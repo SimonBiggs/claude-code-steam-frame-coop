@@ -71,6 +71,10 @@ var vr_velocity := Vector3.ZERO
 # Networked co-op: on the host, player 2 is `remote` (driven by the Steam Machine);
 # on the Steam Machine, player 1 is a `ghost` of the VR player, placed from snapshots.
 var remote := false
+# Personal progression (skill map): own XP, purchased skill tiers and stat modifiers.
+var xp := 0
+var skills := {}
+var personal := {"fire_rate": 1.0, "damage": 1.0, "dash_cd": 1.0, "speed": 1.0, "max_hp": 0.0, "armor": 1.0, "shield": 1.0}
 var ghost := false
 var net_target := Vector3.ZERO
 var net_started := false
@@ -336,7 +340,7 @@ func _physics_process(delta: float) -> void:
 	var dash_held := _dash_held()
 	if dash_held and not dash_was_held and dash_cd <= 0.0:
 		dash_t = DASH_TIME
-		dash_cd = DASH_COOLDOWN * main.upg.dash_cd
+		dash_cd = DASH_COOLDOWN * stat("dash_cd")
 		dash_dir = move.normalized() if move.length() > 0.2 else Basis(Vector3.UP, yaw) * Vector3(0, 0, -1)
 		invuln_t = maxf(invuln_t, DASH_TIME + 0.1)
 		main.burst(global_position + Vector3.UP * 0.3, color, 8, 0.1)
@@ -348,7 +352,7 @@ func _physics_process(delta: float) -> void:
 		dash_t -= delta
 		velocity = dash_dir * DASH_SPEED
 	else:
-		velocity = move * SPEED * main.upg.speed
+		velocity = move * SPEED * stat("speed")
 	if vr:
 		# Applied every rendered frame in _process so locomotion is smooth in the headset.
 		vr_velocity = velocity
@@ -386,7 +390,7 @@ func _update_camera(delta: float) -> void:
 
 
 func _shoot() -> void:
-	fire_cd = FIRE_INTERVAL * main.upg.fire_rate
+	fire_cd = FIRE_INTERVAL * stat("fire_rate")
 	main.sound("shoot", -12.0, 1.0 + index * 0.25)
 	recoil = 1.0
 	if muzzle_mat:
@@ -540,9 +544,7 @@ func _vr_update(_delta: float) -> void:
 	var status := "DOWN - partner, revive me!" if is_down else ("SPREAD SHOT" if spread_t > 0.0 else "")
 	if main.net.mode == "host" and not main.net.connected:
 		status = "Waiting for the TV player to join…"
-	if main.skill_points > 0 and status == "":
-		status = "%d SKILL POINT(S): shoot the tree!" % main.skill_points
-	wrist_label.text = "HP %d / %d   LV %d\nWAVE %d   SCORE %d\n%s" % [maxi(0, int(hp)), int(main.upg.max_hp), main.level, main.wave, main.score, status]
+	wrist_label.text = "HP %d / %d   XP %d\nWAVE %d   SCORE %d\n%s" % [maxi(0, int(hp)), int(stat("max_hp")), xp, main.wave, main.score, status]
 
 
 # --- Health & reviving -------------------------------------------------------
@@ -550,6 +552,7 @@ func _vr_update(_delta: float) -> void:
 func take_damage(amount: float, from_pos = null) -> void:
 	if is_down or invuln_t > 0.0:
 		return
+	amount *= personal.get("armor", 1.0)
 	if remote:
 		main.net.event("hurt", [from_pos if from_pos != null else global_position])
 	main.achievements().on_damage(amount)
@@ -576,7 +579,7 @@ func take_damage(amount: float, from_pos = null) -> void:
 
 func heal(amount: float) -> void:
 	if not is_down:
-		hp = minf(main.upg.max_hp, hp + amount)
+		hp = minf(stat("max_hp"), hp + amount)
 
 
 func _go_down() -> void:
@@ -617,7 +620,7 @@ func _update_revive(delta: float) -> void:
 
 func revive(fraction: float) -> void:
 	is_down = false
-	hp = main.upg.max_hp * fraction
+	hp = stat("max_hp") * fraction
 	invuln_t = 2.0
 	_apply_down_pose(false)
 	main.burst(global_position + Vector3.UP, Color(0.5, 1.0, 0.6), 24)
@@ -644,6 +647,22 @@ func head_transform() -> Transform3D:
 	return Transform3D(Basis.from_euler(Vector3(pitch, yaw, 0.0)), global_position + Vector3.UP * EYE_HEIGHT)
 
 
+## A stat for this player: team upgrades combined with their own skill-map upgrades.
+func stat(name: String) -> float:
+	if name == "max_hp":
+		return main.upg.max_hp + personal.get("max_hp", 0.0)
+	return main.upg.get(name, 1.0) * personal.get(name, 1.0)
+
+
+func add_personal(name: String, mode: String, amount: float) -> void:
+	if mode == "mul":
+		personal[name] = personal.get(name, 1.0) * amount
+	else:
+		personal[name] = personal.get(name, 0.0) + amount
+		if name == "max_hp" and not is_down:
+			hp += amount
+
+
 func left_hand_transform() -> Transform3D:
 	return hand_l.global_transform if vr else Transform3D()
 
@@ -665,9 +684,13 @@ func apply_remote_state(pos: Vector3, new_yaw: float, new_pitch: float) -> void:
 
 
 ## Client: authoritative state from the host's snapshot.
-## [pos, yaw, pitch, hp, is_down, revive_progress, spread_t, head, hand]
+## [pos, yaw, pitch, hp, is_down, revive_progress, spread_t, head, hand, lhand, personal, xp, skills]
 func apply_net_state(st: Array) -> void:
 	hp = st[3]
+	if st.size() > 12:
+		personal = st[10]
+		xp = st[11]
+		skills = st[12]
 	revive_progress = st[5]
 	spread_t = st[6]
 	if ghost:
@@ -767,13 +790,14 @@ func _update_vr_hurt(delta: float) -> void:
 		xr_camera.add_child(shell)
 		_set_layers(shell, viewmodel_layer())
 	vr_hurt = maxf(0.0, vr_hurt - delta * 4.0)
-	var low := 0.08 if hp < main.upg.max_hp * 0.3 and not is_down else 0.0
+	var low := 0.08 if hp < stat("max_hp") * 0.3 and not is_down else 0.0
 	vr_hurt_mat.albedo_color.a = maxf(vr_hurt * 0.3, low)
 
 
 func _ensure_shield() -> void:
 	if shield != null:
 		shield.visible = not is_down
+		shield.scale = Vector3.ONE * personal.get("shield", 1.0)
 		return
 	shield = Node3D.new()
 	if ghost:
@@ -812,7 +836,7 @@ func _ensure_shield() -> void:
 func shield_reflect(pos: Vector3) -> Vector3:
 	if not vr or is_down or shield == null:
 		return Vector3.ZERO
-	if shield.global_position.distance_to(pos) > 0.42:
+	if shield.global_position.distance_to(pos) > 0.42 * personal.get("shield", 1.0):
 		return Vector3.ZERO
 	hand_l.trigger_haptic_pulse("haptic", 0.0, 0.8, 0.12, 0.0)
 	main.achievements().unlock("parry")

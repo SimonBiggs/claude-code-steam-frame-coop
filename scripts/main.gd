@@ -14,7 +14,7 @@ const EnemyShotScript := preload("res://scripts/enemy_shot.gd")
 const MusicScript := preload("res://scripts/music.gd")
 const FishScript := preload("res://scripts/fish.gd")
 const AchScript := preload("res://scripts/achievements.gd")
-const TreeScript := preload("res://scripts/skill_tree.gd")
+const TreeScript := preload("res://scripts/skill_map.gd")
 
 const ARENA_RADIUS := 18.0
 ## Team upgrades granted after each cleared wave: [name, description, stat, "mul" or "add", amount]
@@ -69,9 +69,6 @@ var music: AudioStreamPlayer
 var sky_fish: Node3D
 var ach: Node
 var skill_tree: Node3D
-var xp := 0
-var level := 1
-var skill_points := 0
 var toast_label: Label
 var toast_3d: Label3D
 var toast_tween: Tween
@@ -569,6 +566,9 @@ func _process(delta: float) -> void:
 		add_child(music)
 	if music.has_method("play_track"):
 		music.play_track(maxi(wave - 1, 0) / 2)  # a new track every two waves
+	if skill_tree != null and not skill_tree.has_meta("map"):  # replace the old upright tree
+		skill_tree.queue_free()
+		skill_tree = null
 	if skill_tree == null:
 		skill_tree = TreeScript.new()
 		skill_tree.main = self
@@ -726,23 +726,6 @@ func split_enemy(pos: Vector3, count: int) -> void:
 		add_child(e)
 
 
-func xp_needed() -> int:
-	return 60 + (level - 1) * 40
-
-
-## Team XP from kills; every level gives a skill point to spend on the skill tree.
-func add_xp(amount: int) -> void:
-	if net.mode == "client":
-		return
-	xp += amount
-	while xp >= xp_needed():
-		xp -= xp_needed()
-		level += 1
-		skill_points += 1
-		_show_center("LEVEL %d!\n+1 skill point: shoot a fruit on the skill tree" % level, 2.2)
-		sound("clear", 0.0, 1.5)
-
-
 func achievements() -> Node:
 	if ach == null:
 		ach = AchScript.new()
@@ -808,10 +791,16 @@ func _style_vr_text(l: Label3D) -> void:
 		l.remove_meta("card")
 
 
-func on_enemy_killed(pos: Vector3, color: Color, points: int, drop_chance: float, radius: float) -> void:
+func on_enemy_killed(pos: Vector3, color: Color, points: int, drop_chance: float, radius: float, killer = null) -> void:
 	score += points
 	achievements().on_kill(points, radius)
-	add_xp(points / 10)
+	# XP goes to whoever landed the last hit; beam/shockwave kills are shared.
+	var gain := maxi(1, points / 10)
+	if killer != null and is_instance_valid(killer):
+		killer.xp += gain
+	else:
+		for p in players:
+			p.xp += gain / 2 + 1
 	if radius >= 1.0:
 		sound("big_kill", 0.0, 1.4 / radius)
 	else:
@@ -939,7 +928,7 @@ func spawn_bullet(origin: Vector3, dir: Vector3, color: Color, owner_player, vis
 	var b := BulletScript.new()
 	b.direction = dir
 	b.color = color
-	b.damage = upg.damage
+	b.damage = owner_player.stat("damage") if owner_player != null and owner_player.has_method("stat") else upg.damage
 	b.owner_player = owner_player
 	b.visual_only = visual_only
 	add_child(b)
@@ -1002,7 +991,7 @@ func make_snapshot() -> Array:
 	var ps := []
 	for p in players:
 		ps.append([p.global_position, p.yaw, p.pitch, p.hp, p.is_down, p.revive_progress, p.spread_t,
-			p.head_transform(), p.hand_transform(), p.left_hand_transform()])
+			p.head_transform(), p.hand_transform(), p.left_hand_transform(), p.personal, p.xp, p.skills])
 	var es := []
 	for e in get_tree().get_nodes_in_group("enemies"):
 		es.append([e.net_id, e.kind, e.global_position, e.rotation.y, e.hp])
@@ -1015,8 +1004,7 @@ func make_snapshot() -> Array:
 	var fish_state := [true, 0.0]
 	if sky_fish:
 		fish_state = [sky_fish.alive, sky_fish.hp]
-	var tree_state := [xp, level, skill_points, skill_tree.levels if skill_tree else {}]
-	return [wave, score, upg, upg_names, game_over, ps, es, pk, sh, fish_state, tree_state]
+	return [wave, score, upg, upg_names, game_over, ps, es, pk, sh, fish_state]
 
 
 ## Client: mirror the host's world.
@@ -1037,13 +1025,7 @@ func apply_snapshot(s: Array) -> void:
 	_sync_ghosts(s[8], "shot")
 	if s.size() > 9 and sky_fish:
 		sky_fish.apply_net(s[9])
-	if s.size() > 10:
-		var ts: Array = s[10]
-		xp = ts[0]
-		level = ts[1]
-		skill_points = ts[2]
-		if skill_tree:
-			skill_tree.apply_net(ts[3])
+
 
 
 func _sync_ghosts(list: Array, kind: String) -> void:
@@ -1275,9 +1257,13 @@ func _update_hud() -> void:
 	if net.mode == "client" and not synced:
 		info_label.text = "Syncing with the VR player…"
 		return
-	info_label.text = "WAVE %d        SCORE %d        LV %d  ·  XP %d/%d" % [wave, score, level, xp, xp_needed()]
-	if skill_points > 0:
-		info_label.text += "\n%d SKILL POINT%s: shoot the skill tree!" % [skill_points, "" if skill_points == 1 else "S"]
+	info_label.text = "WAVE %d        SCORE %d" % [wave, score]
+	var xps: Array[String] = []
+	for p in players:
+		if not p.vr and not p.ghost:
+			xps.append("P%d XP %d" % [p.index + 1, p.xp])
+	if not xps.is_empty():
+		info_label.text += "        " + "  ·  ".join(xps)
 	if not upg_names.is_empty():
 		var counts := {}
 		for n in upg_names:

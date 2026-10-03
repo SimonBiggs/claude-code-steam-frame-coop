@@ -76,7 +76,7 @@ func _process(delta: float) -> void:
 	damage_marks = damage_marks.filter(func(m): return m[1] > 0.0)
 	name_label.position = Vector2(28, size.y - 92)
 	bar.position = Vector2(28, size.y - 52)
-	bar.max_value = main.upg.max_hp
+	bar.max_value = player.stat("max_hp")
 	bar.value = player.hp
 	var status := ""
 	if player.is_down:
@@ -94,7 +94,7 @@ func _draw() -> void:
 	var c := size / 2.0
 	if hurt_flash > 0.0:
 		draw_rect(Rect2(Vector2.ZERO, size), Color(1.0, 0.1, 0.1, 0.12 * hurt_flash))
-	if player.hp < main.upg.max_hp * 0.3 and not player.is_down:
+	if player.hp < player.stat("max_hp") * 0.3 and not player.is_down:
 		var pulse := 0.12 + 0.08 * sin(Time.get_ticks_msec() * 0.008)
 		for i in 6:
 			var inset := i * 14.0

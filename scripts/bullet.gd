@@ -52,7 +52,7 @@ func _on_body_entered(body: Node3D) -> void:
 		return
 	spent = true
 	if body.has_method("hit"):
-		body.hit(damage, Vector3(direction.x, 0.0, direction.z).normalized())
+		body.hit(damage, Vector3(direction.x, 0.0, direction.z).normalized(), 1.0, owner_player)
 		if owner_player and owner_player.hud:
 			owner_player.hud.hit_marker()
 		elif owner_player and owner_player.remote:

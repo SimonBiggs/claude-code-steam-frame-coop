@@ -32,6 +32,7 @@ var shot_cd := 2.5
 var bite_cd := 0.0
 var halo: Node3D
 var body_albedo := Color.RED
+var last_hitter  # player who hit this enemy last: gets the XP
 var slam_t := 5.0  # boss: time until the next ground slam
 var slam_count := 0
 var speed_scale := 1.0
@@ -321,9 +322,11 @@ func _ranged_behaviour(delta: float, target, dist: float) -> void:
 	main.sound("spit", -4.0)
 
 
-func hit(damage: float, from_dir: Vector3, knock: float = 1.0) -> void:
+func hit(damage: float, from_dir: Vector3, knock: float = 1.0, source = null) -> void:
 	if dead:
 		return
+	if source != null:
+		last_hitter = source
 	hp -= damage
 	knockback = (knockback + from_dir * (6.0 * knock / radius)).limit_length(14.0)
 	if knock > 0.0:
@@ -377,5 +380,5 @@ func _die() -> void:
 	var splits: int = KINDS[kind].get("splits", 0)
 	if splits > 0:
 		main.split_enemy.call_deferred(global_position, splits)
-	main.on_enemy_killed(global_position, color, points, drop, radius)
+	main.on_enemy_killed(global_position, color, points, drop, radius, last_hitter)
 	queue_free()
