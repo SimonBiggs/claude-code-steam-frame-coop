@@ -120,6 +120,8 @@ func update(delta: float) -> void:
 	recoil = maxf(0.0, recoil - delta * 6.0)
 	shake = maxf(0.0, shake - delta * 2.5)
 	muzzle_mat.emission_energy_multiplier = maxf(0.5, muzzle_mat.emission_energy_multiplier - delta * 30.0)
+	var gold: bool = main.power_t > 0.0
+	muzzle_mat.emission = Color(1.0, 0.85, 0.3) if gold else Color(0.7, 0.95, 1.0)
 	if active and not remote and not ghost:
 		_read_look(delta)
 		if _fire_held() and fire_cd <= 0.0:
@@ -132,7 +134,7 @@ func update(delta: float) -> void:
 
 
 func _fire() -> void:
-	fire_cd = FIRE_INTERVAL
+	fire_cd = FIRE_INTERVAL - 0.04 * float(main.cannon_level)  # beating a Storm King upgrades the cannons
 	recoil = 1.0
 	muzzle_mat.emission_energy_multiplier = 5.0
 	main.fire_bubble(index, yaw, pitch, main.net.mode == "client")

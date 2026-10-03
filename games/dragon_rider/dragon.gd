@@ -36,6 +36,10 @@ var tail: Array[Node3D] = []
 var lantern_meshes: Array[MeshInstance3D] = []
 var lit_mat: StandardMaterial3D
 var dark_mat: StandardMaterial3D
+var eyes: Array[MeshInstance3D] = []
+var blink_t := 3.0
+var smoke: CPUParticles3D
+var head_pivot: Node3D
 
 # TV machine: the host's latest state, extrapolated between snapshots.
 var net_pos := Vector3.ZERO
@@ -92,14 +96,49 @@ func _build() -> void:
 	bel.rotation.x = PI / 2.0
 	# Neck and head, low enough that the rider sees over it.
 	limb(body, Vector3(0, -1.0, -1.6), Vector3(0, -0.15, -4.9), 0.8, 0.5, skin)
-	_mi(body, main.box_mesh(Vector3(1.0, 0.8, 1.35)), skin, Vector3(0, 0.0, -5.55))
-	_mi(body, main.box_mesh(Vector3(0.72, 0.5, 0.95)), skin, Vector3(0, -0.14, -6.5))
-	_mi(body, main.box_mesh(Vector3(0.6, 0.12, 0.8)), belly, Vector3(0, -0.42, -6.3))
+	# The head nods gently on its own pivot (blinking eyes, rosy cheeks, smoke puffs from the nose).
+	head_pivot = Node3D.new()
+	body.add_child(head_pivot)
+	head_pivot.position = Vector3(0, -0.1, -5.0)
+	var hp := head_pivot
+	var o := Vector3(0, 0.1, 5.0)
+	_mi(hp, main.box_mesh(Vector3(1.0, 0.8, 1.35)), skin, Vector3(0, 0.0, -5.55) + o)
+	_mi(hp, main.box_mesh(Vector3(0.72, 0.5, 0.95)), skin, Vector3(0, -0.14, -6.5) + o)
+	_mi(hp, main.box_mesh(Vector3(0.6, 0.12, 0.8)), belly, Vector3(0, -0.42, -6.3) + o)
+	var cheek: StandardMaterial3D = main.color_mat(Color(1.0, 0.55, 0.6), 0.2)
 	for s in [-1.0, 1.0]:
-		_mi(body, main.sphere_mesh(0.13), eye_mat, Vector3(0.45 * s, 0.18, -5.75))
-		_mi(body, main.sphere_mesh(0.06), dark, Vector3(0.52 * s, 0.19, -5.8))
-		limb(body, Vector3(0.3 * s, 0.35, -5.2), Vector3(0.55 * s, 0.85, -4.55), 0.13, 0.02, gold, 8)
-		limb(body, Vector3(0.0, 0.3, -5.0), Vector3(0.0, 0.55, -4.6), 0.1, 0.02, gold, 6)
+		eyes.append(_mi(hp, main.sphere_mesh(0.13), eye_mat, Vector3(0.45 * s, 0.18, -5.75) + o))
+		eyes.append(_mi(hp, main.sphere_mesh(0.06), dark, Vector3(0.52 * s, 0.19, -5.8) + o))
+		_mi(hp, main.sphere_mesh(0.1), cheek, Vector3(0.5 * s, -0.12, -5.95) + o, Vector3(1.0, 0.6, 1.0))
+		limb(hp, Vector3(0.3 * s, 0.35, -5.2) + o, Vector3(0.55 * s, 0.85, -4.55) + o, 0.13, 0.02, gold, 8)
+		limb(hp, Vector3(0.0, 0.3, -5.0) + o, Vector3(0.0, 0.55, -4.6) + o, 0.1, 0.02, gold, 6)
+	smoke = CPUParticles3D.new()
+	smoke.amount = 10
+	smoke.lifetime = 1.1
+	smoke.emitting = false
+	smoke.direction = Vector3(0, 0.4, -1)
+	smoke.spread = 25.0
+	smoke.initial_velocity_min = 1.0
+	smoke.initial_velocity_max = 2.2
+	smoke.gravity = Vector3(0, 0.6, 0)
+	smoke.scale_amount_min = 0.6
+	smoke.scale_amount_max = 1.4
+	var sm := SphereMesh.new()
+	sm.radius = 0.14
+	sm.height = 0.28
+	sm.radial_segments = 6
+	sm.rings = 3
+	var smat := StandardMaterial3D.new()
+	smat.albedo_color = Color(0.95, 0.92, 0.95, 0.6)
+	smat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	smat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	sm.material = smat
+	smoke.mesh = sm
+	smoke.local_coords = true  # rides along with the dragon, drifting forward (never into the rider's face)
+	smoke.one_shot = true
+	smoke.explosiveness = 0.6
+	smoke.position = Vector3(0, 0.0, -7.0) + o
+	hp.add_child(smoke)
 	# Back spikes behind the deck and down the tail.
 	for k in 3:
 		limb(body, Vector3(0, -0.2, 5.7 + k * 0.9), Vector3(0, 0.45 - k * 0.12, 6.0 + k * 0.9), 0.2, 0.0, gold, 6)
@@ -125,6 +164,10 @@ func _build() -> void:
 		var mem := _mi(w, main.prism_mesh(Vector3(6.6, 3.4, 0.06)), membrane, Vector3(3.4 * s, 0.1, 0.9))
 		mem.rotation = Vector3(-PI / 2.0, 0.0, 0.0)
 		mem.scale = Vector3(-s, 1.0, 1.0)
+		# Finger bones spreading through the wing, and a little claw at the wrist.
+		limb(w, Vector3(3.6 * s, 0.17, -0.35), Vector3(4.6 * s, 0.1, 2.3), 0.08, 0.03, skin, 6)
+		limb(w, Vector3(2.0 * s, 0.13, -0.25), Vector3(2.2 * s, 0.1, 2.4), 0.08, 0.03, skin, 6)
+		limb(w, Vector3(6.8 * s, 0.25, -0.6), Vector3(7.2 * s, 0.35, -0.95), 0.06, 0.0, gold, 6)
 		if s < 0.0:
 			wing_l = w
 		else:
@@ -174,6 +217,7 @@ func fly(delta: float, inp: Vector2, flap: bool) -> void:
 		speed = minf(MAX_SPEED, speed + 2.4)
 		flap_power = 1.0
 		main.sound("flap", -6.0, randf_range(0.9, 1.1))
+		puff_smoke()
 	speed = move_toward(speed, BASE_SPEED, delta * 1.4)
 	velocity = Basis(Vector3.UP, yaw) * Vector3.FORWARD * speed + Vector3.UP * vy
 	var p := position + velocity * delta
@@ -197,6 +241,7 @@ func set_net(pos: Vector3, new_yaw: float, vel: Vector3, rate: float, st: float,
 	climb = cl
 	if fp > flap_power + 0.3:
 		flap_power = fp
+		puff_smoke()
 	if not net_has:
 		net_has = true
 		position = pos
@@ -218,8 +263,23 @@ func net_follow(delta: float) -> void:
 	basis = Basis(Vector3.UP, yaw)
 
 
-## Wing beats, tail sway, a little bank and pitch of the body (both machines).
+func puff_smoke() -> void:
+	if smoke != null:
+		smoke.restart()
+		smoke.emitting = true
+
+
+## Wing beats, tail sway, a little bank and pitch of the body, blinking and a nodding head (both machines).
 func animate(delta: float) -> void:
+	blink_t -= delta
+	if blink_t <= 0.0:
+		blink_t = randf_range(2.5, 5.0)
+	var eye_y := 0.15 if blink_t < 0.14 else 1.0
+	for e in eyes:
+		e.scale.y = eye_y
+	if head_pivot != null:
+		head_pivot.rotation.x = sin(flap_phase * 0.5) * 0.05 - climb * 0.08
+		head_pivot.rotation.y = steer * -0.15
 	flap_power = maxf(0.0, flap_power - delta * 0.9)
 	flap_phase += delta * (1.6 + flap_power * 4.5)
 	var beat := sin(flap_phase) * (0.18 + flap_power * 0.45)

@@ -6,6 +6,11 @@ extends Node3D
 ## all around: pop balloons for points and pop the storm sprites before they sneak in and pop the
 ## dragon's four lanterns. Fly through the last ring to finish the level (it re-lights a lantern).
 ## All lanterns out = game over.
+## Every level has a MISSION (cycling): RING RUN, RESCUE (gunners pop bubble cages around sky bunnies,
+## then the rider scoops them up), RACE (beat Goldie the golden dragon; gunners can bubble-wrap her)
+## and the STORM KING boss (gunners pop its orbs, then the rider flies through its ring). A golden
+## balloon gives every gunner TRIPLE BUBBLES; every 12 stars relights a lantern; beating a boss
+## upgrades the bubble cannons. Each level has its own sky (sunset, morning, golden, storm, night, dawn).
 ##
 ## Files: dragon.gd (model + flight), course.gd (rings, stars, balloons, islands from a seed),
 ## rider.gd (players[0]), gunner.gd (players 1-6), sprite.gd, bubble.gd, hud.gd, world.gd (sky),
@@ -20,6 +25,8 @@ const GunnerScript := preload("res://games/dragon_rider/gunner.gd")
 const SpriteScript := preload("res://games/dragon_rider/sprite.gd")
 const BubbleScript := preload("res://games/dragon_rider/bubble.gd")
 const HudScript := preload("res://games/dragon_rider/hud.gd")
+const RivalScript := preload("res://games/dragon_rider/rival.gd")
+const BossScript := preload("res://games/dragon_rider/boss.gd")
 const JoinListenerScript := preload("res://games/dragon_rider/join_listener.gd")
 const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
@@ -33,6 +40,10 @@ const INTRO_TIME := 6.0
 const DONE_TIME := 7.0
 const PAD_LEAVE_TIME := 20.0
 const BUBBLE_SPEED := 36.0
+const MISSIONS: Array[String] = ["rings", "rescue", "race", "boss"]
+const SKIES: Array[String] = ["sunset", "morning", "golden", "night", "dawn"]
+const POWER_TIME := 12.0
+const STARS_PER_LANTERN := 12
 const PLAYER_COLORS: Array[Color] = [Color(1.0, 0.6, 0.3), Color(0.35, 0.7, 1.0), Color(0.55, 0.9, 0.4),
 	Color(1.0, 0.45, 0.7), Color(0.75, 0.55, 1.0), Color(1.0, 0.85, 0.3), Color(0.4, 0.95, 0.85)]
 const SOUNDS := {
@@ -50,6 +61,15 @@ const SOUNDS := {
 	"levelup": [1.0, 392.0, 1568.0, 0.4, "tri", 0.0],
 	"gameover": [1.4, 330.0, 50.0, 0.45, "saw", 0.15],
 	"join": [0.45, 330.0, 1320.0, 0.3, "sine", 0.0],
+	"power": [0.6, 440.0, 1760.0, 0.32, "square", 0.05],
+	"rescue": [0.5, 660.0, 1320.0, 0.3, "tri", 0.0],
+	"cage": [0.2, 1200.0, 500.0, 0.3, "sine", 0.5],
+	"thunder": [1.1, 120.0, 35.0, 0.5, "saw", 0.85],
+	"orb": [0.35, 900.0, 200.0, 0.35, "square", 0.3],
+	"boss_win": [1.4, 330.0, 1320.0, 0.45, "tri", 0.0],
+	"wrap": [0.4, 300.0, 900.0, 0.28, "sine", 0.3],
+	"combo": [0.25, 990.0, 1980.0, 0.22, "square", 0.0],
+	"relight": [0.6, 520.0, 1040.0, 0.3, "tri", 0.0],
 }
 const VIGNETTE_SHADER := """
 shader_type spatial;
@@ -117,6 +137,19 @@ var vr_status: Label3D
 var vignette: MeshInstance3D
 var vignette_mat: ShaderMaterial
 var join_t := 0.0
+var mission := "rings"
+var power_t := 0.0             # TRIPLE BUBBLES time left (all gunners)
+var cannon_level := 0          # +1 per Storm King beaten: faster bubble cannons
+var stars_since_lantern := 0
+var gstats := {}               # gunner index -> {pops, sprites, combo_best}
+var combo := {}                # gunner index -> [count, last hit time]
+var rider_stats := {"rings": 0, "bullseyes": 0, "rescues": 0}
+var rival: Node3D
+var boss: Node3D
+var race_lost := false
+var boss_beaten := false
+var cage_hint := {}            # critter index -> true once the "pop the cage" hint was shown
+var level_balloons := 0
 
 
 func _ready() -> void:
@@ -173,7 +206,7 @@ func _setup_game(mode: String) -> void:
 	_ensure_join_listener()
 	_restore_party()
 	if mode == "host":
-		show_center("DRAGON RIDER\nWaiting for the gunners on the TV to join…\nPractice flying: hands back = climb, forward = dive, left / right = turn", 0.0)
+		show_center("DRAGON RIDER\nWaiting for the gunners on the TV to join…\nPractice flying: raise both hands = climb, lower them = dive,\nmove them left / right = turn, trigger = flap", 0.0)
 	elif mode == "client":
 		show_center("CONNECTED!\nClimb aboard, gunners!", 2.0, false)
 
@@ -373,8 +406,19 @@ func _build_arrow() -> void:
 
 # --- Game flow (host) ----------------------------------------------------------
 
+static func mission_for(n: int) -> String:
+	return MISSIONS[(n - 1) % MISSIONS.size()]
+
+
+static func sky_for(n: int) -> String:
+	if mission_for(n) == "boss":
+		return "storm"
+	return SKIES[(n - 1 - (n - 1) / 4) % SKIES.size()]
+
+
 func _start_level(n: int) -> void:
 	level = n
+	mission = mission_for(n)
 	level_seed = randi() % 1000000
 	course_origin = dragon.global_position
 	course_yaw = dragon.yaw
@@ -382,17 +426,69 @@ func _start_level(n: int) -> void:
 	ring_i = 0
 	ring_last_d = -1.0
 	level_rings = 0
+	level_balloons = 0
 	sprite_t = 2.0
+	race_lost = false
+	boss_beaten = false
+	cage_hint.clear()
 	phase = "intro"
-	phase_t = INTRO_TIME if n == 1 else 3.5
-	if music != null and music.has_method("play_track"):
-		music.play_track(n - 1)
-	print("Level %d: %d rings, seed %d, %d gunners" % [n, course.rings.size(), level_seed, gunner_count()])
+	phase_t = INTRO_TIME + 2.0 if n == 1 else 5.0
+	_spawn_mission_actors()
+	print("Level %d (%s, %s sky): %d rings, seed %d, %d gunners" % [n, mission, sky_for(n), course.rings.size(), level_seed, gunner_count()])
 	sound("levelup", -4.0, 0.8 + n * 0.05)
 	if n == 1:
-		show_center("DRAGON RIDER\nRider: fly through the GOLD rings and scoop up the stars\nReins: hands back = up, forward = down, left / right = turn, trigger = flap, A = re-centre\nGunners: pop the balloons, and the storm sprites before they pop our lanterns!", INTRO_TIME)
+		show_center("DRAGON RIDER\nRIDER: raise BOTH hands to climb, lower them to dive (tummy height = fly level)\n" \
+			+ "move your hands left / right to turn (thumbsticks steer too). Trigger = flap for speed!\n" \
+			+ "Fly through the GOLD rings and scoop up the stars.\n" \
+			+ "GUNNERS: aim and fire bubbles: pop the balloons, and the purple storm sprites\nbefore they pop the dragon's lanterns!", phase_t)
 	else:
-		show_center("LEVEL %d\n%d rings to the sunset gate. Watch out, more storm sprites!" % [n, course.rings.size()], phase_t)
+		show_center(_mission_banner(), phase_t)
+
+
+func _mission_banner() -> String:
+	match mission:
+		"rescue":
+			return "LEVEL %d: SKY RESCUE!\nLittle sky bunnies are stuck in bubble cages.\nGUNNERS: pop the cages!   RIDER: then fly close to scoop them up!" % level
+		"race":
+			return "LEVEL %d: DRAGON RACE!\nGoldie the golden dragon wants to race you through the rings!\nRIDER: flap (trigger) to go faster!   GUNNERS: bubble Goldie to slow her down!" % level
+		"boss":
+			return "LEVEL %d: THE STORM KING!\nA grumpy storm cloud blocks the sky!\nGUNNERS: pop its glowing orbs!   RIDER: then fly through its golden ring!" % level
+	return "LEVEL %d: RING RUN\n%d rings to the sunset gate. Grab the golden balloon for TRIPLE BUBBLES!" % [level, course.rings.size()]
+
+
+## Rival dragon (race) or the Storm King (boss): host simulates, the TV builds ghosts from snapshots.
+func _spawn_mission_actors() -> void:
+	_free_mission_actors()
+	var fwd: Vector3 = Basis(Vector3.UP, dragon.yaw) * Vector3.FORWARD
+	if mission == "race":
+		rival = RivalScript.new()
+		rival.main = self
+		rival.ghost = net.mode == "client"
+		rival.speed = 14.2 + level * 0.15
+		add_child(rival)
+		rival.global_position = dragon.global_position + fwd.cross(Vector3.UP) * 9.0 + fwd * 4.0
+		rival.yaw = dragon.yaw
+	elif mission == "boss":
+		boss = BossScript.new()
+		boss.main = self
+		boss.ghost = net.mode == "client"
+		boss.setup(4 + (level / 4 - 1), 2 + gunner_count() / 2)
+		add_child(boss)
+		boss.global_position = dragon.global_position + fwd * 120.0 + Vector3.UP * 10.0
+
+
+func _free_mission_actors() -> void:
+	for n in [rival, boss]:
+		if n != null and is_instance_valid(n):
+			var nd: Node3D = n
+			if nd.is_in_group("dr_targets"):
+				nd.remove_from_group("dr_targets")
+			for c in nd.get_children():
+				if c.is_in_group("dr_targets"):
+					c.remove_from_group("dr_targets")
+			nd.queue_free()
+	rival = null
+	boss = null
 
 
 func _build_course() -> void:
@@ -408,7 +504,8 @@ func _build_course() -> void:
 	course = CourseScript.new()
 	course.main = self
 	add_child(course)
-	course.build(level_seed, course_origin, course_yaw, level)
+	course.build(level_seed, course_origin, course_yaw, level, mission_for(level))
+	world.set_palette(sky_for(level))
 
 
 func _host_update(delta: float) -> void:
@@ -434,8 +531,22 @@ func _host_update(delta: float) -> void:
 		distance += dragon.speed * delta
 		_check_rings()
 		_check_stars()
+		_check_rescues()
 		if phase == "fly" and (net.mode != "host" or net.connected):
 			_spawn_sprites(delta)
+	power_t = maxf(0.0, power_t - delta)
+	if rival != null and is_instance_valid(rival) and phase != "over":
+		rival.host_update(delta, course.rings)
+		if rival.finished and not race_lost and (phase == "fly" or phase == "intro"):
+			race_lost = true
+			sound("giggle", -2.0, 0.8)
+			show_center("Goldie reached the finish first!\nFinish the course anyway!", 3.0)
+	if boss != null and is_instance_valid(boss) and phase != "over":
+		boss.host_update(delta)
+		if phase == "fly" or phase == "intro":
+			_check_boss_ring()
+			if boss.thunder_t > 0.0 and boss.thunder_t < delta * 1.5 and not boss.defeated:
+				sound("thunder", -6.0, randf_range(0.8, 1.1))
 	if phase != "over":
 		for s in get_tree().get_nodes_in_group("dr_sprites"):
 			s.host_update(delta)
@@ -461,9 +572,11 @@ func _check_rings() -> void:
 		level_rings += 1
 		var pts := 100
 		var label := "RING! +100"
+		rider_stats["rings"] = int(rider_stats["rings"]) + 1
 		if lateral < radius * 0.4:
 			pts = 150
 			label = "BULLSEYE! +150"
+			rider_stats["bullseyes"] = int(rider_stats["bullseyes"]) + 1
 			sound("bullseye", -2.0)
 		else:
 			sound("ring", -2.0, 1.0 + ring_i * 0.04)
@@ -502,6 +615,73 @@ func _check_stars() -> void:
 			sound("star", -3.0, 1.0 + (stars_got % 5) * 0.08)
 			burst(sp, Color(1.0, 0.9, 0.3), 14, 0.15)
 			popup(Vector3(0.8, 1.2, -6.0), "STAR +25", Color(1.0, 0.92, 0.4))
+			stars_since_lantern += 1
+			if stars_since_lantern >= STARS_PER_LANTERN:
+				stars_since_lantern = 0
+				_relight_lantern("%d STARS: A LANTERN IS LIT AGAIN!" % STARS_PER_LANTERN)
+
+
+func _relight_lantern(why: String) -> bool:
+	for i in dragon.lit.size():
+		if not dragon.lit[i]:
+			dragon.lit[i] = true
+			sound("relight", -2.0)
+			burst(dragon.lantern_world(i), Color(1.0, 0.8, 0.4), 18, 0.15)
+			popup(Vector3(0, 1.8, -6.0), why, Color(1.0, 0.85, 0.45))
+			return true
+	return false
+
+
+## Rescue levels: an opened cage + the dragon close by = a sky bunny hops aboard.
+func _check_rescues() -> void:
+	if course == null or course.critters.is_empty():
+		return
+	var core: Vector3 = dragon.core_position()
+	for c in course.critters:
+		var i: int = c.i
+		if course.gone.has(5000 + i):
+			continue
+		var cp: Vector3 = c.pos
+		var d := core.distance_to(cp)
+		if course.critter_open(i):
+			if d < course.RESCUE_R:
+				course.remove_item(5000 + i)
+				score += 150
+				rider_stats["rescues"] = int(rider_stats["rescues"]) + 1
+				sound("rescue", -2.0, 1.0 + course.rescued_count() * 0.08)
+				burst(cp, Color(1.0, 0.8, 0.9), 22, 0.2)
+				popup(Vector3(0, 1.6, -6.0), "RESCUED A SKY BUNNY! +150", Color(1.0, 0.8, 0.9))
+				players[0].haptic("l", 0.6)
+				players[0].haptic("r", 0.6)
+				print("Rescued critter %d (%d/%d)" % [i, course.rescued_count(), course.critters.size()])
+		elif d < 16.0 and not cage_hint.has(i):
+			cage_hint[i] = true
+			popup(Vector3(0, 1.8, -6.0), "GUNNERS: pop the bubble cage!", Color(0.7, 0.95, 1.0))
+
+
+## Boss levels: once the orbs are gone, flying through the Storm King's ring wins the level.
+func _check_boss_ring() -> void:
+	if boss == null or not boss.ring_open or boss.defeated:
+		return
+	var rel: Vector3 = dragon.core_position() - boss.global_position
+	var n: Vector3 = boss.ring_normal
+	var d := rel.dot(n)
+	var was: float = boss.get_meta("last_d", -1.0)
+	boss.set_meta("last_d", d)
+	if was < 0.0 and d >= 0.0 and (rel - n * d).length() < boss.RING_R + 2.5:
+		boss.defeated = true
+		boss_beaten = true
+		score += 500
+		sound("boss_win", 0.0)
+		sound("thunder", -4.0, 1.5)
+		for k in 4:
+			burst(boss.global_position + Vector3(randf_range(-8, 8), randf_range(-6, 6), randf_range(-4, 4)),
+				[Color(1.0, 0.4, 0.4), Color(1.0, 0.85, 0.3), Color(0.4, 0.9, 1.0), Color(0.6, 1.0, 0.5)][k], 26, 0.3)
+		popup(Vector3(0, 2.0, -7.0), "YOU BLEW THE STORM AWAY! +500", Color(1.0, 0.95, 0.5))
+		players[0].haptic("l", 1.0)
+		players[0].haptic("r", 1.0)
+		print("Storm King defeated")
+		_level_complete()
 
 
 func gunner_count() -> int:
@@ -521,12 +701,16 @@ func _spawn_sprites(delta: float) -> void:
 	var g := gunner_count()
 	var alive := get_tree().get_nodes_in_group("dr_sprites").size()
 	var cap := 1 + level + g / 2
+	if mission == "boss":
+		cap = mini(cap, 2 + g / 2)
 	if sprite_t > 0.0 or alive >= cap:
 		return
 	sprite_t = maxf(2.2, 8.0 - level) / (0.75 + 0.25 * g)
 	var local := Vector3(randf_range(-26.0, 26.0), randf_range(-6.0, 10.0), -randf_range(45.0, 65.0))
 	if level >= 2 and randf() < 0.3:
 		local = Vector3(randf_range(30.0, 45.0) * (-1.0 if randf() < 0.5 else 1.0), randf_range(-5.0, 8.0), randf_range(-20.0, 30.0))
+	if boss != null and is_instance_valid(boss) and not boss.defeated:
+		local = to_dragon_local(boss.global_position) + Vector3(randf_range(-6.0, 6.0), randf_range(-4.0, 4.0), 4.0)
 	var s := SpriteScript.new()
 	next_id += 1
 	s.net_id = next_id
@@ -583,6 +767,19 @@ func fire_bubble(index: int, y: float, p: float, visual_only: bool) -> void:
 	var t := assist_target(eye, aim)
 	if t != null:
 		dir = _lead_dir(from, t)
+	_bubble(index, from, dir, visual_only)
+	if power_t > 0.0:
+		# TRIPLE BUBBLES: two more, fanned out a little.
+		var up: Vector3 = dragon.global_basis.y
+		_bubble(index, from, dir.rotated(up, 0.12), visual_only)
+		_bubble(index, from, dir.rotated(up, -0.12), visual_only)
+	if visual_only or not g.remote:
+		local_sound("bubble", -10.0, 1.0 + (index % 3) * 0.15)
+	else:
+		local_sound("bubble", -16.0, 1.0 + (index % 3) * 0.15)  # the rider hears the gunners behind
+
+
+func _bubble(index: int, from: Vector3, dir: Vector3, visual_only: bool) -> void:
 	var b := BubbleScript.new()
 	b.mesh = sphere_mesh(0.24)
 	b.material_override = bubble_mat
@@ -593,10 +790,8 @@ func fire_bubble(index: int, y: float, p: float, visual_only: bool) -> void:
 	b.visual_only = visual_only
 	add_child(b)
 	b.global_position = from
-	if visual_only or not g.remote:
-		local_sound("bubble", -10.0, 1.0 + (index % 3) * 0.15)
-	else:
-		local_sound("bubble", -16.0, 1.0 + (index % 3) * 0.15)  # the rider hears the gunners behind
+	if power_t > 0.0:
+		b.scale = Vector3.ONE * 1.3
 
 
 ## The target nearest to the crosshair, if it is within a few degrees of it.
@@ -619,6 +814,10 @@ func assist_target(from: Vector3, dir: Vector3) -> Node3D:
 func target_velocity(n: Node3D) -> Vector3:
 	if n.get_meta("kind", "") == "sprite":
 		return n.net_vel if n.ghost else n.vel
+	if n.has_method("get_vel"):
+		return n.get_vel()
+	if n.has_meta("vel"):
+		return n.get_meta("vel")
 	return Vector3.ZERO
 
 
@@ -643,12 +842,23 @@ func on_bubble_hit(b: Node3D, target: Node3D) -> void:
 		if c != course or course.gone.has(id):
 			return
 		course.remove_item(id)
-		score += 30
 		var col: Color = target.get_meta("color", Color.WHITE)
 		burst(target.global_position, col, 18, 0.2)
 		sound("pop", -3.0, randf_range(0.9, 1.25))
-		popup(to_dragon_local(target.global_position) + Vector3.UP * 1.5, "+30", col)
 		_hit_marker(by)
+		level_balloons += 1
+		if target.has_meta("golden"):
+			score += 100
+			power_t = POWER_TIME
+			sound("power", -1.0)
+			burst(target.global_position, Color(1.0, 0.9, 0.4), 30, 0.25)
+			popup(to_dragon_local(target.global_position) + Vector3.UP * 1.5, "GOLDEN BALLOON! TRIPLE BUBBLES!", Color(1.0, 0.9, 0.4))
+			show_center("P%d popped the GOLDEN BALLOON!\nTRIPLE BUBBLES for every gunner!" % (by + 1), 2.5)
+			_count_pop(by, 100, false)
+		else:
+			score += 30
+			popup(to_dragon_local(target.global_position) + Vector3.UP * 1.5, "+30", col)
+			_count_pop(by, 30, false)
 	elif kind == "sprite":
 		target.hp -= 1
 		target.hit()
@@ -663,7 +873,75 @@ func on_bubble_hit(b: Node3D, target: Node3D) -> void:
 		burst(target.global_position, Color(0.75, 0.45, 1.0), 22, 0.22)
 		sound("zap", -2.0, randf_range(0.9, 1.2))
 		popup(to_dragon_local(target.global_position) + Vector3.UP * 1.5, "POP! +50", Color(0.85, 0.6, 1.0))
+		_count_pop(by, 50, true)
 		target.queue_free()
+	elif kind == "cage":
+		var cid: int = target.get_meta("id")
+		if course.gone.has(cid):
+			return
+		var hp: int = int(target.get_meta("hp", 2)) - 1
+		target.set_meta("hp", hp)
+		_hit_marker(by)
+		if hp > 0:
+			sound("hit", -4.0, 1.3)
+			return
+		course.remove_item(cid)
+		score += 40
+		sound("cage", -2.0)
+		burst(target.global_position, Color(0.7, 0.95, 1.0), 20, 0.2)
+		popup(to_dragon_local(target.global_position) + Vector3.UP * 2.0, "CAGE POPPED! Rider: fly to the sparkle!", Color(0.7, 0.95, 1.0))
+		_count_pop(by, 40, false)
+	elif kind == "rival":
+		_hit_marker(by)
+		if target.hit():
+			score += 60
+			sound("wrap", -2.0)
+			popup(to_dragon_local(target.global_position) + Vector3.UP * 3.0, "GOLDIE IS BUBBLE-WRAPPED!", Color(0.7, 0.95, 1.0))
+			_count_pop(by, 60, false)
+		else:
+			sound("hit", -4.0, 1.2)
+	elif kind == "orb":
+		var bs: Node3D = target.get_parent()
+		if bs != boss or boss.ring_open:
+			return
+		_hit_marker(by)
+		var oi: int = target.get_meta("orb")
+		if boss.hit_orb(oi):
+			score += 80
+			sound("orb", -2.0)
+			burst(target.global_position, Color(1.0, 0.85, 0.3), 22, 0.25)
+			_count_pop(by, 80, false)
+			var left: int = boss.orbs_left()
+			if left > 0:
+				popup(to_dragon_local(target.global_position) + Vector3.UP * 2.0, "ORB POPPED! %d to go" % left, Color(1.0, 0.9, 0.4))
+			else:
+				boss.open_ring()
+				sound("thunder", -2.0, 0.7)
+				show_center("The Storm King is DIZZY!\nRIDER: fly through the GOLDEN RING in its middle!", 4.0)
+		else:
+			sound("hit", -4.0, 0.9)
+
+
+## Score a gunner's pop: per-gunner stats and a combo (pops in quick succession).
+func _count_pop(i: int, _pts: int, sprite: bool) -> void:
+	if i <= 0:
+		return
+	if not gstats.has(i):
+		gstats[i] = {"pops": 0, "sprites": 0, "combo_best": 0}
+	var st: Dictionary = gstats[i]
+	st["pops"] = int(st["pops"]) + 1
+	if sprite:
+		st["sprites"] = int(st["sprites"]) + 1
+	var now := Time.get_ticks_msec() / 1000.0
+	var cb: Array = combo.get(i, [0, -10.0])
+	var n: int = int(cb[0]) + 1 if now - float(cb[1]) < 3.0 else 1
+	combo[i] = [n, now]
+	st["combo_best"] = maxi(int(st["combo_best"]), n)
+	if n >= 3:
+		score += 10 * mini(n, 5)
+		sound("combo", -6.0, 1.0 + minf(n, 10) * 0.05)
+		if n == 3 or n % 5 == 0:
+			popup(Vector3((-1.0 if i % 2 == 0 else 1.0) * 1.2, 1.4, 2.0 + (i - 1) / 2 * 1.3), "P%d COMBO x%d!" % [i + 1, n], players[i].color.lightened(0.3))
 
 
 func _hit_marker(index: int) -> void:
@@ -678,15 +956,28 @@ func _hit_marker(index: int) -> void:
 
 func _level_complete() -> void:
 	phase = "done"
-	phase_t = DONE_TIME
+	phase_t = DONE_TIME + 2.0
 	confirm_was = true
-	var relit := false
-	for i in dragon.lit.size():
-		if not dragon.lit[i]:
-			dragon.lit[i] = true
-			relit = true
-			break
+	var relit := _relight_lantern("LEVEL COMPLETE: A LANTERN IS LIT AGAIN!")
 	var bonus := 200 * level
+	var result := ""
+	match mission:
+		"rescue":
+			var rc: int = course.rescued_count()
+			bonus += 100 * rc
+			result = "Sky bunnies rescued: %d / %d" % [rc, course.critters.size()]
+			if rc == course.critters.size() and rc > 0:
+				bonus += 300
+				result += "   ALL SAFE! +300"
+		"race":
+			if race_lost:
+				result = "Goldie won this race - flap more next time!"
+			else:
+				bonus += 500
+				result = "YOU BEAT GOLDIE! +500"
+		"boss":
+			cannon_level = mini(cannon_level + 1, 2)
+			result = "STORM KING DEFEATED!   Bubble cannons upgraded: they fire faster!"
 	score += bonus
 	for s in get_tree().get_nodes_in_group("dr_sprites"):
 		s.remove_from_group("dr_sprites")
@@ -695,10 +986,38 @@ func _level_complete() -> void:
 		s.queue_free()
 	_check_best()
 	sound("levelup", 0.0, 1.0)
-	print("Level %d complete: rings %d/%d, stars %d, score %d" % [level, level_rings, course.rings.size(), stars_got, score])
-	show_center("LEVEL %d COMPLETE!\nRings %d / %d   ·   Stars %d   ·   Bonus +%d   ·   Score %d\n%s\nNext level soon (A / Enter, VR: trigger = go now)" % [
-		level, level_rings, course.rings.size(), stars_got, bonus, score,
-		"A lantern is lit again!" if relit else "All four lanterns are shining!"], DONE_TIME)
+	print("Level %d (%s) complete: rings %d/%d, stars %d, score %d %s" % [level, mission, level_rings, course.rings.size(), stars_got, score, result])
+	var ring_line := "Rings %d / %d   ·   " % [level_rings, course.rings.size()] if course.rings.size() > 0 else ""
+	show_center("LEVEL %d COMPLETE!\n%s\n%sStars %d   ·   Bonus +%d   ·   Score %d\n%s\n%s\nNext: %s  (A / Enter, VR: trigger = go now)" % [
+		level, result, ring_line, stars_got, bonus, score, _mvp_line(),
+		"A lantern is lit again!" if relit else "All four lanterns are shining!", _mission_name(mission_for(level + 1))], phase_t)
+
+
+func _mission_name(m: String) -> String:
+	match m:
+		"rescue":
+			return "SKY RESCUE"
+		"race":
+			return "DRAGON RACE"
+		"boss":
+			return "THE STORM KING"
+	return "RING RUN"
+
+
+## The best gunner so far and what they did best.
+func _mvp_line() -> String:
+	var best_i := -1
+	var best_p := 0
+	for i in gstats:
+		var st: Dictionary = gstats[i]
+		if int(st["pops"]) > best_p:
+			best_p = int(st["pops"])
+			best_i = int(i)
+	if best_i < 0:
+		return "Rider: %d rings (%d bullseyes)" % [int(rider_stats["rings"]), int(rider_stats["bullseyes"])]
+	var st2: Dictionary = gstats[best_i]
+	return "TOP GUNNER: P%d (%d pops, best combo x%d)   ·   Rider: %d rings, %d bullseyes" % [best_i + 1, best_p,
+		int(st2["combo_best"]), int(rider_stats["rings"]), int(rider_stats["bullseyes"])]
 
 
 func _on_game_over() -> void:
@@ -708,8 +1027,8 @@ func _on_game_over() -> void:
 	sound("gameover", 0.0)
 	var new_best := _check_best()
 	print("Game over: level %d, score %d, stars %d, %.0f m" % [level, score, stars_got, distance])
-	show_center("THE LANTERNS WENT OUT!\nLevel %d   ·   Score %d   ·   Stars %d   ·   %.1f km flown\n%s\nPress A / Enter (VR: trigger) to fly again" % [
-		level, score, stars_got, distance / 1000.0, "NEW BEST SCORE!" if new_best else "Best: %d" % best], 0.0)
+	show_center("THE LANTERNS WENT OUT!\nLevel %d   ·   Score %d   ·   Stars %d   ·   %.1f km flown\n%s\n%s\nPress A / Enter (VR: trigger) to fly again" % [
+		level, score, stars_got, distance / 1000.0, _mvp_line(), "NEW BEST SCORE!" if new_best else "Best: %d" % best], 0.0)
 
 
 func _check_best() -> bool:
@@ -743,14 +1062,77 @@ func _confirm_pressed() -> bool:
 
 func hud_line() -> String:
 	var total: int = course.rings.size() if course != null else 0
-	return "LEVEL %d    SCORE %d    STARS %d    RING %d/%d    %.1f km" % [maxi(level, 1), score, stars_got,
-		mini(ring_i + 1, total), total, distance / 1000.0]
+	var goal := "RING %d/%d" % [mini(ring_i + 1, total), total]
+	if mission == "boss" and boss != null and is_instance_valid(boss):
+		goal = "STORM KING: %d orbs" % boss.orbs_left() if not boss.ring_open else "STORM KING: fly through the ring!"
+	elif mission == "rescue" and course != null:
+		goal += "   BUNNIES %d/%d" % [course.rescued_count(), course.critters.size()]
+	elif mission == "race" and rival != null and is_instance_valid(rival):
+		goal += "   GOLDIE %s" % ("FINISHED" if rival.finished else "ring %d" % mini(rival.ring_i + 1, total))
+	var pw := "   TRIPLE %d" % int(ceilf(power_t)) if power_t > 0.0 else ""
+	return "LEVEL %d    SCORE %d    STARS %d    %s    %.1f km%s" % [maxi(level, 1), score, stars_got, goal, distance / 1000.0, pw]
 
 
 func next_ring_info() -> Dictionary:
 	if course == null or (phase != "intro" and phase != "fly"):
 		return {}
+	if mission == "boss":
+		if boss != null and is_instance_valid(boss) and boss.ring_open and not boss.defeated:
+			return {"pos": boss.global_position, "normal": boss.ring_normal, "radius": boss.RING_R, "final": true}
+		return {}
 	return course.next_ring(ring_i)
+
+
+## Where the gold arrow points: an opened bunny cage close by, else the next ring.
+func arrow_target() -> Dictionary:
+	if mission == "rescue" and course != null and (phase == "fly" or phase == "intro"):
+		var core: Vector3 = dragon.core_position()
+		var fwd: Vector3 = Basis(Vector3.UP, dragon.yaw) * Vector3.FORWARD
+		for c in course.critters:
+			if course.critter_open(int(c.i)):
+				var cp: Vector3 = c.pos
+				var to := cp - core
+				if to.length() < 90.0 and to.normalized().dot(fwd) > 0.2:
+					return {"pos": cp}
+	return next_ring_info()
+
+
+## A short, contextual line for each player (TV HUD and the rider's VR panel).
+func hint_for(p) -> String:
+	if phase == "over" or phase == "wait":
+		return ""
+	if p.index == 0:
+		match mission:
+			"rescue":
+				for c in course.critters:
+					if course.critter_open(int(c.i)):
+						return "A bunny is free! Fly close to the golden sparkle to scoop it up"
+				return "Fly near the bubble cages so the gunners can pop them"
+			"race":
+				return "RACE! Pull the trigger to flap and fly faster than Goldie"
+			"boss":
+				if boss != null and is_instance_valid(boss) and boss.ring_open:
+					return "Fly through the Storm King's GOLDEN RING!"
+				return "Keep flying, the gunners are popping the Storm King's orbs"
+		return "Raise hands = up, lower = down, left / right = turn, trigger = flap"
+	var near_lantern := false
+	for sp in get_tree().get_nodes_in_group("dr_sprites"):
+		var sn := sp as Node3D
+		if sn.global_position.distance_to(dragon.global_position) < 9.0:
+			near_lantern = true
+	if near_lantern:
+		return "A storm sprite is sneaking up on a lantern: POP IT!"
+	if power_t > 0.0:
+		return "TRIPLE BUBBLES! Fire away!"
+	match mission:
+		"rescue":
+			return "Pop the BUBBLE CAGES around the sky bunnies (2 hits each)"
+		"race":
+			return "Hit GOLDIE (the golden dragon) 3 times to bubble-wrap her!"
+		"boss":
+			if boss != null and is_instance_valid(boss) and not boss.ring_open:
+				return "Pop the Storm King's glowing ORBS!"
+	return "Pop balloons (the GOLDEN one = triple bubbles!) and storm sprites"
 
 
 # --- Main loop -----------------------------------------------------------------
@@ -774,6 +1156,11 @@ func _process(delta: float) -> void:
 		dragon.net_follow(delta)
 		for s in get_tree().get_nodes_in_group("dr_sprites"):
 			s.ghost_update(delta)
+		if rival != null and is_instance_valid(rival):
+			rival.ghost_update(delta)
+		if boss != null and is_instance_valid(boss):
+			boss.ghost_update(delta)
+		power_t = maxf(0.0, power_t - delta)
 		_check_join(delta)
 		if (phase == "over" or phase == "done") and _confirm_pressed():
 			net.send_action("restart" if phase == "over" else "next", [])
@@ -796,7 +1183,7 @@ func _process(delta: float) -> void:
 
 
 func _update_arrow(delta: float) -> void:
-	var r: Dictionary = next_ring_info()
+	var r: Dictionary = arrow_target()
 	arrow.visible = not r.is_empty()
 	if r.is_empty():
 		return
@@ -1344,9 +1731,11 @@ func make_snapshot() -> Array:
 	var gone := PackedInt32Array()
 	if course != null:
 		gone = course.gone_ids()
+	var rv: Array = rival.net_state() if rival != null and is_instance_valid(rival) else []
+	var bs: Array = boss.net_state() if boss != null and is_instance_valid(boss) else []
 	return [phase, level, level_seed, course_origin, course_yaw, ring_i, score, stars_got, dragon.lit_mask(), distance,
 		[dragon.global_position, dragon.yaw, dragon.velocity, dragon.yaw_rate, dragon.steer, dragon.climb, dragon.flap_power],
-		gone, sp, players[0].net_pose(), phase_t, level_rings]
+		gone, sp, players[0].net_pose(), phase_t, level_rings, mission, power_t, cannon_level, rv, bs]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -1359,9 +1748,11 @@ func apply_snapshot(s: Array) -> void:
 	if lv > 0 and (course == null or sd != level_seed or lv != level):
 		level = lv
 		level_seed = sd
+		mission = mission_for(lv)
 		course_origin = s[3]
 		course_yaw = s[4]
 		_build_course()
+		_free_mission_actors()
 	ring_i = s[5]
 	score = s[6]
 	stars_got = s[7]
@@ -1380,6 +1771,30 @@ func apply_snapshot(s: Array) -> void:
 	players[0].apply_net_pose(s[13])
 	phase_t = s[14]
 	level_rings = s[15]
+	if s.size() >= 21:
+		power_t = s[17]
+		cannon_level = s[18]
+		var rv: Array = s[19]
+		if rv.is_empty():
+			if rival != null and is_instance_valid(rival):
+				_free_mission_actors()
+		else:
+			if rival == null or not is_instance_valid(rival):
+				rival = RivalScript.new()
+				rival.main = self
+				rival.ghost = true
+				add_child(rival)
+			rival.apply_net_state(rv)
+		var bs: Array = s[20]
+		if not bs.is_empty():
+			if boss == null or not is_instance_valid(boss):
+				boss = BossScript.new()
+				boss.main = self
+				boss.ghost = true
+				var hp: Array = bs[2]
+				boss.setup(hp.size(), 1)
+				add_child(boss)
+			boss.apply_net_state(bs)
 
 
 func _sync_sprites(list: Array) -> void:
@@ -1486,12 +1901,12 @@ func _update_vr(delta: float) -> void:
 	var lamps := ""
 	for l in dragon.lit:
 		lamps += "O " if l else "x "
-	var hint := ""
+	var hint := hint_for(players[0])
 	if phase == "wait":
-		hint = "Waiting for the gunners…"
+		hint = "Waiting for the gunners…  Practice: raise hands = up, lower = down"
 	elif phase == "over":
 		hint = "Pull the trigger to fly again"
-	vr_status.text = "%s\nLANTERNS  %s  %s" % [hud_line(), lamps, hint]
+	vr_status.text = "%s\nLANTERNS  %s\n%s" % [hud_line(), lamps, hint]
 	VrText.follow(vr_status, cam, dragon, 0.58, 1.8)
 	if vignette_mat != null and delta > 0.0:
 		var turn: float = absf(dragon.yaw_rate) / dragon.MAX_YAW_RATE

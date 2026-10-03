@@ -7,6 +7,7 @@ extends Node3D
 
 const Art := preload("res://games/block_builders/art.gd")
 const Levels := preload("res://games/block_builders/levels.gd")
+const Themes := preload("res://games/block_builders/themes.gd")
 
 const MIN_X := -13
 const MAX_X := 12
@@ -18,6 +19,11 @@ const KILL_Y := -7.0
 const FAN_LIFT := 5.5
 const SPRING_TOP := 0.55
 const FAN_TOP := 0.45
+const BOOSTER_TOP := 0.15
+const LAUNCH_TOP := 0.36
+## Background islands: [x, y, z, width, depth] (decoration far behind and beside the course).
+const BG_ISLANDS := [[-24.0, -3.0, -18.0, 7.0, 5.0], [20.0, 1.0, -22.0, 8.0, 6.0], [2.0, -9.0, -30.0, 10.0, 7.0],
+	[-34.0, 2.0, -2.0, 6.0, 5.0], [32.0, -5.0, -8.0, 7.0, 5.0], [-12.0, 6.0, -34.0, 6.0, 4.0]]
 
 var main
 var level_index := -1
@@ -38,6 +44,23 @@ var flag_cloth: MeshInstance3D
 var flag_ring: MeshInstance3D
 var anim_t := 0.0
 var lava_mat: StandardMaterial3D
+var theme: Dictionary = {}
+var theme_name := ""
+var stars: Array = []         # Vector3 star centres for this level
+var star_nodes: Array = []
+var stars_taken := 0          # bitmask (host decides; snapshots tell the TV)
+var decor_root: Node3D
+var cloud_mm: MultiMesh
+var cloud_mat: StandardMaterial3D
+var cloud_data: Array = []    # [base position, scale]
+var bird_mm: MultiMesh
+var sky_stars: MultiMeshInstance3D
+var rainbow: MeshInstance3D
+var balloon: Node3D
+var balloon_vis := 0.0
+var hint_node: MeshInstance3D
+var hint_mat: StandardMaterial3D
+var hint_key := ""
 
 
 func _ready() -> void:
@@ -68,18 +91,25 @@ func load_level(i: int) -> void:
 	flag_pos = data.flag
 	gusts = data.gusts
 	water = data.water
-	var grass_cols: Array[Color] = [Color(0.45, 0.85, 0.35), Color(0.5, 0.9, 0.45), Color(0.4, 0.8, 0.4)]
+	_apply_theme(str(data.get("theme", "meadow")))
+	var grass_cols: Array = theme.grass
 	var gi := 0
+	# Islands are solid cliffs down to below the lowest island, so a high ledge is a wall you can't
+	# walk under (runners used to slip beneath high ledges and fall).
+	var min_top := INF
+	for g in data.ground:
+		min_top = minf(min_top, float(g[4]))
 	for g in data.ground:
 		var x0: float = g[0]
 		var x1: float = g[1]
 		var z0: float = g[2]
 		var z1: float = g[3]
 		var top: float = g[4]
-		var bottom := top - 1.0
+		var bottom := minf(top - 1.0, min_top - 1.0)
 		grounds.append([x0, x1, z0, z1, top, bottom])
 		var mi := MeshInstance3D.new()
-		mi.mesh = Art.island_mesh(x0, x1, z0, z1, top, bottom, grass_cols[gi % grass_cols.size()])
+		var gc: Color = grass_cols[gi % grass_cols.size()]
+		mi.mesh = Art.island_mesh(x0, x1, z0, z1, top, bottom, gc, theme.dirt, theme.rock)
 		level_root.add_child(mi)
 		gi += 1
 	if lava_mat == null:
@@ -145,6 +175,10 @@ func load_level(i: int) -> void:
 	_build_flag()
 	_build_start_pad()
 	_build_water()
+	_build_props()
+	_build_stars()
+	hint_node = null
+	hint_key = ""
 
 
 func _build_flag() -> void:
@@ -206,23 +240,328 @@ func _build_water() -> void:
 	level_root.add_child(water_node)
 
 
-## Clouds drifting around and below the course, for the "floating in the sky" feel. Built once.
+## Clouds drifting around and below the course, a flock of birds and (per theme) a starry sky and a
+## rainbow. Clouds and birds are MultiMeshes (one draw call each), built once.
 func _build_decor() -> void:
-	var cloud_mat := Art.mat(Color(1.0, 1.0, 1.0), 0.15, 1.0)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 77
-	for i in 7:
-		var c := Node3D.new()
-		c.position = Vector3(rng.randf_range(-16, 16), rng.randf_range(-9, -4), rng.randf_range(-12, -4) if i % 2 == 0 else rng.randf_range(-12, 2))
-		add_child(c)
+	cloud_mat = Art.mat(Color(1.0, 1.0, 1.0), 0.15, 1.0)
+	var puff := Art.sphere(1.0, 12)
+	puff.material = cloud_mat
+	cloud_mm = MultiMesh.new()
+	cloud_mm.transform_format = MultiMesh.TRANSFORM_3D
+	cloud_mm.mesh = puff
+	cloud_mm.instance_count = 36
+	cloud_data.clear()
+	for i in 12:
+		var c := Vector3(rng.randf_range(-40, 40), rng.randf_range(-10, -3) if i % 3 != 0 else rng.randf_range(4, 9),
+			rng.randf_range(-26, -6) if i % 2 == 0 else rng.randf_range(-14, 4))
 		for j in 3:
-			var puff := MeshInstance3D.new()
-			puff.mesh = Art.sphere(rng.randf_range(1.0, 1.8), 12)
-			puff.material_override = cloud_mat
-			puff.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-			puff.position = Vector3(j * 1.6 - 1.6, rng.randf_range(-0.3, 0.3), rng.randf_range(-0.5, 0.5))
-			puff.scale = Vector3(1.0, 0.65, 1.0)
-			c.add_child(puff)
+			var sc := rng.randf_range(1.0, 1.9)
+			cloud_data.append([c + Vector3(j * 1.6 - 1.6, rng.randf_range(-0.3, 0.3), rng.randf_range(-0.5, 0.5)), sc])
+	var cmi := MultiMeshInstance3D.new()
+	cmi.multimesh = cloud_mm
+	cmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(cmi)
+	_update_clouds()
+	bird_mm = MultiMesh.new()
+	bird_mm.transform_format = MultiMesh.TRANSFORM_3D
+	bird_mm.mesh = Art.bird_mesh()
+	bird_mm.instance_count = 7
+	var bmi := MultiMeshInstance3D.new()
+	bmi.multimesh = bird_mm
+	bmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(bmi)
+
+
+func _update_clouds() -> void:
+	for i in cloud_data.size():
+		var d: Array = cloud_data[i]
+		var p: Vector3 = d[0]
+		var sc: float = d[1]
+		var x := fposmod(p.x + anim_t * 0.35 + 40.0, 80.0) - 40.0
+		cloud_mm.set_instance_transform(i, Transform3D(Basis().scaled(Vector3(sc, sc * 0.62, sc)), Vector3(x, p.y, p.z)))
+
+
+func _update_birds() -> void:
+	for i in bird_mm.instance_count:
+		var a := anim_t * 0.22 + i * 0.5
+		var r := 21.0 + (i % 3) * 1.6
+		var pos := Vector3(cos(a) * r, 7.0 + sin(anim_t * 0.7 + i) * 0.6 + (i % 2) * 0.8, -10.0 + sin(a) * r * 0.6)
+		var fwd := Vector3(-sin(a), 0.0, cos(a) * 0.6).normalized()
+		var flap := 1.0 + sin(anim_t * 9.0 + i * 1.7) * 0.45
+		var b := Basis.looking_at(fwd, Vector3.UP).scaled(Vector3(flap, 1.0, 1.0) * 1.4)
+		bird_mm.set_instance_transform(i, Transform3D(b, pos))
+
+
+## Sky, island colours, background islands, stars and rainbow for a theme (rebuilt when it changes).
+func _apply_theme(tn: String) -> void:
+	theme = Themes.get_theme(tn)
+	if main != null and main.has_method("apply_theme"):
+		main.apply_theme(theme)
+	if cloud_mat != null:
+		cloud_mat.albedo_color = theme.cloud
+		cloud_mat.emission = theme.cloud
+	if tn == theme_name and decor_root != null and is_instance_valid(decor_root):
+		return
+	theme_name = tn
+	if decor_root != null and is_instance_valid(decor_root):
+		decor_root.queue_free()
+	decor_root = Node3D.new()
+	decor_root.name = "ThemeDecor"
+	add_child(decor_root)
+	var grass_cols: Array = theme.grass
+	var props: Array = []
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(tn)
+	for i in BG_ISLANDS.size():
+		var b: Array = BG_ISLANDS[i]
+		var c := Vector3(b[0], b[1], b[2])
+		var w: float = b[3]
+		var d: float = b[4]
+		var mi := MeshInstance3D.new()
+		var gc: Color = grass_cols[i % grass_cols.size()]
+		mi.mesh = Art.island_mesh(c.x - w * 0.5, c.x + w * 0.5, c.z - d * 0.5, c.z + d * 0.5, c.y, c.y - 2.0, gc, theme.dirt, theme.rock)
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		decor_root.add_child(mi)
+		var far_props: Array = theme.props_far
+		for k in 3:
+			var pk := rng.randi_range(0, far_props.size() - 1)
+			var pp := Vector3(c.x + rng.randf_range(-w * 0.35, w * 0.35), c.y, c.z + rng.randf_range(-d * 0.3, d * 0.3))
+			props.append([pk, Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * rng.randf_range(1.5, 2.2)), pp)])
+	_fill_props(decor_root, theme.props_far, props)
+	if theme.get("stars", false):
+		_build_sky_stars()
+	if theme.get("rainbow", false):
+		_ensure_rainbow()
+		rainbow.visible = true
+	elif rainbow != null:
+		rainbow.visible = false
+
+
+## One MultiMeshInstance3D per prop kind of a list ([kind, tint] entries); items = [list index, transform].
+func _fill_props(parent: Node3D, kinds: Array, items: Array) -> void:
+	for k in kinds.size():
+		var xfs: Array = []
+		for it in items:
+			if int(it[0]) == k:
+				xfs.append(it[1])
+		if xfs.is_empty():
+			continue
+		var entry: Array = kinds[k]
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.mesh = Art.prop_mesh(str(entry[0]), entry[1])
+		mm.instance_count = xfs.size()
+		for i in xfs.size():
+			mm.set_instance_transform(i, xfs[i])
+		var mmi := MultiMeshInstance3D.new()
+		mmi.multimesh = mm
+		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		parent.add_child(mmi)
+		if str(entry[0]) == "lamp":
+			# Glowing bulbs on top of the lamp posts (a second MultiMesh sharing the transforms).
+			var bm := MultiMesh.new()
+			bm.transform_format = MultiMesh.TRANSFORM_3D
+			bm.mesh = Art.prop_mesh("bulb", Color(1.0, 0.85, 0.45))
+			bm.instance_count = xfs.size()
+			for i in xfs.size():
+				bm.set_instance_transform(i, xfs[i])
+			var bmi := MultiMeshInstance3D.new()
+			bmi.multimesh = bm
+			bmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			parent.add_child(bmi)
+
+
+## Props along the back (tall) and front (small) edges of every island of this level.
+func _build_props() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = level_index * 101 + 7
+	var far_items: Array = []
+	var near_items: Array = []
+	var avoid: Array = [start, flag_pos]
+	for st in data.get("stars", []):
+		avoid.append(st)
+	var sol_cols := {}
+	for item in data.get("solution", []):
+		var c: Vector3i = item[1]
+		sol_cols[Vector2i(c.x, c.z)] = true
+	var far_kinds: Array = theme.props_far
+	var near_kinds: Array = theme.props_near
+	for g in grounds:
+		var x0: float = g[0]
+		var x1: float = g[1]
+		var z0: float = g[2]
+		var z1: float = g[3]
+		var top: float = g[4]
+		if z1 - z0 < 2.5 or x1 - x0 < 1.8:
+			continue
+		var x := x0 + rng.randf_range(0.35, 0.8)
+		while x < x1 - 0.3:
+			var pf := Vector3(x, top, z0 + rng.randf_range(0.35, 0.55))
+			if _prop_ok(pf, avoid, sol_cols, 1.4):
+				far_items.append([rng.randi_range(0, far_kinds.size() - 1),
+					Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * rng.randf_range(0.8, 1.2)), pf)])
+			var pn := Vector3(x + rng.randf_range(0.2, 0.6), top, z1 - rng.randf_range(0.2, 0.35))
+			if rng.randf() < 0.65 and pn.x < x1 - 0.2 and _prop_ok(pn, avoid, sol_cols, 1.2):
+				near_items.append([rng.randi_range(0, near_kinds.size() - 1),
+					Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * rng.randf_range(0.8, 1.1)), pn)])
+			x += rng.randf_range(1.1, 1.7)
+	_fill_props(level_root, far_kinds, far_items)
+	_fill_props(level_root, near_kinds, near_items)
+
+
+func _prop_ok(p: Vector3, avoid: Array, sol_cols: Dictionary, r: float) -> bool:
+	for a in avoid:
+		var av: Vector3 = a
+		if Vector2(p.x - av.x, p.z - av.z).length() < r:
+			return false
+	return not sol_cols.has(Vector2i(floori(p.x), floori(p.z)))
+
+
+func _build_sky_stars() -> void:
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	var bx := Art.box(Vector3.ONE * 0.35)
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.albedo_color = Color(1.0, 0.97, 0.85)
+	bx.material = m
+	mm.mesh = bx
+	mm.instance_count = 160
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 4242
+	for i in 160:
+		var a := rng.randf() * TAU
+		var el := rng.randf_range(0.08, 1.3)
+		var dir := Vector3(cos(a) * cos(el), sin(el), sin(a) * cos(el))
+		mm.set_instance_transform(i, Transform3D(Basis().scaled(Vector3.ONE * rng.randf_range(0.5, 1.4)), dir * 90.0))
+	sky_stars = MultiMeshInstance3D.new()
+	sky_stars.multimesh = mm
+	sky_stars.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	decor_root.add_child(sky_stars)
+
+
+func _ensure_rainbow() -> void:
+	if rainbow != null and is_instance_valid(rainbow):
+		return
+	rainbow = MeshInstance3D.new()
+	rainbow.mesh = Art.rainbow_mesh(28.0, 1.6)
+	rainbow.position = Vector3(0.0, -8.0, -36.0)
+	rainbow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(rainbow)
+
+
+## The finale: the rainbow appears over every theme once all levels are cleared.
+func show_rainbow(on: bool) -> void:
+	if on:
+		_ensure_rainbow()
+		rainbow.visible = true
+	elif rainbow != null and is_instance_valid(rainbow):
+		rainbow.visible = bool(theme.get("rainbow", false))
+
+
+# --- Stars, gift balloon and build hints ------------------------------------------------
+
+func _build_stars() -> void:
+	stars = []
+	star_nodes = []
+	stars_taken = 0
+	var sm := Art.mat(Color(1.0, 0.85, 0.2), 1.6, 0.3)
+	for p in data.get("stars", []):
+		var sp: Vector3 = p
+		stars.append(sp)
+		var mi := MeshInstance3D.new()
+		mi.mesh = Art.star_mesh()
+		mi.material_override = sm
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mi.position = sp
+		level_root.add_child(mi)
+		star_nodes.append(mi)
+
+
+func set_stars_taken(mask: int) -> void:
+	stars_taken = mask
+	for i in star_nodes.size():
+		var n: MeshInstance3D = star_nodes[i]
+		if is_instance_valid(n):
+			n.visible = (mask & (1 << i)) == 0
+
+
+func star_taken(i: int) -> bool:
+	return (stars_taken & (1 << i)) != 0
+
+
+func _ensure_balloon() -> void:
+	if balloon != null and is_instance_valid(balloon):
+		return
+	balloon = Node3D.new()
+	balloon.name = "GiftBalloon"
+	add_child(balloon)
+	var gift := MeshInstance3D.new()
+	gift.mesh = Art.gift_mesh()
+	balloon.add_child(gift)
+	var string := MeshInstance3D.new()
+	string.mesh = Art.cyl(0.015, 0.015, 1.0, 4)
+	string.material_override = Art.mat(Color(0.95, 0.95, 0.95))
+	string.position = Vector3(0, 0.7, 0)
+	balloon.add_child(string)
+	var ball := MeshInstance3D.new()
+	ball.name = "Ball"
+	ball.mesh = Art.sphere(0.45, 14)
+	ball.material_override = Art.mat(Color(1.0, 0.3, 0.4), 0.35, 0.25)
+	ball.position = Vector3(0, 1.55, 0)
+	ball.scale = Vector3(1.0, 1.15, 1.0)
+	balloon.add_child(ball)
+	balloon.visible = false
+
+
+## Balloon state: 0 gone, 1 drifting, 2 carried by the builder. pos = the gift box (the part to touch).
+func update_balloon(state: int, pos: Vector3, delta: float) -> void:
+	if state == 0 and (balloon == null or not balloon.visible):
+		return
+	_ensure_balloon()
+	balloon.visible = state != 0
+	if state == 0:
+		return
+	var k := 1.0 - exp(-12.0 * delta)
+	balloon.global_position = pos if balloon_vis <= 0.0 else balloon.global_position.lerp(pos, k)
+	balloon_vis = 1.0
+	balloon.rotation.z = sin(anim_t * 1.7) * 0.12
+	balloon.rotation.y += delta * 0.6
+
+
+func hide_balloon() -> void:
+	balloon_vis = 0.0
+	if balloon != null and is_instance_valid(balloon):
+		balloon.visible = false
+
+
+## A pulsing see-through block where the solution's next block goes (shown when the builder seems stuck).
+func set_hint(kind: String, cell: Vector3i, rot: int) -> void:
+	var key := "" if kind == "" else "%s_%s_%d" % [kind, cell, rot]
+	if key == hint_key:
+		return
+	hint_key = key
+	if kind == "":
+		if hint_node != null and is_instance_valid(hint_node):
+			hint_node.visible = false
+		return
+	if hint_node == null or not is_instance_valid(hint_node):
+		hint_node = MeshInstance3D.new()
+		hint_node.name = "Hint"
+		if hint_mat == null:
+			hint_mat = StandardMaterial3D.new()
+			hint_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			hint_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			hint_mat.albedo_color = Color(0.4, 0.95, 1.0, 0.35)
+		hint_node.material_override = hint_mat
+		hint_node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		level_root.add_child(hint_node)
+	hint_node.mesh = Art.block_mesh(kind)
+	hint_node.position = Vector3(cell.x + 0.5, cell.y, cell.z + 0.5)
+	hint_node.rotation.y = -rot * PI * 0.5
+	hint_node.visible = true
 
 
 # --- Blocks --------------------------------------------------------------------
@@ -277,6 +616,15 @@ func add_block(kind: String, cell: Vector3i, rot: int, pop: bool = true) -> void
 		air.mesh = am
 		air.position.y = FAN_TOP + 0.1
 		n.add_child(air)
+	elif kind == "booster" or kind == "launcher":
+		# A glowing arrow strip so the direction reads from far away (and from the TV).
+		var glow := MeshInstance3D.new()
+		glow.name = "Glow"
+		glow.mesh = Art.box(Vector3(0.7, 0.02, 0.12))
+		glow.material_override = Art.mat(Art.kind_color(kind).lightened(0.3), 2.0)
+		glow.position = Vector3(0.0, (BOOSTER_TOP if kind == "booster" else LAUNCH_TOP) + 0.02, 0.0)
+		glow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		n.add_child(glow)
 	add_child(n)
 	if pop:
 		n.scale = Vector3.ONE * 0.3
@@ -348,6 +696,10 @@ func block_span(kind: String, rot: int, c: Vector3i, px: float, pz: float) -> Ve
 			return Vector2(y, y + SPRING_TOP)
 		"fan":
 			return Vector2(y, y + FAN_TOP)
+		"booster":
+			return Vector2(y, y + BOOSTER_TOP)
+		"launcher":
+			return Vector2(y, y + LAUNCH_TOP)
 		"stairs":
 			var lx := clampf(px - c.x, 0.0, 1.0)
 			var lz := clampf(pz - c.z, 0.0, 1.0)
@@ -363,15 +715,15 @@ func block_span(kind: String, rot: int, c: Vector3i, px: float, pz: float) -> Ve
 	return Vector2(y, y + 1.0)
 
 
-## All solids overlapping the square [px±r] x [pz±r]: each is [bottom, top, kind].
+## All solids overlapping the square [px±r] x [pz±r]: each is [bottom, top, kind, rot].
 func spans_at(px: float, pz: float, r: float) -> Array:
 	var out: Array = []
 	for g in grounds:
 		if px > g[0] - r and px < g[1] + r and pz > g[2] - r and pz < g[3] + r:
-			out.append([g[5], g[4], "ground"])
+			out.append([g[5], g[4], "ground", 0])
 	for l in lavas:
 		if px > l[0] - r and px < l[1] + r and pz > l[2] - r and pz < l[3] + r:
-			out.append([l[4] - 1.0, l[4], "lava"])
+			out.append([l[4] - 1.0, l[4], "lava", 0])
 	if columns.is_empty():
 		return out
 	for cx in range(floori(px - r), floori(px + r) + 1):
@@ -385,7 +737,7 @@ func spans_at(px: float, pz: float, r: float) -> Array:
 				var b: Array = blocks[c]
 				var kind: String = b[0]
 				var sp := block_span(kind, int(b[1]), c, px, pz)
-				out.append([sp.x, sp.y, kind])
+				out.append([sp.x, sp.y, kind, int(b[1])])
 	return out
 
 
@@ -505,3 +857,21 @@ func update_visuals(delta: float, level_time: float, water_y: float) -> void:
 				var blades := n.get_node_or_null("Blades") as Node3D
 				if blades:
 					blades.rotation.y += delta * 14.0
+		elif b[0] == "booster" or b[0] == "launcher":
+			var n2: Node3D = b[2]
+			if is_instance_valid(n2):
+				var gl := n2.get_node_or_null("Glow") as Node3D
+				if gl:
+					gl.position.x = -0.12 + fmod(anim_t * (1.4 if b[0] == "booster" else 0.8), 1.0) * 0.24
+	for i in star_nodes.size():
+		var sn: MeshInstance3D = star_nodes[i]
+		if is_instance_valid(sn) and sn.visible:
+			var sp: Vector3 = stars[i]
+			sn.position = sp + Vector3(0, sin(anim_t * 2.5 + i) * 0.1, 0)
+			sn.rotation.y = anim_t * 2.2 + i
+	if hint_node != null and is_instance_valid(hint_node) and hint_node.visible and hint_mat != null:
+		hint_mat.albedo_color.a = 0.22 + 0.2 * (0.5 + 0.5 * sin(anim_t * 5.0))
+	if cloud_mm != null:
+		_update_clouds()
+	if bird_mm != null:
+		_update_birds()

@@ -97,10 +97,15 @@ func _draw() -> void:
 			y += heights[i]
 
 	var help := ""
+	var tip: String = main.hint_for(player)
 	if player.index == 0:
-		help = "W/S or stick: climb / dive   A/D: turn   Space / RT / A: flap\nFly through the GOLD rings and grab the stars!"
+		help = "W/S or stick: climb / dive   A/D: turn   Space / RT / A: flap\n" + (tip if tip != "" else "Fly through the GOLD rings and grab the stars!")
 	else:
-		help = "Aim: stick / mouse / arrows   Fire bubbles: RT / A / click / Enter\nPop the storm sprites before they pop the lanterns!"
+		help = "Aim: stick / mouse / arrows   Fire bubbles: RT / A / click / Enter\n" + (tip if tip != "" else "Pop the storm sprites before they pop the lanterns!")
+	# The current tip, big and clear, just under the crosshair area for gunners.
+	if tip != "" and player.index > 0 and main.center_alpha < 0.05:
+		var ts := int(24.0 * s)
+		_wrapped(Vector2(left, h * 0.72), tip, ts, Color(1.0, 0.92, 0.6, 0.95), wrap)
 	var hs := int(17.0 * s)
 	var hh2 := font.get_multiline_string_size(help, HORIZONTAL_ALIGNMENT_CENTER, wrap, hs).y
 	_wrapped(Vector2(left, h - hh2 - 8.0 * s + font.get_ascent(hs)), help, hs, Color(1.0, 0.96, 0.86, 0.8), wrap)

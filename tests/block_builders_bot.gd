@@ -6,6 +6,8 @@ extends Node
 ## BOT_PLAYERS=n (2..6): n TV runners join (via main.debug_join; the last one drops in through a fake
 ## controller pressing A, then gets unplugged at 22 s and plugged back in at 28 s).
 ## BB_START_LEVEL=n: jump straight to level n (1-based) on the host / local game.
+## New features: "jump" / "leap" path modes (crates, speed pads), stars on the bot paths, a gift balloon
+## called early on level 2 that the builder grabs and carries to a runner, and high fives at the flag.
 
 const Levels := preload("res://games/block_builders/levels.gd")
 
@@ -24,6 +26,8 @@ var started_level := false
 var vr_phase := "idle"
 var vr_item: Array = []
 var vr_wait := 0.0
+var gift_called_seq := -1
+var gifts_seen := 0
 
 
 func _ready() -> void:
@@ -41,6 +45,9 @@ func _physics_process(delta: float) -> void:
 			and (main.net.mode != "host" or main.net.connected):
 		started_level = true
 		main._start_level(int(OS.get_environment("BB_START_LEVEL")) - 1)
+	if host_side and main.state == "play" and main.level == 1 and gift_called_seq != main.level_seq and main.level_time > 0.5:
+		gift_called_seq = main.level_seq
+		main.spawn_balloon()
 	if host_side and main.builder != null:
 		if main.builder.flat:
 			_drive_flat_builder(delta)
@@ -49,11 +56,15 @@ func _physics_process(delta: float) -> void:
 	for r in main.runners():
 		if not r.remote:
 			_drive_runner(r)
+	if main.balloon_state == 0 and int(get_meta("balloon_was", 0)) != 0:
+		gifts_seen += 1
+		print("Bot: gift balloon gone (%d), budget=%s" % [gifts_seen, str(main.budget)])
+	set_meta("balloon_was", main.balloon_state)
 	if main.state != last_state:
 		print("t=%.1f state %s -> %s (level %d)" % [t, last_state, main.state, main.level + 1])
 		if main.state == "clear" or main.state == "won":
 			cleared_seen += 1
-			print("Bot: LEVEL %d CLEARED (%d so far) score=%d" % [main.level + 1, cleared_seen, main.score])
+			print("Bot: LEVEL %d CLEARED (%d so far) score=%d stars=%d" % [main.level + 1, cleared_seen, main.score, main.stars_taken])
 		last_state = main.state
 	if t - last_print >= 5.0:
 		last_print = t
@@ -113,13 +124,33 @@ func _path_built() -> bool:
 	return _next_item().is_empty()
 
 
+## Where the builder's hand should go for the co-op extras (gift balloon, high fives), or null.
+func _coop_target():
+	if main.balloon_state == 1:
+		return main.balloon_pos
+	if main.balloon_state == 2:
+		var r = main.players[1]
+		return r.global_position + Vector3.UP * 0.5
+	for r in main.runners():
+		if r.active and r.finished and int(main.high_fived.get(r.index, -1)) != main.level_seq:
+			return r.global_position + Vector3.UP * 0.6
+	return null
+
+
 func _drive_flat_builder(delta: float) -> void:
 	var b = main.builder
 	b.bot = true
 	build_t -= delta
+	var ct = _coop_target()
+	if ct != null and main.state != "intro":
+		var cp: Vector3 = ct
+		b.bot_cell = Vector3i(floori(cp.x), floori(cp.y - 0.5), floori(cp.z))
+		b.bot_kind = "plank"
+		if main.state == "play":
+			return
 	if main.state != "play":
 		# Confirm banners (start / next level / retry) now and then.
-		if main.state_t > 2.0 and build_t <= 0.0:
+		if main.state_t > 3.5 and build_t <= 0.0:
 			build_t = 1.0
 			b.bot_place = true
 		return
@@ -144,8 +175,17 @@ func _drive_vr_builder(delta: float) -> void:
 	var ctrl: XRController3D = b.hand_r
 	var off: Vector3 = ctrl.global_basis * (b.GRAB_LOCAL * b.S)
 	vr_wait -= delta
+	var ct = _coop_target()
+	if ct != null and (vr_phase == "idle" or vr_phase == "coop") and main.state != "intro":
+		vr_phase = "coop"
+		b.bot_trigger = false
+		var want: Vector3 = ct
+		ctrl.global_position = ctrl.global_position.move_toward(want - off, 30.0 * delta)
+		return
+	if vr_phase == "coop":
+		vr_phase = "idle"
 	if main.state != "play":
-		b.bot_trigger = main.state_t > 2.0 and int(t * 2.0) % 2 == 0
+		b.bot_trigger = main.state_t > 3.5 and int(t * 2.0) % 2 == 0
 		vr_phase = "idle"
 		return
 	match vr_phase:
@@ -211,8 +251,18 @@ func _drive_runner(r) -> void:
 	if to.length() > 0.12:
 		move = Vector3(to.x, 0.0, to.y).normalized() * clampf(to.length() * 2.0, 0.3, 1.0)
 	var reached := to.length() < 0.3
+	var jump := false
 	if mode == "rise":
 		reached = reached and pos.y >= wp.y - 0.6
+	elif mode == "jump":
+		reached = reached and pos.y >= wp.y - 0.3
+		jump = int(t * 4.0) % 2 == 0
+	elif mode == "leap":
+		reached = to.length() < 0.5
+		# Jump right at the edge (no ground just ahead).
+		var dir := Vector3(to.x, 0.0, to.y).normalized()
+		var ahead: float = main.course.surface_below(pos.x + dir.x * 0.45, pos.z + dir.z * 0.45, pos.y + 0.1, 0.05)
+		jump = r.on_ground and ahead < pos.y - 0.5
 	if reached and wi < path.size() - 1:
 		r.set_meta("bot_wp", wi + 1)
-	r.bot_input = {"move": move, "jump": false}
+	r.bot_input = {"move": move, "jump": jump}

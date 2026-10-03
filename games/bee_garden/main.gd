@@ -8,6 +8,14 @@ const VrText := preload("res://core/vr_text.gd")
 ##  - Golden sun lilies only open when the gardener has watered them a LOT, and then give the bees
 ##    golden pollen (3x honey) and the gardener a golden fruit.
 ##  - Each day: fill the honey jars before the sun sets. Seasons change from day to day.
+##  - Surprise EVENTS (a few each day, all cosy): a WASP RAID (the gardener shoos them, bees bump them
+##    away), a RAIN shower (everything drinks and grows, then a RAINBOW doubles all honey), a rare
+##    GOLDEN FLOWER (golden pollen), and the QUEEN BEE's visit (she asks for one kind of pollen).
+##  - A daily GARDEN WISH (bonus goal). Every finished day and every wish adds a decoration that stays.
+##  - Bees: a BOUQUET bonus for pollen from different KINDS of flower in one trip, TEAM BUZZ for
+##    delivering together. End of day: awards for the bees and the gardener.
+##  - Clarity: signs on the ledge (seeds / watering can / fruit basket = honey), a jar counter
+##    ("HONEY JARS 2 / 7 FULL"), honey drops flying into the jar being filled, tips on the garden sign.
 ## P2 is keyboard set 0 + the 1st controller, P3 keyboard set 1 + the 2nd controller; any other
 ## controller presses A to drop in as the next free bee (up to P7). Each controller drives one bee.
 ## Modes (docs/GAME_DEV_GUIDE.md): DUO_JOIN=<host> client, VR or DUO_HOST=1 host, else local split screen.
@@ -17,6 +25,7 @@ const GardenerScript := preload("res://games/bee_garden/gardener.gd")
 const BeeScript := preload("res://games/bee_garden/bee.gd")
 const PlantScript := preload("res://games/bee_garden/plant.gd")
 const PestScript := preload("res://games/bee_garden/pest.gd")
+const EventsScript := preload("res://games/bee_garden/events.gd")
 const JoinListenerScript := preload("res://games/bee_garden/join_listener.gd")
 const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
@@ -31,6 +40,16 @@ const DAY_LEN := 170.0
 const POLLEN_REGROW := 4.0
 const FRUIT_TIME := 9.0
 const HARVESTS_PER_PLANT := 2
+const EVENT_KINDS: Array[String] = ["rain", "golden", "raid", "queen"]
+const EVENT_AT: Array[float] = [22.0, 58.0, 96.0, 134.0]   # seconds into the day
+const RAIN_TIME := 12.0
+const RAINBOW_TIME := 16.0
+const GOLDEN_TIME := 25.0
+const QUEEN_TIME := 34.0
+const RAID_TIME := 26.0
+## Daily wishes: [kind, base goal, text]. The goal grows a little each round.
+const WISHES := [["plant", 2, "Plant %d new seeds"], ["harvest", 3, "Pick %d ripe fruits"], ["pollinate", 6, "Pollinate %d flowers"],
+	["shoo", 3, "Shoo away %d pests"], ["combo", 2, "Make %d MIXED BOUQUET trips"], ["gold", 2, "Bring %d loads of golden pollen"]]
 const PLAYER_COLORS: Array[Color] = [Color(0.4, 0.75, 0.35), Color(1.0, 0.45, 0.6), Color(0.35, 0.65, 1.0),
 	Color(0.7, 0.45, 1.0), Color(1.0, 0.55, 0.2), Color(0.3, 0.9, 0.8), Color(0.95, 0.95, 0.95)]
 const SOUNDS := {
@@ -51,6 +70,14 @@ const SOUNDS := {
 	"zoom": [0.25, 200.0, 500.0, 0.2, "saw", 0.3],
 	"buzz": [0.4, 160.0, 190.0, 0.25, "saw", 0.2],
 	"miss": [0.25, 300.0, 150.0, 0.25, "sine", 0.3],
+	"rain": [1.2, 900.0, 600.0, 0.18, "sine", 0.95],
+	"queen": [1.0, 523.0, 1046.0, 0.35, "square", 0.0],
+	"royal": [0.9, 659.0, 1318.0, 0.35, "tri", 0.0],
+	"combo": [0.35, 784.0, 1568.0, 0.3, "tri", 0.0],
+	"wish": [1.2, 392.0, 1568.0, 0.4, "square", 0.0],
+	"raid": [0.6, 220.0, 160.0, 0.35, "saw", 0.3],
+	"golden": [0.8, 880.0, 1760.0, 0.3, "sine", 0.0],
+	"rainbow": [1.0, 523.0, 2093.0, 0.3, "tri", 0.0],
 }
 
 var players: Array = []
@@ -89,6 +116,28 @@ var jar_nodes: Array = []
 var basket_fruit: Array[MeshInstance3D] = []
 var splash_t := {}
 var stats := {"planted": 0, "harvested": 0, "shooed": 0, "pollinated": 0, "pollen": 0}
+# Events, wishes and decorations (host decides; snapshots tell the TV)
+var event := ""               # "", "rain", "golden", "raid", "queen"
+var event_t := 0.0
+var events_today: Array = []  # the order of today's events
+var event_n := 0
+var rain_t := 0.0
+var rainbow_t := 0.0
+var golden_spot := -1
+var queen_kind := 0
+var queen_gifts := 0
+var raid_left := 0
+var decor_count := 0
+var decor_built := 0
+var wish: Array = []          # [kind, goal, text]
+var wish_progress := 0
+var wish_done := false
+var day_stats := {}           # bee index -> {honey, flowers, combos, wasps, royal}
+var gardener_day := {"planted": 0, "harvested": 0, "shooed": 0}
+var last_delivery := {}       # bee index -> time of their last honey delivery (team buzz)
+var events_node: Node3D
+var ambient: Array = []
+var amb_t := 0.0
 
 var info_label: Label
 var center_label: Label
@@ -118,6 +167,11 @@ func _ready() -> void:
 	env = (get_node("Env") as WorldEnvironment).environment
 	_build_plants()
 	_build_jars()
+	W.build_signs(self)
+	ambient = W.build_ambient(self)
+	events_node = EventsScript.new()
+	events_node.main = self
+	add_child(events_node)
 	_build_hud()
 	var menu := PauseMenuScript.new()
 	menu.main = self
@@ -149,7 +203,7 @@ func _setup_game(mode: String) -> void:
 	_ensure_join_listener()
 	print("Bee Garden: %s mode" % mode)
 	var bee_help := "BEES: left stick / WASD fly · right stick / A D turn · RT / Space up · LT / Shift down · A / E zoom\n" \
-		+ "Fly into glowing flowers for pollen, bring it to the HIVE for honey · visit a different flower to grow fruit\n"
+		+ "Fly into glowing flowers for pollen, bring it to the HIVE: honey fills the JARS · fill ALL jars before sunset!\n"
 	if mode == "local":
 		help_label.text = bee_help + "GARDENER (left screen): mouse or 2nd controller moves the glove · hold click / RT: grab seeds, the can, fruit, pests\n" \
 			+ "More bees: press A on another controller (or arrows + Ctrl) to join, up to 6 bees"
@@ -722,6 +776,8 @@ func jar_count() -> int:
 
 func _target_for(d: int, n_bees: int) -> int:
 	var base := 40.0 + 18.0 * (d - 1)
+	if d > 1:
+		base *= 1.12  # the events and bouquets add honey, so later days ask for a bit more
 	return int(round(base * (1.0 + 0.3 * (n_bees - 1))))
 
 
@@ -783,9 +839,14 @@ func _harvest(i: int) -> void:
 	_fly_fruit(from, k)
 	net.event("fruit", [from, k])
 	sound("harvest", -2.0, 1.0 + k * 0.1)
-	popup(from + Vector3.UP * 0.5, "+%d honey!%s" % [value, "\n(plant something new here)" if spent else ""], Color(1.0, 0.85, 0.3))
+	gardener_day["harvested"] = int(gardener_day["harvested"]) + 1
+	_wish_add("harvest")
+	if rainbow_t > 0.0:
+		value *= 2
+	popup(from + Vector3.UP * 0.5, "Fruit picked! It makes +%d honey%s" % [value, "\n(plant something new here)" if spent else ""], Color(1.0, 0.85, 0.3))
 	print("Harvested a %s fruit (+%d honey)" % [kd.name, value])
 	add_honey(value, from)
+	honey_drop(W.BASKET_POS + Vector3(0, 0.5, 0))
 
 
 ## Fruit hops from the plant into the basket (visual, both machines).
@@ -852,6 +913,8 @@ func shoo(pest, from: Vector3) -> void:
 	var pos: Vector3 = pest.global_position
 	pest.shoo(from)
 	stats.shooed += 1
+	gardener_day["shooed"] = int(gardener_day["shooed"]) + 1
+	_wish_add("shoo")
 	sound("shoo", -4.0, 1.3 if pest.kind == "aphid" else 0.9)
 	burst(pos, Color(0.85, 0.95, 1.0), 10, 0.05)
 	popup(pos + Vector3.UP * 0.4, ["Shoo!", "Off you go!", "Bye bye!", "Shoo shoo!"][randi() % 4], Color(0.7, 1.0, 0.7))
@@ -926,6 +989,8 @@ func _seed_landed(kind: int, p: Vector3) -> void:
 	s.growth = 0.02
 	spots[best] = s
 	stats.planted += 1
+	gardener_day["planted"] = int(gardener_day["planted"]) + 1
+	_wish_add("plant")
 	var kd: Dictionary = W.KINDS[kind]
 	burst(W.spot_pos(best) + Vector3.UP * 0.1, Color(0.45, 0.3, 0.18), 12, 0.05)
 	sound("plant", -2.0, 1.0 + kind * 0.15)
@@ -971,8 +1036,27 @@ func add_honey(value: int, _from: Vector3) -> void:
 	if full_after > full_before and full_after <= jar_count():
 		var jp := W.jar_pos(mini(full_after, jar_count()) - 1, jar_count())
 		burst(jp + Vector3.UP * 0.6, Color(1.0, 0.75, 0.2), 20, 0.06)
-		popup(jp + Vector3.UP * 1.0, "JAR FULL!", Color(1.0, 0.8, 0.25))
+		var left := jar_count() - full_after
+		popup(jp + Vector3.UP * 1.0, "JAR %d FULL!  %s" % [full_after, ("%d more to fill" % left) if left > 0 else "ALL FULL!"], Color(1.0, 0.8, 0.25))
 		sound("jar", -2.0)
+
+
+## A golden honey drop flies from where honey was made into the jar being filled (both machines).
+func honey_drop(from: Vector3, broadcast: bool = true) -> void:
+	var n := jar_count()
+	var size := float(target) / n
+	var j := clampi(floori(float(honey) / size), 0, n - 1)
+	var to := W.jar_pos(j, n) + Vector3(0, 0.75, 0)
+	var d := W.mesh_node(self, W.sphere(0.09, 8), W.cmat(Color(1.0, 0.7, 0.15), 1.2), from, Vector3(1.0, 1.3, 1.0))
+	var tw := d.create_tween()
+	tw.tween_method(_move_fruit.bind(d, from, to), 0.0, 1.0, 0.7)
+	tw.tween_callback(d.queue_free)
+	if broadcast and net:
+		net.event("drop", [from])
+
+
+func full_jars() -> int:
+	return clampi(floori(float(honey) / (float(target) / jar_count())), 0, jar_count())
 
 
 # --- Simulation ----------------------------------------------------------------
@@ -994,9 +1078,11 @@ func _sim(delta: float) -> void:
 		var kd: Dictionary = W.KINDS[k]
 		var bug: bool = s.bug
 		s.water = maxf(0.0, float(s.water) - drain * (3.0 if bug else 1.0) * delta)
+		if rain_t > 0.0:
+			s.water = minf(1.0, float(s.water) + 0.22 * delta)  # rain: free watering for everyone
 		var water: float = s.water
 		if float(s.growth) < 1.0 and water > 0.12 and not bug:
-			s.growth = minf(1.0, float(s.growth) + delta / float(kd.grow))
+			s.growth = minf(1.0, float(s.growth) + delta / float(kd.grow) * (1.6 if rain_t > 0.0 else 1.0))
 		if not s.bloom and float(s.growth) >= 1.0 and water >= maxf(float(kd.thirst), 0.12):
 			s.bloom = true
 			s.pollen_t = 0.0
@@ -1022,11 +1108,22 @@ func _sim(delta: float) -> void:
 
 
 func _host_bees(delta: float) -> void:
+	var qpos: Vector3 = events_node.queen_pos() if event == "queen" else Vector3(0, -99, 0)
 	for b in bees():
 		if not b.active:
 			continue
 		b.gather_cd -= delta
 		var pos: Vector3 = b.global_position
+		# Bees bump wasps away (no stings, just a startled wasp).
+		for p in get_tree().get_nodes_in_group("pests"):
+			if p.kind == "wasp" and not p.is_fleeing() and not p.is_queued_for_deletion() and pos.distance_to(p.global_position) < 0.5:
+				p.shoo(pos)
+				_bee_stat(b.index, "wasps", 1)
+				_wish_add("shoo")
+				sound("shoo", -4.0, 1.5)
+				burst(p.global_position, b.color, 10, 0.05)
+				popup(p.global_position + Vector3.UP * 0.4, "BUZZ OFF! P%d chased the wasp away" % (b.index + 1), b.color.lightened(0.35))
+				print("P%d bumped a wasp away" % (b.index + 1))
 		for i in spots.size():
 			var s: Dictionary = spots[i]
 			if not s.bloom:
@@ -1038,36 +1135,328 @@ func _host_bees(delta: float) -> void:
 			if b.last_flower != i and b.pollen > 0 and float(s.fruit) < 0.0:
 				s.fruit = 0.0
 				stats.pollinated += 1
+				_wish_add("pollinate")
 				burst(hp, Color(1.0, 0.9, 0.5), 14, 0.05)
 				sound("pollinate", -4.0, 1.0)
 				popup(hp + Vector3.UP * 0.5, "Pollinated! A fruit is growing", Color(1.0, 0.9, 0.5))
 				print("P%d pollinated spot %d" % [b.index + 1, i])
 			if s.ready and b.pollen < BeeScript.MAX_POLLEN and b.gather_cd <= 0.0:
+				var golden := i == golden_spot
 				b.pollen += 1
-				b.pollen_value += int(kd.honey)
-				b.gold = b.gold or int(s.kind) == 2
+				b.pollen_value += int(kd.honey) + (4 if golden else 0)
+				b.gold = b.gold or int(s.kind) == 2 or golden
+				b.pollen_kinds = b.pollen_kinds | (1 << int(s.kind))
+				if not b.trip_flowers.has(i):
+					b.trip_flowers.append(i)
 				b.gather_cd = 0.35
-				s.pollen_t = POLLEN_REGROW
+				s.pollen_t = POLLEN_REGROW * (0.4 if golden else 1.0)
 				s.ready = false
 				stats.pollen += 1
-				burst(hp, Color(1.0, 0.8, 0.2), 8, 0.04)
-				sound("pollen", -6.0, 0.9 + b.pollen * 0.15)
-				if b.pollen >= BeeScript.MAX_POLLEN:
+				_bee_stat(b.index, "flowers", 1)
+				burst(hp, Color(1.0, 0.95, 0.4) if golden else Color(1.0, 0.8, 0.2), 14 if golden else 8, 0.04)
+				sound("golden" if golden else "pollen", -6.0, 0.9 + b.pollen * 0.15)
+				if golden:
+					popup(pos + Vector3.UP * 0.4, "GOLDEN POLLEN!", Color(1.0, 0.92, 0.4))
+				elif b.pollen >= BeeScript.MAX_POLLEN:
 					popup(pos + Vector3.UP * 0.4, "FULL! To the hive!", b.color.lightened(0.3))
 			b.last_flower = i
 			break
+		# The Queen: bring her the pollen she asked for.
+		if event == "queen" and b.pollen > 0 and (b.pollen_kinds & (1 << queen_kind)) != 0 and pos.distance_to(qpos) < 1.1:
+			var gift: int = 6 + 2 * int(b.pollen)
+			if rainbow_t > 0.0:
+				gift *= 2
+			queen_gifts += 1
+			b.crowned = true
+			_bee_stat(b.index, "royal", 1)
+			_bee_stat(b.index, "honey", gift)
+			b.honey_made += gift
+			_clear_load(b)
+			sound("royal", -1.0)
+			burst(qpos, Color(1.0, 0.85, 0.3), 24, 0.07)
+			popup(qpos + Vector3.UP * 0.8, "THE QUEEN SAYS THANK YOU, P%d!\n+%d honey and a ROYAL CROWN!" % [b.index + 1, gift], Color(1.0, 0.85, 0.4))
+			print("P%d gave the queen pollen (+%d honey)" % [b.index + 1, gift])
+			add_honey(gift, qpos)
+			honey_drop(qpos)
+			continue
 		if b.pollen > 0 and pos.distance_to(W.HIVE_ENTRY) < 0.8:
-			var v: int = b.pollen_value
-			b.honey_made += v
-			b.pollen = 0
-			b.pollen_value = 0
-			b.gold = false
-			b.last_flower = -1
-			burst(W.HIVE_ENTRY, Color(1.0, 0.7, 0.15), 16, 0.06)
-			sound("honey", -2.0, 1.0 + b.index * 0.04)
-			popup(W.HIVE_ENTRY + Vector3(0.3, 0.7, 0.0), "+%d honey  (P%d)" % [v, b.index + 1], b.color.lightened(0.35))
-			print("P%d made %d honey (%d / %d)" % [b.index + 1, v, honey + v, target])
-			add_honey(v, W.HIVE_ENTRY)
+			_deliver(b)
+
+
+func _clear_load(b) -> void:
+	b.pollen = 0
+	b.pollen_value = 0
+	b.pollen_kinds = 0
+	b.gold = false
+	b.last_flower = -1
+	b.trip_flowers.clear()
+
+
+## A bee brings its pollen home: honey, plus FLOWER COMBO (different flowers in one trip),
+## TEAM BUZZ (another bee delivered just now) and RAINBOW (double) bonuses.
+func _deliver(b) -> void:
+	var v: int = b.pollen_value
+	var extra: Array[String] = []
+	# Pollen from different KINDS of flower in one trip makes a bouquet bonus.
+	var kinds := 0
+	for k in 3:
+		if (int(b.pollen_kinds) & (1 << k)) != 0:
+			kinds += 1
+	if kinds >= 2:
+		var cb := 2 if kinds == 2 else 5
+		v += cb
+		extra.append(("MIXED BOUQUET +%d" if kinds == 2 else "RAINBOW BOUQUET +%d") % cb)
+		_bee_stat(b.index, "combos", 1)
+		_wish_add("combo")
+		sound("combo", -3.0, 1.0 + kinds * 0.1)
+	if b.gold:
+		_wish_add("gold")
+	var now := Time.get_ticks_msec() / 1000.0
+	for o in bees():
+		if o != b and o.active and now - float(last_delivery.get(o.index, -10.0)) < 2.5:
+			v += 2
+			extra.append("TEAM BUZZ +2")
+			break
+	last_delivery[b.index] = now
+	if rainbow_t > 0.0:
+		v *= 2
+		extra.append("RAINBOW x2")
+	b.honey_made += v
+	_bee_stat(b.index, "honey", v)
+	_clear_load(b)
+	burst(W.HIVE_ENTRY, Color(1.0, 0.7, 0.15), 16, 0.06)
+	sound("honey", -2.0, 1.0 + b.index * 0.04)
+	var line := "+%d honey  (P%d)" % [v, b.index + 1]
+	if not extra.is_empty():
+		line += "\n" + "  ".join(extra)
+	popup(W.HIVE_ENTRY + Vector3(0.3, 0.7, 0.0), line, b.color.lightened(0.35))
+	print("P%d made %d honey (%d / %d) %s" % [b.index + 1, v, honey + v, target, str(extra)])
+	add_honey(v, W.HIVE_ENTRY)
+	honey_drop(W.HIVE_ENTRY + Vector3.UP * 0.3)
+
+
+func _bee_stat(i: int, key: String, add: int) -> void:
+	if not day_stats.has(i):
+		day_stats[i] = {"honey": 0, "flowers": 0, "combos": 0, "wasps": 0, "royal": 0}
+	var d: Dictionary = day_stats[i]
+	d[key] = int(d.get(key, 0)) + add
+
+
+# --- Daily wish, surprise events, decorations (host) -----------------------------
+
+func _wish_add(kind: String, n: int = 1) -> void:
+	if wish.size() < 3 or wish_done or str(wish[0]) != kind or not (phase == "day" or phase == "intro"):
+		return
+	wish_progress += n
+	if wish_progress >= int(wish[1]):
+		wish_done = true
+		sound("wish", -1.0)
+		_show_center("GARDEN WISH COMPLETE!\n%s\nSomething new is coming to the garden…" % _wish_text(), 3.0)
+		print("Wish complete: %s" % _wish_text())
+		get_tree().create_timer(1.2).timeout.connect(_unlock_decor)
+
+
+func _wish_text() -> String:
+	if wish.size() < 3:
+		return ""
+	return str(wish[2]) % int(wish[1])
+
+
+func _unlock_decor() -> void:
+	if decor_count >= W.DECOR.size():
+		add_honey(5, W.HIVE_ENTRY)
+		return
+	decor_count += 1
+	var d: Array = W.DECOR[decor_count - 1]
+	var at: Vector3 = d[1]
+	sound("bloom", -2.0, 1.3)
+	popup(at + Vector3(0, -W.LAWN_Y + 1.2, 0), "%s moved into the garden!" % str(d[0]).capitalize(), Color(1.0, 0.9, 0.6))
+	print("Decoration unlocked: %s" % d[0])
+
+
+## Build any newly unlocked decorations (both machines; the count comes from the snapshots).
+func _update_decor(delta: float) -> void:
+	while decor_built < decor_count and decor_built < W.DECOR.size():
+		var n := W.build_decor(self, decor_built)
+		n.scale = Vector3.ONE * 0.1
+		n.create_tween().tween_property(n, "scale", Vector3.ONE, 0.8).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		burst(n.global_position + Vector3.UP * 1.0, Color(1.0, 0.85, 0.4), 18, 0.08, false)
+		decor_built += 1
+	amb_t += delta
+	var mill := get_node_or_null("Decor6/Sails") as Node3D
+	if mill != null:
+		mill.rotate_object_local(Vector3.BACK, delta * 1.2)
+	var duck := get_node_or_null("Decor4/Duck") as Node3D
+	if duck != null:
+		duck.position = Vector3(cos(amb_t * 0.4) * 0.8, 0.12 + sin(amb_t * 3.0) * 0.02, sin(amb_t * 0.4) * 0.7)
+		duck.rotation.y = -amb_t * 0.4
+	# Butterflies flutter in loops round the garden (and visit the butterfly bush once it's there).
+	if not ambient.is_empty():
+		var mm: MultiMesh = ambient[0]
+		for i in mm.instance_count:
+			var a := amb_t * (0.25 + (i % 3) * 0.06) + i * 0.63
+			var c := Vector3(-7.2, W.LAWN_Y + 1.6, -2.8) if decor_count >= 3 and i % 2 == 0 else Vector3(0, W.LAWN_Y + 2.4, 0.5)
+			var r := 2.2 + (i % 4) * 1.6
+			var p := c + Vector3(cos(a) * r, sin(amb_t * 1.7 + i) * 0.6, sin(a) * r * 0.7)
+			var flap := 0.25 + absf(sin(amb_t * 14.0 + i * 2.0)) * 0.9
+			var fwd := Vector3(-sin(a), 0.0, cos(a) * 0.7).normalized()
+			mm.set_instance_transform(i, Transform3D(Basis.looking_at(fwd, Vector3.UP).scaled(Vector3(flap, 1.0, 1.0) * 1.3), p))
+		var cmm: MultiMesh = ambient[1]
+		var shift := delta * 0.8
+		for i in cmm.instance_count:
+			var xf := cmm.get_instance_transform(i)
+			xf.origin.x = fposmod(xf.origin.x + shift + 60.0, 120.0) - 60.0
+			cmm.set_instance_transform(i, xf)
+
+
+func _host_events(delta: float) -> void:
+	rain_t = maxf(0.0, rain_t - delta)
+	rainbow_t = maxf(0.0, rainbow_t - delta)
+	var elapsed := DAY_LEN - day_t
+	if event == "" and event_n < EVENT_AT.size() and event_n < events_today.size() and elapsed >= EVENT_AT[event_n]:
+		_start_event(str(events_today[event_n]))
+		event_n += 1
+	if event == "":
+		return
+	event_t -= delta
+	match event:
+		"rain":
+			if rain_t <= 0.0:
+				_end_event(true)
+		"golden":
+			if event_t <= 0.0 or golden_spot < 0 or not spots[golden_spot].bloom:
+				_end_event(true)
+		"raid":
+			var left := 0
+			for p in get_tree().get_nodes_in_group("pests"):
+				if p.has_meta("raid") and not p.is_fleeing() and not p.is_queued_for_deletion():
+					left += 1
+			raid_left = left
+			if left == 0:
+				_end_event(true)
+			elif event_t <= 0.0:
+				_end_event(false)
+		"queen":
+			if queen_gifts >= 2 or event_t <= 0.0:
+				_end_event(queen_gifts > 0)
+
+
+func _start_event(kind: String) -> void:
+	event = kind
+	print("Event: %s" % kind)
+	match kind:
+		"rain":
+			rain_t = RAIN_TIME
+			event_t = RAIN_TIME
+			sound("rain", -2.0)
+			_show_center("A RAIN SHOWER!\nThe flowers are drinking and growing fast… is that a rainbow coming?", 3.5)
+		"golden":
+			var opts: Array[int] = []
+			for i in spots.size():
+				if spots[i].bloom and int(spots[i].kind) != 2:
+					opts.append(i)
+			if opts.is_empty():
+				for i in spots.size():
+					if int(spots[i].kind) < 0:
+						opts.append(i)
+			if opts.is_empty():
+				event = ""
+				return
+			golden_spot = opts[randi() % opts.size()]
+			var s: Dictionary = spots[golden_spot]
+			if int(s.kind) < 0:
+				spots[golden_spot] = _empty_spot()
+				s = spots[golden_spot]
+				s.kind = 0
+			s.growth = 1.0
+			s.water = maxf(float(s.water), 0.8)
+			s.bloom = true
+			s.pollen_t = 0.0
+			event_t = GOLDEN_TIME
+			sound("golden", 0.0)
+			burst(head_pos(golden_spot), Color(1.0, 0.9, 0.3), 24, 0.07)
+			_show_center("A RARE GOLDEN FLOWER!\nBees: its sparkly GOLDEN pollen makes LOTS of honey - quick!", 3.5)
+		"raid":
+			raid_left = 3
+			event_t = RAID_TIME
+			for k in 3:
+				var p := PestScript.new()
+				p.kind = "wasp"
+				p.main = self
+				p.target = -1
+				p.slot = k
+				p.net_id = next_net_id()
+				p.set_meta("raid", true)
+				p.position = Vector3(-9.0 + k * 1.5, 3.0 + k * 0.5, -6.0 + k * 0.8)
+				add_child(p)
+			sound("raid", 0.0)
+			_show_center("WASP RAID!\nGardener: flick or point at the wasps to shoo them!\nBees: bump into them to buzz them away!", 3.5)
+		"queen":
+			var blooming: Array[int] = []
+			for i in spots.size():
+				if spots[i].bloom and not blooming.has(int(spots[i].kind)):
+					blooming.append(int(spots[i].kind))
+			queen_kind = blooming[randi() % blooming.size()] if not blooming.is_empty() else 0
+			queen_gifts = 0
+			event_t = QUEEN_TIME
+			sound("queen", -1.0)
+			var nm: String = W.KINDS[queen_kind].name
+			_show_center("THE QUEEN BEE IS VISITING!\nShe would love some %s pollen. Bees: bring it to her!%s" % [nm.to_upper(),
+				"" if blooming.has(queen_kind) else "\nGardener: grow a %s!" % nm], 4.0)
+
+
+func _end_event(ok: bool) -> void:
+	match event:
+		"rain":
+			rainbow_t = RAINBOW_TIME
+			sound("rainbow", -1.0)
+			_show_center("A RAINBOW!\nAll honey counts DOUBLE while it shines!", 3.0)
+		"golden":
+			golden_spot = -1
+		"raid":
+			if ok:
+				add_honey(5, W.HIVE_ENTRY)
+				sound("daydone", -4.0, 1.3)
+				_show_center("THE HIVE IS SAFE!  +5 honey for chasing off the raid", 2.5)
+			else:
+				for p in get_tree().get_nodes_in_group("pests"):
+					if p.has_meta("raid"):
+						p.shoo(p.global_position + Vector3.DOWN)
+				_show_center("The wasps got bored and buzzed off", 2.0)
+		"queen":
+			_show_center("The Queen is delighted - thank you, bees!" if ok else "The Queen flew home for a nap - maybe next time!", 2.5)
+	event = ""
+	event_t = 0.0
+
+
+## Short advice for the gardener (the VR garden sign and the flat gardener's view).
+func gardener_tip() -> String:
+	if phase != "day" and phase != "intro":
+		return ""
+	match event:
+		"raid":
+			return "WASP RAID: flick them with a hand, or point and pull the trigger!"
+		"queen":
+			var nm: String = W.KINDS[queen_kind].name
+			return "The Queen wants %s pollen: keep %ss blooming and watered" % [nm.to_upper(), nm.to_lower()]
+		"golden":
+			return "Keep the GOLDEN flower watered for the bees!"
+	for i in spots.size():
+		if int(spots[i].kind) >= 0 and float(spots[i].fruit) >= 1.0:
+			return "Ripe fruit! Touch it to pick it (fruit = honey for the jars)"
+	for i in spots.size():
+		var st: Dictionary = spots[i]
+		if int(st.kind) >= 0 and float(st.water) < 0.12:
+			return "A flower is thirsty (blue drop): water it with the can"
+	var empty := 0
+	for i in spots.size():
+		if int(spots[i].kind) < 0:
+			empty += 1
+	if empty >= 3:
+		return "Empty soil: grab a seed from the tray and toss it in"
+	if wish.size() >= 3 and not wish_done:
+		return "WISH: %s  (%d / %d)" % [_wish_text(), wish_progress, int(wish[1])]
+	return ""
 
 
 func _host_pests(delta: float) -> void:
@@ -1077,7 +1466,7 @@ func _host_pests(delta: float) -> void:
 	var nb := active_bee_count()
 	pest_t = maxf(7.0, 17.0 - day * 2.0) * randf_range(0.8, 1.2) / (1.0 + 0.1 * (nb - 1))
 	var pests := get_tree().get_nodes_in_group("pests")
-	if pests.size() >= mini(1 + day, 4):
+	if pests.size() >= mini(1 + day, 4) or event == "raid":
 		return
 	var has_wasp := false
 	for p in pests:
@@ -1111,18 +1500,47 @@ func _start_day(n: int) -> void:
 	pest_t = 22.0 if n == 1 else 12.0
 	for p in get_tree().get_nodes_in_group("pests"):
 		p.queue_free()
+	# Today's surprises (day 1 is gentle: no wasp raid) and today's garden wish.
+	event = ""
+	event_t = 0.0
+	event_n = 0
+	rain_t = 0.0
+	rainbow_t = 0.0
+	golden_spot = -1
+	queen_gifts = 0
+	if n == 1:
+		events_today = ["golden", "rain", "queen"]
+	else:
+		var r := RandomNumberGenerator.new()
+		r.seed = n * 7919 + randi() % 1000
+		events_today = EVENT_KINDS.duplicate()
+		for k in range(events_today.size() - 1, 0, -1):
+			var j := r.randi_range(0, k)
+			var tmp = events_today[k]
+			events_today[k] = events_today[j]
+			events_today[j] = tmp
+	var w: Array = WISHES[(n - 1) % WISHES.size()]
+	wish = [w[0], int(w[1]) + (n - 1) / WISHES.size(), w[2]]
+	wish_progress = 0
+	wish_done = false
+	day_stats.clear()
+	gardener_day = {"planted": 0, "harvested": 0, "shooed": 0}
+	for b in bees():
+		b.crowned = false
 	var season: String = W.SEASONS[(n - 1) % 4]
-	print("Day %d (%s): fill %d jars = %d honey" % [n, season, jar_count(), target])
+	print("Day %d (%s): fill %d jars = %d honey, wish: %s, events %s" % [n, season, jar_count(), target, _wish_text(), str(events_today)])
 	sound("bloom", 0.0, 0.8)
 	if n == 1:
-		_show_center("BEE GARDEN  -  DAY 1, %s\nGardener: plant seeds, water, pick fruit, shoo pests\nBees: pollen from glowing flowers to the HIVE = honey!\nFill %d honey jars before sunset" % [season, jar_count()], INTRO_TIME + 1.0)
+		_show_center("BEE GARDEN  -  DAY 1, %s\nGARDENER: plant seeds, water, pick ripe fruit (fruit = honey!), shoo pests\n" % season \
+			+ "BEES: pollen from glowing flowers, fly it to the HIVE to make honey\n" \
+			+ "Honey fills the JARS on the bed: fill ALL %d jars before sunset!\nToday's wish: %s" % [jar_count(), _wish_text()], INTRO_TIME + 2.0)
 	else:
-		_show_center("DAY %d  -  %s\nFill %d honey jars before sunset!" % [n, season, jar_count()], 3.5)
+		_show_center("DAY %d  -  %s\nFill %d honey jars before sunset!\nToday's wish: %s" % [n, season, jar_count(), _wish_text()], 4.0)
 
 
 func _day_complete() -> void:
 	phase = "dusk"
-	phase_t = DUSK_TIME
+	phase_t = DUSK_TIME + 4.0
 	days_done += 1
 	print("Level complete: day %d done (%d honey, %.0f s left)" % [day, honey, day_t])
 	sound("daydone", 0.0)
@@ -1130,9 +1548,42 @@ func _day_complete() -> void:
 		burst(W.jar_pos(i, jar_count()) + Vector3.UP * 0.7, Color(1.0, 0.78, 0.25), 14, 0.06)
 	for p in get_tree().get_nodes_in_group("pests"):
 		p.shoo(p.global_position + Vector3.DOWN)
-	_show_center("DAY %d COMPLETE!\nAll the honey jars are full - well done, garden friends!\nNext: %s" % [day, W.SEASONS[day % 4]], DUSK_TIME)
+	if event != "":
+		_end_event(true)
+	rain_t = 0.0
+	var new_decor := ""
+	if decor_count < W.DECOR.size():
+		new_decor = "\nNew in the garden: %s!" % str(W.DECOR[decor_count][0])
+	_unlock_decor()
+	var wl := "Garden wish: %s - %s" % [_wish_text(), "DONE!" if wish_done else "%d / %d, maybe tomorrow" % [wish_progress, int(wish[1])]]
+	_show_center("DAY %d COMPLETE!  All %d honey jars are full!\n%s\n%s%s\nNext: %s" % [day, jar_count(), wl, _awards_text(), new_decor,
+		W.SEASONS[day % 4]], phase_t)
+	print(_awards_text())
 	if gardener.vr:
 		gardener.buzz_right(0.6)
+
+
+## Fun end-of-day awards for the bees, and the gardener's day.
+func _awards_text() -> String:
+	var lines: Array[String] = []
+	var cats := [["honey", "BUSIEST BEE", "%d honey"], ["flowers", "FLOWER FRIEND", "%d flowers"], ["combos", "COMBO STAR", "%d combos"],
+		["wasps", "WASP CHASER", "%d wasps"], ["royal", "QUEEN'S FAVOURITE", "%d royal gifts"]]
+	var parts: Array[String] = []
+	for c in cats:
+		var best_i := -1
+		var best_v := 0
+		for i in day_stats:
+			var v: int = int((day_stats[i] as Dictionary).get(c[0], 0))
+			if v > best_v:
+				best_v = v
+				best_i = int(i)
+		if best_i > 0:
+			parts.append("%s: P%d (%s)" % [c[1], best_i + 1, str(c[2]) % best_v])
+	for k in range(0, parts.size(), 2):
+		lines.append("   ".join(parts.slice(k, k + 2)))
+	lines.append("GARDENER: planted %d, picked %d fruits, shooed %d pests" % [int(gardener_day["planted"]),
+		int(gardener_day["harvested"]), int(gardener_day["shooed"])])
+	return "\n".join(lines)
 
 
 func _sunset() -> void:
@@ -1180,7 +1631,6 @@ func _process(delta: float) -> void:
 		music = MusicScript.new()
 		add_child(music)
 		music.volume_db = -22.0
-	music.play_track(2)
 	if mirror_vp:
 		mirror_t -= delta
 		if mirror_t <= 0.0:
@@ -1192,9 +1642,17 @@ func _process(delta: float) -> void:
 	_update_seeds(delta)
 	for i in plant_nodes.size():
 		if i < spots.size():
+			spots[i]["golden"] = i == golden_spot
 			plant_nodes[i].update_from(spots[i], delta)
 	_update_jars(delta)
 	_update_sky()
+	_update_decor(delta)
+	events_node.update_from(delta)
+	music.play_track(1 if event == "raid" else 2)
+	music.pitch_scale = lerpf(music.pitch_scale, (1.06 if event == "raid" else [1.0, 1.02, 0.97, 0.95][(maxi(day, 1) - 1) % 4]), 1.0 - exp(-2.0 * delta))
+	if net.mode == "client":
+		rain_t = maxf(0.0, rain_t - delta)
+		rainbow_t = maxf(0.0, rainbow_t - delta)
 	_update_hud()
 	_update_vr_center()
 	if net.mode != "host":
@@ -1232,6 +1690,7 @@ func _host_update(delta: float) -> void:
 			elif phase == "day":
 				day_t -= delta
 				_host_pests(delta)
+				_host_events(delta)
 				if day_t <= 0.0:
 					day_t = 0.0
 					_sunset()
@@ -1304,7 +1763,9 @@ func _update_sky() -> void:
 		state = "Good night!"
 	elif phase == "wait":
 		state = "Waiting for the bees…"
-	sign_label.text = "BEE GARDEN  ·  DAY %d  %s\nHONEY %d / %d\n%s" % [maxi(day, 1), W.SEASONS[season], honey, target, state]
+	var tip := gardener_tip()
+	sign_label.text = "BEE GARDEN  ·  DAY %d  %s\nHONEY %d / %d  ·  JARS %d / %d FULL\n%s%s" % [maxi(day, 1), W.SEASONS[season], honey, target,
+		full_jars(), jar_count(), state, ("\n" + tip) if tip != "" else ""]
 
 
 # --- Networked co-op (see docs/GAME_DEV_GUIDE.md) ----------------------------
@@ -1385,7 +1846,8 @@ func make_snapshot() -> Array:
 	for p in get_tree().get_nodes_in_group("pests"):
 		if not p.is_queued_for_deletion():
 			pe.append(p.net_item())
-	return [phase, day, day_t, honey, target, total_honey, days_done, sp, ps, pe, game_over, basket_count]
+	return [phase, day, day_t, honey, target, total_honey, days_done, sp, ps, pe, game_over, basket_count,
+		event, rain_t, rainbow_t, golden_spot, queen_kind, decor_count, wish, wish_progress, wish_done]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -1421,6 +1883,18 @@ func apply_snapshot(s: Array) -> void:
 	if game_over and not was_over:
 		game_over_time = 0.0
 	basket_count = s[11]
+	if s.size() >= 21:
+		event = s[12]
+		rain_t = s[13]
+		rainbow_t = s[14]
+		golden_spot = s[15]
+		queen_kind = s[16]
+		decor_count = s[17]
+		wish = s[18]
+		wish_progress = s[19]
+		wish_done = s[20]
+	for i in spots.size():
+		spots[i]["golden"] = i == golden_spot
 
 
 func _sync_pests(list: Array) -> void:
@@ -1462,6 +1936,8 @@ func apply_event(kind: String, args: Array) -> void:
 			_spawn_seed(args[0], args[1], args[2], false)
 		"fruit":
 			_fly_fruit(args[0], args[1])
+		"drop":
+			honey_drop(args[0], false)
 		"remote_pause":
 			get_tree().paused = args[0]
 			_set_pause_banner(args[0], "The gardener paused the game")
@@ -1547,10 +2023,31 @@ func _update_hud() -> void:
 		return
 	var mins := maxi(0, ceili(day_t))
 	var season: String = W.SEASONS[(maxi(day, 1) - 1) % 4]
-	info_label.text = "DAY %d  %s      HONEY %d / %d      SUNSET IN %d:%02d" % [maxi(day, 1), season, honey, target, mins / 60, mins % 60]
+	info_label.text = "DAY %d  %s      HONEY %d / %d  (JARS FULL %d / %d)      SUNSET IN %d:%02d" % [maxi(day, 1), season, honey, target,
+		full_jars(), jar_count(), mins / 60, mins % 60]
 	var n := active_bee_count()
 	if n > 1:
 		info_label.text += "      BEES %d" % n
+	var extra: Array[String] = []
+	if wish.size() >= 3:
+		extra.append("WISH: %s  %s" % [_wish_text(), "DONE!" if wish_done else "%d / %d" % [wish_progress, int(wish[1])]])
+	if rainbow_t > 0.0:
+		extra.append("RAINBOW: DOUBLE HONEY %d s" % int(ceilf(rainbow_t)))
+	match event:
+		"raid":
+			extra.append("WASP RAID!")
+		"queen":
+			extra.append("THE QUEEN WANTS %s POLLEN" % str(W.KINDS[queen_kind].name).to_upper())
+		"golden":
+			extra.append("GOLDEN FLOWER!")
+		"rain":
+			extra.append("RAIN SHOWER")
+	if not extra.is_empty():
+		info_label.text += "\n" + "      ".join(extra)
+	var jt := get_node_or_null("JarTag") as Label3D
+	if jt != null:
+		jt.text = "HONEY JARS: %d / %d FULL" % [full_jars(), jar_count()]
+		jt.position = Vector3(0, 1.3, W.JAR_Z)
 
 
 func _exit_tree() -> void:

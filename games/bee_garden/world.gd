@@ -348,7 +348,7 @@ static func _build_garden(main: Node3D) -> void:
 	post.build(main, mat(Color(0.55, 0.37, 0.22)))
 	var sign_l := Label3D.new()
 	sign_l.name = "Sign"
-	sign_l.font_size = 64
+	sign_l.font_size = 52
 	sign_l.outline_size = 12
 	sign_l.pixel_size = 0.0075
 	sign_l.modulate = Color(1.0, 0.97, 0.85)
@@ -358,3 +358,270 @@ static func _build_garden(main: Node3D) -> void:
 	sign_l.position = SIGN_POS + Vector3(0, 0, -0.05)
 	sign_l.text = "BEE GARDEN"
 	main.add_child(sign_l)
+
+
+# --- Vertex-coloured merged meshes (one draw call for a whole multi-coloured object) ------------
+
+static func vbox(st: SurfaceTool, c: Vector3, s: Vector3, col: Color) -> void:
+	var h := s * 0.5
+	var faces := [
+		[Vector3.UP, [Vector3(-h.x, h.y, -h.z), Vector3(h.x, h.y, -h.z), Vector3(h.x, h.y, h.z), Vector3(-h.x, h.y, h.z)]],
+		[Vector3.DOWN, [Vector3(-h.x, -h.y, h.z), Vector3(h.x, -h.y, h.z), Vector3(h.x, -h.y, -h.z), Vector3(-h.x, -h.y, -h.z)]],
+		[Vector3.RIGHT, [Vector3(h.x, -h.y, -h.z), Vector3(h.x, -h.y, h.z), Vector3(h.x, h.y, h.z), Vector3(h.x, h.y, -h.z)]],
+		[Vector3.LEFT, [Vector3(-h.x, -h.y, h.z), Vector3(-h.x, -h.y, -h.z), Vector3(-h.x, h.y, -h.z), Vector3(-h.x, h.y, h.z)]],
+		[Vector3.BACK, [Vector3(h.x, -h.y, h.z), Vector3(-h.x, -h.y, h.z), Vector3(-h.x, h.y, h.z), Vector3(h.x, h.y, h.z)]],
+		[Vector3.FORWARD, [Vector3(-h.x, -h.y, -h.z), Vector3(h.x, -h.y, -h.z), Vector3(h.x, h.y, -h.z), Vector3(-h.x, h.y, -h.z)]],
+	]
+	for f in faces:
+		var n: Vector3 = f[0]
+		var v: Array = f[1]
+		for idx in [0, 1, 2, 0, 2, 3]:
+			st.set_color(col)
+			st.set_normal(n)
+			var p: Vector3 = v[idx]
+			st.add_vertex(c + p)
+
+
+## A low-poly ellipsoid (radii r) with a flat colour.
+static func vsphere(st: SurfaceTool, c: Vector3, r: Vector3, col: Color, seg: int = 10, rings_n: int = 6) -> void:
+	for i in rings_n:
+		var a0 := PI * i / rings_n - PI * 0.5
+		var a1 := PI * (i + 1) / rings_n - PI * 0.5
+		for j in seg:
+			var b0 := TAU * j / seg
+			var b1 := TAU * (j + 1) / seg
+			var p: Array[Vector3] = [
+				Vector3(cos(a0) * cos(b0), sin(a0), cos(a0) * sin(b0)), Vector3(cos(a0) * cos(b1), sin(a0), cos(a0) * sin(b1)),
+				Vector3(cos(a1) * cos(b1), sin(a1), cos(a1) * sin(b1)), Vector3(cos(a1) * cos(b0), sin(a1), cos(a1) * sin(b0))]
+			for idx in [0, 2, 1, 0, 3, 2]:
+				var u: Vector3 = p[idx]
+				st.set_color(col)
+				st.set_normal(u)
+				st.add_vertex(c + u * r)
+
+
+## An upright cylinder (or cone when r_top = 0) with a flat colour.
+static func vcyl(st: SurfaceTool, c: Vector3, r_top: float, r_bot: float, h: float, col: Color, seg: int = 10) -> void:
+	for j in seg:
+		var a0 := TAU * j / seg
+		var a1 := TAU * (j + 1) / seg
+		var d0 := Vector3(cos(a0), 0, sin(a0))
+		var d1 := Vector3(cos(a1), 0, sin(a1))
+		var p: Array[Vector3] = [c + d0 * r_bot + Vector3(0, -h * 0.5, 0), c + d1 * r_bot + Vector3(0, -h * 0.5, 0),
+			c + d1 * r_top + Vector3(0, h * 0.5, 0), c + d0 * r_top + Vector3(0, h * 0.5, 0)]
+		for idx in [0, 2, 1, 0, 3, 2]:
+			var v: Vector3 = p[idx]
+			st.set_color(col)
+			st.set_normal(((d0 + d1) * 0.5).normalized())
+			st.add_vertex(v)
+		# caps
+		var top: Array[Vector3] = [c + Vector3(0, h * 0.5, 0), p[3], p[2]]
+		var bot: Array[Vector3] = [c + Vector3(0, -h * 0.5, 0), p[1], p[0]]
+		for v2 in top:
+			st.set_color(col)
+			st.set_normal(Vector3.UP)
+			st.add_vertex(v2)
+		for v3 in bot:
+			st.set_color(col)
+			st.set_normal(Vector3.DOWN)
+			st.add_vertex(v3)
+
+
+static func vmesh(st: SurfaceTool, glow: float = 0.0) -> ArrayMesh:
+	var m := st.commit()
+	var mt := StandardMaterial3D.new()
+	mt.vertex_color_use_as_albedo = true
+	mt.roughness = 0.8
+	mt.cull_mode = BaseMaterial3D.CULL_DISABLED
+	if glow > 0.0:
+		mt.emission_enabled = true
+		mt.emission = Color(1.0, 0.9, 0.6)
+		mt.emission_energy_multiplier = glow
+	m.surface_set_material(0, mt)
+	return m
+
+
+static func _st() -> SurfaceTool:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	return st
+
+
+## Garden decorations unlocked day by day (same on both machines): name and where they stand.
+const DECOR := [
+	["a GARDEN GNOME", Vector3(-5.6, LAWN_Y, 2.6)],
+	["a BIRD BATH", Vector3(5.8, LAWN_Y, 1.0)],
+	["a BUTTERFLY BUSH", Vector3(-7.2, LAWN_Y, -2.8)],
+	["a ROSE ARCH", Vector3(0.0, LAWN_Y, -4.6)],
+	["a DUCK POND", Vector3(7.5, LAWN_Y, -3.5)],
+	["FAIRY LIGHTS", Vector3(0.0, LAWN_Y, -2.9)],
+	["a LITTLE WINDMILL", Vector3(-8.5, LAWN_Y, 1.5)],
+	["a SCARECROW", Vector3(6.6, LAWN_Y, 4.2)],
+]
+
+
+## Builds decoration i (a merged, vertex-coloured mesh; the windmill sails and duck are separate).
+static func build_decor(main: Node3D, i: int) -> Node3D:
+	var n := Node3D.new()
+	n.name = "Decor%d" % i
+	main.add_child(n)
+	var d: Array = DECOR[i]
+	n.position = d[1]
+	var st := _st()
+	match i:
+		0:  # gnome: red hat, white beard, blue coat
+			vcyl(st, Vector3(0, 0.45, 0), 0.25, 0.35, 0.9, Color(0.3, 0.45, 0.85))
+			vsphere(st, Vector3(0, 1.05, 0), Vector3(0.24, 0.24, 0.24), Color(1.0, 0.82, 0.68))
+			vsphere(st, Vector3(0, 0.92, -0.17), Vector3(0.2, 0.22, 0.1), Color(0.98, 0.98, 0.98))
+			vsphere(st, Vector3(0, 1.08, -0.24), Vector3(0.06, 0.06, 0.06), Color(1.0, 0.6, 0.55))
+			vcyl(st, Vector3(0, 1.48, 0), 0.0, 0.27, 0.65, Color(0.9, 0.2, 0.25))
+			vbox(st, Vector3(0, 0.05, -0.12), Vector3(0.36, 0.1, 0.24), Color(0.35, 0.22, 0.12))
+		1:  # bird bath with a blue bird
+			vcyl(st, Vector3(0, 0.6, 0), 0.12, 0.22, 1.2, Color(0.85, 0.85, 0.82))
+			vcyl(st, Vector3(0, 1.25, 0), 0.6, 0.3, 0.2, Color(0.88, 0.88, 0.85))
+			vcyl(st, Vector3(0, 1.33, 0), 0.5, 0.5, 0.04, Color(0.5, 0.75, 1.0))
+			vsphere(st, Vector3(0.45, 1.5, 0), Vector3(0.12, 0.11, 0.16), Color(0.3, 0.55, 1.0))
+			vsphere(st, Vector3(0.45, 1.6, -0.12), Vector3(0.08, 0.08, 0.08), Color(0.3, 0.55, 1.0))
+			vcyl(st, Vector3(0.45, 1.6, -0.22), 0.0, 0.03, 0.08, Color(1.0, 0.7, 0.2), 5)
+		2:  # butterfly bush: purple flower spikes
+			for k in 7:
+				var a := TAU * k / 7.0
+				vsphere(st, Vector3(cos(a) * 0.5, 0.6, sin(a) * 0.5), Vector3(0.45, 0.45, 0.45), Color(0.3, 0.6, 0.3))
+				vcyl(st, Vector3(cos(a) * 0.55, 1.25, sin(a) * 0.55), 0.03, 0.12, 0.6, Color(0.75, 0.45, 1.0), 6)
+			vsphere(st, Vector3(0, 0.9, 0), Vector3(0.6, 0.55, 0.6), Color(0.35, 0.65, 0.35))
+		3:  # rose arch over the lawn behind the bed
+			for s in [-1.0, 1.0]:
+				vbox(st, Vector3(s * 1.6, 1.6, 0), Vector3(0.14, 3.2, 0.14), Color(0.95, 0.95, 0.92))
+			for k in 9:
+				var a := PI * k / 8.0
+				vsphere(st, Vector3(cos(a) * 1.6, 3.2 + sin(a) * 0.9, 0), Vector3(0.28, 0.24, 0.24), Color(0.35, 0.65, 0.35))
+				vsphere(st, Vector3(cos(a) * 1.6, 3.25 + sin(a) * 0.9, -0.2), Vector3(0.12, 0.12, 0.12),
+					[Color(1.0, 0.35, 0.45), Color(1.0, 0.75, 0.8), Color(1.0, 0.95, 0.9)][k % 3])
+		4:  # pond with lily pads
+			vcyl(st, Vector3(0, 0.03, 0), 1.6, 1.6, 0.06, Color(0.35, 0.6, 0.95), 18)
+			vcyl(st, Vector3(0, 0.0, 0), 1.75, 1.75, 0.04, Color(0.55, 0.5, 0.45), 18)
+			for k in 4:
+				var a := TAU * k / 4.0 + 0.4
+				vcyl(st, Vector3(cos(a) * 1.0, 0.08, sin(a) * 0.9), 0.25, 0.25, 0.02, Color(0.35, 0.75, 0.3), 8)
+				if k % 2 == 0:
+					vsphere(st, Vector3(cos(a) * 1.0, 0.13, sin(a) * 0.9), Vector3(0.07, 0.05, 0.07), Color(1.0, 0.6, 0.8))
+		5:  # fairy lights strung along the back rim of the bed (glowing bulbs)
+			for k in 17:
+				var x := -4.4 + k * 0.55
+				var sag := sin(float(k % 4) / 4.0 * PI) * 0.12
+				vsphere(st, Vector3(x, -LAWN_Y + 0.55 - sag, 0), Vector3(0.07, 0.09, 0.07),
+					[Color(1.0, 0.85, 0.4), Color(1.0, 0.5, 0.6), Color(0.5, 0.85, 1.0), Color(0.6, 1.0, 0.6)][k % 4], 6, 4)
+			for s in [-1.0, 1.0]:
+				vbox(st, Vector3(s * 4.6, (-LAWN_Y + 0.65) * 0.5, 0), Vector3(0.07, -LAWN_Y + 0.65, 0.07), Color(0.4, 0.3, 0.2))
+			n.add_child(_mesh_of(vmesh(st, 1.2)))
+			return n
+		6:  # little windmill (sails added below)
+			vcyl(st, Vector3(0, 1.2, 0), 0.45, 0.7, 2.4, Color(0.95, 0.92, 0.85))
+			vcyl(st, Vector3(0, 2.7, 0), 0.0, 0.62, 0.7, Color(0.8, 0.35, 0.3))
+			vbox(st, Vector3(0, 0.35, -0.62), Vector3(0.3, 0.6, 0.06), Color(0.45, 0.3, 0.2))
+		7:  # scarecrow (friendly)
+			vbox(st, Vector3(0, 1.0, 0), Vector3(0.1, 2.0, 0.1), Color(0.5, 0.35, 0.2))
+			vbox(st, Vector3(0, 1.45, 0), Vector3(1.4, 0.08, 0.08), Color(0.5, 0.35, 0.2))
+			vbox(st, Vector3(0, 1.3, 0), Vector3(0.6, 0.7, 0.3), Color(0.3, 0.55, 0.85))
+			vsphere(st, Vector3(0, 1.9, 0), Vector3(0.26, 0.28, 0.26), Color(0.95, 0.85, 0.55))
+			vcyl(st, Vector3(0, 2.15, 0), 0.4, 0.4, 0.04, Color(0.85, 0.7, 0.35), 12)
+			vcyl(st, Vector3(0, 2.28, 0), 0.18, 0.22, 0.24, Color(0.85, 0.7, 0.35), 10)
+			for s in [-1.0, 1.0]:
+				vsphere(st, Vector3(s * 0.09, 1.95, -0.23), Vector3(0.04, 0.04, 0.02), Color(0.15, 0.1, 0.05))
+				vsphere(st, Vector3(s * 0.7, 1.45, 0), Vector3(0.1, 0.12, 0.1), Color(0.95, 0.85, 0.4))
+	n.add_child(_mesh_of(vmesh(st)))
+	if i == 6:
+		var sails := _st()
+		for k in 4:
+			var b := Basis(Vector3.BACK, k * PI * 0.5)
+			vbox(sails, b * Vector3(0, 0.75, 0), (b * Vector3(0.24, 1.4, 0.03)).abs(), Color(0.98, 0.96, 0.9))
+		var sm := _mesh_of(vmesh(sails))
+		sm.name = "Sails"
+		sm.position = Vector3(0, 2.3, -0.75)
+		n.add_child(sm)
+	if i == 4:
+		var duck := _st()
+		vsphere(duck, Vector3(0, 0.0, 0), Vector3(0.22, 0.16, 0.3), Color(1.0, 0.92, 0.4))
+		vsphere(duck, Vector3(0, 0.18, -0.2), Vector3(0.12, 0.12, 0.12), Color(1.0, 0.92, 0.4))
+		vbox(duck, Vector3(0, 0.16, -0.34), Vector3(0.08, 0.04, 0.1), Color(1.0, 0.55, 0.1))
+		var dm := _mesh_of(vmesh(duck))
+		dm.name = "Duck"
+		dm.position = Vector3(0.6, 0.12, 0.2)
+		n.add_child(dm)
+	return n
+
+
+static func _mesh_of(m: Mesh) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	mi.mesh = m
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return mi
+
+
+## Small wooden signs on the ledge so everyone knows what each thing is for. They face the gardener
+## (+Z) like real signs (world-locked, not billboards).
+static func build_signs(main: Node3D) -> void:
+	for e in [["SEEDS\ntoss into soil", TRAY_POS + Vector3(0, 0.75, 0.25)], ["WATERING CAN\npoint DOWN to pour", CAN_HOME + Vector3(0, 0.95, 0.25)],
+			["FRUIT BASKET\npicked fruit = HONEY", BASKET_POS + Vector3(0, 0.75, 0.25)]]:
+		var l := Label3D.new()
+		l.text = e[0]
+		l.font_size = 40
+		l.outline_size = 10
+		l.pixel_size = 0.0045
+		l.modulate = Color(1.0, 0.95, 0.75)
+		l.outline_modulate = Color(0.3, 0.18, 0.05)
+		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		l.position = e[1]
+		l.rotation.x = -0.5  # tipped back towards the gardener's eyes
+		main.add_child(l)
+	var jl := Label3D.new()
+	jl.name = "JarTag"
+	jl.text = "HONEY JARS"
+	jl.font_size = 44
+	jl.outline_size = 12
+	jl.pixel_size = 0.006
+	jl.modulate = Color(1.0, 0.85, 0.3)
+	jl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	jl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	jl.layers = TV_LAYER
+	jl.position = Vector3(0, 1.3, JAR_Z)
+	main.add_child(jl)
+
+
+## Butterflies fluttering round the garden and soft clouds overhead (one MultiMesh each).
+static func build_ambient(main: Node3D) -> Array:
+	var bst := _st()
+	for s in [-1.0, 1.0]:
+		vsphere(bst, Vector3(s * 0.13, 0.0, -0.03), Vector3(0.12, 0.015, 0.09), Color(1.0, 1.0, 1.0), 8, 4)
+		vsphere(bst, Vector3(s * 0.1, 0.0, 0.08), Vector3(0.08, 0.015, 0.06), Color(0.9, 0.9, 0.9), 8, 4)
+	vsphere(bst, Vector3.ZERO, Vector3(0.02, 0.02, 0.1), Color(0.2, 0.15, 0.1), 6, 4)
+	var bm := vmesh(bst, 0.3)
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_colors = true
+	mm.mesh = bm
+	mm.instance_count = 10
+	var cols: Array[Color] = [Color(1.0, 0.6, 0.2), Color(0.5, 0.75, 1.0), Color(1.0, 0.95, 0.4), Color(1.0, 0.55, 0.8), Color(0.8, 0.6, 1.0)]
+	for i in 10:
+		mm.set_instance_color(i, cols[i % cols.size()])
+	var mmi := MultiMeshInstance3D.new()
+	mmi.multimesh = mm
+	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	main.add_child(mmi)
+	var cmm := MultiMesh.new()
+	cmm.transform_format = MultiMesh.TRANSFORM_3D
+	var puff := sphere(1.0, 12)
+	puff.material = mat(Color(1.0, 1.0, 1.0), 0.3, 1.0)
+	cmm.mesh = puff
+	cmm.instance_count = 18
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 77
+	for i in 18:
+		var c := Vector3(rng.randf_range(-60, 60), rng.randf_range(22, 34), rng.randf_range(-70, -20))
+		var s := rng.randf_range(4.0, 8.0)
+		cmm.set_instance_transform(i, Transform3D(Basis().scaled(Vector3(s * 1.8, s * 0.6, s)), c))
+	var cmi := MultiMeshInstance3D.new()
+	cmi.multimesh = cmm
+	cmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	main.add_child(cmi)
+	return [mm, cmm]

@@ -2,7 +2,7 @@ extends Node3D
 ## Player 1: the giant BUILDER standing over the floating course.
 ## VR (Steam Frame: only the sticks, the right trigger, A and controller positions reach the game):
 ##   XROrigin3D.world_scale = 8, so the course is a tabletop diorama (a block is 12.5 cm).
-##   Right trigger near a block in your tray (beside your right hand): pick it up. Move it over the
+##   Right trigger near a block in your tray (low, in front of your right hip): pick it up. Move it over the
 ##   course (it snaps to the grid, green = OK) and let go to place it. Let go near the tray (or where
 ##   it can't go) to put it back. Trigger near a placed block picks it up again. A: turn the block.
 ##   Left stick: walk around the course. Right stick left/right: turn, up/down: raise/lower yourself.
@@ -20,7 +20,14 @@ const VIEW_DIST := 0.85      # metres from the course's centre line to the build
 const GRAB_LOCAL := Vector3(0.0, -0.01, -0.07)  # grab point in controller space (metres)
 const TRAY_GRAB := 0.7       # units
 const BLOCK_GRAB := 0.8
-const SLOT_X: Array[float] = [-1.35, -0.45, 0.45, 1.35]
+## Where the tray sits relative to the head when the headset is fitted (metres: right, down, forward),
+## for an adult; shrunk for shorter players (kids, sitting) so it stays within easy reach.
+## Low (between belly and hip), forward and off to the right, so grabbing never brings the hand near
+## the face (players slapped themselves when it sat at chest height, close in).
+const TRAY_OFF := Vector3(0.28, -0.62, -0.38)
+const TRAY_TILT := 14.0      # degrees: the far edge tilts up towards the eyes
+const SLOT_GAP := 0.95       # units between tray slots
+const BALLOON_GRAB := 1.0
 
 var main
 var index := 0
@@ -52,6 +59,14 @@ var head: Node3D
 var tray: Node3D
 var slot_samples: Array = []
 var slot_pips: Array = []
+var slot_holders: Array = []
+var slot_on: Array = []        # per kind: shown in this level's tray?
+var tray_level := -1
+var tray_moving := false
+var tray_off_t := 0.0
+var arrow: MeshInstance3D
+var took_this_level := false
+var tray_k := 1.0
 
 # State
 var held_kind := ""
@@ -212,16 +227,24 @@ func _build_tray() -> void:
 	tray.name = "Tray"
 	xr_origin.add_child(tray)
 	var board := MeshInstance3D.new()
-	board.mesh = Art.box(Vector3(3.8, 0.18, 1.5))
+	board.mesh = Art.box(Vector3(3.9, 0.18, 1.5))
 	board.material_override = Art.mat(Color(0.62, 0.42, 0.26))
 	board.position.y = -0.09
 	tray.add_child(board)
+	var rim := MeshInstance3D.new()
+	rim.mesh = Art.box(Vector3(4.0, 0.12, 0.12))
+	rim.material_override = Art.mat(Color(1.0, 0.82, 0.25), 0.4)
+	rim.position = Vector3(0, 0.02, 0.72)
+	tray.add_child(rim)
 	var pip_mesh := Art.box(Vector3(0.13, 0.13, 0.13))
 	for i in Art.KINDS.size():
 		var kind: String = Art.KINDS[i]
 		var holder := Node3D.new()
-		holder.position = Vector3(SLOT_X[i], 0.0, -0.15)
+		holder.position = Vector3(0.0, 0.0, -0.15)
+		holder.visible = false
 		tray.add_child(holder)
+		slot_holders.append(holder)
+		slot_on.append(false)
 		var sample := MeshInstance3D.new()
 		sample.mesh = Art.block_mesh(kind)
 		sample.scale = Vector3.ONE * 0.6
@@ -243,32 +266,111 @@ func _build_tray() -> void:
 		mmi.multimesh = mm
 		holder.add_child(mmi)
 		slot_pips.append(mmi)
+	# A bouncing arrow over the tray until the builder has grabbed their first block of the level.
+	arrow = MeshInstance3D.new()
+	arrow.mesh = Art.cyl(0.0, 0.32, 0.5, 8)
+	arrow.material_override = Art.mat(Color(1.0, 0.9, 0.2), 1.5)
+	arrow.rotation.x = PI
+	arrow.visible = false
+	tray.add_child(arrow)
+	layout_tray()
+
+
+## Only the kinds this level uses get a slot, centred on the tray.
+func layout_tray() -> void:
+	if tray == null:
+		return
+	tray_level = main.level
+	var d: Dictionary = main.level_data()
+	var b: Dictionary = d.budget
+	for i in Art.KINDS.size():
+		slot_on[i] = int(b.get(Art.KINDS[i], 0)) > 0
+	_relayout_on()
+	took_this_level = false
+
+
+func _relayout_on() -> void:
+	var kinds: Array = []
+	for i in Art.KINDS.size():
+		if slot_on[i]:
+			kinds.append(i)
+	for i in Art.KINDS.size():
+		var holder: Node3D = slot_holders[i]
+		holder.visible = slot_on[i]
+	for n in kinds.size():
+		var i: int = kinds[n]
+		var holder: Node3D = slot_holders[i]
+		holder.position = Vector3((n - (kinds.size() - 1) * 0.5) * SLOT_GAP, 0.0, -0.15)
 
 
 func _place_tray() -> void:
 	if tray == null:
 		return
 	var local := xr_camera.transform
-	var yaw := local.basis.get_euler().y
-	var b := Basis(Vector3.UP, yaw)
-	tray.transform = Transform3D(b, local.origin + b * (Vector3(0.27, 0.0, -0.22) * S) + Vector3(0, -0.55 * S, 0))
+	var eye_h := local.origin.y / S
+	tray_k = 0.9 if eye_h < 0.6 else clampf(eye_h / 1.55, 0.72, 1.0)
+	var b := Basis(Vector3.UP, local.basis.get_euler().y)
+	tray.transform = Transform3D(b * Basis(Vector3.RIGHT, deg_to_rad(TRAY_TILT)), local.origin + b * (TRAY_OFF * tray_k * S))
+	tray_moving = false
+	tray_off_t = 0.0
+
+
+## If the builder walks (in the room) well away from the tray, it glides after them (same direction).
+func _follow_tray(delta: float) -> void:
+	if tray == null or not calibrated:
+		return
+	var local := xr_camera.transform
+	var b := Basis(Vector3.UP, tray.transform.basis.get_euler().y)
+	var want := local.origin + b * (TRAY_OFF * tray_k * S)
+	var off := want - tray.transform.origin
+	off.y = 0.0
+	if not tray_moving:
+		if off.length() > 0.4 * S and held_kind == "":
+			tray_off_t += delta
+			if tray_off_t > 1.2:
+				tray_moving = true
+		else:
+			tray_off_t = 0.0
+	if tray_moving:
+		tray.transform.origin = tray.transform.origin.lerp(want, 1.0 - exp(-4.0 * delta))
+		if tray.transform.origin.distance_to(want) < 0.03 * S:
+			tray_moving = false
+			tray_off_t = 0.0
 
 
 func slot_world(i: int) -> Vector3:
-	return tray.global_transform * Vector3(SLOT_X[i], 0.3, -0.15)
+	var holder: Node3D = slot_holders[i]
+	return holder.global_transform * Vector3(0.0, 0.3, 0.0)
 
 
 func _update_tray(delta: float) -> void:
 	if tray == null:
 		return
+	if tray_level != main.level:
+		layout_tray()
 	for i in Art.KINDS.size():
 		var n: int = main.budget.get(Art.KINDS[i], 0)
+		if n > 0 and not slot_on[i]:
+			slot_on[i] = true  # a gift brought a new kind: give it a slot
+			_relayout_on()
 		var sample: MeshInstance3D = slot_samples[i]
 		sample.visible = n > 0
 		var want := 0.6 * (1.25 + sin(Time.get_ticks_msec() * 0.008) * 0.06 if i == hover_slot else 1.0)
 		sample.scale = sample.scale.lerp(Vector3.ONE * want, 1.0 - exp(-12.0 * delta))
 		var mmi: MultiMeshInstance3D = slot_pips[i]
 		mmi.multimesh.visible_instance_count = clampi(n, 0, 16)
+	# The arrow points at the first full slot until the first block of the level is picked up
+	# (and again whenever the builder hasn't built anything for a while).
+	var show_arrow: bool = main.state == "play" and held_kind == "" and (not took_this_level or main.build_idle() > 25.0)
+	var first := -1
+	for i in Art.KINDS.size():
+		if slot_on[i] and int(main.budget.get(Art.KINDS[i], 0)) > 0:
+			first = i
+			break
+	arrow.visible = show_arrow and first >= 0
+	if arrow.visible:
+		var hp: Vector3 = (slot_holders[first] as Node3D).position
+		arrow.position = hp + Vector3(0.0, 1.25 + absf(sin(Time.get_ticks_msec() * 0.006)) * 0.35, 0.0)
 
 
 # --- Update -----------------------------------------------------------------------
@@ -301,6 +403,7 @@ func _process(delta: float) -> void:
 func _vr_update(delta: float) -> void:
 	_vr_fit(delta)
 	_vr_move(delta)
+	_follow_tray(delta)
 	grab_point = hand_r.global_transform * (GRAB_LOCAL * S)
 	var trig := hand_r.get_float("trigger") > 0.6 or (bot and bot_trigger)
 	var trig_up := hand_r.get_float("trigger") < 0.3 and not (bot and bot_trigger)
@@ -324,10 +427,13 @@ func _vr_update(delta: float) -> void:
 		return
 	hover_slot = -1
 	hover_block = false
+	if held_kind == "" and main.balloon_state == 1 and grab_point.distance_to(main.balloon_pos) < BALLOON_GRAB:
+		main.builder_grab_balloon()
+		_haptic(0.6, 0.08)
 	if held_kind == "":
 		show_target = false
 		for i in Art.KINDS.size():
-			if main.budget.get(Art.KINDS[i], 0) > 0 and grab_point.distance_to(slot_world(i)) < TRAY_GRAB:
+			if slot_on[i] and main.budget.get(Art.KINDS[i], 0) > 0 and grab_point.distance_to(slot_world(i)) < TRAY_GRAB:
 				hover_slot = i
 		if hover_slot < 0:
 			var c = _nearest_block(grab_point)
@@ -343,6 +449,7 @@ func _vr_update(delta: float) -> void:
 				var kind: String = Art.KINDS[hover_slot]
 				if main.take(kind):
 					held_kind = kind
+					took_this_level = true
 					_haptic(0.5, 0.06)
 					main.local_sound("pickup", -6.0, 1.1)
 			elif hover_block:
@@ -524,6 +631,7 @@ func _flat_update(delta: float) -> void:
 	if main.state != "play":
 		show_target = false
 		held_kind = ""
+		grab_point = Vector3(cursor.x, 2.2, cursor.y)  # high fives at the flag still work
 		if place:
 			main.confirm()
 		_flat_camera(delta)
@@ -537,6 +645,8 @@ func _flat_update(delta: float) -> void:
 	if rot_p:
 		held_rot = (held_rot + 1) % 4
 		main.local_sound("click", -10.0, 1.4)
+	if main.balloon_state == 1 and Vector2(cursor.x - main.balloon_pos.x, cursor.y - main.balloon_pos.z).length() < 1.2:
+		main.builder_grab_balloon()
 	var col := Vector2i(floori(cursor.x), floori(cursor.y))
 	if col != last_col:
 		last_col = col
@@ -591,7 +701,7 @@ func _update_visuals() -> void:
 	if glove == null:
 		return
 	if not vr:
-		glove.visible = (flat and main.state == "play") or (ghost and net_hand != Transform3D())
+		glove.visible = (flat and main.state != "intro" and main.state != "failed") or (ghost and net_hand != Transform3D())
 		if flat:
 			glove.global_transform = Transform3D(Basis(Vector3.RIGHT, -0.5).scaled(Vector3.ONE * 1.3), grab_point + Vector3(0, 0.3, 0.4))
 		elif ghost:

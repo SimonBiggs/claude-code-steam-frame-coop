@@ -1,8 +1,9 @@
 extends Node3D
 ## Player 1, the dragon rider (players[0]), sitting in the saddle holding the reins.
-## VR (Steam Frame): steer with your HANDS, like holding reins: pull both hands back towards you =
-## climb, push them forward = dive, move them left / right (or tip them like a steering wheel) = turn.
-## Right trigger = flap the wings (speed boost). A = re-centre the reins and your seat.
+## VR (Steam Frame): steer with your HANDS, like holding reins: raise both hands (relative to your
+## eyes) = climb, lower them = dive (tummy height = level flight, with a wide comfy middle zone),
+## move them left / right (or tip them like a steering wheel) = turn. No gaze steering.
+## Right trigger = flap the wings (speed boost). A = re-centre your seat.
 ## Thumbsticks also steer (up = climb). The seat fits itself to your head (sitting / small riders),
 ## and re-fits if the headset is handed to someone taller or shorter.
 ## Flat (split screen / non-VR host): W/S or stick up/down = climb/dive, A/D or stick = turn,
