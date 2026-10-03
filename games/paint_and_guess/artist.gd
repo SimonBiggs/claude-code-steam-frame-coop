@@ -2,12 +2,17 @@ extends Node3D
 ## Player 1: the ARTIST (players[0]).
 ## VR (Steam Frame): hold the RIGHT trigger to paint with the glowing brush in your right hand. Paint
 ## by touching the easel with the brush tip, or from further away by pointing at it (a laser shows
-## where the paint lands). A: next colour (or touch a paint pot on the tray). Touch the CLEAR bubble to
-## wipe the canvas and the NEW WORD bubble (early in a round) for an easier word.
+## where the paint lands). A: next colour (or touch a paint pot on the tray - the last two are RAINBOW
+## and SPARKLE). Touch the CLEAR bubble to wipe the canvas, UNDO to take back the last stroke and
+## NEW WORD (early in a round) for an easier word.
+## TEAM PAINT rounds swap roles: the TV players paint and the artist guesses by touching (or pointing
+## at + trigger) one of four answer balloons. In the final VOTE, touch / point at your favourite picture.
 ## Left stick: walk around · right stick left/right: turn · right stick up/down: easel height.
-## The easel fits your height at the start and again when a shorter/taller (or sitting) kid takes over.
+## The easel fits your height (and arm's length) at the start and again when a shorter/taller (or
+## sitting) kid takes over.
 ## Flat (split screen / non-VR host): mouse or WASD / left stick moves the brush, left mouse / Space /
-## A / RT paints, C / right mouse / X / RB changes colour, Backspace / Y clears, N / B new word.
+## A / RT paints (or picks a balloon / picture), C / right mouse / X / RB changes colour, Backspace / Y
+## clears, Z / LB undoes, N / B new word.
 ## fake_vr (bots): the VR code path driven by a virtual head and hand (bot_* fields).
 ## On the TV machine this is a ghost: a floating brush that follows the host's brush cursor.
 
@@ -17,6 +22,8 @@ const TOUCH_BACK := 0.3  # ...or pushed this far through it
 const LASER_RANGE := 3.5
 const STAND_Z := 0.85
 const BRUSH_W := 0.022
+const SPARKLE_W := 0.03
+const SEG_POINTS := 90
 
 var index := 0
 var main
@@ -53,12 +60,16 @@ var mouse_d := Vector2.ZERO
 var edges := {}
 var touching := {}
 var trig_was := false
+var trig_block := false  # after unpausing / a new screen: the trigger must be let go first
 var a_was := false
 var turn_was := false
 var fit_t := 0.8
 var fitted := false
 var fit_head := 0.0
 var refit_t := 0.0
+var painted_points := 0  # this round (for tips and stats)
+var colors_used := {}
+var touch_board_was := false
 
 # Bots: flat
 var bot := false
@@ -73,8 +84,10 @@ var bot_lstick := Vector2.ZERO
 
 var brush: Node3D
 var brush_tip: MeshInstance3D
+var tip_mat: StandardMaterial3D
 var brush_label: Label3D
 var laser: MeshInstance3D
+var laser_mat: StandardMaterial3D
 var ghost_brush: Node3D
 var net_cursor := Vector2.ZERO
 var net_on := false
@@ -94,6 +107,11 @@ func apply_remote_state(_pos: Vector3, _yaw: float, _pitch: float) -> void:
 
 func drawing() -> bool:
 	return cur_id >= 0
+
+
+func reset_round() -> void:
+	painted_points = 0
+	_lift()
 
 
 # --- Setup ------------------------------------------------------------------------
@@ -148,6 +166,9 @@ func _build_brush(parent: Node3D) -> void:
 	brush_tip = MeshInstance3D.new()
 	brush_tip.mesh = main.sphere_mesh(0.016)
 	brush_tip.position = Vector3(0, 0, -TIP)
+	tip_mat = StandardMaterial3D.new()
+	tip_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	brush_tip.material_override = tip_mat
 	brush.add_child(brush_tip)
 	# What to draw + time left, on the brush itself (always in view while painting). Secret: layer 2.
 	brush_label = Label3D.new()
@@ -166,6 +187,9 @@ func _build_brush(parent: Node3D) -> void:
 	lm.radial_segments = 6
 	lm.rings = 1
 	laser.mesh = lm
+	laser_mat = StandardMaterial3D.new()
+	laser_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	laser.material_override = laser_mat
 	main.add_child(laser)
 	laser.visible = false
 
@@ -183,37 +207,46 @@ func _process(delta: float) -> void:
 		hud_label.text = main.hud_text(self)
 
 
+func _lift() -> void:
+	if cur_id >= 0:
+		main.stroke_end(0)
+	cur_id = -1
+
+
 func _paint(ok: bool, p: Vector2, held: bool) -> void:
 	cursor = p
 	cursor_on = ok
 	if not (held and ok and main.can_draw()):
-		cur_id = -1
+		_lift()
 		return
 	p = main.canvas.clamp_point(p)
+	var w := SPARKLE_W if color_idx == main.canvas.SPARKLE else BRUSH_W
 	if cur_id < 0 or p.distance_to(last_pt) > 0.3:
 		if main.canvas.is_full():
-			cur_id = -1
+			_lift()
 			return
-		cur_id = main.stroke_begin(color_idx, BRUSH_W, p)
+		cur_id = main.stroke_begin(color_idx, w, p, 0)
 		last_pt = p
 		smooth_pt = p
+		painted_points += 1
+		colors_used[color_idx] = true
 		_buzz(0.3, 0.04)
 		return
 	smooth_pt = smooth_pt.lerp(p, 0.55)
 	if smooth_pt.distance_to(last_pt) < 0.006:
 		return
-	if main.canvas.stroke_len(cur_id) >= main.canvas.MAX_STROKE_POINTS:
-		cur_id = main.stroke_begin(color_idx, BRUSH_W, last_pt)
+	if main.canvas.stroke_len(cur_id) >= SEG_POINTS:
+		cur_id = main.stroke_begin(color_idx, w, last_pt, 0)
 	main.stroke_add(cur_id, smooth_pt)
+	painted_points += 1
 	last_pt = smooth_pt
 
 
 func next_color(i: int = -1) -> void:
 	color_idx = i if i >= 0 else (color_idx + 1) % main.canvas.COLORS.size()
-	cur_id = -1
-	main.sound("color", -6.0, 0.9 + 0.05 * color_idx)
-	if color_idx < main.canvas.pots.size():
-		main.canvas.poke(main.canvas.pots[color_idx], 0.4)
+	_lift()
+	main.sound("sparkle" if color_idx >= main.canvas.RAINBOW else "color", -6.0, 0.9 + 0.05 * color_idx)
+	main.canvas.poke_pot(color_idx)
 	_buzz(0.4, 0.05)
 
 
@@ -222,6 +255,10 @@ func _buzz(amp: float, dur: float) -> void:
 		hand_r.trigger_haptic_pulse("haptic", 0.0, amp, dur, 0.0)
 	elif joy >= 0 and not fake_vr:
 		Input.start_joy_vibration(joy, amp * 0.5, amp * 0.3, dur)
+
+
+func buzz(amp: float, dur: float) -> void:
+	_buzz(amp, dur)
 
 
 # --- VR ------------------------------------------------------------------------------
@@ -239,7 +276,7 @@ func _a() -> bool:
 
 
 func vr_trigger() -> bool:
-	return (vr or fake_vr) and _trigger()
+	return (vr or fake_vr) and _trigger() and not trig_block
 
 
 func _vr_update(delta: float) -> void:
@@ -253,6 +290,11 @@ func _vr_update(delta: float) -> void:
 	_move(delta)
 	var canvas = main.canvas
 	var trig := _trigger()
+	if trig_block:
+		if not trig:
+			trig_block = false
+		trig = false
+	var trig_edge := trig and not trig_was
 	var fwd := -hand.global_basis.z.normalized()
 	var tip := hand.global_position + fwd * TIP
 	var c: Vector3 = canvas.to_canvas(tip)
@@ -260,8 +302,10 @@ func _vr_update(delta: float) -> void:
 	var p := Vector2.ZERO
 	var use_laser := false
 	var hit_w := Vector3.ZERO
+	var touch_board := false
 	if c.z < TOUCH_FRONT and c.z > -TOUCH_BACK and canvas.inside(Vector2(c.x, c.y), 0.04):
 		ok = true
+		touch_board = c.z < 0.03
 		p = Vector2(c.x, c.y)
 	else:
 		var o: Vector3 = canvas.to_canvas(hand.global_position)
@@ -274,17 +318,33 @@ func _vr_update(delta: float) -> void:
 				use_laser = true
 				p = Vector2(hit.x, hit.y)
 				hit_w = canvas.canvas_to_world(p)
-	# Touch / point at the pots and bubbles (only when not painting, so brushing past is harmless).
-	if not drawing():
-		_buttons(tip, fwd, trig and not trig_was)
-	_paint(ok, p, trig)
+	var mode: String = main.artist_mode()
+	if mode == "guess":
+		_lift()
+		cursor = p
+		cursor_on = ok
+		_balloons(tip, fwd, trig_edge)
+	elif mode == "vote":
+		_lift()
+		cursor = p
+		cursor_on = ok
+		if ok and (trig_edge or (touch_board and not touch_board_was)):
+			main.artist_vote(canvas.vote_cell_at(p))
+	elif mode == "paint":
+		# Touch / point at the pots and bubbles (only when not painting, so brushing past is harmless).
+		if not drawing():
+			_buttons(tip, fwd, trig_edge)
+		_paint(ok, p, trig)
+	else:
+		_paint(ok, p, false)
+	touch_board_was = touch_board
 	trig_was = trig
 	var a := _a()
-	if a and not a_was:
+	if a and not a_was and mode == "paint":
 		next_color()
 	a_was = a
-	var col: Color = canvas.COLORS[color_idx]
-	brush_tip.material_override = main.flat_material(col)
+	var col: Color = canvas.ui_color(color_idx)
+	tip_mat.albedo_color = col if mode == "paint" else Color(1, 1, 1)
 	brush_tip.scale = Vector3.ONE * (1.35 if drawing() else 1.0)
 	brush_label.text = main.brush_text()
 	laser.visible = use_laser
@@ -295,7 +355,7 @@ func _vr_update(delta: float) -> void:
 		laser.global_transform = Transform3D(Basis.looking_at(hit_w - from, Vector3.UP if absf(fwd.y) < 0.95 else Vector3.FORWARD) \
 			* Basis(Vector3.RIGHT, PI * 0.5), mid)
 		laser.scale = Vector3(1.0, seg_len, 1.0)
-		laser.material_override = main.flat_material(Color(col.r, col.g, col.b).lerp(Color(1, 1, 1), 0.3))
+		laser_mat.albedo_color = Color(col.r, col.g, col.b).lerp(Color(1, 1, 1), 0.3)
 	yaw = head.global_rotation.y
 	global_position = Vector3(head.global_position.x, 0.0, head.global_position.z)
 
@@ -303,15 +363,32 @@ func _vr_update(delta: float) -> void:
 func _buttons(tip: Vector3, fwd: Vector3, trig_edge: bool) -> void:
 	var canvas = main.canvas
 	var targets: Array = []
-	for i in canvas.pots.size():
+	for i in canvas.COLORS.size():
 		targets.append(["pot%d" % i, canvas.pot_world(i), 0.06])
-	targets.append(["clear", canvas.clear_world(), 0.11])
-	targets.append(["skip", canvas.skip_world(), 0.11])
+	targets.append(["clear", canvas.clear_world(), 0.1])
+	targets.append(["undo", canvas.undo_world(), 0.1])
+	targets.append(["skip", canvas.skip_world(), 0.1])
+	_touch_targets(targets, tip, fwd, trig_edge)
+
+
+## TEAM PAINT: touch a balloon (or point at it and pull the trigger) to guess.
+func _balloons(tip: Vector3, fwd: Vector3, trig_edge: bool) -> void:
+	var canvas = main.canvas
+	var targets: Array = []
+	for i in 4:
+		if canvas.balloons[i].visible:
+			targets.append(["bal%d" % i, canvas.balloon_world(i), 0.11])
+	_touch_targets(targets, tip, fwd, trig_edge)
+
+
+func _touch_targets(targets: Array, tip: Vector3, fwd: Vector3, trig_edge: bool) -> void:
 	var hp := hand.global_position
+	var seen := {}
 	for tgt in targets:
 		var key: String = tgt[0]
 		var pos: Vector3 = tgt[1]
 		var r: float = tgt[2]
+		seen[key] = true
 		var touch := tip.distance_to(pos) < r or hp.distance_to(pos) < r
 		if touch and not touching.get(key, false):
 			_press(key)
@@ -321,15 +398,25 @@ func _buttons(tip: Vector3, fwd: Vector3, trig_edge: bool) -> void:
 			var along := to.dot(fwd)
 			if along > 0.0 and along < LASER_RANGE and (to - fwd * along).length() < r * 0.9:
 				_press(key)
+	for k in touching.keys():
+		if not seen.has(k):
+			touching[k] = false
 
 
 func _press(key: String) -> void:
 	if key.begins_with("pot"):
 		next_color(int(key.substr(3)))
+	elif key.begins_with("bal"):
+		main.artist_guess(int(key.substr(3)))
+		_buzz(0.5, 0.08)
 	elif key == "clear":
 		main.canvas.poke(main.canvas.clear_bubble)
 		main.artist_clear()
 		_buzz(0.6, 0.1)
+	elif key == "undo":
+		main.canvas.poke(main.canvas.undo_bubble)
+		main.artist_undo()
+		_buzz(0.4, 0.06)
 	elif key == "skip":
 		main.canvas.poke(main.canvas.skip_bubble)
 		main.artist_skip()
@@ -363,7 +450,7 @@ func _move(delta: float) -> void:
 		var right := Vector3(-f.z, 0.0, f.x)
 		origin.global_position += (right * s.x + f * s.y) * 1.3 * delta
 	var hp := head.global_position
-	var fix := Vector3(clampf(hp.x, -3.0, 3.0) - hp.x, 0.0, clampf(hp.z, 0.3, 3.5) - hp.z)
+	var fix := Vector3(clampf(hp.x, -3.6, 3.6) - hp.x, 0.0, clampf(hp.z, 0.3, 3.8) - hp.z)
 	origin.global_position += fix
 	var r := _rstick()
 	var turn := absf(r.x) > 0.7
@@ -394,20 +481,27 @@ func _fit(delta: float) -> void:
 		refit_t = 0.0
 
 
+## Arm's length grows with height: a small kid stands closer so the brush can reach the board.
+func stand_dist(h: float) -> float:
+	return clampf(0.4 * h + 0.22, 0.6, STAND_Z)
+
+
 func _do_fit(first: bool) -> void:
 	fitted = true
 	refit_t = 0.0
+	var h := head.global_position.y
 	if first:
 		# Face the easel (-Z) and stand a comfy arm's length in front of it.
 		var hp := head.global_position
 		var rot := Basis(Vector3.UP, -head.global_rotation.y)
 		origin.global_transform = Transform3D(rot * origin.global_basis, hp + rot * (origin.global_position - hp))
 		hp = head.global_position
-		origin.global_position += Vector3(-hp.x, 0.0, STAND_Z - hp.z)
-	var h := head.global_position.y
+		origin.global_position += Vector3(-hp.x, 0.0, stand_dist(h) - hp.z)
+	elif head.global_position.z > 0.0 and head.global_position.z < 1.6:
+		origin.global_position.z += stand_dist(h) - head.global_position.z  # still at the easel: re-fit the reach too
 	fit_head = h
-	main.canvas.set_height(h - 0.3)
-	print("VR: fitted the easel to head height %.2f m (canvas centre %.2f m)" % [h, main.canvas.cy])
+	main.canvas.set_height(h - 0.35)
+	print("VR: fitted the easel to head height %.2f m (canvas centre %.2f m, standing %.2f m away)" % [h, main.canvas.cy, head.global_position.z])
 
 
 # --- Flat -----------------------------------------------------------------------------
@@ -435,20 +529,23 @@ func _edge(key: String, down: bool) -> bool:
 
 
 func _flat_update(delta: float) -> void:
+	var mode: String = main.artist_mode()
 	if bot:
 		mouse_d = Vector2.ZERO
-		_paint(true, bot_cursor, bot_paint)
+		_flat_act(mode, bot_cursor, bot_paint)
 		return
 	var mv := Vector2.ZERO
 	var held := false
 	var col_btn := false
 	var clr_btn := false
+	var undo_btn := false
 	var skip_btn := false
 	if key_set == 0:
 		mv += Vector2(_key(KEY_D) - _key(KEY_A), _key(KEY_W) - _key(KEY_S))
 		held = Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) or Input.is_physical_key_pressed(KEY_SPACE)
 		col_btn = Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) or Input.is_physical_key_pressed(KEY_C)
 		clr_btn = Input.is_physical_key_pressed(KEY_BACKSPACE)
+		undo_btn = Input.is_physical_key_pressed(KEY_Z)
 		skip_btn = Input.is_physical_key_pressed(KEY_N)
 	if joy >= 0:
 		var st := Vector2(Input.get_joy_axis(joy, JOY_AXIS_LEFT_X), -Input.get_joy_axis(joy, JOY_AXIS_LEFT_Y))
@@ -457,22 +554,55 @@ func _flat_update(delta: float) -> void:
 		held = held or Input.is_joy_button_pressed(joy, JOY_BUTTON_A) or Input.get_joy_axis(joy, JOY_AXIS_TRIGGER_RIGHT) > 0.5
 		col_btn = col_btn or Input.is_joy_button_pressed(joy, JOY_BUTTON_X) or Input.is_joy_button_pressed(joy, JOY_BUTTON_RIGHT_SHOULDER)
 		clr_btn = clr_btn or Input.is_joy_button_pressed(joy, JOY_BUTTON_Y)
+		undo_btn = undo_btn or Input.is_joy_button_pressed(joy, JOY_BUTTON_LEFT_SHOULDER)
 		skip_btn = skip_btn or Input.is_joy_button_pressed(joy, JOY_BUTTON_B)
 	var p := cursor + mv.limit_length(1.0) * 0.75 * delta + Vector2(mouse_d.x, -mouse_d.y) * 0.0012
 	mouse_d = Vector2.ZERO
 	p = main.canvas.clamp_point(p)
-	_paint(true, p, held)
+	_flat_act(mode, p, held)
+	if mode != "paint":
+		return
 	if _edge("col", col_btn):
 		next_color()
 	if _edge("clr", clr_btn):
 		main.artist_clear()
+	if _edge("undo", undo_btn):
+		main.artist_undo()
 	if _edge("skip", skip_btn):
 		main.artist_skip()
 
 
+## Flat artist: paint, or (team / vote) click a balloon / picture under the cursor.
+func _flat_act(mode: String, p: Vector2, held: bool) -> void:
+	var click := _edge("click", held)
+	if mode == "paint":
+		_paint(true, p, held)
+		return
+	_lift()
+	cursor = p
+	cursor_on = true
+	if not click:
+		return
+	if mode == "guess":
+		var best := -1
+		var bd := 0.14
+		for i in 4:
+			if not main.canvas.balloons[i].visible:
+				continue
+			var bl: Vector3 = main.canvas.balloon_local(i)
+			var d := Vector2(bl.x, bl.y).distance_to(p)
+			if d < bd:
+				bd = d
+				best = i
+		if best >= 0:
+			main.artist_guess(best)
+	elif mode == "vote":
+		main.artist_vote(main.canvas.vote_cell_at(p))
+
+
 func action_pressed() -> bool:
 	if vr or fake_vr:
-		return _trigger() or _a()
+		return (_trigger() and not trig_block) or _a()
 	if joy >= 0 and Input.is_joy_button_pressed(joy, JOY_BUTTON_A):
 		return true
 	return key_set == 0 and Input.is_physical_key_pressed(KEY_SPACE)
@@ -498,6 +628,9 @@ func _ghost_update(delta: float) -> void:
 		ghost_brush.add_child(body)
 		brush_tip = MeshInstance3D.new()
 		brush_tip.mesh = main.sphere_mesh(0.022)
+		tip_mat = StandardMaterial3D.new()
+		tip_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		brush_tip.material_override = tip_mat
 		ghost_brush.add_child(brush_tip)
 	ghost_brush.visible = net_on
 	if not net_on:
@@ -506,4 +639,4 @@ func _ghost_update(delta: float) -> void:
 	var k := 1.0 - exp(-20.0 * delta)
 	ghost_brush.global_position = ghost_brush.global_position.lerp(target, k)
 	ghost_brush.global_basis = canvas.board_root.global_basis * Basis(Vector3(0, 0, 1), -0.5) * Basis(Vector3(1, 0, 0), 0.5)
-	brush_tip.material_override = main.flat_material(canvas.COLORS[color_idx])
+	tip_mat.albedo_color = canvas.ui_color(color_idx)
