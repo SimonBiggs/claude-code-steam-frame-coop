@@ -1,4 +1,5 @@
 extends Node3D
+const VrText := preload("res://core/vr_text.gd")
 ## Ghost Lantern: a spooky-but-cute co-op ghost hunt in a haunted mansion.
 ## Player 1 (VR, or keyboard+mouse in split screen) carries the spirit lantern: ghosts are only visible
 ## in its light cone, and ghosts held in the beam get stunned. TV players vacuum up revealed ghosts.
@@ -1133,6 +1134,7 @@ func _update_vr_center() -> void:
 	vr_center.text = center_label.text
 	vr_center.modulate.a = center_label.modulate.a
 	vr_center.outline_modulate.a = center_label.modulate.a
+	VrText.follow(vr_center, players[0].xr_camera, self, -0.1, 1.7)
 
 
 func _update_hud() -> void:

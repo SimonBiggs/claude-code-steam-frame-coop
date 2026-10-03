@@ -1,4 +1,5 @@
 extends Node3D
+const VrText := preload("res://core/vr_text.gd")
 ## Kitchen Rush: co-op cooking chaos.
 ## Player 1 is the CHEF at the counter (VR hands, or button controls in split screen): chop and stack.
 ## Players 2-3 are RUNNERS (TV, first person): fetch ingredients to the pass, carry finished plates to customers.
@@ -1580,3 +1581,4 @@ func _update_vr_center() -> void:
 	vr_center.text = center_label.text
 	vr_center.modulate.a = center_label.modulate.a
 	vr_center.outline_modulate = Color(0, 0, 0, center_label.modulate.a)
+	VrText.follow(vr_center, players[0].xr_camera, self, 0.15, 1.6)

@@ -1,4 +1,5 @@
 extends Node3D
+const VrText := preload("res://core/vr_text.gd")
 ## Snowball Blitz: defend the snow fort in the village square from waves of mischievous snowmen.
 ## VR player (host): the team's sniper, throwing real snowballs with their hands.
 ## TV players: lob charged snowballs and pack the fort walls back up. Hot cocoa warms you up.
@@ -1389,6 +1390,7 @@ func _update_vr_center() -> void:
 	vr_center.text = center_label.text
 	vr_center.modulate.a = center_label.modulate.a
 	vr_center.outline_modulate = Color(0, 0, 0, center_label.modulate.a)
+	VrText.follow(vr_center, players[0].xr_camera, self, -0.1, 1.8)
 
 
 func vr_hurt_flash() -> void:

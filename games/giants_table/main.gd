@@ -1,4 +1,5 @@
 extends Node3D
+const VrText := preload("res://core/vr_text.gd")
 ## GIANT'S TABLE: a cosy village on a big wooden table. Waves of goblins climb up the table edges
 ## to steal the embers of the village campfire.
 ##  - Player 1 (VR, host) is the GIANT: grab goblins and boulders with your hands and throw them.
@@ -1113,6 +1114,7 @@ func _update_vr_center() -> void:
 	vr_center.text = center_label.text
 	vr_center.modulate.a = center_label.modulate.a
 	vr_center.outline_modulate.a = center_label.modulate.a
+	VrText.follow(vr_center, giant.xr_camera, self, -0.12 * W.S, 1.7 * W.S)
 
 
 func _update_hud() -> void:

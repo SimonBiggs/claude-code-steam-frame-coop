@@ -1,4 +1,5 @@
 extends Node3D
+const VrText := preload("res://core/vr_text.gd")
 ## Cannon Cove: our pirate ship against waves of pirate ships, boarders and a sea monster.
 ## The VR gunner (player 1) swings and fires the cannons; the TV deckhands (players 2 and 3) keep
 ## the cannons loaded, patch leaks and shoot boarders. Gold for every ship sunk; the game ends when
@@ -1338,6 +1339,7 @@ func _update_vr_center() -> void:
 	vr_center.text = center_label.text
 	vr_center.modulate.a = center_label.modulate.a
 	vr_center.outline_modulate = Color(0, 0, 0, center_label.modulate.a)
+	VrText.follow(vr_center, players[0].xr_camera, self, 0.05, 1.8)
 
 
 # Messages from Claude (res://.dev/say.txt on the host), shown on the TV and in VR.
