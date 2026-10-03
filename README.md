@@ -66,6 +66,11 @@ Pick from the arcade lobby: the TV shows a picker, and the VR player can choose 
 | **Block Builders** | floating sky course | a giant builder placing planks, stairs, springs, fans | tiny runners racing to the flag |
 | **Dragon Rider** | sunset sky islands | steers a friendly dragon with the reins | gunners on its back popping balloons and storm sprites |
 | **Bee Garden** | sunny garden, no fighting | plants, waters, shoos wasps | bees collecting pollen to fill the honey jars |
+| **Paint and Guess** | drawing party game | paints the secret word in glowing neon | race to pick the right answer |
+| **Rhythm Band** | rock concert | drums with both hands on floating drums | hit notes on their own highways |
+| **Penalty Shootout** | football stadium | the goalkeeper, saving with big gloves | strikers aiming and bending shots |
+| **Fishing Lake** | relaxing lake at sunset | casts, reels and lands fish from the jetty | row boats, herd fish, net treasure |
+| **Kart Race** | bright looping tracks | turns a real steering wheel | race in split screen with items and ramps |
 
 Every game takes up to 6 TV players: plug in another controller and press A to join.
 
