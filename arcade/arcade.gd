@@ -30,6 +30,16 @@ const GAMES := [
 		"blurb": "VR steers a friendly dragon with the reins; TV gunners pop balloons from its back"},
 	{"id": "bee_garden", "name": "BEE GARDEN", "scene": "res://games/bee_garden/main.tscn",
 		"blurb": "Cosy, no fighting: VR gardener plants and waters, TV bees make honey"},
+	{"id": "paint_and_guess", "name": "PAINT AND GUESS", "scene": "res://games/paint_and_guess/main.tscn",
+		"blurb": "VR paints a secret word in the air; TV players race to guess it"},
+	{"id": "rhythm_band", "name": "RHYTHM BAND", "scene": "res://games/rhythm_band/main.tscn",
+		"blurb": "VR drums with your hands; TV players hit notes on their highways"},
+	{"id": "penalty_shootout", "name": "PENALTY SHOOTOUT", "scene": "res://games/penalty_shootout/main.tscn",
+		"blurb": "VR goalkeeper saves with big gloves; TV strikers aim, power up and bend shots"},
+	{"id": "fishing_lake", "name": "FISHING LAKE", "scene": "res://games/fishing_lake/main.tscn",
+		"blurb": "Relaxing: VR casts and reels from the jetty; TV rowers herd fish and net treasure"},
+	{"id": "kart_race", "name": "KART RACE", "scene": "res://games/kart_race/main.tscn",
+		"blurb": "VR turns a real steering wheel; TV racers drive in split screen, with items and ramps"},
 ]
 const VrText := preload("res://core/vr_text.gd")
 const DEFAULT_PORT := 7777
@@ -171,8 +181,8 @@ func _launch(index: int) -> void:
 
 
 func _process(_delta: float) -> void:
-	if not has_meta("menu_v2") and not buttons.is_empty():  # hot reload: rebuild the TV menu as two columns
-		set_meta("menu_v2", true)
+	if not has_meta("menu_v3") and not buttons.is_empty():  # hot reload: rebuild the TV menu as two columns
+		set_meta("menu_v3", true)
 		var layer := buttons[0].get_parent()
 		while layer != null and not layer is CanvasLayer:
 			layer = layer.get_parent()
@@ -233,7 +243,7 @@ func _build_tv_menu() -> void:
 	focus.set_corner_radius_all(10)
 	# Two columns so all the games fit on the TV.
 	var grid := GridContainer.new()
-	grid.columns = 2
+	grid.columns = 3 if GAMES.size() > 12 else 2
 	grid.add_theme_constant_override("h_separation", 16)
 	grid.add_theme_constant_override("v_separation", 10)
 	box.add_child(grid)
@@ -241,7 +251,7 @@ func _build_tv_menu() -> void:
 		var g: Dictionary = GAMES[i]
 		var b := Button.new()
 		b.text = "%s\n%s" % [g.name, g.blurb]
-		b.custom_minimum_size = Vector2(820, 96)
+		b.custom_minimum_size = Vector2(600, 88) if GAMES.size() > 12 else Vector2(820, 96)
 		b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		b.add_theme_font_size_override("font_size", 20)
 		b.add_theme_stylebox_override("focus", focus)
@@ -306,8 +316,15 @@ func _refresh_vr() -> void:
 	if vr_list == null:
 		return
 	var lines: Array[String] = ["LIVING ROOM ARCADE", ""]
-	for i in GAMES.size():
+	# Show a window of games around the selection so the list stays a comfortable size.
+	var first := clampi(selected - 3, 0, maxi(0, GAMES.size() - 7))
+	var last := mini(GAMES.size(), first + 7)
+	if first > 0:
+		lines.append("▲")
+	for i in range(first, last):
 		lines.append(("▶  %s  ◀" if i == selected else "%s") % GAMES[i].name)
+	if last < GAMES.size():
+		lines.append("▼  (%d games)" % GAMES.size())
 	lines.append("")
 	lines.append("Right stick: choose  ·  Trigger: play\n(or pick on the TV)")
 	vr_list.text = "\n".join(lines)
