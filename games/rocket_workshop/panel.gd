@@ -105,7 +105,11 @@ func set_top(h: float) -> void:
 	var bh := top - 0.12
 	body.scale = Vector3(1, bh, 1)
 	body.position = Vector3(0, bh / 2.0, -0.02)
-	screen_root.position = Vector3(0, top + 0.26, -0.4)  # low enough to see the rocket over it
+	screen_root.position = Vector3(0, top + 0.32, -0.75)  # far enough to focus on, low enough to see the rocket over it
+	if screen != null:
+		screen.pixel_size = 0.0026  # big and clear from the pilot's spot
+		screen.no_depth_test = true
+		screen.render_priority = 5
 
 
 # --- Building the controls --------------------------------------------------

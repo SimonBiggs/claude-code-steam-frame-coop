@@ -108,6 +108,9 @@ func _vr_update(delta: float) -> void:
 		xr_origin.world_scale = 1.0
 		recentered = false
 		recenter_t = 0.3
+	if not has_meta("screen_v2"):  # hot reload: re-apply the desk layout once
+		set_meta("screen_v2", true)
+		main.panel.set_top(main.panel.top)
 	if not recentered:
 		recenter_t -= delta
 		if recenter_t <= 0.0 and xr_camera.position != Vector3.ZERO:
