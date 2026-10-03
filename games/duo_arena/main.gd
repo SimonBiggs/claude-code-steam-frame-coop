@@ -801,6 +801,34 @@ func _vr_text(pos: Vector3, color: Color, font: int) -> Label3D:
 	return l
 
 
+## VR text panels stay put in the world so you can look around them to read; they glide back in
+## front of you only when you turn well away (more than 35 degrees) or walk off.
+func _lazy_follow(l: Label3D, height: float) -> void:
+	if l == null:
+		return
+	var cam: Node3D = players[0].xr_camera
+	if l.get_parent() == cam:
+		l.reparent(self)  # older panels were glued to the headset
+	l.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
+	var fwd := -cam.global_basis.z
+	fwd.y = 0.0
+	if fwd.length() < 0.01:
+		return
+	fwd = fwd.normalized()
+	var target := cam.global_position + fwd * 1.8 + Vector3(0.0, height, 0.0)
+	if not l.has_meta("placed"):
+		l.set_meta("placed", true)
+		l.global_position = target
+	var to := l.global_position - cam.global_position
+	to.y = 0.0
+	if fwd.angle_to(to.normalized()) > deg_to_rad(35.0) or to.length() > 2.6 or to.length() < 1.0:
+		l.set_meta("moving", true)
+	if l.get_meta("moving", false):
+		l.global_position = l.global_position.lerp(target, 1.0 - exp(-4.0 * get_process_delta_time()))
+		if l.global_position.distance_to(target) < 0.05:
+			l.set_meta("moving", false)
+
+
 ## Thick black outline keeps VR text readable against the bright arena (and hides old backdrop cards).
 func _style_vr_text(l: Label3D) -> void:
 	if l == null:
@@ -1341,6 +1369,9 @@ func _update_vr_center() -> void:
 	vr_center.outline_modulate.a = center_label.modulate.a
 	for l in [vr_center, claude_3d, toast_3d]:
 		_style_vr_text(l)
+	_lazy_follow(vr_center, -0.1)
+	_lazy_follow(claude_3d, -0.42)
+	_lazy_follow(toast_3d, 0.32)
 
 
 func _update_hud() -> void:
