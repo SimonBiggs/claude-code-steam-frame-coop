@@ -207,9 +207,9 @@ func _vr_input(_delta: float) -> Vector2:
 		var r: Vector3 = _hand_local(hand_r) - eye
 		var avg: Vector3 = (l + r) * 0.5
 		var d: Vector3 = avg - neutral
-		var climb := clampf(d.z / 0.15, -1.0, 1.0)  # pulled back towards you = climb
-		var turn := clampf(d.x / 0.17 + (l.y - r.y) / 0.24, -1.0, 1.0)
-		rein_input = Vector2(_dead(turn, 0.18), _dead(climb, 0.2))
+		var climb := clampf(d.z / 0.09, -1.0, 1.0)  # pulled back towards you = climb (sensitive: kids found diving hard)
+		var turn := clampf(d.x / 0.12 + (l.y - r.y) / 0.18, -1.0, 1.0)
+		rein_input = Vector2(_dead(turn, 0.12), _dead(climb, 0.12))
 		v += rein_input
 	return v.limit_length(1.0)
 
