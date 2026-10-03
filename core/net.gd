@@ -213,7 +213,7 @@ func _check_vr_menu() -> void:
 	if hl.get_parent() is XROrigin3D:
 		ws = (hl.get_parent() as XROrigin3D).world_scale
 	if btn != null:
-		btn.position = Vector3(0.0, 0.07, 0.1) * ws
+		btn.position = Vector3(-0.08, 0.03, 0.1) * ws  # beside the wrist, clear of the games' wrist displays
 		btn.pixel_size = 0.0012 * ws
 	var on_btn := false
 	var trig := false
