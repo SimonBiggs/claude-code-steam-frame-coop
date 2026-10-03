@@ -2,9 +2,5 @@
 
 [ext_resource type="Script" path="res://arcade/arcade.gd" id="1"]
 
-[node name="Arcade" type="Control"]
-layout_mode = 3
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
+[node name="Arcade" type="Node"]
 script = ExtResource("1")
