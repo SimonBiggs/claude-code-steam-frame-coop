@@ -140,6 +140,9 @@ def main() -> None:
                 segments, _ = model.transcribe(audio, language="en", beam_size=1, without_timestamps=True,
                                                condition_on_previous_text=False)
                 text = " ".join(s.text.strip() for s in segments).strip()
+                # Whisper sometimes hallucinates subtitle markup (<p begin=...>) on noise: drop it.
+                if "<" in text or "&lt;" in text or "begin=" in text:
+                    continue
                 if text.lower().strip(" .!?") not in {j.strip(" .!?") for j in JUNK}:
                     # Whisper often hears "Claude" as cloud/clawed/clod: tag requests aimed at Claude.
                     addressed = re.search(r"\b(claude|cloud|clawed|clod|claud|clyde|lord|cora|clora)\b", text, re.I)
