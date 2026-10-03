@@ -48,6 +48,15 @@ This repo contains the games built this way, plus the tooling that makes the loo
 | `tools/frame-mirror` | Open the live view of what the VR player sees |
 | `tools/duo-deploy`, `tools/duo-deploy-frame` | Ship changes to both machines (hot reload) and commit |
 
+## The games
+
+Pick from the arcade lobby: the TV shows a picker, and the VR player can choose with the right stick + trigger.
+
+| Game | Theme | VR player | TV players |
+|---|---|---|---|
+| **Duo Arena** | neon arena shooter | gun, shield parry, wrist radar | shoot, dash, build turrets |
+| **Ghost Lantern** | spooky-cute haunted mansion | spirit lantern reveals and stuns ghosts, bell scares them | ghost vacuums catch revealed ghosts |
+
 ## Duo Arena (game #1)
 
 A neon first-person co-op arena shooter, designed out loud by a family during one evening's play.
