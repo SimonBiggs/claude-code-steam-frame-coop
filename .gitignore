@@ -2,3 +2,4 @@
 .godot/
 .dev/
 *.tmp
+.claude/
