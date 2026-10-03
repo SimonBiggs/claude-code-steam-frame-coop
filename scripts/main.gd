@@ -12,6 +12,7 @@ const NetScript := preload("res://scripts/net.gd")
 const BulletScript := preload("res://scripts/bullet.gd")
 const EnemyShotScript := preload("res://scripts/enemy_shot.gd")
 const MusicScript := preload("res://scripts/music.gd")
+const FishScript := preload("res://scripts/fish.gd")
 
 const ARENA_RADIUS := 18.0
 ## Team upgrades granted after each cleared wave: [name, description, stat, "mul" or "add", amount]
@@ -63,6 +64,7 @@ var ghost_nodes := {}
 var ghost_cam: Camera3D
 var vr_center: Label3D
 var music: AudioStreamPlayer
+var sky_fish: Node3D
 # Messages from Claude: written to res://.dev/say.txt on the host, shown in VR and on the TV.
 var say_t := 0.0
 var claude_label: Label
@@ -553,6 +555,10 @@ func _process(delta: float) -> void:
 	if music == null:
 		music = MusicScript.new()
 		add_child(music)
+	if sky_fish == null:
+		sky_fish = FishScript.new()
+		sky_fish.main = self
+		add_child(sky_fish)
 	_check_say(delta)
 	if ghost_cam:
 		ghost_cam.global_transform = players[0].net_head
