@@ -80,6 +80,8 @@ var say_t := 0.0
 var claude_label: Label
 var claude_3d: Label3D
 var claude_tween: Tween
+var last_say := ""
+var last_say_time := -100000
 var synced := false  # client: received at least one snapshot
 
 var wave := 0
@@ -565,6 +567,8 @@ func _process(delta: float) -> void:
 	if music == null:
 		music = MusicScript.new()
 		add_child(music)
+	if music.has_method("play_track"):
+		music.play_track(maxi(wave - 1, 0) / 2)  # a new track every two waves
 	if skill_tree == null:
 		skill_tree = TreeScript.new()
 		skill_tree.main = self
@@ -946,6 +950,8 @@ func spawn_bullet(origin: Vector3, dir: Vector3, color: Color, owner_player, vis
 
 func on_client_joined() -> void:
 	_show_center("PLAYER 2 JOINED", 1.5)
+	if last_say != "" and Time.get_ticks_msec() - last_say_time < 20000:
+		net.event("say", [last_say])  # they were reconnecting when it was said
 
 
 func on_client_left() -> void:
@@ -1193,32 +1199,24 @@ func claude_say(text: String) -> void:
 	if net:
 		net.event("say", [text])
 	var line := "Claude: " + text
-	if claude_label == null or not claude_label.has_meta("panel"):
+	if claude_label == null or not claude_label.has_meta("plain"):
 		if claude_label:
-			claude_label.queue_free()
-		# A dark panel with a heading, so messages are easy to spot on the TV.
-		var panel := PanelContainer.new()
-		var style := StyleBoxFlat.new()
-		style.bg_color = Color(0.02, 0.03, 0.08, 0.85)
-		style.border_color = Color(0.3, 0.9, 1.0)
-		style.set_border_width_all(3)
-		style.set_corner_radius_all(14)
-		style.set_content_margin_all(18)
-		panel.add_theme_stylebox_override("panel", style)
-		center_label.get_parent().add_child(panel)
-		panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
-		panel.offset_left = -620
-		panel.offset_right = 620
-		panel.offset_top = -330
-		panel.offset_bottom = -200
-		panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
-		claude_label = _make_label(38)
-		claude_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.6))
+			(claude_label.get_meta("panel") if claude_label.has_meta("panel") else claude_label).queue_free()
+		claude_label = _make_label(34)
+		claude_label.set_meta("plain", true)
+		claude_label.add_theme_color_override("font_color", Color(1.0, 0.88, 0.55))
+		claude_label.add_theme_constant_override("outline_size", 10)
 		claude_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		claude_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		panel.add_child(claude_label)
-		claude_label.set_meta("panel", panel)
-	claude_label.text = "CLAUDE\n" + text
+		center_label.get_parent().add_child(claude_label)
+		claude_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
+		claude_label.offset_left = -760
+		claude_label.offset_right = 760
+		claude_label.offset_top = -250
+		claude_label.offset_bottom = -140
+	last_say = text
+	last_say_time = Time.get_ticks_msec()
+	claude_label.text = line
 	if players.size() > 0 and players[0].vr:
 		if claude_3d == null:
 			claude_3d = Label3D.new()
@@ -1240,7 +1238,7 @@ func claude_say(text: String) -> void:
 	if claude_tween:
 		claude_tween.kill()
 	claude_tween = create_tween().set_parallel()
-	for node in [claude_label.get_meta("panel"), claude_3d]:
+	for node in [claude_label, claude_3d]:
 		if node:
 			node.modulate.a = 1.0
 			claude_tween.tween_property(node, "modulate:a", 0.0, 0.6).set_delay(hold)

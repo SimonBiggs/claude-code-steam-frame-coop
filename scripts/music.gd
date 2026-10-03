@@ -1,23 +1,47 @@
 extends AudioStreamPlayer
-## Procedural synthwave loop (Am - F - C - G, 112 BPM), synthesized once on a worker thread and cached.
+## Procedural soundtrack: several synthwave loops, each synthesized once on a worker thread and cached.
+## The track changes with the wave (track = wave % count), so both machines play the same one.
 
 const RATE := 22050
-const BPM := 112.0
 const BARS := 8
-const ROOTS := [57, 53, 48, 55]  # A, F, C, G (MIDI), two bars each
-const MINOR := [true, false, false, false]
+const TRACKS := [
+	# name, bpm, chord roots (MIDI, 2 bars each), minor chords?, arpeggio steps, bass pattern
+	{"name": "Neon Drive", "bpm": 112.0, "roots": [57, 53, 48, 55], "minor": [true, false, false, false],
+		"arp": [0, "3rd", 7, 12, 7, "3rd"], "bass": "octave"},
+	{"name": "Overdrive", "bpm": 128.0, "roots": [50, 46, 48, 45], "minor": [true, false, false, true],
+		"arp": [12, 7, "3rd", 0, "3rd", 7, 12, 15], "bass": "gallop"},
+	{"name": "Night City", "bpm": 96.0, "roots": [48, 55, 57, 53], "minor": [false, false, true, false],
+		"arp": [0, 7, 12, "3rd", 12, 7], "bass": "root"},
+]
 
-static var cached: AudioStreamWAV
+static var cached := {}  # track index -> AudioStreamWAV
 
+var current := -1
+var wanted := 0
 var task := -1
+var task_track := -1
 var buffer := PackedFloat32Array()
+var track: Dictionary
 
 
 func _ready() -> void:
 	volume_db = -13.0
-	if cached:
-		_start(cached)
-	else:
+	play_track(0)
+
+
+## Switch to a track (by index, wrapped). Synthesizes it in the background the first time.
+func play_track(index: int) -> void:
+	wanted = index % TRACKS.size()
+	if wanted == current:
+		return
+	if cached.has(wanted):
+		current = wanted
+		stream = cached[wanted]
+		play()
+	elif task < 0:
+		task_track = wanted
+		track = TRACKS[wanted]
+		buffer = PackedFloat32Array()
 		task = WorkerThreadPool.add_task(_synthesize)
 
 
@@ -25,9 +49,11 @@ func _process(_delta: float) -> void:
 	if task >= 0 and WorkerThreadPool.is_task_completed(task):
 		WorkerThreadPool.wait_for_task_completion(task)
 		task = -1
-		cached = _to_stream(buffer)
+		cached[task_track] = _to_stream(buffer)
 		buffer = PackedFloat32Array()
-		_start(cached)
+		var w := wanted
+		current = -1
+		play_track(w)
 
 
 func _exit_tree() -> void:
@@ -35,42 +61,44 @@ func _exit_tree() -> void:
 		WorkerThreadPool.wait_for_task_completion(task)
 
 
-func _start(s: AudioStreamWAV) -> void:
-	stream = s
-	play()
-
-
 static func _freq(midi: float) -> float:
 	return 440.0 * pow(2.0, (midi - 69.0) / 12.0)
 
 
 func _synthesize() -> void:
-	var step := 60.0 / BPM / 4.0  # sixteenth note
+	var step := 60.0 / float(track.bpm) / 4.0  # sixteenth note
 	var steps := BARS * 16
-	var n := int(steps * step * RATE)
-	buffer.resize(n)
+	buffer.resize(int(steps * step * RATE))
+	var arp_steps: Array = track.arp
 	for s in steps:
 		var chord := (s / 32) % 4
-		var root: int = ROOTS[chord]
-		var third := 3 if MINOR[chord] else 4
+		var root: int = track.roots[chord]
+		var third := 3 if track.minor[chord] else 4
 		var t0 := int(s * step * RATE)
 		var beat := s % 16
-		# Bass: driving eighth notes, octave jump on the off-beat.
-		if s % 2 == 0:
-			_tone(t0, step * 1.8, _freq(root - 24 + (12 if s % 4 == 2 else 0)), 0.28, "saw", 6.0)
-		# Arpeggio: chord tones climbing, an octave up.
-		var arp: int = [0, third, 7, 12, 7, third][s % 6]
-		_tone(t0, step * 0.9, _freq(root + 12 + arp), 0.07, "square", 9.0)
-		# Pad on each chord change.
+		match track.bass:
+			"octave":
+				if s % 2 == 0:
+					_tone(t0, step * 1.8, _freq(root - 24 + (12 if s % 4 == 2 else 0)), 0.28, "saw", 6.0)
+			"gallop":
+				if beat % 4 != 1:
+					_tone(t0, step * 0.9, _freq(root - 24), 0.3, "saw", 10.0)
+			_:
+				if s % 4 == 0:
+					_tone(t0, step * 3.6, _freq(root - 24), 0.3, "saw", 3.0)
+		var a = arp_steps[s % arp_steps.size()]
+		var interval: int = third if a is String else a
+		_tone(t0, step * 0.9, _freq(root + 12 + interval), 0.07, "square", 9.0)
 		if s % 32 == 0:
 			for iv in [0, third, 7]:
 				_tone(t0, step * 31.0, _freq(root + iv), 0.05, "saw", 0.4)
-		# Drums.
 		if beat % 4 == 0:
 			_kick(t0)
 		if beat == 4 or beat == 12:
 			_noise(t0, 0.16, 0.22, 0.4)
-		if beat % 4 == 2:
+		if beat % 2 == 1 and track.bpm > 120.0:
+			_noise(t0, 0.03, 0.05, 0.0)  # busier hats on the fast track
+		elif beat % 4 == 2:
 			_noise(t0, 0.05, 0.07, 0.0)
 
 
