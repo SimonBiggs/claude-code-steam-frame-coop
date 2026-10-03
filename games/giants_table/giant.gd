@@ -460,6 +460,16 @@ func _vr_controls(delta: float) -> void:
 		calibrated = true
 		recenter(0.0)
 	var rc := hand_l.is_button_pressed("by_button") or hand_r.is_button_pressed("by_button")
+	# A new (taller or shorter) person put the headset on: re-fit the table to their eye height.
+	var head_y := xr_camera.position.y
+	if calibrated and not has_meta("calib_y"):
+		rc = true  # first frame after this code arrived: fit to whoever is wearing it now
+	elif calibrated and absf(head_y - float(get_meta("calib_y", head_y))) > 0.15:
+		set_meta("height_off_t", float(get_meta("height_off_t", 0.0)) + delta)
+		if float(get_meta("height_off_t", 0.0)) > 1.5:
+			rc = true
+	else:
+		set_meta("height_off_t", 0.0)
 	if rc and not recenter_was:
 		var flat_pos := Vector2(xr_camera.global_position.x, xr_camera.global_position.z)
 		recenter(atan2(flat_pos.x, flat_pos.y))
@@ -486,6 +496,8 @@ func _vr_controls(delta: float) -> void:
 ## Put the table in front of the giant: eyes HEAD_ABOVE_TABLE above it, SEAT_DIST from the centre,
 ## looking at the centre from angle `theta` (0 = the south side).
 func recenter(theta: float) -> void:
+	set_meta("calib_y", xr_camera.position.y)
+	set_meta("height_off_t", 0.0)
 	var local := xr_camera.transform
 	var head_yaw := local.basis.get_euler().y
 	var origin_yaw := theta - head_yaw
