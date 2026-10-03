@@ -225,8 +225,14 @@ func _check_vr_menu() -> void:
 		trig = hr.get_float("trigger") > 0.7
 		btn.modulate = Color(1.0, 0.9, 0.3) if on_btn else Color(0.55, 0.95, 1.0)
 	var touching: bool = hr != null and btn != null and (btn.global_position - hr.global_position).length() < 0.08 * ws
+	# A touch has to be held briefly, so brushing past the wrist while busy doesn't pause.
+	if touching:
+		set_meta("touch_t", float(get_meta("touch_t", 0.0)) + get_process_delta_time())
+	else:
+		set_meta("touch_t", 0.0)
+	var held_touch: bool = float(get_meta("touch_t", 0.0)) > 0.35
 	var down: bool = hl.is_button_pressed("menu_button") or hl.is_button_pressed("by_button") \
-		or touching or (on_btn and trig)
+		or held_touch or (on_btn and trig)
 	if down and not menu_was_down:
 		print("Net: VR pause toggled")
 		main.toggle_vr_pause()
