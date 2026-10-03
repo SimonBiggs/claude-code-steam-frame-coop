@@ -58,6 +58,7 @@ Pick from the arcade lobby: the TV shows a picker, and the VR player can choose 
 | **Ghost Lantern** | spooky-cute haunted mansion | spirit lantern reveals and stuns ghosts, bell scares them | ghost vacuums catch revealed ghosts |
 | **Snowball Blitz** | cosy winter snow fort | scoop, pack and really throw snowballs, pan-lid shield | lob snowballs, rebuild the fort walls |
 | **Cannon Cove** | pirates at sunset | grab and swing the cannons, spyglass | haul cannonballs, patch leaks, musket boarders |
+| **Kitchen Rush** | cartoon cooking chaos | chop with a real knife swing, plate up orders | fetch ingredients, serve customers, fight fires |
 
 ## Duo Arena (game #1)
 
