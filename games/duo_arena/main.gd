@@ -822,7 +822,7 @@ func _lazy_follow(l: Label3D, height: float) -> void:
 	if not l.has_meta("placed"):
 		l.set_meta("placed", true)
 		l.global_position = target
-		l.set_meta("moving", true)
+		l.global_basis = Basis(Vector3.UP, atan2(-fwd.x, -fwd.z))
 	var to := l.global_position - cam.global_position
 	to.y = 0.0
 	if fwd.angle_to(to.normalized()) > deg_to_rad(35.0) or to.length() > 2.6 or to.length() < 1.0:
@@ -1089,13 +1089,17 @@ func _set_pause_banner(paused: bool, who: String) -> void:
 	else:
 		_show_center("", 0.0, false)
 	_update_vr_center()
+	if vr_center != null and paused:
+		vr_center.remove_meta("placed")  # nothing moves while paused: put the banner right in front now
+		_lazy_follow(vr_center, -0.1)
+		vr_center.set_meta("moving", false)
 
 
 ## VR player pressed the menu button: pause/resume both machines.
 func toggle_vr_pause() -> void:
 	var paused := not get_tree().paused
 	get_tree().paused = paused
-	_set_pause_banner(paused, "Menu button: resume  ·  Trigger: back to the arcade")
+	_set_pause_banner(paused, "Wrist RESUME: carry on\nPull the trigger: back to the arcade")
 	net.event("remote_pause", [paused])
 
 
