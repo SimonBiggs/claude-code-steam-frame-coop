@@ -470,6 +470,15 @@ func _vr_controls(delta: float) -> void:
 			rc = true
 	else:
 		set_meta("height_off_t", 0.0)
+	# Squeeze BOTH triggers for a second: bring the table to wherever you're standing and facing
+	# (the Frame's B button doesn't reach the game).
+	if hand_l.get_float("trigger") > 0.8 and hand_r.get_float("trigger") > 0.8:
+		set_meta("both_t", float(get_meta("both_t", 0.0)) + delta)
+		if float(get_meta("both_t", 0.0)) > 1.0:
+			set_meta("both_t", -100.0)
+			rc = true
+	else:
+		set_meta("both_t", 0.0)
 	if rc and not recenter_was:
 		var flat_pos := Vector2(xr_camera.global_position.x, xr_camera.global_position.z)
 		recenter(atan2(flat_pos.x, flat_pos.y))
