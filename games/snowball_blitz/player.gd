@@ -740,6 +740,11 @@ func _process(delta: float) -> void:
 ## Headset drives facing and body position; right stick snap-turns; the wrist shows status.
 func _vr_update(_delta: float) -> void:
 	yaw = xr_camera.global_rotation.y
+	# Left stick walks around inside the fort (smooth, head-relative).
+	var mv := hand_l.get_vector2("primary")
+	if mv.length() > 0.2:
+		var b := Basis(Vector3.UP, xr_camera.global_rotation.y)
+		xr_origin.global_position += b * Vector3(mv.x, 0.0, -mv.y) * 2.2 * _delta
 	var head := xr_camera.global_position
 	var target := Vector3(head.x, 0.0, head.z)
 	var flat := Vector2(target.x, target.z)
