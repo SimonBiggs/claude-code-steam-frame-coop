@@ -320,11 +320,11 @@ func _refresh_vr() -> void:
 	var first := clampi(selected - 3, 0, maxi(0, GAMES.size() - 7))
 	var last := mini(GAMES.size(), first + 7)
 	if first > 0:
-		lines.append("▲")
+		lines.append("^ more ^")
 	for i in range(first, last):
-		lines.append(("▶  %s  ◀" if i == selected else "%s") % GAMES[i].name)
+		lines.append((">>  %s  <<" if i == selected else "%s") % GAMES[i].name)
 	if last < GAMES.size():
-		lines.append("▼  (%d games)" % GAMES.size())
+		lines.append("v more v  (%d games)" % GAMES.size())
 	lines.append("")
 	lines.append("Right stick: choose  ·  Trigger: play\n(or pick on the TV)")
 	vr_list.text = "\n".join(lines)
