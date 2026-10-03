@@ -1,6 +1,6 @@
 #!/bin/bash
 # duo-deploy "message" [file ...]: ship scripts from the staging copy to the TV (live project) and the
-# Steam Frame (hot-reloads on both), then commit the live project to git as a backup.
+# Steam Frame (hot-reloads on both), then commit the live project and push it to GitHub.
 set -e
 msg="$1"; shift
 ST=~/GodotProjects/.duo-arena-stage; LIVE=~/GodotProjects/duo-arena; B=~/GodotProjects/duo-arena-frame-build
@@ -15,3 +15,5 @@ fi
 cd "$LIVE" && git add -A && git commit -q -m "$msg
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" && git log --oneline -1
+# Back up to GitHub (quietly, in the background; a failed push just waits for the next one).
+(git push -q origin main >/dev/null 2>&1 &)
