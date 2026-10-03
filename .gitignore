@@ -1,0 +1,4 @@
+# Godot cache and gdev runtime data (frames, logs, screenshots)
+.godot/
+.dev/
+*.tmp
