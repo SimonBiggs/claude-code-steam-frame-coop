@@ -809,7 +809,7 @@ func _lazy_follow(l: Label3D, height: float) -> void:
 	var cam: Node3D = players[0].xr_camera
 	if l.get_parent() == cam:
 		l.reparent(self)  # older panels were glued to the headset
-	l.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
+	l.billboard = BaseMaterial3D.BILLBOARD_DISABLED  # turning your head must not turn the text
 	var fwd := -cam.global_basis.z
 	fwd.y = 0.0
 	if fwd.length() < 0.01:
@@ -819,12 +819,17 @@ func _lazy_follow(l: Label3D, height: float) -> void:
 	if not l.has_meta("placed"):
 		l.set_meta("placed", true)
 		l.global_position = target
+		l.set_meta("moving", true)
 	var to := l.global_position - cam.global_position
 	to.y = 0.0
 	if fwd.angle_to(to.normalized()) > deg_to_rad(35.0) or to.length() > 2.6 or to.length() < 1.0:
 		l.set_meta("moving", true)
 	if l.get_meta("moving", false):
 		l.global_position = l.global_position.lerp(target, 1.0 - exp(-4.0 * get_process_delta_time()))
+		var face := l.global_position - cam.global_position
+		face.y = 0.0
+		if face.length() > 0.1:
+			l.global_basis = Basis(Vector3.UP, atan2(face.x, face.z))  # face the player, upright
 		if l.global_position.distance_to(target) < 0.05:
 			l.set_meta("moving", false)
 
