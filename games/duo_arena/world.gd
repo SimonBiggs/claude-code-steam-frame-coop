@@ -1,4 +1,6 @@
 extends RefCounted
+
+const DecorScript := preload("res://games/duo_arena/decor.gd")
 ## Builds the arena: sky, lighting, glowing grid floor, force-field wall, pillars and a distant skyline.
 
 const FLOOR_SHADER := """
@@ -90,6 +92,7 @@ static func build(main: Node3D, radius: float) -> void:
 	floor_inst.material_override = floor_mat
 	floor_inst.position.y = -0.5
 	main.add_child(floor_inst)
+	main.set_meta("floor_mat", floor_mat)
 
 	# Invisible floor collision (layer 4) so bullets aimed down stop at the ground.
 	var floor_body := StaticBody3D.new()
@@ -113,6 +116,7 @@ static func build(main: Node3D, radius: float) -> void:
 	edge_inst.material_override = main.make_material(Color(0.2, 0.9, 1.0), 3.0)
 	edge_inst.position.y = 0.05
 	main.add_child(edge_inst)
+	main.set_meta("edge_mat", edge_inst.material_override)
 
 	var wall := CylinderMesh.new()
 	wall.top_radius = radius
@@ -178,32 +182,27 @@ static func _add_pillar(main: Node3D, pos: Vector3, accent: Color) -> void:
 	main.add_child(body)
 
 
+## Distant neon towers, drawn as two MultiMeshes (towers + glowing stripes) instead of ~140 nodes.
 static func _add_skyline(main: Node3D, radius: float) -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 7
-	var dark: StandardMaterial3D = main.make_material(Color(0.05, 0.05, 0.08), 0.0)
 	var window_colors := [Color(0.3, 0.8, 1.0), Color(1.0, 0.4, 0.7), Color(0.9, 0.7, 0.3)]
+	var towers: Array[Transform3D] = []
+	var stripes: Array[Transform3D] = []
+	var stripe_cols: Array[Color] = []
 	for i in 46:
 		var angle := TAU * i / 46.0 + rng.randf_range(-0.05, 0.05)
 		var dist := rng.randf_range(radius + 14.0, radius + 40.0)
 		var h := rng.randf_range(6.0, 28.0)
 		var w := rng.randf_range(3.0, 7.0)
-		var tower := MeshInstance3D.new()
-		var bm := BoxMesh.new()
-		bm.size = Vector3(w, h, w)
-		tower.mesh = bm
-		tower.material_override = dark
-		tower.position = Vector3(cos(angle) * dist, h / 2.0 - 0.5, sin(angle) * dist)
-		tower.rotation.y = rng.randf() * TAU
-		tower.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		main.add_child(tower)
-		# A couple of glowing stripes per tower.
+		var rot := Basis(Vector3.UP, rng.randf() * TAU)
+		var at := Vector3(cos(angle) * dist, h / 2.0 - 0.5, sin(angle) * dist)
+		towers.append(Transform3D(rot.scaled(Vector3(w, h, w)), at))
 		for k in rng.randi_range(1, 3):
-			var stripe := MeshInstance3D.new()
-			var sm := BoxMesh.new()
-			sm.size = Vector3(w + 0.05, 0.25, w + 0.05)
-			stripe.mesh = sm
-			stripe.material_override = main.make_material(window_colors[rng.randi() % window_colors.size()], 3.0)
-			stripe.position = Vector3(0, rng.randf_range(-h * 0.4, h * 0.45), 0)
-			stripe.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-			tower.add_child(stripe)
+			var y := rng.randf_range(-h * 0.4, h * 0.45)
+			stripes.append(Transform3D(rot.scaled(Vector3(w + 0.05, 0.25, w + 0.05)), at + Vector3(0, y, 0)))
+			stripe_cols.append(window_colors[rng.randi() % window_colors.size()])
+	var dark: StandardMaterial3D = main.make_material(Color(0.05, 0.05, 0.08), 0.0)
+	main.add_child(DecorScript.multimesh(BoxMesh.new(), dark, towers, []))
+	main.add_child(DecorScript.multimesh(BoxMesh.new(), DecorScript.glow_material(2.6), stripes, stripe_cols))
+	DecorScript.build(main, radius)

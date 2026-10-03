@@ -92,6 +92,12 @@ var shield_announced := false
 var wrist_radar: MeshInstance3D
 var ghost_head: Node3D  # follows the VR player's real head on the TV
 var force_fire := false  # test bots: hold the trigger
+var rapid_t := 0.0  # RAPID FIRE pickup: shoots twice as fast while > 0
+var bubble_t := 0.0  # SHIELD BUBBLE pickup: can't be hurt while > 0
+var bubble: MeshInstance3D
+var revive_helper  # who is reviving us (gets the credit)
+var slice_streak := 0
+var slice_streak_t := 0.0
 var pad_lost_t := -1.0  # seconds since this player's controller disconnected (-1: not lost)
 
 
@@ -208,6 +214,35 @@ func _ready() -> void:
 		_set_layers(ghost_gun, body_layer())
 
 
+## SHIELD BUBBLE pickup: a shimmering ball around the body (others see it; you see the HUD tint).
+func _update_bubble() -> void:
+	if bubble == null:
+		if bubble_t <= 0.0 or pivot == null:
+			return
+		bubble = MeshInstance3D.new()
+		var sm := SphereMesh.new()
+		sm.radius = 1.05
+		sm.height = 2.1
+		sm.radial_segments = 16
+		sm.rings = 8
+		bubble.mesh = sm
+		var m: StandardMaterial3D = main.make_material(Color(0.45, 0.65, 1.0), 1.5)
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.albedo_color.a = 0.25
+		m.cull_mode = BaseMaterial3D.CULL_DISABLED
+		m.rim_enabled = true
+		m.rim = 1.0
+		bubble.material_override = m
+		bubble.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		bubble.position.y = 0.9
+		pivot.add_child(bubble)
+		_set_layers(bubble, body_layer())
+	var on := bubble_t > 0.0 and active and not is_down
+	bubble.visible = on and (bubble_t > 1.5 or int(bubble_t * 8.0) % 2 == 0)
+	if on:
+		bubble.scale = Vector3.ONE * (1.0 + sin(Time.get_ticks_msec() * 0.008) * 0.04)
+
+
 ## Called by main once the split-screen camera exists.
 func attach_camera(cam: Camera3D) -> void:
 	camera = cam
@@ -322,6 +357,9 @@ func _physics_process(delta: float) -> void:
 	invuln_t -= delta
 	spread_t -= delta
 	flash_t -= delta
+	rapid_t = maxf(0.0, rapid_t - delta)
+	bubble_t = maxf(0.0, bubble_t - delta)
+	_update_bubble()
 	body_mat.emission_energy_multiplier = 3.0 if flash_t > 0.0 else 0.4
 	if muzzle_mat:
 		muzzle_mat.emission_energy_multiplier = maxf(0.0, muzzle_mat.emission_energy_multiplier - delta * 60.0)
@@ -359,6 +397,7 @@ func _physics_process(delta: float) -> void:
 		main.burst(global_position + Vector3.UP * 0.3, color, 8, 0.1)
 		main.sound("dash", -4.0)
 		main.net.send_action("dash", [], index)
+		main.director().on_dash(self)
 	dash_was_held = dash_held
 
 	if dash_t > 0.0:
@@ -403,7 +442,7 @@ func _update_camera(delta: float) -> void:
 
 
 func _shoot() -> void:
-	fire_cd = FIRE_INTERVAL * stat("fire_rate")
+	fire_cd = FIRE_INTERVAL * stat("fire_rate") * (0.5 if rapid_t > 0.0 else 1.0)
 	main.sound("shoot", -12.0, 1.0 + (index % 3) * 0.25 + floorf(index / 3.0) * 0.1)
 	recoil = 1.0
 	if muzzle_mat:
@@ -487,7 +526,7 @@ func _read_move() -> Vector3:
 
 func _fire_held() -> bool:
 	if vr:
-		return hand_r.get_float("trigger") > 0.5
+		return hand_r.get_float("trigger") > 0.5 or force_fire
 	if force_fire:
 		return true
 	if _key("fire"):
@@ -565,6 +604,11 @@ func _vr_update(_delta: float) -> void:
 	elif absf(turn) < 0.3:
 		snap_ready = true
 	var status := "DOWN - partner, revive me!" if is_down else ("SPREAD SHOT" if spread_t > 0.0 else "")
+	var d = main.director()
+	if d.boss_name != "" and d.boss_frac >= 0.0:
+		status += ("   " if status != "" else "") + "%s %d%%" % [d.boss_name, int(ceil(d.boss_frac * 100.0))]
+	elif d.event_name != "":
+		status += ("   " if status != "" else "") + str(d.EVENTS[d.event_name][0])
 	if main.net.mode == "host" and not main.net.connected:
 		status = "Waiting for the TV player to join…"
 	wrist_label.text = "HP %d / %d   XP %d\nWAVE %d   SCORE %d\n%s" % [maxi(0, int(hp)), int(stat("max_hp")), xp, main.wave, main.score, status]
@@ -574,6 +618,12 @@ func _vr_update(_delta: float) -> void:
 
 func take_damage(amount: float, from_pos = null) -> void:
 	if is_down or invuln_t > 0.0 or not active:
+		return
+	if bubble_t > 0.0:
+		var now := Time.get_ticks_msec()
+		if now > int(get_meta("bubble_snd", 0)):
+			set_meta("bubble_snd", now + 300)
+			main.sound("bubble", -8.0, 1.6)
 		return
 	amount *= personal.get("armor", 1.0)
 	if remote:
@@ -615,6 +665,7 @@ func _go_down() -> void:
 	shake = 1.0
 	main.sound("down")
 	main.shockwave(global_position, 6.0, 30.0, 2.0, color)
+	main.director().on_down(self)
 	pulse_t = 3.5
 	if joy >= 0:
 		Input.start_joy_vibration(joy, 0.8, 1.0, 0.4)
@@ -624,6 +675,8 @@ func _update_revive(delta: float) -> void:
 	var helper_near := false
 	for p in main.players:
 		if p != self and p.active and not p.is_down and p.global_position.distance_to(global_position) <= REVIVE_RANGE:
+			if not helper_near:
+				revive_helper = p
 			helper_near = true
 	if helper_near:
 		revive_progress += delta / (REVIVE_TIME * main.upg.revive)
@@ -638,6 +691,7 @@ func _update_revive(delta: float) -> void:
 	revive_fill.scale = Vector3(s, 1, s)
 	if revive_progress >= 1.0:
 		main.achievements().unlock("teamwork")
+		main.director().on_revive(revive_helper, self)
 		revive(0.5)
 
 
@@ -751,6 +805,9 @@ func apply_net_state(st: Array) -> void:
 		main.on_player_activity_changed(self)
 	revive_progress = st[5]
 	spread_t = st[6]
+	if st.size() > 15:
+		rapid_t = st[14]
+		bubble_t = st[15]
 	if ghost:
 		net_target = st[0]
 		yaw = st[1]
@@ -908,6 +965,13 @@ func _update_gun_hp() -> void:
 		set_meta("gun_hp", l)
 	var frac := clampf(hp / maxf(stat("max_hp"), 1.0), 0.0, 1.0)
 	l.text = "♥ %d" % int(ceil(hp))
+	var dir_node = main.director()
+	if dir_node.combo >= 2:
+		l.text += "\nCOMBO x%d" % dir_node.combo
+	if bubble_t > 0.0:
+		l.text += "\nBUBBLE %d" % int(ceil(bubble_t))
+	elif rapid_t > 0.0:
+		l.text += "\nRAPID %d" % int(ceil(rapid_t))
 	l.modulate = Color(1.0, 0.3, 0.3) if frac < 0.3 else (Color(1.0, 0.85, 0.3) if frac < 0.6 else Color(0.4, 1.0, 0.5))
 
 
@@ -925,6 +989,7 @@ func _update_sword(delta: float) -> void:
 		blade.mesh = bm
 		blade.position = Vector3(0.0, 0.0, -0.5)
 		blade.material_override = main.make_material(Color(0.6, 0.95, 1.0), 4.0)
+		set_meta("blade_mat", blade.material_override)
 		blade.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		sword.add_child(blade)
 		var guard := MeshInstance3D.new()
@@ -961,24 +1026,54 @@ func _update_sword(delta: float) -> void:
 	var prev: Vector3 = get_meta("sword_prev", hand_l.global_position)
 	var speed := hand_l.global_position.distance_to(prev) / maxf(delta, 0.001)
 	set_meta("sword_prev", hand_l.global_position)
+	var blade_mat: StandardMaterial3D = get_meta("blade_mat", null)
+	if blade_mat != null:
+		blade_mat.emission_energy_multiplier = lerpf(blade_mat.emission_energy_multiplier, 3.0 + minf(speed, 6.0), 0.3)
 	if speed < 1.2:
 		return
 	var fwd := -hand_l.global_basis.z
 	var now := Time.get_ticks_msec()
+	slice_streak_t -= delta
+	if slice_streak_t <= 0.0:
+		slice_streak = 0
 	for e in get_tree().get_nodes_in_group("enemies"):
 		if now < int(e.get_meta("sliced_until", 0)):
 			continue
+		var c: Vector3 = e.center()
 		for t in [0.25, 0.55, 0.9]:
 			var p: Vector3 = hand_l.global_position + fwd * float(t)
-			var flat := Vector2(p.x - e.global_position.x, p.z - e.global_position.z)
-			if flat.length() < float(e.radius) + 0.15 and absf(p.y - e.global_position.y - float(e.radius)) < float(e.radius) + 0.6:
+			var flat := Vector2(p.x - c.x, p.z - c.z)
+			if flat.length() < float(e.radius) + 0.15 and absf(p.y - c.y) < float(e.radius) + 0.6:
 				e.set_meta("sliced_until", now + 350)
 				var dir := Vector3(e.global_position.x - global_position.x, 0.0, e.global_position.z - global_position.z).normalized()
-				e.hit(4.0 * stat("damage"), dir, 1.5, self)
+				e.sword_hit(4.0 * stat("damage") * (1.0 + 0.25 * mini(slice_streak, 4)), dir, self)
+				slice_streak += 1
+				slice_streak_t = 1.3
+				if e.dead:
+					main.director().add_stat(self, "slices", 1)
+				if slice_streak >= 3:
+					main.popup(c + Vector3.UP * (float(e.radius) + 0.8), "SLICE x%d!" % slice_streak, Color(0.6, 0.95, 1.0))
 				main.burst(p, Color(0.6, 0.95, 1.0), 10, 0.08)
-				main.sound("hit", -2.0, 1.3)
+				main.sound("slice", -2.0, 1.0 + 0.08 * mini(slice_streak, 6))
 				hand_l.trigger_haptic_pulse("haptic", 0.0, 0.9, 0.08, 0.0)
 				break
+	# The blade also cuts fireballs in half and bats spit orbs back.
+	var tip := hand_l.global_position + fwd * 0.95
+	for s in get_tree().get_nodes_in_group("enemy_shots"):
+		if s.friendly or s.spent:
+			continue
+		var cp := Geometry3D.get_closest_point_to_segment(s.global_position, hand_l.global_position, tip)
+		if cp.distance_to(s.global_position) < 0.3 * float(s.size) + 0.2:
+			hand_l.trigger_haptic_pulse("haptic", 0.0, 0.8, 0.1, 0.0)
+			if s.fireball:
+				s.shot_down()
+				main.popup(cp + Vector3.UP * 0.6, "SLICED!", Color(1.0, 0.7, 0.3))
+			else:
+				s._reflect(fwd)
+				main.achievements().unlock("parry")
+	if main.sky_fish != null and main.sky_fish.has_method("sword_check"):
+		if main.sky_fish.sword_check(hand_l.global_position, tip, self):
+			hand_l.trigger_haptic_pulse("haptic", 0.0, 1.0, 0.15, 0.0)
 
 
 ## Host: does the VR shield catch something at `pos`? Returns the reflect direction, or ZERO.
