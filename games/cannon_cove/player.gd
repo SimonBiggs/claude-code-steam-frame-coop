@@ -4,7 +4,7 @@ extends Node3D
 ## swing it to aim and fire with the trigger; A/B (or a left-stick flick) hops between the four
 ## cannons; a spyglass in the left hand zooms when held up to the eye. Flat (split screen / no
 ## headset) the gunner aims with the sticks, mouse or keys.
-## Players 2 and 3 are DECKHANDS in first person: carry cannonballs from the pile to the cannons,
+## Players 2 to 7 are DECKHANDS in first person: carry cannonballs from the pile to the cannons,
 ## hold "use" next to a leak to patch it, and shoot boarding pirates with a musket.
 
 const World := preload("res://games/cannon_cove/world.gd")
@@ -118,16 +118,21 @@ var bot_aim := Vector2.ZERO  # gunner: (yaw relative to the cannon, pitch)
 var bot_station := -1
 
 
+## Render layers: bit 0 is the world, bits 1-7 the crew's bodies, bits 8-14 their first-person
+## view models (musket, carried ball), so each camera hides its own body and the others' view models.
+const ALL_BODIES := 254
+
+
 func body_layer() -> int:
 	return 2 << index
 
 
 func viewmodel_layer() -> int:
-	return 64 << index
+	return 256 << index
 
 
 func camera_cull_mask() -> int:
-	return 1 | (14 & ~body_layer()) | viewmodel_layer()
+	return 1 | (ALL_BODIES & ~body_layer()) | viewmodel_layer()
 
 
 func _ready() -> void:
@@ -294,7 +299,7 @@ func _ensure_spy_view() -> void:
 	spy_cam = Camera3D.new()
 	spy_cam.fov = 14.0
 	spy_cam.far = 600.0
-	spy_cam.cull_mask = 1 | (14 & ~body_layer())
+	spy_cam.cull_mask = 1 | (ALL_BODIES & ~body_layer())
 	spy_vp.add_child(spy_cam)
 	spy_cam.current = true
 	spy_lens = MeshInstance3D.new()
@@ -600,6 +605,8 @@ func _vr_spyglass() -> void:
 # --- Input -----------------------------------------------------------------------
 
 func _keys() -> Dictionary:
+	if key_set < 0:
+		return {}  # a drop-in player on a controller only
 	var sets: Array = GUN_KEYS if gunner else HAND_KEYS
 	return sets[clampi(key_set, 0, sets.size() - 1)]
 
@@ -676,13 +683,13 @@ func _use_held() -> bool:
 
 ## Name of the use button for on-screen prompts.
 func use_name() -> String:
-	if joy >= 0:
+	if joy >= 0 or key_set < 0:
 		return "A"
 	return "E" if key_set == 0 else "SHIFT"
 
 
 func fire_name() -> String:
-	if joy >= 0:
+	if joy >= 0 or key_set < 0:
 		return "RT"
 	return "CLICK" if key_set == 0 else "ENTER"
 
@@ -700,6 +707,19 @@ func head_transform() -> Transform3D:
 func set_active(on: bool) -> void:
 	active = on
 	visible = on
+	if not on:
+		reset_crew_state()
+
+
+## Leaving (or a controller unplugged): put the ball back and stop patching.
+func reset_crew_state() -> void:
+	carrying = false
+	use_held = false
+	use_was_held = false
+	patching = false
+	bot_move = Vector3.ZERO
+	bot_fire = false
+	bot_use = false
 
 
 ## Snapshot: [pos, yaw, pitch, carrying, head, hand_r, hand_l, active, station, patching]
