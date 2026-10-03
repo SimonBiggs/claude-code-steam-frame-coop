@@ -1,6 +1,9 @@
 extends Node
 # Headless test for Kitchen Rush: an autopilot button-chef (host/local) and autopilot runners (client/local).
 # The chef uses the real button-chef actions (cursor + grab + chop); runners walk with bot_move and press_use().
+# BOT_PLAYERS=N (1..6): N TV runners join (local split screen, or on the TV machine when networked). The last
+# one joins through a fake controller pressing Start (the real drop-in path); with N >= 3 that controller is
+# later "unplugged" (the runner should leave after 15 s) and plugged back in (it should rejoin).
 const L := preload("res://games/kitchen_rush/layout.gd")
 const M := preload("res://games/kitchen_rush/main.gd")
 
@@ -13,11 +16,20 @@ var stuck_t := {}
 var max_shift := 0
 var joined := false
 var log_t := 0.0
+var want_players := 1
+var next_join := 2
+var join_at := 3.0
+const FAKE_PAD := 60
+var unplug_stage := 0
+var max_active := 0
 
 
 func _ready() -> void:
 	main = load("res://games/kitchen_rush/main.tscn").instantiate()
 	add_child(main)
+	var default_players := 2 if OS.has_environment("DUO_JOIN") else 1
+	want_players = clampi(int(OS.get_environment("BOT_PLAYERS")) if OS.has_environment("BOT_PLAYERS") else default_players, 1, 6)
+	print("BOT: %d TV runner(s) requested" % want_players)
 
 
 func _physics_process(delta: float) -> void:
@@ -47,9 +59,7 @@ func _physics_process(delta: float) -> void:
 			var p = main.players[i]
 			if p.active:
 				_runner(p, delta)
-		if mode == "client" and not joined and t > 5.0 and main.players.size() > 2:
-			joined = true
-			main.net.send_action("join", [], 2)
+		_join_players(mode)
 	if main.shift > max_shift:
 		max_shift = main.shift
 		print("BOT: reached shift %d (%s)" % [max_shift, mode])
@@ -59,13 +69,68 @@ func _physics_process(delta: float) -> void:
 		var carry := []
 		for i in range(1, main.players.size()):
 			carry.append(main.players[i].carry_kind)
-		print("BOT t=%.0f mode=%s shift=%d coins=%d served=%d/%d total=%d angry=%d items=%d customers=%d fire=%s raccoon=%s carry=%s" % [
-			t, mode, main.shift, main.coins, main.served_shift, main.shift_target(), main.served_total, main.angry,
+		var act := []
+		for i in range(1, main.players.size()):
+			if main.players[i].active:
+				act.append("P%d" % (i + 1))
+		max_active = maxi(max_active, act.size())
+		print("BOT t=%.0f runners=%s views=%d mode=%s shift=%d coins=%d served=%d/%d total=%d angry=%d items=%d customers=%d fire=%s raccoon=%s carry=%s" % [
+			t, act, _views(), mode, main.shift, main.coins, main.served_shift, main.shift_target(), main.served_total, main.angry,
 			main.all_items().size(), main._waiting_customers().size(), main.fire_on, main.raccoon.visible, carry])
 		if mode == "host":
 			print("   snapshot bytes: %d" % var_to_bytes(main.make_snapshot()).size())
 		if mode != "host":
 			print("   runner1 at %s next=%s need=%s" % [main.players[1].global_position.snapped(Vector3.ONE * 0.1), _next_ingredient(1), _needed_recipes()])
+
+
+func _views() -> int:
+	var n := 0
+	for p in main.players:
+		if p.has_meta("view") and p.get_meta("view").visible:
+			n += 1
+	return n
+
+
+## Bring in the extra TV players one at a time, then exercise unplug / replug of the last one.
+func _join_players(mode: String) -> void:
+	if t < join_at or (mode == "client" and not main.synced):
+		return
+	if next_join <= want_players:
+		join_at = t + 0.7
+		if next_join == want_players and next_join >= 3:
+			# Pretend P2 (and the split-screen chef) already own controllers, so the new one is a new player.
+			if main.players[1].joy < 0:
+				main.players[1].joy = FAKE_PAD + 1
+			if mode == "local" and main.players[0].joy < 0:
+				main.players[0].joy = FAKE_PAD + 2
+			print("BOT: fake controller %d presses Start to join" % FAKE_PAD)
+			var e := InputEventJoypadButton.new()
+			e.device = FAKE_PAD
+			e.button_index = JOY_BUTTON_START
+			e.pressed = true
+			Input.parse_input_event(e)
+			var e2 := e.duplicate() as InputEventJoypadButton
+			e2.pressed = false
+			Input.parse_input_event(e2)
+		else:
+			print("BOT: debug_join(%d)" % next_join)
+			main.debug_join(next_join)
+		next_join += 1
+		return
+	if want_players < 3:
+		return
+	var p = main.players[want_players]
+	if unplug_stage == 0 and t > 12.0:
+		unplug_stage = 1
+		print("BOT: P%d joy=%d paused=%s, unplugging controller %d" % [want_players + 1, p.joy, get_tree().paused, FAKE_PAD])
+		main._on_joy_changed(FAKE_PAD, false)
+	elif unplug_stage == 1 and not p.active:
+		unplug_stage = 2
+		print("BOT: P%d left after unplug (t=%.1f)" % [want_players + 1, t])
+		main._on_joy_changed(FAKE_PAD, true)
+	elif unplug_stage == 2 and p.active:
+		unplug_stage = 3
+		print("BOT: P%d rejoined after replug (t=%.1f) joy=%d" % [want_players + 1, t, p.joy])
 
 
 # --- Chef ---------------------------------------------------------------------
@@ -216,16 +281,14 @@ func _next_ingredient(index: int) -> String:
 		missing.erase(main.players[i].carry_kind)
 	if missing.is_empty():
 		return ""
-	if index == 2 and missing.size() > 1:
-		return missing[1]
-	return missing[0]
+	return missing[(index - 1) % missing.size()]
 
 
 func _runner(p, delta: float) -> void:
 	var cd: float = use_t.get(p.index, 0.0) - delta
 	use_t[p.index] = cd
 	var c: String = p.carry_kind
-	var idle := Vector3(-1.0 + p.index, 0.0, -1.6)
+	var idle := Vector3(-1.5 + float((p.index - 1) % 4), 0.0, -1.6 - 0.6 * floorf(p.index / 4.0))
 	var goal := idle
 	if c == "":
 		var plate = null
@@ -233,7 +296,7 @@ func _runner(p, delta: float) -> void:
 		for it in main.all_items():
 			if it.is_plate() and it.recipe != "" and it.holder == -1 and need.has(it.recipe):
 				plate = it
-		if main.fire_on and main.ext_holder == -1 and p.index == 1:
+		if main.fire_on and main.ext_holder == -1 and p.index == want_players:
 			goal = L.EXT_POS + Vector3(0, 0, 1.0)
 		elif plate != null:
 			goal = Vector3(plate.global_position.x, 0.0, -0.8)

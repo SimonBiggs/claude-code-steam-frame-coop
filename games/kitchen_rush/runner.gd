@@ -28,7 +28,9 @@ var remote := false  # host: driven by the TV machine
 var ghost := false
 var vr := false
 var active := true
-var key_set := -1
+var key_set := -1  # -1: no keyboard (controller only)
+var lost_joy := -1  # the controller that disconnected from this player (to rejoin on reconnect)
+var lost_t := 0.0
 var mouse_look := false
 var carry_kind := ""  # "", an ingredient kind, "plate:<RECIPE>" or "extinguisher"
 var carry = null  # host: the carried item node
@@ -41,12 +43,18 @@ var tag: Label3D
 var bot_move := Vector3.ZERO  # tests: a movement wish in world space
 
 
+## Render layer for this runner's body (hidden from its own camera). Layer 7 (value 64) is the chef's
+## viewmodel, so runners 5 and 6 skip ahead to layers 9 and 10.
 func body_layer() -> int:
-	return 2 << index
+	return 2 << index if index <= 4 else 2 << (index + 2)
+
+
+## Every player body layer: the chef (2) and runners 1..6.
+const ALL_BODIES := 2 | 4 | 8 | 16 | 32 | 256 | 512
 
 
 func camera_cull_mask() -> int:
-	return (1 | 2 | 4 | 8 | 16) & ~body_layer()
+	return (1 | ALL_BODIES) & ~body_layer()
 
 
 func _ready() -> void:
@@ -128,6 +136,10 @@ func set_active(on: bool) -> void:
 	active = on
 	visible = on
 	collision_layer = 2 if on else 0
+	use_was_held = true  # the button that made us join must be released before it does anything
+	if not on:
+		velocity = Vector3.ZERO
+		bot_move = Vector3.ZERO
 
 
 ## Where a carried thing is held: in front of the chest, low in the view.
@@ -206,11 +218,13 @@ func net_state() -> Array:
 # --- Input -------------------------------------------------------------------
 
 func keys() -> int:
-	return key_set if key_set >= 0 else 1
+	return key_set
 
 
 func _key(action: String) -> bool:
-	return Input.is_physical_key_pressed(KEYS[keys()][action])
+	if key_set < 0 or key_set >= KEYS.size():
+		return false
+	return Input.is_physical_key_pressed(KEYS[key_set][action])
 
 
 func _stick(axis_x: JoyAxis, axis_y: JoyAxis, deadzone: float) -> Vector2:
@@ -236,7 +250,7 @@ func _read_move() -> Vector3:
 	var v := Vector2.ZERO
 	if keys() == 0:
 		v = Vector2(float(_key("right")) - float(_key("left")), float(_key("down")) - float(_key("up")))
-	else:
+	elif keys() == 1:
 		v.y = float(_key("down")) - float(_key("up"))
 	v += _stick(JOY_AXIS_LEFT_X, JOY_AXIS_LEFT_Y, 0.18)
 	if joy >= 0:
@@ -257,6 +271,6 @@ func _use_held() -> bool:
 	return false
 
 
-## Any input from this player's controls (used to wake up player 3).
+## Any input from this player's controls (used to wake up a waiting player).
 func any_input() -> bool:
 	return _use_held()

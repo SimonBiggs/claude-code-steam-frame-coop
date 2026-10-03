@@ -68,7 +68,8 @@ func viewmodel_layer() -> int:
 
 
 func camera_cull_mask() -> int:
-	return (1 | 2 | 4 | 8 | 16 | viewmodel_layer()) & ~body_layer()
+	# World + every player body (chef 2, runners 4..32, 256, 512; see runner.gd) + own viewmodel.
+	return (1 | 2 | 4 | 8 | 16 | 32 | 256 | 512 | viewmodel_layer()) & ~body_layer()
 
 
 func _ready() -> void:
