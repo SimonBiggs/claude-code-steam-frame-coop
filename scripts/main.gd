@@ -673,6 +673,8 @@ func _pick_kind() -> String:
 		return "spitter"
 	if wave >= 6 and r < 0.74:
 		return "splitter"
+	if wave >= 2 and r > 0.88:
+		return "dino"
 	return "grunt"
 
 

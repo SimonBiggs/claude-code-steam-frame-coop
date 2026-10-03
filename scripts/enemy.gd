@@ -8,6 +8,7 @@ const KINDS := {
 	"brute": {"hp": 14.0, "speed": 2.3, "radius": 1.0, "color": Color(0.65, 0.3, 1.0), "dps": 50.0, "points": 500, "drop": 0.35},
 	"spitter": {"hp": 2.5, "speed": 3.2, "radius": 0.5, "color": Color(0.4, 1.0, 0.3), "dps": 15.0, "points": 250, "drop": 0.1, "ranged": true},
 	"splitter": {"hp": 6.0, "speed": 3.0, "radius": 0.75, "color": Color(0.2, 0.95, 0.85), "dps": 30.0, "points": 300, "drop": 0.15, "splits": 3},
+	"dino": {"hp": 9.0, "speed": 2.6, "radius": 0.9, "color": Color(0.35, 0.85, 0.3), "dps": 35.0, "points": 400, "drop": 0.2, "dino": true},
 	"boss": {"hp": 80.0, "speed": 2.0, "radius": 1.8, "color": Color(1.0, 0.15, 0.6), "dps": 70.0, "points": 3000, "drop": 1.0},
 }
 
@@ -34,6 +35,10 @@ var body_albedo := Color.RED
 var slam_t := 5.0  # boss: time until the next ground slam
 var slam_count := 0
 var speed_scale := 1.0
+var charge_t := 0.0  # dino: charging time left
+var charge_cd := 3.0
+var jaw: Node3D
+var tail: Node3D
 var age := 0.0  # boss: lives longer -> enrages (slams more often)
 # Networked co-op: on the Steam Machine enemies are visual ghosts placed from host snapshots.
 var ghost := false
@@ -73,6 +78,16 @@ func _ready() -> void:
 		cs.position.y = radius
 		add_child(cs)
 
+	if KINDS[kind].get("dino", false):
+		_build_dino()
+	else:
+		_build_orb()
+	mesh.scale = Vector3.ONE * 0.05
+	create_tween().tween_property(mesh, "scale", Vector3.ONE, spawn_grace) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+
+func _build_orb() -> void:
 	mesh = MeshInstance3D.new()
 	var sm := SphereMesh.new()
 	sm.radius = radius
@@ -146,9 +161,64 @@ func _ready() -> void:
 		eye.position = Vector3(side * radius * 0.4, radius * 0.25, -radius * 0.85)
 		mesh.add_child(eye)
 
-	mesh.scale = Vector3.ONE * 0.05
-	create_tween().tween_property(mesh, "scale", Vector3.ONE, spawn_grace) \
-		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+
+## A blocky green T-rex: big head with a snapping jaw, teeth, swinging tail, tiny arms.
+func _build_dino() -> void:
+	body_albedo = color.darkened(0.25)
+	mat = main.make_material(color, 0.3)
+	mat.albedo_color = body_albedo
+	mat.roughness = 0.6
+	var dark: StandardMaterial3D = main.make_material(color.darkened(0.5), 0.0)
+	mesh = _box(self, Vector3(0.9, 0.95, 1.5), Vector3(0, radius + 0.2, 0), mat)
+	var head := _box(mesh, Vector3(0.75, 0.6, 0.95), Vector3(0, 0.55, -1.0), mat)
+	jaw = Node3D.new()
+	head.add_child(jaw)
+	jaw.position = Vector3(0, -0.28, 0.25)
+	_box(jaw, Vector3(0.65, 0.16, 0.85), Vector3(0, -0.05, -0.4), dark)
+	var teeth: StandardMaterial3D = main.make_material(Color(1, 1, 0.9), 1.0)
+	for x in [-0.22, -0.07, 0.07, 0.22]:
+		_box(head, Vector3(0.06, 0.12, 0.06), Vector3(x, -0.33, -0.4), teeth)
+	var eye_mat: StandardMaterial3D = main.make_material(Color(1.0, 0.9, 0.2), 4.0)
+	for side in [-1.0, 1.0]:
+		_box(head, Vector3(0.12, 0.12, 0.12), Vector3(side * 0.38, 0.12, -0.15), eye_mat)
+		_box(mesh, Vector3(0.3, 0.85, 0.35), Vector3(side * 0.35, -0.75, 0.15), dark)  # leg
+		_box(mesh, Vector3(0.1, 0.3, 0.1), Vector3(side * 0.42, 0.0, -0.65), dark)  # tiny arm
+	tail = Node3D.new()
+	mesh.add_child(tail)
+	tail.position = Vector3(0, 0.1, 0.7)
+	_box(tail, Vector3(0.45, 0.4, 0.9), Vector3(0, -0.05, 0.45), mat)
+	_box(tail, Vector3(0.28, 0.25, 0.8), Vector3(0, -0.15, 1.2), mat)
+	for x in range(3):
+		_box(mesh, Vector3(0.1, 0.22, 0.25), Vector3(0, 0.55, -0.3 + x * 0.4), dark)  # back spikes
+
+
+func _box(parent: Node3D, size: Vector3, pos: Vector3, m: Material) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	var b := BoxMesh.new()
+	b.size = size
+	mi.mesh = b
+	mi.material_override = m
+	mi.position = pos
+	parent.add_child(mi)
+	return mi
+
+
+## Dino: plods towards you, then roars and charges when close.
+func _dino_behaviour(delta: float, dist: float) -> void:
+	charge_cd -= delta
+	if charge_t > 0.0:
+		charge_t -= delta
+		speed_scale = 2.8
+		if charge_t <= 0.0:
+			speed_scale = 1.0
+	elif dist < 9.0 and charge_cd <= 0.0:
+		charge_t = 1.3
+		charge_cd = 5.0
+		main.sound("big_kill", -2.0, 0.55)  # roar
+		if not has_meta("roared"):
+			set_meta("roared", true)
+			print("Dino charge")
 
 
 func _physics_process(delta: float) -> void:
@@ -177,6 +247,8 @@ func _physics_process(delta: float) -> void:
 			main.sound("hit", -6.0, 0.6)
 		if kind == "boss":
 			_boss_behaviour(delta)
+		if kind == "dino":
+			_dino_behaviour(delta, dist)
 		if ranged:
 			_ranged_behaviour(delta, target, dist)
 			if dist < 7.0:
@@ -191,6 +263,7 @@ func _physics_process(delta: float) -> void:
 	if dir != Vector3.ZERO:
 		rotation.y = lerp_angle(rotation.y, atan2(-dir.x, -dir.z), 10.0 * delta)
 	bob += delta * speed * 2.0
+	_animate_dino(delta)
 	if halo:
 		halo.rotate_y(delta * 3.0)
 	mesh.position.y = radius + absf(sin(bob)) * radius * 0.25
@@ -288,6 +361,14 @@ func _ghost_update(delta: float) -> void:
 	if halo:
 		halo.rotate_y(delta * 3.0)
 	mesh.position.y = radius + absf(sin(bob)) * radius * 0.25
+	_animate_dino(delta)
+
+
+func _animate_dino(_delta: float) -> void:
+	if jaw:
+		jaw.rotation.x = -absf(sin(bob * 1.5)) * 0.5  # chomp
+	if tail:
+		tail.rotation.y = sin(bob * 0.8) * 0.4
 
 
 func _die() -> void:
