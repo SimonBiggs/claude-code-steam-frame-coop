@@ -100,6 +100,9 @@ func _process(delta: float) -> void:
 
 ## Host: every so often the fish's mouth glows (warning) and it spits a fireball at a random player.
 func _fireballs(delta: float) -> void:
+	if mouth_mat == null:  # fish created before the fireball update: add the mouth now
+		mouth_mat = main.make_material(Color(1.0, 0.3, 0.05), 0.5)
+		_part(SphereMesh.new(), mouth_mat, Vector3(0, -0.2, -1.95), Vector3(0.7, 0.5, 0.4))
 	mouth_mat.emission_energy_multiplier = lerpf(mouth_mat.emission_energy_multiplier, 8.0 if charging else 0.5, delta * 6.0)
 	if main.net.mode == "client" or not main.ready_to_play or main.game_over or main.wave < 1:
 		return
