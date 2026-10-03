@@ -171,6 +171,16 @@ func _launch(index: int) -> void:
 
 
 func _process(_delta: float) -> void:
+	if not has_meta("menu_v2") and not buttons.is_empty():  # hot reload: rebuild the TV menu as two columns
+		set_meta("menu_v2", true)
+		var layer := buttons[0].get_parent()
+		while layer != null and not layer is CanvasLayer:
+			layer = layer.get_parent()
+		if layer != null:
+			layer.queue_free()
+		buttons.clear()
+		_build_tv_menu()
+		_select(selected, false)
 	if join_deadline > 0 and Time.get_ticks_msec() > join_deadline:
 		_lobby_offline()
 	# TV: if the VR player already started a game without us, join it (their game broadcasts it).
@@ -200,14 +210,14 @@ func _build_tv_menu() -> void:
 	layer.add_child(bg)
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 18)
+	box.add_theme_constant_override("separation", 12)
 	layer.add_child(box)
 	box.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	box.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	box.grow_vertical = Control.GROW_DIRECTION_BOTH
 	var title := Label.new()
 	title.text = "LIVING ROOM ARCADE"
-	title.add_theme_font_size_override("font_size", 72)
+	title.add_theme_font_size_override("font_size", 56)
 	title.add_theme_color_override("font_color", Color(0.4, 0.95, 1.0))
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(title)
@@ -221,16 +231,23 @@ func _build_tv_menu() -> void:
 	focus.border_color = Color(0.3, 0.95, 1.0)
 	focus.set_border_width_all(5)
 	focus.set_corner_radius_all(10)
+	# Two columns so all the games fit on the TV.
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 16)
+	grid.add_theme_constant_override("v_separation", 10)
+	box.add_child(grid)
 	for i in GAMES.size():
 		var g: Dictionary = GAMES[i]
 		var b := Button.new()
 		b.text = "%s\n%s" % [g.name, g.blurb]
-		b.custom_minimum_size = Vector2(900, 100)
-		b.add_theme_font_size_override("font_size", 28)
+		b.custom_minimum_size = Vector2(820, 96)
+		b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		b.add_theme_font_size_override("font_size", 20)
 		b.add_theme_stylebox_override("focus", focus)
 		b.pressed.connect(_start_everywhere.bind(i))
 		b.focus_entered.connect(_select.bind(i, true))
-		box.add_child(b)
+		grid.add_child(b)
 		buttons.append(b)
 	var hint := Label.new()
 	hint.text = "D-pad / arrows to choose  ·  A / Enter to play  ·  more games: just ask Claude!"
