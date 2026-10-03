@@ -209,7 +209,9 @@ func _vr_input(_delta: float) -> Vector2:
 		var d: Vector3 = avg - neutral
 		var climb := clampf(d.z / 0.09, -1.0, 1.0)  # pulled back towards you = climb (sensitive: kids found diving hard)
 		var turn := clampf(d.x / 0.12 + (l.y - r.y) / 0.18, -1.0, 1.0)
-		rein_input = Vector2(_dead(turn, 0.12), _dead(climb, 0.12))
+		# Reins only turn: their up/down drifted with how each kid held their hands and kept the
+		# dragon stuck at the ceiling. Height comes from looking up/down (and the stick).
+		rein_input = Vector2(_dead(turn, 0.12), 0.0 * climb)
 		v += rein_input
 	# Look where you want to go: looking well down dives, looking up climbs (what the kids tried first).
 	if vr and xr_camera != null:
