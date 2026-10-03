@@ -8,6 +8,8 @@ extends Node
 const GAMES := [
 	{"id": "duo_arena", "name": "DUO ARENA", "scene": "res://games/duo_arena/main.tscn",
 		"blurb": "Neon first-person co-op arena shooter"},
+	{"id": "ghost_lantern", "name": "GHOST LANTERN", "scene": "res://games/ghost_lantern/main.tscn",
+		"blurb": "Spooky-cute ghost hunt: VR lantern reveals ghosts, TV players vacuum them up"},
 ]
 const DEFAULT_PORT := 7777
 const JOIN_TIMEOUT_MS := 5000
