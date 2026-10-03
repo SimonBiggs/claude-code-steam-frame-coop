@@ -2,6 +2,10 @@ extends Node
 ## Headless bot for Snowball Blitz. The first local player snipes the nearest snowman with charged
 ## lobs; the second local player packs the most damaged fort wall (and throws when the fort is fine).
 ## On the client it also wakes player 3 by "pressing" throw.
+## Local / host also exercise the new content: bunny, balloon and shield snowmen, every fort upgrade, a
+## MEGA SNOWBALL throw and the weather (blizzard, sunshine, cocoa party); the game-over screen prints the
+## awards. BOT_WAVE=N jumps to wave N (12 = the YETI finale), BOT_GOD=1 keeps everyone warm and the fort
+## standing, BOT_VR=1 (local) makes P1 the real VR thrower with fake hands (squeeze, swing, release).
 
 var main
 var t := 0.0
@@ -10,6 +14,9 @@ var cycle := {}  # player index -> seconds into the current charge/throw cycle
 ## BOT_PLAYERS=N: N TV players join programmatically (main.debug_join), like N controllers pressing A.
 var bot_players: int = int(OS.get_environment("BOT_PLAYERS")) if OS.has_environment("BOT_PLAYERS") else 0
 var join_t := 1.0
+var script_step := 0
+var vr_t := 0.0
+var vr_throws := 0
 
 
 func _ready() -> void:
@@ -40,17 +47,93 @@ func _physics_process(delta: float) -> void:
 	for p in main.players:
 		if p.ghost or p.remote:
 			continue
+		if p.vr:
+			_drive_vr(p, delta)
+			continue
 		if not p.active:
 			p.bot_throw = bot_players == 0 and t > 4.0 and fmod(t, 2.0) < 0.3
 			continue
 		if p.index == 1 and _repair_role(p):
 			continue
 		_throw_role(p, delta)
+	if main.net.mode != "client":
+		_content_script()
+		if OS.has_environment("BOT_GOD"):
+			for p in main.players:
+				p.invuln_t = 1.0
+				p.hp = maxf(p.hp, 60.0)
+			for i in main.segments:
+				main.seg_hp[i] = maxf(main.seg_hp[i], 40.0)
+	if main.game_over and not has_meta("over_print"):
+		set_meta("over_print", true)
+		print("Bot: end screen:\n%s" % main.center_label.text)
 	_pad_test()
 	_check_restart()
 	if t >= next_report:
 		next_report += 5.0
 		_report()
+
+
+## New snowmen, upgrades, a mega throw and the weather, once each.
+func _content_script() -> void:
+	var steps := [
+		[1.5, func() -> void:
+			if OS.has_environment("BOT_WAVE"):
+				main.debug_skip_to_wave(int(OS.get_environment("BOT_WAVE")))
+				print("Bot: skip to wave %s" % OS.get_environment("BOT_WAVE"))],
+		[4.0, func() -> void:
+			for k in ["bunny", "balloon", "shield"]:
+				main.debug_spawn(k)
+			print("Bot: spawned bunny, balloon, shield")],
+		[8.0, func() -> void: main.debug_event("blizzard")],
+		[12.0, func() -> void:
+			main.debug_upgrades()
+			main.players[0].mega = true
+			print("Bot: every fort upgrade + a mega snowball for P1")],
+		[24.0, func() -> void: main.debug_event("sunshine")],
+		[36.0, func() -> void: main.debug_event("cocoa")],
+		[float(OS.get_environment("BOT_END")) if OS.has_environment("BOT_END") else 56.0, func() -> void:
+			if not main.game_over:
+				print("Bot: forcing game over to show the awards")
+				main._on_game_over("TIME FOR COCOA!")],
+	]
+	while script_step < steps.size() and t >= float(steps[script_step][0]):
+		var f: Callable = steps[script_step][1]
+		f.call()
+		script_step += 1
+
+
+## BOT_VR: squeeze the fake trigger, swing the hand towards the nearest snowman, let go.
+func _drive_vr(p, delta: float) -> void:
+	vr_t += delta
+	var best = null
+	var best_d := INF
+	for s in get_tree().get_nodes_in_group("snowmen"):
+		var dd: float = s.global_position.distance_to(p.global_position)
+		if dd < best_d:
+			best_d = dd
+			best = s
+	if best == null:
+		p.bot_squeeze = 0.0
+		return
+	var to: Vector3 = best.global_position - p.global_position
+	to.y = 0.0
+	if to.length() > 0.1:
+		p.xr_origin.global_basis = Basis(Vector3.UP, atan2(-to.x, -to.z))
+	var c := fmod(vr_t, 1.2)
+	if c < 0.5:
+		p.bot_squeeze = 1.0
+		p.hand_r.position = Vector3(0.3, 1.3, 0.25)  # wind up behind the shoulder
+	elif c < 0.62:
+		p.bot_squeeze = 1.0
+		var k := (c - 0.5) / 0.12
+		p.hand_r.position = Vector3(0.3, 1.3 + k * 0.3, 0.25 - k * 0.9)  # swing forward
+	else:
+		if p.bot_squeeze > 0.0:
+			vr_throws += 1
+			if vr_throws % 5 == 1:
+				print("Bot VR: throw %d" % vr_throws)
+		p.bot_squeeze = 0.0
 
 
 func _report() -> void:
@@ -60,6 +143,11 @@ func _report() -> void:
 			" repairing" if p.repairing else ""])
 	if main.view_grid:
 		print("Bot: views grid columns=%d shown=%d" % [main.view_grid.columns, main.view_grid.get_children().filter(func(c): return c.visible).size()])
+	var kinds := {}
+	for s in get_tree().get_nodes_in_group("snowmen"):
+		kinds[s.kind] = int(kinds.get(s.kind, 0)) + 1
+	var d = main.director()
+	print("Bot:   kinds=%s event=%s upgrades=%s won=%s night=%.2f boss=%s" % [kinds, d.event_name, d.upgrades, d.won, d.night, main.boss_text()])
 	print("t=%.0f mode=%s playing=%d wave=%d score=%d fort=%d%% snowmen=%d cocoa=%d balls=%d over=%s | %s" % [t, main.net.mode, main.party_size(), main.wave, main.score,
 		int(main.fort_fraction() * 100.0), get_tree().get_nodes_in_group("snowmen").size(), get_tree().get_nodes_in_group("cocoa").size(),
 		main.get_children().filter(func(c): return c.get("spin") != null).size(), main.game_over, ", ".join(ps)])

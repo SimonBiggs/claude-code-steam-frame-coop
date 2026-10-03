@@ -89,7 +89,7 @@ func _process(delta: float) -> void:
 	name_label.position = Vector2(28, size.y - 92)
 	bar.position = Vector2(28, size.y - 52)
 	bar.value = player.hp
-	name_label.text = "P%d  WARMTH" % (player.index + 1)
+	name_label.text = "P%d  WARMTH%s" % [player.index + 1, "      ★ MEGA SNOWBALL READY - throw it!" if player.mega else ""]
 	var text := ""
 	if player.is_down:
 		text = "BRRR! You're frozen solid!\nA friend can stand next to you to thaw you out"
@@ -156,7 +156,7 @@ func _draw_map(rc: Vector2, radius: float) -> void:
 		draw_circle(rc + q, clampf(s.s * 3.5, 3.0, 9.0), Color(0.75, 0.88, 1.0) if s.kind != "king" else Color(1.0, 0.8, 0.3))
 	for cup in get_tree().get_nodes_in_group("cocoa"):
 		var q := _map_point(cup.global_position, inv, k, radius)
-		draw_rect(Rect2(rc + q - Vector2(4, 4), Vector2(8, 8)), Color(0.75, 0.45, 0.25))
+		draw_rect(Rect2(rc + q - Vector2(4, 4), Vector2(8, 8)), Color(0.6, 0.85, 1.0) if cup.kind == "mega" else Color(0.75, 0.45, 0.25))
 	for partner in main.players:
 		if partner == player or not partner.active:
 			continue

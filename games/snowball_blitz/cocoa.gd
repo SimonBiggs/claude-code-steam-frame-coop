@@ -1,7 +1,9 @@
 extends Node3D
 ## A steaming mug of hot cocoa: walk over it (or grab it in VR) to warm up.
+## kind "mega": a glowing MEGA SNOWBALL instead (your next throw is a giant one).
 
 var main
+var kind := "cocoa"
 var ghost := false
 var net_id := 0
 var life := 25.0
@@ -14,6 +16,9 @@ func _ready() -> void:
 	t = randf() * 5.0
 	mug = Node3D.new()
 	add_child(mug)
+	if kind == "mega":
+		_build_mega()
+		return
 	var cup := CylinderMesh.new()
 	cup.top_radius = 0.17
 	cup.bottom_radius = 0.14
@@ -71,6 +76,39 @@ func _ready() -> void:
 	mug.add_child(steam)
 	mug.scale = Vector3.ONE * 0.1
 	create_tween().tween_property(mug, "scale", Vector3.ONE * 1.6, 0.5).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+
+func _build_mega() -> void:
+	life = 30.0
+	var ball := _part(main.sphere_mesh(0.32), main.make_material(Color(0.8, 0.92, 1.0), 1.8), Vector3(0, 0.3, 0))
+	ball.name = "Ball"
+	var ring := TorusMesh.new()
+	ring.inner_radius = 0.45
+	ring.outer_radius = 0.55
+	ring.rings = 20
+	ring.ring_segments = 4
+	var r := MeshInstance3D.new()
+	r.mesh = ring
+	r.material_override = main.make_material(Color(0.5, 0.8, 1.0), 3.0)
+	r.position.y = 0.03
+	r.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(r)
+	var sparkle := CPUParticles3D.new()
+	sparkle.amount = 10
+	sparkle.lifetime = 1.0
+	sparkle.direction = Vector3.UP
+	sparkle.spread = 60.0
+	sparkle.initial_velocity_min = 0.4
+	sparkle.initial_velocity_max = 0.9
+	sparkle.gravity = Vector3(0, -0.5, 0)
+	var q := BoxMesh.new()
+	q.size = Vector3.ONE * 0.05
+	q.material = main.make_material(Color(0.7, 0.9, 1.0), 4.0)
+	sparkle.mesh = q
+	sparkle.position.y = 0.3
+	mug.add_child(sparkle)
+	mug.scale = Vector3.ONE * 0.1
+	create_tween().tween_property(mug, "scale", Vector3.ONE * 1.3, 0.5).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 
 func _part(mesh: Mesh, mat: Material, pos: Vector3) -> MeshInstance3D:

@@ -20,7 +20,7 @@ const MOUSE_SENS := 0.0028
 const CHARGE_TIME := 0.9
 const THROW_COOLDOWN := 0.3
 const REPAIR_RATE := 24.0
-const PACK_TIME := 1.3
+const PACK_TIME := 0.7  # family feedback: quicker packing (was 1.3 s)
 const KEYS := [
 	{"up": KEY_W, "down": KEY_S, "left": KEY_A, "right": KEY_D, "throw": KEY_SPACE, "repair": KEY_E},
 	{"up": KEY_UP, "down": KEY_DOWN, "left": KEY_LEFT, "right": KEY_RIGHT, "throw": KEY_ENTER, "repair": KEY_CTRL},
@@ -58,6 +58,7 @@ var puff_t := 0.0
 var bot_throw := false
 var bot_repair := false
 var bot_move := Vector3.ZERO
+var bot_squeeze := 0.0  # BOT_VR: the fake right trigger
 
 # Visuals.
 var pivot: Node3D
@@ -88,6 +89,8 @@ var pack_pulse := 0.0
 var hint_t := 0.0
 var lid: Node3D
 var hand_ball: MeshInstance3D
+var hand_label: Label3D
+var mega := false  # MEGA SNOWBALL pickup: the next throw is a giant one (host decides, mirrored)
 
 # Networked co-op.
 var remote := false
@@ -484,8 +487,13 @@ func _update_throw(delta: float) -> void:
 			charging = false
 			throw_cd = THROW_COOLDOWN
 			throw_anim = 1.0
-			main.player_throw(self, _throw_origin(), _throw_velocity(c), 0.11 + 0.05 * c, 1.0 + c)
-			main.sound("dash", -6.0, 0.8 + c * 0.3)
+			if mega:
+				mega = false  # the host clears its copy when the throw arrives
+				main.player_throw(self, _throw_origin(), _throw_velocity(maxf(c, 0.6)), main.MEGA_R, main.MEGA_DMG)
+				main.sound("whoosh", -2.0, 0.8)
+			else:
+				main.player_throw(self, _throw_origin(), _throw_velocity(c), 0.11 + 0.05 * c, 1.0 + c)
+				main.sound("dash", -6.0, 0.8 + c * 0.3)
 	_update_marker()
 
 
@@ -539,7 +547,7 @@ func _update_viewmodel(delta: float) -> void:
 	view_hand.visible = not is_down
 	var c := charge()
 	view_ball.visible = throw_anim <= 0.3
-	view_ball.scale = Vector3.ONE * (1.0 + c * 0.45)
+	view_ball.scale = Vector3.ONE * (2.4 if mega else (1.0 + c * 0.45))
 	# Wind up while charging, snap forward on release, bob while packing walls.
 	var wind := Vector3(0.04, -0.02, 0.18) * c
 	var fling := Vector3(-0.08, 0.1, -0.25) * throw_anim
@@ -560,7 +568,8 @@ func _drop_held() -> void:
 # --- VR: scoop, pack and throw for real ----------------------------------------
 
 func _squeeze(hand: XRController3D) -> float:
-	return maxf(hand.get_float("trigger"), hand.get_float("grip"))
+	var v := maxf(hand.get_float("trigger"), hand.get_float("grip"))
+	return maxf(v, bot_squeeze) if hand == hand_r else v
 
 
 func _hand_low(hand: XRController3D) -> bool:
@@ -577,14 +586,17 @@ func _vr_hands(delta: float) -> void:
 	var down := sq > 0.55 or (squeeze_was and sq > 0.35)
 	if not holding:
 		if down and not squeeze_was:
-			if _hand_low(hand_r):
-				holding = true
-				pack = 0.0
-				hand_r.trigger_haptic_pulse("haptic", 0.0, 0.45, 0.08, 0.0)
-				main.sound("spit", -8.0, 1.4)
-				main.puff(hand_r.global_position, Color(1, 1, 1), 8, 0.05)
-			else:
-				hint_t = 2.5
+			# Family feedback (tired arms): a snowball appears wherever you squeeze; reaching down to the
+			# snow still gives a bigger, half-packed one.
+			holding = true
+			pack = 0.5 if _hand_low(hand_r) else 0.0
+			if mega:
+				pack = 1.0
+			hand_r.trigger_haptic_pulse("haptic", 0.0, 0.45, 0.08, 0.0)
+			main.sound("spit", -8.0, 1.4)
+			main.puff(hand_r.global_position, Color(1, 1, 1), 8, 0.05)
+			if pack > 0.0 and not mega:
+				hint_t = 0.0
 	else:
 		if down:
 			pack = minf(1.0, pack + delta / PACK_TIME)
@@ -598,7 +610,10 @@ func _vr_hands(delta: float) -> void:
 	hint_t -= delta
 	hand_ball.visible = holding
 	var r := 0.07 + 0.06 * pack
+	if mega and holding:
+		r = 0.22
 	hand_ball.scale = Vector3.ONE * r
+	_update_hand_label()
 
 
 func _vr_throw(now: float) -> void:
@@ -613,10 +628,19 @@ func _vr_throw(now: float) -> void:
 				v = (p_now - (hand_hist[i][1] as Vector3)) / age
 			break
 	v = (v * 1.6).limit_length(34.0)
-	if v.length() > 4.0:
+	# A gentle flick still flies: boost slow throws (tired arms), then the aim assist bends it on target.
+	if v.length() > 2.0 and v.length() < 13.0:
+		v = v.normalized() * lerpf(13.0, v.length(), 0.3)
+	if v.length() > 2.0:
 		v = main.assist_aim(p_now, v)
 	var r := 0.09 + 0.07 * pack
-	main.player_throw(self, p_now + v.normalized() * 0.12, v, r, 1.5 + 2.5 * pack)
+	var dmg := 1.5 + 2.5 * pack
+	if mega:
+		mega = false
+		r = main.MEGA_R
+		dmg = main.MEGA_DMG
+		main.sound("whoosh", -2.0, 0.8)
+	main.player_throw(self, p_now + v.normalized() * 0.12, v, r, dmg)
 	hand_r.trigger_haptic_pulse("haptic", 0.0, 0.7, 0.06, 0.0)
 	main.sound("dash", -4.0, 0.7 + v.length() * 0.015)
 	pack = 0.0
@@ -765,14 +789,37 @@ func _vr_update(_delta: float) -> void:
 	var status := ""
 	if is_down:
 		status = "FROZEN! A friend can thaw you"
-	elif hint_t > 0.0:
-		status = "Reach DOWN to the snow to scoop!"
+	elif mega:
+		status = "MEGA SNOWBALL ready - squeeze and throw!"
 	elif holding:
 		status = "Packing… %d%%  - throw and let go!" % int(pack * 100.0)
 	if main.net.mode == "host" and not main.net.connected:
 		status = "Waiting for the TV players…"
 	var boss: String = main.boss_text()
 	wrist_label.text = "WAVE %d   SCORE %d\nWARMTH %d   FORT %d%%\n%s%s" % [main.wave, main.score, maxi(0, int(hp)), int(main.fort_fraction() * 100.0), boss + "\n" if boss != "" else "", status]
+
+
+## VR: warmth, fort and power-ups right above the throwing mitten, where the VR player always looks.
+func _update_hand_label() -> void:
+	if hand_label == null:
+		hand_label = Label3D.new()
+		hand_label.font_size = 44
+		hand_label.outline_size = 14
+		hand_label.pixel_size = 0.0007
+		hand_label.no_depth_test = true
+		hand_label.render_priority = 6
+		hand_r.add_child(hand_label)
+		hand_label.position = Vector3(0.0, 0.11, 0.03)
+		hand_label.rotation_degrees = Vector3(-30, 0, 0)
+		_set_layers(hand_label, viewmodel_layer())
+	var lines: Array[String] = ["WARMTH %d   FORT %d%%" % [maxi(0, int(hp)), int(main.fort_fraction() * 100.0)]]
+	if mega:
+		lines.append("MEGA SNOWBALL!")
+	var boss: String = main.boss_text()
+	if boss != "":
+		lines.append(boss)
+	hand_label.text = "\n".join(lines)
+	hand_label.modulate = Color(0.7, 0.9, 1.0) if mega else (Color(1.0, 0.5, 0.4) if hp < 30.0 else Color(1.0, 0.92, 0.75))
 
 
 # --- Warmth, freezing and thawing --------------------------------------------
@@ -904,6 +951,8 @@ func apply_remote_state(pos: Vector3, new_yaw: float, new_pitch: float) -> void:
 func apply_net_state(st: Array) -> void:
 	hp = st[3]
 	revive_progress = st[5]
+	if st.size() > 8 and st[8] is bool:
+		mega = st[8]
 	var on: bool = st[6]
 	if on != active:
 		set_active(on)
@@ -913,10 +962,10 @@ func apply_net_state(st: Array) -> void:
 		yaw = st[1]
 		pitch = st[2]
 		net_held = st[7]
-		if st.size() > 10:
-			net_head = st[8]
-			net_hand = st[9]
-			net_lhand = st[10]
+		if st.size() > 11:
+			net_head = st[9]
+			net_hand = st[10]
+			net_lhand = st[11]
 		if not net_started:
 			net_started = true
 			global_position = net_target

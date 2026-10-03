@@ -15,6 +15,19 @@ const MusicScript := preload("res://core/music.gd")
 const NetScript := preload("res://core/net.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
 const JoinInputScript := preload("res://games/snowball_blitz/join_input.gd")
+const DirectorScript := preload("res://games/snowball_blitz/director.gd")
+
+## Waves 4 and 8 bring the Snow King; wave 12 is the finale with the YETI. Then endless mode.
+const FINALE_WAVE := 12
+const MEGA_R := 0.45
+const MEGA_DMG := 6.0
+const MEGA_SPLASH := 2.6
+const EXTRA_SOUNDS := {
+	"whoosh": [0.4, 300.0, 900.0, 0.25, "sine", 0.6],
+	"thud": [0.4, 160.0, 40.0, 0.6, "saw", 0.6],
+	"fanfare": [1.6, 392.0, 1568.0, 0.4, "tri", 0.0],
+	"roar": [0.9, 150.0, 45.0, 0.6, "saw", 0.45],
+}
 
 const ARENA_RADIUS := 20.0
 const FORT_RADIUS := 6.0
@@ -80,6 +93,8 @@ var join_listener: Node
 var pad_memory := {}  # joypad device id -> player index it last controlled (rejoins on reconnect)
 var join_sent := {}  # player index -> msec of the last join request sent to the host
 var boss_hp := -1.0  # fraction, -1 when no Snow King is around
+var boss_name := ""
+var dir_node: Node
 
 var seg_hp: Array[float] = []
 var seg_nodes: Array = []  # per segment: {stack, mat, bar, bar_mat, shape}
@@ -271,6 +286,10 @@ func sound(sound_name: String, volume_db: float = 0.0, pitch: float = 1.0) -> vo
 	if sfx == null:
 		sfx = SfxScript.new()
 		add_child(sfx)
+	if not sfx.has_meta("sb_sounds") and sfx.has_method("add_sound"):
+		sfx.set_meta("sb_sounds", true)
+		for k in EXTRA_SOUNDS:
+			sfx.add_sound(k, EXTRA_SOUNDS[k])
 	sfx.play(sound_name, volume_db, pitch)
 	if net:
 		net.event("sound", [sound_name, volume_db, pitch])
@@ -431,6 +450,15 @@ func _update_fort_visuals(delta: float) -> void:
 		stack.scale = Vector3(1.0, maxf(0.08, shown), 1.0)
 		var m: StandardMaterial3D = n.mat
 		m.albedo_color = Color(0.62, 0.7, 0.9).lerp(Color(0.9, 0.94, 1.0), frac)
+		if director().ice_walls():
+			# ICE WALLS upgrade: shiny, blue and faintly glowing.
+			m.albedo_color = m.albedo_color.lerp(Color(0.6, 0.85, 1.0), 0.6)
+			if not m.emission_enabled:
+				m.emission_enabled = true
+				m.emission = Color(0.3, 0.6, 1.0)
+				m.emission_energy_multiplier = 0.3
+				m.metallic = 0.4
+				m.roughness = 0.25
 		var bar: MeshInstance3D = n.bar
 		bar.visible = frac < 0.97
 		bar.scale = Vector3(maxf(frac, 0.02), 1.0, 1.0)
@@ -471,6 +499,8 @@ func seg_hit(p: Vector3, r: float) -> int:
 func damage_segment(i: int, amount: float) -> void:
 	if seg_hp[i] <= 0.0:
 		return
+	if director().ice_walls():
+		amount *= 0.65
 	seg_hp[i] = maxf(0.0, seg_hp[i] - amount)
 	if seg_hp[i] <= 0.0:
 		var c := seg_center(i)
@@ -556,28 +586,40 @@ func lob_velocity(from: Vector3, to: Vector3, speed: float) -> Vector3:
 	return (to - from) / flight + Vector3.UP * 0.5 * GRAVITY * flight
 
 
-## VR aim assist: bend a real throw slightly toward a snowman it was nearly aimed at.
+## VR aim assist (kids' arms get tired): a throw roughly towards a snowman (within 14 degrees) is bent
+## onto a lob that reaches it at the same throwing speed, keeping a bit of the real throw.
 func assist_aim(from: Vector3, v: Vector3) -> Vector3:
 	var flat := Vector3(v.x, 0, v.z)
 	if flat.length() < 0.5:
 		return v
-	var best_angle := deg_to_rad(7.0)
-	var best = null
+	var best_angle := deg_to_rad(14.0)
+	var best_pt := Vector3.ZERO
+	var found := false
 	for s in get_tree().get_nodes_in_group("snowmen"):
-		var to: Vector3 = s.global_position - from
+		if s.dead:
+			continue
+		var pt: Vector3 = s.global_position + Vector3.UP * s.height * 0.5
+		for bn in s.balloon_nodes:
+			if bn.visible:
+				pt = bn.global_position  # balloon snowmen: aim for the balloons
+				break
+		var to: Vector3 = pt - from
 		to.y = 0.0
 		if to.length() < 1.0 or to.length() > 30.0:
 			continue
 		var ang := flat.angle_to(to)
 		if ang < best_angle:
 			best_angle = ang
-			best = s
-	if best == null:
+			best_pt = pt
+			found = true
+	if not found:
 		return v
-	var to2: Vector3 = best.global_position - from
-	to2.y = 0.0
-	var turn := flat.signed_angle_to(to2, Vector3.UP)
-	return v.rotated(Vector3.UP, turn * 0.8)
+	var to2 := best_pt - from
+	var hd := Vector2(to2.x, to2.z).length()
+	var hspeed := maxf(flat.length(), 6.0)
+	var flight := clampf(hd / hspeed, 0.15, 2.5)
+	var ideal := Vector3(to2.x, 0.0, to2.z).normalized() * (hd / flight) + Vector3.UP * ((to2.y + 0.5 * GRAVITY * flight * flight) / flight)
+	return v.lerp(ideal, 0.7)
 
 
 ## Called by every snowball each step. Returns true if it hit something (and should vanish).
@@ -588,14 +630,32 @@ func ball_step(b) -> bool:
 	var real: bool = not b.visual_only and net.mode != "client"
 	if p.y <= r * 0.5:
 		puff(Vector3(p.x, 0.05, p.z), Color(1, 1, 1), 6, 0.05)
+		if b.team == "p" and real:
+			if r >= MEGA_R * 0.9:
+				_mega_splash(Vector3(p.x, 0.0, p.z), b.owner_index)
+			else:
+				director().on_miss(b.owner_index)
+		elif r >= MEGA_R * 0.9:
+			puff(Vector3(p.x, 0.2, p.z), Color(1, 1, 1), 30, 0.12)
 		return true
 	if b.team == "p":
 		for s in get_tree().get_nodes_in_group("snowmen"):
-			if s.dead or not s.hit_test(p, r):
+			if s.dead:
+				continue
+			var bi: int = s.balloon_hit(p, r)
+			if bi >= 0:
+				if real:
+					s.pop_balloon(bi)
+					stat_add(b.owner_index, "pops", 1)
+					director().on_hit(b.owner_index, p)
+				return true
+			if not s.hit_test(p, r):
 				continue
 			puff(p, Color(1, 1, 1), 10, 0.07)
 			if real:
 				_on_snowman_hit(s, b)
+			elif r >= MEGA_R * 0.9:
+				puff(p, Color(1, 1, 1), 30, 0.12)
 			return true
 		return false
 	for pl in players:
@@ -625,6 +685,16 @@ func ball_step(b) -> bool:
 
 func _on_snowman_hit(s, b) -> void:
 	var who: int = b.owner_index
+	var mega: bool = b.radius >= MEGA_R * 0.9
+	if mega:
+		_mega_splash(s.global_position, who)
+	if s.shield_blocks(b.vel):
+		s.hit_shield(mega)
+		stat_add(who, "hits", 1)
+		if s.shield_hp > 0:
+			director().hint("Their ICE SHIELD blocks flat throws - LOB a high one over it, or hit them from the side!", 4.0, "shield_tip")
+			return
+	director().on_hit(who, s.global_position + Vector3.UP * s.height)
 	s.take_hit(b.damage, b.vel, who)
 	sound("hit", -6.0, 1.3 if b.radius < 0.15 else 0.9)
 	if who >= 0 and who < players.size():
@@ -639,6 +709,61 @@ func _on_snowman_hit(s, b) -> void:
 			var dist: float = s.global_position.distance_to(p.global_position)
 			if dist > 10.0 and not s.dead:
 				popup(s.global_position + Vector3.UP * (s.height + 0.4), "SNIPE!", Color(1.0, 0.85, 0.4))
+
+
+## A MEGA SNOWBALL landed: knocks every snowman nearby.
+func _mega_splash(pos: Vector3, who: int) -> void:
+	print("Mega splash by P%d" % (who + 1))
+	puff(pos + Vector3.UP * 0.4, Color(1, 1, 1), 40, 0.14)
+	net.event("burst", [pos + Vector3.UP * 0.4, Color(1, 1, 1), 40, 0.14])
+	sound("thud", 0.0)
+	popup(pos + Vector3.UP * 2.0, "MEGA SPLASH!", Color(0.7, 0.9, 1.0))
+	for s in get_tree().get_nodes_in_group("snowmen"):
+		if s.dead:
+			continue
+		var to: Vector3 = s.global_position - pos
+		to.y = 0.0
+		if to.length() < MEGA_SPLASH + s.radius():
+			if s.shield_hp > 0:
+				s.hit_shield(true)
+			s.take_hit(MEGA_DMG * 0.5, to.normalized() * 8.0 if to.length() > 0.01 else Vector3.FORWARD, who)
+	for p in players:
+		if p.camera and not p.vr:
+			p.shake = maxf(p.shake, 0.35)
+
+
+## A glowing MEGA SNOWBALL to pick up (next throw is a giant one).
+func drop_mega(pos: Vector3) -> void:
+	if net.mode == "client":
+		return
+	for c in get_tree().get_nodes_in_group("cocoa"):
+		if c.kind == "mega":
+			return  # one at a time
+	var c := CocoaScript.new()
+	c.main = self
+	c.kind = "mega"
+	c.net_id = next_net_id()
+	c.position = Vector3(pos.x, 0, pos.z)
+	add_child(c)
+
+
+func director() -> Node:
+	if dir_node == null or not is_instance_valid(dir_node):
+		dir_node = DirectorScript.new()
+		dir_node.main = self
+		add_child(dir_node)
+	return dir_node
+
+
+## The yeti stomps: everyone's view shakes.
+func yeti_stomp(pos: Vector3) -> void:
+	for p in players:
+		if p.camera and not p.vr:
+			p.shake = maxf(p.shake, 0.6)
+		if p.vr:
+			p.hand_l.trigger_haptic_pulse("haptic", 0.0, 0.6, 0.2, 0.0)
+			p.hand_r.trigger_haptic_pulse("haptic", 0.0, 0.6, 0.2, 0.0)
+	popup(pos + Vector3.UP * 5.0, "STOMP!", Color(0.7, 0.85, 1.0))
 
 
 # --- Snowmen and waves -------------------------------------------------------
@@ -666,13 +791,17 @@ func _spawn_snowman(kind: String, pos: Vector3, grace: float = 0.8) -> void:
 	s.net_id = next_net_id()
 	s.spawn_grace = grace
 	s.position = pos
+	if kind == "yeti":
+		s.max_hp *= 1.0 + 0.25 * extra_players()
+		s.hp = s.max_hp
 	add_child(s)
+	director().on_snowman_spawned(kind)
 
 
-func summon_minions(pos: Vector3, count: int) -> void:
+func summon_minions(pos: Vector3, count: int, kind: String = "snowman") -> void:
 	for i in count:
 		var a := randf() * TAU
-		_spawn_snowman("snowman", pos + Vector3(cos(a), 0, sin(a)) * 2.5, 0.6)
+		_spawn_snowman(kind, pos + Vector3(cos(a), 0, sin(a)) * 2.5, 0.6)
 	burst(pos + Vector3.UP * 2.0, Color(0.6, 0.85, 1.0), 20, 0.12)
 	sound("wave", -4.0, 0.6)
 
@@ -690,10 +819,18 @@ func on_snowman_collapsed(s, who: int) -> void:
 		sound("kill", -4.0, 1.3)
 	collapse_fx(pos, size, s.kind)
 	popup(pos + Vector3.UP * (size * 2.4 + 0.3), "+%d" % pts, Color(1.0, 0.9, 0.6))
+	if s.kind != "king" and s.kind != "yeti" and randf() < (0.25 if s.kind == "giant" else 0.03):
+		drop_mega.call_deferred(pos)
 	for p in players:
 		if p.camera and not p.vr:
 			p.shake = maxf(p.shake, clampf(0.1 + size * 0.15 - p.global_position.distance_to(pos) * 0.01, 0.0, 0.6))
-	if s.kind == "king":
+	if s.kind == "yeti":
+		boss_hp = -1.0
+		_show_center("THE YETI IS DOWN!", 2.5)
+		sound("fanfare", 0.0)
+		for i in 4:
+			_drop_cocoa.call_deferred(pos + Vector3(randf_range(-2, 2), 0, randf_range(-2, 2)))
+	elif s.kind == "king":
 		boss_hp = -1.0
 		_show_center("THE SNOW KING MELTED!", 2.5)
 		for i in 3:
@@ -706,8 +843,14 @@ func _pick_kind() -> String:
 	var r := randf()
 	if wave >= 3 and r < 0.1 + wave * 0.012:
 		return "giant"
-	if wave >= 2 and r < 0.42:
+	if wave >= 2 and r < 0.34:
 		return "sled"
+	if wave >= 2 and r < 0.44:
+		return "bunny"
+	if wave >= 3 and r < 0.54:
+		return "balloon"
+	if wave >= 4 and r < 0.63:
+		return "shield"
 	return "snowman"
 
 
@@ -723,7 +866,13 @@ func _spawn_wave_snowman() -> void:
 		if dd > best_d:
 			best_d = dd
 			best_pos = pos
-	_spawn_snowman(_pick_kind(), best_pos)
+	var kind := _pick_kind()
+	if kind == "bunny":
+		var side := Vector3(best_pos.z, 0.0, -best_pos.x).normalized()
+		for i in 3:
+			_spawn_snowman("bunny", best_pos + side * (i - 1) * 1.1)
+		return
+	_spawn_snowman(kind, best_pos)
 
 
 func _start_wave() -> void:
@@ -735,13 +884,27 @@ func _start_wave() -> void:
 	sound("wave")
 	if wave == 3:
 		create_tween().tween_property(help_label, "modulate:a", 0.0, 1.0)
-	if wave % BOSS_EVERY == 0:
+	var boss := ""
+	if wave == FINALE_WAVE:
+		boss = "yeti"
+	elif wave % BOSS_EVERY == 0:
+		boss = "king" if (wave / BOSS_EVERY) % 2 == 1 or wave < FINALE_WAVE else "yeti"
+	director().on_wave_started(wave, boss)
+	if boss != "":
 		to_spawn /= 2
 		var a := randf() * TAU
-		_spawn_snowman("king", Vector3(cos(a), 0, sin(a)) * (ARENA_RADIUS - 1.0), 1.5)
-		_show_center("WAVE %d\nTHE SNOW KING APPROACHES!" % wave, 2.0)
+		_spawn_snowman(boss, Vector3(cos(a), 0, sin(a)) * (ARENA_RADIUS - 1.0), 1.5)
+		if boss == "yeti" and wave == FINALE_WAVE:
+			_show_center("FINAL WAVE!\nTHE YETI IS COMING!", 2.5)
+			sound("roar", 0.0, 0.7)
+		elif boss == "yeti":
+			_show_center("WAVE %d\nTHE YETI IS BACK!" % wave, 2.0)
+		else:
+			_show_center("WAVE %d\nTHE SNOW KING APPROACHES!" % wave, 2.0)
+	elif wave < FINALE_WAVE:
+		_show_center("WAVE %d of %d" % [wave, FINALE_WAVE], 1.4)
 	else:
-		_show_center("WAVE %d" % wave, 1.4)
+		_show_center("WAVE %d\nENDLESS" % wave, 1.4)
 
 
 func _end_wave() -> void:
@@ -756,7 +919,16 @@ func _end_wave() -> void:
 			p.revive(0.5)
 		else:
 			p.heal(30.0)
-	_show_center("WAVE %d CLEARED!\nThe fort gets a fresh layer of snow" % wave, 2.6)
+	var upgrade: String = director().on_wave_cleared(wave)
+	if wave == FINALE_WAVE and not director().won:
+		director().won = true
+		break_timer = 14.0
+		score += 2000
+		sound("fanfare", 0.0)
+		print("VICTORY: the village is safe (score %d)" % score)
+		_show_center("VICTORY!\nThe YETI is beaten and the village is safe!\n+2000\n\n%s\n\nEndless snowball fight next…" % director().awards_text(), 13.0)
+		return
+	_show_center("WAVE %d CLEARED!\nThe fort gets a fresh layer of snow%s" % [wave, upgrade], 2.6)
 	sound("clear")
 	print("Wave %d cleared, score %d, fort %d%%" % [wave, score, int(fort_fraction() * 100.0)])
 
@@ -791,6 +963,18 @@ func _update_cocoa(delta: float) -> void:
 					or Vector2(p.global_position.x - at.x, p.global_position.z - at.z).length() < 0.8
 			else:
 				got = Vector2(p.global_position.x - at.x, p.global_position.z - at.z).length() < 1.1
+			if got and c.kind == "mega":
+				if p.mega:
+					continue
+				p.mega = true
+				if p.vr:
+					p.hand_r.trigger_haptic_pulse("haptic", 0.0, 0.8, 0.15, 0.0)
+				burst(at, Color(0.7, 0.9, 1.0), 20, 0.09)
+				sound("pickup", 0.0, 0.6)
+				popup(at + Vector3.UP * 0.8, "MEGA SNOWBALL!", Color(0.7, 0.9, 1.0))
+				director().hint("MEGA SNOWBALL! Your next throw is GIANT and splashes every snowman nearby!", 4.0, "mega")
+				c.queue_free()
+				break
 			if got:
 				p.heal(45.0)
 				if p.vr:
@@ -837,7 +1021,7 @@ func extra_players() -> int:
 func boss_text() -> String:
 	if boss_hp < 0.0:
 		return ""
-	return "SNOW KING %d%%" % int(boss_hp * 100.0)
+	return "%s %d%%" % [boss_name if boss_name != "" else "SNOW KING", int(boss_hp * 100.0)]
 
 
 # --- Main loop ---------------------------------------------------------------
@@ -854,7 +1038,8 @@ func _process(delta: float) -> void:
 		add_child(music)
 		music.volume_db = -17.0
 	if music.has_method("play_track"):
-		music.play_track(maxi(wave - 1, 0) / 3)
+		music.play_track(1 if boss_hp >= 0.0 else maxi(wave - 1, 0) / 3)
+	director().tick(delta)
 	if ghost_cam:
 		ghost_cam.global_transform = players[0].net_head
 	if mirror_vp:
@@ -878,12 +1063,17 @@ func _process(delta: float) -> void:
 			get_tree().reload_current_scene()
 		return
 	if net.mode == "host" and not net.connected:
+		if wave == 0:
+			director().howto()  # the VR player reads how to play while waiting
 		return  # hold the waves until a TV player joins
+	if wave == 0:
+		director().howto()
 	_update_cocoa(delta)
 	boss_hp = -1.0
 	for s in get_tree().get_nodes_in_group("snowmen"):
-		if s.kind == "king" and not s.dead:
+		if (s.kind == "king" or s.kind == "yeti") and not s.dead:
 			boss_hp = maxf(0.0, s.hp / s.max_hp)
+			boss_name = "THE YETI" if s.kind == "yeti" else "SNOW KING"
 	if in_break:
 		break_timer -= delta
 		if break_timer <= 0.0:
@@ -918,13 +1108,8 @@ func _on_game_over(reason: String) -> void:
 	if score > int(best.score):
 		best_line = "NEW BEST SCORE!  (previous %d)" % best.score
 		_save_best(wave, score)
-	var lines: Array[String] = []
-	for p in players:
-		if not p.active:
-			continue
-		var st := stats_for(p.index)
-		lines.append("P%d: %d snowmen felled · %d hits · %d snow packed" % [p.index + 1, int(st.get("felled", 0.0)), int(st.get("hits", 0.0)), int(st.get("packed", 0.0))])
-	_show_center("%s\nWave %d  ·  Score %d\n%s\n%s\n\nPress A / Enter (VR: trigger) to play again" % [reason, wave, score, best_line, "\n".join(lines)], 0.0)
+	var saved := "The village was saved!  ·  " if director().won else ""
+	_show_center("%s\nWave %d  ·  Score %d\n%s%s\n\n%s\n\nPress A / Enter (VR: trigger) to play again" % [reason, wave, score, saved, best_line, director().awards_text()], 0.0)
 
 
 func _load_best() -> Dictionary:
@@ -1058,6 +1243,25 @@ func _build_views(mode: String) -> void:
 		_build_vr_mirror(cam)
 		if mode == "local":
 			_build_flat_window(players[1])
+	elif OS.has_environment("BOT_VR") and mode != "client":
+		# Test bots: the real VR code with XR nodes the bot moves by hand (no headset, no extra window).
+		print("BOT_VR: fake VR snowball thrower")
+		var origin := XROrigin3D.new()
+		add_child(origin)
+		origin.global_position = players[0].global_position
+		var cam := XRCamera3D.new()
+		origin.add_child(cam)
+		cam.position = Vector3(0.0, 1.5, 0.0)
+		var left := XRController3D.new()
+		left.tracker = "left_hand"
+		origin.add_child(left)
+		left.position = Vector3(-0.25, 1.1, -0.3)
+		var right := XRController3D.new()
+		right.tracker = "right_hand"
+		origin.add_child(right)
+		right.position = Vector3(0.25, 1.2, -0.3)
+		players[0].attach_xr(origin, cam, left, right)
+		_build_vr_mirror(cam)
 	else:
 		print("No VR headset: split screen")
 	_ensure_views()
@@ -1373,6 +1577,42 @@ func _request_leave(i: int) -> void:
 		_deactivate_player(i)
 
 
+## Test hooks: spawn a kind, start a weather event, jump to a wave, grant every fort upgrade.
+func debug_spawn(kind: String) -> void:
+	if net.mode == "client":
+		return
+	var a := randf() * TAU
+	var at := Vector3(cos(a), 0, sin(a)) * (ARENA_RADIUS - 1.0)
+	if kind == "bunny":
+		for i in 3:
+			_spawn_snowman("bunny", at + Vector3(i - 1, 0, 0))
+	else:
+		_spawn_snowman(kind, at)
+
+
+func debug_event(ev: String) -> void:
+	director().start_event(ev)
+
+
+func debug_skip_to_wave(n: int) -> void:
+	if net.mode == "client":
+		return
+	for sm in get_tree().get_nodes_in_group("snowmen"):
+		sm.remove_from_group("snowmen")
+		sm.queue_free()
+	to_spawn = 0
+	wave = n - 1
+	in_break = true
+	break_timer = 0.5
+
+
+func debug_upgrades() -> void:
+	for w in director().UPGRADES:
+		var u: Array = director().UPGRADES[w]
+		if not director().upgrades.has(u[0]):
+			director().upgrades.append(u[0])
+
+
 ## Test hook (bots / scripted demos): TV player i joins as if they pressed A on a new controller.
 func debug_join(i: int) -> void:
 	if i >= 0 and i < players.size() and _is_local_tv(players[i]) and not players[i].active:
@@ -1441,6 +1681,10 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 			stat_add(index, "thrown", 1)
 			var r: float = clampf(args[2], 0.05, 0.3)
 			var dmg: float = clampf(args[3], 0.5, 2.0)
+			if p.mega and float(args[2]) >= MEGA_R * 0.9:
+				p.mega = false
+				r = MEGA_R
+				dmg = MEGA_DMG
 			spawn_ball(args[0], args[1], r, dmg, "p", index)
 		"repair":
 			if p.active and not p.is_down:
@@ -1473,18 +1717,18 @@ func toggle_vr_pause() -> void:
 func make_snapshot() -> Array:
 	var ps := []
 	for p in players:
-		var st := [p.global_position, p.yaw, p.pitch, p.hp, p.is_down, p.revive_progress, p.active, p.held_amount()]
+		var st := [p.global_position, p.yaw, p.pitch, p.hp, p.is_down, p.revive_progress, p.active, p.held_amount(), p.mega]
 		if p.index == 0:
 			st.append_array([p.head_transform(), p.hand_transform(), p.left_hand_transform()])  # drawn on the TV
 		ps.append(st)
 	var sm := []
 	for s in get_tree().get_nodes_in_group("snowmen"):
 		if not s.dead:
-			sm.append([s.net_id, s.kind, s.global_position, s.rotation.y, s.hp / s.max_hp, s.bashing])
+			sm.append([s.net_id, s.kind, s.global_position, s.rotation.y, s.hp / s.max_hp, s.bashing, s.net_aux()])
 	var ck := []
 	for c in get_tree().get_nodes_in_group("cocoa"):
-		ck.append([c.net_id, c.global_position])
-	return [wave, score, game_over, seg_hp, ps, sm, ck, boss_hp]
+		ck.append([c.net_id, c.global_position, c.kind])
+	return [wave, score, game_over, seg_hp, ps, sm, ck, boss_hp, director().pack(), boss_name]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -1503,6 +1747,9 @@ func apply_snapshot(s: Array) -> void:
 	_sync_ghosts(s[5], "snowman")
 	_sync_ghosts(s[6], "cocoa")
 	boss_hp = s[7]
+	if s.size() > 9:
+		director().unpack(s[8])
+		boss_name = s[9]
 
 
 func _sync_ghosts(list: Array, kind: String) -> void:
@@ -1538,6 +1785,8 @@ func _make_ghost(kind: String, item: Array) -> Node3D:
 	c.ghost = true
 	c.net_id = item[0]
 	c.position = item[1]
+	if item.size() > 2:
+		c.kind = item[2]
 	add_child(c)
 	return c
 
@@ -1568,6 +1817,8 @@ func apply_event(kind: String, args: Array) -> void:
 			var mi: int = args[0]
 			if players[mi].hud:
 				players[mi].hud.hit_marker()
+		"hint", "catapult":
+			director().client_event(kind, args)
 
 
 # --- HUD ---------------------------------------------------------------------
@@ -1603,13 +1854,15 @@ func _build_hud() -> void:
 	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	help_label.text = "Controller: left stick move · right stick look · hold RT to charge a snowball, let go to throw · hold X / LB at a crumbling wall to pack it\n" \
 		+ "Keyboard: P1 WASD + mouse, hold click / Space to throw, E / right-click to pack  ·  P2 arrows, Enter throw, Ctrl pack\n" \
-		+ "More controllers: press A / Start to join (up to 6 TV players)  ·  Grab hot cocoa to warm up · stand next to a frozen friend to thaw them"
+		+ "More controllers: press A / Start to join (up to 6 TV players)  ·  Grab hot cocoa to warm up · stand next to a frozen friend to thaw them\n" \
+		+ "Survive %d waves and beat the YETI to save the village!" % FINALE_WAVE
 
 
 func _show_center(text: String, duration: float, broadcast: bool = true) -> void:
 	if net and broadcast:
 		net.event("center", [text, duration])
 	center_label.text = text
+	center_label.add_theme_font_size_override("font_size", 58 if text.count("\n") < 6 else 36)
 	center_label.modulate.a = 1.0
 	if center_tween:
 		center_tween.kill()
@@ -1623,10 +1876,14 @@ func _update_hud() -> void:
 	if net.mode == "client" and not synced:
 		info_label.text = "Syncing with the VR player…"
 		return
-	info_label.text = "WAVE %d      SCORE %d      FORT %d%%" % [wave, score, int(fort_fraction() * 100.0)]
+	var wave_text := ("WAVE %d / %d" % [wave, FINALE_WAVE]) if wave <= FINALE_WAVE and not director().won else ("WAVE %d  ENDLESS" % wave)
+	info_label.text = "%s      SCORE %d      FORT %d%%" % [wave_text, score, int(fort_fraction() * 100.0)]
 	var boss := boss_text()
 	if boss != "":
 		info_label.text += "      " + boss
+	var ev: String = director().event_name
+	if ev != "":
+		info_label.text += "\n" + str(director().EVENTS[ev][0])
 
 
 ## VR can't show 2D overlays: mirror the centre banner on a panel in front of the VR player.
