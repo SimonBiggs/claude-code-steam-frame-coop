@@ -1,0 +1,350 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.12"
+# dependencies = ["pillow", "numpy"]
+# ///
+"""gdev: run a Godot project in the background with hot reload and screen recording.
+
+  gdev start [DIR]        install the bridge autoload and launch the game detached
+  gdev run [DIR]          like start, but stays in the foreground until the game exits (for Steam)
+  gdev stop | status
+  gdev restart [--hard]   soft: reload the scene in place; hard: relaunch the process
+  gdev send CMD...        raw bridge command (pause, resume, record on|off, quit)
+  gdev log [-n N] [-e]    tail the game log (-e: only errors/warnings/gdev lines)
+  gdev shot [--screen]    capture the game now (or the whole desktop) and print the path
+  gdev frames             show the range of recorded frames
+  gdev at TIME [--span S] [--count N]
+                          frames around TIME plus change images in one sheet; TIME is
+                          now | -30s | 2m ago | 15:42 | 15:42:10 | unix epoch
+
+The project is found from -C DIR, then the current directory upward, then the last one started.
+"""
+import argparse
+import datetime as dt
+import os
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+GDEV_HOME = Path.home() / ".local/share/gdev"
+BRIDGE_SRC = GDEV_HOME / "bridge.gd"
+LAST_FILE = Path.home() / ".cache/gdev/last"
+AUTOLOAD_LINE = 'GDev="*res://addons/gdev/bridge.gd"'
+
+
+# --- Project helpers ---------------------------------------------------------
+
+def find_project(explicit: str | None) -> Path:
+    if explicit:
+        p = Path(explicit).expanduser().resolve()
+        if (p / "project.godot").exists():
+            return p
+        sys.exit(f"gdev: no project.godot in {p}")
+    for d in [Path.cwd(), *Path.cwd().parents]:
+        if (d / "project.godot").exists():
+            return d
+    if LAST_FILE.exists():
+        p = Path(LAST_FILE.read_text().strip())
+        if (p / "project.godot").exists():
+            return p
+    sys.exit("gdev: no Godot project found (use -C DIR)")
+
+
+def dev_dir(proj: Path) -> Path:
+    d = proj / ".dev"
+    d.mkdir(exist_ok=True)
+    (d / ".gdignore").touch()
+    return d
+
+
+def pid_of(proj: Path) -> int | None:
+    f = proj / ".dev/pid"
+    if not f.exists():
+        return None
+    try:
+        pid = int(f.read_text())
+        os.kill(pid, 0)
+        return pid
+    except (ValueError, ProcessLookupError, PermissionError):
+        return None
+
+
+def install(proj: Path) -> None:
+    dst = proj / "addons/gdev/bridge.gd"
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if not dst.exists() or dst.read_bytes() != BRIDGE_SRC.read_bytes():
+        shutil.copyfile(BRIDGE_SRC, dst)
+    cfg = proj / "project.godot"
+    text = cfg.read_text()
+    if AUTOLOAD_LINE not in text:
+        if "[autoload]" in text:
+            text = text.replace("[autoload]\n", f"[autoload]\n\n{AUTOLOAD_LINE}\n", 1)
+        else:
+            text = text.rstrip() + f"\n\n[autoload]\n\n{AUTOLOAD_LINE}\n"
+        cfg.write_text(text)
+    dev_dir(proj)
+
+
+def send(proj: Path, line: str) -> None:
+    if not pid_of(proj):
+        sys.exit("gdev: game is not running (gdev start)")
+    cmd = dev_dir(proj) / "cmd"
+    tmp = cmd.with_suffix(".tmp")
+    existing = cmd.read_text() if cmd.exists() else ""
+    tmp.write_text(existing + line + "\n")
+    tmp.replace(cmd)
+
+
+# --- Commands ----------------------------------------------------------------
+
+def cmd_run(proj: Path, args) -> None:
+    """Foreground launch (for Steam shortcuts): replaces any running instance and waits for the game."""
+    if pid_of(proj):
+        cmd_stop(proj, args)
+    args.wait = True
+    cmd_start(proj, args)
+
+
+def cmd_start(proj: Path, args) -> None:
+    if pid := pid_of(proj):
+        print(f"already running (pid {pid}); use gdev restart [--hard]")
+        return
+    install(proj)
+    d = dev_dir(proj)
+    log = d / "game.log"
+    if log.exists():
+        log.replace(d / "game.log.1")
+    godot = shutil.which("godot") or str(Path.home() / ".local/bin/godot")
+    with open(log, "w") as out:
+        p = subprocess.Popen([godot, "--path", str(proj)], stdout=out, stderr=subprocess.STDOUT,
+                             stdin=subprocess.DEVNULL, start_new_session=True)
+    (d / "pid").write_text(str(p.pid))
+    LAST_FILE.parent.mkdir(parents=True, exist_ok=True)
+    LAST_FILE.write_text(str(proj))
+    for _ in range(50):
+        time.sleep(0.2)
+        if p.poll() is not None:
+            print(log.read_text()[-3000:])
+            sys.exit(f"gdev: game exited with code {p.returncode}")
+        if "bridge ready" in log.read_text(errors="replace"):
+            break
+    print(f"started {proj.name} (pid {p.pid}), log: {log}")
+    if getattr(args, "wait", False):
+        sys.exit(p.wait())
+
+
+def cmd_stop(proj: Path, args) -> None:
+    pid = pid_of(proj)
+    if not pid:
+        print("not running")
+        return
+    os.killpg(pid, signal.SIGTERM)
+    for _ in range(25):
+        time.sleep(0.2)
+        if not pid_of(proj):
+            break
+    else:
+        os.killpg(pid, signal.SIGKILL)
+    print("stopped")
+
+
+def cmd_restart(proj: Path, args) -> None:
+    if args.hard or not pid_of(proj):
+        cmd_stop(proj, args)
+        cmd_start(proj, args)
+    else:
+        send(proj, "restart")
+        print("scene restarted")
+
+
+def cmd_status(proj: Path, args) -> None:
+    pid = pid_of(proj)
+    print(f"{proj.name}: {'running, pid %d' % pid if pid else 'not running'}")
+    cmd_frames(proj, args)
+
+
+def cmd_send(proj: Path, args) -> None:
+    send(proj, " ".join(args.words))
+
+
+def cmd_log(proj: Path, args) -> None:
+    log = proj / ".dev/game.log"
+    if not log.exists():
+        sys.exit("no log yet")
+    lines = log.read_text(errors="replace").splitlines()
+    if args.errors:
+        keep = re.compile(r"ERROR|WARNING|SCRIPT|Parse Error|at: |\[gdev|backtrace|^\s+\[\d+\]")
+        lines = [l for l in lines if keep.search(l)]
+    print("\n".join(lines[-args.n:]))
+
+
+def cmd_shot(proj: Path, args) -> None:
+    d = dev_dir(proj)
+    if args.screen:
+        raw = d / "screen.png"
+        raw.unlink(missing_ok=True)
+        subprocess.run(["spectacle", "-b", "-n", "-f", "-o", str(raw)], check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        from PIL import Image
+        img = Image.open(raw).convert("RGB")
+        img.thumbnail((1600, 1600))
+        out = d / "screen.jpg"
+        img.save(out, quality=85)
+        print(out)
+        return
+    out = d / "shot.jpg"
+    out.unlink(missing_ok=True)
+    send(proj, f"shot {args.width}")
+    for _ in range(50):
+        time.sleep(0.1)
+        if out.exists():
+            print(out)
+            return
+    sys.exit("gdev: no screenshot arrived (is the window minimized?)")
+
+
+def frame_list(proj: Path) -> list[tuple[float, Path]]:
+    fdir = proj / ".dev/frames"
+    if not fdir.exists():
+        return []
+    return sorted((int(p.stem) / 1000.0, p) for p in fdir.glob("*.jpg") if p.stem.isdigit())
+
+
+def fmt_t(t: float) -> str:
+    return dt.datetime.fromtimestamp(t).strftime("%H:%M:%S.%f")[:-4]
+
+
+def cmd_frames(proj: Path, args) -> None:
+    fl = frame_list(proj)
+    if not fl:
+        print("no frames recorded")
+        return
+    print(f"{len(fl)} frames, {fmt_t(fl[0][0])} .. {fmt_t(fl[-1][0])} "
+          f"({(fl[-1][0] - fl[0][0]) / 60:.1f} min)")
+
+
+def parse_time(s: str) -> float:
+    s = s.strip().lower()
+    now = time.time()
+    if s == "now":
+        return now
+    m = re.fullmatch(r"-?(\d+(?:\.\d+)?)\s*(s|sec|m|min|h)?(?:\s*ago)?", s)
+    if m and (s.startswith("-") or "ago" in s or m.group(2)):
+        n = float(m.group(1))
+        unit = {"m": 60, "min": 60, "h": 3600}.get(m.group(2) or "s", 1)
+        return now - n * unit
+    if re.fullmatch(r"\d{9,}(\.\d+)?", s):
+        n = float(s)
+        return n / 1000.0 if n > 1e11 else n
+    m = re.fullmatch(r"(\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?", s)
+    if m:
+        today = dt.datetime.now()
+        t = today.replace(hour=int(m.group(1)), minute=int(m.group(2)), second=int(m.group(3) or 0),
+                          microsecond=int((m.group(4) or "0").ljust(6, "0")[:6]))
+        if t > today + dt.timedelta(minutes=1):
+            t -= dt.timedelta(days=1)
+        return t.timestamp()
+    return dt.datetime.fromisoformat(s).timestamp()
+
+
+def cmd_at(proj: Path, args) -> None:
+    import numpy as np
+    from PIL import Image, ImageDraw, ImageFont
+
+    t = parse_time(args.time)
+    fl = frame_list(proj)
+    if not fl:
+        sys.exit("no frames recorded")
+    window = [f for f in fl if abs(f[0] - t) <= args.span]
+    if len(window) < 2:
+        nearest = min(fl, key=lambda f: abs(f[0] - t))
+        if abs(nearest[0] - t) > max(args.span, 5):
+            sys.exit(f"no frames near {fmt_t(t)}; recorded {fmt_t(fl[0][0])} .. {fmt_t(fl[-1][0])}")
+        i = fl.index(nearest)
+        window = fl[max(0, i - 1): i + 2]
+    # Pick evenly spaced frames, always including the one closest to t.
+    if len(window) > args.count:
+        idx = {round(k * (len(window) - 1) / (args.count - 1)) for k in range(args.count)}
+        closest = min(range(len(window)), key=lambda k: abs(window[k][0] - t))
+        idx = sorted(idx | {closest})
+        while len(idx) > args.count:
+            drop = min((k for k in idx if k != closest), key=lambda k: abs(window[k][0] - t))
+            idx.remove(drop)
+        window = [window[k] for k in idx]
+
+    tile_w = 640
+    imgs = []
+    for _, p in window:
+        im = Image.open(p).convert("RGB")
+        imgs.append(im.resize((tile_w, round(im.height * tile_w / im.width))))
+    tile_h = imgs[0].height
+    arrs = [np.asarray(im, dtype=np.int16) for im in imgs]
+
+    def change_image(a, b):
+        diff = np.abs(b - a).sum(axis=2)
+        mask = diff > 45
+        gray = (np.asarray(Image.fromarray(b.astype(np.uint8)).convert("L"), dtype=np.float32) * 0.35)
+        out = np.stack([gray] * 3, axis=2)
+        strength = np.clip(diff / 200.0, 0.35, 1.0)[mask]
+        out[mask] = np.stack([255 * strength, 40 * strength, 200 * strength], axis=1)
+        return Image.fromarray(out.astype(np.uint8)), 100.0 * mask.mean()
+
+    font = ImageFont.load_default(size=20)
+    head = 30
+    rows = len(imgs) + 1
+    sheet = Image.new("RGB", (tile_w * 2, rows * (tile_h + head)), (20, 20, 24))
+    draw = ImageDraw.Draw(sheet)
+    report = []
+    for i, (ft, _) in enumerate(window):
+        y = i * (tile_h + head)
+        mark = "  <== target" if ft == min(window, key=lambda f: abs(f[0] - t))[0] else ""
+        draw.text((8, y + 4), f"{fmt_t(ft)}  ({ft - t:+.1f}s){mark}", fill=(255, 255, 255), font=font)
+        sheet.paste(imgs[i], (0, y + head))
+        if i > 0:
+            ci, pct = change_image(arrs[i - 1], arrs[i])
+            draw.text((tile_w + 8, y + 4), f"changed since previous: {pct:.1f}%", fill=(255, 120, 220), font=font)
+            sheet.paste(ci, (tile_w, y + head))
+            report.append(f"{fmt_t(window[i - 1][0])} -> {fmt_t(ft)}: {pct:.1f}% of pixels changed")
+    y = len(imgs) * (tile_h + head)
+    ci, pct = change_image(arrs[0], arrs[-1])
+    draw.text((8, y + 4), f"first -> last ({window[-1][0] - window[0][0]:.1f}s): {pct:.1f}% changed",
+              fill=(255, 120, 220), font=font)
+    sheet.paste(ci, (0, y + head))
+    sheet.paste(imgs[-1], (tile_w, y + head))
+    draw.text((tile_w + 8, y + 4), "last frame", fill=(255, 255, 255), font=font)
+
+    out = dev_dir(proj) / "at.jpg"
+    sheet.save(out, quality=85)
+    print(f"target {fmt_t(t)}; {len(window)} frames")
+    print("\n".join(report))
+    print("frames:\n" + "\n".join(f"  {fmt_t(ft)}  {p}" for ft, p in window))
+    print(out)
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(prog="gdev", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("-C", dest="project", help="project directory")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    s = sub.add_parser("start"); s.add_argument("dir", nargs="?")
+    s = sub.add_parser("run"); s.add_argument("dir", nargs="?")
+    sub.add_parser("stop")
+    s = sub.add_parser("restart"); s.add_argument("--hard", action="store_true")
+    sub.add_parser("status")
+    s = sub.add_parser("send"); s.add_argument("words", nargs="+")
+    s = sub.add_parser("log"); s.add_argument("-n", type=int, default=40); s.add_argument("-e", "--errors", action="store_true")
+    s = sub.add_parser("shot"); s.add_argument("--screen", action="store_true"); s.add_argument("--width", type=int, default=1600)
+    sub.add_parser("frames")
+    s = sub.add_parser("at"); s.add_argument("time")
+    s.add_argument("--span", type=float, default=3.0, help="seconds either side (default 3)")
+    s.add_argument("--count", type=int, default=5, help="max frames in the sheet (default 5)")
+    args = ap.parse_args()
+    proj = find_project(getattr(args, "dir", None) or args.project)
+    globals()["cmd_" + args.cmd](proj, args)
+
+
+if __name__ == "__main__":
+    main()

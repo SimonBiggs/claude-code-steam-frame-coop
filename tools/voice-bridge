@@ -1,0 +1,158 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.12"
+# dependencies = ["faster-whisper", "numpy", "sherpa-onnx"]
+# ///
+"""voice-bridge: live speech-to-text from the Steam Frame's microphone.
+
+Streams the headset mic (echo-cancelled, so game audio is removed) over SSH, splits it into
+utterances with a simple energy detector, transcribes each with faster-whisper, and appends
+"[HH:MM:SS] text" lines to the game's voice log (watched by Claude).
+"""
+import datetime as dt
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+import json
+
+import numpy as np
+import sherpa_onnx
+from faster_whisper import WhisperModel
+
+KEY = str(Path.home() / ".config/steamos-devkit/devkit_rsa")
+HOST = "steamos@frame"
+LOG = Path.home() / "GodotProjects/duo-arena/.dev/voice.log"
+RATE = 16000
+FRAME = 480  # 30 ms
+MODEL = sys.argv[1] if len(sys.argv) > 1 else "medium.en"
+
+# Whisper tends to "hear" these in noise; ignore them when they are the whole utterance.
+JUNK = {"", "you", "thank you", "thank you.", "thanks for watching!", "bye.", ".", "uh", "um", "hmm"}
+
+
+SPEAKER_MODEL = Path.home() / ".local/share/voice-bridge/wespeaker_en_voxceleb_resnet34_LM.onnx"
+SPEAKERS_FILE = Path.home() / ".local/share/voice-bridge/speakers.json"
+SAME_SPEAKER = 0.5  # cosine similarity needed to match a known voice
+# Only capitalised words count as names (Whisper capitalises names, not "scared"/"still"/"fun").
+NAME_RE = re.compile(r"\b(?:[Tt]his is|[Mm]y name is|I'm|I am)\s+([A-Z][a-z]+)\b")
+NOT_NAMES = {"not", "just", "going", "so", "the", "a", "really", "here", "fine", "good", "okay", "done", "dad", "mum", "mom"}
+
+
+class Speakers:
+    """Who is talking: match each utterance's voiceprint to known voices; "this is Simon" names a voice."""
+
+    def __init__(self) -> None:
+        cfg = sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=str(SPEAKER_MODEL), num_threads=2)
+        self.ex = sherpa_onnx.SpeakerEmbeddingExtractor(cfg)
+        self.voices: dict[str, list] = {}  # name -> [mean embedding, count]
+        if SPEAKERS_FILE.exists():
+            for name, (emb, n) in json.loads(SPEAKERS_FILE.read_text()).items():
+                self.voices[name] = [np.array(emb, dtype=np.float32), n]
+
+    def save(self) -> None:
+        SPEAKERS_FILE.write_text(json.dumps({k: [v[0].tolist(), v[1]] for k, v in self.voices.items()}))
+
+    def identify(self, audio: np.ndarray, text: str) -> str:
+        st = self.ex.create_stream()
+        st.accept_waveform(RATE, audio)
+        st.input_finished()
+        emb = np.array(self.ex.compute(st), dtype=np.float32)
+        emb /= np.linalg.norm(emb) + 1e-9
+        best, score = None, -1.0
+        for name, (mean, _) in self.voices.items():
+            sim = float(np.dot(emb, mean / (np.linalg.norm(mean) + 1e-9)))
+            if sim > score:
+                best, score = name, sim
+        name = best if best is not None and score >= SAME_SPEAKER else None
+        m = NAME_RE.search(text)
+        said = m.group(1) if m and m.group(1).lower() not in NOT_NAMES else None
+        if said:
+            if name and name != said and name.startswith("Speaker "):
+                self.voices[said] = self.voices.pop(name)  # name the anonymous voice
+            name = said
+        if name is None:
+            name = f"Speaker {sum(1 for k in self.voices if k.startswith('Speaker ')) + 1}"
+        mean, n = self.voices.get(name, [np.zeros_like(emb), 0])
+        if len(audio) > RATE:  # only learn from utterances over a second
+            self.voices[name] = [(mean * n + emb) / (n + 1), min(n + 1, 50)]
+            self.save()
+        elif name not in self.voices:
+            self.voices[name] = [emb, 1]
+        return name
+
+
+def log(text: str) -> None:
+    line = f"[{dt.datetime.now():%H:%M:%S}] {text}"
+    print(line, flush=True)
+    with open(LOG, "a") as f:
+        f.write(line + "\n")
+
+
+def main() -> None:
+    LOG.parent.mkdir(parents=True, exist_ok=True)
+    print(f"loading {MODEL}…", flush=True)
+    model = WhisperModel(MODEL, device="cpu", compute_type="int8", cpu_threads=6)
+    speakers = Speakers()
+    cmd = ["ssh", "-i", KEY, "-o", "BatchMode=yes", "-o", "ServerAliveInterval=5", HOST,
+           "XDG_RUNTIME_DIR=/run/user/1000 exec pw-record --target echo_cancel_source "
+           f"--rate {RATE} --channels 1 --format s16 -"]
+    backoff = 3
+    was_listening = False
+    while True:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        got_audio = False
+        noise = 300.0
+        speech: list[np.ndarray] = []
+        voiced = 0
+        silent = 0
+        pre: list[np.ndarray] = []
+        while True:
+            raw = proc.stdout.read(FRAME * 2)
+            if not raw or len(raw) < FRAME * 2:
+                break
+            if not got_audio:
+                got_audio = True
+                backoff = 3
+                if not was_listening:
+                    print("listening to the Steam Frame mic", flush=True)
+                    was_listening = True
+            chunk = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
+            rms = float(np.sqrt(np.mean(chunk * chunk)))
+            loud = rms > max(500.0, noise * 3.0)
+            if not speech:
+                noise = noise * 0.98 + rms * 0.02 if not loud else noise
+                pre = (pre + [chunk])[-10:]  # keep 300 ms before speech starts
+                voiced = voiced + 1 if loud else 0
+                if voiced >= 3:
+                    speech = pre[:]
+                    silent = 0
+                continue
+            speech.append(chunk)
+            silent = 0 if loud else silent + 1
+            too_long = len(speech) * FRAME > RATE * 15
+            if silent * FRAME > RATE * 0.8 or too_long:
+                audio = np.concatenate(speech) / 32768.0
+                speech, voiced = [], 0
+                if len(audio) < RATE * 0.5:
+                    continue
+                segments, _ = model.transcribe(audio, language="en", beam_size=1, without_timestamps=True,
+                                               condition_on_previous_text=False)
+                text = " ".join(s.text.strip() for s in segments).strip()
+                if text.lower().strip(" .!?") not in {j.strip(" .!?") for j in JUNK}:
+                    # Whisper often hears "Claude" as cloud/clawed/clod: tag requests aimed at Claude.
+                    addressed = re.search(r"\b(claude|cloud|clawed|clod|claud|clyde|lord|cora|clora)\b", text, re.I)
+                    who = speakers.identify(audio.astype(np.float32), text)
+                    log(("TO CLAUDE: " if addressed else "") + f"{who}: {text}")
+        proc.kill()
+        if was_listening and not got_audio or was_listening:
+            print("Steam Frame mic offline (headset off?) - will keep retrying quietly", flush=True)
+            was_listening = False
+        import time
+        time.sleep(backoff)
+        backoff = min(backoff * 2, 30)  # retry less often while the headset is off
+
+
+if __name__ == "__main__":
+    main()

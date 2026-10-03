@@ -1,0 +1,4 @@
+#!/bin/bash
+# duo-deploy-frame: push the whole Frame build (scripts + project settings + launcher) to the Steam Frame.
+K=~/.config/steamos-devkit/devkit_rsa
+rsync -az -e "ssh -i $K" --exclude .dev ~/GodotProjects/duo-arena-frame-build/ steamos@frame:devkit-game/DuoArena/ && echo "Frame updated"

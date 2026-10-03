@@ -1,0 +1,17 @@
+#!/bin/bash
+# duo-deploy "message" [file ...]: ship scripts from the staging copy to the TV (live project) and the
+# Steam Frame (hot-reloads on both), then commit the live project to git as a backup.
+set -e
+msg="$1"; shift
+ST=~/GodotProjects/.duo-arena-stage; LIVE=~/GodotProjects/duo-arena; B=~/GodotProjects/duo-arena-frame-build
+K=~/.config/steamos-devkit/devkit_rsa
+files=("$@"); [ ${#files[@]} -eq 0 ] && files=($(cd $ST/scripts && ls *.gd))
+for f in "${files[@]}"; do cp "$ST/scripts/$f" "$LIVE/scripts/$f"; cp "$ST/scripts/$f" "$B/game/scripts/$f"; done
+if timeout 4 bash -c 'echo > /dev/tcp/frame/22' 2>/dev/null; then
+  rsync -az -e "ssh -i $K" "$B/game/scripts/" steamos@frame:devkit-game/DuoArena/game/scripts/
+else
+  echo "Steam Frame offline: run 'duo-deploy-frame' when it's back" >&2
+fi
+cd "$LIVE" && git add -A && git commit -q -m "$msg
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" && git log --oneline -1

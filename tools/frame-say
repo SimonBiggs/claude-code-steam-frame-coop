@@ -1,0 +1,3 @@
+#!/bin/bash
+# frame-say "text": show a "Claude:" message in the Duo Arena game on the Steam Frame (and on the TV).
+printf '%s' "$*" | ssh -i ~/.config/steamos-devkit/devkit_rsa steamos@frame 'cat > ~/devkit-game/DuoArena/game/.dev/say.txt'

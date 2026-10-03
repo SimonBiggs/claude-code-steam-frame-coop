@@ -1,71 +1,98 @@
-# Living Room Arcade
+# claude-code-steam-frame-coop
 
-A growing collection of co-op games for the whole family, played together in the living room:
-one player in VR on a **Steam Frame**, others on the TV, everyone in the same game over the home
-network. Made in Godot 4.7.
+**Build co-op games live with Claude Code while your family plays them**: one player in VR on a
+Steam Frame, others on the TV, everyone in the same game. Just say what you want ("Hey Claude,
+bigger explosions!") and Claude builds it and hot-reloads it into the running game, usually
+within a minute.
 
-The games are designed by the family while they play: spoken requests ("Hey Claude, bigger
-explosions!") go through speech-to-text to Claude, who builds the change and hot-reloads it into
-the running game.
+This repo contains the games built this way, plus the tooling that makes the loop work.
 
-## Games
+## The loop
 
-1. **Duo Arena**: a neon first-person co-op arena shooter (below).
-2. More to come.
-
----
-
-# Duo Arena
-
-Fight waves of enemies together, either in split screen or with one player in VR and others on
-the TV.
-
-## Features
-
-- **First-person co-op** for 2 players in split screen, or **VR + TV** over the network. A third
-  player can join on the TV with a second controller or keyboard and mouse.
-- **VR player** (Steam Frame, OpenXR): aim with the right controller, use the left-hand shield to
-  reflect orbs, and check the wrist radar and status. The menu button pauses everyone.
-- **Enemies:** grunts, runners, brutes, spitters, splitters, T-rex dinosaurs and a ground-slamming boss.
-- **Fishwort:** a giant flying fish in the sky that spits fireballs. You can shoot the fireballs,
-  or the fish itself.
-- **Co-op beam** between nearby players that zaps enemies, plus revives and shared wave upgrades.
-- **Skill map** on the arena floor: earn your own XP, shoot nodes to buy upgrades, and build turrets.
-- **16 achievements**, floating score popups, big explosions, procedural sound effects and three
-  procedural synthwave music tracks.
-
-Everything is generated in code: no imported models, textures or audio files.
-
-## Running
-
-```sh
-godot --path .                 # split screen (keyboard + mouse and/or controllers)
-DUO_HOST=1 godot --path .      # host a networked game (automatic when a VR headset is found)
-DUO_JOIN=<host> godot --path . # join a host as the TV player(s)
+```
+ Steam Frame (VR host)                 Steam Machine / PC (TV + Claude Code)
+ ┌──────────────────────┐   ENet/LAN   ┌────────────────────────────────────┐
+ │ Godot game, OpenXR   │◄────────────►│ Godot game client (TV players)     │
+ │ simulates the world  │  snapshots   │                                    │
+ │ headset mic ─────────┼──── SSH ────►│ voice-bridge: Whisper + speaker ID │
+ │                      │              │   → "Simon: Hey Claude, ..."       │
+ │ gdev bridge:         │              │ Claude Code                        │
+ │  hot reload, frames, │◄── rsync ────┤   edits scripts, tests headless,   │
+ │  live MJPEG view     │              │   deploys (both machines reload)   │
+ │ "Claude:" captions ◄─┼── frame-say ─┤   watches screenshots/mirror       │
+ └──────────────────────┘              └────────────────────────────────────┘
 ```
 
-Use the Mobile renderer for VR on standalone headsets: `godot --rendering-method mobile --path .`.
+1. **Talk.** The Frame's microphone streams to `voice-bridge`, which transcribes with
+   faster-whisper, works out who's speaking by voiceprint ("This is Simon" teaches it a name), and
+   tags requests addressed to Claude.
+2. **Claude builds.** Claude Code watches the transcript, edits the game, runs headless bot tests
+   (including a local host + client), and deploys.
+3. **Hot reload.** The `gdev` bridge inside the game reloads changed scripts in place on the VR
+   host and the TV client, so nobody restarts and the wave keeps going.
+4. **Claude watches.** Recorded frames and a live MJPEG mirror of the VR view (`frame-mirror`) let
+   Claude see what the players see. `gdev at 17:42:10` shows the frames around a moment with
+   change highlights.
+5. **Claude replies.** `frame-say "..."` puts a message in the headset and on the TV.
 
-### Controls
+## What's in the box
 
-| | Controller | Keyboard + mouse |
-|---|---|---|
-| Move | Left stick | WASD (P2 in split screen: arrows) |
-| Look | Right stick | Mouse |
-| Shoot | RT / RB | Click / Space |
-| Dash | A / LB / LT | Shift |
-| Menu | Start | Esc |
+| Path | What it does |
+|---|---|
+| `scripts/` | **Duo Arena**, the first game (see below) |
+| `scripts/net.gd` | VR host + TV client networking: 30 Hz snapshots, events, client-side movement |
+| `addons/gdev/bridge.gd` | In-game dev helper: hot reload, frame recording, commands, live view on `:8090` |
+| `tools/gdev` | CLI: start/stop/restart the game, logs, screenshots, `gdev at TIME` timelines |
+| `tools/voice-bridge` | Headset mic → Whisper (`medium.en`) + speaker identification → transcript log |
+| `tools/frame-say` | Show a "Claude:" message in VR and on the TV |
+| `tools/frame-mirror` | Open the live view of what the VR player sees |
+| `tools/duo-deploy`, `tools/duo-deploy-frame` | Ship changes to both machines (hot reload) and commit |
 
-VR: left stick moves, right stick snap-turns, trigger shoots, A dashes, and the left menu button pauses.
+## Duo Arena (game #1)
 
-## Project layout
+A neon first-person co-op arena shooter, designed out loud by a family during one evening's play.
 
-- `scripts/main.gd`: game setup, waves, networking glue, HUD
-- `scripts/player.gd`: first-person, VR, remote and ghost players
-- `scripts/net.gd`: ENet host/client (snapshots + events)
-- `scripts/enemy.gd`, `fish.gd`, `skill_map.gd`, `turret.gd`, `achievements.gd`, `music.gd`, `world.gd`, …
-- `addons/gdev/bridge.gd`: development helper (hot reload, frame recording, live view on :8090)
-- `tests/`: headless bot tests (`godot --headless --path . res://tests/bot.tscn`)
+- **VR + TV co-op over the network**, or split screen. A third player can join on the TV with a
+  second controller or keyboard and mouse.
+- **VR player:** aim with the right controller, use the left-hand shield to reflect orbs, and check
+  the wrist radar and stats. The menu button pauses everyone. Runs at 72 fps on the Frame (Mobile renderer).
+- **Enemies:** grunts, runners, brutes, spitters, splitters, T-rex dinosaurs and a ground-slamming
+  boss that enrages if you farm it.
+- **Fishwort**, a giant flying fish that spits fireballs. You can shoot the fireballs, or the fish.
+- **Skill map** on the arena floor: earn your own XP, shoot nodes to buy upgrades, and build turrets.
+- **Co-op beam** between nearby players, revives, 16 achievements, score popups, big explosions,
+  procedural sound effects and three procedural synthwave tracks.
+
+Everything is generated in code: no imported models, textures or audio.
+
+### Running
+
+```sh
+godot --path .                     # split screen
+DUO_HOST=1 godot --path .          # host (automatic when an OpenXR headset is found)
+DUO_JOIN=<host> godot --path .     # join as the TV player(s)
+```
+
+On a Steam Frame, run the Linux Arm64 Godot with `--rendering-method mobile`, installed as a
+devkit title (SteamOS Devkit Client, user `steamos`; the game id must not contain `-`).
+
+| | Controller | Keyboard + mouse | VR |
+|---|---|---|---|
+| Move | Left stick | WASD | Left stick |
+| Look / turn | Right stick | Mouse | Head / right stick snap turn |
+| Shoot | RT / RB | Click / Space | Trigger |
+| Dash | A / LB / LT | Shift | A |
+| Menu | Start | Esc | Left menu button |
+
+## Notes from building it
+
+- Streaming VR from a Steam Machine to the Steam Frame wasn't supported yet, so the game runs
+  natively on the Frame and the TV joins over the network.
+- OpenXR must render on the **main** viewport (a SubViewport gave a "theatre" view). Move the XR
+  origin in `_process`, not physics, or it judders.
+- Under hot reload, static variables keep old values, and nodes built in `_ready` need replacing.
+  An error in `_process` silently skips the rest of the frame, so check the logs.
+- WorkerThreadPool tasks must be waited on, or their memory leaks.
 
 ## License
 
