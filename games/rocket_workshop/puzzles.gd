@@ -39,6 +39,7 @@ static func make_rocket(n: int) -> Dictionary:
 	for i in job_count:
 		mods.append(_make(jobs[i], n, names, keyed))
 	var time := 50.0 + 40.0 * vr_count + 30.0 * job_count - minf(n, 6.0) * 3.0
+	time += 60.0 if n <= 2 else 0.0  # extra learning time for the first rockets
 	return {"name": names[0], "modules": mods, "time": time}
 
 
