@@ -14,7 +14,7 @@ const TRACKS := [
 		"arp": [0, 7, 12, "3rd", 12, 7], "bass": "root"},
 ]
 
-static var cached := {}  # track index -> AudioStreamWAV
+static var track_cache := {}  # track index -> AudioStreamWAV (renamed so a hot reload starts clean)
 
 var current := -1
 var wanted := 0
@@ -34,9 +34,9 @@ func play_track(index: int) -> void:
 	wanted = index % TRACKS.size()
 	if wanted == current:
 		return
-	if cached.has(wanted):
+	if track_cache.has(wanted):
 		current = wanted
-		stream = cached[wanted]
+		stream = track_cache[wanted]
 		play()
 	elif task < 0:
 		task_track = wanted
@@ -49,7 +49,7 @@ func _process(_delta: float) -> void:
 	if task >= 0 and WorkerThreadPool.is_task_completed(task):
 		WorkerThreadPool.wait_for_task_completion(task)
 		task = -1
-		cached[task_track] = _to_stream(buffer)
+		track_cache[task_track] = _to_stream(buffer)
 		buffer = PackedFloat32Array()
 		var w := wanted
 		current = -1
