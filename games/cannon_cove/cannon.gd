@@ -189,6 +189,11 @@ func _process(delta: float) -> void:
 	for i in rack_balls.size():
 		rack_balls[i].visible = i < ammo
 	handle_mat.emission_energy_multiplier = 2.5 if (grabbed or hover) else (0.9 if manned else 0.3)
+	# In VR the gunner stands right at the cannon: keep its label small and below eye level.
+	var vr_gunner: bool = not main.players.is_empty() and main.players[0].vr
+	label.pixel_size = (0.0016 if manned else 0.0026) if vr_gunner else 0.0055
+	label.position = Vector3(0, 0.55 if manned else 1.0, 0.3) if vr_gunner else Vector3(0, 1.3, 0.3)
+	label.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
 	if ammo <= 0:
 		label.text = "%s\nEMPTY!\nBring cannonballs!" % side_name()
 		label.modulate = Color(1.0, 0.35 + 0.25 * sin(Time.get_ticks_msec() * 0.01), 0.3)
