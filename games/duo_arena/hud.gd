@@ -12,6 +12,7 @@ var hit_flash := 0.0
 var damage_marks: Array = []  # [world position, time left]
 var name_label: Label
 var bar: ProgressBar
+var ui_scale := 1.0  # set by main: smaller HUD in smaller split-screen views
 
 
 func _ready() -> void:
@@ -69,6 +70,7 @@ func _process(delta: float) -> void:
 	if radar_only:
 		queue_redraw()
 		return
+	_apply_scale()
 	hurt_flash = maxf(0.0, hurt_flash - delta * 5.0)
 	hit_flash = maxf(0.0, hit_flash - delta * 6.0)
 	for m in damage_marks:
@@ -152,3 +154,19 @@ func _radar_point(world_pos: Vector3, inv: Basis, radar_scale: float, radius: fl
 	var rel: Vector3 = inv * (world_pos - player.global_position)
 	var p := Vector2(rel.x, rel.z) * radar_scale
 	return p.limit_length(radius - 6.0)
+
+
+## Scale the whole HUD (via its CanvasLayer) and keep it filling the view.
+func _apply_scale() -> void:
+	var layer := get_parent() as CanvasLayer
+	if layer == null:
+		return
+	var s := clampf(ui_scale, 0.3, 2.0)
+	if layer.scale.x != s:
+		layer.scale = Vector2(s, s)
+	if anchor_right != 0.0 or anchor_bottom != 0.0:
+		set_anchors_preset(Control.PRESET_TOP_LEFT)
+	position = Vector2.ZERO
+	var want := get_viewport().get_visible_rect().size / s
+	if size != want:
+		size = want

@@ -87,16 +87,7 @@ func _make_node(key: String, tier: int, title: String, color: Color, pos: Vector
 	# Owner pips: a small ring in each owner's colour.
 	var pips: Array = []
 	for i in 3:
-		var pip := MeshInstance3D.new()
-		var tm := TorusMesh.new()
-		tm.inner_radius = 0.66 + i * 0.12
-		tm.outer_radius = 0.72 + i * 0.12
-		pip.mesh = tm
-		pip.material_override = main.make_material(main.PLAYER_COLORS[i], 3.0)
-		pip.position.y = -0.24
-		pip.visible = false
-		area.add_child(pip)
-		pips.append(pip)
+		_add_pip(area, pips)
 	nodes["%s:%d" % [key, tier]] = {"area": area, "mat": mat, "label": label, "line": line, "pips": pips,
 		"title": title, "key": key, "tier": tier}
 
@@ -109,6 +100,9 @@ func _process(delta: float) -> void:
 		var tier: int = n.tier
 		var revealed := tier == 1
 		var affordable := false
+		var pips: Array = n.pips
+		while pips.size() < mini(main.players.size(), main.PLAYER_COLORS.size()):
+			_add_pip(n.area, pips)  # more players joined: one more ring per player
 		for i in mini(main.players.size(), n.pips.size()):
 			var p = main.players[i]
 			var owned: int = p.skills.get(key, 0)
@@ -122,6 +116,26 @@ func _process(delta: float) -> void:
 		n.area.collision_layer = 4 if revealed else 0
 		n.label.text = "%s %s\n%d XP" % [n.title, ROMAN[tier - 1], COSTS[tier - 1]]
 		n.mat.emission_energy_multiplier = (3.0 + sin(pulse * 6.0) * 1.5) if affordable else 0.7
+
+
+## A ring in a player's colour around a node they own (first three as before, then thinner).
+func _add_pip(area: Area3D, pips: Array) -> void:
+	var i := pips.size()
+	var pip := MeshInstance3D.new()
+	var tm := TorusMesh.new()
+	var r := 0.66 + i * 0.12 if i < 3 else 1.02 + (i - 3) * 0.07
+	tm.inner_radius = r
+	tm.outer_radius = r + (0.06 if i < 3 else 0.04)
+	if i >= 3:
+		tm.rings = 24
+		tm.ring_segments = 6
+	pip.mesh = tm
+	pip.material_override = main.make_material(main.PLAYER_COLORS[i % main.PLAYER_COLORS.size()], 3.0)
+	pip.position.y = -0.24
+	pip.visible = false
+	pip.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	area.add_child(pip)
+	pips.append(pip)
 
 
 ## Centre hub: shoot it to build an auto-turret where you stand.
