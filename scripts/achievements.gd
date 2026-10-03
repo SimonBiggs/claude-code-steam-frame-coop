@@ -18,6 +18,7 @@ const LIST := [
 	["hoarder", "HOARDER", "Collect 10 pickups in one game"],
 	["bomb_squad", "BOMB SQUAD", "Destroy 5 enemies within 2 seconds"],
 	["high_score", "HIGH SCORER", "Score 25,000 points in one game"],
+	["big_catch", "BIG CATCH", "Shoot down the flying fish"],
 ]
 const SAVE := "user://achievements.cfg"
 

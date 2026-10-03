@@ -61,8 +61,15 @@ func _on_body_entered(body: Node3D) -> void:
 
 
 func _on_area_entered(area: Area3D) -> void:
-	if spent or visual_only or not area.has_method("shot_down"):
+	if spent or visual_only:
 		return
-	spent = true
-	area.shot_down()
-	queue_free()
+	if area.has_method("shot_down"):
+		spent = true
+		area.shot_down()
+		queue_free()
+	elif area.get_parent() and area.get_parent().has_method("fish_hit"):
+		spent = true
+		area.get_parent().fish_hit(damage)
+		if owner_player and owner_player.hud:
+			owner_player.hud.hit_marker()
+		queue_free()

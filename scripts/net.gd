@@ -68,7 +68,11 @@ func _exit_tree() -> void:
 	_close_old_peer()
 
 
+var menu_was_down := false
+
+
 func _process(delta: float) -> void:
+	_check_vr_menu()
 	if join_deadline > 0 and Time.get_ticks_msec() > join_deadline:
 		_give_up()
 	if mode == "host" and connected:
@@ -164,3 +168,13 @@ func _p2_state(pos: Vector3, yaw: float, pitch: float) -> void:
 func _p2_action(action: String, args: Array) -> void:
 	if mode == "host":
 		main.on_p2_action(action, args)
+
+
+## The VR player's left menu button pauses both machines (runs even while paused).
+func _check_vr_menu() -> void:
+	if main == null or main.players.is_empty() or not main.players[0].vr:
+		return
+	var down: bool = main.players[0].hand_l.is_button_pressed("menu_button")
+	if down and not menu_was_down:
+		main.toggle_vr_pause()
+	menu_was_down = down

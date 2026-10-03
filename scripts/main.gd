@@ -560,6 +560,9 @@ func _process(delta: float) -> void:
 	if music == null:
 		music = MusicScript.new()
 		add_child(music)
+	if sky_fish != null and not sky_fish.has_meta("v2"):  # replace a fish from an older version
+		sky_fish.queue_free()
+		sky_fish = null
 	if sky_fish == null:
 		sky_fish = FishScript.new()
 		sky_fish.main = self
@@ -775,31 +778,6 @@ func _style_vr_text(l: Label3D) -> void:
 		l.remove_meta("card")
 
 
-func _unused_backdrop(l: Label3D) -> void:
-	if l == null:
-		return
-	var card: MeshInstance3D = l.get_meta("card") if l.has_meta("card") else null
-	if card == null:
-		card = MeshInstance3D.new()
-		card.mesh = QuadMesh.new()
-		var mat := StandardMaterial3D.new()
-		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		mat.no_depth_test = true
-		mat.render_priority = 8
-		mat.albedo_color = Color(0.0, 0.0, 0.03, 0.6)
-		card.material_override = mat
-		l.add_child(card)
-		card.position.z = -0.01
-		players[0]._set_layers(card, players[0].viewmodel_layer())
-		l.set_meta("card", card)
-	var box := l.get_aabb()
-	card.visible = l.text != "" and l.modulate.a > 0.02
-	card.scale = Vector3(box.size.x + 0.08, box.size.y + 0.06, 1.0)
-	card.position = Vector3(box.get_center().x, box.get_center().y, -0.01)
-	card.material_override.albedo_color.a = 0.6 * l.modulate.a
-
-
 func on_enemy_killed(pos: Vector3, color: Color, points: int, drop_chance: float, radius: float) -> void:
 	score += points
 	achievements().on_kill(points, radius)
@@ -966,13 +944,25 @@ func on_p2_action(action: String, args: Array) -> void:
 				get_tree().reload_current_scene()
 		"pause":
 			var paused: bool = args[0]
-			if paused:
-				_show_center("PAUSED\nPlayer 2 opened the menu", 0.0, false)
-				_update_vr_center()
-			else:
-				_show_center("", 0.0, false)
-				_update_vr_center()
+			_set_pause_banner(paused, "Player 2 opened the menu")
 			get_tree().paused = paused
+
+
+## Shared pause: banner on this machine only (each side shows its own message).
+func _set_pause_banner(paused: bool, who: String) -> void:
+	if paused:
+		_show_center("PAUSED\n" + who, 0.0, false)
+	else:
+		_show_center("", 0.0, false)
+	_update_vr_center()
+
+
+## VR player pressed the menu button: pause/resume both machines.
+func toggle_vr_pause() -> void:
+	var paused := not get_tree().paused
+	get_tree().paused = paused
+	_set_pause_banner(paused, "Press the menu button to resume")
+	net.event("remote_pause", [paused])
 
 
 func make_snapshot() -> Array:
@@ -989,7 +979,10 @@ func make_snapshot() -> Array:
 	var sh := []
 	for s in get_tree().get_nodes_in_group("enemy_shots"):
 		sh.append([s.net_id, s.global_position, s.friendly, s.color, s.size])
-	return [wave, score, upg, upg_names, game_over, ps, es, pk, sh]
+	var fish_state := [true, 0.0]
+	if sky_fish:
+		fish_state = [sky_fish.alive, sky_fish.hp]
+	return [wave, score, upg, upg_names, game_over, ps, es, pk, sh, fish_state]
 
 
 ## Client: mirror the host's world.
@@ -1008,6 +1001,8 @@ func apply_snapshot(s: Array) -> void:
 	_sync_ghosts(s[6], "enemy")
 	_sync_ghosts(s[7], "pickup")
 	_sync_ghosts(s[8], "shot")
+	if s.size() > 9 and sky_fish:
+		sky_fish.apply_net(s[9])
 
 
 func _sync_ghosts(list: Array, kind: String) -> void:
@@ -1074,6 +1069,9 @@ func apply_event(kind: String, args: Array) -> void:
 			popup(args[0], args[1], args[2])
 		"achieve":
 			achievement_toast(args[0], args[1], args[2], args[3])
+		"remote_pause":
+			get_tree().paused = args[0]
+			_set_pause_banner(args[0], "The VR player paused the game")
 		"boom":
 			explosion(args[0], args[1], args[2])
 		"say":

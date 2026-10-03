@@ -1,75 +1,89 @@
 extends Node3D
 ## A giant neon flying fish that swoops around the sky above the arena (Abigail's request).
+## It spits fireballs, can be shot down (host decides), and comes back after a while.
 
-const ORBIT := 34.0
-const HEIGHT := 16.0
-const SPEED := 0.55  # radians per second
+const ORBIT := 22.0
+const HEIGHT := 11.0
+const SPEED := 0.5  # radians per second
+const RESPAWN := 45.0
 
 var main
 var t := 0.0
 var tail: Node3D
 var body: Node3D
+var segments: Array[Node3D] = []
 var wings: Array = []
+var skin: StandardMaterial3D
 var mouth_mat: StandardMaterial3D
 var fire_t := 10.0  # host: seconds until the next fireball
 var charging := false
+var max_hp := 60.0
+var hp := 60.0
+var alive := true
+var respawn_t := 0.0
 
 
 func _ready() -> void:
-	# Shared clock so the fish is in the same place on the Frame and the TV.
-	t = fmod(Time.get_unix_time_from_system(), 3600.0)
+	set_meta("v2", true)
+	t = fmod(Time.get_unix_time_from_system(), 3600.0)  # shared clock: same place on every screen
 	body = Node3D.new()
 	add_child(body)
-	var skin: StandardMaterial3D = main.make_material(Color(1.0, 0.45, 0.15), 1.6)
-	var belly: StandardMaterial3D = main.make_material(Color(1.0, 0.85, 0.4), 2.5)
-	_part(SphereMesh.new(), skin, Vector3.ZERO, Vector3(1.4, 1.6, 4.0))  # body
-	_part(SphereMesh.new(), belly, Vector3(0, -0.45, 0.2), Vector3(1.0, 0.8, 3.0))
-	var fin := PrismMesh.new()
-	_part(fin, skin, Vector3(0, 1.3, 0.6), Vector3(0.2, 1.4, 1.6))  # dorsal fin
+	skin = main.make_material(Color(0.25, 0.55, 1.0), 1.2)
+	skin.metallic = 0.7
+	skin.roughness = 0.25
+	var belly: StandardMaterial3D = main.make_material(Color(0.85, 0.92, 1.0), 1.5)
+	var neon: StandardMaterial3D = main.make_material(Color(0.3, 1.0, 1.0), 4.0)
+	# Tapered body: head, chest, belly and tail sections that wiggle in a wave.
+	var sizes := [Vector3(1.5, 1.4, 1.6), Vector3(1.6, 1.5, 1.6), Vector3(1.3, 1.2, 1.5), Vector3(0.9, 0.8, 1.4), Vector3(0.55, 0.5, 1.2)]
+	for i in sizes.size():
+		var seg := Node3D.new()
+		seg.position = Vector3(0, 0, -1.6) if i == 0 else Vector3(0, 0, sizes[i - 1].z * 0.55)
+		(body if i == 0 else segments[i - 1]).add_child(seg)
+		segments.append(seg)
+		_part(seg, SphereMesh.new(), skin, Vector3.ZERO, sizes[i])
+		_part(seg, SphereMesh.new(), belly, Vector3(0, -sizes[i].y * 0.18, 0), sizes[i] * Vector3(0.8, 0.6, 0.9))
+		if i >= 1 and i <= 3:  # dorsal spines
+			_part(seg, PrismMesh.new(), neon, Vector3(0, sizes[i].y * 0.55, 0), Vector3(0.08, 0.6, 0.5))
+	var head := segments[0]
+	# Eyes, gills and the glowing mouth.
 	for side in [-1.0, 1.0]:
-		var eye := _part(SphereMesh.new(), main.make_material(Color.WHITE, 4.0), Vector3(side * 0.62, 0.35, -1.45), Vector3.ONE * 0.38)
-		_part(SphereMesh.new(), main.make_material(Color(0.05, 0.05, 0.1), 0.0), Vector3(side * 0.76, 0.38, -1.55), Vector3.ONE * 0.2)
-		eye.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		# Big see-through "wing" fins, like a real flying fish.
+		_part(head, SphereMesh.new(), main.make_material(Color.WHITE, 3.0), Vector3(side * 0.6, 0.25, -0.35), Vector3.ONE * 0.42)
+		_part(head, SphereMesh.new(), main.make_material(Color(0.02, 0.02, 0.05), 0.0), Vector3(side * 0.74, 0.27, -0.42), Vector3.ONE * 0.24)
+		for g in 3:
+			_part(head, BoxMesh.new(), neon, Vector3(side * 0.7, -0.05, 0.25 + g * 0.18), Vector3(0.04, 0.6, 0.05))
+		# Big see-through wing fins, like a real flying fish.
 		var wing_mat: StandardMaterial3D = main.make_material(Color(0.5, 0.9, 1.0), 2.0)
 		wing_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		wing_mat.albedo_color.a = 0.6
+		wing_mat.albedo_color.a = 0.55
 		wing_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-		var wing := _part(PrismMesh.new(), wing_mat, Vector3(side * 2.2, 0.1, -0.3), Vector3(4.0, 0.1, 2.6))
+		var wing := _part(segments[1], PrismMesh.new(), wing_mat, Vector3(side * 2.3, 0.15, 0.1), Vector3(3.6, 0.08, 2.4))
 		wing.set_meta("side", side)
 		wings.append(wing)
 	mouth_mat = main.make_material(Color(1.0, 0.3, 0.05), 0.5)
-	_part(SphereMesh.new(), mouth_mat, Vector3(0, -0.2, -1.95), Vector3(0.7, 0.5, 0.4))
+	_part(head, SphereMesh.new(), mouth_mat, Vector3(0, -0.15, -0.8), Vector3(0.6, 0.4, 0.3))
+	# Forked tail fin.
 	tail = Node3D.new()
-	tail.position = Vector3(0, 0, 1.9)
-	body.add_child(tail)
-	var tm := MeshInstance3D.new()
-	var tp := PrismMesh.new()
-	tm.mesh = tp
-	tm.material_override = skin
-	tm.scale = Vector3(0.2, 2.4, 1.8)
-	tm.position = Vector3(0, 0, 0.9)
-	tm.rotation.x = -PI / 2.0
-	tail.add_child(tm)
-	# Speed streaks behind it.
-	var trail := CPUParticles3D.new()
-	trail.amount = 40
-	trail.lifetime = 0.6
-	trail.local_coords = false
-	trail.direction = Vector3(0, 0, 1)
-	trail.spread = 10.0
-	trail.initial_velocity_min = 2.0
-	trail.initial_velocity_max = 4.0
-	trail.gravity = Vector3.ZERO
-	var streak := BoxMesh.new()
-	streak.size = Vector3(0.12, 0.12, 0.9)
-	streak.material = main.make_material(Color(1.0, 0.7, 0.3), 3.0)
-	trail.mesh = streak
-	trail.position = Vector3(0, 0, 2.5)
-	body.add_child(trail)
+	tail.position = Vector3(0, 0, 0.7)
+	segments[-1].add_child(tail)
+	for side in [-1.0, 1.0]:
+		var fin := _part(tail, PrismMesh.new(), skin, Vector3(0, side * 0.6, 0.6), Vector3(0.1, 1.4, 1.2))
+		fin.rotation.x = side * 0.9
+	# Hit box for player bullets (layer 4, like enemies).
+	var area := Area3D.new()
+	area.collision_layer = 4
+	area.collision_mask = 0
+	area.monitoring = false
+	var cs := CollisionShape3D.new()
+	var shape := CapsuleShape3D.new()
+	shape.radius = 1.3
+	shape.height = 6.0
+	cs.shape = shape
+	cs.rotation.x = PI / 2.0
+	area.add_child(cs)
+	add_child(area)
 
 
-func _part(mesh: PrimitiveMesh, mat: Material, pos: Vector3, scl: Vector3) -> MeshInstance3D:
+func _part(parent: Node3D, mesh: PrimitiveMesh, mat: Material, pos: Vector3, scl: Vector3) -> MeshInstance3D:
 	if mesh is SphereMesh:
 		mesh.radial_segments = 16
 		mesh.rings = 8
@@ -78,33 +92,77 @@ func _part(mesh: PrimitiveMesh, mat: Material, pos: Vector3, scl: Vector3) -> Me
 	mi.material_override = mat
 	mi.position = pos
 	mi.scale = scl * 0.5
-	body.add_child(mi)
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	parent.add_child(mi)
 	return mi
 
 
 func _process(delta: float) -> void:
 	t = fmod(Time.get_unix_time_from_system(), 3600.0)
-	_fireballs(delta)
 	var a := t * SPEED
-	# A swoopy loop: orbit the arena while bobbing up and down.
-	var pos := Vector3(cos(a) * ORBIT, HEIGHT + sin(a * 2.0) * 4.0, sin(a) * ORBIT)
-	var ahead := Vector3(cos(a + 0.05) * ORBIT, HEIGHT + sin((a + 0.05) * 2.0) * 4.0, sin(a + 0.05) * ORBIT)
+	var pos := Vector3(cos(a) * ORBIT, HEIGHT + sin(a * 2.0) * 3.0, sin(a) * ORBIT)
+	var ahead := Vector3(cos(a + 0.05) * ORBIT, HEIGHT + sin((a + 0.05) * 2.0) * 3.0, sin(a + 0.05) * ORBIT)
 	global_position = pos
 	look_at(ahead, Vector3.UP)
 	rotation.z = 0.35  # bank into the turn
-	tail.rotation.y = sin(t * 12.0) * 0.6
+	for i in segments.size():
+		segments[i].rotation.y = sin(t * 7.0 - i * 0.9) * (0.05 + i * 0.07)  # swimming wave
+	tail.rotation.y = sin(t * 7.0 - 5.0) * 0.5
 	for w in wings:
-		w.rotation.z = w.get_meta("side") * sin(t * 6.0) * 0.25  # gentle wing flap
-	body.rotation.y = sin(t * 18.0 + 1.0) * 0.08
+		w.rotation.z = w.get_meta("side") * sin(t * 5.0) * 0.25
+	skin.emission_energy_multiplier = lerpf(skin.emission_energy_multiplier, 1.2, delta * 8.0)
+	_respawn(delta)
+	_fireballs(delta)
+
+
+## Host: a player bullet hit the fish.
+func fish_hit(damage: float) -> void:
+	if not alive or main.net.mode == "client":
+		return
+	hp -= damage
+	skin.emission_energy_multiplier = 6.0
+	main.sound("hit", -4.0, 0.5)
+	if hp <= 0.0:
+		_die()
+
+
+func _die() -> void:
+	alive = false
+	visible = false
+	respawn_t = RESPAWN
+	main.score += 1500
+	main.explosion(global_position, Color(0.4, 0.8, 1.0), 3.0)
+	main.popup(global_position + Vector3.UP * 2.0, "+1500", Color(0.6, 0.9, 1.0))
+	main._show_center("THE FLYING FISH IS DOWN!\nIt'll be back…", 2.0)
+	main.achievements().unlock("big_catch")
+
+
+func _respawn(delta: float) -> void:
+	if alive or main.net.mode == "client":
+		return
+	respawn_t -= delta
+	if respawn_t <= 0.0:
+		alive = true
+		visible = true
+		max_hp = 60.0 + main.wave * 8.0
+		hp = max_hp
+		main._show_center("THE FLYING FISH IS BACK!", 1.5)
+
+
+## Client: alive/health from the host's snapshot.
+func apply_net(state: Array) -> void:
+	alive = state[0]
+	visible = alive
+	var new_hp: float = state[1]
+	if new_hp < hp - 0.01:
+		skin.emission_energy_multiplier = 6.0
+	hp = new_hp
 
 
 ## Host: every so often the fish's mouth glows (warning) and it spits a fireball at a random player.
 func _fireballs(delta: float) -> void:
-	if mouth_mat == null:  # fish created before the fireball update: add the mouth now
-		mouth_mat = main.make_material(Color(1.0, 0.3, 0.05), 0.5)
-		_part(SphereMesh.new(), mouth_mat, Vector3(0, -0.2, -1.95), Vector3(0.7, 0.5, 0.4))
 	mouth_mat.emission_energy_multiplier = lerpf(mouth_mat.emission_energy_multiplier, 8.0 if charging else 0.5, delta * 6.0)
-	if main.net.mode == "client" or not main.ready_to_play or main.game_over or main.wave < 1:
+	if not alive or main.net.mode == "client" or not main.ready_to_play or main.game_over or main.wave < 1:
 		return
 	if main.net.mode == "host" and not main.net.connected:
 		return
@@ -121,7 +179,7 @@ func _fireballs(delta: float) -> void:
 	if targets.is_empty():
 		return
 	var target = targets.pick_random()
-	var from := global_position + -global_basis.z * 2.0
+	var from := global_position + -global_basis.z * 2.5
 	var aim: Vector3 = target.global_position + Vector3.UP * 1.0 - from
 	var ball := preload("res://scripts/enemy_shot.gd").new()
 	ball.main = main
