@@ -1427,12 +1427,12 @@ func _update_vr_center() -> void:
 	vr_center.modulate.a = center_label.modulate.a
 	vr_center.outline_modulate.a = center_label.modulate.a
 	# Above the table (nothing in front of it), so your eyes don't fight the depth.
-	if not has_meta("vr_center_v3"):
-		set_meta("vr_center_v3", true)
+	if not has_meta("vr_center_v4"):
+		set_meta("vr_center_v4", true)
+		vr_center.pixel_size = 0.0026 * W.S
 		VrText.snap(vr_center)
-	# Far away (past the table) and big, so it's comfortable to focus on.
-	vr_center.pixel_size = 0.0042 * W.S
-	VrText.follow(vr_center, giant.xr_camera, self, 0.3 * W.S, 2.8 * W.S)
+	# Past the table and above it (VrText adds extra comfort distance), so it's easy to focus on.
+	VrText.follow(vr_center, giant.xr_camera, self, 0.2 * W.S, 1.7 * W.S)
 
 
 func _update_hud() -> void:

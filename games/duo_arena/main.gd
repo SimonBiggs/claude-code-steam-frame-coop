@@ -1,4 +1,5 @@
 extends Node3D
+const VrText := preload("res://core/vr_text.gd")
 ## Game controller: builds the arena, runs waves, camera and HUD.
 
 const PlayerScript := preload("res://games/duo_arena/player.gd")
@@ -1167,37 +1168,9 @@ func _vr_text(pos: Vector3, color: Color, font: int) -> Label3D:
 ## VR text panels stay put in the world so you can look around them to read; they glide back in
 ## front of you only when you turn well away (more than 35 degrees) or walk off.
 func _lazy_follow(l: Label3D, height: float) -> void:
-	if l == null:
+	if l == null or players.is_empty():
 		return
-	var cam: Node3D = players[0].xr_camera
-	if l.get_parent() == cam:
-		l.reparent(self)  # older panels were glued to the headset
-	l.billboard = BaseMaterial3D.BILLBOARD_DISABLED  # turning your head must not turn the text
-	var fwd := -cam.global_basis.z
-	fwd.y = 0.0
-	if fwd.length() < 0.01:
-		return
-	fwd = fwd.normalized()
-	var target := cam.global_position + fwd * 1.8 + Vector3(0.0, height, 0.0)
-	if not l.has_meta("faced2"):
-		l.set_meta("faced2", true)
-		l.set_meta("moving", true)
-	if not l.has_meta("placed"):
-		l.set_meta("placed", true)
-		l.global_position = target
-		l.global_basis = Basis(Vector3.UP, atan2(-fwd.x, -fwd.z))
-	var to := l.global_position - cam.global_position
-	to.y = 0.0
-	if fwd.angle_to(to.normalized()) > deg_to_rad(35.0) or to.length() > 2.6 or to.length() < 1.0:
-		l.set_meta("moving", true)
-	if l.get_meta("moving", false):
-		l.global_position = l.global_position.lerp(target, 1.0 - exp(-4.0 * get_process_delta_time()))
-		var face := l.global_position - cam.global_position
-		face.y = 0.0
-		if face.length() > 0.1:
-			l.global_basis = Basis(Vector3.UP, atan2(-face.x, -face.z))  # front (+Z) towards the player, upright
-		if l.global_position.distance_to(target) < 0.05:
-			l.set_meta("moving", false)
+	VrText.follow(l, players[0].xr_camera, self, height, 1.8)
 
 
 ## Thick black outline keeps VR text readable against the bright arena (and hides old backdrop cards).

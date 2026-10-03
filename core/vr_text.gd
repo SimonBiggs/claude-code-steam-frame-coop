@@ -4,9 +4,20 @@ extends RefCounted
 ## Usage, every frame: VrText.follow(label, xr_camera, self, height_offset, distance)
 
 
+## Players found text at ~1.7 m hard to focus on (cross-eyed): push every panel further away and
+## scale it up by the same factor so it reads the same size.
+const COMFORT := 1.6
+
+
 static func follow(l: Label3D, cam: Node3D, world: Node, height: float, dist: float = 1.8) -> void:
 	if l == null or cam == null or not is_instance_valid(l):
 		return
+	dist *= COMFORT
+	height *= COMFORT
+	# Scale the panel's own pixel_size once (games may reset it each frame: treat that as a new base).
+	if not l.has_meta("vr_px") or absf(l.pixel_size - float(l.get_meta("vr_px"))) > 0.0000001:
+		l.pixel_size *= COMFORT
+		l.set_meta("vr_px", l.pixel_size)
 	if l.get_parent() == cam:
 		l.reparent(world)  # panels used to be glued to the headset
 	l.billboard = BaseMaterial3D.BILLBOARD_DISABLED  # turning your head must not turn the text
