@@ -1087,7 +1087,7 @@ func _set_pause_banner(paused: bool, who: String) -> void:
 func toggle_vr_pause() -> void:
 	var paused := not get_tree().paused
 	get_tree().paused = paused
-	_set_pause_banner(paused, "Press the menu button to resume")
+	_set_pause_banner(paused, "Menu button: resume  ·  Trigger: back to the arcade")
 	net.event("remote_pause", [paused])
 
 
@@ -1363,7 +1363,6 @@ func _update_vr_center() -> void:
 		players[0].xr_camera.add_child(vr_center)
 		players[0]._set_layers(vr_center, players[0].viewmodel_layer())
 	vr_center.pixel_size = 0.0026
-	vr_center.position = Vector3(0.0, -0.1, -1.8)
 	vr_center.text = center_label.text
 	vr_center.modulate.a = center_label.modulate.a
 	vr_center.outline_modulate.a = center_label.modulate.a

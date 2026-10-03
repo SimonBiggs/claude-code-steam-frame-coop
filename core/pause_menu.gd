@@ -32,7 +32,7 @@ func _ready() -> void:
 	focus.border_color = Color(0.3, 0.95, 1.0)
 	focus.set_border_width_all(5)
 	focus.set_corner_radius_all(8)
-	for item in [["Resume", _resume], ["Restart", _restart], ["Fullscreen", _fullscreen], ["Quit game", _quit]]:
+	for item in [["Resume", _resume], ["Restart", _restart], ["Back to Arcade", _arcade], ["Fullscreen", _fullscreen], ["Quit game", _quit]]:
 		var b := Button.new()
 		b.text = item[0]
 		b.custom_minimum_size = Vector2(460, 76)
@@ -87,6 +87,15 @@ func _resume() -> void:
 func _restart() -> void:
 	get_tree().paused = false
 	get_tree().reload_current_scene()
+
+
+func _arcade() -> void:
+	panel.visible = false
+	if main and main.get("net") != null:
+		main.net.go_to_arcade()
+	else:
+		get_tree().paused = false
+		get_tree().change_scene_to_file("res://arcade.tscn")
 
 
 func _fullscreen() -> void:

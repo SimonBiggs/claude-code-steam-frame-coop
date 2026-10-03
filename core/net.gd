@@ -146,6 +146,34 @@ func send_action(action: String, args: Array, index: int = 1) -> void:
 		_px_action.rpc_id(1, index, action, args)
 
 
+## Leave the current game and return both machines to the arcade picker.
+func go_to_arcade() -> void:
+	if has_meta("leaving"):
+		return
+	set_meta("leaving", true)
+	if mode == "client" and connected:
+		_request_arcade.rpc_id(1)
+	elif mode == "host" and connected:
+		_to_arcade.rpc()
+	else:
+		_to_arcade()
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _request_arcade() -> void:
+	if mode == "host":
+		_to_arcade.rpc()
+
+
+@rpc("authority", "call_local", "reliable")
+func _to_arcade() -> void:
+	get_tree().paused = false
+	# Let the message reach the other machine before this one drops the connection.
+	get_tree().create_timer(0.4).timeout.connect(func() -> void:
+		_close_old_peer()
+		get_tree().change_scene_to_file("res://arcade.tscn"))
+
+
 # --- RPCs (same node path /root/Main/Net on both machines) -------------------
 
 @rpc("authority", "call_remote", "unreliable_ordered")
@@ -179,3 +207,7 @@ func _check_vr_menu() -> void:
 	if down and not menu_was_down:
 		main.toggle_vr_pause()
 	menu_was_down = down
+	# While paused, the right trigger leaves the game for the arcade lobby.
+	var hand_r = main.players[0].get("hand_r")
+	if get_tree().paused and hand_r != null and hand_r.get_float("trigger") > 0.7:
+		go_to_arcade()
