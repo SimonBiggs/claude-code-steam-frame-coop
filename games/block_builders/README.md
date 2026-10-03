@@ -3,17 +3,36 @@
 A co-op puzzle platformer on a floating obstacle course in the sky.
 
 - **Player 1, the BUILDER (VR, host).** `XROrigin3D.world_scale = 8`, so the course is a tabletop
-  diorama in front of you (a block is 12.5 cm). A tray of colourful blocks floats beside your right
-  hand: planks, stairs, springs and fans. Pick one up with the right trigger, hold it over the course
-  (it snaps to the grid: green means it fits) and let go to place it. Each level has a limited number
-  of blocks, so it's a puzzle.
+  diorama in front of you (a block is 12.5 cm). A tray of colourful blocks sits low in front of your
+  right hip (fitted to your height, well away from your face; it glides after you if you walk away
+  from it): only the blocks this level uses. Pick one up with the right trigger, hold it over the
+  course (it snaps to the grid: green means it fits) and let go to place it. Each level has a limited
+  number of blocks, so it's a puzzle. A bouncing arrow shows the tray until you grab your first block,
+  and if you seem stuck a glowing see-through HINT block shows where a block could go.
 - **Players 2 to 7, the RUNNERS (TV).** Up to six tiny third-person runners who must reach the flag.
   Gaps, lava, gusts of wind and rising water send you back to your last safe spot. A level clears
   when every active runner is at the flag, with a big burst of confetti.
 
-Levels: First Bridge (planks), Lava Steps (stairs), Bounce House (springs), Windy Ridge (railings and
-fans), Rising Tide (rising water), Sky Castle (all of it). The timer gets 8% longer for each runner
-beyond two, and a party of 4 or more gets a spare plank.
+Blocks: PLANK (bridges), STAIRS, CRATE (full blocks: stack them, jump up them), SPRING (boing!), FAN
+(updraft), SPEED PAD (zoom along its arrow: jump at the edge for a long jump), LAUNCH PAD (flings
+runners over a gap along its arrow). A turns the held block.
+
+Ten themed levels, each introducing one idea: First Bridge (meadow), Lava Steps (volcano), Crate
+Canyon (desert canyon), Bounce House (candy land), Windy Ridge (snowy peaks), Zoom Zone (night sky with
+glowing crystals), Rising Tide (beach), Launch Pad (autumn), Sky Castle (castle) and the Rainbow Summit
+finale (fireworks, a rainbow, crowns for everyone and an awards screen).
+
+Co-op extras:
+- **Stars**: three per level (some need a jump or a bounce). Each one gives the builder a spare block.
+- **Gift balloon**: from level 2 a balloon with a present drifts across. Runners jump into it, or the
+  builder grabs it with their hand and carries it down to a runner (SPECIAL DELIVERY): +2 blocks.
+- **High fives**: touch a runner who reached the flag with the giant hand.
+- **Bonuses**: team finish (everyone at the flag within 6 s), no tumbles (with a streak), all stars.
+- **Awards** at the end: Star Catcher, Speedy Sneakers, Bouncy Bunny, High-Five Hero, Gift Grabber,
+  Bravest Tumbler and Master Builder.
+
+The timer gets 8% longer for each runner beyond two, and a party of 4 or more gets a spare plank.
+Islands are solid cliffs (you can't walk under a high ledge).
 
 ## Controls
 
@@ -35,9 +54,11 @@ headset), `DUO_JOIN=<host>` is the TV (runners in a split-screen grid: 1 full, 2
 
 ## Files
 
-`main.gd` (modes, joining, views, level flow, snapshots, HUD), `course.gd` (level geometry, blocks,
-collision spans, hazards), `levels.gd` (level data plus the bot's known solutions), `builder.gd`
-(VR / flat / TV ghost builder and the tray), `runner.gd` (runners), `art.gd` (procedural meshes).
+`main.gd` (modes, joining, views, level flow, stars / gift / high fives / hints, bonuses, awards,
+snapshots, HUD), `course.gd` (level geometry, themed decoration, blocks, collision spans, hazards),
+`levels.gd` (level data plus the bot's known solutions), `themes.gd` (sky, colours, props, music per
+theme), `builder.gd` (VR / flat / TV ghost builder and the tray), `runner.gd` (runners), `art.gd`
+(procedural meshes).
 
 ## Tests
 
@@ -49,6 +70,7 @@ DUO_PORT=7912 DUO_JOIN=127.0.0.1 BOT_PLAYERS=3 timeout 38 godot --headless --pat
 ```
 
 Bot options: `BB_FAKE_VR=1` runs the VR builder code without a headset (the bot moves the right
-controller node to the tray and over the course), `BB_START_LEVEL=n` starts at level n, and
+controller node to the tray and over the course; it also grabs the gift balloon on level 2, carries it
+to P2, and high-fives runners at the flag), `BB_START_LEVEL=n` starts at level n, and
 `BOT_PLAYERS=n` (2-6) joins n runners (the last one through a fake controller that is unplugged at
 22 s and plugged back in at 28 s).

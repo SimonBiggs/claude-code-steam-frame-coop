@@ -8,6 +8,10 @@ const VrText := preload("res://core/vr_text.gd")
 ##    water send you back. A level clears when every active runner is at the flag.
 ##    P2: keyboard (WASD + Space) and the first controller. Any other controller presses A to drop in
 ##    as the next free runner (up to P7). Each controller drives exactly one runner (by device id).
+##  - Ten themed levels introduce one new block at a time (planks, stairs, crates, springs, fans, speed
+##    pads, launch pads) up to the Rainbow Summit finale. Runners collect STARS (each gives the builder
+##    a spare block), pop the GIFT BALLOON (the builder can grab it and carry it to them) and get HIGH
+##    FIVES from the giant at the flag. Team finishes and fall-free runs earn bonuses; the end shows awards.
 ## Modes (docs/GAME_DEV_GUIDE.md): DUO_JOIN=<host> client, VR or DUO_HOST=1 host, else local split screen
 ## (flat builder on the left with mouse / 2nd controller, runners beside it).
 ## BB_FAKE_VR=1 (tests): run the VR builder code without a headset.
@@ -28,6 +32,14 @@ const CLEAR_TIME := 9.0
 const PLAYER_COLORS: Array[Color] = [Color(1.0, 0.82, 0.25), Color(1.0, 0.45, 0.3), Color(0.3, 0.75, 1.0),
 	Color(0.45, 0.95, 0.4), Color(1.0, 0.5, 0.85), Color(0.7, 0.5, 1.0), Color(0.3, 0.95, 0.9)]
 const SOUNDS := {
+	"star": [0.3, 880.0, 1760.0, 0.3, "tri", 0.0],
+	"gift": [0.5, 520.0, 1560.0, 0.35, "square", 0.05],
+	"pop": [0.12, 900.0, 300.0, 0.35, "sine", 0.6],
+	"launch": [0.45, 200.0, 1200.0, 0.4, "saw", 0.2],
+	"zoom": [0.3, 500.0, 1400.0, 0.2, "sine", 0.5],
+	"highfive": [0.18, 700.0, 1300.0, 0.4, "square", 0.3],
+	"firework": [0.6, 1400.0, 80.0, 0.35, "saw", 0.8],
+	"bonus": [0.6, 660.0, 1320.0, 0.3, "tri", 0.0],
 	"jump": [0.12, 300.0, 720.0, 0.22, "square", 0.0],
 	"land": [0.06, 180.0, 90.0, 0.25, "sine", 0.3],
 	"boing": [0.4, 160.0, 900.0, 0.45, "sine", 0.0],
@@ -68,6 +80,25 @@ var water_y := -100.0
 var budget := {}
 var levels_cleared := 0
 var tick_last := -1
+var stars_taken := 0           # bitmask for this level
+var balloon_state := 0         # 0 none, 1 drifting, 2 carried by the builder
+var balloon_pos := Vector3.ZERO
+var balloon_count := 0
+var balloon_x := -12.0
+var hint: Array = []           # [kind index, cell, rot] of the suggested next block, or []
+var hint_t := 0.0
+var last_place_t := 0.0        # level_time of the last block placed
+var first_flag_t := -1.0
+var level_tumbles := 0
+var perfect_streak := 0
+var stats := {}                # player index -> {stars, tumbles, bounces, firsts, flags, fives, gifts}
+var builder_stats := {"placed": 0, "gifts": 0}
+var high_fived := {}           # runner index -> level_seq
+var fireworks_t := 0.0
+var world_env: Environment
+var sky_mat: ProceduralSkyMaterial
+var music_pitch := 1.0
+var music_track := 0
 
 var info_label: Label
 var center_label: Label
@@ -141,8 +172,9 @@ func _setup_game(mode: String) -> void:
 
 
 func _show_intro() -> void:
-	_show_center("BLOCK BUILDERS\n\nBUILDER: grab blocks from the tray and snap them\ninto the course to build a path (A turns a block)\n" \
-		+ "RUNNERS: run and jump to the FLAG - everyone has to make it!\nBlocks are limited, so plan together!\n\n" \
+	_show_center("BLOCK BUILDERS\n\nBUILDER (VR): reach down to the TRAY by your right hip, pull the trigger\n" \
+		+ "on a block, hold it over the course (GREEN = fits) and let go.  A turns it.\n" \
+		+ "RUNNERS: left stick runs, A jumps. Grab STARS (they give the Builder\nspare blocks) and get EVERYONE to the FLAG!\n\n" \
 		+ "Pull the trigger / press A to start", 0.0)
 
 
@@ -151,8 +183,18 @@ func _show_intro() -> void:
 func _build_world() -> void:
 	var env := WorldEnvironment.new()
 	var e := Environment.new()
-	e.background_mode = Environment.BG_COLOR
-	e.background_color = Color(0.52, 0.76, 0.98)
+	sky_mat = ProceduralSkyMaterial.new()
+	sky_mat.sky_top_color = Color(0.22, 0.5, 0.95)
+	sky_mat.sky_horizon_color = Color(0.72, 0.87, 1.0)
+	sky_mat.ground_horizon_color = Color(0.72, 0.87, 1.0)
+	sky_mat.ground_bottom_color = Color(0.5, 0.7, 0.9)
+	sky_mat.sun_angle_max = 8.0
+	var sky := Sky.new()
+	sky.sky_material = sky_mat
+	sky.radiance_size = Sky.RADIANCE_SIZE_32
+	e.background_mode = Environment.BG_SKY
+	e.sky = sky
+	e.reflected_light_source = Environment.REFLECTION_SOURCE_DISABLED
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	e.ambient_light_color = Color(0.8, 0.85, 1.0)
 	e.ambient_light_energy = 0.75
@@ -165,6 +207,7 @@ func _build_world() -> void:
 	e.adjustment_enabled = true
 	e.adjustment_saturation = 1.15
 	env.environment = e
+	world_env = e
 	add_child(env)
 	lamp = DirectionalLight3D.new()
 	lamp.rotation_degrees = Vector3(-55, 30, 0)
@@ -173,6 +216,32 @@ func _build_world() -> void:
 	lamp.shadow_enabled = not vr_on
 	lamp.directional_shadow_max_distance = 40.0
 	add_child(lamp)
+
+
+## Called by the course whenever a level loads (host and TV alike): sky, light, music.
+func apply_theme(th: Dictionary) -> void:
+	if sky_mat != null:
+		sky_mat.sky_top_color = th.sky_top
+		sky_mat.sky_horizon_color = th.sky_horizon
+		sky_mat.ground_horizon_color = th.sky_horizon
+		sky_mat.ground_bottom_color = th.ground
+	if world_env != null:
+		world_env.ambient_light_color = th.ambient
+		world_env.ambient_light_energy = float(th.ambient_energy)
+	if lamp != null:
+		lamp.light_color = th.sun
+		lamp.light_energy = float(th.sun_energy)
+	music_pitch = float(th.get("pitch", 1.0))
+	music_track = int(th.get("track", 0))
+
+
+func level_data() -> Dictionary:
+	return Levels.get_level(level)
+
+
+## Seconds since the builder last placed a block this level (drives the tray arrow and build hints).
+func build_idle() -> float:
+	return level_time - last_place_t
 
 
 # --- Players and views -------------------------------------------------------------
@@ -738,6 +807,18 @@ func put(kind: String, c: Vector3i, rot: int) -> void:
 	course.add_block(kind, c, rot)
 	sound("place", -2.0, randf_range(0.9, 1.15))
 	burst(Vector3(c.x + 0.5, c.y + 1.0, c.z + 0.5), Art.kind_color(kind), 10, 0.1)
+	last_place_t = level_time
+	builder_stats["placed"] = int(builder_stats["placed"]) + 1
+	thud(Vector3(c.x + 0.5, c.y + 0.5, c.z + 0.5))
+
+
+## A block lands: runners close by feel it (a little camera shake on their screens).
+func thud(pos: Vector3) -> void:
+	for r in runners():
+		if r.active and not r.remote and r.global_position.distance_to(pos) < 4.0:
+			r.shake = maxf(r.shake, 0.18)
+	if net and net.mode == "host":
+		net.event("thud", [pos])
 
 
 ## Take a placed block back into the hand. Returns its kind ("" if none).
@@ -767,11 +848,23 @@ func _start_level(i: int) -> void:
 	level_time = 0.0
 	water_y = course.water_level(0.0)
 	tick_last = -1
+	stars_taken = 0
+	course.set_stars_taken(0)
+	balloon_state = 0
+	balloon_count = 0
+	course.hide_balloon()
+	hint = []
+	course.set_hint("", Vector3i.ZERO, 0)
+	last_place_t = 0.0
+	first_flag_t = -1.0
+	level_tumbles = 0
+	high_fived.clear()
+	course.show_rainbow(false)
 	state = "play"
 	state_t = 0.0
 	for r in runners():
 		r.reset_to_start()
-	_show_center("LEVEL %d: %s\n%s" % [level + 1, d.name, d.tip], 4.5)
+	_show_center("LEVEL %d of %d: %s\n%s" % [level + 1, Levels.count(), d.name, d.tip], 6.0)
 	sound("wave", -2.0)
 	print("Level %d (%s) started" % [level + 1, d.name])
 	if level >= 2:
@@ -783,8 +876,8 @@ func confirm() -> void:
 	if net.mode == "client":
 		net.send_action("confirm", [], 1)
 		return
-	if state_t < 1.2:
-		return
+	if state_t < 1.2 or (state == "won" and state_t < 4.0) or (state == "clear" and state_t < 2.0):
+		return  # let everyone read the results (and the awards) before the next level
 	match state:
 		"intro":
 			if net.mode == "host" and not net.connected:
@@ -797,6 +890,9 @@ func confirm() -> void:
 		"won":
 			score = 0
 			levels_cleared = 0
+			perfect_streak = 0
+			stats.clear()
+			builder_stats = {"placed": 0, "gifts": 0}
 			_start_level(0)
 
 
@@ -816,7 +912,12 @@ func _mark_finished(i: int) -> void:
 	r.finished = true
 	r.flag_sent = true
 	sound("flag", -2.0, 1.0 + 0.08 * i)
-	popup(course.flag_pos + Vector3.UP * 2.6, "P%d MADE IT!" % (i + 1), r.color.lightened(0.3))
+	var first := first_flag_t < 0.0
+	if first:
+		first_flag_t = level_time
+		_stat(i, "firsts", 1)
+	_stat(i, "flags", 1)
+	popup(course.flag_pos + Vector3.UP * 2.6, ("P%d IS FIRST!" if first else "P%d MADE IT!") % (i + 1), r.color.lightened(0.3))
 	confetti(course.flag_pos + Vector3.UP * 0.5, 40, 0.7)
 	print("P%d reached the flag" % (i + 1))
 	var waiting := 0
@@ -835,10 +936,22 @@ func runner_fx(i: int, kind: String, pos: Vector3) -> void:
 	if i < 1 or i >= players.size():
 		return
 	var r = players[i]
+	if kind == "lava" or kind == "water" or kind == "fall":
+		_stat(i, "tumbles", 1)
+		level_tumbles += 1
 	match kind:
 		"boing":
+			_stat(i, "bounces", 1)
 			sound("boing", -3.0, randf_range(0.95, 1.1))
 			burst(pos + Vector3.UP * 0.3, Art.kind_color("spring"), 8, 0.08)
+		"launch":
+			_stat(i, "bounces", 1)
+			sound("launch", -2.0, randf_range(0.95, 1.1))
+			burst(pos + Vector3.UP * 0.3, Art.kind_color("launcher"), 14, 0.1)
+			popup(pos + Vector3.UP * 1.6, "WHEEEE!", r.color.lightened(0.3))
+		"boost":
+			sound("zoom", -6.0, randf_range(0.95, 1.1))
+			burst(pos + Vector3.UP * 0.2, Art.kind_color("booster"), 6, 0.07)
 		"lava":
 			sound("sizzle", -3.0)
 			burst(pos + Vector3.UP * 0.2, Color(1.0, 0.5, 0.1), 18, 0.12)
@@ -859,10 +972,30 @@ func _level_clear() -> void:
 	var left := 0
 	for k in budget:
 		left += int(budget[k])
+	var nstars := 0
+	for k in course.stars.size():
+		if stars_taken & (1 << k):
+			nstars += 1
 	var bonus := 100 + 2 * int(maxf(time_left, 0.0)) + 10 * left
+	var extras: Array[String] = []
+	var act := active_runner_count()
+	if act >= 2 and level_time - first_flag_t <= 6.0:
+		bonus += 50
+		extras.append("TEAM FINISH! +50")
+	if level_tumbles == 0:
+		perfect_streak += 1
+		bonus += 50 * mini(perfect_streak, 4)
+		extras.append("NO TUMBLES! +%d%s" % [50 * mini(perfect_streak, 4), ("  (streak x%d)" % perfect_streak) if perfect_streak > 1 else ""])
+	else:
+		perfect_streak = 0
+	if nstars == course.stars.size() and nstars > 0:
+		bonus += 75
+		extras.append("ALL THE STARS! +75")
 	score += bonus
 	sound("fanfare", 0.0)
 	sound("clear", -2.0, 1.2)
+	if not extras.is_empty():
+		get_tree().create_timer(0.8).timeout.connect(func() -> void: sound("bonus", -3.0, 1.1))
 	var fp: Vector3 = course.flag_pos
 	confetti(fp + Vector3.UP * 0.5, 160, 1.2)
 	for x in [-8.0, -3.0, 2.0]:
@@ -873,13 +1006,48 @@ func _level_clear() -> void:
 		var fwd: Vector3 = -builder.xr_camera.global_basis.z
 		fwd.y = 0.0
 		confetti(cam + fwd.normalized() * 6.0 + Vector3.DOWN * 3.0, 120, 1.4)
-	print("Level %d cleared: +%d (score %d)" % [level + 1, bonus, score])
+	print("Level %d cleared: +%d (score %d) stars %d/%d %s" % [level + 1, bonus, score, nstars, course.stars.size(), str(extras)])
+	var star_line := "Stars %d/%d   Spare blocks %d" % [nstars, course.stars.size(), left]
+	var extra_line := ("\n" + "\n".join(extras)) if not extras.is_empty() else ""
 	if level + 1 >= Levels.count():
 		state = "won"
+		fireworks_t = 0.0
+		course.show_rainbow(true)
 		var best := _save_best(score)
-		_show_center("YOU BUILT IT ALL!\nEvery level cleared!\nScore %d   %s\n\nPull the trigger / press A to play again" % [score, best], 0.0)
+		var awards := _awards_text()
+		print(awards)
+		_show_center("YOU BUILT IT ALL!  Every level cleared!\nScore %d   %s\n\n%s\n\nPull the trigger / press A to play again" % [score, best, awards], 0.0)
 	else:
-		_show_center("LEVEL %d CLEAR!\n+%d points  (%d blocks spare)\nScore %d\n\nPull the trigger / press A for the next level" % [level + 1, bonus, left, score], 0.0)
+		_show_center("LEVEL %d CLEAR!   +%d\n%s%s\nScore %d\n\nNext: %s\nPull the trigger / press A" % [level + 1, bonus, star_line, extra_line, score,
+			Levels.get_level(level + 1).name], 0.0)
+
+
+func _stat(i: int, key: String, add: int) -> void:
+	if not stats.has(i):
+		stats[i] = {"stars": 0, "tumbles": 0, "bounces": 0, "firsts": 0, "flags": 0, "fives": 0, "gifts": 0}
+	var d: Dictionary = stats[i]
+	d[key] = int(d.get(key, 0)) + add
+
+
+## Fun end-of-game awards: the best runner in each category, plus the builder.
+func _awards_text() -> String:
+	var lines: Array[String] = ["AWARDS"]
+	var cats := [["stars", "STAR CATCHER", "%d stars"], ["firsts", "SPEEDY SNEAKERS", "first to the flag %dx"],
+		["bounces", "BOUNCY BUNNY", "%d bounces"], ["fives", "HIGH-FIVE HERO", "%d high fives"],
+		["gifts", "GIFT GRABBER", "%d gifts"], ["tumbles", "BRAVEST TUMBLER", "%d tumbles"]]
+	for c in cats:
+		var best_i := -1
+		var best_v := 0
+		for i in stats:
+			var d: Dictionary = stats[i]
+			var v: int = int(d.get(c[0], 0))
+			if v > best_v:
+				best_v = v
+				best_i = int(i)
+		if best_i > 0:
+			lines.append("%s: P%d (%s)" % [c[1], best_i + 1, str(c[2]) % best_v])
+	lines.append("MASTER BUILDER: %d blocks placed, %d gifts delivered" % [int(builder_stats["placed"]), int(builder_stats["gifts"])])
+	return "\n".join(lines)
 
 
 func _level_failed() -> void:
@@ -909,7 +1077,8 @@ func _process(delta: float) -> void:
 	if music == null:
 		music = MusicScript.new()
 		add_child(music)
-	music.play_track(level % 3)
+	music.play_track(music_track)
+	music.pitch_scale = lerpf(music.pitch_scale, music_pitch, 1.0 - exp(-2.0 * delta))
 	if mirror_vp:
 		mirror_t -= delta
 		if mirror_t <= 0.0:
@@ -918,6 +1087,7 @@ func _process(delta: float) -> void:
 	_ensure_runners(net.mode)
 	_layout_views()
 	course.update_visuals(delta, level_time, water_y)
+	course.update_balloon(balloon_state, balloon_pos, delta)
 	_update_hud()
 	_update_vr_text()
 	_check_tv_confirm()
@@ -942,6 +1112,9 @@ func _process(delta: float) -> void:
 			if secs <= 10 and secs != tick_last and secs >= 0:
 				tick_last = secs
 				sound("tick", -4.0, 1.0 + (10 - secs) * 0.05)
+			_update_balloon(delta)
+			_update_hint(delta)
+			_check_high_fives()
 			var act := 0
 			var done := 0
 			for r in runners():
@@ -954,8 +1127,194 @@ func _process(delta: float) -> void:
 			elif time_left <= 0.0:
 				_level_failed()
 		"clear":
+			_check_high_fives()
 			if state_t > CLEAR_TIME:
 				_start_level(level + 1)
+		"won":
+			_check_high_fives()
+			_fireworks(delta)
+
+
+# --- Stars, the gift balloon, high fives and build hints (host) -----------------------------
+
+## A runner touched a star (reported by whichever machine drives it).
+func runner_star(r, i: int) -> void:
+	if net.mode == "client":
+		net.send_action("star", [level_seq, i], r.index)
+	else:
+		_collect_star(r.index, i)
+
+
+func _collect_star(pi: int, i: int) -> void:
+	if state != "play" or i < 0 or i >= course.stars.size() or (stars_taken & (1 << i)) != 0:
+		return
+	stars_taken |= 1 << i
+	course.set_stars_taken(stars_taken)
+	score += 25
+	_stat(pi, "stars", 1)
+	var kind := _gift_kind()
+	budget[kind] = int(budget.get(kind, 0)) + 1
+	var sp: Vector3 = course.stars[i]
+	sound("star", -2.0, 1.0 + 0.1 * i)
+	burst(sp, Color(1.0, 0.9, 0.3), 18, 0.1)
+	popup(sp + Vector3.UP * 0.8, "STAR! +1 %s for the Builder" % Art.KIND_NAMES[Art.kind_index(kind)], Color(1.0, 0.92, 0.4))
+	print("P%d collected star %d (+1 %s)" % [pi + 1, i + 1, kind])
+
+
+## Which block a star or gift gives: one of this level's kinds, weighted by how many the level hands out.
+func _gift_kind() -> String:
+	var b: Dictionary = Levels.get_level(level).budget
+	var total := 0
+	for k in b:
+		total += int(b[k])
+	var pick := randi_range(1, maxi(1, total))
+	for k in b:
+		pick -= int(b[k])
+		if pick <= 0:
+			return str(k)
+	return "plank"
+
+
+func _update_balloon(delta: float) -> void:
+	match balloon_state:
+		0:
+			var due := 25.0 if balloon_count == 0 else 85.0
+			if level >= 1 and balloon_count < 2 and level_time > due:
+				spawn_balloon()
+		1:
+			balloon_x += 1.05 * delta
+			var g: float = course.surface_below(balloon_x, 0.5, 20.0, 0.4)
+			var want_y: float = (g + 1.7 if g > -INF else balloon_pos.y) + sin(level_time * 1.3) * 0.25
+			balloon_pos = Vector3(balloon_x, lerpf(balloon_pos.y, want_y, 1.0 - exp(-1.5 * delta)), 0.5 + sin(level_time * 0.6) * 0.9)
+			if balloon_x > 13.5:
+				balloon_state = 0
+		2:
+			if builder == null or not (builder.vr or builder.flat):
+				balloon_state = 1
+				return
+			balloon_pos = builder.grab_point + (Vector3.ZERO if builder.vr else Vector3(0.0, -1.6, 0.0))
+			for r in runners():
+				if r.active and balloon_pos.distance_to(r.global_position + Vector3.UP * 0.5) < 1.3:
+					_pop_gift(r.index)
+					break
+
+
+## A gift balloon drifts in from the start side (also used by the bot test to call one early).
+func spawn_balloon() -> void:
+	if net.mode == "client" or balloon_state != 0 or state != "play":
+		return
+	balloon_state = 1
+	balloon_count += 1
+	balloon_x = -12.0
+	var g: float = course.surface_below(balloon_x, 0.5, 20.0, 0.4)
+	balloon_pos = Vector3(balloon_x, (g if g > -INF else 0.0) + 1.7, 0.5)
+	sound("wave", -6.0, 1.6)
+	_show_center("A GIFT BALLOON!\nRunners: jump into it.  Builder: grab it and carry it to a runner!", 3.5)
+	print("Gift balloon appears")
+
+
+## The builder's hand touched the drifting balloon: it follows the hand until a runner gets it.
+func builder_grab_balloon() -> void:
+	if net.mode == "client" or balloon_state != 1 or state != "play":
+		return
+	balloon_state = 2
+	sound("pickup", -4.0, 1.4)
+	_show_center("The Builder has the GIFT!\nCarry it down to a runner!", 2.5)
+
+
+func runner_gift(r) -> void:
+	if net.mode == "client":
+		net.send_action("gift", [level_seq], r.index)
+	else:
+		_pop_gift(r.index)
+
+
+func _pop_gift(pi: int) -> void:
+	if balloon_state == 0 or state != "play":
+		return
+	var delivered := balloon_state == 2
+	balloon_state = 0
+	course.hide_balloon()
+	var kind := _gift_kind()
+	budget[kind] = int(budget.get(kind, 0)) + 2
+	score += 30
+	_stat(pi, "gifts", 1)
+	if delivered:
+		builder_stats["gifts"] = int(builder_stats["gifts"]) + 1
+		score += 20
+	sound("pop", -2.0)
+	sound("gift", -3.0)
+	confetti(balloon_pos, 50, 0.6)
+	var what := "+2 %s for the Builder!" % Art.KIND_NAMES[Art.kind_index(kind)]
+	popup(balloon_pos + Vector3.UP * 1.0, ("SPECIAL DELIVERY!\n" if delivered else "GIFT!\n") + what, Color(0.6, 0.9, 1.0))
+	_show_center("P%d got the GIFT!  %s" % [pi + 1, what], 2.0)
+	print("P%d popped the gift balloon (%s, delivered=%s)" % [pi + 1, kind, delivered])
+
+
+## The giant's hand next to a runner who made it to the flag: HIGH FIVE!
+func _check_high_fives() -> void:
+	if builder == null or not (builder.vr or builder.flat) or builder.held_kind != "":
+		return
+	var hp: Vector3 = builder.grab_point
+	for r in runners():
+		if not r.active or not r.finished or int(high_fived.get(r.index, -1)) == level_seq:
+			continue
+		var rp: Vector3 = r.global_position + Vector3.UP * 0.6
+		var near: bool = hp.distance_to(rp) < 1.1 if builder.vr else Vector2(hp.x - rp.x, hp.z - rp.z).length() < 0.7
+		if near:
+			high_fived[r.index] = level_seq
+			_stat(r.index, "fives", 1)
+			score += 10
+			sound("highfive", -2.0, randf_range(0.95, 1.1))
+			burst(rp + Vector3.UP * 0.4, r.color, 14, 0.09)
+			popup(rp + Vector3.UP * 1.4, "HIGH FIVE!", Color(1.0, 0.95, 0.5))
+			if builder.vr:
+				builder._haptic(0.9, 0.12)
+			print("High five for P%d" % (r.index + 1))
+
+
+## When the builder seems stuck, show a see-through block where the next block of a known solution goes.
+func _update_hint(delta: float) -> void:
+	hint_t -= delta
+	if hint_t > 0.0:
+		return
+	hint_t = 0.5
+	var want: Array = []
+	var wait := 20.0 if level < 3 else 32.0
+	if build_idle() > wait and first_flag_t < 0.0 and builder != null and builder.held_kind == "":
+		for item in Levels.get_level(level).solution:
+			var kind: String = item[0]
+			var c: Vector3i = item[1]
+			if course.block_kind(c) == kind or int(budget.get(kind, 0)) <= 0:
+				continue
+			if can_place(kind, c):
+				want = [Art.kind_index(kind), Vector3(c), int(item[2])]
+				break
+	if want.is_empty() != hint.is_empty() and not want.is_empty():
+		sound("click", -6.0, 0.8)
+		if not has_meta("hint_seq") or int(get_meta("hint_seq")) != level_seq:
+			set_meta("hint_seq", level_seq)
+			_show_center("Stuck? The glowing see-through block is a HINT!", 3.0)
+	hint = want
+	_apply_hint()
+
+
+func _apply_hint() -> void:
+	if hint.size() < 3:
+		course.set_hint("", Vector3i.ZERO, 0)
+		return
+	var hc: Vector3 = hint[1]
+	course.set_hint(Art.KINDS[clampi(int(hint[0]), 0, Art.KINDS.size() - 1)], Vector3i(roundi(hc.x), roundi(hc.y), roundi(hc.z)), int(hint[2]))
+
+
+func _fireworks(delta: float) -> void:
+	fireworks_t -= delta
+	if fireworks_t > 0.0 or state_t > 14.0:
+		return
+	fireworks_t = randf_range(0.45, 0.9)
+	var p := Vector3(randf_range(-9.0, 9.0), randf_range(5.0, 9.0), randf_range(-3.0, 1.0))
+	confetti(p, 50, 0.7)
+	sound("firework", -6.0, randf_range(0.8, 1.2))
 
 
 ## A / Enter on the TV (or split screen): start, next level, try again.
@@ -1017,6 +1376,12 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 		"flag":
 			if args.size() > 0 and int(args[0]) == level_seq:
 				_mark_finished(index)
+		"star":
+			if args.size() >= 2 and int(args[0]) == level_seq:
+				_collect_star(index, int(args[1]))
+		"gift":
+			if args.size() >= 1 and int(args[0]) == level_seq:
+				_pop_gift(index)
 		"fx":
 			if args.size() >= 2:
 				runner_fx(index, str(args[0]), args[1])
@@ -1050,7 +1415,7 @@ func make_snapshot() -> Array:
 	for r in runners():
 		rs.append(r.net_state())
 	return [level, level_seq, state, state_t, level_time, time_left, score, water_y, b, course.pack_blocks(),
-		builder.net_state(), rs]
+		builder.net_state(), rs, stars_taken, balloon_state, balloon_pos, hint]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -1080,6 +1445,18 @@ func apply_snapshot(s: Array) -> void:
 	for i in mini(rs.size(), MAX_RUNNERS):
 		if i + 1 < players.size():
 			players[i + 1].apply_net_state(rs[i])
+	if s.size() >= 16:
+		var mask: int = s[12]
+		if mask != stars_taken or mask != course.stars_taken:
+			stars_taken = mask
+			course.set_stars_taken(mask)
+		balloon_state = s[13]
+		balloon_pos = s[14]
+		var h: Array = s[15]
+		if h != hint:
+			hint = h
+			_apply_hint()
+		course.show_rainbow(state == "won")
 
 
 func apply_event(kind: String, args: Array) -> void:
@@ -1096,6 +1473,8 @@ func apply_event(kind: String, args: Array) -> void:
 			popup(args[0], args[1], args[2])
 		"center":
 			_show_center(args[0], args[1], false)
+		"thud":
+			thud(args[0])
 		"remote_pause":
 			get_tree().paused = args[0]
 			_set_pause_banner(args[0], "The Builder paused the game")
@@ -1161,7 +1540,32 @@ func _status_text() -> String:
 				done += 1
 	if state == "intro":
 		return "BLOCK BUILDERS"
-	return "LEVEL %d/%d  %s   TIME %d:%02d   FLAG %d/%d   SCORE %d" % [level + 1, Levels.count(), d.name, t / 60, t % 60, done, act, score]
+	var ns := 0
+	for k in course.stars.size():
+		if stars_taken & (1 << k):
+			ns += 1
+	return "LEVEL %d/%d  %s   TIME %d:%02d   FLAG %d/%d   STARS %d/%d   SCORE %d" % [level + 1, Levels.count(), d.name,
+		t / 60, t % 60, done, act, ns, course.stars.size(), score]
+
+
+## One line of advice for the builder: what to do right now.
+func _builder_tip() -> String:
+	if state != "play":
+		return ""
+	if balloon_state == 1:
+		return "GIFT BALLOON! Touch it with your hand, then carry it to a runner"
+	if balloon_state == 2:
+		return "Carry the gift down to a runner!"
+	for r in runners():
+		if r.active and r.finished and int(high_fived.get(r.index, -1)) != level_seq:
+			return "Touch a runner at the flag with your hand: HIGH FIVE!"
+	if builder != null and builder.vr and not builder.took_this_level:
+		return "Reach down to your TRAY (by your right hip) and pull the trigger on a block"
+	if builder != null and builder.held_kind != "":
+		return "Hold it over the course: GREEN = it fits, let go to drop it.  A turns it"
+	if build_idle() > 15.0 or level_time < 12.0:
+		return "TIP: " + str(Levels.get_level(level).get("btip", ""))
+	return ""
 
 
 func _tray_text() -> String:
@@ -1189,7 +1593,14 @@ func _update_hud() -> void:
 		var sel_kind: String = Art.KINDS[builder.sel]
 		builder.hud_label.text = "BUILDER   %s\n%s     holding: %s  (Q/E pick, wheel height, R turn)" % [status, tray,
 			Art.KIND_NAMES[builder.sel] if int(budget.get(sel_kind, 0)) > 0 else "nothing - pick another block"]
-		builder.hint_label.text = ""
+		var bt := _builder_tip()
+		if balloon_state == 1:
+			bt = "GIFT BALLOON! Move your glove over it, then over a runner"
+		elif bt.begins_with("Touch a runner"):
+			bt = "Move your glove over a runner at the flag: HIGH FIVE!"
+		elif bt.begins_with("Reach down") or bt.begins_with("Hold it"):
+			bt = ""
+		builder.hint_label.text = bt
 
 
 ## VR can't show 2D overlays: the centre banner and a status line float in the world (VrText).
@@ -1208,6 +1619,9 @@ func _update_vr_text() -> void:
 	vr_center.outline_modulate.a = center_label.modulate.a
 	vr_center.visible = center_label.text != "" and center_label.modulate.a > 0.01
 	var info := _status_text() + "\n" + _tray_text()
+	var tip := _builder_tip()
+	if tip != "":
+		info += "\n" + tip
 	if net.mode == "host" and not net.connected:
 		info = "Waiting for the runners to join…"
 	vr_info.text = info
