@@ -82,6 +82,7 @@ func apply_net(item: Array) -> void:
 func _on_body_entered(body: Node3D) -> void:
 	if body.get("is_down") != false:
 		return
+	main.achievements().on_pickup()
 	if kind == "health":
 		body.heal(40.0)
 	else:

@@ -537,6 +537,7 @@ func take_damage(amount: float, from_pos = null) -> void:
 		return
 	if remote:
 		main.net.event("hurt", [from_pos if from_pos != null else global_position])
+	main.achievements().on_damage(amount)
 	if hud and from_pos != null:
 		hud.damage_from(from_pos)
 	hp -= amount
@@ -595,6 +596,7 @@ func _update_revive(delta: float) -> void:
 	var s := maxf(revive_progress, 0.01)
 	revive_fill.scale = Vector3(s, 1, s)
 	if revive_progress >= 1.0:
+		main.achievements().unlock("teamwork")
 		revive(0.5)
 
 
@@ -798,6 +800,7 @@ func shield_reflect(pos: Vector3) -> Vector3:
 	if shield.global_position.distance_to(pos) > 0.42:
 		return Vector3.ZERO
 	hand_l.trigger_haptic_pulse("haptic", 0.0, 0.8, 0.12, 0.0)
+	main.achievements().unlock("parry")
 	if not shield_announced:
 		shield_announced = true
 		main._show_center("SHIELD PARRY!\nYour left hand reflects green orbs back at enemies", 2.5)

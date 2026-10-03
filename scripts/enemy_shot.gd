@@ -86,6 +86,8 @@ func _on_body_entered(body: Node3D) -> void:
 	if friendly:
 		if body.has_method("hit"):
 			body.hit(4.0, Vector3(direction.x, 0.0, direction.z).normalized())
+			if body.dead:
+				main.achievements().unlock("reflect_kill")
 		elif body.has_method("take_damage"):
 			return  # reflected orbs pass through players
 		spent = true
@@ -107,6 +109,7 @@ func shot_down() -> void:
 		return
 	spent = true
 	main.score += 50
+	main.achievements().unlock("fish_fry")
 	main.explosion(global_position, color, 0.8)
 	main.popup(global_position + Vector3.UP * 0.5, "+50", color.lightened(0.3))
 	queue_free()

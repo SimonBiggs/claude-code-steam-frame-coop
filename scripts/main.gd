@@ -13,6 +13,7 @@ const BulletScript := preload("res://scripts/bullet.gd")
 const EnemyShotScript := preload("res://scripts/enemy_shot.gd")
 const MusicScript := preload("res://scripts/music.gd")
 const FishScript := preload("res://scripts/fish.gd")
+const AchScript := preload("res://scripts/achievements.gd")
 
 const ARENA_RADIUS := 18.0
 ## Team upgrades granted after each cleared wave: [name, description, stat, "mul" or "add", amount]
@@ -65,6 +66,10 @@ var ghost_cam: Camera3D
 var vr_center: Label3D
 var music: AudioStreamPlayer
 var sky_fish: Node3D
+var ach: Node
+var toast_label: Label
+var toast_3d: Label3D
+var toast_tween: Tween
 # Messages from Claude: written to res://.dev/say.txt on the host, shown in VR and on the TV.
 var say_t := 0.0
 var claude_label: Label
@@ -618,6 +623,7 @@ func _start_wave() -> void:
 	to_spawn = 4 + wave * 3
 	spawn_timer = 0.5
 	sound("wave")
+	achievements().on_wave_started(wave)
 	if wave == 2:
 		create_tween().tween_property(help_label, "modulate:a", 0.0, 1.0)
 	if wave % 5 == 0:
@@ -631,6 +637,7 @@ func _start_wave() -> void:
 func _end_wave() -> void:
 	in_break = true
 	break_timer = 3.0
+	achievements().on_wave_cleared()
 	var upgrade_text := _grant_upgrade()
 	for p in players:
 		if p.is_down:
@@ -701,8 +708,89 @@ func split_enemy(pos: Vector3, count: int) -> void:
 		add_child(e)
 
 
+func achievements() -> Node:
+	if ach == null:
+		ach = AchScript.new()
+		ach.main = self
+		add_child(ach)
+	return ach
+
+
+## Gold "achievement unlocked" toast on the TV and in VR (and sent to the other machine).
+func achievement_toast(title: String, desc: String, count: int, total: int) -> void:
+	if net:
+		net.event("achieve", [title, desc, count, total])
+	var text := "ACHIEVEMENT UNLOCKED  (%d/%d)\n%s\n%s" % [count, total, title, desc]
+	if toast_label == null:
+		toast_label = _make_label(30)
+		toast_label.add_theme_color_override("font_color", Color(1.0, 0.82, 0.3))
+		toast_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		center_label.get_parent().add_child(toast_label)
+		toast_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+		toast_label.offset_top = 105
+		toast_label.offset_bottom = 230
+	toast_label.text = text
+	if players.size() > 0 and players[0].vr:
+		if toast_3d == null:
+			toast_3d = _vr_text(Vector3(0.0, 0.32, -1.7), Color(1.0, 0.82, 0.3), 36)
+		toast_3d.text = text
+	sound("clear", -2.0, 1.3)
+	if toast_tween:
+		toast_tween.kill()
+	toast_tween = create_tween().set_parallel()
+	for node in [toast_label, toast_3d]:
+		if node:
+			node.modulate.a = 1.0
+			toast_tween.tween_property(node, "modulate:a", 0.0, 0.6).set_delay(4.0)
+
+
+## A head-locked text panel for the VR player, with a dark backdrop so it's readable anywhere.
+func _vr_text(pos: Vector3, color: Color, font: int) -> Label3D:
+	var l := Label3D.new()
+	l.font_size = font
+	l.outline_size = 12
+	l.pixel_size = 0.0022
+	l.no_depth_test = true
+	l.render_priority = 10
+	l.outline_render_priority = 9
+	l.width = 1000.0
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.modulate = color
+	players[0].xr_camera.add_child(l)
+	l.position = pos
+	players[0]._set_layers(l, players[0].viewmodel_layer())
+	return l
+
+
+## Keeps a dark rounded-off card behind a VR text panel, sized to its text.
+func _update_backdrop(l: Label3D) -> void:
+	if l == null:
+		return
+	var card: MeshInstance3D = l.get_meta("card") if l.has_meta("card") else null
+	if card == null:
+		card = MeshInstance3D.new()
+		card.mesh = QuadMesh.new()
+		var mat := StandardMaterial3D.new()
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.no_depth_test = true
+		mat.render_priority = 8
+		mat.albedo_color = Color(0.0, 0.0, 0.03, 0.6)
+		card.material_override = mat
+		l.add_child(card)
+		card.position.z = -0.01
+		players[0]._set_layers(card, players[0].viewmodel_layer())
+		l.set_meta("card", card)
+	var box := l.get_aabb()
+	card.visible = l.text != "" and l.modulate.a > 0.02
+	card.scale = Vector3(box.size.x + 0.08, box.size.y + 0.06, 1.0)
+	card.position = Vector3(box.get_center().x, box.get_center().y, -0.01)
+	card.material_override.albedo_color.a = 0.6 * l.modulate.a
+
+
 func on_enemy_killed(pos: Vector3, color: Color, points: int, drop_chance: float, radius: float) -> void:
 	score += points
+	achievements().on_kill(points, radius)
 	if radius >= 1.0:
 		sound("big_kill", 0.0, 1.4 / radius)
 	else:
@@ -733,7 +821,7 @@ func _on_game_over() -> void:
 	if score > best.score:
 		best_line = "NEW BEST SCORE!  (previous %d)" % best.score
 		_save_best(wave, score)
-	_show_center("YOU BOTH WENT DOWN\nWave %d  ·  Score %d\n%s\n\nPress A or Enter to try again  ·  Start / Esc for menu" % [wave, score, best_line], 0.0)
+	_show_center("YOU BOTH WENT DOWN\nWave %d  ·  Score %d\n%s\n%s\n\nPress A or Enter to try again  ·  Start / Esc for menu" % [wave, score, best_line, achievements().summary()], 0.0)
 
 
 func _load_best() -> Dictionary:
@@ -816,6 +904,8 @@ func _update_tether(delta: float) -> void:
 		var cp := Geometry3D.get_closest_point_to_segment(ep, pa, pb)
 		if Vector2(cp.x - ep.x, cp.z - ep.z).length() < e.radius + 0.25:
 			e.hit(upg.tether_dps * delta, Vector3.ZERO, 0.0)
+			if e.dead:
+				achievements().unlock("beam_team")
 			if zap_t <= 0.0:
 				zap_t = 0.12
 				sound("zap", -6.0)
@@ -970,6 +1060,8 @@ func apply_event(kind: String, args: Array) -> void:
 			_ring(args[0], args[1], args[2])
 		"popup":
 			popup(args[0], args[1], args[2])
+		"achieve":
+			achievement_toast(args[0], args[1], args[2], args[3])
 		"boom":
 			explosion(args[0], args[1], args[2])
 		"say":
@@ -1116,6 +1208,9 @@ func _update_vr_center() -> void:
 	vr_center.text = center_label.text
 	vr_center.modulate.a = center_label.modulate.a
 	vr_center.outline_modulate.a = center_label.modulate.a
+	_update_backdrop(vr_center)
+	_update_backdrop(claude_3d)
+	_update_backdrop(toast_3d)
 
 
 func _update_hud() -> void:
