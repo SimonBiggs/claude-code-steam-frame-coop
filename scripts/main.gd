@@ -1014,6 +1014,7 @@ func _check_join(delta: float) -> void:
 func on_player_activity_changed(p) -> void:
 	if p.has_meta("view"):
 		p.get_meta("view").visible = p.active
+	print("Player %d is now %s on this screen" % [p.index + 1, "playing" if p.active else "waiting"])
 
 
 ## Host: a TV player did something on the Steam Machine.
@@ -1035,6 +1036,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 				p2.set_active(true)
 				p2.hp = p2.stat("max_hp")
 				_show_center("PLAYER %d JOINED!" % (index + 1), 1.5)
+				print("Net: player %d joined the game" % (index + 1))
 		"restart":
 			if game_over:
 				get_tree().reload_current_scene()
