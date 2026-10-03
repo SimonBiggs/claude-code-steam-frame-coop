@@ -15,6 +15,7 @@ const BRANCHES := [
 const COSTS := [40, 90, 160]
 const RADII := [2.6, 4.2, 5.8]
 const ROMAN := ["I", "II", "III"]
+const TURRET_COST := 100
 
 var main
 var nodes := {}  # "key:tier" -> {area, mat, label, line, owners}
@@ -23,6 +24,7 @@ var pulse := 0.0
 
 func _ready() -> void:
 	set_meta("map", true)
+	set_meta("map_v3", true)
 	for b in BRANCHES.size():
 		var key: String = BRANCHES[b][0]
 		var angle := TAU * b / BRANCHES.size() + PI / 6.0
@@ -32,15 +34,7 @@ func _ready() -> void:
 			var pos: Vector3 = dir * float(RADII[tier])
 			_make_node(key, tier + 1, BRANCHES[b][1], BRANCHES[b][2], pos, prev)
 			prev = pos
-	var title := Label3D.new()
-	title.text = "SKILL MAP\nshoot a node to buy it"
-	title.font_size = 40
-	title.outline_size = 14
-	title.pixel_size = 0.008
-	title.modulate = Color(0.6, 1.0, 1.0)
-	title.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	title.position = Vector3(0, 0.6, 0)
-	add_child(title)
+	_make_turret_hub()
 
 
 func _make_node(key: String, tier: int, title: String, color: Color, pos: Vector3, from: Vector3) -> void:
@@ -70,13 +64,16 @@ func _make_node(key: String, tier: int, title: String, color: Color, pos: Vector
 	disc.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	area.add_child(disc)
 	var label := Label3D.new()
-	label.font_size = 36
+	label.font_size = 40
 	label.outline_size = 12
 	label.pixel_size = 0.006
 	label.modulate = color.lightened(0.35)
-	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	label.position = Vector3(0, 0.55, 0)
+	label.double_sided = true
 	area.add_child(label)
+	# Lie flat just outside the disc, text "up" pointing away from the centre.
+	var out := Vector3(pos.x, 0.0, pos.z).normalized()
+	label.basis = Basis(out.cross(Vector3.UP), out, Vector3.UP)
+	label.position = out * 1.05 + Vector3(0, -0.27, 0)
 	# Glowing line on the floor back towards the centre / previous tier.
 	var line := MeshInstance3D.new()
 	var bm := BoxMesh.new()
@@ -127,9 +124,58 @@ func _process(delta: float) -> void:
 		n.mat.emission_energy_multiplier = (3.0 + sin(pulse * 6.0) * 1.5) if affordable else 0.7
 
 
+## Centre hub: shoot it to build an auto-turret where you stand.
+func _make_turret_hub() -> void:
+	var area := Area3D.new()
+	area.collision_layer = 4
+	area.collision_mask = 0
+	area.monitoring = false
+	area.set_meta("turret", true)
+	area.position = Vector3(0, 0.3, 0)
+	add_child(area)
+	var cs := CollisionShape3D.new()
+	var shape := BoxShape3D.new()
+	shape.size = Vector3(1.6, 0.7, 1.6)
+	cs.shape = shape
+	area.add_child(cs)
+	var disc := MeshInstance3D.new()
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = 0.8
+	cyl.bottom_radius = 0.85
+	cyl.height = 0.1
+	cyl.radial_segments = 6  # hexagon
+	disc.mesh = cyl
+	disc.material_override = main.make_material(Color(0.9, 0.95, 1.0), 2.5)
+	disc.position.y = -0.25
+	area.add_child(disc)
+	var label := Label3D.new()
+	label.text = "BUILD TURRET\n%d XP" % TURRET_COST
+	label.font_size = 40
+	label.outline_size = 12
+	label.pixel_size = 0.006
+	label.double_sided = true
+	label.modulate = Color(0.9, 0.95, 1.0)
+	label.basis = Basis(Vector3.RIGHT, Vector3.FORWARD, Vector3.UP)
+	label.position = Vector3(0, -0.18, 0)
+	area.add_child(label)
+
+
 ## Host: a player bullet hit a node; the shooter buys it for themselves.
 func bullet_hit_area(area: Area3D, _damage: float, shooter) -> void:
-	if main.net.mode == "client" or shooter == null or not area.has_meta("skill"):
+	if main.net.mode == "client" or shooter == null:
+		return
+	if area.has_meta("turret"):
+		var at := area.global_position + Vector3.UP * 0.9
+		var mine := get_tree().get_nodes_in_group("turrets").filter(func(t) -> bool: return t.builder == shooter)
+		if mine.size() >= 2:
+			main.popup(at, "max 2 turrets", Color(0.7, 0.7, 0.8))
+		elif shooter.xp < TURRET_COST:
+			main.popup(at, "need %d XP" % TURRET_COST, Color(0.7, 0.7, 0.8))
+		else:
+			shooter.xp -= TURRET_COST
+			main.build_turret(shooter)
+		return
+	if not area.has_meta("skill"):
 		return
 	var key: String = area.get_meta("skill")
 	var tier: int = area.get_meta("tier")

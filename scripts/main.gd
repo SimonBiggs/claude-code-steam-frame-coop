@@ -15,6 +15,7 @@ const MusicScript := preload("res://scripts/music.gd")
 const FishScript := preload("res://scripts/fish.gd")
 const AchScript := preload("res://scripts/achievements.gd")
 const TreeScript := preload("res://scripts/skill_map.gd")
+const TurretScript := preload("res://scripts/turret.gd")
 
 const ARENA_RADIUS := 18.0
 ## Team upgrades granted after each cleared wave: [name, description, stat, "mul" or "add", amount]
@@ -566,7 +567,7 @@ func _process(delta: float) -> void:
 		add_child(music)
 	if music.has_method("play_track"):
 		music.play_track(maxi(wave - 1, 0) / 2)  # a new track every two waves
-	if skill_tree != null and not skill_tree.has_meta("map"):  # replace the old upright tree
+	if skill_tree != null and not skill_tree.has_meta("map_v3"):  # replace an older skill tree/map
 		skill_tree.queue_free()
 		skill_tree = null
 	if skill_tree == null:
@@ -924,7 +925,7 @@ func _update_tether(delta: float) -> void:
 
 # --- Networked co-op -------------------------------------------------------
 
-func spawn_bullet(origin: Vector3, dir: Vector3, color: Color, owner_player, visual_only: bool) -> void:
+func spawn_bullet(origin: Vector3, dir: Vector3, color: Color, owner_player, visual_only: bool, show_everywhere: bool = false) -> void:
 	var b := BulletScript.new()
 	b.direction = dir
 	b.color = color
@@ -933,8 +934,22 @@ func spawn_bullet(origin: Vector3, dir: Vector3, color: Color, owner_player, vis
 	b.visual_only = visual_only
 	add_child(b)
 	b.global_position = origin
-	if not visual_only and owner_player != null and not owner_player.remote:
+	if not visual_only and (show_everywhere or (owner_player != null and not owner_player.remote)):
 		net.event("bullet", [origin, dir, color])
+
+
+## A player bought a turret: drop it just in front of them.
+func build_turret(p) -> void:
+	var t := TurretScript.new()
+	t.main = self
+	t.builder = p
+	t.color = p.color
+	t.net_id = next_net_id()
+	var ahead: Vector3 = Basis(Vector3.UP, p.yaw) * Vector3(0, 0, -1.6)
+	t.position = Vector3(p.global_position.x + ahead.x, 0.0, p.global_position.z + ahead.z)
+	add_child(t)
+	popup(t.position + Vector3.UP * 1.6, "TURRET!", p.color)
+	sound("clear", -2.0, 0.9)
 
 
 func on_client_joined() -> void:
@@ -1004,7 +1019,10 @@ func make_snapshot() -> Array:
 	var fish_state := [true, 0.0]
 	if sky_fish:
 		fish_state = [sky_fish.alive, sky_fish.hp]
-	return [wave, score, upg, upg_names, game_over, ps, es, pk, sh, fish_state]
+	var tu := []
+	for t in get_tree().get_nodes_in_group("turrets"):
+		tu.append([t.net_id, t.global_position, t.head.rotation.y, t.color])
+	return [wave, score, upg, upg_names, game_over, ps, es, pk, sh, fish_state, tu]
 
 
 ## Client: mirror the host's world.
@@ -1025,6 +1043,8 @@ func apply_snapshot(s: Array) -> void:
 	_sync_ghosts(s[8], "shot")
 	if s.size() > 9 and sky_fish:
 		sky_fish.apply_net(s[9])
+	if s.size() > 10:
+		_sync_ghosts(s[10], "turret")
 
 
 
@@ -1056,6 +1076,15 @@ func _make_ghost(kind: String, item: Array) -> Node3D:
 			e.position = item[2]
 			add_child(e)
 			return e
+		"turret":
+			var t := TurretScript.new()
+			t.main = self
+			t.ghost = true
+			t.net_id = item[0]
+			t.color = item[3]
+			t.position = item[1]
+			add_child(t)
+			return t
 		"pickup":
 			var k := PickupScript.new()
 			k.kind = item[1]
