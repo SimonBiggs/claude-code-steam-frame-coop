@@ -2,10 +2,13 @@ extends Node3D
 ## KART RACE - friendly kart racing for the whole living room.
 ## The VR player (players[0]) sits in a kart and drives it with a steering wheel held in both hands
 ## (right trigger = go, A = item / boost). TV players (1-6) drive their own karts in split screen
-## chase cams. Colourful looping tracks with ramps, boost arrows and item boxes (banana slip, bubble
-## shield, speed mushroom); 3 laps; rubber-band catch-up keeps everyone close; bumps never wreck.
-## CPU buddies fill the grid up to 4 karts. Modes, networking and drop-in join follow
-## docs/GAME_DEV_GUIDE.md and games/marble_maze.
+## chase cams. Five themed tracks (meadow, candy, dino desert, moonlight, snowy peaks) with ramps,
+## boost arrows, item boxes, cheering crowds and start lights. GRAND PRIX: cups of 3 races, points
+## for every place, trophies and fun awards at the end. Items are all harmless: banana slip, bubble
+## shield, speed mushroom, triple mushroom, rainbow star and the silly honk (wobbles karts nearby).
+## Drift round bends for sparks and a mini-turbo; press go on the last red light for a rocket start.
+## Rubber-band catch-up keeps everyone close; bumps never wreck. CPU buddies fill the grid up to
+## 4 karts. Modes, networking and drop-in join follow docs/GAME_DEV_GUIDE.md and games/marble_maze.
 
 const VrText := preload("res://core/vr_text.gd")
 const SfxScript := preload("res://core/sfx.gd")
@@ -30,11 +33,22 @@ const RACE_TIMEOUT := 420.0
 const SOLO_WAIT := 8.0  # host: start with CPU buddies if no TV joins
 const SHIELD_TIME := 8.0
 const MUSHROOM_TIME := 1.8
+const STAR_TIME := 5.0
+const HONK_RANGE := 16.0
 const PLAYER_COLORS: Array[Color] = [Color(1.0, 0.75, 0.2), Color(1.0, 0.3, 0.3), Color(0.25, 0.6, 1.0),
 	Color(0.35, 0.9, 0.35), Color(0.85, 0.4, 1.0), Color(1.0, 0.55, 0.15), Color(0.3, 0.95, 0.9)]
 const CPU_NAMES: Array[String] = ["BUNNY", "DINO", "ROBO"]
 const CPU_COLORS: Array[Color] = [Color(1.0, 0.7, 0.85), Color(0.55, 0.8, 0.3), Color(0.7, 0.75, 0.85)]
-const ITEM_NAMES := {"banana": "BANANA", "shield": "BUBBLE SHIELD", "mushroom": "SPEED MUSHROOM"}
+const ITEM_NAMES := {"banana": "BANANA", "shield": "BUBBLE SHIELD", "mushroom": "SPEED MUSHROOM",
+	"triple": "TRIPLE MUSHROOM", "star": "RAINBOW STAR", "honk": "SILLY HONK"}
+const CUPS := [
+	{"name": "SUNFLOWER CUP", "tracks": [0, 1, 2]},
+	{"name": "SNOWFLAKE CUP", "tracks": [4, 3, 1]},
+	{"name": "RAINBOW CUP", "tracks": [2, 4, 0]},
+	{"name": "STARLIGHT CUP", "tracks": [3, 0, 4]},
+]
+const POINTS: Array[int] = [10, 8, 6, 5, 4, 3, 2, 1, 1, 1]
+const TROPHY_COLORS: Array[Color] = [Color(1.0, 0.82, 0.2), Color(0.85, 0.88, 0.95), Color(0.85, 0.5, 0.25)]
 const SOUNDS := {
 	"box": [0.22, 600.0, 1500.0, 0.3, "square", 0.0],
 	"boost": [0.45, 200.0, 900.0, 0.3, "saw", 0.3],
@@ -49,6 +63,14 @@ const SOUNDS := {
 	"pop": [0.15, 1200.0, 300.0, 0.3, "sine", 0.4],
 	"shield": [0.4, 300.0, 1200.0, 0.3, "sine", 0.0],
 	"drop": [0.15, 500.0, 250.0, 0.3, "tri", 0.0],
+	"honk": [0.45, 330.0, 310.0, 0.4, "square", 0.05],
+	"star": [0.9, 523.0, 1568.0, 0.3, "square", 0.0],
+	"spark": [0.12, 1300.0, 1700.0, 0.16, "square", 0.2],
+	"turbo": [0.45, 260.0, 1300.0, 0.32, "saw", 0.35],
+	"rocket": [0.7, 180.0, 1500.0, 0.35, "saw", 0.3],
+	"cheer": [1.3, 700.0, 500.0, 0.22, "sine", 0.95],
+	"trophy": [1.4, 523.0, 2093.0, 0.4, "tri", 0.0],
+	"wobble": [0.5, 600.0, 300.0, 0.3, "sine", 0.0],
 }
 
 var players: Array = []
@@ -89,6 +111,16 @@ var banana_nodes: Array[Node3D] = []
 var synced := false
 var solo_t := 0.0
 var results_text := ""
+var cup_i := 0
+var cup_race := 0
+var cup_pts: Array[int] = []  # per kart (same order as karts)
+var lights := 0
+var trophy_nodes: Array[Node3D] = []
+var trophy_karts: Array[int] = []
+var map_rect := Rect2()
+var map_track := -1
+var tips_shown := {}
+var vr_results := ""
 
 var center_label: Label
 var help_label: Label
@@ -237,6 +269,257 @@ func torus_mesh(inner: float, outer: float) -> TorusMesh:
 	m.ring_segments = 6
 	meshes[key] = m
 	return m
+
+
+# --- Mesh kit: merged vertex-coloured meshes (one draw call for a whole kart body) ---------------
+
+## A box (optionally rotated) into a SurfaceTool, with flat normals.
+func add_box(st: SurfaceTool, c: Vector3, size: Vector3, col: Color, b: Basis = Basis()) -> void:
+	var h := size * 0.5
+	var faces := [[Vector3.RIGHT, Vector3.UP, Vector3.BACK], [Vector3.LEFT, Vector3.UP, Vector3.FORWARD],
+		[Vector3.UP, Vector3.BACK, Vector3.RIGHT], [Vector3.DOWN, Vector3.FORWARD, Vector3.RIGHT],
+		[Vector3.BACK, Vector3.UP, Vector3.LEFT], [Vector3.FORWARD, Vector3.UP, Vector3.RIGHT]]
+	for f in faces:
+		var fa: Array = f
+		var nrm: Vector3 = fa[0]
+		var u: Vector3 = fa[1]
+		var v: Vector3 = fa[2]
+		var center := nrm * h
+		var du := u * h
+		var dv := v * h
+		var q: Array[Vector3] = [center - du - dv, center - du + dv, center + du + dv, center + du - dv]
+		var wn := (b * nrm).normalized()
+		var order: Array[int] = [0, 1, 2, 0, 2, 3]
+		# Clockwise from the front (Godot's front face): flip if this winding faces inwards.
+		if (q[1] - q[0]).cross(q[2] - q[0]).dot(nrm) > 0.0:
+			order = [0, 2, 1, 0, 3, 2]
+		for k in order:
+			st.set_color(col)
+			st.set_normal(wn)
+			st.add_vertex(c + b * q[k])
+
+
+## One triangle, wound so its front faces along `out` (Godot: clockwise seen from the front).
+func _tri(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, na: Vector3, nb: Vector3, nc: Vector3, out: Vector3, col: Color) -> void:
+	if (b - a).cross(c - a).dot(out) > 0.0:
+		var t := b
+		b = c
+		c = t
+		var tn := nb
+		nb = nc
+		nc = tn
+	st.set_color(col)
+	st.set_normal(na)
+	st.add_vertex(a)
+	st.set_color(col)
+	st.set_normal(nb)
+	st.add_vertex(b)
+	st.set_color(col)
+	st.set_normal(nc)
+	st.add_vertex(c)
+
+
+## An ellipsoid (lat-long sphere) into a SurfaceTool.
+func add_ellipsoid(st: SurfaceTool, c: Vector3, r: Vector3, col: Color, seg: int = 10, rings: int = 6) -> void:
+	for i in rings:
+		var v0 := PI * float(i) / rings
+		var v1 := PI * float(i + 1) / rings
+		for j in seg:
+			var u0 := TAU * float(j) / seg
+			var u1 := TAU * float(j + 1) / seg
+			var us: Array[Vector3] = [_sph(v0, u0), _sph(v1, u0), _sph(v1, u1), _sph(v0, u1)]
+			var ps: Array[Vector3] = []
+			var ns: Array[Vector3] = []
+			for un in us:
+				ps.append(c + un * r)
+				ns.append(Vector3(un.x / maxf(r.x, 0.001), un.y / maxf(r.y, 0.001), un.z / maxf(r.z, 0.001)).normalized())
+			var out := (us[0] + us[1] + us[2] + us[3]).normalized()
+			_tri(st, ps[0], ps[1], ps[2], ns[0], ns[1], ns[2], out, col)
+			_tri(st, ps[0], ps[2], ps[3], ns[0], ns[2], ns[3], out, col)
+
+
+func _sph(v: float, u: float) -> Vector3:
+	return Vector3(sin(v) * cos(u), cos(v), sin(v) * sin(u))
+
+
+## A capped cylinder (along the basis' Y axis) into a SurfaceTool.
+func add_cyl(st: SurfaceTool, c: Vector3, r: float, h: float, col: Color, b: Basis = Basis(), seg: int = 10) -> void:
+	var top := Vector3(0, h * 0.5, 0)
+	for j in seg:
+		var a0 := TAU * float(j) / seg
+		var a1 := TAU * float(j + 1) / seg
+		var p0 := Vector3(cos(a0) * r, 0, sin(a0) * r)
+		var p1 := Vector3(cos(a1) * r, 0, sin(a1) * r)
+		var n0 := b * Vector3(cos(a0), 0, sin(a0))
+		var n1 := b * Vector3(cos(a1), 0, sin(a1))
+		var side := b * Vector3(cos((a0 + a1) * 0.5), 0, sin((a0 + a1) * 0.5))
+		_tri(st, c + b * (p0 - top), c + b * (p1 - top), c + b * (p1 + top), n0, n1, n1, side, col)
+		_tri(st, c + b * (p0 - top), c + b * (p1 + top), c + b * (p0 + top), n0, n1, n0, side, col)
+		var up := b * Vector3.UP
+		_tri(st, c + b * top, c + b * (p0 + top), c + b * (p1 + top), up, up, up, up, col)
+		_tri(st, c - b * top, c + b * (p0 - top), c + b * (p1 - top), -up, -up, -up, -up, col)
+
+
+func _commit(st: SurfaceTool) -> ArrayMesh:
+	st.index()
+	return st.commit()
+
+
+## The kart body in one mesh: chassis, nose, bumper, side pods, seat, spoiler, engine, exhausts,
+## headlights and a number plate.
+func kart_body_mesh(col: Color) -> ArrayMesh:
+	var key := "kartbody/" + col.to_html()
+	if meshes.has(key):
+		return meshes[key]
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var light := col.lightened(0.3)
+	var dark := Color(0.12, 0.12, 0.16)
+	var white := Color(0.97, 0.97, 1.0)
+	add_box(st, Vector3(0, 0.38, 0), Vector3(1.3, 0.32, 1.9), col)
+	add_box(st, Vector3(0, 0.42, -1.15), Vector3(1.0, 0.24, 0.7), col, Basis(Vector3.RIGHT, -0.25))
+	add_box(st, Vector3(0, 0.3, -1.45), Vector3(1.5, 0.12, 0.35), white)  # bumper
+	add_box(st, Vector3(0, 0.56, -0.7), Vector3(0.7, 0.06, 0.5), light)  # bonnet stripe
+	for x in [-1.0, 1.0]:
+		add_box(st, Vector3(float(x) * 0.72, 0.36, 0.05), Vector3(0.18, 0.22, 0.8), light)  # side pods
+		add_box(st, Vector3(float(x) * 0.33, 0.47, -1.47), Vector3(0.2, 0.1, 0.06), Color(1.0, 1.0, 0.75))  # headlights
+		add_cyl(st, Vector3(float(x) * 0.28, 0.5, 1.05), 0.07, 0.35, Color(0.6, 0.62, 0.68), Basis(Vector3.RIGHT, PI * 0.5), 8)  # exhausts
+	add_box(st, Vector3(0, 0.75, 0.62), Vector3(0.8, 0.5, 0.15), dark)  # seat back
+	add_box(st, Vector3(0, 0.55, 0.85), Vector3(0.7, 0.3, 0.35), Color(0.3, 0.3, 0.35))  # engine
+	add_box(st, Vector3(0, 1.0, 1.0), Vector3(1.5, 0.12, 0.3), light)  # spoiler
+	for x in [-0.55, 0.55]:
+		add_box(st, Vector3(float(x), 0.82, 1.0), Vector3(0.06, 0.32, 0.12), dark)  # spoiler struts
+	add_box(st, Vector3(0, 0.36, -1.63), Vector3(0.42, 0.14, 0.02), white)  # number plate
+	add_box(st, Vector3(0, 0.36, -1.645), Vector3(0.3, 0.05, 0.01), col.darkened(0.3))
+	var m := _commit(st)
+	meshes[key] = m
+	return m
+
+
+## A wheel: dark tyre plus a coloured hub on the +X side (axle along X).
+func wheel_mesh() -> ArrayMesh:
+	if meshes.has("kartwheel"):
+		return meshes["kartwheel"]
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var side := Basis(Vector3.FORWARD, PI * 0.5)
+	add_cyl(st, Vector3.ZERO, 0.3, 0.26, Color(0.1, 0.1, 0.12), side, 12)
+	add_cyl(st, Vector3(0.12, 0, 0), 0.16, 0.04, Color(0.85, 0.85, 0.9), side, 10)
+	add_box(st, Vector3(0.14, 0, 0), Vector3(0.02, 0.24, 0.05), Color(0.95, 0.75, 0.2))
+	var m := _commit(st)
+	meshes["kartwheel"] = m
+	return m
+
+
+## The driver's body and arms reaching for the wheel.
+func driver_mesh(col: Color) -> ArrayMesh:
+	var key := "driver/" + col.to_html()
+	if meshes.has(key):
+		return meshes[key]
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	add_ellipsoid(st, Vector3(0, 0.78, 0.35), Vector3(0.27, 0.36, 0.22), col)
+	for x in [-1.0, 1.0]:
+		add_ellipsoid(st, Vector3(float(x) * 0.24, 0.85, 0.08), Vector3(0.08, 0.08, 0.26), col.darkened(0.1), 8, 4)
+		add_ellipsoid(st, Vector3(float(x) * 0.16, 0.92, -0.16), Vector3(0.07, 0.07, 0.07), Color(1.0, 1.0, 1.0), 6, 3)  # gloves
+	var m := _commit(st)
+	meshes[key] = m
+	return m
+
+
+## Helmet with a visor and a stripe in the kart's colour.
+func helmet_mesh(col: Color) -> ArrayMesh:
+	var key := "helmet/" + col.to_html()
+	if meshes.has(key):
+		return meshes[key]
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	add_ellipsoid(st, Vector3.ZERO, Vector3(0.24, 0.24, 0.24), Color(0.97, 0.97, 1.0), 12, 7)
+	add_box(st, Vector3(0, 0.0, -0.21), Vector3(0.36, 0.12, 0.08), Color(0.2, 0.6, 1.0))
+	add_box(st, Vector3(0, 0.12, 0.0), Vector3(0.06, 0.3, 0.44), col)
+	var m := _commit(st)
+	meshes[key] = m
+	return m
+
+
+## A spectator: body + head + arms (vertex colour R = skin, G = arm, so the crowd shader can wave).
+func person_mesh() -> ArrayMesh:
+	if meshes.has("person"):
+		return meshes["person"]
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	add_ellipsoid(st, Vector3(0, 0.45, 0), Vector3(0.22, 0.32, 0.16), Color(0, 0, 0), 8, 5)
+	add_ellipsoid(st, Vector3(0, 0.95, 0), Vector3(0.15, 0.16, 0.15), Color(1, 0, 0), 8, 5)
+	for x in [-1.0, 1.0]:
+		add_ellipsoid(st, Vector3(float(x) * 0.25, 0.75, 0), Vector3(0.06, 0.2, 0.06), Color(0, 1, 0), 6, 3)
+	var m := _commit(st)
+	meshes["person"] = m
+	return m
+
+
+func snowman_mesh() -> ArrayMesh:
+	if meshes.has("snowman"):
+		return meshes["snowman"]
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var w := Color(0.97, 0.98, 1.0)
+	add_ellipsoid(st, Vector3(0, 0.55, 0), Vector3(0.6, 0.55, 0.6), w)
+	add_ellipsoid(st, Vector3(0, 1.35, 0), Vector3(0.42, 0.4, 0.42), w)
+	add_ellipsoid(st, Vector3(0, 1.95, 0), Vector3(0.3, 0.3, 0.3), w)
+	add_cyl(st, Vector3(0, 2.3, 0), 0.22, 0.32, Color(0.1, 0.1, 0.12))
+	add_cyl(st, Vector3(0, 2.16, 0), 0.34, 0.04, Color(0.1, 0.1, 0.12))
+	add_cyl(st, Vector3(0, 1.95, -0.38), 0.05, 0.25, Color(1.0, 0.5, 0.1), Basis(Vector3.RIGHT, PI * 0.5), 6)  # carrot
+	for x in [-0.1, 0.1]:
+		add_ellipsoid(st, Vector3(float(x), 2.05, -0.27), Vector3(0.04, 0.04, 0.04), Color(0.05, 0.05, 0.05), 5, 3)
+	add_box(st, Vector3(0, 1.66, 0), Vector3(0.9, 0.12, 0.9), Color(0.85, 0.2, 0.2))  # scarf
+	var m := _commit(st)
+	meshes["snowman"] = m
+	return m
+
+
+## A little model of an item (for the VR dash and the banana peels on the track).
+func build_item_model(parent: Node3D, it: String, sc: float) -> void:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var glow := 0.4
+	match it:
+		"banana":
+			for i in 5:
+				var a := -0.9 + i * 0.45
+				add_ellipsoid(st, Vector3(sin(a) * 0.6, cos(a) * 0.6 - 0.5, 0), Vector3(0.22, 0.22, 0.22), Color(1.0, 0.88, 0.2), 8, 4)
+			add_ellipsoid(st, Vector3(sin(1.05) * 0.6, cos(1.05) * 0.6 - 0.5, 0), Vector3(0.1, 0.1, 0.1), Color(0.35, 0.25, 0.1), 6, 3)
+		"shield":
+			add_ellipsoid(st, Vector3.ZERO, Vector3(0.6, 0.6, 0.6), Color(0.5, 0.9, 1.0), 12, 6)
+			glow = 0.8
+		"mushroom", "triple":
+			var n := 3 if it == "triple" else 1
+			for i in n:
+				var o := Vector3((i - (n - 1) * 0.5) * 0.8, 0, 0) * (1.0 if n > 1 else 0.0)
+				var k := 0.7 if n > 1 else 1.0
+				add_cyl(st, o + Vector3(0, -0.2, 0) * k, 0.2 * k, 0.5 * k, Color(1, 0.95, 0.85), Basis(), 8)
+				add_ellipsoid(st, o + Vector3(0, 0.15, 0) * k, Vector3(0.5, 0.3, 0.5) * k, Color(1.0, 0.25, 0.2), 10, 5)
+				add_ellipsoid(st, o + Vector3(0.18, 0.38, 0.1) * k, Vector3(0.1, 0.06, 0.1) * k, Color(1, 1, 1), 6, 3)
+		"star":
+			for i in 5:
+				var a := TAU * i / 5.0
+				add_box(st, Vector3(sin(a) * 0.32, cos(a) * 0.32, 0), Vector3(0.22, 0.55, 0.18), Color(1.0, 0.9, 0.2), Basis(Vector3.BACK, -a))
+			add_ellipsoid(st, Vector3.ZERO, Vector3(0.3, 0.3, 0.2), Color(1.0, 0.95, 0.4), 8, 4)
+			glow = 1.0
+		"honk":
+			add_cyl(st, Vector3(0, 0, 0.2), 0.35, 0.2, Color(1.0, 0.4, 0.6), Basis(Vector3.RIGHT, PI * 0.5), 10)
+			add_cyl(st, Vector3(0, 0, -0.15), 0.12, 0.6, Color(0.95, 0.85, 0.3), Basis(Vector3.RIGHT, PI * 0.5), 8)
+			add_ellipsoid(st, Vector3(0, 0, -0.5), Vector3(0.25, 0.25, 0.25), Color(1.0, 0.3, 0.3), 8, 4)
+	var mi := MeshInstance3D.new()
+	mi.mesh = _commit(st)
+	var mat := StandardMaterial3D.new()
+	mat.vertex_color_use_as_albedo = true
+	mat.vertex_color_is_srgb = true
+	mat.emission_enabled = true
+	mat.emission = Color(glow, glow, glow) * 0.5
+	mi.material_override = mat
+	mi.scale = Vector3.ONE * sc
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	parent.add_child(mi)
 
 
 func sound(sound_name: String, volume_db: float = 0.0, pitch: float = 1.0, broadcast: bool = false) -> void:
@@ -538,6 +821,30 @@ func _ensure_view(p) -> void:
 	p.boost_fill = ColorRect.new()
 	p.boost_fill.color = Color(0.3, 0.8, 1.0)
 	bar_bg.add_child(p.boost_fill)
+	var drift_bg := ColorRect.new()
+	drift_bg.color = Color(0, 0, 0, 0.55)
+	drift_bg.name = "DriftBg"
+	hud.add_child(drift_bg)
+	p.drift_fill = ColorRect.new()
+	drift_bg.add_child(p.drift_fill)
+	# Minimap: the track outline with a dot for every kart.
+	var mm := Control.new()
+	mm.name = "Minimap"
+	mm.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud.add_child(mm)
+	var line := Line2D.new()
+	line.name = "Line"
+	line.width = 5.0
+	line.default_color = Color(1, 1, 1, 0.75)
+	line.closed = true
+	mm.add_child(line)
+	for i in karts.size():
+		var dot := ColorRect.new()
+		dot.color = karts[i].color
+		dot.size = Vector2(10, 10)
+		dot.visible = false
+		mm.add_child(dot)
+	p.minimap = mm
 
 
 ## TV grid: 1 full, 2 side by side, 3-4 as 2x2, 5-6 as 3x2; smaller views render at lower resolution.
@@ -598,6 +905,15 @@ func _layout_views() -> void:
 		bar_bg.size = Vector2(260.0 * ui, 22.0 * ui)
 		bar_bg.position = Vector2(16.0, cell.y - 44.0 * ui)
 		p.boost_fill.size = Vector2(0, 22.0 * ui)
+		var drift_bg: ColorRect = p.hud.get_node("DriftBg")
+		drift_bg.size = Vector2(260.0 * ui, 12.0 * ui)
+		drift_bg.position = Vector2(16.0, cell.y - 62.0 * ui)
+		p.drift_fill.size = Vector2(0, 12.0 * ui)
+		p.item_label.position = Vector2(16.0, cell.y - 120.0 * ui)
+		var msz := 190.0 * ui
+		p.minimap.position = Vector2(cell.x - msz - 16.0, cell.y - msz - 16.0)
+		p.minimap.size = Vector2(msz, msz)
+		p.minimap.set_meta("track", -1)
 	if players.size() > 0 and not players[0].vr:
 		sun.shadow_enabled = n <= 2
 
@@ -890,6 +1206,8 @@ func _process(delta: float) -> void:
 	else:
 		_host_update(dt, cont_edge)
 	track.update(dt, net.mode != "client")
+	_follow_weather()
+	_update_trophies(dt)
 	_update_bananas_visual()
 	if cockpit != null:
 		cockpit.place(dt)
@@ -910,7 +1228,7 @@ func _host_update(dt: float, cont_edge: bool) -> void:
 				solo_t += dt
 				if solo_t > SOLO_WAIT and not net.connected:
 					print("No TV players yet: racing the CPU buddies (TV players can join any time)")
-					_start_race(track_i)
+					_start_race(cup_track())
 		"countdown":
 			var dur := _intro_time()
 			var left := int(ceilf(dur - state_t))
@@ -918,6 +1236,7 @@ func _host_update(dt: float, cont_edge: bool) -> void:
 				last_count = left
 				_show_center(str(left), 0.8)
 				sound("count", 0.0, 1.0, true)
+				set_lights(4 - left)
 			if state_t >= dur:
 				state = "race"
 				state_t = 0.0
@@ -926,12 +1245,17 @@ func _host_update(dt: float, cont_edge: bool) -> void:
 					k.hold_still = false
 				_show_center("GO!", 0.8)
 				sound("go", 0.0, 1.0, true)
+				set_lights(4)
+				track.excite(1.0)
 				net.event("go", [])
+				for k in karts:
+					if k.active and k.is_sim():
+						_rocket(k)
 		"race":
 			race_t += dt
 		"results":
-			if (state_t > 2.0 and cont_edge) or state_t > 30.0:
-				_start_race(track_i + 1)
+			if (state_t > 2.0 and cont_edge) or state_t > (45.0 if cup_race >= 2 else 30.0):
+				_next_race()
 	for k in karts:
 		if k.is_sim():
 			k.sim(dt)
@@ -999,7 +1323,49 @@ func debug_continue() -> void:
 
 func _on_continue() -> void:
 	if state == "results" and state_t > 1.0:
-		_start_race(track_i + 1)
+		_next_race()
+
+
+## The next race of the Grand Prix (after the third race, a new cup on new tracks).
+func _next_race() -> void:
+	if cup_race >= 2:
+		cup_i += 1
+		cup_race = 0
+		cup_pts.clear()
+	else:
+		cup_race += 1
+	_start_race(cup_track())
+
+
+func cup_info() -> Dictionary:
+	return CUPS[posmod(cup_i, CUPS.size())]
+
+
+func cup_track() -> int:
+	var tr: Array = cup_info()["tracks"]
+	return int(tr[clampi(cup_race, 0, tr.size() - 1)])
+
+
+func cup_points(k) -> int:
+	var i := karts.find(k)
+	return cup_pts[i] if i >= 0 and i < cup_pts.size() else 0
+
+
+func set_lights(k: int) -> void:
+	lights = k
+	track.set_lights(k)
+	if net.mode == "host":
+		net.event("lights", [k])
+
+
+## At GO: a boost for anyone who pressed go at the right moment.
+func _rocket(k) -> void:
+	if k.try_rocket_start():
+		print("%s: rocket start!" % k.kart_name)
+		if not k.cpu:
+			notify(k, "ROCKET START!")
+			kart_sound(k, "rocket", -2.0)
+			burst(k.position + Vector3(0, 0.6, 0) - k.forward() * 1.4, Color(1.0, 0.7, 0.2), 14)
 
 
 func finish_distance() -> float:
@@ -1011,6 +1377,10 @@ func _start_race(ti: int) -> void:
 	round_n += 1
 	track.build(track_i)
 	_apply_track_look()
+	_clear_trophies()
+	set_lights(0)
+	if cup_pts.size() != karts.size():
+		cup_pts.resize(karts.size())
 	bananas.clear()
 	for i in track.box_t.size():
 		track.box_t[i] = 0.0
@@ -1038,15 +1408,14 @@ func _start_race(ti: int) -> void:
 	first_human_finish = -1.0
 	all_done_t = -1.0
 	solo_t = 0.0
-	var title := "RACE %d: %s · %d LAP%s" % [round_n, TrackScript.track_name(track_i), laps, "S" if laps > 1 else ""]
+	var title := "%s - RACE %d of 3\n%s · %d LAP%s" % [str(cup_info()["name"]), cup_race + 1, TrackScript.track_name(track_i), laps, "S" if laps > 1 else ""]
 	if round_n == 1:
-		_show_center("KART RACE!  " + title + "\n" \
-			+ "VR: hold the wheel with both hands and turn it · right trigger = GO · A = item / boost\n" \
-			+ "TV: left stick steers · A = go · B = brake / reverse · X = item · Y = boost\n" \
-			+ "Drive through ? boxes for items · glowing arrows = speed · ramps = big air!\n" \
-			+ "More racers: press A on a spare controller", _intro_time() - 3.2)
+		_show_center("KART RACE GRAND PRIX!  " + title + "\n" \
+			+ "VR: hold the wheel with both hands · trigger = GO · A = item / boost\n" \
+			+ "TV: stick steers · A = go · X = item · Y = boost · B in a turn = DRIFT\n" \
+			+ "Press GO on the last red light for a ROCKET START!", _intro_time() - 3.2)
 	else:
-		_show_center(title, _intro_time() - 3.2)
+		_show_center(title + "\nPress GO on the last red light for a rocket start!", _intro_time() - 3.2)
 	print("Race %d on %s: %d karts (%d human), %d laps, %.0f m to go" % [round_n, TrackScript.track_name(track_i), racer_count(), humans, laps, finish_distance()])
 
 
@@ -1099,6 +1468,12 @@ func _finish(k) -> void:
 	notify(k, "FINISHED %s!" % ordinal(pl).to_upper())
 	burst(k.position + Vector3(0, 1.5, 0), k.color, 24)
 	if not k.cpu:
+		for c in [Color(1.0, 0.3, 0.4), Color(0.3, 0.8, 1.0), Color(1.0, 0.9, 0.3)]:
+			burst(k.position + Vector3(0, 2.0, 0), c, 14)
+		track.excite(1.0)
+		net.event("excite", [1.0])
+		sound("cheer", -8.0, 1.0, true)
+	if not k.cpu:
 		_show_center("%s FINISHES %s!" % [k.kart_name, ordinal(pl).to_upper()], 2.0)
 		sound("finish", -2.0, 1.0 + 0.05 * (4 - mini(pl, 4)), true)
 	print("%s finished %s in %.1f s" % [k.kart_name, ordinal(pl), race_t])
@@ -1113,17 +1488,70 @@ func _results() -> void:
 		if k.active:
 			order.append(k)
 	order.sort_custom(func(a, b) -> bool: return a.place < b.place)
-	var lines: Array[String] = ["RACE OVER!"]
+	if cup_pts.size() != karts.size():
+		cup_pts.resize(karts.size())
+	var lines: Array[String] = ["RACE %d of 3 OVER!  -  %s" % [cup_race + 1, TrackScript.track_name(track_i)]]
+	var row: Array[String] = []
+	var gained := {}
 	for k in order:
-		var t := "%.1f s" % k.finish_time if k.finished else "still racing"
-		var star := "   WINNER!" if k.place == 1 else ""
-		lines.append("%s   %s   %s%s" % [ordinal(k.place), k.kart_name, t, star])
-	lines.append("")
-	lines.append("Next: %s  ·  A / Enter (VR: trigger) to race again" % TrackScript.track_name(track_i + 1))
+		var pts := POINTS[clampi(k.place - 1, 0, POINTS.size() - 1)]
+		var i := karts.find(k)
+		cup_pts[i] += pts
+		gained[k] = pts
+		row.append("%s %s +%d%s" % [ordinal(k.place), k.kart_name, pts, " WINNER!" if k.place == 1 else ""])
+	lines.append("   ·   ".join(row))
+	var final := cup_race >= 2
+	# Cup standings (or the trophies after the third race).
+	var standing: Array = order.duplicate()
+	standing.sort_custom(func(a, b) -> bool: return cup_points(a) > cup_points(b) or (cup_points(a) == cup_points(b) and a.place < b.place))
+	var headline := "RACE %d of 3 OVER!  Winner: %s" % [cup_race + 1, order[0].kart_name if not order.is_empty() else "-"]
+	if final:
+		var names: Array[String] = ["GOLD", "SILVER", "BRONZE"]
+		var tl: Array[String] = []
+		trophy_karts.clear()
+		for j in mini(3, standing.size()):
+			var w = standing[j]
+			tl.append("%s %s (%d pts)" % [names[j], w.kart_name, cup_points(w)])
+			trophy_karts.append(karts.find(w))
+		lines.append("%s - FINAL!  %s" % [str(cup_info()["name"]), "  ·  ".join(tl)])
+		headline = "%s DONE!\n%s" % [str(cup_info()["name"]), "  ".join(tl)]
+		_show_trophies(trophy_karts)
+		net.event("trophies", [trophy_karts])
+	else:
+		var parts: Array[String] = []
+		for k in standing:
+			parts.append("%s %d" % [k.kart_name, cup_points(k)])
+		lines.append("CUP POINTS: " + "  ·  ".join(parts))
+	var aw: Dictionary = _awards(order)
+	if not aw.is_empty():
+		var al: Array[String] = []
+		for k in aw:
+			al.append("%s %s" % [k.kart_name, str(aw[k])])
+		lines.append("AWARDS: " + "  ·  ".join(al))
+	var next_line := ""
+	if final:
+		var nxt: Dictionary = CUPS[posmod(cup_i + 1, CUPS.size())]
+		next_line = "Next: the %s!  A / Enter (VR: trigger)" % str(nxt["name"])
+	else:
+		var tr: Array = cup_info()["tracks"]
+		next_line = "Next: %s  ·  A / Enter (VR: trigger)" % TrackScript.track_name(int(tr[cup_race + 1]))
+	lines.append(next_line)
+	# The VR rider gets a short, personal version (a long list would be a huge panel in VR).
+	var me = players[0]
+	vr_results = headline
+	if me.active:
+		vr_results += "\nYou: %s  (+%d pts, cup %d)" % [ordinal(me.place), int(gained.get(me, 0)), cup_points(me)]
+		if aw.has(me):
+			vr_results += "\n" + str(aw[me])
+	vr_results += "\n" + next_line.replace("A / Enter (VR: trigger)", "pull the trigger")
 	results_text = "\n".join(lines)
 	_show_center(results_text, 0.0)
 	sound("finish", 0.0, 1.2, true)
-	print("Results: " + " | ".join(lines.slice(1, lines.size() - 2)))
+	if final:
+		sound("trophy", 0.0, 1.0, true)
+	track.excite(1.0)
+	net.event("excite", [1.0])
+	print("Results: " + " | ".join(lines))
 
 
 func _update_places() -> void:
@@ -1141,6 +1569,8 @@ func _update_places() -> void:
 		return a.total > b.total)
 	for i in racers.size():
 		racers[i].place = i + 1
+		if state == "race" and race_t > 4.0 and not racers[i].finished:
+			racers[i].worst_place = maxi(racers[i].worst_place, i + 1)
 
 
 ## Catch-up: karts behind the leader go a little faster; CPUs ease off when ahead of the kids.
@@ -1197,17 +1627,27 @@ func give_item(k) -> void:
 		return
 	var n := maxi(1, racer_count() - 1)
 	var behind := clampf(float(k.place - 1) / n, 0.0, 1.0)
-	var w_m := 15.0 + 50.0 * behind
-	var w_b := 45.0 - 30.0 * behind
-	var w_s := 30.0
-	var r := randf() * (w_m + w_b + w_s)
-	var it := "mushroom" if r < w_m else ("banana" if r < w_m + w_b else "shield")
+	# Karts at the back get the zoomy things, the leaders get bananas and shields.
+	var weights := {"mushroom": 14.0 + 36.0 * behind, "triple": 3.0 + 22.0 * behind, "star": 1.0 + 15.0 * behind,
+		"banana": 40.0 - 28.0 * behind, "shield": 24.0, "honk": 14.0}
+	var total := 0.0
+	for w in weights.values():
+		total += float(w)
+	var r := randf() * total
+	var it := "banana"
+	for key in weights:
+		r -= float(weights[key])
+		if r <= 0.0:
+			it = key
+			break
 	k.item = it
+	k.item_count = 3 if it == "triple" else 1
 	k.item_hold_t = 0.0
 	kart_sound(k, "box", -2.0, 1.0)
 	if not k.cpu:
 		var how := "press A" if k.cockpit != null else "press X"
 		notify(k, "%s! %s" % [ITEM_NAMES[it], how])
+		_tip(k, "item", "")
 
 
 func use_item(k) -> void:
@@ -1215,17 +1655,25 @@ func use_item(k) -> void:
 	if it == "":
 		return
 	if net.mode == "client" and k.is_local():
-		if it == "mushroom":
+		if it == "mushroom" or it == "triple":
 			k.boost(MUSHROOM_TIME)
 			sound("boost", -2.0)
+		elif it == "star":
+			k.star_t = STAR_TIME
+			sound("star", -2.0)
 		net.send_action("use", [it], k.index)
-		k.item = ""
+		k.item_count -= 1
+		if k.item_count <= 0:
+			k.item = ""
 		return
 	_do_use(k, it)
 
 
 func _do_use(k, it: String) -> void:
-	k.item = ""
+	k.item_count -= 1
+	if k.item_count <= 0:
+		k.item = ""
+	k.st_items += 1
 	match it:
 		"banana":
 			var p: Vector3 = k.position - k.forward() * 2.6
@@ -1236,12 +1684,21 @@ func _do_use(k, it: String) -> void:
 			k.shield_t = SHIELD_TIME
 			kart_sound(k, "shield", -2.0)
 			notify(k, "BUBBLE SHIELD ON!")
-		"mushroom":
+		"mushroom", "triple":
 			if k.remote:
 				net.event("boost", [k.index, MUSHROOM_TIME])
 			else:
 				k.boost(MUSHROOM_TIME)
-			on_boost(k, "MUSHROOM ZOOM!")
+			on_boost(k, "MUSHROOM ZOOM!" if it == "mushroom" or k.item_count <= 0 else "ZOOM! %d left" % k.item_count)
+		"star":
+			k.star_t = STAR_TIME
+			if k.remote:
+				net.event("star", [k.index, STAR_TIME])
+			kart_sound(k, "star", -2.0)
+			notify(k, "RAINBOW STAR! Nothing can stop you!")
+			burst(k.position + Vector3(0, 1.0, 0), Color(1.0, 0.9, 0.3), 18)
+		"honk":
+			_honk(k)
 	if k.has_meta("uses"):
 		k.set_meta("uses", int(k.get_meta("uses")) + 1)
 	else:
@@ -1276,6 +1733,10 @@ func _check_bananas(dt: float) -> void:
 
 func _banana_hit(k, bp: Vector3) -> void:
 	burst(bp + Vector3(0, 0.4, 0), Color(1.0, 0.9, 0.2), 12)
+	if k.star_t > 0.0:
+		notify(k, "SQUISH! Stars beat bananas!")
+		return
+	k.st_hits += 1
 	if k.shield_t > 0.0:
 		k.shield_t = 0.0
 		kart_sound(k, "pop", 0.0)
@@ -1297,18 +1758,10 @@ func _update_bananas_visual() -> void:
 	while banana_nodes.size() < bananas.size():
 		var b := Node3D.new()
 		add_child(b)
-		var m := MeshInstance3D.new()
-		m.mesh = capsule_mesh(0.22, 0.9)
-		m.material_override = make_material(Color(1.0, 0.88, 0.2), 0.2)
-		m.rotation.z = 1.2
-		m.position = Vector3(0, 0.3, 0)
-		m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		b.add_child(m)
-		var tip := MeshInstance3D.new()
-		tip.mesh = sphere_mesh(0.09)
-		tip.material_override = make_material(Color(0.35, 0.25, 0.1), 0.0)
-		tip.position = Vector3(0.4, 0.5, 0)
-		b.add_child(tip)
+		var holder := Node3D.new()
+		holder.position = Vector3(0, 0.45, 0)
+		b.add_child(holder)
+		build_item_model(holder, "banana", 0.75)
 		banana_nodes.append(b)
 	for i in banana_nodes.size():
 		var n := banana_nodes[i]
@@ -1340,11 +1793,19 @@ func _bumps(dt: float) -> void:
 			var strength := 3.5
 			if o.shield_t > 0.0 and a.shield_t <= 0.0:
 				strength = 8.0
+			if o.star_t > 0.0 and a.star_t <= 0.0:
+				strength = 9.0
+			if a.cockpit != null:
+				strength *= 0.4  # the VR rider gets nudged, not shoved
 			if a.push_v.dot(nrm) < strength:
 				a.push_v += nrm * (strength - maxf(0.0, a.push_v.dot(nrm)))
 			if a.bump_cd <= 0.0:
 				a.bump_cd = 0.5
-				a.speed *= 0.92
+				if a.cockpit == null:
+					a.speed *= 0.92
+				if o.star_t > 0.0 and a.star_t <= 0.0 and a.shield_t <= 0.0:
+					a.wobble()
+					o.st_bumps += 1
 				if not a.cpu:
 					sound("bump", -4.0, randf_range(0.9, 1.2))
 					rumble(a, 0.4, 0.12)
@@ -1365,6 +1826,169 @@ func on_land(k, air: float) -> void:
 			sound("land", -2.0)
 			on_boost(k, "BIG AIR! BOOST!")
 			rumble(k, 0.5, 0.15)
+			if net.mode == "client" and k.is_local():
+				net.send_action("stat", ["air"], k.index)
+
+
+## Drift sparks start: the first time, tell them what's going on.
+func on_drift_start(k) -> void:
+	if k.cpu:
+		return
+	_tip(k, "drift", "SPARKS! Keep turning... then straighten up for a MINI-TURBO!")
+
+
+func on_drift_level(k, lvl: int) -> void:
+	if k.cpu or k.remote:
+		return
+	sound("spark", -6.0, 0.9 + 0.25 * lvl)
+	rumble(k, 0.15 + 0.1 * lvl, 0.06)
+
+
+func on_mini_turbo(k, lvl: int) -> void:
+	if k.cpu:
+		return
+	var nm: String = ["", "MINI-TURBO!", "SUPER TURBO!", "ULTRA TURBO!"][clampi(lvl, 0, 3)]
+	notify(k, nm)
+	if not k.remote:
+		sound("turbo", -3.0, 0.9 + 0.12 * lvl)
+		rumble(k, 0.3 + 0.1 * lvl, 0.15)
+	burst(k.position + Vector3(0, 0.4, 0) + k.forward() * -1.2, k.SPARK_COLORS[clampi(lvl, 0, 3)], 10, net.mode != "client")
+	if net.mode == "client" and k.is_local():
+		net.send_action("stat", ["turbo"], k.index)
+
+
+## The silly honk: every kart close by wobbles for a moment (shields and stars don't mind).
+func _honk(k) -> void:
+	kart_sound(k, "honk", 0.0, 1.0)
+	sound("honk", -6.0, 0.8, true)
+	burst(k.position + Vector3(0, 1.5, 0), Color(1.0, 0.5, 0.8), 18)
+	var hit := 0
+	for o in karts:
+		if o == k or not o.active or o.finished:
+			continue
+		if o.position.distance_to(k.position) > HONK_RANGE:
+			continue
+		if o.shield_t > 0.0 or o.star_t > 0.0:
+			continue
+		hit += 1
+		if o.remote:
+			net.event("wobble", [o.index])
+			o.wobble_t = 0.9
+		else:
+			o.wobble()
+		if not o.cpu:
+			notify(o, "HONK HONK! Wobble wobble!")
+			kart_sound(o, "wobble", -2.0)
+	notify(k, "HONK! %d wobbled!" % hit if hit > 0 else "HONK! (nobody close enough)")
+
+
+## Show a "how to" tip to a human player once per game.
+func _tip(k, key: String, text: String) -> void:
+	var id := "%d/%s" % [k.index, key]
+	if tips_shown.has(id):
+		return
+	tips_shown[id] = true
+	if text != "":
+		notify(k, text)
+
+
+## One fun award per human for the race just finished: {kart: "NAME - why"}.
+func _awards(order: Array) -> Dictionary:
+	var humans: Array = []
+	for k in order:
+		if not k.cpu:
+			humans.append(k)
+	var out := {}
+	var used := {}
+	for k in humans:
+		var got := ""
+		var cands: Array = []
+		if k.place == 1:
+			cands.append(["SPEED DEMON", "won the race!"])
+		if k.st_turbo >= 2:
+			cands.append(["DRIFT STAR", "%d mini-turbos" % k.st_turbo])
+		if k.st_air >= 2:
+			cands.append(["SKY JUMPER", "%d big airs" % k.st_air])
+		if k.worst_place - k.place >= 2:
+			cands.append(["COMEBACK KID", "from %s to %s" % [ordinal(k.worst_place), ordinal(k.place)]])
+		if k.st_bumps >= 1:
+			cands.append(["STAR BOWLER", "bumped %d karts with a star" % k.st_bumps])
+		if k.st_items >= 3:
+			cands.append(["ITEM WIZARD", "used %d items" % k.st_items])
+		if k.st_walls <= 1:
+			cands.append(["SMOOTH DRIVER", "hardly touched a wall"])
+		if k.st_hits >= 2:
+			cands.append(["BANANA MAGNET", "slipped %d times (and laughed!)" % k.st_hits])
+		for c in cands:
+			var ca: Array = c
+			if not used.has(ca[0]):
+				got = "%s - %s" % [ca[0], ca[1]]
+				used[ca[0]] = true
+				break
+		if got == "":
+			got = "GOOD SPORT - raced all the way!"
+		out[k] = got
+	return out
+
+
+## Gold, silver and bronze cups floating over the Grand Prix winners.
+func _show_trophies(idx: Array) -> void:
+	_clear_trophies()
+	for j in idx.size():
+		var root := Node3D.new()
+		add_child(root)
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		var col: Color = TROPHY_COLORS[clampi(j, 0, 2)]
+		add_cyl(st, Vector3(0, 0, 0), 0.3, 0.15, col.darkened(0.3))
+		add_cyl(st, Vector3(0, 0.3, 0), 0.07, 0.45, col)
+		add_ellipsoid(st, Vector3(0, 0.75, 0), Vector3(0.38, 0.32, 0.38), col)
+		for x in [-1.0, 1.0]:
+			add_ellipsoid(st, Vector3(float(x) * 0.4, 0.8, 0), Vector3(0.1, 0.18, 0.05), col)
+		var mi := MeshInstance3D.new()
+		mi.mesh = _commit(st)
+		var m := StandardMaterial3D.new()
+		m.vertex_color_use_as_albedo = true
+		m.vertex_color_is_srgb = true
+		m.metallic = 0.6
+		m.roughness = 0.25
+		m.emission_enabled = true
+		m.emission = col * 0.4
+		mi.material_override = m
+		root.add_child(mi)
+		root.scale = Vector3.ONE * (1.6 - 0.2 * j)
+		trophy_nodes.append(root)
+
+
+func _clear_trophies() -> void:
+	for t in trophy_nodes:
+		if is_instance_valid(t):
+			t.queue_free()
+	trophy_nodes.clear()
+
+
+func _update_trophies(dt: float) -> void:
+	for j in trophy_nodes.size():
+		if j >= trophy_karts.size():
+			break
+		var k = kart_by_index_in_karts(trophy_karts[j])
+		var t := trophy_nodes[j]
+		if k == null or not is_instance_valid(t):
+			continue
+		t.global_position = k.global_position + Vector3(0, 3.2 + 0.2 * sin(race_t * 2.0 + j), 0)
+		t.rotation.y += dt * 1.5
+
+
+func kart_by_index_in_karts(i: int):
+	return karts[i] if i >= 0 and i < karts.size() else null
+
+
+## Falling snow follows whoever this machine shows (the VR rider or the first TV kart).
+func _follow_weather() -> void:
+	for p in players:
+		if p.active and p.is_sim():
+			track.follow_weather(p.position)
+			return
 
 
 func on_boost(k, text: String) -> void:
@@ -1384,8 +2008,10 @@ func on_client_joined() -> void:
 	var p = players[1]
 	if not p.active:
 		_activate(p)
-	if state == "wait" or state == "results":
-		_start_race(track_i if state == "wait" else track_i + 1)
+	if state == "wait":
+		_start_race(cup_track())
+	elif state == "results":
+		_next_race()
 
 
 func on_client_left() -> void:
@@ -1415,6 +2041,13 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 		"use":
 			if p.active and args.size() > 0 and str(args[0]) == p.item and p.item != "":
 				_do_use(p, p.item)
+		"stat":
+			if args.size() > 0:
+				match str(args[0]):
+					"air":
+						p.st_air += 1
+					"turbo":
+						p.st_turbo += 1
 		"pause":
 			var paused: bool = args[0]
 			_set_pause_banner(paused, "A TV player opened the menu")
@@ -1438,7 +2071,8 @@ func make_snapshot() -> Array:
 	var kd: Array = []
 	for k in karts:
 		kd.append([k.position, k.yaw, k.active, k.total, k.finished, k.place, k.item, k.shield_t > 0.0,
-			k.boost_t > 0.0, k.slip_t > 0.0, k.speed, k.steer_s, k.finish_time])
+			k.boost_t > 0.0, k.slip_t > 0.0, k.speed, k.steer_s, k.finish_time,
+			k.drift_level + 4 * (k.drift_dir + 1) + 16 * k.item_count, k.star_t > 0.0])
 	var bn: Array = []
 	for b in bananas:
 		var ba: Array = b
@@ -1446,11 +2080,12 @@ func make_snapshot() -> Array:
 	var head := Transform3D(Basis(), CockpitScript.EYE)
 	if cockpit != null:
 		head = cockpit.head_local()
-	return [state, track_i, state_t, race_t, kd, bn, track.box_state(), head, round_n, laps, finish_frac]
+	return [state, track_i, state_t, race_t, kd, bn, track.box_state(), head, round_n, laps, finish_frac,
+		cup_i, cup_race, PackedInt32Array(cup_pts)]
 
 
 func apply_snapshot(s: Array) -> void:
-	if not ready_to_play or s.size() < 11:
+	if not ready_to_play or s.size() < 14:
 		return
 	var ti: int = s[1]
 	if ti != track.track_i or not synced:
@@ -1479,6 +2114,7 @@ func apply_snapshot(s: Array) -> void:
 		k.place = d[5]
 		k.finished = d[4]
 		k.finish_time = d[12]
+		var flags: int = d[13] if d.size() > 13 else 0
 		if k.ghost:
 			k.target_pos = d[0]
 			k.target_yaw = d[1]
@@ -1489,8 +2125,13 @@ func apply_snapshot(s: Array) -> void:
 			k.net_speed = d[10]
 			k.net_steer = d[11]
 			k.item = d[6]
+			k.net_drift = flags & 3
+			k.net_drift_dir = ((flags >> 2) & 3) - 1
+			k.net_star = bool(d[14]) if d.size() > 14 else false
+			k.item_count = flags >> 4
 		else:
 			k.item = d[6]
+			k.item_count = flags >> 4
 			k.shield_t = 1.0 if bool(d[7]) else 0.0
 	var bn: Array = s[5]
 	bananas.clear()
@@ -1500,6 +2141,12 @@ func apply_snapshot(s: Array) -> void:
 	var head: Transform3D = s[7]
 	if players[0].ghost and players[0].head != null:
 		players[0].head.transform = Transform3D(head.basis.orthonormalized(), head.origin)
+	cup_i = s[11]
+	cup_race = s[12]
+	var cp: PackedInt32Array = s[13]
+	cup_pts.resize(cp.size())
+	for i in cp.size():
+		cup_pts[i] = cp[i]
 
 
 ## The track changed under the karts this machine drives: find them on the new one (keeps their distance).
@@ -1530,6 +2177,7 @@ func apply_event(kind: String, args: Array) -> void:
 			track.build(track_i)
 			_apply_track_look()
 			_relocate_local()
+			_clear_trophies()
 			state = "countdown"
 			state_t = 0.0
 			race_t = 0.0
@@ -1541,6 +2189,29 @@ func apply_event(kind: String, args: Array) -> void:
 			state = "race"
 			state_t = 0.0
 			race_t = 0.0
+			track.excite(1.0)
+			for k in players:
+				if k.active and k.is_local():
+					k.hold_still = false
+					_rocket(k)
+		"lights":
+			lights = args[0]
+			track.set_lights(lights)
+		"excite":
+			track.excite(float(args[0]))
+		"wobble":
+			var k = kart_by_index(int(args[0]))
+			if k != null and k.is_local():
+				k.wobble()
+		"star":
+			var k = kart_by_index(int(args[0]))
+			if k != null and k.is_local():
+				k.star_t = float(args[1])
+		"trophies":
+			trophy_karts.clear()
+			for v in args[0]:
+				trophy_karts.append(int(v))
+			_show_trophies(trophy_karts)
 		"teleport":
 			var k = kart_by_index(int(args[0]))
 			if k != null and k.is_local():
@@ -1590,7 +2261,7 @@ func _build_hud() -> void:
 	help_label.offset_top = -40
 	help_label.offset_bottom = -8
 	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	help_label.text = "Controller: stick steer · A go · B brake · X item · Y boost  ·  Keys P1: WASD + Space item, Shift boost  ·  P2: arrows + Ctrl item, . boost  ·  Spare controller: press A to join"
+	help_label.text = "Controller: stick steer · A go · B brake (in a fast turn: DRIFT) · RB drift · X item · Y boost  ·  Keys P1: WASD (S in a turn drifts) + Space item, Shift boost  ·  P2: arrows + Ctrl item, . boost  ·  Spare controller: press A to join"
 
 
 func _show_center(text: String, duration: float, broadcast: bool = true) -> void:
@@ -1619,8 +2290,16 @@ func _hint_for(k, dt: float) -> String:
 		return str(k.get_meta("hint", ""))
 	if k.wrong_t > 1.5 and not k.finished:
 		return "WRONG WAY! Turn around"
+	if k.cockpit != null and not k.cockpit.fake and k.cockpit.unheld_t > 2.5 and (state == "race" or state == "countdown") and not k.finished:
+		return "Hold the wheel with both hands!"
+	if state == "countdown" and round_n <= 2:
+		return "Press GO on the last red light: ROCKET START!" if lights >= 2 else ""
 	if state == "race" and race_t < 6.0 and round_n <= 1:
 		return "Hold A to go!" if k.cockpit == null else "Pull the trigger to go!"
+	if state == "race" and round_n <= 2 and race_t > 8.0 and race_t < 14.0:
+		return "Hold B in a turn to DRIFT - sparks = turbo!" if k.cockpit == null else "Turn hard round bends for sparks = TURBO!"
+	if state == "race" and k.charge >= 1.0 and k.item == "" and not k.finished and fmod(race_t, 8.0) < 2.0:
+		return "BOOST READY! Press %s" % ("Y" if k.cockpit == null else "A")
 	return ""
 
 
@@ -1630,13 +2309,23 @@ func _update_hud(p, dt: float) -> void:
 		return
 	if not p.active:
 		return
-	var st := lap_text(p) + "\n" + TrackScript.track_name(track_i)
+	var st := lap_text(p) + "   " + TrackScript.track_name(track_i) + "\n%s  race %d/3  ·  %d pts" % [str(cup_info()["name"]), cup_race + 1, cup_points(p)]
 	if state == "wait":
 		st = "WARM-UP LAP\nWaiting for the race…"
 	p.hud_label.text = st
 	p.place_label.text = "%s/%d" % [ordinal(p.place), racer_count()] if state != "wait" else ""
 	var it: String = p.item
-	p.item_label.text = "ITEM: %s  (X)" % ITEM_NAMES[it] if it != "" else "ITEM: -  (drive through ? boxes)"
+	if it == "triple":
+		p.item_label.text = "ITEM: TRIPLE MUSHROOM x%d  (X)" % p.item_count
+	else:
+		p.item_label.text = "ITEM: %s  (X)" % ITEM_NAMES[it] if it != "" else "ITEM: -  (drive through ? boxes)"
+	var dl: int = p.drift_level
+	var dbg: ColorRect = p.hud.get_node("DriftBg")
+	dbg.visible = p.drift_t > 0.0
+	if dbg.visible:
+		p.drift_fill.size.x = dbg.size.x * clampf(p.drift_t / 2.4, 0.0, 1.0)
+		p.drift_fill.color = p.SPARK_COLORS[clampi(dl, 0, 3)]
+	_update_minimap(p)
 	var ch: float = p.charge
 	var bar_bg: ColorRect = p.hud.get_node("BarBg")
 	p.boost_fill.size.x = bar_bg.size.x * ch
@@ -1651,26 +2340,67 @@ func _update_hud(p, dt: float) -> void:
 		p.hint_label.text = "FINISHED %s!" % ordinal(p.place).to_upper()
 
 
-## The VR driver's dashboard (just beyond the wheel): lap, place, item / boost and hints.
-func vr_dash_text(k) -> String:
-	var lines: Array[String] = []
+## The VR driver's two text panels (about 2.4 m ahead, low left / right) and the hint in the middle.
+func vr_panel_texts(k) -> Array:
+	var left := ""
 	if state == "wait":
-		lines.append("WARM-UP · waiting for the race")
+		left = "WARM-UP\nwaiting..."
 	else:
-		lines.append("%s   ·   %s of %d" % [lap_text(k), ordinal(k.place), racer_count()])
+		left = "%s / %d\n%s\n%d pts" % [ordinal(k.place), racer_count(), lap_text(k), cup_points(k)]
+	var right := ""
 	var it: String = k.item
-	if it != "":
-		lines.append("A: use %s" % ITEM_NAMES[it])
+	if it == "triple":
+		right = "MUSHROOM x%d\npress A" % k.item_count
+	elif it != "":
+		right = "%s\npress A" % ITEM_NAMES[it]
 	elif k.charge >= 1.0:
-		lines.append("BOOST READY - press A!")
+		right = "BOOST READY\npress A!"
 	else:
-		lines.append("boost charging…")
+		right = "boost %d%%" % int(k.charge * 100.0)
+	if k.drift_t > 0.0:
+		right += "\n" + ["sparks...", "BLUE SPARKS", "ORANGE SPARKS!", "PINK SPARKS!!"][clampi(k.drift_level, 0, 3)]
 	var h := _hint_for(k, get_process_delta_time())
 	if k.finished and state == "race":
 		h = "FINISHED %s!" % ordinal(k.place).to_upper()
-	if h != "":
-		lines.append(h)
-	return "\n".join(lines)
+	return [left, right, h]
+
+
+## Track outline and kart dots in the corner of a TV view.
+func _update_minimap(p) -> void:
+	var mm: Control = p.minimap
+	if mm == null:
+		return
+	if map_track != track.track_i:
+		map_track = track.track_i
+		var lo := Vector2(INF, INF)
+		var hi := Vector2(-INF, -INF)
+		for q in track.pts:
+			lo = Vector2(minf(lo.x, q.x), minf(lo.y, q.z))
+			hi = Vector2(maxf(hi.x, q.x), maxf(hi.y, q.z))
+		map_rect = Rect2(lo, hi - lo)
+	var sz := mm.size
+	var span := maxf(map_rect.size.x, map_rect.size.y)
+	if span < 1.0 or sz.x < 4.0:
+		return
+	var sc := (sz.x - 16.0) / span
+	var off := Vector2(8, 8) + (Vector2(span, span) - map_rect.size) * 0.5 * sc
+	var line := mm.get_node("Line") as Line2D
+	if int(mm.get_meta("track", -1)) != map_track:
+		mm.set_meta("track", map_track)
+		var arr := PackedVector2Array()
+		for i in range(0, track.pts.size(), 2):
+			var q: Vector3 = track.pts[i]
+			arr.append(off + (Vector2(q.x, q.z) - map_rect.position) * sc)
+		line.points = arr
+		line.width = maxf(2.0, 5.0 * sz.x / 190.0)
+	for i in karts.size():
+		var dot := mm.get_child(i + 1) as ColorRect
+		var k = karts[i]
+		dot.visible = k.active and state != "wait"
+		if dot.visible:
+			var big := 16.0 if k == p else 10.0
+			dot.size = Vector2(big, big)
+			dot.position = off + (Vector2(k.position.x, k.position.z) - map_rect.position) * sc - Vector2(big, big) * 0.5
 
 
 func _update_vr_text(_dt: float) -> void:
@@ -1690,7 +2420,7 @@ func _update_vr_text(_dt: float) -> void:
 		vr_center.width = 1200.0
 		vr_center.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		cockpit.xr_origin.add_child(vr_center)  # rides along with the kart
-	vr_center.text = center_label.text
+	vr_center.text = vr_results if state == "results" and vr_results != "" and not get_tree().paused else center_label.text
 	vr_center.modulate.a = center_label.modulate.a
 	vr_center.outline_modulate = Color(0, 0, 0, center_label.modulate.a)
 	VrText.follow(vr_center, cam, cockpit.xr_origin, 0.3, 1.8)
