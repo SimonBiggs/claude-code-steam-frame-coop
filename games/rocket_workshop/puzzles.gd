@@ -1,0 +1,108 @@
+extends RefCounted
+## Puzzle modules for one rocket. Each module is a plain Dictionary so the host can send it to the
+## TV in snapshots. The VR pilot's panel has the controls; the TV crew's blueprint boards say what
+## the right answer is. From rocket 3 the boards list a few rockets by name, so the crew must ask
+## the pilot what this rocket is called (it's only written on the pilot's desk screen).
+
+const COLOR_NAMES: Array[String] = ["RED", "BLUE", "YELLOW", "GREEN"]
+const COLORS: Array[Color] = [Color(0.95, 0.25, 0.22), Color(0.25, 0.5, 1.0), Color(1.0, 0.82, 0.15), Color(0.3, 0.82, 0.3)]
+const SHAPE_NAMES: Array[String] = ["BALL", "CUBE", "CONE", "RING", "PILL", "TENT"]
+const SHAPE_COLORS: Array[Color] = [Color(1.0, 0.4, 0.35), Color(0.35, 0.6, 1.0), Color(1.0, 0.8, 0.2),
+	Color(0.4, 0.85, 0.4), Color(0.8, 0.45, 0.95), Color(1.0, 0.6, 0.25)]
+const ROCKET_NAMES: Array[String] = ["ZOOMY", "BLIPPY", "NOVA", "WOBBLE", "SPARKY", "LUNA", "ROCKO", "PIP", "COMET", "BIBBLE"]
+const VR_TYPES: Array[String] = ["fuel", "wires", "symbols", "gauge", "switches"]
+const JOB_TYPES: Array[String] = ["canister", "pipe"]
+const TITLES := {
+	"fuel": "FUEL MIX", "wires": "WIRE PLUGS", "symbols": "SHAPE BUTTONS", "gauge": "PRESSURE DIAL",
+	"switches": "SWITCHES", "canister": "FUEL CANISTER", "pipe": "LEAKY PIPE",
+}
+const MISTAKE_SECONDS := 10.0
+const SWITCH_COUNT := 5
+# Where the TV crew's jobs can turn up.
+const CAN_SPOTS: Array[Vector3] = [Vector3(-9.0, 0, 6.5), Vector3(9.0, 0, 6.5), Vector3(-9.0, 0, -4.5), Vector3(9.0, 0, -4.5), Vector3(-5.0, 0, -13.0)]
+const PIPE_SPOTS: Array[Vector3] = [Vector3(-10.75, 1.1, 1.75), Vector3(10.75, 1.1, 1.75), Vector3(-5.0, 1.1, 7.75), Vector3(5.0, 1.1, 7.75)]
+
+
+static func make_rocket(n: int) -> Dictionary:
+	var names: Array = ROCKET_NAMES.duplicate()
+	names.shuffle()
+	var vr_count := clampi(1 + floori((n + 1) / 2.0), 2, 4)  # 2, 2, 3, 3, 4, 4...
+	var types: Array = VR_TYPES.duplicate()
+	types.shuffle()
+	var keyed := 1 if n < 3 else (2 if n < 5 else 3)
+	var mods: Array = []
+	for i in vr_count:
+		mods.append(_make(types[i], n, names, keyed))
+	var job_count := 0 if n < 2 else (1 if n < 5 else 2)
+	var jobs: Array = JOB_TYPES.duplicate()
+	jobs.shuffle()
+	for i in job_count:
+		mods.append(_make(jobs[i], n, names, keyed))
+	var time := 50.0 + 40.0 * vr_count + 30.0 * job_count - minf(n, 6.0) * 3.0
+	return {"name": names[0], "modules": mods, "time": time}
+
+
+## Manual rows: [rocket name ("" = any rocket), answer]. answers[0] belongs to this rocket (names[0]).
+static func _rows(names: Array, keyed: int, answers: Array) -> Array:
+	var rows: Array = []
+	for i in keyed:
+		rows.append([names[i] if keyed > 1 else "", answers[i]])
+	rows.shuffle()
+	return rows
+
+
+static func _make(type: String, n: int, names: Array, keyed: int) -> Dictionary:
+	match type:
+		"fuel":
+			var length := clampi(n + 1, 2, 4)
+			var answers: Array = []
+			while answers.size() < keyed:
+				var r: Array = []
+				for k in length:
+					r.append(randi() % COLORS.size())
+				r.sort()
+				if not answers.has(r):
+					answers.append(r)
+			return {"type": type, "done": false, "rows": _rows(names, keyed, answers), "answer": answers[0], "pressed": []}
+		"wires":
+			var order: Array = [0, 1, 2, 3]
+			order.shuffle()
+			order.resize(3 if n < 3 else 4)
+			return {"type": type, "done": false, "order": order, "placed": [-1, -1, -1, -1]}
+		"symbols":
+			var all: Array = [0, 1, 2, 3, 4, 5]
+			all.shuffle()
+			var layout: Array = all.slice(0, 4)
+			var order: Array = layout.duplicate()
+			order.shuffle()
+			order.resize(3 if n < 4 else 4)
+			return {"type": type, "done": false, "layout": layout, "order": order, "step": 0}
+		"gauge":
+			var nums: Array = [2, 3, 4, 5, 6, 7, 8, 9]
+			nums.shuffle()
+			return {"type": type, "done": false, "rows": _rows(names, keyed, nums.slice(0, keyed)), "answer": nums[0], "value": 1}
+		"switches":
+			var answers: Array = []
+			while answers.size() < keyed:
+				var pat: Array = []
+				var on := 0
+				for k in SWITCH_COUNT:
+					var b := randf() < 0.5
+					pat.append(b)
+					on += int(b)
+				if on >= 1 and on <= 4 and not answers.has(pat):
+					answers.append(pat)
+			var state: Array = []
+			for k in SWITCH_COUNT:
+				state.append(false)
+			return {"type": type, "done": false, "rows": _rows(names, keyed, answers), "answer": answers[0], "state": state}
+		"canister":
+			var spot := randi() % CAN_SPOTS.size()
+			return {"type": type, "done": false, "spot": spot, "pos": CAN_SPOTS[spot], "carrier": -1}
+		"pipe":
+			return {"type": type, "done": false, "spot": randi() % PIPE_SPOTS.size(), "progress": 0.0}
+	return {"type": type, "done": true}
+
+
+static func is_job(type: String) -> bool:
+	return type == "canister" or type == "pipe"
