@@ -216,13 +216,6 @@ func _vr_input(_delta: float) -> Vector2:
 		var lift := clampf((avg.y + 0.45) / 0.2, -1.0, 1.0)
 		rein_input = Vector2(_dead(turn, 0.12), _dead(lift, 0.3) + 0.0 * climb)
 		v += rein_input
-	# Look where you want to go: looking well down dives, looking up climbs (what the kids tried first).
-	if vr and xr_camera != null:
-		var look_pitch := xr_camera.global_basis.get_euler().x  # negative = looking down
-		var gaze := 0.0
-		if absf(look_pitch) > deg_to_rad(22.0):
-			gaze = clampf((absf(look_pitch) - deg_to_rad(22.0)) / deg_to_rad(20.0), 0.0, 1.0) * signf(look_pitch)
-		v.y += gaze
 	return v.limit_length(1.0)
 
 
