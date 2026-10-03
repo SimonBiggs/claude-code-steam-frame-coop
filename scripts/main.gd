@@ -764,8 +764,18 @@ func _vr_text(pos: Vector3, color: Color, font: int) -> Label3D:
 	return l
 
 
-## Keeps a dark rounded-off card behind a VR text panel, sized to its text.
-func _update_backdrop(l: Label3D) -> void:
+## Thick black outline keeps VR text readable against the bright arena (and hides old backdrop cards).
+func _style_vr_text(l: Label3D) -> void:
+	if l == null:
+		return
+	l.outline_size = 26
+	l.outline_modulate = Color(0, 0, 0, l.modulate.a)
+	if l.has_meta("card"):
+		l.get_meta("card").queue_free()
+		l.remove_meta("card")
+
+
+func _unused_backdrop(l: Label3D) -> void:
 	if l == null:
 		return
 	var card: MeshInstance3D = l.get_meta("card") if l.has_meta("card") else null
@@ -1210,9 +1220,8 @@ func _update_vr_center() -> void:
 	vr_center.text = center_label.text
 	vr_center.modulate.a = center_label.modulate.a
 	vr_center.outline_modulate.a = center_label.modulate.a
-	_update_backdrop(vr_center)
-	_update_backdrop(claude_3d)
-	_update_backdrop(toast_3d)
+	for l in [vr_center, claude_3d, toast_3d]:
+		_style_vr_text(l)
 
 
 func _update_hud() -> void:
