@@ -5,7 +5,8 @@ extends Node
 
 signal join_finished(ok: bool)
 
-const PORT := 7777
+const DEFAULT_PORT := 7777
+var PORT: int = int(OS.get_environment("DUO_PORT")) if OS.has_environment("DUO_PORT") else DEFAULT_PORT  # override for parallel tests
 const SNAP_INTERVAL := 1.0 / 30.0
 const JOIN_TIMEOUT := 5.0
 
