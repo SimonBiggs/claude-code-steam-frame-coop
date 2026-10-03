@@ -1,7 +1,9 @@
 extends RefCounted
 ## Builds the cosy open-air rocket workshop: plank floor, cream walls with roof beams and bunting,
 ## workbenches and crates, and the launch yard with its pad, gantry tower, trees and hills.
-## Everything is procedural; bunting and trees are MultiMeshes to keep draw calls low.
+## Cosy details: hanging lamps with glowing bulbs, shelves of jars, a spinning planet mobile, drifting
+## clouds, blinking gantry lights and a wind sock. Everything is procedural; repeated props are
+## MultiMeshes (one draw call each) to keep the Steam Frame happy.
 
 const FLOOR_SHADER := """
 shader_type spatial;
@@ -132,6 +134,11 @@ static func build(main: Node3D, vr: bool) -> void:
 	hatch.position = main.HATCH_POS + Vector3(0, 0.02, 0)
 	main.add_child(hatch)
 	_trees(main)
+	_lamps(main)
+	_shelves(main)
+	_mobile(main)
+	_clouds(main)
+	_gantry_lights(main)
 	var hill: StandardMaterial3D = main.make_material(Color(0.4, 0.66, 0.35), 0.0)
 	for h in [Vector3(-30, -6, -45), Vector3(10, -9, -55), Vector3(40, -7, -35), Vector3(-45, -8, -15)]:
 		var mi := MeshInstance3D.new()
@@ -189,7 +196,7 @@ static func _bunting(main: Node3D) -> void:
 
 
 static func _trees(main: Node3D) -> void:
-	var spots: Array[Vector3] = [Vector3(-9, 0, -12), Vector3(-12, 0, -16), Vector3(8, 0, -14), Vector3(12, 0, -10),
+	var spots: Array[Vector3] = [Vector3(-12.5, 0, -11), Vector3(-12, 0, -16), Vector3(8, 0, -14), Vector3(12, 0, -10),
 		Vector3(-15, 0, -8), Vector3(15, 0, -17), Vector3(3, 0, -20), Vector3(-6, 0, -21)]
 	var leaves := MultiMesh.new()
 	leaves.transform_format = MultiMesh.TRANSFORM_3D
@@ -211,3 +218,132 @@ static func _trees(main: Node3D) -> void:
 	b.multimesh = trunks
 	b.material_override = main.make_material(Color(0.5, 0.33, 0.2), 0.0)
 	main.add_child(b)
+
+
+static func _mm(main: Node3D, mesh: Mesh, xfs: Array, colors: Array, mat: Material) -> MultiMeshInstance3D:
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_colors = not colors.is_empty()
+	mm.mesh = mesh
+	mm.instance_count = xfs.size()
+	for i in xfs.size():
+		mm.set_instance_transform(i, xfs[i])
+		if not colors.is_empty():
+			mm.set_instance_color(i, colors[i % colors.size()])
+	var mmi := MultiMeshInstance3D.new()
+	mmi.multimesh = mm
+	mmi.material_override = mat
+	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	main.add_child(mmi)
+	return mmi
+
+
+static func _vertex_mat(glow: float) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.vertex_color_use_as_albedo = true
+	m.roughness = 0.6
+	if glow > 0.0:
+		m.emission_enabled = true
+		m.emission = Color(1, 1, 1) * glow
+	return m
+
+
+## Warm bulbs hanging on cords from the roof beams (cord + bulb baked into one mesh, unshaded so the
+## bulbs look lit without any real lights).
+static func _lamps(main: Node3D) -> void:
+	var lamp: ArrayMesh = main.merged_mesh("lamp", [
+		[main.cyl_mesh(0.015, 0.015, 1.0, 4), Transform3D(Basis(), Vector3(0, 0.5, 0)), Color(0.15, 0.12, 0.1)],
+		[main.cyl_mesh(0.05, 0.16, 0.12, 10), Transform3D(Basis(), Vector3(0, 0.02, 0)), Color(0.85, 0.35, 0.25)],
+		[main.sphere_mesh(0.1), Transform3D(Basis.from_scale(Vector3(1.0, 1.2, 1.0)), Vector3(0, -0.08, 0)), Color(1.0, 0.92, 0.6)]])
+	var xfs: Array = []
+	for z in [-5.0, -1.0, 3.0, 7.0]:
+		for x in [-8.0, -4.0, 4.0, 8.0]:
+			xfs.append(Transform3D(Basis(), Vector3(x, 3.1, z)))
+	var m := StandardMaterial3D.new()
+	m.vertex_color_use_as_albedo = true
+	m.vertex_color_is_srgb = true
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_mm(main, lamp, xfs, [], m)
+
+
+## Shelves along the side walls, covered in colourful jars and tins (one baked shelf, repeated).
+static func _shelves(main: Node3D) -> void:
+	var jar_cols: Array = [Color(1.0, 0.4, 0.35), Color(0.35, 0.7, 1.0), Color(1.0, 0.85, 0.3), Color(0.5, 0.9, 0.45), Color(0.9, 0.55, 1.0)]
+	var parts: Array = [[main.box_mesh(Vector3(0.4, 0.05, 1.6)), Transform3D(), Color(0.6, 0.4, 0.25)]]
+	for j in 5:
+		var h := 0.18 + fmod(j * 0.37, 0.16)
+		parts.append([main.cyl_mesh(0.07, 0.07, 0.2, 10), Transform3D(Basis.from_scale(Vector3(1.0, h / 0.2, 1.0)), Vector3(0, 0.02 + h / 2.0, -0.6 + j * 0.3)), jar_cols[j]])
+	var shelf: ArrayMesh = main.merged_mesh("shelf", parts)
+	var xfs: Array = []
+	for side in [-1.0, 1.0]:
+		for z in [1.65, -4.5]:
+			for y in [1.6, 2.3]:
+				var flip := Basis(Vector3.UP, PI) if (y > 2.0) else Basis()
+				xfs.append(Transform3D(flip, Vector3(side * 10.78, y, z)))
+	_mm(main, shelf, xfs, [], main.vertex_mat())
+
+
+## A planet mobile turning slowly above the crew's floor (the node spins; main animates it).
+static func _mobile(main: Node3D) -> void:
+	var root := Node3D.new()
+	root.name = "Mobile"
+	root.position = Vector3(-2.0, 3.4, 3.0)
+	main.add_child(root)
+	var xfs: Array = []
+	var cols: Array = [Color(1.0, 0.5, 0.3), Color(0.4, 0.7, 1.0), Color(1.0, 0.85, 0.4), Color(0.55, 0.9, 0.5), Color(0.9, 0.5, 0.9)]
+	for i in 5:
+		var a := TAU * i / 5.0
+		var r := 0.35 + i * 0.12
+		xfs.append(Transform3D(Basis.from_scale(Vector3.ONE * (0.6 + 0.15 * i)), Vector3(cos(a) * r, -0.3 - 0.15 * (i % 3), sin(a) * r)))
+	xfs.append(Transform3D(Basis.from_scale(Vector3(0.08, 2.5, 0.08)), Vector3(0, 0.35, 0)))  # the hanging rod
+	var mmi := MultiMeshInstance3D.new()
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_colors = true
+	mm.mesh = main.sphere_mesh(0.14)
+	mm.instance_count = xfs.size()
+	for i in xfs.size():
+		mm.set_instance_transform(i, xfs[i])
+		mm.set_instance_color(i, cols[i % cols.size()] if i < 5 else Color(0.3, 0.25, 0.2))
+	mmi.multimesh = mm
+	mmi.material_override = _vertex_mat(0.25)
+	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	root.add_child(mmi)
+
+
+## Fluffy clouds drifting high over the yard (main slides the node).
+static func _clouds(main: Node3D) -> void:
+	var root := Node3D.new()
+	root.name = "Clouds"
+	main.add_child(root)
+	var xfs: Array = []
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 77
+	for c in 9:
+		var center := Vector3(rng.randf_range(-70, 70), rng.randf_range(32, 46), rng.randf_range(-110, -25))
+		for k in 4:
+			var off := Vector3(k * 3.2 - 5.0, rng.randf_range(-0.6, 0.8), rng.randf_range(-1.5, 1.5))
+			var sz := rng.randf_range(2.8, 4.4)
+			xfs.append(Transform3D(Basis.from_scale(Vector3(sz * 1.3, sz * 0.7, sz)), center + off))
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(1, 1, 1)
+	m.emission_enabled = true
+	m.emission = Color(0.85, 0.88, 0.95)
+	m.emission_energy_multiplier = 0.6
+	m.disable_fog = true
+	var mmi := _mm(main, main.sphere_mesh(1.0), xfs, [], m)
+	mmi.reparent(root)
+
+
+## Red lamps up the gantry tower that blink while the rocket waits (main pulses the material).
+static func _gantry_lights(main: Node3D) -> void:
+	var pad_pos: Vector3 = main.PAD_POS
+	var xfs: Array = []
+	for y in [1.7, 3.4, 5.1, 6.8]:
+		xfs.append(Transform3D(Basis(), pad_pos + Vector3(-3.2, y + 0.2, 0.8)))
+	xfs.append(Transform3D(Basis(), pad_pos + Vector3(-3.2, 7.1, 0.0)))
+	var m: StandardMaterial3D = main.make_material(Color(1.0, 0.25, 0.2), 2.0)
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	var mmi := _mm(main, main.sphere_mesh(0.12), xfs, [], m)
+	mmi.name = "GantryLights"
+	main.set_meta("gantry_mat", m)

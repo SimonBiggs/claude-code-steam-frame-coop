@@ -1,9 +1,11 @@
 extends Node3D
 ## A TV crew member walking round the workshop in first person: read the blueprint boards out loud
-## to the pilot, carry fuel canisters (walk into one to pick it up, walk to the glowing hatch by the
-## rocket to deliver it) and hold ACTION by a leaky pipe to fix it.
+## to the pilot, carry fuel canisters and paint pots (walk into one to pick it up, walk to the glowing
+## hatch by the rocket to deliver it), pick up loose bolts, catch the space cat, and hold ACTION by a
+## leaky pipe to fix it. During a launch the camera becomes a launch cam (space.gd).
 ## Controller: left stick move, right stick look, A / X / RT action.
 ## Keyboard set 0: WASD + mouse (or Q / E to turn), Space / F / click action.  Set 1: arrows (turn), Enter / Ctrl action.
+## Party seats (P4+ on the TV, P3+ in split screen) have no keys: they join with A on a spare controller.
 
 const SPEED := 4.2
 const EYE_HEIGHT := 1.5
@@ -12,6 +14,7 @@ const STICK_PITCH_SPEED := 1.8
 const KEY_TURN_SPEED := 2.2
 const MOUSE_SENS := 0.0028
 const FIX_TIME := 2.5
+const NO_KEYS := 99
 const KEYS := [
 	{"up": KEY_W, "down": KEY_S, "left": KEY_A, "right": KEY_D, "action": KEY_SPACE, "action2": KEY_F, "turn_l": KEY_Q, "turn_r": KEY_E},
 	{"up": KEY_UP, "down": KEY_DOWN, "left": KEY_LEFT, "right": KEY_RIGHT, "action": KEY_ENTER, "action2": KEY_CTRL},
@@ -31,6 +34,7 @@ var remote := false
 var ghost := false
 var vr := false
 var active := true
+var pad_lost_t := -1.0
 var net_target := Vector3.ZERO
 var net_started := false
 var bot_move := Vector3.ZERO
@@ -40,6 +44,16 @@ var fix_acc := 0.0
 var spark_t := 0.0
 var fixing := false
 var pivot: Node3D
+var body_mesh: MeshInstance3D
+var eyes: MeshInstance3D
+var arm_l: Node3D
+var arm_r: Node3D
+var hud_label: Label
+var blink_t := 2.0
+var walk := 0.0  # 0..1 how fast we're walking (for the animation)
+var last_pos := Vector3.ZERO
+var anim_t := 0.0
+var was_launch_cam := false
 
 
 func body_layer() -> int:
@@ -55,14 +69,15 @@ func _ready() -> void:
 	yaw = rotation.y
 	rotation.y = 0.0
 	net_target = position
+	last_pos = position
 	pivot = Node3D.new()
 	add_child(pivot)
 	var overall: StandardMaterial3D = main.make_material(color, 0.1)
-	var body := MeshInstance3D.new()
-	body.mesh = main.capsule_mesh(0.33, 1.25)
-	body.material_override = overall
-	body.position.y = 0.65
-	pivot.add_child(body)
+	body_mesh = MeshInstance3D.new()
+	body_mesh.mesh = main.capsule_mesh(0.33, 1.25)
+	body_mesh.material_override = overall
+	body_mesh.position.y = 0.65
+	pivot.add_child(body_mesh)
 	var head := MeshInstance3D.new()
 	head.mesh = main.sphere_mesh(0.2)
 	head.material_override = main.make_material(Color(1.0, 0.8, 0.65), 0.0)
@@ -79,6 +94,14 @@ func _ready() -> void:
 	visor.material_override = hat.material_override
 	visor.position = Vector3(0, 1.53, -0.2)
 	pivot.add_child(visor)
+	# Both eyes are one mesh (one draw call); blinking squashes it.
+	eyes = MeshInstance3D.new()
+	eyes.mesh = main.eyes_mesh()
+	eyes.material_override = main.make_material(Color(0.08, 0.06, 0.1), 0.0)
+	eyes.position = Vector3(0, 1.47, -0.17)
+	pivot.add_child(eyes)
+	arm_l = _arm(-1.0, overall)
+	arm_r = _arm(1.0, overall)
 	var tag := Label3D.new()
 	tag.text = "P%d" % (index + 1)
 	tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
@@ -91,6 +114,18 @@ func _ready() -> void:
 	pivot.add_child(tag)
 	main.set_layers(pivot, body_layer())
 	main.set_layers(tag, main.MANUAL_LAYER)  # name tags are for the crew
+
+
+func _arm(side: float, m: Material) -> Node3D:
+	var shoulder := Node3D.new()
+	shoulder.position = Vector3(side * 0.36, 1.05, 0)
+	pivot.add_child(shoulder)
+	var arm := MeshInstance3D.new()
+	arm.mesh = main.capsule_mesh(0.09, 0.55)
+	arm.material_override = m
+	arm.position = Vector3(0, -0.24, 0)
+	shoulder.add_child(arm)
+	return shoulder
 
 
 func attach_camera(cam: Camera3D) -> void:
@@ -125,11 +160,56 @@ func _physics_process(delta: float) -> void:
 	_update_fix(delta)
 
 
+## Body animation on every machine: walk bob with a little squash and stretch, swinging arms
+## (held out in front while carrying something), and blinking.
+func _process(delta: float) -> void:
+	if not active or pivot == null:
+		return
+	anim_t += delta
+	var moved := (position - last_pos).length() / maxf(delta, 0.001)
+	last_pos = position
+	walk = lerpf(walk, clampf(moved / SPEED, 0.0, 1.0), 1.0 - exp(-10.0 * delta))
+	var step := sin(anim_t * 11.0)
+	var bounce := absf(step) * 0.07 * walk
+	pivot.position.y = bounce
+	pivot.scale = Vector3(1.0 + bounce * 0.5, 1.0 - bounce * 0.6, 1.0 + bounce * 0.5)
+	var carrying: bool = main.is_carrying(index)
+	var swing := step * 0.7 * walk
+	arm_l.rotation.x = lerp_angle(arm_l.rotation.x, -1.3 if carrying else swing, 1.0 - exp(-12.0 * delta))
+	arm_r.rotation.x = lerp_angle(arm_r.rotation.x, -1.3 if carrying else -swing, 1.0 - exp(-12.0 * delta))
+	var wave := fixing and not carrying
+	if wave:
+		arm_r.rotation.x = -1.6 + sin(anim_t * 20.0) * 0.3
+	blink_t -= delta
+	if blink_t <= 0.0:
+		blink_t = randf_range(2.0, 5.0)
+	eyes.scale = Vector3(1.0, 0.12 if blink_t < 0.13 else 1.0, 1.0)
+	if camera != null and not remote:
+		_update_hud()
+
+
 func _update_camera() -> void:
 	if camera == null:
 		return
+	var lc: Dictionary = main.launch_cam()
+	if not lc.is_empty():
+		camera.global_transform = lc.xf
+		camera.environment = lc.env
+		camera.far = 600.0
+		was_launch_cam = true
+		return
+	if was_launch_cam:
+		was_launch_cam = false
+		camera.environment = null
+		camera.far = 4000.0
 	camera.global_position = global_position + Vector3(0, EYE_HEIGHT + sin(bob_t) * 0.03, 0)
 	camera.rotation = Vector3(pitch, yaw, 0.0)
+
+
+func _update_hud() -> void:
+	if hud_label == null:
+		return
+	hud_label.text = main.crew_hint(self)
 
 
 ## Hold ACTION next to the leaky pipe to fix it (the host keeps the score).
@@ -159,7 +239,12 @@ func _update_fix(delta: float) -> void:
 # --- Input -------------------------------------------------------------------
 
 func _key(action: String) -> bool:
-	return Input.is_physical_key_pressed(KEYS[key_set][action])
+	if key_set == NO_KEYS:
+		return false
+	var keys: Dictionary = KEYS[key_set]
+	if not keys.has(action):
+		return false
+	return Input.is_physical_key_pressed(keys[action])
 
 
 func _stick(axis_x: JoyAxis, axis_y: JoyAxis, deadzone: float) -> Vector2:
@@ -179,7 +264,7 @@ func _read_look(delta: float) -> void:
 	pitch = clampf(pitch - look.y * STICK_PITCH_SPEED * delta, -1.3, 1.3)
 	if key_set == 1:
 		yaw -= (float(_key("right")) - float(_key("left"))) * KEY_TURN_SPEED * delta
-	else:
+	elif key_set == 0:
 		yaw -= (float(_key("turn_r")) - float(_key("turn_l"))) * KEY_TURN_SPEED * delta
 
 
@@ -189,7 +274,7 @@ func _read_move() -> Vector3:
 	var v := Vector2.ZERO
 	if key_set == 0:
 		v = Vector2(float(_key("right")) - float(_key("left")), float(_key("down")) - float(_key("up")))
-	else:
+	elif key_set == 1:
 		v.y = float(_key("down")) - float(_key("up"))
 	v += _stick(JOY_AXIS_LEFT_X, JOY_AXIS_LEFT_Y, 0.18)
 	if joy >= 0:
@@ -229,9 +314,8 @@ func apply_remote_state(pos: Vector3, new_yaw: float, new_pitch: float) -> void:
 		position = net_target
 
 
-## Client: [pos, yaw, pitch, active] from the host. Our own movement stays local.
-func apply_net_state(st: Array) -> void:
-	var on: bool = st[3]
+## Client: whether this crew seat is playing (from the host). Our own movement stays local.
+func apply_net_state(on: bool) -> void:
 	if on != active:
 		set_active(on)
 		main.on_player_activity_changed(self)
