@@ -13,6 +13,10 @@ const ShipScript := preload("res://games/cannon_cove/enemy_ship.gd")
 const TentacleScript := preload("res://games/cannon_cove/tentacle.gd")
 const BoarderScript := preload("res://games/cannon_cove/boarder.gd")
 const LeakScript := preload("res://games/cannon_cove/leak.gd")
+const TargetScript := preload("res://games/cannon_cove/target.gd")
+const KrakenScript := preload("res://games/cannon_cove/kraken.gd")
+const ParrotScript := preload("res://games/cannon_cove/parrot.gd")
+const GuideScript := preload("res://games/cannon_cove/guide.gd")
 const HudScript := preload("res://games/cannon_cove/hud.gd")
 const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
@@ -44,7 +48,21 @@ const EXTRA_SOUNDS := {
 	"load": [0.18, 260.0, 620.0, 0.35, "tri", 0.15],
 	"tentacle": [0.9, 95.0, 55.0, 0.55, "saw", 0.25],
 	"rope": [0.4, 1200.0, 400.0, 0.2, "sine", 0.7],
+	"bell": [1.3, 880.0, 860.0, 0.32, "sine", 0.0],
+	"squawk": [0.22, 1300.0, 2300.0, 0.22, "saw", 0.3],
+	"thunder": [1.8, 70.0, 28.0, 0.75, "saw", 0.9],
+	"cheer": [0.9, 520.0, 1250.0, 0.28, "tri", 0.45],
+	"roar": [1.5, 130.0, 45.0, 0.75, "saw", 0.45],
+	"bullseye": [0.55, 784.0, 1568.0, 0.35, "tri", 0.0],
+	"golden": [0.7, 1046.0, 2093.0, 0.3, "sine", 0.0],
+	"clang": [0.3, 1700.0, 1550.0, 0.35, "square", 0.25],
+	"kaboom": [1.2, 110.0, 22.0, 0.9, "saw", 0.8],
+	"firework": [0.45, 300.0, 2400.0, 0.25, "sine", 0.6],
 }
+## The voyage: five waves, then the Kraken; after that the "bonus seas" go on forever.
+const BOSS_WAVE := 6
+const WAVE_NAMES := ["", "CALM SEAS", "RAIDERS!", "FIRE SHIPS!", "MONSTER WATERS", "THE STORM", "THE KRAKEN"]
+const PRACTICE_HITS := 3
 
 var players: Array = []
 var cameras: Array[Camera3D] = []
@@ -79,6 +97,34 @@ var game_over := false
 var game_over_time := 0.0
 var hammer_t := 0.0
 
+# The voyage.
+var phase := "practice"  # practice, wave, break, victory
+var parts: Dictionary = {}  # pieces of the world that animate (see world.gd build())
+var spawn_queue: Array[String] = []
+var practice_hits := 0
+var practice_t := 0.0
+var practice_spawn_t := 1.0
+var practice_free_t := 0.0
+var event_t := 25.0
+var event_flip := false
+var golden_balls := 0
+var streak := 0
+var last_sink_t := -10.0
+var stats: Array = []
+var mood := "sunset"
+var mood_k: Dictionary = {}
+var lightning_t := 8.0
+var flash_t := 0.0
+var victory_t := 0.0
+var parrot: Node3D
+var parrot_t := 0.0
+var announced := {}
+var gunner_grabbed := false
+var gunner_fired := false
+var vr_hint: Label3D
+var stats_label: Label
+var stats_text := ""
+var help_panel: PanelContainer
 var info_label: Label
 var center_label: Label
 var help_label: Label
@@ -91,8 +137,8 @@ var say_t := 0.0
 
 func _ready() -> void:
 	randomize()
-	var built: Dictionary = World.build(self)
-	sea = built.sea
+	parts = World.build(self)
+	sea = parts.sea
 	_build_cannons()
 	_build_extras()
 	_build_hud()
@@ -126,11 +172,12 @@ func _setup_game(mode: String) -> void:
 	print("Cannon Cove: %s mode" % mode)
 	_rejoin_party()
 	if mode == "host":
-		_show_center("Waiting for the deckhands on the TV to join…", 0.0)
+		_show_center("CANNON COVE\nTARGET PRACTICE while the TV crew joins!\nGrab the glowing cannon handle and shoot the target", 6.0)
 	elif mode == "client":
 		_show_center("ALL ABOARD!", 1.5)
 	else:
-		_show_center("CANNON COVE\nGet ready, crew!", 2.5)
+		_show_center("CANNON COVE\nTarget practice first - then the pirates come!", 4.0)
+	parrot_say("SQUAWK! Shoot the target!")
 
 
 func next_net_id() -> int:
@@ -171,6 +218,14 @@ func _build_extras() -> void:
 		World.box(g, Vector3(0.12, 0.12, 0.4), Vector3.ZERO, white)
 		add_child(g)
 		gulls.append(g)
+	parrot = ParrotScript.new()
+	parrot.main = self
+	parrot.perches = parts.parrot_perches
+	parrot.scale = Vector3.ONE * 1.4
+	add_child(parrot)
+	for i in MAX_PLAYERS:
+		stats.append({"shots": 0, "hits": 0, "sinks": 0, "loads": 0, "patches": 0, "splashes": 0, "monster": 0,
+			"kegs": 0, "best_streak": 0})
 
 
 func _animate_world(delta: float) -> void:
@@ -190,6 +245,120 @@ func _animate_world(delta: float) -> void:
 		w1.rotation.z = 0.35 + flap
 	gauge.text = "WATER IN THE HOLD  %d%%" % int(water)
 	gauge.modulate = Color(0.5, 0.85, 1.0) if water < 60.0 else Color(1.0, 0.4, 0.3)
+	_animate_ship(delta)
+	_update_mood(delta)
+
+
+## Sails billow, flags flap, the wheel turns, lanterns flicker and the gold pile grows.
+func _animate_ship(delta: float) -> void:
+	var sails: Array = parts.get("sails", [])
+	for i in sails.size():
+		var s: Node3D = sails[i]
+		s.scale = Vector3(1.0, 1.0, 1.0 + 0.6 * sin(t_world * 1.3 + i))
+	var flags: Array = parts.get("flags", [])
+	for i in flags.size():
+		var f: Node3D = flags[i]
+		f.rotation.y = sin(t_world * 4.0 + i * 2.0) * 0.3
+	var wheel: Node3D = parts.get("wheel")
+	if wheel:
+		wheel.rotation.z = sin(t_world * 0.35) * 0.6
+	var lm: StandardMaterial3D = parts.get("lantern_mat")
+	if lm:
+		lm.emission_energy_multiplier = 2.6 + sin(t_world * 9.0) * 0.3 + sin(t_world * 23.0) * 0.2 + mood_value("night") * 1.5
+	var wm: StandardMaterial3D = parts.get("window_mat")
+	if wm:
+		wm.emission_energy_multiplier = 1.5 + mood_value("night") * 1.5
+	var beam: Node3D = parts.get("beam")
+	if beam:
+		beam.rotation.y = t_world * 0.6
+	var pile: Node3D = parts.get("gold_pile")
+	if pile:
+		var k := clampf(float(gold) / 1500.0, 0.0, 1.0)
+		pile.scale = pile.scale.lerp(Vector3(1.0, 0.05 + k * 0.9, 0.62 + k * 0.2), 1.0 - exp(-3.0 * delta))
+	var gb: Node3D = parts.get("golden_ball")
+	if gb:
+		gb.visible = golden_balls > 0
+		gb.position.y = 1.32 + sin(t_world * 3.0) * 0.08
+
+
+func _wanted_mood() -> String:
+	if phase == "victory":
+		return "dawn"
+	if wave <= 2:
+		return "sunset"
+	if wave <= 4:
+		return "dusk"
+	if wave == 5:
+		return "storm"
+	if wave == BOSS_WAVE:
+		return "night"
+	if wave == BOSS_WAVE + 1:
+		return "dawn"
+	return ["sunset", "dusk", "storm", "night"][(wave - BOSS_WAVE - 2) % 4]
+
+
+func mood_value(key: String) -> float:
+	return float(mood_k.get(key, 0.0))
+
+
+## Glides the sky, sun, sea and clouds towards the current wave's mood (same on both machines).
+func _update_mood(delta: float) -> void:
+	mood = _wanted_mood()
+	var m: Dictionary = World.MOODS[mood]
+	var k := 1.0 - exp(-0.6 * delta)
+	if mood_k.is_empty():
+		k = 1.0
+	for key in m:
+		var v = m[key]
+		if v is Color:
+			var cur: Color = mood_k.get(key, v)
+			mood_k[key] = cur.lerp(v, k)
+		else:
+			var cf: float = mood_k.get(key, v)
+			mood_k[key] = lerpf(cf, float(v), k)
+	var sky: ProceduralSkyMaterial = parts.sky
+	var flash := 0.0
+	if mood == "storm":
+		flash = _lightning(delta)
+	sky.sky_top_color = (mood_k.top as Color).lerp(Color(0.85, 0.88, 1.0), flash * 0.6)
+	sky.sky_horizon_color = (mood_k.horizon as Color).lerp(Color(0.9, 0.92, 1.0), flash * 0.5)
+	sky.ground_horizon_color = mood_k.ground
+	var sun: DirectionalLight3D = parts.sun
+	sun.light_color = mood_k.sun
+	sun.light_energy = mood_value("sun_e") + flash * 1.6
+	var e: Environment = parts.env
+	e.ambient_light_energy = mood_value("amb") + flash * 0.6
+	e.fog_light_color = mood_k.fog
+	var sm: ShaderMaterial = parts.sea_mat
+	sm.set_shader_parameter("chop", mood_value("chop"))
+	sm.set_shader_parameter("night", mood_value("night"))
+	var fm: StandardMaterial3D = parts.far_mat
+	fm.albedo_color = Color(0.25, 0.42, 0.55).lerp(Color(0.05, 0.1, 0.18), mood_value("night"))
+	var cm: StandardMaterial3D = parts.clouds_mat
+	cm.albedo_color = mood_k.cloud
+	cm.emission = mood_k.cloud
+	var night := mood_value("night")
+	var stars: Node3D = parts.stars
+	stars.visible = night > 0.05
+	(parts.stars_mat as StandardMaterial3D).albedo_color.a = clampf(night * 1.2 - 0.2, 0.0, 1.0)
+	var moon: Node3D = parts.moon
+	moon.visible = night > 0.05
+	(parts.moon_mat as StandardMaterial3D).albedo_color.a = night
+	(parts.beam_mat as StandardMaterial3D).albedo_color.a = 0.06 + night * 0.2
+
+
+## Storm: lightning flickers now and then (each machine on its own - it's only scenery).
+func _lightning(delta: float) -> float:
+	lightning_t -= delta
+	if lightning_t <= 0.0:
+		lightning_t = randf_range(7.0, 15.0)
+		flash_t = 0.35
+		get_tree().create_timer(randf_range(0.5, 1.2)).timeout.connect(func() -> void:
+			_sfx().play("thunder", -4.0, randf_range(0.8, 1.1)))
+	flash_t = maxf(0.0, flash_t - delta)
+	if flash_t <= 0.0:
+		return 0.0
+	return 1.0 if (flash_t > 0.25 or (flash_t > 0.08 and flash_t < 0.14)) else 0.25
 
 
 func make_material(color: Color, glow: float) -> StandardMaterial3D:
@@ -362,17 +531,85 @@ func add_shake(pos: Vector3, amount: float) -> void:
 		p.shake = maxf(p.shake, amount * falloff)
 
 
-## A cannonball (or, on the client, its look-alike).
-func spawn_ball(origin: Vector3, vel: Vector3, enemy: bool, visual_only: bool) -> void:
+## A cannonball (or, on the client, its look-alike). Mega = a golden cannonball.
+func spawn_ball(origin: Vector3, vel: Vector3, enemy: bool, visual_only: bool, mega: bool = false) -> void:
 	var b := BallScript.new()
 	b.main = self
 	b.vel = vel
 	b.enemy = enemy
+	b.mega = mega
 	b.visual_only = visual_only
 	b.position = origin
 	add_child(b)
 	if not visual_only and net:
-		net.event("ball", [origin, vel, enemy])
+		net.event("ball", [origin, vel, enemy, mega])
+
+
+## Colourful paper bits (celebrations).
+func confetti(pos: Vector3, broadcast: bool = true) -> void:
+	var cols := [Color(1.0, 0.3, 0.3), Color(1.0, 0.85, 0.2), Color(0.3, 0.8, 1.0), Color(0.5, 1.0, 0.4), Color(1.0, 0.5, 0.9)]
+	for i in 3:
+		_particles(pos, cols[(i + randi()) % cols.size()], 10, 0.09, 7.0, 6.0, 1.6, 70.0)
+	if broadcast and net:
+		net.event("confetti", [pos])
+
+
+## A fountain of gold coins (sinking a ship).
+func coins_fx(pos: Vector3, broadcast: bool = true) -> void:
+	_particles(pos, Color(1.0, 0.82, 0.2), 16, 0.12, 9.0, 16.0, 1.3, 35.0)
+	if broadcast and net:
+		net.event("coins", [pos])
+
+
+## A firework bursting in the sky (victory).
+func fireworks(pos: Vector3, broadcast: bool = true) -> void:
+	var col := Color.from_hsv(randf(), 0.7, 1.0)
+	_particles(pos, col, 28, 0.14, 11.0, 3.0, 1.6, 180.0)
+	_particles(pos, Color(1.0, 1.0, 0.85), 10, 0.08, 6.0, 2.0, 1.0, 180.0)
+	_sfx().play("firework", -4.0, randf_range(0.8, 1.2))
+	if broadcast and net:
+		net.event("firework", [pos])
+
+
+## Three dolphins leap alongside the ship (just for fun).
+func dolphins(side: float, z0: float) -> void:
+	var body_mat := World.mat(Color(0.45, 0.55, 0.7), 0.0, 0.3)
+	var belly_mat := World.mat(Color(0.9, 0.92, 0.95))
+	for i in 3:
+		var d := Node3D.new()
+		var b := World.sphere(d, 0.5, Vector3.ZERO, body_mat, 10)
+		b.scale = Vector3(0.55, 0.55, 1.8)
+		var belly := World.sphere(d, 0.4, Vector3(0, -0.12, 0), belly_mat, 8)
+		belly.scale = Vector3(0.5, 0.4, 1.6)
+		var fin := World.box(d, Vector3(0.06, 0.45, 0.35), Vector3(0, 0.38, 0.1), body_mat)
+		fin.rotation.x = -0.5
+		var tail := World.box(d, Vector3(0.8, 0.06, 0.3), Vector3(0, 0, 0.95), body_mat)
+		tail.rotation.x = 0.2
+		World.sphere(d, 0.06, Vector3(0.2, 0.12, -0.6), World.mat(Color.BLACK), 4)
+		World.sphere(d, 0.06, Vector3(-0.2, 0.12, -0.6), World.mat(Color.BLACK), 4)
+		add_child(d)
+		var x := side * (8.5 + i * 1.6)
+		var start := Vector3(x, sea_level - 1.0, z0 + i * 2.5)
+		d.position = start
+		var tw := d.create_tween()
+		for j in 4:
+			var a := start - Vector3(0, 0, j * 7.0)
+			tw.tween_callback(func() -> void: d.position = a)
+			tw.tween_method(func(k: float) -> void:
+				d.position = a + Vector3(0, sin(k * PI) * 2.6, -k * 7.0)
+				d.rotation.x = cos(k * PI) * 0.9, 0.0, 1.0, 1.1).set_delay(0.25 * i)
+		tw.tween_callback(d.queue_free)
+	_sfx().play("splash", -10.0, 1.4)
+
+
+## Polly the parrot says something (on both machines).
+func parrot_say(text: String) -> void:
+	if parrot == null or not is_instance_valid(parrot):
+		return
+	parrot_t = 0.0
+	parrot.say(text)
+	if net:
+		net.event("parrot", [text])
 
 
 # --- Players -----------------------------------------------------------------
@@ -468,6 +705,25 @@ func _build_views(mode: String) -> void:
 		origin.add_child(right)
 		players[0].attach_xr(origin, cam, left, right)
 		_build_vr_mirror(cam)
+	elif OS.has_environment("CC_FAKE_VR") and mode != "client":
+		# Tests: the VR gunner's code runs without a headset; the bot moves the head and hands.
+		print("Fake VR: the bot drives the VR gunner")
+		var origin := XROrigin3D.new()
+		add_child(origin)
+		origin.global_position = players[0].global_position
+		var cam := XRCamera3D.new()
+		origin.add_child(cam)
+		cam.position = Vector3(0, 1.25, 0)
+		var left := XRController3D.new()
+		left.tracker = "left_hand"
+		origin.add_child(left)
+		left.position = Vector3(-0.25, 0.9, -0.2)
+		var right := XRController3D.new()
+		right.tracker = "right_hand"
+		origin.add_child(right)
+		right.position = Vector3(0.25, 0.9, -0.2)
+		players[0].fake_vr = true
+		players[0].attach_xr(origin, cam, left, right)
 	else:
 		print("No VR headset: split screen")
 	_ensure_view_grid()
@@ -844,7 +1100,7 @@ func _process(delta: float) -> void:
 	if music == null:
 		music = MusicScript.new()
 		add_child(music)
-	music.play_track(maxi(wave - 1, 0) / 2)
+	music.play_track(1 if wave == BOSS_WAVE else maxi(wave - 1, 0) / 2)
 	_animate_world(delta)
 	_check_say(delta)
 	if ghost_cam:
@@ -855,6 +1111,7 @@ func _process(delta: float) -> void:
 			mirror_t = 1.0 / 30.0
 			mirror_vp.render_target_update_mode = SubViewport.UPDATE_ONCE
 	_update_hud()
+	_update_guides()
 	if players.size() < MAX_PLAYERS:
 		_ensure_players(net.mode)
 	_poll_joins(delta)
@@ -871,91 +1128,420 @@ func _process(delta: float) -> void:
 		if game_over_time > 1.5 and (_restart_pressed() or vr_restart):
 			get_tree().reload_current_scene()
 		return
+	_update_crew(delta)
+	_update_coach(delta)
+	if phase == "practice":
+		_update_practice(delta)
+		return
 	if net.mode == "host" and not net.connected:
 		return  # hold the waves until the deckhands join
-	_update_crew(delta)
 	_update_water(delta)
+	_random_events(delta)
+	if phase == "victory":
+		victory_t -= delta
+		if victory_t <= 0.0:
+			phase = "break"
+			in_break = true
+			break_timer = 4.0
+			_show_center("BONUS SEAS!\nKeep sailing - how much gold can you grab?", 3.0)
+		return
 	if in_break:
 		break_timer -= delta
 		if break_timer <= 0.0:
 			_start_wave()
 		return
 	spawn_timer -= delta
-	var ships := get_tree().get_nodes_in_group("ships").size()
-	if spawn_timer <= 0.0:
-		if ships_to_spawn > 0 and ships < 2 + wave / 2 + (1 if crew_extra() >= 2 else 0):
-			_spawn_ship()
-			ships_to_spawn -= 1
-			spawn_timer = maxf(4.0, 9.0 - wave * 0.6)
-		elif tentacles_to_spawn > 0 and get_tree().get_nodes_in_group("tentacles").size() < 1 + wave / 4 + crew_extra() / 3:
-			_spawn_tentacle()
-			tentacles_to_spawn -= 1
-			spawn_timer = 5.0
-	ships = get_tree().get_nodes_in_group("ships").size()
-	if ships_to_spawn <= 0 and tentacles_to_spawn <= 0 and ships == 0 \
-			and get_tree().get_nodes_in_group("tentacles").is_empty() and get_tree().get_nodes_in_group("boarders").is_empty():
+	if spawn_timer <= 0.0 and not spawn_queue.is_empty():
+		_spawn_next()
+	if spawn_queue.is_empty() and get_tree().get_nodes_in_group("ships").is_empty() \
+			and get_tree().get_nodes_in_group("tentacles").is_empty() and get_tree().get_nodes_in_group("boarders").is_empty() \
+			and get_tree().get_nodes_in_group("krakens").is_empty():
 		_end_wave()
+
+
+# --- Target practice (before wave 1; the VR gunner practises while the TV crew joins) --------
+
+func _update_practice(delta: float) -> void:
+	var crew_ready: bool = net.mode != "host" or net.connected
+	if crew_ready:
+		practice_t += delta
+	var have := false
+	for tg in get_tree().get_nodes_in_group("targets"):
+		if tg.kind == "practice":
+			have = true
+	if not have:
+		practice_spawn_t -= delta
+		if practice_spawn_t <= 0.0:
+			practice_spawn_t = 1.2
+			_spawn_target("practice")
+	# Free practice balls, so nobody has to fetch anything yet.
+	var c = cannons[players[0].station]
+	var carried := false
+	for p in deckhands():
+		if p.carrying:
+			carried = true
+	if c.ammo <= 0 and not carried:
+		practice_free_t += delta
+		if practice_free_t > 1.4:
+			practice_free_t = 0.0
+			c.ammo += 1
+			popup(c.global_position + Vector3.UP * 1.3, "FREE PRACTICE BALL", Color(0.7, 1.0, 0.7))
+			sound("load", -4.0, 1.2)
+	else:
+		practice_free_t = 0.0
+	if crew_ready and (practice_hits >= PRACTICE_HITS or practice_t > 70.0):
+		_end_practice()
+
+
+func _spawn_target(kind: String) -> void:
+	var tg := TargetScript.new()
+	tg.main = self
+	tg.kind = kind
+	tg.net_id = next_net_id()
+	var pos: Vector3
+	if kind == "practice":
+		var c = cannons[players[0].station]
+		var dist: float = [15.0, 20.0, 26.0, 18.0][practice_hits % 4]
+		var dir: Vector3 = Basis(Vector3.UP, randf_range(-0.45, 0.45)) * c.outboard
+		pos = Vector3(c.global_position.x, 0.0, c.global_position.z) + dir * dist
+	else:
+		var side := -1.0 if randf() < 0.5 else 1.0
+		pos = Vector3(side * randf_range(20.0, 30.0), 0.0, randf_range(-26.0, -14.0))
+		tg.drift = Vector3(0, 0, randf_range(1.2, 1.8))
+	pos.y = sea_level
+	tg.position = pos
+	add_child(tg)
+	if kind != "practice":
+		splash(pos, 1.5)
+		var what := "A SUPPLY BARREL!\nGunner: shoot it for free cannonballs!" if kind == "supply" else "A TREASURE CHEST!\nGunner: shoot it for gold!"
+		_show_center(what, 2.2)
+		parrot_say("SQUAWK! Shoot the barrel!" if kind == "supply" else "SQUAWK! TREASURE!")
+
+
+func on_target_hit(tg, pos: Vector3) -> void:
+	if tg.gone:
+		return
+	tg.gone = true
+	var kind: String = tg.kind
+	explosion(pos + Vector3.UP, Color(1.0, 0.85, 0.3), 1.0)
+	confetti(pos + Vector3.UP * 2.0)
+	sound("bullseye")
+	match kind:
+		"practice":
+			practice_hits += 1
+			gold += 5
+			var left := PRACTICE_HITS - practice_hits
+			var msg := "BULLSEYE!" if left != 0 else "BULLSEYE!  PERFECT!"
+			popup(pos + Vector3.UP * 3.0, msg, Color(1.0, 0.9, 0.3))
+			if left > 0:
+				parrot_say(["SQUAWK! Nice shot!", "Again! Again!", "Ooh, shiny shot!"][practice_hits % 3])
+			elif net.mode == "host" and not net.connected:
+				_show_center("GREAT SHOOTING, GUNNER!\nKeep practising while the deckhands on the TV join…", 4.0)
+			print("Practice target hit (%d)" % practice_hits)
+		"supply":
+			for c in cannons:
+				c.ammo = mini(c.MAX_AMMO, c.ammo + 1)
+			popup(pos + Vector3.UP * 3.0, "FREE AMMO FOR EVERY CANNON!", Color(0.5, 1.0, 0.55))
+			sound("load", 0.0, 1.3)
+			parrot_say("SQUAWK! Cannonballs!")
+			print("Supply barrel hit")
+		_:
+			gold += 40
+			popup(pos + Vector3.UP * 3.0, "TREASURE!  +40 GOLD", Color(1.0, 0.85, 0.2))
+			sound("coin", 0.0, 1.0)
+			sound("coin", -2.0, 1.3)
+			print("Treasure chest hit, gold %d" % gold)
+	tg.queue_free()
+
+
+func _end_practice() -> void:
+	phase = "break"
+	in_break = true
+	break_timer = 7.0
+	for tg in get_tree().get_nodes_in_group("targets"):
+		splash(tg.global_position, 1.2)
+		tg.queue_free()
+	sound("bell", -2.0)
+	_show_center("GREAT SHOOTING!\nPirates are coming - deckhands, keep the cannons loaded!", 4.0)
+	parrot_say("SQUAWK! PIRATES AHOY!")
+	print("Practice over (%d hits)" % practice_hits)
+
+
+## Supply barrels and treasure chests float by during the waves; dolphins visit now and then.
+func _random_events(delta: float) -> void:
+	if phase != "wave" or wave < 2:
+		return
+	event_t -= delta
+	if event_t > 0.0:
+		return
+	event_t = randf_range(30.0, 45.0)
+	event_flip = not event_flip
+	_spawn_target("supply" if event_flip else "chest")
+
+
+func _plan_wave(w: int) -> Array[String]:
+	var q: Array[String] = []
+	match w:
+		1:
+			q.assign(["raider", "raider"])
+		2:
+			q.assign(["raider", "raider", "raider"])
+		3:
+			q.assign(["raider", "fireship", "galleon", "fireship", "raider"])
+		4:
+			q.assign(["raider", "tentacle", "treasure", "galleon", "raider", "tentacle"])
+		5:
+			q.assign(["raider", "fireship", "galleon", "tentacle", "raider", "fireship", "galleon"])
+		BOSS_WAVE:
+			q.assign(["kraken", "wait", "raider"])
+		_:
+			var n := mini(3 + (w - BOSS_WAVE), 9)
+			for i in n:
+				q.append(["raider", "galleon", "raider", "fireship"][i % 4])
+			for i in 1 + (w - BOSS_WAVE) / 2:
+				q.insert(mini(q.size(), 2 + i * 2), "tentacle")
+			if w % 2 == 0:
+				q.insert(2, "treasure")
+	# A bigger crew (more than two deckhands) faces a few more ships and tentacles.
+	var extra := crew_extra()
+	for i in extra / 2:
+		q.append("raider")
+	if extra >= 3 and w >= 3:
+		q.append("tentacle")
+	return q
+
+
+## Bouncing arrows: each local player sees their own, over the next thing to do.
+func _update_guides() -> void:
+	for p in players:
+		var g: Node3D = p.get_meta("guide") if p.has_meta("guide") else null
+		var want = null
+		var k := 1.0
+		if p.active and not p.ghost and not p.remote:
+			if p.gunner:
+				want = coach_point
+				k = coach_scale
+			else:
+				want = deckhand_goal(p)
+				if want != null:
+					var w: Vector3 = want
+					var flat := Vector2(w.x - p.global_position.x, w.z - p.global_position.z).length()
+					if flat < 1.6 and not p.carrying:
+						want = null  # you're there: the prompt says what to do
+		if want == null:
+			if g:
+				g.hide_arrow()
+			continue
+		if g == null:
+			g = GuideScript.new()
+			g.color = p.color.lightened(0.25)
+			g.layer = p.viewmodel_layer()
+			add_child(g)
+			p.set_meta("guide", g)
+		g.point(want, k)
 
 
 func _start_wave() -> void:
 	wave += 1
 	in_break = false
-	# A bigger crew (more than two deckhands) faces a few more ships, boarders and tentacles.
-	var extra := crew_extra()
-	ships_to_spawn = mini(1 + wave, 9) + extra / 2
-	tentacles_to_spawn = 0 if wave < 3 else 1 + (wave - 3) / 2 + extra / 3
+	phase = "wave"
+	spawn_queue = _plan_wave(wave)
 	spawn_timer = 0.5
-	print("Wave %d started (%d deckhands, %d ships)" % [wave, deckhands().size(), ships_to_spawn])
+	ships_to_spawn = spawn_queue.size()
+	print("Wave %d started (%d deckhands, plan %s)" % [wave, deckhands().size(), spawn_queue])
 	sound("wave")
+	sound("bell", -4.0)
+	var title: String = WAVE_NAMES[wave] if wave < WAVE_NAMES.size() else "BONUS SEAS"
 	var sub := "Pirates ahoy!"
-	if wave == 1:
-		sub = "Pirate ships ahoy! Gunner: grab a cannon handle and FIRE!"
-	elif wave == 3:
-		sub = "Something big is stirring under the waves…"
-	elif tentacles_to_spawn > 0:
-		sub = "Pirates AND the sea monster!"
-	_show_center("WAVE %d\n%s" % [wave, sub], 2.5)
+	match wave:
+		1:
+			sub = "Two pirate ships. Gunner: put the gold ring on them and FIRE!"
+		2:
+			sub = "Raiders send BOARDERS - deckhands, muskets ready!"
+		3:
+			sub = "Little boats with BOMBS! Sink them before they ram us!\n(Deckhands: muskets work on them too)"
+		4:
+			sub = "The sea monster wakes… and a TREASURE SHIP sails by!"
+		5:
+			sub = "A storm! Hold on tight, me hearties!"
+		BOSS_WAVE:
+			sub = "Deckhands: shoot its TENTACLES. Gunner: hit its EYES when they open!"
+			golden_balls += 1
+			parrot_say("SQUAWK! A golden cannonball for the Kraken!")
+		_:
+			sub = "Everything the sea has got!"
+	var head := "WAVE %d of %d" % [wave, BOSS_WAVE] if wave <= BOSS_WAVE else "BONUS WAVE %d" % (wave - BOSS_WAVE)
+	_show_center("%s\n%s\n%s" % [head, title, sub], 3.5)
+	if wave != BOSS_WAVE:
+		parrot_say(["SQUAWK! Here they come!", "Battle stations!", "Ready the cannons!"][wave % 3])
 
 
 func _end_wave() -> void:
 	in_break = true
-	break_timer = 6.0
+	phase = "break"
+	break_timer = 7.0
 	var bonus := 25 * wave
 	gold += bonus
 	print("Wave %d cleared, gold %d" % [wave, gold])
 	sound("clear")
+	sound("cheer", -4.0)
 	sound("coin", -2.0, 1.0)
-	_show_center("WAVE %d CLEARED!\n+%d GOLD bonus\nThe pumps are draining the hold…" % [wave, bonus], 3.0)
+	var next := wave + 1
+	var preview := ""
+	if next <= BOSS_WAVE:
+		preview = "\nNext: %s" % WAVE_NAMES[next]
+	_show_center("WAVE %d CLEARED!\n+%d GOLD bonus%s" % [wave, bonus, preview], 3.5)
+	parrot_say("SQUAWK! Well done, crew!")
+	confetti(Vector3(0, 6.0, 2.0))
+	var dside := -1.0 if randf() < 0.5 else 1.0
+	var dz := randf_range(4.0, 12.0)
+	net.event("dolphins", [dside, dz])
+	dolphins(dside, dz)
 
 
-func _spawn_ship() -> void:
+func _spawn_next() -> void:
+	var kind: String = spawn_queue[0]
+	var normal := 0
+	for sh in get_tree().get_nodes_in_group("ships"):
+		if not sh.is_fireship():
+			normal += 1
+	var cap := 2 + wave / 2 + (1 if crew_extra() >= 2 else 0)
+	match kind:
+		"wait":
+			spawn_queue.pop_front()
+			spawn_timer = 22.0
+			return
+		"tentacle":
+			if get_tree().get_nodes_in_group("tentacles").size() >= 1 + wave / 4 + crew_extra() / 3 + (2 if wave == BOSS_WAVE else 0):
+				return
+			_spawn_tentacle(-1.0 if randf() < 0.5 else 1.0, 4.0 + floorf(wave / 3.0))
+			spawn_timer = 5.0
+		"kraken":
+			_spawn_kraken()
+			spawn_timer = 6.0
+		"fireship":
+			_spawn_ship(kind)
+			spawn_timer = 4.0
+		_:
+			if normal >= cap:
+				return
+			_spawn_ship(kind)
+			spawn_timer = 10.0 if wave == 1 else maxf(4.0, 9.0 - wave * 0.6)
+	spawn_queue.pop_front()
+
+
+func _spawn_ship(kind: String) -> void:
 	var s := ShipScript.new()
-	var kind := "raider"
-	if wave >= 2 and randf() < 0.3 + wave * 0.04:
+	if kind == "raider" and wave >= 2 and randf() < 0.15 + wave * 0.03:
 		kind = "galleon"
 	s.setup(kind, wave, self)
+	s.calm = wave == 1
 	s.net_id = next_net_id()
 	# Come in from port or starboard (where the cannons point), a little fore or aft.
 	var side := -1.0 if randf() < 0.5 else 1.0
 	var a := randf_range(-0.9, 0.9)
 	var dir := Vector3(side * cos(a), 0.0, sin(a))
-	s.position = dir * 95.0 + Vector3(0, sea_level, 0)
+	var dist := 95.0 if kind != "fireship" else 70.0
+	s.position = dir * dist + Vector3(0, sea_level, 0)
 	s.heading = atan2(dir.x, dir.z)
 	add_child(s)
+	match kind:
+		"fireship":
+			if not announced.has("fireship"):
+				announced["fireship"] = true
+				_show_center("FIRE SHIP!\nSink the bomb boat before it rams us!", 2.5)
+			parrot_say("SQUAWK! BOMB BOAT!")
+			sound("fuse", -6.0)
+		"treasure":
+			_show_center("A TREASURE SHIP!\nSink it before it gets away - it carries a GOLDEN cannonball!", 3.0)
+			parrot_say("SQUAWK! GOLD! GOLD!")
+			sound("golden", -2.0)
 
 
-func _spawn_tentacle() -> void:
+func _spawn_tentacle(side: float, hp: float, z: float = INF) -> Node3D:
 	var t := TentacleScript.new()
 	t.main = self
 	t.net_id = next_net_id()
-	t.side = -1.0 if randf() < 0.5 else 1.0
-	t.max_hp = 4.0 + floorf(wave / 3.0)
+	t.side = side
+	t.max_hp = hp
 	t.hp = t.max_hp
-	t.position = Vector3(t.side * randf_range(6.8, 8.0), sea_level, randf_range(-7.0, 7.0))
+	t.position = Vector3(t.side * randf_range(6.8, 8.0), sea_level, randf_range(-7.0, 7.0) if z == INF else z)
 	add_child(t)
 	sound("tentacle", 0.0, 0.8)
-	_show_center("THE SEA MONSTER!\nShoot the tentacle before it smashes the deck!", 2.0)
+	if not announced.has("tentacle"):
+		announced["tentacle"] = true
+		_show_center("THE SEA MONSTER!\nShoot the tentacle before it smashes the deck!", 2.0)
 	splash(t.position, 2.0)
+	return t
+
+
+# --- The Kraken (final wave) ----------------------------------------------------------------
+
+func _spawn_kraken() -> void:
+	var k := KrakenScript.new()
+	k.main = self
+	k.net_id = next_net_id()
+	k.side = -1.0 if randf() < 0.5 else 1.0
+	k.max_hp = 9.0 + 2.0 * crew_extra()
+	k.hp = k.max_hp
+	k.position = Vector3(k.side * k.DIST, sea_level, randf_range(-3.0, 4.0))
+	add_child(k)
+	sound("roar", 0.0, 0.8)
+	add_shake(Vector3.ZERO, 0.5)
+	print("The Kraken rises")
+
+
+func kraken_summon(k) -> void:
+	k.tentacles.clear()
+	var n := 2 + (1 if crew_extra() >= 2 else 0)
+	var zs := [-6.0, 5.0, -0.5]
+	for i in n:
+		k.tentacles.append(_spawn_tentacle(k.side, 3.0 + floorf(crew_extra() / 2.0), zs[i] + randf_range(-1.0, 1.0)))
+	sound("roar", -2.0, 1.0)
+	_show_center("THE KRAKEN!\nDeckhands: shoot its TENTACLES so it opens its eyes!", 2.5)
+	parrot_say("SQUAWK! Shoot the wiggly bits!")
+
+
+func kraken_roar(k) -> void:
+	sound("roar", -3.0, randf_range(0.8, 1.0))
+	add_shake(Vector3.ZERO, 0.35)
+	splash(Vector3(k.position.x * 0.6, sea_level, k.position.z), 2.0)
+
+
+func kraken_eyes_open(_k) -> void:
+	sound("roar", 0.0, 1.3)
+	sound("bullseye", -2.0, 0.8)
+	_show_center("ITS EYES ARE OPEN!\nGUNNER: FIRE AT THE KRAKEN NOW!", 2.5)
+	parrot_say("SQUAWK! NOW! NOW!")
+
+
+func kraken_dive(k) -> void:
+	splash(Vector3(k.position.x, sea_level, k.position.z), 3.0)
+	sound("splash", 0.0, 0.5)
+	if k.hp > 0.0:
+		_show_center("It dived! Watch the OTHER side…", 2.0)
+
+
+func on_kraken_defeated(k) -> void:
+	phase = "victory"
+	victory_t = 16.0
+	gold += 500
+	stats[0].sinks += 1
+	for tn in get_tree().get_nodes_in_group("tentacles"):
+		tn.hit(99.0)
+	var pos: Vector3 = k.head_center()
+	explosion(pos, Color(0.9, 0.5, 1.0), 3.0)
+	splash(Vector3(pos.x, sea_level, pos.z), 3.0)
+	sound("kaboom", 0.0, 0.7)
+	sound("cheer", 0.0)
+	sound("clear", -2.0, 0.8)
+	for i in 6:
+		get_tree().create_timer(0.4 + i * 0.7).timeout.connect(func() -> void:
+			fireworks(Vector3(randf_range(-14.0, 14.0), randf_range(14.0, 22.0), randf_range(-16.0, 10.0))))
+	parrot_say("SQUAWK! WE BEAT THE KRAKEN!")
+	print("VICTORY: the Kraken is beaten, gold %d" % gold)
+	_show_center("VICTORY!\nYou beat the KRAKEN!  +500 GOLD", 6.0)
+	_show_stats("THE COVE IS SAFE!", 16.0)
 
 
 func spawn_boarder(ship) -> void:
@@ -993,6 +1579,9 @@ func _update_crew(delta: float) -> void:
 				lk.progress += delta / LeakScript.PATCH_TIME
 				p.patching = true
 				patched_now[lk] = true
+				var who: Dictionary = lk.get_meta("patchers", {})
+				who[p.index] = true
+				lk.set_meta("patchers", who)
 	if not patched_now.is_empty():
 		hammer_t -= delta
 		if hammer_t <= 0.0:
@@ -1001,9 +1590,19 @@ func _update_crew(delta: float) -> void:
 	for lk in get_tree().get_nodes_in_group("leaks"):
 		if lk.progress >= 1.0:
 			var pos: Vector3 = lk.global_position
+			var age: float = lk.t
+			var who: Dictionary = lk.get_meta("patchers", {})
+			for i in who:
+				var idx: int = i
+				stats[idx].patches += 1
 			lk.queue_free()
-			gold += 5
-			popup(pos + Vector3.UP * 1.2, "PATCHED! +5", Color(0.5, 1.0, 0.5))
+			if age < 6.0:
+				gold += 15
+				popup(pos + Vector3.UP * 1.2, "SPEEDY PATCH! +15", Color(0.5, 1.0, 0.7))
+				sound("cheer", -8.0, 1.3)
+			else:
+				gold += 5
+				popup(pos + Vector3.UP * 1.2, "PATCHED! +5", Color(0.5, 1.0, 0.5))
 			sound("clear", -6.0, 1.4)
 			_particles(pos, Color(0.75, 0.55, 0.3), 10, 0.1, 4.0, 12.0, 0.6)
 		elif not patched_now.has(lk):
@@ -1013,8 +1612,16 @@ func _update_crew(delta: float) -> void:
 func _load(p, c) -> void:
 	c.ammo += 1
 	p.carrying = false
+	stats[p.index].loads += 1
 	sound("load", -2.0)
-	popup(c.global_position + Vector3.UP * 1.6, "LOADED!", Color(0.6, 1.0, 0.6))
+	if p.golden:
+		p.golden = false
+		c.golden += 1
+		sound("golden", -2.0)
+		popup(c.global_position + Vector3.UP * 1.6, "GOLDEN BALL LOADED!", Color(1.0, 0.85, 0.2))
+		parrot_say("SQUAWK! Fire the golden one!")
+	else:
+		popup(c.global_position + Vector3.UP * 1.6, "LOADED!", Color(0.6, 1.0, 0.6))
 
 
 func _update_water(delta: float) -> void:
@@ -1026,6 +1633,12 @@ func _update_water(delta: float) -> void:
 	else:
 		water -= (4.0 if in_break else 1.2) * delta
 	water = clampf(water, 0.0, 100.0)
+	if water >= 75.0 and not has_meta("water_warned"):
+		set_meta("water_warned", true)
+		_show_center("THE HOLD IS NEARLY FULL!\nPatch those leaks!", 2.0)
+		parrot_say("SQUAWK! We're sinking!")
+	elif water < 50.0 and has_meta("water_warned"):
+		remove_meta("water_warned")
 	if water >= 100.0:
 		_on_game_over()
 
@@ -1061,7 +1674,13 @@ func set_use(p, held: bool) -> void:
 		return  # holding: patching
 	if not p.carrying and p.global_position.distance_to(World.HOLD_POS) < 2.6:
 		p.carrying = true
-		sound("pickup", -4.0, 0.8)
+		if golden_balls > 0:
+			golden_balls -= 1
+			p.golden = true
+			sound("golden", -2.0)
+			popup(World.HOLD_POS + Vector3.UP * 2.6, "GOLDEN CANNONBALL!", Color(1.0, 0.85, 0.2))
+		else:
+			sound("pickup", -4.0, 0.8)
 		if not has_meta("first_ball"):
 			set_meta("first_ball", true)
 			print("Deckhand picked up a cannonball")
@@ -1074,6 +1693,9 @@ func set_use(p, held: bool) -> void:
 			popup(c.global_position + Vector3.UP * 1.6, "FULL!", Color(1.0, 0.9, 0.5))
 		else:
 			p.carrying = false  # drop it (it rolls away)
+			if p.golden:
+				p.golden = false
+				golden_balls += 1  # the golden one rolls back to the pile
 			sound("dry", -6.0, 0.5)
 
 
@@ -1096,6 +1718,7 @@ func create_leak(pos: Vector3) -> void:
 	if not has_meta("leak_announced"):
 		set_meta("leak_announced", true)
 		_show_center("WE'VE GOT A LEAK!\nDeckhands: hold USE next to it to patch it!", 2.5)
+		parrot_say("SQUAWK! LEAK! LEAK!")
 
 
 # --- Gunner -------------------------------------------------------------------
@@ -1104,41 +1727,194 @@ func gunner_fire(p) -> bool:
 	if game_over or p.station < 0:
 		return false
 	var c = cannons[p.station]
-	return c.fire()
+	var fired: bool = c.fire()
+	if fired:
+		stats[0].shots += 1
+		gunner_fired = true
+	return fired
 
 
 func ball_hit_test(pos: Vector3):
 	for s in get_tree().get_nodes_in_group("ships"):
 		if s.hit_test(pos):
 			return s
+	for k in get_tree().get_nodes_in_group("krakens"):
+		if k.rise > 0.6 and k.state != "dying" and k.head_center().distance_to(pos) < k.HEAD_R + 1.4:
+			return k
 	for t in get_tree().get_nodes_in_group("tentacles"):
 		if t.alive() and t.distance_to_point(pos) < 1.1:
 			return t
+	for tg in get_tree().get_nodes_in_group("targets"):
+		if tg.hit_test(pos):
+			return tg
 	return null
 
 
-func on_ball_hit(target, pos: Vector3) -> void:
+func on_ball_hit(target, pos: Vector3, mega: bool = false) -> void:
+	if target.is_in_group("targets"):
+		on_target_hit(target, pos)
+		_streak_hit(pos)
+		return
 	explosion(pos, Color(1.0, 0.6, 0.2), 1.2)
 	sound("big_kill", -4.0, 1.3)
 	add_shake(pos, 0.15)
-	if target.is_in_group("tentacles"):
+	if mega:
+		_mega_blast(pos, target)
+	if target.is_in_group("krakens"):
+		var r: String = target.hit(3.0 if mega else 1.0, mega)
+		match r:
+			"clang":
+				sound("clang", 0.0, randf_range(0.8, 1.0))
+				popup(pos + Vector3.UP * 2.0, "CLANG! Its eyes are shut!", Color(0.8, 0.7, 1.0))
+				return
+			"dead":
+				on_kraken_defeated(target)
+			_:
+				popup(pos + Vector3.UP * 2.0, ["OUCH!", "BULLSEYE!", "RIGHT IN THE EYE!"][randi() % 3], Color(1.0, 0.85, 0.3))
+				sound("roar", -4.0, 1.5)
+	elif target.is_in_group("tentacles"):
 		target.hit(3.0)
 		popup(pos + Vector3.UP, "SPLAT!", Color(0.9, 0.6, 1.0))
 	else:
-		target.hit(1.0)
-		if not target.sinking:
+		target.hit(3.0 if mega else 1.0)
+		if not target.sinking and is_instance_valid(target):
 			popup(pos + Vector3.UP * 2.0, "HIT!", Color(1.0, 0.8, 0.3))
+	stats[0].hits += 1
+	_streak_hit(pos)
+
+
+## A golden cannonball explodes in a huge golden blast that hurts everything nearby.
+func _mega_blast(pos: Vector3, direct) -> void:
+	explosion(pos, Color(1.0, 0.85, 0.2), 3.0)
+	confetti(pos + Vector3.UP * 2.0)
+	sound("kaboom", 0.0, 1.1)
+	popup(pos + Vector3.UP * 4.0, "MEGA SHOT!", Color(1.0, 0.9, 0.2))
+	add_shake(pos, 0.4)
+	for s in get_tree().get_nodes_in_group("ships"):
+		if s != direct and not s.sinking and s.global_position.distance_to(pos) < 12.0:
+			s.hit(2.0)
+	for t in get_tree().get_nodes_in_group("tentacles"):
+		if t != direct and t.alive() and t.distance_to_point(pos) < 9.0:
+			t.hit(3.0)
+
+
+func _streak_hit(pos: Vector3) -> void:
+	streak += 1
+	stats[0].best_streak = maxi(int(stats[0].best_streak), streak)
+	if streak in [3, 5, 8, 12] or (streak > 12 and streak % 5 == 0):
+		var bonus := streak * 5
+		gold += bonus
+		popup(pos + Vector3.UP * 4.5, "HOT STREAK x%d!  +%d" % [streak, bonus], Color(1.0, 0.55, 0.2))
+		sound("cheer", -4.0, 1.0 + streak * 0.02)
+		parrot_say("SQUAWK! %d in a row!" % streak)
+
+
+## Host: one of our cannonballs splashed into the sea (a miss). During practice the parrot says how
+## to correct the aim.
+func on_ball_splash(pos: Vector3) -> void:
+	streak = 0
+	var c = cannons[players[0].station] if not players.is_empty() else null
+	if c == null:
+		return
+	var best = null
+	var best_d := 9.0
+	for tg in get_tree().get_nodes_in_group("targets"):
+		var d: float = Vector2(tg.global_position.x - pos.x, tg.global_position.z - pos.z).length()
+		if d < best_d:
+			best_d = d
+			best = tg
+	if best == null:
+		return
+	var from := Vector3(c.global_position.x, 0.0, c.global_position.z)
+	var to_t: Vector3 = Vector3(best.global_position.x, 0.0, best.global_position.z) - from
+	var to_s := Vector3(pos.x, 0.0, pos.z) - from
+	var along := to_s.dot(to_t.normalized()) - to_t.length()
+	var across := to_t.normalized().cross(to_s).y
+	var vr: bool = players[0].vr or players[0].fake_vr
+	var tip := "SO CLOSE!"
+	if absf(along) > absf(across):
+		if along < 0.0:
+			tip = "TOO SHORT!\n" + ("Push the handle DOWN a little" if vr else "Aim a bit HIGHER")
+		else:
+			tip = "TOO FAR!\n" + ("Lift the handle UP a little" if vr else "Aim a bit LOWER")
+	else:
+		tip = "A BIT TO THE SIDE!\nSwing the barrel %s" % ("LEFT" if across < 0.0 else "RIGHT")
+	popup(pos + Vector3.UP * 2.5, tip, Color(1.0, 1.0, 0.7))
+	if phase == "practice":
+		coach_tip = tip.replace("\n", " ")
+		coach_tip_t = 4.0
 
 
 func on_ship_sunk(s) -> void:
 	gold += s.gold
+	stats[0].sinks += 1
 	var pos: Vector3 = s.global_position + Vector3.UP * 3.0
 	popup(pos + Vector3.UP * 2.0, "SUNK!  +%d GOLD" % s.gold, Color(1.0, 0.85, 0.2))
 	explosion(pos, Color(1.0, 0.75, 0.3), 2.2)
 	sound("big_kill", 0.0, 0.8)
 	sound("coin", -2.0)
 	splash(s.global_position, 2.5)
+	coins_fx(pos)
+	if t_world - last_sink_t < 5.0:
+		gold += 40
+		popup(pos + Vector3.UP * 4.0, "DOUBLE SINK!  +40", Color(1.0, 0.55, 0.9))
+		sound("cheer", -2.0)
+	last_sink_t = t_world
+	if s.kind == "treasure":
+		golden_balls += 1
+		sound("golden", 0.0)
+		_show_center("TREASURE SHIP SUNK!\nA GOLDEN CANNONBALL is on the pile - deckhands, load it!", 3.0)
+		parrot_say("SQUAWK! Golden ball! Golden ball!")
+	else:
+		parrot_say(["SQUAWK! Sunk 'em!", "Blow me down!", "Glug glug glug!", "Hooray!"][randi() % 4])
 	print("Sunk a %s, gold %d" % [s.kind, gold])
+
+
+## A fire ship blows up: shot (KABOOM, taking nearby pirates with it) or rammed into our hull.
+func fireship_boom(s, reached: bool) -> void:
+	if s.sinking:
+		return
+	s.sinking = true
+	var pos: Vector3 = s.global_position + Vector3.UP * 1.0
+	explosion(pos, Color(1.0, 0.45, 0.1), 2.6)
+	splash(Vector3(pos.x, sea_level, pos.z), 2.0)
+	sound("kaboom", 0.0, randf_range(0.9, 1.1))
+	add_shake(pos, 0.9 if reached else 0.35)
+	if reached:
+		var side := signf(pos.x)
+		var z := clampf(pos.z, -9.0, 8.0)
+		create_leak(Vector3(side * 2.6, 0.0, z - 1.0))
+		create_leak(Vector3(side * 2.2, 0.0, z + 1.2))
+		water = minf(100.0, water + 5.0)
+		popup(Vector3(side * 3.0, 2.5, z), "BOOM! IT RAMMED US!", Color(1.0, 0.4, 0.3))
+		parrot_say("SQUAWK! OUCH!")
+	else:
+		gold += s.gold
+		popup(pos + Vector3.UP * 2.5, "KABOOM!  +%d" % s.gold, Color(1.0, 0.6, 0.2))
+		var chain := 0
+		for o in get_tree().get_nodes_in_group("ships"):
+			if o != s and not o.sinking and o.global_position.distance_to(pos) < 13.0:
+				o.hit(2.0)
+				chain += 1
+		for t in get_tree().get_nodes_in_group("tentacles"):
+			if t.alive() and t.distance_to_point(pos) < 9.0:
+				t.hit(2.0)
+				chain += 1
+		if chain > 0:
+			gold += 30
+			popup(pos + Vector3.UP * 4.5, "CHAIN BLAST! +30", Color(1.0, 0.5, 0.9))
+	s.queue_free()
+	print("Fire ship %s" % ("rammed us" if reached else "blown up"))
+
+
+func on_treasure_fleeing(_s) -> void:
+	_show_center("The treasure ship is getting away!\nQuick, gunner!", 2.0)
+	parrot_say("SQUAWK! Don't let it escape!")
+
+
+func on_treasure_escaped(_s) -> void:
+	popup(Vector3(0, 6.0, -4.0), "The treasure ship got away…", Color(0.9, 0.9, 0.9))
+	sound("dry", -2.0, 0.6)
 
 
 func enemy_ball_hit_deck(pos: Vector3) -> void:
@@ -1168,7 +1944,7 @@ func on_tentacle_killed(t) -> void:
 
 # --- Deckhand muskets ------------------------------------------------------------
 
-## Nudges a musket shot towards a boarder or tentacle that's roughly in front.
+## Nudges a musket shot towards a boarder, tentacle or bomb boat that's roughly in front.
 func musket_aim(from: Vector3, dir: Vector3) -> Vector3:
 	var best := dir
 	var best_dot := cos(deg_to_rad(7.0))
@@ -1180,6 +1956,9 @@ func musket_aim(from: Vector3, dir: Vector3) -> Vector3:
 		if t.alive():
 			for i in range(2, t.SEGMENTS, 2):
 				targets.append(t.segs[i].global_position)
+	for s in get_tree().get_nodes_in_group("ships"):
+		if s.is_fireship() and not s.sinking:
+			targets.append(s.global_position + Vector3.UP * 0.9)
 	for p in targets:
 		var to: Vector3 = p - from
 		var dist := to.length()
@@ -1208,6 +1987,11 @@ func musket_trace(from: Vector3, dir: Vector3) -> Array:
 		if t < best_t:
 			best_t = t
 			target = tn
+	for s in get_tree().get_nodes_in_group("ships"):
+		var t: float = s.ray_hit(from, dir, best_t)
+		if t < best_t:
+			best_t = t
+			target = s
 	return [target, from + dir * best_t]
 
 
@@ -1225,18 +2009,25 @@ func musket_shot(p, from: Vector3, dir: Vector3) -> void:
 		sound("hit", -4.0)
 		if target.hit(1.0):
 			gold += 10
+			stats[p.index].splashes += 1
 			popup(target.global_position + Vector3.UP * 2.0, "SPLASH! +10", Color(0.6, 0.9, 1.0))
 			sound("dash", -4.0, 0.6)
 			get_tree().create_timer(0.9).timeout.connect(func() -> void:
 				if is_instance_valid(target):
 					splash(Vector3(target.global_position.x, sea_level, target.global_position.z), 1.2))
+	elif target.is_in_group("ships"):
+		stats[p.index].kegs += 1
+		popup(target.global_position + Vector3.UP * 3.0, "NICE SHOT, P%d!" % (p.index + 1), Color(1.0, 0.8, 0.4))
+		target.hit(1.0)
 	else:
+		stats[p.index].monster += 1
 		target.hit(1.0)
 		sound("hit", -2.0, 0.6)
 
 
 func boarder_stole(b, c) -> void:
 	c.ammo = maxi(0, c.ammo - 1)
+	c.golden = mini(c.golden, c.ammo)
 	popup(c.global_position + Vector3.UP * 1.8, "HEY! STOLEN!", Color(1.0, 0.45, 0.4))
 	sound("pickup", -6.0, 0.6)
 	_particles(b.global_position + Vector3.UP, Color(0.15, 0.15, 0.15), 4, 0.1, 2.0, 9.0, 0.5)
@@ -1247,7 +2038,156 @@ func boarder_hacked(_b, pos: Vector3) -> void:
 	create_leak(pos)
 
 
-# --- Prompts ----------------------------------------------------------------------
+# --- Coaching: what to do next -----------------------------------------------------
+
+var coach_text := ""
+var coach_point = null  # Vector3 or null: where the gunner's guide arrow points
+var coach_scale := 1.0
+var coach_tip := ""
+var coach_tip_t := 0.0
+var gunner_guide: Node3D
+
+
+## The most important thing for the gunner to shoot: [position, name] or [].
+func _gunner_focus() -> Array:
+	var best: Array = []
+	var best_d := INF
+	for k in get_tree().get_nodes_in_group("krakens"):
+		if k.state == "dying" or k.rise < 0.8:
+			continue
+		if k.vulnerable():
+			return [k.head_center(), "THE KRAKEN'S EYES"]
+	for s in get_tree().get_nodes_in_group("ships"):
+		if s.sinking:
+			continue
+		var d: float = Vector2(s.global_position.x, s.global_position.z).length()
+		if s.is_fireship():
+			d *= 0.4  # bomb boats first
+		if d < best_d:
+			best_d = d
+			best = [s.global_position + Vector3.UP * (1.5 if s.is_fireship() else 3.0), "BOMB BOAT" if s.is_fireship() else ("TREASURE SHIP" if s.kind == "treasure" else "PIRATE SHIP")]
+	for t in get_tree().get_nodes_in_group("tentacles"):
+		if t.alive() and t.rise >= 1.0:
+			var d: float = Vector2(t.position.x, t.position.z).length() * 0.5
+			if d < best_d:
+				best_d = d
+				best = [t.segs[4].global_position, "TENTACLE"]
+	for tg in get_tree().get_nodes_in_group("targets"):
+		var d: float = Vector2(tg.global_position.x, tg.global_position.z).length() * (0.3 if tg.kind == "practice" else 0.8)
+		if d < best_d:
+			best_d = d
+			best = [tg.global_position + Vector3.UP * 1.5, {"practice": "TARGET", "supply": "SUPPLY BARREL", "chest": "TREASURE CHEST"}[tg.kind]]
+	return best
+
+
+## Host / local: works out the gunner's hint (text + an arrow), shown in VR or on the flat HUD.
+func _update_coach(delta: float) -> void:
+	if players.is_empty() or players[0].ghost:
+		return
+	coach_tip_t -= delta
+	var p = players[0]
+	var c = cannons[p.station]
+	var vr: bool = p.vr or p.fake_vr
+	var holding: bool = vr and p.grab_hand != null
+	var focus := _gunner_focus()
+	coach_text = ""
+	coach_point = null
+	coach_scale = 1.0
+	if game_over:
+		return
+	var hop := "Press A (or flick the left stick)" if vr else "LB / RB (Q / E)"
+	if vr and not holding and stats[0].shots < 3:
+		coach_text = "Reach out to the glowing HANDLE behind the cannon\nand HOLD the trigger to grab it"
+		coach_point = c.handle_world()
+		coach_scale = 0.22
+		if p.reach_miss_t > 0.0:
+			coach_text = "A bit closer! Touch the glowing handle\nwith your hand, then HOLD the trigger"
+		return
+	if c.ammo <= 0:
+		var other = null
+		for oc in cannons:
+			if oc.ammo > 0 and (other == null or absf(oc.index - c.index) < absf(other.index - c.index)):
+				other = oc
+		if other != null:
+			coach_text = "This cannon is EMPTY!\n%s to hop to a loaded cannon" % hop
+			coach_point = other.global_position + Vector3.UP * 1.2
+			coach_scale = 0.5
+		else:
+			coach_text = "All the cannons are EMPTY!\nThe deckhands are bringing cannonballs…"
+		return
+	if not focus.is_empty():
+		var fpos: Vector3 = focus[0]
+		var fname: String = focus[1]
+		var my_side := -1.0 if p.station < 2 else 1.0
+		if signf(fpos.x) != my_side and absf(fpos.x) > 4.0:
+			var there := "STARBOARD (right)" if my_side < 0.0 else "PORT (left)"
+			coach_text = "The %s is on the %s side!\n%s to hop over there" % [fname, there, hop]
+			coach_point = cannons[2 if my_side < 0.0 else 0].global_position + Vector3.UP * 1.2
+			coach_scale = 0.5
+			return
+		var dist: float = fpos.distance_to(c.global_position)
+		coach_point = fpos + Vector3.UP * 1.0
+		coach_scale = clampf(dist * 0.06, 0.6, 5.0)
+		if coach_tip_t > 0.0:
+			coach_text = coach_tip
+		elif vr and holding and stats[0].shots < 3:
+			var ring: Vector3 = c.land_ring.global_position
+			var near: bool = Vector2(ring.x - fpos.x, ring.z - fpos.z).length() < 5.0
+			coach_text = "LET GO of the trigger to FIRE!" if near else "Swing the handle to move the gold RING onto the %s" % fname
+		elif vr and not holding and stats[0].shots < 6:
+			coach_text = "Grab the handle (hold the trigger), aim the ring at the %s, let go to fire" % fname
+		elif not vr and stats[0].shots < 3:
+			coach_text = "Aim the gold RING at the %s and FIRE!" % fname
+		elif fname == "BOMB BOAT" and dist < 45.0:
+			coach_text = "BOMB BOAT coming! Sink it!"
+		elif fname == "THE KRAKEN'S EYES":
+			coach_text = "FIRE AT THE KRAKEN'S EYES!"
+		elif c.golden > 0:
+			coach_text = "GOLDEN BALL loaded - make it count!"
+		else:
+			coach_point = null if stats[0].shots > 8 else coach_point
+		return
+	for k in get_tree().get_nodes_in_group("krakens"):
+		if not k.vulnerable() and k.state != "dying":
+			coach_text = "Its eyes are shut! Shoot the TENTACLES first"
+
+
+## Where a deckhand's guide arrow points: the most useful job for them right now, or null.
+func deckhand_goal(p):
+	if game_over or p.gunner:
+		return null
+	if p.carrying:
+		var best = null
+		for c in cannons:
+			if c.ammo >= c.MAX_AMMO:
+				continue
+			if p.golden and c.manned:
+				best = c
+				break
+			if best == null or c.ammo < best.ammo or (c.ammo == best.ammo and c.manned):
+				best = c
+		return best.global_position + Vector3.UP * 1.0 if best != null else null
+	var leaks := get_tree().get_nodes_in_group("leaks")
+	var boarders := get_tree().get_nodes_in_group("boarders").filter(func(b): return b.alive())
+	var want_boarders: bool = not boarders.is_empty() and (leaks.is_empty() or p.index % 2 == 0)
+	if not leaks.is_empty() and not want_boarders:
+		var lk = nearest_leak(p.global_position, 99.0)
+		if lk != null:
+			return lk.global_position + Vector3.UP * 0.4
+	if want_boarders:
+		var best = null
+		var bd := INF
+		for b in boarders:
+			var d: float = b.global_position.distance_to(p.global_position)
+			if d < bd:
+				bd = d
+				best = b
+		return best.global_position + Vector3.UP * 2.3
+	for c in cannons:
+		if c.ammo < c.MAX_AMMO:
+			return World.HOLD_POS + Vector3.UP * 1.4
+	return null
+
 
 ## What this player should do next (shown at the bottom of their screen). A leading "!" makes it red.
 func player_prompt(p) -> String:
@@ -1258,8 +2198,8 @@ func player_prompt(p) -> String:
 		var keys := "Sticks aim · RT / A fire · LB / RB switch cannon"
 		if p.joy < 0:
 			keys = "WASD / mouse aim · SPACE / click fire · Q / E switch cannon" if p.key_set == 0 else "ARROWS aim · ENTER fire · , / . switch cannon"
-		if c.ammo <= 0:
-			return "!This cannon is EMPTY - switch cannon or wait for the deckhands\n" + keys
+		if coach_text != "":
+			return ("!" if c.ammo <= 0 else "") + coach_text + "\n" + keys
 		return "%s cannon: %d balls\n%s" % [c.side_name(), c.ammo, keys]
 	var use: String = p.use_name()
 	var lk = nearest_leak(p.global_position, LeakScript.RANGE)
@@ -1270,17 +2210,31 @@ func player_prompt(p) -> String:
 	if p.hands_full_t > 0.0:
 		return "!Hands full! Load the cannonball first (or press %s away from things to drop it)" % use
 	if p.carrying:
+		if p.golden:
+			return "GOLDEN CANNONBALL! Load it into the GUNNER'S cannon (follow the arrow)"
 		var empty := _emptiest_cannon()
-		return "Carry the cannonball to a cannon!  (%s needs it most)" % empty
+		return "Carry the cannonball to a cannon!  (%s needs it most - follow the arrow)" % empty
 	if p.global_position.distance_to(World.HOLD_POS) < 2.6:
+		if golden_balls > 0:
+			return "PRESS %s TO GRAB THE GOLDEN CANNONBALL!" % use
 		return "PRESS %s TO GRAB A CANNONBALL" % use
+	for s in get_tree().get_nodes_in_group("ships"):
+		if s.is_fireship() and not s.sinking and Vector2(s.global_position.x, s.global_position.z).length() < 28.0:
+			return "!BOMB BOAT! Shoot its powder keg with your musket (%s)!" % p.fire_name()
 	if not get_tree().get_nodes_in_group("boarders").is_empty():
 		return "!BOARDERS! Shoot them with your musket (%s)" % p.fire_name()
+	for k in get_tree().get_nodes_in_group("krakens"):
+		if not k.vulnerable() and k.state != "dying" and not get_tree().get_nodes_in_group("tentacles").is_empty():
+			return "!Shoot the Kraken's TENTACLES with your musket (%s)!" % p.fire_name()
 	if not get_tree().get_nodes_in_group("leaks").is_empty():
-		return "!Find the LEAK and patch it!"
+		return "!Find the LEAK and patch it! (follow the arrow)"
+	if golden_balls > 0:
+		return "A GOLDEN cannonball is on the pile! Fetch it for the gunner"
 	for c in cannons:
 		if c.ammo <= 1:
-			return "Fetch cannonballs from the pile at the front of the ship"
+			return "Fetch cannonballs from the pile at the front of the ship (follow the arrow)"
+	if phase == "practice":
+		return "Target practice! Fetch a cannonball from the pile and load the gunner's cannon"
 	return "Shoot boarders · fetch cannonballs · patch leaks"
 
 
@@ -1292,7 +2246,71 @@ func _emptiest_cannon() -> String:
 	return "%s %s" % [best.side_name(), "FORE" if best.index % 2 == 0 else "AFT"]
 
 
-# --- Game over ---------------------------------------------------------------------
+# --- Stats, awards and game over ---------------------------------------------------
+
+func _award(i: int) -> String:
+	var st: Dictionary = stats[i]
+	if i == 0:
+		var acc := float(st.hits) / maxf(1.0, float(st.shots))
+		if st.best_streak >= 6:
+			return "HOT SHOT"
+		if acc >= 0.6 and st.shots >= 5:
+			return "EAGLE EYE"
+		if st.sinks >= 8:
+			return "SHIP SINKER"
+		return "BRAVE GUNNER"
+	var cats := [["loads", "CANNONBALL COURIER"], ["patches", "MASTER CARPENTER"], ["splashes", "BOARDER BOUNCER"],
+		["monster", "MONSTER TICKLER"], ["kegs", "BOMB SQUASHER"]]
+	var best := "TRUSTY LOOKOUT"
+	var best_score := 0.0
+	for cat in cats:
+		var key: String = cat[0]
+		var mine := float(st[key])
+		if mine <= 0.0:
+			continue
+		var top := 0.0
+		for j in range(1, players.size()):
+			top = maxf(top, float(stats[j][key]))
+		var score := mine / maxf(1.0, top) + mine * 0.01
+		if score > best_score:
+			best_score = score
+			best = cat[1]
+	return best
+
+
+func _stats_lines() -> String:
+	var lines: Array[String] = []
+	var g: Dictionary = stats[0]
+	var acc := int(100.0 * float(g.hits) / maxf(1.0, float(g.shots)))
+	lines.append("P1 GUNNER  ·  %d sunk  ·  %d%% hits  ·  best streak %d   -   %s!" % [g.sinks, acc, g.best_streak, _award(0)])
+	for p in players:
+		if p.index == 0:
+			continue
+		var st: Dictionary = stats[p.index]
+		var any: bool = st.loads + st.patches + st.splashes + st.monster + st.kegs > 0
+		if not p.active and not any:
+			continue
+		lines.append("P%d  ·  %d loaded  ·  %d patched  ·  %d boarders splashed   -   %s!" % [p.index + 1, st.loads, st.patches, st.splashes, _award(p.index)])
+	return "\n".join(lines)
+
+
+## Shows the crew's stats and fun awards on every screen (and in VR).
+func _show_stats(title: String, duration: float) -> void:
+	stats_text = title + "\n" + _stats_lines()
+	_apply_stats(stats_text, duration)
+	net.event("stats", [stats_text, duration])
+
+
+func _apply_stats(text: String, duration: float) -> void:
+	stats_text = text
+	stats_label.text = text
+	stats_label.modulate.a = 1.0
+	if duration > 0.0:
+		var tw := stats_label.create_tween()
+		tw.tween_interval(duration)
+		tw.tween_property(stats_label, "modulate:a", 0.0, 0.6)
+		tw.tween_callback(func() -> void: stats_text = "")
+
 
 func _on_game_over() -> void:
 	if game_over:
@@ -1310,7 +2328,9 @@ func _on_game_over() -> void:
 		cfg.set_value("best", "gold", gold)
 		cfg.set_value("best", "wave", wave)
 		cfg.save("user://cannon_cove_best.cfg")
-	_show_center("THE SHIP SANK!\nWave %d  ·  %d gold\n%s\n\nPress A or Enter to set sail again" % [wave, gold, best_line], 0.0)
+	_show_center("THE SHIP SANK!\nWave %d  ·  %d gold\n%s\nPress A or Enter to set sail again" % [wave, gold, best_line], 0.0)
+	_show_stats("CREW AWARDS", 0.0)
+	print("Stats:\n" + _stats_lines())
 
 
 func _restart_pressed() -> bool:
@@ -1413,7 +2433,13 @@ func make_snapshot() -> Array:
 	var lk := []
 	for l in get_tree().get_nodes_in_group("leaks"):
 		lk.append(l.net_state())
-	return [wave, gold, water, game_over, in_break, ps, cs, sh, te, bo, lk]
+	var tg := []
+	for t in get_tree().get_nodes_in_group("targets"):
+		tg.append(t.net_state())
+	var kr := []
+	for k in get_tree().get_nodes_in_group("krakens"):
+		kr.append(k.net_state())
+	return [wave, gold, water, game_over, in_break, ps, cs, sh, te, bo, lk, phase, tg, kr, golden_balls, streak]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -1435,6 +2461,12 @@ func apply_snapshot(s: Array) -> void:
 	_sync_ghosts(s[8], "tentacle")
 	_sync_ghosts(s[9], "boarder")
 	_sync_ghosts(s[10], "leak")
+	if s.size() > 15:
+		phase = s[11]
+		_sync_ghosts(s[12], "target")
+		_sync_ghosts(s[13], "kraken")
+		golden_balls = s[14]
+		streak = s[15]
 
 
 func _sync_ghosts(list: Array, kind: String) -> void:
@@ -1477,6 +2509,24 @@ func _make_ghost(kind: String, item: Array) -> Node3D:
 			t.deck_target = item[7]
 			add_child(t)
 			return t
+		"target":
+			var tg := TargetScript.new()
+			tg.main = self
+			tg.ghost = true
+			tg.kind = item[1]
+			tg.net_id = item[0]
+			tg.position = item[2]
+			add_child(tg)
+			return tg
+		"kraken":
+			var k := KrakenScript.new()
+			k.main = self
+			k.ghost = true
+			k.net_id = item[0]
+			k.position = item[1]
+			k.side = item[7]
+			add_child(k)
+			return k
 		"boarder":
 			var b := BoarderScript.new()
 			b.main = self
@@ -1510,7 +2560,20 @@ func apply_event(kind: String, args: Array) -> void:
 		"boom":
 			explosion(args[0], args[1], args[2])
 		"ball":
-			spawn_ball(args[0], args[1], args[2], true)
+			spawn_ball(args[0], args[1], args[2], true, args[3] if args.size() > 3 else false)
+		"confetti":
+			confetti(args[0], false)
+		"coins":
+			coins_fx(args[0], false)
+		"firework":
+			fireworks(args[0], false)
+		"dolphins":
+			dolphins(args[0], args[1])
+		"parrot":
+			if parrot:
+				parrot.say(args[0])
+		"stats":
+			_apply_stats(args[0], args[1])
 		"cannon_fx":
 			var i: int = args[0]
 			if i >= 0 and i < cannons.size():
@@ -1562,19 +2625,49 @@ func _build_hud() -> void:
 	center_label = _make_label(58)
 	layer.add_child(center_label)
 	center_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center_label.offset_bottom = -120
 	center_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	center_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	center_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	help_label = _make_label(22)
-	layer.add_child(help_label)
-	help_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
-	help_label.offset_top = 60
-	help_label.offset_bottom = 190
-	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	help_label.text = "DECKHANDS: move (stick / WASD), look (stick / mouse), musket RT / click, use A / E (grab ball, load, hold to patch)\n" \
-		+ "MORE CREW: press A on another controller to jump in (up to 6 deckhands)\n" \
-		+ "GUNNER: grab the glowing cannon handle in VR and fire with the trigger  ·  flat: sticks aim, RT fire, LB/RB switch cannon\n" \
-		+ "Keep the cannons loaded, patch the leaks, sink the pirates, grab the gold!"
+	# How to play: a panel for each role, shown until the first wave is over.
+	help_panel = PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.04, 0.08, 0.16, 0.78)
+	sb.border_color = Color(1.0, 0.8, 0.3, 0.9)
+	sb.set_border_width_all(3)
+	sb.set_corner_radius_all(14)
+	sb.content_margin_left = 22
+	sb.content_margin_right = 22
+	sb.content_margin_top = 10
+	sb.content_margin_bottom = 12
+	help_panel.add_theme_stylebox_override("panel", sb)
+	help_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layer.add_child(help_panel)
+	help_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	help_panel.offset_top = 62
+	help_label = _make_label(23)
+	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	help_label.text = "HOW TO PLAY  -  keep our ship afloat and sink the pirates!\n" \
+		+ "DECKHANDS (TV):  move with the left stick,  look with the right stick\n" \
+		+ "    1. Walk to the CANNONBALL pile at the front, press A to pick one up\n" \
+		+ "    2. Walk to a cannon - it loads by itself (follow your ARROW)\n" \
+		+ "    3. LEAK? Stand next to it and HOLD A to patch it\n" \
+		+ "    4. BOARDERS, bomb boats, tentacles? Shoot them with RT (your musket)\n" \
+		+ "GUNNER (VR):  grab the glowing handle (hold the trigger), aim the gold ring, LET GO to fire\n" \
+		+ "    A or a left-stick flick hops to the next cannon  ·  flat: sticks aim, RT fire, LB/RB switch\n" \
+		+ "MORE CREW: press A on another controller to jump in (up to 6 deckhands)"
+	help_panel.add_child(help_label)
+	help_panel.resized.connect(func() -> void: help_panel.position.x = (help_panel.get_parent_area_size().x - help_panel.size.x) * 0.5)
+	# End-of-voyage stats and awards.
+	stats_label = _make_label(28)
+	stats_label.add_theme_color_override("font_color", Color(0.9, 0.97, 1.0))
+	layer.add_child(stats_label)
+	stats_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	stats_label.offset_top = -330
+	stats_label.offset_bottom = -40
+	stats_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	stats_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	stats_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 
 
 func _show_center(text: String, duration: float, broadcast: bool = true) -> void:
@@ -1590,16 +2683,34 @@ func _show_center(text: String, duration: float, broadcast: bool = true) -> void
 		center_tween.tween_property(center_label, "modulate:a", 0.0, 0.5)
 
 
+func wave_title() -> String:
+	if phase == "practice":
+		return "TARGET PRACTICE"
+	if wave <= 0:
+		return "GET READY"
+	if wave <= BOSS_WAVE:
+		return "WAVE %d/%d  %s" % [wave, BOSS_WAVE, WAVE_NAMES[wave]]
+	return "BONUS WAVE %d" % (wave - BOSS_WAVE)
+
+
 func _update_hud() -> void:
-	if wave >= 2 and help_label.modulate.a > 0.0:
-		help_label.modulate.a = maxf(0.0, help_label.modulate.a - get_process_delta_time())
+	var dt := get_process_delta_time()
+	var show_help := phase == "practice" or wave <= 1
+	help_panel.modulate.a = clampf(help_panel.modulate.a + (dt if show_help else -dt * 0.7), 0.0, 1.0)
+	help_panel.visible = help_panel.modulate.a > 0.0
 	if net.mode == "client" and not synced:
 		info_label.text = "Syncing with the VR gunner…"
 		return
-	info_label.text = "WAVE %d     GOLD %d     WATER %d%%" % [wave, gold, int(water)]
+	var extra := ""
+	if streak >= 3:
+		extra = "     STREAK x%d" % streak
+	if golden_balls > 0:
+		extra += "     GOLDEN BALL ON THE PILE!"
+	info_label.text = "%s     GOLD %d     WATER %d%%%s" % [wave_title(), gold, int(water), extra]
 
 
-## VR can't show 2D overlays: mirror the centre banner on a head-locked Label3D.
+## VR can't show 2D overlays: mirror the centre banner on a world-locked Label3D, plus a lower
+## "what to do next" hint (and the awards at the end).
 func _update_vr_center() -> void:
 	if players.is_empty() or not players[0].vr:
 		return
@@ -1619,7 +2730,35 @@ func _update_vr_center() -> void:
 	vr_center.text = center_label.text
 	vr_center.modulate.a = center_label.modulate.a
 	vr_center.outline_modulate = Color(0, 0, 0, center_label.modulate.a)
-	VrText.follow(vr_center, players[0].xr_camera, self, 0.05, 1.8)
+	VrText.follow(vr_center, players[0].xr_camera, self, 0.08, 1.8)
+	if vr_hint == null:
+		vr_hint = Label3D.new()
+		vr_hint.font_size = 40
+		vr_hint.outline_size = 22
+		vr_hint.no_depth_test = true
+		vr_hint.render_priority = 10
+		vr_hint.outline_render_priority = 9
+		vr_hint.width = 1100.0
+		vr_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		vr_hint.pixel_size = 0.0022
+		vr_hint.modulate = Color(1.0, 0.95, 0.6)
+		add_child(vr_hint)
+		players[0]._set_layers(vr_hint, players[0].viewmodel_layer())
+	var hint := coach_text
+	var stats_mode: bool = stats_text != "" and (game_over or phase == "victory")
+	if stats_mode != vr_hint.get_meta("stats_mode", false):
+		vr_hint.set_meta("stats_mode", stats_mode)
+		VrText.snap(vr_hint)  # jump to the new height
+	if stats_mode:
+		hint = stats_text
+		vr_hint.modulate = Color(0.85, 0.97, 1.0)
+		vr_hint.pixel_size = 0.0017
+	else:
+		vr_hint.modulate = Color(1.0, 0.95, 0.6) if not hint.contains("EMPTY") else Color(1.0, 0.55, 0.45)
+		vr_hint.pixel_size = 0.0022
+	vr_hint.text = hint
+	vr_hint.visible = hint != ""
+	VrText.follow(vr_hint, players[0].xr_camera, self, -0.5 if stats_mode else -0.3, 1.8)
 
 
 # Messages from Claude (res://.dev/say.txt on the host), shown on the TV and in VR.

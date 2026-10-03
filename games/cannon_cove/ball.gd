@@ -7,13 +7,16 @@ const World := preload("res://games/cannon_cove/world.gd")
 var main
 var vel := Vector3.ZERO
 var enemy := false
+var mega := false  # a golden cannonball: bigger, glowing, explodes in a huge blast
 var visual_only := false
 var age := 0.0
 
 
 func _ready() -> void:
 	var m := World.mat(Color(0.1, 0.1, 0.12) if not enemy else Color(0.25, 0.08, 0.08), 0.0, 0.3)
-	var s := World.sphere(self, 0.24, Vector3.ZERO, m, 10)
+	if mega:
+		m = World.mat(Color(1.0, 0.8, 0.2), 3.0, 0.2)
+	var s := World.sphere(self, 0.24 if not mega else 0.4, Vector3.ZERO, m, 10)
 	s.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	# A short smoke trail so the ball is easy to follow against the sea.
 	var trail := CPUParticles3D.new()
@@ -33,6 +36,9 @@ func _ready() -> void:
 	tm.radial_segments = 6
 	tm.rings = 3
 	var smoke := World.mat(Color(1.0, 0.9, 0.7, 0.55) if not enemy else Color(1.0, 0.5, 0.35, 0.6), 0.6)
+	if mega:
+		smoke = World.mat(Color(1.0, 0.85, 0.3, 0.8), 3.0)
+		trail.amount = 16
 	smoke.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	smoke.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	tm.material = smoke
@@ -55,13 +61,15 @@ func _physics_process(delta: float) -> void:
 		var target = main.ball_hit_test(next)
 		if target != null:
 			if not visual_only:
-				main.on_ball_hit(target, next)
+				main.on_ball_hit(target, next, mega)
 			queue_free()
 			return
 	var sea: float = main.sea_level
 	if next.y < sea:
 		if not visual_only:
-			main.splash(Vector3(next.x, sea, next.z), 1.0)
+			main.splash(Vector3(next.x, sea, next.z), 1.0 if not mega else 2.0)
+			if not enemy:
+				main.on_ball_splash(Vector3(next.x, sea, next.z))
 		queue_free()
 		return
 	position = next

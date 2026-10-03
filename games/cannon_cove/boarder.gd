@@ -26,6 +26,10 @@ var fall_dir := Vector3.ZERO
 var body: Node3D
 var shirt: StandardMaterial3D
 var sword: Node3D
+var legs: Array[Node3D] = []
+var eye: MeshInstance3D
+var blink_t := 1.0
+var look := 0
 var net_target := Vector3.ZERO
 var net_started := false
 
@@ -53,12 +57,36 @@ func _ready() -> void:
 	body.add_child(torso)
 	World.box(body, Vector3(0.62, 0.1, 0.62), Vector3(0, 0.95, 0), white)
 	World.box(body, Vector3(0.62, 0.1, 0.62), Vector3(0, 0.7, 0), white)
-	World.box(body, Vector3(0.5, 0.35, 0.4), Vector3(0, 0.3, 0), dark)
+	World.box(body, Vector3(0.5, 0.2, 0.4), Vector3(0, 0.42, 0), dark)
+	# Legs that stride (one is a wooden peg leg, of course).
+	for sx in [-1.0, 1.0]:
+		var leg := Node3D.new()
+		leg.position = Vector3(sx * 0.13, 0.42, 0)
+		body.add_child(leg)
+		if sx < 0.0:
+			World.box(leg, Vector3(0.15, 0.4, 0.16), Vector3(0, -0.2, 0), dark)
+			World.box(leg, Vector3(0.17, 0.09, 0.24), Vector3(0, -0.38, -0.04), World.mat(Color(0.1, 0.08, 0.06)))
+		else:
+			World.cyl(leg, 0.05, 0.035, 0.42, Vector3(0, -0.21, 0), World.mat(Color(0.6, 0.42, 0.22)), 6)
+		legs.append(leg)
 	World.sphere(body, 0.25, Vector3(0, 1.5, 0), skin, 10)
-	var bandana := World.sphere(body, 0.26, Vector3(0, 1.58, 0), World.mat(Color(0.2, 0.3, 0.9)), 10)
-	bandana.scale = Vector3(1.0, 0.6, 1.0)
-	World.sphere(body, 0.05, Vector3(0.1, 1.53, -0.22), dark, 6)
+	look = randi() % 3
+	match look:
+		0:
+			var bandana := World.sphere(body, 0.26, Vector3(0, 1.58, 0), World.mat(Color(0.2, 0.3, 0.9)), 10)
+			bandana.scale = Vector3(1.0, 0.6, 1.0)
+		1:
+			var hat_mat := World.mat(Color(0.1, 0.08, 0.1))
+			World.cyl(body, 0.36, 0.36, 0.05, Vector3(0, 1.68, 0), hat_mat, 3)
+			World.cyl(body, 0.15, 0.2, 0.2, Vector3(0, 1.8, 0), hat_mat, 8)
+			World.sphere(body, 0.06, Vector3(0, 1.82, -0.18), white, 6)  # a little skull badge
+		_:
+			World.sphere(body, 0.05, Vector3(0.24, 1.45, 0), World.mat(Color(1.0, 0.8, 0.2), 0.8), 6)  # gold earring
+			var beard := World.sphere(body, 0.2, Vector3(0, 1.36, -0.12), World.mat(Color(0.3, 0.15, 0.08)), 8)
+			beard.scale = Vector3(1.0, 0.8, 0.7)
+	eye = World.sphere(body, 0.05, Vector3(0.1, 1.53, -0.22), dark, 6)
 	World.box(body, Vector3(0.14, 0.12, 0.04), Vector3(-0.1, 1.53, -0.23), dark)  # eye patch
+	World.box(body, Vector3(0.02, 0.02, 0.5), Vector3(-0.1, 1.6, 0.0), dark, Vector3(0.0, 0.0, 0.5))  # patch strap
 	World.sphere(body, 0.035, Vector3(0, 1.45, -0.25), World.mat(Color(1.0, 0.55, 0.5)), 6)
 	sword = Node3D.new()
 	sword.position = Vector3(0.38, 0.95, -0.1)
@@ -124,6 +152,14 @@ func _physics_process(delta: float) -> void:
 func _animate(delta: float) -> void:
 	walk_t += delta
 	body.rotation.y = lerp_angle(body.rotation.y, yaw, 1.0 - exp(-10.0 * delta))
+	blink_t -= delta
+	if blink_t < -0.12:
+		blink_t = randf_range(1.5, 3.5)
+	eye.scale = Vector3(1.0, 0.2 if blink_t < 0.0 else 1.0, 1.0)
+	var stride := sin(walk_t * 9.0) * 0.6 if state == "walk" else 0.0
+	if legs.size() == 2:
+		legs[0].rotation.x = stride
+		legs[1].rotation.x = -stride
 	match state:
 		"walk", "swing":
 			body.position.y = absf(sin(walk_t * 9.0)) * 0.08
