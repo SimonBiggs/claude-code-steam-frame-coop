@@ -538,6 +538,7 @@ func _process(delta: float) -> void:
 func _vr_update(_delta: float) -> void:
 	_update_vr_hurt(_delta)
 	_ensure_shield()
+	_update_sword(_delta)
 	_ensure_wrist_radar()
 	yaw = xr_camera.global_rotation.y
 	# Keep the body under the headset when the player walks around the room.
@@ -890,9 +891,79 @@ func _ensure_shield() -> void:
 		_set_layers(shield, body_layer())
 
 
+## David's idea: the left hand swaps between the shield and a glowing sword. Swap with the left
+## trigger, or (since the Frame's left trigger may not reach the game) reach over your left shoulder
+## like drawing a sword from your back. Swing the sword through enemies to slice them.
+func _update_sword(delta: float) -> void:
+	var sword: Node3D = get_meta("sword") if has_meta("sword") else null
+	if sword == null:
+		sword = Node3D.new()
+		hand_l.add_child(sword)
+		var blade := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = Vector3(0.04, 0.012, 0.9)
+		blade.mesh = bm
+		blade.position = Vector3(0.0, 0.0, -0.5)
+		blade.material_override = main.make_material(Color(0.6, 0.95, 1.0), 4.0)
+		blade.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		sword.add_child(blade)
+		var guard := MeshInstance3D.new()
+		var gm := BoxMesh.new()
+		gm.size = Vector3(0.18, 0.03, 0.03)
+		guard.mesh = gm
+		guard.position = Vector3(0.0, 0.0, -0.05)
+		guard.material_override = main.make_material(color, 2.0)
+		sword.add_child(guard)
+		sword.visible = false
+		set_meta("sword", sword)
+	# Swap: left trigger, or the over-the-shoulder draw gesture.
+	var trig := hand_l.get_float("trigger") > 0.6 or hand_l.is_button_pressed("trigger_click")
+	var head := xr_camera.global_transform
+	var rel := head.affine_inverse() * hand_l.global_position  # hand in head space (+Y up, +Z behind)
+	var over_shoulder := rel.y > -0.05 and rel.z > 0.02
+	var want := trig or over_shoulder
+	if want and not get_meta("swap_was", false) and Time.get_ticks_msec() > int(get_meta("swap_ok", 0)):
+		set_meta("swap_ok", Time.get_ticks_msec() + 600)
+		var to_sword := not sword.visible
+		sword.visible = to_sword
+		main.sound("dash", -6.0, 1.6 if to_sword else 0.8)
+		hand_l.trigger_haptic_pulse("haptic", 0.0, 0.6, 0.1, 0.0)
+		if to_sword and not has_meta("sword_told"):
+			set_meta("sword_told", true)
+			main._show_center("SWORD!\nSwing it through enemies. Reach over your shoulder again for the shield", 3.0)
+	set_meta("swap_was", want)
+	if shield:
+		shield.visible = not sword.visible and not is_down
+	if not sword.visible or is_down or main.net.mode == "client":
+		set_meta("sword_prev", hand_l.global_position)
+		return
+	# Slice: only a real swing hurts (hand speed), each enemy at most every 0.35 s.
+	var prev: Vector3 = get_meta("sword_prev", hand_l.global_position)
+	var speed := hand_l.global_position.distance_to(prev) / maxf(delta, 0.001)
+	set_meta("sword_prev", hand_l.global_position)
+	if speed < 1.2:
+		return
+	var fwd := -hand_l.global_basis.z
+	var now := Time.get_ticks_msec()
+	for e in get_tree().get_nodes_in_group("enemies"):
+		if now < int(e.get_meta("sliced_until", 0)):
+			continue
+		for t in [0.25, 0.55, 0.9]:
+			var p: Vector3 = hand_l.global_position + fwd * float(t)
+			var flat := Vector2(p.x - e.global_position.x, p.z - e.global_position.z)
+			if flat.length() < float(e.radius) + 0.15 and absf(p.y - e.global_position.y - float(e.radius)) < float(e.radius) + 0.6:
+				e.set_meta("sliced_until", now + 350)
+				var dir := Vector3(e.global_position.x - global_position.x, 0.0, e.global_position.z - global_position.z).normalized()
+				e.hit(4.0 * stat("damage"), dir, 1.5, self)
+				main.burst(p, Color(0.6, 0.95, 1.0), 10, 0.08)
+				main.sound("hit", -2.0, 1.3)
+				hand_l.trigger_haptic_pulse("haptic", 0.0, 0.9, 0.08, 0.0)
+				break
+
+
 ## Host: does the VR shield catch something at `pos`? Returns the reflect direction, or ZERO.
 func shield_reflect(pos: Vector3) -> Vector3:
-	if not vr or is_down or shield == null:
+	if not vr or is_down or shield == null or not shield.visible:
 		return Vector3.ZERO
 	if shield.global_position.distance_to(pos) > 0.42 * personal.get("shield", 1.0):
 		return Vector3.ZERO
