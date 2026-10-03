@@ -748,7 +748,7 @@ func _vr_update(_delta: float) -> void:
 	var head := xr_camera.global_position
 	var target := Vector3(head.x, 0.0, head.z)
 	var flat := Vector2(target.x, target.z)
-	var limit: float = main.fort_r - 1.0  # the VR thrower stays inside the fort, on lookout
+	var limit: float = main.arena_radius - 0.6  # the kids wanted to go out past the walls too
 	if flat.length() > limit:
 		var fix := flat.normalized() * limit - flat
 		xr_origin.global_position += Vector3(fix.x, 0.0, fix.y)
