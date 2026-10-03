@@ -10,6 +10,8 @@ const GAMES := [
 		"blurb": "Neon first-person co-op arena shooter"},
 	{"id": "ghost_lantern", "name": "GHOST LANTERN", "scene": "res://games/ghost_lantern/main.tscn",
 		"blurb": "Spooky-cute ghost hunt: VR lantern reveals ghosts, TV players vacuum them up"},
+	{"id": "snowball_blitz", "name": "SNOWBALL BLITZ", "scene": "res://games/snowball_blitz/main.tscn",
+		"blurb": "Cosy snow-fort defence: throw real snowballs in VR, pack the walls on the TV"},
 ]
 const DEFAULT_PORT := 7777
 const JOIN_TIMEOUT_MS := 5000

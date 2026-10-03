@@ -1,0 +1,37 @@
+#!/bin/bash
+# merge-game <agent-branch> <id> "<NAME>" "<blurb>": merge a game built by a background agent,
+# register it in the arcade, re-run its bot tests (local + networked) from staging, then deploy.
+set -e
+BR="$1"; ID="$2"; NAME="$3"; BLURB="$4"
+LIVE=~/GodotProjects/duo-arena; ST=~/GodotProjects/.duo-arena-stage
+cd "$LIVE"
+OUT=$(git diff --name-only main..."$BR" | grep -vE "^games/$ID/|^tests/${ID}_bot" || true)
+[ -n "$OUT" ] && { echo "Branch touches files outside its game:"; echo "$OUT"; exit 1; }
+git merge --no-ff -q "$BR" -m "Merge $NAME (built by a background agent)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+rsync -a "games/$ID" "$ST/games/" && cp tests/${ID}_bot.* "$ST/tests/"
+cd "$ST"
+python3 - "$ID" "$NAME" "$BLURB" <<'PY'
+import sys
+id_, name, blurb = sys.argv[1:4]
+p = 'arcade/arcade.gd'; s = open(p).read()
+if f'"id": "{id_}"' not in s:
+    entry = f'\t{{"id": "{id_}", "name": "{name}", "scene": "res://games/{id_}/main.tscn",\n\t\t"blurb": "{blurb}"}},\n]'
+    i = s.index('\n]\nconst DEFAULT_PORT')
+    s = s[:i] + '\n' + entry + s[i + 2:]
+    open(p, 'w').write(s)
+PY
+timeout 120 godot --headless --path . --import >/dev/null 2>&1 || true
+L=$(timeout 150 godot --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/${ID}_bot.tscn 2>&1 | grep -c "SCRIPT ERROR" || true)
+(DUO_PORT=7799 DUO_HOST=1 timeout 40 godot --headless --path . res://tests/${ID}_bot.tscn > /tmp/mg_host.log 2>&1 &)
+sleep 3
+DUO_PORT=7799 DUO_JOIN=127.0.0.1 timeout 33 godot --headless --path . res://tests/${ID}_bot.tscn > /tmp/mg_client.log 2>&1 || true
+sleep 6
+H=$(grep -c "SCRIPT ERROR" /tmp/mg_host.log || true); C=$(grep -c "SCRIPT ERROR" /tmp/mg_client.log || true)
+echo "$NAME test errors: local=$L host=$H client=$C"
+if [ "$L$H$C" != "000" ]; then echo "NOT deploying: fix errors first"; exit 1; fi
+duo-deploy "Add $NAME to the arcade" | tail -1
+cd "$LIVE" && git worktree list | grep -F "[$BR]" | awk '{print $1}' | xargs -r -I{} git worktree remove --force {} && git branch -D "$BR" >/dev/null
+git push -q origin main 2>&1 | tail -1 || true
+echo "merged $NAME"
