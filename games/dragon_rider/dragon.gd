@@ -163,6 +163,9 @@ func _build() -> void:
 ## inp.x: rein left (-1) .. right (+1). inp.y: dive (-1) .. climb (+1). Everything is eased so the
 ## headset view never jerks.
 func fly(delta: float, inp: Vector2, flap: bool) -> void:
+	if Time.get_ticks_msec() - int(get_meta("dbg", 0)) > 1500:
+		set_meta("dbg", Time.get_ticks_msec())
+		print("DRDBG inp=%s y=%.1f vy=%.2f" % [inp, position.y, vy])
 	steer = move_toward(steer, clampf(inp.x, -1.0, 1.0), delta * 2.2)
 	climb = move_toward(climb, clampf(inp.y, -1.0, 1.0), delta * 2.2)
 	yaw_rate = lerpf(yaw_rate, -steer * MAX_YAW_RATE, 1.0 - exp(-2.5 * delta))
