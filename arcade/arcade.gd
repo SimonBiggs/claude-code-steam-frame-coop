@@ -20,6 +20,16 @@ const GAMES := [
 		"blurb": "Be a VR giant protecting a tiny tabletop village; TV players are the knights"},
 	{"id": "rocket_workshop", "name": "ROCKET WORKSHOP", "scene": "res://games/rocket_workshop/main.tscn",
 		"blurb": "Cosy rocket puzzle: the VR pilot works the controls, the TV crew read the blueprints out loud"},
+	{"id": "marble_maze", "name": "MARBLE MAZE", "scene": "res://games/marble_maze/main.tscn",
+		"blurb": "Ball racing: VR tilts a giant tabletop maze, everyone on the TV is a marble"},
+	{"id": "hide_and_seek", "name": "HIDE AND SEEK", "scene": "res://games/hide_and_seek/main.tscn",
+		"blurb": "VR seeker with a torch; TV hiders sneak or disguise as lamps, plants and boxes"},
+	{"id": "block_builders", "name": "BLOCK BUILDERS", "scene": "res://games/block_builders/main.tscn",
+		"blurb": "VR giant builds bridges and springs; tiny TV runners race to the flag"},
+	{"id": "dragon_rider", "name": "DRAGON RIDER", "scene": "res://games/dragon_rider/main.tscn",
+		"blurb": "VR steers a friendly dragon with the reins; TV gunners pop balloons from its back"},
+	{"id": "bee_garden", "name": "BEE GARDEN", "scene": "res://games/bee_garden/main.tscn",
+		"blurb": "Cosy, no fighting: VR gardener plants and waters, TV bees make honey"},
 ]
 const VrText := preload("res://core/vr_text.gd")
 const DEFAULT_PORT := 7777
