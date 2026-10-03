@@ -530,7 +530,7 @@ func _solve(m: Dictionary) -> void:
 		phase = "ready"
 		sound("allset", 0.0)
 		print("All modules done: waiting for the launch lever")
-		_show_center("ALL SYSTEMS GO!\nPilot: PULL THE BIG LAUNCH LEVER!", 3.5)
+		_show_center("ALL SYSTEMS GO!\nPULL THE LEVER, CRANK!", 6.0)  # David's wording
 
 
 ## A mistake: the rocket burps and the countdown loses a few seconds (never below 5).
