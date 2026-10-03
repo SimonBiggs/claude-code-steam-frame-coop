@@ -97,7 +97,7 @@ func _lobby_offline() -> void:
 	join_deadline = 0
 	_close_peer()
 	mode = "local"
-	_set_status("No VR player found: playing on the TV")
+	_set_status("No VR player found yet (still looking…). You can also play on the TV")
 
 
 func _close_peer() -> void:
@@ -156,6 +156,11 @@ func _launch(index: int) -> void:
 func _process(_delta: float) -> void:
 	if join_deadline > 0 and Time.get_ticks_msec() > join_deadline:
 		_lobby_offline()
+	# TV: keep looking for the VR player's lobby (they may be mid-game or restarting).
+	if mode == "local" and not starting and OS.has_environment("DUO_JOIN") and not OS.has_environment("ARCADE_GAME"):
+		if Time.get_ticks_msec() > int(get_meta("retry_at", 0)):
+			set_meta("retry_at", Time.get_ticks_msec() + 4000)
+			_join_lobby(OS.get_environment("DUO_JOIN"))
 	if vr_list:
 		_vr_input()
 		VrText.follow(vr_list, vr_cam, self, -0.1, 2.2)  # always findable, wherever you look
