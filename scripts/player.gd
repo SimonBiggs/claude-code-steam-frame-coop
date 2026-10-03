@@ -378,11 +378,11 @@ func _update_camera(delta: float) -> void:
 	var eye := EYE_HEIGHT if not is_down else 0.45
 	var bob := sin(bob_t) * 0.05 if not is_down else 0.0
 	camera.global_position = global_position + Vector3(0, eye + bob, 0)
-	camera.rotation = Vector3(pitch + recoil * 0.04 + randf_range(-1, 1) * shake * 0.02,
+	camera.rotation = Vector3(pitch + recoil * 0.008 + randf_range(-1, 1) * shake * 0.02,
 		yaw + randf_range(-1, 1) * shake * 0.02, 0.35 if is_down else 0.0)
 	if gun:
 		gun.visible = not is_down
-		gun.position = Vector3(0.2 + cos(bob_t * 0.5) * 0.006, -0.17 + absf(sin(bob_t * 0.5)) * 0.008, -0.42 + recoil * 0.035)
+		gun.position = Vector3(0.2 + cos(bob_t * 0.5) * 0.006, -0.17 + absf(sin(bob_t * 0.5)) * 0.008, -0.42 + recoil * 0.015)
 
 
 func _shoot() -> void:
