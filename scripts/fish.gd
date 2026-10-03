@@ -98,6 +98,19 @@ func _part(parent: Node3D, mesh: PrimitiveMesh, mat: Material, pos: Vector3, scl
 
 
 func _process(delta: float) -> void:
+	if not has_meta("named"):
+		set_meta("named", true)
+		var tag := Label3D.new()
+		tag.name = "NameTag"
+		tag.font_size = 64
+		tag.outline_size = 16
+		tag.pixel_size = 0.02
+		tag.modulate = Color(0.6, 0.9, 1.0)
+		tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		tag.position = Vector3(0, 2.4, 0)
+		add_child(tag)
+	var name_tag: Label3D = get_node("NameTag")
+	name_tag.text = "FISHWORT  %d%%" % int(100.0 * hp / max_hp)
 	t = fmod(Time.get_unix_time_from_system(), 3600.0)
 	var a := t * SPEED
 	var pos := Vector3(cos(a) * ORBIT, HEIGHT + sin(a * 2.0) * 3.0, sin(a) * ORBIT)

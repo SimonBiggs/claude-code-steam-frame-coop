@@ -527,7 +527,9 @@ func _vr_update(_delta: float) -> void:
 	var status := "DOWN - partner, revive me!" if is_down else ("SPREAD SHOT" if spread_t > 0.0 else "")
 	if main.net.mode == "host" and not main.net.connected:
 		status = "Waiting for the TV player to join…"
-	wrist_label.text = "HP %d / %d\nWAVE %d   SCORE %d\n%s" % [maxi(0, int(hp)), int(main.upg.max_hp), main.wave, main.score, status]
+	if main.skill_points > 0 and status == "":
+		status = "%d SKILL POINT(S): shoot the tree!" % main.skill_points
+	wrist_label.text = "HP %d / %d   LV %d\nWAVE %d   SCORE %d\n%s" % [maxi(0, int(hp)), int(main.upg.max_hp), main.level, main.wave, main.score, status]
 
 
 # --- Health & reviving -------------------------------------------------------
