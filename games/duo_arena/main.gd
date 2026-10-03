@@ -816,6 +816,9 @@ func _lazy_follow(l: Label3D, height: float) -> void:
 		return
 	fwd = fwd.normalized()
 	var target := cam.global_position + fwd * 1.8 + Vector3(0.0, height, 0.0)
+	if not l.has_meta("faced2"):
+		l.set_meta("faced2", true)
+		l.set_meta("moving", true)
 	if not l.has_meta("placed"):
 		l.set_meta("placed", true)
 		l.global_position = target
@@ -829,7 +832,7 @@ func _lazy_follow(l: Label3D, height: float) -> void:
 		var face := l.global_position - cam.global_position
 		face.y = 0.0
 		if face.length() > 0.1:
-			l.global_basis = Basis(Vector3.UP, atan2(face.x, face.z))  # face the player, upright
+			l.global_basis = Basis(Vector3.UP, atan2(-face.x, -face.z))  # front (+Z) towards the player, upright
 		if l.global_position.distance_to(target) < 0.05:
 			l.set_meta("moving", false)
 
