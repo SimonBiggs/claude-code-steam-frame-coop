@@ -203,8 +203,11 @@ func _px_action(index: int, action: String, args: Array) -> void:
 func _check_vr_menu() -> void:
 	if main == null or main.players.is_empty() or not main.players[0].vr:
 		return
-	var down: bool = main.players[0].hand_l.is_button_pressed("menu_button")
+	# Menu button, or Y on the left controller (SteamVR sometimes keeps the menu button for itself).
+	var hl: XRController3D = main.players[0].hand_l
+	var down: bool = hl.is_button_pressed("menu_button") or hl.is_button_pressed("by_button")
 	if down and not menu_was_down:
+		print("Net: VR pause toggled")
 		main.toggle_vr_pause()
 	menu_was_down = down
 	# While paused, the right trigger leaves the game for the arcade lobby.
