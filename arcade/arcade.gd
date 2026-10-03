@@ -12,6 +12,8 @@ const GAMES := [
 		"blurb": "Spooky-cute ghost hunt: VR lantern reveals ghosts, TV players vacuum them up"},
 	{"id": "snowball_blitz", "name": "SNOWBALL BLITZ", "scene": "res://games/snowball_blitz/main.tscn",
 		"blurb": "Cosy snow-fort defence: throw real snowballs in VR, pack the walls on the TV"},
+	{"id": "cannon_cove", "name": "CANNON COVE", "scene": "res://games/cannon_cove/main.tscn",
+		"blurb": "Pirate co-op: VR gunner aims the cannons, TV deckhands load them and patch leaks"},
 ]
 const DEFAULT_PORT := 7777
 const JOIN_TIMEOUT_MS := 5000
