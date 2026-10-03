@@ -13,8 +13,16 @@ const SfxScript := preload("res://core/sfx.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
 const NetScript := preload("res://core/net.gd")
 const MusicScript := preload("res://core/music.gd")
+const JoinInputScript := preload("res://games/ghost_lantern/join_input.gd")
 
-const PLAYER_COLORS: Array[Color] = [Color(1.0, 0.82, 0.4), Color(0.45, 1.0, 0.7), Color(1.0, 0.55, 0.9)]
+## P1 (lantern) + up to six TV ghost hunters P2..P7.
+const MAX_PLAYERS := 7
+const PLAYER_COLORS: Array[Color] = [Color(1.0, 0.82, 0.4), Color(0.45, 1.0, 0.7), Color(1.0, 0.55, 0.9),
+	Color(0.45, 0.8, 1.0), Color(1.0, 0.6, 0.3), Color(0.8, 1.0, 0.35), Color(0.75, 0.6, 1.0)]
+const SPAWNS: Array[Vector3] = [Vector3(0, 0, 3.0), Vector3(-1.8, 0, 4.2), Vector3(1.8, 0, 4.2),
+	Vector3(-3.4, 0, 5.2), Vector3(3.4, 0, 5.2), Vector3(-1.2, 0, 6.0), Vector3(1.2, 0, 6.0)]
+const PAD_WAIT_TIME := 20.0  # a player whose controller unplugs waits this long before leaving
+const PARTY_META := "ghost_lantern_party"  # Engine meta: who was playing, kept across a restart
 const MUSIC_TRACK := 2  # "Night City", the slowest track
 const LANTERN_ANGLE := 22.0
 const FOCUS_ANGLE := 14.0
@@ -115,6 +123,14 @@ var info_label: Label
 var center_label: Label
 var help_label: Label
 var center_tween: Tween
+var join_label: Label
+
+# Split screen & drop-in players.
+var view_grid: GridContainer
+var view_count := 0
+var bubble: TextureRect
+var pad_wait := {}  # player index -> seconds left to plug their controller back in
+var pending_join := {}  # client: player index -> seconds until we may ask the host again
 
 
 func _ready() -> void:
@@ -149,6 +165,7 @@ func _setup_game(mode: String) -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_assign_joypads()
 	ready_to_play = true
+	_restore_party()
 	if mode == "host":
 		_show_center("GHOST LANTERN\nWaiting for the TV players to join…", 0.0)
 	elif mode == "client":
@@ -290,24 +307,37 @@ func capture_fx(pos: Vector3, nozzle: Vector3, color: Color) -> void:
 
 # --- Players & views ---------------------------------------------------------
 
+## Player node for slot i (0 = lantern/VR, 1..6 = TV vacuums P2..P7). Slots 2+ start out waiting to join.
+func _make_player(i: int, mode: String) -> void:
+	var p := PlayerScript.new()
+	p.index = i
+	p.color = PLAYER_COLORS[i % PLAYER_COLORS.size()]
+	p.main = self
+	p.role = "lantern" if i == 0 else "vacuum"
+	p.remote = mode == "host" and i >= 1
+	p.ghost = mode == "client" and i == 0
+	if mode == "client" and i == 2:
+		p.key_set = 0  # P3 on the TV: WASD + mouse (as before)
+		p.mouse_look = true
+	elif mode != "client" and i == 0:
+		p.mouse_look = true
+	elif i >= 2:
+		p.key_set = 2  # extra players are controller-only
+	p.position = SPAWNS[i % SPAWNS.size()]
+	add_child(p)
+	players.append(p)
+	if i >= 2:
+		p.set_active(false)
+
+
 func _build_players(mode: String) -> void:
-	var count := 3 if mode != "local" else 2
-	for i in count:
-		var p := PlayerScript.new()
-		p.index = i
-		p.color = PLAYER_COLORS[i]
-		p.main = self
-		p.role = "lantern" if i == 0 else "vacuum"
-		p.remote = mode == "host" and i >= 1
-		p.ghost = mode == "client" and i == 0
-		if i == 2:
-			p.key_set = 0
-			p.mouse_look = true
-		elif mode != "client" and i == 0:
-			p.mouse_look = true
-		p.position = [Vector3(0, 0, 3.0), Vector3(-1.8, 0, 4.2), Vector3(1.8, 0, 4.2)][i]
-		add_child(p)
-		players.append(p)
+	_ensure_players(mode)
+
+
+## Lazily tops the player list up to MAX_PLAYERS (also after a hot reload of an older version).
+func _ensure_players(mode: String) -> void:
+	while players.size() < MAX_PLAYERS:
+		_make_player(players.size(), mode)
 
 
 func _apply_vr_performance() -> void:
@@ -365,6 +395,22 @@ func _build_views(mode: String) -> void:
 		_build_vr_mirror(cam)
 	else:
 		print("No VR headset: split screen (player 1 holds the lantern)")
+	for p in players:
+		if p.active and _has_local_view(p):
+			_ensure_view(p)
+	if mode == "client":
+		_build_ghost_mirror()
+	_layout_views()
+
+
+## Players drawn on this machine's screen (flat, driven here).
+func _has_local_view(p) -> bool:
+	return not p.vr and not p.remote and not p.ghost
+
+
+func _ensure_view_grid() -> GridContainer:
+	if view_grid != null and is_instance_valid(view_grid):
+		return view_grid
 	var layer := CanvasLayer.new()
 	layer.layer = -1
 	add_child(layer)
@@ -372,46 +418,84 @@ func _build_views(mode: String) -> void:
 	bg.color = Color.BLACK
 	layer.add_child(bg)
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 4)
-	layer.add_child(row)
-	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	for p in players:
-		if p.vr or p.remote or p.ghost:
-			continue
-		var container := SubViewportContainer.new()
-		p.set_meta("view", container)
-		container.stretch = true
-		container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		container.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		row.add_child(container)
-		var vp := SubViewport.new()
-		vp.world_3d = get_world_3d()
-		vp.msaa_3d = Viewport.MSAA_2X
-		vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA
-		container.add_child(vp)
-		var cam := Camera3D.new()
-		vp.add_child(cam)
-		cam.current = true
-		cameras.append(cam)
-		p.attach_camera(cam)
-		var hud_layer := CanvasLayer.new()
-		vp.add_child(hud_layer)
-		var hud := HudScript.new()
-		hud.player = p
-		hud.main = self
-		hud_layer.add_child(hud)
-		p.hud = hud
-	for p in players:
-		if p.index == 2:
-			p.set_active(false)
-			if p.has_meta("view"):
-				p.get_meta("view").visible = false
-	if mode == "client":
-		_build_ghost_mirror()
+	view_grid = GridContainer.new()
+	view_grid.add_theme_constant_override("h_separation", 4)
+	view_grid.add_theme_constant_override("v_separation", 4)
+	layer.add_child(view_grid)
+	view_grid.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	return view_grid
 
 
-## Client: a camera following the VR player's head, shown as a little bubble on the TV.
+## Lazily builds a split-screen view (SubViewport + camera + HUD) for a local player.
+func _ensure_view(p) -> void:
+	if p.has_meta("view") and is_instance_valid(p.get_meta("view")):
+		return
+	var grid := _ensure_view_grid()
+	var container := SubViewportContainer.new()
+	p.set_meta("view", container)
+	container.stretch = true
+	container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	container.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	container.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	grid.add_child(container)
+	# Keep the views in player order, whoever joined first.
+	var at := 0
+	for c in grid.get_children():
+		if c == container:
+			break
+		var owner_i: int = c.get_meta("player_index", 0)
+		if owner_i < p.index:
+			at += 1
+	container.set_meta("player_index", p.index)
+	grid.move_child(container, at)
+	var vp := SubViewport.new()
+	vp.world_3d = get_world_3d()
+	vp.msaa_3d = Viewport.MSAA_2X
+	vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA
+	container.add_child(vp)
+	var cam := Camera3D.new()
+	vp.add_child(cam)
+	cam.current = true
+	cameras.append(cam)
+	p.attach_camera(cam)
+	var hud_layer := CanvasLayer.new()
+	vp.add_child(hud_layer)
+	var hud := HudScript.new()
+	hud.player = p
+	hud.main = self
+	hud_layer.add_child(hud)
+	p.hud = hud
+
+
+## Split-screen grid: 1 full, 2 side by side, 3-4 as 2x2, 5-6 as 3x2 (7-8 as 4x2). Fewer pixels per view
+## when the screen is shared by many players.
+func _layout_views() -> void:
+	if view_grid == null or not is_instance_valid(view_grid):
+		return
+	var n := 0
+	for c in view_grid.get_children():
+		var idx: int = c.get_meta("player_index", 0)
+		var on: bool = idx < players.size() and players[idx].active
+		c.visible = on
+		if on:
+			n += 1
+	view_grid.columns = 1 if n <= 1 else (2 if n <= 4 else (3 if n <= 6 else 4))
+	var scale_3d := 1.0 if n <= 2 else (0.7 if n <= 4 else 0.55)
+	for c in view_grid.get_children():
+		for vp in c.get_children():
+			if vp is SubViewport:
+				vp.scaling_3d_scale = scale_3d
+				vp.msaa_3d = Viewport.MSAA_2X if n <= 2 else Viewport.MSAA_DISABLED
+	if bubble != null and is_instance_valid(bubble):
+		var b := 240.0 if n <= 2 else (190.0 if n <= 4 else 150.0)
+		bubble.size = Vector2(b, b)
+		bubble.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_KEEP_SIZE, 24)
+		var tag: Label = bubble.get_child(0)
+		tag.position = Vector2(b / 6.0, b)
+	view_count = n
+
+
+## Client: a camera following the VR player's head, shown as a little bubble in the top right of the TV.
 func _build_ghost_mirror() -> void:
 	var vp := SubViewport.new()
 	vp.size = Vector2i(360, 360)
@@ -424,15 +508,15 @@ func _build_ghost_mirror() -> void:
 	ghost_cam.cull_mask = players[0].camera_cull_mask()
 	vp.add_child(ghost_cam)
 	ghost_cam.current = true
-	var hud = players[1].hud
-	if hud == null:
-		return
-	var bubble := TextureRect.new()
+	var layer := CanvasLayer.new()
+	layer.layer = 0
+	add_child(layer)
+	bubble = TextureRect.new()
 	bubble.texture = vp.get_texture()
 	bubble.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	bubble.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
 	bubble.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud.add_child(bubble)
+	layer.add_child(bubble)
 	bubble.size = Vector2(240, 240)
 	bubble.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_KEEP_SIZE, 24)
 	var tag := Label.new()
@@ -445,19 +529,222 @@ func _build_ghost_mirror() -> void:
 	tag.position = Vector2(40, 240)
 
 
+# --- Controllers & drop-in join ----------------------------------------------
+
+## Initial controller assignment (same as before for the first two pads): P2 gets the first pad;
+## the second pad goes to P3 on the TV (client) or to P1 in local split screen. Extra pads press A to join.
 func _assign_joypads() -> void:
-	if players.size() < 2:
+	for dev in Input.get_connected_joypads():
+		_auto_bind_pad(dev)
+
+
+## The local player driven by joypad `device`, or -1.
+func pad_owner(device: int) -> int:
+	for p in players:
+		if p.joy == device and _has_local_view(p):
+			return p.index
+	return -1
+
+
+## A newly seen pad: give it back to a player who lost theirs, else the default slots. Returns the index or -1.
+func _auto_bind_pad(device: int) -> int:
+	if pad_owner(device) >= 0 or net == null or net.mode == "host" or players.size() < 2:
+		return pad_owner(device)
+	var keys: Array = pad_wait.keys()
+	keys.sort()
+	for i in keys:
+		var w: int = i
+		if w < players.size() and players[w].joy < 0:
+			players[w].joy = device
+			pad_wait.erase(w)
+			print("Pad %d reconnected: P%d is back" % [device, w + 1])
+			_show_center("P%d IS BACK!" % (w + 1), 1.2, false)
+			return w
+	if players[1].joy < 0:
+		players[1].joy = device
+		return 1
+	if net.mode == "local" and not players[0].vr and players[0].joy < 0:
+		players[0].joy = device
+		return 0
+	if net.mode == "client" and players[2].joy < 0 and not players[2].active and players[2].uses_keyboard():
+		players[2].joy = device
+		return 2
+	return -1
+
+
+func _on_joy_changed(device: int, connected: bool) -> void:
+	if not ready_to_play:
 		return
-	var pads := Input.get_connected_joypads()
-	players[1].joy = pads[0] if pads.size() > 0 else -1
-	if players.size() > 2:
-		players[2].joy = pads[1] if pads.size() > 1 else -1
-	elif not players[0].vr:
-		players[0].joy = pads[1] if pads.size() > 1 else -1
+	if connected:
+		_auto_bind_pad(device)
+		return
+	var i := pad_owner(device)
+	if i < 0:
+		return
+	var p = players[i]
+	p.joy = -1
+	p.vac_on = false
+	if p.active and not p.uses_keyboard() and not p.mouse_look:
+		pad_wait[i] = PAD_WAIT_TIME
+		print("Pad %d disconnected: P%d waits %d s for it" % [device, i + 1, int(PAD_WAIT_TIME)])
+		_show_center("P%d's controller disconnected!\nPlug it back in to keep playing" % (i + 1), 2.5, false)
 
 
-func _on_joy_changed(_device: int, _connected: bool) -> void:
-	_assign_joypads()
+## First free TV slot: one with no controls bound, else a waiting keyboard slot (the pad takes it over).
+func _free_slot() -> int:
+	for p in players:
+		if p.index >= 1 and not p.active and _has_local_view(p) and p.joy < 0 and not p.uses_keyboard():
+			return p.index
+	for p in players:
+		if p.index >= 1 and not p.active and _has_local_view(p) and p.joy < 0:
+			return p.index
+	return -1
+
+
+## Called by the join_input node (before the pause menu sees it). Returns true if the event was used.
+func on_join_input(event: InputEvent) -> bool:
+	var b := event as InputEventJoypadButton
+	if b == null or not b.pressed or not ready_to_play or net == null or net.mode == "host":
+		return false
+	if b.button_index != JOY_BUTTON_A and b.button_index != JOY_BUTTON_START:
+		return false
+	var owner_i := pad_owner(b.device)
+	if owner_i >= 0:
+		if players[owner_i].active:
+			return false  # A / Start of a playing pad keep their usual job
+		if not pending_join.has(owner_i):
+			request_join(owner_i)
+		return true
+	var slot := _free_slot()
+	if slot < 0:
+		return false
+	var p = players[slot]
+	if p.uses_keyboard() and slot >= 2:
+		p.key_set = 2
+		p.mouse_look = false
+	p.joy = b.device
+	request_join(slot)
+	return true
+
+
+## Drop a player into the hunt (client: ask the host; it switches them on in the next snapshot).
+func request_join(i: int) -> void:
+	if i <= 0 or i >= players.size() or players[i].active:
+		return
+	if net.mode == "client":
+		pending_join[i] = 2.0
+		net.send_action("join", [], i)
+		print("Asking the host to let P%d join" % (i + 1))
+	else:
+		_activate_player(i)
+
+
+## Test hook: join TV player `index` programmatically (the bot drives it directly).
+func debug_join(index: int) -> void:
+	if index <= 0 or index >= players.size():
+		return
+	request_join(index)
+
+
+func _activate_player(i: int) -> void:
+	var p = players[i]
+	if p.active:
+		return
+	p.set_active(true)
+	p.courage = p.MAX_COURAGE
+	if p.is_down:
+		p.revive(1.0)
+	if not p.remote:
+		p.global_position = _spawn_near_team(i)
+	_show_center("PLAYER %d JOINED THE HUNT!" % (i + 1), 1.5)
+	print("Player %d joined the game (%d players)" % [i + 1, active_count()])
+	on_player_activity_changed(p)
+
+
+func _spawn_near_team(i: int) -> Vector3:
+	var anchor: Vector3 = players[0].global_position if players[0].active else Vector3.ZERO
+	var off: Vector3 = SPAWNS[i % SPAWNS.size()] - SPAWNS[0]
+	return Vector3(clampf(anchor.x + off.x, -19.0, 19.0), 0.0, clampf(anchor.z + off.z, -7.0, 7.0))
+
+
+## A TV player leaves (controller gone too long). Index 1 (P2) never leaves: it's the keyboard/first pad.
+func leave_player(i: int) -> void:
+	if i <= 1 or i >= players.size():
+		return
+	var p = players[i]
+	pad_wait.erase(i)
+	if _has_local_view(p):
+		p.joy = -1
+	if net.mode == "client":
+		net.send_action("leave", [], i)
+		return
+	if not p.active:
+		return
+	p.set_active(false)
+	p.vac_on = false
+	_show_center("P%d left the hunt" % (i + 1), 1.5)
+	print("Player %d left the game (%d players)" % [i + 1, active_count()])
+	on_player_activity_changed(p)
+
+
+func active_count() -> int:
+	var n := 0
+	for p in players:
+		if p.active:
+			n += 1
+	return n
+
+
+## TV slots: keyboard / pad joins, pad timeouts and the "press A to join" hint.
+func _update_party(delta: float) -> void:
+	if not has_meta("join_input"):
+		var j := JoinInputScript.new()
+		j.main = self
+		add_child(j)
+		set_meta("join_input", j)
+	for k in pending_join.keys():
+		var left: float = pending_join[k] - delta
+		if left <= 0.0 or players[k].active:
+			pending_join.erase(k)
+		else:
+			pending_join[k] = left
+	for k in pad_wait.keys():
+		var w: float = pad_wait[k] - delta
+		if w <= 0.0:
+			leave_player(k)
+		else:
+			pad_wait[k] = w
+	_check_join(delta)
+	_update_join_hint()
+
+
+func _update_join_hint() -> void:
+	if join_label == null:
+		join_label = _make_label(22)
+		join_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.6))
+		center_label.get_parent().add_child(join_label)
+		join_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+		join_label.offset_top = -40
+		join_label.offset_bottom = -8
+		join_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var spare := false
+	if net.mode != "host" and _free_slot() >= 0:
+		for dev in Input.get_connected_joypads():
+			if pad_owner(dev) < 0:
+				spare = true
+	join_label.visible = spare and not game_over
+	join_label.text = "More ghost hunters? Press A on a spare controller to join!"
+
+
+func on_player_activity_changed(p) -> void:
+	if p.active and _has_local_view(p) and ready_to_play:
+		if net.mode == "client" and not p.has_meta("view"):
+			p.global_position = _spawn_near_team(p.index)
+		_ensure_view(p)
+	if p.has_meta("view") and is_instance_valid(p.get_meta("view")):
+		p.get_meta("view").visible = p.active
+	_layout_views()
+	print("Player %d is now %s on this screen" % [p.index + 1, "playing" if p.active else "waiting"])
 
 
 func nearest_player(pos: Vector3):
@@ -471,12 +758,6 @@ func nearest_player(pos: Vector3):
 			best_d = d
 			best = p
 	return best
-
-
-func on_player_activity_changed(p) -> void:
-	if p.has_meta("view"):
-		p.get_meta("view").visible = p.active
-	print("Player %d is now %s on this screen" % [p.index + 1, "playing" if p.active else "waiting"])
 
 
 # --- Lantern -----------------------------------------------------------------
@@ -806,8 +1087,9 @@ func _process(delta: float) -> void:
 			mirror_vp.render_target_update_mode = SubViewport.UPDATE_ONCE
 	_update_photos(delta)
 	_update_hud()
+	_ensure_players(net.mode)
+	_update_party(delta)
 	if net.mode == "client":
-		_check_join(delta)
 		if game_over:
 			game_over_time += delta
 			if game_over_time > 1.5 and _restart_pressed():
@@ -817,7 +1099,7 @@ func _process(delta: float) -> void:
 	if game_over:
 		game_over_time += delta
 		if game_over_time > 1.5 and (_restart_pressed() or players[0].vr_button_held()):
-			get_tree().reload_current_scene()
+			_restart()
 		return
 	if net.mode == "host" and not net.connected:
 		return  # hold the nights until a TV player joins
@@ -828,9 +1110,9 @@ func _process(delta: float) -> void:
 			_start_night()
 	elif not to_spawn.is_empty():
 		spawn_timer -= delta
-		if spawn_timer <= 0.0 and ghost_by_id.size() < 3 + night:
+		if spawn_timer <= 0.0 and ghost_by_id.size() < 3 + night + (crowd_bonus() + 1) / 2:
 			_spawn_ghost(to_spawn.pop_back())
-			spawn_timer = maxf(1.0, 3.0 - night * 0.25)
+			spawn_timer = maxf(0.8, 3.0 - night * 0.25 - crowd_bonus() * 0.15)
 	elif ghost_by_id.is_empty():
 		_end_night()
 	var all_down := true
@@ -867,9 +1149,10 @@ func _start_night() -> void:
 	night += 1
 	in_break = false
 	to_spawn = []
-	for i in 2 + night:
+	var bonus := crowd_bonus()
+	for i in 2 + night + (bonus + 1) / 2:
 		to_spawn.append("thief")
-	for i in (night + 1) / 2:
+	for i in (night + 1) / 2 + bonus / 3:
 		to_spawn.append("spooker")
 	for i in maxi(0, night - 2):
 		to_spawn.append("sprite")
@@ -881,6 +1164,13 @@ func _start_night() -> void:
 		_show_center("NIGHT 1\nThe ghosts are coming for the family photos!", 2.5)
 	else:
 		_show_center("NIGHT %d\n%d ghosts tonight" % [night, to_spawn.size()], 2.0)
+
+
+## Extra hunters beyond the classic three (P1 + two TV players) bring a few extra ghosts each night.
+## There's still only one lantern, so this stays gentle: +1 thief per two extra players, +1 spooker per three,
+## and slightly more ghosts at once / faster spawns.
+func crowd_bonus() -> int:
+	return maxi(0, active_count() - 3)
 
 
 func _end_night() -> void:
@@ -941,32 +1231,107 @@ func on_client_joined() -> void:
 
 func on_client_left() -> void:
 	_show_center("The TV players left - waiting for them to come back…", 0.0)
+	for p in players:
+		if p.index >= 2 and p.active:
+			p.set_active(false)
+			p.vac_on = false
 
 
 var join_t := 0.0
+## Waiting TV players with controls bound (P3 on WASD + mouse, or a pad) join by holding fire.
 func _check_join(delta: float) -> void:
 	join_t -= delta
-	if players.size() < 3 or players[2].active or join_t > 0.0 or game_over:
+	if join_t > 0.0 or game_over or net.mode == "host":
 		return
-	if players[2]._fire_held():
-		join_t = 1.0
-		net.send_action("join", [], 2)
+	for p in players:
+		if p.index < 2 or p.active or not _has_local_view(p) or pending_join.has(p.index):
+			continue
+		if (p.joy >= 0 or p.uses_keyboard()) and p._fire_held():
+			join_t = 1.0
+			request_join(p.index)
+			return
+
+
+## Restart after game over, keeping the same party (who's playing, and which pad drives whom).
+func _restart() -> void:
+	_remember_party()
+	get_tree().reload_current_scene()
+
+
+func _remember_party() -> void:
+	if net == null or players.is_empty():
+		return
+	var active_list: Array = []
+	var ctl := {}
+	for p in players:
+		if p.active and p.index >= 2:
+			active_list.append(p.index)
+		if _has_local_view(p):
+			ctl[p.index] = [p.joy, p.key_set, p.mouse_look]
+	Engine.set_meta(PARTY_META, {"active": active_list, "ctl": ctl, "mode": net.mode})
+
+
+## Client: the host restarts the scene after game over, which reloads ours too; keep the party.
+func _exit_tree() -> void:
+	if net != null and net.mode == "client" and game_over:
+		_remember_party()
+
+
+func _restore_party() -> void:
+	if not Engine.has_meta(PARTY_META):
+		return
+	var party: Dictionary = Engine.get_meta(PARTY_META)
+	Engine.remove_meta(PARTY_META)
+	if party.get("mode", "") != net.mode:
+		return
+	var ctl: Dictionary = party.get("ctl", {})
+	var connected_pads := Input.get_connected_joypads()
+	for p in players:
+		if _has_local_view(p) and p.index >= 1:
+			p.joy = -1
+	for k in ctl.keys():
+		var i: int = k
+		var c: Array = ctl[k]
+		if i >= players.size() or not _has_local_view(players[i]):
+			continue
+		var dev: int = c[0]
+		var p = players[i]
+		p.joy = dev if connected_pads.has(dev) else -1
+		p.key_set = c[1]
+		p.mouse_look = c[2]
+	_assign_joypads()  # pads plugged in meanwhile
+	var actives: Array = party.get("active", [])
+	for k in actives:
+		var i: int = k
+		if i >= players.size() or players[i].active:
+			continue
+		if net.mode == "client":
+			request_join(i)
+		else:
+			players[i].set_active(true)
+			if _has_local_view(players[i]):
+				players[i].global_position = _spawn_near_team(i)
+			on_player_activity_changed(players[i])
 
 
 func on_p2_action(action: String, args: Array, index: int = 1) -> void:
+	if index <= 0 or index >= players.size():
+		return
 	var p = players[index]
 	match action:
 		"vac":
 			p.vac_on = bool(args[0]) and not p.is_down
 		"join":
 			if not p.active:
-				p.set_active(true)
-				p.courage = p.MAX_COURAGE
-				_show_center("PLAYER %d JOINED THE HUNT!" % (index + 1), 1.5)
 				print("Net: player %d joined the game" % (index + 1))
+				_activate_player(index)
+		"leave":
+			if p.active and index >= 2:
+				print("Net: player %d left the game" % (index + 1))
+				leave_player(index)
 		"restart":
 			if game_over:
-				get_tree().reload_current_scene()
+				_restart()
 		"pause":
 			var paused: bool = args[0]
 			_show_center("PAUSED\nA TV player opened the menu" if paused else "", 0.0, false)
@@ -1095,7 +1460,7 @@ func _build_hud() -> void:
 	help_label.offset_bottom = 150
 	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	help_label.text = "Lantern (P1): WASD + mouse · Space/click focus · E/right click bell  |  " \
-		+ "Vacuums: stick/WASD move · RT / Space / Enter suck  ·  Start/Esc menu\n" \
+		+ "Vacuums: stick/WASD move · RT / Space / Enter suck  ·  Start/Esc menu  ·  spare pad: A to join\n" \
 		+ "Ghosts only show up in the lantern light! Stand next to a spooked friend to cheer them up."
 
 

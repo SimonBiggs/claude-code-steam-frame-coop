@@ -83,7 +83,8 @@ var vr_velocity := Vector3.ZERO
 var remote := false
 var ghost := false
 var active := true
-var key_set := -1
+var key_set := -1  # -1 auto (P1 WASD, others arrows), 0 WASD, 1 arrows, 2 no keyboard (controller only)
+var bot_fire := false  # test hook: the headless bot holds fire for this player
 var mouse_look := false
 var net_target := Vector3.ZERO
 var net_started := false
@@ -114,16 +115,20 @@ var vac_sound_t := 0.0
 var flashlight: SpotLight3D
 
 
+## Render layers: bit 0 = world, bits 1..7 = player bodies (index 0..6), bits 8..14 = first-person viewmodels.
+const BODY_BITS := 0xFE
+
+
 func body_layer() -> int:
 	return 2 << index
 
 
 func viewmodel_layer() -> int:
-	return 64 << index
+	return 256 << index
 
 
 func camera_cull_mask() -> int:
-	return 1 | (14 & ~body_layer()) | viewmodel_layer()
+	return 1 | (BODY_BITS & ~body_layer()) | viewmodel_layer()
 
 
 func _ready() -> void:
@@ -659,7 +664,14 @@ func keys() -> int:
 
 
 func _key(action: String) -> bool:
-	return Input.is_physical_key_pressed(KEYS[keys()][action])
+	var k := keys()
+	if k >= KEYS.size():
+		return false
+	return Input.is_physical_key_pressed(KEYS[k][action])
+
+
+func uses_keyboard() -> bool:
+	return keys() < KEYS.size()
 
 
 func _stick(axis_x: JoyAxis, axis_y: JoyAxis, deadzone: float) -> Vector2:
@@ -703,7 +715,7 @@ func _read_move() -> Vector3:
 func _fire_held() -> bool:
 	if vr:
 		return hand_r.get_float("trigger") > 0.5
-	if _key("fire"):
+	if bot_fire or _key("fire"):
 		return true
 	if mouse_look and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 		return true
