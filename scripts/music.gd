@@ -14,7 +14,6 @@ const TRACKS := [
 		"arp": [0, 7, 12, "3rd", 12, 7], "bass": "root"},
 ]
 
-static var track_cache := {}  # track index -> AudioStreamWAV (renamed so a hot reload starts clean)
 
 var current := -1
 var wanted := 0
@@ -34,9 +33,10 @@ func play_track(index: int) -> void:
 	wanted = index % TRACKS.size()
 	if wanted == current:
 		return
-	if track_cache.has(wanted):
+	var cache := _cache()
+	if cache.has(wanted):
 		current = wanted
-		stream = track_cache[wanted]
+		stream = cache[wanted]
 		play()
 	elif task < 0:
 		task_track = wanted
@@ -45,11 +45,18 @@ func play_track(index: int) -> void:
 		task = WorkerThreadPool.add_task(_synthesize)
 
 
+## Synthesized tracks, kept on the Engine so they survive scene restarts and hot reloads.
+func _cache() -> Dictionary:
+	if not Engine.has_meta("duo_music_tracks"):
+		Engine.set_meta("duo_music_tracks", {})
+	return Engine.get_meta("duo_music_tracks")
+
+
 func _process(_delta: float) -> void:
 	if task >= 0 and WorkerThreadPool.is_task_completed(task):
 		WorkerThreadPool.wait_for_task_completion(task)
 		task = -1
-		track_cache[task_track] = _to_stream(buffer)
+		_cache()[task_track] = _to_stream(buffer)
 		buffer = PackedFloat32Array()
 		var w := wanted
 		current = -1
