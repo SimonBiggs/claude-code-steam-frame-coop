@@ -3,10 +3,13 @@ extends Node
 ## Local/host: player 1 points the lantern at the ghost nearest player 2 (and rings the bell now and then).
 ## Local/client: vacuum players walk up to the nearest ghost, aim at it and hold fire. On the client,
 ## player 3 joins after a few seconds by holding Space.
+## BOT_PLAYERS=N (2..6): N TV players (P2..P{N+1}) join programmatically via main.debug_join(); in local mode
+## the bot also fakes a controller unplug/replug and a player leaving and rejoining.
 var main
 var t := 0.0
 var last_print := -100.0
 var bell_t := 7.0
+var bot_players := int(OS.get_environment("BOT_PLAYERS")) if OS.has_environment("BOT_PLAYERS") else 0
 
 
 func _ready() -> void:
@@ -56,9 +59,19 @@ func _physics_process(delta: float) -> void:
 	if main == null or main.players.size() < 2:
 		return
 	var mode: String = main.net.mode
-	if mode == "client" and t > 8.0 and not has_meta("p3"):
+	if bot_players <= 1 and mode == "client" and t > 8.0 and not has_meta("p3"):
 		set_meta("p3", true)
 		_press(KEY_SPACE, true)  # player 3 joins, then vacuums
+	if bot_players >= 2 and mode != "host" and t > (8.0 if mode == "client" else 3.0) and not has_meta("joined"):
+		set_meta("joined", true)
+		for i in range(2, mini(bot_players, 6) + 1):
+			print("BOT: P%d joins" % (i + 1))
+			main.debug_join(i)
+	if mode == "local" and bot_players >= 4:
+		_test_pads()
+	for p in main.players:
+		if p.index >= 2 and not p.remote:
+			p.bot_fire = p.active
 	var p1 = main.players[0]
 	# Exercise courage, cheering up, game over and restart (host side decides).
 	var down_at := 30.0 if mode == "local" else 18.0
@@ -99,6 +112,39 @@ func _physics_process(delta: float) -> void:
 		var courage := []
 		for p in main.players:
 			courage.append("%d%s" % [int(p.courage), "(down)" if p.is_down else ""])
+		var act := []
+		for p in main.players:
+			if p.active:
+				act.append(p.index + 1)
+		print("BOT t=%.0f active=%s views=%d bonus=%d" % [t, act, main.view_count, main.crowd_bonus()])
 		print("BOT t=%.0f mode=%s night=%d score=%d caught=%d saved=%d photos=%d/%d ghosts=%d courage=%s over=%s" % [
 			t, mode, main.night, main.score, main.caught, main.saved, main.photos_left(), main.photos.size(),
 			get_tree().get_nodes_in_group("ghosts").size(), courage, main.game_over])
+
+
+## Local only: fake a controller for P4, unplug and replug it; then P5 times out, leaves and rejoins.
+func _test_pads() -> void:
+	var p4 = main.players[3]
+	var p5 = main.players[4]
+	if t > 12.0 and not has_meta("unplug"):
+		set_meta("unplug", true)
+		p4.joy = 97
+		main._on_joy_changed(97, false)
+		print("BOT: unplugged P4's pad -> waiting=%s joy=%d" % [main.pad_wait.has(3), p4.joy])
+	if t > 14.0 and not has_meta("replug"):
+		set_meta("replug", true)
+		main._on_joy_changed(97, true)
+		print("BOT: replugged -> P4 joy=%d waiting=%s" % [p4.joy, main.pad_wait.has(3)])
+		p4.joy = -1
+	if t > 16.0 and not has_meta("leave"):
+		set_meta("leave", true)
+		p5.joy = 98
+		main._on_joy_changed(98, false)
+		main.pad_wait[4] = 0.3
+	if t > 17.0 and not has_meta("left"):
+		set_meta("left", true)
+		print("BOT: P5 active after pad timeout = %s" % p5.active)
+	if t > 19.0 and not has_meta("rejoin"):
+		set_meta("rejoin", true)
+		main.debug_join(4)
+		print("BOT: P5 rejoined = %s" % p5.active)

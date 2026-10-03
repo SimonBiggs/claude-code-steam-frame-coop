@@ -10,7 +10,7 @@ inside the spirit lantern's light.
   Ghosts in its light cone show up for everyone. A ghost that stays in the beam gets stunned and drops
   its photo. Focusing the beam makes it narrower and longer, and it stuns twice as fast. The hand bell
   scares every ghost within 9 m away for a few seconds, and they drop their photos. It has a 6 s cooldown.
-- **P2 / P3, ghost vacuums (TV)**: hold fire to suck in a ghost **that the lantern is lighting**.
+- **P2..P7, ghost vacuums (TV, up to six)**: hold fire to suck in a ghost **that the lantern is lighting**.
   A capture bar fills while the ghost struggles. Stunned ghosts are easier to catch. Their torches only
   light the room. They can't reveal ghosts, so shout to P1 where you need the light!
 
@@ -28,4 +28,15 @@ carry every photo out of the mansion.
 | Vacuum (P2/P3) | | RT / RB, Space / click (P3), Enter (P2 on arrows) |
 | Restart after game over | A / X | A / Enter |
 
-Test: `godot --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/ghost_lantern_bot.tscn`
+## Party mode (up to 6 TV players)
+
+- P2 plays on the arrow keys + Enter and/or the first controller; on the TV, P3 joins on WASD + mouse
+  (hold Space / click) or the second controller, as before. In local split screen the second controller drives P1.
+- **Any other controller: press A (or Start) to drop in** as the next free player (P3..P7). Each controller
+  drives exactly one player.
+- Unplugged controller: that player idles for 20 s; plug it back in to carry on, otherwise they leave
+  (press A again to rejoin).
+- Split screen: 1 view full, 2 side by side, 3-4 as 2x2, 5-6 as 3x2 (local 7 as 4x2), at lower render
+  scale for 3+ views. Each extra hunter past three adds a few ghosts per night.
+
+Test: `BOT_PLAYERS=6` makes the bot join that many TV players. `godot --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/ghost_lantern_bot.tscn`
