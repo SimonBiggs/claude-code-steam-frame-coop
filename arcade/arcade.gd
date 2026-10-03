@@ -16,6 +16,8 @@ const GAMES := [
 		"blurb": "Pirate co-op: VR gunner aims the cannons, TV deckhands load them and patch leaks"},
 	{"id": "kitchen_rush", "name": "KITCHEN RUSH", "scene": "res://games/kitchen_rush/main.tscn",
 		"blurb": "Co-op cooking chaos: VR chef chops and plates, TV runners fetch and serve"},
+	{"id": "giants_table", "name": "GIANT'S TABLE", "scene": "res://games/giants_table/main.tscn",
+		"blurb": "Be a VR giant protecting a tiny tabletop village; TV players are the knights"},
 ]
 const DEFAULT_PORT := 7777
 const JOIN_TIMEOUT_MS := 5000
