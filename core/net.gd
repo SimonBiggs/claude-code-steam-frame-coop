@@ -199,18 +199,49 @@ func _px_action(index: int, action: String, args: Array) -> void:
 		main.on_p2_action(action, args, index)
 
 
-## The VR player's left menu button pauses both machines (runs even while paused).
+## VR pause: a MENU button on the left wrist (tap it with the right hand, or point and pull the
+## trigger), or the left menu / Y button where SteamVR passes them through. Runs even while paused.
+## While paused, pulling the trigger anywhere else goes back to the arcade.
 func _check_vr_menu() -> void:
 	if main == null or main.players.is_empty() or not main.players[0].vr:
 		return
-	# Menu button, or Y on the left controller (SteamVR sometimes keeps the menu button for itself).
 	var hl: XRController3D = main.players[0].hand_l
-	var down: bool = hl.is_button_pressed("menu_button") or hl.is_button_pressed("by_button")
+	var hr = main.players[0].get("hand_r")
+	var btn := _wrist_button(hl)
+	var on_btn := false
+	var trig := false
+	if hr != null and btn != null:
+		var to: Vector3 = btn.global_position - hr.global_position
+		var fwd: Vector3 = -hr.global_basis.z
+		var along := to.dot(fwd)
+		on_btn = to.length() < 0.08 or (along > 0.0 and (to - fwd * along).length() < 0.07)
+		trig = hr.get_float("trigger") > 0.7
+		btn.modulate = Color(1.0, 0.9, 0.3) if on_btn else Color(0.55, 0.95, 1.0)
+	var touching: bool = hr != null and btn != null and (btn.global_position - hr.global_position).length() < 0.08
+	var down: bool = hl.is_button_pressed("menu_button") or hl.is_button_pressed("by_button") \
+		or touching or (on_btn and trig)
 	if down and not menu_was_down:
 		print("Net: VR pause toggled")
 		main.toggle_vr_pause()
-	menu_was_down = down
-	# While paused, the right trigger leaves the game for the arcade lobby.
-	var hand_r = main.players[0].get("hand_r")
-	if get_tree().paused and hand_r != null and hand_r.get_float("trigger") > 0.7:
+	elif trig and not get_meta("trig_was", true) and not on_btn and get_tree().paused:
 		go_to_arcade()
+	menu_was_down = down
+	set_meta("trig_was", trig)
+	if btn != null:
+		btn.text = "RESUME" if get_tree().paused else "MENU"
+
+
+func _wrist_button(hl: XRController3D) -> Label3D:
+	var btn := hl.get_node_or_null("WristMenu") as Label3D
+	if btn == null:
+		btn = Label3D.new()
+		btn.name = "WristMenu"
+		btn.font_size = 40
+		btn.outline_size = 18
+		btn.pixel_size = 0.0012
+		btn.no_depth_test = true
+		btn.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		btn.process_mode = Node.PROCESS_MODE_ALWAYS
+		hl.add_child(btn)
+		btn.position = Vector3(0.0, 0.07, 0.1)
+	return btn

@@ -528,15 +528,9 @@ func _vr_update(_delta: float) -> void:
 	_ensure_shield()
 	_ensure_wrist_radar()
 	yaw = xr_camera.global_rotation.y
-	if Time.get_ticks_msec() - int(get_meta("dbg_t", 0)) > 700:
+	if Time.get_ticks_msec() - int(get_meta("dbg_t", 0)) > 2000:
 		set_meta("dbg_t", Time.get_ticks_msec())
 		print("VRDBG head_local=%s origin=%s" % [xr_camera.position, xr_origin.global_position])
-		var hl: XRController3D = hand_l
-		var bs := []
-		for b in ["menu_button", "by_button", "ax_button", "grip_click", "primary_click", "trigger_click", "select_button"]:
-			if hl.is_button_pressed(b) or hand_r.is_button_pressed(b):
-				bs.append(b + ("L" if hl.is_button_pressed(b) else "R"))
-		print("VRDBG L tracker=%s active=%s stick=%s grip=%.2f trig=%.2f buttons=%s" % [hl.tracker, hl.get_is_active(), hl.get_vector2("primary"), hl.get_float("grip"), hl.get_float("trigger"), bs])
 	# Keep the body under the headset when the player walks around the room.
 	var head := xr_camera.global_position
 	var target := Vector3(head.x, 0.0, head.z)
