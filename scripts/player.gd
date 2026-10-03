@@ -528,6 +528,9 @@ func _vr_update(_delta: float) -> void:
 	var turn := hand_r.get_vector2("primary").x
 	if absf(turn) > 0.7 and snap_ready:
 		snap_ready = false
+		if not has_meta("turned"):
+			set_meta("turned", true)
+			print("VR snap turn works")
 		var angle := -signf(turn) * deg_to_rad(30.0)
 		var rot := Basis(Vector3.UP, angle)
 		var pivot_pt := xr_camera.global_position

@@ -1193,18 +1193,32 @@ func claude_say(text: String) -> void:
 	if net:
 		net.event("say", [text])
 	var line := "Claude: " + text
-	if claude_label == null:
-		claude_label = _make_label(30)
-		claude_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.55))
+	if claude_label == null or not claude_label.has_meta("panel"):
+		if claude_label:
+			claude_label.queue_free()
+		# A dark panel with a heading, so messages are easy to spot on the TV.
+		var panel := PanelContainer.new()
+		var style := StyleBoxFlat.new()
+		style.bg_color = Color(0.02, 0.03, 0.08, 0.85)
+		style.border_color = Color(0.3, 0.9, 1.0)
+		style.set_border_width_all(3)
+		style.set_corner_radius_all(14)
+		style.set_content_margin_all(18)
+		panel.add_theme_stylebox_override("panel", style)
+		center_label.get_parent().add_child(panel)
+		panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
+		panel.offset_left = -620
+		panel.offset_right = 620
+		panel.offset_top = -330
+		panel.offset_bottom = -200
+		panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
+		claude_label = _make_label(38)
+		claude_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.6))
 		claude_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		claude_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		center_label.get_parent().add_child(claude_label)
-		claude_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
-		claude_label.offset_left = -700
-		claude_label.offset_right = 700
-		claude_label.offset_top = -240
-		claude_label.offset_bottom = -140
-	claude_label.text = line
+		panel.add_child(claude_label)
+		claude_label.set_meta("panel", panel)
+	claude_label.text = "CLAUDE\n" + text
 	if players.size() > 0 and players[0].vr:
 		if claude_3d == null:
 			claude_3d = Label3D.new()
@@ -1222,11 +1236,11 @@ func claude_say(text: String) -> void:
 			players[0]._set_layers(claude_3d, players[0].viewmodel_layer())
 		claude_3d.text = line
 	sound("pickup", -6.0, 0.8)
-	var hold := 3.0 + text.length() * 0.06
+	var hold := 5.0 + text.length() * 0.08
 	if claude_tween:
 		claude_tween.kill()
 	claude_tween = create_tween().set_parallel()
-	for node in [claude_label, claude_3d]:
+	for node in [claude_label.get_meta("panel"), claude_3d]:
 		if node:
 			node.modulate.a = 1.0
 			claude_tween.tween_property(node, "modulate:a", 0.0, 0.6).set_delay(hold)
