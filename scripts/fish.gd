@@ -188,7 +188,7 @@ func _fireballs(delta: float) -> void:
 	charging = false
 	fire_t = randf_range(8.0, 14.0)
 	print("Fish fireball")
-	var targets: Array = main.players.filter(func(p) -> bool: return not p.is_down)
+	var targets: Array = main.players.filter(func(p) -> bool: return p.active and not p.is_down)
 	if targets.is_empty():
 		return
 	var target = targets.pick_random()

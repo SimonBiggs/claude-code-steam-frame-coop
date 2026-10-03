@@ -137,11 +137,13 @@ func _draw_radar(rc: Vector2, radius: float) -> void:
 	for pk in get_tree().get_nodes_in_group("pickups"):
 		var q := _radar_point(pk.global_position, inv, radar_scale, radius)
 		draw_rect(Rect2(rc + q - Vector2(5, 5), Vector2(10, 10)), pk.color)
-	var partner = main.players[1 - player.index]
-	var pp := _radar_point(partner.global_position, inv, radar_scale, radius)
-	if not partner.is_down or int(Time.get_ticks_msec() / 250) % 2 == 0:
-		draw_circle(rc + pp, 7.0, partner.color)
-		draw_arc(rc + pp, 9.0, 0.0, TAU, 16, Color.WHITE, 1.5)
+	for partner in main.players:
+		if partner == player or not partner.active:
+			continue
+		var pp := _radar_point(partner.global_position, inv, radar_scale, radius)
+		if not partner.is_down or int(Time.get_ticks_msec() / 250) % 2 == 0:
+			draw_circle(rc + pp, 7.0, partner.color)
+			draw_arc(rc + pp, 9.0, 0.0, TAU, 16, Color.WHITE, 1.5)
 	# Self arrow.
 	draw_colored_polygon(PackedVector2Array([rc + Vector2(0, -9), rc + Vector2(6, 6), rc + Vector2(-6, 6)]), player.color.lightened(0.5))
 

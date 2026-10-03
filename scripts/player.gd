@@ -71,6 +71,9 @@ var vr_velocity := Vector3.ZERO
 # Networked co-op: on the host, player 2 is `remote` (driven by the Steam Machine);
 # on the Steam Machine, player 1 is a `ghost` of the VR player, placed from snapshots.
 var remote := false
+var active := true  # player 3 sleeps (invisible, untargetable) until someone joins with a second input
+var key_set := -1  # which KEYS layout this player uses (-1: by index)
+var mouse_look := false
 # Personal progression (skill map): own XP, purchased skill tiers and stat modifiers.
 var xp := 0
 var skills := {}
@@ -91,15 +94,15 @@ var ghost_head: Node3D  # follows the VR player's real head on the TV
 
 
 func body_layer() -> int:
-	return 2 << index  # visual layer 2 (P1) or 3 (P2): hidden from this player's own camera
+	return 2 << index  # visual layers 2-4 (P1-P3): hidden from this player's own camera
 
 
 func viewmodel_layer() -> int:
-	return 8 << index  # visual layer 4 (P1) or 5 (P2): only this player's camera sees it
+	return 64 << index  # visual layers 7-9: only this player's camera sees it
 
 
 func camera_cull_mask() -> int:
-	return 1 | (2 << (1 - index)) | viewmodel_layer()
+	return 1 | (14 & ~body_layer()) | viewmodel_layer()  # world + other players' bodies + own gun
 
 
 func _ready() -> void:
@@ -300,7 +303,7 @@ func aim_dir() -> Vector3:
 func _input(event: InputEvent) -> void:
 	# Mouse look for player 1 while the mouse is captured.
 	var motion := event as InputEventMouseMotion
-	if motion and index == 0 and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and not get_tree().paused:
+	if motion and mouse_look and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and not get_tree().paused:
 		yaw -= motion.relative.x * MOUSE_SENS
 		pitch = clampf(pitch - motion.relative.y * MOUSE_SENS, -1.3, 1.3)
 
@@ -315,6 +318,8 @@ func _physics_process(delta: float) -> void:
 	if muzzle_mat:
 		muzzle_mat.emission_energy_multiplier = maxf(0.0, muzzle_mat.emission_energy_multiplier - delta * 60.0)
 
+	if not active:
+		return
 	if ghost:
 		_ghost_update(delta)
 		return
@@ -333,7 +338,7 @@ func _physics_process(delta: float) -> void:
 		else:
 			_update_revive(delta)
 		_update_camera(delta)
-		main.net.send_state(global_position, yaw, pitch)
+		main.net.send_state(global_position, yaw, pitch, index)
 		return
 
 	var move := _read_move()
@@ -345,7 +350,7 @@ func _physics_process(delta: float) -> void:
 		invuln_t = maxf(invuln_t, DASH_TIME + 0.1)
 		main.burst(global_position + Vector3.UP * 0.3, color, 8, 0.1)
 		main.sound("dash", -4.0)
-		main.net.send_action("dash", [])
+		main.net.send_action("dash", [], index)
 	dash_was_held = dash_held
 
 	if dash_t > 0.0:
@@ -367,7 +372,7 @@ func _physics_process(delta: float) -> void:
 			position.z = flat.y
 	bob_t += velocity.length() * delta * 1.6
 	_update_camera(delta)
-	main.net.send_state(global_position, yaw, pitch)
+	main.net.send_state(global_position, yaw, pitch, index)
 
 	if _fire_held() and fire_cd <= 0.0:
 		_shoot()
@@ -416,13 +421,17 @@ func _shoot() -> void:
 		starts.append(start)
 		dirs.append(d)
 	if client:
-		main.net.send_action("fire", [starts, dirs])
+		main.net.send_action("fire", [starts, dirs], index)
 
 
 # --- Input -------------------------------------------------------------------
 
+func keys() -> int:
+	return key_set if key_set >= 0 else mini(index, KEYS.size() - 1)
+
+
 func _key(action: String) -> bool:
-	return Input.is_physical_key_pressed(KEYS[index][action])
+	return Input.is_physical_key_pressed(KEYS[keys()][action])
 
 
 func _stick(axis_x: JoyAxis, axis_y: JoyAxis, deadzone: float) -> Vector2:
@@ -441,8 +450,8 @@ func _read_look(delta: float) -> void:
 	look = look * look.length()
 	yaw -= look.x * STICK_YAW_SPEED * delta
 	pitch = clampf(pitch - look.y * STICK_PITCH_SPEED * delta, -1.3, 1.3)
-	if index == 1:
-		# Keyboard P2 turns with left/right arrows.
+	if keys() == 1:
+		# The arrow-key layout turns with left/right.
 		yaw -= (float(_key("right")) - float(_key("left"))) * KEY_TURN_SPEED * delta
 
 
@@ -453,7 +462,7 @@ func _read_move() -> Vector3:
 		if s.length() < 0.15:
 			return Vector3.ZERO
 		return Basis(Vector3.UP, yaw) * Vector3(s.x, 0.0, -s.y).limit_length(1.0)
-	if index == 0:
+	if keys() == 0:
 		v = Vector2(float(_key("right")) - float(_key("left")), float(_key("down")) - float(_key("up")))
 	else:
 		v.y = float(_key("down")) - float(_key("up"))
@@ -471,7 +480,7 @@ func _fire_held() -> bool:
 		return hand_r.get_float("trigger") > 0.5
 	if _key("fire"):
 		return true
-	if index == 0 and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+	if mouse_look and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 		return true
 	if joy >= 0:
 		return Input.get_joy_axis(joy, JOY_AXIS_TRIGGER_RIGHT) > 0.4 \
@@ -554,7 +563,7 @@ func take_damage(amount: float, from_pos = null) -> void:
 		return
 	amount *= personal.get("armor", 1.0)
 	if remote:
-		main.net.event("hurt", [from_pos if from_pos != null else global_position])
+		main.net.event("hurt", [index, from_pos if from_pos != null else global_position])
 	main.achievements().on_damage(amount)
 	if hud and from_pos != null:
 		hud.damage_from(from_pos)
@@ -600,7 +609,7 @@ func _go_down() -> void:
 func _update_revive(delta: float) -> void:
 	var helper_near := false
 	for p in main.players:
-		if p != self and not p.is_down and p.global_position.distance_to(global_position) <= REVIVE_RANGE:
+		if p != self and p.active and not p.is_down and p.global_position.distance_to(global_position) <= REVIVE_RANGE:
 			helper_near = true
 	if helper_near:
 		revive_progress += delta / (REVIVE_TIME * main.upg.revive)
@@ -647,6 +656,13 @@ func head_transform() -> Transform3D:
 	return Transform3D(Basis.from_euler(Vector3(pitch, yaw, 0.0)), global_position + Vector3.UP * EYE_HEIGHT)
 
 
+## Wake up (or put to sleep) a player slot: visible, collidable and targetable only when active.
+func set_active(on: bool) -> void:
+	active = on
+	visible = on
+	collision_layer = 2 if on else 0
+
+
 ## A stat for this player: team upgrades combined with their own skill-map upgrades.
 func stat(name: String) -> float:
 	if name == "max_hp":
@@ -691,6 +707,9 @@ func apply_net_state(st: Array) -> void:
 		personal = st[10]
 		xp = st[11]
 		skills = st[12]
+	if st.size() > 13 and st[13] != active:
+		set_active(st[13])
+		main.on_player_activity_changed(self)
 	revive_progress = st[5]
 	spread_t = st[6]
 	if ghost:

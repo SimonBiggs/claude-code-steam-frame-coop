@@ -52,7 +52,7 @@ void fragment() {
 	COLOR = vec4(mix(c.rgb, ring_color.rgb, ring), inside);
 }
 """
-const PLAYER_COLORS: Array[Color] = [Color(0.3, 0.7, 1.0), Color(1.0, 0.75, 0.25)]
+const PLAYER_COLORS: Array[Color] = [Color(0.3, 0.7, 1.0), Color(1.0, 0.75, 0.25), Color(1.0, 0.45, 0.85)]
 
 var arena_radius := ARENA_RADIUS
 var players: Array = []
@@ -316,13 +316,23 @@ func _ring(pos: Vector3, radius: float, color: Color) -> void:
 # --- Players -----------------------------------------------------------------
 
 func _build_players(mode: String) -> void:
-	for i in 2:
+	# Networked: VR player + up to two TV players (player 3 joins later). Local split screen: two.
+	var count := 3 if mode != "local" else 2
+	for i in count:
 		var p := PlayerScript.new()
 		p.index = i
 		p.color = PLAYER_COLORS[i]
 		p.main = self
 		p.remote = mode == "host" and i == 1  # host: player 2 is driven by the Steam Machine
 		p.ghost = mode == "client" and i == 0  # client: player 1 is the VR player, shown from snapshots
+		if mode == "host":
+			p.remote = i >= 1
+		if i == 2:
+			p.position = Vector3(0, 0, 6)
+			p.key_set = 0  # TV player 3: WASD + mouse (or a second controller)
+			p.mouse_look = true
+		elif mode == "local" and i == 0:
+			p.mouse_look = true
 		p.position = Vector3(-2.5 + 5.0 * i, 0, 4)
 		add_child(p)
 		players.append(p)
@@ -463,6 +473,7 @@ func _build_views(mode: String) -> void:
 		if p.vr or p.remote or p.ghost:
 			continue
 		var container := SubViewportContainer.new()
+		p.set_meta("view", container)
 		container.stretch = true
 		container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		container.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -484,6 +495,11 @@ func _build_views(mode: String) -> void:
 		hud.main = self
 		hud_layer.add_child(hud)
 		p.hud = hud
+	for p in players:
+		if p.index == 2:
+			p.set_active(false)
+			if p.has_meta("view"):
+				p.get_meta("view").visible = false
 	if mode == "client":
 		_add_bubble(players[1].hud, _build_ghost_mirror(), PLAYER_COLORS[0])
 
@@ -510,7 +526,10 @@ func _assign_joypads() -> void:
 	# Player 1 is keyboard + mouse; the first controller goes to player 2, a second one to player 1.
 	var pads := Input.get_connected_joypads()
 	players[1].joy = pads[0] if pads.size() > 0 else -1
-	players[0].joy = pads[1] if pads.size() > 1 and not players[0].vr else -1
+	if players.size() > 2:
+		players[2].joy = pads[1] if pads.size() > 1 else -1
+	elif not players[0].vr:
+		players[0].joy = pads[1] if pads.size() > 1 else -1
 	for id in pads:
 		print("Joypad %d: %s" % [id, Input.get_joy_name(id)])
 
@@ -523,7 +542,7 @@ func nearest_player(pos: Vector3):
 	var best = null
 	var best_d := INF
 	for p in players:
-		if p.is_down:
+		if p.is_down or not p.active:
 			continue
 		var d: float = pos.distance_squared_to(p.global_position)
 		if d < best_d:
@@ -591,8 +610,9 @@ func _process(delta: float) -> void:
 			mirror_vp.render_target_update_mode = SubViewport.UPDATE_ONCE
 	_update_hud()
 	if net.mode == "client":
-		# The host simulates; we only draw the beam and can ask for a restart.
+		# The host simulates; we only draw the beam and can ask for a restart (or join as player 3).
 		_update_tether(delta)
+		_check_join(delta)
 		if game_over:
 			game_over_time += delta
 			if game_over_time > 1.5 and _restart_pressed():
@@ -627,7 +647,7 @@ func _process(delta: float) -> void:
 
 	var all_down := true
 	for p in players:
-		if not p.is_down:
+		if p.active and not p.is_down:
 			all_down = false
 	if all_down:
 		_on_game_over()
@@ -871,45 +891,62 @@ func _unhandled_input(event: InputEvent) -> void:
 
 ## Co-op beam: while both players stand within TETHER_RANGE, a beam links them and zaps enemies it touches.
 func _update_tether(delta: float) -> void:
-	if tether == null:
-		tether = MeshInstance3D.new()
+	var tether_range: float = upg.tether_range
+	zap_t -= delta
+	var used := {}
+	for i in players.size():
+		for j in range(i + 1, players.size()):
+			var a = players[i]
+			var b = players[j]
+			if not a.active or not b.active or a.is_down or b.is_down:
+				continue
+			var pa: Vector3 = a.global_position + Vector3.UP * 0.6
+			var pb: Vector3 = b.global_position + Vector3.UP * 0.6
+			var length := pa.distance_to(pb)
+			if length > tether_range or length < 0.5:
+				continue
+			var key := "%d-%d" % [i, j]
+			used[key] = true
+			_draw_beam(key, pa, pb, length, tether_range)
+			if net.mode != "client":
+				_zap_along(pa, pb, delta)
+	for key in beams.keys():
+		beams[key].visible = used.has(key)
+	if not used.is_empty() and not tether_announced:
+		tether_announced = true
+		_show_center("NEW: CO-OP BEAM\nStay close and the beam between you zaps enemies", 2.5)
+	if tether:
+		tether.visible = false  # the old single beam from before 3 players
+
+
+var beams := {}
+func _draw_beam(key: String, pa: Vector3, pb: Vector3, length: float, tether_range: float) -> void:
+	var beam: MeshInstance3D = beams.get(key)
+	if beam == null:
+		beam = MeshInstance3D.new()
 		var cyl := CylinderMesh.new()
 		cyl.top_radius = 0.07
 		cyl.bottom_radius = 0.07
 		cyl.height = 1.0
 		cyl.radial_segments = 8
-		tether.mesh = cyl
-		tether_mat = make_material(Color(0.7, 1.0, 0.95), 4.0)
-		tether.material_override = tether_mat
-		tether.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		add_child(tether)
-	var a = players[0]
-	var b = players[1]
-	var pa: Vector3 = a.global_position + Vector3.UP * 0.6
-	var pb: Vector3 = b.global_position + Vector3.UP * 0.6
-	var length := pa.distance_to(pb)
-	var tether_range: float = upg.tether_range
-	tether.visible = not a.is_down and not b.is_down and length <= tether_range and length > 0.5
-	if not tether.visible:
-		return
-	if not tether_announced:
-		tether_announced = true
-		_show_center("NEW: CO-OP BEAM\nStay close and the beam between you zaps enemies", 2.5)
-	var dir := (pb - pa) / length
-	if not tether.material_override is ShaderMaterial:
+		beam.mesh = cyl
 		var sm := ShaderMaterial.new()
 		sm.shader = Shader.new()
 		sm.shader.code = TETHER_SHADER
-		tether.material_override = sm
-	var beam_mat: ShaderMaterial = tether.material_override
+		beam.material_override = sm
+		beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(beam)
+		beams[key] = beam
+	var dir := (pb - pa) / length
+	var beam_mat: ShaderMaterial = beam.material_override
 	beam_mat.set_shader_parameter("length_m", length)
-	tether.global_transform = Transform3D(Basis(Quaternion(Vector3.UP, dir)) * Basis.from_scale(Vector3(1.0, length, 1.0)), (pa + pb) * 0.5)
+	beam.global_transform = Transform3D(Basis(Quaternion(Vector3.UP, dir)) * Basis.from_scale(Vector3(1.0, length, 1.0)), (pa + pb) * 0.5)
 	# Flicker, and fade as the players near the range limit.
 	var strength := 1.0 - smoothstep(tether_range * 0.7, tether_range, length)
 	beam_mat.set_shader_parameter("energy", (1.5 + randf() * 2.0) * maxf(strength, 0.3))
-	if net.mode == "client":
-		return  # zapping is simulated on the host
-	zap_t -= delta
+
+
+func _zap_along(pa: Vector3, pb: Vector3, delta: float) -> void:
 	for e in get_tree().get_nodes_in_group("enemies"):
 		var ep: Vector3 = e.global_position + Vector3.UP * 0.6
 		var cp := Geometry3D.get_closest_point_to_segment(ep, pa, pb)
@@ -962,9 +999,26 @@ func on_client_left() -> void:
 	_show_center("Player 2 left - waiting for them to rejoin…", 0.0)
 
 
-## Host: player 2 did something on the Steam Machine.
-func on_p2_action(action: String, args: Array) -> void:
-	var p2 = players[1]
+## Client: player 3 joins by pressing fire on the second controller / keyboard / mouse.
+var join_t := 0.0
+func _check_join(delta: float) -> void:
+	join_t -= delta
+	if players.size() < 3 or players[2].active or join_t > 0.0 or game_over:
+		return
+	if players[2]._fire_held():
+		join_t = 1.0
+		net.send_action("join", [], 2)
+
+
+## A player slot woke up or went to sleep: show/hide its split-screen view.
+func on_player_activity_changed(p) -> void:
+	if p.has_meta("view"):
+		p.get_meta("view").visible = p.active
+
+
+## Host: a TV player did something on the Steam Machine.
+func on_p2_action(action: String, args: Array, index: int = 1) -> void:
+	var p2 = players[index]
 	match action:
 		"fire":
 			if not has_meta("p2_fired"):
@@ -976,6 +1030,11 @@ func on_p2_action(action: String, args: Array) -> void:
 				spawn_bullet(origins[i], dirs[i], p2.color, p2, false)
 		"dash":
 			p2.invuln_t = maxf(p2.invuln_t, PlayerScript.DASH_TIME + 0.1)
+		"join":
+			if not p2.active:
+				p2.set_active(true)
+				p2.hp = p2.stat("max_hp")
+				_show_center("PLAYER %d JOINED!" % (index + 1), 1.5)
 		"restart":
 			if game_over:
 				get_tree().reload_current_scene()
@@ -1006,7 +1065,7 @@ func make_snapshot() -> Array:
 	var ps := []
 	for p in players:
 		ps.append([p.global_position, p.yaw, p.pitch, p.hp, p.is_down, p.revive_progress, p.spread_t,
-			p.head_transform(), p.hand_transform(), p.left_hand_transform(), p.personal, p.xp, p.skills])
+			p.head_transform(), p.hand_transform(), p.left_hand_transform(), p.personal, p.xp, p.skills, p.active])
 	var es := []
 	for e in get_tree().get_nodes_in_group("enemies"):
 		es.append([e.net_id, e.kind, e.global_position, e.rotation.y, e.hp])
@@ -1036,7 +1095,7 @@ func apply_snapshot(s: Array) -> void:
 	upg_names = s[3]
 	game_over = s[4]
 	var ps: Array = s[5]
-	for i in mini(2, ps.size()):
+	for i in mini(players.size(), ps.size()):
 		players[i].apply_net_state(ps[i])
 	_sync_ghosts(s[6], "enemy")
 	_sync_ghosts(s[7], "pickup")
@@ -1133,10 +1192,12 @@ func apply_event(kind: String, args: Array) -> void:
 		"bullet":
 			spawn_bullet(args[0], args[1], args[2], null, true)
 		"hurt":
-			players[1].on_remote_hurt(args[0])
+			var hp_index: int = args[0] if args.size() > 1 else 1
+			players[hp_index].on_remote_hurt(args[-1])
 		"hitmark":
-			if players[1].hud:
-				players[1].hud.hit_marker()
+			var hm_index: int = args[0] if args.size() > 0 else 1
+			if players[hm_index].hud:
+				players[hm_index].hud.hit_marker()
 
 
 # --- Camera & HUD ------------------------------------------------------------
@@ -1289,7 +1350,7 @@ func _update_hud() -> void:
 	info_label.text = "WAVE %d        SCORE %d" % [wave, score]
 	var xps: Array[String] = []
 	for p in players:
-		if not p.vr and not p.ghost:
+		if not p.vr and not p.ghost and p.active:
 			xps.append("P%d XP %d" % [p.index + 1, p.xp])
 	if not xps.is_empty():
 		info_label.text += "        " + "  ·  ".join(xps)

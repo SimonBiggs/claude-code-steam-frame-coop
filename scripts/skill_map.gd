@@ -86,7 +86,7 @@ func _make_node(key: String, tier: int, title: String, color: Color, pos: Vector
 	line.look_at(pos + Vector3.UP * 0.03, Vector3.UP)
 	# Owner pips: a small ring in each owner's colour.
 	var pips: Array = []
-	for i in 2:
+	for i in 3:
 		var pip := MeshInstance3D.new()
 		var tm := TorusMesh.new()
 		tm.inner_radius = 0.66 + i * 0.12
@@ -109,7 +109,7 @@ func _process(delta: float) -> void:
 		var tier: int = n.tier
 		var revealed := tier == 1
 		var affordable := false
-		for i in main.players.size():
+		for i in mini(main.players.size(), n.pips.size()):
 			var p = main.players[i]
 			var owned: int = p.skills.get(key, 0)
 			n.pips[i].visible = owned >= tier

@@ -56,7 +56,7 @@ func _on_body_entered(body: Node3D) -> void:
 		if owner_player and owner_player.hud:
 			owner_player.hud.hit_marker()
 		elif owner_player and owner_player.remote:
-			owner_player.main.net.event("hitmark", [])
+			owner_player.main.net.event("hitmark", [owner_player.index])
 	queue_free()
 
 

@@ -133,16 +133,16 @@ func event(kind: String, args: Array) -> void:
 		_event.rpc(kind, args)
 
 
-## Client: report player 2's position and view every physics tick.
-func send_state(pos: Vector3, yaw: float, pitch: float) -> void:
+## Client: report a local player's position and view every physics tick.
+func send_state(pos: Vector3, yaw: float, pitch: float, index: int = 1) -> void:
 	if mode == "client" and connected:
-		_p2_state.rpc_id(1, pos, yaw, pitch)
+		_px_state.rpc_id(1, index, pos, yaw, pitch)
 
 
-## Client: player 2 did something the host must simulate (fire, dash, restart).
-func send_action(action: String, args: Array) -> void:
+## Client: a local player did something the host must simulate (fire, dash, restart, join).
+func send_action(action: String, args: Array, index: int = 1) -> void:
 	if mode == "client" and connected:
-		_p2_action.rpc_id(1, action, args)
+		_px_action.rpc_id(1, index, action, args)
 
 
 # --- RPCs (same node path /root/Main/Net on both machines) -------------------
@@ -159,15 +159,15 @@ func _event(kind: String, args: Array) -> void:
 
 
 @rpc("any_peer", "call_remote", "unreliable_ordered")
-func _p2_state(pos: Vector3, yaw: float, pitch: float) -> void:
-	if mode == "host":
-		main.players[1].apply_remote_state(pos, yaw, pitch)
+func _px_state(index: int, pos: Vector3, yaw: float, pitch: float) -> void:
+	if mode == "host" and index > 0 and index < main.players.size():
+		main.players[index].apply_remote_state(pos, yaw, pitch)
 
 
 @rpc("any_peer", "call_remote", "reliable")
-func _p2_action(action: String, args: Array) -> void:
-	if mode == "host":
-		main.on_p2_action(action, args)
+func _px_action(index: int, action: String, args: Array) -> void:
+	if mode == "host" and index > 0 and index < main.players.size():
+		main.on_p2_action(action, args, index)
 
 
 ## The VR player's left menu button pauses both machines (runs even while paused).
