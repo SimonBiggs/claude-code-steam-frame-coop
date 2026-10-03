@@ -59,6 +59,7 @@ Pick from the arcade lobby: the TV shows a picker, and the VR player can choose 
 | **Snowball Blitz** | cosy winter snow fort | scoop, pack and really throw snowballs, pan-lid shield | lob snowballs, rebuild the fort walls |
 | **Cannon Cove** | pirates at sunset | grab and swing the cannons, spyglass | haul cannonballs, patch leaks, musket boarders |
 | **Kitchen Rush** | cartoon cooking chaos | chop with a real knife swing, plate up orders | fetch ingredients, serve customers, fight fires |
+| **Giant's Table** | cosy fantasy tabletop village | a giant: grab and throw goblins, ogres and boulders | tiny knights with sword and crossbow, carry embers home |
 
 ## Duo Arena (game #1)
 
