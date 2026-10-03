@@ -4,7 +4,7 @@ config_version=5
 [application]
 
 config/name="Duo Arena"
-run/main_scene="res://main.tscn"
+run/main_scene="res://arcade.tscn"
 config/features=PackedStringArray("4.7", "Forward Plus")
 
 [display]

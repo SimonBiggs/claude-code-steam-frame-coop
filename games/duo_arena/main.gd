@@ -1,21 +1,21 @@
 extends Node3D
 ## Game controller: builds the arena, runs waves, camera and HUD.
 
-const PlayerScript := preload("res://scripts/player.gd")
-const EnemyScript := preload("res://scripts/enemy.gd")
-const PickupScript := preload("res://scripts/pickup.gd")
-const SfxScript := preload("res://scripts/sfx.gd")
-const PauseMenuScript := preload("res://scripts/pause_menu.gd")
-const WorldScript := preload("res://scripts/world.gd")
-const HudScript := preload("res://scripts/hud.gd")
-const NetScript := preload("res://scripts/net.gd")
-const BulletScript := preload("res://scripts/bullet.gd")
-const EnemyShotScript := preload("res://scripts/enemy_shot.gd")
-const MusicScript := preload("res://scripts/music.gd")
-const FishScript := preload("res://scripts/fish.gd")
-const AchScript := preload("res://scripts/achievements.gd")
-const TreeScript := preload("res://scripts/skill_map.gd")
-const TurretScript := preload("res://scripts/turret.gd")
+const PlayerScript := preload("res://games/duo_arena/player.gd")
+const EnemyScript := preload("res://games/duo_arena/enemy.gd")
+const PickupScript := preload("res://games/duo_arena/pickup.gd")
+const SfxScript := preload("res://core/sfx.gd")
+const PauseMenuScript := preload("res://core/pause_menu.gd")
+const WorldScript := preload("res://games/duo_arena/world.gd")
+const HudScript := preload("res://games/duo_arena/hud.gd")
+const NetScript := preload("res://core/net.gd")
+const BulletScript := preload("res://games/duo_arena/bullet.gd")
+const EnemyShotScript := preload("res://games/duo_arena/enemy_shot.gd")
+const MusicScript := preload("res://core/music.gd")
+const FishScript := preload("res://games/duo_arena/fish.gd")
+const AchScript := preload("res://games/duo_arena/achievements.gd")
+const TreeScript := preload("res://games/duo_arena/skill_map.gd")
+const TurretScript := preload("res://games/duo_arena/turret.gd")
 
 const ARENA_RADIUS := 18.0
 ## Team upgrades granted after each cleared wave: [name, description, stat, "mul" or "add", amount]

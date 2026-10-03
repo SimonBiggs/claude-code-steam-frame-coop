@@ -4,7 +4,7 @@ extends CharacterBody3D
 ## Keyboard P1: WASD move, mouse look, click or Space shoot, Shift dash.
 ## Keyboard P2: arrows forward/back + turn, Enter shoot, Ctrl dash.
 
-const BulletScript := preload("res://scripts/bullet.gd")
+const BulletScript := preload("res://games/duo_arena/bullet.gd")
 
 const SPEED := 7.0
 const DASH_SPEED := 22.0
@@ -874,7 +874,7 @@ func _ensure_wrist_radar() -> void:
 	vp.transparent_bg = true
 	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	add_child(vp)
-	var radar := preload("res://scripts/hud.gd").new()
+	var radar := preload("res://games/duo_arena/hud.gd").new()
 	radar.player = self
 	radar.main = main
 	radar.radar_only = true

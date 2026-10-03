@@ -3,7 +3,7 @@ extends Node
 var main
 var t := 0.0
 func _ready():
-	main = load("res://main.tscn").instantiate()
+	main = load("res://games/duo_arena/main.tscn").instantiate()
 	add_child(main)
 	for k in [KEY_SPACE, KEY_ENTER]:
 		var e := InputEventKey.new()

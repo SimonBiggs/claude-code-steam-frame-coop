@@ -11,7 +11,7 @@ func _exit_tree():
 	print("spitters=%d shots=%d" % [spitters, shots])
 func _ready():
 	get_tree().node_added.connect(_count)
-	main = load("res://main.tscn").instantiate()
+	main = load("res://games/duo_arena/main.tscn").instantiate()
 	add_child(main)
 	main.wave = int(OS.get_environment("START_WAVE")) if OS.has_environment("START_WAVE") else 0
 	for k in [KEY_SPACE, KEY_ENTER]:

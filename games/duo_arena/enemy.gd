@@ -1,7 +1,7 @@
 extends CharacterBody3D
 ## Chases the nearest standing player and hurts them on contact.
 
-const EnemyShotScript := preload("res://scripts/enemy_shot.gd")
+const EnemyShotScript := preload("res://games/duo_arena/enemy_shot.gd")
 const KINDS := {
 	"grunt": {"hp": 3.0, "speed": 3.6, "radius": 0.55, "color": Color(0.95, 0.25, 0.3), "dps": 30.0, "points": 100, "drop": 0.06},
 	"runner": {"hp": 1.0, "speed": 6.8, "radius": 0.4, "color": Color(1.0, 0.55, 0.1), "dps": 20.0, "points": 150, "drop": 0.05},

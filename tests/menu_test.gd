@@ -3,7 +3,7 @@ extends Node
 var main
 var f := 0
 func _ready():
-	main = load("res://main.tscn").instantiate()
+	main = load("res://games/duo_arena/main.tscn").instantiate()
 	add_child(main)
 	process_mode = Node.PROCESS_MODE_ALWAYS
 func _esc():

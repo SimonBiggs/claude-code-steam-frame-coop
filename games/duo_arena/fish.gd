@@ -194,7 +194,7 @@ func _fireballs(delta: float) -> void:
 	var target = targets.pick_random()
 	var from := global_position + -global_basis.z * 2.5
 	var aim: Vector3 = target.global_position + Vector3.UP * 1.0 - from
-	var ball := preload("res://scripts/enemy_shot.gd").new()
+	var ball := preload("res://games/duo_arena/enemy_shot.gd").new()
 	ball.main = main
 	ball.net_id = main.next_net_id()
 	ball.fireball = true
