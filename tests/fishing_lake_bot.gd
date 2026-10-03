@@ -8,6 +8,9 @@ extends Node
 ## flick casts, yanks on the bite, and winding the left hand around the reel.
 ## BOT_GREEDY=1: the angler never eases off (exercises line snaps).
 ## Local mode also joins one boat by pressing A on a fake controller, and checks Start does NOT join.
+## Events are forced on a timeline (host / local): fish frenzy, a treasure map (boats find the X and drop
+## the buoy, the angler casts at it for the pirate chest), OLD WHISKERS the legend (boats splash next to
+## him to tire him out), then rain on day 2 and starry night late on day 2.
 
 const FAKE_PAD := 40
 
@@ -29,6 +32,8 @@ var aim := 0.0
 var crank_a := 0.0
 var flicks := 0
 var max_crank := 0.0
+var events_done := {}
+var seen := {}  # things that happened (both machines), for the summary
 
 
 func _ready() -> void:
@@ -80,6 +85,8 @@ func _physics_process(delta: float) -> void:
 		print("BOT: day %d complete (%d so far)" % [last_day, days_done])
 	last_day = main.day
 	max_score = maxi(max_score, main.score)
+	_events_timeline(mode)
+	_watch()
 	for p in main.players:
 		if p.index > 0 and p.active and p.is_local():
 			_drive_boat(p)
@@ -98,6 +105,56 @@ func _physics_process(delta: float) -> void:
 	if report_t <= 0.0:
 		report_t = 4.0
 		_report(mode)
+
+
+## Host / local: force the day's events at fixed times so one short test sees them all.
+func _events_timeline(mode: String) -> void:
+	if mode == "client" or main.state != "play":
+		return
+	var plan := [["legend", 1, 1.5], ["map", 1, 16.0], ["frenzy", 2, 3.0], ["night", 2, 22.0]]
+	var day_t: float = main.round_time - main.time_left
+	for e in plan:
+		var ee: Array = e
+		var key := "%s%d" % [ee[0], ee[1]]
+		if events_done.has(key) or main.day != int(ee[1]) or day_t < float(ee[2]):
+			continue
+		if str(ee[0]) == "map" and main.active_boats().is_empty():
+			continue
+		events_done[key] = true
+		print("BOT: forcing event %s on day %d" % [ee[0], main.day])
+		main.debug_event(str(ee[0]))
+
+
+## Records what each machine saw (mirrored state on the TV machine).
+func _watch() -> void:
+	if main.rain > 0.3:
+		seen["rain"] = true
+	if main.daylight > 1.15:
+		seen["night"] = true
+	if main.frenzy_t > 0.0:
+		seen["frenzy"] = true
+	if main.map_state == 1:
+		seen["map_x"] = true
+	if main.map_state == 2:
+		seen["buoy"] = true
+	if main.legend_state == 1:
+		seen["legend"] = true
+	if main.legend_state == 2:
+		seen["legend_caught"] = true
+	if main.legend_stamina < 1.0:
+		seen["legend_tired"] = true
+	if main.streak >= 2:
+		seen["streak"] = true
+	if main.players[0].hooked_kind() == main.FishScript.LEGEND:
+		seen["legend_hooked"] = true
+	for p in main.players:
+		if p.index > 0 and p.level > 0:
+			seen["upgrade_L%d" % p.level] = true
+	for f in main.fish:
+		if f.kind >= 0:
+			seen["kind_%d" % f.kind] = true
+	if main.journal_text != "":
+		seen["journal"] = true
 
 
 func _join_players(mode: String) -> void:
@@ -119,6 +176,18 @@ func _join_players(mode: String) -> void:
 
 func _flat(v: Vector3) -> Vector3:
 	return Vector3(v.x, 0.0, v.z)
+
+
+## Where an angler would like to cast now: the buoy, the frenzy bubbles or the legend come first.
+func _event_target(from: Vector3) -> Vector3:
+	for f in main.fish:
+		if f.kind == main.FishScript.LEGEND and f.free_to_bite():
+			return f.position + Vector3(0.6, 0, 0.6)
+	if main.map_state == 2:
+		return main.map_pos
+	if main.frenzy_t > 2.0:
+		return main.frenzy_pos
+	return Vector3.INF
 
 
 func _target_fish(from: Vector3):
@@ -145,7 +214,10 @@ func _drive_angler(a) -> void:
 				var tip: Vector3 = a.tip_pos()
 				var f = _target_fish(tip)
 				var to := Vector3(0, 0, -10)
-				if f != null:
+				var ev := _event_target(tip)
+				if ev != Vector3.INF:
+					to = _flat(ev - tip)
+				elif f != null:
 					to = _flat(f.position - tip)
 				a.bot_cast_dir = to.normalized()
 				a.bot_cast_dist = clampf(to.length(), 5.0, 18.0)
@@ -178,7 +250,11 @@ func _drive_fake_vr(a, delta: float) -> void:
 				vr_phase = "idle"
 			elif vr_phase == "idle":
 				var f = _target_fish(a.tip_pos())
-				if f != null:
+				var ev := _event_target(a.tip_pos())
+				if ev != Vector3.INF:
+					var to := _flat(ev - hr.global_position)
+					aim = atan2(-to.x, -to.z)
+				elif f != null:
 					var to := _flat(f.position - hr.global_position)
 					aim = atan2(-to.x, -to.z)
 				else:
@@ -242,6 +318,24 @@ func _drive_boat(p) -> void:
 	var want_net := false
 	var want_call := false
 	var best_d := 1e9
+	var a = main.players[0]
+	# A fish on the line: row next to it and splash (co-op catch).
+	if a.line_state == "fight" and p.index <= 3:
+		var lp: Vector3 = a.lure_pos
+		var side := _flat(lp - Vector3(0, 0, 4.0)).normalized()
+		var spot := lp + Vector3(side.z, 0, -side.x) * (1.5 if p.index % 2 == 0 else -1.5)
+		var to_spot := _flat(spot - p.position)
+		p.bot_dir = to_spot.normalized() * clampf(to_spot.length() / 2.0, 0.3, 1.0) if to_spot.length() > 0.5 else Vector3.ZERO
+		p.bot_net = _flat(p.net_point() - lp).length() < 3.5 and frame % 40 < 2
+		p.bot_call = false
+		return
+	# The treasure map's X: go there and press A.
+	if main.map_state == 1 and p.index == 1:
+		var to_x := _flat(main.map_pos - p.position)
+		p.bot_dir = to_x.normalized() * clampf(to_x.length() / 2.0, 0.3, 1.0) if to_x.length() > 0.8 else Vector3.ZERO
+		p.bot_net = to_x.length() < 2.3 and frame % 30 < 2
+		p.bot_call = false
+		return
 	for tr in main.treasures:
 		if tr.kind < 0:
 			continue
@@ -265,8 +359,8 @@ func _drive_boat(p) -> void:
 			if _flat(f.position - p.position).length() < 9.0:
 				want_call = true
 	if not has_tgt:
-		var a: float = t * 0.2 + p.index
-		tgt = Vector3(sin(a) * 9.0, 0.0, -10.0 + cos(a) * 9.0)
+		var ang: float = t * 0.2 + p.index
+		tgt = Vector3(sin(ang) * 9.0, 0.0, -10.0 + cos(ang) * 9.0)
 	var to := _flat(tgt - p.position)
 	p.bot_dir = to.normalized() * clampf(to.length() / 2.0, 0.3, 1.0) if to.length() > 0.3 else Vector3.ZERO
 	p.bot_net = want_net and frame % 4 < 2
@@ -275,6 +369,13 @@ func _drive_boat(p) -> void:
 
 func _report(mode: String) -> void:
 	var a = main.players[0]
+	var lv: Array[String] = []
+	for p in main.players:
+		if p.index > 0 and p.active:
+			lv.append("%d" % p.level)
+	print("BOT %s events: rain=%.2f sky=%.2f frenzy=%.0f map=%d legend=%d stamina=%.2f streak=%d hooked=%d journal=%d boat_levels=[%s]" % [
+		mode, main.rain, main.daylight, main.frenzy_t, main.map_state, main.legend_state, main.legend_stamina, main.streak,
+		a.hooked_kind(), main._journal_found(), ",".join(lv)])
 	var boats: Array[String] = []
 	var scooped := 0
 	var calls := 0
@@ -308,3 +409,6 @@ func _exit_tree() -> void:
 		return
 	print("BOT SUMMARY: mode=%s days_completed=%d max_score=%d casts=%d catches=%d snaps=%d" % [
 		main.net.mode, days_done, max_score, a.casts, a.catches, a.snaps])
+	var keys: Array = seen.keys()
+	keys.sort()
+	print("BOT SEEN: %s" % " ".join(PackedStringArray(keys)))

@@ -9,7 +9,11 @@ const KINDS := [
 	{"name": "Message in a Bottle", "pts": 15, "col": Color(0.3, 0.75, 0.45)},
 	{"name": "Water Lily", "pts": 5, "col": Color(1.0, 0.6, 0.85)},
 	{"name": "Floating Crate", "pts": 20, "col": Color(0.7, 0.5, 0.3)},
+	{"name": "TREASURE MAP", "pts": 10, "col": Color(0.95, 0.85, 0.6)},
+	{"name": "Shiny Shell", "pts": 12, "col": Color(1.0, 0.75, 0.8)},
 ]
+const MAP := 4
+const SHELL := 5
 
 var main
 var kind := -1
@@ -88,11 +92,42 @@ func _rebuild() -> void:
 			flower.material_override = mat
 			flower.position = Vector3(0, 0.07, 0)
 			look.add_child(flower)
+		MAP:
+			# A rolled-up map with a red ribbon, bobbing on a little raft of bubbles.
+			var roll := MeshInstance3D.new()
+			roll.mesh = main.cyl_mesh(0.07, 0.07, 0.5, 10)
+			roll.material_override = main.make_material(col, 0.5)
+			roll.rotation.z = deg_to_rad(90.0)
+			roll.position = Vector3(0, 0.08, 0)
+			look.add_child(roll)
+			var ribbon := MeshInstance3D.new()
+			ribbon.mesh = main.cyl_mesh(0.075, 0.075, 0.06, 10)
+			ribbon.material_override = main.make_material(Color(0.9, 0.15, 0.1), 0.6)
+			ribbon.rotation.z = deg_to_rad(90.0)
+			ribbon.position = Vector3(0, 0.08, 0)
+			look.add_child(ribbon)
+		SHELL:
+			var sh := MeshInstance3D.new()
+			sh.mesh = main.sphere_mesh(0.2)
+			sh.scale = Vector3(1.0, 0.45, 0.85)
+			sh.material_override = main.make_material(col, 0.6)
+			sh.position = Vector3(0, 0.05, 0)
+			look.add_child(sh)
+			var pearl := MeshInstance3D.new()
+			pearl.mesh = main.sphere_mesh(0.07)
+			pearl.material_override = main.make_material(Color(1.0, 1.0, 0.95), 1.2)
+			pearl.position = Vector3(0, 0.12, 0.08)
+			look.add_child(pearl)
 		_:
 			var c := MeshInstance3D.new()
 			c.mesh = main.box_mesh(Vector3(0.45, 0.35, 0.45))
 			c.material_override = mat
 			look.add_child(c)
+			var slat := MeshInstance3D.new()
+			slat.mesh = main.box_mesh(Vector3(0.47, 0.06, 0.47))
+			slat.material_override = main.make_material(Color(0.45, 0.3, 0.18), 0.0)
+			slat.position = Vector3(0, 0.08, 0)
+			look.add_child(slat)
 
 
 func _process(delta: float) -> void:

@@ -5,12 +5,18 @@ extends Node3D
 ## X / Y: call out the nearest fish - it gets a big icon and swims to the angler's bobber.
 ## Local boats move themselves (also on the TV machine, so it feels instant); on the host the TV's
 ## boats are "remote" and follow the positions it sends.
+## Upgrades: scooping treasure and helping the angler earns coins; at 3 / 7 / 12 coins the boat gets a
+## SAIL (faster), a BIG NET (scoops from further) and a LANTERN MOTOR (fastest, sparkly wake). The host
+## decides the level and sends it in the snapshots.
 
 const Lake := preload("res://games/fishing_lake/lake.gd")
 const NO_KEYS := 99
 const MAX_SPEED := 3.6
 const ACCEL := 3.4
 const TURN := 2.4
+const LEVEL_COINS: Array[int] = [3, 7, 12]
+const LEVEL_NAMES: Array[String] = ["ROWING BOAT", "SAILING BOAT", "BIG NET BOAT", "LANTERN MOTORBOAT"]
+const SPEED_MULT: Array[float] = [1.0, 1.25, 1.3, 1.5]
 
 var index := 1
 var main
@@ -25,7 +31,14 @@ var mouse_look := false
 var camera: Camera3D
 var hud: Control
 var hud_label: Label
+var tip_label: Label
 var pad_lost_t := -1.0
+var level := 0
+var coins := 0
+var built_level := 0
+var wake: CPUParticles3D
+var sparkle: CPUParticles3D
+var ring: MeshInstance3D
 
 var vel := Vector3.ZERO
 var yaw := 0.0
@@ -123,7 +136,7 @@ func _ready() -> void:
 	pole.rotation.x = deg_to_rad(90.0)
 	pole.position = Vector3(0, 0, -0.7)
 	net_pivot.add_child(pole)
-	var ring := MeshInstance3D.new()
+	ring = MeshInstance3D.new()
 	var tm := TorusMesh.new()
 	tm.inner_radius = 0.24
 	tm.outer_radius = 0.28
@@ -143,6 +156,40 @@ func _ready() -> void:
 	mesh_bag.position = Vector3(0, -0.15, -1.6)
 	net_pivot.add_child(mesh_bag)
 	net_pivot.rotation.x = deg_to_rad(25.0)
+	# A little pennant in the player's colour at the stern, so you can spot your boat.
+	var stick := MeshInstance3D.new()
+	stick.mesh = main.cyl_mesh(0.015, 0.015, 0.9, 5)
+	stick.material_override = pole.material_override
+	stick.position = Vector3(0, 0.7, 0.85)
+	hull.add_child(stick)
+	var pennant := MeshInstance3D.new()
+	var pp := PrismMesh.new()
+	pp.size = Vector3(0.3, 0.4, 0.01)
+	pennant.mesh = pp
+	pennant.material_override = main.make_material(color, 0.4)
+	pennant.rotation.z = deg_to_rad(-90.0)
+	pennant.position = Vector3(0, 1.0, 1.05)
+	pennant.rotation.y = deg_to_rad(90.0)
+	hull.add_child(pennant)
+	# Wake: a few white bubbles behind the boat while it moves.
+	wake = CPUParticles3D.new()
+	wake.amount = 12
+	wake.lifetime = 1.2
+	wake.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+	wake.emission_box_extents = Vector3(0.35, 0.02, 0.1)
+	wake.direction = Vector3.UP
+	wake.spread = 60.0
+	wake.gravity = Vector3(0, -0.6, 0)
+	wake.initial_velocity_min = 0.1
+	wake.initial_velocity_max = 0.4
+	wake.scale_amount_min = 0.7
+	wake.scale_amount_max = 1.6
+	wake.mesh = main.sphere_mesh(0.06)
+	wake.material_override = main.make_material(Color(0.92, 0.97, 1.0), 0.3)
+	wake.local_coords = false
+	wake.emitting = false
+	wake.position = Vector3(0, 0.05, 1.05)
+	add_child(wake)
 	tag = Label3D.new()
 	tag.text = "P%d" % (index + 1)
 	tag.font_size = 72
@@ -157,6 +204,84 @@ func _ready() -> void:
 func set_active(on: bool) -> void:
 	active = on
 	visible = on
+
+
+## Upgrade parts appear as the level goes up (built lazily, so hot reloads and the TV machine agree).
+func set_level(l: int) -> void:
+	level = clampi(l, 0, LEVEL_NAMES.size() - 1)
+	if level == built_level:
+		return
+	built_level = level
+	var old := hull.get_node_or_null("Upgrades")
+	if old != null:
+		old.free()
+	var up := Node3D.new()
+	up.name = "Upgrades"
+	hull.add_child(up)
+	if level >= 1:
+		var mast := MeshInstance3D.new()
+		mast.mesh = main.cyl_mesh(0.03, 0.035, 1.9, 6)
+		mast.material_override = main.make_material(Color(0.75, 0.6, 0.4), 0.0)
+		mast.position = Vector3(0, 1.15, -0.35)
+		up.add_child(mast)
+		var sail := MeshInstance3D.new()
+		var pm := PrismMesh.new()
+		pm.left_to_right = 0.0
+		pm.size = Vector3(0.9, 1.4, 0.02)
+		sail.mesh = pm
+		var sm := main.make_material(color.lightened(0.45), 0.2).duplicate() as StandardMaterial3D
+		sm.cull_mode = BaseMaterial3D.CULL_DISABLED
+		sail.material_override = sm
+		sail.rotation.y = deg_to_rad(90.0)
+		sail.position = Vector3(0, 1.3, -0.35 + 0.47)
+		up.add_child(sail)
+	if level >= 2:
+		ring.scale = Vector3.ONE * 1.45
+	else:
+		ring.scale = Vector3.ONE
+	if level >= 3:
+		var lpole := MeshInstance3D.new()
+		lpole.mesh = main.cyl_mesh(0.02, 0.02, 0.8, 5)
+		lpole.material_override = main.make_material(Color(0.3, 0.3, 0.3), 0.0)
+		lpole.position = Vector3(-0.3, 0.75, 0.75)
+		up.add_child(lpole)
+		var lamp := MeshInstance3D.new()
+		lamp.mesh = main.sphere_mesh(0.09)
+		lamp.material_override = main.make_material(Color(1.0, 0.85, 0.4), 2.5)
+		lamp.position = Vector3(-0.3, 1.18, 0.75)
+		up.add_child(lamp)
+		var motor := MeshInstance3D.new()
+		motor.mesh = main.box_mesh(Vector3(0.22, 0.3, 0.22))
+		motor.material_override = main.make_material(Color(0.2, 0.2, 0.25), 0.0)
+		motor.position = Vector3(0, 0.3, 1.0)
+		up.add_child(motor)
+		sparkle = CPUParticles3D.new()
+		sparkle.amount = 10
+		sparkle.lifetime = 0.9
+		sparkle.direction = Vector3.UP
+		sparkle.spread = 50.0
+		sparkle.gravity = Vector3(0, -1.5, 0)
+		sparkle.initial_velocity_min = 0.6
+		sparkle.initial_velocity_max = 1.4
+		sparkle.mesh = main.box_mesh(Vector3.ONE * 0.05)
+		sparkle.material_override = main.make_material(color.lightened(0.5), 2.0)
+		sparkle.local_coords = false
+		sparkle.position = Vector3(0, 0.15, 1.15)
+		up.add_child(sparkle)
+	else:
+		sparkle = null
+
+
+func max_speed() -> float:
+	return MAX_SPEED * SPEED_MULT[clampi(level, 0, SPEED_MULT.size() - 1)]
+
+
+func net_reach() -> float:
+	return 2.9 if level >= 2 else 2.0
+
+
+func next_level_coins() -> int:
+	return LEVEL_COINS[level] if level < LEVEL_COINS.size() else -1
 
 
 func is_local() -> bool:
@@ -261,9 +386,9 @@ func sim(delta: float) -> void:
 		var diff := wrapf(want - yaw, -PI, PI)
 		yaw += clampf(diff, -TURN * delta, TURN * delta)
 		var push := cos(clampf(diff, -PI * 0.5, PI * 0.5))
-		vel += forward() * ACCEL * amount * maxf(push, 0.0) * delta
+		vel += forward() * ACCEL * SPEED_MULT[level] * amount * maxf(push, 0.0) * delta
 	vel *= exp(-0.9 * delta)
-	vel = vel.limit_length(MAX_SPEED)
+	vel = vel.limit_length(max_speed())
 	# Sideways drag, so it handles like a boat rather than an ice cube.
 	var side := Vector3(cos(yaw), 0.0, -sin(yaw))
 	vel -= side * vel.dot(side) * (1.0 - exp(-3.0 * delta))
@@ -305,6 +430,13 @@ func _collide() -> void:
 		else:
 			position.x = signf(position.x if position.x != 0.0 else 1.0) * hw
 			vel.x *= -0.3
+	# The trophy and journal boards stand in the shallows.
+	for ob in [Lake.BOARD_L, Lake.BOARD_R]:
+		var bo: Vector3 = ob
+		var d := Vector3(position.x - bo.x, 0.0, position.z - bo.z)
+		if d.length() < 1.9 and d.length() > 0.001:
+			position += d.normalized() * (1.9 - d.length())
+			vel -= d.normalized() * minf(0.0, vel.dot(d.normalized()))
 	for o in main.players:
 		if o == self or o.index == 0 or not o.active:
 			continue
@@ -369,10 +501,16 @@ func _process(delta: float) -> void:
 	net_pivot.rotation.x = deg_to_rad(25.0 - 55.0 * swing)
 	net_pivot.rotation.y = -swing * 0.6
 	main.face_label(tag)
+	var speed := vel.length() if not remote else row_amount * MAX_SPEED
+	wake.emitting = speed > 0.6 or row_amount > 0.3
+	if sparkle != null:
+		sparkle.emitting = wake.emitting
 	if camera != null:
 		_update_camera(delta)
 	if hud_label != null:
 		hud_label.text = main.hud_text(self)
+	if tip_label != null:
+		main.update_tip(self, tip_label)
 
 
 func _update_camera(delta: float) -> void:

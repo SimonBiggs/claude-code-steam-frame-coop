@@ -6,6 +6,10 @@ extends Node3D
 ## rod back (up / towards you) to haul it in. The tension meter on the rod shows how hard the line is
 ## pulling: red means ease off, or the line snaps. Left stick walks along the jetty and shore, right
 ## stick snap-turns. Everything is measured from the rod itself or from your head, never a rest pose.
+## VR hints float above the bobber (where you are looking anyway) rather than on the rod near your eyes.
+## Big fish: when a boat splashes right next to a hooked fish it stops pulling for a moment (co-op catch);
+## OLD WHISKERS, the legend, has stamina that has to be worn down (reeling, pulling back, boat splashes)
+## before he can be reeled in.
 ## Flat (split screen / non-VR host): WASD / left stick walk, mouse / right stick aim, hold Space / LMB /
 ## A / RT to charge a cast and release, then hold it to reel; RMB / Shift / B / X yanks the rod back.
 ## On the TV machine this is a ghost drawn from the host's snapshots.
@@ -33,6 +37,7 @@ var key_set := 0
 var camera: Camera3D
 var hud: Control
 var hud_label: Label
+var tip_label: Label
 var pad_lost_t := -1.0
 var color := Color(1.0, 0.85, 0.55)
 var yaw := 0.0
@@ -119,6 +124,7 @@ var bot_reel := 0.0
 var bot_yank := false
 var fake_trigger := 0.0
 var fake_a := false
+var trig_lock := false  # after un-pausing: ignore the trigger until it has been let go
 
 # Ghost (TV machine).
 var net_body := Vector3.ZERO
@@ -127,6 +133,7 @@ var net_head := Transform3D()
 var net_rod := Transform3D()
 var net_vr := false
 var net_lure := Vector3.ZERO
+var net_hooked := -1
 
 
 func _ready() -> void:
@@ -182,6 +189,29 @@ func _build_avatar() -> void:
 	hat.material_override = main.make_material(Color(0.9, 0.8, 0.45), 0.0)
 	hat.position = Vector3(0, 0.15, 0)
 	head.add_child(hat)
+	var band := MeshInstance3D.new()
+	band.mesh = main.cyl_mesh(0.145, 0.15, 0.04, 12)
+	band.material_override = main.make_material(Color(0.85, 0.25, 0.2), 0.0)
+	band.position = Vector3(0, 0.19, 0)
+	head.add_child(band)
+	# Arms reaching forward to the rod, and wellies.
+	for s in [-1.0, 1.0]:
+		var arm := MeshInstance3D.new()
+		var ac := CapsuleMesh.new()
+		ac.radius = 0.06
+		ac.height = 0.55
+		ac.radial_segments = 8
+		ac.rings = 1
+		arm.mesh = ac
+		arm.material_override = main.make_material(Color(0.25, 0.5, 0.75), 0.0)
+		arm.position = Vector3(float(s) * 0.25, 0.95, -0.12)
+		arm.rotation.x = deg_to_rad(-60.0)
+		avatar.add_child(arm)
+		var boot := MeshInstance3D.new()
+		boot.mesh = main.box_mesh(Vector3(0.14, 0.16, 0.24))
+		boot.material_override = main.make_material(Color(0.2, 0.55, 0.25), 0.0)
+		boot.position = Vector3(float(s) * 0.1, 0.08, -0.03)
+		avatar.add_child(boot)
 
 
 func _build_rod(parent: Node3D) -> void:
@@ -349,9 +379,14 @@ func _attach_hands(origin: Node3D, cam: Node3D, left: Node3D, right: Node3D) -> 
 
 
 func _trigger() -> float:
+	var v := fake_trigger
 	if vr:
-		return (hand_r as XRController3D).get_float("trigger")
-	return fake_trigger
+		v = (hand_r as XRController3D).get_float("trigger")
+	if trig_lock:
+		if v < 0.15:
+			trig_lock = false
+		return 0.0
+	return v
 
 
 func _a_button() -> bool:
@@ -663,6 +698,8 @@ func _process(delta: float) -> void:
 	_update_visuals(delta)
 	if hud_label != null:
 		hud_label.text = main.hud_text(self)
+	if tip_label != null:
+		main.update_tip(self, tip_label)
 
 
 func anchor() -> Vector3:
@@ -730,12 +767,22 @@ func _fish(delta: float) -> void:
 		"fight":
 			_fight(delta)
 		"landing":
-			if hooked != null:
+			var big: bool = hooked != null and hooked.kind == FishScript.LEGEND
+			if big:
+				# The legend is far too big for the rod tip: he floats up alongside the jetty for a
+				# photo, then swims home (catch and release).
+				var a := anchor()
+				hooked.global_position = a + fight_dir * 2.6 + Vector3(0, 0.12 + 0.08 * sin(line_t * 3.0), 0)
+				hooked.rotation = Vector3(0.0, atan2(fight_dir.x, fight_dir.z) + PI * 0.5, sin(line_t * 2.0) * 0.15)
+				lure_pos = hooked.global_position + Vector3(0, 0.25, 0)
+			elif hooked != null:
 				hooked.global_position = tip + Vector3(0, -0.45, 0)
 				hooked.rotation = Vector3(deg_to_rad(90.0), line_t * 2.0, 0.0)
-			lure_pos = tip + Vector3(0, -0.3, 0)
+				lure_pos = tip + Vector3(0, -0.3, 0)
+			else:
+				lure_pos = tip + Vector3(0, -0.3, 0)
 			tension = maxf(0.0, tension - delta * 2.0)
-			if line_t > 2.2:
+			if line_t > (4.0 if big else 2.2):
 				if hooked != null:
 					main.release_fish(hooked)
 					hooked = null
@@ -817,6 +864,9 @@ func _fight(delta: float) -> void:
 	var d: Dictionary = hooked.info()
 	var pull: float = d["pull"]
 	var junk: bool = hooked.is_junk()
+	var legend: bool = hooked.kind == FishScript.LEGEND
+	if legend and main.legend_stamina <= 0.0:
+		pull = 0.45  # worn out
 	phase_t -= delta
 	if phase_t <= 0.0:
 		if junk:
@@ -831,7 +881,7 @@ func _fight(delta: float) -> void:
 				phase_t = randf_range(1.4, 2.6)
 				main.on_fish_tired(hooked)
 				haptic(0.4, 0.1)
-	var heavy := 0.55 if hooked.kind == FishScript.CHEST else 1.0
+	var heavy := 0.55 if hooked.kind == FishScript.CHEST else (0.6 if legend else 1.0)
 	var reel_in := reel * REEL_SPEED * (0.35 if surge else 1.0) * heavy
 	var out := pull * 1.5 if surge else 0.0
 	fight_dist = clampf(fight_dist + (out - reel_in) * delta, 0.0, MAX_LINE)
@@ -848,9 +898,16 @@ func _fight(delta: float) -> void:
 		else:
 			fight_dist = maxf(0.0, fight_dist - (1.6 + (1.0 - pull)))
 			main.on_yank(lure_pos, true)
+			if legend:
+				main.legend_tire(0.07, 0)
+	if legend:
+		if not surge and reel > 0.3 and tension > 0.25 and tension < 1.0:
+			main.legend_tire(delta * 0.035, 0)
+		if main.legend_stamina > 0.0:
+			fight_dist = maxf(fight_dist, 6.0)  # too strong to reel in until he's tired
 	if tension > 1.0:
 		over_t += delta
-		if over_t > SNAP_TIME:
+		if over_t > SNAP_TIME * (1.8 if legend else 1.0):
 			_snap()
 			return
 	else:
@@ -867,6 +924,18 @@ func _fight(delta: float) -> void:
 	hooked.rotation = Vector3(0.0, atan2(face.x, face.z), 0.0)
 	if fight_dist < 1.3:
 		_land()
+
+
+## A boat splashed right next to the hooked fish: it stops pulling for a moment and comes closer.
+func assist(by: int) -> bool:
+	if line_state != "fight" or hooked == null:
+		return false
+	surge = false
+	phase_t = maxf(phase_t, 1.6)
+	fight_dist = maxf(0.0, fight_dist - 0.9)
+	if by > 0 and not hooked.helpers.has(by):
+		hooked.helpers.append(by)
+	return true
 
 
 func _snap() -> void:
@@ -960,7 +1029,7 @@ func _update_visuals(delta: float) -> void:
 	if reel_crank != null:
 		reel_crank.rotation.x = -reel_spin
 	if rod_label != null:
-		rod_label.visible = vr_like() and not ghost
+		rod_label.visible = false  # VR hints float above the bobber instead (main.gd)
 		rod_label.text = hint
 		rod_label.modulate = hint_col
 	# Bobber and line.
@@ -1012,7 +1081,16 @@ func action_pressed() -> bool:
 
 func snapshot() -> Array:
 	return [body_pos, aim_yaw, head_transform(), rod_transform(), vr_like(), line_state, lure_pos, bob, tension,
-		bend, surge, hint]
+		bend, surge, hint, hooked_kind(), hint_col]
+
+
+## The kind of fish on the line (-1: none); mirrored to the TV machine.
+func hooked_kind() -> int:
+	if ghost:
+		return net_hooked
+	if hooked != null and line_state in ["bite", "fight", "landing"]:
+		return hooked.kind
+	return -1
 
 
 func apply_net(s: Array) -> void:
@@ -1033,6 +1111,9 @@ func apply_net(s: Array) -> void:
 	bend = s[9]
 	surge = s[10]
 	hint = s[11]
+	if s.size() >= 14:
+		net_hooked = s[12]
+		hint_col = s[13]
 
 
 func _ghost_update(delta: float) -> void:

@@ -2,7 +2,12 @@ extends Node3D
 ## FISHING LAKE - relaxing co-op fishing, no fighting. The VR player stands on a jetty with a fishing
 ## rod (cast, wait for a bite, reel, pull back at the right moment, don't snap the line); the TV
 ## players (1-6) row little boats around the lake: they herd fish towards the bobber, call fish out,
-## and scoop floating treasure with their nets. Fill the aquarium before the sun sets!
+## scoop floating treasure with their nets (coins upgrade their boats) and splash next to a hooked
+## fish to help land it. Fill the aquarium before the sun sets!
+## Every day is different: sunny morning, rainy day, evening into a starry night (each with its own
+## fish). Mini-events: FISH FRENZY (double points in the bubbles), TREASURE MAPS (a boat finds the X
+## and drops a buoy, the angler fishes up the pirate chest) and OLD WHISKERS, the lake legend, who
+## needs everybody to land him. A fish journal remembers every species you have ever caught.
 ## Modes, networking and party join follow docs/GAME_DEV_GUIDE.md and games/marble_maze.
 
 const VrText := preload("res://core/vr_text.gd")
@@ -23,8 +28,17 @@ const MAX_FISH := 18
 const MAX_TREASURE := 8
 const PAD_LEAVE_TIME := 20.0
 const DAY_TIME := 240.0
+const FRENZY_TIME := 25.0
+const FRENZY_R := 4.5
+const LAST_FISH_WAIT := 25.0
 const PLAYER_COLORS: Array[Color] = [Color(1.0, 0.85, 0.55), Color(1.0, 0.35, 0.35), Color(0.3, 0.6, 1.0),
 	Color(0.35, 0.9, 0.4), Color(1.0, 0.8, 0.15), Color(0.8, 0.45, 1.0), Color(1.0, 0.55, 0.2)]
+# p0 / p1: sky phase at the start / end of the day (0 morning, 1 sunset, 1.45 starry night).
+const THEMES := [
+	{"name": "SUNNY MORNING", "rain": false, "p0": 0.0, "p1": 1.05, "tip": "Sunny Bluegills love the sunshine!"},
+	{"name": "RAINY DAY", "rain": true, "p0": 0.05, "p1": 1.05, "tip": "Fish bite faster in the rain - and the Wiggly Eel comes out!"},
+	{"name": "EVENING UNDER THE STARS", "rain": false, "p0": 0.45, "p1": 1.45, "tip": "When the stars come out, look for the glowing Moonfish!"},
+]
 const SOUNDS := {
 	"cast": [0.35, 1600.0, 300.0, 0.22, "sine", 0.85],
 	"plop": [0.18, 520.0, 120.0, 0.45, "sine", 0.1],
@@ -45,6 +59,17 @@ const SOUNDS := {
 	"boot": [0.5, 300.0, 90.0, 0.35, "saw", 0.1],
 	"day": [0.9, 392.0, 784.0, 0.3, "tri", 0.0],
 	"tired": [0.15, 600.0, 900.0, 0.25, "sine", 0.0],
+	"frenzy": [0.6, 300.0, 900.0, 0.3, "sine", 0.5],
+	"legend": [1.4, 95.0, 45.0, 0.55, "saw", 0.3],
+	"new": [0.7, 784.0, 2093.0, 0.35, "tri", 0.0],
+	"upgrade": [0.6, 523.0, 1046.0, 0.35, "square", 0.0],
+	"map": [0.5, 660.0, 990.0, 0.3, "tri", 0.0],
+	"buoy": [0.3, 400.0, 800.0, 0.35, "sine", 0.2],
+	"streak": [0.35, 880.0, 1760.0, 0.3, "square", 0.0],
+	"leap": [0.25, 700.0, 250.0, 0.22, "sine", 0.7],
+	"assist": [0.3, 500.0, 1000.0, 0.3, "tri", 0.3],
+	"quack": [0.16, 520.0, 380.0, 0.16, "saw", 0.15],
+	"owl": [0.45, 420.0, 360.0, 0.12, "sine", 0.0],
 }
 
 var players: Array = []
@@ -89,14 +114,51 @@ var synced := false
 var board_text := ""
 var reel_snd_t := 0.0
 
+# Day theme, weather and events (host simulates; mirrored through the snapshot extras).
+var theme := 0
+var daylight := 0.0
+var rain := 0.0
+var was_raining := false
+var was_night := false
+var streak := 0
+var best_streak := 0
+var frenzy_t := 0.0
+var frenzy_pos := Vector3.ZERO
+var frenzy_at := 0.4
+var frenzy_done := false
+var map_state := 0  # 0 none, 1 X marked, 2 buoy dropped
+var map_pos := Vector3.ZERO
+var map_by := -1
+var map_wait := 0.0
+var legend_state := 0  # 0 not yet today, 1 in the lake, 2 caught, 3 swam off (comes back)
+var legend_stamina := 1.0
+var legend_t := 0.0
+var legend_at := 0.6
+var leap_t := 6.0
+var extend_t := 0.0
+var last_fish_said := false
+var stats: Array = []  # per player index, this day's numbers (host)
+var awards_text := ""
+var journal_counts := PackedInt32Array()
+var journal_best := PackedFloat32Array()
+var journal_text := ""
+var new_today: Array[int] = []
+var frenzy_warned := false
+var day_summary := ""
+var summary_day := -1
+
 var center_label: Label
 var help_label: Label
 var center_tween: Tween
 var vr_center: Label3D
+var vr_hint: Label3D
+var bobber_label: Label3D
+var rain_player: AudioStreamPlayer
 
 
 func _ready() -> void:
 	randomize()
+	_journal_load()
 	lake = Lake.new()
 	lake.main = self
 	add_child(lake)
@@ -200,6 +262,41 @@ func cyl_mesh(r_top: float, r_bottom: float, h: float, seg: int) -> CylinderMesh
 	return m
 
 
+## The detailed one-piece body mesh of a fish kind (built once, see fish.gd).
+func fish_mesh(kind: int) -> ArrayMesh:
+	var key := "fish%d" % kind
+	if meshes.has(key):
+		return meshes[key]
+	var m := FishScript.build_mesh(kind)
+	meshes[key] = m
+	return m
+
+
+func fish_material(kind: int) -> StandardMaterial3D:
+	var glow := 0.0
+	var gc := Color.WHITE
+	if kind == FishScript.GOLDEN:
+		glow = 0.6
+		gc = Color(1.0, 0.75, 0.2)
+	elif kind == FishScript.MOONFISH:
+		glow = 0.9
+		gc = Color(0.5, 0.8, 1.0)
+	var key := "fishmat/%.2f/%s" % [glow, gc.to_html()]
+	if mats.has(key):
+		return mats[key]
+	var m := StandardMaterial3D.new()
+	m.vertex_color_use_as_albedo = true
+	m.vertex_color_is_srgb = true
+	m.roughness = 0.4
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	if glow > 0.0:
+		m.emission_enabled = true
+		m.emission = gc
+		m.emission_energy_multiplier = glow
+	mats[key] = m
+	return m
+
+
 func sound(sound_name: String, volume_db: float = 0.0, pitch: float = 1.0, broadcast: bool = false) -> void:
 	if sfx == null:
 		sfx = SfxScript.new()
@@ -210,6 +307,16 @@ func sound(sound_name: String, volume_db: float = 0.0, pitch: float = 1.0, broad
 	sfx.play(sound_name, volume_db, pitch)
 	if broadcast and net != null:
 		net.event("sound", [sound_name, volume_db, pitch])
+
+
+## A little rising jingle for the big moments (new species, legend, upgrades).
+func fanfare(broadcast: bool = true) -> void:
+	var notes: Array[float] = [1.0, 1.26, 1.5, 2.0]
+	for i in notes.size():
+		var pitch: float = notes[i]
+		get_tree().create_timer(0.13 * i).timeout.connect(func() -> void: sound("streak", -4.0, pitch))
+	if broadcast and net != null:
+		net.event("fanfare", [])
 
 
 func burst(pos: Vector3, color: Color, amount: int = 14, broadcast: bool = true) -> void:
@@ -260,6 +367,36 @@ func ripple(pos: Vector3, size: float, broadcast: bool = true) -> void:
 	tw.chain().tween_callback(r.queue_free)
 	if broadcast and net != null:
 		net.event("ripple", [pos, size])
+
+
+## A fish jumps out of the water and back in (pure decoration, drawn on both machines).
+func leap(pos: Vector3, kind: int, yaw: float, broadcast: bool = true) -> void:
+	if broadcast and net != null:
+		net.event("leap", [pos, kind, yaw])
+	if not FishScript.is_species(kind):
+		return
+	var m := MeshInstance3D.new()
+	m.mesh = fish_mesh(kind)
+	m.material_override = fish_material(kind)
+	m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(m)
+	var dir := Vector3(sin(yaw), 0.0, cos(yaw))
+	var start := Vector3(pos.x, -0.1, pos.z)
+	var height := 0.8 + randf() * 0.5
+	m.global_position = start
+	ripple(start, 0.9, false)
+	sound("leap", -14.0, randf_range(0.9, 1.2))
+	var fly := func(k: float) -> void:
+		if is_instance_valid(m):
+			m.global_position = start + dir * 1.6 * k + Vector3(0, sin(k * PI) * height, 0)
+			m.global_rotation = Vector3(-cos(k * PI) * 0.9, yaw, 0.0)
+	var land := func() -> void:
+		ripple(start + dir * 1.6, 1.0, false)
+		sound("plop", -12.0, 1.3)
+		m.queue_free()
+	var tw := m.create_tween()
+	tw.tween_method(fly, 0.0, 1.0, 0.9)
+	tw.tween_callback(land)
 
 
 ## World text that faces the viewer: billboard on the TV, turned towards the VR player (never
@@ -325,6 +462,46 @@ func active_boats() -> Array:
 	return out
 
 
+func raining() -> bool:
+	return rain > 0.4
+
+
+func is_night() -> bool:
+	return daylight > 1.15
+
+
+func _flat_dist(a: Vector3, b: Vector3) -> float:
+	return Vector2(a.x - b.x, a.z - b.z).length()
+
+
+func in_frenzy(p: Vector3) -> bool:
+	return frenzy_t > 0.0 and _flat_dist(p, frenzy_pos) < FRENZY_R + 0.5
+
+
+## Fish nibble for less time in the rain and in a frenzy (quicker bites for impatient kids).
+func nibble_factor() -> float:
+	var f := 1.0
+	if raining():
+		f *= 0.7
+	if players.size() > 0 and in_frenzy(players[0].lure_pos):
+		f *= 0.4
+	return f
+
+
+func stat(i: int, key: String, add: float = 1.0) -> void:
+	if i < 0 or i >= stats.size():
+		return
+	var d: Dictionary = stats[i]
+	d[key] = float(d.get(key, 0.0)) + add
+
+
+func stat_get(i: int, key: String) -> float:
+	if i < 0 or i >= stats.size():
+		return 0.0
+	var d: Dictionary = stats[i]
+	return float(d.get(key, 0.0))
+
+
 # --- World ---------------------------------------------------------------------------
 
 func _build_pools() -> void:
@@ -353,14 +530,42 @@ func _random_lake_point(margin: float) -> Vector3:
 	return Lake.LAKE_C
 
 
+## A spot the angler can comfortably cast to from the end of the jetty (for events).
+func _castable_point(min_d: float, max_d: float) -> Vector3:
+	var end := Vector3(0.0, 0.0, Lake.JETTY_END_Z)
+	for i in 30:
+		var a := randf_range(-1.1, 1.1)
+		var d := randf_range(min_d, max_d)
+		var p := end + Vector3(sin(a) * d, 0.0, -cos(a) * d)
+		if is_water(p) and _flat_dist(p, Lake.BOARD_L) > 2.5 and _flat_dist(p, Lake.BOARD_R) > 2.5:
+			return p
+	return end + Vector3(0, 0, -10.0)
+
+
+func _kind_allowed(d: Dictionary) -> bool:
+	match int(d.get("when", 0)):
+		1:
+			return not raining()
+		2:
+			return raining()
+		3:
+			return is_night()
+		4:
+			return false
+	return true
+
+
 func _pick_kind() -> int:
 	var total := 0
 	for k in FishScript.TYPES.size():
 		var d: Dictionary = FishScript.TYPES[k]
-		total += int(d["spawn"])
-	var roll := randi() % total
+		if _kind_allowed(d):
+			total += int(d["spawn"])
+	var roll := randi() % maxi(total, 1)
 	for k in FishScript.TYPES.size():
 		var d: Dictionary = FishScript.TYPES[k]
+		if not _kind_allowed(d):
+			continue
 		roll -= int(d["spawn"])
 		if roll < 0:
 			return k
@@ -386,17 +591,17 @@ func wanted_fish() -> int:
 	return mini(9 + 2 * active_boats().size(), MAX_FISH - 2)
 
 
-func _spawn_shoal() -> void:
+func _spawn_shoal(force_kind: int = -1, at: Vector3 = Vector3.INF) -> void:
 	var golden_present := false
 	for f in fish:
 		if f.kind == FishScript.GOLDEN:
 			golden_present = true
-	var kind := _pick_kind()
-	if not golden_present and randf() < 0.02 + 0.005 * day:
+	var kind := _pick_kind() if force_kind < 0 else force_kind
+	if force_kind < 0 and not golden_present and randf() < 0.02 + 0.005 * day:
 		kind = FishScript.GOLDEN
 	var d: Dictionary = FishScript.TYPES[kind]
 	var n: int = d["shoal"]
-	var c := _random_lake_point(4.0)
+	var c := _random_lake_point(4.0) if at == Vector3.INF else at
 	shoal_next += 1
 	for i in n:
 		var f = _free_fish_slot()
@@ -405,23 +610,34 @@ func _spawn_shoal() -> void:
 		f.spawn(kind, c + Vector3(randf_range(-1.0, 1.0), 0.0, randf_range(-1.0, 1.0)), shoal_next if n > 1 else -1)
 
 
-func _spawn_treasure() -> void:
+func _spawn_treasure(force_kind: int = -1, at: Vector3 = Vector3.INF) -> void:
 	var count := 0
+	var map_floating := false
 	for t in treasures:
 		if t.kind >= 0:
 			count += 1
-	if count >= 2 + active_boats().size():
+		if t.kind == TreasureScript.MAP:
+			map_floating = true
+	if force_kind < 0 and count >= 2 + active_boats().size():
 		return
 	for t in treasures:
 		if t.kind < 0:
-			var roll := randf()
-			var k := 0 if roll < 0.35 else (1 if roll < 0.55 else (2 if roll < 0.8 else 3))
-			t.spawn(k, _random_lake_point(3.0))
+			var k := force_kind
+			if k < 0:
+				var roll := randf()
+				k = 0 if roll < 0.3 else (1 if roll < 0.48 else (2 if roll < 0.68 else (3 if roll < 0.84 else 5)))
+				if map_state == 0 and not map_floating and day_frac() > 0.15 and randf() < 0.14:
+					k = TreasureScript.MAP
+			t.spawn(k, _random_lake_point(3.0) if at == Vector3.INF else at)
 			return
 
 
 func release_fish(f) -> void:
 	f.clear()
+
+
+func day_frac() -> float:
+	return clampf(1.0 - time_left / maxf(1.0, round_time), 0.0, 1.0)
 
 
 # --- Players and views -----------------------------------------------------------------
@@ -447,6 +663,7 @@ func _build_players(mode: String) -> void:
 		players.append(b)
 		b.reset_to_start()
 		b.set_active(i == 1 and mode == "local")
+	_reset_stats()
 
 
 func is_local(p) -> bool:
@@ -572,8 +789,21 @@ func _ensure_view(p) -> void:
 	var l := _make_label(28)
 	hud.add_child(l)
 	l.position = Vector2(36, 10)
+	# Contextual "what to do now" tip, big and yellow at the bottom of each view.
+	var tip := _make_label(30)
+	hud.add_child(tip)
+	tip.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	tip.offset_top = -150
+	tip.offset_bottom = -76
+	tip.offset_left = 20
+	tip.offset_right = -20
+	tip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	tip.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	tip.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	tip.add_theme_color_override("font_color", Color(1.0, 0.92, 0.45))
 	p.hud = hud
 	p.hud_label = l
+	p.tip_label = tip
 
 
 ## TV grid: 1 full, 2 side by side, 3-4 as 2x2, 5-6 as 3x2; smaller views render at lower resolution.
@@ -620,9 +850,14 @@ func _layout_views() -> void:
 		if vp != null:
 			vp.scaling_3d_scale = res_scale
 			vp.msaa_3d = Viewport.MSAA_2X if n <= 2 else Viewport.MSAA_DISABLED
+		var ui := clampf(minf(cell.x / 940.0, cell.y / 900.0), 0.5, 1.0)
 		if p.hud_label != null:
-			var ui := clampf(minf(cell.x / 940.0, cell.y / 900.0), 0.5, 1.0)
 			p.hud_label.add_theme_font_size_override("font_size", int(30.0 * ui))
+		if p.tip_label != null:
+			p.tip_label.add_theme_font_size_override("font_size", int(34.0 * ui))
+			var bottom := -76.0 if row == rows - 1 else -12.0  # only the bottom row shares the screen with the help bar
+			p.tip_label.offset_bottom = bottom
+			p.tip_label.offset_top = bottom - 90.0 * ui
 
 
 # --- Controllers and drop-in join ----------------------------------------------------
@@ -737,7 +972,7 @@ func _activate(p) -> void:
 	p.set_active(true)
 	p.reset_to_start()
 	target = target_score()
-	_show_center("PLAYER %d ROWS OUT!" % (p.index + 1), 1.5)
+	_show_center("PLAYER %d ROWS OUT!\nLeft stick rows - A scoops treasure - X calls a fish" % (p.index + 1), 2.5)
 	sound("day", -6.0, 1.3, true)
 	on_player_activity_changed(p)
 
@@ -850,7 +1085,17 @@ func _update_lost_pads(delta: float) -> void:
 # --- Game flow -----------------------------------------------------------------------
 
 func target_score() -> int:
-	return 160 + 60 * active_boats().size()
+	return 160 + 60 * active_boats().size() + 30 * mini(day - 1, 4)
+
+
+func _reset_stats() -> void:
+	stats.clear()
+	for i in players.size():
+		stats.append({})
+
+
+func _theme() -> Dictionary:
+	return THEMES[theme]
 
 
 func _start_day(n: int) -> void:
@@ -865,6 +1110,29 @@ func _start_day(n: int) -> void:
 	biggest_kg = 0.0
 	golden_bait = false
 	last_tick = -1
+	theme = (n - 1) % THEMES.size()
+	var th := _theme()
+	daylight = float(th["p0"])
+	rain = 0.0
+	was_raining = false
+	was_night = daylight > 1.15
+	streak = 0
+	best_streak = 0
+	frenzy_t = 0.0
+	frenzy_done = false
+	frenzy_warned = false
+	frenzy_pos = Vector3.ZERO
+	frenzy_at = randf_range(0.25, 0.5)
+	map_state = 0
+	map_by = -1
+	legend_state = 0
+	legend_stamina = 1.0
+	legend_at = randf_range(0.55, 0.7) if n >= 2 else 2.0  # day 1: only as a reward for filling the tank
+	extend_t = 0.0
+	last_fish_said = false
+	awards_text = ""
+	new_today.clear()
+	_reset_stats()
 	target = target_score()
 	for f in fish:
 		if f != players[0].hooked:
@@ -879,18 +1147,21 @@ func _start_day(n: int) -> void:
 		if p.index > 0 and p.active:
 			p.reset_to_start()
 	if n == 1:
-		_show_center("FISHING LAKE\nCatch fish before the sun sets: %d points fills the aquarium!\n" % target \
-			+ "VR: FLICK the rod to cast (or A) - wait for the bobber to dip - REEL with the trigger or by winding your left hand by the reel - PULL BACK when it stops pulling. Red meter = ease off!\n" \
-			+ "BOATS: left stick rows - A swings your net (treasure!) or splashes to herd fish - X calls a fish to the bobber" , 10.0)
+		_show_center("FISHING LAKE - fill the aquarium before sunset!\n" \
+			+ "VR: FLICK the rod to cast (or A)  -  trigger REELS  -  PULL BACK when it's tired\n" \
+			+ "BOATS: left stick rows  -  A scoops treasure  -  X calls a fish to the bobber", 8.0)
 	else:
-		_show_center("DAY %d\nA new morning on the lake - target %d points" % [n, target], 3.5)
+		_show_center("DAY %d - %s\nTarget %d points\n%s" % [n, str(th["name"]), target, str(th["tip"])], 4.5)
 	sound("day", -2.0, 1.0, true)
-	print("Day %d started (target %d, %d boats, %.0f s)" % [n, target, active_boats().size(), round_time])
+	_send_journal()
+	print("Day %d started (%s, target %d, %d boats, %.0f s)" % [n, str(th["name"]), target, active_boats().size(), round_time])
 
 
 func _end_day() -> void:
 	state = "over"
 	state_t = 0.0
+	if frenzy_t > 0.0:
+		frenzy_t = 0.0
 	var stars := 0
 	if score >= target:
 		stars = 3
@@ -898,11 +1169,12 @@ func _end_day() -> void:
 		stars = 2
 	elif score * 3 >= target:
 		stars = 1
-	var line := "Best: %d" % best
+	var line := "Best day: %d" % best
 	if score > best:
 		line = "NEW BEST DAY!  (previous %d)" % best
 		best = score
 		_save_best(best)
+	_journal_save()
 	var counts := {}
 	for k in catches:
 		var ki: int = k
@@ -912,11 +1184,63 @@ func _end_day() -> void:
 		var d: Dictionary = FishScript.TYPES[int(k)]
 		parts.append("%s x%d" % [str(d["name"]), int(counts[k])])
 	var catch_line := ", ".join(parts) if not parts.is_empty() else "nothing... the fish were shy today!"
-	var star_text := "STARS: %s" % ("* ".repeat(stars).strip_edges() if stars > 0 else "none yet")
-	_show_center("SUNSET!  Day %d is done\nScore %d / %d   %s\nCaught: %s%s\n%s\n\nTrigger / A / Enter: fish another day" \
-		% [day, score, target, star_text, catch_line, ("\nBiggest: " + biggest) if biggest != "" else "", line], 0.0)
+	var star_text := "*".repeat(stars) if stars > 0 else "no stars yet"
+	awards_text = _awards()
+	_show_center("SUNSET!  Day %d is done   %s\nScore %d / %d    %s\n%s\n\nTrigger / A / Enter: fish another day" \
+		% [day, star_text, score, target, line, awards_text], 0.0)
+	day_summary = "DAY %d - %s\nScore %d / %d  %s\nCaught: %s%s\nBest streak: %d" % [day, star_text, score, target,
+		line, catch_line, ("\nBiggest: " + biggest) if biggest != "" else "", best_streak]
+	summary_day = day
+	net.event("board", [day_summary, day])
+	fanfare()
 	sound("catch", 0.0, 0.8, true)
-	print("Day %d over: score %d / %d, %d catches, stars %d" % [day, score, target, catches.size(), stars])
+	print("Day %d over: score %d / %d, %d catches, stars %d\nAWARDS: %s" % [day, score, target, catches.size(), stars, awards_text.replace("\n", " | ")])
+
+
+## Everybody gets a fun award for the day (the best thing they did).
+func _awards() -> String:
+	var lines: Array[String] = []
+	var aw := "PATIENT ANGLER - waited and watched"
+	if legend_state == 2:
+		aw = "LEGEND CATCHER - landed OLD WHISKERS!"
+	elif not new_today.is_empty():
+		aw = "EXPLORER - %d new species in the journal" % new_today.size()
+	elif stat_get(0, "catch") >= 3 and stat_get(0, "snap") == 0.0:
+		aw = "STEADY HANDS - no snapped lines!"
+	elif best_streak >= 3:
+		aw = "HOT STREAK - %d fish in a row" % best_streak
+	elif biggest != "":
+		aw = "BIG FISH HUNTER - %s" % biggest
+	elif stat_get(0, "catch") > 0:
+		aw = "HAPPY ANGLER - %d catches" % int(stat_get(0, "catch"))
+	lines.append("P1 (rod): %s" % aw)
+	var boats := active_boats()
+	# [stat, award, description]
+	var kinds := [["whisker", "WHISKER WRANGLER", "helped land the legend"], ["map", "MAP READER", "found the treasure X"],
+		["scoop", "TREASURE HUNTER", "%d treasures scooped"], ["help", "FISH WHISPERER", "helped %d catches"],
+		["splash", "BIG SPLASHER", "%d splashes"]]
+	for b in boats:
+		var got := ""
+		for k in kinds:
+			var kk: Array = k
+			var key: String = kk[0]
+			var mine := stat_get(b.index, key)
+			if mine <= 0.0:
+				continue
+			var top := true
+			for o in boats:
+				if o != b and stat_get(o.index, key) > mine:
+					top = false
+			if top:
+				var desc: String = kk[2]
+				if int(mine) == 1:
+					desc = desc.replace("treasures", "treasure").replace("catches", "catch").replace("splashes", "splash")
+				got = "%s - %s" % [str(kk[1]), desc % int(mine) if desc.contains("%d") else desc]
+				break
+		if got == "":
+			got = "HAPPY ROWER - enjoyed the lake"
+		lines.append("P%d: %s" % [b.index + 1, got])
+	return "AWARDS\n" + "\n".join(lines)
 
 
 func _process(delta: float) -> void:
@@ -934,8 +1258,14 @@ func _process(delta: float) -> void:
 	if views_root != null and is_instance_valid(views_root) and views_root.size != last_view_area:
 		_layout_views()
 	var vr: bool = players[0].vr
-	lake.set_daylight(1.0 - time_left / maxf(1.0, round_time), vr)
+	lake.set_daylight(daylight, rain, vr)
+	lake.set_frenzy(frenzy_t > 0.0, frenzy_pos)
+	lake.set_map(map_state, map_pos)
+	lake.update(delta)
 	lake.update_tank(catches, delta)
+	var bp: Vector3 = players[0].body_pos
+	lake.rain_near.position = Vector3(bp.x, 9.0, bp.z - 1.5)
+	_update_rain_sound()
 	_update_board()
 	_update_vr_text()
 	_ambience(delta)
@@ -961,11 +1291,14 @@ func _host_update(delta: float, cont_edge: bool) -> void:
 	match state:
 		"play":
 			time_left -= delta
+			var th := _theme()
+			daylight = lerpf(float(th["p0"]), float(th["p1"]), day_frac())
 			var secs := int(ceilf(time_left))
 			if secs <= 10 and secs != last_tick and secs > 0:
 				last_tick = secs
 				sound("tick", -4.0, 1.0 + (10 - secs) * 0.04, true)
 			_fish_ai(delta)
+			_events(delta)
 			fish_t -= delta
 			if fish_t <= 0.0:
 				fish_t = 1.5
@@ -980,10 +1313,22 @@ func _host_update(delta: float, cont_edge: bool) -> void:
 				goal_hit = true
 				_show_center("AQUARIUM FULL - GOAL REACHED!\nKeep fishing for a high score until sunset", 3.5)
 				sound("golden", -2.0, 1.2, true)
+				fanfare()
+				if day == 1 and legend_state == 0:
+					legend_at = day_frac() + 0.05  # a reward: the legend shows up
 			if time_left <= 0.0:
 				time_left = 0.0
-				_end_day()
+				# The sun waits while a fish is on the line (nobody wants to lose the last fish).
+				var a = players[0]
+				if (a.line_state == "fight" or a.line_state == "bite" or a.line_state == "landing") and extend_t < LAST_FISH_WAIT:
+					extend_t += delta
+					if not last_fish_said:
+						last_fish_said = true
+						_show_center("ONE LAST FISH!\nThe sun waits for you...", 2.5)
+				else:
+					_end_day()
 		"over":
+			rain = move_toward(rain, 0.0, delta * 0.2)
 			if state_t > 1.5 and cont_edge:
 				_start_day(day + 1)
 	# Reel clicks for whoever is holding the rod on this machine.
@@ -995,13 +1340,188 @@ func _host_update(delta: float, cont_edge: bool) -> void:
 			sound("reel", -10.0, 0.9 + a.reel * 0.3)
 
 
+## Host: weather changes and the day's mini-events.
+func _events(delta: float) -> void:
+	var th := _theme()
+	var frac := day_frac()
+	var want_rain := 1.0 if bool(th["rain"]) and frac > 0.08 and frac < 0.8 else 0.0
+	rain = move_toward(rain, want_rain, delta * 0.12)
+	if raining() and not was_raining:
+		was_raining = true
+		_show_center("IT'S RAINING!\nFish bite faster - and the Wiggly Eel comes out to play", 3.0)
+		_spawn_shoal(FishScript.EEL)
+	elif not raining() and was_raining and rain < 0.1:
+		was_raining = false
+		_show_center("The rain stops... the sun peeks out", 2.0)
+	if is_night() and not was_night:
+		was_night = true
+		_show_center("THE STARS ARE OUT!\nLook for the glowing MOONFISH", 3.0)
+		sound("owl", -6.0, 1.0, true)
+		_spawn_shoal(FishScript.MOONFISH)
+	# Fish frenzy: double points inside the bubbles for a little while.
+	if not frenzy_done and frac > frenzy_at - 0.04 and not frenzy_warned:
+		frenzy_warned = true
+		frenzy_pos = _castable_point(7.0, 14.0)
+		ripple(frenzy_pos, 3.0)
+	if not frenzy_done and frac > frenzy_at and legend_state != 1 and time_left > 12.0:
+		_start_frenzy()
+	if frenzy_t > 0.0:
+		frenzy_t -= delta
+		if randf() < delta * 1.5:
+			ripple(frenzy_pos + Vector3(randf_range(-3.0, 3.0), 0, randf_range(-3.0, 3.0)), 1.0)
+		if frenzy_t <= 0.0:
+			frenzy_t = 0.0
+			_show_center("The frenzy calms down...", 1.5)
+	# The legend: from day 2 later in the day (day 1: as a reward for filling the aquarium).
+	match legend_state:
+		0:
+			if frac > legend_at and frenzy_t <= 0.0 and time_left > 25.0:
+				_spawn_legend()
+		3:
+			legend_t -= delta
+			if legend_t <= 0.0 and time_left > 25.0:
+				_spawn_legend()
+	if legend_state == 1:
+		var lf = _legend_fish()
+		if lf == null:
+			legend_state = 3
+			legend_t = 20.0
+		elif randf() < delta * 0.6 and lf.state != "hooked":
+			ripple(lf.position, 2.2)
+	# A treasure map that's been marked but never found: nudge the boats.
+	if map_state == 1:
+		map_wait += delta
+	# Fish jumping out of the water now and then, just for fun.
+	leap_t -= delta
+	if leap_t <= 0.0:
+		leap_t = randf_range(5.0, 10.0) * (0.5 if frenzy_t > 0.0 else 1.0)
+		var pick = null
+		if frenzy_t > 0.0:
+			leap(frenzy_pos + Vector3(randf_range(-2.5, 2.5), 0, randf_range(-2.5, 2.5)), _pick_kind(), randf() * TAU)
+		else:
+			for i in 6:
+				var f = fish[randi() % fish.size()]
+				if f.kind >= 0 and FishScript.is_species(f.kind) and f.kind != FishScript.LEGEND and f.state == "swim":
+					pick = f
+					break
+			if pick != null:
+				leap(pick.position, pick.kind, pick.rotation.y)
+
+
+func _start_frenzy() -> void:
+	frenzy_done = true
+	frenzy_t = FRENZY_TIME
+	if frenzy_pos == Vector3.ZERO:
+		frenzy_pos = _castable_point(7.0, 14.0)
+	# Pull a few fish into the bubbles, and float some goodies there for the boats.
+	for i in 2:
+		_spawn_shoal(-1, frenzy_pos + Vector3(randf_range(-2.0, 2.0), 0, randf_range(-2.0, 2.0)))
+	for f in fish:
+		if f.kind >= 0 and f.state == "swim" and _flat_dist(f.position, frenzy_pos) < 12.0:
+			f.wander = frenzy_pos + Vector3(randf_range(-2.0, 2.0), 0, randf_range(-2.0, 2.0))
+	if not active_boats().is_empty():
+		for i in 2:
+			_spawn_treasure(5 if i == 0 else 2, frenzy_pos + Vector3(randf_range(-3.0, 3.0), 0, randf_range(-3.0, 3.0)))
+	_show_center("FISH FRENZY!\nCast into the BUBBLES for DOUBLE points!\nBoats: herd fish into the bubbles", 3.5)
+	sound("frenzy", 0.0, 1.0, true)
+	sound("frenzy", -2.0, 1.4, true)
+	burst(frenzy_pos + Vector3(0, 0.2, 0), Color(0.6, 1.0, 1.0), 20)
+	print("Event: fish frenzy at %s" % str(frenzy_pos))
+
+
+func _legend_fish():
+	for f in fish:
+		if f.kind == FishScript.LEGEND:
+			return f
+	return null
+
+
+func _spawn_legend() -> void:
+	var slot = _free_fish_slot()
+	if slot == null:
+		for f in fish:
+			if f.kind == FishScript.MINNOW and f.state == "swim":
+				f.clear()
+				slot = f
+				break
+	if slot == null:
+		return
+	var p := _castable_point(11.0, 17.0)
+	slot.spawn(FishScript.LEGEND, p, -1)
+	legend_state = 1
+	legend_stamina = 1.0
+	ripple(p, 4.0)
+	burst(p + Vector3(0, 0.3, 0), Color(0.5, 0.7, 0.9), 18)
+	sound("legend", 0.0, 1.0, true)
+	_show_center("A GIANT SHADOW IN THE WATER...\nOLD WHISKERS, THE LAKE LEGEND, IS HERE!\nBoats: get close and press X to call him to the bobber", 4.5)
+	print("Event: OLD WHISKERS appears at %s" % str(p))
+
+
+## Wear the hooked legend out (reeling, pulling back, boat splashes). by > 0: a boat helped.
+func legend_tire(amount: float, by: int) -> void:
+	if legend_stamina <= 0.0:
+		return
+	legend_stamina = maxf(0.0, legend_stamina - amount)
+	if by > 0:
+		stat(by, "whisker")
+	if legend_stamina <= 0.0:
+		var lp: Vector3 = players[0].lure_pos
+		popup(lp + Vector3(0, 1.4, 0), "HE'S WORN OUT!", Color(0.4, 1.0, 0.5), true, 1.5)
+		_show_center("OLD WHISKERS IS WORN OUT!\nREEL HIM IN!", 2.5)
+		sound("tired", 0.0, 0.8, true)
+
+
 func _ambience(delta: float) -> void:
 	chirp_t -= delta
 	if chirp_t <= 0.0:
 		chirp_t = randf_range(4.0, 11.0)
-		var p := 1.0 + randf() * 0.3
-		sound("chirp", -14.0, p)
-		get_tree().create_timer(0.15).timeout.connect(func() -> void: sound("chirp", -15.0, p * 1.1))
+		if is_night():
+			sound("owl", -16.0, randf_range(0.95, 1.05))
+			get_tree().create_timer(0.55).timeout.connect(func() -> void: sound("owl", -17.0, 0.9))
+		elif randf() < 0.3:
+			sound("quack", -16.0, randf_range(0.9, 1.1))
+			get_tree().create_timer(0.2).timeout.connect(func() -> void: sound("quack", -17.0, 1.05))
+		elif not raining():
+			var p := 1.0 + randf() * 0.3
+			sound("chirp", -14.0, p)
+			get_tree().create_timer(0.15).timeout.connect(func() -> void: sound("chirp", -15.0, p * 1.1))
+
+
+## Soft rain noise that follows the rain strength (both machines).
+func _update_rain_sound() -> void:
+	if rain < 0.02:
+		if rain_player != null and rain_player.playing:
+			rain_player.stop()
+		return
+	if rain_player == null:
+		rain_player = AudioStreamPlayer.new()
+		add_child(rain_player)
+		var cache := "fishing_lake_rain"
+		if Engine.has_meta(cache):
+			rain_player.stream = Engine.get_meta(cache)
+		else:
+			var rate := 22050
+			var n := rate * 2
+			var data := PackedByteArray()
+			data.resize(n * 2)
+			var lp := 0.0
+			var rng := RandomNumberGenerator.new()
+			rng.seed = 7
+			for i in n:
+				lp = lerpf(lp, rng.randf_range(-1.0, 1.0), 0.18)
+				var crackle := rng.randf_range(-1.0, 1.0) * 0.6 if rng.randf() < 0.004 else 0.0
+				data.encode_s16(i * 2, int(clampf(lp * 0.5 + crackle * 0.3, -1.0, 1.0) * 32767.0 * 0.6))
+			var w := AudioStreamWAV.new()
+			w.format = AudioStreamWAV.FORMAT_16_BITS
+			w.mix_rate = rate
+			w.data = data
+			w.loop_mode = AudioStreamWAV.LOOP_FORWARD
+			w.loop_end = n
+			Engine.set_meta(cache, w)
+			rain_player.stream = w
+	rain_player.volume_db = lerpf(-34.0, -17.0, rain)
+	if not rain_player.playing:
+		rain_player.play()
 
 
 ## Host: which fish goes for the lure, plus the "nothing's biting" helpers (kids shouldn't wait long).
@@ -1014,6 +1534,17 @@ func _fish_ai(delta: float) -> void:
 		if f.kind >= 0 and (f.state == "approach" or f.state == "nibble" or f.state == "bite"):
 			engaged = true
 	var lure: Vector3 = a.lure_pos
+	# Treasure map: a lure by the buoy brings up the pirate chest.
+	if map_state == 2 and not engaged and _flat_dist(lure, map_pos) < 3.5 and a.wait_t > 1.2:
+		var c = _free_fish_slot()
+		if c != null:
+			c.spawn(FishScript.CHEST, lure + Vector3(0, -1.0, 0), -1)
+			c.pirate = true
+			c.set_state("nibble")
+			c.nibble_time = 0.9
+			a.on_nibble()
+			popup(lure + Vector3(0, 1.2, 0), "Something's down there...", Color(1.0, 0.85, 0.3))
+			return
 	if golden_bait and not engaged:
 		golden_bait = false
 		var g = _free_fish_slot()
@@ -1027,6 +1558,12 @@ func _fish_ai(delta: float) -> void:
 			engaged = true
 	if engaged:
 		return
+	var frenzy := in_frenzy(lure)
+	# The legend gets first go at a lure cast near him (otherwise the minnows always win).
+	var lf = _legend_fish()
+	if lf != null and lf.free_to_bite() and _flat_dist(lf.position, lure) < 7.0 and randf() < delta * 2.0:
+		lf.set_state("approach")
+		return
 	for f in fish:
 		if not f.free_to_bite():
 			continue
@@ -1034,19 +1571,25 @@ func _fish_ai(delta: float) -> void:
 		var notice: float = d["notice"]
 		if a.twitch_t > 0.0:
 			notice *= 1.6
+		if raining():
+			notice *= 1.4
 		var called: bool = f.called_t > 0.0
 		if called:
 			notice = 80.0
+		var rate := 4.0 if called else 1.2
+		if frenzy and _flat_dist(f.position, frenzy_pos) < FRENZY_R + 4.0:
+			notice = maxf(notice, 9.0)
+			rate = 5.0
 		var dist := Vector2(f.position.x - lure.x, f.position.z - lure.z).length()
-		if dist < notice and randf() < delta * (4.0 if called else 1.2):
+		if dist < notice and randf() < delta * rate:
 			f.set_state("approach")
 			return
-	if a.wait_t > 6.0:
+	if a.wait_t > (3.0 if frenzy else 6.0):
 		a.wait_t = 0.0
 		var best_f = null
 		var best_d := 14.0
 		for f in fish:
-			if not f.free_to_bite():
+			if not f.free_to_bite() or f.kind == FishScript.LEGEND:
 				continue
 			var dist := Vector2(f.position.x - lure.x, f.position.z - lure.z).length()
 			if dist < best_d:
@@ -1082,6 +1625,10 @@ func on_lure_plop(pos: Vector3) -> void:
 	sound("plop", 0.0, 1.0, true)
 	ripple(pos, 1.2)
 	burst(pos, Color(0.8, 0.95, 1.0), 8)
+	if in_frenzy(pos):
+		popup(pos + Vector3(0, 1.0, 0), "IN THE BUBBLES - x2!", Color(0.5, 1.0, 1.0), true, 1.2)
+	elif map_state == 2 and _flat_dist(pos, map_pos) < 3.5:
+		popup(pos + Vector3(0, 1.0, 0), "Right by the buoy!", Color(1.0, 0.9, 0.3), true, 1.2)
 
 
 func on_lure_missed(pos: Vector3) -> void:
@@ -1121,15 +1668,32 @@ func on_fish_scared(f) -> void:
 		a.nibbling = false
 
 
+func _break_streak() -> void:
+	if streak >= 3:
+		popup(players[0].lure_pos + Vector3(0, 1.4, 0), "Streak ended at %d" % streak, Color(0.8, 0.9, 1.0))
+	streak = 0
+
+
 func on_bite_missed(pos: Vector3) -> void:
 	popup(pos + Vector3(0, 0.8, 0), "Too slow - it swam off!", Color(0.8, 0.9, 1.0))
 	sound("splash", -6.0, 1.3, true)
+	_break_streak()
 
 
 func on_hooked(f) -> void:
 	sound("hook", 0.0, 1.0, true)
 	var lp: Vector3 = players[0].lure_pos
-	popup(lp + Vector3(0, 1.0, 0), "FISH ON!" if not f.is_junk() else "Something heavy...", Color(1.0, 0.85, 0.3), true, 1.3)
+	var text := "FISH ON!" if not f.is_junk() else "Something heavy..."
+	if f.kind == FishScript.LEGEND:
+		text = "OLD WHISKERS IS HOOKED!"
+		sound("legend", 0.0, 1.3, true)
+		if not active_boats().is_empty():
+			_show_center("OLD WHISKERS IS ON THE LINE!\nBOATS: row right next to him and press A to SPLASH - tire him out!\nRod: reel when he rests, let him run when he pulls", 4.5)
+		else:
+			_show_center("OLD WHISKERS IS ON THE LINE!\nReel when he rests, PULL BACK hard, let him run when he pulls", 4.0)
+	elif not f.is_junk() and float(f.info()["pull"]) >= 0.6 and not active_boats().is_empty():
+		_show_center("A BIG ONE! Boats: row over and SPLASH (A) right next to it to help!", 2.5)
+	popup(lp + Vector3(0, 1.0, 0), text, Color(1.0, 0.85, 0.3), true, 1.3)
 
 
 func on_fish_surge(pos: Vector3, _f) -> void:
@@ -1155,9 +1719,21 @@ func on_yank(pos: Vector3, good: bool) -> void:
 
 func on_line_snap(pos: Vector3, f) -> void:
 	sound("snap", 0.0, 1.0, true)
+	stat(0, "snap")
 	var what := "fish"
 	if f != null:
 		what = "boot" if f.kind == FishScript.BOOT else ("chest" if f.kind == FishScript.CHEST else "fish")
+	_break_streak()
+	if f != null and f.kind == FishScript.LEGEND:
+		popup(pos + Vector3(0, 1.4, 0), "SNAP! Old Whiskers got away...", Color(1.0, 0.4, 0.3), true, 1.4)
+		_show_center("SNAP! OLD WHISKERS SWAM OFF...\nDon't worry - he'll be back! (Ease off while he pulls)", 3.0)
+		ripple(pos, 3.0)
+		f.clear()
+		legend_state = 3
+		legend_t = 25.0
+		return
+	if f != null and f.pirate:
+		map_state = 2  # the buoy is still there: try again
 	popup(pos + Vector3(0, 1.0, 0), "SNAP! The %s got away" % what, Color(1.0, 0.4, 0.3), true, 1.2)
 	_show_center("SNAP!  Keep the meter out of the red: stop reeling while it pulls", 2.5)
 
@@ -1170,47 +1746,192 @@ func on_catch(f) -> void:
 		helper = f.called_by
 	elif f.herded_by > 0:
 		helper = f.herded_by
+	elif not f.helpers.is_empty():
+		helper = f.helpers[0]
+	if f.pirate and map_by > 0:
+		helper = map_by
 	var bonus := 0
-	if helper > 0 and not f.is_junk():
+	if helper > 0 and (not f.is_junk() or f.pirate):
 		bonus = maxi(3, pts / 2)
-	score += pts + bonus
+		stat(helper, "help")
+		_add_coins(players[helper], 1)
+	for h in f.helpers:
+		var hi: int = h
+		if hi != helper and hi > 0 and hi < players.size():
+			stat(hi, "help")
+			_add_coins(players[hi], 1)
+	var tip: Vector3 = players[0].tip_pos()
+	var lp: Vector3 = players[0].lure_pos
+	var frenzy := in_frenzy(lp) or in_frenzy(f.position)
+	var mult := 2 if frenzy and not f.is_junk() else 1
+	var streak_bonus := 0
+	if not f.is_junk():
+		streak += 1
+		best_streak = maxi(best_streak, streak)
+		if streak >= 3:
+			streak_bonus = mini(5 * (streak - 2), 25)
+	if f.pirate:
+		bonus += 40
+		map_state = 0
+	var total := pts * mult + bonus + streak_bonus
+	score += total
 	catches.append(f.kind)
+	stat(0, "catch")
 	var nm: String = d["name"]
 	var kg: float = f.weight
 	if not f.is_junk() and kg > biggest_kg:
 		biggest_kg = kg
 		biggest = "%s %.1f kg" % [nm, kg]
-	var tip: Vector3 = players[0].tip_pos()
 	var col: Color = d["col"]
 	burst(tip, col.lightened(0.3), 24)
 	burst(tip, Color(1, 1, 1), 12)
-	var text := "%s!\n%.1f kg   +%d" % [nm.to_upper(), kg, pts]
+	var text := "%s!\n%.1f kg   +%d" % [nm.to_upper(), kg, pts * mult]
 	if f.kind == FishScript.BOOT:
 		text = "AN OLD BOOT...\n+%d  (yuck!)" % pts
 		sound("boot", 0.0, 1.0, true)
 	elif f.kind == FishScript.CHEST:
-		text = "TREASURE CHEST!\nfull of coins   +%d" % pts
+		text = "%s!\nfull of coins   +%d" % ["PIRATE TREASURE" if f.pirate else "TREASURE CHEST", pts]
 		sound("golden", 0.0, 1.0, true)
+		for i in 3:
+			burst(tip + Vector3(0, 0.2 * i, 0), Color(1.0, 0.85, 0.2), 16)
 	elif f.kind == FishScript.GOLDEN:
-		text = "THE GOLDEN FISH!!\n%.1f kg   +%d" % [kg, pts]
+		text = "THE GOLDEN FISH!!\n%.1f kg   +%d" % [kg, pts * mult]
 		sound("golden", 0.0, 1.0, true)
 		burst(tip, Color(1.0, 0.85, 0.2), 30)
+	elif f.kind == FishScript.LEGEND:
+		legend_state = 2
+		text = "YOU CAUGHT OLD WHISKERS!!!\nTHE LAKE LEGEND - %.1f kg   +%d" % [kg, pts * mult]
+		var lpos: Vector3 = f.global_position
+		for i in 4:
+			burst(lpos + Vector3(randf_range(-1, 1), 0.5, randf_range(-1, 1)), [Color(1.0, 0.85, 0.2), Color(0.5, 0.9, 1.0), Color(1, 1, 1), Color(1.0, 0.5, 0.7)][i], 30)
+		ripple(lpos, 5.0)
+		sound("golden", 0.0, 0.8, true)
+		fanfare()
+		for b in active_boats():
+			if f.helpers.has(b.index):
+				_add_coins(b, 2)
 	else:
 		sound("catch", 0.0, 1.0 + randf() * 0.1, true)
-	if bonus > 0:
+	if mult > 1:
+		text += "\nFRENZY x2!"
+	if bonus > 0 and helper > 0:
 		text += "\nThanks P%d!  +%d" % [helper + 1, bonus]
+	if streak_bonus > 0:
+		text += "\nSTREAK x%d  +%d" % [streak, streak_bonus]
+		sound("streak", -3.0, 1.0 + 0.05 * streak, true)
+	# The fish journal: a brand-new species is a big moment.
+	if FishScript.is_species(f.kind):
+		_journal_add(f.kind, kg)
 	_show_center(text, 2.8)
-	print("Caught %s (%.1f kg) +%d%s, score %d" % [nm, kg, pts, (" helper P%d +%d" % [helper + 1, bonus]) if bonus > 0 else "", score])
+	print("Caught %s (%.1f kg) +%d%s%s, score %d" % [nm, kg, total, (" helper P%d" % (helper + 1)) if helper > 0 else "",
+		" FRENZY" if mult > 1 else "", score])
+
+
+func _journal_add(kind: int, kg: float) -> void:
+	if journal_counts.size() < FishScript.TYPES.size():
+		journal_counts.resize(FishScript.TYPES.size())
+		journal_best.resize(FishScript.TYPES.size())
+	var first := journal_counts[kind] == 0
+	journal_counts[kind] += 1
+	var record := kg > journal_best[kind] and not first
+	journal_best[kind] = maxf(journal_best[kind], kg)
+	if first:
+		new_today.append(kind)
+		var nm: String = FishScript.TYPES[kind]["name"]
+		var found := _journal_found()
+		var msg := "NEW SPECIES!\n%s goes in your fish journal  (%d / %d)" % [nm.to_upper(), found, _species_total()]
+		var announce := func() -> void: _show_center(msg, 2.5)
+		get_tree().create_timer(2.9).timeout.connect(announce)
+		var tip: Vector3 = players[0].tip_pos()
+		for c in [Color(1.0, 0.4, 0.5), Color(0.4, 0.9, 1.0), Color(1.0, 0.9, 0.3)]:
+			burst(tip + Vector3(0, 0.3, 0), c, 14)
+		fanfare()
+		sound("new", 0.0, 1.0, true)
+		_journal_save()
+	elif record:
+		popup(players[0].lure_pos + Vector3(0, 1.6, 0), "NEW RECORD %s!" % str(FishScript.TYPES[kind]["name"]).to_upper(), Color(1.0, 0.9, 0.4), true, 1.2)
+	_send_journal()
+
+
+func _species_total() -> int:
+	var n := 0
+	for k in FishScript.TYPES.size():
+		if FishScript.is_species(k):
+			n += 1
+	return n
+
+
+func _journal_found() -> int:
+	var n := 0
+	for k in mini(journal_counts.size(), FishScript.TYPES.size()):
+		if FishScript.is_species(k) and journal_counts[k] > 0:
+			n += 1
+	return n
+
+
+## The bot tests keep their own journal so they never "discover" fish for the family.
+func _journal_file() -> String:
+	if get_parent() != get_tree().root:
+		return "user://fishing_lake_journal_test.cfg"
+	return "user://fishing_lake_journal.cfg"
+
+
+func _journal_load() -> void:
+	journal_counts = PackedInt32Array()
+	journal_counts.resize(FishScript.TYPES.size())
+	journal_best = PackedFloat32Array()
+	journal_best.resize(FishScript.TYPES.size())
+	var cfg := ConfigFile.new()
+	if cfg.load(_journal_file()) != OK:
+		return
+	var c: PackedInt32Array = cfg.get_value("journal", "counts", PackedInt32Array())
+	var b: PackedFloat32Array = cfg.get_value("journal", "best", PackedFloat32Array())
+	for i in mini(c.size(), journal_counts.size()):
+		journal_counts[i] = c[i]
+	for i in mini(b.size(), journal_best.size()):
+		journal_best[i] = b[i]
+
+
+func _journal_save() -> void:
+	if net != null and net.mode == "client":
+		return
+	var cfg := ConfigFile.new()
+	cfg.set_value("journal", "counts", journal_counts)
+	cfg.set_value("journal", "best", journal_best)
+	cfg.save(_journal_file())
+
+
+func _send_journal() -> void:
+	if net != null:
+		net.event("journal", [journal_counts, journal_best])
 
 
 # --- Boat callbacks (host) --------------------------------------------------------------
+
+func _add_coins(b, n: int) -> void:
+	if b == null or b.index <= 0:
+		return
+	b.coins += n
+	stat(b.index, "coins", n)
+	var need: int = b.next_level_coins()
+	if need > 0 and b.coins >= need:
+		b.set_level(b.level + 1)
+		var nm: String = BoatScript.LEVEL_NAMES[b.level]
+		var what: String = ["", "a SAIL - faster!", "a BIG NET - scoops from further!", "a LANTERN MOTOR - zoom!"][b.level]
+		popup(b.global_position + Vector3(0, 2.6, 0), "UPGRADE: %s!" % nm, b.color.lightened(0.4), true, 1.3)
+		_show_center("P%d's boat got %s" % [b.index + 1, what], 2.5)
+		burst(b.global_position + Vector3(0, 1.0, 0), b.color.lightened(0.3), 24)
+		sound("upgrade", 0.0, 1.0, true)
+		fanfare()
+		print("Upgrade: P%d boat level %d (%s)" % [b.index + 1, b.level, nm])
+
 
 func on_boat_net(b) -> void:
 	if state == "over":
 		return
 	var np: Vector3 = b.net_point()
 	var best_t = null
-	var best_d := 2.0
+	var best_d: float = b.net_reach()
 	for t in treasures:
 		if t.kind < 0:
 			continue
@@ -1224,10 +1945,12 @@ func on_boat_net(b) -> void:
 		score += pts
 		scooped += 1
 		b.scooped += 1
+		stat(b.index, "scoop")
 		var pos: Vector3 = best_t.position
 		var nm: String = info["name"]
 		var extra := ""
-		if best_t.kind == 1 and not golden_bait and randf() < 0.3:
+		var k: int = best_t.kind
+		if k == 1 and not golden_bait and randf() < 0.3:
 			golden_bait = true
 			extra = "\nIt says: GOLDEN BAIT! Next cast brings a golden fish!"
 		best_t.clear()
@@ -1236,20 +1959,73 @@ func on_boat_net(b) -> void:
 		sound("coin", -2.0, 1.0, true)
 		if extra != "":
 			_show_center("P%d found a message in a bottle!%s" % [b.index + 1, extra], 3.0)
+		if k == TreasureScript.MAP:
+			_start_map(b)
+		_add_coins(b, 2 if k == 3 else 1)
+		return
+	# The treasure map's X: drop the buoy for the angler.
+	if map_state == 1 and _flat_dist(np, map_pos) < 2.8 or map_state == 1 and _flat_dist(b.global_position, map_pos) < 2.5:
+		_place_buoy(b)
 		return
 	# Nothing to scoop: a big splash that scares nearby fish away from the boat (herding!).
 	splash(np, b.index)
+
+
+func _start_map(b) -> void:
+	map_state = 1
+	map_by = -1
+	map_wait = 0.0
+	map_pos = _castable_point(7.0, 15.0)
+	for i in 6:
+		if _flat_dist(map_pos, b.global_position) > 6.0:
+			break
+		map_pos = _castable_point(7.0, 15.0)
+	_show_center("P%d found a TREASURE MAP!\nRow to the big RED X and press A there!" % (b.index + 1), 3.5)
+	sound("map", 0.0, 1.0, true)
+	ripple(map_pos, 3.0)
+	print("Event: treasure map, X at %s" % str(map_pos))
+
+
+func _place_buoy(b) -> void:
+	map_state = 2
+	map_by = b.index
+	stat(b.index, "map")
+	_add_coins(b, 2)
+	burst(map_pos + Vector3(0, 0.5, 0), Color(1.0, 0.85, 0.2), 20)
+	ripple(map_pos, 2.5)
+	sound("buoy", 0.0, 1.0, true)
+	popup(map_pos + Vector3(0, 1.8, 0), "P%d: X MARKS THE SPOT!" % (b.index + 1), b.color.lightened(0.3), true, 1.3)
+	_show_center("P%d dropped a buoy on the X!\nANGLER: cast next to the YELLOW BUOY to fish up the pirate treasure!" % (b.index + 1), 4.0)
+	print("Event: buoy dropped by P%d" % (b.index + 1))
 
 
 func splash(pos: Vector3, by: int) -> void:
 	sound("splash", -2.0, randf_range(0.9, 1.2), true)
 	burst(pos, Color(0.8, 0.95, 1.0), 14)
 	ripple(pos, 2.5)
+	stat(by, "splash")
 	for f in fish:
 		if f.kind < 0 or f.is_junk():
 			continue
 		if Vector2(f.position.x - pos.x, f.position.z - pos.z).length() < 5.0:
 			f.scare(pos, by)
+	# Splashing right next to a hooked fish helps the angler land it (co-op catch!).
+	var a = players[0]
+	var now := Time.get_ticks_msec() / 1000.0
+	var ready: bool = by > 0 and now - float(players[by].get_meta("assist_t", -10.0)) > 1.4
+	if ready and a.line_state == "fight" and a.hooked != null and _flat_dist(pos, a.lure_pos) < 4.0:
+		players[by].set_meta("assist_t", now)
+		var first: bool = not a.hooked.helpers.has(by)
+		if a.assist(by):
+			sound("assist", 0.0, 1.0, true)
+			var who := "P%d" % (by + 1)
+			if a.hooked.kind == FishScript.LEGEND:
+				legend_tire(0.09, by)
+				popup(a.lure_pos + Vector3(0, 1.6, 0), "%s SPLASH! Whiskers is tiring!" % who, players[by].color.lightened(0.3), true, 1.2)
+			else:
+				popup(a.lure_pos + Vector3(0, 1.4, 0), "%s HELPS! It stops pulling!" % who, players[by].color.lightened(0.3), true, 1.1)
+			if first:
+				_add_coins(players[by], 1)
 
 
 func on_boat_call(b) -> void:
@@ -1260,7 +2036,7 @@ func on_boat_call(b) -> void:
 		if f.kind < 0 or f.is_junk() or f.state == "hooked" or f.state == "landed":
 			continue
 		var d := Vector2(f.position.x - bp.x, f.position.z - bp.z).length()
-		if d > 11.0:
+		if d > (14.0 if b.level >= 3 else 11.0):
 			continue
 		var flen: float = f.info()["len"]
 		var s := d - flen * 8.0
@@ -1286,10 +2062,35 @@ func on_boat_call(b) -> void:
 			pick.set_state("approach")
 
 
+## Bot hooks: start an event now ("frenzy", "map", "legend", "rain", "night").
+func debug_event(what: String) -> void:
+	if net.mode == "client" or state != "play":
+		return
+	match what:
+		"frenzy":
+			frenzy_done = false
+			frenzy_pos = _castable_point(7.0, 12.0)
+			_start_frenzy()
+		"map":
+			var boats := active_boats()
+			if boats.is_empty():
+				return
+			var b = boats[0]
+			_spawn_treasure(TreasureScript.MAP, b.global_position + b.forward() * 3.0)
+		"legend":
+			if legend_state != 1:
+				_spawn_legend()
+		"rain":
+			theme = 1
+		"night":
+			theme = 2
+
+
 # --- Networked co-op (see docs/GAME_DEV_GUIDE.md) ------------------------------------
 
 func on_client_joined() -> void:
 	_show_center("THE TV PLAYERS JOINED!", 1.5)
+	_send_journal()
 
 
 func on_client_left() -> void:
@@ -1310,6 +2111,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 		"join":
 			if not p.active:
 				_activate(p)
+				_send_journal()
 				print("Net: player %d joined the game" % (index + 1))
 		"leave":
 			if p.active:
@@ -1332,6 +2134,8 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 			var paused: bool = args[0]
 			_set_pause_banner(paused, "A TV player opened the menu")
 			get_tree().paused = paused
+			if not paused:
+				players[0].trig_lock = true
 
 
 func _set_pause_banner(paused: bool, who: String) -> void:
@@ -1343,6 +2147,8 @@ func _set_pause_banner(paused: bool, who: String) -> void:
 func toggle_vr_pause() -> void:
 	var paused := not get_tree().paused
 	get_tree().paused = paused
+	if not paused:
+		players[0].trig_lock = true  # a trigger still held from the pause must not reel or continue
 	_set_pause_banner(paused, "Wrist RESUME: carry on\nHold the trigger: back to the arcade")
 	net.event("remote_pause", [paused])
 
@@ -1364,15 +2170,18 @@ func make_snapshot() -> Array:
 	for t in treasures:
 		var tp: Vector3 = t.position
 		ts.append_array([float(t.kind), tp.x, tp.y, tp.z])
-	var bs: Array = []
+	var bs := PackedInt32Array()
 	for i in range(1, players.size()):
-		bs.append(players[i].active)
+		bs.append(1 + players[i].level + 4 * mini(players[i].coins, 9999) if players[i].active else 0)
+	# Weather, sky, events: a few numbers.
+	var ex := PackedFloat32Array([rain, daylight, frenzy_t, frenzy_pos.x, frenzy_pos.z, float(map_state), map_pos.x, map_pos.z,
+		legend_stamina, float(streak), float(theme), float(legend_state)])
 	return [state, state_t, time_left, round_time, score, target, day, best, fs, ts, bs, players[0].snapshot(),
-		PackedInt32Array(catches), goal_hit, biggest]
+		PackedInt32Array(catches), goal_hit, biggest, ex]
 
 
 func apply_snapshot(s: Array) -> void:
-	if not ready_to_play or s.size() < 15:
+	if not ready_to_play or s.size() < 16:
 		return
 	synced = true
 	var st: String = s[0]
@@ -1415,13 +2224,16 @@ func apply_snapshot(s: Array) -> void:
 				t.position = tp
 				t.visible = true
 		t.net_pos = tp
-	var bs: Array = s[10]
+	var bs: PackedInt32Array = s[10]
 	for i in bs.size():
 		var idx := i + 1
 		if idx >= players.size():
 			break
 		var p = players[idx]
-		var act: bool = bs[i]
+		var act: bool = bs[i] > 0
+		if act:
+			p.set_level((bs[i] - 1) % 4)
+			p.coins = (bs[i] - 1) / 4
 		if act != p.active:
 			if act and not p.has_meta("want_join") and is_local(p) and not p.active and p.has_meta("left_by_pad"):
 				continue
@@ -1434,6 +2246,18 @@ func apply_snapshot(s: Array) -> void:
 	catches = Array(cs)
 	goal_hit = s[13]
 	biggest = s[14]
+	var ex: PackedFloat32Array = s[15]
+	if ex.size() >= 12:
+		rain = ex[0]
+		daylight = ex[1]
+		frenzy_t = ex[2]
+		frenzy_pos = Vector3(ex[3], 0.0, ex[4])
+		map_state = int(ex[5])
+		map_pos = Vector3(ex[6], 0.0, ex[7])
+		legend_stamina = ex[8]
+		streak = int(ex[9])
+		theme = clampi(int(ex[10]), 0, THEMES.size() - 1)
+		legend_state = int(ex[11])
 
 
 func apply_event(kind: String, args: Array) -> void:
@@ -1442,14 +2266,25 @@ func apply_event(kind: String, args: Array) -> void:
 	match kind:
 		"sound":
 			sound(args[0], args[1], args[2])
+		"fanfare":
+			fanfare(false)
 		"burst":
 			burst(args[0], args[1], args[2], false)
 		"ripple":
 			ripple(args[0], args[1], false)
+		"leap":
+			leap(args[0], args[1], args[2], false)
 		"popup":
 			popup(args[0], args[1], args[2], false, args[3])
 		"center":
 			_show_center(args[0], args[1], false)
+		"board":
+			day_summary = args[0]
+			summary_day = args[1]
+		"journal":
+			journal_counts = args[0]
+			journal_best = args[1]
+			journal_text = ""
 		"remote_pause":
 			get_tree().paused = args[0]
 			_set_pause_banner(args[0], "The VR player paused the game")
@@ -1523,7 +2358,7 @@ func _build_hud() -> void:
 	help_label.offset_top = -64
 	help_label.offset_bottom = -12
 	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	help_label.text = "Boat: left stick / arrows (WASD on the TV) row · right stick / mouse camera · A / Space / Enter net · X / F / slash call a fish · Start / Esc menu\n" \
+	help_label.text = "Boat: left stick / arrows (WASD on the TV) row · right stick / mouse camera · A / Space / Enter net & splash · X / F / slash call a fish · Start / Esc menu\n" \
 		+ "Split screen P1 fishes: WASD walk · mouse aim · hold Space / LMB to cast, hold again to reel · Shift / RMB pull back  ·  More boats: press A on another controller"
 
 
@@ -1545,28 +2380,101 @@ func clock_text() -> String:
 	return "%d:%02d" % [s / 60, s % 60]
 
 
+func _theme_name() -> String:
+	var n: String = _theme()["name"]
+	if raining():
+		n = "RAIN"
+	elif is_night():
+		n = "STARRY NIGHT"
+	return n
+
+
+func event_line() -> String:
+	var a = players[0]
+	if a.line_state == "fight" and a.hooked_kind() == FishScript.LEGEND:
+		return "OLD WHISKERS HOOKED!  stamina %s" % _bar(legend_stamina * 1.2)
+	if frenzy_t > 0.0:
+		return "FISH FRENZY %ds - double points in the bubbles!" % int(ceilf(frenzy_t))
+	if map_state == 1:
+		return "TREASURE MAP: a boat must find the red X"
+	if map_state == 2:
+		return "BUOY DROPPED: cast next to the yellow buoy!"
+	if legend_state == 1:
+		return "OLD WHISKERS is in the lake!"
+	return ""
+
+
 func hud_text(p) -> String:
 	if net.mode == "client" and not synced:
 		return "Syncing with the VR player..."
-	var line := "DAY %d   SUNSET IN %s   SCORE %d / %d" % [day, clock_text(), score, target]
+	var line := "DAY %d - %s   SUNSET IN %s\nSCORE %d / %d%s" % [day, _theme_name(), clock_text(), score, target,
+		"   STREAK x%d" % streak if streak >= 2 else ""]
 	if state == "over":
 		return line + "\nSUNSET - press A / Enter for another day"
+	var ev := event_line()
+	if ev != "":
+		line += "\n" + ev
 	var a = players[0]
 	var ls: String = a.line_state
 	if p.index == 0:
-		line += "\n" + str(a.hint)
 		if ls == "fight":
 			line += "\nLINE TENSION %s" % _bar(float(a.tension))
 		return line
+	var nxt: int = p.next_level_coins()
+	line += "\n%s  coins %d%s" % [BoatScript.LEVEL_NAMES[p.level], p.coins, (" (upgrade at %d)" % nxt) if nxt > 0 else " (max!)"]
 	if ls == "fight":
-		line += "\nFISH ON! Cheer - the line tension is %s" % _bar(float(a.tension))
-	elif ls == "waiting" or ls == "bite":
-		line += "\nThe red bobber is out! Herd fish to it, or press X to call one"
-	else:
-		line += "\nScoop floating treasure with A (net) · splash to herd fish"
+		line += "\nFISH ON! Line tension %s" % _bar(float(a.tension))
 	if golden_bait:
 		line += "\nGOLDEN BAIT is ready!"
 	return line
+
+
+## The contextual "what do I do now?" tip for each player (big text at the bottom of their view).
+func tip_text(p) -> String:
+	if net.mode == "client" and not synced:
+		return ""
+	if state == "over":
+		return "Press A for another day!"
+	var a = players[0]
+	if p.index == 0:
+		var h: String = a.hint
+		if a.line_state == "ready" and frenzy_t > 0.0:
+			h += "\nAim for the BUBBLES - double points!"
+		elif a.line_state == "ready" and map_state == 2:
+			h += "\nCast next to the YELLOW BUOY!"
+		return h
+	var bp: Vector3 = p.global_position
+	if a.line_state == "fight":
+		var near := _flat_dist(bp, a.lure_pos) < 5.0
+		if a.hooked_kind() == FishScript.LEGEND:
+			return "Press A right next to OLD WHISKERS to SPLASH him tired!" if near else "OLD WHISKERS IS HOOKED! Row to him and SPLASH (A)!"
+		return "Press A now - SPLASH next to the fish to help land it!" if near else "Fish on! Row over and SPLASH (A) next to it to help"
+	var np: Vector3 = p.net_point()
+	for t in treasures:
+		if t.kind >= 0 and _flat_dist(t.position, np) < p.net_reach() + 1.0:
+			return "Press A to scoop the %s!" % str(t.info()["name"]).to_upper()
+	if map_state == 1:
+		if _flat_dist(bp, map_pos) < 3.5:
+			return "Press A to drop a buoy on the X!"
+		return "Row to the big RED X (follow the red light) and press A there"
+	if legend_state == 1 and a.line_state == "waiting":
+		return "OLD WHISKERS is here - row close and press X to call him to the bobber!"
+	if frenzy_t > 0.0:
+		return "FISH FRENZY! Herd fish into the bubbles - A splashes them away from you"
+	if a.line_state == "waiting":
+		for f in fish:
+			if f.kind >= 0 and FishScript.is_species(f.kind) and _flat_dist(f.position, bp) < 9.0:
+				return "Press X to call a fish to the red bobber!"
+		return "The bobber is out: row near fish, then press X to call one"
+	if day == 1 and state_t < 30.0:
+		return "Row with the left stick - look for floating treasure!"
+	return "Look for floating treasure (A scoops it) - coins upgrade your boat!"
+
+
+func update_tip(p, l: Label) -> void:
+	var t := tip_text(p)
+	if l.text != t:
+		l.text = t
 
 
 func _bar(v: float) -> String:
@@ -1575,6 +2483,12 @@ func _bar(v: float) -> String:
 
 
 func _update_board() -> void:
+	if state == "over" and summary_day == day and day_summary != "":
+		if board_text != day_summary:
+			board_text = day_summary
+			lake.board_label.text = day_summary
+		_update_journal_board()
+		return
 	var counts := {}
 	for k in catches:
 		var ki: int = k
@@ -1584,21 +2498,45 @@ func _update_board() -> void:
 		if counts.has(k):
 			var d: Dictionary = FishScript.TYPES[k]
 			lines.append("%s x%d" % [str(d["name"]), int(counts[k])])
-	var t := "TROPHY BOARD - DAY %d\nSCORE %d / %d%s\nSUNSET IN %s\n%s" % [day, score, target,
-		"  GOAL!" if goal_hit else "", clock_text(), "\n".join(lines) if not lines.is_empty() else "(no catches yet)"]
+	var t := "DAY %d - %s\nSCORE %d / %d%s\nSUNSET IN %s%s\n%s" % [day, _theme_name(), score, target,
+		"  GOAL!" if goal_hit else "", clock_text(), ("   STREAK x%d" % streak) if streak >= 2 else "",
+		", ".join(lines) if not lines.is_empty() else "(no catches yet)"]
 	if biggest != "":
 		t += "\nBIGGEST: " + biggest
+	var ev := event_line()
+	if ev != "":
+		t += "\n" + ev
 	if t != board_text:
 		board_text = t
 		lake.board_label.text = t
+	_update_journal_board()
+
+
+func _update_journal_board() -> void:
+	var lines: Array[String] = ["FISH JOURNAL   %d / %d found" % [_journal_found(), _species_total()]]
+	for k in FishScript.TYPES.size():
+		if not FishScript.is_species(k):
+			continue
+		var d: Dictionary = FishScript.TYPES[k]
+		var c := journal_counts[k] if k < journal_counts.size() else 0
+		if c > 0:
+			var bk := journal_best[k] if k < journal_best.size() else 0.0
+			lines.append("%s%s  x%d  (best %.1f kg)" % ["NEW! " if new_today.has(k) else "", str(d["name"]), c, bk])
+		else:
+			lines.append("? ? ? - %s" % str(d["hint"]))
+	var t := "\n".join(lines)
+	if t != journal_text:
+		journal_text = t
+		lake.journal_label.text = t
 
 
 func _update_vr_text() -> void:
 	if help_label.modulate.a > 0.0 and day >= 2:
 		help_label.modulate.a = maxf(0.0, help_label.modulate.a - get_process_delta_time() * 0.5)
-	if players.is_empty() or not players[0].vr:
+	if players.is_empty() or not players[0].vr_like() or players[0].xr_camera == null:
 		return
-	var cam: Node3D = players[0].xr_camera
+	var a = players[0]
+	var cam: Node3D = a.xr_camera
 	if vr_center == null:
 		vr_center = Label3D.new()
 		vr_center.font_size = 44
@@ -1614,3 +2552,49 @@ func _update_vr_text() -> void:
 	vr_center.modulate.a = center_label.modulate.a
 	vr_center.outline_modulate = Color(0, 0, 0, center_label.modulate.a)
 	VrText.follow(vr_center, cam, self, 0.25, 1.8)
+	# Casting hint: a panel low in front while the rod is ready (below the centre banner).
+	if vr_hint == null:
+		vr_hint = Label3D.new()
+		vr_hint.font_size = 40
+		vr_hint.outline_size = 22
+		vr_hint.pixel_size = 0.002
+		vr_hint.no_depth_test = true
+		vr_hint.render_priority = 8
+		vr_hint.outline_render_priority = 7
+		vr_hint.width = 900.0
+		vr_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		add_child(vr_hint)
+	var ls: String = a.line_state
+	var show_panel := state == "play" and (ls == "ready" or ls == "landing") and center_label.modulate.a < 0.05
+	vr_hint.visible = show_panel
+	if show_panel:
+		vr_hint.text = tip_text(a)
+		vr_hint.modulate = a.hint_col
+		VrText.follow(vr_hint, cam, self, -0.45, 1.6)
+	# While the line is out, the hint floats above the bobber: that's where the angler is looking.
+	if bobber_label == null:
+		bobber_label = Label3D.new()
+		bobber_label.font_size = 56
+		bobber_label.outline_size = 18
+		bobber_label.width = 700.0
+		bobber_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		bobber_label.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+		bobber_label.render_priority = 6
+		add_child(bobber_label)
+	var out := ls == "waiting" or ls == "bite" or ls == "fight"
+	bobber_label.visible = out and state == "play"
+	if bobber_label.visible:
+		var lp: Vector3 = a.lure_pos
+		var dist := cam.global_position.distance_to(lp)
+		var t: String = a.hint
+		if ls == "fight":
+			t += "\n%s" % _bar(float(a.tension))
+			if a.hooked_kind() == FishScript.LEGEND and legend_stamina > 0.0:
+				t += "\nWHISKERS %s" % _bar(legend_stamina * 1.2)
+		bobber_label.text = t
+		bobber_label.modulate = a.hint_col
+		bobber_label.pixel_size = clampf(dist * 0.00055, 0.002, 0.009)
+		bobber_label.global_position = Vector3(lp.x, 0.55 + dist * 0.035, lp.z)
+		face_label(bobber_label)
+		if not a.vr:
+			bobber_label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
