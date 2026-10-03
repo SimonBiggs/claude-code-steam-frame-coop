@@ -492,9 +492,19 @@ func _process(delta: float) -> void:
 	if not vr or xr_origin == null or vr_velocity == Vector3.ZERO:
 		return
 	var step := vr_velocity * delta
-	# Don't walk through pillars; the arena edge is handled in _vr_update.
+	# Don't walk through pillars (slide along them instead); the arena edge is handled in _vr_update.
+	# If the player has physically walked into a pillar, let the stick move them out freely.
 	if test_move(global_transform, step):
-		return
+		var inside := test_move(global_transform, Vector3(0.0, 0.001, 0.0))
+		if not inside:
+			var along_x := Vector3(step.x, 0.0, 0.0)
+			var along_z := Vector3(0.0, 0.0, step.z)
+			if not test_move(global_transform, along_x):
+				step = along_x
+			elif not test_move(global_transform, along_z):
+				step = along_z
+			else:
+				return
 	xr_origin.global_position += step
 	global_position += step
 
