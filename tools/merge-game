@@ -33,5 +33,5 @@ echo "$NAME test errors: local=$L host=$H client=$C"
 if [ "$L$H$C" != "000" ]; then echo "NOT deploying: fix errors first"; exit 1; fi
 duo-deploy "Add $NAME to the arcade" | tail -1
 cd "$LIVE" && git worktree list | grep -F "[$BR]" | awk '{print $1}' | xargs -r -I{} git worktree remove --force {} && git branch -D "$BR" >/dev/null
-git push -q origin main 2>&1 | tail -1 || true
+sleep 6; git push -q origin main 2>/dev/null || true  # after duo-deploy's background push
 echo "merged $NAME"

@@ -35,6 +35,13 @@ const DEFS := {
 }
 
 
+## Register a game-specific sound: def = [seconds, start Hz, end Hz, volume, wave, noise mix]
+## (wave: "square", "saw", "tri" or "sine"). Safe to call repeatedly.
+func add_sound(sound: String, def: Array) -> void:
+	if not streams.has(sound):
+		streams[sound] = _make(def[0], def[1], def[2], def[3], def[4], def[5])
+
+
 func play(sound: String, volume_db: float = 0.0, pitch: float = 1.0) -> void:
 	if not streams.has(sound):
 		if not DEFS.has(sound):

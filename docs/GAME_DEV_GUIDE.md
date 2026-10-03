@@ -9,7 +9,7 @@ connected over the home network. There's also a split-screen fallback when no he
 ```
 arcade/arcade.gd        launcher (register your game in GAMES)
 core/net.gd             ENet host/client: snapshots + events (shared, don't fork)
-core/sfx.gd             procedural sound effects: sfx.play(name, volume_db, pitch)
+core/sfx.gd             procedural sound effects: sfx.play(name, volume_db, pitch), sfx.add_sound(name, def)
 core/music.gd           procedural synthwave tracks: play_track(i)
 core/pause_menu.gd      Esc/Start pause menu (shares pause over the network)
 games/<id>/main.tscn    root node MUST be a Node3D named "Main" with games/<id>/main.gd
