@@ -93,7 +93,7 @@ var hand_ball: MeshInstance3D
 var remote := false
 var ghost := false
 var active := true
-var key_set := -1
+var key_set := -1  # -1: by index (P1 WASD, P2 arrows), -2: no keyboard (extra controller players)
 var mouse_look := false
 var net_target := Vector3.ZERO
 var net_started := false
@@ -105,16 +105,17 @@ var ghost_head: Node3D
 var ghost_hand: Node3D
 
 
+## Render layers: bit 0 world, bits 1-7 the bodies of players 0-6, bits 8-14 their first-person viewmodels.
 func body_layer() -> int:
 	return 2 << index
 
 
 func viewmodel_layer() -> int:
-	return 64 << index
+	return 256 << index
 
 
 func camera_cull_mask() -> int:
-	return 1 | (14 & ~body_layer()) | viewmodel_layer()
+	return 1 | (0xFE & ~body_layer()) | viewmodel_layer()
 
 
 func _ready() -> void:
@@ -640,11 +641,21 @@ func on_block() -> void:
 # --- Input -------------------------------------------------------------------
 
 func keys() -> int:
+	if key_set == -2:
+		return -1
 	return key_set if key_set >= 0 else mini(index, KEYS.size() - 1)
 
 
 func _key(action: String) -> bool:
-	return Input.is_physical_key_pressed(KEYS[keys()][action])
+	var k := keys()
+	if k < 0:
+		return false
+	return Input.is_physical_key_pressed(KEYS[k][action])
+
+
+## Has a keyboard (and maybe the mouse) of its own, so it never "leaves" when its controller unplugs.
+func has_keyboard() -> bool:
+	return keys() >= 0 or mouse_look
 
 
 func _stick(axis_x: JoyAxis, axis_y: JoyAxis, deadzone: float) -> Vector2:

@@ -7,6 +7,9 @@ var main
 var t := 0.0
 var next_report := 0.0
 var cycle := {}  # player index -> seconds into the current charge/throw cycle
+## BOT_PLAYERS=N: N TV players join programmatically (main.debug_join), like N controllers pressing A.
+var bot_players: int = int(OS.get_environment("BOT_PLAYERS")) if OS.has_environment("BOT_PLAYERS") else 0
+var join_t := 1.0
 
 
 func _ready() -> void:
@@ -24,15 +27,26 @@ func _physics_process(delta: float) -> void:
 	t += delta
 	if not main.ready_to_play:
 		return
+	if bot_players > 0 and t >= join_t:
+		join_t = t + 1.0
+		var n := 0
+		for p in main.players:
+			if p.ghost or p.remote or p.vr:
+				continue
+			n += 1
+			if n <= bot_players and not p.active:
+				print("Bot: P%d joins" % (p.index + 1))
+				main.debug_join(p.index)
 	for p in main.players:
 		if p.ghost or p.remote:
 			continue
 		if not p.active:
-			p.bot_throw = t > 4.0 and fmod(t, 2.0) < 0.3
+			p.bot_throw = bot_players == 0 and t > 4.0 and fmod(t, 2.0) < 0.3
 			continue
 		if p.index == 1 and _repair_role(p):
 			continue
 		_throw_role(p, delta)
+	_pad_test()
 	_check_restart()
 	if t >= next_report:
 		next_report += 5.0
@@ -44,7 +58,9 @@ func _report() -> void:
 	for p in main.players:
 		ps.append("P%d%s hp=%d%s%s" % [p.index + 1, "" if p.active else "(idle)", int(p.hp), " DOWN" if p.is_down else "",
 			" repairing" if p.repairing else ""])
-	print("t=%.0f mode=%s wave=%d score=%d fort=%d%% snowmen=%d cocoa=%d balls=%d over=%s | %s" % [t, main.net.mode, main.wave, main.score,
+	if main.view_grid:
+		print("Bot: views grid columns=%d shown=%d" % [main.view_grid.columns, main.view_grid.get_children().filter(func(c): return c.visible).size()])
+	print("t=%.0f mode=%s playing=%d wave=%d score=%d fort=%d%% snowmen=%d cocoa=%d balls=%d over=%s | %s" % [t, main.net.mode, main.party_size(), main.wave, main.score,
 		int(main.fort_fraction() * 100.0), get_tree().get_nodes_in_group("snowmen").size(), get_tree().get_nodes_in_group("cocoa").size(),
 		main.get_children().filter(func(c): return c.get("spin") != null).size(), main.game_over, ", ".join(ps)])
 
@@ -145,3 +161,30 @@ func _check_restart() -> void:
 		e.physical_keycode = KEY_ENTER
 		e.pressed = true
 		Input.parse_input_event(e)
+
+
+## BOT_PAD_TEST=1: a new controller (device 7) presses A to join, unplugs (leaves), plugs back in (rejoins).
+var pad_step := 0
+func _pad_test() -> void:
+	if not OS.has_environment("BOT_PAD_TEST") or main.net.mode == "host":
+		return
+	if pad_step == 0 and t > 6.0:
+		pad_step = 1
+		var e := InputEventJoypadButton.new()
+		e.device = 7
+		e.button_index = JOY_BUTTON_A
+		e.pressed = true
+		Input.parse_input_event(e)
+		print("Bot: controller 7 pressed A")
+	elif pad_step == 1 and t > 9.0:
+		pad_step = 2
+		print("Bot: controller 7 unplugged")
+		main._on_joy_changed(7, false)
+	elif pad_step == 2 and t > 12.0:
+		pad_step = 3
+		print("Bot: controller 7 plugged back in")
+		main._on_joy_changed(7, true)
+	elif pad_step == 3 and t > 14.0:
+		pad_step = 4
+		var owner = main._player_with_pad(7)
+		print("Bot: pad test done, controller 7 -> P%d active=%s, playing=%d" % [owner.index + 1 if owner else 0, owner.active if owner else false, main.party_size()])
