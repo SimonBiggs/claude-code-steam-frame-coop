@@ -117,7 +117,7 @@ func _vr_update(delta: float) -> void:
 		var b := Basis(Vector3.UP, xr_camera.global_rotation.y)
 		xr_origin.global_position += b * Vector3(s.x, 0.0, -s.y) * 0.6 * delta
 	var head := xr_camera.global_position
-	var fix := Vector3(clampf(head.x, -0.9, 0.9) - head.x, 0.0, clampf(head.z, -0.6, 0.9) - head.z)  # lean right over the desk without being pushed back
+	var fix := Vector3(clampf(head.x, -0.9, 0.9) - head.x, 0.0, clampf(head.z, -1.5, 0.9) - head.z)  # lean right over the desk without being pushed back
 	xr_origin.global_position += fix
 	var r := hand_r.get_vector2("primary")
 	if absf(r.y) > 0.5:
