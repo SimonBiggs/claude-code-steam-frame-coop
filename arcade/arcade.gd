@@ -25,7 +25,9 @@ const VrText := preload("res://core/vr_text.gd")
 const DEFAULT_PORT := 7777
 const JOIN_TIMEOUT_MS := 5000
 
-var port: int = int(OS.get_environment("DUO_PORT")) if OS.has_environment("DUO_PORT") else DEFAULT_PORT
+# The lobby listens one port above the games, so a TV still looking for the lobby never
+# connects to a game that's already running on the headset.
+var port: int = (int(OS.get_environment("DUO_PORT")) if OS.has_environment("DUO_PORT") else DEFAULT_PORT) + 1
 var mode := "local"  # "local", "host", "client"
 var selected := 0
 var join_deadline := 0
@@ -162,6 +164,7 @@ func _process(_delta: float) -> void:
 	if mode == "local" and not starting and OS.has_environment("DUO_JOIN") and not OS.has_environment("ARCADE_GAME"):
 		if Time.get_ticks_msec() > int(get_meta("retry_at", 0)):
 			set_meta("retry_at", Time.get_ticks_msec() + 4000)
+			port = (int(OS.get_environment("DUO_PORT")) if OS.has_environment("DUO_PORT") else DEFAULT_PORT) + 1
 			_join_lobby(OS.get_environment("DUO_JOIN"))
 	if vr_list:
 		_vr_input()
