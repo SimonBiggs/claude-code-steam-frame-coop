@@ -1114,7 +1114,11 @@ func _update_vr_center() -> void:
 	vr_center.text = center_label.text
 	vr_center.modulate.a = center_label.modulate.a
 	vr_center.outline_modulate.a = center_label.modulate.a
-	VrText.follow(vr_center, giant.xr_camera, self, -0.12 * W.S, 1.7 * W.S)
+	# Above the table (nothing in front of it), so your eyes don't fight the depth.
+	if not has_meta("vr_center_v2"):
+		set_meta("vr_center_v2", true)
+		VrText.snap(vr_center)
+	VrText.follow(vr_center, giant.xr_camera, self, 0.18 * W.S, 1.2 * W.S)
 
 
 func _update_hud() -> void:
