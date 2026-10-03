@@ -36,6 +36,9 @@ var gold := false       # carrying sun lily pollen
 var last_flower := -1
 var honey_made := 0
 var gather_cd := 0.0
+var pollen_kinds := 0   # bitmask of the flower kinds in this load (the Queen asks for one kind)
+var trip_flowers: Array = []  # host: different flowers visited this trip (FLOWER COMBO)
+var crowned := false    # gave the Queen her pollen today
 var vel := Vector3.ZERO
 var face := 0.0
 var cam_yaw := 0.0
@@ -55,6 +58,7 @@ var wings: Array[MeshInstance3D] = []
 var balls: Array[MeshInstance3D] = []
 var arrow: MeshInstance3D
 var tag: Label3D
+var crown: MeshInstance3D
 
 
 func _ready() -> void:
@@ -62,26 +66,33 @@ func _ready() -> void:
 	net_target = global_position
 	pivot = Node3D.new()
 	add_child(pivot)
-	var yellow := W.cmat(Color(1.0, 0.8, 0.15))
-	var black := W.cmat(Color(0.12, 0.1, 0.08))
-	W.mesh_node(pivot, W.sphere(0.14, 14), yellow, Vector3(0, 0, 0.04), Vector3(0.95, 0.9, 1.25))
+	# Body, stripes, head, big eyes, antennae, stinger and this player's scarf: one merged mesh.
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var yellow := Color(1.0, 0.8, 0.15)
+	var black := Color(0.12, 0.1, 0.08)
+	W.vsphere(st, Vector3(0, 0, 0.04), Vector3(0.133, 0.126, 0.175), yellow, 12, 8)
 	for z in [0.0, 0.1]:
-		var band := W.mesh_node(pivot, W.cyl(0.135, 0.135, 0.04, 12), black, Vector3(0, 0, z + 0.02))
-		band.rotation.x = PI / 2.0
-	W.mesh_node(pivot, W.sphere(0.09, 12), black, Vector3(0, 0.02, -0.15))
-	for s in [-1.0, 1.0]:
-		W.mesh_node(pivot, W.sphere(0.03, 6), W.cmat(Color.WHITE, 0.3), Vector3(s * 0.045, 0.05, -0.22))
-	var scarf := MeshInstance3D.new()
-	var tm := TorusMesh.new()
-	tm.inner_radius = 0.07
-	tm.outer_radius = 0.11
-	tm.rings = 12
-	tm.ring_segments = 6
-	scarf.mesh = tm
-	scarf.material_override = W.cmat(color, 0.4)
-	scarf.rotation.x = PI / 2.0
-	scarf.position = Vector3(0, 0, -0.09)
-	pivot.add_child(scarf)
+		W.vsphere(st, Vector3(0, 0, z + 0.02), Vector3(0.137, 0.13, 0.025), black, 12, 4)
+	W.vsphere(st, Vector3(0, 0.02, -0.15), Vector3(0.09, 0.09, 0.09), black, 10, 6)
+	for s2 in [-1.0, 1.0]:
+		W.vsphere(st, Vector3(s2 * 0.045, 0.05, -0.215), Vector3(0.032, 0.036, 0.022), Color(1, 1, 1), 8, 4)
+		W.vsphere(st, Vector3(s2 * 0.045, 0.05, -0.234), Vector3(0.016, 0.02, 0.01), Color(0.05, 0.04, 0.08), 6, 4)
+		W.vsphere(st, Vector3(s2 * 0.07, -0.0, -0.205), Vector3(0.02, 0.013, 0.01), Color(1.0, 0.55, 0.55), 6, 4)
+		W.vcyl(st, Vector3(s2 * 0.035, 0.13, -0.19), 0.006, 0.008, 0.1, black, 4)
+		W.vsphere(st, Vector3(s2 * 0.04, 0.185, -0.2), Vector3(0.018, 0.018, 0.018), black, 6, 4)
+	W.vsphere(st, Vector3(0, 0, -0.09), Vector3(0.115, 0.1, 0.035), color, 12, 4)
+	W.vsphere(st, Vector3(0.08, -0.04, -0.06), Vector3(0.03, 0.06, 0.02), color, 6, 4)
+	W.vcyl(st, Vector3(0, -0.01, 0.23), 0.0, 0.025, 0.06, black, 6)
+	var body_m := W.vmesh(st)
+	(body_m.surface_get_material(0) as StandardMaterial3D).cull_mode = BaseMaterial3D.CULL_BACK
+	var body := MeshInstance3D.new()
+	body.mesh = body_m
+	body.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	pivot.add_child(body)
+	# A little gold crown, for bees who brought the Queen her pollen.
+	crown = W.mesh_node(pivot, W.cyl(0.06, 0.05, 0.06, 6), W.cmat(Color(1.0, 0.85, 0.2), 1.4), Vector3(0, 0.12, -0.15))
+	crown.visible = false
 	var wing_mat := W.mat(Color(0.92, 0.97, 1.0, 0.55), 0.2)
 	wing_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	for s in [-1.0, 1.0]:
@@ -247,10 +258,15 @@ func _process(delta: float) -> void:
 		b.visible = b_on
 		b.scale = Vector3.ONE * (0.7 + 0.3 * pollen)
 		b.material_override = W.cmat(Color(1.0, 0.85, 0.2) if gold else Color(1.0, 0.6, 0.1), 0.8 if gold else 0.5)
-	arrow.visible = active and pollen > 0 and global_position.distance_to(W.HIVE_ENTRY) > 2.0
+	crown.visible = crowned
+	# The arrow points to the HIVE, or to the Queen when we carry the pollen she wants.
+	var goal := W.HIVE_ENTRY
+	if main.event == "queen" and pollen > 0 and (pollen_kinds & (1 << int(main.queen_kind))) != 0:
+		goal = main.events_node.queen_pos()
+	arrow.visible = active and pollen > 0 and global_position.distance_to(goal) > 1.2
 	if arrow.visible:
 		arrow.position = Vector3(0, 0.3, 0)
-		var to := W.HIVE_ENTRY - global_position
+		var to := goal - global_position
 		var dir := to.normalized()
 		# The cone's tip is +Y: point it at the hive.
 		var axis := Vector3.UP.cross(dir)
@@ -279,16 +295,29 @@ func _update_hud() -> void:
 	if hud_label:
 		hud_label.text = "P%d  BEE   POLLEN %d / %d   HONEY MADE %d" % [index + 1, pollen, MAX_POLLEN, honey_made]
 	if hint_label:
-		var h := ""
-		if main.game_over:
-			h = ""
-		elif pollen >= MAX_POLLEN:
-			h = "Full of pollen! Follow the arrow to the HIVE"
-		elif pollen > 0:
-			h = "Visit a DIFFERENT flower to grow fruit,\nor follow the arrow to the HIVE to make honey"
-		else:
-			h = "Fly into a glowing flower to collect pollen"
-		hint_label.text = h
+		hint_label.text = _hint()
+
+
+## What should this bee do right now? Events first, then the pollen loop.
+func _hint() -> String:
+	if main.game_over or main.phase == "dusk":
+		return ""
+	var want: String = str(W.KINDS[clampi(int(main.queen_kind), 0, 2)].name).to_upper()
+	if main.event == "queen":
+		if pollen > 0 and (pollen_kinds & (1 << int(main.queen_kind))) != 0:
+			return "You have %s pollen! Follow the arrow to the QUEEN!" % want
+		if pollen < MAX_POLLEN:
+			return "The QUEEN wants %s pollen: find a %s flower!" % [want, want]
+	if main.event == "raid":
+		return "WASP RAID! Bump into the wasps to buzz them away from the hive!"
+	if main.event == "golden" and pollen < MAX_POLLEN:
+		return "Find the sparkly GOLDEN flower: golden pollen = lots of honey!"
+	var rb := "   (RAINBOW: double honey!)" if main.rainbow_t > 0.0 else ""
+	if pollen >= MAX_POLLEN:
+		return "Full of pollen! Follow the arrow to the HIVE" + rb
+	if pollen > 0:
+		return "Visit a DIFFERENT flower (fruit grows; a different KIND = bouquet bonus),\nor follow the arrow to the HIVE to make honey" + rb
+	return "Fly into a glowing flower to collect pollen" + rb
 
 
 # --- Network -----------------------------------------------------------------
@@ -306,7 +335,7 @@ func apply_remote_state(pos: Vector3, new_face: float, new_cam_yaw: float) -> vo
 func net_state() -> Array:
 	if not active:
 		return [false]
-	return [global_position, face, pollen, honey_made, active, gold]
+	return [global_position, face, pollen, honey_made, active, gold, pollen_kinds, crowned]
 
 
 ## TV: authoritative pollen / honey / seat state from the host.
@@ -319,6 +348,9 @@ func apply_net_state(st: Array) -> void:
 	pollen = st[2]
 	honey_made = st[3]
 	gold = st[5]
+	if st.size() >= 8:
+		pollen_kinds = st[6]
+		crowned = st[7]
 	var act: bool = st[4]
 	if act != active:
 		set_active(act)

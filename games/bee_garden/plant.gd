@@ -19,6 +19,7 @@ var open := 0.0     # petal opening animation 0..1
 var fruit_s := 0.0
 var t := 0.0
 var was_bloom := false
+var golden_shown := false
 
 
 static func head_pos(i: int, st: Dictionary) -> Vector3:
@@ -67,11 +68,15 @@ func update_from(st: Dictionary, delta: float) -> void:
 		was_bloom = false
 		return
 	var kd: Dictionary = W.KINDS[k]
-	if k != kind:
+	var golden: bool = st.get("golden", false)
+	if k != kind or golden != golden_shown:
+		if k != kind:
+			open = 0.0
 		kind = k
-		petals.material_override = W.cmat(kd.petal, 0.5 if k == 2 else 0.1)
+		golden_shown = golden
+		# The rare golden flower: shiny gold petals (golden pollen for the bees).
+		petals.material_override = W.cmat(Color(1.0, 0.85, 0.2), 1.6) if golden else W.cmat(kd.petal, 0.5 if k == 2 else 0.1)
 		fruit.material_override = W.cmat(kd.fruit_color, 0.3 if k == 2 else 0.05)
-		open = 0.0
 	var g: float = st.get("growth", 0.0)
 	var water: float = st.get("water", 0.0)
 	var bloom: bool = st.get("bloom", false)
@@ -99,7 +104,7 @@ func update_from(st: Dictionary, delta: float) -> void:
 	was_bloom = bloom
 	petals.visible = open > 0.02
 	var pop := 1.0 + sin(open * PI) * 0.25
-	petals.scale = Vector3(open * pop, 1.0, open * pop) * (1.25 if k == 1 else 1.0)
+	petals.scale = Vector3(open * pop, 1.0, open * pop) * (1.25 if k == 1 else 1.0) * ((1.3 + sin(t * 4.0) * 0.06) if golden_shown else 1.0)
 	center.visible = open > 0.02
 	var cglow := 1.4 + sin(t * 5.0) * 0.5 if ready else 0.0
 	center.material_override = W.cmat(kd.center, snappedf(cglow, 0.25))

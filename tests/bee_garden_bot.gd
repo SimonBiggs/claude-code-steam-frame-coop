@@ -7,6 +7,9 @@ extends Node
 ## BOT_PLAYERS=n (2..6): n TV bees play (via main.debug_join; the last one drops in through a fake
 ## controller pressing A, gets unplugged at 22 s and plugged back in at 28 s).
 ## Prints progress every 10 s and "Bot: LEVEL COMPLETE" when the first day's jars are full.
+## Events: the host/local bot starts each surprise event early (golden flower, queen, wasp raid, rain)
+## because its bees fill the jars long before the day's own schedule; bees then visit the golden
+## flower, bring the Queen her pollen and bump raid wasps away.
 
 const W := preload("res://games/bee_garden/world.gd")
 const PlantScript := preload("res://games/bee_garden/plant.gd")
@@ -27,6 +30,9 @@ var g_timer := 0.0
 var g_target := Vector3.ZERO
 var g_seeds := 0
 var g_tasks := {}
+var test_events: Array[String] = ["golden", "queen", "raid", "rain"]
+var test_event_i := 0
+var events_seen := {}
 
 
 func _ready() -> void:
@@ -44,6 +50,14 @@ func _physics_process(delta: float) -> void:
 	for b in main.bees():
 		if not b.remote:
 			_drive_bee(b)
+	if main.net.mode != "client" and main.phase == "day" and main.event == "" and test_event_i < test_events.size() \
+			and t > 4.0 + test_event_i * 7.0:
+		print("Bot: starting event %s" % test_events[test_event_i])
+		main._start_event(test_events[test_event_i])
+		test_event_i += 1
+	if main.event != "" and not events_seen.has(main.event):
+		events_seen[main.event] = true
+		print("Bot: sees event %s (mode=%s)" % [main.event, main.net.mode])
 	if main.days_done >= 1 and not reported:
 		reported = true
 		print("Bot: LEVEL COMPLETE at t=%.1f (mode=%s, day %d done, honey %d)" % [t, main.net.mode, main.days_done, main.total_honey])
@@ -66,7 +80,9 @@ func _physics_process(delta: float) -> void:
 		print("t=%.0f mode=%s phase=%s day=%d honey=%d/%d days_done=%d plants=%d bloom=%d fruit=%d pests=%d views=%d gardener=%s %s" % [
 			t, main.net.mode, main.phase, main.day, main.honey, main.target, main.days_done, planted, blooming, fruit,
 			get_tree().get_nodes_in_group("pests").size(), main.view_count, g_state, ", ".join(bs)])
-		print("   stats: %s" % str(main.stats))
+		print("   stats: %s  event=%s rain=%.0f rainbow=%.0f golden=%d decor=%d wish=%s %d done=%s queen_gifts=%d" % [str(main.stats),
+			main.event, main.rain_t, main.rainbow_t, main.golden_spot, main.decor_count, str(main.wish), main.wish_progress,
+			main.wish_done, main.queen_gifts])
 
 
 ## BOT_PLAYERS: bring in extra TV bees one by one, and exercise unplug / replug.
@@ -116,7 +132,17 @@ func _drive_bee(b) -> void:
 	var goal := Vector3.ZERO
 	var have_goal := false
 	var last: int = b.get_meta("bot_last", -1)
-	if b.pollen > 0:
+	# Events: bump raid wasps, bring the Queen her pollen.
+	if main.event == "raid":
+		for p in get_tree().get_nodes_in_group("pests"):
+			if p.kind == "wasp" and not p.is_fleeing():
+				goal = p.global_position
+				have_goal = true
+				break
+	if not have_goal and main.event == "queen" and b.pollen > 0 and (int(b.pollen_kinds) & (1 << int(main.queen_kind))) != 0:
+		goal = main.events_node.queen_pos()
+		have_goal = true
+	if not have_goal and b.pollen > 0:
 		var to_hive := W.HIVE_ENTRY + Vector3(0.2, 0.0, 0.0)
 		if b.pollen >= 3:
 			goal = to_hive
@@ -131,6 +157,10 @@ func _drive_bee(b) -> void:
 			var d := hp.distance_to(pos)
 			if not s.ready:
 				d += 6.0
+			if i == main.golden_spot:
+				d -= 4.0
+			if main.event == "queen" and int(s.kind) == int(main.queen_kind):
+				d -= 3.0
 			# spread the bees out over the flowers
 			for o in main.bees():
 				if o != b and o.active and int(o.get_meta("bot_goal", -1)) == i:

@@ -19,6 +19,7 @@ var flee_dir := Vector3.UP
 var net_target := Vector3.ZERO
 var net_fleeing := false
 var radius := 0.2
+var slot := 0          # wasp raids: each wasp hovers at its own spot round the hive
 var wings: Array[MeshInstance3D] = []
 var body: Node3D
 
@@ -103,7 +104,8 @@ func _process(delta: float) -> void:
 
 func _goal() -> Vector3:
 	if kind == "wasp":
-		return W.HIVE_ENTRY + Vector3(0.35, 0.3, 0.0)
+		var a := slot * 2.1
+		return W.HIVE_ENTRY + Vector3(0.35 + cos(a) * 0.25 * float(slot > 0), 0.3 + slot * 0.18, sin(a) * 0.35 * float(slot > 0))
 	return main.head_pos(target) + Vector3(0.1, 0.06, 0.08)
 
 
