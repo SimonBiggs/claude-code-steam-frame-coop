@@ -19,6 +19,7 @@ const MusicScript := preload("res://core/music.gd")
 const NetScript := preload("res://core/net.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
 const JoinInputScript := preload("res://games/kitchen_rush/join_input.gd")
+const GuideScript := preload("res://games/kitchen_rush/guide.gd")
 
 const RECIPES := {
 	"SALAD": ["lettuce", "tomato", "cucumber"],
@@ -34,6 +35,20 @@ const MAX_RUNNERS := 6  # player indices 1..6 (P2..P7); index 0 is the chef
 const PLAYER_COLORS: Array[Color] = [Color(1.0, 0.45, 0.35), Color(0.3, 0.65, 1.0), Color(0.7, 0.45, 1.0),
 	Color(0.35, 0.9, 0.4), Color(1.0, 0.82, 0.2), Color(1.0, 0.45, 0.8), Color(0.25, 0.92, 0.9)]
 const LEAVE_AFTER_UNPLUG := 15.0  # a runner whose controller is unplugged this long leaves the kitchen
+## A day in the kitchen: breakfast, lunch and dinner, each rated with up to three stars.
+const SHIFT_NAMES := ["BREAKFAST", "LUNCH", "DINNER"]
+const RUSH_TIME := 25.0
+## Extra sounds made with core/sfx.gd: [seconds, start Hz, end Hz, volume, wave, noise]
+const EXTRA_SOUNDS := {
+	"chop": [0.09, 320.0, 90.0, 0.5, "square", 0.55],
+	"ding": [0.9, 1568.0, 1560.0, 0.3, "sine", 0.0],
+	"star": [0.45, 880.0, 1760.0, 0.32, "tri", 0.0],
+	"coin": [0.25, 988.0, 1976.0, 0.28, "square", 0.0],
+	"cheer": [0.8, 520.0, 1250.0, 0.26, "tri", 0.45],
+	"cluck": [0.16, 700.0, 500.0, 0.18, "saw", 0.4],
+	"rush": [0.7, 330.0, 990.0, 0.35, "saw", 0.1],
+	"splat": [0.2, 220.0, 80.0, 0.35, "sine", 0.7],
+}
 const BUBBLE_SHADER := """
 shader_type canvas_item;
 uniform vec4 ring_color : source_color = vec4(1.0, 0.5, 0.4, 1.0);
@@ -85,6 +100,23 @@ var fire_t := 30.0
 var ext_holder := -1
 var raccoon_t := 25.0
 var raccoon: Node3D
+var stars: Array = []  # stars earned per finished shift
+var angry_at_start := 0
+var frac_sum := 0.0
+var rush_t := 0.0
+var rush_done := false
+var critic_done := false
+var customers_spawned := 0
+var stats: Array = []  # per player
+var parts: Dictionary = {}  # animated bits of the kitchen (fan, bell, chickens, butterflies, menu)
+var chef_task: Dictionary = {}
+var vr_hint: Label3D
+var stats_label: Label
+var stats_text := ""
+var help_panel: PanelContainer
+var bell_t := 0.0
+var cluck_t := 4.0
+var chicken_goals: Array = []
 
 # Visuals
 var fire_node: Node3D
@@ -98,7 +130,9 @@ var center_tween: Tween
 
 func _ready() -> void:
 	randomize()
-	KitchenScript.build(self)
+	parts = KitchenScript.build(self)
+	for i in MAX_RUNNERS + 1:
+		stats.append({"fetched": 0, "served": 0, "sprays": 0, "raccoons": 0, "chops": 0, "dishes": 0})
 	_build_hud()
 	_build_fire_and_extinguisher()
 	_build_tickets()
@@ -133,7 +167,8 @@ func _setup_game(mode: String) -> void:
 	ready_to_play = true
 	print("Kitchen Rush: %s mode" % mode)
 	if mode == "host":
-		banner("Waiting for the runners on the TV to join…", 0.0)
+		banner("KITCHEN RUSH\nWaiting for the runners on the TV to join…\nTry chopping: swing a knife down through a vegetable!", 0.0)
+		_practice_veg()
 	elif mode == "client":
 		banner("CONNECTED TO THE KITCHEN!", 1.5, false)
 	else:
@@ -224,6 +259,9 @@ func sfx_local(sound_name: String, volume_db: float = 0.0, pitch: float = 1.0) -
 	if sfx == null:
 		sfx = SfxScript.new()
 		add_child(sfx)
+		for k in EXTRA_SOUNDS:
+			var d: Array = EXTRA_SOUNDS[k]
+			sfx.add_sound(k, d)
 	sfx.play(sound_name, volume_db, pitch)
 
 
@@ -360,6 +398,25 @@ func _build_views(mode: String) -> void:
 		if mode == "local":
 			_build_flat_window(players[1])
 			_add_bubble(players[1].hud, mirror, PLAYER_COLORS[0])
+	elif OS.has_environment("KR_FAKE_VR") and mode != "client":
+		# Tests: the VR chef's code runs without a headset; the bot moves the hands.
+		print("Fake VR: the bot drives the VR chef")
+		var origin := XROrigin3D.new()
+		add_child(origin)
+		origin.global_position = L.CHEF_POS
+		var cam := XRCamera3D.new()
+		origin.add_child(cam)
+		cam.position = Vector3(0, 1.2, 0)
+		var left := XRController3D.new()
+		left.tracker = "left_hand"
+		origin.add_child(left)
+		left.position = Vector3(-0.25, 0.9, -0.2)
+		var right := XRController3D.new()
+		right.tracker = "right_hand"
+		origin.add_child(right)
+		right.position = Vector3(0.25, 0.9, -0.2)
+		players[0].fake_vr = true
+		players[0].attach_xr(origin, cam, left, right)
 	else:
 		print("No VR headset: split screen")
 	_view_grid()
@@ -895,47 +952,119 @@ func _build_fire_and_extinguisher() -> void:
 	ext_node.add_child(nozzle)
 
 
-## Order tickets hanging in front of the chef (one per waiting customer, in window order).
+## Order tickets hanging in front of the chef (one per waiting customer, in window order). Each shows
+## the dish name, the customer's colour, the ingredients as little 3D models on a ledge (a green ring =
+## already on the plate, orange = needs chopping) and a patience bar.
 func _build_tickets() -> void:
 	var rail := MeshInstance3D.new()
 	var rm := BoxMesh.new()
-	rm.size = Vector3(2.3, 0.03, 0.03)
+	rm.size = Vector3(2.5, 0.03, 0.03)
 	rail.mesh = rm
 	rail.material_override = mat(Color(0.75, 0.75, 0.8))
-	rail.position = Vector3(0, 1.78, -0.38)
+	rail.position = Vector3(0, 2.0, -0.62)
 	add_child(rail)
 	for i in MAX_CUSTOMERS:
 		var root := Node3D.new()
-		root.position = Vector3(-0.84 + i * 0.56, 1.6, -0.38)
+		root.position = Vector3(-0.9 + i * 0.6, 1.75, -0.62)
+		root.rotation.x = 0.12  # tilted towards the chef's eyes
 		add_child(root)
 		var paper := MeshInstance3D.new()
 		var q := QuadMesh.new()
-		q.size = Vector2(0.5, 0.34)
+		q.size = Vector2(0.54, 0.46)
 		paper.mesh = q
 		paper.material_override = mat(Color(1.0, 0.98, 0.9))
+		paper.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		root.add_child(paper)
+		var swatch := MeshInstance3D.new()
+		var sw := CylinderMesh.new()
+		sw.top_radius = 0.04
+		sw.bottom_radius = 0.04
+		sw.height = 0.01
+		sw.radial_segments = 12
+		sw.rings = 1
+		swatch.mesh = sw
+		swatch.rotation.x = PI / 2.0
+		swatch.position = Vector3(-0.21, 0.15, 0.01)
+		var sw_mat := StandardMaterial3D.new()
+		swatch.material_override = sw_mat
+		root.add_child(swatch)
 		var label := Label3D.new()
-		label.font_size = 30
-		label.outline_size = 26
-		label.outline_modulate = Color.BLACK
-		label.pixel_size = 0.0018
+		label.font_size = 64
+		label.outline_size = 0
+		label.modulate = Color(0.2, 0.12, 0.1)
+		label.pixel_size = 0.0016
 		label.double_sided = false
-		label.position = Vector3(0, 0.03, 0.01)
-		label.width = 260.0
-		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		label.position = Vector3(0.03, 0.15, 0.012)
 		root.add_child(label)
+		var ledge := MeshInstance3D.new()
+		var lb := BoxMesh.new()
+		lb.size = Vector3(0.52, 0.015, 0.12)
+		ledge.mesh = lb
+		ledge.material_override = mat(Color(0.85, 0.65, 0.4))
+		ledge.position = Vector3(0, -0.13, 0.06)
+		root.add_child(ledge)
+		var icons := Node3D.new()
+		icons.position = Vector3(0, -0.122, 0.06)
+		root.add_child(icons)
 		var bar := MeshInstance3D.new()
 		var bm := BoxMesh.new()
-		bm.size = Vector3(0.44, 0.035, 0.01)
+		bm.size = Vector3(0.48, 0.035, 0.01)
 		bar.mesh = bm
 		var bar_mat := StandardMaterial3D.new()
 		bar_mat.albedo_color = Color(0.3, 1.0, 0.4)
 		bar_mat.emission_enabled = true
 		bar_mat.emission = Color(0.3, 1.0, 0.4)
 		bar.material_override = bar_mat
-		bar.position = Vector3(0, -0.135, 0.01)
+		bar.position = Vector3(0, -0.2, 0.01)
 		root.add_child(bar)
-		tickets.append([root, label, bar, bar_mat])
+		tickets.append([root, label, bar, bar_mat, swatch, sw_mat, icons, ""])
+
+
+## Rebuilds a ticket's ingredient models when its order changes.
+func _ticket_icons(t: Array, recipe: String) -> void:
+	var icons: Node3D = t[6]
+	for c in icons.get_children():
+		c.queue_free()
+	var items: Array = RECIPES.get(recipe, [])
+	for j in items.size():
+		var slot := Node3D.new()
+		slot.position = Vector3((j - (items.size() - 1) * 0.5) * 0.125, 0.0, 0.0)
+		icons.add_child(slot)
+		var it := ItemScript.new()
+		it.main = self
+		it.kind = items[j]
+		it.ghost = true
+		it.scale = Vector3.ONE * 0.8
+		slot.add_child(it)
+		it.remove_from_group("kr_items")
+		it.set_process(false)
+		var ring := MeshInstance3D.new()
+		var tm := TorusMesh.new()
+		tm.inner_radius = 0.045
+		tm.outer_radius = 0.058
+		tm.rings = 12
+		tm.ring_segments = 4
+		ring.mesh = tm
+		ring.name = "Ring"
+		ring.position.y = 0.002
+		ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		slot.add_child(ring)
+	t[7] = recipe
+
+
+## The plate (if any) that's being built for this recipe: its contents count as ticked off.
+func _plate_for(recipe: String):
+	for h in L.PLATE_HOME.size():
+		var p = _home_plate(h)
+		if p == null or p.recipe != "" or p.contents.is_empty():
+			continue
+		var ok := true
+		for k in p.contents:
+			if not RECIPES[recipe].has(k):
+				ok = false
+		if ok:
+			return p
+	return null
 
 
 func _update_tickets() -> void:
@@ -950,19 +1079,38 @@ func _update_tickets() -> void:
 		root.visible = c != null
 		if c == null:
 			continue
+		if t[7] != c.recipe:
+			_ticket_icons(t, c.recipe)
 		var label: Label3D = t[1]
-		var parts: Array[String] = []
-		for k in RECIPES[c.recipe]:
-			parts.append(ItemScript.display_name(k) + ("*" if ItemScript.chops_needed(k) > 0 else ""))
-		label.text = "%s\n%s" % [c.recipe, " ".join(parts)]
-		label.modulate = Color(1.0, 0.95, 0.6) if c.frac > 0.3 else Color(1.0, 0.45, 0.35)
+		label.text = c.recipe + ("  VIP!" if c.ctype == "critic" else "")
+		label.modulate = Color(0.2, 0.12, 0.1) if c.frac > 0.3 else Color(0.85, 0.15, 0.1)
+		var sw_mat: StandardMaterial3D = t[5]
+		if c.body_mat:
+			sw_mat.albedo_color = c.body_mat.albedo_color
 		var bar: MeshInstance3D = t[2]
 		bar.scale.x = maxf(c.frac, 0.01)
 		var bm: StandardMaterial3D = t[3]
 		var col := Color(1.0, 0.25, 0.2).lerp(Color(0.3, 1.0, 0.4), clampf(c.frac * 1.6 - 0.2, 0.0, 1.0))
 		bm.albedo_color = col
 		bm.emission = col
-		root.position.y = 1.6 + (sin(clock * 20.0) * 0.01 if c.frac < 0.25 else 0.0)
+		root.position.y = 1.75 + (sin(clock * 20.0) * 0.01 if c.frac < 0.25 else 0.0)
+		# Tick off what's already on a plate; orange rings for things that still need chopping.
+		var plate = _plate_for(c.recipe)
+		var icons: Node3D = t[6]
+		var items: Array = RECIPES.get(c.recipe, [])
+		for j in mini(items.size(), icons.get_child_count()):
+			var ring := icons.get_child(j).get_node_or_null("Ring") as MeshInstance3D
+			if ring == null:
+				continue
+			var k: String = items[j]
+			if plate != null and plate.contents.has(k):
+				ring.visible = true
+				ring.material_override = mat(Color(0.3, 1.0, 0.4), 1.5)
+			elif ItemScript.chops_needed(k) > 0:
+				ring.visible = true
+				ring.material_override = mat(Color(1.0, 0.6, 0.2), 0.8)
+			else:
+				ring.visible = false
 
 
 # --- Main loop -------------------------------------------------------------------
@@ -997,6 +1145,8 @@ func _process(delta: float) -> void:
 	music.play_track(maxi(shift - 1, 0))
 	_update_tickets()
 	_update_fire_visuals()
+	_animate_kitchen(delta)
+	_update_guides()
 	_update_vr_center()
 	if ghost_cam:
 		ghost_cam.global_transform = players[0].head_t
@@ -1020,6 +1170,8 @@ func _process(delta: float) -> void:
 			get_tree().reload_current_scene()
 		return
 	if net.mode == "host" and not net.connected:
+		_ensure_plates()
+		chef_task = _compute_chef_task()
 		return
 	_host_update(delta)
 
@@ -1027,6 +1179,8 @@ func _process(delta: float) -> void:
 func _host_update(delta: float) -> void:
 	_ensure_plates()
 	_move_finished_plates()
+	chef_task = _compute_chef_task()
+	rush_t = maxf(0.0, rush_t - delta)
 	if in_break:
 		break_t -= delta
 		if break_t <= 0.0:
@@ -1038,7 +1192,15 @@ func _host_update(delta: float) -> void:
 		spawn_t = minf(spawn_t, 1.5)
 	if spawn_t <= 0.0 and waiting.size() < MAX_CUSTOMERS:
 		_spawn_customer()
-		spawn_t = _spawn_interval() * randf_range(0.8, 1.2)
+		spawn_t = _spawn_interval() * randf_range(0.8, 1.2) * (0.35 if rush_t > 0.0 else 1.0)
+	# Dinner rush: from the first dinner on, halfway through the shift a crowd turns up (double coins!).
+	if shift >= 3 and shift % 3 == 0 and not rush_done and served_shift >= shift_target() / 3:
+		rush_done = true
+		rush_t = RUSH_TIME
+		spawn_t = 0.5
+		banner("DINNER RUSH!\nA crowd of hungry customers - DOUBLE COINS for %d seconds!" % int(RUSH_TIME), 2.5)
+		sound("rush", 0.0, 1.0)
+		print("Dinner rush!")
 	if combo > 0 and clock - last_serve_time > COMBO_WINDOW:
 		combo = 0
 	if shift >= 2:
@@ -1087,31 +1249,72 @@ func unlocked_recipes() -> Array:
 	return out
 
 
+## "DAY 1 · LUNCH" etc.
+func shift_name(sh: int = -1) -> String:
+	if sh < 0:
+		sh = shift
+	sh = maxi(sh, 1)
+	return "DAY %d  ·  %s" % [(sh - 1) / 3 + 1, SHIFT_NAMES[(sh - 1) % 3]]
+
+
 func _start_shift() -> void:
 	shift += 1
 	served_shift = 0
 	in_break = false
 	spawn_t = 0.5
+	angry_at_start = angry
+	frac_sum = 0.0
+	rush_done = false
+	critic_done = false
 	fire_t = randf_range(25.0, 40.0) / _chaos_scale()
 	raccoon_t = randf_range(15.0, 30.0) / _chaos_scale()
-	print("Shift %d started" % shift)
+	print("Shift %d started (%s)" % [shift, shift_name()])
+	for it in all_items():  # practice vegetables still lying about make room for real orders
+		if it.has_meta("practice") and it.holder == -1:
+			burst(it.global_position, Color(1.0, 1.0, 1.0), 8, 0.04)
+			remove_item(it)
 	var extra := ""
 	if shift - 1 < UNLOCKS.size() and shift > 1:
 		extra = "\nNEW RECIPE: " + ", ".join(PackedStringArray(UNLOCKS[shift - 1]))
 	if shift == 2:
 		extra += "\nWatch out for fires and raccoons!"
+	if shift % 3 == 0:
+		extra += "\nDinner time gets BUSY…"
 	if active_runners() > 2:
 		extra += "\n%d runners: busier kitchen!" % active_runners()
-	banner("SHIFT %d\nServe %d orders!%s" % [shift, shift_target(), extra], 2.5)
+	banner("%s\nServe %d orders!%s" % [shift_name(), shift_target(), extra], 3.0)
 	sound("wave")
+	sound("ding", -6.0, 1.0)
+	_update_menu_board()
 
 
 func _end_shift() -> void:
 	in_break = true
-	break_t = 6.0
-	print("Shift %d complete: coins %d, angry %d" % [shift, coins, angry])
-	banner("SHIFT %d COMPLETE!\n%d coins so far\nNext shift: hungrier customers!" % [shift, coins], 4.0)
+	break_t = 7.0
+	rush_t = 0.0
+	var angry_now := angry - angry_at_start
+	var avg := frac_sum / maxf(1.0, float(served_shift))
+	var n := 1
+	if angry_now == 0 and avg >= 0.35:
+		n = 3
+	elif angry_now <= 1:
+		n = 2
+	stars.append(n)
+	coins += n * 10
+	var total := 0
+	for st in stars:
+		total += int(st)
+	print("Shift %d complete: coins %d, angry %d, %d stars (avg patience left %.2f)" % [shift, coins, angry, n, avg])
+	var praise: String = ["Phew, we made it!", "Good job, team!", "PERFECT SERVICE!"][n - 1]
+	var next := "Next: %s - hungrier customers!" % SHIFT_NAMES[shift % 3]
+	if shift % 3 == 0:
+		next = "DAY %d DONE! Total stars: %d\nTomorrow the customers are even hungrier!" % [(shift - 1) / 3 + 1, total]
+		_show_stats("END OF DAY %d - CREW AWARDS" % ((shift - 1) / 3 + 1), 7.0)
+	banner("%s COMPLETE!\n%d STAR%s  -  %s  (+%d coins)\n%s" % [SHIFT_NAMES[(shift - 1) % 3], n, "S" if n > 1 else "", praise, n * 10, next], 5.0)
+	show_stars(n)
+	net.event("stars", [n])
 	sound("clear")
+	sound("cheer", -4.0)
 	if fire_on:
 		fire_on = false
 		ext_holder = -1
@@ -1155,7 +1358,19 @@ func _spawn_customer() -> void:
 				c.recipe = it.recipe
 				break
 	c.color_index = randi() % CustomerScript.COLORS.size()
-	c.max_patience = _patience()
+	# Personalities: the very first customer is a patient granny who wants a simple toastie.
+	var types := ["kid", "granny", "robot", "pirate", "alien", "knight"]
+	c.ctype = types.pick_random()
+	customers_spawned += 1
+	if customers_spawned == 1 and served_total == 0:
+		c.ctype = "granny"
+		c.recipe = "TOASTIE"
+	elif shift >= 2 and not critic_done and served_shift >= 1 and randf() < 0.35:
+		critic_done = true
+		c.ctype = "critic"
+		banner("A VIP FOOD CRITIC is here!\nServe the %s fast for a big tip!" % c.recipe, 2.5)
+		sound("ding", -2.0, 1.3)
+	c.max_patience = _patience() * float(CustomerScript.TYPES[c.ctype][0])
 	c.patience = c.max_patience
 	c.position = Vector3(10.5, 0.0, L.CUSTOMER_Z[c.slot] + (2.5 if c.slot >= 2 else -2.5))
 	add_child(c)
@@ -1165,6 +1380,7 @@ func _spawn_customer() -> void:
 func on_customer_angry(c) -> void:
 	angry += 1
 	combo = 0
+	sound("splat", -2.0, 0.8)
 	print("A customer left angry (%d/%d)" % [angry, MAX_ANGRY])
 	sound("hurt", 0.0, 0.8)
 	popup(c.global_position + Vector3.UP * 2.0, "HMPH!  (%d/%d)" % [angry, MAX_ANGRY], Color(1.0, 0.4, 0.3))
@@ -1185,7 +1401,11 @@ func _game_over() -> void:
 		best_line = "NEW BEST!  (previous %d)" % best
 		cfg.set_value("best", "coins", coins)
 		cfg.save("user://kitchen_rush_best.cfg")
-	banner("KITCHEN CLOSED!\nToo many hungry customers left\nShift %d  ·  %d served  ·  %d coins\n%s\n\nPress A / Enter (VR: trigger) to cook again" % [shift, served_total, coins, best_line], 0.0)
+	var total := 0
+	for st in stars:
+		total += int(st)
+	banner("KITCHEN CLOSED!\nToo many hungry customers left\n%s  ·  %d served  ·  %d coins  ·  %d stars\n%s\nPress A / Enter (VR: trigger) to cook again" % [shift_name(), served_total, coins, total, best_line], 0.0)
+	_show_stats("CREW AWARDS", 0.0)
 
 
 func _restart_pressed() -> bool:
@@ -1391,8 +1611,10 @@ func add_to_plate(plate, it) -> void:
 		if want == have:
 			plate.recipe = r
 			plate.home = -1
+			stats[0].dishes += 1
 			print("Dish ready: %s" % r)
 			sound("revive", 0.0, 1.2)
+			ring_bell()
 			popup(plate.global_position + Vector3.UP * 0.35, "DING! %s" % r, Color(1.0, 0.9, 0.3))
 			burst(plate.global_position + Vector3.UP * 0.15, Color(1.0, 0.85, 0.3), 18, 0.05)
 			if players[0].vr:
@@ -1411,8 +1633,10 @@ func chop(it) -> bool:
 		return false
 	it.chops += 1
 	it.chop_cd = 0.2
-	sound("hit", -2.0, 0.9 + it.chops * 0.15)
-	burst(it.global_position + Vector3.UP * 0.06, ItemScript.color_of(it.kind), 8, 0.035)
+	it.squash = 1.0
+	stats[0].chops += 1
+	sound("chop", 0.0, 0.9 + it.chops * 0.12)
+	burst(it.global_position + Vector3.UP * 0.06, ItemScript.color_of(it.kind), 12, 0.035)
 	if it.is_ready():
 		popup(it.global_position + Vector3.UP * 0.25, "CHOPPED!", Color(0.6, 1.0, 0.5))
 		sound("pickup", -8.0, 1.4)
@@ -1536,6 +1760,7 @@ func runner_use(p) -> void:
 			var kind: String = r["kind"]
 			p.carry = spawn_item(kind, p.carry_point(), p.index)
 			p.carry_kind = kind
+			stats[p.index].fetched += 1
 			sound("pickup", -6.0, 1.0)
 		"spray":
 			_spray(p)
@@ -1574,14 +1799,26 @@ func _serve(p, cust) -> void:
 	served_total += 1
 	combo = combo + 1 if clock - last_serve_time < COMBO_WINDOW else 1
 	last_serve_time = clock
-	var tip := int(round(10.0 * cust.frac))
+	var tip_mult := float(CustomerScript.TYPES.get(cust.ctype, [1.0, 1.0])[1])
+	var tip := int(round(10.0 * cust.frac * tip_mult))
 	var mult := 1.0 + minf(combo - 1, 4) * 0.5
+	if rush_t > 0.0:
+		mult *= 2.0
 	var gain := int(round((10 + tip) * mult))
 	coins += gain
-	print("Served %s: +%d coins (combo %d), total %d" % [cust.recipe, gain, combo, coins])
+	frac_sum += cust.frac
+	stats[p.index].served += 1
+	print("Served %s to a %s: +%d coins (combo %d), total %d" % [cust.recipe, cust.ctype, gain, combo, coins])
 	var text := "+%d coins" % gain
 	if combo > 1:
 		text += "\nCOMBO x%d!" % combo
+	if rush_t > 0.0:
+		text += "\nRUSH x2!"
+	if cust.ctype == "critic":
+		coins += 25
+		text += "\nTHE CRITIC LOVED IT! +25"
+		sound("cheer", 0.0, 1.1)
+	sound("coin", -4.0, 1.0)
 	popup(cust.global_position + Vector3(-0.6, 2.3, 0), text, Color(1.0, 0.85, 0.2))
 	sound("clear", -2.0, 1.0 + minf(combo, 5) * 0.08)
 	burst(cust.global_position + Vector3.UP * 1.6, Color(1.0, 0.5, 0.8), 20, 0.06)
@@ -1602,6 +1839,7 @@ func _start_fire() -> void:
 
 func _spray(p) -> void:
 	fire_hp -= 1
+	stats[p.index].sprays += 1
 	sound("dash", 0.0, 0.6)
 	burst(L.STOVE + Vector3(0.3, 1.1, 0.0), Color(0.95, 0.97, 1.0), 24, 0.1)
 	if fire_hp <= 0:
@@ -1629,14 +1867,402 @@ func _update_fire_visuals() -> void:
 		ext_node.rotation.y = 0.0
 
 
+# --- Juice, guidance and the lively kitchen ------------------------------------------------
+
+## While the VR chef waits for the TV runners: two vegetables to practise chopping on.
+func _practice_veg() -> void:
+	for k in [["tomato", 1], ["cucumber", 2]]:
+		var it = spawn_item(k[0], L.PASS_SLOTS[k[1]], -1)
+		it.set_meta("practice", true)
+
+
+## Big stars pop up over the counter at the end of a shift (seen by the chef and the runners).
+func show_stars(n: int) -> void:
+	for i in 3:
+		var star := MeshInstance3D.new()
+		star.mesh = _star_mesh()
+		var m := StandardMaterial3D.new()
+		m.cull_mode = BaseMaterial3D.CULL_DISABLED
+		m.albedo_color = Color(1.0, 0.82, 0.2) if i < n else Color(0.35, 0.35, 0.4)
+		if i < n:
+			m.emission_enabled = true
+			m.emission = Color(1.0, 0.75, 0.2)
+			m.emission_energy_multiplier = 1.5
+		star.material_override = m
+		star.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(star)
+		star.position = Vector3(-0.6 + i * 0.6, 2.45, -0.55)
+		star.scale = Vector3.ONE * 0.01
+		var tw := star.create_tween()
+		tw.tween_interval(0.35 * i)
+		tw.tween_callback(func() -> void:
+			if i < n:
+				sfx_local("star", -2.0, 1.0 + i * 0.15)
+				burst(star.global_position, Color(1.0, 0.85, 0.3), 14, 0.05)
+			else:
+				sfx_local("hit", -10.0, 0.6))
+		tw.tween_property(star, "scale", Vector3.ONE, 0.35).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		tw.tween_property(star, "rotation:y", TAU, 1.2).set_trans(Tween.TRANS_CUBIC)
+		tw.tween_interval(2.5)
+		tw.tween_property(star, "scale", Vector3.ONE * 0.01, 0.3)
+		tw.tween_callback(star.queue_free)
+
+
+func _star_mesh() -> ArrayMesh:
+	if has_meta("kr_star_mesh"):
+		return get_meta("kr_star_mesh")
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var pts: Array[Vector3] = []
+	for k in 10:
+		var r := 0.22 if k % 2 == 0 else 0.09
+		var a := PI / 2.0 + k * TAU / 10.0
+		pts.append(Vector3(cos(a) * r, sin(a) * r, 0.0))
+	for k in 10:
+		st.set_normal(Vector3.BACK)
+		st.add_vertex(Vector3.ZERO)
+		st.add_vertex(pts[k])
+		st.add_vertex(pts[(k + 1) % 10])
+	var mesh := st.commit()
+	set_meta("kr_star_mesh", mesh)
+	return mesh
+
+
+## DING! The service bell on the counter wobbles when a dish is ready.
+func ring_bell() -> void:
+	bell_t = 1.0
+	sound("ding", -2.0, 1.0)
+	if net:
+		net.event("bell", [])
+
+
+func _animate_kitchen(delta: float) -> void:
+	var fan: Node3D = parts.get("fan")
+	if fan:
+		fan.rotation.y += delta * (2.5 if not rush_t > 0.0 else 6.0)
+	var bell: Node3D = parts.get("bell")
+	if bell:
+		bell_t = maxf(0.0, bell_t - delta * 1.5)
+		bell.rotation.z = sin(clock * 40.0) * 0.25 * bell_t
+		bell.scale = Vector3.ONE * (1.0 + 0.2 * bell_t)
+	var open_sign: Label3D = parts.get("open_sign")
+	if open_sign:
+		open_sign.modulate.a = 0.85 + 0.15 * sin(clock * 3.0)
+	# Chickens wander and peck in the garden.
+	var chickens: Array = parts.get("chickens", [])
+	while chicken_goals.size() < chickens.size():
+		chicken_goals.append(Vector3.ZERO)
+	for i in chickens.size():
+		var ch: Node3D = chickens[i]
+		var goal: Vector3 = chicken_goals[i]
+		var side := -1.0 if i == 0 else 1.0
+		if goal == Vector3.ZERO or ch.position.distance_to(goal) < 0.2:
+			chicken_goals[i] = Vector3(side * randf_range(5.2, 8.3), 0.0, randf_range(-10.8, -6.8))
+			goal = chicken_goals[i]
+		var to := goal - ch.position
+		var pecking := fmod(clock + i * 2.3, 5.0) < 1.6
+		var head: Node3D = ch.get_node_or_null("Head")
+		if pecking:
+			if head:
+				head.position = Vector3(0, 0.4 + absf(sin(clock * 12.0)) * 0.12, -0.26)
+		else:
+			ch.position += to.normalized() * delta * 0.6
+			ch.rotation.y = lerp_angle(ch.rotation.y, atan2(-to.x, -to.z), 1.0 - exp(-6.0 * delta))
+			ch.position.y = absf(sin(clock * 10.0)) * 0.03
+			if head:
+				head.position = Vector3(0, 0.55, -0.18)
+	cluck_t -= delta
+	if cluck_t <= 0.0 and not chickens.is_empty():
+		cluck_t = randf_range(5.0, 11.0)
+		sfx_local("cluck", -16.0, randf_range(0.9, 1.3))
+	# Butterflies flutter over the garden beds.
+	var bfs: MultiMeshInstance3D = parts.get("butterflies")
+	if bfs:
+		var mm := bfs.multimesh
+		for i in mm.instance_count:
+			var a := clock * (0.5 + i * 0.07) + i * 1.9
+			var p := Vector3(-4.5 + i * 1.8 + sin(a) * 1.2, 1.0 + sin(a * 2.3) * 0.35, -8.6 + cos(a * 0.8) * 1.2)
+			var flap := sin(clock * 22.0 + i) * 0.9
+			mm.set_instance_transform(i, Transform3D(Basis(Vector3.UP, a) * Basis(Vector3.BACK, flap), p))
+
+
+## What's on today's menu (the chalkboard by the back door).
+func _update_menu_board() -> void:
+	var menu: Label3D = parts.get("menu")
+	if menu == null:
+		return
+	var lines: Array[String] = ["TODAY'S MENU"]
+	for r in unlocked_recipes():
+		lines.append("%s = %s" % [r, _names(RECIPES[r]).to_lower().replace(", ", " + ")])
+	lines.append("(* chop: lettuce, tomato, cucumber, cheese)")
+	menu.text = "\n".join(lines)
+
+
+## Bouncing arrows only one player sees: the chef's next ingredient, each runner's next job.
+func _update_guides() -> void:
+	for p in players:
+		if not p.active or p.ghost or p.remote:
+			_hide_guide(p)
+			continue
+		var want = null
+		var k := 1.0
+		if p.index == 0:
+			var it = chef_task.get("item")
+			if it != null and is_instance_valid(it):
+				want = it.global_position + Vector3.UP * 0.12
+				k = 0.18
+			else:
+				var pl = chef_task.get("plate")
+				if pl != null and is_instance_valid(pl):
+					want = pl.global_position + Vector3.UP * 0.12
+					k = 0.18
+		else:
+			var job := runner_job(p)
+			if job.has("pos"):
+				want = job["pos"]
+				k = 0.6
+				var w: Vector3 = want
+				if flat_dist(w, p.global_position) < 1.3:
+					want = null
+		if want == null:
+			_hide_guide(p)
+			continue
+		var g: Node3D = p.get_meta("guide") if p.has_meta("guide") else null
+		if g == null:
+			g = GuideScript.new()
+			g.color = p.color.lightened(0.3) if p.index > 0 else Color(1.0, 0.9, 0.3)
+			g.layer = p.viewmodel_layer() if p.index == 0 else p.guide_layer()
+			add_child(g)
+			p.set_meta("guide", g)
+		g.point(want, k)
+
+
+func _hide_guide(p) -> void:
+	if p.has_meta("guide"):
+		var g: Node3D = p.get_meta("guide")
+		g.hide_arrow()
+
+
+## The recipes still to be made, most urgent first (finished plates and plates in hands don't count).
+func _open_orders() -> Array:
+	var cs := _waiting_customers()
+	cs.sort_custom(func(a, b) -> bool: return a.frac < b.frac)
+	var need := []
+	for c in cs:
+		need.append(c.recipe)
+	for it in all_items():
+		if it.is_plate() and it.recipe != "":
+			need.erase(it.recipe)
+	for i in range(1, players.size()):
+		var ck: String = players[i].carry_kind
+		if ck.begins_with("plate:"):
+			need.erase(ck.substr(6))
+	return need
+
+
+## Host: the chef's next step: {text, item, plate} (shown in VR / on the button chef's screen).
+func _compute_chef_task() -> Dictionary:
+	if game_over:
+		return {}
+	var held_items: Array = []
+	if not players.is_empty():
+		for h in players[0].held:
+			if h != null and is_instance_valid(h):
+				held_items.append(h)
+	var need := _open_orders()
+	if need.is_empty():
+		var first := shift == 0 and not ready_for_orders()
+		for it in all_items():
+			if it.holder == -1 and it.needs_chop():
+				return {"text": "Practise chopping: swing a knife DOWN through the %s!" % ItemScript.display_name(it.kind), "item": it}
+		if first:
+			return {"text": "Waiting for the runners to join…"}
+		return {"text": "All orders done! Waiting for hungry customers…" if shift > 0 else ""}
+	# Pair plates with orders (a plate already started keeps its order).
+	var plates: Array = []
+	for h in L.PLATE_HOME.size():
+		var pl = _home_plate(h)
+		if pl != null and pl.recipe == "":
+			plates.append(pl)
+	for r in need:
+		var target = null
+		for pl in plates:
+			if not pl.contents.is_empty():
+				var ok := true
+				for kk in pl.contents:
+					if not RECIPES[r].has(kk):
+						ok = false
+				if ok:
+					target = pl
+					break
+		if target == null:
+			for pl in plates:
+				if pl.contents.is_empty():
+					target = pl
+					break
+		if target == null:
+			continue
+		for kind in RECIPES[r]:
+			if target.contents.has(kind):
+				continue
+			for it in held_items:
+				if it.kind == kind and not it.is_plate():
+					if it.needs_chop():
+						return {"text": "Put the %s down on the counter and CHOP it!" % ItemScript.display_name(kind), "plate": target}
+					return {"text": "Drop the %s on the glowing plate (let go of the trigger)" % ItemScript.display_name(kind), "plate": target}
+			for it in all_items():
+				if it.holder != -1 or it.is_plate() or it.kind != kind:
+					continue
+				if it.needs_chop():
+					if fire_on:
+						return {"text": "FIRE! Too smoky to chop - runners, spray it out!", "item": it}
+					return {"text": "CHOP the %s: swing a knife DOWN through it!  (%d more)" % [ItemScript.display_name(kind), ItemScript.chops_needed(kind) - it.chops], "item": it}
+				return {"text": "Grab the %s (right trigger) and drop it on the glowing plate" % ItemScript.display_name(kind), "item": it, "plate": target}
+		var missing: Array[String] = []
+		for kind in RECIPES[r]:
+			if not target.contents.has(kind):
+				missing.append(ItemScript.display_name(kind))
+		return {"text": "%s needs %s - the runners are fetching it…" % [r, " + ".join(missing)], "plate": target}
+	return {"text": "Both plates are busy - finish one!"}
+
+
+func ready_for_orders() -> bool:
+	return net.mode != "host" or net.connected
+
+
+## What a runner should do next: {text, pos}. Works on both machines (uses only mirrored state).
+func runner_job(p) -> Dictionary:
+	var c: String = p.carry_kind
+	if c.begins_with("plate:"):
+		var r := c.substr(6)
+		var best = null
+		for cu in get_tree().get_nodes_in_group("kr_customers"):
+			if cu.waiting() and cu.recipe == r and (best == null or cu.frac < best.frac):
+				best = cu
+		if best != null:
+			return {"text": "SERVE the %s to the customer who wants it!" % r, "pos": best.global_position + Vector3.UP * 3.4}
+		return {"text": "Nobody wants this %s right now - wait by the window" % r}
+	if c == "extinguisher":
+		if fire_on:
+			return {"text": "SPRAY THE FIRE on the stove!", "pos": L.STOVE + Vector3.UP * 1.6}
+		return {"text": "Put the extinguisher back on its stand", "pos": L.EXT_POS + Vector3.UP * 1.3}
+	if c != "":
+		return {"text": "Bring the %s to the PASS (the front edge of the counter)" % ItemScript.display_name(c), "pos": Vector3(0, 1.4, -0.13)}
+	var idle := _idle_runners()
+	var my := idle.find(p.index)
+	if fire_on and ext_holder == -1 and my == 0:
+		return {"text": "FIRE! Grab the EXTINGUISHER (by the back door)", "pos": L.EXT_POS + Vector3.UP * 1.3}
+	if raccoon.visible and raccoon.carry_kind == "" and my == idle.size() - 1:
+		return {"text": "A RACCOON! Run into it to scare it off!", "pos": raccoon.global_position + Vector3.UP * 1.0}
+	var open := _open_orders()
+	for it in all_items():
+		if it.is_plate() and it.recipe != "" and it.holder == -1:
+			for cu in get_tree().get_nodes_in_group("kr_customers"):
+				if cu.waiting() and cu.recipe == it.recipe:
+					return {"text": "A %s is READY! Pick it up from the counter corner" % it.recipe, "pos": it.global_position + Vector3.UP * 0.5}
+	var missing := _missing_ingredients(open)
+	if missing.is_empty():
+		return {"text": "Nothing to fetch right now - watch for ready plates!"}
+	var kind: String = missing[maxi(my, 0) % missing.size()]
+	var where := "the GARDEN (out the back door)" if L.source_pos(kind).z < -6.0 else ("the FRIDGE" if L.source_pos(kind).z < 1.0 else "the PANTRY")
+	return {"text": "FETCH a %s from %s" % [ItemScript.display_name(kind), where], "pos": L.source_pos(kind) + Vector3.UP * 1.9, "kind": kind}
+
+
+func _idle_runners() -> Array:
+	var out := []
+	for i in range(1, players.size()):
+		if players[i].active and players[i].carry_kind == "":
+			out.append(i)
+	return out
+
+
+## Ingredients the two most urgent orders still need that nobody has yet (on a plate, on the counter,
+## in the chef's hands or being carried).
+func _missing_ingredients(open: Array) -> Array:
+	var missing := []
+	for r in open.slice(0, 2):
+		for k in RECIPES[r]:
+			missing.append(k)
+	for h in L.PLATE_HOME.size():
+		var pl = _home_plate(h)
+		if pl != null and pl.recipe == "":
+			for k in pl.contents:
+				missing.erase(k)
+	for it in all_items():
+		if not it.is_plate() and (it.holder == -1 or it.holder == 0):
+			missing.erase(it.kind)
+	for i in range(1, players.size()):
+		missing.erase(players[i].carry_kind)
+	return missing
+
+
+# --- Stats and awards --------------------------------------------------------------
+
+func _award(i: int) -> String:
+	var st: Dictionary = stats[i]
+	if i == 0:
+		if st.dishes >= 12:
+			return "MASTER CHEF"
+		if st.chops >= 40:
+			return "CHOP CHAMPION"
+		return "HEAD CHEF"
+	var cats := [["served", "SPEEDY SERVER"], ["fetched", "VEGGIE HUNTER"], ["sprays", "FIREFIGHTER"], ["raccoons", "RACCOON WRANGLER"]]
+	var best := "KITCHEN HELPER"
+	var best_score := 0.0
+	for cat in cats:
+		var key: String = cat[0]
+		var mine := float(st[key])
+		if mine <= 0.0:
+			continue
+		var top := 0.0
+		for j in range(1, players.size()):
+			top = maxf(top, float(stats[j][key]))
+		var score := mine / maxf(1.0, top) + (0.5 if key == "sprays" or key == "raccoons" else 0.0)
+		if score > best_score:
+			best_score = score
+			best = cat[1]
+	return best
+
+
+func _stats_lines() -> String:
+	var lines: Array[String] = []
+	var c: Dictionary = stats[0]
+	lines.append("CHEF  ·  %d chops  ·  %d dishes   -   %s!" % [c.chops, c.dishes, _award(0)])
+	for i in range(1, players.size()):
+		var st: Dictionary = stats[i]
+		if not players[i].active and st.fetched + st.served == 0:
+			continue
+		lines.append("P%d  ·  %d fetched  ·  %d served  ·  %d sprays  ·  %d raccoons   -   %s!" % [i + 1, st.fetched, st.served, st.sprays, st.raccoons, _award(i)])
+	return "\n".join(lines)
+
+
+func _show_stats(title: String, duration: float) -> void:
+	_apply_stats(title + "\n" + _stats_lines(), duration)
+	net.event("stats", [stats_text, duration])
+	print("Stats:\n" + stats_text)
+
+
+func _apply_stats(text: String, duration: float) -> void:
+	stats_text = text
+	stats_label.text = text
+	stats_label.modulate.a = 1.0
+	if duration > 0.0:
+		var tw := stats_label.create_tween()
+		tw.tween_interval(duration)
+		tw.tween_property(stats_label, "modulate:a", 0.0, 0.6)
+		tw.tween_callback(func() -> void: stats_text = "")
+
+
 func return_stolen(kind: String) -> void:
 	var slot := free_pass_slot(Vector3.ZERO)
 	if slot >= 0:
 		spawn_item(kind, L.PASS_SLOTS[slot], -1)
 
 
-func on_raccoon_scared(_runner_index: int) -> void:
+func on_raccoon_scared(runner_index: int) -> void:
 	coins += 3
+	if runner_index >= 0 and runner_index < stats.size():
+		stats[runner_index].raccoons += 1
 	print("Raccoon scared off")
 
 
@@ -1702,7 +2328,7 @@ func make_snapshot() -> Array:
 	for c in get_tree().get_nodes_in_group("kr_customers"):
 		cs.append(c.net_state())
 	return [shift, coins, served_shift, angry, combo, game_over, in_break, fire_on, ext_holder,
-		players[0].net_state(), rs, its, cs, raccoon.net_state(), served_total]
+		players[0].net_state(), rs, its, cs, raccoon.net_state(), served_total, rush_t, stars]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -1726,6 +2352,12 @@ func apply_snapshot(s: Array) -> void:
 	_sync_ghosts(s[12], "cust")
 	raccoon.apply_net(s[13])
 	served_total = s[14]
+	if s.size() > 16:
+		rush_t = s[15]
+		stars = s[16]
+		if not has_meta("menu_shift") or int(get_meta("menu_shift")) != shift:
+			set_meta("menu_shift", shift)
+			_update_menu_board()
 
 
 func _sync_ghosts(list: Array, kind: String) -> void:
@@ -1769,6 +2401,8 @@ func _make_ghost(kind: String, entry: PackedFloat32Array) -> Node3D:
 	c.position = Vector3(entry[2], entry[3], entry[4])
 	c.color_index = int(entry[7])
 	c.slot = int(entry[8])
+	if entry.size() > 9:
+		c.ctype = CustomerScript.type_from(int(entry[9]))
 	add_child(c)
 	return c
 
@@ -1788,6 +2422,12 @@ func apply_event(kind: String, args: Array) -> void:
 		"remote_pause":
 			get_tree().paused = args[0]
 			_set_pause_banner(args[0], "The chef paused the game")
+		"stars":
+			show_stars(args[0])
+		"stats":
+			_apply_stats(args[0], args[1])
+		"bell":
+			bell_t = 1.0
 
 
 # --- HUD -------------------------------------------------------------------------
@@ -1816,14 +2456,45 @@ func _build_hud() -> void:
 	center_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	center_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	center_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	help_label = _make_label(20)
-	layer.add_child(help_label)
-	help_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
-	help_label.offset_top = -64
-	help_label.offset_bottom = -12
-	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	help_label.text = "CHEF: chop ingredients (* = needs chopping) and stack them on a plate to match the tickets.\n" \
-		+ "RUNNERS: fetch ingredients to the PASS, carry finished plates to the hungry customers at the window!"
+	# How to play: one panel at the top until the first shift is done.
+	help_panel = PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.1, 0.06, 0.08, 0.8)
+	sb.border_color = Color(1.0, 0.6, 0.45, 0.95)
+	sb.set_border_width_all(3)
+	sb.set_corner_radius_all(14)
+	sb.content_margin_left = 22
+	sb.content_margin_right = 22
+	sb.content_margin_top = 10
+	sb.content_margin_bottom = 12
+	help_panel.add_theme_stylebox_override("panel", sb)
+	help_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layer.add_child(help_panel)
+	help_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
+	help_panel.offset_top = -330
+	help_panel.offset_bottom = -24
+	help_label = _make_label(22)
+	help_label.text = "HOW TO PLAY  -  cook what the customers order!\n" \
+		+ "RUNNERS (TV): left stick move, right stick look, A = pick up / put down / serve\n" \
+		+ "    1. Follow your ARROW to FETCH an ingredient (fridge, pantry or the garden out the back)\n" \
+		+ "    2. Put it on the PASS - the yellow strip at the front of the counter\n" \
+		+ "    3. When a plate glows gold, carry it to the customer showing that dish at the window\n" \
+		+ "    FIRE? grab the red extinguisher and spray the stove.  RACCOON? run into it!\n" \
+		+ "CHEF (VR): swing a knife DOWN through vegetables to chop them, grab with the right trigger,\n" \
+		+ "    drop ingredients on the glowing plate to match the tickets.  Left stick slides, A recenters."
+	help_panel.add_child(help_label)
+	help_panel.resized.connect(func() -> void:
+		var area := help_panel.get_parent_area_size()
+		help_panel.position = Vector2((area.x - help_panel.size.x) * 0.5, area.y - help_panel.size.y - 24.0))
+	stats_label = _make_label(28)
+	stats_label.add_theme_color_override("font_color", Color(0.95, 0.97, 1.0))
+	layer.add_child(stats_label)
+	stats_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	stats_label.offset_top = -300
+	stats_label.offset_bottom = -30
+	stats_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	stats_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	stats_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 
 
 ## Big centre message on both machines (and on a floating panel in VR).
@@ -1841,10 +2512,19 @@ func banner(text: String, duration: float, broadcast: bool = true) -> void:
 
 
 func status_text() -> String:
-	var s := "SHIFT %d   COINS %d\nSERVED %d/%d   ANGRY %d/%d" % [maxi(shift, 1), coins, served_shift, shift_target(), angry, MAX_ANGRY]
+	var s := "%s   COINS %d\nSERVED %d/%d   ANGRY %d/%d" % [shift_name(), coins, served_shift, shift_target(), angry, MAX_ANGRY]
 	if combo > 1:
 		s += "   COMBO x%d" % combo
+	if rush_t > 0.0:
+		s += "\nRUSH! x2 COINS"
 	return s
+
+
+func total_stars() -> int:
+	var n := 0
+	for st in stars:
+		n += int(st)
+	return n
 
 
 func orders_text() -> String:
@@ -1879,20 +2559,27 @@ func chef_hint(chef) -> String:
 	var t: String = names[chef.cursor]
 	if here != "":
 		t += ": " + here
-	if fire_on:
+	var task: String = chef_task.get("text", "")
+	if task != "":
+		t = "NEXT: " + task.replace("swing a knife DOWN through it", "press Shift / X").replace("(right trigger)", "(Space / A)").replace(" (let go of the trigger)", "") + "\n" + t
+	elif fire_on:
 		t += "\nFIRE! The runners must put it out before you can chop"
 	return t
 
 
 func _update_hud() -> void:
-	if shift >= 2 and help_label.modulate.a > 0.0:
-		help_label.modulate.a = maxf(0.0, help_label.modulate.a - get_process_delta_time())
+	var dt := get_process_delta_time()
+	var show_help := shift == 0 or (shift == 1 and served_total < 2 and not in_break)
+	help_panel.modulate.a = clampf(help_panel.modulate.a + (dt if show_help else -dt * 0.7), 0.0, 1.0)
+	help_panel.visible = help_panel.modulate.a > 0.0
 	if net.mode == "client" and not synced:
 		info_label.text = "Syncing with the chef…"
 		return
-	info_label.text = "SHIFT %d     COINS %d     SERVED %d/%d     ANGRY %d/%d" % [maxi(shift, 1), coins, served_shift, shift_target(), angry, MAX_ANGRY]
+	info_label.text = "%s     COINS %d     SERVED %d/%d     ANGRY %d/%d     STARS %d" % [shift_name(), coins, served_shift, shift_target(), angry, MAX_ANGRY, total_stars()]
 	if combo > 1:
 		info_label.text += "     COMBO x%d" % combo
+	if rush_t > 0.0:
+		info_label.text += "     RUSH! DOUBLE COINS %ds" % int(rush_t)
 
 
 ## VR can't show 2D overlays: mirror the centre banner on a floating panel in front of the chef.
@@ -1916,4 +2603,28 @@ func _update_vr_center() -> void:
 	vr_center.text = center_label.text
 	vr_center.modulate.a = center_label.modulate.a
 	vr_center.outline_modulate = Color(0, 0, 0, center_label.modulate.a)
-	VrText.follow(vr_center, players[0].xr_camera, self, 0.15, 1.6)
+	# The tickets hang just in front of the chef's eyes and the counter is below them, so the banner and
+	# the "next step" hint float further out, between the ticket rail and the counter's far edge
+	# (the end-of-day awards go above the ticket rail).
+	VrText.follow(vr_center, players[0].xr_camera, self, -0.3, 1.6)
+	if vr_hint == null:
+		vr_hint = Label3D.new()
+		vr_hint.font_size = 40
+		vr_hint.outline_size = 22
+		vr_hint.no_depth_test = true
+		vr_hint.render_priority = 10
+		vr_hint.outline_render_priority = 9
+		vr_hint.width = 1100.0
+		vr_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		add_child(vr_hint)
+		set_layers(vr_hint, players[0].viewmodel_layer())
+	var stats_mode: bool = stats_text != ""
+	if stats_mode != vr_hint.get_meta("stats_mode", false):
+		vr_hint.set_meta("stats_mode", stats_mode)
+		VrText.snap(vr_hint)
+	var hint: String = stats_text if stats_mode else str(chef_task.get("text", ""))
+	vr_hint.pixel_size = 0.0017 if stats_mode else 0.0021
+	vr_hint.modulate = Color(0.9, 0.97, 1.0) if stats_mode else (Color(1.0, 0.55, 0.45) if fire_on else Color(1.0, 0.95, 0.6))
+	vr_hint.text = hint
+	vr_hint.visible = hint != "" and not game_over or stats_mode
+	VrText.follow(vr_hint, players[0].xr_camera, self, -0.62 if not stats_mode else 0.75, 1.6)

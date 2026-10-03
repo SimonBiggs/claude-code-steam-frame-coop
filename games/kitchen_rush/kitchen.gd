@@ -76,10 +76,14 @@ static func build(main: Node3D) -> Dictionary:
 	for s in [-1.0, 1.0]:
 		_box(main, Vector3(wx, 1.6, s * 4.7), Vector3(0.3, 1.3, 2.6), wall_col)
 	_box(main, Vector3(wx - 0.05, 0.98, 0), Vector3(0.7, 0.06, 6.8), Color(0.95, 0.5, 0.3))  # ledge
+	var aw_x: Array = []
+	var aw_c: Array = []
 	for i in 8:  # striped awning
-		var stripe := _box(main, Vector3(wx + 0.55, 2.35, -3.15 + i * 0.9), Vector3(1.0, 0.06, 0.9),
-			Color(1.0, 0.35, 0.4) if i % 2 == 0 else Color.WHITE)
-		stripe.rotation.z = -0.35
+		aw_x.append(Transform3D(Basis(Vector3.BACK, -0.35), Vector3(wx + 0.55, 2.35, -3.15 + i * 0.9)))
+		aw_c.append(Color(1.0, 0.35, 0.4) if i % 2 == 0 else Color.WHITE)
+	var aw_mesh := BoxMesh.new()
+	aw_mesh.size = Vector3(1.0, 0.06, 0.9)
+	_multi(main, aw_mesh, aw_x, aw_c)
 	main.add_sign(Vector3(wx - 0.1, 2.85, 0), "SERVING WINDOW", Color(1.0, 0.45, 0.4), 90, false)
 
 	# The big counter in the middle, and the chef's little area behind it.
@@ -131,24 +135,45 @@ static func build(main: Node3D) -> Dictionary:
 
 	# Garden fence.
 	var fence_col := Color.WHITE
+	var post_x: Array = []
 	for i in 21:
 		var x := -10.0 + i
-		_box(main, Vector3(x, 0.45, L.GARDEN_END), Vector3(0.12, 0.9, 0.08), fence_col)
+		post_x.append(Transform3D(Basis(), Vector3(x, 0.45, L.GARDEN_END)))
 	_box(main, Vector3(0, 0.6, L.GARDEN_END), Vector3(20.0, 0.08, 0.06), fence_col)
 	_collider(statics, Vector3(0, 0.6, L.GARDEN_END - 0.1), Vector3(20.0, 1.2, 0.2))
 	for s in [-1.0, 1.0]:
 		_collider(statics, Vector3(s * 9.0, 0.6, -8.8), Vector3(0.2, 1.2, 5.6))
 		for i in 6:
-			_box(main, Vector3(s * 9.0, 0.45, -6.3 - i), Vector3(0.08, 0.9, 0.12), fence_col)
+			post_x.append(Transform3D(Basis(), Vector3(s * 9.0, 0.45, -6.3 - i)))
+	var post := BoxMesh.new()
+	post.size = Vector3(0.12, 0.9, 0.12)
+	_multi(main, post, post_x, [], fence_col)
 	main.add_sign(Vector3(0, 2.6, -7.0), "VEGETABLE GARDEN", Color(0.45, 0.9, 0.35), 70, true)
 	# A few round trees and flowers for cheer.
 	for t in [Vector3(-7.5, 0, -9.5), Vector3(7.0, 0, -10.0), Vector3(-9.0, 0, 6.0), Vector3(10.5, 0, 7.0), Vector3(10.0, 0, -6.5)]:
 		_tree(main, t)
-	for i in 14:
-		var fx := -8.0 + i * 1.2
-		var flower := _sphere_mi(main, 0.09, Vector3(fx, 0.12, -10.9),
-			[Color(1.0, 0.4, 0.6), Color(1.0, 0.85, 0.3), Color(0.6, 0.5, 1.0)][i % 3])
-		flower.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var fl_x: Array = []
+	var fl_c: Array = []
+	var stem_x: Array = []
+	var petals := [Color(1.0, 0.4, 0.6), Color(1.0, 0.85, 0.3), Color(0.6, 0.5, 1.0), Color(1.0, 0.55, 0.2), Color(1.0, 1.0, 1.0)]
+	for i in 34:
+		var fx := -8.5 + i * 0.5
+		var fz := -10.9 + (0.25 if i % 2 == 0 else -0.05)
+		if absf(fx) < 1.0:
+			continue
+		var fh := 0.18 + 0.08 * float(i % 3)
+		fl_x.append(Transform3D(Basis().scaled(Vector3(1.0, 0.6, 1.0)), Vector3(fx, fh, fz)))
+		fl_c.append(petals[i % petals.size()])
+		stem_x.append(Transform3D(Basis().scaled(Vector3(1.0, fh, 1.0)), Vector3(fx, fh * 0.5, fz)))
+	var fmesh := SphereMesh.new()
+	fmesh.radius = 0.1
+	fmesh.height = 0.2
+	fmesh.radial_segments = 8
+	fmesh.rings = 4
+	_multi(main, fmesh, fl_x, fl_c)
+	var stem := BoxMesh.new()
+	stem.size = Vector3(0.03, 1.0, 0.03)
+	_multi(main, stem, stem_x, [], Color(0.25, 0.6, 0.25))
 
 	# Stove with a frying pan (it catches fire sometimes!) and the fire extinguisher.
 	_box(main, Vector3(L.STOVE.x, 0.45, L.STOVE.z), Vector3(1.2, 0.9, 0.8), Color(0.35, 0.37, 0.42))
@@ -173,7 +198,223 @@ static func build(main: Node3D) -> Dictionary:
 	fill.omni_range = 7.0
 	fill.position = Vector3(0, 2.3, 0)
 	main.add_child(fill)
+	_decorate(main, out)
 	return out
+
+
+## Many copies of one mesh in a single draw call (with per-copy colours, or one colour for all).
+static func _multi(main: Node3D, mesh: Mesh, xforms: Array, colors: Array, color: Color = Color.WHITE) -> MultiMeshInstance3D:
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_colors = not colors.is_empty()
+	mm.mesh = mesh
+	mm.instance_count = xforms.size()
+	for i in xforms.size():
+		var xf: Transform3D = xforms[i]
+		mm.set_instance_transform(i, xf)
+		if mm.use_colors:
+			var c: Color = colors[i]
+			mm.set_instance_color(i, c)
+	var mmi := MultiMeshInstance3D.new()
+	mmi.multimesh = mm
+	var m := StandardMaterial3D.new()
+	m.albedo_color = color
+	m.roughness = 0.6
+	m.vertex_color_use_as_albedo = mm.use_colors
+	mmi.material_override = m
+	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	main.add_child(mmi)
+	return mmi
+
+
+## Cosy details: shelves of jars, bunting, potted plants, a ceiling fan, a pot of soup steaming on the
+## stove, flower boxes under the serving window, the service bell and the menu chalkboard.
+static func _decorate(main: Node3D, out: Dictionary) -> void:
+	var hz := L.ROOM_HALF.y
+	var hx := L.ROOM_HALF.x
+	# Wall shelves with colourful jars (north wall either side of the back door, and the south wall).
+	var shelf_x: Array = []
+	var jar_x: Array = []
+	var jar_c: Array = []
+	var jar_cols := [Color(1.0, 0.45, 0.4), Color(1.0, 0.85, 0.35), Color(0.5, 0.85, 0.45), Color(0.55, 0.7, 1.0), Color(0.95, 0.6, 0.9)]
+	var shelves := [[Vector3(-3.8, 1.55, -hz + 0.28), 0.0], [Vector3(5.2, 1.55, -hz + 0.28), 0.0], [Vector3(-3.8, 1.95, -hz + 0.28), 0.0],
+		[Vector3(-2.5, 1.6, hz - 0.28), PI], [Vector3(2.5, 1.6, hz - 0.28), PI]]
+	var k := 0
+	for sh in shelves:
+		var sp: Vector3 = sh[0]
+		shelf_x.append(Transform3D(Basis(), sp))
+		for j in 6:
+			var jx := sp.x - 0.95 + j * 0.38
+			var jh := 0.18 + 0.08 * float((j + k) % 3)
+			jar_x.append(Transform3D(Basis().scaled(Vector3(1.0, jh / 0.2, 1.0)), Vector3(jx, sp.y + 0.03 + jh * 0.5, sp.z)))
+			jar_c.append(jar_cols[(j + k) % jar_cols.size()])
+		k += 1
+	var shelf_mesh := BoxMesh.new()
+	shelf_mesh.size = Vector3(2.4, 0.05, 0.32)
+	_multi(main, shelf_mesh, shelf_x, [], Color(0.75, 0.5, 0.3))
+	var jar := CylinderMesh.new()
+	jar.top_radius = 0.07
+	jar.bottom_radius = 0.08
+	jar.height = 0.2
+	jar.radial_segments = 10
+	jar.rings = 1
+	_multi(main, jar, jar_x, jar_c)
+	# Bunting: little triangle flags along the top of the walls.
+	var flag_x: Array = []
+	var flag_c: Array = []
+	var bunt_cols := [Color(1.0, 0.4, 0.45), Color(1.0, 0.85, 0.3), Color(0.4, 0.8, 1.0), Color(0.55, 0.9, 0.45), Color(0.85, 0.55, 1.0)]
+	var n := 0
+	for side in [[Vector3(-hx + 0.2, 2.35, -hz + 0.4), Vector3(-hx + 0.2, 2.35, hz - 0.4)], [Vector3(-hx + 0.4, 2.35, hz - 0.2), Vector3(hx - 0.6, 2.35, hz - 0.2)],
+			[Vector3(-hx + 0.4, 2.35, -hz + 0.2), Vector3(-1.4, 2.35, -hz + 0.2)], [Vector3(1.4, 2.35, -hz + 0.2), Vector3(hx - 0.6, 2.35, -hz + 0.2)]]:
+		var a: Vector3 = side[0]
+		var b: Vector3 = side[1]
+		var count := int(a.distance_to(b) / 0.45)
+		var along := (b - a).normalized()
+		var yaw := atan2(along.x, along.z)
+		for i in count:
+			var p := a.lerp(b, (i + 0.5) / float(count)) + Vector3.DOWN * (0.08 * sin(float(i) / float(count) * PI * 3.0))
+			flag_x.append(Transform3D(Basis(Vector3.UP, yaw + PI / 2.0) * Basis(Vector3.BACK, PI / 4.0).scaled(Vector3(1.0, 1.0, 0.1)), p))
+			flag_c.append(bunt_cols[n % bunt_cols.size()])
+			n += 1
+	var flag_mesh := BoxMesh.new()
+	flag_mesh.size = Vector3(0.2, 0.2, 0.2)
+	_multi(main, flag_mesh, flag_x, flag_c)
+	# Potted plants in the corners.
+	var pot_x: Array = []
+	var bush_x: Array = []
+	for pp in [Vector3(-6.4, 0, -5.4), Vector3(6.0, 0, 5.4), Vector3(-6.4, 0, 5.4), Vector3(1.9, 0, -5.4)]:
+		var ppos: Vector3 = pp
+		pot_x.append(Transform3D(Basis(), ppos + Vector3(0, 0.22, 0)))
+		bush_x.append(Transform3D(Basis().scaled(Vector3(1.0, 1.25, 1.0)), ppos + Vector3(0, 0.75, 0)))
+	var pot := CylinderMesh.new()
+	pot.top_radius = 0.28
+	pot.bottom_radius = 0.2
+	pot.height = 0.44
+	pot.radial_segments = 10
+	pot.rings = 1
+	_multi(main, pot, pot_x, [], Color(0.85, 0.45, 0.3))
+	var bush := SphereMesh.new()
+	bush.radius = 0.4
+	bush.height = 0.8
+	bush.radial_segments = 10
+	bush.rings = 5
+	_multi(main, bush, bush_x, [], Color(0.3, 0.72, 0.35))
+	# Flower boxes under the serving window, outside.
+	var fb_x: Array = []
+	var fbl_x: Array = []
+	var fbl_c: Array = []
+	for i in 9:
+		var z := -3.2 + i * 0.8
+		fbl_x.append(Transform3D(Basis(), Vector3(L.WINDOW_X + 0.3, 0.92, z)))
+		fbl_c.append(bunt_cols[(i * 2) % bunt_cols.size()])
+	fb_x.append(Transform3D(Basis(), Vector3(L.WINDOW_X + 0.3, 0.8, 0.0)))
+	var fbox := BoxMesh.new()
+	fbox.size = Vector3(0.3, 0.2, 7.0)
+	_multi(main, fbox, fb_x, [], Color(0.55, 0.35, 0.2))
+	var bloom := SphereMesh.new()
+	bloom.radius = 0.12
+	bloom.height = 0.2
+	bloom.radial_segments = 8
+	bloom.rings = 4
+	_multi(main, bloom, fbl_x, fbl_c)
+	# Ceiling fan over the counter (main spins it).
+	var fan := Node3D.new()
+	fan.position = Vector3(0, 2.52, -2.6)
+	main.add_child(fan)
+	var hub := _cyl_mi(main, 0.12, 0.1, Vector3.ZERO, Color(0.85, 0.85, 0.9))
+	hub.reparent(fan, false)
+	for i in 2:
+		var blade := _box(main, Vector3.ZERO, Vector3(1.9, 0.02, 0.16), Color(0.9, 0.75, 0.55))
+		blade.reparent(fan, false)
+		blade.rotation.y = i * PI / 2.0
+	out["fan"] = fan
+	# A big pot of soup bubbling on the stove's left burner.
+	var pot2 := _cyl_mi(main, 0.2, 0.28, Vector3(L.STOVE.x - 0.3, 1.05, L.STOVE.z), Color(0.75, 0.75, 0.8))
+	pot2.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var soup := _cyl_mi(main, 0.18, 0.02, Vector3(L.STOVE.x - 0.3, 1.18, L.STOVE.z), Color(1.0, 0.6, 0.25))
+	soup.material_override = main.mat(Color(1.0, 0.6, 0.25), 0.6)
+	var steam := CPUParticles3D.new()
+	steam.amount = 8
+	steam.lifetime = 2.0
+	steam.position = Vector3(L.STOVE.x - 0.3, 1.25, L.STOVE.z)
+	steam.direction = Vector3.UP
+	steam.spread = 12.0
+	steam.initial_velocity_min = 0.3
+	steam.initial_velocity_max = 0.6
+	steam.gravity = Vector3(0, 0.15, 0)
+	steam.scale_amount_min = 0.8
+	steam.scale_amount_max = 2.0
+	var stm := SphereMesh.new()
+	stm.radius = 0.06
+	stm.height = 0.12
+	stm.radial_segments = 6
+	stm.rings = 3
+	var steam_mat := StandardMaterial3D.new()
+	steam_mat.albedo_color = Color(1, 1, 1, 0.35)
+	steam_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	steam_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	stm.material = steam_mat
+	steam.mesh = stm
+	main.add_child(steam)
+	# The service bell, on the chef's side of the counter (it rings when a dish is ready).
+	var bell := Node3D.new()
+	bell.position = Vector3(0.95, L.COUNTER_TOP, 0.2)
+	main.add_child(bell)
+	var base := _cyl_mi(main, 0.07, 0.02, Vector3(0, 0.01, 0), Color(0.3, 0.2, 0.15))
+	base.reparent(bell, false)
+	var dome := _sphere_mi(main, 0.06, Vector3(0, 0.03, 0), Color(1.0, 0.8, 0.3))
+	dome.reparent(bell, false)
+	dome.scale = Vector3(1.0, 0.8, 1.0)
+	dome.material_override = main.mat(Color(1.0, 0.8, 0.3), 0.4)
+	out["bell"] = bell
+	# A glowing OPEN sign above the serving window (inside) and the menu chalkboard by the back door.
+	var open_sign: Label3D = main.add_sign(Vector3(L.WINDOW_X - 0.2, 2.45, -2.7), "OPEN", Color(1.0, 0.35, 0.55), 80, false)
+	open_sign.modulate = Color(1.0, 0.4, 0.6)
+	out["open_sign"] = open_sign
+	var board := _box(main, Vector3(2.35, 1.15, -hz + 0.18), Vector3(2.0, 1.1, 0.05), Color(0.12, 0.2, 0.16))
+	board.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_box(main, Vector3(2.35, 1.15, -hz + 0.165), Vector3(2.12, 1.22, 0.03), Color(0.6, 0.4, 0.22))
+	var menu := Label3D.new()
+	menu.font_size = 30
+	menu.outline_size = 0
+	menu.pixel_size = 0.0042
+	menu.modulate = Color(0.97, 0.97, 0.9)
+	menu.position = Vector3(2.35, 1.15, -hz + 0.215)
+	menu.width = 450.0
+	menu.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	main.add_child(menu)
+	out["menu"] = menu
+	# Two chickens pecking about in the garden, and butterflies (main animates them).
+	var chickens: Array = []
+	for cx in [-7.0, 7.0]:
+		var ch := Node3D.new()
+		ch.position = Vector3(cx, 0.0, -8.5)
+		main.add_child(ch)
+		var body := _sphere_mi(main, 0.2, Vector3(0, 0.3, 0), Color(0.98, 0.97, 0.92))
+		body.reparent(ch, false)
+		body.scale = Vector3(0.9, 0.9, 1.2)
+		var head := _sphere_mi(main, 0.11, Vector3(0, 0.55, -0.18), Color(0.98, 0.97, 0.92))
+		head.reparent(ch, false)
+		head.name = "Head"
+		var comb := _box(main, Vector3(0, 0.12, 0.0), Vector3(0.03, 0.08, 0.1), Color(0.95, 0.15, 0.15))
+		comb.reparent(head, false)
+		var beak := _box(main, Vector3(0, 0.0, -0.11), Vector3(0.05, 0.04, 0.07), Color(1.0, 0.7, 0.15))
+		beak.reparent(head, false)
+		var legs := _box(main, Vector3(0, 0.07, 0), Vector3(0.16, 0.15, 0.025), Color(1.0, 0.7, 0.15))
+		legs.reparent(ch, false)
+		for c in ch.get_children():
+			if c is GeometryInstance3D:
+				c.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		chickens.append(ch)
+	out["chickens"] = chickens
+	var bf_x: Array = []
+	var bf_c: Array = []
+	for i in 6:
+		bf_x.append(Transform3D(Basis(), Vector3(-4.0 + i * 1.6, 1.0, -9.0)))
+		bf_c.append(bunt_cols[i % bunt_cols.size()])
+	var wing := BoxMesh.new()
+	wing.size = Vector3(0.16, 0.01, 0.1)
+	out["butterflies"] = _multi(main, wing, bf_x, bf_c)
 
 
 static func _environment(main: Node3D) -> void:
