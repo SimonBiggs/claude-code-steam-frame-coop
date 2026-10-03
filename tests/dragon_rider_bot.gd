@@ -3,6 +3,9 @@ extends Node
 ## and flaps on the straights; every local gunner aims at the nearest storm sprite (or balloon) and
 ## holds fire. BOT_PLAYERS=N: total TV-side players (local: rider + gunners, up to 6; TV machine
 ## (DUO_JOIN): gunners, up to 6). Local mode also joins one gunner with a fake controller pressing A.
+## DR_START_LEVEL=n: jump to level n (missions cycle: 1 ring run, 2 rescue, 3 race, 4 Storm King boss).
+## The autopilot follows main.arrow_target() (rings, freed sky bunnies, the boss ring); gunners shoot
+## sprites first, then cages, orbs, Goldie and balloons.
 
 const FAKE_PAD := 40
 
@@ -38,6 +41,9 @@ func _process(delta: float) -> void:
 		joined = true
 		_join_players(mode)
 	if mode != "client":
+		if OS.has_environment("DR_START_LEVEL") and not has_meta("jumped") and main.level == 1 and main.phase == "intro":
+			set_meta("jumped", true)
+			main._start_level(int(OS.get_environment("DR_START_LEVEL")))
 		_autopilot()
 	for i in range(1, main.players.size()):
 		var g = main.players[i]
@@ -55,7 +61,9 @@ func _process(delta: float) -> void:
 	var done: bool = main.phase == "done"
 	if done and not was_done:
 		levels_done += 1
-		print("BOT %s: LEVEL %d COMPLETE (rings %d, score %d)" % [mode, main.level, main.level_rings, main.score])
+		print("BOT %s: LEVEL %d (%s) COMPLETE (rings %d, score %d, rescued %d, power %.0f, cannon %d)" % [mode, main.level,
+			main.mission, main.level_rings, main.score, main.course.rescued_count() if main.course != null else 0, main.power_t,
+			main.cannon_level])
 	was_done = done
 	best_level = maxi(best_level, main.level)
 	report_t -= delta
@@ -85,13 +93,13 @@ func _autopilot() -> void:
 	var r = main.players[0]
 	r.bot_drive = true
 	var d: Node3D = main.dragon
-	var ring: Dictionary = main.next_ring_info()
+	var ring: Dictionary = main.arrow_target()
 	if ring.is_empty():
 		r.bot_input = Vector2.ZERO
 		r.bot_flap = false
 		return
 	var rp: Vector3 = ring.pos
-	var rn: Vector3 = ring.normal
+	var rn: Vector3 = ring.get("normal", (rp - d.core_position()).normalized())
 	var core: Vector3 = d.core_position()
 	var dist := core.distance_to(rp)
 	var aim_pt := rp - rn * clampf(dist * 0.35, 0.0, 22.0)
@@ -109,8 +117,11 @@ func _aim(g) -> void:
 	for n in get_tree().get_nodes_in_group("dr_targets"):
 		var node := n as Node3D
 		var dd := node.global_position.distance_to(eye)
-		if node.get_meta("kind", "") == "sprite":
-			dd *= 0.3  # sprites first
+		var kind: String = node.get_meta("kind", "")
+		if kind == "sprite" and dd < 30.0:
+			dd *= 0.3  # sprites close to the dragon first
+		elif kind == "orb" or kind == "cage" or kind == "rival" or node.has_meta("golden"):
+			dd *= 0.5  # then the mission targets
 		if dd < best_d and node.global_position.distance_to(eye) < 65.0:
 			best_d = dd
 			best = node
@@ -140,7 +151,15 @@ func _report(mode: String) -> void:
 	if mode == "host":
 		print("BOT host: %d active TV gunners are aiming over the network" % synced)
 	var total: int = main.course.rings.size() if main.course != null else 0
-	print("BOT %s t=%.0f phase=%s level=%d ring=%d/%d score=%d stars=%d lanterns=%d sprites=%d popped=%d alt=%.0f active=%s views=%d cell=%s levels_done=%d" % [
-		mode, t, main.phase, main.level, main.ring_i, total, main.score, main.stars_got, main.dragon.lit_count(),
+	var extra := ""
+	if main.rival != null and is_instance_valid(main.rival):
+		extra = " goldie_ring=%d wrapped=%.1f" % [main.rival.ring_i, main.rival.bubbled_t]
+	if main.boss != null and is_instance_valid(main.boss):
+		extra = " boss_orbs=%d ring_open=%s dist=%.0f" % [main.boss.orbs_left(), main.boss.ring_open,
+			main.boss.global_position.distance_to(main.dragon.global_position)]
+	if main.course != null and not main.course.critters.is_empty():
+		extra = " bunnies=%d/%d" % [main.course.rescued_count(), main.course.critters.size()]
+	print("BOT %s t=%.0f phase=%s level=%d %s ring=%d/%d score=%d stars=%d lanterns=%d sprites=%d popped=%d alt=%.0f active=%s views=%d cell=%s levels_done=%d power=%.0f%s" % [
+		mode, t, main.phase, main.level, main.mission, main.ring_i, total, main.score, main.stars_got, main.dragon.lit_count(),
 		get_tree().get_nodes_in_group("dr_sprites").size(), main.sprites_popped, main.dragon.global_position.y,
-		", ".join(act), views, cell, levels_done])
+		", ".join(act), views, cell, levels_done, main.power_t, extra])
