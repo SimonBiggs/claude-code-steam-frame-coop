@@ -1,11 +1,24 @@
+# Living Room Arcade
+
+A growing collection of co-op games for the whole family, played together in the living room:
+one player in VR on a **Steam Frame**, others on the TV, everyone in the same game over the home
+network. Made in Godot 4.7.
+
+The games are designed by the family while they play: spoken requests ("Hey Claude, bigger
+explosions!") go through speech-to-text to Claude, who builds the change and hot-reloads it into
+the running game.
+
+## Games
+
+1. **Duo Arena**: a neon first-person co-op arena shooter (below).
+2. More to come.
+
+---
+
 # Duo Arena
 
-A neon co-op arena shooter made in Godot 4.7. Players fight waves of enemies together, either in
-split screen or with one player in VR on a **Steam Frame** and others on the TV, connected over
-the home network.
-
-The family designed it while playing: most features started as spoken requests ("Hey Claude,
-bigger explosions!") that were built and hot-reloaded into the running game.
+Fight waves of enemies together, either in split screen or with one player in VR and others on
+the TV.
 
 ## Features
 
