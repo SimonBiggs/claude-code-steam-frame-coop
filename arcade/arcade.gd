@@ -18,6 +18,8 @@ const GAMES := [
 		"blurb": "Co-op cooking chaos: VR chef chops and plates, TV runners fetch and serve"},
 	{"id": "giants_table", "name": "GIANT'S TABLE", "scene": "res://games/giants_table/main.tscn",
 		"blurb": "Be a VR giant protecting a tiny tabletop village; TV players are the knights"},
+	{"id": "rocket_workshop", "name": "ROCKET WORKSHOP", "scene": "res://games/rocket_workshop/main.tscn",
+		"blurb": "Cosy rocket puzzle: the VR pilot works the controls, the TV crew read the blueprints out loud"},
 ]
 const VrText := preload("res://core/vr_text.gd")
 const DEFAULT_PORT := 7777
