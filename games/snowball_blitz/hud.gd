@@ -66,7 +66,21 @@ func damage_from(pos: Vector3) -> void:
 	damage_marks.append([pos, 1.0])
 
 
+## Shrink the whole HUD in small split-screen views (3+ players) so it doesn't cover the view.
+func _fit_to_view() -> void:
+	var vs := get_viewport().get_visible_rect().size
+	if vs.x < 1.0 or vs.y < 1.0:
+		return
+	var k := clampf(minf(vs.x / 900.0, vs.y / 600.0), 0.45, 1.0)
+	if anchor_right != 0.0 or anchor_bottom != 0.0:
+		set_anchors_preset(Control.PRESET_TOP_LEFT)
+	position = Vector2.ZERO
+	scale = Vector2(k, k)
+	size = vs / k
+
+
 func _process(delta: float) -> void:
+	_fit_to_view()
 	hurt_flash = maxf(0.0, hurt_flash - delta * 4.0)
 	hit_flash = maxf(0.0, hit_flash - delta * 6.0)
 	for m in damage_marks:
@@ -84,6 +98,8 @@ func _process(delta: float) -> void:
 		text = "Packing snow…  %d%%" % int(hp / main.seg_max * 100.0)
 	elif player.repair_seg >= 0:
 		text = "This wall is crumbling!  Hold %s to pack it" % ("X / LB" if player.joy >= 0 else ("E / right-click" if player.keys() == 0 else "Ctrl"))
+	elif player.joy < 0 and not player.has_keyboard():
+		text = "Controller unplugged - plug it back in to keep playing"
 	prompt.text = text
 	prompt.size = Vector2(size.x, 100)
 	prompt.position = Vector2(0, size.y * 0.62)

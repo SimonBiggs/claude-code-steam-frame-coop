@@ -14,6 +14,7 @@ const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
 const NetScript := preload("res://core/net.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
+const JoinInputScript := preload("res://games/snowball_blitz/join_input.gd")
 
 const ARENA_RADIUS := 20.0
 const FORT_RADIUS := 6.0
@@ -24,7 +25,9 @@ const SEG_DEPTH := 0.9
 const SEG_HEIGHT := 1.25
 const GRAVITY := 12.0
 const BOSS_EVERY := 4
-const PLAYER_COLORS: Array[Color] = [Color(0.95, 0.35, 0.3), Color(0.3, 0.7, 1.0), Color(0.5, 0.85, 0.35)]
+const MAX_TV_PLAYERS := 6  # TV players are indices 1..6 when networked (0..5 in local split screen)
+const PLAYER_COLORS: Array[Color] = [Color(0.95, 0.35, 0.3), Color(0.3, 0.7, 1.0), Color(0.5, 0.85, 0.35),
+	Color(1.0, 0.82, 0.25), Color(0.75, 0.45, 1.0), Color(1.0, 0.55, 0.15), Color(0.3, 0.95, 0.85)]
 const SCARF_COLORS: Array[Color] = [Color(0.9, 0.2, 0.25), Color(0.2, 0.55, 0.95), Color(0.95, 0.75, 0.2), Color(0.3, 0.75, 0.4), Color(0.75, 0.35, 0.85)]
 const BUBBLE_SHADER := """
 shader_type canvas_item;
@@ -71,7 +74,11 @@ var game_over := false
 var game_over_time := 0.0
 var cocoa_timer := 14.0
 var repair_score := 0.0
-var stats := [{}, {}, {}]
+var stats := []
+var view_grid: GridContainer
+var join_listener: Node
+var pad_memory := {}  # joypad device id -> player index it last controlled (rejoins on reconnect)
+var join_sent := {}  # player index -> msec of the last join request sent to the host
 var boss_hp := -1.0  # fraction, -1 when no Snow King is around
 
 var seg_hp: Array[float] = []
@@ -117,6 +124,7 @@ func _setup_game(mode: String) -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_assign_joypads()
 	ready_to_play = true
+	_ensure_party()
 	if mode == "host":
 		_show_center("Waiting for the TV players to join…", 0.0)
 	elif mode == "client":
@@ -721,7 +729,7 @@ func _spawn_wave_snowman() -> void:
 func _start_wave() -> void:
 	wave += 1
 	in_break = false
-	to_spawn = 4 + wave * 3
+	to_spawn = int((4 + wave * 3) * (1.0 + 0.22 * extra_players()))
 	spawn_timer = 0.5
 	print("Wave %d started" % wave)
 	sound("wave")
@@ -754,7 +762,7 @@ func _end_wave() -> void:
 
 
 func _drop_cocoa(pos: Vector3) -> void:
-	if get_tree().get_nodes_in_group("cocoa").size() >= 5:
+	if get_tree().get_nodes_in_group("cocoa").size() >= 5 + extra_players():
 		return
 	var c := CocoaScript.new()
 	c.main = self
@@ -767,7 +775,7 @@ func _update_cocoa(delta: float) -> void:
 	if not in_break:
 		cocoa_timer -= delta
 		if cocoa_timer <= 0.0:
-			cocoa_timer = randf_range(14.0, 20.0)
+			cocoa_timer = randf_range(14.0, 20.0) / (1.0 + 0.2 * extra_players())
 			var a := randf() * TAU
 			_drop_cocoa(Vector3(cos(a), 0, sin(a)) * randf_range(2.0, 4.5))
 	for c in get_tree().get_nodes_in_group("cocoa"):
@@ -800,10 +808,30 @@ func on_player_frozen(p) -> void:
 
 
 func stat_add(who: int, key: String, amount: float) -> void:
-	if who < 0 or who >= stats.size():
+	if who < 0 or who > MAX_TV_PLAYERS:
 		return
-	var st: Dictionary = stats[who]
+	var st := stats_for(who)
 	st[key] = st.get(key, 0.0) + amount
+
+
+func stats_for(who: int) -> Dictionary:
+	while stats.size() <= who:
+		stats.append({})
+	return stats[who]
+
+
+## How many players (VR + TV) are in the game right now.
+func party_size() -> int:
+	var n := 0
+	for p in players:
+		if p.active:
+			n += 1
+	return n
+
+
+## Extra players beyond the classic VR + 2 TV players: used to scale the waves.
+func extra_players() -> int:
+	return clampi(party_size() - 3, 0, 4)
 
 
 func boss_text() -> String:
@@ -817,6 +845,7 @@ func boss_text() -> String:
 func _process(delta: float) -> void:
 	if not ready_to_play:
 		return
+	_ensure_party()
 	_update_fort_visuals(delta)
 	_update_vr_center()
 	_update_vr_hurt(delta)
@@ -834,8 +863,8 @@ func _process(delta: float) -> void:
 			mirror_t = 1.0 / 30.0
 			mirror_vp.render_target_update_mode = SubViewport.UPDATE_ONCE
 	_update_hud()
+	_check_join(delta)
 	if net.mode == "client":
-		_check_join(delta)
 		if game_over:
 			game_over_time += delta
 			if game_over_time > 1.5 and _restart_pressed():
@@ -862,10 +891,11 @@ func _process(delta: float) -> void:
 	elif to_spawn > 0:
 		spawn_timer -= delta
 		var alive := get_tree().get_nodes_in_group("snowmen").size()
-		if spawn_timer <= 0.0 and alive < 6 + wave:
+		var extra := extra_players()
+		if spawn_timer <= 0.0 and alive < 6 + wave + extra * 2:
 			_spawn_wave_snowman()
 			to_spawn -= 1
-			spawn_timer = maxf(0.6, 1.8 - wave * 0.1)
+			spawn_timer = maxf(0.45, (1.8 - wave * 0.1) / (1.0 + 0.15 * extra))
 	elif get_tree().get_nodes_in_group("snowmen").is_empty():
 		_end_wave()
 	var all_down := true
@@ -892,7 +922,7 @@ func _on_game_over(reason: String) -> void:
 	for p in players:
 		if not p.active:
 			continue
-		var st: Dictionary = stats[p.index]
+		var st := stats_for(p.index)
 		lines.append("P%d: %d snowmen felled · %d hits · %d snow packed" % [p.index + 1, int(st.get("felled", 0.0)), int(st.get("hits", 0.0)), int(st.get("packed", 0.0))])
 	_show_center("%s\nWave %d  ·  Score %d\n%s\n%s\n\nPress A / Enter (VR: trigger) to play again" % [reason, wave, score, best_line, "\n".join(lines)], 0.0)
 
@@ -931,27 +961,64 @@ func _unhandled_input(event: InputEvent) -> void:
 
 # --- Players and views -------------------------------------------------------
 
-func _build_players(mode: String) -> void:
-	# Networked: VR player + up to two TV players (player 3 joins later). Local split screen: two.
-	var count := 3 if mode != "local" else 2
-	var spots := [Vector3(0, 0, 0), Vector3(-2.2, 0, 2.6), Vector3(2.2, 0, 2.6)]
+## How many player nodes this mode has: the VR player + six TV players networked, six in split screen.
+func _player_count(mode: String) -> int:
+	return MAX_TV_PLAYERS + 1 if mode != "local" else MAX_TV_PLAYERS
+
+
+func _spawn_spot(i: int, mode: String) -> Vector3:
+	var tv: Array[Vector3] = [Vector3(-2.2, 0, 2.6), Vector3(2.2, 0, 2.6), Vector3(0, 0, 3.6), Vector3(-3.6, 0, 0.8),
+		Vector3(3.6, 0, 0.8), Vector3(0, 0, -2.8)]
 	if mode == "local":
-		spots = [Vector3(-2.0, 0, 2.6), Vector3(2.0, 0, 2.6)]
-	for i in count:
+		if i == 0:
+			return Vector3(-2.0, 0, 2.6)
+		if i == 1:
+			return Vector3(2.0, 0, 2.6)
+		return tv[clampi(i, 0, tv.size() - 1)]
+	if i == 0:
+		return Vector3.ZERO
+	return tv[clampi(i - 1, 0, tv.size() - 1)]
+
+
+## Creates any missing player nodes (lazily, so a hot reload of an older game grows the party too).
+## Networked: VR player + TV players 2-7. Local split screen: players 1-6. As before, only the first
+## two start in the game; the others wait (inactive) until someone presses A / Start on a controller.
+func _build_players(mode: String) -> void:
+	for i in range(players.size(), _player_count(mode)):
 		var p := PlayerScript.new()
 		p.index = i
-		p.color = PLAYER_COLORS[i]
+		p.color = PLAYER_COLORS[i % PLAYER_COLORS.size()]
 		p.main = self
 		p.remote = mode == "host" and i >= 1
 		p.ghost = mode == "client" and i == 0
-		if i == 2:
+		if mode == "local" and i == 0:
+			p.mouse_look = true
+		elif mode != "local" and i == 2:
 			p.key_set = 0
 			p.mouse_look = true
-		elif mode == "local" and i == 0:
-			p.mouse_look = true
-		p.position = spots[i]
+		elif i >= 2:
+			p.key_set = -2  # extra players are controller-only
+		p.position = _spawn_spot(i, mode)
 		add_child(p)
 		players.append(p)
+		if i >= 2:
+			p.set_active(false)
+
+
+func _is_local_tv(p) -> bool:
+	return not p.remote and not p.ghost and not p.vr
+
+
+## Lazily grows the party / views / input hook (safe to call every frame).
+func _ensure_party() -> void:
+	if join_listener == null or not is_instance_valid(join_listener):
+		join_listener = JoinInputScript.new()
+		join_listener.main = self
+		add_child(join_listener)
+	if players.size() < _player_count(net.mode):
+		_build_players(net.mode)
+		_ensure_views()
+		_sync_view_visibility()
 
 
 func _apply_vr_performance() -> void:
@@ -993,50 +1060,106 @@ func _build_views(mode: String) -> void:
 			_build_flat_window(players[1])
 	else:
 		print("No VR headset: split screen")
-	var layer := CanvasLayer.new()
-	layer.layer = -1
-	add_child(layer)
-	var bg := ColorRect.new()
-	bg.color = Color(0.05, 0.05, 0.1)
-	layer.add_child(bg)
-	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 4)
-	layer.add_child(row)
-	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_ensure_views()
+	_sync_view_visibility()
+
+
+## A split-screen view for every TV player on this machine, in a grid (hidden until they join).
+func _ensure_views() -> void:
+	if view_grid == null:
+		var layer := CanvasLayer.new()
+		layer.layer = -1
+		add_child(layer)
+		var bg := ColorRect.new()
+		bg.color = Color(0.05, 0.05, 0.1)
+		layer.add_child(bg)
+		bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		view_grid = GridContainer.new()
+		view_grid.add_theme_constant_override("h_separation", 4)
+		view_grid.add_theme_constant_override("v_separation", 4)
+		layer.add_child(view_grid)
+		view_grid.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	for p in players:
-		if p.vr or p.remote or p.ghost or p.camera != null:
+		if not _is_local_tv(p):
 			continue
-		var container := SubViewportContainer.new()
-		p.set_meta("view", container)
-		container.stretch = true
-		container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		container.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		row.add_child(container)
-		var vp := SubViewport.new()
-		vp.world_3d = get_world_3d()
-		vp.msaa_3d = Viewport.MSAA_2X
-		vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA
-		container.add_child(vp)
-		var cam := Camera3D.new()
-		vp.add_child(cam)
-		cam.current = true
-		cameras.append(cam)
-		p.attach_camera(cam)
-		var hud_layer := CanvasLayer.new()
-		vp.add_child(hud_layer)
-		var hud := HudScript.new()
-		hud.player = p
-		hud.main = self
-		hud_layer.add_child(hud)
-		p.hud = hud
+		if p.has_meta("view"):
+			var old: Control = p.get_meta("view")
+			if is_instance_valid(old) and old.get_parent() != view_grid and old is SubViewportContainer:
+				old.reparent(view_grid, false)  # views made by an older version of this script
+			continue
+		if p.camera != null:
+			continue  # e.g. player 2's own window when VR runs without a TV machine
+		if players[0].vr and p.index >= 2:
+			continue  # VR without a TV machine: only player 2's window (no screen for more)
+		_build_view(p)
+
+
+func _build_view(p) -> void:
+	var container := SubViewportContainer.new()
+	p.set_meta("view", container)
+	container.stretch = true
+	container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	container.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	view_grid.add_child(container)
+	var vp := SubViewport.new()
+	vp.world_3d = get_world_3d()
+	vp.msaa_3d = Viewport.MSAA_2X
+	vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA
+	container.add_child(vp)
+	var cam := Camera3D.new()
+	vp.add_child(cam)
+	cam.current = true
+	cameras.append(cam)
+	p.attach_camera(cam)
+	var hud_layer := CanvasLayer.new()
+	vp.add_child(hud_layer)
+	var hud := HudScript.new()
+	hud.player = p
+	hud.main = self
+	hud_layer.add_child(hud)
+	p.hud = hud
+	if net.mode == "client":
+		if ghost_cam == null:
+			_build_ghost_mirror()
+		_add_bubble(hud, mirror_vp, PLAYER_COLORS[0])
+
+
+func _sync_view_visibility() -> void:
 	for p in players:
-		if p.index == 2:
-			p.set_active(false)
-			if p.has_meta("view"):
-				p.get_meta("view").visible = false
-	if mode == "client":
-		_add_bubble(players[1].hud, _build_ghost_mirror(), PLAYER_COLORS[0])
+		if p.has_meta("view"):
+			var v: Control = p.get_meta("view")
+			v.visible = p.active
+	_layout_views()
+
+
+## 1 view full screen, 2 side by side, 3-4 as 2x2, 5-6 as 3x2. More views: lower 3D resolution.
+func _layout_views() -> void:
+	if view_grid == null:
+		return
+	var shown: Array[SubViewportContainer] = []
+	for c in view_grid.get_children():
+		var svc := c as SubViewportContainer
+		if svc != null and svc.visible:
+			shown.append(svc)
+	var n := shown.size()
+	view_grid.columns = 1 if n <= 1 else (2 if n <= 4 else 3)
+	var scale_3d := 1.0 if n <= 2 else (0.7 if n <= 4 else 0.55)
+	for svc in shown:
+		for c in svc.get_children():
+			var vp := c as SubViewport
+			if vp != null:
+				vp.scaling_3d_scale = scale_3d
+				vp.msaa_3d = Viewport.MSAA_2X if n <= 2 else Viewport.MSAA_DISABLED
+	for c in get_children():
+		var sun := c as DirectionalLight3D
+		if sun != null and sun.shadow_enabled:
+			sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS if n <= 2 else DirectionalLight3D.SHADOW_ORTHOGONAL
+			sun.directional_shadow_max_distance = 45.0 if n <= 4 else 30.0
+		var we := c as WorldEnvironment
+		if we != null and we.environment != null:
+			if not we.has_meta("base_glow"):
+				we.set_meta("base_glow", we.environment.glow_enabled)
+			we.environment.glow_enabled = bool(we.get_meta("base_glow")) and n <= 4
 
 
 ## Low-res copy of the VR view, recorded by gdev (group gdev_capture) so others can watch.
@@ -1128,35 +1251,172 @@ func _build_flat_window(p) -> void:
 		_add_bubble(hud, mirror_vp, PLAYER_COLORS[0])
 
 
+## Controllers fill these players in order at the start (as before): networked P2 then P3,
+## local split screen P2 then P1. Any further controller joins with A / Start.
+func _base_slots() -> Array[int]:
+	var slots: Array[int] = []
+	if net.mode == "client":
+		slots = [1, 2]
+	elif net.mode == "local" and players.size() > 1:
+		slots.append(1)
+		if not players[0].vr:
+			slots.append(0)
+	return slots
+
+
 func _assign_joypads() -> void:
-	if players.size() < 2:
-		return
 	var pads := Input.get_connected_joypads()
-	players[1].joy = pads[0] if pads.size() > 0 else -1
-	if players.size() > 2:
-		players[2].joy = pads[1] if pads.size() > 1 else -1
-	elif not players[0].vr:
-		players[0].joy = pads[1] if pads.size() > 1 else -1
+	var slots := _base_slots()
+	for i in slots.size():
+		var slot: int = slots[i]
+		players[slot].joy = pads[i] if i < pads.size() else -1
+		if i < pads.size():
+			pad_memory[pads[i]] = slot
 
 
-func _on_joy_changed(_device: int, _connected: bool) -> void:
-	_assign_joypads()
+func _player_with_pad(device: int):
+	for p in players:
+		if p.joy == device and _is_local_tv(p):
+			return p
+	return null
 
 
-## Client: player 3 joins by pressing throw on the second controller / keyboard / mouse.
-var join_t := 0.0
-func _check_join(delta: float) -> void:
-	join_t -= delta
-	if players.size() < 3 or players[2].active or join_t > 0.0 or game_over:
+## Each controller belongs to exactly one player (by device id). Unplugging a controller-only
+## player makes them leave; plugging the same controller back in rejoins them.
+func _on_joy_changed(device: int, connected: bool) -> void:
+	if not ready_to_play:
 		return
-	if players[2]._throw_held():
-		join_t = 1.0
-		net.send_action("join", [], 2)
+	if connected:
+		if _player_with_pad(device) != null:
+			return
+		var back: int = pad_memory.get(device, -1)
+		if back >= 0 and back < players.size() and _is_local_tv(players[back]) and players[back].joy < 0:
+			players[back].joy = device
+			print("Controller %d reconnected: P%d" % [device, back + 1])
+			if not players[back].active and not players[back].has_keyboard():
+				_request_join(back)
+			return
+		for slot in _base_slots():
+			if players[slot].joy < 0:
+				players[slot].joy = device
+				pad_memory[device] = slot
+				return
+		print("Controller %d connected: press A / Start to join" % device)
+	else:
+		var p = _player_with_pad(device)
+		if p == null:
+			return
+		p.joy = -1
+		pad_memory[device] = p.index
+		print("Controller %d disconnected (P%d)" % [device, p.index + 1])
+		if p.active and not p.has_keyboard():
+			_request_leave(p.index)
+
+
+## The first TV player slot that's free for a new controller, or -1 when the party is full.
+func _free_slot() -> int:
+	for p in players:
+		if _is_local_tv(p) and not p.active and p.joy < 0 and p.camera != null:
+			return p.index
+	return -1
+
+
+## Called by join_input.gd: A / Start on a controller that isn't playing yet joins the game.
+func handle_join_input(event: InputEvent) -> bool:
+	var b := event as InputEventJoypadButton
+	if b == null or not b.pressed or not ready_to_play or game_over or get_tree().paused or net.mode == "host":
+		return false
+	if b.button_index != JOY_BUTTON_A and b.button_index != JOY_BUTTON_START:
+		return false
+	var p = _player_with_pad(b.device)
+	if p != null:
+		if p.active:
+			return false
+		_request_join(p.index)
+		return true
+	var slot := _free_slot()
+	if slot < 0:
+		return false
+	players[slot].joy = b.device
+	pad_memory[b.device] = slot
+	print("Controller %d is now P%d" % [b.device, slot + 1])
+	_request_join(slot)
+	return true
+
+
+## A waiting player with a keyboard or controller joins by holding throw (as P3 always could).
+func _check_join(_delta: float) -> void:
+	if game_over or net.mode == "host":
+		return
+	for p in players:
+		if p.active or not _is_local_tv(p) or p.camera == null:
+			continue
+		if (p.joy >= 0 or p.has_keyboard()) and p._throw_held():
+			_request_join(p.index)
+
+
+func _request_join(i: int) -> void:
+	if net.mode == "client":
+		var now := Time.get_ticks_msec()
+		if now - int(join_sent.get(i, -100000)) < 800:
+			return
+		join_sent[i] = now
+		net.send_action("join", [], i)
+	else:
+		_activate_player(i)
+
+
+func _request_leave(i: int) -> void:
+	if net.mode == "client":
+		net.send_action("leave", [], i)
+	else:
+		_deactivate_player(i)
+
+
+## Test hook (bots / scripted demos): TV player i joins as if they pressed A on a new controller.
+func debug_join(i: int) -> void:
+	if i >= 0 and i < players.size() and _is_local_tv(players[i]) and not players[i].active:
+		_request_join(i)
+
+
+## Host / local: a player joins (fresh and warm).
+func _activate_player(i: int) -> void:
+	if i < 0 or i >= players.size() or players[i].active:
+		return
+	var p = players[i]
+	p.set_active(true)
+	p.hp = PlayerScript.MAX_HP
+	if p.is_down:
+		p.is_down = false
+		p._apply_down_pose(false)
+	p.invuln_t = 2.0
+	if p.remote:
+		p.net_started = false  # snap to the TV player's next reported position
+	elif not p.vr:
+		p.global_position = _spawn_spot(i, net.mode)
+	_show_center("PLAYER %d JOINED!" % (i + 1), 1.5)
+	print("Net: player %d joined the game (%d playing)" % [i + 1, party_size()])
+	on_player_activity_changed(p)
+
+
+## Host / local: a player leaves (their controller was unplugged).
+func _deactivate_player(i: int) -> void:
+	if i < 0 or i >= players.size() or not players[i].active:
+		return
+	var p = players[i]
+	p.set_active(false)
+	p.charging = false
+	p.repairing = false
+	if p.is_down:
+		p.is_down = false
+		p._apply_down_pose(false)
+	_show_center("PLAYER %d LEFT" % (i + 1), 1.5)
+	print("Net: player %d left the game (%d playing)" % [i + 1, party_size()])
+	on_player_activity_changed(p)
 
 
 func on_player_activity_changed(p) -> void:
-	if p.has_meta("view"):
-		p.get_meta("view").visible = p.active
+	_sync_view_visibility()
 	print("Player %d is now %s on this screen" % [p.index + 1, "playing" if p.active else "waiting"])
 
 
@@ -1171,6 +1431,8 @@ func on_client_left() -> void:
 
 
 func on_p2_action(action: String, args: Array, index: int = 1) -> void:
+	if index < 0 or index >= players.size():
+		return
 	var p = players[index]
 	match action:
 		"throw":
@@ -1184,11 +1446,9 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 			if p.active and not p.is_down:
 				repair_segment(int(args[0]), clampf(float(args[1]), 0.0, 8.0), index)
 		"join":
-			if not p.active:
-				p.set_active(true)
-				p.hp = PlayerScript.MAX_HP
-				_show_center("PLAYER %d JOINED!" % (index + 1), 1.5)
-				print("Net: player %d joined the game" % (index + 1))
+			_activate_player(index)
+		"leave":
+			_deactivate_player(index)
 		"restart":
 			if game_over:
 				get_tree().reload_current_scene()
@@ -1343,7 +1603,7 @@ func _build_hud() -> void:
 	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	help_label.text = "Controller: left stick move · right stick look · hold RT to charge a snowball, let go to throw · hold X / LB at a crumbling wall to pack it\n" \
 		+ "Keyboard: P1 WASD + mouse, hold click / Space to throw, E / right-click to pack  ·  P2 arrows, Enter throw, Ctrl pack\n" \
-		+ "Grab hot cocoa to warm up · stand next to a frozen friend to thaw them"
+		+ "More controllers: press A / Start to join (up to 6 TV players)  ·  Grab hot cocoa to warm up · stand next to a frozen friend to thaw them"
 
 
 func _show_center(text: String, duration: float, broadcast: bool = true) -> void:

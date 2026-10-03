@@ -20,5 +20,12 @@ mischievous snowmen (top hats, carrot noses, giants, sled riders, and the Snow K
 | Keyboard P1 | hold click / Space | E / right-click | WASD + mouse |
 | Keyboard P2 | hold Enter | Ctrl | arrows (turn) |
 
+**Party mode (up to 6 TV players + VR):** players 2-3 on the TV work as before (first controller =
+P2, keyboard+mouse / second controller = P3, hold throw to join). Any other controller presses
+**A / Start** to join as the next free player (P4-P7; in split screen without VR, P3-P6). Each
+controller belongs to one player; unplugging a controller-only player makes them leave, plugging the
+same controller back in rejoins them. Split screen: 1 full, 2 side by side, 3-4 as 2x2, 5-6 as 3x2
+(lower 3D resolution and a smaller HUD with more views). Waves grow a little with more than 3 players.
+
 Restart after game over: A / Enter (VR: trigger).
-Test: `godot --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/snowball_blitz_bot.tscn`
+Test (`BOT_PLAYERS=N` joins N TV players, `BOT_PAD_TEST=1` checks controller join/unplug/replug): `godot --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/snowball_blitz_bot.tscn`
