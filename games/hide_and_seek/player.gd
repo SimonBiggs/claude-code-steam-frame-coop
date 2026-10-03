@@ -415,8 +415,21 @@ func _physics_process(delta: float) -> void:
 	elif spectating:
 		velocity = Vector3.ZERO
 	else:
+		# Jump (kids asked): B on a controller, Space for keyboard hiders. Also hops over low furniture.
+		var jy: float = get_meta("jump_y", 0.0)
+		var jv: float = get_meta("jump_v", 0.0)
+		if role == "hider" and jy <= 0.0 and can_move() and _jump_held():
+			jv = 5.0
+			main.sound("dash", -8.0, 1.5)
+		jv -= 14.0 * delta
+		jy = maxf(0.0, jy + jv * delta)
+		if jy <= 0.0:
+			jv = 0.0
+		set_meta("jump_y", jy)
+		set_meta("jump_v", jv)
+		position.y = jy
 		move_and_slide()
-		position.y = 0.0
+		position.y = jy
 	bob_t += velocity.length() * delta * 2.2
 	_update_camera(delta)
 	main.net.send_state(global_position, yaw, pitch, index)
@@ -648,9 +661,18 @@ func _alt_held() -> bool:
 	if mouse_look and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
 		return true
 	if joy >= 0 and role == "hider":
-		return Input.is_joy_button_pressed(joy, JOY_BUTTON_X) or Input.is_joy_button_pressed(joy, JOY_BUTTON_B) \
+		return Input.is_joy_button_pressed(joy, JOY_BUTTON_X) \
 			or Input.is_joy_button_pressed(joy, JOY_BUTTON_Y) or Input.is_joy_button_pressed(joy, JOY_BUTTON_RIGHT_SHOULDER) \
 			or Input.get_joy_axis(joy, JOY_AXIS_TRIGGER_RIGHT) > 0.4
+	return false
+
+
+## Hider: jump (B on a controller).
+func _jump_held() -> bool:
+	if vr or role != "hider":
+		return false
+	if joy >= 0 and Input.is_joy_button_pressed(joy, JOY_BUTTON_B):
+		return true
 	return false
 
 
