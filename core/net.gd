@@ -236,8 +236,13 @@ func _check_vr_menu() -> void:
 	if down and not menu_was_down:
 		print("Net: VR pause toggled")
 		main.toggle_vr_pause()
-	elif trig and not get_meta("trig_was", true) and not on_btn and get_tree().paused:
-		go_to_arcade()
+	# Leaving needs the trigger HELD for 1.5 s while paused, so a stray trigger pull doesn't quit.
+	if trig and not on_btn and get_tree().paused:
+		set_meta("leave_t", float(get_meta("leave_t", 0.0)) + get_process_delta_time())
+		if float(get_meta("leave_t", 0.0)) > 1.5:
+			go_to_arcade()
+	else:
+		set_meta("leave_t", 0.0)
 	menu_was_down = down
 	set_meta("trig_was", trig)
 	if btn != null:
