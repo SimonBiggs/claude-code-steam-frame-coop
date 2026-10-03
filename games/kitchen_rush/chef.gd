@@ -330,7 +330,7 @@ func _vr_update(delta: float) -> void:
 				near.highlight = true
 	knife.visible = held[1] == null
 	_vr_chop(delta)
-	wrist_label.text = main.status_text() + "\nX: recenter at the counter"
+	wrist_label.text = main.status_text() + "\nA: recenter at the counter"
 
 
 func hand_point(h: int) -> Vector3:

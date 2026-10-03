@@ -101,7 +101,7 @@ static func build(main: Node3D) -> Dictionary:
 	_box(main, Vector3(L.TRASH.x, top + 0.008, L.TRASH.z), Vector3(0.18, 0.01, 0.18), Color(0.08, 0.08, 0.1))
 	var lab: Label3D = main.add_sign(Vector3(L.TRASH.x, top + 0.05, L.TRASH.z + 0.18), "BIN", Color(1.0, 0.5, 0.45), 40, false)
 	lab.rotation.x = -PI / 2.6
-	main.add_sign(Vector3(0, top + 0.45, -0.42), "PASS  -  drop ingredients here", Color(1.0, 0.8, 0.3), 36, true)
+	main.add_sign(Vector3(0, top + 0.012, -0.42), "PASS  -  drop ingredients here", Color(1.0, 0.8, 0.3), 22, false).rotation.x = -PI / 2.0  # flat on the counter
 	# Chef area fence (low, so runners can see the chef).
 	var ca := L.CHEF_AREA
 	_collider(statics, Vector3(ca.get_center().x, 0.6, ca.get_center().y), Vector3(ca.size.x, 1.2, ca.size.y))
@@ -116,11 +116,11 @@ static func build(main: Node3D) -> Dictionary:
 	_box(main, Vector3(-6.18, 1.1, -1.4), Vector3(0.04, 2.0, 0.04), Color(0.5, 0.6, 0.7))
 	_box(main, Vector3(-6.16, 1.4, -0.9), Vector3(0.05, 0.6, 0.06), Color(0.85, 0.85, 0.9))
 	_box(main, Vector3(-6.16, 1.4, -1.9), Vector3(0.05, 0.6, 0.06), Color(0.85, 0.85, 0.9))
-	main.add_sign(Vector3(-6.1, 2.45, -1.4), "FRIDGE", Color(0.4, 0.7, 1.0), 80, false).rotation.y = -PI / 2.0
+	main.add_sign(Vector3(-6.1, 2.45, -1.4), "FRIDGE", Color(0.4, 0.7, 1.0), 80, false).rotation.y = PI / 2.0  # face into the room (+X)
 	_collider(statics, Vector3(-6.55, 1.1, -1.4), Vector3(0.7, 2.2, 3.6))
 	_box(main, Vector3(-6.6, 0.9, 2.2), Vector3(0.6, 1.8, 1.4), Color(0.75, 0.5, 0.3))
 	_collider(statics, Vector3(-6.6, 0.9, 2.2), Vector3(0.6, 1.8, 1.4))
-	main.add_sign(Vector3(-6.2, 2.1, 2.2), "PANTRY", Color(0.95, 0.65, 0.3), 70, false).rotation.y = -PI / 2.0
+	main.add_sign(Vector3(-6.2, 2.1, 2.2), "PANTRY", Color(0.95, 0.65, 0.3), 70, false).rotation.y = PI / 2.0  # face into the room (+X)
 	for src in L.SOURCES:
 		var kind: String = src[0]
 		var pos: Vector3 = src[1]

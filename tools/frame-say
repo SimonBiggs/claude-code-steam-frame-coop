@@ -1,3 +1,14 @@
 #!/bin/bash
-# frame-say "text": show a "Claude:" message in the Duo Arena game on the Steam Frame (and on the TV).
-printf '%s' "$*" | ssh -i ~/.config/steamos-devkit/devkit_rsa steamos@frame 'cat > ~/devkit-game/DuoArena/game/.dev/say.txt'
+# frame-say "text": show a "Claude:" message in the game on the Steam Frame (and on the TV),
+# and speak it aloud (piper TTS) in the headset and through the TV speakers.
+# FRAME_SAY_QUIET=1 shows the text without speaking it.
+KEY=~/.config/steamos-devkit/devkit_rsa
+printf '%s' "$*" | ssh -i $KEY steamos@frame 'cat > ~/devkit-game/DuoArena/game/.dev/say.txt'
+[ -n "$FRAME_SAY_QUIET" ] && exit 0
+(
+	wav=$(mktemp --suffix=.wav)
+	printf '%s' "$*" | piper -m ~/.local/share/piper/en_US-amy-medium.onnx -f "$wav" >/dev/null 2>&1 || exit 0
+	ssh -i $KEY steamos@frame 'f=$(mktemp --suffix=.wav); cat > $f; XDG_RUNTIME_DIR=/run/user/1000 pw-play --volume 0.9 $f; rm -f $f' < "$wav" &
+	pw-play --volume 0.8 "$wav" 2>/dev/null
+	wait; rm -f "$wav"
+) >/dev/null 2>&1 &

@@ -651,6 +651,16 @@ func _update_tickets() -> void:
 func _process(delta: float) -> void:
 	if not ready_to_play:
 		return
+	if not has_meta("signs_fixed"):  # hot-reload fix for signs built before the kitchen.gd change
+		set_meta("signs_fixed", true)
+		for c in get_children():
+			if c is Label3D and (c.text == "FRIDGE" or c.text == "PANTRY"):
+				c.rotation.y = PI / 2.0
+			elif c is Label3D and c.text.begins_with("PASS"):
+				c.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+				c.font_size = 22
+				c.position.y = L.COUNTER_TOP + 0.012
+				c.rotation = Vector3(-PI / 2.0, 0.0, 0.0)
 	clock += delta
 	if music == null:
 		music = MusicScript.new()
