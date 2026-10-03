@@ -19,6 +19,7 @@ const GAMES := [
 	{"id": "giants_table", "name": "GIANT'S TABLE", "scene": "res://games/giants_table/main.tscn",
 		"blurb": "Be a VR giant protecting a tiny tabletop village; TV players are the knights"},
 ]
+const VrText := preload("res://core/vr_text.gd")
 const DEFAULT_PORT := 7777
 const JOIN_TIMEOUT_MS := 5000
 
@@ -157,6 +158,10 @@ func _process(_delta: float) -> void:
 		_lobby_offline()
 	if vr_list:
 		_vr_input()
+		VrText.follow(vr_list, vr_cam, self, -0.1, 2.2)  # always findable, wherever you look
+		if not has_meta("vr_floor"):
+			set_meta("vr_floor", true)
+			_build_vr_floor()
 
 
 # --- TV menu ---------------------------------------------------------------
@@ -276,3 +281,30 @@ func _vr_input() -> void:
 	if trig and not trigger_was:
 		_start_everywhere(selected)
 	trigger_was = trig
+
+
+## A glowing floor and a ring of pillars so the VR lobby isn't a black void.
+func _build_vr_floor() -> void:
+	var floor_mesh := MeshInstance3D.new()
+	var pm := PlaneMesh.new()
+	pm.size = Vector2(30, 30)
+	floor_mesh.mesh = pm
+	var fm := StandardMaterial3D.new()
+	fm.albedo_color = Color(0.05, 0.06, 0.14)
+	fm.emission_enabled = true
+	fm.emission = Color(0.1, 0.25, 0.5)
+	fm.emission_energy_multiplier = 0.4
+	floor_mesh.material_override = fm
+	add_child(floor_mesh)
+	for i in 12:
+		var a := TAU * i / 12.0
+		var pillar := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = Vector3(0.3, 3.0, 0.3)
+		pillar.mesh = bm
+		var m := StandardMaterial3D.new()
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.albedo_color = Color.from_hsv(float(i) / 12.0, 0.6, 1.0)
+		pillar.material_override = m
+		pillar.position = Vector3(sin(a) * 7.0, 1.5, cos(a) * 7.0)
+		add_child(pillar)
