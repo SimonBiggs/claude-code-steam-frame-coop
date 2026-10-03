@@ -74,6 +74,7 @@ var menu_was_down := false
 
 func _process(delta: float) -> void:
 	_check_vr_menu()
+	_beacon(delta)
 	if join_deadline > 0 and Time.get_ticks_msec() > join_deadline:
 		_give_up()
 	if mode == "host" and connected:
@@ -251,3 +252,23 @@ func _wrist_button(hl: XRController3D) -> Label3D:
 		hl.add_child(btn)
 		btn.position = Vector3(0.0, 0.07, 0.1)
 	return btn
+
+
+## Host: once a second, tell the home network which game is running (UDP broadcast on port + 2),
+## so a TV still sitting in the arcade lobby can jump straight into it.
+func _beacon(delta: float) -> void:
+	if mode != "host":
+		return
+	set_meta("beacon_t", float(get_meta("beacon_t", 0.0)) - delta)
+	if float(get_meta("beacon_t", 0.0)) > 0.0:
+		return
+	set_meta("beacon_t", 1.0)
+	if not has_meta("beacon"):
+		var udp := PacketPeerUDP.new()
+		udp.set_broadcast_enabled(true)
+		udp.set_dest_address("255.255.255.255", PORT + 2)
+		set_meta("beacon", udp)
+	var u: PacketPeerUDP = get_meta("beacon")
+	var scene := get_tree().current_scene
+	if scene != null and scene.scene_file_path != "":
+		u.put_packet(("ARCADE_GAME " + scene.scene_file_path).to_utf8_buffer())

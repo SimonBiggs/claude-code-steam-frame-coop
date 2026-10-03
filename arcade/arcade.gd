@@ -85,6 +85,8 @@ func _join_lobby(address: String) -> void:
 	mode = "client"
 	multiplayer.multiplayer_peer = peer
 	join_deadline = Time.get_ticks_msec() + JOIN_TIMEOUT_MS
+	if multiplayer.connected_to_server.get_connections().size() > 0:
+		return  # already set up by an earlier attempt: just retry with the new peer
 	multiplayer.connected_to_server.connect(func() -> void:
 		join_deadline = 0
 		_set_status("Connected to the VR player: pick a game!")
@@ -160,6 +162,9 @@ func _launch(index: int) -> void:
 func _process(_delta: float) -> void:
 	if join_deadline > 0 and Time.get_ticks_msec() > join_deadline:
 		_lobby_offline()
+	# TV: if the VR player already started a game without us, join it (their game broadcasts it).
+	if mode != "host" and not starting and OS.has_environment("DUO_JOIN"):
+		_listen_for_game()
 	# TV: keep looking for the VR player's lobby (they may be mid-game or restarting).
 	if mode == "local" and not starting and OS.has_environment("DUO_JOIN") and not OS.has_environment("ARCADE_GAME"):
 		if Time.get_ticks_msec() > int(get_meta("retry_at", 0)):
@@ -318,3 +323,30 @@ func _build_vr_floor() -> void:
 		pillar.material_override = m
 		pillar.position = Vector3(sin(a) * 7.0, 1.5, cos(a) * 7.0)
 		add_child(pillar)
+
+
+func _listen_for_game() -> void:
+	if not has_meta("listen"):
+		var udp := PacketPeerUDP.new()
+		var base: int = int(OS.get_environment("DUO_PORT")) if OS.has_environment("DUO_PORT") else DEFAULT_PORT
+		if udp.bind(base + 2) != OK:
+			set_meta("listen", null)
+			return
+		set_meta("listen", udp)
+	var u = get_meta("listen")
+	if u == null:
+		return
+	var udp: PacketPeerUDP = u
+	while udp.get_available_packet_count() > 0:
+		var msg := udp.get_packet().get_string_from_utf8()
+		if not msg.begins_with("ARCADE_GAME "):
+			continue
+		var scene := msg.substr(12)
+		for i in GAMES.size():
+			if GAMES[i].scene == scene:
+				print("Arcade: the VR player is already playing %s, joining" % GAMES[i].name)
+				udp.close()
+				remove_meta("listen")
+				mode = "client"
+				_launch(i)
+				return
