@@ -539,6 +539,7 @@ func _vr_update(_delta: float) -> void:
 	_update_vr_hurt(_delta)
 	_ensure_shield()
 	_update_sword(_delta)
+	_update_gun_hp()
 	_ensure_wrist_radar()
 	yaw = xr_camera.global_rotation.y
 	# Keep the body under the headset when the player walks around the room.
@@ -889,6 +890,25 @@ func _ensure_shield() -> void:
 	shield.add_child(rim)
 	if ghost:
 		_set_layers(shield, body_layer())
+
+
+## Health readout on top of the gun, where the VR player is always looking.
+func _update_gun_hp() -> void:
+	var l: Label3D = get_meta("gun_hp") if has_meta("gun_hp") else null
+	if l == null:
+		l = Label3D.new()
+		l.font_size = 48
+		l.outline_size = 14
+		l.pixel_size = 0.0007
+		l.no_depth_test = true
+		l.render_priority = 6
+		hand_r.add_child(l)
+		l.position = Vector3(0.0, 0.07, 0.02)
+		l.rotation_degrees = Vector3(-30, 0, 0)
+		set_meta("gun_hp", l)
+	var frac := clampf(hp / maxf(stat("max_hp"), 1.0), 0.0, 1.0)
+	l.text = "♥ %d" % int(ceil(hp))
+	l.modulate = Color(1.0, 0.3, 0.3) if frac < 0.3 else (Color(1.0, 0.85, 0.3) if frac < 0.6 else Color(0.4, 1.0, 0.5))
 
 
 ## David's idea: the left hand swaps between the shield and a glowing sword. Swap with the left
