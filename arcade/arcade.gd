@@ -14,6 +14,8 @@ const GAMES := [
 		"blurb": "Cosy snow-fort defence: throw real snowballs in VR, pack the walls on the TV"},
 	{"id": "cannon_cove", "name": "CANNON COVE", "scene": "res://games/cannon_cove/main.tscn",
 		"blurb": "Pirate co-op: VR gunner aims the cannons, TV deckhands load them and patch leaks"},
+	{"id": "kitchen_rush", "name": "KITCHEN RUSH", "scene": "res://games/kitchen_rush/main.tscn",
+		"blurb": "Co-op cooking chaos: VR chef chops and plates, TV runners fetch and serve"},
 ]
 const DEFAULT_PORT := 7777
 const JOIN_TIMEOUT_MS := 5000
