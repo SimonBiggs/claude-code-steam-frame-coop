@@ -91,18 +91,26 @@ var shield: Node3D  # VR left-hand energy shield: reflects spitter orbs
 var shield_announced := false
 var wrist_radar: MeshInstance3D
 var ghost_head: Node3D  # follows the VR player's real head on the TV
+var force_fire := false  # test bots: hold the trigger
+var pad_lost_t := -1.0  # seconds since this player's controller disconnected (-1: not lost)
+
+
+## Bodies: visual layers 2-4 for P1-P3, 17-20 for P4-P7 (hidden from this player's own camera).
+const ALL_BODIES := 14 | (15 << 16)
+const NO_KEYS := 99  # key_set for controller-only drop-in players
 
 
 func body_layer() -> int:
-	return 2 << index  # visual layers 2-4 (P1-P3): hidden from this player's own camera
+	return 2 << index if index < 3 else 1 << (13 + index)
 
 
+## Viewmodel: visual layers 7-9 for P1-P3, 13-16 for P4-P7 (only this player's camera sees it).
 func viewmodel_layer() -> int:
-	return 64 << index  # visual layers 7-9: only this player's camera sees it
+	return 64 << index if index < 3 else 1 << (9 + index)
 
 
 func camera_cull_mask() -> int:
-	return 1 | (14 & ~body_layer()) | viewmodel_layer()  # world + other players' bodies + own gun
+	return 1 | (ALL_BODIES & ~body_layer()) | viewmodel_layer()  # world + other players' bodies + own gun
 
 
 func _ready() -> void:
@@ -194,7 +202,7 @@ func _ready() -> void:
 	revive_fill.visible = false
 	add_child(revive_fill)
 
-	if ghost:
+	if ghost and index == 0:
 		ghost_gun = _make_gun()
 		add_child(ghost_gun)
 		_set_layers(ghost_gun, body_layer())
@@ -396,7 +404,7 @@ func _update_camera(delta: float) -> void:
 
 func _shoot() -> void:
 	fire_cd = FIRE_INTERVAL * stat("fire_rate")
-	main.sound("shoot", -12.0, 1.0 + index * 0.25)
+	main.sound("shoot", -12.0, 1.0 + (index % 3) * 0.25 + floorf(index / 3.0) * 0.1)
 	recoil = 1.0
 	if muzzle_mat:
 		muzzle_mat.emission_energy_multiplier = 6.0
@@ -431,6 +439,8 @@ func keys() -> int:
 
 
 func _key(action: String) -> bool:
+	if keys() >= KEYS.size():
+		return false
 	return Input.is_physical_key_pressed(KEYS[keys()][action])
 
 
@@ -478,6 +488,8 @@ func _read_move() -> Vector3:
 func _fire_held() -> bool:
 	if vr:
 		return hand_r.get_float("trigger") > 0.5
+	if force_fire:
+		return true
 	if _key("fire"):
 		return true
 	if mouse_look and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
@@ -559,7 +571,7 @@ func _vr_update(_delta: float) -> void:
 # --- Health & reviving -------------------------------------------------------
 
 func take_damage(amount: float, from_pos = null) -> void:
-	if is_down or invuln_t > 0.0:
+	if is_down or invuln_t > 0.0 or not active:
 		return
 	amount *= personal.get("armor", 1.0)
 	if remote:
@@ -575,7 +587,7 @@ func take_damage(amount: float, from_pos = null) -> void:
 	hurt_sound_t -= get_physics_process_delta_time()
 	if hurt_sound_t <= 0.0:
 		hurt_sound_t = 0.2
-		main.sound("hurt", -4.0, 1.0 + index * 0.2)
+		main.sound("hurt", -4.0, 1.0 + (index % 3) * 0.2)
 	if joy >= 0:
 		Input.start_joy_vibration(joy, 0.3, 0.5, 0.1)
 	if vr:
@@ -661,6 +673,12 @@ func set_active(on: bool) -> void:
 	active = on
 	visible = on
 	collision_layer = 2 if on else 0
+	if not on and is_down:  # leaving while down: come back standing
+		is_down = false
+		revive_progress = 0.0
+		_apply_down_pose(false)
+	if not on and main != null:
+		hp = stat("max_hp")
 
 
 ## A stat for this player: team upgrades combined with their own skill-map upgrades.
@@ -668,6 +686,22 @@ func stat(name: String) -> float:
 	if name == "max_hp":
 		return main.upg.max_hp + personal.get("max_hp", 0.0)
 	return main.upg.get(name, 1.0) * personal.get(name, 1.0)
+
+
+const PERSONAL_KEYS := ["fire_rate", "damage", "dash_cd", "speed", "max_hp", "armor", "shield"]
+
+
+## Personal stats as a small packed array for snapshots.
+func pack_personal() -> PackedFloat32Array:
+	var out := PackedFloat32Array()
+	for k in PERSONAL_KEYS:
+		out.append(float(personal.get(k, 0.0 if k == "max_hp" else 1.0)))
+	return out
+
+
+func unpack_personal(packed: PackedFloat32Array) -> void:
+	for i in mini(packed.size(), PERSONAL_KEYS.size()):
+		personal[PERSONAL_KEYS[i]] = packed[i]
 
 
 func add_personal(name: String, mode: String, amount: float) -> void:
@@ -704,7 +738,10 @@ func apply_remote_state(pos: Vector3, new_yaw: float, new_pitch: float) -> void:
 func apply_net_state(st: Array) -> void:
 	hp = st[3]
 	if st.size() > 12:
-		personal = st[10]
+		if st[10] is PackedFloat32Array:
+			unpack_personal(st[10])
+		elif st[10] is Dictionary:
+			personal = st[10]
 		xp = st[11]
 		skills = st[12]
 	if st.size() > 13 and st[13] != active:
@@ -716,9 +753,11 @@ func apply_net_state(st: Array) -> void:
 		net_target = st[0]
 		yaw = st[1]
 		pitch = st[2]
-		net_head = st[7]
-		net_hand = st[8]
-		if st.size() > 9:
+		if st[7] is Transform3D:
+			net_head = st[7]
+		if st[8] is Transform3D:
+			net_hand = st[8]
+		if st.size() > 9 and st[9] is Transform3D:
 			net_lhand = st[9]
 		if not net_started:
 			net_started = true
@@ -748,7 +787,7 @@ func on_remote_hurt(from_pos: Vector3) -> void:
 func _ghost_update(delta: float) -> void:
 	global_position = global_position.lerp(net_target, 1.0 - exp(-15.0 * delta))
 	pivot.rotation.y = yaw
-	if ghost_head == null:
+	if ghost_head == null and index == 0:
 		ghost_head = Node3D.new()
 		add_child(ghost_head)
 		var helmet := MeshInstance3D.new()
@@ -766,10 +805,10 @@ func _ghost_update(delta: float) -> void:
 		visor.position = Vector3(0, 0.01, -0.14)
 		ghost_head.add_child(visor)
 		_set_layers(ghost_head, body_layer())
-	if net_lhand != Transform3D():
+	if net_lhand != Transform3D() and index == 0:
 		_ensure_shield()
 		shield.global_transform = net_lhand.orthonormalized() * Transform3D(Basis(), Vector3(0.0, 0.0, -0.06))
-	if net_head != Transform3D():
+	if net_head != Transform3D() and ghost_head != null:
 		var target := net_head.orthonormalized()
 		ghost_head.global_transform = ghost_head.global_transform.interpolate_with(target, 1.0 - exp(-20.0 * delta))
 		ghost_head.visible = not is_down
