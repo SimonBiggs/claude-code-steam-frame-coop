@@ -211,7 +211,10 @@ func _vr_input(_delta: float) -> Vector2:
 		var turn := clampf(d.x / 0.12 + (l.y - r.y) / 0.18, -1.0, 1.0)
 		# Reins only turn: their up/down drifted with how each kid held their hands and kept the
 		# dragon stuck at the ceiling. Height comes from looking up/down (and the stick).
-		rein_input = Vector2(_dead(turn, 0.12), 0.0 * climb)
+		# Abigail's idea: raise the reins to fly up, lower them to fly down. Measured from the eyes
+		# (not a calibrated rest pose), with a wide comfy middle zone around tummy height.
+		var lift := clampf((avg.y + 0.45) / 0.2, -1.0, 1.0)
+		rein_input = Vector2(_dead(turn, 0.12), _dead(lift, 0.3) + 0.0 * climb)
 		v += rein_input
 	# Look where you want to go: looking well down dives, looking up climbs (what the kids tried first).
 	if vr and xr_camera != null:
