@@ -47,7 +47,7 @@ var vr_list: Label3D
 var vr_cam: XRCamera3D
 var hand_r: XRController3D
 var stick_ready := true
-var trigger_was := false
+var trigger_was := true  # a trigger still held from leaving a game must be released first
 var starting := false
 
 
