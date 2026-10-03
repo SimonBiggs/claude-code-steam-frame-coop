@@ -886,7 +886,7 @@ func make_snapshot() -> Array:
 		pk.append([k.net_id, k.kind, k.global_position])
 	var sh := []
 	for s in get_tree().get_nodes_in_group("enemy_shots"):
-		sh.append([s.net_id, s.global_position, s.friendly])
+		sh.append([s.net_id, s.global_position, s.friendly, s.color, s.size])
 	return [wave, score, upg, upg_names, game_over, ps, es, pk, sh]
 
 
@@ -948,6 +948,9 @@ func _make_ghost(kind: String, item: Array) -> Node3D:
 	var shot := EnemyShotScript.new()
 	shot.main = self
 	shot.ghost = true
+	if item.size() > 4:
+		shot.color = item[3]
+		shot.size = item[4]
 	shot.net_id = item[0]
 	shot.position = item[1]
 	add_child(shot)

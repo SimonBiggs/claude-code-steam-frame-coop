@@ -11,23 +11,25 @@ var spent := false
 var ghost := false  # Steam Machine copy: visual only, placed from host snapshots
 var net_id := 0
 var net_target := Vector3.ZERO
+var fireball := false  # from the sky fish: bigger, and players can shoot it down
+var size := 1.0
 var friendly := false  # reflected by the VR shield: now hurts enemies
 
 
 func _ready() -> void:
 	add_to_group("enemy_shots")
 	net_target = position
-	collision_layer = 0
-	collision_mask = 0 if ghost else (1 | 2)
+	collision_layer = 4 if fireball and not ghost else 0  # layer 4 lets player bullets hit fireballs
+	collision_mask = 0 if ghost else (1 | 2 | 8)
 	var cs := CollisionShape3D.new()
 	var s := SphereShape3D.new()
-	s.radius = 0.35
+	s.radius = 0.35 * size
 	cs.shape = s
 	add_child(cs)
 	var mi := MeshInstance3D.new()
 	var m := SphereMesh.new()
-	m.radius = 0.3
-	m.height = 0.6
+	m.radius = 0.3 * size
+	m.height = 0.6 * size
 	m.radial_segments = 12
 	m.rings = 6
 	mi.mesh = m
@@ -96,4 +98,15 @@ func _on_body_entered(body: Node3D) -> void:
 		body.take_damage(damage, global_position - direction * 2.0)
 	spent = true
 	main.burst(global_position, color, 8, 0.1)
+	queue_free()
+
+
+## Player bullets can shoot fireballs out of the sky.
+func shot_down() -> void:
+	if spent or not fireball:
+		return
+	spent = true
+	main.score += 50
+	main.explosion(global_position, color, 0.8)
+	main.popup(global_position + Vector3.UP * 0.5, "+50", color.lightened(0.3))
 	queue_free()

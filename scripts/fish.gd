@@ -10,10 +10,14 @@ var t := 0.0
 var tail: Node3D
 var body: Node3D
 var wings: Array = []
+var mouth_mat: StandardMaterial3D
+var fire_t := 10.0  # host: seconds until the next fireball
+var charging := false
 
 
 func _ready() -> void:
-	t = Time.get_ticks_msec() / 1000.0
+	# Shared clock so the fish is in the same place on the Frame and the TV.
+	t = fmod(Time.get_unix_time_from_system(), 3600.0)
 	body = Node3D.new()
 	add_child(body)
 	var skin: StandardMaterial3D = main.make_material(Color(1.0, 0.45, 0.15), 1.6)
@@ -34,6 +38,8 @@ func _ready() -> void:
 		var wing := _part(PrismMesh.new(), wing_mat, Vector3(side * 2.2, 0.1, -0.3), Vector3(4.0, 0.1, 2.6))
 		wing.set_meta("side", side)
 		wings.append(wing)
+	mouth_mat = main.make_material(Color(1.0, 0.3, 0.05), 0.5)
+	_part(SphereMesh.new(), mouth_mat, Vector3(0, -0.2, -1.95), Vector3(0.7, 0.5, 0.4))
 	tail = Node3D.new()
 	tail.position = Vector3(0, 0, 1.9)
 	body.add_child(tail)
@@ -77,7 +83,8 @@ func _part(mesh: PrimitiveMesh, mat: Material, pos: Vector3, scl: Vector3) -> Me
 
 
 func _process(delta: float) -> void:
-	t += delta
+	t = fmod(Time.get_unix_time_from_system(), 3600.0)
+	_fireballs(delta)
 	var a := t * SPEED
 	# A swoopy loop: orbit the arena while bobbing up and down.
 	var pos := Vector3(cos(a) * ORBIT, HEIGHT + sin(a * 2.0) * 4.0, sin(a) * ORBIT)
@@ -89,3 +96,39 @@ func _process(delta: float) -> void:
 	for w in wings:
 		w.rotation.z = w.get_meta("side") * sin(t * 6.0) * 0.25  # gentle wing flap
 	body.rotation.y = sin(t * 18.0 + 1.0) * 0.08
+
+
+## Host: every so often the fish's mouth glows (warning) and it spits a fireball at a random player.
+func _fireballs(delta: float) -> void:
+	mouth_mat.emission_energy_multiplier = lerpf(mouth_mat.emission_energy_multiplier, 8.0 if charging else 0.5, delta * 6.0)
+	if main.net.mode == "client" or not main.ready_to_play or main.game_over or main.wave < 1:
+		return
+	if main.net.mode == "host" and not main.net.connected:
+		return
+	fire_t -= delta
+	if fire_t <= 1.0 and not charging:
+		charging = true
+		main.sound("big_kill", -4.0, 2.0)  # roar
+	if fire_t > 0.0:
+		return
+	charging = false
+	fire_t = randf_range(8.0, 14.0)
+	print("Fish fireball")
+	var targets: Array = main.players.filter(func(p) -> bool: return not p.is_down)
+	if targets.is_empty():
+		return
+	var target = targets.pick_random()
+	var from := global_position + -global_basis.z * 2.0
+	var aim: Vector3 = target.global_position + Vector3.UP * 1.0 - from
+	var ball := preload("res://scripts/enemy_shot.gd").new()
+	ball.main = main
+	ball.net_id = main.next_net_id()
+	ball.fireball = true
+	ball.color = Color(1.0, 0.45, 0.1)
+	ball.size = 2.2
+	ball.speed = 11.0
+	ball.damage = 12.0
+	ball.life = 6.0
+	ball.direction = aim.normalized()
+	main.add_child(ball)
+	ball.global_position = from

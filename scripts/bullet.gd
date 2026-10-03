@@ -37,6 +37,7 @@ func _ready() -> void:
 	add_child(mi)
 	basis = Basis.looking_at(direction)
 	body_entered.connect(_on_body_entered)
+	area_entered.connect(_on_area_entered)
 
 
 func _physics_process(delta: float) -> void:
@@ -56,4 +57,12 @@ func _on_body_entered(body: Node3D) -> void:
 			owner_player.hud.hit_marker()
 		elif owner_player and owner_player.remote:
 			owner_player.main.net.event("hitmark", [])
+	queue_free()
+
+
+func _on_area_entered(area: Area3D) -> void:
+	if spent or visual_only or not area.has_method("shot_down"):
+		return
+	spent = true
+	area.shot_down()
 	queue_free()
