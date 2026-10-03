@@ -3,6 +3,8 @@ extends Node
 ## the flat giant grabs goblins/ogres and throws them off the table, drops boulders on armoured
 ## goblins and carries downed knights to the campfire; the knights chase goblins with sword and
 ## crossbow and fetch dropped embers. Prints progress every 10 s.
+## BOT_PLAYERS=n (2..6): n TV knights join (via main.debug_join; the last one drops in through a fake
+## controller button press, then gets unplugged at 22 s and plugged back in at 28 s).
 
 const W := preload("res://games/giants_table/world.gd")
 
@@ -14,6 +16,10 @@ var giant_target = null
 var giant_wait := 0.0
 var last_print := -100.0
 var lazy := OS.has_environment("BOT_LAZY_GIANT")  # giant only rescues knights: tests downs and revives
+var bot_players := clampi(int(OS.get_environment("BOT_PLAYERS")), 0, 6) if OS.has_environment("BOT_PLAYERS") else 0
+var joined := 1
+var fake_pad := 13  # device id for the simulated drop-in controller
+var pad_phase := 0
 
 
 func _ready() -> void:
@@ -31,6 +37,7 @@ func _physics_process(delta: float) -> void:
 	if OS.has_environment("BOT_DOWN") and t >= 25.0 and t - delta < 25.0 and main.net.mode != "client":
 		print("Bot: knocking P2 down")
 		main.knight_hurt(main.players[1], 999.0, Vector3.ZERO)
+	_party(delta)
 	if main.giant != null and main.giant.flat:
 		_drive_giant(delta)
 	elif main.giant != null and main.giant.vr:
@@ -43,6 +50,10 @@ func _physics_process(delta: float) -> void:
 		var ks: Array[String] = []
 		for k in main.knights():
 			ks.append("P%d hp=%d%s%s%s" % [k.index + 1, int(k.hp), " DOWN" if k.is_down else "", " ember" if k.carrying else "", "" if k.active else " (asleep)"])
+		var cell := Vector2.ZERO
+		if main.knights()[0].has_meta("view"):
+			cell = main.knights()[0].get_meta("view").size
+		print("t=%.0f knights=%d views=%d cell=%s" % [t, main.active_knight_count(), main.view_count, cell])
 		print("t=%.0f mode=%s wave=%d score=%d embers=%d goblins=%d boulders=%d loose_embers=%d grabs=%d %s%s" % [
 			t, main.net.mode, main.wave, main.score, main.embers,
 			get_tree().get_nodes_in_group("goblins").size(), get_tree().get_nodes_in_group("boulders").size(),
@@ -55,10 +66,41 @@ func _physics_process(delta: float) -> void:
 			print("   kills: %s" % str(main.kills))
 
 
+## BOT_PLAYERS: bring in extra TV knights one by one, and exercise unplug / replug.
+func _party(_delta: float) -> void:
+	if bot_players < 2 or main.net.mode == "host":
+		return
+	if main.net.mode == "client" and not main.synced:
+		return
+	if joined < bot_players and t >= 3.0 + joined * 1.5:
+		joined += 1
+		if joined == bot_players and joined >= 3:
+			var ev := InputEventJoypadButton.new()
+			ev.device = fake_pad
+			ev.button_index = JOY_BUTTON_A
+			ev.pressed = true
+			Input.parse_input_event(ev)
+			print("Bot: fake controller %d pressed A (expect P%d)" % [fake_pad, joined + 1])
+		else:
+			print("Bot: P%d joins" % (joined + 1))
+			main.debug_join(joined)
+	if joined == bot_players and bot_players >= 3:
+		if pad_phase == 0 and t >= 22.0:
+			pad_phase = 1
+			print("Bot: unplugging controller %d (owner P%d)" % [fake_pad, main.pad_owner(fake_pad) + 1])
+			main._on_joy_changed(fake_pad, false)
+		elif pad_phase == 1 and t >= 28.0:
+			pad_phase = 2
+			print("Bot: plugging controller %d back in" % fake_pad)
+			main._on_joy_changed(fake_pad, true)
+			print("Bot: controller %d now owned by P%d" % [fake_pad, main.pad_owner(fake_pad) + 1])
+
+
 func _drive_knight(k) -> void:
 	var inp := {"move": Vector3.ZERO, "sword": false, "bow": false, "jump": false}
 	if not k.active:
-		inp.sword = int(t * 2.0) % 2 == 0  # player 3 presses attack to join
+		# player 3 presses attack to join (the original 2-player TV test)
+		inp.sword = bot_players == 0 and main.net.mode == "client" and k.index == 2 and int(t * 2.0) % 2 == 0
 		k.bot_input = inp
 		return
 	if main.game_over:

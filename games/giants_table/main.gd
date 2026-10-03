@@ -3,7 +3,11 @@ const VrText := preload("res://core/vr_text.gd")
 ## GIANT'S TABLE: a cosy village on a big wooden table. Waves of goblins climb up the table edges
 ## to steal the embers of the village campfire.
 ##  - Player 1 (VR, host) is the GIANT: grab goblins and boulders with your hands and throw them.
-##  - Players 2 and 3 (TV) are tiny KNIGHTS: sword, crossbow, carry embers home, revive each other.
+##  - Players 2 to 7 (TV) are tiny KNIGHTS: sword, crossbow, carry embers home, revive each other.
+##    P2 is keyboard set 0 + the 1st controller, P3 keyboard set 1 + the 2nd controller; any other
+##    controller presses A (or attack) to drop in as the next free knight (up to P7). Each controller
+##    drives exactly one knight (by device id); unplugging it makes that knight leave, plugging it
+##    back in rejoins them.
 ##  - Armoured goblins: knights only (too spiky for the giant). Ogres: giant only (too big for knights).
 ## Modes (see docs/GAME_DEV_GUIDE.md): DUO_JOIN=<host> client, VR or DUO_HOST=1 host, else local split screen.
 
@@ -23,7 +27,9 @@ const MAX_EMBERS := 10
 const BOULDER_COUNT := 8
 const DOWN_GRACE := 20.0  # seconds the giant has to carry a knight to the fire when all knights are down
 const FIRE_HOME := 2.6    # drop an ember this close to the fire and it goes home
-const PLAYER_COLORS: Array[Color] = [Color(0.3, 0.6, 1.0), Color(1.0, 0.72, 0.2), Color(1.0, 0.45, 0.75)]
+const MAX_KNIGHTS := 6     # TV players 2..7 (player indices 1..6)
+const PLAYER_COLORS: Array[Color] = [Color(0.3, 0.6, 1.0), Color(1.0, 0.72, 0.2), Color(1.0, 0.45, 0.75),
+	Color(0.95, 0.3, 0.28), Color(0.68, 0.45, 1.0), Color(0.3, 0.92, 0.95), Color(0.96, 0.96, 0.92)]
 
 var max_embers := MAX_EMBERS
 var players: Array = []
@@ -62,6 +68,13 @@ var fire_light: OmniLight3D
 var flames: Array = []
 var ember_orbs: Array = []
 var fire_t := 0.0
+
+# Split-screen views (a grid of SubViewports, laid out by _layout_views)
+var view_root: Control
+var views_dirty := true
+var last_view_size := Vector2.ZERO
+var view_count := 0
+var lamp: DirectionalLight3D
 
 
 func _ready() -> void:
@@ -106,10 +119,11 @@ func _setup_game(mode: String) -> void:
 	if mode == "local":
 		help_label.text = knight_help \
 			+ "GIANT (left screen): mouse or 2nd controller moves the hand · hold left click / RT to grab · flick and let go to throw\n" \
+			+ "More knights: press A on another controller (or Enter / arrow keys) to join, up to 6 knights\n" \
 			+ "Armoured goblins: KNIGHTS only · Big ogres: GIANT only · Bring dropped embers home · The Giant can carry knights!"
 	else:
 		help_label.text = knight_help \
-			+ "Player 3: press attack on the 2nd controller (or Enter / arrow keys) to join  ·  The GIANT in VR grabs and throws goblins and boulders\n" \
+			+ "More knights: press A or attack on any other controller (or Enter / arrow keys) to join, up to 6 knights  ·  The GIANT in VR grabs and throws goblins and boulders\n" \
 			+ "Armoured goblins: KNIGHTS only · Big ogres: GIANT only · Bring dropped embers home · Stand by a fallen friend to revive them"
 	if mode == "host":
 		_show_center("Waiting for the knights to join…", 0.0)
@@ -136,17 +150,49 @@ func _build_players(mode: String) -> void:
 	giant.color = PLAYER_COLORS[0]
 	add_child(giant)
 	players.append(giant)
-	var count := 2 if mode != "local" else 1
-	for i in range(1, count + 1):
+	_ensure_knights(mode)
+
+
+## Every machine keeps a knight node for each TV slot (indices 1..MAX_KNIGHTS) so indices line up
+## with net.gd and the snapshots. Slots 3+ sleep until someone joins. Called again from _process
+## so a hot reload into an older session (fewer slots) grows the list lazily.
+func _ensure_knights(mode: String) -> void:
+	if giant == null:
+		return
+	while players.size() <= MAX_KNIGHTS:
+		var i := players.size()
 		var k := KnightScript.new()
 		k.main = self
 		k.index = i
-		k.color = PLAYER_COLORS[i]
+		k.color = PLAYER_COLORS[i % PLAYER_COLORS.size()]
 		k.remote = mode == "host"
-		k.key_set = i - 1
-		k.position = Vector3(-1.2 + 2.4 * (i - 1), 0.0, 3.2)
+		k.key_set = i - 1 if i <= 2 else -1  # P2: WASD set, P3: arrows set, P4+: controller only
+		k.claimed = i <= 2
+		k.position = spawn_pos(i)
 		add_child(k)
 		players.append(k)
+		if i >= 2:
+			k.set_active(false)
+
+
+## Where knight i (re)appears: P2/P3 in front of the fire as before, the others in a ring.
+func spawn_pos(i: int) -> Vector3:
+	match i:
+		1:
+			return Vector3(-1.2, 0.0, 3.2)
+		2:
+			return Vector3(1.2, 0.0, 3.2)
+	var angles: Array[float] = [-0.85, 0.85, -1.6, 1.6]
+	var a: float = angles[clampi(i - 3, 0, angles.size() - 1)]
+	return Vector3(sin(a) * 3.4, 0.0, cos(a) * 3.4)
+
+
+func active_knight_count() -> int:
+	var n := 0
+	for k in knights():
+		if k.active:
+			n += 1
+	return maxi(n, 1)
 
 
 func _build_views(mode: String) -> void:
@@ -179,52 +225,149 @@ func _build_views(mode: String) -> void:
 	bg.color = Color.BLACK
 	layer.add_child(bg)
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 4)
-	layer.add_child(row)
-	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	view_root = Control.new()
+	view_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layer.add_child(view_root)
+	view_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	if not giant.vr and not giant.ghost:
-		var vp := _add_view(row, giant)
+		var vp := _add_view(giant)
 		var cam := Camera3D.new()
 		vp.add_child(cam)
 		cam.current = true
 		giant.setup_flat(cam, true)
 	for k in knights():
-		if k.remote:
-			continue
-		var vp := _add_view(row, k)
-		var cam := Camera3D.new()
-		vp.add_child(cam)
-		cam.current = true
-		k.attach_camera(cam)
-		var hud := CanvasLayer.new()
-		vp.add_child(hud)
-		k.hud_label = _make_label(30)
-		k.hud_label.add_theme_color_override("font_color", k.color.lightened(0.3))
-		hud.add_child(k.hud_label)
-		k.hud_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
-		k.hud_label.offset_top = -110
-		k.hud_label.offset_left = 30
-		k.hint_label = _make_label(34)
-		k.hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		hud.add_child(k.hint_label)
-		k.hint_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
-		k.hint_label.offset_left = -500
-		k.hint_label.offset_right = 500
-		k.hint_label.offset_top = -330
-		k.hint_label.offset_bottom = -200
-	if players.size() > 2:
-		players[2].set_active(false)
-		on_player_activity_changed(players[2])
+		if not k.remote and k.active:
+			_ensure_view(k)
+	views_dirty = true
+	_layout_views()
 
 
-func _add_view(row: HBoxContainer, p) -> SubViewport:
+## A knight's own split-screen view + HUD, made the first time they're active on this machine.
+func _ensure_view(k) -> void:
+	if k.remote or k.has_meta("view") or view_root == null:
+		return
+	var vp := _add_view(k)
+	var cam := Camera3D.new()
+	vp.add_child(cam)
+	cam.current = true
+	k.attach_camera(cam)
+	var hud := CanvasLayer.new()
+	vp.add_child(hud)
+	k.hud_label = _make_label(30)
+	k.hud_label.add_theme_color_override("font_color", k.color.lightened(0.3))
+	hud.add_child(k.hud_label)
+	k.hint_label = _make_label(34)
+	k.hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hud.add_child(k.hint_label)
+	_scale_hud(k, 1.0)
+	views_dirty = true
+
+
+## Per-view HUD, shrunk for small grid cells (s = 1 is the original 2-player layout).
+func _scale_hud(k, s: float) -> void:
+	if k.hud_label == null or k.hint_label == null:
+		return
+	if k.has_meta("hud_scale") and is_equal_approx(float(k.get_meta("hud_scale")), s):
+		return
+	k.set_meta("hud_scale", s)
+	var fs := maxi(12, int(30 * s))
+	var hl: Label = k.hud_label
+	hl.add_theme_font_size_override("font_size", fs)
+	hl.add_theme_constant_override("outline_size", maxi(4, int(fs / 4.0)))
+	hl.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
+	hl.offset_top = -110.0 * s
+	hl.offset_left = 30.0 * s
+	var fs2 := maxi(12, int(34 * s))
+	var hn: Label = k.hint_label
+	hn.add_theme_font_size_override("font_size", fs2)
+	hn.add_theme_constant_override("outline_size", maxi(4, int(fs2 / 4.0)))
+	hn.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
+	hn.offset_left = -500.0 * s
+	hn.offset_right = 500.0 * s
+	hn.offset_top = -330.0 * s
+	hn.offset_bottom = -200.0 * s
+
+
+## Split-screen grid: 1 view full, 2 side by side, 3-4 as 2x2, 5-6 as 3x2 (7 as 4x2: local mode
+## with the flat giant plus six knights). More views = lower 3D resolution and cheaper shadows.
+func _layout_views() -> void:
+	if view_root == null:
+		return
+	var area := view_root.size
+	if not views_dirty and area == last_view_size:
+		return
+	views_dirty = false
+	last_view_size = area
+	var list: Array = []
+	for p in players:
+		if p.has_meta("view"):
+			var c: SubViewportContainer = p.get_meta("view")
+			c.visible = p.active and not p.remote
+			if c.visible:
+				list.append(p)
+	var n := list.size()
+	view_count = n
+	if n == 0:
+		return
+	var cols := 1
+	var rows := 1
+	if n == 2:
+		cols = 2
+	elif n > 2 and n <= 4:
+		cols = 2
+		rows = 2
+	elif n > 4 and n <= 6:
+		cols = 3
+		rows = 2
+	elif n > 6:
+		cols = 4
+		rows = 2
+	var gap := 4.0
+	var cell := Vector2((area.x - gap * (cols - 1)) / cols, (area.y - gap * (rows - 1)) / rows)
+	var scale3d := 1.0
+	if n > 4:
+		scale3d = 0.55
+	elif n > 2:
+		scale3d = 0.7
+	var hud_s := 1.0
+	if n > 2:
+		hud_s = clampf(minf(cell.x / 958.0, cell.y / 1080.0) * 1.2, 0.45, 1.0)
+	for i in n:
+		var p = list[i]
+		var c: SubViewportContainer = p.get_meta("view")
+		var row := floori(float(i) / cols)
+		var col := i - row * cols
+		var in_row := mini(cols, n - row * cols)  # centre a short last row (3 views: 2 + 1)
+		var x0 := (area.x - (cell.x * in_row + gap * (in_row - 1))) * 0.5
+		c.position = Vector2(x0 + col * (cell.x + gap), row * (cell.y + gap))
+		c.size = cell
+		var vp := c.get_child(0) as SubViewport
+		if vp:
+			vp.scaling_3d_scale = scale3d
+			vp.msaa_3d = Viewport.MSAA_2X if n <= 2 else Viewport.MSAA_DISABLED
+		if p != giant:
+			_scale_hud(p, hud_s)
+	_tune_shadows(n)
+
+
+func _tune_shadows(n: int) -> void:
+	if lamp == null:
+		for c in get_children():
+			if c is DirectionalLight3D:
+				lamp = c
+				break
+	if lamp == null:
+		return
+	lamp.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS if n <= 2 else DirectionalLight3D.SHADOW_ORTHOGONAL
+	lamp.directional_shadow_max_distance = 50.0 if n <= 4 else 30.0
+
+
+func _add_view(p) -> SubViewport:
 	var container := SubViewportContainer.new()
 	p.set_meta("view", container)
 	container.stretch = true
-	container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	container.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	row.add_child(container)
+	container.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	view_root.add_child(container)
 	var vp := SubViewport.new()
 	vp.world_3d = get_world_3d()
 	vp.msaa_3d = Viewport.MSAA_2X
@@ -254,28 +397,141 @@ func _build_vr_mirror(xr_cam: XRCamera3D) -> void:
 	follow.remote_path = follow.get_path_to(cam)
 
 
+## Players that get a controller automatically, in order (as in the 2-player game): client P2, P3;
+## local P2 then the flat giant; a flat host's giant. Other controllers drop in by pressing A.
+func _reserved_slots() -> Array:
+	var slots: Array = []
+	if players.size() > 1 and not players[1].remote:
+		slots.append(players[1])
+	if net.mode == "client" and players.size() > 2:
+		slots.append(players[2])
+	if giant.flat:
+		slots.append(giant)
+	return slots
+
+
 func _assign_joypads() -> void:
 	var pads := Input.get_connected_joypads()
-	var locals: Array = []
-	for k in knights():
-		if not k.remote:
-			locals.append(k)
-	for i in locals.size():
-		locals[i].joy = pads[i] if pads.size() > i else -1
-	if giant.flat:
-		giant.joy = pads[locals.size()] if pads.size() > locals.size() else -1
+	var slots := _reserved_slots()
+	for p in players:
+		p.joy = -1
+	for i in slots.size():
+		slots[i].joy = pads[i] if pads.size() > i else -1
 	for id in pads:
 		print("Joypad %d: %s" % [id, Input.get_joy_name(id)])
 
 
-func _on_joy_changed(_device: int, _connected: bool) -> void:
-	if ready_to_play:
-		_assign_joypads()
+## Which player (index) a controller belongs to, or -1.
+func pad_owner(device: int) -> int:
+	for p in players:
+		if p.joy == device:
+			return p.index
+	return -1
+
+
+func _on_joy_changed(device: int, connected: bool) -> void:
+	if not ready_to_play or players.is_empty():
+		return
+	if not connected:
+		var who := pad_owner(device)
+		if who < 0:
+			return
+		var p = players[who]
+		p.joy = -1
+		print("Joypad %d disconnected (P%d)" % [device, who + 1])
+		if who == 0:
+			return
+		p.set_meta("lost_pad", device)
+		if p.key_set < 0 and p.active:
+			p.set_meta("rejoin", true)
+			request_leave(who)  # no keyboard to fall back on: the knight leaves until it's back
+		return
+	if pad_owner(device) >= 0:
+		return
+	print("Joypad %d connected: %s" % [device, Input.get_joy_name(device)])
+	# The same controller coming back: give it to its knight again (and rejoin them).
+	for k in knights():
+		if k.joy < 0 and int(k.get_meta("lost_pad", -1)) == device:
+			k.joy = device
+			k.remove_meta("lost_pad")
+			if k.get_meta("rejoin", false):
+				k.remove_meta("rejoin")
+				request_join(k.index)
+			return
+	for p in _reserved_slots():
+		if p.joy < 0:
+			p.joy = device
+			return
+	# Otherwise it's a spare: pressing A on it joins the next free knight (see _input).
+
+
+## Drop-in: a button on a controller nobody owns yet claims the next free knight slot.
+func _input(event: InputEvent) -> void:
+	var b := event as InputEventJoypadButton
+	if b == null or not b.pressed or not ready_to_play or game_over or net == null or net.mode == "host":
+		return
+	if b.button_index not in [JOY_BUTTON_A, JOY_BUTTON_B, JOY_BUTTON_X, JOY_BUTTON_RIGHT_SHOULDER, JOY_BUTTON_LEFT_SHOULDER]:
+		return
+	if pad_owner(b.device) >= 0:
+		return
+	var k = _free_knight()
+	if k == null:
+		return
+	k.joy = b.device
+	k.claimed = true
+	k.remove_meta("rejoin")
+	k.remove_meta("lost_pad")
+	print("Joypad %d drops in as P%d" % [b.device, k.index + 1])
+	join_t = 1.0
+	request_join(k.index)
+
+
+func _free_knight():
+	for k in knights():
+		if not k.remote and not k.active and k.joy < 0 and not k.has_meta("lost_pad"):
+			return k
+	for k in knights():
+		if not k.remote and not k.active and k.joy < 0:
+			return k
+	return null
+
+
+func request_join(i: int) -> void:
+	if i < 1 or i >= players.size():
+		return
+	var k = players[i]
+	if not k.remote and not k.active:
+		k.global_position = spawn_pos(i)
+		k.face = 0.0
+		k.cam_yaw = 0.0
+	if net.mode == "client":
+		net.send_action("join", [], i)
+	else:
+		on_p2_action("join", [], i)
+
+
+func request_leave(i: int) -> void:
+	if net.mode == "client":
+		net.send_action("leave", [], i)
+	else:
+		on_p2_action("leave", [], i)
+
+
+## Tests: join TV player `index` (1..6) as if a new controller had pressed A.
+func debug_join(index: int) -> void:
+	_ensure_knights(net.mode)
+	if index < 1 or index >= players.size() or players[index].remote:
+		return
+	players[index].claimed = true
+	request_join(index)
 
 
 func on_player_activity_changed(p) -> void:
+	if p.active and not p.remote:
+		_ensure_view(p)
 	if p.has_meta("view"):
 		p.get_meta("view").visible = p.active
+	views_dirty = true
 
 
 # --- Effects -----------------------------------------------------------------
@@ -439,8 +695,12 @@ func _process(delta: float) -> void:
 		if mirror_t <= 0.0:
 			mirror_t = 1.0 / 30.0
 			mirror_vp.render_target_update_mode = SubViewport.UPDATE_ONCE
+	_ensure_knights(net.mode)
+	_layout_views()
 	_update_hud()
 	_update_vr_center()
+	if net.mode == "local":
+		_check_join()
 	if net.mode == "client":
 		_check_join()
 		if game_over:
@@ -465,9 +725,10 @@ func _process(delta: float) -> void:
 	elif not spawn_queue.is_empty():
 		spawn_timer -= delta
 		var alive := get_tree().get_nodes_in_group("goblins").size()
-		if spawn_timer <= 0.0 and alive < mini(6 + wave * 2, 18):
+		var extra := _extra_knights()
+		if spawn_timer <= 0.0 and alive < mini(6 + wave * 2, 18) + extra * 3:
 			_spawn_goblin(spawn_queue.pop_back())
-			spawn_timer = maxf(0.5, 1.6 - wave * 0.08)
+			spawn_timer = maxf(0.5, 1.6 - wave * 0.08) / (1.0 + 0.15 * extra)
 	elif get_tree().get_nodes_in_group("goblins").is_empty():
 		_end_wave()
 	_check_lose(delta)
@@ -482,15 +743,25 @@ func _restart_pressed() -> bool:
 	return false
 
 
-## TV: player 3 joins by pressing attack on the second controller / keyboard set.
+## TV / split screen: a sleeping knight whose controller (or keyboard set) presses attack or A joins.
+## P3 = 2nd controller or arrows + Enter, as before; P4-P7 are claimed by spare controllers in _input.
 var join_t := 0.0
 func _check_join() -> void:
 	join_t -= get_process_delta_time()
-	if players.size() < 3 or players[2].active or join_t > 0.0 or game_over:
+	if join_t > 0.0 or game_over:
 		return
-	if players[2].any_attack_held():
-		join_t = 1.0
-		net.send_action("join", [], 2)
+	for k in knights():
+		if k.active or k.remote or not k.claimed:
+			continue
+		if k.any_attack_held() or (k.joy >= 0 and k.jump_held()):
+			join_t = 1.0
+			request_join(k.index)
+			return
+
+
+## Knights beyond the original two: used to scale the waves up a little for a big party.
+func _extra_knights() -> int:
+	return maxi(0, active_knight_count() - 2)
 
 
 # --- Waves -------------------------------------------------------------------
@@ -500,13 +771,16 @@ func _start_wave() -> void:
 	in_break = false
 	print("Wave %d started" % wave)
 	spawn_queue.clear()
-	for i in 3 + wave * 2:
+	# 1-2 knights: the original waves. Each extra knight adds ~30% goblins and ~35% armoured ones
+	# (knight work); ogres are the giant's job, so only a big party gets one more.
+	var party := _extra_knights()
+	for i in roundi((3 + wave * 2) * (1.0 + 0.3 * party)):
 		spawn_queue.append("goblin")
 	if wave >= 2:
-		for i in mini(wave - 1, 6):
+		for i in roundi(mini(wave - 1, 6) * (1.0 + 0.35 * party)):
 			spawn_queue.append("armored")
 	if wave >= 3:
-		for i in 1 + (wave - 3) / 3:
+		for i in 1 + (wave - 3) / 3 + (1 if party >= 3 and wave >= 4 else 0):
 			spawn_queue.append("ogre")
 	spawn_queue.shuffle()
 	spawn_queue.append("goblin")  # the first one out is always an easy one
@@ -671,15 +945,29 @@ func knight_action(k, action: String, args: Array) -> void:
 
 
 func on_p2_action(action: String, args: Array, index: int = 1) -> void:
+	if index < 1 or index >= players.size():
+		return
 	match action:
 		"join":
 			var k = players[index]
 			if not k.active:
 				k.set_active(true)
 				k.hp = KnightScript.MAX_HP
-				k.global_position = Vector3(1.5, 0.0, 3.0)
+				k.carrying = false
+				k.carried = false
+				if k.is_down:
+					k.set_down(false)
+				if k.remote:
+					var at := Vector3(1.5, 0.0, 3.0) if index == 2 else spawn_pos(index)
+					k.global_position = at
+					k.net_target = at
+				on_player_activity_changed(k)
 				_show_center("PLAYER %d JOINED!" % (index + 1), 1.5)
 				print("Net: player %d joined the game" % (index + 1))
+		"leave":
+			var k = players[index]
+			if k.active:
+				_knight_leaves(k)
 		"restart":
 			if game_over:
 				get_tree().reload_current_scene()
@@ -689,6 +977,27 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 			get_tree().paused = paused
 		_:
 			do_knight_action(index, action, args)
+
+
+## A knight leaves (controller unplugged, or the TV went away): drop what they carry and sleep.
+func _knight_leaves(k) -> void:
+	if giant:
+		for h in giant.hands:
+			if h.held == k:
+				giant._release(h)
+	if k.carrying:
+		_spawn_ember(k.global_position + Vector3.UP * 0.05)
+	k.carrying = false
+	k.carried = false
+	k.held = false
+	if k.is_down:
+		k.set_down(false)
+	k.hp = KnightScript.MAX_HP
+	k.revive_progress = 0.0
+	k.set_active(false)
+	on_player_activity_changed(k)
+	popup(k.global_position + Vector3.UP * 1.6, "P%d left - see you soon!" % (k.index + 1), k.color)
+	print("P%d left the game" % (k.index + 1))
 
 
 func do_knight_action(index: int, action: String, args: Array) -> void:
@@ -931,6 +1240,9 @@ func on_client_joined() -> void:
 
 func on_client_left() -> void:
 	_show_center("The knights left - waiting for them to come back…", 0.0)
+	for k in knights():
+		if k.index >= 2 and k.active:
+			_knight_leaves(k)  # P2 waits as before; drop-in knights rejoin when the TV is back
 
 
 func _set_pause_banner(paused: bool, who: String) -> void:
@@ -1124,3 +1436,6 @@ func _update_hud() -> void:
 		info_label.text = "Syncing with the Giant…"
 		return
 	info_label.text = "WAVE %d      SCORE %d      CAMPFIRE EMBERS %d / %d" % [wave, score, embers, MAX_EMBERS]
+	var n := active_knight_count()
+	if n > 2:
+		info_label.text += "      KNIGHTS %d" % n

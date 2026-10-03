@@ -222,7 +222,7 @@ func _think(delta: float) -> void:
 	if not carrying:
 		var reach := radius + 0.55 + (0.5 if kind == "ogre" else 0.0)
 		for k in main.knights():
-			if k.is_down or k.carried:
+			if not k.active or k.is_down or k.carried:
 				continue
 			var kp: Vector3 = k.global_position
 			if Vector2(kp.x - pos.x, kp.z - pos.z).length() < reach and absf(kp.y - pos.y) < 1.2 * sc:
