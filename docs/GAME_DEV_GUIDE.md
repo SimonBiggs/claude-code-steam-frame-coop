@@ -62,8 +62,14 @@ score and game over. Use visual-only "ghost" copies of host objects on the clien
   `is_button_pressed("ax_button")`, `"menu_button"`, and `trigger_haptic_pulse("haptic", 0, amp, dur, 0)`.
 - Move the XR origin in `_process` (per frame), not `_physics_process`, or it judders.
   Snap-turn on the right stick. The player may be **sitting down**.
-- 2D UI doesn't show in VR. Use `Label3D` attached to the XR camera (about 1.7 m ahead) with a thick
-  black outline (`outline_size` around 26), or on the wrist.
+- 2D UI doesn't show in VR. Use a world-space `Label3D` about 1.8 m ahead with a thick black outline
+  (`outline_size` around 26), or put it on the wrist. Don't attach text to the XR camera, and don't
+  billboard it: players want to turn their head to read it. Let it glide back in front only when they
+  turn well away (see `_lazy_follow` in duo_arena/main.gd).
+- On the Steam Frame, the **left controller's buttons (menu, Y, grip) don't reach the game**; only the
+  sticks and the right trigger/A do. `core/net.gd` adds a MENU button on the left wrist (tap it, or
+  point and pull the trigger) that calls `toggle_vr_pause()`. While paused, the trigger returns everyone
+  to the arcade.
 - Give the VR player a role that uses their **hands**, different from the TV players' role.
 - `Engine.physics_ticks_per_second = 90` in VR.
 
