@@ -60,6 +60,14 @@ Pick from the arcade lobby: the TV shows a picker, and the VR player can choose 
 | **Cannon Cove** | pirates at sunset | grab and swing the cannons, spyglass | haul cannonballs, patch leaks, musket boarders |
 | **Kitchen Rush** | cartoon cooking chaos | chop with a real knife swing, plate up orders | fetch ingredients, serve customers, fight fires |
 | **Giant's Table** | cosy fantasy tabletop village | a giant: grab and throw goblins, ogres and boulders | tiny knights with sword and crossbow, carry embers home |
+| **Rocket Workshop** | cartoon launch pad, talk-it-through puzzles | works the desk: buttons, plugs, dials, the launch lever | find the blueprints and read them out, carry fuel, fix pipes |
+| **Marble Maze** | toy ball racing | tilts a giant tabletop maze by its handles | race through the maze as marbles |
+| **Hide and Seek** | cosy cartoon house | the seeker, with a torch | hide, or disguise as a lamp, plant or box |
+| **Block Builders** | floating sky course | a giant builder placing planks, stairs, springs, fans | tiny runners racing to the flag |
+| **Dragon Rider** | sunset sky islands | steers a friendly dragon with the reins | gunners on its back popping balloons and storm sprites |
+| **Bee Garden** | sunny garden, no fighting | plants, waters, shoos wasps | bees collecting pollen to fill the honey jars |
+
+Every game takes up to 6 TV players: plug in another controller and press A to join.
 
 ## Duo Arena (game #1)
 
