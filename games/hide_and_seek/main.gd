@@ -758,6 +758,7 @@ func _process(delta: float) -> void:
 	if not ready_to_play:
 		return
 	_ensure_players(net.mode)
+	_seek_hints(delta)
 	if music == null:
 		music = MusicScript.new()
 		add_child(music)
@@ -1351,3 +1352,27 @@ func _update_hud() -> void:
 			info_label.text = "ROUND %d  ·  %d:%02d LEFT  ·  %d STILL HIDING" % [round_no, int(phase_t) / 60, int(phase_t) % 60, hiders_left()]
 		"over":
 			info_label.text = "ROUND %d OVER" % round_no
+
+
+## Hints for the seeker (David's idea): after 30 s of seeking, every 15 s a gold sparkle and a
+## chime pop up where one of the remaining hiders is.
+func _seek_hints(delta: float) -> void:
+	if net.mode == "client" or phase != "seek":
+		set_meta("hint_t", 30.0)
+		return
+	var t: float = float(get_meta("hint_t", 30.0)) - delta
+	if t > 0.0:
+		set_meta("hint_t", t)
+		return
+	set_meta("hint_t", 15.0)
+	var hiding: Array = []
+	for p in players:
+		if p.active and p.role == "hider" and p.is_hiding():
+			hiding.append(p)
+	if hiding.is_empty():
+		return
+	var h = hiding[randi() % hiding.size()]
+	var at: Vector3 = h.global_position + Vector3.UP * 1.2
+	burst(at, Color(1.0, 0.85, 0.2), 40, 0.1)
+	popup(at + Vector3.UP * 0.4, "HINT!", Color(1.0, 0.85, 0.2), true)
+	sound("pickup", 0.0, 1.4)

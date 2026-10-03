@@ -428,8 +428,19 @@ func _physics_process(delta: float) -> void:
 		set_meta("jump_y", jy)
 		set_meta("jump_v", jv)
 		position.y = jy
+		var before := global_position
 		move_and_slide()
 		position.y = jy
+		# Unstick: pushing for 2 s without getting anywhere slides you free towards the house centre.
+		if move.length() > 0.5 and before.distance_to(global_position) < 0.2 * delta:
+			set_meta("stuck_t", float(get_meta("stuck_t", 0.0)) + delta)
+			if float(get_meta("stuck_t", 0.0)) > 2.0:
+				set_meta("stuck_t", 0.0)
+				var to_c := Vector3(-global_position.x, 0.0, -global_position.z)
+				global_position += to_c.normalized() * 0.8 if to_c.length() > 0.1 else Vector3(0.8, 0.0, 0.0)
+				main.burst(global_position + Vector3.UP, Color(0.7, 0.9, 1.0), 10, 0.06)
+		else:
+			set_meta("stuck_t", 0.0)
 	bob_t += velocity.length() * delta * 2.2
 	_update_camera(delta)
 	main.net.send_state(global_position, yaw, pitch, index)
