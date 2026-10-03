@@ -224,6 +224,8 @@ func _process(delta: float) -> void:
 			var g := false
 			if hh.right:
 				g = hh.ctrl.get_float("trigger") > (0.35 if hh.gripping else 0.6)
+			else:
+				g = _left_touch_grip(hh)
 			_update_hand(hh, g, delta)
 		_flicks()
 	elif flat:
@@ -341,6 +343,31 @@ func _grab(h: Hand) -> void:
 			main.mist(h.xf.origin + fwd * 0.3, pest.global_position)
 			main.shoo(pest, h.xf.origin)
 			haptic(h, 0.4, 0.06)
+
+
+## The Frame's left trigger never reaches the game, so the left hand works by touch (the kids
+## wanted both hands): touching the seed tray, the can, a ripe plant or a pest grabs/uses it; a
+## downward toss plants a held seed; touching the can's spot again puts the can back.
+func _left_touch_grip(h: Hand) -> bool:
+	var now := Time.get_ticks_msec()
+	if h.gripping:
+		if h.held == "seed":
+			return not (h.vel.y < -0.9 and now > int(get_meta("l_grab_at", 0)) + 300)
+		if h.held == "can":
+			var home := W.CAN_HOME + Vector3(0.0, 0.3, 0.0)
+			return not (h.pos.distance_to(home) < VR_REACH and now > int(get_meta("l_grab_at", 0)) + 1200)
+		return now < int(get_meta("l_grab_at", 0)) + 150  # a touch (harvest / shoo) is a short tap
+	if now < int(get_meta("l_probe_ok", 0)):
+		return false
+	var near_tray := h.pos.distance_to(W.TRAY_POS + Vector3(0.0, 0.12, 0.0)) < 0.75
+	var near_can := h.pos.distance_to(W.CAN_HOME + Vector3(0.0, 0.3, 0.0)) < VR_REACH + 0.15
+	var near_plants := h.pos.y < 1.05
+	if not (near_tray or near_can or near_plants):
+		return false
+	# Probe: try a grab here; keep "gripping" only if something was actually taken or used.
+	set_meta("l_probe_ok", now + 400)
+	set_meta("l_grab_at", now)
+	return true
 
 
 func _release(h: Hand) -> void:
