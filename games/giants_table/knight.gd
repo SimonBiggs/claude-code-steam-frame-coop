@@ -1,8 +1,9 @@
 extends Node3D
-## A tiny knight on the tabletop (TV players 2 and 3), seen in third person.
+## A tiny knight on the tabletop (TV players 2 to 7), seen in third person.
 ## Controller: left stick move, right stick turn the camera, RT/RB/B sword, LT/LB/X crossbow, A jump.
 ## Keyboard set 0: W/S move, A/D turn, Space sword, F crossbow, Shift jump.
 ## Keyboard set 1: arrows (left/right turn), Enter sword, Right Ctrl / . crossbow, / jump.
+## Players 4-7 have no keyboard set (key_set = -1): one controller each, picked by device id.
 ## Their own movement is local (instant); the host decides hits, damage, embers and reviving.
 
 const W := preload("res://games/giants_table/world.gd")
@@ -33,7 +34,8 @@ var color := Color.WHITE
 var joy := -1
 var key_set := 0
 var remote := false   # host: driven by the TV machine
-var active := true    # player 3 sleeps until they press attack
+var active := true    # players 3+ sleep until they press attack / A
+var claimed := false  # a controller or keyboard set belongs to this knight (they can press to join)
 var vr := false
 var ghost := false
 
@@ -179,6 +181,8 @@ func set_active(on: bool) -> void:
 # --- Input -------------------------------------------------------------------
 
 func _key(action: String) -> bool:
+	if key_set < 0 or key_set >= KEYS.size():
+		return false
 	var keys: Dictionary = KEYS[clampi(key_set, 0, KEYS.size() - 1)]
 	if action == "bow" and Input.is_physical_key_pressed(keys["bow2"]):
 		return true
@@ -423,11 +427,18 @@ func apply_remote_state(pos: Vector3, new_face: float, new_cam_yaw: float) -> vo
 
 
 func net_state() -> Array:
+	if not active:
+		return [false]  # sleeping slot: keep the snapshot small (up to 6 knights)
 	return [global_position, face, hp, is_down, revive_progress, active, carrying, carried]
 
 
 ## TV: authoritative state from the host.
 func apply_net_state(st: Array) -> void:
+	if st.size() < 8:
+		if active:
+			set_active(false)
+			main.on_player_activity_changed(self)
+		return
 	hp = st[2]
 	revive_progress = st[4]
 	carrying = st[6]
