@@ -2,7 +2,8 @@ extends Node3D
 const VrText := preload("res://core/vr_text.gd")
 ## Kitchen Rush: co-op cooking chaos.
 ## Player 1 is the CHEF at the counter (VR hands, or button controls in split screen): chop and stack.
-## Players 2-3 are RUNNERS (TV, first person): fetch ingredients to the pass, carry finished plates to customers.
+## Players 2-7 are RUNNERS (TV, first person, split screen): fetch ingredients to the pass, carry finished plates
+## to customers. Extra runners drop in by pressing A / Start on a controller nobody owns yet.
 ## The host simulates everything; the TV machine mirrors it from snapshots (see core/net.gd).
 
 const L := preload("res://games/kitchen_rush/layout.gd")
@@ -17,6 +18,7 @@ const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
 const NetScript := preload("res://core/net.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
+const JoinInputScript := preload("res://games/kitchen_rush/join_input.gd")
 
 const RECIPES := {
 	"SALAD": ["lettuce", "tomato", "cucumber"],
@@ -28,7 +30,10 @@ const UNLOCKS := [["SALAD", "TOASTIE"], ["BURGER"], ["PIZZA"]]  # new recipes at
 const MAX_ANGRY := 5
 const MAX_CUSTOMERS := 4
 const COMBO_WINDOW := 12.0
-const PLAYER_COLORS: Array[Color] = [Color(1.0, 0.45, 0.35), Color(0.3, 0.65, 1.0), Color(0.7, 0.45, 1.0)]
+const MAX_RUNNERS := 6  # player indices 1..6 (P2..P7); index 0 is the chef
+const PLAYER_COLORS: Array[Color] = [Color(1.0, 0.45, 0.35), Color(0.3, 0.65, 1.0), Color(0.7, 0.45, 1.0),
+	Color(0.35, 0.9, 0.4), Color(1.0, 0.82, 0.2), Color(1.0, 0.45, 0.8), Color(0.25, 0.92, 0.9)]
+const LEAVE_AFTER_UNPLUG := 15.0  # a runner whose controller is unplugged this long leaves the kitchen
 const BUBBLE_SHADER := """
 shader_type canvas_item;
 uniform vec4 ring_color : source_color = vec4(1.0, 0.5, 0.4, 1.0);
@@ -56,6 +61,9 @@ var mirror_t := 0.0
 var ghost_cam: Camera3D
 var vr_center: Label3D
 var cameras: Array[Camera3D] = []
+var bubble_rect: TextureRect
+var bubble_tag: Label
+var join_cd := {}  # player index -> seconds until another join request may be sent
 
 # Game state (simulated on the host, mirrored on the client).
 var shift := 0
@@ -285,21 +293,33 @@ func _build_players(mode: String) -> void:
 	chef.ghost = mode == "client"
 	add_child(chef)
 	players.append(chef)
-	var count := 3 if mode != "local" else 2
-	for i in range(1, count):
+	_ensure_runners(mode)
+
+
+## Runners 1..6 always exist (so the host can accept any index); all but runner 1 wait until they join.
+## Called again every frame, so a hot-reloaded game grows the extra runners lazily.
+func _ensure_runners(mode: String) -> void:
+	while players.size() <= MAX_RUNNERS:
+		var i := players.size()
 		var r := RunnerScript.new()
 		r.index = i
-		r.color = PLAYER_COLORS[i]
+		r.color = PLAYER_COLORS[i % PLAYER_COLORS.size()]
 		r.main = self
 		r.remote = mode == "host"
-		r.key_set = 0 if i == 2 else 1
-		r.mouse_look = i == 2
-		r.position = L.RUNNER_SPAWN[i - 1]
+		# Keyboards: P2 arrows + Enter; P3 on the TV machine WASD + mouse. Everyone else uses a controller.
+		r.key_set = 1 if i == 1 else (0 if i == 2 and mode == "client" else -1)
+		r.mouse_look = r.key_set == 0
+		r.position = runner_spawn(i)
 		r.yaw = PI
 		add_child(r)
 		players.append(r)
-	if players.size() > 2:
-		players[2].set_active(false)  # player 3 wakes up when someone presses its button
+		if i >= 2:
+			r.set_active(false)
+
+
+func runner_spawn(i: int) -> Vector3:
+	var base: Vector3 = L.RUNNER_SPAWN[(i - 1) % 2]
+	return base + Vector3(0.0, 0.0, -0.8 * floorf((i - 1) / 2.0))
 
 
 func _apply_vr_performance() -> void:
@@ -342,49 +362,143 @@ func _build_views(mode: String) -> void:
 			_add_bubble(players[1].hud, mirror, PLAYER_COLORS[0])
 	else:
 		print("No VR headset: split screen")
+	_view_grid()
+	for p in players:
+		if p.active and _wants_view(p):
+			_ensure_view(p)
+	if mode == "client":
+		_add_bubble(players[1].hud, _build_ghost_mirror(), PLAYER_COLORS[0])
+	_layout_views()
+
+
+func _wants_view(p) -> bool:
+	return not (p.vr or p.remote or p.ghost) and (p.camera == null or p.has_meta("view"))
+
+
+## The split-screen grid on the main window (created lazily, so hot reloads can add it too).
+func _view_grid() -> GridContainer:
+	var grid := get_node_or_null("ViewLayer/Grid") as GridContainer
+	if grid != null:
+		return grid
 	var layer := CanvasLayer.new()
+	layer.name = "ViewLayer"
 	layer.layer = -1
 	add_child(layer)
 	var bg := ColorRect.new()
 	bg.color = Color.BLACK
 	layer.add_child(bg)
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 4)
-	layer.add_child(row)
-	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	grid = GridContainer.new()
+	grid.name = "Grid"
+	grid.add_theme_constant_override("h_separation", 4)
+	grid.add_theme_constant_override("v_separation", 4)
+	layer.add_child(grid)
+	grid.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	for p in players:  # views made by an older version of this script
+		if p.has_meta("view"):
+			var c: Control = p.get_meta("view")
+			if c.get_parent() != grid:
+				c.reparent(grid, false)
+	return grid
+
+
+## One SubViewport (camera + HUD) for a local player.
+func _ensure_view(p) -> void:
+	if p.has_meta("view") or p.camera != null:
+		return
+	var container := SubViewportContainer.new()
+	p.set_meta("view", container)
+	container.stretch = true
+	container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	container.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	container.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_view_grid().add_child(container)
+	var vp := SubViewport.new()
+	vp.world_3d = get_world_3d()
+	vp.msaa_3d = Viewport.MSAA_2X
+	vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA
+	container.add_child(vp)
+	var cam := Camera3D.new()
+	vp.add_child(cam)
+	cam.current = true
+	cameras.append(cam)
+	p.attach_camera(cam)
+	var hud_layer := CanvasLayer.new()
+	vp.add_child(hud_layer)
+	var hud := HudScript.new()
+	hud.player = p
+	hud.main = self
+	hud.chef = p.index == 0
+	hud_layer.add_child(hud)
+	p.hud = hud
+
+
+## 1 view: full screen, 2: side by side, 3-4: 2x2, 5-6: 3x2, 7: 4x2. Empty cells invite more players.
+## More views render at a lower resolution, with fewer effects, to keep the frame rate up.
+func _layout_views() -> void:
+	var grid := _view_grid()
+	var views: Array = []
 	for p in players:
-		if p.vr or p.remote or p.ghost or p.camera != null:
-			continue
-		var container := SubViewportContainer.new()
-		p.set_meta("view", container)
-		container.stretch = true
-		container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		container.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		row.add_child(container)
-		var vp := SubViewport.new()
-		vp.world_3d = get_world_3d()
-		vp.msaa_3d = Viewport.MSAA_2X
-		vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA
-		container.add_child(vp)
-		var cam := Camera3D.new()
-		vp.add_child(cam)
-		cam.current = true
-		cameras.append(cam)
-		p.attach_camera(cam)
-		var hud_layer := CanvasLayer.new()
-		vp.add_child(hud_layer)
-		var hud := HudScript.new()
-		hud.player = p
-		hud.main = self
-		hud.chef = p.index == 0
-		hud_layer.add_child(hud)
-		p.hud = hud
-	for p in players:
-		if p.index == 2 and not p.active and p.has_meta("view"):
-			p.get_meta("view").visible = false
-	if mode == "client":
-		_add_bubble(players[1].hud, _build_ghost_mirror(), PLAYER_COLORS[0])
+		if p.has_meta("view"):
+			var c: Control = p.get_meta("view")
+			c.visible = p.active
+			if p.active:
+				views.append(c)
+	var n := views.size()
+	var cols := 1
+	if n == 2:
+		cols = 2
+	elif n >= 3 and n <= 4:
+		cols = 2
+	elif n >= 5 and n <= 6:
+		cols = 3
+	elif n >= 7:
+		cols = 4
+	grid.columns = cols
+	var scale_3d := 1.0 if n <= 2 else (0.7 if n <= 4 else 0.55)
+	for i in views.size():
+		var c: Control = views[i]
+		grid.move_child(c, i)
+		var vp := c.get_child(0) as SubViewport
+		if vp:
+			vp.scaling_3d_scale = scale_3d
+			vp.msaa_3d = Viewport.MSAA_2X if n <= 2 else Viewport.MSAA_DISABLED
+	# Fillers for the empty grid cells.
+	var rows := ceili(float(n) / float(cols)) if n > 0 else 0
+	var need := rows * cols - n if n > 2 else 0
+	var fillers: Array = []
+	for c in grid.get_children():
+		if c.has_meta("filler"):
+			fillers.append(c)
+	while fillers.size() < need:
+		var f := ColorRect.new()
+		f.set_meta("filler", true)
+		f.color = Color(0.06, 0.07, 0.1)
+		f.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		f.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		f.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var l := _make_label(30)
+		l.text = "Grab a controller\nand press A to join!"
+		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		l.add_theme_color_override("font_color", Color(0.75, 0.8, 0.9))
+		f.add_child(l)
+		l.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		grid.add_child(f)
+		fillers.append(f)
+	for i in fillers.size():
+		var f: Control = fillers[i]
+		f.visible = i < need
+		grid.move_child(f, grid.get_child_count() - 1)
+	# Effects: shared by every view, so trim them when the screen is split many ways.
+	if players.is_empty() or players[0].vr:
+		return
+	for nd in get_children():
+		if nd is WorldEnvironment and nd.environment:
+			nd.environment.ssao_enabled = n <= 2
+		elif nd is DirectionalLight3D:
+			nd.shadow_enabled = n <= 4
+			nd.directional_shadow_max_distance = 30.0 if n <= 2 else 18.0
 
 
 func _build_vr_mirror(xr_cam: XRCamera3D) -> SubViewport:
@@ -438,6 +552,7 @@ func _add_bubble(hud: Control, source: SubViewport, color: Color) -> void:
 	hud.add_child(bubble)
 	bubble.size = Vector2(260, 260)
 	bubble.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_KEEP_SIZE, 24)
+	bubble_rect = bubble
 	var tag := Label.new()
 	tag.text = "CHEF (VR)"
 	tag.add_theme_font_size_override("font_size", 22)
@@ -446,6 +561,24 @@ func _add_bubble(hud: Control, source: SubViewport, color: Color) -> void:
 	tag.add_theme_color_override("font_color", color)
 	bubble.add_child(tag)
 	tag.position = Vector2(80, 262)
+	bubble_tag = tag
+
+
+## The VR bubble shrinks with its view in a 2x2 / 3x2 split.
+func _update_bubble() -> void:
+	if bubble_rect == null or not is_instance_valid(bubble_rect):
+		return
+	var hud := bubble_rect.get_parent() as Control
+	if hud == null:
+		return
+	var sz := clampf(minf(hud.size.x, hud.size.y) * 0.3, 110.0, 260.0)
+	var k := sz / 260.0
+	bubble_rect.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	bubble_rect.size = Vector2(sz, sz)
+	bubble_rect.position = Vector2(hud.size.x - sz - 24.0 * k, 24.0 * k)
+	if bubble_tag:
+		bubble_tag.add_theme_font_size_override("font_size", maxi(12, int(22.0 * k)))
+		bubble_tag.position = Vector2(80.0 * k, sz + 2.0)
 
 
 ## VR without a TV machine: the runner gets an OS window on this device.
@@ -490,15 +623,200 @@ func _assign_joypads() -> void:
 		print("Joypad %d: %s" % [id, Input.get_joy_name(id)])
 
 
-func _on_joy_changed(_device: int, _connected: bool) -> void:
-	if ready_to_play:
-		_assign_joypads()
+## Can TV players drop in on this machine? (Not on the host, nor in VR without a TV machine.)
+func drop_in_allowed() -> bool:
+	if not ready_to_play or players.size() <= MAX_RUNNERS:
+		return false
+	return net.mode == "client" or (net.mode == "local" and not players[0].vr)
+
+
+func _owner_of_joy(device: int):
+	for p in players:
+		if p.joy == device:
+			return p
+	return null
+
+
+## Each controller drives exactly one player (by device id). Unplugging leaves that player idle and,
+## after a while, out of the kitchen; plugging back in (or any new controller pressing A) rejoins.
+func _on_joy_changed(device: int, connected: bool) -> void:
+	if not ready_to_play:
+		return
+	if not connected:
+		var p = _owner_of_joy(device)
+		if p != null:
+			p.joy = -1
+			if p.index >= 1:
+				p.lost_joy = device
+				p.lost_t = 0.0
+			print("Joypad %d unplugged from player %d" % [device, p.index + 1])
+		return
+	print("Joypad %d connected: %s" % [device, Input.get_joy_name(device)])
+	if _owner_of_joy(device) != null:
+		return
+	for i in range(1, players.size()):
+		var r = players[i]
+		if r.lost_joy == device and r.joy < 0:
+			_give_joy(r, device)
+			return
+	# Same as before for the first two pads: they belong to P2 (and P3 on the TV / the button chef).
+	if players[1].joy < 0 and drop_in_allowed():
+		_give_joy(players[1], device)
+	elif net.mode == "client" and players[2].joy < 0 and players[2].lost_joy < 0:
+		players[2].joy = device
+	elif net.mode == "local" and not players[0].vr and players[0].joy < 0:
+		players[0].joy = device
+	elif net.mode == "host" and not players[0].vr and players[0].joy < 0:
+		players[0].joy = device
+
+
+func _give_joy(p, device: int) -> void:
+	p.joy = device
+	p.lost_joy = -1
+	p.lost_t = 0.0
+	print("Joypad %d now drives player %d" % [device, p.index + 1])
+	if not p.active:
+		request_join(p.index)
+
+
+## Called by the JoinInput node for every input event. True = consumed (a controller just joined).
+func on_join_input(event: InputEvent) -> bool:
+	var b := event as InputEventJoypadButton
+	if b == null or not b.pressed or not drop_in_allowed() or game_over or get_tree().paused:
+		return false
+	if b.button_index != JOY_BUTTON_A and b.button_index != JOY_BUTTON_START:
+		return false
+	if _owner_of_joy(b.device) != null:
+		return false
+	var target = null
+	for i in range(1, players.size()):  # a player waiting for its unplugged controller
+		if players[i].lost_joy >= 0 and players[i].joy < 0:
+			target = players[i]
+			break
+	if target == null and players[1].joy < 0:
+		target = players[1]
+	if target == null and net.mode == "local" and players[0].joy < 0:
+		players[0].joy = b.device
+		print("Joypad %d now drives the button chef" % b.device)
+		return true
+	if target == null:
+		for i in range(2, players.size()):
+			if players[i].joy < 0 and not players[i].active:
+				target = players[i]
+				break
+	if target == null:
+		return false
+	_give_joy(target, b.device)
+	return true
+
+
+## A local player wants in: the host decides (networked), or just let them in (split screen).
+func request_join(i: int) -> void:
+	if i < 1 or i >= players.size() or players[i].active:
+		return
+	if net.mode == "client":
+		if join_cd.get(i, 0.0) > 0.0:
+			return
+		join_cd[i] = 1.0
+		net.send_action("join", [], i)
+	else:
+		_set_runner_active(players[i], true)
+
+
+func request_leave(i: int) -> void:
+	if i < 1 or i >= players.size() or not players[i].active:
+		return
+	if net.mode == "client":
+		net.send_action("leave", [], i)
+	else:
+		_set_runner_active(players[i], false)
+
+
+## Host / split screen: a runner joins or leaves the kitchen.
+func _set_runner_active(p, on: bool) -> void:
+	if p.active == on:
+		return
+	if not on:
+		_drop_carry(p)
+	p.set_active(on)
+	if on:
+		p.global_position = runner_spawn(p.index)
+		p.net_target = p.global_position
+		p.yaw = PI
+	var n := active_runners()
+	if on:
+		banner("P%d JOINED THE KITCHEN!  (%d runners)" % [p.index + 1, n], 1.5)
+		sound("wave", -6.0, 1.3)
+	else:
+		banner("P%d left the kitchen  (%d runners)" % [p.index + 1, n], 1.5)
+	print("Net: player %d %s (%d runners)" % [p.index + 1, "joined" if on else "left", n])
+	if not p.remote:
+		on_player_activity_changed(p)
+
+
+## A leaving runner puts down what they carry: plates go back to a counter corner, the extinguisher home.
+func _drop_carry(p) -> void:
+	if p.carry_kind == "extinguisher":
+		ext_holder = -1
+	var it = p.carry
+	if it != null and is_instance_valid(it):
+		if it.is_plate():
+			it.holder = -1
+			it.global_position = L.OUT_SLOTS[0]
+			for sl in L.OUT_SLOTS:
+				if item_at(sl, 0.18) == null:
+					it.global_position = sl
+					break
+		else:
+			remove_item(it)
+	p.carry = null
+	p.carry_kind = ""
+
+
+func active_runners() -> int:
+	var n := 0
+	for i in range(1, players.size()):
+		if players[i].active:
+			n += 1
+	return maxi(n, 1)
+
+
+## Tests: make TV player `index` join as if they pressed A.
+func debug_join(index: int) -> void:
+	_ensure_runners(net.mode)
+	if net.mode == "host":
+		_set_runner_active(players[index], true)
+	else:
+		request_join(index)
 
 
 func on_player_activity_changed(p) -> void:
+	if p.active and _wants_view(p):
+		_ensure_view(p)
+	if p.active and not p.remote and p.index >= 1 and net.mode == "client":
+		p.global_position = runner_spawn(p.index)
+		p.yaw = PI
 	if p.has_meta("view"):
-		p.get_meta("view").visible = p.active
+		_layout_views()
 	print("Player %d is now %s" % [p.index + 1, "playing" if p.active else "waiting"])
+
+
+## Client / split screen: waiting players with their own controls join by pressing their button;
+## a runner whose controller was unplugged for a while leaves (it rejoins when plugged back in).
+func _drop_in_update(delta: float) -> void:
+	for k in join_cd.keys():
+		join_cd[k] = float(join_cd[k]) - delta
+	if not drop_in_allowed() or game_over or get_tree().paused:
+		return
+	for i in range(1, players.size()):
+		var p = players[i]
+		if not p.active and (p.joy >= 0 or p.key_set >= 0) and p.any_input():
+			request_join(i)
+		if p.lost_joy >= 0 and p.joy < 0:
+			p.lost_t += delta
+			if p.active and p.key_set < 0 and p.lost_t > LEAVE_AFTER_UNPLUG:
+				p.lost_t = -INF
+				request_leave(i)
 
 
 # --- Fire, extinguisher, ticket rail ----------------------------------------------
@@ -663,6 +981,16 @@ func _process(delta: float) -> void:
 				c.position.y = L.COUNTER_TOP + 0.012
 				c.rotation = Vector3(-PI / 2.0, 0.0, 0.0)
 	clock += delta
+	if players.size() <= MAX_RUNNERS:
+		_ensure_runners(net.mode)
+	if get_node_or_null("JoinInput") == null:
+		var ji := JoinInputScript.new()
+		ji.name = "JoinInput"
+		ji.main = self
+		add_child(ji)
+	_update_bubble()
+	if net.mode != "host":
+		_drop_in_update(delta)
 	if music == null:
 		music = MusicScript.new()
 		add_child(music)
@@ -679,7 +1007,6 @@ func _process(delta: float) -> void:
 			mirror_vp.render_target_update_mode = SubViewport.UPDATE_ONCE
 	_update_hud()
 	if net.mode == "client":
-		_check_join()
 		if game_over:
 			game_over_t += delta
 			if game_over_t > 1.5 and _restart_pressed():
@@ -721,18 +1048,28 @@ func _host_update(delta: float) -> void:
 				_start_fire()
 		raccoon_t -= delta
 		if raccoon_t <= 0.0 and not raccoon.active():
-			raccoon_t = randf_range(30.0, 50.0) - shift * 2.0
+			raccoon_t = (randf_range(30.0, 50.0) - shift * 2.0) / _chaos_scale()
 			raccoon.start()
 			banner("A cheeky RACCOON is sneaking in!\nRunners: bump into it to scare it off!", 2.5)
 			sound("spit", 0.0, 0.7)
 
 
+## Extra runners beyond two make the kitchen busier (the chef is still the bottleneck, so only modestly).
+func _extra_runners() -> int:
+	return maxi(0, active_runners() - 2)
+
+
 func shift_target() -> int:
-	return 2 + shift * 2
+	return 2 + shift * 2 + int((_extra_runners() + 1) / 2.0)
 
 
 func _spawn_interval() -> float:
-	return maxf(5.0, 15.0 - shift * 2.0)
+	return maxf(4.0, (15.0 - shift * 2.0) / (1.0 + 0.1 * _extra_runners()))
+
+
+## More hands, more trouble: fires burn hotter and come back sooner.
+func _chaos_scale() -> float:
+	return 1.0 + 0.12 * _extra_runners()
 
 
 func _patience() -> float:
@@ -755,14 +1092,16 @@ func _start_shift() -> void:
 	served_shift = 0
 	in_break = false
 	spawn_t = 0.5
-	fire_t = randf_range(25.0, 40.0)
-	raccoon_t = randf_range(15.0, 30.0)
+	fire_t = randf_range(25.0, 40.0) / _chaos_scale()
+	raccoon_t = randf_range(15.0, 30.0) / _chaos_scale()
 	print("Shift %d started" % shift)
 	var extra := ""
 	if shift - 1 < UNLOCKS.size() and shift > 1:
 		extra = "\nNEW RECIPE: " + ", ".join(PackedStringArray(UNLOCKS[shift - 1]))
 	if shift == 2:
 		extra += "\nWatch out for fires and raccoons!"
+	if active_runners() > 2:
+		extra += "\n%d runners: busier kitchen!" % active_runners()
 	banner("SHIFT %d\nServe %d orders!%s" % [shift, shift_target(), extra], 2.5)
 	sound("wave")
 
@@ -1255,7 +1594,7 @@ func _serve(p, cust) -> void:
 
 func _start_fire() -> void:
 	fire_on = true
-	fire_hp = 3
+	fire_hp = 3 + int((_extra_runners() + 1) / 2.0)
 	print("Fire on the stove!")
 	sound("big_kill", -2.0, 0.8)
 	banner("FIRE ON THE STOVE!\nRunners: grab the extinguisher and spray it!\n(The chef can't chop in the smoke)", 3.0)
@@ -1270,7 +1609,7 @@ func _spray(p) -> void:
 		ext_holder = -1
 		p.carry_kind = ""
 		coins += 5
-		fire_t = randf_range(35.0, 55.0) - shift * 2.0
+		fire_t = (randf_range(35.0, 55.0) - shift * 2.0) / _chaos_scale()
 		print("Fire is out")
 		popup(L.STOVE + Vector3.UP * 1.6, "FIRE OUT!  +5", Color(0.6, 0.9, 1.0))
 		sound("revive")
@@ -1310,31 +1649,27 @@ func on_client_joined() -> void:
 
 
 func on_client_left() -> void:
+	# The TV machine reloads when it reconnects: its extra players will press to join again.
+	for i in range(2, players.size()):
+		if players[i].active:
+			_drop_carry(players[i])
+			players[i].set_active(false)
 	banner("The TV players left - waiting for them to rejoin…", 0.0)
 
 
-## Client: player 3 joins by pressing their button.
-var join_t := 0.0
-func _check_join() -> void:
-	join_t -= get_process_delta_time()
-	if players.size() < 3 or players[2].active or join_t > 0.0 or game_over:
-		return
-	if players[2].any_input():
-		join_t = 1.0
-		net.send_action("join", [], 2)
-
-
 func on_p2_action(action: String, args: Array, index: int = 1) -> void:
+	if index < 1 or index > MAX_RUNNERS:
+		return
+	_ensure_runners(net.mode)
 	var p = players[index]
 	match action:
 		"use":
 			runner_use(p)
 		"join":
-			if not p.active:
-				p.set_active(true)
-				p.global_position = L.RUNNER_SPAWN[1]
-				banner("PLAYER %d JOINED THE KITCHEN!" % (index + 1), 1.5)
-				print("Net: player %d joined" % (index + 1))
+			_set_runner_active(p, true)
+		"leave":
+			if index >= 2:
+				_set_runner_active(p, false)
 		"restart":
 			if game_over:
 				get_tree().reload_current_scene()
