@@ -1445,3 +1445,7 @@ func _update_hud() -> void:
 	var n := active_knight_count()
 	if n > 2:
 		info_label.text += "      KNIGHTS %d" % n
+
+
+func _exit_tree() -> void:
+	XRServer.world_scale = 1.0  # XR world scale is global: don't leave other games giant-sized

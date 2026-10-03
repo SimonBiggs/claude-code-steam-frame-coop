@@ -42,6 +42,7 @@ var starting := false
 
 
 func _ready() -> void:
+	XRServer.world_scale = 1.0  # a game (Giant's Table) may have left the world scaled up
 	var wanted := OS.get_environment("ARCADE_GAME") if OS.has_environment("ARCADE_GAME") else ""
 	if wanted != "" or GAMES.size() == 1:
 		_launch(_index_of(wanted))

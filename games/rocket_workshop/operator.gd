@@ -104,6 +104,10 @@ func _process(delta: float) -> void:
 
 
 func _vr_update(delta: float) -> void:
+	if xr_origin.world_scale != 1.0:  # Giant's Table leaves XR world scale at 20 (it's global)
+		xr_origin.world_scale = 1.0
+		recentered = false
+		recenter_t = 0.3
 	if not recentered:
 		recenter_t -= delta
 		if recenter_t <= 0.0 and xr_camera.position != Vector3.ZERO:
