@@ -246,7 +246,7 @@ func _try_throw() -> void:
 	if aim.distance_to(global_position) > 24.0:
 		throw_cd = 1.0
 		return
-	throw_cd = float(d.throw_cd) * randf_range(0.8, 1.25)
+	throw_cd = float(d.throw_cd) * randf_range(1.1, 1.6)  # family feedback: fewer incoming snowballs
 	squash = -0.6  # wind-up stretch
 	var from := global_position + Vector3(0, (lift + 1.3) * s, 0) + Basis(Vector3.UP, rotation.y) * Vector3(0.4 * s, 0, -0.3 * s)
 	var count: int = d.get("volley", 1)
