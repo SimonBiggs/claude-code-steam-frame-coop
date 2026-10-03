@@ -528,9 +528,6 @@ func _vr_update(_delta: float) -> void:
 	_ensure_shield()
 	_ensure_wrist_radar()
 	yaw = xr_camera.global_rotation.y
-	if Time.get_ticks_msec() - int(get_meta("dbg_t", 0)) > 2000:
-		set_meta("dbg_t", Time.get_ticks_msec())
-		print("VRDBG head_local=%s origin=%s" % [xr_camera.position, xr_origin.global_position])
 	# Keep the body under the headset when the player walks around the room.
 	var head := xr_camera.global_position
 	var target := Vector3(head.x, 0.0, head.z)
