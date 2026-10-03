@@ -14,6 +14,17 @@ const PauseMenuScript := preload("res://core/pause_menu.gd")
 const NetScript := preload("res://core/net.gd")
 const MusicScript := preload("res://core/music.gd")
 const JoinInputScript := preload("res://games/ghost_lantern/join_input.gd")
+const DirectorScript := preload("res://games/ghost_lantern/director.gd")
+
+## Survive night 6 to see the sunrise (then bonus nights). Nights 3 and 6 bring the GHOST KING.
+const FINAL_NIGHT := 6
+const EXTRA_SOUNDS := {
+	"thunder": [1.3, 90.0, 28.0, 0.6, "saw", 0.92],
+	"puff": [0.35, 900.0, 200.0, 0.3, "sine", 0.85],
+	"giggle": [0.25, 900.0, 1400.0, 0.2, "tri", 0.1],
+	"fanfare": [1.6, 392.0, 1568.0, 0.4, "tri", 0.0],
+	"crown": [0.5, 1200.0, 300.0, 0.3, "square", 0.2],
+}
 
 ## P1 (lantern) + up to six TV ghost hunters P2..P7.
 const MAX_PLAYERS := 7
@@ -53,6 +64,9 @@ uniform float cos_outer = 0.93;
 uniform float cos_inner = 0.95;
 uniform float range = 11.0;
 uniform float lantern_on = 1.0;
+uniform float focus_on = 0.0;
+uniform float flash_all = 0.0;
+instance uniform float shy = 0.0;
 varying vec3 wpos;
 void vertex() { wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; }
 void fragment() {
@@ -62,7 +76,8 @@ void fragment() {
 	float r = smoothstep(cos_outer, cos_inner, c) * (1.0 - smoothstep(range * 0.75, range, d)) * lantern_on;
 	float rim = pow(1.0 - abs(dot(NORMAL, VIEW)), 2.0);
 	ALBEDO = color * (1.0 + flash) + vec3(0.5, 0.8, 0.6) * rim * 0.5;
-	ALPHA = clamp(r * (0.8 + 0.3 * rim), 0.0, 1.0);
+	float lit = r * (0.8 + 0.3 * rim) * mix(1.0, focus_on, shy);
+	ALPHA = clamp(max(lit, flash_all * 0.85), 0.0, 1.0);
 }
 """
 const PHOTO_SHADER := """
@@ -107,6 +122,10 @@ var candles: Array = []
 var anims: Array = []
 var anim_t := 0.0
 var _ghost_mat: ShaderMaterial
+var storm_flash := 0.0  # lightning: every ghost shows for a moment (0..1)
+var dir_node: Node
+var world_refs := {}
+var king_t := -1.0  # host: seconds until the Ghost King arrives tonight
 
 var night := 0
 var score := 0
@@ -138,6 +157,7 @@ func _ready() -> void:
 	var built: Dictionary = WorldScript.build(self)
 	candles = built.candles
 	anims = built.anim
+	world_refs = built
 	_build_photos()
 	_build_hud()
 	var menu := PauseMenuScript.new()
@@ -204,7 +224,19 @@ func local_sound(sound_name: String, volume_db: float = 0.0, pitch: float = 1.0)
 	if sfx == null:
 		sfx = SfxScript.new()
 		add_child(sfx)
+	if not sfx.has_meta("gl_sounds") and sfx.has_method("add_sound"):
+		sfx.set_meta("gl_sounds", true)
+		for k in EXTRA_SOUNDS:
+			sfx.add_sound(k, EXTRA_SOUNDS[k])
 	sfx.play(sound_name, volume_db, pitch)
+
+
+func director() -> Node:
+	if dir_node == null or not is_instance_valid(dir_node):
+		dir_node = DirectorScript.new()
+		dir_node.main = self
+		add_child(dir_node)
+	return dir_node
 
 
 func sound(sound_name: String, volume_db: float = 0.0, pitch: float = 1.0) -> void:
@@ -391,6 +423,25 @@ func _build_views(mode: String) -> void:
 		right.tracker = "right_hand"
 		right.pose = "aim"
 		origin.add_child(right)
+		players[0].attach_xr(origin, cam, left, right)
+		_build_vr_mirror(cam)
+	elif OS.has_environment("BOT_VR") and mode != "client":
+		# Test bots: the real VR code with XR nodes the bot moves by hand (no headset).
+		print("BOT_VR: fake VR lantern-bearer")
+		var origin := XROrigin3D.new()
+		add_child(origin)
+		origin.global_position = players[0].global_position
+		var cam := XRCamera3D.new()
+		origin.add_child(cam)
+		cam.position = Vector3(0.0, 1.5, 0.0)
+		var left := XRController3D.new()
+		left.tracker = "left_hand"
+		origin.add_child(left)
+		left.position = Vector3(-0.25, 1.1, -0.3)
+		var right := XRController3D.new()
+		right.tracker = "right_hand"
+		origin.add_child(right)
+		right.position = Vector3(0.25, 1.2, -0.35)
 		players[0].attach_xr(origin, cam, left, right)
 		_build_vr_mirror(cam)
 	else:
@@ -639,6 +690,37 @@ func request_join(i: int) -> void:
 		_activate_player(i)
 
 
+## Test hooks: spawn a ghost kind, start an event, jump to a night, lose every photo on the walls.
+func debug_spawn(kind: String):
+	if net.mode == "client":
+		return null
+	return ensure_king() if kind == "king" else _spawn_ghost(kind)
+
+
+func debug_event(ev: String) -> void:
+	director().start_event(ev)
+
+
+func debug_skip_to_night(n: int) -> void:
+	if net.mode == "client":
+		return
+	for g in get_tree().get_nodes_in_group("ghosts"):
+		_remove_ghost(g)
+	to_spawn = []
+	king_t = -1.0
+	night = n - 1
+	in_break = true
+	break_timer = 0.5
+
+
+func debug_lose_photos() -> void:
+	for g in get_tree().get_nodes_in_group("ghosts"):
+		g.carrying = -1
+		g.carried.clear()
+	for i in photos.size():
+		_set_photo_state(i, -2)
+
+
 ## Test hook: join TV player `index` programmatically (the bot drives it directly).
 func debug_join(index: int) -> void:
 	if index <= 0 or index >= players.size():
@@ -802,6 +884,8 @@ func _update_ghost_material() -> void:
 	m.set_shader_parameter("cos_inner", cos(deg_to_rad(ang - 5.0)))
 	m.set_shader_parameter("range", lantern_range())
 	m.set_shader_parameter("lantern_on", 1.0 if players.size() > 0 and players[0].lantern_lit() else 0.0)
+	m.set_shader_parameter("focus_on", 1.0 if players.size() > 0 and players[0].focus else 0.0)
+	m.set_shader_parameter("flash_all", storm_flash)
 
 
 ## Host: the lantern-bearer rang the hand bell: nearby ghosts flee and drop their photos.
@@ -815,6 +899,8 @@ func ring_bell(p, pos: Vector3) -> void:
 		if g.global_position.distance_to(pos) < BELL_RADIUS:
 			g.scare(pos)
 			scared += 1
+	if scared > 0:
+		director().add_stat(p, "bells", 1)
 	print("Bell rung by P%d: %d ghosts scared" % [p.index + 1, scared])
 
 
@@ -869,7 +955,15 @@ func capture_ghost(g, by) -> void:
 		return
 	caught += 1
 	score += g.points
-	g.drop_photo()
+	director().add_stat(by, "caught", 1)
+	g.drop_photo(by)
+	if g.kind == "king":
+		director().on_king_caught()
+		_show_center("YOU CAUGHT THE GHOST KING!", 2.5)
+		sound("fanfare", 0.0)
+		burst(g.global_position, Color(1.0, 0.85, 0.3), 40, 0.1)
+	elif g.kind == "golden":
+		burst(g.global_position, Color(1.0, 0.85, 0.3), 30, 0.08)
 	var nozzle: Vector3 = by.nozzle_pos() if by != null else g.global_position
 	capture_fx(g.global_position, nozzle, g.color)
 	net.event("capture", [g.global_position, nozzle, g.color])
@@ -888,7 +982,7 @@ func _remove_ghost(g) -> void:
 
 # --- Ghosts & photos (host) --------------------------------------------------
 
-func _spawn_ghost(kind: String) -> void:
+func _spawn_ghost(kind: String):
 	var g := GhostScript.new()
 	g.setup(kind, night, self)
 	g.net_id = next_net_id()
@@ -910,6 +1004,58 @@ func _spawn_ghost(kind: String) -> void:
 	g.position = pos
 	add_child(g)
 	ghost_by_id[g.net_id] = g
+	director().on_ghost_spawned(kind)
+	return g
+
+
+## The Ghost King (one at a time): arrives through the ceiling of a random room.
+func ensure_king():
+	for g in get_tree().get_nodes_in_group("ghosts"):
+		if g.kind == "king":
+			return g
+	var g = _spawn_ghost("king")
+	g.position = Vector3([-14.0, 0.0, 14.0].pick_random(), 4.5, randf_range(-3.0, 3.0))
+	_show_center("THE GHOST KING IS HERE!", 2.2)
+	sound("crown", 0.0, 0.8)
+	sound("gameover", -8.0, 1.6)
+	print("Ghost King arrives")
+	return g
+
+
+## Lost photos go to the Ghost King: catch him to win them back.
+func give_king_lost_photos(king) -> void:
+	var n := 0
+	for i in photos.size():
+		if photos[i].state == -2:
+			king.carried.append(i)
+			_set_photo_state(i, king.net_id)
+			n += 1
+	if n > 0:
+		popup(king.global_position + Vector3.UP * 1.5, "HE HAS %d PHOTO%s!" % [n, "" if n == 1 else "S"], Color(1.0, 0.85, 0.4))
+
+
+## The king calls two little thieves to help him.
+func king_summon(king) -> void:
+	if ghost_by_id.size() >= 10:
+		return
+	for i in 2:
+		var g = _spawn_ghost("thief")
+		g.position = king.global_position + Vector3(randf_range(-1.5, 1.5), 0.3, randf_range(-1.5, 1.5))
+	popup(king.global_position + Vector3.UP * 2.2, "MY FRIENDS, HELP!", Color(0.8, 0.9, 1.0))
+	sound("giggle", -2.0, 0.8)
+
+
+## A snuffer reached the lantern: it goes dark for a few seconds.
+func snuff_lantern(g) -> void:
+	var p = players[0]
+	p.snuff_t = 4.0
+	popup(p.global_position + Vector3.UP * 2.2, "PFFF! LANTERN OUT!", Color(1.0, 0.7, 0.4))
+	burst(p.global_position + Vector3.UP * 1.4, Color(0.6, 0.6, 0.7), 14, 0.1)
+	sound("puff", 0.0)
+	director().hint("A SNUFFER blew out the lantern! TV players: vacuum the floating brass hats before they reach it!", 5.0, "snuffed")
+	if p.vr:
+		p.hand_r.trigger_haptic_pulse("haptic", 0.0, 0.7, 0.2, 0.0)
+	print("Lantern snuffed by ghost %d" % g.net_id)
 
 
 func photos_left() -> int:
@@ -926,7 +1072,7 @@ func photo_available(i: int, g) -> bool:
 
 func _photo_claimer(i: int, except):
 	for o in get_tree().get_nodes_in_group("ghosts"):
-		if o != except and o.kind == "thief" and o.target_photo == i and o.carrying < 0:
+		if o != except and o.kind in GhostScript.STEALERS and o.target_photo == i and o.carrying < 0:
 			return o
 	return null
 
@@ -957,12 +1103,13 @@ func grab_photo(g, i: int) -> void:
 
 
 ## A photo was knocked out of a ghost's hands: it floats back to its wall.
-func return_photo(i: int, rescued: bool) -> void:
-	if photos[i].state < 0:
+func return_photo(i: int, rescued: bool, by = null) -> void:
+	if i < 0 or i >= photos.size() or photos[i].state < 0:
 		return
 	_set_photo_state(i, -1)
 	if rescued:
 		saved += 1
+		director().add_stat(by, "saved", 1)
 		score += 50
 		popup(photos[i].node.global_position + Vector3.UP * 0.5, "PHOTO SAVED!", Color(1.0, 0.9, 0.5))
 		sound("pickup", -4.0, 1.0)
@@ -970,22 +1117,29 @@ func return_photo(i: int, rescued: bool) -> void:
 
 func ghost_escaped(g) -> void:
 	var i: int = g.carrying
+	if g.kind == "golden":
+		_show_center("The golden ghost got away!", 1.5)
 	if i >= 0:
 		_set_photo_state(i, -2)
 		sound("gameover", -10.0, 2.2)
 		var left := photos_left()
 		_show_center("A ghost escaped with a photo!\n%d photos left" % left, 2.0)
+		if left <= 3 and left > 0:
+			director().hint("Only %d photos left! The GHOST KING keeps lost photos - catch him to get them back!" % left, 5.0, "low_photos")
 		print("Photo %d lost (%d left)" % [i, left])
 	_remove_ghost(g)
 
 
 func spook_player(p, g) -> void:
-	p.spook(SPOOK_AMOUNT, g.global_position)
+	if p.invuln_t <= 0.0 and not p.is_down:
+		director().add_stat(p, "spooked", 1)
+	p.spook(SPOOK_AMOUNT * (1.3 if g.get("kind") == "king" else 1.0), g.global_position)
 	popup(p.global_position + Vector3.UP * 2.0, "BOO!", g.color)
 	sound("spit", -2.0, 0.7)
 
 
 func on_ghost_stunned(g) -> void:
+	director().add_stat(players[0], "stuns", 1)
 	popup(g.global_position + Vector3.UP * 0.8, "STUNNED!", Color(1.0, 0.95, 0.4))
 	sound("hit", -2.0, 0.5)
 	if players[0].vr:
@@ -997,6 +1151,8 @@ func _set_photo_state(i: int, s: int) -> void:
 	var old: int = ph.state
 	ph.state = s
 	var node: Node3D = ph.node
+	if s >= 0:
+		node.visible = true  # carried (also: a lost photo the Ghost King brings back)
 	if s == -2:
 		node.visible = false
 	elif s == -1 and old >= 0:
@@ -1058,6 +1214,17 @@ func _update_photos(delta: float) -> void:
 			continue
 		var node: Node3D = ph.node
 		var target: Vector3 = g.global_position + Vector3(0, -0.45, 0) + g.body.global_basis.z * -0.3
+		if g.kind == "king":
+			# The king's photos circle around him.
+			var k := 0
+			var n := 0
+			for other in photos:
+				if other.state == s:
+					if other == ph:
+						k = n
+					n += 1
+			var a := TAU * k / maxf(n, 1.0) + anim_t * 1.2
+			target = g.global_position + Vector3(cos(a) * 1.5, 0.1 + sin(anim_t * 2.0 + k) * 0.2, sin(a) * 1.5)
 		node.global_position = node.global_position.lerp(target, 1.0 - exp(-10.0 * delta))
 		node.rotation.y += delta * 1.5
 		node.rotation.z = sin(anim_t * 4.0) * 0.2
@@ -1077,7 +1244,10 @@ func _process(delta: float) -> void:
 		add_child(music)
 		music.volume_db = -16.0
 	if music.has_method("play_track"):
-		music.play_track(MUSIC_TRACK)
+		var d := director()
+		music.play_track(1 if d.event_name == "party" else (0 if d.dawn > 0.5 else MUSIC_TRACK))
+	director().tick(delta)
+	_update_mood()
 	if ghost_cam:
 		ghost_cam.global_transform = players[0].net_head
 	if mirror_vp:
@@ -1102,9 +1272,17 @@ func _process(delta: float) -> void:
 			_restart()
 		return
 	if net.mode == "host" and not net.connected:
+		if night == 0:
+			director().howto()  # the lantern-bearer reads how to play while waiting
 		return  # hold the nights until a TV player joins
 	_update_vacuums(delta)
+	if king_t > 0.0:
+		king_t -= delta
+		if king_t <= 0.0:
+			give_king_lost_photos(ensure_king())
 	if in_break:
+		if night == 0:
+			director().howto()
 		break_timer -= delta
 		if break_timer <= 0.0:
 			_start_night()
@@ -1113,16 +1291,18 @@ func _process(delta: float) -> void:
 		if spawn_timer <= 0.0 and ghost_by_id.size() < 3 + night + (crowd_bonus() + 1) / 2:
 			_spawn_ghost(to_spawn.pop_back())
 			spawn_timer = maxf(0.8, 3.0 - night * 0.25 - crowd_bonus() * 0.15)
-	elif ghost_by_id.is_empty():
+	elif ghost_by_id.is_empty() and king_t <= 0.0:
 		_end_night()
 	var all_down := true
 	for p in players:
 		if p.active and not p.is_down:
 			all_down = false
 	if all_down:
-		_on_game_over("Everyone got too spooked!")
+		if not director().try_relight():
+			_on_game_over("Everyone got too spooked!")
 	elif photos_left() == 0:
-		_on_game_over("The ghosts took every photo!")
+		if not director().try_last_chance():
+			_on_game_over("The ghosts took every photo!")
 
 
 func _animate_world(_delta: float) -> void:
@@ -1143,6 +1323,24 @@ func _animate_world(_delta: float) -> void:
 				n.rotation.z = sin(anim_t * 0.7) * 0.04
 			"flame":
 				n.scale = Vector3(1.0, 1.0 + 0.25 * sin(anim_t * 9.0), 1.0)
+			"float", "spider":
+				if not n.has_meta("base"):
+					n.set_meta("base", n.position)
+				var base: Vector3 = n.get_meta("base")
+				var ph: float = n.get_meta("phase", 0.0)
+				if a[1] == "float":
+					n.position = base + Vector3(0, sin(anim_t * 1.3 + ph) * 0.15, 0)
+					n.rotation = Vector3(sin(anim_t * 0.9 + ph) * 0.25, anim_t * 0.4 + ph, cos(anim_t * 0.7 + ph) * 0.2)
+				else:
+					n.position = base + Vector3(0, sin(anim_t * 0.8) * 0.45 - 0.2, 0)
+			"pupil":
+				var who = nearest_player(n.global_position)
+				if who != null:
+					var par := n.get_parent() as Node3D
+					var local: Vector3 = par.global_transform.affine_inverse() * (who.global_position + Vector3.UP * 1.4)
+					var d2 := Vector2(local.x, local.y).limit_length(1.0) * 0.6
+					var home: Vector3 = n.get_meta("home", Vector3.ZERO)
+					n.position = n.position.lerp(home + Vector3(d2.x, d2.y, 0.0) * 0.04, 0.2)
 
 
 func _start_night() -> void:
@@ -1156,14 +1354,31 @@ func _start_night() -> void:
 		to_spawn.append("spooker")
 	for i in maxi(0, night - 2):
 		to_spawn.append("sprite")
+	if night >= 2:
+		for i in 1 + (night - 2) / 2:
+			to_spawn.append("shy")
+		to_spawn.append("golden")
+	if night >= 3:
+		for i in 1 + (night - 3) / 3:
+			to_spawn.append("snuffer")
 	to_spawn.shuffle()
 	spawn_timer = 1.0
+	var king_night := night % 3 == 0
+	king_t = 7.0 if king_night else -1.0
+	director().on_night_started(night, king_night)
 	sound("wave", -2.0, 0.7)
-	print("Night %d started (%d ghosts)" % [night, to_spawn.size()])
+	print("Night %d started (%d ghosts%s)" % [night, to_spawn.size(), ", KING" if king_night else ""])
+	var of := (" of %d" % FINAL_NIGHT) if night <= FINAL_NIGHT and not director().won else ""
 	if night == 1:
-		_show_center("NIGHT 1\nThe ghosts are coming for the family photos!", 2.5)
+		_show_center("NIGHT 1%s\nThe ghosts are coming for the family photos!" % of, 2.5)
+	elif night == FINAL_NIGHT and not director().won:
+		_show_center("THE LAST NIGHT!\nSurvive until sunrise!", 2.5)
+	elif king_night:
+		_show_center("NIGHT %d%s\nThe GHOST KING is coming…" % [night, of], 2.5)
+	elif night > FINAL_NIGHT:
+		_show_center("BONUS NIGHT %d\n%d ghosts tonight" % [night, to_spawn.size()], 2.0)
 	else:
-		_show_center("NIGHT %d\n%d ghosts tonight" % [night, to_spawn.size()], 2.0)
+		_show_center("NIGHT %d%s\n%d ghosts tonight" % [night, of, to_spawn.size()], 2.0)
 
 
 ## Extra hunters beyond the classic three (P1 + two TV players) bring a few extra ghosts each night.
@@ -1182,8 +1397,17 @@ func _end_night() -> void:
 			p.revive(0.6)
 		else:
 			p.courage = minf(p.MAX_COURAGE, p.courage + 30.0)
-	sound("clear", -2.0, 0.8)
+	director().on_night_ended()
 	print("Night %d survived (score %d, caught %d, saved %d)" % [night, score, caught, saved])
+	if night == FINAL_NIGHT and not director().won:
+		director().won = true
+		break_timer = 14.0
+		score += 1000
+		sound("fanfare", 0.0)
+		print("DAWN: the family survived the last night (score %d)" % score)
+		_show_center("THE SUN IS UP!\nThe mansion is safe - you did it!\n+1000  ·  %d photos saved\n\n%s\n\nBonus nights next…" % [photos_left(), director().awards_text()], 13.0)
+		return
+	sound("clear", -2.0, 0.8)
 	_show_center("NIGHT %d SURVIVED!\n+%d bonus  ·  %d photos still safe" % [night, 100 * night, photos_left()], 3.0)
 
 
@@ -1201,7 +1425,8 @@ func _on_game_over(reason: String) -> void:
 		cfg.set_value("best", "score", score)
 		cfg.set_value("best", "night", night)
 		cfg.save(BEST_FILE)
-	_show_center("%s\nNight %d  ·  Score %d\nGhosts caught %d  ·  Photos saved %d\n%s\n\nPress A or Enter to play again" % [reason, night, score, caught, saved, best_line], 0.0)
+	var dawn_line := "You saw the sunrise!  ·  " if director().won else ""
+	_show_center("%s\nNight %d  ·  Score %d\n%sGhosts caught %d  ·  Photos saved %d\n%s\n\n%s\n\nPress A or Enter to play again" % [reason, night, score, dawn_line, caught, saved, best_line, director().awards_text()], 0.0)
 
 
 func _restart_pressed() -> bool:
@@ -1355,7 +1580,7 @@ func make_snapshot() -> Array:
 	var ph := []
 	for p in photos:
 		ph.append(p.state)
-	return [night, score, caught, saved, game_over, ps, gs, ph, in_break]
+	return [night, score, caught, saved, game_over, ps, gs, ph, in_break, director().pack()]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -1376,6 +1601,8 @@ func apply_snapshot(s: Array) -> void:
 	for i in mini(ph.size(), photos.size()):
 		if photos[i].state != ph[i]:
 			_set_photo_state(i, ph[i])
+	if s.size() > 9:
+		director().unpack(s[9])
 
 
 func _sync_ghosts(list: Array) -> void:
@@ -1425,6 +1652,29 @@ func apply_event(kind: String, args: Array) -> void:
 			var i: int = args[0]
 			if i < players.size():
 				players[i].on_remote_hurt(args[1])
+		"hint", "lightning":
+			director().client_event(kind, args)
+
+
+## Lightning flashes, party lights and the sunrise (both machines).
+func _update_mood() -> void:
+	var d := director()
+	var e: Environment = world_refs.get("env", null)
+	if e != null:
+		var night_bg := Color(0.02, 0.01, 0.04)
+		var dawn_bg := Color(0.95, 0.6, 0.45)
+		e.background_color = night_bg.lerp(dawn_bg, d.dawn)
+		e.ambient_light_color = Color(0.42, 0.32, 0.6).lerp(Color(1.0, 0.82, 0.65), d.dawn)
+		e.ambient_light_energy = 0.55 + d.dawn * 0.6 + storm_flash * 1.4
+	var pane: StandardMaterial3D = world_refs.get("pane", null)
+	if pane != null:
+		var c := Color(0.55, 0.65, 1.0).lerp(Color(1.0, 0.65, 0.35), d.dawn)
+		pane.albedo_color = c
+		pane.emission = c.lerp(Color.WHITE, storm_flash)
+		pane.emission_energy_multiplier = 1.6 + storm_flash * 8.0 + d.dawn * 1.5
+	var ch: OmniLight3D = world_refs.get("chandelier", null)
+	if ch != null and is_instance_valid(ch):
+		ch.light_color = Color.from_hsv(fmod(anim_t * 0.5, 1.0), 0.6, 1.0) if d.event_name == "party" else Color(1.0, 0.72, 0.4)
 
 
 # --- HUD ---------------------------------------------------------------------
@@ -1461,13 +1711,14 @@ func _build_hud() -> void:
 	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	help_label.text = "Lantern (P1): WASD + mouse · Space/click focus · E/right click bell  |  " \
 		+ "Vacuums: stick/WASD move · RT / Space / Enter suck  ·  Start/Esc menu  ·  spare pad: A to join\n" \
-		+ "Ghosts only show up in the lantern light! Stand next to a spooked friend to cheer them up."
+		+ "Ghosts only show up in the lantern light! Survive %d nights to see the sunrise." % FINAL_NIGHT
 
 
 func _show_center(text: String, duration: float, broadcast: bool = true) -> void:
 	if net and broadcast:
 		net.event("center", [text, duration])
 	center_label.text = text
+	center_label.add_theme_font_size_override("font_size", 56 if text.count("\n") < 6 else 36)
 	center_label.modulate.a = 1.0
 	if center_tween:
 		center_tween.kill()
@@ -1508,4 +1759,8 @@ func _update_hud() -> void:
 	if net.mode == "client" and not synced:
 		info_label.text = "Syncing with the lantern-bearer…"
 		return
-	info_label.text = "NIGHT %d   ·   GHOSTS CAUGHT %d   ·   PHOTOS %d/%d   ·   SCORE %d" % [night, caught, photos_left(), photos.size(), score]
+	var night_text := ("NIGHT %d / %d" % [night, FINAL_NIGHT]) if night <= FINAL_NIGHT and not director().won else ("BONUS NIGHT %d" % night)
+	info_label.text = "%s   ·   GHOSTS CAUGHT %d   ·   PHOTOS %d/%d   ·   SCORE %d" % [night_text, caught, photos_left(), photos.size(), score]
+	var ev: String = director().event_name
+	if ev != "":
+		info_label.text += "\n" + str(director().EVENTS[ev][0])

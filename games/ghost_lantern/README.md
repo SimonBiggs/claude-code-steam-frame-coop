@@ -15,8 +15,24 @@ inside the spirit lantern's light.
   light the room. They can't reveal ghosts, so shout to P1 where you need the light!
 
 When a ghost touches you, you lose courage. With no courage left you're spooked: stand next to a
-spooked friend to cheer them up. Nights get busier. The game ends if everyone is spooked or the ghosts
-carry every photo out of the mansion.
+spooked friend to cheer them up. Nights get busier. Survive **night 6** to see the sunrise (then bonus
+nights). The game ends if everyone is spooked (once a night the lantern flickers back to life first) or the
+ghosts carry every photo away - but before that, the **LAST CHANCE**: the Ghost King grabs every lost photo
+and you have 50 seconds to catch him.
+
+## Ghosts and events
+
+- **Thief** (bandit mask) and **Shy** ghost (blushing, hides its face) steal photos. Shy ghosts only show
+  up in a **focused** beam (VR: hold the trigger).
+- **Spooker** (witch hat) says BOO, **Sprite** (bow) is tiny and fast.
+- **Snuffer**: its brass snuffer hat is always visible. If it reaches the lantern-bearer the lantern goes
+  out for 4 s - TV players, vacuum it first!
+- **Golden ghost**: rare, flees, leaves a sparkle trail, worth 500.
+- **GHOST KING** (nights 3 and 6): golden crown always visible, carries every lost photo (each stun drops
+  one; catching him returns them all), calls thieves to help, needs several vacuums at once.
+- Events from night 2: **thunderstorm** (lightning shows every ghost), **ghost party** (dizzy dancing ghosts
+  in the ballroom, easy to catch), **treat time** (candy = courage + points).
+- End screens show **awards** (GHOSTBUSTER, PHOTO HERO, CHEERLEADER, LIGHT BRINGER, ...).
 
 ## Controls
 
@@ -39,4 +55,5 @@ carry every photo out of the mansion.
 - Split screen: 1 view full, 2 side by side, 3-4 as 2x2, 5-6 as 3x2 (local 7 as 4x2), at lower render
   scale for 3+ views. Each extra hunter past three adds a few ghosts per night.
 
-Test: `BOT_PLAYERS=6` makes the bot join that many TV players. `godot --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/ghost_lantern_bot.tscn`
+Test: `BOT_PLAYERS=6` makes the bot join that many TV players; `BOT_VR=1` fake VR lantern;
+`BOT_NIGHT=6 BOT_GOD=1` plays the last night to the sunrise. `godot --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/ghost_lantern_bot.tscn`
