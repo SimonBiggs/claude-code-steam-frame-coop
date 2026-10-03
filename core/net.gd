@@ -208,16 +208,22 @@ func _check_vr_menu() -> void:
 	var hl: XRController3D = main.players[0].hand_l
 	var hr = main.players[0].get("hand_r")
 	var btn := _wrist_button(hl)
+	var ws := 1.0  # games like Giant's Table scale the world (XROrigin3D.world_scale)
+	if hl.get_parent() is XROrigin3D:
+		ws = (hl.get_parent() as XROrigin3D).world_scale
+	if btn != null:
+		btn.position = Vector3(0.0, 0.07, 0.1) * ws
+		btn.pixel_size = 0.0012 * ws
 	var on_btn := false
 	var trig := false
 	if hr != null and btn != null:
 		var to: Vector3 = btn.global_position - hr.global_position
 		var fwd: Vector3 = -hr.global_basis.z
 		var along := to.dot(fwd)
-		on_btn = to.length() < 0.08 or (along > 0.0 and (to - fwd * along).length() < 0.07)
+		on_btn = to.length() < 0.08 * ws or (along > 0.0 and (to - fwd * along).length() < 0.07 * ws)
 		trig = hr.get_float("trigger") > 0.7
 		btn.modulate = Color(1.0, 0.9, 0.3) if on_btn else Color(0.55, 0.95, 1.0)
-	var touching: bool = hr != null and btn != null and (btn.global_position - hr.global_position).length() < 0.08
+	var touching: bool = hr != null and btn != null and (btn.global_position - hr.global_position).length() < 0.08 * ws
 	var down: bool = hl.is_button_pressed("menu_button") or hl.is_button_pressed("by_button") \
 		or touching or (on_btn and trig)
 	if down and not menu_was_down:
