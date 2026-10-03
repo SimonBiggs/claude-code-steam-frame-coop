@@ -2,6 +2,8 @@ extends Node
 ## Headless bot test for Cannon Cove. The gunner aims (solving the ballistic arc) and fires at the
 ## nearest ship or tentacle; deckhands patch leaks, shoot boarders and carry cannonballs.
 ## Same scene on host and client, so node paths match.
+## BOT_PLAYERS=N (1..6) brings N deckhands aboard (players 2..N+1) through main.debug_join(); on the
+## TV client the default is 2 (player 3 joins after a few seconds, as before).
 
 const World := preload("res://games/cannon_cove/world.gd")
 
@@ -9,6 +11,13 @@ var main
 var t := 0.0
 var report_t := 0.0
 var toggle := false
+var joined_upto := 1
+
+
+func _wanted_deckhands() -> int:
+	if OS.has_environment("BOT_PLAYERS"):
+		return clampi(int(OS.get_environment("BOT_PLAYERS")), 1, 6)
+	return 2 if main.net.mode == "client" else 1
 
 
 func _ready() -> void:
@@ -21,11 +30,16 @@ func _physics_process(delta: float) -> void:
 	toggle = not toggle
 	if main == null or not main.ready_to_play:
 		return
+	# Drop-in: one more deckhand every second from t=4 s (host: nothing to do, the TV sends joins).
+	if main.net.mode != "host" and t > 4.0 + joined_upto and joined_upto < _wanted_deckhands() and not main.game_over:
+		joined_upto += 1
+		main.debug_join(joined_upto)
+		print("Bot: player %d joins" % (joined_upto + 1))
+	_hotplug_test()
 	for p in main.players:
 		if p.ghost or p.remote:
 			continue
 		if not p.active:
-			p.bot_fire = t > 6.0 and toggle  # player 3 joins on the client
 			continue
 		if p.gunner:
 			_drive_gunner(p)
@@ -35,6 +49,29 @@ func _physics_process(delta: float) -> void:
 	if report_t <= 0.0:
 		report_t = 10.0
 		_report()
+
+
+## With 3+ deckhands: player 3's (pretend) controller unplugs at t=14 s and comes back at t=17 s.
+var hotplug_step := 0
+
+
+func _hotplug_test() -> void:
+	if main.net.mode == "host" or _wanted_deckhands() < 3 or main.players.size() < 3:
+		return
+	var p = main.players[2]
+	if hotplug_step == 0 and t > 14.0 and p.active:
+		hotplug_step = 1
+		p.joy = 42  # a fake device id
+		main._on_joy_changed(42, false)
+		print("Bot: unplugged player 3's controller")
+	elif hotplug_step == 1 and t > 16.5:
+		hotplug_step = 2
+		print("Bot: player 3 active after unplug = %s" % p.active)
+		main._on_joy_changed(42, true)
+		print("Bot: plugged it back in")
+	elif hotplug_step == 2 and t > 19.0:
+		hotplug_step = 3
+		print("Bot: player 3 active after replug = %s (joy %d)" % [p.active, p.joy])
 
 
 func _report() -> void:
@@ -47,8 +84,12 @@ func _report() -> void:
 	var best: int = Engine.get_meta("cc_best_wave", 0)
 	best = maxi(best, main.wave)
 	Engine.set_meta("cc_best_wave", best)
-	print("t=%.0f mode=%s wave=%d (best %d) gold=%d water=%.0f ships=%d tentacles=%d boarders=%d leaks=%d ammo=%s carrying=%s over=%s" % [
-		t, main.net.mode, main.wave, best, main.gold, main.water,
+	var active := 0
+	for p in main.players:
+		if p.active:
+			active += 1
+	print("t=%.0f mode=%s players=%d views=%d wave=%d (best %d) gold=%d water=%.0f ships=%d tentacles=%d boarders=%d leaks=%d ammo=%s carrying=%s over=%s" % [
+		t, main.net.mode, active, main.view_count, main.wave, best, main.gold, main.water,
 		get_tree().get_nodes_in_group("ships").size(), get_tree().get_nodes_in_group("tentacles").size(),
 		get_tree().get_nodes_in_group("boarders").size(), get_tree().get_nodes_in_group("leaks").size(),
 		ammo, carrying, main.game_over])
@@ -120,8 +161,8 @@ func _drive_deckhand(p) -> void:
 	var leaks := get_tree().get_nodes_in_group("leaks")
 	var boarders := get_tree().get_nodes_in_group("boarders").filter(func(b): return b.alive())
 	var goal = null
-	# Player 2 goes for leaks first; player 3 goes for boarders first.
-	if not leaks.is_empty() and (p.index == 1 or boarders.is_empty() or leaks.size() > 1):
+	# Odd players go for leaks first; even players go for boarders first.
+	if not leaks.is_empty() and (p.index % 2 == 1 or boarders.is_empty() or leaks.size() > 1):
 		var lk = leaks[0]
 		for l in leaks:
 			if l.global_position.distance_to(pos) < lk.global_position.distance_to(pos):
@@ -150,7 +191,7 @@ func _drive_deckhand(p) -> void:
 			if c.ammo < c.MAX_AMMO:
 				need = true
 		if need:
-			var spot := World.HOLD_POS + Vector3(0.0 if p.index == 1 else 0.9, 0.0, 1.9)
+			var spot := World.HOLD_POS + Vector3(-1.2 + 0.4 * p.index, 0.0, 1.9)
 			if pos.distance_to(World.HOLD_POS) < 2.3:
 				p.bot_use = toggle
 				return
@@ -167,4 +208,8 @@ func _drive_deckhand(p) -> void:
 
 func _exit_tree() -> void:
 	if main != null:
-		print("FINAL mode=%s wave=%d gold=%d water=%.0f game_over=%s best_wave=%d" % [main.net.mode, main.wave, main.gold, main.water, main.game_over, maxi(main.wave, Engine.get_meta("cc_best_wave", 0))])
+		var active := 0
+		for p in main.players:
+			if p.active:
+				active += 1
+		print("FINAL players=%d mode=%s wave=%d gold=%d water=%.0f game_over=%s best_wave=%d" % [active, main.net.mode, main.wave, main.gold, main.water, main.game_over, maxi(main.wave, Engine.get_meta("cc_best_wave", 0))])

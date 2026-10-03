@@ -9,7 +9,7 @@ var hit_flash := 0.0
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
 	prompt = Label.new()
 	prompt.add_theme_font_size_override("font_size", 30)
 	prompt.add_theme_constant_override("outline_size", 8)
@@ -26,6 +26,7 @@ func hit_marker() -> void:
 
 func _process(delta: float) -> void:
 	hit_flash = maxf(0.0, hit_flash - delta * 6.0)
+	_fit_to_view()
 	prompt.size = Vector2(size.x - 80.0, 120.0)
 	prompt.position = Vector2(40.0, size.y - 230.0)
 	var text: String = main.player_prompt(player)
@@ -36,9 +37,24 @@ func _process(delta: float) -> void:
 	queue_redraw()
 
 
+## Scales the whole HUD down in smaller split-screen views (full size at 960x720 and up).
+func _fit_to_view() -> void:
+	if anchor_right != 0.0 or anchor_bottom != 0.0:
+		set_anchors_preset(Control.PRESET_TOP_LEFT)
+	var vs := get_viewport().get_visible_rect().size
+	var s := clampf(minf(vs.y / 720.0, vs.x / 960.0), 0.45, 1.0)
+	scale = Vector2(s, s)
+	position = Vector2.ZERO
+	size = vs / s
+
+
 func _draw() -> void:
 	var font := get_theme_default_font()
 	var c := size * 0.5
+	# Who this view belongs to, in the player's colour.
+	var who: String = "P%d GUNNER" % (player.index + 1) if player.gunner else "P%d DECKHAND" % (player.index + 1)
+	draw_string_outline(font, Vector2(size.x - 260.0, size.y - 22.0), who, HORIZONTAL_ALIGNMENT_RIGHT, 240.0, 28, 8, Color(0, 0, 0, 0.9))
+	draw_string(font, Vector2(size.x - 260.0, size.y - 22.0), who, HORIZONTAL_ALIGNMENT_RIGHT, 240.0, 28, player.color)
 	if not player.gunner:
 		# Crosshair.
 		var col := Color(1, 1, 1, 0.85) if hit_flash <= 0.0 else Color(1.0, 0.4, 0.3)
