@@ -27,8 +27,8 @@ func _process(delta: float) -> void:
 	# (in game.log, with the time) to match against reports like "the screen goes black".
 	if vr and delta > 0.03:
 		print("[hitch] %d ms at %s" % [int(delta * 1000.0), Time.get_time_string_from_system()])
-	if vr and (not active or get_meta("rules_v", 0) != 2):
-		set_meta("rules_v", 2)  # bump when _fix changes, so a hot reload re-applies it to existing labels
+	if vr and (not active or get_meta("rules_v", 0) != 3):
+		set_meta("rules_v", 3)  # bump when _fix changes, so a hot reload re-applies it to existing labels
 		_sweep(get_tree().root)  # labels made before the guard started
 	active = vr
 	if not vr:
@@ -69,6 +69,13 @@ func _fix(l: Label3D) -> void:
 	# it's behind them; let transparent sorting by distance decide instead.
 	l.render_priority = 0
 	l.outline_render_priority = -1
+	# Readable in the headset (Abigail: "the writing is very dark"): a solid dark outline, and dark
+	# text colours lifted towards white.
+	l.outline_size = maxi(l.outline_size, 12)
+	l.outline_modulate = Color(0.0, 0.0, 0.0, 1.0)
+	var c := l.modulate
+	if c.get_luminance() < 0.6:
+		l.modulate = Color(c.lerp(Color.WHITE, 0.6), c.a)
 	if l.billboard != BaseMaterial3D.BILLBOARD_DISABLED:
 		l.billboard = BaseMaterial3D.BILLBOARD_DISABLED
 		if not faced.has(l):
