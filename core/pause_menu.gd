@@ -1,5 +1,8 @@
 extends CanvasLayer
 ## Pause menu. Esc or controller Start toggles it (Steam's desktop layout sends Esc for Start).
+## Only a controller that is in play may open it: with a core/party.gd PartyManager on main
+## (`main.party`) that means a pad the party owns; older games fall back to their players' `joy`.
+## In group "pause_menu": core/net.gd calls sync_remote_pause() when the other machine resumes.
 
 var main
 var panel: ColorRect
@@ -9,6 +12,7 @@ var buttons: Array[Button] = []
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	layer = 10
+	add_to_group("pause_menu")
 	panel = ColorRect.new()
 	panel.color = Color(0.02, 0.03, 0.06, 0.75)
 	add_child(panel)
@@ -70,7 +74,12 @@ func _input(event: InputEvent) -> void:
 ## Start on a spare controller nobody is playing with (left on the couch, or a test machine's pads)
 ## shouldn't pause everyone. A pad counts if a player owns it via `joy`, or if no player owns any pad.
 func _pad_in_play(device: int) -> bool:
-	if main == null or not ("players" in main):
+	if main == null:
+		return true
+	var party = main.get("party")
+	if party != null and is_instance_valid(party) and party.has_method("owner_of"):
+		return int(party.owner_of(device)) >= 0
+	if not ("players" in main):
 		return true
 	var any_owned := false
 	for p in main.players:
@@ -100,6 +109,14 @@ func _resume() -> void:
 	if main and main.net:
 		main.net.send_action("pause", [false])
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+## The other machine resumed (VR wrist RESUME, or the TV's menu): close this menu without
+## sending anything back. Called by core/net.gd through the "pause_menu" group.
+func sync_remote_pause(paused: bool) -> void:
+	if not paused and panel != null and panel.visible:
+		panel.visible = false
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 
 func _restart() -> void:
