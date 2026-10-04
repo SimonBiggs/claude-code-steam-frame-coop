@@ -2549,7 +2549,7 @@ func _update_vr_text() -> void:
 		vr_center.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		add_child(vr_center)
 	vr_center.no_depth_test = false  # nearer things (rod, bobber) must pass in front of the text
-	vr_center.text = center_label.text
+	vr_center.text = _vr_short(center_label.text)
 	vr_center.modulate.a = center_label.modulate.a
 	vr_center.outline_modulate = Color(0, 0, 0, center_label.modulate.a)
 	VrText.follow(vr_center, cam, self, 0.25, 1.8)
@@ -2600,3 +2600,25 @@ func _update_vr_text() -> void:
 		face_label(bobber_label)
 		if not a.vr:
 			bobber_label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+
+
+## The VR angler only needs the headline: drop the TV boat players' instructions and keep at most
+## two short lines (the family found the full announcements too much text to read in VR).
+func _vr_short(text: String) -> String:
+	var keep: PackedStringArray = []
+	var trigger := ""
+	for line in text.split("\n", false):
+		var l := line.strip_edges()
+		var low := l.to_lower()
+		if low.begins_with("trigger"):
+			trigger = "Trigger: " + l.get_slice(":", 1).strip_edges()  # how the angler carries on
+			continue
+		if l == "" or low.begins_with("boats") or low.contains("left stick") or low.contains("press a") \
+				or low.contains("press x") or low.contains("(a)") or low.contains("enter:"):
+			continue
+		if keep.size() < 2:
+			keep.append(l)
+	if trigger != "":
+		keep.append(trigger)
+	return "\n".join(keep)
+
