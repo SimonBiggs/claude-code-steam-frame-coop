@@ -5,6 +5,10 @@ extends Node
 ## town should grow past its first milestone (TT_FAST=1), then the town is saved and reloaded.
 ## Local:     TT_FAST=1 godot --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/tiny_town_tycoon_bot.tscn
 ## Networked: DUO_PORT=8070 DUO_HOST=1 BOT_VR=1 ... & DUO_PORT=8070 DUO_JOIN=127.0.0.1 BOT_PLAYERS=3 ...
+## SIMPLE_MODE (Defs.SIMPLE_MODE): no island select, events, goals or results; the mayor does the
+## practice first (road from the glowing spot, then the house beside it), new blocks unlock one at a
+## time, drivers get a vehicle without a menu and bring the bricks, and the fake VR glove touches the
+## toys (clouds, balloon, windmill, sheep, a house) and picks a tree up and replants it.
 
 const BotKit := preload("res://tests/bot_kit.gd")
 const Defs := preload("res://games/tiny_town_tycoon/defs.gd")
@@ -29,6 +33,13 @@ var touched := false
 var saw_results := false
 var orbit_t := 0.0
 var picked := false
+var simple := Defs.SIMPLE_MODE
+var toy_list: Array = []  ## SIMPLE_MODE VR: toys still to touch
+var tree_state := ""  ## SIMPLE_MODE VR: "", "grab", "carry", "done"
+var tree_from := -1
+var saw_complete := false
+var toys_started := false
+var toy_wait := 0.0
 
 
 func _ready() -> void:
@@ -70,11 +81,11 @@ func _ready() -> void:
 		kit.at(t0 + 13.2, "resumed?", func() -> void:
 			kit.assert_true(not get_tree().paused, "Start again resumes")
 			kit.allow_pause = false)
-	if not client:
+	if not client and not simple:
 		kit.at(30.0, "a small fire breaks out", func() -> void:
 			kit.assert_true(main.debug_event("fire"), "a fire started"))
 		kit.at(20.0, "a festival (if there's a park)", func() -> void: main.debug_event("festival"))
-	if not client:
+	if not client and not simple:
 		kit.at(42.0, "the island's goals are all done (forced): results", func() -> void:
 			for k in main.goals_done.size():
 				main.goals_done[k] = true
@@ -136,6 +147,8 @@ func _press_any(action: String) -> void:
 
 ## Open menus: drivers take the suggested vehicle; results: continue.
 func _menus() -> String:
+	if main.phase() == "complete":
+		saw_complete = true
 	for s in main.party.local_slots():
 		if s >= 1 and UiMenu.slot_busy(s) and main.phase() == "play":
 			kit.slot_press(main.party, s, "accept")
@@ -170,6 +183,21 @@ func _make_plan() -> void:
 		else:
 			break
 	plan.append(["road", col])
+	if simple:
+		var pr: Array[Vector2i] = []
+		for c in main.practice_road:
+			pr.append(c)
+		kit.assert_true(pr.size() == 3, "SIMPLE: the practice starts with a road to draw from a glowing spot")
+		plan.clear()
+		plan.append(["road", pr])
+		plan.append(["practice_house", []])
+		plan.append(["road", row])
+		plan.append(["road", col])
+		for k in ["house", "house", "farm", "house", "park", "house", "windmill", "house", "house", "shop", "house", "house", "water",
+				"house", "bakery", "house", "house", "school"]:
+			plan.append([String(k), []])
+		kit.info("plan: %d steps" % plan.size())
+		return
 	for k in ["windmill", "water", "house", "house", "farm", "shop", "house", "house", "park", "house", "house", "shop", "house", "house",
 			"house", "windmill", "water", "bakery", "house", "house", "school"]:
 		plan.append([String(k), []])
@@ -215,6 +243,13 @@ func _next_step() -> Array:
 	while step < plan.size():
 		var st: Array = plan[step]
 		var kind := String(st[0])
+		if kind == "practice_house":
+			if main.practice != 1:
+				if main.practice >= 2:
+					step += 1
+					continue
+				return []
+			return ["house", [main.practice_house]]
 		if Defs.is_tool_kind(kind):
 			if (st[1] as Array).is_empty():
 				step += 1
@@ -291,11 +326,13 @@ func _vr_mayor(delta: float) -> void:
 	var palm_off: Vector3 = rig.hand_point(VrRig.RIGHT) - rig.hand(VrRig.RIGHT).global_position
 	match vr_state:
 		"":
+			if simple and placed >= 6 and orbit_t >= 2.5 and _vr_toys(delta):
+				return
 			kit.vr_trigger(rig, 0.0)
 			if step_t > 0.0 or orbit_t < 2.5:
 				return
 			# touch a house with the left glove once (speech bubble)
-			if not touched and placed >= 6:
+			if not touched and placed >= 6 and not simple:
 				var houses: Array = main.town.of_kind("house", true)
 				if not houses.is_empty():
 					var hc: Vector3 = main.town.center_of(houses[0])
@@ -359,6 +396,90 @@ func _vr_mayor(delta: float) -> void:
 			step += 1
 			vr_state = ""
 			step_t = 0.4
+
+
+## SIMPLE_MODE: the left glove touches each toy once, then the right hand moves a tree. True while busy.
+func _vr_toys(delta: float) -> bool:
+	var rig = main.vr_rig
+	var props = main.props
+	if props == null:
+		return false
+	if toy_list.is_empty() and not toys_started:
+		toys_started = true
+		toy_list = ["cloud", "balloon", "windmill", "sheep", "building"]
+	if not toy_list.is_empty():
+		var what := String(toy_list[0])
+		var at := Vector3.ZERO
+		if what == "building":
+			var houses: Array = main.town.of_kind("house", false)
+			if houses.is_empty():
+				toy_list.pop_front()
+				return true
+			at = main.town.center_of(houses[0]) + Vector3(0, 0.025, 0)
+		else:
+			at = props.bot_targets()[what]
+		var lo: Vector3 = rig.hand_point(VrRig.LEFT) - rig.hand(VrRig.LEFT).global_position
+		if kit.vr_reach(rig, VrRig.LEFT, at - lo, 3.0, delta) or props.touched.has(what):
+			toy_wait += delta
+			if not props.touched.has(what) and toy_wait < 0.6:
+				return true  # give the toys a frame or two to feel the glove
+			kit.assert_true(props.touched.has(what), "SIMPLE: touching the %s makes it react" % what)
+			toy_wait = 0.0
+			toy_list.pop_front()
+			rig.hand_l.position = Vector3(-0.45, 0.7, 0.25)
+		return true
+	if tree_state == "done":
+		return false
+	var po: Vector3 = rig.hand_point(VrRig.RIGHT) - rig.hand(VrRig.RIGHT).global_position
+	match tree_state:
+		"":
+			# the tree nearest the player
+			var best := -1
+			var bd := INF
+			for i in main.town.trees.size():
+				if main.town.trees[i] > 0:
+					var c := Defs.cell_center(i % Defs.GRID, i / Defs.GRID)
+					var d := c.distance_to(rig.camera.global_position)
+					if d < bd:
+						bd = d
+						best = i
+			if best < 0:
+				tree_state = "done"
+				return false
+			tree_from = best
+			tree_state = "grab"
+		"grab":
+			var c2 := Defs.cell_center(tree_from % Defs.GRID, tree_from / Defs.GRID) + Vector3(0, 0.02, 0)
+			if kit.vr_reach(rig, VrRig.RIGHT, c2 - po, 2.0, delta):
+				kit.vr_trigger(rig, 1.0)
+				tree_state = "carry"
+				step_t = 0.2
+		"carry":
+			if step_t > 0.0:
+				return true
+			if not props.holding():
+				kit.info("tree grab failed")
+				kit.vr_trigger(rig, 0.0)
+				tree_state = "done"
+				return false
+			# a free grass cell a little way off
+			var to := Vector2i(-1, -1)
+			var fc := Vector2i(tree_from % Defs.GRID, tree_from / Defs.GRID)
+			for r in range(2, 6):
+				for d2 in [Vector2i(r, 0), Vector2i(-r, 0), Vector2i(0, r), Vector2i(0, -r)]:
+					var cc: Vector2i = fc + d2
+					if to.x < 0 and Defs.inside(cc.x, cc.y) and props.can_plant(cc.x, cc.y) and main.town.trees[cc.x + cc.y * Defs.GRID] == 0:
+						to = cc
+			if to.x < 0:
+				to = fc
+			var target := Defs.cell_center(to.x, to.y) + Vector3(0, 0.03, 0)
+			if kit.vr_reach(rig, VrRig.RIGHT, target - po, 1.5, delta):
+				kit.vr_trigger(rig, 0.0)
+				tree_state = "done"
+				get_tree().create_timer(0.3).timeout.connect(func() -> void:
+					kit.assert_true(props.touched.has("tree_grab") and not props.holding(), "SIMPLE: the right hand picked a tree up and let it go")
+					kit.assert_true(int(main.town.trees[to.x + to.y * Defs.GRID]) > 0, "SIMPLE: the tree was replanted where it was put"))
+	return true
 
 
 # --- Drivers ------------------------------------------------------------------------------------------
@@ -471,6 +592,9 @@ func _checks() -> void:
 			lay += 1 if main.town.lay[i] != Defs.L_NONE else 0
 		kit.assert_true(lay > 10, "TV machine: the roads arrived (%d)" % lay)
 		return
+	if simple:
+		_simple_checks()
+		return
 	kit.assert_true(int(main.sim.pop) >= Defs.TIER_POP[1], "the town grew past the first milestone (pop %d)" % int(main.sim.pop))
 	kit.assert_true(int(main.sim.tier) >= 1, "the town became a VILLAGE")
 	kit.assert_true(int(main.sim.counters["loads"]) > 0, "the crane brought bricks")
@@ -481,5 +605,29 @@ func _checks() -> void:
 		player_jobs += int(main.awards.total(st))
 	if not host:
 		kit.assert_true(player_jobs > 0, "bot drivers finished jobs (%d)" % player_jobs)
+	if main.vr_rig != null:
+		kit.assert_true(placed >= 6, "the fake VR mayor placed blocks from the tray (%d)" % placed)
+
+
+func _simple_checks() -> void:
+	kit.assert_true(int(main.sim.pop) >= 8, "SIMPLE: people moved into the houses (pop %d)" % int(main.sim.pop))
+	kit.assert_true(int(main.sim.unl) >= 4, "SIMPLE: new blocks joined the tray one at a time (%d unlocked)" % int(main.sim.unl))
+	kit.assert_true(int(main.sim.counters["loads"]) > 0, "SIMPLE: bricks were brought to new buildings")
+	kit.assert_true(not saw_complete, "SIMPLE: no island-complete awards screen")
+	kit.assert_true((main.net.state_get("ev", {}) as Dictionary).is_empty(), "SIMPLE: no events with text banners")
+	if main.mayor != null or main.flat != null:
+		kit.assert_eq(int(main.practice), 2, "SIMPLE: the mayor finished the practice (a road, then a house beside it)")
+	if main.mayor != null:
+		kit.assert_true(main.ghost_hand.shown, "SIMPLE: the ghost hand showed the mayor how to build")
+		kit.assert_true(main.mayor.board == null, "SIMPLE: no mayor's board of numbers in VR")
+		for s in main.mayor.slots:
+			kit.assert_true(Defs.SIMPLE_TRAY.find(String(s["kind"])) < int(main.sim.unl), "SIMPLE: the tray only holds unlocked blocks (%s)" % String(s["kind"]))
+		kit.assert_true(toys_started and toy_list.is_empty(), "SIMPLE: the glove went round the toys")
+	var player_jobs := 0
+	for st in ["deliveries", "loads", "passengers", "fires", "helps", "visits"]:
+		player_jobs += int(main.awards.total(st))
+	if not host:
+		kit.assert_true(player_jobs > 0, "bot drivers finished jobs (%d)" % player_jobs)
+		kit.assert_true(int(main.awards.total("loads")) > 0, "SIMPLE: a driver brought bricks (the glowing delivery)")
 	if main.vr_rig != null:
 		kit.assert_true(placed >= 6, "the fake VR mayor placed blocks from the tray (%d)" % placed)
