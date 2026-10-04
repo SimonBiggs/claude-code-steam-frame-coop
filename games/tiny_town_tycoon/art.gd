@@ -850,7 +850,7 @@ static func tool_mesh(kind: String) -> ArrayMesh:
 
 ## Tray / ghost model for any kind (tools and buildings).
 static func piece_mesh(kind: String, snow: bool) -> ArrayMesh:
-	if Defs.is_tool(kind):
+	if Defs.is_tool_kind(kind):
 		return tool_mesh(kind)
 	return building_mesh(kind, 0, 1, snow)
 

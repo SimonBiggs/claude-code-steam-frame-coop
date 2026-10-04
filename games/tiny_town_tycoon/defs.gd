@@ -167,7 +167,7 @@ static func size_of(kind: String) -> int:
 	return int(def(kind).get("size", 1))
 
 
-static func is_tool(kind: String) -> bool:
+static func is_tool_kind(kind: String) -> bool:
 	return bool(def(kind).get("tool", false))
 
 
