@@ -18,6 +18,21 @@ extends Node3D
 ## snapshots, sends menu choices / dice hits with net.request() and minigame sticks with send_state().
 ## Bot knobs (tests/party_board_bot.gd): rounds_override, mg_force / PB_MINIGAME, mg_all /
 ## PB_ALL_MINIGAMES, mg_time_scale, quick.
+##
+## SIMPLE_MODE (the family: "all of the games have become too complicated", "simple games are the fun
+## games", "everything's being driven by text"): roll the dice, hop along the board, a quick minigame
+## after each round, collect STARS. That's it. Four short rounds; the party starts by itself (no setup
+## menu, no how-to cards). The first roll is a PRACTICE roll: in VR a see-through ghost hand
+## (ghost_hand.gd) shows how to grab the dice and throw it; TV players see a glowing A button on their
+## spinning dice block. Spaces are only blue (good: hop 2 more), red (bad: slide back 2) and START; the
+## STAR is picked up just by passing or landing on it (then it flies off somewhere new). Paths pick
+## themselves (towards the STAR). No coins, shop, items, events, duels, kid-mode menu or bonus stars.
+## Minigames: only the simplest three (coin catch, kart dash, balloon pop), free-for-all, taught by a 3 s
+## glowing demo (ghost hand / glowing ring + A) while everyone can already try; the winner gets a STAR.
+## The end: one winner moment, then a new party. Everything on the island in the giant's reach reacts
+## to touch (props.gd): trees and flowers wobble, the STAR spins, the windmill whirls, the volcano
+## puffs, the lighthouse flashes, boats rock, clouds puff away, houses jiggle and tokens get a boop.
+## Text: one short headline at a time. Everything cut stays behind the flag.
 
 const NetScript := preload("res://core/net.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
@@ -47,6 +62,10 @@ const MgRunner := preload("res://games/party_board/mg_runner.gd")
 const GiantAvatar := preload("res://games/party_board/giant_avatar.gd")
 const CeremonyScript := preload("res://games/party_board/ceremony.gd")
 const UiMenu := preload("res://core/ui_menu.gd")
+const PropsScript := preload("res://games/party_board/props.gd")
+const GhostHand := preload("res://games/party_board/ghost_hand.gd")
+
+const SIMPLE_MODE := true
 
 const GAME_ID := "party_board"
 ## VR: one board unit is 6.5 cm, the island sits on a table in front of the VR player.
@@ -71,6 +90,9 @@ var mg_force := ""  ## a minigame id every round (PB_MINIGAME)
 var mg_all := false  ## cycle through every minigame (PB_ALL_MINIGAMES)
 var mg_time_scale := 1.0  ## bots shorten minigames
 var quick := false  ## bots: shorter pauses between steps
+var simple := SIMPLE_MODE
+var props: PropsScript  ## SIMPLE: touchable island (every machine; touches are found where the VR player is)
+var ghost: GhostHand  ## SIMPLE, VR player only: the see-through teaching hand
 
 # --- The networking contract (see docs/engine/systems.md) ---
 var net: Node
@@ -168,6 +190,8 @@ func _setup(mode: String) -> void:
 		hints.set_vr_rig(vr_rig, self)
 	S = S_VR if vr_rig != null else 1.0
 	data = BD.new()
+	if simple:
+		data.make_simple()
 	_build_world()
 	if mode != "host":
 		split = SplitView.new()
@@ -204,6 +228,15 @@ func _setup(mode: String) -> void:
 	ceremony = CeremonyScript.new()
 	ceremony.main = self
 	add_child(ceremony)
+	if simple:
+		props = PropsScript.new()
+		props.main = self
+		props.name = "Props"
+		stage.add_child(props)
+		if vr_rig != null:
+			ghost = GhostHand.new()
+			ghost.name = "GhostHand"
+			add_child(ghost)
 	if mode != "client":
 		flow = TurnFlow.new()
 		flow.main = self
@@ -393,7 +426,7 @@ func _sync_tokens() -> void:
 			continue
 		if t.space < 0 or not _synced:
 			t.place(data.pos(sp))
-		elif data.next_of(t.space).has(sp):
+		elif data.next_of(t.space).has(sp) or (simple and data.next_of(sp).has(t.space)):
 			t.hop_to(data.pos(sp))
 		else:
 			t.fly_to(data.pos(sp), 1.1)
@@ -629,6 +662,9 @@ func _do_fx(kind: String, args: Array) -> void:
 			dice.on_fx(String(args[0]), args[1])
 		"intro":
 			hints.intro(INTRO, {"duration": 9.0, "min_time": 1.0})
+		"prop":
+			if props != null:
+				props.react(String(args[0]), int(args[1]))
 		"arrows":
 			if args.is_empty():
 				board.hide_arrows()

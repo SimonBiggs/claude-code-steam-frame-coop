@@ -54,6 +54,7 @@ const TYPE_NAMES := {"blue": "BLUE SPACE", "red": "RED SPACE", "event": "EVENT S
 
 ## spaces[i] = {id, pos (Vector3, on the ground), type, next (Array of ids), zone, star_ok, junction}
 var spaces: Array = []
+var simple := false  ## SIMPLE_MODE board: only blue (good), red (bad) and START (make_simple())
 
 
 func _init() -> void:
@@ -100,6 +101,18 @@ func _add(p: Vector2, type: String) -> void:
 func _link(a: int, b: int) -> void:
 	var nx: Array = spaces[a]["next"]
 	nx.append(b)
+
+
+## SIMPLE_MODE: event, shop and duel spaces become plain blue ones (nothing to explain), so the board
+## only has blue (good: a bonus hop forward), red (bad: slide back) and START; the STAR can sit on any
+## blue space that isn't a junction.
+func make_simple() -> void:
+	simple = true
+	for s in spaces:
+		var sp: Dictionary = s
+		if String(sp["type"]) in ["event", "shop", "duel"]:
+			sp["type"] = "blue"
+		sp["star_ok"] = String(sp["type"]) == "blue" and not sp["junction"]
 
 
 # --- Queries --------------------------------------------------------------------------------------

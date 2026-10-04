@@ -44,6 +44,11 @@ var _star_from := Vector3.ZERO
 var _star_to := Vector3.ZERO
 var _star_move := 1.0
 var _flashes: Array = []  # [MeshInstance3D, time left]
+## The scattered trees, flowers, rocks... per kind: {kind, mm (MultiMesh), xfs (Array of Transform3D)}
+## (props.gd makes them wobble when the giant touches them).
+var prop_sets: Array = []
+var star_boost := 0.0  ## seconds of fast spinning left (props.gd: the giant touched the STAR)
+var sails_boost := 0.0  ## seconds of fast windmill sails left
 
 
 ## Build everything. vr: the island sits in a water dish on the VR player's table (no ocean to
@@ -52,7 +57,7 @@ func build(p_data: BD, vr: bool) -> void:
 	data = p_data
 	vr_table = vr
 	add_child(MeshKit.instance(ResCache.get_or_make("pb_island_v3", _island_mesh)))
-	var spaces := MeshKit.instance(ResCache.get_or_make("pb_spaces_v3", _spaces_mesh), false)
+	var spaces := MeshKit.instance(ResCache.get_or_make("pb_spaces_simple_v1" if data.simple else "pb_spaces_v3", _spaces_mesh), false)
 	add_child(spaces)
 	_build_water(vr)
 	_build_props()
@@ -267,6 +272,7 @@ func _build_props() -> void:
 		var mmi := MeshKit.scatter(m[0], xfs, cols, PackedColorArray(), not vr_table)
 		mmi.name = "Props_" + String(kind)
 		add_child(mmi)
+		prop_sets.append({"kind": String(kind), "mm": mmi.multimesh, "xfs": xfs})
 
 
 ## True if p is clear of every space (space_r) and path (path_r).
@@ -528,6 +534,7 @@ func show_arrows(from: int, options: Array, sel: int) -> void:
 		if not vr_table:
 			lab.billboard = BaseMaterial3D.BILLBOARD_ENABLED  # TV: always readable (VR turns it in _process)
 		lab.name = "Label"
+		lab.visible = not data.simple  # SIMPLE: the arrows point, no path names
 		a.add_child(lab)
 		add_child(a)
 		a.position = p + dir * 1.55 + Vector3(0, 0.9, 0)
@@ -573,11 +580,13 @@ func flash_space(id: int, color: Color) -> void:
 
 func _process(delta: float) -> void:
 	_t += delta
+	sails_boost = maxf(0.0, sails_boost - delta)
+	star_boost = maxf(0.0, star_boost - delta)
 	if sails != null:
-		sails.rotation.z += delta * 0.8
+		sails.rotation.z += delta * (0.8 + sails_boost * 6.0)
 	if star_node != null and star_node.visible:
 		var spin := star_node.get_node("Spin") as Node3D
-		spin.rotation.y += delta * 1.6
+		spin.rotation.y += delta * (1.6 + star_boost * 10.0)
 		spin.position.y = 2.1 + 0.15 * sin(_t * 2.2)
 		if _star_move < 1.0:
 			_star_move = minf(1.0, _star_move + delta / 1.6)

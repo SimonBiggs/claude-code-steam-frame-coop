@@ -7,6 +7,9 @@ extends Node
 ##    round, whose turn, everyone's coins / stars), the player's own coins and stars on the back of
 ##    the left glove, VR banners / toasts.
 ##  - 3D (every machine): a bouncing marker over the current token and the "steps left" counter.
+## SIMPLE_MODE: almost no text. TV: a card per player with just their name and STARS, a "PIP'S TURN"
+## pill (no hints), no round pill, no title screen text. VR: the scoreboard is a row of little gold
+## stars per player (their colour dot bounces on their turn), nothing on the glove.
 
 const UiKit := preload("res://core/ui_kit.gd")
 const HudKit := preload("res://core/hud_kit.gd")
@@ -36,6 +39,9 @@ var marker: Node3D
 var steps_label: Label3D
 var _t := 0.0
 var _marker_pid := -1
+var round_pill: Control
+var vr_stars: Array[Node3D] = []  # SIMPLE: one row of star meshes per player
+var _star_mesh: Mesh
 
 
 func _ready() -> void:
@@ -52,6 +58,8 @@ func _build_tv(ui: Control) -> void:
 	var s := UiKit.scale_of(ui)
 	var rp := UiKit.panel("pill")
 	ui.add_child(rp)
+	round_pill = rp
+	rp.visible = not main.simple
 	rp.position = Vector2(26, 22) * s
 	var rrow := UiKit.hbox(10, s)
 	rp.add_child(rrow)
@@ -81,14 +89,15 @@ func _build_tv(ui: Control) -> void:
 	cards_row.offset_bottom = -18.0 * s
 	cards_row.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	join_pill = UiKit.panel("pill")
-	join_pill.add_child(UiKit.prompts([["A", "on a spare controller: JOIN!"]], s))
+	join_pill.add_child(UiKit.prompts([["A", "JOIN!" if main.simple else "on a spare controller: JOIN!"]], s))
 	ui.add_child(join_pill)
 	join_pill.set_anchors_preset(Control.PRESET_TOP_RIGHT)
 	join_pill.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	join_pill.offset_left = -24.0 * s
 	join_pill.offset_right = -24.0 * s
 	join_pill.offset_top = 22.0 * s
-	_build_title(ui, s)
+	if not main.simple:
+		_build_title(ui, s)
 
 
 func _build_title(ui: Control, s: float) -> void:
@@ -147,6 +156,9 @@ func _refresh_cards() -> void:
 		var rk := card.find_child("Rank", true, false) as Label
 		rk.text = HudKit.ordinal(int(ranks.get(pid, 1)))
 		rk.add_theme_color_override("font_color", HudKit.rank_color(int(ranks.get(pid, 1))))
+		if main.simple:
+			for nm in ["Cpu", "Coins", "CoinIcon", "Rank", "Items"]:
+				(card.find_child(nm, true, false) as Control).visible = false
 		var items := card.find_child("Items", true, false) as HBoxContainer
 		for c in items.get_children():
 			c.queue_free()
@@ -196,7 +208,9 @@ func _make_card(pid: int, s: float, w: float) -> PanelContainer:
 	st.name = "Stars"
 	mid.add_child(st)
 	mid.add_child(UiKit.spacer(8.0 * s))
-	mid.add_child(UiKit.icon("coin", Color(1.0, 0.75, 0.25), 26.0 * s))
+	var coin_icon := UiKit.icon("coin", Color(1.0, 0.75, 0.25), 26.0 * s)
+	coin_icon.name = "CoinIcon"
+	mid.add_child(coin_icon)
 	var co := UiKit.label("0", "number")
 	co.name = "Coins"
 	mid.add_child(co)
@@ -240,7 +254,7 @@ func _refresh_turn() -> void:
 	var hint := ""
 	if phase == "board" and cur >= 0:
 		title = "%s'S TURN" % who
-		hint = _hint_for(step, cur, false)
+		hint = "" if main.simple else _hint_for(step, cur, false)
 	if turn_pill != null:
 		turn_pill.visible = title != ""
 		turn_label.text = title
@@ -248,7 +262,9 @@ func _refresh_turn() -> void:
 			turn_label.add_theme_color_override("font_color", (main.color_of(cur) as Color).lightened(0.25))
 		hint_label.text = hint
 		hint_label.visible = hint != ""
-	if vr_turn != null:
+	if vr_turn != null and main.simple:
+		vr_turn.text = ""
+	elif vr_turn != null:
 		var vh := _hint_for(step, cur, true) if phase == "board" and cur >= 0 else ""
 		vr_turn.text = (title + ("\n" + vh if vh != "" else "")) if title != "" else ""
 		if cur >= 0:
@@ -295,7 +311,9 @@ func _refresh_round() -> void:
 	if round_label != null:
 		round_label.text = text
 		final_badge.visible = bool(main.net.state_get("final", false)) and phase != "title"
-	if vr_title != null:
+	if vr_title != null and main.simple:
+		vr_title.text = ""
+	elif vr_title != null:
 		vr_title.text = text + ("   FINAL TURNS!" if bool(main.net.state_get("final", false)) and phase != "title" else "")
 
 
@@ -368,6 +386,9 @@ func _build_vr() -> void:
 func _refresh_vr() -> void:
 	if vr_board == null:
 		return
+	if main.simple:
+		_refresh_vr_simple()
+		return
 	var ps: Array = main.roster()
 	var ranks := ranks_of(ps)
 	var cur := int(main.net.state_get("cur", -1))
@@ -396,6 +417,48 @@ func _refresh_vr() -> void:
 			its.append(Rules.item_name(String(it)))
 		glove_label.text = "COINS %d\nSTARS %d%s" % [int(me.get("coins", 0)), int(me.get("stars", 0)),
 			("\nITEMS %d" % its.size()) if not its.is_empty() else ""] if not me.is_empty() else ""
+
+
+## SIMPLE: each player's colour dot and a row of little gold stars (no names, no numbers).
+func _refresh_vr_simple() -> void:
+	var ps: Array = main.roster()
+	if _star_mesh == null:
+		var b := MeshKit.Builder.new()
+		b.star(5, 0.032, 0.014, 0.012, MeshKit.at(Vector3.ZERO), Color(1.0, 0.85, 0.25), true)
+		_star_mesh = b.build()
+	while vr_stars.size() < vr_rows.size():
+		var row := Node3D.new()
+		row.position = Vector3(-0.62, 0.36 - vr_stars.size() * 0.12, 0.0)
+		vr_board.add_child(row)
+		vr_stars.append(row)
+	for i in vr_rows.size():
+		vr_rows[i].visible = false
+		var dot := vr_dots[i]
+		var row := vr_stars[i]
+		if i >= ps.size():
+			dot.visible = false
+			row.visible = false
+			continue
+		var pd: Dictionary = ps[i]
+		var pid := int(pd["pid"])
+		dot.position = Vector3(-0.72, row.position.y, 0)
+		dot.material_override = MeshKit.material(main.color_of(pid), 1.0)
+		dot.visible = true
+		dot.set_meta("pid", pid)
+		row.visible = true
+		var n := mini(int(pd.get("stars", 0)), 14)
+		while row.get_child_count() < n:
+			var mi := MeshInstance3D.new()
+			mi.mesh = _star_mesh
+			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			mi.position = Vector3(row.get_child_count() * 0.095, 0, 0)
+			row.add_child(mi)
+		while row.get_child_count() > n:
+			var c := row.get_child(row.get_child_count() - 1)
+			row.remove_child(c)
+			c.queue_free()
+	if glove_label != null:
+		glove_label.text = ""
 
 
 ## Hide the VR scoreboard while a minigame shows its own.
@@ -429,6 +492,10 @@ func _process(delta: float) -> void:
 	_t += delta
 	var cur := int(main.net.state_get("cur", -1))
 	var phase := String(main.net.state_get("phase", ""))
+	if main.simple and vr_board != null:  # SIMPLE: whose turn it is: their colour dot bounces
+		for dot in vr_dots:
+			var on: bool = dot.visible and int(dot.get_meta("pid", -1)) == cur and phase == "board"
+			dot.scale = Vector3.ONE * (1.6 + 0.4 * sin(_t * 6.0) if on else 1.0)
 	var show: bool = cur >= 0 and phase == "board" and main.tokens.has(cur)
 	marker.visible = show
 	if show:
