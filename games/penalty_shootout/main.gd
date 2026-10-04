@@ -2,9 +2,15 @@ extends Node3D
 ## PENALTY SHOOTOUT - football fun. The VR player is the GOALKEEPER in a full-size goal: touch the ball
 ## with a glove (or block it with your body) to save it; left stick shuffles along the goal line.
 ## The TV players (1-6) are STRIKERS who take turns from the penalty spot: aim the reticle with the
-## stick, HOLD A to power up, release to shoot, triggers curve it. The keeper scores saves, strikers
-## score goals; shots get faster every round. Split screen fallback: the keeper is a flat player who
-## shuffles and dives. Modes, networking and party join follow docs/GAME_DEV_GUIDE.md and games/duo_arena.
+## stick, HOLD A to power up, release to shoot (X: a floating CHIP, Y: a FIREBALL once per match),
+## triggers curve it. Shots get faster every round.
+## It's a CUP: a GROUP STAGE, then THE FINAL between the two top strikers (with sudden death), then the
+## TROPHY ceremony - with one striker it's striker vs keeper for the cup. Now and then a POWER-UP
+## bubble floats in front of the keeper (BIG GLOVES, SLOW-MO, DOUBLE SAVE): touch it to take it.
+## Goals bring celebrations, confetti cannons, the dancing lion mascot and a slow-motion REPLAY on the
+## TV; the end screen hands out awards (golden boot, golden glove, fastest shot...).
+## Split screen fallback: the keeper is a flat player who shuffles and dives.
+## Modes, networking and party join follow docs/GAME_DEV_GUIDE.md and games/duo_arena.
 
 const VrText := preload("res://core/vr_text.gd")
 const SfxScript := preload("res://core/sfx.gd")
@@ -22,10 +28,16 @@ const MAX_LOCAL_VIEWS := 6
 const PAD_LEAVE_TIME := 20.0
 const FIRST_INTRO_TIME := 9.0
 const INTRO_TIME := 3.5
+const FINAL_INTRO_TIME := 4.5
+const TROPHY_TIME := 7.0
 const READY_TIME := 1.0
 const AIM_TIME := 15.0
 const RUNUP_TIME := 0.5
 const SPD_MIN := 6.5
+const FIRE_SPEED := 22.0
+const REPLAY_DELAY := 0.7
+const REPLAY_CAM := Vector3(6.6, 1.35, 5.2)
+const POWERS: Array[String] = ["big", "slow", "double"]
 const PLAYER_COLORS: Array[Color] = [Color(0.2, 1.0, 0.45), Color(1.0, 0.3, 0.3), Color(0.25, 0.6, 1.0),
 	Color(1.0, 0.85, 0.15), Color(0.85, 0.45, 1.0), Color(1.0, 0.55, 0.15), Color(0.3, 0.95, 0.95)]
 const SOUNDS := {
@@ -40,6 +52,11 @@ const SOUNDS := {
 	"bounce": [0.08, 150.0, 90.0, 0.35, "sine", 0.2],
 	"dive": [0.25, 900.0, 300.0, 0.18, "sine", 0.8],
 	"join": [0.45, 523.0, 1046.0, 0.3, "tri", 0.0],
+	"power": [0.5, 400.0, 1600.0, 0.3, "sine", 0.0],
+	"fire": [0.5, 900.0, 120.0, 0.4, "saw", 0.8],
+	"boom": [0.7, 110.0, 30.0, 0.5, "saw", 0.7],
+	"fanfare": [1.4, 392.0, 1568.0, 0.4, "square", 0.0],
+	"replay": [0.3, 700.0, 500.0, 0.2, "tri", 0.0],
 }
 
 var players: Array = []
@@ -63,7 +80,7 @@ var mats := {}
 var meshes := {}
 var spot := Vector3(0.0, BallScript.R, 11.0)
 
-var state := "wait"  # wait, intro, aim, runup, flight, result, over
+var state := "wait"  # wait, intro, aim, runup, flight, result, final_intro, trophy, over
 var state_t := 0.0
 var intro_dur := FIRST_INTRO_TIME
 var shooter := -1
@@ -71,6 +88,7 @@ var round_i := 0
 var rounds_total := 5
 var order: Array[int] = []
 var turn_k := 0
+var turn_count := 0
 var saves := 0
 var goals_total := 0
 var shots_total := 0
@@ -78,9 +96,30 @@ var matches := 0
 var pending := {}
 var cur_max_speed := 9.5
 var last_result := ""
+var last_kmh := 0
+var result_len := 2.5
 var excite := 0.0
 var shake := 0.0
 var cont_was := false
+# The cup.
+var cup_stage := "group"  # group, final
+var finalists: Array[int] = []
+var final_goals := {}
+var final_shots := 3
+var sudden := 0
+var champion := -1  # 0 = the keeper, 1-6 a striker
+var save_streak := 0
+var best_save_streak := 0
+var last_shot := "normal"
+var wild_t := 0.0
+# Replays (TV views only).
+var rec: Array = []  # [t, ball pos, head, down, glove l, glove r]
+var rec_t := 0.0
+var replay_on := false
+var replay_t := 0.0
+var replay_len := 0.0
+var replay_ball: MeshInstance3D
+var replay_pos := Vector3.ZERO
 
 var reticle: MeshInstance3D
 var dots: Array[MeshInstance3D] = []
@@ -88,6 +127,8 @@ var center_label: Label
 var help_label: Label
 var center_tween: Tween
 var vr_center: Label3D
+var vr_msg := ""
+var vr_msg_t := 0.0
 
 
 func _ready() -> void:
@@ -135,7 +176,8 @@ func _setup_game(mode: String) -> void:
 	_restore_party()
 	if mode == "host":
 		state = "wait"
-		_show_center("PENALTY SHOOTOUT\nYou're the KEEPER!\nWaiting for the strikers on the TV…", 0.0)
+		_show_center("PENALTY SHOOTOUT\nYou're the KEEPER!\nWaiting for the strikers on the TV…", 0.0, true,
+			"You're the KEEPER!\nWaiting for the strikers…")
 	elif mode == "client":
 		state = "wait"
 		_show_center("CONNECTED", 1.5, false)
@@ -236,6 +278,8 @@ func burst(pos: Vector3, color: Color, amount: int = 20, broadcast: bool = true)
 		net.event("burst", [pos, color, amount])
 
 
+## Big floating words. VR: world-locked facing the keeper, kept at least 3.5 m away and drawn with
+## normal depth (nothing nearer sits in front of them by then: the ball has stopped).
 func popup(pos: Vector3, text: String, color: Color, broadcast: bool = true) -> void:
 	var l := Label3D.new()
 	l.text = text
@@ -243,15 +287,15 @@ func popup(pos: Vector3, text: String, color: Color, broadcast: bool = true) -> 
 	l.pixel_size = 0.006
 	l.outline_size = 18
 	l.modulate = color
-	l.no_depth_test = true
 	l.render_priority = 5
 	if keeper_in_vr():
 		l.billboard = BaseMaterial3D.BILLBOARD_DISABLED  # VR: world-locked, facing the keeper
 		l.rotation.y = PI
-		l.pixel_size = 0.004
+		l.pixel_size = 0.004 * keeper.ws()
 		pos = Vector3(clampf(pos.x, -3.0, 3.0), maxf(pos.y, 1.2) + 0.6, maxf(pos.z, 4.0))  # never close to the eyes
 	else:
 		l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		l.no_depth_test = true
 	add_child(l)
 	l.global_position = pos
 	var tw := l.create_tween()
@@ -414,6 +458,17 @@ func _ensure_view(p) -> void:
 	l.position = Vector2(36, 10)
 	p.hud = hud
 	p.hud_label = l
+	var rl := _make_label(26)
+	rl.text = "● REPLAY"
+	rl.add_theme_color_override("font_color", Color(1.0, 0.35, 0.3))
+	hud.add_child(rl)
+	rl.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	rl.offset_left = -220
+	rl.offset_right = -16
+	rl.offset_top = 12
+	rl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	rl.visible = false
+	p.set_meta("replay_label", rl)
 	if p.index > 0:
 		var bg := ColorRect.new()
 		bg.color = Color(0, 0, 0, 0.6)
@@ -597,8 +652,7 @@ func _request_join(p) -> void:
 
 func _activate(p) -> void:
 	p.set_active(true)
-	p.goals = 0
-	p.shots = 0
+	p.reset_match()
 	if state in ["aim", "runup", "flight", "result", "intro"] and not order.has(p.index):
 		order.append(p.index)  # gets a shot at the end of this round
 	_show_center("PLAYER %d JOINS THE SHOOTOUT!" % (p.index + 1), 1.5)
@@ -725,7 +779,7 @@ func can_shoot() -> bool:
 
 
 func keeper_can_move() -> bool:
-	return state != "wait" and state != "over"
+	return state != "wait" and state != "over" and state != "trophy"
 
 
 # --- Game flow -------------------------------------------------------------------------------
@@ -736,6 +790,8 @@ func _rounds_for(n: int) -> int:
 
 func _max_speed() -> float:
 	var progress := clampf(float(round_i) / maxf(1.0, float(rounds_total - 1)), 0.0, 1.0)
+	if cup_stage == "final":
+		progress = 1.0
 	var n := maxi(1, active_strikers().size())
 	return (9.5 + 8.0 * progress) * (1.0 - 0.025 * (n - 1))
 
@@ -749,12 +805,23 @@ func _begin_match() -> void:
 	goals_total = 0
 	shots_total = 0
 	round_i = 0
+	turn_count = 0
 	shooter = -1
 	order.clear()
+	cup_stage = "group"
+	finalists.clear()
+	final_goals.clear()
+	sudden = 0
+	champion = -1
+	save_streak = 0
+	best_save_streak = 0
+	keeper.power = ""
+	keeper.bubble = ""
 	for p in players:
 		if p.index > 0:
-			p.goals = 0
-			p.shots = 0
+			p.reset_match()
+	world.show_trophy(Vector3.INF)
+	world.mascot_cheer("")
 	rounds_total = _rounds_for(active_strikers().size())
 	cur_max_speed = _max_speed()
 	ball.place(spot)
@@ -763,20 +830,27 @@ func _begin_match() -> void:
 	intro_dur = FIRST_INTRO_TIME if matches == 0 else INTRO_TIME
 	matches += 1
 	if intro_dur > INTRO_TIME:
-		_show_center("PENALTY SHOOTOUT!\n" \
+		_show_center("PENALTY CUP!\n" \
 			+ "KEEPER: stop the ball with your gloves! (VR: just reach out and touch it · left stick shuffles)\n" \
 			+ "STRIKERS: take turns · aim with the stick · HOLD A to power up, let go to shoot · triggers bend it\n" \
-			+ "Too much power (red) = wild shot!\n\nA / Enter (VR: trigger) to kick off", intro_dur)
+			+ "X: a floating CHIP · Y: a FIREBALL (once a match) · too much power (red) = wild shot!\n" \
+			+ "Group stage, then THE FINAL for the cup!\n\nA / Enter (VR: trigger) to kick off", intro_dur, true,
+			"PENALTY CUP! You're the KEEPER\nTouch the ball with your gloves!")
 	else:
-		_show_center("NEW MATCH!  %d rounds\nGet ready…" % rounds_total, intro_dur)
+		_show_center("NEW CUP!  Group stage: %d rounds\nGet ready…" % rounds_total, intro_dur, true, "NEW CUP!\nGet ready…")
 	sound("whistle", 0.0, 1.0, true)
 	print("Match started: %d strikers, %d rounds" % [active_strikers().size(), rounds_total])
 
 
 func _begin_round() -> void:
 	order.clear()
-	for p in active_strikers():
-		order.append(p.index)
+	if cup_stage == "final":
+		for f in finalists:
+			if players[f].active:
+				order.append(f)
+	else:
+		for p in active_strikers():
+			order.append(p.index)
 	turn_k = 0
 	if order.is_empty():
 		state = "wait"
@@ -791,44 +865,159 @@ func _start_turn() -> void:
 		turn_k += 1
 	if turn_k >= order.size():
 		round_i += 1
-		if round_i >= rounds_total:
-			_match_over()
+		if cup_stage == "final":
+			_final_round_done()
+		elif round_i >= rounds_total:
+			_group_done()
 		else:
 			_begin_round()
 		return
 	shooter = order[turn_k]
 	state = "aim"
 	state_t = 0.0
+	turn_count += 1
 	cur_max_speed = _max_speed()
 	ball.place(spot)
 	var p = players[shooter]
 	if is_local(p):
 		p.prepare_turn()
+	# Now and then the keeper gets a power-up bubble (more often when the strikers are well ahead).
+	if keeper.bubble == "" and keeper.power == "" and (turn_count % 3 == 0 or goals_total - saves >= 3):
+		var kind: String = POWERS[randi() % POWERS.size()]
+		keeper.offer(kind)
+		_vr_say("POWER-UP!  Touch the bubble!", 2.5)
+		print("Power-up offered: %s" % kind)
 	var tip := ""
-	if matches <= 1 and round_i == 0:
+	if matches <= 1 and round_i == 0 and cup_stage == "group":
 		tip = "\nKEEPER: touch the ball with a glove to save it!  Strikers: aim, HOLD A, let go!"
-	_show_center("ROUND %d of %d  ·  P%d TO SHOOT%s" % [round_i + 1, rounds_total, shooter + 1, tip], 1.6 if tip == "" else 2.6)
+	var head := "THE FINAL" if cup_stage == "final" else "ROUND %d of %d" % [round_i + 1, rounds_total]
+	if cup_stage == "final" and sudden > 0:
+		head = "SUDDEN DEATH"
+	_show_center("%s  ·  P%d TO SHOOT%s" % [head, shooter + 1, tip], 1.6 if tip == "" else 2.6, true, "P%d to shoot - get ready!" % (shooter + 1))
 	sound("whistle", -6.0, 1.15, true)
-	print("Turn: round %d/%d, P%d shoots (max speed %.1f)" % [round_i + 1, rounds_total, shooter + 1, cur_max_speed])
+	print("Turn: %s round %d/%d, P%d shoots (max speed %.1f)" % [cup_stage, round_i + 1, rounds_total, shooter + 1, cur_max_speed])
 
 
 func _advance() -> void:
+	keeper.power = ""
+	keeper.bubble = ""
 	turn_k += 1
 	_start_turn()
 
 
-func request_shot(p, aim: Vector2, power: float, curve: float) -> void:
+## The group stage is over: the two top strikers meet in THE FINAL (one striker: it's them against the
+## keeper for the cup).
+func _group_done() -> void:
+	var gs := active_strikers()
+	if gs.is_empty():
+		_match_over()
+		return
+	if gs.size() == 1:
+		var s = gs[0]
+		champion = s.index if s.goals * 2 > s.shots else 0
+		_start_trophy()
+		return
+	gs.sort_custom(func(a, b) -> bool: return a.goals > b.goals or (a.goals == b.goals and a.shots < b.shots))
+	finalists.clear()
+	finalists.append(int(gs[0].index))
+	finalists.append(int(gs[1].index))
+	final_goals = {finalists[0]: 0, finalists[1]: 0}
+	cup_stage = "final"
+	sudden = 0
+	round_i = 0
+	state = "final_intro"
+	state_t = 0.0
+	keeper.power = ""
+	keeper.bubble = ""
+	_show_center("THE FINAL!\nP%d  vs  P%d\n%d shots each - most goals lifts the CUP!" % [finalists[0] + 1, finalists[1] + 1, final_shots],
+		FINAL_INTRO_TIME, true, "THE FINAL!\nP%d vs P%d" % [finalists[0] + 1, finalists[1] + 1])
+	sound("fanfare", -2.0, 1.0, true)
+	world.fireworks(2)
+	net.event("fx", ["fireworks"])
+	print("Group stage done: final P%d vs P%d" % [finalists[0] + 1, finalists[1] + 1])
+
+
+## After each pair of final shots: decided? (or sudden death, up to three extra pairs).
+func _final_round_done() -> void:
+	var a: int = finalists[0]
+	var b: int = finalists[1]
+	var ga: int = final_goals.get(a, 0)
+	var gb: int = final_goals.get(b, 0)
+	if round_i < final_shots:
+		_begin_round()
+		return
+	if ga != gb:
+		champion = a if ga > gb else b
+		_start_trophy()
+		return
+	if sudden < 3:
+		sudden += 1
+		_show_center("SUDDEN DEATH!\nP%d %d - %d P%d" % [a + 1, ga, gb, b + 1], 2.0, true, "SUDDEN DEATH!")
+		_begin_round()
+		return
+	champion = a if players[a].goals >= players[b].goals else b
+	_start_trophy()
+
+
+func _start_trophy() -> void:
+	state = "trophy"
+	state_t = 0.0
+	shooter = -1
+	ball.place(spot)
+	var who := "THE KEEPER" if champion == 0 else "P%d" % (champion + 1)
+	_show_center("%s WINS THE CUP!" % who, TROPHY_TIME, true, ("YOU WIN THE CUP!" if champion == 0 else "%s WINS THE CUP!" % who))
+	_trophy_fx()
+	net.event("trophy", [champion])
+	print("Cup winner: %s" % who)
+
+
+func _trophy_fx() -> void:
+	sound("fanfare", 0.0, 1.0)
+	sound("cheer", 0.0, 0.9)
+	world.fireworks(5)
+	world.confetti_cannons()
+	world.mascot_cheer("cup")
+	excite = 1.0
+	if champion > 0 and champion < players.size():
+		players[champion].hold_cup = true
+
+
+## Where the TV cameras look during the trophy ceremony: [camera position, look-at point].
+func ceremony_camera() -> Array:
+	if champion > 0 and champion < players.size():
+		var p = players[champion]
+		return [Vector3(p.position.x, 1.75, p.position.z - 3.6), p.position + Vector3(0, 1.7, 0)]
+	return [Vector3(keeper.head_pos.x * 0.6, 1.9, 5.5), keeper.head_pos + Vector3(0, -0.2, 0)]
+
+
+func _update_trophy() -> void:
+	if state != "trophy":
+		return
+	if champion > 0 and champion < players.size():
+		var p = players[champion]
+		world.show_trophy(p.global_position + Vector3(0, 2.25, -0.05), 1.0)
+	elif champion == 0:
+		var w: float = keeper.ws()
+		if keeper_in_vr():
+			world.show_trophy(keeper.head_pos + Vector3(0.0, -0.45, 0.5) * w, w)  # chest height, in front
+		else:
+			world.show_trophy(keeper.head_pos + Vector3(0, 0.25, 0.05), 1.0)
+
+
+func request_shot(p, aim: Vector2, power: float, curve: float, shot: String = "normal") -> void:
 	if net.mode == "client":
-		net.send_action("shoot", [aim, power, curve], p.index)
+		net.send_action("shoot", [aim, power, curve, shot], p.index)
 	else:
-		_on_shoot(p.index, aim, power, curve)
+		_on_shoot(p.index, aim, power, curve, shot)
 
 
-func _on_shoot(index: int, aim: Vector2, power: float, curve: float) -> void:
+func _on_shoot(index: int, aim: Vector2, power: float, curve: float, shot: String = "normal") -> void:
 	if state != "aim" or index != shooter or state_t < READY_TIME - 0.3:
 		return
 	var p = players[index]
-	pending = {"aim": aim, "power": clampf(power, 0.0, 1.0), "curve": clampf(curve, -1.0, 1.0)}
+	if shot == "fire" and p.fire_left <= 0:
+		shot = "normal"
+	pending = {"aim": aim, "power": clampf(power, 0.0, 1.0), "curve": clampf(curve, -1.0, 1.0), "shot": shot}
 	p.shots += 1
 	shots_total += 1
 	state = "runup"
@@ -839,23 +1028,46 @@ func _launch() -> void:
 	var aim: Vector2 = pending.get("aim", Vector2(0, 1))
 	var power: float = pending.get("power", 0.5)
 	var curve: float = pending.get("curve", 0.0)
+	var shot: String = pending.get("shot", "normal")
 	var target := Vector3(clampf(aim.x, -StrikerScript.AIM_X, StrikerScript.AIM_X), aim.y, 0.0)
 	if power > 0.85:
 		var err := (power - 0.85) / 0.15 * 0.9
 		target += Vector3(randf_range(-err, err), randf_range(-err * 0.4, err), 0.0)
 	target.y = clampf(target.y, BallScript.R, StrikerScript.AIM_Y_MAX + 0.5)
 	var speed := lerpf(SPD_MIN, cur_max_speed, power)
+	match shot:
+		"chip":
+			speed = lerpf(SPD_MIN * 0.75, cur_max_speed * 0.6, power)  # slow = a high, floating arc
+		"fire":
+			speed = minf(FIRE_SPEED, cur_max_speed * 1.25 + 2.0)
+			var p = players[shooter]
+			p.fire_left = maxi(0, int(p.fire_left) - 1)
+	if keeper.power == "slow":
+		speed *= 0.65
+	last_shot = shot
 	ball.place(spot)
 	ball.kick(target, speed, curve)
+	ball.set_fire(shot == "fire")
+	last_kmh = int(roundf(ball.vel.length() * 3.6))
+	var sp = players[shooter]
+	sp.fastest = maxf(float(sp.fastest), float(last_kmh))
 	state = "flight"
 	state_t = 0.0
-	excite = maxf(excite, 0.35)
+	excite = maxf(excite, 0.5 if shot == "fire" else 0.35)
 	sound("kick", 0.0, 1.0, true)
-	print("Shot by P%d: power %.2f curve %.2f speed %.1f -> (%.1f, %.1f)" % [shooter + 1, power, curve, speed, target.x, target.y])
+	if shot == "fire":
+		sound("fire", -2.0, 1.0, true)
+	if power > 0.85:
+		wild_t = 6.0
+	print("Shot by P%d: %s power %.2f curve %.2f speed %.1f (%d km/h)%s -> (%.1f, %.1f)" % [shooter + 1, shot, power, curve, speed,
+		last_kmh, " SLOW-MO" if keeper.power == "slow" else "", target.x, target.y])
 
 
 func _on_save(kind: String) -> void:
-	saves += 1
+	var worth := 2 if keeper.power == "double" else 1
+	saves += worth
+	save_streak += 1
+	best_save_streak = maxi(best_save_streak, save_streak)
 	state = "result"
 	state_t = 0.0
 	var fast := ball.vel.length() > 12.0
@@ -868,28 +1080,46 @@ func _on_save(kind: String) -> void:
 		"dive":
 			text = "DIVING SAVE!"
 		_:
-			text = "SUPER SAVE!" if fast or absf(ball.position.x) > 2.4 or ball.position.y > 1.9 else "SAVED!"
+			text = "SUPER SAVE!" if fast or absf(ball.position.x) > 2.4 or ball.position.y > 1.9 or last_shot == "fire" else "SAVED!"
+	if worth == 2:
+		text += " x2"
 	last_result = text
 	keeper.haptic(kind)
+	keeper.cheer_t = 1.6
 	sound("save", 0.0, 1.0, true)
 	sound("cheer", -2.0, 1.1, true)
 	excite = 1.0
 	popup(ball.position + Vector3(0, 0.5, 0.4), text, Color(0.3, 1.0, 0.5))
 	burst(ball.position, Color(0.3, 1.0, 0.5), 24)
-	_show_center("%s\nKEEPER %d saves  ·  STRIKERS %d goals" % [text, saves, goals_total], 1.8)
+	world.mascot_cheer("save")
+	net.event("fx", ["save"])
+	var streak_line := ("  ·  %d SAVES IN A ROW!" % save_streak) if save_streak >= 3 else ""
+	_show_center("%s  (%d km/h)\n%s%s" % [text, last_kmh, _score_line(), streak_line], 1.8, true, text + streak_line)
+	result_len = _result_time() + _replay_extra(text)
 	print("Result: %s (%s) - saves %d goals %d" % [text, kind, saves, goals_total])
 
 
 func _on_goal() -> void:
 	goals_total += 1
+	save_streak = 0
 	var p = players[shooter] if shooter > 0 and shooter < players.size() else null
 	if p != null:
 		p.goals += 1
+		if last_shot != "normal" or absf(float(pending.get("curve", 0.0))) > 0.5:
+			p.trick_goals += 1
+		if cup_stage == "final":
+			final_goals[shooter] = int(final_goals.get(shooter, 0)) + 1
 		if is_local(p) and p.joy >= 0:
 			Input.start_joy_vibration(p.joy, 0.7, 0.9, 0.4)
 	state = "result"
 	state_t = 0.0
-	last_result = "GOAL!"
+	var label := "GOAL!"
+	match last_shot:
+		"chip":
+			label = "CHIP GOAL!"
+		"fire":
+			label = "FIREBALL GOAL!"
+	last_result = label
 	world.bulge()
 	net.event("bulge", [])
 	sound("net", 0.0, 1.0, true)
@@ -897,48 +1127,228 @@ func _on_goal() -> void:
 	excite = 1.0
 	shake = 0.5
 	var col: Color = p.color if p != null else Color(1, 1, 0)
-	popup(ball.position + Vector3(0, 0.6, 0.6), "GOAL!", col)
+	popup(ball.position + Vector3(0, 0.6, 0.6), label, col)
 	burst(Vector3(-3.0, 2.6, 0.0), col, 26)
 	burst(Vector3(3.0, 2.6, 0.0), Color(1, 1, 1), 26)
-	_show_center("GOAL by P%d!\nKEEPER %d saves  ·  STRIKERS %d goals" % [shooter + 1, saves, goals_total], 1.8)
-	print("Result: GOAL by P%d - saves %d goals %d" % [shooter + 1, saves, goals_total])
+	var kind := randi() % 3
+	_goal_fx(shooter, kind)
+	net.event("goal_fx", [shooter, kind])
+	_show_center("%s  P%d  (%d km/h)\n%s" % [label, shooter + 1, last_kmh, _score_line()], 1.8, true, "%s  P%d" % [label, shooter + 1])
+	result_len = _result_time() + _replay_extra(label)
+	print("Result: %s by P%d - saves %d goals %d" % [label, shooter + 1, saves, goals_total])
+
+
+## Celebration on every machine: the scorer's dance, confetti cannons and the mascot.
+func _goal_fx(idx: int, kind: int) -> void:
+	if idx > 0 and idx < players.size():
+		players[idx].celebrate(kind)
+	world.confetti_cannons()
+	world.mascot_cheer("goal")
+	if cup_stage == "final" or last_shot == "fire":
+		world.fireworks(2)
 
 
 func _on_miss(reason: String) -> void:
 	state = "result"
 	state_t = 0.0
 	last_result = reason
+	save_streak = 0
 	sound("groan", -2.0, 1.0, true)
 	excite = 0.3
 	popup(ball.position + Vector3(0, 0.6, 0), reason, Color(1.0, 0.75, 0.3))
-	_show_center("%s\nKEEPER %d saves  ·  STRIKERS %d goals" % [reason, saves, goals_total], 1.8)
+	_show_center("%s\n%s" % [reason, _score_line()], 1.8, true, reason)
+	result_len = _result_time()
 	print("Result: %s - saves %d goals %d" % [reason, saves, goals_total])
+
+
+func _score_line() -> String:
+	if cup_stage == "final" and finalists.size() == 2:
+		return "THE FINAL:  P%d %d - %d P%d" % [finalists[0] + 1, int(final_goals.get(finalists[0], 0)),
+			int(final_goals.get(finalists[1], 0)), finalists[1] + 1]
+	return "KEEPER %d saves  ·  STRIKERS %d goals" % [saves, goals_total]
 
 
 func _match_over() -> void:
 	state = "over"
 	state_t = 0.0
 	shooter = -1
+	for p in players:
+		if p.index > 0:
+			p.hold_cup = false
+	world.show_trophy(Vector3.INF)
+	world.mascot_cheer("")
 	var verdict := "IT'S A DRAW!"
 	var kept := shots_total - goals_total
-	if goals_total * 2 > shots_total:
+	if champion == 0:
+		verdict = "THE KEEPER WINS THE CUP!"
+	elif champion > 0:
+		verdict = "P%d WINS THE CUP!" % (champion + 1)
+	elif goals_total * 2 > shots_total:
 		verdict = "THE STRIKERS WIN!"
 	elif goals_total * 2 < shots_total:
 		verdict = "THE KEEPER WINS!"
-	var top = null
-	for p in active_strikers():
-		if top == null or p.goals > top.goals:
-			top = p
-	var top_line := ""
-	if top != null and top.goals > 0:
-		top_line = "Top striker: P%d with %d goal%s\n" % [top.index + 1, top.goals, "" if top.goals == 1 else "s"]
-	_show_center("FULL TIME!  %s\nThe keeper kept out %d of %d shots (%d saves)\n%s\nA / Enter (VR: trigger) to play again" \
-		% [verdict, kept, shots_total, saves, top_line], 0.0)
+	var awards := _awards()
+	set_meta("awards", awards)
+	_show_center("FULL TIME!  %s\nThe keeper kept out %d of %d shots (%d saves)\n\n%s\n\nA / Enter (VR: trigger) to play again" \
+		% [verdict, kept, shots_total, saves, awards], 0.0, true, "FULL TIME!\n" + verdict)
 	sound("whistle", 0.0, 0.9, true)
 	sound("cheer", 0.0, 0.9, true)
 	excite = 1.0
-	print("Match over: %s saves %d goals %d shots %d" % [verdict, saves, goals_total, shots_total])
+	print("Match over: %s saves %d goals %d shots %d | awards: %s" % [verdict, saves, goals_total, shots_total, awards.replace("\n", " | ")])
 
+
+## Fun end-of-cup awards (a few lines).
+func _awards() -> String:
+	var out: PackedStringArray = []
+	var boot = null
+	var rocket = null
+	var trick = null
+	var sharp = null
+	for p in active_strikers():
+		if p.goals > 0 and (boot == null or p.goals > boot.goals):
+			boot = p
+		if p.fastest > 0.0 and (rocket == null or p.fastest > rocket.fastest):
+			rocket = p
+		if p.trick_goals > 0 and (trick == null or p.trick_goals > trick.trick_goals):
+			trick = p
+		if p.shots >= 3 and p.goals == p.shots and (sharp == null or p.goals > sharp.goals):
+			sharp = p
+	if boot != null:
+		out.append("GOLDEN BOOT: P%d (%d goal%s)" % [boot.index + 1, boot.goals, "" if boot.goals == 1 else "s"])
+	if shots_total >= 3 and float(shots_total - goals_total) / float(shots_total) >= 0.4:
+		out.append("GOLDEN GLOVE: the KEEPER (%d%% kept out)" % int(100.0 * float(shots_total - goals_total) / float(shots_total)))
+	if best_save_streak >= 3:
+		out.append("THE WALL: %d saves in a row!" % best_save_streak)
+	if rocket != null:
+		out.append("ROCKET SHOT: P%d (%d km/h)" % [rocket.index + 1, int(rocket.fastest)])
+	if trick != null:
+		out.append("TRICK SHOT: P%d (%d chip / curl / fireball goals)" % [trick.index + 1, trick.trick_goals])
+	if sharp != null:
+		out.append("PERFECT AIM: P%d scored every shot" % (sharp.index + 1))
+	if out.is_empty():
+		out.append("EVERYONE: what a match!")
+	return "\n".join(out.slice(0, 5))
+
+
+# --- Power-ups (host / local) ---------------------------------------------------------------------
+
+func keeper_collect(kind: String) -> void:
+	if keeper.bubble == "" or not is_host_side():
+		return
+	keeper.bubble = ""
+	keeper.power = kind
+	_power_fx(kind)
+	net.event("power", [kind])
+	var name: String = keeper.POWER_NAMES.get(kind, kind)
+	_show_center("KEEPER POWER-UP: %s!" % name, 1.6, true, "%s!" % name)
+	print("Keeper took the power-up: %s" % kind)
+
+
+func _power_fx(kind: String) -> void:
+	sound("power", -2.0, 1.0 + 0.1 * POWERS.find(kind))
+	var c: Color = keeper.POWER_COLORS.get(kind, Color.WHITE)
+	burst(keeper.head_pos + Vector3(0, -0.4, 0.4), c, 20, false)
+	if keeper_in_vr():
+		keeper.hand_l.trigger_haptic_pulse("haptic", 0.0, 0.6, 0.15, 0.0)
+		keeper.hand_r.trigger_haptic_pulse("haptic", 0.0, 0.6, 0.15, 0.0)
+
+
+func is_host_side() -> bool:
+	return net == null or net.mode != "client"
+
+
+# --- Replays (TV views: slow motion from the side, after goals and great saves) ------------------
+
+func _has_tv_views() -> bool:
+	for p in players:
+		if p.has_meta("view"):
+			return true
+	return false
+
+
+## Host: extra result time for a replay (the TV machine plays it; the VR keeper just waits a moment).
+func _replay_extra(result: String) -> float:
+	if not _replay_worthy(result):
+		return 0.0
+	if net.mode == "local" or (net.mode == "host" and net.connected):
+		return REPLAY_DELAY + 1.9
+	return 0.0
+
+
+func _replay_worthy(result: String) -> bool:
+	return result.contains("GOAL") or result.begins_with("SUPER") or result.begins_with("DIVING") or result.begins_with("HEADER")
+
+
+func _record(delta: float) -> void:
+	if state == "runup":
+		rec.clear()
+		rec_t = 0.0
+		return
+	if state != "flight" and not (state == "result" and state_t < 0.5):
+		return
+	if rec.size() > 300:
+		return
+	rec_t += delta
+	rec.append([rec_t, ball.global_position, keeper.head_pos, keeper.down_dir, keeper.glove_l, keeper.glove_r])
+
+
+func _start_replay() -> void:
+	if rec.size() < 6 or not _has_tv_views():
+		return
+	replay_on = true
+	replay_t = 0.0
+	replay_len = minf(float(rec[rec.size() - 1][0]) / 0.45, 1.8)
+	if replay_ball == null:
+		replay_ball = MeshInstance3D.new()
+		replay_ball.mesh = sphere_mesh(BallScript.R)
+		replay_ball.material_override = make_material(Color(1.0, 0.95, 0.8), 0.6)
+		add_child(replay_ball)
+	replay_ball.visible = true
+	ball.hide_for_replay = true
+	sound("replay", -10.0)
+
+
+func _stop_replay() -> void:
+	if not replay_on:
+		return
+	replay_on = false
+	keeper.replay_pose = []
+	ball.hide_for_replay = false
+	if replay_ball != null:
+		replay_ball.visible = false
+
+
+func _update_replay(delta: float) -> void:
+	if state == "result" and not replay_on and state_t >= REPLAY_DELAY and state_t - delta < REPLAY_DELAY and _replay_worthy(last_result):
+		_start_replay()
+	if not replay_on:
+		return
+	if state != "result":
+		_stop_replay()
+		return
+	replay_t += delta
+	var total: float = rec[rec.size() - 1][0]
+	var tt := clampf(replay_t / maxf(replay_len, 0.1), 0.0, 1.0) * total
+	var k := 0
+	while k < rec.size() - 2 and float(rec[k + 1][0]) < tt:
+		k += 1
+	var a: Array = rec[k]
+	var b: Array = rec[mini(k + 1, rec.size() - 1)]
+	var span := maxf(0.0001, float(b[0]) - float(a[0]))
+	var f := clampf((tt - float(a[0])) / span, 0.0, 1.0)
+	replay_pos = (a[1] as Vector3).lerp(b[1], f)
+	replay_ball.global_position = replay_pos
+	keeper.replay_pose = [(a[2] as Vector3).lerp(b[2], f), (a[3] as Vector3).lerp(b[3], f).normalized(),
+		(a[4] as Vector3).lerp(b[4], f), (a[5] as Vector3).lerp(b[5], f)]
+	if replay_t > replay_len + 0.3:
+		_stop_replay()
+
+
+func replay_look() -> Vector3:
+	return Vector3(0, 1.1, 1.5).lerp(replay_pos, 0.45)
+
+
+# --- Main loop -------------------------------------------------------------------------------
 
 func _process(delta: float) -> void:
 	if not ready_to_play:
@@ -947,7 +1357,7 @@ func _process(delta: float) -> void:
 		music = MusicScript.new()
 		add_child(music)
 		music.volume_db = -19.0
-	music.play_track(round_i % 3)
+	music.play_track(1 if cup_stage == "final" or state == "trophy" else round_i % 3)
 	_ensure_join_listener()
 	if mirror_vp:
 		mirror_t -= delta
@@ -957,12 +1367,20 @@ func _process(delta: float) -> void:
 	if views_root != null and is_instance_valid(views_root) and views_root.size != last_view_area:
 		_layout_views()
 	excite = maxf(0.05, excite - delta * 0.35)
+	if state == "trophy":
+		excite = maxf(excite, 0.8)
 	shake = maxf(0.0, shake - delta * 1.2)
-	if world.crowd_mat != null:
-		world.crowd_mat.set_shader_parameter("excite", excite)
+	wild_t = maxf(0.0, wild_t - delta)
+	world.set_excite(excite)
 	_place_strikers()
 	_update_aim_visuals()
-	_update_vr_text()
+	_update_vr_text(delta)
+	_record(delta)
+	_update_replay(delta)
+	_update_trophy()
+	for p in players:
+		if p.has_meta("replay_label"):
+			(p.get_meta("replay_label") as Label).visible = replay_on
 	world.set_scoreboard(_scoreboard_text())
 	var cont := _continue_pressed()
 	var cont_edge := cont and not cont_was
@@ -976,6 +1394,9 @@ func _process(delta: float) -> void:
 		"intro":
 			if state_t >= intro_dur or (state_t > 1.5 and cont_edge):
 				_begin_round()
+		"final_intro":
+			if state_t >= FINAL_INTRO_TIME:
+				_begin_round()
 		"aim":
 			var p = players[shooter] if shooter > 0 and shooter < players.size() else null
 			if p == null or not p.active:
@@ -988,8 +1409,11 @@ func _process(delta: float) -> void:
 			if state_t >= RUNUP_TIME:
 				_launch()
 		"result":
-			if state_t >= _result_time():
+			if state_t >= result_len:
 				_advance()
+		"trophy":
+			if state_t >= TROPHY_TIME:
+				_match_over()
 		"over":
 			if state_t > 1.5 and cont_edge:
 				_begin_match()
@@ -1067,6 +1491,7 @@ func _on_continue() -> void:
 
 
 ## Where everyone stands: the shooter behind the ball (running up when kicking), the rest queue at the D.
+## Cup ceremony: the champion steps forward to lift the trophy, the others line up behind.
 func _queue_pos(k: int) -> Vector3:
 	return Vector3(-3.0 + (k % 6) * 1.2, 0.0, 18.8 + (k / 6) * 1.2)
 
@@ -1077,7 +1502,10 @@ func _place_strikers() -> void:
 		var p = players[i]
 		if not p.active:
 			continue
-		if i == shooter and state in ["aim", "runup", "flight", "result"]:
+		if state == "trophy" and i == champion:
+			p.run = 0.0
+			p.stand_at = Vector3(0.0, 0.0, 8.5)
+		elif i == shooter and state in ["aim", "runup", "flight", "result"]:
 			p.run = 1.0
 			if state == "aim":
 				p.stand_at = spot + Vector3(0.25, 0.0, 1.9)
@@ -1085,7 +1513,7 @@ func _place_strikers() -> void:
 				p.stand_at = spot + Vector3(0.22, 0.0, 0.35)
 		else:
 			p.run = 0.0
-			p.stand_at = _queue_pos(k)
+			p.stand_at = _queue_pos(k) if state != "trophy" else Vector3(-3.0 + k * 1.2, 0.0, 12.5)
 			k += 1
 
 
@@ -1135,7 +1563,12 @@ func _update_aim_visuals() -> void:
 	var rm2: StandardMaterial3D = reticle.material_override
 	rm2.albedo_color = Color(1.0, 0.3, 0.2) if p.power > 0.85 else p.color.lightened(0.4)
 	var pw: float = maxf(p.power, 0.3)
-	var pl: Array = BallScript.plan(spot, Vector3(aim.x, aim.y, 0.0), lerpf(SPD_MIN, cur_max_speed, pw), p.curve)
+	var spd := lerpf(SPD_MIN, cur_max_speed, pw)
+	if p.charging and p.shot == "chip":
+		spd = lerpf(SPD_MIN * 0.75, cur_max_speed * 0.6, pw)
+	elif p.charging and p.shot == "fire":
+		spd = minf(FIRE_SPEED, cur_max_speed * 1.25 + 2.0)
+	var pl: Array = BallScript.plan(spot, Vector3(aim.x, aim.y, 0.0), spd, p.curve)
 	var v0: Vector3 = pl[0]
 	var acc: Vector3 = pl[1]
 	var tf: float = pl[2]
@@ -1159,6 +1592,7 @@ func on_client_left() -> void:
 	state = "wait"
 	shooter = -1
 	ball.place(spot)
+	world.show_trophy(Vector3.INF)
 	_show_center("The strikers left - waiting for them to come back…", 0.0)
 
 
@@ -1184,15 +1618,18 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 				var a: Vector2 = args[0]
 				var pw: float = args[1]
 				var cv: float = args[2]
-				_on_shoot(index, a, pw, cv)
+				var shot: String = str(args[3]) if args.size() > 3 else "normal"
+				_on_shoot(index, a, pw, cv, shot)
 		"pause":
 			var paused: bool = args[0]
 			_set_pause_banner(paused, "A TV player opened the menu")
 			get_tree().paused = paused
+			if not paused:
+				keeper.trig_block = true
 
 
 func _set_pause_banner(paused: bool, who: String) -> void:
-	_show_center("PAUSED\n" + who if paused else "", 0.0, false)
+	_show_center("PAUSED\n" + who if paused else "", 0.0, false, ("PAUSED\n" + who) if paused else "")
 	if vr_center != null and paused:
 		VrText.snap(vr_center)
 
@@ -1200,6 +1637,8 @@ func _set_pause_banner(paused: bool, who: String) -> void:
 func toggle_vr_pause() -> void:
 	var paused := not get_tree().paused
 	get_tree().paused = paused
+	keeper.trig_block = true  # the trigger that resumed must not kick off or restart anything
+	cont_was = true
 	_set_pause_banner(paused, "Wrist RESUME: carry on\nHold the trigger: back to the arcade")
 	net.event("remote_pause", [paused])
 
@@ -1208,14 +1647,16 @@ func make_snapshot() -> Array:
 	var ss: Array = []
 	for i in range(1, players.size()):
 		var p = players[i]
-		ss.append([p.active, p.goals, p.shots, p.power, p.charging])
+		ss.append([p.active, p.goals, p.shots, p.power, p.charging, p.fire_left, p.hold_cup])
 	return [state, state_t, shooter, round_i, rounds_total, ball.position, ball.vel, ball.visible,
 		[keeper.head_pos, keeper.down_dir, keeper.glove_l, keeper.glove_r], saves, goals_total, ss,
-		cur_max_speed, shots_total, last_result]
+		cur_max_speed, shots_total, last_result, cup_stage, finalists, [final_goals.get(finalists[0], 0) if finalists.size() == 2 else 0,
+		final_goals.get(finalists[1], 0) if finalists.size() == 2 else 0], champion, keeper.power, keeper.bubble, keeper.bubble_pos,
+		ball.fire, last_kmh, sudden, last_shot]
 
 
 func apply_snapshot(s: Array) -> void:
-	if not ready_to_play or s.size() < 15:
+	if not ready_to_play or s.size() < 26:
 		return
 	synced = true
 	var new_state: String = s[0]
@@ -1254,9 +1695,29 @@ func apply_snapshot(s: Array) -> void:
 		if not is_local(p):
 			p.power = st[3]
 			p.charging = st[4]
+		p.fire_left = st[5]
+		p.hold_cup = st[6]
 	cur_max_speed = s[12]
 	shots_total = s[13]
 	last_result = s[14]
+	cup_stage = s[15]
+	finalists.clear()
+	for f in s[16]:
+		finalists.append(int(f))
+	var fg: Array = s[17]
+	final_goals.clear()
+	if finalists.size() == 2:
+		final_goals[finalists[0]] = int(fg[0])
+		final_goals[finalists[1]] = int(fg[1])
+	champion = s[18]
+	keeper.power = s[19]
+	keeper.bubble = s[20]
+	keeper.bubble_pos = s[21]
+	if bool(s[22]) != ball.fire:
+		ball.set_fire(s[22])
+	last_kmh = s[23]
+	sudden = s[24]
+	last_shot = s[25]
 
 
 func apply_event(kind: String, args: Array) -> void:
@@ -1272,10 +1733,23 @@ func apply_event(kind: String, args: Array) -> void:
 		"popup":
 			popup(args[0], args[1], args[2], false)
 		"center":
-			_show_center(args[0], args[1], false)
+			_show_center(args[0], args[1], false, str(args[2]) if args.size() > 2 else "\u0001")
 		"bulge":
 			world.bulge()
 			shake = 0.5
+		"goal_fx":
+			_goal_fx(int(args[0]), int(args[1]))
+		"fx":
+			match str(args[0]):
+				"save":
+					world.mascot_cheer("save")
+				"fireworks":
+					world.fireworks(2)
+		"power":
+			_power_fx(str(args[0]))
+		"trophy":
+			champion = int(args[0])
+			_trophy_fx()
 		"remote_pause":
 			get_tree().paused = args[0]
 			_set_pause_banner(args[0], "The keeper paused the game")
@@ -1309,16 +1783,17 @@ func _build_hud() -> void:
 	help_label.offset_bottom = -12
 	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	if OS.has_environment("DUO_JOIN"):
-		help_label.text = "STRIKERS: stick / WASD / mouse aims · HOLD A / Space / click to power up, let go to shoot · triggers or Q/E bend it\n" \
+		help_label.text = "STRIKERS: stick / WASD / mouse aims · HOLD A / Space / click to power up, let go to shoot · X / C: chip · Y / F: FIREBALL · triggers or Q/E bend it\n" \
 			+ "More strikers: press A on another controller · Start / Esc menu"
 	else:
-		help_label.text = "STRIKER: stick / arrows aim · HOLD A (Enter) to power up, let go to shoot · triggers (, .) bend it\n" \
+		help_label.text = "STRIKER: stick / arrows aim · HOLD A (Enter) to power up, let go to shoot · X (/): chip · Y ('): FIREBALL · triggers (, .) bend it\n" \
 			+ "KEEPER: A-D / stick / mouse shuffle · Space / A / click dives (hold W = high) · more strikers: press A on a controller"
 
 
-func _show_center(text: String, duration: float, broadcast: bool = true) -> void:
+## TV banner; vr: the short version for the VR keeper ("\u0001" = the first two lines).
+func _show_center(text: String, duration: float, broadcast: bool = true, vr: String = "\u0001") -> void:
 	if net and broadcast:
-		net.event("center", [text, duration])
+		net.event("center", [text, duration, vr])
 	center_label.text = text
 	center_label.modulate.a = 1.0
 	if center_tween:
@@ -1327,6 +1802,15 @@ func _show_center(text: String, duration: float, broadcast: bool = true) -> void
 		center_tween = create_tween()
 		center_tween.tween_interval(duration)
 		center_tween.tween_property(center_label, "modulate:a", 0.0, 0.5)
+	if vr == "\u0001":
+		var lines := text.split("\n")
+		vr = "\n".join(lines.slice(0, 2)) if lines.size() > 0 else ""
+	_vr_say(vr, duration if duration > 0.0 else 9999.0)
+
+
+func _vr_say(text: String, duration: float) -> void:
+	vr_msg = text
+	vr_msg_t = duration
 
 
 func _scoreboard_text() -> String:
@@ -1334,22 +1818,31 @@ func _scoreboard_text() -> String:
 	match state:
 		"aim", "runup", "flight":
 			line3 = "P%d TO SHOOT" % (shooter + 1)
+			if keeper.power != "":
+				line3 += "  ·  KEEPER: %s" % str(keeper.POWER_NAMES.get(keeper.power, ""))
 		"result":
-			line3 = last_result
+			line3 = "%s  %d km/h" % [last_result, last_kmh]
+		"final_intro":
+			line3 = "THE FINAL IS NEXT!"
+		"trophy":
+			line3 = "CUP WINNER: %s" % ("THE KEEPER" if champion == 0 else "P%d" % (champion + 1))
 		"over":
 			line3 = "FULL TIME"
 		"intro":
 			line3 = "KICK OFF SOON"
 		_:
 			line3 = "WAITING FOR STRIKERS"
-	return "SAVES %d   ·   GOALS %d\nROUND %d / %d\n%s" % [saves, goals_total, mini(round_i + 1, rounds_total), rounds_total, line3]
+	var line2 := "ROUND %d / %d" % [mini(round_i + 1, rounds_total), rounds_total]
+	if cup_stage == "final" and finalists.size() == 2:
+		line2 = "FINAL  P%d %d - %d P%d" % [finalists[0] + 1, int(final_goals.get(finalists[0], 0)), int(final_goals.get(finalists[1], 0)), finalists[1] + 1]
+	return "SAVES %d   ·   GOALS %d\n%s\n%s" % [saves, goals_total, line2, line3]
 
 
 func glove_text() -> String:
 	var hint := ""
 	match state:
 		"aim":
-			hint = "\nGET READY!"
+			hint = "\nTOUCH THE BUBBLE!" if keeper.bubble != "" else "\nGET READY!"
 		"runup", "flight":
 			hint = "\nSAVE IT!"
 		"result":
@@ -1358,13 +1851,19 @@ func glove_text() -> String:
 			hint = "\nTRIGGER: play again"
 		"intro":
 			hint = "\nTRIGGER: kick off"
-	return "SAVES %d  GOALS %d\nROUND %d/%d%s" % [saves, goals_total, mini(round_i + 1, rounds_total), rounds_total, hint]
+	if keeper.power != "":
+		hint += "\n" + str(keeper.POWER_NAMES.get(keeper.power, ""))
+	return "SAVES %d  GOALS %d%s" % [saves, goals_total, hint]
 
 
 func hud_text(p) -> String:
 	if net.mode == "client" and not synced:
 		return "Syncing with the keeper…"
 	var head := "ROUND %d/%d   SAVES %d · GOALS %d" % [mini(round_i + 1, rounds_total), rounds_total, saves, goals_total]
+	if cup_stage == "final" and finalists.size() == 2:
+		head = "THE FINAL   P%d %d - %d P%d" % [finalists[0] + 1, int(final_goals.get(finalists[0], 0)), int(final_goals.get(finalists[1], 0)), finalists[1] + 1]
+	if state == "trophy":
+		return "CUP WINNER: %s!" % ("THE KEEPER" if champion == 0 else "P%d" % (champion + 1))
 	if p.index == 0:
 		match state:
 			"aim", "runup":
@@ -1374,20 +1873,31 @@ func hud_text(p) -> String:
 			"result":
 				return head + "\n" + last_result
 		return head + "\nYOU'RE THE KEEPER!"
-	var line := head + "\nYOUR GOALS %d" % p.goals
+	var line := head + "\nYOUR GOALS %d%s" % [p.goals, "   ·   FIREBALL ready (Y)" if p.fire_left > 0 else ""]
+	if state == "final_intro":
+		return line + ("\nYOU'RE IN THE FINAL!" if finalists.has(p.index) else "\nThe final is next - cheer them on!")
 	if state == "aim" and shooter == p.index:
+		if keeper.power == "slow":
+			line += "\nKEEPER SLOW-MO: your shot will be slower!"
+		elif keeper.power == "big":
+			line += "\nKEEPER BIG GLOVES: aim for the corners!"
 		if not can_shoot():
 			return line + "\nYOUR SHOT! Aim with the stick…"
 		if p.charging:
 			if p.power > 0.85:
 				return line + "\nTOO MUCH POWER - wild shot!"
-			return line + "\n…let go to SHOOT!"
+			return line + "\n…let go to SHOOT!  (%s)" % {"normal": "shot", "chip": "CHIP", "fire": "FIREBALL"}.get(p.shot, "shot")
 		var left := int(ceilf(AIM_TIME - state_t))
-		return line + "\nYOUR SHOT! Aim, then HOLD A to power up%s" % ("  (%d)" % left if left <= 5 else "")
+		var tip := "Aim, then HOLD A to power up (X: chip · Y: FIREBALL)"
+		if wild_t > 0.0:
+			tip = "Tip: let go before the meter turns RED!"
+		elif p.idle_aim_t > 6.0:
+			tip = "HOLD A, watch the meter, LET GO to shoot!"
+		return line + "\nYOUR SHOT! %s%s" % [tip, "  (%d)" % left if left <= 5 else ""]
 	if state == "runup" or state == "flight":
 		return line + ("\nGO GO GO!" if shooter == p.index else "\nP%d shoots…" % (shooter + 1))
 	if state == "result":
-		return line + "\n" + last_result
+		return line + "\n%s  %d km/h" % [last_result, last_kmh]
 	if state == "aim":
 		var pos := order.find(p.index) - turn_k
 		if pos > 0:
@@ -1396,27 +1906,30 @@ func hud_text(p) -> String:
 	return line
 
 
-func _update_vr_text() -> void:
+## Short messages for the VR keeper: far down the pitch, above the run-up line, normal depth test, and
+## pushed out (and scaled up) with the keeper's world scale so they stay comfortably far in real metres.
+func _update_vr_text(delta: float) -> void:
 	if help_label.modulate.a > 0.0 and matches >= 1 and state != "intro" and state != "wait":
 		help_label.modulate.a = maxf(0.25, help_label.modulate.a - get_process_delta_time() * 0.2)
+	vr_msg_t -= delta
 	if not keeper_in_vr():
 		return
 	var cam: XRCamera3D = players[0].xr_camera
+	var w: float = keeper.ws()
 	if vr_center == null:
 		vr_center = Label3D.new()
 		vr_center.font_size = 44
 		vr_center.outline_size = 26
-		vr_center.pixel_size = 0.0022
-		vr_center.no_depth_test = true
 		vr_center.render_priority = 10
 		vr_center.outline_render_priority = 9
-		vr_center.width = 1100.0
+		vr_center.width = 700.0
 		vr_center.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		add_child(vr_center)
-	vr_center.text = center_label.text
-	vr_center.modulate.a = center_label.modulate.a
-	vr_center.outline_modulate = Color(0, 0, 0, center_label.modulate.a)
+	vr_center.pixel_size = 0.0022 * w  # VrText scales it by its comfort factor
+	var alpha := clampf(vr_msg_t / 0.5, 0.0, 1.0)
+	vr_center.text = vr_msg
+	vr_center.modulate.a = alpha
+	vr_center.outline_modulate = Color(0, 0, 0, alpha)
 	# Never cover the incoming ball: hide while a shot is coming.
 	vr_center.visible = state != "runup" and state != "flight"
-	# Raised a little so it sits above the striker's run-up line of sight.
-	VrText.follow(vr_center, cam, self, 0.35, 1.8)
+	VrText.follow(vr_center, cam, self, 0.35 * w, 1.8 * w)
