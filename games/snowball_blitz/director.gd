@@ -3,6 +3,8 @@ extends Node
 ## catapult, ice walls, campfire), hit streaks, per-player awards, short hints on the TV and in VR, and
 ## the sky going from dusk to an aurora night (and to morning when the village is saved).
 ## The host decides; the TV machine mirrors pack()/unpack() and gets one-off events.
+## Simple mode (main.simple): only the sky (dusk -> aurora night -> sunrise) and the odd MEGA SNOWBALL
+## from wave 6 on; no weather, upgrades, streaks, hints or awards.
 
 const VrText := preload("res://core/vr_text.gd")
 
@@ -123,6 +125,10 @@ func _host_tick(delta: float) -> void:
 
 func on_wave_started(wave: int, boss: String) -> void:
 	end_event()
+	if main.simple:
+		if wave >= 6 and wave % 3 == 0 and boss == "":
+			main.drop_mega(Vector3(randf_range(-2.0, 2.0), 0.0, randf_range(-2.0, 2.0)))
+		return
 	if boss != "":
 		hint(KIND_HINTS.get(boss, "A BOSS IS COMING!"), 5.0, "boss_" + boss)
 		return
@@ -138,6 +144,8 @@ func on_wave_started(wave: int, boss: String) -> void:
 func on_wave_cleared(wave: int) -> String:
 	end_event()
 	pending_event = ""
+	if main.simple:
+		return ""
 	if UPGRADES.has(wave):
 		var u: Array = UPGRADES[wave]
 		if not upgrades.has(u[0]):
@@ -149,7 +157,7 @@ func on_wave_cleared(wave: int) -> String:
 
 
 func start_event(ev: String) -> void:
-	if not EVENTS.has(ev) or main.net.mode == "client":
+	if not EVENTS.has(ev) or main.net.mode == "client" or main.simple:
 		return
 	end_event()
 	var info: Array = EVENTS[ev]
@@ -220,7 +228,7 @@ func swing_catapult() -> void:
 # --- Streaks, stats, awards ----------------------------------------------------------
 
 func on_hit(who: int, pos: Vector3) -> void:
-	if who < 0 or main.net.mode == "client":
+	if who < 0 or main.net.mode == "client" or main.simple:
 		return
 	var n: int = int(streaks.get(who, 0)) + 1
 	streaks[who] = n
@@ -272,6 +280,8 @@ func awards_text() -> String:
 # --- Hints -------------------------------------------------------------------------
 
 func hint(text: String, duration: float = 4.0, key: String = "") -> void:
+	if main.simple:
+		return  # show, don't tell
 	if key != "":
 		if told.has(key):
 			return
@@ -287,6 +297,8 @@ func on_snowman_spawned(kind: String) -> void:
 
 
 func howto() -> void:
+	if main.simple:
+		return
 	var tv_ready: bool = main.net.mode != "host" or main.net.connected
 	if not told.has("howto_tv") and tv_ready:
 		told["howto_tv"] = true

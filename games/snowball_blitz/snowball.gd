@@ -11,9 +11,21 @@ var owner_index := -1
 var visual_only := false
 var life := 5.0
 var spin := Vector3.ZERO
+var look := ""  # "icicle": a thrown icicle (simple mode), flies point first
 
 
 func _ready() -> void:
+	if look == "icicle":
+		var cm := CylinderMesh.new()
+		cm.top_radius = 0.028
+		cm.bottom_radius = 0.0
+		cm.height = 0.24
+		cm.radial_segments = 6
+		cm.rings = 1
+		mesh = cm
+		material_override = main.mat("ice")
+		cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		return
 	var sm := SphereMesh.new()
 	sm.radius = radius
 	sm.height = radius * 2.0
@@ -35,6 +47,11 @@ func _physics_process(delta: float) -> void:
 		if main.ball_step(self):
 			queue_free()
 			return
-	rotation += spin * delta
+	if look == "icicle":
+		if vel.length() > 0.1:
+			look_at(global_position + vel, Vector3.UP if absf(vel.normalized().y) < 0.99 else Vector3.RIGHT)
+			rotate_object_local(Vector3.RIGHT, PI / 2.0)  # the cone's point (-Y) leads
+	else:
+		rotation += spin * delta
 	if life <= 0.0:
 		queue_free()
