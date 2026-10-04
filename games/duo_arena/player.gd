@@ -808,6 +808,9 @@ func apply_net_state(st: Array) -> void:
 	if st.size() > 15:
 		rapid_t = st[14]
 		bubble_t = st[15]
+	elif st.size() > 13:
+		rapid_t = 0.0
+		bubble_t = 0.0
 	if ghost:
 		net_target = st[0]
 		yaw = st[1]

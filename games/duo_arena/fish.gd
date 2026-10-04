@@ -246,6 +246,8 @@ func apply_net(state: Array) -> void:
 		var u: float = state[4]
 		if u < 0.0 or dive_u < 0.0 or absf(u - dive_u) > 0.05:
 			dive_u = u
+	elif state.size() == 2:
+		dive_u = -1.0
 	var new_hp: float = state[1]
 	if new_hp < hp - 0.01:
 		skin.emission_energy_multiplier = 6.0

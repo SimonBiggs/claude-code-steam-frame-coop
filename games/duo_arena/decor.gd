@@ -12,8 +12,9 @@ varying vec3 tint;
 void vertex() {
 	vec3 origin = MODEL_MATRIX[3].xyz;
 	float ph = INSTANCE_CUSTOM.x * 6.2831;
-	float sp = 2.0 + INSTANCE_CUSTOM.y * 2.5 + cheer * 5.0;
-	float hop = abs(sin(TIME * sp + ph)) * (0.04 + cheer * 0.5);
+	float sp = 2.0 + INSTANCE_CUSTOM.y * 2.5;
+	// Speeds are constant (a changing speed times TIME would jitter); cheering only adds bigger hops.
+	float hop = abs(sin(TIME * sp + ph)) * 0.04 + abs(sin(TIME * 8.0 + ph)) * cheer * 0.45;
 	float sq = 1.0 + 0.08 * cos(TIME * sp * 2.0 + ph * 2.0) * (0.5 + cheer);
 	vec3 rel = VERTEX - origin;
 	rel.y *= sq;
