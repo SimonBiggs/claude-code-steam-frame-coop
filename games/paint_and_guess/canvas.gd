@@ -1,3 +1,4 @@
+# Label sizes x1.8 (2026-10-04): the artist now stands 1.5 m back instead of 0.85 m (Simon).
 extends Node3D
 ## The easel: a dark canvas board on wooden legs, facing +Z (towards the artist). Strokes live in
 ## canvas coordinates (metres, origin at the canvas centre, x right, y up) and are drawn as glowing
@@ -153,7 +154,7 @@ func _ready() -> void:
 	score_label = _label(34, Color(1.0, 0.9, 0.75), Vector3(-W * 0.5 - 0.3, H * 0.05, 0.0))
 	score_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	score_label.vertical_alignment = VERTICAL_ALIGNMENT_TOP
-	score_label.pixel_size = 0.0011
+	score_label.pixel_size = 0.00198
 	score_label.visible = false
 	timer_bar = MeshInstance3D.new()
 	timer_bar.mesh = MeshKit.box(Vector3(1.0, 0.022, 0.012))
@@ -205,7 +206,7 @@ func _bubble(text: String, col: Color, pos: Vector3) -> MeshInstance3D:
 	l.text = text
 	l.font_size = 38
 	l.outline_size = 12
-	l.pixel_size = 0.0011
+	l.pixel_size = 0.00198
 	l.position = Vector3(0, 0, 0.075)
 	b.add_child(l)
 	return b
@@ -215,7 +216,7 @@ func _label(size: int, col: Color, pos: Vector3) -> Label3D:
 	var l := Label3D.new()
 	l.font_size = size
 	l.outline_size = 14
-	l.pixel_size = 0.0014
+	l.pixel_size = 0.00252
 	l.modulate = col
 	l.outline_modulate = Color(0, 0, 0)
 	l.position = pos
@@ -906,7 +907,7 @@ func _build_balloons() -> void:
 		var l := Label3D.new()
 		l.font_size = 40
 		l.outline_size = 14
-		l.pixel_size = 0.00115
+		l.pixel_size = 0.00207
 		l.position = Vector3(0, 0, 0.09)
 		l.render_priority = 3
 		l.outline_render_priority = 2
@@ -976,7 +977,7 @@ func show_vote(pics: Array) -> void:
 		l.text = "%d" % (k + 1)
 		l.font_size = 48
 		l.outline_size = 14
-		l.pixel_size = 0.0012
+		l.pixel_size = 0.00216
 		l.modulate = Color(1.0, 0.9, 0.5)
 		l.position = Vector3(center.x - cw * 0.42, center.y + ch * 0.3, 0.02)
 		vote_root.add_child(l)
@@ -984,7 +985,7 @@ func show_vote(pics: Array) -> void:
 		wl.text = str(entry[1]).to_upper()
 		wl.font_size = 30
 		wl.outline_size = 10
-		wl.pixel_size = 0.001
+		wl.pixel_size = 0.00180
 		wl.position = Vector3(center.x, center.y - ch * 0.42, 0.02)
 		vote_root.add_child(wl)
 	vote_marks = MultiMeshInstance3D.new()
