@@ -8,6 +8,10 @@ extends Node3D
 ## Flat (split screen / non-VR host): A-D / left stick / mouse shuffle, Space / A / left click / RB dives
 ## the way you are pushing (W or stick up = high), or flick the right stick to dive that way.
 ## On the TV machine it is a ghost: a keeper body posed from the host's head + glove positions.
+## POWER-UPS: now and then a glowing bubble floats in front of the keeper's chest (never at the face)
+## while a striker lines up - touch it with a glove (flat keeper: it is collected automatically) for
+## BIG GLOVES, SLOW-MO or DOUBLE SAVE on the next shot.
+## Replays (TV views) pose the body from a recording (replay_pose).
 
 const GLOVE_R := 0.12  # visual glove radius (VR, metres before world scale)
 const VR_FORGIVE := 0.05  # extra save radius in VR
@@ -18,6 +22,10 @@ const FLAT_X := 3.1
 const DIVE_TIME := 0.95
 const KEEPER_Z := 0.35
 const TARGET_HEAD := 1.7  # world-scaled head height we fit to
+const MeshKit := preload("res://games/penalty_shootout/mesh_kit.gd")
+const BIG_GLOVES := 1.6
+const POWER_NAMES := {"big": "BIG GLOVES", "slow": "SLOW-MO", "double": "DOUBLE SAVE"}
+const POWER_COLORS := {"big": Color(0.3, 1.0, 0.5), "slow": Color(0.4, 0.75, 1.0), "double": Color(1.0, 0.8, 0.25)}
 
 var index := 0
 var main
@@ -48,6 +56,18 @@ var refit_t := 0.0
 var place_frames := 0
 var snap_was := false
 var a_was := false
+var trig_block := false  # after unpausing: the trigger must be let go before it does anything
+
+# Power-ups: power = active for the next shot, bubble = offered (floating in front of the keeper).
+var power := ""
+var bubble := ""
+var bubble_pos := Vector3.ZERO
+var bubble_t := 0.0
+var bubble_node: Node3D
+var bubble_mat: StandardMaterial3D
+var bubble_label: Label3D
+var cheer_t := 0.0
+var replay_pose: Array = []  # [head, down, glove_l, glove_r] while a TV replay plays
 
 # Flat keeper.
 var kx := 0.0
@@ -148,7 +168,7 @@ func attach_xr(origin: XROrigin3D, cam: XRCamera3D, left: XRController3D, right:
 
 
 func vr_trigger() -> bool:
-	return vr and hand_r.get_float("trigger") > 0.6
+	return vr and hand_r.get_float("trigger") > 0.6 and not trig_block
 
 
 func vr_a() -> bool:
@@ -162,14 +182,92 @@ func _process(delta: float) -> void:
 		_vr_update(delta)
 	else:
 		_flat_update(delta)
+	cheer_t = maxf(0.0, cheer_t - delta)
+	if replay_pose.size() == 4 and body != null:
+		_pose_body(replay_pose[0], replay_pose[1], replay_pose[2], replay_pose[3])
+	_update_bubble(delta)
 	if hud_label != null:
 		hud_label.text = main.hud_text(self)
+
+
+# --- Power-ups -------------------------------------------------------------------------------
+
+## Host / local: offer a power-up bubble in front of the keeper's chest.
+func offer(kind: String) -> void:
+	bubble = kind
+	bubble_t = 0.0
+
+
+func glove_scale() -> float:
+	return BIG_GLOVES if power == "big" else 1.0
+
+
+## Where the bubble floats: chest height, a little to one side, an arm's length towards the pitch.
+func bubble_spot() -> Vector3:
+	var w := ws()
+	var side := 0.32 if int(main.shots_total) % 2 == 0 else -0.32
+	return head_pos + Vector3(side, -0.48, 0.42) * w
+
+
+func _update_bubble(delta: float) -> void:
+	var show := bubble != ""
+	if show and bubble_node == null:
+		bubble_node = Node3D.new()
+		bubble_node.top_level = true
+		add_child(bubble_node)
+		var mi := MeshInstance3D.new()
+		mi.mesh = main.sphere_mesh(0.13)
+		bubble_mat = StandardMaterial3D.new()
+		bubble_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		bubble_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mi.material_override = bubble_mat
+		bubble_node.add_child(mi)
+		var core := MeshInstance3D.new()
+		core.mesh = main.sphere_mesh(0.05)
+		core.material_override = main.make_material(Color(1, 1, 1), 2.0)
+		bubble_node.add_child(core)
+		bubble_label = Label3D.new()
+		bubble_label.font_size = 40
+		bubble_label.pixel_size = 0.0016
+		bubble_label.outline_size = 12
+		bubble_label.position = Vector3(0, 0.2, 0)
+		bubble_node.add_child(bubble_label)
+	if bubble_node == null:
+		return
+	bubble_node.visible = show
+	if not show:
+		return
+	bubble_t += delta
+	if is_local():
+		bubble_pos = bubble_spot()
+	var w := ws()
+	bubble_node.global_position = bubble_pos + Vector3(0, 0.03 * sin(bubble_t * 3.0), 0) * w
+	bubble_node.scale = Vector3.ONE * w * (1.0 + 0.08 * sin(bubble_t * 6.0))
+	var c: Color = POWER_COLORS.get(bubble, Color.WHITE)
+	bubble_mat.albedo_color = Color(c.r, c.g, c.b, 0.55)
+	bubble_label.text = str(POWER_NAMES.get(bubble, ""))
+	bubble_label.modulate = c.lightened(0.3)
+	# Face the label towards the keeper (who looks down the pitch, +z).
+	bubble_label.global_basis = Basis(Vector3.UP, PI).scaled(Vector3.ONE * w)
+	if not is_local() or main.net.mode == "client":
+		return
+	# Touch it with a glove (VR), or it is taken automatically (flat keeper, after a moment).
+	var got := false
+	if vr:
+		var r := 0.17 * w
+		got = glove_l.distance_to(bubble_pos) < r or glove_r.distance_to(bubble_pos) < r
+	else:
+		got = bubble_t > 1.2
+	if got:
+		main.keeper_collect(bubble)
 
 
 func _vr_update(delta: float) -> void:
 	_fit(delta)
 	var s := bot_stick if bot else hand_l.get_vector2("primary")
 	var w := ws()
+	if trig_block and hand_r.get_float("trigger") < 0.3:
+		trig_block = false
 	if s.length() > 0.2:
 		var right := xr_origin.global_basis.x
 		var fwd := -xr_origin.global_basis.z
@@ -189,8 +287,9 @@ func _vr_update(delta: float) -> void:
 		var rot := Basis(Vector3.UP, -signf(r.x) * deg_to_rad(30.0))
 		xr_origin.global_transform = Transform3D(rot * xr_origin.global_basis, h + rot * (xr_origin.global_position - h))
 	snap_was = snap
+	var gs := glove_scale()
 	for g in gloves:
-		g.scale = Vector3(1.0, 1.15, 0.6) * w
+		g.scale = g.scale.lerp(Vector3(1.0, 1.15, 0.6) * w * gs, 1.0 - exp(-10.0 * delta))
 	head_pos = xr_camera.global_position
 	down_dir = Vector3.DOWN
 	glove_l = gloves[0].global_position
@@ -345,9 +444,21 @@ func _flat_update(delta: float) -> void:
 	head_pos = h
 	glove_l = h + idle_l.lerp(dive_l, e)
 	glove_r = h + idle_r.lerp(dive_r, e)
+	if cheer_t > 0.0 and dive_t < 0.0:
+		# Fist pump after a save.
+		var pump := absf(sin(cheer_t * 9.0)) * 0.25
+		glove_l = h + Vector3(0.3, 0.35 + pump, 0.15)
+		glove_r = h + Vector3(-0.3, 0.35 + pump, 0.15)
 	position = Vector3(kx, 0, KEEPER_Z)
 	_pose_body(head_pos, down_dir, glove_l, glove_r)
-	if camera != null:
+	if camera != null and main.replay_on:
+		camera.global_position = main.REPLAY_CAM
+		camera.look_at(main.replay_look(), Vector3.UP)
+	elif camera != null and main.state == "trophy":
+		var ct: Array = main.ceremony_camera()
+		camera.global_position = camera.global_position.lerp(ct[0], 1.0 - exp(-4.0 * delta))
+		camera.look_at(ct[1], Vector3.UP)
+	elif camera != null:
 		var cp := Vector3(kx * 0.45, 2.3, -1.7)
 		if not camera.has_meta("placed"):
 			camera.set_meta("placed", true)
@@ -384,7 +495,7 @@ func save_spheres(delta: float) -> Array:
 	last_head = head_pos
 	if vr:
 		var w := ws()
-		var gr := GLOVE_R * w + VR_FORGIVE
+		var gr := (GLOVE_R * w + VR_FORGIVE) * glove_scale()
 		out.append([glove_l, gr, vl.limit_length(12.0), "left"])
 		out.append([glove_r, gr, vrr.limit_length(12.0), "right"])
 		out.append([head_pos, 0.12 * w, Vector3.ZERO, "head"])
@@ -393,8 +504,8 @@ func save_spheres(delta: float) -> Array:
 		if hip.y > 0.15:
 			out.append([hip, 0.19 * w, Vector3.ZERO, "body"])
 	else:
-		out.append([glove_l, FLAT_GLOVE_R, vl.limit_length(12.0), "left"])
-		out.append([glove_r, FLAT_GLOVE_R, vrr.limit_length(12.0), "right"])
+		out.append([glove_l, FLAT_GLOVE_R * glove_scale(), vl.limit_length(12.0), "left"])
+		out.append([glove_r, FLAT_GLOVE_R * glove_scale(), vrr.limit_length(12.0), "right"])
 		var bk := "dive" if is_diving() else "body"
 		out.append([head_pos, 0.14, Vector3.ZERO, bk if is_diving() else "head"])
 		out.append([head_pos + down_dir * 0.5, 0.24, Vector3.ZERO, bk])
@@ -421,35 +532,48 @@ func _ensure_body() -> void:
 	body.name = "KeeperBody"
 	main.add_child(body)
 	body.top_level = true
-	var jersey: StandardMaterial3D = main.make_material(color, 0.15)
-	var skin: StandardMaterial3D = main.make_material(Color(1.0, 0.8, 0.62), 0.0)
+	var jersey := color
+	var skin := Color(1.0, 0.8, 0.62)
+	var dark := Color(0.1, 0.1, 0.12)
+	var vm: StandardMaterial3D = MeshKit.vertex_material(main.mats)
 	b_head = MeshInstance3D.new()
-	b_head.mesh = main.sphere_mesh(0.13)
-	b_head.material_override = skin
+	b_head.mesh = MeshKit.merge([
+		[MeshKit.sphere(0.13, 14), MeshKit.at(Vector3.ZERO), skin],
+		[MeshKit.sphere(0.135, 12), MeshKit.at(Vector3(0, 0.05, 0), Vector3(1.0, 0.55, 1.0)), dark],
+		[MeshKit.box(Vector3(0.2, 0.025, 0.12)), MeshKit.at(Vector3(0, 0.06, 0.12)), dark],
+		[MeshKit.sphere(0.022, 6), MeshKit.at(Vector3(-0.045, 0.01, 0.115)), Color(1, 1, 1)],
+		[MeshKit.sphere(0.022, 6), MeshKit.at(Vector3(0.045, 0.01, 0.115)), Color(1, 1, 1)],
+		[MeshKit.sphere(0.011, 6), MeshKit.at(Vector3(-0.045, 0.01, 0.133)), Color(0.05, 0.05, 0.1)],
+		[MeshKit.sphere(0.011, 6), MeshKit.at(Vector3(0.045, 0.01, 0.133)), Color(0.05, 0.05, 0.1)],
+		[MeshKit.box(Vector3(0.06, 0.012, 0.01)), MeshKit.at(Vector3(0, -0.06, 0.12)), Color(0.6, 0.2, 0.2)],
+	])
+	b_head.material_override = vm
 	body.add_child(b_head)
-	var cap := MeshInstance3D.new()
-	cap.mesh = main.sphere_mesh(0.135)
-	cap.material_override = main.make_material(Color(0.1, 0.1, 0.12), 0.0)
-	cap.scale = Vector3(1.0, 0.55, 1.0)
-	cap.position = Vector3(0, 0.05, 0)
-	b_head.add_child(cap)
 	b_torso = MeshInstance3D.new()
-	var cm := CapsuleMesh.new()
-	cm.radius = 0.21
-	cm.height = 0.75
-	cm.radial_segments = 12
-	cm.rings = 4
-	b_torso.mesh = cm
-	b_torso.material_override = jersey
+	b_torso.mesh = MeshKit.merge([
+		[MeshKit.cyl(0.2, 0.22, 0.75, 12), MeshKit.at(Vector3.ZERO), jersey],
+		[MeshKit.cyl(0.1, 0.12, 0.06, 10), MeshKit.at(Vector3(0, 0.38, 0)), jersey.darkened(0.4)],
+		[MeshKit.box(Vector3(0.18, 0.2, 0.02)), MeshKit.at(Vector3(0, 0.05, 0.215)), Color(1, 1, 1)],
+		[MeshKit.box(Vector3(0.03, 0.14, 0.022)), MeshKit.at(Vector3(0, 0.05, 0.22)), jersey.darkened(0.5)],
+		[MeshKit.box(Vector3(0.46, 0.07, 0.44)), MeshKit.at(Vector3(0, -0.36, 0)), dark],
+	])
+	b_torso.material_override = vm
 	body.add_child(b_torso)
 	b_legs = MeshInstance3D.new()
-	b_legs.mesh = main.box_mesh(Vector3(0.38, 0.8, 0.22))
-	b_legs.material_override = main.make_material(Color(0.1, 0.1, 0.12), 0.0)
+	b_legs.mesh = MeshKit.merge([
+		[MeshKit.box(Vector3(0.4, 0.3, 0.24)), MeshKit.at(Vector3(0, 0.25, 0)), dark],
+		[MeshKit.box(Vector3(0.14, 0.5, 0.16)), MeshKit.at(Vector3(-0.1, -0.15, 0)), jersey.lightened(0.3)],
+		[MeshKit.box(Vector3(0.14, 0.5, 0.16)), MeshKit.at(Vector3(0.1, -0.15, 0)), jersey.lightened(0.3)],
+		[MeshKit.box(Vector3(0.15, 0.1, 0.26)), MeshKit.at(Vector3(-0.1, -0.42, 0.05)), Color(0.95, 0.95, 0.95)],
+		[MeshKit.box(Vector3(0.15, 0.1, 0.26)), MeshKit.at(Vector3(0.1, -0.42, 0.05)), Color(0.95, 0.95, 0.95)],
+	])
+	b_legs.material_override = vm
 	body.add_child(b_legs)
+	var jersey_mat: StandardMaterial3D = main.make_material(color, 0.15)
 	for i in 2:
 		var arm := MeshInstance3D.new()
 		arm.mesh = main.cyl_mesh(0.055, 0.055, 1.0, 8)
-		arm.material_override = jersey
+		arm.material_override = jersey_mat
 		body.add_child(arm)
 		b_arms.append(arm)
 		var g := MeshInstance3D.new()
@@ -487,6 +611,9 @@ func _pose_body(h: Vector3, down: Vector3, gl: Vector3, gr: Vector3) -> void:
 	_stretch(b_arms[1], sh + Vector3(-0.18, 0, 0), gr)
 	b_gloves[0].global_position = gl
 	b_gloves[1].global_position = gr
+	var gs := glove_scale()
+	for g in b_gloves:
+		g.scale = Vector3(1.0, 1.15, 0.7) * gs
 
 
 ## TV machine: pose the keeper body from the host's snapshot.

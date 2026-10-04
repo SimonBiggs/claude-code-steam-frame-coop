@@ -3,6 +3,8 @@ extends Node3D
 ## striker's reticle after a readable flight (gravity arc plus an optional banana curve that bends back
 ## onto the target). The keeper's gloves/body, the posts and crossbar, the ground and the net all
 ## interact with it. On the TV machine it is a ghost that extrapolates the host's snapshots.
+## A FIREBALL (set_fire) burns orange with a long flaming trail; it is visual only (the speed comes
+## from the kick).
 
 const R := 0.11
 const G := Vector3(0.0, -9.8, 0.0)
@@ -29,6 +31,9 @@ var mat: StandardMaterial3D
 var shadow: MeshInstance3D
 var trail: CPUParticles3D
 var glow := 0.0
+var fire := false
+var hide_for_replay := false  # a TV replay shows its own ball meanwhile
+var trail_mat: StandardMaterial3D
 var net_pos := Vector3.ZERO
 var net_vel := Vector3.ZERO
 var bounce_t := 0.0
@@ -100,6 +105,7 @@ func _ready() -> void:
 	trm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	trm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	trail.material_override = trm
+	trail_mat = trm
 	var curve := Curve.new()
 	curve.add_point(Vector2(0, 1))
 	curve.add_point(Vector2(1, 0))
@@ -119,6 +125,17 @@ func place(p: Vector3) -> void:
 	in_net = false
 	flight_t = 0.0
 	mesh.rotation = Vector3.ZERO
+	set_fire(false)
+
+
+func set_fire(on: bool) -> void:
+	fire = on
+	if trail_mat == null:
+		return
+	trail_mat.albedo_color = Color(1.0, 0.45, 0.1, 0.75) if on else Color(1.0, 0.95, 0.6, 0.5)
+	trail.amount = 40 if on else 24
+	trail.lifetime = 0.5 if on else 0.35
+	mat.emission = Color(1.0, 0.45, 0.1) if on else Color(1.0, 0.85, 0.3)
 
 
 ## Initial velocity and curve acceleration so the ball reaches `target` after a flight at ~`speed`.
@@ -270,9 +287,13 @@ func _process(delta: float) -> void:
 		if sp.length() > 0.05:
 			mesh.rotate(Vector3(sp.z, 0.0, -sp.x).normalized(), sp.length() * delta / R)
 	var speed := (net_vel if ghost else vel).length()
-	trail.emitting = visible and speed > 4.0
-	shadow.visible = visible
+	mesh.visible = not hide_for_replay
+	trail.emitting = visible and mesh.visible and (speed > 4.0 or (fire and speed > 0.5))
+	shadow.visible = visible and not hide_for_replay
 	shadow.global_position = Vector3(global_position.x, 0.012, global_position.z)
 	var sc := clampf(1.0 - (global_position.y - R) * 0.15, 0.4, 1.0)
 	shadow.scale = Vector3(sc, 1.0, sc)
-	mat.emission_energy_multiplier = lerpf(mat.emission_energy_multiplier, glow * 1.6, 1.0 - exp(-10.0 * delta))
+	var want := glow * 1.6
+	if fire:
+		want = 2.2 + 0.8 * sin(Time.get_ticks_msec() * 0.03)
+	mat.emission_energy_multiplier = lerpf(mat.emission_energy_multiplier, want, 1.0 - exp(-10.0 * delta))
