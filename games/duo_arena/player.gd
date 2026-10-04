@@ -1008,7 +1008,11 @@ func _update_sword(delta: float) -> void:
 	var trig := hand_l.get_float("trigger") > 0.6 or hand_l.is_button_pressed("trigger_click")
 	var head := xr_camera.global_transform
 	var rel := head.affine_inverse() * hand_l.global_position  # hand in head space (+Y up, +Z behind)
-	var over_shoulder := rel.y > -0.05 and rel.z > 0.02
+	# Beside/behind the ear (kids couldn't reach "above the eyes and behind the head"), held for 0.2 s
+	# so a fast sword swing passing through doesn't swap by accident.
+	var near_shoulder := rel.y > -0.2 and rel.z > -0.06 and Vector2(rel.x, rel.z).length() < 0.35
+	set_meta("shoulder_t", float(get_meta("shoulder_t", 0.0)) + delta if near_shoulder else 0.0)
+	var over_shoulder := float(get_meta("shoulder_t", 0.0)) > 0.2
 	var want := trig or over_shoulder
 	if want and not get_meta("swap_was", false) and Time.get_ticks_msec() > int(get_meta("swap_ok", 0)):
 		set_meta("swap_ok", Time.get_ticks_msec() + 600)
