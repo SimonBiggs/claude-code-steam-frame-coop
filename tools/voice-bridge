@@ -34,7 +34,7 @@ MODEL = sys.argv[1] if len(sys.argv) > 1 else "medium.en"  # the user prefers it
 FLOOR = float(os.environ.get("VOICE_FLOOR", "180"))
 
 # Whisper tends to "hear" these in noise; ignore them when they are the whole utterance.
-JUNK = {"", "you", "thank you", "thank you.", "thanks for watching!", "bye.", ".", "uh", "um", "hmm"}
+JUNK = {"", "you", "thank you", "thank you.", "thanks for watching!", "bye.", ".", "uh", "um", "hmm", "silence", "silence.", "[silence]", "(silence)"}
 
 
 SPEAKER_MODEL = Path.home() / ".local/share/voice-bridge/wespeaker_en_voxceleb_resnet34_LM.onnx"
