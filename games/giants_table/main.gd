@@ -103,6 +103,7 @@ var shield := false
 var shield_said := false
 var rain_node: Node3D
 var wave_t := 0.0
+var solo_wait := 0.0
 var combo := 0
 var last_kill_t := -10.0
 var clock := 0.0
@@ -768,7 +769,9 @@ func _process(delta: float) -> void:
 			get_tree().reload_current_scene()
 		return
 	if net.mode == "host" and not net.connected:
-		return  # hold the waves until the knights join
+		solo_wait += delta
+		if solo_wait < 8.0:
+			return  # give the knights a moment to join; after that the Giant can play alone (they can still join)
 	_host_knights(delta)
 	_update_boulders(delta)
 	_update_rain(delta)
