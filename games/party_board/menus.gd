@@ -41,6 +41,9 @@ func on_state(key: String, value: Variant) -> void:
 			_on_menu(value if value is Dictionary else {})
 		"phase", "settings", "players":
 			_refresh_setup()
+		"branch":
+			if main.flow == null and value is Dictionary and (value as Dictionary).has("sel"):
+				main.board.set_arrow_sel(int((value as Dictionary)["sel"]))
 
 
 # --- Generic menus ------------------------------------------------------------------------------------

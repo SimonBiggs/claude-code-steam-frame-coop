@@ -44,6 +44,7 @@ const HudScript := preload("res://games/party_board/hud.gd")
 const MenusScript := preload("res://games/party_board/menus.gd")
 const MgRunner := preload("res://games/party_board/mg_runner.gd")
 const GiantAvatar := preload("res://games/party_board/giant_avatar.gd")
+const CeremonyScript := preload("res://games/party_board/ceremony.gd")
 const UiMenu := preload("res://core/ui_menu.gd")
 
 const GAME_ID := "party_board"
@@ -73,6 +74,7 @@ var quick := false  ## bots: shorter pauses between steps
 # --- The networking contract (see docs/engine/systems.md) ---
 var net: Node
 var ready_to_play := false
+var players: Array = []  ## unused (core/net.gd looks for it); the player records are roster()
 var party: Party
 var split: SplitView
 var vr_rig: VrRig
@@ -93,6 +95,7 @@ var dice: DiceScript
 var hud: HudScript
 var menus: MenusScript
 var runner: MgRunner
+var ceremony: CeremonyScript
 var cam: CameraRig  ## the TV's shared camera
 var giant: GiantAvatar  ## TV machine: the VR player seen from the TV
 var tv_ui: Control  ## the shared view's UiKit root
@@ -197,6 +200,9 @@ func _setup(mode: String) -> void:
 	runner = MgRunner.new()
 	runner.main = self
 	add_child(runner)
+	ceremony = CeremonyScript.new()
+	ceremony.main = self
+	add_child(ceremony)
 	if mode != "client":
 		flow = TurnFlow.new()
 		flow.main = self
@@ -262,12 +268,12 @@ func to_board(p: Vector3) -> Vector3:
 # --- Players and tokens -----------------------------------------------------------------------------
 
 ## The replicated player records (Array of Dictionaries), in seat order.
-func players() -> Array:
+func roster() -> Array:
 	return net.state_get("players", [])
 
 
 func player(pid: int) -> Dictionary:
-	for p in players():
+	for p in roster():
 		if int((p as Dictionary)["pid"]) == pid:
 			return p
 	return {}
@@ -275,7 +281,7 @@ func player(pid: int) -> Dictionary:
 
 func pids() -> Array[int]:
 	var out: Array[int] = []
-	for p in players():
+	for p in roster():
 		out.append(int((p as Dictionary)["pid"]))
 	return out
 
@@ -324,7 +330,7 @@ func token(pid: int) -> TokenScript:
 ## Bring the tokens in line with the replicated records (hop to the next space, fly further).
 func _sync_tokens() -> void:
 	var seen := {}
-	for p in players():
+	for p in roster():
 		var pd: Dictionary = p
 		var pid := int(pd["pid"])
 		seen[pid] = true
@@ -397,6 +403,7 @@ func _on_state_changed(key: String, value: Variant) -> void:
 	menus.on_state(key, value)
 	dice.on_state(key, value)
 	runner.on_state(key, value)
+	ceremony.on_state(key, value)
 
 
 ## Rebuild everything from the store (a TV machine that joined late, or after setup).
@@ -567,8 +574,13 @@ func _do_fx(kind: String, args: Array) -> void:
 			runner.on_fx(String(args[0]), args[1])
 		"dice_fx":
 			dice.on_fx(String(args[0]), args[1])
-		"ceremony_fx":
-			hud.ceremony_fx(String(args[0]), args[1])
+		"intro":
+			hints.intro(INTRO, {"duration": 9.0, "min_time": 1.0})
+		"arrows":
+			if args.is_empty():
+				board.hide_arrows()
+			else:
+				board.show_arrows(int(args[0]), args[1], 0)
 
 
 ## Coins popping out of (or into) a token, with a sound.
@@ -625,6 +637,11 @@ func _burst(at: Vector3, color: Color, amount: int) -> void:
 
 func burst(at_board: Vector3, color: Color, amount: int = 16) -> void:
 	_burst(at_board, color, amount)
+
+
+## Host / local: the last minigame is over: bonus stars, the winner, the results.
+func ceremony_start(records: Dictionary) -> void:
+	ceremony.run(records)
 
 
 # --- Requests (any machine -> host) -------------------------------------------------------------------

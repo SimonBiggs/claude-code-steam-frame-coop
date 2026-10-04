@@ -40,6 +40,7 @@ var mg_cycle: Array = []
 var takeover := {}  # pid -> true: a human takes this CPU seat after the current turn
 var shop_used := false
 var game_on := false
+var bot_land: Array = []  ## bots: space types to pretend the next landings are ("event", "duel"...)
 
 
 func _ready() -> void:
@@ -372,6 +373,8 @@ func _after_minigames() -> void:
 ## (PB_ALL_MINIGAMES), or a random one not played lately.
 func _pick_minigames() -> Array:
 	var ids: Array = main.runner.ids()
+	if ids.is_empty():
+		return []
 	if main.mg_force != "" and ids.has(main.mg_force):
 		return [main.mg_force]
 	if main.mg_all:
@@ -746,6 +749,8 @@ func _land(pid: int) -> void:
 	var net: Node = main.net
 	var sp := int(pl[pid]["space"])
 	var type: String = main.data.type_of(sp)
+	if not bot_land.is_empty():
+		type = String(bot_land.pop_front())
 	var mult := 2 if bool(net.state_get("final", false)) else 1
 	net.state_set("step", "land")
 	match type:
@@ -928,6 +933,16 @@ func _duel_end() -> void:
 	main.net.state_set("duel", {})
 	seq.wait(_w(2.4))
 	seq.add(func() -> void: main.net.state_set("step", "land"))
+
+
+## Bots: put the STAR one hop ahead of `pid` and give them enough coins to buy it.
+func bot_star_ahead(pid: int) -> void:
+	if not pl.has(pid):
+		return
+	var ahead: Array = main.data.next_of(int(pl[pid]["space"]))
+	pl[pid]["coins"] = maxi(int(pl[pid]["coins"]), Rules.STAR_PRICE + 8)
+	_publish()
+	main.net.state_set("star", int(ahead[0]))
 
 
 # --- Minigame coins (mg_runner.gd calls these) ----------------------------------------------------------

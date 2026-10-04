@@ -337,7 +337,7 @@ func _vr_update(delta: float) -> void:
 		var off_table: bool = d.global_position.y < float(main.TABLE_Y) - 0.15 or Vector2(d.global_position.x, d.global_position.z).length() > 1.6
 		if off_table:
 			_reset_die(i)
-			main.hud.toast("Oops! The dice fell off. Throw again!", 0, "exclaim")
+			main.hud.toast("Oops! The dice fell off. Throw again!", 0, "question")
 			continue
 		if d.linear_velocity.length() < 0.04 and d.angular_velocity.length() < 0.4 and _released_t[i] > 0.4:
 			_still_t[i] += delta

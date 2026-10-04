@@ -117,7 +117,7 @@ func _build_title(ui: Control, s: float) -> void:
 func _refresh_cards() -> void:
 	if cards_row == null:
 		return
-	var ps: Array = main.players()
+	var ps: Array = main.roster()
 	var want := {}
 	for p in ps:
 		want[int((p as Dictionary)["pid"])] = true
@@ -303,7 +303,7 @@ func _refresh_title() -> void:
 	if title_box != null:
 		title_box.visible = phase == "title"
 		var lines: PackedStringArray = []
-		for p in main.players():
+		for p in main.roster():
 			var pd: Dictionary = p
 			lines.append("%s%s" % [String(pd.get("name", "")), "  (CPU)" if bool(pd.get("cpu", false)) else ""])
 		var cfg: Dictionary = main.net.state_get("settings", {})
@@ -364,7 +364,7 @@ func _build_vr() -> void:
 func _refresh_vr() -> void:
 	if vr_board == null:
 		return
-	var ps: Array = main.players()
+	var ps: Array = main.roster()
 	var ranks := ranks_of(ps)
 	var cur := int(main.net.state_get("cur", -1))
 	for i in vr_rows.size():
@@ -414,7 +414,6 @@ func _build_3d() -> void:
 	marker.visible = false
 	main.stage.add_child(marker)
 	steps_label = UiKit.label3d("", 0.9, Color(1, 1, 1), true)
-	steps_label.no_depth_test = true
 	steps_label.outline_size = 18
 	if main.vr_rig == null:
 		steps_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
@@ -440,6 +439,9 @@ func _process(delta: float) -> void:
 		steps_label.visible = left > 0 and String(main.net.state_get("step", "")) in ["move", "branch", "menu"]
 		steps_label.text = str(left)
 		steps_label.position = t.position + Vector3(0, 3.7, 0)
+		if main.vr_rig != null:  # VR: turn on Y only towards the head (a Label3D reads from +Z)
+			var d: Vector3 = steps_label.global_position - main.vr_rig.camera.global_position
+			steps_label.global_basis = Basis(Vector3.UP, atan2(-d.x, -d.z)).scaled(steps_label.global_basis.get_scale())
 	else:
 		steps_label.visible = false
 
@@ -485,5 +487,3 @@ func toast(text: String, pid: int = -1, icon: String = "") -> void:
 		HudKit.vr_toast(main, main.vr_rig.camera, text, {"color": main.color_of(pid) if pid >= 0 else UiKit.ACCENT})
 
 
-func ceremony_fx(_kind: String, _args: Variant) -> void:
-	pass

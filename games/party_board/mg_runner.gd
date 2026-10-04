@@ -15,16 +15,9 @@ const HudKit := preload("res://core/hud_kit.gd")
 const Rules := preload("res://games/party_board/rules.gd")
 
 ## Every minigame, in the order PB_ALL_MINIGAMES plays them.
-const GAMES := {
-	"coin_catch": preload("res://games/party_board/minigames/coin_catch.gd"),
-	"hot_potato": preload("res://games/party_board/minigames/hot_potato.gd"),
-	"memory_tiles": preload("res://games/party_board/minigames/memory_tiles.gd"),
-	"falling_platforms": preload("res://games/party_board/minigames/falling_platforms.gd"),
-	"kart_dash": preload("res://games/party_board/minigames/kart_dash.gd"),
-	"balloon_pop": preload("res://games/party_board/minigames/balloon_pop.gd"),
-	"sheep_herding": preload("res://games/party_board/minigames/sheep_herding.gd"),
-	"treasure_dive": preload("res://games/party_board/minigames/treasure_dive.gd"),
-}
+const GAMES := ["coin_catch", "hot_potato", "memory_tiles", "falling_platforms", "kart_dash", "balloon_pop",
+	"sheep_herding", "treasure_dive"]
+const MG_DIR := "res://games/party_board/minigames/"
 const ARENA_POS := Vector3(0.0, 0.0, 11.5)
 const FORMAT_NAMES := {"ffa": "FREE FOR ALL", "giant": "GIANT VS ISLANDERS", "teams": "TEAM GAME"}
 const TEAM_NAMES := ["RED TEAM", "BLUE TEAM"]
@@ -53,14 +46,26 @@ var _vr_scores: Label3D
 var _score_t := 0.0
 
 
+## The minigames that exist (loaded lazily, so they hot-reload).
 func ids() -> Array:
-	return GAMES.keys()
+	var out: Array = []
+	for id in GAMES:
+		if ResourceLoader.exists(MG_DIR + id + ".gd"):
+			out.append(id)
+	return out
+
+
+func script_of(id: String) -> GDScript:
+	if not GAMES.has(id) or not ResourceLoader.exists(MG_DIR + id + ".gd"):
+		return null
+	return load(MG_DIR + id + ".gd") as GDScript
 
 
 func meta(id: String) -> Dictionary:
-	if not GAMES.has(id):
+	var sc := script_of(id)
+	if sc == null:
 		return {}
-	return (GAMES[id] as GDScript).get_script_constant_map().get("META", {})
+	return sc.get_script_constant_map().get("META", {})
 
 
 func _w(s: float) -> float:
@@ -87,6 +92,9 @@ func _next() -> void:
 			d.call()
 		return
 	var id := String(_queue.pop_front())
+	if script_of(id) == null:
+		_next()
+		return
 	var m := meta(id)
 	_n += 1
 	var pids: Array = []
@@ -257,9 +265,10 @@ func _on_mg(cfg: Dictionary) -> void:
 		return
 	mg_seq = n
 	var id := String(cfg.get("id", ""))
-	if not GAMES.has(id):
+	var sc := script_of(id)
+	if sc == null:
 		return
-	mg = (GAMES[id] as GDScript).new()
+	mg = sc.new()
 	mg.name = "Minigame"
 	mg.setup(main, cfg, main.net.mode != "client")
 	mg.position = ARENA_POS
