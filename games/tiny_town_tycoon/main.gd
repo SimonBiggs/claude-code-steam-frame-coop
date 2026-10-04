@@ -174,6 +174,11 @@ func _setup(mode: String) -> void:
 		vr_rig.bounds = Rect2(-1.8, -1.8, 3.6, 3.6)
 		add_child(vr_rig)
 		vr_rig.place(Vector3(0.0, 0.0, 1.05), 0.0)
+		# the drivers' job rings and beams are for their own TV views, not the mayor's
+		var marker_bits := 0
+		for k in 8:
+			marker_bits |= 1 << (TownViewScript.MARKER_BIT0 + k)
+		vr_rig.camera.cull_mask &= ~marker_bits
 		hints.set_vr_rig(vr_rig, self)
 	var vr := vr_rig != null
 	sky = SkyKit.apply(self, "day", vr)
