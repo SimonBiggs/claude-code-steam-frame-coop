@@ -536,7 +536,7 @@ func pack() -> Array:
 	for i in UPGRADE_BITS.size():
 		if upgrades.has(UPGRADE_BITS[i]):
 			bits |= 1 << i
-	return [event_name, bits, won]
+	return [event_name, bits, won, main.in_break]
 
 
 func unpack(a: Array) -> void:
@@ -548,6 +548,8 @@ func unpack(a: Array) -> void:
 		if bits & (1 << i) and not upgrades.has(UPGRADE_BITS[i]):
 			upgrades.append(UPGRADE_BITS[i])
 	won = a[2]
+	if a.size() > 3:
+		main.in_break = a[3]  # the TV needs it for the sunrise after the finale
 
 
 func client_event(kind: String, args: Array) -> void:
