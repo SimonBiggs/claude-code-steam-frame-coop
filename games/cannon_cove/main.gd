@@ -1529,6 +1529,11 @@ func on_kraken_defeated(k) -> void:
 	stats[0].sinks += 1
 	for tn in get_tree().get_nodes_in_group("tentacles"):
 		tn.hit(99.0)
+	for sh in get_tree().get_nodes_in_group("ships"):
+		if not sh.sinking:
+			sh.hit(99.0)  # the rest of the pirates go down with their monster
+	for b in get_tree().get_nodes_in_group("boarders"):
+		b.hit(99.0)
 	var pos: Vector3 = k.head_center()
 	explosion(pos, Color(0.9, 0.5, 1.0), 3.0)
 	splash(Vector3(pos.x, sea_level, pos.z), 3.0)
@@ -2738,9 +2743,9 @@ func _update_vr_center() -> void:
 		vr_hint.no_depth_test = true
 		vr_hint.render_priority = 10
 		vr_hint.outline_render_priority = 9
-		vr_hint.width = 1100.0
+		vr_hint.width = 800.0
 		vr_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		vr_hint.pixel_size = 0.0022
+		vr_hint.pixel_size = 0.0019
 		vr_hint.modulate = Color(1.0, 0.95, 0.6)
 		add_child(vr_hint)
 		players[0]._set_layers(vr_hint, players[0].viewmodel_layer())
@@ -2752,10 +2757,10 @@ func _update_vr_center() -> void:
 	if stats_mode:
 		hint = stats_text
 		vr_hint.modulate = Color(0.85, 0.97, 1.0)
-		vr_hint.pixel_size = 0.0017
+		vr_hint.pixel_size = 0.0016
 	else:
 		vr_hint.modulate = Color(1.0, 0.95, 0.6) if not hint.contains("EMPTY") else Color(1.0, 0.55, 0.45)
-		vr_hint.pixel_size = 0.0022
+		vr_hint.pixel_size = 0.0019
 	vr_hint.text = hint
 	vr_hint.visible = hint != ""
 	VrText.follow(vr_hint, players[0].xr_camera, self, -0.5 if stats_mode else -0.3, 1.8)

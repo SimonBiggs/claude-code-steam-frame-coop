@@ -1142,7 +1142,7 @@ func _process(delta: float) -> void:
 	if music == null:
 		music = MusicScript.new()
 		add_child(music)
-	music.play_track(maxi(shift - 1, 0))
+	music.play_track(1 if rush_t > 0.0 else maxi(shift - 1, 0))
 	_update_tickets()
 	_update_fire_visuals()
 	_animate_kitchen(delta)
@@ -2011,6 +2011,10 @@ func _update_guides() -> void:
 			if it != null and is_instance_valid(it):
 				want = it.global_position + Vector3.UP * 0.12
 				k = 0.18
+			elif chef_task.has("spot"):
+				var sp: Vector3 = chef_task["spot"]
+				want = sp + Vector3.UP * 0.12
+				k = 0.18
 			else:
 				var pl = chef_task.get("plate")
 				if pl != null and is_instance_valid(pl):
@@ -2108,7 +2112,7 @@ func _compute_chef_task() -> Dictionary:
 			for it in held_items:
 				if it.kind == kind and not it.is_plate():
 					if it.needs_chop():
-						return {"text": "Put the %s down on the counter and CHOP it!" % ItemScript.display_name(kind), "plate": target}
+						return {"text": "Put the %s down on the counter and CHOP it!" % ItemScript.display_name(kind), "spot": L.BOARD}
 					return {"text": "Drop the %s on the glowing plate (let go of the trigger)" % ItemScript.display_name(kind), "plate": target}
 			for it in all_items():
 				if it.holder != -1 or it.is_plate() or it.kind != kind:
@@ -2614,7 +2618,7 @@ func _update_vr_center() -> void:
 		vr_hint.no_depth_test = true
 		vr_hint.render_priority = 10
 		vr_hint.outline_render_priority = 9
-		vr_hint.width = 1100.0
+		vr_hint.width = 800.0
 		vr_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		add_child(vr_hint)
 		set_layers(vr_hint, players[0].viewmodel_layer())
@@ -2623,7 +2627,7 @@ func _update_vr_center() -> void:
 		vr_hint.set_meta("stats_mode", stats_mode)
 		VrText.snap(vr_hint)
 	var hint: String = stats_text if stats_mode else str(chef_task.get("text", ""))
-	vr_hint.pixel_size = 0.0017 if stats_mode else 0.0021
+	vr_hint.pixel_size = 0.0016 if stats_mode else 0.0019
 	vr_hint.modulate = Color(0.9, 0.97, 1.0) if stats_mode else (Color(1.0, 0.55, 0.45) if fire_on else Color(1.0, 0.95, 0.6))
 	vr_hint.text = hint
 	vr_hint.visible = hint != "" and not game_over or stats_mode
