@@ -30,6 +30,7 @@ var stream_server: TCPServer
 var stream_clients: Array[StreamPeerTCP] = []
 var stream_t := 0.0
 var stream_busy := false
+var stream_busy_since := 0
 var caption: Node  # "Claude:" captions (addons/gdev/caption.gd), created lazily
 
 
@@ -244,18 +245,43 @@ func _update_stream(delta: float) -> void:
 		c.poll()
 		return c.get_status() == StreamPeerTCP.STATUS_CONNECTED)
 	stream_t += delta
+	if stream_busy and Time.get_ticks_msec() - stream_busy_since > 2000:
+		stream_busy = false  # a lost frame (e.g. its viewport freed on a scene change) must not freeze the stream
 	if stream_clients.is_empty() or stream_busy or stream_t < 1.0 / STREAM_FPS:
 		return
 	stream_t = 0.0
-	var img := _capture_viewport().get_texture().get_image()
-	if img == null:
-		return
 	stream_busy = true
-	tasks.append(WorkerThreadPool.add_task(func() -> void:
-		while img.get_width() >= 960:
-			img.shrink_x2()
-		img.convert(Image.FORMAT_RGB8)
-		_send_stream_frame.call_deferred(img.save_jpg_to_buffer(0.8))))
+	stream_busy_since = Time.get_ticks_msec()
+	# Read back asynchronously like _capture: a synchronous get_image() 25 times a second stalls the
+	# headset (missed VR frames show as black flashes).
+	var vp := _capture_viewport()
+	var rd_tex := RenderingServer.texture_get_rd_texture(vp.get_texture().get_rid())
+	if rd and rd_tex.is_valid():
+		var fmt := rd.texture_get_format(rd_tex)
+		if fmt.format == RenderingDevice.DATA_FORMAT_R8G8B8A8_UNORM or fmt.format == RenderingDevice.DATA_FORMAT_R8G8B8A8_SRGB:
+			var w := fmt.width
+			var h := fmt.height
+			var err := rd.texture_get_data_async(rd_tex, 0, func(data: PackedByteArray) -> void:
+				if data.size() != w * h * 4:
+					stream_busy = false
+					return
+				tasks.append(WorkerThreadPool.add_task(func() -> void:
+					var img := Image.create_from_data(w, h, false, Image.FORMAT_RGBA8, data)
+					_stream_encode(img))))
+			if err == OK:
+				return
+	var img := vp.get_texture().get_image()  # fallback (can hitch)
+	if img == null:
+		stream_busy = false
+		return
+	tasks.append(WorkerThreadPool.add_task(_stream_encode.bind(img)))
+
+
+func _stream_encode(img: Image) -> void:
+	while img.get_width() >= 960:
+		img.shrink_x2()
+	img.convert(Image.FORMAT_RGB8)
+	_send_stream_frame.call_deferred(img.save_jpg_to_buffer(0.8))
 
 
 func _send_stream_frame(jpeg: PackedByteArray) -> void:
