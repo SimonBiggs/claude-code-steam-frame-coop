@@ -88,6 +88,16 @@ func _process(_delta: float) -> void:
 	carry_label.position = Vector2(24 * s, size.y - 120 * s)
 	hint_label.position = Vector2(0, size.y * 0.5 + 60 * s)
 	hint_label.size = Vector2(size.x, 40 * s)
+	if main.simple:
+		# Simple mode: no lists or paragraphs - the arrow shows the way, one short button prompt.
+		orders_label.visible = false
+		job_panel.visible = false
+		carry_label.visible = false
+		if chef:
+			hint_label.text = main.chef_prompt(player)
+		else:
+			hint_label.text = ("PRESS " + _button_name()) if main.resolve(player).has("act") and not main.input_blocked() else ""
+		return
 	orders_label.text = main.orders_text()
 	# Your job right now, big and clear (the arrow in the world points at it).
 	var job_text := ""
