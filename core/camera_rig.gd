@@ -168,6 +168,7 @@ func _switch(new_mode: String, blend: float) -> void:
 	mode = new_mode
 
 
+## True while a mode change or shot is still blending in.
 func is_blending() -> bool:
 	return _blend_t < 1.0
 

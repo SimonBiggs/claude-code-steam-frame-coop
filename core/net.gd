@@ -54,6 +54,7 @@ func _ready() -> void:
 	_was_paused = get_tree().paused
 
 
+## Become the host (the headset, or DUO_HOST=1): listen for the TV machine.
 func host() -> void:
 	mode = "host"
 	_try_listen()
@@ -75,6 +76,7 @@ func _try_listen() -> void:
 	print("Net: hosting on port %d" % PORT)
 
 
+## Become the TV machine: join the host at `address` (join_finished tells how it went).
 func join(address: String) -> void:
 	_close_old_peer()
 	var peer := ENetMultiplayerPeer.new()

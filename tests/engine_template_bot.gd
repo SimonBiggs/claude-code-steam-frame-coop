@@ -34,6 +34,16 @@ func _ready() -> void:
 	kit.at(t0 + 9.0, "split?", func() -> void:
 		if main.split != null:
 			kit.assert_true(not main.split.is_shared(), "Y switched back to split screen"))
+	if not host:
+		kit.at(t0 + 10.0, "P2 presses Start: pause menu", func() -> void:
+			kit.allow_pause = true
+			_press("start"))
+		kit.at(t0 + 10.6, "paused?", func() -> void:
+			kit.assert_true(get_tree().paused and main.tv_banner != null and main.tv_banner.visible, "Start pauses and main.on_pause_changed shows the banner")
+			_press("start"))
+		kit.at(t0 + 11.2, "resumed?", func() -> void:
+			kit.assert_true(not get_tree().paused and not main.tv_banner.visible, "Start again resumes everyone")
+			kit.allow_pause = false)
 	if host:
 		kit.at(20.0, "host checks (the TV machine is still connected)", _checks)
 		kit.at(30.0, "finish", kit.finish)
@@ -52,9 +62,13 @@ func _join() -> void:
 
 
 func _press_y() -> void:
+	_press("y")
+
+
+func _press(action: String) -> void:
 	var slots: Array[int] = main.party.local_slots()
 	if not slots.is_empty():
-		kit.slot_press(main.party, slots[0], "y")
+		kit.slot_press(main.party, slots[0], action)
 
 
 func _physics_process(delta: float) -> void:

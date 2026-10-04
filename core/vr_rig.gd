@@ -212,6 +212,7 @@ func refit() -> void:
 	_do_fit(true)
 
 
+## World position of the eyes.
 func head_position() -> Vector3:
 	return camera.global_position
 
@@ -307,6 +308,7 @@ func a_down() -> bool:
 	return _a_now[_ctx()]
 
 
+## A went down this frame (fresh press only).
 func a_pressed() -> bool:
 	var c := _ctx()
 	return _a_now[c] and not _a_prev[c]
@@ -317,6 +319,7 @@ func stick_left() -> Vector2:
 	return _dead(fake_stick_l if fake else hand_l.get_vector2("primary"))
 
 
+## Right thumbstick (snap / smooth turn uses its x unless turn_mode is "none").
 func stick_right() -> Vector2:
 	return _dead(fake_stick_r if fake else hand_r.get_vector2("primary"))
 
@@ -375,6 +378,7 @@ func pulse(which: int, amplitude: float = 0.4, duration: float = 0.06) -> void:
 
 # --- Hands --------------------------------------------------------------------------------
 
+## The controller node for LEFT or RIGHT.
 func hand(which: int) -> XRController3D:
 	return hand_l if which == LEFT else hand_r
 
@@ -411,6 +415,7 @@ func hand_velocity(which: int) -> Vector3:
 	return global_basis * ((ps[ps.size() - 1] - ps[0]) / dt)
 
 
+## Hand speed in units per second (see hand_velocity).
 func hand_speed(which: int) -> float:
 	return hand_velocity(which).length()
 
@@ -724,6 +729,7 @@ static func glove_mesh(left: bool, color: Color, cuff: Color) -> ArrayMesh:
 	return VrRigStatics.glove_mesh(left, color, cuff)
 
 
+## Material for vertex-coloured meshes like the gloves.
 static func vertex_color_material() -> StandardMaterial3D:
 	return VrRigStatics.vertex_color_material()
 
@@ -732,12 +738,14 @@ static func vertex_color_material() -> StandardMaterial3D:
 class VrRigStatics:
 	# Built per rig / avatar (tiny meshes). Resources are NOT cached in Engine metadata: they would
 	# outlive the renderer at exit and print leak errors.
+	## A plain material that uses the mesh's vertex colours.
 	static func vertex_color_material() -> StandardMaterial3D:
 		var mat := StandardMaterial3D.new()
 		mat.vertex_color_use_as_albedo = true
 		mat.roughness = 0.8
 		return mat
 
+	## Palm + fingers + thumb + cuff merged into one mesh (fingers point along -Z).
 	static func glove_mesh(left: bool, color: Color, cuff: Color) -> ArrayMesh:
 		var side := 1.0 if left else -1.0
 		var st := SurfaceTool.new()
@@ -769,6 +777,7 @@ class VrRigStatics:
 		_add(st, band, Transform3D(Basis(Vector3.RIGHT, PI * 0.5).scaled(Vector3(1.0, 1.0, 0.75)), Vector3(0.0, -0.015, 0.085)), cuff)
 		return st.commit()
 
+	## The avatar head: face, headset visor and a strap in the player colour.
 	static func head_mesh(color: Color) -> ArrayMesh:
 		var st := SurfaceTool.new()
 		st.begin(Mesh.PRIMITIVE_TRIANGLES)

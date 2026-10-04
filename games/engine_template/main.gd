@@ -16,6 +16,7 @@ const SplitView := preload("res://core/split_view.gd")
 const VrRig := preload("res://core/vr_rig.gd")
 const CameraRig := preload("res://core/camera_rig.gd")
 const Save := preload("res://core/save.gd")
+const VrText := preload("res://core/vr_text.gd")
 
 const GAME_ID := "engine_template"
 const ARENA := 8.0
@@ -38,9 +39,12 @@ var group_cam: CameraRig  # the shared view's camera
 var hud_labels := {}  # slot -> Label (-1 = the shared view's)
 var vr_avatar: VrRig.Avatar  # TV machine: the VR player as seen from the TV
 var vr_label: Label3D  # host: score on the back of the VR player's left glove
+var vr_banner: Label3D  # host: "PAUSED" in front of the VR player
+var tv_banner: Label  # TV: "PAUSED" over every view
 var stars := {}  # id -> Node3D
 var next_star := 0
 var star_t := 0.0
+var send_t := 0.0  # TV machine: positions go to the host 30 times a second
 
 
 func _ready() -> void:
@@ -216,6 +220,10 @@ func _hud_label(parent: Control) -> Label:
 ## Local TV players walk with their left stick, relative to their camera. The TV machine moves its
 ## own players instantly and tells the host where they are (net.send_state).
 func _move_local_players(delta: float) -> void:
+	send_t -= delta
+	var send := send_t <= 0.0
+	if send:
+		send_t = 1.0 / 30.0
 	for slot in party.local_slots():
 		if not avatars.has(slot):
 			continue
@@ -232,7 +240,7 @@ func _move_local_players(delta: float) -> void:
 			p.y = 0.0
 			a.position = p.limit_length(ARENA)
 			a.rotation.y = atan2(-dir.x, -dir.z)
-		if net.mode == "client":
+		if net.mode == "client" and send:
 			net.send_state(a.position, a.rotation.y, 0.0, slot)
 		if party.just_pressed(slot, "y"):
 			net.request(slot, "toggle_view")
@@ -251,6 +259,39 @@ func on_request(_slot: int, action: String, _args: Array) -> void:
 	match action:
 		"toggle_view":
 			net.state_set("shared", not bool(net.state_get("shared", false)))
+
+
+## Every machine: the game was paused or resumed (wrist MENU, or a TV pause menu). Nothing in
+## the paused game processes, so put the banners up right here.
+func on_pause_changed(paused: bool, by_slot: int) -> void:
+	var why := "PAUSED by %s\n%s" % [party.name_of(by_slot),
+		"Wrist MENU: carry on" if vr_rig != null else "Start: menu"]
+	if vr_rig != null:
+		if vr_banner == null:
+			vr_banner = Label3D.new()
+			vr_banner.font_size = 64
+			vr_banner.outline_size = 26
+			vr_banner.pixel_size = 0.002
+			add_child(vr_banner)
+		vr_banner.text = why
+		vr_banner.visible = paused
+		VrText.snap(vr_banner)
+		VrText.follow(vr_banner, vr_rig.camera, self, 0.0)
+	if split != null:
+		if tv_banner == null:
+			var layer := CanvasLayer.new()
+			layer.layer = 5
+			add_child(layer)
+			tv_banner = Label.new()
+			tv_banner.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			tv_banner.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+			tv_banner.add_theme_font_size_override("font_size", 64)
+			tv_banner.add_theme_constant_override("outline_size", 14)
+			tv_banner.add_theme_color_override("font_outline_color", Color.BLACK)
+			layer.add_child(tv_banner)
+			tv_banner.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		tv_banner.text = why
+		tv_banner.visible = paused
 
 
 ## Every machine: a replicated value changed.

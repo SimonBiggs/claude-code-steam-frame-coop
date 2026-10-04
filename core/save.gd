@@ -68,6 +68,7 @@ func save_now() -> bool:
 	return ok
 
 
+## True between mark_dirty() and the next write.
 func has_unsaved_changes() -> bool:
 	return _dirty
 
@@ -170,6 +171,7 @@ static func erase(id: String) -> void:
 			DirAccess.remove_absolute(ProjectSettings.globalize_path(p))
 
 
+## True if the game has a save file (in the test folder during bots).
 static func exists(id: String) -> bool:
 	return FileAccess.file_exists(path_for(id))
 

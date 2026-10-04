@@ -94,6 +94,7 @@ func set_slots(slots: Array) -> void:
 	layout()
 
 
+## Show a view for one more slot.
 func add_slot(slot: int) -> void:
 	if not _slots.has(slot):
 		var list: Array = _slots.duplicate()
@@ -101,12 +102,14 @@ func add_slot(slot: int) -> void:
 		set_slots(list)
 
 
+## Hide a slot's view (kept for later, not rendered).
 func remove_slot(slot: int) -> void:
 	if _slots.has(slot):
 		_slots.erase(slot)
 		layout()
 
 
+## True if the slot has a view in the grid.
 func has_slot(slot: int) -> bool:
 	return _slots.has(slot)
 
@@ -148,6 +151,7 @@ func hud(slot: int) -> Control:
 	return _ensure_view(slot)["hud"]
 
 
+## The slot's SubViewport (e.g. to change its 3D settings).
 func viewport(slot: int) -> SubViewport:
 	return _ensure_view(slot)["viewport"]
 
@@ -200,14 +204,17 @@ func _showing_shared() -> bool:
 	return _shared_on or (shared_when_empty and _slots.is_empty())
 
 
+## The shared view's camera (created on first use).
 func shared_camera() -> Camera3D:
 	return _ensure_shared()["camera"]
 
 
+## The shared view's HUD root.
 func shared_hud() -> Control:
 	return _ensure_shared()["hud"]
 
 
+## The shared view's SubViewport.
 func shared_viewport() -> SubViewport:
 	return _ensure_shared()["viewport"]
 
@@ -410,6 +417,7 @@ func set_bubble(source: SubViewport, ring_color: Color = Color(0.3, 0.7, 1.0), l
 	_place_bubble(_area())
 
 
+## Hide the VR bubble.
 func clear_bubble() -> void:
 	if _bubble != null and is_instance_valid(_bubble):
 		_bubble.visible = false

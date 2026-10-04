@@ -193,6 +193,7 @@ func player_count() -> int:
 	return active_slots().size()
 
 
+## Seated (local or remote; a seat whose controller is unplugged still counts).
 func is_active(slot: int) -> bool:
 	return slot >= 0 and slot < MAX_SLOTS and _state[slot] == ACTIVE
 
@@ -224,11 +225,13 @@ func name_of(slot: int) -> String:
 	return "P%d" % (slot + 1)
 
 
+## Give a seat a name (shown by name_of; sent to the host with the join request).
 func set_player_name(slot: int, player_name: String) -> void:
 	if slot >= 0 and slot < MAX_SLOTS:
 		_names[slot] = player_name
 
 
+## The slot's player colour (COLORS: P1 blue, P2 gold, P3 pink, ...).
 func color_of(slot: int) -> Color:
 	return COLORS[posmod(slot, COLORS.size())]
 
@@ -576,6 +579,7 @@ func guard(slot: int) -> void:
 		_guard_slot(slot)
 
 
+## guard() every seat (e.g. when a new screen or round starts).
 func guard_all() -> void:
 	for s in MAX_SLOTS:
 		_guard_slot(s)
