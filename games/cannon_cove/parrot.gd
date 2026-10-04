@@ -59,13 +59,14 @@ func _ready() -> void:
 		if c is GeometryInstance3D:
 			c.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	bubble = Label3D.new()
-	bubble.font_size = 44
-	bubble.outline_size = 16
-	bubble.pixel_size = 0.0045
+	# Small and above the rail: the VR gunner stands about two metres away (no big text in their face).
+	bubble.font_size = 36
+	bubble.outline_size = 14
+	bubble.pixel_size = 0.002
 	bubble.modulate = Color(1.0, 1.0, 0.85)
 	bubble.outline_modulate = Color(0.05, 0.1, 0.2, 0.95)
-	bubble.position = Vector3(0, 0.75, 0)
-	bubble.width = 520.0
+	bubble.position = Vector3(0, 0.8, 0)
+	bubble.width = 360.0
 	bubble.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	bubble.visible = false
 	bubble.rotation.y = PI  # readable from inboard (never billboarded)

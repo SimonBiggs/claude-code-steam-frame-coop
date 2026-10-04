@@ -1922,7 +1922,7 @@ func _update_vr_center() -> void:
 		vr_hint.no_depth_test = true
 		vr_hint.render_priority = 10
 		vr_hint.outline_render_priority = 9
-		vr_hint.width = 1100.0
+		vr_hint.width = 800.0
 		vr_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		add_child(vr_hint)
 	var stats_mode := game_over and stats_text != ""
@@ -1930,7 +1930,7 @@ func _update_vr_center() -> void:
 		vr_hint.set_meta("stats_mode", stats_mode)
 		VrText.snap(vr_hint)
 	var text := stats_text if stats_mode else (giant_tip if giant_tip_t > 0.0 else "")
-	vr_hint.pixel_size = (0.0015 if stats_mode else 0.0022) * W.S
+	vr_hint.pixel_size = (0.0015 if stats_mode else 0.0019) * W.S
 	vr_hint.modulate = Color(0.95, 0.97, 1.0) if stats_mode else Color(1.0, 0.93, 0.6)
 	vr_hint.text = text
 	vr_hint.visible = text != ""
