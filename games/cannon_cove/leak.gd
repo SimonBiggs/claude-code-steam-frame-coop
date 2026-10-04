@@ -14,6 +14,7 @@ var fill: MeshInstance3D
 var label: Label3D
 var spray: CPUParticles3D
 var t := 0.0
+var glow: MeshInstance3D
 
 
 func _ready() -> void:
@@ -65,6 +66,19 @@ func _process(delta: float) -> void:
 	fill.visible = progress > 0.01
 	var s := maxf(progress, 0.02)
 	fill.scale = Vector3(s, 1.0, s)
+	if main != null and main.simple:
+		# Simple mode: no words - a glowing ring pulses round the hole; the green fill grows as you fix it.
+		label.visible = false
+		if glow == null:
+			glow = World.cyl(self, 0.75, 0.75, 0.02, Vector3(0, 0.03, 0), World.mat(Color(0.4, 0.85, 1.0, 0.5), 2.5), 16)
+			var gm := glow.material_override as StandardMaterial3D
+			gm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			gm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			glow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var k := 0.5 + 0.5 * sin(t * 6.0)
+		glow.scale = Vector3.ONE * (0.8 + 0.5 * k)
+		glow.visible = progress < 0.01
+		return
 	label.text = "PATCHING %d%%" % int(progress * 100.0) if progress > 0.01 else "LEAK!"
 
 

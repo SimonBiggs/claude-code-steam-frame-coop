@@ -395,7 +395,7 @@ func _attack(delta: float) -> void:
 		if board_t <= 0.0 and d < orbit_r + 8.0:
 			board_t = randf_range(7.0, 10.0)
 			var extra: int = main.crew_extra()  # bigger crews get a few more boarders
-			if boarders_sent < 2 + wave / 3 + extra / 2 and main.boarder_count() < 2 + wave / 2 + extra:
+			if boarders_sent < 2 + wave / 3 + extra / 2 and main.boarder_count() < mini(2 + wave / 2 + extra, main.boarder_cap()):
 				boarders_sent += 1
 				main.spawn_boarder(self)
 

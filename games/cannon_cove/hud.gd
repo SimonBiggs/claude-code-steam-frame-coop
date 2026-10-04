@@ -53,6 +53,8 @@ func _draw() -> void:
 	var c := size * 0.5
 	# Who this view belongs to, in the player's colour.
 	var who: String = "P%d GUNNER" % (player.index + 1) if player.gunner else "P%d DECKHAND" % (player.index + 1)
+	if main.simple:
+		who = "P%d" % (player.index + 1)
 	draw_string_outline(font, Vector2(size.x - 260.0, size.y - 22.0), who, HORIZONTAL_ALIGNMENT_RIGHT, 240.0, 28, 8, Color(0, 0, 0, 0.9))
 	draw_string(font, Vector2(size.x - 260.0, size.y - 22.0), who, HORIZONTAL_ALIGNMENT_RIGHT, 240.0, 28, player.color)
 	if not player.gunner:
@@ -75,6 +77,17 @@ func _draw() -> void:
 				draw_string(font, bc + Vector2(-60, -44), "GOLDEN!", HORIZONTAL_ALIGNMENT_CENTER, 120.0, 22, Color(1.0, 0.85, 0.2))
 	# Water in the hold: a vertical gauge on the left.
 	var water: float = main.water
+	if main.simple:
+		# Simple mode: just a picture of the water level (no words, no numbers, no ammo table).
+		if water < 0.5:
+			return
+		var sgh := minf(220.0, size.y * 0.35)
+		var sgy := size.y - 60.0 - sgh
+		draw_rect(Rect2(26, sgy - 4, 44, sgh + 8), Color(0, 0, 0, 0.55))
+		var sfill := sgh * water / 100.0
+		var scol := Color(0.3, 0.7, 1.0) if water < 60.0 else Color(1.0, 0.35 + 0.2 * sin(Time.get_ticks_msec() * 0.012), 0.3)
+		draw_rect(Rect2(30, sgy + sgh - sfill, 36, sfill), scol)
+		return
 	var gx := 30.0
 	var gh := minf(260.0, size.y * 0.4)
 	var gy := size.y - 60.0 - gh
