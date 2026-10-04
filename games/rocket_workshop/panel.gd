@@ -202,14 +202,14 @@ func _build_wing_controls() -> void:
 			proj.position = Vector3(ALIEN_AT.x, ALIEN_AT.y, 0.015)
 			holder.add_child(proj)
 			alien_beam = MeshInstance3D.new()
-			alien_beam.mesh = main.cyl_mesh(0.07, 0.035, 0.16, 14)
+			alien_beam.mesh = main.cyl_mesh(0.085, 0.035, 0.18, 14)
 			var bm: StandardMaterial3D = main.make_material(Color(0.4, 0.95, 1.0, 0.18), 1.2)
 			bm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 			bm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 			bm.cull_mode = BaseMaterial3D.CULL_DISABLED
 			alien_beam.material_override = bm
 			alien_beam.rotation.x = PI / 2.0
-			alien_beam.position = Vector3(ALIEN_AT.x, ALIEN_AT.y, 0.11)
+			alien_beam.position = Vector3(ALIEN_AT.x, ALIEN_AT.y, 0.12)
 			alien_beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			holder.add_child(alien_beam)
 			alien_holder = Node3D.new()
@@ -575,7 +575,7 @@ func _refresh() -> void:
 		if not al.is_empty():
 			var cast: Array = al.cast
 			var a: Array = cast[int(al.pick)]
-			alien_holder.add_child(main.alien_node(int(a[0]), int(a[1]), int(a[2]), 0.13))
+			alien_holder.add_child(main.alien_node(int(a[0]), int(a[1]), int(a[2]), 0.17))
 		main.set_layers(alien_holder, main.PANEL_LAYER)
 
 

@@ -830,8 +830,7 @@ func on_panel(kind: String, args: Array) -> void:
 			if m.is_empty() or m.done:
 				return
 			if word == int(m.answer):
-				popup(panel.control_world("hello%d" % word) + Vector3.UP * 0.35, P.HELLO_WORDS[word] + "!", P.HELLO_COLORS[word])
-				_solve(m)
+				_solve(m)  # (no popup here: it would be huge and right in the pilot's face)
 			else:
 				_burp("That alien says hello differently!")
 		"crank":
