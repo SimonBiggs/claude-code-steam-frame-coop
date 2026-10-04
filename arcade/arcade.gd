@@ -80,6 +80,12 @@ func _ready() -> void:
 	get_tree().paused = false  # the lobby must never start paused (a game can leave the tree paused)
 	XRServer.world_scale = 1.0  # a game (Giant's Table) may have left the world scaled up
 	var wanted := OS.get_environment("ARCADE_GAME") if OS.has_environment("ARCADE_GAME") else ""
+	# ARCADE_GAME only picks the FIRST game: coming back to the arcade must show the lobby, not
+	# start that game again.
+	if get_tree().root.has_meta("arcade_auto_started"):
+		wanted = ""
+	elif wanted != "":
+		get_tree().root.set_meta("arcade_auto_started", true)
 	if wanted != "" or GAMES.size() == 1:
 		_launch(_index_of(wanted))
 		return
