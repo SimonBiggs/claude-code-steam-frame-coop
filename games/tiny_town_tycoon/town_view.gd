@@ -142,6 +142,7 @@ func _process(delta: float) -> void:
 		_rebuild_trees()
 		if Time.get_ticks_usec() - _pt > 8000:
 			print("[perf] %s %d ms" % ["_rebuild_trees()", (Time.get_ticks_usec() - _pt) / 1000])
+	_warm_meshes()
 	if town.version != _bld_ver or _dirty:
 		_bld_ver = town.version
 		_dirty = false
@@ -282,6 +283,28 @@ func _rebuild_trees() -> void:
 func building_xf(b: Dictionary) -> Transform3D:
 	var c := town.center_of(b)
 	return Transform3D(Basis(Vector3.UP, int(b["rot"]) * PI * 0.5).scaled(Vector3.ONE * Defs.CELL), c + Vector3(0, 0.0005, 0))
+
+
+## Stutter fix (David/Simon "very glitchy"): a building's mesh was generated the first time it was
+## needed, e.g. a house levelling up in a sim tick, which took tens of ms on the Frame. Build every
+## building mesh ahead of time, one per frame, so a rebuild only reuses cached meshes.
+func _warm_meshes() -> void:
+	var key := "ttt_warm_%s" % ("s" if snowy else "n")
+	var queue: Array = get_meta(key, []) if has_meta(key) else []
+	if not has_meta(key):
+		for kind in Defs.KINDS:
+			if Defs.B.has(kind) and bool((Defs.B[kind] as Dictionary).get("tool", false)):
+				continue
+			var variants := 5 if kind == "house" or kind == "shop" else 1
+			var lvls := 3 if kind == "house" else 1
+			for v in variants:
+				for lvl in range(1, lvls + 1):
+					queue.append([kind, v, lvl])
+		set_meta(key, queue)
+	if queue.is_empty():
+		return
+	var job: Array = queue.pop_back()
+	Art.building_mesh(String(job[0]), int(job[1]), int(job[2]), snowy)
 
 
 func _rebuild_buildings() -> void:

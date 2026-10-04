@@ -884,10 +884,17 @@ func _process(delta: float) -> void:
 
 
 func _sim_tick() -> void:
+	var t0 := Time.get_ticks_usec()
 	sim.tick(1.0)
+	var t1 := Time.get_ticks_usec()
 	jobs.generate()
+	var t2 := Time.get_ticks_usec()
 	jobs.assign(fleet.get("vehicles"))
+	var t3 := Time.get_ticks_usec()
 	fleet.call("sync_ai", sim.tier)
+	var t4 := Time.get_ticks_usec()
+	if t4 - t0 > 8000:
+		print("[perf] sim %d / jobs.generate %d / jobs.assign %d / fleet.sync_ai %d ms" % [(t1 - t0) / 1000, (t2 - t1) / 1000, (t3 - t2) / 1000, (t4 - t3) / 1000])
 	view.call("set_walkers", sim.pop / 2 + 2 if sim.pop > 0 else 0)
 	_publish_town(false)
 	_publish_stats()
