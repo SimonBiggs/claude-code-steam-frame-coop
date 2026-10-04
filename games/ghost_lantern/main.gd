@@ -4,6 +4,28 @@ const VrText := preload("res://core/vr_text.gd")
 ## Player 1 (VR, or keyboard+mouse in split screen) carries the spirit lantern: ghosts are only visible
 ## in its light cone, and ghosts held in the beam get stunned. TV players vacuum up revealed ghosts.
 ## Ghosts steal the family photos and spook players. Survive the nights!
+##
+## SIMPLE_MODE (the family: "all of the games have become too complicated", "simple games are the fun
+## games", "everything's being driven by text"): the lantern lights the friendly ghosts up and makes
+## them dizzy; the TV players vacuum them. That's all.
+##  - PRACTICE first: the lantern-bearer gets a sleepy ghost floating in front (it only shows in the
+##    light) and, in VR, a see-through ghost hand (ghost_hand.gd) that sweeps a lantern onto it; light
+##    it until it wakes, giggles and pops, then a second one. Each TV player gets one glowing ghost in
+##    front of them to vacuum (a one-line "HOLD RT!" until they do).
+##  - Gentle nights, one new thing at a time: 1 three slow plain ghosts, 2 + little fast sprites,
+##    3 + ghosts in witch hats, 4 + the golden ghost, 5 the GHOST KING (crown; vacuum him together),
+##    6 a mix and the sunrise, then more nights. Nothing ever goes wrong: no stealing, no spooking, no
+##    game over; a ghost nobody catches giggles and floats away through the ceiling.
+##  - Solo VR (no TV players): a dizzy ghost held in the light gets slurped into the lantern.
+##  - Everything near the lantern-bearer reacts to touch (props.gd): candles, a music box, a bubbling
+##    cauldron, a cuckoo clock, a winking portrait, a cobweb with a spider, a creaky cupboard.
+##  - Off: photo stealing (and the photo / LAST CHANCE rules), courage / spooked / cheering up, the
+##    snuffer and shy ghosts, storms / parties / treats, the bell scaring ghosts (it just rings), score,
+##    stats, popups, hint panels, awards and best scores. Text: one short headline ("NIGHT 2").
+const SIMPLE_MODE := true
+const PropsScript := preload("res://games/ghost_lantern/props.gd")
+const GhostHandScript := preload("res://games/ghost_lantern/ghost_hand.gd")
+const VR_PRACTICE := 2  # sleepy practice ghosts the lantern-bearer wakes up
 
 const PlayerScript := preload("res://games/ghost_lantern/player.gd")
 const GhostScript := preload("res://games/ghost_lantern/ghost.gd")
@@ -24,6 +46,10 @@ const EXTRA_SOUNDS := {
 	"giggle": [0.25, 900.0, 1400.0, 0.2, "tri", 0.1],
 	"fanfare": [1.6, 392.0, 1568.0, 0.4, "tri", 0.0],
 	"crown": [0.5, 1200.0, 300.0, 0.3, "square", 0.2],
+	"note": [0.45, 1046.0, 1040.0, 0.25, "sine", 0.0],
+	"cuckoo": [0.25, 784.0, 740.0, 0.3, "sine", 0.0],
+	"bloop": [0.22, 180.0, 520.0, 0.3, "sine", 0.0],
+	"creak": [0.7, 150.0, 95.0, 0.25, "saw", 0.35],
 }
 
 ## P1 (lantern) + up to six TV ghost hunters P2..P7.
@@ -67,6 +93,7 @@ uniform float lantern_on = 1.0;
 uniform float focus_on = 0.0;
 uniform float flash_all = 0.0;
 instance uniform float shy = 0.0;
+instance uniform float glow = 0.0;
 varying vec3 wpos;
 void vertex() { wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; }
 void fragment() {
@@ -77,7 +104,7 @@ void fragment() {
 	float rim = pow(1.0 - abs(dot(NORMAL, VIEW)), 2.0);
 	ALBEDO = color * (1.0 + flash) + vec3(0.5, 0.8, 0.6) * rim * 0.5;
 	float lit = r * (0.8 + 0.3 * rim) * mix(1.0, focus_on, shy);
-	ALPHA = clamp(max(lit, flash_all * 0.85), 0.0, 1.0);
+	ALPHA = clamp(max(max(lit, flash_all * 0.85), glow * 0.9), 0.0, 1.0);
 }
 """
 const PHOTO_SHADER := """
@@ -150,6 +177,15 @@ var view_count := 0
 var bubble: TextureRect
 var pad_wait := {}  # player index -> seconds left to plug their controller back in
 var pending_join := {}  # client: player index -> seconds until we may ask the host again
+var simple := SIMPLE_MODE  # other scripts read main.simple
+var props: Node3D  # simple mode: the touchable things around the lantern-bearer
+var ghost_hand: Node3D  # simple mode: the practice ghost hand (VR lantern-bearer only)
+var practice := SIMPLE_MODE  # simple mode: practice ghosts before night 1 (mirrored to the TV)
+var practice_t := 0.0
+var vr_woken := 0  # practice ghosts the lantern-bearer has woken up
+var vr_ghost_t := 1.5
+var tv_given := {}  # player index -> true once their glowing practice ghost appeared
+var tv_caught := {}  # player index -> true once they vacuumed a ghost (their "HOLD RT!" line goes)
 
 
 func _ready() -> void:
@@ -160,6 +196,10 @@ func _ready() -> void:
 	world_refs = built
 	_build_photos()
 	_build_hud()
+	if SIMPLE_MODE:
+		props = PropsScript.new()
+		props.main = self
+		add_child(props)
 	var menu := PauseMenuScript.new()
 	menu.main = self
 	add_child(menu)
@@ -186,7 +226,9 @@ func _setup_game(mode: String) -> void:
 	_assign_joypads()
 	ready_to_play = true
 	_restore_party()
-	if mode == "host":
+	if SIMPLE_MODE:
+		_show_center("GHOST LANTERN", 3.0, false)
+	elif mode == "host":
 		_show_center("GHOST LANTERN\nWaiting for the TV players to join…", 0.0)
 	elif mode == "client":
 		_show_center("CONNECTED", 1.5)
@@ -274,6 +316,8 @@ func burst(pos: Vector3, color: Color, amount: int = 16, size: float = 0.12) -> 
 
 
 func popup(pos: Vector3, text: String, color: Color) -> void:
+	if SIMPLE_MODE:
+		return  # no floating words: bursts and sounds say it
 	var l := Label3D.new()
 	l.text = text
 	l.modulate = color
@@ -706,6 +750,7 @@ func debug_skip_to_night(n: int) -> void:
 		return
 	for g in get_tree().get_nodes_in_group("ghosts"):
 		_remove_ghost(g)
+	practice = false
 	to_spawn = []
 	king_t = -1.0
 	night = n - 1
@@ -738,7 +783,7 @@ func _activate_player(i: int) -> void:
 		p.revive(1.0)
 	if not p.remote:
 		p.global_position = _spawn_near_team(i)
-	_show_center("PLAYER %d JOINED THE HUNT!" % (i + 1), 1.5)
+	_show_center(("PLAYER %d!" if SIMPLE_MODE else "PLAYER %d JOINED THE HUNT!") % (i + 1), 1.5)
 	print("Player %d joined the game (%d players)" % [i + 1, active_count()])
 	on_player_activity_changed(p)
 
@@ -894,6 +939,9 @@ func ring_bell(p, pos: Vector3) -> void:
 		return
 	_bell_fx(pos)
 	net.event("bell", [pos])
+	if SIMPLE_MODE:
+		sound("giggle", -6.0, 1.2)  # just a happy jingle: the ghosts giggle
+		return
 	var scared := 0
 	for g in get_tree().get_nodes_in_group("ghosts"):
 		if g.global_position.distance_to(pos) < BELL_RADIUS:
@@ -956,15 +1004,23 @@ func capture_ghost(g, by) -> void:
 	caught += 1
 	score += g.points
 	director().add_stat(by, "caught", 1)
+	if by != null:
+		tv_caught[by.index] = true
 	g.drop_photo(by)
+	if g.kind == "sleepy":
+		vr_woken += 1
+		vr_ghost_t = 1.0
 	if g.kind == "king":
-		director().on_king_caught()
-		_show_center("YOU CAUGHT THE GHOST KING!", 2.5)
+		if not SIMPLE_MODE:
+			director().on_king_caught()
+		_show_center("HOORAY!" if SIMPLE_MODE else "YOU CAUGHT THE GHOST KING!", 2.5)
 		sound("fanfare", 0.0)
 		burst(g.global_position, Color(1.0, 0.85, 0.3), 40, 0.1)
 	elif g.kind == "golden":
 		burst(g.global_position, Color(1.0, 0.85, 0.3), 30, 0.08)
 	var nozzle: Vector3 = by.nozzle_pos() if by != null else g.global_position
+	if by != null and by.role == "lantern":
+		nozzle = lantern_xform().origin  # solo: slurped into the lantern
 	capture_fx(g.global_position, nozzle, g.color)
 	net.event("capture", [g.global_position, nozzle, g.color])
 	burst(g.global_position, g.color, 18)
@@ -1001,6 +1057,15 @@ func _spawn_ghost(kind: String):
 		if d > best:
 			best = d
 			pos = c
+	if SIMPLE_MODE:
+		# Drift down through the ceiling somewhere near the lantern-bearer (or a TV player).
+		var anchor: Vector3 = players[0].global_position
+		if randf() < 0.4:
+			for p in players:
+				if p.role == "vacuum" and p.active and (not p.remote or net.connected) and randf() < 0.5:
+					anchor = p.global_position
+		var off := Vector3.FORWARD.rotated(Vector3.UP, randf() * TAU) * randf_range(4.0, 7.0)
+		pos = Vector3(clampf(anchor.x + off.x, -19.0, 19.0), 4.0, clampf(anchor.z + off.z, -6.5, 6.5))
 	g.position = pos
 	add_child(g)
 	ghost_by_id[g.net_id] = g
@@ -1014,8 +1079,9 @@ func ensure_king():
 		if g.kind == "king":
 			return g
 	var g = _spawn_ghost("king")
-	g.position = Vector3([-14.0, 0.0, 14.0].pick_random(), 4.5, randf_range(-3.0, 3.0))
-	_show_center("THE GHOST KING IS HERE!", 2.2)
+	if not SIMPLE_MODE:
+		g.position = Vector3([-14.0, 0.0, 14.0].pick_random(), 4.5, randf_range(-3.0, 3.0))
+	_show_center("GHOST KING!" if SIMPLE_MODE else "THE GHOST KING IS HERE!", 2.2)
 	sound("crown", 0.0, 0.8)
 	sound("gameover", -8.0, 1.6)
 	print("Ghost King arrives")
@@ -1039,7 +1105,7 @@ func king_summon(king) -> void:
 	if ghost_by_id.size() >= 10:
 		return
 	for i in 2:
-		var g = _spawn_ghost("thief")
+		var g = _spawn_ghost("plain" if SIMPLE_MODE else "thief")
 		g.position = king.global_position + Vector3(randf_range(-1.5, 1.5), 0.3, randf_range(-1.5, 1.5))
 	popup(king.global_position + Vector3.UP * 2.2, "MY FRIENDS, HELP!", Color(0.8, 0.9, 1.0))
 	sound("giggle", -2.0, 0.8)
@@ -1117,6 +1183,9 @@ func return_photo(i: int, rescued: bool, by = null) -> void:
 
 func ghost_escaped(g) -> void:
 	var i: int = g.carrying
+	if SIMPLE_MODE:
+		ghost_floated_away(g)
+		return
 	if g.kind == "golden":
 		_show_center("The golden ghost got away!", 1.5)
 	if i >= 0:
@@ -1131,6 +1200,8 @@ func ghost_escaped(g) -> void:
 
 
 func spook_player(p, g) -> void:
+	if SIMPLE_MODE:
+		return  # nobody gets spooked: ghosts just giggle
 	if p.invuln_t <= 0.0 and not p.is_down:
 		director().add_stat(p, "spooked", 1)
 	p.spook(SPOOK_AMOUNT * (1.3 if g.get("kind") == "king" else 1.0), g.global_position)
@@ -1271,11 +1342,16 @@ func _process(delta: float) -> void:
 		if game_over_time > 1.5 and (_restart_pressed() or players[0].vr_button_held()):
 			_restart()
 		return
-	if net.mode == "host" and not net.connected:
+	if net.mode == "host" and not net.connected and not SIMPLE_MODE:
 		if night == 0:
 			director().howto()  # the lantern-bearer reads how to play while waiting
 		return  # hold the nights until a TV player joins
 	_update_vacuums(delta)
+	if SIMPLE_MODE:
+		_update_ghost_hand(delta)
+		if practice:
+			_update_practice(delta)
+			return
 	if king_t > 0.0:
 		king_t -= delta
 		if king_t <= 0.0:
@@ -1288,11 +1364,14 @@ func _process(delta: float) -> void:
 			_start_night()
 	elif not to_spawn.is_empty():
 		spawn_timer -= delta
-		if spawn_timer <= 0.0 and ghost_by_id.size() < 3 + night + (crowd_bonus() + 1) / 2:
+		var at_once := mini(2 + night / 2 + (crowd_bonus() + 1) / 2, 6) if SIMPLE_MODE else 3 + night + (crowd_bonus() + 1) / 2
+		if spawn_timer <= 0.0 and ghost_by_id.size() < at_once:
 			_spawn_ghost(to_spawn.pop_back())
-			spawn_timer = maxf(0.8, 3.0 - night * 0.25 - crowd_bonus() * 0.15)
+			spawn_timer = maxf(2.0, 5.0 - night * 0.4) if SIMPLE_MODE else maxf(0.8, 3.0 - night * 0.25 - crowd_bonus() * 0.15)
 	elif ghost_by_id.is_empty() and king_t <= 0.0:
 		_end_night()
+	if SIMPLE_MODE:
+		return  # nothing to lose: no game over
 	var all_down := true
 	for p in players:
 		if p.active and not p.is_down:
@@ -1344,6 +1423,9 @@ func _animate_world(_delta: float) -> void:
 
 
 func _start_night() -> void:
+	if SIMPLE_MODE:
+		_start_simple_night()
+		return
 	night += 1
 	in_break = false
 	to_spawn = []
@@ -1389,6 +1471,9 @@ func crowd_bonus() -> int:
 
 
 func _end_night() -> void:
+	if SIMPLE_MODE:
+		_end_simple_night()
+		return
 	in_break = true
 	break_timer = 5.0
 	score += 100 * night
@@ -1455,7 +1540,8 @@ func on_client_joined() -> void:
 
 
 func on_client_left() -> void:
-	_show_center("The TV players left - waiting for them to come back…", 0.0)
+	if not SIMPLE_MODE:
+		_show_center("The TV players left - waiting for them to come back…", 0.0)
 	for p in players:
 		if p.index >= 2 and p.active:
 			p.set_active(false)
@@ -1580,7 +1666,7 @@ func make_snapshot() -> Array:
 	var ph := []
 	for p in photos:
 		ph.append(p.state)
-	return [night, score, caught, saved, game_over, ps, gs, ph, in_break, director().pack()]
+	return [night, score, caught, saved, game_over, ps, gs, ph, in_break, director().pack(), practice, tv_caught.keys()]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -1603,6 +1689,10 @@ func apply_snapshot(s: Array) -> void:
 			_set_photo_state(i, ph[i])
 	if s.size() > 9:
 		director().unpack(s[9])
+	if s.size() > 11:
+		practice = s[10]
+		for k in s[11]:
+			tv_caught[k] = true
 
 
 func _sync_ghosts(list: Array) -> void:
@@ -1654,6 +1744,9 @@ func apply_event(kind: String, args: Array) -> void:
 				players[i].on_remote_hurt(args[1])
 		"hint", "lightning":
 			director().client_event(kind, args)
+		"prop":
+			if props != null:
+				props.play(args[0])
 
 
 ## Lightning flashes, party lights and the sunrise (both machines).
@@ -1675,6 +1768,174 @@ func _update_mood() -> void:
 	var ch: OmniLight3D = world_refs.get("chandelier", null)
 	if ch != null and is_instance_valid(ch):
 		ch.light_color = Color.from_hsv(fmod(anim_t * 0.5, 1.0), 0.6, 1.0) if d.event_name == "party" else Color(1.0, 0.72, 0.4)
+
+
+# --- Simple mode -----------------------------------------------------------------
+
+## Is there a TV ghost vacuum to catch things? (No: solo VR, the lantern slurps dizzy ghosts itself.)
+func has_vacuums() -> bool:
+	for p in players:
+		if p.role == "vacuum" and p.active and (not p.remote or net.connected):
+			return true
+	return false
+
+
+## Host / local: practice. The lantern-bearer wakes VR_PRACTICE sleepy ghosts, one at a time; each TV
+## player vacuums one glowing ghost in front of them. Then night 1 (solo: once the lantern is done).
+func _update_practice(delta: float) -> void:
+	practice_t += delta
+	var crew_ready: bool = net.mode != "host" or net.connected
+	var sleepy_alive := false
+	var glowy_alive := false
+	for g in get_tree().get_nodes_in_group("ghosts"):
+		if g.kind == "sleepy":
+			sleepy_alive = true
+		elif g.kind == "glowy":
+			glowy_alive = true
+	if players[0].active and not sleepy_alive and vr_woken < VR_PRACTICE:
+		vr_ghost_t -= delta
+		if vr_ghost_t <= 0.0:
+			_spawn_sleepy()
+			sleepy_alive = true
+	for p in players:
+		if p.role == "vacuum" and p.active and (not p.remote or net.connected) and not tv_given.has(p.index):
+			tv_given[p.index] = true
+			_spawn_glowy(p)
+			glowy_alive = true
+	var vr_done := vr_woken >= VR_PRACTICE
+	if crew_ready and ((vr_done and not glowy_alive) or practice_t > 60.0):
+		_end_practice()
+	elif not crew_ready and vr_done and practice_t > 4.0:
+		_end_practice()  # solo VR: the ghosts come anyway (TV players can still drop in)
+
+
+## A practice ghost floating 3 m in front of the lantern-bearer, a little to one side each time.
+func _spawn_sleepy() -> void:
+	var p = players[0]
+	var head: Vector3 = p.eye_pos()
+	var fwd: Vector3 = -p.camera.global_basis.z if p.camera != null else Vector3.FORWARD
+	fwd.y = 0.0
+	fwd = fwd.normalized() if fwd.length() > 0.1 else Vector3.FORWARD
+	fwd = fwd.rotated(Vector3.UP, [0.35, -0.45][vr_woken % 2])
+	_place_practice("sleepy", head + fwd * 3.0)
+	print("Practice: sleepy ghost %d appears" % (vr_woken + 1))
+
+
+func _spawn_glowy(p) -> void:
+	var fwd := Basis(Vector3.UP, p.yaw) * Vector3.FORWARD
+	_place_practice("glowy", p.global_position + fwd * 3.2 + Vector3.UP * 1.4)
+	print("Practice: glowing ghost for P%d" % (p.index + 1))
+
+
+func _place_practice(kind: String, pos: Vector3):
+	var g := GhostScript.new()
+	g.setup(kind, 1, self)
+	g.net_id = next_net_id()
+	g.position = Vector3(clampf(pos.x, -19.5, 19.5), clampf(pos.y, 1.1, 2.0), clampf(pos.z, -7.0, 7.0))
+	g.home_y = g.position.y
+	add_child(g)
+	ghost_by_id[g.net_id] = g
+	sound("giggle", -10.0, 0.8)
+	burst(g.position, Color(0.8, 1.0, 0.85), 10, 0.05)
+	return g
+
+
+## The sleepy ghost was held in the light until it woke up: a giggle, a sparkle, the next one.
+func practice_ghost_done(g) -> void:
+	vr_woken += 1
+	vr_ghost_t = 1.0
+	sound("pickup", -2.0, 1.2)
+	sound("giggle", -4.0, 1.3)
+	burst(g.global_position, Color(1.0, 0.95, 0.5), 18, 0.06)
+	if players[0].vr:
+		players[0].hand_r.trigger_haptic_pulse("haptic", 0.0, 0.5, 0.15, 0.0)
+	print("Practice: sleepy ghost woken (%d)" % vr_woken)
+	_remove_ghost(g)
+
+
+func _end_practice() -> void:
+	practice = false
+	for g in get_tree().get_nodes_in_group("ghosts"):
+		if g.kind in GhostScript.PRACTICE:
+			burst(g.global_position, Color(0.8, 1.0, 0.85), 12, 0.06)
+			_remove_ghost(g)
+	in_break = true
+	break_timer = 2.5
+	if ghost_hand:
+		ghost_hand.visible = false
+	print("Practice over (lantern woke %d, %.0f s)" % [vr_woken, practice_t])
+
+
+## VR practice: the ghost hand sweeps a lantern onto the sleepy ghost until the player has done it.
+func _update_ghost_hand(delta: float) -> void:
+	var p = players[0]
+	if not p.vr:
+		return
+	var target = null
+	if practice and vr_woken < VR_PRACTICE:
+		for g in get_tree().get_nodes_in_group("ghosts"):
+			if g.kind == "sleepy":
+				target = g
+	if ghost_hand == null:
+		if target == null:
+			return
+		ghost_hand = GhostHandScript.new()
+		add_child(ghost_hand)
+		p._set_layers(ghost_hand, p.viewmodel_layer())
+	if target == null:
+		ghost_hand.show_demo(false, Transform3D(), Vector3.ZERO, false, delta)
+	else:
+		ghost_hand.show_demo(true, p.xr_camera.global_transform, target.global_position, target.reveal > 0.5, delta)
+
+
+## Gentle nights, one new kind at a time.
+func _start_simple_night() -> void:
+	night += 1
+	in_break = false
+	to_spawn = []
+	var bonus := crowd_bonus()
+	var plain := 3 if night == 1 else mini(2 + night / 2, 6)
+	for i in plain + bonus / 2:
+		to_spawn.append("plain")
+	if night >= 2:
+		for i in 2 if night == 2 else 1 + (night - 2) / 3:
+			to_spawn.append("sprite")
+	if night >= 3:
+		for i in 2 if night == 3 else 1 + (night - 3) / 3:
+			to_spawn.append("spooker")
+	if night >= 4:
+		to_spawn.append("golden")
+	to_spawn.shuffle()
+	spawn_timer = 1.5
+	var king_night := night % 5 == 0
+	king_t = 6.0 if king_night else -1.0
+	director().on_night_started(night, king_night)
+	sound("wave", -2.0, 0.7)
+	print("Night %d started (%d ghosts%s)" % [night, to_spawn.size(), ", KING" if king_night else ""])
+	_show_center("NIGHT %d" % night, 2.0)
+
+
+func _end_simple_night() -> void:
+	in_break = true
+	break_timer = 5.0
+	director().on_night_ended()
+	print("Night %d done (caught %d)" % [night, caught])
+	if night == FINAL_NIGHT and not director().won:
+		director().won = true
+		break_timer = 10.0
+		sound("fanfare", 0.0)
+		_show_center("GOOD MORNING!", 6.0)
+		return
+	sound("clear", -2.0, 0.8)
+	_show_center("HOORAY!", 2.5)
+
+
+## A ghost nobody caught: a giggle, a puff of sparkles, gone.
+func ghost_floated_away(g) -> void:
+	sound("giggle", -6.0, 0.9)
+	burst(g.global_position, g.color, 10, 0.06)
+	print("A %s ghost floated away" % g.kind)
+	_remove_ghost(g)
 
 
 # --- HUD ---------------------------------------------------------------------
@@ -1709,6 +1970,7 @@ func _build_hud() -> void:
 	help_label.offset_top = 64
 	help_label.offset_bottom = 150
 	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	help_label.visible = not SIMPLE_MODE
 	help_label.text = "Lantern (P1): WASD + mouse · Space/click focus · E/right click bell  |  " \
 		+ "Vacuums: stick/WASD move · RT / Space / Enter suck  ·  Start/Esc menu  ·  spare pad: A to join\n" \
 		+ "Ghosts only show up in the lantern light! Survive %d nights to see the sunrise." % FINAL_NIGHT
@@ -1758,6 +2020,9 @@ func _update_hud() -> void:
 		help_label.modulate.a = maxf(0.0, help_label.modulate.a - get_process_delta_time())
 	if net.mode == "client" and not synced:
 		info_label.text = "Syncing with the lantern-bearer…"
+		return
+	if SIMPLE_MODE:
+		info_label.text = ""  # no readouts: the ghosts say it all
 		return
 	var night_text := ("NIGHT %d / %d" % [night, FINAL_NIGHT]) if night <= FINAL_NIGHT and not director().won else ("BONUS NIGHT %d" % night)
 	info_label.text = "%s   ·   GHOSTS CAUGHT %d   ·   PHOTOS %d/%d   ·   SCORE %d" % [night_text, caught, photos_left(), photos.size(), score]

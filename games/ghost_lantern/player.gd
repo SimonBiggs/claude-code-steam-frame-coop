@@ -575,7 +575,7 @@ func _set_vac(on: bool) -> void:
 func try_ring_bell() -> void:
 	if bell_cd > 0.0 or is_down:
 		return
-	bell_cd = BELL_COOLDOWN
+	bell_cd = 1.5 if main.simple else BELL_COOLDOWN  # simple mode: the bell is just a happy jingle
 	if bell:
 		var tw := bell.create_tween()
 		tw.tween_property(bell, "rotation:z", 0.6, 0.06)
@@ -775,6 +775,9 @@ func _vr_update(delta: float) -> void:
 	var status := "SPOOKED! Friends, come cheer me up!" if is_down else ("Bell ready: shake it!" if bell_cd <= 0.0 else "Bell: %d s" % ceili(bell_cd))
 	if main.net.mode == "host" and not main.net.connected:
 		status = "Waiting for the TV players…"
+	if main.simple:
+		wrist_label.text = ""  # simple mode: no readouts on the hands
+		return
 	wrist_label.text = "COURAGE %d\nNIGHT %d   PHOTOS %d/%d\n%s" % [maxi(0, int(courage)), main.night, main.photos_left(), main.photos.size(), status]
 	_update_lantern_label()
 

@@ -15,7 +15,14 @@ const KINDS := {
 	"snuffer": {"color": Color(1.0, 0.78, 0.5), "radius": 0.4, "speed": 1.9, "tough": 0.9, "points": 180},
 	"golden": {"color": Color(1.0, 0.85, 0.3), "radius": 0.36, "speed": 2.9, "tough": 0.8, "points": 500},
 	"king": {"color": Color(0.75, 0.9, 1.0), "radius": 0.95, "speed": 1.05, "tough": 5.0, "points": 1500},
+	# Simple mode: a plain friendly ghost, the VR practice ghost (asleep, shows in the light) and the TV
+	# practice ghost (always glowing, so it can be vacuumed without the lantern).
+	"plain": {"color": Color(0.6, 1.0, 0.75), "radius": 0.45, "speed": 1.6, "tough": 0.8, "points": 100},
+	"sleepy": {"color": Color(0.75, 0.88, 1.0), "radius": 0.45, "speed": 0.0, "tough": 0.6, "points": 0},
+	"glowy": {"color": Color(0.6, 1.0, 0.75), "radius": 0.45, "speed": 0.0, "tough": 0.5, "points": 0},
 }
+const PRACTICE := ["sleepy", "glowy"]
+const LIFE := 50.0  # simple mode: an uncaught ghost giggles and floats away through the ceiling after this
 const STEALERS := ["thief", "shy"]
 const STUN_TIME := 1.1  # seconds in the lantern beam to stun (half that with a focused beam)
 
@@ -68,6 +75,8 @@ var minion_t := 14.0
 var life_t := 0.0  # golden ghost: leaves after a while
 var trail: CPUParticles3D
 var crown: Node3D
+var leaving := false  # simple mode: giggling off through the ceiling
+var home_y := 1.4
 
 func setup(k: String, n: int, m) -> void:
 	kind = k
@@ -79,6 +88,10 @@ func setup(k: String, n: int, m) -> void:
 	speed = d.speed + 0.1 * (n - 1)
 	tough = d.tough * (1.0 + 0.06 * (n - 1))
 	points = d.points
+	if m.simple:
+		# Night 1 ghosts drift slowly; they speed up a little each night.
+		speed = d.speed * (0.5 + 0.06 * mini(n - 1, 6))
+		tough = d.tough * (0.5 if k == "king" else 1.0)
 
 
 func _ready() -> void:
@@ -230,6 +243,9 @@ func _build_extras() -> void:
 	if kind == "shy":
 		for mi in meshes:
 			mi.set_instance_shader_parameter("shy", 1.0)
+	if kind == "glowy":
+		for mi in meshes:
+			mi.set_instance_shader_parameter("glow", 1.0)  # shows without the lantern
 	match kind:
 		"thief":
 			var mask := BoxMesh.new()
@@ -325,6 +341,8 @@ func _build_extras() -> void:
 			for sx in [-1.0, 1.0]:
 				var stache := _ghost_part(_blob(r * 0.16, 0.45), Vector3(sx * r * 0.18, -r * 0.08, -r * 0.92), Color(0.95, 0.95, 1.0))
 				stache.rotation.z = sx * 0.4
+			if main.simple:
+				return  # no name tag: the crown says it
 			var tag := Label3D.new()
 			tag.name = "KingTag"
 			tag.font_size = 56
@@ -365,6 +383,10 @@ func _physics_process(delta: float) -> void:
 	if kind == "shy" and not main.players[0].focus:
 		reveal = 0.0  # only the focused beam finds shy ghosts
 	reveal = maxf(reveal, main.storm_flash)  # lightning shows everyone for a moment
+	if kind == "glowy":
+		reveal = 1.0
+	if main.simple and _simple_extras(delta):
+		return
 	if reveal > 0.5 and stun_t <= 0.0:
 		beam_t += delta * (2.0 if main.players[0].focus else 1.0)
 		if beam_t >= STUN_TIME * (2.2 if kind == "king" else 1.0) and stun_cd <= 0.0:
@@ -397,6 +419,19 @@ func _physics_process(delta: float) -> void:
 	elif flee_t > 0.0:
 		desired = wander_point - global_position
 		desired.y = 0.0
+	elif main.simple and kind != "golden":
+		if kind == "king":
+			minion_t -= delta
+			if minion_t <= 0.0:
+				minion_t = 16.0
+				main.king_summon(self)
+		var sr := _simple_move()
+		desired = Vector3(sr.x, 0.0, sr.z)
+		target_y = sr.y
+		if kind in PRACTICE:
+			spd = 0.0
+		elif leaving:
+			spd = 0.3
 	elif main.director().event_name == "party" and carrying < 0 and kind != "king":
 		# Ghost party in the ballroom: everyone dances in a ring (dizzy: easy to catch).
 		var a := t * 0.8 + float(net_id) * 1.3
@@ -491,6 +526,9 @@ func _chase() -> Vector3:
 
 
 func _check_touch() -> void:
+	if main.simple:
+		_simple_touch()
+		return
 	if kind in STEALERS or kind == "golden" or spook_cd > 0.0 or stun_t > 0.0 or scared_t > 0.0 or sucked_t > 0.0:
 		return
 	if main.director().event_name == "party" and kind != "king":
@@ -517,6 +555,9 @@ func _stun() -> void:
 	stun_t = 2.6
 	stun_cd = 4.5
 	beam_t = 0.0
+	if kind == "sleepy":
+		main.practice_ghost_done(self)
+		return
 	if kind == "king":
 		# Each stun shakes one photo loose; catching him returns the rest.
 		if not carried.is_empty():
@@ -587,6 +628,72 @@ func is_stunned() -> bool:
 	return stun_t > 0.0
 
 
+# --- Simple mode (host) --------------------------------------------------------
+
+## Life timer, floating away, and the solo lantern catch. Returns true if the ghost is gone.
+func _simple_extras(delta: float) -> bool:
+	if kind in PRACTICE:
+		return false
+	if kind != "golden":
+		life_t += delta
+	if not leaving and life_t > LIFE * (1.8 if kind == "king" else 1.0) and stun_t <= 0.0 and capture < 0.05:
+		leaving = true
+		main.sound("giggle", -4.0, randf_range(0.9, 1.2))
+	if leaving and position.y > 4.6:
+		main.ghost_floated_away(self)
+		return true
+	# No TV vacuums around (solo VR): a stunned ghost held in the light gets slurped into the lantern.
+	if stun_t > 0.0 and reveal > 0.5 and not main.has_vacuums():
+		sucked_t = 0.15
+		pull_from = main.lantern_xform().origin
+		capture += delta * 0.55 / tough
+		if capture >= 1.0:
+			main.capture_ghost(self, main.players[0])
+			return true
+	return false
+
+
+## Direction (x, z) plus the wanted height (y): drift between spots near the players.
+func _simple_move() -> Vector3:
+	if kind in PRACTICE:
+		return Vector3(0.0, home_y, 0.0)
+	if leaving:
+		return Vector3(0.0, 7.0, 0.0)
+	var flat := Vector3(wander_point.x - global_position.x, 0.0, wander_point.z - global_position.z)
+	if flat.length() < 0.8 or flee_t > -0.1 and flee_t < 0.0:
+		_pick_wander()
+		flat = Vector3(wander_point.x - global_position.x, 0.0, wander_point.z - global_position.z)
+	return Vector3(flat.x, wander_point.y, flat.z)
+
+
+func _pick_wander() -> void:
+	var anchors: Array = []
+	for p in main.players:
+		if p.active and not p.ghost and (not p.remote or main.net.connected or p.index == 0):
+			anchors.append(p.global_position)
+	var a: Vector3 = anchors.pick_random() if not anchors.is_empty() else Vector3.ZERO
+	var off := Vector3.FORWARD.rotated(Vector3.UP, randf() * TAU) * randf_range(2.5, 6.0)
+	wander_point = Vector3(clampf(a.x + off.x, -19.5, 19.5), randf_range(1.1, 1.9), clampf(a.z + off.z, -7.0, 7.0))
+
+
+## Bumping into someone: a giggle and a little float away (no harm done).
+func _simple_touch() -> void:
+	if kind in PRACTICE or kind == "golden" or spook_cd > 0.0 or stun_t > 0.0 or sucked_t > 0.0 or leaving:
+		return
+	for p in main.players:
+		if not p.active:
+			continue
+		var d := Vector2(p.global_position.x - global_position.x, p.global_position.z - global_position.z)
+		if d.length() < radius + 0.45:
+			main.sound("giggle", -6.0, randf_range(1.0, 1.4))
+			spook_cd = 3.0
+			flee_t = 2.2
+			var away := -Vector3(d.x, 0.0, d.y).normalized()
+			wander_point = global_position + away * 4.0
+			wander_point.y = 1.6
+			return
+
+
 # --- Visuals (both machines) -------------------------------------------------
 
 func _process(delta: float) -> void:
@@ -620,6 +727,8 @@ func _process(delta: float) -> void:
 	var shut := blink_t < 0.12
 	if blink_t <= 0.0:
 		blink_t = randf_range(2.0, 4.5)
+	if kind == "sleepy" and reveal < 0.5:
+		shut = true  # asleep until the light wakes it up
 	for e in eye_nodes:
 		e.scale.y = 0.2 if shut else 1.0
 	if crown != null:
