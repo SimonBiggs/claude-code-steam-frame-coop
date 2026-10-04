@@ -18,8 +18,9 @@ const MeshKit := preload("res://games/rhythm_band/mesh_kit.gd")
 const HIT_R := 0.13  # metres from the stick tip to a drum's centre
 const REARM_R := 0.17
 const MIN_SPEED := 0.45  # m/s: resting a hand on a drum doesn't play it
-const PAD_OFFSETS: Array[Vector3] = [Vector3(-0.36, -0.36, -0.30), Vector3(-0.16, -0.50, -0.38),
-	Vector3(0.16, -0.50, -0.38), Vector3(0.36, -0.34, -0.30)]
+# Further out than arm-tucked (Simon: the drums were "way too close"), like a real kit.
+const PAD_OFFSETS: Array[Vector3] = [Vector3(-0.40, -0.36, -0.44), Vector3(-0.18, -0.48, -0.52),
+	Vector3(0.18, -0.48, -0.52), Vector3(0.40, -0.34, -0.44)]
 const PAD_COLORS: Array[Color] = [Color(1.0, 0.85, 0.2), Color(1.0, 0.3, 0.35), Color(0.3, 0.6, 1.0), Color(0.35, 0.95, 0.45)]
 const PAD_NAMES: Array[String] = ["HI-HAT", "SNARE", "TOM", "CRASH"]
 const MENU_NAMES: Array[String] = ["EASY", "NORMAL", "ROCK", "START!"]

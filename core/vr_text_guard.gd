@@ -27,7 +27,8 @@ func _process(delta: float) -> void:
 	# (in game.log, with the time) to match against reports like "the screen goes black".
 	if vr and delta > 0.03:
 		print("[hitch] %d ms at %s" % [int(delta * 1000.0), Time.get_time_string_from_system()])
-	if vr and not active:
+	if vr and (not active or get_meta("rules_v", 0) != 2):
+		set_meta("rules_v", 2)  # bump when _fix changes, so a hot reload re-applies it to existing labels
 		_sweep(get_tree().root)  # labels made before the guard started
 	active = vr
 	if not vr:
@@ -64,6 +65,10 @@ func _fix(l: Label3D) -> void:
 	if not is_instance_valid(l):
 		return
 	l.no_depth_test = false
+	# A raised render priority draws text over see-through things (light beams, glass) even when
+	# it's behind them; let transparent sorting by distance decide instead.
+	l.render_priority = 0
+	l.outline_render_priority = -1
 	if l.billboard != BaseMaterial3D.BILLBOARD_DISABLED:
 		l.billboard = BaseMaterial3D.BILLBOARD_DISABLED
 		if not faced.has(l):
@@ -79,7 +84,7 @@ func _update_mirror(cam: Camera3D, delta: float) -> void:
 		return
 	if not is_instance_valid(mirror):
 		mirror = SubViewport.new()
-		mirror.size = Vector2i(960, 960)
+		mirror.size = Vector2i(480, 480)  # small: it is an extra scene render on a phone-class GPU
 		mirror.world_3d = get_tree().root.world_3d
 		mirror.render_target_update_mode = SubViewport.UPDATE_DISABLED
 		mirror_cam = Camera3D.new()
@@ -91,6 +96,6 @@ func _update_mirror(cam: Camera3D, delta: float) -> void:
 	mirror_cam.current = true
 	mirror_t -= delta
 	if mirror_t <= 0.0:
-		mirror_t = 1.0 / 12.0  # enough for frame-at and the live view; cheap on the Frame's GPU
+		mirror_t = 1.0 / 5.0  # enough for frame-at; more caused visible jitter on the Frame
 		mirror.render_target_update_mode = SubViewport.UPDATE_ONCE
 

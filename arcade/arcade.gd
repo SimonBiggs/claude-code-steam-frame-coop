@@ -218,7 +218,7 @@ func _process(_delta: float) -> void:
 			_join_lobby(OS.get_environment("DUO_JOIN"))
 	if vr_list:
 		_vr_input()
-		VrText.follow(vr_list, vr_cam, self, -0.1, 2.2)  # always findable, wherever you look
+		VrText.follow(vr_list, vr_cam, self, 0.25, 2.4)  # always findable; raised so a seated player's list stays above the floor
 		if not has_meta("vr_floor"):
 			set_meta("vr_floor", true)
 			_build_vr_floor()
@@ -457,7 +457,7 @@ func _build_vr_view() -> void:
 	vr_list = Label3D.new()
 	vr_list.font_size = 44
 	vr_list.outline_size = 22
-	vr_list.pixel_size = 0.003
+	vr_list.pixel_size = 0.0026
 	vr_list.width = 1100.0
 	vr_list.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	vr_list.modulate = Color(0.85, 0.97, 1.0)
