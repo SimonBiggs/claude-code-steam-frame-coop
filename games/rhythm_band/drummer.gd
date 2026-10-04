@@ -272,7 +272,9 @@ func _build_rig() -> void:
 ## Puts the drums, lanes, lane labels and the dashboard where they belong for this player's size.
 func _layout_kit() -> void:
 	for i in 4:
-		var p := PAD_OFFSETS[i] * kit_s
+		# Height and spread follow the player's size; the forward distance doesn't (a seated kid's
+		# 0.7 scale pulled the drums back into their face).
+		var p := Vector3(PAD_OFFSETS[i].x * kit_s, PAD_OFFSETS[i].y * kit_s, PAD_OFFSETS[i].z)
 		pads[i].position = p
 		var dir := lane_dir(i)
 		guides[i].position = p + dir * NOTE_TRAVEL * 0.5

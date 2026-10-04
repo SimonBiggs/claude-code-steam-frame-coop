@@ -214,10 +214,12 @@ func _build_set() -> void:
 		parts.append([MeshKit.cyl(0.12, 0.14, 0.02, 10), MeshKit.at(Vector3(x + 0.05, STAGE_Y + 0.01, z - 0.42)), metal])
 		parts.append([MeshKit.sphere(0.03, 8), MeshKit.at(Vector3(x + 0.05, STAGE_Y + 1.26, z - 0.42), Vector3(1, 1.4, 1)), Color(0.2, 0.2, 0.22)])
 		parts.append([MeshKit.box(Vector3(0.02, 0.01, 1.2)), MeshKit.at(Vector3(x * 1.03, STAGE_Y + 0.005, z + 0.1), Vector3.ONE, Vector3(0, 0.3, 0)), Color(0.05, 0.05, 0.05)])
-	# The band's bass drum on the riser (the VR drummer's kit floats above it).
-	parts.append([MeshKit.cyl(0.32, 0.32, 0.36, 18), MeshKit.at(Vector3(DRUM_SPOT.x, STAGE_Y + 0.64, DRUM_SPOT.z - 0.55), Vector3.ONE, Vector3(PI * 0.5, 0, 0)), Color(0.85, 0.2, 0.3)])
-	parts.append([MeshKit.cyl(0.28, 0.28, 0.37, 18), MeshKit.at(Vector3(DRUM_SPOT.x, STAGE_Y + 0.64, DRUM_SPOT.z - 0.55), Vector3.ONE, Vector3(PI * 0.5, 0, 0)), Color(0.95, 0.92, 0.85)])
-	parts.append([MeshKit.sphere(0.1, 10), MeshKit.at(Vector3(DRUM_SPOT.x, STAGE_Y + 0.64, DRUM_SPOT.z - 0.74), Vector3(1, 1, 0.1)), Color(1.0, 0.8, 0.2)])
+	# The band's bass drum, standing on the riser floor well in front of the drummer: at eye height it
+	# blocked a seated player's view of the notes (Simon).
+	var kick := Vector3(DRUM_SPOT.x, STAGE_Y + 0.32, DRUM_SPOT.z - 1.0)
+	parts.append([MeshKit.cyl(0.32, 0.32, 0.36, 18), MeshKit.at(kick, Vector3.ONE, Vector3(PI * 0.5, 0, 0)), Color(0.85, 0.2, 0.3)])
+	parts.append([MeshKit.cyl(0.28, 0.28, 0.37, 18), MeshKit.at(kick, Vector3.ONE, Vector3(PI * 0.5, 0, 0)), Color(0.95, 0.92, 0.85)])
+	parts.append([MeshKit.sphere(0.1, 10), MeshKit.at(kick + Vector3(0, 0, -0.19), Vector3(1, 1, 0.1)), Color(1.0, 0.8, 0.2)])
 	var mi := MeshInstance3D.new()
 	mi.mesh = MeshKit.merge(parts)
 	mi.material_override = MeshKit.vertex_material(main.mats)
