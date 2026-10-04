@@ -294,11 +294,20 @@ func _stream_encode(img: Image) -> void:
 func _send_stream_frame(jpeg: PackedByteArray) -> void:
 	stream_busy = false
 	var part := ("--gdevframe\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n" % jpeg.size()).to_utf8_buffer()
+	part.append_array(jpeg)
+	part.append_array("\r\n".to_utf8_buffer())
+	# NEVER block the main thread on a viewer: a background browser tab that stops reading filled the
+	# socket and put_data() froze the whole game. Send what fits; drop viewers that fall behind.
+	var keep: Array[StreamPeerTCP] = []
 	for c in stream_clients:
-		if c.get_status() == StreamPeerTCP.STATUS_CONNECTED:
-			c.put_data(part)
-			c.put_data(jpeg)
-			c.put_data("\r\n".to_utf8_buffer())
+		if c.get_status() != StreamPeerTCP.STATUS_CONNECTED:
+			continue
+		var r := c.put_partial_data(part)
+		if r[0] == OK and int(r[1]) == part.size():
+			keep.append(c)
+		else:
+			c.disconnect_from_host()  # too slow (or a half-sent frame): it can reconnect
+	stream_clients = keep
 
 
 func _capture_viewport() -> Viewport:
