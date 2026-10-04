@@ -25,15 +25,35 @@ is generated in code (no image, font, audio or model files) and cached in Engine
 Tested by `tests/engine_ui_test.tscn` (`godot --headless --path . --fixed-fps 60 res://tests/engine_ui_test.tscn`,
 `ENGINE_PARTS=ui,world,audio` picks parts). Read its parts in `tests/engine_ui/` for more usage examples.
 
+## With the engine systems (core/party.gd, core/split_view.gd, core/vr_rig.gd)
+
+`games/engine_template/` (Star Catch) uses every module below on top of the systems: copy it.
+
+```gdscript
+var ui := UiKit.ui_root(split.hud(slot))          # per view; undoes SplitView's HUD scaling itself
+var shared_ui := UiKit.ui_root(split.shared_hud())
+UiMenu.open(ui, {"party": party, "slot": slot, "items": [...]})       # that seat's pad / keyboard
+VrMenu.open(self, {"rig": vr_rig, "items": [...]})                   # guarded trigger, right hand
+dlg.bind_party(party); dlg.set_vr_rig(vr_rig)     # any local seat (or the VR trigger) advances
+hints.bind_party(party); hints.set_vr_rig(vr_rig, self); hints.add_view(ui, slot)
+Awards.results_screen(shared_ui, data, {"party": party}); Awards.vr_summary(self, null, data, null, {"rig": vr_rig})
+var input := UiInput.for_party(party, slot)      # or UiInput.for_rig(vr_rig) for your own screens
+if UiMenu.slot_busy(slot): return                # skip that seat's gameplay input while its menu is open
+```
+Player colours (`UiKit.player_color(slot)`) are `Party.COLORS`: slot 0 is the VR player (P1, blue).
+Put round/phase/results data in the net state store (`net.state_set("results", awards.results())`)
+and build the UI in `state_changed`, so the host and the TV machine show the same thing.
+
 ## Rules of thumb
 
 - **Every TV view gets a UI root**: `var ui := UiKit.ui_root(view)` where `view` is Main (full screen),
   a split-screen `SubViewport`, or an existing CanvasLayer/Control. The root's Theme follows the view's
   size (scale 1.0 at 1920x1080, about 0.55 for a 3x2 split cell), so text never gets too big or small.
   Put every panel/menu/HUD for that view under its root.
-- **Each player's UI is bound to that player's controller** (`device` = their joypad id, `keys` = their
-  key set or `UiInput.KEYS_NONE`). Six players can each have a menu open at once. Real controllers on
-  the dev machine use low ids: bots should inject events on fake ids (40+).
+- **Each player's UI is bound to that player's input**: a party seat (`{"party": party, "slot": slot}`),
+  or a raw `device` (joypad id) + `keys` (key set or `UiInput.KEYS_NONE`) without core/party.gd. Six
+  players can each have a menu open at once. Real controllers on the dev machine use low ids: bots
+  should use the party's virtual pads (40+).
 - **UI is local.** Menus, dialogue and HUD run on each machine. The host decides; send results and
   one-off displays with `net.event(...)` / `net.send_action(...)` and show them on the client. The
   data you pass (`awards.results()`, dialogue line indices, scoreboard rows) is plain and network-safe.
@@ -69,7 +89,7 @@ hp.set_value(35, 100)                            # animated, trailing damage chi
 
 - Palette constants: `BG`, `BG_CARD`, `BG_DEEP`, `TEXT`, `TEXT_DIM`, `TEXT_OFF`, `ACCENT` (gold), `GOOD`,
   `BAD`, `INFO`, `WARN`, `MAGIC`, `GOLD`, `SILVER`, `BRONZE`, `HP_FULL/MID/LOW`, `MP`, `XP`,
-  `PLAYER_COLORS` (same order as the games: orange, blue, green, pink, purple, yellow, teal, red).
+  `PLAYER_COLORS` (= `Party.COLORS`, by slot: P1/VR blue, P2 gold, P3 pink, P4 green, P5 white, P6 purple, P7 teal).
 - `player_color(i)`, `color_of(Color | "good" | player_index)`, `hp_color(frac)`.
 - `scale_for_size(size)`, `scale_of(node)`, `font_size(kind, scale)`, `font(bold, spacing)`, `theme(scale)`,
   `stylebox(bg, scale, radius, border, border_w, shadow, margin)`.
@@ -94,7 +114,9 @@ hp.set_value(35, 100)                            # animated, trailing damage chi
 ## UiInput (core/ui_input.gd)
 
 ```gdscript
-var input := UiInput.new(p.joy, UiInput.KEYS_NONE)     # or (UiInput.PAD_ANY, UiInput.KEYS_ALL), or (.., .., hand_r)
+var input := UiInput.for_party(party, slot)            # a core/party.gd seat (slot -1 = any local seat)
+var vr_in := UiInput.for_rig(vr_rig)                   # the VR player through core/vr_rig.gd
+var raw := UiInput.new(p.joy, UiInput.KEYS_NONE)       # without the systems: (PAD_ANY, KEYS_ALL), (.., .., hand_r)
 input.latch()                                           # ignore buttons still held from before
 for a in input.poll(delta):                             # "up","down","left","right","confirm","cancel","tab_prev","tab_next"
 	...
@@ -109,25 +131,25 @@ LB/RB tabs. A VR hand (XRController3D or a fake Node3D with metadata `trigger`, 
 
 ```gdscript
 const UiMenu := preload("res://core/ui_menu.gd")
-var m := UiMenu.open(p.ui_root, {"title": "COMMAND", "player": p.index, "device": p.joy, "keys": UiMenu.KEYS_NONE,
-	"anchor": "bottom_left",
+var m := UiMenu.open(ui, {"title": "COMMAND", "party": party, "slot": slot, "anchor": "bottom_left",
 	"items": [{"id": "attack", "text": "Attack", "icon": "sword", "desc": "Hit one enemy."},
 		{"id": "fire", "text": "Fireball", "icon": "fire", "right": "6 MP", "disabled": mp < 6, "reason": "Not enough MP"},
 		{"id": "item", "text": "Item", "icon": "bag"}, "Run"]})
-m.chosen.connect(func(id: String, item: Dictionary) -> void: net.send_action("command", [id], p.index))
+m.chosen.connect(func(id: String, item: Dictionary) -> void: net.request(slot, "command", [id]))
 m.cancelled.connect(...)
 ```
 - Items: String or `{id, text, desc, disabled, reason, icon, icon_color, right, badge, badge_color, color, data}`.
-- Options: title, items | tabs `[{title, items}]`, columns (grid), max_rows (scrolls), width, player (tint +
-  "P3" badge), device, keys, mouse, anchor (center, top, bottom, left, right, top_left, ...), margin,
+- Options: title, items | tabs `[{title, items}]`, columns (grid), max_rows (scrolls), width, party +
+  slot (the usual way; also `bind_party(party, slot)`), player (tint + "P3" badge; defaults to the
+  slot), device, keys (without a party), mouse, anchor (center, top, bottom, left, right, top_left, ...), margin,
   close_on_choose, allow_cancel, free_on_close, prompts, desc, wrap, start (id/index), sounds,
   cancel_text, confirm_text, accent, input (false = only `press()` drives it).
 - Signals: `chosen(id, item)`, `cancelled()`, `rejected(id, item)` (disabled item: error sound, shake,
   reason shown), `focus_changed(id, item)`, `tab_changed(i)`, `closed()`.
 - Methods: `press("down"|"confirm"|...)` (bots / network), `confirm(i)`, `cancel()`, `focus(id|index)`,
   `choose_id(id)`, `set_tab(i)`, `set_items(list)`, `set_disabled(id, bool, reason)`, `focused_id()`,
-  `close()`, `open_menu()`; static `UiMenu.device_busy(joy)` (skip gameplay input for a pad whose
-  menu is open), `UiMenu.vr(world, opts)`.
+  `close()`, `open_menu()`, `bind_party(party, slot)`; static `UiMenu.slot_busy(slot)` /
+  `UiMenu.device_busy(joy)` (skip gameplay input while that player's menu is open), `UiMenu.vr(world, opts)`.
 - Shops: `close_on_choose: false` and `set_disabled(...)` when money changes. Inventories: `columns: 4`
   with `icon` + `badge: "x3"`. Quiz answers: `columns: 2`.
 
@@ -135,12 +157,13 @@ m.cancelled.connect(...)
 
 ```gdscript
 const VrMenu := preload("res://core/vr_menu.gd")
-var vm := VrMenu.open(self, {"title": "YOUR TURN", "cam": hero.xr_camera, "hand": hero.hand_r,
+var vm := VrMenu.open(self, {"title": "YOUR TURN", "rig": vr_rig,
 	"items": ["Attack", "Magic", {"id": "item", "text": "Item", "disabled": true, "reason": "Bag is empty"}]})
 vm.chosen.connect(func(id: String, _item: Dictionary) -> void: ...)
 ```
 Point the right hand (laser + dot appear on the panel) and pull the trigger, or stick up/down + A, or
-touch an option. Options: as UiMenu plus `cam`, `hand`, `distance` (1.25 -> 2 m after the vr_text
+touch an option. Options: as UiMenu plus `rig` (a core/vr_rig.gd VrRig: camera, right hand, guarded
+trigger/A and haptics; also `bind_rig(rig)`) or `cam` + `hand`, `distance` (1.25 -> 2 m after the vr_text
 comfort factor), `height`, `follow` (lazy follow), `reach: true` (0.42 m away and low: touchable),
 `touch`, `columns` (2 = 2x2 quiz answers), `position` (fixed world spot), `layers`, `haptics`.
 `allow_cancel` adds a BACK row. Signals and `press()/confirm()/focus()/set_items()` as UiMenu.
@@ -151,8 +174,9 @@ comfort factor), `height`, `follow` (lazy follow), `reach: true` (0.42 m away an
 const Dialogue := preload("res://core/dialogue.gd")
 var dlg := Dialogue.new()
 add_child(dlg)
-for p in local_players: dlg.add_tv_view(p.ui_root)       # a box at the bottom of each view
-dlg.set_vr(hero.xr_camera, hero.hand_r)                 # and a world-space box in VR
+for slot in party.local_slots(): dlg.add_tv_view(huds[slot], slot)   # a box at the bottom of each view
+dlg.bind_party(party)                                   # any local seat advances (A)
+dlg.set_vr_rig(vr_rig)                                  # and a world-space box in VR (trigger / A)
 dlg.play([
 	{"speaker": "ELDER", "color": "gold", "text": "Welcome, {hero}!"},
 	{"speaker": "ELDER", "text": "Will you help us?", "choices": [
@@ -209,15 +233,16 @@ HudKit.vr_banner(self, xr_cam, "VICTORY!", "", {"style": "victory"}); HudKit.vr_
 ```gdscript
 const Hints := preload("res://core/hints.gd")
 var hints := Hints.new(); add_child(hints)
-hints.add_view(p.ui_root, p.index)        # each TV view (slot -1 = a shared screen)
-hints.set_vr(hero.xr_camera, self, hero.hand_r)
+hints.add_view(huds[slot], slot)          # each TV view (slot -1 = a shared screen)
+hints.bind_party(party)                   # any local seat dismisses the intro
+hints.set_vr_rig(vr_rig, self)            # the VR player is slot 0
 hints.intro({"title": "DRAGON DUNGEON", "goal": "Find the key and escape together!",
 	"vr": {"role": "THE KNIGHT", "controls": [["TRIGGER", "Swing your sword"], ["STICK", "Walk"]]},
 	"tv": {"role": "THE WIZARDS", "color": "magic", "controls": [["A", "Cast"], ["L-STICK", "Move"]],
 		"tips": ["Stay close to the knight!"]}})
 await hints.intro_done
 hints.hint("door", "Doors open with a KEY!", {"icon": "key"})                      # once, everyone
-hints.hint("low_hp", "Drink a potion!", {"to": p.index, "button": "Y", "times": 3, "cooldown": 40})
+hints.hint("low_hp", "Drink a potion!", {"to": slot, "button": "Y", "times": 3, "cooldown": 40})
 ```
 Intro options: `slots` (per-player roles), `duration` (auto close, 14 s), `min_time` (1.5 s). Hint options:
 `to` ("all", "tv", "vr", slot), `times`, `cooldown`, `duration`, `icon`, `button`, `vr_text`, `color`,
@@ -234,9 +259,9 @@ awards.add(i, "damage", 35); awards.add(i, "revives"); awards.best(i, "best_time
 awards.define("pie_master", "PIE MASTER", "%s pies baked", "pies")          # game-specific, shown first
 var data := awards.results({"title": "VICTORY!", "style": "victory", "stats": [["TIME", "4:12"]], "score_format": "%d PTS"})
 net.event("results", [data])                  # plain data
-var screen := Awards.results_screen(ui, data) # TV: standings + award cards + Continue (A)
+var screen := Awards.results_screen(shared_ui, data, {"party": party})  # TV: standings, award cards, Continue (A)
 await screen.continued
-Awards.vr_summary(self, hero.xr_camera, data, hero.hand_r)   # VR: trigger continues
+Awards.vr_summary(self, null, data, null, {"rig": vr_rig})   # VR: trigger continues
 ```
 Catalogue stats -> titles: score MVP, damage HEAVY HITTER, revives LIFESAVER, healing GUARDIAN ANGEL,
 damage_taken IRON WALL, blocks SHIELD WALL, hits SHARPSHOOTER, crits CRITICAL!, kills MONSTER MASHER,

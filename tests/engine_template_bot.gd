@@ -12,6 +12,7 @@ var kit: BotKit
 var main: Node
 var want := 2
 var caught_by_vr := 0
+var saw_results := false
 
 
 func _ready() -> void:
@@ -19,6 +20,7 @@ func _ready() -> void:
 	kit = BotKit.new()
 	add_child(kit)  # first: real controllers are ignored, saves go to user://test_saves/
 	main = load("res://games/engine_template/main.tscn").instantiate()
+	main.set("round_time", 15.0)  # short rounds so the results screen and round 2 happen in the test
 	add_child(main)
 	kit.main = main
 	want = BotKit.bot_players(2, 6)
@@ -45,13 +47,25 @@ func _ready() -> void:
 			kit.assert_true(not get_tree().paused and not main.tv_banner.visible, "Start again resumes everyone")
 			kit.allow_pause = false)
 	if host:
-		kit.at(20.0, "host checks (the TV machine is still connected)", _checks)
+		kit.at(26.0, "host checks (the TV machine is still connected)", _checks)
 		kit.at(30.0, "finish", kit.finish)
 	else:
-		kit.at(22.0 if client else 18.0, "finish", func() -> void:
+		kit.at(25.0 if client else 22.0, "finish", func() -> void:
 			_checks()
 			kit.finish())
 	kit.every(2.0, _report)
+	kit.every(0.5, _continue_results)
+
+
+## When the round's results are up, a TV player presses A to start the next round.
+func _continue_results() -> String:
+	if main.results_showing():
+		if not saw_results:
+			saw_results = true
+			kit.assert_true(main.split == null or main.results_ui != null, "the results screen shows on the TV")
+			kit.assert_true(main.vr_rig == null or main.vr_results != null, "the results card shows in VR")
+		_press("accept")
+	return ""
 
 
 func _join() -> void:
@@ -146,6 +160,7 @@ func _checks() -> void:
 	var mode: String = main.net.mode
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
 	kit.assert_eq(main.party.player_count(), want, "%s: all %d TV players are seated" % [mode, want])
-	kit.assert_true(int(main.net.state_get("score", 0)) > 0, "%s: stars were caught" % mode)
+	kit.assert_true(int(main.net.state_get("caught", 0)) > 0, "%s: stars were caught" % mode)
+	kit.assert_true(int(main.net.state_get("round", 0)) >= 2, "%s: round 1 ended with results and round 2 started" % mode)
 	if main.vr_rig != null:
 		kit.assert_true(caught_by_vr > 0 or int(main.net.state_get("score", 0)) > 0, "fake VR player played")

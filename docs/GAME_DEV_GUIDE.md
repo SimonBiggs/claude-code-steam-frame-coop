@@ -9,6 +9,12 @@ VR-rig and bot code: `core/party.gd` (drop-in seats + per-player input), `core/s
 `core/camera_rig.gd`, `core/vr_rig.gd`, `core/save.gd`, the state store / `request()` in
 `core/net.gd`, and `tests/bot_kit.gd`. Start from `games/engine_template/` (a small complete game
 using all of them, with `tests/engine_template_bot.gd`); the API is in `docs/engine/systems.md`.
+For how it looks and sounds, use the shared **presentation** modules instead of hand-made labels,
+meshes and beeps: `core/ui_kit.gd` (theme, panels, icons, bars), `core/ui_menu.gd` / `core/vr_menu.gd`
+(per-player menus), `core/dialogue.gd`, `core/hud_kit.gd` (banners, toasts, damage popups, 3D HP bars,
+scoreboards, timers), `core/hints.gd`, `core/awards.gd` (results screens), `core/mesh_kit.gd`,
+`core/creatures.gd`, `core/sky_kit.gd`, and the extended `core/sfx.gd` / `core/music.gd` (moods);
+the API is in `docs/engine/presentation.md`.
 
 ## Layout
 
