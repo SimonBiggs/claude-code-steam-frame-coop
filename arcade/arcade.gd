@@ -418,6 +418,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			step = -1
 		elif pad.button_index == JOY_BUTTON_RIGHT_SHOULDER:
 			step = 1
+		elif pad.button_index == JOY_BUTTON_X:
+			# X picks the highlighted game too (kids pressed X and nothing happened).
+			var f := get_viewport().gui_get_focus_owner()
+			if f is BaseButton:
+				get_viewport().set_input_as_handled()
+				(f as BaseButton).pressed.emit()
+				return
 	var key := event as InputEventKey
 	if key and key.pressed and not key.echo:
 		if key.physical_keycode == KEY_Q or key.physical_keycode == KEY_PAGEUP:

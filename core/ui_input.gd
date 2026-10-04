@@ -177,7 +177,8 @@ func _pad_state(d: int, s: Dictionary) -> void:
 		s["left"] = true
 	if Input.is_joy_button_pressed(d, JOY_BUTTON_DPAD_RIGHT) or lx > 0.55:
 		s["right"] = true
-	if Input.is_joy_button_pressed(d, JOY_BUTTON_A):
+	# A or X confirms: kids press either (on PlayStation-style pads the bottom button is marked X).
+	if Input.is_joy_button_pressed(d, JOY_BUTTON_A) or Input.is_joy_button_pressed(d, JOY_BUTTON_X):
 		s["confirm"] = true
 	if Input.is_joy_button_pressed(d, JOY_BUTTON_B):
 		s["cancel"] = true
