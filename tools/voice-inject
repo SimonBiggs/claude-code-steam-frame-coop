@@ -1,16 +1,57 @@
-#!/bin/bash
-# voice-inject [PANE]: type spoken requests into a Claude Code session running in tmux.
-# Watches the voice bridge log and sends each line addressed to Claude ("TO CLAUDE: ...")
-# into the tmux pane as a message, so Claude gets it like typed input.
-# PANE defaults to the pane in ~/.claude/voice-pane (written by `voice-inject --here`).
-log=~/GodotProjects/duo-arena/.dev/voice.log
-pane_file=~/.claude/voice-pane
-if [ "$1" = "--here" ]; then echo "$TMUX_PANE" > "$pane_file"; echo "voice requests will go to pane $TMUX_PANE"; exit 0; fi
-pane=${1:-$(cat "$pane_file" 2>/dev/null)}
-[ -n "$pane" ] || { echo "no pane: run 'voice-inject --here' inside the Claude tmux pane"; exit 1; }
-tail -n0 -F "$log" 2>/dev/null | while IFS= read -r line; do
-  [[ $line == *"TO CLAUDE: "* ]] || continue
-  msg="[voice] ${line#*TO CLAUDE: }"   # e.g. "[voice] Simon: Hey Claude, ..."
-  pane=$(cat "$pane_file" 2>/dev/null || echo "$pane")
-  /usr/bin/tmux send-keys -t "$pane" -l "$msg" && /usr/bin/tmux send-keys -t "$pane" Enter
-done
+#!/usr/bin/env python3
+"""voice-inject [PANE]: type spoken requests into a Claude Code session running in tmux.
+
+Watches the voice bridge log and sends each NEW line addressed to Claude ("TO CLAUDE: ...")
+into the tmux pane as a message, so Claude gets it like typed input.
+Only bytes appended after start-up are read. If the log shrinks or is replaced, it jumps to the
+new end instead of replaying old lines.
+  voice-inject --here   remember the current tmux pane ($TMUX_PANE) as the target
+"""
+import os, subprocess, sys, time
+
+LOG = os.environ.get("VOICE_LOG", os.path.expanduser("~/GodotProjects/duo-arena/.dev/voice.log"))
+PANE_FILE = os.path.expanduser("~/.claude/voice-pane")
+
+if sys.argv[1:] == ["--here"]:
+    open(PANE_FILE, "w").write(os.environ["TMUX_PANE"] + "\n")
+    print("voice requests will go to pane", os.environ["TMUX_PANE"])
+    sys.exit(0)
+
+
+def pane() -> str:
+    if len(sys.argv) > 1:
+        return sys.argv[1]
+    return open(PANE_FILE).read().strip()
+
+
+def stat():
+    try:
+        st = os.stat(LOG)
+        return st.st_ino, st.st_size
+    except FileNotFoundError:
+        return None, 0
+
+
+ino, pos = stat()  # start at the current end: never send old lines
+buf = b""
+while True:
+    time.sleep(0.5)
+    new_ino, size = stat()
+    if new_ino != ino or size < pos:  # replaced or truncated: skip to the end
+        ino, pos, buf = new_ino, size, b""
+        continue
+    if size == pos:
+        continue
+    with open(LOG, "rb") as f:
+        f.seek(pos)
+        buf += f.read(size - pos)
+    pos = size
+    *lines, buf = buf.split(b"\n")
+    for raw in lines:
+        line = raw.decode("utf-8", "replace")
+        if "TO CLAUDE: " not in line:
+            continue
+        msg = "[voice] " + line.split("TO CLAUDE: ", 1)[1]
+        p = pane()
+        subprocess.run(["/usr/bin/tmux", "send-keys", "-t", p, "-l", msg])
+        subprocess.run(["/usr/bin/tmux", "send-keys", "-t", p, "Enter"])
