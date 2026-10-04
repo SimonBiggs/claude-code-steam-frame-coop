@@ -34,6 +34,8 @@ func _try_listen() -> void:
 		print("Net: port %d busy, retrying" % PORT)
 		get_tree().create_timer(1.0).timeout.connect(_try_listen)
 		return
+	# Busy games' snapshots exceed one network packet (~1.4 KB); compress them (both ends must match).
+	peer.host.compress(ENetConnection.COMPRESS_RANGE_CODER)
 	multiplayer.multiplayer_peer = peer
 	multiplayer.peer_connected.connect(_on_peer_connected)
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
@@ -46,6 +48,7 @@ func join(address: String) -> void:
 	if peer.create_client(address, PORT) != OK:
 		join_finished.emit(false)
 		return
+	peer.host.compress(ENetConnection.COMPRESS_RANGE_CODER)  # must match the host
 	mode = "client"
 	multiplayer.multiplayer_peer = peer
 	multiplayer.connected_to_server.connect(_on_connected)
