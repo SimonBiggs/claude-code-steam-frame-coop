@@ -737,8 +737,10 @@ func apply_net(item: Array) -> void:
 	hp = new_hp
 	if item.size() > 5:
 		net_aux = item[5]
-		if kind == "ankylo" and net_aux <= 0.0:
-			_shell_off()
+	else:
+		net_aux = 0.0  # left out when zero (small snapshots)
+	if kind == "ankylo" and net_aux <= 0.0:
+		_shell_off()
 
 
 func _ghost_update(delta: float) -> void:

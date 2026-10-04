@@ -1665,11 +1665,18 @@ func make_snapshot() -> Array:
 			head = p.head_transform()
 			hand = p.hand_transform()
 			lhand = p.left_hand_transform()
-		ps.append([p.global_position, p.yaw, p.pitch, p.hp, p.is_down, p.revive_progress, p.spread_t,
-			head, hand, lhand, p.pack_personal(), p.xp, p.skills, p.active, p.rapid_t, p.bubble_t])
+		var st := [p.global_position, p.yaw, p.pitch, p.hp, p.is_down, p.revive_progress, p.spread_t,
+			head, hand, lhand, p.pack_personal(), p.xp, p.skills, p.active]
+		if p.rapid_t > 0.0 or p.bubble_t > 0.0:
+			st.append_array([p.rapid_t, p.bubble_t])  # power-up timers only while they run (small snapshots)
+		ps.append(st)
 	var es := []
 	for e in get_tree().get_nodes_in_group("enemies"):
-		es.append([e.net_id, e.kind, e.global_position, e.rotation.y, e.hp, e.net_aux_value(), 1 if e.golden else 0])
+		var item := [e.net_id, e.kind, e.global_position, e.rotation.y, e.hp]
+		var aux: float = e.net_aux_value()
+		if aux != 0.0 or e.golden:
+			item.append_array([aux, 1 if e.golden else 0])
+		es.append(item)
 	var pk := []
 	for k in get_tree().get_nodes_in_group("pickups"):
 		pk.append([k.net_id, k.kind, k.global_position])
@@ -1678,7 +1685,9 @@ func make_snapshot() -> Array:
 		sh.append([s.net_id, s.global_position, s.friendly, s.color, s.size])
 	var fish_state := [true, 0.0]
 	if sky_fish:
-		fish_state = [sky_fish.alive, sky_fish.hp, sky_fish.dive_start, sky_fish.dive_target, sky_fish.dive_u]
+		fish_state = [sky_fish.alive, sky_fish.hp]
+		if sky_fish.dive_u >= 0.0:
+			fish_state.append_array([sky_fish.dive_start, sky_fish.dive_target, sky_fish.dive_u])
 	var tu := []
 	for t in get_tree().get_nodes_in_group("turrets"):
 		tu.append([t.net_id, t.global_position, t.head.rotation.y, t.color])

@@ -907,8 +907,11 @@ func set_active(on: bool) -> void:
 
 ## [pos, yaw, pitch, courage, is_down, revive, head, hand, lhand, active, vac_on, focus, bell_cd]
 func net_state() -> Array:
-	return [global_position, yaw, pitch, courage, is_down, revive_progress, head_transform(),
-		hand_transform(), left_hand_transform(), active, vac_on, focus, bell_cd, snuff_t]
+	var st := [global_position, yaw, pitch, courage, is_down, revive_progress, head_transform(),
+		hand_transform(), left_hand_transform(), active, vac_on, focus, bell_cd]
+	if index == 0:
+		st.append(snuff_t)  # only the lantern can be snuffed
+	return st
 
 
 ## Host: latest position and view of a TV player.
