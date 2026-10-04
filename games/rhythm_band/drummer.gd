@@ -1,13 +1,19 @@
 extends Node3D
 ## Player 1: the DRUMMER. Four floating drums (hi-hat, snare, tom, crash) hang around them; glowing
-## balls fly down a lane into each drum and a shrinking ring shows when to hit.
+## balls fly down a lane into each drum and a shrinking ring shows when to hit. GOLD balls are star
+## notes: they charge STAR POWER, and the CRASH sets it off when it's ready.
 ## VR (Steam Frame): swing either hand into a drum (the glowing stick tip) - hand speed + being at the
 ## drum = a hit; no buttons. Left stick: walk around the stage (the kit comes along). Right stick:
 ## snap turn. A: bring the kit back in front of you. The kit fits your height at the start and again
 ## when someone shorter or taller takes the headset (it is measured from your head, not a rest pose).
+## In the SETLIST menu the drums are buttons: hi-hat EASY, snare NORMAL, tom ROCK, crash START.
+## The crowd meter, star meter and combo float far ahead between the lanes (easy to focus on, never in
+## a ball's way); short messages float above them (main.gd).
 ## Flat (split screen / non-VR host): A S D F or mouse left/right; controller X A B Y (or LB / RB).
 ## Bot "fake VR": the bot moves fake_tips and the same swing detection as VR runs.
 ## On the TV machine this is a ghost: the kit, a head and two sticks drawn from the host's snapshots.
+
+const MeshKit := preload("res://games/rhythm_band/mesh_kit.gd")
 
 const HIT_R := 0.13  # metres from the stick tip to a drum's centre
 const REARM_R := 0.17
@@ -16,11 +22,12 @@ const PAD_OFFSETS: Array[Vector3] = [Vector3(-0.36, -0.36, -0.30), Vector3(-0.16
 	Vector3(0.16, -0.50, -0.38), Vector3(0.36, -0.34, -0.30)]
 const PAD_COLORS: Array[Color] = [Color(1.0, 0.85, 0.2), Color(1.0, 0.3, 0.35), Color(0.3, 0.6, 1.0), Color(0.35, 0.95, 0.45)]
 const PAD_NAMES: Array[String] = ["HI-HAT", "SNARE", "TOM", "CRASH"]
-const FLAT_KEYS: Array[String] = ["A", "S", "D", "F"]
+const MENU_NAMES: Array[String] = ["EASY", "NORMAL", "ROCK", "START!"]
+const GOLD := Color(1.0, 0.82, 0.25)
 const NOTE_TRAVEL := 2.6
-const TRAVEL_BEATS := 3.0
-const POOL := 20
+const POOL := 24
 const FLAT_HEAD := 1.45
+const DASH := Vector3(0.0, 0.0, -2.4)  # the crowd meter / combo panel, kit-relative (between the lanes)
 const STAGE_LIMIT := Rect2(-4.0, -2.0, 8.0, 4.6)  # where the VR player may walk (x, z)
 
 var index := 0
@@ -50,10 +57,9 @@ var top_mats: Array[StandardMaterial3D] = []
 var approach: Array[MeshInstance3D] = []
 var guides: Array[MeshInstance3D] = []
 var flat_tags: Array[Label3D] = []
+var lane_tags: Array[Label3D] = []
 var flash := PackedFloat32Array([0.0, 0.0, 0.0, 0.0])
-var notes: Array[MeshInstance3D] = []
-var note_mats: Array[StandardMaterial3D] = []
-var miss_mat: StandardMaterial3D
+var notes_mm: MultiMesh
 var note_cursor := 0
 var cursor_serial := -1
 var tips: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO]
@@ -67,10 +73,14 @@ var hand_pad := PackedInt32Array([1, 2])
 
 var avatar: Node3D
 var av_head: Node3D
+var av_body: MeshInstance3D
 var av_hands: Array[MeshInstance3D] = []
+var dash: Node3D
 var status_label: Label3D
 var meter_fill: MeshInstance3D
 var meter_mat: StandardMaterial3D
+var star_fill: MeshInstance3D
+var star_mat: StandardMaterial3D
 
 var fitted := false
 var fit_t := 0.8
@@ -79,6 +89,7 @@ var refit_t := 0.0
 var away_t := 0.0
 var a_was := false
 var trig_was := false
+var trig_block := false
 var turn_ready := true
 
 var hits := 0
@@ -86,6 +97,7 @@ var misses := 0
 var streak := 0
 var miss_run := 0
 var swings := 0
+var tour := {}  # tour stats: hits, misses, perfects, best_streak, stars
 
 var net_rig := Transform3D()
 var net_head := Transform3D()
@@ -106,11 +118,30 @@ func apply_remote_state(_pos: Vector3, _yaw: float, _pitch: float) -> void:
 
 
 func _ready() -> void:
+	reset_tour()
 	_build_rig()
 	_build_avatar()
 
 
 # --- Building ------------------------------------------------------------------------
+
+func _pad_mesh(i: int) -> ArrayMesh:
+	var cym := i == 0 or i == 3
+	var parts: Array = []
+	if cym:
+		var brass := Color(0.9, 0.72, 0.3)
+		parts.append([MeshKit.cyl(0.14, 0.14, 0.012, 20), MeshKit.at(Vector3.ZERO), brass])
+		parts.append([MeshKit.sphere(0.03, 10), MeshKit.at(Vector3(0, 0.008, 0), Vector3(1, 0.5, 1)), brass.lightened(0.2)])
+	else:
+		var shell := Color(0.85, 0.15, 0.25) if i == 1 else Color(0.2, 0.35, 0.85)
+		parts.append([MeshKit.cyl(0.12, 0.12, 0.08, 20), MeshKit.at(Vector3.ZERO), shell])
+		parts.append([MeshKit.cyl(0.125, 0.125, 0.012, 20), MeshKit.at(Vector3(0, 0.036, 0)), Color(0.85, 0.85, 0.9)])
+		parts.append([MeshKit.cyl(0.125, 0.125, 0.012, 20), MeshKit.at(Vector3(0, -0.036, 0)), Color(0.85, 0.85, 0.9)])
+		for k in 6:
+			var a := TAU * k / 6.0
+			parts.append([MeshKit.box(Vector3(0.015, 0.05, 0.015)), MeshKit.at(Vector3(cos(a) * 0.123, 0, sin(a) * 0.123)), Color(0.9, 0.9, 0.95)])
+	return MeshKit.merge(parts)
+
 
 func _build_rig() -> void:
 	rig = Node3D.new()
@@ -122,7 +153,6 @@ func _build_rig() -> void:
 	torus.outer_radius = 0.135
 	torus.rings = 16
 	torus.ring_segments = 6
-	miss_mat = main.make_material(Color(0.35, 0.35, 0.4), 0.0)
 	for i in 4:
 		var cym := i == 0 or i == 3
 		var pad := Node3D.new()
@@ -130,8 +160,8 @@ func _build_rig() -> void:
 		var r := 0.14 if cym else 0.12
 		var h := 0.02 if cym else 0.08
 		var body := MeshInstance3D.new()
-		body.mesh = main.cyl_mesh(r, r, h, 16)
-		body.material_override = main.make_material(Color(0.85, 0.7, 0.3) if cym else Color(0.9, 0.9, 0.95), 0.0)
+		body.mesh = _pad_mesh(i)
+		body.material_override = MeshKit.vertex_material(main.mats)
 		pad.add_child(body)
 		var top := MeshInstance3D.new()
 		top.mesh = main.cyl_mesh(r * 0.85, r * 0.85, 0.012, 16)
@@ -168,12 +198,6 @@ func _build_rig() -> void:
 		guide.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		rig.add_child(guide)
 		guides.append(guide)
-		var nm := StandardMaterial3D.new()
-		nm.albedo_color = PAD_COLORS[i]
-		nm.emission_enabled = true
-		nm.emission = PAD_COLORS[i]
-		nm.emission_energy_multiplier = 1.2
-		note_mats.append(nm)
 		var tag := Label3D.new()
 		tag.text = PAD_NAMES[i]
 		tag.font_size = 40
@@ -184,40 +208,67 @@ func _build_rig() -> void:
 		tag.rotation.x = -0.6
 		pad.add_child(tag)
 		flat_tags.append(tag)
-	for k in POOL:
-		var m := MeshInstance3D.new()
-		m.mesh = main.sphere_mesh(0.05)
-		m.visible = false
-		m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		rig.add_child(m)
-		notes.append(m)
-	# Status on the kit itself (VR): the crowd meter and combo, right where the player looks.
+		# Far labels at the start of each lane (VR menu: what each drum chooses).
+		var lt := Label3D.new()
+		lt.font_size = 48
+		lt.pixel_size = 0.0034
+		lt.outline_size = 16
+		lt.modulate = PAD_COLORS[i]
+		lt.visible = false
+		rig.add_child(lt)
+		lane_tags.append(lt)
+	notes_mm = MultiMesh.new()
+	notes_mm.transform_format = MultiMesh.TRANSFORM_3D
+	notes_mm.use_colors = true
+	notes_mm.mesh = main.sphere_mesh(0.05)
+	notes_mm.instance_count = POOL
+	notes_mm.visible_instance_count = 0
+	var nmi := MultiMeshInstance3D.new()
+	nmi.multimesh = notes_mm
+	var nm := StandardMaterial3D.new()
+	nm.vertex_color_use_as_albedo = true
+	nm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	nmi.material_override = nm
+	nmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	rig.add_child(nmi)
+	# The dashboard (VR): crowd meter, star meter and combo, far ahead between the lanes.
+	dash = Node3D.new()
+	rig.add_child(dash)
 	status_label = Label3D.new()
-	status_label.font_size = 36
-	status_label.pixel_size = 0.0011
-	status_label.outline_size = 12
-	status_label.width = 520.0
-	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	rig.add_child(status_label)
+	status_label.font_size = 40
+	status_label.pixel_size = 0.0032
+	status_label.outline_size = 14
+	status_label.position = Vector3(0, 0.1, 0)
+	status_label.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	dash.add_child(status_label)
 	var back := MeshInstance3D.new()
-	back.name = "MeterBack"
-	back.mesh = main.box_mesh(Vector3(0.38, 0.03, 0.01))
+	back.mesh = main.box_mesh(Vector3(0.62, 0.07, 0.02))
 	back.material_override = main.make_material(Color(0.1, 0.1, 0.12), 0.0)
-	rig.add_child(back)
+	back.position = Vector3(0, 0.04, -0.01)
+	dash.add_child(back)
 	meter_fill = MeshInstance3D.new()
-	meter_fill.mesh = main.box_mesh(Vector3(0.37, 0.024, 0.012))
+	meter_fill.mesh = main.box_mesh(Vector3(0.6, 0.05, 0.02))
 	meter_mat = StandardMaterial3D.new()
-	meter_mat.emission_enabled = true
-	meter_mat.emission_energy_multiplier = 1.0
+	meter_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	meter_fill.material_override = meter_mat
-	rig.add_child(meter_fill)
-	status_label.visible = false
-	back.visible = false
-	meter_fill.visible = false
+	dash.add_child(meter_fill)
+	var sback := MeshInstance3D.new()
+	sback.mesh = main.box_mesh(Vector3(0.62, 0.035, 0.02))
+	sback.material_override = main.make_material(Color(0.1, 0.1, 0.12), 0.0)
+	sback.position = Vector3(0, -0.03, -0.01)
+	dash.add_child(sback)
+	star_fill = MeshInstance3D.new()
+	star_fill.mesh = main.box_mesh(Vector3(0.6, 0.022, 0.02))
+	star_mat = StandardMaterial3D.new()
+	star_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	star_mat.albedo_color = GOLD
+	star_fill.material_override = star_mat
+	dash.add_child(star_fill)
+	dash.visible = false
 	_layout_kit()
 
 
-## Puts the drums, lanes and status where they belong for this player's size (kit_s).
+## Puts the drums, lanes, lane labels and the dashboard where they belong for this player's size.
 func _layout_kit() -> void:
 	for i in 4:
 		var p := PAD_OFFSETS[i] * kit_s
@@ -228,51 +279,55 @@ func _layout_kit() -> void:
 		var stand := pads[i].get_child(3) as MeshInstance3D
 		if stand != null:
 			stand.visible = not vr  # floating drums in VR (the floor height is unknown)
-	status_label.position = Vector3(0.0, -0.25, -0.72) * kit_s
-	var back := rig.get_node_or_null("MeterBack") as MeshInstance3D
-	if back != null:
-		back.position = Vector3(0.0, -0.31, -0.72) * kit_s
-	meter_fill.position = Vector3(0.0, -0.31, -0.715) * kit_s
+		lane_tags[i].position = p + dir * NOTE_TRAVEL + Vector3(0, 0.16, 0)
+	dash.position = DASH  # not scaled: always far enough to focus on, and clear of the lanes
 
 
 func lane_dir(i: int) -> Vector3:
 	return Vector3(PAD_OFFSETS[i].x * 1.4, 0.45, -1.0).normalized()
 
 
+## The drummer as the TV sees them (flat / ghost): one merged body, a head with headphones, hands
+## with sticks.
 func _build_avatar() -> void:
 	avatar = Node3D.new()
 	main.add_child(avatar)
 	av_head = Node3D.new()
 	avatar.add_child(av_head)
+	var skin := Color(1.0, 0.82, 0.65)
+	var hparts: Array = [
+		[MeshKit.sphere(0.15, 14), MeshKit.at(Vector3.ZERO), skin],
+		[MeshKit.sphere(0.155, 12), MeshKit.at(Vector3(0, 0.05, 0.03), Vector3(1.05, 0.8, 1.05)), Color(0.3, 0.18, 0.08)],
+		[MeshKit.box(Vector3(0.22, 0.06, 0.05)), MeshKit.at(Vector3(0, 0.02, -0.13)), Color(0.15, 0.15, 0.2)],
+		[MeshKit.cyl(0.05, 0.05, 0.05, 10), MeshKit.at(Vector3(-0.15, 0, 0), Vector3.ONE, Vector3(0, 0, PI * 0.5)), Color(1.0, 0.3, 0.4)],
+		[MeshKit.cyl(0.05, 0.05, 0.05, 10), MeshKit.at(Vector3(0.15, 0, 0), Vector3.ONE, Vector3(0, 0, PI * 0.5)), Color(1.0, 0.3, 0.4)],
+		[MeshKit.box(Vector3(0.32, 0.025, 0.04)), MeshKit.at(Vector3(0, 0.16, 0)), Color(0.2, 0.2, 0.25)],
+	]
 	var face := MeshInstance3D.new()
-	face.mesh = main.sphere_mesh(0.15)
-	face.material_override = main.make_material(Color(1.0, 0.82, 0.65), 0.0)
+	face.mesh = MeshKit.merge(hparts)
+	face.material_override = MeshKit.vertex_material(main.mats)
 	av_head.add_child(face)
-	var visor := MeshInstance3D.new()
-	visor.mesh = main.box_mesh(Vector3(0.22, 0.08, 0.06))
-	visor.material_override = main.make_material(Color(0.2, 0.2, 0.25), 0.0)
-	visor.position = Vector3(0, 0.02, -0.13)
-	av_head.add_child(visor)
-	var body := MeshInstance3D.new()
-	var cap := CapsuleMesh.new()
-	cap.radius = 0.2
-	cap.height = 0.8
-	cap.radial_segments = 10
-	cap.rings = 3
-	body.mesh = cap
-	body.material_override = main.make_material(Color(1.0, 0.85, 0.55), 0.1)
-	body.name = "Body"
-	avatar.add_child(body)
+	var bparts: Array = [
+		[MeshKit.cyl(0.18, 0.21, 0.55, 10), MeshKit.at(Vector3(0, 0.0, 0)), Color(1.0, 0.85, 0.55)],
+		[MeshKit.box(Vector3(0.3, 0.08, 0.3)), MeshKit.at(Vector3(0, 0.2, 0)), Color(0.2, 0.2, 0.25)],
+		[MeshKit.cyl(0.07, 0.065, 0.5, 8), MeshKit.at(Vector3(-0.09, -0.5, 0)), Color(0.15, 0.15, 0.2)],
+		[MeshKit.cyl(0.07, 0.065, 0.5, 8), MeshKit.at(Vector3(0.09, -0.5, 0)), Color(0.15, 0.15, 0.2)],
+	]
+	av_body = MeshInstance3D.new()
+	av_body.mesh = MeshKit.merge(bparts)
+	av_body.material_override = MeshKit.vertex_material(main.mats)
+	av_body.name = "Body"
+	avatar.add_child(av_body)
+	var sparts: Array = [
+		[MeshKit.sphere(0.04, 8), MeshKit.at(Vector3.ZERO), skin],
+		[MeshKit.cyl(0.01, 0.012, 0.3, 6), MeshKit.at(Vector3(0, 0, -0.12), Vector3.ONE, Vector3(-PI * 0.5, 0, 0)), Color(0.95, 0.85, 0.6)],
+		[MeshKit.sphere(0.016, 6), MeshKit.at(Vector3(0, 0, -0.27)), Color(1.0, 1.0, 0.85)],
+	]
+	var hand_mesh := MeshKit.merge(sparts)
 	for h in 2:
 		var hand := MeshInstance3D.new()
-		hand.mesh = main.sphere_mesh(0.04)
-		hand.material_override = main.make_material(Color(1.0, 0.82, 0.65), 0.0)
-		var stick := MeshInstance3D.new()
-		stick.mesh = main.cyl_mesh(0.01, 0.012, 0.3, 6)
-		stick.material_override = main.make_material(Color(0.95, 0.85, 0.6), 0.2)
-		stick.rotation.x = -PI * 0.5
-		stick.position = Vector3(0, 0, -0.12)
-		hand.add_child(stick)
+		hand.mesh = hand_mesh
+		hand.material_override = MeshKit.vertex_material(main.mats)
 		avatar.add_child(hand)
 		av_hands.append(hand)
 
@@ -290,11 +345,7 @@ func attach_xr(origin: XROrigin3D, cam: XRCamera3D, left: XRController3D, right:
 	rig.reparent(origin, false)
 	for tag in flat_tags:
 		tag.visible = false
-	status_label.visible = true
-	meter_fill.visible = true
-	var back := rig.get_node_or_null("MeterBack") as MeshInstance3D
-	if back != null:
-		back.visible = true
+	dash.visible = true
 	for h in [left, right]:
 		var hh: XRController3D = h
 		var stick := MeshInstance3D.new()
@@ -312,7 +363,7 @@ func attach_xr(origin: XROrigin3D, cam: XRCamera3D, left: XRController3D, right:
 
 
 func vr_trigger() -> bool:
-	return vr and hand_r.get_float("trigger") > 0.6
+	return vr and hand_r.get_float("trigger") > 0.6 and not trig_block
 
 
 func vr_a() -> bool:
@@ -326,11 +377,14 @@ func _process(delta: float) -> void:
 		_vr_update(delta)
 	else:
 		_flat_update(delta)
+	var star_on: bool = main.star_active()
 	for i in 4:
 		flash[i] = maxf(0.0, flash[i] - delta * 4.0)
-		top_mats[i].emission_energy_multiplier = 0.4 + flash[i] * 3.5
+		top_mats[i].emission_energy_multiplier = 0.4 + flash[i] * 3.5 + (0.6 if star_on else 0.0)
+		top_mats[i].emission = GOLD if star_on and i == 3 and main.star_ready() else (PAD_COLORS[i].lerp(GOLD, 0.6) if star_on else PAD_COLORS[i])
 		pads[i].scale = Vector3.ONE * (1.0 + flash[i] * 0.12)
 	_update_notes()
+	_update_tags()
 	if vr:
 		_update_status()
 
@@ -338,6 +392,8 @@ func _process(delta: float) -> void:
 func _vr_update(delta: float) -> void:
 	if xr_origin.world_scale != 1.0:
 		xr_origin.world_scale = 1.0
+	if trig_block and hand_r.get_float("trigger") < 0.3:
+		trig_block = false
 	_fit(delta)
 	# Left stick: walk around the stage (relative to where you look, flattened). The kit comes along.
 	var s := hand_l.get_vector2("primary")
@@ -520,8 +576,7 @@ func _flat_update(delta: float) -> void:
 		camera.global_transform = Transform3D(Basis(), from).looking_at(rig.to_global(Vector3(0.0, -0.4, -1.6)), Vector3.UP)
 	var head := rig.global_position
 	av_head.global_position = head
-	var body := avatar.get_node("Body") as MeshInstance3D
-	body.global_position = head + Vector3(0.0, -0.6, 0.05)
+	av_body.global_position = head + Vector3(0.0, -0.55, 0.05)
 	if fake_vr:
 		tips[0] = fake_tips[0]
 		tips[1] = fake_tips[1]
@@ -539,7 +594,8 @@ func _flat_update(delta: float) -> void:
 
 # --- Notes and status ----------------------------------------------------------------
 
-## Pooled balls flying down each drum's lane; a ring shrinks onto the drum as its next ball arrives.
+## Balls flying down each drum's lane (one MultiMesh); a ring shrinks onto the drum as its next ball
+## arrives. Gold = star note; notes above the drummer's level aren't shown.
 func _update_notes() -> void:
 	var g = main.song
 	var used := 0
@@ -550,11 +606,12 @@ func _update_notes() -> void:
 			cursor_serial = main.song_serial
 			note_cursor = 0
 		var st: float = main.song_t
-		var travel: float = TRAVEL_BEATS * g.spb
+		var travel: float = main.drum_travel_beats() * g.spb
 		var n: int = g.d_t.size()
 		while note_cursor < n and float(g.d_t[note_cursor]) < st - 0.4:
 			note_cursor += 1
 		var judged: PackedByteArray = main.d_judged
+		var star_on: bool = main.star_active()
 		var i := note_cursor
 		while i < n and used < POOL:
 			var tn: float = g.d_t[i]
@@ -563,16 +620,16 @@ func _update_notes() -> void:
 				break
 			var j: int = judged[i] if i < judged.size() else 0
 			i += 1
-			if j == 1 or j == 2 or dt < -0.3:
+			if j == 1 or j == 2 or j == 4 or dt < -0.3:
 				continue
 			var pad: int = g.d_pad[i - 1]
-			var m := notes[used]
+			var gold: bool = g.d_star[i - 1] == 1
+			var col := Color(0.35, 0.35, 0.4) if j == 3 else (GOLD if gold or star_on else PAD_COLORS[pad])
+			var pos := pads[pad].position + lane_dir(pad) * NOTE_TRAVEL * (dt / travel)
+			var sc := (1.0 if dt > 0.0 else maxf(0.3, 1.0 + dt * 3.0)) * (0.8 + 0.4 * kit_s) * (1.25 if gold else 1.0)
+			notes_mm.set_instance_transform(used, Transform3D(Basis().scaled(Vector3.ONE * sc), pos))
+			notes_mm.set_instance_color(used, col)
 			used += 1
-			m.visible = true
-			m.material_override = miss_mat if j == 3 else note_mats[pad]
-			m.position = pads[pad].position + lane_dir(pad) * NOTE_TRAVEL * (dt / travel)
-			var sc := 1.0 if dt > 0.0 else maxf(0.3, 1.0 + dt * 3.0)
-			m.scale = Vector3.ONE * sc * (0.8 + 0.4 * kit_s)
 			if j == 0 and dt >= -0.05 and dt < ring_dt[pad]:
 				ring_dt[pad] = dt
 		for p in 4:
@@ -584,20 +641,36 @@ func _update_notes() -> void:
 	else:
 		for p in 4:
 			approach[p].visible = false
-	for k in range(used, POOL):
-		notes[k].visible = false
+	notes_mm.visible_instance_count = used
+
+
+## In the SETLIST menu the drums are buttons: their lane labels say what they pick.
+func _update_tags() -> void:
+	var menu: bool = main.state == "menu"
+	for i in 4:
+		var lt := lane_tags[i]
+		lt.visible = menu and (vr or fake_vr)
+		if lt.visible:
+			lt.text = MENU_NAMES[i]
+			var chosen: bool = i < 3 and int(main.drum_level) == i
+			lt.modulate = PAD_COLORS[i].lightened(0.4) if chosen else PAD_COLORS[i]
+			lt.text = ("> %s <" % MENU_NAMES[i]) if chosen else MENU_NAMES[i]
+		if not vr:
+			flat_tags[i].text = MENU_NAMES[i] if menu else PAD_NAMES[i]
 
 
 func _update_status() -> void:
 	var crowd: float = main.crowd
 	meter_fill.scale = Vector3(maxf(0.01, crowd), 1.0, 1.0)
-	meter_fill.position.x = -0.185 * kit_s * (1.0 - crowd)
-	meter_fill.scale.x *= kit_s
+	meter_fill.position = Vector3(-0.3 * (1.0 - crowd), 0.04, 0.0)
 	var c := Color(1.0, 0.3, 0.3).lerp(Color(1.0, 0.9, 0.2), clampf(crowd * 2.0, 0.0, 1.0))
 	if crowd > 0.5:
 		c = Color(1.0, 0.9, 0.2).lerp(Color(0.3, 1.0, 0.4), (crowd - 0.5) * 2.0)
 	meter_mat.albedo_color = c
-	meter_mat.emission = c
+	var sm: float = main.star_meter_value()
+	star_fill.scale = Vector3(maxf(0.01, sm), 1.0, 1.0)
+	star_fill.position = Vector3(-0.3 * (1.0 - sm), -0.03, 0.0)
+	star_mat.albedo_color = GOLD.lightened(0.4 * absf(sin(Time.get_ticks_msec() * 0.008))) if main.star_ready() or main.star_active() else GOLD.darkened(0.2)
 	status_label.text = main.drummer_status(self)
 
 
@@ -606,15 +679,22 @@ func flash_pad(pad: int) -> void:
 		flash[pad] = 1.0
 
 
-func record(q: int) -> void:
+func record(q: int, star: bool = false) -> void:
 	if q < 2:
 		hits += 1
 		streak += 1
 		miss_run = 0
+		tour["hits"] = int(tour["hits"]) + 1
+		if q == 0:
+			tour["perfects"] = int(tour["perfects"]) + 1
+		if star:
+			tour["stars"] = int(tour["stars"]) + 1
+		tour["best_streak"] = maxi(int(tour["best_streak"]), streak)
 	else:
 		misses += 1
 		streak = 0
 		miss_run += 1
+		tour["misses"] = int(tour["misses"]) + 1
 
 
 func reset_stats() -> void:
@@ -623,6 +703,10 @@ func reset_stats() -> void:
 	streak = 0
 	miss_run = 0
 	swings = 0
+
+
+func reset_tour() -> void:
+	tour = {"hits": 0, "misses": 0, "perfects": 0, "best_streak": 0, "stars": 0}
 
 
 ## Player 1's continue button: VR trigger / A; flat: Space / Enter / controller A.
@@ -662,7 +746,6 @@ func _ghost_update(delta: float) -> void:
 		kit_s = net_s
 		_layout_kit()
 	av_head.global_transform = av_head.global_transform.interpolate_with(net_head.orthonormalized(), k)
-	var body := avatar.get_node("Body") as MeshInstance3D
-	body.global_position = av_head.global_position + Vector3(0.0, -0.6, 0.05)
+	av_body.global_position = av_head.global_position + Vector3(0.0, -0.55, 0.05)
 	for h in 2:
 		av_hands[h].global_position = av_hands[h].global_position.lerp(net_tips[h] + Vector3(0.0, 0.0, 0.12), k)

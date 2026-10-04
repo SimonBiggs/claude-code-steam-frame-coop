@@ -1,8 +1,11 @@
 extends Node
 ## A TV player (P2-P7): plays the 3-lane note highway on their own split-screen view.
 ## Lanes: X / A / B or D-pad left / down / right (keyboard: arrows; the TV machine's P2 also A S D
-## or J K L). Each machine judges its own players against the song clock it hears, then tells the
-## host (which owns the band's crowd meter, combo and score). Pressing with no note near is free.
+## or J K L). Y (or Up / W / I) sets off STAR POWER when the band's star meter is full.
+## Everyone picks their own level in the SETLIST menu (left / right: EASY - NORMAL - ROCK, A: ready):
+## EASY shows only the big on-beat notes and gives a wider timing window, ROCK adds extra notes.
+## Each machine judges its own players against the song clock it hears, then tells the host (which
+## owns the band's crowd meter, combo, star meter and score). Pressing with no note near is free.
 
 const NO_KEYS := 99
 
@@ -22,22 +25,32 @@ var hud_label: Label
 var highway: Control
 var pad_lost_t := -1.0
 
-var judged := PackedByteArray()  # per note: 0 open, 1 perfect, 2 good, 3 missed, 4 skipped (joined late)
+var level := 1  # 0 EASY, 1 NORMAL, 2 ROCK
+var menu_ready := false  # SETLIST menu: this player is ready to rock
+var judged := PackedByteArray()  # per note: 0 open, 1 perfect, 2 good, 3 missed, 4 skipped (other level / joined late)
 var judged_serial := -1
+var judged_level := -1
 var next_idx := 0
 var streak := 0
 var hits := 0
 var misses := 0
 var perfects := 0
 var miss_run := 0
+var tour := {}
 var lane_flash := PackedFloat32Array([0.0, 0.0, 0.0])
 var judge_text := ""
 var judge_t := 0.0
 var judge_col := Color.WHITE
 
 
+func _ready() -> void:
+	reset_tour()
+
+
 func set_active(on: bool) -> void:
 	active = on
+	if not on:
+		menu_ready = false
 
 
 func is_local() -> bool:
@@ -48,11 +61,13 @@ func apply_remote_state(_pos: Vector3, _yaw: float, _pitch: float) -> void:
 	pass
 
 
-## New song (or joined mid-song): notes that already went by don't count against you.
+## New song (or joined mid-song, or changed level): notes that already went by, and notes above your
+## level, don't count against you.
 func reset_for_song() -> void:
 	var g = main.song
 	judged = PackedByteArray()
 	judged_serial = main.song_serial
+	judged_level = level
 	next_idx = 0
 	streak = 0
 	hits = 0
@@ -64,8 +79,12 @@ func reset_for_song() -> void:
 	judged.resize(g.g_t.size())
 	var st: float = main.song_t
 	for i in judged.size():
-		if float(g.g_t[i]) < st + 0.3 and main.state == "play":
+		if int(g.g_lvl[i]) > level or (float(g.g_t[i]) < st + 0.3 and main.state == "play"):
 			judged[i] = 4
+
+
+func reset_tour() -> void:
+	tour = {"hits": 0, "misses": 0, "perfects": 0, "best_streak": 0, "stars": 0}
 
 
 func key_hint(lane: int) -> String:
@@ -80,8 +99,34 @@ func _input(event: InputEvent) -> void:
 	if not active or not is_local() or get_tree().paused:
 		return
 	var lane := _lane_for(event)
+	var up := _up_for(event)
+	if main.state == "menu":
+		if lane == 0:
+			set_level(level - 1)
+		elif lane == 2 or up:
+			set_level((level + 1) % 3 if up else level + 1)
+		elif lane == 1:
+			set_ready(not menu_ready)
+		return
+	if up:
+		main.request_star(self)
 	if lane >= 0:
 		press(lane)
+
+
+func set_level(l: int) -> void:
+	l = clampi(l, 0, 2)
+	if l == level:
+		return
+	level = l
+	main.inst.chime(0.8 + 0.25 * l)
+	main.player_level_changed(self)
+
+
+func set_ready(r: bool) -> void:
+	menu_ready = r
+	main.inst.click(r)
+	main.player_ready_changed(self)
 
 
 func _lane_for(event: InputEvent) -> int:
@@ -114,6 +159,21 @@ func _lane_for(event: InputEvent) -> int:
 	return -1
 
 
+## Y / D-pad up (keyboard: Up, or W / I on the TV machine): STAR POWER (in the menu: next level).
+func _up_for(event: InputEvent) -> bool:
+	var k := event as InputEventKey
+	if k and k.pressed and not k.echo:
+		var kc := k.physical_keycode
+		if (key_set == 0 or key_set == 1) and kc == KEY_UP:
+			return true
+		if key_set == 1 and (kc == KEY_W or kc == KEY_I):
+			return true
+	var b := event as InputEventJoypadButton
+	if b and b.pressed and joy >= 0 and b.device == joy:
+		return b.button_index == JOY_BUTTON_Y or b.button_index == JOY_BUTTON_DPAD_UP
+	return false
+
+
 ## A lane button: hit the nearest open note in that lane inside the timing window.
 func press(lane: int) -> void:
 	lane_flash[lane] = 1.0
@@ -121,10 +181,11 @@ func press(lane: int) -> void:
 	if main.state != "play" or g == null:
 		main.free_strum(self, lane)
 		return
-	if judged_serial != main.song_serial or judged.size() != g.g_t.size():
+	if judged_serial != main.song_serial or judged.size() != g.g_t.size() or judged_level != level:
 		reset_for_song()
 	var st: float = main.song_t
-	var good: float = main.GOOD
+	var win: Vector2 = main.window(level)
+	var good: float = win.y
 	var best := -1
 	var bdt := 99.0
 	var i := maxi(0, next_idx - 3)
@@ -142,9 +203,9 @@ func press(lane: int) -> void:
 	if best < 0:
 		main.free_strum(self, lane)
 		return
-	var q := 0 if bdt <= main.PERFECT else 1
+	var q := 0 if bdt <= win.x else 1
 	judged[best] = q + 1
-	record(q)
+	record(q, g.g_star[best] == 1)
 	main.guitar_result(self, best, q)
 
 
@@ -155,9 +216,10 @@ func _process(delta: float) -> void:
 	var g = main.song
 	if not active or not is_local() or main.state != "play" or g == null:
 		return
-	if judged_serial != main.song_serial or judged.size() != g.g_t.size():
+	if judged_serial != main.song_serial or judged.size() != g.g_t.size() or judged_level != level:
 		reset_for_song()
-	var late: float = main.song_t - main.GOOD - 0.02
+	var win: Vector2 = main.window(level)
+	var late: float = main.song_t - win.y - 0.02
 	var n: int = g.g_t.size()
 	while next_idx < n and float(g.g_t[next_idx]) < late:
 		if judged[next_idx] == 0:
@@ -167,22 +229,32 @@ func _process(delta: float) -> void:
 		next_idx += 1
 
 
-func record(q: int) -> void:
+func record(q: int, star: bool = false) -> void:
 	if q < 2:
 		hits += 1
 		streak += 1
 		miss_run = 0
+		tour["hits"] = int(tour["hits"]) + 1
 		if q == 0:
 			perfects += 1
+			tour["perfects"] = int(tour["perfects"]) + 1
+		if star:
+			tour["stars"] = int(tour["stars"]) + 1
+		tour["best_streak"] = maxi(int(tour["best_streak"]), streak)
 		if joy >= 0:
 			Input.start_joy_vibration(joy, 0.15, 0.35, 0.05)
 	else:
 		misses += 1
 		streak = 0
 		miss_run += 1
-	judge_text = ["PERFECT!", "GOOD", "MISS"][q]
-	judge_col = [Color(1.0, 0.9, 0.3), Color(0.5, 1.0, 0.6), Color(1.0, 0.45, 0.45)][q]
-	judge_t = 0.8
+		tour["misses"] = int(tour["misses"]) + 1
+	if is_local():
+		judge_text = ["PERFECT!", "GOOD", "MISS"][q]
+		judge_col = [Color(1.0, 0.9, 0.3), Color(0.5, 1.0, 0.6), Color(1.0, 0.45, 0.45)][q]
+		if star and q < 2:
+			judge_text = "STAR!"
+			judge_col = Color(1.0, 0.82, 0.25)
+		judge_t = 0.8
 
 
 ## Continue button on the end screens: A (or Enter / Space on the keyboard player).
