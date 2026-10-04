@@ -104,6 +104,9 @@ func _close_old_peer() -> void:
 
 
 func _exit_tree() -> void:
+	var fu = get_meta("follow_udp", null)  # _follow_headset's beacon listener
+	if fu != null:
+		(fu as PacketPeerUDP).close()
 	_close_old_peer()
 
 
@@ -112,6 +115,7 @@ var menu_was_down := false
 
 func _process(delta: float) -> void:
 	_ensure_caption()
+	_follow_headset()
 	_ensure_fullscreen()
 	_hide_tv_cursor()
 	_track_pause()
@@ -684,3 +688,31 @@ func _hide_tv_cursor() -> void:
 	var xr := XRServer.primary_interface
 	if xr == null or not xr.is_initialized():
 		Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
+
+
+## TV machine playing on its own (it couldn't reach the headset when this game started): listen for the
+## headset's "ARCADE_GAME <scene>" beacon and switch to that game as a client, so the TV and the
+## headset never end up in different games (it happened twice on 2026-10-04).
+func _follow_headset() -> void:
+	if mode != "local" or not OS.has_environment("DUO_JOIN") or has_meta("following"):
+		return
+	if not has_meta("follow_udp"):
+		var udp := PacketPeerUDP.new()
+		set_meta("follow_udp", udp if udp.bind(PORT + 2) == OK else null)
+	var u = get_meta("follow_udp")
+	if u == null:
+		return
+	var udp: PacketPeerUDP = u
+	while udp.get_available_packet_count() > 0:
+		var msg := udp.get_packet().get_string_from_utf8()
+		if not msg.begins_with("ARCADE_GAME "):
+			continue
+		var scene := msg.substr(12)
+		print("Net: the headset is playing %s; joining it" % scene)
+		set_meta("following", true)
+		udp.close()
+		get_tree().paused = false
+		get_tree().change_scene_to_file.call_deferred(scene)
+		return
+
+
