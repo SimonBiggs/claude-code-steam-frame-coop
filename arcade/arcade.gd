@@ -207,6 +207,7 @@ func _launch(index: int) -> void:
 func _process(_delta: float) -> void:
 	_ensure_shared_nodes()
 	_ensure_fullscreen()
+	_hide_tv_cursor()
 	if not has_meta("menu_v4") and (not buttons.is_empty() or grid == null) and status != null:
 		set_meta("menu_v4", true)  # hot reload: replace an older TV menu with the category tabs
 		for c in get_children():
@@ -602,3 +603,14 @@ func _ensure_fullscreen() -> void:
 	if xr != null and xr.is_initialized():
 		return  # the headset draws through OpenXR, not the window
 	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+
+
+## No mouse pointer over the TV picture (Simon); it comes back as soon as the mouse moves.
+func _hide_tv_cursor() -> void:
+	var root := get_tree().root
+	if root.has_meta("cursor_hidden") or DisplayServer.get_name() == "headless":
+		return
+	root.set_meta("cursor_hidden", true)
+	var xr := XRServer.primary_interface
+	if xr == null or not xr.is_initialized():
+		Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
