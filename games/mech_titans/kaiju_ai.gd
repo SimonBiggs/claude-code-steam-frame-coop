@@ -70,6 +70,12 @@ static func think(k: Node3D, delta: float, g: Node) -> void:
 				g.call("send_home", k, false)
 		"grabbed":
 			pass
+		"practice":
+			# A warm-up target: hovers still, bobbing, and looks at the Titan.
+			_walk_anim(k, 0.0)
+			var to: Vector3 = g.mech.global_position - k.global_position
+			k.face_dir(to, delta, 4.0)
+			k.position.y = k.alt + sin(k.state_t * 2.0) * 0.3
 		"thrown":
 			_thrown(k, delta, g)
 		"home":

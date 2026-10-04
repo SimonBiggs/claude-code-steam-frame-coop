@@ -128,6 +128,26 @@ func spawn_boss(k: String, index: int, count: int) -> Kaiju:
 	return n
 
 
+## Host: a PRACTICE target (missions.gd's warm-up): a little zap bat that hovers at `local` (Titan
+## space: -Z is ahead, y = height) with a glowing ring, waiting for a punch or the beam.
+func spawn_practice(local: Vector3) -> Kaiju:
+	var p := mech.to_global(Vector3(local.x, 0.0, local.z))
+	var n := _make_kaiju(next_id, "batlet", 0)
+	next_id += 1
+	n.fly_alt = local.y
+	n.alt = local.y
+	n.position = Vector3(p.x, local.y, p.z)
+	n.hp_max = 14.0
+	n.hp = n.hp_max
+	n.set_meta("blocking", true)
+	var to := mech.global_position - n.position
+	n.yaw = atan2(to.x, to.z)
+	n.rotation.y = n.yaw
+	n.set_state("practice")
+	emit_fx("burst", ["stars", n.center(), 2.0])
+	return n
+
+
 func active_bosses() -> Array[Kaiju]:
 	var out: Array[Kaiju] = []
 	for id in kaiju:
@@ -250,7 +270,8 @@ func _beam(delta: float, from: Vector3, dir: Vector3) -> void:
 			end = from + dir * tg
 	var bt := city.ray_hit(from, dir, BEAM_RANGE)
 	mech.beam_hot = false
-	if not hit.is_empty() and float(hit["t"]) < bt:
+	# Kid-friendly: a kaiju on the beam's line is hit even behind a building (the beam hops over roofs).
+	if not hit.is_empty():
 		var k: Kaiju = hit["k"]
 		var wi: int = hit["weak"]
 		end = from + dir * float(hit["t"])
@@ -584,6 +605,8 @@ func damage_kaiju(k: Kaiju, amount: float, wi: int, by: int, source: String, cra
 		return
 	if k.state == "dizzy":
 		return
+	if k.state == "practice" and by != 0:
+		return  # warm-up targets are the pilot's to hit
 	var m := Bosses.damage_mult(k, wi)
 	var dmg := amount * m
 	if wi >= 0 and wi < k.weak.size():
@@ -604,7 +627,7 @@ func damage_kaiju(k: Kaiju, amount: float, wi: int, by: int, source: String, cra
 
 ## A full stun meter / stun shell: dizzy for a moment (flyers fall down and can be punched).
 func stun_kaiju(k: Kaiju, by: int) -> void:
-	if not k.is_active() or k.state == "stunned" or k.state == "downed":
+	if not k.is_active() or k.state == "stunned" or k.state == "downed" or k.state == "practice":
 		return
 	var st := Bosses.stun_state(k)
 	k.set_state(st)

@@ -45,6 +45,7 @@ const VR_MASK := 0xFFFFF & ~Data.LAYER_EXTERIOR & ~Data.LAYER_TV_ONLY & ~VrRig.A
 # --- The networking contract ---
 var net: Node
 var ready_to_play := false
+var players: Array = []  ## core/net.gd reads it (the wrist menu); this game uses vr_rig + Party seats
 # --- Engine modules ---
 var party: Party
 var split: SplitView
@@ -69,6 +70,7 @@ var built_map := -1
 var test_hp_scale := 1.0  ## bots: shorter fights
 var auto_launch := -1  ## bots: launch this mission straight from the hangar
 var test_boss_only := false  ## bots: skip the mini waves
+var test_practice := false  ## bots: keep the PRACTICE warm-up even when skipping the waves
 var results_t := 0.0
 var briefing_t := 0.0
 
@@ -212,7 +214,14 @@ func _setup(mode: String) -> void:
 		net.state_set("phase", "hangar")
 		net.state_set("veh", {})
 		_refresh_ai()
+	# The how-to card is for the TV views only: the VR pilot learns by doing (the PRACTICE warm-up at
+	# the start of a mission) and gets a short cockpit headline instead of a wall of text.
+	var vr_cam: Variant = hints.get("_vr_cam")
+	hints.set("_vr_cam", null)
 	hints.intro(Data.INTRO, {"duration": 12.0})
+	hints.set("_vr_cam", vr_cam)
+	if vr_rig != null:
+		cockpit_message("WELCOME, PILOT!", UiKit.ACCENT, 4.0)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	ready_to_play = true
 	print("Mech Titans: %s mode%s" % [mode, " with a VR pilot" if vr_rig != null else ""])

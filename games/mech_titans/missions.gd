@@ -28,6 +28,11 @@ var _cdmg_t := 0.0
 var _cdmg_dirty := false
 var _rain_t := 0.0
 var _warned_landmark := false
+## PRACTICE warm-up before the first wave (teach by doing): 1 = punch the two bats in front of the
+## canopy, 2 = beam the two far bats, 0 = off / done. Runs on mission 1 and on the first mission of a session.
+var practice := 0
+var practice_t := 0.0
+var practice_ids: Array[int] = []
 
 
 ## Host: begin mission i (the city is already built for it).
@@ -55,8 +60,10 @@ func start(i: int) -> void:
 	main.net.state_set("rescued", 0)
 	main.net.state_set("objective", "Get ready, Titans!")
 	main.net.state_set("step", -1)
-	if bool(main.test_boss_only):
-		step = (info["steps"] as Array).size() - 2  # bots: straight to the boss fight
+	practice_ids.clear()
+	practice = 1 if (i == 0 or not main.has_meta("practiced")) else 0
+	if bool(main.test_boss_only) and not bool(main.test_practice):
+		practice = 0
 
 
 func playing() -> bool:
@@ -90,7 +97,12 @@ func tick(delta: float) -> void:
 	step_t -= delta
 	if step < 0:
 		if step_t <= 0.0:
-			_next_step()
+			if practice > 0:
+				_practice_tick(delta)
+			else:
+				if bool(main.test_boss_only):
+					step = maxi(step, (info["steps"] as Array).size() - 2)  # bots: straight to the boss fight
+				_next_step()
 		return
 	var st: Dictionary = (info["steps"] as Array)[step]
 	if st.has("extra"):
@@ -106,6 +118,57 @@ func tick(delta: float) -> void:
 		else:
 			done_t = 4.0
 			main.net.state_set("objective", "ALL KAIJU SENT HOME!")
+
+
+## The warm-up: glowing practice targets the pilot clears by doing (never blocks: 25 s per part).
+func _practice_tick(delta: float) -> void:
+	var vr: bool = main.vr_rig != null
+	if practice_ids.is_empty():
+		practice_t = 0.0
+		var spots: Array[Vector3] = []
+		if practice == 1:
+			spots = [Vector3(-2.3, 6.0, -6.2), Vector3(2.3, 6.0, -6.2)]
+			main.net.state_set("objective", "PRACTICE: punch the two glowing bats!")
+			main.combat.announce("PRACTICE!", "PUNCH!", "info")
+			main.hint_vr("practice_punch", "PUNCH! Throw a real punch" if vr else "X: PUNCH the bats")
+			main.radio("Warm-up time, Titan! Punch those practice bats!")
+			main.hint_tv("practice_tv", "The Titan is warming up: try your vehicle!")
+		else:
+			spots = [Vector3(-11.0, 10.0, -42.0), Vector3(11.0, 12.0, -46.0)]
+			main.net.state_set("objective", "PRACTICE: beam the far bats!")
+			main.combat.announce("BEAM!", "Point and pull the trigger" if vr else "RT: beam", "info")
+			main.hint_vr("practice_beam", "TRIGGER: BEAM! Point your right hand" if vr else "RT: BEAM the far bats")
+		for sp in spots:
+			var k: Kaiju = main.combat.spawn_practice(sp)
+			practice_ids.append(k.id)
+		main.sfx.play("ui_notify", -2.0)
+		return
+	practice_t += delta
+	var left := 0
+	for id in practice_ids:
+		var k: Kaiju = main.combat.kaiju.get(id, null)
+		if k != null and k.state == "practice":
+			left += 1
+	if left > 0 and practice_t < 25.0:
+		return
+	for id in practice_ids:
+		var k: Kaiju = main.combat.kaiju.get(id, null)
+		if k != null and k.state == "practice":
+			main.combat.send_home(k, false)
+	practice_ids.clear()
+	main.sfx.play("level_up" if left == 0 else "ui_notify", -2.0)
+	main.cockpit_message("GREAT!" if left == 0 else "NICE TRY!", Color(0.5, 1.0, 0.6), 1.6)
+	main.pulse(0, 0.6, 0.15)
+	main.pulse(1, 0.6, 0.15)
+	practice += 1
+	if practice > 2:
+		practice = 0
+		main.set_meta("practiced", true)
+		step_t = 2.0
+		main.net.state_set("objective", "Warm-up done! Here they come!")
+		main.radio("Great warm-up, Titans! Here they come!")
+	else:
+		step_t = 1.2
 
 
 func _next_step() -> void:

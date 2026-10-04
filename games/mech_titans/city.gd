@@ -82,6 +82,7 @@ func _plan_cells() -> void:
 	_open[_key(0, 26)] = "start"
 	_open[_key(0, 52)] = "start"
 	_open[_key(0, -26)] = "arrival"
+	_open[_key(0, -52)] = "arrival"  # a clear boulevard from the north edge: bosses walk in without getting stuck
 	_open[_key(-26, 52)] = "shelter"
 	_open[_key(26, 52)] = "shelter"
 	var water: String = place_info.get("water", "")
@@ -579,7 +580,16 @@ func _pick_rescue_spots() -> void:
 		var s: Vector3 = rec["size"]
 		if p.z > 40.0:
 			continue
-		cand.append(p + Vector3(0, 0, s.z * 0.5 + 2.2))
+		# Only on the street side of a block (the south edge, next to an east-west road), so a rescue
+		# truck can always drive right up to them.
+		var c := p + Vector3(0, 0, s.z * 0.5 + 2.2)
+		var cz := CELLS[0]
+		for cv in CELLS:
+			if absf(p.z - cv) < absf(p.z - cz):
+				cz = cv
+		if c.z < cz + 6.0 or push_out(c, 1.0).distance_to(c) > 0.01:
+			continue
+		cand.append(c)
 	for i in cand.size():
 		var j := _rng.randi_range(i, cand.size() - 1)
 		var t := cand[i]

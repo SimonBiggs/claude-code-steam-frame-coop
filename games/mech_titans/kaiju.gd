@@ -12,7 +12,7 @@ const MeshKit := preload("res://core/mesh_kit.gd")
 const UiKit := preload("res://core/ui_kit.gd")
 
 ## State codes (also sent in snapshots).
-const STATES: Array[String] = ["enter", "roam", "windup", "attack", "recover", "stunned", "dizzy", "grabbed", "thrown", "home", "gone", "downed"]
+const STATES: Array[String] = ["enter", "roam", "windup", "attack", "recover", "stunned", "dizzy", "grabbed", "thrown", "home", "gone", "downed", "practice"]
 
 var id := 0
 var kind := "lizard"
@@ -62,6 +62,7 @@ var _hit_shake := 0.0
 var _glow_mat: StandardMaterial3D
 var _paint_mat: StandardMaterial3D
 var _broken_mat: StandardMaterial3D
+var _practice_fx: Node3D  ## PRACTICE: a glowing target ring + arrow (every machine, lazily)
 
 
 ## Build the body. k: a Data.KAIJU or Data.MINIS key.
@@ -355,6 +356,7 @@ func visual_tick(delta: float) -> void:
 			ring.scale = Vector3.ONE * (1.0 + 0.2 * sin(_t * 10.0))
 		if painted and simulate_paint_decay:
 			w["painted"] = maxf(0.0, float(w["painted"]) - delta)
+	_tick_practice(delta)
 	var dz := state == "dizzy" or state == "stunned" or state == "downed" or state == "grabbed"
 	dizzy_ring.visible = dz
 	if dz:
@@ -369,6 +371,50 @@ func visual_tick(delta: float) -> void:
 	else:
 		model.position.x = 0.0
 		model.position.z = 0.0
+
+
+## PRACTICE targets (missions.gd's warm-up): a big glowing ring that faces the Titan and a bouncing
+## arrow above, so the pilot sees what to hit without reading anything.
+func _tick_practice(_delta: float) -> void:
+	var on := state == "practice"
+	if not on:
+		if _practice_fx != null:
+			_practice_fx.visible = false
+		return
+	if _practice_fx == null:
+		_practice_fx = Node3D.new()
+		add_child(_practice_fx)
+		var mat := MeshKit.material(Color(0.35, 1.0, 0.55), 3.0)
+		var ring := MeshInstance3D.new()
+		var tm := TorusMesh.new()
+		tm.inner_radius = height * 0.62
+		tm.outer_radius = height * 0.74
+		tm.rings = 24
+		tm.ring_segments = 8
+		ring.mesh = tm
+		ring.material_override = mat
+		ring.rotation.x = PI * 0.5  # stands up, facing +Z (the kaiju faces the Titan)
+		ring.name = "Ring"
+		ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_practice_fx.add_child(ring)
+		var arrow := MeshInstance3D.new()
+		var cm := CylinderMesh.new()
+		cm.top_radius = height * 0.3
+		cm.bottom_radius = 0.0
+		cm.height = height * 0.45
+		cm.radial_segments = 12
+		cm.rings = 1
+		arrow.mesh = cm
+		arrow.material_override = mat
+		arrow.name = "Arrow"
+		arrow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_practice_fx.add_child(arrow)
+	_practice_fx.visible = true
+	_practice_fx.position = Vector3(0, height * 0.45, 0)
+	var ring2: Node3D = _practice_fx.get_node("Ring")
+	ring2.scale = Vector3.ONE * (1.0 + 0.12 * sin(_t * 6.0))
+	var arrow2: Node3D = _practice_fx.get_node("Arrow")
+	arrow2.position = Vector3(0, height * (1.05 + 0.15 * absf(sin(_t * 4.0))), 0)
 
 
 ## Painted timers count down on the host (the TV machine gets them in snapshots).

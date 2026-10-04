@@ -787,6 +787,8 @@ func _route(p: Vector3, goal: Vector3) -> Vector3:
 	var tz := _nearest_road(goal.z)
 	var on_x := absf(p.x - rx) < 2.5  # on a north-south road
 	var on_z := absf(p.z - rz) < 2.5  # on an east-west road
+	if on_z and absf(goal.z - rz) < PICKUP_R and absf(p.x - goal.x) > 2.0:
+		return Vector3(goal.x, 0, rz)  # a stop right beside the goal (citizens wait by the road)
 	if on_x and absf(p.z - tz) > 2.0:
 		return Vector3(rx, 0, tz)
 	if on_z and absf(p.x - tx) > 2.0:
