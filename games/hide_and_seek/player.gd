@@ -477,7 +477,7 @@ func _physics_process(delta: float) -> void:
 				var to_c := Vector3(-global_position.x, 0.0, -global_position.z)
 				global_position += to_c.normalized() * 0.8 if to_c.length() > 0.1 else Vector3(0.8, 0.0, 0.0)
 				if main.in_jail(global_position):
-					global_position = main.WorldScript.BELL_POS + Vector3(-0.6, 0, 0)  # never pop into the jail cage
+					global_position = main.bell_pos() + Vector3(-0.6, 0, 0)  # never pop into the jail cage
 				main.burst(global_position + Vector3.UP, Color(0.7, 0.9, 1.0), 10, 0.06)
 		else:
 			set_meta("stuck_t", 0.0)
@@ -831,7 +831,7 @@ func fit_height() -> void:
 	xr_origin.global_position = Vector3(o.x, SEEKER_EYE - calib_y, o.z)
 	print("VR: fitted eye height (head %.2f m above the floor -> eyes at %.2f m)" % [calib_y, SEEKER_EYE])
 	if first and main.phase != "seek":
-		teleport(main.SEEKER_SPAWN, PI)  # tracking just started: stand on the counting spot
+		teleport(main.spawn_pos(0), PI)  # tracking just started: stand on the counting spot
 
 
 ## Put the player at `pos` facing `new_yaw` (VR: moves the play space so the head lands there).

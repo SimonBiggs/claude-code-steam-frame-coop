@@ -1,16 +1,21 @@
 extends Node3D
 const VrText := preload("res://core/vr_text.gd")
-## Hide and Seek: a playful round game in a cosy cartoon house.
+## Hide and Seek: a playful round game. The map changes every round: the cosy HOUSE, THE CASTLE, THE SPACESHIP.
 ## Player 1 (VR, or keyboard+mouse / controller in split screen) is the SEEKER: counts to 20 with eyes
 ## covered, then searches with a torch. Touch a hider with either hand, or point the torch at one within 3 m
 ## and pull the trigger. SNIFF (VR: left hand on your nose; flat: Q / LB) makes nearby hiders sneeze.
 ## TV players (P2..P7) are HIDERS: run, hide, disguise as something that fits the room (lamp, pot plant,
-## box, teddy, beach ball), squeak for bonus points. Found hiders go to JAIL in the hall; a free hider who
+## box, teddy, beach ball), squeak for bonus points. Found hiders go to JAIL by the start; a free hider who
 ## rings the jail bell lets everyone out. Rounds take turns: CLASSIC, STAR HUNT (grab golden stars while
 ## hiding) and NIGHT TIME (lights low, glowing eyes, extra-bright torch). Awards after every round.
 
 const PlayerScript := preload("res://games/hide_and_seek/player.gd")
 const WorldScript := preload("res://games/hide_and_seek/world.gd")
+const CastleScript := preload("res://games/hide_and_seek/map_castle.gd")
+const ShipScript := preload("res://games/hide_and_seek/map_ship.gd")
+## The maps take turns (Abigail: "every single time you play there's a different map"): each new round, and
+## each new game launch, uses the next one. Every map script has data() and build(root).
+const MAPS := [WorldScript, CastleScript, ShipScript]
 const HudScript := preload("res://games/hide_and_seek/hud.gd")
 const SfxScript := preload("res://core/sfx.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
@@ -22,10 +27,6 @@ const JoinInputScript := preload("res://games/hide_and_seek/join_input.gd")
 const MAX_PLAYERS := 7
 const PLAYER_COLORS: Array[Color] = [Color(1.0, 0.85, 0.45), Color(0.5, 0.85, 1.0), Color(1.0, 0.55, 0.75),
 	Color(0.55, 0.95, 0.55), Color(1.0, 0.65, 0.35), Color(0.75, 0.6, 1.0), Color(0.4, 0.95, 0.9)]
-## Round start: the seeker faces the front door in the hall; the hiders stand behind them.
-const SEEKER_SPAWN := Vector3(0.0, 0.0, 5.7)
-const SPAWNS: Array[Vector3] = [Vector3(0, 0, 5.7), Vector3(-1.4, 0, 2.3), Vector3(1.4, 0, 2.3), Vector3(0, 0, 2.0),
-	Vector3(-2.0, 0, 3.4), Vector3(2.0, 0, 3.4), Vector3(-0.7, 0, 3.2), Vector3(0.7, 0, 3.2)]
 const PAD_WAIT_TIME := 20.0
 const PARTY_META := "hide_and_seek_party"
 const MUSIC_TRACK := 0
@@ -65,6 +66,10 @@ var lights: Array = []
 var window_mat: StandardMaterial3D
 var night_k := 0.0  # 0 day .. 1 night (eased)
 var star_mm: MultiMesh
+var map_idx := -1  # which MAPS entry is built right now
+var map: Dictionary = {}  # its data(): rooms, doors, spawns, jail, bell, star_spots, hide_spots, bounds
+var world_root: Node3D
+var mood_dirty := true
 
 # Round state (host decides; mirrored to the TV by snapshots).
 var phase := "wait"  # wait, intro, count, seek, over
@@ -110,10 +115,7 @@ var join_t := 0.0
 
 func _ready() -> void:
 	randomize()
-	var built: Dictionary = WorldScript.build(self)
-	decoys = built.decoys
-	lights = built.lights
-	window_mat = built.get("window_mat")
+	_build_map(_saved_next_map())
 	_build_hud()
 	var menu := PauseMenuScript.new()
 	menu.main = self
@@ -209,12 +211,92 @@ func merged_mesh(parts: Array) -> ArrayMesh:
 	return am
 
 
+# --- Maps ----------------------------------------------------------------------
+
+## The map this launch starts on (the rotation carries on from the last game).
+func _saved_next_map() -> int:
+	var cfg := ConfigFile.new()
+	cfg.load(BEST_FILE)
+	return int(cfg.get_value("maps", "next", 0)) % MAPS.size()
+
+
+func _save_next_map(i: int) -> void:
+	var cfg := ConfigFile.new()
+	cfg.load(BEST_FILE)
+	cfg.set_value("maps", "next", i % MAPS.size())
+	cfg.save(BEST_FILE)
+
+
+## Current map data (lazily filled, e.g. after a hot reload of an older version).
+func md() -> Dictionary:
+	if map.is_empty():
+		map = MAPS[maxi(map_idx, 0)].data()
+	return map
+
+
+func map_title() -> String:
+	return str(md().get("title", "THE HOUSE"))
+
+
+func spawn_pos(i: int) -> Vector3:
+	var sp: Array = md().spawns
+	return sp[i % sp.size()]
+
+
+func jail_pos() -> Vector3:
+	return md().jail
+
+
+func bell_pos() -> Vector3:
+	return md().bell
+
+
+func star_spot(k: int) -> Vector3:
+	var st: Array = md().star_spots
+	return st[k % st.size()]
+
+
+## Throw away the old map's nodes and build map `i` (both machines; the TV follows the snapshot).
+func _build_map(i: int) -> void:
+	i = posmod(i, MAPS.size())
+	if world_root != null and is_instance_valid(world_root):
+		remove_child(world_root)
+		world_root.queue_free()
+	elif has_node("House"):
+		_free_legacy_world()
+	world_root = Node3D.new()
+	world_root.name = "World"
+	add_child(world_root)
+	move_child(world_root, 0)
+	var built: Dictionary = MAPS[i].build(world_root)
+	map_idx = i
+	map = MAPS[i].data()
+	decoys = built.decoys
+	lights = built.lights
+	window_mat = built.get("window_mat")
+	mood_dirty = true
+	print("Map: %s" % map_title())
+
+
+## Hot reload from the one-map version: its house was built straight into Main.
+func _free_legacy_world() -> void:
+	for c in get_children():
+		var legacy := c is WorldEnvironment or c is DirectionalLight3D or c is OmniLight3D or (c is StaticBody3D and c.name == "House")
+		if c is MeshInstance3D and c.get_script() == null:
+			legacy = true
+		if c is MultiMeshInstance3D and (c as MultiMeshInstance3D).multimesh != star_mm:
+			legacy = true
+		if legacy:
+			remove_child(c)
+			c.queue_free()
+
+
 func is_night() -> bool:
 	return round_type == "night" and phase != "over" and phase != "wait"
 
 
 func in_jail(p: Vector3) -> bool:
-	var j: Vector3 = WorldScript.JAIL_POS
+	var j: Vector3 = jail_pos()
 	return absf(p.x - j.x) < WorldScript.JAIL_HALF + 0.1 and absf(p.z - j.z) < WorldScript.JAIL_HALF + 0.1
 
 
@@ -396,7 +478,7 @@ func _make_player(i: int, mode: String) -> void:
 		p.mouse_look = true
 	elif i >= 2:
 		p.key_set = 2  # extra players are controller-only
-	p.position = SPAWNS[i % SPAWNS.size()]
+	p.position = spawn_pos(i)
 	p.yaw = PI if i == 0 else 0.0
 	add_child(p)
 	players.append(p)
@@ -465,7 +547,7 @@ func _build_views(mode: String) -> void:
 		right.pose = "aim"
 		origin.add_child(right)
 		players[0].attach_xr(origin, cam, left, right)
-		players[0].teleport(SEEKER_SPAWN, PI)
+		players[0].teleport(spawn_pos(0), PI)
 		_build_vr_mirror(cam)
 	else:
 		print("No VR headset: split screen (player 1 is the seeker)")
@@ -726,7 +808,7 @@ func _activate_player(i: int) -> void:
 		p.set_found(true, true)  # no sneaking in mid-round: spectate, hide next round
 	else:
 		p.set_found(false)
-		_place_player(p, SPAWNS[i % SPAWNS.size()], 0.0)
+		_place_player(p, spawn_pos(i), 0.0)
 	_show_center("PLAYER %d JOINED!" % (i + 1), 1.5)
 	print("Player %d joined the game (%d players)" % [i + 1, active_count()])
 	on_player_activity_changed(p)
@@ -920,7 +1002,12 @@ func _start_round() -> void:
 	sniff_hits = 0
 	sniff_cd = 0.0
 	results_text = ""
-	round_type = ROUND_TYPES[(round_no - 1) % ROUND_TYPES.size()]
+	# Round types shift by one every lap of the maps, so each map gets every round type in turn.
+	var lap := (round_no - 1) / MAPS.size()
+	round_type = ROUND_TYPES[(round_no - 1 + lap) % ROUND_TYPES.size()]
+	if round_no > 1 or map_idx < 0:
+		_build_map(map_idx + 1)
+	_save_next_map(map_idx + 1)
 	for i in round_scores.size():
 		round_scores[i] = 0
 		survive_acc[i] = 0.0
@@ -933,32 +1020,33 @@ func _start_round() -> void:
 		p.set_found(false)
 		p.taunt_cd = 0.0
 		if p.active:
-			_place_player(p, SPAWNS[p.index % SPAWNS.size()], PI if p.index == 0 else 0.0)
+			_place_player(p, spawn_pos(p.index), PI if p.index == 0 else 0.0)
 	jail_breaks = 1 + (1 if hider_count() >= 4 else 0)
 	star_idx.clear()
 	star_taken.clear()
 	if round_type == "stars":
-		var all: Array = range(WorldScript.STAR_SPOTS.size())
+		var all: Array = range((md().star_spots as Array).size())
 		all.shuffle()
 		for k in STAR_COUNT:
 			star_idx.append(all[k])
 			star_taken.append(false)
 	phase = "intro"
 	phase_t = intro_time if round_no == 1 else 5.0
-	print("Round %d (%s): %d hiders" % [round_no, round_type, hider_count()])
+	print("Round %d (%s) on %s: %d hiders" % [round_no, round_type, map_title(), hider_count()])
 	sound("ready", -4.0, 1.0)
 	var rules := "Found hiders go to JAIL - ring the jail BELL to set your friends free!"
+	var where := map_title()
 	if round_no == 1:
-		_show_center("HIDE AND SEEK!\nSEEKER: count with your eyes covered, then find everyone with your torch!\n"
+		_show_center("HIDE AND SEEK: %s!\nSEEKER: count with your eyes covered, then find everyone with your torch!\n" % where
 			+ "HIDERS: hide! Turn into something that fits in. Squeak for bonus points!\n" + rules, intro_time)
 	else:
 		match round_type:
 			"stars":
-				_show_center("ROUND %d: STAR HUNT!\nHiders: grab the golden stars for +%d each - but the seeker might spot you!" % [round_no, STAR_POINTS], 4.5)
+				_show_center("ROUND %d: %s\nSTAR HUNT! Hiders: grab the golden stars for +%d each - but the seeker might spot you!" % [round_no, where, STAR_POINTS], 4.5)
 			"night":
-				_show_center("ROUND %d: NIGHT TIME!\nThe lights are low and the torch is extra bright.\nHiders: your eyes glow in the dark - disguise to hide them!" % round_no, 4.5)
+				_show_center("ROUND %d: %s\nNIGHT TIME! The lights are low and the torch is extra bright.\nHiders: your eyes glow in the dark - disguise to hide them!" % [round_no, where], 4.5)
 			_:
-				_show_center("ROUND %d: CLASSIC HIDE AND SEEK\n%s" % [round_no, rules], 4.0)
+				_show_center("ROUND %d: %s\nCLASSIC HIDE AND SEEK - %s" % [round_no, where, rules], 4.0)
 
 
 func _begin_count() -> void:
@@ -1022,7 +1110,7 @@ func _check_bell() -> void:
 			jailed.append(p)
 	if jailed.is_empty():
 		return
-	var bell: Vector3 = WorldScript.BELL_POS
+	var bell: Vector3 = bell_pos()
 	for h in players:
 		if not h.is_hiding() or h.prop_kind >= 0:
 			continue
@@ -1052,7 +1140,7 @@ func _check_stars() -> void:
 	for k in star_idx.size():
 		if star_taken[k]:
 			continue
-		var at: Vector3 = WorldScript.STAR_SPOTS[int(star_idx[k])]
+		var at: Vector3 = star_spot(int(star_idx[k]))
 		for h in players:
 			if not h.is_hiding() or h.prop_kind >= 0:
 				continue
@@ -1261,7 +1349,7 @@ func find_hider(h, how: String) -> void:
 	for o in players:
 		if o != h and o.active and o.found and not o.late:
 			slot += 1
-	_place_player(h, WorldScript.JAIL_POS + JAIL_SLOTS[slot % JAIL_SLOTS.size()], PI)
+	_place_player(h, jail_pos() + JAIL_SLOTS[slot % JAIL_SLOTS.size()], PI)
 	sound("jail", -6.0, 1.0)
 
 
@@ -1511,7 +1599,7 @@ func make_snapshot() -> Array:
 	var ps := []
 	for p in players:
 		ps.append(p.net_state())
-	return [phase, phase_t, round_no, seek_len, ps, round_scores, totals, count_time, round_type, jail_breaks, star_idx, star_taken, snappedf(sniff_cd, 0.1)]
+	return [phase, phase_t, round_no, seek_len, ps, round_scores, totals, count_time, round_type, jail_breaks, star_idx, star_taken, snappedf(sniff_cd, 0.1), maxi(map_idx, 0)]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -1534,6 +1622,8 @@ func apply_snapshot(s: Array) -> void:
 		star_idx = s[10]
 		star_taken = s[11]
 		sniff_cd = s[12]
+	if s.size() >= 14 and int(s[13]) != map_idx:
+		_build_map(int(s[13]))  # the seeker moved on to the next map
 	var ps: Array = s[4]
 	for i in mini(players.size(), ps.size()):
 		players[i].apply_net_state(ps[i])
@@ -1665,18 +1755,27 @@ func _update_vr_text() -> void:
 ## Night time: lights dim, windows turn dark blue (both machines, eased).
 func _update_mood(delta: float) -> void:
 	var want := 1.0 if is_night() else 0.0
-	if absf(night_k - want) < 0.001:
+	if absf(night_k - want) < 0.001 and not mood_dirty:
 		return
+	mood_dirty = false
 	night_k = move_toward(night_k, want, delta * 0.6)
 	for l in lights:
-		(l as OmniLight3D).light_energy = lerpf(1.1, 0.28, night_k)
-	for c in get_children():
+		if is_instance_valid(l):
+			var day_e: float = (l as OmniLight3D).get_meta("day_energy", 1.1)
+			(l as OmniLight3D).light_energy = lerpf(day_e, day_e * 0.25, night_k)
+	var holder: Node = world_root if world_root != null and is_instance_valid(world_root) else self
+	for c in holder.get_children():
 		if c is WorldEnvironment:
 			var e: Environment = (c as WorldEnvironment).environment
-			e.ambient_light_energy = lerpf(0.65, 0.22, night_k)
-			e.background_color = Color(0.45, 0.55, 0.8).lerp(Color(0.05, 0.06, 0.15), night_k)
+			var day_bg: Color = c.get_meta("day_bg", Color(0.45, 0.55, 0.8))
+			var day_amb: float = c.get_meta("day_ambient", 0.65)
+			e.ambient_light_energy = lerpf(day_amb, 0.22, night_k)
+			e.background_color = day_bg.lerp(Color(0.05, 0.06, 0.15) if day_bg.v > 0.2 else day_bg * 0.5, night_k)
 		elif c is DirectionalLight3D:
-			(c as DirectionalLight3D).light_energy = lerpf(0.45, 0.08, night_k)
+			if not c.has_meta("day_energy"):
+				c.set_meta("day_energy", (c as DirectionalLight3D).light_energy)
+			var sun_e: float = c.get_meta("day_energy")
+			(c as DirectionalLight3D).light_energy = lerpf(sun_e, sun_e * 0.18, night_k)
 	if window_mat != null:
 		window_mat.albedo_color = Color(0.6, 0.72, 1.0).lerp(Color(0.12, 0.15, 0.4), night_k)
 		window_mat.emission = window_mat.albedo_color
@@ -1704,7 +1803,7 @@ func _update_stars() -> void:
 		if not on:
 			star_mm.set_instance_transform(k, Transform3D(Basis.from_scale(Vector3.ONE * 0.001), Vector3(0, -10, 0)))
 			continue
-		var at: Vector3 = WorldScript.STAR_SPOTS[int(star_idx[k])]
+		var at: Vector3 = star_spot(int(star_idx[k]))
 		var b := Basis(Vector3.UP, t * 2.0 + k) * Basis.from_scale(Vector3.ONE * 0.22)
 		star_mm.set_instance_transform(k, Transform3D(b, at + Vector3(0, 0.75 + sin(t * 3.0 + k) * 0.08, 0)))
 
