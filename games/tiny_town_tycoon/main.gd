@@ -17,6 +17,13 @@ extends Node3D
 ## one "b<id>" key per building, only changed ones are sent); vehicles, the VR pose, the cow and the
 ## parade go in snapshots; one-off effects are "fx" events. TV players' own vehicles are simulated
 ## on the TV machine (instant) and sent with net.send_state.
+##
+## SIMPLE_MODE (Defs.SIMPLE_MODE; the family: "all of the games have become too complicated"): no island
+## select, coins, needs, events, goals or awards. The mayor starts with ROAD + HOUSE and one new block
+## sparkles into the tray at a time as the town grows. PRACTICE: a glowing spot and a ghost hand
+## (ghost_hand.gd) show the mayor how to draw a road and put a house beside it; a house blueprint waits
+## by the town hall so the drivers' first job is one glowing delivery (bricks from the hall to the new
+## house). Everything on the table reacts to touch (props.gd). Text: one short headline at the start.
 
 const NetScript := preload("res://core/net.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
@@ -43,6 +50,8 @@ const FleetScript := preload("res://games/tiny_town_tycoon/fleet.gd")
 const MayorVrScript := preload("res://games/tiny_town_tycoon/mayor_vr.gd")
 const MayorFlatScript := preload("res://games/tiny_town_tycoon/mayor_flat.gd")
 const HudScript := preload("res://games/tiny_town_tycoon/hud.gd")
+const PropsScript := preload("res://games/tiny_town_tycoon/props.gd")
+const GhostHandScript := preload("res://games/tiny_town_tycoon/ghost_hand.gd")
 
 const GAME_ID := "tiny_town_tycoon"
 const DAY_LEN := 420.0  ## seconds for a whole day
@@ -107,6 +116,13 @@ var _isl_shown := -1  ## island drawn by the view
 var _ter_dirty := false
 var _mood := ""
 var _last_veh := {}  ## host: slot -> the vehicle they drove (given back when they reconnect)
+# SIMPLE_MODE
+var props: Node3D  ## touchable toys (every machine)
+var ghost_hand: Node3D  ## the mayor's practice (host / local)
+var practice := 2  ## host: 0 = draw a road, 1 = put a house by it, 2 = done
+var practice_road: Array[Vector2i] = []
+var practice_house := Vector2i(-1, -1)
+var _practice_site := -1  ## the drivers' practice delivery (a house blueprint by the hall)
 
 
 func _ready() -> void:
@@ -129,6 +145,9 @@ func _ready() -> void:
 	add_child(save)
 	sfx = SfxScript.new()
 	add_child(sfx)
+	if Defs.SIMPLE_MODE:
+		# the touch and celebration sounds, made now (a first-use synth mid-game hitches the Frame)
+		sfx.warm(["boing", "whoosh", "swish", "correct", "reveal", "sparkle", "pop", "clap", "party_horn", "ding", "kaching"], false)
 	sfx.warm([], true)
 	music = MusicScript.new()
 	add_child(music)
@@ -202,6 +221,16 @@ func _setup(mode: String) -> void:
 	hud.name = "Hud"
 	add_child(hud)
 	hud.call("setup", self)
+	if Defs.SIMPLE_MODE:
+		props = PropsScript.new()
+		props.name = "Props"
+		props.set("main", self)
+		add_child(props)
+		if mode != "client":
+			ghost_hand = GhostHandScript.new()
+			ghost_hand.name = "GhostHand"
+			ghost_hand.set("main", self)
+			add_child(ghost_hand)
 	if vr:
 		mayor = MayorVrScript.new()
 		mayor.name = "Mayor"
@@ -234,9 +263,14 @@ func _setup(mode: String) -> void:
 	if mode != "client":
 		net.state_set("shared", false)
 		var last := clampi(int(save.data.get("last", 0)), 0, Defs.ISLANDS.size() - 1)
-		load_island(last)
-		_set_phase("select")
-	hints.intro(INTRO, {"duration": 12.0})
+		if Defs.SIMPLE_MODE:
+			load_island(0)  # no island select: straight into the meadow town
+			_set_phase("play")
+		else:
+			load_island(last)
+			_set_phase("select")
+	if not Defs.SIMPLE_MODE:
+		hints.intro(INTRO, {"duration": 12.0})
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	ready_to_play = true
 	print("Tiny Town Tycoon: %s mode%s" % [mode, " with a VR mayor" if vr_rig != null else ""])
@@ -300,6 +334,8 @@ func load_island(i: int) -> void:
 	else:
 		town.generate(i)
 		town.starter_town()
+		if Defs.SIMPLE_MODE:
+			_starter_blueprint()
 		sim.setup(town, free)
 		sim.coins = int(isl["start_coins"])
 		sim.tier = 3 if free else 0
@@ -314,7 +350,11 @@ func load_island(i: int) -> void:
 	sim.pop = 0
 	for bid in town.buildings:
 		sim.pop += int(town.buildings[bid].get("res", 0))
+	if Defs.SIMPLE_MODE:
+		sim.refresh_unlocks(false)
+		_start_practice()
 	jobs.setup(town, sim)
+	jobs.practice_site = _practice_site
 	events.call("finish", sim, jobs)
 	fleet.call("reset_positions")
 	fleet.call("sync_ai", sim.tier)
@@ -325,6 +365,73 @@ func load_island(i: int) -> void:
 	_publish_town(true)
 	_publish_stats()
 	_check_goals(false)
+
+
+## SIMPLE_MODE: a new town has one house blueprint by the town hall, so the drivers' very first job is
+## one glowing delivery (bricks from the hall to the new house) while the mayor practises.
+func _starter_blueprint() -> void:
+	var halls := town.of_kind("hall", true)
+	if halls.is_empty():
+		return
+	var hb: Dictionary = halls[0]
+	for dz in [3, -1]:
+		for dx in [-2, -1, 2, 3, -3]:
+			var x := int(hb["x"]) + int(dx)
+			var z := int(hb["z"]) + int(dz)
+			if town.can_place("house", x, z) == "" and town.on_road({"kind": "house", "x": x, "z": z}):
+				_practice_site = town.add_building("house", x, z, town.auto_rot("house", x, z), 0)
+				return
+
+
+## SIMPLE_MODE: the mayor's practice (draw a road from a glowing spot, then a house beside it), once
+## per saved town.
+func _start_practice() -> void:
+	practice = 2
+	practice_road.clear()
+	practice_house = Vector2i(-1, -1)
+	if bool(save.data.get("practiced", false)):
+		return
+	# the end of the first street: three free cells going on from it
+	var best: Array[Vector2i] = []
+	for z in Defs.GRID:
+		for x in Defs.GRID:
+			if not town.has_road(x, z):
+				continue
+			for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+				var cells: Array[Vector2i] = []
+				for k in range(1, 4):
+					var c: Vector2i = Vector2i(x, z) + d * k
+					if town.can_place("road", c.x, c.y) != "" or town.has_road(c.x, c.y):
+						break
+					cells.append(c)
+				if cells.size() == 3 and (best.is_empty() or d.x > 0):
+					best = cells
+	if best.is_empty():
+		return
+	practice_road = best
+	practice = 0
+
+
+## A house spot right beside the practice road.
+func _practice_house_spot() -> Vector2i:
+	for c in practice_road:
+		for d in [Vector2i(0, 1), Vector2i(0, -1), Vector2i(1, 0), Vector2i(-1, 0)]:
+			var h: Vector2i = c + d
+			if place_problem("house", h.x, h.y) == "" and town.on_road({"kind": "house", "x": h.x, "z": h.y}):
+				return h
+	return Vector2i(-1, -1)
+
+
+func _practice_step(done_kind: String) -> void:
+	if practice == 0 and done_kind == "road":
+		practice_house = _practice_house_spot()
+		practice = 1 if practice_house.x >= 0 else 2
+		_fx("practice", [1])
+	elif practice == 1 and done_kind == "house":
+		practice = 2
+		save.data["practiced"] = true
+		save.mark_dirty()
+		_fx("practice", [2])
 
 
 ## Keep the current town in the save (host / local).
@@ -366,6 +473,8 @@ func _goal_value(g: Array) -> int:
 
 ## Host: tick the goals, publish them, celebrate new stars and the island's completion.
 func _check_goals(celebrate: bool) -> void:
+	if Defs.SIMPLE_MODE:
+		return  # no goals with numbers, no island-complete awards
 	var isl := Defs.island(island)
 	var goals: Array = isl["goals"]
 	var out: Array = []
@@ -418,7 +527,7 @@ func on_request(slot: int, action: String, args: Array) -> void:
 				load_island(clampi(int(args[0]), 0, Defs.ISLANDS.size() - 1))
 				_set_phase("play")
 		"menu":
-			if phase() == "play":
+			if phase() == "play" and not Defs.SIMPLE_MODE:
 				save_town()
 				_set_phase("select")
 		"continue":
@@ -440,6 +549,23 @@ func on_request(slot: int, action: String, args: Array) -> void:
 			fleet.call("honk", slot)
 		"toggle_view":
 			net.state_set("shared", not bool(net.state_get("shared", false)))
+		"tree_take":
+			var ci := int(args[0]) if args.size() > 0 else -1
+			if ci >= 0 and ci < town.trees.size() and town.trees[ci] > 0:
+				town.trees[ci] = town.trees[ci] - 1
+				town.tree_version += 1
+				_publish_town(false)
+		"tree_plant":
+			if args.size() >= 2:
+				var to := int(args[0])
+				var from := int(args[1])
+				var ok: bool = to >= 0 and to < town.trees.size() and props != null and props.call("can_plant", to % Defs.GRID, to / Defs.GRID)
+				var at := to if ok else from
+				if at >= 0 and at < town.trees.size():
+					town.trees[at] = mini(3, town.trees[at] + 1)
+					town.tree_version += 1
+					_publish_town(false)
+					_fx("prop", ["plant", at])
 
 
 ## Why `kind` can't go at x, z right now ("" = it can). Used by the mayors' ghosts too.
@@ -470,6 +596,8 @@ func place(slot: int, kind: String, x: int, z: int, rot: int) -> bool:
 		sim.add_coins(-Defs.cost_of(kind))
 	var id := town.add_building(kind, x, z, rot, 0)
 	awards.add(slot, "builds")
+	if Defs.SIMPLE_MODE and slot == 0:
+		_practice_step(kind)
 	_fx("placed", [id, slot])
 	_publish_town(false)
 	_publish_stats()
@@ -519,6 +647,8 @@ func paint(slot: int, kind: String, cells: Variant) -> void:
 						sim.add_coins(refund)
 						changed += 1
 	if changed > 0:
+		if Defs.SIMPLE_MODE and slot == 0:
+			_practice_step(kind)
 		_fx("painted", [kind, list[list.size() - 1] if list.size() > 0 else 0, changed])
 		_publish_town(false)
 		_publish_stats()
@@ -559,6 +689,7 @@ func _publish_stats() -> void:
 	net.state_set("pop", sim.pop)
 	net.state_set("happy", sim.happy)
 	net.state_set("tier", sim.tier)
+	net.state_set("unl", sim.unl)
 
 
 ## Host: each TV player's job card (only when it changes).
@@ -625,7 +756,7 @@ func _on_state_changed(key: String, value: Variant) -> void:
 		"shared":
 			if split != null and playing():
 				split.set_shared(bool(value))
-		"coins", "pop", "happy", "tier", "goals", "free":
+		"coins", "pop", "happy", "tier", "goals", "free", "unl":
 			hud.call("refresh")
 			if mayor != null:
 				mayor.call("refresh_board")
@@ -651,6 +782,12 @@ func _on_phase(p: String) -> void:
 		"play":
 			music.play_mood("town")
 			var isl := Defs.island(int(net.state_get("island", 0)))
+			if Defs.SIMPLE_MODE:
+				# one short headline; the glowing spots and the ghost hand show the rest
+				HudKit.banner(hud.call("all_roots"), "TINY TOWN", "", {"duration": 2.5})
+				if vr_rig != null:
+					HudKit.vr_banner(self, vr_rig.camera, "TINY TOWN", "", {"duration": 2.5})
+				return
 			HudKit.banner(hud.call("all_roots"), String(isl["name"]), String(isl["blurb"]), {"duration": 2.5})
 			if vr_rig != null:
 				HudKit.vr_banner(self, vr_rig.camera, String(isl["name"]), String(isl["blurb"]), {"duration": 2.5})
@@ -704,7 +841,8 @@ func _on_player_joined(slot: int, _device: int) -> void:
 			flat.call("setup", self, town, cam)
 			hud.call("make_view", slot, split.hud(slot))
 			hints.add_view(hud.call("root_of", slot), slot)
-			hints.intro({"title": "TINY TOWN TYCOON", "goal": INTRO["goal"], "tv": MAYOR_INTRO}, {"duration": 10.0, "slots": [slot]})
+			if not Defs.SIMPLE_MODE:
+				hints.intro({"title": "TINY TOWN TYCOON", "goal": INTRO["goal"], "tv": MAYOR_INTRO}, {"duration": 10.0, "slots": [slot]})
 		else:
 			var c := CameraRig.new()
 			c.camera = cam
@@ -792,7 +930,10 @@ func _tv_buttons() -> void:
 			if net.mode == "client":
 				net.request(slot, "honk")
 		if party.just_pressed(slot, "x"):
-			hud.call("open_vehicle_menu", slot)
+			if Defs.SIMPLE_MODE:
+				hud.call("next_vehicle", slot)  # no menu: X just swaps to the next toy vehicle
+			else:
+				hud.call("open_vehicle_menu", slot)
 
 
 # --- Pause ---------------------------------------------------------------------------------------
@@ -852,6 +993,8 @@ func _process(delta: float) -> void:
 	if flat != null:
 		flat.call("tick", delta, is_play)
 	hud.call("tick", delta)
+	if ghost_hand != null:
+		ghost_hand.call("update_demo", delta)
 	_slow_t -= delta
 	if _slow_t <= 0.0:
 		_slow_t = 1.0
@@ -867,7 +1010,8 @@ func _process(delta: float) -> void:
 		if _phase_t > 40.0:
 			_set_phase("play")
 		return
-	events.call("tick", delta * fast, sim, jobs)
+	if not Defs.SIMPLE_MODE:
+		events.call("tick", delta * fast, sim, jobs)  # SIMPLE_MODE: no events with text banners
 	_sim_t += delta * fast
 	if _sim_t >= 1.0:
 		_sim_t -= 1.0
@@ -901,7 +1045,8 @@ func _sim_tick() -> void:
 	_publish_jobs()
 	net.state_set("hour", snappedf(hour, 0.05))
 	_check_goals(true)
-	_contextual_hints()
+	if not Defs.SIMPLE_MODE:
+		_contextual_hints()
 
 
 func _music() -> void:
@@ -939,7 +1084,8 @@ func _contextual_hints() -> void:
 func _on_sim_event(kind: String, args: Array) -> void:
 	match kind:
 		"tier":
-			_fx("tier", args)
+			if not Defs.SIMPLE_MODE:
+				_fx("tier", args)
 			fleet.call("sync_ai", sim.tier)
 		"helped":
 			events.call("helped", String(args[0]), jobs)
@@ -973,7 +1119,7 @@ func show_fx(kind: String, args: Array) -> void:
 				sfx.play_at("pop", c, -4.0, 1.2)
 				get_tree().create_timer(0.05).timeout.connect(func() -> void: view.call("plonk", int(args[0])))
 				for slot in party.local_slots():
-					if slot >= 1:
+					if slot >= 1 and not Defs.SIMPLE_MODE:
 						hints.hint("crane_%d" % slot, "A new building! The CRANE brings bricks to build it.", {"to": slot, "icon": "plus"})
 		"painted":
 			var ci := int(args[1])
@@ -982,7 +1128,7 @@ func show_fx(kind: String, args: Array) -> void:
 		"nope":
 			if mayor != null and int(args[0]) == 0:
 				mayor.call("nope", String(args[1]))
-			if flat != null and int(args[0]) == 0:
+			if flat != null and int(args[0]) == 0 and not Defs.SIMPLE_MODE:
 				HudKit.toast(hud.call("root_of", 0), String(args[1]), {"icon": "cross", "color": "bad"})
 			sound("ui_error", -6.0)
 		"building":
@@ -997,12 +1143,15 @@ func show_fx(kind: String, args: Array) -> void:
 				var c3 := town.center_of(b3)
 				sfx.play_at("sparkle", c3, -2.0)
 				view.call("burst", c3 + Vector3(0, 0.03, 0), Color(1.0, 0.9, 0.4), 18, 1.0)
-				HudKit.toast(roots, "%s is ready!" % Defs.building_name(String(b3["kind"]), id), {"icon": "check", "color": "good"})
+				if not Defs.SIMPLE_MODE:
+					HudKit.toast(roots, "%s is ready!" % Defs.building_name(String(b3["kind"]), id), {"icon": "check", "color": "good"})
+				else:
+					sfx.play_at("clap", c3, -8.0, 1.2)
 				if mayor != null:
 					mayor.call("built", id)
 		"sale":
 			var b4 := town.buildings.get(int(args[0]), {}) as Dictionary
-			if not b4.is_empty():
+			if not b4.is_empty() and not Defs.SIMPLE_MODE:
 				HudKit.popup(self, town.center_of(b4) + Vector3(0, 0.07, 0), "+%d" % int(args[1]), {"color": "gold", "size": 0.12})
 				sfx.play_at("coin", town.center_of(b4), -12.0, 1.3)
 		"move_in":
@@ -1024,11 +1173,17 @@ func show_fx(kind: String, args: Array) -> void:
 			if not b7.is_empty():
 				var c7 := town.center_of(b7)
 				var res := String(args[1])
-				var txt := ("+%d %s" if kind == "pickup" else "%d %s DELIVERED") % [int(args[2]), String(Defs.RES_NAMES.get(res, res.to_upper()))]
-				HudKit.popup(self, c7 + Vector3(0, 0.08, 0), txt, {"color": Defs.RES_COLORS.get(res, Color.WHITE), "size": 0.1})
+				if not Defs.SIMPLE_MODE:
+					var txt := ("+%d %s" if kind == "pickup" else "%d %s DELIVERED") % [int(args[2]), String(Defs.RES_NAMES.get(res, res.to_upper()))]
+					HudKit.popup(self, c7 + Vector3(0, 0.08, 0), txt, {"color": Defs.RES_COLORS.get(res, Color.WHITE), "size": 0.1})
 				sfx.play_at("pickup" if kind == "pickup" else "kaching", c7, -3.0)
+				if kind == "pickup" and Defs.SIMPLE_MODE:
+					view.call("burst", c7 + Vector3(0, 0.03, 0), Defs.RES_COLORS.get(res, Color.WHITE), 8, 0.6)
 				if kind == "dropoff":
-					view.call("burst", c7 + Vector3(0, 0.03, 0), Defs.RES_COLORS.get(res, Color.WHITE), 12, 0.8)
+					var big := Defs.SIMPLE_MODE and vid >= 1 and vid < 100
+					view.call("burst", c7 + Vector3(0, 0.03, 0), Defs.RES_COLORS.get(res, Color.WHITE), 22 if big else 12, 1.2 if big else 0.8)
+					if big:
+						sfx.play_at("clap", c7, -4.0)
 			if vid >= 1 and vid < 100 and party.is_local(vid):
 				party.rumble(vid, 0.3, 0.0, 0.12)
 		"fire_out", "helped", "visited":
@@ -1038,7 +1193,9 @@ func show_fx(kind: String, args: Array) -> void:
 			sfx.play_at("splash" if kind == "fire_out" else ("cheer" if kind == "helped" else "ding"), at2, -3.0)
 			view.call("burst", at2 + Vector3(0, 0.04, 0), Color(0.5, 0.85, 1.0) if kind == "fire_out" else Color(1.0, 0.9, 0.4), 14, 0.9)
 			view.call("mark_dirty")
-			if kind == "fire_out":
+			if Defs.SIMPLE_MODE:
+				pass
+			elif kind == "fire_out":
 				HudKit.toast(roots, "Fire out! Hooray for the fire engine!", {"icon": "drop", "color": "info"})
 			elif kind == "helped":
 				HudKit.toast(roots, "Great help, %s!" % party.name_of(vid2) if vid2 < 100 else "The police car helped out!", {"icon": "star", "color": "good"})
@@ -1062,6 +1219,25 @@ func show_fx(kind: String, args: Array) -> void:
 			view.call("fireworks", 4)
 		"train":
 			sfx.play("whistle", -6.0)
+		"unlock":
+			# SIMPLE_MODE: a new block sparkles into the tray (no tier names, no words)
+			view.call("fireworks", 3)
+			sfx.play("sparkle", -2.0)
+			sfx.play("reveal", -8.0)
+			if mayor != null:
+				mayor.call("unlocked", String(args[0]))
+				vr_rig.pulse(VrRig.RIGHT, 0.5, 0.2)
+			if flat != null:
+				flat.call("select", String(args[0]))
+		"practice":
+			# a practice step done: a happy sparkle where it happened
+			sfx.play("correct", -4.0)
+			if int(args[0]) >= 2:
+				sfx.play("party_horn", -6.0)
+				view.call("fireworks", 4)
+		"prop":
+			if props != null and args.size() >= 2:
+				props.call("react", String(args[0]), int(args[1]))
 		"event":
 			var ek := String(args[0])
 			var title := String(EventsScript.NAMES.get(ek, ek.to_upper()))

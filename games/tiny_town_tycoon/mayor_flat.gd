@@ -56,12 +56,23 @@ func setup(p_main: Node, p_town: Town, p_cam: Camera3D) -> void:
 	_cam_pos = Defs.CENTER + Vector3(0, 0.6, 0.6)
 
 
+## The blocks this mayor can cycle through (SIMPLE_MODE: only the unlocked ones, no bulldozer).
+func _tray() -> Array[String]:
+	if not Defs.SIMPLE_MODE:
+		return Defs.TRAY
+	var out: Array[String] = []
+	for i in clampi(int(main.net.state_get("unl", 2)), 2, Defs.SIMPLE_TRAY.size()):
+		out.append(Defs.SIMPLE_TRAY[i])
+	return out
+
+
 func kind() -> String:
-	return Defs.TRAY[clampi(pick, 0, Defs.TRAY.size() - 1)]
+	var tray := _tray()
+	return tray[clampi(pick, 0, tray.size() - 1)]
 
 
 func select(k: String) -> void:
-	var i := Defs.TRAY.find(k)
+	var i := _tray().find(k)
 	if i >= 0:
 		pick = i
 		manual = false
@@ -106,14 +117,14 @@ func _input_tick(delta: float) -> void:
 	cam_yaw -= look.x * 1.8 * delta
 	cam_dist = clampf(cam_dist + look.y * 0.6 * delta, 0.35, 1.4)
 	if party.just_pressed(SLOT, "rb"):
-		pick = posmod(pick + 1, Defs.TRAY.size())
+		pick = posmod(pick + 1, _tray().size())
 		manual = false
 		main.sound("ui_move", -6.0)
 	if party.just_pressed(SLOT, "lb"):
-		pick = posmod(pick - 1, Defs.TRAY.size())
+		pick = posmod(pick - 1, _tray().size())
 		manual = false
 		main.sound("ui_move", -6.0)
-	if party.just_pressed(SLOT, "back"):
+	if party.just_pressed(SLOT, "back") and not Defs.SIMPLE_MODE:
 		if kind() == "bulldozer":
 			pick = _prev_pick
 		else:
@@ -124,7 +135,7 @@ func _input_tick(delta: float) -> void:
 		manual = true
 		rot = posmod(rot + 1, 4)
 		main.sound("ui_tick", -6.0)
-	if party.just_pressed(SLOT, "select"):
+	if party.just_pressed(SLOT, "select") and not Defs.SIMPLE_MODE:
 		main.net.request(SLOT, "menu")
 	var k := kind()
 	var c := cell()

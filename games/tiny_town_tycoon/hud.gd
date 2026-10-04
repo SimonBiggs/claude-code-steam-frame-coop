@@ -6,6 +6,8 @@ extends Node
 ## - the flat mayor (local play, slot 0): the picked building, its price and what's under the cursor
 ## - menus: island select (title card), vehicle pick per driver
 ## - the TV machine also draws the VR mayor's held piece as a ghost on the board.
+## SIMPLE_MODE: no numbers, no goals, no words on the job card (just the arrow; the glowing ring in the
+## world shows where), no vehicle menu (each driver gets the next free toy vehicle, X swaps it).
 
 const Defs := preload("res://games/tiny_town_tycoon/defs.gd")
 const Art := preload("res://games/tiny_town_tycoon/art.gd")
@@ -59,6 +61,7 @@ func make_view(slot: int, parent: Control) -> void:
 	var card := UiKit.panel("card")
 	ui.add_child(card)
 	card.position = Vector2(20.0, 16.0)
+	card.visible = not Defs.SIMPLE_MODE
 	var row := UiKit.hbox()
 	card.add_child(row)
 	if slot >= 0:
@@ -92,7 +95,7 @@ func make_view(slot: int, parent: Control) -> void:
 		_make_piece_card(ui, v)
 	else:
 		var jp := UiKit.panel("pill")
-		jp.add_child(UiKit.prompts([["A", "Join and drive a vehicle"]]))
+		jp.add_child(UiKit.prompts([["A", "Join" if Defs.SIMPLE_MODE else "Join and drive a vehicle"]]))
 		ui.add_child(jp)
 		jp.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
 		jp.grow_horizontal = Control.GROW_DIRECTION_BOTH
@@ -122,6 +125,7 @@ func _make_job_card(ui: Control, v: Dictionary) -> void:
 	arrow.pivot_offset = Vector2(30.0, 30.0)
 	var col := UiKit.vbox(2)
 	row.add_child(col)
+	col.visible = not Defs.SIMPLE_MODE  # SIMPLE_MODE: just the arrow
 	var title := UiKit.label("", "heading", "gold")
 	col.add_child(title)
 	var line := UiKit.label("", "body")
@@ -149,7 +153,13 @@ func _make_piece_card(ui: Control, v: Dictionary) -> void:
 	col.add_child(line)
 	var info := UiKit.label("", "small", "info", HORIZONTAL_ALIGNMENT_CENTER)
 	col.add_child(info)
-	col.add_child(UiKit.prompts([["LB", ""], ["RB", "Pick"], ["A", "Build"], ["X", "Turn"], ["B", "Bulldozer"], ["SELECT", "Islands"]]))
+	if Defs.SIMPLE_MODE:
+		title.visible = false  # the ghost on the cursor shows the block: one line of buttons only
+		line.visible = false
+		info.visible = false
+		col.add_child(UiKit.prompts([["LB", ""], ["RB", "Pick"], ["A", "Build"]]))
+	else:
+		col.add_child(UiKit.prompts([["LB", ""], ["RB", "Pick"], ["A", "Build"], ["X", "Turn"], ["B", "Bulldozer"], ["SELECT", "Islands"]]))
 	v["piece"] = pc
 	v["piece_title"] = title
 	v["piece_line"] = line
@@ -222,7 +232,7 @@ func _fill_goals(v: Dictionary, goals: Array) -> void:
 		row.add_child(UiKit.icon("check" if done else "star", "good" if done else "dim", 22.0))
 		var txt := String(ga[0]) if done else "%s  %d/%d" % [String(ga[0]), int(ga[1]), int(ga[2])]
 		row.add_child(UiKit.label(txt, "small", "good" if done else null))
-	(v["goals_card"] as Control).visible = true
+	(v["goals_card"] as Control).visible = not Defs.SIMPLE_MODE
 
 
 ## Every frame: job cards and their arrows, the flat mayor's card, open menus.
@@ -245,7 +255,11 @@ func tick(delta: float) -> void:
 				continue
 			_no_veh_t[slot] = float(_no_veh_t.get(slot, 0.0)) + delta
 			if float(_no_veh_t[slot]) > 0.8 and not vehicle_menus.has(slot) and main.phase() == "play":
-				open_vehicle_menu(slot)
+				if Defs.SIMPLE_MODE:
+					main.net.request(slot, "vehicle", [_free_vehicle(slot, "")])
+					_no_veh_t[slot] = -1.5  # asks again in a moment if it hasn't arrived
+				else:
+					open_vehicle_menu(slot)
 
 
 func _tick_job(slot: int, v: Dictionary) -> void:
@@ -380,6 +394,31 @@ func _ensure_select_menu() -> void:
 	m.chosen.connect(func(id: String, _item: Dictionary) -> void: main.net.request(slot, "pick_island", [int(id)]))
 	m.focus_changed.connect(func(id: String, _item: Dictionary) -> void: main.net.request(slot, "preview", [int(id)]))
 	select_menu = m
+
+
+## SIMPLE_MODE: the next toy vehicle nobody else is driving (the crane first: it builds).
+func _free_vehicle(slot: int, after: String) -> String:
+	var taken := {}
+	for s in main.party.active_slots():
+		var k := String(main.net.state_get("veh%d" % s, ""))
+		if k != "" and s != slot:
+			taken[k] = true
+	var order: Array[String] = ["crane", "truck", "bus", "fire", "police"]
+	var start := order.find(after) + 1
+	for i in order.size():
+		var k2: String = order[(start + i) % order.size()]
+		if not taken.has(k2) and k2 != after:
+			return k2
+	return order[start % order.size()]
+
+
+## SIMPLE_MODE: X swaps to the next toy vehicle (no menu).
+func next_vehicle(slot: int) -> void:
+	var mine := String(main.net.state_get("veh%d" % slot, ""))
+	if mine == "":
+		return
+	main.net.request(slot, "vehicle", [_free_vehicle(slot, mine)])
+	main.sound("ui_toggle", -6.0)
 
 
 func open_vehicle_menu(slot: int) -> void:
