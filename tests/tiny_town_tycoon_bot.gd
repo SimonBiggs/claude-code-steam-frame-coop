@@ -74,6 +74,16 @@ func _ready() -> void:
 		kit.at(30.0, "a small fire breaks out", func() -> void:
 			kit.assert_true(main.debug_event("fire"), "a fire started"))
 		kit.at(20.0, "a festival (if there's a park)", func() -> void: main.debug_event("festival"))
+	if not client:
+		kit.at(42.0, "the island's goals are all done (forced): results", func() -> void:
+			for k in main.goals_done.size():
+				main.goals_done[k] = true
+			main._complete_island())
+		kit.at(48.0, "back to the town after the results?", func() -> void:
+			kit.assert_true(saw_results, "the island-complete results showed")
+			kit.assert_eq(String(main.phase()), "play", "Continue goes back to the town"))
+	if not host:
+		kit.at(16.0, "a driver honks (A)", func() -> void: _press_driver("accept"))
 	if client:
 		kit.at(52.0, "finish", func() -> void:
 			_checks()
@@ -132,6 +142,7 @@ func _menus() -> String:
 		if not saw_results:
 			saw_results = true
 			kit.assert_true(main.split == null or main.results_ui != null, "the island-complete results show on the TV")
+			kit.assert_true(main.vr_rig == null or main.vr_results != null, "the results card shows in VR")
 		_press_any("accept")
 		if main.vr_rig != null:
 			kit.vr_trigger(main.vr_rig, 1.0)
@@ -266,6 +277,8 @@ func _vr_mayor(delta: float) -> void:
 	var mayor = main.mayor
 	rig.camera.position = Vector3(0.0, 1.6, 0.0)
 	rig.camera.basis = Basis()
+	if touched or placed < 6:
+		rig.hand_l.position = Vector3(-0.45, 0.7, 0.25)  # resting by the side, away from the right hand's work
 	# turn the table a little at the start, and back
 	orbit_t += delta
 	if orbit_t < 1.0:
