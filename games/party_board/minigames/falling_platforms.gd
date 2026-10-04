@@ -239,7 +239,9 @@ func _process(delta: float) -> void:
 func cpu_move(pid: int) -> Vector3:
 	var me := where(pid)
 	var here := stone_under(me)
-	var hs := giant_hands() if host else []
+	var hs: Array[Vector3] = []
+	if host:
+		hs = giant_hands()
 	var best := here
 	var bs := -INF
 	for i in stones.size():

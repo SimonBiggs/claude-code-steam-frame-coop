@@ -66,7 +66,7 @@ func begin() -> void:
 	net.state_set("vr", main.vr_rig != null)
 	net.state_set("saved", {"parties": int(main.save.data["parties"]), "giant_wins": int(main.save.data["giant_wins"]),
 		"best_stars": int(main.save.data["best_stars"])})
-	for k in ["menu", "dice", "branch", "duel", "mg", "mg_phase", "mg_result", "ceremony", "results", "final", "steps_left"]:
+	for k in ["menu", "dice", "branch", "duel", "mg", "mg_phase", "mg_result", "ceremony", "results", "final", "steps_left", "winners"]:
 		net.state_set(k, null)
 	net.state_set("cur", -1)
 	net.state_set("step", "")

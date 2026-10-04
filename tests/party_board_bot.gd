@@ -111,12 +111,24 @@ func _watch() -> String:
 		_star_rigged = true
 		main.flow.bot_star_ahead(int(main.net.state_get("cur", 0)))
 	if phase == "results" and _finish_at < 0.0:
-		_finish_at = kit.t + (6.0 if host else 4.0)
+		_finish_at = kit.t + (6.0 if host else 5.0)
 		kit.info("results are up")
-	if _finish_at > 0.0 and kit.t >= _finish_at:
-		_finish_at = 1e9
+	if _finish_at > 0.0 and kit.t >= _finish_at and _finish_at < 1e8:
 		_checks()
-		kit.finish()
+		if main.net.mode == "local":
+			# PLAY AGAIN from the results screen goes back to the title / setup menu.
+			_finish_at = 2e9
+			var seats: Array[int] = main.party.local_slots()
+			if main.ceremony.results_ui != null and not seats.is_empty():
+				kit.slot_press(main.party, seats[0], "accept")
+			else:
+				main.net.request(0, "again", [])
+			kit.at(kit.t + 3.0, "back at the title?", func() -> void:
+				kit.assert_eq(String(main.net.state_get("phase", "")), "title", "PLAY AGAIN goes back to the title")
+				kit.finish())
+		else:
+			_finish_at = 1e9
+			kit.finish()
 	return ""
 
 

@@ -451,7 +451,7 @@ func _update_camera(delta: float) -> void:
 		_cam_orbit += delta * 0.12
 		var r := 26.0
 		cam_look(Vector3(sin(_cam_orbit) * r, 17.0, -cos(_cam_orbit) * r), Vector3(0, 1.0, 0), 1.0)
-	elif phase == "board" or phase == "intro":
+	elif phase == "board" or phase == "intro" or phase == "ceremony":
 		var cur := int(net.state_get("cur", -1))
 		if cur >= 0 and tokens.has(cur):
 			var t: TokenScript = tokens[cur]
