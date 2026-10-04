@@ -420,7 +420,7 @@ func popup(pos: Vector3, text: String, color: Color, broadcast: bool = true, siz
 	l.pixel_size = 0.006 * size
 	l.outline_size = 16
 	l.modulate = color
-	l.no_depth_test = true
+	l.no_depth_test = false
 	l.render_priority = 5
 	add_child(l)
 	l.global_position = pos
@@ -2542,12 +2542,13 @@ func _update_vr_text() -> void:
 		vr_center.font_size = 44
 		vr_center.outline_size = 26
 		vr_center.pixel_size = 0.0022
-		vr_center.no_depth_test = true
+		vr_center.no_depth_test = false
 		vr_center.render_priority = 10
 		vr_center.outline_render_priority = 9
 		vr_center.width = 1100.0
 		vr_center.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		add_child(vr_center)
+	vr_center.no_depth_test = false  # nearer things (rod, bobber) must pass in front of the text
 	vr_center.text = center_label.text
 	vr_center.modulate.a = center_label.modulate.a
 	vr_center.outline_modulate = Color(0, 0, 0, center_label.modulate.a)
@@ -2558,12 +2559,13 @@ func _update_vr_text() -> void:
 		vr_hint.font_size = 40
 		vr_hint.outline_size = 22
 		vr_hint.pixel_size = 0.002
-		vr_hint.no_depth_test = true
+		vr_hint.no_depth_test = false
 		vr_hint.render_priority = 8
 		vr_hint.outline_render_priority = 7
 		vr_hint.width = 900.0
 		vr_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		add_child(vr_hint)
+	vr_hint.no_depth_test = false
 	var ls: String = a.line_state
 	var show_panel := state == "play" and (ls == "ready" or ls == "landing") and center_label.modulate.a < 0.05
 	vr_hint.visible = show_panel

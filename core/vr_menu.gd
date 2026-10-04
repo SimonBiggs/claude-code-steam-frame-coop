@@ -343,7 +343,7 @@ func _glow_material(c: Color) -> StandardMaterial3D:
 		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		m.albedo_color = Color(c.r, c.g, c.b, 0.85)
 		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		m.no_depth_test = true
+		m.no_depth_test = false
 		m.render_priority = UiKit.VR_PRIO_TEXT + 1
 		return m)
 

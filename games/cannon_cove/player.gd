@@ -203,7 +203,7 @@ func _ready() -> void:
 	var tag := Label3D.new()
 	tag.text = "P%d" % (index + 1) if not gunner else "P1 GUNNER"
 	tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	tag.no_depth_test = true
+	tag.no_depth_test = false
 	tag.fixed_size = true
 	tag.pixel_size = 0.0012
 	tag.font_size = 28
@@ -316,7 +316,7 @@ func attach_xr(origin: XROrigin3D, cam: XRCamera3D, left: XRController3D, right:
 	wrist_label.modulate = Color(1.0, 0.9, 0.6)
 	wrist_label.position = Vector3(0.0, 0.06, 0.12)
 	wrist_label.rotation_degrees = Vector3(-55, 0, 0)
-	wrist_label.no_depth_test = true
+	wrist_label.no_depth_test = false
 	hand_r.add_child(wrist_label)
 	_set_layers(wrist_label, viewmodel_layer())
 	set_station(station)
@@ -727,7 +727,7 @@ func _draw_reach_line(handle: Vector3) -> void:
 		var m := StandardMaterial3D.new()
 		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		m.albedo_color = Color(1.0, 0.85, 0.3)
-		m.no_depth_test = true
+		m.no_depth_test = false
 		reach_line.material_override = m
 		add_child(reach_line)
 		_set_layers(reach_line, viewmodel_layer())

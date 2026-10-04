@@ -407,7 +407,7 @@ func popup(pos: Vector3, text: String, color: Color) -> void:
 	l.outline_size = 26
 	l.pixel_size = 0.008
 	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	l.no_depth_test = true
+	l.no_depth_test = false
 	add_child(l)
 	l.global_position = pos
 	var t := l.create_tween().set_parallel()
@@ -2723,7 +2723,7 @@ func _update_vr_center() -> void:
 		vr_center = Label3D.new()
 		vr_center.font_size = 48
 		vr_center.outline_size = 26
-		vr_center.no_depth_test = true
+		vr_center.no_depth_test = false
 		vr_center.render_priority = 10
 		vr_center.outline_render_priority = 9
 		vr_center.width = 900.0
@@ -2740,7 +2740,7 @@ func _update_vr_center() -> void:
 		vr_hint = Label3D.new()
 		vr_hint.font_size = 40
 		vr_hint.outline_size = 22
-		vr_hint.no_depth_test = true
+		vr_hint.no_depth_test = false
 		vr_hint.render_priority = 10
 		vr_hint.outline_render_priority = 9
 		vr_hint.width = 800.0

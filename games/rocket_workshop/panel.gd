@@ -152,7 +152,7 @@ func set_top(h: float) -> void:
 		wb.rotation.y = yaw
 	if screen != null:
 		screen.pixel_size = 0.0026  # big and clear from the pilot's spot
-		screen.no_depth_test = true
+		screen.no_depth_test = false
 		screen.render_priority = 5
 
 

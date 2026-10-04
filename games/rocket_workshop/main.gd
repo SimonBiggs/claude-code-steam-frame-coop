@@ -524,7 +524,7 @@ func popup(pos: Vector3, text: String, color: Color, broadcast: bool = true) -> 
 	l.font_size = 64
 	l.outline_size = 18
 	l.pixel_size = 0.008
-	l.no_depth_test = true
+	l.no_depth_test = false
 	l.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(l)
 	l.global_position = pos
@@ -2126,7 +2126,7 @@ func _update_vr_center() -> void:
 		vr_center = Label3D.new()
 		vr_center.font_size = 46
 		vr_center.outline_size = 26
-		vr_center.no_depth_test = true
+		vr_center.no_depth_test = false
 		vr_center.render_priority = 10
 		vr_center.outline_render_priority = 9
 		vr_center.width = 1000.0

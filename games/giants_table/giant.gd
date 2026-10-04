@@ -107,7 +107,7 @@ func setup_vr(origin: XROrigin3D, cam: XRCamera3D, left: XRController3D, right: 
 	wrist_label.outline_size = 26
 	wrist_label.outline_modulate = Color.BLACK
 	wrist_label.modulate = Color(1.0, 0.92, 0.7)
-	wrist_label.no_depth_test = true
+	wrist_label.no_depth_test = false
 	wrist_label.render_priority = 5
 	wrist_label.position = Vector3(0.0, 0.9, 1.4)
 	wrist_label.rotation_degrees = Vector3(-50, 0, 0)

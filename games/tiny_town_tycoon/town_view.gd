@@ -596,7 +596,7 @@ func _icon_mesh(ic: String) -> ArrayMesh:
 		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 		mat.billboard_keep_scale = true
-		mat.no_depth_test = true
+		mat.no_depth_test = false
 		mat.render_priority = 3
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		return b.build(mat)) as ArrayMesh

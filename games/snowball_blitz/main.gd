@@ -305,7 +305,7 @@ func popup(pos: Vector3, text: String, color: Color) -> void:
 	l.outline_size = 16
 	l.pixel_size = 0.007
 	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	l.no_depth_test = true
+	l.no_depth_test = false
 	l.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(l)
 	l.global_position = pos
@@ -1899,7 +1899,7 @@ func _update_vr_center() -> void:
 		vr_center = Label3D.new()
 		vr_center.font_size = 48
 		vr_center.outline_size = 26
-		vr_center.no_depth_test = true
+		vr_center.no_depth_test = false
 		vr_center.render_priority = 10
 		vr_center.outline_render_priority = 9
 		vr_center.width = 900.0
@@ -1936,7 +1936,7 @@ func _update_vr_hurt(delta: float) -> void:
 		vr_hurt_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		vr_hurt_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		vr_hurt_mat.cull_mode = BaseMaterial3D.CULL_FRONT
-		vr_hurt_mat.no_depth_test = true
+		vr_hurt_mat.no_depth_test = false
 		vr_hurt_mat.render_priority = 20
 		vr_hurt_mat.albedo_color = Color(0.7, 0.9, 1.0, 0.0)
 		shell.material_override = vr_hurt_mat

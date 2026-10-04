@@ -545,7 +545,7 @@ func _wrist_button(hl: XRController3D) -> Label3D:
 		btn.font_size = 40
 		btn.outline_size = 18
 		btn.pixel_size = 0.0012
-		btn.no_depth_test = true
+		btn.no_depth_test = false
 		btn.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 		btn.process_mode = Node.PROCESS_MODE_ALWAYS
 		hl.add_child(btn)

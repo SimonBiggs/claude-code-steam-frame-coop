@@ -156,7 +156,7 @@ func _ready() -> void:
 	tag = Label3D.new()
 	tag.text = "P%d" % (index + 1)
 	tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	tag.no_depth_test = true
+	tag.no_depth_test = false
 	tag.fixed_size = true
 	tag.pixel_size = 0.0012
 	tag.font_size = 28
@@ -370,7 +370,7 @@ func attach_xr(origin: XROrigin3D, cam: XRCamera3D, left: XRController3D, right:
 	bm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	bm.albedo_color = Color(0.03, 0.02, 0.06, 0.97)
 	bm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	bm.no_depth_test = true
+	bm.no_depth_test = false
 	bm.render_priority = -10
 	blindfold.material_override = bm
 	blindfold.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

@@ -380,7 +380,7 @@ func _update_icon() -> void:
 		icon.pixel_size = 0.012
 		icon.outline_size = 24
 		icon.modulate = Color(1.0, 0.9, 0.2)
-		icon.no_depth_test = true
+		icon.no_depth_test = false
 		icon.render_priority = 4
 		add_child(icon)
 	if icon != null:

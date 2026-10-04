@@ -2414,7 +2414,7 @@ func _update_vr_text(_dt: float) -> void:
 		vr_center.font_size = 40
 		vr_center.outline_size = 26
 		vr_center.pixel_size = 0.0022
-		vr_center.no_depth_test = true
+		vr_center.no_depth_test = false
 		vr_center.render_priority = 10
 		vr_center.outline_render_priority = 9
 		vr_center.width = 1200.0
