@@ -272,6 +272,7 @@ func _build_rod(parent: Node3D) -> void:
 	meter_bg.mesh = main.box_mesh(Vector3(0.022, 0.012, 0.34))
 	meter_bg.material_override = main.make_material(Color(0.1, 0.1, 0.12), 0.0)
 	meter_bg.position = Vector3(0, 0.026, -0.42)
+	meter_bg.visible = not main.SIMPLE_MODE  # simple mode: no tension meter (the line never snaps)
 	rod_root.add_child(meter_bg)
 	meter_fill = MeshInstance3D.new()
 	meter_fill.mesh = main.box_mesh(Vector3(0.026, 0.014, 0.34))
@@ -753,7 +754,7 @@ func _fish(delta: float) -> void:
 			bob = 1.0
 			if reel > 0.3 or yank:
 				_hook()
-			elif line_t > BITE_WINDOW:
+			elif line_t > BITE_WINDOW * (1.7 if main.SIMPLE_MODE else 1.0):
 				_set_line("waiting")
 				nibbling = false
 				wait_t = 0.0
@@ -902,10 +903,10 @@ func _fight(delta: float) -> void:
 				main.legend_tire(0.07, 0)
 	if legend:
 		if not surge and reel > 0.3 and tension > 0.25 and tension < 1.0:
-			main.legend_tire(delta * 0.035, 0)
+			main.legend_tire(delta * (0.06 if main.SIMPLE_MODE else 0.035), 0)
 		if main.legend_stamina > 0.0:
 			fight_dist = maxf(fight_dist, 6.0)  # too strong to reel in until he's tired
-	if tension > 1.0:
+	if tension > 1.0 and not main.SIMPLE_MODE:  # simple mode: the line never snaps
 		over_t += delta
 		if over_t > SNAP_TIME * (1.8 if legend else 1.0):
 			_snap()
@@ -1018,7 +1019,7 @@ func _update_visuals(delta: float) -> void:
 		rod_bend.rotation.x = -bend * 0.6
 	if meter_fill != null:
 		var tv := clampf(tension, 0.0, 1.2)
-		meter_fill.visible = line_state == "fight" or tv > 0.05
+		meter_fill.visible = (line_state == "fight" or tv > 0.05) and not main.SIMPLE_MODE
 		meter_fill.scale = Vector3(1.0, 1.0, maxf(0.02, tv / 1.2))
 		meter_fill.position = Vector3(0, 0.03, -0.25 - 0.17 * meter_fill.scale.z)
 		meter_fill.material_override = meter_mats[0 if tv < 0.6 else (1 if tv < 0.88 else 2)]
@@ -1029,9 +1030,17 @@ func _update_visuals(delta: float) -> void:
 	if reel_crank != null:
 		reel_crank.rotation.x = -reel_spin
 	if rod_label != null:
-		rod_label.visible = false  # VR hints float above the bobber instead (main.gd)
-		rod_label.text = hint
-		rod_label.modulate = hint_col
+		if main.SIMPLE_MODE:
+			# The one number the angler needs, on the rod they are holding: fish caught today.
+			rod_label.visible = vr_like() and main.state != "over"
+			var txt := "FISH %d" % main.fish_caught()
+			if rod_label.text != txt:
+				rod_label.text = txt
+				rod_label.modulate = Color(1.0, 0.92, 0.5)
+		else:
+			rod_label.visible = false  # VR hints float above the bobber instead (main.gd)
+			rod_label.text = hint
+			rod_label.modulate = hint_col
 	# Bobber and line.
 	var t := Time.get_ticks_msec() / 1000.0
 	var wave := sin(t * 2.0 + lure_pos.x) * 0.02
