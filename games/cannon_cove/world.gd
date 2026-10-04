@@ -574,6 +574,7 @@ static func _build_ship(main: Node3D, out: Dictionary) -> void:
 	pile_sign.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
 	pile_sign.position = HOLD_POS + Vector3(0, 2.0, 0)
 	ship.add_child(pile_sign)
+	out["pile_sign"] = pile_sign
 	# Barrels (stern corners and bow) and coils of rope by the masts.
 	var barrel_x: Array = []
 	for bp in [Vector3(-3.25, 0, 8.55), Vector3(-2.75, 0, 9.15), Vector3(-3.3, 0.8, 8.85), Vector3(3.25, 0, 8.55),

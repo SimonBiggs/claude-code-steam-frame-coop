@@ -1,6 +1,8 @@
 extends Control
 ## One TV player's HUD: crosshair with a charge ring, warmth bar, frosty hurt vignette,
 ## repair prompt and a little fort map (wall health, snowmen, friends, cocoa).
+## Simple mode (main.simple): just the crosshair, the hit marker, the frosty splat and which way it came
+## from, the player's "P2" in their colour, and during practice one line ("PRESS RT!") until they throw.
 
 const MAP_RANGE := 22.0
 const MAP_SIZE := 92.0
@@ -88,6 +90,10 @@ func _process(delta: float) -> void:
 	damage_marks = damage_marks.filter(func(m): return m[1] > 0.0)
 	name_label.position = Vector2(28, size.y - 92)
 	bar.position = Vector2(28, size.y - 52)
+	if main.simple:
+		_simple_text()
+		queue_redraw()
+		return
 	bar.value = player.hp
 	name_label.text = "P%d  WARMTH%s" % [player.index + 1, "      * MEGA SNOWBALL READY - throw it!" if player.mega else ""]
 	var text := ""
@@ -104,6 +110,24 @@ func _process(delta: float) -> void:
 	prompt.size = Vector2(size.x, 100)
 	prompt.position = Vector2(0, size.y * 0.62)
 	queue_redraw()
+
+
+func _simple_text() -> void:
+	bar.visible = false
+	name_label.text = "P%d" % (player.index + 1)
+	var text := ""
+	if player.joy < 0 and not player.has_keyboard():
+		text = "PLUG IN!"
+	elif main.practice and player.tv_throws == 0:
+		if player.joy >= 0:
+			text = "PRESS RT!"
+		elif player.mouse_look:
+			text = "CLICK!"
+		else:
+			text = "PRESS ENTER!" if player.keys() == 1 else "PRESS SPACE!"
+	prompt.text = text
+	prompt.size = Vector2(size.x, 100)
+	prompt.position = Vector2(0, size.y * 0.62)
 
 
 func _draw() -> void:
@@ -132,7 +156,8 @@ func _draw() -> void:
 			var hc := Color(1.0, 0.85, 0.4, hit_flash)
 			for d in [Vector2(1, 1), Vector2(-1, 1), Vector2(1, -1), Vector2(-1, -1)]:
 				draw_line(c + d * 12.0, c + d * 22.0, hc, 3.0)
-	_draw_map(Vector2(size.x - MAP_SIZE - 30.0, size.y - MAP_SIZE - 30.0), MAP_SIZE)
+	if not main.simple:
+		_draw_map(Vector2(size.x - MAP_SIZE - 30.0, size.y - MAP_SIZE - 30.0), MAP_SIZE)
 
 
 ## Top-down fort map, forward is up.

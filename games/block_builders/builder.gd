@@ -415,6 +415,13 @@ func _vr_update(delta: float) -> void:
 		trig_was = true
 	elif trig_up:
 		trig_was = false
+	# SIMPLE_MODE toys (props.gd): the trigger near a toy block grabs it (unless a tray block is closer).
+	if held_kind == "" and main.props != null and (main.props.held >= 0 or not _near_tray_slot()) and main.props.vr_hand(grab_point, trig, pressed, delta):
+		show_target = false
+		hover_slot = -1
+		hover_block = false
+		_update_tray(delta)
+		return
 	if main.state != "play":
 		if held_kind != "":
 			_return_held()
@@ -477,6 +484,13 @@ func _vr_update(delta: float) -> void:
 			else:
 				_return_held()
 	_update_tray(delta)
+
+
+func _near_tray_slot() -> bool:
+	for i in Art.KINDS.size():
+		if slot_on[i] and grab_point.distance_to(slot_world(i)) < TRAY_GRAB:
+			return true
+	return false
 
 
 func _nearest_block(p: Vector3):
@@ -636,6 +650,16 @@ func _flat_update(delta: float) -> void:
 			main.confirm()
 		_flat_camera(delta)
 		return
+	if main.simple and not bot and int(main.budget.get(Art.KINDS[sel], 0)) <= 0:
+		# SIMPLE_MODE: no "pick a block" text: switch to the glowing hint's block (or any that's left).
+		var want: int = int(main.hint[0]) if main.hint.size() >= 3 else -1
+		if want < 0 or int(main.budget.get(Art.KINDS[want], 0)) <= 0:
+			for n in Art.KINDS.size():
+				if int(main.budget.get(Art.KINDS[n], 0)) > 0:
+					want = n
+					break
+		if want >= 0:
+			sel = want
 	if kind_step != 0:
 		for n in Art.KINDS.size():
 			sel = (sel + kind_step + Art.KINDS.size()) % Art.KINDS.size()

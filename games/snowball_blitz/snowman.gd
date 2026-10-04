@@ -14,6 +14,8 @@ const KINDS := {
 	"bunny": {"hp": 1.0, "speed": 3.4, "scale": 0.55, "wall_dps": 4.0, "points": 80, "cocoa": 0.04},
 	"balloon": {"hp": 2.0, "speed": 1.5, "scale": 0.9, "wall_dps": 6.0, "points": 250, "cocoa": 0.15, "balloons": 3},
 	"shield": {"hp": 4.0, "speed": 1.45, "scale": 1.1, "wall_dps": 8.0, "points": 300, "cocoa": 0.2, "shield": 3},
+	# Simple mode's practice snowman: stands still, glows, one hit knocks it over.
+	"target": {"hp": 1.0, "speed": 0.0, "scale": 0.85, "points": 0, "cocoa": 0.0},
 	"yeti": {"hp": 110.0, "speed": 0.8, "scale": 2.2, "wall_dps": 20.0, "throw_cd": 4.2, "ball_dmg": 14.0, "ball_r": 0.42, "points": 6000, "cocoa": 1.0},
 }
 const BALLOON_COLORS: Array[Color] = [Color(1.0, 0.3, 0.35), Color(0.35, 0.7, 1.0), Color(1.0, 0.85, 0.25), Color(0.5, 1.0, 0.45)]
@@ -52,6 +54,7 @@ var arms: Array[MeshInstance3D] = []
 var blink_t := 2.0
 var stomp_t := 6.0
 var melt := 0.0  # sunshine event: shrinks a little
+var glow: Node3D  # practice target: a glowing ring and a bouncing arrow
 # Networked: ghosts on the client.
 var ghost := false
 var net_id := 0
@@ -217,6 +220,8 @@ func _build() -> void:
 		boss.material_override = main.mat("gem")
 		boss.position.z = -0.05
 		shield_node.add_child(boss)
+	if kind == "target":
+		_build_target_glow()
 	if kind == "sled":
 		var deck := BoxMesh.new()
 		deck.size = Vector3(0.9, 0.12, 1.5)
@@ -228,6 +233,37 @@ func _build() -> void:
 	for c in body.get_children():
 		if c is MeshInstance3D:
 			(c as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if s > 1.5 else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+
+
+## Practice target: a golden ring on the snow and a golden arrow bobbing over its hat ("hit me!").
+func _build_target_glow() -> void:
+	glow = Node3D.new()
+	add_child(glow)
+	var gm: StandardMaterial3D = main.make_material(Color(1.0, 0.82, 0.3), 3.0)
+	var ring := MeshInstance3D.new()
+	var tm := TorusMesh.new()
+	tm.inner_radius = 0.62
+	tm.outer_radius = 0.78
+	tm.rings = 20
+	tm.ring_segments = 4
+	ring.mesh = tm
+	ring.material_override = gm
+	ring.position.y = 0.04
+	glow.add_child(ring)
+	var arrow := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.top_radius = 0.16
+	cm.bottom_radius = 0.0
+	cm.height = 0.32
+	cm.radial_segments = 8
+	cm.rings = 1
+	arrow.mesh = cm
+	arrow.material_override = gm
+	arrow.position.y = 2.75 * s
+	arrow.name = "Arrow"
+	glow.add_child(arrow)
+	for c in glow.get_children():
+		(c as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
 
 ## The YETI: a big fluffy blue-white beast with horns, a dark face and huge eyes.
@@ -287,6 +323,14 @@ func hit_test(p: Vector3, r: float) -> bool:
 
 ## Which balloon (if any) a ball at p touches, or -1.
 func balloon_hit(p: Vector3, r: float) -> int:
+	if glow != null:
+		var k := 1.0 + 0.12 * sin(t * 5.0)
+		glow.scale = Vector3(k, 1.0, k)
+		var arrow := glow.get_node("Arrow") as Node3D
+		arrow.position.y = 2.75 * s + absf(sin(t * 3.5)) * 0.25
+		arrow.scale = Vector3.ONE / k
+		if not ghost:
+			body.rotation.z = sin(t * 2.5) * 0.06  # a cheeky wobble
 	for i in balloon_nodes.size():
 		var bn := balloon_nodes[i]
 		if bn.visible and bn.global_position.distance_to(p) < 0.3 * s + r:
@@ -349,6 +393,9 @@ func _physics_process(delta: float) -> void:
 	if main.game_over:
 		bashing = false
 		return
+	if kind == "target":
+		t += delta
+		return  # practice targets just stand there and wobble
 	t += delta
 	spawn_grace -= delta
 	throw_cd -= delta
@@ -546,6 +593,14 @@ func _process(delta: float) -> void:
 		var side: float = a.get_meta("side")
 		var wave_amt := 0.5 if bashing else 0.25 * move_amt
 		a.rotation.z = side * (0.45 + sin(t * 6.0 + side) * wave_amt)
+	if glow != null:
+		var k := 1.0 + 0.12 * sin(t * 5.0)
+		glow.scale = Vector3(k, 1.0, k)
+		var arrow := glow.get_node("Arrow") as Node3D
+		arrow.position.y = 2.75 * s + absf(sin(t * 3.5)) * 0.25
+		arrow.scale = Vector3.ONE / k
+		if not ghost:
+			body.rotation.z = sin(t * 2.5) * 0.06  # a cheeky wobble
 	for i in balloon_nodes.size():
 		var bn := balloon_nodes[i]
 		bn.rotation.z = sin(t * 1.7 + i) * 0.15

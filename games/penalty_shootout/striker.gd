@@ -6,6 +6,8 @@ extends Node3D
 ##   A (Space / left mouse; Enter for split-screen P2): a normal shot
 ##   X (C / right mouse; / for P2): a CHIP - slow and high, floats over a diving keeper
 ##   Y (F; ' for P2): a FIREBALL - the fastest shot there is, once per match
+## Simple mode (main.simple): only A (hold, let go); no curving or chips. From round 3 a FIREBALL (Y,
+## once) - a flame icon with a "Y" next to the power bar shows you have it.
 ## Score and you celebrate (jump-spin, aeroplane or a little dance); win the cup and you lift it.
 ## Local strikers run their own aim (also on the TV machine, so it's instant); the host decides the
 ## shot. On the host, the TV machine's strikers are "remote": their aim arrives via apply_remote_state.
@@ -35,6 +37,7 @@ var hud: Control
 var hud_label: Label
 var power_bg: ColorRect
 var power_fill: ColorRect
+var fire_icon: Panel
 var pad_lost_t := -1.0
 
 var aim := Vector2(0.0, 1.0)
@@ -219,6 +222,8 @@ func charge_held() -> bool:
 
 
 func chip_held() -> bool:
+	if main.simple:
+		return false
 	if bot:
 		return bot_hold and bot_shot == "chip"
 	if joy >= 0 and Input.is_joy_button_pressed(joy, JOY_BUTTON_X):
@@ -231,6 +236,8 @@ func chip_held() -> bool:
 
 
 func fire_held() -> bool:
+	if main.simple and not main.fire_on:
+		return false
 	if bot:
 		return bot_hold and bot_shot == "fire"
 	if joy >= 0 and Input.is_joy_button_pressed(joy, JOY_BUTTON_Y):
@@ -243,6 +250,8 @@ func fire_held() -> bool:
 
 
 func curve_input() -> float:
+	if main.simple:
+		return 0.0
 	if bot:
 		return bot_curve
 	var c := 0.0
@@ -444,6 +453,7 @@ func _update_power_bar() -> void:
 		return
 	var mine: bool = main.shooter == index and (main.state == "aim" or main.state == "runup") and not main.replay_on
 	power_bg.visible = mine
+	_update_fire_icon(mine)
 	if not mine:
 		return
 	var vp_size := power_bg.get_parent_control().size if power_bg.get_parent_control() != null else Vector2(800, 600)
@@ -457,5 +467,37 @@ func _update_power_bar() -> void:
 		power_fill.color = Color(1.0, 0.5, 0.1)
 	elif shot == "chip" and charging:
 		power_fill.color = Color(0.5, 0.8, 1.0)
-	if power > 0.85:
+	if power > 0.85 and not main.simple:
 		power_fill.color = Color(1.0, 0.3, 0.2)
+
+
+## Simple mode: a round flame-coloured "Y" button left of the power bar while you have your FIREBALL.
+func _update_fire_icon(mine: bool) -> void:
+	var show: bool = main.simple and main.fire_on and fire_left > 0 and mine
+	if fire_icon == null:
+		if not show:
+			return
+		fire_icon = Panel.new()
+		fire_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var sb := StyleBoxFlat.new()
+		sb.bg_color = Color(1.0, 0.45, 0.1)
+		sb.border_color = Color(1.0, 0.9, 0.3)
+		sb.set_border_width_all(4)
+		sb.set_corner_radius_all(64)
+		fire_icon.add_theme_stylebox_override("panel", sb)
+		var l: Label = main._make_label(30)
+		l.text = "Y"
+		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		fire_icon.add_child(l)
+		l.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		power_bg.get_parent().add_child(fire_icon)
+	fire_icon.visible = show
+	if not show:
+		return
+	var h := clampf(power_bg.size.y * 2.2, 40.0, 66.0)
+	fire_icon.size = Vector2(h, h)
+	fire_icon.position = power_bg.position + Vector2(-h - 14.0, (power_bg.size.y - h) * 0.5)
+	var pulse := 1.0 + 0.08 * sin(Time.get_ticks_msec() * 0.01)
+	fire_icon.pivot_offset = Vector2(h, h) * 0.5
+	fire_icon.scale = Vector2(pulse, pulse) * (1.25 if charging and shot == "fire" else 1.0)

@@ -140,7 +140,8 @@ func _on_body_entered(body: Node3D) -> void:
 		_:
 			body.spread_t = 10.0
 			label = "SPREAD SHOT!"
-	main.popup(global_position + Vector3.UP * 1.6, label, color.lightened(0.3))
+	if not main.SIMPLE_MODE:  # simple mode: the burst, the sound and the effect say it
+		main.popup(global_position + Vector3.UP * 1.6, label, color.lightened(0.3))
 	main.burst(global_position + Vector3.UP * 0.8, color, 16)
 	main.sound("pickup")
 	queue_free()

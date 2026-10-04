@@ -11,6 +11,12 @@ extends Node
 ## comet and the random event picker, checks the launch cam reaches space, then (local) runs the clock
 ## out, checks the end screen and awards, and presses Enter. The second session is left natural.
 ## BOT_COUNT=1: just count what the pilot's camera draws a few seconds in, then quit.
+## Simple mode (main.simple): no plan forcing, events or end screen. Instead the bot checks the simple
+## game ("Bot CHECK <name>: OK / FAIL"): the practice rocket (one fuel button, the real button glows, the
+## ghost hand presses it and then pulls the lever while the bot waits), one new control per rocket with
+## only its areas on the desk, a wrong press costs nothing, every toy round the pilot reacts (the TV
+## plays them too), the pilot's own blueprint shows only while nobody's on the TV, no HUD text, and
+## never a game over. It quits once 5 rockets have flown (the TV a few seconds later).
 
 const P := preload("res://games/rocket_workshop/puzzles.gd")
 const PLAN := [
@@ -36,6 +42,23 @@ var events_done := {}
 var cam_checked := false
 var join_t := 0.0
 var counted := false
+var checks := {}  # simple mode: check name -> passed
+var practice_wait := -1.0
+var lever_wait := -1.0
+var wrong_at := {}
+var props_done := false
+var seen_rockets := {}
+var quit_t := -1.0
+var crew_was := false
+var crew_t := 0.0
+
+
+## Records a check; a FAIL sticks (and prints once), an OK prints the first time.
+func _check(check_name: String, ok: bool, detail: String = "") -> void:
+	if checks.has(check_name) and (not checks[check_name] or ok):
+		return
+	checks[check_name] = ok
+	print("Bot CHECK %s: %s %s" % [check_name, "OK" if ok else "FAIL", detail])
 
 
 func _ready() -> void:
@@ -61,10 +84,13 @@ func _physics_process(delta: float) -> void:
 		_count()
 		return
 	_party(delta)
+	if main.simple:
+		_simple_checks(delta)
 	if main.net.mode != "client":
-		_force_plan()
+		if not main.simple:
+			_force_plan()
+			_events()
 		_pilot(delta)
-		_events()
 	for p in main.players:
 		if p.index > 0 and not p.remote and not p.ghost:
 			_crew(p)
@@ -185,6 +211,9 @@ func _events() -> void:
 
 func _pilot(delta: float) -> void:
 	var op = main.players[0]
+	if main.simple and steps.is_empty() and _simple_wait(delta):
+		op.bot_hand = {"pos": hand, "grip": false}
+		return
 	if steps.is_empty():
 		plan_wait -= delta
 		if plan_wait <= 0.0:
@@ -235,7 +264,11 @@ func _plan() -> void:
 		if m.done or P.is_job(m.type):
 			continue
 		var wrong := not did_wrong
-		did_wrong = true
+		if main.simple:  # simple: the practice rocket is done right; one mistake on rocket 2
+			wrong = not did_wrong and main.rocket_n == 2
+			if wrong:
+				wrong_at = {"time": main.time_left, "mistakes": main.mistakes, "t": t}
+		did_wrong = did_wrong or wrong or not main.simple
 		if (m.type == "crank" or m.type == "alien") and not wrong_types.has(m.type) and _first_session():
 			wrong_types[m.type] = true
 			wrong = true
@@ -245,6 +278,12 @@ func _plan() -> void:
 			"fuel":
 				var answer: Array = m.answer
 				var pressed: Array = m.pressed
+				if wrong and main.simple:
+					var c := 0
+					while answer.has(c):
+						c += 1
+					_tap("fuel%d" % c)
+					return
 				if wrong and pressed.is_empty():
 					var c := 0
 					while answer.count(c) == answer.size():
@@ -260,11 +299,17 @@ func _plan() -> void:
 			"wires":
 				var order: Array = m.order
 				var placed: Array = m.placed
+				if wrong and main.simple:
+					var col := 0
+					while not order.has(col):
+						col += 1
+					_drag("plug%d" % col, ["sock%d" % order.find(-1)])
+					return
 				if wrong:
 					_drag("plug%d" % int(order[0]), ["sock1"])
 					return
 				for i in order.size():
-					if int(placed[i]) < 0:
+					if int(placed[i]) < 0 and int(order[i]) >= 0:
 						_drag("plug%d" % int(order[i]), ["sock%d" % i])
 			"symbols":
 				var layout: Array = m.layout
@@ -278,6 +323,9 @@ func _plan() -> void:
 				for k in range(step, order.size()):
 					_tap("shape%d" % layout.find(order[k]))
 			"gauge":
+				if main.simple:  # no SET button: letting go of the dial checks it
+					_drag("dial", ["dial%d" % (int(m.answer) % 9 + 1 if wrong else int(m.answer))])
+					return
 				if wrong:
 					_tap("set")
 					return
@@ -292,7 +340,8 @@ func _plan() -> void:
 				for i in state.size():
 					if bool(state[i]) != bool(answer[i]):
 						_tap("sw%d" % i)
-				_tap("check")
+				if not main.simple:  # simple: the right pattern checks itself
+					_tap("check")
 			"alien":
 				var answer := int(m.answer)
 				if wrong:
@@ -427,6 +476,10 @@ func _check_cam() -> void:
 # --- End screen and restart (local runs) ---------------------------------------
 
 func _check_over(delta: float) -> void:
+	if main.simple:
+		if main.phase == "launch" and cam_checked and main.launch_t > 7.5 and main.launch_t < 9.8 and main.net.mode == "local":
+			main.launch_t = 9.8
+		return
 	if main.net.mode != "local":
 		return
 	if not forced_over and not Engine.has_meta("rw_bot_restarts") and (main.phase == "work" or main.phase == "ready") \
@@ -451,3 +504,97 @@ func _check_over(delta: float) -> void:
 	e.physical_keycode = KEY_ENTER
 	e.pressed = true
 	Input.parse_input_event(e)
+
+
+# --- Simple mode -------------------------------------------------------------------
+
+## Pilot pauses so the ghost hand gets its turn (returns true while waiting), and the toy tour.
+func _simple_wait(delta: float) -> bool:
+	if main.rocket_n == 1 and main.phase == "work":
+		if practice_wait == -1.0:  # only once
+			practice_wait = 3.2
+		practice_wait -= delta
+		if practice_wait > 0.0:
+			if practice_wait < 1.0:
+				var fuel: Dictionary = main.modules[0]
+				_check("practice_rocket", main.modules.size() == 1 and fuel.type == "fuel" and (fuel.answer as Array).size() == 1,
+					str(main.modules))
+				_check("practice_glow", main.panel.glow_key == "fuel%d" % int(fuel.answer[0]), main.panel.glow_key)
+				_check("ghost_hand_presses", main.ghost_hand.visible)
+				_check("only_needed_controls", main.panel.area_holders["fuel"].visible and main.panel.area_holders["lever"].visible
+					and not main.panel.area_holders["wires"].visible and not main.panel.area_holders["gauge"].visible
+					and not main.panel.wing_l.visible)
+				var centre: String = main.center_label.text
+				_check("no_vr_or_hud_text", (centre == "" or centre.contains("JOINED") or main.center_label.modulate.a < 0.05)
+					and main.info_label.text == "" and main.screen_text() == "",
+					"center='%s'" % main.center_label.text)
+			return true
+	if main.rocket_n == 1 and main.phase == "ready":
+		if lever_wait == -1.0:  # only once
+			lever_wait = 2.6
+		lever_wait -= delta
+		if lever_wait > 0.0:
+			if lever_wait < 0.5:
+				_check("ghost_hand_pulls_lever", main.ghost_hand.visible)
+			return true
+	if main.phase == "launch" and not props_done and main.launch_t > 0.5:
+		props_done = true
+		for n in main.props.TOUCH:
+			var at: Vector3 = main.props.TOUCH[n][0]
+			steps.append({"pos": at + Vector3(0, 0.15, 0.15), "grip": false, "dur": 0.1})
+			steps.append({"pos": at, "grip": false, "dur": 0.15})
+			steps.append({"pos": at + Vector3(0, 0.15, 0.15), "grip": false, "dur": 0.1})
+		print("Bot: touching every toy round the pilot")
+		return false
+	return false
+
+
+func _simple_checks(delta: float) -> void:
+	_check("never_game_over", main.phase != "over" and not main.game_over)
+	if main.net.mode == "client":
+		if main.props.played.size() >= 7:
+			_check("tv_sees_toys", true, str(main.props.played))
+		if main.launched >= 5 and quit_t < 0.0:
+			quit_t = 1.0
+	else:
+		if not seen_rockets.has(main.rocket_n) and (main.phase == "work"):
+			seen_rockets[main.rocket_n] = true
+			var types: Array = []
+			for m in main.modules:
+				types.append(m.type)
+			var n: int = main.rocket_n
+			var ok: bool = types.size() <= 2 and (n > P.SIMPLE_ORDER.size() or types[0] == P.SIMPLE_ORDER[n - 1])
+			for a in main.panel.area_holders:
+				var want: bool = a == "lever" or types.has(a)
+				if main.panel.area_holders[a].visible != want:
+					ok = false
+			print("Bot: rocket %d needs %s" % [n, ", ".join(types)])
+			_check("one_new_control_rocket%d" % n, ok, str(types))
+		if not wrong_at.is_empty() and t - float(wrong_at.t) > 2.0:
+			_check("wrong_press_is_free", main.mistakes > int(wrong_at.mistakes) and absf(main.time_left - float(wrong_at.time)) < 0.01
+				and main.phase != "over", "mistakes %d" % main.mistakes)
+			wrong_at = {}
+		if main.props.touched.size() >= 7:
+			_check("toys_react", true, str(main.props.touched))
+		var solo: bool = main.manual.solo != null and main.manual.solo.visible
+		var crew_here: bool = (main.net.mode == "host" and main.net.connected) or (main.net.mode == "local" and main.crew_count() > 0)
+		if crew_here != crew_was:
+			crew_was = crew_here
+			crew_t = 0.0
+		crew_t += delta
+		if (main.phase == "work" or main.phase == "intro") and crew_t > 0.5:
+			if crew_here:
+				_check("solo_blueprint_hidden_with_crew", not solo)
+			else:
+				_check("solo_blueprint_for_lone_pilot", solo)
+		if main.launched >= 5 and quit_t < 0.0:
+			quit_t = 6.0 if main.net.mode == "host" else 0.5  # the host waits for the TV bot to finish
+	if quit_t > 0.0:
+		quit_t -= delta
+		if quit_t <= 0.0:
+			var failed: Array = []
+			for k in checks:
+				if not checks[k]:
+					failed.append(k)
+			print("Bot: simple checks %d passed, %d failed %s" % [checks.size() - failed.size(), failed.size(), str(failed)])
+			get_tree().quit()

@@ -284,13 +284,17 @@ static func _build_tools(main: Node3D) -> void:
 		var c := Vector3((k - 1) * TRAY_DX, 0.0, 0.0)
 		var kd: Dictionary = KINDS[k]
 		mesh_node(tray, box(Vector3(TRAY_DX - 0.06, 0.1, 0.42)), cmat(Color(0.82, 0.62, 0.4)), c + Vector3(0, 0.08, 0))
-		mesh_node(tray, sphere(0.13, 10), cmat(Color(0.4, 0.27, 0.17)), c + Vector3(0, 0.12, 0), Vector3(1.0, 0.35, 1.2))
+		# The seeds and the little flower showing what grows (main hides the kinds not unlocked yet).
+		var slot := Node3D.new()
+		slot.name = "Slot%d" % k
+		tray.add_child(slot)
+		mesh_node(slot, sphere(0.13, 10), cmat(Color(0.4, 0.27, 0.17)), c + Vector3(0, 0.12, 0), Vector3(1.0, 0.35, 1.2))
 		for j in 4:
-			mesh_node(tray, sphere(0.035, 6), cmat(Color(0.25, 0.18, 0.1)), c + Vector3(-0.06 + j * 0.04, 0.17, -0.05 + (j % 2) * 0.08))
-		mesh_node(tray, cyl(0.012, 0.012, 0.3, 4), cmat(Color(0.35, 0.65, 0.3)), c + Vector3(0, 0.3, -0.14))
-		var bloom := mesh_node(tray, cyl(0.1, 0.1, 0.02, 10), cmat(kd.petal, 0.2), c + Vector3(0, 0.46, -0.14))
+			mesh_node(slot, sphere(0.035, 6), cmat(Color(0.25, 0.18, 0.1)), c + Vector3(-0.06 + j * 0.04, 0.17, -0.05 + (j % 2) * 0.08))
+		mesh_node(slot, cyl(0.012, 0.012, 0.3, 4), cmat(Color(0.35, 0.65, 0.3)), c + Vector3(0, 0.3, -0.14))
+		var bloom := mesh_node(slot, cyl(0.1, 0.1, 0.02, 10), cmat(kd.petal, 0.2), c + Vector3(0, 0.46, -0.14))
 		bloom.rotation.x = 0.9
-		mesh_node(tray, sphere(0.04, 8), cmat(kd.center), c + Vector3(0, 0.47, -0.12))
+		mesh_node(slot, sphere(0.04, 8), cmat(kd.center), c + Vector3(0, 0.47, -0.12))
 	# Watering can home spot (the can itself is drawn by the gardener script) + a puddle mat.
 	var mat_node := mesh_node(main, cyl(0.38, 0.38, 0.02, 16), cmat(Color(0.4, 0.6, 0.75)), CAN_HOME + Vector3(0, 0.01, 0))
 	mat_node.name = "CanMat"

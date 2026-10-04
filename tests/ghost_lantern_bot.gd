@@ -10,6 +10,9 @@ extends Node
 ## screen prints the awards. BOT_NIGHT=N jumps to night N first (6 = the last night -> sunrise);
 ## BOT_GOD=1 nobody gets spooked (and skips the scripted spook tests).
 ## BOT_VR=1 (local): the lantern-bearer runs the real VR code with fake hands (aims, shakes the bell).
+## SIMPLE_MODE (main.simple): instead of the content / spook scripts, the bot checks the practice (sleepy
+## ghosts for the lantern, a glowing ghost per TV player, the VR ghost hand), touches every prop (VR:
+## with the fake left hand), makes one ghost float away, and that nothing ever ends the game.
 var main
 var t := 0.0
 var last_print := -100.0
@@ -17,11 +20,18 @@ var bell_t := 7.0
 var bot_players := int(OS.get_environment("BOT_PLAYERS")) if OS.has_environment("BOT_PLAYERS") else 0
 var script_step := 0
 var god := OS.has_environment("BOT_GOD")
+var simple := false
+var saw_hand := false
+var saw_sleepy := false
+var saw_glowy := false
+var prop_i := 0
+var prop_t := 0.0
 
 
 func _ready() -> void:
 	main = load("res://games/ghost_lantern/main.tscn").instantiate()
 	add_child(main)
+	simple = main.simple
 	_press(KEY_ENTER, true)  # P2 vacuum (and restart after game over)
 	if not OS.has_environment("DUO_JOIN"):
 		_press(KEY_SPACE, true)  # P1 focuses the lantern
@@ -34,10 +44,12 @@ func _press(k: Key, down: bool) -> void:
 	Input.parse_input_event(e)
 
 
-func _nearest_ghost(pos: Vector3):
+func _nearest_ghost(pos: Vector3, kind: String = ""):
 	var best = null
 	var best_d := INF
 	for g in get_tree().get_nodes_in_group("ghosts"):
+		if kind != "" and g.kind != kind:
+			continue
 		var d: float = g.global_position.distance_to(pos)
 		if d < best_d:
 			best_d = d
@@ -80,7 +92,9 @@ func _physics_process(delta: float) -> void:
 		if p.index >= 2 and not p.remote:
 			p.bot_fire = p.active
 	var p1 = main.players[0]
-	if mode != "client":
+	if simple:
+		_simple_checks(delta)
+	if mode != "client" and not simple:
 		_content_script()
 		if god:
 			for p in main.players:
@@ -91,7 +105,7 @@ func _physics_process(delta: float) -> void:
 	# Exercise courage, cheering up, game over and restart (host side decides).
 	var down_at := 30.0 if mode == "local" else 18.0
 	var over_at := 50.0 if mode == "local" else 26.0
-	if mode != "client" and t > down_at and not has_meta("spooked") and not god:
+	if mode != "client" and t > down_at and not has_meta("spooked") and not god and not simple:
 		set_meta("spooked", true)
 		print("BOT: spooking player 2 until they're down")
 		for i in 3:
@@ -100,7 +114,7 @@ func _physics_process(delta: float) -> void:
 	if mode == "local" and has_meta("spooked") and main.players[1].is_down and t < down_at + 6.0:
 		p1.global_position = main.players[1].global_position + Vector3(1.0, 0.0, 0.0)  # cheer them up
 		return
-	if mode != "client" and t > over_at and not main.game_over and not god:
+	if mode != "client" and t > over_at and not main.game_over and not god and not simple:
 		print("BOT: spooking everyone to test game over + restart")
 		for p in main.players:
 			for i in 4:
@@ -109,7 +123,12 @@ func _physics_process(delta: float) -> void:
 	if p1.vr and not p1.is_down:
 		# BOT_VR: point the lantern hand at the ghost nearest P2, walk the play space there, and shake
 		# the left hand now and then to ring the bell.
-		var vg = _nearest_ghost(main.players[1].global_position)
+		var vg = _nearest_ghost(p1.global_position, "sleepy")
+		if vg == null:
+			vg = _nearest_ghost(main.players[1].global_position)
+		if vg and simple and vg.kind == "sleepy" and not saw_hand:
+			vg = null  # simple: look away first so the practice ghost hand shows how
+			p1.hand_r.global_basis = Basis(Vector3.UP, PI)
 		if vg:
 			p1.hand_r.global_basis = Basis.looking_at((vg.global_position - p1.hand_r.global_position).normalized(), Vector3.UP)
 			var to: Vector3 = vg.global_position - p1.global_position
@@ -117,9 +136,12 @@ func _physics_process(delta: float) -> void:
 			if to.length() > 5.0:
 				p1.xr_origin.global_position += to.normalized() * 3.0 * delta
 		var shaking := fmod(t, 9.0) < 1.0
-		p1.hand_l.position = Vector3(-0.25 + (sin(t * 30.0) * 0.12 if shaking else 0.0), 1.1, -0.3)
+		if not (simple and prop_t > 0.0):
+			p1.hand_l.position = Vector3(-0.25 + (sin(t * 30.0) * 0.12 if shaking else 0.0), 1.1, -0.3)
 	elif not p1.ghost and not p1.remote and not p1.is_down:
-		var g = _nearest_ghost(main.players[1].global_position)
+		var g = _nearest_ghost(p1.global_position, "sleepy")
+		if g == null:
+			g = _nearest_ghost(main.players[1].global_position)
 		if g:
 			_aim(p1, g.global_position)
 			_walk_to(p1, g.global_position, 6.0, delta)
@@ -153,6 +175,82 @@ func _physics_process(delta: float) -> void:
 		var d = main.director()
 		print("BOT   kinds=%s event=%s last_chance=%.0f treats=%d won=%s dawn=%.2f snuff=%.1f" % [kinds, d.event_name,
 			d.last_chance_t, d.treats.size(), d.won, d.dawn, main.players[0].snuff_t])
+
+
+## Simple mode: practice, props, a ghost floating away, no game over.
+func _simple_checks(delta: float) -> void:
+	var mode: String = main.net.mode
+	for g in get_tree().get_nodes_in_group("ghosts"):
+		if g.kind == "sleepy":
+			saw_sleepy = true
+		elif g.kind == "glowy":
+			saw_glowy = true
+	if main.ghost_hand != null and main.ghost_hand.visible:
+		saw_hand = true
+	if main.game_over:
+		print("BOT: FAIL simple mode reached game over")
+	if mode == "client":
+		if t > 30.0 and not has_meta("client_report"):
+			set_meta("client_report", true)
+			print("BOT: client simple: practice=%s saw_glowy=%s tv_caught=%s night=%d caught=%d" % [main.practice, saw_glowy, main.tv_caught.keys(), main.night, main.caught])
+		return
+	var p1 = main.players[0]
+	if OS.has_environment("BOT_NIGHT") and t > 1.5 and not has_meta("skipped"):
+		set_meta("skipped", true)
+		main.debug_skip_to_night(int(OS.get_environment("BOT_NIGHT")))
+		print("BOT: skip to night %s" % OS.get_environment("BOT_NIGHT"))
+	if t - last_print < 0.02 and fmod(t, 5.0) < 0.1:
+		print("BOT   simple: dawn=%.2f won=%s kinds=%s" % [main.director().dawn, main.director().won, _kinds()])
+	# Touch every prop once practice is over (VR: with the fake left hand; flat: P2 bumps the floor spots).
+	if not main.practice and main.props != null and t > 20.0:
+		var names: Array = main.props.TOUCH.keys()
+		if prop_i < names.size():
+			prop_t += delta
+			var n: String = names[prop_i]
+			var d: Array = main.props.TOUCH[n]
+			if p1.vr:
+				p1.hand_l.global_position = d[0]
+			elif d[2] != null:
+				main.players[1].global_position = d[2]
+			elif not main.props.touched.has(n):
+				main.props.touch(n)
+			if prop_t > 0.5:
+				prop_t = 0.0
+				prop_i += 1
+				if prop_i >= names.size():
+					prop_t = 0.0
+					print("BOT: props touched %s" % main.props.touched)
+	if not main.practice and t > 40.0 and not has_meta("float"):
+		for g in get_tree().get_nodes_in_group("ghosts"):
+			if g.kind != "golden" and g.kind != "king":
+				set_meta("float", g)
+				g.life_t = 999.0
+				print("BOT: ghost %d should giggle and float away" % g.net_id)
+				break
+	if has_meta("float") and not has_meta("float_seen"):
+		var fg = get_meta("float")
+		if is_instance_valid(fg) and fg.leaving:
+			set_meta("float_seen", true)
+			print("BOT: ghost %d is giggling off through the ceiling" % fg.net_id)
+	if t > 55.0 and not has_meta("report"):
+		set_meta("report", true)
+		var practiced: bool = OS.has_environment("BOT_NIGHT") or (saw_sleepy and main.vr_woken >= main.VR_PRACTICE)
+		var ok: bool = practiced and not main.practice and main.night >= 1 and has_meta("float_seen") \
+			and main.caught > 0 and not main.game_over and main.props.touched.size() >= 5
+		if (mode == "local" or main.net.connected) and not OS.has_environment("BOT_NIGHT"):
+			ok = ok and saw_glowy
+		if p1.vr and not OS.has_environment("BOT_NIGHT"):
+			ok = ok and saw_hand and main.props.touched.size() >= main.props.TOUCH.size()
+		print("BOT: SIMPLE %s practice_done=%s woken=%d saw_sleepy=%s saw_glowy=%s hand=%s tv_caught=%s night=%d caught=%d props=%s" % [
+			"OK" if ok else "FAIL", not main.practice, main.vr_woken, saw_sleepy, saw_glowy, saw_hand, main.tv_caught.keys(),
+			main.night, main.caught, main.props.touched])
+
+
+func _kinds() -> Dictionary:
+	var kinds := {}
+	for g in get_tree().get_nodes_in_group("ghosts"):
+		kinds[g.kind] = int(kinds.get(g.kind, 0)) + 1
+	return kinds
 
 
 ## New ghosts and events, once each.

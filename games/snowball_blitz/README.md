@@ -3,6 +3,30 @@
 Cosy co-op snowball fight. Defend your snow fort in a village square at dusk from waves of
 mischievous snowmen (top hats, carrot noses, giants, sled riders, and the Snow King every 4th wave).
 
+## Simple mode (default: `SIMPLE_MODE := true` in main.gd)
+
+The family found the games too complicated and too wordy, so by default it's just: **defend the fort
+from waddling snowmen by throwing snowballs.** Everything below "Full mode" is behind that one flag.
+
+- **Practice first:** the VR player gets glowing target snowmen close by, one at a time, and a
+  see-through ghost hand that reaches down, scoops, winds up and throws. Each TV player gets one
+  glowing target in front of them (and "PRESS RT!" until they throw). Then the snowmen come. A solo
+  VR player gets extra targets for ~40 s, then the waves start anyway (TV players can drop in).
+- **One new thing per wave:** 1 a few slow plain snowmen that don't throw, 2 they throw (harmless
+  splats; the pan lid blocks them), 3 sled riders, 4 snow bunnies, 5 giants (they can drop a MEGA
+  SNOWBALL), 6 balloon snowmen, 7 the SNOW KING, 8-9 a mix, 10 the YETI finale (VICTORY, sunrise),
+  then endless.
+- **Touch everything (VR):** snow piles at your feet (squeeze there for a big snowball), icicles
+  on a little rack (tinkle; squeeze one to snap it off and throw it), a snowy pine (dumps its snow),
+  a sled (shove it), a bell (DING), and the fort wall puffs and packs up a little when you pat it.
+- **TV:** press throw to throw (hold to keep throwing); a gentle aim assist helps.
+- **Off:** warmth, freezing and hot cocoa; wall packing (the walls snow back up by themselves);
+  charged lobs; shield snowmen; weather; fort upgrades; streaks; score / warmth / fort readouts, the
+  minimap and popups; hint panels; awards. Text is one headline ("WAVE 2!", "SNOW KING!", "HOORAY!",
+  "OH NO!"); the VR wrist shows "WAVE n". Game over restarts by itself after 7 s.
+
+## Full mode (`SIMPLE_MODE := false`)
+
 - **VR player (host, Steam Frame), the sniper:** squeeze grip or trigger with your right hand down low
   (reach toward the snow) to scoop a snowball. Keep squeezing to pack it bigger and harder. Throw for
   real and let go: the launch velocity comes from your hand's motion, with a gentle aim assist.

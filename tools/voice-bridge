@@ -10,7 +10,9 @@ utterances with a simple energy detector, transcribes each with faster-whisper, 
 "[HH:MM:SS] text" lines to the game's voice log (watched by Claude).
 """
 import datetime as dt
+import os
 import re
+import time
 import subprocess
 import sys
 from pathlib import Path
@@ -26,10 +28,13 @@ HOST = "steamos@frame"
 LOG = Path.home() / "GodotProjects/duo-arena/.dev/voice.log"
 RATE = 16000
 FRAME = 480  # 30 ms
-MODEL = sys.argv[1] if len(sys.argv) > 1 else "medium.en"
+MODEL = sys.argv[1] if len(sys.argv) > 1 else "medium.en"  # the user prefers its accuracy over small.en speed
+# Loudness (RMS) a 30 ms frame needs to count as speech. 180 also hears people across the room,
+# not just the headset wearer (that needed ~500); Whisper's VAD filter drops the extra non-speech.
+FLOOR = float(os.environ.get("VOICE_FLOOR", "180"))
 
 # Whisper tends to "hear" these in noise; ignore them when they are the whole utterance.
-JUNK = {"", "you", "thank you", "thank you.", "thanks for watching!", "bye.", ".", "uh", "um", "hmm"}
+JUNK = {"", "you", "thank you", "thank you.", "thanks for watching!", "bye.", ".", "uh", "um", "hmm", "silence", "silence.", "[silence]", "(silence)"}
 
 
 SPEAKER_MODEL = Path.home() / ".local/share/voice-bridge/wespeaker_en_voxceleb_resnet34_LM.onnx"
@@ -53,6 +58,20 @@ class Speakers:
 
     def save(self) -> None:
         SPEAKERS_FILE.write_text(json.dumps({k: [v[0].tolist(), v[1]] for k, v in self.voices.items()}))
+
+    def who(self, audio: np.ndarray):
+        """The best-matching known voice for a short piece of audio (no learning, no new names)."""
+        st = self.ex.create_stream()
+        st.accept_waveform(RATE, audio)
+        st.input_finished()
+        emb = np.array(self.ex.compute(st), dtype=np.float32)
+        emb /= np.linalg.norm(emb) + 1e-9
+        best, score = None, -1.0
+        for name, (mean, _) in self.voices.items():
+            sim = float(np.dot(emb, mean / (np.linalg.norm(mean) + 1e-9)))
+            if sim > score:
+                best, score = name, sim
+        return best if score >= SAME_SPEAKER else None
 
     def identify(self, audio: np.ndarray, text: str) -> str:
         st = self.ex.create_stream()
@@ -83,6 +102,49 @@ class Speakers:
         return name
 
 
+def split_turns(segments, audio: np.ndarray, speakers, default: str, text: str) -> list:
+    """Split one transcript into speaker turns: cut at pauses over 0.35 s, identify each piece of
+    0.8 s or more, give short pieces their neighbour's speaker, merge runs of the same speaker.
+    (Simon: several people talking should come through as separate messages.)"""
+    words = [w for seg in segments for w in (seg.words or [])]
+    if len(words) < 4:
+        return [(default, text)]
+    chunks, cur = [], [words[0]]
+    for w in words[1:]:
+        if w.start - cur[-1].end > 0.35:
+            chunks.append(cur)
+            cur = [w]
+        else:
+            cur.append(w)
+    chunks.append(cur)
+    if len(chunks) < 2:
+        return [(default, text)]
+    labeled = []
+    for c in chunks:
+        a, b = c[0].start, c[-1].end
+        name = speakers.who(audio[int(a * RATE):int(b * RATE)]) if b - a >= 0.8 else None
+        labeled.append([name, "".join(w.word for w in c).strip()])
+    prev = next((l[0] for l in labeled if l[0]), default)
+    for l in labeled:
+        l[0] = l[0] or prev
+        prev = l[0]
+    runs: list = []
+    for name, t in labeled:
+        if runs and runs[-1][0] == name:
+            runs[-1][1] += " " + t
+        else:
+            runs.append([name, t])
+    if len(runs) == 1:
+        return [(default, text)]
+    return [(n, t) for n, t in runs]
+
+
+def timing(text: str) -> None:
+    """Latency log for each utterance (.dev/voice-timing.log)."""
+    with open(LOG.parent / "voice-timing.log", "a") as f:
+        f.write(text + "\n")
+
+
 def log(text: str) -> None:
     line = f"[{dt.datetime.now():%H:%M:%S}] {text}"
     print(line, flush=True)
@@ -96,7 +158,11 @@ def main() -> None:
     model = WhisperModel(MODEL, device="cpu", compute_type="int8", cpu_threads=6)
     speakers = Speakers()
     cmd = ["ssh", "-i", KEY, "-o", "BatchMode=yes", "-o", "ServerAliveInterval=5", HOST,
-           "XDG_RUNTIME_DIR=/run/user/1000 exec pw-record --target echo_cancel_source "
+           # Prefer the echo-cancelled mic; it disappears after the Frame sleeps, so fall back to
+           # the default source rather than recording silence.
+           "export XDG_RUNTIME_DIR=/run/user/1000; "
+           "src=$(pactl list short sources | grep -q echo_cancel_source && echo echo_cancel_source "
+           "|| pactl get-default-source); exec pw-record --target \"$src\" "
            f"--rate {RATE} --channels 1 --format s16 -"]
     backoff = 3
     was_listening = False
@@ -120,25 +186,29 @@ def main() -> None:
                     was_listening = True
             chunk = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
             rms = float(np.sqrt(np.mean(chunk * chunk)))
-            loud = rms > max(500.0, noise * 3.0)
+            loud = rms > max(FLOOR, noise * 3.0)
             if not speech:
                 noise = noise * 0.98 + rms * 0.02 if not loud else noise
                 pre = (pre + [chunk])[-10:]  # keep 300 ms before speech starts
                 voiced = voiced + 1 if loud else 0
                 if voiced >= 3:
                     speech = pre[:]
+                    t_start = time.time() - len(pre) * FRAME / RATE
                     silent = 0
                 continue
             speech.append(chunk)
             silent = 0 if loud else silent + 1
             too_long = len(speech) * FRAME > RATE * 15
-            if silent * FRAME > RATE * 0.8 or too_long:
+            if silent * FRAME > RATE * 0.5 or too_long:  # 0.5 s pause ends an utterance
+                t_end = time.time() - silent * FRAME / RATE
                 audio = np.concatenate(speech) / 32768.0
                 speech, voiced = [], 0
                 if len(audio) < RATE * 0.5:
                     continue
-                segments, _ = model.transcribe(audio, language="en", beam_size=1, without_timestamps=True,
+                t_tx = time.time()
+                segments, _ = model.transcribe(audio, language="en", beam_size=1, word_timestamps=True, vad_filter=True,
                                                condition_on_previous_text=False)
+                segments = list(segments)
                 text = " ".join(s.text.strip() for s in segments).strip()
                 # Whisper sometimes hallucinates subtitle markup (<p begin=...>) on noise: drop it.
                 if "<" in text or "&lt;" in text or "begin=" in text:
@@ -147,12 +217,22 @@ def main() -> None:
                     # Whisper often hears "Claude" as cloud/clawed/clod: tag requests aimed at Claude.
                     addressed = re.search(r"\b(claude|cloud|clawed|clod|claud|clyde|lord|cora|clora)\b", text, re.I)
                     who = speakers.identify(audio.astype(np.float32), text)
-                    log(("TO CLAUDE: " if addressed else "") + f"{who}: {text}")
+                    try:
+                        turns = split_turns(segments, audio.astype(np.float32), speakers, who, text) \
+                            if len(audio) > RATE * 2.5 else [(who, text)]
+                    except Exception as e:  # never lose a transcript to the splitter
+                        print(f"split_turns failed: {e}", flush=True)
+                        turns = [(who, text)]
+                    for name, part in turns:
+                        part_addressed = addressed if len(turns) == 1 else re.search(
+                            r"\b(claude|cloud|clawed|clod|claud|clyde|lord|cora|clora)\b", part, re.I)
+                        log(("TO CLAUDE: " if part_addressed else "") + f"{name}: {part}")
+                    timing(f"speech {t_start:.2f}-{t_end:.2f} silence_wait {t_tx - t_end:.2f}s "
+                           f"transcribe {time.time() - t_tx:.2f}s logged {time.time():.2f} | {text[:40]}")
         proc.kill()
         if was_listening and not got_audio or was_listening:
             print("Steam Frame mic offline (headset off?) - will keep retrying quietly", flush=True)
             was_listening = False
-        import time
         time.sleep(backoff)
         backoff = min(backoff * 2, 30)  # retry less often while the headset is off
 

@@ -51,6 +51,8 @@ var flat_cursor := Vector3(0.0, 0.0, 0.8)
 var mouse_delta := Vector2.ZERO
 var pour_snd_t := 0.0
 var bot := false
+var fake_vr := false      # tests (BOT_VR=1): the VR code runs with hands the bot moves
+var fake_trigger := 0.0   # tests: the right trigger
 var bot_target := Vector3.ZERO
 var bot_grip := false
 # TV ghost state
@@ -69,7 +71,7 @@ class Hand:
 	var vel := Vector3.ZERO
 	var hist: Array = []
 	var gripping := false
-	var held := ""        # "", "seed" or "can"
+	var held := ""        # "", "seed", "can" or "rake" (simple mode)
 	var seed_kind := 0
 	var seed_node: MeshInstance3D
 	var pour := false
@@ -223,7 +225,8 @@ func _process(delta: float) -> void:
 			hh.pos = hh.xf * GRAB_OFFSET
 			var g := false
 			if hh.right:
-				g = hh.ctrl.get_float("trigger") > (0.35 if hh.gripping else 0.6)
+				var trig: float = fake_trigger if fake_vr else hh.ctrl.get_float("trigger")
+				g = trig > (0.35 if hh.gripping else 0.6)
 			else:
 				g = _left_touch_grip(hh)
 			_update_hand(hh, g, delta)
@@ -336,6 +339,10 @@ func _grab(h: Hand) -> void:
 			main.set_meta("told_pour", true)
 			main.popup(can_at + Vector3.UP * 1.0, "Point it DOWN to pour!" if vr else "Drag it over the plants!", Color(0.6, 0.85, 1.0))
 		return
+	if main.props != null and main.props.try_grab_rake(h.pos, reach):
+		h.held = "rake"
+		haptic(h, 0.3, 0.05)
+		return
 	if vr:
 		var fwd: Vector3 = -h.xf.basis.z
 		var pest = main.pest_on_ray(h.xf.origin, fwd)
@@ -378,6 +385,8 @@ func _release(h: Hand) -> void:
 		main.drop_seed(h.seed_kind, h.pos, v.limit_length(12.0))
 	elif h.held == "can":
 		main.sound("pick", -10.0, 0.5)
+	elif h.held == "rake" and main.props != null:
+		main.props.release_rake()
 	h.held = ""
 	h.pour = false
 
@@ -429,6 +438,8 @@ func _draw_items(delta: float) -> void:
 
 
 func haptic(h: Hand, amp: float, dur: float) -> void:
+	if fake_vr:
+		return
 	if vr and h.ctrl:
 		h.ctrl.trigger_haptic_pulse("haptic", 0.0, amp, dur, 0.0)
 	elif joy >= 0:
@@ -443,6 +454,8 @@ func buzz_right(amp: float) -> void:
 
 func let_go_all() -> void:
 	for h in hands:
+		if h.held == "rake" and main.props != null:
+			main.props.release_rake()
 		h.held = ""
 		h.gripping = false
 		h.pour = false
@@ -457,7 +470,7 @@ func _vr_controls(delta: float) -> void:
 	if not calibrated and calib_t > 0.5 and xr_camera.position != Vector3.ZERO:
 		calibrated = true
 		refit(true)
-	var a := hand_r.is_button_pressed("ax_button") or hand_l.is_button_pressed("ax_button")
+	var a := false if fake_vr else (hand_r.is_button_pressed("ax_button") or hand_l.is_button_pressed("ax_button"))
 	if a and not a_was and calibrated:
 		refit(true)
 		main.sound("pick", -8.0, 0.7)
@@ -470,6 +483,9 @@ func _vr_controls(delta: float) -> void:
 			refit(false)
 	else:
 		set_meta("height_off_t", 0.0)
+	if fake_vr:
+		global_position = Vector3(xr_camera.global_position.x, 0.0, xr_camera.global_position.z)
+		return
 	var r := hand_r.get_vector2("primary")
 	if absf(r.x) > 0.7 and snap_ready:
 		snap_ready = false

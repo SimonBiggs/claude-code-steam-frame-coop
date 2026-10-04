@@ -4,6 +4,10 @@ extends Control
 ## note highway in perspective with X / A / B target rings (gold STAR notes; the road turns gold during
 ## STAR POWER). The SETLIST menu card: tonight's songs, your level (EASY / NORMAL / ROCK) and READY.
 ## For the flat drummer: the bar and key hints.
+## Simple mode (main.SIMPLE_MODE): no words or numbers - a thin song-progress line and your colour; the
+## first song has just the two outer lanes (X and B), the middle lane joins in song 2 (its ring pulses
+## in the intro); a hit bursts its ring; the ring of the next note pulses in song 1; keyboard players
+## get little arrows under the rings; PRACTICE shows one slow note waiting on its ring.
 
 const LANE_COLORS: Array[Color] = [Color(0.3, 0.6, 1.0), Color(0.35, 0.95, 0.4), Color(1.0, 0.35, 0.35)]
 const LANE_BUTTONS: Array[String] = ["X", "A", "B"]
@@ -29,6 +33,11 @@ func _draw() -> void:
 	if w < 20.0 or h < 20.0 or main == null or p == null:
 		return
 	var ui := clampf(minf(w / 960.0, h / 760.0), 0.42, 1.3)
+	if main.SIMPLE_MODE:
+		if p.index > 0:
+			_draw_highway(w, h, ui)
+		_draw_top_simple(w, ui)
+		return
 	if main.state == "menu":
 		_draw_top(w, ui)
 		_draw_menu(w, h, ui)
@@ -99,6 +108,24 @@ func _draw_top(w: float, ui: float) -> void:
 		draw_rect(Rect2(0, bh - 3 * ui, w * prog, 3 * ui), Color(0.6, 0.9, 1.0, 0.8))
 
 
+## Simple mode: your colour in the corner and how far through the song we are. No numbers.
+func _draw_top_simple(w: float, ui: float) -> void:
+	draw_rect(Rect2(10 * ui, 10 * ui, 16 * ui, 16 * ui), main.PLAYER_COLORS[p.index])
+	var g = main.song
+	if g != null and main.state == "play":
+		var prog := clampf(float(main.song_t) / maxf(1.0, float(g.length)), 0.0, 1.0)
+		draw_rect(Rect2(0, 0, w, 5 * ui), Color(0, 0, 0, 0.4))
+		draw_rect(Rect2(0, 0, w * prog, 5 * ui), Color(0.6, 0.9, 1.0, 0.8))
+
+
+## A small arrow under a ring for keyboard players (left / down / right), drawn, not written.
+func _draw_arrow(c: Vector2, lane: int, r: float, col: Color) -> void:
+	var dirs: Array[Vector2] = [Vector2.LEFT, Vector2.DOWN, Vector2.RIGHT]
+	var d := dirs[lane]
+	var side := Vector2(-d.y, d.x)
+	draw_colored_polygon(PackedVector2Array([c + d * r, c - d * r * 0.6 + side * r * 0.8, c - d * r * 0.6 - side * r * 0.8]), col)
+
+
 func _proj(hit_y: float, h0: float, cx: float, bw: float, u: float, lane_x: float) -> Vector2:
 	var z := 1.0 + u * (DEPTH - 1.0)
 	return Vector2(cx + lane_x * bw / 3.0 / z, h0 + (hit_y - h0) / z)
@@ -124,7 +151,10 @@ func _draw_highway(w: float, h: float, ui: float) -> void:
 	var poly := PackedVector2Array([_proj(hit_y, h0, cx, bw, under, -1.6), _proj(hit_y, h0, cx, bw, under, 1.6),
 		_proj(hit_y, h0, cx, bw, 1.0, 1.6), _proj(hit_y, h0, cx, bw, 1.0, -1.6)])
 	draw_colored_polygon(poly, Color(0.35, 0.25, 0.04, 0.7) if star_on else Color(0.05, 0.04, 0.12, 0.62))
-	for e in [-1.6, -0.5, 0.5, 1.6]:
+	var simple: bool = main.SIMPLE_MODE
+	var lanes: Array[int] = main.lanes_now()
+	var edges: Array = [-1.6, -0.5, 0.5, 1.6] if lanes.size() == 3 else [-1.6, 0.0, 1.6]
+	for e in edges:
 		var ef: float = e
 		var a := _proj(hit_y, h0, cx, bw, under, ef)
 		var b := _proj(hit_y, h0, cx, bw, 1.0, ef)
@@ -142,18 +172,54 @@ func _draw_highway(w: float, h: float, ui: float) -> void:
 			draw_line(l, r, Color(1, 1, 1, 0.35 if bar_line else 0.14), (3.0 if bar_line else 1.5) * ui)
 			b0 += 1
 			bt = b0 * spb
+	# Simple mode: which ring to pulse (the practice note's lane, the next note's lane in song 1, the
+	# new middle lane in song 2's intro).
+	var pulse_lane := -1
+	var now := Time.get_ticks_msec() * 0.001
+	if simple:
+		if main.state == "practice" and int(p.prac_step) < main.PRACTICE_LANES.size():
+			pulse_lane = main.PRACTICE_LANES[int(p.prac_step)]
+		elif main.state == "intro" and int(main.tour_pos) == 1:
+			pulse_lane = 1
+		elif playing and int(main.tour_pos) == 0 and p.judged.size() == g.g_t.size():
+			var k := maxi(0, int(p.next_idx) - 1)
+			while k < g.g_t.size():
+				if p.judged[k] == 0 and float(g.g_t[k]) > st - 0.1:
+					if float(g.g_t[k]) - st < 1.0:
+						pulse_lane = g.g_lane[k]
+					break
+				k += 1
 	# Target rings with the button letters (and the keyboard keys under them).
-	for lane in 3:
+	for lane in lanes:
 		var pos := _proj(hit_y, h0, cx, bw, 0.0, float(lane - 1))
 		var col := LANE_COLORS[lane]
 		var fl: float = p.lane_flash[lane]
 		var rr := 30.0 * ui
+		if lane == pulse_lane:
+			var pk := absf(sin(now * 5.0))
+			draw_arc(pos, rr * (1.25 + 0.25 * pk), 0.0, TAU, 28, Color(1, 1, 1, 0.5 + 0.5 * pk), 4.0 * ui)
 		draw_circle(pos, rr, Color(col.r, col.g, col.b, 0.18 + 0.6 * fl))
 		draw_arc(pos, rr, 0.0, TAU, 28, col.lightened(0.3 * fl), 4.0 * ui)
+		var ht: float = p.hit_t[lane]
+		if simple and ht > 0.0:
+			draw_arc(pos, rr * (1.0 + (1.0 - ht) * 1.2), 0.0, TAU, 28, Color(1.0, 0.9, 0.4, ht), 6.0 * ui * ht)
 		_text(pos + Vector2(-rr, 9 * ui), LANE_BUTTONS[lane], int(26 * ui), Color(1, 1, 1, 0.95), HORIZONTAL_ALIGNMENT_CENTER, rr * 2.0)
+		if simple:
+			if int(p.key_set) != int(p.NO_KEYS):
+				_draw_arrow(pos + Vector2(0, rr + 20 * ui), lane, 10 * ui, Color(1, 1, 1, 0.7))
+			continue
 		var kh: String = p.key_hint(lane)
 		if kh != "":
 			_text(pos + Vector2(-rr * 2.0, rr + 22 * ui), kh, int(15 * ui), Color(1, 1, 1, 0.7), HORIZONTAL_ALIGNMENT_CENTER, rr * 4.0)
+	# PRACTICE: one note slides down and waits on its ring.
+	if simple and main.state == "practice" and pulse_lane >= 0:
+		var u := clampf(1.0 - float(p.prac_t) / 1.6, 0.0, 1.0)
+		var z0 := 1.0 + u * (DEPTH - 1.0)
+		var bob := 0.0 if u > 0.0 else -4.0 * ui * absf(sin(now * 5.0))
+		var ppos := _proj(hit_y, h0, cx, bw, u, float(pulse_lane - 1)) + Vector2(0, bob)
+		var pr := 25.0 * ui / maxf(z0, 0.75)
+		draw_circle(ppos, pr, LANE_COLORS[pulse_lane])
+		draw_circle(ppos + Vector2(-pr * 0.25, -pr * 0.3), pr * 0.35, Color(1, 1, 1, 0.55))
 	# Notes (only the few on screen: from the player's cursor until the horizon).
 	if playing and p.judged.size() == g.g_t.size():
 		var n: int = g.g_t.size()
@@ -181,6 +247,8 @@ func _draw_highway(w: float, h: float, ui: float) -> void:
 				_draw_star(pos, r * 1.45, Color(1.0, 0.95, 0.6))
 			draw_circle(pos, r, col)
 			draw_circle(pos + Vector2(-r * 0.25, -r * 0.3), r * 0.35, Color(1, 1, 1, 0.55 if j == 0 else 0.2))
+	if simple:
+		return
 	# Judgement pop + hints.
 	var jt: float = p.judge_t
 	if jt > 0.0:

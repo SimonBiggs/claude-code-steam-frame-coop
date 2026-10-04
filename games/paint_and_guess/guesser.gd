@@ -506,8 +506,9 @@ func _update_hud() -> void:
 		hint_label.text = "VOTE FOR THE BEST PICTURE!"
 		hint_label.modulate = Color(1.0, 0.85, 0.4)
 	else:
-		hint_label.text = main.hint_text if st == "draw" else ""
-		hint_label.modulate = Color(1, 1, 1)
+		# The guessers' goal in one line (no letters: they gave the word away with four answers).
+		hint_label.text = "GUESS WHAT THEY'RE PAINTING!" if (st == "draw" or st == "intro") and active and not got else ""
+		hint_label.modulate = Color(0.7, 0.95, 1.0)
 	var opts: Array = main.options_for(index)
 	var show_opts: bool = (st == "draw" or st == "reveal") and not team and opts.size() == 4 and active
 	opt_root.visible = show_opts

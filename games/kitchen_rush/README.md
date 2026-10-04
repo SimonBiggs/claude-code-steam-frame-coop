@@ -2,6 +2,29 @@
 
 Bright, cartoony co-op cooking chaos for one chef (VR) and up to six runners (TV, split screen).
 
+## Simple mode (`SIMPLE_MODE := true` in main.gd, the default)
+
+The family found the games too complicated and too wordy, so the core is: the **VR chef chops and stacks**
+at the counter; the **TV runners fetch** ingredients to the pass and **carry plates** to customers.
+
+- **Practice first:** one patient granny wants a TOASTIE (bun + cheese). The cheese waits on the board; a
+  see-through **ghost hand** (chef's headset only) shows CHOP, then STACK onto the plate, and a glowing
+  spot shows where. The runners' arrow leads to the **glowing bun crate**, the **glowing pass**, then the
+  customer. Serving her starts round 1.
+- **One new dish per round:** TOASTIE, then SALAD, BURGER, PIZZA. Tickets and customers show the dish as
+  little 3D food, no words. "ORDER UP!" when a dish is ready; "HOORAY!" + three gold stars after a round.
+- **Everything interactable** (props.gd): hanging pans CLANG, a wooden spoon to bang on pans / counter /
+  bell, a bowl of veggies to juggle and throw (BOING off a runner), a pepper grinder, a cuckoo clock, the
+  service bell ("ORDER UP!").
+- **Solo VR:** with no TV runner connected, kitchen helpers pop missing ingredients onto the pass and whisk
+  finished plates to the customers.
+- **Off:** fires and the extinguisher, the food critic, the dinner rush, coins / tips / combos / star
+  ratings, awards and stats, the help panel, next-step lines, popups, signs, game over (a customer who
+  waits too long just leaves under a rain cloud). The raccoon comes back from round 3.
+- **Text:** VR one short headline (wrist: ROUND n); TV one short prompt (PRESS A) at most.
+
+The rest of this file describes the full game (`SIMPLE_MODE := false`).
+
 **A day in the kitchen:** BREAKFAST, LUNCH and DINNER shifts. Each shift is rated with up to three big
 stars that pop up over the counter (no grumpy customers and quick service = 3 stars, +10 coins a star).
 Dinner gets a DINNER RUSH halfway through (a crowd arrives, double coins for 25 s). After dinner the day
@@ -71,7 +94,8 @@ godot --headless --path . --fixed-fps 60 --quit-after 9000 res://tests/kitchen_r
 BOT_PLAYERS=6 godot --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/kitchen_rush_bot.tscn
 DUO_PORT=7784 DUO_HOST=1 timeout 130 godot --headless --path . res://tests/kitchen_rush_bot.tscn &
 DUO_PORT=7784 DUO_JOIN=127.0.0.1 BOT_PLAYERS=4 timeout 123 godot --headless --path . res://tests/kitchen_rush_bot.tscn
-KR_FAKE_VR=1 godot --headless --path . --fixed-fps 60 --quit-after 4800 res://tests/kitchen_rush_bot.tscn   # VR chef code, bot hands
+BOT_VR=1 godot --headless --path . --fixed-fps 60 --quit-after 4800 res://tests/kitchen_rush_bot.tscn   # VR chef code, bot hands
 KR_START_SHIFT=3 BOT_PLAYERS=4 godot --headless --path . --fixed-fps 60 --quit-after 5400 res://tests/kitchen_rush_bot.tscn  # dinner rush + day end
-KR_LAZY=1 godot --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/kitchen_rush_bot.tscn  # game over + awards + restart
+KR_LAZY=1 godot --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/kitchen_rush_bot.tscn  # simple: no game over; full: game over + awards + restart
+DUO_PORT=7784 DUO_HOST=1 BOT_VR=1 timeout 100 godot --headless --path . res://tests/kitchen_rush_bot.tscn  # solo VR: kitchen helpers
 ```

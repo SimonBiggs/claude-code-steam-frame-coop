@@ -63,6 +63,8 @@ var guide_on := false
 var guide_star: MeshInstance3D
 var boop_t := 0.0
 var towing := 0.0
+var tilt_only := false  # SIMPLE_MODE solo VR: the giant's own marble, rolled only by tilting the board
+var safe := Vector2.ZERO  # SIMPLE_MODE: the last safe floor cell centre (a fall pops you back here)
 
 
 func _ready() -> void:
@@ -119,6 +121,7 @@ func reset_to_start() -> void:
 	var s: Vector2 = board.starts[index % n]
 	var off := Vector2(((index - 1) % 3 - 1) * 0.022, (((index - 1) / 3) % 2) * 0.02 - 0.01)
 	spawn = s + off
+	safe = spawn
 	_place(spawn)
 	yaw = 0.0
 
@@ -134,6 +137,13 @@ func _place(p: Vector2) -> void:
 func respawn() -> void:
 	falling = false
 	fall_t = 0.0
+	if main.simple:
+		_place(safe)  # just back nearby, with a boing (main.on_marble_respawn)
+		lp.y = R + 0.04
+		vy = 0.4
+		position = lp
+		main.on_marble_respawn(self)
+		return
 	var p := spawn
 	checkpoint = main.best_checkpoint(checkpoint)  # the team's furthest checkpoint: nobody gets left behind
 	if checkpoint >= 0 and checkpoint < board.checkpoints.size():
@@ -194,7 +204,7 @@ func _physics_process(delta: float) -> void:
 		return
 	if remote or ghost:
 		return
-	if main.state != "play":
+	if main.state != "play" and main.state != "practice":
 		if main.state == "intro" and not home:
 			_place(spawn if checkpoint < 0 else board.checkpoints[checkpoint])
 		return
@@ -209,8 +219,12 @@ func _physics_process(delta: float) -> void:
 func sim(delta: float) -> void:
 	if home:
 		_sit_in_goal(delta)
-		_steer_guide(delta)
+		if not main.simple:
+			_steer_guide(delta)
 		return
+	if lp.y > R:  # SIMPLE_MODE: the little hop after popping back up
+		vy -= 2.5 * delta
+		lp.y = maxf(R, lp.y + vy * delta)
 	if falling:
 		fall_t += delta
 		vy -= 2.5 * delta
@@ -219,10 +233,12 @@ func sim(delta: float) -> void:
 		lp.x = hp.x
 		lp.z = hp.y
 		position = lp
-		if fall_t > 1.1:
+		if fall_t > (0.55 if main.simple else 1.1):
 			respawn()
 		return
 	var steer := bot_steer if bot else _steer_dir()
+	if tilt_only:
+		steer = Vector2.ZERO
 	var here := Vector2(lp.x, lp.z)
 	var a: Vector2 = board.gravity_local() + steer * STEER * board.grip_at(here) + board.hole_pull(here) + board.boost_at(here)
 	a += main.guide_pull(self, here)
@@ -246,7 +262,7 @@ func sim(delta: float) -> void:
 	if impact > 0.25 and wall_click_t <= 0.0:
 		wall_click_t = 0.15
 		main.on_wall_hit(self, impact)
-	lp = Vector3(p.x, R, p.y)
+	lp = Vector3(p.x, lp.y, p.y)
 	# Roll the ball visually.
 	var dist := v.length() * delta
 	if dist > 0.00001:
@@ -272,6 +288,8 @@ func sim(delta: float) -> void:
 			position = lp
 			tp_lock = board.cell_of(dest)
 			main.on_teleport(self, from, dest)
+	if main.simple:
+		_remember_safe(p)
 	var cp: int = board.checkpoint_at(p)
 	if cp >= 0 and cp != checkpoint:
 		checkpoint = cp
@@ -279,6 +297,18 @@ func sim(delta: float) -> void:
 	if board.in_goal(p):
 		home = true
 		main.on_marble_home(self)
+
+
+## SIMPLE_MODE: plain floor with no hole, edge or teleporter next to it is a safe place to pop back to.
+func _remember_safe(p: Vector2) -> void:
+	var c: Vector2i = board.cell_of(p)
+	if not (board.ch(c.x, c.y) in [".", "S", "I"]):
+		return
+	for dr in range(-1, 2):
+		for dc in range(-1, 2):
+			if board.ch(c.x + dc, c.y + dr) in ["O", "_", "-", "|", "T"]:
+				return
+	safe = board.center(c.x, c.y)
 
 
 ## Stick direction turned from camera space into board space.
