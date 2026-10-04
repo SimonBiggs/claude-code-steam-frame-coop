@@ -204,8 +204,7 @@ func _flat(c: Color, prio: int) -> StandardMaterial3D:
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	m.albedo_color = c
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	m.no_depth_test = true
-	m.render_priority = prio
+	m.render_priority = prio  # depth-tested: hands in front of the dials must stay in front
 	return m
 
 

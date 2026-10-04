@@ -109,6 +109,11 @@ func setup(p_id: int, k: String, p_split_gen: int = 0) -> void:
 		for w in info["weak"]:
 			var arr: Array = w
 			_add_weak(String(arr[0]), arr[1], float(arr[2]), float(arr[3]))
+	if kind == "mega":
+		for w2 in weak:
+			if String(w2["name"]) == "MEGA CORE":
+				w2["broken"] = true  # opens in phase 3 (bosses.gd)
+				(w2["node"] as Node3D).visible = false
 	_build_dizzy()
 	# Ground shadow marker for flyers (helps everyone judge where it is).
 	if fly_alt > 0.0:
@@ -166,7 +171,6 @@ func _add_weak(wname: String, frac: Vector3, rfrac: float, whp: float) -> void:
 	tag.outline_size = 18
 	tag.modulate = Color(1.0, 0.5, 0.35)
 	tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	tag.no_depth_test = true
 	tag.layers = Data.LAYER_TV_ONLY
 	tag.position = Vector3(0, r * 2.6, 0)
 	tag.visible = false
@@ -340,6 +344,7 @@ func visual_tick(delta: float) -> void:
 		var mesh: MeshInstance3D = w["mesh"]
 		var ring: MeshInstance3D = w["ring"]
 		var tag: Label3D = w["tag"]
+		(w["node"] as Node3D).visible = not (broken and String(w["name"]) == "MEGA CORE")  # opens in phase 3
 		mesh.material_override = _broken_mat if broken else (_paint_mat if painted else _glow_mat)
 		var pulse := 1.0 + 0.15 * sin(_t * (12.0 if painted else 4.0) + i)
 		mesh.scale = Vector3.ONE * (0.6 if broken else pulse * (1.25 if painted else 1.0))
