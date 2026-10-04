@@ -28,6 +28,9 @@ var on_event: Callable
 var on_reward: Callable
 ## Extra jobs from events (police): main.gd sets {"sub": "cow"/"parade", "pos": Vector3} or {}.
 var help_target := {}
+## SIMPLE_MODE: the starter house blueprint (the drivers' practice delivery): the AI crane leaves it
+## alone for a good while so a TV driver who joins a bit late still gets it.
+var practice_site := -1
 
 
 func setup(t: Town, s: Sim) -> void:
@@ -72,6 +75,9 @@ func _b(id: int) -> Dictionary:
 
 func generate() -> void:
 	_cleanup()
+	for id in jobs:
+		if int(jobs[id]["vid"]) == -1:
+			jobs[id]["age"] = int(jobs[id].get("age", 0)) + 1
 	# deliveries: shops want food or bread, bakeries want food
 	for id in town.buildings:
 		var c: Dictionary = town.buildings[id]
@@ -183,20 +189,50 @@ func _destination(h: Dictionary) -> Dictionary:
 
 ## Give every idle vehicle the nearest open job of its type (players with nothing to do get a visit).
 ## vehicles: vid -> vehicle node (fields kind, job_id, is_player, position via global_position).
+## SIMPLE_MODE: drivers (whatever they drive) bring the bricks first, the job that teaches itself (a
+## glowing pick-up, a glowing new building); the AI crane leaves a site to them for a while.
 func assign(vehicles: Dictionary) -> void:
-	for vid in vehicles:
+	var order: Array = vehicles.keys()
+	var drivers := false
+	if Defs.SIMPLE_MODE:
+		order.sort()  # players (vid = slot) before the AI (100+)
+		for vid in order:
+			drivers = drivers or bool(vehicles[vid].get("is_player"))
+	var open_build := false
+	if drivers:
+		for id in jobs:
+			open_build = open_build or (String(jobs[id]["type"]) == "build" and int(jobs[id]["vid"]) == -1)
+	for vid in order:
 		var v: Node3D = vehicles[vid]
 		var cur := int(v.get("job_id"))
-		if cur != 0 and jobs.has(cur):
+		if open_build and cur != 0 and jobs.has(cur) and String(jobs[cur]["type"]) == "visit" and bool(v.get("is_player")):
+			jobs.erase(cur)  # SIMPLE_MODE: a new building beats a hello
+		elif cur != 0 and jobs.has(cur):
 			continue
 		v.set("job_id", 0)
 		var t := job_type(String(v.get("kind")))
+		var player := bool(v.get("is_player"))
 		var best := -1
 		var bd := INF
+		if Defs.SIMPLE_MODE and player:
+			for id in jobs:
+				var jb: Dictionary = jobs[id]
+				if String(jb["type"]) == "build" and int(jb["vid"]) == -1:
+					var db := target_of(jb).distance_to(v.global_position)
+					if db < bd:
+						bd = db
+						best = int(id)
+		var own_jobs := best < 0
 		for id in jobs:
+			if not own_jobs:
+				break
 			var j: Dictionary = jobs[id]
 			if String(j["type"]) != t or int(j["vid"]) != -1:
 				continue
+			if Defs.SIMPLE_MODE and not player and t == "build":
+				var age := int(j.get("age", 0))
+				if (drivers and age < 12) or (int(j["to"]) == practice_site and age < 30):
+					continue
 			var d := target_of(j).distance_to(v.global_position)
 			if d < bd:
 				bd = d

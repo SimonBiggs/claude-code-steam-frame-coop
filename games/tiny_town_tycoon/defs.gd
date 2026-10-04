@@ -7,6 +7,20 @@ extends RefCounted
 ## Building meshes are designed in "cell units" (1.0 = one cell, origin at the ground, door +Z) and
 ## scaled by CELL when drawn.
 
+## SIMPLE_MODE (the family: "all of the games have become too complicated", "simple games are the fun
+## games", "everything's being driven by text"): the mayor starts with just ROAD + HOUSE; one new
+## building joins the tray at a time as the town grows (a sparkle in the tray, no tier names). No coins,
+## costs, needs (power / water / jobs), events, goals, island select or awards; houses only need a road.
+## Drivers just bring bricks to new buildings (a glowing ring and an arrow, no job text). A practice
+## moment teaches by doing (ghost_hand.gd for the mayor, one glowing delivery for the drivers) and the
+## island is full of things to touch (props.gd). Everything cut stays in the code behind this flag.
+const SIMPLE_MODE := true
+## SIMPLE_MODE tray, in unlock order, and how many buildings (not counting the town hall) the town
+## needs before each one joins the tray.
+const SIMPLE_TRAY: Array[String] = ["road", "house", "farm", "park", "windmill", "shop", "water", "bakery", "school",
+	"fire_station", "sawmill", "landmark", "ferris"]
+const SIMPLE_UNLOCK_AT: Array[int] = [0, 0, 3, 5, 7, 9, 11, 13, 15, 17, 19, 22, 25]
+
 const GRID := 22
 const CELL := 0.055
 const TABLE_Y := 0.80  ## table top (metres above the garden lawn)
@@ -181,6 +195,15 @@ static func tier_for_pop(pop: int) -> int:
 		if pop >= TIER_POP[i]:
 			t = i
 	return t
+
+
+## SIMPLE_MODE: how many tray blocks a town with `n` buildings (not the hall) has unlocked.
+static func simple_unlocked(n: int) -> int:
+	var k := 0
+	for i in SIMPLE_UNLOCK_AT.size():
+		if n >= SIMPLE_UNLOCK_AT[i]:
+			k = i + 1
+	return k
 
 
 static func island(i: int) -> Dictionary:
