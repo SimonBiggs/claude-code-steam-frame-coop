@@ -4,7 +4,10 @@ extends Node
 # BOT_PLAYERS=N (1..6): N TV runners join (local split screen, or on the TV machine when networked). The last
 # one joins through a fake controller pressing Start (the real drop-in path); with N >= 3 that controller is
 # later "unplugged" (the runner should leave after 15 s) and plugged back in (it should rejoin).
-# KR_FAKE_VR=1: the real VR chef code runs; the bot moves the fake hands like a person, following the
+# SIMPLE_MODE (main.gd): checks the practice order, the ghost hand, the glowing spots / crates / pass,
+# one new dish per round, no game over, and (fake VR) pokes every prop: pans, clock, grinder, bell, a
+# thrown veggie and the spoon. DUO_HOST=1 alone = solo VR: the kitchen helpers must keep it going.
+# KR_FAKE_VR=1 (or BOT_VR=1): the real VR chef code runs; the bot moves the fake hands like a person, following the
 # chef's on-screen "next step" guidance (chop with a knife swing, grab with the right trigger, drop on the plate).
 # KR_START_SHIFT=N starts at shift N (3 = the first dinner, with the rush).
 const L := preload("res://games/kitchen_rush/layout.gd")
@@ -32,6 +35,10 @@ var vr_target = null
 var vr_from := Vector3.ZERO
 var vr_chops := 0
 var vr_drops := 0
+var play_at := 25.0
+var play_step := 0
+var playing := false
+var grumpy_seen := false
 
 
 func _ready() -> void:
@@ -56,6 +63,13 @@ func _physics_process(delta: float) -> void:
 		# Game-over test: nobody cooks and customers run out of patience fast; then press Enter to restart.
 		for c in main._waiting_customers():
 			c.patience = minf(c.patience, 0.5)
+		if main.simple:
+			# Simple mode has no game over: grumpy customers just leave and new ones keep coming.
+			if main.angry >= 6 and not grumpy_seen:
+				grumpy_seen = true
+				print("BOT: %d grumpy customers left, kitchen still open (game_over=%s)" % [main.angry, main.game_over])
+			main.practice = false
+			return
 		if main.game_over and main.game_over_t > 2.5 and not Engine.has_meta("kr_restarted"):
 			Engine.set_meta("kr_restarted", true)
 			print("BOT: game over seen, pressing Enter to restart")
@@ -170,6 +184,18 @@ func _note_features() -> void:
 		"fire": main.fire_on,
 		"raccoon": main.raccoon.visible,
 		"stats": main.stats_text != "",
+		"practice": main.practice and main.served_total == 0 and main.net.mode != "client",
+		"practice done": not main.practice and main.served_total >= 1,
+		"ghost hand": main.ghost_hand != null and main.ghost_hand.visible,
+		"ghost chop": main.ghost_hand != null and main.ghost_hand.visible and main.ghost_hand.mode == "chop",
+		"ghost stack": main.ghost_hand != null and main.ghost_hand.visible and main.ghost_hand.mode == "stack",
+		"chef spot": main.chef_spot != null and main.chef_spot.visible,
+		"crate glow": _any_glow(),
+		"pass glow": main.pass_glow != null and main.pass_glow.visible,
+		"new dish SALAD": main.unlocked_recipes().has("SALAD"),
+		"new dish BURGER": main.unlocked_recipes().has("BURGER"),
+		"new dish PIZZA": main.unlocked_recipes().has("PIZZA"),
+		"props moving": main.props != null and (absf(float(main.props.pans[0]["ang"])) > 0.05 or main.props.bird_out > 0.0),
 	}
 	for k in checks:
 		if checks[k] and not seen.has(k):
@@ -182,10 +208,98 @@ func _note_features() -> void:
 			elif k == "stars":
 				extra = ": %s" % [main.stars]
 			print("BOT: seen %s (t=%.0f, shift %d)%s" % [k, t, main.shift, extra])
+	if main.props != null:
+		for kind in main.props.touched:
+			if not seen.has("prop:" + kind):
+				seen["prop:" + kind] = true
+				print("BOT: prop %s (t=%.0f)" % [kind, t])
 	for ty in types:
 		if not seen.has("type:" + ty):
 			seen["type:" + ty] = true
 			print("BOT: customer type %s" % ty)
+
+
+func _any_glow() -> bool:
+	for k in main.crate_glows:
+		if main.crate_glows[k].visible:
+			return true
+	return false
+
+
+## Fake VR chef: plays with the props now and then (pans, clock, grinder, a thrown veggie, the spoon).
+## Returns true while busy.
+func _play_props(delta: float) -> bool:
+	var chef = main.players[0]
+	var props = main.props
+	if props == null or main.practice or t < play_at or chef.held[0] != null or chef.held[1] != null:
+		return false
+	if not playing:
+		playing = true
+		vr_t = 0.0
+	var hl: Node3D = chef.hand_l
+	var hr: Node3D = chef.hand_r
+	# The hand point is 6 cm in front of and 2 cm below the controller.
+	var off := Vector3(0, 0.02, 0.06)
+	match play_step:
+		0, 2:  # swing the left hand through a pan from the chef's side
+			var c: Vector3 = props.pan_centre(0 if play_step == 0 else 1)
+			var start := c + Vector3(0.25, 0.0, 0.0) + off
+			var end := c + Vector3(-0.1, 0.0, 0.0) + off
+			if vr_t < 0.6:
+				hl.global_position = hl.global_position.move_toward(start, delta * 3.0)
+			else:
+				hl.global_position = hl.global_position.move_toward(end, delta * 2.0)
+				if hl.global_position.distance_to(end) < 0.01:
+					play_step += 1
+					vr_t = 0.0
+		1:  # touch the cuckoo clock and the pepper grinder
+			var want: Vector3 = (props.CLOCK if vr_t < 0.8 else props.grinder.global_position + Vector3.UP * 0.18) + off
+			hr.global_position = hr.global_position.move_toward(want, delta * 2.5)
+			if vr_t > 1.8:
+				play_step += 1
+				vr_t = 0.0
+		3:  # grab a veggie and throw it towards the runners
+			var vg: Dictionary = props.veg[0]
+			if props.held[1] == "":
+				var want: Vector3 = vg["pos"] + Vector3(0, 0.05, 0.06)
+				hr.global_position = hr.global_position.move_toward(want, delta * 2.0)
+				chef.fake_trigger[1] = 1.0 if hr.global_position.distance_to(want) < 0.01 and chef.fake_trigger[1] == 0.0 else 0.0
+				vr_t = minf(vr_t, 0.99)
+				if t > play_at + 30.0:
+					play_step = 99
+			elif vr_t < 1.3:
+				hr.global_position += Vector3(0.0, 1.5, -3.0) * delta
+			else:
+				chef.fake_trigger[1] = 0.0
+				play_step += 1
+				vr_t = 0.0
+		4:  # pick up the spoon and bang it on the counter, then on the bell
+			var bell: Node3D = main.parts.get("bell")
+			if props.held[1] == "":
+				var want2: Vector3 = props.spoon.global_position + Vector3(0, 0.03, 0.06)
+				hr.global_position = hr.global_position.move_toward(want2, delta * 2.0)
+				chef.fake_trigger[1] = 1.0 if hr.global_position.distance_to(want2) < 0.01 and chef.fake_trigger[1] == 0.0 else 0.0
+				vr_t = minf(vr_t, 0.99)
+				if t > play_at + 30.0:
+					play_step = 99
+			elif vr_t < 1.6:
+				hr.global_position = hr.global_position.move_toward(Vector3(0.7, 1.2, 0.3), delta * 2.0)
+			elif vr_t < 1.9:
+				hr.global_position += Vector3(0.0, -2.5, 0.0) * delta
+			elif vr_t < 2.6:
+				var head: Vector3 = props.spoon_head()
+				hr.global_position += (bell.global_position + Vector3.UP * 0.06 - head).limit_length(delta * 1.5)
+			else:
+				chef.fake_trigger[1] = 0.0
+				play_step += 1
+				vr_t = 0.0
+		_:
+			play_step = 0
+			playing = false
+			play_at = t + 40.0
+			print("BOT VR: played with the props: %s" % [props.touched])
+			return false
+	return true
 
 
 ## Fake VR chef: moves the hands like a person would, following the chef's guidance.
@@ -197,6 +311,8 @@ func _chef_vr(delta: float) -> void:
 	var rest_r := head + Vector3(0.3, -0.55, -0.35)
 	var rest_l := head + Vector3(-0.3, -0.55, -0.35)
 	vr_t += delta
+	if vr_state == "idle" and _play_props(delta):
+		return
 	var task: Dictionary = main.chef_task
 	var it = task.get("item")
 	var plate = task.get("plate")
@@ -206,7 +322,7 @@ func _chef_vr(delta: float) -> void:
 			chef.fake_trigger[1] = 0.0
 			hr.global_position = hr.global_position.lerp(rest_r, 0.2)
 			hl.global_position = hl.global_position.lerp(rest_l, 0.2)
-			if vr_t < 0.4 or main.game_over:
+			if vr_t < (2.5 if main.practice else 0.4) or main.game_over:  # in practice: hesitate, watch the ghost hand
 				return
 			if held != null and is_instance_valid(held):
 				vr_state = "carry"
