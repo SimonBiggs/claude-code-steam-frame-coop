@@ -6,6 +6,7 @@ into the tmux pane as a message, so Claude gets it like typed input.
 Only bytes appended after start-up are read. If the log shrinks or is replaced, it jumps to the
 new end instead of replaying old lines.
   voice-inject --here   remember the current tmux pane ($TMUX_PANE) as the target
+  voice-inject --print  print each new request to stdout instead (for a Claude Code Monitor)
 """
 import os, subprocess, sys, time
 
@@ -32,6 +33,9 @@ def stat():
         return None, 0
 
 
+PRINT = "--print" in sys.argv
+if PRINT:
+    sys.argv.remove("--print")
 ino, pos = stat()  # start at the current end: never send old lines
 buf = b""
 while True:
@@ -52,6 +56,9 @@ while True:
         if "TO CLAUDE: " not in line:
             continue
         msg = "[voice] " + line.split("TO CLAUDE: ", 1)[1]
+        if PRINT:
+            print(msg, flush=True)
+            continue
         p = pane()
         subprocess.run(["/usr/bin/tmux", "send-keys", "-t", p, "-l", msg])
         subprocess.run(["/usr/bin/tmux", "send-keys", "-t", p, "Enter"])
