@@ -88,6 +88,13 @@ func _watch() -> String:
 	var mg: Dictionary = main.net.state_get("mg", {}) if main.net.state_get("mg", {}) is Dictionary else {}
 	if not mg.is_empty():
 		seen["mg:" + String(mg.get("id", ""))] = true
+		if String(main.net.state_get("mg_phase", "")) == "result" and not seen.has("res:%d" % int(mg.get("n", 0))):
+			seen["res:%d" % int(mg.get("n", 0))] = true
+			var res: Dictionary = main.net.state_get("mg_result", {})
+			var parts: PackedStringArray = []
+			for r in res.get("rows", []):
+				parts.append("%s=%d(+%d)" % [main.name_of(int(r["pid"])), int(r["score"]), int(r["coins"])])
+			kit.info("%s: %s  %s" % [String(mg.get("id", "")), String(res.get("title", "")), " ".join(parts)])
 	if main.flow != null and not _star_rigged and phase == "board" and String(main.net.state_get("step", "")) == "roll" \
 			and int(main.net.state_get("round", 0)) >= 1 and seen.has("menu:shop"):
 		_star_rigged = true
