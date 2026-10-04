@@ -21,7 +21,7 @@ MAX_TEXT = 8000  # tool results can be huge; keep the start
 
 
 def connect() -> sqlite3.Connection:
-    db = sqlite3.connect(DB)
+    db = sqlite3.connect(DB, timeout=30)  # hooks and the timer may index at the same moment
     db.executescript("""
     CREATE TABLE IF NOT EXISTS files (path TEXT PRIMARY KEY, offset INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE IF NOT EXISTS messages (
