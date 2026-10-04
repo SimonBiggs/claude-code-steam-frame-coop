@@ -493,9 +493,11 @@ func _vr_controls(delta: float) -> void:
 	var head_y := xr_camera.position.y
 	if calibrated and not has_meta("calib_y"):
 		rc = true  # first frame after this code arrived: fit to whoever is wearing it now
-	elif calibrated and absf(head_y - float(get_meta("calib_y", head_y))) > 0.15:
+	# The camera's tracking position is in world-scaled units (XRServer.world_scale is ~20 here), so
+	# compare in real metres: before, 0.75 cm of leaning re-fitted the table and snapped the Giant back.
+	elif calibrated and absf(head_y - float(get_meta("calib_y", head_y))) / maxf(XRServer.world_scale, 1.0) > 0.15:
 		set_meta("height_off_t", float(get_meta("height_off_t", 0.0)) + delta)
-		if float(get_meta("height_off_t", 0.0)) > 1.5:
+		if float(get_meta("height_off_t", 0.0)) > 3.0:
 			rc = true
 	else:
 		set_meta("height_off_t", 0.0)
