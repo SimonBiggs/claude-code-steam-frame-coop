@@ -165,6 +165,7 @@ func attach_xr(origin: XROrigin3D, cam: XRCamera3D, left: XRController3D, right:
 	glove_label.rotation.x = deg_to_rad(-55.0)
 	glove_label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
 	gloves[1].add_child(glove_label)
+	glove_label.visible = not main.simple  # simple mode: no score text on the glove
 
 
 func vr_trigger() -> bool:
