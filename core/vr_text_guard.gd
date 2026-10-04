@@ -9,6 +9,11 @@ extends Node
 
 var faced: Array[Label3D] = []
 var active := false
+## Fallback capture mirror: scenes without their own gdev_capture SubViewport (e.g. the arcade lobby)
+## would record black, because the VR main viewport's texture isn't readable. Follows the XR camera.
+var mirror: SubViewport
+var mirror_cam: Camera3D
+var mirror_t := 0.0
 
 
 func _ready() -> void:
@@ -27,6 +32,7 @@ func _process(delta: float) -> void:
 	active = vr
 	if not vr:
 		return
+	_update_mirror(cam, delta)
 	var head := cam.global_position
 	for i in range(faced.size() - 1, -1, -1):
 		var l := faced[i]
@@ -62,3 +68,29 @@ func _fix(l: Label3D) -> void:
 		l.billboard = BaseMaterial3D.BILLBOARD_DISABLED
 		if not faced.has(l):
 			faced.append(l)
+
+
+func _update_mirror(cam: Camera3D, delta: float) -> void:
+	var others := get_tree().get_nodes_in_group("gdev_capture").filter(func(n: Node) -> bool: return n != mirror)
+	if not others.is_empty():
+		if is_instance_valid(mirror):
+			mirror.queue_free()  # the scene has its own mirror
+			mirror = null
+		return
+	if not is_instance_valid(mirror):
+		mirror = SubViewport.new()
+		mirror.size = Vector2i(960, 960)
+		mirror.world_3d = get_tree().root.world_3d
+		mirror.render_target_update_mode = SubViewport.UPDATE_DISABLED
+		mirror_cam = Camera3D.new()
+		mirror_cam.fov = 90.0
+		mirror.add_child(mirror_cam)
+		add_child(mirror)
+		mirror.add_to_group("gdev_capture")
+	mirror_cam.global_transform = cam.global_transform
+	mirror_cam.current = true
+	mirror_t -= delta
+	if mirror_t <= 0.0:
+		mirror_t = 1.0 / 12.0  # enough for frame-at and the live view; cheap on the Frame's GPU
+		mirror.render_target_update_mode = SubViewport.UPDATE_ONCE
+

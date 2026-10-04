@@ -516,8 +516,17 @@ func _check_vr_menu() -> void:
 	else:
 		set_meta("touch_t", 0.0)
 	var held_touch: bool = float(get_meta("touch_t", 0.0)) > 0.35
+	var paused := get_tree().paused
+	# While paused, a trigger pull on the button resumes only when released quickly, so HOLDING the
+	# trigger (even while pointing near the wrist, e.g. with a fishing rod) always goes to the arcade.
+	var tap_resume := false
+	if paused and on_btn and trig:
+		set_meta("btn_hold", float(get_meta("btn_hold", 0.0)) + get_process_delta_time())
+	elif float(get_meta("btn_hold", 0.0)) > 0.0:
+		tap_resume = float(get_meta("btn_hold", 0.0)) < 0.5 and not trig
+		set_meta("btn_hold", 0.0)
 	var down: bool = hl.is_button_pressed("menu_button") or hl.is_button_pressed("by_button") \
-		or held_touch or (on_btn and trig)
+		or held_touch or (on_btn and trig and not paused) or tap_resume
 	if down and not menu_was_down:
 		print("Net: VR pause toggled")
 		if main.has_method("toggle_vr_pause"):
@@ -525,7 +534,7 @@ func _check_vr_menu() -> void:
 		else:
 			toggle_pause(0)
 	# Leaving needs the trigger HELD for 1.5 s while paused, so a stray trigger pull doesn't quit.
-	if trig and not on_btn and get_tree().paused:
+	if trig and paused:
 		set_meta("leave_t", float(get_meta("leave_t", 0.0)) + get_process_delta_time())
 		if float(get_meta("leave_t", 0.0)) > 1.5:
 			go_to_arcade()
