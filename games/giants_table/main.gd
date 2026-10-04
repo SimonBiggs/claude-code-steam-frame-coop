@@ -185,6 +185,12 @@ func next_net_id() -> int:
 	return net_ids
 
 
+## The Giant is playing alone (hosting, no knights connected): spiky goblins can then be picked up
+## and thrown (Simon: picking them up and throwing them is more fun than smacking).
+func solo_giant() -> bool:
+	return net.mode == "host" and not net.connected
+
+
 func knights() -> Array:
 	return players.slice(1)
 
@@ -1107,8 +1113,6 @@ func king_hit(g, knight) -> void:
 ## An open giant hand came down fast on a goblin.
 func giant_smack(g, at: Vector3) -> void:
 	var spiky: bool = g.kind == "armored" or (g.kind == "king" and g.armor > 0.0)
-	if net.mode == "host" and not net.connected:
-		spiky = false  # no knights to help: the Giant playing alone can smack the spiky ones too
 	if spiky:
 		popup(g.grab_center() + Vector3.UP * 0.9, "OUCH! Too spiky!\nKnights, get this one!", Color(1.0, 0.6, 0.5))
 		sound("hurt", -6.0, 0.7)

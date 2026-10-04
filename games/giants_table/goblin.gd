@@ -273,6 +273,8 @@ func _ready() -> void:
 
 
 func can_grab() -> bool:
+	if main != null and main.solo_giant():
+		return true
 	if kind == "king":
 		return armor <= 0.0
 	return kind != "armored"
@@ -517,7 +519,7 @@ func hit_by_object(v: Vector3, by) -> void:
 		flying = true
 		vel = Vector3(v.x, 0.0, v.z) * 0.3
 		return
-	if kind == "armored" or (kind == "king" and armor > 0.0):
+	if (kind == "armored" or (kind == "king" and armor > 0.0)) and not (main != null and main.solo_giant()):
 		dizzy_t = 2.0
 		main.popup(grab_center() + Vector3.UP * 0.6, "CLANG!", Color(0.8, 0.85, 1.0))
 		main.sound("hit", -2.0, 0.6)

@@ -511,6 +511,11 @@ func _vr_controls(delta: float) -> void:
 	else:
 		set_meta("both_t", 0.0)
 	if rc and not recenter_was:
+		print("Giant: table re-fit (A=%s B=%s both_t=%.1f height_off=%.1f head_dy=%.2f m)" % [
+			hand_r.is_button_pressed("ax_button") or hand_l.is_button_pressed("ax_button"),
+			hand_l.is_button_pressed("by_button") or hand_r.is_button_pressed("by_button"),
+			float(get_meta("both_t", 0.0)), float(get_meta("height_off_t", 0.0)),
+			(head_y - float(get_meta("calib_y", head_y))) / maxf(XRServer.world_scale, 1.0)])
 		var flat_pos := Vector2(xr_camera.global_position.x, xr_camera.global_position.z)
 		recenter(atan2(flat_pos.x, flat_pos.y))
 		main.sound("pickup", -8.0, 0.7)
