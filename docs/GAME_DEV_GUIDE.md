@@ -109,6 +109,10 @@ score and game over. Use visual-only "ghost" copies of host objects on the clien
   - Show a how-to banner and short contextual hints: kids constantly ask "how do I…?".
 - `XRServer.world_scale` is global. If a game scales the world, reset it to 1.0 in `_exit_tree`.
 - Give the VR player a role that uses their **hands**, different from the TV players' role.
+- **Everything should be interactable** (Simon's rule): if the VR player can reach it, touching it
+  should do something: trees sway or can be picked up, rocks can be thrown, houses wobble, water
+  splashes. Prefer grab-and-throw over abstract buttons; picking things up and throwing them is the
+  most fun part of VR.
 - `Engine.physics_ticks_per_second = 90` in VR.
 
 ## Performance (the Frame has a phone-class GPU, target 72 fps)
