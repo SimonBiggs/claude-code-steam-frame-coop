@@ -104,9 +104,8 @@ func _close_old_peer() -> void:
 
 
 func _exit_tree() -> void:
-	var fu = get_meta("follow_udp", null)  # _follow_headset's beacon listener
-	if fu != null:
-		(fu as PacketPeerUDP).close()
+	if has_meta("follow_udp") and get_meta("follow_udp") != null:  # _follow_headset's beacon listener
+		(get_meta("follow_udp") as PacketPeerUDP).close()
 	_close_old_peer()
 
 
