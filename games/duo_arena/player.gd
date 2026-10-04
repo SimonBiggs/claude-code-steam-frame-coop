@@ -174,7 +174,7 @@ func _ready() -> void:
 	tag = Label3D.new()
 	tag.text = "P%d" % (index + 1)
 	tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	tag.no_depth_test = true
+	tag.no_depth_test = false
 	tag.fixed_size = true
 	tag.pixel_size = 0.0012
 	tag.font_size = 28
@@ -292,7 +292,7 @@ func attach_xr(origin: XROrigin3D, cam: XRCamera3D, left: XRController3D, right:
 	wrist_label.modulate = color.lightened(0.4)
 	wrist_label.position = Vector3(0.0, 0.05, 0.08)
 	wrist_label.rotation_degrees = Vector3(-55, 0, 0)
-	wrist_label.no_depth_test = true
+	wrist_label.no_depth_test = false
 	hand_l.add_child(wrist_label)
 	_set_layers(wrist_label, viewmodel_layer())
 
@@ -902,7 +902,7 @@ func _update_vr_hurt(delta: float) -> void:
 		vr_hurt_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		vr_hurt_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		vr_hurt_mat.cull_mode = BaseMaterial3D.CULL_FRONT  # seen from inside
-		vr_hurt_mat.no_depth_test = true
+		vr_hurt_mat.no_depth_test = false
 		vr_hurt_mat.render_priority = 20
 		vr_hurt_mat.albedo_color = Color(1.0, 0.05, 0.05, 0.0)
 		shell.material_override = vr_hurt_mat
@@ -960,7 +960,7 @@ func _update_gun_hp() -> void:
 		l.font_size = 48
 		l.outline_size = 14
 		l.pixel_size = 0.0007
-		l.no_depth_test = true
+		l.no_depth_test = false
 		l.render_priority = 6
 		hand_r.add_child(l)
 		l.position = Vector3(0.0, 0.07, 0.02)

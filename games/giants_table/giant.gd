@@ -107,7 +107,7 @@ func setup_vr(origin: XROrigin3D, cam: XRCamera3D, left: XRController3D, right: 
 	wrist_label.outline_size = 26
 	wrist_label.outline_modulate = Color.BLACK
 	wrist_label.modulate = Color(1.0, 0.92, 0.7)
-	wrist_label.no_depth_test = true
+	wrist_label.no_depth_test = false
 	wrist_label.render_priority = 5
 	wrist_label.position = Vector3(0.0, 0.9, 1.4)
 	wrist_label.rotation_degrees = Vector3(-50, 0, 0)
@@ -493,9 +493,11 @@ func _vr_controls(delta: float) -> void:
 	var head_y := xr_camera.position.y
 	if calibrated and not has_meta("calib_y"):
 		rc = true  # first frame after this code arrived: fit to whoever is wearing it now
-	elif calibrated and absf(head_y - float(get_meta("calib_y", head_y))) > 0.15:
+	# The camera's tracking position is in world-scaled units (XRServer.world_scale is ~20 here), so
+	# compare in real metres: before, 0.75 cm of leaning re-fitted the table and snapped the Giant back.
+	elif calibrated and absf(head_y - float(get_meta("calib_y", head_y))) / maxf(XRServer.world_scale, 1.0) > 0.15:
 		set_meta("height_off_t", float(get_meta("height_off_t", 0.0)) + delta)
-		if float(get_meta("height_off_t", 0.0)) > 1.5:
+		if float(get_meta("height_off_t", 0.0)) > 3.0:
 			rc = true
 	else:
 		set_meta("height_off_t", 0.0)
@@ -509,6 +511,11 @@ func _vr_controls(delta: float) -> void:
 	else:
 		set_meta("both_t", 0.0)
 	if rc and not recenter_was:
+		print("Giant: table re-fit (A=%s B=%s both_t=%.1f height_off=%.1f head_dy=%.2f m)" % [
+			hand_r.is_button_pressed("ax_button") or hand_l.is_button_pressed("ax_button"),
+			hand_l.is_button_pressed("by_button") or hand_r.is_button_pressed("by_button"),
+			float(get_meta("both_t", 0.0)), float(get_meta("height_off_t", 0.0)),
+			(head_y - float(get_meta("calib_y", head_y))) / maxf(XRServer.world_scale, 1.0)])
 		var flat_pos := Vector2(xr_camera.global_position.x, xr_camera.global_position.z)
 		recenter(atan2(flat_pos.x, flat_pos.y))
 		main.sound("pickup", -8.0, 0.7)

@@ -209,7 +209,7 @@ func _ready() -> void:
 	tag = Label3D.new()
 	tag.text = "P%d" % (index + 1)
 	tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	tag.no_depth_test = true
+	tag.no_depth_test = false
 	tag.fixed_size = true
 	tag.pixel_size = 0.0012
 	tag.font_size = 28
@@ -306,7 +306,7 @@ func attach_xr(origin: XROrigin3D, cam: XRCamera3D, left: XRController3D, right:
 	wrist_label.modulate = color.lightened(0.3)
 	wrist_label.position = Vector3(0.0, 0.07, 0.12)
 	wrist_label.rotation_degrees = Vector3(-55, 0, 0)
-	wrist_label.no_depth_test = true
+	wrist_label.no_depth_test = false
 	hand_l.add_child(wrist_label)
 	_set_layers(wrist_label, viewmodel_layer())
 
@@ -786,7 +786,7 @@ func _update_lantern_label() -> void:
 		lantern_label.font_size = 44
 		lantern_label.outline_size = 14
 		lantern_label.pixel_size = 0.0007
-		lantern_label.no_depth_test = true
+		lantern_label.no_depth_test = false
 		lantern_label.render_priority = 6
 		hand_r.add_child(lantern_label)
 		lantern_label.position = Vector3(0.0, 0.1, 0.02)

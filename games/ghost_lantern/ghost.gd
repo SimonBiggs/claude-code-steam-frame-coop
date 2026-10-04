@@ -155,7 +155,7 @@ func _build() -> void:
 	bg_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	bg_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	bg_mat.albedo_color = Color(0.05, 0.02, 0.08)
-	bg_mat.no_depth_test = true
+	bg_mat.no_depth_test = false
 	bg_mat.render_priority = 5
 	var fill_mat: StandardMaterial3D = bg_mat.duplicate()
 	fill_mat.albedo_color = Color(0.45, 1.0, 0.6)

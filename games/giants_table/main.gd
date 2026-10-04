@@ -103,6 +103,7 @@ var shield := false
 var shield_said := false
 var rain_node: Node3D
 var wave_t := 0.0
+var solo_wait := 0.0
 var combo := 0
 var last_kill_t := -10.0
 var clock := 0.0
@@ -182,6 +183,12 @@ func _setup_game(mode: String) -> void:
 func next_net_id() -> int:
 	net_ids += 1
 	return net_ids
+
+
+## The Giant is playing alone (hosting, no knights connected): no spiky goblins then (they need
+## knights), and the Goblin King comes without armour.
+func solo_giant() -> bool:
+	return net.mode == "host" and not net.connected
 
 
 func knights() -> Array:
@@ -633,7 +640,7 @@ func popup(pos: Vector3, text: String, color: Color) -> void:
 	l.outline_size = 18
 	l.pixel_size = 0.009
 	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	l.no_depth_test = true
+	l.no_depth_test = false
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	l.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(l)
@@ -768,7 +775,9 @@ func _process(delta: float) -> void:
 			get_tree().reload_current_scene()
 		return
 	if net.mode == "host" and not net.connected:
-		return  # hold the waves until the knights join
+		solo_wait += delta
+		if solo_wait < 8.0:
+			return  # give the knights a moment to join; after that the Giant can play alone (they can still join)
 	_host_knights(delta)
 	_update_boulders(delta)
 	_update_rain(delta)
@@ -892,6 +901,8 @@ func _end_wave() -> void:
 
 
 func _spawn_goblin(kind: String) -> void:
+	if kind == "armored" and solo_giant():
+		kind = "goblin"  # spiky ones need knights: without any, send plain goblins (Simon)
 	var a := randf() * TAU
 	var dir := Vector3(cos(a), 0.0, sin(a))
 	var g := GoblinScript.new()
@@ -912,7 +923,7 @@ func _spawn_goblin(kind: String) -> void:
 			tips_said["balloon"] = true
 			_giant_tip("BALLOON GOBLINS! Grab them out of the air (right trigger)!")
 		return
-	if kind == "king":
+	if kind == "king" and not solo_giant():
 		g.max_armor = 8.0 + 2.0 * _extra_knights()
 		g.armor = g.max_armor
 	g.position = dir * (W.EDGE - 0.3) + Vector3.DOWN * 1.0
@@ -948,7 +959,7 @@ func _check_lose(delta: float) -> void:
 			any_active = true
 			if not k.is_down:
 				any_up = true
-	if any_active and not any_up:
+	if any_active and not any_up and not solo_giant():  # solo: no knights to fall asleep
 		var before := int(DOWN_GRACE - down_t)
 		down_t += delta
 		var left := int(DOWN_GRACE - down_t)
@@ -1893,7 +1904,7 @@ func _update_vr_center() -> void:
 		vr_center.font_size = 48
 		vr_center.outline_size = 26
 		vr_center.outline_modulate = Color.BLACK
-		vr_center.no_depth_test = true
+		vr_center.no_depth_test = false
 		vr_center.render_priority = 10
 		vr_center.outline_render_priority = 9
 		vr_center.width = 900.0
@@ -1919,7 +1930,7 @@ func _update_vr_center() -> void:
 		vr_hint.font_size = 36
 		vr_hint.outline_size = 22
 		vr_hint.outline_modulate = Color.BLACK
-		vr_hint.no_depth_test = true
+		vr_hint.no_depth_test = false
 		vr_hint.render_priority = 10
 		vr_hint.outline_render_priority = 9
 		vr_hint.width = 800.0

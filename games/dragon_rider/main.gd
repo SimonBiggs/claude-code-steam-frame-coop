@@ -368,7 +368,7 @@ func popup(local: Vector3, text: String, color: Color, broadcast: bool = true) -
 	l.font_size = 64
 	l.outline_size = 20
 	l.pixel_size = 0.012
-	l.no_depth_test = true
+	l.no_depth_test = false
 	l.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	dragon.add_child(l)
 	l.position = local
@@ -1874,7 +1874,7 @@ func _vr_label(font: int, width: float) -> Label3D:
 	var l := Label3D.new()
 	l.font_size = font
 	l.outline_size = 26
-	l.no_depth_test = true
+	l.no_depth_test = false
 	l.render_priority = 10
 	l.outline_render_priority = 9
 	l.width = width

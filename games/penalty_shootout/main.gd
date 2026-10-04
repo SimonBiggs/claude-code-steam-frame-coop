@@ -295,7 +295,7 @@ func popup(pos: Vector3, text: String, color: Color, broadcast: bool = true) -> 
 		pos = Vector3(clampf(pos.x, -3.0, 3.0), maxf(pos.y, 1.2) + 0.6, maxf(pos.z, 4.0))  # never close to the eyes
 	else:
 		l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-		l.no_depth_test = true
+		l.no_depth_test = false
 	add_child(l)
 	l.global_position = pos
 	var tw := l.create_tween()
@@ -1532,7 +1532,7 @@ func _update_aim_visuals() -> void:
 		var rm := StandardMaterial3D.new()
 		rm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		rm.albedo_color = Color(1, 1, 0.3)
-		rm.no_depth_test = true
+		rm.no_depth_test = false
 		reticle.material_override = rm
 		add_child(reticle)
 		var dm := StandardMaterial3D.new()

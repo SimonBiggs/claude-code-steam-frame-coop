@@ -40,6 +40,8 @@ const GAMES := [
 		"blurb": "Relaxing: VR casts and reels from the jetty; TV rowers herd fish and net treasure"},
 	{"id": "kart_race", "cat": "sports", "name": "KART RACE", "scene": "res://games/kart_race/main.tscn",
 		"blurb": "VR turns a real steering wheel; TV racers drive in split screen, with items and ramps"},
+	{"id": "tiny_town_tycoon", "cat": "cosy", "name": "TINY TOWN TYCOON", "scene": "res://games/tiny_town_tycoon/main.tscn",
+		"blurb": "Build a cosy toy town together: the mayor places the buildings, the drivers bring it to life"},
 ]
 ## Tabs on the TV (LB/RB) and in VR (stick left/right). Empty categories are hidden.
 const CATEGORIES := [
@@ -75,8 +77,15 @@ var starting := false
 
 
 func _ready() -> void:
+	get_tree().paused = false  # the lobby must never start paused (a game can leave the tree paused)
 	XRServer.world_scale = 1.0  # a game (Giant's Table) may have left the world scaled up
 	var wanted := OS.get_environment("ARCADE_GAME") if OS.has_environment("ARCADE_GAME") else ""
+	# ARCADE_GAME only picks the FIRST game: coming back to the arcade must show the lobby, not
+	# start that game again.
+	if get_tree().root.has_meta("arcade_auto_started"):
+		wanted = ""
+	elif wanted != "":
+		get_tree().root.set_meta("arcade_auto_started", true)
 	if wanted != "" or GAMES.size() == 1:
 		_launch(_index_of(wanted))
 		return
@@ -194,6 +203,7 @@ func _launch(index: int) -> void:
 
 
 func _process(_delta: float) -> void:
+	_ensure_shared_nodes()
 	if not has_meta("menu_v4") and (not buttons.is_empty() or grid == null) and status != null:
 		set_meta("menu_v4", true)  # hot reload: replace an older TV menu with the category tabs
 		for c in get_children():
@@ -214,7 +224,7 @@ func _process(_delta: float) -> void:
 			_join_lobby(OS.get_environment("DUO_JOIN"))
 	if vr_list:
 		_vr_input()
-		VrText.follow(vr_list, vr_cam, self, -0.1, 2.2)  # always findable, wherever you look
+		VrText.follow(vr_list, vr_cam, self, 0.25, 2.4)  # always findable; raised so a seated player's list stays above the floor
 		if not has_meta("vr_floor"):
 			set_meta("vr_floor", true)
 			_build_vr_floor()
@@ -453,7 +463,7 @@ func _build_vr_view() -> void:
 	vr_list = Label3D.new()
 	vr_list.font_size = 44
 	vr_list.outline_size = 22
-	vr_list.pixel_size = 0.003
+	vr_list.pixel_size = 0.0026
 	vr_list.width = 1100.0
 	vr_list.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	vr_list.modulate = Color(0.85, 0.97, 1.0)
@@ -565,3 +575,16 @@ func _listen_for_game() -> void:
 				mode = "client"
 				_launch(i)
 				return
+
+
+## The lobby doesn't use core/net.gd, so start the same root-level helpers the games get from it:
+## the VR text guard (also a capture mirror, so the live view isn't black here) and Claude's captions.
+func _ensure_shared_nodes() -> void:
+	var root := get_tree().root
+	for pair in [["vr_text_guard", "res://core/vr_text_guard.gd"], ["claude_caption", "res://addons/gdev/caption.gd"]]:
+		if root.has_meta(pair[0]) or not ResourceLoader.exists(pair[1]):
+			continue
+		var n: Node = (load(pair[1]) as GDScript).new()
+		root.set_meta(pair[0], n)
+		root.add_child.call_deferred(n)
+

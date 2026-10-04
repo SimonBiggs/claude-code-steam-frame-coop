@@ -145,7 +145,7 @@ func _ready() -> void:
 	var tag := Label3D.new()
 	tag.text = "CHEF"
 	tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	tag.no_depth_test = true
+	tag.no_depth_test = false
 	tag.fixed_size = true
 	tag.pixel_size = 0.0012
 	tag.font_size = 28
@@ -235,7 +235,7 @@ func attach_xr(origin: XROrigin3D, cam: XRCamera3D, left: XRController3D, right:
 	wrist_label.modulate = Color(1.0, 0.95, 0.7)
 	wrist_label.position = Vector3(0.0, 0.07, 0.1)
 	wrist_label.rotation_degrees = Vector3(-55, 0, 0)
-	wrist_label.no_depth_test = true
+	wrist_label.no_depth_test = false
 	hand_l.add_child(wrist_label)
 	main.set_layers(wrist_label, viewmodel_layer())
 

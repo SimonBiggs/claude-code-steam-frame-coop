@@ -10,7 +10,9 @@ utterances with a simple energy detector, transcribes each with faster-whisper, 
 "[HH:MM:SS] text" lines to the game's voice log (watched by Claude).
 """
 import datetime as dt
+import os
 import re
+import time
 import subprocess
 import sys
 from pathlib import Path
@@ -26,10 +28,13 @@ HOST = "steamos@frame"
 LOG = Path.home() / "GodotProjects/duo-arena/.dev/voice.log"
 RATE = 16000
 FRAME = 480  # 30 ms
-MODEL = sys.argv[1] if len(sys.argv) > 1 else "medium.en"
+MODEL = sys.argv[1] if len(sys.argv) > 1 else "medium.en"  # the user prefers its accuracy over small.en speed
+# Loudness (RMS) a 30 ms frame needs to count as speech. 180 also hears people across the room,
+# not just the headset wearer (that needed ~500); Whisper's VAD filter drops the extra non-speech.
+FLOOR = float(os.environ.get("VOICE_FLOOR", "180"))
 
 # Whisper tends to "hear" these in noise; ignore them when they are the whole utterance.
-JUNK = {"", "you", "thank you", "thank you.", "thanks for watching!", "bye.", ".", "uh", "um", "hmm"}
+JUNK = {"", "you", "thank you", "thank you.", "thanks for watching!", "bye.", ".", "uh", "um", "hmm", "silence", "silence.", "[silence]", "(silence)"}
 
 
 SPEAKER_MODEL = Path.home() / ".local/share/voice-bridge/wespeaker_en_voxceleb_resnet34_LM.onnx"
@@ -83,6 +88,12 @@ class Speakers:
         return name
 
 
+def timing(text: str) -> None:
+    """Latency log for each utterance (.dev/voice-timing.log)."""
+    with open(LOG.parent / "voice-timing.log", "a") as f:
+        f.write(text + "\n")
+
+
 def log(text: str) -> None:
     line = f"[{dt.datetime.now():%H:%M:%S}] {text}"
     print(line, flush=True)
@@ -96,7 +107,11 @@ def main() -> None:
     model = WhisperModel(MODEL, device="cpu", compute_type="int8", cpu_threads=6)
     speakers = Speakers()
     cmd = ["ssh", "-i", KEY, "-o", "BatchMode=yes", "-o", "ServerAliveInterval=5", HOST,
-           "XDG_RUNTIME_DIR=/run/user/1000 exec pw-record --target echo_cancel_source "
+           # Prefer the echo-cancelled mic; it disappears after the Frame sleeps, so fall back to
+           # the default source rather than recording silence.
+           "export XDG_RUNTIME_DIR=/run/user/1000; "
+           "src=$(pactl list short sources | grep -q echo_cancel_source && echo echo_cancel_source "
+           "|| pactl get-default-source); exec pw-record --target \"$src\" "
            f"--rate {RATE} --channels 1 --format s16 -"]
     backoff = 3
     was_listening = False
@@ -120,24 +135,27 @@ def main() -> None:
                     was_listening = True
             chunk = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
             rms = float(np.sqrt(np.mean(chunk * chunk)))
-            loud = rms > max(500.0, noise * 3.0)
+            loud = rms > max(FLOOR, noise * 3.0)
             if not speech:
                 noise = noise * 0.98 + rms * 0.02 if not loud else noise
                 pre = (pre + [chunk])[-10:]  # keep 300 ms before speech starts
                 voiced = voiced + 1 if loud else 0
                 if voiced >= 3:
                     speech = pre[:]
+                    t_start = time.time() - len(pre) * FRAME / RATE
                     silent = 0
                 continue
             speech.append(chunk)
             silent = 0 if loud else silent + 1
             too_long = len(speech) * FRAME > RATE * 15
-            if silent * FRAME > RATE * 0.8 or too_long:
+            if silent * FRAME > RATE * 0.5 or too_long:  # 0.5 s pause ends an utterance
+                t_end = time.time() - silent * FRAME / RATE
                 audio = np.concatenate(speech) / 32768.0
                 speech, voiced = [], 0
                 if len(audio) < RATE * 0.5:
                     continue
-                segments, _ = model.transcribe(audio, language="en", beam_size=1, without_timestamps=True,
+                t_tx = time.time()
+                segments, _ = model.transcribe(audio, language="en", beam_size=1, without_timestamps=True, vad_filter=True,
                                                condition_on_previous_text=False)
                 text = " ".join(s.text.strip() for s in segments).strip()
                 # Whisper sometimes hallucinates subtitle markup (<p begin=...>) on noise: drop it.
@@ -148,11 +166,12 @@ def main() -> None:
                     addressed = re.search(r"\b(claude|cloud|clawed|clod|claud|clyde|lord|cora|clora)\b", text, re.I)
                     who = speakers.identify(audio.astype(np.float32), text)
                     log(("TO CLAUDE: " if addressed else "") + f"{who}: {text}")
+                    timing(f"speech {t_start:.2f}-{t_end:.2f} silence_wait {t_tx - t_end:.2f}s "
+                           f"transcribe {time.time() - t_tx:.2f}s logged {time.time():.2f} | {text[:40]}")
         proc.kill()
         if was_listening and not got_audio or was_listening:
             print("Steam Frame mic offline (headset off?) - will keep retrying quietly", flush=True)
             was_listening = False
-        import time
         time.sleep(backoff)
         backoff = min(backoff * 2, 30)  # retry less often while the headset is off
 

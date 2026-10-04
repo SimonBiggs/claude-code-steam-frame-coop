@@ -376,7 +376,7 @@ func show_hint(text: String, duration: float) -> void:
 			hint_3d.outline_size = 26
 			hint_3d.outline_modulate = Color.BLACK
 			hint_3d.pixel_size = 0.0022
-			hint_3d.no_depth_test = true
+			hint_3d.no_depth_test = false
 			hint_3d.render_priority = 10
 			hint_3d.outline_render_priority = 9
 			hint_3d.width = 1100.0

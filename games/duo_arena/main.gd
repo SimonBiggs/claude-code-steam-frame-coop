@@ -329,7 +329,7 @@ func popup(pos: Vector3, text: String, color: Color) -> void:
 	l.outline_size = 12
 	l.pixel_size = 0.006
 	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	l.no_depth_test = true
+	l.no_depth_test = false
 	l.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(l)
 	l.global_position = pos
@@ -1311,7 +1311,7 @@ func _vr_text(pos: Vector3, color: Color, font: int) -> Label3D:
 	l.font_size = font
 	l.outline_size = 12
 	l.pixel_size = 0.0022
-	l.no_depth_test = true
+	l.no_depth_test = false
 	l.render_priority = 10
 	l.outline_render_priority = 9
 	l.width = 1000.0
@@ -1924,7 +1924,7 @@ func claude_say(text: String) -> void:
 			claude_3d.font_size = 40
 			claude_3d.outline_size = 12
 			claude_3d.pixel_size = 0.0022
-			claude_3d.no_depth_test = true
+			claude_3d.no_depth_test = false
 			claude_3d.render_priority = 10
 			claude_3d.outline_render_priority = 9
 			claude_3d.width = 1000.0
@@ -1953,7 +1953,7 @@ func _update_vr_center() -> void:
 		vr_center = Label3D.new()
 		vr_center.font_size = 48
 		vr_center.outline_size = 14
-		vr_center.no_depth_test = true
+		vr_center.no_depth_test = false
 		vr_center.fixed_size = false
 		vr_center.render_priority = 10
 		vr_center.outline_render_priority = 9

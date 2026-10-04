@@ -57,7 +57,7 @@ func _ready() -> void:
 	warn.pixel_size = 0.01
 	warn.modulate = Color(1.0, 0.3, 0.3)
 	warn.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	warn.no_depth_test = true
+	warn.no_depth_test = false
 	warn.top_level = true
 	add_child(warn)
 	if deck_target == Vector3.ZERO:
