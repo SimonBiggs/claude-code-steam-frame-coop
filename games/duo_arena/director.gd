@@ -192,6 +192,12 @@ func on_wave_started(wave: int, boss_kind: String) -> void:
 		return
 	mood = ""
 	waves_since_event += 1
+	if main.SIMPLE_MODE:
+		# Simple mode keeps one arena event, the fun visual one: Fishwort dives now and then.
+		if wave >= 4 and wave % 3 == 1 and main.sky_fish != null and main.sky_fish.alive:
+			pending_event = "dive"
+			pending_t = 4.0
+		return
 	if wave < 3:
 		return
 	if randf() < 0.55 or waves_since_event >= 2:
@@ -423,6 +429,10 @@ func _check_bash() -> void:
 
 ## Host: a monster died. Returns the points after the combo bonus.
 func on_kill(killer, e, points: int) -> int:
+	if main.SIMPLE_MODE:
+		if killer != null and is_instance_valid(killer):
+			add_stat(killer, "kills", 1)
+		return points  # no combo counter / multipliers in simple mode
 	combo += 1
 	combo_t = COMBO_TIME
 	best_combo = maxi(best_combo, combo)
@@ -464,7 +474,7 @@ func get_stat(idx: int, key: String) -> int:
 func on_revive(helper, downed) -> void:
 	add_stat(helper, "revives", 1)
 	if helper != null and is_instance_valid(helper):
-		main.popup(downed.global_position + Vector3.UP * 2.4, "P%d SAVED P%d!" % [helper.index + 1, downed.index + 1], helper.color.lightened(0.3))
+		main.popup(downed.global_position + Vector3.UP * 2.4, "SAVED!" if main.SIMPLE_MODE else "P%d SAVED P%d!" % [helper.index + 1, downed.index + 1], helper.color.lightened(0.3))
 	cheer(0.8, 1.0)
 	main.sound("cheer", -3.0, 1.1)
 	hint("TEAMWORK! The crowd LOVES a rescue!", 3.0, "revive_cheer")
@@ -478,6 +488,8 @@ func on_down(p) -> void:
 
 ## Awards for the end screen: every player gets at least one.
 func awards_text() -> String:
+	if main.SIMPLE_MODE:
+		return ""
 	var active: Array = main.players.filter(func(p) -> bool: return p.active)
 	if active.is_empty():
 		return ""
@@ -512,6 +524,8 @@ func awards_text() -> String:
 
 ## A short tip on the TV and in VR. With a key it is shown once per game.
 func hint(text: String, duration: float = 4.0, key: String = "", vr_text: String = "") -> void:
+	if main.SIMPLE_MODE:
+		return  # simple mode teaches with the world (targets, arrows, the ghost hand), not hint text
 	if key != "":
 		if told.has(key):
 			return
@@ -523,6 +537,8 @@ func hint(text: String, duration: float = 4.0, key: String = "", vr_text: String
 
 ## Like hint(), but may repeat after `cooldown` seconds.
 func hint_every(text: String, duration: float, key: String, cooldown: float) -> void:
+	if main.SIMPLE_MODE:
+		return
 	var now := Time.get_ticks_msec() / 1000.0
 	if now < float(told.get(key, -1000.0)):
 		return
@@ -574,6 +590,8 @@ const VR_HOWTO := "HOW TO PLAY\nRIGHT TRIGGER: shoot   LEFT STICK: walk   RIGHT 
 
 
 func howto() -> void:
+	if main.SIMPLE_MODE:
+		return  # the practice targets teach shooting instead
 	var tv_ready: bool = main.net.mode != "host" or main.net.connected
 	if not told.has("howto_tv") and tv_ready:
 		told["howto_tv"] = true
@@ -754,7 +772,7 @@ func _update_ui(_delta: float) -> void:
 		combo_label.modulate.a = maxf(0.0, combo_label.modulate.a - _delta * 2.0)
 	shown_combo = combo
 	var show_boss := boss_frac >= 0.0 and boss_name != ""
-	boss_label.visible = show_boss
+	boss_label.visible = show_boss and not main.SIMPLE_MODE  # simple mode: just the red bar
 	boss_bar.visible = show_boss
 	if show_boss:
 		boss_label.text = boss_name

@@ -111,5 +111,6 @@ func shot_down() -> void:
 	main.score += 50
 	main.achievements().unlock("fish_fry")
 	main.explosion(global_position, color, 0.8)
-	main.popup(global_position + Vector3.UP * 0.5, "+50", color.lightened(0.3))
+	if not main.SIMPLE_MODE:
+		main.popup(global_position + Vector3.UP * 0.5, "+50", color.lightened(0.3))
 	queue_free()
