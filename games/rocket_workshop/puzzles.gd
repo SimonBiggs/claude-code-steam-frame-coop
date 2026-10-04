@@ -12,7 +12,7 @@ const SHAPE_NAMES: Array[String] = ["BALL", "CUBE", "CONE", "RING", "PILL", "TEN
 const SHAPE_COLORS: Array[Color] = [Color(1.0, 0.4, 0.35), Color(0.35, 0.6, 1.0), Color(1.0, 0.8, 0.2),
 	Color(0.4, 0.85, 0.4), Color(0.8, 0.45, 0.95), Color(1.0, 0.6, 0.25)]
 const ROCKET_NAMES: Array[String] = ["ZOOMY", "BLIPPY", "NOVA", "WOBBLE", "SPARKY", "LUNA", "ROCKO", "PIP", "COMET", "BIBBLE",
-	"FIZZ", "DOODLE", "TWINKLE", "BOOMER"]
+	"FIZZ", "DOODLE", "TWINKLE", "ZIPPY"]
 const VR_TYPES: Array[String] = ["fuel", "wires", "symbols", "gauge", "switches", "alien", "crank"]
 const NEW_TYPES: Array[String] = ["alien", "crank"]  # introduced from rocket 2, one at a time
 const JOB_TYPES: Array[String] = ["canister", "pipe", "bolts", "paint"]
