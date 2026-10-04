@@ -1,4 +1,5 @@
 #!/bin/bash
 # frame-mirror: smooth live view of what the Steam Frame (VR) player sees.
-# The game's gdev bridge on the headset serves an MJPEG stream on port 8090; this opens it in a browser.
-exec xdg-open "http://${1:-frame}:8090/"
+# The game's gdev bridge on the headset serves an MJPEG stream on port 8090. This opens a small
+# local page that shows it and reconnects every 20 s (the raw stream can freeze when a game changes).
+exec xdg-open "file://$HOME/.local/share/frame-mirror/index.html?host=${1:-frame}"
