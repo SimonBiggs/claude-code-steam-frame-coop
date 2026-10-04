@@ -140,7 +140,7 @@ func _ready() -> void:
 	bubble.outline_size = 18
 	bubble.pixel_size = 0.0055
 	bubble.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	bubble.no_depth_test = true
+	bubble.no_depth_test = false
 	bubble.modulate = Color.WHITE
 	bubble.position.y = 2.95
 	add_child(bubble)

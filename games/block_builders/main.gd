@@ -738,7 +738,7 @@ func popup(pos: Vector3, text: String, color: Color) -> void:
 	l.outline_size = 16
 	l.pixel_size = 0.008
 	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	l.no_depth_test = true
+	l.no_depth_test = false
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	l.layers = Art.TV_LAYER
 	add_child(l)
@@ -1636,7 +1636,7 @@ func _make_vr_label(font: int, color: Color) -> Label3D:
 	l.outline_size = 26
 	l.outline_modulate = Color.BLACK
 	l.modulate = color
-	l.no_depth_test = true
+	l.no_depth_test = false
 	l.render_priority = 10
 	l.outline_render_priority = 9
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART

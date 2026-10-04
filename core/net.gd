@@ -111,6 +111,7 @@ var menu_was_down := false
 
 
 func _process(delta: float) -> void:
+	_ensure_caption()
 	_track_pause()
 	if not get_tree().paused:
 		_since_unpause += delta
@@ -544,11 +545,20 @@ func _wrist_button(hl: XRController3D) -> Label3D:
 		btn.font_size = 40
 		btn.outline_size = 18
 		btn.pixel_size = 0.0012
-		btn.no_depth_test = true
-		btn.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		btn.no_depth_test = false
+		btn.billboard = BaseMaterial3D.BILLBOARD_DISABLED
 		btn.process_mode = Node.PROCESS_MODE_ALWAYS
 		hl.add_child(btn)
 		btn.position = Vector3(0.0, 0.07, 0.1)
+	btn.no_depth_test = false  # (re)applied so buttons made before this fix also let the hand pass in front
+	# No billboard in VR: each eye would see it turned differently (cross-eyed, Abigail/Simon).
+	# Turn it towards the head once per frame instead; a Label3D reads from its +Z side.
+	btn.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+	var cam := get_viewport().get_camera_3d()
+	if cam != null:
+		var d := btn.global_position - cam.global_position
+		if d.length() > 0.01:
+			btn.global_basis = Basis.looking_at(d, Vector3.UP).scaled(btn.global_basis.get_scale())
 	return btn
 
 
@@ -570,3 +580,22 @@ func _beacon(delta: float) -> void:
 	var scene := get_tree().current_scene
 	if scene != null and scene.scene_file_path != "":
 		u.put_packet(("ARCADE_GAME " + scene.scene_file_path).to_utf8_buffer())
+
+
+## "Claude:" captions from frame-say (addons/gdev/caption.gd, a dev tool that may be missing).
+## Added once to the root so it survives game changes; created here because net.gd hot-reloads,
+## so it switches on in a running game without a restart.
+func _ensure_caption() -> void:
+	var root := get_tree().root
+	if not root.has_meta("vr_text_guard"):
+		var g: Node = (load("res://core/vr_text_guard.gd") as GDScript).new()
+		g.name = "VrTextGuard"
+		root.set_meta("vr_text_guard", g)
+		root.add_child.call_deferred(g)
+	if root.has_meta("claude_caption") or not ResourceLoader.exists("res://addons/gdev/caption.gd"):
+		return
+	var c: Node = (load("res://addons/gdev/caption.gd") as GDScript).new()
+	c.name = "ClaudeCaption"
+	root.set_meta("claude_caption", c)
+	root.add_child.call_deferred(c)
+

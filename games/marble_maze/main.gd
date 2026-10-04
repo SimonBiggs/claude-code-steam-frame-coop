@@ -242,7 +242,7 @@ func popup(pos: Vector3, text: String, color: Color, broadcast: bool = true) -> 
 	l.pixel_size = 0.0009
 	l.outline_size = 14
 	l.modulate = color
-	l.no_depth_test = true
+	l.no_depth_test = false
 	l.render_priority = 5
 	if players.size() > 0 and players[0].vr:
 		l.billboard = BaseMaterial3D.BILLBOARD_DISABLED  # VR text faces the player but never follows the head
@@ -1794,7 +1794,7 @@ func _update_vr_text() -> void:
 		vr_center.font_size = 44
 		vr_center.outline_size = 26
 		vr_center.pixel_size = 0.0022
-		vr_center.no_depth_test = true
+		vr_center.no_depth_test = false
 		vr_center.render_priority = 10
 		vr_center.outline_render_priority = 9
 		vr_center.width = 1100.0

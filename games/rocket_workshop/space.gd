@@ -408,7 +408,7 @@ func _build_diorama() -> void:
 	dio_label.outline_size = 24
 	dio_label.modulate = Color(1.0, 0.9, 0.4)
 	dio_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	dio_label.no_depth_test = true
+	dio_label.no_depth_test = false
 	dio.add_child(dio_label)
 	main.set_layers(dio, main.MANUAL_LAYER)
 	space_env = Environment.new()

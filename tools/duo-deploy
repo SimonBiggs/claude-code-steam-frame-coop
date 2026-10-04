@@ -5,10 +5,15 @@ set -e
 msg="$1"
 ST=~/GodotProjects/.duo-arena-stage; LIVE=~/GodotProjects/duo-arena; B=~/GodotProjects/duo-arena-frame-build
 K=~/.config/steamos-devkit/devkit_rsa
+# VR text rule: far text must never draw over nearer things (it hurts to look at in the headset).
+if bad=$(grep -rn "no_depth_test = true" "$ST/core" "$ST/games" "$ST/arcade" --include='*.gd'); then
+  echo "NOT deploying: Label3D.no_depth_test = true breaks VR depth (see docs/GAME_DEV_GUIDE.md):" >&2
+  echo "$bad" >&2; exit 1
+fi
 for d in core games arcade tests; do rsync -a --delete --exclude '*.uid' "$ST/$d/" "$LIVE/$d/"; done
 cp "$ST/arcade.tscn" "$LIVE/arcade.tscn"
 rsync -a --delete --exclude .git --exclude .dev --exclude .godot --exclude launch.sh --exclude tools "$LIVE/" "$B/game/"
-if timeout 4 bash -c 'echo > /dev/tcp/frame/22' 2>/dev/null; then
+if ssh -o ConnectTimeout=4 -o BatchMode=yes -i $K steamos@frame true 2>/dev/null; then
   rsync -az -e "ssh -i $K" --exclude .godot --exclude .dev "$B/game/" steamos@frame:devkit-game/DuoArena/game/
 else
   echo "Steam Frame offline: run 'duo-deploy-frame' when it's back" >&2

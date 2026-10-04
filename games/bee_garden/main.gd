@@ -694,7 +694,7 @@ func popup(pos: Vector3, text: String, color: Color, broadcast: bool = true) -> 
 	l.font_size = 56
 	l.outline_size = 16
 	l.pixel_size = 0.006
-	l.no_depth_test = true
+	l.no_depth_test = false
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	l.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(l)
@@ -1999,7 +1999,7 @@ func _update_vr_center() -> void:
 		vr_center.font_size = 46
 		vr_center.outline_size = 26
 		vr_center.outline_modulate = Color.BLACK
-		vr_center.no_depth_test = true
+		vr_center.no_depth_test = false
 		vr_center.render_priority = 10
 		vr_center.outline_render_priority = 9
 		vr_center.width = 1000.0

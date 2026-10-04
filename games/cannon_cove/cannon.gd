@@ -100,7 +100,7 @@ func _ready() -> void:
 	label.outline_size = 26
 	label.pixel_size = 0.0055
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	label.no_depth_test = true
+	label.no_depth_test = false
 	label.position = Vector3(0, 1.3, 0.3)
 	add_child(label)
 	# Trajectory preview.

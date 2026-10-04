@@ -730,7 +730,7 @@ static func label3d(text: String, height_m: float = 0.06, color: Variant = "text
 	l.outline_size = 14
 	l.modulate = color_of(color)
 	l.outline_modulate = Color(0.02, 0.02, 0.06, 0.95)
-	l.no_depth_test = true
+	l.no_depth_test = false
 	l.render_priority = VR_PRIO_TEXT
 	l.outline_render_priority = VR_PRIO_TEXT - 1
 	l.double_sided = false

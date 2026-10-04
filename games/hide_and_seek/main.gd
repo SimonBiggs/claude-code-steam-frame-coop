@@ -1110,7 +1110,7 @@ func _achoo(pos: Vector3, index: int) -> void:
 	l.outline_size = 16
 	l.modulate = Color(0.75, 1.0, 0.75)
 	l.outline_modulate = Color(0, 0, 0, 0.9)
-	l.no_depth_test = true
+	l.no_depth_test = false
 	add_child(l)
 	l.global_position = pos + Vector3.UP * 0.5
 	if not players.is_empty() and players[0].vr and players[0].xr_camera != null:
@@ -1625,7 +1625,7 @@ func _vr_label(font: int, width: float) -> Label3D:
 	l.font_size = font
 	l.outline_size = 26
 	l.outline_modulate = Color.BLACK
-	l.no_depth_test = true
+	l.no_depth_test = false
 	l.render_priority = 10
 	l.outline_render_priority = 9
 	l.width = width
