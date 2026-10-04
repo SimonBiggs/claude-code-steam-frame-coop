@@ -58,7 +58,8 @@ var step := party.nav(slot)                     # Vector2i menu step with key re
   `join_filter = func(slot: int) -> bool`; refusals emit `join_refused(device, reason)` on the TV.
 - **Leaving**: a controller that disconnects keeps its seat for `leave_after` s (`device_lost`,
   `device_restored`); then the player leaves; plugging it back in rejoins the same seat.
-  `leave(slot)` frees a seat (a "quit" menu item, kicking). When the TV machine disconnects, the
+  `leave(slot)` frees a seat (a "quit" menu item, kicking; `leave(slot, true)` lets that pad
+  rejoin by being plugged in again). When the TV machine disconnects, the
   host's REMOTE seats leave; they come back when it reconnects.
 - **Roster**: `owner_of(device) -> slot|-1`, `device_of(slot)`, `active_slots()`, `local_slots()`
   (seats driven on THIS machine: the ones needing a view), `player_count()`, `is_active/is_local/
@@ -74,7 +75,8 @@ var step := party.nav(slot)                     # Vector2i menu step with key re
   / `guard_all()` after your own screen changes.
 - Keyboard player: move WASD, look mouse, accept Space/Enter/left click, back Backspace/right
   click, x F, y R, lb Q, rb E, lt Shift, rt Ctrl, start Tab, select M, d-pad arrows.
-  Esc stays the pause menu.
+  Esc stays the pause menu. A keyboard join waits 0.15 s and is dropped if a pad button went down
+  with it (Steam's desktop layout sends keys for pad buttons: no phantom keyboard players).
 - `allow_slot0 = true` (local play without a headset) makes slot 0 a joinable TV seat.
 - The pause menu (`core/pause_menu.gd`) only opens from a pad the party owns.
 - Bots: `add_virtual_pad() -> device` (ids from 40), `remove_virtual_pad` / `replug_virtual_pad`,
@@ -97,7 +99,9 @@ split.set_bubble(vr_mirror)                      # round picture-in-picture of t
 - `set_slots([...])`, `add_slot`, `remove_slot`, `slots()`, `view_count()`, `view_rect(slot)`,
   `hud_scale(slot)`, `viewport(slot)`, `active_camera(slot)` (the shared one in shared mode).
 - Shared mode for board games, quiz shows, RPG battles: switch any time; per-player views are kept
-  (hidden views don't render) so switching back is instant.
+  (hidden views don't render) so switching back is instant. While nobody is seated on this screen
+  the shared view shows too (`shared_when_empty`, `showing_shared()`): point its camera at the
+  world and put "Press A to join" in `shared_hud()`.
 - Performance: 3D resolution by view count (`res_scales`), MSAA only up to `msaa_max_views` (2),
   SSAO off beyond 2 views and sun shadows off beyond 4 (`manage_effects`; never touches VR).
 - HUD roots are scaled by `clamp(min(w / 940, h / 900), 0.5, 1)`: design at full size, anchor to
@@ -140,6 +144,8 @@ var throw_velocity := vr_rig.hand_velocity(VrRig.RIGHT)
   limits `fit_limits`), `"none"` keeps real height. Fits on start and re-fits when the head height
   changes by `refit_threshold` for `refit_time` s; signal `refitted(head_height)`. `refit()`,
   `real_head_height()`. Move the player with `place(feet, yaw)` / `floor_height`, not by setting y.
+  `place()` is remembered: `recenter()` goes back to it, and the first fit (once tracking starts)
+  recentres there too, wherever the player stands in their room (`recenter_on_first_fit`).
 - Locomotion: `locomotion` (left stick, head-relative, `move_speed`), `turn_mode` "snap"
   (`snap_degrees`) / "smooth" / "none", `bounds` (Rect2 on XZ), `collision_mask` + `body_radius`
   (slide along walls), `move_filter = func(from, to) -> Vector3`.
