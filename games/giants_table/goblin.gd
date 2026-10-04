@@ -52,6 +52,7 @@ var max_armor := 0.0
 var armor_vis: Node3D
 var blink_t := 1.0
 var eyes_mi: MeshInstance3D
+var practice := false  # simple mode: the glowing training goblin (stands still, never steals)
 
 
 ## Big walkers (ogres and the king) share a flow field and stomp through trees.
@@ -312,9 +313,9 @@ func bolt_hit(p: Vector3) -> bool:
 func _physics_process(delta: float) -> void:
 	flash_t -= delta
 	too_big_t -= delta
-	body_mat.emission_enabled = flash_t > 0.0
-	body_mat.emission = Color.WHITE
-	body_mat.emission_energy_multiplier = 1.5
+	body_mat.emission_enabled = flash_t > 0.0 or practice
+	body_mat.emission = Color.WHITE if flash_t > 0.0 else Color(1.0, 0.8, 0.3)
+	body_mat.emission_energy_multiplier = 1.5 if flash_t > 0.0 else 0.6 + 0.5 * absf(sin(walk_t * 4.0))
 	walk_t += delta
 	ember_orb.visible = carrying
 	stars.visible = dizzy_t > 0.0
@@ -350,7 +351,8 @@ func _physics_process(delta: float) -> void:
 			arm_l.rotation.z = 0.0
 			arm_r.rotation.z = 0.0
 			_pop_balloon(false)
-			main.popup(grab_center() + Vector3.UP * 0.8, "He landed!", Color(1.0, 0.7, 0.4))
+			if not main.simple:
+				main.popup(grab_center() + Vector3.UP * 0.8, "He landed!", Color(1.0, 0.7, 0.4))
 		elif global_position.y < W.FLOOR_Y:
 			_fell_off()
 		return
@@ -364,6 +366,12 @@ func _physics_process(delta: float) -> void:
 	pivot.rotation.x = 0.0
 	if dizzy_t > 0.0:
 		dizzy_t -= delta
+		return
+	if practice:
+		# Training goblin: hops on the spot and waves its arms ("come and get me!").
+		pivot.position.y = absf(sin(walk_t * 5.0)) * 0.12
+		arm_l.rotation.z = -2.2 + sin(walk_t * 9.0) * 0.5
+		arm_r.rotation.z = 2.2 - sin(walk_t * 9.0) * 0.5
 		return
 	_think(delta)
 
@@ -538,6 +546,10 @@ func hit_by_object(v: Vector3, by) -> void:
 
 ## Hit by a knight's sword or crossbow bolt.
 func hit_by_knight(damage: float, dir: Vector3, knight) -> void:
+	if practice:
+		flash_t = 0.12  # the training goblin is the Giant's to throw: knights just make it giggle
+		main.sound("squeak", -8.0, 1.4)
+		return
 	if floating:
 		_pop_balloon(true)
 		flying = true
@@ -553,6 +565,15 @@ func hit_by_knight(damage: float, dir: Vector3, knight) -> void:
 		var np2 := W.push_out(global_position + dir * 0.1, radius)
 		np2.y = maxf(W.height(np2.x, np2.z), global_position.y)
 		global_position = np2
+		return
+	if is_big() and main.simple:
+		# Simple mode: no "too big for knights" rule - big ones just take lots of bonks.
+		hp -= damage * 0.25
+		flash_t = 0.12
+		main.sound("hit", -6.0, 0.5)
+		global_position = W.push_out(global_position + dir * 0.15, radius)
+		if hp <= 0.0:
+			main.goblin_defeated(self, "knight", knight)
 		return
 	if is_big():
 		global_position = W.push_out(global_position + dir * 0.15, radius)
@@ -588,8 +609,11 @@ func _landed(impact: float) -> void:
 			if hp <= 0.0:
 				main.goblin_defeated(self, "slam", null)
 				return
-			main.popup(grab_center() + Vector3.UP * 1.2, "OOF! Once more!", Color(1.0, 0.8, 0.4))
+			main.popup(grab_center() + Vector3.UP * 1.2, "OOF!" if main.simple else "OOF! Once more!", Color(1.0, 0.8, 0.4))
 		dizzy_t = 2.5
+		return
+	if practice and main.practice != null and main.practice.in_ring(global_position):
+		main.goblin_defeated(self, "ring", null)
 		return
 	if impact > SQUASH_SPEED:
 		main.goblin_defeated(self, "squash", null)
@@ -607,7 +631,7 @@ func net_item() -> Array:
 
 
 func flags() -> int:
-	return int(carrying) | (int(held) << 1) | (int(dizzy_t > 0.0) << 2) | (int(flying) << 3) | (int(floating) << 4)
+	return int(carrying) | (int(held) << 1) | (int(dizzy_t > 0.0) << 2) | (int(flying) << 3) | (int(floating) << 4) | (int(practice) << 5)
 
 
 func apply_net(item: Array) -> void:
@@ -617,6 +641,7 @@ func apply_net(item: Array) -> void:
 	held = f & 2 != 0
 	dizzy_t = 1.0 if f & 4 != 0 else 0.0
 	flying = f & 8 != 0
+	practice = f & 32 != 0
 	var fl := f & 16 != 0
 	if fl != floating or (balloon != null and balloon.visible != fl):
 		floating = fl

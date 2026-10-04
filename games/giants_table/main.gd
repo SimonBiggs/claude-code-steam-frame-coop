@@ -10,6 +10,20 @@ const VrText := preload("res://core/vr_text.gd")
 ##    back in rejoins them.
 ##  - Armoured goblins: knights only (too spiky for the giant). Ogres: giant only (too big for knights).
 ## Modes (see docs/GAME_DEV_GUIDE.md): DUO_JOIN=<host> client, VR or DUO_HOST=1 host, else local split screen.
+##
+## SIMPLE_MODE (the family: "all of the games have become too complicated", "everything's being driven
+## by text"): the Giant grabs goblins walking to the campfire and throws them; the knights bonk them.
+##  - A PRACTICE moment first (practice.gd): a glowing training goblin, a glowing ring, a bouncing arrow
+##    and a ghost hand showing the grab-and-throw. Wave 1 = plain goblins only.
+##  - One new thing per wave, later waves only: 3 rain (cover the fire: a glowing ghost hand shows
+##    where), 4 balloon goblins, 5 an ogre, 6 the Goblin King (no armour), 7 spiky goblins (with knights).
+##    No "only knights / only the Giant" rules (knights can bonk big ones too; spiky ones still say OUCH).
+##  - Everything on the table reacts to the Giant's hands (scenery.gd): trees sway and can be pulled up
+##    and thrown, cottages wobble, sheep / villagers / ducks hop, the river splashes.
+##  - Off: embers dropping on the table (a stolen ember flies home when its goblin is beaten), village
+##    growth, combos, score popups, awards, the all-knights-asleep game over (down knights get back up by
+##    themselves), the help panel and the tips. Text: one short headline ("WAVE 2!", "RAIN!").
+const SIMPLE_MODE := true
 
 const W := preload("res://games/giants_table/world.gd")
 const GiantScript := preload("res://games/giants_table/giant.gd")
@@ -23,6 +37,9 @@ const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
 const NetScript := preload("res://core/net.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
+const SceneryScript := preload("res://games/giants_table/scenery.gd")
+const PracticeScript := preload("res://games/giants_table/practice.gd")
+const PropScript := preload("res://games/giants_table/prop.gd")
 
 const MAX_EMBERS := 10
 const BOULDER_COUNT := 8
@@ -41,11 +58,21 @@ const EXTRA_SOUNDS := {
 	"fanfare": [1.0, 392.0, 784.0, 0.35, "square", 0.0],
 	"roar": [1.2, 160.0, 60.0, 0.6, "saw", 0.4],
 	"sizzle": [0.6, 3000.0, 2500.0, 0.12, "square", 0.95],
+	"rustle": [0.35, 1800.0, 900.0, 0.14, "sine", 0.9],
+	"boing": [0.35, 160.0, 420.0, 0.32, "sine", 0.0],
+	"baa": [0.45, 520.0, 430.0, 0.22, "saw", 0.1],
+	"squeak": [0.15, 1200.0, 1800.0, 0.2, "sine", 0.0],
+	"splash": [0.4, 1500.0, 300.0, 0.25, "sine", 0.9],
+	"chime": [0.45, 880.0, 1320.0, 0.32, "tri", 0.0],
 }
 const PLAYER_COLORS: Array[Color] = [Color(0.3, 0.6, 1.0), Color(1.0, 0.72, 0.2), Color(1.0, 0.45, 0.75),
 	Color(0.95, 0.3, 0.28), Color(0.68, 0.45, 1.0), Color(0.3, 0.92, 0.95), Color(0.96, 0.96, 0.92)]
 
 var max_embers := MAX_EMBERS
+var simple := SIMPLE_MODE  # other scripts read main.simple
+var scenery: Node3D        # simple mode: trees / cottages that react to touch
+var practice: Node3D       # simple mode: the practice moment and the umbrella-hand hint
+var practice_done := not SIMPLE_MODE
 var players: Array = []
 var giant
 var net: Node
@@ -123,10 +150,17 @@ func _ready() -> void:
 	vr_on = xr != null and xr.is_initialized() and not OS.has_environment("DUO_JOIN")
 	if OS.has_environment("GT_FAKE_VR") and not OS.has_environment("DUO_JOIN"):
 		vr_on = true  # tests: run the VR code paths headless, without a headset
-	W.build(self, vr_on)
+	W.build(self, vr_on, SIMPLE_MODE)
 	village = VillageScript.new()
 	village.main = self
 	add_child(village)
+	if SIMPLE_MODE:
+		scenery = SceneryScript.new()
+		scenery.main = self
+		add_child(scenery)
+		practice = PracticeScript.new()
+		practice.main = self
+		add_child(practice)
 	for i in MAX_KNIGHTS + 1:
 		stats.append({"thrown": 0, "squashed": 0, "carried": 0, "caught": 0, "shield": 0.0, "kills": 0, "embers": 0, "revives": 0, "king": 0})
 	_build_fire()
@@ -160,6 +194,13 @@ func _setup_game(mode: String) -> void:
 			_spawn_boulder(Vector3(cos(a) * (W.R - 0.2), 0.0, sin(a) * (W.R - 0.2)), false)
 	ready_to_play = true
 	print("Giant's Table: %s mode" % mode)
+	if SIMPLE_MODE:
+		help_label.text = "" if mode == "host" else "RT sword   LT crossbow   A jump"  # one short TV line (fades at wave 2)
+		if mode == "client":
+			_show_center("GIANT'S TABLE!", 2.0)
+		elif mode == "local":
+			_show_center("GIANT'S TABLE!", 2.0)
+		return
 	var knight_help := "KNIGHTS: left stick / W S move · right stick / A D turn · RT / Space sword · LT / F crossbow · A / Shift jump\n"
 	if mode == "local":
 		help_label.text = knight_help \
@@ -593,7 +634,7 @@ func make_material(color: Color, glow: float) -> StandardMaterial3D:
 	return W.mat(color, glow)
 
 
-func burst(pos: Vector3, color: Color, amount: int = 16, size: float = 0.12) -> void:
+func burst(pos: Vector3, color: Color, amount: int = 16, size: float = 0.12, broadcast: bool = true) -> void:
 	var p := CPUParticles3D.new()
 	p.one_shot = true
 	p.amount = amount
@@ -614,11 +655,11 @@ func burst(pos: Vector3, color: Color, amount: int = 16, size: float = 0.12) -> 
 	p.global_position = pos
 	p.emitting = true
 	get_tree().create_timer(1.0).timeout.connect(p.queue_free)
-	if net:
+	if net and broadcast:
 		net.event("burst", [pos, color, amount, size])
 
 
-func sound(sound_name: String, volume_db: float = 0.0, pitch: float = 1.0) -> void:
+func sound(sound_name: String, volume_db: float = 0.0, pitch: float = 1.0, broadcast: bool = true) -> void:
 	if sfx == null:
 		sfx = SfxScript.new()
 		add_child(sfx)
@@ -626,7 +667,7 @@ func sound(sound_name: String, volume_db: float = 0.0, pitch: float = 1.0) -> vo
 			var d: Array = EXTRA_SOUNDS[k]
 			sfx.add_sound(k, d)
 	sfx.play(sound_name, volume_db, pitch)
-	if net:
+	if net and broadcast:
 		net.event("sound", [sound_name, volume_db, pitch])
 
 
@@ -749,7 +790,8 @@ func _process(delta: float) -> void:
 	_update_fire(delta)
 	_update_growth()
 	_update_rain_visuals(delta)
-	_update_knight_hints()
+	if not SIMPLE_MODE:
+		_update_knight_hints()
 	if mirror_vp:
 		mirror_t -= delta
 		if mirror_t <= 0.0:
@@ -771,8 +813,14 @@ func _process(delta: float) -> void:
 		return
 	if game_over:
 		game_over_time += delta
-		if game_over_time > 1.5 and (_restart_pressed() or giant.restart_held()):
+		if game_over_time > 1.5 and (_restart_pressed() or giant.restart_held() or (SIMPLE_MODE and game_over_time > 7.0)):
 			get_tree().reload_current_scene()
+		return
+	if not practice_done:
+		# Simple mode: practise while the knights join (the TV can join any time).
+		practice.tick(delta)
+		_host_knights(delta)
+		_update_boulders(delta)
 		return
 	if net.mode == "host" and not net.connected:
 		solo_wait += delta
@@ -781,7 +829,8 @@ func _process(delta: float) -> void:
 	_host_knights(delta)
 	_update_boulders(delta)
 	_update_rain(delta)
-	_update_giant_tips(delta)
+	if not SIMPLE_MODE:
+		_update_giant_tips(delta)
 	if not in_break:
 		wave_t += delta
 	if in_break:
@@ -832,10 +881,58 @@ func _extra_knights() -> int:
 
 # --- Waves -------------------------------------------------------------------
 
+## Simple mode: practice is over, wave 1 comes in a moment.
+func practice_finished() -> void:
+	practice_done = true
+	in_break = true
+	break_timer = 1.5
+	solo_wait = practice.t  # the practice time counts towards the knights' 8 s to join
+	print("Practice done")
+
+
+## Simple mode: plain goblins, plus one new thing per wave from wave 3 on (then a gentle mix).
+func _simple_wave() -> void:
+	var party := _extra_knights()
+	var more := 1.0 + 0.3 * party
+	for i in roundi((3 + wave) * more):
+		spawn_queue.append("goblin")
+	rain_at = randf_range(6.0, 10.0) if wave == 3 or (wave > 6 and randf() < 0.35) else -1.0
+	if wave >= 4:
+		for i in roundi(mini(wave - 2, 5) * more):
+			spawn_queue.append("balloon")
+	if wave >= 5:
+		for i in 1 + (wave - 5) / 3:
+			spawn_queue.append("ogre")
+	if wave >= 7 and not solo_giant():
+		for i in roundi(mini(wave - 6, 4) * more):
+			spawn_queue.append("armored")
+	spawn_queue.shuffle()
+	if wave >= 6 and wave % 3 == 0:
+		spawn_queue.insert(0, "king")  # pop_back: the king comes last, after his army
+	spawn_queue.append("goblin")  # the first one out is always an easy one
+	var headline := "WAVE %d!" % wave
+	match wave:
+		4:
+			headline = "BALLOONS!"
+		5:
+			headline = "BIG OGRE!"
+		7:
+			if not solo_giant():
+				headline = "SPIKY GOBLINS!"
+	_show_center(headline, 1.6)
+
+
 func _start_wave() -> void:
 	wave += 1
 	in_break = false
 	wave_t = 0.0
+	if SIMPLE_MODE:
+		print("Wave %d started" % wave)
+		spawn_queue.clear()
+		_simple_wave()
+		spawn_timer = 0.5
+		sound("wave")
+		return
 	rain_at = randf_range(10.0, 22.0) if wave >= 3 and (wave % 2 == 1 or randf() < 0.4) else -1.0
 	print("Wave %d started" % wave)
 	spawn_queue.clear()
@@ -885,6 +982,13 @@ func _end_wave() -> void:
 			_revive(k, 0.6)
 		else:
 			k.hp = minf(KnightScript.MAX_HP, k.hp + 30.0)
+	if SIMPLE_MODE:
+		_show_center("HOORAY!", 1.6)
+		sound("clear")
+		sound("cheer", -4.0)
+		village.cheer()
+		net.event("cheer", [])
+		return
 	var grew := ""
 	if built < W.GROWTH.size():
 		var g: Array = W.GROWTH[built]
@@ -919,13 +1023,16 @@ func _spawn_goblin(kind: String) -> void:
 		g.drift = Vector3(land.x - start.x, 0.0, land.z - start.z) / fall_time
 		add_child(g)
 		g.rotation.y = atan2(dir.x, dir.z)
-		if not tips_said.has("balloon"):
+		if not tips_said.has("balloon") and not SIMPLE_MODE:
 			tips_said["balloon"] = true
 			_giant_tip("BALLOON GOBLINS! Grab them out of the air (right trigger)!")
 		return
-	if kind == "king" and not solo_giant():
+	if kind == "king" and not solo_giant() and not SIMPLE_MODE:
 		g.max_armor = 8.0 + 2.0 * _extra_knights()
 		g.armor = g.max_armor
+	elif kind == "king":
+		g.max_armor = 0.0  # solo / simple mode: an unarmoured King (just big)
+		g.armor = 0.0
 	g.position = dir * (W.EDGE - 0.3) + Vector3.DOWN * 1.0
 	add_child(g)
 	g.rotation.y = atan2(dir.x, dir.z)
@@ -935,6 +1042,9 @@ func _spawn_goblin(kind: String) -> void:
 	if kind == "king":
 		sound("roar", 0.0, 0.8)
 		sound("fanfare", -4.0, 0.7)
+		if SIMPLE_MODE:
+			_show_center("GOBLIN KING!", 2.0)
+			return
 		_show_center("THE GOBLIN KING!\nKnights: hit him to break his armour!", 2.5)
 		_giant_tip("THE GOBLIN KING! His armour is too spiky - let the knights break it first")
 
@@ -959,7 +1069,7 @@ func _check_lose(delta: float) -> void:
 			any_active = true
 			if not k.is_down:
 				any_up = true
-	if any_active and not any_up and not solo_giant():  # solo: no knights to fall asleep
+	if any_active and not any_up and not solo_giant() and not SIMPLE_MODE:  # solo: no knights to fall asleep; simple: they get back up
 		var before := int(DOWN_GRACE - down_t)
 		down_t += delta
 		var left := int(DOWN_GRACE - down_t)
@@ -980,6 +1090,9 @@ func _on_game_over(reason: String) -> void:
 	giant.release_all()
 	print("Game over: %s wave=%d score=%d" % [reason, wave, score])
 	sound("gameover")
+	if SIMPLE_MODE:
+		_show_center("OH NO!\nThe fire went out", 0.0)
+		return
 	var how := "Press A / X (VR) or attack (knights) to play again"
 	_show_center("GAME OVER\n%s\nWave %d   ·   Score %d   ·   Village %d/%d\n%s" % [reason, wave, score, built, W.GROWTH.size(), how], 0.0)
 	_show_stats("HEROES OF THE VILLAGE")
@@ -997,7 +1110,8 @@ func goblin_steals(g) -> void:
 		away = Vector3(randf_range(-1, 1), 0.0, randf_range(-1, 1))
 	g.flee_target = away.normalized() * (W.EDGE + 3.0)
 	sound("spit", -2.0, 0.9)
-	popup(g.grab_center() + Vector3.UP * 0.8, "Ember stolen!", Color(1.0, 0.55, 0.3))
+	if not SIMPLE_MODE:
+		popup(g.grab_center() + Vector3.UP * 0.8, "Ember stolen!", Color(1.0, 0.55, 0.3))
 
 
 func goblin_takes_loose_ember(g, e) -> void:
@@ -1014,7 +1128,8 @@ func goblin_escaped(g) -> void:
 	if g.has_meta("dead"):
 		return
 	g.set_meta("dead", true)
-	popup(g.grab_center() + Vector3.UP * 0.8, "An ember got away!", Color(1.0, 0.4, 0.3))
+	if not SIMPLE_MODE:
+		popup(g.grab_center() + Vector3.UP * 0.8, "An ember got away!", Color(1.0, 0.4, 0.3))
 	sound("hurt", -2.0, 0.6)
 	g.queue_free()
 
@@ -1023,6 +1138,11 @@ func goblin_defeated(g, how: String, by) -> void:
 	if g.has_meta("dead"):
 		return
 	g.set_meta("dead", true)
+	if g.practice:
+		kills["practice"] = kills.get("practice", 0) + 1
+		practice.on_hit(g)
+		g.queue_free()
+		return
 	var points: int = GoblinScript.KINDS[g.kind].points
 	score += points
 	var stat_key := "%s:%s" % [g.kind, how]
@@ -1035,7 +1155,9 @@ func goblin_defeated(g, how: String, by) -> void:
 	elif how in ["squash", "slam", "boulder", "smack"]:
 		stats[0].squashed += 1
 	# Quick knock-outs in a row make a combo.
-	if clock - last_kill_t < 2.5:
+	if SIMPLE_MODE:
+		combo = 0
+	elif clock - last_kill_t < 2.5:
 		combo += 1
 	else:
 		combo = 1
@@ -1056,10 +1178,16 @@ func goblin_defeated(g, how: String, by) -> void:
 	else:
 		sound("kill", -6.0, randf_range(1.1, 1.4))
 	var words := {"squash": "SQUASH!", "fell": "BYE BYE!", "slam": "BOOM!", "boulder": "BONK!", "knight": "POW!", "smack": "SMACK!"}
-	popup(center + Vector3.UP * 0.5, "%s +%d" % [words.get(how, "POW!"), points], c.lightened(0.4))
+	if SIMPLE_MODE:
+		popup(center + Vector3.UP * 0.5, words.get(how, "POW!"), c.lightened(0.4))  # a comic word, no numbers
+	else:
+		popup(center + Vector3.UP * 0.5, "%s +%d" % [words.get(how, "POW!"), points], c.lightened(0.4))
 	if how in ["squash", "slam", "boulder"]:
 		add_thud(pos, 12.0)
-	if g.carrying:
+	if g.carrying and SIMPLE_MODE:
+		embers = mini(embers + 1, MAX_EMBERS)  # no embers to carry about: it flies straight home
+		burst(Vector3(0.0, 1.6, 0.0), Color(1.0, 0.7, 0.3), 12, 0.1)
+	elif g.carrying:
 		if how != "fell" and Vector2(pos.x, pos.z).length() < W.EDGE and pos.y > -2.0:
 			var gh := W.height(pos.x, pos.z)
 			_spawn_ember(Vector3(pos.x, maxf(gh, 0.0), pos.z))
@@ -1070,7 +1198,7 @@ func goblin_defeated(g, how: String, by) -> void:
 		score += 100
 		sound("fanfare", 0.0, 1.0)
 		sound("cheer", 0.0)
-		_show_center("THE GOBLIN KING IS BEATEN!\n+300  ·  The village is saved!", 3.0)
+		_show_center("HOORAY!" if SIMPLE_MODE else "THE GOBLIN KING IS BEATEN!\n+300  ·  The village is saved!", 3.0)
 		for i in 5:
 			var p := Vector3(randf_range(-6.0, 6.0), randf_range(4.0, 7.0), randf_range(-6.0, 6.0))
 			get_tree().create_timer(0.3 + i * 0.4).timeout.connect(func() -> void:
@@ -1116,7 +1244,8 @@ func king_hit(g, knight) -> void:
 func giant_smack(g, at: Vector3) -> void:
 	var spiky: bool = g.kind == "armored" or (g.kind == "king" and g.armor > 0.0)
 	if spiky:
-		popup(g.grab_center() + Vector3.UP * 0.9, "OUCH! Too spiky!\nKnights, get this one!", Color(1.0, 0.6, 0.5))
+		popup(g.grab_center() + Vector3.UP * 0.9, "OUCH!" if SIMPLE_MODE else "OUCH! Too spiky!\nKnights, get this one!", Color(1.0, 0.6, 0.5))
+		burst(at, Color(1.0, 0.4, 0.3), 10, 0.08)
 		sound("hurt", -6.0, 0.7)
 		g.dizzy_t = 1.0
 		return
@@ -1124,7 +1253,7 @@ func giant_smack(g, at: Vector3) -> void:
 	sound("smack", 0.0, randf_range(0.9, 1.1))
 	if g.is_big():
 		g.dizzy_t = 2.5
-		popup(g.grab_center() + Vector3.UP * 1.4, "OOF! Now THROW me!", Color(1.0, 0.8, 0.4))
+		popup(g.grab_center() + Vector3.UP * 1.4, "OOF!" if SIMPLE_MODE else "OOF! Now THROW me!", Color(1.0, 0.8, 0.4))
 		return
 	goblin_defeated(g, "smack", giant)
 
@@ -1146,8 +1275,11 @@ func _update_rain(delta: float) -> void:
 		rain_drain = 0.0
 		shield_said = false
 		sound("rain", -4.0, 1.0)
-		_show_center("A RAIN CLOUD!\nGiant: hold your hand over the campfire to keep it dry!", 2.5)
-		_giant_tip("RAIN! Hold your open hand over the campfire, like an umbrella!")
+		if SIMPLE_MODE:
+			_show_center("RAIN!", 1.8)  # the glowing ghost hand over the fire shows what to do
+		else:
+			_show_center("A RAIN CLOUD!\nGiant: hold your hand over the campfire to keep it dry!", 2.5)
+			_giant_tip("RAIN! Hold your open hand over the campfire, like an umbrella!")
 		print("Rain cloud over the campfire")
 	shield = false
 	if rain_t <= 0.0:
@@ -1160,7 +1292,11 @@ func _update_rain(delta: float) -> void:
 		stats[0].shield += delta
 		if not shield_said:
 			shield_said = true
-			popup(Vector3(0.0, 3.2, 0.0), "Nice umbrella, Giant!", Color(0.7, 0.9, 1.0))
+			if SIMPLE_MODE:
+				burst(Vector3(0.0, 3.2, 0.0), Color(0.7, 0.9, 1.0), 14, 0.1)
+				sound("chime", -4.0, 1.2)
+			else:
+				popup(Vector3(0.0, 3.2, 0.0), "Nice umbrella, Giant!", Color(0.7, 0.9, 1.0))
 	else:
 		rain_drain += delta
 		if rain_drain >= 5.0:
@@ -1168,8 +1304,11 @@ func _update_rain(delta: float) -> void:
 			if embers > 1:
 				embers -= 1
 				sound("sizzle", 0.0, 1.0)
-				popup(Vector3(0.0, 2.8, 0.0), "HISS! The rain put out an ember!", Color(0.6, 0.8, 1.0))
-	if rain_t <= 0.0:
+				if SIMPLE_MODE:
+					burst(Vector3(0.0, 1.5, 0.0), Color(0.8, 0.82, 0.85), 16, 0.14)  # a puff of steam
+				else:
+					popup(Vector3(0.0, 2.8, 0.0), "HISS! The rain put out an ember!", Color(0.6, 0.8, 1.0))
+	if rain_t <= 0.0 and not SIMPLE_MODE:
 		_show_center("The rain stopped. Phew!", 1.5)
 
 
@@ -1528,7 +1667,8 @@ func knight_hurt(k, dmg: float, from: Vector3) -> void:
 		k.revive_progress = 0.0
 		sound("down", -2.0)
 		burst(k.global_position + Vector3.UP * 0.5, k.color, 18)
-		popup(k.global_position + Vector3.UP * 1.6, "P%d is down!" % (k.index + 1), k.color)
+		if not SIMPLE_MODE:
+			popup(k.global_position + Vector3.UP * 1.6, "P%d is down!" % (k.index + 1), k.color)
 		print("P%d is down" % (k.index + 1))
 		if k.carrying:
 			k.carrying = false
@@ -1542,7 +1682,8 @@ func _revive(k, fraction: float) -> void:
 	k.revive_progress = 0.0
 	burst(k.global_position + Vector3.UP * 0.6, Color(0.6, 1.0, 0.6), 18)
 	sound("revive", -2.0)
-	popup(k.global_position + Vector3.UP * 1.6, "Back on your feet!", Color(0.7, 1.0, 0.7))
+	if not SIMPLE_MODE:
+		popup(k.global_position + Vector3.UP * 1.6, "Back on your feet!", Color(0.7, 1.0, 0.7))
 
 
 func _host_knights(delta: float) -> void:
@@ -1563,6 +1704,8 @@ func _host_knights(delta: float) -> void:
 					helper = true
 			if helper or fire_d < 2.6:
 				k.revive_progress += delta / KnightScript.REVIVE_TIME
+			elif SIMPLE_MODE:
+				k.revive_progress += delta / (KnightScript.REVIVE_TIME * 3.0)  # gets back up by themselves
 			else:
 				k.revive_progress = maxf(0.0, k.revive_progress - delta * 0.2)
 			if k.revive_progress >= 1.0:
@@ -1608,7 +1751,8 @@ func _fall_knight(k, delta: float) -> void:
 	if g < -50.0 and p.y < -4.0:
 		p = Vector3(0.0, 0.0, 2.4)
 		k.carried = false
-		popup(p + Vector3.UP * 1.6, "Whoops! Back to the campfire", k.color)
+		if not SIMPLE_MODE:
+			popup(p + Vector3.UP * 1.6, "Whoops! Back to the campfire", k.color)
 		sound("revive", -6.0, 0.8)
 	elif p.y <= g:
 		p = W.push_out(Vector3(p.x, g, p.z), KnightScript.BODY_R)
@@ -1624,6 +1768,10 @@ func _fall_knight(k, delta: float) -> void:
 
 func on_grabbed(obj) -> void:
 	sound("pickup", -6.0, 0.8 if obj.is_in_group("boulders") else 1.2)
+	if SIMPLE_MODE:
+		if obj.is_in_group("goblins") or obj.is_in_group("knights"):
+			sound("squeak", -6.0, randf_range(0.9, 1.3))
+		return
 	if obj.is_in_group("knights"):
 		popup(obj.grab_center() + Vector3.UP * 1.2, "Wheee!", obj.color)
 	elif obj.is_in_group("goblins") and randf() < 0.5:
@@ -1688,17 +1836,19 @@ func ember_home(e, msg: String) -> void:
 	embers = mini(embers + 1, MAX_EMBERS)
 	score += 5
 	sound("revive", -4.0, 1.3)
-	popup(Vector3(0.0, 2.6, 0.0), msg, Color(1.0, 0.8, 0.4))
+	if not SIMPLE_MODE:
+		popup(Vector3(0.0, 2.6, 0.0), msg, Color(1.0, 0.8, 0.4))
 
 
 # --- Networking --------------------------------------------------------------
 
 func on_client_joined() -> void:
-	_show_center("THE KNIGHTS HAVE ARRIVED!", 1.5)
+	_show_center("KNIGHTS!" if SIMPLE_MODE else "THE KNIGHTS HAVE ARRIVED!", 1.5)
 
 
 func on_client_left() -> void:
-	_show_center("The knights left - waiting for them to come back…", 0.0)
+	if not SIMPLE_MODE:
+		_show_center("The knights left - waiting for them to come back…", 0.0)
 	for k in knights():
 		if k.index >= 2 and k.active:
 			_knight_leaves(k)  # P2 waits as before; drop-in knights rejoin when the TV is back
@@ -1732,7 +1882,13 @@ func make_snapshot() -> Array:
 	for e in get_tree().get_nodes_in_group("embers"):
 		if not e.is_queued_for_deletion():
 			es.append(e.net_item())
-	return [wave, score, embers, game_over, down_t, ps, gs, bs, es, built, rain_t, shield]
+	var props: Array = []
+	for o in get_tree().get_nodes_in_group("props"):
+		if not o.is_queued_for_deletion():
+			props.append(o.net_item())
+	var gone: Array = scenery.gone_list() if scenery != null else []
+	var prac: Array = [practice.active, practice.ring_pos] if practice != null else [false, Vector3.ZERO]
+	return [wave, score, embers, game_over, down_t, ps, gs, bs, es, built, rain_t, shield, props, gone, prac]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -1757,6 +1913,14 @@ func apply_snapshot(s: Array) -> void:
 		built = s[9]
 		rain_t = s[10]
 		shield = s[11]
+	if s.size() > 14:
+		_sync_ghosts(s[12], "prop")
+		if scenery != null:
+			scenery.apply_gone(s[13])
+		var prac: Array = s[14]
+		if practice != null:
+			practice.active = prac[0]
+			practice.ring_pos = prac[1]
 
 
 func _sync_ghosts(list: Array, kind: String) -> void:
@@ -1786,6 +1950,10 @@ func _make_ghost(kind: String, item: Array) -> Node3D:
 			n = g
 		"boulder":
 			n = BoulderScript.new()
+		"prop":
+			var pr := PropScript.new()
+			pr.setup(item[5], item[6], item[7])
+			n = pr
 		_:
 			n = EmberScript.new()
 	n.set("main", self)
@@ -1936,11 +2104,11 @@ func _update_vr_center() -> void:
 		vr_hint.width = 800.0
 		vr_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		add_child(vr_hint)
-	var stats_mode := game_over and stats_text != ""
+	var stats_mode := game_over and stats_text != "" and not SIMPLE_MODE
 	if stats_mode != vr_hint.get_meta("stats_mode", false):
 		vr_hint.set_meta("stats_mode", stats_mode)
 		VrText.snap(vr_hint)
-	var text := stats_text if stats_mode else (giant_tip if giant_tip_t > 0.0 else "")
+	var text := stats_text if stats_mode else (giant_tip if giant_tip_t > 0.0 and not SIMPLE_MODE else "")
 	vr_hint.pixel_size = (0.0015 if stats_mode else 0.0019) * W.S
 	vr_hint.modulate = Color(0.95, 0.97, 1.0) if stats_mode else Color(1.0, 0.93, 0.6)
 	vr_hint.text = text
@@ -1955,6 +2123,9 @@ func _update_hud() -> void:
 	help_panel.visible = help_panel.modulate.a > 0.0 and help_label.text != ""
 	if net.mode == "client" and not synced:
 		info_label.text = "Syncing with the Giant…"
+		return
+	if SIMPLE_MODE:
+		info_label.text = "WAVE %d" % wave if wave > 0 else ""  # one short line: the fire shows the embers
 		return
 	info_label.text = "WAVE %d      SCORE %d      CAMPFIRE EMBERS %d / %d      VILLAGE %d / %d" % [wave, score, embers, MAX_EMBERS, built, W.GROWTH.size()]
 	if combo >= 3 and clock - last_kill_t < 2.5:
