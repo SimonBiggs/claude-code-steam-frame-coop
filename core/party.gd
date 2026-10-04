@@ -67,6 +67,9 @@ const _JOIN_KEYS: Array[int] = [KEY_SPACE, KEY_ENTER, KEY_KP_ENTER]
 const FREE := 0
 const PENDING := 1
 const ACTIVE := 2
+## Steam Input's desktop layout can turn a pad's A into a key press: a keyboard join waits this
+## long and is dropped if any pad button went down around it (no phantom keyboard players).
+const KEYBOARD_JOIN_DELAY := 0.15
 
 ## Seconds a disconnected controller keeps its seat.
 var leave_after := 20.0
@@ -110,6 +113,9 @@ var _mouse_acc := Vector2.ZERO
 var _mouse_frame := Vector2.ZERO
 var _was_paused := false
 var _net_hooked: Node
+var _kb_join_t := -1.0
+var _clock := 0.0  # game seconds (deterministic under --fixed-fps)
+var _last_pad_t := -100.0
 
 
 func _init() -> void:
@@ -678,6 +684,7 @@ func _update_nav(delta: float) -> void:
 # --- Frame upkeep ------------------------------------------------------------------------
 
 func _process(delta: float) -> void:
+	_clock += delta
 	_try_start()
 	var paused := get_tree().paused
 	if paused != _was_paused:
@@ -690,6 +697,10 @@ func _process(delta: float) -> void:
 	if not _started:
 		return
 	_hook_net()
+	if _kb_join_t >= 0.0:
+		_kb_join_t -= delta
+		if _kb_join_t < 0.0 and _can_join_now() and owner_of(KEYBOARD) < 0:
+			join_device(KEYBOARD)
 	if not paused:
 		for s in MAX_SLOTS:
 			if _state[s] == ACTIVE and _lost_t[s] >= 0.0:
@@ -713,7 +724,11 @@ func _physics_process(_delta: float) -> void:
 func _input(event: InputEvent) -> void:
 	var jb := event as InputEventJoypadButton
 	if jb != null:
-		if not jb.pressed or _ignored(jb.device):
+		if not jb.pressed:
+			return
+		_last_pad_t = _clock
+		_kb_join_t = -1.0  # that "key" was probably this pad (Steam desktop layout)
+		if _ignored(jb.device):
 			return
 		var s := owner_of(jb.device)
 		if s >= 0:
@@ -737,9 +752,10 @@ func _input(event: InputEvent) -> void:
 				for c in 2:
 					_latch[c * MAX_SLOTS + ks] |= _KEY_BITS[idx]
 			return
-		if allow_keyboard and _JOIN_KEYS.has(int(k.physical_keycode)) and _can_join_now():
-			if join_device(KEYBOARD) >= 0:
-				get_viewport().set_input_as_handled()
+		if allow_keyboard and _JOIN_KEYS.has(int(k.physical_keycode)) and _can_join_now() \
+				and _clock - _last_pad_t > KEYBOARD_JOIN_DELAY:
+			_kb_join_t = KEYBOARD_JOIN_DELAY
+			get_viewport().set_input_as_handled()
 		return
 	var mb := event as InputEventMouseButton
 	if mb != null and mb.pressed:

@@ -256,7 +256,7 @@ func _group_xf(delta: float) -> Transform3D:
 		if n != null and is_instance_valid(n) and n.is_inside_tree():
 			pts.append(n.global_position)
 	if pts.is_empty():
-		return _last
+		pts.append(_group_center)  # nobody yet: keep looking at the last centre (the origin at first)
 	var c := Vector3.ZERO
 	for p in pts:
 		c += p

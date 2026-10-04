@@ -90,6 +90,7 @@ func _setup(mode: String) -> void:
 		split.bind_party(party)
 		group_cam = CameraRig.new()
 		group_cam.camera = split.shared_camera()
+		group_cam.group_min_distance = 9.0
 		add_child(group_cam)
 		group_cam.follow_group([], -60.0, 0.0, 0.0)
 		hud_labels[-1] = _hud_label(split.shared_hud())
@@ -365,7 +366,11 @@ func _update_hud() -> void:
 	var line := "STARS %d   BEST %d" % [int(net.state_get("score", 0)), int(net.state_get("best", 0))]
 	for slot in hud_labels:
 		var l: Label = hud_labels[slot]
-		if is_instance_valid(l):
+		if not is_instance_valid(l):
+			continue
+		if int(slot) < 0 and party.local_slots().is_empty():
+			l.text = "STAR CATCH\nPress A to join"  # the shared view shows while nobody is seated
+		else:
 			l.text = (party.name_of(int(slot)) + "   " if int(slot) >= 0 else "") + line + "\nY: shared / split view"
 	if vr_label != null:
 		vr_label.text = line

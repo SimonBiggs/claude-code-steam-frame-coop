@@ -168,17 +168,22 @@ func _local_timeline() -> void:
 		kit.pad_hold(int(pads["b"]), JOY_BUTTON_A, false)
 		kit.pad_stick(int(pads["b"]), "left", Vector2.ZERO)
 		kit.pad_press(int(pads["b"]), JOY_BUTTON_DPAD_DOWN))
-	kit.at(1.6, "party: Space on the keyboard", func() -> void:
+	kit.at(1.6, "party: A on a pad that Steam's desktop layout also turns into Enter", func() -> void:
 		kit.assert_true(main.nav_events.has([2, Vector2i(0, 1)]), "nav() reports the d-pad step")
+		kit.pad_press(int(pads["b"]), JOY_BUTTON_A)
+		_key(KEY_ENTER, true)
+		_key(KEY_ENTER, false))
+	kit.at(1.8, "party: Space on the keyboard", func() -> void:
+		kit.assert_eq(party.owner_of(Party.KEYBOARD), -1, "a key that comes with a pad press doesn't join the keyboard")
 		_key(KEY_SPACE, true)
 		_key(KEY_SPACE, false))
-	kit.at(1.8, "party: unplug P3's pad", func() -> void:
+	kit.at(2.0, "party: unplug P3's pad", func() -> void:
 		kit.assert_eq(party.owner_of(Party.KEYBOARD), 3, "keyboard + mouse joined as P4 (slot 3)")
 		party.remove_virtual_pad(int(pads["b"])))
-	kit.at(2.0, "party: plug it back in quickly", func() -> void:
+	kit.at(2.2, "party: plug it back in quickly", func() -> void:
 		kit.assert_true(party.is_lost(2) and lost_log.has(2), "the seat waits for its controller")
 		party.replug_virtual_pad(int(pads["b"])))
-	kit.at(2.2, "party: unplug it for longer than leave_after", func() -> void:
+	kit.at(2.4, "party: unplug it for longer than leave_after", func() -> void:
 		kit.assert_true(not party.is_lost(2) and restored_log.has(2), "reconnecting restores the seat")
 		party.remove_virtual_pad(int(pads["b"])))
 	kit.at(3.6, "party: plug it in after the player left", func() -> void:
@@ -319,6 +324,13 @@ func _local_timeline() -> void:
 		kit.assert_true(rig.touching(VrRig.LEFT, p, 0.1) and not rig.touching(VrRig.RIGHT, p, 0.1), "touching(hand, point, radius)")
 		kit.assert_eq(rig.touching_any(p, 0.1), VrRig.LEFT, "touching_any")
 		kit.assert_true(rig.in_wrist_zone(rig.wrist_menu_position()), "in_wrist_zone")
+		rig.place(Vector3(1.0, 0.0, 1.0), 0.0)
+		var hp := rig.head_position()
+		kit.assert_true(Vector2(hp.x - 1.0, hp.z - 1.0).length() < 0.001 and absf(rig.head_yaw()) < 0.001, "place(feet, yaw)")
+		rig.camera.position.x += 0.4  # the player steps aside in their room
+		rig.recenter()
+		hp = rig.head_position()
+		kit.assert_true(Vector2(hp.x - 1.0, hp.z - 1.0).length() < 0.001, "recenter() puts them back on the spot")
 		rig.pulse(VrRig.RIGHT, 0.5, 0.05)
 		rig.pulse(VrRig.RIGHT, 0.5, 0.05)
 		kit.assert_eq(rig.pulses_sent, 1, "haptics are rate-limited")
@@ -424,9 +436,16 @@ func _local_timeline() -> void:
 		kit.vr_stick(rig, Vector2.ZERO)
 		var moved: float = (rig.head_position() - (mark["wall_from"] as Vector3)).dot(mark["wall_dir"] as Vector3)
 		kit.assert_true(moved > 0.4 and moved < 0.7, "collision_mask: stick walking stops at walls (moved %.2f m of 1.1)" % moved)
+		mark["at_wall"] = rig.head_position()
+		kit.vr_stick(rig, Vector2(0.7, 0.7)))
+	kit.at(20.8, "vr rig: slid along the wall?", func() -> void:
+		kit.vr_stick(rig, Vector2.ZERO)
+		var d: Vector3 = rig.head_position() - (mark["at_wall"] as Vector3)
+		var f: Vector3 = mark["wall_dir"]
+		kit.assert_true(absf(d.dot(f)) < 0.05 and Vector3(-f.z, 0.0, f.x).dot(d) > 0.2, "pushing diagonally slides along the wall (%s)" % str(d))
 		rig.collision_mask = 0
 		(mark["vr_wall"] as Node).queue_free())
-	kit.at(20.6, "vr rig: world scale, then leave", func() -> void:
+	kit.at(20.9, "vr rig: world scale, then leave", func() -> void:
 		split.clear_bubble()
 		rig.set_scale_of_world(2.0)
 		kit.assert_near(XRServer.world_scale, 2.0, 0.001, "world_scale is applied")
@@ -434,7 +453,7 @@ func _local_timeline() -> void:
 		kit.assert_near(XRServer.world_scale, 1.0, 0.001, "XRServer.world_scale goes back to 1 when the rig leaves")
 		rig.queue_free()
 		main.vr_rig = null)
-	kit.at(20.8, "done", func() -> void:
+	kit.at(21.1, "done", func() -> void:
 		kit.finish())
 
 
@@ -486,6 +505,8 @@ func _test_split() -> void:
 	kit.assert_true(split.active_camera(4) == split.shared_camera() and split.shared_hud() != null, "active_camera in shared mode")
 	split.set_shared(false)
 	kit.assert_eq(split.view_count(), 7, "back to split")
+	split.set_slots([])
+	kit.assert_true(split.showing_shared() and split.view_count() == 1, "nobody seated: the shared view shows")
 	split.bind_party(party)
 	kit.assert_eq(split.slots(), party.local_slots(), "bind_party shows the party's local players")
 

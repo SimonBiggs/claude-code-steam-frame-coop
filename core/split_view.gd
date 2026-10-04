@@ -56,6 +56,8 @@ var camera_far := 500.0
 var bubble_mode := "auto"
 ## Bubble diameter as a fraction of the screen height when it sits in the corner.
 var bubble_size := 0.28
+## With nobody seated on this screen, show the shared view (e.g. the world behind "Press A to join").
+var shared_when_empty := true
 
 var _root: Control
 var _bg: ColorRect
@@ -74,6 +76,7 @@ func _ready() -> void:
 	if layer == 1:
 		layer = -1  # behind the game's own HUD layers and the pause menu
 	_ensure_root()
+	layout()
 
 
 # --- Slots ------------------------------------------------------------------------------
@@ -151,7 +154,7 @@ func viewport(slot: int) -> SubViewport:
 
 ## Where the slot's view is on the screen (Rect2() if it isn't shown).
 func view_rect(slot: int) -> Rect2:
-	if _shared_on or not _slots.has(slot) or not _views.has(slot):
+	if _showing_shared() or not _slots.has(slot) or not _views.has(slot):
 		return Rect2()
 	return _views[slot]["rect"]
 
@@ -165,12 +168,12 @@ func hud_scale(slot: int) -> float:
 
 ## The camera that is on screen for `slot` right now (the shared one in shared mode).
 func active_camera(slot: int) -> Camera3D:
-	return shared_camera() if _shared_on else camera(slot)
+	return shared_camera() if _showing_shared() else camera(slot)
 
 
 ## Number of views on screen.
 func view_count() -> int:
-	return 1 if _shared_on else _slots.size()
+	return 1 if _showing_shared() else _slots.size()
 
 
 ## One view for everyone (true) or one view per player (false). Switch any time.
@@ -183,8 +186,18 @@ func set_shared(on: bool) -> void:
 	layout()
 
 
+## True in shared mode (set_shared(true)). See also showing_shared().
 func is_shared() -> bool:
 	return _shared_on
+
+
+## True while the shared view is on screen: shared mode, or nobody seated with shared_when_empty.
+func showing_shared() -> bool:
+	return _showing_shared()
+
+
+func _showing_shared() -> bool:
+	return _shared_on or (shared_when_empty and _slots.is_empty())
 
 
 func shared_camera() -> Camera3D:
@@ -235,13 +248,16 @@ func layout() -> void:
 	var area := _area()
 	_last_area = area
 	_empty_cell = Rect2()
+	var shared_now := _showing_shared()
+	if shared_now:
+		_ensure_shared()
 	for s in _views:
 		var v: Dictionary = _views[s]
-		_show_view(v, not _shared_on and _slots.has(int(s)))
+		_show_view(v, not shared_now and _slots.has(int(s)))
 	if not _shared.is_empty():
-		_show_view(_shared, _shared_on)
+		_show_view(_shared, shared_now)
 	var n := view_count()
-	if _shared_on:
+	if shared_now:
 		_place_view(_shared, Rect2(Vector2.ZERO, area), 1)
 	elif n > 0:
 		var rects := cell_rects(n, area)
@@ -303,7 +319,7 @@ func _ensure_shared() -> Dictionary:
 	if _shared.is_empty() or not is_instance_valid(_shared["container"]):
 		_shared = _make_view("SharedView")
 		_shared["slot"] = -1
-		_show_view(_shared, _shared_on)
+		_show_view(_shared, _showing_shared())
 	return _shared
 
 

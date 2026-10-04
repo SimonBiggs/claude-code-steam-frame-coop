@@ -69,6 +69,9 @@ var cuff_color := Color(1.0, 1.0, 1.0)
 var make_mirror := true
 ## Feet height the game wants (place() sets it); the rig's y = floor_height + fit lift.
 var floor_height := 0.0
+## Once tracking starts, put the player back on the place() spot (they may stand anywhere in
+## their room when the game starts).
+var recenter_on_first_fit := true
 
 ## True with a real headset, false in fake (bot) mode.
 var is_xr := false
@@ -92,6 +95,9 @@ var head_height := 0.0
 var fitted := false
 
 var _fit_wait := 0.5
+var _place_feet := Vector3.ZERO
+var _place_yaw := NAN
+var _has_place := false
 var _refit_t := 0.0
 var _trig_raw := false
 var _trig_guard := true
@@ -177,7 +183,21 @@ func _make_hand(tracker_name: String, left: bool) -> XRController3D:
 # --- Placement and height fit -------------------------------------------------------------
 
 ## Put the player's feet at `feet` (head above it), facing `yaw` (radians, 0 = -Z) unless NAN.
+## Remembered for recenter() and for the first fit.
 func place(feet: Vector3, yaw: float = NAN) -> void:
+	_place_feet = feet
+	_place_yaw = yaw
+	_has_place = true
+	_apply_place(feet, yaw)
+
+
+## Back to the last place() spot and facing (a "recentre" button, or a new round).
+func recenter() -> void:
+	if _has_place:
+		_apply_place(_place_feet, _place_yaw)
+
+
+func _apply_place(feet: Vector3, yaw: float) -> void:
 	if not is_nan(yaw):
 		_turn_about_head(yaw - head_yaw())
 	var head := camera.global_position
@@ -239,6 +259,7 @@ func _fit(delta: float) -> void:
 
 func _do_fit(snap: bool) -> void:
 	var h := real_head_height()
+	var first := not fitted
 	fitted = true
 	_refit_t = 0.0
 	head_height = h
@@ -248,6 +269,8 @@ func _do_fit(snap: bool) -> void:
 	if snap:
 		lift = fit_lift
 		global_position.y = floor_height + lift
+	if first and recenter_on_first_fit:
+		recenter()
 	print("VrRig: fitted to head height %.2f m (lift %.2f)" % [h, fit_lift])
 	refitted.emit(h)
 
@@ -456,8 +479,11 @@ func _locomote(delta: float) -> void:
 				_turn_about_head(-x * smooth_turn_speed * delta)
 
 
-## Stick movement against walls: cast a knee-high sphere, and slide along what it hits.
+## Stick movement against walls: cast a knee-high sphere, stop a skin short of what it hits and
+## slide along it. (Casts ignore bodies they start inside, so never end a move touching a wall;
+## if the player already stands in one for real, the stick may only move them out of it.)
 func _collide_move(from: Vector3, to: Vector3) -> Vector3:
+	const SKIN := 0.02
 	if _body_shape == null:
 		_body_shape = SphereShape3D.new()
 	_body_shape.radius = body_radius * world_scale
@@ -465,18 +491,41 @@ func _collide_move(from: Vector3, to: Vector3) -> Vector3:
 	var q := PhysicsShapeQueryParameters3D.new()
 	q.shape = _body_shape
 	q.collision_mask = collision_mask
-	var y := floor_height + (0.35 + body_radius) * world_scale
-	var at := Vector3(from.x, y, from.z)
+	var at := Vector3(from.x, floor_height + (0.35 + body_radius) * world_scale, from.z)
 	var motion := Vector3(to.x - from.x, 0.0, to.z - from.z)
-	q.transform = Transform3D(Basis(), at)
-	q.motion = motion
-	if space.cast_motion(q)[0] >= 1.0:
-		return to
-	for part: Vector3 in [Vector3(motion.x, 0.0, 0.0), Vector3(0.0, 0.0, motion.z)]:
+	for attempt in 3:
+		if motion.length_squared() < 0.00000001:
+			break
 		q.transform = Transform3D(Basis(), at)
-		q.motion = part
-		at += part * space.cast_motion(q)[0]
+		q.motion = Vector3.ZERO
+		var inside := space.get_rest_info(q)
+		if not inside.is_empty():
+			var n0 := _flat_normal(inside)
+			motion -= n0 * minf(motion.dot(n0), 0.0)
+			at += motion
+			break
+		q.motion = motion
+		var r := space.cast_motion(q)
+		if r[0] >= 1.0:
+			at += motion
+			break
+		var safe := maxf(0.0, r[0] - SKIN / motion.length())
+		at += motion * safe
+		q.transform = Transform3D(Basis(), at + motion * (r[1] - safe))
+		q.motion = Vector3.ZERO
+		var info := space.get_rest_info(q)
+		if info.is_empty():
+			break
+		var n := _flat_normal(info)
+		motion *= 1.0 - safe
+		motion -= n * minf(motion.dot(n), 0.0)  # keep only the part along the wall
 	return Vector3(at.x, to.y, at.z)
+
+
+func _flat_normal(info: Dictionary) -> Vector3:
+	var n: Vector3 = info.get("normal", Vector3.ZERO)
+	n.y = 0.0
+	return n.normalized() if n.length_squared() > 0.000001 else Vector3.ZERO
 
 
 func _turn_about_head(angle: float) -> void:
