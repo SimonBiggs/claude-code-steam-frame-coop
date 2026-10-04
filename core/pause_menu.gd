@@ -1,14 +1,19 @@
 extends CanvasLayer
 ## Pause menu. Esc or controller Start toggles it (Steam's desktop layout sends Esc for Start).
+## Only a controller that is in play may open it: with a core/party.gd PartyManager on main
+## (`main.party`) that means a pad the party owns; older games fall back to their players' `joy`.
+## In group "pause_menu": core/net.gd calls sync_remote_pause() when the other machine resumes.
 
 var main
 var panel: ColorRect
 var buttons: Array[Button] = []
+var who := 1  # party games: the slot that opened the menu (sent with the pause, 1 otherwise)
 
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	layer = 10
+	add_to_group("pause_menu")
 	panel = ColorRect.new()
 	panel.color = Color(0.02, 0.03, 0.06, 0.75)
 	add_child(panel)
@@ -64,13 +69,28 @@ func _input(event: InputEvent) -> void:
 	if panel.visible:
 		_resume()
 	else:
+		who = _slot_of(-2 if key != null else pad.device)
 		_open()
+
+
+## Party games: which slot pressed Start / Esc (-2 = the keyboard). Others: 1, as before.
+func _slot_of(device: int) -> int:
+	var party = main.get("party") if main != null else null
+	if party == null or not is_instance_valid(party) or not party.has_method("owner_of"):
+		return 1
+	var s: int = party.owner_of(device)
+	return s if s >= 0 else 1
 
 
 ## Start on a spare controller nobody is playing with (left on the couch, or a test machine's pads)
 ## shouldn't pause everyone. A pad counts if a player owns it via `joy`, or if no player owns any pad.
 func _pad_in_play(device: int) -> bool:
-	if main == null or not ("players" in main):
+	if main == null:
+		return true
+	var party = main.get("party")
+	if party != null and is_instance_valid(party) and party.has_method("owner_of"):
+		return int(party.owner_of(device)) >= 0
+	if not ("players" in main):
 		return true
 	var any_owned := false
 	for p in main.players:
@@ -89,7 +109,8 @@ func _open() -> void:
 	panel.visible = true
 	get_tree().paused = true
 	if main and main.net:
-		main.net.send_action("pause", [true])  # networked co-op: pause the host too
+		main.net.send_action("pause", [true], maxi(who, 1))  # networked co-op: pause the host too
+	_tell_main(true)
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	buttons[0].grab_focus()
 
@@ -98,8 +119,25 @@ func _resume() -> void:
 	panel.visible = false
 	get_tree().paused = false
 	if main and main.net:
-		main.net.send_action("pause", [false])
+		main.net.send_action("pause", [false], maxi(who, 1))
+	_tell_main(false)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+## Local play: main.on_pause_changed(paused, by_slot) if the game has it (networked games hear
+## it from core/net.gd on both machines).
+func _tell_main(paused: bool) -> void:
+	if main != null and main.has_method("on_pause_changed") and main.get("net") != null \
+			and str(main.net.mode) == "local":
+		main.on_pause_changed(paused, who)
+
+
+## The other machine resumed (VR wrist RESUME, or the TV's menu): close this menu without
+## sending anything back. Called by core/net.gd through the "pause_menu" group.
+func sync_remote_pause(paused: bool) -> void:
+	if not paused and panel != null and panel.visible:
+		panel.visible = false
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 
 func _restart() -> void:
