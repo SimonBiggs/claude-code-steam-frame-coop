@@ -433,17 +433,11 @@ func on_kill(killer, e, points: int) -> int:
 		add_stat(killer, "points", total)
 		if e != null and e.is_dino():
 			add_stat(killer, "dinos", 1)
-	if e != null and e.is_boss():
-		cheer(1.0, 4.0)
-		main.sound("cheer", 0.0)
-	else:
-		cheer(0.12 + 0.02 * minf(combo, 20.0))
+	# No cheering for defeating enemies (Abigail didn't like a crowd cheering on killing); the crowd
+	# cheers teamwork instead (rescues).
 	if combo in COMBO_MILESTONES:
 		main.popup(e.global_position + Vector3.UP * 3.0 if e != null else Vector3.UP * 3.0, "COMBO x%d!" % combo, Color(1.0, 0.85, 0.3))
 		main.sound("combo", 0.0, 1.0 + combo * 0.004)
-		cheer(0.9, 1.5)
-		if combo >= 10:
-			main.sound("cheer", -4.0)
 		if combo == 5:
 			hint("COMBO! Keep defeating monsters quickly for BONUS points!", 3.5, "combo")
 		if combo >= 20:
