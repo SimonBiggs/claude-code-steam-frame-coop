@@ -6,40 +6,48 @@ extends Node
 ## With a single game, ARCADE_GAME=<id>, or no lobby partner, it behaves like a plain local menu.
 
 const GAMES := [
-	{"id": "duo_arena", "name": "DUO ARENA", "scene": "res://games/duo_arena/main.tscn",
+	{"id": "duo_arena", "cat": "action", "name": "DUO ARENA", "scene": "res://games/duo_arena/main.tscn",
 		"blurb": "Neon first-person co-op arena shooter"},
-	{"id": "ghost_lantern", "name": "GHOST LANTERN", "scene": "res://games/ghost_lantern/main.tscn",
+	{"id": "ghost_lantern", "cat": "action", "name": "GHOST LANTERN", "scene": "res://games/ghost_lantern/main.tscn",
 		"blurb": "Spooky-cute ghost hunt: VR lantern reveals ghosts, TV players vacuum them up"},
-	{"id": "snowball_blitz", "name": "SNOWBALL BLITZ", "scene": "res://games/snowball_blitz/main.tscn",
+	{"id": "snowball_blitz", "cat": "action", "name": "SNOWBALL BLITZ", "scene": "res://games/snowball_blitz/main.tscn",
 		"blurb": "Cosy snow-fort defence: throw real snowballs in VR, pack the walls on the TV"},
-	{"id": "cannon_cove", "name": "CANNON COVE", "scene": "res://games/cannon_cove/main.tscn",
+	{"id": "cannon_cove", "cat": "action", "name": "CANNON COVE", "scene": "res://games/cannon_cove/main.tscn",
 		"blurb": "Pirate co-op: VR gunner aims the cannons, TV deckhands load them and patch leaks"},
-	{"id": "kitchen_rush", "name": "KITCHEN RUSH", "scene": "res://games/kitchen_rush/main.tscn",
+	{"id": "kitchen_rush", "cat": "party", "name": "KITCHEN RUSH", "scene": "res://games/kitchen_rush/main.tscn",
 		"blurb": "Co-op cooking chaos: VR chef chops and plates, TV runners fetch and serve"},
-	{"id": "giants_table", "name": "GIANT'S TABLE", "scene": "res://games/giants_table/main.tscn",
+	{"id": "giants_table", "cat": "action", "name": "GIANT'S TABLE", "scene": "res://games/giants_table/main.tscn",
 		"blurb": "Be a VR giant protecting a tiny tabletop village; TV players are the knights"},
-	{"id": "rocket_workshop", "name": "ROCKET WORKSHOP", "scene": "res://games/rocket_workshop/main.tscn",
+	{"id": "rocket_workshop", "cat": "cosy", "name": "ROCKET WORKSHOP", "scene": "res://games/rocket_workshop/main.tscn",
 		"blurb": "Cosy rocket puzzle: the VR pilot works the controls, the TV crew read the blueprints out loud"},
-	{"id": "marble_maze", "name": "MARBLE MAZE", "scene": "res://games/marble_maze/main.tscn",
+	{"id": "marble_maze", "cat": "sports", "name": "MARBLE MAZE", "scene": "res://games/marble_maze/main.tscn",
 		"blurb": "Ball racing: VR tilts a giant tabletop maze, everyone on the TV is a marble"},
-	{"id": "hide_and_seek", "name": "HIDE AND SEEK", "scene": "res://games/hide_and_seek/main.tscn",
+	{"id": "hide_and_seek", "cat": "party", "name": "HIDE AND SEEK", "scene": "res://games/hide_and_seek/main.tscn",
 		"blurb": "VR seeker with a torch; TV hiders sneak or disguise as lamps, plants and boxes"},
-	{"id": "block_builders", "name": "BLOCK BUILDERS", "scene": "res://games/block_builders/main.tscn",
+	{"id": "block_builders", "cat": "cosy", "name": "BLOCK BUILDERS", "scene": "res://games/block_builders/main.tscn",
 		"blurb": "VR giant builds bridges and springs; tiny TV runners race to the flag"},
-	{"id": "dragon_rider", "name": "DRAGON RIDER", "scene": "res://games/dragon_rider/main.tscn",
+	{"id": "dragon_rider", "cat": "action", "name": "DRAGON RIDER", "scene": "res://games/dragon_rider/main.tscn",
 		"blurb": "VR steers a friendly dragon with the reins; TV gunners pop balloons from its back"},
-	{"id": "bee_garden", "name": "BEE GARDEN", "scene": "res://games/bee_garden/main.tscn",
+	{"id": "bee_garden", "cat": "cosy", "name": "BEE GARDEN", "scene": "res://games/bee_garden/main.tscn",
 		"blurb": "Cosy, no fighting: VR gardener plants and waters, TV bees make honey"},
-	{"id": "paint_and_guess", "name": "PAINT AND GUESS", "scene": "res://games/paint_and_guess/main.tscn",
+	{"id": "paint_and_guess", "cat": "party", "name": "PAINT AND GUESS", "scene": "res://games/paint_and_guess/main.tscn",
 		"blurb": "VR paints a secret word in the air; TV players race to guess it"},
-	{"id": "rhythm_band", "name": "RHYTHM BAND", "scene": "res://games/rhythm_band/main.tscn",
+	{"id": "rhythm_band", "cat": "party", "name": "RHYTHM BAND", "scene": "res://games/rhythm_band/main.tscn",
 		"blurb": "VR drums with your hands; TV players hit notes on their highways"},
-	{"id": "penalty_shootout", "name": "PENALTY SHOOTOUT", "scene": "res://games/penalty_shootout/main.tscn",
+	{"id": "penalty_shootout", "cat": "sports", "name": "PENALTY SHOOTOUT", "scene": "res://games/penalty_shootout/main.tscn",
 		"blurb": "VR goalkeeper saves with big gloves; TV strikers aim, power up and bend shots"},
-	{"id": "fishing_lake", "name": "FISHING LAKE", "scene": "res://games/fishing_lake/main.tscn",
+	{"id": "fishing_lake", "cat": "cosy", "name": "FISHING LAKE", "scene": "res://games/fishing_lake/main.tscn",
 		"blurb": "Relaxing: VR casts and reels from the jetty; TV rowers herd fish and net treasure"},
-	{"id": "kart_race", "name": "KART RACE", "scene": "res://games/kart_race/main.tscn",
+	{"id": "kart_race", "cat": "sports", "name": "KART RACE", "scene": "res://games/kart_race/main.tscn",
 		"blurb": "VR turns a real steering wheel; TV racers drive in split screen, with items and ramps"},
+]
+## Tabs on the TV (LB/RB) and in VR (stick left/right). Empty categories are hidden.
+const CATEGORIES := [
+	{"id": "action", "name": "ACTION", "color": Color(1.0, 0.45, 0.35)},
+	{"id": "adventure", "name": "ADVENTURE", "color": Color(0.65, 0.5, 1.0)},
+	{"id": "party", "name": "PARTY", "color": Color(1.0, 0.8, 0.3)},
+	{"id": "sports", "name": "SPORTS & RACING", "color": Color(0.35, 0.9, 0.5)},
+	{"id": "cosy", "name": "COSY & PUZZLE", "color": Color(0.45, 0.8, 1.0)},
 ]
 const VrText := preload("res://core/vr_text.gd")
 const DEFAULT_PORT := 7777
@@ -52,7 +60,12 @@ var mode := "local"  # "local", "host", "client"
 var selected := 0
 var join_deadline := 0
 var status: Label
-var buttons: Array[Button] = []
+var buttons: Array[Button] = []  # (old menu; kept so a hot reload of an older arcade still works)
+var cards: Dictionary = {}  # game index -> Button, for the category on screen
+var cat := 0  # index into tabs()
+var tab_bar: HBoxContainer
+var grid: GridContainer
+var vr_stick_x_ready := true
 var vr_list: Label3D
 var vr_cam: XRCamera3D
 var hand_r: XRController3D
@@ -181,16 +194,13 @@ func _launch(index: int) -> void:
 
 
 func _process(_delta: float) -> void:
-	if not has_meta("menu_v3") and not buttons.is_empty():  # hot reload: rebuild the TV menu as two columns
-		set_meta("menu_v3", true)
-		var layer := buttons[0].get_parent()
-		while layer != null and not layer is CanvasLayer:
-			layer = layer.get_parent()
-		if layer != null:
-			layer.queue_free()
+	if not has_meta("menu_v4") and (not buttons.is_empty() or grid == null) and status != null:
+		set_meta("menu_v4", true)  # hot reload: replace an older TV menu with the category tabs
+		for c in get_children():
+			if c is CanvasLayer:
+				c.queue_free()
 		buttons.clear()
 		_build_tv_menu()
-		_select(selected, false)
 	if join_deadline > 0 and Time.get_ticks_msec() > join_deadline:
 		_lobby_offline()
 	# TV: if the VR player already started a game without us, join it (their game broadcasts it).
@@ -214,57 +224,193 @@ func _process(_delta: float) -> void:
 
 func _build_tv_menu() -> void:
 	var layer := CanvasLayer.new()
+	layer.name = "TvMenu"
 	add_child(layer)
 	var bg := ColorRect.new()
 	bg.color = Color(0.03, 0.03, 0.08)
 	layer.add_child(bg)
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var glow := ColorRect.new()  # a soft band of colour behind the title
+	glow.color = Color(0.12, 0.08, 0.3)
+	layer.add_child(glow)
+	glow.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+	glow.custom_minimum_size = Vector2(0, 150)
 	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 12)
+	box.add_theme_constant_override("separation", 14)
 	layer.add_child(box)
-	box.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	box.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
 	box.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	box.grow_vertical = Control.GROW_DIRECTION_BOTH
+	box.position.y = 28
 	var title := Label.new()
 	title.text = "LIVING ROOM ARCADE"
-	title.add_theme_font_size_override("font_size", 56)
+	title.add_theme_font_size_override("font_size", 60)
 	title.add_theme_color_override("font_color", Color(0.4, 0.95, 1.0))
+	title.add_theme_color_override("font_outline_color", Color(0.1, 0.05, 0.3))
+	title.add_theme_constant_override("outline_size", 10)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(title)
 	status = Label.new()
-	status.add_theme_font_size_override("font_size", 26)
+	status.add_theme_font_size_override("font_size", 24)
+	status.add_theme_color_override("font_color", Color(0.75, 0.8, 0.95))
 	status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(status)
-	_set_status({"host": "Waiting for the TV… (or pick in VR)", "client": "Looking for the VR player…"}.get(mode, "Pick a game"))
-	var focus := StyleBoxFlat.new()
-	focus.draw_center = false
-	focus.border_color = Color(0.3, 0.95, 1.0)
-	focus.set_border_width_all(5)
-	focus.set_corner_radius_all(10)
-	# Two columns so all the games fit on the TV.
-	var grid := GridContainer.new()
-	grid.columns = 3 if GAMES.size() > 12 else 2
-	grid.add_theme_constant_override("h_separation", 16)
-	grid.add_theme_constant_override("v_separation", 10)
-	box.add_child(grid)
-	for i in GAMES.size():
-		var g: Dictionary = GAMES[i]
-		var b := Button.new()
-		b.text = "%s\n%s" % [g.name, g.blurb]
-		b.custom_minimum_size = Vector2(600, 88) if GAMES.size() > 12 else Vector2(820, 96)
-		b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		b.add_theme_font_size_override("font_size", 20)
-		b.add_theme_stylebox_override("focus", focus)
-		b.pressed.connect(_start_everywhere.bind(i))
-		b.focus_entered.connect(_select.bind(i, true))
-		grid.add_child(b)
-		buttons.append(b)
+	_set_status({"host": "Waiting for the TV... (or pick in VR)", "client": "Looking for the VR player..."}.get(mode, "Pick a game"))
+	tab_bar = HBoxContainer.new()
+	tab_bar.alignment = BoxContainer.ALIGNMENT_CENTER
+	tab_bar.add_theme_constant_override("separation", 10)
+	box.add_child(tab_bar)
+	grid = GridContainer.new()
+	grid.columns = 3
+	grid.add_theme_constant_override("h_separation", 18)
+	grid.add_theme_constant_override("v_separation", 16)
+	var center := CenterContainer.new()
+	center.custom_minimum_size = Vector2(1860, 0)
+	center.add_child(grid)
+	box.add_child(center)
 	var hint := Label.new()
-	hint.text = "D-pad / arrows to choose  ·  A / Enter to play  ·  more games: just ask Claude!"
-	hint.add_theme_font_size_override("font_size", 22)
+	hint.text = "LB / RB (Q / E): change category   ·   D-pad / arrows: choose   ·   A / Enter: play   ·   more games: just ask Claude!"
+	hint.add_theme_font_size_override("font_size", 20)
+	hint.add_theme_color_override("font_color", Color(0.6, 0.65, 0.8))
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(hint)
-	buttons[0].grab_focus()
+	cat = maxi(0, tabs().find(_cat_index_of(selected)))
+	_show_category(cat, false)
+
+
+## Categories that have at least one game, as indices into CATEGORIES.
+func tabs() -> Array[int]:
+	var out: Array[int] = []
+	for c in CATEGORIES.size():
+		for g in GAMES:
+			if str(g.get("cat", "action")) == str(CATEGORIES[c].id):
+				out.append(c)
+				break
+	return out
+
+
+func _cat_index_of(game_index: int) -> int:
+	var id := str(GAMES[clampi(game_index, 0, GAMES.size() - 1)].get("cat", "action"))
+	for c in CATEGORIES.size():
+		if str(CATEGORIES[c].id) == id:
+			return c
+	return 0
+
+
+func _games_in(tab: int) -> Array[int]:
+	var out: Array[int] = []
+	var t := tabs()
+	if t.is_empty():
+		return out
+	var c: int = t[clampi(tab, 0, t.size() - 1)]
+	for i in GAMES.size():
+		if str(GAMES[i].get("cat", "action")) == str(CATEGORIES[c].id):
+			out.append(i)
+	return out
+
+
+## Show one category's game cards (focus the selected game if it's in it, else the first).
+func _show_category(tab: int, focus_first: bool) -> void:
+	var t := tabs()
+	if t.is_empty() or grid == null:
+		return
+	cat = wrapi(tab, 0, t.size())
+	for child in tab_bar.get_children():
+		child.queue_free()
+	for k in t.size():
+		var cd: Dictionary = CATEGORIES[t[k]]
+		var tab_label := Label.new()
+		tab_label.text = "  %s  " % cd.name
+		tab_label.add_theme_font_size_override("font_size", 26 if k == cat else 22)
+		var on := k == cat
+		tab_label.add_theme_color_override("font_color", Color(0.05, 0.05, 0.1) if on else (cd.color as Color))
+		var sb := StyleBoxFlat.new()
+		sb.bg_color = (cd.color as Color) if on else Color(0.1, 0.1, 0.18)
+		sb.set_corner_radius_all(18)
+		sb.content_margin_top = 6
+		sb.content_margin_bottom = 6
+		tab_label.add_theme_stylebox_override("normal", sb)
+		tab_bar.add_child(tab_label)
+	for child in grid.get_children():
+		grid.remove_child(child)
+		child.queue_free()
+	cards.clear()
+	var colour: Color = CATEGORIES[t[cat]].color
+	var games := _games_in(cat)
+	for i in games:
+		var b := _make_card(i, colour)
+		grid.add_child(b)
+		cards[i] = b
+	var target: int = selected if cards.has(selected) and not focus_first else (games[0] if not games.is_empty() else 0)
+	if cards.has(target):
+		(cards[target] as Button).grab_focus()
+
+
+func _make_card(i: int, colour: Color) -> Button:
+	var g: Dictionary = GAMES[i]
+	var b := Button.new()
+	b.custom_minimum_size = Vector2(600, 150)
+	b.focus_mode = Control.FOCUS_ALL
+	var normal := StyleBoxFlat.new()
+	normal.bg_color = Color(0.08, 0.08, 0.15)
+	normal.border_color = colour.darkened(0.45)
+	normal.set_border_width_all(2)
+	normal.set_corner_radius_all(16)
+	var focus := normal.duplicate() as StyleBoxFlat
+	focus.bg_color = Color(0.13, 0.12, 0.24)
+	focus.border_color = colour
+	focus.set_border_width_all(6)
+	focus.shadow_color = Color(colour, 0.35)
+	focus.shadow_size = 12
+	b.add_theme_stylebox_override("normal", normal)
+	b.add_theme_stylebox_override("hover", focus)
+	b.add_theme_stylebox_override("pressed", focus)
+	b.add_theme_stylebox_override("focus", focus)
+	var v := VBoxContainer.new()
+	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_theme_constant_override("separation", 6)
+	b.add_child(v)
+	v.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	v.offset_left = 22
+	v.offset_right = -22
+	v.offset_top = 16
+	v.offset_bottom = -12
+	var name_label := Label.new()
+	name_label.text = str(g.name)
+	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	name_label.add_theme_font_size_override("font_size", 30)
+	name_label.add_theme_color_override("font_color", colour)
+	v.add_child(name_label)
+	var blurb := Label.new()
+	blurb.text = str(g.blurb)
+	blurb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	blurb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	blurb.add_theme_font_size_override("font_size", 19)
+	blurb.add_theme_color_override("font_color", Color(0.85, 0.87, 0.95))
+	v.add_child(blurb)
+	b.pressed.connect(_start_everywhere.bind(i))
+	b.focus_entered.connect(_select.bind(i, true))
+	return b
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if grid == null or starting:
+		return
+	var step := 0
+	var pad := event as InputEventJoypadButton
+	if pad and pad.pressed:
+		if pad.button_index == JOY_BUTTON_LEFT_SHOULDER:
+			step = -1
+		elif pad.button_index == JOY_BUTTON_RIGHT_SHOULDER:
+			step = 1
+	var key := event as InputEventKey
+	if key and key.pressed and not key.echo:
+		if key.physical_keycode == KEY_Q or key.physical_keycode == KEY_PAGEUP:
+			step = -1
+		elif key.physical_keycode == KEY_E or key.physical_keycode == KEY_PAGEDOWN or key.physical_keycode == KEY_TAB:
+			step = 1
+	if step != 0:
+		get_viewport().set_input_as_handled()
+		_show_category(cat + step, true)
 
 
 func _set_status(text: String) -> void:
@@ -275,8 +421,12 @@ func _set_status(text: String) -> void:
 ## Keep the TV focus and the VR highlight in step (and tell the other machine).
 func _select(index: int, broadcast: bool) -> void:
 	selected = clampi(index, 0, GAMES.size() - 1)
-	if not broadcast and selected < buttons.size() and not buttons[selected].has_focus():
-		buttons[selected].grab_focus()
+	if not broadcast and grid != null:
+		var want := tabs().find(_cat_index_of(selected))
+		if want >= 0 and want != cat:
+			_show_category(want, false)
+		if cards.has(selected) and not (cards[selected] as Button).has_focus():
+			(cards[selected] as Button).grab_focus()
 	if broadcast and mode != "local" and multiplayer.multiplayer_peer != null:
 		_sync_selection.rpc(selected)
 	_refresh_vr()
@@ -316,27 +466,47 @@ func _refresh_vr() -> void:
 	if vr_list == null:
 		return
 	var lines: Array[String] = ["LIVING ROOM ARCADE", ""]
-	# Show a window of games around the selection so the list stays a comfortable size.
-	var first := clampi(selected - 3, 0, maxi(0, GAMES.size() - 7))
-	var last := mini(GAMES.size(), first + 7)
+	var t := tabs()
+	var my_tab := maxi(0, t.find(_cat_index_of(selected)))
+	lines.append("<   %s   >" % CATEGORIES[t[my_tab]].name if not t.is_empty() else "")
+	lines.append("")
+	var games := _games_in(my_tab)
+	# A window of games around the selection so the list stays a comfortable size.
+	var pos := maxi(0, games.find(selected))
+	var first := clampi(pos - 3, 0, maxi(0, games.size() - 7))
+	var last := mini(games.size(), first + 7)
 	if first > 0:
 		lines.append("^ more ^")
-	for i in range(first, last):
+	for k in range(first, last):
+		var i: int = games[k]
 		lines.append((">>  %s  <<" if i == selected else "%s") % GAMES[i].name)
-	if last < GAMES.size():
-		lines.append("v more v  (%d games)" % GAMES.size())
+	if last < games.size():
+		lines.append("v more v")
 	lines.append("")
-	lines.append("Right stick: choose  ·  Trigger: play\n(or pick on the TV)")
+	lines.append("Stick up/down: choose  ·  left/right: category\nTrigger: play  (or pick on the TV)")
 	vr_list.text = "\n".join(lines)
 
 
 func _vr_input() -> void:
-	var y := hand_r.get_vector2("primary").y
-	if absf(y) > 0.7 and stick_ready:
+	var stick := hand_r.get_vector2("primary")
+	var games := _games_in(maxi(0, tabs().find(_cat_index_of(selected))))
+	if absf(stick.y) > 0.7 and stick_ready and not games.is_empty():
 		stick_ready = false
-		_select(selected + (-1 if y > 0.0 else 1), true)
-	elif absf(y) < 0.3:
+		var pos := maxi(0, games.find(selected))
+		_select(games[wrapi(pos + (-1 if stick.y > 0.0 else 1), 0, games.size())], true)
+	elif absf(stick.y) < 0.3:
 		stick_ready = true
+	if absf(stick.x) > 0.7 and vr_stick_x_ready:
+		vr_stick_x_ready = false
+		var t := tabs()
+		var next_tab := wrapi(t.find(_cat_index_of(selected)) + (1 if stick.x > 0.0 else -1), 0, t.size())
+		var in_next := _games_in(next_tab)
+		if not in_next.is_empty():
+			_select(in_next[0], true)
+			if grid != null:
+				_show_category(next_tab, true)
+	elif absf(stick.x) < 0.3:
+		vr_stick_x_ready = true
 	var trig := hand_r.get_float("trigger") > 0.6
 	if trig and not trigger_was:
 		_start_everywhere(selected)
