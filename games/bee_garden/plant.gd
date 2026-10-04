@@ -20,6 +20,12 @@ var fruit_s := 0.0
 var t := 0.0
 var was_bloom := false
 var golden_shown := false
+# Simple mode: a glowing ring on the soil (plant here!), a glowing halo round the flower (bees: here!)
+# and a wobble when someone touches the plant.
+var ring: MeshInstance3D
+var halo: MeshInstance3D
+var wob := 0.0
+var wob_v := 0.0
 
 
 static func head_pos(i: int, st: Dictionary) -> Vector3:
@@ -48,13 +54,38 @@ func _ready() -> void:
 	bud = W.mesh_node(head, W.sphere(0.1, 8), W.cmat(Color(0.35, 0.7, 0.3)), Vector3(0, 0.02, 0), Vector3(0.8, 1.3, 0.8))
 	fruit = W.mesh_node(head, W.sphere(0.2, 12), W.cmat(Color.RED), Vector3(0, -0.12, 0.08))
 	drop = W.mesh_node(self, W.sphere(0.07, 8), W.cmat(Color(0.35, 0.65, 1.0), 0.8), Vector3.ZERO, Vector3(0.8, 1.2, 0.8))
+	ring = W.mesh_node(self, _torus(0.3, 0.4), W.cmat(Color(1.0, 0.95, 0.5), 2.0), Vector3(0, 0.04, 0))
+	ring.visible = false
+	halo = W.mesh_node(head, _torus(0.34, 0.42), W.cmat(Color(1.0, 0.85, 0.3), 2.0), Vector3(0, 0.02, 0))
+	halo.visible = false
 	update_from({"kind": -1}, 0.0)
+
+
+static func _torus(r_in: float, r_out: float) -> TorusMesh:
+	var m := TorusMesh.new()
+	m.inner_radius = r_in
+	m.outer_radius = r_out
+	m.rings = 16
+	m.ring_segments = 4
+	return m
+
+
+## Someone touched the plant: it bobs.
+func poke(push: Vector3) -> void:
+	wob_v += 5.0 * (1.0 if push.x >= 0.0 else -1.0)
 
 
 func update_from(st: Dictionary, delta: float) -> void:
 	t += delta
 	var k: int = st.get("kind", -1)
 	var show := k >= 0
+	var glow: bool = st.get("glow", false)
+	ring.visible = glow
+	if glow:
+		var pulse := 1.0 + sin(t * 5.0) * 0.12
+		ring.scale = Vector3(pulse, 1.0, pulse)
+	wob_v += (-wob * 50.0 - wob_v * 3.0) * delta
+	wob = clampf(wob + wob_v * delta, -0.6, 0.6)
 	mound.visible = show
 	stem.visible = show
 	head.visible = show
@@ -97,7 +128,11 @@ func update_from(st: Dictionary, delta: float) -> void:
 		lf.rotation.z = side * (-0.35 - droop)
 	var sway := sin(t * 1.3 + spot * 1.7) * 0.06 + (sin(t * 22.0) * 0.06 if bug else 0.0)
 	head.position = Vector3(sin(stem.rotation.z) * -h, h + 0.06, 0.0)
-	head.rotation = Vector3(0.35 + droop, 0.0, sway)  # tilted towards the gardener
+	head.rotation = Vector3(0.35 + droop, 0.0, sway + wob)  # tilted towards the gardener
+	var halo_on: bool = st.get("halo", false) and bloom
+	halo.visible = halo_on
+	if halo_on:
+		halo.scale = Vector3.ONE * (1.0 + sin(t * 6.0) * 0.15)
 	open = move_toward(open, 1.0 if bloom else 0.0, delta * 2.5)
 	if bloom and not was_bloom and delta > 0.0:
 		open = 0.01
