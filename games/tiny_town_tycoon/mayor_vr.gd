@@ -283,15 +283,17 @@ func _turn_table(delta: float) -> void:
 	station.global_transform = t * station.global_transform
 
 
-## The tray and board stay put while the player looks about; they glide back beside them when they
-## walk away or turn more than ~50 degrees. Their height follows the head (always well below the eyes).
+## The tray and board stay put while the player looks about; they glide back beside them only when
+## they walk away. Their height follows the head (always well below the eyes).
 func _follow(delta: float) -> void:
 	var head := rig.head_position()
 	var yaw := rig.head_yaw()
 	var target_pos := Vector3(head.x, clampf(head.y - 0.55, Defs.TABLE_Y + 0.08, Defs.TABLE_Y + 0.38), head.z)
 	var cur_yaw := station.rotation.y
-	var far := Vector2(station.global_position.x - head.x, station.global_position.z - head.z).length() > 0.3
-	var turned := absf(wrapf(yaw - cur_yaw, -PI, PI)) > deg_to_rad(50.0)
+	var far := Vector2(station.global_position.x - head.x, station.global_position.z - head.z).length() > 0.5
+	# Never follow head turns: looking right at the tray made it swing away (Simon). It stays fixed
+	# beside the table unless the player walks away (the right stick turns rig and station together).
+	var turned := false
 	var dy := absf(station.global_position.y - target_pos.y) > 0.12
 	if far or turned or dy:
 		_st_moving = true

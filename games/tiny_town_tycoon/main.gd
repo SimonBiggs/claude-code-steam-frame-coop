@@ -871,11 +871,16 @@ func _process(delta: float) -> void:
 	_sim_t += delta * fast
 	if _sim_t >= 1.0:
 		_sim_t -= 1.0
+		var _pt := Time.get_ticks_usec()
 		_sim_tick()
+		if Time.get_ticks_usec() - _pt > 8000:
+			print("[perf] sim_tick %d ms" % ((Time.get_ticks_usec() - _pt) / 1000))
 	_save_t += delta
 	if _save_t > 30.0:
 		_save_t = 0.0
+		var _ps := Time.get_ticks_usec()
 		save_town()
+		print("[perf] save_town %d ms" % ((Time.get_ticks_usec() - _ps) / 1000))
 
 
 func _sim_tick() -> void:

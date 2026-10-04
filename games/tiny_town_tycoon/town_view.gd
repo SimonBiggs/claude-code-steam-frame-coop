@@ -132,14 +132,23 @@ func _process(delta: float) -> void:
 	_t += delta
 	if town.lay_version != _lay_ver:
 		_lay_ver = town.lay_version
+		var _pt := Time.get_ticks_usec()
 		_rebuild_roads()
+		if Time.get_ticks_usec() - _pt > 8000:
+			print("[perf] %s %d ms" % ["_rebuild_roads()", (Time.get_ticks_usec() - _pt) / 1000])
 	if town.tree_version != _tree_ver:
 		_tree_ver = town.tree_version
+		var _pt := Time.get_ticks_usec()
 		_rebuild_trees()
+		if Time.get_ticks_usec() - _pt > 8000:
+			print("[perf] %s %d ms" % ["_rebuild_trees()", (Time.get_ticks_usec() - _pt) / 1000])
 	if town.version != _bld_ver or _dirty:
 		_bld_ver = town.version
 		_dirty = false
+		var _pt := Time.get_ticks_usec()
 		_rebuild_buildings()
+		if Time.get_ticks_usec() - _pt > 8000:
+			print("[perf] %s %d ms" % ["_rebuild_buildings()", (Time.get_ticks_usec() - _pt) / 1000])
 		_slow_t = 0.0
 	_slow_t -= delta
 	if _slow_t <= 0.0:
