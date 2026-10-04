@@ -51,7 +51,9 @@ var rock_xf: Array = []
 var mill_blades: Array = []
 
 
-static func ring_count(lv: int) -> int:
+func ring_count(lv: int) -> int:
+	if main.SIMPLE_MODE:
+		return [4, 5, 6][lv - 1] if lv <= 3 else mini(5 + lv / 2, 9)
 	return mini(6 + (lv - 1) * 2, 14)
 
 
@@ -68,6 +70,9 @@ func build(seed_v: int, origin: Vector3, yaw: float, lv: int, mis: String = "rin
 	var rock: StandardMaterial3D = main.color_mat(Color(0.55, 0.42, 0.5), 0.0)
 	var grass: StandardMaterial3D = main.color_mat(Color(0.5, 0.78, 0.4), 0.0)
 	var string_mat: StandardMaterial3D = main.color_mat(Color(0.95, 0.95, 0.95), 0.0)
+	var simple: bool = main.SIMPLE_MODE
+	var easy := simple and lv <= 2  # stage 1-2: big rings in an easy, gentle line; balloons close by
+	var has_stars: bool = not simple or main.simple_has("stars", lv)
 	var count := ring_count(lv)
 	if mission == "rescue":
 		count = maxi(5, count - 2)
@@ -77,7 +82,7 @@ func build(seed_v: int, origin: Vector3, yaw: float, lv: int, mis: String = "rin
 	var pos := origin
 	var prev := origin
 	var star_pts: Array = []
-	var arc_leg := count / 2 if count > 3 else -1
+	var arc_leg := count / 2 if count > 3 and has_stars else -1
 	var critter_legs: Array = []
 	if mission == "rescue":
 		var nc := mini(3 + lv / 3, count - 1)
@@ -86,15 +91,27 @@ func build(seed_v: int, origin: Vector3, yaw: float, lv: int, mis: String = "rin
 	var golden_leg := 1 + rng.randi() % maxi(1, count - 2)
 	for k in count:
 		var dist := FIRST if k == 0 else SPACING
+		var wiggle := 0.55 * minf(1.0, 0.5 + lv * 0.15)
+		var dy := 12.0
+		if easy:
+			dist = 60.0 if k == 0 else 62.0
+			wiggle = 0.12 if lv == 1 else 0.25
+			dy = 3.0 if lv == 1 else 6.0
+		elif simple:
+			wiggle = minf(wiggle, 0.4)
+			dy = 8.0
 		if k > 0:
-			heading += rng.randf_range(-0.55, 0.55) * minf(1.0, 0.5 + lv * 0.15)
-		var y := clampf(pos.y + rng.randf_range(-12.0, 12.0), 22.0, 85.0)
+			heading += rng.randf_range(-1.0, 1.0) * wiggle
+		var y := clampf(pos.y + rng.randf_range(-dy, dy), 22.0, 85.0)
 		pos = pos + Basis(Vector3.UP, heading) * Vector3.FORWARD * dist
 		pos.y = y
 		var normal := (pos - prev).normalized()
 		var final := k == count - 1
 		if mission != "boss":
-			var radius := RING_R * (1.3 if final else 1.0)
+			var r0 := RING_R
+			if simple:
+				r0 = 9.5 if lv == 1 else (8.5 if lv == 2 else 7.5)
+			var radius := r0 * (1.3 if final else 1.0)
 			var ring := MeshInstance3D.new()
 			var tm := TorusMesh.new()
 			tm.inner_radius = radius - 0.45
@@ -110,7 +127,9 @@ func build(seed_v: int, origin: Vector3, yaw: float, lv: int, mis: String = "rin
 			rings.append({"pos": pos, "normal": normal, "radius": radius, "node": ring, "final": final})
 		# Stars along the way from the previous ring to this one (one leg: a rainbow arc of stars).
 		var side := normal.cross(Vector3.UP).normalized()
-		if k == arc_leg:
+		if not has_stars:
+			pass
+		elif k == arc_leg:
 			var arc_h := 9.0 + rng.randf() * 3.0
 			var pts: Array = []
 			for j in 7:
@@ -128,13 +147,18 @@ func build(seed_v: int, origin: Vector3, yaw: float, lv: int, mis: String = "rin
 				star_pts.append(sp)
 		# Balloons off to the sides for the gunners (and once per level a golden one).
 		var nb := 2 if lv < 3 else 3
+		if easy:
+			nb = 3
 		for j in nb:
 			var s := -1.0 if rng.randf() < 0.5 else 1.0
 			var bp := prev.lerp(pos, rng.randf_range(0.2, 0.9)) + side * s * rng.randf_range(9.0, 22.0) \
 				+ Vector3.UP * rng.randf_range(-5.0, 9.0)
+			if easy:
+				bp = prev.lerp(pos, 0.2 + 0.25 * j + rng.randf_range(0.0, 0.1)) + side * s * rng.randf_range(5.0, 9.0) \
+					+ Vector3.UP * rng.randf_range(-1.0, 4.0)
 			var c: Color = BALLOON_COLORS[rng.randi() % BALLOON_COLORS.size()]
 			_balloon(2000 + balloons.size(), bp, c, false, string_mat)
-		if k == golden_leg:
+		if k == golden_leg and (not simple or main.simple_has("golden", lv)):
 			var gs := -1.0 if rng.randf() < 0.5 else 1.0
 			_balloon(3000, prev.lerp(pos, 0.5) + side * gs * rng.randf_range(10.0, 15.0) + Vector3.UP * rng.randf_range(2.0, 7.0),
 				Color(1.0, 0.82, 0.25), true, string_mat)
