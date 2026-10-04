@@ -44,8 +44,6 @@ const GAMES := [
 		"blurb": "Build a cosy toy town together: the mayor places the buildings, the drivers bring it to life"},
 	{"id": "party_board", "cat": "party", "name": "PARTY BOARD", "scene": "res://games/party_board/main.tscn",
 		"blurb": "A Mario-Party-style board game on a diorama island: roll, hop, shop and duel for STARS, with a minigame after every round"},
-	{"id": "roller_coaster", "cat": "cosy", "name": "COASTER CREW", "scene": "res://games/roller_coaster/main.tscn",
-		"blurb": "VR builds a roller coaster with their hands on a tabletop park; TV players ride it, hands up!"},
 	{"id": "mech_titans", "cat": "action", "name": "MECH TITANS", "scene": "res://games/mech_titans/main.tscn",
 		"blurb": "Giant robot vs cute kaiju: VR pilot punches and beams from the cockpit, TV jets, trucks, drones and tanks support"},
 ]
@@ -508,7 +506,17 @@ func _refresh_vr() -> void:
 	if last < games.size():
 		lines.append("v more v")
 	lines.append("")
-	lines.append("Stick up/down: choose  ·  left/right: category\nTrigger: play  (or pick on the TV)")
+	lines.append("POINT + TRIGGER: PLAY")
+	# What each text line is, for pointing: a game index, -2 = the category line, -1 = nothing.
+	var rows: Array[int] = []
+	for k in lines.size():
+		rows.append(-1)
+	rows[2] = -2
+	var row := 4 + (1 if first > 0 else 0)
+	for k in range(first, last):
+		rows[row] = games[k]
+		row += 1
+	set_meta("vr_rows", rows)
 	vr_list.text = "\n".join(lines)
 
 
@@ -532,10 +540,80 @@ func _vr_input() -> void:
 				_show_category(next_tab, true)
 	elif absf(stick.x) < 0.3:
 		vr_stick_x_ready = true
+	var aim := _vr_pointed_row()
 	var trig := hand_r.get_float("trigger") > 0.6
+	if aim.x >= 0 and aim.x != selected:
+		_select(aim.x, true)  # pointing at a game highlights it
 	if trig and not trigger_was:
-		_start_everywhere(selected)
+		if aim.x == -2:
+			_switch_vr_tab(1 if aim.y > 0 else -1)
+		else:
+			_start_everywhere(selected)
 	trigger_was = trig
+
+
+## Simon: pick games by pointing. Returns (row value, side): the game index (or -2 for the category
+## line, -1 for nothing) under the right hand's ray, and which half of the line it hits (1 = right).
+## Also draws the pointer laser.
+func _vr_pointed_row() -> Vector2i:
+	var laser: MeshInstance3D = get_meta("vr_laser", null) if has_meta("vr_laser") else null
+	if laser == null:
+		laser = MeshInstance3D.new()
+		var cm := CylinderMesh.new()
+		cm.top_radius = 0.003
+		cm.bottom_radius = 0.003
+		cm.height = 1.0
+		cm.radial_segments = 6
+		cm.rings = 1
+		var m := StandardMaterial3D.new()
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.albedo_color = Color(0.4, 0.9, 1.0)
+		cm.material = m
+		laser.mesh = cm
+		add_child(laser)
+		set_meta("vr_laser", laser)
+	var out := Vector2i(-1, 0)
+	var from := hand_r.global_position
+	var dir := -hand_r.global_basis.z.normalized()
+	var length := 3.0
+	var rows: Array = get_meta("vr_rows", []) if has_meta("vr_rows") else []
+	var xf := vr_list.global_transform
+	var n := xf.basis.z.normalized()
+	var denom := dir.dot(n)
+	if absf(denom) > 0.05:
+		var t := (xf.origin - from).dot(n) / denom
+		if t > 0.0 and t < 6.0:
+			var local := xf.affine_inverse() * (from + dir * t)
+			var font: Font = vr_list.font if vr_list.font != null else ThemeDB.fallback_font
+			var lh := (font.get_height(vr_list.font_size) + vr_list.line_spacing) * vr_list.pixel_size
+			var top := lh * vr_list.text.count("\n") * 0.5 + lh * 0.5
+			var half_w := vr_list.width * vr_list.pixel_size * 0.5
+			var row := int(floor((top - local.y) / lh))
+			if absf(local.x) < half_w and row >= 0 and row < rows.size():
+				out = Vector2i(int(rows[row]), 1 if local.x > 0.0 else 0)
+				length = t
+	laser.visible = hand_r.get_has_tracking_data()
+	laser.global_transform = Transform3D(_laser_basis(dir, length), from + dir * length * 0.5)
+	return out
+
+
+func _laser_basis(dir: Vector3, length: float) -> Basis:
+	var up := dir
+	var side := up.cross(Vector3.UP if absf(up.y) < 0.95 else Vector3.RIGHT).normalized()
+	var fwd := side.cross(up).normalized()
+	return Basis(side, up * length, fwd)
+
+
+func _switch_vr_tab(step: int) -> void:
+	var t := tabs()
+	if t.is_empty():
+		return
+	var next_tab := wrapi(t.find(_cat_index_of(selected)) + step, 0, t.size())
+	var in_next := _games_in(next_tab)
+	if not in_next.is_empty():
+		_select(in_next[0], true)
+		if grid != null:
+			_show_category(next_tab, true)
 
 
 ## A glowing floor and a ring of pillars so the VR lobby isn't a black void.
