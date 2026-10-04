@@ -27,7 +27,7 @@ HOST = "steamos@frame"
 LOG = Path.home() / "GodotProjects/duo-arena/.dev/voice.log"
 RATE = 16000
 FRAME = 480  # 30 ms
-MODEL = sys.argv[1] if len(sys.argv) > 1 else "small.en"  # ~3x faster than medium.en on this CPU
+MODEL = sys.argv[1] if len(sys.argv) > 1 else "medium.en"  # the user prefers its accuracy over small.en speed
 # Loudness (RMS) a 30 ms frame needs to count as speech. 180 also hears people across the room,
 # not just the headset wearer (that needed ~500); Whisper's VAD filter drops the extra non-speech.
 FLOOR = float(os.environ.get("VOICE_FLOOR", "180"))
