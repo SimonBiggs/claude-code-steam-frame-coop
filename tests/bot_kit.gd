@@ -144,6 +144,7 @@ func assert_true(cond: bool, msg: String) -> bool:
 	return false
 
 
+## Check a == b (same type; numbers compared approximately).
 func assert_eq(a: Variant, b: Variant, msg: String) -> bool:
 	var same: bool = typeof(a) == typeof(b) and a == b
 	if not same and (a is float or a is int) and (b is float or b is int):
@@ -151,6 +152,7 @@ func assert_eq(a: Variant, b: Variant, msg: String) -> bool:
 	return assert_true(same, "%s (got %s, want %s)" % [msg, str(a), str(b)])
 
 
+## Check |a - b| <= tolerance.
 func assert_near(a: float, b: float, tolerance: float, msg: String) -> bool:
 	return assert_true(absf(a - b) <= tolerance, "%s (got %.3f, want %.3f +- %.3f)" % [msg, a, b, tolerance])
 
@@ -191,6 +193,7 @@ func pad_press(device: int, button: JoyButton) -> void:
 	pad_hold(device, button, false)
 
 
+## Press (down = true) or release a button and leave it there.
 func pad_hold(device: int, button: JoyButton, down: bool) -> void:
 	var e := InputEventJoypadButton.new()
 	e.device = device
@@ -228,12 +231,14 @@ func slot_press(party: Node, slot: int, action: String) -> void:
 	pad_press(dev, BUTTONS.get(action, JOY_BUTTON_A))
 
 
+## Hold or release a standard action on a party slot's pad.
 func slot_hold(party: Node, slot: int, action: String, down: bool) -> void:
 	var dev: int = party.device_of(slot)
 	if dev >= 0:
 		pad_hold(dev, BUTTONS.get(action, JOY_BUTTON_A), down)
 
 
+## Move a stick on a party slot's pad (y DOWN positive).
 func slot_stick(party: Node, slot: int, which: String, v: Vector2) -> void:
 	var dev: int = party.device_of(slot)
 	if dev >= 0:
@@ -287,10 +292,12 @@ func vr_trigger(rig: Node, value: float) -> void:
 	rig.fake_trigger = value
 
 
+## Hold or release the fake A button.
 func vr_a(rig: Node, down: bool) -> void:
 	rig.fake_a = down
 
 
+## Push the fake thumbsticks (y UP = forward, like OpenXR).
 func vr_stick(rig: Node, left: Vector2, right: Vector2 = Vector2.ZERO) -> void:
 	rig.fake_stick_l = left
 	rig.fake_stick_r = right
