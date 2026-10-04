@@ -12,6 +12,9 @@ extends Node3D
 ##   and the island's goals
 ## - the right stick turns the table (the rig orbits round it), the left stick walks round it.
 ## The tray and board are world-locked and glide after the player only when they walk or turn away.
+## SIMPLE_MODE: the tray holds only what's unlocked (ROAD + HOUSE at first), as little models with no
+## words; a new block arrives with a sparkle. No board, no ISLANDS sign, no bulldozer, no speech bubbles
+## (touching things makes them react instead: props.gd), and a "not there" is just a buzz.
 
 const Defs := preload("res://games/tiny_town_tycoon/defs.gd")
 const Art := preload("res://games/tiny_town_tycoon/art.gd")
@@ -64,6 +67,8 @@ var _nope_t := 0.0
 var _st_moving := true
 var _snow := false
 var _tray_key := ""
+var _sparkle_kind := ""
+var _sparkle_t := 0.0
 
 
 func setup(p_main: Node, p_rig: VrRig, p_town: Town) -> void:
@@ -95,6 +100,11 @@ func setup(p_main: Node, p_rig: VrRig, p_town: Town) -> void:
 
 func _tray_kinds() -> Array[String]:
 	var out: Array[String] = []
+	if Defs.SIMPLE_MODE:
+		var n := clampi(int(main.net.state_get("unl", 2)), 2, Defs.SIMPLE_TRAY.size())
+		for i in n:
+			out.append(Defs.SIMPLE_TRAY[i])
+		return out
 	for k in Defs.TRAY:
 		out.append(k)
 	out.append("islands")
@@ -105,6 +115,7 @@ func _build_tray() -> void:
 	for c in tray.get_children():
 		c.queue_free()
 	slots.clear()
+	hover = -1
 	var kinds := _tray_kinds()
 	var rows := int(ceil(kinds.size() / float(COLS)))
 	var back := MeshInstance3D.new()
@@ -136,6 +147,10 @@ func _build_tray() -> void:
 			piece.mesh = Art.piece_mesh(kind, _snow)
 			piece.scale = Vector3.ONE * (PIECE / float(Defs.size_of(kind) if not Defs.is_tool_kind(kind) else 1))
 		n.add_child(piece)
+		if Defs.SIMPLE_MODE:
+			base.material_override = MeshKit.material(Color(0.98, 0.93, 0.82))
+			slots.append({"kind": kind, "node": n, "piece": piece, "base": base, "label": null})
+			continue
 		var label := UiKit.label3d("", 0.0075, "text", true, PITCH)
 		label.position = Vector3(0.0, 0.004, PITCH * 0.42)
 		label.rotation = Vector3(-1.1, 0.0, 0.0)
@@ -147,6 +162,10 @@ func _build_tray() -> void:
 
 
 func refresh_tray() -> void:
+	if Defs.SIMPLE_MODE:
+		if slots.size() != _tray_kinds().size():
+			_build_tray()
+		return
 	var key := "%d_%d_%s" % [int(main.net.state_get("tier", 0)), int(main.net.state_get("coins", 0)) / 5, str(main.net.state_get("free", false))]
 	if key == _tray_key:
 		return
@@ -177,6 +196,8 @@ func refresh_tray() -> void:
 
 
 func _locked(kind: String) -> String:
+	if Defs.SIMPLE_MODE:
+		return "" if _tray_kinds().has(kind) else "locked"
 	if bool(main.net.state_get("free", false)):
 		return ""
 	var t := int(Defs.def(kind).get("tier", 0))
@@ -184,6 +205,8 @@ func _locked(kind: String) -> String:
 
 
 func _build_board() -> void:
+	if Defs.SIMPLE_MODE:
+		return
 	board = Node3D.new()
 	board.name = "Board"
 	station.add_child(board)
@@ -204,6 +227,9 @@ func _build_board() -> void:
 
 
 func refresh_board() -> void:
+	if Defs.SIMPLE_MODE:
+		refresh_tray()
+		return
 	if board_title == null:
 		return
 	var net: Node = main.net
@@ -226,6 +252,47 @@ func refresh_board() -> void:
 
 func built(_id: int) -> void:
 	rig.pulse(VrRig.LEFT, 0.25, 0.05)
+
+
+## SIMPLE_MODE: a new block joined the tray: it bounces and sparkles for a while (no words).
+func unlocked(kind: String) -> void:
+	refresh_tray()
+	_sparkle_kind = kind
+	_sparkle_t = 8.0
+	for s in slots:
+		if String(s["kind"]) == kind:
+			var n: Node3D = s["node"]
+			var p := CPUParticles3D.new()
+			p.name = "Sparkle"
+			p.amount = 10
+			p.lifetime = 0.9
+			p.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+			p.emission_sphere_radius = PITCH * 0.4
+			p.direction = Vector3.UP
+			p.spread = 40.0
+			p.gravity = Vector3(0, 0.02, 0)
+			p.initial_velocity_min = 0.02
+			p.initial_velocity_max = 0.05
+			p.mesh = Art.spark_mesh(Color(1.0, 0.9, 0.4))
+			p.scale_amount_min = 0.25
+			p.scale_amount_max = 0.5
+			n.add_child(p)
+			p.emitting = true
+			get_tree().create_timer(_sparkle_t).timeout.connect(func() -> void:
+				if is_instance_valid(p):
+					p.emitting = false
+					p.get_tree().create_timer(1.2).timeout.connect(p.queue_free))
+	rig.pulse(VrRig.RIGHT, 0.4, 0.15)
+
+
+func _sparkle(delta: float) -> void:
+	if _sparkle_t <= 0.0:
+		return
+	_sparkle_t -= delta
+	for i in slots.size():
+		if String(slots[i]["kind"]) == _sparkle_kind and i != hover:
+			var k := 1.0 + absf(sin(_sparkle_t * 5.0)) * 0.25 * clampf(_sparkle_t, 0.0, 1.0)
+			(slots[i]["node"] as Node3D).scale = Vector3.ONE * k
 
 
 # --- Phases --------------------------------------------------------------------------------------------
@@ -262,6 +329,7 @@ func _process(delta: float) -> void:
 		_hide_bubble(delta, true)
 		return
 	_hover_tray()
+	_sparkle(delta)
 	if held == "":
 		_idle_hands()
 	elif Defs.is_tool_kind(held):
@@ -339,9 +407,11 @@ func _grab_hovered() -> bool:
 	if why != "":
 		nope("Unlocks when you're a %s!" % why)
 		return false
-	if not bool(main.net.state_get("free", false)) and Defs.cost_of(kind) > int(main.net.state_get("coins", 0)):
+	if not Defs.SIMPLE_MODE and not bool(main.net.state_get("free", false)) and Defs.cost_of(kind) > int(main.net.state_get("coins", 0)):
 		nope("Not enough coins yet: %d needed" % Defs.cost_of(kind))
 		return false
+	if kind == _sparkle_kind:
+		_sparkle_t = minf(_sparkle_t, 0.2)
 	held = kind
 	held_mi.mesh = (slots[hover]["piece"] as MeshInstance3D).mesh
 	held_mi.scale = (slots[hover]["piece"] as MeshInstance3D).scale
@@ -354,7 +424,9 @@ func _grab_hovered() -> bool:
 	paint_last = Vector2i(-99, -99)
 	rig.pulse(VrRig.RIGHT, 0.5, 0.06)
 	UiKit.sound("ui_select", -4.0)
-	if Defs.is_tool_kind(kind):
+	if Defs.SIMPLE_MODE:
+		pass
+	elif Defs.is_tool_kind(kind):
 		var tip := "Hold the trigger and draw over the island!" if kind != "bulldozer" else "Hold the trigger and sweep to clear roads and buildings."
 		main.hints.hint("tool_" + kind, tip, {"to": "vr", "icon": "plus"})
 	else:
@@ -432,7 +504,8 @@ func _hold_building() -> void:
 		if ghost_on and ghost_ok:
 			main.net.request(0, "place", [held, ghost_cell.x, ghost_cell.y, rot])
 			rig.pulse(VrRig.RIGHT, 0.7, 0.08)
-			main.hints.hint("crane_vr", "The crane brings bricks to build it. Touch buildings to see what they need!", {"to": "vr", "icon": "plus"})
+			if not Defs.SIMPLE_MODE:
+				main.hints.hint("crane_vr", "The crane brings bricks to build it. Touch buildings to see what they need!", {"to": "vr", "icon": "plus"})
 		elif ghost_on:
 			nope(ghost_why)
 		else:
@@ -530,8 +603,11 @@ func _idle_hands() -> void:
 	ghost.visible = false
 	ghost_on = false
 	if rig.trigger_pressed():
-		_grab_hovered()
+		if not _grab_hovered() and Defs.SIMPLE_MODE and main.props != null and hover < 0:
+			main.props.try_grab_tree(rig.hand_point(VrRig.RIGHT))
 		return
+	if Defs.SIMPLE_MODE:
+		return  # touching things makes them react (props.gd), no speech bubbles
 	for h in [VrRig.LEFT, VrRig.RIGHT]:
 		var p := rig.hand_point(int(h))
 		if p.y > Defs.GROUND_Y + 0.09 or p.y < Defs.GROUND_Y - 0.03:
@@ -588,7 +664,7 @@ func _hide_bubble(delta: float, now: bool) -> void:
 func nope(why: String) -> void:
 	rig.pulse(VrRig.RIGHT, 0.35, 0.12)
 	UiKit.sound("ui_error", -6.0)
-	if _nope_t <= 0.0 and why != "":
+	if _nope_t <= 0.0 and why != "" and not Defs.SIMPLE_MODE:
 		_nope_t = 1.6
 		HudKit.vr_toast(main, rig.camera, why, {"duration": 2.0})
 

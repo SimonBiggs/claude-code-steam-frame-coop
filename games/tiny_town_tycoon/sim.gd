@@ -19,6 +19,7 @@ var happy := 60
 var tier := 0
 var job_slots := 0
 var free_build := false
+var unl := 2  ## SIMPLE_MODE: how many Defs.SIMPLE_TRAY blocks are unlocked
 ## Counters for goals and the results screen.
 var counters := {"deliveries": 0, "passengers": 0, "loads": 0, "fires": 0, "festivals": 0, "trains": 0, "cows": 0,
 	"built": 0, "roads": 0, "upgrades": 0, "visits": 0}
@@ -58,11 +59,27 @@ func add_coins(n: int) -> void:
 
 
 func can_afford(kind: String) -> bool:
-	return free_build or coins >= Defs.cost_of(kind)
+	return Defs.SIMPLE_MODE or free_build or coins >= Defs.cost_of(kind)
 
 
 func unlocked(kind: String) -> bool:
+	if Defs.SIMPLE_MODE:
+		var i := Defs.SIMPLE_TRAY.find(kind)
+		return i >= 0 and i < unl
 	return free_build or tier >= int(Defs.def(kind).get("tier", 0))
+
+
+## SIMPLE_MODE: one new tray block at a time as the town grows ("unlock" event when one joins).
+func refresh_unlocks(announce: bool) -> void:
+	var n := 0
+	for id in town.buildings:
+		if String(town.buildings[id]["kind"]) != "hall":
+			n += 1
+	var k := Defs.simple_unlocked(n)
+	if k > unl and announce:
+		unl = k
+		_emit("unlock", [Defs.SIMPLE_TRAY[k - 1]])
+	unl = k
 
 
 ## One simulated second (dt may be larger when the game runs fast).
@@ -78,6 +95,8 @@ func tick(dt: float) -> void:
 	if _hall_t >= 4.0:
 		_hall_t -= 4.0
 		add_coins(1)
+	if Defs.SIMPLE_MODE:
+		refresh_unlocks(true)
 	var new_tier := Defs.tier_for_pop(pop)
 	if new_tier > tier:
 		tier = new_tier
@@ -246,34 +265,37 @@ func _homes(dt: float) -> void:
 			needs |= Defs.N_FIRE
 		if kind == "house":
 			houses += 1
-			var power := town.near_kind(b, "windmill", 5.0)
-			var water := town.near_kind(b, "water", 5.0)
+			var power := Defs.SIMPLE_MODE or town.near_kind(b, "windmill", 5.0)
+			var water := Defs.SIMPLE_MODE or town.near_kind(b, "water", 5.0)
 			if not power:
 				needs |= Defs.N_POWER
 			if not water:
 				needs |= Defs.N_WATER
 			var cap: int = HOMES[clampi(int(b["lvl"]), 1, 3)]
-			var shop := _shop_stocked_near(b)
-			var fun := town.near_kind(b, "park", 3.5) or town.near_kind(b, "landmark", 8.0) or town.near_kind(b, "ferris", 8.0)
-			if not shop:
-				needs |= Defs.N_SHOP
-			if not fun and tier >= 1:
-				needs |= Defs.N_FUN
 			var h := 45
-			h += 15 if power else 0
-			h += 10 if water else 0
-			h += 12 if shop else 0
-			h += 8 if town.near_kind(b, "park", 3.5) else 0
-			h += 8 if town.near_kind(b, "school", 5.0) else 0
-			h += 10 if town.near_kind(b, "landmark", 8.0) else 0
-			h += 10 if town.near_kind(b, "ferris", 8.0) else 0
+			if Defs.SIMPLE_MODE:
+				h = 82  # no needs to go without (and none of the near-by searches: cheaper sim ticks)
+			else:
+				var shop := _shop_stocked_near(b)
+				var fun := town.near_kind(b, "park", 3.5) or town.near_kind(b, "landmark", 8.0) or town.near_kind(b, "ferris", 8.0)
+				if not shop:
+					needs |= Defs.N_SHOP
+				if not fun and tier >= 1:
+					needs |= Defs.N_FUN
+				h += 15 if power else 0
+				h += 10 if water else 0
+				h += 12 if shop else 0
+				h += 8 if town.near_kind(b, "park", 3.5) else 0
+				h += 8 if town.near_kind(b, "school", 5.0) else 0
+				h += 10 if town.near_kind(b, "landmark", 8.0) else 0
+				h += 10 if town.near_kind(b, "ferris", 8.0) else 0
 			h += 12 if festival_t > 0.0 else 0
 			h -= 25 if int(b["fire"]) > 0 else 0
 			b["happy"] = clampi(h, 0, 100)
 			happy_sum += int(b["happy"])
 			# moving in: powered, watered homes on a road with free beds, and work (or a little slack)
 			var ok := power and water and road and int(b["fire"]) == 0
-			var work_ok := pop < job_slots + 6
+			var work_ok := Defs.SIMPLE_MODE or pop < job_slots + 6
 			if ok and not work_ok and int(b["res"]) < cap:
 				needs |= Defs.N_JOBS
 			if ok and work_ok and int(b["res"]) < cap:
@@ -301,7 +323,7 @@ func _homes(dt: float) -> void:
 						b["wait"] = int(b["wait"]) + 1
 				_wait_t[id] = wt
 			total += int(b["res"])
-		else:
+		elif not Defs.SIMPLE_MODE:
 			if int(d.get("jobs", 0)) > 0 and road and int(b["work"]) == 0 and String(b["kind"]) != "hall":
 				needs |= Defs.N_WORKERS
 			if kind == "shop" and int(b["food"]) + int(b["bread"]) == 0:

@@ -69,6 +69,12 @@ var _dirty := true
 var _slow_t := 0.0
 var _t := 0.0
 var _route_ver := -1
+# SIMPLE_MODE touches (props.gd): wobble one MultiMesh instance at a time, no rebuilds.
+var _inst := {}  # building id -> [group key, instance index, rest transform]
+var _wob := {}  # building id -> seconds of wobble left
+var _tree_inst := {}  # cell index -> [first instance, count]
+var _tree_xf: Array[Transform3D] = []
+var _twob := {}  # cell index -> seconds of sway left
 
 
 func setup(p_main: Node, p_town: Town, p_isl: Dictionary, p_vr: bool) -> void:
@@ -252,9 +258,13 @@ func _rebuild_trees() -> void:
 	var xfs: Array[Transform3D] = []
 	var cols := PackedColorArray()
 	var n := Defs.GRID
+	_tree_inst.clear()
+	_twob.clear()
 	for z in n:
 		for x in n:
 			var cnt := int(town.trees[Town.idx(x, z)])
+			if cnt > 0:
+				_tree_inst[Town.idx(x, z)] = [xfs.size(), cnt]
 			for k in cnt:
 				var h := (x * 73856093) ^ (z * 19349663) ^ (k * 83492791)
 				var ox := (float(h % 1000) / 1000.0 - 0.5) * 0.6
@@ -276,6 +286,7 @@ func _rebuild_trees() -> void:
 		_trees.multimesh.set_instance_transform(i, xfs[i])
 		_trees.multimesh.set_instance_color(i, cols[i])
 	_trees.visible = not xfs.is_empty()
+	_tree_xf = xfs
 
 
 # --- Buildings ------------------------------------------------------------------------------------------
@@ -313,6 +324,8 @@ func _rebuild_buildings() -> void:
 	_sail_xf.clear()
 	_wheel_xf.clear()
 	var live_sites := {}
+	_inst.clear()
+	_wob.clear()
 	for id in town.buildings:
 		var b: Dictionary = town.buildings[id]
 		if int(id) == hidden_id:
@@ -330,6 +343,7 @@ func _rebuild_buildings() -> void:
 			var arr: Array[Transform3D] = []
 			by_key[key] = arr
 			meshes[key] = Art.building_mesh(kind, int(id), int(b["lvl"]), snowy)
+		_inst[id] = [key, (by_key[key] as Array).size(), xf]
 		(by_key[key] as Array).append(xf)
 		if kind == "windmill":
 			_sail_xf.append(xf * Transform3D(Basis(), Vector3(0, 0.62, 0.25)))
@@ -668,12 +682,76 @@ func _animate(delta: float) -> void:
 				mi.queue_free()
 			_rise_nodes.erase(id)
 			_dirty = true
+	_animate_pokes(delta)
 	for slot in _markers:
 		var m: Node3D = _markers[slot]
 		if m.visible:
 			var ring: Node3D = m.get_node("Ring")
 			ring.rotation.y = _t * 1.5
 			ring.scale = Vector3.ONE * (1.0 + sin(_t * 5.0) * 0.08)
+
+
+# --- SIMPLE_MODE touches (props.gd calls these on every machine) -----------------------------------------
+
+## A building was touched: it does a little squash-and-stretch jiggle.
+func poke_building(id: int) -> void:
+	if _inst.has(id):
+		_wob[id] = 0.6
+
+
+## A tree was touched: it sways.
+func poke_tree(ci: int) -> void:
+	if _tree_inst.has(ci):
+		_twob[ci] = 1.0
+
+
+## Little people near `p` hop and wave.
+func poke_walkers(p: Vector3, radius: float) -> int:
+	var n := 0
+	for w in _walkers:
+		var wp: Vector3 = w["pos"]
+		if Vector2(wp.x - p.x, wp.z - p.z).length() < radius:
+			w["joy"] = 1.2
+			n += 1
+	return n
+
+
+func _animate_pokes(delta: float) -> void:
+	for id in _wob.keys():
+		var t := float(_wob[id]) - delta
+		var info: Array = _inst.get(id, [])
+		var mmi: MultiMeshInstance3D = _groups.get(String(info[0]), null) if info.size() == 3 else null
+		if mmi == null or int(info[1]) >= mmi.multimesh.instance_count:
+			_wob.erase(id)
+			continue
+		var xf: Transform3D = info[2]
+		if t <= 0.0:
+			_wob.erase(id)
+			mmi.multimesh.set_instance_transform(int(info[1]), xf)
+			continue
+		_wob[id] = t
+		var k := sin((0.6 - t) * 26.0) * t * 0.35
+		mmi.multimesh.set_instance_transform(int(info[1]), Transform3D(xf.basis * Basis().scaled(Vector3(1.0 - k * 0.5, 1.0 + k, 1.0 - k * 0.5)), xf.origin))
+	if _trees == null:
+		return
+	for ci in _twob.keys():
+		var t2 := float(_twob[ci]) - delta
+		var ti: Array = _tree_inst.get(ci, [])
+		if ti.size() < 2:
+			_twob.erase(ci)
+			continue
+		var done := t2 <= 0.0
+		if done:
+			_twob.erase(ci)
+		else:
+			_twob[ci] = t2
+		var sway := 0.0 if done else sin((1.0 - t2) * 16.0) * t2 * 0.45
+		for k in int(ti[1]):
+			var i := int(ti[0]) + k
+			if i >= _tree_xf.size() or i >= _trees.multimesh.instance_count:
+				break
+			var bx: Transform3D = _tree_xf[i]
+			_trees.multimesh.set_instance_transform(i, Transform3D(Basis(Vector3.BACK, sway) * bx.basis, bx.origin))
 
 
 # --- Citizens strolling ------------------------------------------------------------------------------------
@@ -721,7 +799,13 @@ func _walk(delta: float) -> void:
 	for i in _walkers.size():
 		var w: Dictionary = _walkers[i]
 		var pause := float(w["pause"])
-		if pause > 0.0:
+		var joy := float(w.get("joy", 0.0))
+		if joy > 0.0:
+			w["joy"] = joy - delta
+			pause = maxf(pause, 0.01)  # stop to hop and wave
+		if joy > 0.0:
+			pass
+		elif pause > 0.0:
 			w["pause"] = pause - delta
 		else:
 			w["t"] = float(w["t"]) + delta * float(w["speed"])
@@ -745,12 +829,16 @@ func _walk(delta: float) -> void:
 		if moving:
 			w["yaw"] = lerp_angle(float(w["yaw"]), atan2(flat.x, flat.z), 1.0 - exp(-10.0 * delta))
 		var hop := absf(sin(_t * 9.0 + i)) * 0.0012 if moving else 0.0
+		if joy > 0.0:
+			hop = absf(sin(_t * 13.0 + i)) * 0.006
 		w["pos"] = p
 		var look := i % 4
 		var mm := _walk_mm[look].multimesh
 		var k := idx_in_look[look]
 		if k < mm.instance_count:
 			var sway := sin(_t * 9.0 + i) * 0.12 if moving else 0.0
+			if joy > 0.0:
+				sway = sin(_t * 18.0 + i) * 0.35  # a happy wiggle-wave
 			mm.set_instance_transform(k, Transform3D(Basis(Vector3.UP, float(w["yaw"])) * Basis(Vector3.BACK, sway) * Basis().scaled(Vector3.ONE * WALKER_SCALE),
 				p + Vector3(0, 0.0012 + hop, 0)))
 		idx_in_look[look] = k + 1
