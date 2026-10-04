@@ -646,8 +646,8 @@ func apply_net(item: Array) -> void:
 	net_rot = item[3]
 	reveal = item[4]
 	capture = item[5]
-	if item.size() > 8:
-		var n: int = item[8]
+	if item.size() > 8 or not carried.is_empty():
+		var n: int = item[8] if item.size() > 8 else 0
 		while carried.size() < n:
 			carried.append(-1)
 		while carried.size() > n:
@@ -660,4 +660,7 @@ func apply_net(item: Array) -> void:
 
 
 func net_state() -> Array:
-	return [net_id, kind, global_position, body.rotation.y, reveal, capture, stun_t > 0.0, scared_t > 0.0, carried.size()]
+	var st := [net_id, kind, global_position, body.rotation.y, reveal, capture, stun_t > 0.0, scared_t > 0.0]
+	if not carried.is_empty():
+		st.append(carried.size())  # only the Ghost King carries several photos
+	return st
