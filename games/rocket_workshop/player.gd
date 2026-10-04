@@ -73,27 +73,18 @@ func _ready() -> void:
 	pivot = Node3D.new()
 	add_child(pivot)
 	var overall: StandardMaterial3D = main.make_material(color, 0.1)
+	# Overalls, head, hard hat and visor baked into one mesh per colour (fewer draw calls for the pilot).
+	var hat_col := Color(1.0, 0.82, 0.15)
 	body_mesh = MeshInstance3D.new()
-	body_mesh.mesh = main.capsule_mesh(0.33, 1.25)
-	body_mesh.material_override = overall
-	body_mesh.position.y = 0.65
+	body_mesh.mesh = main.merged_mesh("crew_%s" % color.to_html(), [
+		[main.capsule_mesh(0.33, 1.25), Transform3D(Basis(), Vector3(0, 0.65, 0)), color],
+		[main.sphere_mesh(0.2), Transform3D(Basis(), Vector3(0, 1.45, 0)), Color(1.0, 0.8, 0.65)],
+		[main.sphere_mesh(0.22), Transform3D(Basis.from_scale(Vector3(1, 0.6, 1)), Vector3(0, 1.56, 0)), hat_col],
+		[main.box_mesh(Vector3(0.3, 0.03, 0.16)), Transform3D(Basis(), Vector3(0, 1.53, -0.2)), hat_col],
+		[main.box_mesh(Vector3(0.4, 0.08, 0.2)), Transform3D(Basis(), Vector3(0, 0.62, -0.26)), color.darkened(0.25)],
+	])
+	body_mesh.material_override = main.vertex_mat()
 	pivot.add_child(body_mesh)
-	var head := MeshInstance3D.new()
-	head.mesh = main.sphere_mesh(0.2)
-	head.material_override = main.make_material(Color(1.0, 0.8, 0.65), 0.0)
-	head.position.y = 1.45
-	pivot.add_child(head)
-	var hat := MeshInstance3D.new()
-	hat.mesh = main.sphere_mesh(0.22)
-	hat.material_override = main.make_material(Color(1.0, 0.82, 0.15), 0.1)
-	hat.scale = Vector3(1, 0.6, 1)
-	hat.position.y = 1.56
-	pivot.add_child(hat)
-	var visor := MeshInstance3D.new()
-	visor.mesh = main.box_mesh(Vector3(0.3, 0.03, 0.16))
-	visor.material_override = hat.material_override
-	visor.position = Vector3(0, 1.53, -0.2)
-	pivot.add_child(visor)
 	# Both eyes are one mesh (one draw call); blinking squashes it.
 	eyes = MeshInstance3D.new()
 	eyes.mesh = main.eyes_mesh()
