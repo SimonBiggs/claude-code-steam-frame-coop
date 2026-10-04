@@ -408,7 +408,7 @@ func face_label(l: Label3D) -> void:
 		var d := l.global_position - cam.global_position
 		d.y = 0.0
 		if d.length() > 0.01:
-			l.global_rotation = Vector3(0.0, atan2(d.x, d.z), 0.0)
+			l.global_rotation = Vector3(0.0, atan2(-d.x, -d.z), 0.0)  # Label3D front is +Z: point it back at the camera
 	else:
 		l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 
