@@ -104,6 +104,9 @@ var bell_cd := 0.0
 var alt_was_held := false
 var shake_meter := 0.0
 var last_lhand := Vector3.ZERO
+var snuff_t := 0.0  # a snuffer blew the lantern out: dark while > 0
+var lantern_label: Label3D
+var cheer_helper  # who is cheering us up (gets the credit)
 
 # Vacuum (TV players).
 var vac_on := false
@@ -501,7 +504,7 @@ func nozzle_pos() -> Vector3:
 
 
 func lantern_lit() -> bool:
-	return active and not is_down and lantern != null
+	return active and not is_down and lantern != null and snuff_t <= 0.0
 
 
 func _input(event: InputEvent) -> void:
@@ -515,6 +518,7 @@ func _physics_process(delta: float) -> void:
 	invuln_t -= delta
 	flash_t -= delta
 	bell_cd -= delta
+	snuff_t = maxf(0.0, snuff_t - delta)
 	body_mat.emission_energy_multiplier = 3.0 if flash_t > 0.0 else 0.35
 	if not active:
 		return
@@ -772,6 +776,33 @@ func _vr_update(delta: float) -> void:
 	if main.net.mode == "host" and not main.net.connected:
 		status = "Waiting for the TV players…"
 	wrist_label.text = "COURAGE %d\nNIGHT %d   PHOTOS %d/%d\n%s" % [maxi(0, int(courage)), main.night, main.photos_left(), main.photos.size(), status]
+	_update_lantern_label()
+
+
+## VR: photos, courage and bell right above the lantern, where the lantern-bearer always looks.
+func _update_lantern_label() -> void:
+	if lantern_label == null:
+		lantern_label = Label3D.new()
+		lantern_label.font_size = 44
+		lantern_label.outline_size = 14
+		lantern_label.pixel_size = 0.0007
+		lantern_label.no_depth_test = true
+		lantern_label.render_priority = 6
+		hand_r.add_child(lantern_label)
+		lantern_label.position = Vector3(0.0, 0.1, 0.02)
+		lantern_label.rotation_degrees = Vector3(-30, 0, 0)
+		_set_layers(lantern_label, viewmodel_layer())
+	var lines: Array[String] = ["PHOTOS %d/%d   ♥ %d" % [main.photos_left(), main.photos.size(), maxi(0, int(courage))]]
+	if snuff_t > 0.0:
+		lines.append("LANTERN OUT! %d" % ceili(snuff_t))
+	elif bell_cd <= 0.0:
+		lines.append("BELL READY - shake left hand")
+	var d = main.director()
+	if d.last_chance_t > 0.0:
+		lines.append("CATCH THE KING: %d s" % ceili(d.last_chance_t))
+	lantern_label.text = "\n".join(lines)
+	var frac := clampf(float(main.photos_left()) / maxf(main.photos.size(), 1.0), 0.0, 1.0)
+	lantern_label.modulate = Color(1.0, 0.45, 0.4) if frac <= 0.25 or snuff_t > 0.0 else Color(1.0, 0.92, 0.6)
 
 
 # --- Courage & cheering up ---------------------------------------------------
@@ -811,6 +842,8 @@ func _update_revive(delta: float) -> void:
 	var helper_near := false
 	for p in main.players:
 		if p != self and p.active and not p.is_down and p.global_position.distance_to(global_position) <= REVIVE_RANGE:
+			if not helper_near:
+				cheer_helper = p
 			helper_near = true
 	if helper_near:
 		revive_progress += delta / REVIVE_TIME
@@ -819,6 +852,9 @@ func _update_revive(delta: float) -> void:
 	var s := maxf(revive_progress, 0.01)
 	revive_fill.scale = Vector3(s, 1, s)
 	if revive_progress >= 1.0:
+		if cheer_helper != null and is_instance_valid(cheer_helper):
+			main.director().add_stat(cheer_helper, "cheers", 1)
+			main.popup(global_position + Vector3.UP * 2.6, "P%d CHEERED UP P%d!" % [cheer_helper.index + 1, index + 1], cheer_helper.color)
 		revive(0.6)
 
 
@@ -872,7 +908,7 @@ func set_active(on: bool) -> void:
 ## [pos, yaw, pitch, courage, is_down, revive, head, hand, lhand, active, vac_on, focus, bell_cd]
 func net_state() -> Array:
 	return [global_position, yaw, pitch, courage, is_down, revive_progress, head_transform(),
-		hand_transform(), left_hand_transform(), active, vac_on, focus, bell_cd]
+		hand_transform(), left_hand_transform(), active, vac_on, focus, bell_cd, snuff_t]
 
 
 ## Host: latest position and view of a TV player.
@@ -902,6 +938,8 @@ func apply_net_state(st: Array) -> void:
 		vac_on = st[10]
 		focus = st[11]
 		bell_cd = st[12]
+		if st.size() > 13:
+			snuff_t = st[13]
 		if not net_started:
 			net_started = true
 			global_position = net_target

@@ -19,6 +19,11 @@ const LIST := [
 	["bomb_squad", "BOMB SQUAD", "Destroy 5 enemies within 2 seconds"],
 	["high_score", "HIGH SCORER", "Score 25,000 points in one game"],
 	["big_catch", "BIG CATCH", "Shoot down the flying fish"],
+	["shell_shock", "SHELL SHOCK", "Crack an armored ankylo with the VR sword"],
+	["fish_fillet", "FISH FILLET", "Slice Fishwort with the sword while it dives"],
+	["combo_king", "COMBO KING", "Reach a x20 team combo"],
+	["rex_wrecker", "REX WRECKER", "Defeat KING REX"],
+	["champion", "CHAMPION", "Beat the wave 15 finale"],
 ]
 const SAVE := "user://achievements.cfg"
 

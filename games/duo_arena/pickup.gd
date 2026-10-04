@@ -1,5 +1,5 @@
 extends Area3D
-## Health or spread-shot pickup dropped by enemies.
+## Pickups dropped by enemies: health, spread shot, rapid fire, shield bubble and the mega bomb.
 
 var kind := "health"
 var main
@@ -23,16 +23,51 @@ func _ready() -> void:
 	add_child(cs)
 
 	mesh = MeshInstance3D.new()
-	if kind == "health":
-		color = Color(0.3, 1.0, 0.45)
-		var b := BoxMesh.new()
-		b.size = Vector3(0.5, 0.5, 0.5)
-		mesh.mesh = b
-	else:
-		color = Color(0.3, 0.9, 1.0)
-		var p := PrismMesh.new()
-		p.size = Vector3(0.6, 0.6, 0.3)
-		mesh.mesh = p
+	match kind:
+		"health":
+			color = Color(0.3, 1.0, 0.45)
+			var b := BoxMesh.new()
+			b.size = Vector3(0.5, 0.5, 0.5)
+			mesh.mesh = b
+		"rapid":
+			color = Color(1.0, 0.6, 0.15)
+			var c := CylinderMesh.new()
+			c.top_radius = 0.0
+			c.bottom_radius = 0.28
+			c.height = 0.7
+			c.radial_segments = 6
+			mesh.mesh = c
+		"bubble":
+			color = Color(0.45, 0.65, 1.0)
+			var sp := SphereMesh.new()
+			sp.radius = 0.32
+			sp.height = 0.64
+			sp.radial_segments = 14
+			sp.rings = 7
+			mesh.mesh = sp
+		"bomb":
+			color = Color(1.0, 0.25, 0.35)
+			var bs := SphereMesh.new()
+			bs.radius = 0.3
+			bs.height = 0.6
+			bs.radial_segments = 12
+			bs.rings = 6
+			mesh.mesh = bs
+			var fuse := MeshInstance3D.new()
+			var tm := TorusMesh.new()
+			tm.inner_radius = 0.36
+			tm.outer_radius = 0.44
+			tm.rings = 16
+			tm.ring_segments = 6
+			fuse.mesh = tm
+			fuse.material_override = main.make_material(Color(1.0, 0.85, 0.3), 4.0)
+			fuse.rotation.x = PI / 2.0
+			mesh.add_child(fuse)
+		_:
+			color = Color(0.3, 0.9, 1.0)
+			var p := PrismMesh.new()
+			p.size = Vector3(0.6, 0.6, 0.3)
+			mesh.mesh = p
 	mesh.material_override = main.make_material(color, 2.0)
 	mesh.position.y = 0.8
 	add_child(mesh)
@@ -59,6 +94,8 @@ func _process(delta: float) -> void:
 	life -= delta
 	mesh.rotation.y = t * 2.0
 	mesh.position.y = 0.8 + sin(t * 3.0) * 0.15
+	var pulse := 1.0 + sin(t * 6.0) * 0.08
+	mesh.scale = Vector3.ONE * pulse
 	if life < 3.0:
 		mesh.visible = fmod(life, 0.3) > 0.12
 	if life <= 0.0:
@@ -83,10 +120,27 @@ func _on_body_entered(body: Node3D) -> void:
 	if body.get("is_down") != false:
 		return
 	main.achievements().on_pickup()
-	if kind == "health":
-		body.heal(40.0)
-	else:
-		body.spread_t = 10.0
+	main.director().add_stat(body, "pickups", 1)
+	main.director().on_pickup(kind)
+	var label := ""
+	match kind:
+		"health":
+			body.heal(40.0)
+			label = "+HEALTH"
+		"rapid":
+			body.rapid_t = 8.0
+			label = "RAPID FIRE!"
+		"bubble":
+			body.bubble_t = 6.0
+			label = "SHIELD BUBBLE!"
+			main.sound("bubble", -2.0)
+		"bomb":
+			label = "MEGA BOMB!"
+			main.mega_bomb(global_position, body)
+		_:
+			body.spread_t = 10.0
+			label = "SPREAD SHOT!"
+	main.popup(global_position + Vector3.UP * 1.6, label, color.lightened(0.3))
 	main.burst(global_position + Vector3.UP * 0.8, color, 16)
 	main.sound("pickup")
 	queue_free()

@@ -18,6 +18,25 @@ const AchScript := preload("res://games/duo_arena/achievements.gd")
 const TreeScript := preload("res://games/duo_arena/skill_map.gd")
 const TurretScript := preload("res://games/duo_arena/turret.gd")
 const JoinListenerScript := preload("res://games/duo_arena/join_listener.gd")
+const DirectorScript := preload("res://games/duo_arena/director.gd")
+
+## Waves 5 and 10 have bosses; wave 15 is the finale (OMEGA OVERLORD + Fishwort). Beat it to win, then
+## the arena keeps going in endless mode.
+const FINALE_WAVE := 15
+## Game-specific sounds: [seconds, start Hz, end Hz, volume, wave, noise mix]
+const EXTRA_SOUNDS := {
+	"ping": [0.08, 2400.0, 1800.0, 0.16, "tri", 0.0],
+	"crack": [0.3, 520.0, 70.0, 0.5, "saw", 0.7],
+	"roar": [0.9, 150.0, 45.0, 0.6, "saw", 0.45],
+	"screech": [0.35, 1900.0, 800.0, 0.22, "saw", 0.3],
+	"combo": [0.22, 660.0, 1320.0, 0.28, "square", 0.0],
+	"meteor": [0.9, 1500.0, 180.0, 0.22, "sine", 0.3],
+	"cheer": [1.2, 320.0, 520.0, 0.3, "saw", 0.92],
+	"bubble": [0.3, 420.0, 950.0, 0.3, "sine", 0.0],
+	"slice": [0.14, 3200.0, 500.0, 0.22, "saw", 0.8],
+	"victory": [1.8, 392.0, 1568.0, 0.4, "tri", 0.0],
+	"bomb": [1.0, 120.0, 30.0, 0.8, "saw", 0.7],
+}
 
 const ARENA_RADIUS := 18.0
 ## Team upgrades granted after each cleared wave: [name, description, stat, "mul" or "add", amount]
@@ -100,7 +119,7 @@ var wave := 0
 var score := 0
 var to_spawn := 0
 var spawn_timer := 0.0
-var break_timer := 3.0
+var break_timer := 7.0  # the first break is longer: time to read how to play
 var in_break := true
 var game_over := false
 var game_over_time := 0.0
@@ -117,6 +136,9 @@ var tether_announced := false
 var upg := {"fire_rate": 1.0, "damage": 1.0, "dash_cd": 1.0, "tether_range": 10.0, "tether_dps": 3.0,
 	"max_hp": 100.0, "speed": 1.0, "revive": 1.0}
 var upg_names: Array = []
+var dir_node: Node
+var won := false  # beat the finale (endless mode after that)
+var wave_downs := 0
 
 
 func _ready() -> void:
@@ -203,16 +225,25 @@ func burst(pos: Vector3, color: Color, amount: int = 16, size: float = 0.15) -> 
 
 
 func sound(sound_name: String, volume_db: float = 0.0, pitch: float = 1.0) -> void:
-	if sfx == null:
-		sfx = SfxScript.new()
-		add_child(sfx)
-	sfx.play(sound_name, volume_db, pitch)
+	sfx_local(sound_name, volume_db, pitch)
 	if net:
 		net.event("sound", [sound_name, volume_db, pitch])
 
 
+## Play a sound on this machine only.
+func sfx_local(sound_name: String, volume_db: float = 0.0, pitch: float = 1.0) -> void:
+	if sfx == null:
+		sfx = SfxScript.new()
+		add_child(sfx)
+	if not sfx.has_meta("da_sounds") and sfx.has_method("add_sound"):
+		sfx.set_meta("da_sounds", true)
+		for k in EXTRA_SOUNDS:
+			sfx.add_sound(k, EXTRA_SOUNDS[k])
+	sfx.play(sound_name, volume_db, pitch)
+
+
 ## Pushes enemies away from pos with an expanding ring.
-func shockwave(pos: Vector3, radius: float, force: float, damage: float, color: Color) -> void:
+func shockwave(pos: Vector3, radius: float, force: float, damage: float, color: Color, source = null) -> void:
 	for e in get_tree().get_nodes_in_group("enemies"):
 		var to: Vector3 = e.global_position - pos
 		to.y = 0.0
@@ -221,7 +252,7 @@ func shockwave(pos: Vector3, radius: float, force: float, damage: float, color: 
 			continue
 		var dir := to / d if d > 0.01 else Vector3.RIGHT
 		e.knockback += dir * force * (1.0 - d / (radius * 1.5)) / maxf(e.radius, 0.5)
-		e.hit(damage, dir, 0.0)
+		e.hit(damage, dir, 0.0, source)
 	_ring(pos, radius, color)
 	if net:
 		net.event("ring", [pos, radius, color])
@@ -283,6 +314,7 @@ func explosion(pos: Vector3, color: Color, radius: float) -> void:
 	p.emitting = true
 	get_tree().create_timer(1.3).timeout.connect(p.queue_free)
 	_ring(Vector3(pos.x, 0.0, pos.z), size * 2.0, color)
+	director().cheer(0.15 + radius * 0.3)
 	if net:
 		net.event("boom", [pos, color, radius])
 
@@ -496,6 +528,8 @@ func _build_views(mode: String) -> void:
 			# No Steam Machine: player 2 gets a window on this device.
 			_build_flat_window(players[1])
 			_add_bubble(players[1].hud, mirror, PLAYER_COLORS[0])
+	elif OS.has_environment("BOT_VR") and mode != "client":
+		_build_fake_vr()
 	else:
 		print("No VR headset: split screen")
 	_ensure_views_root()
@@ -508,6 +542,27 @@ func _build_views(mode: String) -> void:
 	if mode == "client":
 		_add_bubble(players[1].hud, _build_ghost_mirror(), PLAYER_COLORS[0])
 	_layout_views()
+
+
+## Test bots (BOT_VR=1): player 1 runs the real VR code with XR nodes that the bot moves by hand.
+func _build_fake_vr() -> void:
+	print("BOT_VR: fake VR player 1 (XR nodes, no headset)")
+	var origin := XROrigin3D.new()
+	add_child(origin)
+	origin.global_position = players[0].global_position
+	var cam := XRCamera3D.new()
+	origin.add_child(cam)
+	cam.position = Vector3(0.0, 1.6, 0.0)
+	var left := XRController3D.new()
+	left.tracker = "left_hand"
+	origin.add_child(left)
+	left.position = Vector3(-0.25, 1.1, -0.3)
+	var right := XRController3D.new()
+	right.tracker = "right_hand"
+	origin.add_child(right)
+	right.position = Vector3(0.25, 1.2, -0.35)
+	players[0].attach_xr(origin, cam, left, right)
+	_build_vr_mirror(cam)
 
 
 ## Black backdrop plus a plain Control that holds one SubViewportContainer per local player.
@@ -862,6 +917,29 @@ func _ensure_join_listener() -> void:
 	add_child(join_listener)
 
 
+## Test hooks: spawn a kind, start an arena event, jump to a wave.
+func debug_spawn(kind: String):
+	if net.mode == "client":
+		return null
+	return spawn_enemy_at(kind, edge_point())
+
+
+func debug_event(ev: String) -> void:
+	director().start_event(ev)
+
+
+func debug_skip_to_wave(n: int) -> void:
+	if net.mode == "client":
+		return
+	for e in get_tree().get_nodes_in_group("enemies"):
+		e.remove_from_group("enemies")
+		e.queue_free()
+	to_spawn = 0
+	wave = n - 1
+	in_break = true
+	break_timer = 0.5
+
+
 ## Test hook: join a TV player without a controller (index -1: the next free seat).
 func debug_join(index: int = -1):
 	if not ready_to_play or net.mode == "host":
@@ -899,7 +977,7 @@ func auto_aim(from: Vector3, dir: Vector3) -> Vector3:
 	var best := dir
 	var best_dot := cos(deg_to_rad(4.0))
 	for e in get_tree().get_nodes_in_group("enemies"):
-		var to: Vector3 = e.global_position + Vector3.UP * e.radius - from
+		var to: Vector3 = e.center() - from
 		var dist := to.length()
 		if dist < 0.5 or dist > 30.0:
 			continue
@@ -928,7 +1006,9 @@ func _process(delta: float) -> void:
 		music = MusicScript.new()
 		add_child(music)
 	if music.has_method("play_track"):
-		music.play_track(maxi(wave - 1, 0) / 2)  # a new track every two waves
+		var boss_wave := wave > 0 and wave % 5 == 0
+		music.play_track(1 if boss_wave else maxi(wave - 1, 0) / 2)  # a new track every two waves; bosses rock out
+	director().tick(delta)
 	if skill_tree != null and not skill_tree.has_meta("map_v3"):  # replace an older skill tree/map
 		skill_tree.queue_free()
 		skill_tree = null
@@ -974,8 +1054,12 @@ func _process(delta: float) -> void:
 
 	_update_tether(delta)
 	if net.mode == "host" and not net.connected:
+		if wave == 0:
+			director().howto()  # the VR player reads how to play while waiting
 		return  # hold the waves until player 2 joins
 	if in_break:
+		if wave == 0:
+			director().howto()
 		break_timer -= delta
 		if break_timer <= 0.0:
 			_start_wave()
@@ -1018,6 +1102,7 @@ func _extra_players() -> int:
 func _start_wave() -> void:
 	wave += 1
 	in_break = false
+	wave_downs = 0
 	print("Wave %d started" % wave)
 	to_spawn = int((4 + wave * 3) * (1.0 + 0.3 * _extra_players()))
 	spawn_timer = 0.5
@@ -1025,26 +1110,65 @@ func _start_wave() -> void:
 	achievements().on_wave_started(wave)
 	if wave == 2:
 		create_tween().tween_property(help_label, "modulate:a", 0.0, 1.0)
-	if wave % 5 == 0:
+	var boss_kind := _boss_for_wave(wave)
+	director().on_wave_started(wave, boss_kind)
+	if boss_kind != "":
 		to_spawn /= 2
-		_spawn_enemy("boss")
-		_show_center("WAVE %d\nBOSS INCOMING" % wave, 1.5)
+		spawn_enemy_at(boss_kind, edge_point())
+		var title: String = EnemyScript.BOSS_NAMES.get(boss_kind, "BOSS")
+		if boss_kind == "omega":
+			_show_center("FINAL WAVE!\n%s" % title, 2.2)
+		else:
+			_show_center("WAVE %d\nBOSS: %s" % [wave, title], 1.8)
+		sound("roar", 0.0, 0.7)
+	elif wave < FINALE_WAVE:
+		_show_center("WAVE %d of %d" % [wave, FINALE_WAVE], 1.2)
 	else:
-		_show_center("WAVE %d" % wave, 1.2)
+		_show_center("WAVE %d\nENDLESS" % wave, 1.2)
+
+
+## Which boss (if any) starts this wave: ORB OVERLORD on 5, KING REX on 10, the OMEGA OVERLORD finale
+## on 15; then they take turns every 5 waves in endless mode.
+func _boss_for_wave(w: int) -> String:
+	if w % 5 != 0:
+		return ""
+	if w == FINALE_WAVE:
+		return "omega"
+	return "rex" if (w / 5) % 2 == 0 else "boss"
 
 
 func _end_wave() -> void:
 	in_break = true
 	break_timer = 3.0
 	achievements().on_wave_cleared()
+	director().on_wave_cleared()
 	var upgrade_text := _grant_upgrade()
 	for p in players:
 		if p.is_down:
 			p.revive(0.5)
 		else:
 			p.heal(30.0)
-	_show_center("WAVE %d CLEARED\n\nUPGRADE: %s" % [wave, upgrade_text], 2.6)
+	var bonus := ""
+	if wave_downs == 0 and active_player_count() > 0:
+		score += 500
+		bonus = "\nNOBODY WENT DOWN: +500!"
+	if wave == FINALE_WAVE and not won:
+		_victory()
+		return
+	_show_center("WAVE %d CLEARED%s\n\nUPGRADE: %s" % [wave, bonus, upgrade_text], 2.6)
 	sound("clear")
+
+
+## Beat the finale: fireworks, awards, then endless mode.
+func _victory() -> void:
+	won = true
+	break_timer = 14.0
+	achievements().unlock("champion")
+	director().victory()
+	sound("victory")
+	sound("cheer", 0.0)
+	print("VICTORY at wave %d, score %d" % [wave, score])
+	_show_center("VICTORY!\nYou beat the OMEGA OVERLORD!\nScore %d\n\n%s\n\nENDLESS MODE starts soon - how far can you go?" % [score, director().awards_text()], 13.0)
 
 
 func _grant_upgrade() -> String:
@@ -1066,24 +1190,25 @@ func _pick_kind() -> String:
 	var r := randf()
 	if wave >= 3 and r < 0.05 + wave * 0.008:
 		return "brute"
-	if wave >= 2 and r < 0.45:
+	if wave >= 2 and r < 0.36:
 		return "runner"
-	if wave >= 4 and r < 0.62:
+	if wave >= 4 and r < 0.5:
 		return "spitter"
-	if wave >= 6 and r < 0.74:
+	if wave >= 3 and r < 0.58:
+		return "ptero"
+	if wave >= 6 and r < 0.66:
 		return "splitter"
-	if wave >= 2 and r > 0.88:
+	if wave >= 4 and r < 0.71:
+		return "ankylo"
+	if wave >= 2 and r > 0.9:
 		return "dino"
+	if wave >= 2 and r > 0.84:
+		return "raptor"
 	return "grunt"
 
 
-func _spawn_enemy(kind: String) -> void:
-	var e := EnemyScript.new()
-	e.setup(kind, wave, self)
-	e.net_id = next_net_id()
-	var extra := _extra_players()
-	e.hp *= (1.0 + 0.25 * extra) if kind == "boss" else (1.0 + 0.08 * extra)  # everyone focuses the boss
-	# Try a few edge points and keep the one farthest from both players.
+## A random spot on the arena edge, away from the players.
+func edge_point() -> Vector3:
 	var best_pos := Vector3.ZERO
 	var best_d := -1.0
 	for attempt in 4:
@@ -1091,24 +1216,57 @@ func _spawn_enemy(kind: String) -> void:
 		var pos := Vector3(cos(angle), 0, sin(angle)) * (ARENA_RADIUS - 1.5)
 		var d := INF
 		for p in players:
-			d = minf(d, pos.distance_to(p.global_position))
+			if p.active:
+				d = minf(d, pos.distance_to(p.global_position))
 		if d > best_d:
 			best_d = d
 			best_pos = pos
-	e.position = best_pos
+	return best_pos
+
+
+func _spawn_enemy(kind: String) -> void:
+	var at := edge_point()
+	if kind == "raptor":
+		# Raptors hunt in packs of three.
+		var side := Vector3(at.z, 0.0, -at.x).normalized()
+		for i in 3:
+			spawn_enemy_at("raptor", at + side * (i - 1) * 1.3)
+		return
+	spawn_enemy_at(kind, at, director().take_golden())
+
+
+## Host: one enemy at `pos` (bosses get tougher with a bigger party).
+func spawn_enemy_at(kind: String, pos: Vector3, golden: bool = false):
+	var e := EnemyScript.new()
+	e.setup(kind, wave, self)
+	e.net_id = next_net_id()
+	e.golden = golden
+	var extra := _extra_players()
+	e.hp *= (1.0 + 0.25 * extra) if e.is_boss() else (1.0 + 0.08 * extra)  # everyone focuses the boss
+	e.position = Vector3(pos.x, 0.0, pos.z)
 	add_child(e)
+	director().on_enemy_spawned(kind)
+	return e
 
 
-## A splitter burst: spawn fast runners around where it died.
-func split_enemy(pos: Vector3, count: int) -> void:
+## A splitter burst (or a boss calling help): spawn small fast enemies around where it was.
+func split_enemy(pos: Vector3, count: int, kind: String = "runner") -> void:
 	for i in count:
 		var e := EnemyScript.new()
-		e.setup("runner", wave, self)
+		e.setup(kind, wave, self)
 		e.net_id = next_net_id()
 		e.spawn_grace = 0.25
 		var a := TAU * i / count
 		e.position = Vector3(pos.x + cos(a) * 0.9, 0.0, pos.z + sin(a) * 0.9)
 		add_child(e)
+
+
+func director() -> Node:
+	if dir_node == null or not is_instance_valid(dir_node):
+		dir_node = DirectorScript.new()
+		dir_node.main = self
+		add_child(dir_node)
+	return dir_node
 
 
 func achievements() -> Node:
@@ -1184,9 +1342,10 @@ func _style_vr_text(l: Label3D) -> void:
 		l.remove_meta("card")
 
 
-func on_enemy_killed(pos: Vector3, color: Color, points: int, drop_chance: float, radius: float, killer = null) -> void:
-	score += points
-	achievements().on_kill(points, radius)
+func on_enemy_killed(pos: Vector3, color: Color, points: int, drop_chance: float, radius: float, killer = null, enemy = null) -> void:
+	var gained: int = director().on_kill(killer, enemy, points)
+	score += gained
+	achievements().on_kill(gained, radius)
 	# XP goes to whoever landed the last hit; beam/shockwave kills are shared.
 	var gain := maxi(1, points / 10)
 	if killer != null and is_instance_valid(killer):
@@ -1199,7 +1358,10 @@ func on_enemy_killed(pos: Vector3, color: Color, points: int, drop_chance: float
 	else:
 		sound("kill", -4.0)
 	explosion(pos + Vector3.UP * radius, color, radius)
-	popup(pos + Vector3.UP * (radius * 2.0 + 0.3), "+%d" % points, color.lightened(0.3))
+	var label := "+%d" % gained
+	if gained > points:
+		label = "+%d  x%.1f" % [gained, float(gained) / maxf(points, 1.0)]
+	popup(pos + Vector3.UP * (radius * 2.0 + 0.3), label, color.lightened(0.3))
 	add_shake(pos, 0.1 + radius * 0.25)
 	if randf() < drop_chance * (1.0 + 0.1 * _extra_players()):
 		_drop_pickup.call_deferred(pos)
@@ -1207,11 +1369,20 @@ func on_enemy_killed(pos: Vector3, color: Color, points: int, drop_chance: float
 
 func _drop_pickup(pos: Vector3) -> void:
 	var pk := PickupScript.new()
-	pk.kind = "health" if randf() < 0.6 else "spread"
+	var r := randf()
+	pk.kind = "health" if r < 0.45 else ("spread" if r < 0.64 else ("rapid" if r < 0.8 else ("bubble" if r < 0.91 else "bomb")))
 	pk.main = self
 	pk.net_id = next_net_id()
 	pk.position = Vector3(pos.x, 0, pos.z)
 	add_child(pk)
+
+
+## MEGA BOMB pickup: a huge blast that hurts every monster nearby (the picker gets the credit).
+func mega_bomb(pos: Vector3, by) -> void:
+	shockwave(pos, 9.0, 30.0, 8.0, Color(1.0, 0.35, 0.4), by)
+	explosion(pos + Vector3.UP * 0.8, Color(1.0, 0.35, 0.4), 1.6)
+	add_shake(pos, 0.8)
+	sound("bomb", 0.0)
 
 
 func _on_game_over() -> void:
@@ -1225,7 +1396,9 @@ func _on_game_over() -> void:
 		best_line = "NEW BEST SCORE!  (previous %d)" % best.score
 		_save_best(wave, score)
 	var who := "YOU BOTH WENT DOWN" if active_player_count() <= 2 else "EVERYONE WENT DOWN"
-	_show_center(who + "\nWave %d  ·  Score %d\n%s\n%s\n\nPress A or Enter to try again  ·  Start / Esc for menu" % [wave, score, best_line, achievements().summary()], 0.0)
+	if won:
+		who = "WHAT A RUN, CHAMPIONS!"
+	_show_center(who + "\nWave %d  ·  Score %d\n%s  ·  %s\n\n%s\n\nPress A or Enter to try again  ·  Start / Esc for menu" % [wave, score, best_line, achievements().summary(), director().awards_text()], 0.0)
 
 
 func _load_best() -> Dictionary:
@@ -1316,15 +1489,19 @@ func _draw_beam(key: String, pa: Vector3, pb: Vector3, length: float, tether_ran
 	beam.global_transform = Transform3D(Basis(Quaternion(Vector3.UP, dir)) * Basis.from_scale(Vector3(1.0, length, 1.0)), (pa + pb) * 0.5)
 	# Flicker, and fade as the players near the range limit.
 	var strength := 1.0 - smoothstep(tether_range * 0.7, tether_range, length)
-	beam_mat.set_shader_parameter("energy", (1.5 + randf() * 2.0) * maxf(strength, 0.3))
+	var surge: float = director().beam_mult()
+	beam_mat.set_shader_parameter("energy", (1.5 + randf() * 2.0) * maxf(strength, 0.3) * (1.6 if surge > 1.0 else 1.0))
+	beam_mat.set_shader_parameter("color", director().beam_color())
 
 
 func _zap_along(pa: Vector3, pb: Vector3, delta: float) -> void:
 	for e in get_tree().get_nodes_in_group("enemies"):
 		var ep: Vector3 = e.global_position + Vector3.UP * 0.6
 		var cp := Geometry3D.get_closest_point_to_segment(ep, pa, pb)
+		if e.lift > 1.5:
+			continue  # flying high over the beam
 		if Vector2(cp.x - ep.x, cp.z - ep.z).length() < e.radius + 0.25:
-			e.hit(upg.tether_dps * delta, Vector3.ZERO, 0.0)
+			e.hit(upg.tether_dps * director().beam_mult() * delta, Vector3.ZERO, 0.0)
 			if e.dead:
 				achievements().unlock("beam_team")
 			if zap_t <= 0.0:
@@ -1426,6 +1603,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 				spawn_bullet(origins[i], dirs[i], p2.color, p2, false)
 		"dash":
 			p2.invuln_t = maxf(p2.invuln_t, PlayerScript.DASH_TIME + 0.1)
+			director().on_dash(p2)
 		"join":
 			if not p2.active:
 				p2.set_active(true)
@@ -1488,10 +1666,10 @@ func make_snapshot() -> Array:
 			hand = p.hand_transform()
 			lhand = p.left_hand_transform()
 		ps.append([p.global_position, p.yaw, p.pitch, p.hp, p.is_down, p.revive_progress, p.spread_t,
-			head, hand, lhand, p.pack_personal(), p.xp, p.skills, p.active])
+			head, hand, lhand, p.pack_personal(), p.xp, p.skills, p.active, p.rapid_t, p.bubble_t])
 	var es := []
 	for e in get_tree().get_nodes_in_group("enemies"):
-		es.append([e.net_id, e.kind, e.global_position, e.rotation.y, e.hp])
+		es.append([e.net_id, e.kind, e.global_position, e.rotation.y, e.hp, e.net_aux_value(), 1 if e.golden else 0])
 	var pk := []
 	for k in get_tree().get_nodes_in_group("pickups"):
 		pk.append([k.net_id, k.kind, k.global_position])
@@ -1500,11 +1678,11 @@ func make_snapshot() -> Array:
 		sh.append([s.net_id, s.global_position, s.friendly, s.color, s.size])
 	var fish_state := [true, 0.0]
 	if sky_fish:
-		fish_state = [sky_fish.alive, sky_fish.hp]
+		fish_state = [sky_fish.alive, sky_fish.hp, sky_fish.dive_start, sky_fish.dive_target, sky_fish.dive_u]
 	var tu := []
 	for t in get_tree().get_nodes_in_group("turrets"):
 		tu.append([t.net_id, t.global_position, t.head.rotation.y, t.color])
-	return [wave, score, upg, upg_names, game_over, ps, es, pk, sh, fish_state, tu]
+	return [wave, score, upg, upg_names, game_over, ps, es, pk, sh, fish_state, tu, director().pack()]
 
 
 ## Client: mirror the host's world.
@@ -1535,6 +1713,8 @@ func apply_snapshot(s: Array) -> void:
 		sky_fish.apply_net(s[9])
 	if s.size() > 10:
 		_sync_ghosts(s[10], "turret")
+	if s.size() > 11:
+		director().unpack(s[11])
 
 
 
@@ -1564,6 +1744,11 @@ func _make_ghost(kind: String, item: Array) -> Node3D:
 			e.ghost = true
 			e.net_id = item[0]
 			e.position = item[2]
+			if item.size() > 6:
+				e.golden = (int(item[6]) & 1) == 1
+				e.net_aux = item[5]
+				if e.kind == "ptero":
+					e.lift = item[5]
 			add_child(e)
 			return e
 		"turret":
@@ -1626,6 +1811,8 @@ func apply_event(kind: String, args: Array) -> void:
 			var hp_index: int = args[0] if args.size() > 1 else 1
 			if hp_index < players.size():
 				players[hp_index].on_remote_hurt(args[-1])
+		"hint", "meteor", "fireworks":
+			director().client_event(kind, args)
 		"hitmark":
 			var hm_index: int = args[0] if args.size() > 0 else 1
 			if hm_index < players.size() and players[hm_index].hud:
@@ -1666,16 +1853,16 @@ func _build_hud() -> void:
 	help_label.offset_top = 110
 	help_label.offset_bottom = 210
 	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	help_label.text = "Controller: left stick move · right stick look · RT shoot · A / LB dash · Start menu\n" \
+	help_label.text = "Controller: LEFT STICK move · RIGHT STICK look · RT shoot · A dash · Start menu\n" \
 		+ "Keyboard: P1 WASD + mouse, click / Space shoot, Shift dash  ·  P2 arrows (turn), Enter shoot, Ctrl dash\n" \
-		+ "Stay close: the beam between you zaps enemies  ·  Stand next to a downed partner to revive them!\n" \
-		+ "More players: press A or Start on another controller to join (up to 6 on the TV)"
+		+ "Beat 15 waves and 3 bosses to WIN!  ·  More players: press A on another controller to join (up to 6)"
 
 
 func _show_center(text: String, duration: float, broadcast: bool = true) -> void:
 	if net and broadcast:
 		net.event("center", [text, duration])
 	center_label.text = text
+	center_label.add_theme_font_size_override("font_size", 60 if text.count("\n") < 6 else 38)
 	center_label.modulate.a = 1.0
 	if center_tween:
 		center_tween.kill()
@@ -1782,7 +1969,11 @@ func _update_hud() -> void:
 	if net.mode == "client" and not synced:
 		info_label.text = "Syncing with the VR player…"
 		return
-	info_label.text = "WAVE %d        SCORE %d" % [wave, score]
+	var wave_text := ("WAVE %d / %d" % [wave, FINALE_WAVE]) if wave <= FINALE_WAVE and not won else ("WAVE %d  ENDLESS" % wave)
+	var d := director()
+	if wave > 0 and d.left > 0:
+		wave_text += "  ·  %d LEFT" % d.left
+	info_label.text = "%s        SCORE %d" % [wave_text, score]
 	var xps: Array[String] = []
 	for p in players:
 		if not p.vr and not p.ghost and p.active:

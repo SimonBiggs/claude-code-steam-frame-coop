@@ -13,6 +13,18 @@ mischievous snowmen (top hats, carrot noses, giants, sled riders, and the Snow K
   pack it back up. Walk over hot cocoa to warm up.
 - Snowballs make you colder. At 0 warmth you freeze into an ice block until a friend stands next to
   you. The game ends when everyone is frozen or every fort wall is down.
+- **Easier VR throwing** (tired arms): squeeze the trigger anywhere for a snowball (reaching down to the
+  snow gives a bigger, half-packed one), packing takes 0.7 s, gentle flicks are boosted, and a stronger
+  aim assist bends throws onto a lob that reaches the snowman you were throwing at.
+- **MEGA SNOWBALL** (glowing blue ball, sometimes dropped by giants, every 3rd wave, cocoa parties):
+  your next throw is giant and splashes every snowman nearby.
+- New snowmen: **snow bunnies** (tiny, in threes), **balloon snowmen** (float over the walls - pop the
+  balloons), **shield snowmen** (an ice shield blocks flat throws from the front - lob over it, hit from
+  the side, or break it), and the **YETI** finale boss on wave 12 (stomps walls, calls bunnies).
+- **Fort upgrades**: snowball catapult (after wave 2), ice walls (wave 5), campfire that warms you
+  (wave 8). **Weather**: blizzard (snowmen slow), sunshine (snowmen melt), cocoa party. Dusk turns into
+  an aurora night; beat the yeti for a sunrise VICTORY, then endless waves.
+- Hit streaks give bonus points; the end screen shows **awards** (SNOW SNIPER, FORT BUILDER, ...).
 
 | | Throw | Repair (pack wall) | Move / look |
 |---|---|---|---|
@@ -28,4 +40,5 @@ same controller back in rejoins them. Split screen: 1 full, 2 side by side, 3-4 
 (lower 3D resolution and a smaller HUD with more views). Waves grow a little with more than 3 players.
 
 Restart after game over: A / Enter (VR: trigger).
-Test (`BOT_PLAYERS=N` joins N TV players, `BOT_PAD_TEST=1` checks controller join/unplug/replug): `godot --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/snowball_blitz_bot.tscn`
+Test (`BOT_PLAYERS=N` joins N TV players, `BOT_PAD_TEST=1` checks controller join/unplug/replug,
+`BOT_VR=1` fake VR thrower, `BOT_WAVE=12 BOT_GOD=1 BOT_END=380` plays the yeti finale): `godot --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/snowball_blitz_bot.tscn`

@@ -83,8 +83,13 @@ func _process(delta: float) -> void:
 	var status := ""
 	if player.is_down:
 		status = "  ·  DOWN! partner, come revive me"
-	elif player.spread_t > 0.0:
-		status = "  ·  SPREAD SHOT"
+	else:
+		if player.bubble_t > 0.0:
+			status += "  ·  BUBBLE %ds" % int(ceil(player.bubble_t))
+		if player.rapid_t > 0.0:
+			status += "  ·  RAPID %ds" % int(ceil(player.rapid_t))
+		if player.spread_t > 0.0:
+			status += "  ·  SPREAD %ds" % int(ceil(player.spread_t))
 	name_label.text = "PLAYER %d%s" % [player.index + 1, status]
 	queue_redraw()
 
@@ -96,6 +101,10 @@ func _draw() -> void:
 	var c := size / 2.0
 	if hurt_flash > 0.0:
 		draw_rect(Rect2(Vector2.ZERO, size), Color(1.0, 0.1, 0.1, 0.12 * hurt_flash))
+	if player.bubble_t > 0.0 and not player.is_down:
+		for i in 4:
+			var inset := i * 12.0
+			draw_rect(Rect2(Vector2(inset, inset), size - Vector2(inset, inset) * 2.0), Color(0.4, 0.65, 1.0, 0.16 * (1.0 - i / 4.0)), false, 12.0)
 	if player.hp < player.stat("max_hp") * 0.3 and not player.is_down:
 		var pulse := 0.12 + 0.08 * sin(Time.get_ticks_msec() * 0.008)
 		for i in 6:
