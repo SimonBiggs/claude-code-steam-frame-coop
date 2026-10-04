@@ -134,7 +134,9 @@ func reset(id: String = "") -> void:
 
 ## The how-to-play cards: the TV role card on every TV view and the VR role card in VR. data: title,
 ## goal, tv {role, color, controls [[glyph, text]], tips [String]}, vr {...}, slots {slot: {...}} for
-## per-player roles. opts: duration (auto close, 14 s), min_time (1.5 s before A closes it).
+## per-player roles. opts: duration (auto close, 14 s), min_time (1.5 s before A closes it),
+## vr_card ("short" = role + goal only, the default since VR text must stay short; "full" = with the
+## controls and tips list; "none" = no VR card at all).
 func intro(data: Dictionary, opts: Dictionary = {}) -> void:
 	_close_intro()
 	_intro_t = 0.0
@@ -156,9 +158,10 @@ func intro(data: Dictionary, opts: Dictionary = {}) -> void:
 			role = per[slot]
 		var card := _tv_card(root, data, role)
 		_intro_nodes.append(card)
-	if _vr_cam != null and is_instance_valid(_vr_cam):
+	var vr_mode := String(opts.get("vr_card", "short"))
+	if _vr_cam != null and is_instance_valid(_vr_cam) and vr_mode != "none":
 		var vrole: Dictionary = data.get("vr", data.get("tv", {}))
-		_intro_nodes.append(_vr_intro(data, vrole))
+		_intro_nodes.append(_vr_intro(data, vrole, vr_mode == "full"))
 	UiKit.sound("ui_open")
 	if _intro_nodes.is_empty():
 		intro_done.emit.call_deferred()
@@ -341,7 +344,7 @@ func _tv_card(root: Control, data: Dictionary, role: Dictionary) -> Control:
 	return holder
 
 
-func _vr_intro(data: Dictionary, role: Dictionary) -> Node3D:
+func _vr_intro(data: Dictionary, role: Dictionary, full: bool = false) -> Node3D:
 	var world: Node = _vr_world if _vr_world != null else get_parent()
 	var lines: PackedStringArray = []
 	if role.has("role"):
@@ -349,12 +352,13 @@ func _vr_intro(data: Dictionary, role: Dictionary) -> Node3D:
 	var goal := String(role.get("goal", data.get("goal", "")))
 	if goal != "":
 		lines.append(goal)
-	lines.append("")
-	for c in role.get("controls", []):
-		var pair: Array = c
-		lines.append("%s:  %s" % [String(pair[0]), String(pair[1])])
-	for tip in role.get("tips", []):
-		lines.append("* " + String(tip))
+	if full:
+		lines.append("")
+		for c in role.get("controls", []):
+			var pair: Array = c
+			lines.append("%s:  %s" % [String(pair[0]), String(pair[1])])
+		for tip in role.get("tips", []):
+			lines.append("* " + String(tip))
 	lines.append("")
 	lines.append("TRIGGER: got it!")
 	var col := UiKit.color_of(role.get("color", "accent"), UiKit.ACCENT)
