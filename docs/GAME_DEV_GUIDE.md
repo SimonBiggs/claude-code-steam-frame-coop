@@ -4,6 +4,12 @@ Each game is a co-op game for **one VR player on a Steam Frame plus 1–2 player
 connected over the home network. There's also a split-screen fallback when no headset is present.
 `games/duo_arena/` is the reference implementation: read it before starting.
 
+**New games: build on the shared engine systems** instead of copying a game's party, split-screen,
+VR-rig and bot code: `core/party.gd` (drop-in seats + per-player input), `core/split_view.gd`,
+`core/camera_rig.gd`, `core/vr_rig.gd`, `core/save.gd`, the state store / `request()` in
+`core/net.gd`, and `tests/bot_kit.gd`. Start from `games/engine_template/` (a small complete game
+using all of them, with `tests/engine_template_bot.gd`); the API is in `docs/engine/systems.md`.
+
 ## Layout
 
 ```
