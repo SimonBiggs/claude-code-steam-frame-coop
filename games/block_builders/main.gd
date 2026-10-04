@@ -1539,7 +1539,7 @@ func _status_text() -> String:
 			if r.finished:
 				done += 1
 	if state == "intro":
-		return "BLOCK BUILDERS"
+		return ""  # the centre banner already shows the title (it was on screen twice)
 	var ns := 0
 	for k in course.stars.size():
 		if stars_taken & (1 << k):
