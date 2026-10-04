@@ -124,8 +124,10 @@ func _publish() -> void:
 
 func on_human_joined(slot: int) -> void:
 	var phase := String(main.net.state_get("phase", ""))
-	if phase == "title" or not game_on:
+	if phase == "title":
 		_roster()
+		return
+	if not game_on:  # the results are up: the next party's roster picks them up
 		return
 	if pl.has(slot):
 		if bool(pl[slot]["cpu"]):
@@ -161,8 +163,10 @@ func _take_over(slot: int) -> void:
 
 
 func on_human_left(slot: int) -> void:
-	if not game_on:
+	if String(main.net.state_get("phase", "")) == "title":
 		_roster()
+		return
+	if not game_on:
 		return
 	if pl.has(slot) and not bool(pl[slot]["cpu"]) and not (slot == 0 and main.vr_rig != null):
 		pl[slot]["cpu"] = true

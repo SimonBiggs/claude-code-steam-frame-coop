@@ -89,8 +89,8 @@ func on_begin() -> void:
 		rate[p] = 0.0
 
 
-func _press(pid: int) -> void:
-	rate[pid] = float(rate.get(pid, 0.0)) + 1.0
+func _press(pid: int, weight: float = 1.0) -> void:
+	rate[pid] = float(rate.get(pid, 0.0)) + weight
 	if karts.has(pid) and rng.randf() < 0.3:
 		fx("puff", [pid])
 
@@ -128,11 +128,10 @@ func play_tick(delta: float) -> void:
 		prog[p] = minf(1.0, float(prog[p]) + v * delta / (START_X - FINISH_X))
 		if float(prog[p]) >= 1.0:
 			order.append(p)
-			add_score(p, 100 - 10 * order.size())
 			fx("finish", [p, order.size()])
 			if _first_t < 0.0:
 				_first_t = play_t
-		score[p] = float(int(float(prog[p]) * 50.0)) + (100.0 - 10.0 * (order.find(p) + 1) if order.has(p) else 0.0)
+		score[p] = float(int(float(prog[p]) * 100.0)) + (100.0 - 10.0 * (order.find(p) + 1) if order.has(p) else 0.0)
 	for p in walkers():
 		var i := pids.find(p)
 		var x := lerpf(START_X, FINISH_X, float(prog[p]))
@@ -155,7 +154,7 @@ func _giant_pump() -> void:
 		elif _pump_from - y > PUMP:
 			_pump_dir = -1
 			_pump_from = y
-			_press(0)
+			_press(0, 2.2)  # arms are slower than thumbs: one pump counts double
 			buzz(1, 0.35, 0.03)
 	else:
 		if y < _pump_from:

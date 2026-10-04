@@ -136,13 +136,20 @@ func play_tick(delta: float) -> void:
 	else:
 		_auto_t -= delta
 		if _auto_t <= 0.0:
-			_auto_t = maxf(0.35, 1.3 - play_t * 0.03)
+			_auto_t = maxf(0.3, 0.9 - play_t * 0.03)
 			var up: Array = []
 			for i in stones.size():
 				if state[i] == 0:
 					up.append(i)
 			if up.size() > 3:
-				_wobble(int(up[rng.randi() % up.size()]))
+				# Half the time the stone under someone wobbles: keep everybody hopping.
+				var ws: Array = walkers().filter(func(p: int) -> bool: return not out.has(p))
+				var s := -1
+				if not ws.is_empty() and rng.randf() < 0.5:
+					s = stone_under(pos[int(ws[rng.randi() % ws.size()])])
+				if s < 0 or state[s] != 0:
+					s = int(up[rng.randi() % up.size()])
+				_wobble(s)
 
 
 func _wobble(i: int) -> void:

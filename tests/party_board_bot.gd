@@ -37,6 +37,7 @@ func _ready() -> void:
 	main.set("mg_time_scale", 0.4)
 	add_child(main)
 	kit.main = main
+	main.net.state_changed.connect(_on_state)
 	want = BotKit.bot_players(2, 6)
 	client = OS.has_environment("DUO_JOIN")
 	host = OS.has_environment("DUO_HOST")
@@ -60,7 +61,7 @@ func _start() -> void:
 	if String(main.net.state_get("phase", "")) != "title":
 		return
 	if main.flow != null:
-		main.flow.bot_land = ["event", "shop", "duel", "red", "blue", "event", "event"]
+		main.flow.bot_land = ["shop", "event", "duel", "red", "blue", "event", "event"]
 	var seats: Array[int] = main.party.local_slots()
 	if main.menus.setup_tv != null and is_instance_valid(main.menus.setup_tv):
 		kit.assert_true(String(main.menus.setup_tv.focused_id()) == "start", "the setup menu opens on START")
@@ -73,11 +74,21 @@ func _start() -> void:
 
 func _start_direct() -> void:
 	if main.flow != null and String(main.net.state_get("phase", "")) == "title":
-		main.flow.bot_land = ["event", "shop", "duel", "red", "blue", "event", "event"]
+		main.flow.bot_land = ["shop", "event", "duel", "red", "blue", "event", "event"]
 		main.flow.on_request(0, "setup", ["start"])
 
 
-## Record what happened (every half second) and finish once the results are up.
+## Record every replicated step, menu and phase as it happens.
+func _on_state(key: String, value: Variant) -> void:
+	match key:
+		"phase", "step":
+			seen[key + ":" + String(value if value != null else "")] = true
+		"menu":
+			if value is Dictionary and not (value as Dictionary).is_empty():
+				seen["menu:" + String((value as Dictionary).get("kind", ""))] = true
+
+
+## Record what happened and finish once the results are up.
 func _watch() -> String:
 	var phase := String(main.net.state_get("phase", ""))
 	seen["phase:" + phase] = true
@@ -169,7 +180,7 @@ func _drive_tv(slot: int) -> void:
 			return
 		# Steer like a CPU would (the minigame knows where a good spot is).
 		var goal: Vector3 = mg.cpu_move(slot)
-		var at: Vector3 = mg.pos.get(slot, Vector3.ZERO)
+		var at: Vector3 = mg.where(slot)
 		var dv := goal - at
 		dv.y = 0.0
 		var v := Vector2.ZERO

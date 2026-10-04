@@ -525,7 +525,8 @@ func show_arrows(from: int, options: Array, sel: int) -> void:
 		var lab := UiKit.label3d(data.branch_name(from, int(options[i])), 0.34, Color(1, 1, 1), true)
 		lab.no_depth_test = false
 		lab.position = Vector3(0, 0.55, 0.2)
-		lab.rotation = Vector3(-0.9, 0, 0)
+		if not vr_table:
+			lab.billboard = BaseMaterial3D.BILLBOARD_ENABLED  # TV: always readable (VR turns it in _process)
 		lab.name = "Label"
 		a.add_child(lab)
 		add_child(a)
@@ -582,10 +583,17 @@ func _process(delta: float) -> void:
 			_star_move = minf(1.0, _star_move + delta / 1.6)
 			var k := _star_move * _star_move * (3.0 - 2.0 * _star_move)
 			star_node.position = _star_from.lerp(_star_to, k) + Vector3(0, sin(k * PI) * 6.0, 0)
+	var cam := get_viewport().get_camera_3d()
 	for a in arrows:
 		if is_instance_valid(a):
 			var mi := a.get_node("Mesh") as Node3D
 			mi.position.z = 0.15 * sin(_t * 6.0)
+			if vr_table and cam != null:
+				# VR: face the player's head, turned on Y only and tipped back a little (reads from +Z).
+				var lab := a.get_node("Label") as Node3D
+				var d := lab.global_position - cam.global_position
+				var sc := lab.global_basis.get_scale()
+				lab.global_basis = (Basis(Vector3.UP, atan2(-d.x, -d.z)) * Basis(Vector3.RIGHT, -0.5)).scaled(sc)
 	for i in range(_flashes.size() - 1, -1, -1):
 		var f: Array = _flashes[i]
 		var mi: MeshInstance3D = f[0]
