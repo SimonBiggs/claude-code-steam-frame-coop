@@ -30,7 +30,7 @@ machines). Name these members exactly so core/ finds them: `net`, `party`, `vr_r
 | `on_remote_state(slot, pos, yaw, pitch)` | host | the TV machine's `net.send_state(pos, yaw, pitch, slot)` |
 | `make_snapshot() -> Array` | host, 30 Hz | while the TV machine is connected |
 | `apply_snapshot(s)` / `apply_event(kind, args)` | TV machine | snapshots / `net.event()` |
-| `on_pause_changed(paused, by_slot)` | both | shared pause (wrist MENU, pause menu) |
+| `on_pause_changed(paused, by_slot)` | every machine | shared pause: wrist MENU (slot 0) or a TV pause menu (the slot that pressed Start / Esc); nothing else runs while paused, so show banners here |
 | `on_client_joined()` / `on_client_left()` | host | also signals `net.client_connected` / `client_disconnected` |
 | `toggle_vr_pause()` | host | optional override of the default wrist-MENU pause |
 
@@ -78,7 +78,8 @@ var step := party.nav(slot)                     # Vector2i menu step with key re
   Esc stays the pause menu. A keyboard join waits 0.15 s and is dropped if a pad button went down
   with it (Steam's desktop layout sends keys for pad buttons: no phantom keyboard players).
 - `allow_slot0 = true` (local play without a headset) makes slot 0 a joinable TV seat.
-- The pause menu (`core/pause_menu.gd`) only opens from a pad the party owns.
+- The pause menu (`core/pause_menu.gd`) only opens from a pad the party owns, and reports which
+  slot opened it (`on_pause_changed(paused, by_slot)`).
 - Bots: `add_virtual_pad() -> device` (ids from 40), `remove_virtual_pad` / `replug_virtual_pad`,
   `inject_button` / `inject_axis`, `join_device(device, slot = -1)`.
 
