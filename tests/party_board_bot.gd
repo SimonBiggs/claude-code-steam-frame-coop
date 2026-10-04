@@ -24,6 +24,8 @@ var _vr_t := 0.0
 var _star_rigged := false
 var _press_t := {}  # slot -> next time this seat may press A
 var _finish_at := -1.0
+var _vr_panel_n := 0  # VR cards / menus measured (family play-test: tiny, far, and one inside the board)
+var _vr_panel_bad: PackedStringArray = []
 
 
 func _ready() -> void:
@@ -90,6 +92,7 @@ func _on_state(key: String, value: Variant) -> void:
 
 ## Record what happened and finish once the results are up.
 func _watch() -> String:
+	_measure_vr_panels()
 	var phase := String(main.net.state_get("phase", ""))
 	seen["phase:" + phase] = true
 	seen["step:" + String(main.net.state_get("step", ""))] = true
@@ -130,6 +133,46 @@ func _watch() -> String:
 			_finish_at = 1e9
 			kit.finish()
 	return ""
+
+
+## Every visible VR how-to / result card and menu: horizontal distance from the eyes ~1.5 m, and its
+## panel's bottom edge above the tallest thing on the table (main.board_top_y()).
+func _measure_vr_panels() -> void:
+	if main.vr_rig == null or main.runner == null or main.menus == null:
+		return
+	var cam: Node3D = main.vr_rig.camera
+	for n in [main.runner.get("_howto_vr"), main.runner.get("_result_vr"), main.menus.vr_menu, main.menus.setup_vr]:
+		if n == null or not is_instance_valid(n):
+			continue
+		var panel_root := n as Node3D
+		if panel_root == null or not panel_root.is_visible_in_tree():
+			continue
+		if panel_root.get_meta("vr_moving", false) or not panel_root.has_meta("vr_placed"):
+			continue
+		var box := AABB()
+		var found := false
+		for c in panel_root.get_children():
+			var mi := c as MeshInstance3D
+			if mi != null and mi.mesh != null and mi.visible:
+				var b: AABB = mi.global_transform * mi.get_aabb()
+				if not found or b.size.x * b.size.y > box.size.x * box.size.y:
+					box = b
+					found = true
+		if not found:
+			continue
+		var to := panel_root.global_position - cam.global_position
+		var dist := Vector2(to.x, to.z).length()
+		var top: float = main.board_top_y()
+		_vr_panel_n += 1
+		if not seen.has("vrpanel:" + String(panel_root.name).left(12)):
+			seen["vrpanel:" + String(panel_root.name).left(12)] = true
+			kit.info("VR panel %s: %.2f m away, %.2f m wide, bottom %.2f m (board top %.2f m, eyes %.2f m)" % [panel_root.name, dist,
+				box.size.x, box.position.y, top, cam.global_position.y])
+		if dist < 1.2 or dist > 1.8 or box.position.y < top - 0.03:
+			var msg := "%s dist %.2f bottom %.2f board top %.2f" % [panel_root.name, dist, box.position.y, top]
+			if _vr_panel_bad.size() < 6:
+				_vr_panel_bad.append(msg)
+				kit.info("VR panel problem: " + msg)
 
 
 func _physics_process(delta: float) -> void:
@@ -316,6 +359,14 @@ func _checks() -> void:
 	if main.split != null:
 		kit.assert_true(main.ceremony.results_ui != null and is_instance_valid(main.ceremony.results_ui), "%s: the results screen shows on the TV" % mode)
 	if main.vr_rig != null:
+		kit.assert_true(_vr_panel_n > 0, "VR how-to cards / menus were measured (%d)" % _vr_panel_n)
+		kit.assert_true(_vr_panel_bad.is_empty(), "every VR card / menu is ~1.5 m away and above the board %s" % str(_vr_panel_bad))
+		var gl: Label3D = main.hud.glove_label
+		if gl != null:
+			var box: AABB = gl.transform * gl.get_aabb()
+			var menu_btn := Vector3(-0.15, 0.02, 0.12)  # core/net.gd's wrist MENU, left-controller space
+			var gap := (menu_btn.clamp(box.position, box.end) - menu_btn).length()
+			kit.assert_true(gap > 0.08, "the glove coins/stars stay clear of the wrist MENU button (%.2f m, text '%s')" % [gap, gl.text.replace("\n", " | ")])
 		kit.assert_true(main.ceremony.vr_results != null, "the results card shows in VR")
 		kit.assert_true(seen.has("vr:throw"), "the fake VR player threw the dice")
 	var mgs: PackedStringArray = []
