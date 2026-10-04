@@ -10,6 +10,7 @@ utterances with a simple energy detector, transcribes each with faster-whisper, 
 "[HH:MM:SS] text" lines to the game's voice log (watched by Claude).
 """
 import datetime as dt
+import os
 import re
 import subprocess
 import sys
@@ -27,6 +28,9 @@ LOG = Path.home() / "GodotProjects/duo-arena/.dev/voice.log"
 RATE = 16000
 FRAME = 480  # 30 ms
 MODEL = sys.argv[1] if len(sys.argv) > 1 else "medium.en"
+# Loudness (RMS) a 30 ms frame needs to count as speech. 180 also hears people across the room,
+# not just the headset wearer (that needed ~500); Whisper's VAD filter drops the extra non-speech.
+FLOOR = float(os.environ.get("VOICE_FLOOR", "180"))
 
 # Whisper tends to "hear" these in noise; ignore them when they are the whole utterance.
 JUNK = {"", "you", "thank you", "thank you.", "thanks for watching!", "bye.", ".", "uh", "um", "hmm"}
@@ -120,7 +124,7 @@ def main() -> None:
                     was_listening = True
             chunk = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
             rms = float(np.sqrt(np.mean(chunk * chunk)))
-            loud = rms > max(500.0, noise * 3.0)
+            loud = rms > max(FLOOR, noise * 3.0)
             if not speech:
                 noise = noise * 0.98 + rms * 0.02 if not loud else noise
                 pre = (pre + [chunk])[-10:]  # keep 300 ms before speech starts
@@ -137,7 +141,7 @@ def main() -> None:
                 speech, voiced = [], 0
                 if len(audio) < RATE * 0.5:
                     continue
-                segments, _ = model.transcribe(audio, language="en", beam_size=1, without_timestamps=True,
+                segments, _ = model.transcribe(audio, language="en", beam_size=1, without_timestamps=True, vad_filter=True,
                                                condition_on_previous_text=False)
                 text = " ".join(s.text.strip() for s in segments).strip()
                 # Whisper sometimes hallucinates subtitle markup (<p begin=...>) on noise: drop it.
