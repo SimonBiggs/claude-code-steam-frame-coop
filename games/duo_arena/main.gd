@@ -20,6 +20,19 @@ const TurretScript := preload("res://games/duo_arena/turret.gd")
 const JoinListenerScript := preload("res://games/duo_arena/join_listener.gd")
 const DirectorScript := preload("res://games/duo_arena/director.gd")
 
+## SIMPLE MODE (the family: "simple games are the fun games", "words everywhere"): just shoot cute
+## monsters together and revive each other. It turns off the skill map / XP / turrets, achievement
+## toasts, combos, most arena events, the co-op beam, upgrades text, stat banners and hint text; it
+## starts with a practice moment (glowing targets) and brings in one new monster type per wave.
+## Set to false to bring all of that back.
+const SIMPLE_MODE := true
+## Practice targets (in front of the start spots), hit one after the other before wave 1.
+const PRACTICE_SPOTS: Array[Vector3] = [Vector3(0.0, 0.0, -3.0), Vector3(-4.5, 0.0, -1.0), Vector3(4.5, 0.0, -1.0)]
+const PRACTICE_MAX_TIME := 45.0
+## Simple mode: the wave each monster type first appears in (one new type at a time).
+const KIND_UNLOCK := {"grunt": 1, "runner": 2, "dino": 3, "ptero": 4, "spitter": 6, "raptor": 7, "brute": 8,
+	"ankylo": 9, "splitter": 11}
+
 ## Waves 5 and 10 have bosses; wave 15 is the finale (OMEGA OVERLORD + Fishwort). Beat it to win, then
 ## the arena keeps going in endless mode.
 const FINALE_WAVE := 15
@@ -139,6 +152,12 @@ var upg_names: Array = []
 var dir_node: Node
 var won := false  # beat the finale (endless mode after that)
 var wave_downs := 0
+var practice_step := 0  # practice targets popped so far
+var practice_t := 0.0
+var practice_gap := 1.5
+var practice_target = null
+var solo := false  # simple mode: the VR player started without the TV (it can still join later)
+var debut_kind := ""  # simple mode: the monster type that is new this wave (it comes first)
 
 
 func _ready() -> void:
@@ -174,7 +193,8 @@ func _setup_game(mode: String) -> void:
 	_ensure_join_listener()
 	_restore_party()
 	if mode == "host":
-		_show_center("Waiting for the TV player to join…", 0.0)
+		if not SIMPLE_MODE:  # simple mode: the practice targets are up while the TV joins
+			_show_center("Waiting for the TV player to join…", 0.0)
 	elif mode == "client":
 		_show_center("CONNECTED", 1.5)
 	else:
@@ -935,6 +955,7 @@ func debug_skip_to_wave(n: int) -> void:
 		e.remove_from_group("enemies")
 		e.queue_free()
 	to_spawn = 0
+	practice_step = PRACTICE_SPOTS.size()
 	wave = n - 1
 	in_break = true
 	break_timer = 0.5
@@ -1009,10 +1030,14 @@ func _process(delta: float) -> void:
 		var boss_wave := wave > 0 and wave % 5 == 0
 		music.play_track(1 if boss_wave else maxi(wave - 1, 0) / 2)  # a new track every two waves; bosses rock out
 	director().tick(delta)
-	if skill_tree != null and not skill_tree.has_meta("map_v3"):  # replace an older skill tree/map
+	if SIMPLE_MODE:
+		if skill_tree != null:  # simple mode: no skill map / XP buttons / turrets
+			skill_tree.queue_free()
+			skill_tree = null
+	elif skill_tree != null and not skill_tree.has_meta("map_v3"):  # replace an older skill tree/map
 		skill_tree.queue_free()
 		skill_tree = null
-	if skill_tree == null:
+	if skill_tree == null and not SIMPLE_MODE:
 		skill_tree = TreeScript.new()
 		skill_tree.main = self
 		add_child(skill_tree)
@@ -1053,16 +1078,28 @@ func _process(delta: float) -> void:
 		return
 
 	_update_tether(delta)
-	if net.mode == "host" and not net.connected:
-		if wave == 0:
-			director().howto()  # the VR player reads how to play while waiting
-		return  # hold the waves until player 2 joins
-	if in_break:
-		if wave == 0:
-			director().howto()
+	if net.mode == "host" and not net.connected and not solo:
+		if not SIMPLE_MODE or wave > 0:
+			if wave == 0:
+				director().howto()  # the VR player reads how to play while waiting
+			return  # hold the waves until player 2 joins
+		if practice_step < PRACTICE_SPOTS.size():
+			_practice_tick(delta)  # practice while the TV joins
+			return
 		break_timer -= delta
-		if break_timer <= 0.0:
-			_start_wave()
+		if break_timer > -6.0:
+			return  # a few more seconds for the TV to join, then start alone
+		break_timer = 0.0
+		_go_solo()
+	if in_break:
+		if wave == 0 and SIMPLE_MODE and practice_step < PRACTICE_SPOTS.size():
+			_practice_tick(delta)
+		else:
+			if wave == 0:
+				director().howto()
+			break_timer -= delta
+			if break_timer <= 0.0:
+				_start_wave()
 	elif to_spawn > 0:
 		spawn_timer -= delta
 		var alive := get_tree().get_nodes_in_group("enemies").size()
@@ -1080,6 +1117,53 @@ func _process(delta: float) -> void:
 			all_down = false
 	if all_down:
 		_on_game_over()
+
+
+## Simple mode, before wave 1: one glowing target at a time floats in front of the players; shoot it
+## and the next one appears (show, don't tell). Skipped after PRACTICE_MAX_TIME so nobody gets stuck.
+func _practice_tick(delta: float) -> void:
+	practice_t += delta
+	if practice_t > PRACTICE_MAX_TIME:
+		for e in get_tree().get_nodes_in_group("enemies"):
+			if e.kind == "target":
+				e.remove_from_group("enemies")
+				e.queue_free()
+		practice_step = PRACTICE_SPOTS.size()
+		_practice_done()
+		return
+	var up: bool = practice_target != null and is_instance_valid(practice_target) and not practice_target.dead
+	if up:
+		return
+	if practice_gap <= -100.0:  # popped! (a freed node compares equal to null, so a flag tracks it)
+		practice_step += 1
+		practice_gap = 0.6
+		sound("pickup", 0.0, 1.0 + 0.2 * practice_step)
+		if practice_step >= PRACTICE_SPOTS.size():
+			_practice_done()
+			return
+	practice_gap -= delta
+	if practice_gap <= 0.0:
+		practice_target = spawn_enemy_at("target", PRACTICE_SPOTS[practice_step])
+		practice_gap = -1000.0  # a target is up
+		sound("bubble", -4.0, 1.2)
+
+
+func _practice_done() -> void:
+	print("Practice done")
+	director().cheer(0.7, 1.0)
+	sound("cheer", -4.0, 1.2)
+	_show_center("GO!", 1.0)
+	break_timer = 1.5
+
+
+## Simple mode: no TV yet after the practice, so the VR player starts alone (the TV seats wake up
+## when the Steam Machine joins).
+func _go_solo() -> void:
+	solo = true
+	print("Solo VR: starting without the TV")
+	for i in range(1, players.size()):
+		if players[i].active:
+			players[i].set_active(false)
 
 
 ## Party mode upkeep (lazy, so it also works after a hot reload).
@@ -1112,7 +1196,19 @@ func _start_wave() -> void:
 		create_tween().tween_property(help_label, "modulate:a", 0.0, 1.0)
 	var boss_kind := _boss_for_wave(wave)
 	director().on_wave_started(wave, boss_kind)
-	if boss_kind != "":
+	debut_kind = ""
+	if SIMPLE_MODE:
+		for k in KIND_UNLOCK:
+			if int(KIND_UNLOCK[k]) == wave and k != "grunt":
+				debut_kind = k  # the new monster comes first, alone, so everyone sees it
+	if SIMPLE_MODE and boss_kind != "":
+		to_spawn /= 2
+		spawn_enemy_at(boss_kind, edge_point())
+		_show_center("FINAL BOSS!" if boss_kind == "omega" else "BOSS!", 1.8)
+		sound("roar", 0.0, 0.7)
+	elif SIMPLE_MODE:
+		_show_center("WAVE %d!" % wave, 1.2)
+	elif boss_kind != "":
 		to_spawn /= 2
 		spawn_enemy_at(boss_kind, edge_point())
 		var title: String = EnemyScript.BOSS_NAMES.get(boss_kind, "BOSS")
@@ -1155,6 +1251,11 @@ func _end_wave() -> void:
 	if wave == FINALE_WAVE and not won:
 		_victory()
 		return
+	if SIMPLE_MODE:
+		_show_center("WAVE %d CLEAR!" % wave, 2.0)
+		director().cheer(0.5, 0.5)
+		sound("clear")
+		return
 	_show_center("WAVE %d CLEARED%s\n\nUPGRADE: %s" % [wave, bonus, upgrade_text], 2.6)
 	sound("clear")
 
@@ -1168,6 +1269,9 @@ func _victory() -> void:
 	sound("victory")
 	sound("cheer", 0.0)
 	print("VICTORY at wave %d, score %d" % [wave, score])
+	if SIMPLE_MODE:
+		_show_center("YOU WIN!", 8.0)
+		return
 	_show_center("VICTORY!\nYou beat the OMEGA OVERLORD!\nScore %d\n\n%s\n\nENDLESS MODE starts soon - how far can you go?" % [score, director().awards_text()], 13.0)
 
 
@@ -1187,6 +1291,18 @@ func _grant_upgrade() -> String:
 
 
 func _pick_kind() -> String:
+	if SIMPLE_MODE:
+		if debut_kind != "":
+			var k := debut_kind
+			debut_kind = ""
+			return k
+		var pool: Array[String] = []
+		for kk in KIND_UNLOCK:
+			if wave >= int(KIND_UNLOCK[kk]):
+				pool.append(kk)
+		if randf() < 0.45:
+			return "grunt"  # most monsters stay the easy ones
+		return pool.pick_random()
 	var r := randf()
 	if wave >= 3 and r < 0.05 + wave * 0.008:
 		return "brute"
@@ -1279,6 +1395,8 @@ func achievements() -> Node:
 
 ## Gold "achievement unlocked" toast on the TV and in VR (and sent to the other machine).
 func achievement_toast(title: String, desc: String, count: int, total: int) -> void:
+	if SIMPLE_MODE:
+		return  # no achievement popups: they were more words in the VR player's face
 	if net:
 		net.event("achieve", [title, desc, count, total])
 	var text := "ACHIEVEMENT UNLOCKED  (%d/%d)\n%s\n%s" % [count, total, title, desc]
@@ -1358,10 +1476,11 @@ func on_enemy_killed(pos: Vector3, color: Color, points: int, drop_chance: float
 	else:
 		sound("kill", -4.0)
 	explosion(pos + Vector3.UP * radius, color, radius)
-	var label := "+%d" % gained
-	if gained > points:
-		label = "+%d  x%.1f" % [gained, float(gained) / maxf(points, 1.0)]
-	popup(pos + Vector3.UP * (radius * 2.0 + 0.3), label, color.lightened(0.3))
+	if not SIMPLE_MODE:  # simple mode: the pop and the sound say it all (no numbers floating about)
+		var label := "+%d" % gained
+		if gained > points:
+			label = "+%d  x%.1f" % [gained, float(gained) / maxf(points, 1.0)]
+		popup(pos + Vector3.UP * (radius * 2.0 + 0.3), label, color.lightened(0.3))
 	add_shake(pos, 0.1 + radius * 0.25)
 	if randf() < drop_chance * (1.0 + 0.1 * _extra_players()):
 		_drop_pickup.call_deferred(pos)
@@ -1371,6 +1490,12 @@ func _drop_pickup(pos: Vector3) -> void:
 	var pk := PickupScript.new()
 	var r := randf()
 	pk.kind = "health" if r < 0.45 else ("spread" if r < 0.64 else ("rapid" if r < 0.8 else ("bubble" if r < 0.91 else "bomb")))
+	if SIMPLE_MODE:  # fewer kinds, one at a time: health, then rapid fire (wave 3), then the big bomb (wave 6)
+		pk.kind = "health"
+		if wave >= 3 and r > 0.6:
+			pk.kind = "rapid"
+		if wave >= 6 and r > 0.85:
+			pk.kind = "bomb"
 	pk.main = self
 	pk.net_id = next_net_id()
 	pk.position = Vector3(pos.x, 0, pos.z)
@@ -1395,6 +1520,9 @@ func _on_game_over() -> void:
 	if score > best.score:
 		best_line = "NEW BEST SCORE!  (previous %d)" % best.score
 		_save_best(wave, score)
+	if SIMPLE_MODE:
+		_show_center("GAME OVER\nWAVE %d\n\nA = PLAY AGAIN" % wave, 0.0)
+		return
 	var who := "YOU BOTH WENT DOWN" if active_player_count() <= 2 else "EVERYONE WENT DOWN"
 	if won:
 		who = "WHAT A RUN, CHAMPIONS!"
@@ -1437,6 +1565,8 @@ func _unhandled_input(event: InputEvent) -> void:
 
 ## Co-op beam: while both players stand within TETHER_RANGE, a beam links them and zaps enemies it touches.
 func _update_tether(delta: float) -> void:
+	if SIMPLE_MODE:
+		return  # no co-op beam rules in simple mode
 	var tether_range: float = upg.tether_range
 	zap_t -= delta
 	var used := {}
@@ -1541,6 +1671,10 @@ func build_turret(p) -> void:
 
 func on_client_joined() -> void:
 	_ensure_player(MAX_PLAYERS - 1)
+	if solo and not players[1].active:  # the TV arrived after a solo start: wake player 2 up
+		players[1].set_active(true)
+		players[1].hp = players[1].stat("max_hp")
+		players[1].net_started = false
 	_show_center("PLAYER 2 JOINED", 1.5)
 	if last_say != "" and Time.get_ticks_msec() - last_say_time < 20000:
 		net.event("say", [last_say])  # they were reconnecting when it was said
@@ -1551,6 +1685,11 @@ func on_client_left() -> void:
 	for i in range(2, players.size()):
 		if players[i].active:
 			players[i].set_active(false)
+	if SIMPLE_MODE:  # keep playing; player 2 wakes up again when the TV rejoins
+		solo = true
+		players[1].set_active(false)
+		_show_center("P2 LEFT", 1.5)
+		return
 	_show_center("Player 2 left - waiting for them to rejoin…", 0.0)
 
 
@@ -1862,7 +2001,7 @@ func _build_hud() -> void:
 	help_label.offset_top = 110
 	help_label.offset_bottom = 210
 	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	help_label.text = "Controller: LEFT STICK move · RIGHT STICK look · RT shoot · A dash · Start menu\n" \
+	help_label.text = "" if SIMPLE_MODE else "Controller: LEFT STICK move · RIGHT STICK look · RT shoot · A dash · Start menu\n" \
 		+ "Keyboard: P1 WASD + mouse, click / Space shoot, Shift dash  ·  P2 arrows (turn), Enter shoot, Ctrl dash\n" \
 		+ "Beat 15 waves and 3 bosses to WIN!  ·  More players: press A on another controller to join (up to 6)"
 
@@ -1977,6 +2116,9 @@ func _update_hud() -> void:
 		help_label.modulate.a = maxf(0.0, help_label.modulate.a - get_process_delta_time())
 	if net.mode == "client" and not synced:
 		info_label.text = "Syncing with the VR player…"
+		return
+	if SIMPLE_MODE:
+		info_label.text = "WAVE %d" % wave if wave > 0 else ""
 		return
 	var wave_text := ("WAVE %d / %d" % [wave, FINALE_WAVE]) if wave <= FINALE_WAVE and not won else ("WAVE %d  ENDLESS" % wave)
 	var d := director()
