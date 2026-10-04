@@ -24,6 +24,26 @@ var _branch_hover := -1
 var _stick_ready := {}  # slot -> bool (stick back to centre before the next branch step)
 
 
+## VR menus: 1.5 m away (main.vr_ui_opts) and drawn bigger than core's default so kids can read them.
+const VR_MENU_W := 1.0  ## panel width in menu units (core default)
+const VR_MENU_BIG := 1.3  ## extra size over core's "same apparent size as at 2 m"
+
+
+## Rough real height of a menu panel (metres, after _enlarge) for placing it above the board.
+func _vr_menu_h(items: Array) -> float:
+	var rows := mini(items.size(), 6)
+	var units := 0.1 + 0.11 + rows * 0.13 + 0.16
+	return units * (main.VR_UI_DIST / 2.0) * VR_MENU_BIG
+
+
+func _enlarge(m: Node3D) -> void:
+	if m == null or not m.has_method("size_scale"):
+		return
+	# After core's pop-in tween (0.22 s), which scales back to its own size.
+	var big := Vector3.ONE * float(m.call("size_scale")) * VR_MENU_BIG
+	m.create_tween().tween_property(m, "scale", big, 0.12).set_delay(0.24)
+
+
 func _ready() -> void:
 	if main.vr_rig != null:
 		laser = MeshInstance3D.new()
@@ -60,8 +80,9 @@ func _on_menu(m: Dictionary) -> void:
 	var items: Array = m.get("items", [])
 	var title := String(m.get("title", ""))
 	if main.is_local_vr(pid):
-		vr_menu = VrMenu.open(main, {"title": title, "items": items, "rig": main.vr_rig, "player": 0,
-			"distance": 1.15, "height": -0.16})
+		vr_menu = VrMenu.open(main, main.vr_ui_opts(_vr_menu_h(items), {"title": title, "items": items, "rig": main.vr_rig,
+			"player": 0, "width": VR_MENU_W}))
+		_enlarge(vr_menu)
 		vr_menu.chosen.connect(func(id: String, _it: Dictionary) -> void: main.net.request(0, "menu", [seq, id]))
 		main.vr_rig.guard_trigger()
 	elif main.is_local_tv(pid) and main.tv_ui != null:
@@ -124,8 +145,9 @@ func _refresh_setup() -> void:
 				setup_tv.focus(f)
 	if main.vr_rig != null:
 		if setup_vr == null or not is_instance_valid(setup_vr):
-			setup_vr = VrMenu.open(main, {"title": "NEW PARTY", "items": items, "rig": main.vr_rig, "close_on_choose": false,
-				"distance": 1.15, "height": -0.1})
+			setup_vr = VrMenu.open(main, main.vr_ui_opts(_vr_menu_h(items), {"title": "NEW PARTY", "items": items,
+				"rig": main.vr_rig, "close_on_choose": false, "width": VR_MENU_W}))
+			_enlarge(setup_vr)
 			setup_vr.chosen.connect(func(id: String, _it: Dictionary) -> void: main.net.request(0, "setup", [id]))
 		else:
 			var i := setup_vr.index
