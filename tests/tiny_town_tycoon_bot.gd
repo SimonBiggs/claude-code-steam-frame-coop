@@ -90,8 +90,9 @@ func _ready() -> void:
 			kit.finish())
 	elif host:
 		kit.at(50.0, "save + reload", _save_reload)
-		kit.at(58.0, "host checks", _checks)
-		kit.at(62.0, "finish", kit.finish)
+		var end := float(OS.get_environment("TT_HOST_END")) if OS.has_environment("TT_HOST_END") else 62.0
+		kit.at(end - 4.0, "host checks", _checks)
+		kit.at(end, "finish", kit.finish)
 	else:
 		kit.at(50.0, "save + reload", _save_reload)
 		kit.at(57.0, "finish", func() -> void:

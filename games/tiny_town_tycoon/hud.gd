@@ -23,6 +23,7 @@ var title_card: Control
 var vehicle_menus := {}  ## slot -> UiMenu
 var _ghost: MeshInstance3D
 var _ghost_key := ""
+var _no_veh_t := {}  ## slot -> seconds without a vehicle (the pick menu opens after a moment)
 
 
 func setup(p_main: Node) -> void:
@@ -148,7 +149,7 @@ func _make_piece_card(ui: Control, v: Dictionary) -> void:
 	col.add_child(line)
 	var info := UiKit.label("", "small", "info", HORIZONTAL_ALIGNMENT_CENTER)
 	col.add_child(info)
-	col.add_child(UiKit.prompts([["LB", "Pick"], ["RB", ""], ["A", "Build"], ["X", "Turn"], ["B", "Bulldozer"]]))
+	col.add_child(UiKit.prompts([["LB", ""], ["RB", "Pick"], ["A", "Build"], ["X", "Turn"], ["B", "Bulldozer"], ["SELECT", "Islands"]]))
 	v["piece"] = pc
 	v["piece_title"] = title
 	v["piece_line"] = line
@@ -225,7 +226,7 @@ func _fill_goals(v: Dictionary, goals: Array) -> void:
 
 
 ## Every frame: job cards and their arrows, the flat mayor's card, open menus.
-func tick(_delta: float) -> void:
+func tick(delta: float) -> void:
 	for slot in views:
 		var v: Dictionary = views[slot]
 		var r: Control = v.get("root", null)
@@ -239,7 +240,11 @@ func tick(_delta: float) -> void:
 		_ensure_select_menu()
 	else:
 		for slot in main.party.local_slots():
-			if slot >= 1 and main.fleet.call("vehicle_of", slot) == null and not vehicle_menus.has(slot) and main.phase() == "play":
+			if slot < 1 or main.fleet.call("vehicle_of", slot) != null or main.party.is_pending(slot):
+				_no_veh_t[slot] = 0.0
+				continue
+			_no_veh_t[slot] = float(_no_veh_t.get(slot, 0.0)) + delta
+			if float(_no_veh_t[slot]) > 0.8 and not vehicle_menus.has(slot) and main.phase() == "play":
 				open_vehicle_menu(slot)
 
 

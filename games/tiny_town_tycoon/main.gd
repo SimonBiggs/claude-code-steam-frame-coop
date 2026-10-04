@@ -106,6 +106,7 @@ var _job_pub := {}  ## slot -> Array last published job card
 var _isl_shown := -1  ## island drawn by the view
 var _ter_dirty := false
 var _mood := ""
+var _last_veh := {}  ## host: slot -> the vehicle they drove (given back when they reconnect)
 
 
 func _ready() -> void:
@@ -718,7 +719,8 @@ func _on_player_joined(slot: int, _device: int) -> void:
 			_overview(c)
 			hud.call("make_view", slot, split.hud(slot))
 			hints.add_view(hud.call("root_of", slot), slot)
-			hud.call("open_vehicle_menu", slot)
+	if net.mode != "client" and slot >= 1 and _last_veh.has(slot) and String(net.state_get("veh%d" % slot, "")) == "":
+		on_request(slot, "vehicle", [String(_last_veh[slot])])  # back after a reconnect: same vehicle
 	_refresh_group()
 	hud.call("refresh")
 	sound("ui_notify", -6.0)
@@ -734,6 +736,9 @@ func _on_player_left(slot: int) -> void:
 	hud.call("remove_view", slot)
 	hints.remove_view(slot)
 	if net.mode != "client":
+		var had := String(net.state_get("veh%d" % slot, ""))
+		if had != "":
+			_last_veh[slot] = had
 		net.state_set("veh%d" % slot, null)
 		net.state_set("job%d" % slot, null)
 		_job_pub.erase(slot)
@@ -783,8 +788,6 @@ func _tv_buttons() -> void:
 				net.request(slot, "honk")
 		if party.just_pressed(slot, "x"):
 			hud.call("open_vehicle_menu", slot)
-		if party.just_pressed(slot, "select"):
-			net.request(slot, "menu")
 
 
 # --- Pause ---------------------------------------------------------------------------------------
