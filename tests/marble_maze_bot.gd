@@ -10,6 +10,12 @@ extends Node
 ## marble furthest behind and tow it along its path. Unless BOT_LEVEL is set, local / host runs take a
 ## TOUR of the new levels (team gates, ice, zoom arrows, teleporters, mud + two gate groups, finale)
 ## and finally let the clock run out to check the awards.
+## SIMPLE_MODE (main.simple): the tour is every level in order; the bot checks the practice (the ring,
+## the ghost hands and ghost marble), that holes pop marbles back nearby, that no clock, score or game
+## over exists, and touches every toy round the table (VR: with the fake hands).
+## BOT_VR=1 (local or DUO_HOST): the giant runs the real VR code with fake hands: the right hand grabs a
+## handle (after watching the ghost hands for a moment) and tilts the board the way the marbles need.
+## DUO_HOST alone (no TV machine) in SIMPLE_MODE: the giant's own solo marble rolls home by tilt only.
 
 const FAKE_PAD := 40
 
@@ -28,6 +34,14 @@ var pad_dist := {}  # pad index -> {cell: dist}
 var tour_i := 0
 const TOUR := [1, 3, 5, 7, 9, 10, 12]
 var forced_over := false
+var simple := false
+var saw_ring := false
+var saw_hands := false
+var saw_ghost_marble := false
+var practice_done := false
+var vr_grab_t := 0.0
+var toy_i := 0
+var toy_t := 0.0
 
 
 func _ready() -> void:
@@ -58,6 +72,9 @@ func _physics_process(delta: float) -> void:
 			get_tree().quit()
 		return
 	var mode: String = main.net.mode
+	simple = main.simple
+	if simple:
+		_simple_checks(delta)
 	if not joined and t > (3.0 if mode == "client" else 1.0):
 		joined = true
 		join_time = t
@@ -99,7 +116,7 @@ func _physics_process(delta: float) -> void:
 	for p in main.players:
 		if p.index == 0 or not p.active:
 			continue
-		var d := _guide_dir(p) if p.home else _desired(p, k)
+		var d := (Vector2.ZERO if main.simple else _guide_dir(p)) if p.home else _desired(p, k)
 		k += 1
 		d = _unstick(p, d, delta)
 		if p.is_local():
@@ -111,6 +128,8 @@ func _physics_process(delta: float) -> void:
 	if OS.has_environment("BOT_CHAOS"):
 		_chaos(delta)
 	var tl = main.players[0]
+	if tl.vr and mode != "client":
+		_vr_drive(tl, (want / n * 0.6) if n > 0 else Vector2.ZERO, delta)
 	if tl.is_local() and not tl.vr:
 		tl.bot = true
 		tl.bot_tilt = (want / n * 0.6) if n > 0 else Vector2.ZERO
@@ -132,7 +151,7 @@ func _chaos(_delta: float) -> void:
 	for p in main.players:
 		if p.index > 0 and p.is_local():
 			p.bot_steer = Vector2(sin(t * 1.3 + p.index), cos(t * 0.7 + p.index * 2.0))
-	if main.state == "play" and main.level == 1 and not has_meta("rushed") and main.net.mode != "client":
+	if main.state == "play" and main.level == 1 and not has_meta("rushed") and main.net.mode != "client" and not simple:
 		set_meta("rushed", true)
 		main.time_left = 25.0  # reach the time-up screen quickly
 
@@ -159,6 +178,11 @@ func _join_players(mode: String) -> void:
 func _tour() -> void:
 	if mode_is_client() or OS.has_environment("BOT_LEVEL") or OS.has_environment("BOT_CHAOS"):
 		return
+	if simple:
+		if main.state == "clear" and main.state_t > 1.6 and not has_meta("clear_%d" % main.level):
+			set_meta("clear_%d" % main.level, true)
+			print("BOT: simple level %d (%s) cleared, falls so far %d" % [main.level, main.board.level_name(main.level), _falls()])
+		return
 	if main.state == "clear" and main.state_t > 1.6 and tour_i + 1 < TOUR.size():
 		tour_i += 1
 		print("BOT: tour -> level %d" % TOUR[tour_i])
@@ -172,6 +196,91 @@ func _tour() -> void:
 	if main.state == "over" and not has_meta("over_said") and main.state_t > 0.5:
 		set_meta("over_said", true)
 		print("BOT: end screen says: %s" % main.center_label.text.replace("\n", " | "))
+
+
+func _falls() -> int:
+	var f := 0
+	for p in main.players:
+		if p.index > 0:
+			f += p.falls
+	return f
+
+
+## SIMPLE_MODE checks (all machines): practice ring, ghost hands / marble, no clock, toys.
+func _simple_checks(delta: float) -> void:
+	if main.state == "practice":
+		if main.ring_node != null and main.ring_node.visible and not saw_ring:
+			saw_ring = true
+			print("BOT: practice ring is glowing at %s" % main.board.practice_spot())
+		var gh = main.ghost_hand
+		if gh != null and gh.marble.visible and not saw_ghost_marble:
+			saw_ghost_marble = true
+			print("BOT: ghost marble rolls to the ring")
+		if gh != null and gh.visible and gh.shown_hands and not saw_hands:
+			saw_hands = true
+			print("BOT: ghost hands show the grip and tilt")
+	if main.state == "play" and saw_ring and not practice_done:
+		practice_done = true
+		print("BOT: practice done -> play (ring hits %s)" % str(main.ring_hit.keys()))
+	if main.state == "over" and not has_meta("over_bad"):
+		set_meta("over_bad", true)
+		print("BOT: FAIL simple mode reached a game over")
+	if main.props != null and not has_meta("props_said") and t > 50.0:
+		set_meta("props_said", true)
+		print("BOT: toys touched: %s (of 9)" % str(main.props.touched.keys()))
+	if not has_meta("hud_said") and main.state == "play" and t > 20.0 and main.players.size() > 1:
+		set_meta("hud_said", true)
+		print("BOT: HUD line: '%s'  centre: '%s'" % [main.hud_text(main.players[1]), main.center_label.text.replace("\n", " | ")])
+	# Non-VR toys: poke them straight (the VR run touches them with the fake left hand).
+	if main.props != null and not main.players[0].vr and main.net.mode != "client":
+		toy_t -= delta
+		if toy_t <= 0.0 and toy_i < 8:
+			toy_t = 2.0
+			main.props.react(toy_i)
+			toy_i += 1
+
+
+## BOT_VR: the real tilter code with fake hands. The right hand waits a moment in practice (so the
+## ghost hands show), then grabs the right handle and moves to tilt the board towards `want`.
+## The left hand visits each toy in turn, then grabs and throws a spare marble.
+func _vr_drive(tl, want: Vector2, delta: float) -> void:
+	var board = main.board
+	var waiting: bool = main.state == "practice" and not saw_hands
+	if waiting or main.state != "play" and main.state != "practice":
+		if tl.grabbing:
+			tl.fake_trigger = 0.0
+		else:
+			tl.fake_trigger = 0.0
+			tl.hand_r.global_position = tl.xr_camera.global_position + Vector3(0.25, -0.5, -0.3)
+	else:
+		if not tl.grabbing:
+			tl.hand_r.global_position = board.handle_world(1)
+			tl.fake_trigger = 0.0 if tl.fake_trigger > 0.5 else 1.0
+			if tl.fake_trigger > 0.5:
+				vr_grab_t = 0.0
+		else:
+			tl.fake_trigger = 1.0
+			vr_grab_t += delta
+			if not has_meta("vr_grab_said"):
+				set_meta("vr_grab_said", true)
+				print("BOT: VR right hand grabbed the board's handle")
+			var g: Vector2 = tl.grab_tilt
+			var d := want.limit_length(1.0) - g
+			var gain: float = tl.HAND_GAIN
+			tl.hand_r.global_position = tl.grab_r + Vector3(0.0, -d.x / gain, d.y / gain)
+			if vr_grab_t > 6.0:  # let go now and then (re-grab at the current tilt)
+				tl.fake_trigger = 0.0
+	# Left hand: toys.
+	var pr = main.props
+	if pr == null:
+		return
+	toy_t -= delta
+	if toy_t <= 0.0:
+		toy_t = 1.5
+		toy_i = (toy_i + 1) % 9
+	var target: Vector3 = pr.touch_point(mini(toy_i, 8))
+	var side := Vector3(0.0, 0.12 if toy_t > 0.8 else 0.0, 0.0)  # come down onto it
+	tl.hand_l.global_position = target + side
 
 
 func mode_is_client() -> bool:
@@ -346,6 +455,11 @@ func _report(mode: String) -> void:
 	for p in main.players:
 		if p.index > 0 and p.remote and p.active and p.net_started:
 			synced += 1
+	if simple:
+		print("BOT %s t=%.0f level=%d state=%s home=%d/%d falls=%d views=%d remote_synced=%d tilt=%s solo=%s [%s]" % [
+			mode, t, main.level, main.state, main.home_count(), main.active_marbles().size(), falls, views, synced,
+			main.board.tilt.snapped(Vector2(0.01, 0.01)), main.solo, ", ".join(act)])
+		return
 	print("BOT %s t=%.0f level=%d state=%s time=%.0f score=%d stars=%d jar=%d home=%d/%d gems=%d falls=%d cleared=%d views=%d remote_synced=%d gates=%s tilt=%s [%s]" % [
 		mode, t, main.level, main.state, main.time_left, main.score, main.stars, main.jar, main.home_count(), main.active_marbles().size(),
 		main.board.gem_taken.count(true), falls, cleared, views, synced, str(main.board.gate_open), main.board.tilt.snapped(Vector2(0.01, 0.01)), ", ".join(act)])
