@@ -30,6 +30,7 @@ var stream_server: TCPServer
 var stream_clients: Array[StreamPeerTCP] = []
 var stream_t := 0.0
 var stream_busy := false
+var caption: Node  # "Claude:" captions (addons/gdev/caption.gd), created lazily
 
 
 func _ready() -> void:
@@ -61,6 +62,9 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	if not is_instance_valid(caption) and ResourceLoader.exists("res://addons/gdev/caption.gd"):
+		caption = (load("res://addons/gdev/caption.gd") as GDScript).new()
+		add_child(caption)
 	poll_t += delta
 	if poll_t >= 0.25:
 		poll_t = 0.0
@@ -111,8 +115,8 @@ func _scan_files(initial: bool) -> void:
 			continue
 		if path.ends_with(".gd"):
 			_reload_script(path)
-		else:
-			scene_changed = true
+		elif ResourceLoader.has_cached(path) or path == get_tree().current_scene.scene_file_path:
+			scene_changed = true  # only scenes in use restart the game (a new game's files don't)
 	if scene_changed:
 		_log("scene file changed, restarting scene")
 		_restart()
