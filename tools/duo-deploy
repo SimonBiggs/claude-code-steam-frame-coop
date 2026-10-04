@@ -8,7 +8,7 @@ K=~/.config/steamos-devkit/devkit_rsa
 for d in core games arcade tests; do rsync -a --delete --exclude '*.uid' "$ST/$d/" "$LIVE/$d/"; done
 cp "$ST/arcade.tscn" "$LIVE/arcade.tscn"
 rsync -a --delete --exclude .git --exclude .dev --exclude .godot --exclude launch.sh --exclude tools "$LIVE/" "$B/game/"
-if timeout 4 bash -c 'echo > /dev/tcp/frame/22' 2>/dev/null; then
+if ssh -o ConnectTimeout=4 -o BatchMode=yes -i $K steamos@frame true 2>/dev/null; then
   rsync -az -e "ssh -i $K" --exclude .godot --exclude .dev "$B/game/" steamos@frame:devkit-game/DuoArena/game/
 else
   echo "Steam Frame offline: run 'duo-deploy-frame' when it's back" >&2

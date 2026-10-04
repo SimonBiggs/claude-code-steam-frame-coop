@@ -63,14 +63,16 @@ while True:
         line = raw.decode("utf-8", "replace")
         if "TO CLAUDE: " in line:
             follow_until = time.time() + FOLLOW_S  # conversation mode: keep listening a while
-            msg = "[voice] " + line.split("TO CLAUDE: ", 1)[1]
+            msg = f"[voice {line[1:9]}] " + line.split("TO CLAUDE: ", 1)[1]
         elif (ALL or time.time() < follow_until) and line.startswith("[") and "] " in line:
             follow_until = time.time() + FOLLOW_S
-            msg = "[voice] " + line.split("] ", 1)[1]
+            msg = f"[voice {line[1:9]}] " + line.split("] ", 1)[1]
         else:
             continue
         if PRINT:
             print(msg, flush=True)
+            with open(os.path.join(os.path.dirname(LOG), "voice-timing.log"), "a") as f:
+                f.write(f"event_sent {time.time():.2f} | {msg[:50]}\n")
             continue
         p = pane()
         subprocess.run(["/usr/bin/tmux", "send-keys", "-t", p, "-l", msg])

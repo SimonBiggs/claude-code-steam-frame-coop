@@ -111,6 +111,7 @@ var menu_was_down := false
 
 
 func _process(delta: float) -> void:
+	_ensure_caption()
 	_track_pause()
 	if not get_tree().paused:
 		_since_unpause += delta
@@ -570,3 +571,17 @@ func _beacon(delta: float) -> void:
 	var scene := get_tree().current_scene
 	if scene != null and scene.scene_file_path != "":
 		u.put_packet(("ARCADE_GAME " + scene.scene_file_path).to_utf8_buffer())
+
+
+## "Claude:" captions from frame-say (addons/gdev/caption.gd, a dev tool that may be missing).
+## Added once to the root so it survives game changes; created here because net.gd hot-reloads,
+## so it switches on in a running game without a restart.
+func _ensure_caption() -> void:
+	var root := get_tree().root
+	if root.has_meta("claude_caption") or not ResourceLoader.exists("res://addons/gdev/caption.gd"):
+		return
+	var c: Node = (load("res://addons/gdev/caption.gd") as GDScript).new()
+	c.name = "ClaudeCaption"
+	root.set_meta("claude_caption", c)
+	root.add_child.call_deferred(c)
+
