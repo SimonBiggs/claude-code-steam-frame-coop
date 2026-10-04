@@ -15,9 +15,13 @@ func _ready() -> void:
 	get_tree().node_added.connect(_on_node_added)
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	var cam := get_viewport().get_camera_3d()
 	var vr := cam is XRCamera3D
+	# Hitch log: in VR a slow frame can show as a black flash, so record every frame over 30 ms
+	# (in game.log, with the time) to match against reports like "the screen goes black".
+	if vr and delta > 0.03:
+		print("[hitch] %d ms at %s" % [int(delta * 1000.0), Time.get_time_string_from_system()])
 	if vr and not active:
 		_sweep(get_tree().root)  # labels made before the guard started
 	active = vr
