@@ -54,7 +54,12 @@ const ALL_BODIES := 2 | 4 | 8 | 16 | 32 | 256 | 512
 
 
 func camera_cull_mask() -> int:
-	return (1 | ALL_BODIES) & ~body_layer()
+	return ((1 | ALL_BODIES) & ~body_layer()) | guide_layer()
+
+
+## This runner's own guide arrow lives on its own layer (layers 11-16), so only their camera sees it.
+func guide_layer() -> int:
+	return 1024 << (index - 1)
 
 
 func _ready() -> void:

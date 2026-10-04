@@ -17,7 +17,8 @@ const KEY_TURN := 2.4
 const MOUSE_SENS := 0.0028
 const MUSKET_CD := 0.55
 const GUN_AIM_SPEED := 0.9
-const GRAB_RANGE := 0.3
+const GRAB_RANGE := 0.42  # generous: kids' arms are short and nobody aims their hand precisely
+const EYE_TARGET := 1.45  # VR: lift/lower the gunner so their eyes sit here (handle ~0.6 m below)
 const HAND_KEYS := [
 	{"up": KEY_W, "down": KEY_S, "left": KEY_A, "right": KEY_D, "fire": KEY_F, "use": KEY_E, "use2": KEY_SPACE},
 	{"up": KEY_UP, "down": KEY_DOWN, "left": KEY_LEFT, "right": KEY_RIGHT, "fire": KEY_ENTER, "use": KEY_SHIFT, "use2": KEY_SLASH},
@@ -64,6 +65,7 @@ var net_hand_l := Transform3D()
 
 # Deckhand.
 var carrying := false
+var golden := false  # carrying the golden cannonball
 var use_held := false  # host: holding the use button (patching)
 var use_was_held := false
 var patching := false
@@ -100,6 +102,20 @@ var spy_cam: Camera3D
 var spy_lens: MeshInstance3D
 var spy_zoom := false
 var station_placed := -1
+var fake_vr := false  # tests: the VR code runs with hands/head moved by the bot
+var fake_trigger := {}  # tracker -> float
+var fake_a := false
+var fake_stick := Vector2.ZERO
+var fit_y := 0.0
+var fit_head := -1.0
+var refit_t := 0.0
+var trig_armed := {}  # tracker -> the trigger was pulled during play (not held over from a pause)
+var reach_miss_t := 0.0
+var reach_line: MeshInstance3D
+var reach_mesh: ImmediateMesh
+var grab_t := 0.0
+var limbs: Array[Node3D] = []
+var walk_t := 0.0
 
 # Visuals.
 var pivot: Node3D
@@ -166,6 +182,24 @@ func _ready() -> void:
 		held_ball.visible = false
 		var body_musket := World.box(pivot, Vector3(0.07, 0.07, 1.0), Vector3(0.35, 1.0, -0.3), World.mat(Color(0.45, 0.28, 0.12)))
 		body_musket.rotation.x = 0.3
+		# Arms and legs that swing as they walk, a belt and a red neckerchief.
+		var trousers := World.mat(Color(0.25, 0.22, 0.3))
+		for sx in [-1.0, 1.0]:
+			var leg := Node3D.new()
+			leg.position = Vector3(sx * 0.14, 0.42, 0)
+			pivot.add_child(leg)
+			World.box(leg, Vector3(0.16, 0.42, 0.18), Vector3(0, -0.2, 0), trousers)
+			World.box(leg, Vector3(0.18, 0.1, 0.26), Vector3(0, -0.4, -0.04), World.mat(Color(0.12, 0.1, 0.08)))
+			limbs.append(leg)
+		for sx in [-1.0, 1.0]:
+			var arm := Node3D.new()
+			arm.position = Vector3(sx * 0.38, 1.12, 0)
+			pivot.add_child(arm)
+			World.box(arm, Vector3(0.13, 0.45, 0.13), Vector3(0, -0.2, 0), coat)
+			World.sphere(arm, 0.08, Vector3(0, -0.45, 0), skin, 6)
+			limbs.append(arm)
+		World.box(pivot, Vector3(0.68, 0.1, 0.68), Vector3(0, 0.62, 0), World.mat(Color(0.2, 0.13, 0.08)))
+		World.sphere(pivot, 0.13, Vector3(0, 1.3, -0.2), World.mat(Color(0.9, 0.15, 0.15)), 6)
 	var tag := Label3D.new()
 	tag.text = "P%d" % (index + 1) if not gunner else "P1 GUNNER"
 	tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
@@ -332,6 +366,13 @@ func _input(event: InputEvent) -> void:
 		pitch = clampf(pitch - motion.relative.y * MOUSE_SENS, -1.3, 1.3)
 
 
+func _ball_mat(gold_ball: bool) -> StandardMaterial3D:
+	var key := "cc_ball_gold" if gold_ball else "cc_ball_iron"
+	if not has_meta(key):
+		set_meta(key, World.mat(Color(1.0, 0.8, 0.2), 2.5, 0.2) if gold_ball else World.mat(Color(0.1, 0.1, 0.12), 0.0, 0.3))
+	return get_meta(key)
+
+
 func _physics_process(delta: float) -> void:
 	musket_cd -= delta
 	hands_full_t -= delta
@@ -339,9 +380,12 @@ func _physics_process(delta: float) -> void:
 	shake = maxf(0.0, shake - delta * 3.0)
 	if held_ball:
 		held_ball.visible = carrying
+		held_ball.material_override = _ball_mat(golden)
 	if view_ball:
 		view_ball.visible = carrying
+		view_ball.material_override = _ball_mat(golden)
 		musket.visible = not carrying
+	_animate_limbs(delta)
 	if not active:
 		return
 	if ghost:
@@ -360,6 +404,30 @@ func _physics_process(delta: float) -> void:
 func _process(delta: float) -> void:
 	if vr and active:
 		_vr_gunner_update(delta)
+
+
+## Deckhand arms and legs swing while they move; arms go up when carrying a cannonball.
+func _animate_limbs(delta: float) -> void:
+	if limbs.is_empty():
+		return
+	var moved := global_position.distance_to(get_meta("last_pos", global_position))
+	set_meta("last_pos", global_position)
+	var speed := moved / maxf(delta, 0.001)
+	walk_t += delta * clampf(speed, 0.0, 6.0) * 2.2
+	var swing := sin(walk_t) * clampf(speed / 4.0, 0.0, 0.7)
+	limbs[0].rotation.x = swing
+	limbs[1].rotation.x = -swing
+	if carrying:
+		limbs[2].rotation.x = lerpf(limbs[2].rotation.x, 2.8, 0.3)
+		limbs[3].rotation.x = lerpf(limbs[3].rotation.x, 2.8, 0.3)
+		if held_ball:
+			held_ball.position = Vector3(0, 1.95, -0.15)
+	else:
+		var patch_k := sin(Time.get_ticks_msec() * 0.03) * 0.8 if patching else 0.0
+		limbs[2].rotation.x = -swing * 0.8 + absf(patch_k)
+		limbs[3].rotation.x = swing * 0.8 + absf(patch_k)
+		if held_ball:
+			held_ball.position = Vector3(0, 1.0, -0.45)
 
 
 # --- Deckhand --------------------------------------------------------------------
@@ -479,12 +547,49 @@ func set_station(i: int) -> void:
 		var stand: Vector3 = c.stand_pos()
 		var head_now := xr_camera.global_position
 		xr_origin.global_position += Vector3(stand.x - head_now.x, 0.0, stand.z - head_now.z)
+		xr_origin.global_position.y = fit_y
 		station_placed = station
 
 
 # --- Gunner (VR) -------------------------------------------------------------------
 
+## Lifts or lowers the gunner so the cannon handle sits at a comfy height below their eyes, for
+## tall grown-ups, kids and people sitting down alike. Re-fits when someone new puts the headset on.
+func _vr_fit_height(delta: float) -> void:
+	var head_h := xr_camera.position.y  # head height above the real floor
+	if head_h < 0.5:
+		return  # not tracking yet
+	if fit_head < 0.0:
+		fit_head = head_h
+		fit_y = clampf(EYE_TARGET - head_h, -0.35, 0.5)
+		xr_origin.global_position.y = fit_y
+		print("VR gunner height fitted: head %.2f m, lift %.2f m" % [head_h, fit_y])
+	if absf(head_h - fit_head) > 0.3:
+		refit_t += delta
+		if refit_t > 3.0:
+			refit_t = 0.0
+			fit_head = head_h
+			fit_y = clampf(EYE_TARGET - head_h, -0.35, 0.5)
+			print("VR gunner height re-fitted: head %.2f m, lift %.2f m" % [head_h, fit_y])
+	else:
+		refit_t = 0.0
+	xr_origin.global_position.y = lerpf(xr_origin.global_position.y, fit_y, 1.0 - exp(-3.0 * delta))
+
+
+func _vr_ax() -> bool:
+	if fake_vr:
+		return fake_a
+	return hand_r.is_button_pressed("ax_button") or hand_l.is_button_pressed("ax_button")
+
+
+func _vr_stick_l() -> Vector2:
+	if fake_vr:
+		return fake_stick
+	return hand_l.get_vector2("primary")
+
+
 func _vr_gunner_update(delta: float) -> void:
+	_vr_fit_height(delta)
 	if station_placed != station:
 		set_station(station)
 	var head := xr_camera.global_position
@@ -493,9 +598,9 @@ func _vr_gunner_update(delta: float) -> void:
 	pivot.rotation.y = yaw
 	var c = main.cannons[station]
 	# Hop between cannons: A = next, B = previous, or flick the left stick.
-	var ax := hand_r.is_button_pressed("ax_button") or hand_l.is_button_pressed("ax_button")
+	var ax := _vr_ax()
 	var by := hand_r.is_button_pressed("by_button") or hand_l.is_button_pressed("by_button")
-	var flick := hand_l.get_vector2("primary").x
+	var flick := _vr_stick_l().x
 	if not main.game_over:
 		if ax and not ax_was:
 			set_station((station + 1) % 4)
@@ -520,16 +625,22 @@ func _vr_gunner_update(delta: float) -> void:
 	_vr_grab(c, delta)
 	_vr_spyglass()
 	var ammo_text: String = "EMPTY - deckhands, bring balls!" if c.ammo <= 0 else "AMMO %d / %d" % [c.ammo, c.MAX_AMMO]
-	wrist_label.text = "%s CANNON  ·  %s\nWAVE %d   GOLD %d\nWATER IN HOLD %d%%" % [c.side_name(), ammo_text, main.wave, main.gold, int(main.water)]
+	if c.golden > 0:
+		ammo_text += "  (GOLDEN!)"
+	wrist_label.text = "%s CANNON  ·  %s\n%s   GOLD %d\nWATER IN HOLD %d%%" % [c.side_name(), ammo_text, main.wave_title(), main.gold, int(main.water)]
 	if main.net.mode == "host" and not main.net.connected:
 		wrist_label.text += "\nWaiting for the TV crew to join…"
 
 
 func _trig(h: XRController3D) -> bool:
+	if fake_vr:
+		return float(fake_trigger.get(h.tracker, 0.0)) > 0.6
 	return h.get_float("trigger") > 0.6
 
 
 func _grip(h: XRController3D) -> bool:
+	if fake_vr:
+		return false
 	return h.get_float("grip") > 0.6
 
 
@@ -538,6 +649,11 @@ func _vr_grab(c, delta: float) -> void:
 	var handle: Vector3 = c.handle_world()
 	var trig_edge := {}
 	var grip_edge := {}
+	if not has_meta("trig_init"):
+		set_meta("trig_init", true)  # a trigger still held from the arcade menu isn't a fresh pull
+		for h in [hand_l, hand_r]:
+			trig_was[h.tracker] = _trig(h)
+			grip_was[h.tracker] = _grip(h)
 	for h in [hand_l, hand_r]:
 		var t := _trig(h)
 		var g := _grip(h)
@@ -548,23 +664,46 @@ func _vr_grab(c, delta: float) -> void:
 		trig_was[h.tracker] = t
 		grip_was[h.tracker] = g
 	c.hover = false
+	c.near = 0.0
+	reach_miss_t = maxf(0.0, reach_miss_t - delta)
+	if get_tree().paused:
+		trig_armed.clear()
 	if grab_hand == null:
 		for h in [hand_r, hand_l]:
-			var near: bool = h.global_position.distance_to(handle) < GRAB_RANGE
+			var dist: float = h.global_position.distance_to(handle)
+			var near: bool = dist < GRAB_RANGE
+			c.near = maxf(c.near, clampf(1.0 - (dist - GRAB_RANGE) / 0.5, 0.0, 1.0))
 			if near:
 				c.hover = true
-			if near and (grip_edge[h.tracker] or trig_edge[h.tracker]):
+			if trig_edge[h.tracker]:
+				trig_armed[h.tracker] = true  # pulled during play (not held over from a menu)
+			elif not _trig(h):
+				trig_armed[h.tracker] = false
+			# Grab with a fresh trigger pull at the handle, or by moving a hand that's already
+			# squeezing (pulled during play) onto it.
+			var squeeze_onto: bool = _trig(h) and trig_armed.get(h.tracker, false) and grab_t > 0.4
+			if near and (grip_edge[h.tracker] or trig_edge[h.tracker] or squeeze_onto):
 				grab_hand = h
 				grab_by_trigger = not _grip(h)
 				grab_offset = handle - h.global_position
 				h.trigger_haptic_pulse("haptic", 0.0, 0.3, 0.06, 0.0)
+				main.sound("load", -10.0, 1.6)
 				if not has_meta("grabbed_once"):
 					set_meta("grabbed_once", true)
 					print("VR gunner grabbed a cannon")
 				break
+			elif trig_edge[h.tracker] and dist < 1.3:
+				reach_miss_t = 2.5  # pulled the trigger, but not at the handle: show where it is
+				h.trigger_haptic_pulse("haptic", 0.0, 0.1, 0.03, 0.0)
+				if not has_meta("missed_once"):
+					set_meta("missed_once", true)
+					print("VR gunner pulled the trigger away from the handle")
+	_draw_reach_line(handle)
+	grab_t += delta
 	c.grabbed = grab_hand != null
 	if grab_hand == null:
 		return
+	grab_t = 0.0
 	c.aim_from_handle(grab_hand.global_position + grab_offset, delta)
 	if grab_by_trigger:
 		if not _trig(grab_hand):
@@ -575,6 +714,38 @@ func _vr_grab(c, delta: float) -> void:
 			grab_hand = null
 		elif trig_edge[hand_l.tracker] or trig_edge[hand_r.tracker]:
 			_vr_fire()
+
+
+## A dotted line from the hand to the handle after a trigger pull that missed it.
+func _draw_reach_line(handle: Vector3) -> void:
+	if reach_line == null:
+		reach_mesh = ImmediateMesh.new()
+		reach_line = MeshInstance3D.new()
+		reach_line.mesh = reach_mesh
+		reach_line.top_level = true
+		reach_line.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var m := StandardMaterial3D.new()
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.albedo_color = Color(1.0, 0.85, 0.3)
+		m.no_depth_test = true
+		reach_line.material_override = m
+		add_child(reach_line)
+		_set_layers(reach_line, viewmodel_layer())
+	reach_mesh.clear_surfaces()
+	reach_line.visible = reach_miss_t > 0.0 and grab_hand == null
+	if not reach_line.visible:
+		return
+	var h := hand_r
+	if hand_l.global_position.distance_to(handle) < hand_r.global_position.distance_to(handle):
+		h = hand_l
+	var a := h.global_position
+	reach_mesh.surface_begin(Mesh.PRIMITIVE_LINES)
+	var n := 10
+	for i in n:
+		if i % 2 == 0:
+			reach_mesh.surface_add_vertex(a.lerp(handle, float(i) / n))
+			reach_mesh.surface_add_vertex(a.lerp(handle, float(i + 1) / n))
+	reach_mesh.surface_end()
 
 
 func _vr_fire() -> void:
@@ -713,6 +884,9 @@ func set_active(on: bool) -> void:
 
 ## Leaving (or a controller unplugged): put the ball back and stop patching.
 func reset_crew_state() -> void:
+	if golden and main != null and main.net != null and main.net.mode != "client":
+		main.golden_balls += 1  # the golden cannonball goes back on the pile
+	golden = false
 	carrying = false
 	use_held = false
 	use_was_held = false
@@ -722,16 +896,18 @@ func reset_crew_state() -> void:
 	bot_use = false
 
 
-## Snapshot: [pos, yaw, pitch, carrying, head, hand_r, hand_l, active, station, patching]
+## Snapshot: [pos, yaw, pitch, carrying, head, hand_r, hand_l, active, station, patching, golden]
 func net_state() -> Array:
 	var hr := hand_r.global_transform if vr else Transform3D()
 	var hl := hand_l.global_transform if vr else Transform3D()
-	return [global_position, yaw, pitch, carrying, head_transform(), hr, hl, active, station, patching]
+	return [global_position, yaw, pitch, carrying, head_transform(), hr, hl, active, station, patching, golden]
 
 
 func apply_net_state(st: Array) -> void:
 	carrying = st[3]
 	patching = st[9]
+	if st.size() > 10:
+		golden = st[10]
 	var on: bool = st[7]
 	if on != active:
 		set_active(on)

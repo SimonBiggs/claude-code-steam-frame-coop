@@ -32,6 +32,7 @@ var ghost := false
 var net_target := Vector3.ZERO
 var net_started := false
 var highlight := false
+var squash := 0.0  # a chop squashes it for a moment
 var visual: Node3D
 var visual_key := ""
 var label: Label3D
@@ -74,7 +75,9 @@ func _process(delta: float) -> void:
 		_rebuild()
 	if visual:
 		var s := 1.18 if highlight else 1.0
-		visual.scale = visual.scale.lerp(Vector3.ONE * s, 1.0 - exp(-14.0 * delta))
+		squash = maxf(0.0, squash - delta * 5.0)
+		var want := Vector3(s * (1.0 + 0.35 * squash), s * (1.0 - 0.45 * squash), s * (1.0 + 0.35 * squash))
+		visual.scale = visual.scale.lerp(want, 1.0 - exp(-14.0 * delta)) if squash <= 0.0 else want
 	if holder >= 1 and holder < main.players.size():
 		# Carried by a runner: always follow that runner (instant for our own runner on the TV).
 		var p = main.players[holder]

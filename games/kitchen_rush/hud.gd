@@ -11,6 +11,8 @@ var hint_label: Label
 var carry_label: Label
 var orders_label: Label
 var cross: ColorRect
+var job_panel: PanelContainer
+var job_label: Label
 var ui_scale := 1.0  # shrinks with the split-screen view (1.0 at half a 1080p screen or bigger)
 var fonts := {}  # Label -> base font size
 
@@ -26,6 +28,21 @@ func _ready() -> void:
 	hint_label = _label(28, Color(1.0, 0.92, 0.45))
 	hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	add_child(hint_label)
+	job_panel = PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.08, 0.06, 0.1, 0.72)
+	sb.border_color = player.color.lightened(0.2)
+	sb.set_border_width_all(3)
+	sb.set_corner_radius_all(12)
+	sb.content_margin_left = 16
+	sb.content_margin_right = 16
+	sb.content_margin_top = 6
+	sb.content_margin_bottom = 6
+	job_panel.add_theme_stylebox_override("panel", sb)
+	job_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(job_panel)
+	job_label = _label(30, Color(1.0, 0.95, 0.6))
+	job_panel.add_child(job_label)
 	if not chef:
 		cross = ColorRect.new()
 		cross.color = Color(1, 1, 1, 0.8)
@@ -67,11 +84,21 @@ func _process(_delta: float) -> void:
 	var s := ui_scale
 	if cross:
 		cross.position = size * 0.5 - Vector2(4, 4)
-	orders_label.position = Vector2(24, 70) * s
+	orders_label.position = Vector2(24, 130) * s
 	carry_label.position = Vector2(24 * s, size.y - 120 * s)
 	hint_label.position = Vector2(0, size.y * 0.5 + 60 * s)
 	hint_label.size = Vector2(size.x, 40 * s)
 	orders_label.text = main.orders_text()
+	# Your job right now, big and clear (the arrow in the world points at it).
+	var job_text := ""
+	if chef:
+		job_text = str(main.chef_task.get("text", ""))
+	else:
+		job_text = str(main.runner_job(player).get("text", ""))
+	job_panel.visible = job_text != "" and not main.game_over
+	job_label.text = ("NEXT: " if chef else "YOUR JOB: ") + job_text
+	job_panel.size = Vector2.ZERO
+	job_panel.position = Vector2((size.x - job_panel.size.x) * 0.5, 64.0 * s)
 	if chef:
 		var held = player.held[0]
 		var what := "nothing"

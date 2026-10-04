@@ -4,6 +4,9 @@ extends Node
 # BOT_PLAYERS=N (1..6): N TV runners join (local split screen, or on the TV machine when networked). The last
 # one joins through a fake controller pressing Start (the real drop-in path); with N >= 3 that controller is
 # later "unplugged" (the runner should leave after 15 s) and plugged back in (it should rejoin).
+# KR_FAKE_VR=1: the real VR chef code runs; the bot moves the fake hands like a person, following the
+# chef's on-screen "next step" guidance (chop with a knife swing, grab with the right trigger, drop on the plate).
+# KR_START_SHIFT=N starts at shift N (3 = the first dinner, with the rush).
 const L := preload("res://games/kitchen_rush/layout.gd")
 const M := preload("res://games/kitchen_rush/main.gd")
 
@@ -22,6 +25,13 @@ var join_at := 3.0
 const FAKE_PAD := 60
 var unplug_stage := 0
 var max_active := 0
+var seen := {}
+var vr_state := "idle"
+var vr_t := 0.0
+var vr_target = null
+var vr_from := Vector3.ZERO
+var vr_chops := 0
+var vr_drops := 0
 
 
 func _ready() -> void:
@@ -37,6 +47,11 @@ func _physics_process(delta: float) -> void:
 	if not main.ready_to_play:
 		return
 	var mode: String = main.net.mode
+	if OS.has_environment("KR_START_SHIFT") and mode != "client" and not has_meta("skipped"):
+		set_meta("skipped", true)
+		main.shift = int(OS.get_environment("KR_START_SHIFT")) - 1
+		print("BOT: starting at shift %d" % (main.shift + 1))
+	_note_features()
 	if OS.has_environment("KR_LAZY") and mode != "client":
 		# Game-over test: nobody cooks and customers run out of patience fast; then press Enter to restart.
 		for c in main._waiting_customers():
@@ -53,7 +68,10 @@ func _physics_process(delta: float) -> void:
 			print("BOT: restarted into a fresh kitchen")
 		return
 	if mode != "client":
-		_chef(delta)
+		if main.players[0].fake_vr:
+			_chef_vr(delta)
+		else:
+			_chef(delta)
 	if mode != "host":
 		for i in range(1, main.players.size()):
 			var p = main.players[i]
@@ -131,6 +149,132 @@ func _join_players(mode: String) -> void:
 	elif unplug_stage == 2 and p.active:
 		unplug_stage = 3
 		print("BOT: P%d rejoined after replug (t=%.1f) joy=%d" % [want_players + 1, t, p.joy])
+
+
+## Prints each new feature the first time it shows up.
+func _note_features() -> void:
+	var types := {}
+	for c in get_tree().get_nodes_in_group("kr_customers"):
+		types[c.ctype] = true
+	var guide := false
+	for p in main.players:
+		if p.has_meta("guide") and p.get_meta("guide").visible:
+			guide = true
+	var checks := {
+		"chef guidance": str(main.chef_task.get("text", "")) != "",
+		"runner job": main.players.size() > 1 and str(main.runner_job(main.players[1]).get("text", "")) != "",
+		"guide arrow": guide,
+		"stars": not main.stars.is_empty(),
+		"dinner rush": main.rush_t > 0.0,
+		"critic": types.has("critic"),
+		"fire": main.fire_on,
+		"raccoon": main.raccoon.visible,
+		"stats": main.stats_text != "",
+	}
+	for k in checks:
+		if checks[k] and not seen.has(k):
+			seen[k] = true
+			var extra := ""
+			if k == "chef guidance":
+				extra = ": " + str(main.chef_task.get("text", ""))
+			elif k == "runner job":
+				extra = ": " + str(main.runner_job(main.players[1]).get("text", ""))
+			elif k == "stars":
+				extra = ": %s" % [main.stars]
+			print("BOT: seen %s (t=%.0f, shift %d)%s" % [k, t, main.shift, extra])
+	for ty in types:
+		if not seen.has("type:" + ty):
+			seen["type:" + ty] = true
+			print("BOT: customer type %s" % ty)
+
+
+## Fake VR chef: moves the hands like a person would, following the chef's guidance.
+func _chef_vr(delta: float) -> void:
+	var chef = main.players[0]
+	var hl: Node3D = chef.hand_l
+	var hr: Node3D = chef.hand_r
+	var head: Vector3 = chef.xr_camera.global_position
+	var rest_r := head + Vector3(0.3, -0.55, -0.35)
+	var rest_l := head + Vector3(-0.3, -0.55, -0.35)
+	vr_t += delta
+	var task: Dictionary = main.chef_task
+	var it = task.get("item")
+	var plate = task.get("plate")
+	var held = chef.held[1]
+	match vr_state:
+		"idle":
+			chef.fake_trigger[1] = 0.0
+			hr.global_position = hr.global_position.lerp(rest_r, 0.2)
+			hl.global_position = hl.global_position.lerp(rest_l, 0.2)
+			if vr_t < 0.4 or main.game_over:
+				return
+			if held != null and is_instance_valid(held):
+				vr_state = "carry"
+			elif it != null and is_instance_valid(it) and it.holder == -1:
+				vr_target = it
+				vr_state = "chop_up" if it.needs_chop() and not main.fire_on else ("reach" if not it.needs_chop() else "idle")
+			elif main.free_pass_slot(Vector3.ZERO) < 0:
+				for i in 4:
+					var junk = main.item_at(L.PASS_SLOTS[i], 0.15)
+					if junk != null:
+						vr_target = junk
+						vr_state = "reach"
+						break
+			vr_t = 0.0
+		"chop_up":
+			if vr_target == null or not is_instance_valid(vr_target) or not vr_target.needs_chop():
+				vr_state = "idle"
+				return
+			var above: Vector3 = vr_target.global_position + Vector3(0, 0.3, 0.18)
+			hl.global_position = hl.global_position.move_toward(above, delta * 1.5)
+			if hl.global_position.distance_to(above) < 0.02:
+				vr_state = "chop_down"
+				vr_t = 0.0
+		"chop_down":
+			if vr_target == null or not is_instance_valid(vr_target):
+				vr_state = "idle"
+				return
+			var below: Vector3 = vr_target.global_position + Vector3(0, -0.02, 0.18)
+			hl.global_position = hl.global_position.move_toward(below, delta * 2.6)
+			if hl.global_position.distance_to(below) < 0.02 or vr_t > 0.6:
+				vr_chops += 1
+				if vr_chops <= 3:
+					print("BOT VR: knife swing %d at the %s (chops %d)" % [vr_chops, vr_target.kind, vr_target.chops])
+				vr_state = "chop_up" if vr_target.needs_chop() else "idle"
+				vr_t = 0.0
+		"reach":
+			if vr_target == null or not is_instance_valid(vr_target) or vr_target.holder != -1:
+				vr_state = "idle"
+				return
+			# hand_point is 6 cm in front of and 2 cm below the controller.
+			var want: Vector3 = vr_target.global_position + Vector3(0, 0.06, 0.06)
+			hr.global_position = hr.global_position.move_toward(want, delta * 1.5)
+			if hr.global_position.distance_to(want) < 0.02:
+				chef.fake_trigger[1] = 1.0
+				vr_state = "carry"
+				vr_t = 0.0
+		"carry":
+			held = chef.held[1]
+			if held == null or not is_instance_valid(held):
+				if vr_t > 0.3:
+					vr_state = "idle"
+					chef.fake_trigger[1] = 0.0
+				return
+			var dest: Vector3
+			if plate != null and is_instance_valid(plate) and held.is_ready():
+				dest = plate.global_position + Vector3(0, 0.14, 0.06)
+			elif held.needs_chop():
+				dest = L.BOARD + Vector3(0, 0.14, 0.06)
+			else:
+				dest = L.TRASH + Vector3(0, 0.14, 0.06)
+			hr.global_position = hr.global_position.move_toward(dest, delta * 1.5)
+			if hr.global_position.distance_to(dest) < 0.02:
+				chef.fake_trigger[1] = 0.0
+				vr_drops += 1
+				if vr_drops <= 3:
+					print("BOT VR: dropped the %s (task: %s)" % [held.kind, main.chef_task.get("text", "")])
+				vr_state = "idle"
+				vr_t = 0.0
 
 
 # --- Chef ---------------------------------------------------------------------
@@ -370,3 +514,24 @@ func _walk(p, goal: Vector3, delta: float) -> void:
 	last_pos[p.index] = pos
 	if stuck_t.get(p.index, 0.0) > 0.6:
 		p.bot_move = Basis(Vector3.UP, PI / 2.0) * p.bot_move + Vector3(0, 0, -0.5)
+
+
+func _count_visuals(n: Node) -> int:
+	var c := 0
+	if (n is MeshInstance3D or n is MultiMeshInstance3D or n is CPUParticles3D or n is Label3D) and n.is_visible_in_tree():
+		c += 1
+	for ch in n.get_children():
+		c += _count_visuals(ch)
+	return c
+
+
+func _exit_tree() -> void:
+	if main != null:
+		print("FINAL mode=%s shift=%d coins=%d served=%d angry=%d stars=%s seen=%s" % [main.net.mode, main.shift, main.coins, main.served_total, main.angry, main.stars, seen.keys()])
+		print("Visual instances in the scene: %d" % _count_visuals(main))
+		if OS.has_environment("KR_BREAKDOWN"):
+			var by := {}
+			for ch in main.get_children():
+				var key: String = ch.get_script().resource_path.get_file() if ch.get_script() else ch.get_class()
+				by[key] = by.get(key, 0) + _count_visuals(ch)
+			print("Breakdown: %s" % by)

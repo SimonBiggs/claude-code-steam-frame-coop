@@ -68,8 +68,11 @@ func _draw() -> void:
 		if player.carrying:
 			var bc := Vector2(size.x - 90.0, size.y - 90.0)
 			draw_circle(bc, 34.0, Color(0, 0, 0, 0.5))
-			draw_circle(bc, 28.0, Color(0.12, 0.12, 0.14))
+			draw_circle(bc, 28.0, Color(1.0, 0.8, 0.2) if player.golden else Color(0.12, 0.12, 0.14))
 			draw_circle(bc + Vector2(-9, -9), 7.0, Color(1, 1, 1, 0.35))
+			if player.golden:
+				draw_string_outline(font, bc + Vector2(-60, -44), "GOLDEN!", HORIZONTAL_ALIGNMENT_CENTER, 120.0, 22, 6, Color.BLACK)
+				draw_string(font, bc + Vector2(-60, -44), "GOLDEN!", HORIZONTAL_ALIGNMENT_CENTER, 120.0, 22, Color(1.0, 0.85, 0.2))
 	# Water in the hold: a vertical gauge on the left.
 	var water: float = main.water
 	var gx := 30.0
@@ -91,7 +94,7 @@ func _draw() -> void:
 			var p := Vector2(196 + i * 24, y)
 			draw_circle(p, 9.0, Color(0, 0, 0, 0.6))
 			if i < ammo:
-				draw_circle(p, 7.0, Color(0.95, 0.95, 0.95))
+				draw_circle(p, 7.0, Color(1.0, 0.8, 0.2) if i < cn.golden else Color(0.95, 0.95, 0.95))
 		if ammo == 0:
 			draw_string(font, Vector2(196 + 4 * 24, y + 8), "EMPTY!", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1.0, 0.4, 0.3))
 		y += 28.0

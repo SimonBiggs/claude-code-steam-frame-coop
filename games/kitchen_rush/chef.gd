@@ -1,7 +1,9 @@
 extends Node3D
 ## Player 1: the CHEF behind the counter.
-## VR: grab with either hand (grip or trigger), the right hand holds a knife: swing it down through an
-##     ingredient to chop it. Drop ingredients onto a plate to build the dish. X / A recenters you at the counter.
+## VR: BOTH hands hold knives: swing one down through an ingredient to chop it (no buttons needed, so the
+##     left hand works on the Steam Frame too). Grab with the right trigger (the knife tucks away while you
+##     hold something; the left trigger / grips grab too where the headset sends them). Drop ingredients onto
+##     a plate to build the dish. Left stick slides you along the counter. A recenters you at the counter.
 ## Buttons (no headset): move a hand cursor between the counter spots, grab/place, chop.
 ##     Keyboard: WASD move cursor, Space grab / place, Shift (or F) chop.  Controller: d-pad / stick, A grab, X / RT chop.
 ## On the TV machine the chef is a ghost drawn from the host's snapshots.
@@ -27,8 +29,15 @@ var recentered := false
 var ax_was := false
 var grip_was := [false, false]
 var held: Array = [null, null]  # [left, right]; the button chef uses the left slot
-var last_mid := Vector3.ZERO
+var last_mid := [Vector3.ZERO, Vector3.ZERO]
 var wrist_label: Label3D
+var fake_vr := false  # tests: the VR code runs with hands moved by the bot
+var fake_trigger := [0.0, 0.0]
+var fit_head := -1.0
+var refit_t := 0.0
+var knife_l: Node3D
+var chop_flash := [0.0, 0.0]
+var chops_done := 0
 
 # Button chef
 var camera: Camera3D
@@ -150,6 +159,8 @@ func _ready() -> void:
 	rhand_vis = _make_hand()
 	knife = _make_knife()
 	rhand_vis.add_child(knife)
+	knife_l = _make_knife()
+	lhand_vis.add_child(knife_l)
 
 
 func _make_hand() -> Node3D:
@@ -289,26 +300,39 @@ func _place_body() -> void:
 
 # --- VR ------------------------------------------------------------------------
 
+func _squeeze(h: int) -> bool:
+	if fake_vr:
+		return float(fake_trigger[h]) > 0.55
+	var hand: XRController3D = hand_l if h == 0 else hand_r
+	return hand.get_float("grip") > 0.55 or hand.get_float("trigger") > 0.55
+
+
 func _vr_update(delta: float) -> void:
 	var tracked := xr_camera.position != Vector3.ZERO
-	var ax: bool = hand_l.is_button_pressed("ax_button") or hand_r.is_button_pressed("ax_button")
+	var ax: bool = false if fake_vr else (hand_l.is_button_pressed("ax_button") or hand_r.is_button_pressed("ax_button"))
 	if (tracked and not recentered) or (ax and not ax_was):
 		recenter()
 	ax_was = ax
+	_refit_height(delta)
+	_slide(delta)
 	head_t = xr_camera.global_transform
 	lhand_vis.global_transform = hand_l.global_transform
 	rhand_vis.global_transform = hand_r.global_transform
+	if not has_meta("grip_init"):
+		set_meta("grip_init", true)  # a trigger still held from the arcade menu isn't a fresh grab
+		grip_was = [_squeeze(0), _squeeze(1)]
 	var hands: Array = [hand_l, hand_r]
 	for h in 2:
 		var hand: XRController3D = hands[h]
-		var grip: bool = hand.get_float("grip") > 0.55 or hand.get_float("trigger") > 0.55
+		var grip: bool = _squeeze(h)
 		var point := hand_point(h)
 		if grip and not grip_was[h] and held[h] == null:
 			var it = main.chef_pick_target(point, 0.14)
 			if it != null:
 				held[h] = it
 				main.chef_grab(it)
-				hand.trigger_haptic_pulse("haptic", 0.0, 0.3, 0.04, 0.0)
+				if not fake_vr:
+					hand.trigger_haptic_pulse("haptic", 0.0, 0.3, 0.04, 0.0)
 		elif not grip and held[h] != null:
 			var it2 = held[h]
 			held[h] = null
@@ -330,8 +354,62 @@ func _vr_update(delta: float) -> void:
 			if near != null:
 				near.highlight = true
 	knife.visible = held[1] == null
-	_vr_chop(delta)
-	wrist_label.text = main.status_text() + "\nA: recenter at the counter"
+	knife_l.visible = held[0] == null
+	_vr_chop(delta, 0)
+	_vr_chop(delta, 1)
+	_vr_bell(delta)
+	wrist_label.text = main.status_text() + "\nA: recenter  ·  left stick: slide"
+
+
+## Tap the service bell on the counter with a hand or knife: DING! (just for fun, everyone hears it)
+func _vr_bell(delta: float) -> void:
+	var bell: Node3D = main.parts.get("bell")
+	if bell == null:
+		return
+	set_meta("bell_cd", float(get_meta("bell_cd", 0.0)) - delta)
+	var top := bell.global_position + Vector3.UP * 0.06
+	for h in 2:
+		var hand: XRController3D = hand_l if h == 0 else hand_r
+		var tip := hand.global_transform * Vector3(0, -0.012, -0.2)
+		var near: bool = held[h] == null and (hand_point(h).distance_to(top) < 0.08 or tip.distance_to(top) < 0.07)
+		var was: bool = get_meta("bell_near_%d" % h, false)
+		set_meta("bell_near_%d" % h, near)
+		# Only when a hand comes down onto it, not while resting there.
+		if near and not was and float(get_meta("bell_cd", 0.0)) <= 0.0:
+			set_meta("bell_cd", 0.6)
+			main.ring_bell()
+			if not fake_vr:
+				hand.trigger_haptic_pulse("haptic", 0.0, 0.4, 0.05, 0.0)
+
+
+## Left stick: slide sideways along the counter (to reach the bin and the corners).
+func _slide(delta: float) -> void:
+	if fake_vr:
+		return
+	var x := hand_l.get_vector2("primary").x
+	if absf(x) < 0.25:
+		return
+	var head_x := xr_camera.global_position.x
+	var want := clampf(head_x + x * 1.3 * delta, L.CHEF_AREA.position.x + 0.35, L.CHEF_AREA.end.x - 0.35)
+	xr_origin.global_position.x += want - head_x
+
+
+## Someone new (taller, shorter, sitting down) put the headset on: recentre at the counter again.
+func _refit_height(delta: float) -> void:
+	var head_h := xr_camera.position.y
+	if head_h < 0.5:
+		return
+	if fit_head < 0.0:
+		fit_head = head_h
+	if absf(head_h - fit_head) > 0.3:
+		refit_t += delta
+		if refit_t > 3.0:
+			refit_t = 0.0
+			fit_head = head_h
+			print("Chef height changed (head %.2f m): recentring" % head_h)
+			recenter()
+	else:
+		refit_t = 0.0
 
 
 func hand_point(h: int) -> Vector3:
@@ -339,25 +417,29 @@ func hand_point(h: int) -> Vector3:
 	return hand.global_transform * Vector3(0.0, -0.02, -0.06)
 
 
-## Swing the knife down through an ingredient on the counter to chop it.
-func _vr_chop(delta: float) -> void:
-	var a := hand_r.global_transform * Vector3(0, -0.012, -0.07)
-	var b := hand_r.global_transform * Vector3(0, -0.012, -0.29)
+## Swing a knife down through an ingredient on the counter to chop it (either hand).
+func _vr_chop(delta: float, h: int) -> void:
+	var hand: XRController3D = hand_l if h == 0 else hand_r
+	var a := hand.global_transform * Vector3(0, -0.012, -0.07)
+	var b := hand.global_transform * Vector3(0, -0.012, -0.29)
 	var mid := (a + b) * 0.5
-	var vel := (mid - last_mid) / maxf(delta, 0.001)
-	last_mid = mid
-	if held[1] != null or vel.y > -0.6:
+	var prev: Vector3 = last_mid[h]
+	var vel := (mid - prev) / maxf(delta, 0.001)
+	last_mid[h] = mid
+	if held[h] != null or vel.y > -0.5:
 		return
 	for it in get_tree().get_nodes_in_group("kr_items"):
 		if it.holder != -1 or not it.needs_chop() or it.chop_cd > 0.0:
 			continue
 		var c: Vector3 = it.global_position + Vector3.UP * 0.05
 		var cp := Geometry3D.get_closest_point_to_segment(c, a, b)
-		if cp.distance_to(c) < 0.09:
+		if cp.distance_to(c) < 0.11:
 			if main.chop(it):
-				hand_r.trigger_haptic_pulse("haptic", 0.0, 0.8, 0.09, 0.0)
-			else:
-				hand_r.trigger_haptic_pulse("haptic", 0.0, 0.2, 0.05, 0.0)
+				chops_done += 1
+				if not fake_vr:
+					hand.trigger_haptic_pulse("haptic", 0.0, 0.8, 0.09, 0.0)
+			elif not fake_vr:
+				hand.trigger_haptic_pulse("haptic", 0.0, 0.2, 0.05, 0.0)
 
 
 ## Put the player's head at the chef spot at a comfortable standing height, facing the counter.
@@ -390,6 +472,7 @@ func _button_update(delta: float) -> void:
 	var rpos := sp + Vector3(0.12, 0.26 - down * 0.24, 0.12)
 	rhand_vis.global_transform = Transform3D(Basis(Vector3.UP, 0.35) * Basis(Vector3.RIGHT, -0.15 - down * 0.4), rpos)
 	knife.visible = true
+	knife_l.visible = false
 	if held[0] != null:
 		if not is_instance_valid(held[0]) or held[0].holder != 0:
 			held[0] = null
@@ -523,6 +606,7 @@ func _ghost_update(delta: float) -> void:
 	lhand_vis.global_transform = lhand_vis.global_transform.interpolate_with(net_l.orthonormalized(), k)
 	rhand_vis.global_transform = rhand_vis.global_transform.interpolate_with(net_r.orthonormalized(), k)
 	knife.visible = net_knife
+	knife_l.visible = net_vr
 	if not net_vr:
 		if cursor_vis == null:
 			_build_cursor()
