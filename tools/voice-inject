@@ -36,6 +36,10 @@ def stat():
 PRINT = "--print" in sys.argv
 if PRINT:
     sys.argv.remove("--print")
+# After someone says "Claude", everything said in the next FOLLOW_S seconds also comes through
+# (each line extends the window), so follow-ups don't need the wake word.
+FOLLOW_S = float(os.environ.get("VOICE_FOLLOW_S", "60"))
+follow_until = 0.0
 ino, pos = stat()  # start at the current end: never send old lines
 buf = b""
 while True:
@@ -53,9 +57,14 @@ while True:
     *lines, buf = buf.split(b"\n")
     for raw in lines:
         line = raw.decode("utf-8", "replace")
-        if "TO CLAUDE: " not in line:
+        if "TO CLAUDE: " in line:
+            follow_until = time.time() + FOLLOW_S  # conversation mode: keep listening a while
+            msg = "[voice] " + line.split("TO CLAUDE: ", 1)[1]
+        elif time.time() < follow_until and line.startswith("[") and "] " in line:
+            follow_until = time.time() + FOLLOW_S
+            msg = "[voice] " + line.split("] ", 1)[1]
+        else:
             continue
-        msg = "[voice] " + line.split("TO CLAUDE: ", 1)[1]
         if PRINT:
             print(msg, flush=True)
             continue
