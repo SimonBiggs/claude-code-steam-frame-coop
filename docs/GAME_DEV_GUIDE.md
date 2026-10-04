@@ -109,6 +109,9 @@ score and game over. Use visual-only "ghost" copies of host objects on the clien
   - Show a how-to banner and short contextual hints: kids constantly ask "how do I…?".
 - `XRServer.world_scale` is global. If a game scales the world, reset it to 1.0 in `_exit_tree`.
 - Give the VR player a role that uses their **hands**, different from the TV players' role.
+- **Keep it simple** (Simon: "all of the games have become too complicated"): one core idea a
+  kid gets in 10 seconds. Start with only that; add mechanics one at a time in later rounds, never all
+  at once. Cut anything that needs explaining. Fewer HUD readouts, fewer modes, fewer special rules.
 - **Show, don't tell** (Simon: "everything's being driven by text"): teach with the world, not
   paragraphs: glowing targets, arrows, a ghost hand doing the move, icons, sounds and short spoken
   lines. Text is a last resort: one short headline at a time, never instructions for the other team.
