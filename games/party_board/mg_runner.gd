@@ -371,14 +371,15 @@ func _show_howto(id: String) -> void:
 		_howto_tv = card
 		_refresh_ready()
 	if main.vr_rig != null:
-		var lines: PackedStringArray = [String(m.get("goal", ""))]
-		if giant:
-			for c in m.get("vr", []):
-				lines.append("%s: %s" % [String((c as Array)[0]), String((c as Array)[1])])
-		if not (mg.teams as Dictionary).is_empty():
-			lines.append(_teams_text())
-		lines.append("Practise now! Pull the TRIGGER when you're READY")
-		_howto_vr = HudKit.vr_card(main, main.vr_rig.camera, String(m.get("name", id)), "\n".join(lines),
+		# VR: a headline and one short line (the TV card has the details).
+		var line := String(m.get("vr_line", "")) if giant else ""
+		if line == "":
+			line = String(m.get("goal", ""))
+		if format == "giant":
+			line = "YOU vs EVERYONE!  " + line
+		elif format == "teams":
+			line = ("RED TEAM!  " if int((mg.teams as Dictionary).get(0, 0)) == 0 else "BLUE TEAM!  ") + line
+		_howto_vr = HudKit.vr_card(main, main.vr_rig.camera, String(m.get("name", id)), line + "  TRIGGER: ready!",
 			{"width": 1.3, "distance": 1.9, "height": 0.25})
 		main.vr_rig.guard_trigger()
 
@@ -479,12 +480,12 @@ func _show_result(res: Dictionary) -> void:
 				"color": main.color_of(p), "sub": "WINNER!" if bool(rd["win"]) else ""})
 		_result_tv = HudKit.scoreboard(main.tv_ui, sb_rows, {"title": "COINS WON", "format": "+%d"})
 	if main.vr_rig != null:
-		var lines: PackedStringArray = []
+		var mine := ""
 		for r in rows:
 			var rd: Dictionary = r
-			var p := int(rd["pid"])
-			lines.append("%s%s  +%d coins" % ["GIANT" if p == 0 and mg.giant else main.name_of(p), "  WINNER!" if bool(rd["win"]) else "", int(rd["coins"])])
-		_result_vr = HudKit.vr_card(main, main.vr_rig.camera, String(res.get("title", "")), "\n".join(lines), {"width": 1.2, "distance": 1.9, "height": 0.25})
+			if int(rd["pid"]) == 0:
+				mine = ("YOU WON!  +%d coins" if bool(rd["win"]) else "You got +%d coins") % int(rd["coins"])
+		_result_vr = HudKit.vr_card(main, main.vr_rig.camera, String(res.get("title", "")), mine, {"width": 1.2, "distance": 1.9, "height": 0.25})
 	if main.cam != null:
 		main.cam.shake(0.15)
 

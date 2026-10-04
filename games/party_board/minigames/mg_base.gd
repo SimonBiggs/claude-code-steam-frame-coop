@@ -40,6 +40,19 @@ var _targets := {}  ## TV machine: pid -> [Vector3, yaw]
 var _last := {}  ## pid -> Vector3 (walk animation)
 var _cpu_goal := {}  ## pid -> Vector3
 var _cpu_t := {}  ## pid -> float
+var stun := {}  ## pid -> seconds left: can't move (host)
+## Synced props (coins, balloons, sheep...): id -> Node3D, id -> kind. The host adds / moves / removes
+## them; snapshots carry them to the TV machine (items_snap / items_apply, done by the base).
+var items := {}
+var item_kind := {}
+var _next_item := 0
+## The giant's PAWN (games where the giant's glove is a piece on the arena, e.g. a shark fin): it
+## follows the right glove projected onto the ground, at a capped speed. use_pawn = true to enable.
+var use_pawn := false
+var pawn_speed := 9.0
+var pawn := Vector3.ZERO
+var pawn_node: Node3D
+var _pawn_target := Vector3.ZERO
 
 
 ## Called by mg_runner before the node enters the tree.
@@ -62,6 +75,13 @@ func _ready() -> void:
 	build()
 	for p in walkers():
 		_make_avatar(p)
+	if use_pawn and giant:
+		pawn_node = make_pawn()
+		pawn_node.name = "Pawn"
+		add_child(pawn_node)
+		pawn = Vector3(0, 0, arena_r * 0.5)
+		_pawn_target = pawn
+		pawn_node.position = pawn
 
 
 # --- Virtuals ---------------------------------------------------------------------------------------------
@@ -101,6 +121,19 @@ func snap_extra() -> Array:
 	return []
 
 
+## Every machine: the mesh for a synced item of `kind`.
+func make_item(_kind: int) -> Node3D:
+	return MeshKit.instance(MeshKit.prop("coin"), false)
+
+
+## Every machine: the giant's pawn (when use_pawn).
+func make_pawn() -> Node3D:
+	var b := MeshKit.Builder.new()
+	b.cylinder(1.0, 1.15, 0.25, MeshKit.at(Vector3(0, 0.12, 0)), Color(0.98, 0.95, 0.85), 20)
+	b.torus(1.05, 0.12, MeshKit.at(Vector3(0, 0.25, 0)), color_of(0), 20, 6)
+	return MeshKit.instance(b.build(), false)
+
+
 func unsnap_extra(_a: Array) -> void:
 	pass
 
@@ -138,6 +171,86 @@ func walkers() -> Array[int]:
 		if not (giant and p == 0):
 			w.append(p)
 	return w
+
+
+## Where a walker is (host: the simulation; TV machine: the mirrored avatar).
+func where(pid: int) -> Vector3:
+	if host:
+		return pos.get(pid, Vector3.ZERO)
+	return (avatars[pid] as Node3D).position if avatars.has(pid) else Vector3.ZERO
+
+
+## Host: add a synced item; returns its id.
+func add_item(kind: int, p: Vector3) -> int:
+	_next_item += 1
+	_spawn_item(_next_item, kind, p)
+	return _next_item
+
+
+func _spawn_item(id: int, kind: int, p: Vector3) -> Node3D:
+	var n := make_item(kind)
+	n.position = p
+	add_child(n)
+	items[id] = n
+	item_kind[id] = kind
+	return n
+
+
+## Host: remove a synced item (the TV machine drops it at the next snapshot).
+func remove_item(id: int) -> void:
+	if items.has(id):
+		(items[id] as Node).queue_free()
+	items.erase(id)
+	item_kind.erase(id)
+
+
+func items_snap() -> Array:
+	var ids := PackedInt32Array()
+	var kinds := PackedInt32Array()
+	var ps := PackedVector3Array()
+	for id in items:
+		ids.append(int(id))
+		kinds.append(int(item_kind[id]))
+		ps.append((items[id] as Node3D).position)
+	return [ids, kinds, ps]
+
+
+func items_apply(a: Array) -> void:
+	if a.size() < 3:
+		return
+	var ids: PackedInt32Array = a[0]
+	var kinds: PackedInt32Array = a[1]
+	var ps: PackedVector3Array = a[2]
+	var seen := {}
+	for i in ids.size():
+		var id := ids[i]
+		seen[id] = true
+		if not items.has(id) or int(item_kind.get(id, -1)) != kinds[i]:
+			if items.has(id):
+				(items[id] as Node).queue_free()
+			_spawn_item(id, kinds[i], ps[i])
+		else:
+			var n: Node3D = items[id]
+			n.position = n.position.lerp(ps[i], 0.6)
+	for id in items.keys():
+		if not seen.has(id):
+			(items[id] as Node).queue_free()
+			items.erase(id)
+			item_kind.erase(id)
+
+
+## Host: move the giant's pawn towards the right glove (projected on the ground), speed-capped.
+func update_pawn(delta: float) -> void:
+	var hs := giant_hands()
+	if hs.size() < 2:
+		return
+	var h: Vector3 = hs[1]
+	var t := Vector3(h.x, 0.0, h.z)
+	var flat := Vector2(t.x, t.z).limit_length(arena_r)
+	t = Vector3(flat.x, 0.0, flat.y)
+	pawn = pawn.move_toward(t, pawn_speed * delta)
+	if pawn_node != null:
+		pawn_node.position = pawn
 
 
 func is_cpu(pid: int) -> bool:
@@ -205,6 +318,11 @@ func cpu_goal(pid: int) -> Vector3:
 func walk(pid: int, delta: float, speed: float = -1.0, limit_r: float = -1.0) -> Dictionary:
 	var inp := input_of(pid)
 	if out.has(pid):
+		return inp
+	if float(stun.get(pid, 0.0)) > 0.0:
+		stun[pid] = float(stun[pid]) - delta
+		inp["pressed"] = false
+		inp["held"] = false
 		return inp
 	var mv: Vector3 = inp["move"]
 	var p: Vector3 = pos[pid]
@@ -308,6 +426,9 @@ func begin_play() -> void:
 	practice = false
 	play_t = 0.0
 	out.clear()
+	stun.clear()
+	for id in items.keys():
+		remove_item(int(id))
 	for p in pids:
 		score[p] = 0.0
 	var ws := walkers()
@@ -335,8 +456,11 @@ func _process(delta: float) -> void:
 			var a: Node3D = avatars[p]
 			a.position = a.position.lerp(tg[0], 1.0 - exp(-14.0 * delta))
 			a.rotation.y = lerp_angle(a.rotation.y, float(tg[1]), 1.0 - exp(-12.0 * delta))
+	if not host and pawn_node != null:
+		pawn_node.position = pawn_node.position.lerp(_pawn_target, 1.0 - exp(-14.0 * delta))
 	for p in avatars:
 		var a: Node3D = avatars[p]
+		a.visible = not out.has(p) or a.position.y > -6.0  # knocked out: shown while falling, then hidden
 		var prev: Vector3 = _last.get(p, a.position)
 		var v := Vector2(a.position.x - prev.x, a.position.z - prev.z).length() / maxf(delta, 0.001)
 		Creatures.anim(a).walk(v if v > 0.4 else 0.0)
@@ -353,7 +477,7 @@ func snapshot() -> Array:
 	var sc := PackedInt32Array()
 	for p in pids:
 		sc.append(int(score.get(p, 0.0)))
-	return [w, sc, snap_extra()]
+	return [w, sc, snap_extra(), items_snap(), pawn]
 
 
 ## TV machine: mirror the host.
@@ -376,3 +500,6 @@ func apply_snapshot(s: Array) -> void:
 	for i in mini(sc.size(), pids.size()):
 		score[pids[i]] = float(sc[i])
 	unsnap_extra(s[2])
+	if s.size() >= 5:
+		items_apply(s[3])
+		_pawn_target = s[4]

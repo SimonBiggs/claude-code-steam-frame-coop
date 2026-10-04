@@ -279,11 +279,10 @@ func _checks() -> void:
 	if mode != "client":
 		for s in ["step:event", "step:duel", "menu:shop", "menu:duel"]:
 			kit.assert_true(seen.has(s), "%s: saw %s" % [mode, s])
-		kit.assert_true(seen.has("menu:star"), "%s: the STAR was offered" % mode)
-		var stars := 0
+		var bought := 0
 		for p in main.roster():
-			stars += int((p as Dictionary)["stars"])
-		kit.assert_true(stars > 0, "%s: someone has a star" % mode)
+			bought += int((p as Dictionary)["stars_bought"])
+		kit.assert_true(bought > 0, "%s: someone bought a STAR" % mode)
 	if main.split != null:
 		kit.assert_true(main.ceremony.results_ui != null and is_instance_valid(main.ceremony.results_ui), "%s: the results screen shows on the TV" % mode)
 	if main.vr_rig != null:
