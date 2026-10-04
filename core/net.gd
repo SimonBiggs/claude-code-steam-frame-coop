@@ -517,6 +517,36 @@ func _check_vr_menu() -> void:
 		set_meta("touch_t", 0.0)
 	var held_touch: bool = float(get_meta("touch_t", 0.0)) > 0.35
 	var paused := get_tree().paused
+	# While paused, an ARCADE button appears above RESUME: touch it, or point at it and pull the
+	# trigger, to go back to the arcade (Simon: "why can't I just press the menu's buttons?").
+	var abtn := _wrist_arcade_button(hl)
+	abtn.visible = paused
+	if paused and hr != null and btn != null:
+		abtn.position = btn.position + Vector3(0.0, 0.055, 0.0) * ws
+		abtn.pixel_size = btn.pixel_size
+		var to2: Vector3 = abtn.global_position - hr.global_position
+		var fwd2: Vector3 = -hr.global_basis.z
+		var along2 := to2.dot(fwd2)
+		var off2 := (to2 - fwd2 * along2).length()
+		var on_arc := to2.length() < 0.07 * ws or (along2 > 0.0 and off2 < 0.06 * ws)
+		if on_arc and on_btn:
+			# Pointing between the two: the one closer to the ray wins.
+			var to1: Vector3 = btn.global_position - hr.global_position
+			var off1 := (to1 - fwd2 * to1.dot(fwd2)).length()
+			if off1 < off2:
+				on_arc = false
+			else:
+				on_btn = false
+		abtn.modulate = Color(1.0, 0.9, 0.3) if on_arc else Color(1.0, 0.7, 0.55)
+		btn.modulate = Color(1.0, 0.9, 0.3) if on_btn else Color(0.55, 0.95, 1.0)
+		if to2.length() < 0.07 * ws:
+			set_meta("arc_touch_t", float(get_meta("arc_touch_t", 0.0)) + get_process_delta_time())
+		else:
+			set_meta("arc_touch_t", 0.0)
+		if (on_arc and trig and not bool(get_meta("trig_was", false))) or float(get_meta("arc_touch_t", 0.0)) > 0.3:
+			print("Net: VR arcade button")
+			go_to_arcade()
+			return
 	# While paused, a trigger pull on the button resumes only when released quickly, so HOLDING the
 	# trigger (even while pointing near the wrist, e.g. with a fishing rod) always goes to the arcade.
 	var tap_resume := false
@@ -546,6 +576,26 @@ func _check_vr_menu() -> void:
 	set_meta("trig_was", trig)
 	if btn != null:
 		btn.text = "RESUME" if get_tree().paused else "MENU"
+
+
+func _wrist_arcade_button(hl: XRController3D) -> Label3D:
+	var b := hl.get_node_or_null("WristArcade") as Label3D
+	if b == null:
+		b = Label3D.new()
+		b.name = "WristArcade"
+		b.text = "ARCADE"
+		b.font_size = 40
+		b.outline_size = 18
+		b.pixel_size = 0.0012
+		b.process_mode = Node.PROCESS_MODE_ALWAYS
+		b.visible = false
+		hl.add_child(b)
+	var cam := get_viewport().get_camera_3d()
+	if cam != null:
+		var d := b.global_position - cam.global_position
+		if d.length() > 0.01:
+			b.global_basis = Basis.looking_at(d, Vector3.UP).scaled(b.global_basis.get_scale())
+	return b
 
 
 func _wrist_button(hl: XRController3D) -> Label3D:

@@ -9,7 +9,7 @@ new end instead of replaying old lines.
   voice-inject --all    forward everything said, without needing "Claude" (combine with --print)
   voice-inject --print  print each new request to stdout instead (for a Claude Code Monitor)
 """
-import os, subprocess, sys, time
+import difflib, os, re, subprocess, sys, time
 
 LOG = os.environ.get("VOICE_LOG", os.path.expanduser("~/GodotProjects/duo-arena/.dev/voice.log"))
 PANE_FILE = os.path.expanduser("~/.claude/voice-pane")
@@ -24,6 +24,36 @@ def pane() -> str:
     if len(sys.argv) > 1:
         return sys.argv[1]
     return open(PANE_FILE).read().strip()
+
+
+SAID = os.path.expanduser("~/.claude/said.log")
+
+
+def _norm(t: str) -> str:
+    return re.sub(r"[^a-z0-9 ]", "", t.lower()).strip()
+
+
+def echo_of_claude(text: str) -> bool:
+    """True if this transcript is the mic hearing Claude's own frame-say speech from the TV."""
+    try:
+        lines = open(SAID).read().splitlines()[-20:]
+    except FileNotFoundError:
+        return False
+    heard = _norm(text)
+    if len(heard) < 4:
+        return False
+    now = time.time()
+    for line in lines:
+        ts, _, said = line.partition("\t")
+        if not ts.isdigit() or now - int(ts) > 90:
+            continue
+        said = _norm(said)
+        if heard in said:
+            return True
+        m = difflib.SequenceMatcher(None, heard, said).find_longest_match(0, len(heard), 0, len(said))
+        if m.size >= 0.6 * len(heard):
+            return True
+    return False
 
 
 def stat():
@@ -69,6 +99,8 @@ while True:
             msg = f"[voice {line[1:9]}] " + line.split("] ", 1)[1]
         else:
             continue
+        if "] Claude (TV): " in msg or echo_of_claude(msg.split(": ", 1)[-1]):
+            continue  # the mic heard Claude's own speech from the TV
         if PRINT:
             print(msg, flush=True)
             with open(os.path.join(os.path.dirname(LOG), "voice-timing.log"), "a") as f:

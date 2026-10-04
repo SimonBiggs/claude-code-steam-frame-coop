@@ -4,6 +4,8 @@
 # FRAME_SAY_QUIET=1 shows the text without speaking it.
 KEY=~/.config/steamos-devkit/devkit_rsa
 TL=~/GodotProjects/duo-arena/.dev/voice-timing.log
+# Remember what Claude said, so voice-inject can drop the mic hearing it back from the TV.
+printf '%s\t%s\n' "$(date +%s)" "$*" >> ~/.claude/said.log
 echo "say_called $(date +%s.%N | cut -c1-13) | ${*:0:40}" >> $TL
 # Caption in every game (addons/gdev/caption.gd): on the Frame, and on this machine's copy for the TV.
 printf '%s' "$*" | ssh -i $KEY steamos@frame 'cat > ~/devkit-game/DuoArena/game/.dev/caption.txt'
