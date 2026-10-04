@@ -44,9 +44,10 @@ const HP_LOW := Color(1.0, 0.33, 0.3)
 const MP := Color(0.36, 0.62, 1.0)
 const XP := Color(0.98, 0.78, 0.3)
 
-## Player colours, same order as the existing games (P1 orange, P2 blue, P3 green, P4 pink, ...).
-const PLAYER_COLORS: Array[Color] = [Color(1.0, 0.55, 0.25), Color(0.3, 0.65, 1.0), Color(0.55, 0.85, 0.35),
-	Color(1.0, 0.4, 0.6), Color(0.75, 0.5, 1.0), Color(1.0, 0.85, 0.25), Color(0.3, 0.9, 0.85), Color(0.95, 0.35, 0.3)]
+## Player colours by party slot: exactly core/party.gd's Party.COLORS (slot 0 = the VR player "P1" blue,
+## P2 gold, P3 pink, P4 green, P5 white, P6 purple, P7 teal).
+const PartyScript := preload("res://core/party.gd")
+const PLAYER_COLORS: Array[Color] = PartyScript.COLORS
 
 ## Named colours for options like {"color": "good"}.
 const NAMED := {"text": TEXT, "dim": TEXT_DIM, "off": TEXT_OFF, "accent": ACCENT, "good": GOOD, "bad": BAD,
@@ -67,7 +68,7 @@ const PANEL_STYLES := {"default": "PanelContainer", "glass": "PanelContainer", "
 	"success": "SuccessPanel", "info": "InfoPanel", "tooltip": "TooltipPanel", "clear": "ClearPanel"}
 
 
-## Player colour for a player index (wraps).
+## Player colour for a party slot / player index (wraps; same as Party.color_of(slot)).
 static func player_color(index: int) -> Color:
 	return PLAYER_COLORS[posmod(index, PLAYER_COLORS.size())]
 
@@ -286,8 +287,9 @@ static func _toast_box(s: float, edge: Color) -> StyleBoxFlat:
 # --- Building blocks -------------------------------------------------------------------------------
 
 ## A full-screen themed UI root for a view. `parent` may be a CanvasLayer/Control (root added inside),
-## or anything else, e.g. Main or a split-screen SubViewport (a CanvasLayer is made at `layer`).
-## The root ignores the mouse, rescales with its viewport, and is the place to add panels and HUDs.
+## e.g. `split.hud(slot)` from core/split_view.gd, or anything else, e.g. Main or a SubViewport (a
+## CanvasLayer is made at `layer`). The root ignores the mouse, rescales with its viewport (and
+## undoes a scaled parent such as SplitView's HUD roots), and is the place to add panels and HUDs.
 static func ui_root(parent: Node, layer: int = 5, fixed_scale: float = 0.0) -> Control:
 	var host: Node = parent
 	if not (parent is CanvasLayer or parent is Control):
@@ -830,14 +832,34 @@ class UiRoot extends Control:
 	var ui_scale := 1.0
 	var fixed_scale := 0.0  ## > 0: always use this scale
 
+	var _queued := false
+
 	func _ready() -> void:
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
 		set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		get_viewport().size_changed.connect(_rescale)
+		get_viewport().size_changed.connect(_queue_rescale)
 		_rescale()
 
+	func _notification(what: int) -> void:
+		if what == NOTIFICATION_RESIZED:
+			_queue_rescale()  # e.g. a SplitView HUD root that was re-scaled for a new layout
+
+	func _queue_rescale() -> void:
+		if not _queued:
+			_queued = true
+			_rescale.call_deferred()
+
 	func _rescale() -> void:
-		var s := fixed_scale if fixed_scale > 0.0 else Me.scale_for_size(get_viewport().get_visible_rect().size)
+		_queued = false
+		if not is_inside_tree():
+			return
+		var s := fixed_scale
+		if s <= 0.0:
+			s = Me.scale_for_size(get_viewport().get_visible_rect().size)
+			# a scaled parent (core/split_view.gd scales its HUD roots) already shrinks us: compensate
+			var parent_scale := get_global_transform().get_scale().x / maxf(0.001, scale.x)
+			if parent_scale > 0.05:
+				s /= parent_scale
 		if absf(s - ui_scale) < 0.025 and theme != null:
 			return
 		ui_scale = s

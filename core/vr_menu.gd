@@ -5,8 +5,8 @@ extends Node3D
 ## comfortable distance and gliding back in front only when the player turns well away.
 ##
 ##   const VrMenu := preload("res://core/vr_menu.gd")
-##   var m := VrMenu.open(self, {"title": "YOUR TURN", "items": ["Attack", "Magic", "Item"],
-##       "cam": players[0].xr_camera, "hand": players[0].hand_r})
+##   var m := VrMenu.open(self, {"title": "YOUR TURN", "items": ["Attack", "Magic", "Item"], "rig": vr_rig})
+##   # (or "cam": xr_camera, "hand": right_controller without core/vr_rig.gd)
 ##   m.chosen.connect(func(id: String, item: Dictionary) -> void: ...)
 ##
 ## Items are the same as core/ui_menu.gd (String or Dictionary with id, text, desc, disabled, reason,
@@ -26,6 +26,7 @@ const Me := preload("res://core/vr_menu.gd")
 const VrText := preload("res://core/vr_text.gd")
 
 # --- Options ---
+var rig: Node = null              ## core/vr_rig.gd VrRig: camera, right hand and guarded trigger/A (bind_rig)
 var cam: Node3D = null            ## the XR camera (placement + lazy follow)
 var hand: Node3D = null           ## pointing hand (right XRController3D)
 var title_text := ""
@@ -83,7 +84,8 @@ static func open(world: Node, opts: Dictionary) -> Me:
 	return m
 
 
-## Configure: title, items, columns, max_rows, width, cam, hand, distance, height, follow, touch,
+## Configure: title, items, columns, max_rows, width, rig (a core/vr_rig.gd VrRig: the usual way) or
+## cam + hand, distance, height, follow, touch,
 ## reach (true = close + low for touching), allow_cancel, close_on_choose, free_on_close, accent, player,
 ## layers, sounds, haptics, start (id or index), position (Vector3: fixed spot instead of in front).
 func setup(opts: Dictionary) -> Me:
@@ -95,6 +97,8 @@ func setup(opts: Dictionary) -> Me:
 	row_height = float(opts.get("row_height", 0.115 if columns == 1 else 0.17))
 	cam = opts.get("cam", cam)
 	hand = opts.get("hand", hand)
+	if opts.has("rig"):
+		bind_rig(opts["rig"])
 	follow = bool(opts.get("follow", follow))
 	touch = bool(opts.get("touch", touch))
 	if bool(opts.get("reach", false)):
@@ -137,8 +141,21 @@ func setup(opts: Dictionary) -> Me:
 	return self
 
 
+## Use a core/vr_rig.gd VrRig: its camera, its right hand for pointing, and its guarded trigger / A
+## (a pull held over from another screen, or one that started on the wrist MENU, never chooses).
+func bind_rig(p_rig: Node) -> void:
+	rig = p_rig
+	if rig == null:
+		return
+	cam = rig.get("camera")
+	hand = rig.get("hand_r")
+	if reader != null:
+		reader = UiInput.for_rig(rig)
+		reader.latch()
+
+
 func _ready() -> void:
-	reader = UiInput.new(UiInput.PAD_NONE, UiInput.KEYS_NONE, hand)
+	reader = UiInput.for_rig(rig) if rig != null else UiInput.new(UiInput.PAD_NONE, UiInput.KEYS_NONE, hand)
 	_build()
 	_built = true
 	_rebuild()
@@ -161,7 +178,8 @@ func size_scale() -> float:
 func open_menu() -> void:
 	visible = true
 	is_open = true
-	reader.hand = hand
+	if rig == null:
+		reader.hand = hand
 	reader.latch()
 	_touch_latched = true
 	scale = Vector3.ONE * size_scale()
@@ -603,5 +621,7 @@ func _sound(name: String, vol: float = 0.0) -> void:
 
 
 func _pulse_hand(amp: float, dur: float) -> void:
-	if haptics and hand is XRController3D:
+	if haptics and rig != null and rig.has_method("pulse"):
+		rig.call("pulse", 1, amp, dur)  # VrRig.RIGHT
+	elif haptics and hand is XRController3D:
 		(hand as XRController3D).trigger_haptic_pulse("haptic", 0.0, amp, dur, 0.0)

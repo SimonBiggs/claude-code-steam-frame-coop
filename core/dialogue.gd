@@ -9,6 +9,7 @@ extends Node
 ##   add_child(dlg)
 ##   dlg.add_tv_view(ui_root)                          # each split-screen view's UiKit.ui_root
 ##   dlg.set_vr(xr_camera, hand_r)                     # optional: show it in VR too
+##   # with the engine systems: dlg.bind_party(party) (any local seat advances) and dlg.set_vr_rig(vr_rig)
 ##   dlg.play([
 ##       {"speaker": "ELDER", "color": "gold", "text": "Welcome, {hero}!"},
 ##       {"speaker": "ELDER", "text": "Will you help us?", "choices": [
@@ -24,7 +25,8 @@ extends Node
 ## disabled, reason}), label, goto, event (emits `event`), set ({var: value}), if ("var" or "!var":
 ## skip the line unless true), call (Callable), wait (seconds without a box), auto (advance N s after
 ## typing), speed (chars/s), pitch (voice blip pitch), sound (sfx name), chooser ("tv"/"vr"),
-## device (controller that answers the choices), end (true = stop here).
+## slot (party seat that answers the choices; slot 0 = the VR player), device (raw controller that
+## answers them without a party), end (true = stop here).
 ##
 ## Networking: run it on the host; mirror on the client with `remote = true` and `show_line(index)` /
 ## `stop()` from net events (line_started gives the index). In remote mode input emits
@@ -73,6 +75,10 @@ var _vr: Node3D = null            ## VrBox
 var _vr_cam: Node3D = null
 var _vr_hand: Node3D = null
 var _vr_world: Node = null
+var _vr_rig: Node = null
+var _party: Node = null
+var _party_slot := -1
+var _tv_slot := {}                ## view root -> party slot (for choices: the chooser's own view)
 var _shown := 0.0                 ## characters revealed (float for speed)
 var _full := ""                   ## current substituted text
 var _pause := 0.0                 ## punctuation pause
@@ -84,10 +90,28 @@ var _vr_menu: Node3D = null
 var _blip := 0
 
 
-## Show the dialogue box on a TV view (a UiKit.ui_root, or any Control). Call once per view.
-func add_tv_view(root: Control) -> void:
+## Show the dialogue box on a TV view (a UiKit.ui_root, or any Control). Call once per view; `slot` is
+## the party seat that view belongs to (choices for that seat open there; -1 = shared view).
+func add_tv_view(root: Control, slot: int = -1) -> void:
 	if root != null and not _tv_roots.has(root):
 		_tv_roots.append(root)
+	if root != null:
+		_tv_slot[root] = slot
+
+
+## Take TV input from core/party.gd: slot -1 = any seat on this machine can advance, else only that one.
+## Choices then go to the line's "slot" (or this slot / the first local seat).
+func bind_party(party: Node, slot: int = -1) -> void:
+	_party = party
+	_party_slot = slot
+	if reader != null:
+		reader.bind_party(party, slot)
+
+
+## Show it in VR with a core/vr_rig.gd VrRig (camera, right hand, guarded trigger / A).
+func set_vr_rig(rig: Node, world: Node = null) -> void:
+	_vr_rig = rig
+	set_vr(rig.get("camera"), rig.get("hand_r"), world)
 
 
 ## Show it in VR too: the XR camera (placement), the pointing hand (choices) and the world node to put
@@ -118,6 +142,11 @@ func play(script_lines: Array, opts: Dictionary = {}) -> void:
 		if l.has("label"):
 			_labels[String(l["label"])] = i
 	reader = UiInput.new(device, keys, _vr_hand)
+	if _party != null:
+		reader.bind_party(_party, _party_slot)
+	if _vr_rig != null:
+		reader.rig = _vr_rig
+		reader.hand = _vr_rig.get("hand_r")
 	reader.latch()
 	playing = true
 	started.emit()
@@ -420,15 +449,31 @@ func _open_choices() -> void:
 	var choices: Array = UiKit.normalize_items(line.get("choices", []))
 	var chooser := String(line.get("chooser", "tv" if not _tv_roots.is_empty() else "vr"))
 	var dev := int(line.get("device", device))
+	var seat := int(line.get("slot", _party_slot))
+	if _party != null and seat < 0:
+		var locals: Array = _party.call("local_slots")
+		seat = int(locals[0]) if not locals.is_empty() else 0
+	if chooser == "vr" or (_party != null and seat == 0 and _vr_cam != null and not line.has("chooser")):
+		chooser = "vr" if _vr_cam != null else "tv"
 	if chooser == "vr" and _vr_cam != null:
 		var world: Node = _vr_world if _vr_world != null else get_parent()
-		_vr_menu = VrMenu.open(world, {"items": choices, "cam": _vr_cam, "hand": _vr_hand, "distance": vr_distance,
-			"height": vr_height - 0.42, "follow": false, "allow_cancel": false, "layers": vr_layers})
+		var vopts := {"items": choices, "cam": _vr_cam, "hand": _vr_hand, "distance": vr_distance,
+			"height": vr_height - 0.42, "follow": false, "allow_cancel": false, "layers": vr_layers}
+		if _vr_rig != null:
+			vopts["rig"] = _vr_rig
+		_vr_menu = VrMenu.open(world, vopts)
 		_vr_menu.connect("chosen", func(id: String, _it: Dictionary) -> void: _on_choice_id(id, choices))
 	elif not _tv_roots.is_empty() and is_instance_valid(_tv_roots[0]):
 		var root := _tv_roots[0]
-		_menu = UiMenu.open(root, {"items": choices, "device": dev, "keys": keys, "allow_cancel": false, "anchor": "bottom_right",
-			"margin": 36.0, "width": 520.0, "prompts": false, "desc": false})
+		for r in _tv_roots:  # the chooser's own split-screen view, if registered
+			if is_instance_valid(r) and int(_tv_slot.get(r, -1)) == seat and seat >= 0:
+				root = r
+		var mopts := {"items": choices, "device": dev, "keys": keys, "allow_cancel": false, "anchor": "bottom_right",
+			"margin": 36.0, "width": 520.0, "prompts": false, "desc": false}
+		if _party != null:
+			mopts["party"] = _party
+			mopts["slot"] = seat
+		_menu = UiMenu.open(root, mopts)
 		# sit above the dialogue box
 		_menu.offset_bottom -= _tv_box_height(root)
 		_menu.offset_top -= _tv_box_height(root)

@@ -9,6 +9,7 @@ extends PanelContainer
 ##                 {"id": "fire", "text": "Fireball", "right": "6 MP", "disabled": true, "reason": "Not enough MP"},
 ##                 "Run"]})
 ##   m.chosen.connect(func(id: String, item: Dictionary) -> void: print(id))
+##   # with core/party.gd (the usual way): {"party": party, "slot": slot, "items": [...]}
 ##
 ## Items: a String, or a Dictionary with id, text, desc, disabled, reason, icon, icon_color, right
 ## (right-aligned detail), badge, badge_color, color, data (anything). Tabs: opts "tabs" =
@@ -37,6 +38,8 @@ const KEYS_ARROWS := UiInput.KEYS_ARROWS  ## arrows move, Enter confirm, Backspa
 const KEYS_ALL := UiInput.KEYS_ALL        ## both key sets
 
 # --- Options (set via setup()/open() or directly before adding to the tree) ---
+var party: Node = null            ## core/party.gd: read this seat's input through the party (see bind_party)
+var slot := -1                    ## the party seat driving this menu
 var device := PAD_NONE
 var keys := KEYS_ALL
 var mouse := true                 ## hover/click items with the mouse
@@ -108,11 +111,17 @@ static func vr(world: Node, opts: Dictionary) -> Node3D:
 	return m
 
 
-## Configure from a Dictionary: title, items, tabs, columns, device, keys, mouse, player, width,
+## Configure from a Dictionary: title, items, tabs, columns, party + slot (a core/party.gd seat drives
+## it; the usual way), or device + keys (a raw joypad id / key set), mouse, player, width,
 ## max_rows, close_on_choose, allow_cancel, free_on_close, prompts, desc, wrap, anchor, margin,
 ## start (id or index to focus first), sounds, cancel_text, confirm_text, accent.
 func setup(opts: Dictionary) -> Me:
 	title_text = String(opts.get("title", title_text))
+	if opts.has("party"):
+		party = opts["party"]
+		slot = int(opts.get("slot", slot))
+		if not opts.has("player") and player < 0:
+			player = slot
 	device = int(opts.get("device", device))
 	keys = int(opts.get("keys", keys))
 	mouse = bool(opts.get("mouse", mouse))
@@ -160,7 +169,7 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP if mouse else Control.MOUSE_FILTER_IGNORE
 	if get_theme_constant("scale_pct", "UiKit") <= 0:
 		theme = UiKit.theme(UiKit.scale_for_size(get_viewport().get_visible_rect().size))  # not under a UiRoot
-	reader = UiInput.new(device, keys)
+	reader = _make_reader()
 	_build()
 	_built = true
 	_rebuild_all()
@@ -180,6 +189,32 @@ func _input(event: InputEvent) -> void:
 
 
 # --- Public API ------------------------------------------------------------------------------------
+
+## Drive this menu from a core/party.gd seat (its pad or keyboard, with the party's join/unpause
+## guards). The menu takes the seat's colour and "P3" badge unless `player` was set.
+func bind_party(p_party: Node, p_slot: int) -> void:
+	_set_busy(false)
+	party = p_party
+	slot = p_slot
+	if player < 0:
+		player = p_slot
+		accent = UiKit.player_color(p_slot)
+	if reader != null:
+		reader = _make_reader()
+		reader.latch()
+	if is_open:
+		_set_busy(true)
+	if _built:
+		_rebuild_all()
+
+
+## True while an open menu is driven by this party seat (games: skip that seat's gameplay input).
+static func slot_busy(p_slot: int) -> bool:
+	if not Engine.has_meta("ui_menu_busy"):
+		return false
+	var d: Dictionary = Engine.get_meta("ui_menu_busy")
+	return int(d.get("slot:%d" % p_slot, 0)) > 0
+
 
 ## Show (again) with a pop-in, latch held buttons (a held A from the last screen must not confirm).
 func open_menu() -> void:
@@ -478,7 +513,17 @@ func _rebuild_all() -> void:
 
 
 func _tab_key(prev: bool) -> String:
-	return String(UiInput.new(device, keys).glyphs()["tab_prev" if prev else "tab_next"])
+	return String(_glyphs()["tab_prev" if prev else "tab_next"])
+
+
+func _glyphs() -> Dictionary:
+	return reader.glyphs() if reader != null else _make_reader().glyphs()
+
+
+func _make_reader() -> UiInput:
+	if party != null:
+		return UiInput.for_party(party, slot)
+	return UiInput.new(device, keys)
 
 
 func _rebuild_items() -> void:
@@ -575,7 +620,7 @@ func _rebuild_prompts() -> void:
 	_prompts = null
 	if not show_prompts:
 		return
-	var g := UiInput.new(device, keys).glyphs()
+	var g := _glyphs()
 	var ok := String(g["confirm"])
 	var back := String(g["cancel"])
 	var pairs: Array = [[ok, confirm_text]]
@@ -731,13 +776,15 @@ func _set_busy(on: bool) -> void:
 		Engine.set_meta("ui_menu_busy", {})
 	var d: Dictionary = Engine.get_meta("ui_menu_busy")
 	var was: bool = has_meta("busy_registered")
-	if on == was or device == PAD_NONE:
+	var key: Variant = ("slot:%d" % slot) if party != null else device
+	if on == was or (party == null and device == PAD_NONE):
 		return
 	if on:
-		set_meta("busy_registered", true)
-		d[device] = int(d.get(device, 0)) + 1
+		set_meta("busy_registered", key)
+		d[key] = int(d.get(key, 0)) + 1
 	else:
+		var old_key: Variant = get_meta("busy_registered")
 		remove_meta("busy_registered")
-		d[device] = maxi(0, int(d.get(device, 0)) - 1)
+		d[old_key] = maxi(0, int(d.get(old_key, 0)) - 1)
 
 

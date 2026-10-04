@@ -8,9 +8,14 @@ extends RefCounted
 ##   input.latch()                        # ignore the A that is still held from the previous screen
 ##   for action in input.poll(delta): ... # in _process
 ##
+##   var input := UiInput.for_party(party, slot)            # a core/party.gd seat (pad or keyboard)
+##   var vr_input := UiInput.for_rig(vr_rig)                 # the VR player via core/vr_rig.gd
+##
 ## Polling (not _input) means it works in split-screen SubViewports, while paused (if the owner
 ## processes) and with Input.parse_input_event from bots. Call note_event(ev) from _input so PAD_ANY
 ## also hears controllers that Input.get_connected_joypads() doesn't list (bots' fake pads).
+
+const Me := preload("res://core/ui_input.gd")
 
 const PAD_NONE := -1   ## no controller
 const PAD_ANY := -2    ## any controller
@@ -29,6 +34,9 @@ const KEYMAP := {
 const ACTIONS: Array[String] = ["up", "down", "left", "right", "confirm", "cancel", "tab_prev", "tab_next"]
 const DIRECTIONS: Array[String] = ["up", "down", "left", "right"]
 
+var party: Node = null    ## core/party.gd PartyManager: read `slot`'s buttons through it (see for_party)
+var slot := -1            ## the party slot
+var rig: Node = null      ## core/vr_rig.gd VrRig: guarded trigger / A and the right stick (see for_rig)
 var device := PAD_NONE    ## joypad id, PAD_ANY or PAD_NONE
 var keys := KEYS_ALL      ## key set, or KEYS_NONE
 var hand: Node3D = null   ## optional VR hand (XRController3D, or a fake Node3D with metas): trigger / A
@@ -45,6 +53,41 @@ func _init(p_device: int = PAD_NONE, p_keys: int = KEYS_ALL, p_hand: Node3D = nu
 	device = p_device
 	keys = p_keys
 	hand = p_hand
+
+
+## A reader for one party seat (core/party.gd): its pad or keyboard, with the party's guards (buttons
+## held when the player joined or the game unpaused don't count). Remote seats read as idle.
+## slot -1 = any seat played on this machine (party.local_slots()).
+static func for_party(p_party: Node, p_slot: int) -> Me:
+	var r: Me = Me.new(PAD_NONE, KEYS_NONE)
+	r.party = p_party
+	r.slot = p_slot
+	return r
+
+
+## A reader for the VR player (core/vr_rig.gd): the rig's guarded trigger / A confirm, the right stick
+## moves up/down, and `hand` becomes the rig's right hand (for pointing).
+static func for_rig(p_rig: Node) -> Me:
+	var r: Me = Me.new(PAD_NONE, KEYS_NONE)
+	r.bind_rig(p_rig)
+	return r
+
+
+## Switch this reader to a party seat (slot -1 = any local seat). Also usable together with bind_rig
+## (e.g. dialogue that anyone - TV or VR - can advance).
+func bind_party(p_party: Node, p_slot: int) -> void:
+	party = p_party
+	slot = p_slot
+	device = PAD_NONE
+	keys = KEYS_NONE
+
+
+## Switch this reader to the VR rig.
+func bind_rig(p_rig: Node) -> void:
+	rig = p_rig
+	hand = p_rig.get("hand_r") if p_rig != null else null
+	device = PAD_NONE
+	keys = KEYS_NONE
 
 
 ## Ignore everything currently held until it is released.
@@ -89,7 +132,11 @@ func state() -> Dictionary:
 				pads.append(int(d))
 		for d in pads:
 			_pad_state(d, s)
-	if hand != null and is_instance_valid(hand):
+	if party != null and is_instance_valid(party):
+		var seats: Array = [slot] if slot >= 0 else party.call("local_slots")
+		for seat in seats:
+			_party_state(int(seat), s)
+	if (hand != null and is_instance_valid(hand)) or (rig != null and is_instance_valid(rig)):
 		if hand_float("trigger") > 0.6 or hand_bool("ax_button"):
 			s["confirm"] = true
 		if hand_bool("by_button"):
@@ -100,6 +147,23 @@ func state() -> Dictionary:
 		elif v.y < -0.6:
 			s["down"] = true
 	return s
+
+
+func _party_state(seat: int, s: Dictionary) -> void:
+	var pairs := {"confirm": "accept", "cancel": "back", "tab_prev": "lb", "tab_next": "rb",
+		"up": "up", "down": "down", "left": "left", "right": "right"}
+	for a in pairs:
+		if bool(party.call("pressed", seat, pairs[a])):
+			s[a] = true
+	var mv: Vector2 = party.call("stick", seat, "move")  # y DOWN, like pads
+	if mv.y < -0.55:
+		s["up"] = true
+	elif mv.y > 0.55:
+		s["down"] = true
+	if mv.x < -0.55:
+		s["left"] = true
+	elif mv.x > 0.55:
+		s["right"] = true
 
 
 func _pad_state(d: int, s: Dictionary) -> void:
@@ -123,8 +187,13 @@ func _pad_state(d: int, s: Dictionary) -> void:
 		s["tab_next"] = true
 
 
-## A float action of the VR hand ("trigger"); fake hands use node metadata of the same name.
+## A float action of the VR hand ("trigger"); fake hands use node metadata of the same name; with a
+## rig, the trigger counts only when the rig's guard allows it.
 func hand_float(n: String) -> float:
+	if rig != null and is_instance_valid(rig):
+		if n == "trigger" and bool(rig.call("trigger_down")):
+			return maxf(0.61, float(rig.call("trigger_value")))
+		return 0.0
 	if hand == null or not is_instance_valid(hand):
 		return 0.0
 	if hand is XRController3D:
@@ -132,8 +201,11 @@ func hand_float(n: String) -> float:
 	return float(hand.get_meta(n, 0.0))
 
 
-## A button of the VR hand ("ax_button", "by_button"); fake hands use metadata.
+## A button of the VR hand ("ax_button", "by_button"); fake hands use metadata; with a rig, A is the
+## rig's guarded A (the Steam Frame has no B).
 func hand_bool(n: String) -> bool:
+	if rig != null and is_instance_valid(rig):
+		return n == "ax_button" and bool(rig.call("a_down"))
 	if hand == null or not is_instance_valid(hand):
 		return false
 	if hand is XRController3D:
@@ -141,8 +213,12 @@ func hand_bool(n: String) -> bool:
 	return bool(hand.get_meta(n, false))
 
 
-## A Vector2 action of the VR hand ("primary" stick); fake hands use metadata.
+## A Vector2 action of the VR hand ("primary" stick, y UP); fake hands use metadata; with a rig, its
+## right stick.
 func hand_vec(n: String) -> Vector2:
+	if rig != null and is_instance_valid(rig):
+		var v2: Vector2 = rig.call("stick_right")
+		return v2 if n == "primary" else Vector2.ZERO
 	if hand == null or not is_instance_valid(hand):
 		return Vector2.ZERO
 	if hand is XRController3D:
@@ -177,6 +253,12 @@ func poll(delta: float) -> PackedStringArray:
 
 ## Prompt glyph names for this input ("A"/"B" for pads, key names for keyboards).
 func glyphs() -> Dictionary:
+	if party != null and is_instance_valid(party):
+		if slot >= 0 and int(party.call("device_of", slot)) == -2:  # Party.KEYBOARD
+			return {"confirm": "SPACE", "cancel": "BKSP", "tab_prev": "Q", "tab_next": "E"}
+		return {"confirm": "A", "cancel": "B", "tab_prev": "LB", "tab_next": "RB"}
+	if rig != null:
+		return {"confirm": "TRIGGER", "cancel": "B", "tab_prev": "LB", "tab_next": "RB"}
 	var pad := device != PAD_NONE or keys == KEYS_NONE
 	if pad:
 		return {"confirm": "A", "cancel": "B", "tab_prev": "LB", "tab_next": "RB"}

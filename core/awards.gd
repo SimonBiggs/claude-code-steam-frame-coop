@@ -10,9 +10,9 @@ extends RefCounted
 ##   awards.best(3, "best_time", 41.2, true)       # keep the lowest
 ##   var data := awards.results({"title": "VICTORY!", "score_stat": "score", "style": "victory"})
 ##   net.event("results", [data])                  # plain data: send it to the TV
-##   var screen := Awards.results_screen(ui_root, data)
+##   var screen := Awards.results_screen(ui_root, data, {"party": party})   # any local seat continues
 ##   await screen.continued
-##   Awards.vr_summary(self, xr_camera, data, hand_r)
+##   Awards.vr_summary(self, null, data, null, {"rig": vr_rig})            # or (self, xr_camera, data, hand_r)
 ##
 ## Stats are free-form names; the catalogue below gives the common ones titles. define() adds your own.
 
@@ -217,12 +217,14 @@ func results(opts: Dictionary = {}) -> Dictionary:
 	}
 
 
-## The TV results screen. data: from results() (or hand-made with the same keys). opts: device / keys
-## (who can continue; default anyone), min_time (s before Continue works, 2.5), keep (don't close on
-## continue). Connect `continued`.
+## The TV results screen. data: from results() (or hand-made with the same keys). opts: party (+ slot,
+## default -1 = any seat on this machine) or device / keys (who can continue; default anyone),
+## min_time (s before Continue works, 2.5), keep (don't close on continue). Connect `continued`.
 static func results_screen(root: Control, data: Dictionary, opts: Dictionary = {}) -> ResultsScreen:
 	var r := ResultsScreen.new()
 	r.data = data
+	r.party = opts.get("party", null)
+	r.slot = int(opts.get("slot", -1))
 	r.device = int(opts.get("device", UiInput.PAD_ANY))
 	r.keys = int(opts.get("keys", UiInput.KEYS_ALL))
 	r.min_time = float(opts.get("min_time", 2.5))
@@ -232,12 +234,17 @@ static func results_screen(root: Control, data: Dictionary, opts: Dictionary = {
 
 
 ## The VR summary: title, the top three and the awards on a card in front of the VR player; the
-## trigger (or A) continues. Connect `continued`.
+## trigger (or A) continues. Connect `continued`. opts: rig (a core/vr_rig.gd VrRig: then cam/hand may
+## be null), min_time, layers.
 static func vr_summary(world: Node, cam: Node3D, data: Dictionary, hand: Node3D = null, opts: Dictionary = {}) -> VrSummary:
 	var s := VrSummary.new()
 	s.data = data
 	s.cam = cam
 	s.hand = hand
+	s.rig = opts.get("rig", null)
+	if s.rig != null:
+		s.cam = s.rig.get("camera")
+		s.hand = s.rig.get("hand_r")
 	s.min_time = float(opts.get("min_time", 2.5))
 	s.vis_layers = int(opts.get("layers", 1))
 	world.add_child(s)
@@ -274,6 +281,8 @@ class ResultsScreen extends Control:
 	const UiInput := preload("res://core/ui_input.gd")
 	const HudKit := preload("res://core/hud_kit.gd")
 	var data := {}
+	var party: Node = null
+	var slot := -1
 	var device := -2
 	var keys := 2
 	var min_time := 2.5
@@ -290,7 +299,7 @@ class ResultsScreen extends Control:
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
 		set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		_s = UiKit.scale_of(self)
-		reader = UiInput.new(device, keys)
+		reader = UiInput.for_party(party, slot) if party != null else UiInput.new(device, keys)
 		reader.latch()
 		var style := String(data.get("style", "neutral"))
 		var accent: Color = {"victory": UiKit.GOLD, "defeat": UiKit.BAD}.get(style, UiKit.ACCENT)
@@ -465,6 +474,7 @@ class VrSummary extends Node3D:
 	var data := {}
 	var cam: Node3D
 	var hand: Node3D
+	var rig: Node = null
 	var min_time := 2.5
 	var vis_layers := 1
 	var t := 0.0
@@ -473,7 +483,7 @@ class VrSummary extends Node3D:
 	var _done := false
 
 	func _ready() -> void:
-		reader = UiInput.new(UiInput.PAD_NONE, UiInput.KEYS_NONE, hand)
+		reader = UiInput.for_rig(rig) if rig != null else UiInput.new(UiInput.PAD_NONE, UiInput.KEYS_NONE, hand)
 		reader.latch()
 		var lines: PackedStringArray = []
 		var rows: Array = data.get("rows", [])

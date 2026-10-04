@@ -8,6 +8,8 @@ extends Node
 ##   add_child(hints)
 ##   hints.add_view(ui_root_p2, 2)               # each TV player's view (slot = player index), or -1 shared
 ##   hints.set_vr(xr_camera, self, hand_r)        # the VR player (slot 0 by default)
+##   # with the engine systems: hints.bind_party(party); hints.set_vr_rig(vr_rig, self);
+##   # hints.add_view(UiKit.ui_root(split.hud(slot)), slot) for each local seat
 ##   hints.intro({"title": "DUNGEON DASH", "goal": "Find the key and escape together!",
 ##       "vr": {"role": "THE KNIGHT", "controls": [["TRIGGER", "Swing your sword"], ["STICK", "Walk"]]},
 ##       "tv": {"role": "THE WIZARDS", "controls": [["A", "Cast"], ["L-STICK", "Move"]], "tips": ["Stay near the knight!"]}})
@@ -36,6 +38,8 @@ var _views := {}                  ## slot -> Control
 var _vr_cam: Node3D = null
 var _vr_world: Node = null
 var _vr_hand: Node3D = null
+var _vr_rig: Node = null
+var _party: Node = null
 var _seen := {}                   ## "id@target" -> times shown
 var _last := {}                   ## "id@target" -> time shown
 var _busy := {}                   ## target -> time it is free again
@@ -66,6 +70,17 @@ func set_vr(cam: Node3D, world: Node = null, hand: Node3D = null) -> void:
 	_vr_cam = cam
 	_vr_world = world
 	_vr_hand = hand
+
+
+## Use core/party.gd for dismissing the intro (any seat on this machine) instead of device/keys.
+func bind_party(party: Node) -> void:
+	_party = party
+
+
+## Register the VR player through core/vr_rig.gd (camera, right hand, guarded trigger / A).
+func set_vr_rig(rig: Node, world: Node = null) -> void:
+	_vr_rig = rig
+	set_vr(rig.get("camera"), world, rig.get("hand_r"))
 
 
 ## Show a contextual hint (if it hasn't been shown `times` times to that target, isn't cooling down,
@@ -126,6 +141,10 @@ func intro(data: Dictionary, opts: Dictionary = {}) -> void:
 	_intro_min = float(opts.get("min_time", 1.5))
 	_intro_max = float(opts.get("duration", 14.0))
 	_reader = UiInput.new(device, keys, _vr_hand)
+	if _party != null:
+		_reader.bind_party(_party, -1)
+	if _vr_rig != null:
+		_reader.rig = _vr_rig
 	_reader.latch()
 	for slot in _views:
 		var root: Control = _views[slot]
@@ -305,7 +324,7 @@ func _tv_card(root: Control, data: Dictionary, role: Dictionary) -> Control:
 		th.add_child(ic)
 		th.add_child(UiKit.label(String(tip), "small", "dim"))
 		v.add_child(th)
-	var g := UiInput.new(device, keys).glyphs()
+	var g := _reader.glyphs() if _reader != null else UiInput.new(device, keys).glyphs()
 	v.add_child(UiKit.prompts([[String(g["confirm"]), "Got it!"]], s))
 	var bar: UiKit.Bar = UiKit.bar("custom", 360.0, 8.0, col)
 	bar.size_flags_horizontal = Control.SIZE_SHRINK_CENTER

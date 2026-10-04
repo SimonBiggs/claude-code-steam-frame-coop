@@ -8,6 +8,10 @@ const UiInput := preload("res://core/ui_input.gd")
 const UiMenu := preload("res://core/ui_menu.gd")
 const VrMenu := preload("res://core/vr_menu.gd")
 
+const Party := preload("res://core/party.gd")
+const VrRig := preload("res://core/vr_rig.gd")
+const SplitView := preload("res://core/split_view.gd")
+
 const PAD_A := 61  # fake controllers (real pads on this machine use low ids)
 const PAD_B := 62
 
@@ -25,7 +29,7 @@ func run() -> void:
 	await _test_menus()
 	await _test_grid_tabs()
 	await _test_vr_menu()
-	for extra in ["_test_dialogue", "_test_hud", "_test_hud_extra", "_test_hints", "_test_awards"]:
+	for extra in ["_test_dialogue", "_test_hud", "_test_hud_extra", "_test_hints", "_test_awards", "_test_systems"]:
 		if has_method(extra):
 			await call(extra)
 	await frames(2)
@@ -700,3 +704,167 @@ func _test_hud_extra() -> void:
 	check(goals.all_done(), "objectives all done")
 	await wait(0.4)
 	goals.queue_free()
+
+
+
+class FakeMain extends Node:
+	## Just enough of a game's main for core/party.gd (local mode, ready to play).
+	var ready_to_play := true
+	var net: Node = null
+	var party: Node = null
+	var vr_rig: Node = null
+
+
+## The presentation modules driven through the engine systems: party seats, the VR rig, split views.
+func _test_systems() -> void:
+	const Dialogue := preload("res://core/dialogue.gd")
+	const Awards := preload("res://core/awards.gd")
+	Engine.set_meta(Party.BOT_IGNORE_META, true)  # real pads on this machine stay out of it
+	var fm := FakeMain.new()
+	fm.name = "FakeMain"
+	add_child(fm)
+	var party: Party = Party.new()
+	party.name = "Party"
+	party.auto_join_first_pad = false
+	fm.party = party
+	fm.add_child(party)
+	await frames(2)
+	var pa := party.add_virtual_pad()
+	var pb := party.add_virtual_pad()
+	var sa := party.join_device(pa)
+	var sb := party.join_device(pb)
+	await frames(3)
+	check(sa >= 1 and sb >= 1 and sa != sb, "two party seats (%d, %d)" % [sa, sb])
+	var got := []
+	var m1 := UiMenu.open(root, {"party": party, "slot": sa, "items": ["Attack", "Magic", "Run"], "anchor": "left"})
+	var m2 := UiMenu.open(root, {"party": party, "slot": sb, "items": ["Buy", "Sell"], "anchor": "right"})
+	m1.chosen.connect(func(id: String, _it: Dictionary) -> void: got.append("a:" + id))
+	m2.chosen.connect(func(id: String, _it: Dictionary) -> void: got.append("b:" + id))
+	await frames(3)
+	check(m1.player == sa and m1.accent == party.color_of(sa), "party menu takes the seat's colour")
+	check(UiMenu.slot_busy(sa) and UiMenu.slot_busy(sb) and not UiMenu.slot_busy(5), "slot_busy registry")
+	party.inject_button(pa, JOY_BUTTON_DPAD_DOWN, true)
+	await frames(2)
+	party.inject_button(pa, JOY_BUTTON_DPAD_DOWN, false)
+	await frames(2)
+	check(m1.focused_id() == "Magic" and m2.focused_id() == "Buy", "seat A's pad moves only its menu")
+	party.inject_axis(pb, JOY_AXIS_LEFT_Y, 0.9)
+	await frames(2)
+	party.inject_axis(pb, JOY_AXIS_LEFT_Y, 0.0)
+	await frames(2)
+	check(m2.focused_id() == "Sell", "seat B's stick moves its menu (%s)" % m2.focused_id())
+	party.inject_button(pa, JOY_BUTTON_A, true)
+	party.inject_button(pb, JOY_BUTTON_A, true)
+	await frames(2)
+	party.inject_button(pa, JOY_BUTTON_A, false)
+	party.inject_button(pb, JOY_BUTTON_A, false)
+	await frames(2)
+	check(got.has("a:Magic") and got.has("b:Sell"), "both seats chose (%s)" % [got])
+	await wait(0.4)
+	check(not UiMenu.slot_busy(sa), "seat released after the menu closed")
+	# a menu opened while A is still held (it joined / chose with A) must wait for a release
+	party.inject_button(pa, JOY_BUTTON_A, true)
+	await frames(2)
+	var held_got := []
+	var m3 := UiMenu.open(root, {"party": party, "slot": sa, "items": ["Yes", "No"]})
+	m3.chosen.connect(func(id: String, _it: Dictionary) -> void: held_got.append(id))
+	await frames(3)
+	check(held_got.is_empty(), "A held from before the menu opened doesn't choose")
+	party.inject_button(pa, JOY_BUTTON_A, false)
+	await frames(2)
+	party.inject_button(pa, JOY_BUTTON_A, true)
+	await frames(2)
+	party.inject_button(pa, JOY_BUTTON_A, false)
+	await frames(2)
+	check(held_got == ["Yes"], "a fresh A chooses (%s)" % [held_got])
+	await wait(0.3)
+	# dialogue: any local seat advances
+	var dlg: Dialogue = Dialogue.new()
+	add_child(dlg)
+	dlg.add_tv_view(root, sa)
+	dlg.bind_party(party)
+	var choice := []
+	dlg.choice_made.connect(func(id: String, _i: int) -> void: choice.append(id))
+	dlg.play([{"speaker": "INNKEEPER", "text": "Rooms are ten gold."}, {"text": "Stay the night?", "slot": sb, "choices": ["Yes", "No"]}])
+	await wait(0.2)
+	for k in 2:
+		party.inject_button(pb, JOY_BUTTON_A, true)
+		await frames(2)
+		party.inject_button(pb, JOY_BUTTON_A, false)
+		await frames(2)
+	check(dlg.pos == 1, "seat B's A finishes and advances the dialogue (%d)" % dlg.pos)
+	await wait(1.0)
+	check(dlg._menu != null and int(dlg._menu.get("slot")) == sb, "choices go to the line's seat")
+	party.inject_button(pb, JOY_BUTTON_DPAD_DOWN, true)
+	await frames(2)
+	party.inject_button(pb, JOY_BUTTON_DPAD_DOWN, false)
+	party.inject_button(pb, JOY_BUTTON_A, true)
+	await frames(2)
+	party.inject_button(pb, JOY_BUTTON_A, false)
+	await frames(3)
+	check(choice == ["No"], "seat B answered (%s)" % [choice])
+	dlg.queue_free()
+	# the VR rig: pointing + the guarded trigger
+	var rig: VrRig = VrRig.new()
+	rig.make_mirror = false
+	rig.fake_trigger = 1.0  # held over from the previous screen
+	fm.vr_rig = rig
+	world.add_child(rig)
+	await frames(2)
+	var vgot := []
+	var vm := VrMenu.open(world, {"title": "TURN", "rig": rig, "items": ["Attack", "Defend", "Flee"]})
+	vm.chosen.connect(func(id: String, _it: Dictionary) -> void: vgot.append(id))
+	await frames(3)
+	check(vm.cam == rig.camera and vm.hand == rig.hand_r, "VR menu takes the rig's camera and right hand")
+	var rect: Rect2 = vm._cell_rects[2]
+	rig.hand_r.look_at(vm.to_global(Vector3(rect.get_center().x, rect.get_center().y, 0)), Vector3.UP)
+	await frames(3)
+	check(vm.index == 2 and vgot.is_empty(), "held-over trigger doesn't choose while pointing (%d)" % vm.index)
+	rig.fake_trigger = 0.0
+	await frames(2)
+	rig.fake_trigger = 1.0
+	await frames(2)
+	rig.fake_trigger = 0.0
+	await frames(2)
+	check(vgot == ["Flee"], "a fresh pull chooses the pointed option (%s)" % [vgot])
+	await wait(0.3)
+	# results screen (any seat) + VR summary (rig)
+	var aw: Awards = Awards.new()
+	aw.set_player(0, "HERO")
+	aw.set_player(sa, "MAGE")
+	aw.add(0, "score", 5)
+	aw.add(sa, "score", 9)
+	var data := aw.results({"title": "DONE"})
+	var scr := Awards.results_screen(root, data, {"party": party, "min_time": 0.2})
+	var sum := Awards.vr_summary(world, null, data, null, {"rig": rig, "min_time": 0.2})
+	var cont := [0]
+	scr.continued.connect(func() -> void: cont[0] += 1)
+	sum.continued.connect(func() -> void: cont[0] += 10)
+	await wait(0.5)
+	party.inject_button(pb, JOY_BUTTON_A, true)
+	rig.fake_trigger = 1.0
+	await frames(2)
+	party.inject_button(pb, JOY_BUTTON_A, false)
+	rig.fake_trigger = 0.0
+	await frames(2)
+	check(cont[0] == 11, "results continue from a party seat and the VR trigger (%d)" % cont[0])
+	await wait(0.5)
+	# SplitView HUD roots are scaled: a UiKit root inside undoes that
+	var split: SplitView = SplitView.new()
+	add_child(split)
+	split.set_slots([1, 2, 3])
+	await frames(3)
+	var hud_root := UiKit.ui_root(split.hud(1))
+	await frames(3)
+	var view_px := split.viewport(1).get_visible_rect().size
+	var want := UiKit.scale_for_size(view_px)
+	var got_scale := UiKit.scale_of(hud_root) * split.hud_scale(1)
+	check(absf(got_scale - want) < 0.06, "UI in a split view ends up at the view's scale (%.2f vs %.2f)" % [got_scale, want])
+	var hm := UiMenu.open(hud_root, {"party": party, "slot": sa, "items": ["One", "Two"]})
+	await frames(3)
+	check(hm.get_global_rect().size.x * split.hud_scale(1) <= view_px.x + 1.0, "a menu fits its split view")
+	split.queue_free()
+	rig.queue_free()
+	fm.queue_free()
+	Engine.remove_meta(Party.BOT_IGNORE_META)
+	await frames(2)
