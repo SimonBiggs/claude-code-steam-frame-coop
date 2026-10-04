@@ -9,6 +9,9 @@ extends Node
 ## again at full time, joins one striker by pressing A on a fake controller and checks that Start does
 ## NOT join. Strikers mix normal shots, CHIPs (X) and their FIREBALL (Y); the keeper takes power-up
 ## bubbles (flat: automatic, fake VR: touches them with a glove).
+## SIMPLE_MODE (main.simple): strikers aim at the practice ring during striker practice and only kick
+## normal shots (plus the FIREBALL once it unlocks); the fake-VR keeper also touches every prop (posts,
+## net, bottle, flag, mascot, a spare ball) and grabs and throws a spare ball. BOT_VR=1 = PS_FAKE_VR=1.
 ## Real controllers are attached to this machine: their presses are swallowed (they must not pause
 ## or join the test), and if anything else pauses the game the bot resumes it.
 
@@ -40,6 +43,13 @@ var powers_seen := {}
 var replays := 0
 var finals := 0
 var cups := []
+var last_practice := "-"
+var prop_i := 0
+var prop_key := ""
+var throw_key := ""
+const PROP_SPOTS: Array = [["post", Vector3(3.72, 1.2, 0.05)], ["net", Vector3(0.0, 1.2, -1.95)],
+	["bottle", Vector3(-4.4, 0.95, 0.9)], ["flag", Vector3(4.75, 1.0, 2.1)], ["mascot", Vector3(-5.0, 1.3, 1.9)],
+	["ball", Vector3(4.33, 0.81, 0.95)]]
 
 
 class RealPadFilter extends Node:
@@ -53,6 +63,8 @@ class RealPadFilter extends Node:
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS  # keeps running if the Start check opened the pause menu
+	if OS.has_environment("BOT_VR") and not OS.has_environment("DUO_JOIN"):
+		OS.set_environment("PS_FAKE_VR", "1")
 	main = load("res://games/penalty_shootout/main.tscn").instantiate()
 	add_child(main)
 	var filt := RealPadFilter.new()
@@ -117,8 +129,9 @@ func _physics_process(delta: float) -> void:
 		set_meta("pad_checked", true)
 		print("BOT: fake controller %d drives P%d, paused=%s" % [FAKE_PAD, int(main.joy_owner.get(FAKE_PAD, -1)) + 1, get_tree().paused])
 	var st: String = main.state
-	if mode == "local" and st == "intro" and main.rounds_total > 1:
-		main.rounds_total = 1  # keep the headless match short
+	var short := 3 if main.simple else 1  # simple mode: 3 rounds, so the FIREBALL unlocks
+	if mode == "local" and st == "intro" and main.rounds_total > short:
+		main.rounds_total = short  # keep the headless match short
 		main.final_shots = 1
 	if mode == "host" and st == "intro" and main.rounds_total > 2:
 		main.rounds_total = 2
@@ -137,6 +150,10 @@ func _physics_process(delta: float) -> void:
 	if main.keeper.power != "" and not powers_seen.has("%d/%s" % [main.turn_count, main.keeper.power]):
 		powers_seen["%d/%s" % [main.turn_count, main.keeper.power]] = true
 		print("BOT %s: keeper power-up %s" % [mode, main.keeper.power])
+	if main.simple and main.practice != last_practice:
+		print("BOT %s: practice '%s' -> '%s' (keeper steps %d/%d balls, rings hit %d)" % [mode, last_practice, main.practice,
+			main.kp_step, main.kp_balls, main.sp_hits])
+		last_practice = main.practice
 	if st != last_state:
 		if st == "final_intro":
 			finals += 1
@@ -219,6 +236,12 @@ func _drive_striker(p) -> void:
 		plan_curve = randf_range(-1.0, 1.0) if randf() < 0.4 else 0.0
 		var r := randf()
 		p.bot_shot = "fire" if (r < 0.3 and p.fire_left > 0) else ("chip" if r < 0.55 else "normal")
+		if main.simple:
+			p.bot_shot = "fire" if (r < 0.5 and main.fire_on and p.fire_left > 0) else "normal"
+			plan_curve = 0.0
+			if main.practice == "striker":
+				plan_aim = Vector2(main.ptarget.x, main.ptarget.y) + Vector2(randf_range(-0.5, 0.5), randf_range(-0.4, 0.4))
+				plan_power = randf_range(0.3, 0.7)
 	var aim: Vector2 = p.aim
 	var to := plan_aim - aim
 	p.bot_stick = (to * 3.0).limit_length(1.0) if to.length() > 0.05 else Vector2.ZERO
@@ -279,6 +302,8 @@ func _drive_vr_keeper(k, delta: float) -> void:
 	var head: Vector3 = k.xr_camera.global_position
 	var hr: Node3D = k.hand_r
 	var hl: Node3D = k.hand_l
+	if main.simple and main.props != null and _drive_props(k, hl, hr, delta):
+		return
 	if main.state == "aim" and k.bubble != "" and main.state_t > 0.6:
 		# Touch the power-up bubble with the left glove.
 		hl.global_position = hl.global_position.move_toward(k.bubble_pos, 3.0 * delta)
@@ -299,6 +324,37 @@ func _drive_vr_keeper(k, delta: float) -> void:
 		hand.global_position = hand.global_position.move_toward(reach, 7.0 * delta)
 
 
+## Simple mode: touch one prop with the left glove at the start of each turn; every few results,
+## grab a spare ball with the right glove and throw it towards the strikers.
+func _drive_props(k, hl: Node3D, hr: Node3D, delta: float) -> bool:
+	var pr = main.props
+	if main.state == "aim" and main.state_t < 1.5:
+		k.bot_stick = Vector2.ZERO
+		var key := "%d/%d" % [main.turn_count, main.shooter]
+		if key != prop_key:
+			prop_key = key
+			prop_i += 1
+		var spot: Array = PROP_SPOTS[prop_i % PROP_SPOTS.size()]
+		hl.global_position = hl.global_position.move_toward(spot[1], 9.0 * delta)
+		return true
+	if main.state == "result" and main.shots_total % 3 == 1:
+		var key2 := "%d" % main.shots_total
+		var b: Vector3 = pr.balls[0].pos
+		if main.state_t < 0.6 and throw_key != key2:
+			hr.global_position = hr.global_position.move_toward(b, 12.0 * delta)
+			if hr.global_position.distance_to(b) < 0.05:
+				pr.bot_grab = true
+				throw_key = key2
+			return true
+		if pr.bot_grab:
+			if main.state_t < 1.0:
+				hr.global_position += Vector3(0, 3.0, 9.0) * delta
+			else:
+				pr.bot_grab = false
+			return true
+	return false
+
+
 func _report(mode: String) -> void:
 	var act: Array[String] = []
 	for p in main.players:
@@ -311,6 +367,9 @@ func _report(mode: String) -> void:
 	var kinfo := ""
 	if main.keeper.vr:
 		kinfo = " vr_scale=%.2f head=%s" % [main.keeper.ws(), str(main.keeper.head_pos.snapped(Vector3(0.01, 0.01, 0.01)))]
+	if main.simple:
+		kinfo += " practice=%s fire_on=%s cpu=%s props=%s" % [main.practice, main.fire_on, main.cpu,
+			str(main.props.touched) if main.props != null else "-"]
 	print("BOT %s t=%.0f state=%s stage=%s round=%d/%d shooter=P%d saves=%d goals=%d shots=%d fired=%d kinds=%s replays=%d finals=%d cups=%s rounds_done=%d matches=%d views=%d results=%s [%s]%s" % [
 		mode, t, main.state, main.cup_stage, main.round_i + 1, main.rounds_total, main.shooter + 1, main.saves, main.goals_total,
 		main.shots_total, shots_fired, str(shot_kinds), replays, finals, str(cups), rounds_done, matches_done, views, str(results), ", ".join(act), kinfo])
