@@ -1,0 +1,16 @@
+#!/bin/bash
+# voice-inject [PANE]: type spoken requests into a Claude Code session running in tmux.
+# Watches the voice bridge log and sends each line addressed to Claude ("TO CLAUDE: ...")
+# into the tmux pane as a message, so Claude gets it like typed input.
+# PANE defaults to the pane in ~/.claude/voice-pane (written by `voice-inject --here`).
+log=~/GodotProjects/duo-arena/.dev/voice.log
+pane_file=~/.claude/voice-pane
+if [ "$1" = "--here" ]; then echo "$TMUX_PANE" > "$pane_file"; echo "voice requests will go to pane $TMUX_PANE"; exit 0; fi
+pane=${1:-$(cat "$pane_file" 2>/dev/null)}
+[ -n "$pane" ] || { echo "no pane: run 'voice-inject --here' inside the Claude tmux pane"; exit 1; }
+tail -n0 -F "$log" 2>/dev/null | while IFS= read -r line; do
+  [[ $line == *"TO CLAUDE: "* ]] || continue
+  msg="[voice] ${line#*TO CLAUDE: }"   # e.g. "[voice] Simon: Hey Claude, ..."
+  pane=$(cat "$pane_file" 2>/dev/null || echo "$pane")
+  /usr/bin/tmux send-keys -t "$pane" -l "$msg" && /usr/bin/tmux send-keys -t "$pane" Enter
+done
