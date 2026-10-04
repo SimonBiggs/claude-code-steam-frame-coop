@@ -6,6 +6,8 @@ extends Node
 ## MEGA SNOWBALL throw and the weather (blizzard, sunshine, cocoa party); the game-over screen prints the
 ## awards. BOT_WAVE=N jumps to wave N (12 = the YETI finale), BOT_GOD=1 keeps everyone warm and the fort
 ## standing, BOT_VR=1 (local) makes P1 the real VR thrower with fake hands (squeeze, swing, release).
+## SIMPLE_MODE (main.simple): no packing / weather / upgrades; the bot checks target practice ends, the
+## waves bring one new kind at a time, and (BOT_VR) touches every prop and throws a snapped-off icicle.
 
 var main
 var t := 0.0
@@ -53,7 +55,7 @@ func _physics_process(delta: float) -> void:
 		if not p.active:
 			p.bot_throw = bot_players == 0 and t > 4.0 and fmod(t, 2.0) < 0.3
 			continue
-		if p.index == 1 and _repair_role(p):
+		if p.index == 1 and not main.simple and _repair_role(p):
 			continue
 		_throw_role(p, delta)
 	if main.net.mode != "client":
@@ -76,6 +78,9 @@ func _physics_process(delta: float) -> void:
 
 ## New snowmen, upgrades, a mega throw and the weather, once each.
 func _content_script() -> void:
+	if main.simple:
+		_simple_script()
+		return
 	var steps := [
 		[1.5, func() -> void:
 			if OS.has_environment("BOT_WAVE"):
@@ -103,8 +108,77 @@ func _content_script() -> void:
 		script_step += 1
 
 
+var practice_seen := false
+var kinds_seen := {}
+## Simple mode: skip ahead if asked, note when practice ends and which kinds each wave brings,
+## a MEGA SNOWBALL for P1, then the game-over screen (which restarts by itself).
+func _simple_script() -> void:
+	if script_step == 0 and t >= 1.5:
+		script_step = 1
+		if OS.has_environment("BOT_WAVE"):
+			main.debug_skip_to_wave(int(OS.get_environment("BOT_WAVE")))
+			print("Bot: skip to wave %s" % OS.get_environment("BOT_WAVE"))
+	if main.practice:
+		practice_seen = true
+	elif practice_seen and not has_meta("practice_done"):
+		set_meta("practice_done", true)
+		print("Bot: practice over at t=%.1f (VR hits %d)" % [t, main.vr_hits])
+	for s in get_tree().get_nodes_in_group("snowmen"):
+		var key := "%s" % s.kind
+		if not kinds_seen.has(key):
+			kinds_seen[key] = main.wave
+			print("Bot: first %s in wave %d" % [s.kind, main.wave])
+	if script_step == 1 and t >= 20.0:
+		script_step = 2
+		main.players[0].mega = true
+		print("Bot: a mega snowball for P1")
+	var end_t: float = float(OS.get_environment("BOT_END")) if OS.has_environment("BOT_END") else 56.0
+	if script_step == 2 and t >= end_t:
+		script_step = 3
+		if not main.game_over:
+			print("Bot: forcing game over")
+			main._on_game_over("TIME FOR COCOA!")
+
+
+## BOT_VR + simple mode: the left hand touches every prop in turn; the right hand snaps off an icicle.
+func _touch_props(p) -> bool:
+	if main.props == null or t < 2.0 or t > 9.5:
+		return false
+	var pr = main.props
+	var spots := [pr.bell_pivot.global_position + Vector3(0, -0.13, 0), pr.icicles[0].node.global_position,
+		pr.tree.global_position + Vector3(0, 0.9, 0), pr.sled_pos + Vector3(0, 0.1, 0), pr.piles[0].node.global_position,
+		main.seg_center(0) + Vector3(0, 0.8, 0)]
+	var i := int((t - 2.0) / 1.0)
+	if i < spots.size():
+		p.hand_l.global_position = spots[i]
+		return false
+	p.hand_l.position = Vector3(-0.25, 1.1, -0.3)
+	# 8.0-9.5 s: the right hand goes to an icicle, squeezes, and the normal throw loop takes over.
+	var ic: Vector3 = pr.icicles[2].node.global_position
+	if t < 8.2:
+		p.bot_squeeze = 0.0
+		p.hand_r.global_position = ic
+		return true
+	if t < 8.5:
+		p.bot_squeeze = 1.0
+		p.hand_r.global_position = ic
+		if p.held_icicle and not has_meta("icicle"):
+			set_meta("icicle", true)
+			print("Bot VR: snapped off an icicle")
+		return true
+	return false
+
+
 ## BOT_VR: squeeze the fake trigger, swing the hand towards the nearest snowman, let go.
 func _drive_vr(p, delta: float) -> void:
+	if main.simple and _touch_props(p):
+		return
+	if main.simple and main.practice and t < 4.5:
+		p.bot_squeeze = 0.0  # stand still for a moment: the ghost hand shows how to throw
+		if main.ghost_hand != null and main.ghost_hand.visible and not has_meta("ghost_seen"):
+			set_meta("ghost_seen", true)
+			print("Bot VR: the ghost hand is showing scoop-and-throw")
+		return
 	vr_t += delta
 	var best = null
 	var best_d := INF
@@ -147,6 +221,9 @@ func _report() -> void:
 	for s in get_tree().get_nodes_in_group("snowmen"):
 		kinds[s.kind] = int(kinds.get(s.kind, 0)) + 1
 	var d = main.director()
+	if main.simple:
+		print("Bot:   simple practice=%s vr_hits=%d props=%s ghost_hand=%s" % [main.practice, main.vr_hits,
+			main.props.touched if main.props else {}, main.ghost_hand != null and main.ghost_hand.visible])
 	print("Bot:   kinds=%s event=%s upgrades=%s won=%s night=%.2f boss=%s" % [kinds, d.event_name, d.upgrades, d.won, d.night, main.boss_text()])
 	print("t=%.0f mode=%s playing=%d wave=%d score=%d fort=%d%% snowmen=%d cocoa=%d balls=%d over=%s | %s" % [t, main.net.mode, main.party_size(), main.wave, main.score,
 		int(main.fort_fraction() * 100.0), get_tree().get_nodes_in_group("snowmen").size(), get_tree().get_nodes_in_group("cocoa").size(),
@@ -187,6 +264,8 @@ func _throw_role(p, delta: float) -> void:
 	var best = null
 	var best_d := INF
 	for s in get_tree().get_nodes_in_group("snowmen"):
+		if s.kind == "target" and not s.has_meta("tv") and main.net.mode != "client":
+			continue  # the VR player's practice target
 		var dd: float = s.global_position.distance_to(p.global_position)
 		if dd < best_d:
 			best_d = dd
@@ -200,7 +279,7 @@ func _throw_role(p, delta: float) -> void:
 	var eye: Vector3 = p.global_position + Vector3.UP * 1.5
 	var flat := Vector2(target.x - eye.x, target.z - eye.z)
 	p.yaw = atan2(-flat.x, -flat.y)
-	p.pitch = _solve_pitch(flat.length(), target.y - eye.y, 24.0)
+	p.pitch = _solve_pitch(flat.length(), target.y - eye.y, 17.7 if main.simple else 24.0)
 	# Hold for a full charge, then release.
 	p.bot_throw = c < 1.0
 	if c > 1.15:

@@ -124,6 +124,8 @@ var stars_root: Node3D
 var star_meshes: Array[MeshInstance3D] = []
 var stars_shown := 0
 var star_anim := 0.0
+var tint_col := Color.WHITE
+var tint_k := 0.0  # the drummer's spotlight toy (props.gd) tints the beams for a moment
 
 
 func build() -> void:
@@ -214,10 +216,12 @@ func _build_set() -> void:
 		parts.append([MeshKit.cyl(0.12, 0.14, 0.02, 10), MeshKit.at(Vector3(x + 0.05, STAGE_Y + 0.01, z - 0.42)), metal])
 		parts.append([MeshKit.sphere(0.03, 8), MeshKit.at(Vector3(x + 0.05, STAGE_Y + 1.26, z - 0.42), Vector3(1, 1.4, 1)), Color(0.2, 0.2, 0.22)])
 		parts.append([MeshKit.box(Vector3(0.02, 0.01, 1.2)), MeshKit.at(Vector3(x * 1.03, STAGE_Y + 0.005, z + 0.1), Vector3.ONE, Vector3(0, 0.3, 0)), Color(0.05, 0.05, 0.05)])
-	# The band's bass drum on the riser (the VR drummer's kit floats above it).
-	parts.append([MeshKit.cyl(0.32, 0.32, 0.36, 18), MeshKit.at(Vector3(DRUM_SPOT.x, STAGE_Y + 0.64, DRUM_SPOT.z - 0.55), Vector3.ONE, Vector3(PI * 0.5, 0, 0)), Color(0.85, 0.2, 0.3)])
-	parts.append([MeshKit.cyl(0.28, 0.28, 0.37, 18), MeshKit.at(Vector3(DRUM_SPOT.x, STAGE_Y + 0.64, DRUM_SPOT.z - 0.55), Vector3.ONE, Vector3(PI * 0.5, 0, 0)), Color(0.95, 0.92, 0.85)])
-	parts.append([MeshKit.sphere(0.1, 10), MeshKit.at(Vector3(DRUM_SPOT.x, STAGE_Y + 0.64, DRUM_SPOT.z - 0.74), Vector3(1, 1, 0.1)), Color(1.0, 0.8, 0.2)])
+	# The band's bass drum, standing on the riser floor well in front of the drummer: at eye height it
+	# blocked a seated player's view of the notes (Simon).
+	var kick := Vector3(DRUM_SPOT.x, STAGE_Y + 0.32, DRUM_SPOT.z - 1.0)
+	parts.append([MeshKit.cyl(0.32, 0.32, 0.36, 18), MeshKit.at(kick, Vector3.ONE, Vector3(PI * 0.5, 0, 0)), Color(0.85, 0.2, 0.3)])
+	parts.append([MeshKit.cyl(0.28, 0.28, 0.37, 18), MeshKit.at(kick, Vector3.ONE, Vector3(PI * 0.5, 0, 0)), Color(0.95, 0.92, 0.85)])
+	parts.append([MeshKit.sphere(0.1, 10), MeshKit.at(kick + Vector3(0, 0, -0.19), Vector3(1, 1, 0.1)), Color(1.0, 0.8, 0.2)])
 	var mi := MeshInstance3D.new()
 	mi.mesh = MeshKit.merge(parts)
 	mi.material_override = MeshKit.vertex_material(main.mats)
@@ -553,6 +557,21 @@ func hide_stars() -> void:
 func set_song_title(text: String) -> void:
 	if song_label != null:
 		song_label.text = text
+		song_label.visible = not main.SIMPLE_MODE  # simple mode: almost no text
+
+
+## The amp toy: the speaker stacks thump and the lights flash.
+func pump() -> void:
+	beat_flash = 1.0
+	for sp in speakers:
+		sp.scale = Vector3(1.35, 1.0, 1.35)
+
+
+## The spotlight toy: the stage beams take its colour for a couple of seconds.
+func tint(c: Color) -> void:
+	tint_col = c
+	tint_k = 1.0
+	beat_flash = 1.0
 
 
 func set_avatar_visible(i: int, on: bool) -> void:
@@ -609,6 +628,7 @@ func update(delta: float, beat_pos: float, crowd: float, playing: bool, star: fl
 	t += delta
 	star_k = lerpf(star_k, star, 1.0 - exp(-5.0 * delta))
 	beat_flash = maxf(0.0, beat_flash - delta * 3.5)
+	tint_k = maxf(0.0, tint_k - delta * 0.4)
 	var energy := clampf((crowd if playing else 0.35) + star_k * 0.3, 0.0, 1.0)
 	for i in beam_pivots.size():
 		var pv := beam_pivots[i]
@@ -616,8 +636,8 @@ func update(delta: float, beat_pos: float, crowd: float, playing: bool, star: fl
 		var spd := 1.0 + star_k * 1.5
 		pv.rotation.z = sin(t * (0.6 + k * 0.07) * spd + k * 1.3) * 0.55
 		pv.rotation.x = 0.45 + sin(t * 0.5 * spd + k) * 0.25
-		var c := BEAM_COLORS[(i + bar_n) % BEAM_COLORS.size()].lerp(Color(1.0, 0.8, 0.25), star_k)
-		beam_mats[i].albedo_color = Color(c.r, c.g, c.b, 0.05 + 0.2 * beat_flash * (0.4 + energy))
+		var c := BEAM_COLORS[(i + bar_n) % BEAM_COLORS.size()].lerp(Color(1.0, 0.8, 0.25), star_k).lerp(tint_col, minf(1.0, tint_k * 1.5))
+		beam_mats[i].albedo_color = Color(c.r, c.g, c.b, 0.05 + 0.2 * beat_flash * (0.4 + energy) + 0.12 * tint_k)
 	key_light.light_energy = 1.0 + beat_flash * 0.8 * (0.3 + energy)
 	key_light.light_color = BEAM_COLORS[bar_n % BEAM_COLORS.size()].lerp(Color.WHITE, 0.6).lerp(Color(1.0, 0.85, 0.5), star_k)
 	for sp in speakers:

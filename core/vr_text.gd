@@ -54,3 +54,40 @@ static func _place(l: Label3D, cam: Node3D, pos: Vector3) -> void:
 	face.y = 0.0
 	if face.length() > 0.01:
 		l.global_basis = Basis(Vector3.UP, atan2(-face.x, -face.z)).scaled(l.global_basis.get_scale())  # front (+Z) towards the player
+
+
+## What the VR player should read of a TV announcement: no walls of text in VR (Simon). Keeps the
+## headline and at most one more line, cuts VR instructions to their first phrase, drops lines meant
+## for the TV players (sticks, A button, runners/boats/knights...) and ends with a short trigger hint.
+static func short(text: String) -> String:
+	var keep: PackedStringArray = []
+	var trigger := ""
+	var tv_words := ["left stick", "right stick", "press a", "a jumps", "a turns", "(a)", "enter", "runners",
+		"boats", "knights", "tv player", "keyboard", "mouse", "d-pad", "controller"]
+	for raw in text.split("\n", false):
+		var l := raw.strip_edges()
+		if l == "":
+			continue
+		var low := l.to_lower()
+		if low.contains("trigger") and (low.contains("start") or low.contains("again") or low.contains("continue") or low.contains("another")):
+			trigger = l.replace(" / press A", "").replace(" / A", "").replace(" / Enter", "").replace("/ Enter", "")
+			continue
+		if low.contains("(vr)") or low.begins_with("vr"):
+			l = l.get_slice(":", 1).strip_edges() if l.contains(":") else l
+			for cut in [",", ". ", " ("]:
+				if l.contains(cut):
+					l = l.get_slice(cut, 0)
+			l = l.strip_edges()
+		else:
+			var tv := false
+			for w in tv_words:
+				if low.contains(w):
+					tv = true
+					break
+			if tv:
+				continue
+		if keep.size() < 2 and l != "":
+			keep.append(l)
+	if trigger != "":
+		keep.append(trigger)
+	return "\n".join(keep)

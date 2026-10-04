@@ -111,7 +111,7 @@ func _ready() -> void:
 	tag = Label3D.new()
 	tag.text = "P%d" % (index + 1)
 	tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	tag.no_depth_test = true
+	tag.no_depth_test = false
 	tag.fixed_size = true
 	tag.pixel_size = 0.0012
 	tag.font_size = 28
@@ -261,9 +261,20 @@ func _process(delta: float) -> void:
 	crown.visible = crowned
 	# The arrow points to the HIVE, or to the Queen when we carry the pollen she wants.
 	var goal := W.HIVE_ENTRY
+	var to_flower := false
+	if main.simple and pollen == 0 and honey_made == 0:
+		# Practice: until this bee has made honey once, the arrow shows the way to a glowing flower.
+		var best := INF
+		for i in main.spots.size():
+			if main.spots[i].bloom:
+				var d: float = (main.head_pos(i) as Vector3).distance_to(global_position) - (50.0 if i == main.halo_spot else 0.0)
+				if d < best:
+					best = d
+					goal = main.head_pos(i)
+					to_flower = true
 	if main.event == "queen" and pollen > 0 and (pollen_kinds & (1 << int(main.queen_kind))) != 0:
 		goal = main.events_node.queen_pos()
-	arrow.visible = active and pollen > 0 and global_position.distance_to(goal) > 1.2
+	arrow.visible = active and (pollen > 0 or to_flower) and global_position.distance_to(goal) > (0.6 if to_flower else 1.2)
 	if arrow.visible:
 		arrow.position = Vector3(0, 0.3, 0)
 		var to := goal - global_position
@@ -292,7 +303,9 @@ func _update_camera(delta: float) -> void:
 
 
 func _update_hud() -> void:
-	if hud_label:
+	if hud_label and main.simple:
+		hud_label.text = "P%d" % (index + 1)
+	elif hud_label:
 		hud_label.text = "P%d  BEE   POLLEN %d / %d   HONEY MADE %d" % [index + 1, pollen, MAX_POLLEN, honey_made]
 	if hint_label:
 		hint_label.text = _hint()
@@ -302,6 +315,11 @@ func _update_hud() -> void:
 func _hint() -> String:
 	if main.game_over or main.phase == "dusk":
 		return ""
+	if main.simple:
+		# One short line, only while this bee is still learning.
+		if honey_made > 0:
+			return ""
+		return "Follow the arrow to the HIVE!" if pollen > 0 else "Fly into the glowing flower!"
 	var want: String = str(W.KINDS[clampi(int(main.queen_kind), 0, 2)].name).to_upper()
 	if main.event == "queen":
 		if pollen > 0 and (pollen_kinds & (1 << int(main.queen_kind))) != 0:

@@ -95,7 +95,7 @@ func _ready() -> void:
 	label.outline_size = 32
 	label.pixel_size = 0.02
 	label.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
-	label.no_depth_test = true
+	label.no_depth_test = false
 	add_child(label)
 	# Health bar.
 	var bar_root := Node3D.new()

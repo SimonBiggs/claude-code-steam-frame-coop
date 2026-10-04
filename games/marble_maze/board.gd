@@ -67,14 +67,19 @@ func _ready() -> void:
 	_build_frame()
 
 
+## The level list in play: the short simple set in SIMPLE_MODE (see main.gd), else all twelve.
+func levels() -> Array:
+	return Levels.SIMPLE_LEVELS if main.simple else Levels.LEVELS
+
+
 ## Level n (1-based): map (n-1) % count, mirrored and faster on every second lap.
 func load_level(n: int) -> void:
 	level_n = n
-	var count: int = Levels.LEVELS.size()
+	var count: int = levels().size()
 	var idx := (n - 1) % count
 	var lap := (n - 1) / count
 	hazard_speed = 1.0 + 0.3 * lap
-	var lv: Dictionary = Levels.LEVELS[idx]
+	var lv: Dictionary = levels()[idx]
 	theme = str(lv.get("theme", "garden"))
 	var src: Array = lv["map"]
 	rows.clear()
@@ -136,23 +141,44 @@ func load_level(n: int) -> void:
 
 
 func level_name(n: int) -> String:
-	var lv: Dictionary = Levels.LEVELS[(n - 1) % Levels.LEVELS.size()]
+	var lv: Dictionary = levels()[(n - 1) % levels().size()]
 	return str(lv["name"])
 
 
 func level_tip(n: int) -> String:
-	var lv: Dictionary = Levels.LEVELS[(n - 1) % Levels.LEVELS.size()]
+	var lv: Dictionary = levels()[(n - 1) % levels().size()]
 	return str(lv["tip"])
 
 
 ## A one-time "NEW: ..." line for a level that brings a new idea ("" if none).
 func level_new(n: int) -> String:
-	var lv: Dictionary = Levels.LEVELS[(n - 1) % Levels.LEVELS.size()]
+	var lv: Dictionary = levels()[(n - 1) % levels().size()]
 	return str(lv.get("new", ""))
 
 
+## SIMPLE_MODE: the one tile kind that's new on this level ("" if none).
+func level_new_tile(n: int) -> String:
+	var lv: Dictionary = levels()[(n - 1) % levels().size()]
+	return str(lv.get("new", ""))
+
+
+## SIMPLE_MODE practice: the cell centre a few steps from the start along the way to the goal.
+func practice_spot() -> Vector2:
+	var c := cell_of(starts[0])
+	for i in 4:
+		var best := c
+		var bd: int = goal_dist.get(c, 9999)
+		for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+			var nb: Vector2i = c + d
+			if int(goal_dist.get(nb, 9999)) < bd and ch(nb.x, nb.y) == ".":
+				bd = goal_dist[nb]
+				best = nb
+		c = best
+	return center(c.x, c.y)
+
+
 func level_time(n: int) -> float:
-	var lv: Dictionary = Levels.LEVELS[(n - 1) % Levels.LEVELS.size()]
+	var lv: Dictionary = levels()[(n - 1) % levels().size()]
 	return float(lv["time"])
 
 

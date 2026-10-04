@@ -3,6 +3,31 @@ const VrText := preload("res://core/vr_text.gd")
 ## Snowball Blitz: defend the snow fort in the village square from waves of mischievous snowmen.
 ## VR player (host): the team's sniper, throwing real snowballs with their hands.
 ## TV players: lob charged snowballs and pack the fort walls back up. Hot cocoa warms you up.
+##
+## SIMPLE_MODE (the family: "all of the games have become too complicated", "simple games are the fun
+## games", "everything's being driven by text"): defend the snow fort from waddling snowmen by
+## throwing snowballs - the VR player with real hands, the TV players with one press.
+##  - PRACTICE first: the VR player gets glowing target snowmen close by, one at a time, and a
+##    see-through ghost hand (ghost_hand.gd) that scoops snow and throws; each TV player gets one
+##    glowing target in front of them (and a one-line "PRESS RT!" until their first throw).
+##  - One new thing per wave: 1 a few slow plain snowmen that don't throw, 2 they throw (harmless
+##    splats; the pan lid still blocks), 3 sled riders, 4 snow bunnies, 5 giants (MEGA SNOWBALL drops),
+##    6 balloon snowmen, 7 the SNOW KING, 8-9 a mix, 10 the YETI finale, then endless.
+##  - Everything beside the VR player reacts to touch (props.gd): snow piles to scoop, icicles that
+##    tinkle and snap off to throw, a snowy tree that dumps its snow, a sled to shove, a bell, and the
+##    fort wall puffs (and packs up) when patted.
+##  - Off: warmth / freezing / hot cocoa, wall packing (the walls snow back up by themselves), charged
+##    lobs (a TV press just throws, with a gentle aim assist), shield snowmen, weather events, fort
+##    upgrades, streaks, score / fort / warmth readouts, the minimap, popups, hint panels and awards.
+##    Text: one short headline ("WAVE 2!"); game over restarts by itself.
+const SIMPLE_MODE := true
+const PropsScript := preload("res://games/snowball_blitz/props.gd")
+const GhostHandScript := preload("res://games/snowball_blitz/ghost_hand.gd")
+const VR_PRACTICE := 3  # glowing targets the VR player knocks over before the snowmen come
+## Simple mode: the one new kind each wave brings (it joins the mix from the next wave on).
+const SIMPLE_NEW := {3: "sled", 4: "bunny", 5: "giant", 6: "balloon"}
+const SIMPLE_KING := 7
+const SIMPLE_FINALE := 10
 
 const PlayerScript := preload("res://games/snowball_blitz/player.gd")
 const SnowmanScript := preload("res://games/snowball_blitz/snowman.gd")
@@ -27,6 +52,10 @@ const EXTRA_SOUNDS := {
 	"thud": [0.4, 160.0, 40.0, 0.6, "saw", 0.6],
 	"fanfare": [1.6, 392.0, 1568.0, 0.4, "tri", 0.0],
 	"roar": [0.9, 150.0, 45.0, 0.6, "saw", 0.45],
+	"bell": [1.4, 1318.0, 1310.0, 0.4, "sine", 0.0],
+	"tinkle": [0.22, 2637.0, 3136.0, 0.25, "sine", 0.0],
+	"whump": [0.35, 140.0, 50.0, 0.5, "sine", 0.7],
+	"crunch": [0.12, 420.0, 180.0, 0.3, "saw", 0.85],
 }
 
 const ARENA_RADIUS := 20.0
@@ -106,6 +135,15 @@ var center_tween: Tween
 var vr_center: Label3D
 var vr_hurt_mat: StandardMaterial3D
 var vr_hurt := 0.0
+var simple := SIMPLE_MODE  # other scripts read main.simple
+var props: Node3D  # simple mode: touchable things beside the VR player (props.gd)
+var ghost_hand: Node3D  # simple mode: the practice ghost hand (VR player only)
+var practice := SIMPLE_MODE  # simple mode: target practice before wave 1 (mirrored to the TV)
+var practice_t := 0.0
+var vr_hits := 0
+var vr_target_t := 1.0
+var tv_given := {}  # player index -> true once their practice target appeared
+var simple_new_left := 0
 
 
 func _ready() -> void:
@@ -115,6 +153,10 @@ func _ready() -> void:
 	WorldScript.build(self, ARENA_RADIUS, will_vr)
 	_build_fort()
 	_build_hud()
+	if SIMPLE_MODE:
+		props = PropsScript.new()
+		props.main = self
+		add_child(props)
 	var menu := PauseMenuScript.new()
 	menu.main = self
 	add_child(menu)
@@ -140,6 +182,9 @@ func _setup_game(mode: String) -> void:
 	_assign_joypads()
 	ready_to_play = true
 	_ensure_party()
+	if SIMPLE_MODE:
+		_show_center("SNOWBALL BLITZ!", 2.5)
+		return
 	if mode == "host":
 		_show_center("Waiting for the TV players to join…", 0.0)
 	elif mode == "client":
@@ -297,6 +342,8 @@ func sound(sound_name: String, volume_db: float = 0.0, pitch: float = 1.0) -> vo
 
 ## Floating 3D text that rises and fades; shown on both machines.
 func popup(pos: Vector3, text: String, color: Color) -> void:
+	if SIMPLE_MODE:
+		return  # no floating numbers or words: the splats and sounds say it
 	var l := Label3D.new()
 	l.text = text
 	l.modulate = color
@@ -305,7 +352,7 @@ func popup(pos: Vector3, text: String, color: Color) -> void:
 	l.outline_size = 16
 	l.pixel_size = 0.007
 	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	l.no_depth_test = true
+	l.no_depth_test = false
 	l.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(l)
 	l.global_position = pos
@@ -460,7 +507,7 @@ func _update_fort_visuals(delta: float) -> void:
 				m.metallic = 0.4
 				m.roughness = 0.25
 		var bar: MeshInstance3D = n.bar
-		bar.visible = frac < 0.97
+		bar.visible = frac < 0.97 and not SIMPLE_MODE  # simple mode: the wall's height shows it
 		bar.scale = Vector3(maxf(frac, 0.02), 1.0, 1.0)
 		var bm: StandardMaterial3D = n.bar_mat
 		bm.albedo_color = Color(1.0, 0.3, 0.2).lerp(Color(0.4, 1.0, 0.5), frac)
@@ -554,8 +601,9 @@ func pack_puff(i: int, color: Color) -> void:
 
 # --- Snowballs ---------------------------------------------------------------
 
-func spawn_ball(origin: Vector3, v: Vector3, r: float, dmg: float, team: String, owner_index: int, visual_only: bool = false) -> void:
+func spawn_ball(origin: Vector3, v: Vector3, r: float, dmg: float, team: String, owner_index: int, visual_only: bool = false, look: String = "") -> void:
 	var b := SnowballScript.new()
+	b.look = look
 	b.main = self
 	b.vel = v
 	b.radius = r
@@ -567,17 +615,17 @@ func spawn_ball(origin: Vector3, v: Vector3, r: float, dmg: float, team: String,
 	b.global_position = origin
 	var from_remote: bool = owner_index >= 0 and players[owner_index].remote
 	if not visual_only and not from_remote:
-		net.event("ball", [origin, v, r, team])
+		net.event("ball", [origin, v, r, team] if look == "" else [origin, v, r, team, look])
 
 
 ## A player threw: on the TV machine it's drawn right away and the host makes the real one.
-func player_throw(p, origin: Vector3, v: Vector3, r: float, dmg: float) -> void:
+func player_throw(p, origin: Vector3, v: Vector3, r: float, dmg: float, look: String = "") -> void:
 	stat_add(p.index, "thrown", 1)
 	if net.mode == "client":
 		spawn_ball(origin, v, r, dmg, "p", p.index, true)
 		net.send_action("throw", [origin, v, r, dmg], p.index)
 	else:
-		spawn_ball(origin, v, r, dmg, "p", p.index)
+		spawn_ball(origin, v, r, dmg, "p", p.index, false, look)
 
 
 ## Initial velocity for a lob from `from` that lands on `to` (flight time from the distance).
@@ -685,6 +733,8 @@ func ball_step(b) -> bool:
 
 func _on_snowman_hit(s, b) -> void:
 	var who: int = b.owner_index
+	if s.kind == "target" and not s.has_meta("tv") and who != 0:
+		return  # the VR player's practice targets are theirs to knock over
 	var mega: bool = b.radius >= MEGA_R * 0.9
 	if mega:
 		_mega_splash(s.global_position, who)
@@ -785,9 +835,13 @@ func _nearest_seg(pos: Vector3) -> int:
 	return posmod(roundi(atan2(pos.z, pos.x) / (TAU / SEGMENTS)), SEGMENTS)
 
 
-func _spawn_snowman(kind: String, pos: Vector3, grace: float = 0.8) -> void:
+func _spawn_snowman(kind: String, pos: Vector3, grace: float = 0.8) -> Node3D:
 	var s := SnowmanScript.new()
 	s.setup(kind, wave, self, _nearest_seg(pos))
+	if SIMPLE_MODE and wave <= 2 and kind == "snowman":
+		s.speed *= 0.55 if wave <= 1 else 0.8  # gentle start: slow waddlers
+		if wave <= 1:
+			s.throw_cd = 1.0e9  # wave 1: they don't throw yet
 	s.net_id = next_net_id()
 	s.spawn_grace = grace
 	s.position = pos
@@ -796,6 +850,7 @@ func _spawn_snowman(kind: String, pos: Vector3, grace: float = 0.8) -> void:
 		s.hp = s.max_hp
 	add_child(s)
 	director().on_snowman_spawned(kind)
+	return s
 
 
 func summon_minions(pos: Vector3, count: int, kind: String = "snowman") -> void:
@@ -810,6 +865,8 @@ func on_snowman_collapsed(s, who: int) -> void:
 	var pos: Vector3 = s.global_position
 	var pts: int = s.d.points
 	score += pts
+	if s.kind == "target":
+		_on_target_down(s)
 	if who >= 0 and who < players.size():
 		stat_add(who, "felled", 1)
 	var size: float = s.s
@@ -819,7 +876,7 @@ func on_snowman_collapsed(s, who: int) -> void:
 		sound("kill", -4.0, 1.3)
 	collapse_fx(pos, size, s.kind)
 	popup(pos + Vector3.UP * (size * 2.4 + 0.3), "+%d" % pts, Color(1.0, 0.9, 0.6))
-	if s.kind != "king" and s.kind != "yeti" and randf() < (0.25 if s.kind == "giant" else 0.03):
+	if s.kind != "king" and s.kind != "yeti" and s.kind != "target" and randf() < (0.25 if s.kind == "giant" else (0.0 if SIMPLE_MODE else 0.03)):
 		drop_mega.call_deferred(pos)
 	for p in players:
 		if p.camera and not p.vr:
@@ -840,6 +897,8 @@ func on_snowman_collapsed(s, who: int) -> void:
 
 
 func _pick_kind() -> String:
+	if SIMPLE_MODE:
+		return _pick_simple_kind()
 	var r := randf()
 	if wave >= 3 and r < 0.1 + wave * 0.012:
 		return "giant"
@@ -875,7 +934,186 @@ func _spawn_wave_snowman() -> void:
 	_spawn_snowman(kind, best_pos)
 
 
+## Simple mode: mostly plain snowmen; this wave's new kind shows up a few times (it's guaranteed),
+## earlier waves' kinds join the mix. No shield snowmen (they need explaining).
+func _pick_simple_kind() -> String:
+	if simple_new_left > 0 and (randf() < 0.5 or to_spawn <= simple_new_left):
+		simple_new_left -= 1
+		return SIMPLE_NEW.get(wave, "snowman")
+	var pool: Array[String] = []
+	for w in SIMPLE_NEW:
+		if wave > w:
+			pool.append(SIMPLE_NEW[w])
+	if pool.is_empty() or randf() < 0.55:
+		return "snowman"
+	return pool.pick_random()
+
+
+func _simple_boss() -> String:
+	if wave == SIMPLE_FINALE:
+		return "yeti"
+	if wave == SIMPLE_KING or (wave > SIMPLE_FINALE and wave % 4 == 2):
+		return "king"
+	return ""
+
+
+func _start_simple_wave() -> void:
+	wave += 1
+	in_break = false
+	var base: int = [3, 5, 6][wave - 1] if wave <= 3 else 5 + wave
+	to_spawn = int(base * (1.0 + 0.22 * extra_players()))
+	simple_new_left = 0
+	if SIMPLE_NEW.has(wave):
+		simple_new_left = 2 if SIMPLE_NEW[wave] == "giant" else 3
+	spawn_timer = 0.5
+	print("Wave %d started (simple, %d snowmen)" % [wave, to_spawn])
+	sound("wave")
+	var boss := _simple_boss()
+	director().on_wave_started(wave, boss)
+	var head := "WAVE %d!" % wave
+	if boss != "":
+		to_spawn /= 2
+		var a := randf() * TAU
+		_spawn_snowman(boss, Vector3(cos(a), 0, sin(a)) * (ARENA_RADIUS - 1.0), 1.5)
+		head = "THE YETI!" if boss == "yeti" else "SNOW KING!"
+		sound("roar", 0.0, 0.7 if boss == "yeti" else 1.0)
+	_show_center(head, 2.0)
+
+
+func _end_simple_wave() -> void:
+	in_break = true
+	break_timer = 4.0
+	for i in SEGMENTS:
+		seg_hp[i] = SEG_MAX  # fresh snow on every wall
+	director().on_wave_cleared(wave)
+	sound("clear")
+	if wave == SIMPLE_FINALE and not director().won:
+		director().won = true
+		break_timer = 10.0
+		sound("fanfare", 0.0)
+		print("VICTORY: the village is safe (simple)")
+		_show_center("VICTORY!", 6.0)
+		return
+	_show_center("HOORAY!", 2.0)
+	print("Wave %d cleared, fort %d%%" % [wave, int(fort_fraction() * 100.0)])
+
+
+# --- Simple mode: target practice ----------------------------------------------
+
+## Host / local: one glowing target at a time for the VR player, one for each TV player. The snowmen
+## come once they're all down (a solo VR player gets a few extra targets while the TV is away).
+func _update_practice(delta: float) -> void:
+	practice_t += delta
+	var crew_ready: bool = net.mode != "host" or net.connected
+	var vr_on: bool = players[0].vr and players[0].active
+	var vr_alive := false
+	var tv_alive := false
+	for s in get_tree().get_nodes_in_group("snowmen"):
+		if s.kind == "target" and not s.dead:
+			if s.has_meta("tv"):
+				tv_alive = true
+			else:
+				vr_alive = true
+	if vr_on and not vr_alive and (vr_hits < VR_PRACTICE or not crew_ready):
+		vr_target_t -= delta
+		if vr_target_t <= 0.0:
+			vr_target_t = 0.8
+			_spawn_vr_target()
+	for p in players:
+		if p.active and not p.vr and not p.ghost and (not p.remote or net.connected) and not tv_given.has(p.index):
+			tv_given[p.index] = true
+			_spawn_tv_target(p)
+			tv_alive = true
+	var vr_done := not vr_on or vr_hits >= VR_PRACTICE
+	if crew_ready and ((vr_done and not tv_alive) or practice_t > 45.0):
+		_end_practice()
+	elif not crew_ready and vr_done and practice_t > 40.0:
+		_end_practice()  # solo VR: the snowmen come anyway (TV players can still drop in)
+
+
+func _spawn_vr_target() -> void:
+	var cam: Node3D = players[0].xr_camera
+	var head := cam.global_position
+	var fwd := -cam.global_basis.z
+	fwd.y = 0.0
+	fwd = fwd.normalized() if fwd.length() > 0.1 else Vector3.FORWARD
+	var ang: float = [0.0, 0.55, -0.55][vr_hits % 3]
+	var dist: float = [3.0, 3.6, 4.2][vr_hits % 3]
+	_place_target(Vector3(head.x, 0.0, head.z) + fwd.rotated(Vector3.UP, ang) * dist, head, false)
+
+
+func _spawn_tv_target(p) -> void:
+	var fwd := Basis(Vector3.UP, p.yaw) * Vector3.FORWARD
+	_place_target(p.global_position + fwd * 4.5, p.global_position, true)
+
+
+func _place_target(pos: Vector3, look_from: Vector3, tv: bool) -> void:
+	var flat := Vector2(pos.x, pos.z)
+	if flat.length() > FORT_RADIUS - 1.2:
+		flat = flat.normalized() * (FORT_RADIUS - 1.2)
+	pos = Vector3(flat.x, 0.0, flat.y)
+	var s := _spawn_snowman("target", pos, 0.5)
+	var d := look_from - pos
+	s.rotation.y = atan2(-d.x, -d.z)
+	if tv:
+		s.set_meta("tv", true)
+	sound("pickup", -6.0, 1.4)
+	burst(pos + Vector3.UP * 1.0, Color(1.0, 0.85, 0.4), 12, 0.07)
+
+
+func _on_target_down(s) -> void:
+	sound("pickup", -2.0, 1.2)
+	burst(s.global_position + Vector3.UP * 1.6, Color(1.0, 0.85, 0.35), 18, 0.08)
+	if not s.has_meta("tv"):
+		vr_hits += 1
+		vr_target_t = 0.8
+	print("Practice target down (VR %d)" % vr_hits)
+
+
+func _end_practice() -> void:
+	practice = false
+	for s in get_tree().get_nodes_in_group("snowmen"):
+		if s.kind == "target":
+			puff(s.global_position + Vector3.UP, Color(1, 1, 1), 16, 0.08)
+			net.event("burst", [s.global_position + Vector3.UP, Color(1, 1, 1), 16, 0.08])
+			s.remove_from_group("snowmen")
+			s.queue_free()
+	in_break = true
+	break_timer = 2.0
+	if ghost_hand:
+		ghost_hand.show_demo(false, Vector3.ZERO, Vector3.ZERO, 0.0)
+	print("Practice over (VR hits %d, %.0f s)" % [vr_hits, practice_t])
+
+
+## VR practice: the ghost hand scoops and throws at the current target until the first few hits.
+func _update_ghost_hand(delta: float) -> void:
+	var p = players[0]
+	if not p.vr:
+		return
+	var aim := Vector3.ZERO
+	if practice and vr_hits < VR_PRACTICE and not p.holding:
+		for s in get_tree().get_nodes_in_group("snowmen"):
+			if s.kind == "target" and not s.has_meta("tv") and not s.dead:
+				aim = s.global_position + Vector3.UP * 1.0
+	if ghost_hand == null:
+		if aim == Vector3.ZERO:
+			return
+		ghost_hand = GhostHandScript.new()
+		add_child(ghost_hand)
+		p._set_layers(ghost_hand, p.viewmodel_layer())
+	ghost_hand.show_demo(aim != Vector3.ZERO, p.xr_camera.global_position, aim, delta)
+
+
+## Simple mode: the walls slowly snow back up by themselves (no packing rules to learn).
+func _regrow_walls(delta: float) -> void:
+	for i in SEGMENTS:
+		seg_hp[i] = minf(SEG_MAX, seg_hp[i] + 1.5 * delta)
+
+
 func _start_wave() -> void:
+	if SIMPLE_MODE:
+		_start_simple_wave()
+		return
 	wave += 1
 	in_break = false
 	to_spawn = int((4 + wave * 3) * (1.0 + 0.22 * extra_players()))
@@ -908,6 +1146,9 @@ func _start_wave() -> void:
 
 
 func _end_wave() -> void:
+	if SIMPLE_MODE:
+		_end_simple_wave()
+		return
 	in_break = true
 	break_timer = 5.0
 	for i in SEGMENTS:
@@ -934,6 +1175,8 @@ func _end_wave() -> void:
 
 
 func _drop_cocoa(pos: Vector3) -> void:
+	if SIMPLE_MODE:
+		return  # no warmth to top up
 	if get_tree().get_nodes_in_group("cocoa").size() >= 5 + extra_players():
 		return
 	var c := CocoaScript.new()
@@ -1040,6 +1283,8 @@ func _process(delta: float) -> void:
 	if music.has_method("play_track"):
 		music.play_track(1 if boss_hp >= 0.0 else maxi(wave - 1, 0) / 3)
 	director().tick(delta)
+	if props:
+		props.tick(delta)
 	if ghost_cam:
 		ghost_cam.global_transform = players[0].net_head
 	if mirror_vp:
@@ -1059,10 +1304,16 @@ func _process(delta: float) -> void:
 	if game_over:
 		game_over_time += delta
 		var vr_restart: bool = players[0].vr_trigger_held()
-		if game_over_time > 1.5 and (_restart_pressed() or vr_restart):
+		if game_over_time > 1.5 and (_restart_pressed() or vr_restart or (SIMPLE_MODE and game_over_time > 7.0)):
 			get_tree().reload_current_scene()
 		return
-	if net.mode == "host" and not net.connected:
+	if SIMPLE_MODE:
+		_update_ghost_hand(delta)
+		if practice:
+			_update_practice(delta)
+			return
+		_regrow_walls(delta)
+	if net.mode == "host" and not net.connected and not SIMPLE_MODE:
 		if wave == 0:
 			director().howto()  # the VR player reads how to play while waiting
 		return  # hold the waves until a TV player joins
@@ -1086,6 +1337,8 @@ func _process(delta: float) -> void:
 			_spawn_wave_snowman()
 			to_spawn -= 1
 			spawn_timer = maxf(0.45, (1.8 - wave * 0.1) / (1.0 + 0.15 * extra))
+			if SIMPLE_MODE and wave <= 2:
+				spawn_timer = 3.0 if wave == 1 else 2.2  # a gentle trickle to start
 	elif get_tree().get_nodes_in_group("snowmen").is_empty():
 		_end_wave()
 	var all_down := true
@@ -1103,6 +1356,9 @@ func _on_game_over(reason: String) -> void:
 	game_over_time = 0.0
 	sound("gameover")
 	print("Game over (%s): wave %d, score %d" % [reason, wave, score])
+	if SIMPLE_MODE:
+		_show_center("OH NO!", 0.0)  # it starts again by itself
+		return
 	var best := _load_best()
 	var best_line := "Best: wave %d  ·  score %d" % [best.wave, best.score]
 	if score > int(best.score):
@@ -1601,6 +1857,8 @@ func debug_skip_to_wave(n: int) -> void:
 		sm.remove_from_group("snowmen")
 		sm.queue_free()
 	to_spawn = 0
+	if practice:
+		_end_practice()
 	wave = n - 1
 	in_break = true
 	break_timer = 0.5
@@ -1634,7 +1892,7 @@ func _activate_player(i: int) -> void:
 		p.net_started = false  # snap to the TV player's next reported position
 	elif not p.vr:
 		p.global_position = _spawn_spot(i, net.mode)
-	_show_center("PLAYER %d JOINED!" % (i + 1), 1.5)
+	_show_center(("PLAYER %d!" if SIMPLE_MODE else "PLAYER %d JOINED!") % (i + 1), 1.5)
 	print("Net: player %d joined the game (%d playing)" % [i + 1, party_size()])
 	on_player_activity_changed(p)
 
@@ -1650,7 +1908,8 @@ func _deactivate_player(i: int) -> void:
 	if p.is_down:
 		p.is_down = false
 		p._apply_down_pose(false)
-	_show_center("PLAYER %d LEFT" % (i + 1), 1.5)
+	if not SIMPLE_MODE:
+		_show_center("PLAYER %d LEFT" % (i + 1), 1.5)
 	print("Net: player %d left the game (%d playing)" % [i + 1, party_size()])
 	on_player_activity_changed(p)
 
@@ -1663,10 +1922,16 @@ func on_player_activity_changed(p) -> void:
 # --- Networked co-op (see docs/GAME_DEV_GUIDE.md) ----------------------------
 
 func on_client_joined() -> void:
+	if SIMPLE_MODE:
+		sound("pickup", 0.0, 0.8)
+		_show_center("HELLO TV!", 1.5)
+		return
 	_show_center("THE TV PLAYERS JOINED!", 1.5)
 
 
 func on_client_left() -> void:
+	if SIMPLE_MODE:
+		return  # keep playing; they can drop back in
 	_show_center("The TV players left - waiting for them to rejoin…", 0.0)
 
 
@@ -1733,7 +1998,10 @@ func make_snapshot() -> Array:
 	var ck := []
 	for c in get_tree().get_nodes_in_group("cocoa"):
 		ck.append([c.net_id, c.global_position, c.kind] if c.kind != "cocoa" else [c.net_id, c.global_position])
-	return [wave, score, game_over, seg_hp, ps, sm, ck, boss_hp, director().pack(), boss_name if boss_hp >= 0.0 else ""]
+	var snap := [wave, score, game_over, seg_hp, ps, sm, ck, boss_hp, director().pack(), boss_name if boss_hp >= 0.0 else ""]
+	if props:
+		snap.append_array([props.pack(), practice])
+	return snap
 
 
 func apply_snapshot(s: Array) -> void:
@@ -1755,6 +2023,9 @@ func apply_snapshot(s: Array) -> void:
 	if s.size() > 9:
 		director().unpack(s[8])
 		boss_name = s[9]
+	if s.size() > 11 and props:
+		props.unpack(s[10])
+		practice = s[11]
 
 
 func _sync_ghosts(list: Array, kind: String) -> void:
@@ -1809,7 +2080,7 @@ func apply_event(kind: String, args: Array) -> void:
 		"collapse":
 			collapse_fx(args[0], args[1], args[2])
 		"ball":
-			spawn_ball(args[0], args[1], args[2], 1.0, args[3], -1, true)
+			spawn_ball(args[0], args[1], args[2], 1.0, args[3], -1, true, args[4] if args.size() > 4 else "")
 		"center":
 			_show_center(args[0], args[1])
 		"remote_pause":
@@ -1824,6 +2095,9 @@ func apply_event(kind: String, args: Array) -> void:
 				players[mi].hud.hit_marker()
 		"hint", "catapult":
 			director().client_event(kind, args)
+		"prop":
+			if props:
+				props.client_event(args)
 
 
 # --- HUD ---------------------------------------------------------------------
@@ -1861,6 +2135,7 @@ func _build_hud() -> void:
 		+ "Keyboard: P1 WASD + mouse, hold click / Space to throw, E / right-click to pack  ·  P2 arrows, Enter throw, Ctrl pack\n" \
 		+ "More controllers: press A / Start to join (up to 6 TV players)  ·  Grab hot cocoa to warm up · stand next to a frozen friend to thaw them\n" \
 		+ "Survive %d waves and beat the YETI to save the village!" % FINALE_WAVE
+	help_label.visible = not SIMPLE_MODE
 
 
 func _show_center(text: String, duration: float, broadcast: bool = true) -> void:
@@ -1881,6 +2156,9 @@ func _update_hud() -> void:
 	if net.mode == "client" and not synced:
 		info_label.text = "Syncing with the VR player…"
 		return
+	if SIMPLE_MODE:
+		info_label.text = "WAVE %d" % wave if wave > 0 and not practice else ""
+		return
 	var wave_text := ("WAVE %d / %d" % [wave, FINALE_WAVE]) if wave <= FINALE_WAVE and not director().won else ("WAVE %d  ENDLESS" % wave)
 	info_label.text = "%s      SCORE %d      FORT %d%%" % [wave_text, score, int(fort_fraction() * 100.0)]
 	var boss := boss_text()
@@ -1899,7 +2177,7 @@ func _update_vr_center() -> void:
 		vr_center = Label3D.new()
 		vr_center.font_size = 48
 		vr_center.outline_size = 26
-		vr_center.no_depth_test = true
+		vr_center.no_depth_test = false
 		vr_center.render_priority = 10
 		vr_center.outline_render_priority = 9
 		vr_center.width = 900.0
@@ -1909,7 +2187,7 @@ func _update_vr_center() -> void:
 		vr_center.modulate = Color(1.0, 0.95, 0.85)
 		players[0].xr_camera.add_child(vr_center)
 		players[0]._set_layers(vr_center, players[0].viewmodel_layer())
-	vr_center.text = center_label.text
+	vr_center.text = preload("res://core/vr_text.gd").short(center_label.text)  # no walls of text in VR
 	vr_center.modulate.a = center_label.modulate.a
 	vr_center.outline_modulate = Color(0, 0, 0, center_label.modulate.a)
 	VrText.follow(vr_center, players[0].xr_camera, self, -0.1, 1.8)
@@ -1936,7 +2214,7 @@ func _update_vr_hurt(delta: float) -> void:
 		vr_hurt_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		vr_hurt_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		vr_hurt_mat.cull_mode = BaseMaterial3D.CULL_FRONT
-		vr_hurt_mat.no_depth_test = true
+		vr_hurt_mat.no_depth_test = false
 		vr_hurt_mat.render_priority = 20
 		vr_hurt_mat.albedo_color = Color(0.7, 0.9, 1.0, 0.0)
 		shell.material_override = vr_hurt_mat

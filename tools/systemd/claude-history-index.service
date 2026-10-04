@@ -1,0 +1,6 @@
+[Unit]
+Description=Add new Claude Code messages to ~/.claude/history.db
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/claude-history index -q

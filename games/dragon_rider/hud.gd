@@ -44,6 +44,9 @@ func _draw() -> void:
 	var h := size.y
 	var font := ThemeDB.fallback_font
 	var cream := Color(1.0, 0.96, 0.86)
+	if main.SIMPLE_MODE:
+		_draw_simple(s, w, h)
+		return
 	# Hurt flash: a warm red frame when a lantern pops.
 	if hurt_flash > 0.0:
 		draw_rect(Rect2(Vector2.ZERO, size), Color(1.0, 0.2, 0.2, 0.35 * hurt_flash), false, 18.0 * s)
@@ -109,6 +112,36 @@ func _draw() -> void:
 	var hs := int(17.0 * s)
 	var hh2 := font.get_multiline_string_size(help, HORIZONTAL_ALIGNMENT_CENTER, wrap, hs).y
 	_wrapped(Vector2(left, h - hh2 - 8.0 * s + font.get_ascent(hs)), help, hs, Color(1.0, 0.96, 0.86, 0.8), wrap)
+
+
+## Simple mode: no score, lanterns or help text. Markers (the next ring for the rider; your own
+## practice balloon and storm sprites for gunners), the crosshair, one short headline, and one short
+## control line while learning (practice and stage 1).
+func _draw_simple(s: float, w: float, h: float) -> void:
+	var cam: Camera3D = player.camera
+	if cam != null:
+		if player.index == 0:
+			var r: Dictionary = main.next_ring_info()
+			if not r.is_empty():
+				_marker(cam, r.pos, Color(1.0, 0.85, 0.3), 30.0 * s, s)
+		else:
+			var mine = main.practice_balloons.get(player.index)
+			if mine != null and is_instance_valid(mine):
+				_marker(cam, (mine as Node3D).global_position, player.color, 34.0 * s, s)
+			for sp in get_tree().get_nodes_in_group("dr_sprites"):
+				_marker(cam, (sp as Node3D).global_position, Color(0.85, 0.4, 1.0), 14.0 * s, s)
+			var cc := size * 0.5
+			var col := Color(1.0, 1.0, 1.0, 0.9).lerp(Color(1.0, 0.85, 0.3), hit_flash)
+			draw_arc(cc, (16.0 + hit_flash * 8.0) * s, 0.0, TAU, 24, col, 3.0 * s)
+			draw_circle(cc, 3.0 * s, col)
+	var a: float = main.center_alpha
+	var text: String = (main.center_text as String).get_slice("\n", 0)
+	if a > 0.01 and text != "":
+		var fs := int(64.0 * s)
+		_wrapped(Vector2(w * 0.04, h * 0.3), text, fs, Color(1.0, 0.95, 0.75, a), w * 0.92)
+	if main.phase == "practice" or main.level <= 1:
+		var line := "STICK = FLY" if player.index == 0 else "RT / A = BUBBLES"
+		_wrapped(Vector2(w * 0.04, h - 24.0 * s), line, int(26.0 * s), Color(1.0, 0.96, 0.86, 0.85), w * 0.92)
 
 
 func _wrapped(pos: Vector2, text: String, fsize: int, color: Color, width: float) -> void:

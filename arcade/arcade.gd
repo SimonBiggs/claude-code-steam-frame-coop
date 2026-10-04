@@ -40,6 +40,16 @@ const GAMES := [
 		"blurb": "Relaxing: VR casts and reels from the jetty; TV rowers herd fish and net treasure"},
 	{"id": "kart_race", "cat": "sports", "name": "KART RACE", "scene": "res://games/kart_race/main.tscn",
 		"blurb": "VR turns a real steering wheel; TV racers drive in split screen, with items and ramps"},
+	{"id": "tiny_town_tycoon", "cat": "cosy", "name": "TINY TOWN TYCOON", "scene": "res://games/tiny_town_tycoon/main.tscn",
+		"blurb": "Build a cosy toy town together: the mayor places the buildings, the drivers bring it to life"},
+	{"id": "party_board", "cat": "party", "name": "PARTY BOARD", "scene": "res://games/party_board/main.tscn",
+		"blurb": "A Mario-Party-style board game on a diorama island: roll, hop, shop and duel for STARS, with a minigame after every round"},
+	{"id": "mech_titans", "cat": "action", "name": "MECH TITANS", "scene": "res://games/mech_titans/main.tscn",
+		"blurb": "Giant robot vs cute kaiju: VR pilot punches and beams from the cockpit, TV jets, trucks, drones and tanks support"},
+	{"id": "roller_coaster", "cat": "cosy", "name": "COASTER CREW", "scene": "res://games/roller_coaster/main.tscn",
+		"blurb": "VR builds a roller coaster with their hands on a tabletop park; TV players ride it, hands up!"},
+	{"id": "mini_golf_party", "cat": "sports", "name": "MINI GOLF PARTY", "scene": "res://games/mini_golf_party/main.tscn",
+		"blurb": "Life-size mini golf in a sunny garden: swing a real putter in VR or aim and hold A on the TV, and everyone putts at once!"},
 ]
 ## Tabs on the TV (LB/RB) and in VR (stick left/right). Empty categories are hidden.
 const CATEGORIES := [
@@ -75,8 +85,15 @@ var starting := false
 
 
 func _ready() -> void:
+	get_tree().paused = false  # the lobby must never start paused (a game can leave the tree paused)
 	XRServer.world_scale = 1.0  # a game (Giant's Table) may have left the world scaled up
 	var wanted := OS.get_environment("ARCADE_GAME") if OS.has_environment("ARCADE_GAME") else ""
+	# ARCADE_GAME only picks the FIRST game: coming back to the arcade must show the lobby, not
+	# start that game again.
+	if get_tree().root.has_meta("arcade_auto_started"):
+		wanted = ""
+	elif wanted != "":
+		get_tree().root.set_meta("arcade_auto_started", true)
 	if wanted != "" or GAMES.size() == 1:
 		_launch(_index_of(wanted))
 		return
@@ -194,6 +211,9 @@ func _launch(index: int) -> void:
 
 
 func _process(_delta: float) -> void:
+	_ensure_shared_nodes()
+	_ensure_fullscreen()
+	_hide_tv_cursor()
 	if not has_meta("menu_v4") and (not buttons.is_empty() or grid == null) and status != null:
 		set_meta("menu_v4", true)  # hot reload: replace an older TV menu with the category tabs
 		for c in get_children():
@@ -214,7 +234,7 @@ func _process(_delta: float) -> void:
 			_join_lobby(OS.get_environment("DUO_JOIN"))
 	if vr_list:
 		_vr_input()
-		VrText.follow(vr_list, vr_cam, self, -0.1, 2.2)  # always findable, wherever you look
+		VrText.follow(vr_list, vr_cam, self, 0.25, 2.4)  # always findable; raised so a seated player's list stays above the floor
 		if not has_meta("vr_floor"):
 			set_meta("vr_floor", true)
 			_build_vr_floor()
@@ -402,6 +422,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			step = -1
 		elif pad.button_index == JOY_BUTTON_RIGHT_SHOULDER:
 			step = 1
+		elif pad.button_index == JOY_BUTTON_X:
+			# X picks the highlighted game too (kids pressed X and nothing happened).
+			var f := get_viewport().gui_get_focus_owner()
+			if f is BaseButton:
+				get_viewport().set_input_as_handled()
+				(f as BaseButton).pressed.emit()
+				return
 	var key := event as InputEventKey
 	if key and key.pressed and not key.echo:
 		if key.physical_keycode == KEY_Q or key.physical_keycode == KEY_PAGEUP:
@@ -453,7 +480,7 @@ func _build_vr_view() -> void:
 	vr_list = Label3D.new()
 	vr_list.font_size = 44
 	vr_list.outline_size = 22
-	vr_list.pixel_size = 0.003
+	vr_list.pixel_size = 0.0026
 	vr_list.width = 1100.0
 	vr_list.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	vr_list.modulate = Color(0.85, 0.97, 1.0)
@@ -483,7 +510,17 @@ func _refresh_vr() -> void:
 	if last < games.size():
 		lines.append("v more v")
 	lines.append("")
-	lines.append("Stick up/down: choose  ·  left/right: category\nTrigger: play  (or pick on the TV)")
+	lines.append("POINT + TRIGGER: PLAY")
+	# What each text line is, for pointing: a game index, -2 = the category line, -1 = nothing.
+	var rows: Array[int] = []
+	for k in lines.size():
+		rows.append(-1)
+	rows[2] = -2
+	var row := 4 + (1 if first > 0 else 0)
+	for k in range(first, last):
+		rows[row] = games[k]
+		row += 1
+	set_meta("vr_rows", rows)
 	vr_list.text = "\n".join(lines)
 
 
@@ -507,10 +544,80 @@ func _vr_input() -> void:
 				_show_category(next_tab, true)
 	elif absf(stick.x) < 0.3:
 		vr_stick_x_ready = true
+	var aim := _vr_pointed_row()
 	var trig := hand_r.get_float("trigger") > 0.6
+	if aim.x >= 0 and aim.x != selected:
+		_select(aim.x, true)  # pointing at a game highlights it
 	if trig and not trigger_was:
-		_start_everywhere(selected)
+		if aim.x == -2:
+			_switch_vr_tab(1 if aim.y > 0 else -1)
+		else:
+			_start_everywhere(selected)
 	trigger_was = trig
+
+
+## Simon: pick games by pointing. Returns (row value, side): the game index (or -2 for the category
+## line, -1 for nothing) under the right hand's ray, and which half of the line it hits (1 = right).
+## Also draws the pointer laser.
+func _vr_pointed_row() -> Vector2i:
+	var laser: MeshInstance3D = get_meta("vr_laser", null) if has_meta("vr_laser") else null
+	if laser == null:
+		laser = MeshInstance3D.new()
+		var cm := CylinderMesh.new()
+		cm.top_radius = 0.003
+		cm.bottom_radius = 0.003
+		cm.height = 1.0
+		cm.radial_segments = 6
+		cm.rings = 1
+		var m := StandardMaterial3D.new()
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.albedo_color = Color(0.4, 0.9, 1.0)
+		cm.material = m
+		laser.mesh = cm
+		add_child(laser)
+		set_meta("vr_laser", laser)
+	var out := Vector2i(-1, 0)
+	var from := hand_r.global_position
+	var dir := -hand_r.global_basis.z.normalized()
+	var length := 3.0
+	var rows: Array = get_meta("vr_rows", []) if has_meta("vr_rows") else []
+	var xf := vr_list.global_transform
+	var n := xf.basis.z.normalized()
+	var denom := dir.dot(n)
+	if absf(denom) > 0.05:
+		var t := (xf.origin - from).dot(n) / denom
+		if t > 0.0 and t < 6.0:
+			var local := xf.affine_inverse() * (from + dir * t)
+			var font: Font = vr_list.font if vr_list.font != null else ThemeDB.fallback_font
+			var lh := (font.get_height(vr_list.font_size) + vr_list.line_spacing) * vr_list.pixel_size
+			var top := lh * vr_list.text.count("\n") * 0.5 + lh * 0.5
+			var half_w := vr_list.width * vr_list.pixel_size * 0.5
+			var row := int(floor((top - local.y) / lh))
+			if absf(local.x) < half_w and row >= 0 and row < rows.size():
+				out = Vector2i(int(rows[row]), 1 if local.x > 0.0 else 0)
+				length = t
+	laser.visible = hand_r.get_has_tracking_data()
+	laser.global_transform = Transform3D(_laser_basis(dir, length), from + dir * length * 0.5)
+	return out
+
+
+func _laser_basis(dir: Vector3, length: float) -> Basis:
+	var up := dir
+	var side := up.cross(Vector3.UP if absf(up.y) < 0.95 else Vector3.RIGHT).normalized()
+	var fwd := side.cross(up).normalized()
+	return Basis(side, up * length, fwd)
+
+
+func _switch_vr_tab(step: int) -> void:
+	var t := tabs()
+	if t.is_empty():
+		return
+	var next_tab := wrapi(t.find(_cat_index_of(selected)) + step, 0, t.size())
+	var in_next := _games_in(next_tab)
+	if not in_next.is_empty():
+		_select(in_next[0], true)
+		if grid != null:
+			_show_category(next_tab, true)
 
 
 ## A glowing floor and a ring of pillars so the VR lobby isn't a black void.
@@ -565,3 +672,38 @@ func _listen_for_game() -> void:
 				mode = "client"
 				_launch(i)
 				return
+
+
+## The lobby doesn't use core/net.gd, so start the same root-level helpers the games get from it:
+## the VR text guard (also a capture mirror, so the live view isn't black here) and Claude's captions.
+func _ensure_shared_nodes() -> void:
+	var root := get_tree().root
+	for pair in [["vr_text_guard", "res://core/vr_text_guard.gd"], ["claude_caption", "res://addons/gdev/caption.gd"]]:
+		if root.has_meta(pair[0]) or not ResourceLoader.exists(pair[1]):
+			continue
+		var n: Node = (load(pair[1]) as GDScript).new()
+		root.set_meta(pair[0], n)
+		root.add_child.call_deferred(n)
+
+
+## The TV machine (no VR) runs fullscreen (Simon). Done once per launch, so F11/Alt+Enter still work.
+func _ensure_fullscreen() -> void:
+	var root := get_tree().root
+	if root.has_meta("fullscreen_done") or DisplayServer.get_name() == "headless":
+		return
+	root.set_meta("fullscreen_done", true)
+	var xr := XRServer.primary_interface
+	if xr != null and xr.is_initialized():
+		return  # the headset draws through OpenXR, not the window
+	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+
+
+## No mouse pointer over the TV picture (Simon); it comes back as soon as the mouse moves.
+func _hide_tv_cursor() -> void:
+	var root := get_tree().root
+	if root.has_meta("cursor_hidden") or DisplayServer.get_name() == "headless":
+		return
+	root.set_meta("cursor_hidden", true)
+	var xr := XRServer.primary_interface
+	if xr == null or not xr.is_initialized():
+		Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
