@@ -39,7 +39,7 @@ if PRINT:
 ino, pos = stat()  # start at the current end: never send old lines
 buf = b""
 while True:
-    time.sleep(0.5)
+    time.sleep(0.1)
     new_ino, size = stat()
     if new_ino != ino or size < pos:  # replaced or truncated: skip to the end
         ino, pos, buf = new_ino, size, b""

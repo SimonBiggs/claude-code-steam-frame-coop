@@ -27,7 +27,7 @@ HOST = "steamos@frame"
 LOG = Path.home() / "GodotProjects/duo-arena/.dev/voice.log"
 RATE = 16000
 FRAME = 480  # 30 ms
-MODEL = sys.argv[1] if len(sys.argv) > 1 else "medium.en"
+MODEL = sys.argv[1] if len(sys.argv) > 1 else "small.en"  # ~3x faster than medium.en on this CPU
 # Loudness (RMS) a 30 ms frame needs to count as speech. 180 also hears people across the room,
 # not just the headset wearer (that needed ~500); Whisper's VAD filter drops the extra non-speech.
 FLOOR = float(os.environ.get("VOICE_FLOOR", "180"))
@@ -100,7 +100,11 @@ def main() -> None:
     model = WhisperModel(MODEL, device="cpu", compute_type="int8", cpu_threads=6)
     speakers = Speakers()
     cmd = ["ssh", "-i", KEY, "-o", "BatchMode=yes", "-o", "ServerAliveInterval=5", HOST,
-           "XDG_RUNTIME_DIR=/run/user/1000 exec pw-record --target echo_cancel_source "
+           # Prefer the echo-cancelled mic; it disappears after the Frame sleeps, so fall back to
+           # the default source rather than recording silence.
+           "export XDG_RUNTIME_DIR=/run/user/1000; "
+           "src=$(pactl list short sources | grep -q echo_cancel_source && echo echo_cancel_source "
+           "|| pactl get-default-source); exec pw-record --target \"$src\" "
            f"--rate {RATE} --channels 1 --format s16 -"]
     backoff = 3
     was_listening = False
@@ -136,7 +140,7 @@ def main() -> None:
             speech.append(chunk)
             silent = 0 if loud else silent + 1
             too_long = len(speech) * FRAME > RATE * 15
-            if silent * FRAME > RATE * 0.8 or too_long:
+            if silent * FRAME > RATE * 0.5 or too_long:  # 0.5 s pause ends an utterance
                 audio = np.concatenate(speech) / 32768.0
                 speech, voiced = [], 0
                 if len(audio) < RATE * 0.5:
