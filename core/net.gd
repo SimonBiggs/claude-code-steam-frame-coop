@@ -527,6 +527,8 @@ func _check_vr_menu() -> void:
 		set_meta("btn_hold", 0.0)
 	var down: bool = hl.is_button_pressed("menu_button") or hl.is_button_pressed("by_button") \
 		or held_touch or (on_btn and trig and not paused) or tap_resume
+	if has_meta("leaving"):
+		down = false  # on the way to the arcade: a late trigger release must not pause again
 	if down and not menu_was_down:
 		print("Net: VR pause toggled")
 		if main.has_method("toggle_vr_pause"):

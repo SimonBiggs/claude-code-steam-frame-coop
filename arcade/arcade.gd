@@ -77,6 +77,7 @@ var starting := false
 
 
 func _ready() -> void:
+	get_tree().paused = false  # the lobby must never start paused (a game can leave the tree paused)
 	XRServer.world_scale = 1.0  # a game (Giant's Table) may have left the world scaled up
 	var wanted := OS.get_environment("ARCADE_GAME") if OS.has_environment("ARCADE_GAME") else ""
 	if wanted != "" or GAMES.size() == 1:
@@ -196,6 +197,7 @@ func _launch(index: int) -> void:
 
 
 func _process(_delta: float) -> void:
+	_ensure_shared_nodes()
 	if not has_meta("menu_v4") and (not buttons.is_empty() or grid == null) and status != null:
 		set_meta("menu_v4", true)  # hot reload: replace an older TV menu with the category tabs
 		for c in get_children():
@@ -567,3 +569,16 @@ func _listen_for_game() -> void:
 				mode = "client"
 				_launch(i)
 				return
+
+
+## The lobby doesn't use core/net.gd, so start the same root-level helpers the games get from it:
+## the VR text guard (also a capture mirror, so the live view isn't black here) and Claude's captions.
+func _ensure_shared_nodes() -> void:
+	var root := get_tree().root
+	for pair in [["vr_text_guard", "res://core/vr_text_guard.gd"], ["claude_caption", "res://addons/gdev/caption.gd"]]:
+		if root.has_meta(pair[0]) or not ResourceLoader.exists(pair[1]):
+			continue
+		var n: Node = (load(pair[1]) as GDScript).new()
+		root.set_meta(pair[0], n)
+		root.add_child.call_deferred(n)
+
