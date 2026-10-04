@@ -34,6 +34,7 @@ const Hints := preload("res://core/hints.gd")
 const Awards := preload("res://core/awards.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 const SkyKit := preload("res://core/sky_kit.gd")
+const VrText := preload("res://core/vr_text.gd")
 const BD := preload("res://games/party_board/board_data.gd")
 const BoardView := preload("res://games/party_board/board_view.gd")
 const TokenScript := preload("res://games/party_board/token.gd")
@@ -263,6 +264,58 @@ func to_world(p: Vector3) -> Vector3:
 ## World -> board units.
 func to_board(p: Vector3) -> Vector3:
 	return stage.to_local(p)
+
+
+# --- VR panels: big, ~1.5 m away and ABOVE the board ------------------------------------------------
+# Family play-test: the how-to cards were tiny and ~3 m away, and a menu sat partly inside the island
+# (a seated player's "eye level minus a bit" is inside the board). Every VR card / menu of this game
+# goes through vr_ui_opts(): 1.5 m away, and its bottom edge clear of the tallest thing on the table.
+
+const VR_UI_DIST := 1.5  ## metres from the eyes
+const VR_UI_CLEAR := 0.12  ## metres between the panel's bottom edge and the top of the board
+var _board_top := -1.0
+var _board_top_t := 0.0
+
+
+## The world height of the tallest thing on the table (board, minigame arena, tokens), cached for 1 s.
+func board_top_y() -> float:
+	var now := Time.get_ticks_msec() / 1000.0
+	if _board_top >= 0.0 and now - _board_top_t < 1.0:
+		return _board_top
+	_board_top_t = now
+	var top := TABLE_Y
+	var stack: Array[Node] = [stage]
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		stack.append_array(n.get_children())
+		var vi := n as GeometryInstance3D
+		if vi == null or vi is Label3D or not vi.is_visible_in_tree():
+			continue
+		var bb: AABB = vi.global_transform * vi.get_aabb()
+		var c := bb.get_center()
+		if Vector2(c.x, c.z).length() > TABLE_R + 0.2 or bb.size.y > 1.0:
+			continue
+		top = maxf(top, bb.end.y)
+	_board_top = minf(top, TABLE_Y + 0.7)
+	return _board_top
+
+
+## Height (vr_card / VrMenu units: metres above the eyes / COMFORT) that keeps a panel panel_h metres
+## tall above the board; want = the preferred height above the eyes in metres.
+func vr_ui_height(panel_h: float, want: float = 0.0) -> float:
+	if vr_rig == null or vr_rig.camera == null:
+		return want / VrText.COMFORT
+	var eye: float = vr_rig.camera.global_position.y
+	var need := board_top_y() + VR_UI_CLEAR + panel_h * 0.5 - eye
+	return maxf(want, need) / VrText.COMFORT
+
+
+## Options for HudKit.vr_card / vr_banner / vr_toast and core/vr_menu.gd: 1.5 m away, above the board.
+func vr_ui_opts(panel_h: float, extra: Dictionary = {}, want: float = 0.0) -> Dictionary:
+	var o := extra.duplicate()
+	o["distance"] = VR_UI_DIST / VrText.COMFORT
+	o["height"] = vr_ui_height(panel_h, want)
+	return o
 
 
 # --- Players and tokens -----------------------------------------------------------------------------

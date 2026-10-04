@@ -31,6 +31,7 @@ var vr_turn: Label3D
 var vr_rows: Array[Label3D] = []
 var vr_dots: Array[MeshInstance3D] = []
 var glove_label: Label3D
+const GLOVE_POS := Vector3(0.06, 0.05, 0.05)  ## left-controller space; MENU is at (-0.15, 0.02, 0.12)
 var marker: Node3D
 var steps_label: Label3D
 var _t := 0.0
@@ -355,8 +356,11 @@ func _build_vr() -> void:
 		dot.visible = false
 		vr_board.add_child(dot)
 		vr_dots.append(dot)
+	# Coins and stars on the back of the left glove, kept to the RIGHT of the hand: core/net.gd's MENU
+	# button sits at (-0.15, 0.02, 0.12) from the left controller and they overlapped (play-test).
+	# Short lines (max ~9 characters, ~0.11 m wide) centred at x = +0.06 stay > 0.14 m from it.
 	glove_label = UiKit.label3d("", 0.022, "gold", true)
-	glove_label.position = Vector3(0.0, 0.05, 0.06)
+	glove_label.position = GLOVE_POS
 	glove_label.rotation = Vector3(-1.2, 0.0, 0.0)
 	rig.hand_l.add_child(glove_label)
 
@@ -390,8 +394,8 @@ func _refresh_vr() -> void:
 		var its: PackedStringArray = []
 		for it in me.get("items", []):
 			its.append(Rules.item_name(String(it)))
-		glove_label.text = "COINS %d   STARS %d%s" % [int(me.get("coins", 0)), int(me.get("stars", 0)),
-			("\n" + ", ".join(its)) if not its.is_empty() else ""] if not me.is_empty() else ""
+		glove_label.text = "COINS %d\nSTARS %d%s" % [int(me.get("coins", 0)), int(me.get("stars", 0)),
+			("\nITEMS %d" % its.size()) if not its.is_empty() else ""] if not me.is_empty() else ""
 
 
 ## Hide the VR scoreboard while a minigame shows its own.
@@ -476,14 +480,15 @@ func banner(title: String, sub: String, style: String = "default", dur: float = 
 	if main.tv_ui != null:
 		HudKit.banner(main.tv_ui, title, sub, {"style": style, "duration": dur})
 	if main.vr_rig != null:
-		HudKit.vr_banner(main, main.vr_rig.camera, title, sub, {"style": style, "duration": dur,
-			"sound": "" if main.tv_ui != null else HudKit.BANNER_STYLES.get(style, HudKit.BANNER_STYLES["default"])[2]})
+		HudKit.vr_banner(main, main.vr_rig.camera, title, sub, main.vr_ui_opts(0.4, {"style": style, "duration": dur,
+			"sound": "" if main.tv_ui != null else HudKit.BANNER_STYLES.get(style, HudKit.BANNER_STYLES["default"])[2]}, 0.15))
 
 
 func toast(text: String, pid: int = -1, icon: String = "") -> void:
 	if main.tv_ui != null:
 		HudKit.toast(main.tv_ui, text, {"color": pid if pid >= 0 else "accent", "icon": icon})
 	if main.vr_rig != null:
-		HudKit.vr_toast(main, main.vr_rig.camera, text, {"color": main.color_of(pid) if pid >= 0 else UiKit.ACCENT})
+		HudKit.vr_toast(main, main.vr_rig.camera, text, main.vr_ui_opts(0.15,
+			{"color": main.color_of(pid) if pid >= 0 else UiKit.ACCENT}, -0.25))
 
 

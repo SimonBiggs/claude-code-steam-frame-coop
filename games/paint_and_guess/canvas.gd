@@ -85,6 +85,11 @@ var balloon_popped: Array[bool] = [false, false, false, false]
 var vote_root: Node3D
 var vote_cells: Array[Vector2] = []
 var vote_marks: MultiMeshInstance3D
+var word_card: MeshInstance3D  # secret: the glowing card behind the word (artist only)
+var guide_arrow: MeshInstance3D  # secret: bounces under the word card, pointing up at it
+var guide_brush: Node3D  # secret: a ghost brush that sweeps across the empty canvas ("paint here!")
+var guide_t := 0.0
+const WORD_Y := H * 0.5 + 0.34  # the word card's centre above the canvas centre: clear of the critters
 
 
 func _ready() -> void:
@@ -142,9 +147,10 @@ func _ready() -> void:
 	cursor.material_override = cursor_mat
 	board_root.add_child(cursor)
 	cursor.visible = false
-	word_label = _label(64, Color(1.0, 0.95, 0.6), Vector3(0, H * 0.5 + 0.24, 0.0))
+	word_label = _label(64, Color(1.0, 0.95, 0.6), Vector3(0, WORD_Y, 0.012))
 	word_label.layers = SECRET_LAYER
-	hint_label = _label(54, Color(0.7, 0.95, 1.0), Vector3(0, H * 0.5 + 0.24, 0.0))
+	hint_label = _label(40, Color(0.7, 0.95, 1.0), Vector3(0, WORD_Y, 0.012))
+	_build_guides()
 	info_label = _label(40, Color(1, 1, 1), Vector3(0, 0, 0.012))
 	info_label.width = (W - 0.1) / info_label.pixel_size
 	info_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -170,6 +176,66 @@ func _ready() -> void:
 	_build_tv_cursors()
 	_build_balloons()
 	set_height(cy)
+
+
+## The artist-only word card and two show-don't-tell helpers: an arrow bouncing up at the word and a
+## ghost brush painting a wavy line on the empty canvas. All on SECRET_LAYER: the TV never sees them.
+func _build_guides() -> void:
+	word_card = MeshInstance3D.new()
+	word_card.mesh = MeshKit.box(Vector3(W + 0.1, 0.2, 0.012))
+	var cm := StandardMaterial3D.new()
+	cm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	cm.albedo_color = Color(0.2, 0.12, 0.32)
+	word_card.material_override = cm
+	word_card.position = Vector3(0, WORD_Y, 0.0)
+	word_card.layers = SECRET_LAYER
+	word_card.visible = false
+	board_root.add_child(word_card)
+	var glow := StandardMaterial3D.new()
+	glow.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	glow.albedo_color = Color(1.0, 0.85, 0.3)
+	guide_arrow = MeshInstance3D.new()
+	guide_arrow.mesh = MeshKit.merge([
+		[MeshKit.cyl(0.0, 0.05, 0.07, 12), MeshKit.at(Vector3(0, 0.035, 0)), Color(1.0, 0.85, 0.3)],
+		[MeshKit.cyl(0.018, 0.018, 0.06, 8), MeshKit.at(Vector3(0, -0.03, 0)), Color(1.0, 0.85, 0.3)]])
+	guide_arrow.material_override = glow
+	guide_arrow.layers = SECRET_LAYER
+	guide_arrow.visible = false
+	board_root.add_child(guide_arrow)
+	guide_brush = Node3D.new()
+	var bm := MeshInstance3D.new()
+	bm.mesh = MeshKit.merge([
+		[MeshKit.cyl(0.012, 0.016, 0.22, 8), MeshKit.at(Vector3(0, 0.15, 0)), Color(0.85, 0.6, 0.35)],
+		[MeshKit.cyl(0.018, 0.018, 0.04, 8), MeshKit.at(Vector3(0, 0.03, 0)), Color(0.8, 0.8, 0.85)],
+		[MeshKit.sphere(0.022, 10), MeshKit.at(Vector3(0, 0.0, 0), Vector3(1.0, 1.4, 1.0)), Color(1.0, 0.85, 0.3)]])
+	bm.material_override = MeshKit.vertex_material(main.mats)
+	bm.layers = SECRET_LAYER
+	bm.rotation.z = -0.5
+	guide_brush.add_child(bm)
+	guide_brush.visible = false
+	board_root.add_child(guide_brush)
+
+
+## word_on: show the card behind the word; arrow_on: the bouncing arrow; brush_on: the ghost brush.
+func set_guides(word_on: bool, arrow_on: bool, brush_on: bool) -> void:
+	if word_card == null:
+		return
+	word_card.visible = word_on
+	guide_arrow.visible = arrow_on
+	guide_brush.visible = brush_on
+
+
+func _animate_guides(delta: float) -> void:
+	guide_t += delta
+	if guide_arrow != null and guide_arrow.visible:
+		var b := absf(sin(guide_t * 3.5))
+		guide_arrow.position = Vector3(0, H * 0.5 + 0.1 + b * 0.06, 0.02)
+		guide_arrow.scale = Vector3.ONE * (1.0 + 0.15 * b)
+	if guide_brush != null and guide_brush.visible:
+		var u := fmod(guide_t * 0.45, 1.0)
+		var x := lerpf(-W * 0.32, W * 0.32, u)
+		guide_brush.position = Vector3(x, 0.12 * sin(u * TAU * 1.5) - 0.05, 0.04)
+		guide_brush.scale = Vector3.ONE * (1.0 + 0.12 * sin(guide_t * 8.0))
 
 
 func _build_pots() -> void:
@@ -688,6 +754,7 @@ func _process(delta: float) -> void:
 			cmesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays2)
 	_animate_pots(delta)
 	_animate_audience(delta)
+	_animate_guides(delta)
 	_animate_balloons()
 	# Squash-and-stretch on pressed bubbles and hopping critters.
 	for n in pulse.keys():

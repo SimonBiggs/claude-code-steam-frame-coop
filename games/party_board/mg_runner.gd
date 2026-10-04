@@ -19,6 +19,7 @@ const GAMES := ["coin_catch", "hot_potato", "memory_tiles", "falling_platforms",
 	"sheep_herding", "treasure_dive"]
 const MG_DIR := "res://games/party_board/minigames/"
 const ARENA_POS := Vector3(0.0, 0.0, 11.5)
+const VR_CARD_H := 0.55  ## rough height of a VR how-to / result card (metres), to keep it above the board
 const FORMAT_NAMES := {"ffa": "FREE FOR ALL", "giant": "GIANT VS ISLANDERS", "teams": "TEAM GAME"}
 const TEAM_NAMES := ["RED TEAM", "BLUE TEAM"]
 const TEAM_COLORS := [Color(1.0, 0.4, 0.38), Color(0.35, 0.6, 1.0)]
@@ -379,8 +380,9 @@ func _show_howto(id: String) -> void:
 			line = "YOU vs EVERYONE!  " + line
 		elif format == "teams":
 			line = ("RED TEAM!  " if int((mg.teams as Dictionary).get(0, 0)) == 0 else "BLUE TEAM!  ") + line
+		# 1.5 m away, big letters, above the board (family play-test: "tiny and far away").
 		_howto_vr = HudKit.vr_card(main, main.vr_rig.camera, String(m.get("name", id)), line + "  TRIGGER: ready!",
-			{"width": 1.3, "distance": 1.9, "height": 0.25})
+			main.vr_ui_opts(VR_CARD_H, {"width": 1.2, "title_size": 0.1, "body_size": 0.065}, 0.1))
 		main.vr_rig.guard_trigger()
 
 
@@ -485,7 +487,8 @@ func _show_result(res: Dictionary) -> void:
 			var rd: Dictionary = r
 			if int(rd["pid"]) == 0:
 				mine = ("YOU WON!  +%d coins" if bool(rd["win"]) else "You got +%d coins") % int(rd["coins"])
-		_result_vr = HudKit.vr_card(main, main.vr_rig.camera, String(res.get("title", "")), mine, {"width": 1.2, "distance": 1.9, "height": 0.25})
+		_result_vr = HudKit.vr_card(main, main.vr_rig.camera, String(res.get("title", "")), mine,
+			main.vr_ui_opts(VR_CARD_H, {"width": 1.2, "title_size": 0.1, "body_size": 0.065}, 0.1))
 	if main.cam != null:
 		main.cam.shake(0.15)
 
