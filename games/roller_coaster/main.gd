@@ -35,7 +35,7 @@ const MIN_CARS := 4
 const G := 9.8
 const VMIN := 3.0
 const VMAX := 15.0
-const VMAX_VR := 7.5
+const VMAX_VR := 5.5
 const LIFT_V := 3.2
 const LAPS := 2
 const CHEER_TIME := 4.5
@@ -452,6 +452,7 @@ func _process(delta: float) -> void:
 		train_s = lerpf(train_s + train_v * delta, snap_s, 0.2) if phase == "ride" else snap_s
 		if phase == "ride":
 			train.place(track, train_s)
+	train.hide_slot0 = builder != null and builder.riding  # the VR player sits there themselves
 	train.set_hands(hand_bits, delta)
 	_effects(delta)
 	_spin_stars(delta)
@@ -581,7 +582,7 @@ func on_request(slot: int, action: String, args: Array) -> void:
 	match action:
 		"hands":
 			var up := bool(args[0]) if args.size() > 0 else false
-			if up and not bool(hands.get(slot, false)) and phase == "ride" and train_v > 7.0:
+			if up and not bool(hands.get(slot, false)) and phase == "ride" and train_v > 6.0:
 				sound("scream", -6.0, 0.9 + 0.05 * slot)
 			hands[slot] = up
 
@@ -603,7 +604,7 @@ func _bot_hands(delta: float) -> void:
 			var hy := minf(vr_rig.hand_l.global_position.y, vr_rig.hand_r.global_position.y)
 			up = hy > vr_rig.camera.global_position.y
 		elif phase == "ride":
-			up = train_v > 10.0 or fmod(bot_hands_t + i * 1.7, 7.0) < 1.2
+			up = train_v > 6.5 or fmod(bot_hands_t + i * 1.7, 7.0) < 1.2
 			if not up and _humans_riding() == 0:
 				for st in list:
 					var ds := wrapf(float((st as Array)[1]) - train.car_s(train_s, i), -length * 0.5, length * 0.5)
@@ -841,12 +842,12 @@ func _effects(delta: float) -> void:
 		if fx_lift_t <= 0.0:
 			fx_lift_t = 0.16
 			sfx.play_at("clack", park.to_global(xf.origin), -3.0, 1.0)
-	var fast := train_v > 10.0
+	var fast := train_v > 6.5
 	if fast and not fx_fast:
 		sfx.play_at("whoosh", park.to_global(xf.origin), 0.0, 0.8)
 	fx_fast = fast
 	for i in train.cars.size():
-		if (hand_bits >> i) & 1 == 1 and train_v > 8.0:
+		if (hand_bits >> i) & 1 == 1 and train_v > 6.0:
 			var t: float = fx_scream.get(i, 0.0)
 			if t <= 0.0:
 				fx_scream[i] = 1.6 + _rng.randf()
@@ -1034,7 +1035,7 @@ func _update_cameras(delta: float) -> void:
 			target = Transform3D(Basis.looking_at(focus - pos, Vector3.UP), pos)
 		else:
 			var a: float = cam_t * 0.12 + slot * 0.9
-			var pos := Vector3(sin(a) * 15.0, 9.0, cos(a) * 15.0)
+			var pos := Vector3(sin(a) * 19.0, 11.0, cos(a) * 19.0)
 			target = Transform3D(Basis.looking_at(-pos + Vector3(0, 1.0, 0), Vector3.UP), pos)
 		cam.global_transform = cam.global_transform.interpolate_with(target, k)
 

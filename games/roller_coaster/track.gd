@@ -46,7 +46,7 @@ static func station_end() -> Vector3:
 static func piece_len(t: String) -> float:
 	match t:
 		"up", "down":
-			return 2.6
+			return 2.8
 		"left", "right":
 			return TURN_R * PI * 0.5
 		"loop":
@@ -91,9 +91,9 @@ static func _piece(t: String, h: float, pos: Vector3, yaw: float, out) -> Array:
 	var y1 := y0
 	match t:
 		"up":
-			y1 = y0 + 1.6
+			y1 = y0 + 2.2
 		"down":
-			y1 = y0 - 1.6
+			y1 = y0 - 2.2
 		"splash":
 			y1 = MIN_Y
 	y1 = clampf(y1 + h, MIN_Y, MAX_Y)
