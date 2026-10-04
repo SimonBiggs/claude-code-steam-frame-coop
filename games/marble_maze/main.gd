@@ -1800,7 +1800,7 @@ func _update_vr_text() -> void:
 		vr_center.width = 1100.0
 		vr_center.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		add_child(vr_center)
-	vr_center.text = center_label.text
+	vr_center.text = preload("res://core/vr_text.gd").short(center_label.text)  # no walls of text in VR
 	vr_center.modulate.a = center_label.modulate.a
 	vr_center.outline_modulate = Color(0, 0, 0, center_label.modulate.a)
 	VrText.follow(vr_center, cam, self, -0.05, 1.8)

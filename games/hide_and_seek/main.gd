@@ -1650,7 +1650,7 @@ func _update_vr_text() -> void:
 		vr_center.text = "Eyes covered… counting!\n%d" % ceili(phase_t)
 		vr_center.modulate.a = 1.0
 	else:
-		vr_center.text = center_label.text
+		vr_center.text = preload("res://core/vr_text.gd").short(center_label.text)  # no walls of text in VR
 		vr_center.modulate.a = center_label.modulate.a
 	vr_center.outline_modulate.a = vr_center.modulate.a
 	VrText.follow(vr_center, cam, self, -0.12, 1.7)

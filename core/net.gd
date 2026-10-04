@@ -112,6 +112,7 @@ var menu_was_down := false
 
 func _process(delta: float) -> void:
 	_ensure_caption()
+	_ensure_fullscreen()
 	_track_pause()
 	if not get_tree().paused:
 		_since_unpause += delta
@@ -660,3 +661,14 @@ func _ensure_caption() -> void:
 	root.set_meta("claude_caption", c)
 	root.add_child.call_deferred(c)
 
+
+## The TV machine (no VR) runs fullscreen (Simon). Done once per launch, so F11/Alt+Enter still work.
+func _ensure_fullscreen() -> void:
+	var root := get_tree().root
+	if root.has_meta("fullscreen_done") or DisplayServer.get_name() == "headless":
+		return
+	root.set_meta("fullscreen_done", true)
+	var xr := XRServer.primary_interface
+	if xr != null and xr.is_initialized():
+		return  # the headset draws through OpenXR, not the window
+	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)

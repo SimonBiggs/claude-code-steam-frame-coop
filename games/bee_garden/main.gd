@@ -2008,7 +2008,7 @@ func _update_vr_center() -> void:
 		vr_center.pixel_size = 0.0024 * W.S
 		vr_center.layers = VR_LAYER
 		add_child(vr_center)
-	vr_center.text = center_label.text
+	vr_center.text = preload("res://core/vr_text.gd").short(center_label.text)  # no walls of text in VR
 	vr_center.modulate.a = center_label.modulate.a
 	vr_center.outline_modulate.a = center_label.modulate.a
 	# Far past the bed and above it (VrText adds comfort distance), so nothing nearer overlaps it.

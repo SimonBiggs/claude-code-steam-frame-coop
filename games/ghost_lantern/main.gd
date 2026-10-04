@@ -1747,7 +1747,7 @@ func _update_vr_center() -> void:
 		players[0].xr_camera.add_child(vr_center)
 		vr_center.position = Vector3(0.0, -0.1, -1.7)
 		players[0]._set_layers(vr_center, players[0].viewmodel_layer())
-	vr_center.text = center_label.text
+	vr_center.text = preload("res://core/vr_text.gd").short(center_label.text)  # no walls of text in VR
 	vr_center.modulate.a = center_label.modulate.a
 	vr_center.outline_modulate.a = center_label.modulate.a
 	VrText.follow(vr_center, players[0].xr_camera, self, -0.1, 1.7)

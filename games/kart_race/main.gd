@@ -2420,7 +2420,7 @@ func _update_vr_text(_dt: float) -> void:
 		vr_center.width = 1200.0
 		vr_center.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		cockpit.xr_origin.add_child(vr_center)  # rides along with the kart
-	vr_center.text = vr_results if state == "results" and vr_results != "" and not get_tree().paused else center_label.text
+	vr_center.text = vr_results if state == "results" and vr_results != "" and not get_tree().paused else preload("res://core/vr_text.gd").short(center_label.text)
 	vr_center.modulate.a = center_label.modulate.a
 	vr_center.outline_modulate = Color(0, 0, 0, center_label.modulate.a)
 	VrText.follow(vr_center, cam, cockpit.xr_origin, 0.3, 1.8)
