@@ -13,6 +13,7 @@ const MAX_FRAMES := 2400  # about 20 minutes at 0.5 s
 var dev_dir := ""
 var frames_dir := ""
 var hashes := {}
+var mtimes := {}
 var poll_t := 0.0
 var frame_t := 0.0
 var recording := true
@@ -107,6 +108,12 @@ func _scan_files(initial: bool) -> void:
 	_list_files("res://", paths)
 	var scene_changed := false
 	for path in paths:
+		# md5 of every script 4x a second cost ~14 ms on the Frame's main thread (VR hitches):
+		# only hash a file when its modified time changed.
+		var mt := FileAccess.get_modified_time(path)
+		if mtimes.get(path, -1) == mt and hashes.has(path):
+			continue
+		mtimes[path] = mt
 		var h := FileAccess.get_md5(path)
 		if hashes.get(path, "") == h:
 			continue
