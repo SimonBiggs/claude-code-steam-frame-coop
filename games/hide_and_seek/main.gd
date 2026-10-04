@@ -1787,9 +1787,13 @@ func jailed_count() -> int:
 	return n
 
 
+const SEEK_HINTS := false
+
 ## Hints for the seeker (David's idea): after 30 s of seeking, every 15 s a gold sparkle and a
 ## chime pop up where one of the remaining hiders is.
 func _seek_hints(delta: float) -> void:
+	if not SEEK_HINTS:
+		return  # off: Abigail asked twice ("it's cheating"); David can ask for it back
 	if net.mode == "client" or phase != "seek":
 		set_meta("hint_t", 30.0)
 		return
