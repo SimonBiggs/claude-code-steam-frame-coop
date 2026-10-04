@@ -11,6 +11,15 @@ extends Node3D
 ## "briefing" (Commander Sunny) -> "play" -> "results" -> hangar.
 ## Files: data.gd (tables), city.gd, mech.gd, cockpit.gd, pilot.gd, kaiju.gd, kaiju_ai.gd, bosses.gd,
 ## combat.gd (rules), support.gd (vehicles, AI, citizens), missions.gd (flow, stars), fx.gd.
+##
+## SIMPLE_MODE (data.gd; on): no hangar, briefing, shop, stars or results. The game starts straight in
+## round 1: a PRACTICE moment (VR: a ghost hand, ghost_hand.gd, shows a punch at a glowing target, then
+## at another; TV: one glowing ring each to fly / drive through, toys.gd), then ONE slow friendly kaiju
+## to punch until it's dizzy and goes home. A cheer, then the next round, which unlocks one new thing
+## (round 2 the beam, round 3 the dash; TV players get one new vehicle per round, Y swaps). The Titan
+## never loses: a knock-down is a quick sit-down. Everything in reach reacts (toys.gd): cockpit
+## buttons, horn, bobblehead, fuzzy dice, wipers; outside, buildings wobble and trees can be picked up
+## and thrown. Text: one short headline in VR, one short line on the TV.
 
 const NetScript := preload("res://core/net.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
@@ -38,6 +47,11 @@ const Combat := preload("res://games/mech_titans/combat.gd")
 const Support := preload("res://games/mech_titans/support.gd")
 const Missions := preload("res://games/mech_titans/missions.gd")
 const Kaiju := preload("res://games/mech_titans/kaiju.gd")
+const Toys := preload("res://games/mech_titans/toys.gd")
+const GhostHand := preload("res://games/mech_titans/ghost_hand.gd")
+
+const SIMPLE_MODE := Data.SIMPLE_MODE
+const CHEER_TIME := 5.5  ## SIMPLE_MODE: seconds of cheering between rounds
 
 const TV_MASK := 0xFFFFF & ~Data.LAYER_VR_ONLY
 const VR_MASK := 0xFFFFF & ~Data.LAYER_EXTERIOR & ~Data.LAYER_TV_ONLY & ~VrRig.AVATAR_LAYER
@@ -66,6 +80,8 @@ var fx: Fx
 var combat: Combat
 var support: Support
 var missions: Missions
+var toys: Toys
+var ghost: GhostHand
 var built_map := -1
 var test_hp_scale := 1.0  ## bots: shorter fights
 var auto_launch := -1  ## bots: launch this mission straight from the hangar
@@ -203,6 +219,17 @@ func _setup(mode: String) -> void:
 			split.set_bubble(m, UiKit.player_color(0), "TITAN PILOT")
 		elif vr_rig != null:
 			split.set_bubble(vr_rig.mirror, UiKit.player_color(0), "TITAN PILOT")
+	if SIMPLE_MODE:
+		toys = Toys.new()
+		toys.name = "Toys"
+		world_root.add_child(toys)
+		toys.setup(self)
+		mech.cockpit.simplify()
+		if vr_rig != null:
+			ghost = GhostHand.new()
+			ghost.name = "GhostHand"
+			ghost.main = self
+			mech.cockpit.add_child(ghost)
 	party.allow_slot0 = mode == "local" and vr_rig == null
 	awards.set_player(0, "TITAN")
 	if mode != "client":
@@ -214,20 +241,26 @@ func _setup(mode: String) -> void:
 		net.state_set("phase", "hangar")
 		net.state_set("veh", {})
 		_refresh_ai()
-	# The how-to card is for the TV views only: the VR pilot learns by doing (the PRACTICE warm-up at
-	# the start of a mission) and gets a short cockpit headline instead of a wall of text.
-	var vr_cam: Variant = hints.get("_vr_cam")
-	hints.set("_vr_cam", null)
-	hints.intro(Data.INTRO, {"duration": 12.0})
-	hints.set("_vr_cam", vr_cam)
-	if vr_rig != null:
-		cockpit_message("WELCOME, PILOT!", UiKit.ACCENT, 4.0)
+	if SIMPLE_MODE:
+		# No how-to card: everyone learns by doing in the practice moment. One headline.
+		if split != null:
+			HudKit.banner(_all_huds(), "MECH TITANS", "", {"duration": 2.5})
+		if vr_rig != null:
+			cockpit_message("MECH TITANS", UiKit.ACCENT, 2.5)
+	else:
+		# The how-to card is for the TV views only: the VR pilot learns by doing (the PRACTICE warm-up at
+		# the start of a mission) and gets a short cockpit headline instead of a wall of text.
+		hints.intro(Data.INTRO, {"duration": 12.0, "vr_card": "none"})
+		if vr_rig != null:
+			cockpit_message("WELCOME, PILOT!", UiKit.ACCENT, 4.0)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	ready_to_play = true
 	print("Mech Titans: %s mode%s" % [mode, " with a VR pilot" if vr_rig != null else ""])
-	if mode != "client" and auto_launch >= 0:
+	if mode != "client" and auto_launch >= 0 and not SIMPLE_MODE:
 		net.state_set("sel", auto_launch)
 		_set_map(auto_launch)
+	if mode != "client" and SIMPLE_MODE:
+		_launch(0)  # straight into round 1 (no hangar)
 
 
 func _mask_mirror(vp: SubViewport, mask: int) -> void:
@@ -256,6 +289,8 @@ func _build_map(i: int) -> void:
 		return
 	built_map = i
 	var m := Data.mission(i)
+	if toys != null:
+		toys.reset_world()
 	if combat != null:
 		combat.clear()
 	if city != null:
@@ -303,6 +338,8 @@ func _place_mech_at_start() -> void:
 # --- Upgrades and tools (host reads the save) ---------------------------------------------------------
 
 func has_upgrade(id: String) -> bool:
+	if SIMPLE_MODE:
+		return false  # no shop: everyone has the same friendly Titan
 	var s: Dictionary = net.state_get("save", {})
 	return (s.get("owned", []) as Array).has(id)
 
@@ -340,6 +377,8 @@ func _apply_upgrades() -> void:
 
 ## The tool lever (VR) / Y (TV pilot): next or previous unlocked arm tool.
 func cycle_tool(dir: int) -> void:
+	if SIMPLE_MODE:
+		return  # no arm tools: the fist is all you need
 	var list := tools_available()
 	if list.size() <= 1:
 		cockpit_message("MORE TOOLS IN THE HANGAR", UiKit.TEXT_DIM, 1.5)
@@ -353,6 +392,20 @@ func cycle_tool(dir: int) -> void:
 	cockpit_message(String(info["name"]), info["color"], 1.5)
 	sfx.play("equip", 0.0, 0.8)
 	pulse(0, 0.5, 0.08)
+
+
+## SIMPLE_MODE: may the pilot use `move` ("beam" / "dash") this round? Always true otherwise.
+func move_ok(move: String) -> bool:
+	if not SIMPLE_MODE:
+		return true
+	return Data.simple_has(move, int(net.state_get("mission", 0)))
+
+
+## SIMPLE_MODE: the vehicles TV players may use this round (all of them otherwise).
+func vehicle_kinds() -> Array[String]:
+	if not SIMPLE_MODE:
+		return Data.VEHICLES
+	return Data.simple_vehicles(int(net.state_get("mission", 0)))
 
 
 # --- Players ------------------------------------------------------------------------------------------
@@ -376,8 +429,9 @@ func _on_player_joined(slot: int, _device: int) -> void:
 			pilot.mode = "pad"
 			pilot.slot = 0
 			pilot.cam = c.camera
-			hints.hint("pilot_tv", "You pilot the TITAN! X punch, RT beam, LB block", {"to": 0, "times": 1})
-		else:
+			if not SIMPLE_MODE:
+				hints.hint("pilot_tv", "You pilot the TITAN! X punch, RT beam, LB block", {"to": 0, "times": 1})
+		elif not SIMPLE_MODE:
 			hints.hint("support_%d" % slot, "X: paint weak spots with your target laser!", {"to": slot, "icon": "eye"})
 	if slot > 0:
 		awards.set_player(slot, party.name_of(slot))
@@ -415,14 +469,15 @@ func _on_player_left(slot: int) -> void:
 
 
 func _free_kind(veh: Dictionary) -> String:
+	var kinds := vehicle_kinds()
 	var used := []
 	for k in veh:
 		if int(k) < Support.AI_BASE:
 			used.append(String(veh[k]))
-	for kind in Data.VEHICLES:
+	for kind in kinds:
 		if not used.has(kind):
 			return kind
-	return Data.VEHICLES[veh.size() % Data.VEHICLES.size()]
+	return kinds[veh.size() % kinds.size()]
 
 
 ## Host: AI vehicles fill in for the jobs no TV player is doing (always at least a jet, truck and drone,
@@ -443,6 +498,14 @@ func _refresh_ai() -> void:
 		var d: Dictionary = st
 		if d.has("boss") and ((d["boss"] as Array).has("moth") or (d["boss"] as Array).has("crab")):
 			needed.append("tank")
+	if SIMPLE_MODE:
+		# Helpers only of the kinds the TV players have unlocked (round 1: one jet).
+		var ok := Data.simple_vehicles(int(net.state_get("map", 0)))
+		var keep: Array[String] = []
+		for kind in needed:
+			if ok.has(kind):
+				keep.append(kind)
+		needed = keep
 	var room := maxi(0, 4 - humans.size())
 	var id := Support.AI_BASE
 	for kind in needed:
@@ -511,6 +574,8 @@ func cockpit_sparks() -> void:
 
 
 func hint_vr(id: String, text: String) -> void:
+	if SIMPLE_MODE:
+		return  # show, don't tell
 	if vr_rig != null:
 		hints.hint(id, text, {"to": "vr", "times": 1})
 	elif pilot.mode == "pad":
@@ -518,6 +583,8 @@ func hint_vr(id: String, text: String) -> void:
 
 
 func hint_tv(id: String, text: String, slot: int = -1) -> void:
+	if SIMPLE_MODE:
+		return
 	if net.mode == "host":
 		net.event("hint", [id, text, slot])
 	_hint_tv_local(id, text, slot)
@@ -535,6 +602,8 @@ func _hint_tv_local(id: String, text: String, slot: int) -> void:
 
 ## Every machine: a big banner (TV) / cockpit headline (VR).
 func announce(title: String, sub: String, style: String) -> void:
+	if SIMPLE_MODE:
+		sub = ""  # one short line on the TV
 	if split != null:
 		HudKit.banner(_all_huds(), title, sub, {"style": style, "duration": 2.4})
 	var c := UiKit.ACCENT
@@ -559,7 +628,7 @@ func radio(text: String) -> void:
 
 func _radio_local(text: String) -> void:
 	sfx.play("computer", -8.0, 1.3)
-	if split != null:
+	if split != null and not SIMPLE_MODE:
 		HudKit.toast(_all_huds(), "%s: %s" % [Data.COMMANDER, text], {"icon": "flag", "color": "gold", "duration": 4.0})
 
 
@@ -651,6 +720,11 @@ func _make_hud(slot: int, parent: Control) -> void:
 	var bb := UiKit.bar("hp", 340.0, 16.0, Color(1.0, 0.4, 0.35))
 	bv.add_child(bb)
 	boss.visible = false
+	if SIMPLE_MODE:
+		# No score, objective, armour or city readouts; the boss bar without a name.
+		card.visible = false
+		card2.visible = false
+		bn.visible = false
 	w["boss"] = boss
 	w["boss_name"] = bn
 	w["boss_bar"] = bb
@@ -672,7 +746,7 @@ func _make_hud(slot: int, parent: Control) -> void:
 		_refresh_vehicle_hud(slot)
 	else:
 		var jp := UiKit.panel("pill")
-		jp.add_child(UiKit.prompts([["A", "Join the support team"]]))
+		jp.add_child(UiKit.prompts([["A", "Join" if SIMPLE_MODE else "Join the support team"]]))
 		ui.add_child(jp)
 		jp.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
 		jp.grow_horizontal = Control.GROW_DIRECTION_BOTH
@@ -694,6 +768,26 @@ func _refresh_vehicle_hud(slot: int) -> void:
 		c.queue_free()
 	var row := UiKit.hbox()
 	bottom.add_child(row)
+	if SIMPLE_MODE:
+		# One short line: only what this player can do this round.
+		if slot == 0:
+			var p: Array = [["X", "Punch"]]
+			if move_ok("beam"):
+				p.append(["RT", "Beam"])
+			if move_ok("dash"):
+				p.append(["A", "Dash"])
+			row.add_child(UiKit.prompts(p))
+			return
+		var sv: Support.Vehicle = support.vehicles.get(slot, null)
+		if sv == null:
+			return
+		var si: Dictionary = Data.VEHICLE_INFO[sv.kind]
+		row.add_child(UiKit.icon(String(si["icon"]), si["color"], 30.0))
+		var sp: Array = [["A", String(si["a"])]]
+		if vehicle_kinds().size() > 1:
+			sp.append(["Y", "Swap"])
+		row.add_child(UiKit.prompts(sp))
+		return
 	if slot == 0:
 		row.add_child(UiKit.label("TITAN-1", "body", "info"))
 		row.add_child(UiKit.prompts([["X", "Punch"], ["RT", "Beam"], ["LB", "Block"], ["A", "Dash"], ["Y", "Tool"]]))
@@ -787,9 +881,10 @@ func _tick_hud(delta: float) -> void:
 	if reboot != _prev_reboot:
 		_prev_reboot = reboot
 		if not reboot and net.mode != "client" and String(net.state_get("phase", "")) == "play":
-			announce("TITAN BACK ONLINE!", "", "victory")
+			var back := "UP AGAIN!" if SIMPLE_MODE else "TITAN BACK ONLINE!"
+			announce(back, "", "victory")
 			if net.mode == "host":
-				net.event("announce", ["TITAN BACK ONLINE!", "", "victory"])
+				net.event("announce", [back, "", "victory"])
 
 
 # --- Hangar menus ---------------------------------------------------------------------------------------
@@ -885,7 +980,7 @@ func _menu_title(page: String) -> String:
 
 ## Open / rebuild the hangar menus for the current phase.
 func _refresh_menus() -> void:
-	var hangar := String(net.state_get("phase", "")) == "hangar" and ready_to_play
+	var hangar := String(net.state_get("phase", "")) == "hangar" and ready_to_play and not SIMPLE_MODE
 	# TV: one menu on the shared screen, driven by the first seat on this machine.
 	if split != null:
 		var seats := party.local_slots()
@@ -1033,6 +1128,9 @@ func _launch(i: int) -> void:
 	_apply_upgrades()
 	awards.reset()
 	missions.start(i)  # resets the score / meters; steps begin once the briefing is over
+	if SIMPLE_MODE:
+		_start_play()  # no briefing
+		return
 	missions.active = false
 	_play_briefing(i)
 
@@ -1065,9 +1163,20 @@ func _start_play() -> void:
 	net.state_set("phase", "play")
 	missions.active = true
 	sfx.play("go", 0.0)
-	announce("MISSION START!", "Go, Titans!", "level")
-	if net.mode == "host":
-		net.event("announce", ["MISSION START!", "Go, Titans!", "level"])
+	if SIMPLE_MODE:
+		_refresh_all_vehicle_huds()
+		net.event("unlocks", [])
+		var r := int(net.state_get("mission", 0))
+		var kinds := vehicle_kinds()
+		if r > 0 and kinds.size() > Data.simple_vehicles(r - 1).size():
+			# A new vehicle this round: its name + Y on the TV.
+			var info: Dictionary = Data.VEHICLE_INFO[kinds[kinds.size() - 1]]
+			_new_vehicle_toast(String(info["name"]))
+			net.event("newveh", [String(info["name"])])
+	else:
+		announce("MISSION START!", "Go, Titans!", "level")
+		if net.mode == "host":
+			net.event("announce", ["MISSION START!", "Go, Titans!", "level"])
 	if vr_rig != null:
 		vr_rig.guard_trigger()
 
@@ -1087,6 +1196,38 @@ func mission_finished(i: int, win: bool, stars: int, parts: int, data: Dictionar
 	net.state_set("results", data)
 	net.state_set("phase", "results")
 	results_t = 0.0
+
+
+## SIMPLE_MODE (host): the round's kaiju went home. Cheer for a moment, then the next round.
+func round_cleared(i: int) -> void:
+	net.state_set("results", {"win": true, "mission": i, "simple": true})
+	net.state_set("phase", "results")
+	results_t = 0.0
+	combat.announce("HOORAY!", "", "victory")
+
+
+## SIMPLE_MODE (host): a fresh city and the next round (it unlocks one new thing).
+func _next_round() -> void:
+	combat.clear()
+	var next := int(net.state_get("mission", 0)) + 1
+	net.state_set("sel", next)
+	net.state_set("bld", PackedByteArray())
+	net.state_set("cit", PackedByteArray())
+	net.state_set("rings", {})
+	_set_map(next)
+	_launch(next)
+
+
+func _refresh_all_vehicle_huds() -> void:
+	for slot in hud_w:
+		_refresh_vehicle_hud(int(slot))
+
+
+func _new_vehicle_toast(vname: String) -> void:
+	_refresh_all_vehicle_huds()
+	if split != null:
+		HudKit.toast(_all_huds(), "NEW: %s  (Y)" % vname, {"icon": "star", "color": "gold", "duration": 4.0})
+	sfx.play("reveal", -4.0)
 
 
 func _back_to_hangar() -> void:
@@ -1138,6 +1279,9 @@ func _on_state_changed(key: String, value: Variant) -> void:
 		"boss_intro":
 			var arr: Array = value
 			_boss_intro(arr[1])
+		"rings":
+			if toys != null:
+				toys.sync_rings(value)
 
 
 func _on_phase(phase: String) -> void:
@@ -1148,7 +1292,7 @@ func _on_phase(phase: String) -> void:
 		"hangar":
 			_hide_results()
 			music.play_mood("overworld")
-			if split != null:
+			if split != null and not SIMPLE_MODE:
 				HudKit.banner(_all_huds(), "TITAN HANGAR", "Pick a mission, buy upgrades. Y: change vehicle", {"duration": 3.0})
 		"briefing":
 			music.play_mood("tension")
@@ -1156,6 +1300,8 @@ func _on_phase(phase: String) -> void:
 				split.set_shared(false)
 		"play":
 			music.play_mood("battle")
+			if SIMPLE_MODE:
+				_refresh_all_vehicle_huds()
 			if net.mode == "client" and dlg.is_playing():
 				dlg.stop()
 		"results":
@@ -1170,7 +1316,9 @@ func _boss_intro(list: Array) -> void:
 			continue
 		var delay := float(i) * 2.6
 		get_tree().create_timer(delay + 0.5).timeout.connect(func() -> void:
-			if split != null:
+			if split != null and SIMPLE_MODE:
+				HudKit.banner(_all_huds(), String(info["name"]), "", {"style": "boss", "duration": 2.4})
+			elif split != null:
 				HudKit.banner(_all_huds(), String(info["name"]), String(info["title"]), {"style": "boss", "duration": 2.4})
 				HudKit.toast(_all_huds(), String(info["tip"]), {"icon": "eye", "color": "warn", "duration": 6.0})
 			cockpit_message(String(info["name"]) + "!", Color(1.0, 0.5, 0.4), 2.4)
@@ -1180,6 +1328,14 @@ func _boss_intro(list: Array) -> void:
 func _show_results(data: Dictionary) -> void:
 	_hide_results()
 	if data.is_empty():
+		return
+	if SIMPLE_MODE:
+		# A cheer instead of a results screen: music and stars bursting round the Titan.
+		music.play_mood("victory")
+		sfx.play("cheer", -2.0)
+		for k in 6:
+			var a := k * TAU / 6.0
+			fx.burst("stars", mech.chest_world() + Vector3(cos(a) * 6.0, 4.0 + (k % 2) * 3.0, sin(a) * 6.0), 3.0)
 		return
 	music.play_mood("victory" if bool(data.get("win", false)) else "defeat")
 	if split != null:
@@ -1220,9 +1376,10 @@ func on_request(slot: int, action: String, args: Array) -> void:
 				v.hold_x = bool(args[1])
 		"vehicle_next":
 			var veh: Dictionary = (net.state_get("veh", {}) as Dictionary).duplicate()
-			if veh.has(slot):
-				var i := Data.VEHICLES.find(String(veh[slot]))
-				veh[slot] = Data.VEHICLES[(i + 1) % Data.VEHICLES.size()]
+			var kinds := vehicle_kinds()
+			if veh.has(slot) and kinds.size() > 1:
+				var i := kinds.find(String(veh[slot]))
+				veh[slot] = kinds[(i + 1) % kinds.size()]
 				net.state_set("veh", veh)
 				_refresh_ai()
 		"hangar":
@@ -1295,6 +1452,8 @@ func _process(delta: float) -> void:
 			intent.erase("snap")
 			intent.erase("face")
 			intent["dash"] = false
+		if not move_ok("dash"):
+			intent["dash"] = false
 		mech.simulate(delta, intent)
 		combat.tick(delta)
 		if phase == "play":
@@ -1313,7 +1472,9 @@ func _process(delta: float) -> void:
 				_start_play()
 		elif phase == "results":
 			results_t += delta
-			if results_t > 40.0:
+			if SIMPLE_MODE and results_t > CHEER_TIME:
+				_next_round()
+			elif results_t > 40.0:
 				_back_to_hangar()
 		elif phase == "hangar" and auto_launch >= 0 and not dlg.is_playing():
 			var al := auto_launch
@@ -1322,6 +1483,10 @@ func _process(delta: float) -> void:
 	support.drive_local(delta, phase == "play" or phase == "hangar")
 	support.visual_tick(delta)
 	_tick_hud(delta)
+	if ghost != null:
+		var pk := missions.practice_kind if missions != null else ""
+		var gk := "punch" if pk.begins_with("punch") else ("beam" if pk == "beam" else "")
+		ghost.show_move(gk if phase == "play" else "", missions.practice_target if missions != null else Vector3.ZERO, delta)
 	if vr_rig != null:
 		var vig := clampf(mech.speed / Mech.WALK_SPEED * 0.55 + mech.turning * 0.75 + (0.9 if mech.dash_t > 0.0 else 0.0), 0.0, 1.0)
 		mech.cockpit.set_vignette(vig)
@@ -1362,6 +1527,10 @@ func apply_event(kind: String, args: Array) -> void:
 			_radio_local(String(args[0]))
 		"hint":
 			_hint_tv_local(String(args[0]), String(args[1]), int(args[2]))
+		"unlocks":
+			_refresh_all_vehicle_huds()
+		"newveh":
+			_new_vehicle_toast(String(args[0]))
 		"bought":
 			_bought_fx(String(args[0]))
 		"dlg":

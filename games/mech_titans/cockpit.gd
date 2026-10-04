@@ -215,12 +215,14 @@ func _build_holo() -> void:
 	var fill := Color(0.03, 0.08, 0.14, 0.55)
 	# Left: armour + tool.
 	var left := _panel(Vector3(-1.45, 1.25, -2.25), Vector2(0.95, 0.5), fill)
+	left.name = "ArmourBoard"
 	_label(left, "ARMOUR", 0.07, "dim", Vector3(-0.2, 0.15, 0.01))
 	armour_label = _label(left, "100%", 0.09, "good", Vector3(0.25, 0.15, 0.01))
 	armour_bar = _bar(left, Vector3(0, 0.0, 0.01), Vector2(0.8, 0.09), UiKit.GOOD)
 	tool_label = _label(left, "TOOL: MEGA FIST", 0.055, Color(0.6, 0.85, 1.0), Vector3(0, -0.15, 0.01))
 	# Right: energy + info (city damage / landmark).
 	var right_p := _panel(Vector3(1.45, 1.25, -2.25), Vector2(0.95, 0.5), fill)
+	right_p.name = "EnergyBoard"
 	_label(right_p, "ENERGY", 0.07, "dim", Vector3(-0.2, 0.15, 0.01))
 	energy_label = _label(right_p, "100%", 0.09, "info", Vector3(0.25, 0.15, 0.01))
 	energy_bar = _bar(right_p, Vector3(0, 0.0, 0.01), Vector2(0.8, 0.09), UiKit.MP)
@@ -243,6 +245,15 @@ func _build_holo() -> void:
 	message_label.rotation.x = 0.0
 	holo.add_child(message_label)
 	message_label.visible = false
+
+
+## SIMPLE_MODE: no number boards, no objective text, no tool lever. What stays: the big headline word,
+## the boss's health bar (no name) and the red warning light.
+func simplify() -> void:
+	for n in ["ArmourBoard", "EnergyBoard", "ObjectiveBoard"]:
+		(holo.get_node(n) as Node3D).visible = false
+	boss_label.visible = false
+	lever_pivot.visible = false
 
 
 # --- Per-frame values --------------------------------------------------------------------------------
@@ -315,6 +326,8 @@ func sparks() -> void:
 
 ## Feed hand positions in cockpit space. Returns +1 / -1 when the lever flips forward / back, else 0.
 func lever_update(hands_local: Array, delta: float) -> int:
+	if not lever_pivot.visible:
+		return 0
 	_lever_cool = maxf(0.0, _lever_cool - delta)
 	var knob := LEVER_BASE + Vector3(0, LEVER_LEN, 0)
 	var flip := 0

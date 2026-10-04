@@ -441,6 +441,8 @@ func tick(delta: float) -> void:
 
 
 func _laser(v: Vehicle) -> void:
+	if Data.SIMPLE_MODE:
+		return  # SIMPLE_MODE: no weak-spot painting (it needed explaining); A is the one action
 	var hit: Dictionary = main.combat._ray_kaiju(v.pivot(), v.aim_dir(), 140.0, 2.2)
 	if hit.is_empty() or int(hit["weak"]) < 0:
 		return

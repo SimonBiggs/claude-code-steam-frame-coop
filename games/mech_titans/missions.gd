@@ -33,6 +33,11 @@ var _warned_landmark := false
 var practice := 0
 var practice_t := 0.0
 var practice_ids: Array[int] = []
+## SIMPLE_MODE practice: one target at a time ("punch_l", "punch_r", "beam", "dash"); the ghost hand
+## (VR) shows the move at the current one. practice_kind / practice_target are read by main.gd.
+var practice_parts: Array[String] = []
+var practice_kind := ""
+var practice_target := Vector3.INF
 
 
 ## Host: begin mission i (the city is already built for it).
@@ -62,6 +67,19 @@ func start(i: int) -> void:
 	main.net.state_set("step", -1)
 	practice_ids.clear()
 	practice = 1 if (i == 0 or not main.has_meta("practiced")) else 0
+	practice_parts.clear()
+	practice_kind = ""
+	practice_target = Vector3.INF
+	if Data.SIMPLE_MODE:
+		# Practise only what is new this round: punches first, then the beam, then the dash.
+		if i == 0:
+			practice_parts.append("punch_l")
+			practice_parts.append("punch_r")
+		if i == int(Data.SIMPLE_MOVES["beam"]):
+			practice_parts.append("beam")
+		if i == int(Data.SIMPLE_MOVES["dash"]):
+			practice_parts.append("dash")
+		practice = 1 if not practice_parts.is_empty() else 0
 	if bool(main.test_boss_only) and not bool(main.test_practice):
 		practice = 0
 
@@ -97,7 +115,9 @@ func tick(delta: float) -> void:
 	step_t -= delta
 	if step < 0:
 		if step_t <= 0.0:
-			if practice > 0:
+			if practice > 0 and Data.SIMPLE_MODE:
+				_practice_simple(delta)
+			elif practice > 0:
 				_practice_tick(delta)
 			else:
 				if bool(main.test_boss_only):
@@ -169,6 +189,74 @@ func _practice_tick(delta: float) -> void:
 		main.radio("Great warm-up, Titans! Here they come!")
 	else:
 		step_t = 1.2
+
+
+## SIMPLE_MODE warm-up: one glowing target at a time. The headline is one word or two; the ghost hand
+## (VR) or the glow shows the rest. Never blocks: 25 s per target.
+func _practice_simple(delta: float) -> void:
+	var vr: bool = main.vr_rig != null
+	var part: String = practice_parts[0]
+	if practice_kind == "":
+		practice_kind = part
+		practice_t = 0.0
+		practice_ids.clear()
+		var spot := Vector3.INF
+		match part:
+			"punch_l":
+				spot = Vector3(-2.3, 6.0, -6.2)
+				main.combat.announce("PUNCH!" if vr else "X: PUNCH!", "", "info")
+			"punch_r":
+				spot = Vector3(2.3, 6.0, -6.2)
+			"beam":
+				spot = Vector3(0.0, 11.0, -40.0)
+				main.combat.announce("TRIGGER: BEAM!" if vr else "RT: BEAM!", "", "info")
+			"dash":
+				var p: Vector3 = main.mech.to_global(Vector3(0, 6.0, -34.0))
+				p.x = clampf(p.x, -Data.MAP + 8.0, Data.MAP - 8.0)
+				p.z = clampf(p.z, -Data.MAP + 8.0, Data.MAP - 8.0)
+				practice_target = p
+				main.toys.add_ring("dash", p)
+				main.combat.announce("A: DASH!", "", "info")
+		if spot != Vector3.INF:
+			var k: Kaiju = main.combat.spawn_practice(spot)
+			practice_ids.append(k.id)
+			practice_target = k.center()
+		main.sfx.play("ui_notify", -2.0)
+		return
+	practice_t += delta
+	var done := false
+	if part == "dash":
+		done = not main.toys.has_ring("dash")
+	else:
+		done = true
+		for id in practice_ids:
+			var k: Kaiju = main.combat.kaiju.get(id, null)
+			if k != null and k.state == "practice":
+				done = false
+				practice_target = k.center()
+	if not done and practice_t < 25.0:
+		return
+	for id in practice_ids:
+		var k: Kaiju = main.combat.kaiju.get(id, null)
+		if k != null and k.state == "practice":
+			main.combat.send_home(k, false)
+	if part == "dash":
+		main.toys.remove_ring("dash", false)
+	practice_ids.clear()
+	practice_kind = ""
+	practice_target = Vector3.INF
+	main.sfx.play("level_up" if done else "ui_notify", -2.0)
+	if done:
+		main.cockpit_message("YES!", Color(0.5, 1.0, 0.6), 1.2)
+	main.pulse(0, 0.6, 0.15)
+	main.pulse(1, 0.6, 0.15)
+	practice_parts.pop_front()
+	if practice_parts.is_empty():
+		practice = 0
+		main.set_meta("practiced", true)
+		step_t = 2.0
+	else:
+		step_t = 0.8
 
 
 func _next_step() -> void:
@@ -303,6 +391,9 @@ func rule_met(rule: Array) -> bool:
 
 func finish(win: bool) -> void:
 	active = false
+	if Data.SIMPLE_MODE:
+		main.round_cleared(index)  # no stars, parts or results screen: a cheer, then the next round
+		return
 	var stars := 0
 	var lines: Array = []
 	if win:
