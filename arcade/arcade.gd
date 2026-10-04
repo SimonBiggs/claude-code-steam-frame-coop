@@ -48,6 +48,8 @@ const GAMES := [
 		"blurb": "Giant robot vs cute kaiju: VR pilot punches and beams from the cockpit, TV jets, trucks, drones and tanks support"},
 	{"id": "roller_coaster", "cat": "cosy", "name": "COASTER CREW", "scene": "res://games/roller_coaster/main.tscn",
 		"blurb": "VR builds a roller coaster with their hands on a tabletop park; TV players ride it, hands up!"},
+	{"id": "mini_golf_party", "cat": "sports", "name": "MINI GOLF PARTY", "scene": "res://games/mini_golf_party/main.tscn",
+		"blurb": "Life-size mini golf in a sunny garden: swing a real putter in VR or aim and hold A on the TV, and everyone putts at once!"},
 ]
 ## Tabs on the TV (LB/RB) and in VR (stick left/right). Empty categories are hidden.
 const CATEGORIES := [
