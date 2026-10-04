@@ -34,6 +34,8 @@ func make_item(kind: int) -> Node3D:
 
 
 func team_color(pid: int) -> Color:
+	if teams.is_empty():
+		return color_of(pid)
 	return main.runner.TEAM_COLORS[int(teams.get(pid, 0))]
 
 
@@ -94,6 +96,8 @@ func _pop(id: int, pid: int) -> void:
 
 
 func team_winner() -> int:
+	if teams.is_empty():  # SIMPLE_MODE plays it free-for-all: the scores decide
+		return -2
 	var t := [0.0, 0.0]
 	for p in pids:
 		t[int(teams.get(p, 0))] += float(score.get(p, 0.0))

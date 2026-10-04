@@ -7,6 +7,11 @@ extends Node
 ## The flow runs on a Sequencer (sequencer.gd), so it pauses with the game and never awaits timers.
 ## CPU players (filling up to 4 seats) are decided here too; late TV joiners take over a CPU seat or
 ## join at the next turn with catch-up coins; players who leave are replaced by a CPU.
+## SIMPLE_MODE (main.simple): the title only lasts a moment (no setup menu), a PRACTICE roll for every
+## human (the VR ghost hand / the glowing A on the dice block show how), then SIMPLE_ROUNDS short rounds:
+## roll, hop (paths pick themselves: towards the STAR), and you pick the STAR up just by passing or
+## landing on it. Blue spaces: a bonus hop forward; red: slide back. No coins, items, shop, events,
+## duels, final turns or catch-up. A minigame after every round: the winner gets a STAR.
 
 const Seq := preload("res://games/party_board/sequencer.gd")
 const Rules := preload("res://games/party_board/rules.gd")
@@ -16,6 +21,11 @@ const Hints := preload("res://core/hints.gd")
 
 const CPU_NAMES := ["BOBO", "PIP", "MIMI", "TUTU", "ZAZA", "LULU", "KIKI"]
 const MIN_SEATS := 4
+const SIMPLE_ROUNDS := 4
+const SIMPLE_TITLE_T := 2.5  ## seconds on the title before the party starts by itself
+const SIMPLE_BONUS_HOPS := 2  ## blue space: hop this many spaces further
+const SIMPLE_BACK := 2  ## red space: slide back this many spaces
+const SIMPLE_AGAIN_T := 10.0  ## the winner moment, then a new party starts by itself
 
 var main: Node
 var seq: Seq
@@ -41,6 +51,9 @@ var takeover := {}  # pid -> true: a human takes this CPU seat after the current
 var shop_used := false
 var game_on := false
 var bot_land: Array = []  ## bots: space types to pretend the next landings are ("event", "duel"...)
+var bonus_moving := false  ## SIMPLE: the bonus hops of a blue space (no second landing)
+var practiced: Array = []  ## SIMPLE: pids that did their practice roll (bots)
+var results_age := 0.0  ## SIMPLE: game seconds since the winner moment started
 
 
 func _ready() -> void:
@@ -48,6 +61,10 @@ func _ready() -> void:
 	seq.name = "Seq"
 	add_child(seq)
 	rng.randomize()
+
+
+func _process(delta: float) -> void:
+	results_age += delta
 
 
 func _w(seconds: float) -> float:
@@ -76,6 +93,10 @@ func begin() -> void:
 	_roster()
 	net.state_set("star", -1)
 	net.state_set("phase", "title")
+	if main.simple:
+		main.fx("banner", ["PARTY BOARD!", "", "victory", SIMPLE_TITLE_T])
+		seq.wait(_w(SIMPLE_TITLE_T))
+		seq.add(start_game)
 
 
 ## Title screen roster: the humans here now, CPUs up to MIN_SEATS.
@@ -133,7 +154,8 @@ func on_human_joined(slot: int) -> void:
 		if bool(pl[slot]["cpu"]):
 			if int(main.net.state_get("cur", -1)) == slot and String(main.net.state_get("phase", "")) == "board":
 				takeover[slot] = true
-				main.fx("toast", ["%s takes over from %s next turn!" % [main.party.name_of(slot), String(pl[slot]["name"])], slot, "person"])
+				if not main.simple:
+					main.fx("toast", ["%s takes over from %s next turn!" % [main.party.name_of(slot), String(pl[slot]["name"])], slot, "person"])
 			else:
 				_take_over(slot)
 		return
@@ -149,7 +171,8 @@ func on_human_joined(slot: int) -> void:
 	order.append(slot)
 	main.net.state_set("order", order.duplicate())
 	_publish()
-	main.fx("toast", ["%s joined the party with %d coins!" % [String(r["name"]), avg], slot, "person"])
+	if not main.simple:
+		main.fx("toast", ["%s joined the party with %d coins!" % [String(r["name"]), avg], slot, "person"])
 	main.fx("sfx", ["party_horn", -4.0])
 
 
@@ -159,7 +182,10 @@ func _take_over(slot: int) -> void:
 	pl[slot]["name"] = _name_for(slot, false)
 	takeover.erase(slot)
 	_publish()
-	main.fx("toast", ["%s takes over from %s!" % [String(pl[slot]["name"]), was], slot, "person"])
+	if main.simple:
+		main.fx("sfx", ["party_horn", -4.0])
+	else:
+		main.fx("toast", ["%s takes over from %s!" % [String(pl[slot]["name"]), was], slot, "person"])
 
 
 func on_human_left(slot: int) -> void:
@@ -172,7 +198,8 @@ func on_human_left(slot: int) -> void:
 		pl[slot]["cpu"] = true
 		pl[slot]["name"] = _name_for(slot, true)
 		_publish()
-		main.fx("toast", ["%s left - %s plays for them" % [main.party.name_of(slot), String(pl[slot]["name"])], slot, "person"])
+		if not main.simple:
+			main.fx("toast", ["%s left - %s plays for them" % [main.party.name_of(slot), String(pl[slot]["name"])], slot, "person"])
 
 
 func _cpu(pid: int) -> bool:
@@ -226,6 +253,8 @@ func on_request(slot: int, action: String, args: Array) -> void:
 			_duel_hit(slot)
 		"again":
 			if String(net.state_get("phase", "")) == "results":
+				if main.simple and results_age < 3.0:
+					return
 				begin()
 		_:
 			main.runner.on_request(slot, action, args)
@@ -238,6 +267,10 @@ func start_game() -> void:
 	var cfg: Dictionary = net.state_get("settings", {})
 	rounds = main.rounds_override if main.rounds_override > 0 else int(cfg.get("turns", 10))
 	kid = bool(cfg.get("kid", false))
+	if main.simple:
+		rounds = main.rounds_override if main.rounds_override > 0 else SIMPLE_ROUNDS
+		kid = false
+		seq.clear()
 	_roster()
 	for k in pl:
 		pl[k] = _new_record(int(k), bool(pl[k]["cpu"]))
@@ -258,8 +291,12 @@ func start_game() -> void:
 	net.state_set("order", order.duplicate())
 	net.state_set("final", false)
 	_publish()
-	var spots: Array = main.data.star_spots().filter(func(s: int) -> bool: return main.data.distance(0, s) >= 6)
+	var spots: Array = main.data.star_spots().filter(func(s: int) -> bool: return main.data.distance(0, s) >= (4 if main.simple else 6) \
+		and (not main.simple or main.data.distance(0, s) <= 8))
 	net.state_set("star", int(spots[rng.randi() % spots.size()]))
+	if main.simple:
+		_simple_opening()
+		return
 	net.state_set("phase", "intro")
 	net.state_set("music", "party")
 	net.state_set("step", "overview")
@@ -285,6 +322,41 @@ func start_game() -> void:
 	seq.add(_start_round)
 
 
+## SIMPLE: one cheerful headline, a look at the STAR, then everyone's practice roll.
+func _simple_opening() -> void:
+	var net: Node = main.net
+	practiced.clear()
+	net.state_set("phase", "intro")
+	net.state_set("music", "party")
+	net.state_set("step", "overview")
+	main.fx("sfx", ["party_horn"])
+	main.fx("banner", ["LET'S PARTY!", "", "victory", 2.0])
+	seq.wait(_w(2.0))
+	seq.add(func() -> void:
+		main.net.state_set("step", "star_intro")
+		main.fx("sfx", ["sparkle"]))
+	seq.wait(_w(1.6))
+	seq.add(func() -> void:
+		main.net.state_set("phase", "board")
+		for p in order:
+			if not _cpu(int(p)):
+				var pid := int(p)
+				seq.add(func() -> void: _practice_roll(pid))
+		seq.add(_start_round))
+
+
+## SIMPLE: a practice roll: hit / throw the dice once (the ghost hand or the glowing A shows how); the
+## number pops up and the token cheers, nobody moves.
+func _practice_roll(pid: int) -> void:
+	if not pl.has(pid) or _cpu(pid):
+		return
+	main.net.state_set("cur", pid)
+	main.net.state_set("step", "start")
+	dice_n = 1
+	seq.wait(_w(0.6))
+	seq.add(func() -> void: _roll(pid, true))
+
+
 # --- Rounds and turns ------------------------------------------------------------------------------
 
 func _start_round() -> void:
@@ -294,6 +366,13 @@ func _start_round() -> void:
 	net.state_set("round", round_n)
 	net.state_set("phase", "board")
 	net.state_set("music", "tension" if bool(net.state_get("final", false)) else "party")
+	if main.simple:
+		if round_n == rounds and rounds > 1:
+			net.state_set("sky", "sunset")
+			main.fx("banner", ["LAST ROUND!", "", "boss", 1.8])
+			seq.wait(_w(1.6))
+		seq.add(_next_turn)
+		return
 	main.fx("banner", ["ROUND %d" % round_n, "of %d" % rounds, "default", 1.8])
 	seq.wait(_w(1.6))
 	if rounds >= 5 and round_n == rounds - 2:
@@ -344,7 +423,7 @@ func _turn(pid: int) -> void:
 	net.state_set("steps_left", 0)
 	main.fx("sfx", ["bell", -6.0])
 	seq.wait(_w(1.1))
-	if not (pl[pid]["items"] as Array).is_empty():
+	if not main.simple and not (pl[pid]["items"] as Array).is_empty():
 		seq.add(func() -> void: _item_phase(pid))
 	seq.add(func() -> void: _roll(pid))
 	seq.add(func() -> void: _end_turn(pid))
@@ -538,12 +617,12 @@ func _roll_value() -> int:
 	return rng.randi_range(1, 6)
 
 
-func _roll(pid: int) -> void:
+func _roll(pid: int, practice: bool = false) -> void:
 	var net: Node = main.net
 	dice_id += 1
 	dice_values = []
 	var mode := "cpu" if _cpu(pid) else ("vr" if main.is_local_vr(pid) else "tv")
-	net.state_set("dice", {"id": dice_id, "pid": pid, "n": dice_n, "mode": mode, "values": []})
+	net.state_set("dice", {"id": dice_id, "pid": pid, "n": dice_n, "mode": mode, "values": [], "practice": practice})
 	net.state_set("step", "roll")
 	if mode == "cpu":
 		for i in dice_n:
@@ -558,6 +637,14 @@ func _roll(pid: int) -> void:
 			while dice_values.size() < dice_n:
 				_add_die(_roll_value()))
 	seq.wait(_w(0.9))
+	if practice:
+		seq.add(func() -> void:
+			practiced.append(pid)
+			main.net.state_set("dice", {})
+			main.fx("sfx", ["correct", -4.0])
+			main.fx("anim", [pid, "cheer", 1.2]))
+		seq.wait(_w(1.0))
+		return
 	seq.add(func() -> void: _start_move(pid))
 
 
@@ -603,6 +690,9 @@ func _hop(pid: int) -> void:
 	var net: Node = main.net
 	var left := int(net.state_get("steps_left", 0))
 	if left <= 0:
+		if bonus_moving:
+			bonus_moving = false
+			return
 		seq.add(func() -> void: _land(pid))
 		return
 	var here := int(pl[pid]["space"])
@@ -630,7 +720,9 @@ func _hop_to(pid: int, to: int) -> void:
 	net.state_set("steps_left", left)
 	seq.wait(_w(0.36))
 	var star := int(net.state_get("star", -1))
-	if to == star:
+	if to == star and main.simple:
+		seq.add(func() -> void: _star_grab(pid))
+	elif to == star:
 		seq.add(func() -> void: _star_offer(pid))
 	elif main.data.type_of(to) == "shop" and left > 0 and not shop_used:
 		seq.add(func() -> void: _shop(pid, true))
@@ -653,7 +745,7 @@ func _choose_branch(pid: int, here: int, options: Array) -> void:
 	main.board.show_arrows(here, options, 0)
 	net.event("arrows", [here, options])
 	main.fx("sfx", ["ui_open", -4.0])
-	if _cpu(pid):
+	if _cpu(pid) or main.simple:  # SIMPLE: the path picks itself (towards the STAR)
 		seq.wait(_w(0.7))
 		seq.add(func() -> void:
 			on_request(pid, "branch_sel", [best]))
@@ -688,6 +780,18 @@ func _star_offer(pid: int) -> void:
 		seq.add(_move_star))
 
 
+## SIMPLE: passing or landing on the STAR picks it up.
+func _star_grab(pid: int) -> void:
+	pl[pid]["stars"] = int(pl[pid]["stars"]) + 1
+	pl[pid]["stars_bought"] = int(pl[pid]["stars_bought"]) + 1
+	_publish()
+	main.net.state_set("step", "star")
+	main.fx("star_fx", [pid, 1])
+	main.fx("banner", ["STAR!", "", "victory", 1.8])
+	seq.wait(_w(2.0))
+	seq.add(_move_star)
+
+
 func _move_star() -> void:
 	var cur := int(main.net.state_get("star", -1))
 	var spots: Array = main.data.star_spots().filter(func(s: int) -> bool: return s != cur and main.data.distance(cur, s) >= 5 and main.data.distance(s, cur) >= 5)
@@ -697,7 +801,8 @@ func _move_star() -> void:
 	main.net.state_set("star", to)
 	main.net.state_set("step", "star_move")
 	main.fx("sfx", ["whoosh"])
-	main.fx("banner", ["THE STAR FLEW AWAY!", "Find it at its new spot!", "info", 2.0])
+	if not main.simple:
+		main.fx("banner", ["THE STAR FLEW AWAY!", "Find it at its new spot!", "info", 2.0])
 	seq.wait(_w(2.2))
 	seq.add(func() -> void: main.net.state_set("step", "move"))
 
@@ -757,6 +862,9 @@ func _land(pid: int) -> void:
 		type = String(bot_land.pop_front())
 	var mult := 2 if bool(net.state_get("final", false)) else 1
 	net.state_set("step", "land")
+	if main.simple:
+		_land_simple(pid, sp, type)
+		return
 	match type:
 		"blue", "start":
 			_coins(pid, Rules.BLUE_COINS * mult)
@@ -775,6 +883,33 @@ func _land(pid: int) -> void:
 			main.fx("space_fx", [sp, Color(0.75, 0.5, 1.0)])
 			seq.add(func() -> void: _duel_start(pid))
 	seq.wait(_w(0.9))
+
+
+## SIMPLE: blue (and START) = hop SIMPLE_BONUS_HOPS further (picking up the STAR on the way), red =
+## slide back SIMPLE_BACK spaces. Shown by the space's colour, a sound and the token, no text.
+func _land_simple(pid: int, sp: int, type: String) -> void:
+	if type == "red":
+		main.fx("space_fx", [sp, Color(1.0, 0.35, 0.35)])
+		main.fx("sfx", ["boing", -3.0, 0.8])
+		main.fx("anim", [pid, "hurt", 0.6])
+		seq.wait(_w(0.6))
+		for i in SIMPLE_BACK:
+			seq.add(func() -> void:
+				var back: Array = main.data.prev_of(int(pl[pid]["space"]))
+				if not back.is_empty():
+					_move_to(pid, int(back[0])))
+			seq.wait(_w(0.45))
+	else:
+		main.fx("space_fx", [sp, Color(0.4, 0.7, 1.0)])
+		main.fx("sfx", ["power_up", -4.0])
+		main.fx("anim", [pid, "cheer", 0.6])
+		seq.wait(_w(0.6))
+		seq.add(func() -> void:
+			bonus_moving = true
+			main.net.state_set("steps_left", SIMPLE_BONUS_HOPS)
+			main.net.state_set("step", "move")
+			seq.add(func() -> void: _hop(pid)))
+	seq.wait(_w(0.6))
 
 
 func _coins(pid: int, n: int) -> void:
@@ -963,6 +1098,17 @@ func give_minigame_coins(rows: Array) -> void:
 		if bool(rd.get("win", false)):
 			pl[pid]["mg_wins"] = int(pl[pid]["mg_wins"]) + 1
 			main.awards.add(pid, "mg_wins")
+	_publish()
+
+
+## SIMPLE: every minigame winner gets a STAR.
+func give_minigame_stars(rows: Array) -> void:
+	for r in rows:
+		var rd: Dictionary = r
+		var pid := int(rd["pid"])
+		if pl.has(pid) and bool(rd.get("win", false)):
+			pl[pid]["stars"] = int(pl[pid]["stars"]) + 1
+			pl[pid]["mg_wins"] = int(pl[pid]["mg_wins"]) + 1
 	_publish()
 
 

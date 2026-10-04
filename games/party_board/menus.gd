@@ -6,6 +6,8 @@ extends Node
 ##    [seq, id]). CPU players are answered by the host (turn_flow.gd).
 ##  - the title-screen SETUP menu (turns, kid mode, start) for the first TV seat and the VR player;
 ##  - board input for local seats: hit the dice block (A), pick a branch (stick / point), Quick Draw.
+## SIMPLE_MODE: no setup menu (the party starts by itself) and no menus at all during play (turn_flow
+## never asks); A / TRIGGER on the winner moment starts the next party sooner.
 
 const UiKit := preload("res://core/ui_kit.gd")
 const UiMenu := preload("res://core/ui_menu.gd")
@@ -113,7 +115,7 @@ func _setup_items() -> Array:
 
 
 func _refresh_setup() -> void:
-	var title_on := String(main.net.state_get("phase", "")) == "title"
+	var title_on: bool = String(main.net.state_get("phase", "")) == "title" and not main.simple
 	if not title_on:
 		if setup_tv != null and is_instance_valid(setup_tv):
 			setup_tv.close()
@@ -162,6 +164,9 @@ func board_input(slot: int) -> void:
 	if get_tree().paused or main.net.just_unpaused():
 		return
 	var phase := String(main.net.state_get("phase", ""))
+	if main.simple and phase == "results" and main.party.just_pressed(slot, "accept"):
+		main.net.request(slot, "again", [])
+		return
 	if phase != "board":
 		return
 	var step := String(main.net.state_get("step", ""))
@@ -218,6 +223,10 @@ func _process(_delta: float) -> void:
 		return
 	var phase := String(main.net.state_get("phase", ""))
 	var step := String(main.net.state_get("step", ""))
+	if main.simple:  # paths pick themselves; the trigger on the winner moment: next party
+		if phase == "results" and main.vr_rig.trigger_pressed():
+			main.net.request(0, "again", [])
+		return
 	if phase == "board" and step == "branch":
 		var br: Dictionary = main.net.state_get("branch", {})
 		if int(br.get("pid", -1)) == 0:

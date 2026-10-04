@@ -6,6 +6,9 @@ extends Node3D
 ##    with the trigger, let go to THROW it onto the island; when it stops, the face pointing up is the
 ##    roll. Fell off the table or got stuck? It comes back. The TV machine sees the giant dice fly
 ##    (positions in the snapshot).
+## SIMPLE_MODE teaching (no text): a TV player's spinning block has a glowing, pulsing A button under
+## it; the VR player gets the ghost hand (ghost_hand.gd) grabbing and throwing the dice on the practice
+## roll, and again whenever the dice have waited a while.
 
 const MeshKit := preload("res://core/mesh_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")
@@ -32,6 +35,8 @@ var _cycle_t := 0.0
 var _t := 0.0
 var _hint_t := 0.0
 var _reported := false
+var _ghost_on := false
+const GHOST_AFTER := 6.0  ## SIMPLE: seconds of waiting before the ghost hand shows again (practice: at once)
 
 
 func _ready() -> void:
@@ -94,6 +99,8 @@ func _make_block(i: int, n: int) -> void:
 		l.transform = Transform3D(basis, off)
 		l.name = "Face%d" % f
 		mi.add_child(l)
+	if main.simple and String(state.get("mode", "")) == "tv":
+		b.add_child(_a_button())
 	b.set_meta("slot", i)
 	b.set_meta("n", n)
 	b.set_meta("value", 0)
@@ -102,6 +109,31 @@ func _make_block(i: int, n: int) -> void:
 	var tw := b.create_tween()
 	tw.tween_property(b, "scale", Vector3.ONE, 0.3).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	blocks.append(b)
+
+
+## SIMPLE: a glowing green A button under a TV player's dice block (readable from both sides).
+func _a_button() -> Node3D:
+	var root := Node3D.new()
+	root.name = "PressA"
+	root.position = Vector3(0, -1.15, 0)
+	root.add_child(MeshKit.instance(ResCache.get_or_make("pb_press_a_v1", _a_mesh), false))
+	for side in 2:
+		var l := UiKit.label3d("A", 0.55, Color(1, 1, 1), true)
+		l.outline_size = 8
+		l.outline_modulate = Color(0.05, 0.35, 0.1)
+		l.no_depth_test = false
+		l.double_sided = false
+		l.position = Vector3(0, 0, 0.07 if side == 0 else -0.07)
+		l.rotation.y = 0.0 if side == 0 else PI
+		root.add_child(l)
+	return root
+
+
+func _a_mesh() -> Resource:
+	var b := MeshKit.Builder.new()
+	b.cylinder(0.42, 0.42, 0.12, MeshKit.at(Vector3.ZERO, Vector3.ONE, Vector3(PI * 0.5, 0, 0)), Color(0.3, 0.95, 0.4), 20, true)
+	b.torus(0.42, 0.05, MeshKit.at(Vector3.ZERO, Vector3.ONE, Vector3(PI * 0.5, 0, 0)), Color(0.9, 1.0, 0.9), 20, 5, true)
+	return b.build()
 
 
 func _block_mesh() -> Resource:
@@ -121,6 +153,9 @@ func _refresh_blocks() -> void:
 			continue
 		var i := int(b.get_meta("slot"))
 		if i < values.size() and int(b.get_meta("value")) == 0:
+			var pa := b.get_node_or_null("PressA")
+			if pa != null:
+				pa.queue_free()
 			var v := int(values[i])
 			b.set_meta("value", v)
 			_set_faces(b, str(v), Color(0.9, 0.25, 0.2))
@@ -170,6 +205,9 @@ func _process(delta: float) -> void:
 			var want := tok.position + Vector3(side, 3.9 + 0.12 * sin(_t * 3.0 + i), 0)
 			b.position = b.position.lerp(want, 1.0 - exp(-12.0 * delta)) if b.position.length() > 0.01 else want
 			var mi := b.get_node("Cube") as Node3D
+			var pa := b.get_node_or_null("PressA") as Node3D
+			if pa != null:
+				pa.scale = Vector3.ONE * (1.0 + 0.18 * absf(sin(_t * 5.0)))
 			if int(b.get_meta("value")) == 0:
 				mi.rotation.y += delta * 7.0
 				mi.rotation.x = 0.25 * sin(_t * 5.0 + i)
@@ -182,6 +220,22 @@ func _process(delta: float) -> void:
 				mi.rotation.x = lerpf(mi.rotation.x, 0.0, 1.0 - exp(-10.0 * delta))
 	if not vr_dice.is_empty():
 		_vr_update(delta)
+	_update_ghost()
+
+
+## SIMPLE, VR player: the ghost hand shows how to grab and throw the dice (practice roll, or waiting).
+func _update_ghost() -> void:
+	var g: Node = main.ghost
+	if g == null:
+		return
+	var want: bool = not vr_dice.is_empty() and vr_waiting() and _held < 0 and not get_tree().paused \
+		and (bool(state.get("practice", false)) or _hint_t > GHOST_AFTER)
+	if want:
+		_ghost_on = true
+		g.call("show_throw", pedestal(0), main.to_world(Vector3(0, 1.0, 3.5)))
+	elif _ghost_on:
+		_ghost_on = false
+		g.call("hide_demo")
 
 
 # --- VR physical dice (host) ------------------------------------------------------------------------------
@@ -337,7 +391,10 @@ func _vr_update(delta: float) -> void:
 		var off_table: bool = d.global_position.y < float(main.TABLE_Y) - 0.15 or Vector2(d.global_position.x, d.global_position.z).length() > 1.6
 		if off_table:
 			_reset_die(i)
-			main.hud.toast("Oops! The dice fell off. Throw again!", 0, "question")
+			if main.simple:
+				main.sfx.play("boing", -4.0)
+			else:
+				main.hud.toast("Oops! The dice fell off. Throw again!", 0, "question")
 			continue
 		if d.linear_velocity.length() < 0.04 and d.angular_velocity.length() < 0.4 and _released_t[i] > 0.4:
 			_still_t[i] += delta

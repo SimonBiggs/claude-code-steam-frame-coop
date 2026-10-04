@@ -9,14 +9,24 @@ extends Node
 ## the arena from snapshots and effects (main.fx("mg_fx", ...)).
 ## The arena sits under main.stage at ARENA_POS (board units): on the VR table that is right in front
 ## of the GIANT, within reach; the TV camera looks at it from the north, the giant looming behind.
+## SIMPLE_MODE: only SIMPLE_GAMES (one button / one motion), always free-for-all, at most
+## SIMPLE_MAX_TIME seconds. No how-to card or READY check: the game's name as one headline and a 3 s
+## glowing demo while everyone can already try (VR: the ghost hand taps where to reach; TV players: a
+## glowing ring under their character, plus a pulsing A button in A games). No live scoreboard, no
+## coin table: "<NAME> WINS!", the winner cheers and gets a STAR (turn_flow.give_minigame_stars).
 
 const UiKit := preload("res://core/ui_kit.gd")
 const HudKit := preload("res://core/hud_kit.gd")
 const Rules := preload("res://games/party_board/rules.gd")
+const MeshKit := preload("res://core/mesh_kit.gd")
+const Creatures := preload("res://core/creatures.gd")
 
 ## Every minigame, in the order PB_ALL_MINIGAMES plays them.
 const GAMES := ["coin_catch", "hot_potato", "memory_tiles", "falling_platforms", "kart_dash", "balloon_pop",
 	"sheep_herding", "treasure_dive"]
+const SIMPLE_GAMES := ["coin_catch", "kart_dash", "balloon_pop"]
+const SIMPLE_DEMO_T := 3.0
+const SIMPLE_MAX_TIME := 25.0
 const MG_DIR := "res://games/party_board/minigames/"
 const ARENA_POS := Vector3(0.0, 0.0, 11.5)
 const VR_CARD_H := 0.55  ## rough height of a VR how-to / result card (metres), to keep it above the board
@@ -45,12 +55,14 @@ var _board: Control  ## TV: live scores
 var _timer: Control
 var _vr_scores: Label3D
 var _score_t := 0.0
+var _demo_nodes: Array[Node] = []  # SIMPLE: glowing rings / A buttons on the TV players' characters
+var _demo_on := false
 
 
 ## The minigames that exist (loaded lazily, so they hot-reload).
 func ids() -> Array:
 	var out: Array = []
-	for id in GAMES:
+	for id in (SIMPLE_GAMES if main.simple else GAMES):
 		if ResourceLoader.exists(MG_DIR + id + ".gd"):
 			out.append(id)
 	return out
@@ -103,7 +115,7 @@ func _next() -> void:
 		pids.append(int(p))
 	var giant: bool = main.has_vr() and pids.has(0)
 	var format := String(m.get("format", "ffa"))
-	if format == "giant" and not giant:
+	if format == "giant" and not giant or main.simple:
 		format = "ffa"
 	var teams := {}
 	if format == "giant":
@@ -124,7 +136,10 @@ func _next() -> void:
 	net.state_set("phase", "minigame")
 	net.state_set("music", String(m.get("music", "party")))
 	net.state_set("mg_phase", "howto")
-	_limit = float(m.get("time", 40.0)) * float(main.mg_time_scale)
+	_limit = float(m.get("time", 40.0))
+	if main.simple:
+		_limit = minf(_limit, SIMPLE_MAX_TIME)
+	_limit *= float(main.mg_time_scale)
 	net.state_set("mg_time", int(ceil(_limit)))
 	_phase = "howto"
 	_t = 0.0
@@ -144,6 +159,8 @@ func host_tick(delta: float) -> void:
 			for p in main.pids():
 				if not main.is_cpu(int(p)) and not ready.has(int(p)):
 					ready_all = false
+			if main.simple:
+				ready_all = _t > _w(SIMPLE_DEMO_T)
 			if (_t > _w(2.5) and ready_all) or _t > _w(14.0):
 				_phase = "countdown"
 				_t = 0.0
@@ -227,7 +244,18 @@ func _finish() -> void:
 			title = ("%s WINS!" % TEAM_NAMES[tw]) if tw >= 0 else "IT'S A DRAW!"
 		sub = "Teamwork pays off!"
 	rows.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return int(a["place"]) < int(b["place"]))
-	main.flow.give_minigame_coins(rows)
+	if main.simple:
+		var names: PackedStringArray = []
+		for r in rows:
+			if bool((r as Dictionary)["win"]):
+				names.append(main.name_of(int((r as Dictionary)["pid"])))
+		title = ("%s WIN%s!" % [" & ".join(names), "" if names.size() > 1 else "S"]) if not names.is_empty() else ""
+		if names.size() > 2:
+			title = "%d WINNERS!" % names.size()
+		sub = ""
+		main.flow.give_minigame_stars(rows)
+	else:
+		main.flow.give_minigame_coins(rows)
 	net.state_set("mg_result", {"rows": rows, "title": title, "sub": sub})
 	net.state_set("mg_phase", "result")
 	main.fx("sfx", ["time_up", -3.0])
@@ -281,6 +309,7 @@ func _on_mg(cfg: Dictionary) -> void:
 
 
 func _clear() -> void:
+	_hide_demo()
 	_hide_howto()
 	_hide_result()
 	for n: Variant in [_board, _timer]:
@@ -303,10 +332,15 @@ func _on_phase(phase: String) -> void:
 	var id := String(mg.cfg.get("id", ""))
 	match phase:
 		"howto":
-			_show_howto(id)
+			if main.simple:
+				_show_demo(id)
+			else:
+				_show_howto(id)
 		"countdown":
 			_hide_howto()
-			_make_scores()
+			_hide_demo()
+			if not main.simple:
+				_make_scores()
 			if main.tv_ui != null:
 				HudKit.countdown(main.tv_ui, 3)
 			if main.vr_rig != null:
@@ -314,12 +348,18 @@ func _on_phase(phase: String) -> void:
 					"go_sound": "" if main.tv_ui != null else "go"})
 		"play":
 			_hide_howto()
-			_make_scores()
+			_hide_demo()
+			if not main.simple:
+				_make_scores()
 			if main.tv_ui != null and (_timer == null or not is_instance_valid(_timer)):
 				_timer = HudKit.timer(main.tv_ui, {"seconds": float(main.net.state_get("mg_time", 30)), "warn": 5.0})
 		"result":
 			_hide_howto()
-			_show_result(main.net.state_get("mg_result", {}))
+			_hide_demo()
+			if main.simple:
+				_show_result_simple(main.net.state_get("mg_result", {}))
+			else:
+				_show_result(main.net.state_get("mg_result", {}))
 
 
 # --- How-to card (with the READY! check) ----------------------------------------------------------------------
@@ -386,6 +426,78 @@ func _show_howto(id: String) -> void:
 		main.vr_rig.guard_trigger()
 
 
+# --- SIMPLE: the 3-second glowing demo -------------------------------------------------------------------------
+
+func _show_demo(id: String) -> void:
+	_hide_demo()
+	_demo_on = true
+	var m := meta(id)
+	main.hud.banner(String(m.get("name", id.to_upper())), "", "info", SIMPLE_DEMO_T)
+	var uses_a := false
+	for c in m.get("tv", []):
+		if String((c as Array)[0]) == "A":
+			uses_a = true
+	if main.split == null:
+		return
+	for p in mg.pids:
+		var pid := int(p)
+		if main.is_cpu(pid) or (pid == 0 and mg.giant) or not mg.avatars.has(pid):
+			continue
+		var av: Node3D = mg.avatars[pid]
+		var b := MeshKit.Builder.new()
+		b.torus(0.9, 0.12, MeshKit.at(Vector3(0, 0.08, 0)), (main.color_of(pid) as Color).lightened(0.4), 20, 5, true)
+		var ring := MeshKit.instance(b.build(), false)
+		ring.name = "DemoRing"
+		av.add_child(ring)
+		_demo_nodes.append(ring)
+		if uses_a:
+			var a: Node3D = main.dice.call("_a_button")
+			a.position = Vector3(0, 3.2, 0)
+			av.add_child(a)
+			_demo_nodes.append(a)
+
+
+func _hide_demo() -> void:
+	for n in _demo_nodes:
+		if is_instance_valid(n):
+			n.queue_free()
+	_demo_nodes.clear()
+	if _demo_on and main.ghost != null:
+		main.ghost.hide_demo()
+	_demo_on = false
+
+
+func _update_demo() -> void:
+	if not _demo_on:
+		return
+	var k := 1.0 + 0.2 * absf(sin(Time.get_ticks_msec() / 1000.0 * 5.0))
+	for n in _demo_nodes:
+		if is_instance_valid(n):
+			(n as Node3D).scale = Vector3.ONE * k
+	if main.ghost != null and mg != null and is_instance_valid(mg) and mg.giant:
+		var g: Vector3 = mg.bot_vr_goal()
+		if g != Vector3.INF:
+			main.ghost.show_tap(mg.to_global(g))
+
+
+func _show_result_simple(res: Dictionary) -> void:
+	_hide_result()
+	if res.is_empty():
+		return
+	var title := String(res.get("title", ""))
+	if title != "":
+		main.hud.banner(title, "", "victory", 2.4)
+	for r in res.get("rows", []):
+		var rd: Dictionary = r
+		var p := int(rd["pid"])
+		if bool(rd["win"]) and mg.avatars.has(p):
+			var av: Node3D = mg.avatars[p]
+			Creatures.anim(av).play("victory", 2.5)
+			main.burst(main.to_board(av.global_position) + Vector3(0, 1.8, 0), Color(1.0, 0.9, 0.35), 20)
+	if main.cam != null:
+		main.cam.shake(0.15)
+
+
 func _teams_text() -> String:
 	var t: PackedStringArray = []
 	for team in 2:
@@ -450,6 +562,7 @@ func _score_rows() -> Array:
 func _process(delta: float) -> void:
 	if mg == null or not is_instance_valid(mg):
 		return
+	_update_demo()
 	_score_t -= delta
 	if _score_t > 0.0:
 		return

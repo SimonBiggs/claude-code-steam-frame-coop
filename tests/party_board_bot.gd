@@ -9,6 +9,10 @@ extends Node
 ## minigames (main.gd reads them). PB_ROUNDS overrides the 3 rounds.
 ## Local:     godot --headless --path . --fixed-fps 60 --quit-after 12000 res://tests/party_board_bot.tscn
 ## Networked: DUO_PORT=8030 DUO_HOST=1 ... & DUO_PORT=8030 DUO_JOIN=127.0.0.1 ... (same scene, real time)
+## SIMPLE_MODE (main.simple): the party starts by itself; checks the practice roll (every human), the
+## glowing A on TV dice blocks, the VR ghost hand, no menus / shop / duels, stars picked up on the board
+## and from minigames (only the simple ones), the winner moment and that the island reacts to touch
+## (the fake VR player's left hand pokes the star, a tree, a cloud, a house and a token).
 
 const BotKit := preload("res://tests/bot_kit.gd")
 
@@ -26,6 +30,10 @@ var _press_t := {}  # slot -> next time this seat may press A
 var _finish_at := -1.0
 var _vr_panel_n := 0  # VR cards / menus measured (family play-test: tiny, far, and one inside the board)
 var _vr_panel_bad: PackedStringArray = []
+var _poke_i := 0  # SIMPLE: which prop the fake VR left hand pokes next
+var _poke_t := 0.0
+var _final_roster: Array = []  # SIMPLE: the players when the winner moment started (a new party follows)
+var _final_winners: Array = []
 
 
 func _ready() -> void:
@@ -60,6 +68,10 @@ func _join() -> void:
 
 
 func _start() -> void:
+	if main.simple:  # the party starts by itself
+		if main.flow != null:
+			main.flow.bot_land = ["blue", "red", "blue", "red"]
+		return
 	if String(main.net.state_get("phase", "")) != "title":
 		return
 	if main.flow != null:
@@ -75,7 +87,7 @@ func _start() -> void:
 
 
 func _start_direct() -> void:
-	if main.flow != null and String(main.net.state_get("phase", "")) == "title":
+	if main.flow != null and String(main.net.state_get("phase", "")) == "title" and not main.simple:
 		main.flow.bot_land = ["shop", "event", "duel", "red", "blue", "event", "event"]
 		main.flow.on_request(0, "setup", ["start"])
 
@@ -110,10 +122,19 @@ func _watch() -> String:
 				parts.append("%s=%d(+%d)" % [main.name_of(int(r["pid"])), int(r["score"]), int(r["coins"])])
 			kit.info("%s: %s  %s" % [String(mg.get("id", "")), String(res.get("title", "")), " ".join(parts)])
 	if main.flow != null and not _star_rigged and phase == "board" and String(main.net.state_get("step", "")) == "roll" \
-			and int(main.net.state_get("round", 0)) >= 1 and seen.has("menu:shop"):
+			and int(main.net.state_get("round", 0)) >= 1 and (seen.has("menu:shop") or main.simple):
 		_star_rigged = true
 		main.flow.bot_star_ahead(int(main.net.state_get("cur", 0)))
+	if main.dice == null:
+		return ""
+	for b in main.dice.blocks:
+		if is_instance_valid(b) and b.get_node_or_null("PressA") != null:
+			seen["tv:press_a"] = true
+	if main.ghost != null and main.ghost.visible:
+		seen["vr:ghost_" + phase] = true
 	if phase == "results" and _finish_at < 0.0:
+		_final_roster = main.roster().duplicate(true)
+		_final_winners = (main.net.state_get("winners", []) as Array).duplicate() if main.net.state_get("winners", []) is Array else []
 		_finish_at = kit.t + (6.0 if host else 5.0)
 		kit.info("results are up")
 	if _finish_at > 0.0 and kit.t >= _finish_at and _finish_at < 1e8:
@@ -122,6 +143,16 @@ func _watch() -> String:
 			# PLAY AGAIN from the results screen goes back to the title / setup menu.
 			_finish_at = 2e9
 			var seats: Array[int] = main.party.local_slots()
+			seen.erase("phase:title")
+			if main.simple:
+				if not seats.is_empty():
+					kit.slot_press(main.party, seats[0], "accept")
+				else:
+					main.net.request(0, "again", [])
+				kit.at(kit.t + 3.0, "back at the start?", func() -> void:
+					kit.assert_true(seen.has("phase:title"), "A on the winner moment starts a new party")
+					kit.finish())
+				return ""
 			if main.ceremony.results_ui != null and not seats.is_empty():
 				kit.slot_press(main.party, seats[0], "accept")
 			else:
@@ -265,6 +296,8 @@ func _drive_vr(delta: float) -> void:
 			vm.confirm(mini(pick, vm.items.size() - 1))
 		return
 	_menu_t = 0.0
+	if main.simple and phase in ["board", "intro", "ceremony"]:
+		_poke_props(rig, delta)
 	if phase == "board" and step == "roll" and int((main.net.state_get("dice", {}) as Dictionary).get("pid", -1)) == 0:
 		_throw_dice(rig, delta)
 		return
@@ -282,6 +315,8 @@ func _drive_vr(delta: float) -> void:
 		return
 	if phase == "minigame":
 		var mph := String(main.net.state_get("mg_phase", ""))
+		if main.simple:  # the left glove waits up high (not near the right glove's wrist MENU)
+			kit.vr_reach(rig, 0, Vector3(-0.5, 1.75, 1.6), 3.0, delta)
 		if mph == "howto":
 			kit.vr_trigger(rig, 1.0 if fmod(kit.t, 0.6) < 0.3 else 0.0)
 		var mg: Node = main.runner.mg
@@ -330,6 +365,41 @@ func _throw_dice(rig: Node, delta: float) -> void:
 				_vr_phase = ""
 
 
+## SIMPLE: the left hand pokes things on the island in turn (they should react: main.props.touched).
+func _poke_props(rig: Node, delta: float) -> void:
+	var props: Node = main.props
+	if props == null:
+		return
+	_poke_t += delta
+	if _poke_t > 1.2:
+		_poke_t = 0.0
+		_poke_i += 1
+	var target := Vector3.INF
+	match _poke_i % 5:
+		0:
+			if main.board.star_node.visible:
+				target = main.board.star_top()
+		1:
+			var st: Dictionary = main.board.prop_sets[0]
+			var xf: Transform3D = (st["xfs"] as Array)[0]
+			target = xf.origin + Vector3(0, 0.9 * xf.basis.get_scale().y, 0)
+		2:
+			target = props.clouds[0].position
+		3:
+			if not props.houses.is_empty():
+				target = props.houses[0].position + Vector3(0, 0.7, 0)
+		4:
+			for pid in main.tokens:
+				target = (main.tokens[pid] as Node3D).position + Vector3(0, 1.0, 0)
+				break
+	if target != Vector3.INF:
+		kit.vr_reach(rig, 0, main.to_world(target), 3.0, delta)
+	# Keep the right glove up high and out of the way, or it presses the wrist MENU on the left glove.
+	var dice_mine: bool = String(main.net.state_get("step", "")) == "roll" and int((main.net.state_get("dice", {}) as Dictionary).get("pid", -1)) == 0
+	if not dice_mine:
+		kit.vr_reach(rig, 1, Vector3(0.5, 1.75, 1.6), 3.0, delta)
+
+
 func _report() -> String:
 	var ps: PackedStringArray = []
 	for p in main.roster():
@@ -349,6 +419,9 @@ func _checks() -> void:
 	kit.assert_true(main.roster().size() >= 4, "%s: at least 4 players (CPUs fill up)" % mode)
 	for s in ["step:roll", "step:move", "step:land", "phase:minigame"]:
 		kit.assert_true(seen.has(s), "%s: saw %s" % [mode, s])
+	if main.simple:
+		_checks_simple(mode)
+		return
 	if mode != "client":
 		for s in ["step:event", "step:duel", "menu:shop", "menu:duel"]:
 			kit.assert_true(seen.has(s), "%s: saw %s" % [mode, s])
@@ -379,3 +452,42 @@ func _checks() -> void:
 			kit.assert_true(seen.has("mg:" + String(id)), "%s: played minigame %s" % [mode, id])
 	if OS.has_environment("PB_MINIGAME"):
 		kit.assert_true(seen.has("mg:" + OS.get_environment("PB_MINIGAME")), "%s: played %s" % [mode, OS.get_environment("PB_MINIGAME")])
+
+
+func _checks_simple(mode: String) -> void:
+	var menus: PackedStringArray = []
+	var mgs: PackedStringArray = []
+	for k in seen:
+		if String(k).begins_with("menu:") and String(k) != "menu:":
+			menus.append(String(k))
+		if String(k).begins_with("mg:"):
+			mgs.append(String(k).substr(3))
+	kit.assert_true(menus.is_empty(), "%s: no menus pop up %s" % [mode, str(menus)])
+	for s in ["step:event", "step:duel", "step:item"]:
+		kit.assert_true(not seen.has(s), "%s: no %s" % [mode, s])
+	for id in mgs:
+		kit.assert_true(main.runner.SIMPLE_GAMES.has(id), "%s: %s is one of the simple minigames" % [mode, id])
+	kit.info("minigames played: %s" % ", ".join(mgs))
+	var stars := 0
+	for p in _final_roster:
+		stars += int((p as Dictionary)["stars"])
+	kit.assert_true(stars > 0, "%s: STARS were collected (%d)" % [mode, stars])
+	kit.assert_true(not _final_winners.is_empty(), "%s: a winner was crowned %s" % [mode, str(_final_winners)])
+	if mode != "client":
+		var grabbed := 0
+		for p in _final_roster:
+			grabbed += int((p as Dictionary)["stars_bought"])
+		kit.assert_true(grabbed > 0, "%s: someone picked up the STAR on the board" % mode)
+		kit.assert_true(not main.flow.practiced.is_empty(), "%s: practice rolls happened %s" % [mode, str(main.flow.practiced)])
+	if main.split != null and main.party.player_count() > 0:
+		kit.assert_true(seen.has("tv:press_a"), "%s: TV dice blocks show the glowing A" % mode)
+	if main.tv_ui != null:
+		kit.assert_true(main.hud.hint_label.text == "", "%s: no hint text under the turn pill" % mode)
+	if main.vr_rig != null:
+		kit.assert_true(seen.has("vr:throw"), "the fake VR player threw the dice")
+		kit.assert_true(seen.has("vr:ghost_board"), "the ghost hand showed how to throw the dice")
+		kit.assert_true(seen.has("vr:ghost_minigame"), "the ghost hand showed a minigame move")
+		kit.assert_true(main.hud.vr_turn.text == "" and main.hud.glove_label.text == "", "no text on the VR scoreboard / glove")
+		var kinds: Array = main.props.touched.keys()
+		kit.info("touched: %s" % str(kinds))
+		kit.assert_true(kinds.size() >= 4, "the island reacts to touch (%s)" % str(kinds))
