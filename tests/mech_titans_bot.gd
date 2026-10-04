@@ -76,12 +76,13 @@ func _ready() -> void:
 			var vr: bool = s == 0 and main.vr_rig != null
 			main._hangar("select", str(mission))
 			main._menu_chosen("launch", vr, s))
-	var end := 57.0 if not host else 58.0
-	if client:
-		end = 52.0
-	kit.at(end, "checks", func() -> void:
-		_checks()
-		kit.finish())
+	if host:
+		kit.at(50.0, "host checks (the TV machine is still connected)", _checks)
+		kit.at(58.0, "finish", kit.finish)
+	else:
+		kit.at(52.0 if client else 57.0, "checks", func() -> void:
+			_checks()
+			kit.finish())
 	kit.every(2.0, _report)
 	kit.every(0.4, _flow)
 
@@ -380,6 +381,8 @@ func _drive_vr(delta: float, phase: String) -> void:
 # --- Report and checks ------------------------------------------------------------------------------------
 
 func _report() -> String:
+	if main == null or main.combat == null:
+		return "BOT: starting"
 	var bosses := 0
 	var hp := 0.0
 	for k in main.combat.active_bosses():
