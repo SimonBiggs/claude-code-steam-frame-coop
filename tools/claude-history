@@ -1,0 +1,168 @@
+#!/usr/bin/env python3
+"""claude-history: every Claude Code message on this machine in a searchable SQLite database.
+
+  claude-history index                 add new messages from ~/.claude/projects/**/*.jsonl (incremental)
+  claude-history search QUERY [-n N] [--role R] [--session S] [--since YYYY-MM-DD]
+                                       full-text search (SQLite FTS5 syntax: words, "phrases", OR, NEAR, prefix*)
+  claude-history show ID [-c N]        a message with N messages of context around it
+  claude-history sessions [-n N]       sessions with first/last time and message count
+  claude-history stats
+
+Database: ~/.claude/history.db (table messages + FTS5 index messages_fts). Roles: user, assistant,
+tool_use, tool_result. Agent transcripts (subagents/*.jsonl) are included, with agent = their id.
+claude-history-index.timer runs `index` every 5 minutes.
+"""
+import argparse, glob, json, os, sqlite3, sys
+from pathlib import Path
+
+DB = Path(os.environ.get("CLAUDE_HISTORY_DB", Path.home() / ".claude/history.db"))
+ROOT = Path.home() / ".claude/projects"
+MAX_TEXT = 8000  # tool results can be huge; keep the start
+
+
+def connect() -> sqlite3.Connection:
+    db = sqlite3.connect(DB)
+    db.executescript("""
+    CREATE TABLE IF NOT EXISTS files (path TEXT PRIMARY KEY, offset INTEGER NOT NULL DEFAULT 0);
+    CREATE TABLE IF NOT EXISTS messages (
+        id INTEGER PRIMARY KEY, uuid TEXT UNIQUE, session TEXT, agent TEXT, project TEXT,
+        ts TEXT, role TEXT, tool TEXT, text TEXT);
+    CREATE INDEX IF NOT EXISTS messages_session ON messages(session, ts);
+    CREATE INDEX IF NOT EXISTS messages_ts ON messages(ts);
+    CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+        text, content='messages', content_rowid='id', tokenize='porter unicode61');
+    CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
+        INSERT INTO messages_fts(rowid, text) VALUES (new.id, new.text); END;
+    """)
+    return db
+
+
+def blocks(entry: dict):
+    """Yield (role, tool, text) for one transcript line."""
+    t = entry.get("type")
+    msg = entry.get("message") or {}
+    content = msg.get("content")
+    if t not in ("user", "assistant") or content is None:
+        return
+    if isinstance(content, str):
+        yield t, None, content
+        return
+    for b in content:
+        if not isinstance(b, dict):
+            continue
+        bt = b.get("type")
+        if bt == "text" and b.get("text"):
+            yield t, None, b["text"]
+        elif bt == "tool_use":
+            inp = b.get("input") or {}
+            desc = inp.get("description") or ""
+            body = inp.get("command") or inp.get("prompt") or inp.get("file_path") or json.dumps(inp)[:2000]
+            yield "tool_use", b.get("name"), (desc + "\n" if desc else "") + str(body)
+        elif bt == "tool_result":
+            c = b.get("content")
+            if isinstance(c, list):
+                c = "\n".join(x.get("text", "") for x in c if isinstance(x, dict))
+            if c:
+                yield "tool_result", None, str(c)[:MAX_TEXT]
+
+
+def index(db: sqlite3.Connection, quiet: bool = False) -> int:
+    added = 0
+    for path in glob.glob(str(ROOT / "**/*.jsonl"), recursive=True):
+        size = os.path.getsize(path)
+        row = db.execute("SELECT offset FROM files WHERE path = ?", (path,)).fetchone()
+        start = row[0] if row else 0
+        if size < start:
+            start = 0  # file was rewritten
+        if size == start:
+            continue
+        rel = Path(path).relative_to(ROOT)
+        project = rel.parts[0]
+        agent = Path(path).stem.removeprefix("agent-") if "subagents" in rel.parts else None
+        with open(path, "rb") as f:
+            f.seek(start)
+            data = f.read(size - start)
+        end = data.rfind(b"\n") + 1  # only whole lines; the rest is read next time
+        pos = start
+        for line in data[:end].splitlines(keepends=True):
+            line_pos, pos = pos, pos + len(line)
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            session = e.get("sessionId") or (rel.parts[1] if len(rel.parts) > 2 else Path(path).stem)
+            for i, (role, tool, text) in enumerate(blocks(e)):
+                # A resumed session repeats earlier messages (same uuid), so key on the session too.
+                uid = f"{session}:{e.get('uuid') or f'{rel}@{line_pos}'}:{i}"
+                cur = db.execute(
+                    "INSERT OR IGNORE INTO messages(uuid, session, agent, project, ts, role, tool, text) "
+                    "VALUES (?,?,?,?,?,?,?,?)",
+                    (uid, session, agent, project, e.get("timestamp"), role, tool, text))
+                added += cur.rowcount
+        db.execute("INSERT INTO files(path, offset) VALUES (?, ?) ON CONFLICT(path) DO UPDATE SET offset = ?",
+                   (path, start + end, start + end))
+    db.commit()
+    if not quiet:
+        print(f"indexed {added} new messages")
+    return added
+
+
+def short(text: str, n: int = 220) -> str:
+    t = " ".join(text.split())
+    return t if len(t) <= n else t[: n - 1] + "…"
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("index"); p.add_argument("-q", action="store_true")
+    p = sub.add_parser("search"); p.add_argument("query"); p.add_argument("-n", type=int, default=20)
+    p.add_argument("--role"); p.add_argument("--session"); p.add_argument("--since")
+    p = sub.add_parser("show"); p.add_argument("id", type=int); p.add_argument("-c", type=int, default=3)
+    p = sub.add_parser("sessions"); p.add_argument("-n", type=int, default=20)
+    sub.add_parser("stats")
+    a = ap.parse_args()
+    db = connect()
+    if a.cmd == "index":
+        index(db, a.q)
+    elif a.cmd == "search":
+        index(db, quiet=True)
+        sql = ("SELECT m.id, m.ts, m.role, m.session, m.agent, snippet(messages_fts, 0, '[', ']', '…', 24) "
+               "FROM messages_fts JOIN messages m ON m.id = messages_fts.rowid WHERE messages_fts MATCH ?")
+        args: list = [a.query]
+        if a.role:
+            sql += " AND m.role = ?"; args.append(a.role)
+        if a.session:
+            sql += " AND m.session LIKE ?"; args.append(a.session + "%")
+        if a.since:
+            sql += " AND m.ts >= ?"; args.append(a.since)
+        sql += " ORDER BY m.ts DESC LIMIT ?"; args.append(a.n)
+        for mid, ts, role, sess, agent, snip in db.execute(sql, args):
+            who = f"{sess[:8]}" + (f"/agent {agent[:8]}" if agent else "")
+            print(f"#{mid} {ts[:19] if ts else '?'} {role:<11} {who}  {short(snip, 300)}")
+    elif a.cmd == "show":
+        r = db.execute("SELECT session, agent, ts FROM messages WHERE id = ?", (a.id,)).fetchone()
+        if not r:
+            sys.exit("no such message")
+        rows = db.execute(
+            "SELECT id, ts, role, tool, text FROM messages WHERE session = ? AND agent IS ? "
+            "AND id BETWEEN ? AND ? ORDER BY id", (r[0], r[1], a.id - a.c, a.id + a.c)).fetchall()
+        for mid, ts, role, tool, text in rows:
+            mark = ">>" if mid == a.id else "  "
+            print(f"{mark} #{mid} {ts[:19] if ts else '?'} {role}{' ' + tool if tool else ''}\n{text[:3000]}\n")
+    elif a.cmd == "sessions":
+        for s, first, last, n in db.execute(
+                "SELECT session, MIN(ts), MAX(ts), COUNT(*) FROM messages WHERE agent IS NULL "
+                "GROUP BY session ORDER BY MAX(ts) DESC LIMIT ?", (a.n,)):
+            first_user = db.execute("SELECT text FROM messages WHERE session = ? AND role = 'user' AND agent IS NULL "
+                                    "AND text NOT LIKE '<%' ORDER BY id LIMIT 1", (s,)).fetchone()
+            print(f"{s}  {first[:16]} → {last[:16]}  {n:>6} msgs  {short(first_user[0], 70) if first_user else ''}")
+    elif a.cmd == "stats":
+        n, s = db.execute("SELECT COUNT(*), COUNT(DISTINCT session) FROM messages").fetchone()
+        print(f"{n} messages in {s} sessions; {DB} is {DB.stat().st_size / 1e6:.1f} MB")
+        for role, c in db.execute("SELECT role, COUNT(*) FROM messages GROUP BY role"):
+            print(f"  {role}: {c}")
+
+
+if __name__ == "__main__":
+    main()
