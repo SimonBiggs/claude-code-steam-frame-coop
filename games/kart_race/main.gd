@@ -9,6 +9,16 @@ extends Node3D
 ## Drift round bends for sparks and a mini-turbo; press go on the last red light for a rocket start.
 ## Rubber-band catch-up keeps everyone close; bumps never wreck. CPU buddies fill the grid up to
 ## 4 karts. Modes, networking and drop-in join follow docs/GAME_DEV_GUIDE.md and games/marble_maze.
+##
+## SIMPLE_MODE (the family found the games too complicated and too wordy): just race round a colourful
+## track. Before the first race a PRACTICE moment: three glowing rings on the road, one at a time
+## (drive through it, it pops, the next one appears); in VR ghost mittens turn the wheel to show how.
+## Then 3-2-1 GO, 2 laps, and a finish party (trophies over the top three, confetti, cheering). The
+## next race starts by itself on the next track. Race 1 is just driving (ramps, jumps, boost arrows);
+## from race 2 the ? boxes come out and give an instant ZOOM (no button); from race 3 some give a
+## rainbow STAR. Off: drifting / mini-turbos, the boost meter, rocket starts, held items (bananas,
+## shields, honks, triples), cups, points, awards, results tables, the minimap and every how-to text.
+## Text: VR gets one short headline at a time (3-2-1 GO!, LAP 2, FINISH! 2nd); TV views show place + lap.
 
 const VrText := preload("res://core/vr_text.gd")
 const SfxScript := preload("res://core/sfx.gd")
@@ -20,6 +30,12 @@ const KartScript := preload("res://games/kart_race/kart.gd")
 const CockpitScript := preload("res://games/kart_race/cockpit.gd")
 const JoinListenerScript := preload("res://games/kart_race/join_listener.gd")
 
+## Everything cut for the simple game is behind this flag (false = the full Grand Prix game).
+const SIMPLE_MODE := true
+const SIMPLE_LAPS := 2
+const PRACTICE_GATES: Array[float] = [22.0, 44.0, 66.0]  # metres past the start line
+const PRACTICE_MAX := 75.0  # seconds: the race starts anyway
+const SIMPLE_NEXT := 9.0  # seconds of finish party before the next race starts by itself
 const MAX_PLAYERS := 7  # VR player + 6 TV karts
 const MAX_LOCAL_VIEWS := 6
 const MAX_CPU := 3
@@ -121,6 +137,13 @@ var map_rect := Rect2()
 var map_track := -1
 var tips_shown := {}
 var vr_results := ""
+var practice_gate := -1  # simple mode: index of the glowing practice ring (-1: none)
+var practice_t := 0.0
+var gate_node: Node3D
+var gate_mat: StandardMaterial3D
+var gate_shown := -2
+var gate_track := -1
+var items_given := {}  # simple mode: which instant box effects happened (for the bot)
 
 var center_label: Label
 var help_label: Label
@@ -160,14 +183,29 @@ func _setup_game(mode: String) -> void:
 	ready_to_play = true
 	_ensure_join_listener()
 	_restore_party()
+	if SIMPLE_MODE:
+		laps = SIMPLE_LAPS
 	if mode == "host":
 		state = "wait"
 		var p: Array = track.grid_point(0)
 		players[0].place_at(p[0], p[1], p[3])
-		_show_center("KART RACE\nWaiting for the TV players… (warm up: drive around!)", 0.0)
+		if SIMPLE_MODE:
+			_start_practice()
+		else:
+			_show_center("KART RACE\nWaiting for the TV players… (warm up: drive around!)", 0.0)
 	elif mode == "client":
 		state = "wait"
 		_show_center("CONNECTED", 1.5, false)
+	elif SIMPLE_MODE:
+		state = "wait"
+		var slot := 0
+		for k in players:
+			if k.active:
+				k.grid_slot = slot
+				var g: Array = track.grid_point(slot)
+				k.place_at(g[0], g[1], g[3])
+				slot += 1
+		_start_practice()
 	else:
 		_start_race(0)
 
@@ -1030,7 +1068,9 @@ func _activate(p) -> void:
 	p.set_active(true)
 	p.reset_race()
 	_place_new(p)
-	_show_center("%s JOINS THE RACE!" % p.kart_name, 1.5)
+	if not SIMPLE_MODE:
+		_show_center("%s JOINS THE RACE!" % p.kart_name, 1.5)
+	burst(p.position + Vector3(0, 1.5, 0), p.color, 16)
 	sound("box", -4.0, 0.8, true)
 	on_player_activity_changed(p)
 
@@ -1209,6 +1249,8 @@ func _process(delta: float) -> void:
 	_follow_weather()
 	_update_trophies(dt)
 	_update_bananas_visual()
+	track.boxes_on = boxes_live()
+	_update_gate(dt)
 	if cockpit != null:
 		cockpit.place(dt)
 	for p in players:
@@ -1224,7 +1266,9 @@ func _host_update(dt: float, cont_edge: bool) -> void:
 	state_t += dt
 	match state:
 		"wait":
-			if net.mode == "host":
+			if SIMPLE_MODE and practice_gate >= 0:
+				_practice_update(dt)
+			elif net.mode == "host":
 				solo_t += dt
 				if solo_t > SOLO_WAIT and not net.connected:
 					print("No TV players yet: racing the CPU buddies (TV players can join any time)")
@@ -1254,7 +1298,7 @@ func _host_update(dt: float, cont_edge: bool) -> void:
 		"race":
 			race_t += dt
 		"results":
-			if (state_t > 2.0 and cont_edge) or state_t > (45.0 if cup_race >= 2 else 30.0):
+			if (state_t > 2.0 and cont_edge) or state_t > (SIMPLE_NEXT if SIMPLE_MODE else 45.0 if cup_race >= 2 else 30.0):
 				_next_race()
 	for k in karts:
 		if k.is_sim():
@@ -1287,6 +1331,8 @@ func _client_update(dt: float, cont_edge: bool) -> void:
 func _intro_time() -> float:
 	if intro_override > 0.0:
 		return intro_override
+	if SIMPLE_MODE:
+		return INTRO_TIME
 	return FIRST_INTRO_TIME if round_n <= 1 else INTRO_TIME
 
 
@@ -1328,6 +1374,9 @@ func _on_continue() -> void:
 
 ## The next race of the Grand Prix (after the third race, a new cup on new tracks).
 func _next_race() -> void:
+	if SIMPLE_MODE:  # no cups: just the next track
+		_start_race(track_i + 1)
+		return
 	if cup_race >= 2:
 		cup_i += 1
 		cup_race = 0
@@ -1360,6 +1409,8 @@ func set_lights(k: int) -> void:
 
 ## At GO: a boost for anyone who pressed go at the right moment.
 func _rocket(k) -> void:
+	if SIMPLE_MODE:
+		return
 	if k.try_rocket_start():
 		print("%s: rocket start!" % k.kart_name)
 		if not k.cpu:
@@ -1408,6 +1459,10 @@ func _start_race(ti: int) -> void:
 	first_human_finish = -1.0
 	all_done_t = -1.0
 	solo_t = 0.0
+	if SIMPLE_MODE:
+		_show_center("", 0.0)
+		print("Race %d on %s: %d karts (%d human), %d laps, %.0f m to go" % [round_n, TrackScript.track_name(track_i), racer_count(), humans, laps, finish_distance()])
+		return
 	var title := "%s - RACE %d of 3\n%s · %d LAP%s" % [str(cup_info()["name"]), cup_race + 1, TrackScript.track_name(track_i), laps, "S" if laps > 1 else ""]
 	if round_n == 1:
 		_show_center("KART RACE GRAND PRIX!  " + title + "\n" \
@@ -1431,7 +1486,10 @@ func _authority(dt: float) -> void:
 		if lap > shown:
 			k.set_meta("lap", lap)
 			if not k.cpu:
-				notify(k, "FINAL LAP!" if lap == laps else "LAP %d!" % lap)
+				if SIMPLE_MODE:
+					notify(k, "LAP %d" % lap)
+				else:
+					notify(k, "FINAL LAP!" if lap == laps else "LAP %d!" % lap)
 				kart_sound(k, "lap", -2.0, 1.0 + 0.1 * lap)
 		elif lap < shown:
 			k.set_meta("lap", lap)
@@ -1465,7 +1523,7 @@ func _finish(k) -> void:
 	if not k.cpu and first_human_finish < 0.0:
 		first_human_finish = race_t
 	var pl: int = k.place
-	notify(k, "FINISHED %s!" % ordinal(pl).to_upper())
+	notify(k, "FINISH! %s" % ordinal(pl) if SIMPLE_MODE else "FINISHED %s!" % ordinal(pl).to_upper())
 	burst(k.position + Vector3(0, 1.5, 0), k.color, 24)
 	if not k.cpu:
 		for c in [Color(1.0, 0.3, 0.4), Color(0.3, 0.8, 1.0), Color(1.0, 0.9, 0.3)]:
@@ -1473,7 +1531,7 @@ func _finish(k) -> void:
 		track.excite(1.0)
 		net.event("excite", [1.0])
 		sound("cheer", -8.0, 1.0, true)
-	if not k.cpu:
+	if not k.cpu and not SIMPLE_MODE:
 		_show_center("%s FINISHES %s!" % [k.kart_name, ordinal(pl).to_upper()], 2.0)
 		sound("finish", -2.0, 1.0 + 0.05 * (4 - mini(pl, 4)), true)
 	print("%s finished %s in %.1f s" % [k.kart_name, ordinal(pl), race_t])
@@ -1488,6 +1546,9 @@ func _results() -> void:
 		if k.active:
 			order.append(k)
 	order.sort_custom(func(a, b) -> bool: return a.place < b.place)
+	if SIMPLE_MODE:
+		_simple_results(order)
+		return
 	if cup_pts.size() != karts.size():
 		cup_pts.resize(karts.size())
 	var lines: Array[String] = ["RACE %d of 3 OVER!  -  %s" % [cup_race + 1, TrackScript.track_name(track_i)]]
@@ -1597,6 +1658,168 @@ func rubber(k) -> float:
 	return f
 
 
+# --- Simple mode: practice rings, instant ? boxes, the finish party -------------------------
+
+## Race 1 is just driving; the ? boxes come out from race 2.
+func boxes_live() -> bool:
+	return not SIMPLE_MODE or round_n >= 2
+
+
+func _start_practice() -> void:
+	practice_gate = 0
+	practice_t = 0.0
+	_show_center("", 0.0)
+	print("Practice: drive through %d glowing rings" % PRACTICE_GATES.size())
+
+
+func gate_pos(i: int) -> Array:
+	return track.point_at(PRACTICE_GATES[clampi(i, 0, PRACTICE_GATES.size() - 1)], 0.0)
+
+
+## Host / local: a driver goes through the glowing ring -> it pops and the next one appears.
+## After the last one everyone lines up for 3-2-1 GO.
+func _practice_update(dt: float) -> void:
+	practice_t += dt
+	var gp: Array = gate_pos(practice_gate)
+	var c: Vector3 = gp[0]
+	var yaw: float = gp[1]
+	var tg := Vector3(-sin(yaw), 0.0, -cos(yaw))
+	var rt := Vector3(-tg.z, 0.0, tg.x)
+	var hit = null
+	for p in players:
+		if not p.active:
+			continue
+		var d: Vector3 = p.position - c
+		if absf(d.dot(tg)) < 2.2 and absf(d.dot(rt)) < 6.5 and absf(d.y) < 3.0:
+			hit = p
+			break
+	if hit != null:
+		for col in [Color(1.0, 0.3, 0.4), Color(0.3, 0.8, 1.0), Color(1.0, 0.9, 0.3)]:
+			burst(c + Vector3(0, 3.0, 0), col, 14)
+		sound("lap", -2.0, 1.0 + 0.15 * practice_gate, true)
+		rumble(hit, 0.4, 0.15)
+		track.excite(0.7)
+		net.event("excite", [0.7])
+		practice_gate += 1
+		print("Practice: ring %d by %s" % [practice_gate, hit.kart_name])
+	if practice_gate >= PRACTICE_GATES.size() or practice_t > PRACTICE_MAX:
+		print("Practice done (%.0f s): line up for the race" % practice_t)
+		practice_gate = -1
+		_start_race(0)
+
+
+## Every machine: the glowing ring (and a bouncing arrow over it) for the practice.
+func _update_gate(dt: float) -> void:
+	var want := practice_gate if SIMPLE_MODE and state == "wait" else -1
+	if want < 0:
+		if gate_node != null:
+			gate_node.visible = false
+		gate_shown = -1
+		return
+	if gate_node == null:
+		gate_node = Node3D.new()
+		add_child(gate_node)
+		gate_mat = StandardMaterial3D.new()
+		gate_mat.emission_enabled = true
+		gate_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		var ring := MeshInstance3D.new()
+		var tm := TorusMesh.new()
+		tm.inner_radius = 4.3
+		tm.outer_radius = 5.0
+		tm.rings = 32
+		tm.ring_segments = 8
+		ring.mesh = tm
+		ring.material_override = gate_mat
+		ring.rotation.x = PI * 0.5
+		ring.position.y = 3.4
+		ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		gate_node.add_child(ring)
+		var arrow := MeshInstance3D.new()
+		arrow.name = "Arrow"
+		arrow.mesh = cyl_mesh(0.9, 0.0, 1.5, 12)
+		arrow.material_override = make_material(Color(1.0, 0.9, 0.2), 1.5)
+		arrow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		gate_node.add_child(arrow)
+	if want != gate_shown or track.track_i != gate_track:
+		gate_shown = want
+		gate_track = track.track_i
+		var gp: Array = gate_pos(want)
+		gate_node.position = gp[0]
+		gate_node.rotation = Vector3(0, float(gp[1]), 0)
+		gate_node.scale = Vector3.ONE * 0.2  # pops in
+	gate_node.visible = true
+	gate_node.scale = gate_node.scale.lerp(Vector3.ONE, 1.0 - exp(-6.0 * dt))
+	var ms := Time.get_ticks_msec()
+	var col := Color.from_hsv(fmod(ms * 0.0002, 1.0), 0.55, 1.0)
+	gate_mat.albedo_color = col
+	gate_mat.emission = col
+	gate_mat.emission_energy_multiplier = 1.5 + 1.5 * sin(ms * 0.008)
+	var arrow := gate_node.get_node("Arrow") as Node3D
+	arrow.position = Vector3(0, 9.6 + 0.6 * sin(ms * 0.006), 0)
+	arrow.rotation.y = ms * 0.002
+
+
+## A ? box in simple mode: an instant ZOOM (from race 3 sometimes a rainbow STAR). No buttons.
+func _simple_box(k) -> void:
+	if round_n >= 3 and randf() < 0.25:
+		k.star_t = STAR_TIME
+		if k.remote:
+			net.event("star", [k.index, STAR_TIME])
+		kart_sound(k, "star", -2.0)
+		burst(k.position + Vector3(0, 1.0, 0), Color(1.0, 0.9, 0.3), 18)
+		items_given["star"] = true
+	else:
+		if k.remote:
+			net.event("boost", [k.index, MUSHROOM_TIME])
+		else:
+			k.boost(MUSHROOM_TIME)
+		on_boost(k, "")
+		items_given["zoom"] = true
+	k.st_items += 1
+	k.set_meta("uses", int(k.get_meta("uses", 0)) + 1)
+
+
+## The finish party: trophies float over the top three, confetti, one headline.
+func _simple_results(order: Array) -> void:
+	trophy_karts.clear()
+	for j in mini(3, order.size()):
+		trophy_karts.append(karts.find(order[j]))
+	_show_trophies(trophy_karts)
+	net.event("trophies", [trophy_karts])
+	var w = order[0] if not order.is_empty() else null
+	results_text = "%s WINS!" % w.kart_name if w != null else ""
+	var me = players[0]
+	vr_results = "FINISH! %s" % ordinal(me.place) if me.active else results_text
+	_show_center(results_text, 0.0)
+	if w != null:
+		for c in [Color(1.0, 0.3, 0.4), Color(0.3, 0.8, 1.0), Color(1.0, 0.9, 0.3), w.color]:
+			burst(w.position + Vector3(0, 2.5, 0), c, 16)
+	sound("finish", 0.0, 1.2, true)
+	sound("trophy", 0.0, 1.0, true)
+	track.excite(1.0)
+	net.event("excite", [1.0])
+	var row: Array[String] = []
+	for k in order:
+		row.append("%s %s" % [ordinal(k.place), k.kart_name])
+	print("Results: " + " | ".join(row))
+
+
+## TV view in simple mode: place (big, top right) and lap (top left); short headlines only.
+func _update_simple_hud(p, dt: float) -> void:
+	var racing := state == "race" or state == "countdown"
+	p.hud_label.text = lap_text(p) if racing else ""
+	p.place_label.text = ordinal(p.place) if racing or state == "results" else ""
+	p.item_label.visible = false
+	p.hud.get_node("BarBg").visible = false
+	p.hud.get_node("DriftBg").visible = false
+	if p.minimap != null:
+		p.minimap.visible = false
+	var h := _hint_for(p, dt)
+	if p.finished and state == "race":
+		h = "FINISH! %s" % ordinal(p.place)
+	p.hint_label.text = h
+
+
 # --- Items, bananas, bumps ------------------------------------------------------------------
 
 func notify(k, text: String) -> void:
@@ -1608,6 +1831,8 @@ func notify(k, text: String) -> void:
 
 
 func _check_boxes() -> void:
+	if not boxes_live():
+		return
 	for i in track.boxes.size():
 		if track.box_t[i] > 0.0:
 			continue
@@ -1621,6 +1846,9 @@ func _check_boxes() -> void:
 
 
 func give_item(k) -> void:
+	if SIMPLE_MODE:
+		_simple_box(k)
+		return
 	k.charge = minf(1.0, k.charge + 0.2)
 	if k.item != "":
 		kart_sound(k, "box", -8.0, 0.8)
@@ -1824,7 +2052,7 @@ func on_land(k, air: float) -> void:
 		k.boost(0.8)
 		if not k.cpu:
 			sound("land", -2.0)
-			on_boost(k, "BIG AIR! BOOST!")
+			on_boost(k, "" if SIMPLE_MODE else "BIG AIR! BOOST!")
 			rumble(k, 0.5, 0.15)
 			if net.mode == "client" and k.is_local():
 				net.send_action("stat", ["air"], k.index)
@@ -2004,11 +2232,14 @@ func on_boost(k, text: String) -> void:
 # --- Networked co-op (see docs/GAME_DEV_GUIDE.md) ------------------------------------------
 
 func on_client_joined() -> void:
-	_show_center("THE TV PLAYERS JOINED!", 1.5)
+	if not SIMPLE_MODE:
+		_show_center("THE TV PLAYERS JOINED!", 1.5)
 	var p = players[1]
 	if not p.active:
 		_activate(p)
-	if state == "wait":
+	if state == "wait" and SIMPLE_MODE and practice_gate >= 0:
+		pass  # they join the practice rings; the race starts after the third one
+	elif state == "wait":
 		_start_race(cup_track())
 	elif state == "results":
 		_next_race()
@@ -2018,7 +2249,8 @@ func on_client_left() -> void:
 	for i in range(1, players.size()):
 		if players[i].active:
 			players[i].set_active(false)
-	_show_center("The TV players left - racing on with the CPU buddies", 2.5)
+	if not SIMPLE_MODE:
+		_show_center("The TV players left - racing on with the CPU buddies", 2.5)
 
 
 func on_p2_action(action: String, args: Array, index: int = 1) -> void:
@@ -2035,7 +2267,8 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 		"leave":
 			if p.active:
 				p.set_active(false)
-				_show_center("%s LEFT" % p.kart_name, 1.5)
+				if not SIMPLE_MODE:
+					_show_center("%s LEFT" % p.kart_name, 1.5)
 		"continue":
 			_on_continue()
 		"use":
@@ -2081,7 +2314,7 @@ func make_snapshot() -> Array:
 	if cockpit != null:
 		head = cockpit.head_local()
 	return [state, track_i, state_t, race_t, kd, bn, track.box_state(), head, round_n, laps, finish_frac,
-		cup_i, cup_race, PackedInt32Array(cup_pts)]
+		cup_i, cup_race, PackedInt32Array(cup_pts), practice_gate]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -2147,6 +2380,7 @@ func apply_snapshot(s: Array) -> void:
 	cup_pts.resize(cp.size())
 	for i in cp.size():
 		cup_pts[i] = cp[i]
+	practice_gate = int(s[14]) if s.size() > 14 else -1
 
 
 ## The track changed under the karts this machine drives: find them on the new one (keeps their distance).
@@ -2261,6 +2495,7 @@ func _build_hud() -> void:
 	help_label.offset_top = -40
 	help_label.offset_bottom = -8
 	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	help_label.visible = not SIMPLE_MODE  # simple mode: no controls wall
 	help_label.text = "Controller: stick steer · A go · B brake (in a fast turn: DRIFT) · RB drift · X item · Y boost  ·  Keys P1: WASD (S in a turn drifts) + Space item, Shift boost  ·  P2: arrows + Ctrl item, . boost  ·  Spare controller: press A to join"
 
 
@@ -2289,7 +2524,9 @@ func _hint_for(k, dt: float) -> String:
 		k.set_meta("hint_t", t - dt)
 		return str(k.get_meta("hint", ""))
 	if k.wrong_t > 1.5 and not k.finished:
-		return "WRONG WAY! Turn around"
+		return "WRONG WAY!" if SIMPLE_MODE else "WRONG WAY! Turn around"
+	if SIMPLE_MODE:  # no how-to texts: the rings, arrows and ghost mittens show it
+		return ""
 	if k.cockpit != null and not k.cockpit.fake and k.cockpit.unheld_t > 2.5 and (state == "race" or state == "countdown") and not k.finished:
 		return "Hold the wheel with both hands!"
 	if state == "countdown" and round_n <= 2:
@@ -2308,6 +2545,9 @@ func _update_hud(p, dt: float) -> void:
 		p.hud_label.text = "Syncing with the VR player…"
 		return
 	if not p.active:
+		return
+	if SIMPLE_MODE:
+		_update_simple_hud(p, dt)
 		return
 	var st := lap_text(p) + "   " + TrackScript.track_name(track_i) + "\n%s  race %d/3  ·  %d pts" % [str(cup_info()["name"]), cup_race + 1, cup_points(p)]
 	if state == "wait":
@@ -2342,6 +2582,14 @@ func _update_hud(p, dt: float) -> void:
 
 ## The VR driver's two text panels (about 2.4 m ahead, low left / right) and the hint in the middle.
 func vr_panel_texts(k) -> Array:
+	if SIMPLE_MODE:  # just your place, low on the left; one headline at a time in the middle
+		var h := _hint_for(k, get_process_delta_time())
+		if k.finished and state == "race":
+			h = "FINISH! %s" % ordinal(k.place)
+		if state == "results" or center_label.modulate.a > 0.05 and center_label.text != "":
+			h = ""  # the big headline is showing
+		var pl := ordinal(k.place) if state == "race" or state == "countdown" else ""
+		return [pl, "", h]
 	var left := ""
 	if state == "wait":
 		left = "WARM-UP\nwaiting..."

@@ -135,6 +135,7 @@ var pads: Array = []  # [s0, len, lat, half width]
 var boxes: Array[Vector3] = []
 var box_t: Array[float] = []  # > 0: respawning
 var box_nodes: Array[MeshInstance3D] = []
+var boxes_on := true  # main: false hides the ? boxes (simple mode: race 1 is just driving)
 var box_mat: StandardMaterial3D
 var pad_mat: StandardMaterial3D
 var built: Node3D
@@ -1055,7 +1056,7 @@ func update(delta: float, authority: bool) -> void:
 		var b := box_nodes[i]
 		if authority and box_t[i] > 0.0:
 			box_t[i] = maxf(0.0, box_t[i] - delta)
-		var avail := box_t[i] <= 0.0
+		var avail := box_t[i] <= 0.0 and boxes_on
 		b.visible = avail
 		if avail:
 			b.rotation.y = spin * 1.5 + i

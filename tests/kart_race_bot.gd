@@ -10,6 +10,10 @@ extends Node
 ## run goes through a whole 3-race cup (BOT_CUP=1 forces it in a short test) to the trophies.
 ## BOT_FULL=1: full 3-lap races (default: short races so the test finishes in time).
 ## Local mode also joins one kart by pressing A on a fake controller, and checks Start does NOT join.
+## SIMPLE_MODE (main.gd): the run starts with the practice rings (the autopilot drives through them),
+## then races on the next track each time; checks the boxes stay away in race 1 (only instant ZOOM /
+## STAR effects later), no drift turbos and no rocket starts, and that a ghost-hands demo appears on
+## the VR wheel when the fake hands let go.
 
 const FAKE_PAD := 40
 
@@ -34,6 +38,11 @@ var turbos := 0
 var rockets := 0
 var items_seen := {}
 var cups_done := 0
+var practice_seen := false
+var practice_rings := 0
+var boxes_in_race1 := false
+var ghost_seen := false
+var max_vr_lines := 0  # simple mode: the most lines of text on any VR label
 
 
 func _ready() -> void:
@@ -68,7 +77,7 @@ func _process(delta: float) -> void:
 				frac = 0.3
 			main.debug_fast(1, frac)
 			print("BOT: short races: 1 lap, finish at %.0f%%" % (frac * 100.0))
-			if mode == "local":
+			if mode == "local" and not main.SIMPLE_MODE:
 				main._start_race(main.cup_track())
 	if OS.has_environment("BOT_FAKE_VR") and mode == "local" and main.cockpit == null:
 		main.debug_fake_vr()
@@ -97,10 +106,12 @@ func _process(delta: float) -> void:
 	for k in main.karts:
 		if k.active and k.item != "":
 			items_seen[k.item] = true
+	if main.SIMPLE_MODE:
+		_simple_checks()
 	var res: bool = main.state == "results"
 	if res and not was_results:
 		races += 1
-		if main.cup_race >= 2:
+		if main.cup_race >= 2 and not main.SIMPLE_MODE:
 			cups_done += 1
 			print("BOT %s: CUP FINISHED (%s), trophies for %s" % [mode, main.cup_info()["name"], str(main.trophy_karts)])
 		var uses := 0
@@ -190,9 +201,28 @@ func _drive_fake_vr(delta: float) -> void:
 	last_seat_y = c.seat.global_position.y
 
 
+func _simple_checks() -> void:
+	if main.state == "wait" and main.practice_gate >= 0:
+		practice_seen = true
+		practice_rings = maxi(practice_rings, main.practice_gate)
+	if main.state == "race" and main.round_n == 1 and main.track.boxes_on:
+		boxes_in_race1 = true
+	var c = main.cockpit
+	if c != null and c.ghost_l != null and c.ghost_l.visible:
+		ghost_seen = true
+	if c != null:
+		for l in [c.panel_l, c.panel_r, c.panel_hint, main.vr_center]:
+			if l != null and l.visible and str(l.text) != "":
+				max_vr_lines = maxi(max_vr_lines, str(l.text).split("\n").size())
+
+
 func _exit_tree() -> void:
 	if main == null:
 		return
+	if main.SIMPLE_MODE:
+		print("BOT SIMPLE: mode=%s practice_seen=%s rings=%d boxes_in_race1=%s box_effects=%s ghost_hands=%s max_vr_lines=%d" % [
+			main.net.mode, practice_seen, practice_rings, boxes_in_race1, ",".join(PackedStringArray(main.items_given.keys())),
+			ghost_seen, max_vr_lines])
 	print("BOT SUMMARY: mode=%s races=%d cups=%d items_seen=%s turbos=%d fake_vr_err=%.3f max_dv=%.1f max_seat_dy=%.1f" % [
 		main.net.mode, races, cups_done, ",".join(PackedStringArray(items_seen.keys())), _turbos(),
 		fake_err / maxf(1.0, float(fake_n)), max_dv, max_dy])
