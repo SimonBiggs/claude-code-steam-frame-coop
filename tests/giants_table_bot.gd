@@ -20,6 +20,8 @@ var bot_players := clampi(int(OS.get_environment("BOT_PLAYERS")), 0, 6) if OS.ha
 var joined := 1
 var fake_pad := 13  # device id for the simulated drop-in controller
 var pad_phase := 0
+var seen := {}
+var smacks := 0
 
 
 func _ready() -> void:
@@ -38,6 +40,11 @@ func _physics_process(delta: float) -> void:
 		print("Bot: knocking P2 down")
 		main.knight_hurt(main.players[1], 999.0, Vector3.ZERO)
 	_party(delta)
+	_note_features()
+	if OS.has_environment("GT_LOSE") and t > 20.0 and not main.game_over and main.net.mode != "client" and not has_meta("lost"):
+		set_meta("lost", true)
+		print("Bot: forcing a game over (tests the heroes screen)")
+		main._on_game_over("The goblins stole the campfire!")
 	if main.giant != null and main.giant.flat:
 		_drive_giant(delta)
 	elif main.giant != null and main.giant.vr:
@@ -64,6 +71,39 @@ func _physics_process(delta: float) -> void:
 				print("   %s at %s flying=%s dizzy=%.1f carrying=%s" % [g.kind, g.global_position.snapped(Vector3.ONE * 0.1), g.flying, g.dizzy_t, g.carrying])
 		if not main.kills.is_empty():
 			print("   kills: %s" % str(main.kills))
+
+
+## Prints each new feature the first time it shows up.
+func _note_features() -> void:
+	var kinds := {}
+	var floating := false
+	var king_broken := false
+	for g in get_tree().get_nodes_in_group("goblins"):
+		kinds[g.kind] = true
+		if g.floating:
+			floating = true
+		if g.kind == "king" and g.armor <= 0.0:
+			king_broken = true
+	var checks := {
+		"balloon goblin floating": floating,
+		"goblin king": kinds.has("king"),
+		"king armour broken": king_broken,
+		"rain": main.rain_t > 0.0,
+		"giant shielding the fire": main.shield,
+		"village grew": main.built > 0,
+		"combo": main.combo >= 3,
+		"giant tip": main.giant_tip_t > 0.0,
+		"stats": main.stats_text != "",
+	}
+	for k in checks:
+		if checks[k] and not seen.has(k):
+			seen[k] = true
+			var extra := ""
+			if k == "giant tip":
+				extra = ": " + main.giant_tip
+			elif k == "village grew":
+				extra = ": %d building(s)" % main.built
+			print("Bot: seen %s (t=%.0f, wave %d)%s" % [k, t, main.wave, extra])
 
 
 ## BOT_PLAYERS: bring in extra TV knights one by one, and exercise unplug / replug.
@@ -126,7 +166,7 @@ func _drive_knight(k) -> void:
 					target_pos = e.global_position
 			if best > 6.0:
 				for g in get_tree().get_nodes_in_group("goblins"):
-					if g.kind == "ogre" or g.held or g.flying:
+					if g.kind == "ogre" or g.held or g.flying or (g.kind == "king" and g.armor <= 0.0):
 						continue
 					var d: float = g.global_position.distance_to(pos) + Vector2(g.global_position.x, g.global_position.z).length() * 0.3
 					if d < best:
@@ -136,6 +176,16 @@ func _drive_knight(k) -> void:
 	var to := target_pos - pos
 	to.y = 0.0
 	var dist := to.length()
+	if target != null and target.floating:
+		# A balloon goblin up in the air: stand back a little and shoot the balloon.
+		if dist < 3.0:
+			to = -to
+		inp.move = to.normalized() * (0.6 if dist < 3.0 else 1.0) if absf(dist - 4.0) > 1.0 else Vector3.ZERO
+		k.face = atan2(-(target_pos - pos).x, -(target_pos - pos).z)
+		inp.bow = true
+		inp.jump = false
+		k.bot_input = inp
+		return
 	if dist > 1.0 or target == null:
 		inp.move = to.normalized() if dist > 0.3 else Vector3.ZERO
 	if target != null:
@@ -185,6 +235,9 @@ func _drive_giant(delta: float) -> void:
 		if not g.bot_grip:
 			giant_wait = 3.0
 		return
+	if main.rain_t > 0.0 and not g.bot_grip:
+		g.bot_target = Vector3(0.3, 0.0, 0.3)  # hold the hand over the campfire like an umbrella
+		return
 	if g.bot_grip and giant_wait < -1.5:
 		g.bot_grip = false  # couldn't grab it; pick something else
 		giant_wait = 0.2
@@ -201,7 +254,9 @@ func _drive_giant(delta: float) -> void:
 		g.bot_target = Vector3(0, 0, 6)
 		return
 	if target == null:
-		target = _nearest_goblin(Vector3.ZERO, ["ogre"])
+		target = _nearest_goblin(Vector3.ZERO, ["ogre", "king"])
+	if target == null:
+		target = _nearest_goblin(Vector3.ZERO, ["balloon"])
 	if target == null and grabs % 3 == 2 and _nearest_goblin(Vector3.ZERO, ["armored"]) != null:
 		var bb := INF
 		for b in get_tree().get_nodes_in_group("boulders"):
@@ -229,7 +284,7 @@ func _nearest_goblin(from: Vector3, kinds: Array):
 	var best = null
 	var bd := INF
 	for g in get_tree().get_nodes_in_group("goblins"):
-		if g.held or g.flying or not (g.kind in kinds) or g.has_meta("dead"):
+		if g.held or g.flying or not (g.kind in kinds) or g.has_meta("dead") or not g.can_grab():
 			continue
 		var d: float = g.global_position.distance_to(from)
 		if d < bd:
@@ -242,6 +297,7 @@ func _nearest_goblin(from: Vector3, kinds: Array):
 ## carry them past the table edge and let go.
 var vr_phase := 0
 var vr_target = null
+var smack_phase := 0
 func _drive_vr_giant(delta: float) -> void:
 	var g = main.giant
 	g.bot = true
@@ -251,6 +307,30 @@ func _drive_vr_giant(delta: float) -> void:
 		g.bot_grip = false
 		return
 	var grab_off: Vector3 = ctrl.global_basis * g.GRAB_OFFSET
+	if main.rain_t > 0.0 and h.held == null:
+		g.bot_grip = false
+		ctrl.global_position = ctrl.global_position.move_toward(Vector3(0.0, 4.0, 0.0) - grab_off, 25.0 * delta)
+		return
+	# Every few goblins, SMACK one flat with the left hand instead (no button: a fast slap down).
+	var left: Node3D = g.hand_l
+	var lh = g.hands[0]
+	var lgrab: Vector3 = left.global_basis * g.GRAB_OFFSET
+	var victim = _nearest_goblin(Vector3.ZERO, ["goblin"])
+	if victim != null and grabs % 3 == 1:
+		var c2: Vector3 = victim.global_position
+		var above := c2 + Vector3.UP * 3.0 - lgrab
+		if smack_phase == 0:
+			left.global_position = left.global_position.move_toward(above, 30.0 * delta)
+			if left.global_position.distance_to(above) < 0.3:
+				smack_phase = 1
+		else:
+			left.global_position = left.global_position.move_toward(c2 + Vector3.UP * 0.3 - lgrab, 45.0 * delta)
+			if lh.pos.y < c2.y + 0.6:
+				smack_phase = 0
+				smacks += 1
+				grabs += 1
+				print("Bot: VR giant smacked down at a goblin (vel %.0f)" % lh.vel.y)
+		return
 	if h.held != null and is_instance_valid(h.held):
 		var p: Vector3 = h.held.global_position
 		var out := Vector2(p.x, p.z).normalized() * (W.EDGE + 3.0)
@@ -270,3 +350,24 @@ func _drive_vr_giant(delta: float) -> void:
 	if h.pos.distance_to(c) < 0.6:
 		g.bot_grip = true
 		grabs += 1
+
+
+func _count_visuals(n: Node) -> int:
+	var c := 0
+	if (n is MeshInstance3D or n is MultiMeshInstance3D or n is CPUParticles3D or n is Label3D) and n.is_visible_in_tree():
+		c += 1
+	for ch in n.get_children():
+		c += _count_visuals(ch)
+	return c
+
+
+func _exit_tree() -> void:
+	if main != null:
+		print("FINAL mode=%s wave=%d score=%d embers=%d built=%d smacks=%d kills=%s seen=%s" % [main.net.mode, main.wave, main.score, main.embers, main.built, smacks, main.kills, seen.keys()])
+		print("Visual instances in the scene: %d" % _count_visuals(main))
+		if OS.has_environment("GT_BREAKDOWN"):
+			var by := {}
+			for ch in main.get_children():
+				var key: String = ch.get_script().resource_path.get_file() if ch.get_script() else ch.get_class()
+				by[key] = by.get(key, 0) + _count_visuals(ch)
+			print("Breakdown: %s" % by)

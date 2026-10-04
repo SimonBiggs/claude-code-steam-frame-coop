@@ -2,8 +2,10 @@ extends Node3D
 ## Player 1: the friendly GIANT sitting at the table.
 ## VR: XROrigin3D.world_scale makes the village a miniature. Grip or trigger near a goblin, boulder,
 ##   ember or knight picks it up; let go to drop it, or throw it (hand speed from recent positions).
+##   SMACK: bring either open hand down fast onto a goblin to squash it (no button needed, so the left
+##   hand is useful on the Steam Frame, whose left trigger and grip don't reach the game).
 ##   Right stick: walk around the table (snap 45°). Left stick up/down: lean in / back.
-##   B / Y: re-centre the table in front of you. A / X: restart after game over. Menu: pause.
+##   A (or B / Y, or both triggers): bring the table in front of you. A / X: restart after game over.
 ## Flat fallback (split screen / no headset): a big hand cursor moved with the mouse (or the second
 ##   controller's left stick); hold the left mouse button (or RT / A) to grab, release to throw.
 ## TV: a ghost of the giant (big friendly head + hands) placed from the host's snapshots.
@@ -17,6 +19,7 @@ const MAX_THROW := 70.0
 const HEAD_ABOVE_TABLE := 0.45   # metres between the giant's eyes and the tabletop
 const SEAT_DIST := 0.95          # metres from the table centre to the giant's eyes
 const FLAT_CAM_POS := Vector3(0.0, 23.0, 22.0)
+const SMACK_SPEED := 22.0  # world units/s downwards (about 1.1 m/s for the giant)
 
 var main
 var index := 0
@@ -70,6 +73,7 @@ class Hand:
 	var held = null
 	var hold_off := Vector3.ZERO
 	var refuse_t := 0.0
+	var smack_cd := 0.0
 
 
 func body_layer() -> int:
@@ -301,6 +305,7 @@ func _process(delta: float) -> void:
 			if bot:
 				g = 1.0 if bot_grip and h == hands[1] else 0.0
 			_update_hand(h, g, delta)
+			_smack(h, delta)
 			_pose_hand(h, xf, maxf(g, 0.6 if h.held != null else 0.0))
 		_update_wrist()
 	elif flat:
@@ -415,6 +420,27 @@ func _try_grab(h: Hand) -> bool:
 	return true
 
 
+## An open hand slapping down onto the table squashes the goblin under it.
+func _smack(h: Hand, delta: float) -> void:
+	h.smack_cd -= delta
+	if h.held != null or h.gripping or h.smack_cd > 0.0 or main.game_over or h.vel.y > -SMACK_SPEED:
+		return
+	for g in get_tree().get_nodes_in_group("goblins"):
+		if g.held or g.flying or g.floating or g.has_meta("dead") or g.is_queued_for_deletion():
+			continue
+		var c: Vector3 = g.global_position
+		var flat := Vector2(h.pos.x - c.x, h.pos.z - c.z).length()
+		if flat < g.radius + 0.7 and h.pos.y < c.y + g.radius * 2.0 + 0.9 and h.pos.y > c.y - 0.6:
+			h.smack_cd = 0.35
+			main.giant_smack(g, h.pos)
+			haptic(h, 0.8, 0.08)
+			return
+	var gy := W.height(h.pos.x, h.pos.z)
+	if gy > -50.0 and h.pos.y < gy + 0.4:
+		h.smack_cd = 0.35
+		main.add_thud(Vector3(h.pos.x, gy, h.pos.z), 9.0)
+
+
 func _release(h: Hand) -> void:
 	if h.held == null:
 		return
@@ -460,6 +486,9 @@ func _vr_controls(delta: float) -> void:
 		calibrated = true
 		recenter(0.0)
 	var rc := hand_l.is_button_pressed("by_button") or hand_r.is_button_pressed("by_button")
+	# A brings the table in front of you (the Frame's left trigger, so the both-trigger squeeze, may not work).
+	if not main.game_over and (hand_r.is_button_pressed("ax_button") or hand_l.is_button_pressed("ax_button")):
+		rc = true
 	# A new (taller or shorter) person put the headset on: re-fit the table to their eye height.
 	var head_y := xr_camera.position.y
 	if calibrated and not has_meta("calib_y"):
@@ -527,7 +556,7 @@ func _update_wrist() -> void:
 	var status := ""
 	if main.net.mode == "host" and not main.net.connected:
 		status = "\nWaiting for the knights to join…"
-	wrist_label.text = "WAVE %d   SCORE %d\nEMBERS %d / %d%s" % [main.wave, main.score, main.embers, main.max_embers, status]
+	wrist_label.text = "WAVE %d   SCORE %d\nEMBERS %d / %d%s\nA: table in front of me" % [main.wave, main.score, main.embers, main.max_embers, status]
 
 
 func restart_held() -> bool:

@@ -18,6 +18,7 @@ const GoblinScript := preload("res://games/giants_table/goblin.gd")
 const BoulderScript := preload("res://games/giants_table/boulder.gd")
 const EmberScript := preload("res://games/giants_table/ember.gd")
 const BoltScript := preload("res://games/giants_table/bolt.gd")
+const VillageScript := preload("res://games/giants_table/village.gd")
 const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
 const NetScript := preload("res://core/net.gd")
@@ -28,6 +29,19 @@ const BOULDER_COUNT := 8
 const DOWN_GRACE := 20.0  # seconds the giant has to carry a knight to the fire when all knights are down
 const FIRE_HOME := 2.6    # drop an ember this close to the fire and it goes home
 const MAX_KNIGHTS := 6     # TV players 2..7 (player indices 1..6)
+const KING_EVERY := 5     # the Goblin King comes every 5th wave
+const RAIN_TIME := 16.0
+## Extra sounds made with core/sfx.gd: [seconds, start Hz, end Hz, volume, wave, noise]
+const EXTRA_SOUNDS := {
+	"pop": [0.12, 900.0, 300.0, 0.35, "square", 0.6],
+	"smack": [0.14, 300.0, 70.0, 0.55, "square", 0.7],
+	"rain": [1.5, 2000.0, 1800.0, 0.12, "sine", 1.0],
+	"build": [0.6, 220.0, 660.0, 0.3, "tri", 0.2],
+	"cheer": [0.8, 520.0, 1250.0, 0.26, "tri", 0.45],
+	"fanfare": [1.0, 392.0, 784.0, 0.35, "square", 0.0],
+	"roar": [1.2, 160.0, 60.0, 0.6, "saw", 0.4],
+	"sizzle": [0.6, 3000.0, 2500.0, 0.12, "square", 0.95],
+}
 const PLAYER_COLORS: Array[Color] = [Color(0.3, 0.6, 1.0), Color(1.0, 0.72, 0.2), Color(1.0, 0.45, 0.75),
 	Color(0.95, 0.3, 0.28), Color(0.68, 0.45, 1.0), Color(0.3, 0.92, 0.95), Color(0.96, 0.96, 0.92)]
 
@@ -76,6 +90,31 @@ var last_view_size := Vector2.ZERO
 var view_count := 0
 var lamp: DirectionalLight3D
 
+# The growing village, weather, combos and stats.
+var village: Node3D
+var built := 0  # how many growth buildings stand (one per cleared wave)
+var growth_root: Node3D
+var growth_new: Node3D
+var growth_sails: Node3D
+var rain_t := 0.0
+var rain_at := -1.0  # seconds into this wave when the rain cloud comes (-1 = not this wave)
+var rain_drain := 0.0
+var shield := false
+var shield_said := false
+var rain_node: Node3D
+var wave_t := 0.0
+var combo := 0
+var last_kill_t := -10.0
+var clock := 0.0
+var stats: Array = []
+var stats_label: Label
+var stats_text := ""
+var vr_hint: Label3D
+var giant_tip := ""
+var giant_tip_t := 0.0
+var tips_said := {}
+var help_panel: PanelContainer
+
 
 func _ready() -> void:
 	randomize()
@@ -84,6 +123,11 @@ func _ready() -> void:
 	if OS.has_environment("GT_FAKE_VR") and not OS.has_environment("DUO_JOIN"):
 		vr_on = true  # tests: run the VR code paths headless, without a headset
 	W.build(self, vr_on)
+	village = VillageScript.new()
+	village.main = self
+	add_child(village)
+	for i in MAX_KNIGHTS + 1:
+		stats.append({"thrown": 0, "squashed": 0, "carried": 0, "caught": 0, "shield": 0.0, "kills": 0, "embers": 0, "revives": 0, "king": 0})
 	_build_fire()
 	_build_hud()
 	var menu := PauseMenuScript.new()
@@ -120,11 +164,13 @@ func _setup_game(mode: String) -> void:
 		help_label.text = knight_help \
 			+ "GIANT (left screen): mouse or 2nd controller moves the hand · hold left click / RT to grab · flick and let go to throw\n" \
 			+ "More knights: press A on another controller (or Enter / arrow keys) to join, up to 6 knights\n" \
-			+ "Armoured goblins: KNIGHTS only · Big ogres: GIANT only · Bring dropped embers home · The Giant can carry knights!"
+			+ "Armoured goblins: KNIGHTS only · Big ogres: GIANT only · Bring dropped embers home · The Giant can carry knights!\n" \
+			+ "Balloon goblins: pop them with the crossbow · Goblin King: knights break his armour, then the Giant throws him · Rain: Giant, cover the fire!"
 	else:
 		help_label.text = knight_help \
 			+ "More knights: press A or attack on any other controller (or Enter / arrow keys) to join, up to 6 knights  ·  The GIANT in VR grabs and throws goblins and boulders\n" \
-			+ "Armoured goblins: KNIGHTS only · Big ogres: GIANT only · Bring dropped embers home · Stand by a fallen friend to revive them"
+			+ "Armoured goblins: KNIGHTS only · Big ogres: GIANT only · Bring dropped embers home · Stand by a fallen friend to revive them\n" \
+			+ "Balloon goblins: pop them with the crossbow · Goblin King: knights break his armour, then the Giant throws him · Every wave the village grows!"
 	if mode == "host":
 		_show_center("Waiting for the knights to join…", 0.0)
 	elif mode == "client":
@@ -569,6 +615,9 @@ func sound(sound_name: String, volume_db: float = 0.0, pitch: float = 1.0) -> vo
 	if sfx == null:
 		sfx = SfxScript.new()
 		add_child(sfx)
+		for k in EXTRA_SOUNDS:
+			var d: Array = EXTRA_SOUNDS[k]
+			sfx.add_sound(k, d)
 	sfx.play(sound_name, volume_db, pitch)
 	if net:
 		net.event("sound", [sound_name, volume_db, pitch])
@@ -688,8 +737,12 @@ func _process(delta: float) -> void:
 	if music == null:
 		music = MusicScript.new()
 		add_child(music)
-	music.play_track(maxi(wave - 1, 0) / 2)
+	music.play_track(1 if _king_alive() else maxi(wave - 1, 0) / 2)
+	clock += delta
 	_update_fire(delta)
+	_update_growth()
+	_update_rain_visuals(delta)
+	_update_knight_hints()
 	if mirror_vp:
 		mirror_t -= delta
 		if mirror_t <= 0.0:
@@ -718,6 +771,10 @@ func _process(delta: float) -> void:
 		return  # hold the waves until the knights join
 	_host_knights(delta)
 	_update_boulders(delta)
+	_update_rain(delta)
+	_update_giant_tips(delta)
+	if not in_break:
+		wave_t += delta
 	if in_break:
 		break_timer -= delta
 		if break_timer <= 0.0:
@@ -769,6 +826,8 @@ func _extra_knights() -> int:
 func _start_wave() -> void:
 	wave += 1
 	in_break = false
+	wave_t = 0.0
+	rain_at = randf_range(10.0, 22.0) if wave >= 3 and (wave % 2 == 1 or randf() < 0.4) else -1.0
 	print("Wave %d started" % wave)
 	spawn_queue.clear()
 	# 1-2 knights: the original waves. Each extra knight adds ~30% goblins and ~35% armoured ones
@@ -782,7 +841,12 @@ func _start_wave() -> void:
 	if wave >= 3:
 		for i in 1 + (wave - 3) / 3 + (1 if party >= 3 and wave >= 4 else 0):
 			spawn_queue.append("ogre")
+	if wave >= 4:
+		for i in roundi((2 + mini(wave - 4, 4)) * (1.0 + 0.3 * party)):
+			spawn_queue.append("balloon")
 	spawn_queue.shuffle()
+	if wave % KING_EVERY == 0:
+		spawn_queue.insert(0, "king")  # pop_back: the king comes last, after his army
 	spawn_queue.append("goblin")  # the first one out is always an easy one
 	spawn_timer = 0.5
 	sound("wave")
@@ -791,14 +855,19 @@ func _start_wave() -> void:
 		extra = "\nArmoured goblins! Only KNIGHTS can beat them"
 	elif wave == 3:
 		extra = "\nAn OGRE! Only the GIANT can lift it - throw it off the table!"
-	_show_center("WAVE %d%s" % [wave, extra], 2.5 if extra != "" else 1.4)
+	elif wave == 4:
+		extra = "\nBALLOON GOBLINS from the sky!\nGiant: pluck them out of the air  ·  Knights: pop the balloons!"
+	elif wave % KING_EVERY == 0:
+		extra = "\nTHE GOBLIN KING IS COMING!\nKnights break his armour, then the Giant throws him!"
+	_show_center("WAVE %d%s" % [wave, extra], 3.0 if extra != "" else 1.4)
 	if wave == 2:
 		create_tween().tween_property(help_label, "modulate:a", 0.0, 1.0)
 
 
 func _end_wave() -> void:
 	in_break = true
-	break_timer = 4.0
+	break_timer = 6.0
+	rain_t = 0.0
 	embers = mini(embers + 1, MAX_EMBERS)
 	for k in knights():
 		if not k.active:
@@ -807,8 +876,19 @@ func _end_wave() -> void:
 			_revive(k, 0.6)
 		else:
 			k.hp = minf(KnightScript.MAX_HP, k.hp + 30.0)
-	_show_center("WAVE %d CLEARED!\nThe campfire grows: +1 ember" % wave, 2.6)
+	var grew := ""
+	if built < W.GROWTH.size():
+		var g: Array = W.GROWTH[built]
+		grew = "\nThe village grows: %s!" % W.GROWTH_NAMES[g[0]]
+		built += 1
+		sound("build", -2.0)
+		net.event("grow", [built])
+		_grow_fx(built)
+	_show_center("WAVE %d CLEARED!\nThe campfire grows: +1 ember%s" % [wave, grew], 3.2)
 	sound("clear")
+	sound("cheer", -4.0)
+	village.cheer()
+	net.event("cheer", [])
 
 
 func _spawn_goblin(kind: String) -> void:
@@ -817,12 +897,35 @@ func _spawn_goblin(kind: String) -> void:
 	var g := GoblinScript.new()
 	g.setup(kind, self)
 	g.net_id = next_net_id()
+	if kind == "balloon":
+		# Floats in from the sky and drifts down towards the village.
+		var start := dir * randf_range(7.0, 11.0) + Vector3.UP * 13.0
+		var land := dir * randf_range(3.0, 4.5)
+		land.y = W.height(land.x, land.z)
+		g.floating = true
+		g.position = start
+		var fall_time := (start.y - land.y) / GoblinScript.BALLOON_FALL
+		g.drift = Vector3(land.x - start.x, 0.0, land.z - start.z) / fall_time
+		add_child(g)
+		g.rotation.y = atan2(dir.x, dir.z)
+		if not tips_said.has("balloon"):
+			tips_said["balloon"] = true
+			_giant_tip("BALLOON GOBLINS! Grab them out of the air (right trigger)!")
+		return
+	if kind == "king":
+		g.max_armor = 8.0 + 2.0 * _extra_knights()
+		g.armor = g.max_armor
 	g.position = dir * (W.EDGE - 0.3) + Vector3.DOWN * 1.0
 	add_child(g)
 	g.rotation.y = atan2(dir.x, dir.z)
 	g.flying = true
 	g.hop = true
 	g.vel = -dir * 2.5 + Vector3.UP * 11.0
+	if kind == "king":
+		sound("roar", 0.0, 0.8)
+		sound("fanfare", -4.0, 0.7)
+		_show_center("THE GOBLIN KING!\nKnights: hit him to break his armour!", 2.5)
+		_giant_tip("THE GOBLIN KING! His armour is too spiky - let the knights break it first")
 
 
 func _check_lose(delta: float) -> void:
@@ -867,7 +970,8 @@ func _on_game_over(reason: String) -> void:
 	print("Game over: %s wave=%d score=%d" % [reason, wave, score])
 	sound("gameover")
 	var how := "Press A / X (VR) or attack (knights) to play again"
-	_show_center("GAME OVER\n%s\nWave %d   ·   Score %d\n%s" % [reason, wave, score, how], 0.0)
+	_show_center("GAME OVER\n%s\nWave %d   ·   Score %d   ·   Village %d/%d\n%s" % [reason, wave, score, built, W.GROWTH.size(), how], 0.0)
+	_show_stats("HEROES OF THE VILLAGE")
 
 
 # --- Goblins -----------------------------------------------------------------
@@ -912,6 +1016,25 @@ func goblin_defeated(g, how: String, by) -> void:
 	score += points
 	var stat_key := "%s:%s" % [g.kind, how]
 	kills[stat_key] = kills.get(stat_key, 0) + 1
+	# Who gets the credit (for the end-of-game awards).
+	if by != null and by is Node and by.is_in_group("knights"):
+		stats[by.index].kills += 1
+	elif how == "fell":
+		stats[0].thrown += 1
+	elif how in ["squash", "slam", "boulder", "smack"]:
+		stats[0].squashed += 1
+	# Quick knock-outs in a row make a combo.
+	if clock - last_kill_t < 2.5:
+		combo += 1
+	else:
+		combo = 1
+	last_kill_t = clock
+	if combo >= 3:
+		var bonus := combo * 5
+		score += bonus
+		popup(g.grab_center() + Vector3.UP * 1.6, "COMBO x%d!  +%d" % [combo, bonus], Color(1.0, 0.55, 0.9))
+		if combo == 3 or combo % 5 == 0:
+			sound("cheer", -6.0, 1.0 + combo * 0.03)
 	var pos: Vector3 = g.global_position
 	var center: Vector3 = g.grab_center()
 	var c: Color = g.color
@@ -921,7 +1044,7 @@ func goblin_defeated(g, how: String, by) -> void:
 		sound("big_kill", -2.0, 1.2)
 	else:
 		sound("kill", -6.0, randf_range(1.1, 1.4))
-	var words := {"squash": "SQUASH!", "fell": "BYE BYE!", "slam": "BOOM!", "boulder": "BONK!", "knight": "POW!"}
+	var words := {"squash": "SQUASH!", "fell": "BYE BYE!", "slam": "BOOM!", "boulder": "BONK!", "knight": "POW!", "smack": "SMACK!"}
 	popup(center + Vector3.UP * 0.5, "%s +%d" % [words.get(how, "POW!"), points], c.lightened(0.4))
 	if how in ["squash", "slam", "boulder"]:
 		add_thud(pos, 12.0)
@@ -932,7 +1055,327 @@ func goblin_defeated(g, how: String, by) -> void:
 		else:
 			embers = mini(embers + 1, MAX_EMBERS)
 			popup(Vector3(0.0, 2.6, 0.0), "The ember flew home!", Color(1.0, 0.75, 0.35))
+	if g.kind == "king":
+		score += 100
+		sound("fanfare", 0.0, 1.0)
+		sound("cheer", 0.0)
+		_show_center("THE GOBLIN KING IS BEATEN!\n+300  ·  The village is saved!", 3.0)
+		for i in 5:
+			var p := Vector3(randf_range(-6.0, 6.0), randf_range(4.0, 7.0), randf_range(-6.0, 6.0))
+			get_tree().create_timer(0.3 + i * 0.4).timeout.connect(func() -> void:
+				burst(p, Color.from_hsv(randf(), 0.7, 1.0), 26, 0.16)
+				sound("pop", -6.0, randf_range(0.8, 1.3)))
+		village.cheer()
+		net.event("cheer", [])
+		print("The Goblin King is beaten")
 	g.queue_free()
+
+
+## The giant plucked a balloon goblin out of the sky.
+func on_balloon_caught(g) -> void:
+	stats[0].caught += 1
+	score += 5
+	popup(g.grab_center() + Vector3.UP * 1.0, "GOTCHA! +5", Color(0.6, 0.9, 1.0))
+	sound("pop", 0.0, 1.0)
+
+
+## A knight's bolt popped a balloon: down he goes!
+func on_balloon_popped(g, knight) -> void:
+	score += 5
+	sound("pop", 0.0, 1.2)
+	if knight != null and knight is Node and knight.is_in_group("knights"):
+		stats[knight.index].kills += 1
+
+
+## A knight dented the Goblin King's armour.
+func king_hit(g, knight) -> void:
+	if knight != null and knight is Node and knight.is_in_group("knights"):
+		stats[knight.index].king += 1
+	if g.armor <= 0.0:
+		burst(g.grab_center() + Vector3.UP * 0.4, Color(0.8, 0.82, 0.9), 30, 0.14)
+		sound("big_kill", -2.0, 1.4)
+		_show_center("THE KING'S ARMOUR IS BROKEN!\nGIANT: grab him and throw him off the table!", 2.5)
+		_giant_tip("His armour is broken! GRAB the Goblin King and THROW him off the table!")
+		print("The Goblin King's armour is broken")
+	else:
+		popup(g.grab_center() + Vector3.UP * 1.4, "CLANG!  armour %d" % ceili(g.armor), Color(0.85, 0.9, 1.0))
+
+
+## An open giant hand came down fast on a goblin.
+func giant_smack(g, at: Vector3) -> void:
+	var spiky: bool = g.kind == "armored" or (g.kind == "king" and g.armor > 0.0)
+	if spiky:
+		popup(g.grab_center() + Vector3.UP * 0.9, "OUCH! Too spiky!\nKnights, get this one!", Color(1.0, 0.6, 0.5))
+		sound("hurt", -6.0, 0.7)
+		g.dizzy_t = 1.0
+		return
+	burst(at, Color(0.85, 0.75, 0.55), 10, 0.1)
+	sound("smack", 0.0, randf_range(0.9, 1.1))
+	if g.is_big():
+		g.dizzy_t = 2.5
+		popup(g.grab_center() + Vector3.UP * 1.4, "OOF! Now THROW me!", Color(1.0, 0.8, 0.4))
+		return
+	goblin_defeated(g, "smack", giant)
+
+
+func _king_alive() -> bool:
+	for g in get_tree().get_nodes_in_group("goblins"):
+		if g.kind == "king":
+			return true
+	return false
+
+
+# --- Weather: a rain cloud over the campfire -------------------------------------
+
+## Host: the rain puts embers out unless the giant holds a hand over the fire like an umbrella.
+func _update_rain(delta: float) -> void:
+	if not in_break and rain_at > 0.0 and wave_t >= rain_at and rain_t <= 0.0:
+		rain_at = -1.0
+		rain_t = RAIN_TIME
+		rain_drain = 0.0
+		shield_said = false
+		sound("rain", -4.0, 1.0)
+		_show_center("A RAIN CLOUD!\nGiant: hold your hand over the campfire to keep it dry!", 2.5)
+		_giant_tip("RAIN! Hold your open hand over the campfire, like an umbrella!")
+		print("Rain cloud over the campfire")
+	shield = false
+	if rain_t <= 0.0:
+		return
+	rain_t -= delta
+	for h in giant.hands:
+		if Vector2(h.pos.x, h.pos.z).length() < 2.6 and h.pos.y > 0.8 and h.pos.y < 10.0:
+			shield = true
+	if shield:
+		stats[0].shield += delta
+		if not shield_said:
+			shield_said = true
+			popup(Vector3(0.0, 3.2, 0.0), "Nice umbrella, Giant!", Color(0.7, 0.9, 1.0))
+	else:
+		rain_drain += delta
+		if rain_drain >= 5.0:
+			rain_drain = 0.0
+			if embers > 1:
+				embers -= 1
+				sound("sizzle", 0.0, 1.0)
+				popup(Vector3(0.0, 2.8, 0.0), "HISS! The rain put out an ember!", Color(0.6, 0.8, 1.0))
+	if rain_t <= 0.0:
+		_show_center("The rain stopped. Phew!", 1.5)
+
+
+## Both machines: the cloud and the raindrops (and a dimmer fire) while it rains.
+func _update_rain_visuals(delta: float) -> void:
+	if rain_node == null:
+		rain_node = Node3D.new()
+		add_child(rain_node)
+		var puffs: Array = []
+		for i in 6:
+			var a := TAU * i / 6.0
+			puffs.append(Transform3D(Basis().scaled(Vector3(1.0, 0.65, 1.0)), Vector3(cos(a) * 1.5, randf_range(-0.2, 0.3), sin(a) * 1.3)))
+		puffs.append(Transform3D(Basis().scaled(Vector3(1.3, 0.8, 1.3)), Vector3(0, 0.4, 0)))
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.mesh = W.sphere(1.3, 10)
+		mm.instance_count = puffs.size()
+		for i in puffs.size():
+			var xf: Transform3D = puffs[i]
+			mm.set_instance_transform(i, xf)
+		var cloud := MultiMeshInstance3D.new()
+		cloud.multimesh = mm
+		cloud.material_override = W.mat(Color(0.55, 0.58, 0.68))
+		cloud.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		rain_node.add_child(cloud)
+		var drops := CPUParticles3D.new()
+		drops.name = "Drops"
+		drops.amount = 60
+		drops.lifetime = 0.55
+		drops.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+		drops.emission_box_extents = Vector3(2.0, 0.1, 2.0)
+		drops.direction = Vector3.DOWN
+		drops.spread = 2.0
+		drops.initial_velocity_min = 14.0
+		drops.initial_velocity_max = 16.0
+		drops.gravity = Vector3(0, -10, 0)
+		drops.position.y = -0.6
+		var dm := W.box(Vector3(0.03, 0.3, 0.03))
+		dm.material = W.mat(Color(0.6, 0.8, 1.0), 1.0)
+		drops.mesh = dm
+		rain_node.add_child(drops)
+	rain_node.visible = rain_t > 0.0
+	if rain_node.visible:
+		rain_node.position = Vector3(sin(clock * 0.4) * 0.6, 9.5 + sin(clock * 0.9) * 0.2, cos(clock * 0.3) * 0.6)
+		var drops := rain_node.get_node("Drops") as CPUParticles3D
+		drops.emitting = not shield
+
+
+# --- The growing village -------------------------------------------------------------
+
+## Both machines: the growth buildings that stand (rebuilt when the count changes).
+func _update_growth() -> void:
+	if growth_root != null and int(growth_root.get_meta("built", -1)) == built:
+		return
+	if growth_root != null:
+		growth_root.queue_free()
+	if growth_new != null:
+		growth_new.queue_free()
+		growth_new = null
+	growth_root = Node3D.new()
+	growth_root.set_meta("built", built)
+	add_child(growth_root)
+	var out := {}
+	var settled: int = built if not has_meta("grow_anim") else built - 1
+	W.build_growth(growth_root, 0, settled, out)
+	if settled < built:
+		# The newest building rises out of the ground.
+		growth_new = Node3D.new()
+		add_child(growth_new)
+		W.build_growth(growth_new, built - 1, built, out)
+		growth_new.position.y = -3.5
+		var tw := growth_new.create_tween()
+		tw.tween_property(growth_new, "position:y", 0.0, 2.2).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		remove_meta("grow_anim")
+	growth_sails = out.get("sails")
+
+
+## The next building rises with a puff of dust and sparkles.
+func _grow_fx(n: int) -> void:
+	set_meta("grow_anim", true)
+	var g: Array = W.GROWTH[n - 1]
+	var x: float = g[1]
+	var z: float = g[2]
+	var p := Vector3(x, W.height(x, z), z)
+	burst(p + Vector3.UP * 0.5, Color(0.85, 0.75, 0.55), 24, 0.14)
+	burst(p + Vector3.UP * 2.0, Color(1.0, 0.9, 0.5), 16, 0.1)
+	popup(p + Vector3.UP * 3.5, "NEW: %s!" % W.GROWTH_NAMES[g[0]].substr(2) if W.GROWTH_NAMES[g[0]].begins_with("a ") else "NEW BUILDING!", Color(1.0, 0.9, 0.55))
+
+
+# --- Hints ---------------------------------------------------------------------------
+
+## A tip for the VR giant, shown on the floating hint panel for a few seconds.
+func _giant_tip(text: String) -> void:
+	giant_tip = text
+	giant_tip_t = 6.0
+
+
+## Host: first-time tips for the giant as new things happen.
+func _update_giant_tips(delta: float) -> void:
+	giant_tip_t -= delta
+	if giant_tip_t > 0.0:
+		return
+	var tip := ""
+	var key := ""
+	for g in get_tree().get_nodes_in_group("goblins"):
+		if g.kind == "ogre" and not g.held and not tips_said.has("ogre"):
+			tip = "An OGRE! Knights can't beat it: GRAB it (right trigger) and THROW it off the table!"
+			key = "ogre"
+		elif g.kind == "armored" and not tips_said.has("armored"):
+			tip = "Armoured goblins are too spiky to hold - drop a BOULDER on them, the knights will finish them"
+			key = "armored"
+	for k in knights():
+		if k.active and k.is_down and not k.carried and not tips_said.has("down"):
+			tip = "A knight is DOWN! Pick them up and carry them to the campfire"
+			key = "down"
+	if wave == 1 and wave_t > 3.0 and not tips_said.has("smack"):
+		tip = "Grab goblins with your RIGHT trigger and throw them off the table - or SMACK them flat with an open hand!"
+		key = "smack"
+	if wave == 2 and wave_t > 6.0 and not tips_said.has("boulder"):
+		tip = "Set BOULDERS down to block the goblins, or as stepping stones over the river for the knights"
+		key = "boulder"
+	if key != "":
+		tips_said[key] = true
+		_giant_tip(tip)
+
+
+## TV: a short contextual tip under each knight's view ("how do I…?").
+func _update_knight_hints() -> void:
+	for k in knights():
+		if k.hint_label == null or not k.active or k.remote:
+			continue
+		if k.is_down or k.carried:
+			continue  # knight.gd shows its own message
+		var tip := ""
+		var pos: Vector3 = k.global_position
+		var near_d := 7.0
+		for g in get_tree().get_nodes_in_group("goblins"):
+			var d: float = g.global_position.distance_to(pos)
+			if d > near_d:
+				continue
+			if g.kind == "king" and g.armor > 0.0:
+				tip = "THE GOBLIN KING! Hit him with your sword to break his armour!"
+				near_d = d
+			elif g.kind == "king" or g.kind == "ogre":
+				tip = "Too big for knights! The GIANT must throw it off the table"
+				near_d = d
+			elif g.kind == "armored":
+				tip = "ARMOURED goblin: only knights can beat it - SWORD it (RT / Space)!"
+				near_d = d
+			elif g.floating:
+				tip = "Pop the BALLOON with your crossbow (LT / F)!"
+				near_d = d
+		if tip == "" and k.carrying:
+			tip = "Take the ember back to the CAMPFIRE in the middle!"
+		if tip == "":
+			for e in get_tree().get_nodes_in_group("embers"):
+				if e.global_position.distance_to(pos) < 6.0:
+					tip = "A dropped EMBER! Walk over it to pick it up"
+		if tip == "" and rain_t > 0.0:
+			tip = "RAIN! Keep the goblins busy while the Giant shields the fire"
+		k.hint_label.text = tip
+
+
+# --- Stats and awards ------------------------------------------------------------------
+
+func _award(i: int) -> String:
+	var st: Dictionary = stats[i]
+	if i == 0:
+		var best := "GENTLE GIANT"
+		var top := 0.0
+		for cat in [["thrown", "GOBLIN BOWLER", 1.0], ["squashed", "SQUISHER", 1.0], ["caught", "SKY CATCHER", 2.0],
+				["carried", "KNIGHT TAXI", 3.0], ["shield", "HUMAN UMBRELLA", 0.4]]:
+			var v := float(st[cat[0]]) * float(cat[2])
+			if v > top:
+				top = v
+				best = cat[1]
+		return best
+	var cats := [["kills", "GOBLIN BASHER"], ["embers", "EMBER HERO"], ["revives", "LIFESAVER"], ["king", "KING BREAKER"]]
+	var best2 := "BRAVE KNIGHT"
+	var best_score := 0.0
+	for cat in cats:
+		var key: String = cat[0]
+		var mine := float(st[key])
+		if mine <= 0.0:
+			continue
+		var top2 := 0.0
+		for j in range(1, players.size()):
+			top2 = maxf(top2, float(stats[j][key]))
+		var sc := mine / maxf(1.0, top2) + (0.4 if key != "kills" else 0.0)
+		if sc > best_score:
+			best_score = sc
+			best2 = cat[1]
+	return best2
+
+
+func _stats_lines() -> String:
+	var lines: Array[String] = []
+	var g: Dictionary = stats[0]
+	lines.append("GIANT  ·  %d thrown off  ·  %d squashed  ·  %d caught  ·  %d knights carried   -   %s!" % [g.thrown, g.squashed, g.caught, g.carried, _award(0)])
+	for k in knights():
+		var st: Dictionary = stats[k.index]
+		if not k.active and st.kills + st.embers + st.revives == 0:
+			continue
+		lines.append("P%d  ·  %d goblins  ·  %d embers home  ·  %d friends revived   -   %s!" % [k.index + 1, st.kills, st.embers, st.revives, _award(k.index)])
+	return "\n".join(lines)
+
+
+func _show_stats(title: String) -> void:
+	_apply_stats(title + "\n" + _stats_lines())
+	net.event("stats", [stats_text])
+	print("Stats:\n" + stats_text)
+
+
+func _apply_stats(text: String) -> void:
+	stats_text = text
+	if stats_label:
+		stats_label.text = text
 
 
 # --- Knights (host side) -----------------------------------------------------
@@ -1112,6 +1555,9 @@ func _host_knights(delta: float) -> void:
 			else:
 				k.revive_progress = maxf(0.0, k.revive_progress - delta * 0.2)
 			if k.revive_progress >= 1.0:
+				for o in knights():
+					if o != k and o.active and not o.is_down and o.global_position.distance_to(pos) < KnightScript.REVIVE_RANGE:
+						stats[o.index].revives += 1
 				_revive(k, 0.6)
 			continue
 		if fire_d < 3.0:
@@ -1129,6 +1575,7 @@ func _host_knights(delta: float) -> void:
 		elif fire_d < 2.4:
 			k.carrying = false
 			embers = mini(embers + 1, MAX_EMBERS)
+			stats[k.index].embers += 1
 			score += 5
 			sound("revive", -4.0, 1.3)
 			popup(Vector3(0.0, 2.4, 0.0), "Ember home! +5", Color(1.0, 0.8, 0.4))
@@ -1160,6 +1607,7 @@ func _fall_knight(k, delta: float) -> void:
 	k.global_position = p
 	k.net_target = p
 	if not k.carried and k.is_down and Vector2(p.x, p.z).length() < 3.2:
+		stats[0].carried += 1
 		_revive(k, 0.8)
 
 
@@ -1273,7 +1721,7 @@ func make_snapshot() -> Array:
 	for e in get_tree().get_nodes_in_group("embers"):
 		if not e.is_queued_for_deletion():
 			es.append(e.net_item())
-	return [wave, score, embers, game_over, down_t, ps, gs, bs, es]
+	return [wave, score, embers, game_over, down_t, ps, gs, bs, es, built, rain_t, shield]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -1294,6 +1742,10 @@ func apply_snapshot(s: Array) -> void:
 	_sync_ghosts(s[6], "goblin")
 	_sync_ghosts(s[7], "boulder")
 	_sync_ghosts(s[8], "ember")
+	if s.size() > 11:
+		built = s[9]
+		rain_t = s[10]
+		shield = s[11]
 
 
 func _sync_ghosts(list: Array, kind: String) -> void:
@@ -1352,6 +1804,13 @@ func apply_event(kind: String, args: Array) -> void:
 			var i: int = args[0]
 			if i < players.size():
 				players[i].on_hurt(args[1])
+		"grow":
+			set_meta("grow_anim", true)
+			built = args[0]
+		"cheer":
+			village.cheer()
+		"stats":
+			_apply_stats(args[0])
 
 
 # --- HUD ---------------------------------------------------------------------
@@ -1380,12 +1839,33 @@ func _build_hud() -> void:
 	center_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	center_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	center_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	help_panel = PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.12, 0.07, 0.04, 0.78)
+	sb.border_color = Color(1.0, 0.75, 0.4, 0.9)
+	sb.set_border_width_all(3)
+	sb.set_corner_radius_all(14)
+	sb.content_margin_left = 20
+	sb.content_margin_right = 20
+	sb.content_margin_top = 8
+	sb.content_margin_bottom = 10
+	help_panel.add_theme_stylebox_override("panel", sb)
+	help_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layer.add_child(help_panel)
+	help_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	help_panel.offset_top = 64
 	help_label = _make_label(22)
-	layer.add_child(help_label)
-	help_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
-	help_label.offset_top = 70
-	help_label.offset_bottom = 200
+	help_panel.add_child(help_label)
 	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	help_panel.resized.connect(func() -> void: help_panel.position.x = (help_panel.get_parent_area_size().x - help_panel.size.x) * 0.5)
+	stats_label = _make_label(28)
+	stats_label.add_theme_color_override("font_color", Color(1.0, 0.95, 0.85))
+	layer.add_child(stats_label)
+	stats_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	stats_label.offset_top = -300
+	stats_label.offset_bottom = -30
+	stats_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	stats_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	help_label.text = "KNIGHTS: left stick / W S move · right stick / A D turn · RT / Space sword · LT / F crossbow · A / Shift jump\n" \
 		+ "GIANT: mouse moves the hand · hold left click to grab · flick and let go to throw (VR: grip or trigger)\n" \
 		+ "Armoured goblins: KNIGHTS only · Big ogres: GIANT only · Bring dropped embers home · Stand by a fallen friend to revive them"
@@ -1433,15 +1913,43 @@ func _update_vr_center() -> void:
 		VrText.snap(vr_center)
 	# Past the table and above it (VrText adds extra comfort distance), so it's easy to focus on.
 	VrText.follow(vr_center, giant.xr_camera, self, 0.2 * W.S, 1.7 * W.S)
+	# Tips (and the end-of-game heroes) float just below it - still above the far edge of the table.
+	if vr_hint == null:
+		vr_hint = Label3D.new()
+		vr_hint.font_size = 36
+		vr_hint.outline_size = 22
+		vr_hint.outline_modulate = Color.BLACK
+		vr_hint.no_depth_test = true
+		vr_hint.render_priority = 10
+		vr_hint.outline_render_priority = 9
+		vr_hint.width = 1100.0
+		vr_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		add_child(vr_hint)
+	var stats_mode := game_over and stats_text != ""
+	if stats_mode != vr_hint.get_meta("stats_mode", false):
+		vr_hint.set_meta("stats_mode", stats_mode)
+		VrText.snap(vr_hint)
+	var text := stats_text if stats_mode else (giant_tip if giant_tip_t > 0.0 else "")
+	vr_hint.pixel_size = (0.0015 if stats_mode else 0.0022) * W.S
+	vr_hint.modulate = Color(0.95, 0.97, 1.0) if stats_mode else Color(1.0, 0.93, 0.6)
+	vr_hint.text = text
+	vr_hint.visible = text != ""
+	# (the heroes list goes above the GAME OVER banner, never in front of the table)
+	VrText.follow(vr_hint, giant.xr_camera, self, (0.78 if stats_mode else -0.125) * W.S, 1.7 * W.S)
 
 
 func _update_hud() -> void:
-	if wave >= 2 and help_label.modulate.a > 0.0:
-		help_label.modulate.a = maxf(0.0, help_label.modulate.a - get_process_delta_time() * 0.5)
+	if wave >= 2 and help_panel.modulate.a > 0.0:
+		help_panel.modulate.a = maxf(0.0, help_panel.modulate.a - get_process_delta_time() * 0.5)
+	help_panel.visible = help_panel.modulate.a > 0.0 and help_label.text != ""
 	if net.mode == "client" and not synced:
 		info_label.text = "Syncing with the Giant…"
 		return
-	info_label.text = "WAVE %d      SCORE %d      CAMPFIRE EMBERS %d / %d" % [wave, score, embers, MAX_EMBERS]
+	info_label.text = "WAVE %d      SCORE %d      CAMPFIRE EMBERS %d / %d      VILLAGE %d / %d" % [wave, score, embers, MAX_EMBERS, built, W.GROWTH.size()]
+	if combo >= 3 and clock - last_kill_t < 2.5:
+		info_label.text += "      COMBO x%d" % combo
+	if rain_t > 0.0:
+		info_label.text += "      RAIN! %s" % ("(the Giant is shielding the fire)" if shield else "(Giant: shield the fire!)")
 	var n := active_knight_count()
 	if n > 2:
 		info_label.text += "      KNIGHTS %d" % n
