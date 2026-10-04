@@ -354,10 +354,12 @@ func _process(delta: float) -> void:
 	_update_camera(delta)
 	if hud_label:
 		var lines := "P%d   HP %d / %d" % [index + 1, maxi(0, int(hp)), int(MAX_HP)]
-		if carrying:
+		if carrying and not main.simple:
 			lines += "\nCarrying an ember: take it to the campfire!"
 		hud_label.text = lines
-	if hint_label:
+	if hint_label and main.simple:
+		hint_label.text = "Back up soon!" if is_down else ""  # simple mode: one short line at most
+	elif hint_label:
 		if is_down:
 			hint_label.text = "YOU'RE DOWN!\nA friend can stand next to you to revive you,\nor the Giant can carry you to the campfire"
 		elif carried:

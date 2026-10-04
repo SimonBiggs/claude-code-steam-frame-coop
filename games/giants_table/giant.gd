@@ -385,7 +385,7 @@ func _try_grab(h: Hand) -> bool:
 	var best = null
 	var best_d := INF
 	var reach := FLAT_REACH if flat else VR_REACH
-	for group in ["goblins", "boulders", "embers", "knights"]:
+	for group in ["goblins", "boulders", "embers", "props", "knights"]:
 		for o in get_tree().get_nodes_in_group(group):
 			if o.is_queued_for_deletion() or (group == "knights" and not o.active):
 				continue
@@ -400,12 +400,15 @@ func _try_grab(h: Hand) -> bool:
 			if d < reach and d < best_d:
 				best_d = d
 				best = o
+	if best == null and main.scenery != null:
+		best = main.scenery.grab_tree(h.pos, reach, flat)  # simple mode: pull a tree out of the table
 	if best == null:
 		return false
 	if not best.can_grab():
 		if h.refuse_t <= 0.0:
 			h.refuse_t = 1.0
-			main.popup(best.grab_center() + Vector3.UP * 0.9, "OUCH! Too spiky!\nKnights, get this one!", Color(1.0, 0.6, 0.5))
+			main.burst(best.grab_center() + Vector3.UP * 0.5, Color(1.0, 0.4, 0.3), 10, 0.08)
+			main.popup(best.grab_center() + Vector3.UP * 0.9, "OUCH!" if main.simple else "OUCH! Too spiky!\nKnights, get this one!", Color(1.0, 0.6, 0.5))
 			main.sound("hurt", -6.0, 0.7)
 			haptic(h, 0.9, 0.15)
 		return false
@@ -560,6 +563,9 @@ func _orbit(angle: float) -> void:
 
 
 func _update_wrist() -> void:
+	if main.simple:
+		wrist_label.text = "WAVE %d" % main.wave if main.wave > 0 else ""
+		return
 	var status := ""
 	if main.net.mode == "host" and not main.net.connected:
 		status = "\nWaiting for the knights to join…"
