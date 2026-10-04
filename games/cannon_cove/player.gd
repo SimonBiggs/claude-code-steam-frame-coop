@@ -627,6 +627,9 @@ func _vr_gunner_update(delta: float) -> void:
 	var ammo_text: String = "EMPTY - deckhands, bring balls!" if c.ammo <= 0 else "AMMO %d / %d" % [c.ammo, c.MAX_AMMO]
 	if c.golden > 0:
 		ammo_text += "  (GOLDEN!)"
+	if main.simple:
+		wrist_label.text = "" if main.wave <= 0 else "WAVE %d" % main.wave
+		return
 	wrist_label.text = "%s CANNON  ·  %s\n%s   GOLD %d\nWATER IN HOLD %d%%" % [c.side_name(), ammo_text, main.wave_title(), main.gold, int(main.water)]
 	if main.net.mode == "host" and not main.net.connected:
 		wrist_label.text += "\nWaiting for the TV crew to join…"
@@ -670,6 +673,8 @@ func _vr_grab(c, delta: float) -> void:
 		trig_armed.clear()
 	if grab_hand == null:
 		for h in [hand_r, hand_l]:
+			if main.props and main.props.is_holding(h):
+				continue  # this hand is carrying a cannonball or the barrel (props.gd)
 			var dist: float = h.global_position.distance_to(handle)
 			var near: bool = dist < GRAB_RANGE
 			c.near = maxf(c.near, clampf(1.0 - (dist - GRAB_RANGE) / 0.5, 0.0, 1.0))
@@ -692,7 +697,7 @@ func _vr_grab(c, delta: float) -> void:
 					set_meta("grabbed_once", true)
 					print("VR gunner grabbed a cannon")
 				break
-			elif trig_edge[h.tracker] and dist < 1.3:
+			elif trig_edge[h.tracker] and dist < 1.3 and not (main.props and main.props.near_grabbable(h)):
 				reach_miss_t = 2.5  # pulled the trigger, but not at the handle: show where it is
 				h.trigger_haptic_pulse("haptic", 0.0, 0.1, 0.03, 0.0)
 				if not has_meta("missed_once"):
