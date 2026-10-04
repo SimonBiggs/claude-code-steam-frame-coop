@@ -951,8 +951,7 @@ func apply_remote_state(pos: Vector3, new_yaw: float, new_pitch: float) -> void:
 func apply_net_state(st: Array) -> void:
 	hp = st[3]
 	revive_progress = st[5]
-	if st.size() > 8 and st[8] is bool:
-		mega = st[8]
+	mega = st.size() > (11 if index == 0 else 8)  # a trailing true means MEGA SNOWBALL ready
 	var on: bool = st[6]
 	if on != active:
 		set_active(on)
@@ -962,10 +961,10 @@ func apply_net_state(st: Array) -> void:
 		yaw = st[1]
 		pitch = st[2]
 		net_held = st[7]
-		if st.size() > 11:
-			net_head = st[9]
-			net_hand = st[10]
-			net_lhand = st[11]
+		if st.size() > 10:
+			net_head = st[8]
+			net_hand = st[9]
+			net_lhand = st[10]
 		if not net_started:
 			net_started = true
 			global_position = net_target

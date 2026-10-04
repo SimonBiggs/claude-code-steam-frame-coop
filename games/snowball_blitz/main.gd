@@ -1717,18 +1717,23 @@ func toggle_vr_pause() -> void:
 func make_snapshot() -> Array:
 	var ps := []
 	for p in players:
-		var st := [p.global_position, p.yaw, p.pitch, p.hp, p.is_down, p.revive_progress, p.active, p.held_amount(), p.mega]
+		var st := [p.global_position, p.yaw, p.pitch, p.hp, p.is_down, p.revive_progress, p.active, p.held_amount()]
 		if p.index == 0:
 			st.append_array([p.head_transform(), p.hand_transform(), p.left_hand_transform()])  # drawn on the TV
+		if p.mega:
+			st.append(true)  # MEGA SNOWBALL ready (left out when false: small snapshots)
 		ps.append(st)
 	var sm := []
 	for s in get_tree().get_nodes_in_group("snowmen"):
 		if not s.dead:
-			sm.append([s.net_id, s.kind, s.global_position, s.rotation.y, s.hp / s.max_hp, s.bashing, s.net_aux()])
+			var item := [s.net_id, s.kind, s.global_position, s.rotation.y, s.hp / s.max_hp, s.bashing]
+			if s.net_aux() != 0:
+				item.append(s.net_aux())  # balloons / shield, only for those kinds
+			sm.append(item)
 	var ck := []
 	for c in get_tree().get_nodes_in_group("cocoa"):
-		ck.append([c.net_id, c.global_position, c.kind])
-	return [wave, score, game_over, seg_hp, ps, sm, ck, boss_hp, director().pack(), boss_name]
+		ck.append([c.net_id, c.global_position, c.kind] if c.kind != "cocoa" else [c.net_id, c.global_position])
+	return [wave, score, game_over, seg_hp, ps, sm, ck, boss_hp, director().pack(), boss_name if boss_hp >= 0.0 else ""]
 
 
 func apply_snapshot(s: Array) -> void:

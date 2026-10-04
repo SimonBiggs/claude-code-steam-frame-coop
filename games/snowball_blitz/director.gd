@@ -528,15 +528,25 @@ func _box(parent: Node3D, size: Vector3, pos: Vector3, m: Material) -> MeshInsta
 
 # --- Network ------------------------------------------------------------------------
 
+const UPGRADE_BITS := ["catapult", "ice", "fire"]
+
+
 func pack() -> Array:
-	return [event_name, upgrades, won]
+	var bits := 0
+	for i in UPGRADE_BITS.size():
+		if upgrades.has(UPGRADE_BITS[i]):
+			bits |= 1 << i
+	return [event_name, bits, won]
 
 
 func unpack(a: Array) -> void:
 	if a.size() < 3:
 		return
 	event_name = a[0]
-	upgrades = a[1]
+	var bits: int = a[1]
+	for i in UPGRADE_BITS.size():
+		if bits & (1 << i) and not upgrades.has(UPGRADE_BITS[i]):
+			upgrades.append(UPGRADE_BITS[i])
 	won = a[2]
 
 

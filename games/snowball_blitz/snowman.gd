@@ -499,8 +499,8 @@ func apply_net(item: Array) -> void:
 		squash = 1.0
 	net_hp = frac
 	bashing = item[5]
-	if item.size() > 6:
-		var aux: int = item[6]
+	if item.size() > 6 or balloons > 0 or shield_hp > 0:
+		var aux: int = item[6] if item.size() > 6 else 0
 		var b := aux / 10
 		while balloons > b and balloons > 0:
 			var i := balloons - 1
