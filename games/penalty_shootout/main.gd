@@ -1045,6 +1045,7 @@ func _launch() -> void:
 	if keeper.power == "slow":
 		speed *= 0.65
 	last_shot = shot
+	keeper.bubble = ""  # an offer not taken expires with the kick (never in front of the incoming ball)
 	ball.place(spot)
 	ball.kick(target, speed, curve)
 	ball.set_fire(shot == "fire")
