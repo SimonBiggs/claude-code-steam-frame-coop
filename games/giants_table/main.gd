@@ -185,8 +185,8 @@ func next_net_id() -> int:
 	return net_ids
 
 
-## The Giant is playing alone (hosting, no knights connected): spiky goblins can then be picked up
-## and thrown (Simon: picking them up and throwing them is more fun than smacking).
+## The Giant is playing alone (hosting, no knights connected): no spiky goblins then (they need
+## knights), and the Goblin King comes without armour.
 func solo_giant() -> bool:
 	return net.mode == "host" and not net.connected
 
@@ -901,6 +901,8 @@ func _end_wave() -> void:
 
 
 func _spawn_goblin(kind: String) -> void:
+	if kind == "armored" and solo_giant():
+		kind = "goblin"  # spiky ones need knights: without any, send plain goblins (Simon)
 	var a := randf() * TAU
 	var dir := Vector3(cos(a), 0.0, sin(a))
 	var g := GoblinScript.new()
@@ -921,7 +923,7 @@ func _spawn_goblin(kind: String) -> void:
 			tips_said["balloon"] = true
 			_giant_tip("BALLOON GOBLINS! Grab them out of the air (right trigger)!")
 		return
-	if kind == "king":
+	if kind == "king" and not solo_giant():
 		g.max_armor = 8.0 + 2.0 * _extra_knights()
 		g.armor = g.max_armor
 	g.position = dir * (W.EDGE - 0.3) + Vector3.DOWN * 1.0
