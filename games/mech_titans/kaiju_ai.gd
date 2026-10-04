@@ -116,7 +116,7 @@ static func _walk_anim(k: Node3D, speed: float) -> void:
 static func _move_to(k: Node3D, p: Vector3, delta: float, g: Node, speed_mul: float = 1.0) -> float:
 	var to := Vector3(p.x - k.position.x, 0, p.z - k.position.z)
 	var d := to.length()
-	var spd: float = float(k.info["speed"]) * speed_mul * (0.5 if k.goo > 0.0 or k.slip > 0.0 else 1.0)
+	var spd: float = float(k.info["speed"]) * speed_mul * float(k.get_meta("slow", 1.0)) * (0.5 if k.goo > 0.0 or k.slip > 0.0 else 1.0)
 	if d > 0.1:
 		var step := to / d * minf(spd * delta, d)
 		var before: Vector3 = k.position
@@ -165,6 +165,8 @@ static func _roam(k: Node3D, delta: float, g: Node) -> void:
 
 
 static func _choose_attack(k: Node3D, dist: float, tgt: Dictionary, g: Node) -> String:
+	if float(k.cooldowns.get("_calm", 0.0)) > 0.0:
+		return ""  # SIMPLE_MODE: a friendly pause between attacks
 	var list: Array = k.info.get("attacks", ["nibble"]) if not k.is_mini else ["nibble"]
 	if k.is_mini and k.fly_alt > 0.0:
 		list = ["nibble"]
@@ -196,7 +198,10 @@ static func _begin(k: Node3D, id: String, tgt: Dictionary, g: Node) -> void:
 	var to: Vector3 = k.attack_pos - k.position
 	to.y = 0.0
 	k.attack_dir = to.normalized() if to.length() > 0.1 else Vector3(sin(k.yaw), 0, cos(k.yaw))
-	k.cooldowns[id] = float(ATTACKS[id][3])
+	var calm := float(k.get_meta("calm", 1.0))
+	k.cooldowns[id] = float(ATTACKS[id][3]) * calm
+	if calm > 1.0:
+		k.cooldowns["_calm"] = 2.5 * calm
 	k.set_state("windup")
 	g.call("telegraph", k, id)
 	if k.anim != null:

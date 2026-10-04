@@ -3,6 +3,15 @@ extends RefCounted
 ## only, so every machine reads the same tables and the scripts hot-reload cleanly.
 ## Units: metres. The Titan is ~10.5 m tall, kaiju 7-15 m, citizens ~0.55 m: a toy-like city.
 
+## SIMPLE_MODE (the family: "all of the games have become too complicated", "simple games are the fun
+## games", "everything's being driven by text"): the giant robot punches cute kaiju, that's it. No hangar,
+## shop, paint jobs, briefings, stars, score, meters, results screens, weak-spot painting, arm tools or
+## landmarks to protect; the Titan never loses (a knock-down just sits it down for a moment and it pops
+## back up). Rounds follow SIMPLE_ROUNDS: round 1 is ONE slow, friendly kaiju and only the PUNCH; the
+## beam and the dash unlock one at a time in later rounds (each with a glowing practice target), and the
+## TV players start with the jet only (one new vehicle per round). Everything cut stays behind this flag.
+const SIMPLE_MODE := true
+
 const GAME_ID := "mech_titans"
 const SAVE_VERSION := 1
 
@@ -235,9 +244,57 @@ const PILOT_TV_INTRO := {"role": "PILOT OF TITAN-1", "color": "info", "controls"
 	"tips": ["Punch a DIZZY kaiju to send it home!"]}
 
 
-## The mission table entry (clamped index).
+# --- SIMPLE_MODE rounds ---------------------------------------------------------------------------
+## One kaiju per round (no mini waves until round 4). hp: health multiplier, slow: walking speed
+## multiplier, calm: attack cooldown multiplier (bigger = attacks less often). After the last round the
+## list loops from round 2, a little tougher each lap.
+const SIMPLE_ROUNDS: Array[Dictionary] = [
+	{"name": "HELLO SIZZLE", "place": "downtown", "sky": "day", "seed": 11, "rescue": 0, "boss": "lizard", "hp": 0.4, "slow": 0.55, "calm": 2.6},
+	{"name": "JELLY WOBBLE", "place": "downtown", "sky": "sunset", "seed": 41, "rescue": 3, "boss": "jelly", "hp": 0.5, "slow": 0.7, "calm": 2.0},
+	{"name": "SPARKLY NIGHT", "place": "powerplant", "sky": "night", "seed": 37, "rescue": 3, "boss": "eel", "hp": 0.5, "slow": 0.75, "calm": 1.8},
+	{"name": "SNOWY MOTH", "place": "snowy", "sky": "snowy", "seed": 53, "rescue": 4, "boss": "moth", "hp": 0.55, "slow": 0.8, "calm": 1.6, "extra": ["mothlet", 2, 40.0]},
+	{"name": "LAVA QUEEN", "place": "volcano", "sky": "sunset", "seed": 79, "rescue": 4, "boss": "lizard_queen", "hp": 0.5, "slow": 0.8, "calm": 1.6, "extra": ["froglet", 2, 40.0]},
+]
+## What unlocks in which round (0-based). The pilot always has PUNCH (and BLOCK: both hands up).
+const SIMPLE_MOVES := {"beam": 1, "dash": 2}
+const SIMPLE_VEHICLES := {"jet": 0, "truck": 1, "drone": 2, "tank": 3}
+
+
+## SIMPLE_MODE: is pilot move `move` ("beam" / "dash") unlocked in round r?
+static func simple_has(move: String, r: int) -> bool:
+	return r >= int(SIMPLE_MOVES.get(move, 0))
+
+
+## SIMPLE_MODE: the vehicle kinds TV players may use in round r (in unlock order).
+static func simple_vehicles(r: int) -> Array[String]:
+	var out: Array[String] = []
+	for kind in VEHICLES:
+		if r >= int(SIMPLE_VEHICLES.get(kind, 0)):
+			out.append(kind)
+	return out
+
+
+## The mission table entry (clamped index). SIMPLE_MODE: round i, in the same shape as MISSIONS.
 static func mission(i: int) -> Dictionary:
+	if SIMPLE_MODE:
+		return simple_round(i)
 	return MISSIONS[clampi(i, 0, MISSIONS.size() - 1)]
+
+
+static func simple_round(i: int) -> Dictionary:
+	var n := SIMPLE_ROUNDS.size()
+	var lap := 0
+	var j := maxi(i, 0)
+	if j >= n:
+		lap = (j - 1) / (n - 1)
+		j = 1 + (j - 1) % (n - 1)
+	var r: Dictionary = SIMPLE_ROUNDS[j]
+	var step := {"boss": [String(r["boss"])]}
+	if r.has("extra"):
+		step["extra"] = r["extra"]
+	return {"name": r["name"], "place": r["place"], "sky": r["sky"], "seed": int(r["seed"]) + lap * 7, "protect": "",
+		"rescue": r["rescue"], "steps": [step], "star2": ["damage", 100], "star3": ["damage", 100], "brief": [],
+		"hp": float(r["hp"]) * (1.0 + 0.15 * lap), "slow": r["slow"], "calm": r["calm"]}
 
 
 ## "4:05" style.

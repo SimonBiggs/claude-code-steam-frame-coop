@@ -540,7 +540,7 @@ func take_damage(amount: float) -> float:
 	if blocking:
 		shield_t = 1.0
 	if armour <= 0.0:
-		rebooting = 6.0
+		rebooting = 3.0 if Data.SIMPLE_MODE else 6.0  # SIMPLE_MODE: a quick sit-down, then it pops back up
 		beam_on = false
 		foam_on = false
 	return dmg
@@ -557,7 +557,7 @@ func repair(amount: float) -> void:
 
 func finish_reboot_if_due() -> bool:
 	if rebooting <= 0.0 and armour <= 0.0:
-		armour = armour_max * 0.5
+		armour = armour_max if Data.SIMPLE_MODE else armour_max * 0.5
 		return true
 	return false
 
@@ -608,7 +608,7 @@ func _animate(delta: float) -> void:
 		sm.albedo_color = Color(g.r, g.g, g.b, 0.22 + shield_t * 0.4)
 	hit_flash = maxf(0.0, hit_flash - delta * 3.0)
 	repair_fx = maxf(0.0, repair_fx - delta)
-	reboot_sign.visible = rebooting > 0.0
+	reboot_sign.visible = rebooting > 0.0 and not Data.SIMPLE_MODE
 	for i in 2:
 		punch_flash[i] = maxf(0.0, punch_flash[i] - delta * 3.0)
 	_update_arms(delta, false)

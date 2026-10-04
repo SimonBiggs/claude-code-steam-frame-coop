@@ -88,6 +88,13 @@ func spawn(k: String, from: Vector3, goal: Vector3, split_gen: int = 0, blocking
 	n.hp_max *= hp_scale if not n.is_mini else 1.0
 	n.hp = n.hp_max
 	n.set_meta("blocking", blocking)
+	if Data.SIMPLE_MODE and not n.is_mini and main.missions != null:
+		# SIMPLE_MODE: this round's kaiju is softer, slower and calmer (round 1: very friendly).
+		var info: Dictionary = main.missions.info
+		n.hp_max *= float(info.get("hp", 1.0))
+		n.hp = n.hp_max
+		n.set_meta("slow", float(info.get("slow", 1.0)))
+		n.set_meta("calm", float(info.get("calm", 1.0)))
 	var to := goal - from
 	n.yaw = atan2(to.x, to.z)
 	n.rotation.y = n.yaw
@@ -123,7 +130,11 @@ func spawn_minis(kind: String, n: int, blocking: bool, near: Vector3 = Vector3.I
 ## Host: a boss enters from the north.
 func spawn_boss(k: String, index: int, count: int) -> Kaiju:
 	var x := 0.0 if count <= 1 else (-22.0 if index == 0 else 22.0)
-	var n := spawn(k, Vector3(x, 0, -Data.MAP - 14.0), Vector3(x * 0.6, 0, -22.0))
+	var n: Kaiju
+	if Data.SIMPLE_MODE:
+		n = spawn(k, Vector3(x, 0, -44.0), Vector3(x * 0.6, 0, 4.0))  # closer: no long wait for little ones
+	else:
+		n = spawn(k, Vector3(x, 0, -Data.MAP - 14.0), Vector3(x * 0.6, 0, -22.0))
 	emit_fx("sfx", ["explosion", n.global_position, 6.0, 0.4])
 	return n
 
@@ -218,12 +229,12 @@ func pilot_actions(delta: float, out: Dictionary) -> void:
 		_set_beam_sound(false)
 		return
 	var flip: int = out.get("tool", 0)
-	if flip != 0:
+	if flip != 0 and not Data.SIMPLE_MODE:
 		main.cycle_tool(flip)
 	for p in out.get("punches", []):
 		var arr: Array = p
 		_punch(int(arr[0]), float(arr[1]), out)
-	var trig: bool = out.get("beam", false)
+	var trig: bool = out.get("beam", false) and bool(main.move_ok("beam"))
 	var from: Vector3 = out.get("aim_from", mech.chest_world())
 	var dir: Vector3 = out.get("aim_dir", mech.forward())
 	if mech.tool == "foam":
@@ -238,8 +249,9 @@ func pilot_actions(delta: float, out: Dictionary) -> void:
 		if on and not mech.beam_on and mech.energy < 8.0:
 			on = false  # empty: wait for a little charge before restarting
 		mech.beam_on = on
-		if on:
+		if on and not Data.SIMPLE_MODE:  # SIMPLE_MODE: no energy meter, the beam never runs out
 			mech.use_energy(BEAM_ENERGY * delta * float(main.energy_mult()))
+		if on:
 			_beam(delta, from, dir)
 		else:
 			mech.beam_hot = false
@@ -366,6 +378,15 @@ func _punch(hand: int, strength: float, out: Dictionary) -> void:
 	var dir := (tgt - sh).normalized()
 	var probe := sh + dir * Mech.REACH
 	mech.punch_flash[hand] = 1.0
+	if main.toys != null and main.toys.held[hand] >= 0:
+		# A tree in this fist: the punch throws it.
+		var tv: Vector3 = out.get("throw_vel", dir * 26.0)
+		var vel := dir * 26.0 + Vector3(0, 7.0, 0)
+		if main.pilot.mode == "vr" and tv.length() > 8.0:
+			vel = tv.limit_length(40.0) + Vector3(0, 5.0, 0)
+		main.toys.throw_tree(hand, vel)
+		main.pulse(hand, 0.6, 0.1)
+		return
 	if tool == "claw" and hand == 1:
 		if held_kind != "":
 			_throw(out)
@@ -390,7 +411,12 @@ func _punch(hand: int, strength: float, out: Dictionary) -> void:
 		return
 	# Missed the kaiju: buildings and props in reach wobble, trees and cars get bonked.
 	var bi := city.nearest_building(probe, 3.0)
-	if bi >= 0:
+	if bi >= 0 and Data.SIMPLE_MODE:
+		# SIMPLE_MODE: buildings just wobble (boing!), they never break from a punch.
+		emit_fx("wobble", [int(city.buildings[bi]["block"])])
+		emit_fx("sfx", ["boing", probe, 4.0, 0.45])
+		main.cockpit_rattle(0.25)
+	elif bi >= 0:
 		emit_fx("burst", ["dust", probe, 2.0])
 		emit_fx("sfx", ["hit", probe, 2.0, 0.6])
 		if city.damage_building(bi, 5.0 * strength):
@@ -788,7 +814,7 @@ func telegraph(k: Kaiju, id: String) -> void:
 		threat_t = w + 0.3
 		if _tele_warned <= 0.0:
 			_tele_warned = 3.0
-			main.cockpit_message("INCOMING! BLOCK OR DASH", Color(1.0, 0.45, 0.35), w)
+			main.cockpit_message("WATCH OUT!" if Data.SIMPLE_MODE else "INCOMING! BLOCK OR DASH", Color(1.0, 0.45, 0.35), w)
 			main.pulse(0, 0.3, 0.1)
 			main.pulse(1, 0.3, 0.1)
 			main.hint_vr("block", "Raise BOTH hands to BLOCK!")
@@ -956,7 +982,12 @@ func hurt_mech(amount: float, from: Node3D) -> void:
 	main.awards.add(0, "damage_taken", taken)
 	if from != null and from is Kaiju:
 		(from as Kaiju).aggro["mech"] = float((from as Kaiju).aggro.get("mech", 0.0)) + 2.0
-	if mech.rebooting > 0.0:
+	if mech.rebooting > 0.0 and Data.SIMPLE_MODE:
+		# Knocked down (never game over): a sit-down with dizzy stars, then it pops back up.
+		emit_fx("burst", ["stars", mech.chest_world() + Vector3.UP * 4.0, 3.0])
+		emit_fx("sfx", ["boing", mech.chest_world(), 6.0, 0.5])
+		main.cockpit_message("WHOA!", Color(1.0, 0.75, 0.3), 2.5)
+	elif mech.rebooting > 0.0:
 		main.missions.on_reboot()
 		announce("TITAN REBOOTING!", "Repair drones: fix the Titan fast!", "defeat")
 		main.cockpit_message("REBOOTING...", Color(1.0, 0.5, 0.3), 5.0)
@@ -1054,6 +1085,12 @@ func play_fx(kind: String, a: Array) -> void:
 			main.tv_shake(float(a[0]))
 		"slowmo":
 			_start_slowmo(float(a[0]))
+		"tree":
+			if main.toys != null:
+				main.toys.on_tree(a)
+		"wobble":
+			if main.toys != null:
+				main.toys.wobble(int(a[0]))
 
 
 func _start_slowmo(real_seconds: float) -> void:

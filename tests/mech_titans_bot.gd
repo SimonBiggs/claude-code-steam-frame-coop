@@ -1,5 +1,10 @@
 extends Node
 ## Headless bot for games/mech_titans (MECH TITANS), built on tests/bot_kit.gd.
+## SIMPLE_MODE (data.gd, on): no hangar: round 1 starts by itself. The bot checks the practice (ghost hand
+## in VR, one glowing ring per TV player), that round 1 is jets + punches only (the beam stays off), the
+## cockpit toys (VR: buttons, horn, bobblehead, dice, wipers), a tree picked up and thrown, a building
+## wobble, the cheer and that round 2 starts (with the beam).
+## Without SIMPLE_MODE (the full game):
 ## It buys an upgrade in the hangar, launches a mission, plays the PRACTICE warm-up and the boss fight
 ## (fake-VR punches / beam / dash, or a pad pilot, or the autopilot), drives the TV support vehicles
 ## (jets paint weak spots, rescue trucks rescue, repair drones repair, stun tanks stun), sees the
@@ -36,6 +41,15 @@ var _punch_t := 0.0
 var _punch_hand := 0
 var _punch_step := 0.0
 var _dash_t := 0.0
+var simple := false
+var saw_round2 := false
+var beam_in_round1 := false
+var beam_in_round2 := false
+var only_jets_round1 := true
+var saw_vehicle := false
+var _pokes: Array = []  ## SIMPLE VR: [toy name, seconds left]
+var _poke_t := 0.0
+var _tree_done := false
 
 
 func _ready() -> void:
@@ -43,6 +57,7 @@ func _ready() -> void:
 	kit = BotKit.new()
 	add_child(kit)  # first: real controllers are ignored, saves go to user://test_saves/
 	main = load("res://games/mech_titans/main.tscn").instantiate()
+	simple = bool(Data.SIMPLE_MODE)
 	if OS.has_environment("MT_MISSION"):
 		mission = clampi(int(OS.get_environment("MT_MISSION")), 0, Data.MISSIONS.size() - 1)
 		practice = false
@@ -56,6 +71,11 @@ func _ready() -> void:
 	host = OS.has_environment("DUO_HOST")
 	var t0 := 3.0 if client else 1.0
 	kit.at(t0, "%d TV players press A on their pads" % want, _join)
+	if simple:
+		_simple_timeline(t0)
+		kit.every(2.0, _report)
+		kit.every(0.4, _flow)
+		return
 	if not client:
 		kit.at(t0 + 1.5, "the hangar gets some parts to spend", func() -> void:
 			main.save.data["parts"] = 400
@@ -87,6 +107,32 @@ func _ready() -> void:
 	kit.every(0.4, _flow)
 
 
+func _simple_timeline(t0: float) -> void:
+	if not client and OS.has_environment("BOT_VR"):
+		kit.at(t0 + 1.0, "the VR pilot pokes the cockpit toys", func() -> void:
+			for toy in ["button", "horn", "bobble", "dice", "wiper"]:
+				_pokes.append([toy, 0.5]))
+	if not client:
+		kit.at(40.0, "the Titan picks up a tree and a building wobbles", func() -> void:
+			var f: Vector3 = main.mech.fist_world(1)
+			var i: int = main.toys._tree_near(f, 400.0)
+			kit.assert_true(i >= 0, "there is a tree to pick up")
+			if i >= 0:
+				main.combat.emit_fx("tree", ["grab", i, 1])
+			main.combat.emit_fx("wobble", [0]))
+		kit.at(41.0, "the tree gets thrown", func() -> void:
+			main.toys.throw_tree(1, main.mech.forward() * 26.0 + Vector3(0, 8, 0))
+			_tree_done = true)
+	var end := 100.0
+	if host:
+		kit.at(end - 6.0, "host checks (the TV machine is still connected)", _checks)
+		kit.at(end, "finish", kit.finish)
+	else:
+		kit.at(end - 5.0 if client else end, "checks", func() -> void:
+			_checks()
+			kit.finish())
+
+
 func _menu_slot() -> int:
 	var seats: Array[int] = main.party.local_slots()
 	if main.vr_rig != null or seats.is_empty():
@@ -104,6 +150,21 @@ func _join() -> void:
 ## Briefing: skip lines; results: continue.
 func _flow() -> String:
 	var phase := String(main.net.state_get("phase", ""))
+	if simple:
+		var r := int(main.net.state_get("mission", 0))
+		if phase == "play" and r == 0:
+			for k in main.net.state_get("veh", {}):
+				if int(k) < 11:
+					saw_vehicle = true
+					if String(main.net.state_get("veh", {})[k]) != "jet":
+						only_jets_round1 = false
+		if phase == "play" and r >= 1:
+			saw_round2 = true
+		if phase == "results":
+			saw_results = true
+		if phase == "play":
+			saw_play = true
+		return ""
 	if phase == "play":
 		if not saw_play and main.net.mode != "client":
 			main.mech.armour = main.mech.armour_max * 0.6  # a bump, so the repair drones get work
@@ -198,6 +259,10 @@ func _drive_vehicle(slot: int, phase: String) -> void:
 	var a := false
 	var x := false
 	var mech: Node3D = main.mech
+	var rings: Dictionary = main.net.state_get("rings", {})
+	if rings.has(str(slot)):
+		kind = "ring"  # SIMPLE practice: fly / drive through my glowing ring first
+		goal = rings[str(slot)]
 	match kind:
 		"jet", "tank":
 			var k := _target_kaiju(pos)
@@ -223,7 +288,7 @@ func _drive_vehicle(slot: int, phase: String) -> void:
 			goal = mech.global_position + mech.global_basis.z * 6.0
 			aim = mech.chest_world()
 			a = pos.distance_to(mech.chest_world()) < 18.0
-	if kind == "truck" or kind == "tank":
+	if kind == "truck" or kind == "tank" or kind == "ring" and not bool(v.call("flyer")):
 		goal = main.support._route(pos, goal)  # follow the roads around buildings
 	var d := goal - pos
 	d.y = 0.0
@@ -317,6 +382,28 @@ func _drive_vr(delta: float, phase: String) -> void:
 	var rest_r := Vector3(0.25, 1.15, -0.3)
 	rig.camera.position = head
 	rig.camera.basis = Basis()
+	if main.mech.beam_on:
+		var r := int(main.net.state_get("mission", 0))
+		if r == 0:
+			beam_in_round1 = true
+		else:
+			beam_in_round2 = true
+	if not _pokes.is_empty():
+		# SIMPLE: touch a cockpit toy with the right palm, then pull back before the next one.
+		var pk: Array = _pokes[0]
+		pk[1] = float(pk[1]) - delta
+		kit.vr_stick(rig, Vector2.ZERO)
+		kit.vr_trigger(rig, 0.0)
+		rig.hand_l.position = rest_l
+		if float(pk[1]) > 0.2:
+			var tgt: Vector3 = main.mech.cockpit.to_global(main.toys.bot_targets()[String(pk[0])])
+			var off: Vector3 = rig.hand_point(VrRig.RIGHT) - rig.hand_r.global_position
+			rig.hand_r.global_position = tgt - off
+		else:
+			rig.hand_r.position = rest_r
+		if float(pk[1]) <= 0.0:
+			_pokes.pop_front()
+		return
 	var k: Kaiju = _pilot_target() if phase == "play" else null
 	if k == null:
 		kit.vr_stick(rig, Vector2.ZERO)
@@ -400,6 +487,9 @@ func _report() -> String:
 
 
 func _checks() -> void:
+	if simple:
+		_simple_checks()
+		return
 	var mode: String = main.net.mode
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
 	kit.assert_eq(main.party.player_count(), want, "%s: all %d TV players are seated" % [mode, want])
@@ -425,3 +515,31 @@ func _checks() -> void:
 			kit.assert_true(vr_punches > 0 and vr_beam_t > 0.0, "the fake VR pilot punched and beamed")
 	else:
 		kit.assert_true(saw_painted, "client: painted weak spots were mirrored")
+
+
+func _simple_checks() -> void:
+	var mode: String = main.net.mode
+	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
+	kit.assert_eq(main.party.player_count(), want, "%s: all %d TV players are seated" % [mode, want])
+	kit.assert_true(main.vr_menu == null and main.tv_menu == null, "%s: no hangar menus" % mode)
+	kit.assert_true(saw_play, "%s: round 1 was played" % mode)
+	kit.assert_true(saw_kaiju, "%s: kaiju showed up" % mode)
+	kit.assert_true(saw_practice, "%s: the practice targets showed up" % mode)
+	kit.assert_true(saw_results, "%s: round 1 ended with a cheer" % mode)
+	kit.assert_true(saw_round2, "%s: round 2 started by itself" % mode)
+	kit.assert_true(saw_vehicle and only_jets_round1, "%s: TV players only had jets in round 1" % mode)
+	kit.assert_true(not saw_painted, "%s: no weak-spot painting" % mode)
+	if mode != "client":
+		kit.assert_true(main.has_meta("practiced"), "the PRACTICE finished")
+		kit.assert_true(main.toys.rings_popped > 0, "TV players flew through their practice rings")
+		kit.assert_true(not beam_in_round1, "no beam in round 1 (punch only)")
+		kit.assert_true(_tree_done and main.toys.trees_thrown > 0, "a tree was picked up and thrown")
+		kit.info("trees grabbed %d thrown %d, rings popped %d, wobbles %d" % [main.toys.trees_grabbed, main.toys.trees_thrown,
+			main.toys.rings_popped, main.toys.wobbles_seen])
+		if main.vr_rig != null:
+			kit.assert_true(vr_punches > 0, "the fake VR pilot punched")
+			kit.assert_true(main.ghost != null and main.ghost.shown, "the ghost hand showed the punch")
+			for toy in ["button", "horn", "bobble", "dice", "wiper"]:
+				kit.assert_true(main.toys.touched.has(toy), "the cockpit %s reacted to a touch" % toy)
+	else:
+		kit.assert_true(main.toys.trees_thrown > 0 and main.toys.wobbles_seen > 0, "client: the thrown tree and the wobble were mirrored")
