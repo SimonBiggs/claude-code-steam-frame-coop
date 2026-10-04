@@ -5,6 +5,11 @@ extends Node
 ## BOT_LEVEL=n (local): start at level n.
 ## BOT_CHAOS=1: random tilting and steering instead (exercises falls, bumpers, respawns and time-up).
 ## Local mode also joins one marble by pressing A on a fake controller, and checks Start does NOT join.
+## Teamwork: while a level's team gates are shut, marbles split up onto the pads (the BFS treats shut
+## gates as walls and teleporters as links); marbles that are home steer their guide star to the
+## marble furthest behind and tow it along its path. Unless BOT_LEVEL is set, local / host runs take a
+## TOUR of the new levels (team gates, ice, zoom arrows, teleporters, mud + two gate groups, finale)
+## and finally let the clock run out to check the awards.
 
 const FAKE_PAD := 40
 
@@ -19,6 +24,10 @@ var cleared := 0
 var last_level := 1
 var max_home := 0
 var join_time := 0.0
+var pad_dist := {}  # pad index -> {cell: dist}
+var tour_i := 0
+const TOUR := [1, 3, 5, 7, 9, 10, 12]
+var forced_over := false
 
 
 func _ready() -> void:
@@ -39,6 +48,14 @@ func _pad_press(device: int, button: JoyButton) -> void:
 func _physics_process(delta: float) -> void:
 	t += delta
 	if main == null or not main.ready_to_play:
+		return
+	if OS.has_environment("BOT_COUNT"):
+		if t > 8.0 and not has_meta("counted"):
+			set_meta("counted", true)
+			var c := {"mesh": 0, "multimesh": 0, "label": 0, "particles": 0}
+			_count_node(main, c)
+			print("COUNT ", c)
+			get_tree().quit()
 		return
 	var mode: String = main.net.mode
 	if not joined and t > (3.0 if mode == "client" else 1.0):
@@ -63,8 +80,14 @@ func _physics_process(delta: float) -> void:
 		set_meta("pad_checked", true)
 		print("BOT: fake controller %d drives P%d, paused=%s" % [FAKE_PAD, int(main.joy_owner.get(FAKE_PAD, -1)) + 1, get_tree().paused])
 	var board = main.board
-	if board.level_n != dist_level and board.rows.size() > 0:
-		_bfs()
+	var key: int = board.level_n * 4 + int(board.gate_open[0]) + int(board.gate_open[1]) * 2
+	if key != dist_level and board.rows.size() > 0:
+		dist_level = key
+		dist = _bfs_from([board.cell_of(board.goal)])
+		pad_dist.clear()
+		for i in board.pads.size():
+			var pd: Array = board.pads[i]
+			pad_dist[i] = _bfs_from([board.cell_of(pd[0])])
 	if main.level > last_level:
 		cleared += main.level - last_level
 		print("BOT: level %d cleared (%d so far)" % [last_level, cleared])
@@ -72,10 +95,13 @@ func _physics_process(delta: float) -> void:
 	max_home = maxi(max_home, main.home_count())
 	var want := Vector2.ZERO
 	var n := 0
+	var k := 0
 	for p in main.players:
 		if p.index == 0 or not p.active:
 			continue
-		var d := _desired(p)
+		var d := _guide_dir(p) if p.home else _desired(p, k)
+		k += 1
+		d = _unstick(p, d, delta)
 		if p.is_local():
 			p.bot = true
 			p.bot_steer = d
@@ -90,6 +116,7 @@ func _physics_process(delta: float) -> void:
 		tl.bot_tilt = (want / n * 0.6) if n > 0 else Vector2.ZERO
 		if OS.has_environment("BOT_CHAOS"):
 			tl.bot_tilt = Vector2(sin(t * 0.9), cos(t * 0.6))
+	_tour()
 	if (main.state == "clear" or main.state == "over") and main.state_t > 2.0:
 		cont_t -= delta
 		if cont_t <= 0.0:
@@ -128,12 +155,44 @@ func _join_players(mode: String) -> void:
 		print("BOT: debug_join -> %s" % ("P%d" % (p.index + 1) if p != null else "none"))
 
 
+## Local / host without BOT_LEVEL: hop between the new levels on each clear, then run the clock out.
+func _tour() -> void:
+	if mode_is_client() or OS.has_environment("BOT_LEVEL") or OS.has_environment("BOT_CHAOS"):
+		return
+	if main.state == "clear" and main.state_t > 1.6 and tour_i + 1 < TOUR.size():
+		tour_i += 1
+		print("BOT: tour -> level %d" % TOUR[tour_i])
+		last_level = TOUR[tour_i]
+		main._start_level(TOUR[tour_i])
+	var limit := 52.0 if not OS.has_environment("BOT_PLAYERS") else 34.0
+	if not forced_over and main.net.mode == "local" and main.state == "play" and t > limit:
+		forced_over = true
+		print("BOT: letting the clock run out to check the awards")
+		main.time_left = 0.2
+	if main.state == "over" and not has_meta("over_said") and main.state_t > 0.5:
+		set_meta("over_said", true)
+		print("BOT: end screen says: %s" % main.center_label.text.replace("\n", " | "))
+
+
+func mode_is_client() -> bool:
+	return main.net.mode == "client"
+
+
 func _passable(k: String) -> bool:
 	return k != "#" and k != "O" and k != "_" and k != "B"
 
 
+func _open_here(board, c: Vector2i) -> bool:
+	var k: String = board.ch(c.x, c.y)
+	if k == "D":
+		return board.gate_open[0]
+	if k == "E":
+		return board.gate_open[1]
+	return _passable(k)
+
+
 func _step_ok(board, a: Vector2i, b: Vector2i) -> bool:
-	if not _passable(board.ch(b.x, b.y)):
+	if not _open_here(board, b):
 		return false
 	var ka: String = board.ch(a.x, a.y)
 	var kb: String = board.ch(b.x, b.y)
@@ -144,33 +203,67 @@ func _step_ok(board, a: Vector2i, b: Vector2i) -> bool:
 	return true
 
 
-## Distance (in cells) from every cell to the goal.
-func _bfs() -> void:
+## Distance (in cells) from every cell to the nearest of `targets`. Rolling onto a teleporter puts
+## you on its twin, so a teleporter's distance comes from its twin's neighbours, never from walking.
+func _bfs_from(targets: Array) -> Dictionary:
 	var board = main.board
-	dist_level = board.level_n
-	dist.clear()
-	var g: Vector2i = board.cell_of(board.goal)
-	dist[g] = 0
-	var q: Array[Vector2i] = [g]
+	var out := {}
+	var q: Array[Vector2i] = []
+	for tc in targets:
+		var c: Vector2i = tc
+		out[c] = 0
+		q.append(c)
 	while not q.is_empty():
 		var c: Vector2i = q.pop_front()
-		for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
-			var nb: Vector2i = c + d
-			if dist.has(nb) or not _step_ok(board, nb, c) or not _passable(board.ch(nb.x, nb.y)):
+		var nbs: Array[Vector2i] = [c + Vector2i(1, 0), c + Vector2i(-1, 0), c + Vector2i(0, 1), c + Vector2i(0, -1)]
+		for nb in nbs:
+			if not _step_ok(board, nb, c) or not _open_here(board, nb):
 				continue
-			dist[nb] = int(dist[c]) + 1
+			if board.tp_dest.has(nb):
+				# Arriving on teleporter nb, you can roll on to c: so entering nb's twin is 2 steps from c.
+				var twin: Vector2i = board.cell_of(board.tp_dest[nb])
+				if not out.has(twin):
+					out[twin] = int(out[c]) + 2
+					q.append(twin)
+				continue
+			if out.has(nb):
+				continue
+			out[nb] = int(out[c]) + 1
 			q.append(nb)
+	return out
 
 
-func _desired(p) -> Vector2:
+## Where this marble should head: the goal, or (while a team gate is shut) a team pad of its own.
+func _target_map(p, k: int) -> Dictionary:
+	var board = main.board
+	var c: Vector2i = board.cell_of(Vector2(p.lp.x, p.lp.z))
+	if dist.has(c) or board.pads.is_empty():
+		return dist
+	for g in 2:
+		if board.gate_open[g] or not board.group_has_pads(g):
+			continue
+		var mine: Array = []
+		for i in board.pads.size():
+			var pd: Array = board.pads[i]
+			if int(pd[1]) == g and pad_dist.has(i) and (pad_dist[i] as Dictionary).has(c):
+				mine.append(i)
+		if not mine.is_empty():
+			return pad_dist[mine[k % mine.size()]]
+	return dist
+
+
+func _desired(p, k: int = 0) -> Vector2:
 	var board = main.board
 	var pos := Vector2(p.lp.x, p.lp.z)
 	var c: Vector2i = board.cell_of(pos)
+	var dm := _target_map(p, k)
 	var best := c
-	var bd: int = dist.get(c, 9999)
+	var bd: int = dm.get(c, 9999)
+	if c == p.tp_lock:
+		bd = 9999  # just popped out of a teleporter: roll off it first
 	for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
 		var nb: Vector2i = c + d
-		var nd: int = dist.get(nb, 9999)
+		var nd: int = dm.get(nb, 9999)
 		if nd < bd and _step_ok(board, c, nb):
 			bd = nd
 			best = nb
@@ -183,7 +276,61 @@ func _desired(p) -> Vector2:
 	return ((desired_v - vel) * 5.0).limit_length(1.0)
 
 
+## Two marbles nose to nose (e.g. one popping out of a teleporter the other wants to enter): after a
+## couple of seconds of not moving, wiggle off in a random direction for a moment.
+func _unstick(p, d: Vector2, delta: float) -> Vector2:
+	if p.home or p.falling or main.state != "play":
+		p.set_meta("stuck_t", 0.0)
+		return d
+	var wig: float = p.get_meta("wiggle_t", 0.0)
+	if wig > 0.0:
+		p.set_meta("wiggle_t", wig - delta)
+		return p.get_meta("wiggle_dir", Vector2.ZERO)
+	var vel: Vector2 = p.est_v
+	var st: float = p.get_meta("stuck_t", 0.0)
+	st = st + delta if vel.length() < 0.02 else 0.0
+	p.set_meta("stuck_t", st)
+	if st > 2.0:
+		p.set_meta("stuck_t", 0.0)
+		p.set_meta("wiggle_t", 0.7)
+		p.set_meta("wiggle_dir", Vector2.from_angle(randf() * TAU))
+	return d
+
+
+## A home marble's guide star: go to the marble furthest from the goal, then lead it along its path.
+func _guide_dir(p) -> Vector2:
+	var board = main.board
+	var worst = null
+	var wd := -1
+	for o in main.players:
+		if o.index == 0 or not o.active or o.home or o.falling:
+			continue
+		var od: int = dist.get(board.cell_of(Vector2(o.lp.x, o.lp.z)), 999)
+		if od > wd:
+			wd = od
+			worst = o
+	if worst == null:
+		return Vector2.ZERO
+	var op := Vector2(worst.lp.x, worst.lp.z)
+	var to: Vector2 = op - p.guide
+	if to.length() > 0.04:
+		if not has_meta("guide_said"):
+			set_meta("guide_said", true)
+			print("BOT: P%d's guide star heads for P%d" % [p.index + 1, worst.index + 1])
+		return to.normalized()
+	if not has_meta("tow_said"):
+		set_meta("tow_said", true)
+		print("BOT: P%d is towing P%d" % [p.index + 1, worst.index + 1])
+	return _desired(worst) * 0.6 + to * 6.0
+
+
 func _report(mode: String) -> void:
+	if OS.has_environment("BOT_DEBUG"):
+		for p in main.players:
+			if p.index > 0 and p.active:
+				var pos := Vector2(p.lp.x, p.lp.z)
+				var c: Vector2i = main.board.cell_of(pos)
+				print("DBG P%d pos=%s cell=%s off=%s lock=%s dist=%s steer=%s v=%s" % [p.index + 1, pos, c, pos - main.board.center(c.x, c.y), p.tp_lock, dist.get(c, -1), p.bot_steer, p.v])
 	var act: Array[String] = []
 	var falls := 0
 	for p in main.players:
@@ -199,6 +346,21 @@ func _report(mode: String) -> void:
 	for p in main.players:
 		if p.index > 0 and p.remote and p.active and p.net_started:
 			synced += 1
-	print("BOT %s t=%.0f level=%d state=%s time=%.0f score=%d home=%d/%d gems=%d falls=%d cleared=%d views=%d remote_synced=%d tilt=%s [%s]" % [
-		mode, t, main.level, main.state, main.time_left, main.score, main.home_count(), main.active_marbles().size(),
-		main.board.gem_taken.count(true), falls, cleared, views, synced, main.board.tilt.snapped(Vector2(0.01, 0.01)), ", ".join(act)])
+	print("BOT %s t=%.0f level=%d state=%s time=%.0f score=%d stars=%d jar=%d home=%d/%d gems=%d falls=%d cleared=%d views=%d remote_synced=%d gates=%s tilt=%s [%s]" % [
+		mode, t, main.level, main.state, main.time_left, main.score, main.stars, main.jar, main.home_count(), main.active_marbles().size(),
+		main.board.gem_taken.count(true), falls, cleared, views, synced, str(main.board.gate_open), main.board.tilt.snapped(Vector2(0.01, 0.01)), ", ".join(act)])
+
+
+## BOT_COUNT=1: what a camera would draw (performance check).
+func _count_node(n: Node, c: Dictionary) -> void:
+	if n is VisualInstance3D and (n as Node3D).is_visible_in_tree():
+		if n is MeshInstance3D:
+			c.mesh += 1
+		elif n is MultiMeshInstance3D:
+			c.multimesh += 1
+		elif n is Label3D:
+			c.label += 1
+		elif n is CPUParticles3D:
+			c.particles += 1
+	for ch in n.get_children():
+		_count_node(ch, c)

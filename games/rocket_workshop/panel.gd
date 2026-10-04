@@ -9,6 +9,10 @@ extends Node3D
 ## Surface layout (metres, x right, y away from the pilot along the sloped top):
 ##   SHAPES (2x2 buttons)  |            | PRESSURE dial + SET |  LAUNCH
 ##   FUEL MIX (4 colours)  |   PLUGS    | SWITCHES x5 + CHECK |  lever
+## Two cockpit wings angle in towards the pilot either side of the desk:
+##   left: ALIEN HELLO (a hologram alien + BEEP / BOOP / ZORP buttons)
+##   right: THRUSTER CRANK (grab the handle and wind it round, then press GO)
+## Every control lives on a "deck" (the main surface or a wing) and uses that deck's local x/y.
 
 const P := preload("res://games/rocket_workshop/puzzles.gd")
 const TILT := -1.0471976  # surface pitched 30 degrees towards the pilot
@@ -29,6 +33,19 @@ const DIAL_R := 0.06
 const LEVER_PIVOT := Vector3(0.775, -0.06, 0.0)
 const LEVER_LEN := 0.17
 const LEVER_MAX := 0.6
+const WING_SIZE := Vector2(0.62, 0.5)
+const WING_X := 1.2
+const WING_YAW := 0.7  # radians the wings turn in towards the pilot
+const WING_AREAS := {
+	"alien": ["l", Vector2(0.0, 0.0), Vector2(0.6, 0.48), "ALIEN HELLO", Color(0.3, 0.42, 0.6)],
+	"crank": ["r", Vector2(0.0, 0.0), Vector2(0.6, 0.48), "THRUSTER CRANK", Color(0.55, 0.38, 0.22)],
+}
+const HELLO_X: Array[float] = [-0.18, 0.0, 0.18]
+const HELLO_Y := -0.14
+const ALIEN_AT := Vector2(0.0, 0.08)
+const CRANK_C := Vector2(-0.06, 0.04)
+const CRANK_R := 0.1
+const GO_POS := Vector2(0.2, -0.15)
 
 var main
 var detail := true
@@ -55,6 +72,18 @@ var lever_pivot: Node3D
 var lever_pull := 0.0
 var lever_fired := false
 var shown_rocket := -1
+var wing_l: Node3D
+var wing_r: Node3D
+var wing_bodies: Array = []
+var alien_holder: Node3D
+var alien_beam: MeshInstance3D
+var crank_wheel: Node3D
+var crank_handle: Node3D
+var crank_label: Label3D
+var crank_acc := 0.0
+var crank_last := 0.0
+var crank_turns := 0
+var anim_t := 0.0
 
 
 func _ready() -> void:
@@ -83,8 +112,11 @@ func _ready() -> void:
 	frame.material_override = main.make_material(Color(0.95, 0.6, 0.2), 0.0)
 	frame.position.z = -0.02
 	screen_root.add_child(frame)
+	wing_l = _build_wing(-1.0)
+	wing_r = _build_wing(1.0)
 	if detail:
 		_build_controls()
+		_build_wing_controls()
 		screen = Label3D.new()
 		screen.font_size = 40
 		screen.pixel_size = 0.0017
@@ -106,10 +138,118 @@ func set_top(h: float) -> void:
 	body.scale = Vector3(1, bh, 1)
 	body.position = Vector3(0, bh / 2.0, -0.02)
 	screen_root.position = Vector3(0, top + 0.32, -0.75)  # far enough to focus on, low enough to see the rocket over it
+	for side in [-1.0, 1.0]:
+		var wing: Node3D = wing_l if side < 0.0 else wing_r
+		if wing == null:
+			continue
+		var yaw: float = -side * WING_YAW
+		wing.position = Vector3(side * WING_X, top - 0.03, 0.18)
+		wing.basis = Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, TILT)
+		var wb: MeshInstance3D = wing_bodies[0 if side < 0.0 else 1]
+		var wh := top - 0.15
+		wb.scale = Vector3(1, wh, 1)
+		wb.position = Vector3(side * WING_X, wh / 2.0, 0.18 - 0.05)
+		wb.rotation.y = yaw
 	if screen != null:
 		screen.pixel_size = 0.0026  # big and clear from the pilot's spot
 		screen.no_depth_test = true
 		screen.render_priority = 5
+
+
+## A cockpit wing: a small sloped console turned in towards the pilot (side -1 = left, 1 = right).
+func _build_wing(side: float) -> Node3D:
+	var wb := MeshInstance3D.new()
+	wb.mesh = main.box_mesh(Vector3(0.6, 1.0, 0.42))
+	wb.material_override = main.make_material(Color(0.62, 0.42, 0.28), 0.0)
+	add_child(wb)
+	wing_bodies.append(wb)
+	var wing := Node3D.new()
+	add_child(wing)
+	var slab := MeshInstance3D.new()
+	slab.name = "Slab"
+	slab.mesh = main.box_mesh(Vector3(WING_SIZE.x + 0.04, WING_SIZE.y + 0.04, 0.06))
+	slab.material_override = main.make_material(Color(0.22, 0.24, 0.3), 0.0)
+	slab.position = Vector3(0, 0, -0.027)
+	wing.add_child(slab)
+	return wing
+
+
+func _build_wing_controls() -> void:
+	for area in WING_AREAS:
+		var a: Array = WING_AREAS[area]
+		var deck: Node3D = wing_l if a[0] == "l" else wing_r
+		var holder := Node3D.new()
+		deck.add_child(holder)
+		var c: Vector2 = a[1]
+		var size: Vector2 = a[2]
+		# The wing's own slab doubles as this module's coloured plate (one less draw call).
+		var pm: StandardMaterial3D = main.make_material(a[4], 0.0)
+		(deck.get_node("Slab") as MeshInstance3D).material_override = pm
+		var lamp := MeshInstance3D.new()
+		lamp.mesh = main.sphere_mesh(0.016)
+		var lm: StandardMaterial3D = main.make_material(Color(0.2, 0.2, 0.2), 0.01)
+		lamp.material_override = lm
+		lamp.position = Vector3(c.x + size.x / 2.0 - 0.035, c.y + size.y / 2.0 - 0.035, 0.012)
+		holder.add_child(lamp)
+		_flat_label(holder, a[3], Vector2(c.x - 0.03, c.y + size.y / 2.0 - 0.035), 30)
+		area_nodes[area] = {"plate": pm, "lamp": lm, "color": a[4]}
+		if area == "alien":
+			# Hologram projector with the alien floating above it, and three hello buttons.
+			var proj := MeshInstance3D.new()
+			proj.mesh = main.cyl_mesh(0.05, 0.065, 0.03, 16)
+			proj.material_override = main.make_material(Color(0.35, 0.38, 0.45), 0.0)
+			proj.rotation.x = PI / 2.0
+			proj.position = Vector3(ALIEN_AT.x, ALIEN_AT.y, 0.015)
+			holder.add_child(proj)
+			alien_beam = MeshInstance3D.new()
+			alien_beam.mesh = main.cyl_mesh(0.07, 0.035, 0.16, 14)
+			var bm: StandardMaterial3D = main.make_material(Color(0.4, 0.95, 1.0, 0.18), 1.2)
+			bm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			bm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			bm.cull_mode = BaseMaterial3D.CULL_DISABLED
+			alien_beam.material_override = bm
+			alien_beam.rotation.x = PI / 2.0
+			alien_beam.position = Vector3(ALIEN_AT.x, ALIEN_AT.y, 0.11)
+			alien_beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			holder.add_child(alien_beam)
+			alien_holder = Node3D.new()
+			alien_holder.rotation.x = -TILT  # the alien stands upright in the world
+			alien_holder.position = Vector3(ALIEN_AT.x, ALIEN_AT.y, 0.1)
+			holder.add_child(alien_holder)
+			for i in 3:
+				_button(holder, "hello%d" % i, Vector2(HELLO_X[i], HELLO_Y), 0.055, P.HELLO_COLORS[i], false)
+				controls["hello%d" % i].deck = deck
+				_flat_label(controls["hello%d" % i].cap, P.HELLO_WORDS[i], Vector2(0, 0), 26, Color(0.1, 0.1, 0.15), 0.027)
+		else:
+			# A big wheel with a handle on its rim, a turn counter and a GO button.
+			crank_wheel = Node3D.new()
+			crank_wheel.position = Vector3(CRANK_C.x, CRANK_C.y, 0.0)
+			holder.add_child(crank_wheel)
+			var disc := MeshInstance3D.new()
+			disc.mesh = main.cyl_mesh(CRANK_R + 0.025, CRANK_R + 0.025, 0.025, 20)
+			disc.material_override = main.make_material(Color(0.75, 0.72, 0.68), 0.0)
+			disc.rotation.x = PI / 2.0
+			disc.position.z = 0.0125
+			crank_wheel.add_child(disc)
+			var spoke := MeshInstance3D.new()
+			spoke.mesh = main.box_mesh(Vector3(CRANK_R * 2.0, 0.02, 0.012))
+			spoke.material_override = main.make_material(Color(0.95, 0.55, 0.2), 0.2)
+			spoke.position.z = 0.03
+			crank_wheel.add_child(spoke)
+			crank_handle = Node3D.new()
+			holder.add_child(crank_handle)
+			var knob := MeshInstance3D.new()
+			knob.mesh = main.capsule_mesh(0.026, 0.11)  # a stubby handle sticking up off the wheel
+			knob.rotation.x = PI / 2.0
+			knob.material_override = main.make_material(Color(0.95, 0.25, 0.2), 0.4)
+			knob.position.z = 0.075
+			crank_handle.add_child(knob)
+			controls["crank"] = {"pos": CRANK_C, "r": 0.04, "h": 0.07, "kind": "grab", "cap": crank_handle, "deck": deck}
+			crank_label = _flat_label(holder, "TURNS\n0", Vector2(0.2, 0.08), 40, Color(0.75, 1.0, 0.8))
+			_button(holder, "crank_go", GO_POS, 0.045, Color(0.3, 0.85, 0.4), false)
+			controls["crank_go"].deck = deck
+			_flat_label(controls["crank_go"].cap, "GO", Vector2(0, 0), 30, Color(0.1, 0.2, 0.1), 0.027)
+		main.set_layers(holder, main.PANEL_LAYER)
 
 
 # --- Building the controls --------------------------------------------------
@@ -188,7 +328,7 @@ func _build_controls() -> void:
 		plug.add_child(pb)
 		plug.position = Vector3(SOCKET_X[i], PLUG_REST_Y, 0.0)
 		plug_nodes.append(plug)
-		controls["plug%d" % i] = {"pos": Vector2(SOCKET_X[i], PLUG_REST_Y), "r": 0.03, "h": 0.06, "kind": "grab", "cap": plug}
+		controls["plug%d" % i] = {"pos": Vector2(SOCKET_X[i], PLUG_REST_Y), "r": 0.03, "h": 0.06, "kind": "grab", "cap": plug, "deck": surface}
 	# Pressure dial with numbers 1-9 and a SET button.
 	var face := MeshInstance3D.new()
 	face.mesh = main.cyl_mesh(0.105, 0.105, 0.012, 24)
@@ -212,7 +352,7 @@ func _build_controls() -> void:
 	knob.material_override = main.make_material(Color(0.95, 0.3, 0.25), 0.3)
 	knob.position = Vector3(0, DIAL_R, 0.012)
 	needle.add_child(knob)
-	controls["dial"] = {"pos": DIAL_C, "r": 0.03, "h": 0.04, "kind": "grab", "cap": needle}
+	controls["dial"] = {"pos": DIAL_C, "r": 0.03, "h": 0.04, "kind": "grab", "cap": needle, "deck": surface}
 	_button(holder, "set", Vector2(0.615, 0.105), 0.035, Color(0.3, 0.85, 0.4))
 	_flat_label(holder, "SET", Vector2(0.615, 0.05), 20)
 	# Five flip switches with lamps, and a CHECK button.
@@ -246,7 +386,7 @@ func _build_controls() -> void:
 		holder.add_child(lamp)
 		switch_lamps.append(lm)
 		_flat_label(holder, str(i + 1), Vector2(x, -0.265), 20)
-		controls["sw%d" % i] = {"pos": Vector2(x, -0.2), "r": 0.022, "h": 0.05, "kind": "button", "cap": null}
+		controls["sw%d" % i] = {"pos": Vector2(x, -0.2), "r": 0.022, "h": 0.05, "kind": "button", "cap": null, "deck": surface}
 	_button(holder, "check", Vector2(0.625, -0.2), 0.03, Color(0.3, 0.85, 0.4))
 	_flat_label(holder, "CHECK", Vector2(0.625, -0.255), 18)
 	# The big launch lever.
@@ -269,17 +409,18 @@ func _build_controls() -> void:
 	handle.material_override = main.make_material(Color(0.95, 0.2, 0.2), 0.4)
 	handle.position.z = LEVER_LEN
 	lever_pivot.add_child(handle)
-	controls["lever"] = {"pos": Vector2(LEVER_PIVOT.x, LEVER_PIVOT.y), "r": 0.04, "h": LEVER_LEN, "kind": "grab", "cap": lever_pivot}
+	controls["lever"] = {"pos": Vector2(LEVER_PIVOT.x, LEVER_PIVOT.y), "r": 0.04, "h": LEVER_LEN, "kind": "grab", "cap": lever_pivot, "deck": surface}
 	main.set_layers(holder, main.PANEL_LAYER)
 
 
-func _button(parent: Node3D, key: String, pos: Vector2, r: float, color: Color) -> void:
-	var ring := MeshInstance3D.new()
-	ring.mesh = main.cyl_mesh(r + 0.008, r + 0.008, 0.012, 16)
-	ring.material_override = main.make_material(Color(0.1, 0.1, 0.12), 0.0)
-	ring.rotation.x = PI / 2.0
-	ring.position = Vector3(pos.x, pos.y, 0.006)
-	parent.add_child(ring)
+func _button(parent: Node3D, key: String, pos: Vector2, r: float, color: Color, ring_too: bool = true) -> void:
+	if ring_too:
+		var ring := MeshInstance3D.new()
+		ring.mesh = main.cyl_mesh(r + 0.008, r + 0.008, 0.012, 16)
+		ring.material_override = main.make_material(Color(0.1, 0.1, 0.12), 0.0)
+		ring.rotation.x = PI / 2.0
+		ring.position = Vector3(pos.x, pos.y, 0.006)
+		parent.add_child(ring)
 	var cap := Node3D.new()
 	cap.position = Vector3(pos.x, pos.y, 0.0)
 	parent.add_child(cap)
@@ -289,7 +430,7 @@ func _button(parent: Node3D, key: String, pos: Vector2, r: float, color: Color) 
 	m.rotation.x = PI / 2.0
 	m.position.z = 0.0125
 	cap.add_child(m)
-	controls[key] = {"pos": pos, "r": r, "h": 0.025, "kind": "button", "cap": cap}
+	controls[key] = {"pos": pos, "r": r, "h": 0.025, "kind": "button", "cap": cap, "deck": surface}
 
 
 func _flat_label(parent: Node3D, text: String, pos: Vector2, font: int, color: Color = Color(1, 0.97, 0.88), z: float = 0.008) -> Label3D:
@@ -310,7 +451,16 @@ func _dial_angle(v: int) -> float:
 
 # --- Positions the bot (and anyone else) can aim for --------------------------
 
-## Local (surface) position of a control's touch / grab point.
+## The deck (main surface or a wing) a control key lives on.
+func deck_of(key: String) -> Node3D:
+	if key.begins_with("crank"):
+		return wing_r
+	if key.begins_with("hello"):
+		return wing_l
+	return surface
+
+
+## Local (deck) position of a control's touch / grab point.
 func control_local(key: String) -> Vector3:
 	if key.begins_with("sock"):
 		return Vector3(SOCKET_X[int(key.substr(4))], SOCKET_Y, 0.04)
@@ -327,9 +477,19 @@ func control_local(key: String) -> Vector3:
 		return _lever_handle()
 	if key == "lever_pulled":
 		return LEVER_PIVOT + Vector3(0, -sin(LEVER_MAX), cos(LEVER_MAX)) * LEVER_LEN
+	if key == "crank":
+		return _crank_point(crank_acc)
+	if key.begins_with("crank@"):  # "crank@6.5": where the handle sits after winding 6.5 radians
+		return _crank_point(float(key.substr(6)))
 	var c: Dictionary = controls[key]
 	var p: Vector2 = c.pos
 	return Vector3(p.x, p.y, c.h)
+
+
+## World position of a control, optionally lifted off its deck (for the bot's hovering hand).
+func control_world(key: String, lift: float = 0.0) -> Vector3:
+	var deck := deck_of(key)
+	return deck.global_transform * (control_local(key) + Vector3(0, 0, lift))
 
 
 func to_world(local: Vector3) -> Vector3:
@@ -341,9 +501,50 @@ func _lever_handle() -> Vector3:
 	return LEVER_PIVOT + Vector3(0, -sin(rot), cos(rot)) * LEVER_LEN
 
 
+func _crank_point(acc: float) -> Vector3:
+	return Vector3(CRANK_C.x + cos(acc) * CRANK_R, CRANK_C.y + sin(acc) * CRANK_R, 0.075)
+
+
+func _decks() -> Array:
+	return [surface, wing_l, wing_r]
+
+
+func _deck_size(deck: Node3D) -> Vector2:
+	return Vector2(1.86, 0.8) if deck == surface else WING_SIZE
+
+
+## Split-screen pointer: where a camera ray lands on the desk (surface or wings), lifted off it when
+## dragging. Vector3.INF when it misses everything.
+func pointer_point(from: Vector3, dir: Vector3, lifted: bool) -> Vector3:
+	var best := Vector3.INF
+	var best_d := INF
+	for deck in _decks():
+		var d3: Node3D = deck
+		if d3 == null:
+			continue
+		var n := d3.global_basis.z.normalized()
+		var hit = Plane(n, d3.global_position).intersects_ray(from, dir)
+		if hit == null:
+			continue
+		var local: Vector3 = d3.global_transform.affine_inverse() * (hit as Vector3)
+		var half := _deck_size(d3) / 2.0 + Vector2(0.06, 0.06)
+		var dist := from.distance_to(hit as Vector3)
+		var inside := absf(local.x) < half.x and absf(local.y) < half.y
+		if not inside and d3 != surface:
+			continue
+		if not inside:
+			dist += 100.0  # off the desk: fall back to the main surface's plane
+		if dist < best_d:
+			best_d = dist
+			local.z = 0.1 if lifted else 0.0
+			best = d3.global_transform * local
+	return best
+
+
 # --- Hands ------------------------------------------------------------------
 
 func update_panel(delta: float) -> void:
+	anim_t += delta
 	if not detail or not is_inside_tree():
 		return
 	if shown_rocket != main.rocket_n:
@@ -357,6 +558,7 @@ func update_panel(delta: float) -> void:
 func _refresh() -> void:
 	plug_drag.clear()
 	lever_pull = 0.0
+	reset_crank()
 	var m: Dictionary = main.module("symbols")
 	for i in 4:
 		var h: Node3D = shape_holders[i]
@@ -366,20 +568,50 @@ func _refresh() -> void:
 			var layout: Array = m.layout
 			h.add_child(main.shape_node(int(layout[i]), 0.05))
 		main.set_layers(h, main.PANEL_LAYER)
+	if alien_holder != null:
+		for c in alien_holder.get_children():
+			c.queue_free()
+		var al: Dictionary = main.module("alien")
+		if not al.is_empty():
+			var cast: Array = al.cast
+			var a: Array = cast[int(al.pick)]
+			alien_holder.add_child(main.alien_node(int(a[0]), int(a[1]), int(a[2]), 0.13))
+		main.set_layers(alien_holder, main.PANEL_LAYER)
+
+
+## After the pause menu: a trigger still held must be let go before it grabs anything again.
+func block_held_grips() -> void:
+	for id in ["l", "r", "p", "bot"]:
+		grip_was[id] = true
+	grabs.clear()
+	lever_fired = false
+
+
+func reset_crank() -> void:
+	crank_acc = 0.0
+	crank_turns = 0
+	for id in grabs.keys():
+		if grabs[id] == "crank":
+			grabs.erase(id)
 
 
 func _handle_hands(hands: Array) -> void:
-	var inv := surface.global_transform.affine_inverse()
+	var invs := {}
+	for deck in _decks():
+		if deck != null:
+			invs[deck] = (deck as Node3D).global_transform.affine_inverse()
 	var seen := {}
 	for h in hands:
 		var id: String = h.id
-		var lp: Vector3 = inv * (h.pos as Vector3)
+		var wp: Vector3 = h.pos
 		var grip: bool = h.grip
 		var pointer: bool = h.pointer
 		var was: bool = grip_was.get(id, false)
 		grip_was[id] = grip
 		if grabs.has(id):
 			var key: String = grabs[id]
+			var t: Transform3D = invs[deck_of(key)]
+			var lp: Vector3 = t * wp
 			if grip:
 				_drag(key, lp)
 			else:
@@ -387,16 +619,22 @@ func _handle_hands(hands: Array) -> void:
 				grabs.erase(id)
 			continue
 		if grip and not was:
-			var key := _grab_target(lp, pointer)
+			var key := _grab_target(wp, invs, pointer)
 			if key != "":
 				grabs[id] = key
 				main.players[0].haptic(id, 0.4)
 				main.local_sound("click", -6.0, 1.2)
+				if key == "crank":
+					var t: Transform3D = invs[wing_r]
+					var lp: Vector3 = t * wp
+					crank_last = atan2(lp.y - CRANK_C.y, lp.x - CRANK_C.x)
 				continue
 		for key in controls:
 			var c: Dictionary = controls[key]
 			if c.kind != "button":
 				continue
+			var t: Transform3D = invs[c.deck]
+			var lp: Vector3 = t * wp
 			var cp: Vector2 = c.pos
 			var r: float = c.r
 			var hh: float = c.h
@@ -410,10 +648,12 @@ func _handle_hands(hands: Array) -> void:
 	touching = seen
 
 
-func _grab_target(lp: Vector3, pointer: bool) -> String:
+func _grab_target(wp: Vector3, invs: Dictionary, pointer: bool) -> String:
 	var best := ""
 	var best_d := 0.055 if pointer else 0.07
 	var keys: Array[String] = ["dial", "lever"]
+	if controls.has("crank"):
+		keys.append("crank")
 	var wires: Dictionary = main.module("wires")
 	if not wires.is_empty() and not wires.done:
 		var placed: Array = wires.placed
@@ -421,8 +661,17 @@ func _grab_target(lp: Vector3, pointer: bool) -> String:
 			if not placed.has(i):
 				keys.append("plug%d" % i)
 	for key in keys:
+		var t: Transform3D = invs[deck_of(key)]
+		var lp: Vector3 = t * wp
 		var at := control_local(key)
-		var d := Vector2(lp.x - at.x, lp.y - at.y).length() if pointer else lp.distance_to(at)
+		var d := INF
+		if pointer:
+			if absf(lp.z) < 0.25:
+				d = Vector2(lp.x - at.x, lp.y - at.y).length()
+		else:
+			d = lp.distance_to(at)
+		if key == "crank":
+			d -= 0.015  # the crank knob is easy to catch
 		if d < best_d:
 			best_d = d
 			best = key
@@ -438,6 +687,8 @@ func _press(key: String, hand_id: String) -> void:
 		main.on_panel("shape", [int(key.substr(5))])
 	elif key.begins_with("sw"):
 		main.on_panel("switch", [int(key.substr(2))])
+	elif key.begins_with("hello"):
+		main.on_panel("hello", [int(key.substr(5))])
 	else:
 		main.on_panel(key, [])
 
@@ -459,6 +710,18 @@ func _drag(key: String, lp: Vector3) -> void:
 			lever_fired = true
 			main.players[0].haptic("r", 1.0)
 			main.on_panel("lever", [])
+	elif key == "crank":
+		var off := Vector2(lp.x - CRANK_C.x, lp.y - CRANK_C.y)
+		if off.length() < 0.012:
+			return  # too close to the axle to tell which way it's turning
+		var a := atan2(off.y, off.x)
+		crank_acc += wrapf(a - crank_last, -PI, PI)
+		crank_last = a
+		var turns := int(absf(crank_acc) / TAU)
+		if turns != crank_turns:
+			crank_turns = turns
+			main.on_panel("crank", [turns])
+			main.players[0].haptic("r", 0.7)
 
 
 func _release(key: String, lp: Vector3) -> void:
@@ -566,5 +829,22 @@ func _update_visuals(delta: float) -> void:
 	if not grabs.values().has("lever"):
 		lever_pull = move_toward(lever_pull, 0.0, delta * 2.5)
 	lever_pivot.rotation.x = lerpf(-LEVER_MAX, LEVER_MAX, lever_pull)
+	# Wings: the hologram alien bobs and spins, the crank shows its turns.
+	if alien_holder != null:
+		alien_holder.position.z = 0.1 + sin(anim_t * 2.2) * 0.012
+		alien_holder.rotation.y = sin(anim_t * 0.8) * 0.6
+		var al: Dictionary = main.module("alien")
+		alien_beam.visible = not al.is_empty() and not al.done
+		alien_holder.visible = alien_beam.visible
+	if crank_wheel != null:
+		crank_wheel.rotation.z = crank_acc
+		crank_handle.position = _crank_point(crank_acc) - Vector3(0, 0, 0.075)
+		var cm: Dictionary = main.module("crank")
+		if cm.is_empty():
+			crank_label.text = "TURNS\n-"
+		elif cm.done:
+			crank_label.text = "TURNS\nDONE"
+		else:
+			crank_label.text = "TURNS\n%d" % crank_turns
 	if screen:
 		screen.text = main.screen_text()

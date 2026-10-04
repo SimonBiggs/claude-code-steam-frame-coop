@@ -3,6 +3,9 @@ extends Node3D
 ## Lives under the board node, so `lp` (board-local position, y up from the floor) is its transform.
 ## Local marbles simulate themselves (also on the TV machine: instant response); on the host, the
 ## TV machine's marbles are "remote" and just follow the positions it sends.
+## Teamwork: marbles bump softly (a friend can never be shoved hard, and never over an edge or into a
+## hole), and once you're HOME you steer a GUIDE STAR: touch a friend's marble with it to tow them
+## along. Every marble has a little face that looks where it's rolling (and blinks).
 
 const R := 0.028
 const STEER := 0.45  # own push (m/s^2); the board's tilt gives up to ~0.9
@@ -49,6 +52,17 @@ var wall_click_t := 0.0
 
 var ball: MeshInstance3D
 var shine: MeshInstance3D
+var face: Node3D
+var eyes: MeshInstance3D
+var face_yaw := 0.0
+var blink_t := 2.0
+var squash := 0.0
+var tp_lock := Vector2i(-99, -99)
+var guide := Vector2.ZERO  # home marbles: the guide star's board position
+var guide_on := false
+var guide_star: MeshInstance3D
+var boop_t := 0.0
+var towing := 0.0
 
 
 func _ready() -> void:
@@ -69,6 +83,14 @@ func _ready() -> void:
 	shine.mesh = tm
 	shine.material_override = main.make_material(Color(1, 1, 1), 0.3)
 	ball.add_child(shine)
+	# A little face (doesn't roll: it turns to look where the marble is going).
+	face = Node3D.new()
+	add_child(face)
+	eyes = MeshInstance3D.new()
+	eyes.mesh = main.eyes_mesh()
+	eyes.material_override = main.vertex_mat()
+	eyes.position = Vector3(0, R * 0.32, -R * 0.9)
+	face.add_child(eyes)
 	visible = active
 	position = lp
 
@@ -78,6 +100,7 @@ func set_active(on: bool) -> void:
 	visible = on
 	if not on:
 		home = false
+		guide_on = false
 
 
 func is_local() -> bool:
@@ -89,6 +112,9 @@ func reset_to_start() -> void:
 	checkpoint = -1
 	home = false
 	falling = false
+	guide_on = false
+	towing = 0.0
+	tp_lock = Vector2i(-99, -99)
 	var n: int = board.starts.size()
 	var s: Vector2 = board.starts[index % n]
 	var off := Vector2(((index - 1) % 3 - 1) * 0.022, (((index - 1) / 3) % 2) * 0.02 - 0.01)
@@ -109,6 +135,7 @@ func respawn() -> void:
 	falling = false
 	fall_t = 0.0
 	var p := spawn
+	checkpoint = main.best_checkpoint(checkpoint)  # the team's furthest checkpoint: nobody gets left behind
 	if checkpoint >= 0 and checkpoint < board.checkpoints.size():
 		p = board.checkpoints[checkpoint]
 	_place(p)
@@ -173,12 +200,16 @@ func _physics_process(delta: float) -> void:
 		return
 	sim(delta)
 	if main.net.mode == "client":
-		main.net.send_state(lp, yaw, pitch, index)
+		if home and guide_on:
+			main.net.send_state(Vector3(guide.x, 5.0, guide.y), yaw, pitch, index)  # y = 5: "this is my guide star"
+		else:
+			main.net.send_state(lp, yaw, pitch, index)
 
 
 func sim(delta: float) -> void:
 	if home:
 		_sit_in_goal(delta)
+		_steer_guide(delta)
 		return
 	if falling:
 		fall_t += delta
@@ -192,10 +223,13 @@ func sim(delta: float) -> void:
 			respawn()
 		return
 	var steer := bot_steer if bot else _steer_dir()
-	var a: Vector2 = board.gravity_local() + steer * STEER + board.hole_pull(Vector2(lp.x, lp.z))
+	var here := Vector2(lp.x, lp.z)
+	var a: Vector2 = board.gravity_local() + steer * STEER * board.grip_at(here) + board.hole_pull(here) + board.boost_at(here)
+	a += main.guide_pull(self, here)
 	v += a * delta
-	v *= exp(-DAMP * delta)
-	v = v.limit_length(MAX_SPEED)
+	v *= exp(-board.damp_at(here) * delta)
+	v = v.limit_length(0.3 if board.is_mud(here) else MAX_SPEED)
+	boop_t -= delta
 	var p := Vector2(lp.x, lp.z)
 	var impact := 0.0
 	for i in 2:
@@ -226,6 +260,18 @@ func sim(delta: float) -> void:
 		falls += 1
 		main.on_marble_fell(self)
 		return
+	# Teleporters: pop out of the twin (and not straight back until you've rolled off it).
+	var cell: Vector2i = board.cell_of(p)
+	if cell != tp_lock:
+		tp_lock = Vector2i(-99, -99)
+		var dest: Vector2 = board.teleport_dest(p)
+		if dest != Vector2.INF:
+			var from := p
+			p = dest
+			lp = Vector3(p.x, R, p.y)
+			position = lp
+			tp_lock = board.cell_of(dest)
+			main.on_teleport(self, from, dest)
 	var cp: int = board.checkpoint_at(p)
 	if cp >= 0 and cp != checkpoint:
 		checkpoint = cp
@@ -244,6 +290,8 @@ func _steer_dir() -> Vector2:
 	return Vector2(w.x, w.z).limit_length(1.0)
 
 
+## Marbles bump softly: you lose your own speed rather than flinging your friend, they only get a
+## gentle nudge, and never one that would roll them over an edge or into a hole.
 func _push_marbles(p: Vector2) -> Vector2:
 	for o in main.players:
 		if o == self or o.index == 0 or not o.active or o.home or o.falling:
@@ -256,10 +304,27 @@ func _push_marbles(p: Vector2) -> Vector2:
 			p = op + n * R * 2.0
 			var vn := v.dot(n)
 			if vn < 0.0:
-				v -= n * vn * 1.1
+				v -= n * vn * 1.05  # almost all of the closing speed is soaked up
 				if o.is_local():
-					o.v += n * vn * 0.9
+					var nudge := -n * minf(-vn * 0.25, 0.08)
+					var ahead: Vector2 = op + (o.v + nudge) * 0.25
+					if board.supported(ahead) and board.supported(op + nudge.normalized() * R * 2.0):
+						o.v += nudge
+				if -vn > 0.12 and boop_t <= 0.0:
+					boop_t = 0.6
+					main.on_marble_boop(self, o)
 	return p
+
+
+## Home marbles steer a guide star round the board (left stick, camera-relative).
+func _steer_guide(delta: float) -> void:
+	if not guide_on:
+		guide_on = true
+		guide = board.goal
+	var s := bot_steer if bot else _steer_dir()
+	guide += s * 0.3 * delta
+	var hs: Vector2 = board.half_size()
+	guide = Vector2(clampf(guide.x, -hs.x + 0.03, hs.x - 0.03), clampf(guide.y, -hs.y + 0.03, hs.y - 0.03))
 
 
 func _sit_in_goal(delta: float) -> void:
@@ -278,10 +343,14 @@ func _sit_in_goal(delta: float) -> void:
 # --- Remote (host) / camera ---------------------------------------------------------
 
 func apply_remote_state(pos: Vector3, y: float, p: float) -> void:
-	target_lp = pos
 	yaw = y
 	pitch = p
 	net_started = true
+	if pos.y > 1.0:
+		guide = Vector2(pos.x, pos.z)
+		guide_on = home
+		return
+	target_lp = pos
 
 
 func _process(delta: float) -> void:
@@ -301,10 +370,54 @@ func _process(delta: float) -> void:
 		position = lp
 	elif is_local():
 		est_v = v
+	if active:
+		_animate_face(delta)
+		_update_guide_star(delta)
 	if camera != null and active:
 		_update_camera(delta)
 	if hud_label != null:
 		hud_label.text = main.hud_text(self)
+
+
+## Eyes look where we're rolling and blink; a bump squashes the ball a little.
+func _animate_face(delta: float) -> void:
+	var vel := est_v
+	if vel.length() > 0.03:
+		face_yaw = lerp_angle(face_yaw, atan2(-vel.x, -vel.y), 1.0 - exp(-8.0 * delta))
+	elif home:
+		face_yaw += delta * 3.0
+	face.rotation.y = face_yaw
+	blink_t -= delta
+	if blink_t <= 0.0:
+		blink_t = randf_range(1.8, 4.5)
+	eyes.scale = Vector3(1.0, 0.15 if blink_t < 0.12 else 1.0, 1.0)
+	squash = move_toward(squash, 0.0, delta * 4.0)
+	var sq := sin(squash * PI) * 0.25
+	ball.scale = Vector3(1.0 + sq, 1.0 - sq, 1.0 + sq)
+	face.visible = not falling
+
+
+func bump_squash() -> void:
+	squash = 1.0
+
+
+## The guide star floats over the board where this (home) marble's player is pointing.
+func _update_guide_star(_delta: float) -> void:
+	var show: bool = home and guide_on and main.state == "play"
+	if guide_star == null:
+		if not show:
+			return
+		guide_star = MeshInstance3D.new()
+		guide_star.mesh = main.star_mesh()
+		guide_star.material_override = main.make_material(color.lightened(0.3), 2.0)
+		guide_star.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		board.add_child(guide_star)
+	guide_star.visible = show
+	if show:
+		var bob := sin(board.t * 4.0 + index) * 0.006
+		guide_star.position = Vector3(guide.x, 0.05 + bob, guide.y)
+		guide_star.rotation = Vector3(0.0, board.t * 2.5 + index, 0.0)
+		guide_star.scale = Vector3.ONE * (0.018 if towing <= 0.0 else 0.024)
 
 
 func _update_camera(delta: float) -> void:
@@ -323,6 +436,8 @@ func _update_camera(delta: float) -> void:
 		var want := atan2(-v.x, -v.y)
 		yaw = lerp_angle(yaw, want, 1.0 - exp(-1.2 * delta))
 	var target: Vector3 = global_position if not falling else board.to_global(Vector3(lp.x, R, lp.z))
+	if home and guide_on:
+		target = board.to_global(Vector3(guide.x, R, guide.y))
 	var back := Basis(Vector3.UP, yaw) * Vector3(0.0, 0.0, 0.22)
 	var want_pos := target + back + Vector3(0, 0.12, 0)
 	if not camera.has_meta("placed"):

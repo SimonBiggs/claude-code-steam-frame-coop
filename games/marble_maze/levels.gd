@@ -4,9 +4,15 @@ extends RefCounted
 ## O  hole          C  checkpoint   B  bumper post    H  block sliding left/right
 ## V  block sliding forward/back (blocks slide one cell each way: use them as gates across a corridor,
 ##    sliding into walls on either side, never along the corridor you must travel)    _  empty air      -  plank (cross left/right)   |  plank (cross forward/back)
+## Teamwork tiles: P  team pad (group 1)   D  gate (group 1)   Q  team pad (group 2)   E  gate (group 2)
+##    A group's gates open (and stay open) when enough of its pads have a marble on them AT THE SAME TIME:
+##    every pad, or one per marble when there are fewer marbles than pads.
+## Floors: I  ice (slippery)   M  mud (slow)   > < ^ v  zoom arrows (push that way: ^ = away from the VR player)
+## T  teleporter (in reading order, 1st and 2nd are a pair, 3rd and 4th...)
+## Every level has a theme: its colours, the little decorations on the walls and the room's mood.
 
 const LEVELS := [
-	{"name": "WARM-UP", "tip": "Tilt gently - roll everyone into the glowing goal!", "time": 90,
+	{"name": "WARM-UP", "theme": "garden", "tip": "Tilt gently - roll everyone into the glowing goal!", "time": 90,
 		"map": [
 			"############",
 			"#S..#.....*#",
@@ -19,7 +25,7 @@ const LEVELS := [
 			"#..#...#..G#",
 			"############",
 		]},
-	{"name": "HOLE IN ONE", "tip": "Mind the holes: falling sends you back to a checkpoint", "time": 100,
+	{"name": "HOLE IN ONE", "theme": "beach", "tip": "Mind the holes: falling sends you back to a checkpoint", "time": 100,
 		"map": [
 			"############",
 			"#S...O....*#",
@@ -32,7 +38,21 @@ const LEVELS := [
 			"#*.....O..G#",
 			"############",
 		]},
-	{"name": "BOING BOING", "tip": "Bumpers bounce you hard - go slow", "time": 100,
+	{"name": "TEAM GATES", "theme": "castle", "tip": "Two marbles on the two blue pads AT THE SAME TIME opens the gate!", "time": 120,
+		"new": "NEW: TEAM PADS! Park a marble on EACH blue pad at the same time to open the gate. VR: keep it gentle so they stay put!",
+		"map": [
+			"############",
+			"#S....#...P#",
+			"#.##..#.#..#",
+			"#..*..#.#*.#",
+			"#.##.##.##.#",
+			"#P........C#",
+			"####DD######",
+			"#*....O...*#",
+			"#..#.....#G#",
+			"############",
+		]},
+	{"name": "BOING BOING", "theme": "candy", "tip": "Bumpers bounce you hard - go slow", "time": 100,
 		"map": [
 			"############",
 			"#S..B...B..#",
@@ -45,7 +65,21 @@ const LEVELS := [
 			"#....B....G#",
 			"############",
 		]},
-	{"name": "SLIDING DOORS", "tip": "Sliding blocks shove marbles around - time your run", "time": 110,
+	{"name": "ICE RINK", "theme": "ice", "tip": "Ice is slippery! Tiny tilts only", "time": 110,
+		"new": "NEW: ICE! Marbles slide and slide. VR: tiny tilts. Marbles: steer early!",
+		"map": [
+			"############",
+			"#S..#*IIII.#",
+			"#...#IIIII.#",
+			"#.##IIOIII.#",
+			"#.IIIIIIII*#",
+			"#*IIO..OII.#",
+			"#.IIIIIIIIC#",
+			"#..IIIOIII.#",
+			"#*..III...G#",
+			"############",
+		]},
+	{"name": "SLIDING DOORS", "theme": "toys", "tip": "Sliding blocks shove marbles around - time your run", "time": 110,
 		"map": [
 			"############",
 			"#S..#*..##*#",
@@ -58,7 +92,21 @@ const LEVELS := [
 			"#O.....*..G#",
 			"############",
 		]},
-	{"name": "RICKETY BRIDGES", "tip": "Narrow planks over thin air - keep the board level!", "time": 110,
+	{"name": "ZOOM ZOOM", "theme": "race", "tip": "Zoom arrows fling you along - wheee!", "time": 100,
+		"new": "NEW: ZOOM ARROWS push marbles the way they point. Ride them to the goal!",
+		"map": [
+			"############",
+			"#S..>>>>>.*#",
+			"#.########.#",
+			"#.#*..<<<..#",
+			"#.#.######v#",
+			"#^#..*.B#.v#",
+			"#^#.###.#.v#",
+			"#^..#.....v#",
+			"#*..#..C..G#",
+			"############",
+		]},
+	{"name": "RICKETY BRIDGES", "theme": "jungle", "tip": "Narrow planks over thin air - keep the board level!", "time": 110,
 		"map": [
 			"############",
 			"#S..___..*.#",
@@ -71,7 +119,35 @@ const LEVELS := [
 			"#...____..G#",
 			"############",
 		]},
-	{"name": "THE GAUNTLET", "tip": "Everything at once. Good luck!", "time": 130,
+	{"name": "BEAM ME UP", "theme": "space", "tip": "Roll into a teleporter to pop out of its twin", "time": 110,
+		"new": "NEW: TELEPORTERS! Roll into a swirly pad and pop out of the other one.",
+		"map": [
+			"############",
+			"#S...#*..#*#",
+			"#.##.#.#.#.#",
+			"#.#T.#.#T#.#",
+			"#.#..#.#...#",
+			"#.####.#####",
+			"#..*...C..T#",
+			"#.####O#####",
+			"#T..*.....G#",
+			"############",
+		]},
+	{"name": "MUDDY BUDDIES", "theme": "farm", "tip": "Gooey mud and TWO sets of team pads - stick together!", "time": 140,
+		"new": "Mud is slow and sticky. Purple pads open the purple gate, blue pads the blue gate!",
+		"map": [
+			"############",
+			"#S..MMM..Q.#",
+			"#.####M###.#",
+			"#..MMM.*..Q#",
+			"###E########",
+			"#P.MM.*MM.P#",
+			"#####D######",
+			"#*.MMMM..C.#",
+			"#.......*G.#",
+			"############",
+		]},
+	{"name": "THE GAUNTLET", "theme": "volcano", "tip": "Everything at once. Good luck!", "time": 130,
 		"map": [
 			"############",
 			"#S.B..O..*.#",
@@ -84,4 +160,34 @@ const LEVELS := [
 			"#*....B...G#",
 			"############",
 		]},
+	{"name": "GRAND FINALE", "theme": "rainbow", "tip": "Pads, ice, arrows and bumpers - all together now!", "time": 150,
+		"map": [
+			"############",
+			"#S..B...>>*#",
+			"#.##.##.##.#",
+			"#.P#IIII#P.#",
+			"#.##IOII##.#",
+			"#*..IIII..C#",
+			"####DD######",
+			"#*.<<..B...#",
+			"#..O.B...OG#",
+			"############",
+		]},
 ]
+
+
+## name -> [floor A, floor B, walls, decoration, room background]
+const THEMES := {
+	"garden": [Color(0.86, 0.96, 0.78), Color(0.78, 0.9, 0.68), Color(0.4, 0.72, 0.38), "flowers", Color(0.62, 0.84, 1.0)],
+	"beach": [Color(1.0, 0.93, 0.74), Color(0.97, 0.87, 0.64), Color(0.35, 0.7, 0.95), "shells", Color(0.55, 0.85, 1.0)],
+	"castle": [Color(0.86, 0.85, 0.82), Color(0.78, 0.77, 0.74), Color(0.55, 0.55, 0.62), "flags", Color(0.7, 0.75, 0.95)],
+	"candy": [Color(1.0, 0.9, 0.96), Color(0.97, 0.82, 0.92), Color(1.0, 0.45, 0.7), "lollipops", Color(1.0, 0.8, 0.92)],
+	"ice": [Color(0.9, 0.97, 1.0), Color(0.82, 0.92, 0.99), Color(0.55, 0.75, 0.95), "snow", Color(0.75, 0.88, 1.0)],
+	"toys": [Color(0.98, 0.92, 0.78), Color(0.93, 0.85, 0.68), Color(1.0, 0.6, 0.2), "blocks", Color(0.8, 0.85, 1.0)],
+	"race": [Color(0.86, 0.86, 0.88), Color(0.72, 0.72, 0.76), Color(0.95, 0.25, 0.25), "cones", Color(0.65, 0.85, 1.0)],
+	"jungle": [Color(0.8, 0.92, 0.7), Color(0.7, 0.84, 0.6), Color(0.35, 0.55, 0.3), "leaves", Color(0.6, 0.85, 0.7)],
+	"space": [Color(0.42, 0.4, 0.62), Color(0.36, 0.34, 0.56), Color(0.6, 0.4, 1.0), "crystals", Color(0.12, 0.1, 0.25)],
+	"farm": [Color(0.92, 0.86, 0.68), Color(0.86, 0.78, 0.58), Color(0.7, 0.45, 0.28), "grass", Color(0.7, 0.88, 1.0)],
+	"volcano": [Color(0.55, 0.45, 0.42), Color(0.48, 0.38, 0.36), Color(0.35, 0.2, 0.18), "lava", Color(0.45, 0.2, 0.15)],
+	"rainbow": [Color(0.98, 0.96, 1.0), Color(0.92, 0.9, 0.98), Color(1.0, 0.5, 0.3), "rainbow", Color(0.85, 0.8, 1.0)],
+}

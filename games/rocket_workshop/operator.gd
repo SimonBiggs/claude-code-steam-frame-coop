@@ -3,7 +3,9 @@ extends Node3D
 ## VR (Steam Frame): touch buttons and switches with either hand (a glowing fingertip shows the touch
 ## point); squeeze the RIGHT trigger near a plug, the dial knob or the launch lever to grab it and move
 ## your hand. Left stick shuffles you round the desk, right stick up/down raises or lowers the desk.
-## The desk sizes itself to your head height a moment after starting (sitting is fine).
+## The desk sizes itself to your head height a moment after starting (sitting is fine), and again if
+## your head height changes a lot for a few seconds (someone else put the headset on).
+## The cockpit wings either side (ALIEN HELLO, THRUSTER CRANK) work the same way.
 ## Split screen / non-VR host: a pointer. Mouse: click to press, hold and drag to grab.
 ## Controller: left stick moves the pointer, A / RT clicks and holds.
 ## On the TV machine this is a "ghost": a helmet and two mittens drawn from the host's snapshots.
@@ -34,6 +36,8 @@ var cursor_ball: MeshInstance3D
 var bot_hand := {}  # tests: {pos: Vector3 (world), grip: bool} replaces the real hands
 var recenter_t := 0.8
 var recentered := false
+var fit_head := 0.0
+var refit_t := 0.0
 var net_head := Transform3D()
 var net_hand_r := Transform3D()
 var net_hand_l := Transform3D()
@@ -115,12 +119,21 @@ func _vr_update(delta: float) -> void:
 		recenter_t -= delta
 		if recenter_t <= 0.0 and xr_camera.position != Vector3.ZERO:
 			_recenter()
+	elif xr_camera.position != Vector3.ZERO:
+		# Someone taller or shorter (or sitting down now): re-fit the desk after a few steady seconds.
+		var hy := xr_camera.global_position.y
+		refit_t = refit_t + delta if absf(hy - fit_head) > 0.3 else 0.0
+		if refit_t > 4.0:
+			refit_t = 0.0
+			fit_head = hy
+			main.panel.set_top(hy - 0.58)
+			print("VR: head height changed, desk re-fitted to %.2f m" % main.panel.top)
 	var s := hand_l.get_vector2("primary")
 	if s.length() > 0.2:
 		var b := Basis(Vector3.UP, xr_camera.global_rotation.y)
 		xr_origin.global_position += b * Vector3(s.x, 0.0, -s.y) * 0.6 * delta
 	var head := xr_camera.global_position
-	var fix := Vector3(clampf(head.x, -0.9, 0.9) - head.x, 0.0, clampf(head.z, -1.5, 0.9) - head.z)  # lean right over the desk without being pushed back
+	var fix := Vector3(clampf(head.x, -1.05, 1.05) - head.x, 0.0, clampf(head.z, -1.5, 0.9) - head.z)  # lean right over the desk (and wings) without being pushed back
 	xr_origin.global_position += fix
 	var r := hand_r.get_vector2("primary")
 	if absf(r.y) > 0.5:
@@ -139,6 +152,7 @@ func _recenter() -> void:
 	head = xr_camera.global_position
 	xr_origin.global_position += Vector3(-head.x, 0.0, 0.12 - head.z)
 	main.panel.set_top(head.y - 0.58)
+	fit_head = head.y
 	print("VR: recentred at the desk, head %.2f m, desk %.2f m" % [head.y, main.panel.top])
 
 
@@ -148,10 +162,10 @@ func attach_camera(cam: Camera3D) -> void:
 	camera = cam
 	camera.cull_mask = 0xFFFFF & ~main.MANUAL_LAYER
 	camera.keep_aspect = Camera3D.KEEP_WIDTH
-	camera.fov = 74.0
+	camera.fov = 84.0  # wide enough to see both cockpit wings
 	var top: float = main.panel.top
-	camera.position = Vector3(0, top + 0.95, 0.55)
-	camera.look_at(Vector3(0, top - 0.05, -0.55))
+	camera.position = Vector3(0, top + 1.0, 0.75)
+	camera.look_at(Vector3(0, top - 0.08, -0.5))
 	global_position = Vector3(0, 0, 0.3)
 	cursor_ball = MeshInstance3D.new()
 	cursor_ball.mesh = main.sphere_mesh(0.016)
@@ -185,15 +199,11 @@ func _pointer_update(delta: float) -> void:
 		held = held or Input.is_joy_button_pressed(joy, JOY_BUTTON_A) or Input.get_joy_axis(joy, JOY_AXIS_TRIGGER_RIGHT) > 0.4
 	held_t = held_t + delta if held else 0.0
 	pointer_held = held
-	var surface: Node3D = main.panel.surface
-	var n := surface.global_basis.z.normalized()
-	var plane := Plane(n, surface.global_position)
-	var hit = plane.intersects_ray(camera.project_ray_origin(cursor), camera.project_ray_normal(cursor))
-	if hit != null:
-		var local: Vector3 = surface.global_transform.affine_inverse() * (hit as Vector3)
-		# A quick click pokes down onto the buttons; holding lifts the finger so dragging doesn't press.
-		local.z = 0.0 if held and held_t < 0.25 else 0.1
-		pointer_pos = surface.global_transform * local
+	# A quick click pokes down onto the buttons; holding lifts the finger so dragging doesn't press.
+	var lifted := not (held and held_t < 0.25)
+	var hit: Vector3 = main.panel.pointer_point(camera.project_ray_origin(cursor), camera.project_ray_normal(cursor), lifted)
+	if hit != Vector3.INF:
+		pointer_pos = hit
 	if cursor_ball:
 		cursor_ball.global_position = pointer_pos
 		cursor_ball.scale = Vector3.ONE * (0.7 if held else 1.0)
@@ -231,12 +241,12 @@ func set_active(on: bool) -> void:
 	active = on
 
 
-## Client: [pos, yaw, pitch, active, head, right hand, left hand].
+## Client: [head, right hand, left hand].
 func apply_net_state(st: Array) -> void:
-	if st.size() > 6:
-		net_head = st[4]
-		net_hand_r = st[5]
-		net_hand_l = st[6]
+	if st.size() >= 3:
+		net_head = st[0]
+		net_hand_r = st[1]
+		net_hand_l = st[2]
 
 
 ## TV machine: a friendly helmeted pilot and two orange mittens at the desk.
@@ -254,6 +264,16 @@ func _ghost_update(delta: float) -> void:
 		visor.scale = Vector3(1.0, 0.75, 0.6)
 		visor.position = Vector3(0, 0, -0.1)
 		ghost_head.add_child(visor)
+		var antenna := MeshInstance3D.new()
+		antenna.mesh = main.cyl_mesh(0.01, 0.01, 0.2, 6)
+		antenna.material_override = main.make_material(Color(0.8, 0.8, 0.85), 0.0)
+		antenna.position = Vector3(0, 0.25, 0)
+		ghost_head.add_child(antenna)
+		var bobble := MeshInstance3D.new()
+		bobble.mesh = main.sphere_mesh(0.04)
+		bobble.material_override = main.make_material(Color(1.0, 0.4, 0.3), 2.0)
+		bobble.position = Vector3(0, 0.36, 0)
+		ghost_head.add_child(bobble)
 		var suit := MeshInstance3D.new()
 		suit.mesh = main.capsule_mesh(0.28, 1.0)
 		suit.material_override = main.make_material(Color(1.0, 0.55, 0.25), 0.0)
