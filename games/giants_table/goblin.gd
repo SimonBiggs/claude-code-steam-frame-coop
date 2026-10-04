@@ -3,12 +3,19 @@ extends "res://games/giants_table/toss.gd"
 ##  "goblin"  - anyone can beat it (sword, crossbow, squash, throw, drop off the table)
 ##  "armored" - spiky armour: the giant can't hold it and boulders only stun it; knights must beat it
 ##  "ogre"    - too big for the knights: the giant must lift it and throw it off the table (or drop it hard twice)
+##  "balloon" - floats down from the sky under a balloon: the giant can pluck it out of the air, a knight's
+##              crossbow bolt pops the balloon (and down it goes); if it lands it walks to the fire
+##  "king"    - THE GOBLIN KING (boss): spiky royal armour the giant can't hold, so the knights must
+##              break it first; then he's too big for the knights and the giant has to throw him off
 
 const KINDS := {
 	"goblin": {"hp": 2.0, "speed": 2.2, "scale": 1.0, "color": Color(0.45, 0.78, 0.3), "points": 10},
 	"armored": {"hp": 6.0, "speed": 1.7, "scale": 1.1, "color": Color(0.5, 0.72, 0.35), "points": 25},
 	"ogre": {"hp": 2.0, "speed": 1.15, "scale": 2.3, "color": Color(0.62, 0.5, 0.82), "points": 50},
+	"balloon": {"hp": 1.0, "speed": 2.4, "scale": 1.0, "color": Color(0.4, 0.8, 0.6), "points": 20},
+	"king": {"hp": 2.0, "speed": 1.0, "scale": 1.9, "color": Color(0.5, 0.74, 0.32), "points": 200},
 }
+const BALLOON_FALL := 1.1  # units per second
 const SQUASH_SPEED := 14.0
 const OGRE_HURT_SPEED := 18.0
 
@@ -36,6 +43,20 @@ var ember_orb: MeshInstance3D
 var stars: Node3D
 var arm_l: Node3D
 var arm_r: Node3D
+var floating := false  # balloon goblin still hanging under its balloon
+var drift := Vector3.ZERO
+var balloon: Node3D
+var balloon_mat: StandardMaterial3D
+var armor := 0.0  # the king's armour (knights wear it down)
+var max_armor := 0.0
+var armor_vis: Node3D
+var blink_t := 1.0
+var eyes_mi: MeshInstance3D
+
+
+## Big walkers (ogres and the king) share a flow field and stomp through trees.
+func is_big() -> bool:
+	return kind == "ogre" or kind == "king"
 
 
 func setup(k: String, m) -> void:
@@ -48,6 +69,9 @@ func setup(k: String, m) -> void:
 	color = d.color
 	radius = 0.35 * sc
 	center_h = 0.4 * sc
+	if k == "king":
+		max_armor = 8.0
+		armor = max_armor
 
 
 func _ready() -> void:
@@ -83,6 +107,7 @@ func _ready() -> void:
 	eyes.material_override = W.mat(Color(1.0, 0.9, 0.3), 2.5)
 	eyes.position = Vector3(0, 0.63, -0.17)
 	pivot.add_child(eyes)
+	eyes_mi = eyes
 	for side in [-1.0, 1.0]:
 		var arm := Node3D.new()
 		arm.position = Vector3(side * 0.22, 0.4, 0)
@@ -104,6 +129,93 @@ func _ready() -> void:
 		club.position = Vector3(0, -0.3, -0.1)
 		club.rotation.x = -1.2
 		arm_r.add_child(club)
+	elif kind == "balloon":
+		var club2 := MeshInstance3D.new()
+		club2.mesh = W.cyl(0.06, 0.03, 0.3, 5)
+		club2.material_override = W.mat(Color(0.5, 0.32, 0.17))
+		club2.position = Vector3(0, -0.28, -0.1)
+		club2.rotation.x = -1.2
+		arm_r.add_child(club2)
+		var goggles := MeshInstance3D.new()
+		goggles.mesh = W.box(Vector3(0.3, 0.09, 0.06))
+		goggles.material_override = W.mat(Color(0.35, 0.25, 0.15))
+		goggles.position = Vector3(0, 0.7, -0.15)
+		pivot.add_child(goggles)
+		# The balloon (it pops when plucked or shot, or floats away once he lands).
+		balloon = Node3D.new()
+		balloon.position = Vector3(0, 1.3, 0)
+		add_child(balloon)
+		var hues: Array[Color] = [Color(1.0, 0.35, 0.4), Color(1.0, 0.8, 0.25), Color(0.4, 0.65, 1.0), Color(0.8, 0.45, 1.0)]
+		balloon_mat = W.mat(hues[net_id % hues.size()] if net_id > 0 else hues[randi() % hues.size()], 0.3, 0.4)
+		var ball := MeshInstance3D.new()
+		ball.mesh = W.sphere(0.6, 14)
+		ball.material_override = balloon_mat
+		ball.position.y = 0.75
+		ball.scale = Vector3(1.0, 1.15, 1.0)
+		balloon.add_child(ball)
+		var knot := MeshInstance3D.new()
+		knot.mesh = W.cyl(0.0, 0.1, 0.15, 6)
+		knot.material_override = balloon_mat
+		knot.position.y = 0.06
+		balloon.add_child(knot)
+		var string := MeshInstance3D.new()
+		string.mesh = W.box(Vector3(0.02, 0.55, 0.02))
+		string.material_override = W.mat(Color(0.95, 0.95, 0.9))
+		string.position.y = -0.25
+		balloon.add_child(string)
+		balloon.visible = floating
+	elif kind == "king":
+		var gold := W.mat(Color(1.0, 0.8, 0.25), 1.2, 0.3)
+		var crown := MeshInstance3D.new()
+		crown.mesh = W.cyl(0.17, 0.15, 0.14, 10)
+		crown.material_override = gold
+		crown.position.y = 0.82
+		pivot.add_child(crown)
+		for i in 5:
+			var a := TAU * i / 5.0
+			var spike := MeshInstance3D.new()
+			spike.mesh = W.cyl(0.0, 0.04, 0.12, 4)
+			spike.material_override = gold
+			spike.position = Vector3(cos(a) * 0.15, 0.94, sin(a) * 0.15)
+			pivot.add_child(spike)
+		var cape := MeshInstance3D.new()
+		cape.mesh = W.box(Vector3(0.42, 0.55, 0.05))
+		cape.material_override = W.mat(Color(0.75, 0.12, 0.2))
+		cape.position = Vector3(0, 0.3, 0.2)
+		cape.rotation.x = 0.15
+		pivot.add_child(cape)
+		var beard := MeshInstance3D.new()
+		beard.mesh = W.sphere(0.14, 8)
+		beard.material_override = W.mat(Color(0.95, 0.95, 0.9))
+		beard.position = Vector3(0, 0.5, -0.14)
+		beard.scale = Vector3(1.0, 1.2, 0.6)
+		pivot.add_child(beard)
+		var sceptre := MeshInstance3D.new()
+		sceptre.mesh = W.cyl(0.03, 0.03, 0.45, 5)
+		sceptre.material_override = gold
+		sceptre.position = Vector3(0, -0.3, -0.1)
+		sceptre.rotation.x = -1.0
+		arm_r.add_child(sceptre)
+		armor_vis = Node3D.new()
+		pivot.add_child(armor_vis)
+		var steel2 := W.mat(Color(0.78, 0.8, 0.86), 0.0, 0.25)
+		steel2.metallic = 0.8
+		for side in [-1.0, 1.0]:
+			var pad := MeshInstance3D.new()
+			pad.mesh = W.sphere(0.11, 8)
+			pad.material_override = steel2
+			pad.position = Vector3(side * 0.22, 0.48, 0.0)
+			armor_vis.add_child(pad)
+			var sp := MeshInstance3D.new()
+			sp.mesh = W.cyl(0.0, 0.04, 0.14, 4)
+			sp.material_override = steel2
+			sp.position = Vector3(side * 0.27, 0.58, 0.0)
+			armor_vis.add_child(sp)
+		var plate := MeshInstance3D.new()
+		plate.mesh = W.box(Vector3(0.36, 0.3, 0.08))
+		plate.material_override = steel2
+		plate.position = Vector3(0, 0.3, -0.19)
+		armor_vis.add_child(plate)
 	elif kind == "armored":
 		var helm := MeshInstance3D.new()
 		helm.mesh = W.sphere(0.215, 10)
@@ -161,6 +273,8 @@ func _ready() -> void:
 
 
 func can_grab() -> bool:
+	if kind == "king":
+		return armor <= 0.0
 	return kind != "armored"
 
 
@@ -168,6 +282,31 @@ func on_grabbed() -> void:
 	super.on_grabbed()
 	hop = false
 	dizzy_t = 0.0
+	if floating:
+		_pop_balloon(true)
+		main.on_balloon_caught(self)
+
+
+## The balloon pops (plucked / shot) or floats away (he landed).
+func _pop_balloon(popped: bool) -> void:
+	floating = false
+	if balloon == null:
+		return
+	if popped:
+		main.burst(balloon.global_position + Vector3.UP * 0.75, balloon_mat.albedo_color, 14, 0.1)
+		main.sound("zap", -2.0, 0.6)
+		balloon.visible = false
+	else:
+		var tw := balloon.create_tween()
+		tw.tween_property(balloon, "position", balloon.position + Vector3(0.5, 8.0, 0.3), 3.0)
+		tw.tween_callback(func() -> void: balloon.visible = false)
+
+
+## Did a crossbow bolt at p hit us (or our balloon)?
+func bolt_hit(p: Vector3) -> bool:
+	if grab_center().distance_to(p) < radius + 0.25:
+		return true
+	return floating and balloon != null and (balloon.global_position + Vector3.UP * 0.75).distance_to(p) < 0.85
 
 
 func _physics_process(delta: float) -> void:
@@ -181,6 +320,15 @@ func _physics_process(delta: float) -> void:
 	stars.visible = dizzy_t > 0.0
 	if stars.visible:
 		stars.rotation.y += delta * 6.0
+	blink_t -= delta
+	if blink_t < -0.12:
+		blink_t = randf_range(1.5, 3.5)
+	if eyes_mi:
+		eyes_mi.scale = Vector3(1.0, 0.2 if blink_t < 0.0 else 1.0, 1.0)
+	if balloon and balloon.visible and floating:
+		balloon.rotation.z = sin(walk_t * 1.3) * 0.12
+	if armor_vis:
+		armor_vis.visible = armor > 0.0
 	if ghost:
 		ghost_update(delta)
 		_animate(delta, global_position.distance_to(net_target) > 0.02)
@@ -189,6 +337,22 @@ func _physics_process(delta: float) -> void:
 		_animate(delta, true)
 		arm_l.rotation.z = sin(walk_t * 20.0) * 1.2 - 1.0
 		arm_r.rotation.z = -sin(walk_t * 20.0) * 1.2 + 1.0
+		return
+	if floating:
+		# Drifting down under the balloon, legs kicking.
+		var gh := W.height(global_position.x, global_position.z)
+		global_position += drift * delta + Vector3.DOWN * BALLOON_FALL * delta
+		arm_l.rotation.z = -2.4 + sin(walk_t * 3.0) * 0.2
+		arm_r.rotation.z = 2.4 - sin(walk_t * 3.0) * 0.2
+		pivot.rotation.z = sin(walk_t * 2.0) * 0.15
+		if gh > -50.0 and global_position.y <= gh:
+			global_position.y = gh
+			arm_l.rotation.z = 0.0
+			arm_r.rotation.z = 0.0
+			_pop_balloon(false)
+			main.popup(grab_center() + Vector3.UP * 0.8, "He landed!", Color(1.0, 0.7, 0.4))
+		elif global_position.y < W.FLOOR_Y:
+			_fell_off()
 		return
 	if flying:
 		pivot.rotation.x += delta * 8.0 if not hop else 0.0
@@ -220,7 +384,7 @@ func _think(delta: float) -> void:
 	var pos := global_position
 	# Fight a knight that's right next to us (unless we're running off with an ember).
 	if not carrying:
-		var reach := radius + 0.55 + (0.5 if kind == "ogre" else 0.0)
+		var reach := radius + 0.55 + (0.5 if is_big() else 0.0)
 		for k in main.knights():
 			if not k.active or k.is_down or k.carried:
 				continue
@@ -228,11 +392,11 @@ func _think(delta: float) -> void:
 			if Vector2(kp.x - pos.x, kp.z - pos.z).length() < reach and absf(kp.y - pos.y) < 1.2 * sc:
 				rotation.y = atan2(-(kp.x - pos.x), -(kp.z - pos.z))
 				if attack_cd <= 0.0:
-					attack_cd = 2.0 if kind == "ogre" else 1.2
+					attack_cd = 2.0 if is_big() else 1.2
 					arm_r.rotation.x = -1.8
 					var tw := create_tween()
 					tw.tween_property(arm_r, "rotation:x", 0.6, 0.15)
-					main.knight_hurt(k, 26.0 if kind == "ogre" else 10.0, pos)
+					main.knight_hurt(k, 26.0 if is_big() else 10.0, pos)
 				_animate(delta, false)
 				return
 	# Where to?
@@ -260,7 +424,7 @@ func _think(delta: float) -> void:
 	# Heading for the fire or the edge: follow the flow field around the village.
 	var on_flow := false
 	if carrying or target == Vector3.ZERO:
-		var fd := W.flow_dir(pos, kind == "ogre", carrying)
+		var fd := W.flow_dir(pos, is_big(), carrying)
 		if fd != Vector3.ZERO:
 			dir = fd
 			on_flow = true
@@ -280,7 +444,7 @@ func _think(delta: float) -> void:
 	var side := Vector3(-dir.z, 0.0, dir.x)
 	var steer := Vector3.ZERO
 	var statics: Array = W.obstacles()
-	if kind == "ogre":
+	if is_big():
 		statics = statics.filter(func(o: Array) -> bool: return o[2] > W.TREE_R)  # ogres trample trees
 	var blockers: Array = [] if on_flow else statics.duplicate()
 	var n_static := blockers.size()
@@ -311,7 +475,7 @@ func _think(delta: float) -> void:
 	if W.in_water(pos.x, pos.z):
 		spd *= 0.5
 	var np := pos + move * spd * delta
-	if kind == "ogre":
+	if is_big():
 		for o in statics:
 			var off := Vector2(np.x - o[0], np.z - o[1])
 			var min_d: float = o[2] + radius
@@ -348,13 +512,18 @@ func _bowl(v: Vector3) -> void:
 
 ## Hit by a flying boulder or goblin.
 func hit_by_object(v: Vector3, by) -> void:
-	if kind == "armored":
+	if floating:
+		_pop_balloon(true)
+		flying = true
+		vel = Vector3(v.x, 0.0, v.z) * 0.3
+		return
+	if kind == "armored" or (kind == "king" and armor > 0.0):
 		dizzy_t = 2.0
 		main.popup(grab_center() + Vector3.UP * 0.6, "CLANG!", Color(0.8, 0.85, 1.0))
 		main.sound("hit", -2.0, 0.6)
 		global_position += Vector3(v.x, 0.0, v.z).normalized() * 0.5
 		return
-	if kind == "ogre":
+	if is_big():
 		hp -= 1.0
 		flash_t = 0.15
 		if hp <= 0.0:
@@ -369,7 +538,23 @@ func hit_by_object(v: Vector3, by) -> void:
 
 ## Hit by a knight's sword or crossbow bolt.
 func hit_by_knight(damage: float, dir: Vector3, knight) -> void:
-	if kind == "ogre":
+	if floating:
+		_pop_balloon(true)
+		flying = true
+		vel = Vector3.ZERO
+		main.popup(grab_center() + Vector3.UP * 0.8, "POP!", Color(1.0, 0.9, 0.5))
+		main.on_balloon_popped(self, knight)
+		return
+	if kind == "king" and armor > 0.0:
+		armor = maxf(0.0, armor - damage)
+		flash_t = 0.12
+		main.sound("hit", -4.0, 0.7)
+		main.king_hit(self, knight)
+		var np2 := W.push_out(global_position + dir * 0.1, radius)
+		np2.y = maxf(W.height(np2.x, np2.z), global_position.y)
+		global_position = np2
+		return
+	if is_big():
 		global_position = W.push_out(global_position + dir * 0.15, radius)
 		if too_big_t <= 0.0:
 			too_big_t = 2.0
@@ -395,7 +580,7 @@ func _landed(impact: float) -> void:
 	if hop:
 		hop = false
 		return
-	if kind == "ogre":
+	if is_big():
 		if impact > OGRE_HURT_SPEED:
 			hp -= 1.0
 			flash_t = 0.15
@@ -418,11 +603,11 @@ func _fell_off() -> void:
 
 
 func net_item() -> Array:
-	return [net_id, kind, global_position, rotation.y, flags(), hp]
+	return [net_id, kind, global_position, rotation.y, flags(), hp, armor]
 
 
 func flags() -> int:
-	return int(carrying) | (int(held) << 1) | (int(dizzy_t > 0.0) << 2) | (int(flying) << 3)
+	return int(carrying) | (int(held) << 1) | (int(dizzy_t > 0.0) << 2) | (int(flying) << 3) | (int(floating) << 4)
 
 
 func apply_net(item: Array) -> void:
@@ -432,6 +617,13 @@ func apply_net(item: Array) -> void:
 	held = f & 2 != 0
 	dizzy_t = 1.0 if f & 4 != 0 else 0.0
 	flying = f & 8 != 0
+	var fl := f & 16 != 0
+	if fl != floating or (balloon != null and balloon.visible != fl):
+		floating = fl
+		if balloon:
+			balloon.visible = fl
+	if item.size() > 6:
+		armor = item[6]
 	var new_hp: float = item[5]
 	if new_hp < hp - 0.01:
 		flash_t = 0.12

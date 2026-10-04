@@ -36,7 +36,7 @@ func _physics_process(delta: float) -> void:
 	for g in get_tree().get_nodes_in_group("goblins"):
 		if g.held or g.is_queued_for_deletion():
 			continue
-		if g.grab_center().distance_to(p) < g.radius + 0.25:
+		if g.bolt_hit(p):
 			if not visual_only:
 				g.hit_by_knight(1.0, Vector3(vel.x, 0.0, vel.z).normalized(), shooter)
 				main.burst(p, Color(1.0, 0.85, 0.5), 6, 0.06)

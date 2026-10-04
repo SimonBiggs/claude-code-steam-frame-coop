@@ -20,6 +20,15 @@ const COTTAGES := [
 	[4.6, 1.6, 0.3], [1.8, 5.0, 1.4], [-3.2, 4.3, 2.4], [-5.2, 0.4, 3.0], [5.0, -2.2, -0.4], [-4.4, -2.4, 3.8],
 ]
 const COTTAGE_R := 1.25
+## The village grows: after each wave a new building rises on one of these spots (they're reserved as
+## obstacles from the start, so the goblins' paths never change). [kind, x, z, radius, yaw]
+const GROWTH := [
+	["well", -2.8, 1.6, 0.75, 0.0], ["market", 2.6, -1.0, 0.95, 0.4], ["bakery", -1.6, -3.0, 1.05, -0.3],
+	["windmill", -10.0, -1.5, 1.0, 0.0], ["statue", -2.0, 7.2, 0.8, 3.0], ["barn", 10.5, -2.0, 1.25, 1.4],
+	["tower", -6.5, 8.5, 0.9, 0.0], ["chapel", -7.4, 3.0, 1.0, 1.2],
+]
+const GROWTH_NAMES := {"well": "a WELL", "market": "a MARKET STALL", "bakery": "a BAKERY", "windmill": "a WINDMILL",
+	"statue": "a STATUE OF THE GIANT", "barn": "a BARN", "tower": "a WATCHTOWER", "chapel": "a CHAPEL"}
 const TREE_R := 0.45
 const FIRE_R := 1.1  # stones around the campfire block walkers
 
@@ -69,15 +78,17 @@ static func height(x: float, z: float, with_bridge: bool = true) -> float:
 
 ## Static circular obstacles [x, z, radius] (cottages, trees, fire). Cached on the Engine.
 static func obstacles() -> Array:
-	if Engine.has_meta("gt_obstacles"):
-		return Engine.get_meta("gt_obstacles")
+	if Engine.has_meta("gt_obstacles2"):
+		return Engine.get_meta("gt_obstacles2")
 	var list: Array = []
 	for c in COTTAGES:
 		list.append([c[0], c[1], COTTAGE_R])
 	for t in trees():
 		list.append([t[0], t[1], TREE_R])
+	for gsite in GROWTH:
+		list.append([gsite[1], gsite[2], gsite[3]])
 	list.append([0.0, 0.0, FIRE_R])
-	Engine.set_meta("gt_obstacles", list)
+	Engine.set_meta("gt_obstacles2", list)
 	return list
 
 
@@ -120,7 +131,7 @@ static func _cell() -> float:
 
 
 static func field(big: bool, to_edge: bool) -> PackedInt32Array:
-	var key := "gt_field_%d_%d" % [int(big), int(to_edge)]
+	var key := "gt_field2_%d_%d" % [int(big), int(to_edge)]
 	if Engine.has_meta(key):
 		return Engine.get_meta(key)
 	var cs := _cell()
@@ -494,6 +505,131 @@ static func _build_props(main: Node3D) -> void:
 	flowers_a.build(main, mat(Color(1.0, 0.55, 0.75), 0.3))
 	flowers_b.build(main, mat(Color(1.0, 0.92, 0.35), 0.3))
 	wood.build(main, mat(Color(0.6, 0.4, 0.22)))
+
+
+## Builds the first `count` growth buildings as a few merged meshes under `parent` (the windmill's
+## sails are returned separately in out["sails"] so they can turn).
+static func build_growth(parent: Node3D, from: int, count: int, out: Dictionary) -> void:
+	var b := {"walls": Batch.new(), "roof": Batch.new(), "wood": Batch.new(), "stone": Batch.new(),
+		"glow": Batch.new(), "red": Batch.new(), "white": Batch.new(), "green": Batch.new(), "gold": Batch.new()}
+	for i in range(from, mini(count, GROWTH.size())):
+		var g: Array = GROWTH[i]
+		var x: float = g[1]
+		var z: float = g[2]
+		var base := Transform3D(Basis(Vector3.UP, g[4]), Vector3(x, height(x, z), z))
+		_growth_building(g[0], base, b, parent, out)
+	var mats := {"walls": mat(Color(0.98, 0.9, 0.74)), "roof": mat(Color(0.8, 0.33, 0.2)), "wood": mat(Color(0.55, 0.36, 0.2)),
+		"stone": mat(Color(0.66, 0.64, 0.6)), "glow": mat(Color(1.0, 0.8, 0.4), 2.2), "red": mat(Color(0.88, 0.22, 0.2)),
+		"white": mat(Color(0.97, 0.96, 0.92)), "green": mat(Color(0.35, 0.7, 0.3)), "gold": mat(Color(1.0, 0.8, 0.3), 0.8)}
+	for k in b:
+		var batch: Batch = b[k]
+		if batch.count > 0:
+			var mi := batch.build(parent, mats[k])
+			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+
+
+static func _growth_building(kind: String, base: Transform3D, b: Dictionary, parent: Node3D, out: Dictionary) -> void:
+	var at := func(p: Vector3) -> Transform3D: return base * Transform3D(Basis(), p)
+	match kind:
+		"well":
+			b.stone.add(cyl(0.6, 0.65, 0.55, 12), at.call(Vector3(0, 0.27, 0)))
+			b.glow.add(cyl(0.45, 0.45, 0.02, 12), at.call(Vector3(0, 0.5, 0)))
+			for sx in [-0.5, 0.5]:
+				b.wood.add(box(Vector3(0.1, 1.1, 0.1)), at.call(Vector3(sx, 0.8, 0)))
+			var roof := PrismMesh.new()
+			roof.size = Vector3(1.4, 0.45, 0.9)
+			b.roof.add(roof, at.call(Vector3(0, 1.55, 0)))
+			b.wood.add(box(Vector3(0.18, 0.2, 0.18)), at.call(Vector3(0, 1.0, 0)))  # bucket
+		"market":
+			for sx in [-0.8, 0.8]:
+				for sz in [-0.5, 0.5]:
+					b.wood.add(box(Vector3(0.08, 1.3, 0.08)), at.call(Vector3(sx, 0.65, sz)))
+			b.wood.add(box(Vector3(1.7, 0.5, 0.5)), at.call(Vector3(0, 0.25, 0.3)))
+			for i in 5:
+				var stripe: Batch = b.red if i % 2 == 0 else b.white
+				var sx2 := -0.72 + i * 0.36
+				stripe.add(box(Vector3(0.36, 0.06, 1.25)), base * Transform3D(Basis(Vector3.RIGHT, 0.25), Vector3(sx2, 1.35, 0)))
+			for i in 6:
+				var fruit: Batch = b.red if i % 3 == 0 else (b.green if i % 3 == 1 else b.gold)
+				fruit.add(sphere(0.11, 6), at.call(Vector3(-0.6 + i * 0.24, 0.6, 0.3)))
+		"bakery":
+			b.walls.add(box(Vector3(1.6, 1.1, 1.3)), at.call(Vector3(0, 0.55, 0)))
+			var roof2 := PrismMesh.new()
+			roof2.size = Vector3(1.9, 0.75, 1.55)
+			b.roof.add(roof2, at.call(Vector3(0, 1.47, 0)))
+			b.stone.add(cyl(0.16, 0.2, 0.8, 8), at.call(Vector3(-0.45, 1.75, -0.2)))
+			b.glow.add(box(Vector3(0.5, 0.35, 0.06)), at.call(Vector3(0, 0.55, 0.66)))
+			b.gold.add(sphere(0.22, 8), base * Transform3D(Basis().scaled(Vector3(1.3, 0.6, 0.6)), Vector3(0, 1.25, 0.72)))  # bread sign
+		"windmill":
+			b.stone.add(cyl(0.5, 0.8, 2.6, 10), at.call(Vector3(0, 1.3, 0)))
+			b.roof.add(cyl(0.0, 0.65, 0.8, 10), at.call(Vector3(0, 3.0, 0)))
+			b.glow.add(box(Vector3(0.3, 0.4, 0.06)), at.call(Vector3(0, 0.9, 0.72)))
+			b.wood.add(box(Vector3(0.36, 0.6, 0.06)), at.call(Vector3(0, 0.3, 0.8)))
+			var sails := Node3D.new()
+			sails.transform = base * Transform3D(Basis(), Vector3(0, 2.4, 0.75))
+			parent.add_child(sails)
+			var sb := Batch.new()
+			for k in 4:
+				sb.add(box(Vector3(0.32, 1.45, 0.04)), Transform3D(Basis(Vector3.BACK, k * PI / 2.0), Vector3.ZERO) * Transform3D(Basis(), Vector3(0, 0.78, 0)))
+			sb.add(cyl(0.1, 0.1, 0.2, 8), Transform3D(Basis(Vector3.RIGHT, PI / 2.0), Vector3.ZERO))
+			sb.build(sails, mat(Color(0.95, 0.92, 0.85)))
+			out["sails"] = sails
+		"statue":
+			b.stone.add(box(Vector3(1.0, 0.6, 1.0)), at.call(Vector3(0, 0.3, 0)))
+			b.stone.add(cyl(0.3, 0.42, 0.8, 10), at.call(Vector3(0, 1.0, 0)))
+			b.stone.add(sphere(0.32, 10), at.call(Vector3(0, 1.6, 0)))
+			b.stone.add(cyl(0.12, 0.32, 0.4, 10), at.call(Vector3(0, 2.0, 0)))  # the giant's pointy hat
+			b.gold.add(box(Vector3(0.6, 0.12, 0.05)), at.call(Vector3(0, 0.42, 0.51)))  # plaque
+			for i in 6:
+				var a := TAU * i / 6.0
+				var fl: Batch = b.red if i % 2 == 0 else b.gold
+				fl.add(sphere(0.09, 6), at.call(Vector3(cos(a) * 0.75, 0.08, sin(a) * 0.75)))
+		"barn":
+			b.red.add(box(Vector3(2.2, 1.4, 1.6)), at.call(Vector3(0, 0.7, 0)))
+			var roof3 := PrismMesh.new()
+			roof3.size = Vector3(2.5, 0.9, 1.85)
+			b.roof.add(roof3, at.call(Vector3(0, 1.85, 0)))
+			b.white.add(box(Vector3(0.8, 0.9, 0.06)), at.call(Vector3(0, 0.45, 0.82)))
+			b.red.add(box(Vector3(0.7, 0.08, 0.08)), base * Transform3D(Basis(Vector3.BACK, 0.85), Vector3(0, 0.45, 0.86)))
+			b.red.add(box(Vector3(0.7, 0.08, 0.08)), base * Transform3D(Basis(Vector3.BACK, -0.85), Vector3(0, 0.45, 0.86)))
+			b.gold.add(box(Vector3(0.5, 0.18, 0.5)), at.call(Vector3(1.4, 0.09, 0.5)))  # hay bale
+		"tower":
+			b.stone.add(cyl(0.6, 0.7, 2.8, 10), at.call(Vector3(0, 1.4, 0)))
+			for k in 6:
+				var a := TAU * k / 6.0
+				b.stone.add(box(Vector3(0.25, 0.3, 0.25)), at.call(Vector3(cos(a) * 0.55, 2.95, sin(a) * 0.55)))
+			b.glow.add(box(Vector3(0.22, 0.35, 0.06)), at.call(Vector3(0, 1.9, 0.66)))
+			b.wood.add(box(Vector3(0.05, 1.0, 0.05)), at.call(Vector3(0, 3.4, 0)))
+			b.red.add(box(Vector3(0.04, 0.32, 0.5)), at.call(Vector3(0, 3.7, 0.25)))
+		_:
+			b.walls.add(box(Vector3(1.3, 1.3, 1.8)), at.call(Vector3(0, 0.65, 0)))
+			var roof4 := PrismMesh.new()
+			roof4.size = Vector3(1.6, 0.8, 2.0)
+			b.roof.add(roof4, at.call(Vector3(0, 1.7, 0)))
+			b.walls.add(box(Vector3(0.6, 0.9, 0.6)), at.call(Vector3(0, 2.0, -0.6)))
+			b.roof.add(cyl(0.0, 0.42, 1.0, 4), at.call(Vector3(0, 2.95, -0.6)))
+			b.gold.add(sphere(0.12, 8), at.call(Vector3(0, 2.2, -0.29)))  # the bell
+			b.glow.add(box(Vector3(0.3, 0.5, 0.06)), at.call(Vector3(0, 0.75, 0.91)))
+
+
+## Where each cottage's chimney puffs smoke from (world space).
+static func chimney_tops() -> PackedVector3Array:
+	var pts := PackedVector3Array()
+	for c in COTTAGES:
+		var x: float = c[0]
+		var z: float = c[1]
+		var base := Transform3D(Basis(Vector3.UP, c[2]), Vector3(x, height(x, z), z))
+		pts.append(base * Vector3(0.5, 2.1, 0.2))
+	return pts
+
+
+## The door of cottage i (where villagers come out).
+static func cottage_door(i: int) -> Vector3:
+	var c: Array = COTTAGES[i % COTTAGES.size()]
+	var x: float = c[0]
+	var z: float = c[1]
+	var base := Transform3D(Basis(Vector3.UP, c[2]), Vector3(x, height(x, z), z))
+	return base * Vector3(0, 0, 0.95)
 
 
 static func _build_room(main: Node3D) -> void:
