@@ -157,9 +157,9 @@ static func toast(root: Variant, text: String, opts: Dictionary = {}) -> Control
 	while live.size() > 4:
 		var old: Node = live.pop_front() if where != "bottom" else live.pop_back()
 		old.queue_free()
-	var snd := String(opts.get("sound", "ui_open"))
+	var snd := String(opts.get("sound", "ui_notify"))
 	if snd != "":
-		UiKit.sound(snd, -4.0, 1.2)
+		UiKit.sound(snd, -6.0)
 	return holder
 
 

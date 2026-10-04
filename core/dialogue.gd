@@ -100,15 +100,15 @@ func set_vr(cam: Node3D, hand: Node3D = null, world: Node = null) -> void:
 		reader.hand = hand
 
 
-## Start a conversation. opts: device, keys, speed, skippable, vars (merged), remote, portraits, start
-## (label or index).
+## Start a conversation. opts: device, keys, speed, skippable, vars (merged), portraits, start (label
+## or index) - these stick for later plays - and remote (mirror mode, this play only).
 func play(script_lines: Array, opts: Dictionary = {}) -> void:
 	lines = script_lines.duplicate()
 	device = int(opts.get("device", device))
 	keys = int(opts.get("keys", keys))
 	speed = float(opts.get("speed", speed))
 	skippable = bool(opts.get("skippable", skippable))
-	remote = bool(opts.get("remote", remote))
+	remote = bool(opts.get("remote", false))
 	portraits = bool(opts.get("portraits", portraits))
 	var v: Dictionary = opts.get("vars", {})
 	vars.merge(v, true)

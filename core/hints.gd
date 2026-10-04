@@ -243,7 +243,7 @@ func _show(q: Dictionary) -> void:
 		pill.accent = col
 		pill.duration = dur
 		root.add_child(pill)
-	UiKit.sound("ui_open", -6.0, 1.35)
+	UiKit.sound("ui_notify", -8.0, 1.12)
 	_seen[q.key] = int(_seen.get(q.key, 0)) + 1
 	_last[q.key] = _now
 	_busy[target] = _now + dur + gap * 0.5
