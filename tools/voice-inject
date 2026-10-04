@@ -68,7 +68,7 @@ PRINT = "--print" in sys.argv
 if PRINT:
     sys.argv.remove("--print")
 # After someone says "Claude", everything said in the next FOLLOW_S seconds also comes through
-# (each line extends the window), so follow-ups don't need the wake word.
+# (a fixed window; only "Claude" opens it again), so follow-ups don't need the wake word.
 FOLLOW_S = float(os.environ.get("VOICE_FOLLOW_S", "60"))
 follow_until = 0.0
 ALL = "--all" in sys.argv  # forward every transcribed line, not just ones after "Claude"
@@ -95,7 +95,7 @@ while True:
             follow_until = time.time() + FOLLOW_S  # conversation mode: keep listening a while
             msg = f"[voice {line[1:9]}] " + line.split("TO CLAUDE: ", 1)[1]
         elif (ALL or time.time() < follow_until) and line.startswith("[") and "] " in line:
-            follow_until = time.time() + FOLLOW_S
+            # The window is fixed: chatter inside it must not keep it open forever.
             msg = f"[voice {line[1:9]}] " + line.split("] ", 1)[1]
         else:
             continue
