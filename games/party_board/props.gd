@@ -41,6 +41,7 @@ var _boat_t: Array[float] = []
 var houses: Array[Node3D] = []
 var _house_t: Array[float] = []
 var _t := 0.0
+var _cloud_lift := 0.0  ## TV-only machines: clouds float higher, out of the TV camera's way
 
 
 func _ready() -> void:
@@ -66,6 +67,7 @@ func _shadows() -> bool:
 # --- Extra toys -----------------------------------------------------------------------------------
 
 func _build_clouds() -> void:
+	_cloud_lift = 0.0 if main.vr_rig != null else 6.0
 	var b := MeshKit.Builder.new()
 	b.sphere(1.1, MeshKit.at(Vector3.ZERO), Color(1, 1, 1), 10)
 	b.sphere(0.8, MeshKit.at(Vector3(-1.0, -0.2, 0.1)), Color(0.97, 0.98, 1.0), 10)
@@ -278,7 +280,7 @@ func _process(delta: float) -> void:
 		_cloud_vel[i] = _cloud_vel[i] * exp(-2.0 * delta) - _cloud_off[i] * 0.6 * delta  # drift back home
 		_cloud_puff[i] = maxf(0.0, _cloud_puff[i] - delta * 1.5)
 		var drift := Vector3(sin(_t * 0.2 + i * 1.7), 0.15 * sin(_t * 0.6 + i), cos(_t * 0.17 + i)) * 0.6
-		c.position = CLOUD_SPOTS[i] + drift + _cloud_off[i]
+		c.position = CLOUD_SPOTS[i] + drift + _cloud_off[i] + Vector3(0, _cloud_lift, 0)
 		var puff := 1.0 + 0.35 * _cloud_puff[i] * absf(sin(_cloud_puff[i] * 12.0))
 		c.scale = Vector3(puff, 1.0 / sqrt(puff), puff)
 	for i in boats.size():
