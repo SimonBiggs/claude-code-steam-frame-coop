@@ -12,6 +12,21 @@ extends Node3D
 ## Modes, networking and party join follow docs/GAME_DEV_GUIDE.md and games/marble_maze.
 ## The song clock: the host owns it (snapshots carry it); every machine plays the same backing
 ## locally and judges its own players against the clock it hears, then reports hits to the host.
+##
+## SIMPLE_MODE (the family: "all of the games have become too complicated", "simple games are the fun
+## games", "everything's being driven by text"). The core stays: the VR drummer hits floating drums as
+## glowing balls fly into them, the TV players play a note highway, and together it's music.
+##  - No SETLIST menu, no levels to pick: a short PRACTICE (one ball floats into one drum at a time and
+##    waits, a see-through stick shows the swing; TV: one slow note per lane waits on its ring), then
+##    the songs just keep coming, gently harder: song 1 is slow and short with EASY drums and only two
+##    lanes (X and B) on the TV, song 2 adds the middle lane, song 3 on gets NORMAL drums and is longer.
+##  - Off: gold STAR notes and STAR POWER, IN SYNC bonuses, combo / score / star meters and readouts,
+##    PERFECT / GOOD / MISS words, result stars, the awards and tour screens, stats. Hits make sparks,
+##    rings burst, the crowd jumps and cheers, combos still set off pyro and fireworks (no words).
+##  - Everything interactable: stage toys around the kit (props.gd) - cowbell, splash cymbal,
+##    microphone, amp, spotlight, maracas to pick up and shake.
+##  - Text: one short headline at a time (RHYTHM BAND!, SONG 2!, 3-2-1, PLAY!, HOORAY!, PLAYER 3!).
+##  - Kept: networking, VR comfort (kit fit, walking, snap turn), the wrist MENU, split screen.
 
 const VrText := preload("res://core/vr_text.gd")
 const SfxScript := preload("res://core/sfx.gd")
@@ -41,6 +56,13 @@ const SONGS_PER_TOUR := 3
 const START_LEAD := 0.6
 const STAR_BEATS := 16.0
 const DRUM_SPOT := Vector3(0.0, 0.8, 1.2)
+const SIMPLE_MODE := true
+const PRACTICE_PADS: Array[int] = [1, 2, 0, 3]  # snare, tom, hi-hat, then the big crash
+const PRACTICE_LANES: Array[int] = [0, 2, 0, 2]  # song 1 has only the outer lanes
+const PRACTICE_MAX := 45.0  # practice never holds the show up longer than this
+const PRACTICE_WAIT := 12.0  # once someone has finished, the others get this long
+const CELEBRATE_TIME := 5.0
+const SIMPLE_BARS: Array[int] = [12, 16, 20, 24]  # bars of notes for songs 1, 2, 3, 4+
 const PLAYER_COLORS: Array[Color] = [Color(1.0, 0.85, 0.55), Color(1.0, 0.3, 0.3), Color(0.25, 0.6, 1.0),
 	Color(0.35, 0.9, 0.35), Color(1.0, 0.8, 0.1), Color(0.8, 0.4, 1.0), Color(1.0, 0.55, 0.15)]
 const SOUNDS := {
@@ -105,6 +127,11 @@ var last_pluck := -1
 var cheer_cd := 0.0
 var cont_was := false
 var vr_start_was := false
+var simple := SIMPLE_MODE  # other scripts may read main.simple
+var bars_cap := NOTE_BARS
+var prac_d := 0  # PRACTICE: the drummer's next practice drum (index into PRACTICE_PADS)
+var prac_t := 0.0  # time since the drummer's practice ball set off
+var prac_first_done := -1.0
 
 var backing: AudioStreamPlayer
 var backing_serial := -1
@@ -135,6 +162,7 @@ func _ready() -> void:
 	backing.name = "Backing"
 	backing.volume_db = -9.0
 	add_child(backing)
+	bars_cap = song_bars
 	_build_hud()
 	var menu := PauseMenuScript.new()
 	menu.main = self
@@ -165,7 +193,9 @@ func _setup_game(mode: String) -> void:
 	_ensure_join_listener()
 	_restore_party()
 	stage.set_tags_for_vr(players[0].vr)
-	if mode == "host":
+	if mode == "host" and SIMPLE_MODE:
+		_start_practice()
+	elif mode == "host":
 		state = "wait"
 		_load_song(setlist[0], song_bars)
 		_show_center("RHYTHM BAND\nWaiting for the TV band to join…\nDrum along while you wait! Pull the trigger to pick the songs now.", 0.0, true,
@@ -618,7 +648,7 @@ func _activate(p) -> void:
 	p.set_active(true)
 	if p.index > 0:
 		p.reset_for_song()
-	_show_center("PLAYER %d JOINS THE BAND!" % (p.index + 1), 1.5)
+	_show_center(("PLAYER %d!" if SIMPLE_MODE else "PLAYER %d JOINS THE BAND!") % (p.index + 1), 1.5)
 	sound("join", -4.0, 1.0, true)
 	on_player_activity_changed(p)
 
@@ -632,7 +662,7 @@ func _leave(p) -> void:
 	elif p.active:
 		p.set_active(false)
 		on_player_activity_changed(p)
-		_show_center("PLAYER %d LEFT" % (p.index + 1), 1.5)
+		_show_center("PLAYER %d LEFT" % (p.index + 1), 1.5, true, "" if SIMPLE_MODE else "\u0001")
 	_save_party()
 
 
@@ -735,6 +765,13 @@ func _load_song(i: int, bars: int) -> void:
 	song_idx = i
 	song_bars = bars
 	song = SongScript.new()
+	if SIMPLE_MODE:
+		song.no_stars = true
+		song.two_lanes = tour_pos == 0
+		drum_level = 0 if tour_pos < 2 else 1
+		for p in players:
+			if p.index > 0:
+				p.level = 0
 	song.setup(i, bars)
 	d_judged = PackedByteArray()
 	d_judged.resize(song.d_t.size())
@@ -832,6 +869,9 @@ func _sync_audio(delta: float) -> void:
 
 ## The SETLIST: everyone picks their level, the drummer starts the show.
 func _enter_menu() -> void:
+	if SIMPLE_MODE:
+		_start_practice()
+		return
 	state = "menu"
 	state_t = 0.0
 	setlist = SongScript.make_setlist(randi())
@@ -860,6 +900,73 @@ func _enter_menu() -> void:
 	print("Menu: setlist %s" % str(names))
 
 
+## Simple mode: the PRACTICE moment before song 1 (see the top of this file).
+func _start_practice() -> void:
+	state = "practice"
+	state_t = 0.0
+	prac_d = 0
+	prac_t = 0.0
+	prac_first_done = -1.0
+	setlist = SongScript.make_setlist(randi())
+	tour_pos = 0
+	score = 0
+	players[0].reset_tour()
+	for p in players:
+		if p.index > 0:
+			p.prac_step = 0
+			p.prac_t = 0.0
+			p.reset_tour()
+	stage.hide_stars()
+	_load_song(setlist[0], mini(bars_cap, SIMPLE_BARS[0]))
+	_show_center("RHYTHM BAND!", 2.5, true, "RHYTHM BAND!")
+	sound("ready", -4.0, 1.0, true)
+	print("Practice: drums %s, lanes %s, then setlist %s" % [str(PRACTICE_PADS), str(PRACTICE_LANES), str(setlist)])
+
+
+## Practice is over when everyone has done theirs, or a while after the first one finished.
+func _check_practice() -> void:
+	var all_done := prac_d >= PRACTICE_PADS.size()
+	var any_done := all_done
+	for g in active_guitarists():
+		if int(g.prac_step) >= PRACTICE_LANES.size():
+			any_done = true
+		else:
+			all_done = false
+	if any_done and prac_first_done < 0.0:
+		prac_first_done = state_t
+	if state_t < 2.5:
+		return
+	var waited := state_t - prac_first_done if prac_first_done >= 0.0 else 0.0
+	if (all_done and waited > 1.5) or (any_done and waited > PRACTICE_WAIT) or state_t > PRACTICE_MAX:
+		print("Practice done (drums %d/%d) after %.1f s" % [prac_d, PRACTICE_PADS.size(), state_t])
+		_start_song(0)
+
+
+## The drummer hit the glowing practice drum: sparks, a rising chime, the next ball sets off.
+func _practice_drum(pad: int) -> void:
+	prac_d += 1
+	prac_t = 0.0
+	_drum_fx(pad, 0, false)
+	net.event("djudge", [pad, 0, false])
+	inst.chime(0.9 + 0.15 * prac_d)
+	if prac_d >= PRACTICE_PADS.size():
+		inst.cheer(-4.0)
+		net.event("cheer", [-4.0])
+		burst(players[0].pads[pad].global_position + Vector3(0, 0.2, 0), Color(1.0, 0.85, 0.3), 30)
+	print("Practice: the drummer hit drum %d (%d/%d)" % [pad, prac_d, PRACTICE_PADS.size()])
+
+
+## Any machine: one of its own guitarists hit their waiting practice note.
+func guitar_practice_hit(p, lane: int) -> void:
+	if song != null:
+		inst.pluck(song.lane_pitch_at(0.0, lane), -3.0)
+	stage.strum(p.index, true)
+	if int(p.prac_step) >= PRACTICE_LANES.size():
+		inst.chime(1.4)
+	if net.mode == "client":
+		net.send_action("prac", [p.prac_step], p.index)
+
+
 func _start_tour() -> void:
 	tour_pos = 0
 	_start_song(0)
@@ -868,7 +975,13 @@ func _start_tour() -> void:
 func _start_song(pos: int) -> void:
 	tour_pos = pos
 	song_serial += 1
-	_load_song(setlist[clampi(pos, 0, setlist.size() - 1)], song_bars)
+	if SIMPLE_MODE:
+		# The songs keep coming: after the slow / middle / fast three, random ones (encores get faster).
+		while setlist.size() <= pos:
+			setlist.append(randi() % (SongScript.song_count() * 2))
+		_load_song(setlist[pos], mini(bars_cap, SIMPLE_BARS[mini(pos, SIMPLE_BARS.size() - 1)]))
+	else:
+		_load_song(setlist[clampi(pos, 0, setlist.size() - 1)], song_bars)
 	state = "intro"
 	state_t = 0.0
 	song_t = -START_LEAD
@@ -885,7 +998,9 @@ func _start_song(pos: int) -> void:
 	stage.hide_stars()
 	net.event("stars", [-1])
 	var head := "SONG %d of %d: %s  (%d BPM)" % [pos + 1, SONGS_PER_TOUR, song.title, int(song.bpm)]
-	if pos == 0:
+	if SIMPLE_MODE:
+		_show_center("SONG %d!" % (pos + 1), INTRO_TIME, true, "SONG %d!" % (pos + 1))
+	elif pos == 0:
 		_show_center("RHYTHM BAND!\nPlay the song together and keep the crowd happy!\n" \
 			+ "TV: press X / A / B (or D-pad left / down / right) when a ball reaches its ring\n" \
 			+ "GOLD balls charge STAR POWER - then press Y (drummer: hit the CRASH)!\n" \
@@ -913,7 +1028,7 @@ func _beat_fx() -> void:
 	var count_beats: int = SongScript.COUNT_IN * 4
 	if b < count_beats:
 		inst.click(b % 4 == 0)
-		if b == 0:
+		if b == 0 and not SIMPLE_MODE:
 			_show_center("Get ready…", 0.0, false, "Get ready…")
 		elif b >= count_beats - 3:
 			_show_center(str(count_beats - b), 0.4, false, str(count_beats - b))
@@ -968,7 +1083,7 @@ func _band_result(q: int, star: bool = false, src: int = -1, tn: float = -1.0) -
 			if star_meter >= 1.0:
 				_show_center("STAR POWER READY!\nTV: press Y  ·  Drummer: hit the CRASH!", 2.5, true, "STAR POWER READY!\nHit the CRASH!")
 				sound("ready", -2.0, 1.3, true)
-		if src >= 0 and tn >= 0.0:
+		if src >= 0 and tn >= 0.0 and not SIMPLE_MODE:
 			_sync_check(src, tn)
 		_combo_fx()
 	else:
@@ -1031,7 +1146,8 @@ func _combo_fx() -> void:
 				name = "UNSTOPPABLE!"
 	if name == "":
 		return
-	_show_center("%d COMBO - %s" % [c, name], 1.2, true, "%d COMBO!  %s" % [c, name])
+	if not SIMPLE_MODE:
+		_show_center("%d COMBO - %s" % [c, name], 1.2, true, "%d COMBO!  %s" % [c, name])
 	_milestone_fx(c)
 	net.event("milestone", [c])
 
@@ -1049,6 +1165,8 @@ func _milestone_fx(c: int) -> void:
 
 ## Y on a TV pad, or the drummer's CRASH: set off STAR POWER when it's full.
 func request_star(p) -> void:
+	if SIMPLE_MODE:
+		return
 	if net.mode == "client":
 		net.send_action("star", [], p.index)
 	else:
@@ -1113,6 +1231,11 @@ func drum_hit(pad: int, speed: float) -> void:
 		_menu_drum(pad)
 		net.event("drum", [pad, -1, -1, vol])
 		return
+	if state == "practice":
+		if prac_d < PRACTICE_PADS.size() and pad == PRACTICE_PADS[prac_d] and prac_t > 0.3:
+			_practice_drum(pad)
+		net.event("drum", [pad, -1, -1, vol])
+		return
 	var id := -1
 	var q := -1
 	if state == "play" and song != null:
@@ -1168,7 +1291,7 @@ func _drum_result(id: int, q: int) -> void:
 func _drum_fx(pad: int, q: int, star: bool) -> void:
 	var d = players[0]
 	var pos: Vector3 = d.pads[pad].global_position + Vector3(0.0, 0.12, 0.0)
-	if d.vr:
+	if d.vr or SIMPLE_MODE:
 		if q < 2:
 			_sparks(d.pads[pad].global_position + Vector3(0, 0.04, 0), Color(1.0, 0.82, 0.25) if star or q == 0 else Color(0.5, 1.0, 0.6))
 		return
@@ -1203,6 +1326,18 @@ func _song_done() -> void:
 	state = "results"
 	state_t = 0.0
 	var acc := float(band_hits) / maxf(1.0, float(band_hits + band_misses))
+	if SIMPLE_MODE:
+		# No stars, no numbers: everyone cheers.
+		_show_center("HOORAY!", 3.0, true, "HOORAY!")
+		inst.cheer(0.0)
+		net.event("cheer", [0.0])
+		burst(Vector3(-2.0, 2.5, -1.5), Color(1.0, 0.85, 0.2), 40)
+		burst(Vector3(2.0, 2.5, -1.5), Color(0.4, 0.8, 1.0), 40)
+		_milestone_fx(50 if acc >= 0.5 else 25)
+		net.event("milestone", [50 if acc >= 0.5 else 25])
+		print("Song %d complete: '%s' hits %d, misses %d (%d%%), best combo %d" % [tour_pos + 1, song.title, band_hits, band_misses,
+			int(acc * 100.0), best_combo])
+		return
 	last_stars = clampi(1 + int(acc * 4.0 + 0.15), 1, 5)
 	tour_stars += last_stars
 	var d = players[0]
@@ -1324,6 +1459,7 @@ func _process(delta: float) -> void:
 	var cont_edge := cont and not cont_was
 	cont_was = cont
 	state_t += delta
+	prac_t += delta
 	if state == "play":
 		song_t += delta
 	_sync_audio(delta)
@@ -1341,6 +1477,8 @@ func _process(delta: float) -> void:
 			if vs and not vr_start_was:
 				_enter_menu()
 			vr_start_was = vs
+		"practice":
+			_check_practice()
 		"menu":
 			var gs := active_guitarists()
 			var all_ready := not gs.is_empty()
@@ -1352,7 +1490,7 @@ func _process(delta: float) -> void:
 				_start_tour()
 			vr_start_was = vs2
 		"intro":
-			var dur := FIRST_INTRO_TIME if tour_pos == 0 else INTRO_TIME
+			var dur := FIRST_INTRO_TIME if tour_pos == 0 and not SIMPLE_MODE else INTRO_TIME
 			if state_t >= dur:
 				state = "play"
 				state_t = 0.0
@@ -1370,7 +1508,7 @@ func _process(delta: float) -> void:
 		"results":
 			if backing.playing and song_t >= song.length - 0.05:
 				backing.stop()
-			if (state_t > 1.5 and cont_edge) or state_t > RESULTS_AUTO:
+			if (state_t > 1.5 and cont_edge) or state_t > (CELEBRATE_TIME if SIMPLE_MODE else RESULTS_AUTO):
 				_on_continue(true)
 		"tour":
 			if state_t > 1.5 and cont_edge:
@@ -1411,8 +1549,8 @@ func _continue_pressed() -> bool:
 	for p in players:
 		if is_local(p) and p.active and p.action_pressed():
 			return true
-	if players.size() > 0 and players[0].vr and players[0].action_pressed():
-		return true
+	if players.size() > 0 and players[0].vr and players[0].action_pressed() and not SIMPLE_MODE:
+		return true  # (simple mode: the trigger picks up maracas; the songs move on by themselves)
 	return false
 
 
@@ -1432,7 +1570,7 @@ func debug_start() -> void:
 
 func _on_continue(_auto: bool) -> void:
 	if state == "results" and state_t > 1.0:
-		if tour_pos + 1 >= SONGS_PER_TOUR:
+		if tour_pos + 1 >= SONGS_PER_TOUR and not SIMPLE_MODE:
 			_tour_done()
 		else:
 			_start_song(tour_pos + 1)
@@ -1455,7 +1593,8 @@ func _save_best(s: int) -> void:
 # --- Networked co-op (see docs/GAME_DEV_GUIDE.md) ------------------------------------
 
 func on_client_joined() -> void:
-	_show_center("THE TV BAND JOINED!", 1.5)
+	if not SIMPLE_MODE:
+		_show_center("THE TV BAND JOINED!", 1.5)
 	if not players[1].active:
 		_activate(players[1])  # the TV machine's first guitarist; more join with A over there
 	if state == "wait":
@@ -1469,7 +1608,8 @@ func on_client_left() -> void:
 		if players[i].active:
 			players[i].set_active(false)
 			stage.set_avatar_visible(i, false)
-	_show_center("The TV players left - keep drumming!", 2.0)
+	if not SIMPLE_MODE:
+		_show_center("The TV players left - keep drumming!", 2.0)
 
 
 ## A TV player changed their level / readiness in the SETLIST menu (local: nothing to send).
@@ -1511,6 +1651,10 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 				p.menu_ready = bool(args[0])
 		"star":
 			_activate_star(index)
+		"prac":
+			if args.size() >= 1:
+				p.prac_step = clampi(int(args[0]), 0, PRACTICE_LANES.size())
+				stage.strum(index, true)
 		"hit", "miss":
 			if args.size() < 2 or song == null or state != "play":
 				return
@@ -1560,7 +1704,8 @@ func make_snapshot() -> Array:
 	var d = players[0]
 	return [state, song_serial, song_idx, song_bars, song_t, crowd, combo, score, best, state_t, ps,
 		d.rig_transform(), d.kit_s, d.head_transform(), d.tip(0), d.tip(1), last_stars, tour_stars,
-		tour_pos, setlist, drum_level, star_meter, star_until]
+		tour_pos, setlist, drum_level, star_meter, star_until, prac_d,
+		d.props.net_state() if d.props != null else [-1]]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -1626,6 +1771,12 @@ func apply_snapshot(s: Array) -> void:
 	tour_stars = s[17]
 	star_meter = s[21]
 	star_until = s[22]
+	if s.size() >= 25:
+		if int(s[23]) != prac_d:
+			prac_d = int(s[23])
+			prac_t = 0.0
+		if d.props != null:
+			d.props.apply_net(s[24])
 
 
 func apply_event(kind: String, args: Array) -> void:
@@ -1672,6 +1823,9 @@ func apply_event(kind: String, args: Array) -> void:
 			_star_fx()
 		"setlist":
 			pass
+		"prop":
+			if players[0].props != null:
+				players[0].props.react(int(args[0]))
 		"remote_pause":
 			get_tree().paused = args[0]
 			_set_pause_banner(args[0], "The VR drummer paused the game")
@@ -1704,7 +1858,21 @@ func _build_hud() -> void:
 	help_label.offset_top = -30
 	help_label.offset_bottom = -6
 	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	help_label.visible = not SIMPLE_MODE  # simple mode: the rings and arrows show the buttons
 	help_label.text = "Guitar: X / A / B or D-pad (keyboard: arrows) · STAR POWER: Y · more players: press A on another controller · Start / Esc: menu"
+
+
+## Simple mode: the lanes on the TV highway right now (song 1: just the outer two).
+func lanes_now() -> Array[int]:
+	if SIMPLE_MODE and tour_pos == 0:
+		return [0, 2]
+	return [0, 1, 2]
+
+
+## Authority (host / local): the drummer touched a stage toy (props.gd).
+func prop_touched(k: int) -> void:
+	players[0].props.react(k)
+	net.event("prop", [k])
 
 
 ## TV banner; vr: the short version for the VR drummer ("\u0001" = the first two lines).

@@ -88,6 +88,11 @@ func chime(pitch: float = 1.0) -> void:
 	_play(_stream_for("chime"), -6.0, pitch)
 
 
+## Stage toys (props.gd): "cowbell", "shaker", "whoosh".
+func toy(sound_key: String, volume_db: float = -4.0, pitch: float = 1.0) -> void:
+	_play(_stream_for(sound_key), volume_db, pitch * randf_range(0.97, 1.03))
+
+
 ## Builds the drum and guitar sounds a song needs before it starts (no hitch on the first hit).
 func warm(midis: Array[int]) -> void:
 	for i in 4:
@@ -168,6 +173,44 @@ func _chime() -> PackedFloat32Array:
 	for i in n:
 		var t := float(i) / RATE
 		b[i] = (sin(t * 1046.5 * TAU) * 0.5 + sin(t * 1568.0 * TAU) * 0.35 + sin(t * 2093.0 * TAU) * 0.2) * exp(-t * 5.0)
+	return b
+
+
+func _cowbell() -> PackedFloat32Array:
+	var n := int(0.4 * RATE)
+	var b := PackedFloat32Array()
+	b.resize(n)
+	for i in n:
+		var t := float(i) / RATE
+		var a := 1.0 if fmod(t * 545.0, 1.0) < 0.5 else -1.0
+		var c := 1.0 if fmod(t * 815.0, 1.0) < 0.5 else -1.0
+		b[i] = (a + c) * 0.3 * (exp(-t * 30.0) * 0.6 + exp(-t * 7.0) * 0.4)
+	return b
+
+
+func _shaker() -> PackedFloat32Array:
+	var n := int(0.11 * RATE)
+	var b := PackedFloat32Array()
+	b.resize(n)
+	var prev := 0.0
+	for i in n:
+		var t := float(i) / RATE
+		var w := randf_range(-1.0, 1.0)
+		b[i] = (w - prev) * 0.5 * minf(1.0, t * 120.0) * exp(-t * 35.0)
+		prev = w
+	return b
+
+
+## A rising sweep (the spotlight spinning round).
+func _whoosh() -> PackedFloat32Array:
+	var n := int(0.5 * RATE)
+	var b := PackedFloat32Array()
+	b.resize(n)
+	var phase := 0.0
+	for i in n:
+		var t := float(i) / RATE
+		phase += (300.0 + 1400.0 * t) / RATE
+		b[i] = sin(phase * TAU) * 0.35 * sin(PI * t / 0.5)
 	return b
 
 
