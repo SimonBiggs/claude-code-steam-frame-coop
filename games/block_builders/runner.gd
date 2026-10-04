@@ -36,6 +36,7 @@ var active := true
 var claimed := false
 var vr := false
 var ghost := false
+var buddy := false     # SIMPLE_MODE solo VR: the host walks this runner (main._drive_buddy)
 
 var finished := false  # at the flag (host decides; snapshots tell the TV)
 var flag_sent := false
@@ -456,6 +457,21 @@ func _respawn(why: String) -> void:
 	shake = 0.3
 	if joy >= 0:
 		Input.start_joy_vibration(joy, 0.6, 0.8, 0.25)
+	if main.simple:  # pop back up with a boing (and a stretch), no "WHOOPS!"
+		squash = -0.5
+		main.runner_fx(index, "pop", global_position)
+
+
+## SIMPLE_MODE: the giant's hand touched us: a little hop and a squish.
+func boop() -> void:
+	squash = 0.35
+	if finished or remote or not active:
+		return
+	vy = maxf(vy, 6.5)
+	on_ground = false
+	air_t = COYOTE
+	if joy >= 0:
+		Input.start_joy_vibration(joy, 0.3, 0.2, 0.12)
 
 
 func start_spot() -> Vector3:
@@ -560,7 +576,7 @@ func _process(delta: float) -> void:
 	_update_camera(delta)
 	_body_fx(delta)
 	if hud_label:
-		hud_label.text = "P%d" % (index + 1)
+		hud_label.text = "" if main.simple else "P%d" % (index + 1)
 	if hint_label:
 		hint_label.text = _hint_text()
 
@@ -569,6 +585,8 @@ func _process(delta: float) -> void:
 func _hint_text() -> String:
 	if main.state != "play":
 		return ""
+	if main.simple:
+		return "YOU MADE IT!" if finished else ""
 	if finished:
 		if main.builder != null and (main.builder.vr or main.builder.get("net_vr")):
 			return "YOU MADE IT!\nWave at the giant: it can give you a HIGH FIVE!"

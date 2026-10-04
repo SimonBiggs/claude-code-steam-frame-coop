@@ -15,6 +15,19 @@ const VrText := preload("res://core/vr_text.gd")
 ## Modes (docs/GAME_DEV_GUIDE.md): DUO_JOIN=<host> client, VR or DUO_HOST=1 host, else local split screen
 ## (flat builder on the left with mouse / 2nd controller, runners beside it).
 ## BB_FAKE_VR=1 (tests): run the VR builder code without a headset.
+##
+## SIMPLE_MODE (the family: "all of the games have become too complicated", "simple games are the fun
+## games", Block Builders was "a wall of text" in VR): the builder grabs blocks from the tray and makes
+## a path; the runners run to the flag. That's it. No timer, score, stars, gift balloons, high-five
+## rules, tips, hints text or awards; falling just pops you back with a boing. Eight short levels
+## (levels.gd SIMPLE_LEVELS): level 1 is one gap to bridge and doubles as the PRACTICE: a glowing
+## see-through block marks the gap, and a ghost hand (ghost_hand.gd) shows the VR builder how to take a
+## plank from the tray and drop it in; the TV runners get a glowing ring to jump through over the new
+## bridge, then the flag. After that ONE new block per level (its glowing ghost shows where it goes).
+## Everything in the builder's reach reacts to touch (props.gd): clouds puff, balloons pop, birds flap
+## away, the flag waves, toy blocks stack, topple and can be thrown, and runners get a gentle boop.
+## Solo VR: with no TV machine, P2 is a little buddy runner the host drives (it waits at the gap for
+## your bridge). Text: one short headline at a time. Everything cut stays behind the flag.
 
 const Art := preload("res://games/block_builders/art.gd")
 const Levels := preload("res://games/block_builders/levels.gd")
@@ -25,6 +38,12 @@ const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
 const NetScript := preload("res://core/net.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
+const PropsScript := preload("res://games/block_builders/props.gd")
+const GhostHandScript := preload("res://games/block_builders/ghost_hand.gd")
+
+const SIMPLE_MODE := true
+const SIMPLE_INTRO_TIME := 2.5
+const SIMPLE_CLEAR_TIME := 5.0
 
 const MAX_RUNNERS := 6  # TV players 2..7 (player indices 1..6)
 const INTRO_TIME := 9.0
@@ -53,6 +72,11 @@ const SOUNDS := {
 	"fanfare": [1.0, 392.0, 1568.0, 0.4, "square", 0.0],
 	"poof": [0.2, 300.0, 150.0, 0.25, "sine", 0.7],
 	"tick": [0.05, 1500.0, 1500.0, 0.15, "square", 0.0],
+	"boop": [0.15, 500.0, 900.0, 0.35, "sine", 0.0],
+	"tweet": [0.22, 2200.0, 3200.0, 0.2, "sine", 0.0],
+	"ding": [0.5, 1046.0, 2093.0, 0.3, "tri", 0.0],
+	"hooray": [0.9, 523.0, 2093.0, 0.4, "square", 0.2],
+	"clack": [0.06, 700.0, 400.0, 0.3, "square", 0.4],
 }
 
 var players: Array = []
@@ -107,6 +131,15 @@ var center_tween: Tween
 var vr_center: Label3D
 var vr_info: Label3D
 
+# SIMPLE_MODE
+var simple := SIMPLE_MODE
+var props: Node3D
+var ghost_hand: Node3D
+var ring_state := 0            # practice ring: 0 none, 1 glowing (level 1), 2 jumped through
+var ring_node: MeshInstance3D
+var solo := false              # host with no TV machine: P2 is the buddy runner driven here
+var placed_level := 0          # blocks placed this level (the ghost hand stops after the first)
+
 # Split-screen views
 var view_root: Control
 var views_dirty := true
@@ -118,6 +151,7 @@ var join_t := 0.0
 
 func _ready() -> void:
 	randomize()
+	Engine.set_meta("bb_simple", simple)  # levels.gd: the short SIMPLE_LEVELS
 	var xr := XRServer.find_interface("OpenXR")
 	vr_on = xr != null and xr.is_initialized() and not OS.has_environment("DUO_JOIN")
 	if OS.has_environment("BB_FAKE_VR") and not OS.has_environment("DUO_JOIN"):
@@ -156,6 +190,9 @@ func _setup_game(mode: String) -> void:
 	state = "intro"
 	state_t = 0.0
 	print("Block Builders: %s mode" % mode)
+	if simple:
+		_setup_simple(mode)
+		return
 	var runner_help := "RUNNERS: left stick / WASD move · A / Space jump · right stick / arrows turn the camera · " \
 		+ "press A on a spare controller to join (up to 6)"
 	if mode == "local":
@@ -169,6 +206,44 @@ func _setup_game(mode: String) -> void:
 		_show_center("CONNECTED!", 1.5, false)
 	else:
 		_show_intro()
+
+
+## SIMPLE_MODE: touchable toys, the ghost hand (VR builder only), the buddy runner (solo VR) and one
+## short headline. Only one line of controls on the TV, and it fades after the first level.
+func _setup_simple(mode: String) -> void:
+	props = PropsScript.new()
+	props.name = "Props"
+	props.main = self
+	add_child(props)
+	if builder.vr:
+		ghost_hand = GhostHandScript.new()
+		ghost_hand.name = "GhostHand"
+		ghost_hand.main = self
+		add_child(ghost_hand)
+	help_label.text = "Left stick: run    A: jump"
+	if mode == "local":
+		help_label.text = "Runners: left stick + A        Builder: mouse + click"
+	if mode == "client":
+		_show_center("", 0.0, false)
+		return
+	if mode == "host":
+		_set_solo(true)
+	_show_center("BLOCK BUILDERS", SIMPLE_INTRO_TIME)
+
+
+## Host only: with no TV machine, P2 is a buddy runner simulated (and walked to the flag) here.
+func _set_solo(on: bool) -> void:
+	if not simple or net.mode != "host" or players.size() < 2:
+		return
+	solo = on
+	var r = players[1]
+	r.remote = not on
+	r.buddy = on
+	r.bot_input = {}
+	r.net_started = false
+	r.set_active(true)
+	r.reset_to_start()
+	print("Buddy runner for the VR builder: %s" % ("on" if on else "off"))
 
 
 func _show_intro() -> void:
@@ -367,7 +442,7 @@ func _add_view_hud(p, vp: SubViewport) -> void:
 
 ## A runner's own split-screen view + HUD, made the first time they're active on this machine.
 func _ensure_view(r) -> void:
-	if r.remote or r.has_meta("view") or view_root == null:
+	if r.remote or r.buddy or r.has_meta("view") or view_root == null:
 		return
 	var vp := _add_view(r)
 	var cam := Camera3D.new()
@@ -808,6 +883,7 @@ func put(kind: String, c: Vector3i, rot: int) -> void:
 	sound("place", -2.0, randf_range(0.9, 1.15))
 	burst(Vector3(c.x + 0.5, c.y + 1.0, c.z + 0.5), Art.kind_color(kind), 10, 0.1)
 	last_place_t = level_time
+	placed_level += 1
 	builder_stats["placed"] = int(builder_stats["placed"]) + 1
 	thud(Vector3(c.x + 0.5, c.y + 0.5, c.z + 0.5))
 
@@ -862,8 +938,20 @@ func _start_level(i: int) -> void:
 	course.show_rainbow(false)
 	state = "play"
 	state_t = 0.0
+	placed_level = 0
 	for r in runners():
 		r.reset_to_start()
+	if props != null:
+		props.on_level()
+	if simple:
+		ring_state = 1 if level_data().has("ring") else 0
+		hint_t = 0.0
+		_show_center(str(d.name), SIMPLE_INTRO_TIME)  # one short headline; the glowing ghost block shows the rest
+		sound("wave", -2.0)
+		print("Level %d (%s) started" % [level + 1, d.name])
+		if level >= 1:
+			create_tween().tween_property(help_label, "modulate:a", 0.0, 1.0)
+		return
 	_show_center("LEVEL %d of %d: %s\n%s" % [level + 1, Levels.count(), d.name, d.tip], 6.0)
 	sound("wave", -2.0)
 	print("Level %d (%s) started" % [level + 1, d.name])
@@ -880,7 +968,7 @@ func confirm() -> void:
 		return  # let everyone read the results (and the awards) before the next level
 	match state:
 		"intro":
-			if net.mode == "host" and not net.connected:
+			if net.mode == "host" and not net.connected and not simple:
 				return
 			_start_level(0)
 		"clear":
@@ -917,6 +1005,13 @@ func _mark_finished(i: int) -> void:
 		first_flag_t = level_time
 		_stat(i, "firsts", 1)
 	_stat(i, "flags", 1)
+	if simple:  # no text: a jingle and a puff of confetti in their colour
+		confetti(course.flag_pos + Vector3.UP * 0.5, 40, 0.7)
+		burst(r.global_position + Vector3.UP * 0.6, r.color, 14, 0.1)
+		if props != null:
+			props.wave_flag()
+		print("P%d reached the flag" % (i + 1))
+		return
 	popup(course.flag_pos + Vector3.UP * 2.6, ("P%d IS FIRST!" if first else "P%d MADE IT!") % (i + 1), r.color.lightened(0.3))
 	confetti(course.flag_pos + Vector3.UP * 0.5, 40, 0.7)
 	print("P%d reached the flag" % (i + 1))
@@ -939,6 +1034,9 @@ func runner_fx(i: int, kind: String, pos: Vector3) -> void:
 	if kind == "lava" or kind == "water" or kind == "fall":
 		_stat(i, "tumbles", 1)
 		level_tumbles += 1
+	if simple:
+		_simple_fx(r, kind, pos)
+		return
 	match kind:
 		"boing":
 			_stat(i, "bounces", 1)
@@ -965,10 +1063,33 @@ func runner_fx(i: int, kind: String, pos: Vector3) -> void:
 			popup(Vector3(pos.x, -2.0, pos.z), "WHOOOPS!", r.color.lightened(0.3))
 
 
+## SIMPLE_MODE effects: no "WHOOPS!" or "HOT HOT HOT!" text. A fall is a soft whistle, then the runner
+## pops back up where they were with a boing ("pop", sent by runner.gd after it respawns).
+func _simple_fx(r, kind: String, pos: Vector3) -> void:
+	match kind:
+		"boing":
+			sound("boing", -3.0, randf_range(0.95, 1.1))
+			burst(pos + Vector3.UP * 0.3, Art.kind_color("spring"), 8, 0.08)
+		"launch":
+			sound("launch", -2.0, randf_range(0.95, 1.1))
+			burst(pos + Vector3.UP * 0.3, Art.kind_color("launcher"), 14, 0.1)
+		"boost":
+			sound("zoom", -6.0, randf_range(0.95, 1.1))
+		"lava", "water", "fall":
+			sound("fall", -10.0, 1.4 + 0.05 * r.index)
+		"pop":
+			sound("boing", -2.0, randf_range(0.9, 1.15))
+			burst(pos + Vector3.UP * 0.4, r.color, 12, 0.09)
+			burst(pos + Vector3.UP * 0.2, Color(1, 1, 1), 6, 0.07)
+
+
 func _level_clear() -> void:
 	state = "clear"
 	state_t = 0.0
 	levels_cleared = level + 1
+	if simple:
+		_simple_clear()
+		return
 	var left := 0
 	for k in budget:
 		left += int(budget[k])
@@ -1020,6 +1141,28 @@ func _level_clear() -> void:
 	else:
 		_show_center("LEVEL %d CLEAR!   +%d\n%s%s\nScore %d\n\nNext: %s\nPull the trigger / press A" % [level + 1, bonus, star_line, extra_line, score,
 			Levels.get_level(level + 1).name], 0.0)
+
+
+func _simple_clear() -> void:
+	sound("hooray", -2.0)
+	sound("fanfare", -4.0)
+	var fp: Vector3 = course.flag_pos
+	confetti(fp + Vector3.UP * 0.5, 140, 1.2)
+	if builder != null and builder.vr:
+		var cam: Vector3 = builder.xr_camera.global_position
+		var fwd: Vector3 = -builder.xr_camera.global_basis.z
+		fwd.y = 0.0
+		confetti(cam + fwd.normalized() * 6.0 + Vector3.DOWN * 3.0, 100, 1.4)
+	if props != null:
+		props.wave_flag()
+	print("Level %d cleared!" % (level + 1))
+	if level + 1 >= Levels.count():
+		state = "won"
+		fireworks_t = 0.0
+		course.show_rainbow(true)
+		_show_center("YOU DID IT!", 0.0)
+	else:
+		_show_center("HOORAY!", SIMPLE_CLEAR_TIME - 1.0)
 
 
 func _stat(i: int, key: String, add: int) -> void:
@@ -1090,6 +1233,9 @@ func _process(delta: float) -> void:
 	course.update_balloon(balloon_state, balloon_pos, delta)
 	_update_hud()
 	_update_vr_text()
+	_update_ring_visual()
+	if ghost_hand != null:
+		ghost_hand.update_demo(delta)
 	_check_tv_confirm()
 	if net.mode == "client":
 		_check_join(delta)
@@ -1100,11 +1246,18 @@ func _process(delta: float) -> void:
 	state_t += delta
 	match state:
 		"intro":
+			if simple:
+				if state_t > SIMPLE_INTRO_TIME:
+					_start_level(0)
+				return
 			if net.mode == "host" and not net.connected:
 				return
 			if state_t > INTRO_TIME:
 				_start_level(0)
 		"play":
+			if simple:
+				_simple_play(delta)
+				return
 			level_time += delta
 			time_left -= delta
 			water_y = course.water_level(level_time)
@@ -1128,11 +1281,130 @@ func _process(delta: float) -> void:
 				_level_failed()
 		"clear":
 			_check_high_fives()
-			if state_t > CLEAR_TIME:
+			if state_t > (SIMPLE_CLEAR_TIME if simple else CLEAR_TIME):
 				_start_level(level + 1)
 		"won":
 			_check_high_fives()
 			_fireworks(delta)
+			if simple and state_t > 25.0:
+				_start_level(0)  # no button to find: round again from the first level
+
+
+## SIMPLE_MODE play (host / local): no clock and no way to fail. The buddy runner, the practice ring,
+## boops, the glowing ghost block and the flag.
+func _simple_play(delta: float) -> void:
+	level_time += delta
+	if solo:
+		_drive_buddy(players[1])
+	_update_hint(delta)
+	_check_high_fives()
+	_check_ring()
+	var act := 0
+	var done := 0
+	for r in runners():
+		if r.active:
+			act += 1
+			if r.finished:
+				done += 1
+	if act > 0 and done == act:
+		_level_clear()
+
+
+## The practice ring over the first bridge: any runner who jumps through it gets a ding and confetti.
+func _check_ring() -> void:
+	if ring_state != 1:
+		return
+	var rp: Vector3 = level_data().get("ring", Vector3.ZERO)
+	for r in runners():
+		if not r.active:
+			continue
+		var p: Vector3 = r.global_position
+		if absf(p.x - rp.x) < 0.7 and absf(p.z - rp.z) < 0.8 and p.y > rp.y - 0.85 and p.y < rp.y + 0.5:
+			ring_state = 2
+			sound("ding", -1.0)
+			sound("star", -4.0, 1.2)
+			burst(rp, Color(1.0, 0.95, 0.45), 24, 0.1)
+			confetti(rp, 50, 0.6)
+			print("Practice: P%d jumped through the ring" % (r.index + 1))
+			return
+
+
+## Both machines: draw the practice ring (a glowing hoop standing across the path, gently bobbing).
+func _update_ring_visual() -> void:
+	if not simple:
+		return
+	var show := ring_state == 1 and level_data().has("ring") and (state == "play" or state == "intro")
+	if ring_node == null:
+		if not show:
+			return
+		ring_node = MeshInstance3D.new()
+		var tm := TorusMesh.new()
+		tm.inner_radius = 0.42
+		tm.outer_radius = 0.55
+		tm.rings = 20
+		tm.ring_segments = 6
+		ring_node.mesh = tm
+		ring_node.material_override = Art.mat(Color(1.0, 0.92, 0.35), 2.4)
+		ring_node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(ring_node)
+	ring_node.visible = show
+	if show:
+		var rp: Vector3 = level_data().ring
+		var t := Time.get_ticks_msec() / 1000.0
+		var pulse := 1.0 + 0.1 * sin(t * 6.0)
+		ring_node.global_transform = Transform3D(Basis(Vector3.FORWARD, PI * 0.5).scaled(Vector3(pulse, 1.0, pulse)),
+			rp + Vector3(0, 0.08 * sin(t * 2.5), 0))
+
+
+## Solo VR: drive the buddy runner along the level's path. It waits at the first waypoint until the
+## builder has put down as many blocks as the path needs, never walks off an edge into a gap (it waits
+## there for a bridge), and hops up walls one block high.
+func _drive_buddy(r) -> void:
+	var path: Array = level_data().bot_path
+	if not r.active or r.finished or path.is_empty():
+		r.bot_input = {"move": Vector3.ZERO, "jump": false}
+		return
+	if int(r.get_meta("bot_seq", -1)) != level_seq:
+		r.set_meta("bot_seq", level_seq)
+		r.set_meta("bot_wp", 0)
+	if r.respawn_t > 0.0:
+		var k := 0
+		while k < path.size() - 1:
+			var wpk: Vector3 = path[k][0]
+			if wpk.x > r.global_position.x - 0.3:
+				break
+			k += 1
+		r.set_meta("bot_wp", k)
+	var sol: Array = level_data().solution
+	var built: bool = course.blocks.size() >= sol.size()
+	var wi: int = clampi(int(r.get_meta("bot_wp", 0)), 0, path.size() - 1)
+	var wp: Vector3 = path[wi][0]
+	var mode: String = path[wi][1]
+	var pos: Vector3 = r.global_position
+	var to := Vector2(wp.x - pos.x, wp.z - pos.z)
+	var move := Vector3.ZERO
+	if to.length() > 0.12:
+		move = Vector3(to.x, 0.0, to.y).normalized() * clampf(to.length() * 2.0, 0.3, 0.8)
+	var reached := to.length() < 0.3
+	var jump := false
+	if mode == "rise":
+		reached = reached and pos.y >= wp.y - 0.6
+	elif mode == "jump":
+		reached = reached and pos.y >= wp.y - 0.3
+		jump = int(level_time * 4.0) % 2 == 0
+	if r.on_ground and move != Vector3.ZERO:
+		var dir := move.normalized()
+		var ahead := pos + dir * 0.75
+		var top := -INF
+		for sp in course.spans_at(ahead.x, ahead.z, 0.1):
+			top = maxf(top, float(sp[1]))
+		if top < pos.y - 1.2:
+			move = Vector3.ZERO  # a gap: wait for a bridge
+		elif top > pos.y + 0.62 and top < pos.y + 1.1:
+			jump = true
+	if reached and wi < path.size() - 1 and (wi > 0 or built):
+		r.set_meta("bot_wp", wi + 1)
+	r.bot_input = {"move": move, "jump": jump}
 
 
 # --- Stars, the gift balloon, high fives and build hints (host) -----------------------------
@@ -1201,7 +1473,7 @@ func _update_balloon(delta: float) -> void:
 
 ## A gift balloon drifts in from the start side (also used by the bot test to call one early).
 func spawn_balloon() -> void:
-	if net.mode == "client" or balloon_state != 0 or state != "play":
+	if simple or net.mode == "client" or balloon_state != 0 or state != "play":
 		return
 	balloon_state = 1
 	balloon_count += 1
@@ -1255,6 +1527,9 @@ func _pop_gift(pi: int) -> void:
 func _check_high_fives() -> void:
 	if builder == null or not (builder.vr or builder.flat) or builder.held_kind != "":
 		return
+	if simple:
+		_check_boops()
+		return
 	var hp: Vector3 = builder.grab_point
 	for r in runners():
 		if not r.active or not r.finished or int(high_fived.get(r.index, -1)) == level_seq:
@@ -1273,6 +1548,50 @@ func _check_high_fives() -> void:
 			print("High five for P%d" % (r.index + 1))
 
 
+## SIMPLE_MODE: the giant's hand (either hand in VR) touching a runner gives them a gentle BOOP: a little
+## hop, a squash and a happy sound. Runners at the flag get a high-five sound instead (no rules, no score).
+func _check_boops() -> void:
+	var hands: Array = [builder.grab_point]
+	if builder.vr and builder.hand_l != null:
+		hands.append(builder.hand_l.global_transform * (BuilderScript.GRAB_LOCAL * BuilderScript.S))
+	var now := Time.get_ticks_msec() / 1000.0
+	for r in runners():
+		if not r.active or now < float(r.get_meta("boop_t", 0.0)) or (not builder.vr and not r.finished):
+			continue  # the flat glove hovers over everything: it only high-fives at the flag
+		var rp: Vector3 = r.global_position + Vector3.UP * 0.5
+		var near := false
+		for h in hands:
+			var hp: Vector3 = h
+			if builder.vr and hp.distance_to(rp) < 0.9:
+				near = true
+			elif not builder.vr and Vector2(hp.x - rp.x, hp.z - rp.z).length() < 0.7:
+				near = true
+		if not near:
+			continue
+		r.set_meta("boop_t", now + 1.0)
+		if r.finished:
+			high_fived[r.index] = level_seq
+			_stat(r.index, "fives", 1)
+			sound("highfive", -2.0, randf_range(0.95, 1.1))
+		else:
+			sound("boop", -2.0, randf_range(0.9, 1.2))
+		burst(rp + Vector3.UP * 0.3, r.color, 10, 0.08)
+		boop_runner(r.index)
+		if builder.vr:
+			builder._haptic(0.6, 0.08)
+		print("Boop P%d%s" % [r.index + 1, " (high five)" if r.finished else ""])
+
+
+## A boop: a little hop on whichever machine drives that runner.
+func boop_runner(i: int) -> void:
+	if i < 1 or i >= players.size():
+		return
+	var r = players[i]
+	r.boop()  # squish here; the hop happens wherever the runner is driven
+	if r.remote:
+		net.event("boop", [i])
+
+
 ## When the builder seems stuck, show a see-through block where the next block of a known solution goes.
 func _update_hint(delta: float) -> void:
 	hint_t -= delta
@@ -1281,18 +1600,22 @@ func _update_hint(delta: float) -> void:
 	hint_t = 0.5
 	var want: Array = []
 	var wait := 20.0 if level < 3 else 32.0
-	if build_idle() > wait and first_flag_t < 0.0 and builder != null and builder.held_kind == "":
+	var holding_ok := false
+	if simple:  # the glowing gap IS the teaching: show it straight away (and while a block is in the hand)
+		wait = 0.0 if level == 0 or placed_level == 0 else 6.0
+		holding_ok = true
+	if build_idle() > wait and first_flag_t < 0.0 and builder != null and (builder.held_kind == "" or holding_ok):
 		for item in Levels.get_level(level).solution:
 			var kind: String = item[0]
 			var c: Vector3i = item[1]
-			if course.block_kind(c) == kind or int(budget.get(kind, 0)) <= 0:
+			if course.block_kind(c) == kind or (int(budget.get(kind, 0)) <= 0 and builder.held_kind != kind):
 				continue
 			if can_place(kind, c):
 				want = [Art.kind_index(kind), Vector3(c), int(item[2])]
 				break
 	if want.is_empty() != hint.is_empty() and not want.is_empty():
 		sound("click", -6.0, 0.8)
-		if not has_meta("hint_seq") or int(get_meta("hint_seq")) != level_seq:
+		if not simple and (not has_meta("hint_seq") or int(get_meta("hint_seq")) != level_seq):
 			set_meta("hint_seq", level_seq)
 			_show_center("Stuck? The glowing see-through block is a HINT!", 3.0)
 	hint = want
@@ -1334,6 +1657,11 @@ func _check_tv_confirm() -> void:
 # --- Networking ----------------------------------------------------------------------------
 
 func on_client_joined() -> void:
+	if simple:
+		_set_solo(false)
+		sound("revive", -4.0, 1.2)
+		burst(course.start + Vector3.UP * 1.0, Color(1.0, 0.9, 0.4), 16, 0.1)
+		return
 	_show_center("THE RUNNERS HAVE ARRIVED!", 1.5)
 	if state == "intro":
 		state_t = 0.0
@@ -1343,6 +1671,13 @@ func on_client_joined() -> void:
 
 
 func on_client_left() -> void:
+	if simple:
+		for r in runners():
+			if r.index >= 2 and r.active:
+				r.set_active(false)
+				on_player_activity_changed(r)
+		_set_solo(true)
+		return
 	_show_center("The runners left - waiting for them to come back…", 0.0)
 	for r in runners():
 		if r.index >= 2 and r.active:
@@ -1362,8 +1697,11 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 				if state == "play" and level_time > 0.0:
 					r.finished = false
 				on_player_activity_changed(r)
-				popup(course.start + Vector3.UP * 2.0, "P%d JOINED!" % (index + 1), r.color)
-				_show_center("PLAYER %d JOINED!" % (index + 1), 1.5)
+				if simple:
+					burst(course.start + Vector3.UP * 1.0, r.color, 16, 0.1)
+				else:
+					popup(course.start + Vector3.UP * 2.0, "P%d JOINED!" % (index + 1), r.color)
+					_show_center("PLAYER %d JOINED!" % (index + 1), 1.5)
 				sound("revive", -4.0, 1.2)
 				print("Player %d joined the game" % (index + 1))
 		"leave":
@@ -1371,7 +1709,8 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 				r.set_active(false)
 				r.finished = false
 				on_player_activity_changed(r)
-				_show_center("PLAYER %d LEFT" % (index + 1), 1.5)
+				if not simple:
+					_show_center("PLAYER %d LEFT" % (index + 1), 1.5)
 				print("Player %d left the game" % (index + 1))
 		"flag":
 			if args.size() > 0 and int(args[0]) == level_seq:
@@ -1415,7 +1754,8 @@ func make_snapshot() -> Array:
 	for r in runners():
 		rs.append(r.net_state())
 	return [level, level_seq, state, state_t, level_time, time_left, score, water_y, b, course.pack_blocks(),
-		builder.net_state(), rs, stars_taken, balloon_state, balloon_pos, hint]
+		builder.net_state(), rs, stars_taken, balloon_state, balloon_pos, hint, ring_state,
+		props.net_state() if props != null else []]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -1457,6 +1797,10 @@ func apply_snapshot(s: Array) -> void:
 			hint = h
 			_apply_hint()
 		course.show_rainbow(state == "won")
+	if s.size() >= 18:
+		ring_state = s[16]
+		if props != null:
+			props.apply_net_state(s[17])
 
 
 func apply_event(kind: String, args: Array) -> void:
@@ -1475,6 +1819,13 @@ func apply_event(kind: String, args: Array) -> void:
 			_show_center(args[0], args[1], false)
 		"thud":
 			thud(args[0])
+		"boop":
+			var bi: int = args[0]
+			if bi >= 1 and bi < players.size() and not players[bi].remote:
+				players[bi].boop()
+		"prop":
+			if props != null:
+				props.react(str(args[0]), int(args[1]), false)
 		"remote_pause":
 			get_tree().paused = args[0]
 			_set_pause_banner(args[0], "The Builder paused the game")
@@ -1584,6 +1935,14 @@ func _update_hud() -> void:
 		info_label.text = "Syncing with the Builder…"
 		return
 	info_label.text = ""
+	if simple:  # no status line, no block counts (the tray shows them), no tips
+		for r in runners():
+			if r.hud_label != null:
+				r.hud_label.text = ""
+		if builder != null and builder.flat and builder.hud_label != null:
+			builder.hud_label.text = ""
+			builder.hint_label.text = ""
+		return
 	var status := _status_text()
 	var tray := _tray_text()
 	for r in runners():
@@ -1618,6 +1977,10 @@ func _update_vr_text() -> void:
 	vr_center.modulate.a = center_label.modulate.a
 	vr_center.outline_modulate.a = center_label.modulate.a
 	vr_center.visible = center_label.text != "" and center_label.modulate.a > 0.01
+	if simple:
+		vr_info.visible = false  # VR: one short headline at most (the centre banner)
+		VrText.follow(vr_center, builder.xr_camera, self, 0.02 * S, 1.8 * S)
+		return
 	var info := _status_text() + "\n" + _tray_text()
 	var tip := _builder_tip()
 	if tip != "":
