@@ -19,6 +19,26 @@ const VrText := preload("res://core/vr_text.gd")
 ## P2 is keyboard set 0 + the 1st controller, P3 keyboard set 1 + the 2nd controller; any other
 ## controller presses A to drop in as the next free bee (up to P7). Each controller drives one bee.
 ## Modes (docs/GAME_DEV_GUIDE.md): DUO_JOIN=<host> client, VR or DUO_HOST=1 host, else local split screen.
+##
+## SIMPLE_MODE (the family: "all of the games have become too complicated", "simple games are the fun
+## games", "everything's being driven by text"). Everything below that needs explaining is switched off
+## behind this one flag (not deleted). What's left is the cosy core loop with no way to fail:
+##   plant a seed -> water it -> it blooms -> the bees pollinate it -> fruit -> pick it.
+##  - PRACTICE first. Gardener: a see-through glowing glove (ghost_hand.gd) takes a seed from the tray and
+##    pushes it into a glowing ring on the soil; once planted it fetches the can and tips it over the
+##    sprout. Bees: one flower glows with a halo and the bee's arrow points at it; once a bee has pollen
+##    the arrow points to the hive. Later the ghost glove shows how to pick ripe fruit if nobody does.
+##  - ONE flower kind (the daisy). No sunset, no timer, no score: honey fills the jars (you can see them
+##    fill); when they're all full, HOORAY, and the next round adds ONE new thing: round 2 the
+##    sunflower seeds appear in the tray, round 3 on a decoration moves in, and from round 3 a rain
+##    shower now and then (and a rainbow). Off: pests and wasps, the sun lily, golden flowers, the
+##    Queen, garden wishes, bouquet / team bonuses, awards, sunset game over, the info line, the ledge
+##    signs and all floating text popups.
+##  - EVERYTHING INTERACTABLE (props.gd): flowers bob and drop petals, a gnome giggles, a snail hides, a
+##    rake scratches the soil, a bird bath splashes, a wind chime tinkles, butterflies flutter off.
+##  - Solo VR (host with no TV yet): two helper bees (helpers.gd) do the pollinating, so the garden
+##    still grows. They fly home when a TV bee arrives.
+##  - Text: VR shows at most one short headline; each TV bee gets at most one short line.
 
 const W := preload("res://games/bee_garden/world.gd")
 const GardenerScript := preload("res://games/bee_garden/gardener.gd")
@@ -31,6 +51,13 @@ const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
 const NetScript := preload("res://core/net.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
+const GhostHandScript := preload("res://games/bee_garden/ghost_hand.gd")
+const PropsScript := preload("res://games/bee_garden/props.gd")
+const HelpersScript := preload("res://games/bee_garden/helpers.gd")
+
+const SIMPLE_MODE := true
+const PRACTICE_SPOT := 10      # simple mode: the glowing ring where the first seed goes
+const PRACTICE_FLOWER := 5     # simple mode: the bees' glowing first flower
 
 const MAX_BEES := 6          # TV players 2..7 (player indices 1..6)
 const VR_LAYER := 1024       # the gardener's floating banner: drawn in VR only
@@ -78,6 +105,14 @@ const SOUNDS := {
 	"raid": [0.6, 220.0, 160.0, 0.35, "saw", 0.3],
 	"golden": [0.8, 880.0, 1760.0, 0.3, "sine", 0.0],
 	"rainbow": [1.0, 523.0, 2093.0, 0.3, "tri", 0.0],
+	"giggle": [0.12, 750.0, 1150.0, 0.3, "tri", 0.0],
+	"chime": [1.1, 1568.0, 1560.0, 0.22, "sine", 0.0],
+	"pop": [0.12, 400.0, 900.0, 0.3, "sine", 0.0],
+	"tweet": [0.15, 2200.0, 3000.0, 0.2, "sine", 0.0],
+	"flutter": [0.3, 1200.0, 900.0, 0.08, "sine", 0.8],
+	"petal": [0.25, 1300.0, 1700.0, 0.15, "sine", 0.3],
+	"rake": [0.15, 300.0, 200.0, 0.15, "saw", 0.9],
+	"hooray": [1.4, 523.0, 1568.0, 0.4, "tri", 0.0],
 }
 
 var players: Array = []
@@ -138,6 +173,18 @@ var last_delivery := {}       # bee index -> time of their last honey delivery (
 var events_node: Node3D
 var ambient: Array = []
 var amb_t := 0.0
+# Simple mode (host decides; the snapshots tell the TV)
+var simple := SIMPLE_MODE      # other scripts read main.simple
+var practice_g := "seed" if SIMPLE_MODE else "done"   # gardener practice: seed -> water -> done
+var glow_spot := PRACTICE_SPOT if SIMPLE_MODE else -1  # the glowing ring (plant / water here)
+var halo_spot := PRACTICE_FLOWER if SIMPLE_MODE else -1  # the bees' glowing flower
+var seed_kinds := 1 if SIMPLE_MODE else 3   # how many seed kinds the tray offers
+var round_t := 0.0
+var rain_done := false
+var gardener_idle := 0.0
+var props: Node3D
+var ghost_hand: Node3D
+var helpers: Node3D
 
 var info_label: Label
 var center_label: Label
@@ -167,7 +214,18 @@ func _ready() -> void:
 	env = (get_node("Env") as WorldEnvironment).environment
 	_build_plants()
 	_build_jars()
-	W.build_signs(self)
+	if SIMPLE_MODE:
+		decor_count = 2  # the gnome and the bird bath are touchable props from the start (props.gd)
+		decor_built = 2
+		props = PropsScript.new()
+		props.main = self
+		add_child(props)
+		helpers = HelpersScript.new()
+		helpers.main = self
+		add_child(helpers)
+		sign_label.text = "BEE GARDEN"
+	else:
+		W.build_signs(self)
 	ambient = W.build_ambient(self)
 	events_node = EventsScript.new()
 	events_node.main = self
@@ -201,7 +259,12 @@ func _setup_game(mode: String) -> void:
 		_reset_garden()
 	ready_to_play = true
 	_ensure_join_listener()
-	print("Bee Garden: %s mode" % mode)
+	print("Bee Garden: %s mode%s" % [mode, "  (simple mode)" if SIMPLE_MODE else ""])
+	if SIMPLE_MODE:
+		help_label.text = "Stick: fly   RT: up   LT: down"
+		if mode == "client":
+			_show_center("BUZZ BUZZ!", 2.0)
+		return
 	var bee_help := "BEES: left stick / WASD fly · right stick / A D turn · RT / Space up · LT / Shift down · A / E zoom\n" \
 		+ "Fly into glowing flowers for pollen, bring it to the HIVE: honey fills the JARS · fill ALL jars before sunset!\n"
 	if mode == "local":
@@ -301,6 +364,24 @@ func _build_views(mode: String) -> void:
 		origin.add_child(right)
 		gardener.setup_vr(origin, cam, left, right)
 		_build_vr_mirror(cam)
+	elif OS.has_environment("BOT_VR") and mode != "client":
+		# Tests: the VR gardener's code runs without a headset; the bot moves the hands.
+		print("Fake VR: the bot drives the VR gardener")
+		var origin := XROrigin3D.new()
+		add_child(origin)
+		var cam := XRCamera3D.new()
+		origin.add_child(cam)
+		cam.position = Vector3(0, 1.5 * W.S, 0)
+		var left := XRController3D.new()
+		left.tracker = "left_hand"
+		origin.add_child(left)
+		left.position = Vector3(-0.25, 1.0, -0.2) * W.S
+		var right := XRController3D.new()
+		right.tracker = "right_hand"
+		origin.add_child(right)
+		right.position = Vector3(0.25, 1.0, -0.2) * W.S
+		gardener.fake_vr = true
+		gardener.setup_vr(origin, cam, left, right)
 	elif mode == "client":
 		gardener.setup_ghost()
 	var layer := CanvasLayer.new()
@@ -687,6 +768,8 @@ func sound(sound_name: String, volume_db: float = 0.0, pitch: float = 1.0) -> vo
 
 ## Floating text that rises and fades (faces the VR gardener, or billboards on the TV).
 func popup(pos: Vector3, text: String, color: Color, broadcast: bool = true) -> void:
+	if SIMPLE_MODE:
+		return  # simple mode: no floating text; the world shows what happened (bursts, sounds)
 	var l := Label3D.new()
 	l.text = text
 	l.modulate = color
@@ -731,6 +814,15 @@ func _reset_garden() -> void:
 	spots.clear()
 	for i in W.SPOTS:
 		spots.append(_empty_spot())
+	if SIMPLE_MODE:
+		# Two daisies already bloom (the bees' practice flower glows); the glowing ring waits for a seed.
+		for i in [PRACTICE_FLOWER, 2]:
+			var d: Dictionary = spots[i]
+			d.kind = 0
+			d.growth = 1.0
+			d.water = 1.0
+			d.bloom = true
+		return
 	# A few flowers are already blooming so the bees can start right away; the sun lily needs water.
 	for e in [[1, 0], [2, 1], [5, 0], [6, 0], [10, 1]]:
 		var s: Dictionary = spots[int(e[0])]
@@ -867,7 +959,7 @@ func _move_fruit(x: float, f: Node3D, from: Vector3, to: Vector3) -> void:
 func tray_pick(pos: Vector3, reach: float, flat: bool) -> int:
 	var best := -1
 	var best_d := reach
-	for k in 3:
+	for k in seed_kinds:
 		var sp := W.tray_slot(k)
 		var d := Vector2(sp.x - pos.x, sp.z - pos.z).length() if flat else sp.distance_to(pos)
 		if d < best_d:
@@ -983,11 +1075,19 @@ func _seed_landed(kind: int, p: Vector3) -> void:
 		popup(p + Vector3.UP * 0.5, "No room here - try an empty spot", Color(1.0, 0.8, 0.6))
 		sound("miss", -6.0)
 		return
+	if SIMPLE_MODE and glow_spot >= 0 and int(spots[glow_spot].kind) < 0 \
+			and Vector2(W.spot_pos(glow_spot).x - p.x, W.spot_pos(glow_spot).z - p.z).length() < 1.4:
+		best = glow_spot  # practice: anywhere near the glowing ring counts
 	var s := _empty_spot()
 	s.kind = kind
-	s.water = 0.3
+	s.water = 0.0 if SIMPLE_MODE else 0.3  # simple: the seed needs watering before it grows
 	s.growth = 0.02
 	spots[best] = s
+	if SIMPLE_MODE and practice_g == "seed":
+		practice_g = "water"
+		glow_spot = best
+		sound("pick", -2.0, 1.6)
+		print("Practice: seed planted, now water it")
 	stats.planted += 1
 	gardener_day["planted"] = int(gardener_day["planted"]) + 1
 	_wish_add("plant")
@@ -1014,6 +1114,12 @@ func water_at(tip: Vector3, delta: float) -> void:
 			continue
 		var before: float = s.water
 		s.water = minf(1.0, before + 0.6 * delta)
+		if SIMPLE_MODE and practice_g == "water" and i == glow_spot and float(s.water) >= 0.6:
+			practice_g = "done"
+			glow_spot = -1
+			sound("bloom", -2.0, 1.4)
+			burst(W.spot_pos(i) + Vector3.UP * 0.3, Color(0.6, 0.85, 1.0), 16, 0.05)
+			print("Practice: watered - the gardener's practice is done")
 		if before < 0.12 and float(s.water) >= 0.12:
 			popup(head_pos(i) + Vector3.UP * 0.4, "Ahh, water!", Color(0.6, 0.85, 1.0))
 	for b in bees():
@@ -1064,6 +1170,8 @@ func full_jars() -> int:
 func _sim(delta: float) -> void:
 	var season := (maxi(day, 1) - 1) % 4
 	var drain := 0.02 * (1.4 if season == 1 else 1.0)
+	if SIMPLE_MODE:
+		drain = 0.012  # gentle: a watered flower stays happy for over a minute
 	for s in spots:
 		s.bug = false
 	for p in get_tree().get_nodes_in_group("pests"):
@@ -1202,6 +1310,9 @@ func _deliver(b) -> void:
 	for k in 3:
 		if (int(b.pollen_kinds) & (1 << k)) != 0:
 			kinds += 1
+	if SIMPLE_MODE:
+		kinds = 0  # no bouquet / team bonuses: pollen in, honey out
+		halo_spot = -1  # a bee found its way: the practice halo can go
 	if kinds >= 2:
 		var cb := 2 if kinds == 2 else 5
 		v += cb
@@ -1213,7 +1324,7 @@ func _deliver(b) -> void:
 		_wish_add("gold")
 	var now := Time.get_ticks_msec() / 1000.0
 	for o in bees():
-		if o != b and o.active and now - float(last_delivery.get(o.index, -10.0)) < 2.5:
+		if not SIMPLE_MODE and o != b and o.active and now - float(last_delivery.get(o.index, -10.0)) < 2.5:
 			v += 2
 			extra.append("TEAM BUZZ +2")
 			break
@@ -1349,6 +1460,8 @@ func _start_event(kind: String) -> void:
 			rain_t = RAIN_TIME
 			event_t = RAIN_TIME
 			sound("rain", -2.0)
+			if SIMPLE_MODE:
+				return
 			_show_center("A RAIN SHOWER!\nThe flowers are drinking and growing fast… is that a rainbow coming?", 3.5)
 		"golden":
 			var opts: Array[int] = []
@@ -1410,7 +1523,8 @@ func _end_event(ok: bool) -> void:
 		"rain":
 			rainbow_t = RAINBOW_TIME
 			sound("rainbow", -1.0)
-			_show_center("A RAINBOW!\nAll honey counts DOUBLE while it shines!", 3.0)
+			if not SIMPLE_MODE:
+				_show_center("A RAINBOW!\nAll honey counts DOUBLE while it shines!", 3.0)
 		"golden":
 			golden_spot = -1
 		"raid":
@@ -1487,6 +1601,76 @@ func _host_pests(delta: float) -> void:
 	add_child(p)
 	sound("buzz", -8.0, 1.4 if kind == "aphid" else 0.8)
 	print("A %s arrived" % kind)
+
+
+## Simple mode: a round = fill the jars (no timer). Each new round adds ONE new thing.
+func _start_round_simple(n: int) -> void:
+	day = n
+	day_t = DAY_LEN
+	honey = 0
+	round_t = 0.0
+	rain_done = false
+	day_bees = active_bee_count()
+	target = mini(12 + 6 * (n - 1), 36)
+	phase = "intro"
+	phase_t = 2.0
+	event = ""
+	rain_t = 0.0
+	rainbow_t = 0.0
+	if n == 2:
+		seed_kinds = 2  # sunflower seeds appear in the tray (with a sparkle)
+		burst(W.tray_slot(1) + Vector3.UP * 0.3, Color(1.0, 0.85, 0.2), 20, 0.06)
+	print("Round %d: fill %d jars = %d honey, %d seed kinds" % [n, jar_count(), target, seed_kinds])
+	sound("bloom", 0.0, 0.8)
+	if n == 1:
+		_show_center("BEE GARDEN", 3.0)
+
+
+func _round_complete_simple() -> void:
+	phase = "dusk"
+	phase_t = 5.0
+	days_done += 1
+	print("Level complete: round %d done (%d honey)" % [day, honey])
+	sound("hooray", 0.0)
+	for i in jar_count():
+		burst(W.jar_pos(i, jar_count()) + Vector3.UP * 0.7, Color(1.0, 0.78, 0.25), 14, 0.06)
+	burst(W.HIVE_ENTRY + Vector3.UP * 0.6, Color(1.0, 0.6, 0.8), 24, 0.07)
+	if event != "":
+		_end_event(true)
+	if day >= 2:
+		_unlock_decor()
+	_show_center("HOORAY!", 3.0)
+	if gardener.vr:
+		gardener.buzz_right(0.6)
+
+
+func _host_update_simple(delta: float) -> void:
+	match phase:
+		"wait":
+			_start_round_simple(1)  # no waiting: the garden grows even before the bees arrive
+		"intro", "day", "dusk":
+			_sim(delta)
+			helpers.host_update(delta)
+			if phase == "intro":
+				phase_t -= delta
+				if phase_t <= 0.0:
+					phase = "day"
+			elif phase == "day":
+				round_t += delta
+				# From round 3, a cosy rain shower once a round (then a rainbow). No text, no rules to learn.
+				rain_t = maxf(0.0, rain_t - delta)
+				rainbow_t = maxf(0.0, rainbow_t - delta)
+				if day >= 3 and not rain_done and round_t > 40.0:
+					rain_done = true
+					_start_event("rain")
+				if event == "rain" and rain_t <= 0.0:
+					_end_event(true)
+				if honey >= target:
+					_round_complete_simple()
+			else:
+				phase_t -= delta
+				if phase_t <= 0.0:
+					_start_round_simple(day + 1)
 
 
 func _start_day(n: int) -> void:
@@ -1643,7 +1827,12 @@ func _process(delta: float) -> void:
 	for i in plant_nodes.size():
 		if i < spots.size():
 			spots[i]["golden"] = i == golden_spot
+			spots[i]["glow"] = i == glow_spot
+			spots[i]["halo"] = i == halo_spot
 			plant_nodes[i].update_from(spots[i], delta)
+	if SIMPLE_MODE:
+		_update_ghost_hand(delta)
+		_update_tray()
 	_update_jars(delta)
 	_update_sky()
 	_update_decor(delta)
@@ -1663,6 +1852,9 @@ func _process(delta: float) -> void:
 			if game_over_time > 1.5 and _restart_pressed():
 				game_over_time = 0.0
 				net.send_action("restart", [])
+		return
+	if SIMPLE_MODE:
+		_host_update_simple(delta)
 		return
 	_host_update(delta)
 
@@ -1729,7 +1921,9 @@ func _update_jars(_delta: float) -> void:
 
 func _update_sky() -> void:
 	var p := 0.0
-	if phase == "day" or phase == "dusk":
+	if SIMPLE_MODE:
+		p = 0.35  # simple mode: a sunny day that never ends
+	elif phase == "day" or phase == "dusk":
 		p = clampf(1.0 - day_t / DAY_LEN, 0.0, 1.0)
 	elif phase == "over":
 		p = 1.0
@@ -1755,6 +1949,8 @@ func _update_sky() -> void:
 		var leaves := get_node_or_null("Leaves") as MeshInstance3D
 		if leaves != null:
 			(leaves.material_override as StandardMaterial3D).albedo_color = W.SEASON_LEAF[season]
+	if SIMPLE_MODE:
+		return  # the garden sign just says BEE GARDEN
 	var mins := maxi(0, ceili(day_t))
 	var state := "%d:%02d until sunset" % [mins / 60, mins % 60]
 	if phase == "dusk":
@@ -1768,6 +1964,81 @@ func _update_sky() -> void:
 		full_jars(), jar_count(), state, ("\n" + tip) if tip != "" else ""]
 
 
+# --- Simple mode: practice ghost hand, tray, touches ------------------------------
+
+## The see-through glove shows the gardener the next step (only on the gardener's own screen).
+func _update_ghost_hand(delta: float) -> void:
+	if gardener == null or gardener.ghost or gardener.hands.is_empty():
+		return
+	if ghost_hand == null:
+		ghost_hand = GhostHandScript.new()
+		add_child(ghost_hand)
+		ghost_hand.set_layer(VR_LAYER)  # the bees' cameras don't draw this layer
+	var busy := false
+	for h in gardener.hands:
+		if h.held != "" or h.gripping:
+			busy = true
+	gardener_idle = 0.0 if busy else gardener_idle + delta
+	var want := ""
+	var a := Vector3.ZERO
+	var b := Vector3.ZERO
+	if not can_interact() or get_tree().paused:
+		want = ""
+	elif practice_g == "seed" and glow_spot >= 0:
+		want = "seed"
+		a = W.tray_slot(0)
+		b = W.spot_pos(glow_spot)
+	elif practice_g == "water" and glow_spot >= 0:
+		want = "water"
+		a = W.CAN_HOME
+		b = W.spot_pos(glow_spot)
+	elif gardener_idle > 5.0:
+		# Later: if ripe fruit waits and the gardener hasn't done anything for a while, show picking.
+		for i in spots.size():
+			if int(spots[i].kind) >= 0 and float(spots[i].fruit) >= 1.0:
+				want = "pick"
+				a = head_pos(i) + Vector3(0.0, -0.1, 0.08)
+				b = W.BASKET_POS + Vector3(0.0, 0.3, 0.0)
+				break
+	ghost_hand.show_demo(want, a, b, busy, delta)
+
+
+## Only the unlocked seed kinds show in the tray.
+func _update_tray() -> void:
+	for k in 3:
+		var n := get_node_or_null("Tray/Slot%d" % k) as Node3D
+		if n != null:
+			n.visible = k < seed_kinds
+
+
+## Solo helper bees (helpers.gd): a visit takes pollen, and pollinates when they bring some from another flower.
+func helper_visit(i: int, pollinate: bool) -> void:
+	var s: Dictionary = spots[i]
+	var hp := head_pos(i)
+	burst(hp, Color(1.0, 0.8, 0.2), 6, 0.04)
+	sound("pollen", -10.0, 1.1)
+	if pollinate and float(s.fruit) < 0.0:
+		s.fruit = 0.0
+		stats.pollinated += 1
+		burst(hp, Color(1.0, 0.9, 0.5), 12, 0.05)
+		sound("pollinate", -6.0, 1.0)
+
+
+func helper_deliver(loads: int) -> void:
+	burst(W.HIVE_ENTRY, Color(1.0, 0.7, 0.15), 12, 0.06)
+	sound("honey", -6.0, 1.1)
+	add_honey(loads, W.HIVE_ENTRY)
+	honey_drop(W.HIVE_ENTRY + Vector3.UP * 0.3)
+
+
+## Someone touched a plant (props.gd, host): it bobs on every screen.
+func poke_plant(i: int, push: Vector3) -> void:
+	if i >= 0 and i < plant_nodes.size():
+		plant_nodes[i].poke(push)
+	if net:
+		net.event("poke", [i, push])
+
+
 # --- Networked co-op (see docs/GAME_DEV_GUIDE.md) ----------------------------
 
 func on_client_joined() -> void:
@@ -1775,7 +2046,8 @@ func on_client_joined() -> void:
 
 
 func on_client_left() -> void:
-	_show_center("The bees flew home - waiting for them to come back…", 0.0)
+	if not SIMPLE_MODE:
+		_show_center("The bees flew home - waiting for them to come back…", 0.0)
 	for b in bees():
 		if b.index >= 2 and b.active:
 			_bee_leaves(b)
@@ -1797,7 +2069,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 					b.global_position = spawn_pos(index)
 					b.net_target = b.global_position
 				on_player_activity_changed(b)
-				_show_center("PLAYER %d JOINED THE HIVE!" % (index + 1), 1.5)
+				_show_center("BUZZ! P%d" % (index + 1) if SIMPLE_MODE else "PLAYER %d JOINED THE HIVE!" % (index + 1), 1.5)
 				sound("buzz", -4.0, 1.0 + index * 0.05)
 				print("Net: player %d joined the game" % (index + 1))
 		"leave":
@@ -1822,7 +2094,7 @@ func _bee_leaves(b) -> void:
 
 
 func _set_pause_banner(paused: bool, who: String) -> void:
-	_show_center("PAUSED\n" + who if paused else "", 0.0, false)
+	_show_center(("PAUSED" if SIMPLE_MODE else "PAUSED\n" + who) if paused else "", 0.0, false)
 	if vr_center != null and paused:
 		VrText.snap(vr_center)
 	_update_vr_center()
@@ -1847,7 +2119,8 @@ func make_snapshot() -> Array:
 		if not p.is_queued_for_deletion():
 			pe.append(p.net_item())
 	return [phase, day, day_t, honey, target, total_honey, days_done, sp, ps, pe, game_over, basket_count,
-		event, rain_t, rainbow_t, golden_spot, queen_kind, decor_count, wish, wish_progress, wish_done]
+		event, rain_t, rainbow_t, golden_spot, queen_kind, decor_count, wish, wish_progress, wish_done,
+		practice_g, glow_spot, halo_spot, seed_kinds, props.net_state() if props != null else PackedFloat32Array()]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -1893,6 +2166,13 @@ func apply_snapshot(s: Array) -> void:
 		wish = s[18]
 		wish_progress = s[19]
 		wish_done = s[20]
+	if s.size() >= 26:
+		practice_g = s[21]
+		glow_spot = s[22]
+		halo_spot = s[23]
+		seed_kinds = s[24]
+		if props != null:
+			props.apply_net(s[25])
 	for i in spots.size():
 		spots[i]["golden"] = i == golden_spot
 
@@ -1938,6 +2218,10 @@ func apply_event(kind: String, args: Array) -> void:
 			_fly_fruit(args[0], args[1])
 		"drop":
 			honey_drop(args[0], false)
+		"poke":
+			var pi: int = args[0]
+			if pi >= 0 and pi < plant_nodes.size():
+				plant_nodes[pi].poke(args[1])
 		"remote_pause":
 			get_tree().paused = args[0]
 			_set_pause_banner(args[0], "The gardener paused the game")
@@ -2020,6 +2304,19 @@ func _update_hud() -> void:
 		help_label.modulate.a = maxf(0.0, help_label.modulate.a - get_process_delta_time() * 0.5)
 	if net.mode == "client" and not synced:
 		info_label.text = "Syncing with the gardener…"
+		return
+	if SIMPLE_MODE:
+		# No score line: the jars show the honey. The controls line fades once every bee made honey.
+		info_label.text = ""
+		var learned := true
+		for b in bees():
+			if b.active and not b.remote and b.honey_made == 0:
+				learned = false
+		if learned and help_label.modulate.a > 0.0:
+			help_label.modulate.a = maxf(0.0, help_label.modulate.a - get_process_delta_time() * 0.5)
+		var jt0 := get_node_or_null("JarTag") as Label3D
+		if jt0 != null:
+			jt0.visible = false
 		return
 	var mins := maxi(0, ceili(day_t))
 	var season: String = W.SEASONS[(maxi(day, 1) - 1) % 4]
