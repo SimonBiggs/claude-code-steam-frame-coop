@@ -633,6 +633,17 @@ func _update_torch(_delta: float) -> void:
 	torch_glow.emission_energy_multiplier = (4.0 + torch_flash * 6.0) if on else 0.3
 	var bm: ShaderMaterial = torch_beam.material_override
 	bm.set_shader_parameter("energy", 0.22 + torch_flash * 0.5)
+	# Stop the beam (and the light) at the first wall, so it doesn't shine through (Abigail).
+	if on:
+		var bp := torch_beam.get_parent() as Node3D
+		var from := bp.global_position
+		var dir := -bp.global_basis.y.normalized()
+		var hit: Dictionary = main.ray(from, from + dir * 7.0)
+		var length: float = clampf(from.distance_to(hit.position), 0.3, 7.0) if not hit.is_empty() else 7.0
+		var r: float = tan(deg_to_rad(main.TAG_ANGLE)) * main.TAG_RANGE * 2.4 * (length / 7.0)
+		torch_beam.scale = Vector3(r, length, r)
+		torch_beam.position = Vector3(0, -length * 0.5, 0)
+		torch_light.spot_range = minf(torch_light.spot_range, length + 0.4)
 
 
 func _update_camera(delta: float) -> void:

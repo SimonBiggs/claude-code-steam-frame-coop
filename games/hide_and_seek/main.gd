@@ -1797,7 +1797,7 @@ func _seek_hints(delta: float) -> void:
 	if t > 0.0:
 		set_meta("hint_t", t)
 		return
-	set_meta("hint_t", 15.0)
+	set_meta("hint_t", 30.0)  # half as often (Abigail wanted no hints; David asked for them)
 	var hiding: Array = []
 	for p in players:
 		if p.active and p.role == "hider" and p.is_hiding():
@@ -1806,6 +1806,5 @@ func _seek_hints(delta: float) -> void:
 		return
 	var h = hiding[randi() % hiding.size()]
 	var at: Vector3 = h.global_position + Vector3.UP * 1.2
-	burst(at, Color(1.0, 0.85, 0.2), 40, 0.1)
-	popup(at + Vector3.UP * 0.4, "HINT!", Color(1.0, 0.85, 0.2), true)
+	burst(at, Color(1.0, 0.85, 0.2), 20, 0.1)  # a faint sparkle, no "HINT!" text
 	sound("pickup", 0.0, 1.4)
