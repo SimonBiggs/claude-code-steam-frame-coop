@@ -206,6 +206,7 @@ func _launch(index: int) -> void:
 
 func _process(_delta: float) -> void:
 	_ensure_shared_nodes()
+	_ensure_fullscreen()
 	if not has_meta("menu_v4") and (not buttons.is_empty() or grid == null) and status != null:
 		set_meta("menu_v4", true)  # hot reload: replace an older TV menu with the category tabs
 		for c in get_children():
@@ -590,3 +591,14 @@ func _ensure_shared_nodes() -> void:
 		root.set_meta(pair[0], n)
 		root.add_child.call_deferred(n)
 
+
+## The TV machine (no VR) runs fullscreen (Simon). Done once per launch, so F11/Alt+Enter still work.
+func _ensure_fullscreen() -> void:
+	var root := get_tree().root
+	if root.has_meta("fullscreen_done") or DisplayServer.get_name() == "headless":
+		return
+	root.set_meta("fullscreen_done", true)
+	var xr := XRServer.primary_interface
+	if xr != null and xr.is_initialized():
+		return  # the headset draws through OpenXR, not the window
+	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
