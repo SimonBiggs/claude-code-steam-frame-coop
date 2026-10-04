@@ -97,7 +97,7 @@ static func _altitude(k: Node3D, delta: float) -> void:
 		want = k.fly_alt + (3.0 - k.state_t) * 8.0
 	k.alt = lerpf(k.alt, want, 1.0 - exp(-2.5 * delta))
 	k.position.y = k.alt
-	k.high = k.alt > 4.5
+	k.high = k.alt > 8.0
 	k.can_punch = not k.high
 
 
@@ -201,15 +201,7 @@ static func _windup(k: Node3D, delta: float, g: Node) -> void:
 	var w: float = ATTACKS.get(k.attack, [0, 1.0])[1]
 	k.face_dir(k.attack_dir, delta, 5.0)
 	_walk_anim(k, 0.0)
-	# Track moving targets during the first part of the wind-up (then it's committed: dodgeable).
-	if k.attack_target != null and is_instance_valid(k.attack_target) and k.state_t < w * 0.4:
-		var tp: Vector3 = k.attack_target.global_position
-		if k.attack != "lava_bombs" and k.attack != "zap_bolt":
-			k.attack_pos = tp
-			var to := tp - k.position
-			to.y = 0.0
-			if to.length() > 0.1:
-				k.attack_dir = to.normalized()
+	# Committed at the telegraph: the danger marker shows exactly where it lands (dodgeable).
 	if k.state_t >= w:
 		k.set_state("attack")
 		if k.anim != null:
@@ -241,7 +233,7 @@ static func _home(k: Node3D, delta: float, g: Node) -> void:
 	_walk_anim(k, spd)
 	if k.anim != null and int(k.state_t * 2.0) % 6 == 0 and not bool(k.anim.call("is_busy")):
 		k.anim.call("play", "wave", 1.0)
-	var far := maxf(absf(k.position.x), absf(k.position.z)) > Data.MAP + 30.0 or k.position.y > 80.0 or k.state_t > 22.0
+	var far: bool = maxf(absf(k.position.x), absf(k.position.z)) > Data.MAP + 30.0 or k.position.y > 80.0 or k.state_t > 22.0
 	if far:
 		k.set_state("gone")
 		k.visible = false
