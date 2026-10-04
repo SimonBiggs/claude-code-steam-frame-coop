@@ -959,7 +959,7 @@ func _check_lose(delta: float) -> void:
 			any_active = true
 			if not k.is_down:
 				any_up = true
-	if any_active and not any_up:
+	if any_active and not any_up and not solo_giant():  # solo: no knights to fall asleep
 		var before := int(DOWN_GRACE - down_t)
 		down_t += delta
 		var left := int(DOWN_GRACE - down_t)
