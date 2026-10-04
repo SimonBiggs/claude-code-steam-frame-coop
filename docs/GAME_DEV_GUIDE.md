@@ -66,10 +66,25 @@ score and game over. Use visual-only "ghost" copies of host objects on the clien
   (`outline_size` around 26), or put it on the wrist. Don't attach text to the XR camera, and don't
   billboard it: players want to turn their head to read it. Let it glide back in front only when they
   turn well away (see `_lazy_follow` in duo_arena/main.gd).
-- On the Steam Frame, the **left controller's buttons (menu, Y, grip) don't reach the game**; only the
-  sticks and the right trigger/A do. `core/net.gd` adds a MENU button on the left wrist (tap it, or
-  point and pull the trigger) that calls `toggle_vr_pause()`. While paused, the trigger returns everyone
-  to the arcade.
+- On the Steam Frame, the **left controller's buttons (menu, Y, grip) and the left trigger don't reach
+  the game**; only the sticks, the right trigger, A and both hands' positions do. Give the left hand
+  touch-based jobs. `core/net.gd` adds a MENU button beside the left wrist (touch and hold, or point and
+  pull the trigger) that calls `toggle_vr_pause()`. While paused, HOLDING the trigger for 1.5 s returns
+  everyone to the arcade.
+- Lessons from playtesting with kids:
+  - Never base an input on a calibrated "rest pose": it drifts between kids and got a dragon stuck at
+    the ceiling. Measure hands relative to the head/eyes or to a held object, with generous dead zones.
+  - No gaze steering (it annoyed them). Let the VR player move with the left stick; kids hate being
+    stuck in one spot.
+  - Fit the height on start and re-fit when the head height changes a lot for a few seconds (the
+    headset gets handed to a smaller kid, or someone sits down).
+  - Keep text far from the eyes (use `core/vr_text.gd`); never put grab zones where reaching for them
+    means hitting your own face.
+  - A trigger still held from the previous screen (the pause menu, the arcade) must not act on the next
+    one: wait for a release.
+  - Put what the VR player needs (health, the word to draw) where they always look, e.g. on the held tool.
+  - Show a how-to banner and short contextual hints: kids constantly ask "how do I…?".
+- `XRServer.world_scale` is global. If a game scales the world, reset it to 1.0 in `_exit_tree`.
 - Give the VR player a role that uses their **hands**, different from the TV players' role.
 - `Engine.physics_ticks_per_second = 90` in VR.
 
@@ -78,7 +93,12 @@ score and game over. Use visual-only "ghost" copies of host objects on the clien
 - The Frame runs with `--rendering-method mobile`. In VR turn off SSAO, fog and directional shadows,
   and use MSAA 2x.
 - Keep draw calls low: use few meshes per object, sphere segments around 12–20 (not the default
-  64), and avoid hundreds of nodes.
+  64), and avoid hundreds of nodes. Bake static, vertex-coloured shapes into one mesh, and use
+  `MultiMeshInstance3D` for crowds and repeated props (several games have a `mesh_kit.gd` to copy).
+- Godot's built-in font has no symbols like ♥ ★ ▶ ✓ →; the headset may not have a fallback font. Use
+  plain text ("HP 80", "* AWARDS *", "> <").
+- Snapshots go over the network ~30 times a second; `core/net.gd` compresses them, but keep them
+  small and send one-off things as events.
 - No sync GPU readbacks every frame. The gdev bridge records the group `gdev_capture` viewport
   (add a small mirror SubViewport like duo_arena's `_build_vr_mirror` so people can watch the VR view).
 
@@ -105,4 +125,9 @@ DUO_PORT=78xx DUO_JOIN=127.0.0.1 timeout 33 godot --headless --path . res://test
 
 The bot should load the game (`load("res://games/<id>/main.tscn").instantiate()`), drive the
 players (press keys with `Input.parse_input_event`, or set their aim directly) and print progress.
-Done means **zero `SCRIPT ERROR`s** locally and networked.
+Done means **zero `SCRIPT ERROR`s** locally, with `BOT_PLAYERS=6`, and networked. Also:
+- This machine has real controllers attached: make bots ignore real pads and resume if something
+  pauses the game.
+- Add a fake-VR mode that moves the XR hands, so the VR code path runs headless too.
+- For games with walls and furniture, check that every room, doorway and spawn can be reached on
+  foot (see `tests/hide_and_seek_bot.gd`).

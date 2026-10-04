@@ -2217,7 +2217,7 @@ func _update_easel_text() -> void:
 		var g = players[i]
 		canvas.set_audience(i - 1, g.active, g.got and (state == "draw" or state == "reveal"))
 		if g.active:
-			sb += "P%d  %d%s%s\n" % [i + 1, g.score, "  ✓" if g.got and (state == "draw" or state == "reveal") else "",
+			sb += "P%d  %d%s%s\n" % [i + 1, g.score, "  GOT IT" if g.got and (state == "draw" or state == "reveal") else "",
 				"  x%d" % g.streak if g.streak >= 2 else ""]
 			if team and state == "draw" and (is_host_side() or is_local(g)):
 				cursors.append([g.tv_cursor, g.color, g.tv_down])

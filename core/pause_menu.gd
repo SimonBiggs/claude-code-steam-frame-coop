@@ -56,7 +56,7 @@ func _input(event: InputEvent) -> void:
 	if key and key.pressed and not key.echo and key.physical_keycode == KEY_ESCAPE:
 		toggle = true
 	var pad := event as InputEventJoypadButton
-	if pad and pad.pressed and pad.button_index == JOY_BUTTON_START:
+	if pad and pad.pressed and pad.button_index == JOY_BUTTON_START and (panel.visible or _pad_in_play(pad.device)):
 		toggle = true
 	if not toggle:
 		return
@@ -65,6 +65,24 @@ func _input(event: InputEvent) -> void:
 		_resume()
 	else:
 		_open()
+
+
+## Start on a spare controller nobody is playing with (left on the couch, or a test machine's pads)
+## shouldn't pause everyone. A pad counts if a player owns it via `joy`, or if no player owns any pad.
+func _pad_in_play(device: int) -> bool:
+	if main == null or not ("players" in main):
+		return true
+	var any_owned := false
+	for p in main.players:
+		if p == null or not is_instance_valid(p) or not ("joy" in p):
+			continue
+		var j: int = int(p.get("joy"))
+		if j < 0:
+			continue
+		any_owned = true
+		if j == device:
+			return true
+	return not any_owned
 
 
 func _open() -> void:

@@ -574,7 +574,7 @@ func _update_big_panel(st: String) -> void:
 	var bg := Color(0.12, 0.14, 0.26, 0.88)
 	if st == "vote":
 		var n: int = main.vote_count()
-		var t := "Pick your favourite:  ◀  #%d  ▶" % (vote_cursor + 1)
+		var t := "Pick your favourite:  <  #%d  >" % (vote_cursor + 1)
 		if n > 0:
 			t += "   (%s)" % str(main.vote_word(vote_cursor)).to_upper()
 		t += "\nPress A to vote!" if vote < 0 else ("\nYou voted for #%d - A again to change" % (vote + 1))

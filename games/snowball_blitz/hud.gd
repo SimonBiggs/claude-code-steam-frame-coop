@@ -89,7 +89,7 @@ func _process(delta: float) -> void:
 	name_label.position = Vector2(28, size.y - 92)
 	bar.position = Vector2(28, size.y - 52)
 	bar.value = player.hp
-	name_label.text = "P%d  WARMTH%s" % [player.index + 1, "      ★ MEGA SNOWBALL READY - throw it!" if player.mega else ""]
+	name_label.text = "P%d  WARMTH%s" % [player.index + 1, "      * MEGA SNOWBALL READY - throw it!" if player.mega else ""]
 	var text := ""
 	if player.is_down:
 		text = "BRRR! You're frozen solid!\nA friend can stand next to you to thaw you out"

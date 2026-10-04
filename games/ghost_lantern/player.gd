@@ -792,7 +792,7 @@ func _update_lantern_label() -> void:
 		lantern_label.position = Vector3(0.0, 0.1, 0.02)
 		lantern_label.rotation_degrees = Vector3(-30, 0, 0)
 		_set_layers(lantern_label, viewmodel_layer())
-	var lines: Array[String] = ["PHOTOS %d/%d   ♥ %d" % [main.photos_left(), main.photos.size(), maxi(0, int(courage))]]
+	var lines: Array[String] = ["PHOTOS %d/%d   COURAGE %d" % [main.photos_left(), main.photos.size(), maxi(0, int(courage))]]
 	if snuff_t > 0.0:
 		lines.append("LANTERN OUT! %d" % ceili(snuff_t))
 	elif bell_cd <= 0.0:

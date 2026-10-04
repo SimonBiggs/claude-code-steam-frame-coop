@@ -325,7 +325,7 @@ func awards_text() -> String:
 				best = p
 		if best != null:
 			given[best.index].append(aw[0])
-	var lines: Array[String] = ["★ AWARDS ★"]
+	var lines: Array[String] = ["* AWARDS *"]
 	for p in active:
 		var mine: Array = given[p.index]
 		if mine.is_empty():

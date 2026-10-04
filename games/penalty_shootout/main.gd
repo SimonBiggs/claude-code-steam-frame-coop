@@ -459,7 +459,7 @@ func _ensure_view(p) -> void:
 	p.hud = hud
 	p.hud_label = l
 	var rl := _make_label(26)
-	rl.text = "● REPLAY"
+	rl.text = "· REPLAY ·"
 	rl.add_theme_color_override("font_color", Color(1.0, 0.35, 0.3))
 	hud.add_child(rl)
 	rl.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)

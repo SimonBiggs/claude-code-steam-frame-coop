@@ -967,7 +967,7 @@ func _update_gun_hp() -> void:
 		l.rotation_degrees = Vector3(-30, 0, 0)
 		set_meta("gun_hp", l)
 	var frac := clampf(hp / maxf(stat("max_hp"), 1.0), 0.0, 1.0)
-	l.text = "♥ %d" % int(ceil(hp))
+	l.text = "HP %d" % int(ceil(hp))
 	var dir_node = main.director()
 	if dir_node.combo >= 2:
 		l.text += "\nCOMBO x%d" % dir_node.combo
