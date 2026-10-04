@@ -48,8 +48,8 @@ func _notification(what: int) -> void:
 		big_label.add_theme_font_size_override("font_size", maxi(28, int(80 * ui)))
 		big_label.add_theme_constant_override("outline_size", maxi(4, int(12 * ui)))
 		name_label.position = Vector2(24 * ui, size.y - 60 * ui)
-		hint_label.position = Vector2(size.x * 0.08, size.y * 0.7)
-		hint_label.size = Vector2(size.x * 0.84, 90 * ui)
+		hint_label.position = Vector2(size.x * 0.08, size.y * 0.66)
+		hint_label.size = Vector2(size.x * 0.84, 120 * ui)
 		big_label.position = Vector2(0, size.y * 0.3)
 		big_label.size = Vector2(size.x, size.y * 0.3)
 
@@ -89,18 +89,29 @@ func _hint() -> String:
 	if player.role == "seeker":
 		if main.phase == "count":
 			return "No peeking!"
-		return "Click / Space / RT with a hider in the torch beam (3 m), or bump into them!  %d left" % main.hiders_left()
+		var sniff := "Q / LB: SNIFF (hiders close by sneeze!)" if main.sniff_cd <= 0.0 else "sniff ready in %d s" % ceili(main.sniff_cd)
+		return "Click / Space / RT with a hider in the torch beam (3 m), or bump into them!  %d left\n%s  ·  guard the JAIL!" % [main.hiders_left(), sniff]
 	if player.late:
 		return "You joined mid-round: you're in the next round! Watching the seeker…"
 	if player.found:
+		if main.jail_breaks > 0 and main.hiders_left() > 0:
+			return "You're in JAIL! A friend can free you by ringing the BELL by the cage. Watching the seeker…"
 		return "FOUND! Watching the seeker… (you'll hide again next round)"
+	if main.sneezed.has(player.index):
+		return "ACHOO! You sneezed - the seeker heard that! Move!"
 	var s: String
 	if player.prop_kind >= 0:
 		s = "You're a %s! Stay still…  A / Space: pop out" % main.WorldScript.PROP_NAMES[player.prop_kind]
 	else:
-		s = "A / Space / Enter: disguise as an object"
+		s = "A / Space / Enter: disguise as something  ·  B: jump"
 	if main.phase == "seek":
 		s += "  ·  " + ("X / E: squeak for +%d" % main.TAUNT_POINTS if player.taunt_cd <= 0.0 else "squeak in %d s" % ceili(player.taunt_cd))
+		if main.jailed_count() > 0 and main.jail_breaks > 0:
+			s = "Friends in JAIL! Sneak to the hall and ring the BELL to free them!\n" + s
+		elif main.round_type == "stars" and main.star_taken.has(false):
+			s = "Grab the golden STARS: +%d each!\n" % main.STAR_POINTS + s
+		elif main.round_type == "night" and player.prop_kind < 0:
+			s = "Your eyes glow in the dark - disguise to hide them!\n" + s
 	return s
 
 

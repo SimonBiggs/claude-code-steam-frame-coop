@@ -3,8 +3,11 @@ const VrText := preload("res://core/vr_text.gd")
 ## Hide and Seek: a playful round game in a cosy cartoon house.
 ## Player 1 (VR, or keyboard+mouse / controller in split screen) is the SEEKER: counts to 20 with eyes
 ## covered, then searches with a torch. Touch a hider with either hand, or point the torch at one within 3 m
-## and pull the trigger. TV players (P2..P7) are HIDERS: run, hide, disguise as a lamp / pot plant / box, and
-## squeak for bonus points. Found hiders spectate. Hiders score for every second hidden; the seeker for finds.
+## and pull the trigger. SNIFF (VR: left hand on your nose; flat: Q / LB) makes nearby hiders sneeze.
+## TV players (P2..P7) are HIDERS: run, hide, disguise as something that fits the room (lamp, pot plant,
+## box, teddy, beach ball), squeak for bonus points. Found hiders go to JAIL in the hall; a free hider who
+## rings the jail bell lets everyone out. Rounds take turns: CLASSIC, STAR HUNT (grab golden stars while
+## hiding) and NIGHT TIME (lights low, glowing eyes, extra-bright torch). Awards after every round.
 
 const PlayerScript := preload("res://games/hide_and_seek/player.gd")
 const WorldScript := preload("res://games/hide_and_seek/world.gd")
@@ -35,6 +38,13 @@ const TAUNT_POINTS := 10
 const FIND_POINTS := 100
 const SURVIVE_BONUS := 50
 const BEST_FILE := "user://hide_and_seek_best.cfg"
+const ROUND_TYPES: Array[String] = ["classic", "stars", "night"]
+const STAR_COUNT := 8
+const STAR_POINTS := 15
+const SNIFF_COOLDOWN := 15.0
+const SNIFF_RANGE := 4.5
+const JAIL_SLOTS: Array[Vector3] = [Vector3(-0.3, 0, -0.25), Vector3(0.3, 0, -0.25), Vector3(-0.3, 0, 0.3), Vector3(0.3, 0, 0.3),
+	Vector3(0.0, 0, 0.0), Vector3(0.0, 0, -0.4)]
 
 var players: Array = []
 var cameras: Array[Camera3D] = []
@@ -51,6 +61,10 @@ var sfx: Node
 var music: AudioStreamPlayer
 var decoys: Array = []
 var _beam_shader: Shader
+var lights: Array = []
+var window_mat: StandardMaterial3D
+var night_k := 0.0  # 0 day .. 1 night (eased)
+var star_mm: MultiMesh
 
 # Round state (host decides; mirrored to the TV by snapshots).
 var phase := "wait"  # wait, intro, count, seek, over
@@ -67,6 +81,17 @@ var finds := 0
 var last_tick := -1
 var over_t := 0.0
 var results_text := ""
+var round_type := "classic"
+var jail_breaks := 1
+var star_idx: Array = []  # STAR_SPOTS indices this round
+var star_taken: Array = []
+var sniff_cd := 0.0
+var hidden_time: Array[float] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+var squeaks: Array[int] = [0, 0, 0, 0, 0, 0, 0]
+var freed: Array[int] = [0, 0, 0, 0, 0, 0, 0]
+var stars_got: Array[int] = [0, 0, 0, 0, 0, 0, 0]
+var sniff_hits := 0
+var sneezed := {}  # client/local: player index -> seconds the "ACHOO" note shows
 
 var info_label: Label
 var center_label: Label
@@ -87,6 +112,8 @@ func _ready() -> void:
 	randomize()
 	var built: Dictionary = WorldScript.build(self)
 	decoys = built.decoys
+	lights = built.lights
+	window_mat = built.get("window_mat")
 	_build_hud()
 	var menu := PauseMenuScript.new()
 	menu.main = self
@@ -133,6 +160,64 @@ func make_material(color: Color, glow: float) -> StandardMaterial3D:
 	return m
 
 
+func vertex_mat() -> StandardMaterial3D:
+	if not has_meta("hs_vertex_mat"):
+		var m := StandardMaterial3D.new()
+		m.vertex_color_use_as_albedo = true
+		m.vertex_color_is_srgb = true
+		m.roughness = 0.7
+		m.emission_enabled = true
+		m.emission = Color(0.08, 0.08, 0.08)
+		set_meta("hs_vertex_mat", m)
+	return get_meta("hs_vertex_mat")
+
+
+## Several primitive meshes baked into one vertex-coloured mesh. parts: [[Mesh, Transform3D, Color], ...]
+func merged_mesh(parts: Array) -> ArrayMesh:
+	var verts := PackedVector3Array()
+	var norms := PackedVector3Array()
+	var cols := PackedColorArray()
+	var idx := PackedInt32Array()
+	for part in parts:
+		var m: Mesh = part[0]
+		var xf: Transform3D = part[1]
+		var c: Color = part[2]
+		var arr: Array = m.surface_get_arrays(0)
+		var v: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+		var n: PackedVector3Array = arr[Mesh.ARRAY_NORMAL]
+		var raw = arr[Mesh.ARRAY_INDEX]
+		var base := verts.size()
+		var nb := xf.basis.inverse().transposed()
+		for i in v.size():
+			verts.append(xf * v[i])
+			norms.append((nb * n[i]).normalized() if i < n.size() else Vector3.UP)
+			cols.append(c)
+		if raw is PackedInt32Array and not (raw as PackedInt32Array).is_empty():
+			for i in (raw as PackedInt32Array):
+				idx.append(base + i)
+		else:
+			for i in v.size():
+				idx.append(base + i)
+	var arrays: Array = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_NORMAL] = norms
+	arrays[Mesh.ARRAY_COLOR] = cols
+	arrays[Mesh.ARRAY_INDEX] = idx
+	var am := ArrayMesh.new()
+	am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return am
+
+
+func is_night() -> bool:
+	return round_type == "night" and phase != "over" and phase != "wait"
+
+
+func in_jail(p: Vector3) -> bool:
+	var j: Vector3 = WorldScript.JAIL_POS
+	return absf(p.x - j.x) < WorldScript.JAIL_HALF + 0.1 and absf(p.z - j.z) < WorldScript.JAIL_HALF + 0.1
+
+
 func beam_shader() -> Shader:
 	if _beam_shader == null:
 		_beam_shader = Shader.new()
@@ -151,6 +236,11 @@ func _sfx() -> Node:
 		sfx.add_sound("click", [0.04, 2400.0, 1800.0, 0.2, "square", 0.3])
 		sfx.add_sound("boing", [0.35, 180.0, 520.0, 0.4, "sine", 0.0])
 		sfx.add_sound("ready", [0.8, 392.0, 1175.0, 0.35, "tri", 0.0])
+		sfx.add_sound("sniff", [0.5, 300.0, 900.0, 0.3, "sine", 0.85])
+		sfx.add_sound("achoo", [0.45, 900.0, 200.0, 0.45, "saw", 0.6])
+		sfx.add_sound("bell", [1.0, 1320.0, 1300.0, 0.4, "tri", 0.0])
+		sfx.add_sound("jail", [0.4, 300.0, 180.0, 0.35, "square", 0.1])
+		sfx.add_sound("star", [0.25, 1320.0, 1980.0, 0.3, "tri", 0.0])
 	return sfx
 
 
@@ -198,10 +288,15 @@ func popup(pos: Vector3, text: String, color: Color, through_walls: bool = true)
 	l.font_size = 64
 	l.outline_size = 16
 	l.pixel_size = 0.005
-	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	l.no_depth_test = through_walls
 	add_child(l)
 	l.global_position = pos
+	if not players.is_empty() and players[0].vr and players[0].xr_camera != null:
+		# VR: world-locked, facing the seeker (never billboarded); the TV shows its own copy.
+		var to: Vector3 = pos - players[0].xr_camera.global_position
+		l.global_basis = Basis(Vector3.UP, atan2(-to.x, -to.z))
+	else:
+		l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	var t := l.create_tween().set_parallel()
 	t.tween_property(l, "global_position", pos + Vector3.UP * 0.8, 1.2).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
 	t.tween_property(l, "modulate:a", 0.0, 0.8).set_delay(0.6)
@@ -777,6 +872,12 @@ func _process(delta: float) -> void:
 	_update_party(delta)
 	_update_hud()
 	_update_vr_text()
+	_update_mood(delta)
+	_update_stars()
+	for k in sneezed.keys():
+		sneezed[k] = float(sneezed[k]) - delta
+		if float(sneezed[k]) <= 0.0:
+			sneezed.erase(k)
 	if net.mode == "client":
 		if phase == "over":
 			over_t += delta
@@ -816,25 +917,48 @@ func _process(delta: float) -> void:
 func _start_round() -> void:
 	round_no += 1
 	finds = 0
+	sniff_hits = 0
+	sniff_cd = 0.0
 	results_text = ""
+	round_type = ROUND_TYPES[(round_no - 1) % ROUND_TYPES.size()]
 	for i in round_scores.size():
 		round_scores[i] = 0
 		survive_acc[i] = 0.0
+		hidden_time[i] = 0.0
+		squeaks[i] = 0
+		freed[i] = 0
+		stars_got[i] = 0
 	for p in players:
 		p.set_prop(-1)
 		p.set_found(false)
 		p.taunt_cd = 0.0
 		if p.active:
 			_place_player(p, SPAWNS[p.index % SPAWNS.size()], PI if p.index == 0 else 0.0)
+	jail_breaks = 1 + (1 if hider_count() >= 4 else 0)
+	star_idx.clear()
+	star_taken.clear()
+	if round_type == "stars":
+		var all: Array = range(WorldScript.STAR_SPOTS.size())
+		all.shuffle()
+		for k in STAR_COUNT:
+			star_idx.append(all[k])
+			star_taken.append(false)
 	phase = "intro"
-	phase_t = intro_time if round_no == 1 else 3.5
-	print("Round %d: %d hiders" % [round_no, hider_count()])
+	phase_t = intro_time if round_no == 1 else 5.0
+	print("Round %d (%s): %d hiders" % [round_no, round_type, hider_count()])
 	sound("ready", -4.0, 1.0)
+	var rules := "Found hiders go to JAIL - ring the jail BELL to set your friends free!"
 	if round_no == 1:
 		_show_center("HIDE AND SEEK!\nSEEKER: count with your eyes covered, then find everyone with your torch!\n"
-			+ "HIDERS: hide! Turn into a lamp, plant or box. Squeak for bonus points!", intro_time)
+			+ "HIDERS: hide! Turn into something that fits in. Squeak for bonus points!\n" + rules, intro_time)
 	else:
-		_show_center("ROUND %d\nGet ready…" % round_no, 3.0)
+		match round_type:
+			"stars":
+				_show_center("ROUND %d: STAR HUNT!\nHiders: grab the golden stars for +%d each - but the seeker might spot you!" % [round_no, STAR_POINTS], 4.5)
+			"night":
+				_show_center("ROUND %d: NIGHT TIME!\nThe lights are low and the torch is extra bright.\nHiders: your eyes glow in the dark - disguise to hide them!" % round_no, 4.5)
+			_:
+				_show_center("ROUND %d: CLASSIC HIDE AND SEEK\n%s" % [round_no, rules], 4.0)
 
 
 func _begin_count() -> void:
@@ -845,11 +969,12 @@ func _begin_count() -> void:
 	print("Round %d: counting (%d s)" % [round_no, int(count_time)])
 
 
-## Gentle balance: more hiders, a bit more seeking time (1 hider 130 s, 3 hiders 150 s, 6 hiders 180 s).
+## Gentle balance: more hiders, a bit more seeking time (1 hider 140 s, 3 hiders 160 s, 6 hiders 190 s;
+## the house got a back garden, so there's more to search).
 func _seek_time() -> float:
 	if seek_override > 0.0:
 		return seek_override
-	return clampf(120.0 + 10.0 * hider_count(), 130.0, 180.0)
+	return clampf(130.0 + 10.0 * hider_count(), 140.0, 190.0)
 
 
 func _begin_seek() -> void:
@@ -864,13 +989,17 @@ func _begin_seek() -> void:
 
 func _update_seek(delta: float) -> void:
 	phase_t -= delta
+	sniff_cd = maxf(0.0, sniff_cd - delta)
 	for p in players:
 		if p.is_hiding():
+			hidden_time[p.index] += delta
 			survive_acc[p.index] += delta
 			while survive_acc[p.index] >= 1.0:
 				survive_acc[p.index] -= 1.0
 				round_scores[p.index] += 1
 	_check_touch()
+	_check_bell()
+	_check_stars()
 	var n := ceili(phase_t)
 	if n <= 10 and n != last_tick and n > 0:
 		last_tick = n
@@ -881,6 +1010,145 @@ func _update_seek(delta: float) -> void:
 		_end_round(false)
 	elif hider_count() == 0:
 		phase = "wait"
+
+
+## Jailbreak: a free hider (not disguised) ringing the bell by the cage lets everyone out.
+func _check_bell() -> void:
+	if jail_breaks <= 0:
+		return
+	var jailed: Array = []
+	for p in players:
+		if p.active and p.role == "hider" and p.found and not p.late:
+			jailed.append(p)
+	if jailed.is_empty():
+		return
+	var bell: Vector3 = WorldScript.BELL_POS
+	for h in players:
+		if not h.is_hiding() or h.prop_kind >= 0:
+			continue
+		var hp: Vector3 = h.global_position
+		if Vector2(hp.x - bell.x, hp.z - bell.z).length() > 1.0:
+			continue
+		jail_breaks -= 1
+		freed[h.index] += jailed.size()
+		round_scores[h.index] += 25 * jailed.size()
+		sound("bell", 0.0, 1.0)
+		burst(bell + Vector3.UP * 1.2, Color(1.0, 0.85, 0.2), 30)
+		var k := 0
+		for j in jailed:
+			j.set_found(false)
+			_place_player(j, bell + Vector3(-0.7 - 0.45 * (k % 3), 0, -0.4 - 0.5 * (k / 3)), 0.0)
+			burst(j.global_position + Vector3.UP * 0.6, j.color, 12)
+			k += 1
+		popup(bell + Vector3.UP * 1.8, "JAILBREAK!", h.color.lightened(0.3))
+		_show_center("JAILBREAK!\nP%d rang the bell - everyone's free! RUN AND HIDE!" % (h.index + 1), 2.5)
+		net.event("jailbreak", [])
+		print("Round %d: P%d rang the bell, %d freed (%d breaks left)" % [round_no, h.index + 1, jailed.size(), jail_breaks])
+		return
+
+
+## Star hunt: hiders grab golden stars for points (and get seen doing it).
+func _check_stars() -> void:
+	for k in star_idx.size():
+		if star_taken[k]:
+			continue
+		var at: Vector3 = WorldScript.STAR_SPOTS[int(star_idx[k])]
+		for h in players:
+			if not h.is_hiding() or h.prop_kind >= 0:
+				continue
+			var hp: Vector3 = h.global_position
+			if Vector2(hp.x - at.x, hp.z - at.z).length() < 0.8:
+				star_taken[k] = true
+				stars_got[h.index] += 1
+				round_scores[h.index] += STAR_POINTS
+				sound("star", -2.0, 1.0 + 0.05 * star_taken.count(true))
+				popup(at + Vector3.UP * 1.2, "STAR! +%d" % STAR_POINTS, Color(1.0, 0.85, 0.2), false)
+				burst(at + Vector3.UP * 0.6, Color(1.0, 0.85, 0.2), 14)
+				break
+
+
+## The seeker sniffs: every hider still hiding within SNIFF_RANGE sneezes a moment later.
+func request_sniff(s) -> void:
+	if net.mode == "client" or phase != "seek" or s.role != "seeker":
+		return
+	if sniff_cd > 0.0:
+		return
+	sniff_cd = SNIFF_COOLDOWN
+	sound("sniff", 0.0, 1.0)
+	var near: Array = []
+	for h in players:
+		if h.is_hiding() and Vector2(h.global_position.x - s.global_position.x, h.global_position.z - s.global_position.z).length() < SNIFF_RANGE:
+			near.append(h)
+	print("Round %d: the seeker sniffs (%d hiders close by)" % [round_no, near.size()])
+	if near.is_empty():
+		var ahead: Vector3 = s.head_transform().origin + -s.head_transform().basis.z * 1.2
+		popup(ahead, "sniff sniff… nobody close!", Color(0.8, 0.9, 1.0), false)
+		return
+	sniff_hits += near.size()
+	get_tree().create_timer(0.7).timeout.connect(func() -> void:
+		for h in near:
+			if is_instance_valid(h) and h.is_hiding():
+				var pos: Vector3 = h.global_position + Vector3.UP * 0.7
+				_achoo(pos, h.index)
+				net.event("achoo", [pos, h.index]))
+
+
+func _achoo(pos: Vector3, index: int) -> void:
+	var sp := AudioStreamPlayer3D.new()
+	sp.stream = _sfx().streams.get("achoo")
+	sp.unit_size = 6.0
+	sp.max_db = 6.0
+	sp.pitch_scale = 0.9 + 0.05 * index
+	add_child(sp)
+	sp.global_position = pos
+	sp.play()
+	sp.finished.connect(sp.queue_free)
+	var l := Label3D.new()
+	l.text = "ACHOO!"
+	l.font_size = 64
+	l.pixel_size = 0.006
+	l.outline_size = 16
+	l.modulate = Color(0.75, 1.0, 0.75)
+	l.outline_modulate = Color(0, 0, 0, 0.9)
+	l.no_depth_test = true
+	add_child(l)
+	l.global_position = pos + Vector3.UP * 0.5
+	if not players.is_empty() and players[0].vr and players[0].xr_camera != null:
+		var to: Vector3 = l.global_position - players[0].xr_camera.global_position
+		l.global_basis = Basis(Vector3.UP, atan2(-to.x, -to.z))
+	else:
+		l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	var t := l.create_tween()
+	t.tween_property(l, "scale", Vector3.ONE * 1.4, 0.3).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	t.tween_interval(1.2)
+	t.tween_property(l, "modulate:a", 0.0, 0.5)
+	t.tween_callback(l.queue_free)
+	var p := CPUParticles3D.new()
+	p.one_shot = true
+	p.amount = 10
+	p.lifetime = 0.8
+	p.explosiveness = 0.9
+	p.direction = Vector3.UP
+	p.spread = 60.0
+	p.initial_velocity_min = 1.0
+	p.initial_velocity_max = 2.2
+	p.gravity = Vector3(0, -2.0, 0)
+	var m := SphereMesh.new()
+	m.radius = 0.04
+	m.height = 0.08
+	m.radial_segments = 6
+	m.rings = 3
+	m.material = make_material(Color(0.7, 1.0, 0.8), 1.0)
+	p.mesh = m
+	add_child(p)
+	p.global_position = pos
+	p.emitting = true
+	get_tree().create_timer(1.1).timeout.connect(p.queue_free)
+	if index < players.size():
+		sneezed[index] = 2.5
+		var hp = players[index]
+		if hp.joy >= 0:
+			Input.start_joy_vibration(hp.joy, 0.6, 0.3, 0.25)
 
 
 ## Seeker hands (VR) or body (flat) touching a hider.
@@ -988,6 +1256,13 @@ func find_hider(h, how: String) -> void:
 	_on_found_local(h.index)
 	net.event("found", [h.index])
 	print("Round %d: P%d found by %s (%d left)" % [round_no, h.index + 1, how, hiders_left()])
+	# Off to jail (a few hops in the cage until a friend rings the bell).
+	var slot := 0
+	for o in players:
+		if o != h and o.active and o.found and not o.late:
+			slot += 1
+	_place_player(h, WorldScript.JAIL_POS + JAIL_SLOTS[slot % JAIL_SLOTS.size()], PI)
+	sound("jail", -6.0, 1.0)
 
 
 func _on_found_local(i: int) -> void:
@@ -1015,6 +1290,7 @@ func do_taunt(p) -> void:
 		return
 	p.taunt_cd = TAUNT_COOLDOWN
 	round_scores[p.index] += TAUNT_POINTS
+	squeaks[p.index] += 1
 	var pos: Vector3 = p.global_position + Vector3.UP * 0.6
 	var pitch: float = 0.9 + 0.08 * p.index
 	squeak_fx(pos, pitch)
@@ -1043,6 +1319,10 @@ func _end_round(seeker_won: bool) -> void:
 		if p.is_hiding():
 			round_scores[p.index] += SURVIVE_BONUS
 		lines.append("P%d: %s  +%d" % [p.index + 1, "found" if p.found else "NEVER FOUND!", round_scores[p.index]])
+	var awards := _awards(seeker_won)
+	if not awards.is_empty():
+		lines.append("AWARDS: " + "  ·  ".join(awards))
+		print("Awards: %s" % ", ".join(awards))
 	var best := -1
 	for i in totals.size():
 		totals[i] += round_scores[i]
@@ -1055,6 +1335,41 @@ func _end_round(seeker_won: bool) -> void:
 	_show_center(results_text, 0.0)
 	_save_best()
 	print("Round %d over: %s, scores %s, totals %s" % [round_no, "seeker wins" if seeker_won else "hiders win", round_scores, totals])
+
+
+## Fun awards for the round (only for things somebody actually did).
+func _awards(seeker_won: bool) -> Array[String]:
+	var out: Array[String] = []
+	var hiders: Array = []
+	for p in players:
+		if p.role == "hider" and p.active and not p.late:
+			hiders.append(p.index)
+	var best_i := -1
+	for i in hiders:
+		if best_i < 0 or hidden_time[i] > hidden_time[best_i]:
+			best_i = i
+	if best_i > 0 and hidden_time[best_i] >= 10.0:
+		out.append("P%d SNEAKIEST (%d s hidden)" % [best_i + 1, int(hidden_time[best_i])])
+	var sq := -1
+	for i in hiders:
+		if squeaks[i] >= 2 and (sq < 0 or squeaks[i] > squeaks[sq]):
+			sq = i
+	if sq > 0:
+		out.append("P%d SQUEAKIEST" % (sq + 1))
+	for i in hiders:
+		if freed[i] > 0:
+			out.append("P%d JAIL HERO" % (i + 1))
+	var st := -1
+	for i in hiders:
+		if stars_got[i] > 0 and (st < 0 or stars_got[i] > stars_got[st]):
+			st = i
+	if st > 0:
+		out.append("P%d STAR CATCHER" % (st + 1))
+	if seeker_won:
+		out.append("P1 EAGLE EYES")
+	if sniff_hits >= 2:
+		out.append("P1 SUPER SNIFFER")
+	return out
 
 
 func _save_best() -> void:
@@ -1196,7 +1511,7 @@ func make_snapshot() -> Array:
 	var ps := []
 	for p in players:
 		ps.append(p.net_state())
-	return [phase, phase_t, round_no, seek_len, ps, round_scores, totals, count_time]
+	return [phase, phase_t, round_no, seek_len, ps, round_scores, totals, count_time, round_type, jail_breaks, star_idx, star_taken, snappedf(sniff_cd, 0.1)]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -1213,6 +1528,12 @@ func apply_snapshot(s: Array) -> void:
 	round_scores.assign(s[5])
 	totals.assign(s[6])
 	count_time = s[7]
+	if s.size() >= 13:
+		round_type = s[8]
+		jail_breaks = s[9]
+		star_idx = s[10]
+		star_taken = s[11]
+		sniff_cd = s[12]
 	var ps: Array = s[4]
 	for i in mini(players.size(), ps.size()):
 		players[i].apply_net_state(ps[i])
@@ -1236,6 +1557,10 @@ func apply_event(kind: String, args: Array) -> void:
 			_show_center(args[0], args[1])
 		"found":
 			_on_found_local(args[0])
+		"achoo":
+			_achoo(args[0], args[1])
+		"jailbreak":
+			pass
 		"teleport":
 			var i: int = args[0]
 			if i < players.size() and _has_local_view(players[i]):
@@ -1331,8 +1656,99 @@ func _update_vr_text() -> void:
 	VrText.follow(vr_center, cam, self, -0.12, 1.7)
 	vr_status.visible = phase == "seek"
 	if vr_status.visible:
-		vr_status.text = "%d:%02d   ·   %d hiding   ·   %d pts   ·   trigger: torch tag" % [int(phase_t) / 60, int(phase_t) % 60, hiders_left(), round_scores[0]]
+		var sniff_txt := "left hand on your nose: SNIFF" if sniff_cd <= 0.0 else "sniff ready in %d s" % ceili(sniff_cd)
+		vr_status.text = "%d:%02d   ·   %d hiding   ·   %d in jail   ·   %d pts\ntrigger: torch tag   ·   %s" % [int(phase_t) / 60, int(phase_t) % 60,
+			hiders_left(), jailed_count(), round_scores[0], sniff_txt]
 		VrText.follow(vr_status, cam, self, 0.55, 1.7)
+
+
+## Night time: lights dim, windows turn dark blue (both machines, eased).
+func _update_mood(delta: float) -> void:
+	var want := 1.0 if is_night() else 0.0
+	if absf(night_k - want) < 0.001:
+		return
+	night_k = move_toward(night_k, want, delta * 0.6)
+	for l in lights:
+		(l as OmniLight3D).light_energy = lerpf(1.1, 0.28, night_k)
+	for c in get_children():
+		if c is WorldEnvironment:
+			var e: Environment = (c as WorldEnvironment).environment
+			e.ambient_light_energy = lerpf(0.65, 0.22, night_k)
+			e.background_color = Color(0.45, 0.55, 0.8).lerp(Color(0.05, 0.06, 0.15), night_k)
+		elif c is DirectionalLight3D:
+			(c as DirectionalLight3D).light_energy = lerpf(0.45, 0.08, night_k)
+	if window_mat != null:
+		window_mat.albedo_color = Color(0.6, 0.72, 1.0).lerp(Color(0.12, 0.15, 0.4), night_k)
+		window_mat.emission = window_mat.albedo_color
+		window_mat.emission_energy_multiplier = lerpf(1.4, 0.6, night_k)
+
+
+## Star hunt: spinning golden stars (one MultiMesh), hidden once grabbed.
+func _update_stars() -> void:
+	if star_idx.is_empty() and star_mm == null:
+		return
+	if star_mm == null:
+		star_mm = MultiMesh.new()
+		star_mm.transform_format = MultiMesh.TRANSFORM_3D
+		star_mm.mesh = _star_mesh()
+		star_mm.instance_count = STAR_COUNT
+		var mmi := MultiMeshInstance3D.new()
+		mmi.multimesh = star_mm
+		mmi.material_override = make_material(Color(1.0, 0.85, 0.2), 2.5)
+		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(mmi)
+	var t := Time.get_ticks_msec() * 0.001
+	var shown := phase == "count" or phase == "seek"
+	for k in STAR_COUNT:
+		var on: bool = shown and k < star_idx.size() and k < star_taken.size() and not bool(star_taken[k])
+		if not on:
+			star_mm.set_instance_transform(k, Transform3D(Basis.from_scale(Vector3.ONE * 0.001), Vector3(0, -10, 0)))
+			continue
+		var at: Vector3 = WorldScript.STAR_SPOTS[int(star_idx[k])]
+		var b := Basis(Vector3.UP, t * 2.0 + k) * Basis.from_scale(Vector3.ONE * 0.22)
+		star_mm.set_instance_transform(k, Transform3D(b, at + Vector3(0, 0.75 + sin(t * 3.0 + k) * 0.08, 0)))
+
+
+func _star_mesh() -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var pts: Array[Vector3] = []
+	for i in 10:
+		var a := PI / 2.0 + TAU * i / 10.0
+		var r := 1.0 if i % 2 == 0 else 0.45
+		pts.append(Vector3(cos(a) * r, sin(a) * r, 0.0))
+	for face in [1.0, -1.0]:
+		st.set_normal(Vector3(0, 0, face))
+		for i in 10:
+			var a: Vector3 = pts[i]
+			var b: Vector3 = pts[(i + 1) % 10]
+			st.add_vertex(Vector3(0, 0, 0.12 * face))
+			if face > 0.0:
+				st.add_vertex(a)
+				st.add_vertex(b)
+			else:
+				st.add_vertex(b)
+				st.add_vertex(a)
+	return st.commit()
+
+
+## Smart disguise: something that fits in with the room you're standing in (what the decoys nearby are).
+func pick_disguise(at: Vector3) -> int:
+	var weights := [0.2, 0.2, 0.2, 0.2, 0.2]
+	for d in decoys:
+		var dp: Vector3 = d.pos
+		var dist := Vector2(dp.x - at.x, dp.z - at.z).length()
+		if dist < 5.0:
+			weights[int(d.kind)] += 3.0 / (1.0 + dist)
+	var total := 0.0
+	for w in weights:
+		total += float(w)
+	var r := randf() * total
+	for k in weights.size():
+		r -= float(weights[k])
+		if r <= 0.0:
+			return k
+	return randi() % WorldScript.PROP_NAMES.size()
 
 
 func _update_hud() -> void:
@@ -1352,6 +1768,23 @@ func _update_hud() -> void:
 			info_label.text = "ROUND %d  ·  %d:%02d LEFT  ·  %d STILL HIDING" % [round_no, int(phase_t) / 60, int(phase_t) % 60, hiders_left()]
 		"over":
 			info_label.text = "ROUND %d OVER" % round_no
+
+
+func _type_name() -> String:
+	match round_type:
+		"stars":
+			return "STAR HUNT"
+		"night":
+			return "NIGHT TIME"
+	return "CLASSIC"
+
+
+func jailed_count() -> int:
+	var n := 0
+	for p in players:
+		if p.active and p.role == "hider" and p.found and not p.late:
+			n += 1
+	return n
 
 
 ## Hints for the seeker (David's idea): after 30 s of seeking, every 15 s a gold sparkle and a

@@ -5,6 +5,11 @@ extends Node
 ## Hiders (local / client): each runs to a hiding spot while the seeker counts, disguises, and squeaks.
 ## BOT_PLAYERS=N (1..6): N TV hiders (P2..P{N+1}); extras join via main.debug_join(). In local mode with
 ## N >= 4 the bot also fakes a controller unplug/replug and a player leaving and rejoining.
+## Default: 2 hiders locally (so the jail can be broken), 1 on the TV machine.
+## New in this version: a CONNECTIVITY check at start (every room, doorway, hiding spot and spawn must be
+## walkable from the counting spot without jumping, for both the seeker's and a hider's size); the seeker
+## sniffs when close to a hider; a free hider rings the jail bell once someone is in jail; in STAR HUNT
+## rounds hiders grab the nearest star before hiding. Rounds cycle classic / stars / night.
 const WorldScript := preload("res://games/hide_and_seek/world.gd")
 
 var main
@@ -12,9 +17,11 @@ var t := 0.0
 var last_print := -100.0
 var click_t := 0.0
 var near_t := 0.0
-var bot_players := int(OS.get_environment("BOT_PLAYERS")) if OS.has_environment("BOT_PLAYERS") else 1
+var bot_players := int(OS.get_environment("BOT_PLAYERS")) if OS.has_environment("BOT_PLAYERS") else (1 if OS.has_environment("DUO_JOIN") else 2)
 var spots := {}  # player index -> hiding spot
 var rounds_seen := {}
+var conn_done := false
+var conn_ok := true
 
 
 func _ready() -> void:
@@ -58,6 +65,21 @@ func _physics_process(delta: float) -> void:
 	t += delta
 	if main == null or main.players.size() < 2 or not main.ready_to_play:
 		return
+	if OS.has_environment("BOT_COUNT"):
+		if t > 8.0 and not has_meta("counted"):
+			set_meta("counted", true)
+			var c := {"mesh": 0, "multimesh": 0, "label": 0, "particles": 0, "lights": 0}
+			_count_node(main, main.players[0].camera_cull_mask(), c)
+			print("COUNT ", c)
+			get_tree().quit()
+		return
+	if not conn_done and t > 0.3 and main.net.mode != "client":
+		conn_done = true
+		_connectivity(0.32, 1.6, "seeker")
+		_connectivity(0.3, 0.9, "hider")
+		if OS.has_environment("BOT_CONN_ONLY"):
+			get_tree().quit()
+			return
 	var mode: String = main.net.mode
 	# Real controllers may be plugged into this machine (someone might be playing!): ignore them.
 	var real := Input.get_connected_joypads()
@@ -107,6 +129,7 @@ func _seeker(delta: float) -> void:
 		return
 	if main.round_no == 2:
 		s.bot_fire = false
+		s.bot_alt = false
 		return  # dawdle
 	var best = null
 	var best_d := INF
@@ -118,6 +141,10 @@ func _seeker(delta: float) -> void:
 				best = h
 	if best == null:
 		return
+	# Sniff when someone's close (hiders in range sneeze: it's how a real seeker would use it).
+	s.bot_alt = best_d < 4.0 and main.sniff_cd <= 0.0 and not s.bot_alt
+	if s.bot_alt:
+		print("BOT: the seeker sniffs (nearest hider %.1f m)" % best_d)
 	# Torch from 2 m; if a wall is in the way, walk right up and bump into them instead.
 	near_t = near_t + delta if best_d < 2.3 else 0.0
 	s.collision_mask = 1 if near_t < 1.5 else 0  # the bot can't path-find round walls: let it squeeze through
@@ -147,12 +174,40 @@ func _hiders(delta: float) -> void:
 			spots[p.index] = choice
 		var spot: Vector3 = spots[p.index]
 		used[spot] = true
+		# Jailbreak: the last free hider (not disguised) dashes to the bell once a friend is in jail.
+		if main.phase == "seek" and main.jailed_count() > 0 and main.jail_breaks > 0 and p.index == _bell_ringer():
+			if p.prop_kind >= 0:
+				p.toggle_disguise()
+			if _walk_to(p, WorldScript.BELL_POS + Vector3(-0.5, 0, 0), 0.2, delta, 5.0) and not has_meta("rang_%d" % main.round_no):
+				set_meta("rang_%d" % main.round_no, true)
+				print("BOT: P%d rings the jail bell" % (p.index + 1))
+			continue
+		# Star hunt: grab the nearest star first.
+		if main.round_type == "stars" and p.prop_kind < 0 and main.star_taken.has(false) and (p.index % 2 == 0 or main.phase == "count"):
+			var best_s := Vector3.INF
+			for k in main.star_idx.size():
+				if not main.star_taken[k]:
+					var at: Vector3 = WorldScript.STAR_SPOTS[int(main.star_idx[k])]
+					if best_s == Vector3.INF or at.distance_to(p.global_position) < best_s.distance_to(p.global_position):
+						best_s = at
+			if best_s != Vector3.INF and best_s.distance_to(p.global_position) < 9.0:
+				_walk_to(p, best_s, 0.1, delta, 5.0)
+				continue
 		if p.prop_kind < 0:
 			var there := _walk_to(p, spot, 0.2, delta, 5.0)
 			if there and main.phase == "count" and (p.index + main.round_no) % 2 == 0:
 				p.toggle_disguise()  # half of the hiders turn into furniture
 		if main.phase == "seek":
 			p.bot_alt = fmod(t + p.index * 0.7, 7.0) < 0.2  # squeak now and then
+
+
+## The free hider with the highest index rings the bell.
+func _bell_ringer() -> int:
+	var who := -1
+	for p in main.players:
+		if p.index > 0 and p.is_hiding() and not p.remote and not p.ghost:
+			who = p.index
+	return who
 
 
 ## Local only: fake a controller for P4, unplug and replug it; then P5 times out, leaves and rejoins.
@@ -181,3 +236,139 @@ func _test_pads() -> void:
 		set_meta("rejoin", true)
 		main.debug_join(4)
 		print("BOT: P5 rejoined = %s (late=%s, phase=%s)" % [p5.active, p5.late, main.phase])
+
+
+# --- Connectivity check: nobody can get trapped -------------------------------------
+
+## Walk-ability grid (10 cm cells) for a capsule of this size against the house's collision (layer 1),
+## flood-filled from the seeker's counting spot WITHOUT jumping. Every room, every doorway, every hiding
+## spot and every spawn must be reachable; otherwise print "CONNECTIVITY FAIL" with what's cut off.
+func _connectivity(radius: float, height: float, who: String) -> void:
+	var space: PhysicsDirectSpaceState3D = main.get_world_3d().direct_space_state
+	var shape := CapsuleShape3D.new()
+	shape.radius = radius
+	shape.height = height
+	var q := PhysicsShapeQueryParameters3D.new()
+	q.shape = shape
+	q.collision_mask = 1
+	var x0: float = -WorldScript.HALF_X - WorldScript.GARDEN_W
+	var x1: float = WorldScript.HALF_X
+	var z0: float = -WorldScript.HALF_Z
+	var z1: float = WorldScript.HALF_Z
+	var nx := int((x1 - x0) / 0.1)
+	var nz := int((z1 - z0) / 0.1)
+	var free := PackedByteArray()
+	free.resize(nx * nz)
+	for iz in nz:
+		for ix in nx:
+			var at := Vector3(x0 + (ix + 0.5) * 0.1, height / 2.0 + 0.02, z0 + (iz + 0.5) * 0.1)
+			q.transform = Transform3D(Basis(), at)
+			free[iz * nx + ix] = 1 if space.intersect_shape(q, 1).is_empty() else 0
+	var start := _cell(Vector3(main.SEEKER_SPAWN), x0, z0, nx, nz)
+	var seen := PackedByteArray()
+	seen.resize(nx * nz)
+	var stack: Array[int] = [start]
+	seen[start] = 1
+	var count := 0
+	while not stack.is_empty():
+		var c: int = stack.pop_back()
+		count += 1
+		var cx := c % nx
+		var cz := c / nx
+		for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+			var n2: Vector2i = Vector2i(cx, cz) + d
+			if n2.x < 0 or n2.y < 0 or n2.x >= nx or n2.y >= nz:
+				continue
+			var k := n2.y * nx + n2.x
+			if free[k] == 1 and seen[k] == 0:
+				seen[k] = 1
+				stack.append(k)
+	var problems: Array[String] = []
+	for room in WorldScript.ROOMS:
+		var r: Array = room
+		if not _reach_near(r[1], 1.6, seen, free, x0, z0, nx, nz):
+			problems.append("room %s" % r[0])
+	for door in WorldScript.DOORS:
+		var dr: Array = door
+		if not _reach_near(dr[1], 0.25, seen, free, x0, z0, nx, nz):
+			problems.append("doorway %s" % dr[0])
+	if who == "hider":
+		for sp in WorldScript.HIDE_SPOTS:
+			if not _reach_near(sp, 0.6, seen, free, x0, z0, nx, nz):
+				problems.append("hide spot %s" % sp)
+		for i in range(1, main.SPAWNS.size()):
+			if not _reach_near(main.SPAWNS[i], 0.5, seen, free, x0, z0, nx, nz):
+				problems.append("spawn %s" % main.SPAWNS[i])
+	# Free pockets nobody can walk into (a hider bounced or jumped in there would need to jump out).
+	var pockets: Array[String] = []
+	var pseen := seen.duplicate()
+	for i in free.size():
+		if free[i] == 0 or pseen[i] == 1:
+			continue
+		var size := 0
+		var sum := Vector2.ZERO
+		var st2: Array[int] = [i]
+		pseen[i] = 1
+		while not st2.is_empty():
+			var c: int = st2.pop_back()
+			size += 1
+			sum += Vector2(x0 + (c % nx + 0.5) * 0.1, z0 + (c / nx + 0.5) * 0.1)
+			for d in [1, -1, nx, -nx]:
+				var k: int = c + int(d)
+				if k >= 0 and k < free.size() and free[k] == 1 and pseen[k] == 0 and absi((k % nx) - (c % nx)) <= 1:
+					pseen[k] = 1
+					st2.append(k)
+		if size >= 12:
+			var mid := sum / size
+			var jail: Vector3 = WorldScript.JAIL_POS
+			if absf(mid.x - jail.x) < WorldScript.JAIL_HALF and absf(mid.y - jail.z) < WorldScript.JAIL_HALF:
+				continue  # the jail cage: you only get in by being found, and out by a jailbreak
+			pockets.append("%d cells at (%.1f, %.1f)" % [size, mid.x, mid.y])
+	if not pockets.is_empty():
+		print("BOT: walled-off pockets for the %s (jump in/out only): %s" % [who, ", ".join(pockets)])
+	if problems.is_empty():
+		print("BOT: CONNECTIVITY OK for the %s (r %.2f): %d walkable cells reachable, %d rooms, %d doorways" % [
+			who, radius, count, WorldScript.ROOMS.size(), WorldScript.DOORS.size()])
+	else:
+		conn_ok = false
+		print("BOT: CONNECTIVITY FAIL for the %s (r %.2f): cut off: %s" % [who, radius, ", ".join(problems)])
+
+
+func _cell(p: Vector3, x0: float, z0: float, nx: int, nz: int) -> int:
+	var ix := clampi(int((p.x - x0) / 0.1), 0, nx - 1)
+	var iz := clampi(int((p.z - z0) / 0.1), 0, nz - 1)
+	return iz * nx + ix
+
+
+## Is any reachable cell within `r` of this point?
+func _reach_near(p: Vector3, r: float, seen: PackedByteArray, _free: PackedByteArray, x0: float, z0: float, nx: int, nz: int) -> bool:
+	var steps := int(r / 0.1)
+	var c := _cell(p, x0, z0, nx, nz)
+	var cx := c % nx
+	var cz := c / nx
+	for dz in range(-steps, steps + 1):
+		for dx in range(-steps, steps + 1):
+			var x := cx + dx
+			var z := cz + dz
+			if x < 0 or z < 0 or x >= nx or z >= nz:
+				continue
+			if seen[z * nx + x] == 1:
+				return true
+	return false
+
+
+## BOT_COUNT=1: what the seeker's camera would draw (performance check).
+func _count_node(n: Node, mask: int, c: Dictionary) -> void:
+	if n is VisualInstance3D and (n as Node3D).is_visible_in_tree() and ((n as VisualInstance3D).layers & mask) != 0:
+		if n is MeshInstance3D:
+			c.mesh += 1
+		elif n is MultiMeshInstance3D:
+			c.multimesh += 1
+		elif n is Label3D:
+			c.label += 1
+		elif n is CPUParticles3D:
+			c.particles += 1
+		elif n is Light3D:
+			c.lights += 1
+	for ch in n.get_children():
+		_count_node(ch, mask, c)
