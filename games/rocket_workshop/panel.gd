@@ -13,6 +13,9 @@ extends Node3D
 ##   left: ALIEN HELLO (a hologram alien + BEEP / BOOP / ZORP buttons)
 ##   right: THRUSTER CRANK (grab the handle and wind it round, then press GO)
 ## Every control lives on a "deck" (the main surface or a wing) and uses that deck's local x/y.
+## Simple mode (main.simple): no wings, no SET / CHECK buttons (letting go of the dial and the right
+## switch pattern check themselves), no words on the desk, and only the areas this rocket needs are
+## shown. glow_key makes one real button glow (the practice), demo_path() feeds the ghost hand.
 
 const P := preload("res://games/rocket_workshop/puzzles.gd")
 const TILT := -1.0471976  # surface pitched 30 degrees towards the pilot
@@ -84,9 +87,15 @@ var crank_acc := 0.0
 var crank_last := 0.0
 var crank_turns := 0
 var anim_t := 0.0
+var area_holders := {}  # area -> Node3D (simple mode hides the areas this rocket doesn't use)
+var glow_key := ""  # simple mode: this button glows (practice)
+var idle_t := 0.0  # seconds since the pilot last touched or grabbed anything (the ghost hand waits for it)
+var simple := false
+var lever_handle_mat: StandardMaterial3D
 
 
 func _ready() -> void:
+	simple = main.simple
 	position = Vector3(0, 0, -0.5)
 	var wood: StandardMaterial3D = main.make_material(Color(0.62, 0.42, 0.28), 0.0)
 	body = MeshInstance3D.new()
@@ -114,9 +123,16 @@ func _ready() -> void:
 	screen_root.add_child(frame)
 	wing_l = _build_wing(-1.0)
 	wing_r = _build_wing(1.0)
+	if simple:  # no cockpit wings (the toys in props.gd stand there instead), no desk screen
+		wing_l.visible = false
+		wing_r.visible = false
+		for wb in wing_bodies:
+			(wb as Node3D).visible = false
+		screen_root.visible = false
 	if detail:
 		_build_controls()
-		_build_wing_controls()
+		if not simple:
+			_build_wing_controls()
 		screen = Label3D.new()
 		screen.font_size = 40
 		screen.pixel_size = 0.0017
@@ -255,9 +271,16 @@ func _build_wing_controls() -> void:
 # --- Building the controls --------------------------------------------------
 
 func _build_controls() -> void:
-	var holder := Node3D.new()
-	surface.add_child(holder)
+	var root := Node3D.new()
+	surface.add_child(root)
 	for area in AREAS:
+		var ah := Node3D.new()
+		ah.name = "Area_" + area
+		root.add_child(ah)
+		area_holders[area] = ah
+	var holder: Node3D = root
+	for area in AREAS:
+		holder = area_holders[area]
 		var a: Array = AREAS[area]
 		var c: Vector2 = a[0]
 		var size: Vector2 = a[1]
@@ -273,9 +296,11 @@ func _build_controls() -> void:
 		lamp.material_override = lm
 		lamp.position = Vector3(c.x + size.x / 2.0 - 0.03, c.y + size.y / 2.0 - 0.03, 0.012)
 		holder.add_child(lamp)
-		_flat_label(holder, a[2], Vector2(c.x - (0.02 if area != "lever" else 0.0), c.y + size.y / 2.0 - 0.032), 26)
+		if not simple:  # simple: no words, the coloured plate and its lamp are enough
+			_flat_label(holder, a[2], Vector2(c.x - (0.02 if area != "lever" else 0.0), c.y + size.y / 2.0 - 0.032), 26)
 		area_nodes[area] = {"plate": pm, "lamp": lm, "color": a[3]}
 	# Shape buttons.
+	holder = area_holders["symbols"]
 	var shape_pos: Array[Vector2] = [Vector2(-0.65, 0.225), Vector2(-0.45, 0.225), Vector2(-0.65, 0.095), Vector2(-0.45, 0.095)]
 	for i in 4:
 		_button(holder, "shape%d" % i, shape_pos[i], 0.045, Color(0.92, 0.92, 0.95))
@@ -285,6 +310,7 @@ func _build_controls() -> void:
 		sh.position = Vector3(0, 0, 0.035)
 		shape_holders.append(sh)
 	# Fuel colour buttons and the "mixed so far" dots.
+	holder = area_holders["fuel"]
 	for i in 4:
 		_button(holder, "fuel%d" % i, Vector2(-0.715 + i * 0.11, -0.25), 0.043, P.COLORS[i])
 		var dot := MeshInstance3D.new()
@@ -294,6 +320,7 @@ func _build_controls() -> void:
 		holder.add_child(dot)
 		fuel_dots.append(dot)
 	# Wire sockets (numbered) and four coloured plugs on cables.
+	holder = area_holders["wires"]
 	for i in 4:
 		var s := MeshInstance3D.new()
 		s.mesh = main.cyl_mesh(0.03, 0.03, 0.014, 14)
@@ -307,7 +334,8 @@ func _build_controls() -> void:
 		ring.rotation.x = PI / 2.0
 		ring.position = Vector3(SOCKET_X[i], SOCKET_Y, 0.004)
 		holder.add_child(ring)
-		_flat_label(holder, str(i + 1), Vector2(SOCKET_X[i], SOCKET_Y + 0.06), 40)
+		if not simple:  # simple: the blueprint shows WHERE, not a number
+			_flat_label(holder, str(i + 1), Vector2(SOCKET_X[i], SOCKET_Y + 0.06), 40)
 		var anchor := MeshInstance3D.new()
 		anchor.mesh = main.box_mesh(Vector3(0.05, 0.03, 0.02))
 		anchor.material_override = main.make_material(Color(0.15, 0.15, 0.18), 0.0)
@@ -330,6 +358,7 @@ func _build_controls() -> void:
 		plug_nodes.append(plug)
 		controls["plug%d" % i] = {"pos": Vector2(SOCKET_X[i], PLUG_REST_Y), "r": 0.03, "h": 0.06, "kind": "grab", "cap": plug, "deck": surface}
 	# Pressure dial with numbers 1-9 and a SET button.
+	holder = area_holders["gauge"]
 	var face := MeshInstance3D.new()
 	face.mesh = main.cyl_mesh(0.105, 0.105, 0.012, 24)
 	face.material_override = main.make_material(Color(0.97, 0.95, 0.88), 0.0)
@@ -353,9 +382,11 @@ func _build_controls() -> void:
 	knob.position = Vector3(0, DIAL_R, 0.012)
 	needle.add_child(knob)
 	controls["dial"] = {"pos": DIAL_C, "r": 0.03, "h": 0.04, "kind": "grab", "cap": needle, "deck": surface}
-	_button(holder, "set", Vector2(0.615, 0.105), 0.035, Color(0.3, 0.85, 0.4))
-	_flat_label(holder, "SET", Vector2(0.615, 0.05), 20)
+	if not simple:
+		_button(holder, "set", Vector2(0.615, 0.105), 0.035, Color(0.3, 0.85, 0.4))
+		_flat_label(holder, "SET", Vector2(0.615, 0.05), 20)
 	# Five flip switches with lamps, and a CHECK button.
+	holder = area_holders["switches"]
 	for i in P.SWITCH_COUNT:
 		var x := 0.33 + i * 0.055
 		var base := MeshInstance3D.new()
@@ -385,11 +416,14 @@ func _build_controls() -> void:
 		lamp.position = Vector3(x, -0.125, 0.01)
 		holder.add_child(lamp)
 		switch_lamps.append(lm)
-		_flat_label(holder, str(i + 1), Vector2(x, -0.265), 20)
+		if not simple:
+			_flat_label(holder, str(i + 1), Vector2(x, -0.265), 20)
 		controls["sw%d" % i] = {"pos": Vector2(x, -0.2), "r": 0.022, "h": 0.05, "kind": "button", "cap": null, "deck": surface}
-	_button(holder, "check", Vector2(0.625, -0.2), 0.03, Color(0.3, 0.85, 0.4))
-	_flat_label(holder, "CHECK", Vector2(0.625, -0.255), 18)
+	if not simple:
+		_button(holder, "check", Vector2(0.625, -0.2), 0.03, Color(0.3, 0.85, 0.4))
+		_flat_label(holder, "CHECK", Vector2(0.625, -0.255), 18)
 	# The big launch lever.
+	holder = area_holders["lever"]
 	var slot := MeshInstance3D.new()
 	slot.mesh = main.box_mesh(Vector3(0.035, 0.4, 0.008))
 	slot.material_override = main.make_material(Color(0.08, 0.08, 0.1), 0.0)
@@ -410,7 +444,8 @@ func _build_controls() -> void:
 	handle.position.z = LEVER_LEN
 	lever_pivot.add_child(handle)
 	controls["lever"] = {"pos": Vector2(LEVER_PIVOT.x, LEVER_PIVOT.y), "r": 0.04, "h": LEVER_LEN, "kind": "grab", "cap": lever_pivot, "deck": surface}
-	main.set_layers(holder, main.PANEL_LAYER)
+	lever_handle_mat = handle.material_override
+	main.set_layers(root, main.PANEL_LAYER)
 
 
 func _button(parent: Node3D, key: String, pos: Vector2, r: float, color: Color, ring_too: bool = true) -> void:
@@ -430,7 +465,7 @@ func _button(parent: Node3D, key: String, pos: Vector2, r: float, color: Color, 
 	m.rotation.x = PI / 2.0
 	m.position.z = 0.0125
 	cap.add_child(m)
-	controls[key] = {"pos": pos, "r": r, "h": 0.025, "kind": "button", "cap": cap, "deck": surface}
+	controls[key] = {"pos": pos, "r": r, "h": 0.025, "kind": "button", "cap": cap, "deck": surface, "mat": m.material_override}
 
 
 func _flat_label(parent: Node3D, text: String, pos: Vector2, font: int, color: Color = Color(1, 0.97, 0.88), z: float = 0.008) -> Label3D:
@@ -506,7 +541,7 @@ func _crank_point(acc: float) -> Vector3:
 
 
 func _decks() -> Array:
-	return [surface, wing_l, wing_r]
+	return [surface] if simple else [surface, wing_l, wing_r]
 
 
 func _deck_size(deck: Node3D) -> Vector2:
@@ -545,6 +580,7 @@ func pointer_point(from: Vector3, dir: Vector3, lifted: bool) -> Vector3:
 
 func update_panel(delta: float) -> void:
 	anim_t += delta
+	idle_t += delta
 	if not detail or not is_inside_tree():
 		return
 	if shown_rocket != main.rocket_n:
@@ -622,6 +658,7 @@ func _handle_hands(hands: Array) -> void:
 			var key := _grab_target(wp, invs, pointer)
 			if key != "":
 				grabs[id] = key
+				idle_t = 0.0
 				main.players[0].haptic(id, 0.4)
 				main.local_sound("click", -6.0, 1.2)
 				if key == "crank":
@@ -631,7 +668,7 @@ func _handle_hands(hands: Array) -> void:
 				continue
 		for key in controls:
 			var c: Dictionary = controls[key]
-			if c.kind != "button":
+			if c.kind != "button" or not _usable(key):
 				continue
 			var t: Transform3D = invs[c.deck]
 			var lp: Vector3 = t * wp
@@ -661,6 +698,8 @@ func _grab_target(wp: Vector3, invs: Dictionary, pointer: bool) -> String:
 			if not placed.has(i):
 				keys.append("plug%d" % i)
 	for key in keys:
+		if not _usable(key):
+			continue
 		var t: Transform3D = invs[deck_of(key)]
 		var lp: Vector3 = t * wp
 		var at := control_local(key)
@@ -678,7 +717,69 @@ func _grab_target(wp: Vector3, invs: Dictionary, pointer: bool) -> String:
 	return best
 
 
+## Simple mode: controls in a hidden area can't be pressed or grabbed.
+func _usable(key: String) -> bool:
+	if not simple:
+		return true
+	var area := area_of(key)
+	return area == "" or not area_holders.has(area) or (area_holders[area] as Node3D).visible
+
+
+func area_of(key: String) -> String:
+	if key.begins_with("fuel"):
+		return "fuel"
+	if key.begins_with("plug") or key.begins_with("sock"):
+		return "wires"
+	if key.begins_with("shape"):
+		return "symbols"
+	if key.begins_with("dial") or key == "set":
+		return "gauge"
+	if key.begins_with("sw") or key == "check":
+		return "switches"
+	if key.begins_with("lever"):
+		return "lever"
+	return ""
+
+
+## World centre of a desk area (Vector3.INF if there's no such area).
+func area_centre(area: String) -> Vector3:
+	if not AREAS.has(area) or surface == null:
+		return Vector3.INF
+	var c: Vector2 = AREAS[area][0]
+	return surface.global_transform * Vector3(c.x, c.y, 0.06)
+
+
+## Simple mode: where the ghost hand goes to show how a control works: [[world pos, grip], ...].
+## The practice button gets the real answer; new controls get the move, not the answer.
+func demo_path(m: Dictionary) -> Array:
+	var pts: Array = []
+	match str(m.get("type", "")):
+		"fuel":
+			var key: String = ("fuel%d" % int((m.answer as Array)[0])) if m.has("answer") else "fuel0"
+			pts = [[control_world(key, 0.15), false], [control_world(key, 0.01), false], [control_world(key, 0.15), false]]
+		"wires":
+			var spare := 0
+			var order: Array = m.order
+			while order.has(spare) and spare < 3:
+				spare += 1
+			var key := "plug%d" % spare
+			var to := to_world(Vector3((SOCKET_X[1] + SOCKET_X[2]) / 2.0, SOCKET_Y - 0.06, 0.1))
+			pts = [[control_world(key, 0.12), false], [control_world(key), false], [control_world(key), true], [to, true], [to, false]]
+		"gauge":
+			pts = [[control_world("dial", 0.1), false], [control_world("dial"), false], [control_world("dial"), true],
+				[control_world("dial3"), true], [control_world("dial7"), true], [control_world("dial5"), true], [control_world("dial5"), false]]
+		"switches":
+			pts = [[control_world("sw2", 0.12), false], [control_world("sw2", 0.0), false], [control_world("sw2", 0.12), false]]
+		"symbols":
+			pts = [[control_world("shape0", 0.15), false], [control_world("shape0", 0.01), false], [control_world("shape0", 0.15), false]]
+		"lever":
+			pts = [[control_world("lever", 0.1), false], [control_world("lever"), false], [control_world("lever"), true],
+				[to_world(LEVER_PIVOT + Vector3(0, -sin(LEVER_MAX), cos(LEVER_MAX)) * LEVER_LEN), true]]
+	return pts
+
+
 func _press(key: String, hand_id: String) -> void:
+	idle_t = 0.0
 	press_t[key] = 0.18
 	main.players[0].haptic(hand_id, 0.5)
 	if key.begins_with("fuel"):
@@ -734,6 +835,8 @@ func _release(key: String, lp: Vector3) -> void:
 				break
 	elif key == "lever":
 		lever_fired = false
+	elif key == "dial" and simple:
+		main.on_panel("dial_let_go", [])
 
 
 func _dial_value() -> int:
@@ -745,6 +848,17 @@ func _dial_value() -> int:
 
 func _update_visuals(delta: float) -> void:
 	var blink := 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.008)
+	if simple:
+		for area in area_holders:
+			var on: bool = area == "lever" or not main.module(area).is_empty()
+			(area_holders[area] as Node3D).visible = on
+		for key in controls:
+			var cm = controls[key].get("mat")
+			if cm is StandardMaterial3D:
+				var bm := cm as StandardMaterial3D
+				bm.emission_energy_multiplier = (0.6 + 3.5 * blink) if key == glow_key else 0.25
+		if lever_handle_mat != null:
+			lever_handle_mat.emission_energy_multiplier = (0.8 + 3.0 * blink) if main.phase == "ready" else 0.4
 	for area in area_nodes:
 		var n: Dictionary = area_nodes[area]
 		var base: Color = n.color

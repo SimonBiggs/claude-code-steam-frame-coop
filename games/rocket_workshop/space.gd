@@ -127,6 +127,7 @@ func _board(at: Vector3, size: Vector2, title: String) -> Node3D:
 	l.modulate = Color(1.0, 0.85, 0.4)
 	l.outline_modulate = Color(0.25, 0.12, 0.05)
 	l.position = Vector3(0, size.y / 2.0 - 0.22, 0.08)
+	l.visible = not main.simple  # simple mode: pictures only
 	root.add_child(l)
 	return root
 
@@ -174,6 +175,7 @@ func _build_map() -> void:
 		name_l.outline_size = 8
 		name_l.modulate = Color(0.95, 0.95, 1.0)
 		name_l.position = at + Vector3(0, -0.34, 0.02)
+		name_l.visible = not main.simple
 		root.add_child(name_l)
 		main.set_layers(name_l, main.MANUAL_LAYER)  # names for the crew; the pilot's desk says where they're going
 	var a := MultiMeshInstance3D.new()
@@ -226,6 +228,7 @@ func _build_map() -> void:
 
 func _build_log() -> void:
 	var root := _board(LOG_POS, Vector2(6.2, 2.7), "LAUNCH LOG")
+	root.visible = not main.simple  # simple mode: no log of names and stars
 	log_label = Label3D.new()
 	log_label.font_size = 40
 	log_label.pixel_size = 0.004
@@ -493,7 +496,7 @@ func _update_diorama(n: int, phase: String, launch_t: float) -> void:
 	dio_flame.emitting = u < 0.98
 	var arrived := launch_t >= ARRIVE_AT
 	dio_flag.visible = arrived
-	dio_label.visible = arrived
+	dio_label.visible = arrived and not main.simple
 	if arrived:
 		var grow := clampf((launch_t - ARRIVE_AT) * 3.0, 0.0, 1.0)
 		dio_flag.position = land + Vector3(2.2, -0.3, 0.8)
