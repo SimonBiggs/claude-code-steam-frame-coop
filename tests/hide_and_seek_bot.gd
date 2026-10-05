@@ -10,6 +10,9 @@ extends Node
 ## walkable from the counting spot without jumping, for both the seeker's and a hider's size); the seeker
 ## sniffs when close to a hider; a free hider rings the jail bell once someone is in jail; in STAR HUNT
 ## rounds hiders grab the nearest star before hiding. Rounds cycle classic / stars / night.
+## MAPS: the connectivity check runs on EVERY map (each built into its own isolated physics world), and the
+## bot plays at least 3 rounds so the map rotation (house -> castle -> spaceship) happens; it prints
+## "BOT: MAP ROTATION OK" once it has played on 3 different maps (and the TV mirrored each one).
 const WorldScript := preload("res://games/hide_and_seek/world.gd")
 
 var main
@@ -22,6 +25,8 @@ var spots := {}  # player index -> hiding spot
 var rounds_seen := {}
 var conn_done := false
 var conn_ok := true
+var conn_worlds: Array = []  # [SubViewport, map index]
+var maps_seen := {}
 
 
 func _ready() -> void:
@@ -73,13 +78,36 @@ func _physics_process(delta: float) -> void:
 			print("COUNT ", c)
 			get_tree().quit()
 		return
-	if not conn_done and t > 0.3 and main.net.mode != "client":
+	if conn_worlds.is_empty() and not conn_done and t > 0.3 and main.net.mode != "client":
+		for i in main.MAPS.size():
+			var vp := SubViewport.new()
+			vp.own_world_3d = true
+			vp.size = Vector2i(4, 4)
+			vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
+			add_child(vp)
+			var holder := Node3D.new()
+			vp.add_child(holder)
+			main.MAPS[i].build(holder)
+			conn_worlds.append([vp, i])
+	if not conn_done and t > 0.8 and not conn_worlds.is_empty():
 		conn_done = true
-		_connectivity(0.32, 1.6, "seeker")
-		_connectivity(0.3, 0.9, "hider")
+		for cw in conn_worlds:
+			var vp: SubViewport = cw[0]
+			var d: Dictionary = main.MAPS[int(cw[1])].data()
+			var space: PhysicsDirectSpaceState3D = vp.find_world_3d().direct_space_state
+			_connectivity(space, d, 0.32, 1.6, "seeker")
+			_connectivity(space, d, 0.3, 0.9, "hider")
+			vp.queue_free()
+		conn_worlds.clear()
+		print("BOT: CONNECTIVITY %s on all %d maps" % ["OK" if conn_ok else "FAIL", main.MAPS.size()])
 		if OS.has_environment("BOT_CONN_ONLY"):
 			get_tree().quit()
 			return
+	if main.round_no > 0 and main.phase != "wait" and not maps_seen.has(main.map_title()):
+		maps_seen[main.map_title()] = main.round_no
+		print("BOT: round %d is on %s (%s)" % [main.round_no, main.map_title(), main.round_type])
+		if maps_seen.size() >= 3:
+			print("BOT: MAP ROTATION OK (%s)" % ", ".join(maps_seen.keys()))
 	var mode: String = main.net.mode
 	# Real controllers may be plugged into this machine (someone might be playing!): ignore them.
 	var real := Input.get_connected_joypads()
@@ -170,7 +198,8 @@ func _hiders(delta: float) -> void:
 			p.bot_alt = false
 			continue
 		if not spots.has(p.index):
-			var choice: Vector3 = WorldScript.HIDE_SPOTS[(p.index * 5 + main.round_no * 3) % WorldScript.HIDE_SPOTS.size()]
+			var hs: Array = main.md().hide_spots
+			var choice: Vector3 = hs[(p.index * 5 + main.round_no * 3) % hs.size()]
 			spots[p.index] = choice
 		var spot: Vector3 = spots[p.index]
 		used[spot] = true
@@ -178,7 +207,7 @@ func _hiders(delta: float) -> void:
 		if main.phase == "seek" and main.jailed_count() > 0 and main.jail_breaks > 0 and p.index == _bell_ringer():
 			if p.prop_kind >= 0:
 				p.toggle_disguise()
-			if _walk_to(p, WorldScript.BELL_POS + Vector3(-0.5, 0, 0), 0.2, delta, 5.0) and not has_meta("rang_%d" % main.round_no):
+			if _walk_to(p, main.bell_pos() + Vector3(-0.5, 0, 0), 0.2, delta, 5.0) and not has_meta("rang_%d" % main.round_no):
 				set_meta("rang_%d" % main.round_no, true)
 				print("BOT: P%d rings the jail bell" % (p.index + 1))
 			continue
@@ -187,7 +216,7 @@ func _hiders(delta: float) -> void:
 			var best_s := Vector3.INF
 			for k in main.star_idx.size():
 				if not main.star_taken[k]:
-					var at: Vector3 = WorldScript.STAR_SPOTS[int(main.star_idx[k])]
+					var at: Vector3 = main.star_spot(int(main.star_idx[k]))
 					if best_s == Vector3.INF or at.distance_to(p.global_position) < best_s.distance_to(p.global_position):
 						best_s = at
 			if best_s != Vector3.INF and best_s.distance_to(p.global_position) < 9.0:
@@ -243,18 +272,20 @@ func _test_pads() -> void:
 ## Walk-ability grid (10 cm cells) for a capsule of this size against the house's collision (layer 1),
 ## flood-filled from the seeker's counting spot WITHOUT jumping. Every room, every doorway, every hiding
 ## spot and every spawn must be reachable; otherwise print "CONNECTIVITY FAIL" with what's cut off.
-func _connectivity(radius: float, height: float, who: String) -> void:
-	var space: PhysicsDirectSpaceState3D = main.get_world_3d().direct_space_state
+func _connectivity(space: PhysicsDirectSpaceState3D, md: Dictionary, radius: float, height: float, who: String) -> void:
+	var title: String = md.title
+	var bounds: Array = md.bounds
 	var shape := CapsuleShape3D.new()
 	shape.radius = radius
 	shape.height = height
 	var q := PhysicsShapeQueryParameters3D.new()
 	q.shape = shape
 	q.collision_mask = 1
-	var x0: float = -WorldScript.HALF_X - WorldScript.GARDEN_W
-	var x1: float = WorldScript.HALF_X
-	var z0: float = -WorldScript.HALF_Z
-	var z1: float = WorldScript.HALF_Z
+	var x0: float = bounds[0]
+	var x1: float = bounds[1]
+	var z0: float = bounds[2]
+	var z1: float = bounds[3]
+	var spawns: Array = md.spawns
 	var nx := int((x1 - x0) / 0.1)
 	var nz := int((z1 - z0) / 0.1)
 	var free := PackedByteArray()
@@ -264,7 +295,7 @@ func _connectivity(radius: float, height: float, who: String) -> void:
 			var at := Vector3(x0 + (ix + 0.5) * 0.1, height / 2.0 + 0.02, z0 + (iz + 0.5) * 0.1)
 			q.transform = Transform3D(Basis(), at)
 			free[iz * nx + ix] = 1 if space.intersect_shape(q, 1).is_empty() else 0
-	var start := _cell(Vector3(main.SEEKER_SPAWN), x0, z0, nx, nz)
+	var start := _cell(spawns[0], x0, z0, nx, nz)
 	var seen := PackedByteArray()
 	seen.resize(nx * nz)
 	var stack: Array[int] = [start]
@@ -284,21 +315,27 @@ func _connectivity(radius: float, height: float, who: String) -> void:
 				seen[k] = 1
 				stack.append(k)
 	var problems: Array[String] = []
-	for room in WorldScript.ROOMS:
+	for room in md.rooms:
 		var r: Array = room
 		if not _reach_near(r[1], 1.6, seen, free, x0, z0, nx, nz):
 			problems.append("room %s" % r[0])
-	for door in WorldScript.DOORS:
+	for door in md.doors:
 		var dr: Array = door
 		if not _reach_near(dr[1], 0.25, seen, free, x0, z0, nx, nz):
 			problems.append("doorway %s" % dr[0])
 	if who == "hider":
-		for sp in WorldScript.HIDE_SPOTS:
+		for sp in md.hide_spots:
 			if not _reach_near(sp, 0.6, seen, free, x0, z0, nx, nz):
 				problems.append("hide spot %s" % sp)
-		for i in range(1, main.SPAWNS.size()):
-			if not _reach_near(main.SPAWNS[i], 0.5, seen, free, x0, z0, nx, nz):
-				problems.append("spawn %s" % main.SPAWNS[i])
+		for i in range(1, spawns.size()):
+			if not _reach_near(spawns[i], 0.5, seen, free, x0, z0, nx, nz):
+				problems.append("spawn %s" % spawns[i])
+		for st in md.star_spots:
+			if not _reach_near(st, 0.6, seen, free, x0, z0, nx, nz):
+				problems.append("star spot %s" % st)
+		var bell: Vector3 = md.bell
+		if not _reach_near(bell, 1.0, seen, free, x0, z0, nx, nz):
+			problems.append("jail bell %s" % bell)
 	# Free pockets nobody can walk into (a hider bounced or jumped in there would need to jump out).
 	var pockets: Array[String] = []
 	var pseen := seen.duplicate()
@@ -320,18 +357,18 @@ func _connectivity(radius: float, height: float, who: String) -> void:
 					st2.append(k)
 		if size >= 12:
 			var mid := sum / size
-			var jail: Vector3 = WorldScript.JAIL_POS
+			var jail: Vector3 = md.jail
 			if absf(mid.x - jail.x) < WorldScript.JAIL_HALF and absf(mid.y - jail.z) < WorldScript.JAIL_HALF:
 				continue  # the jail cage: you only get in by being found, and out by a jailbreak
 			pockets.append("%d cells at (%.1f, %.1f)" % [size, mid.x, mid.y])
 	if not pockets.is_empty():
-		print("BOT: walled-off pockets for the %s (jump in/out only): %s" % [who, ", ".join(pockets)])
+		print("BOT: %s: walled-off pockets for the %s (jump in/out only): %s" % [title, who, ", ".join(pockets)])
 	if problems.is_empty():
-		print("BOT: CONNECTIVITY OK for the %s (r %.2f): %d walkable cells reachable, %d rooms, %d doorways" % [
-			who, radius, count, WorldScript.ROOMS.size(), WorldScript.DOORS.size()])
+		print("BOT: %s: CONNECTIVITY OK for the %s (r %.2f): %d walkable cells reachable, %d rooms, %d doorways" % [
+			title, who, radius, count, (md.rooms as Array).size(), (md.doors as Array).size()])
 	else:
 		conn_ok = false
-		print("BOT: CONNECTIVITY FAIL for the %s (r %.2f): cut off: %s" % [who, radius, ", ".join(problems)])
+		print("BOT: %s: CONNECTIVITY FAIL for the %s (r %.2f): cut off: %s" % [title, who, radius, ", ".join(problems)])
 
 
 func _cell(p: Vector3, x0: float, z0: float, nx: int, nz: int) -> int:

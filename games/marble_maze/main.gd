@@ -9,6 +9,16 @@ extends Node3D
 ## grabbed by different marbles close together make TEAM COMBOS, arriving together earns a bonus, and
 ## every gem fills the shared GEM JAR. Golden gems pop up as surprises. Awards at the end.
 ## Modes, networking and party join follow docs/GAME_DEV_GUIDE.md and games/duo_arena.
+##
+## SIMPLE_MODE (the family: "all of the games have become too complicated", "simple games are the fun
+## games"): just tilt the maze and roll every marble into the goal. No clock, no gems, score, stars,
+## jar, golden gems, combos, checkpoints, guide stars or awards; holes just pop you back nearby with a
+## boing. Seven short levels: a wide easy one first, then ONE new thing per level (holes, bumpers, ice,
+## zoom arrows, sliding blocks, teleporters) which sparkles in the intro instead of being explained.
+## A PRACTICE moment starts the game: a glowing ring a few steps from the start (roll into it!), and for
+## the VR giant a pair of ghost hands grips the handles and tilts while a ghost marble rolls to the ring.
+## Toys round the table react to the giant's touch (props.gd). Solo VR: the giant gets their own
+## marble to tilt home until TV players join. Almost no text. Everything cut stays behind the flag.
 
 const VrText := preload("res://core/vr_text.gd")
 const SfxScript := preload("res://core/sfx.gd")
@@ -19,6 +29,13 @@ const BoardScript := preload("res://games/marble_maze/board.gd")
 const MarbleScript := preload("res://games/marble_maze/marble.gd")
 const TilterScript := preload("res://games/marble_maze/tilter.gd")
 const JoinListenerScript := preload("res://games/marble_maze/join_listener.gd")
+const PropsScript := preload("res://games/marble_maze/props.gd")
+const GhostHandScript := preload("res://games/marble_maze/ghost_hand.gd")
+
+const SIMPLE_MODE := true
+const SIMPLE_INTRO_TIME := 2.2
+const PRACTICE_MAX := 45.0
+const SIMPLE_CLEAR_TIME := 4.0
 
 const MAX_PLAYERS := 7  # VR player + 6 marbles
 const MAX_LOCAL_VIEWS := 6
@@ -52,6 +69,13 @@ const SOUNDS := {
 	"jar": [1.0, 392.0, 1568.0, 0.4, "square", 0.0],
 	"combo": [0.3, 990.0, 1980.0, 0.3, "tri", 0.0],
 	"tow": [0.2, 300.0, 450.0, 0.2, "sine", 0.2],
+	"boing": [0.35, 180.0, 720.0, 0.35, "sine", 0.4],
+	"ring": [0.45, 1046.0, 2093.0, 0.3, "tri", 0.0],
+	"bell": [1.0, 1568.0, 1560.0, 0.35, "tri", 0.15],
+	"rustle": [0.18, 2400.0, 1800.0, 0.12, "square", 0.9],
+	"whirr": [0.5, 200.0, 600.0, 0.2, "square", 0.3],
+	"horn": [0.8, 150.0, 140.0, 0.35, "tri", 0.05],
+	"hooray": [0.9, 523.0, 2093.0, 0.4, "square", 0.2],
 }
 
 var players: Array = []
@@ -105,6 +129,14 @@ var help_label: Label
 var center_tween: Tween
 var vr_center: Label3D
 var vr_board: Label3D
+var simple := SIMPLE_MODE
+var props: Node3D
+var ghost_hand: Node3D
+var practiced := false
+var ring_node: MeshInstance3D
+var ring_hit := {}  # marble index -> true once it rolled through the practice ring
+var sparkle_t := 0.0
+var solo := false  # host with no TV machine: P2 is the giant's own marble (rolled by tilting only)
 
 
 func _ready() -> void:
@@ -140,7 +172,10 @@ func _setup_game(mode: String) -> void:
 	ready_to_play = true
 	_ensure_join_listener()
 	_restore_party()
-	if mode == "host":
+	if mode == "host" and simple:
+		_set_solo(true)  # no waiting about: tilt your own marble until the TV players join
+		_start_level(1)
+	elif mode == "host":
 		state = "wait"
 		_show_center("MARBLE MAZE\nWaiting for the TV players to join…", 0.0)
 	elif mode == "client":
@@ -242,7 +277,7 @@ func popup(pos: Vector3, text: String, color: Color, broadcast: bool = true) -> 
 	l.pixel_size = 0.0009
 	l.outline_size = 14
 	l.modulate = color
-	l.no_depth_test = true
+	l.no_depth_test = false
 	l.render_priority = 5
 	if players.size() > 0 and players[0].vr:
 		l.billboard = BaseMaterial3D.BILLBOARD_DISABLED  # VR text faces the player but never follows the head
@@ -382,6 +417,15 @@ func _build_world() -> void:
 	board.main = self
 	add_child(board)
 	set_board_height(board_y)
+	if simple:
+		props = PropsScript.new()
+		props.name = "Props"
+		props.main = self
+		add_child(props)
+		ghost_hand = GhostHandScript.new()
+		ghost_hand.name = "GhostHand"
+		ghost_hand.main = self
+		add_child(ghost_hand)
 
 
 ## The cosy play-room round the table, baked into ONE mesh: floorboards, walls with windows, a rug,
@@ -453,9 +497,10 @@ func _build_room() -> void:
 	parts.append([cyl_mesh(0.03, 0.03, 1.6, 8), Transform3D(Basis(), Vector3(-3.8, 0.8, -3.5)), Color(0.3, 0.3, 0.32)])
 	parts.append([cyl_mesh(0.2, 0.2, 0.03, 16), Transform3D(Basis(), Vector3(-3.8, 0.015, -3.5)), Color(0.3, 0.3, 0.32)])
 	parts.append([cyl_mesh(0.18, 0.35, 0.35, 16), Transform3D(Basis(), Vector3(-3.8, 1.65, -3.5)), Color(1.0, 0.85, 0.55)])
-	# The gem jar's stool and lid (the glass and gems are separate).
-	parts.append([cyl_mesh(0.14, 0.17, 0.6, 14), Transform3D(Basis(), Vector3(-1.05, 0.3, -0.6)), Color(0.7, 0.5, 0.32)])
-	parts.append([cyl_mesh(0.1, 0.1, 0.03, 14), Transform3D(Basis(), Vector3(-1.05, 0.875, -0.6)), Color(0.95, 0.4, 0.4)])
+	# The gem jar's stool and lid (the glass and gems are separate). Not in SIMPLE_MODE (no gems).
+	if not simple:
+		parts.append([cyl_mesh(0.14, 0.17, 0.6, 14), Transform3D(Basis(), Vector3(-1.05, 0.3, -0.6)), Color(0.7, 0.5, 0.32)])
+		parts.append([cyl_mesh(0.1, 0.1, 0.03, 14), Transform3D(Basis(), Vector3(-1.05, 0.875, -0.6)), Color(0.95, 0.4, 0.4)])
 	# Bunting along the back wall.
 	for i in 18:
 		var x := -4.5 + i * 0.53
@@ -465,10 +510,11 @@ func _build_room() -> void:
 		parts.append([pm, Transform3D(Basis(Vector3.RIGHT, PI), Vector3(x, y, -4.42)), toy_cols[i % toy_cols.size()]])
 	var room := MeshInstance3D.new()
 	room.name = "Room"
-	room.mesh = merged_mesh("playroom", parts)
+	room.mesh = merged_mesh("playroom_simple" if simple else "playroom", parts)
 	room.material_override = vertex_mat()
 	add_child(room)
-	_build_jar()
+	if not simple:
+		_build_jar()
 
 
 ## The team's gem jar beside the table: every gem anyone grabs drops in; a full jar is a bonus.
@@ -573,6 +619,25 @@ func _build_views(mode: String) -> void:
 		right.tracker = "right_hand"
 		right.pose = "aim"
 		origin.add_child(right)
+		players[0].attach_xr(origin, cam, left, right)
+		_build_vr_mirror(cam)
+	elif OS.has_environment("BOT_VR") and mode != "client":
+		# Test bots: the real VR code with XR nodes the bot moves by hand (no headset).
+		print("BOT_VR: fake VR giant")
+		var origin := XROrigin3D.new()
+		add_child(origin)
+		origin.global_position = Vector3(0, 0, 0.66)
+		var cam := XRCamera3D.new()
+		origin.add_child(cam)
+		cam.position = Vector3(0.0, 1.5, 0.0)
+		var left := XRController3D.new()
+		left.tracker = "left_hand"
+		origin.add_child(left)
+		left.position = Vector3(-0.25, 1.0, -0.3)
+		var right := XRController3D.new()
+		right.tracker = "right_hand"
+		origin.add_child(right)
+		right.position = Vector3(0.25, 1.0, -0.3)
 		players[0].attach_xr(origin, cam, left, right)
 		_build_vr_mirror(cam)
 	else:
@@ -828,7 +893,8 @@ func _activate(p) -> void:
 	p.reset_to_start()
 	if state == "play" or state == "intro":
 		time_left += EXTRA_TIME_PER_PLAYER
-	_show_center("PLAYER %d ROLLS IN!" % (p.index + 1), 1.5)
+	if not simple:
+		_show_center("PLAYER %d ROLLS IN!" % (p.index + 1), 1.5)
 	sound("home", -4.0, 1.2, true)
 	on_player_activity_changed(p)
 
@@ -965,6 +1031,8 @@ func _process(delta: float) -> void:
 		_layout_views()
 	_update_vr_text()
 	_update_extras(delta)
+	if simple:
+		_update_simple(delta)
 	var cont := _continue_pressed()
 	var cont_edge := cont and not cont_was
 	cont_was = cont
@@ -975,7 +1043,7 @@ func _process(delta: float) -> void:
 	state_t += delta
 	board.t += delta
 	var target := Vector2.ZERO
-	if state == "play":
+	if state == "play" or state == "practice":
 		target = players[0].want_tilt
 	board.tilt = board.tilt.lerp(target, 1.0 - exp(-7.0 * delta))
 	board.basis = board.tilt_basis(board.tilt)
@@ -984,12 +1052,26 @@ func _process(delta: float) -> void:
 			board.tilt = Vector2.ZERO
 		"intro":
 			var dur := FIRST_INTRO_TIME if level == 1 else INTRO_TIME
-			if state_t >= dur:
+			if simple:
+				dur = SIMPLE_INTRO_TIME
+				_sparkle_new(delta)
+			if state_t >= dur and simple and not practiced:
+				state = "practice"
+				state_t = 0.0
+				ring_hit.clear()
+				sound("ring", -4.0, 0.8, true)
+			elif state_t >= dur:
 				state = "play"
 				state_t = 0.0
 				_show_center("GO!", 0.8)
 				sound("go", 0.0, 1.0, true)
+		"practice":
+			_practice_checks()
 		"play":
+			if simple:
+				level_t += delta
+				_authority_checks()
+				return
 			time_left -= delta
 			level_t += delta
 			var secs := int(ceilf(time_left))
@@ -1001,11 +1083,105 @@ func _process(delta: float) -> void:
 				time_left = 0.0
 				_game_over()
 		"clear":
-			if state_t > CLEAR_TIME or (state_t > 1.5 and cont_edge):
+			if state_t > (SIMPLE_CLEAR_TIME if simple else CLEAR_TIME) or (state_t > 1.5 and cont_edge):
 				_start_level(level + 1)
 		"over":
 			if state_t > 1.5 and cont_edge:
 				_restart()
+
+
+# --- SIMPLE_MODE: practice ring, ghost hands, sparkles, solo marble ---------------------
+
+## Both machines: the practice ring and the ghost-hand demo.
+func _update_simple(delta: float) -> void:
+	var practice := state == "practice"
+	if ring_node == null:
+		ring_node = MeshInstance3D.new()
+		var tm := TorusMesh.new()
+		tm.inner_radius = 0.032
+		tm.outer_radius = 0.046
+		tm.rings = 20
+		tm.ring_segments = 6
+		ring_node.mesh = tm
+		ring_node.material_override = make_material(Color(1.0, 0.95, 0.45), 2.4)
+		ring_node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		board.add_child(ring_node)
+	ring_node.visible = practice
+	var spot := Vector2.ZERO
+	if not board.starts.is_empty():
+		spot = board.practice_spot()
+	if practice:
+		var pulse := 1.0 + 0.15 * sin(board.t * 6.0)
+		ring_node.position = Vector3(spot.x, 0.012 + 0.006 * sin(board.t * 3.0), spot.y)
+		ring_node.scale = Vector3(pulse, 1.0, pulse)
+	if ghost_hand != null and not players.is_empty() and not board.starts.is_empty():
+		var tl = players[0]
+		var busy: bool = tl.vr and (tl.grabbing or tl.want_tilt.length() > 0.2)
+		ghost_hand.show_demo(practice, tl.vr, busy, board.starts[0], spot, delta)
+
+
+## Host / local: every marble that rolls through the practice ring gets a ding; once they all have
+## (or after a while, so nobody waits for ever) it's GO!
+func _practice_checks() -> void:
+	var marbles := active_marbles()
+	var spot: Vector2 = board.practice_spot()
+	for p in marbles:
+		if ring_hit.has(p.index) or p.falling:
+			continue
+		if Vector2(p.lp.x, p.lp.z).distance_to(spot) < 0.8 * board.CELL:
+			ring_hit[p.index] = true
+			var wp := board_world(spot, 0.03)
+			burst(wp, Color(1.0, 0.95, 0.45), 20)
+			burst(wp, p.color, 12)
+			sound("ring", 0.0, 1.0 + 0.1 * ring_hit.size(), true)
+			print("Practice: P%d rolled through the ring" % (p.index + 1))
+	var all_in := not marbles.is_empty()
+	for p in marbles:
+		if not ring_hit.has(p.index) and not p.home:
+			all_in = false
+	if all_in or state_t > PRACTICE_MAX:
+		practiced = true
+		state = "play"
+		state_t = 0.0
+		_show_center("GO!", 0.8)
+		sound("go", 0.0, 1.0, true)
+		print("Practice done (%s)" % ("everyone hit the ring" if all_in else "time"))
+
+
+## The intro of a level with something new: that new thing sparkles (instead of a line explaining it).
+func _sparkle_new(delta: float) -> void:
+	var tile := board.level_new_tile(level)
+	if tile == "":
+		return
+	sparkle_t -= delta
+	if sparkle_t > 0.0:
+		return
+	sparkle_t = 0.6
+	var kinds := {">": "<>^v", "H": "HV"}
+	var match_set: String = kinds.get(tile, tile)
+	var n := 0
+	for r in board.H:
+		for c in board.W:
+			if match_set.contains(board.ch(c, r)) and (c + r + int(state_t * 2.0)) % 2 == 0 and n < 6:
+				n += 1
+				burst(board_world(board.center(c, r), 0.05), Color(1.0, 1.0, 0.6), 8)
+	if n > 0:
+		sound("pad", -10.0, 1.4, true)
+
+
+## Host only: with no TV machine, P2 is the giant's own marble (simulated here, rolled only by the tilt).
+func _set_solo(on: bool) -> void:
+	if not simple or net.mode != "host" or players.size() < 2:
+		return
+	solo = on
+	var m = players[1]
+	m.remote = not on
+	m.tilt_only = on
+	m.net_started = false
+	if on:
+		m.set_active(true)
+		m.reset_to_start()
+	print("Solo marble for the VR giant: %s" % ("on" if on else "off"))
 
 
 ## Both machines: the golden gem, the gem jar and the guide stars' tow timers.
@@ -1103,14 +1279,19 @@ func _start_level(n: int) -> void:
 	last_gem_by = -1
 	first_home_t = -1.0
 	_apply_theme()
-	var lap := (n - 1) / board.Levels.LEVELS.size()
+	var lap := (n - 1) / board.levels().size()
 	var title := "LEVEL %d: %s%s" % [n, board.level_name(n), "  (MIRRORED!)" if lap % 2 == 1 else ""]
 	var fresh := board.level_new(n)
 	if seen_new.has(fresh):
 		fresh = ""
 	elif fresh != "":
 		seen_new[fresh] = true
-	if n == 1:
+	sparkle_t = 0.3
+	if props != null:
+		props.on_level()
+	if simple:
+		_show_center(board.level_name(n), SIMPLE_INTRO_TIME)  # one short headline; the new thing sparkles
+	elif n == 1:
 		_show_center("MARBLE MAZE\nRoll EVERY marble into the glowing goal - it's a TEAM game!\n" \
 			+ "VR: grab a side handle (right trigger) and tilt the board · left stick tilts too · A levels it\n" \
 			+ "TV: left stick rolls your marble · right stick turns the camera · A joins\n" \
@@ -1168,8 +1349,9 @@ func _authority_checks() -> void:
 			p.home = true
 			on_marble_home(p)
 	_team_pads(marbles)
-	_maybe_golden()
-	_track_tows(marbles)
+	if not simple:
+		_maybe_golden()
+		_track_tows(marbles)
 	if marbles.is_empty():
 		return
 	for p in marbles:
@@ -1326,6 +1508,16 @@ func _level_clear() -> void:
 	state = "clear"
 	state_t = 0.0
 	levels_cleared += 1
+	if simple:
+		_show_center("HOORAY!", SIMPLE_CLEAR_TIME)
+		sound("hooray", 0.0, 1.0, true)
+		var gw := board_world(board.goal, 0.08)
+		for c in [Color(1.0, 0.9, 0.3), Color(0.4, 1.0, 0.5), Color(1.0, 0.5, 0.8), Color(0.4, 0.8, 1.0)]:
+			burst(gw, c, 24)
+		if props != null:
+			props.ring_bell()
+		print("Level %d cleared!" % level)
+		return
 	var bonus := int(time_left) * 2
 	score += bonus
 	var all_gems: bool = not board.gem_taken.has(false)
@@ -1427,6 +1619,11 @@ func on_wall_hit(p, impact: float) -> void:
 
 func on_marble_fell(p) -> void:
 	var wp: Vector3 = board.to_global(p.lp)
+	if simple:  # no "OOPS!": it just pops back up nearby with a boing (on_marble_respawn)
+		sound("fall", -10.0, 1.4)
+		if p.joy >= 0:
+			Input.start_joy_vibration(p.joy, 0.4, 0.3, 0.2)
+		return
 	sound("fall", -2.0)
 	burst(wp, p.color, 10, false)
 	popup(wp + Vector3(0, 0.05, 0), "OOPS!", p.color, false)
@@ -1439,6 +1636,12 @@ func on_marble_fell(p) -> void:
 
 func on_marble_respawn(p) -> void:
 	burst(board.to_global(p.lp), Color(1, 1, 1), 8, false)
+	if simple:
+		var wp: Vector3 = board.to_global(p.lp)
+		sound("boing", -2.0, randf_range(0.9, 1.15))
+		burst(wp, p.color, 10, false)
+		p.bump_squash()
+		_forward_fx("pop", [wp], p)
 
 
 ## A checkpoint: further along than the team's best? Then it's everyone's new respawn point.
@@ -1471,7 +1674,8 @@ func on_teleport(p, from: Vector2, to: Vector2) -> void:
 func on_marble_boop(p, o) -> void:
 	var mid: Vector3 = board.to_global((p.lp + o.lp) * 0.5)
 	sound("boop", -6.0, randf_range(1.0, 1.3))
-	popup(mid + Vector3(0, 0.04, 0), "boop!", Color(1.0, 0.75, 0.85), false)
+	if not simple:
+		popup(mid + Vector3(0, 0.04, 0), "boop!", Color(1.0, 0.75, 0.85), false)
 	p.bump_squash()
 	o.bump_squash()
 	_forward_fx("boop", [mid], p)
@@ -1481,6 +1685,15 @@ func on_marble_boop(p, o) -> void:
 func on_marble_home(p) -> void:
 	if net.mode == "client":
 		net.send_action("home", [], p.index)  # the host scores it (it may not have seen the last frames)
+		return
+	if simple:
+		var gw := board_world(board.goal, 0.06)
+		burst(gw, p.color, 20)
+		burst(gw, Color(1.0, 0.95, 0.5), 12)
+		sound("home", 0.0, 1.0 + 0.1 * home_count(), true)
+		if props != null:
+			props.ring_bell()
+		print("P%d reached the goal (%d/%d)" % [p.index + 1, home_count(), active_marbles().size()])
 		return
 	score += 25
 	var wp := board_world(board.goal, 0.06)
@@ -1503,6 +1716,12 @@ func on_marble_home(p) -> void:
 # --- Networked co-op (see docs/GAME_DEV_GUIDE.md) ------------------------------------
 
 func on_client_joined() -> void:
+	if simple:
+		_set_solo(false)
+		practiced = false  # the TV players get the practice ring too
+		sound("home", -2.0, 1.2, true)
+		_start_level(level)
+		return
 	_show_center("THE TV PLAYERS JOINED!", 1.5)
 	_start_level(level if state != "over" else 1)
 
@@ -1511,6 +1730,10 @@ func on_client_left() -> void:
 	for i in range(2, players.size()):
 		if players[i].active:
 			players[i].set_active(false)
+	if simple:
+		_set_solo(true)  # carry on with the giant's own marble
+		_start_level(level)
+		return
 	state = "wait"
 	_show_center("The TV players left - waiting for them to come back…", 0.0)
 
@@ -1529,7 +1752,8 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 		"leave":
 			if p.active:
 				p.set_active(false)
-				_show_center("PLAYER %d LEFT" % (index + 1), 1.5)
+				if not simple:
+					_show_center("PLAYER %d LEFT" % (index + 1), 1.5)
 		"continue":
 			_on_continue()
 		"home":
@@ -1558,7 +1782,11 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 					_stat(index, "tp", 1.0)
 				"boop":
 					sound("boop", -8.0, 1.2)
-					popup(args[1], "boop!", Color(1.0, 0.75, 0.85), false)
+					if not simple:
+						popup(args[1], "boop!", Color(1.0, 0.75, 0.85), false)
+				"pop":
+					sound("boing", -4.0, randf_range(0.9, 1.15))
+					burst(args[1], p.color, 10, false)
 		"pause":
 			var paused: bool = args[0]
 			_set_pause_banner(paused, "A TV player opened the menu")
@@ -1679,6 +1907,9 @@ func apply_event(kind: String, args: Array) -> void:
 					p.reset_to_start()
 			state = "intro"
 			state_t = 0.0
+		"prop":
+			if props != null:
+				props.react(int(args[0]), false)
 		"remote_pause":
 			get_tree().paused = args[0]
 			_set_pause_banner(args[0], "The VR player paused the game")
@@ -1711,6 +1942,9 @@ func _build_hud() -> void:
 	help_label.offset_top = -64
 	help_label.offset_bottom = -12
 	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	if simple:
+		help_label.text = "Stick: roll   ·   A: join"
+		return
 	help_label.text = "Marble: left stick / arrows roll · right stick (Q/E, mouse on the TV) turns the camera · Start / Esc menu\n" \
 		+ "Split screen P1 tilts the board: WASD / mouse / left stick, Space or A levels it  ·  More marbles: press A on another controller"
 
@@ -1731,6 +1965,8 @@ func _show_center(text: String, duration: float, broadcast: bool = true) -> void
 func hud_text(p) -> String:
 	if net.mode == "client" and not synced:
 		return "Syncing with the VR player…"
+	if simple:
+		return _simple_hud(p)
 	var gems := 0
 	for g in board.gem_taken:
 		if g:
@@ -1740,6 +1976,19 @@ func hud_text(p) -> String:
 	if p.index == 0:
 		return line + "\nYOU TILT THE BOARD!" + ("\nGentle tilts help them sit on the pads!" if _gates_closed() else "")
 	return line + "\n" + _marble_hint(p)
+
+
+## SIMPLE_MODE: one short line at most (most of the time none).
+func _simple_hud(p) -> String:
+	if state == "clear":
+		return "HOORAY!"
+	if p.index == 0:
+		return "Tilt the table!" if state == "practice" else ""
+	if p.home:
+		return "HOME!"
+	if state == "practice" and not ring_hit.has(p.index):
+		return "Roll into the ring!"
+	return ""
 
 
 ## A short "what do I do now?" line for one marble.
@@ -1784,7 +2033,7 @@ func _gates_closed() -> bool:
 
 
 func _update_vr_text() -> void:
-	if help_label.modulate.a > 0.0 and level >= 2:
+	if help_label.modulate.a > 0.0 and (level >= 2 or (simple and state == "play" and state_t > 8.0)):
 		help_label.modulate.a = maxf(0.0, help_label.modulate.a - get_process_delta_time() * 0.5)
 	if players.is_empty() or not players[0].vr:
 		return
@@ -1794,16 +2043,18 @@ func _update_vr_text() -> void:
 		vr_center.font_size = 44
 		vr_center.outline_size = 26
 		vr_center.pixel_size = 0.0022
-		vr_center.no_depth_test = true
+		vr_center.no_depth_test = false
 		vr_center.render_priority = 10
 		vr_center.outline_render_priority = 9
 		vr_center.width = 1100.0
 		vr_center.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		add_child(vr_center)
-	vr_center.text = center_label.text
+	vr_center.text = preload("res://core/vr_text.gd").short(center_label.text)  # no walls of text in VR
 	vr_center.modulate.a = center_label.modulate.a
 	vr_center.outline_modulate = Color(0, 0, 0, center_label.modulate.a)
 	VrText.follow(vr_center, cam, self, -0.05, 1.8)
+	if simple:
+		return  # no scoreboard
 	# Scoreboard hanging high above the far side of the table (world-locked, ~2.4 m away, above the banner).
 	if vr_board == null:
 		vr_board = Label3D.new()

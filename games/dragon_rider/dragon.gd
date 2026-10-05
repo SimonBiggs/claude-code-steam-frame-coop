@@ -28,6 +28,8 @@ var flap_power := 0.0
 var flap_cd := 0.0
 var velocity := Vector3.ZERO
 var lit: Array[bool] = [true, true, true, true]
+var cruise := BASE_SPEED   # simple mode: main sets a slower, gentler cruising speed per stage
+var happy := 0.0           # simple mode: patted (squinty happy eyes, head lifts)
 
 var body: Node3D
 var wing_l: Node3D
@@ -214,11 +216,11 @@ func fly(delta: float, inp: Vector2, flap: bool) -> void:
 	flap_cd -= delta
 	if flap and flap_cd <= 0.0:
 		flap_cd = 0.6
-		speed = minf(MAX_SPEED, speed + 2.4)
+		speed = minf(cruise + (MAX_SPEED - BASE_SPEED), speed + 2.4)
 		flap_power = 1.0
 		main.sound("flap", -6.0, randf_range(0.9, 1.1))
 		puff_smoke()
-	speed = move_toward(speed, BASE_SPEED, delta * 1.4)
+	speed = move_toward(speed, cruise, delta * 1.4)
 	velocity = Basis(Vector3.UP, yaw) * Vector3.FORWARD * speed + Vector3.UP * vy
 	var p := position + velocity * delta
 	if p.y < MIN_Y:
@@ -263,6 +265,39 @@ func net_follow(delta: float) -> void:
 	basis = Basis(Vector3.UP, yaw)
 
 
+## Simple mode: the rider patted the dragon's neck. Purr, happy squint, a little smoke ring.
+func patted() -> void:
+	happy = 1.0
+	smoke_ring()
+
+
+## A soft smoke ring that drifts forward from the nose and fades (never towards the rider).
+func smoke_ring() -> void:
+	if head_pivot == null:
+		return
+	var r := MeshInstance3D.new()
+	var tm := TorusMesh.new()
+	tm.inner_radius = 0.16
+	tm.outer_radius = 0.26
+	tm.rings = 12
+	tm.ring_segments = 6
+	r.mesh = tm
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.95, 0.93, 0.97, 0.7)
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	r.material_override = m
+	r.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	head_pivot.add_child(r)
+	r.position = Vector3(0, 0.05, -2.1)
+	r.rotation.x = PI / 2.0
+	var tw := r.create_tween().set_parallel()
+	tw.tween_property(r, "position", Vector3(0, 0.9, -6.0), 2.2).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_SINE)
+	tw.tween_property(r, "scale", Vector3.ONE * 3.0, 2.2).set_ease(Tween.EASE_OUT)
+	tw.tween_property(m, "albedo_color:a", 0.0, 1.0).set_delay(1.2)
+	tw.chain().tween_callback(r.queue_free)
+
+
 func puff_smoke() -> void:
 	if smoke != null:
 		smoke.restart()
@@ -275,10 +310,13 @@ func animate(delta: float) -> void:
 	if blink_t <= 0.0:
 		blink_t = randf_range(2.5, 5.0)
 	var eye_y := 0.15 if blink_t < 0.14 else 1.0
+	happy = maxf(0.0, happy - delta * 0.5)
+	if happy > 0.0:
+		eye_y = 0.35  # squinty, happy eyes while being patted
 	for e in eyes:
 		e.scale.y = eye_y
 	if head_pivot != null:
-		head_pivot.rotation.x = sin(flap_phase * 0.5) * 0.05 - climb * 0.08
+		head_pivot.rotation.x = sin(flap_phase * 0.5) * 0.05 - climb * 0.08 + happy * 0.12 + sin(happy * 18.0) * happy * 0.05
 		head_pivot.rotation.y = steer * -0.15
 	flap_power = maxf(0.0, flap_power - delta * 0.9)
 	flap_phase += delta * (1.6 + flap_power * 4.5)

@@ -5,6 +5,24 @@ const VrText := preload("res://core/vr_text.gd")
 ## Players 2-7 are RUNNERS (TV, first person, split screen): fetch ingredients to the pass, carry finished plates
 ## to customers. Extra runners drop in by pressing A / Start on a controller nobody owns yet.
 ## The host simulates everything; the TV machine mirrors it from snapshots (see core/net.gd).
+##
+## SIMPLE_MODE (the family: "all of the games have become too complicated", "simple games are the fun
+## games", "everything's being driven by text"). The core: the VR CHEF chops and stacks at the counter;
+## the TV RUNNERS fetch ingredients and carry plates to customers. With the flag on:
+##  - PRACTICE first: one patient customer wants a TOASTIE (bun + cheese). The cheese waits on the board;
+##    a see-through ghost hand (ghost_hand.gd, chef's headset only) shows CHOP, then STACK on the plate,
+##    and a glowing spot shows where. The runners' arrow leads to the glowing BUN crate, then to the
+##    glowing pass, then to the customer. Serving them starts round 1.
+##  - One dish at first (TOASTIE); one new dish per round (SALAD, BURGER, PIZZA). Tickets are pictures
+##    (the ingredients as little 3D food), no words.
+##  - Off: fires and the extinguisher, the food critic, the dinner rush, coins / tips / combos / star
+##    ratings, awards and stats, the help panel, "next step" lines, popups, signs, game over (a customer
+##    who waits too long just leaves with a rain cloud). The raccoon comes back from round 3.
+##  - Everything interactable (props.gd): pans clang, a spoon to bang, veggies to juggle and throw,
+##    a pepper grinder, a cuckoo clock; the bell rings ("ORDER UP!").
+##  - Solo VR: when no TV runner is connected, kitchen helpers pop missing ingredients onto the pass and
+##    whisk finished plates to the customers.
+##  - Text: VR one short headline; TV one short line (PRESS A) at most.
 
 const L := preload("res://games/kitchen_rush/layout.gd")
 const KitchenScript := preload("res://games/kitchen_rush/kitchen.gd")
@@ -20,6 +38,12 @@ const NetScript := preload("res://core/net.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
 const JoinInputScript := preload("res://games/kitchen_rush/join_input.gd")
 const GuideScript := preload("res://games/kitchen_rush/guide.gd")
+const PropsScript := preload("res://games/kitchen_rush/props.gd")
+const GhostHandScript := preload("res://games/kitchen_rush/ghost_hand.gd")
+const SIMPLE_MODE := true
+## Simple mode: one dish to start with, then one new dish per round.
+const SIMPLE_UNLOCKS := [["TOASTIE"], ["SALAD"], ["BURGER"], ["PIZZA"]]
+const HELPER_DELAY := 6.0  # solo VR: seconds before a kitchen helper drops a missing ingredient on the pass
 
 const RECIPES := {
 	"SALAD": ["lettuce", "tomato", "cucumber"],
@@ -48,6 +72,10 @@ const EXTRA_SOUNDS := {
 	"cluck": [0.16, 700.0, 500.0, 0.18, "saw", 0.4],
 	"rush": [0.7, 330.0, 990.0, 0.35, "saw", 0.1],
 	"splat": [0.2, 220.0, 80.0, 0.35, "sine", 0.7],
+	"clang": [0.55, 940.0, 900.0, 0.26, "square", 0.2],
+	"cuckoo": [0.2, 760.0, 740.0, 0.3, "sine", 0.0],
+	"grind": [0.3, 260.0, 240.0, 0.18, "saw", 0.9],
+	"boing": [0.3, 220.0, 660.0, 0.3, "sine", 0.0],
 }
 const BUBBLE_SHADER := """
 shader_type canvas_item;
@@ -117,6 +145,18 @@ var help_panel: PanelContainer
 var bell_t := 0.0
 var cluck_t := 4.0
 var chicken_goals: Array = []
+var simple := SIMPLE_MODE  # other scripts read main.simple
+var practice := SIMPLE_MODE  # simple mode: the practice order before round 1 (host)
+var practice_t := 0.0
+var new_dish := ""  # simple mode: the dish that just unlocked (the round's first customer orders it)
+var helper_t := 0.0
+var props: Node3D
+var ghost_hand: Node3D
+var chef_spot: MeshInstance3D
+var crate_glows := {}  # ingredient kind -> glowing lid on its crate / garden bed
+var pass_glow: MeshInstance3D
+var glow_mat: StandardMaterial3D
+var chef_busy := ""  # simple mode: what the chef was doing last frame (the ghost hand waits while they act)
 
 # Visuals
 var fire_node: Node3D
@@ -131,10 +171,13 @@ var center_tween: Tween
 func _ready() -> void:
 	randomize()
 	parts = KitchenScript.build(self)
+	if SIMPLE_MODE:
+		_simplify_kitchen()
 	for i in MAX_RUNNERS + 1:
 		stats.append({"fetched": 0, "served": 0, "sprays": 0, "raccoons": 0, "chops": 0, "dishes": 0})
 	_build_hud()
 	_build_fire_and_extinguisher()
+	ext_node.visible = not SIMPLE_MODE
 	_build_tickets()
 	raccoon = RaccoonScript.new()
 	raccoon.main = self
@@ -166,7 +209,9 @@ func _setup_game(mode: String) -> void:
 	_assign_joypads()
 	ready_to_play = true
 	print("Kitchen Rush: %s mode" % mode)
-	if mode == "host":
+	if SIMPLE_MODE:
+		banner("KITCHEN RUSH!", 2.5, mode != "client")
+	elif mode == "host":
 		banner("KITCHEN RUSH\nWaiting for the runners on the TV to join…\nTry chopping: swing a knife down through a vegetable!", 0.0)
 		_practice_veg()
 	elif mode == "client":
@@ -292,6 +337,8 @@ func burst(pos: Vector3, color: Color, amount: int = 16, size: float = 0.08) -> 
 
 ## Floating text that rises and fades; shown on both machines.
 func popup(pos: Vector3, text: String, color: Color) -> void:
+	if SIMPLE_MODE:
+		return  # no floating words: bursts and sounds do the talking
 	var l := Label3D.new()
 	l.text = text
 	l.modulate = color
@@ -300,7 +347,7 @@ func popup(pos: Vector3, text: String, color: Color) -> void:
 	l.outline_size = 22
 	l.pixel_size = 0.004
 	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	l.no_depth_test = true
+	l.no_depth_test = false
 	l.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(l)
 	l.global_position = pos
@@ -398,7 +445,7 @@ func _build_views(mode: String) -> void:
 		if mode == "local":
 			_build_flat_window(players[1])
 			_add_bubble(players[1].hud, mirror, PLAYER_COLORS[0])
-	elif OS.has_environment("KR_FAKE_VR") and mode != "client":
+	elif (OS.has_environment("KR_FAKE_VR") or OS.has_environment("BOT_VR")) and mode != "client":
 		# Tests: the VR chef's code runs without a headset; the bot moves the hands.
 		print("Fake VR: the bot drives the VR chef")
 		var origin := XROrigin3D.new()
@@ -801,7 +848,11 @@ func _set_runner_active(p, on: bool) -> void:
 		p.net_target = p.global_position
 		p.yaw = PI
 	var n := active_runners()
-	if on:
+	if SIMPLE_MODE:
+		if on:
+			banner("P%d!" % (p.index + 1), 1.5)
+			sound("wave", -6.0, 1.3)
+	elif on:
 		banner("P%d JOINED THE KITCHEN!  (%d runners)" % [p.index + 1, n], 1.5)
 		sound("wave", -6.0, 1.3)
 	else:
@@ -1082,7 +1133,7 @@ func _update_tickets() -> void:
 		if t[7] != c.recipe:
 			_ticket_icons(t, c.recipe)
 		var label: Label3D = t[1]
-		label.text = c.recipe + ("  VIP!" if c.ctype == "critic" else "")
+		label.text = "" if SIMPLE_MODE else c.recipe + ("  VIP!" if c.ctype == "critic" else "")
 		label.modulate = Color(0.2, 0.12, 0.1) if c.frac > 0.3 else Color(0.85, 0.15, 0.1)
 		var sw_mat: StandardMaterial3D = t[5]
 		if c.body_mat:
@@ -1147,6 +1198,9 @@ func _process(delta: float) -> void:
 	_update_fire_visuals()
 	_animate_kitchen(delta)
 	_update_guides()
+	if SIMPLE_MODE:
+		_update_glows()
+		_update_chef_teaching(delta)
 	_update_vr_center()
 	if ghost_cam:
 		ghost_cam.global_transform = players[0].head_t
@@ -1169,7 +1223,7 @@ func _process(delta: float) -> void:
 		if game_over_t > 2.0 and (_restart_pressed() or vr_restart):
 			get_tree().reload_current_scene()
 		return
-	if net.mode == "host" and not net.connected:
+	if net.mode == "host" and not net.connected and not SIMPLE_MODE:
 		_ensure_plates()
 		chef_task = _compute_chef_task()
 		return
@@ -1181,6 +1235,9 @@ func _host_update(delta: float) -> void:
 	_move_finished_plates()
 	chef_task = _compute_chef_task()
 	rush_t = maxf(0.0, rush_t - delta)
+	if SIMPLE_MODE:
+		_simple_update(delta)
+		return
 	if in_break:
 		break_t -= delta
 		if break_t <= 0.0:
@@ -1222,10 +1279,14 @@ func _extra_runners() -> int:
 
 
 func shift_target() -> int:
+	if SIMPLE_MODE:
+		return 2 + mini(shift, 4) + int(_extra_runners() / 2.0)
 	return 2 + shift * 2 + int((_extra_runners() + 1) / 2.0)
 
 
 func _spawn_interval() -> float:
+	if SIMPLE_MODE:
+		return maxf(6.0, 14.0 - shift) / (1.0 + 0.1 * _extra_runners())
 	return maxf(4.0, (15.0 - shift * 2.0) / (1.0 + 0.1 * _extra_runners()))
 
 
@@ -1235,6 +1296,8 @@ func _chaos_scale() -> float:
 
 
 func _patience() -> float:
+	if SIMPLE_MODE:
+		return maxf(60.0, 110.0 - shift * 6.0)
 	return maxf(35.0, 85.0 - shift * 8.0)
 
 
@@ -1244,6 +1307,10 @@ func recipe_items(r: String) -> Array:
 
 func unlocked_recipes() -> Array:
 	var out := []
+	if SIMPLE_MODE:
+		for i in mini(maxi(shift, 1), SIMPLE_UNLOCKS.size()):
+			out.append_array(SIMPLE_UNLOCKS[i])
+		return out
 	for i in mini(maxi(shift, 1), UNLOCKS.size()):
 		out.append_array(UNLOCKS[i])
 	return out
@@ -1273,6 +1340,15 @@ func _start_shift() -> void:
 		if it.has_meta("practice") and it.holder == -1:
 			burst(it.global_position, Color(1.0, 1.0, 1.0), 8, 0.04)
 			remove_item(it)
+	if SIMPLE_MODE:
+		var fresh: bool = shift > 1 and shift - 1 < SIMPLE_UNLOCKS.size()
+		new_dish = SIMPLE_UNLOCKS[shift - 1][0] if fresh else ""
+		banner("NEW DISH!" if fresh else ("LET'S COOK!" if shift == 1 else "OPEN!"), 2.0)
+		sound("wave")
+		sound("ding", -6.0, 1.0)
+		if props:
+			props.cuckoo()
+		return
 	var extra := ""
 	if shift - 1 < UNLOCKS.size() and shift > 1:
 		extra = "\nNEW RECIPE: " + ", ".join(PackedStringArray(UNLOCKS[shift - 1]))
@@ -1290,6 +1366,16 @@ func _start_shift() -> void:
 
 func _end_shift() -> void:
 	in_break = true
+	if SIMPLE_MODE:
+		# A happy little party: three gold stars over the counter, no ratings or scores.
+		break_t = 5.0
+		print("Shift %d complete: served %d, angry %d" % [shift, served_total, angry])
+		banner("HOORAY!", 2.5)
+		show_stars(3)
+		net.event("stars", [3])
+		sound("clear")
+		sound("cheer", -4.0)
+		return
 	break_t = 7.0
 	rush_t = 0.0
 	var angry_now := angry - angry_at_start
@@ -1365,6 +1451,10 @@ func _spawn_customer() -> void:
 	if customers_spawned == 1 and served_total == 0:
 		c.ctype = "granny"
 		c.recipe = "TOASTIE"
+	elif SIMPLE_MODE:
+		if new_dish != "":
+			c.recipe = new_dish  # the round's new dish comes first
+			new_dish = ""
 	elif shift >= 2 and not critic_done and served_shift >= 1 and randf() < 0.35:
 		critic_done = true
 		c.ctype = "critic"
@@ -1379,6 +1469,11 @@ func _spawn_customer() -> void:
 
 func on_customer_angry(c) -> void:
 	angry += 1
+	if SIMPLE_MODE:
+		# No game over: they just stomp off under a little rain cloud.
+		sound("splat", -2.0, 0.8)
+		print("A customer left grumpy (%d so far)" % angry)
+		return
 	combo = 0
 	sound("splat", -2.0, 0.8)
 	print("A customer left angry (%d/%d)" % [angry, MAX_ANGRY])
@@ -1616,6 +1711,8 @@ func add_to_plate(plate, it) -> void:
 			sound("revive", 0.0, 1.2)
 			ring_bell()
 			popup(plate.global_position + Vector3.UP * 0.35, "DING! %s" % r, Color(1.0, 0.9, 0.3))
+			if SIMPLE_MODE:
+				banner("ORDER UP!", 1.5)
 			burst(plate.global_position + Vector3.UP * 0.15, Color(1.0, 0.85, 0.3), 18, 0.05)
 			if players[0].vr:
 				players[0].hand_l.trigger_haptic_pulse("haptic", 0.0, 0.5, 0.15, 0.0)
@@ -1794,6 +1891,11 @@ func _serve(p, cust) -> void:
 	remove_item(p.carry)
 	p.carry = null
 	p.carry_kind = ""
+	_serve_done(cust, p.index)
+
+
+## The customer got their dish (from runner `who`, or -1 for a solo-VR kitchen helper).
+func _serve_done(cust, who: int) -> void:
 	cust.serve()
 	served_shift += 1
 	served_total += 1
@@ -1807,7 +1909,8 @@ func _serve(p, cust) -> void:
 	var gain := int(round((10 + tip) * mult))
 	coins += gain
 	frac_sum += cust.frac
-	stats[p.index].served += 1
+	if who >= 0:
+		stats[who].served += 1
 	print("Served %s to a %s: +%d coins (combo %d), total %d" % [cust.recipe, cust.ctype, gain, combo, coins])
 	var text := "+%d coins" % gain
 	if combo > 1:
@@ -2273,6 +2376,9 @@ func on_raccoon_scared(runner_index: int) -> void:
 # --- Networking ----------------------------------------------------------------
 
 func on_client_joined() -> void:
+	if SIMPLE_MODE:
+		banner("LET'S COOK!", 2.0)
+		return
 	banner("THE RUNNERS ARE HERE!\nLet's cook!", 2.0)
 	if shift == 0:
 		break_t = 3.0
@@ -2284,6 +2390,8 @@ func on_client_left() -> void:
 		if players[i].active:
 			_drop_carry(players[i])
 			players[i].set_active(false)
+	if SIMPLE_MODE:
+		return  # the kitchen helpers take over (solo VR)
 	banner("The TV players left - waiting for them to rejoin…", 0.0)
 
 
@@ -2310,7 +2418,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 
 
 func _set_pause_banner(paused: bool, who: String) -> void:
-	banner("PAUSED\n" + who if paused else "", 0.0, false)
+	banner(("PAUSED" if SIMPLE_MODE else "PAUSED\n" + who) if paused else "", 0.0, false)
 	_update_vr_center()
 
 
@@ -2332,7 +2440,8 @@ func make_snapshot() -> Array:
 	for c in get_tree().get_nodes_in_group("kr_customers"):
 		cs.append(c.net_state())
 	return [shift, coins, served_shift, angry, combo, game_over, in_break, fire_on, ext_holder,
-		players[0].net_state(), rs, its, cs, raccoon.net_state(), served_total, rush_t, stars]
+		players[0].net_state(), rs, its, cs, raccoon.net_state(), served_total, rush_t, stars,
+		props.net_state() if props else PackedFloat32Array()]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -2359,6 +2468,8 @@ func apply_snapshot(s: Array) -> void:
 	if s.size() > 16:
 		rush_t = s[15]
 		stars = s[16]
+		if s.size() > 17 and props:
+			props.apply_net(s[17])
 		if not has_meta("menu_shift") or int(get_meta("menu_shift")) != shift:
 			set_meta("menu_shift", shift)
 			_update_menu_board()
@@ -2572,6 +2683,10 @@ func chef_hint(chef) -> String:
 
 
 func _update_hud() -> void:
+	if SIMPLE_MODE:
+		help_panel.visible = false
+		info_label.text = "Syncing…" if net.mode == "client" and not synced else ""
+		return
 	var dt := get_process_delta_time()
 	var show_help := shift == 0 or (shift == 1 and served_total < 2 and not in_break)
 	help_panel.modulate.a = clampf(help_panel.modulate.a + (dt if show_help else -dt * 0.7), 0.0, 1.0)
@@ -2594,7 +2709,7 @@ func _update_vr_center() -> void:
 		vr_center = Label3D.new()
 		vr_center.font_size = 48
 		vr_center.outline_size = 26
-		vr_center.no_depth_test = true
+		vr_center.no_depth_test = false
 		vr_center.render_priority = 10
 		vr_center.outline_render_priority = 9
 		vr_center.width = 900.0
@@ -2604,7 +2719,7 @@ func _update_vr_center() -> void:
 		vr_center.modulate = Color(1.0, 0.92, 0.55)
 		players[0].xr_camera.add_child(vr_center)
 		set_layers(vr_center, players[0].viewmodel_layer())
-	vr_center.text = center_label.text
+	vr_center.text = preload("res://core/vr_text.gd").short(center_label.text)  # no walls of text in VR
 	vr_center.modulate.a = center_label.modulate.a
 	vr_center.outline_modulate = Color(0, 0, 0, center_label.modulate.a)
 	# The tickets hang just in front of the chef's eyes and the counter is below them, so the banner and
@@ -2615,7 +2730,7 @@ func _update_vr_center() -> void:
 		vr_hint = Label3D.new()
 		vr_hint.font_size = 40
 		vr_hint.outline_size = 22
-		vr_hint.no_depth_test = true
+		vr_hint.no_depth_test = false
 		vr_hint.render_priority = 10
 		vr_hint.outline_render_priority = 9
 		vr_hint.width = 800.0
@@ -2626,9 +2741,260 @@ func _update_vr_center() -> void:
 	if stats_mode != vr_hint.get_meta("stats_mode", false):
 		vr_hint.set_meta("stats_mode", stats_mode)
 		VrText.snap(vr_hint)
-	var hint: String = stats_text if stats_mode else str(chef_task.get("text", ""))
+	var hint: String = stats_text if stats_mode else ("" if SIMPLE_MODE else str(chef_task.get("text", "")))
 	vr_hint.pixel_size = 0.0016 if stats_mode else 0.0019
 	vr_hint.modulate = Color(0.9, 0.97, 1.0) if stats_mode else (Color(1.0, 0.55, 0.45) if fire_on else Color(1.0, 0.95, 0.6))
 	vr_hint.text = hint
 	vr_hint.visible = hint != "" and not game_over or stats_mode
 	VrText.follow(vr_hint, players[0].xr_camera, self, -0.62 if not stats_mode else 0.75, 1.6)
+
+
+# --- Simple mode -----------------------------------------------------------------
+
+## No signs or chalkboard words; touchable props around the chef; glowing crate lids and pass for the runners.
+func _simplify_kitchen() -> void:
+	for c in get_children():
+		if c is Label3D:
+			c.visible = false
+	props = PropsScript.new()
+	props.main = self
+	add_child(props)
+	glow_mat = StandardMaterial3D.new()
+	glow_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	glow_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	glow_mat.albedo_color = Color(1.0, 0.9, 0.3, 0.5)
+	for src in L.SOURCES:
+		var pos: Vector3 = src[1]
+		var crate: bool = pos.x < -5.0
+		var g := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = Vector3(0.74, 0.04, 1.04) if crate else Vector3(1.7, 0.04, 1.1)
+		g.mesh = bm
+		g.material_override = glow_mat
+		g.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		g.position = pos + (Vector3(0.1, 0.64, 0.0) if crate else Vector3(0.0, 0.46, 0.0))
+		g.visible = false
+		add_child(g)
+		crate_glows[src[0]] = g
+	pass_glow = MeshInstance3D.new()
+	var pm := BoxMesh.new()
+	pm.size = Vector3(2.3, 0.012, 0.24)
+	pass_glow.mesh = pm
+	pass_glow.material_override = glow_mat
+	pass_glow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	pass_glow.position = Vector3(0.0, L.COUNTER_TOP + 0.008, -0.13)
+	pass_glow.visible = false
+	add_child(pass_glow)
+
+
+## Host, simple mode: the practice order, then rounds with one new dish each.
+func _simple_update(delta: float) -> void:
+	_helper_update(delta)
+	if practice:
+		_practice_update(delta)
+		return
+	if in_break:
+		break_t -= delta
+		if break_t <= 0.0:
+			_start_shift()
+		return
+	spawn_t -= delta
+	var waiting := _waiting_customers()
+	if waiting.is_empty():
+		spawn_t = minf(spawn_t, 1.5)
+	if spawn_t <= 0.0 and waiting.size() < _max_waiting():
+		_spawn_customer()
+		spawn_t = _spawn_interval() * randf_range(0.8, 1.2)
+	if shift >= 3:  # a little cosy chaos once everyone knows the ropes
+		raccoon_t -= delta
+		if raccoon_t <= 0.0 and not raccoon.active():
+			raccoon_t = randf_range(40.0, 60.0) / _chaos_scale()
+			raccoon.start()
+			banner("RACCOON!", 1.5)
+			sound("spit", 0.0, 0.7)
+
+
+func _max_waiting() -> int:
+	return mini(MAX_CUSTOMERS, 1 + shift / 2 + (1 if _extra_runners() > 0 else 0))
+
+
+## The practice order: one patient granny wants a TOASTIE. The cheese waits on the chopping board; the
+## runners fetch the bun. Her patience doesn't run down (in_break), so there's no rush.
+func _practice_update(delta: float) -> void:
+	practice_t += delta
+	in_break = true
+	if not has_meta("practice_set"):
+		set_meta("practice_set", true)
+		spawn_item("cheese", L.BOARD, -1)
+		_spawn_customer()
+		print("Practice: chop the cheese, stack the toastie, serve the granny")
+	if served_total >= 1:
+		practice = false
+		break_t = 3.0
+		banner("HOORAY!", 2.0)
+		show_stars(3)
+		net.event("stars", [3])
+		sound("cheer", -4.0)
+		print("Practice done (%.0f s)" % practice_t)
+
+
+## Solo VR (no TV runners connected): kitchen helpers pop missing ingredients onto the pass now and then
+## and whisk finished plates off to the customers who want them.
+func _helper_update(delta: float) -> void:
+	if net.mode != "host" or net.connected:
+		helper_t = 0.0
+		return
+	helper_t += delta
+	if helper_t > HELPER_DELAY:
+		var missing := _missing_ingredients(_open_orders())
+		var slot := free_pass_slot(Vector3.ZERO)
+		if missing.is_empty() or slot < 0:
+			helper_t = HELPER_DELAY - 2.0
+		else:
+			helper_t = HELPER_DELAY - 3.0
+			spawn_item(missing[0], L.PASS_SLOTS[slot], -1)
+			burst(L.PASS_SLOTS[slot] + Vector3.UP * 0.08, Color(1.0, 1.0, 1.0), 10, 0.04)
+			sound("pickup", -8.0, 1.2)
+	for it in all_items():
+		if not it.is_plate() or it.recipe == "" or it.holder != -1:
+			continue
+		var w: float = float(it.get_meta("helper_wait", 0.0)) + delta
+		it.set_meta("helper_wait", w)
+		if w < 2.0:
+			continue
+		var best = null
+		for cu in _waiting_customers():
+			if cu.recipe == it.recipe and (best == null or cu.frac < best.frac):
+				best = cu
+		if best != null:
+			burst(it.global_position + Vector3.UP * 0.1, Color(1.0, 0.85, 0.3), 14, 0.05)
+			remove_item(it)
+			_serve_done(best, -1)
+			return
+
+
+## Simple mode: crate lids glow for a runner who should fetch from them; the pass glows while a runner
+## carries an ingredient. Both machines (each lights up for its own local runners).
+func _update_glows() -> void:
+	if glow_mat == null:
+		return
+	var want := {}
+	var pass_on := false
+	for i in range(1, players.size()):
+		var p = players[i]
+		if not p.active or p.remote or p.ghost:
+			continue
+		var c: String = p.carry_kind
+		if c == "":
+			var job := runner_job(p)
+			if job.has("kind"):
+				want[job["kind"]] = true
+		elif not c.begins_with("plate:") and c != "extinguisher":
+			pass_on = true
+	var pulse := 0.5 + 0.5 * sin(clock * 5.0)
+	glow_mat.albedo_color.a = 0.25 + 0.4 * pulse
+	for k in crate_glows:
+		crate_glows[k].visible = want.has(k)
+	pass_glow.visible = pass_on
+
+
+## Simple mode, chef (host / split screen): a glowing spot where to act next, and during practice and the
+## first dishes a see-through ghost hand showing CHOP and STACK (headset only).
+func _update_chef_teaching(delta: float) -> void:
+	if players.is_empty() or players[0].ghost:
+		return
+	var chef = players[0]
+	var it = chef_task.get("item")
+	var pl = chef_task.get("plate")
+	if it != null and not is_instance_valid(it):
+		it = null
+	if pl != null and not is_instance_valid(pl):
+		pl = null
+	var holding: bool = (chef.held[0] != null and is_instance_valid(chef.held[0])) or (chef.held[1] != null and is_instance_valid(chef.held[1]))
+	var spot = null
+	if it != null and it.holder == -1 and it.needs_chop():
+		spot = it.global_position
+	elif pl != null and (holding or it != null):
+		spot = pl.global_position
+	elif chef_task.has("spot"):
+		spot = chef_task["spot"]
+	if chef_spot == null:
+		chef_spot = MeshInstance3D.new()
+		var cm := CylinderMesh.new()
+		cm.top_radius = 0.12
+		cm.bottom_radius = 0.12
+		cm.height = 0.004
+		cm.radial_segments = 20
+		cm.rings = 1
+		chef_spot.mesh = cm
+		var m := StandardMaterial3D.new()
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.albedo_color = Color(1.0, 0.9, 0.3, 0.5)
+		chef_spot.material_override = m
+		chef_spot.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(chef_spot)
+		set_layers(chef_spot, chef.viewmodel_layer())
+	chef_spot.visible = spot != null and not game_over
+	if spot != null:
+		var sp: Vector3 = spot
+		chef_spot.global_position = Vector3(sp.x, L.COUNTER_TOP + 0.006, sp.z)
+		var pulse := 0.5 + 0.5 * sin(clock * 6.0)
+		chef_spot.scale = Vector3.ONE * (0.9 + 0.25 * pulse)
+		(chef_spot.material_override as StandardMaterial3D).albedo_color.a = 0.3 + 0.4 * pulse
+	if not chef.vr:
+		return
+	var mode := ""
+	var a := Vector3.ZERO
+	var b := Vector3.ZERO
+	if (practice or stats[0].dishes < 2) and it != null and it.holder == -1:
+		if it.needs_chop():
+			mode = "chop"
+			a = it.global_position
+		elif pl != null:
+			mode = "stack"
+			a = it.global_position
+			b = pl.global_position
+	var key := "%d|%s|%s" % [chef.chops_done, str(chef.held[0]), str(chef.held[1])]
+	var busy: bool = key != chef_busy or holding
+	chef_busy = key
+	if ghost_hand == null:
+		ghost_hand = GhostHandScript.new()
+		add_child(ghost_hand)
+		set_layers(ghost_hand, chef.viewmodel_layer())
+	ghost_hand.show_demo(mode, a, b, busy, delta)
+
+
+## The chef tapped the service bell: DING! If a dish is waiting on the counter: ORDER UP!
+func chef_rang_bell() -> void:
+	ring_bell()
+	if not SIMPLE_MODE:
+		return
+	for it in all_items():
+		if it.is_plate() and it.recipe != "" and it.holder == -1:
+			banner("ORDER UP!", 1.2)
+			return
+
+
+## The VR chef's wrist.
+func wrist_text() -> String:
+	if SIMPLE_MODE:
+		return "ROUND %d" % shift if shift > 0 else ""
+	return status_text() + "\nA: recenter  ·  left stick: slide"
+
+
+## Simple mode, button chef (split screen): one short prompt for what the buttons do here.
+func chef_prompt(chef) -> String:
+	var pad: bool = chef.joy >= 0
+	var sp := L.spot_pos(chef.cursor)
+	var held = chef.held[0]
+	if held != null and is_instance_valid(held):
+		return ("A" if pad else "SPACE") + " DROP"
+	var it = item_at(sp, 0.2)
+	if chef.cursor == 5 or chef.cursor == 7:
+		it = _home_plate(0 if chef.cursor == 5 else 1)
+	if it == null:
+		return ""
+	if it.needs_chop():
+		return ("X" if pad else "SHIFT") + " CHOP!"
+	return ("A" if pad else "SPACE") + " GRAB"

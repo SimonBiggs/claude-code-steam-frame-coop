@@ -5,7 +5,9 @@ extends Node
 ## BOT_PLAYERS=N (1..6) brings N deckhands aboard (players 2..N+1) through main.debug_join(); on the
 ## TV client the default is 2 (player 3 joins after a few seconds, as before).
 ## CC_START_WAVE=N skips ahead (e.g. 6 for the Kraken). CC_FAKE_VR=1 runs the real VR gunner code:
-## the bot moves the fake hands to the glowing handle, squeezes the trigger, swings it and lets go.
+## the bot moves the fake hands to the glowing handle, squeezes the trigger, swings it and lets go
+## (BOT_VR=1 does the same). In SIMPLE_MODE the fake VR gunner also rings the bell, pokes Polly and
+## throws a spare cannonball overboard (props.gd) after the first shot.
 
 const World := preload("res://games/cannon_cove/world.gd")
 
@@ -20,6 +22,8 @@ var vr_a_t := 0.0
 var vr_shots := 0
 var vr_misses := 0
 var skipped := false
+var prop_step := 0  # simple mode, fake VR: 0 not yet, 1 bell, 2 parrot, 3 reach ball, 4 throw, 5 done
+var prop_t := 0.0
 var seen := {}
 
 
@@ -101,8 +105,11 @@ func _report() -> void:
 	for c in main.cannons:
 		ammo.append(c.ammo)
 	var carrying := []
+	var where := []
 	for p in main.players:
 		carrying.append(p.carrying)
+		if p.active and not p.gunner:
+			where.append(Vector2(snappedf(p.global_position.x, 0.1), snappedf(p.global_position.z, 0.1)))
 	var best: int = Engine.get_meta("cc_best_wave", 0)
 	best = maxi(best, main.wave)
 	Engine.set_meta("cc_best_wave", best)
@@ -110,11 +117,11 @@ func _report() -> void:
 	for p in main.players:
 		if p.active:
 			active += 1
-	print("t=%.0f mode=%s players=%d views=%d wave=%d (best %d) gold=%d water=%.0f ships=%d tentacles=%d boarders=%d leaks=%d ammo=%s carrying=%s over=%s" % [
+	print("t=%.0f mode=%s players=%d views=%d wave=%d (best %d) gold=%d water=%.0f ships=%d tentacles=%d boarders=%d leaks=%d ammo=%s carrying=%s deckhands at %s over=%s" % [
 		t, main.net.mode, active, main.view_count, main.wave, best, main.gold, main.water,
 		get_tree().get_nodes_in_group("ships").size(), get_tree().get_nodes_in_group("tentacles").size(),
 		get_tree().get_nodes_in_group("boarders").size(), get_tree().get_nodes_in_group("leaks").size(),
-		ammo, carrying, main.game_over])
+		ammo, carrying, where, main.game_over])
 
 
 ## Prints each new feature the first time it shows up, so the log shows what got exercised.
@@ -129,6 +136,10 @@ func _note_features() -> void:
 		"golden ball on pile": main.golden_balls > 0,
 		"golden ball loaded": main.cannons.any(func(c): return c.golden > 0),
 		"victory": main.phase == "victory",
+		"leak": not get_tree().get_nodes_in_group("leaks").is_empty(),
+		"boarder": not get_tree().get_nodes_in_group("boarders").is_empty(),
+		"tentacle": not get_tree().get_nodes_in_group("tentacles").is_empty(),
+		"ghost hand": main.ghost_hand != null and main.ghost_hand.visible,
 		"coach hint": main.coach_text != "",
 		"guide arrow": main.players.any(func(pl): return pl.has_meta("guide") and pl.get_meta("guide").visible),
 	}
@@ -211,6 +222,8 @@ func _drive_fake_vr(p, delta: float) -> void:
 			vr_a_t = 0.4
 			vr_state = "rest"
 			return
+	if _fake_vr_props(p, delta):
+		return
 	match vr_state:
 		"rest":
 			hr.global_position = hr.global_position.lerp(rest, 0.2)
@@ -260,6 +273,61 @@ func _drive_fake_vr(p, delta: float) -> void:
 				vr_t = 0.0
 				if vr_shots <= 3:
 					print("Bot VR: fired shot %d (ammo now %d)" % [vr_shots, c.ammo])
+
+
+## Simple mode: touch the bell, poke Polly, then pick up a spare cannonball and throw it overboard.
+func _fake_vr_props(p, delta: float) -> bool:
+	if main.props == null or prop_step >= 5 or vr_shots < 1 or vr_state != "rest" or p.grab_hand != null:
+		return false
+	var hr: Node3D = p.hand_r
+	var c = main.cannons[p.station]
+	var mine := func(d: Dictionary) -> bool:
+		var n: Node3D = d.node
+		return Vector2(n.global_position.x - c.global_position.x, n.global_position.z - c.global_position.z).length() < 2.2
+	prop_t += delta
+	if prop_t > 8.0:
+		print("Bot VR props: gave up at step %d" % prop_step)
+		prop_step = 5
+		return false
+	match prop_step:
+		0:
+			prop_step = 1
+			prop_t = 0.0
+		1, 3:
+			var kind := "bell" if prop_step == 1 else "ball"
+			var goal = null
+			for d in main.props.items:
+				if d.kind == kind and d.state == "home" and mine.call(d):
+					goal = main.props._touch_point(d) if kind == "bell" else (d.node as Node3D).global_position
+					break
+			if goal == null:
+				return false
+			var g: Vector3 = goal
+			hr.global_position = hr.global_position.move_toward(g + (Vector3.ZERO if kind == "ball" else c.outboard * 0.15), delta * 1.6)
+			p.fake_trigger["right_hand"] = 0.0
+			if kind == "ball" and hr.global_position.distance_to(g) < 0.04:
+				p.fake_trigger["right_hand"] = 1.0
+				prop_step = 4
+				prop_t = 0.0
+			elif kind == "bell" and hr.global_position.distance_to(g + c.outboard * 0.15) < 0.03:
+				prop_step = 2
+				prop_t = 0.0
+		2:
+			var parrot = main.parrot
+			var pp: Vector3 = parrot.global_position + Vector3.UP * 0.25
+			hr.global_position = hr.global_position.move_toward(pp, delta * 1.2)
+			if hr.global_position.distance_to(pp) < 0.05:
+				prop_step = 3
+				prop_t = 0.0
+		4:
+			p.fake_trigger["right_hand"] = 1.0
+			hr.global_position += (c.outboard * 6.0 + Vector3.UP * 3.0) * delta  # fling it out to sea
+			if prop_t > 0.25:
+				p.fake_trigger["right_hand"] = 0.0
+				print("Bot VR props: threw a cannonball (holding=%s)" % main.props.is_holding(hr))
+				prop_step = 5
+				vr_t = 0.0
+	return true
 
 
 func _drive_gunner(p) -> void:
@@ -348,7 +416,7 @@ func _drive_deckhand(p) -> void:
 				need = true
 		if need:
 			var spot := World.HOLD_POS + Vector3(-1.2 + 0.4 * p.index, 0.0, 1.9)
-			if pos.distance_to(World.HOLD_POS) < 2.3:
+			if pos.distance_to(World.HOLD_POS) < 2.45:  # (the spot is 2.06 away; walking stops within 0.3 of it)
 				p.bot_use = toggle
 				return
 			goal = spot

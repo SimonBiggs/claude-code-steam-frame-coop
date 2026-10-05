@@ -107,7 +107,7 @@ func _hint() -> String:
 	if main.phase == "seek":
 		s += "  ·  " + ("X / E: squeak for +%d" % main.TAUNT_POINTS if player.taunt_cd <= 0.0 else "squeak in %d s" % ceili(player.taunt_cd))
 		if main.jailed_count() > 0 and main.jail_breaks > 0:
-			s = "Friends in JAIL! Sneak to the hall and ring the BELL to free them!\n" + s
+			s = "Friends in JAIL! Sneak back to the jail and ring the BELL to free them!\n" + s
 		elif main.round_type == "stars" and main.star_taken.has(false):
 			s = "Grab the golden STARS: +%d each!\n" % main.STAR_POINTS + s
 		elif main.round_type == "night" and player.prop_kind < 0:

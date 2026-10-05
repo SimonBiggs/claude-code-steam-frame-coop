@@ -12,6 +12,22 @@ extends Node3D
 ## jobs.gd (crew jobs), rocket.gd (rocket + launch fx), space.gd (planets, map, log, launch cam),
 ## operator.gd (pilot), player.gd (crew), world.gd (the workshop), join_listener.gd (drop-in join).
 ## The host is authoritative; modules travel to the TV in snapshots.
+##
+## SIMPLE_MODE (the family: "all of the games have become too complicated", "simple games are the fun
+## games", "everything's being driven by text"). Everything below that it cuts is switched off, not
+## deleted. In simple mode Rocket Workshop is just the talking puzzle:
+##  - Rocket 1 is a PRACTICE: the blueprint shows one big glowing button; the matching real button on the
+##    desk glows too and a see-through ghost hand (ghost_hand.gd, pilot only) presses it. Then the ghost
+##    hand pulls the glowing lever: "the TV tells, the pilot does".
+##  - One new desk control per rocket (button, plugs, dial, switches, shapes; at most two puzzles + the
+##    lever); only the controls this rocket needs are on the desk. The ghost hand shows how a new one moves.
+##  - Blueprints are pictures (colours, shapes, positions), no words. With nobody on the TV, the pilot
+##    sees the blueprint too, floating behind the desk.
+##  - No cockpit wings, crew jobs, surprise events, countdown, penalties, stars, log or end screen.
+##    A wrong press just makes a silly honk and a puff of smoke.
+##  - Everything round the pilot reacts to touch (props.gd): a toy alien, a globe, a rubber chicken,
+##    a fan, a window shutter and bobbleheads.
+##  - Text: VR only gets "3 2 1" and "LIFT OFF!"; the TV gets one short line.
 
 const P := preload("res://games/rocket_workshop/puzzles.gd")
 const WorldScript := preload("res://games/rocket_workshop/world.gd")
@@ -28,6 +44,9 @@ const MusicScript := preload("res://core/music.gd")
 const NetScript := preload("res://core/net.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
 const VrText := preload("res://core/vr_text.gd")
+const PropsScript := preload("res://games/rocket_workshop/props.gd")
+const GhostHandScript := preload("res://games/rocket_workshop/ghost_hand.gd")
+const SIMPLE_MODE := true
 
 const MANUAL_LAYER := 512  # blueprint content: drawn for the TV crew only
 const PANEL_LAYER := 1024  # desk controls: drawn for the pilot only
@@ -78,6 +97,11 @@ const SOUNDS := {
 	"arrive": [1.1, 523.0, 2093.0, 0.4, "square", 0.0],
 	"star": [0.22, 1320.0, 1980.0, 0.28, "tri", 0.0],
 	"uhoh": [0.6, 520.0, 260.0, 0.35, "square", 0.0],
+	"honk": [0.4, 700.0, 380.0, 0.4, "saw", 0.15],
+	"squeak": [0.3, 1500.0, 2300.0, 0.3, "sine", 0.0],
+	"boing": [0.45, 300.0, 700.0, 0.35, "sine", 0.0],
+	"whirr": [0.8, 180.0, 260.0, 0.25, "saw", 0.5],
+	"tweet": [0.18, 2600.0, 3400.0, 0.25, "sine", 0.0],
 }
 const HELLO_SOUNDS: Array[String] = ["beep", "boopy", "zorp"]
 
@@ -139,6 +163,10 @@ var center_label: Label
 var help_label: Label
 var center_tween: Tween
 var vr_center: Label3D
+var simple := SIMPLE_MODE  # other scripts read main.simple
+var props: Node3D  # simple mode: touchable toys round the pilot
+var ghost_hand: Node3D  # simple mode: shows the pilot how (pilot only)
+var oops_t := 0.0
 
 
 func _ready() -> void:
@@ -159,6 +187,10 @@ func _ready() -> void:
 	jobs.main = self
 	add_child(jobs)
 	_build_hud()
+	if SIMPLE_MODE:
+		props = PropsScript.new()
+		props.main = self
+		add_child(props)
 	best = _load_best()
 	var menu := PauseMenuScript.new()
 	menu.main = self
@@ -190,7 +222,14 @@ func _setup_game(mode: String) -> void:
 	ready_to_play = true
 	_ensure_join_listener()
 	_restore_party()
-	if mode == "host":
+	if SIMPLE_MODE:
+		if mode != "client":
+			ghost_hand = GhostHandScript.new()
+			add_child(ghost_hand)
+			set_layers(ghost_hand, PANEL_LAYER)
+		else:
+			_show_center("", 0.0, false)  # clear "Connecting…"; no words: the first rocket rolls out
+	elif mode == "host":
 		_show_center("Waiting for the TV crew to join…", 0.0)
 	elif mode == "client":
 		_show_center("CONNECTED!\nFind the boards with BOUNCING ARROWS and tell the pilot what they say!", 3.0)
@@ -524,7 +563,7 @@ func popup(pos: Vector3, text: String, color: Color, broadcast: bool = true) -> 
 	l.font_size = 64
 	l.outline_size = 18
 	l.pixel_size = 0.008
-	l.no_depth_test = true
+	l.no_depth_test = false
 	l.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(l)
 	l.global_position = pos
@@ -684,7 +723,7 @@ func crew_count() -> int:
 
 
 func _start_rocket(n: int) -> void:
-	var r := P.make_rocket(n, crew_count())
+	var r := P.make_simple_rocket(n) if SIMPLE_MODE else P.make_rocket(n, crew_count())
 	rocket_n = n
 	rocket_name = r.name
 	modules = r.modules
@@ -714,6 +753,10 @@ func _start_rocket(n: int) -> void:
 				fresh.append(NEW_LINES[m.type])
 	print("Rocket %d (%s) to %s: %s, %.0f s" % [n, rocket_name, P.PLANETS[P.planet(n)], ", ".join(types), time_left])
 	sound("pop", -2.0, 0.8)
+	if SIMPLE_MODE:
+		events_left = 0
+		phase_t = INTRO_TIME if n == 1 else 2.0  # no words: the new rocket rolls out, the arrows bounce
+		return
 	if n == 1:
 		phase_t = FIRST_INTRO_TIME
 		_show_center("ROCKET WORKSHOP!  First stop: %s\nPILOT: you have the buttons, but no instructions.\n" % P.PLANETS[0] \
@@ -734,7 +777,8 @@ func on_panel(kind: String, args: Array) -> void:
 			_start_launch()
 		elif phase == "work" and lever_hint_t <= 0.0:
 			lever_hint_t = 3.0
-			_flash("Not yet! Finish every job first.")
+			if not SIMPLE_MODE:
+				_flash("Not yet! Finish every job first.")
 			sound("boop", -6.0, 0.5)
 		return
 	if phase != "work" and phase != "ready":
@@ -746,6 +790,18 @@ func on_panel(kind: String, args: Array) -> void:
 				return
 			var pressed: Array = m.pressed
 			var answer: Array = m.answer
+			if SIMPLE_MODE:  # each press is right (it lights up) or a silly honk; no mixing to remember
+				var c := int(args[0])
+				if pressed.has(c):
+					return
+				if not answer.has(c):
+					_oops("fuel%d" % c)
+					return
+				pressed.append(c)
+				sound("plug", -4.0, 0.7 + c * 0.15)
+				if pressed.size() >= answer.size():
+					_solve(m)
+				return
 			pressed.append(int(args[0]))
 			sound("plug", -4.0, 0.7 + int(args[0]) * 0.15)
 			if pressed.size() >= answer.size():
@@ -775,6 +831,8 @@ func on_panel(kind: String, args: Array) -> void:
 						all = false
 				if all:
 					_solve(m)
+			elif SIMPLE_MODE:
+				_oops("sock%d" % socket)
 			else:
 				_burp("Wrong socket - zzzap!")
 		"shape":
@@ -790,6 +848,8 @@ func on_panel(kind: String, args: Array) -> void:
 				m.step = step + 1
 				if int(m.step) >= order.size():
 					_solve(m)
+			elif SIMPLE_MODE:
+				_oops("shape%d" % int(args[0]))  # keep the shapes already pressed
 			else:
 				m.step = 0
 				_burp("Wrong shape order!")
@@ -797,6 +857,14 @@ func on_panel(kind: String, args: Array) -> void:
 			var m := module("gauge")
 			if not m.is_empty() and not m.done:
 				m.value = clampi(int(args[0]), 1, 9)
+		"dial_let_go":  # simple mode: no SET button, letting go of the dial checks it
+			var m := module("gauge")
+			if m.is_empty() or m.done:
+				return
+			if int(m.value) == int(m.answer):
+				_solve(m)
+			else:
+				sound("boop", -8.0, 0.6)
 		"set":
 			var m := module("gauge")
 			if m.is_empty() or m.done:
@@ -814,6 +882,8 @@ func on_panel(kind: String, args: Array) -> void:
 			var i := int(args[0])
 			state[i] = not bool(state[i])
 			sound("click", -4.0, 1.0)
+			if SIMPLE_MODE and state == m.answer:  # no CHECK button: right pattern, done
+				_solve(m)
 		"check":
 			var m := module("switches")
 			if m.is_empty() or m.done:
@@ -859,6 +929,8 @@ func _solve(m: Dictionary) -> void:
 	print("Module solved: %s (rocket %d, %.0f s left)" % [m.type, rocket_n, time_left])
 	sound("solve", -2.0)
 	_flash(title + " - DONE!")
+	if SIMPLE_MODE and panel != null and panel.area_centre(m.type) != Vector3.INF:
+		burst(panel.area_centre(m.type), Color(0.4, 1.0, 0.5), 14, 0.02)  # the pilot sees it work too
 	if not P.is_job(m.type) and manual.boards.has(m.type):
 		var root: Node3D = manual.boards[m.type].root
 		burst(root.global_position + root.global_basis.z * 0.5, Color(0.4, 1.0, 0.5), 18, 0.08)
@@ -869,7 +941,8 @@ func _solve(m: Dictionary) -> void:
 		phase = "ready"
 		sound("allset", 0.0)
 		print("All modules done: waiting for the launch lever")
-		_show_center("ALL SYSTEMS GO!\nPULL THE LEVER, CRONK!", 6.0)  # David's wording
+		if not SIMPLE_MODE:  # simple: the lever glows (and the ghost hand pulls it on the practice rocket)
+			_show_center("ALL SYSTEMS GO!\nPULL THE LEVER, CRONK!", 6.0)  # David's wording
 
 
 ## A mistake: the rocket burps and the countdown loses a few seconds (never below 5).
@@ -889,6 +962,21 @@ func _burp(why: String) -> void:
 		players[0].haptic("r", 0.8)
 
 
+## Simple mode: a wrong press is just funny - a honk, a puff of smoke at that control, a wobble. No penalty.
+func _oops(key: String) -> void:
+	mistakes += 1
+	print("Oops (simple): %s" % key)
+	if oops_t <= 0.0:
+		oops_t = 0.5
+		sound("honk", -2.0, randf_range(0.8, 1.25))
+		rocket.burp()
+		net.event("burp", [])
+	if panel != null:
+		burst(panel.control_world(key, 0.05), Color(0.75, 0.75, 0.8), 10, 0.025)
+	if players[0].vr:
+		players[0].haptic("r", 0.5)
+
+
 func _flash(text: String) -> void:
 	msg = text
 	msg_t = 3.0
@@ -902,7 +990,7 @@ func _start_launch() -> void:
 	last_stars = 1 + (1 if rocket_burps == 0 else 0) + (1 if time_left >= start_time * 0.4 else 0)
 	stars += last_stars
 	streak = streak + 1 if rocket_burps == 0 else 0
-	if streak >= 2:
+	if streak >= 2 and not SIMPLE_MODE:  # simple: no countdown to add to
 		bonus_next = minf(5.0 * streak, 20.0)
 	print("Rocket %d launched! (%d total, %.0f s to spare, %d stars, streak %d)" % [rocket_n, launched, time_left, last_stars, streak])
 	_show_center("3", 0.9)
@@ -916,7 +1004,12 @@ func _launch_beats(prev: float, now: float) -> void:
 			sound("count", 0.0, 1.0)
 	if prev < 2.6 and now >= 2.6:
 		sound("rumble", 2.0, 1.0)
-	if prev < RocketScript.LIFTOFF and now >= RocketScript.LIFTOFF:
+	if prev < RocketScript.LIFTOFF and now >= RocketScript.LIFTOFF and SIMPLE_MODE:
+		_show_center("LIFT OFF!", 2.5)
+		sound("count", 2.0, 2.0)
+		sound("whoosh", 0.0, 1.0)
+		sound("allset", -2.0, 1.2)
+	elif prev < RocketScript.LIFTOFF and now >= RocketScript.LIFTOFF:
 		var line := "LIFT OFF!\nRocket #%d (%s) is off to %s!" % [rocket_n, rocket_name, P.PLANETS[P.planet(rocket_n)]]
 		if streak >= 2:
 			line += "\nPERFECT STREAK x%d!  +%d s on the next rocket" % [streak, int(bonus_next)]
@@ -930,7 +1023,8 @@ func _launch_beats(prev: float, now: float) -> void:
 	if prev < SpaceScript.ARRIVE_AT and now >= SpaceScript.ARRIVE_AT:
 		var star_names: Array[String] = ["", "1 STAR", "2 STARS", "3 STARS!"]
 		var star_txt: String = star_names[clampi(last_stars, 0, 3)]
-		_show_center("TOUCHDOWN ON %s!\n%s   (total %d)" % [P.PLANETS[P.planet(rocket_n)], star_txt, stars], 1.6)
+		if not SIMPLE_MODE:
+			_show_center("TOUCHDOWN ON %s!\n%s   (total %d)" % [P.PLANETS[P.planet(rocket_n)], star_txt, stars], 1.6)
 		sound("arrive", -2.0, 1.0)
 		for k in last_stars:
 			get_tree().create_timer(0.15 * k).timeout.connect(sound.bind("star", -4.0, 1.0 + 0.15 * k))
@@ -1181,13 +1275,15 @@ func _host_update(delta: float) -> void:
 	lever_hint_t -= delta
 	match phase:
 		"wait":
-			if net.mode != "host" or net.connected:
+			if net.mode != "host" or net.connected or SIMPLE_MODE:  # simple: solo VR works too
 				_start_rocket(1)
 		"intro":
 			phase_t -= delta
 			if phase_t <= 0.0:
 				phase = "work"
 		"work", "ready":
+			if SIMPLE_MODE:
+				return  # no countdown, no jobs, no surprises: just the desk and the blueprints
 			if net.mode == "host" and not net.connected:
 				return  # hold the countdown while the TV crew is away
 			time_left -= delta
@@ -1284,6 +1380,8 @@ func _clock() -> String:
 ## Text on the pilot's desk screen (world-space, only the pilot sees it). The status line takes
 ## turns between the useful messages.
 func screen_text() -> String:
+	if SIMPLE_MODE:
+		return ""
 	var status := ""
 	var tips: Array[String] = []
 	match phase:
@@ -1327,6 +1425,13 @@ func launch_cam() -> Dictionary:
 ## A short "what do I do now?" line under each crew member's view.
 func crew_hint(p) -> String:
 	if net.mode == "client" and not synced:
+		return ""
+	if SIMPLE_MODE:  # one short line at most; the bouncing arrows and pictures do the rest
+		match phase:
+			"intro", "work":
+				return "Tell the pilot what you see!"
+			"ready":
+				return "PULL THE LEVER!"
 		return ""
 	match phase:
 		"wait":
@@ -1429,6 +1534,45 @@ func _process(delta: float) -> void:
 	_animate_world(delta)
 	_update_hud()
 	_update_vr_center()
+	if SIMPLE_MODE:
+		oops_t -= delta
+		_update_simple(delta)
+
+
+## Simple mode (host / local): the practice glow, the ghost hand and the pilot's own blueprint.
+func _update_simple(delta: float) -> void:
+	if net.mode == "client" or panel == null or not panel.detail:
+		return
+	var glow := ""
+	var demo: Array = []
+	var idle: float = panel.idle_t
+	var working := phase == "work"
+	var first := rocket_n == 1
+	if working and not modules.is_empty():
+		var m: Dictionary = modules[0]  # the new control is always first
+		if not m.done:
+			if first and m.type == "fuel":
+				var c := int((m.answer as Array)[0])
+				glow = "fuel%d" % c
+				if idle > 1.2:
+					demo = panel.demo_path(m)
+			elif rocket_n <= P.SIMPLE_ORDER.size() and idle > 4.0:
+				demo = panel.demo_path(m)
+	elif phase == "ready" and idle > (1.2 if first else 6.0):
+		demo = panel.demo_path({"type": "lever"})
+	panel.glow_key = glow
+	if ghost_hand != null:
+		ghost_hand.play(demo, delta)
+	var solo := false
+	if phase == "intro" or phase == "work" or phase == "ready":
+		solo = (net.mode == "host" and not net.connected) or (net.mode == "local" and crew_count() == 0)
+	var show: Dictionary = {}
+	if solo:
+		for m in modules:
+			if not m.done:
+				show = m
+				break
+	manual.update_solo(show, panel)
 
 
 ## Ambient life: the planet mobile turns, clouds drift, gantry lights blink faster when ready.
@@ -1907,7 +2051,8 @@ func on_client_left() -> void:
 	for i in range(2, players.size()):
 		if players[i].active:
 			players[i].set_active(false)
-	_show_center("The TV crew left - waiting for them to come back…", 0.0)
+	if not SIMPLE_MODE:  # simple mode just carries on solo
+		_show_center("The TV crew left - waiting for them to come back…", 0.0)
 
 
 func on_p2_action(action: String, args: Array, index: int = 1) -> void:
@@ -1938,7 +2083,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 
 
 func _set_pause_banner(paused: bool, who: String) -> void:
-	_show_center("PAUSED\n" + who if paused else "", 0.0, false)
+	_show_center(("PAUSED" if SIMPLE_MODE else "PAUSED\n" + who) if paused else "", 0.0, false)
 	if vr_center != null and paused:
 		VrText.snap(vr_center)
 	_update_vr_center()
@@ -2020,6 +2165,9 @@ func apply_event(kind: String, args: Array) -> void:
 			star_burst(args[0], args[1])
 		"logged":
 			space.add_log(args[0], args[1], args[2], args[3])
+		"prop":
+			if props != null:
+				props.play(args[0])
 		"remote_pause":
 			get_tree().paused = args[0]
 			_set_pause_banner(args[0], "The pilot paused the game")
@@ -2060,6 +2208,8 @@ func _build_hud() -> void:
 	help_label.offset_top = -64
 	help_label.offset_bottom = -12
 	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	if SIMPLE_MODE:
+		return
 	help_label.text = "Crew: left stick / WASD / arrows walk · right stick / mouse / Q E look · hold A / X / Space / Enter to fix pipes · walk into cans, pots, bolts and cats · more crew: press A on another controller\n" \
 		+ "Pilot (split screen): mouse or controller pointer · click buttons · hold and drag plugs, the dial, the crank and the launch lever"
 
@@ -2078,6 +2228,10 @@ func _show_center(text: String, duration: float, broadcast: bool = true) -> void
 
 
 func _update_hud() -> void:
+	if SIMPLE_MODE:
+		info_label.text = ""
+		list_label.text = ""
+		return
 	if help_label.modulate.a > 0.0 and launched >= 2:
 		help_label.modulate.a = maxf(0.0, help_label.modulate.a - get_process_delta_time() * 0.5)
 	if net.mode == "client" and not synced:
@@ -2126,7 +2280,7 @@ func _update_vr_center() -> void:
 		vr_center = Label3D.new()
 		vr_center.font_size = 46
 		vr_center.outline_size = 26
-		vr_center.no_depth_test = true
+		vr_center.no_depth_test = false
 		vr_center.render_priority = 10
 		vr_center.outline_render_priority = 9
 		vr_center.width = 1000.0
@@ -2135,7 +2289,7 @@ func _update_vr_center() -> void:
 		vr_center.modulate = Color(1.0, 0.95, 0.85)
 		add_child(vr_center)
 		set_layers(vr_center, PANEL_LAYER)
-	vr_center.text = center_label.text
+	vr_center.text = preload("res://core/vr_text.gd").short(center_label.text)  # no walls of text in VR
 	vr_center.modulate.a = center_label.modulate.a
 	vr_center.outline_modulate = Color(0, 0, 0, center_label.modulate.a)
 	VrText.follow(vr_center, players[0].xr_camera, self, 0.3, 1.8)

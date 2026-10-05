@@ -50,6 +50,8 @@ var _custom_loops := {}  # add_loop(): name -> recipe
 var _bg_task := -1
 var _bg_jobs: Array = []  # [cache key, recipe, seed] being rendered in the background
 var _bg_out: Array = []  # rendered PackedFloat32Array per job (written by the worker)
+var _bg_done := 0  # jobs the worker has finished (only the worker writes it while it runs)
+var _bg_applied := 0  # jobs the main thread has put in the cache
 
 
 func _ready() -> void:
@@ -563,6 +565,8 @@ func warm(names: Array = [], background: bool = false) -> void:
 		return
 	_bg_out.clear()
 	_bg_out.resize(_bg_jobs.size())
+	_bg_done = 0
+	_bg_applied = 0
 	_bg_task = WorkerThreadPool.add_task(_render_jobs)
 	set_process(true)
 
@@ -571,22 +575,34 @@ func _render_jobs() -> void:
 	for i in _bg_jobs.size():
 		var job: Array = _bg_jobs[i]
 		_bg_out[i] = render(job[1], int(job[2]))
+		_bg_done = i + 1  # the main thread hands each sound over as soon as it is ready
 
 
+## Hand finished background sounds to the cache as they come (not only when the whole batch is done:
+## a big batch takes many seconds on the Frame, and every sound played meanwhile was synthesised again
+## on the main thread, which hitched).
 func _process(_delta: float) -> void:
-	if _bg_task < 0 or not WorkerThreadPool.is_task_completed(_bg_task):
+	if _bg_task < 0:
 		return
-	WorkerThreadPool.wait_for_task_completion(_bg_task)
-	_bg_task = -1
-	for i in _bg_jobs.size():
+	var done := _bg_done
+	var finished := WorkerThreadPool.is_task_completed(_bg_task)
+	if finished:
+		WorkerThreadPool.wait_for_task_completion(_bg_task)
+		_bg_task = -1
+		done = _bg_jobs.size()
+	for i in range(_bg_applied, mini(done, _bg_jobs.size())):
 		var job: Array = _bg_jobs[i]
 		var def: Dictionary = job[1]
 		var buf: PackedFloat32Array = _bg_out[i]
 		if not ResCache.has(str(job[0])):
 			ResCache.put(str(job[0]), to_wav(buf, int(def.get("rate", 32000)), def.has("loop")))
-	_bg_jobs.clear()
-	_bg_out.clear()
-	set_process(false)
+	_bg_applied = maxi(_bg_applied, done)
+	if finished:
+		_bg_jobs.clear()
+		_bg_out.clear()
+		_bg_done = 0
+		_bg_applied = 0
+		set_process(false)
 
 
 # --- Loops -------------------------------------------------------------------------

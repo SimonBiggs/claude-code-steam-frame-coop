@@ -2,6 +2,27 @@
 
 A co-op puzzle platformer on a floating obstacle course in the sky.
 
+## SIMPLE_MODE (on: `const SIMPLE_MODE := true` in main.gd)
+
+The family found the games too complicated and Block Builders "a wall of text" in VR, so by default it's
+just: **the builder grabs blocks from the tray and makes a path, the runners run to the flag.**
+
+- No timer, score, stars, gift balloons, high-five rules, tips or awards; you can't fail. Falling just
+  pops you back up with a boing. Clearing a level is a HOORAY and confetti, then the next one starts.
+- Eight short levels (`levels.gd` SIMPLE_LEVELS): one gap to bridge, two bridges, then ONE new block
+  per level: stairs, crates, a spring, a fan, a launch pad, and a rainbow finale.
+- Practice: level 1 is one gap. A glowing see-through block shows where the plank goes, and the VR
+  builder sees a ghost hand (`ghost_hand.gd`) take a plank from the tray and drop it in. The runners
+  get a glowing ring to jump through over the new bridge, then the flag. On later levels the glowing
+  block shows where the first block goes straight away. The tray shows what's left as little cubes.
+- Everything in reach reacts (`props.gd`): toy blocks on a little cloud by your left hip (knock them
+  over, stack them, grab one with the trigger and throw it), balloons that pop and grow back, birds
+  that flap away, fluffy clouds that puff, the flag waves, and touching a runner gives them a boop.
+- Solo VR: with no TV machine, P2 is a buddy runner who waits at the gap for your bridge.
+- Text: only a short headline (BLOCK BUILDERS, the level name, HOORAY!); one line of controls on the TV.
+
+Everything below describes the full game (SIMPLE_MODE = false).
+
 - **Player 1, the BUILDER (VR, host).** `XROrigin3D.world_scale = 8`, so the course is a tabletop
   diorama in front of you (a block is 12.5 cm). A tray of colourful blocks sits low in front of your
   right hip (fitted to your height, well away from your face; it glides after you if you walk away

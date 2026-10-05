@@ -1,5 +1,5 @@
 #!/bin/bash
-# merge-game <agent-branch> <id> "<NAME>" "<blurb>": merge a game built by a background agent,
+# merge-game <agent-branch> <id> "<NAME>" "<blurb>" [category]: merge a game built by a background agent,
 # register it in the arcade, re-run its bot tests (local + networked) from staging, then deploy.
 set -e
 BR="$1"; ID="$2"; NAME="$3"; BLURB="$4"
@@ -12,14 +12,16 @@ git merge --no-ff -q "$BR" -m "Merge $NAME (built by a background agent)
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 rsync -a "games/$ID" "$ST/games/" && cp tests/${ID}_bot.* "$ST/tests/"
 cd "$ST"
-python3 - "$ID" "$NAME" "$BLURB" <<'PY'
+python3 - "$ID" "$NAME" "$BLURB" "${5:-party}" <<'PY'
 import sys
 id_, name, blurb = sys.argv[1:4]
 p = 'arcade/arcade.gd'; s = open(p).read()
 if f'"id": "{id_}"' not in s:
-    entry = f'\t{{"id": "{id_}", "name": "{name}", "scene": "res://games/{id_}/main.tscn",\n\t\t"blurb": "{blurb}"}},\n]'
-    i = s.index('\n]\nconst DEFAULT_PORT')
-    s = s[:i] + '\n' + entry + s[i + 2:]
+    cat = sys.argv[4] if len(sys.argv) > 4 else "party"
+    entry = f'\t{{"id": "{id_}", "cat": "{cat}", "name": "{name}", "scene": "res://games/{id_}/main.tscn",\n\t\t"blurb": "{blurb}"}},\n'
+    start = s.index('const GAMES := [')
+    end = s.index('\n]\n', start) + 1  # the line holding the list's closing bracket
+    s = s[:end] + entry + s[end:]
     open(p, 'w').write(s)
 PY
 timeout 120 godot --headless --path . --import >/dev/null 2>&1 || true

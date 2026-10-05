@@ -104,6 +104,8 @@ func _close_old_peer() -> void:
 
 
 func _exit_tree() -> void:
+	if has_meta("follow_udp") and get_meta("follow_udp") != null:  # _follow_headset's beacon listener
+		(get_meta("follow_udp") as PacketPeerUDP).close()
 	_close_old_peer()
 
 
@@ -111,6 +113,10 @@ var menu_was_down := false
 
 
 func _process(delta: float) -> void:
+	_ensure_caption()
+	_follow_headset()
+	_ensure_fullscreen()
+	_hide_tv_cursor()
 	_track_pause()
 	if not get_tree().paused:
 		_since_unpause += delta
@@ -497,7 +503,7 @@ func _check_vr_menu() -> void:
 	if hl.get_parent() is XROrigin3D:
 		ws = (hl.get_parent() as XROrigin3D).world_scale
 	if btn != null:
-		btn.position = Vector3(-0.08, 0.03, 0.1) * ws  # beside the wrist, clear of the games' wrist displays
+		btn.position = Vector3(-0.15, 0.02, 0.12) * ws  # well out beside the wrist: games put their own displays on the glove (Party Board coins, Duo Arena HP)
 		btn.pixel_size = 0.0012 * ws
 	var on_btn := false
 	var trig := false
@@ -515,8 +521,49 @@ func _check_vr_menu() -> void:
 	else:
 		set_meta("touch_t", 0.0)
 	var held_touch: bool = float(get_meta("touch_t", 0.0)) > 0.35
+	var paused := get_tree().paused
+	# While paused, an ARCADE button appears above RESUME: touch it, or point at it and pull the
+	# trigger, to go back to the arcade (Simon: "why can't I just press the menu's buttons?").
+	var abtn := _wrist_arcade_button(hl)
+	abtn.visible = paused
+	if paused and hr != null and btn != null:
+		abtn.position = btn.position + Vector3(0.0, 0.055, 0.0) * ws
+		abtn.pixel_size = btn.pixel_size
+		var to2: Vector3 = abtn.global_position - hr.global_position
+		var fwd2: Vector3 = -hr.global_basis.z
+		var along2 := to2.dot(fwd2)
+		var off2 := (to2 - fwd2 * along2).length()
+		var on_arc := to2.length() < 0.07 * ws or (along2 > 0.0 and off2 < 0.06 * ws)
+		if on_arc and on_btn:
+			# Pointing between the two: the one closer to the ray wins.
+			var to1: Vector3 = btn.global_position - hr.global_position
+			var off1 := (to1 - fwd2 * to1.dot(fwd2)).length()
+			if off1 < off2:
+				on_arc = false
+			else:
+				on_btn = false
+		abtn.modulate = Color(1.0, 0.9, 0.3) if on_arc else Color(1.0, 0.7, 0.55)
+		btn.modulate = Color(1.0, 0.9, 0.3) if on_btn else Color(0.55, 0.95, 1.0)
+		if to2.length() < 0.07 * ws:
+			set_meta("arc_touch_t", float(get_meta("arc_touch_t", 0.0)) + get_process_delta_time())
+		else:
+			set_meta("arc_touch_t", 0.0)
+		if (on_arc and trig and not bool(get_meta("trig_was", false))) or float(get_meta("arc_touch_t", 0.0)) > 0.3:
+			print("Net: VR arcade button")
+			go_to_arcade()
+			return
+	# While paused, a trigger pull on the button resumes only when released quickly, so HOLDING the
+	# trigger (even while pointing near the wrist, e.g. with a fishing rod) always goes to the arcade.
+	var tap_resume := false
+	if paused and on_btn and trig:
+		set_meta("btn_hold", float(get_meta("btn_hold", 0.0)) + get_process_delta_time())
+	elif float(get_meta("btn_hold", 0.0)) > 0.0:
+		tap_resume = float(get_meta("btn_hold", 0.0)) < 0.5 and not trig
+		set_meta("btn_hold", 0.0)
 	var down: bool = hl.is_button_pressed("menu_button") or hl.is_button_pressed("by_button") \
-		or held_touch or (on_btn and trig)
+		or held_touch or (on_btn and trig and not paused) or tap_resume
+	if has_meta("leaving"):
+		down = false  # on the way to the arcade: a late trigger release must not pause again
 	if down and not menu_was_down:
 		print("Net: VR pause toggled")
 		if main.has_method("toggle_vr_pause"):
@@ -524,7 +571,7 @@ func _check_vr_menu() -> void:
 		else:
 			toggle_pause(0)
 	# Leaving needs the trigger HELD for 1.5 s while paused, so a stray trigger pull doesn't quit.
-	if trig and not on_btn and get_tree().paused:
+	if trig and paused:
 		set_meta("leave_t", float(get_meta("leave_t", 0.0)) + get_process_delta_time())
 		if float(get_meta("leave_t", 0.0)) > 1.5:
 			go_to_arcade()
@@ -536,6 +583,26 @@ func _check_vr_menu() -> void:
 		btn.text = "RESUME" if get_tree().paused else "MENU"
 
 
+func _wrist_arcade_button(hl: XRController3D) -> Label3D:
+	var b := hl.get_node_or_null("WristArcade") as Label3D
+	if b == null:
+		b = Label3D.new()
+		b.name = "WristArcade"
+		b.text = "ARCADE"
+		b.font_size = 40
+		b.outline_size = 18
+		b.pixel_size = 0.0012
+		b.process_mode = Node.PROCESS_MODE_ALWAYS
+		b.visible = false
+		hl.add_child(b)
+	var cam := get_viewport().get_camera_3d()
+	if cam != null:
+		var d := b.global_position - cam.global_position
+		if d.length() > 0.01:
+			b.global_basis = Basis.looking_at(d, Vector3.UP).scaled(b.global_basis.get_scale())
+	return b
+
+
 func _wrist_button(hl: XRController3D) -> Label3D:
 	var btn := hl.get_node_or_null("WristMenu") as Label3D
 	if btn == null:
@@ -544,11 +611,20 @@ func _wrist_button(hl: XRController3D) -> Label3D:
 		btn.font_size = 40
 		btn.outline_size = 18
 		btn.pixel_size = 0.0012
-		btn.no_depth_test = true
-		btn.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		btn.no_depth_test = false
+		btn.billboard = BaseMaterial3D.BILLBOARD_DISABLED
 		btn.process_mode = Node.PROCESS_MODE_ALWAYS
 		hl.add_child(btn)
 		btn.position = Vector3(0.0, 0.07, 0.1)
+	btn.no_depth_test = false  # (re)applied so buttons made before this fix also let the hand pass in front
+	# No billboard in VR: each eye would see it turned differently (cross-eyed, Abigail/Simon).
+	# Turn it towards the head once per frame instead; a Label3D reads from its +Z side.
+	btn.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+	var cam := get_viewport().get_camera_3d()
+	if cam != null:
+		var d := btn.global_position - cam.global_position
+		if d.length() > 0.01:
+			btn.global_basis = Basis.looking_at(d, Vector3.UP).scaled(btn.global_basis.get_scale())
 	return btn
 
 
@@ -570,3 +646,72 @@ func _beacon(delta: float) -> void:
 	var scene := get_tree().current_scene
 	if scene != null and scene.scene_file_path != "":
 		u.put_packet(("ARCADE_GAME " + scene.scene_file_path).to_utf8_buffer())
+
+
+## "Claude:" captions from frame-say (addons/gdev/caption.gd, a dev tool that may be missing).
+## Added once to the root so it survives game changes; created here because net.gd hot-reloads,
+## so it switches on in a running game without a restart.
+func _ensure_caption() -> void:
+	var root := get_tree().root
+	if not root.has_meta("vr_text_guard"):
+		var g: Node = (load("res://core/vr_text_guard.gd") as GDScript).new()
+		g.name = "VrTextGuard"
+		root.set_meta("vr_text_guard", g)
+		root.add_child.call_deferred(g)
+	if root.has_meta("claude_caption") or not ResourceLoader.exists("res://addons/gdev/caption.gd"):
+		return
+	var c: Node = (load("res://addons/gdev/caption.gd") as GDScript).new()
+	c.name = "ClaudeCaption"
+	root.set_meta("claude_caption", c)
+	root.add_child.call_deferred(c)
+
+
+## The TV machine (no VR) runs fullscreen (Simon). Done once per launch, so F11/Alt+Enter still work.
+func _ensure_fullscreen() -> void:
+	var root := get_tree().root
+	if root.has_meta("fullscreen_done") or DisplayServer.get_name() == "headless":
+		return
+	root.set_meta("fullscreen_done", true)
+	var xr := XRServer.primary_interface
+	if xr != null and xr.is_initialized():
+		return  # the headset draws through OpenXR, not the window
+	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+
+
+## No mouse pointer over the TV picture (Simon); it comes back as soon as the mouse moves.
+func _hide_tv_cursor() -> void:
+	var root := get_tree().root
+	if root.has_meta("cursor_hidden") or DisplayServer.get_name() == "headless":
+		return
+	root.set_meta("cursor_hidden", true)
+	var xr := XRServer.primary_interface
+	if xr == null or not xr.is_initialized():
+		Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
+
+
+## TV machine playing on its own (it couldn't reach the headset when this game started): listen for the
+## headset's "ARCADE_GAME <scene>" beacon and switch to that game as a client, so the TV and the
+## headset never end up in different games (it happened twice on 2026-10-04).
+func _follow_headset() -> void:
+	if mode != "local" or not OS.has_environment("DUO_JOIN") or has_meta("following"):
+		return
+	if not has_meta("follow_udp"):
+		var udp := PacketPeerUDP.new()
+		set_meta("follow_udp", udp if udp.bind(PORT + 2) == OK else null)
+	var u = get_meta("follow_udp")
+	if u == null:
+		return
+	var udp: PacketPeerUDP = u
+	while udp.get_available_packet_count() > 0:
+		var msg := udp.get_packet().get_string_from_utf8()
+		if not msg.begins_with("ARCADE_GAME "):
+			continue
+		var scene := msg.substr(12)
+		print("Net: the headset is playing %s; joining it" % scene)
+		set_meta("following", true)
+		udp.close()
+		get_tree().paused = false
+		get_tree().change_scene_to_file.call_deferred(scene)
+		return
+
+

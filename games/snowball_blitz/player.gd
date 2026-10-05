@@ -90,6 +90,9 @@ var hint_t := 0.0
 var lid: Node3D
 var hand_ball: MeshInstance3D
 var hand_label: Label3D
+var held_icicle := false  # simple mode: an icicle snapped off the rack is in the right hand
+var icicle_mesh: MeshInstance3D
+var tv_throws := 0  # simple mode: the practice prompt hides after the first throw
 var mega := false  # MEGA SNOWBALL pickup: the next throw is a giant one (host decides, mirrored)
 
 # Networked co-op.
@@ -176,7 +179,7 @@ func _ready() -> void:
 	tag = Label3D.new()
 	tag.text = "P%d" % (index + 1)
 	tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	tag.no_depth_test = true
+	tag.no_depth_test = false
 	tag.fixed_size = true
 	tag.pixel_size = 0.0012
 	tag.font_size = 28
@@ -316,7 +319,7 @@ func attach_xr(origin: XROrigin3D, cam: XRCamera3D, left: XRController3D, right:
 	wrist_label.modulate = Color(1.0, 0.92, 0.75)
 	wrist_label.position = Vector3(0.0, 0.1, 0.12)
 	wrist_label.rotation_degrees = Vector3(-55, 0, 0)
-	wrist_label.no_depth_test = true
+	wrist_label.no_depth_test = false
 	hand_l.add_child(wrist_label)
 	_set_layers(wrist_label, viewmodel_layer())
 
@@ -477,6 +480,9 @@ func _throw_origin() -> Vector3:
 
 func _update_throw(delta: float) -> void:
 	var held := _throw_held()
+	if main.simple:
+		_simple_throw(held)
+		return
 	if held and not charging and throw_cd <= 0.0:
 		charging = true
 		charge_t = 0.0
@@ -495,6 +501,28 @@ func _update_throw(delta: float) -> void:
 				main.player_throw(self, _throw_origin(), _throw_velocity(c), 0.11 + 0.05 * c, 1.0 + c)
 				main.sound("dash", -6.0, 0.8 + c * 0.3)
 	_update_marker()
+
+
+## Simple mode: a press just throws (no charging); holding keeps throwing. The aim assist bends it
+## onto a snowman you were roughly looking at.
+func _simple_throw(held: bool) -> void:
+	charging = false
+	if marker:
+		marker.visible = false
+	if not held or throw_cd > 0.0:
+		return
+	throw_cd = 0.45
+	throw_anim = 1.0
+	tv_throws += 1
+	var origin := _throw_origin()
+	var v := main.assist_aim(origin, _throw_velocity(0.55)) as Vector3
+	if mega:
+		mega = false
+		main.player_throw(self, origin, v, main.MEGA_R, main.MEGA_DMG)
+		main.sound("whoosh", -2.0, 0.8)
+	else:
+		main.player_throw(self, origin, v, 0.14, 1.6)
+		main.sound("dash", -6.0, 1.0)
 
 
 ## Shows where a snowball thrown now would land (only on this player's own screen).
@@ -518,6 +546,10 @@ func _update_marker() -> void:
 
 
 func _update_repair(delta: float) -> void:
+	if main.simple:
+		repair_seg = -1
+		repairing = false
+		return  # simple mode: the walls snow back up by themselves
 	repair_seg = main.repair_target(global_position)
 	repairing = _repair_held() and repair_seg >= 0
 	if not repairing:
@@ -558,6 +590,7 @@ func _update_viewmodel(delta: float) -> void:
 func _drop_held() -> void:
 	if holding:
 		holding = false
+		held_icicle = false
 		pack = 0.0
 		if hand_ball:
 			hand_ball.visible = false
@@ -590,8 +623,14 @@ func _vr_hands(delta: float) -> void:
 			# snow still gives a bigger, half-packed one.
 			holding = true
 			pack = 0.5 if _hand_low(hand_r) else 0.0
+			if main.props:
+				if main.props.take_icicle(hand_r.global_position):
+					held_icicle = true
+				elif main.props.scoop(hand_r.global_position):
+					pack = 0.8
 			if mega:
 				pack = 1.0
+				held_icicle = false
 			hand_r.trigger_haptic_pulse("haptic", 0.0, 0.45, 0.08, 0.0)
 			main.sound("spit", -8.0, 1.4)
 			main.puff(hand_r.global_position, Color(1, 1, 1), 8, 0.05)
@@ -608,7 +647,8 @@ func _vr_hands(delta: float) -> void:
 			_vr_throw(now)
 	squeeze_was = down
 	hint_t -= delta
-	hand_ball.visible = holding
+	hand_ball.visible = holding and not held_icicle
+	_show_icicle(holding and held_icicle)
 	var r := 0.07 + 0.06 * pack
 	if mega and holding:
 		r = 0.22
@@ -635,15 +675,44 @@ func _vr_throw(now: float) -> void:
 		v = main.assist_aim(p_now, v)
 	var r := 0.09 + 0.07 * pack
 	var dmg := 1.5 + 2.5 * pack
+	var look := ""
+	if held_icicle:
+		held_icicle = false
+		r = 0.1
+		dmg = 3.0
+		look = "icicle"
+		main.sound("tinkle", -6.0, 1.4)
 	if mega:
 		mega = false
 		r = main.MEGA_R
 		dmg = main.MEGA_DMG
 		main.sound("whoosh", -2.0, 0.8)
-	main.player_throw(self, p_now + v.normalized() * 0.12, v, r, dmg)
+	main.player_throw(self, p_now + v.normalized() * 0.12, v, r, dmg, look)
 	hand_r.trigger_haptic_pulse("haptic", 0.0, 0.7, 0.06, 0.0)
 	main.sound("dash", -4.0, 0.7 + v.length() * 0.015)
 	pack = 0.0
+
+
+## Simple mode: the icicle snapped off the rack, held point-forward in the mitten.
+func _show_icicle(on: bool) -> void:
+	if icicle_mesh == null:
+		if not on:
+			return
+		icicle_mesh = MeshInstance3D.new()
+		var cm := CylinderMesh.new()
+		cm.top_radius = 0.028
+		cm.bottom_radius = 0.0
+		cm.height = 0.24
+		cm.radial_segments = 6
+		cm.rings = 1
+		icicle_mesh.mesh = cm
+		icicle_mesh.material_override = main.mat("ice")
+		icicle_mesh.rotation.x = PI / 2.0
+		icicle_mesh.position = Vector3(0, 0.0, -0.1)
+		icicle_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		hand_r.add_child(icicle_mesh)
+		_set_layers(icicle_mesh, viewmodel_layer())
+	icicle_mesh.visible = on
 
 
 ## The host says one of our snowballs landed a hit.
@@ -786,6 +855,9 @@ func _vr_update(_delta: float) -> void:
 		xr_origin.global_transform = Transform3D(rot * xr_origin.global_basis, pivot_pt + rot * (xr_origin.global_position - pivot_pt))
 	elif absf(turn) < 0.3:
 		snap_ready = true
+	if main.simple:
+		wrist_label.text = "WAVE %d" % main.wave if main.wave > 0 else ""
+		return
 	var status := ""
 	if is_down:
 		status = "FROZEN! A friend can thaw you"
@@ -801,12 +873,14 @@ func _vr_update(_delta: float) -> void:
 
 ## VR: warmth, fort and power-ups right above the throwing mitten, where the VR player always looks.
 func _update_hand_label() -> void:
+	if main.simple:
+		return  # simple mode: no readouts on the hand
 	if hand_label == null:
 		hand_label = Label3D.new()
 		hand_label.font_size = 44
 		hand_label.outline_size = 14
 		hand_label.pixel_size = 0.0007
-		hand_label.no_depth_test = true
+		hand_label.no_depth_test = false
 		hand_label.render_priority = 6
 		hand_r.add_child(hand_label)
 		hand_label.position = Vector3(0.0, 0.11, 0.03)
@@ -831,6 +905,20 @@ func take_damage(amount: float, from_pos = null) -> void:
 		main.net.event("hurt", [index, from_pos if from_pos != null else global_position])
 	if hud and from_pos != null:
 		hud.damage_from(from_pos)
+	if main.simple:
+		# Simple mode: no warmth, no freezing - a hit is just a cold splat (a flash, a shake, a buzz).
+		invuln_t = 0.4
+		flash_t = 0.08
+		shake = maxf(shake, 0.2)
+		if hud:
+			hud.hurt()
+		main.sound("hurt", -10.0, 1.4 + index * 0.1)
+		if joy >= 0:
+			Input.start_joy_vibration(joy, 0.2, 0.3, 0.08)
+		if vr:
+			hand_l.trigger_haptic_pulse("haptic", 0.0, 0.3, 0.08, 0.0)
+			main.vr_hurt_flash()
+		return
 	hp -= amount
 	flash_t = 0.08
 	main.stat_add(index, "hits_taken", 1)

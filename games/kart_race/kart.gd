@@ -314,7 +314,7 @@ func reset_race() -> void:
 	slip_t = 0.0
 	star_t = 0.0
 	wobble_t = 0.0
-	charge = 0.3
+	charge = 0.0 if main.SIMPLE_MODE else 0.3
 	wrong_t = 0.0
 	stuck_t = 0.0
 	reverse_t = 0.0
@@ -515,11 +515,11 @@ func sim(delta: float) -> void:
 	wobble_t = maxf(0.0, wobble_t - delta)
 	if slip_t > 0.0:
 		slip_t = maxf(0.0, slip_t - delta)
-	if main.state == "race" and not finished:
+	if main.state == "race" and not finished and not main.SIMPLE_MODE:  # simple mode: no boost meter
 		charge = minf(1.0, charge + delta / 14.0)
 	if want_item and item != "":
 		main.use_item(self)
-	if want_boost and charge >= 1.0:
+	if want_boost and charge >= 1.0 and not main.SIMPLE_MODE:
 		charge = 0.0
 		boost(1.6)
 		main.on_boost(self, "BOOST!")
@@ -650,6 +650,11 @@ func net_code() -> int:
 ## Drifting: charge sparks while sliding round a bend, release for a mini-turbo.
 func _drift(delta: float) -> void:
 	var going := false
+	if main.SIMPLE_MODE:  # simple mode: no drifting or mini-turbos (braking just brakes)
+		drift_t = 0.0
+		drift_level = 0
+		drift_dir = 0
+		return
 	if on_ground and speed > 6.5 and slip_t <= 0.0 and main.state == "race":
 		if auto_drift():
 			going = absf(steer_s) > (0.42 if drift_t > 0.0 else 0.52) and (drift_t > 0.0 or speed > 7.5)
