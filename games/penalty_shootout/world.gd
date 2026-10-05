@@ -105,6 +105,7 @@ var mascot: Node3D
 var mascot_arms: Array[Node3D] = []
 var mascot_mode := ""
 var mascot_t := 0.0
+var mascot_home_yaw := 0.5
 var trophy: Node3D
 var trophy_spin := 0.0
 
@@ -406,6 +407,11 @@ func bulge() -> void:
 	net_bulge = 1.0
 
 
+## A glove pushed into the net: a small ripple.
+func poke_net() -> void:
+	net_bulge = maxf(net_bulge, 0.3)
+
+
 # --- The mascot: a big friendly lion beside the goal ----------------------------------------------
 
 func _build_mascot() -> void:
@@ -491,7 +497,7 @@ func _animate_mascot(delta: float) -> void:
 			y = absf(sin(t * 2.4)) * 0.04
 			spin = sin(t * 0.7) * 0.25
 	mascot.position.y = y
-	mascot.rotation.y = 0.5 + spin
+	mascot.rotation.y = mascot_home_yaw + spin
 	for i in mascot_arms.size():
 		var sd := -1.0 if i == 0 else 1.0
 		mascot_arms[i].rotation = Vector3(-arm_swing * 1.2, 0.0, sd * (arm_a + arm_swing))

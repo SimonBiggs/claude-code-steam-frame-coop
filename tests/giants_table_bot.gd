@@ -5,6 +5,8 @@ extends Node
 ## crossbow and fetch dropped embers. Prints progress every 10 s.
 ## BOT_PLAYERS=n (2..6): n TV knights join (via main.debug_join; the last one drops in through a fake
 ## controller button press, then gets unplugged at 22 s and plugged back in at 28 s).
+## Simple mode (main.simple): the giant does the practice throws first (the training goblin is a plain
+## goblin to it), and between waves pulls up a tree and throws it (once per bot run per hand type).
 
 const W := preload("res://games/giants_table/world.gd")
 
@@ -85,16 +87,18 @@ func _note_features() -> void:
 		if g.kind == "king" and g.armor <= 0.0:
 			king_broken = true
 	var checks := {
+		"practice done": main.practice_done,
+		"tree pulled up": not get_tree().get_nodes_in_group("props").is_empty(),
+		"scenery touched": main.scenery != null and main.scenery.touches > 0,
 		"balloon goblin floating": floating,
 		"goblin king": kinds.has("king"),
 		"king armour broken": king_broken,
 		"rain": main.rain_t > 0.0,
 		"giant shielding the fire": main.shield,
-		"village grew": main.built > 0,
-		"combo": main.combo >= 3,
-		"giant tip": main.giant_tip_t > 0.0,
-		"stats": main.stats_text != "",
 	}
+	if not main.simple:
+		checks.merge({"village grew": main.built > 0, "combo": main.combo >= 3,
+			"giant tip": main.giant_tip_t > 0.0, "stats": main.stats_text != ""})
 	for k in checks:
 		if checks[k] and not seen.has(k):
 			seen[k] = true
@@ -166,7 +170,7 @@ func _drive_knight(k) -> void:
 					target_pos = e.global_position
 			if best > 6.0:
 				for g in get_tree().get_nodes_in_group("goblins"):
-					if g.kind == "ogre" or g.held or g.flying or (g.kind == "king" and g.armor <= 0.0):
+					if g.held or g.flying or g.practice or (not main.simple and (g.kind == "ogre" or (g.kind == "king" and g.armor <= 0.0))):
 						continue
 					var d: float = g.global_position.distance_to(pos) + Vector2(g.global_position.x, g.global_position.z).length() * 0.3
 					if d < best:
@@ -221,6 +225,11 @@ func _drive_giant(delta: float) -> void:
 				g.bot_target = best.global_position
 				if Vector2(h.pos.x - best.global_position.x, h.pos.z - best.global_position.z).length() < 0.5:
 					g.bot_grip = false
+		elif obj.is_in_group("props"):
+			g.bot_target = Vector3(3.0, 0.0, 6.0)  # simple mode: toss the tree back onto the table
+			if Vector2(h.pos.x - 3.0, h.pos.z - 6.0).length() < 0.8:
+				g.bot_grip = false
+				print("Bot: giant threw a tree")
 		elif obj.is_in_group("knights"):
 			g.bot_target = Vector3(0.0, 0.0, 1.8)
 			if Vector2(h.pos.x, h.pos.z - 1.8).length() < 0.6 and h.vel.length() < 4.0:
@@ -268,6 +277,15 @@ func _drive_giant(delta: float) -> void:
 				target = b
 	if target == null:
 		target = _nearest_goblin(Vector3.ZERO, ["goblin"])
+	if target == null and main.simple and main.practice_done and not has_meta("tree_done"):
+		var tp := _a_tree()
+		g.bot_target = tp
+		if Vector2(h.pos.x - tp.x, h.pos.z - tp.z).length() < 0.8 and not g.bot_grip:
+			g.bot_grip = true
+			giant_wait = 0.0
+			set_meta("tree_done", true)
+			print("Bot: giant reaches for a tree")
+		return
 	if target == null:
 		g.bot_grip = false
 		g.bot_target = Vector3(0, 0, 5)
@@ -278,6 +296,19 @@ func _drive_giant(delta: float) -> void:
 		g.bot_grip = true
 		giant_wait = 0.0
 		grabs += 1
+
+
+## A tree near the giant's side of the table (simple mode: trees can be pulled up).
+func _a_tree() -> Vector3:
+	var best := Vector3.ZERO
+	var bd := INF
+	for t in W.trees():
+		var p := Vector3(t[0], W.height(t[0], t[1]), t[1])
+		var d := p.distance_to(Vector3(0, 0, 10))
+		if d < bd:
+			bd = d
+			best = p
+	return best
 
 
 func _nearest_goblin(from: Vector3, kinds: Array):
@@ -341,8 +372,17 @@ func _drive_vr_giant(delta: float) -> void:
 			print("Bot: VR giant threw a %s" % h.held.get("kind"))
 		return
 	if vr_target == null or not is_instance_valid(vr_target) or vr_target.flying:
-		vr_target = _nearest_goblin(Vector3.ZERO, ["goblin", "ogre"])
+		vr_target = _nearest_goblin(Vector3.ZERO, ["goblin", "ogre", "king"])
 		g.bot_grip = false
+		if vr_target == null and main.simple and main.practice_done and not has_meta("tree_done"):
+			# Between waves: pull up a tree with the right hand (and throw it off the table).
+			var tp := _a_tree() + Vector3.UP * 1.3
+			ctrl.global_position = ctrl.global_position.move_toward(tp - grab_off, 30.0 * delta)
+			if h.pos.distance_to(tp) < 0.6:
+				g.bot_grip = true
+				set_meta("tree_done", true)
+				print("Bot: VR giant grabs a tree")
+			return
 		if vr_target == null:
 			return
 	var c: Vector3 = vr_target.grab_center()
@@ -364,6 +404,8 @@ func _count_visuals(n: Node) -> int:
 func _exit_tree() -> void:
 	if main != null:
 		print("FINAL mode=%s wave=%d score=%d embers=%d built=%d smacks=%d kills=%s seen=%s" % [main.net.mode, main.wave, main.score, main.embers, main.built, smacks, main.kills, seen.keys()])
+		if main.scenery != null:
+			print("Scenery: %d touches, trees pulled up now: %s" % [main.scenery.touches, main.scenery.gone_list()])
 		print("Visual instances in the scene: %d" % _count_visuals(main))
 		if OS.has_environment("GT_BREAKDOWN"):
 			var by := {}

@@ -42,6 +42,7 @@ var flash_mat: StandardMaterial3D
 var gold_mat: StandardMaterial3D
 var iron_mat: StandardMaterial3D
 var handle_halo: MeshInstance3D
+var empty_mat: StandardMaterial3D
 var t := 0.0
 
 
@@ -93,6 +94,9 @@ func _ready() -> void:
 	# Ammo rack: a little row of balls next to the carriage.
 	iron_mat = World.mat(Color(0.1, 0.1, 0.12), 0.0, 0.35)
 	gold_mat = World.mat(Color(1.0, 0.8, 0.2), 2.5, 0.2)
+	empty_mat = World.mat(Color(1.0, 0.25, 0.2), 2.0)
+	empty_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	empty_mat.albedo_color.a = 0.6
 	for i in MAX_AMMO:
 		rack_balls.append(World.sphere(self, 0.13, Vector3(0.75, -0.65, 0.9 - i * 0.3), iron_mat, 8))
 	label = Label3D.new()
@@ -100,7 +104,7 @@ func _ready() -> void:
 	label.outline_size = 26
 	label.pixel_size = 0.0055
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	label.no_depth_test = true
+	label.no_depth_test = false
 	label.position = Vector3(0, 1.3, 0.3)
 	add_child(label)
 	# Trajectory preview.
@@ -237,7 +241,14 @@ func _process(delta: float) -> void:
 	# (the manned one sits low beside its ammo rack, out of the line of sight along the barrel)
 	label.position = (Vector3(0.75, -0.15, 0.55) if manned else Vector3(0, 1.0, 0.3)) if vr_gunner else Vector3(0, 1.3, 0.3)
 	label.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
-	if ammo <= 0:
+	if main.simple:
+		# Simple mode: no words; the rack shows the balls, and an empty rack has a pulsing red ball.
+		label.visible = false
+		if ammo <= 0 and not rack_balls.is_empty():
+			rack_balls[0].visible = true
+			rack_balls[0].material_override = empty_mat
+			empty_mat.emission_energy_multiplier = 1.0 + 2.0 * (0.5 + 0.5 * sin(t * 8.0))
+	elif ammo <= 0:
 		label.text = "%s\nEMPTY!\nBring cannonballs!" % side_name()
 		label.modulate = Color(1.0, 0.35 + 0.25 * sin(Time.get_ticks_msec() * 0.01), 0.3)
 	else:

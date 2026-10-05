@@ -6,20 +6,62 @@ extends Node3D
 ## drum = a hit; no buttons. Left stick: walk around the stage (the kit comes along). Right stick:
 ## snap turn. A: bring the kit back in front of you. The kit fits your height at the start and again
 ## when someone shorter or taller takes the headset (it is measured from your head, not a rest pose).
+## PRACTICE (simple mode): one ball floats slowly into one drum at a time and waits there; the drum
+## glows and its ring pulses; once the ball has arrived a see-through stick swings onto the drum.
+func _update_practice() -> void:
+	var now := Time.get_ticks_msec() * 0.001
+	var used := 0
+	for p in 4:
+		approach[p].visible = false
+	var k: int = main.prac_d
+	var waiting := false
+	var pad := -1
+	if k < main.PRACTICE_PADS.size():
+		pad = main.PRACTICE_PADS[k]
+		var u := clampf(1.0 - float(main.prac_t) / PRAC_TRAVEL, 0.0, 1.0)
+		waiting = u <= 0.0
+		var hover := Vector3(0.0, 0.1 + 0.025 * sin(now * 5.0), 0.0) * (1.0 - u)
+		var pos := pads[pad].position + lane_dir(pad) * NOTE_TRAVEL * u + hover
+		notes_mm.set_instance_transform(used, Transform3D(Basis().scaled(Vector3.ONE * 1.4), pos))
+		notes_mm.set_instance_color(used, PAD_COLORS[pad].lightened(0.3))
+		used += 1
+		approach[pad].visible = true
+		approach[pad].scale = Vector3.ONE * (1.15 + 0.35 * absf(sin(now * 4.0)))
+		flash[pad] = maxf(flash[pad], 0.45 + 0.35 * sin(now * 8.0))
+	notes_mm.visible_instance_count = used
+	if demo != null:
+		demo.visible = waiting and (vr or fake_vr) and not ghost
+		if demo.visible:
+			# Up and back, then a quick swing down onto the drum (loops every 1.2 s).
+			var ph := fmod(now, 1.2) / 1.2
+			var lift := 1.0 - (ph - 0.75) / 0.25 if ph > 0.75 else minf(1.0, ph / 0.5)
+			var hit_pos := pads[pad].position + Vector3(0.0, 0.03, 0.0)
+			var tip := hit_pos + Vector3(0.0, 0.28 * lift, 0.08 * lift)
+			var back := Vector3(0.0, 0.25 + 0.15 * lift, 0.5).normalized()  # the stick points back to the hand
+			demo.position = tip
+			demo.basis = main.basis_y_to(back)
+			demo_mat.albedo_color.a = 0.25 + 0.2 * (1.0 - lift)
+
+
 ## In the SETLIST menu the drums are buttons: hi-hat EASY, snare NORMAL, tom ROCK, crash START.
 ## The crowd meter, star meter and combo float far ahead between the lanes (easy to focus on, never in
 ## a ball's way); short messages float above them (main.gd).
 ## Flat (split screen / non-VR host): A S D F or mouse left/right; controller X A B Y (or LB / RB).
+## Simple mode (main.SIMPLE_MODE): no dashboard (no meters, no combo text); a PRACTICE ball floats
+## slowly into one drum at a time and waits there, glowing, while a see-through stick shows the swing;
+## stage toys (props.gd) hang around the kit; flat drum tags show the key / button instead of names.
 ## Bot "fake VR": the bot moves fake_tips and the same swing detection as VR runs.
 ## On the TV machine this is a ghost: the kit, a head and two sticks drawn from the host's snapshots.
 
 const MeshKit := preload("res://games/rhythm_band/mesh_kit.gd")
+const PropsScript := preload("res://games/rhythm_band/props.gd")
 
 const HIT_R := 0.13  # metres from the stick tip to a drum's centre
 const REARM_R := 0.17
 const MIN_SPEED := 0.45  # m/s: resting a hand on a drum doesn't play it
-const PAD_OFFSETS: Array[Vector3] = [Vector3(-0.36, -0.36, -0.30), Vector3(-0.16, -0.50, -0.38),
-	Vector3(0.16, -0.50, -0.38), Vector3(0.36, -0.34, -0.30)]
+# Further out than arm-tucked (Simon: the drums were "way too close"), like a real kit.
+const PAD_OFFSETS: Array[Vector3] = [Vector3(-0.40, -0.36, -0.44), Vector3(-0.18, -0.48, -0.52),
+	Vector3(0.18, -0.48, -0.52), Vector3(0.40, -0.34, -0.44)]
 const PAD_COLORS: Array[Color] = [Color(1.0, 0.85, 0.2), Color(1.0, 0.3, 0.35), Color(0.3, 0.6, 1.0), Color(0.35, 0.95, 0.45)]
 const PAD_NAMES: Array[String] = ["HI-HAT", "SNARE", "TOM", "CRASH"]
 const MENU_NAMES: Array[String] = ["EASY", "NORMAL", "ROCK", "START!"]
@@ -28,6 +70,7 @@ const NOTE_TRAVEL := 2.6
 const POOL := 24
 const FLAT_HEAD := 1.45
 const DASH := Vector3(0.0, 0.0, -2.4)  # the crowd meter / combo panel, kit-relative (between the lanes)
+const PRAC_TRAVEL := 1.8  # seconds for a practice ball to float into its drum
 const STAGE_LIMIT := Rect2(-4.0, -2.0, 8.0, 4.6)  # where the VR player may walk (x, z)
 
 var index := 0
@@ -81,6 +124,9 @@ var meter_fill: MeshInstance3D
 var meter_mat: StandardMaterial3D
 var star_fill: MeshInstance3D
 var star_mat: StandardMaterial3D
+var props: PropsScript
+var demo: Node3D  # the see-through practice stick
+var demo_mat: StandardMaterial3D
 
 var fitted := false
 var fit_t := 0.8
@@ -265,13 +311,45 @@ func _build_rig() -> void:
 	star_fill.material_override = star_mat
 	dash.add_child(star_fill)
 	dash.visible = false
+	if main.SIMPLE_MODE:
+		props = PropsScript.new()
+		props.name = "Props"
+		props.main = main
+		props.d = self
+		rig.add_child(props)
+		props.build()
+		_build_demo()
 	_layout_kit()
+
+
+## The see-through stick that shows the swing onto the practice drum (simple mode).
+func _build_demo() -> void:
+	demo = Node3D.new()
+	rig.add_child(demo)
+	demo_mat = StandardMaterial3D.new()
+	demo_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	demo_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	demo_mat.albedo_color = Color(0.8, 0.95, 1.0, 0.35)
+	var stick := MeshInstance3D.new()
+	stick.mesh = main.cyl_mesh(0.009, 0.013, 0.26, 6)
+	stick.material_override = demo_mat
+	stick.position = Vector3(0, 0.13, 0)  # the tip end sits at the node's origin
+	stick.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	demo.add_child(stick)
+	var tip := MeshInstance3D.new()
+	tip.mesh = main.sphere_mesh(0.025)
+	tip.material_override = demo_mat
+	tip.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	demo.add_child(tip)
+	demo.visible = false
 
 
 ## Puts the drums, lanes, lane labels and the dashboard where they belong for this player's size.
 func _layout_kit() -> void:
 	for i in 4:
-		var p := PAD_OFFSETS[i] * kit_s
+		# Height and spread follow the player's size; the forward distance doesn't (a seated kid's
+		# 0.7 scale pulled the drums back into their face).
+		var p := Vector3(PAD_OFFSETS[i].x * kit_s, PAD_OFFSETS[i].y * kit_s, PAD_OFFSETS[i].z)
 		pads[i].position = p
 		var dir := lane_dir(i)
 		guides[i].position = p + dir * NOTE_TRAVEL * 0.5
@@ -280,6 +358,8 @@ func _layout_kit() -> void:
 		if stand != null:
 			stand.visible = not vr  # floating drums in VR (the floor height is unknown)
 		lane_tags[i].position = p + dir * NOTE_TRAVEL + Vector3(0, 0.16, 0)
+	if props != null:
+		props.layout(kit_s)
 	dash.position = DASH  # not scaled: always far enough to focus on, and clear of the lanes
 
 
@@ -345,7 +425,7 @@ func attach_xr(origin: XROrigin3D, cam: XRCamera3D, left: XRController3D, right:
 	rig.reparent(origin, false)
 	for tag in flat_tags:
 		tag.visible = false
-	dash.visible = true
+	dash.visible = not main.SIMPLE_MODE
 	for h in [left, right]:
 		var hh: XRController3D = h
 		var stick := MeshInstance3D.new()
@@ -385,7 +465,9 @@ func _process(delta: float) -> void:
 		pads[i].scale = Vector3.ONE * (1.0 + flash[i] * 0.12)
 	_update_notes()
 	_update_tags()
-	if vr:
+	if props != null:
+		props.tick(delta, tips, not ghost and (vr or fake_vr))
+	if vr and dash.visible:
 		_update_status()
 
 
@@ -597,6 +679,11 @@ func _flat_update(delta: float) -> void:
 ## Balls flying down each drum's lane (one MultiMesh); a ring shrinks onto the drum as its next ball
 ## arrives. Gold = star note; notes above the drummer's level aren't shown.
 func _update_notes() -> void:
+	if main.state == "practice":
+		_update_practice()
+		return
+	if demo != null:
+		demo.visible = false
 	var g = main.song
 	var used := 0
 	var ring_dt: Array[float] = [99.0, 99.0, 99.0, 99.0]
@@ -656,7 +743,11 @@ func _update_tags() -> void:
 			lt.modulate = PAD_COLORS[i].lightened(0.4) if chosen else PAD_COLORS[i]
 			lt.text = ("> %s <" % MENU_NAMES[i]) if chosen else MENU_NAMES[i]
 		if not vr:
-			flat_tags[i].text = MENU_NAMES[i] if menu else PAD_NAMES[i]
+			flat_tags[i].visible = not (ghost and main.SIMPLE_MODE)
+			if main.SIMPLE_MODE:
+				flat_tags[i].text = (["X", "A", "B", "Y"] if joy >= 0 else ["A", "S", "D", "F"])[i]
+			else:
+				flat_tags[i].text = MENU_NAMES[i] if menu else PAD_NAMES[i]
 
 
 func _update_status() -> void:

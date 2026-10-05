@@ -1,0 +1,13 @@
+#!/bin/bash
+# claude-watchdog: keep an interactive Claude Code session running in tmux.
+# If no interactive `claude` process exists (crash, reboot, kwin taking the terminal down), start
+# one in a detached tmux session "claude" that continues the latest conversation in ~ and tells
+# Claude to re-arm its monitors. Run by claude-watchdog.timer every 2 minutes.
+for p in $(pgrep -x claude); do
+  args=$(tr '\0' ' ' < /proc/$p/cmdline)
+  case "$args" in *daemon*|*bg-*) continue ;; esac
+  exit 0  # an interactive Claude is running
+done
+cd ~ || exit 1
+/usr/bin/tmux new-session -d -s claude "claude --continue 'You were restarted by claude-watchdog (crash or reboot). Re-arm your monitors (voice: exec ~/.local/bin/voice-inject --all --print), check the Frame and claude-pace, and carry on.'"
+echo "$(date -Is) restarted Claude in tmux session 'claude'" >> ~/.claude/watchdog.log

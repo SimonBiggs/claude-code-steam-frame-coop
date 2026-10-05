@@ -6,7 +6,8 @@ extends Node3D
 ## from where it is (no fixed "rest pose" anywhere). No hands: it springs back to straight (the left
 ## stick steers too). Right trigger = accelerate, left stick up/down = drive/brake-reverse, A = use your
 ## item (or the boost when the meter on the wheel is full). Right stick up/down raises or lowers your seat.
-## A hard turn held round a bend charges drift sparks; straighten up for a mini-turbo.
+## A hard turn held round a bend charges drift sparks; straighten up for a mini-turbo (not in main.SIMPLE_MODE,
+## which also hides the boost meter and shows see-through ghost mittens turning the wheel when nobody holds it).
 ## Comfort: the seat is a stable frame (yaw only: no roll or pitch of the view; height eased over bumps
 ## and ramps with a speed cap), and the wheel, dash and mittens ride in that same frame so they never
 ## jump at your face. Soft vignette on boosts, spins and teleports. The seat fits your head height
@@ -91,6 +92,9 @@ var panel_r: Label3D
 var panel_hint: Label3D
 var mitten_l: MeshInstance3D
 var mitten_r: MeshInstance3D
+var ghost_l: MeshInstance3D  # simple mode: see-through mittens that show how to turn the wheel
+var ghost_r: MeshInstance3D
+var ghost_mat: StandardMaterial3D
 var vignette: MeshInstance3D
 var vignette_mat: ShaderMaterial
 
@@ -118,6 +122,9 @@ func setup(k, origin: XROrigin3D, cam: XRCamera3D, left: XRController3D, right: 
 		_build_vignette(cam)
 	mitten_l = _mitten()
 	mitten_r = _mitten()
+	if main.SIMPLE_MODE:
+		hub_bar.visible = false  # no boost meter
+		_build_ghost_hands()
 	kart.sparks.position = Vector3(0, 0.12, -0.6)  # by the front wheels, where the rider can see them
 
 
@@ -418,6 +425,7 @@ func place(delta: float) -> void:
 		grip_mat.emission = kart.color
 		grip_mat.emission_energy_multiplier = 0.3
 	_update_icon(delta)
+	_update_ghost_hands()
 	var texts: Array = main.vr_panel_texts(kart)
 	panel_l.text = texts[0]
 	panel_r.text = texts[1]
@@ -456,6 +464,40 @@ func place(delta: float) -> void:
 	var v := maxf(vignette_k, fade_k)
 	vignette.visible = v > 0.02
 	vignette_mat.set_shader_parameter("strength", v)
+
+
+## Simple mode: two see-through mittens on the rim turn the wheel left and right whenever nobody
+## holds it (the practice, the countdown, or hands off for a moment): grab it like that.
+func _build_ghost_hands() -> void:
+	ghost_mat = StandardMaterial3D.new()
+	ghost_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	ghost_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	ghost_mat.albedo_color = Color(0.7, 0.95, 1.0, 0.45)
+	ghost_l = _mitten()
+	ghost_r = _mitten()
+	for g in [ghost_l, ghost_r]:
+		var m: MeshInstance3D = g
+		m.material_override = ghost_mat
+		m.scale *= 1.15
+		m.visible = false
+
+
+func _update_ghost_hands() -> void:
+	if ghost_l == null:
+		return
+	var vis: bool = unheld_t > 0.8 and not kart.finished and main.state != "results"
+	ghost_l.visible = vis
+	ghost_r.visible = vis
+	if not vis:
+		return
+	var t := Time.get_ticks_msec() * 0.001
+	var a := 0.7 * sin(t * 1.8)
+	var b := wheel_basis()
+	var up := b * Vector3(0, 0, -1)
+	var c := wheel_center()
+	ghost_r.position = c + b.x * (WHEEL_R * cos(a)) + up * (WHEEL_R * sin(a))
+	ghost_l.position = c + b.x * (WHEEL_R * cos(a + PI)) + up * (WHEEL_R * sin(a + PI))
+	ghost_mat.albedo_color.a = 0.3 + 0.2 * sin(t * 4.0)
 
 
 ## The item you hold, as a little model on the dash.

@@ -4,6 +4,13 @@ A playful, kid-friendly round game in a cosy cartoon house (living room, hall, k
 playroom, bathroom) with a back garden (shed, hedges, trees, slide, sandpit, washing line, fairy lights)
 through the living room's garden door.
 
+**Three maps take turns** (Abigail's idea): every new round, and every new launch, moves on to the next
+one: THE HOUSE (`world.gd`), THE CASTLE (`map_castle.gd`: armoury, great hall, kitchen, bedchamber, an
+open-sky courtyard, library, throne room, tower room) and THE SPACESHIP (`map_ship.gd`: crew quarters,
+mess hall, cargo bay, corridor, engine room, bridge with a starry window, hydroponics). The round banner
+names the map; the host sends the map index in the snapshot so the TV builds the same one. Round types
+shift by one each lap, so every map gets every round type.
+
 - **Player 1, the SEEKER (VR on the Steam Frame, or flat in split screen).** Counts to 20 with eyes
   covered (the view goes dark), then searches with a torch in the right hand. Tag a hider by touching
   them with either hand, or by pointing the torch at them within 3 m and pulling the trigger. Tagging a

@@ -16,6 +16,23 @@ extends Node3D
 ## rider.gd (players[0]), gunner.gd (players 1-6), sprite.gd, bubble.gd, hud.gd, world.gd (sky),
 ## join_listener.gd (drop-in join with A). The host simulates; the TV machine mirrors snapshots and
 ## rebuilds the same course from the level seed.
+##
+## SIMPLE_MODE (the family: "all of the games have become too complicated", "simple games are the fun
+## games", "everything's being driven by text"): the core is just flying a big friendly dragon through
+## glowing rings while the gunners pop balloons. Everything cut is behind the flag, not deleted:
+##  - PRACTICE first: three big glowing rings close ahead, one at a time (left, right, up), with a
+##    see-through ghost pair of hands (ghost_hands.gd, rider's headset only) showing the rein move;
+##    each gunner gets one glowing balloon right where they are looking.
+##  - Gentle, gradual stages: stage 1 = four big rings in an easy line, slow flight, balloons close by.
+##    One new thing per stage: 2 stars, 3 the golden balloon, 4 sky bunnies, 5 racing Goldie, 6 storm
+##    sprites (they only tickle the dragon), 7 the Storm King; then the missions cycle.
+##  - Comfort and no getting stuck: reins measured from the rider's eyes with a wide level zone, a
+##    slow cruise, a soft height band around the next ring, and a gentle nudge towards it when idle.
+##  - Everything interactable (props.gd): pat the dragon's mane (purr + smoke ring), honk the saddle
+##    horns, swing the lantern, spin the flag, poof passing clouds, startle birds that fly alongside.
+##    The dragon also pops balloons it flies into, so solo VR is fun too.
+##  - Off: score / stars / combo readouts, popups, lanterns going out and game over, awards and level
+##    reports, help lines. Text: a single short headline (VR and TV), plus one short TV control line.
 
 const WorldScript := preload("res://games/dragon_rider/world.gd")
 const DragonScript := preload("res://games/dragon_rider/dragon.gd")
@@ -28,12 +45,15 @@ const HudScript := preload("res://games/dragon_rider/hud.gd")
 const RivalScript := preload("res://games/dragon_rider/rival.gd")
 const BossScript := preload("res://games/dragon_rider/boss.gd")
 const JoinListenerScript := preload("res://games/dragon_rider/join_listener.gd")
+const PropsScript := preload("res://games/dragon_rider/props.gd")
+const GhostHandsScript := preload("res://games/dragon_rider/ghost_hands.gd")
 const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
 const NetScript := preload("res://core/net.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
 const VrText := preload("res://core/vr_text.gd")
 
+const SIMPLE_MODE := true
 const MAX_PLAYERS := 7  # rider + 6 gunners
 const MAX_LOCAL_VIEWS := 6
 const INTRO_TIME := 6.0
@@ -71,6 +91,19 @@ const SOUNDS := {
 	"combo": [0.25, 990.0, 1980.0, 0.22, "square", 0.0],
 	"relight": [0.6, 520.0, 1040.0, 0.3, "tri", 0.0],
 }
+const RECIPES := {
+	"purr": {"len": 1.1, "peak": 0.5, "layers": [{"w": "saw", "f": 52.0, "f1": 46.0, "vol": 0.7, "trem": [24.0, 0.85],
+		"lp": 380.0, "atk": 0.12, "rel": 0.35}]},
+	"tweet": {"len": 0.42, "peak": 0.4, "layers": [{"w": "sine", "f": 2600.0, "f1": 3900.0, "len": 0.11, "vol": 0.6},
+		{"w": "sine", "f": 2900.0, "f1": 4200.0, "at": 0.16, "len": 0.11, "vol": 0.6},
+		{"w": "noise", "len": 0.35, "vol": 0.25, "hp": 2500.0, "trem": [28.0, 0.9], "at": 0.05}]},
+}
+const SIMPLE_DONE_TIME := 4.5
+const PRACTICE_RINGS: Array[Vector3] = [Vector3(-13.0, 1.0, -40.0), Vector3(13.0, 1.0, -40.0), Vector3(0.0, 10.0, -40.0)]
+const PRACTICE_MOVES: Array[String] = ["left", "right", "up"]
+const PRACTICE_RING_R := 6.0
+const NEW_THING := {2: "STARS!", 3: "GOLDEN BALLOON!", 4: "SKY BUNNIES!", 5: "RACE GOLDIE!", 6: "STORM SPRITES!",
+	7: "STORM KING!"}
 const VIGNETTE_SHADER := """
 shader_type spatial;
 render_mode unshaded, cull_front, depth_draw_never, depth_test_disabled, blend_mix;
@@ -150,6 +183,21 @@ var race_lost := false
 var boss_beaten := false
 var cage_hint := {}            # critter index -> true once the "pop the cage" hint was shown
 var level_balloons := 0
+# Simple mode
+var props: Node3D
+var ghost_hands: Node3D
+var practice_step := -1        # 0..2: practice ring (left, right, up); 3: done; -1: not practising
+var practice_t := 0.0
+var practice_ring: MeshInstance3D
+var practice_pos := Vector3.ZERO
+var practice_normal := Vector3.FORWARD
+var practice_last_d := -1.0
+var practice_balloons := {}    # gunner index -> Node3D (dragon child)
+var practice_popped := 0       # bit per gunner index: their practice balloon was popped
+var idle_t := 0.0              # rider not steering (for the gentle nudge towards the next ring)
+var next_visitor := 0
+var sounds_added := {}
+var solo_boss_t := 0.0
 
 
 func _ready() -> void:
@@ -166,6 +214,11 @@ func _ready() -> void:
 	add_child(dragon)
 	dragon.position = Vector3(0, 45, 0)
 	_build_arrow()
+	if SIMPLE_MODE:
+		props = PropsScript.new()
+		props.name = "Props"
+		props.main = self
+		dragon.add_child(props)
 	bubble_mat = StandardMaterial3D.new()
 	bubble_mat.albedo_color = Color(0.75, 0.95, 1.0, 0.5)
 	bubble_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -205,10 +258,15 @@ func _setup_game(mode: String) -> void:
 	ready_to_play = true
 	_ensure_join_listener()
 	_restore_party()
-	if mode == "host":
+	if SIMPLE_MODE:
+		if mode != "client":
+			show_center("DRAGON RIDER!", 3.0)
+	elif mode == "host":
 		show_center("DRAGON RIDER\nWaiting for the gunners on the TV to join…\nPractice flying: raise both hands = climb, lower them = dive,\nmove them left / right = turn, trigger = flap", 0.0)
 	elif mode == "client":
 		show_center("CONNECTED!\nClimb aboard, gunners!", 2.0, false)
+	if SIMPLE_MODE and mode == "client":
+		show_center("ALL ABOARD!", 2.0, false)
 
 
 # --- Shared materials, meshes and effects ------------------------------------
@@ -350,6 +408,9 @@ func local_sound(sound_name: String, volume_db: float = 0.0, pitch: float = 1.0)
 		add_child(sfx)
 	if SOUNDS.has(sound_name):
 		sfx.add_sound(sound_name, SOUNDS[sound_name])
+	elif RECIPES.has(sound_name) and not sounds_added.has(sound_name):
+		sounds_added[sound_name] = true
+		sfx.add_recipe(sound_name, RECIPES[sound_name])
 	sfx.play(sound_name, volume_db, pitch)
 
 
@@ -361,6 +422,8 @@ func sound(sound_name: String, volume_db: float = 0.0, pitch: float = 1.0) -> vo
 
 ## Floating text that rides along with the dragon (local = dragon-local position).
 func popup(local: Vector3, text: String, color: Color, broadcast: bool = true) -> void:
+	if SIMPLE_MODE:
+		return  # no floating score text: bursts and sounds say it
 	var l := Label3D.new()
 	l.text = text
 	l.modulate = color
@@ -368,7 +431,7 @@ func popup(local: Vector3, text: String, color: Color, broadcast: bool = true) -
 	l.font_size = 64
 	l.outline_size = 20
 	l.pixel_size = 0.012
-	l.no_depth_test = true
+	l.no_depth_test = false
 	l.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	dragon.add_child(l)
 	l.position = local
@@ -407,7 +470,25 @@ func _build_arrow() -> void:
 # --- Game flow (host) ----------------------------------------------------------
 
 static func mission_for(n: int) -> String:
+	if SIMPLE_MODE:
+		if n <= 7:
+			return ["rings", "rings", "rings", "rescue", "race", "rings", "boss"][maxi(n, 1) - 1]
+		return MISSIONS[(n - 8) % MISSIONS.size()]
 	return MISSIONS[(n - 1) % MISSIONS.size()]
+
+
+## Simple mode: one new thing per stage (stars 2, golden balloon 3, storm sprites 6).
+static func simple_has(feature: String, n: int) -> bool:
+	if not SIMPLE_MODE:
+		return true
+	match feature:
+		"stars":
+			return n >= 2
+		"golden":
+			return n >= 3
+		"sprites":
+			return n >= 6
+	return true
 
 
 static func sky_for(n: int) -> String:
@@ -436,13 +517,24 @@ func _start_level(n: int) -> void:
 	_spawn_mission_actors()
 	print("Level %d (%s, %s sky): %d rings, seed %d, %d gunners" % [n, mission, sky_for(n), course.rings.size(), level_seed, gunner_count()])
 	sound("levelup", -4.0, 0.8 + n * 0.05)
-	if n == 1:
+	if SIMPLE_MODE:
+		dragon.cruise = simple_cruise(n)
+		if rival != null:
+			rival.speed = dragon.cruise + 0.6
+		phase_t = 3.0
+		show_center(NEW_THING.get(n, "LET'S FLY!") as String, 3.0)
+	elif n == 1:
 		show_center("DRAGON RIDER\nRIDER: raise BOTH hands to climb, lower them to dive (tummy height = fly level)\n" \
 			+ "move your hands left / right to turn (thumbsticks steer too). Trigger = flap for speed!\n" \
 			+ "Fly through the GOLD rings and scoop up the stars.\n" \
 			+ "GUNNERS: aim and fire bubbles: pop the balloons, and the purple storm sprites\nbefore they pop the dragon's lanterns!", phase_t)
 	else:
 		show_center(_mission_banner(), phase_t)
+
+
+## Simple mode: slow and gentle at first, a little faster each stage.
+static func simple_cruise(n: int) -> float:
+	return minf(9.5 + (n - 1) * 0.6, 13.0)
 
 
 func _mission_banner() -> String:
@@ -511,15 +603,19 @@ func _build_course() -> void:
 func _host_update(delta: float) -> void:
 	match phase:
 		"wait":
-			if net.mode != "host" or net.connected:
+			if SIMPLE_MODE:
+				_start_practice()  # no waiting: solo VR flies straight away, gunners drop in any time
+			elif net.mode != "host" or net.connected:
 				_start_level(1)
+		"practice":
+			_practice_update(delta)
 		"intro":
 			phase_t -= delta
 			if phase_t <= 0.0:
 				phase = "fly"
 		"done":
 			phase_t -= delta
-			if phase_t <= DONE_TIME - 1.5 and _confirm_pressed():
+			if not SIMPLE_MODE and phase_t <= DONE_TIME - 1.5 and _confirm_pressed():
 				phase_t = 0.0
 			if phase_t <= 0.0:
 				_start_level(level + 1)
@@ -532,15 +628,19 @@ func _host_update(delta: float) -> void:
 		_check_rings()
 		_check_stars()
 		_check_rescues()
-		if phase == "fly" and (net.mode != "host" or net.connected):
+		if phase == "fly" and (net.mode != "host" or net.connected) and simple_has("sprites", level):
 			_spawn_sprites(delta)
+		if SIMPLE_MODE:
+			_fly_through_balloons()
+			_solo_boss(delta)
 	power_t = maxf(0.0, power_t - delta)
 	if rival != null and is_instance_valid(rival) and phase != "over":
 		rival.host_update(delta, course.rings)
 		if rival.finished and not race_lost and (phase == "fly" or phase == "intro"):
 			race_lost = true
 			sound("giggle", -2.0, 0.8)
-			show_center("Goldie reached the finish first!\nFinish the course anyway!", 3.0)
+			if not SIMPLE_MODE:
+				show_center("Goldie reached the finish first!\nFinish the course anyway!", 3.0)
 	if boss != null and is_instance_valid(boss) and phase != "over":
 		boss.host_update(delta)
 		if phase == "fly" or phase == "intro":
@@ -643,8 +743,11 @@ func _check_rescues() -> void:
 			continue
 		var cp: Vector3 = c.pos
 		var d := core.distance_to(cp)
+		if SIMPLE_MODE and d < course.RESCUE_R * 1.4 and not course.gone.has(4000 + i):
+			course.remove_item(4000 + i)  # simple: flying up to a bunny frees it (no gunners needed)
+			sound("cage", -2.0)
 		if course.critter_open(i):
-			if d < course.RESCUE_R:
+			if d < course.RESCUE_R * (1.4 if SIMPLE_MODE else 1.0):
 				course.remove_item(5000 + i)
 				score += 150
 				rider_stats["rescues"] = int(rider_stats["rescues"]) + 1
@@ -693,6 +796,8 @@ func gunner_count() -> int:
 
 
 func sprite_speed() -> float:
+	if SIMPLE_MODE:
+		return 4.0 + level * 0.25
 	return 6.5 + level * 0.7
 
 
@@ -703,9 +808,13 @@ func _spawn_sprites(delta: float) -> void:
 	var cap := 1 + level + g / 2
 	if mission == "boss":
 		cap = mini(cap, 2 + g / 2)
+	if SIMPLE_MODE:
+		cap = 1 + g / 3
 	if sprite_t > 0.0 or alive >= cap:
 		return
 	sprite_t = maxf(2.2, 8.0 - level) / (0.75 + 0.25 * g)
+	if SIMPLE_MODE:
+		sprite_t = 9.0 / (0.75 + 0.25 * g)
 	var local := Vector3(randf_range(-26.0, 26.0), randf_range(-6.0, 10.0), -randf_range(45.0, 65.0))
 	if level >= 2 and randf() < 0.3:
 		local = Vector3(randf_range(30.0, 45.0) * (-1.0 if randf() < 0.5 else 1.0), randf_range(-5.0, 8.0), randf_range(-20.0, 30.0))
@@ -715,7 +824,7 @@ func _spawn_sprites(delta: float) -> void:
 	next_id += 1
 	s.net_id = next_id
 	s.main = self
-	s.hp = 1 if g < 4 else 2
+	s.hp = 1 if g < 4 or SIMPLE_MODE else 2
 	s.target = dragon.random_lit()
 	add_child(s)
 	s.global_position = dragon.global_transform * local
@@ -730,6 +839,12 @@ func on_sprite_reached(s: Node3D) -> void:
 	s.remove_from_group("dr_sprites")
 	s.remove_from_group("dr_targets")
 	s.queue_free()
+	if SIMPLE_MODE:
+		# Simple: a sprite only tickles the dragon (giggles, a sneeze of smoke). Nothing is lost.
+		burst(s.global_position, Color(0.75, 0.45, 1.0), 12, 0.15)
+		sound("giggle", -3.0, 1.3)
+		dragon.puff_smoke()
+		return
 	if not dragon.lit[t]:
 		return
 	dragon.lit[t] = false
@@ -812,6 +927,8 @@ func assist_target(from: Vector3, dir: Vector3) -> Node3D:
 
 
 func target_velocity(n: Node3D) -> Vector3:
+	if n.get_meta("kind", "") == "pballoon":
+		return dragon.velocity  # rides along with the dragon
 	if n.get_meta("kind", "") == "sprite":
 		return n.net_vel if n.ghost else n.vel
 	if n.has_method("get_vel"):
@@ -836,6 +953,10 @@ func on_bubble_hit(b: Node3D, target: Node3D) -> void:
 		return
 	var by: int = b.owner_index
 	var kind: String = target.get_meta("kind", "")
+	if kind == "pballoon":
+		_pop_practice_balloon(int(target.get_meta("owner")))
+		_hit_marker(by)
+		return
 	if kind == "balloon":
 		var c: Node3D = target.get_parent()
 		var id: int = target.get_meta("id")
@@ -853,7 +974,10 @@ func on_bubble_hit(b: Node3D, target: Node3D) -> void:
 			sound("power", -1.0)
 			burst(target.global_position, Color(1.0, 0.9, 0.4), 30, 0.25)
 			popup(to_dragon_local(target.global_position) + Vector3.UP * 1.5, "GOLDEN BALLOON! TRIPLE BUBBLES!", Color(1.0, 0.9, 0.4))
-			show_center("P%d popped the GOLDEN BALLOON!\nTRIPLE BUBBLES for every gunner!" % (by + 1), 2.5)
+			if SIMPLE_MODE:
+				show_center("TRIPLE BUBBLES!", 2.0)
+			else:
+				show_center("P%d popped the GOLDEN BALLOON!\nTRIPLE BUBBLES for every gunner!" % (by + 1), 2.5)
 			_count_pop(by, 100, false)
 		else:
 			score += 30
@@ -917,7 +1041,7 @@ func on_bubble_hit(b: Node3D, target: Node3D) -> void:
 			else:
 				boss.open_ring()
 				sound("thunder", -2.0, 0.7)
-				show_center("The Storm King is DIZZY!\nRIDER: fly through the GOLDEN RING in its middle!", 4.0)
+				show_center("FLY THROUGH!" if SIMPLE_MODE else "The Storm King is DIZZY!\nRIDER: fly through the GOLDEN RING in its middle!", 4.0)
 		else:
 			sound("hit", -4.0, 0.9)
 
@@ -958,6 +1082,9 @@ func _level_complete() -> void:
 	phase = "done"
 	phase_t = DONE_TIME + 2.0
 	confirm_was = true
+	if SIMPLE_MODE:
+		_simple_level_complete()
+		return
 	var relit := _relight_lantern("LEVEL COMPLETE: A LANTERN IS LIT AGAIN!")
 	var bonus := 200 * level
 	var result := ""
@@ -1074,6 +1201,10 @@ func hud_line() -> String:
 
 
 func next_ring_info() -> Dictionary:
+	if phase == "practice":
+		if practice_step >= 0 and practice_step < 3 and practice_ring != null:
+			return {"pos": practice_pos, "normal": practice_normal, "radius": PRACTICE_RING_R, "final": false}
+		return {}
 	if course == null or (phase != "intro" and phase != "fly"):
 		return {}
 	if mission == "boss":
@@ -1089,7 +1220,7 @@ func arrow_target() -> Dictionary:
 		var core: Vector3 = dragon.core_position()
 		var fwd: Vector3 = Basis(Vector3.UP, dragon.yaw) * Vector3.FORWARD
 		for c in course.critters:
-			if course.critter_open(int(c.i)):
+			if course.critter_open(int(c.i)) or (SIMPLE_MODE and not course.gone.has(5000 + int(c.i))):
 				var cp: Vector3 = c.pos
 				var to := cp - core
 				if to.length() < 90.0 and to.normalized().dot(fwd) > 0.2:
@@ -1099,7 +1230,7 @@ func arrow_target() -> Dictionary:
 
 ## A short, contextual line for each player (TV HUD and the rider's VR panel).
 func hint_for(p) -> String:
-	if phase == "over" or phase == "wait":
+	if SIMPLE_MODE or phase == "over" or phase == "wait":
 		return ""
 	if p.index == 0:
 		match mission:
@@ -1135,6 +1266,340 @@ func hint_for(p) -> String:
 	return "Pop balloons (the GOLDEN one = triple bubbles!) and storm sprites"
 
 
+# --- Simple mode: practice, gentle flight, touchable props ------------------------
+
+## Practice first (host): three big glowing rings close ahead, one at a time (left, right, up), with
+## the ghost hands showing the rein move; each gunner gets one glowing balloon where they look.
+func _start_practice() -> void:
+	phase = "practice"
+	phase_t = 0.0
+	practice_step = 0
+	practice_popped = 0
+	dragon.cruise = 8.0
+	world.set_palette(sky_for(1))
+	_spawn_practice_ring()
+	print("Practice: 3 rings (left, right, up) + one balloon per gunner")
+
+
+func _spawn_practice_ring() -> void:
+	var local: Vector3 = PRACTICE_RINGS[practice_step]
+	practice_pos = dragon.global_position + Basis(Vector3.UP, dragon.yaw) * local
+	practice_pos.y = clampf(practice_pos.y, 20.0, 100.0)
+	var n: Vector3 = practice_pos - dragon.core_position()
+	n.y = 0.0
+	practice_normal = n.normalized() if n.length() > 0.1 else Basis(Vector3.UP, dragon.yaw) * Vector3.FORWARD
+	practice_last_d = (dragon.core_position() - practice_pos).dot(practice_normal)
+	practice_t = 0.0
+	_place_practice_ring()
+
+
+func _place_practice_ring() -> void:
+	if practice_ring == null:
+		practice_ring = MeshInstance3D.new()
+		var tm := TorusMesh.new()
+		tm.inner_radius = PRACTICE_RING_R - 0.55
+		tm.outer_radius = PRACTICE_RING_R + 0.55
+		tm.rings = 28
+		tm.ring_segments = 8
+		practice_ring.mesh = tm
+		practice_ring.material_override = color_mat(Color(1.0, 0.85, 0.3), 2.8)
+		practice_ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(practice_ring)
+	practice_ring.global_position = practice_pos
+	practice_ring.global_basis = basis_y_to(practice_normal)
+
+
+func _practice_update(delta: float) -> void:
+	phase_t += delta
+	practice_t += delta
+	_ensure_practice_balloons()
+	if practice_step < 0 or practice_step >= 3:
+		return
+	if phase_t > 100.0:
+		_end_practice()  # never stuck in practice
+		return
+	var rel: Vector3 = dragon.core_position() - practice_pos
+	var d := rel.dot(practice_normal)
+	var crossed := practice_last_d < 0.0 and d >= 0.0
+	practice_last_d = d
+	if crossed:
+		if (rel - practice_normal * d).length() <= PRACTICE_RING_R + 1.5:
+			burst(practice_pos, Color(1.0, 0.85, 0.35), 26, 0.25)
+			sound("ring", -2.0, 1.0 + practice_step * 0.12)
+			players[0].haptic("l", 0.5)
+			players[0].haptic("r", 0.5)
+			print("Practice ring %d (%s) done" % [practice_step + 1, PRACTICE_MOVES[practice_step]])
+			practice_step += 1
+			if practice_step >= 3:
+				_end_practice()
+			else:
+				_spawn_practice_ring()
+			return
+		sound("miss", -10.0)
+		_spawn_practice_ring()  # try again: the same ring pops up ahead
+		return
+	if d > 15.0 or rel.length() > 90.0 or practice_t > 25.0:
+		_spawn_practice_ring()
+
+
+func _end_practice() -> void:
+	practice_step = 3
+	if practice_ring != null:
+		puff(practice_ring.global_position, Color(1.0, 0.85, 0.35), 12, 0.2)
+		practice_ring.queue_free()
+		practice_ring = null
+	for i in practice_balloons.keys():
+		_remove_practice_balloon(int(i), true)
+	print("Practice done (%.0f s)" % phase_t)
+	_start_level(1)
+
+
+## Where gunner i's practice balloon floats (dragon-local): straight along their starting aim.
+func _practice_balloon_spot(i: int) -> Vector3:
+	var side := -1.0 if (i - 1) % 2 == 0 else 1.0
+	return (players[i] as Node3D).position + Basis(Vector3.UP, -0.6 * side) * Vector3(0, 0, -8.0) + Vector3(0, 1.6, 0)
+
+
+func _ensure_practice_balloons() -> void:
+	for i in range(1, players.size()):
+		var want: bool = players[i].active and (practice_popped & (1 << i)) == 0
+		if want and not practice_balloons.has(i):
+			_make_practice_balloon(i)
+		elif not want and practice_balloons.has(i):
+			_remove_practice_balloon(i, true)
+
+
+func _make_practice_balloon(i: int) -> void:
+	var b := Node3D.new()
+	dragon.add_child(b)
+	b.position = _practice_balloon_spot(i)
+	var bm := MeshInstance3D.new()
+	bm.mesh = sphere_mesh(0.9)
+	bm.material_override = color_mat(PLAYER_COLORS[i], 1.8)
+	bm.scale = Vector3(1.0, 1.2, 1.0)
+	bm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	b.add_child(bm)
+	var st := MeshInstance3D.new()
+	st.mesh = cyl_mesh(0.02, 0.02, 1.6, 4)
+	st.material_override = color_mat(Color(0.95, 0.95, 0.95), 0.0)
+	st.position = Vector3(0, -1.9, 0)
+	st.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	b.add_child(st)
+	b.set_meta("kind", "pballoon")
+	b.set_meta("owner", i)
+	b.set_meta("radius", 1.4)
+	b.add_to_group("dr_targets")
+	practice_balloons[i] = b
+
+
+func _pop_practice_balloon(i: int) -> void:
+	if not practice_balloons.has(i):
+		return
+	practice_popped |= 1 << i
+	var b: Node3D = practice_balloons[i]
+	burst(b.global_position, PLAYER_COLORS[i], 24, 0.22)
+	sound("pop", -2.0, 1.1)
+	sound("sparkle", -8.0)
+	print("Practice balloon of P%d popped" % (i + 1))
+	_remove_practice_balloon(i, false)
+
+
+func _remove_practice_balloon(i: int, with_puff: bool) -> void:
+	var b: Node3D = practice_balloons.get(i)
+	practice_balloons.erase(i)
+	if b == null or not is_instance_valid(b):
+		return
+	if with_puff:
+		puff(b.global_position, PLAYER_COLORS[i], 8, 0.15)
+	b.remove_from_group("dr_targets")
+	b.queue_free()
+
+
+func _practice_alive_mask() -> int:
+	var m := 0
+	for i in practice_balloons.keys():
+		m |= 1 << int(i)
+	return m
+
+
+## TV machine: mirror the practice ring and balloons.
+func _sync_practice(a: Array) -> void:
+	if a.size() < 4:
+		return
+	practice_step = a[0]
+	if phase == "practice" and practice_step >= 0 and practice_step < 3:
+		practice_pos = a[1]
+		practice_normal = a[2]
+		_place_practice_ring()
+	elif practice_ring != null:
+		practice_ring.queue_free()
+		practice_ring = null
+	var mask: int = a[3]
+	for i in range(1, players.size()):
+		var want := (mask & (1 << i)) != 0
+		if want and not practice_balloons.has(i):
+			_make_practice_balloon(i)
+		elif not want and practice_balloons.has(i):
+			_remove_practice_balloon(i, true)
+
+
+func _simple_level_complete() -> void:
+	phase_t = SIMPLE_DONE_TIME
+	if mission == "boss":
+		cannon_level = mini(cannon_level + 1, 2)
+	for s in get_tree().get_nodes_in_group("dr_sprites"):
+		s.remove_from_group("dr_sprites")
+		s.remove_from_group("dr_targets")
+		burst(s.global_position, Color(0.75, 0.45, 1.0), 10, 0.15)
+		s.queue_free()
+	sound("levelup", 0.0, 1.0)
+	sound("cheer", -8.0)
+	var fwd := Basis(Vector3.UP, dragon.yaw)
+	var cols: Array[Color] = [Color(1.0, 0.4, 0.4), Color(1.0, 0.85, 0.3), Color(0.4, 0.9, 1.0), Color(0.6, 1.0, 0.5), Color(1.0, 0.55, 0.9)]
+	for k in cols.size():
+		burst(dragon.global_position + fwd * Vector3(randf_range(-12.0, 12.0), randf_range(4.0, 10.0), randf_range(-28.0, -14.0)), cols[k], 24, 0.28)
+	print("Level %d (%s) complete: rings %d/%d, balloons %d" % [level, mission, level_rings, course.rings.size(), level_balloons])
+	show_center("HOORAY!", SIMPLE_DONE_TIME - 1.0)
+
+
+## Simple mode: the dragon pops balloons it flies into (fun solo, too).
+func _fly_through_balloons() -> void:
+	if course == null:
+		return
+	var core: Vector3 = dragon.core_position()
+	for b in course.balloons:
+		var id: int = b.id
+		if course.gone.has(id):
+			continue
+		var node: Node3D = b.node
+		if node.global_position.distance_squared_to(core) < 4.5 * 4.5:
+			course.remove_item(id)
+			burst(node.global_position, node.get_meta("color", Color.WHITE), 18, 0.2)
+			sound("pop", -3.0, randf_range(0.9, 1.2))
+			level_balloons += 1
+			if node.has_meta("golden"):
+				power_t = POWER_TIME
+				sound("power", -1.0)
+
+
+func real_gunners() -> int:
+	var n := 0
+	for i in range(1, players.size()):
+		if players[i].active:
+			n += 1
+	return n
+
+
+## Simple mode, nobody on the cannons: the Storm King gets dizzy on its own after a while.
+func _solo_boss(delta: float) -> void:
+	if boss == null or not is_instance_valid(boss) or boss.ring_open or phase != "fly" or real_gunners() > 0:
+		solo_boss_t = 0.0
+		return
+	solo_boss_t += delta
+	if solo_boss_t < 10.0:
+		return
+	for oi in boss.orb_hp.size():
+		while int(boss.orb_hp[oi]) > 0:
+			boss.hit_orb(oi)
+	boss.open_ring()
+	burst(boss.global_position, Color(1.0, 0.85, 0.3), 26, 0.3)
+	sound("thunder", -2.0, 0.7)
+	show_center("FLY THROUGH!", 4.0)
+
+
+## Simple mode (host): comfy flight that can't get stuck. A soft height band around the next ring
+## (the reins can't take the dragon far above or below it), a gentle drift to its height while the
+## rider isn't climbing or diving, and after a few idle seconds a gentle nudge towards it.
+func _simple_assist(inp: Vector2, delta: float) -> Vector2:
+	if inp.length() > 0.05:
+		idle_t = 0.0
+	else:
+		idle_t += delta
+	var target: Dictionary = arrow_target()
+	var want_y := 45.0
+	if not target.is_empty():
+		want_y = (target.pos as Vector3).y
+	var core: Vector3 = dragon.core_position()
+	if inp.y > 0.0 and core.y > want_y + 18.0:
+		inp.y = 0.0
+	elif inp.y < 0.0 and core.y < want_y - 18.0:
+		inp.y = 0.0
+	var waited := idle_t > (6.0 if phase == "practice" else 3.0)
+	if absf(inp.y) < 0.05 and (phase != "practice" or waited):
+		inp.y = clampf((want_y - core.y) / 12.0, -0.6, 0.6) * (1.0 if not target.is_empty() else 0.5)
+	if waited and not target.is_empty():
+		var to: Vector3 = (target.pos as Vector3) - core
+		var err := wrapf(atan2(-to.x, -to.z) - float(dragon.yaw), -PI, PI)
+		inp.x = clampf(-err * 1.2, -0.45, 0.45)
+	return inp
+
+
+## Host: the rider's hands touch the props; new visitors (clouds, birds) now and then.
+func _host_props(delta: float) -> void:
+	if props == null:
+		return
+	props.touch(players[0].hand_positions(), delta)
+	if phase == "over":
+		return
+	var v: Array = props.want_visitor(delta)
+	if not v.is_empty():
+		next_visitor += 1
+		props.spawn_visitor(v[0], next_visitor, v[1])
+		net.event("visitor", [v[0], next_visitor, v[1]])
+
+
+## Host: the rider touched something (props.gd). Sound, haptics, and the reaction on both machines.
+func prop_touched(what: String, id: int, dir: float) -> void:
+	match what:
+		"pat":
+			sound("purr", -1.0)
+		"horn":
+			sound("honk", -6.0, 1.1 if id == 0 else 1.3)
+		"lantern":
+			sound("bell", -12.0, 1.7)
+		"flag":
+			sound("whoosh", -6.0, 1.3)
+		"cloud":
+			burst(props.visitor_pos(id), Color(1.0, 1.0, 1.0), 14, 0.2)
+			sound("whoosh", -4.0, 0.8)
+		"bird":
+			sound("tweet", -4.0, randf_range(0.9, 1.15))
+	_prop_react(what, id, dir)
+	net.event("prop", [what, id, dir])
+	players[0].haptic("l", 0.25)
+	players[0].haptic("r", 0.25)
+	print("Rider touched: %s" % what)
+
+
+func _prop_react(what: String, id: int, dir: float) -> void:
+	if props != null:
+		props.react(what, id, dir)
+	if what == "pat":
+		dragon.patted()
+
+
+## Both machines: props, the practice ring's pulse, practice balloons bobbing, the ghost hands.
+func _simple_animate(delta: float) -> void:
+	var now := Time.get_ticks_msec() / 1000.0
+	if props != null:
+		props.animate(delta)
+	if practice_ring != null:
+		practice_ring.scale = Vector3.ONE * (1.0 + sin(now * 6.0) * 0.06)
+	for i in practice_balloons.keys():
+		var b: Node3D = practice_balloons[i]
+		if is_instance_valid(b):
+			b.position = _practice_balloon_spot(int(i)) + Vector3(0, sin(now * 2.0 + float(i)) * 0.3, 0)
+			b.rotation.y = now
+	if ghost_hands != null:
+		var want := ""
+		var right_way := false
+		if phase == "practice" and practice_step >= 0 and practice_step < 3:
+			want = PRACTICE_MOVES[practice_step]
+			var ri: Vector2 = players[0].rein_input
+			right_way = (want == "left" and ri.x < -0.1) or (want == "right" and ri.x > 0.1) or (want == "up" and ri.y > 0.1)
+		ghost_hands.show_demo(want, players[0].head_local(), right_way, delta)
+
+
 # --- Main loop -----------------------------------------------------------------
 
 func _process(delta: float) -> void:
@@ -1165,7 +1630,11 @@ func _process(delta: float) -> void:
 		if (phase == "over" or phase == "done") and _confirm_pressed():
 			net.send_action("restart" if phase == "over" else "next", [])
 	else:
-		dragon.fly(delta, players[0].steer_input(delta), players[0].flap_held() and phase != "over")
+		var inp: Vector2 = players[0].steer_input(delta)
+		if SIMPLE_MODE:
+			inp = _simple_assist(inp, delta)
+			_host_props(delta)
+		dragon.fly(delta, inp, players[0].flap_held() and phase != "over")
 		_host_update(delta)
 		if not is_inside_tree():
 			return  # "play again" just reloaded the scene
@@ -1177,6 +1646,8 @@ func _process(delta: float) -> void:
 		course.animate(delta)
 		course.update_rings(ring_i)
 	_update_arrow(delta)
+	if SIMPLE_MODE:
+		_simple_animate(delta)
 	world.follow(dragon.global_position, dragon.velocity)
 	_party_tick(delta)
 	_update_vr(delta)
@@ -1261,8 +1732,31 @@ func _build_views(mode: String) -> void:
 		players[0].attach_xr(origin, cam, left, right)
 		_build_vignette(cam)
 		_build_vr_mirror(cam)
+	elif mode != "client" and (OS.has_environment("BOT_VR") or OS.has_environment("DR_FAKE_VR")):
+		# Tests: the real VR rider code runs with hand nodes the bot moves (no headset).
+		print("Fake VR rider (tests)")
+		var origin := XROrigin3D.new()
+		add_child(origin)
+		var cam := XRCamera3D.new()
+		origin.add_child(cam)
+		cam.position = Vector3(0, 1.2, 0)
+		var left := XRController3D.new()
+		left.tracker = "left_hand"
+		origin.add_child(left)
+		left.position = Vector3(-0.2, 0.75, -0.38)
+		var right := XRController3D.new()
+		right.tracker = "right_hand"
+		origin.add_child(right)
+		right.position = Vector3(0.2, 0.75, -0.38)
+		players[0].fake_vr = true
+		players[0].attach_xr(origin, cam, left, right)
+		_build_vignette(cam)
 	else:
 		print("No VR headset: %s" % ("TV gunners" if mode == "client" else "split screen, player 1 flies the dragon"))
+	if SIMPLE_MODE and players[0].vr:
+		ghost_hands = GhostHandsScript.new()
+		ghost_hands.main = self
+		dragon.add_child(ghost_hands)
 	_ensure_views_root()
 	for p in players:
 		if _is_local(p) and p.active:
@@ -1543,7 +2037,7 @@ func _request_join(p) -> void:
 		if net.mode == "client":
 			net.send_action("join", [p.index], 1)
 		else:
-			show_center("PLAYER %d CLIMBED ABOARD!" % (p.index + 1), 1.5)
+			show_center("ALL ABOARD!" if SIMPLE_MODE else "PLAYER %d CLIMBED ABOARD!" % (p.index + 1), 1.5)
 			sound("join", -4.0, 1.2)
 	_save_party()
 
@@ -1556,7 +2050,7 @@ func _leave(p) -> void:
 		on_player_activity_changed(p)
 		if net.mode == "client":
 			net.send_action("leave", [p.index], 1)
-		else:
+		elif not SIMPLE_MODE:
 			show_center("PLAYER %d LEFT" % (p.index + 1), 1.5)
 	_save_party()
 
@@ -1657,14 +2151,15 @@ func _check_join(delta: float) -> void:
 
 func on_client_joined() -> void:
 	players[1].set_active(true)
-	show_center("THE GUNNERS CLIMBED ABOARD!", 1.5)
+	show_center("ALL ABOARD!" if SIMPLE_MODE else "THE GUNNERS CLIMBED ABOARD!", 1.5)
 	sound("join", -2.0)
 
 
 func on_client_left() -> void:
 	for i in range(1, players.size()):
 		players[i].set_active(false)
-	show_center("The TV gunners left - waiting for them to come back…", 0.0)
+	if not SIMPLE_MODE:
+		show_center("The TV gunners left - waiting for them to come back…", 0.0)
 
 
 func on_p2_action(action: String, args: Array, index: int = 1) -> void:
@@ -1684,13 +2179,14 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 		"join":
 			if not g.active:
 				g.set_active(true)
-				show_center("PLAYER %d CLIMBED ABOARD!" % (index + 1), 1.5)
+				show_center("ALL ABOARD!" if SIMPLE_MODE else "PLAYER %d CLIMBED ABOARD!" % (index + 1), 1.5)
 				sound("join", -4.0, 1.2)
 				print("Net: player %d joined the game" % (index + 1))
 		"leave":
 			if g.active and index >= 2:
 				g.set_active(false)
-				show_center("PLAYER %d LEFT" % (index + 1), 1.5)
+				if not SIMPLE_MODE:
+					show_center("PLAYER %d LEFT" % (index + 1), 1.5)
 		"restart":
 			if phase == "over":
 				get_tree().reload_current_scene()
@@ -1735,7 +2231,8 @@ func make_snapshot() -> Array:
 	var bs: Array = boss.net_state() if boss != null and is_instance_valid(boss) else []
 	return [phase, level, level_seed, course_origin, course_yaw, ring_i, score, stars_got, dragon.lit_mask(), distance,
 		[dragon.global_position, dragon.yaw, dragon.velocity, dragon.yaw_rate, dragon.steer, dragon.climb, dragon.flap_power],
-		gone, sp, players[0].net_pose(), phase_t, level_rings, mission, power_t, cannon_level, rv, bs]
+		gone, sp, players[0].net_pose(), phase_t, level_rings, mission, power_t, cannon_level, rv, bs,
+		[practice_step, practice_pos, practice_normal, _practice_alive_mask()]]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -1795,6 +2292,8 @@ func apply_snapshot(s: Array) -> void:
 				boss.setup(hp.size(), 1)
 				add_child(boss)
 			boss.apply_net_state(bs)
+	if s.size() >= 22:
+		_sync_practice(s[21])
 
 
 func _sync_sprites(list: Array) -> void:
@@ -1844,6 +2343,11 @@ func apply_event(kind: String, args: Array) -> void:
 		"remote_pause":
 			get_tree().paused = args[0]
 			_set_pause_banner(args[0], "The dragon rider paused the game")
+		"prop":
+			_prop_react(args[0], args[1], args[2])
+		"visitor":
+			if props != null:
+				props.spawn_visitor(args[0], args[1], args[2])
 
 
 # --- Banner, VR text and comfort ------------------------------------------------
@@ -1855,7 +2359,7 @@ func show_center(text: String, duration: float, broadcast: bool = true) -> void:
 	center_alpha = 1.0 if text != "" else 0.0
 	center_left = duration
 	if fallback_label:
-		fallback_label.text = text
+		fallback_label.text = text.get_slice("\n", 0) if SIMPLE_MODE else text
 	if vr_center != null:
 		VrText.snap(vr_center)
 
@@ -1874,7 +2378,7 @@ func _vr_label(font: int, width: float) -> Label3D:
 	var l := Label3D.new()
 	l.font_size = font
 	l.outline_size = 26
-	l.no_depth_test = true
+	l.no_depth_test = false
 	l.render_priority = 10
 	l.outline_render_priority = 9
 	l.width = width
@@ -1893,11 +2397,15 @@ func _update_vr(delta: float) -> void:
 	if vr_center == null:
 		vr_center = _vr_label(46, 1000.0)
 		vr_status = _vr_label(30, 1100.0)
-	vr_center.text = center_text
+	vr_center.text = VrText.short(center_text) if SIMPLE_MODE else center_text
 	vr_center.visible = center_alpha > 0.01 and center_text != ""
 	vr_center.modulate.a = center_alpha
 	vr_center.outline_modulate = Color(0, 0, 0, center_alpha)
 	VrText.follow(vr_center, cam, dragon, 0.05, 1.8)
+	vr_status.visible = not SIMPLE_MODE
+	if SIMPLE_MODE:
+		_update_vignette(delta)
+		return
 	var lamps := ""
 	for l in dragon.lit:
 		lamps += "O " if l else "x "
@@ -1908,6 +2416,10 @@ func _update_vr(delta: float) -> void:
 		hint = "Pull the trigger to fly again"
 	vr_status.text = "%s\nLANTERNS  %s\n%s" % [hud_line(), lamps, hint]
 	VrText.follow(vr_status, cam, dragon, 0.58, 1.8)
+	_update_vignette(delta)
+
+
+func _update_vignette(delta: float) -> void:
 	if vignette_mat != null and delta > 0.0:
 		var turn: float = absf(dragon.yaw_rate) / dragon.MAX_YAW_RATE
 		var fast: float = clampf((dragon.speed - dragon.BASE_SPEED) / (dragon.MAX_SPEED - dragon.BASE_SPEED), 0.0, 1.0)

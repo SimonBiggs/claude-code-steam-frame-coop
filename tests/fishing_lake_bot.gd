@@ -11,6 +11,9 @@ extends Node
 ## Events are forced on a timeline (host / local): fish frenzy, a treasure map (boats find the X and drop
 ## the buoy, the angler casts at it for the pirate chest), OLD WHISKERS the legend (boats splash next to
 ## him to tire him out), then rain on day 2 and starry night late on day 2.
+## SIMPLE_MODE (main.gd): the game starts with the practice (cast into the glowing ring, reel in the
+## fish, then the clock starts); only OLD WHISKERS (day 2) and the night (late day 2) are forced, since
+## frenzies, maps, upgrades and the journal are off. The summary checks the practice ended.
 
 const FAKE_PAD := 40
 
@@ -111,7 +114,11 @@ func _physics_process(delta: float) -> void:
 func _events_timeline(mode: String) -> void:
 	if mode == "client" or main.state != "play":
 		return
+	if main.practice:
+		return  # the practice first: the day's clock hasn't started yet
 	var plan := [["legend", 1, 1.5], ["map", 1, 16.0], ["frenzy", 2, 3.0], ["night", 2, 22.0]]
+	if main.SIMPLE_MODE:
+		plan = [["legend", 2, 3.0], ["night", 2, 22.0]]
 	var day_t: float = main.round_time - main.time_left
 	for e in plan:
 		var ee: Array = e
@@ -127,6 +134,16 @@ func _events_timeline(mode: String) -> void:
 
 ## Records what each machine saw (mirrored state on the TV machine).
 func _watch() -> void:
+	if main.practice:
+		seen["practice"] = true
+		if main.practice_step == 1:
+			seen["practice_ring_hit"] = true
+	elif seen.has("practice"):
+		seen["practice_done"] = true
+	if main.reel_icon != null and main.reel_icon.visible:
+		seen["reel_icon"] = true
+	if main.ghost_demo != null and main.ghost_demo.visible:
+		seen["ghost_demo"] = true
 	if main.rain > 0.3:
 		seen["rain"] = true
 	if main.daylight > 1.15:
@@ -180,6 +197,8 @@ func _flat(v: Vector3) -> Vector3:
 
 ## Where an angler would like to cast now: the buoy, the frenzy bubbles or the legend come first.
 func _event_target(from: Vector3) -> Vector3:
+	if main.practice and main.practice_step == 0:
+		return main.practice_pos
 	for f in main.fish:
 		if f.kind == main.FishScript.LEGEND and f.free_to_bite():
 			return f.position + Vector3(0.6, 0, 0.6)
@@ -210,7 +229,7 @@ func _drive_angler(a) -> void:
 	a.bot_reel = 0.0
 	match str(a.line_state):
 		"ready":
-			if a.cast_cool <= 0.0 and main.state == "play":
+			if a.cast_cool <= 0.0 and main.state == "play" and t > 1.0:  # wait for the rod to be in place
 				var tip: Vector3 = a.tip_pos()
 				var f = _target_fish(tip)
 				var to := Vector3(0, 0, -10)
@@ -396,7 +415,7 @@ func _report(mode: String) -> void:
 		if x.kind >= 0:
 			tr += 1
 	print("BOT %s t=%.0f day=%d state=%s time=%.0f score=%d/%d line=%s tension=%.2f casts=%d catches=%d(%d) snaps=%d fish=%d treasure=%d scooped=%d calls=%d views=%d remote_synced=%d%s [%s]" % [
-		mode, t, main.day, main.state, main.time_left, main.score, main.target, a.line_state, a.tension, a.casts,
+		mode, t, main.day, main.state + ("/practice%d" % main.practice_step if main.practice else ""), main.time_left, main.score, main.target, a.line_state, a.tension, a.casts,
 		a.catches, main.catches.size(), a.snaps, main.fish_count(), tr, scooped, calls, views, synced,
 		(" flicks=%d max_crank=%.2f" % [flicks, max_crank]) if a.fake_vr else "", ", ".join(boats)])
 
@@ -407,8 +426,8 @@ func _exit_tree() -> void:
 	var a = main.players[0] if main.players.size() > 0 else null
 	if a == null:
 		return
-	print("BOT SUMMARY: mode=%s days_completed=%d max_score=%d casts=%d catches=%d snaps=%d" % [
-		main.net.mode, days_done, max_score, a.casts, a.catches, a.snaps])
+	print("BOT SUMMARY: mode=%s days_completed=%d max_score=%d casts=%d catches=%d snaps=%d fish_today=%d simple=%s" % [
+		main.net.mode, days_done, max_score, a.casts, a.catches, a.snaps, main.fish_caught(), main.SIMPLE_MODE])
 	var keys: Array = seen.keys()
 	keys.sort()
 	print("BOT SEEN: %s" % " ".join(PackedStringArray(keys)))

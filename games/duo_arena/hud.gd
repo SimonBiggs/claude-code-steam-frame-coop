@@ -90,6 +90,8 @@ func _process(delta: float) -> void:
 			status += "  ·  RAPID %ds" % int(ceil(player.rapid_t))
 		if player.spread_t > 0.0:
 			status += "  ·  SPREAD %ds" % int(ceil(player.spread_t))
+	if main != null and main.SIMPLE_MODE:
+		status = ""  # simple mode: just your name and your health bar
 	name_label.text = "PLAYER %d%s" % [player.index + 1, status]
 	queue_redraw()
 

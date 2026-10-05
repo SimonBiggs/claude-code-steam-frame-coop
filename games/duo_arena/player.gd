@@ -174,7 +174,7 @@ func _ready() -> void:
 	tag = Label3D.new()
 	tag.text = "P%d" % (index + 1)
 	tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	tag.no_depth_test = true
+	tag.no_depth_test = false
 	tag.fixed_size = true
 	tag.pixel_size = 0.0012
 	tag.font_size = 28
@@ -292,7 +292,7 @@ func attach_xr(origin: XROrigin3D, cam: XRCamera3D, left: XRController3D, right:
 	wrist_label.modulate = color.lightened(0.4)
 	wrist_label.position = Vector3(0.0, 0.05, 0.08)
 	wrist_label.rotation_degrees = Vector3(-55, 0, 0)
-	wrist_label.no_depth_test = true
+	wrist_label.no_depth_test = false
 	hand_l.add_child(wrist_label)
 	_set_layers(wrist_label, viewmodel_layer())
 
@@ -611,6 +611,10 @@ func _vr_update(_delta: float) -> void:
 		status += ("   " if status != "" else "") + str(d.EVENTS[d.event_name][0])
 	if main.net.mode == "host" and not main.net.connected:
 		status = "Waiting for the TV player to join…"
+	if main.SIMPLE_MODE:  # one short line on the wrist: which wave
+		wrist_label.text = "WAVE %d" % main.wave if main.wave > 0 else ""
+		_update_sword_demo(_delta)
+		return
 	wrist_label.text = "HP %d / %d   XP %d\nWAVE %d   SCORE %d\n%s" % [maxi(0, int(hp)), int(stat("max_hp")), xp, main.wave, main.score, status]
 
 
@@ -706,6 +710,7 @@ func revive(fraction: float) -> void:
 
 
 func _apply_down_pose(down: bool) -> void:
+	_down_arrow().visible = down
 	pivot.rotation.x = -PI / 2.0 if down else 0.0
 	pivot.position.y = 0.45 if down else 0.0
 	revive_ring.visible = down
@@ -902,7 +907,7 @@ func _update_vr_hurt(delta: float) -> void:
 		vr_hurt_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		vr_hurt_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		vr_hurt_mat.cull_mode = BaseMaterial3D.CULL_FRONT  # seen from inside
-		vr_hurt_mat.no_depth_test = true
+		vr_hurt_mat.no_depth_test = false
 		vr_hurt_mat.render_priority = 20
 		vr_hurt_mat.albedo_color = Color(1.0, 0.05, 0.05, 0.0)
 		shell.material_override = vr_hurt_mat
@@ -960,7 +965,7 @@ func _update_gun_hp() -> void:
 		l.font_size = 48
 		l.outline_size = 14
 		l.pixel_size = 0.0007
-		l.no_depth_test = true
+		l.no_depth_test = false
 		l.render_priority = 6
 		hand_r.add_child(l)
 		l.position = Vector3(0.0, 0.07, 0.02)
@@ -969,9 +974,13 @@ func _update_gun_hp() -> void:
 	var frac := clampf(hp / maxf(stat("max_hp"), 1.0), 0.0, 1.0)
 	l.text = "HP %d" % int(ceil(hp))
 	var dir_node = main.director()
-	if dir_node.combo >= 2:
+	if main.SIMPLE_MODE:
+		pass  # just the health number
+	elif dir_node.combo >= 2:
 		l.text += "\nCOMBO x%d" % dir_node.combo
-	if bubble_t > 0.0:
+	if main.SIMPLE_MODE:
+		pass
+	elif bubble_t > 0.0:
 		l.text += "\nBUBBLE %d" % int(ceil(bubble_t))
 	elif rapid_t > 0.0:
 		l.text += "\nRAPID %d" % int(ceil(rapid_t))
@@ -1008,7 +1017,11 @@ func _update_sword(delta: float) -> void:
 	var trig := hand_l.get_float("trigger") > 0.6 or hand_l.is_button_pressed("trigger_click")
 	var head := xr_camera.global_transform
 	var rel := head.affine_inverse() * hand_l.global_position  # hand in head space (+Y up, +Z behind)
-	var over_shoulder := rel.y > -0.05 and rel.z > 0.02
+	# Beside/behind the ear (kids couldn't reach "above the eyes and behind the head"), held for 0.2 s
+	# so a fast sword swing passing through doesn't swap by accident.
+	var near_shoulder := rel.y > -0.2 and rel.z > -0.06 and Vector2(rel.x, rel.z).length() < 0.35
+	set_meta("shoulder_t", float(get_meta("shoulder_t", 0.0)) + delta if near_shoulder else 0.0)
+	var over_shoulder := float(get_meta("shoulder_t", 0.0)) > 0.2
 	var want := trig or over_shoulder
 	if want and not get_meta("swap_was", false) and Time.get_ticks_msec() > int(get_meta("swap_ok", 0)):
 		set_meta("swap_ok", Time.get_ticks_msec() + 600)
@@ -1016,7 +1029,8 @@ func _update_sword(delta: float) -> void:
 		sword.visible = to_sword
 		main.sound("dash", -6.0, 1.6 if to_sword else 0.8)
 		hand_l.trigger_haptic_pulse("haptic", 0.0, 0.6, 0.1, 0.0)
-		if to_sword and not has_meta("sword_told"):
+		set_meta("swapped", int(get_meta("swapped", 0)) + 1)  # the ghost-hand demo stops once they've done it
+		if to_sword and not has_meta("sword_told") and not main.SIMPLE_MODE:
 			set_meta("sword_told", true)
 			main._show_center("SWORD!\nSwing it through enemies. Reach over your shoulder again for the shield", 3.0)
 	set_meta("swap_was", want)
@@ -1054,7 +1068,7 @@ func _update_sword(delta: float) -> void:
 				slice_streak_t = 1.3
 				if e.dead:
 					main.director().add_stat(self, "slices", 1)
-				if slice_streak >= 3:
+				if slice_streak >= 3 and not main.SIMPLE_MODE:
 					main.popup(c + Vector3.UP * (float(e.radius) + 0.8), "SLICE x%d!" % slice_streak, Color(0.6, 0.95, 1.0))
 				main.burst(p, Color(0.6, 0.95, 1.0), 10, 0.08)
 				main.sound("slice", -2.0, 1.0 + 0.08 * mini(slice_streak, 6))
@@ -1070,7 +1084,8 @@ func _update_sword(delta: float) -> void:
 			hand_l.trigger_haptic_pulse("haptic", 0.0, 0.8, 0.1, 0.0)
 			if s.fireball:
 				s.shot_down()
-				main.popup(cp + Vector3.UP * 0.6, "SLICED!", Color(1.0, 0.7, 0.3))
+				if not main.SIMPLE_MODE:
+					main.popup(cp + Vector3.UP * 0.6, "SLICED!", Color(1.0, 0.7, 0.3))
 			else:
 				s._reflect(fwd)
 				main.achievements().unlock("parry")
@@ -1087,7 +1102,7 @@ func shield_reflect(pos: Vector3) -> Vector3:
 		return Vector3.ZERO
 	hand_l.trigger_haptic_pulse("haptic", 0.0, 0.8, 0.12, 0.0)
 	main.achievements().unlock("parry")
-	if not shield_announced:
+	if not shield_announced and not main.SIMPLE_MODE:
 		shield_announced = true
 		main._show_center("SHIELD PARRY!\nYour left hand reflects green orbs back at enemies", 2.5)
 	return -hand_l.global_basis.z
@@ -1124,3 +1139,159 @@ func _ensure_wrist_radar() -> void:
 	wrist_radar.rotation_degrees = Vector3(-60, 0, 0)
 	_set_layers(wrist_radar, viewmodel_layer())
 	wrist_label.position = Vector3(0.0, 0.11, 0.2)
+
+
+## A bouncing arrow over a downed player (seen by everyone else): "go here!" without any words.
+## Standing in their glowing ring revives them.
+func _down_arrow() -> Node3D:
+	var arrow: Node3D = get_meta("down_arrow") if has_meta("down_arrow") else null
+	if arrow != null:
+		return arrow
+	arrow = Node3D.new()
+	add_child(arrow)
+	var cone := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.top_radius = 0.38
+	cm.bottom_radius = 0.0
+	cm.height = 0.6
+	cm.radial_segments = 12
+	cone.mesh = cm
+	cone.material_override = main.make_material(color.lightened(0.3), 3.0)
+	cone.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	arrow.add_child(cone)
+	var stem := MeshInstance3D.new()
+	var sm := BoxMesh.new()
+	sm.size = Vector3(0.18, 0.45, 0.18)
+	stem.mesh = sm
+	stem.material_override = cone.material_override
+	stem.position.y = 0.5
+	stem.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	arrow.add_child(stem)
+	arrow.position.y = 2.4
+	_set_layers(arrow, body_layer())  # not in the downed player's own view
+	var t := arrow.create_tween().set_loops()
+	t.tween_property(arrow, "position:y", 1.9, 0.35).set_trans(Tween.TRANS_SINE)
+	t.tween_property(arrow, "position:y", 2.4, 0.35).set_trans(Tween.TRANS_SINE)
+	arrow.visible = false
+	set_meta("down_arrow", arrow)
+	return arrow
+
+
+## VR, simple mode: from wave 2 a see-through "mirror" figure in front of the VR player shows the
+## sword move: left hand up beside the ear, hold, the sword appears, swing. It goes away once the
+## player has swapped to the sword and back (or after a while; it comes back at wave 4 if never tried).
+func _update_sword_demo(delta: float) -> void:
+	if main.net.mode == "client" or ghost:
+		return
+	var demo: Node3D = get_meta("sword_demo") if has_meta("sword_demo") else null
+	var w: int = main.wave
+	if w >= 2 and int(get_meta("demo_wave", 0)) == 0 or (w >= 4 and int(get_meta("demo_wave", 0)) == 2 and int(get_meta("swapped", 0)) == 0):
+		set_meta("demo_wave", w)
+		set_meta("demo_left", 14.0 if w < 4 else 10.0)
+	var left: float = float(get_meta("demo_left", 0.0)) - delta
+	set_meta("demo_left", left)
+	var want: bool = left > 0.0 and int(get_meta("swapped", 0)) < 2 and not is_down and not main.game_over
+	if not want:
+		if demo != null:
+			demo.visible = false
+		return
+	if demo == null:
+		demo = _build_sword_demo()
+	demo.visible = true
+	# Stand 1.6 m in front of the player's face (follows the head's turn slowly).
+	var cam := xr_camera.global_transform
+	var fwd := -cam.basis.z
+	fwd.y = 0.0
+	fwd = fwd.normalized() if fwd.length() > 0.01 else Vector3.FORWARD
+	var want_pos := cam.origin + fwd * 1.6 + Vector3.DOWN * 0.15
+	demo.global_position = demo.global_position.lerp(want_pos, 1.0 - exp(-3.0 * delta)) if demo.has_meta("placed") else want_pos
+	demo.set_meta("placed", true)
+	var face := cam.origin - demo.global_position
+	face.y = 0.0
+	if face.length() > 0.01:
+		demo.global_basis = Basis(Vector3.UP, atan2(face.x, face.z))  # local +Z points at the player
+	# Hand path in the figure's space: +X is the player's right, so -X is the mirror of their LEFT hand.
+	var cyc := fmod(Time.get_ticks_msec() / 1000.0, 2.6)
+	var rest := Vector3(-0.3, -0.5, 0.15)
+	var ear := Vector3(-0.2, 0.0, -0.05)
+	var hand: Node3D = demo.get_meta("hand")
+	var sword: Node3D = demo.get_meta("sword")
+	var ear_mark: Node3D = demo.get_meta("ear")
+	ear_mark.scale = Vector3.ONE * (1.0 + 0.3 * sin(Time.get_ticks_msec() * 0.012))
+	if cyc < 0.8:
+		hand.position = rest.lerp(ear, smoothstep(0.0, 0.8, cyc))
+		sword.visible = false
+	elif cyc < 1.3:
+		hand.position = ear
+		sword.visible = cyc > 1.1
+	else:
+		var u := smoothstep(1.3, 2.1, cyc)
+		hand.position = ear.lerp(Vector3(0.35, -0.45, 0.35), u)
+		hand.rotation.z = -1.4 * u
+		sword.visible = true
+	if cyc < 1.3:
+		hand.rotation.z = 0.0
+
+
+func _build_sword_demo() -> Node3D:
+	var demo := Node3D.new()
+	main.add_child(demo)
+	var ghost_mat := StandardMaterial3D.new()
+	ghost_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	ghost_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	ghost_mat.albedo_color = Color(0.6, 0.9, 1.0, 0.25)
+	var head := MeshInstance3D.new()
+	var hm := SphereMesh.new()
+	hm.radius = 0.13
+	hm.height = 0.3
+	hm.radial_segments = 12
+	hm.rings = 6
+	head.mesh = hm
+	head.material_override = ghost_mat
+	demo.add_child(head)
+	var body := MeshInstance3D.new()
+	var bm := CapsuleMesh.new()
+	bm.radius = 0.17
+	bm.height = 0.7
+	bm.radial_segments = 10
+	bm.rings = 4
+	body.mesh = bm
+	body.material_override = ghost_mat
+	body.position = Vector3(0.0, -0.55, 0.0)
+	demo.add_child(body)
+	var ear := MeshInstance3D.new()  # a glowing dot beside the head: "put your hand here"
+	var em := SphereMesh.new()
+	em.radius = 0.035
+	em.height = 0.07
+	em.radial_segments = 8
+	em.rings = 4
+	ear.mesh = em
+	ear.material_override = main.make_material(Color(1.0, 0.9, 0.3), 4.0)
+	ear.position = Vector3(-0.2, 0.0, -0.05)
+	demo.add_child(ear)
+	var hand := Node3D.new()
+	demo.add_child(hand)
+	var palm := MeshInstance3D.new()
+	var pm := SphereMesh.new()
+	pm.radius = 0.06
+	pm.height = 0.12
+	pm.radial_segments = 10
+	pm.rings = 5
+	palm.mesh = pm
+	palm.material_override = main.make_material(color.lightened(0.4), 2.5)
+	hand.add_child(palm)
+	var sword := MeshInstance3D.new()
+	var sb := BoxMesh.new()
+	sb.size = Vector3(0.035, 0.6, 0.012)
+	sword.mesh = sb
+	sword.position = Vector3(0.0, 0.33, 0.0)
+	sword.material_override = main.make_material(Color(0.6, 0.95, 1.0), 4.0)
+	hand.add_child(sword)
+	for n in [head, body, ear, palm, sword]:
+		(n as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	demo.set_meta("hand", hand)
+	demo.set_meta("sword", sword)
+	demo.set_meta("ear", ear)
+	_set_layers(demo, viewmodel_layer())
+	set_meta("sword_demo", demo)
+	return demo
