@@ -141,8 +141,8 @@ func _setup(mode: String) -> void:
 		add_child(split)
 		split.bind_party(party)
 		var sc := split.shared_camera()
-		sc.global_position = Vector3(-6.0, 14.0, 22.0)
-		sc.look_at(Vector3(1.0, 0.0, 0.0), Vector3.UP)
+		sc.global_position = Vector3(0.0, 13.0, -21.0)  # across the table: the giant waves from behind the course
+		sc.look_at(Vector3(0.0, 0.5, 1.0), Vector3.UP)
 		_make_hud(-1, split.shared_hud())
 		if mode == "client":
 			giant.make_avatar()
@@ -546,6 +546,9 @@ func _finish_rules() -> void:
 	for rid in runners:
 		var r: Runner = runners[rid]
 		if done.has(rid):
+			continue
+		if not r.owned and course_t < 2.0:  # the TV machine hasn't moved them to the new start yet
+			all_in = false
 			continue
 		var late := course_t > HOP_IN_TIME or (first_t >= 0.0 and course_t - first_t > AFTER_FIRST)
 		var natural := course.finished(r.position)
