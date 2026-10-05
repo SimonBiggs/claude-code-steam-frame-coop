@@ -78,6 +78,9 @@ def install(proj: Path) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
     if not dst.exists() or dst.read_bytes() != BRIDGE_SRC.read_bytes():
         shutil.copyfile(BRIDGE_SRC, dst)
+    cap = GDEV_HOME / "caption.gd"  # "Claude:" captions, created by the bridge
+    if cap.exists() and (not (dst.parent / "caption.gd").exists() or (dst.parent / "caption.gd").read_bytes() != cap.read_bytes()):
+        shutil.copyfile(cap, dst.parent / "caption.gd")
     cfg = proj / "project.godot"
     text = cfg.read_text()
     if AUTOLOAD_LINE not in text:

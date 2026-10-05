@@ -108,6 +108,8 @@ func _host_tick(delta: float) -> void:
 func on_night_started(night: int, king_night: bool) -> void:
 	end_event()
 	relight_night = -1
+	if main.simple:
+		return  # simple mode: no storms, parties or treats
 	if night >= 2 and not king_night and night != main.FINAL_NIGHT:
 		var choices: Array[String] = ["storm", "party", "treats"]
 		choices.erase(last_event)
@@ -338,6 +340,8 @@ func awards_text() -> String:
 # --- Hints -----------------------------------------------------------------------
 
 func hint(text: String, duration: float = 4.0, key: String = "") -> void:
+	if main.simple:
+		return  # simple mode: no hint panels (the practice shows it)
 	if key != "":
 		if told.has(key):
 			return
@@ -353,6 +357,8 @@ func on_ghost_spawned(kind: String) -> void:
 
 
 func howto() -> void:
+	if main.simple:
+		return
 	var tv_ready: bool = main.net.mode != "host" or main.net.connected
 	if not told.has("howto_tv") and tv_ready:
 		told["howto_tv"] = true
@@ -376,7 +382,7 @@ func show_hint(text: String, duration: float) -> void:
 			hint_3d.outline_size = 26
 			hint_3d.outline_modulate = Color.BLACK
 			hint_3d.pixel_size = 0.0022
-			hint_3d.no_depth_test = true
+			hint_3d.no_depth_test = false
 			hint_3d.render_priority = 10
 			hint_3d.outline_render_priority = 9
 			hint_3d.width = 1100.0

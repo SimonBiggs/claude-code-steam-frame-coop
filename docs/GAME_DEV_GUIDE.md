@@ -78,6 +78,17 @@ score and game over. Use visual-only "ghost" copies of host objects on the clien
   (`outline_size` around 26), or put it on the wrist. Don't attach text to the XR camera, and don't
   billboard it: players want to turn their head to read it. Let it glide back in front only when they
   turn well away (see `_lazy_follow` in duo_arena/main.gd).
+- **VR text and depth** (it hurt the family's eyes when wrong):
+  - Never set `Label3D.no_depth_test = true`. Far text drawn over nearer things (hands, a fishing rod)
+    looks wrong in stereo. `duo-deploy` refuses code that sets it.
+  - No billboards in VR: each eye turns the label differently, which looks cross-eyed. To face the
+    player, turn it on Y only. A Label3D reads from its **+Z** side, so with `d = label - head`, use
+    `Basis(Vector3.UP, atan2(-d.x, -d.z))`. The other sign mirrors the text.
+  - `core/vr_text_guard.gd` (started by `core/net.gd`) enforces both at runtime for every Label3D while
+    a VR camera is active, but write it correctly anyway.
+  - Keep VR text short: a headline and at most one more line. Instructions meant for the TV players
+    belong on the TV only.
+  - `frame-say` captions ("Claude: …") are drawn by addons/gdev/caption.gd in every game.
 - On the Steam Frame, the **left controller's buttons (menu, Y, grip) and the left trigger don't reach
   the game**; only the sticks, the right trigger, A and both hands' positions do. Give the left hand
   touch-based jobs. `core/net.gd` adds a MENU button beside the left wrist (touch and hold, or point and
@@ -98,6 +109,18 @@ score and game over. Use visual-only "ghost" copies of host objects on the clien
   - Show a how-to banner and short contextual hints: kids constantly ask "how do I…?".
 - `XRServer.world_scale` is global. If a game scales the world, reset it to 1.0 in `_exit_tree`.
 - Give the VR player a role that uses their **hands**, different from the TV players' role.
+- **Keep it simple** (Simon: "all of the games have become too complicated"): one core idea a
+  kid gets in 10 seconds. Start with only that; add mechanics one at a time in later rounds, never all
+  at once. Cut anything that needs explaining. Fewer HUD readouts, fewer modes, fewer special rules.
+- **Show, don't tell** (Simon: "everything's being driven by text"): teach with the world, not
+  paragraphs: glowing targets, arrows, a ghost hand doing the move, icons, sounds and short spoken
+  lines. Text is a last resort: one short headline at a time, never instructions for the other team.
+  Start every game with a short PRACTICE moment that teaches by doing (Simon's favourite: Cannon
+  Cove's practice targets): one safe target per skill, it lights up, you hit it, the next one appears.
+- **Everything should be interactable** (Simon's rule): if the VR player can reach it, touching it
+  should do something: trees sway or can be picked up, rocks can be thrown, houses wobble, water
+  splashes. Prefer grab-and-throw over abstract buttons; picking things up and throwing them is the
+  most fun part of VR.
 - `Engine.physics_ticks_per_second = 90` in VR.
 
 ## Performance (the Frame has a phone-class GPU, target 72 fps)

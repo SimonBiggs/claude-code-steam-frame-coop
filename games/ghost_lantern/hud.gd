@@ -52,6 +52,8 @@ func _process(delta: float) -> void:
 		return
 	var role_name := "SPIRIT LANTERN" if player.role == "lantern" else "GHOST VACUUM"
 	name_label.text = "P%d  ·  %s  ·  COURAGE" % [player.index + 1, role_name]
+	if main.simple:
+		name_label.text = "P%d" % (player.index + 1)
 	hint_label.text = _hint()
 	queue_redraw()
 
@@ -59,6 +61,8 @@ func _process(delta: float) -> void:
 func _hint() -> String:
 	if main.pad_wait.has(player.index):
 		return "CONTROLLER DISCONNECTED! Plug it back in within %d s to keep playing." % ceili(main.pad_wait[player.index])
+	if main.simple:
+		return _simple_hint()
 	if player.is_down:
 		return "SPOOKED! Stand still: a friend next to you will cheer you up."
 	if main.game_over:
@@ -74,6 +78,17 @@ func _hint() -> String:
 	if main.night <= 1:
 		return "Ghosts only show up in the lantern's light. Hold fire to vacuum them!"
 	return ""
+
+
+## Simple mode: one short line while practising (lantern) / until a vacuum's first catch.
+func _simple_hint() -> String:
+	if player.role == "lantern":
+		return "SHINE THE LIGHT!" if main.practice else ""
+	if main.tv_caught.has(player.index) or main.night > 3:
+		return ""
+	if player.joy >= 0:
+		return "HOLD RT!"
+	return "HOLD SPACE!" if player.keys() == 0 else "HOLD ENTER!"
 
 
 func _draw() -> void:
@@ -96,6 +111,8 @@ func _draw() -> void:
 			draw_rect(Rect2(top, Vector2(w * clampf(progress, 0.0, 1.0), 16.0 * ui)), Color(0.45, 1.0, 0.6))
 	else:
 		draw_arc(c, 10.0, 0.0, TAU, 20, Color(0.85, 1.0, 0.75, 0.8), 2.0, true)
+	if main.simple:
+		return  # no courage bar: nobody gets spooked
 	# Courage bar.
 	var bar_pos := Vector2(28, size.y - 50) * Vector2(ui, 1.0) + Vector2(0.0, 50.0 * (1.0 - ui))
 	var bw := 300.0 * ui

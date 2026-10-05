@@ -145,7 +145,7 @@ func _ready() -> void:
 	var tag := Label3D.new()
 	tag.text = "CHEF"
 	tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	tag.no_depth_test = true
+	tag.no_depth_test = false
 	tag.fixed_size = true
 	tag.pixel_size = 0.0012
 	tag.font_size = 28
@@ -235,7 +235,7 @@ func attach_xr(origin: XROrigin3D, cam: XRCamera3D, left: XRController3D, right:
 	wrist_label.modulate = Color(1.0, 0.95, 0.7)
 	wrist_label.position = Vector3(0.0, 0.07, 0.1)
 	wrist_label.rotation_degrees = Vector3(-55, 0, 0)
-	wrist_label.no_depth_test = true
+	wrist_label.no_depth_test = false
 	hand_l.add_child(wrist_label)
 	main.set_layers(wrist_label, viewmodel_layer())
 
@@ -333,6 +333,11 @@ func _vr_update(delta: float) -> void:
 				main.chef_grab(it)
 				if not fake_vr:
 					hand.trigger_haptic_pulse("haptic", 0.0, 0.3, 0.04, 0.0)
+			elif main.props and main.props.try_grab(h, point):  # simple mode: a veggie or the spoon
+				if not fake_vr:
+					hand.trigger_haptic_pulse("haptic", 0.0, 0.3, 0.04, 0.0)
+		elif not grip and main.props and main.props.holding(h):
+			main.props.release(h)
 		elif not grip and held[h] != null:
 			var it2 = held[h]
 			held[h] = null
@@ -353,12 +358,13 @@ func _vr_update(delta: float) -> void:
 			var near = main.chef_pick_target(hand_point(h), 0.14)
 			if near != null:
 				near.highlight = true
-	knife.visible = held[1] == null
-	knife_l.visible = held[0] == null
+	var props = main.props
+	knife.visible = held[1] == null and not (props and props.holding(1))
+	knife_l.visible = held[0] == null and not (props and props.holding(0))
 	_vr_chop(delta, 0)
 	_vr_chop(delta, 1)
 	_vr_bell(delta)
-	wrist_label.text = main.status_text() + "\nA: recenter  ·  left stick: slide"
+	wrist_label.text = main.wrist_text()
 
 
 ## Tap the service bell on the counter with a hand or knife: DING! (just for fun, everyone hears it)
@@ -377,7 +383,7 @@ func _vr_bell(delta: float) -> void:
 		# Only when a hand comes down onto it, not while resting there.
 		if near and not was and float(get_meta("bell_cd", 0.0)) <= 0.0:
 			set_meta("bell_cd", 0.6)
-			main.ring_bell()
+			main.chef_rang_bell()
 			if not fake_vr:
 				hand.trigger_haptic_pulse("haptic", 0.0, 0.4, 0.05, 0.0)
 

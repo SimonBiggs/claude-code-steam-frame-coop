@@ -156,7 +156,7 @@ func _ready() -> void:
 	tag = Label3D.new()
 	tag.text = "P%d" % (index + 1)
 	tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	tag.no_depth_test = true
+	tag.no_depth_test = false
 	tag.fixed_size = true
 	tag.pixel_size = 0.0012
 	tag.font_size = 28
@@ -370,7 +370,7 @@ func attach_xr(origin: XROrigin3D, cam: XRCamera3D, left: XRController3D, right:
 	bm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	bm.albedo_color = Color(0.03, 0.02, 0.06, 0.97)
 	bm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	bm.no_depth_test = true
+	bm.no_depth_test = false
 	bm.render_priority = -10
 	blindfold.material_override = bm
 	blindfold.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -477,7 +477,7 @@ func _physics_process(delta: float) -> void:
 				var to_c := Vector3(-global_position.x, 0.0, -global_position.z)
 				global_position += to_c.normalized() * 0.8 if to_c.length() > 0.1 else Vector3(0.8, 0.0, 0.0)
 				if main.in_jail(global_position):
-					global_position = main.WorldScript.BELL_POS + Vector3(-0.6, 0, 0)  # never pop into the jail cage
+					global_position = main.bell_pos() + Vector3(-0.6, 0, 0)  # never pop into the jail cage
 				main.burst(global_position + Vector3.UP, Color(0.7, 0.9, 1.0), 10, 0.06)
 		else:
 			set_meta("stuck_t", 0.0)
@@ -633,6 +633,17 @@ func _update_torch(_delta: float) -> void:
 	torch_glow.emission_energy_multiplier = (4.0 + torch_flash * 6.0) if on else 0.3
 	var bm: ShaderMaterial = torch_beam.material_override
 	bm.set_shader_parameter("energy", 0.22 + torch_flash * 0.5)
+	# Stop the beam (and the light) at the first wall, so it doesn't shine through (Abigail).
+	if on:
+		var bp := torch_beam.get_parent() as Node3D
+		var from := bp.global_position
+		var dir := -bp.global_basis.y.normalized()
+		var hit: Dictionary = main.ray(from, from + dir * 7.0)
+		var length: float = clampf(from.distance_to(hit.position), 0.3, 7.0) if not hit.is_empty() else 7.0
+		var r: float = tan(deg_to_rad(main.TAG_ANGLE)) * main.TAG_RANGE * 2.4 * (length / 7.0)
+		torch_beam.scale = Vector3(r, length, r)
+		torch_beam.position = Vector3(0, -length * 0.5, 0)
+		torch_light.spot_range = minf(torch_light.spot_range, length + 0.4)
 
 
 func _update_camera(delta: float) -> void:
@@ -820,7 +831,7 @@ func fit_height() -> void:
 	xr_origin.global_position = Vector3(o.x, SEEKER_EYE - calib_y, o.z)
 	print("VR: fitted eye height (head %.2f m above the floor -> eyes at %.2f m)" % [calib_y, SEEKER_EYE])
 	if first and main.phase != "seek":
-		teleport(main.SEEKER_SPAWN, PI)  # tracking just started: stand on the counting spot
+		teleport(main.spawn_pos(0), PI)  # tracking just started: stand on the counting spot
 
 
 ## Put the player at `pos` facing `new_yaw` (VR: moves the play space so the head lands there).

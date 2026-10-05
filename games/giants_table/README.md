@@ -20,7 +20,27 @@ You lose when the campfire has no embers left and none can be won back, or when 
 down for 20 seconds. The end screen lists the HEROES OF THE VILLAGE with a fun award each (GOBLIN BOWLER,
 SQUISHER, SKY CATCHER, KNIGHT TAXI, HUMAN UMBRELLA; GOBLIN BASHER, EMBER HERO, LIFESAVER, KING BREAKER).
 
-**What's new:**
+**Simple mode (`SIMPLE_MODE := true` in main.gd, the default).** The family found the games too
+complicated and too wordy, so the game is now just: grab the goblins walking to the campfire and throw
+them; the knights bonk them. Everything below that needs explaining is switched off behind that flag
+(not deleted):
+- **Practice first** (`practice.gd`): a glowing training goblin drops in near the Giant and a glowing
+  ring lies on the table, with a bouncing arrow and a see-through ghost hand showing reach - squeeze -
+  swing - let go. Throw it into the ring (or off the table, or smack it): confetti and a chime; two of
+  them, then wave 1. Knights' bonks only make the training goblin giggle (it's the Giant's practice).
+- **Gradual:** wave 1-2 plain goblins; then one new thing per wave: 3 rain (a glowing ghost hand over
+  the fire shows the umbrella), 4 balloon goblins, 5 an ogre, 6 the Goblin King (no armour; every 3rd
+  wave from then on), 7 spiky goblins (only with knights). Knights can bonk ogres and the King too.
+- **Everything reacts to the Giant's hands** (`scenery.gd`, `prop.gd`): trees sway and rustle and can be
+  pulled up and thrown or swung at goblins (a new tree grows back), cottages wobble (boing), sheep,
+  villagers and ducks hop, the river splashes. Trees and cottages are MultiMeshes (as cheap as before).
+- **Off:** loose embers to carry (a stolen ember flies home when its goblin is beaten), the growing
+  village, combos, score popups and the HUD stats, the heroes / awards screen, the all-knights-asleep
+  game over (down knights get back up by themselves), tips and the help panel.
+- **Text:** one short headline (WAVE 2!, RAIN!, BALLOONS!, BIG OGRE!, GOBLIN KING!, HOORAY!, OH NO!);
+  the TV shows WAVE n and, until wave 2, one line of knight controls. Game over restarts by itself.
+
+**What's new (full mode):**
 - **The village lives and grows.** Villagers stroll between the cottages, the well and the campfire, hurry
   indoors when goblins climb onto the table and come out to jump and cheer between waves. Sheep graze in the
   north meadow, ducks paddle along the river, smoke curls from every chimney. After every cleared wave a new

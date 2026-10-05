@@ -5,7 +5,7 @@ extends Node3D
 ## UNDO, CLEAR). The TV players (1-6) watch the easel live in their own split-screen views and each pick
 ## from their OWN four answers (one right, three decoys). First right answer scores most (+FIRST bonus),
 ## guessing several rounds in a row builds a STREAK, a wrong pick locks you out for a moment, hint
-## letters appear over time, and X / Y / B cheer the artist on (critters on the easel jump about).
+## letters are gone (they gave the word away), and X / Y / B cheer the artist on (critters on the easel jump about).
 ## A game is 5 rounds, each with its own THEME (animals, food, ...):
 ##   1-2 PAINT · 3 TEAM PAINT (roles swap: the TV players paint the word together with their stick
 ##   brushes and the VR player guesses by touching one of four balloons) · 4 SPEED ROUND (35 s, x2)
@@ -1074,7 +1074,8 @@ func _process(delta: float) -> void:
 				state = "draw"
 				state_t = 0.0
 				players[0].trig_block = players[0].trig_block or round_type == "team"
-				_show_center("GO!" if round_type != "team" else "TEAM - PAINT!", 0.8, true, "GO!" if round_type != "team" else "GUESS - touch a balloon!")
+				_show_center("GO!  Guess what they're painting!" if round_type != "team" else "TEAM - PAINT!", 1.5, true,
+					"GO!  Paint the word above the easel!" if round_type != "team" else "GUESS - touch a balloon!")
 				sound("go", 0.0, 1.0, true)
 				print("Round %d (%s, %s): draw! (%d guessers)" % [round_n, round_type, theme, active_guessers().size()])
 		"draw":
@@ -1083,14 +1084,8 @@ func _process(delta: float) -> void:
 			if secs <= 10 and secs != last_tick and secs > 0:
 				last_tick = secs
 				sound("tick", -4.0, 1.0 + (10 - secs) * 0.05, true)
-			if round_type != "team":
-				var want_hints := mini(int((round_time() - time_left) / HINT_EVERY), _max_hints())
-				if round_type == "speed":
-					want_hints = mini(int((round_time() - time_left) / 9.0), _max_hints())
-				if want_hints > hints_shown:
-					hints_shown = want_hints
-					_update_hint()
-					sound("hint", -6.0, 1.0, true)
+			# No hint letters any more: with only four answers to pick from, a letter (or even the letter
+			# count) gave the word away before anything was painted (family play-test).
 			if end_t >= 0.0:
 				end_t -= delta
 				if end_t < 0.0:
@@ -1235,10 +1230,8 @@ func _next_round() -> void:
 			sound("fanfare", -4.0, 1.2, true)
 		_:
 			if round_n == 1:
-				_show_center("PAINT AND GUESS!\nThe VR player paints a secret word - TV players guess it!\n" \
-					+ "TV: D-pad / stick picks an answer, A to guess. First right answer scores most!\n" \
-					+ "Wrong guesses freeze you for a moment. Hint letters appear over time.\nX / Y / B: cheer the artist!\n\n" \
-					+ "ROUND 1 of %d  ·  THEME: %s" % [ROUNDS, theme], FIRST_INTRO_TIME, true, "ROUND 1 of %d\nTheme: %s" % [ROUNDS, theme])
+				_show_center("PAINT AND GUESS!\nGuess what they're painting!\nD-pad picks an answer  ·  A guesses\n\n" \
+					+ "ROUND 1 of %d  ·  THEME: %s" % [ROUNDS, theme], FIRST_INTRO_TIME, true, "Paint the word above the easel!")
 			else:
 				_show_center("ROUND %d of %d\nTHEME: %s\nGet ready to guess!" % [round_n, ROUNDS, theme], INTRO_TIME, true,
 					"ROUND %d of %d\nTheme: %s" % [round_n, ROUNDS, theme])
@@ -1275,7 +1268,9 @@ func _pick_word() -> void:
 			hint_order.append(i)
 	hint_order.shuffle()
 	_update_hint()
-	var same_theme := 1 if round_n <= 2 else 2
+	# Every decoy comes from this round's theme (shown to everyone), so knowing the theme never rules
+	# answers out: only the painting tells them apart.
+	var same_theme := 3
 	opts = []
 	for i in MAX_PLAYERS:
 		var o: Array = [word]
@@ -1301,19 +1296,9 @@ func _max_hints() -> int:
 	return maxi(1, letters / 2)
 
 
+## Guessers see only the drawing: the old hint letters ("_ A _") gave the word away with four answers.
 func _update_hint() -> void:
-	var shown: Array[int] = []
-	for k in mini(hints_shown, hint_order.size()):
-		shown.append(hint_order[k])
-	var parts: PackedStringArray = []
-	for i in word.length():
-		if word[i] == " " or word[i] == "-":
-			parts.append(word[i])
-		elif shown.has(i):
-			parts.append(word[i].to_upper())
-		else:
-			parts.append("_")
-	hint_text = " ".join(parts)
+	hint_text = ""
 
 
 func _send_round() -> void:
@@ -2165,13 +2150,17 @@ func _update_easel_text() -> void:
 	var a = players[0]
 	var vr_like: bool = a.vr or a.fake_vr
 	var team := round_type == "team"
-	canvas.word_label.text = ("DRAW:  %s" % word.to_upper()) if (state == "draw" or state == "intro") and is_host_side() and not team else ""
-	canvas.word_label.visible = not a.vr  # the VR player reads it in the floating header instead
+	# The word card above the easel: artist only (SECRET_LAYER), world-locked, in VR too.
+	var show_word := (state == "draw" or state == "intro") and is_host_side() and not team and word != ""
+	canvas.word_label.text = word.to_upper() if show_word else ""
+	canvas.word_label.font_size = clampi(int(1.25 / (0.6 * canvas.word_label.pixel_size * maxf(1.0, word.length()))), 36, 64)
+	canvas.word_label.visible = show_word
 	canvas.hint_label.layers = HINT_LAYER
-	if state == "draw":
-		canvas.hint_label.text = ("PAINT:  %s" % team_word.to_upper()) if team else hint_text
-	else:
-		canvas.hint_label.text = ""
+	canvas.hint_label.text = ""  # the TV's own top line says it (the easel top is at the edge of their view)
+	# Show, don't tell: an arrow bounces up at the word until they start painting, and a ghost brush
+	# sweeps over the empty canvas.
+	var fresh: bool = show_word and a.painted_points == 0
+	canvas.set_guides(show_word, fresh, fresh and state == "draw")
 	canvas.tip_label.layers = CanvasScript.SECRET_LAYER
 	canvas.tip_label.text = _artist_tip(vr_like)
 	var info := ""
@@ -2184,27 +2173,21 @@ func _update_easel_text() -> void:
 				info = "PAINT AND GUESS\nWaiting for the VR artist…"
 		"intro":
 			if team:
-				info = "TEAM PAINT!\nThe TV players paint a secret word together.\n" + \
-					("YOU guess! Touch the balloon with the right answer (or point at it + trigger)." if vr_like else "The artist guesses!")
+				info = "TEAM PAINT!\n" + ("You GUESS this time!" if vr_like else "The artist guesses!")
 			elif round_type == "speed":
 				info = "SPEED ROUND!\n35 seconds · points x2\nDraw fast and BIG!"
 			elif round_type == "final":
 				info = "GOLDEN FINAL!\nPoints x2 - make it count!"
-			elif vr_like and round_n == 1:
-				info = "YOU ARE THE ARTIST!\nPaint the word above so the TV players can guess it.\n"
-				info += "Hold the RIGHT TRIGGER to paint - touch the board or point at it.\n"
-				info += "A = next colour (or touch a paint pot - try RAINBOW and SPARKLE!)\nUNDO · CLEAR · NEW WORD bubbles on the right\nLeft stick walks around"
-			elif vr_like:
-				info = "ROUND %d of %d\nTheme: %s\nGet ready to paint!" % [round_n, ROUNDS, theme]
 			else:
-				info = "ROUND %d of %d\nTheme: %s\nThe artist is getting ready…" % [round_n, ROUNDS, theme]
+				# Everyone sees this (the artist's goal line is on the artist-only tip label).
+				info = "ROUND %d of %d\nTheme: %s" % [round_n, ROUNDS, theme]
 		"reveal":
 			info = "It was %s!" % _article(reveal_word).to_upper() if reveal_word != "" else ""
 		"vote":
 			if vote_done_t >= 0.0:
 				info = "MASTERPIECE!\n%s" % masterpiece if masterpiece != "" else "Every picture is a winner!"
 		"over":
-			canvas.info_label.font_size = 32
+			canvas.info_label.font_size = 26  # the labels are 1.8x bigger now: keep the scores on the board
 			info = "THE END!\n" + _scoreboard().replace("   ", "  ·  ") + "\n\n" + str(get_meta("awards", ""))
 	canvas.info_label.text = info
 	canvas.score_label.visible = round_n > 0
@@ -2240,14 +2223,18 @@ func _update_easel_text() -> void:
 ## Short contextual tips for the artist on the bottom of the board (artist views only).
 func _artist_tip(vr_like: bool) -> String:
 	var a = players[0]
+	if state == "intro" and round_type != "team":
+		return "Paint the word above the easel!"
 	match artist_mode():
 		"paint":
 			if state != "draw":
 				return ""
-			if a.painted_points == 0 and state_t > 4.0:
-				return "Hold the RIGHT TRIGGER and touch the board to paint!" if vr_like else "Hold Space / left mouse / A to paint!"
+			if a.painted_points == 0:
+				if state_t < 4.0:
+					return "Paint the word above the easel!"
+				return "Hold the RIGHT TRIGGER to paint!" if vr_like else "Hold Space / left mouse / A to paint!"
 			if state_t > 25.0 and correct_count == 0 and fmod(state_t, 8.0) < 5.0:
-				return "Tip: draw it BIG!  A = new colour · UNDO fixes mistakes" if vr_like else "Tip: draw it BIG! C = new colour, Z = undo"
+				return "Tip: draw it BIG!"
 		"guess":
 			if vr_lock > 0.0:
 				return "Pop! Not that one - wait a moment…"
@@ -2279,7 +2266,7 @@ func _update_vr_text(delta: float) -> void:
 	vr_center.modulate.a = alpha
 	vr_center.outline_modulate = Color(0, 0, 0, alpha)
 	vr_status.text = _vr_status_text()
-	VrText.follow(vr_center, cam, self, 0.62, 1.8)
+	VrText.follow(vr_center, cam, self, 0.72, 1.8)  # above the word card on the easel
 	VrText.follow(vr_status, cam, self, 0.42, 1.8)
 
 
@@ -2303,12 +2290,12 @@ func _vr_status_text() -> String:
 		"wait":
 			return "Waiting for the TV players - practise painting!"
 		"intro":
-			return "Get ready - TEAM PAINT" if round_type == "team" else "Get ready:  %s" % word.to_upper()
+			return "Get ready - TEAM PAINT" if round_type == "team" else ""
 		"draw":
 			var secs := int(ceilf(time_left))
 			if round_type == "team":
 				return "GUESS what they paint!  ·  %d" % secs
-			return "%s  ·  %d" % [word.to_upper(), secs]
+			return ""  # the word is on the card above the easel (and on the brush): nothing behind it
 		"vote":
 			return "VOTE  ·  %d" % int(ceilf(time_left)) if vote_done_t < 0.0 else ""
 	return ""

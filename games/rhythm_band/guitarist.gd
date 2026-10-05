@@ -6,6 +6,9 @@ extends Node
 ## EASY shows only the big on-beat notes and gives a wider timing window, ROCK adds extra notes.
 ## Each machine judges its own players against the song clock it hears, then tells the host (which
 ## owns the band's crowd meter, combo, star meter and score). Pressing with no note near is free.
+## Simple mode (main.SIMPLE_MODE): no menu, no levels to pick (everyone plays EASY), no STAR POWER, no
+## judgement words (a hit makes its ring burst). PRACTICE: one slow note at a time slides down and
+## waits on its ring until you press that lane (main.PRACTICE_LANES), then the next one comes.
 
 const NO_KEYS := 99
 
@@ -41,6 +44,9 @@ var lane_flash := PackedFloat32Array([0.0, 0.0, 0.0])
 var judge_text := ""
 var judge_t := 0.0
 var judge_col := Color.WHITE
+var prac_step := 0  # simple mode PRACTICE: notes done so far
+var prac_t := 0.0  # time since the current practice note set off
+var hit_t := PackedFloat32Array([0.0, 0.0, 0.0])  # ring bursts after a hit
 
 
 func _ready() -> void:
@@ -51,6 +57,9 @@ func set_active(on: bool) -> void:
 	active = on
 	if not on:
 		menu_ready = false
+	elif main != null and main.state != "practice":
+		prac_step = 0
+		prac_t = 0.0
 
 
 func is_local() -> bool:
@@ -108,7 +117,7 @@ func _input(event: InputEvent) -> void:
 		elif lane == 1:
 			set_ready(not menu_ready)
 		return
-	if up:
+	if up and not main.SIMPLE_MODE:
 		main.request_star(self)
 	if lane >= 0:
 		press(lane)
@@ -177,6 +186,15 @@ func _up_for(event: InputEvent) -> bool:
 ## A lane button: hit the nearest open note in that lane inside the timing window.
 func press(lane: int) -> void:
 	lane_flash[lane] = 1.0
+	if main.state == "practice":
+		if prac_step < main.PRACTICE_LANES.size() and lane == main.PRACTICE_LANES[prac_step] and prac_t > 0.3:
+			prac_step += 1
+			prac_t = 0.0
+			hit_t[lane] = 1.0
+			main.guitar_practice_hit(self, lane)
+		else:
+			main.free_strum(self, lane)
+		return
 	var g = main.song
 	if main.state != "play" or g == null:
 		main.free_strum(self, lane)
@@ -205,6 +223,7 @@ func press(lane: int) -> void:
 		return
 	var q := 0 if bdt <= win.x else 1
 	judged[best] = q + 1
+	hit_t[lane] = 1.0
 	record(q, g.g_star[best] == 1)
 	main.guitar_result(self, best, q)
 
@@ -213,6 +232,9 @@ func _process(delta: float) -> void:
 	for l in 3:
 		lane_flash[l] = maxf(0.0, lane_flash[l] - delta * 5.0)
 	judge_t = maxf(0.0, judge_t - delta)
+	prac_t += delta
+	for l in 3:
+		hit_t[l] = maxf(0.0, hit_t[l] - delta * 3.0)
 	var g = main.song
 	if not active or not is_local() or main.state != "play" or g == null:
 		return
@@ -248,7 +270,7 @@ func record(q: int, star: bool = false) -> void:
 		streak = 0
 		miss_run += 1
 		tour["misses"] = int(tour["misses"]) + 1
-	if is_local():
+	if is_local() and not main.SIMPLE_MODE:
 		judge_text = ["PERFECT!", "GOOD", "MISS"][q]
 		judge_col = [Color(1.0, 0.9, 0.3), Color(0.5, 1.0, 0.6), Color(1.0, 0.45, 0.45)][q]
 		if star and q < 2:
