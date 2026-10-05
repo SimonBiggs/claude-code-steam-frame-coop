@@ -345,7 +345,7 @@ func _host_step(delta: float) -> void:
 	if rid >= 0:
 		var rp: Vector3 = space.objs[rid]["p"]
 		var to := Vector2(rp.x, rp.y) - space.off
-		if rp.z > -25.0 and to.length() < 4.5:
+		if rp.z > -25.0 and to.length() < 4.5 and not bool(space.objs[rid]["held"]):  # not the practice ring
 			space.off += to * minf(1.0, 0.9 * delta)
 	if station >= 0 and space.objs.has(station):
 		var sp: Vector3 = space.objs[station]["p"]

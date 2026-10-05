@@ -106,7 +106,7 @@ func _vr_bot(delta: float) -> void:
 	vr_t += delta
 	match vr_step:
 		"wait":  # let the ghost glove show the move first
-			kit.vr_reach(rig, VrRig.RIGHT, Vector3(0.3, 0.75, -0.05), 1.0, delta)
+			kit.vr_reach(rig, VrRig.RIGHT, Vector3(0.5, 0.6, 0.25), 1.0, delta)
 			if vr_t > 3.5:
 				vr_step = "reach"
 				vr_t = 0.0
