@@ -50,6 +50,8 @@ const GAMES := [
 		"blurb": "VR builds a roller coaster with their hands on a tabletop park; TV players ride it, hands up!"},
 	{"id": "mini_golf_party", "cat": "sports", "name": "MINI GOLF PARTY", "scene": "res://games/mini_golf_party/main.tscn",
 		"blurb": "Life-size mini golf in a sunny garden: swing a real putter in VR or aim and hold A on the TV, and everyone putts at once!"},
+	{"id": "obstacle_rush", "cat": "party", "name": "OBSTACLE RUSH", "scene": "res://games/obstacle_rush/main.tscn",
+		"blurb": "Race jelly-bean runners over a bouncy toy course while the VR giant lobs beach balls!"},
 ]
 ## Tabs on the TV (LB/RB) and in VR (stick left/right). Empty categories are hidden.
 const CATEGORIES := [
