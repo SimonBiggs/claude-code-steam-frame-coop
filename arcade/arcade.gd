@@ -52,6 +52,8 @@ const GAMES := [
 		"blurb": "Life-size mini golf in a sunny garden: swing a real putter in VR or aim and hold A on the TV, and everyone putts at once!"},
 	{"id": "obstacle_rush", "cat": "party", "name": "OBSTACLE RUSH", "scene": "res://games/obstacle_rush/main.tscn",
 		"blurb": "Race jelly-bean runners over a bouncy toy course while the VR giant lobs beach balls!"},
+	{"id": "starship_crew", "cat": "action", "name": "STARSHIP CREW", "scene": "res://games/starship_crew/main.tscn",
+		"blurb": "Fly the little starship through glowing rings while the crew zaps space rocks and silly aliens all the way home!"},
 ]
 ## Tabs on the TV (LB/RB) and in VR (stick left/right). Empty categories are hidden.
 const CATEGORIES := [
