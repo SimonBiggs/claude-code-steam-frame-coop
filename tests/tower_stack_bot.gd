@@ -106,7 +106,8 @@ func _steer(slot: int, climber: bool, _delta: float) -> void:
 			kit.slot_stick(main.party, slot, "left", Vector2.ZERO)
 			return
 		var bp := blk.global_position
-		var to_pad: Vector3 = main.PAD - bp
+		var dest := _route(Vector3(bp.x, 0.0, bp.z))
+		var to_pad: Vector3 = dest - bp
 		to_pad.y = 0.0
 		var behind := bp - to_pad.normalized() * 0.95
 		var ap := Vector3(a.position.x, 0.0, a.position.z)
@@ -117,7 +118,7 @@ func _steer(slot: int, climber: bool, _delta: float) -> void:
 			if ap.distance_to(bflat) < 1.3 and (bflat - ap).dot(dirp) < 0.0:
 				goal = bflat + Vector3(-dirp.z, 0.0, dirp.x) * 1.3  # walk round it, don't push it the wrong way
 		else:
-			goal = Vector3(main.PAD.x, 0.0, main.PAD.z)
+			goal = dest
 	var d := goal - a.position
 	d.y = 0.0
 	var v := Vector2.ZERO
@@ -130,6 +131,19 @@ func _steer(slot: int, climber: bool, _delta: float) -> void:
 		var r := Vector3(-f.z, 0.0, f.x)
 		v = Vector2(d.dot(r), -d.dot(f))
 	kit.slot_stick(main.party, slot, "left", v)
+
+
+## Where to push a block next: straight to the pad, or round the tower stage if it is in the way.
+func _route(from: Vector3) -> Vector3:
+	var pad := Vector3(main.PAD.x, 0.0, main.PAD.z)
+	var seg := pad - from
+	var k := clampf(-from.dot(seg) / maxf(seg.length_squared(), 0.001), 0.0, 1.0)
+	var c := from + seg * k
+	var clear: float = main.BASE_R + 1.2
+	if c.length() < clear:
+		var side := c if c.length() > 0.1 else Vector3(-seg.z, 0.0, seg.x)
+		return side.normalized() * (clear + 0.6)
+	return pad
 
 
 ## The nearest block lying in the field (not on the stage, the pad, or in the air).
@@ -157,6 +171,10 @@ func _drive_vr(delta: float) -> void:
 	var rig = main.vr_rig
 	kit.vr_head_height(rig, 1.5)
 	vr_wait -= delta
+	if main.results_showing():
+		kit.vr_trigger(rig, 1.0 if int(kit.t * 2.0) % 2 == 0 else 0.0)  # the giant pulls the trigger: play again
+		vr_phase = "find"
+		return
 	match vr_phase:
 		"find":
 			kit.vr_trigger(rig, 0.0)

@@ -1094,11 +1094,12 @@ func _release_held() -> void:
 	var rb: RigidBody3D = blocks[id]
 	var v := vr_rig.hand_velocity(VrRig.RIGHT)
 	_let_go(id)
-	if v.length() < 2.0:
+	var gentle := v.length() < 1.5 or (_in_tower_zone(rb.global_position) and v.length() < 3.5)
+	if gentle:
 		# A gentle place: stand it up straight (keep its turn) so towers are buildable.
 		var f := rb.global_basis.z
 		rb.global_basis = Basis(Vector3.UP, atan2(f.x, f.z))
-		rb.linear_velocity = v * 0.2
+		rb.linear_velocity = v * 0.1
 	else:
 		rb.linear_velocity = v.limit_length(9.0)  # a throw
 	vr_rig.pulse(VrRig.RIGHT, 0.3, 0.04)
