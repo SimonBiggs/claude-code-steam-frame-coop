@@ -45,10 +45,10 @@ func _ready() -> void:
 			kit.assert_true(not get_tree().paused, "Start again resumes")
 			kit.allow_pause = false)
 	if host:
-		kit.at(30.0, "host checks (the TV machine is still connected)", _checks)
-		kit.at(34.0, "finish", kit.finish)
+		kit.at(27.0, "host checks (the TV machine is still connected)", _checks)
+		kit.at(37.0, "finish", kit.finish)
 	else:
-		kit.at(29.0 if client else 27.0, "finish", func() -> void:
+		kit.at(31.0 if client else 27.0, "finish", func() -> void:
 			_checks()
 			kit.finish())
 	kit.every(2.0, _report)
