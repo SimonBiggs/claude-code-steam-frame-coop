@@ -36,6 +36,7 @@ var client_saw_raiders := 0
 var boss_alive_t := 0.0
 var giveup_t := float(OS.get_environment("BOT_GIVEUP")) if OS.has_environment("BOT_GIVEUP") else -1.0
 var wave_after_again := 0
+var max_snap := 0
 # Fake VR
 var vr_state := "rest"
 var vr_t := 0.0
@@ -320,6 +321,9 @@ func _vr_go(s: String) -> void:
 
 func _report() -> String:
 	var m = main.master
+	if main.net.mode == "host":
+		var sz := var_to_bytes(main.make_snapshot()).size()
+		max_snap = maxi(max_snap, sz)
 	return "BOT %s: phase %s wave %d raiders %d score %d spirit %d | benders %s | tv shots %d vr shots %d%s" % [
 		main.net.mode, main.phase(), int(main.net.state_get("wave", 0)), main.raiders.size(),
 		int(main.net.state_get("score", 0)), int(main.team_spirit()), str(main.benders.keys()), main.log_tv_shots,
@@ -337,6 +341,8 @@ func _checks() -> void:
 		kit.assert_true(client_saw_raiders > 0, "client: raider ghosts mirrored from the host")
 		kit.assert_true(max_wave >= 1, "client: waves reached the TV machine (%d)" % max_wave)
 		return
+	if mode == "host":
+		kit.assert_true(max_snap < 1400, "host: snapshots stay small (max %d bytes before compression)" % max_snap)
 	kit.assert_true(main.log_practice >= 1, "%s: practice dummies popped (%d)" % [mode, main.log_practice])
 	kit.assert_true(max_wave >= 1, "%s: waves started (max %d)" % [mode, max_wave])
 	kit.assert_true(main.log_counters > 0, "%s: counter hits x2 (%d)" % [mode, main.log_counters])
