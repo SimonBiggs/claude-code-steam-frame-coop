@@ -602,7 +602,7 @@ func _sim_sheep(delta: float) -> void:
 	var hands: Array[Vector3] = []
 	if vr_rig != null:
 		var lp := vr_rig.hand_point(VrRig.LEFT)  # the left glove shoos; the right one grabs
-		if lp.y < 0.8:
+		if lp.y < 0.7:
 			hands.append(lp)
 	for i in sheep.size():
 		var s: Node3D = sheep[i]
@@ -781,7 +781,7 @@ func _vr_hands() -> void:
 		if d < nd and hp.y - s.position.y < 1.1:
 			nd = d
 			near = i
-	var can := near >= 0 and nd < 0.5 and hp.y - (sheep[near] as Node3D).position.y < 0.75
+	var can := near >= 0 and nd < 0.55 and hp.y - (sheep[near] as Node3D).position.y < 0.9
 	if ring != null:
 		ring.visible = held < 0 and near >= 0 and playing
 		if ring.visible:
