@@ -301,7 +301,7 @@ func _start_wave() -> void:
 	_set_phase("fight")
 	net.state_set("wave", wave)
 	var n := maxi(1, fighters(true).size())
-	to_spawn = (2 + wave if fast else 3 + wave * 2) + (n - 1) * 2
+	to_spawn = (2 + int(wave / 2.0) + (n - 1)) if fast else (3 + wave * 2 + (n - 1) * 2)
 	spawn_t = 0.0
 	if wave % 5 == 0:
 		to_spawn = (2 if fast else wave) + n - 1
@@ -372,13 +372,13 @@ func _host_step(delta: float) -> void:
 		"practice":
 			_practice_step(delta)
 		"breather":
-			if phase_t > (2.0 if fast else 4.0) and not alive.is_empty():
+			if phase_t > (1.5 if fast else 4.0) and not alive.is_empty():
 				_start_wave()
 		"fight":
 			if to_spawn > 0:
 				spawn_t -= delta
 				if spawn_t <= 0.0 and raiders.size() < MAX_ALIVE:
-					spawn_t = 0.6
+					spawn_t = 0.4 if fast else 0.6
 					to_spawn -= 1
 					_spawn_raider(false)
 			elif raiders.is_empty():
@@ -439,6 +439,7 @@ func _make_dummy(id: int, e: int, pos: Vector3) -> void:
 
 
 func _clear_dummy() -> void:
+	_targets_frame = -1
 	if dummy != null and is_instance_valid(dummy):
 		dummy.queue_free()
 	dummy = null
@@ -571,6 +572,8 @@ func aim_assist(from: Vector3, dir: Vector3, min_dot: float) -> Vector3:
 	var best := dir
 	var best_score := -INF
 	for t in targets_for(0):
+		if not is_instance_valid(t):
+			continue
 		var n: Node3D = t
 		var to: Vector3 = n.global_position + Vector3.UP * float(n.get("hit_height")) - from
 		var d := to.length()
@@ -620,6 +623,7 @@ func _popup(pos: Vector3, text: String, opts: Dictionary) -> void:
 
 func on_raider_died(r: Raider, ring_out: bool) -> void:
 	raiders.erase(r.id)
+	_targets_frame = -1
 	kills += 1
 	var pts := 100 * (10 if r.boss else 1)
 	if ring_out:

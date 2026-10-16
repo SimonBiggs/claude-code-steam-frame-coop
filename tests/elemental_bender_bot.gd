@@ -29,6 +29,7 @@ var max_raiders := 0
 var max_wave := 0
 var cd := {}  # slot -> {"elem": t, "special": t, "jump": t, "dash": t}
 var client_saw_raiders := 0
+var boss_alive_t := 0.0
 # Fake VR
 var vr_state := "rest"
 var vr_t := 0.0
@@ -68,6 +69,9 @@ func _ready() -> void:
 
 func _watch() -> String:
 	max_raiders = maxi(max_raiders, main.raiders.size())
+	for r in main.raiders.values():
+		if is_instance_valid(r) and r.boss:
+			boss_alive_t += 0.25
 	max_wave = maxi(max_wave, int(main.net.state_get("wave", 0)))
 	if main.net.mode == "client":
 		client_saw_raiders = maxi(client_saw_raiders, main.raiders.size())
@@ -99,9 +103,9 @@ func _nearest_target(from: Vector3) -> Node3D:
 	var best: Node3D = null
 	var bd := INF
 	for t in main.targets_for(0):
-		var n: Node3D = t
-		if not is_instance_valid(n):
+		if not is_instance_valid(t):
 			continue
+		var n: Node3D = t
 		var d := n.global_position.distance_to(from)
 		if d < bd:
 			bd = d
@@ -291,8 +295,8 @@ func _checks() -> void:
 	if mode == "local" and not OS.has_environment("BOT_END"):
 		kit.assert_true(max_wave >= 6 or saw_results, "local: reached wave 6 (max %d)" % max_wave)
 		kit.assert_true(main.log_boss or saw_results, "local: the Shadow General appeared")
-	if main.log_boss:
-		kit.assert_true(main.log_boss_swaps > 0 or not main.raiders.values().any(func(r: Node) -> bool: return r.boss), "the General swapped elements")
+	if boss_alive_t > 6.0:
+		kit.assert_true(main.log_boss_swaps > 0, "the General swapped elements (%d, alive %.1f s)" % [main.log_boss_swaps, boss_alive_t])
 	if main.vr_rig != null:
 		var m = main.master
 		kit.assert_true(m.punches > 0 and main.log_vr_shots > 0, "VR: punches fired (%d)" % m.punches)

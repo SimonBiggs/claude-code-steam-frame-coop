@@ -294,6 +294,8 @@ func _aim(from: Vector3) -> Vector3:
 	var best: Node3D = null
 	var best_score := 0.0
 	for t in game.call("targets_for", 0):
+		if not is_instance_valid(t):
+			continue
 		var en: Node3D = t
 		var to: Vector3 = en.global_position + Vector3.UP * float(en.get("hit_height")) - from
 		var d := to.length()

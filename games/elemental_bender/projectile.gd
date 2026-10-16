@@ -90,9 +90,9 @@ func _physics_process(delta: float) -> void:
 	var reach := radius * (_model.scale.x if element == E.AIR else 1.0)
 	var targets: Array = game.call("targets_for", team)
 	for t in targets:
-		var tn: Node3D = t
-		if _hit.has(tn) or not is_instance_valid(tn):
+		if not is_instance_valid(t) or _hit.has(t):
 			continue
+		var tn: Node3D = t
 		var centre: Vector3 = tn.global_position + Vector3.UP * float(tn.get("hit_height"))
 		if global_position.distance_to(centre) < reach + float(tn.get("hit_radius")):
 			_hit[tn] = true
