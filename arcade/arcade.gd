@@ -64,6 +64,8 @@ const GAMES := [
 		"blurb": "Sheepdogs herd, the giant farmer scoops - get every fluffy sheep into the pen!"},
 	{"id": "fruit_catch", "cat": "party", "name": "FRUIT CATCH", "scene": "res://games/fruit_catch/main.tscn",
 		"blurb": "Shake the giant tree and catch the falling fruit in your baskets!"},
+	{"id": "whack_a_mole", "cat": "party", "name": "WHACK-A-MOLE", "scene": "res://games/whack_a_mole/main.tscn",
+		"blurb": "Silly moles pop out of a big table: bonk them with a giant mallet or a tiny hammer!"},
 ]
 ## Tabs on the TV (LB/RB) and in VR (stick left/right). Empty categories are hidden.
 const CATEGORIES := [
