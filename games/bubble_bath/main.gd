@@ -111,6 +111,7 @@ var send_t := 0.0
 var time_left := 0.0
 var results_t := 0.0
 var total_ducks := 0
+var splashes := 0  # splashes made on this machine (bots)
 
 
 func _ready() -> void:
@@ -937,6 +938,7 @@ func splash(pos: Vector3, push: Vector3, strength: float) -> void:
 
 
 func wave(pos: Vector3, push: Vector3, strength: float) -> void:
+	splashes += 1
 	for slot in party.local_slots():
 		if boats.has(slot):
 			var b: Node3D = boats[slot]

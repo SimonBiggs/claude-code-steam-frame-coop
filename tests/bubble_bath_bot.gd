@@ -201,3 +201,7 @@ func _checks() -> void:
 		kit.assert_true(max_train > 0 or main.net.mode == "host", "boats towed ducks")
 	if main.vr_rig != null:
 		kit.assert_true(vr_throws > 0, "fake VR player grabbed and threw ducks")
+		kit.assert_true(int(main.splashes) > 3, "the fake VR glove splashed the water (%d)" % int(main.splashes))
+	if mode == "client":
+		kit.assert_true(int(main.splashes) > 3, "client: splashes from the VR player arrived (%d)" % int(main.splashes))
+		kit.assert_true(main.vr_avatar != null, "client: the VR player is drawn on the TV")
