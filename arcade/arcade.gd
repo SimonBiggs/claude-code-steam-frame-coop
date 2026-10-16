@@ -78,6 +78,8 @@ const GAMES := [
 		"blurb": "Steer tiny boats to round up rubber ducks and sail them down the plug-hole, while the giant splashes up waves."},
 	{"id": "snowman_maker", "cat": "cosy", "name": "SNOWMAN MAKER", "scene": "res://games/snowman_maker/main.tscn",
 		"blurb": "Roll giant snowballs, stack them up, and give every snowman a carrot nose and a hat!"},
+	{"id": "dodge_ball", "cat": "party", "name": "SOFT DODGEBALL", "scene": "res://games/dodge_ball/main.tscn",
+		"blurb": "A friendly VR giant throws squishy balls; dodge them and bop the target on his belly!"},
 ]
 ## Tabs on the TV (LB/RB) and in VR (stick left/right). Empty categories are hidden.
 const CATEGORIES := [
