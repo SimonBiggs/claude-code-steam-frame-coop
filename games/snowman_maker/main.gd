@@ -82,6 +82,9 @@ var vr_results: Node
 var sign_label: Label3D
 var sign_time: Label3D
 var boxes: Array[Node3D] = []
+var sign_node: Node3D
+var sign_wob := 0.0
+var setup_msec := 0
 var box_bounce: Array[float] = [0.0, 0.0]
 
 # --- World objects (host simulates; the TV machine mirrors) ---
@@ -188,6 +191,7 @@ func _setup(mode: String) -> void:
 		hints.hint("vr_grab", "Pull the trigger to lift snow!", {"to": "vr"})
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	ready_to_play = true
+	setup_msec = Time.get_ticks_msec()
 	print("Snowman Maker: %s mode%s" % [mode, " with a VR player" if vr_rig != null else ""])
 
 
@@ -250,7 +254,7 @@ func _build_world(vr: bool) -> void:
 	post.cylinder(0.06, 0.06, 2.0, MeshKit.at(Vector3(0.0, 1.0, 0.0)), Color(0.45, 0.3, 0.15))
 	post.rounded_box(Vector3(1.9, 1.0, 0.08), 0.06, MeshKit.at(Vector3(0.0, 2.2, 0.0)), Color(0.55, 0.36, 0.2))
 	post.box(Vector3(2.0, 0.1, 0.16), MeshKit.at(Vector3(0.0, 2.72, 0.0)), Color(0.97, 0.98, 1.0))
-	var sign_node := Node3D.new()
+	sign_node = Node3D.new()
 	sign_node.position = SIGN_POS
 	var d := SIGN_POS - (VR_START + Vector3.UP * 1.5)
 	sign_node.basis = Basis(Vector3.UP, atan2(-d.x, -d.z))
@@ -476,7 +480,8 @@ func _on_state_changed(key: String, value: Variant) -> void:
 		"stacks":
 			_sync_stacks(value)
 		"made":
-			_celebrate()
+			if Time.get_ticks_msec() - setup_msec > 2000:  # not for a TV machine that just (re)joined
+				_celebrate()
 		"phase":
 			if String(value) == "results":
 				_show_results(net.state_get("results", {}))
@@ -571,6 +576,9 @@ func _process(delta: float) -> void:
 		var s := sin(box_bounce[k] * PI * 3.0) * box_bounce[k] * 0.2
 		boxes[k].scale = Vector3(1.0 + s, 1.0 - s, 1.0 + s)
 	_update_carry_visuals(delta)
+	sign_wob = maxf(0.0, sign_wob - delta * 1.2)
+	if sign_node != null:
+		sign_node.rotation.z = sin(sign_wob * 18.0) * sign_wob * 0.12
 	for key in touch_cd.keys():
 		touch_cd[key] = float(touch_cd[key]) - delta
 		if float(touch_cd[key]) <= 0.0:
@@ -1013,6 +1021,11 @@ func _vr_hands() -> void:
 				touch_cd["box%d" % b] = 0.4
 				fx("box", [b], "bounce", -6.0)
 				vr_rig.pulse(k, 0.2, 0.04)
+		if not touch_cd.has("sign") and _flat(hp - SIGN_POS) < 0.25 + (1.0 if hp.y > 1.65 else 0.0) and hp.y < 2.8 \
+				and absf((sign_node.global_transform.affine_inverse() * hp).z) < 0.2:
+			touch_cd["sign"] = 0.6
+			fx("sign", [], "bounce", -6.0, 0.7)
+			vr_rig.pulse(k, 0.3, 0.05)
 		if hp.y < 0.06 and not touch_cd.has("snow%d" % k) and vr_rig.hand_speed(k) > 0.3:
 			touch_cd["snow%d" % k] = 0.3
 			fx("puff", [Vector3(hp.x, 0.02, hp.z)], "crunch", -4.0)
@@ -1098,7 +1111,7 @@ func _release_ball() -> void:
 		return
 	var b: Dictionary = balls[id]
 	var v := vr_rig.hand_velocity(VrRig.RIGHT)
-	if v.length() < 1.5 and _try_snap(id, true):
+	if v.length() < 2.5 and _try_snap(id, true):
 		return
 	b["s"] = FLYING
 	b["v"] = v.limit_length(9.0)
@@ -1312,6 +1325,9 @@ func _fx_local(kind: String, args: Array, sound: String, vol: float, pitch: floa
 		"box":
 			box_bounce[int(args[0])] = 1.0
 			at = BOX_POS[int(args[0])]
+		"sign":
+			sign_wob = 1.0
+			at = SIGN_POS + Vector3.UP * 1.5
 	if sound != "":
 		if at != Vector3.ZERO:
 			sfx.play_at(sound, at, vol, pitch)

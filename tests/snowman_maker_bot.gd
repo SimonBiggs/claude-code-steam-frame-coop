@@ -44,7 +44,7 @@ func _ready() -> void:
 			kit.assert_true(not get_tree().paused, "Start again resumes")
 			kit.allow_pause = false)
 	if host:
-		kit.at(33.0, "host checks", _checks)
+		kit.at(29.0, "host checks (the TV machine is still connected)", _checks)
 		kit.at(35.0, "finish", kit.finish)
 	else:
 		kit.at(31.0 if client else 36.0, "finish", func() -> void:
@@ -187,8 +187,9 @@ func _steer(slot: int, idx: int) -> void:
 func _drive_vr(delta: float) -> void:
 	var rig = main.vr_rig
 	rig.camera.position.y = 1.6
-	if rig.hand_l.position == Vector3.ZERO:
+	if rig.hand_r.position == Vector3.ZERO:
 		kit.vr_idle(rig)
+	rig.hand_l.position = Vector3(-0.45, 1.5, 0.25)  # the left hand waves up and back, clear of the right
 	vr_wait -= delta
 	if vr_wait > 0.0:
 		kit.vr_stick(rig, Vector2.ZERO)
@@ -227,7 +228,7 @@ func _drive_vr(delta: float) -> void:
 			return
 		var top := anchor.scale.x * 2.0 if not (anchor is Snowman) else Snowman.top_y((anchor as Snowman).radii)
 		drop = Vector3(anchor.position.x, top + 0.35, anchor.position.z)
-	if _walk_to(rig, drop) and kit.vr_reach(rig, 1, drop, 2.0, delta):
+	if _walk_to(rig, drop) and kit.vr_reach(rig, 1, drop, 1.2, delta):
 		kit.vr_trigger(rig, 0.0)
 		vr_wait = 0.4
 
