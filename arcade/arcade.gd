@@ -58,6 +58,8 @@ const GAMES := [
 		"blurb": "Bop cute slimes and bats room by room: the knight swings a big toy sword in VR, the heroes bonk on the TV, and the treasure waits at the end!"},
 	{"id": "crystal_saga", "cat": "action", "name": "CRYSTAL SAGA", "scene": "res://games/crystal_saga/main.tscn",
 		"blurb": "Be the hero in VR! Swing your sword, raise your hand for magic, and restore the Crystal of Light with your party."},
+	{"id": "balloon_pop", "cat": "party", "name": "BALLOON POP", "scene": "res://games/balloon_pop/main.tscn",
+		"blurb": "Pop the balloons floating up all around you: VR punches and squeezes, TV players run and jump!"},
 ]
 ## Tabs on the TV (LB/RB) and in VR (stick left/right). Empty categories are hidden.
 const CATEGORIES := [

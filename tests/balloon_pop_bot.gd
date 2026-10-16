@@ -16,6 +16,8 @@ var jumps := 0
 var vr_t := 0.0
 
 
+var jump_peak := 0.0
+
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	kit = BotKit.new()
@@ -41,10 +43,16 @@ func _ready() -> void:
 			kit.assert_true(not get_tree().paused and not main.tv_banner.visible, "Start again resumes")
 			kit.allow_pause = false)
 	kit.at(t0 + 3.0, "P2 jumps", func() -> void: _press("a"))
-	kit.at(t0 + 3.25, "in the air?", func() -> void:
+	# Sample the jump height over half a second (networked runs are not frame-locked).
+	for i in 10:
+		kit.at(t0 + 3.05 + i * 0.05, "", func() -> void:
+			var slots: Array[int] = main.party.local_slots()
+			if not slots.is_empty() and main.avatars.has(slots[0]):
+				jump_peak = maxf(jump_peak, (main.avatars[slots[0]] as Node3D).position.y))
+	kit.at(t0 + 3.6, "in the air?", func() -> void:
 		var slots: Array[int] = main.party.local_slots()
 		if not slots.is_empty() and main.avatars.has(slots[0]):
-			kit.assert_true((main.avatars[slots[0]] as Node3D).position.y > 0.5, "A makes a TV player jump"))
+			kit.assert_true(jump_peak > 0.5, "A makes a TV player jump"))
 	if host:
 		kit.at(22.0, "host checks (the TV machine is still connected)", _checks)
 		kit.at(30.0, "finish", kit.finish)
