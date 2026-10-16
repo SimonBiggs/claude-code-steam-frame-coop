@@ -46,7 +46,7 @@ func _ready() -> void:
 		kit.at(34.0, "host checks", _checks)
 		kit.at(38.0, "finish", kit.finish)
 	else:
-		kit.at(33.0 if client else 36.0, "finish", func() -> void:
+		kit.at(30.0 if client else 36.0, "finish", func() -> void:
 			_checks()
 			kit.finish())
 	kit.every(2.0, _report)

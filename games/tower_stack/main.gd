@@ -109,6 +109,7 @@ var crane_state := "idle"
 var crane_id := -1
 var crane_goal := Vector3.ZERO
 var crane_wait := 0.0
+var touch_cd := {}  # "pad" / "ring" -> clock time when it may react again
 
 var time_left := 0.0
 var results_t := 0.0
@@ -210,7 +211,7 @@ func _setup(mode: String) -> void:
 		_start_round()
 	hints.intro(INTRO, {"duration": 7.0})
 	if vr_rig != null:
-		_vr_say("TOWER STACK", 4.0)
+		_vr_say("TOWER STACK\nTRIGGER = GRAB", 5.0)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	ready_to_play = true
 	print("Tower Stack: %s mode%s" % [mode, " with a VR giant" if vr_rig != null else ""])
@@ -1057,6 +1058,7 @@ func _vr_hands() -> void:
 				var rb: RigidBody3D = b
 				rb.sleeping = false
 				rb.apply_central_impulse(hv.limit_length(6.0) * 0.35)
+		_touch_scenery(w, hp)
 		if hv.length() > 1.2:
 			for slot in avatars:
 				var a: Node3D = avatars[slot]
@@ -1070,6 +1072,22 @@ func _vr_hands() -> void:
 					else:
 						net.event("boop", [slot])
 						sfx.play_at("boing", a.position, -2.0, 1.2)
+
+
+## The pad boings and the record hoop rings when the giant touches them.
+func _touch_scenery(w: int, hp: Vector3) -> void:
+	if float(touch_cd.get("pad", 0.0)) < clock and hp.y < 0.5 and Vector2(hp.x - PAD.x, hp.z - PAD.z).length() < PAD_R:
+		touch_cd["pad"] = clock + 0.6
+		vr_rig.pulse(w, 0.4, 0.06)
+		boing(PAD, -1)
+	var rr := Vector2(hp.x, hp.z).length()
+	if float(touch_cd.get("ring", 0.0)) < clock and absf(hp.y - ring.position.y) < 0.25 and absf(rr - (BASE_R + 0.35)) < 0.3:
+		touch_cd["ring"] = clock + 0.5
+		vr_rig.pulse(w, 0.3, 0.05)
+		sfx.play_at("ding", hp, -4.0, 1.0 + randf() * 0.3)
+		var tw := create_tween()
+		ring.scale = Vector3(1.08, 1.0, 1.08)
+		tw.tween_property(ring, "scale", Vector3.ONE, 0.6).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
 
 
 func _grab(id: int) -> void:
