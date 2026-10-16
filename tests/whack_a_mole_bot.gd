@@ -40,10 +40,10 @@ func _ready() -> void:
 			kit.assert_true(not get_tree().paused, "Start again resumes")
 			kit.allow_pause = false)
 	if host:
-		kit.at(30.0, "host checks", _checks)
+		kit.at(28.0, "host checks", _checks)
 		kit.at(34.0, "finish", kit.finish)
 	else:
-		kit.at(30.0 if client else 34.0, "finish", func() -> void:
+		kit.at(25.0 if client else 34.0, "finish", func() -> void:
 			_checks()
 			kit.finish())
 	kit.every(2.0, _report)
@@ -65,6 +65,9 @@ func _continue_results() -> String:
 func _join() -> void:
 	if main.net.mode == "host":
 		return
+	if not main.ready_to_play:  # the TV machine is still connecting: try again shortly
+		get_tree().create_timer(0.5).timeout.connect(_join)
+		return
 	for i in want:
 		kit.join_bot(main.party)
 
@@ -78,6 +81,8 @@ func _press(action: String) -> void:
 func _physics_process(delta: float) -> void:
 	if main == null or not main.ready_to_play:
 		return
+	if String(main.net.state_get("phase", "")) == "practice":
+		saw_practice = true
 	for slot in main.party.local_slots():
 		_steer(slot, delta)
 	if main.vr_rig != null:
