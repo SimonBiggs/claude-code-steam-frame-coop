@@ -48,6 +48,8 @@ const FIRE_HOME := 2.6    # drop an ember this close to the fire and it goes hom
 const MAX_KNIGHTS := 6     # TV players 2..7 (player indices 1..6)
 const KING_EVERY := 5     # the Goblin King comes every 5th wave
 const RAIN_TIME := 16.0
+const NO_RAIN := true  # David (2026-10-16): no rain cloud
+const NO_GROWTH := true  # David (2026-10-16): the village houses don't grow between waves
 ## Extra sounds made with core/sfx.gd: [seconds, start Hz, end Hz, volume, wave, noise]
 const EXTRA_SOUNDS := {
 	"pop": [0.12, 900.0, 300.0, 0.35, "square", 0.6],
@@ -990,7 +992,7 @@ func _end_wave() -> void:
 		net.event("cheer", [])
 		return
 	var grew := ""
-	if built < W.GROWTH.size():
+	if built < W.GROWTH.size() and not NO_GROWTH:
 		var g: Array = W.GROWTH[built]
 		grew = "\nThe village grows: %s!" % W.GROWTH_NAMES[g[0]]
 		built += 1
@@ -1269,6 +1271,10 @@ func _king_alive() -> bool:
 
 ## Host: the rain puts embers out unless the giant holds a hand over the fire like an umbrella.
 func _update_rain(delta: float) -> void:
+	if NO_RAIN:
+		rain_at = -1.0
+		rain_t = 0.0
+		return
 	if not in_break and rain_at > 0.0 and wave_t >= rain_at and rain_t <= 0.0:
 		rain_at = -1.0
 		rain_t = RAIN_TIME
