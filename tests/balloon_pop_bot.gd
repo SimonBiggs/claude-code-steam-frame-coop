@@ -46,10 +46,10 @@ func _ready() -> void:
 		if not slots.is_empty() and main.avatars.has(slots[0]):
 			kit.assert_true((main.avatars[slots[0]] as Node3D).position.y > 0.5, "A makes a TV player jump"))
 	if host:
-		kit.at(30.0, "host checks", _checks)
-		kit.at(33.0, "finish", kit.finish)
+		kit.at(22.0, "host checks (the TV machine is still connected)", _checks)
+		kit.at(30.0, "finish", kit.finish)
 	else:
-		kit.at(28.0 if client else 26.0, "finish", func() -> void:
+		kit.at(24.0 if client else 26.0, "finish", func() -> void:
 			_checks()
 			kit.finish())
 	kit.every(2.0, _report)
