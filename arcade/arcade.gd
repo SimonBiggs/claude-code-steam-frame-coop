@@ -62,6 +62,8 @@ const GAMES := [
 		"blurb": "Pop the balloons floating up all around you: VR punches and squeezes, TV players run and jump!"},
 	{"id": "sheep_round_up", "cat": "cosy", "name": "SHEEP ROUND-UP", "scene": "res://games/sheep_round_up/main.tscn",
 		"blurb": "Sheepdogs herd, the giant farmer scoops - get every fluffy sheep into the pen!"},
+	{"id": "fruit_catch", "cat": "party", "name": "FRUIT CATCH", "scene": "res://games/fruit_catch/main.tscn",
+		"blurb": "Shake the giant tree and catch the falling fruit in your baskets!"},
 ]
 ## Tabs on the TV (LB/RB) and in VR (stick left/right). Empty categories are hidden.
 const CATEGORIES := [
