@@ -566,7 +566,7 @@ func hit_by_knight(damage: float, dir: Vector3, knight) -> void:
 		np2.y = maxf(W.height(np2.x, np2.z), global_position.y)
 		global_position = np2
 		return
-	if is_big() and main.simple:
+	if is_big() and main.simple and kind != "ogre":  # ogres: giant only (David, 2026-10-16)
 		# Simple mode: no "too big for knights" rule - big ones just take lots of bonks.
 		hp -= damage * 0.25
 		flash_t = 0.12
