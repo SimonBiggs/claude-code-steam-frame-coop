@@ -81,6 +81,7 @@ var mallet_head: Node3D
 var mallet_prev := Vector3.ZERO
 var mallet_vel := Vector3.ZERO
 var thump_cd := 0.0
+var hop_cd := {}  # slot -> seconds before that kid can be bopped again
 var vr_banner: Node3D
 var tv_banner: Control
 var results_ui: Control
@@ -612,7 +613,7 @@ func _simulate(delta: float) -> void:
 	var level := int(p * 3.0)
 	if level > int(net.state_get("level", 0)):
 		net.state_set("level", level)
-		net.state_set("faster", level)
+		net.state_set("faster", int(net.state_get("faster", 0)) + 1)  # a counter, so every round shows it
 	spawn_t -= delta
 	if spawn_t <= 0.0:
 		spawn_t = lerpf(1.1, 0.45, p) * randf_range(0.8, 1.2)
@@ -711,6 +712,17 @@ func _vr_mallet(delta: float) -> void:
 			_whack(hit, 0)
 			vr_rig.pulse(VrRig.LEFT, 0.6, 0.08)
 			return
+	# Touching a hammer-kid with the mallet or a glove makes them hop.
+	for slot in avatars:
+		var a: Node3D = avatars[slot]
+		var c := a.position + Vector3(0.0, 0.2, 0.0)
+		if float(hop_cd.get(slot, 0.0)) <= 0.0 and (hp.distance_to(c) < Props.HEAD_R + 0.15 or lp.distance_to(c) < 0.2):
+			hop_cd[slot] = 0.8
+			hop(int(slot))
+			net.event("hop", [int(slot)])
+			vr_rig.pulse(VrRig.LEFT if lp.distance_to(c) < 0.2 else VrRig.RIGHT, 0.3, 0.05)
+	for slot in hop_cd.keys():
+		hop_cd[slot] = float(hop_cd[slot]) - delta
 	# Bonking the table itself: it wobbles, the kids hop.
 	var on_table := absf(hp.x) < Props.HALF.x + 0.1 and absf(hp.z) < Props.HALF.y + 0.1
 	if on_table and thump_cd <= 0.0 and mallet_vel.y < -0.8 and hp.y - Props.HEAD_R < Props.TABLE_Y + 0.05:
@@ -822,6 +834,14 @@ func thump(at: Vector3, power: float) -> void:
 				mole_bodies[i].scale = Vector3(0.85, 1.2, 0.85)
 
 
+## Every machine: the VR giant bopped a hammer-kid: they hop and giggle.
+func hop(slot: int) -> void:
+	if avatars.has(slot):
+		var a: Node3D = avatars[slot]
+		Creatures.anim(a).play("jump", 0.5)
+		sfx.play_at("boing", a.position, -2.0, randf_range(1.4, 1.7))
+
+
 ## Every machine: place the moles from their heights (with a bouncy overshoot) and wiggle them.
 func _draw_moles(delta: float) -> void:
 	var t := Time.get_ticks_msec() * 0.001
@@ -896,3 +916,5 @@ func apply_event(kind: String, args: Array) -> void:
 				_squash_mallet()
 		"thump":
 			thump(args[0], float(args[1]))
+		"hop":
+			hop(int(args[0]))
