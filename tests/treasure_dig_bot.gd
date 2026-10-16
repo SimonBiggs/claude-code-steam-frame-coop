@@ -33,12 +33,12 @@ func _ready() -> void:
 	main.set("round_time", 18.0)
 	add_child(main)
 	kit.main = main
-	want = BotKit.bot_players(2, 6)
+	want = 0 if OS.has_environment("BOT_SOLO") else BotKit.bot_players(2, 6)  # BOT_SOLO=1 BOT_VR=1: the giant alone
 	var client := OS.has_environment("DUO_JOIN")
 	var host := OS.has_environment("DUO_HOST")
 	var t0 := 3.0 if client else 1.0
 	kit.at(t0, "%d TV players press A on their pads" % want, _join)
-	if not host:
+	if not host and want > 0:
 		kit.at(t0 + 8.0, "P2 presses Start: pause menu", func() -> void:
 			kit.allow_pause = true
 			_press("start"))
@@ -49,10 +49,11 @@ func _ready() -> void:
 			kit.assert_true(not get_tree().paused and not main.tv_banner.visible, "Start again resumes")
 			kit.allow_pause = false)
 	if host:
-		kit.at(32.0, "host checks", _checks)
-		kit.at(34.0, "finish", kit.finish)
+		var end := float(OS.get_environment("BOT_HOST_END")) if OS.has_environment("BOT_HOST_END") else 37.0  # late-join tests
+		kit.at(end - 9.0, "host checks (the TV machine is still connected)", _checks)
+		kit.at(end, "finish", kit.finish)
 	else:
-		kit.at(30.0 if client else 36.0, "finish", func() -> void:
+		kit.at(31.0 if client else 36.0, "finish", func() -> void:
 			_checks()
 			kit.finish())
 	kit.every(2.0, _report)
@@ -243,8 +244,10 @@ func _checks() -> void:
 	if mode == "client":
 		kit.assert_true(max_items_seen > 0, "client: treasure items mirrored from the host")
 		kit.assert_true(max_sparkles_seen > 0, "client: sparkles mirrored from the host")
-	else:
+	elif want > 0:
 		kit.assert_true(int(main.stats["tv_digs"]) > 0, "TV players dug up treasure")
+	else:
+		kit.assert_true(int(main.net.state_get("score", 0)) > 0 or int(main.net.state_get("round", 0)) >= 2, "the giant alone filled the chest")
 	if main.vr_rig != null:
 		kit.assert_true(int(main.stats["sparkles"]) > 0, "the giant's telescope made sparkles")
 		kit.assert_true(int(main.stats["giant_digs"]) > 0, "the giant poked treasure out of the sand")

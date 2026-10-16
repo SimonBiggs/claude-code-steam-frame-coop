@@ -699,7 +699,7 @@ func _hidden_near(pos: Vector3, radius: float) -> int:
 
 
 ## Host: someone dug at `pos`. A TV digger carries what they find; the giant's poke makes it pop out.
-func _dig(pos: Vector3, by: int, radius: float, carry: bool) -> void:
+func _dig(pos: Vector3, by: int, radius: float, carry: bool, toward: Vector3 = Vector3.INF) -> void:
 	var i := _hidden_near(pos, radius)
 	if i < 0:
 		fx("dig", [pos, -1, by])
@@ -723,7 +723,10 @@ func _dig(pos: Vector3, by: int, radius: float, carry: bool) -> void:
 	it["carrier"] = carrier
 	if carrier == FLYING:
 		var out := Vector3(at.x, 0.0, at.z).normalized() * -1.5
-		it["vel"] = Vector3(out.x, 9.0, out.z)
+		if toward != Vector3.INF:  # leap towards the giant
+			var d := Vector3(toward.x - at.x, 0.0, toward.z - at.z)
+			out = d.normalized() * maxf(d.length() - 2.0, 0.0) / 0.8
+		it["vel"] = Vector3(out.x, 12.0, out.z)
 
 
 func _carrying(slot: int) -> int:
@@ -767,7 +770,7 @@ func _tick_items(delta: float) -> void:
 			var v: Vector3 = it["vel"]
 			v.y -= 30.0 * delta
 			var flat := Vector2(n.position.x, n.position.z)
-			if v.y < 0.0 and flat.length() < 4.0:  # a friendly magnet into the chest
+			if v.y < 0.0 and flat.length() < 4.0 and it.has("thrower"):  # a friendly magnet into the chest
 				v.x = lerpf(v.x, -n.position.x * 3.0, 2.0 * delta)
 				v.z = lerpf(v.z, -n.position.z * 3.0, 2.0 * delta)
 			n.position += v * delta
@@ -860,7 +863,13 @@ func _giant(delta: float) -> void:
 		var i := _hidden_near(lh, 3.2)
 		vr_rig.pulse(VrRig.RIGHT, 0.5 if i >= 0 else 0.15, 0.08)
 		if i >= 0:
-			_add_sparkle(hidden[i][0], 0)
+			var hp: Vector3 = hidden[i][0]
+			_add_sparkle(hp, 0)
+			if party.player_count() == 0:  # playing alone: the treasure leaps out to the giant
+				var head := beach.to_local(vr_rig.head_position())
+				get_tree().create_timer(0.8).timeout.connect(func() -> void:
+					if not results_showing() and _hidden_near(hp, 0.2) >= 0:
+						_dig(hp, 0, 0.2, false, head))
 		else:
 			fx("fizz", [Vector3(lh.x, 0.1, lh.z)])
 	for h in 2:
