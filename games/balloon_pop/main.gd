@@ -644,7 +644,7 @@ func pop_fx(pos: Vector3, color: Color, kind: int, by: int) -> void:
 	add_child(p)
 	p.position = pos
 	p.emitting = true
-	get_tree().create_timer(1.0).timeout.connect(p.queue_free)
+	p.finished.connect(p.queue_free)
 	var pts: int = POINTS[kind]
 	if pts > 0:
 		HudKit.score(self, pos + Vector3.UP * 0.3, pts, {"color": "gold" if kind == Balloon.GOLD else color, "size": 1.4 if kind == Balloon.GOLD else 1.1})
@@ -707,7 +707,7 @@ func _confetti(pos: Vector3, amount: int, life: float) -> void:
 	add_child(p)
 	p.position = pos
 	p.emitting = true
-	get_tree().create_timer(life + 0.5).timeout.connect(p.queue_free)
+	p.finished.connect(p.queue_free)
 
 
 func sound(sound_name: String, volume_db: float = 0.0, pitch: float = 1.0) -> void:
