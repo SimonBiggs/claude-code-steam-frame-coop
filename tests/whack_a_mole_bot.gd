@@ -1,0 +1,187 @@
+extends Node
+## Headless bot for games/whack_a_mole. BOT_PLAYERS=n TV kids drop in and run to moles and press A.
+## BOT_VR=1 (local / host): a fake VR player walks up and swings the mallet down onto moles.
+## Local:      godot --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/whack_a_mole_bot.tscn
+## Networked:  DUO_PORT=81xx DUO_HOST=1 ... & DUO_PORT=81xx DUO_JOIN=127.0.0.1 ... (same scene, real time)
+
+const BotKit := preload("res://tests/bot_kit.gd")
+
+var kit: BotKit
+var main: Node
+var want := 2
+var saw_results := false
+var saw_practice := false
+var bonk_cd := {}
+var swing_phase := 0  # fake VR: 0 = raise above a mole, 1 = swing down
+var swing_hole := -1
+
+
+func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	kit = BotKit.new()
+	add_child(kit)
+	main = load("res://games/whack_a_mole/main.tscn").instantiate()
+	main.set("round_time", 14.0)
+	add_child(main)
+	kit.main = main
+	want = BotKit.bot_players(2, 6)
+	var client := OS.has_environment("DUO_JOIN")
+	var host := OS.has_environment("DUO_HOST")
+	var t0 := 3.0 if client else 1.0
+	kit.at(t0, "%d TV players press A on their pads" % want, _join)
+	if not host:
+		kit.at(t0 + 6.0, "P1 presses Start: pause menu", func() -> void:
+			kit.allow_pause = true
+			_press("start"))
+		kit.at(t0 + 6.6, "paused?", func() -> void:
+			kit.assert_true(get_tree().paused and main.tv_banner != null and main.tv_banner.visible, "Start pauses")
+			_press("start"))
+		kit.at(t0 + 7.2, "resumed?", func() -> void:
+			kit.assert_true(not get_tree().paused, "Start again resumes")
+			kit.allow_pause = false)
+	if host:
+		kit.at(24.0, "host checks (the TV machine is still connected)", _checks)
+		kit.at(34.0, "finish", kit.finish)
+	else:
+		kit.at(25.0 if client else 34.0, "finish", func() -> void:
+			_checks()
+			kit.finish())
+	kit.every(2.0, _report)
+	kit.every(0.5, _continue_results)
+
+
+func _continue_results() -> String:
+	if String(main.net.state_get("phase", "")) == "practice":
+		saw_practice = true
+	if main.results_showing():
+		if not saw_results:
+			saw_results = true
+			kit.assert_true(main.split == null or main.results_ui != null, "the results screen shows on the TV")
+			kit.assert_true(main.vr_rig == null or main.vr_results != null, "the results card shows in VR")
+		_press("accept")
+	return ""
+
+
+func _join() -> void:
+	if main.net.mode == "host":
+		return
+	if not main.ready_to_play:  # the TV machine is still connecting: try again shortly
+		get_tree().create_timer(0.5).timeout.connect(_join)
+		return
+	for i in want:
+		kit.join_bot(main.party)
+
+
+func _press(action: String) -> void:
+	var slots: Array[int] = main.party.local_slots()
+	if not slots.is_empty():
+		kit.slot_press(main.party, slots[0], action)
+
+
+func _physics_process(delta: float) -> void:
+	if main == null or not main.ready_to_play:
+		return
+	if String(main.net.state_get("phase", "")) == "practice":
+		saw_practice = true
+	for slot in main.party.local_slots():
+		_steer(slot, delta)
+	if main.vr_rig != null:
+		_drive_vr(delta)
+
+
+func _up_holes() -> Array[int]:
+	var out: Array[int] = []
+	for i in main.holes.size():
+		if main.m_state[i] == 1 and main.m_h[i] > 0.5:
+			out.append(i)
+	return out
+
+
+func _nearest_up(from: Vector3) -> int:
+	var best := -1
+	var bd := INF
+	for i in _up_holes():
+		var p: Vector3 = main.holes[i]
+		var d := Vector2(p.x - from.x, p.z - from.z).length()
+		if d < bd:
+			bd = d
+			best = i
+	return best
+
+
+## Run to the nearest mole and press A when close.
+func _steer(slot: int, delta: float) -> void:
+	if not main.avatars.has(slot):
+		return
+	var a: Node3D = main.avatars[slot]
+	var i := _nearest_up(a.position)
+	var v := Vector2.ZERO
+	bonk_cd[slot] = float(bonk_cd.get(slot, 0.0)) - delta
+	if i >= 0:
+		var d: Vector3 = main.holes[i] - a.position
+		d.y = 0.0
+		if d.length() > 0.25:
+			d = d.normalized()
+			var cam: Camera3D = main.split.active_camera(slot)
+			var f := -cam.global_basis.z
+			f.y = 0.0
+			f = f.normalized()
+			var r := Vector3(-f.z, 0.0, f.x)
+			v = Vector2(d.dot(r), -d.dot(f))
+		if d.length() < 0.35 and float(bonk_cd[slot]) <= 0.0:
+			bonk_cd[slot] = 0.3
+			kit.slot_press(main.party, slot, "accept")
+	kit.slot_stick(main.party, slot, "left", v)
+
+
+## Fake VR: walk near a mole, raise the mallet above it, swing it down.
+func _drive_vr(delta: float) -> void:
+	var rig = main.vr_rig
+	rig.camera.position.y = 1.6
+	if swing_hole < 0 or main.m_state[swing_hole] != 1:
+		var head: Vector3 = rig.head_position()
+		swing_hole = _nearest_up(head)
+		swing_phase = 0
+	if swing_hole < 0:
+		kit.vr_stick(rig, Vector2.ZERO)
+		return
+	var hole: Vector3 = main.holes[swing_hole]
+	var head2: Vector3 = rig.head_position()
+	var d := hole - head2
+	d.y = 0.0
+	var f: Vector3 = rig.head_forward()
+	var r := Vector3(-f.z, 0.0, f.x)
+	if d.length() > 1.0:
+		kit.vr_stick(rig, Vector2(d.normalized().dot(r), d.normalized().dot(f)))
+	else:
+		kit.vr_stick(rig, Vector2.ZERO)
+	# Where the hand must be so the mallet head lands on the target.
+	var hand: Node3D = rig.hand_r
+	var off: Vector3 = main.mallet_head.global_position - hand.global_position
+	var above := hole + Vector3(0.0, 0.75, 0.0) - off
+	var on := hole + Vector3(0.0, 0.2, 0.0) - off
+	if swing_phase == 0:
+		if kit.vr_reach(rig, 1, above, 3.0, delta):
+			swing_phase = 1
+	else:
+		if kit.vr_reach(rig, 1, on, 3.0, delta):
+			swing_phase = 0
+
+
+func _report() -> String:
+	return "BOT %s: players %s, phase %s, moles up %d, score %d, whacked %d (VR %d), best %d" % [main.net.mode,
+		str(main.party.active_slots()), String(main.net.state_get("phase", "")), _up_holes().size(),
+		int(main.net.state_get("score", 0)), int(main.net.state_get("whacked", 0)), main.vr_whacks,
+		int(main.net.state_get("best", 0))]
+
+
+func _checks() -> void:
+	var mode: String = main.net.mode
+	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
+	kit.assert_eq(main.party.player_count(), want, "%s: all %d TV players are seated" % [mode, want])
+	kit.assert_true(int(main.net.state_get("whacked", 0)) > 1, "%s: moles were whacked" % mode)
+	kit.assert_true(int(main.net.state_get("round", 0)) >= 2, "%s: round 1 ended with results and round 2 started" % mode)
+	if main.vr_rig != null:
+		kit.assert_true(main.vr_whacks > 0, "the fake VR player whacked moles with the mallet")
+	if mode != "client":
+		kit.assert_true(saw_practice, "the round started with a practice mole")
