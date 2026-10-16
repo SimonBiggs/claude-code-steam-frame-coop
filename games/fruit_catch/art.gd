@@ -107,3 +107,14 @@ static func shadow_mesh() -> Mesh:
 		mat.albedo_color = Color(0.05, 0.1, 0.0, 0.4)
 		m.material = mat
 		return m)
+
+
+## A wooden sign post (board centred at 2.1 m, facing +Z).
+static func sign_post() -> Mesh:
+	return ResCache.get_or_make("fruit_catch_sign_v1", func() -> Mesh:
+		var b := MeshKit.Builder.new()
+		b.cylinder(0.07, 0.08, 1.7, MeshKit.at(Vector3(-0.55, 0.85, -0.05)), BARK, 8)
+		b.cylinder(0.07, 0.08, 1.7, MeshKit.at(Vector3(0.55, 0.85, -0.05)), BARK, 8)
+		b.rounded_box(Vector3(1.4, 0.95, 0.1), 0.06, MeshKit.at(Vector3(0.0, 2.1, 0.0)), Color(0.72, 0.5, 0.3))
+		b.sphere(0.12, MeshKit.at(Vector3(0.0, 2.65, 0.02)), FRUIT_COLORS[0], 10)
+		return b.build())

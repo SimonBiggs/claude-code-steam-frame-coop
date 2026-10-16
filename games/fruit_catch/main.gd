@@ -35,7 +35,8 @@ const DROP_HEIGHT := 4.1  ## fruit appears under the leaves
 const FALL_G := 2.6  ## slow, floaty fall
 const HANG_TIME := 0.45  ## fruit wiggles before it falls
 const MAX_FRUIT := 18
-const BOWL_POS := Vector3(1.5, 0.0, 3.7)
+const BOWL_POS := Vector3(1.25, 0.0, 2.4)  ## front right of the VR player
+const SIGN_POS := Vector3(-1.6, 0.0, 1.6)  ## the score sign, front left of the VR player
 const BOWL_TOP := 0.8
 const BOWL_R := 0.75
 const VR_START := Vector3(0.0, 0.0, 3.05)
@@ -219,9 +220,15 @@ func _build_world(vr: bool) -> void:
 	bowl.position = BOWL_POS
 	add_child(bowl)
 	bowl.add_child(MeshKit.instance(Art.bowl(BOWL_TOP, BOWL_R)))
-	sign_label = UiKit.label3d("0", 0.5, "gold", true)
-	sign_label.position = Vector3(0.0, 2.2, 0.72)
-	add_child(sign_label)
+	var post := Node3D.new()  # a wooden sign with the score and the clock, turned to face the VR player
+	post.position = SIGN_POS
+	var d := SIGN_POS - VR_START
+	post.basis = Basis(Vector3.UP, atan2(-d.x, -d.z))
+	add_child(post)
+	post.add_child(MeshKit.instance(Art.sign_post(), not vr))
+	sign_label = UiKit.label3d("0", 0.32, "gold", true)
+	sign_label.position = Vector3(0.0, 2.1, 0.08)
+	post.add_child(sign_label)
 
 
 ## Point branch k at its (displaced) tip.
@@ -745,6 +752,10 @@ func _simulate_fruit(delta: float) -> void:
 				v.y = maxf(v.y - FALL_G * delta, -5.0)
 				f.vel = v
 				n.position += v * delta
+				if _in_bowl(n.position):  # fell straight in: it bounces off the fruit pile
+					fx("land", n.position, Art.FRUIT_COLORS[int(f.kind)], int(f.kind))
+					_free_fruit(int(id))
+					continue
 			HELD:
 				if vr_rig == null:
 					f.state = FALL
