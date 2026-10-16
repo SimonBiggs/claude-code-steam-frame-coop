@@ -46,9 +46,9 @@ func _ready() -> void:
 		kit.at(12.0, "fake VR: left glove reaches for the paper stack", func() -> void: left_test = 1)
 	if host:
 		kit.at(40.0, "host checks (the TV machine is still connected)", _checks)
-		kit.at(42.0, "finish", kit.finish)
+		kit.at(50.0, "finish", kit.finish)
 	else:
-		kit.at(38.0 if client else 37.0, "finish", func() -> void:
+		kit.at(44.0 if client else 37.0, "finish", func() -> void:
 			_checks()
 			kit.finish())
 	kit.every(3.0, _report)
