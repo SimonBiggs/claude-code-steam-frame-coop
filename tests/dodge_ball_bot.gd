@@ -2,6 +2,7 @@ extends Node
 ## Headless bot for games/dodge_ball (Soft Dodgeball).
 ## BOT_PLAYERS=n TV runners (default 2) run to loose balls and throw them at the giant's belly.
 ## BOT_VR=1 (local / host): a fake VR giant grabs balls from the tray and flings them at runners.
+## BOT_SOLO=1 with BOT_VR=1: nobody joins on the TV (VR alone: CPU runners fill in).
 ## Local:     godot --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/dodge_ball_bot.tscn
 ## Networked: DUO_PORT=81xx DUO_HOST=1 ... & DUO_PORT=81xx DUO_JOIN=127.0.0.1 ... (same scene, real time)
 
@@ -30,12 +31,12 @@ func _ready() -> void:
 	main.set("results_wait", 6.0)
 	add_child(main)
 	kit.main = main
-	want = BotKit.bot_players(2, 6)
+	want = 0 if OS.has_environment("BOT_SOLO") else BotKit.bot_players(2, 6)  # BOT_SOLO: VR alone
 	var client := OS.has_environment("DUO_JOIN")
 	var host := OS.has_environment("DUO_HOST")
 	var t0 := 3.0 if client else 1.0
 	kit.at(t0, "%d TV runners press A on their pads" % want, _join)
-	if not host:
+	if not host and want > 0:
 		kit.at(t0 + 6.0, "P pauses with Start", func() -> void:
 			kit.allow_pause = true
 			_press("start"))
@@ -211,6 +212,8 @@ func _checks() -> void:
 	kit.assert_true(int(main.net.state_get("round", 0)) >= 2, "%s: the next round started by itself" % mode)
 	kit.assert_true(max_tv > 0, "%s: runners hit the giant's belly (%d)" % [mode, max_tv])
 	kit.assert_true(max_giant > 0, "%s: the giant hit runners (%d)" % [mode, max_giant])
+	if want == 0 and main.vr_rig != null:
+		kit.assert_eq(main.cpu.size(), 2, "VR alone: two CPU runners fill in")
 	if main.vr_rig != null:
 		kit.assert_true(vr_grabs > 0 and vr_throws > 0, "fake VR giant grabbed and threw balls")
 	elif mode != "client":

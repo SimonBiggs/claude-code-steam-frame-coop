@@ -881,7 +881,11 @@ func _vr_hands(_delta: float) -> void:
 			if d.length() > BALL_R + 0.08:
 				continue
 			var n := d.normalized() if d.length() > 0.01 else _fwd()
-			b.tray = -1
+			if b.tray >= 0:
+				if b.squish < 0.1:  # balls on the tray just squish (reaching for one never knocks it off)
+					b.squish = 0.4
+					sound_at("boing", b.node.position, -12.0, 1.5)
+				continue
 			if hv.length() > 1.3:
 				b.vel = _assist(b.node.position, hv * 1.4 + n * 1.0)
 				b.thrower = GIANT
@@ -957,8 +961,9 @@ func _runner_throw(id: int) -> void:
 		return
 	var b: Ball = balls[i]
 	var from := b.node.position
-	var t := clampf(from.distance_to(target_point()) / 10.0, 0.45, 1.0)
-	var to := target_point() + Vector3(g_vel.x, 0.0, g_vel.z) * t  # aim where the giant will be
+	var t := clampf(from.distance_to(target_point()) / 8.5, 0.55, 1.2)
+	var wobble := Vector2.from_angle(randf() * TAU) * randf_range(0.0, 0.45)  # not every throw is perfect
+	var to := target_point() + Vector3(g_vel.x, 0.0, g_vel.z) * t + Vector3(wobble.x, wobble.y, 0.0)
 	b.holder = -1
 	b.vel = _lob(from, to, t)
 	b.thrower = id
