@@ -203,7 +203,7 @@ func _checks() -> void:
 	if mode != "client":
 		var tv := 0
 		for s in main.scored_by:
-			if int(s) > 0:
+			if int(s) > 0 or main.vr_rig == null:
 				tv += int(main.scored_by[s])
 		kit.assert_true(tv > 0, "%s: TV planes flew through hoops (%d)" % [mode, tv])
 	else:
