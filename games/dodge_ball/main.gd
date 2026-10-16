@@ -791,9 +791,9 @@ func _move_giant(delta: float, playing: bool) -> void:
 					var aim: int = int(cpu_g["aim"])
 					var to := Vector3(randf_range(-3.0, 3.0), 0.5, randf_range(0.0, 4.0))
 					if avatars.has(aim):
-						var lead: Vector3 = vels.get(aim, Vector3.ZERO) * 0.6
+						var lead: Vector3 = vels.get(aim, Vector3.ZERO) * 0.7
 						to = (avatars[aim] as Node3D).position + lead + Vector3(randf_range(-0.4, 0.4), 0.6, randf_range(-0.4, 0.4))
-					_release(b, _lob(b.node.position, to, 1.15))
+					_release(b, _lob(b.node.position, to, 1.0))
 					cpu_g["phase"] = 0
 					cpu_g["ball"] = -1
 					cpu_g["t"] = randf_range(0.9, 1.8)
@@ -986,7 +986,7 @@ func _runner_hits() -> void:
 			if out.has(id) or safe.has(id):
 				continue
 			var a: Node3D = avatars[id]
-			if p.y < Creatures.height_of(a) + 0.25 and Vector2(p.x - a.position.x, p.z - a.position.z).length() < 0.55:
+			if p.y < Creatures.height_of(a) + 0.4 and Vector2(p.x - a.position.x, p.z - a.position.z).length() < 0.6:
 				_hit_runner(int(id), b)
 				break
 
