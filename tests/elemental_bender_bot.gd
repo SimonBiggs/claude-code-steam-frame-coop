@@ -9,6 +9,10 @@ extends Node
 ## Design checks: practice dummies popped, waves cleared, the boss (wave 5) appeared and swapped
 ## element, counter hits happened, specials of several elements, Spirit State, the TV machine sees
 ## the raiders, the results + PLAY AGAIN restart work (local).
+## BOT_GIVEUP=t: from t seconds on the bots stop fighting (and are one hit from going down) so the
+## temple falls: checks the results screen, the VR card and PLAY AGAIN (a fresh wave 1, no practice).
+## EB_SHOT=dir (windowed run, not headless): saves screenshots of the TV picture (and the VR mirror)
+## to dir at a few moments, to check the look.
 ## Local:     godot --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/elemental_bender_bot.tscn
 ##            (EB_FAST=1 for short waves: wave 6 inside a minute)
 ## Networked: DUO_PORT=80xx DUO_HOST=1 BOT_VR=1 ... & DUO_PORT=80xx DUO_JOIN=127.0.0.1 ... (real time)
@@ -30,6 +34,8 @@ var max_wave := 0
 var cd := {}  # slot -> {"elem": t, "special": t, "jump": t, "dash": t}
 var client_saw_raiders := 0
 var boss_alive_t := 0.0
+var giveup_t := float(OS.get_environment("BOT_GIVEUP")) if OS.has_environment("BOT_GIVEUP") else -1.0
+var wave_after_again := 0
 # Fake VR
 var vr_state := "rest"
 var vr_t := 0.0
@@ -44,6 +50,11 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	kit = BotKit.new()
 	add_child(kit)
+	if OS.has_environment("EB_SHOT"):
+		get_tree().root.set_meta("fullscreen_done", true)  # stay a small window
+		for t in [7.0, 20.0, 32.0]:
+			var at: float = t
+			kit.at(at, "screenshot", func() -> void: _shot("t%d" % int(at)))
 	main = load("res://games/elemental_bender/main.tscn").instantiate()
 	add_child(main)
 	kit.main = main
@@ -84,14 +95,32 @@ func _watch() -> String:
 		if kit.t - results_t > 5.0 and not again_sent and main.net.mode != "client":
 			again_sent = true
 			kit.info("PLAY AGAIN")
+			giveup_t = -1.0
 			main.choose_end("again")
 	elif again_sent and not restarted:
 		restarted = true
+		giveup_t = -1.0
+	if restarted:
+		wave_after_again = maxi(wave_after_again, int(main.net.state_get("wave", 0)))
+	if giving_up() and main.net.mode != "client":
+		for f in main.fighters(true):
+			f.hp = minf(f.hp, 1.0)
 	return ""
+
+
+func giving_up() -> bool:
+	return giveup_t >= 0.0 and kit.t > giveup_t
 
 
 func _physics_process(delta: float) -> void:
 	if main == null or not main.ready_to_play:
+		return
+	if giving_up():
+		for slot in main.party.local_slots():
+			kit.slot_stick(main.party, slot, "left", Vector2.ZERO)
+			kit.pad_trigger(main.party.device_of(slot), "rt", 0.0)
+		if main.vr_rig != null:
+			kit.vr_trigger(main.vr_rig, 0.0)
 		return
 	for slot in main.party.local_slots():
 		_tv_bot(slot, delta)
@@ -263,6 +292,27 @@ func _vr_bot(delta: float) -> void:
 		pass
 
 
+func _shot(tag: String) -> void:
+	var dir := OS.get_environment("EB_SHOT")
+	get_viewport().get_texture().get_image().save_png("%s/tv_%s.png" % [dir, tag])
+	if main.vr_rig != null and main.vr_rig.mirror != null:
+		main.vr_rig.mirror.get_texture().get_image().save_png("%s/vr_%s.png" % [dir, tag])
+	if OS.has_environment("EB_DUMP"):
+		_dump(main, "")
+
+
+func _dump(n: Node, ind: String) -> void:
+	for c in n.get_children():
+		if c is Control and (c as Control).is_visible_in_tree():
+			var t := ""
+			if c is Label:
+				t = (c as Label).text
+			print("DUMP %s%s %s %s '%s'" % [ind, c.name, c.get_class(), str((c as Control).get_global_rect()), t])
+		elif c is Label3D:
+			print("DUMP3D %s %s '%s' vis %s" % [c.get_path(), str((c as Label3D).global_position), (c as Label3D).text, str((c as Label3D).is_visible_in_tree())])
+		_dump(c, ind + " ")
+
+
 func _vr_go(s: String) -> void:
 	vr_state = s
 	vr_t = 0.0
@@ -292,6 +342,11 @@ func _checks() -> void:
 	kit.assert_true(main.log_counters > 0, "%s: counter hits x2 (%d)" % [mode, main.log_counters])
 	kit.assert_true(max_raiders <= main.MAX_ALIVE, "%s: at most %d raiders alive (%d)" % [mode, main.MAX_ALIVE, max_raiders])
 	kit.assert_true(main.log_specials.size() >= 1, "%s: specials used %s" % [mode, str(main.log_specials)])
+	if OS.has_environment("BOT_GIVEUP"):
+		kit.assert_true(saw_results, "%s: the temple fell and the results showed" % mode)
+		if mode != "client":
+			kit.assert_true(restarted and wave_after_again >= 1, "%s: PLAY AGAIN started a new game (wave %d)" % [mode, wave_after_again])
+		return
 	if mode == "local" and not OS.has_environment("BOT_END"):
 		kit.assert_true(max_wave >= 6 or saw_results, "local: reached wave 6 (max %d)" % max_wave)
 		kit.assert_true(main.log_boss or saw_results, "local: the Shadow General appeared")

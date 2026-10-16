@@ -96,6 +96,7 @@ var vr_results: Node
 var end_menu: Node
 var tv_banner: Control
 var vr_banner: Node3D
+var vr_headline: Node3D
 
 # Host / local game state
 var wave := 0
@@ -319,6 +320,16 @@ func _start_wave() -> void:
 
 func _game_over() -> void:
 	_set_phase("over")
+	# The raiders melt back into the shadows (no more hits on the results screen).
+	for id in raiders.keys():
+		var r: Raider = raiders[id]
+		if is_instance_valid(r):
+			spawn_fx(r.global_position, r.boss)
+			net.event("spawn", [r.global_position, r.boss])
+			r.dead = true
+			r.queue_free()
+	raiders.clear()
+	_targets_frame = -1
 	announce("THE TEMPLE HAS FALLEN", "Wave %d" % wave, "defeat")
 	if wave > int(save.data["best_wave"]):
 		save.data["best_wave"] = wave
@@ -402,7 +413,7 @@ func _practice_step(delta: float) -> void:
 			_make_dummy(practice_i + 1, PRACTICE[practice_i], DUMMY_AT + Vector3((practice_i % 2) * 4.0 - 2.0, 0.0, 0.0))
 			var need: int = E.beater(PRACTICE[practice_i])
 			if vr_rig != null:
-				HudKit.vr_banner(self, vr_rig.camera, "USE %s" % E.NAMES[need], "", {"duration": 3.0, "color": E.COLORS[need], "sound": ""})
+				_vr_headline("USE %s" % E.NAMES[need], "", {"duration": 3.0, "color": E.COLORS[need], "sound": ""})
 	if practice_i >= PRACTICE.size() and dummy == null:
 		_start_breather(false)
 	elif phase_t > (25.0 if fast else 80.0):
@@ -1050,6 +1061,9 @@ func _process(delta: float) -> void:
 	else:
 		_send_states(delta)
 	world.animate(delta)
+	# A pause undone from elsewhere (bots, the arcade) must not leave the PAUSED card up.
+	if tv_banner != null and tv_banner.visible and not get_tree().paused:
+		tv_banner.visible = false
 	if split != null:
 		_update_huds()
 		if shared_cam != null and split.showing_shared():
@@ -1091,12 +1105,19 @@ func _banner_local(title: String, sub: String, style: String) -> void:
 	if not roots.is_empty():
 		HudKit.banner(roots, title, sub, {"style": style, "duration": 2.2})
 	if vr_rig != null:
-		HudKit.vr_banner(self, vr_rig.camera, title, "", {"duration": 2.2, "style": style, "sound": ""})
+		_vr_headline(title, "", {"duration": 2.2, "style": style, "sound": ""})
 	match style:
 		"boss":
 			music.play_mood("boss", 0.8)
 		"defeat":
 			music.play_mood("defeat")
+
+
+## One VR headline at a time (a new one replaces the last, so cards never overlap).
+func _vr_headline(title: String, sub: String, opts: Dictionary) -> void:
+	if vr_headline != null and is_instance_valid(vr_headline):
+		vr_headline.call("hide_card")
+	vr_headline = HudKit.vr_banner(self, vr_rig.camera, title, sub, opts)
 
 
 ## A one-line note for one player (their own view, or a short card in VR).
@@ -1139,9 +1160,7 @@ func _make_hud(slot: int, parent: Control) -> void:
 		join_prompt = UiKit.panel("pill")
 		join_prompt.add_child(UiKit.prompts([["A", "Join the fight!"]]))
 		ui.add_child(join_prompt)
-		join_prompt.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-		join_prompt.grow_horizontal = Control.GROW_DIRECTION_BOTH
-		join_prompt.grow_vertical = Control.GROW_DIRECTION_BEGIN
+		_anchor(join_prompt, 0.5, 1.0)
 		join_prompt.offset_top = -70.0
 		join_prompt.offset_bottom = -70.0
 		hud_parts[slot] = parts
@@ -1161,24 +1180,20 @@ func _make_hud(slot: int, parent: Control) -> void:
 	v.add_child(chi)
 	parts["hp"] = hp
 	parts["chi"] = chi
-	# Top right: wave and score.
-	var pill := UiKit.panel("pill")
-	ui.add_child(pill)
-	pill.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	pill.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	pill.offset_left = -20.0
-	pill.offset_right = -20.0
-	pill.offset_top = 18.0
-	var wl := UiKit.label("WAVE 0", "heading", "gold")
-	pill.add_child(wl)
-	parts["wave"] = wl
-	# Top centre: the team's spirit meter.
+	# Top centre: wave and score, and the team's spirit meter under it.
 	var sp := UiKit.vbox()
 	ui.add_child(sp)
-	sp.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	sp.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	sp.offset_top = 70.0
+	_anchor(sp, 0.5, 0.0)
+	sp.offset_top = 14.0
+	sp.offset_bottom = 14.0
+	var pill := UiKit.panel("pill")
+	pill.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	sp.add_child(pill)
+	var wl := UiKit.label("WAVE 0", "heading", "gold", HORIZONTAL_ALIGNMENT_CENTER)
+	pill.add_child(wl)
+	parts["wave"] = wl
 	var sbar := UiKit.bar("xp", 300, 16, Color(1.0, 0.85, 0.3))
+	sbar.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	sp.add_child(sbar)
 	var sl := UiKit.label("", "small", "gold", HORIZONTAL_ALIGNMENT_CENTER)
 	sp.add_child(sl)
@@ -1187,9 +1202,7 @@ func _make_hud(slot: int, parent: Control) -> void:
 	# Bottom centre: the four elements (current one big) and a one-line hint.
 	var bottom := UiKit.vbox()
 	ui.add_child(bottom)
-	bottom.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	bottom.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	bottom.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_anchor(bottom, 0.5, 1.0)
 	bottom.offset_top = -20.0
 	bottom.offset_bottom = -20.0
 	var hint := UiKit.label("", "body", "text", HORIZONTAL_ALIGNMENT_CENTER)
@@ -1207,6 +1220,20 @@ func _make_hud(slot: int, parent: Control) -> void:
 		chip_list.append(c)
 	parts["chips"] = chip_list
 	hud_parts[slot] = parts
+
+
+## Pin a control to a point of its parent (0 / 0.5 / 1 on each axis), growing away from the edge.
+## (Set the anchors directly: set_anchors_preset() after add_child left these controls at the
+## parent's top-left corner inside UiKit roots.)
+func _anchor(c: Control, x: float, y: float) -> void:
+	c.anchor_left = x
+	c.anchor_right = x
+	c.anchor_top = y
+	c.anchor_bottom = y
+	var gh := Control.GROW_DIRECTION_END if x < 0.25 else (Control.GROW_DIRECTION_BEGIN if x > 0.75 else Control.GROW_DIRECTION_BOTH)
+	var gv := Control.GROW_DIRECTION_END if y < 0.25 else (Control.GROW_DIRECTION_BEGIN if y > 0.75 else Control.GROW_DIRECTION_BOTH)
+	c.grow_horizontal = gh
+	c.grow_vertical = gv
 
 
 func _update_huds() -> void:
@@ -1270,7 +1297,7 @@ func _on_state_changed(key: String, value: Variant) -> void:
 					if int(s) >= 0 and is_instance_valid(huds[s]):
 						HudKit.toast(huds[s], "SPIRIT READY! Click a stick", {"color": "gold", "icon": "star"})
 				if vr_rig != null:
-					HudKit.vr_banner(self, vr_rig.camera, "SPIRIT READY!", "PRESS A", {"duration": 2.5, "style": "level", "sound": ""})
+					_vr_headline("SPIRIT READY!", "PRESS A", {"duration": 2.5, "style": "level", "sound": ""})
 				sfx.play("achievement", -4.0)
 
 
@@ -1352,9 +1379,7 @@ func on_pause_changed(paused: bool, by_slot: int) -> void:
 			var l := UiKit.label("", "small", "dim", HORIZONTAL_ALIGNMENT_CENTER)
 			l.name = "Why"
 			v.add_child(l)
-			tv_banner.set_anchors_preset(Control.PRESET_CENTER)
-			tv_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
-			tv_banner.grow_vertical = Control.GROW_DIRECTION_BOTH
+			_anchor(tv_banner, 0.5, 0.5)
 		(tv_banner.find_child("Why", true, false) as Label).text = why
 		tv_banner.visible = paused
 		if paused:
