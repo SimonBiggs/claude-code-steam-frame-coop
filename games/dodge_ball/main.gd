@@ -71,6 +71,7 @@ var huds := {}
 var score_labels := {}  # slot -> [runners Label, giant Label]
 var timers := {}
 var join_prompt: Control
+var throw_prompts := {}  # slot -> "A Throw!" pill, shown while that runner holds a ball
 var tv_banner: Control
 var vr_banner: Node3D
 var results_ui: Control
@@ -226,6 +227,17 @@ func _make_hud(slot: int, parent: Control) -> void:
 	row.add_child(UiKit.label("GIANT", "heading", "bad"))
 	score_labels[slot] = [tv, gl]
 	timers[slot] = HudKit.timer(ui, {"seconds": float(net.state_get("time", round_time))})
+	if slot >= 0:
+		var tp := UiKit.panel("accent")
+		tp.add_child(UiKit.prompts([["A", "THROW!"]]))
+		ui.add_child(tp)
+		tp.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+		tp.grow_horizontal = Control.GROW_DIRECTION_BOTH
+		tp.grow_vertical = Control.GROW_DIRECTION_BEGIN
+		tp.offset_top = -50.0
+		tp.offset_bottom = -50.0
+		tp.visible = false
+		throw_prompts[slot] = tp
 	if slot < 0:
 		join_prompt = UiKit.panel("pill")
 		join_prompt.add_child(UiKit.prompts([["A", "Join"]]))
@@ -298,6 +310,7 @@ func _on_player_left(slot: int) -> void:
 		huds.erase(slot)
 	score_labels.erase(slot)
 	timers.erase(slot)
+	throw_prompts.erase(slot)
 	_refresh_group()
 	_refresh_hud()
 
@@ -419,7 +432,7 @@ func _on_state_changed(key: String, value: Variant) -> void:
 		"round":
 			HudKit.banner(_all_huds(), "DODGE!", "Throw at the belly!", {"duration": 2.5})
 			if vr_rig != null:
-				HudKit.vr_banner(self, vr_rig.camera, "THROW!", "", {"duration": 2.0, "sound": ""})
+				HudKit.vr_banner(self, vr_rig.camera, "THROW!", "Grab: TRIGGER", {"duration": 2.5, "sound": ""})
 			sfx.play("whistle", -4.0)
 		"phase":
 			if String(value) == "results":
@@ -510,6 +523,13 @@ func _process(delta: float) -> void:
 	else:
 		_host_tick(delta)
 	_animate_avatars(delta)
+	for slot in throw_prompts:
+		var tp: Control = throw_prompts[slot]
+		if is_instance_valid(tp):
+			var show := _holding(int(slot)) >= 0
+			if show and not tp.visible:
+				UiKit.pop_in(tp)
+			tp.visible = show
 	world.update_giant(g_head, g_yaw, g_hands, delta)
 	for b: Ball in balls:
 		b.squish = move_toward(b.squish, 0.0, delta * 4.0)
