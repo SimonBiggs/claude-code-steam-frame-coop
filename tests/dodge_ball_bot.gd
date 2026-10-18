@@ -47,6 +47,9 @@ func _ready() -> void:
 		kit.at(t0 + 7.2, "resumed?", func() -> void:
 			kit.assert_true(not get_tree().paused, "Start again resumes")
 			kit.allow_pause = false)
+	if want > 0:
+		kit.drop_in_out(main.party, t0 + 9.0, 3.0, func(slot: int) -> bool:
+			return main.avatars.has(slot) and main.huds.has(slot) and main.cams.has(slot) and main.throw_prompts.has(slot))
 	if host:
 		kit.at(38.0, "host checks", _checks)
 		kit.at(42.0, "finish", kit.finish)
@@ -63,6 +66,8 @@ func _watch_results() -> String:
 		saw_results = true
 		round_at_results = int(main.net.state_get("round", 0))
 		kit.assert_true(main.split == null or main.results_ui != null, "the results screen shows on the TV")
+		kit.assert_true(main.results_ui == null or (main.results_ui.get("data") as Dictionary).has("title"),
+			"the results screen has the round's results")
 		kit.assert_true(main.vr_rig == null or main.vr_results != null, "the results card shows in VR")
 		return "results are up (nobody presses anything: the next round must start by itself)"
 	return ""

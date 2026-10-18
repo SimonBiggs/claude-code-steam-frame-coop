@@ -21,6 +21,7 @@ const Awards := preload("res://core/awards.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 const Creatures := preload("res://core/creatures.gd")
 const SkyKit := preload("res://core/sky_kit.gd")
+const ResCache := preload("res://core/res_cache.gd")
 const World := preload("res://games/dodge_ball/world.gd")
 
 const STAGE_H := 0.9  # the giant's stage height
@@ -302,7 +303,9 @@ func _on_player_left(slot: int) -> void:
 			(dict[slot] as Node).queue_free()
 			dict.erase(slot)
 	last_pos.erase(slot)
+	vels.erase(slot)
 	out.erase(slot)
+	safe.erase(slot)
 	if huds.has(slot):
 		var h: Control = huds[slot]
 		if is_instance_valid(h):
@@ -473,6 +476,9 @@ func _end_round() -> void:
 	for i in balls.size():
 		var b: Ball = balls[i]
 		_drop_ball(b)
+	# The CPU giant lets go too (it kept "holding" the dropped ball and threw it during the results).
+	cpu_g["phase"] = 0
+	cpu_g["ball"] = -1
 
 
 func _show_results(data: Dictionary) -> void:
@@ -1077,20 +1083,22 @@ func burst(p: Vector3, color: Color, amount: int, size: float, feathers: bool = 
 	c.damping_max = 3.0 if feathers else 0.0
 	c.angular_velocity_min = -300.0
 	c.angular_velocity_max = 300.0
-	var m: PrimitiveMesh
-	var mat: StandardMaterial3D = MeshKit.material(color, 0.6)
-	if feathers:
-		var q := QuadMesh.new()
-		q.size = Vector2(size, size * 2.0)
-		m = q
-		mat = mat.duplicate() as StandardMaterial3D
-		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	else:
-		var bm := BoxMesh.new()
-		bm.size = Vector3.ONE * size * 0.7
-		m = bm
-	m.material = mat
-	c.mesh = m
+	# One cached mesh per look (a hit made two new meshes and a material copy every time).
+	c.mesh = ResCache.get_or_make("dodge_bit_%s_%.2f_%s" % [color.to_html(false), size, str(feathers)], func() -> Resource:
+		var m: PrimitiveMesh
+		var mat: StandardMaterial3D = MeshKit.material(color, 0.6)
+		if feathers:
+			var q := QuadMesh.new()
+			q.size = Vector2(size, size * 2.0)
+			m = q
+			mat = mat.duplicate() as StandardMaterial3D
+			mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		else:
+			var bm := BoxMesh.new()
+			bm.size = Vector3.ONE * size * 0.7
+			m = bm
+		m.material = mat
+		return m)
 	add_child(c)
 	c.position = p
 	c.emitting = true
