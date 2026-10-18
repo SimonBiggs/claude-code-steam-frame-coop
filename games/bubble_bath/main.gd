@@ -23,6 +23,7 @@ const Awards := preload("res://core/awards.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 const Creatures := preload("res://core/creatures.gd")
 const SkyKit := preload("res://core/sky_kit.gd")
+const ResCache := preload("res://core/res_cache.gd")
 const Art := preload("res://games/bubble_bath/art.gd")
 
 const GAME_ID := "bubble_bath"
@@ -995,13 +996,14 @@ func burst(pos: Vector3, color: Color, amount: int, speed: float) -> void:
 	p.initial_velocity_max = speed
 	p.scale_amount_min = 0.6
 	p.scale_amount_max = 1.3
-	var sm := SphereMesh.new()
-	sm.radius = 0.04
-	sm.height = 0.08
-	sm.radial_segments = 6
-	sm.rings = 3
-	sm.material = MeshKit.material(color, 0.6)
-	p.mesh = sm
+	p.mesh = ResCache.get_or_make("bb_drop_%s" % color.to_html(false), func() -> Resource:  # splashes are frequent
+		var sm := SphereMesh.new()
+		sm.radius = 0.04
+		sm.height = 0.08
+		sm.radial_segments = 6
+		sm.rings = 3
+		sm.material = MeshKit.material(color, 0.6)
+		return sm)
 	add_child(p)
 	p.position = pos
 	p.emitting = true
@@ -1062,7 +1064,7 @@ func make_snapshot() -> Array:
 
 
 func apply_snapshot(s: Array) -> void:
-	if not ready_to_play:
+	if not ready_to_play or s.size() < 4:
 		return
 	if vr_avatar != null:
 		vr_avatar.apply_pose(s[0])
