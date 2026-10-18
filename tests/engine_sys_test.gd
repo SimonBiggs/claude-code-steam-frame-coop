@@ -257,10 +257,12 @@ func _local_timeline() -> void:
 		kit.assert_true(main.pauses.has([true, 0]), "net.toggle_pause told main.on_pause_changed")
 		kit.vr_trigger(rig, 0.0))
 	kit.at(7.3, "vr rig: pull to resume", func() -> void:
+		kit.assert_true(get_tree().paused, "releasing the pull that paused doesn't resume")
 		kit.vr_trigger(rig, 1.0))
+	kit.at(7.4, "vr rig: quick release (a tap resumes; holding goes to the arcade)", func() -> void:
+		kit.vr_trigger(rig, 0.0))
 	kit.at(7.5, "vr rig: hands back", func() -> void:
 		kit.assert_true(not get_tree().paused, "a second pull on the MENU resumes")
-		kit.vr_trigger(rig, 0.0)
 		kit.vr_pose(rig, Vector3(0, 1.6, 0), Vector3(-0.25, 1.1, -0.3), Vector3(0.25, 1.1, -0.3)))
 	kit.at(7.8, "vr rig: pull and keep holding through a pause", func() -> void:
 		kit.allow_pause = false

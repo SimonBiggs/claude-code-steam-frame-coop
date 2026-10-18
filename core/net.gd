@@ -555,7 +555,9 @@ func _check_vr_menu() -> void:
 	# While paused, a trigger pull on the button resumes only when released quickly, so HOLDING the
 	# trigger (even while pointing near the wrist, e.g. with a fishing rod) always goes to the arcade.
 	var tap_resume := false
-	if paused and on_btn and trig:
+	# Only a pull that STARTED while paused counts: the pull that paused (still held) must not resume
+	# the moment it is released.
+	if paused and on_btn and trig and (float(get_meta("btn_hold", 0.0)) > 0.0 or not bool(get_meta("trig_was", false))):
 		set_meta("btn_hold", float(get_meta("btn_hold", 0.0)) + get_process_delta_time())
 	elif float(get_meta("btn_hold", 0.0)) > 0.0:
 		tap_resume = float(get_meta("btn_hold", 0.0)) < 0.5 and not trig
