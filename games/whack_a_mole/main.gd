@@ -20,6 +20,7 @@ const Awards := preload("res://core/awards.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 const Creatures := preload("res://core/creatures.gd")
 const SkyKit := preload("res://core/sky_kit.gd")
+const ResCache := preload("res://core/res_cache.gd")
 const Props := preload("res://games/whack_a_mole/props.gd")
 
 const GAME_ID := "whack_a_mole"
@@ -343,6 +344,7 @@ func _on_player_left(slot: int) -> void:
 			(dict[slot] as Node).queue_free()
 			dict.erase(slot)
 	last_pos.erase(slot)
+	hop_cd.erase(slot)
 	if huds.has(slot):
 		var h: Control = huds[slot]
 		if is_instance_valid(h):
@@ -638,6 +640,8 @@ func _simulate(delta: float) -> void:
 func _start_play() -> void:
 	time_left = round_time
 	spawn_t = 1.2
+	if m_state[PRACTICE_HOLE] == UP:
+		m_t[PRACTICE_HOLE] = minf(m_t[PRACTICE_HOLE], 2.0)  # nobody bonked it: it goes down like any mole
 	net.state_set("time", int(ceil(time_left)))
 	net.state_set("phase", "play")
 
@@ -796,13 +800,15 @@ func whack_fx(i: int, by: int, pts: int) -> void:
 	p.gravity = Vector3(0.0, -6.0, 0.0)
 	p.initial_velocity_min = 1.5
 	p.initial_velocity_max = 3.0
-	var bm := SphereMesh.new()
-	bm.radius = 0.035
-	bm.height = 0.07
-	bm.radial_segments = 6
-	bm.rings = 3
-	bm.material = MeshKit.material(Color(1.0, 0.85, 0.2) if gold else party.color_of(by), 1.5)
-	p.mesh = bm
+	var col := Color(1.0, 0.85, 0.2) if gold else party.color_of(by)
+	p.mesh = ResCache.get_or_make("wam_bit_%s" % col.to_html(false), func() -> Resource:
+		var bm := SphereMesh.new()
+		bm.radius = 0.035
+		bm.height = 0.07
+		bm.radial_segments = 6
+		bm.rings = 3
+		bm.material = MeshKit.material(col, 1.5)
+		return bm)
 	add_child(p)
 	p.position = pos
 	p.emitting = true
