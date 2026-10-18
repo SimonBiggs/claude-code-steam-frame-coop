@@ -44,6 +44,8 @@ func _ready() -> void:
 			kit.allow_pause = false)
 	if OS.has_environment("BOT_VR"):
 		kit.at(12.0, "fake VR: left glove reaches for the paper stack", func() -> void: left_test = 1)
+	kit.drop_in_out(main.party, t0 + 11.0, 3.0, func(slot: int) -> bool:
+		return main.flyers.has(slot) and main.huds.has(slot))
 	if host:
 		kit.at(40.0, "host checks (the TV machine is still connected)", _checks)
 		kit.at(50.0, "finish", kit.finish)
@@ -60,6 +62,8 @@ func _continue_results() -> String:
 		if not saw_results:
 			saw_results = true
 			kit.assert_true(main.split == null or main.results_ui != null, "the results screen shows on the TV")
+			kit.assert_true(main.results_ui == null or (main.results_ui.get("data") as Dictionary).has("title"),
+				"the results screen has the round's results")
 			kit.assert_true(main.vr_rig == null or main.vr_results != null, "the results card shows in VR")
 		_press("accept")
 	return ""
@@ -200,6 +204,11 @@ func _checks() -> void:
 	kit.assert_eq(main.party.player_count(), want, "%s: all %d TV players are seated" % [mode, want])
 	kit.assert_true(int(main.net.state_get("round", 0)) >= 2, "%s: round 1 ended with results and round 2 started" % mode)
 	kit.assert_true(main.hoops.size() >= 3, "%s: hoops are in the sky" % mode)
+	var ghosts := 0
+	for s in main.flyers:
+		if not main.party.is_active(int(s)):
+			ghosts += 1
+	kit.assert_eq(ghosts, 0, "%s: no plane is left behind by a player who quit" % mode)
 	if mode != "client":
 		var tv := 0
 		for s in main.scored_by:

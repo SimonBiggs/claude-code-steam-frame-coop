@@ -20,6 +20,7 @@ const Awards := preload("res://core/awards.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 const Creatures := preload("res://core/creatures.gd")
 const SkyKit := preload("res://core/sky_kit.gd")
+const ResCache := preload("res://core/res_cache.gd")
 const Meshes := preload("res://games/paper_planes/meshes.gd")
 
 const GAME_ID := "paper_planes"
@@ -473,6 +474,8 @@ func _animate_flyers(delta: float) -> void:
 
 ## Host: a TV player's plane moved on the TV machine.
 func on_remote_state(slot: int, pos: Vector3, yaw: float, pitch: float) -> void:
+	if not party.is_active(slot):
+		return  # a late (unreliable) packet from a player who just left: don't bring back a ghost plane
 	var f := _ensure_flyer(slot)
 	var from := f.target if f.has_target else pos
 	f.target = pos
@@ -513,10 +516,11 @@ func _make_hoop(id: int, kind: int, ci: int, pos: Vector3) -> Hoop:
 		sp.emission_sphere_radius = 1.0
 		sp.gravity = Vector3(0.0, 0.4, 0.0)
 		sp.initial_velocity_max = 0.2
-		var bm := BoxMesh.new()
-		bm.size = Vector3.ONE * 0.07
-		bm.material = MeshKit.material(Color(1.0, 0.95, 0.6), 2.0)
-		sp.mesh = bm
+		sp.mesh = ResCache.get_or_make("pp_sparkle_v1", func() -> Resource:
+			var bm := BoxMesh.new()
+			bm.size = Vector3.ONE * 0.07
+			bm.material = MeshKit.material(Color(1.0, 0.95, 0.6), 2.0)
+			return bm)
 		h.node.add_child(sp)
 	h.target = pos
 	hoops[id] = h
@@ -667,16 +671,22 @@ func burst(at: Vector3, cols: Array[Color], amount: int, speed: float) -> void:
 	p.initial_velocity_max = 6.0 * speed
 	p.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
 	p.emission_sphere_radius = 0.6
-	var bm := BoxMesh.new()
-	bm.size = Vector3(0.12, 0.12, 0.02)
-	bm.material = MeshKit.vertex_material(true)
-	p.mesh = bm
-	var g := Gradient.new()
-	g.offsets = PackedFloat32Array([0.0])
-	g.colors = PackedColorArray([cols[0]])
-	for i in range(1, cols.size()):
-		g.add_point(float(i) / float(cols.size() - 1), cols[i])
-	p.color_initial_ramp = g
+	# Cached: one confetti mesh, one colour ramp per palette (no allocations per burst).
+	p.mesh = ResCache.get_or_make("pp_confetti_v1", func() -> Resource:
+		var bm := BoxMesh.new()
+		bm.size = Vector3(0.12, 0.12, 0.02)
+		bm.material = MeshKit.vertex_material(true)
+		return bm)
+	var key := "pp_ramp"
+	for c in cols:
+		key += "_" + c.to_html(false)
+	p.color_initial_ramp = ResCache.get_or_make(key, func() -> Resource:
+		var g := Gradient.new()
+		g.offsets = PackedFloat32Array([0.0])
+		g.colors = PackedColorArray([cols[0]])
+		for i in range(1, cols.size()):
+			g.add_point(float(i) / float(cols.size() - 1), cols[i])
+		return g)
 	p.angular_velocity_min = -400.0
 	p.angular_velocity_max = 400.0
 	add_child(p)
