@@ -353,7 +353,8 @@ func _checks() -> void:
 		if mode != "client":
 			kit.assert_true(restarted and wave_after_again >= 1, "%s: PLAY AGAIN started a new game (wave %d)" % [mode, wave_after_again])
 		return
-	if mode == "local" and not OS.has_environment("BOT_END"):
+	# Wave 6 + the General inside 58 s needs the short test waves (EB_FAST=1, see the header).
+	if mode == "local" and main.fast and not OS.has_environment("BOT_END"):
 		kit.assert_true(max_wave >= 6 or saw_results, "local: reached wave 6 (max %d)" % max_wave)
 		kit.assert_true(main.log_boss or saw_results, "local: the Shadow General appeared")
 	if boss_alive_t > 6.0:
