@@ -24,6 +24,7 @@ const Awards := preload("res://core/awards.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 const Creatures := preload("res://core/creatures.gd")
 const SkyKit := preload("res://core/sky_kit.gd")
+const ResCache := preload("res://core/res_cache.gd")
 const Looks := preload("res://games/tower_stack/looks.gd")
 const JellyScript := preload("res://games/tower_stack/jelly.gd")
 
@@ -734,14 +735,16 @@ func _make_block_node(id: int, authority: bool) -> Node3D:
 		rb.linear_damp = 0.3
 		rb.angular_damp = 1.5
 		rb.freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
-		var pm := PhysicsMaterial.new()
-		pm.friction = 1.0
-		pm.bounce = 0.05
-		rb.physics_material_override = pm
+		rb.physics_material_override = ResCache.get_or_make("tower_stack_block_pm_v1", func() -> Resource:
+			var pm := PhysicsMaterial.new()
+			pm.friction = 1.0
+			pm.bounce = 0.05
+			return pm)
 		var cs := CollisionShape3D.new()
-		var box := BoxShape3D.new()
-		box.size = Vector3.ONE * B
-		cs.shape = box
+		cs.shape = ResCache.get_or_make("tower_stack_block_shape_v1", func() -> Resource:
+			var box := BoxShape3D.new()
+			box.size = Vector3.ONE * B
+			return box)
 		rb.add_child(cs)
 		n = rb
 	else:
@@ -1160,7 +1163,9 @@ func _run_crane(delta: float) -> void:
 			else:
 				target = (blocks[crane_id] as Node3D).global_position + Vector3.UP * 0.55
 				if crane.position.distance_to(target) < 0.1:
-					hover[hover.find(crane_id)] = -1
+					var hi := hover.find(crane_id)
+					if hi >= 0:  # (hover[-1] would clear the wrong spot)
+						hover[hi] = -1
 					bstate[crane_id] = "crane"
 					_poke(crane_id, 0.4)
 					sfx.play_at("pop", target, -4.0)
@@ -1235,7 +1240,7 @@ func make_snapshot() -> Array:
 
 ## TV machine: mirror the host's world (ghost blocks glide to their targets).
 func apply_snapshot(s: Array) -> void:
-	if not ready_to_play:
+	if not ready_to_play or s.size() < 4:
 		return
 	if vr_avatar != null:
 		vr_avatar.apply_pose(s[0])
