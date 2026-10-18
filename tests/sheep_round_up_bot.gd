@@ -42,6 +42,8 @@ func _ready() -> void:
 		kit.at(t0 + 7.2, "resumed?", func() -> void:
 			kit.assert_true(not get_tree().paused and not main.tv_banner.visible, "Start again resumes everyone")
 			kit.allow_pause = false)
+	kit.drop_in_out(main.party, t0 + 9.0, 3.0, func(slot: int) -> bool:
+		return main.dogs.has(slot) and main.huds.has(slot) and main.cams.has(slot))
 	if host:
 		kit.at(31.0, "host checks (the TV machine is still connected)", _checks)
 		kit.at(40.0, "finish", kit.finish)
@@ -58,6 +60,8 @@ func _watch_results() -> String:
 	if main.results_showing() and not saw_results:
 		saw_results = true
 		kit.assert_true(main.split == null or main.results_ui != null, "the results screen shows on the TV")
+		kit.assert_true(main.results_ui == null or (main.results_ui.get("data") as Dictionary).has("title"),
+			"the results screen has the round's results")
 		kit.assert_true(main.vr_rig == null or main.vr_results != null, "the results card shows in VR")
 	return ""
 

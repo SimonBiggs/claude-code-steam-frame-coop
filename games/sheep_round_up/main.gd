@@ -23,6 +23,7 @@ const Awards := preload("res://core/awards.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 const Creatures := preload("res://core/creatures.gd")
 const SkyKit := preload("res://core/sky_kit.gd")
+const ResCache := preload("res://core/res_cache.gd")
 const SheepScript := preload("res://games/sheep_round_up/sheep.gd")
 
 const GAME_ID := "sheep_round_up"
@@ -319,6 +320,8 @@ func _on_player_left(slot: int) -> void:
 			(dict[slot] as Node).queue_free()
 			dict.erase(slot)
 	last_pos.erase(slot)
+	bark_t.erase(slot)
+	bark_cd.erase(slot)
 	if huds.has(slot):
 		var h: Control = huds[slot]
 		if is_instance_valid(h):
@@ -849,13 +852,14 @@ func burst(pos: Vector3, color: Color, amount: int = 14) -> void:
 	p.gravity = Vector3(0.0, -5.0, 0.0)
 	p.initial_velocity_min = 2.0
 	p.initial_velocity_max = 4.0
-	var bm := SphereMesh.new()
-	bm.radius = 0.06
-	bm.height = 0.12
-	bm.radial_segments = 6
-	bm.rings = 3
-	bm.material = MeshKit.material(color, 1.5)
-	p.mesh = bm
+	p.mesh = ResCache.get_or_make("sheep_bit_%s" % color.to_html(false), func() -> Resource:
+		var bm := SphereMesh.new()
+		bm.radius = 0.06
+		bm.height = 0.12
+		bm.radial_segments = 6
+		bm.rings = 3
+		bm.material = MeshKit.material(color, 1.5)
+		return bm)
 	add_child(p)
 	p.position = pos
 	p.emitting = true
@@ -921,7 +925,7 @@ func make_snapshot() -> Array:
 
 
 func apply_snapshot(s: Array) -> void:
-	if not ready_to_play:
+	if not ready_to_play or s.size() < 3 or (s[1] as PackedVector3Array).size() != (s[2] as PackedByteArray).size():
 		return
 	if vr_avatar != null:
 		vr_avatar.apply_pose(s[0])
