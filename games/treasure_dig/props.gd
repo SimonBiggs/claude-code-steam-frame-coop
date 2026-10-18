@@ -12,13 +12,14 @@ const KIND_SCALE := 1.9
 
 
 ## A treasure (coin, gem or a silly old boot) as one MeshInstance3D, origin at its base.
-static func item_mesh(kind: int) -> MeshInstance3D:
+## `variant` picks the gem colour (pass the item id so every machine shows the same gem).
+static func item_mesh(kind: int, variant: int = -1) -> MeshInstance3D:
 	var mi: MeshInstance3D
 	match kind:
 		KIND_COIN:
 			mi = MeshKit.instance(MeshKit.prop("coin"), false)
 		KIND_GEM:
-			mi = MeshKit.instance(MeshKit.prop("gem", randi() % 4), false)
+			mi = MeshKit.instance(MeshKit.prop("gem", posmod(variant, 4) if variant >= 0 else randi() % 4), false)
 		_:
 			mi = MeshKit.instance(boot(), false)
 	mi.scale = Vector3.ONE * KIND_SCALE
@@ -126,10 +127,11 @@ static func burst(parent: Node3D, pos: Vector3, color: Color, amount: int = 16, 
 	p.initial_velocity_max = speed
 	p.scale_amount_min = 0.5
 	p.scale_amount_max = 1.2
-	var bm := BoxMesh.new()
-	bm.size = Vector3.ONE * size
-	bm.material = MeshKit.material(color, glow)
-	p.mesh = bm
+	p.mesh = ResCache.get_or_make("td_bit_%s_%.2f_%.1f" % [color.to_html(false), size, glow], func() -> Resource:
+		var bm := BoxMesh.new()
+		bm.size = Vector3.ONE * size
+		bm.material = MeshKit.material(color, glow)
+		return bm)
 	parent.add_child(p)
 	p.position = pos
 	p.emitting = true

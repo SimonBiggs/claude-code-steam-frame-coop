@@ -48,6 +48,9 @@ func _ready() -> void:
 		kit.at(t0 + 9.2, "resumed?", func() -> void:
 			kit.assert_true(not get_tree().paused and not main.tv_banner.visible, "Start again resumes")
 			kit.allow_pause = false)
+	if want > 0:
+		kit.drop_in_out(main.party, t0 + 10.0, 3.0, func(slot: int) -> bool:
+			return main.avatars.has(slot) and main.huds.has(slot) and main.cams.has(slot))
 	if host:
 		var end := float(OS.get_environment("BOT_HOST_END")) if OS.has_environment("BOT_HOST_END") else 37.0  # late-join tests
 		kit.at(end - 9.0, "host checks (the TV machine is still connected)", _checks)
@@ -71,6 +74,8 @@ func _continue_results() -> String:
 		if not results_checked:
 			results_checked = true
 			kit.assert_true(main.split == null or main.results_ui != null, "the results screen shows on the TV")
+			kit.assert_true(main.results_ui == null or (main.results_ui.get("data") as Dictionary).has("title"),
+				"the results screen has the round's results")
 			kit.assert_true(main.vr_rig == null or main.vr_results != null, "the results card shows in VR")
 		_press("accept")
 	return ""

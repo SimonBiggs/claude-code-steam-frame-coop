@@ -25,6 +25,7 @@ const Awards := preload("res://core/awards.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 const Creatures := preload("res://core/creatures.gd")
 const SkyKit := preload("res://core/sky_kit.gd")
+const ResCache := preload("res://core/res_cache.gd")
 const Props := preload("res://games/treasure_dig/props.gd")
 
 const GAME_ID := "treasure_dig"
@@ -350,6 +351,7 @@ func _on_player_joined(slot: int, _device: int) -> void:
 
 func _on_player_left(slot: int) -> void:
 	_drop_carried(slot)
+	dig_cd.erase(slot)
 	for d in [avatars, cams]:
 		var dict: Dictionary = d
 		if dict.has(slot):
@@ -749,7 +751,7 @@ func _make_item(id: int, kind: int, pos: Vector3) -> int:
 		next_item += 1
 		id = next_item
 	var n := Node3D.new()
-	n.add_child(Props.item_mesh(kind))
+	n.add_child(Props.item_mesh(kind, id))
 	beach.add_child(n)
 	n.position = pos
 	n.scale = Vector3.ONE * 0.2
@@ -816,7 +818,7 @@ func _bank(id: int, by: int) -> void:
 	var v: int = Props.VALUES[kind]
 	awards.add(by, "score", v)
 	net.state_set("score", int(net.state_get("score", 0)) + v)
-	fx("bank", [pos, kind, by])
+	fx("bank", [pos, kind, by, id])
 
 
 # --- The giant (host / local with a VR rig) -----------------------------------------------------
@@ -982,7 +984,7 @@ func _play_fx(fx_kind: String, args: Array) -> void:
 			var kind := int(args[1])
 			var by := int(args[2])
 			var ghost := Node3D.new()
-			ghost.add_child(Props.item_mesh(kind))
+			ghost.add_child(Props.item_mesh(kind, int(args[3]) if args.size() > 3 else -1))
 			beach.add_child(ghost)
 			ghost.position = pos
 			var t := ghost.create_tween()
@@ -1042,13 +1044,14 @@ func _sound_at(sound_name: String, local_pos: Vector3, db: float = 0.0, pitch: f
 
 func _make_hole(pos: Vector3) -> void:
 	var mi := MeshInstance3D.new()
-	var cm := CylinderMesh.new()
-	cm.top_radius = 0.45
-	cm.bottom_radius = 0.45
-	cm.height = 0.02
-	cm.radial_segments = 12
-	cm.rings = 1
-	mi.mesh = cm
+	mi.mesh = ResCache.get_or_make("td_hole_v1", func() -> Resource:
+		var cm := CylinderMesh.new()
+		cm.top_radius = 0.45
+		cm.bottom_radius = 0.45
+		cm.height = 0.02
+		cm.radial_segments = 12
+		cm.rings = 1
+		return cm)
 	mi.material_override = MeshKit.material(Color(0.7, 0.55, 0.32))
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	beach.add_child(mi)
