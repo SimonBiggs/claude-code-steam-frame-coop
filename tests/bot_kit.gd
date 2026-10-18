@@ -252,6 +252,39 @@ func join_bot(party: Node) -> int:
 	return dev
 
 
+## Drop-in / drop-out mid-game: at `time` one more pad joins, `stay` s later that player quits and the
+## pad is unplugged. `seated(slot) -> bool` says whether the game has set the player up (avatar,
+## view, ...); it is checked after joining (true) and after leaving (false). Not on the headset host
+## (it has no pads). The roster is back to what it was afterwards.
+func drop_in_out(party: Node, time: float, stay: float, seated: Callable) -> void:
+	var st := {"dev": -1, "slot": -1}
+	at(time, "a late player drops in", func() -> void:
+		if party.get_parent().get("net") != null and str(party.get_parent().net.mode) == "host":
+			return
+		if int(party.player_count()) >= int(party.max_slot):
+			info("(every seat is taken: no drop-in test)")
+			return
+		st["dev"] = join_bot(party))
+	at(time + 1.0, "late player seated?", func() -> void:
+		if int(st["dev"]) < 0:
+			return
+		var slot: int = party.owner_of(int(st["dev"]))
+		st["slot"] = slot
+		assert_true(slot >= 0 and party.is_active(slot), "a player can drop in mid-game")
+		if slot >= 0:
+			assert_true(bool(seated.call(slot)), "the late player (P%d) is set up" % (slot + 1)))
+	at(time + stay, "the late player quits", func() -> void:
+		if int(st["slot"]) >= 0:
+			party.leave(int(st["slot"]))
+			party.remove_virtual_pad(int(st["dev"])))
+	at(time + stay + 1.0, "late player gone?", func() -> void:
+		var slot := int(st["slot"])
+		if slot < 0:
+			return
+		assert_true(not party.is_active(slot), "the late player left")
+		assert_true(not bool(seated.call(slot)), "the late player's things were cleaned up"))
+
+
 # --- Fake VR (core/vr_rig.gd in fake mode) ----------------------------------------------------
 
 ## Put the head and hands at origin-local positions (head looks along -Z, hands point forward).

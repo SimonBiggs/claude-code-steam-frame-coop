@@ -23,6 +23,7 @@ const Awards := preload("res://core/awards.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 const Creatures := preload("res://core/creatures.gd")
 const SkyKit := preload("res://core/sky_kit.gd")
+const ResCache := preload("res://core/res_cache.gd")
 const Balloon := preload("res://games/balloon_pop/balloon.gd")
 
 const GAME_ID := "balloon_pop"
@@ -550,10 +551,10 @@ func _simulate(delta: float) -> void:
 		boop_cd[id] = float(boop_cd[id]) - delta
 		if float(boop_cd[id]) <= 0.0:
 			boop_cd.erase(id)
+	var t := Time.get_ticks_msec() * 0.001
 	for id in balloons.keys():
 		var b: Node3D = balloons[id]
 		var p := b.position
-		var t := Time.get_ticks_msec() * 0.001
 		p.y += float(b.get("rise")) * delta
 		p.x += sin(t * 0.7 + float(b.get("phase"))) * 0.15 * delta
 		var push: Vector3 = b.get("push")
@@ -637,10 +638,11 @@ func pop_fx(pos: Vector3, color: Color, kind: int, by: int) -> void:
 	p.initial_velocity_max = 4.5
 	p.scale_amount_min = 0.6
 	p.scale_amount_max = 1.4
-	var bm := BoxMesh.new()
-	bm.size = Vector3(0.09, 0.09, 0.02)
-	bm.material = MeshKit.material(color, 1.0)
-	p.mesh = bm
+	p.mesh = ResCache.get_or_make("bp_bit_%s" % color.to_html(false), func() -> Resource:
+		var bm := BoxMesh.new()
+		bm.size = Vector3(0.09, 0.09, 0.02)
+		bm.material = MeshKit.material(color, 1.0)
+		return bm)
 	add_child(p)
 	p.position = pos
 	p.emitting = true
@@ -692,18 +694,21 @@ func _confetti(pos: Vector3, amount: int, life: float) -> void:
 	p.angular_velocity_max = 360.0
 	p.damping_min = 1.0
 	p.damping_max = 2.0
-	var g := Gradient.new()
-	g.offsets = PackedFloat32Array([0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
-	g.colors = PackedColorArray(Balloon.COLORS.slice(0, 6))
-	p.color_initial_ramp = g
-	var qm := QuadMesh.new()
-	qm.size = Vector2(0.08, 0.05)
-	var m := StandardMaterial3D.new()
-	m.vertex_color_use_as_albedo = true
-	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.cull_mode = BaseMaterial3D.CULL_DISABLED
-	qm.material = m
-	p.mesh = qm
+	# Shared resources: the finale makes ~20 of these at once (no per-burst allocations).
+	p.color_initial_ramp = ResCache.get_or_make("bp_confetti_ramp_v1", func() -> Resource:
+		var g := Gradient.new()
+		g.offsets = PackedFloat32Array([0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
+		g.colors = PackedColorArray(Balloon.COLORS.slice(0, 6))
+		return g)
+	p.mesh = ResCache.get_or_make("bp_confetti_mesh_v1", func() -> Resource:
+		var qm := QuadMesh.new()
+		qm.size = Vector2(0.08, 0.05)
+		var m := StandardMaterial3D.new()
+		m.vertex_color_use_as_albedo = true
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.cull_mode = BaseMaterial3D.CULL_DISABLED
+		qm.material = m
+		return qm)
 	add_child(p)
 	p.position = pos
 	p.emitting = true

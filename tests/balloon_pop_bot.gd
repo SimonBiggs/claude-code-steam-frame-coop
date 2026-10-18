@@ -42,6 +42,8 @@ func _ready() -> void:
 		kit.at(t0 + 7.2, "resumed?", func() -> void:
 			kit.assert_true(not get_tree().paused and not main.tv_banner.visible, "Start again resumes")
 			kit.allow_pause = false)
+	kit.drop_in_out(main.party, t0 + 8.0, 3.0, func(slot: int) -> bool:
+		return main.avatars.has(slot) and main.huds.has(slot) and main.cams.has(slot))
 	kit.at(t0 + 3.0, "P2 jumps", func() -> void: _press("a"))
 	# Sample the jump height over half a second (networked runs are not frame-locked).
 	for i in 10:
@@ -69,6 +71,8 @@ func _watch_results() -> String:
 		saw_results = true
 		kit.assert_true(main.balloons.is_empty(), "the finale popped every balloon")
 		kit.assert_true(main.split == null or main.results_ui != null, "the results screen shows on the TV")
+		kit.assert_true(main.results_ui == null or (main.results_ui.get("data") as Dictionary).has("title"),
+			"the results screen has the round's results (also for a TV machine that joins late)")
 		kit.assert_true(main.vr_rig == null or main.vr_results != null, "the results card shows in VR")
 	return ""
 
