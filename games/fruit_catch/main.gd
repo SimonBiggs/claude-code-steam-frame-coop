@@ -21,6 +21,7 @@ const Awards := preload("res://core/awards.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 const Creatures := preload("res://core/creatures.gd")
 const SkyKit := preload("res://core/sky_kit.gd")
+const ResCache := preload("res://core/res_cache.gd")
 const Art := preload("res://games/fruit_catch/art.gd")
 
 const GAME_ID := "fruit_catch"
@@ -345,6 +346,7 @@ func _on_player_left(slot: int) -> void:
 	baskets.erase(slot)
 	last_pos.erase(slot)
 	dizzy.erase(slot)
+	boop_t.erase(slot)
 	if huds.has(slot):
 		var h: Control = huds[slot]
 		if is_instance_valid(h):
@@ -932,13 +934,14 @@ func _burst(pos: Vector3, color: Color, amount: int, speed: float) -> void:
 	p.initial_velocity_max = speed
 	p.scale_amount_min = 0.6
 	p.scale_amount_max = 1.2
-	var bm := SphereMesh.new()
-	bm.radius = 0.05
-	bm.height = 0.1
-	bm.radial_segments = 6
-	bm.rings = 3
-	bm.material = MeshKit.material(color, 0.4)
-	p.mesh = bm
+	p.mesh = ResCache.get_or_make("fruit_catch_bit_%s" % color.to_html(false), func() -> Resource:
+		var bm := SphereMesh.new()
+		bm.radius = 0.05
+		bm.height = 0.1
+		bm.radial_segments = 6
+		bm.rings = 3
+		bm.material = MeshKit.material(color, 0.4)
+		return bm)
 	add_child(p)
 	p.position = pos
 	p.emitting = true
@@ -980,7 +983,7 @@ func make_snapshot() -> Array:
 
 
 func apply_snapshot(s: Array) -> void:
-	if not ready_to_play:
+	if not ready_to_play or s.size() < 5:
 		return
 	if vr_avatar != null:
 		vr_avatar.apply_pose(s[0])
