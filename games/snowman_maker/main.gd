@@ -22,6 +22,7 @@ const Awards := preload("res://core/awards.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 const Creatures := preload("res://core/creatures.gd")
 const SkyKit := preload("res://core/sky_kit.gd")
+const ResCache := preload("res://core/res_cache.gd")
 const Snowman := preload("res://games/snowman_maker/snowman.gd")
 
 const GAME_ID := "snowman_maker"
@@ -898,9 +899,11 @@ func _sync_stacks(value: Variant) -> void:
 	for sid in data:
 		var e: Array = data[sid]
 		var node: Snowman
+		var fresh := false
 		if stack_nodes.has(sid) and is_instance_valid(stack_nodes[sid]):
 			node = stack_nodes[sid]
 		else:
+			fresh = true
 			node = Snowman.new()
 			add_child(node)
 			stack_nodes[sid] = node
@@ -914,7 +917,7 @@ func _sync_stacks(value: Variant) -> void:
 		var flags := int(e[3])
 		var was_done := node.done
 		node.set_data(radii, flags & 1 != 0, flags & 2 != 0, flags & 4 != 0)
-		if node.done and not was_done:
+		if node.done and not was_done and not fresh:  # (a TV machine joining late: no cheer storm)
 			_cheer_fx(node)
 	for sid in stack_nodes.keys():
 		if not data.has(sid):
@@ -1348,20 +1351,28 @@ func _burst(pos: Vector3, amount: int, colors: Array, speed: float) -> void:
 	p.initial_velocity_max = speed
 	p.scale_amount_min = 0.6
 	p.scale_amount_max = 1.2
-	var bm := SphereMesh.new()
-	bm.radius = 0.05
-	bm.height = 0.1
-	bm.radial_segments = 6
-	bm.rings = 3
-	bm.material = MeshKit.material(colors[0] as Color, 0.6)
-	p.mesh = bm
-	if colors.size() > 1:
-		p.color_initial_ramp = _ramp(colors)
-		var mat := StandardMaterial3D.new()
-		mat.vertex_color_use_as_albedo = true
-		mat.emission_enabled = true
-		mat.emission = Color(0.3, 0.3, 0.3)
-		bm.material = mat
+	# Cached: one mesh per single colour, one shared vertex-coloured mesh + a ramp per palette.
+	var multi := colors.size() > 1
+	var key := ""
+	for c in colors:
+		key += (c as Color).to_html(false)
+	p.mesh = ResCache.get_or_make("snowman_bit_%s" % ("multi" if multi else key), func() -> Resource:
+		var bm := SphereMesh.new()
+		bm.radius = 0.05
+		bm.height = 0.1
+		bm.radial_segments = 6
+		bm.rings = 3
+		if multi:
+			var mat := StandardMaterial3D.new()
+			mat.vertex_color_use_as_albedo = true
+			mat.emission_enabled = true
+			mat.emission = Color(0.3, 0.3, 0.3)
+			bm.material = mat
+		else:
+			bm.material = MeshKit.material(colors[0] as Color, 0.6)
+		return bm)
+	if multi:
+		p.color_initial_ramp = ResCache.get_or_make("snowman_ramp_%s" % key, func() -> Resource: return _ramp(colors))
 	add_child(p)
 	p.position = pos
 	p.emitting = true
@@ -1409,7 +1420,7 @@ func make_snapshot() -> Array:
 
 
 func apply_snapshot(s: Array) -> void:
-	if not ready_to_play:
+	if not ready_to_play or s.size() < 7:
 		return
 	if vr_avatar != null and (s[0] as PackedFloat32Array).size() > 0:
 		vr_avatar.apply_pose(s[0])

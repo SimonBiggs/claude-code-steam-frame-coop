@@ -43,9 +43,13 @@ func _ready() -> void:
 		kit.at(t0 + 9.2, "resumed?", func() -> void:
 			kit.assert_true(not get_tree().paused, "Start again resumes")
 			kit.allow_pause = false)
+	if want > 0:
+		kit.drop_in_out(main.party, t0 + 11.0, 3.0, func(slot: int) -> bool:
+			return main.avatars.has(slot) and main.huds.has(slot) and main.cams.has(slot))
 	if host:
 		kit.at(29.0, "host checks (the TV machine is still connected)", _checks)
-		kit.at(35.0, "finish", kit.finish)
+		var end := float(OS.get_environment("BOT_HOST_END")) if OS.has_environment("BOT_HOST_END") else 35.0  # late-join tests
+		kit.at(end, "finish", kit.finish)
 	else:
 		kit.at(31.0 if client else 36.0, "finish", func() -> void:
 			_checks()
@@ -63,6 +67,8 @@ func _continue_results() -> String:
 		if not saw_results:
 			saw_results = true
 			kit.assert_true(main.split == null or main.results_ui != null, "the results screen shows on the TV")
+			kit.assert_true(main.results_ui == null or (main.results_ui.get("data") as Dictionary).has("title"),
+				"the results screen has the round's results")
 			kit.assert_true(main.vr_rig == null or main.vr_results != null, "the results card shows in VR")
 			return "RESULTS UP"
 		_press("accept")
@@ -317,6 +323,8 @@ func _checks() -> void:
 	kit.assert_eq(main.party.player_count(), want, "%s: all %d TV players are seated" % [mode, want])
 	kit.assert_true(int(main.net.state_get("round", 0)) >= 2, "%s: round 1 ended with results and round 2 started" % mode)
 	kit.assert_true(saw_results, "%s: the results showed" % mode)
+	kit.assert_eq(main.stack_nodes.size(), (main.net.state_get("stacks", {}) as Dictionary).size(),
+		"%s: every snowman in the store is drawn" % mode)
 	if mode != "client":
 		kit.assert_true(main.total_rolled > 1.0, "%s: snow was rolled" % mode)
 		kit.assert_true(main.total_stacked > 0, "%s: snowballs were stacked" % mode)
