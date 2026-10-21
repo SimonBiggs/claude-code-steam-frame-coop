@@ -9,6 +9,7 @@ extends Node
 ## Simple mode (main.SIMPLE_MODE): no menu, no levels to pick (everyone plays EASY), no STAR POWER, no
 ## judgement words (a hit makes its ring burst). PRACTICE: one slow note at a time slides down and
 ## waits on its ring until you press that lane (main.PRACTICE_LANES), then the next one comes.
+## Every hit counts towards that lane's picture cue (main.cue_did): it goes away after two.
 
 const NO_KEYS := 99
 
@@ -191,6 +192,7 @@ func press(lane: int) -> void:
 			prac_step += 1
 			prac_t = 0.0
 			hit_t[lane] = 1.0
+			main.cue_did(self, "lane%d" % lane)
 			main.guitar_practice_hit(self, lane)
 		else:
 			main.free_strum(self, lane)
@@ -224,6 +226,7 @@ func press(lane: int) -> void:
 	var q := 0 if bdt <= win.x else 1
 	judged[best] = q + 1
 	hit_t[lane] = 1.0
+	main.cue_did(self, "lane%d" % lane)
 	record(q, g.g_star[best] == 1)
 	main.guitar_result(self, best, q)
 

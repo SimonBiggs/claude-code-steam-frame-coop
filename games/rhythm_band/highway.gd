@@ -8,14 +8,30 @@ extends Control
 ## first song has just the two outer lanes (X and B), the middle lane joins in song 2 (its ring pulses
 ## in the intro); a hit bursts its ring; the ring of the next note pulses in song 1; keyboard players
 ## get little arrows under the rings; PRACTICE shows one slow note waiting on its ring.
+## Visual teaching (simple mode, no how-to words): a pulsing glowing pad button and a glowing arrow
+## point at the ring to hit, in this player's own controls (X / A / B, or an arrow key cap for a
+## keyboard player, whose rings show arrows instead of pad letters): above the ring in PRACTICE, the
+## intro and while that lane is empty, beside the road for an outer lane's next note. The flat drummer
+## gets the drum's button (X A B Y / A S D F) over the glowing 3D arrow on the drum to hit. Each cue
+## fades once that lane / drum has been hit twice (main.cue_did / cue_learned).
 
 const LANE_COLORS: Array[Color] = [Color(0.3, 0.6, 1.0), Color(0.35, 0.95, 0.4), Color(1.0, 0.35, 0.35)]
 const LANE_BUTTONS: Array[String] = ["X", "A", "B"]
 const DEPTH := 3.6
+const UiKit := preload("res://core/ui_kit.gd")
 
 var main
 var p
 var font: Font
+# Simple mode picture cue (a "Cue" box of UiKit glyphs / icons on top of the drawing).
+var rings: Array[Vector2] = [Vector2.ZERO, Vector2.ZERO, Vector2.ZERO]  # target ring centres (last frame)
+var ring_r := 30.0
+var next_lane := -1  # the lane of the next note (within a second)
+var lane_busy: Array[bool] = [false, false, false]  # a note is on its way down this lane
+var cue_box: Control
+var cue_sig := ""
+var cue_a := 0.0
+var cue_glow := Vector2.ZERO  # where the halo goes (the glyph's centre)
 
 
 func _ready() -> void:
@@ -23,8 +39,179 @@ func _ready() -> void:
 	font = ThemeDB.fallback_font
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	if main != null and p != null and main.SIMPLE_MODE:
+		_update_cue(delta)
 	queue_redraw()
+
+
+# --- Simple mode picture cues (no words) ------------------------------------------------------
+
+func _keyboard_only() -> bool:
+	return p.index > 0 and int(p.joy) < 0 and int(p.key_set) != int(p.NO_KEYS)
+
+
+## What this view should show now: [key, place, lane or pad] (key "" for nothing). place: "above" the
+## ring, "side" of the road (outer lanes, notes coming), "drum" (over the flat drummer's 3D arrow).
+func _want_cue() -> Array:
+	var none := ["", "", -1]
+	if not p.active or main.get_tree().paused or (main.net.mode == "client" and not main.synced):
+		return none
+	var st: String = main.state
+	if p.index == 0:
+		if p.vr or p.fake_vr or p.ghost or int(p.cue_pad) < 0 or p.camera == null:
+			return none
+		return ["pad%d" % int(p.cue_pad), "drum", int(p.cue_pad)]
+	var lanes: Array[int] = main.lanes_now()
+	if st == "practice":
+		if int(p.prac_step) < main.PRACTICE_LANES.size():
+			var l: int = main.PRACTICE_LANES[int(p.prac_step)]
+			if not main.cue_learned(p, "lane%d" % l):
+				return ["lane%d" % l, "above", l]
+		return none
+	if st == "intro":
+		for l in lanes:
+			if not main.cue_learned(p, "lane%d" % l):
+				return ["lane%d" % l, "above", l]
+		return none
+	if st != "play":
+		return none
+	if next_lane >= 0 and next_lane != 1 and not main.cue_learned(p, "lane%d" % next_lane):
+		return ["lane%d" % next_lane, "side", next_lane]
+	if lanes.has(1) and not main.cue_learned(p, "lane1") and not lane_busy[1]:
+		return ["lane1", "above", 1]  # the new middle lane: shown between its notes (the ring pulses)
+	return none
+
+
+## A key cap (keyboard) with a letter or an arrow icon in it.
+func _keycap(text: String, icon_kind: String, s: float) -> Control:
+	var g := UiKit.glyph("KEY", s)
+	var l := g.get_child(0) as Label
+	l.text = text
+	if icon_kind != "":
+		l.text = ""
+		var ic := UiKit.icon(icon_kind, Color.WHITE, 26.0 * s)
+		ic.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		g.add_child(ic)
+	return g
+
+
+## The button in this player's own controls.
+func _cue_button(idx: int, s: float) -> Control:
+	var arrows: Array[String] = ["arrow_left", "arrow_down", "arrow_right"]
+	if p.index == 0:
+		if int(p.joy) >= 0:
+			return UiKit.glyph(["X", "A", "B", "Y"][idx], s)
+		return _keycap(["A", "S", "D", "F"][idx], "", s)
+	if _keyboard_only():
+		return _keycap("", arrows[idx], s)
+	return UiKit.glyph(LANE_BUTTONS[idx], s)
+
+
+func _update_cue(delta: float) -> void:
+	var want := _want_cue()
+	var key: String = want[0]
+	var place: String = want[1]
+	var idx: int = want[2]
+	p.set_meta("cue", key)
+	var ui := clampf(minf(size.x / 960.0, size.y / 760.0), 0.42, 1.3)
+	var s := 2.2 * ui  # big: a kid sees it from the sofa
+	if cue_box == null:
+		cue_box = Control.new()
+		cue_box.name = "Cue"
+		cue_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		add_child(cue_box)
+	var sig := "%s/%s/%d/%d/%.2f" % [key, place, int(int(p.joy) >= 0), int(_keyboard_only()), s]
+	if key != "" and sig != cue_sig:
+		if cue_sig.get_slice("/", 0) != key:
+			cue_a = 0.0  # a new cue fades in
+		cue_sig = sig
+		for c in cue_box.get_children():
+			cue_box.remove_child(c)
+			c.queue_free()
+		var box: BoxContainer = VBoxContainer.new() if place != "side" else HBoxContainer.new()
+		box.name = "Row"
+		box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		box.alignment = BoxContainer.ALIGNMENT_CENTER
+		box.add_theme_constant_override("separation", int(6 * s))
+		cue_box.add_child(box)
+		var col: Color = LANE_COLORS[idx].lightened(0.45) if p.index > 0 else Color(1.0, 0.95, 0.6)
+		var btn := _cue_button(idx, s)
+		btn.name = "Button"
+		var arrow: Control = null
+		if place == "above":
+			arrow = UiKit.icon("arrow_down", col, 34.0 * s)
+		elif place == "side":
+			arrow = UiKit.icon("arrow_right" if idx == 0 else "arrow_left", col, 34.0 * s)
+		if place == "side" and idx == 2:
+			box.add_child(arrow)
+			box.add_child(btn)
+		else:
+			box.add_child(btn)
+			if arrow != null:
+				box.add_child(arrow)
+		for c in box.get_children():
+			var ctl := c as Control
+			ctl.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+			ctl.size_flags_vertical = Control.SIZE_SHRINK_CENTER  # a round X, not a tall pill
+	if key != "":
+		cue_a = minf(1.0, cue_a + delta * 4.0)
+	else:
+		cue_a = maxf(0.0, cue_a - delta * 2.5)  # the old cue fades away
+	cue_box.visible = cue_a > 0.01 and cue_box.get_child_count() > 0
+	if not cue_box.visible:
+		if cue_a <= 0.01:
+			cue_sig = ""
+		return
+	var row := cue_box.get_child(0) as Control
+	if row == null:
+		return
+	row.size = row.get_combined_minimum_size()
+	var sz := row.size
+	var now := Time.get_ticks_msec() * 0.001
+	var k := absf(sin(now * 4.0))
+	var bob := 10.0 * ui * k  # nudges towards the ring / drum
+	var cur_place: String = cue_sig.get_slice("/", 1)
+	var cur_idx: int = int(cue_sig.get_slice("/", 0).trim_prefix("lane").trim_prefix("pad"))
+	var pos := Vector2.ZERO
+	match cur_place:
+		"above":
+			var ring: Vector2 = rings[cur_idx]
+			pos = ring - Vector2(sz.x * 0.5, ring_r * 1.3 + sz.y - bob)
+		"side":
+			var ring: Vector2 = rings[cur_idx]
+			if cur_idx == 0:
+				pos = Vector2(ring.x - ring_r * 1.3 - sz.x + bob, ring.y - sz.y * 0.5)
+			else:
+				pos = Vector2(ring.x + ring_r * 1.3 - bob, ring.y - sz.y * 0.5)
+		"drum":
+			var d = p
+			if d.camera == null or cur_idx < 0 or cur_idx >= d.pads.size():
+				return
+			var at: Vector3 = d.rig.to_global(d.pads[cur_idx].position + Vector3(0.0, 0.46, 0.0))
+			if d.camera.is_position_behind(at):
+				return
+			var sp: Vector2 = d.camera.unproject_position(at)
+			pos = sp - Vector2(sz.x * 0.5, sz.y + bob * 0.5)
+	cue_box.position = pos
+	row.position = Vector2.ZERO
+	cue_box.modulate = Color(1.0 + 0.3 * k, 1.0 + 0.3 * k, 1.0 + 0.3 * k, cue_a * (0.8 + 0.2 * k))
+	var btn := row.get_node_or_null("Button") as Control
+	if btn != null:
+		btn.pivot_offset = btn.size * 0.5
+		btn.scale = Vector2.ONE * (1.0 + 0.15 * k)
+		cue_glow = pos + btn.position + btn.size * 0.5
+
+
+## The soft glow behind the cue's button (drawn under it).
+func _draw_cue_glow(ui: float) -> void:
+	if cue_box == null or not cue_box.visible:
+		return
+	var k := absf(sin(Time.get_ticks_msec() * 0.004))
+	var r := 34.0 * ui * (1.0 + 0.2 * k)
+	for i in 3:
+		draw_circle(cue_glow, r * (1.0 + 0.35 * i), Color(1.0, 0.95, 0.6, 0.16 * cue_a * (1.0 - 0.3 * i)))
 
 
 func _draw() -> void:
@@ -37,6 +224,7 @@ func _draw() -> void:
 		if p.index > 0:
 			_draw_highway(w, h, ui)
 		_draw_top_simple(w, ui)
+		_draw_cue_glow(ui)
 		return
 	if main.state == "menu":
 		_draw_top(w, ui)
@@ -176,6 +364,16 @@ func _draw_highway(w: float, h: float, ui: float) -> void:
 	# new middle lane in song 2's intro).
 	var pulse_lane := -1
 	var now := Time.get_ticks_msec() * 0.001
+	next_lane = -1
+	lane_busy = [false, false, false]
+	if simple and playing and p.judged.size() == g.g_t.size():
+		var k0 := maxi(0, int(p.next_idx) - 1)
+		while k0 < g.g_t.size():
+			if p.judged[k0] == 0 and float(g.g_t[k0]) > st - 0.1:
+				if float(g.g_t[k0]) - st < 1.0:
+					next_lane = g.g_lane[k0]
+				break
+			k0 += 1
 	if simple:
 		if main.state == "practice" and int(p.prac_step) < main.PRACTICE_LANES.size():
 			pulse_lane = main.PRACTICE_LANES[int(p.prac_step)]
@@ -195,6 +393,8 @@ func _draw_highway(w: float, h: float, ui: float) -> void:
 		var col := LANE_COLORS[lane]
 		var fl: float = p.lane_flash[lane]
 		var rr := 30.0 * ui
+		rings[lane] = pos
+		ring_r = rr
 		if lane == pulse_lane:
 			var pk := absf(sin(now * 5.0))
 			draw_arc(pos, rr * (1.25 + 0.25 * pk), 0.0, TAU, 28, Color(1, 1, 1, 0.5 + 0.5 * pk), 4.0 * ui)
@@ -203,6 +403,9 @@ func _draw_highway(w: float, h: float, ui: float) -> void:
 		var ht: float = p.hit_t[lane]
 		if simple and ht > 0.0:
 			draw_arc(pos, rr * (1.0 + (1.0 - ht) * 1.2), 0.0, TAU, 28, Color(1.0, 0.9, 0.4, ht), 6.0 * ui * ht)
+		if simple and _keyboard_only():
+			_draw_arrow(pos, lane, 14 * ui, Color(1, 1, 1, 0.95))  # their own key, not a pad letter
+			continue
 		_text(pos + Vector2(-rr, 9 * ui), LANE_BUTTONS[lane], int(26 * ui), Color(1, 1, 1, 0.95), HORIZONTAL_ALIGNMENT_CENTER, rr * 2.0)
 		if simple:
 			if int(p.key_set) != int(p.NO_KEYS):
@@ -234,6 +437,8 @@ func _draw_highway(w: float, h: float, ui: float) -> void:
 			i += 1
 			if j == 1 or j == 2 or j == 4 or dt < -0.25:
 				continue
+			if j == 0:
+				lane_busy[lane] = true
 			var u := dt / look
 			var z := 1.0 + u * (DEPTH - 1.0)
 			var pos := _proj(hit_y, h0, cx, bw, u, float(lane - 1))

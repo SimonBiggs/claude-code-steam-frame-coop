@@ -492,6 +492,7 @@ func _build_avatar(i: int) -> void:
 	tag.outline_size = 16
 	tag.modulate = color
 	tag.position = Vector3(0, 1.62, 0)
+	tag.layers = tag_layer(i)  # that player's own camera leaves it out (main._ensure_view)
 	root.add_child(tag)
 	root.visible = false
 	avatars.append(root)
@@ -580,6 +581,11 @@ func set_avatar_visible(i: int, on: bool) -> void:
 
 
 ## VR: name tags face the drummer behind them. Flat views: they turn to the camera.
+## The render layer of player i's name tag (layers 12-17, unused by anything else in this game).
+func tag_layer(i: int) -> int:
+	return 1 << (10 + i)
+
+
 func set_tags_for_vr(vr: bool) -> void:
 	for tag in tags:
 		tag.billboard = BaseMaterial3D.BILLBOARD_DISABLED if vr else BaseMaterial3D.BILLBOARD_ENABLED
