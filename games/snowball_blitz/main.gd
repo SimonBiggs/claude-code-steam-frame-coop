@@ -9,7 +9,7 @@ const VrText := preload("res://core/vr_text.gd")
 ## throwing snowballs - the VR player with real hands, the TV players with one press.
 ##  - PRACTICE first: the VR player gets glowing target snowmen close by, one at a time, and a
 ##    see-through ghost hand (ghost_hand.gd) that scoops snow and throws; each TV player gets one
-##    glowing target in front of them (and a one-line "PRESS RT!" until their first throw).
+##    glowing target in front of them, with a bobbing glowing arrow over it.
 ##  - One new thing per wave: 1 a few slow plain snowmen that don't throw, 2 they throw (harmless
 ##    splats; the pan lid still blocks), 3 sled riders, 4 snow bunnies, 5 giants (MEGA SNOWBALL drops),
 ##    6 balloon snowmen, 7 the SNOW KING, 8-9 a mix, 10 the YETI finale, then endless.
@@ -20,6 +20,14 @@ const VrText := preload("res://core/vr_text.gd")
 ##    lobs (a TV press just throws, with a gentle aim assist), shield snowmen, weather events, fort
 ##    upgrades, streaks, score / fort / warmth readouts, the minimap, popups, hint panels and awards.
 ##    Text: one short headline ("WAVE 2!"); game over restarts by itself.
+##  - No how-to words (visual teaching): each TV view has a pulsing glowing button in that player's
+##    own controls plus an icon under the crosshair (hud.gd): RT / CLICK / SPACE / ENTER + a snowball
+##    until they've thrown twice; STICK / MOUSE / an arrow key + an arrow, with a big glowing arrow
+##    round the crosshair, when every snowman is off screen (until they've turned to one twice); a
+##    pulsing bolt when their controller is unplugged. The ghost hand stops once the VR player has hit
+##    two practice targets; a MEGA SNOWBALL has a bobbing arrow over it. PAUSED has no sentence, and
+##    the small WAVE n at the top hides while the big headline shows. Each cue goes after two goes
+##    (cue_did / cue_learned).
 const SIMPLE_MODE := true
 const PropsScript := preload("res://games/snowball_blitz/props.gd")
 const GhostHandScript := preload("res://games/snowball_blitz/ghost_hand.gd")
@@ -1066,6 +1074,7 @@ func _on_target_down(s) -> void:
 	burst(s.global_position + Vector3.UP * 1.6, Color(1.0, 0.85, 0.35), 18, 0.08)
 	if not s.has_meta("tv"):
 		vr_hits += 1
+		cue_did(players[0], "throw")
 		vr_target_t = 0.8
 	print("Practice target down (VR %d)" % vr_hits)
 
@@ -1085,13 +1094,13 @@ func _end_practice() -> void:
 	print("Practice over (VR hits %d, %.0f s)" % [vr_hits, practice_t])
 
 
-## VR practice: the ghost hand scoops and throws at the current target until the first few hits.
+## VR practice: the ghost hand scoops and throws at the current target until the VR player has hit two.
 func _update_ghost_hand(delta: float) -> void:
 	var p = players[0]
 	if not p.vr:
 		return
 	var aim := Vector3.ZERO
-	if practice and vr_hits < VR_PRACTICE and not p.holding:
+	if practice and not cue_learned(p, "throw") and not p.holding:
 		for s in get_tree().get_nodes_in_group("snowmen"):
 			if s.kind == "target" and not s.has_meta("tv") and not s.dead:
 				aim = s.global_position + Vector3.UP * 1.0
@@ -1102,6 +1111,18 @@ func _update_ghost_hand(delta: float) -> void:
 		add_child(ghost_hand)
 		p._set_layers(ghost_hand, p.viewmodel_layer())
 	ghost_hand.show_demo(aim != Vector3.ZERO, p.xr_camera.global_position, aim, delta)
+
+
+## Simple mode picture cues: a player has done `key` once more ("throw", "turn"); its cue goes after two.
+func cue_did(p, key: String) -> void:
+	var done: Dictionary = p.get_meta("cue_done", {})
+	done[key] = int(done.get(key, 0)) + 1
+	p.set_meta("cue_done", done)
+
+
+func cue_learned(p, key: String) -> bool:
+	var done: Dictionary = p.get_meta("cue_done", {})
+	return int(done.get(key, 0)) >= 2
 
 
 ## Simple mode: the walls slowly snow back up by themselves (no packing rules to learn).
@@ -1968,7 +1989,10 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 
 
 func _set_pause_banner(paused: bool, who: String) -> void:
-	_show_center("PAUSED\n" + who if paused else "", 0.0, false)
+	if SIMPLE_MODE:
+		who = ""  # no explaining sentence: just PAUSED
+	var title := ("PAUSED\n" + who) if who != "" else "PAUSED"
+	_show_center(title if paused else "", 0.0, false)
 	_update_vr_center()
 
 
@@ -2142,6 +2166,8 @@ func _show_center(text: String, duration: float, broadcast: bool = true) -> void
 	if net and broadcast:
 		net.event("center", [text, duration])
 	center_label.text = text
+	if SIMPLE_MODE and text.strip_edges() != "":
+		info_label.visible = false  # one headline at a time (_update_hud shows it again)
 	center_label.add_theme_font_size_override("font_size", 58 if text.count("\n") < 6 else 36)
 	center_label.modulate.a = 1.0
 	if center_tween:
@@ -2158,6 +2184,8 @@ func _update_hud() -> void:
 		return
 	if SIMPLE_MODE:
 		info_label.text = "WAVE %d" % wave if wave > 0 and not practice else ""
+		# One headline at a time: the small WAVE n hides while the big one ("WAVE 3!") shows.
+		info_label.visible = not (center_label.modulate.a > 0.05 and center_label.text.strip_edges() != "")
 		return
 	var wave_text := ("WAVE %d / %d" % [wave, FINALE_WAVE]) if wave <= FINALE_WAVE and not director().won else ("WAVE %d  ENDLESS" % wave)
 	info_label.text = "%s      SCORE %d      FORT %d%%" % [wave_text, score, int(fort_fraction() * 100.0)]

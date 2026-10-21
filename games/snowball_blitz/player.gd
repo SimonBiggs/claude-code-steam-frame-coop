@@ -514,6 +514,8 @@ func _simple_throw(held: bool) -> void:
 	throw_cd = 0.45
 	throw_anim = 1.0
 	tv_throws += 1
+	if not vr:
+		main.cue_did(self, "throw")  # the throw cue (hud.gd) goes after two
 	var origin := _throw_origin()
 	var v := main.assist_aim(origin, _throw_velocity(0.55)) as Vector3
 	if mega:

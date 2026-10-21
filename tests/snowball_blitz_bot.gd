@@ -8,6 +8,12 @@ extends Node
 ## standing, BOT_VR=1 (local) makes P1 the real VR thrower with fake hands (squeeze, swing, release).
 ## SIMPLE_MODE (main.simple): no packing / weather / upgrades; the bot checks target practice ends, the
 ## waves bring one new kind at a time, and (BOT_VR) touches every prop and throws a snapped-off icicle.
+## Visual teaching (simple mode): records the picture cues each TV view shows (cue_throw, cue_turn,
+## cue_plug), the ones learned (cue_learned_*), the glowing arrows (target_arrow, turn_arrow,
+## mega_arrow), the VR ghost hand and that no view draws its own name tag; the TV players wait a moment
+## before their first throw, and look away from the snowmen a few times, so the cues show. Prints
+## "BOT: ERROR instruction text" if a headline (TV or VR) is anything but a short title / score word,
+## or a tip spot (a view's prompt line, the help line, the hint panel) shows any words.
 
 var main
 var t := 0.0
@@ -19,6 +25,12 @@ var join_t := 1.0
 var script_step := 0
 var vr_t := 0.0
 var vr_throws := 0
+var cues := {}  # simple mode: picture cues seen / learned
+const HEADLINES := "^(SNOWBALL BLITZ!|WAVE \\d+!|THE YETI!|SNOW KING!|HOORAY!|VICTORY!|OH NO!|PAUSED|HELLO TV!|PLAYER \\d+!|CONNECTED!|THE YETI IS DOWN!|THE SNOW KING MELTED!|Connecting to the VR player…)$"
+var headline_re := RegEx.create_from_string(HEADLINES)
+var turn_waits := 0  # simple mode: times a TV player looked away until the turn cue showed
+var turn_wait_t := -1.0
+var turn_gap := 0.0
 
 
 func _ready() -> void:
@@ -69,6 +81,8 @@ func _physics_process(delta: float) -> void:
 	if main.game_over and not has_meta("over_print"):
 		set_meta("over_print", true)
 		print("Bot: end screen:\n%s" % main.center_label.text)
+	if main.simple:
+		_note_cues()
 	_pad_test()
 	_check_restart()
 	if t >= next_report:
@@ -132,6 +146,14 @@ func _simple_script() -> void:
 		script_step = 2
 		main.players[0].mega = true
 		print("Bot: a mega snowball for P1")
+		if main.net.mode != "client":
+			main.drop_mega(Vector3(1.5, 0.0, 1.0))  # one on the snow too (its glowing arrow)
+	if not has_meta("pause_check") and t >= 30.0:
+		set_meta("pause_check", true)  # the pause banner is just PAUSED (no sentence)
+		main._set_pause_banner(true, "A TV player opened the menu")
+		var pt: String = main.center_label.text
+		print("Bot: pause banner %s" % ("PAUSED" if pt == "PAUSED" else "ERROR: " + pt.replace("\n", " / ")))
+		main._set_pause_banner(false, "")
 	var end_t: float = float(OS.get_environment("BOT_END")) if OS.has_environment("BOT_END") else 56.0
 	if script_step == 2 and t >= end_t:
 		script_step = 3
@@ -211,6 +233,11 @@ func _drive_vr(p, delta: float) -> void:
 
 
 func _report() -> void:
+	if main.simple and cues.size() != int(get_meta("cues_shown", -1)):
+		set_meta("cues_shown", cues.size())  # networked runs end on a timeout: print the cues as they come
+		var ks: Array = cues.keys()
+		ks.sort()
+		print("BOT CUES so far: mode=%s %s" % [main.net.mode, ",".join(PackedStringArray(ks))])
 	var ps: Array[String] = []
 	for p in main.players:
 		ps.append("P%d%s hp=%d%s%s" % [p.index + 1, "" if p.active else "(idle)", int(p.hp), " DOWN" if p.is_down else "",
@@ -272,6 +299,11 @@ func _throw_role(p, delta: float) -> void:
 			best = s
 	var c: float = cycle.get(p.index, 0.0) + delta
 	cycle[p.index] = c
+	if main.simple and main.practice and t < 4.0:
+		p.bot_throw = false  # a moment first: the throw cue (button + snowball) shows
+		return
+	if main.simple and best != null and _look_away(p, best):
+		return
 	if best == null:
 		p.bot_throw = false
 		return
@@ -284,6 +316,118 @@ func _throw_role(p, delta: float) -> void:
 	p.bot_throw = c < 1.0
 	if c > 1.15:
 		cycle[p.index] = 0.0
+
+
+## Simple mode: the first TV player looks away from the snowmen (up to three times, once the waves are on) until the
+## turn cue (button + arrow, and the big arrow round the crosshair) shows, then turns back to them.
+func _look_away(p, best) -> bool:
+	if turn_waits >= 3 or main.practice or main.wave < 1 or best.kind == "target":
+		return false
+	var first = null
+	for q in main.players:
+		if q.active and not q.vr and not q.ghost and not q.remote:
+			first = q
+			break
+	if p != first:
+		return false
+	var now := t
+	if turn_wait_t < 0.0:
+		if now < turn_gap:
+			return false
+		turn_wait_t = now
+	var to: Vector3 = best.global_position - p.global_position
+	p.yaw = atan2(to.x, to.z)  # facing straight away
+	p.pitch = 0.0
+	p.bot_throw = false
+	if str(p.get_meta("cue", "")) == "turn" or now - turn_wait_t > 8.0:
+		turn_waits += 1
+		turn_wait_t = -1.0
+		turn_gap = now + 6.0
+		print("Bot: P%d looked away until the turn cue showed (%s)" % [p.index + 1, p.get_meta("cue", "")])
+	return true
+
+
+## Visual teaching: picture cues instead of words; any instruction text in a tip spot is an error.
+func _note_cues() -> void:
+	if main.ghost_hand != null and main.ghost_hand.visible:
+		cues["ghost_hand"] = true
+	for s in get_tree().get_nodes_in_group("snowmen"):
+		if s.kind == "target" and s.glow != null and s.glow.visible and s.glow.get_node("Arrow").visible:
+			cues["target_arrow"] = true
+	for c in get_tree().get_nodes_in_group("cocoa"):
+		if c.kind == "mega" and c.arrow != null and c.arrow.visible:
+			cues["mega_arrow"] = true
+	if main.help_label.visible and main.help_label.text.strip_edges() != "":
+		_tip_error("TV help line", main.help_label.text)
+	var d = main.director()
+	if d.get("hint_label") != null and d.hint_label.visible and d.hint_label.text.strip_edges() != "":
+		_tip_error("hint panel", d.hint_label.text)
+	if main.center_label.modulate.a > 0.05:
+		_check_headline("TV headline", main.center_label.text)
+		if main.info_label.visible and main.info_label.text != "" and main.center_label.text.strip_edges() != "":
+			if not cues.has("two_headlines"):
+				print("BOT: ERROR two headlines at once: %s / %s" % [main.info_label.text, main.center_label.text])
+			cues["two_headlines"] = true
+	if main.vr_center != null and main.vr_center.modulate.a > 0.05:
+		_check_headline("VR headline", main.vr_center.text)
+	var it: String = main.info_label.text
+	if it != "" and not RegEx.create_from_string("^(WAVE \\d+|Syncing with the VR player…)$").search(it):
+		_tip_error("top line", it)
+	for p in main.players:
+		if not p.active or p.ghost or p.remote:
+			continue
+		if p.vr:
+			if p.wrist_label != null and p.wrist_label.text != "" and not p.wrist_label.text.begins_with("WAVE "):
+				_tip_error("VR wrist", p.wrist_label.text)
+			continue
+		if p.hud == null:
+			continue
+		if p.hud.prompt.text.strip_edges() != "":
+			_tip_error("P%d prompt line" % (p.index + 1), p.hud.prompt.text)
+		if p.hud.turn_a > 0.5:
+			cues["turn_arrow"] = true
+		if p.camera != null:
+			if int(p.camera.cull_mask) & int(p.body_layer()):
+				if not cues.has("own_tag_shown"):
+					print("BOT: ERROR P%d's view shows its own name tag" % (p.index + 1))
+				cues["own_tag_shown"] = true
+			else:
+				cues["own_tag_hidden"] = true
+		var key := str(p.get_meta("cue", ""))
+		var box = p.get_meta("cue_box") if p.has_meta("cue_box") else null
+		if key != "" and box != null and box.visible:
+			if not cues.has("cue_" + key):
+				print("BOT: P%d picture cue %s" % [p.index + 1, key])
+			cues["cue_" + key] = true
+	for p in main.players:
+		var done: Dictionary = p.get_meta("cue_done", {})
+		for k in done:
+			if int(done[k]) >= 2:
+				cues["cue_learned_" + str(k)] = true
+
+
+func _check_headline(who: String, text: String) -> void:
+	var tx := text.strip_edges()
+	if tx == "" or headline_re.search(tx) != null:
+		return
+	_tip_error(who, tx)
+
+
+func _tip_error(who: String, text: String) -> void:
+	if not cues.has("tip_text"):
+		print("BOT: ERROR instruction text on %s: %s" % [who, text.replace("\n", " / ")])
+	cues["tip_text"] = true
+
+
+func _exit_tree() -> void:
+	if main == null or not is_instance_valid(main) or not main.simple:
+		return
+	var ks: Array = cues.keys()
+	ks.sort()
+	print("BOT CUES: mode=%s %s" % [main.net.mode, ",".join(PackedStringArray(ks))])
+	for p in main.players:
+		if p.has_meta("cue_done"):
+			print("BOT CUES: P%d done=%s" % [p.index + 1, p.get_meta("cue_done")])
 
 
 ## Pitch that lands a full-charge throw at horizontal distance dist and height dy (numeric search).
