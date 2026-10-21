@@ -538,6 +538,7 @@ func move_cursor(dir: Vector2i) -> void:
 	col = clampi(col + dir.x, 0, 3)
 	row = clampi(row + dir.y, 0, 1)
 	cursor = row * 4 + col
+	main.cue_did(self, "move")  # simple mode: the move cue goes after two moves
 	main.sfx_local("zap", -18.0, 1.6)
 
 
@@ -555,6 +556,7 @@ func do_grab() -> void:
 		var it2 = held[0]
 		if main.chef_release(it2, sp, true):
 			held[0] = null
+			main.cue_did(self, "drop")
 
 
 func do_chop() -> void:
