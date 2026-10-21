@@ -19,6 +19,16 @@ extends Node3D
 ## the VR giant a pair of ghost hands grips the handles and tilts while a ghost marble rolls to the ring.
 ## Toys round the table react to the giant's touch (props.gd). Solo VR: the giant gets their own
 ## marble to tilt home until TV players join. Almost no text. Everything cut stays behind the flag.
+## VISUAL TEACHING (no how-to words at all): low in each TV view a pulsing glowing button in that
+## player's own controls plus a picture (cue.gd, UiKit glyph / icon): STICK / an arrow key / W + an
+## arrow + the glowing practice ring or the goal hole (roll there); RS / MOUSE / Q E / an arrow key +
+## an arrow, with a big glowing green arrow at the view's edge, when the goal is off screen (turn to
+## it); for a split-screen giant STICK / W A S D + an arrow + a rocking table (tilt it that way); a
+## pulsing bolt while a controller is unplugged. Each goes once that player has done it twice
+## (cue_did / cue_learned); a seat's cues reset when its player leaves. On the board: a glowing arrow
+## lies from the start to the practice ring, one bobs over the goal (first two levels) and, for a VR
+## giant, one bobs over the handle until they've grabbed it twice (plus the ghost hands). A spare
+## controller sees a pulsing A + plus + person; a full table / someone leaving is just a soft sound.
 
 const VrText := preload("res://core/vr_text.gd")
 const SfxScript := preload("res://core/sfx.gd")
@@ -31,6 +41,8 @@ const TilterScript := preload("res://games/marble_maze/tilter.gd")
 const JoinListenerScript := preload("res://games/marble_maze/join_listener.gd")
 const PropsScript := preload("res://games/marble_maze/props.gd")
 const GhostHandScript := preload("res://games/marble_maze/ghost_hand.gd")
+const CueScript := preload("res://games/marble_maze/cue.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 const SIMPLE_MODE := true
 const SIMPLE_INTRO_TIME := 2.2
@@ -136,6 +148,13 @@ var practiced := false
 var ring_node: MeshInstance3D
 var ring_hit := {}  # marble index -> true once it rolled through the practice ring
 var sparkle_t := 0.0
+var join_cue: Control  # simple mode: pulsing A + plus + person (a spare controller can join)
+var tilt_arrow: Node3D  # simple mode: lies on the board from the start to the practice ring
+var goal_arrow: Node3D  # simple mode: bobs over the goal (first two levels)
+var grab_arrow: Node3D  # simple mode, VR giant: bobs over the right handle until grabbed twice
+var goal_clears := 0  # levels this machine has seen cleared (the goal arrow goes after two)
+var cue_state := ""
+var grab_was := false
 var solo := false  # host with no TV machine: P2 is the giant's own marble (rolled by tilting only)
 
 
@@ -180,7 +199,7 @@ func _setup_game(mode: String) -> void:
 		_show_center("MARBLE MAZE\nWaiting for the TV players to join…", 0.0)
 	elif mode == "client":
 		state = "wait"
-		_show_center("CONNECTED", 1.5, false)
+		_show_center("HELLO!" if simple else "CONNECTED", 1.5, false)
 	else:
 		_start_level(1)
 
@@ -725,6 +744,14 @@ func _ensure_view(p) -> void:
 	l.position = Vector2(36, 10)
 	p.hud = hud
 	p.hud_label = l
+	if simple:  # no how-to words: a glowing edge arrow and a picture cue low in the view
+		var edge := CueScript.EdgeArrow.new()
+		edge.cam = cam
+		hud_layer.add_child(edge)
+		p.set_meta("edge", edge)
+		var cue := CueScript.new()
+		hud_layer.add_child(cue)
+		p.set_meta("cue", cue)
 
 
 ## TV grid: 1 full, 2 side by side, 3-4 as 2x2, 5-6 as 3x2; smaller views render at lower resolution.
@@ -817,6 +844,8 @@ func _on_joy_changed(device: int, connected: bool) -> void:
 			return  # unassigned: press A to join
 		pick.joy = device
 		joy_owner[device] = pick.index
+		if simple and pick.pad_lost_t >= 0.0 and pick.active:
+			sound("pad", -6.0, 1.3)  # no words: the bolt goes and a happy blip
 		pick.pad_lost_t = -1.0
 		if not pick.active and pick.has_meta("left_by_pad"):
 			_request_join(pick)
@@ -833,7 +862,10 @@ func _on_joy_changed(device: int, connected: bool) -> void:
 		p.set_meta("last_joy", device)
 		if idx >= 2 and p.active:
 			p.pad_lost_t = 0.0
-			_show_center("P%d: controller disconnected" % (idx + 1), 2.0, false)
+			if simple:
+				sound("boop", -8.0, 0.6)  # no sentence: a pulsing bolt in their view shows it
+			else:
+				_show_center("P%d: controller disconnected" % (idx + 1), 2.0, false)
 
 
 ## Called by the join listener for every input event: A on a controller nobody owns joins a marble.
@@ -865,7 +897,10 @@ func _next_free_index() -> int:
 func _join_slot(device: int):
 	var idx := _next_free_index()
 	if idx < 0:
-		_show_center("All %d marbles are taken!" % (players.size() - 1), 1.5, false)
+		if simple:
+			sound("boop", -10.0, 0.7)  # no sentence: a soft "no room" boop
+		else:
+			_show_center("All %d marbles are taken!" % (players.size() - 1), 1.5, false)
 		return null
 	var p = players[idx]
 	if device >= 0:
@@ -908,7 +943,10 @@ func _leave(p) -> void:
 	elif p.active:
 		p.set_active(false)
 		on_player_activity_changed(p)
-		_show_center("PLAYER %d LEFT" % (p.index + 1), 1.5)
+		if simple:
+			sound("pop", -10.0, 0.6)  # no sentence: a soft puff
+		else:
+			_show_center("PLAYER %d LEFT" % (p.index + 1), 1.5)
 	_save_party()
 
 
@@ -981,6 +1019,8 @@ func _check_join(delta: float) -> void:
 
 
 func on_player_activity_changed(p) -> void:
+	if not p.active:
+		p.remove_meta("cue_done")  # whoever takes this seat next sees the picture cues again
 	if p.active and is_local(p):
 		_ensure_view(p)
 	if p.active:
@@ -1033,6 +1073,9 @@ func _process(delta: float) -> void:
 	_update_extras(delta)
 	if simple:
 		_update_simple(delta)
+		_update_cues(delta)
+		_update_join_cue()
+		_update_board_arrows()
 	var cont := _continue_pressed()
 	var cont_edge := cont and not cont_was
 	cont_was = cont
@@ -1713,6 +1756,267 @@ func on_marble_home(p) -> void:
 		sound("combo", 0.0, 1.4, true)
 
 
+# --- Simple mode: visual teaching (picture cues instead of words) ----------------------
+
+## Player p has done `key` once more ("roll", "turn", "tilt", "grab"); its cue goes once done twice.
+## Kept on the machine that draws p's view (or holds the VR giant).
+func cue_did(p, key: String) -> void:
+	if p == null:
+		return
+	var done: Dictionary = p.get_meta("cue_done", {})
+	done[key] = int(done.get(key, 0)) + 1
+	p.set_meta("cue_done", done)
+
+
+func cue_learned(p, key: String) -> bool:
+	if p == null:
+		return false
+	var done: Dictionary = p.get_meta("cue_done", {})
+	return int(done.get(key, 0)) >= 2
+
+
+## Is a world point inside this view's camera (with a margin)?
+func _in_view(cam: Camera3D, pos: Vector3) -> bool:
+	if cam == null or cam.is_position_behind(pos):
+		return false
+	var vs: Vector2 = cam.get_viewport().get_visible_rect().size
+	var sp := cam.unproject_position(pos)
+	var mg := vs * 0.1
+	return sp.x > mg.x and sp.y > mg.y and sp.x < vs.x - mg.x and sp.y < vs.y - mg.y
+
+
+## Where the marbles are heading right now: the practice ring, or the goal (board-local).
+func _cue_target() -> Vector2:
+	if state == "practice" and not board.starts.is_empty():
+		return board.practice_spot()
+	return board.goal
+
+
+## The way to tilt the table (as seen by the split-screen giant): "up", "down", "left" or "right",
+## from the marbles still rolling towards where they're heading (in a straight line).
+func _tilt_dir() -> String:
+	var from := Vector2.ZERO
+	var n := 0
+	for p in active_marbles():
+		if not p.home:
+			from += Vector2(p.lp.x, p.lp.z)
+			n += 1
+	if n == 0:
+		return ""
+	var d := _cue_target() - from / n
+	if d.length() < 0.05:
+		return ""
+	if absf(d.x) >= absf(d.y):
+		return "right" if d.x > 0.0 else "left"
+	return "down" if d.y > 0.0 else "up"
+
+
+## [key, dir] for p's picture cue: "plug", "turn", "roll", "tilt" or "".
+func _cue_now(p) -> Array:
+	var edge = p.get_meta("edge") if p.has_meta("edge") else null
+	if edge != null:
+		edge.on = false
+	if not p.active or get_tree().paused or (net.mode == "client" and not synced):
+		return ["", ""]
+	if p.pad_lost_t >= 0.0:
+		return ["plug", ""]
+	if state != "play" and state != "practice":
+		return ["", ""]
+	if p.index == 0:
+		var td := _tilt_dir()
+		if td == "" or cue_learned(p, "tilt"):
+			return ["", ""]
+		return ["tilt", td]
+	if p.home or p.falling or p.camera == null:
+		return ["", ""]
+	var aim := board_world(_cue_target(), 0.03)
+	if not _in_view(p.camera, aim):
+		if edge != null:
+			edge.on = true  # where the goal is, even once turning is learned
+			edge.target = aim
+		if cue_learned(p, "turn"):
+			return ["", ""]
+		var loc: Vector3 = p.camera.global_basis.inverse() * (aim - p.camera.global_position)
+		return ["turn", "right" if loc.x > 0.0 else "left"]
+	return ["", ""] if cue_learned(p, "roll") else ["roll", "up"]
+
+
+## p's own button: the stick, an arrow key, W / A / S / D, the mouse, Q / E or the right stick.
+func _cue_button(p, k: String, dir: String, sc: float) -> Control:
+	if p.index == 0:  # the split-screen giant: WASD or a stick tilts
+		if p.joy >= 0:
+			return UiKit.glyph("STICK", sc)
+		return UiKit.glyph({"up": "W", "down": "S", "left": "A", "right": "D"}.get(dir, "W"), sc)
+	if k == "turn":
+		if p.joy >= 0:
+			return UiKit.glyph("RS", sc)
+		if p.key_set == 1:
+			if p.mouse_look:
+				return UiKit.glyph("MOUSE", sc)
+			return UiKit.glyph("E" if dir == "right" else "Q", sc)
+		if p.key_set == 0:
+			return CueScript.arrow_key(dir, sc)  # rolling that way swings the camera round
+		return UiKit.glyph("RS", sc)
+	if p.joy >= 0 or p.key_set == MarbleScript.NO_KEYS:
+		return UiKit.glyph("STICK", sc)
+	if p.key_set == 0:
+		return CueScript.arrow_key("up", sc)
+	return UiKit.glyph("W", sc)
+
+
+## Every frame (both machines): what each local player has done, and the picture cue in their view.
+func _update_cues(delta: float) -> void:
+	if state != cue_state:
+		if state == "clear":
+			goal_clears += 1
+		cue_state = state
+	if players.is_empty():
+		return
+	var tl = players[0]
+	if tl.vr and not tl.ghost:
+		if tl.grabbing and not grab_was:
+			cue_did(tl, "grab")  # grabbed a handle
+		grab_was = tl.grabbing
+	for p in players:
+		if not p.has_meta("cue"):
+			continue
+		if p.index == 0:
+			var amt: float = p.want_tilt.length()
+			var tilting: bool = p.get_meta("tilting", false)
+			if amt > 0.4 and not tilting and (state == "play" or state == "practice"):
+				cue_did(p, "tilt")  # pushed the table over
+			p.set_meta("tilting", amt > 0.4 or (tilting and amt > 0.15))
+		else:
+			var in_ring := false
+			if state == "practice" and p.active and not p.falling:
+				in_ring = Vector2(p.lp.x, p.lp.z).distance_to(board.practice_spot()) < 0.8 * board.CELL
+			if in_ring and not p.get_meta("ringed", false):
+				cue_did(p, "roll")  # rolled into the practice ring
+			p.set_meta("ringed", in_ring or (state == "practice" and p.get_meta("ringed", false)))
+			if p.home and not p.get_meta("was_home", false) and p.active:
+				cue_did(p, "roll")  # rolled into the goal
+			p.set_meta("was_home", p.home)
+		var cue = p.get_meta("cue")
+		var was: String = p.get_meta("cue_key", "")
+		var kd := _cue_now(p)
+		var k: String = kd[0]
+		var dir: String = kd[1]
+		if was == "turn" and k != "turn" and k != "plug" and k != "":
+			cue_did(p, "turn")  # turned until the goal came into view
+		p.set_meta("cue_key", k)
+		cue.set_cue(k, "%s|%d|%d|%s|%s" % [dir, int(p.joy >= 0), p.key_set, str(p.get("mouse_look")), state],
+			func(sc: float) -> Array:
+				match k:
+					"plug":
+						return [UiKit.icon("bolt", Color(1.0, 0.8, 0.3), 64.0 * sc)]
+					"turn":
+						return [_cue_button(p, k, dir, sc), UiKit.icon("arrow_" + dir, Color(0.6, 1.0, 0.65), 48.0 * sc)]
+					"roll":
+						var pic: Control = CueScript.ring_icon(46.0 * sc) if state == "practice" else CueScript.goal_icon(46.0 * sc)
+						return [_cue_button(p, k, dir, sc), UiKit.icon("arrow_up", Color(1.0, 0.9, 0.45), 44.0 * sc), pic]
+					"tilt":
+						var row: Array = [_cue_button(p, k, dir, sc), UiKit.icon("arrow_" + dir, Color(1.0, 0.9, 0.45), 44.0 * sc)]
+						if dir == "left" or dir == "right":
+							row.append(CueScript.tilt_icon(56.0 * sc, 1.0 if dir == "right" else -1.0))
+						row.append(CueScript.ring_icon(40.0 * sc) if state == "practice" else CueScript.goal_icon(40.0 * sc))
+						return row
+				return [], delta)
+
+
+## A pulsing A + plus + person in the corner while a spare controller could join (no words).
+func _update_join_cue() -> void:
+	if net.mode == "host":
+		return
+	var spare := false
+	if _next_free_index() >= 0 and not get_tree().paused:
+		for dev in Input.get_connected_joypads():
+			if not joy_owner.has(dev):
+				spare = true
+	if join_cue == null:
+		join_cue = HBoxContainer.new()
+		join_cue.name = "JoinCue"
+		join_cue.alignment = BoxContainer.ALIGNMENT_CENTER
+		join_cue.add_theme_constant_override("separation", 12)
+		join_cue.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		join_cue.add_child(UiKit.glyph("A", 1.4))
+		join_cue.add_child(UiKit.icon("plus", Color(1.0, 0.9, 0.6), 34.0))
+		join_cue.add_child(UiKit.icon("person", Color(1.0, 0.9, 0.6), 58.0))
+		for c in join_cue.get_children():
+			(c as Control).size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		help_label.get_parent().add_child(join_cue)
+		join_cue.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+		join_cue.offset_left = -200
+		join_cue.offset_top = -74
+		join_cue.offset_right = -16
+		join_cue.offset_bottom = -10
+		var tw := join_cue.create_tween().set_loops()
+		tw.tween_property(join_cue, "modulate:a", 0.5, 0.7)
+		tw.tween_property(join_cue, "modulate:a", 1.0, 0.7)
+	join_cue.visible = spare
+
+
+## A glowing 3D arrow (cone head + shaft) pointing along -Z, origin at the middle.
+func _make_arrow(col: Color, length: float) -> Node3D:
+	var root := Node3D.new()
+	var mat := make_material(col, 2.4)
+	var hl := length * 0.45
+	var head := MeshInstance3D.new()
+	head.mesh = cyl_mesh(0.0, length * 0.28, hl, 12)
+	head.rotation.x = -PI / 2.0
+	head.position.z = -length * 0.5 + hl * 0.5
+	var shaft := MeshInstance3D.new()
+	shaft.mesh = cyl_mesh(length * 0.1, length * 0.1, length - hl, 8)
+	shaft.rotation.x = -PI / 2.0
+	shaft.position.z = -length * 0.5 + hl + (length - hl) * 0.5
+	for m in [head, shaft]:
+		m.material_override = mat
+		m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		root.add_child(m)
+	return root
+
+
+## Both machines: the glowing arrows on the board (start -> practice ring, over the goal, over the
+## handle for a VR giant who hasn't grabbed it twice yet).
+func _update_board_arrows() -> void:
+	if board == null or board.starts.is_empty():
+		return
+	if tilt_arrow == null:
+		tilt_arrow = _make_arrow(Color(1.0, 0.9, 0.4), 0.1)
+		tilt_arrow.name = "TiltArrow"
+		board.add_child(tilt_arrow)
+		goal_arrow = _make_arrow(Color(0.45, 1.0, 0.55), 0.07)
+		goal_arrow.name = "GoalArrow"
+		board.add_child(goal_arrow)
+		grab_arrow = _make_arrow(Color(1.0, 0.8, 0.3), 0.08)
+		grab_arrow.name = "GrabArrow"
+		add_child(grab_arrow)
+	var paused := get_tree().paused
+	var ph := absf(sin(board.t * 4.0))
+	# Which way to tilt / roll: lies on the floor from the start towards the practice ring, sliding along.
+	var from: Vector2 = board.starts[0]
+	var spot: Vector2 = board.practice_spot()
+	var d := spot - from
+	tilt_arrow.visible = state == "practice" and d.length() > 0.01 and not paused
+	if tilt_arrow.visible:
+		var dn := d.normalized()
+		var mid := from + d * (0.45 + 0.12 * fmod(board.t * 0.8, 1.0))
+		tilt_arrow.position = Vector3(mid.x, 0.02, mid.y)
+		tilt_arrow.rotation = Vector3(0.0, atan2(-dn.x, -dn.y), 0.0)
+		tilt_arrow.scale = Vector3.ONE * clampf(d.length() * 0.5 / 0.1, 0.8, 2.5)
+	# Where the goal is: bobs over it, pointing down (the first two levels this machine sees).
+	goal_arrow.visible = state == "play" and goal_clears < 2 and home_count() < active_marbles().size() and not paused
+	if goal_arrow.visible:
+		goal_arrow.position = Vector3(board.goal.x, 0.1 + 0.03 * ph, board.goal.y)
+		goal_arrow.rotation = Vector3(-PI / 2.0, board.t * 2.0, 0.0)
+	# VR giant: grab here (the right handle), until they've grabbed it twice.
+	var tl = players[0] if not players.is_empty() else null
+	grab_arrow.visible = (tl != null and tl.vr and not tl.ghost and not tl.grabbing and not cue_learned(tl, "grab")
+		and (state == "play" or state == "practice") and not paused)
+	if grab_arrow.visible:
+		grab_arrow.global_position = board.handle_world(1) + Vector3(0.0, 0.1 + 0.03 * ph, 0.0)
+		grab_arrow.global_rotation = Vector3(-PI / 2.0, board.t * 2.0, 0.0)
+
+
 # --- Networked co-op (see docs/GAME_DEV_GUIDE.md) ------------------------------------
 
 func on_client_joined() -> void:
@@ -1794,7 +2098,9 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 
 
 func _set_pause_banner(paused: bool, who: String) -> void:
-	_show_center("PAUSED\n" + who if paused else "", 0.0, false)
+	if simple:
+		who = ""  # just PAUSED (no sentence)
+	_show_center(("PAUSED" + ("\n" + who if who != "" else "")) if paused else "", 0.0, false)
 	if vr_center != null and paused:
 		VrText.snap(vr_center)
 
@@ -1943,7 +2249,7 @@ func _build_hud() -> void:
 	help_label.offset_bottom = -12
 	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	if simple:
-		help_label.text = "Stick: roll   ·   A: join"
+		help_label.visible = false  # no controls line: picture cues and the join cue instead
 		return
 	help_label.text = "Marble: left stick / arrows roll · right stick (Q/E, mouse on the TV) turns the camera · Start / Esc menu\n" \
 		+ "Split screen P1 tilts the board: WASD / mouse / left stick, Space or A levels it  ·  More marbles: press A on another controller"
@@ -1981,14 +2287,12 @@ func hud_text(p) -> String:
 ## SIMPLE_MODE: one short line at most (most of the time none).
 func _simple_hud(p) -> String:
 	if state == "clear":
-		return "HOORAY!"
+		return ""  # the big HOORAY! says it (no second copy in each view)
 	if p.index == 0:
-		return "Tilt the table!" if state == "practice" else ""
+		return ""  # the tilt cue low in the view shows it
 	if p.home:
 		return "HOME!"
-	if state == "practice" and not ring_hit.has(p.index):
-		return "Roll into the ring!"
-	return ""
+	return ""  # the roll cue low in the view shows it
 
 
 ## A short "what do I do now?" line for one marble.
