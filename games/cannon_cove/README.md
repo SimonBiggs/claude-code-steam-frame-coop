@@ -11,9 +11,14 @@ Pirate co-op: one VR gunner on a Steam Frame plus 1–6 deckhands on the TV (spl
 - Touch everything (`props.gd`): beside every cannon a bell (DING), a rope (swings), a barrel (wobbles,
   deckhands bump it too) with two spare cannonballs; squeeze to pick up a ball or the barrel and throw it
   overboard (SPLASH), at a boarder (BONK) or a tentacle. Poke Polly and she squawks and jumps.
-- Text: one short headline ("WAVE 3!", "BOARDERS!", "NOW! FIRE!", "HOORAY!"); VR also "LET GO!" while the
-  ring is on the target for the first shots; the wrist shows "WAVE n". TV: "WAVE n" and one short prompt
-  ("PRESS A", "HOLD A", "RT SHOOT"). The water shows as the sea rising up the hull (TV: a bar, no number);
+- Text: one short headline ("WAVE 3!", "BOARDERS!", "NOW! FIRE!", "HOORAY!"); the wrist shows "WAVE n";
+  TV: "WAVE n" (hidden while the headline says it). No how-to words: each TV view shows a pulsing picture
+  cue in the player's own controls (A/E/SHIFT + cannonball at the pile, + drop by a leak (hold), RT/CLICK/ENTER
+  + skull for boarders and tentacles; the flat gunner RT/SPACE/ENTER + star, LB/RB (Q/E, , .) + arrows when
+  empty) that fades once they've done it twice. VR: the ghost hand opens its fingers over the handle when
+  the ring is on the target (was "LET GO!"). A practice miss shows a glowing arrow towards the target
+  (was "TOO SHORT!" / "TOO FAR!"). The join card is a pulsing A + person; PAUSED has no sentence; no
+  "LOADED!" word in the gunner's face; no words over the Kraken. The water shows as the sea rising up the hull (TV: a bar, no number);
   the cannon's rack shows its balls (a pulsing red one when empty).
 - Off: treasure ship, supply barrels, streak / double-sink / chain bonuses, gold numbers, parrot speech
   bubbles, crew awards. Game over ("OH NO!") sets sail again by itself after 7 s.

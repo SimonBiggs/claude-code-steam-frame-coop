@@ -2,7 +2,9 @@ extends Node3D
 ## Simple mode, VR practice: a see-through glowing hand that shows the gunner what to do, instead of
 ## hint text. It loops: reach to the cannon's glowing handle, squeeze, swing towards the target, let go.
 ## Only the gunner's headset sees it (main puts it on their view-model layer). main calls show_demo()
-## every frame; it fades in after the gunner has been idle for a moment.
+## every frame; it fades in after the gunner has been idle for a moment. show_release() is the other
+## lesson: while the gunner holds the handle with the ring on the target, the hand hovers just above
+## theirs, squeezed, and opens its fingers again and again ("let go now"), instead of the words.
 
 const LOOP := 3.0
 
@@ -12,6 +14,7 @@ var thumb: Node3D
 var mat: StandardMaterial3D
 var t := 0.0
 var idle_t := 0.0
+var release_t := -1.0  # show_release's loop time (-1: off)
 
 
 func _ready() -> void:
@@ -109,3 +112,28 @@ func show_demo(want: bool, c, aim: Vector3, delta: float) -> void:
 	for f in fingers:
 		f.rotation.x = -grip * 1.3
 	thumb.rotation.x = -grip * 0.7
+
+
+## want: the gunner is holding c's handle and should let go now. Squeezed, then the fingers spring open,
+## over and over, just above (and a little behind) their own hand so it doesn't hide it.
+func show_release(want: bool, c, delta: float) -> void:
+	if not want:
+		if release_t >= 0.0:
+			release_t = -1.0
+			visible = false
+		return
+	if release_t < 0.0:
+		release_t = 0.0
+		idle_t = 0.0
+		t = 0.0
+	release_t = fmod(release_t + delta, 1.2)
+	var open := clampf((release_t - 0.45) / 0.15, 0.0, 1.0)  # squeezed ... pop!
+	var alpha := 0.6 if release_t < 0.95 else 0.6 * maxf(0.0, 1.0 - (release_t - 0.95) / 0.25)
+	var out: Vector3 = c.outboard
+	var p: Vector3 = c.handle_world() + Vector3.UP * (0.12 + 0.04 * open) - out * 0.05
+	visible = true
+	mat.albedo_color.a = alpha
+	hand.global_transform = Transform3D(Basis.looking_at(out, Vector3.UP), p)
+	for f in fingers:
+		f.rotation.x = -(1.0 - open) * 1.3 + open * 0.25  # fingers flick open (a little past flat)
+	thumb.rotation.x = -(1.0 - open) * 0.7

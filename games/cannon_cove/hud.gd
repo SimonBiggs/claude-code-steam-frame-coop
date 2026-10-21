@@ -1,5 +1,6 @@
 extends Control
-## One flat player's HUD: crosshair, what to do next, the hold's water level and the cannons' ammo.
+## One flat player's HUD: crosshair, what to do next (simple mode: a picture cue, main.update_cue), the
+## hold's water level and the cannons' ammo.
 
 var player
 var main
@@ -29,6 +30,12 @@ func _process(delta: float) -> void:
 	_fit_to_view()
 	prompt.size = Vector2(size.x - 80.0, 120.0)
 	prompt.position = Vector2(40.0, size.y - 230.0)
+	if main.simple:
+		# Simple mode: no words, a picture cue (glowing button + icon) inside the empty prompt label.
+		prompt.text = ""
+		main.update_cue(player, prompt, delta)
+		queue_redraw()
+		return
 	var text: String = main.player_prompt(player)
 	prompt.text = text
 	prompt.add_theme_color_override("font_color", Color(1.0, 0.92, 0.55) if not text.begins_with("!") else Color(1.0, 0.5, 0.4))
