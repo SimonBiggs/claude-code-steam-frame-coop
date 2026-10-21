@@ -650,7 +650,9 @@ func _roll(pid: int, practice: bool = false) -> void:
 
 func _add_die(v: int) -> void:
 	dice_values.append(v)
-	var d: Dictionary = main.net.state_get("dice", {})
+	# a copy: changing the stored dict in place made state_set see "no change", so the rolled number
+	# never reached the dice blocks (or the TV machine)
+	var d: Dictionary = (main.net.state_get("dice", {}) as Dictionary).duplicate()
 	d["values"] = dice_values.duplicate()
 	main.net.state_set("dice", d)
 	main.fx("sfx", ["dice", -2.0])
