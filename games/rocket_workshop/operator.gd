@@ -33,7 +33,7 @@ var pointer_pos := Vector3.ZERO
 var pointer_held := false
 var held_t := 0.0
 var cursor_ball: MeshInstance3D
-var bot_hand := {}  # tests: {pos: Vector3 (world), grip: bool} replaces the real hands
+var bot_hand := {}  # tests: {pos: Vector3 (world), grip: bool, vr: bool} replaces the real hands (vr: a touch hand)
 var recenter_t := 0.8
 var recentered := false
 var fit_head := 0.0
@@ -52,7 +52,7 @@ func _ready() -> void:
 ## Hands for the panel: id, world position, grip, and whether it's a screen pointer.
 func panel_hands() -> Array:
 	if not bot_hand.is_empty():
-		return [{"id": "bot", "pos": bot_hand.pos, "grip": bot_hand.grip, "pointer": true}]
+		return [{"id": "bot", "pos": bot_hand.pos, "grip": bot_hand.grip, "pointer": not bot_hand.get("vr", false)}]
 	if vr:
 		return [{"id": "l", "pos": hand_l.global_transform * TIP, "grip": false, "pointer": false},
 			{"id": "r", "pos": hand_r.global_transform * TIP, "grip": hand_r.get_float("trigger") > 0.6, "pointer": false}]
@@ -81,7 +81,7 @@ func attach_xr(origin: XROrigin3D, cam: XRCamera3D, left: XRController3D, right:
 	xr_camera = cam
 	hand_l = left
 	hand_r = right
-	cam.cull_mask = 0xFFFFF & ~main.MANUAL_LAYER
+	cam.cull_mask = 0xFFFFF & ~main.MANUAL_LAYER & ~main.TAG_LAYERS
 	cam.near = 0.03
 	for h in [left, right]:
 		var mitten := MeshInstance3D.new()
@@ -160,7 +160,7 @@ func _recenter() -> void:
 
 func attach_camera(cam: Camera3D) -> void:
 	camera = cam
-	camera.cull_mask = 0xFFFFF & ~main.MANUAL_LAYER
+	camera.cull_mask = 0xFFFFF & ~main.MANUAL_LAYER & ~main.TAG_LAYERS
 	camera.keep_aspect = Camera3D.KEEP_WIDTH
 	camera.fov = 84.0  # wide enough to see both cockpit wings
 	var top: float = main.panel.top

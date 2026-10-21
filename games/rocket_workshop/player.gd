@@ -61,7 +61,12 @@ func body_layer() -> int:
 
 
 func camera_cull_mask() -> int:
-	return 0xFFFFF & ~body_layer() & ~main.PANEL_LAYER
+	return 0xFFFFF & ~body_layer() & ~main.PANEL_LAYER & ~tag_layer()  # never our own name tag
+
+
+## This crew member's name tag layer (other crew see it; this view and the pilot don't).
+func tag_layer() -> int:
+	return main.TAG_LAYER_0 << index
 
 
 func _ready() -> void:
@@ -104,7 +109,7 @@ func _ready() -> void:
 	tag.position.y = 2.0
 	pivot.add_child(tag)
 	main.set_layers(pivot, body_layer())
-	main.set_layers(tag, main.MANUAL_LAYER)  # name tags are for the crew
+	main.set_layers(tag, tag_layer())  # name tags are for the (other) crew
 
 
 func _arm(side: float, m: Material) -> Node3D:

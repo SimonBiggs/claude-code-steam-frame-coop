@@ -27,7 +27,16 @@ extends Node3D
 ##    A wrong press just makes a silly honk and a puff of smoke.
 ##  - Everything round the pilot reacts to touch (props.gd): a toy alien, a globe, a rubber chicken,
 ##    a fan, a window shutter and bobbleheads.
-##  - Text: VR only gets "3 2 1" and "LIFT OFF!"; the TV gets one short line.
+##  - Text: VR only gets "3 2 1" and "LIFT OFF!"; the TV gets no how-to words at all (visual teaching):
+##    low in each crew view a pulsing glowing button in that player's own controls plus a picture
+##    (cue.gd, UiKit glyph / icon): STICK / W / an up-arrow key + an arrow + a blueprint board (walk to
+##    a board with a bouncing arrow), STICK / MOUSE / Q E / an arrow key + an arrow with a big glowing
+##    arrow at the view's edge (turn to the board), a talking face + the pilot (tell the pilot what the
+##    board shows), a talking face + the lever (shout PULL THE LEVER), a pulsing bolt while a controller
+##    is unplugged. Each goes once that player has done it twice (cue_did / cue_learned). The pilot gets
+##    a glowing arrow over the practice button and over the lever (plus the ghost hand). A spare
+##    controller sees a pulsing A + plus + person; joining says PLAYER 3!, the TV crew arriving HELLO!,
+##    and a full crew / someone leaving / a lost controller is just a soft sound (and the bolt).
 
 const P := preload("res://games/rocket_workshop/puzzles.gd")
 const WorldScript := preload("res://games/rocket_workshop/world.gd")
@@ -46,10 +55,14 @@ const PauseMenuScript := preload("res://core/pause_menu.gd")
 const VrText := preload("res://core/vr_text.gd")
 const PropsScript := preload("res://games/rocket_workshop/props.gd")
 const GhostHandScript := preload("res://games/rocket_workshop/ghost_hand.gd")
+const CueScript := preload("res://games/rocket_workshop/cue.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 const SIMPLE_MODE := true
 
 const MANUAL_LAYER := 512  # blueprint content: drawn for the TV crew only
 const PANEL_LAYER := 1024  # desk controls: drawn for the pilot only
+const TAG_LAYER_0 := 4096  # crew name tags: P(i+1)'s tag is on TAG_LAYER_0 << i (never in its own view)
+const TAG_LAYERS := 0xFF000  # every name tag layer (the pilot doesn't draw them)
 const PAD_POS := Vector3(0, 0, -11.0)
 const HATCH_POS := Vector3(0, 0, -8.0)
 const LAUNCH_TIME := 11.5
@@ -167,6 +180,8 @@ var simple := SIMPLE_MODE  # other scripts read main.simple
 var props: Node3D  # simple mode: touchable toys round the pilot
 var ghost_hand: Node3D  # simple mode: shows the pilot how (pilot only)
 var oops_t := 0.0
+var join_cue: Control  # simple mode: pulsing A + plus + person (a spare controller can join)
+var pilot_arrow: MeshInstance3D  # simple mode: a glowing arrow over the practice button / the lever
 
 
 func _ready() -> void:
@@ -1426,12 +1441,7 @@ func launch_cam() -> Dictionary:
 func crew_hint(p) -> String:
 	if net.mode == "client" and not synced:
 		return ""
-	if SIMPLE_MODE:  # one short line at most; the bouncing arrows and pictures do the rest
-		match phase:
-			"intro", "work":
-				return "Tell the pilot what you see!"
-			"ready":
-				return "PULL THE LEVER!"
+	if SIMPLE_MODE:  # no words: the picture cue low in the view (_update_crew_cues) shows what to do
 		return ""
 	match phase:
 		"wait":
@@ -1537,6 +1547,8 @@ func _process(delta: float) -> void:
 	if SIMPLE_MODE:
 		oops_t -= delta
 		_update_simple(delta)
+		_update_crew_cues(delta)
+		_update_join_cue()
 
 
 ## Simple mode (host / local): the practice glow, the ghost hand and the pilot's own blueprint.
@@ -1563,6 +1575,10 @@ func _update_simple(delta: float) -> void:
 	panel.glow_key = glow
 	if ghost_hand != null:
 		ghost_hand.play(demo, delta)
+	var point := glow
+	if phase == "ready" and launched < 2:
+		point = "lever"
+	_update_pilot_arrow(point)
 	var solo := false
 	if phase == "intro" or phase == "work" or phase == "ready":
 		solo = (net.mode == "host" and not net.connected) or (net.mode == "local" and crew_count() == 0)
@@ -1594,6 +1610,206 @@ func _unhandled_input(event: InputEvent) -> void:
 	if k and k.pressed and not k.echo and k.physical_keycode == KEY_F11:
 		var w := get_window()
 		w.mode = Window.MODE_WINDOWED if w.mode == Window.MODE_FULLSCREEN else Window.MODE_FULLSCREEN
+
+
+# --- Simple mode: visual teaching (picture cues instead of words) --------------------
+
+## Player p has done `key` once more ("walk", "turn", "tell", "lever"); its cue goes once done twice.
+## Kept on the machine that draws p's view.
+func cue_did(p, key: String) -> void:
+	if p == null:
+		return
+	var done: Dictionary = p.get_meta("cue_done", {})
+	done[key] = int(done.get(key, 0)) + 1
+	p.set_meta("cue_done", done)
+
+
+func cue_learned(p, key: String) -> bool:
+	if p == null:
+		return false
+	var done: Dictionary = p.get_meta("cue_done", {})
+	return int(done.get(key, 0)) >= 2
+
+
+## The blueprint board p should go to (the nearest one still to do), or null; and the type of the
+## board p is standing in front of ("" if none).
+func _crew_board(p) -> Array:
+	var pos: Vector3 = p.global_position
+	var best = null
+	var best_d := INF
+	var at := ""
+	for m in modules:
+		if m.done or not manual.boards.has(m.type):
+			continue
+		var root: Node3D = manual.boards[m.type].root
+		var to: Vector3 = pos - root.global_position
+		to.y = 0.0
+		var ahead := to.dot(root.global_basis.z)
+		if ahead > 0.3 and ahead < 6.5 and absf(to.dot(root.global_basis.x)) < 2.5:
+			at = m.type
+		var d := to.length()
+		if d < best_d:
+			best_d = d
+			best = root
+	return [best, at]
+
+
+## Is a world point inside this crew member's view (with a margin)?
+func _in_view(p, pos: Vector3) -> bool:
+	var cam: Camera3D = p.camera
+	if cam == null or cam.is_position_behind(pos):
+		return false
+	var vs: Vector2 = cam.get_viewport().get_visible_rect().size
+	var sp := cam.unproject_position(pos)
+	var mg := vs * 0.12
+	return sp.x > mg.x and sp.y > mg.y and sp.x < vs.x - mg.x and sp.y < vs.y - mg.y
+
+
+## [key, dir] for p's picture cue: "plug", "turn", "walk", "tell", "lever" or "".
+func _crew_cue_now(p) -> Array:
+	var edge = p.get_meta("edge") if p.has_meta("edge") else null
+	if edge != null:
+		edge.on = false
+	if not p.active or game_over or get_tree().paused or (net.mode == "client" and not synced):
+		return ["", ""]
+	if p.pad_lost_t >= 0.0:
+		return ["plug", ""]
+	if phase == "ready":
+		return ["", ""] if cue_learned(p, "lever") else ["lever", ""]
+	if phase != "work" and phase != "intro":
+		return ["", ""]
+	var ba := _crew_board(p)
+	var at: String = ba[1]
+	if at != "":
+		return ["", ""] if cue_learned(p, "tell") else ["tell", ""]
+	if ba[0] == null:
+		return ["", ""]
+	var root: Node3D = ba[0]
+	var aim: Vector3 = root.global_position + Vector3(0, 0.6, 0)
+	if not _in_view(p, aim):
+		if cue_learned(p, "turn"):
+			return ["", ""]
+		if edge != null:
+			edge.on = true
+			edge.target = aim
+		var loc: Vector3 = p.camera.global_basis.inverse() * (aim - p.camera.global_position)
+		return ["turn", "right" if loc.x > 0.0 else "left"]
+	return ["", ""] if cue_learned(p, "walk") else ["walk", "up"]
+
+
+## p's own button for a move / turn cue: the stick, the mouse, W / Q E, or an arrow key.
+func _cue_button(p, k: String, dir: String, sc: float) -> Control:
+	if p.joy >= 0 or p.key_set == PlayerScript.NO_KEYS:
+		return UiKit.glyph("STICK", sc)
+	if p.key_set == 1:
+		return CueScript.arrow_key(dir, sc)
+	if k == "turn":
+		if p.mouse_look:
+			return UiKit.glyph("MOUSE", sc)
+		return UiKit.glyph("E" if dir == "right" else "Q", sc)
+	return UiKit.glyph("W", sc)
+
+
+## Every frame (both machines): the picture cue low in each local crew view, and what has been done.
+func _update_crew_cues(delta: float) -> void:
+	for p in players:
+		if p.index == 0 or not p.has_meta("cue"):
+			continue
+		var cue = p.get_meta("cue")
+		var was: String = p.get_meta("cue_key", "")
+		var was_at: String = p.get_meta("at_board", "")
+		var ba := _crew_board(p) if p.active and (phase == "work" or phase == "intro" or phase == "ready") else [null, ""]
+		var at: String = ba[1]
+		if at != "" and was_at == "":
+			cue_did(p, "walk")  # walked up to a board
+		if was_at != "" and module(was_at).get("done", false):
+			cue_did(p, "tell")  # the pilot did what this board showed while p stood there
+			at = ""
+		p.set_meta("at_board", at)
+		var lp: String = p.get_meta("cue_phase", "")
+		if lp == "ready" and phase == "launch" and p.active:
+			cue_did(p, "lever")
+		p.set_meta("cue_phase", phase)
+		var kd := _crew_cue_now(p)
+		var k: String = kd[0]
+		var dir: String = kd[1]
+		if was == "turn" and k != "turn" and k != "plug" and k != "":
+			cue_did(p, "turn")  # turned until the board came into view
+		p.set_meta("cue_key", k)
+		cue.set_cue(k, "%s|%d|%d|%s" % [dir, int(p.joy >= 0), p.key_set, p.mouse_look], func(sc: float) -> Array:
+			match k:
+				"plug":
+					return [UiKit.icon("bolt", Color(1.0, 0.8, 0.3), 64.0 * sc)]
+				"turn":
+					return [_cue_button(p, k, dir, sc), UiKit.icon("arrow_" + dir, Color(1.0, 0.9, 0.45), 48.0 * sc)]
+				"walk":
+					return [_cue_button(p, k, dir, sc), UiKit.icon("arrow_up", Color(1.0, 0.9, 0.45), 44.0 * sc),
+						CueScript.board_icon(46.0 * sc)]
+				"tell":
+					return [CueScript.talk_icon(50.0 * sc), UiKit.icon("person", PLAYER_COLORS[0], 54.0 * sc)]
+				"lever":
+					return [CueScript.talk_icon(50.0 * sc), CueScript.lever_icon(58.0 * sc)]
+			return [], delta)
+
+
+## A pulsing A + plus + person in the corner while a spare controller could join (no words).
+func _update_join_cue() -> void:
+	if net.mode == "host":
+		return
+	var spare := false
+	if not game_over and _next_free_index() >= 0:
+		for dev in Input.get_connected_joypads():
+			if not joy_owner.has(dev):
+				spare = true
+	if join_cue == null:
+		join_cue = HBoxContainer.new()
+		join_cue.name = "JoinCue"
+		join_cue.alignment = BoxContainer.ALIGNMENT_CENTER
+		join_cue.add_theme_constant_override("separation", 12)
+		join_cue.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		join_cue.add_child(UiKit.glyph("A", 1.4))
+		join_cue.add_child(UiKit.icon("plus", Color(1.0, 0.9, 0.6), 34.0))
+		join_cue.add_child(UiKit.icon("person", Color(1.0, 0.9, 0.6), 58.0))
+		for c in join_cue.get_children():
+			(c as Control).size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		center_label.get_parent().add_child(join_cue)
+		join_cue.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+		join_cue.offset_left = -200
+		join_cue.offset_top = -74
+		join_cue.offset_right = -16
+		join_cue.offset_bottom = -10
+		var tw := join_cue.create_tween().set_loops()
+		tw.tween_property(join_cue, "modulate:a", 0.5, 0.7)
+		tw.tween_property(join_cue, "modulate:a", 1.0, 0.7)
+	join_cue.visible = spare
+
+
+## The pilot's glowing arrow: bobs over the desk control `key` ("" = hidden), pointing down at it.
+## Only the pilot sees it (PANEL_LAYER).
+func _update_pilot_arrow(key: String) -> void:
+	if key == "" or panel == null:
+		if pilot_arrow != null:
+			pilot_arrow.visible = false
+		return
+	if pilot_arrow == null:
+		pilot_arrow = MeshInstance3D.new()  # the head (a cone, tip down) with a shaft above it
+		pilot_arrow.name = "PilotArrow"
+		var mat := make_material(Color(1.0, 0.75, 0.2), 2.2)
+		pilot_arrow.mesh = cyl_mesh(0.05, 0.0, 0.08, 12)
+		pilot_arrow.material_override = mat
+		pilot_arrow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var shaft := MeshInstance3D.new()
+		shaft.mesh = cyl_mesh(0.018, 0.018, 0.08, 8)
+		shaft.material_override = mat
+		shaft.position.y = 0.08
+		shaft.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		pilot_arrow.add_child(shaft)
+		add_child(pilot_arrow)
+		set_layers(pilot_arrow, PANEL_LAYER)
+	var bob := absf(sin(status_t * 4.0))
+	pilot_arrow.visible = true
+	pilot_arrow.global_position = panel.control_world(key, 0.02) + Vector3.UP * (0.09 + 0.04 * bob)
+	pilot_arrow.global_basis = Basis(Vector3.UP, status_t * 2.0)
 
 
 # --- Players and views -------------------------------------------------------
@@ -1723,6 +1939,15 @@ func _ensure_view(p) -> void:
 		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		p.hud_label = l
+		if SIMPLE_MODE:  # no hint line: a glowing edge arrow and a picture cue instead
+			l.visible = false
+			var edge := CueScript.EdgeArrow.new()
+			edge.cam = cam
+			hud_layer.add_child(edge)
+			p.set_meta("edge", edge)
+			var cue := CueScript.new()
+			hud_layer.add_child(cue)
+			p.set_meta("cue", cue)
 
 
 ## TV grid: 1 full, 2 side by side, 3-4 as 2x2, 5-6 as 3x2; smaller views render at lower resolution.
@@ -1855,6 +2080,8 @@ func _on_joy_changed(device: int, connected: bool) -> void:
 			return  # unassigned: press A to join
 		pick.joy = device
 		joy_owner[device] = pick.index
+		if SIMPLE_MODE and pick.pad_lost_t >= 0.0 and pick.active:
+			local_sound("pop", -8.0, 1.3)  # no words: the bolt goes and a happy blip
 		pick.pad_lost_t = -1.0
 		if not pick.active and pick.has_meta("left_by_pad"):
 			_request_join(pick)
@@ -1871,7 +2098,10 @@ func _on_joy_changed(device: int, connected: bool) -> void:
 		p.set_meta("last_joy", device)
 		if idx >= 2 and p.active and p.key_set == PlayerScript.NO_KEYS:
 			p.pad_lost_t = 0.0
-			_show_center("P%d: controller disconnected" % (idx + 1), 2.0, false)
+			if SIMPLE_MODE:
+				local_sound("boop", -8.0, 0.6)  # no sentence: a pulsing bolt in their view shows it
+			else:
+				_show_center("P%d: controller disconnected" % (idx + 1), 2.0, false)
 
 
 ## Called by the join listener for every input event: A on a controller nobody owns joins the crew.
@@ -1903,7 +2133,10 @@ func _next_free_index() -> int:
 func _join_slot(device: int):
 	var idx := _next_free_index()
 	if idx < 0:
-		_show_center("All %d crew spots are taken!" % (players.size() - 1), 1.5, false)
+		if SIMPLE_MODE:
+			local_sound("boop", -10.0, 0.7)  # no sentence: a soft "no room" boop
+		else:
+			_show_center("All %d crew spots are taken!" % (players.size() - 1), 1.5, false)
 		return null
 	var p = players[idx]
 	if device >= 0:
@@ -1932,7 +2165,7 @@ func _activate(p) -> void:
 	p.net_started = false
 	if phase == "work" or phase == "ready" or phase == "intro":
 		time_left += 10.0  # a new crew member gets a little welcome time
-	_show_center("PLAYER %d JOINED THE CREW!" % (p.index + 1), 1.5)
+	_show_center(("PLAYER %d!" if SIMPLE_MODE else "PLAYER %d JOINED THE CREW!") % (p.index + 1), 1.5)
 	sound("pop", -2.0, 1.4)
 	on_player_activity_changed(p)
 
@@ -1946,7 +2179,7 @@ func _leave(p) -> void:
 	elif p.active:
 		p.set_active(false)
 		on_player_activity_changed(p)
-		_show_center("PLAYER %d LEFT" % (p.index + 1), 1.5)
+		_left_note(p.index)
 	_save_party()
 
 
@@ -2032,7 +2265,17 @@ func _update_lost_pads(delta: float) -> void:
 				_leave(p)
 
 
+## Someone left the crew: a soft puff in simple mode (no sentence), "PLAYER 3 LEFT" otherwise.
+func _left_note(index: int) -> void:
+	if SIMPLE_MODE:
+		sound("pop", -10.0, 0.6)
+	else:
+		_show_center("PLAYER %d LEFT" % (index + 1), 1.5)
+
+
 func on_player_activity_changed(p) -> void:
+	if not p.active:
+		p.remove_meta("cue_done")  # whoever takes this seat next sees the picture cues again
 	if p.active and is_local(p):
 		_ensure_view(p)
 	if p.active:
@@ -2044,7 +2287,7 @@ func on_player_activity_changed(p) -> void:
 # --- Networked co-op (see docs/GAME_DEV_GUIDE.md) ----------------------------
 
 func on_client_joined() -> void:
-	_show_center("THE TV CREW JOINED!", 1.5)
+	_show_center("HELLO!" if SIMPLE_MODE else "THE TV CREW JOINED!", 1.5)
 
 
 func on_client_left() -> void:
@@ -2072,7 +2315,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 		"leave":
 			if p.active:
 				p.set_active(false)
-				_show_center("PLAYER %d LEFT" % (index + 1), 1.5)
+				_left_note(index)
 		"restart":
 			if game_over:
 				get_tree().reload_current_scene()
