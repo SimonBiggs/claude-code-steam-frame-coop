@@ -7,6 +7,10 @@ extends Node
 ## controller button press, then gets unplugged at 22 s and plugged back in at 28 s).
 ## Simple mode (main.simple): the giant does the practice throws first (the training goblin is a plain
 ## goblin to it), and between waves pulls up a tree and throws it (once per bot run per hand type).
+## Visual teaching (simple mode): records the picture cues each knight's view shows (cue_move,
+## cue_sword, ...), the ones learned (cue_learned_*), the knights' goblin arrows and the Giant's ghost
+## hand, and prints "BOT: ERROR instruction text" if a hint label, the TV help panel or the VR hint
+## panel shows any words. BOT_VR=1 is the same as GT_FAKE_VR=1 (main reads it).
 
 const W := preload("res://games/giants_table/world.gd")
 
@@ -24,6 +28,7 @@ var fake_pad := 13  # device id for the simulated drop-in controller
 var pad_phase := 0
 var seen := {}
 var smacks := 0
+var cues := {}  # simple mode: picture cues seen / learned
 
 
 func _ready() -> void:
@@ -43,6 +48,8 @@ func _physics_process(delta: float) -> void:
 		main.knight_hurt(main.players[1], 999.0, Vector3.ZERO)
 	_party(delta)
 	_note_features()
+	if main.simple:
+		_note_cues()
 	if OS.has_environment("GT_LOSE") and t > 20.0 and not main.game_over and main.net.mode != "client" and not has_meta("lost"):
 		set_meta("lost", true)
 		print("Bot: forcing a game over (tests the heroes screen)")
@@ -108,6 +115,39 @@ func _note_features() -> void:
 			elif k == "village grew":
 				extra = ": %d building(s)" % main.built
 			print("Bot: seen %s (t=%.0f, wave %d)%s" % [k, t, main.wave, extra])
+
+
+## Visual teaching: picture cues instead of words; any instruction text in a tip spot is an error.
+func _note_cues() -> void:
+	if main.practice != null and main.practice.hand != null and main.practice.hand.visible:
+		cues["ghost_hand_umbrella" if main.rain_t > 0.0 else "ghost_hand"] = true
+	if main.practice != null and main.practice.arrow.visible:
+		cues["practice_arrow"] = true
+	_check_tip("TV help", main.help_label.text if main.help_panel.visible else "")
+	if main.vr_hint != null and main.vr_hint.visible:
+		_check_tip("VR hint", main.vr_hint.text)
+	for k in main.knights():
+		if k.hint_label == null:
+			continue
+		_check_tip("P%d" % (k.index + 1), k.hint_label.text)
+		var box = k.hint_label.get_node_or_null("Cue")
+		if box != null and box.visible and str(k.get_meta("cue", "")) != "":
+			cues["cue_" + str(k.get_meta("cue", ""))] = true
+		var arrow = k.get_meta("cue_arrow") if k.has_meta("cue_arrow") else null
+		if arrow != null and is_instance_valid(arrow) and arrow.visible:
+			cues["goblin_arrow"] = true
+		var done: Dictionary = k.get_meta("cue_done", {})
+		for key in done:
+			if int(done[key]) >= 2:
+				cues["cue_learned_" + str(key)] = true
+
+
+func _check_tip(who: String, text: String) -> void:
+	if text == "":
+		return
+	if not cues.has("tip_text"):
+		print("BOT: ERROR instruction text on %s: %s" % [who, text.replace("\n", " / ")])
+	cues["tip_text"] = true
 
 
 ## BOT_PLAYERS: bring in extra TV knights one by one, and exercise unplug / replug.
@@ -404,6 +444,13 @@ func _count_visuals(n: Node) -> int:
 func _exit_tree() -> void:
 	if main != null:
 		print("FINAL mode=%s wave=%d score=%d embers=%d built=%d smacks=%d kills=%s seen=%s" % [main.net.mode, main.wave, main.score, main.embers, main.built, smacks, main.kills, seen.keys()])
+		if main.simple:
+			var ks: Array = cues.keys()
+			ks.sort()
+			print("BOT CUES: mode=%s %s" % [main.net.mode, ",".join(PackedStringArray(ks))])
+			for k in main.knights():
+				if k.has_meta("cue_done"):
+					print("BOT CUES: P%d done=%s" % [k.index + 1, k.get_meta("cue_done")])
 		if main.scenery != null:
 			print("Scenery: %d touches, trees pulled up now: %s" % [main.scenery.touches, main.scenery.gone_list()])
 		print("Visual instances in the scene: %d" % _count_visuals(main))

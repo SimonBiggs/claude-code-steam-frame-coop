@@ -358,7 +358,7 @@ func _process(delta: float) -> void:
 			lines += "\nCarrying an ember: take it to the campfire!"
 		hud_label.text = lines
 	if hint_label and main.simple:
-		hint_label.text = "Back up soon!" if is_down else ""  # simple mode: one short line at most
+		hint_label.text = ""  # simple mode: no words (main shows a pulsing heart cue while you're down)
 	elif hint_label:
 		if is_down:
 			hint_label.text = "YOU'RE DOWN!\nA friend can stand next to you to revive you,\nor the Giant can carry you to the campfire"
