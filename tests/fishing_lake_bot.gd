@@ -172,6 +172,26 @@ func _watch() -> void:
 			seen["kind_%d" % f.kind] = true
 	if main.journal_text != "":
 		seen["journal"] = true
+	# Visual teaching (simple mode): picture cues instead of words.
+	if main.get("practice_arrow") != null and main.practice_arrow.visible:
+		seen["practice_arrow"] = true
+	if main.ghost_demo != null and main.ghost_demo.visible and main.ghost_demo.get_node_or_null("Hand") != null:
+		seen["ghost_hand"] = true
+	for p in main.players:
+		if p.tip_label == null:
+			continue
+		if main.SIMPLE_MODE and p.tip_label.text != "":
+			if not seen.has("tip_text"):
+				print("BOT: ERROR instruction text on P%d: %s" % [p.index + 1, p.tip_label.text])
+			seen["tip_text"] = true
+		var cue = p.tip_label.get_node_or_null("Cue")
+		if cue != null and cue.visible:
+			seen["cue_" + str(p.get_meta("cue", ""))] = true
+	for p in main.players:
+		var done: Dictionary = p.get_meta("cue_done", {})
+		for k in done:
+			if int(done[k]) >= 2:
+				seen["cue_learned_" + str(k)] = true
 
 
 func _join_players(mode: String) -> void:
