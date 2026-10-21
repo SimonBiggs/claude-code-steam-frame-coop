@@ -14,6 +14,10 @@ extends Node
 ## then races on the next track each time; checks the boxes stay away in race 1 (only instant ZOOM /
 ## STAR effects later), no drift turbos and no rocket starts, and that a ghost-hands demo appears on
 ## the VR wheel when the fake hands let go.
+## Visual teaching (simple mode): records the picture cues each TV view shows (cue_go, cue_steer, ...),
+## the ones learned (cue_learned_*), the VR ghost hands squeezing the trigger and the wrong-way arrow,
+## and prints "BOT: ERROR instruction text" if a hint label / VR hint panel shows anything but the
+## short FINISH! / LAP n headlines. BOT_VR=1 is the same as BOT_FAKE_VR=1.
 
 const FAKE_PAD := 40
 
@@ -43,6 +47,7 @@ var practice_rings := 0
 var boxes_in_race1 := false
 var ghost_seen := false
 var max_vr_lines := 0  # simple mode: the most lines of text on any VR label
+var seen := {}  # simple mode: picture cues seen / learned
 
 
 func _ready() -> void:
@@ -79,7 +84,7 @@ func _process(delta: float) -> void:
 			print("BOT: short races: 1 lap, finish at %.0f%%" % (frac * 100.0))
 			if mode == "local" and not main.SIMPLE_MODE:
 				main._start_race(main.cup_track())
-	if OS.has_environment("BOT_FAKE_VR") and mode == "local" and main.cockpit == null:
+	if (OS.has_environment("BOT_FAKE_VR") or OS.has_environment("BOT_VR")) and mode == "local" and main.cockpit == null:
 		main.debug_fake_vr()
 	if not joined and t > (3.0 if mode == "client" else 1.0):
 		joined = true
@@ -187,6 +192,8 @@ func _drive_fake_vr(delta: float) -> void:
 		c.fake_stick.x = clampf(want_steer, -1.0, 1.0)  # hands off: the left stick steers
 	if main.state == "countdown":
 		c.fake_trigger = 1.0 if main.lights >= 3 else 0.0  # rocket start timing
+	if main.SIMPLE_MODE and main.state == "wait" and main.practice_t < 4.0:
+		c.fake_trigger = 0.0  # a new driver who doesn't know the trigger yet: the ghost hand shows it
 	a_t += delta
 	c.fake_a = (k.item != "" or k.charge >= 1.0) and fmod(a_t, 0.5) < 0.1 and a_t > 1.0
 	if main.state == "race" and phase != "off":
@@ -202,6 +209,12 @@ func _drive_fake_vr(delta: float) -> void:
 
 
 func _simple_checks() -> void:
+	# Pretend the humans are driving the wrong way for a moment in race 1 (the red arrow cues).
+	if main.state == "race" and main.round_n == 1 and main.race_t > 6.0 and main.race_t < 7.0:
+		for p in main.players:
+			if p.active and p.is_local() and not p.finished:
+				p.wrong_t = 2.0
+				p.wrong_dir = 1.0 if p.index % 2 == 0 else -1.0
 	if main.state == "wait" and main.practice_gate >= 0:
 		practice_seen = true
 		practice_rings = maxi(practice_rings, main.practice_gate)
@@ -214,6 +227,34 @@ func _simple_checks() -> void:
 		for l in [c.panel_l, c.panel_r, c.panel_hint, main.vr_center]:
 			if l != null and l.visible and str(l.text) != "":
 				max_vr_lines = maxi(max_vr_lines, str(l.text).split("\n").size())
+		if c.panel_hint.visible:
+			_check_tip("VR", str(c.panel_hint.text))
+		if c.ghost_r != null and c.ghost_r.visible and c.ghost_r.fingers[0].rotation.x > -1.15:
+			seen["ghost_trigger"] = true
+		if c.wrong_arrow != null and c.wrong_arrow.visible:
+			seen["wrong_arrow"] = true
+	# Visual teaching: picture cues instead of words.
+	for p in main.players:
+		if p.hint_label == null or not p.active:
+			continue
+		_check_tip("P%d" % (p.index + 1), str(p.hint_label.text))
+		var cue = p.hint_label.get_node_or_null("Cue")
+		if cue != null and cue.visible:
+			seen["cue_" + str(p.get_meta("cue", ""))] = true
+	for p in main.players:
+		var done: Dictionary = p.get_meta("cue_done", {})
+		for k in done:
+			if int(done[k]) >= 2:
+				seen["cue_learned_" + str(k)] = true
+
+
+## Only the short headlines may show as text in a hint spot: anything else is a how-to sentence.
+func _check_tip(who: String, text: String) -> void:
+	if text == "" or text == "FINISH!" or (text.begins_with("LAP ") and text.length() <= 6 and who == "VR"):
+		return
+	if not seen.has("tip_text"):
+		print("BOT: ERROR instruction text on %s: %s" % [who, text])
+	seen["tip_text"] = true
 
 
 func _exit_tree() -> void:
@@ -223,6 +264,9 @@ func _exit_tree() -> void:
 		print("BOT SIMPLE: mode=%s practice_seen=%s rings=%d boxes_in_race1=%s box_effects=%s ghost_hands=%s max_vr_lines=%d" % [
 			main.net.mode, practice_seen, practice_rings, boxes_in_race1, ",".join(PackedStringArray(main.items_given.keys())),
 			ghost_seen, max_vr_lines])
+		var ks: Array = seen.keys()
+		ks.sort()
+		print("BOT CUES: mode=%s %s" % [main.net.mode, ",".join(PackedStringArray(ks))])
 	print("BOT SUMMARY: mode=%s races=%d cups=%d items_seen=%s turbos=%d fake_vr_err=%.3f max_dv=%.1f max_seat_dy=%.1f" % [
 		main.net.mode, races, cups_done, ",".join(PackedStringArray(items_seen.keys())), _turbos(),
 		fake_err / maxf(1.0, float(fake_n)), max_dv, max_dy])
