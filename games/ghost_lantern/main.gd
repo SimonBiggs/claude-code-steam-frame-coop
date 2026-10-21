@@ -11,7 +11,7 @@ const VrText := preload("res://core/vr_text.gd")
 ##  - PRACTICE first: the lantern-bearer gets a sleepy ghost floating in front (it only shows in the
 ##    light) and, in VR, a see-through ghost hand (ghost_hand.gd) that sweeps a lantern onto it; light
 ##    it until it wakes, giggles and pops, then a second one. Each TV player gets one glowing ghost in
-##    front of them to vacuum (a one-line "HOLD RT!" until they do).
+##    front of them to vacuum (a pulsing RT + ghost picture until they have caught two).
 ##  - Gentle nights, one new thing at a time: 1 three slow plain ghosts, 2 + little fast sprites,
 ##    3 + ghosts in witch hats, 4 + the golden ghost, 5 the GHOST KING (crown; vacuum him together),
 ##    6 a mix and the sunrise, then more nights. Nothing ever goes wrong: no stealing, no spooking, no
@@ -22,6 +22,16 @@ const VrText := preload("res://core/vr_text.gd")
 ##  - Off: photo stealing (and the photo / LAST CHANCE rules), courage / spooked / cheering up, the
 ##    snuffer and shy ghosts, storms / parties / treats, the bell scaring ghosts (it just rings), score,
 ##    stats, popups, hint panels, awards and best scores. Text: one short headline ("NIGHT 2").
+##  - No how-to words (visual teaching): low in each TV view a pulsing glowing button in that player's
+##    own controls plus a picture (hud.gd, cue.gd, UiKit glyph / icon): RT / SPACE / ENTER + a ghost
+##    (hold to vacuum the lit ghost in front), STICK / MOUSE / an arrow key + an arrow (and a glowing
+##    arrow at the view's edge) when the nearest lit ghost is off screen, MOUSE / STICK + a lantern beam
+##    + a ghost for a split-screen lantern-bearer in practice, and a pulsing bolt while a controller is
+##    unplugged. Each goes once done twice (cue_did / cue_learned; catches are mirrored to the TV in
+##    tv_catches). In practice a soft glowing arrow bobs above the sleepy ghost (only the lantern-bearer
+##    sees it) until it has been lit; the VR ghost hand shows the sweep. The "press A to join" line is a
+##    pulsing A + a person; PAUSED, PLAYER 3!, NIGHT 2, HOORAY!, GHOST KING!, GOOD MORNING! are the only
+##    words (no pause / unplug / left / seats sentences: a soft sound instead).
 const SIMPLE_MODE := true
 const PropsScript := preload("res://games/ghost_lantern/props.gd")
 const GhostHandScript := preload("res://games/ghost_lantern/ghost_hand.gd")
@@ -37,6 +47,7 @@ const NetScript := preload("res://core/net.gd")
 const MusicScript := preload("res://core/music.gd")
 const JoinInputScript := preload("res://games/ghost_lantern/join_input.gd")
 const DirectorScript := preload("res://games/ghost_lantern/director.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 ## Survive night 6 to see the sunrise (then bonus nights). Nights 3 and 6 bring the GHOST KING.
 const FINAL_NIGHT := 6
@@ -185,7 +196,10 @@ var practice_t := 0.0
 var vr_woken := 0  # practice ghosts the lantern-bearer has woken up
 var vr_ghost_t := 1.5
 var tv_given := {}  # player index -> true once their glowing practice ghost appeared
-var tv_caught := {}  # player index -> true once they vacuumed a ghost (their "HOLD RT!" line goes)
+var tv_caught := {}  # player index -> true once they vacuumed a ghost
+var tv_catches := {}  # player index -> ghosts vacuumed (mirrored: the picture cue goes after two)
+var practice_arrow: MeshInstance3D  # simple mode: a glowing arrow above the sleepy practice ghost
+var join_cue: Control  # simple mode: pulsing A + a person (a spare controller can join)
 
 
 func _ready() -> void:
@@ -228,6 +242,7 @@ func _setup_game(mode: String) -> void:
 	_restore_party()
 	if SIMPLE_MODE:
 		_show_center("GHOST LANTERN", 3.0, false)
+		help_label.text = ""
 	elif mode == "host":
 		_show_center("GHOST LANTERN\nWaiting for the TV players to join…", 0.0)
 	elif mode == "client":
@@ -615,7 +630,7 @@ func _build_ghost_mirror() -> void:
 	bubble.size = Vector2(240, 240)
 	bubble.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_KEEP_SIZE, 24)
 	var tag := Label.new()
-	tag.text = "P1 LANTERN (VR)"
+	tag.text = "P1" if SIMPLE_MODE else "P1 LANTERN (VR)"
 	tag.add_theme_font_size_override("font_size", 20)
 	tag.add_theme_constant_override("outline_size", 6)
 	tag.add_theme_color_override("font_outline_color", Color.BLACK)
@@ -653,8 +668,21 @@ func _auto_bind_pad(device: int) -> int:
 			players[w].joy = device
 			pad_wait.erase(w)
 			print("Pad %d reconnected: P%d is back" % [device, w + 1])
-			_show_center("P%d IS BACK!" % (w + 1), 1.2, false)
+			players[w].remove_meta("lost_pad_t")
+			if SIMPLE_MODE:
+				local_sound("pickup", -8.0, 1.3)  # no words: the bolt goes and a happy blip
+			else:
+				_show_center("P%d IS BACK!" % (w + 1), 1.2, false)
 			return w
+	if SIMPLE_MODE:
+		# A keyboard player who lost their pad gets it back (their bolt goes).
+		for p in players:
+			if p.has_meta("lost_pad_t") and p.joy < 0 and _has_local_view(p):
+				p.joy = device
+				p.remove_meta("lost_pad_t")
+				print("Pad %d reconnected: P%d has it again" % [device, p.index + 1])
+				local_sound("pickup", -8.0, 1.3)
+				return p.index
 	if players[1].joy < 0:
 		players[1].joy = device
 		return 1
@@ -679,10 +707,40 @@ func _on_joy_changed(device: int, connected: bool) -> void:
 	var p = players[i]
 	p.joy = -1
 	p.vac_on = false
+	if SIMPLE_MODE and p.active:
+		p.set_meta("lost_pad_t", PAD_WAIT_TIME)  # a pulsing bolt in their view (hud.gd)
+		print("Pad %d disconnected: P%d shows the bolt" % [device, i + 1])
 	if p.active and not p.uses_keyboard() and not p.mouse_look:
 		pad_wait[i] = PAD_WAIT_TIME
 		print("Pad %d disconnected: P%d waits %d s for it" % [device, i + 1, int(PAD_WAIT_TIME)])
-		_show_center("P%d's controller disconnected!\nPlug it back in to keep playing" % (i + 1), 2.5, false)
+		if SIMPLE_MODE:
+			local_sound("miss", -8.0)  # no sentence: the bolt in their view shows it
+		else:
+			_show_center("P%d's controller disconnected!\nPlug it back in to keep playing" % (i + 1), 2.5, false)
+
+
+## Simple mode: is player i's controller unplugged (their view shows a pulsing bolt)?
+func pad_lost(i: int) -> bool:
+	if i < 0 or i >= players.size():
+		return false
+	return pad_wait.has(i) or (players[i].has_meta("lost_pad_t") and players[i].joy < 0)
+
+
+## Simple mode picture cues: player p has done `key` once more ("shine", "turn", "vac"); its cue goes
+## once done twice. Kept on each machine for its own players (catches are mirrored, so the TV knows).
+func cue_did(p, key: String) -> void:
+	if p == null:
+		return
+	var done: Dictionary = p.get_meta("cue_done", {})
+	done[key] = int(done.get(key, 0)) + 1
+	p.set_meta("cue_done", done)
+
+
+func cue_learned(p, key: String) -> bool:
+	if p == null:
+		return false
+	var done: Dictionary = p.get_meta("cue_done", {})
+	return int(done.get(key, 0)) >= 2
 
 
 ## First free TV slot: one with no controls bound, else a waiting keyboard slot (the pad takes it over).
@@ -800,6 +858,7 @@ func leave_player(i: int) -> void:
 		return
 	var p = players[i]
 	pad_wait.erase(i)
+	p.remove_meta("cue_done")  # whoever takes this seat next sees the picture cues again
 	if _has_local_view(p):
 		p.joy = -1
 	if net.mode == "client":
@@ -809,7 +868,10 @@ func leave_player(i: int) -> void:
 		return
 	p.set_active(false)
 	p.vac_on = false
-	_show_center("P%d left the hunt" % (i + 1), 1.5)
+	if SIMPLE_MODE:
+		sound("puff", -8.0, 0.9)  # no sentence: their view just goes
+	else:
+		_show_center("P%d left the hunt" % (i + 1), 1.5)
 	print("Player %d left the game (%d players)" % [i + 1, active_count()])
 	on_player_activity_changed(p)
 
@@ -835,6 +897,13 @@ func _update_party(delta: float) -> void:
 			pending_join.erase(k)
 		else:
 			pending_join[k] = left
+	for p in players:
+		if p.has_meta("lost_pad_t"):
+			var lt: float = float(p.get_meta("lost_pad_t")) - delta
+			if lt <= 0.0 or not p.active:
+				p.remove_meta("lost_pad_t")
+			else:
+				p.set_meta("lost_pad_t", lt)
 	for k in pad_wait.keys():
 		var w: float = pad_wait[k] - delta
 		if w <= 0.0:
@@ -859,6 +928,32 @@ func _update_join_hint() -> void:
 		for dev in Input.get_connected_joypads():
 			if pad_owner(dev) < 0:
 				spare = true
+	if SIMPLE_MODE:
+		# No words: a pulsing A + a person with a plus (press A on a spare controller to join).
+		join_label.visible = false
+		join_label.text = ""
+		if join_cue == null:
+			join_cue = HBoxContainer.new()
+			join_cue.name = "JoinCue"
+			join_cue.alignment = BoxContainer.ALIGNMENT_CENTER
+			join_cue.add_theme_constant_override("separation", 12)
+			join_cue.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			join_cue.add_child(UiKit.glyph("A", 1.4))
+			join_cue.add_child(UiKit.icon("plus", Color(1.0, 0.9, 0.6), 34.0))
+			join_cue.add_child(UiKit.icon("person", Color(1.0, 0.9, 0.6), 58.0))
+			for c in join_cue.get_children():
+				(c as Control).size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			center_label.get_parent().add_child(join_cue)
+			join_cue.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+			join_cue.offset_left = -200
+			join_cue.offset_top = -74
+			join_cue.offset_right = -16
+			join_cue.offset_bottom = -10
+			var tw := join_cue.create_tween().set_loops()
+			tw.tween_property(join_cue, "modulate:a", 0.5, 0.7)
+			tw.tween_property(join_cue, "modulate:a", 1.0, 0.7)
+		join_cue.visible = spare and not game_over
+		return
 	join_label.visible = spare and not game_over
 	join_label.text = "More ghost hunters? Press A on a spare controller to join!"
 
@@ -1006,10 +1101,12 @@ func capture_ghost(g, by) -> void:
 	director().add_stat(by, "caught", 1)
 	if by != null:
 		tv_caught[by.index] = true
+		tv_catches[by.index] = int(tv_catches.get(by.index, 0)) + 1
 	g.drop_photo(by)
 	if g.kind == "sleepy":
 		vr_woken += 1
 		vr_ghost_t = 1.0
+		cue_did(players[0], "shine")
 	if g.kind == "king":
 		if not SIMPLE_MODE:
 			director().on_king_caught()
@@ -1536,7 +1633,7 @@ func _unhandled_input(event: InputEvent) -> void:
 # --- Networked co-op ---------------------------------------------------------
 
 func on_client_joined() -> void:
-	_show_center("GHOST HUNTERS JOINED!", 1.5)
+	_show_center("HELLO!" if SIMPLE_MODE else "GHOST HUNTERS JOINED!", 1.5)
 
 
 func on_client_left() -> void:
@@ -1645,15 +1742,23 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 				_restart()
 		"pause":
 			var paused: bool = args[0]
-			_show_center("PAUSED\nA TV player opened the menu" if paused else "", 0.0, false)
+			_pause_banner(paused, "A TV player opened the menu")
 			get_tree().paused = paused
 
 
 func toggle_vr_pause() -> void:
 	var paused := not get_tree().paused
 	get_tree().paused = paused
-	_show_center("PAUSED\nPress the menu button to resume" if paused else "", 0.0, false)
+	_pause_banner(paused, "Press the menu button to resume")
 	net.event("remote_pause", [paused])
+
+
+## The pause banner: just PAUSED in simple mode (the sentence under it is the full game's).
+func _pause_banner(paused: bool, why: String) -> void:
+	if not paused:
+		_show_center("", 0.0, false)
+	else:
+		_show_center("PAUSED" if SIMPLE_MODE else "PAUSED\n" + why, 0.0, false)
 
 
 func make_snapshot() -> Array:
@@ -1666,7 +1771,7 @@ func make_snapshot() -> Array:
 	var ph := []
 	for p in photos:
 		ph.append(p.state)
-	return [night, score, caught, saved, game_over, ps, gs, ph, in_break, director().pack(), practice, tv_caught.keys()]
+	return [night, score, caught, saved, game_over, ps, gs, ph, in_break, director().pack(), practice, tv_caught.keys(), tv_catches]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -1693,6 +1798,10 @@ func apply_snapshot(s: Array) -> void:
 		practice = s[10]
 		for k in s[11]:
 			tv_caught[k] = true
+	if s.size() > 12:
+		var tc: Dictionary = s[12]
+		for k in tc:
+			tv_catches[k] = int(tc[k])
 
 
 func _sync_ghosts(list: Array) -> void:
@@ -1737,7 +1846,7 @@ func apply_event(kind: String, args: Array) -> void:
 			_show_center(args[0], args[1])
 		"remote_pause":
 			get_tree().paused = args[0]
-			_show_center("PAUSED\nThe lantern-bearer paused the game" if args[0] else "", 0.0, false)
+			_pause_banner(args[0], "The lantern-bearer paused the game")
 		"hurt":
 			var i: int = args[0]
 			if i < players.size():
@@ -1849,6 +1958,7 @@ func practice_ghost_done(g) -> void:
 	burst(g.global_position, Color(1.0, 0.95, 0.5), 18, 0.06)
 	if players[0].vr:
 		players[0].hand_r.trigger_haptic_pulse("haptic", 0.0, 0.5, 0.15, 0.0)
+	cue_did(players[0], "shine")  # simple mode: the shine cue goes once lit twice
 	print("Practice: sleepy ghost woken (%d)" % vr_woken)
 	_remove_ghost(g)
 
@@ -1869,6 +1979,7 @@ func _end_practice() -> void:
 ## VR practice: the ghost hand sweeps a lantern onto the sleepy ghost until the player has done it.
 func _update_ghost_hand(delta: float) -> void:
 	var p = players[0]
+	_update_practice_arrow()
 	if not p.vr:
 		return
 	var target = null
@@ -1886,6 +1997,55 @@ func _update_ghost_hand(delta: float) -> void:
 		ghost_hand.show_demo(false, Transform3D(), Vector3.ZERO, false, delta)
 	else:
 		ghost_hand.show_demo(true, p.xr_camera.global_transform, target.global_position, target.reveal > 0.5, delta)
+
+
+## Practice: a soft glowing arrow bobs above the sleepy ghost, pointing down at it ("shine here"),
+## until it is lit; only the lantern-bearer sees it (their viewmodel layer). Goes once lit twice.
+func _update_practice_arrow() -> void:
+	var p = players[0]
+	var target = null
+	if practice and not cue_learned(p, "shine"):
+		for g in get_tree().get_nodes_in_group("ghosts"):
+			if g.kind == "sleepy" and g.reveal < 0.5:
+				target = g
+	if target == null:
+		if practice_arrow != null:
+			practice_arrow.visible = false
+		return
+	if practice_arrow == null:
+		practice_arrow = MeshInstance3D.new()
+		practice_arrow.name = "PracticeArrow"
+		var cm := CylinderMesh.new()
+		cm.top_radius = 0.0
+		cm.bottom_radius = 0.16
+		cm.height = 0.32
+		cm.radial_segments = 12
+		practice_arrow.mesh = cm
+		var shaft := MeshInstance3D.new()
+		var sm := CylinderMesh.new()
+		sm.top_radius = 0.06
+		sm.bottom_radius = 0.06
+		sm.height = 0.3
+		sm.radial_segments = 8
+		shaft.mesh = sm
+		shaft.position = Vector3(0, -0.28, 0)
+		practice_arrow.add_child(shaft)
+		var m := make_material(Color(1.0, 0.9, 0.45), 2.5)
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.albedo_color.a = 0.85
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		practice_arrow.material_override = m
+		shaft.material_override = m
+		practice_arrow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		shaft.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(practice_arrow)
+		practice_arrow.top_level = true
+		p._set_layers(practice_arrow, p.viewmodel_layer())
+	var k := absf(sin(anim_t * 3.0))
+	practice_arrow.visible = true
+	# Tip down (the cone's tip is +Y, so flip it), bobbing just above the ghost's head.
+	practice_arrow.global_transform = Transform3D(Basis(Vector3.RIGHT, PI).scaled(Vector3.ONE * (1.0 + 0.25 * k)),
+		target.global_position + Vector3.UP * (0.95 + 0.15 * k))
 
 
 ## Gentle nights, one new kind at a time.
