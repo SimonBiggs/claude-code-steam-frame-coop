@@ -19,7 +19,15 @@ extends Node3D
 ## (round 2 the beam, round 3 the dash; TV players get one new vehicle per round, Y swaps). The Titan
 ## never loses: a knock-down is a quick sit-down. Everything in reach reacts (toys.gd): cockpit
 ## buttons, horn, bobblehead, fuzzy dice, wipers; outside, buildings wobble and trees can be picked up
-## and thrown. Text: one short headline in VR, one short line on the TV.
+## and thrown. Text: one short headline in VR (a name or a cheer), no how-to words on the TV.
+## VISUAL TEACHING (SIMPLE_MODE, teach.gd + cue.gd): low in each TV player's view a pulsing glowing
+## button in that player's own controls plus a picture (punch / beam / dash for the TV pilot; fly through
+## the ring, shoot / repair / stun, pick people up / take them to the shelter, swap vehicle for the
+## support team), a glowing edge arrow when that thing is off screen, a glowing 3D arrow over the
+## practice bat / the dash ring / a dizzy kaiju, glowing buttons on the VR controllers for the dash, and
+## a pulsing A + plus + person on the shared view. Each cue goes once its player has done it twice and
+## comes back for the next player in that seat. Lost controller / full party / someone leaving: soft
+## sounds (and a pulsing bolt). Pause: just PAUSED.
 
 const NetScript := preload("res://core/net.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
@@ -49,12 +57,16 @@ const Missions := preload("res://games/mech_titans/missions.gd")
 const Kaiju := preload("res://games/mech_titans/kaiju.gd")
 const Toys := preload("res://games/mech_titans/toys.gd")
 const GhostHand := preload("res://games/mech_titans/ghost_hand.gd")
+const Teach := preload("res://games/mech_titans/teach.gd")
 
 const SIMPLE_MODE := Data.SIMPLE_MODE
 const CHEER_TIME := 5.5  ## SIMPLE_MODE: seconds of cheering between rounds
 
 const TV_MASK := 0xFFFFF & ~Data.LAYER_VR_ONLY
-const VR_MASK := 0xFFFFF & ~Data.LAYER_EXTERIOR & ~Data.LAYER_TV_ONLY & ~VrRig.AVATAR_LAYER
+## Support vehicles' name tags: slot s's tag is on TAG_LAYER_0 << (s - 1), so its own view leaves it out.
+const TAG_LAYER_0 := 1 << 10
+const TAG_LAYERS := 0x3F << 10
+const VR_MASK := 0xFFFFF & ~Data.LAYER_EXTERIOR & ~Data.LAYER_TV_ONLY & ~VrRig.AVATAR_LAYER & ~TAG_LAYERS
 
 # --- The networking contract ---
 var net: Node
@@ -82,6 +94,8 @@ var support: Support
 var missions: Missions
 var toys: Toys
 var ghost: GhostHand
+var teach: Teach  ## SIMPLE_MODE: picture cues instead of how-to words
+var pause_menu: Node
 var built_map := -1
 var test_hp_scale := 1.0  ## bots: shorter fights
 var auto_launch := -1  ## bots: launch this mission straight from the hangar
@@ -113,6 +127,7 @@ func _ready() -> void:
 	var menu := PauseMenuScript.new()
 	menu.main = self
 	add_child(menu)
+	pause_menu = menu
 	net = NetScript.new()
 	net.name = "Net"
 	net.main = self
@@ -198,6 +213,10 @@ func _setup(mode: String) -> void:
 		dlg.set_vr_rig(vr_rig)
 		pilot.rig = vr_rig
 		pilot.mode = "vr"
+	if SIMPLE_MODE:
+		teach = Teach.new()
+		add_child(teach)
+		teach.setup(self)
 	if mode != "host":
 		split = SplitView.new()
 		add_child(split)
@@ -414,7 +433,7 @@ func _on_player_joined(slot: int, _device: int) -> void:
 	if party.is_local(slot) and split != null:
 		var c := CameraRig.new()
 		c.camera = split.camera(slot)
-		c.camera.cull_mask = TV_MASK
+		c.camera.cull_mask = TV_MASK & ~tag_layer(slot)  # never this player's own name tag
 		c.party = party
 		c.slot = slot
 		c.pitch = -0.3
@@ -447,6 +466,8 @@ func _on_player_joined(slot: int, _device: int) -> void:
 
 
 func _on_player_left(slot: int) -> void:
+	if teach != null:
+		teach.player_left(slot)  # whoever takes this seat next sees the picture cues again
 	if cams.has(slot):
 		(cams[slot] as Node).queue_free()
 		cams.erase(slot)
@@ -542,6 +563,11 @@ func _refresh_group() -> void:
 			Vector3(-1.0, 0.0, 0.0))
 	else:
 		group_cam.follow_group(t, -42.0, 0.0)
+
+
+## The render layer of slot's name tag (other TV views see it; its own view and VR don't).
+func tag_layer(slot: int) -> int:
+	return TAG_LAYER_0 << clampi(slot - 1, 0, 5) if slot >= 1 else 0
 
 
 func view_camera(slot: int) -> Camera3D:
@@ -737,6 +763,7 @@ func _make_hud(slot: int, parent: Control) -> void:
 		bottom.grow_vertical = Control.GROW_DIRECTION_BEGIN
 		bottom.offset_top = -24.0
 		bottom.offset_bottom = -24.0
+		bottom.visible = not SIMPLE_MODE  # SIMPLE_MODE: no button words: the picture cue (teach.gd) instead
 		w["bottom"] = bottom
 		var cross := UiKit.icon("plus", Color(1, 1, 1, 0.8), 28.0)
 		ui.add_child(cross)
@@ -744,9 +771,13 @@ func _make_hud(slot: int, parent: Control) -> void:
 		cross.position -= Vector2(14.0, 14.0)
 		w["cross"] = cross
 		_refresh_vehicle_hud(slot)
+		if teach != null:
+			teach.add_view(slot, ui)
+	elif teach != null:
+		w["join"] = teach.make_join(ui)  # no words: a pulsing A + plus + person in the corner
 	else:
 		var jp := UiKit.panel("pill")
-		jp.add_child(UiKit.prompts([["A", "Join" if SIMPLE_MODE else "Join the support team"]]))
+		jp.add_child(UiKit.prompts([["A", "Join the support team"]]))
 		ui.add_child(jp)
 		jp.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
 		jp.grow_horizontal = Control.GROW_DIRECTION_BOTH
@@ -766,28 +797,10 @@ func _refresh_vehicle_hud(slot: int) -> void:
 		return
 	for c in bottom.get_children():
 		c.queue_free()
+	if SIMPLE_MODE:
+		return  # no button words: the picture cue low in the view (teach.gd) shows what to do
 	var row := UiKit.hbox()
 	bottom.add_child(row)
-	if SIMPLE_MODE:
-		# One short line: only what this player can do this round.
-		if slot == 0:
-			var p: Array = [["X", "Punch"]]
-			if move_ok("beam"):
-				p.append(["RT", "Beam"])
-			if move_ok("dash"):
-				p.append(["A", "Dash"])
-			row.add_child(UiKit.prompts(p))
-			return
-		var sv: Support.Vehicle = support.vehicles.get(slot, null)
-		if sv == null:
-			return
-		var si: Dictionary = Data.VEHICLE_INFO[sv.kind]
-		row.add_child(UiKit.icon(String(si["icon"]), si["color"], 30.0))
-		var sp: Array = [["A", String(si["a"])]]
-		if vehicle_kinds().size() > 1:
-			sp.append(["Y", "Swap"])
-		row.add_child(UiKit.prompts(sp))
-		return
 	if slot == 0:
 		row.add_child(UiKit.label("TITAN-1", "body", "info"))
 		row.add_child(UiKit.prompts([["X", "Punch"], ["RT", "Beam"], ["LB", "Block"], ["A", "Dash"], ["Y", "Tool"]]))
@@ -1225,7 +1238,7 @@ func _refresh_all_vehicle_huds() -> void:
 
 func _new_vehicle_toast(vname: String) -> void:
 	_refresh_all_vehicle_huds()
-	if split != null:
+	if split != null and not SIMPLE_MODE:  # SIMPLE_MODE: Y + an arrow + the new vehicle (teach.gd)
 		HudKit.toast(_all_huds(), "NEW: %s  (Y)" % vname, {"icon": "star", "color": "gold", "duration": 4.0})
 	sfx.play("reveal", -4.0)
 
@@ -1403,9 +1416,11 @@ func on_client_joined() -> void:
 
 func on_pause_changed(paused: bool, by_slot: int) -> void:
 	var why := "Paused by %s" % ("the pilot" if by_slot == 0 else party.name_of(by_slot))
+	if SIMPLE_MODE:
+		why = ""  # just PAUSED (no sentence)
 	if vr_rig != null:
 		if paused:
-			vr_banner = HudKit.vr_card(self, vr_rig.camera, "PAUSED", "Wrist MENU: carry on", {"width": 1.1})
+			vr_banner = HudKit.vr_card(self, vr_rig.camera, "PAUSED", "" if SIMPLE_MODE else "Wrist MENU: carry on", {"width": 1.1})
 			vr_banner.process_mode = Node.PROCESS_MODE_ALWAYS
 		elif vr_banner != null and is_instance_valid(vr_banner):
 			vr_banner.call("hide_card")
@@ -1424,8 +1439,12 @@ func on_pause_changed(paused: bool, by_slot: int) -> void:
 			tv_banner.set_anchors_preset(Control.PRESET_CENTER)
 			tv_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
 			tv_banner.grow_vertical = Control.GROW_DIRECTION_BOTH
-		(tv_banner.find_child("Why", true, false) as Label).text = why
-		tv_banner.visible = paused
+		var wl := tv_banner.find_child("Why", true, false) as Label
+		wl.text = why
+		wl.visible = why != ""
+		# the pause menu open on this machine already says PAUSED: don't draw a second one under it
+		var menu_open: bool = pause_menu != null and pause_menu.get("panel") != null and (pause_menu.panel as Control).visible
+		tv_banner.visible = paused and not (SIMPLE_MODE and menu_open)
 		if paused:
 			UiKit.pop_in(tv_banner)
 	if paused:
@@ -1455,6 +1474,8 @@ func _process(delta: float) -> void:
 		if not move_ok("dash"):
 			intent["dash"] = false
 		mech.simulate(delta, intent)
+		if teach != null:
+			teach.note_pilot(out, intent, phase)
 		combat.tick(delta)
 		if phase == "play":
 			combat.pilot_actions(delta, out)
@@ -1483,6 +1504,8 @@ func _process(delta: float) -> void:
 	support.drive_local(delta, phase == "play" or phase == "hangar")
 	support.visual_tick(delta)
 	_tick_hud(delta)
+	if teach != null:
+		teach.tick(delta)
 	if ghost != null:
 		var pk := missions.practice_kind if missions != null else ""
 		var gk := "punch" if pk.begins_with("punch") else ("beam" if pk == "beam" else "")

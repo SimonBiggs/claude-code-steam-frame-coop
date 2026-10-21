@@ -176,7 +176,8 @@ func _make(id: int, kind: String) -> Vehicle:
 		v.carry_sign.visible = false
 		v.add_child(v.carry_sign)
 	if not v.ai:
-		HudKit.nameplate(v, main.party.name_of(id), id, 4.0 if kind != "drone" else 2.6, 0.9).layers = Data.LAYER_TV_ONLY
+		# on this player's own tag layer: the other TV views see it, their own view doesn't (no "P2" over your own head)
+		HudKit.nameplate(v, main.party.name_of(id), id, 4.0 if kind != "drone" else 2.6, 0.9).layers = main.tag_layer(id)
 	return v
 
 
@@ -833,7 +834,7 @@ func visual_tick(delta: float) -> void:
 				v.spray.direction = v.global_basis.inverse() * (v.aim_dir() if v.kind == "truck" else Vector3.DOWN)
 		if v.carry_sign != null:
 			v.carry_sign.visible = v.carry > 0
-			v.carry_sign.text = "%d ON BOARD" % (v.carry * 3)
+			v.carry_sign.text = ("%d" if Data.SIMPLE_MODE else "%d ON BOARD") % (v.carry * 3)
 	for g in groups:
 		if int(g["state"]) == 0:
 			var n: Node3D = g["node"]

@@ -4,6 +4,13 @@ extends Node
 ## in VR, one glowing ring per TV player), that round 1 is jets + punches only (the beam stays off), the
 ## cockpit toys (VR: buttons, horn, bobblehead, dice, wipers), a tree picked up and thrown, a building
 ## wobble, the cheer and that round 2 starts (with the beam).
+## VISUAL TEACHING (SIMPLE_MODE): records the picture cues each TV view shows (cue_punch, cue_beam,
+## cue_dash, cue_ring_*, cue_act_*, cue_pickup, cue_deliver, cue_swap_*, cue_plug), the ones learned
+## (cue_learned_*), the glowing edge arrow, the glowing 3D arrow (arrow_bat / arrow_dash / arrow_dizzy),
+## the VR controller buttons, the ghost hand and the join cue; unplugs and replugs P2's pad in local mode
+## (bolt), checks the pause banner is just PAUSED (and not drawn under the pause menu's own PAUSED),
+## checks a dropped-out seat's cues are forgotten and that no view draws its own name tag, and prints
+## BOT: ERROR on how-to text anywhere in the game's HUD / VR text. BOT_VR=1: the fake VR pilot.
 ## Without SIMPLE_MODE (the full game):
 ## It buys an upgrade in the hangar, launches a mission, plays the PRACTICE warm-up and the boss fight
 ## (fake-VR punches / beam / dash, or a pad pilot, or the autopilot), drives the TV support vehicles
@@ -50,6 +57,10 @@ var saw_vehicle := false
 var _pokes: Array = []  ## SIMPLE VR: [toy name, seconds left]
 var _poke_t := 0.0
 var _tree_done := false
+var seen := {}  ## SIMPLE_MODE: cues / arrows seen on this machine
+var bad_text := {}  ## SIMPLE_MODE: how-to text found (reported once each)
+var unplug_dev := -1
+var unplug_slot := -1
 
 
 func _ready() -> void:
@@ -123,6 +134,10 @@ func _simple_timeline(t0: float) -> void:
 		kit.at(41.0, "the tree gets thrown", func() -> void:
 			main.toys.throw_tree(1, main.mech.forward() * 26.0 + Vector3(0, 8, 0))
 			_tree_done = true)
+	kit.every(0.1, _record)
+	kit.every(0.5, _scan_text)
+	if not client and not host:
+		_teach_timeline()
 	var end := 100.0
 	if host:
 		kit.at(end - 6.0, "host checks (the TV machine is still connected)", _checks)
@@ -131,6 +146,163 @@ func _simple_timeline(t0: float) -> void:
 		kit.at(end - 5.0 if client else end, "checks", func() -> void:
 			_checks()
 			kit.finish())
+
+
+# --- SIMPLE_MODE: visual teaching ---------------------------------------------------------------------
+
+func _teach_timeline() -> void:
+	kit.at(20.0, "P2's controller is unplugged (bolt)", func() -> void:
+		for sl in main.party.local_slots():
+			if sl >= 1 and main.party.device_of(sl) >= 0:
+				unplug_slot = sl
+				unplug_dev = main.party.device_of(sl)
+				main.party.remove_virtual_pad(unplug_dev)
+				return)
+	kit.at(21.0, "bolt?", func() -> void:
+		if unplug_slot < 0:
+			return
+		kit.assert_true(main.party.is_lost(unplug_slot), "SIMPLE: P%d's controller is away" % (unplug_slot + 1))
+		kit.assert_eq(String(main.teach.views[unplug_slot]["cue"].key), "plug", "SIMPLE: a pulsing bolt shows in P%d's view" % (unplug_slot + 1))
+		main.party.replug_virtual_pad(unplug_dev))
+	kit.at(22.0, "bolt gone?", func() -> void:
+		if unplug_slot < 0:
+			return
+		kit.assert_true(not main.party.is_lost(unplug_slot), "SIMPLE: the controller is back")
+		kit.assert_true(String(main.teach.views[unplug_slot]["cue"].key) != "plug", "SIMPLE: the bolt goes when it's back"))
+	kit.at(24.0, "the pause menu opens on the TV", func() -> void:
+		main.pause_menu._open())
+	kit.at(24.3, "paused once?", func() -> void:
+		kit.assert_true(get_tree().paused, "SIMPLE: the pause menu pauses")
+		kit.assert_true(main.tv_banner == null or not main.tv_banner.visible,
+			"SIMPLE: the pause menu says PAUSED once (no second PAUSED banner under it)")
+		main.pause_menu._resume())
+	kit.at(25.0, "the other machine pauses (banner on the TV)", func() -> void:
+		main.on_pause_changed(true, 0)
+		kit.assert_true(main.tv_banner != null and main.tv_banner.visible, "SIMPLE: a pause from the other machine shows the PAUSED banner")
+		_check_pause_banner()
+		main.on_pause_changed(false, 0))
+	kit.drop_in_out(main.party, 30.0, 6.0, func(sl: int) -> bool: return main.teach.views.has(sl))
+	kit.at(37.5, "the late player's cues were forgotten?", func() -> void:
+		for sl in main.teach.cue_done:
+			kit.assert_true(int(sl) == 0 or main.party.is_active(int(sl)), "SIMPLE: a seat's cues reset when its player leaves (P%d)" % (int(sl) + 1)))
+
+
+## The pause banner says PAUSED and nothing else.
+func _check_pause_banner() -> void:
+	if main.tv_banner == null:
+		return
+	var words: Array[String] = []
+	for l in main.tv_banner.find_children("*", "Label", true, false):
+		if (l as Label).is_visible_in_tree() and (l as Label).text != "":
+			words.append((l as Label).text)
+	kit.assert_true(words == ["PAUSED"], "SIMPLE: the pause banner is just PAUSED (%s)" % str(words))
+
+
+func _see(what: String) -> void:
+	if not seen.has(what):
+		seen[what] = true
+		kit.info("saw %s" % what)
+
+
+## Every 0.1 s: which cues, arrows and hands are showing on this machine.
+func _record() -> String:
+	if main == null or not main.ready_to_play or main.teach == null:
+		return ""
+	var teach: Node = main.teach
+	for sl in teach.views:
+		var v: Dictionary = teach.views[sl]
+		for k in v["cue"].shown:
+			_see("cue_" + String(k))
+		if v["edge"].on:
+			_see("edge_arrow")
+		var cam: Camera3D = main.view_camera(int(sl))
+		if int(sl) >= 1 and cam != null and (cam.cull_mask & main.tag_layer(int(sl))) != 0:
+			_see("own_tag_shown")
+			if not bad_text.has("own tag"):
+				bad_text["own tag"] = true
+				printerr("BOT: ERROR: P%d's view draws its own name tag" % (int(sl) + 1))
+	for sl in teach.cue_done:
+		for k in teach.cue_done[sl]:
+			if teach.cue_learned(int(sl), String(k)):
+				_see("cue_learned_" + String(k))
+	for hk in main.hud_w:
+		var w: Dictionary = main.hud_w[hk]
+		if w.has("join") and is_instance_valid(w["join"]) and (w["join"] as Control).is_visible_in_tree():
+			_see("join_cue")
+	if teach.arrow != null and teach.arrow.visible and teach.arrow_kind != "":
+		_see("arrow_" + String(teach.arrow_kind))
+	for b in teach.vr_buttons:
+		if (b as Node3D).visible and teach.arrow_kind == "dash":
+			_see("vr_button")
+	if main.ghost != null and main.ghost.visible:
+		_see("ghost_hand")
+	return ""
+
+
+## How-to words: a sentence (3+ words or lower-case words), a button prompt ("X: ...") or a known
+## instruction word.
+func _is_instruction(t: String) -> bool:
+	var txt := t.strip_edges()
+	if txt == "":
+		return false
+	for w in ["JOIN", "SWAP", "PRESS", "HOLD", "PUNCH IT", "TO THROW", "PAUSED BY", "CARRY ON", "MENU", "ON BOARD", ":"]:
+		if txt.to_upper().contains(w):
+			return true
+	var re := RegEx.create_from_string("[a-z]{2,}")
+	if re.search(txt) != null:
+		return true
+	return txt.split(" ", false).size() >= 3
+
+
+## Every 0.5 s: no how-to text in the game's HUD or VR text (the core pause menu is not the game's).
+func _scan_text() -> String:
+	if main == null or not main.ready_to_play:
+		return ""
+	var nodes: Array = main.find_children("*", "Label", true, false)
+	nodes.append_array(main.find_children("*", "Label3D", true, false))
+	nodes.append_array(main.find_children("*", "RichTextLabel", true, false))
+	for n in nodes:
+		if main.pause_menu != null and main.pause_menu.is_ancestor_of(n):
+			continue
+		if main.vr_rig != null and String(main.get_path_to(n)).contains("WristMenu"):
+			continue  # the core wrist menu button (not the game's text)
+		if not (n as Node).call("is_visible_in_tree"):
+			continue
+		if n is Control and (n as Control).modulate.a < 0.05:
+			continue
+		var t := String(n.get("text"))
+		if _is_instruction(t) and not bad_text.has(t):
+			bad_text[t] = true
+			printerr("BOT: ERROR: how-to text in SIMPLE_MODE: \"%s\" (%s)" % [t, str(main.get_path_to(n))])
+			kit.assert_true(false, "SIMPLE: no how-to text (\"%s\")" % t)
+	return ""
+
+
+## SIMPLE_MODE: the picture cues and arrows this machine should have shown.
+func _cue_checks() -> void:
+	var ks: Array = seen.keys()
+	ks.sort()
+	print("BOT CUES: mode=%s %s" % [main.net.mode, ",".join(PackedStringArray(ks))])
+	var seats: Array[int] = main.party.local_slots()
+	if seats.has(0):
+		kit.assert_true(seen.has("cue_punch"), "SIMPLE: the TV pilot saw X + a fist + the bat")
+		kit.assert_true(seen.has("cue_learned_punch"), "SIMPLE: the punch cue went after two punches")
+	var drivers := false
+	for sl in seats:
+		drivers = drivers or sl >= 1
+	if drivers:
+		kit.assert_true(seen.has("cue_ring_jet"), "SIMPLE: a jet saw STICK + jet + the glowing ring")
+		kit.assert_true(seen.has("cue_learned_act_jet"), "SIMPLE: the jet's shoot cue (A + a bolt + the kaiju) went after two shots")
+		if saw_round2:
+			kit.assert_true(seen.has("cue_swap_truck") or seen.has("cue_swap_jet"), "SIMPLE: Y + the new vehicle showed in round 2")
+		kit.assert_true(not seen.has("own_tag_shown"), "SIMPLE: no view draws its own name tag")
+	if main.net.mode != "client":
+		kit.assert_true(seen.has("arrow_bat"), "SIMPLE: a glowing arrow bobbed over the practice bat")
+	if main.vr_rig != null:
+		kit.assert_true(seen.has("ghost_hand"), "SIMPLE: the ghost hand showed the move")
+	if not host and not client and unplug_slot >= 0:
+		kit.assert_true(seen.has("cue_plug"), "SIMPLE: the bolt showed for an unplugged pad")
+	kit.assert_true(bad_text.is_empty(), "SIMPLE: no how-to text on this machine %s" % str(bad_text.keys()))
 
 
 func _menu_slot() -> int:
@@ -271,7 +443,7 @@ func _drive_vehicle(slot: int, phase: String) -> void:
 				to.y = 0.0
 				goal = k.global_position - to.normalized() * (24.0 if kind == "jet" else 30.0)
 				var wi := _unpainted(k)
-				if wi >= 0 and kind == "jet":
+				if wi >= 0 and kind == "jet" and not simple:  # SIMPLE_MODE: no painting, A shoots
 					aim = k.weak_world(wi)
 					x = true
 				else:
@@ -519,6 +691,7 @@ func _checks() -> void:
 
 func _simple_checks() -> void:
 	var mode: String = main.net.mode
+	_cue_checks()
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
 	kit.assert_eq(main.party.player_count(), want, "%s: all %d TV players are seated" % [mode, want])
 	kit.assert_true(main.vr_menu == null and main.tv_menu == null, "%s: no hangar menus" % mode)

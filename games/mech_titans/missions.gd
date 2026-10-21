@@ -194,7 +194,6 @@ func _practice_tick(delta: float) -> void:
 ## SIMPLE_MODE warm-up: one glowing target at a time. The headline is one word or two; the ghost hand
 ## (VR) or the glow shows the rest. Never blocks: 25 s per target.
 func _practice_simple(delta: float) -> void:
-	var vr: bool = main.vr_rig != null
 	var part: String = practice_parts[0]
 	if practice_kind == "":
 		practice_kind = part
@@ -203,20 +202,17 @@ func _practice_simple(delta: float) -> void:
 		var spot := Vector3.INF
 		match part:
 			"punch_l":
-				spot = Vector3(-2.3, 6.0, -6.2)
-				main.combat.announce("PUNCH!" if vr else "X: PUNCH!", "", "info")
+				spot = Vector3(-2.3, 6.0, -6.2)  # no words: the ghost hand (VR) / X + a fist (TV) + a glowing arrow
 			"punch_r":
 				spot = Vector3(2.3, 6.0, -6.2)
 			"beam":
-				spot = Vector3(0.0, 11.0, -40.0)
-				main.combat.announce("TRIGGER: BEAM!" if vr else "RT: BEAM!", "", "info")
+				spot = Vector3(0.0, 11.0, -40.0)  # no words: the ghost hand (VR) / RT + the beam (TV)
 			"dash":
 				var p: Vector3 = main.mech.to_global(Vector3(0, 6.0, -34.0))
 				p.x = clampf(p.x, -Data.MAP + 8.0, Data.MAP - 8.0)
 				p.z = clampf(p.z, -Data.MAP + 8.0, Data.MAP - 8.0)
 				practice_target = p
-				main.toys.add_ring("dash", p)
-				main.combat.announce("A: DASH!", "", "info")
+				main.toys.add_ring("dash", p)  # no words: glowing controller buttons (VR) / A + the ring (TV)
 		if spot != Vector3.INF:
 			var k: Kaiju = main.combat.spawn_practice(spot)
 			practice_ids.append(k.id)
