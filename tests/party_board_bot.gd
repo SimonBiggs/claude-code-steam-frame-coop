@@ -142,9 +142,6 @@ func _watch() -> String:
 		main.flow.bot_star_ahead(int(main.net.state_get("cur", 0)))
 	if main.dice == null:
 		return ""
-	for b in main.dice.blocks:
-		if is_instance_valid(b) and b.get_node_or_null("PressA") != null:
-			seen["tv:press_a"] = true
 	if main.ghost != null and main.ghost.visible:
 		seen["vr:ghost_" + phase] = true
 	if phase == "results" and _finish_at < 0.0:
@@ -224,6 +221,10 @@ func _measure_vr_panels() -> void:
 func _physics_process(delta: float) -> void:
 	if main == null or not main.ready_to_play or get_tree().paused:
 		return
+	if main.dice != null:  # every frame: the A goes as soon as the block is hit (the number shows)
+		for b in main.dice.blocks:
+			if is_instance_valid(b) and b.get_node_or_null("PressA") != null:
+				seen["tv:press_a"] = true
 	for slot in main.party.local_slots():
 		if slot == 0 and main.vr_rig != null:
 			continue

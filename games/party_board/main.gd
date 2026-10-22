@@ -440,7 +440,7 @@ func token(pid: int) -> TokenScript:
 	t.hopped.connect(func(_tk: Node3D) -> void: sfx.play("jump", -10.0, 1.3))
 	tokens[pid] = t
 	if split != null and vr_rig == null:
-		HudKit.nameplate(t.body, name_of(pid), color_of(pid), 1.9, 0.42)
+		t.set_meta("plate", HudKit.nameplate(t.body, name_of(pid), color_of(pid), 1.9, 0.42))
 	return t
 
 
@@ -452,6 +452,9 @@ func _sync_tokens() -> void:
 		var pid := int(pd["pid"])
 		seen[pid] = true
 		var t := token(pid)
+		var plate: Label3D = (t.get_meta("plate") if t.has_meta("plate") else null)
+		if plate != null and is_instance_valid(plate) and plate.text != name_of(pid):
+			plate.text = name_of(pid)  # a CPU seat taken over: the name over the token follows the card
 		var sp := int(pd.get("space", 0))
 		if t.space == sp:
 			continue
@@ -487,6 +490,10 @@ func _spread_tokens() -> void:
 			else:
 				var a := TAU * float(i) / float(list.size()) + 0.4
 				t.offset = Vector3(cos(a), 0.0, sin(a)) * 0.55
+			# names of tokens sharing a space stack up instead of being drawn over each other
+			var plate: Label3D = (t.get_meta("plate") if t.has_meta("plate") else null)
+			if plate != null and is_instance_valid(plate):
+				plate.position.y = 1.9 + 0.5 * float(i if list.size() > 1 else 0)
 
 
 func _on_player_joined(slot: int, _device: int) -> void:

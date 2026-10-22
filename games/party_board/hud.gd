@@ -89,7 +89,9 @@ func _build_tv(ui: Control) -> void:
 	rrow.add_child(final_badge)
 	turn_pill = UiKit.panel("card")
 	ui.add_child(turn_pill)
-	turn_pill.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	# anchors AND offsets: set_anchors_preset() alone kept the pill's old x (0), so "PIP'S TURN" was
+	# cut off at the left edge of the TV
+	turn_pill.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
 	turn_pill.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	turn_pill.offset_top = 18.0 * s
 	var tv := UiKit.vbox(2, s)
@@ -102,7 +104,7 @@ func _build_tv(ui: Control) -> void:
 	cards_row = UiKit.hbox(12, s)
 	cards_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	ui.add_child(cards_row)
-	cards_row.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	cards_row.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)  # centred (it sat at the left)
 	cards_row.offset_top = -18.0 * s
 	cards_row.offset_bottom = -18.0 * s
 	cards_row.grow_vertical = Control.GROW_DIRECTION_BEGIN
@@ -680,8 +682,10 @@ func _tick_cues(delta: float) -> void:
 			if phase == "board" and card != null and is_instance_valid(card) and card.is_visible_in_tree():
 				var r := card.get_global_rect()
 				var o := ui.get_global_rect().position
-				cue.at = Vector2(r.position.x - o.x + r.size.x * 0.5, r.position.y - o.y - 16.0)
 				cue.shrink = 1.0
+				var half := cue.row_size(k).x * 0.5 + 24.0 * cue.s  # keep the whole pill on screen
+				var cx := clampf(r.position.x - o.x + r.size.x * 0.5, half, maxf(half, ui.size.x - half))
+				cue.at = Vector2(cx, r.position.y - o.y - 16.0)
 			else:
 				cue.at = Vector2(ui.size.x * (float(i) + 0.5) / float(n), ui.size.y * 0.93)
 				cue.shrink = 1.0 if n <= 2 else (0.8 if n <= 3 else (0.62 if n <= 4 else 0.45))

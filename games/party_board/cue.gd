@@ -106,11 +106,11 @@ func add_row(k: String, items: Array, anim: Array = []) -> void:
 	_anim[k] = anim
 
 
-## The row's size once shown (scaled), for laying several cues out.
-func row_size() -> Vector2:
-	if _row == null:
+## The size of the row for `k` (scaled), for laying cues out.
+func row_size(k: String) -> Vector2:
+	if not rows.has(k):
 		return Vector2.ZERO
-	return _row.get_combined_minimum_size() * shrink
+	return (rows[k] as Control).get_combined_minimum_size() * shrink
 
 
 ## Load-time warm up: every row drawn once, almost invisible (fonts / glyph panels are ready then).
