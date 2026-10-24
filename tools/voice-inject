@@ -8,6 +8,8 @@ new end instead of replaying old lines.
   voice-inject --here   remember the current tmux pane ($TMUX_PANE) as the target
   voice-inject --all    forward everything said, without needing "Claude" (combine with --print)
   voice-inject --print  print each new request to stdout instead (for a Claude Code Monitor)
+The bridge's accurate pass appends "[HH:MM:SS] ~ Name: text" corrections (same timestamp as the fast line);
+these come through as "[voice HH:MM:SS fix] Name: text" when they say something different.
 """
 import difflib, os, re, subprocess, sys, time
 
@@ -18,6 +20,40 @@ if sys.argv[1:] == ["--here"]:
     open(PANE_FILE, "w").write(os.environ["TMUX_PANE"] + "\n")
     print("voice requests will go to pane", os.environ["TMUX_PANE"])
     sys.exit(0)
+
+# Only ONE Claude session may receive the voice feed (Simon, 2026-10-17): a second copy exits at once.
+import fcntl
+_lock = open(os.path.expanduser("~/.claude/voice-inject.lock"), "w")
+try:
+    fcntl.flock(_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except BlockingIOError:
+    print("voice-inject: another Claude session already has the voice feed; not starting", flush=True)
+    sys.exit(1)
+
+
+# Rude words are masked in the text the family sees on the TV (Simon, 2026-10-17).
+RUDE = re.compile(r"\b(penis|penises|vagina|bum|butt|poo+|poop|wee|willy|fart\w*|sh[i1]t\w*|f[u*]ck\w*|"
+                  r"bitch\w*|crap\w*|damn\w*|dick\w*|cock\w*|arse\w*|ass|asshole\w*|bastard\w*|piss\w*|"
+                  r"bloody|bollock\w*|twat\w*|wank\w*|boob\w*|nipple\w*|sex\w*|stupid|idiot\w*|hell)\b", re.I)
+
+
+def clean(text: str) -> str:
+    return RUDE.sub("***", text)
+
+
+def mc_show(msg: str) -> None:
+    """Show what the mic heard in Minecraft chat (grey) when the game is connected (Simon, 15:28)."""
+    import json, threading, urllib.request
+    m = re.match(r"\[voice ([^\]]+)\] (.*)", msg)
+    text = ("fix: " if m and m.group(1).endswith(" fix") else "") + m.group(2) if m else msg
+    cmd = "tellraw @a " + json.dumps({"rawtext": [{"text": "\u00a77" + text}]})
+
+    def send():
+        try:
+            urllib.request.urlopen(urllib.request.Request("http://127.0.0.1:3001/cmd", data=cmd.encode()), timeout=5)
+        except OSError:
+            pass
+    threading.Thread(target=send, daemon=True).start()
 
 
 def pane() -> str:
@@ -76,6 +112,9 @@ if ALL:
     sys.argv.remove("--all")
 ino, pos = stat()  # start at the current end: never send old lines
 buf = b""
+heard: dict = {}  # timestamp -> fast-pass texts, to drop corrections that only change punctuation
+sent: set = set()  # timestamps whose fast line was passed on (their corrections follow them)
+FIX_RE = re.compile(r"\[(\d\d:\d\d:\d\d)\] ~ (TO CLAUDE: )?([^:]+): (.*)")
 while True:
     time.sleep(0.1)
     new_ino, size = stat()
@@ -91,7 +130,22 @@ while True:
     *lines, buf = buf.split(b"\n")
     for raw in lines:
         line = raw.decode("utf-8", "replace")
-        if "TO CLAUDE: " in line:
+        fix = FIX_RE.match(line)
+        if not fix and line.startswith("[") and ": " in line:
+            heard.setdefault(line[1:9], set()).add(_norm(line[11:].removeprefix("TO CLAUDE: ").split(": ", 1)[-1]))
+        if len(heard) > 300:  # forget the oldest
+            for k in list(heard)[:100]:
+                heard.pop(k), sent.discard(k)
+        if fix:
+            ts, to_claude, name, text = fix.groups()
+            if _norm(text) in heard.get(ts, ()):
+                continue  # same words as the fast line
+            if to_claude:
+                follow_until = time.time() + FOLLOW_S
+            elif not (ALL or ts in sent or time.time() < follow_until):
+                continue
+            msg = f"[voice {ts} fix] {name}: {text}"
+        elif "TO CLAUDE: " in line:
             follow_until = time.time() + FOLLOW_S  # conversation mode: keep listening a while
             msg = f"[voice {line[1:9]}] " + line.split("TO CLAUDE: ", 1)[1]
         elif (ALL or time.time() < follow_until) and line.startswith("[") and "] " in line:
@@ -101,6 +155,10 @@ while True:
             continue
         if "] Claude (TV): " in msg or echo_of_claude(msg.split(": ", 1)[-1]):
             continue  # the mic heard Claude's own speech from the TV
+        if not fix:
+            sent.add(line[1:9])
+        msg = clean(msg)
+        mc_show(msg)
         if PRINT:
             print(msg, flush=True)
             with open(os.path.join(os.path.dirname(LOG), "voice-timing.log"), "a") as f:

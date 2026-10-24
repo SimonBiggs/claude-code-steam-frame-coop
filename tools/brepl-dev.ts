@@ -235,7 +235,14 @@ export async function debt() {
   const d = await stage.diff();
   if (d.liveNewer.length || d.onlyLive.length) issues.push({ kind: "stage-behind", what: `live has newer files than staging: ${[...d.liveNewer, ...d.onlyLive].slice(0, 5).join(", ")}`, fix: "dev.stage.pull()" });
   if (d.stageNewer.length || d.onlyStage.length) issues.push({ kind: "undeployed", what: `staging has changes not deployed: ${[...d.stageNewer, ...d.onlyStage].slice(0, 5).join(", ")}`, fix: "test, then dev.stage.deploy(msg)" });
-  for (const [src, rel] of Object.entries(TOOL_COPIES)) {
+  // Plus every tools/ file named like an installed command (~/.local/bin) and every tools/systemd unit, so a new
+  // tool never drifts just because nobody added it to TOOL_COPIES.
+  const copies: Record<string, string> = { ...TOOL_COPIES };
+  for (const f of await readdir(join(LIVE, "tools")).catch(() => [] as string[]))
+    if (!Object.values(copies).includes(`tools/${f}`)) copies[join(BIN, f)] = `tools/${f}`;
+  for (const f of await readdir(join(LIVE, "tools/systemd")).catch(() => [] as string[]))
+    if (!Object.values(copies).includes(`tools/systemd/${f}`)) copies[join(HOME, ".config/systemd/user", f)] = `tools/systemd/${f}`;
+  for (const [src, rel] of Object.entries(copies)) {
     const repo = join(LIVE, rel);
     const [a, b] = await Promise.all([readFile(src).catch(() => null), readFile(repo).catch(() => null)]);
     if (a && b && !a.equals(b))
