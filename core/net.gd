@@ -599,9 +599,7 @@ func _wrist_arcade_button(hl: XRController3D) -> Label3D:
 		hl.add_child(b)
 	var cam := get_viewport().get_camera_3d()
 	if cam != null:
-		var d := b.global_position - cam.global_position
-		if d.length() > 0.01:
-			b.global_basis = Basis.looking_at(d, Vector3.UP).scaled(b.global_basis.get_scale())
+		_face_camera(b, cam)
 	return b
 
 
@@ -624,9 +622,7 @@ func _wrist_button(hl: XRController3D) -> Label3D:
 	btn.billboard = BaseMaterial3D.BILLBOARD_DISABLED
 	var cam := get_viewport().get_camera_3d()
 	if cam != null:
-		var d := btn.global_position - cam.global_position
-		if d.length() > 0.01:
-			btn.global_basis = Basis.looking_at(d, Vector3.UP).scaled(btn.global_basis.get_scale())
+		_face_camera(btn, cam)
 	return btn
 
 
@@ -716,4 +712,20 @@ func _follow_headset() -> void:
 		get_tree().change_scene_to_file.call_deferred(scene)
 		return
 
+
+## Turn a wrist button to face the head. Looking straight down at the wrist made the direction parallel to
+## UP: looking_at gave a NaN basis, the button vanished, and reusing its (now NaN) scale kept it broken.
+static func _face_camera(n: Node3D, cam: Camera3D) -> void:
+	var d := n.global_position - cam.global_position
+	if d.length() < 0.01:
+		return
+	# The "up" least parallel to d: world up, else the head's up or forward (one of them always works).
+	var up := Vector3.UP
+	for u in [cam.global_basis.y, -cam.global_basis.z]:
+		if absf(d.normalized().dot(u.normalized())) < absf(d.normalized().dot(up)):
+			up = u
+	var sc := n.global_basis.get_scale()
+	if not sc.is_finite() or sc.length() < 0.001:
+		sc = Vector3.ONE
+	n.global_basis = Basis.looking_at(d, up).scaled(sc)
 

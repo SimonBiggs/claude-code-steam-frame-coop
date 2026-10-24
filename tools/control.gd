@@ -492,6 +492,9 @@ func _tracker(hand_name: String, node: XRController3D) -> XRPositionalTracker:
 func _pose(t: XRPositionalTracker, node: XRController3D) -> void:
 	var origin := node.get_parent() as Node3D
 	var local := origin.global_transform.affine_inverse() * node.global_transform if origin else node.transform
+	# Tracker poses are in real metres; XRNode3D multiplies by world_scale (giant / tiny modes, e.g. 18 in
+	# Coaster Crew), so divide it out or the hand flies off 18x too far.
+	local.origin /= maxf(XRServer.world_scale, 0.001)
 	t.set_pose(node.pose, local, Vector3.ZERO, Vector3.ZERO, XRPose.XR_TRACKING_CONFIDENCE_HIGH)
 
 

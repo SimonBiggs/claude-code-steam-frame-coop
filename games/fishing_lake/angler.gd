@@ -345,15 +345,18 @@ func attach_xr(origin: XROrigin3D, cam: XRCamera3D, left: XRController3D, right:
 ## Bot test: the same VR code, driven by plain nodes the bot moves around.
 func attach_fake_vr() -> void:
 	fake_vr = true
-	var origin := Node3D.new()
+	# Real XR node types (no headset drives them): offscreen VR tests find and move them like a headset would.
+	var origin := XROrigin3D.new()
 	main.add_child(origin)
-	var cam := Node3D.new()
+	var cam := XRCamera3D.new()
 	origin.add_child(cam)
 	cam.position = Vector3(0, 1.5, 0)
-	var left := Node3D.new()
+	var left := XRController3D.new()
+	left.tracker = "left_hand"
 	origin.add_child(left)
 	left.position = Vector3(-0.25, 1.1, -0.3)
-	var right := Node3D.new()
+	var right := XRController3D.new()
+	right.tracker = "right_hand"
 	origin.add_child(right)
 	right.position = Vector3(0.25, 1.1, -0.3)
 	_attach_hands(origin, cam, left, right)

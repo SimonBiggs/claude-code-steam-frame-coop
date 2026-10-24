@@ -191,7 +191,7 @@ var gh_t := 0.0
 
 func _ready() -> void:
 	randomize()
-	fake_vr = OS.has_environment("PS_FAKE_VR") and not OS.has_environment("DUO_JOIN")
+	fake_vr = (OS.has_environment("PS_FAKE_VR") or OS.has_environment("BOT_VR")) and not OS.has_environment("DUO_JOIN")
 	var xr := XRServer.find_interface("OpenXR")
 	var vr_on: bool = (xr != null and xr.is_initialized()) or fake_vr
 	world = WorldScript.new()

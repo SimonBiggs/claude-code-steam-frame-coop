@@ -176,7 +176,7 @@ func _ready() -> void:
 	Engine.set_meta("bb_simple", simple)  # levels.gd: the short SIMPLE_LEVELS
 	var xr := XRServer.find_interface("OpenXR")
 	vr_on = xr != null and xr.is_initialized() and not OS.has_environment("DUO_JOIN")
-	if OS.has_environment("BB_FAKE_VR") and not OS.has_environment("DUO_JOIN"):
+	if (OS.has_environment("BB_FAKE_VR") or OS.has_environment("BOT_VR")) and not OS.has_environment("DUO_JOIN"):
 		vr_on = true  # tests: run the VR code paths headless, without a headset
 	_build_world()
 	course = CourseScript.new()
