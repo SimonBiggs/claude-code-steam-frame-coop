@@ -36,7 +36,7 @@ const GAMES := [
 		"blurb": "VR drums with your hands; TV players hit notes on their highways"},
 	{"id": "penalty_shootout", "multi": true, "cat": "sports", "name": "PENALTY SHOOTOUT", "scene": "res://games/penalty_shootout/main.tscn",
 		"blurb": "VR goalkeeper saves with big gloves; TV strikers aim, power up and bend shots"},
-	{"id": "fishing_lake", "cat": "cosy", "name": "FISHING LAKE", "scene": "res://games/fishing_lake/main.tscn",
+	{"id": "fishing_lake", "multi": true, "cat": "cosy", "name": "FISHING LAKE", "scene": "res://games/fishing_lake/main.tscn",
 		"blurb": "Relaxing: VR casts and reels from the jetty; TV rowers herd fish and net treasure"},
 	{"id": "kart_race", "multi": true, "cat": "sports", "name": "KART RACE", "scene": "res://games/kart_race/main.tscn",
 		"blurb": "VR turns a real steering wheel; TV racers drive in split screen, with items and ramps"},

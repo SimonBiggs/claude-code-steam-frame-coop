@@ -472,6 +472,8 @@ func call_fish() -> void:
 
 
 func apply_remote_state(pos: Vector3, y: float, rowing: float) -> void:
+	if main != null and main.has_method("remote_owner_ok") and not main.remote_owner_ok(index):
+		return  # many machines: only the machine that owns this seat drives it
 	target_pos = pos
 	target_yaw = y
 	row_amount = rowing
@@ -479,7 +481,7 @@ func apply_remote_state(pos: Vector3, y: float, rowing: float) -> void:
 
 
 func _process(delta: float) -> void:
-	if remote and active:
+	if (remote or ghost) and active:  # ghost: another machine's boat, mirrored from snapshots
 		if position.distance_to(target_pos) > 4.0:
 			position = target_pos
 		else:
