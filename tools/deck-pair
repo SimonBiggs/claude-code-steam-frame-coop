@@ -6,7 +6,7 @@ KEY=~/.config/steamos-devkit/devkit_rsa
 LIST=~/.config/duo-arena/decks
 mkdir -p "$(dirname "$LIST")"; touch "$LIST"
 avahi-browse -rtp _steamos-devkit._tcp 2>/dev/null | awk -F';' '$1=="=" && $3=="IPv4"{print $4" "$8" "$9}' | sort -u |
-while read -r host ip port; do
+while read -r host ip port <&3; do
   name=${host%-steamdeck}; name=${name%-steam-deck}; [ "$name" = "$host" ] && name=$host
   alias="$name-deck"; [ "$host" = steamdeck ] && alias="steamdeck-$(echo "$ip" | tr . -)"
   if ! grep -q "^Host $alias\$" ~/.ssh/config 2>/dev/null; then
@@ -28,5 +28,5 @@ while read -r host ip port; do
   # In its Steam library for Gaming Mode (needs Steam running on the Deck; retried every run until it's there).
   ssh -o BatchMode=yes "$alias" 'grep -qa DuoArena ~/.local/share/Steam/userdata/*/config/shortcuts.vdf 2>/dev/null ||
     { pgrep -x steam >/dev/null && XDG_SESSION_TYPE=x11 steamos-add-to-steam ~/.local/share/applications/duo-arena.desktop >/dev/null 2>&1 && echo "added Living Room Arcade to the Steam library"; }' 2>/dev/null
-done
+done 3<&0 </dev/null  # ssh reads stdin: keep the Deck list on fd 3 or the first ssh swallows the rest
 exit 0
