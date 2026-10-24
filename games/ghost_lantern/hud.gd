@@ -1,5 +1,17 @@
 extends Control
 ## One flat-screen player's HUD: crosshair, courage bar, capture bar and a hint line.
+## Simple mode (visual teaching, no how-to words): no hint line; low in the view a pulsing glowing
+## button in this player's own controls plus a picture (cue.gd, UiKit glyph / icon):
+##  - lantern (split screen) in practice: MOUSE / STICK + a lantern beam + a ghost (shine on the sleepy
+##    ghost); a glowing arrow at the view's edge when the sleepy ghost is off screen.
+##  - vacuum: RT / SPACE / ENTER + a ghost when a lit ghost is in front (hold to vacuum it), and STICK /
+##    MOUSE / an arrow key + an arrow (with a glowing arrow at the view's edge) when the nearest lit ghost
+##    is off screen.
+##  - a pulsing bolt while this player's controller is unplugged.
+## Each goes once this player has done it twice (main.cue_did / cue_learned).
+
+const CueScript := preload("res://games/ghost_lantern/cue.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 var player
 var main
@@ -7,6 +19,13 @@ var hurt_flash := 0.0
 var name_label: Label
 var hint_label: Label
 var ui := 1.0  # shrinks with the view when many players share the TV
+# Simple mode picture cue (cue.gd) and what it counts towards.
+var cue: Control
+var cue_key := ""
+var cue_dir := ""
+var edge_on := false   # draw the glowing edge arrow towards edge_pos
+var edge_pos := Vector3.ZERO
+var last_catches := 0
 
 
 func _ready() -> void:
@@ -54,7 +73,12 @@ func _process(delta: float) -> void:
 	name_label.text = "P%d  ·  %s  ·  COURAGE" % [player.index + 1, role_name]
 	if main.simple:
 		name_label.text = "P%d" % (player.index + 1)
-	hint_label.text = _hint()
+	if main.simple:
+		hint_label.text = ""  # no how-to line: the picture cue shows it
+		hint_label.visible = false
+		_update_cue(delta)
+	else:
+		hint_label.text = _hint()
 	queue_redraw()
 
 
@@ -112,6 +136,8 @@ func _draw() -> void:
 	else:
 		draw_arc(c, 10.0, 0.0, TAU, 20, Color(0.85, 1.0, 0.75, 0.8), 2.0, true)
 	if main.simple:
+		if edge_on:
+			_draw_edge_arrow()
 		return  # no courage bar: nobody gets spooked
 	# Courage bar.
 	var bar_pos := Vector2(28, size.y - 50) * Vector2(ui, 1.0) + Vector2(0.0, 50.0 * (1.0 - ui))
@@ -120,3 +146,145 @@ func _draw() -> void:
 	draw_rect(Rect2(bar_pos - Vector2(3, 3), Vector2(bw + 6, bh + 6)), Color(0, 0, 0, 0.6))
 	var frac := clampf(player.courage / player.MAX_COURAGE, 0.0, 1.0)
 	draw_rect(Rect2(bar_pos, Vector2(bw * frac, bh)), Color(0.75, 0.45, 1.0).lerp(Color(0.45, 1.0, 0.6), frac))
+
+
+# --- Simple mode picture cues ---------------------------------------------------
+
+## The ghost this player should look at: the lantern's sleepy practice ghost, or (vacuum) the nearest
+## ghost that is showing (lit by the lantern, or glowing). null if none.
+func _target():
+	var best = null
+	var best_d := 14.0
+	for g in main.get_tree().get_nodes_in_group("ghosts"):
+		if player.role == "lantern":
+			if g.kind == "sleepy":
+				return g
+			continue
+		if g.kind == "sleepy" or (g.reveal < 0.35 and g.kind != "glowy"):
+			continue
+		var d: float = g.global_position.distance_to(player.global_position)
+		if d < best_d:
+			best_d = d
+			best = g
+	return best
+
+
+## Is pos inside this view (with a margin)?
+func _on_screen(pos: Vector3) -> bool:
+	var cam: Camera3D = player.camera
+	if cam == null or cam.is_position_behind(pos):
+		return false
+	var sp := cam.unproject_position(pos)
+	var m := size * 0.12
+	return sp.x > m.x and sp.y > m.y and sp.x < size.x - m.x and sp.y < size.y - m.y
+
+
+## [key, dir]: "plug", "shine" (lantern), "turn" (vacuum: a lit ghost off screen), "vac", or "".
+func _cue_now() -> Array:
+	edge_on = false
+	if not player.active or main.game_over or not main.ready_to_play or main.get_tree().paused \
+			or (main.net.mode == "client" and not main.synced):
+		return ["", ""]
+	if main.pad_lost(player.index):
+		return ["plug", ""]
+	var g = _target()
+	if g == null:
+		return ["", ""]
+	var pos: Vector3 = g.global_position
+	var on := _on_screen(pos)
+	if player.role == "lantern":
+		if not main.practice or main.cue_learned(player, "shine") or g.reveal > 0.5:
+			return ["", ""]
+		edge_on = not on
+		edge_pos = pos
+		return ["shine", ""]
+	if not on:
+		if main.cue_learned(player, "turn"):
+			return ["", ""]
+		edge_on = true
+		edge_pos = pos
+		var loc: Vector3 = player.camera.global_basis.inverse() * (pos - player.camera.global_position)
+		return ["turn", "right" if loc.x > 0.0 else "left"]
+	if main.cue_learned(player, "vac") or main.night > 3:
+		return ["", ""]
+	return ["vac", ""]
+
+
+## This player's own button for a cue.
+func _cue_button(k: String, dir: String, sc: float) -> Control:
+	var pad: bool = player.joy >= 0
+	if k == "vac":
+		if pad or not player.uses_keyboard():
+			return UiKit.glyph("RT", sc)
+		return UiKit.glyph("SPACE" if player.keys() == 0 else "ENTER", sc)
+	# Aim / turn: the stick, the mouse, or the arrow keys (P2 turns with left / right).
+	if pad:
+		return UiKit.glyph("STICK", sc)
+	if player.mouse_look:
+		return UiKit.glyph("MOUSE", sc)
+	if player.keys() == 1:
+		return CueScript.arrow_key(dir if dir != "" else "left", sc)
+	return UiKit.glyph("STICK", sc)
+
+
+func _update_cue(delta: float) -> void:
+	_count_cues()
+	if cue == null or not is_instance_valid(cue):
+		cue = CueScript.new()
+		add_child(cue)
+	var was := cue_key
+	var kd := _cue_now()
+	cue_key = kd[0]
+	cue_dir = kd[1]
+	if was == "turn" and cue_key != "turn" and cue_key != "plug":
+		main.cue_did(player, "turn")  # turned until the ghost came into view
+	var k: String = cue_key
+	var dir: String = cue_dir
+	var gc: Color = player.color.lerp(Color(0.75, 1.0, 0.85), 0.5)
+	cue.set_cue(k, "%s|%s|%s|%d" % [dir, player.joy >= 0, player.mouse_look, player.keys()], func(sc: float) -> Array:
+		match k:
+			"plug":
+				return [UiKit.icon("bolt", Color(1.0, 0.8, 0.3), 64.0 * sc)]
+			"shine":
+				return [_cue_button(k, dir, sc), CueScript.beam_icon(48.0 * sc), CueScript.ghost_icon(52.0 * sc)]
+			"turn":
+				return [_cue_button(k, dir, sc), UiKit.icon("arrow_" + dir, Color(1.0, 0.9, 0.45), 48.0 * sc)]
+		return [_cue_button(k, dir, sc), CueScript.ghost_icon(56.0 * sc, gc)], delta)
+
+
+## Catches come from the host (mirrored on the TV): count each new one.
+func _count_cues() -> void:
+	var n: int = int(main.tv_catches.get(player.index, 0))
+	for i in maxi(0, n - last_catches):
+		main.cue_did(player, "vac")
+	last_catches = n
+
+
+## A big glowing arrow at the edge of the view, pointing the way to edge_pos.
+func _draw_edge_arrow() -> void:
+	var cam: Camera3D = player.camera
+	if cam == null:
+		return
+	var loc: Vector3 = cam.global_basis.inverse() * (edge_pos - cam.global_position)
+	var d := Vector2(loc.x, -loc.y)
+	if loc.z > 0.0:
+		d = Vector2(1.0 if loc.x >= 0.0 else -1.0, 0.0)  # behind: point round the short way
+	if d.length() < 0.001:
+		d = Vector2.RIGHT
+	d = d.normalized()
+	var c := size / 2.0
+	var k := absf(sin(Time.get_ticks_msec() * 0.005))
+	var reach := minf(size.x, size.y) * 0.38
+	var at := c + d * (reach + 14.0 * k * ui)
+	var r := (46.0 + 10.0 * k) * maxf(ui, 0.6)
+	var side := Vector2(-d.y, d.x)
+	for i in 3:
+		draw_circle(at, r * (1.0 + 0.35 * i), Color(1.0, 0.95, 0.6, 0.12 * (1.0 - 0.3 * i)))
+	var tip := at + d * r
+	var pts := PackedVector2Array([tip, at - d * r * 0.2 + side * r * 0.75, at - d * r * 0.2 + side * r * 0.25,
+		at - d * r * 0.9 + side * r * 0.25, at - d * r * 0.9 - side * r * 0.25, at - d * r * 0.2 - side * r * 0.25,
+		at - d * r * 0.2 - side * r * 0.75])
+	var outline := pts.duplicate()
+	outline.append(pts[0])
+	draw_colored_polygon(pts, Color(1.0, 0.9, 0.45, 0.75 + 0.25 * k))
+	draw_polyline(outline, Color(0.3, 0.2, 0.05, 0.8), maxf(2.0, 3.0 * ui), true)

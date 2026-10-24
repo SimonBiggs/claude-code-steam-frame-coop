@@ -12,7 +12,8 @@ the friendly ghosts up and makes them dizzy; the TV players vacuum them.**
 - **Practice first.** The lantern-bearer gets a sleepy ghost floating in front of them (it only shows in
   the light); in VR a see-through ghost hand sweeps a lantern onto it. Keep the light on it until it wakes
   up, giggles and pops; then a second one. Each TV player gets one glowing ghost right in front of them
-  to vacuum ("HOLD RT!" until their first catch).
+  to vacuum (a pulsing RT / SPACE / ENTER button + a little ghost low in their view until they have
+  caught two).
 - **Gentle nights, one new thing each:** 1 three slow plain ghosts, 2 little fast sprites, 3 witch hats,
   4 the golden ghost, 5 the Ghost King (vacuum him together), 6 a mix and the sunrise, then more nights.
 - **Nothing goes wrong:** no photo stealing, no spooking, no game over. Bump into a ghost and it giggles
@@ -23,7 +24,12 @@ the friendly ghosts up and makes them dizzy; the TV players vacuum them.**
   cobweb whose spider abseils down, a creaky cupboard with a grinning pumpkin. TV players bump them.
 - Off: photos / LAST CHANCE, courage and cheering up, shy and snuffer ghosts, storms / parties / treats,
   the bell scaring ghosts (it just jingles), score and readouts, popups, hint panels, awards.
-  Text: one short headline ("NIGHT 2", "HOORAY!").
+  Text: one short headline ("NIGHT 2", "HOORAY!"). No how-to words: each TV view shows a pulsing glowing
+  button in that player's own controls plus a picture (hud.gd / cue.gd): RT / SPACE / ENTER + a ghost (vacuum),
+  STICK / MOUSE / an arrow key + an arrow and a glowing edge arrow (a lit ghost is off screen), MOUSE / STICK +
+  a lantern beam + a ghost (split-screen lantern practice), a bolt (controller unplugged). Each goes once done
+  twice. A glowing arrow bobs above the sleepy practice ghost for the lantern-bearer; "press A to join" is a
+  pulsing A + a person; PAUSED has no sentence.
 
 Everything below describes the full game (`SIMPLE_MODE := false`).
 
