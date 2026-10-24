@@ -20,7 +20,7 @@ const GAMES := [
 		"blurb": "Be a VR giant protecting a tiny tabletop village; TV players are the knights"},
 	{"id": "rocket_workshop", "cat": "cosy", "name": "ROCKET WORKSHOP", "scene": "res://games/rocket_workshop/main.tscn",
 		"blurb": "Cosy rocket puzzle: the VR pilot works the controls, the TV crew read the blueprints out loud"},
-	{"id": "marble_maze", "cat": "sports", "name": "MARBLE MAZE", "scene": "res://games/marble_maze/main.tscn",
+	{"id": "marble_maze", "multi": true, "cat": "sports", "name": "MARBLE MAZE", "scene": "res://games/marble_maze/main.tscn",
 		"blurb": "Ball racing: VR tilts a giant tabletop maze, everyone on the TV is a marble"},
 	{"id": "hide_and_seek", "cat": "party", "name": "HIDE AND SEEK", "scene": "res://games/hide_and_seek/main.tscn",
 		"blurb": "VR seeker with a torch; TV hiders sneak or disguise as lamps, plants and boxes"},
