@@ -22,7 +22,7 @@ const TOOL_COPIES: Record<string, string> = {  // installed file -> repo copy (k
   [join(HOME, ".local/share/brepl/peers.ts")]: "tools/brepl-peers.ts", [join(BIN, "brepl-tunnel")]: "tools/brepl-tunnel",
   [join(HOME, ".config/systemd/user/brepl-tunnel@.service")]: "tools/systemd/brepl-tunnel@.service",
   [join(BIN, "test-throttle")]: "tools/test-throttle", [join(BIN, "duo-deploy-deck")]: "tools/duo-deploy-deck",
-  [join(HOME, "GodotProjects/duo-arena-deck-build/run.sh")]: "tools/deck-run.sh",
+  [join(HOME, "GodotProjects/duo-arena-deck-build/run.sh")]: "tools/deck-run.sh", [join(HOME, "GodotProjects/duo-arena-deck-build/claude-rc.sh")]: "tools/deck/claude-rc.sh",
   [join(HOME, ".config/systemd/user/brepl.service")]: "tools/systemd/brepl.service", [join(BIN, "frame-at")]: "tools/frame-at", [join(BIN, "duo-deploy-frame")]: "tools/duo-deploy-frame",
 };
 
