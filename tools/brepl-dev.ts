@@ -326,7 +326,9 @@ async function sweepOne(id: string, seconds: number) {
         .map((i: any) => `"${String(i.text).slice(0, 30)}" @${i.rect.map((v: number) => Math.round(v)).join(",")}`);
       if (cut.length) r.problems.push(`text off screen: ${[...new Set(cut)].slice(0, 4).join("; ")}`);
       // Text drawn over other text (e.g. a timer pill on top of a score card).
-      const labels = (ui.items ?? []).filter((i: any) => i.text && String(i.text).trim() && i.rect && i.rect[2] > 2 && i.rect[3] > 2 && !String(i.path).includes("/GDev/"));
+      // (Labels stretched over most of the screen just centre their text, so their box says nothing: skip them.)
+      const labels = (ui.items ?? []).filter((i: any) => i.text && String(i.text).trim() && i.rect && i.rect[2] > 2 && i.rect[3] > 2
+        && i.rect[2] * i.rect[3] < 0.25 * 1920 * 1080 && !String(i.path).includes("/GDev/"));
       const over: string[] = [];
       for (let x = 0; x < labels.length; x++) for (let y = x + 1; y < labels.length; y++) {
         const [a, b] = [labels[x], labels[y]];
@@ -357,4 +359,35 @@ async function sweepOne(id: string, seconds: number) {
   }
   r.ok = !r.problems.length;
   return r;
+}
+
+/** Arcade card pictures: screenshot each game (default: all in arcade.gd GAMES) offscreen from the staging copy
+ *  after a few seconds of play, saved as arcade/thumbs/<id>.jpg (480x270), which the lobby cards load. Run after
+ *  adding a game or changing how one looks; deploy with duo-deploy. Long: run it in bg(). */
+export async function thumbs(o: { only?: string[] } = {}) {
+  const godot = (globalThis as any).godot;
+  const src = await readFile(join(STAGE, "arcade/arcade.gd"), "utf8");
+  const games = [...src.matchAll(/"id": "(\w+)".*?"scene": "(res:\/\/[^"]+)"/g)].map(m => ({ id: m[1], scene: m[2] }))
+    .filter(g => !o.only || o.only.includes(g.id));
+  const out = join(STAGE, "arcade/thumbs");
+  await mkdir(out, { recursive: true });
+  const done: string[] = [], failed: string[] = [];
+  let next = 0;
+  await Promise.all(Array.from({ length: await parallelGames() }, async () => {
+    while (next < games.length) {
+      const { id, scene } = games[next++];
+      let g: any;
+      try {
+        g = await godot.launch({ project: STAGE, scene, record: false });
+        await Bun.sleep(4000);
+        for (const [b, opt] of [["a"], ["lx", { value: 0.7, frames: 30 }], ["a"], ["ly", { value: -0.7, frames: 30 }]] as [string, any?][]) { await g.joy(b, opt ?? {}); await Bun.sleep(600); }
+        await Bun.sleep(2500);
+        const png = await g.shot(join(out, `${id}.png`), 640);
+        await sh(`uv run --quiet --with pillow python -c "from PIL import Image; import sys; Image.open(sys.argv[1]).convert('RGB').resize((480,270)).save(sys.argv[2], quality=82)" '${png}' '${join(out, id + ".jpg")}' && rm -f '${png}'`);
+        done.push(id);
+      } catch (e) { failed.push(`${id}: ${String(e).slice(0, 160)}`); }
+      finally { await g?.quit().catch(() => {}); }
+    }
+  }));
+  return { done: done.length, failed, dir: out };
 }

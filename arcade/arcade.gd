@@ -395,10 +395,20 @@ func _show_category(tab: int, focus_first: bool) -> void:
 		(cards[target] as Button).grab_focus()
 
 
+## arcade/thumbs/<id>.jpg (screenshots taken offscreen by Claude's dev.thumbs()), loaded straight from the
+## file so they need no import step; null (a text-only card) when there isn't one.
+func _thumb(id: String) -> Texture2D:
+	var path := "res://arcade/thumbs/%s.jpg" % id
+	if not FileAccess.file_exists(path):
+		return null
+	var img := Image.load_from_file(path)
+	return ImageTexture.create_from_image(img) if img else null
+
+
 func _make_card(i: int, colour: Color) -> Button:
 	var g: Dictionary = GAMES[i]
 	var b := Button.new()
-	b.custom_minimum_size = Vector2(600, 150)
+	b.custom_minimum_size = Vector2(600, 136)  # five rows plus the help line fit on a 1080p TV
 	b.focus_mode = Control.FOCUS_ALL
 	var normal := StyleBoxFlat.new()
 	normal.bg_color = Color(0.08, 0.08, 0.15)
@@ -415,26 +425,44 @@ func _make_card(i: int, colour: Color) -> Button:
 	b.add_theme_stylebox_override("hover", focus)
 	b.add_theme_stylebox_override("pressed", focus)
 	b.add_theme_stylebox_override("focus", focus)
+	# A screenshot of the game on the left (kids pick by picture), name and blurb beside it.
+	var row := HBoxContainer.new()
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_theme_constant_override("separation", 16)
+	b.add_child(row)
+	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	row.offset_left = 12
+	row.offset_right = -18
+	row.offset_top = 12
+	row.offset_bottom = -12
+	var thumb := _thumb(str(g.id))
+	if thumb:
+		var pic := TextureRect.new()
+		pic.texture = thumb
+		pic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		pic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		pic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+		pic.custom_minimum_size = Vector2(198, 112)
+		pic.clip_contents = true
+		row.add_child(pic)
 	var v := VBoxContainer.new()
 	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	v.add_theme_constant_override("separation", 6)
-	b.add_child(v)
-	v.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	v.offset_left = 22
-	v.offset_right = -22
-	v.offset_top = 16
-	v.offset_bottom = -12
+	row.add_child(v)
 	var name_label := Label.new()
 	name_label.text = str(g.name)
 	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	name_label.add_theme_font_size_override("font_size", 30)
+	name_label.add_theme_font_size_override("font_size", 28)
 	name_label.add_theme_color_override("font_color", colour)
 	v.add_child(name_label)
 	var blurb := Label.new()
 	blurb.text = str(g.blurb)
 	blurb.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	blurb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	blurb.add_theme_font_size_override("font_size", 19)
+	blurb.add_theme_font_size_override("font_size", 17)
+	blurb.max_lines_visible = 3  # a long blurb ends in "…" instead of spilling out of the card
+	blurb.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	blurb.add_theme_color_override("font_color", Color(0.85, 0.87, 0.95))
 	v.add_child(blurb)
 	b.pressed.connect(_start_everywhere.bind(i))
