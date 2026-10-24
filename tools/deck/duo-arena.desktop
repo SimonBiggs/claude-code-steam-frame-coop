@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Living Room Arcade
+Comment=Join the family's co-op games (Duo Arena arcade)
+Exec=/home/deck/DuoArena/run.sh
+Icon=applications-games
+Terminal=false
+Categories=Game;

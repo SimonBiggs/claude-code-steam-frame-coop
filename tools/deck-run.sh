@@ -15,4 +15,6 @@ else
   unset DUO_JOIN
 fi
 [ "$1" = "--solo" ] && shift
-exec ./godot --path ./game "$@" > game/.dev/game.log 2>&1
+# The Deck's own screen size (1280x800, 16:10), fullscreen: the games stretch to any aspect ("expand"), so no black
+# bars or scaling. An external display can override with DUO_RESOLUTION=1920x1080.
+exec ./godot --path ./game --fullscreen --resolution "${DUO_RESOLUTION:-1280x800}" "$@" > game/.dev/game.log 2>&1

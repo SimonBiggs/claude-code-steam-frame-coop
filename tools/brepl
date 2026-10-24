@@ -16,16 +16,20 @@ const args = process.argv.slice(2);
 
 if (args[0] === "--serve") {
   if (existsSync(SOCK)) unlinkSync(SOCK);
-  // Offscreen Godot test runs (~/.local/share/gdev/godot.ts): godot.launch("duo-arena"), g.ui(), g.joy("a"), g.shot()...
-  globalThis.godot = await import(`${process.env.HOME}/.local/share/gdev/godot.ts`).catch((e) => ({ error: String(e) }));
-  // Dev-loop helpers (~/.local/share/brepl/dev.ts): dev.help(), dev.debt(), dev.bots.all(), dev.stage.diff(), ...
-  globalThis.dev = await import(`${process.env.HOME}/.local/share/brepl/dev.ts`).catch((e) => ({ error: String(e) }));
-  // reload(): pick up edits to godot.ts / dev.ts without restarting (running offscreen games keep their old code).
-  globalThis.reload = async () => {
-    const t = Date.now();
-    globalThis.godot = await import(`${process.env.HOME}/.local/share/gdev/godot.ts?t=${t}`);
-    globalThis.dev = await import(`${process.env.HOME}/.local/share/brepl/dev.ts?t=${t}`);
-    return "reloaded godot + dev";
+  // Everything beyond this core lives in HOT-RELOADABLE modules (Simon, 2026-10-24: "hot-reload features that mean
+  // you don't have to restart"). Each may export start(ctx) / stop(); saving the file reloads it automatically
+  // (stop the old copy, import the new one, start it) and posts "reloaded <name>" to the channel. reload() reloads
+  // all. Running offscreen games keep their old code until relaunched. This core file itself still needs
+  // `brepl --restart` (it's kept small and stable: socket, jobs, channel, module loader).
+  //   godot  ~/.local/share/gdev/godot.ts    offscreen Godot runs: godot.launch(...), launchGroup(...)
+  //   dev    ~/.local/share/brepl/dev.ts     dev-loop helpers: dev.help()
+  //   alerts ~/.local/share/brepl/alerts.ts  watchers that post to the channel
+  //   peers  ~/.local/share/brepl/peers.ts   peer(name).send/eval/pipe between machines' REPLs
+  const MODULES = {
+    godot: `${process.env.HOME}/.local/share/gdev/godot.ts`,
+    dev: `${process.env.HOME}/.local/share/brepl/dev.ts`,
+    alerts: `${process.env.HOME}/.local/share/brepl/alerts.ts`,
+    peers: `${process.env.HOME}/.local/share/brepl/peers.ts`,
   };
   // Every call runs as a job with its own output (AsyncLocalStorage), so console.log and show() inside
   // concurrent or background work land in the right place (Simon, 2026-10-24: background by default).
@@ -186,9 +190,37 @@ if (args[0] === "--serve") {
     toBackground(job);
     return [...job.lines, `⏳ still running after ${waitS}s -> background job #${job.id} (result goes to the channel: brepl_poll)`].join("\n") + "\n";
   };
-  // Alerts (~/.local/share/brepl/alerts.ts): watchers that post to the channel by themselves (crashes, mic, memory,
-  // usage, game errors...), which wakes Claude's Monitor. alerts.list() / .add() / .off().
-  globalThis.alerts = await import(`${process.env.HOME}/.local/share/brepl/alerts.ts`).then((m) => (m.startAll(), m)).catch((e) => { send("⚠ alerts", `failed to load: ${e}`); return { error: String(e) }; });
+  const modCtx = { send, show, inspect };
+  globalThis.loadModule = async (name) => {
+    const path = MODULES[name];
+    if (!path || !(await Bun.file(path).exists())) return `${name}: no module`;
+    try { globalThis[name]?.stop?.(); } catch (e) { send("⚠ brepl", `${name}.stop failed: ${e}`); }
+    try {
+      const m = await import(`${path}?t=${Date.now()}`);
+      globalThis[name] = m;
+      await m.start?.(modCtx);
+      return `reloaded ${name}`;
+    } catch (e) {
+      send("⚠ brepl", `${name} failed to load: ${e?.stack ?? e}`);
+      globalThis[name] = { error: String(e) };
+      return `${name} failed: ${e}`;
+    }
+  };
+  globalThis.reload = async (...names) => (await Promise.all((names.length ? names : Object.keys(MODULES)).map((n) => globalThis.loadModule(n)))).join(", ");
+  for (const n of Object.keys(MODULES)) await globalThis.loadModule(n);
+  // Save a module = reload it (debounced; editors write files in several steps).
+  const { watch } = await import("node:fs");
+  const pending = {};
+  for (const [name, path] of Object.entries(MODULES)) {
+    const dir = path.slice(0, path.lastIndexOf("/")), file = path.slice(path.lastIndexOf("/") + 1);
+    try {
+      watch(dir, (_ev, f) => {
+        if (f !== file) return;
+        clearTimeout(pending[name]);
+        pending[name] = setTimeout(async () => send("brepl", await globalThis.loadModule(name)), 400);
+      });
+    } catch {}
+  }
   Bun.listen({
     unix: SOCK,
     socket: {

@@ -138,6 +138,13 @@ async function newErrors(path: string): Promise<string[]> {
 // --- Built-in alerts ----------------------------------------------------------------------------
 const meminfo = async () => Object.fromEntries((await Bun.file("/proc/meminfo").text()).split("\n").map((l) => l.split(/:\s+/)).map(([k, v]) => [k, parseInt(v) / 1024 / 1024]));
 
+/** Hot reload (brepl loads this module with start/stop): stop every watcher before the new copy starts. */
+export function stop() {
+  for (const name of [...all.keys()]) off(name);
+  all.clear();
+}
+export function start() { startAll(); }
+
 export function startAll() {
   // Microphone plugged in / unplugged (voice only works with one).
   add("mic", 5, async () => {
@@ -147,6 +154,7 @@ export function startAll() {
   }, { quietStart: true });
 
   add("voice-bridge", 30, async () => {
+    if ((await $`systemctl --user cat voice-bridge`.nothrow().quiet()).exitCode !== 0) return null;  // not on this machine (e.g. a Deck)
     const s = (await $`systemctl --user is-active voice-bridge`.nothrow().quiet()).stdout.toString().trim();
     return s === "active" ? null : `voice-bridge service is ${s}`;
   }, { recovered: "voice-bridge is running again" });
@@ -155,6 +163,25 @@ export function startAll() {
     const m = await meminfo();
     return m.MemAvailable < 1.5 ? `low memory: ${m.MemAvailable.toFixed(1)} GB free of ${m.MemTotal.toFixed(0)} GB` : null;
   }, { recovered: "memory ok again" });
+
+  // CPU (Simon, 2026-10-24: "keep an eye on the RAM and cpu usage"): 1-minute load above the thread count for
+  // 2 checks in a row = the family's game may stutter; name the biggest CPU users (tests are the usual cause).
+  let hot = 0;
+  add("cpu", 30, async () => {
+    const load = parseFloat((await Bun.file("/proc/loadavg").text()).split(" ")[0]);
+    const threads = navigator.hardwareConcurrency;
+    hot = load > threads ? hot + 1 : 0;
+    if (hot < 2) return null;
+    const top = (await $`ps -eo pcpu,comm --sort=-pcpu`.nothrow().quiet()).stdout.toString().split("\n").slice(1, 5).map(l => l.trim().replace(/\s+/, "% ")).join(", ");
+    return `CPU overloaded: load ${load.toFixed(1)} on ${threads} threads (top: ${top})`;
+  }, { recovered: "CPU load back to normal" });
+
+  // Memory headroom, logged as a trend: post when available memory drops below 3 GB (the low-memory alert
+  // above fires at 1.5 GB).
+  add("memory-trend", 30, async () => {
+    const m = await meminfo();
+    return m.MemAvailable < 3 ? `memory getting tight: ${m.MemAvailable.toFixed(1)} GB available` : null;
+  }, { recovered: "memory headroom back above 3 GB" });
 
   add("disk", 300, async () => {
     const out = (await $`df -BG --output=avail ${HOME}`.nothrow().quiet()).stdout.toString();

@@ -18,6 +18,10 @@ const TOOL_COPIES: Record<string, string> = {  // installed file -> repo copy (k
   [join(BIN, "voice-bridge")]: "tools/voice-bridge", [join(BIN, "claude-watchdog")]: "tools/claude-watchdog",
   [join(HOME, ".local/share/gdev/recsheet.py")]: "tools/recsheet.py", [join(HOME, ".local/share/brepl/dev.ts")]: "tools/brepl-dev.ts",
   [join(HOME, ".local/share/brepl/mcp.ts")]: "tools/brepl-mcp.ts", [join(HOME, ".local/share/brepl/alerts.ts")]: "tools/brepl-alerts.ts",
+  [join(HOME, ".local/share/brepl/peers.ts")]: "tools/brepl-peers.ts", [join(BIN, "brepl-tunnel")]: "tools/brepl-tunnel",
+  [join(HOME, ".config/systemd/user/brepl-tunnel@.service")]: "tools/systemd/brepl-tunnel@.service",
+  [join(BIN, "test-throttle")]: "tools/test-throttle", [join(BIN, "duo-deploy-deck")]: "tools/duo-deploy-deck",
+  [join(HOME, "GodotProjects/duo-arena-deck-build/run.sh")]: "tools/deck-run.sh",
   [join(HOME, ".config/systemd/user/brepl.service")]: "tools/systemd/brepl.service", [join(BIN, "frame-at")]: "tools/frame-at", [join(BIN, "duo-deploy-frame")]: "tools/duo-deploy-frame",
 };
 
@@ -509,3 +513,51 @@ export async function thumbs(o: { only?: string[] } = {}) {
   }));
   return { done: done.length, failed, dir: out };
 }
+
+// --- Steam Decks (and other devkit-paired SteamOS machines) ------------------------------------------
+// Simon, 2026-10-24: "can you do all this through your brepl?" One place to drive paired handhelds over SSH.
+// Machines: ssh aliases in ~/.ssh/config (simon-deck = Simon's Deck). Long-lived terminal programs run in a
+// tmux session under `systemd-run --user` (SteamOS kills an SSH session's children when it ends).
+export const deck = {
+  host: "simon-deck",
+  /** Run a shell command on the Deck: {code, out}. */
+  sh(cmd: string, host = deck.host) { return sh(`ssh -o BatchMode=yes -o ConnectTimeout=5 ${host} ${shq(cmd)}`); },
+  /** Is it reachable (on, awake, Developer Mode on)? */
+  async up(host = deck.host) { return (await deck.sh("true", host)).code === 0; },
+  /** Start a program in a detached tmux session that outlives SSH (e.g. "claude"). */
+  async start(name: string, cmd: string, host = deck.host) {
+    await deck.sh(`systemctl --user stop ${name} 2>/dev/null; tmux kill-session -t ${name} 2>/dev/null; true`, host);
+    return deck.sh(`systemd-run --user --unit=${name} --property=Type=forking --setenv=TERM=xterm-256color --setenv=BROWSER=true --working-directory=$HOME tmux new-session -d -s ${name} -x 220 -y 50 ${shq(cmd + "; echo EXITED; sleep 900")}`, host);
+  },
+  /** The session's screen (last `lines` non-empty lines). */
+  async screen(name: string, lines = 30, host = deck.host) {
+    const r = await deck.sh(`tmux capture-pane -p -t ${name} -S -200`, host);
+    return r.out.split("\n").filter(l => l.trim()).slice(-lines).join("\n");
+  },
+  /** Type into the session: text then Enter (enter=false to leave it), or tmux key names via keys([...]). */
+  type(name: string, text: string, enter = true, host = deck.host) { return deck.sh(`tmux send-keys -t ${name} -l ${shq(text)}${enter ? `; tmux send-keys -t ${name} Enter` : ""}`, host); },
+  keys(name: string, keys: string[], host = deck.host) { return deck.sh(`tmux send-keys -t ${name} ${keys.join(" ")}`, host); },
+  stop(name: string, host = deck.host) { return deck.sh(`systemctl --user stop ${name}; tmux kill-session -t ${name}; true`, host); },
+  /** Claude Code login without the Deck's browser: starts `claude`, walks the first-run screens, returns the
+   *  sign-in URL to open on any device; then deck.claudeCode(code) types the code it shows. */
+  async claudeLogin(host = deck.host) {
+    await deck.start("claude-login", "$HOME/.local/bin/claude", host);
+    for (let i = 0; i < 12; i++) {
+      await Bun.sleep(2000);
+      const s = await deck.screen("claude-login", 60, host);
+      const m = s.replace(/\n/g, "").match(/https:\/\/claude\.com\/cai\/oauth\S+?(?=Paste code|$)/);
+      if (m) return { url: m[0].replace(/\s+/g, ""), next: 'deck.claudeCode("<code from the page>")' };
+      if (/Choose the text style|Select login method|Press Enter|Security notes|trust/i.test(s)) await deck.keys("claude-login", ["Enter"], host);
+    }
+    return { error: "no sign-in URL appeared", screen: await deck.screen("claude-login", 20, host) };
+  },
+  async claudeCode(code: string, host = deck.host) {
+    await deck.type("claude-login", code.trim(), true, host);
+    await Bun.sleep(4000);
+    const ok = (await deck.sh("test -s ~/.claude/.credentials.json && echo yes", host)).out === "yes";
+    return { loggedIn: ok, screen: await deck.screen("claude-login", 12, host) };
+  },
+  /** Push the arcade to the Deck (same as duo-deploy-deck). */
+  deploy() { return sh("duo-deploy-deck"); },
+};
+const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
