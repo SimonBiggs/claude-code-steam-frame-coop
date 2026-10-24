@@ -791,12 +791,11 @@ func _refresh_all() -> void:
 	if int(net.state_get("qt", 0)) > 0:
 		info_text += "   %d / %d" % [int(net.state_get("qn", 0)), int(net.state_get("qt", 0))]
 	var show_pic := asking and kind == "picture"
-	# big screen
-	scr_info.text = (info_text + "   %ds" % int(net.state_get("time", 0))) if phase == "ask" else info_text
-	scr_info.visible = asking
-	# The question and answers on the big screen are for the VR player; a TV reads them on its HUD
+	# big screen. The question and answers on it are for the VR player; a TV reads them on its HUD
 	# (it sees the screen only in the picture round, where they would sit under the HUD twice over).
 	var scr_text := vr_rig != null
+	scr_info.text = (info_text + "   %ds" % int(net.state_get("time", 0))) if phase == "ask" else info_text
+	scr_info.visible = asking and scr_text
 	scr_question.text = String(q.get("text", "")) if asking and scr_text else ""
 	scr_center.visible = asking and not show_pic
 	scr_center.text = cat if kind == "warmup" or kind == "final" else ""
