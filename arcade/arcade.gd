@@ -370,7 +370,7 @@ func _launch(index: int) -> void:
 	var delay := 0.4 if mode == "host" else (0.9 if mode == "client" else 0.1)
 	if mode == "client":
 		_close_peer()
-	if has_meta("lobby_udp"):
+	if get_meta("lobby_udp", null) is PacketPeerUDP:
 		(get_meta("lobby_udp") as PacketPeerUDP).close()
 		remove_meta("lobby_udp")
 	get_tree().create_timer(delay).timeout.connect(func() -> void:
@@ -997,7 +997,7 @@ func _lobby_net(delta: float) -> void:
 	if starting or (OS.get_environment("DUO_JOIN_ORIGINAL") != "auto" and mode != "host"):
 		return
 	var base: int = int(OS.get_environment("DUO_PORT")) if OS.has_environment("DUO_PORT") else DEFAULT_PORT
-	if not has_meta("lobby_udp"):
+	if not get_meta("lobby_udp", null) is PacketPeerUDP:
 		# Port taken: retry twice a second (a null meta value erases the meta).
 		if Time.get_ticks_msec() < int(get_meta("lobby_retry_ms", 0)):
 			return
@@ -1050,7 +1050,7 @@ func _lobby_net(delta: float) -> void:
 
 
 func _listen_for_game() -> void:
-	if not has_meta("listen"):
+	if not get_meta("listen", null) is PacketPeerUDP:
 		# Port taken: retry twice a second (a null meta value erases the meta).
 		if Time.get_ticks_msec() < int(get_meta("listen_retry_ms", 0)):
 			return
