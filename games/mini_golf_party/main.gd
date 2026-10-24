@@ -720,8 +720,11 @@ func _make_tag(slot: int, mine: bool) -> Label3D:
 	# Flat screens: fixed_size keeps it readable however far the camera is (height ~ fraction of the view).
 	var t := UiKit.label3d(_name_of(slot), (0.05 if mine else 0.032) if flat else (0.07 if mine else 0.05), col, true)
 	t.fixed_size = flat
-	t.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	t.no_depth_test = true
+	# Flat screens only: always on top and facing the camera (a ball's tag must never hide behind the course).
+	# In VR both are off (docs/GAME_DEV_GUIDE.md "VR text and depth": far text over near hands, cross-eyed billboards).
+	var flat_only := flat and vr_rig == null
+	t.billboard = BaseMaterial3D.BILLBOARD_ENABLED if flat_only else BaseMaterial3D.BILLBOARD_DISABLED
+	t.no_depth_test = flat_only
 	t.vertical_alignment = VERTICAL_ALIGNMENT_TOP
 	if mine:
 		t.render_priority += 2  # your own tag in front of the others when the balls bunch up on the tee
