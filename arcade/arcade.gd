@@ -74,7 +74,7 @@ const GAMES := [
 		"blurb": "Dig up treasure on a sandy island while the VR giant's magic telescope shows where it hides!"},
 	{"id": "paper_planes", "cat": "party", "name": "PAPER PLANES", "scene": "res://games/paper_planes/main.tscn",
 		"blurb": "Throw and fly paper planes through floating hoops together. Rainbow hoops are worth 3!"},
-	{"id": "bubble_bath", "cat": "party", "name": "BUBBLE BATH", "scene": "res://games/bubble_bath/main.tscn",
+	{"id": "bubble_bath", "multi": true, "cat": "party", "name": "BUBBLE BATH", "scene": "res://games/bubble_bath/main.tscn",
 		"blurb": "Steer tiny boats to round up rubber ducks and sail them down the plug-hole, while the giant splashes up waves."},
 	{"id": "snowman_maker", "cat": "cosy", "name": "SNOWMAN MAKER", "scene": "res://games/snowman_maker/main.tscn",
 		"blurb": "Roll giant snowballs, stack them up, and give every snowman a carrot nose and a hat!"},

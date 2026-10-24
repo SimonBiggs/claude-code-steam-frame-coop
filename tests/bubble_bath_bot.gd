@@ -4,6 +4,7 @@ extends Node
 ## grabs ducks with the right glove (trigger) and throws them at the plug-hole.
 ## Local:      godot --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/bubble_bath_bot.tscn
 ## Networked:  DUO_PORT=81xx DUO_HOST=1 BOT_VR=1 ... & DUO_PORT=81xx DUO_JOIN=127.0.0.1 ... (same scene, real time)
+## Flat host: add DUO_FLAT_HOST=1 to the host (no VR: one bot pad plays slot 0 on the host).
 
 const BotKit := preload("res://tests/bot_kit.gd")
 
@@ -33,13 +34,13 @@ func _ready() -> void:
 	var host := OS.has_environment("DUO_HOST")
 	var t0 := 3.0 if client else 1.0
 	kit.at(t0, "%d TV players press A on their pads" % want, _join)
-	kit.at(t0 + 4.0, "P2 presses Y: one shared view", func() -> void: _press("y"))
+	kit.at(t0 + 4.0, "P2 presses Y: one shared view", func() -> void: _press_y())
 	kit.at(t0 + 5.0, "shared?", func() -> void:
-		if main.split != null:
+		if main.split != null and not main.flat:
 			kit.assert_true(main.split.is_shared(), "Y switched to the shared view"))
-	kit.at(t0 + 8.0, "P2 presses Y again: split screen", func() -> void: _press("y"))
+	kit.at(t0 + 8.0, "P2 presses Y again: split screen", func() -> void: _press_y())
 	kit.at(t0 + 9.0, "split?", func() -> void:
-		if main.split != null:
+		if main.split != null and not main.flat:
 			kit.assert_true(not main.split.is_shared(), "Y switched back to split screen"))
 	if not host:
 		kit.at(t0 + 10.0, "P2 presses Start: pause menu", func() -> void:
@@ -78,9 +79,17 @@ func _continue_results() -> String:
 
 func _join() -> void:
 	if main.net.mode == "host":
+		if main.flat:
+			kit.join_bot(main.party)  # a flat host (DUO_FLAT_HOST=1): one pad player here, in slot 0
 		return
 	for i in want:
 		kit.join_bot(main.party)
+
+
+## The view (split / shared) is shared by every machine: on a flat host the client's Y presses toggle it too.
+func _press_y() -> void:
+	if not main.flat:
+		_press("y")
 
 
 func _press(action: String) -> void:
@@ -197,7 +206,13 @@ func _report() -> String:
 func _checks() -> void:
 	var mode: String = main.net.mode
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
-	kit.assert_eq(main.party.player_count(), want, "%s: all %d TV players are seated" % [mode, want])
+	if mode == "client":
+		kit.assert_eq(main.party.local_slots().size(), want, "client: all %d local players are seated" % want)
+	else:
+		var host_p := 1 if main.flat else 0
+		kit.assert_eq(main.party.player_count(), want + host_p, "%s: all %d TV players (+%d on the host) are seated" % [mode, want, host_p])
+	if main.flat:
+		kit.assert_true(main.party.is_local(0) and main.boats.has(0) and main.cams.has(0), "flat host: slot 0 plays here with a camera")
 	kit.assert_true(int(main.net.state_get("total", 0)) > 0, "%s: ducks went down the plug" % mode)
 	kit.assert_true(int(main.net.state_get("round", 0)) >= 2, "%s: round 1 ended with results and round 2 started" % mode)
 	kit.assert_true(main.ducks.size() > 0, "%s: ducks float in the tub" % mode)
@@ -206,6 +221,6 @@ func _checks() -> void:
 	if main.vr_rig != null:
 		kit.assert_true(vr_throws > 0, "fake VR player grabbed and threw ducks")
 		kit.assert_true(int(main.splashes) > 3, "the fake VR glove splashed the water (%d)" % int(main.splashes))
-	if mode == "client":
+	if mode == "client" and main.vr_avatar != null:
 		kit.assert_true(int(main.splashes) > 3, "client: splashes from the VR player arrived (%d)" % int(main.splashes))
 		kit.assert_true(main.vr_avatar != null, "client: the VR player is drawn on the TV")
