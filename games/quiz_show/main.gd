@@ -214,10 +214,17 @@ func _build_world() -> void:
 		var x := -6.0 + k * 2.0
 		b.box(Vector3(0.12, 6.0, 0.06), MeshKit.at(Vector3(x, 3.2, -5.0)), Rounds.LETTER_COLORS[k % 4].darkened(0.2))
 	b.box(Vector3(7.0, 0.5, 0.6), MeshKit.at(Vector3(0.0, 0.25, -4.4)), Color(0.18, 0.17, 0.3))  # screen stand
-	var mi := MeshInstance3D.new()
-	mi.mesh = b.build()
-	mi.material_override = MeshKit.material(Color.WHITE)
-	add_child(mi)
+	# behind the contestants: an arc of audience steps and a wall with light strips
+	for k in 15:
+		var a := lerpf(-1.1, 1.1, k / 14.0)
+		var dir := Vector3(sin(a), 0.0, cos(a))
+		for row in 3:
+			var r := 6.4 + row * 0.9
+			b.box(Vector3(1.5, 0.45 + row * 0.45, 0.9), MeshKit.at(dir * r + Vector3(0.0, (0.45 + row * 0.45) * 0.5, 0.6), Vector3.ONE, Vector3(0.0, a, 0.0)),
+				Color(0.22, 0.2, 0.36).lightened(0.05 * row))
+		b.box(Vector3(1.6, 4.5, 0.3), MeshKit.at(dir * 9.4 + Vector3(0.0, 2.25, 0.6), Vector3.ONE, Vector3(0.0, a, 0.0)), Color(0.12, 0.11, 0.24))
+		b.box(Vector3(0.1, 3.4, 0.05), MeshKit.at(dir * 9.2 + Vector3(0.0, 2.6, 0.6), Vector3.ONE, Vector3(0.0, a, 0.0)), Rounds.LETTER_COLORS[k % 4].darkened(0.1))
+	add_child(MeshKit.instance(b.build()))
 	for k in 3:
 		var l := OmniLight3D.new()
 		l.light_color = [Color(1.0, 0.7, 0.9), Color(0.7, 0.85, 1.0), Color(1.0, 0.95, 0.7)][k]
@@ -229,7 +236,7 @@ func _build_world() -> void:
 
 ## Big screen: question on top, the picture (or the category) in the middle, the four answers below.
 func _build_screen() -> void:
-	var back := UiKit.panel3d(SCREEN_SIZE, Color(0.05, 0.06, 0.14), Color(1.0, 0.8, 0.3, 0.8), 0.12)
+	var back := UiKit.panel3d(SCREEN_SIZE, Color(0.05, 0.06, 0.14), Color(1.0, 0.8, 0.3, 0.8), 0.12, true)
 	back.position = SCREEN
 	add_child(back)
 	scr_info = UiKit.label3d("", 0.13, "gold", true)
@@ -244,10 +251,10 @@ func _build_screen() -> void:
 	for i in 4:
 		var t := {}
 		var pos := SCREEN + Vector3(-1.62 + 3.24 * (i % 2), -1.35 - 0.56 * int(i / 2), 0.03)
-		var p := UiKit.panel3d(Vector2(3.1, 0.48), Rounds.LETTER_COLORS[i].darkened(0.35), Rounds.LETTER_COLORS[i], 0.08)
+		var p := UiKit.panel3d(Vector2(3.1, 0.48), Rounds.LETTER_COLORS[i].darkened(0.35), Rounds.LETTER_COLORS[i], 0.08, true)
 		p.position = pos
 		add_child(p)
-		var l := UiKit.label3d("", 0.17, "white", true)
+		var l := UiKit.label3d("", 0.2, "white", true)
 		l.position = pos + Vector3(0.0, 0.0, 0.02)
 		add_child(l)
 		t["panel"] = p
@@ -265,9 +272,7 @@ func _build_desk() -> void:
 	b.box(Vector3(1.15, DESK_TOP, 0.42), MeshKit.at(d + Vector3(0.0, DESK_TOP * 0.5, 0.0)), Color(0.2, 0.18, 0.34))
 	b.box(Vector3(1.2, 0.04, 0.46), MeshKit.at(d + Vector3(0.0, DESK_TOP, 0.0)), Color(1.0, 0.8, 0.3))
 	b.box(Vector3(1.0, 0.25, 0.02), MeshKit.at(d + Vector3(0.0, DESK_TOP * 0.55, -0.22)), Color(0.36, 0.55, 1.0))
-	var desk := MeshInstance3D.new()
-	desk.mesh = b.build()
-	desk.material_override = MeshKit.material(Color.WHITE)
+	var desk := MeshKit.instance(b.build())
 	add_child(desk)
 	for i in 4:
 		var bt := Node3D.new()
@@ -319,12 +324,9 @@ func _ensure_podium(slot: int) -> void:
 	var p := {"node": node}
 	if not is_vr:
 		var b := MeshKit.Builder.new()
-		b.box(Vector3(0.9, 0.9, 0.5), MeshKit.at(Vector3(0.0, 0.45, -0.45)), Color(0.18, 0.17, 0.3))
-		b.box(Vector3(0.92, 0.12, 0.52), MeshKit.at(Vector3(0.0, 0.62, -0.45)), col)
-		var mi := MeshInstance3D.new()
-		mi.mesh = b.build()
-		mi.material_override = MeshKit.material(Color.WHITE)
-		node.add_child(mi)
+		b.box(Vector3(0.8, 0.5, 0.45), MeshKit.at(Vector3(0.0, 0.25, -0.5)), Color(0.18, 0.17, 0.3))
+		b.box(Vector3(0.82, 0.07, 0.47), MeshKit.at(Vector3(0.0, 0.5, -0.5)), col)
+		node.add_child(MeshKit.instance(b.build()))
 		var a := Creatures.humanoid({"class": LOOKS[slot % LOOKS.size()], "outfit": col, "seed": slot})
 		a.position = Vector3(0.0, 0.0, 0.05)
 		a.rotation.y = PI  # creatures face +Z: turn to the screen
@@ -333,7 +335,7 @@ func _ensure_podium(slot: int) -> void:
 		avatars[slot] = a
 	# score on the front (towards the screen and the TV camera), and an answer light
 	var s := UiKit.label3d("0", 0.13, col, true)
-	s.position = Vector3(0.0, 0.42, -0.71 if not is_vr else -0.66)
+	s.position = Vector3(0.0, 0.25 if not is_vr else 0.42, -0.735 if not is_vr else -0.66)
 	s.rotation.y = PI
 	node.add_child(s)
 	p["score"] = s
@@ -345,7 +347,7 @@ func _ensure_podium(slot: int) -> void:
 	sm.rings = 6
 	light.mesh = sm
 	light.material_override = MeshKit.material(Color(0.3, 0.3, 0.35))
-	light.position = Vector3(0.0, 1.02 if is_vr else 0.75, -0.68 if not is_vr else -0.42)
+	light.position = Vector3(0.0, 1.02 if is_vr else 0.58, -0.62 if not is_vr else -0.42)
 	node.add_child(light)
 	p["light"] = light
 	podiums[slot] = p
@@ -365,9 +367,9 @@ func _camera_shot(screen: bool, blend: float = 1.0) -> void:
 	if cam == null:
 		return
 	if screen:
-		cam.shot_look(Vector3(0.0, 3.0, -1.9), SCREEN + Vector3(0.0, 0.0, 0.0), blend)
+		cam.shot_look(Vector3(0.0, 2.9, -0.7), SCREEN + Vector3(0.0, -0.25, 0.0), blend)
 	else:
-		cam.shot_look(Vector3(0.0, 3.4, -3.6), Vector3(0.0, 1.0, 1.4), blend)
+		cam.shot_look(Vector3(0.0, 2.6, -2.4), Vector3(0.0, 1.1, 1.6), blend)
 
 
 # --- HUD (shared TV view) -------------------------------------------------------------------
@@ -425,11 +427,10 @@ func _make_hud(parent: Control) -> void:
 	bottom.offset_top = -18.0
 	bottom.offset_bottom = -18.0
 	join_prompt = UiKit.panel("pill")
+	join_prompt.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	join_prompt.add_child(UiKit.prompts([["A", "Join the quiz"]]))
-	hud.add_child(join_prompt)
-	UiKit.pin(join_prompt, Control.PRESET_CENTER)
-	join_prompt.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	join_prompt.grow_vertical = Control.GROW_DIRECTION_BOTH
+	bottom.add_child(join_prompt)
+	bottom.move_child(join_prompt, 0)
 
 
 # --- Players ------------------------------------------------------------------------------
@@ -588,7 +589,8 @@ func _run_show(delta: float) -> void:
 					net.event("tick", [])
 					sound("tick", -6.0)
 			if q_kind == "picture":
-				var want := mini(int(phase_t / (ask_time * 0.85) * float(TILE_COLS * TILE_ROWS)), TILE_COLS * TILE_ROWS - 2)
+				# one tile at first, then one every ~1.6 s; the last three stay until the answer
+				var want := mini(1 + int(phase_t / (ask_time * 0.9) * float(TILE_COLS * TILE_ROWS - 3)), TILE_COLS * TILE_ROWS - 3)
 				if want != int(net.state_get("tiles", 0)):
 					net.state_set("tiles", want)
 			var everyone := not contestants().is_empty()
@@ -792,7 +794,10 @@ func _refresh_all() -> void:
 	# big screen
 	scr_info.text = (info_text + "   %ds" % int(net.state_get("time", 0))) if phase == "ask" else info_text
 	scr_info.visible = asking
-	scr_question.text = String(q.get("text", "")) if asking else ""
+	# The question and answers on the big screen are for the VR player; a TV reads them on its HUD
+	# (it sees the screen only in the picture round, where they would sit under the HUD twice over).
+	var scr_text := vr_rig != null
+	scr_question.text = String(q.get("text", "")) if asking and scr_text else ""
 	scr_center.visible = asking and not show_pic
 	scr_center.text = cat if kind == "warmup" or kind == "final" else ""
 	if cat != "":
@@ -802,7 +807,7 @@ func _refresh_all() -> void:
 		scr_center.modulate = Color(1.0, 0.8, 0.3)
 	for i in 4:
 		var t: Dictionary = scr_tiles[i]
-		var on := asking and i < answers.size()
+		var on := asking and i < answers.size() and scr_text
 		(t.panel as Node3D).visible = on
 		(t.label as Node3D).visible = on
 		if on:
@@ -836,7 +841,7 @@ func _refresh_all() -> void:
 		return
 	_camera_shot(show_pic, 1.0)
 	ui_top.visible = asking
-	ui_bottom.visible = asking or phase == "intro"
+	ui_bottom.visible = asking or phase == "intro" or party.local_slots().is_empty()
 	join_prompt.visible = party.local_slots().is_empty() and phase != "results"
 	ui_timer.visible = phase == "ask"
 	ui_timer.set_time(float(net.state_get("time", 0)))
@@ -854,6 +859,11 @@ func _refresh_all() -> void:
 			continue
 		(t.label as Label).text = String(answers[i])
 		panel.modulate = Color(1, 1, 1, 0.35) if correct >= 0 and i != correct else Color.WHITE
+		if i == correct and not bool(panel.get_meta("pulsed", false)):
+			panel.set_meta("pulsed", true)
+			UiKit.pulse(panel, 1.06, 0.3)
+		elif correct < 0:
+			panel.set_meta("pulsed", false)
 		var pk: HBoxContainer = t.pickers
 		for c in pk.get_children():
 			c.queue_free()
@@ -914,7 +924,7 @@ func _refresh_picture(on: bool, id: String, qid: int, gone: int) -> void:
 			tile.mesh = bm
 			var c := Rounds.LETTER_COLORS[k % 4].darkened(0.25)
 			tile.material_override = MeshKit.material(c)
-			tile.position = Vector3(-1.6 + w * (k % TILE_COLS + 0.5), h * (int(k / TILE_COLS) + 0.5) - 0.05, 0.9)
+			tile.position = Vector3(-1.6 + w * (k % TILE_COLS + 0.5), h * (int(k / TILE_COLS) + 0.5) - 0.05, 0.7)
 			pic_root.add_child(tile)
 			pic_cover.append(tile)
 		var rng := RandomNumberGenerator.new()

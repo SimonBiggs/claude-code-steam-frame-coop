@@ -16,5 +16,15 @@ func _initialize() -> void:
 		var b := UiKit.face(d)
 		if not b.is_finite() or absf(b.determinant()) < 0.5:
 			fails.append("face(%s) degenerate" % d)
+	# World-space UI order: panels below text both on the TV (labels at VR_PRIO_TEXT) and in VR, where
+	# core/vr_text_guard.gd resets every Label3D to priority 0 (panels at 20 hid their own text).
+	if not (UiKit.VR_PRIO_PANEL < UiKit.VR_PRIO_HILITE and UiKit.VR_PRIO_HILITE < 0 and UiKit.VR_PRIO_TEXT > 0):
+		fails.append("VR UI priorities: panel %d, hilite %d must be < 0 (vr_text_guard puts labels at 0)" % [UiKit.VR_PRIO_PANEL, UiKit.VR_PRIO_HILITE])
+	for depth in [false, true]:
+		var pm := UiKit.panel3d(Vector2.ONE, UiKit.BG, Color.WHITE, 0.05, depth)
+		var m: StandardMaterial3D = pm.material_override
+		pm.free()
+		if m.render_priority >= 0:
+			fails.append("panel3d(depth_test=%s) priority %d would draw over VR text" % [depth, m.render_priority])
 	print("CORE MATH: %s" % ("PASS" if fails.is_empty() else "FAIL " + "; ".join(fails)))
 	quit(1 if not fails.is_empty() else 0)

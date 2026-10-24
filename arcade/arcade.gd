@@ -80,6 +80,8 @@ const GAMES := [
 		"blurb": "Roll giant snowballs, stack them up, and give every snowman a carrot nose and a hat!"},
 	{"id": "dodge_ball", "multi": true, "cat": "party", "name": "SOFT DODGEBALL", "scene": "res://games/dodge_ball/main.tscn",
 		"blurb": "A friendly VR giant throws squishy balls; dodge them and bop the target on his belly!"},
+	{"id": "quiz_show", "multi": true, "cat": "party", "name": "QUIZ SHOW", "scene": "res://games/quiz_show/main.tscn",
+		"blurb": "A TV quiz for the whole family: pick a level, answer with the coloured buttons, guess the hidden picture!"},
 ]
 ## Tabs on the TV (LB/RB) and in VR (stick left/right). Empty categories are hidden.
 const CATEGORIES := [
@@ -102,7 +104,7 @@ const SOLO := {
 	"snowman_maker": 2, "starship_crew": 2, "treasure_dig": 2,
 	"balloon_pop": 1, "bubble_bath": 1, "cannon_cove": 1, "crystal_saga": 1, "dungeon_delve": 1, "fishing_lake": 1,
 	"fruit_catch": 1, "mech_titans": 1, "mini_golf_party": 1, "paper_planes": 1, "rhythm_band": 1,
-	"sheep_round_up": 1, "tiny_town_tycoon": 1, "tower_stack": 1, "whack_a_mole": 1,
+	"sheep_round_up": 1, "tiny_town_tycoon": 1, "tower_stack": 1, "whack_a_mole": 1, "quiz_show": 1,
 }
 const VrText := preload("res://core/vr_text.gd")
 const DEFAULT_PORT := 7777
