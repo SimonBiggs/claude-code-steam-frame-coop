@@ -81,11 +81,18 @@ export async function launch(o: LaunchOpts | string): Promise<Game> {
   if (!(await Bun.file(join(proj, "project.godot")).exists())) throw new Error(`no Godot project at ${proj}`);
   await install(proj);
   const w = opts.width ?? 1920, h = opts.height ?? 1080;
+  // Ports handed out by this REPL stay reserved until the game quits: probing a port and releasing it before the
+  // game binds it raced between concurrent launches ("gdev control: cannot listen"). Kept on globalThis so a hot
+  // reload of this module keeps the reservations.
+  const reserved: Set<number> = ((globalThis as any).__gdevPorts ??= new Set<number>());
   let port = 0;
-  for (let i = 0; i < 50 && !port; i++) {
+  for (let i = 0; i < 200 && !port; i++) {
     const p = 21000 + Math.floor(Math.random() * 8000);
+    if (reserved.has(p) || reserved.has(p + 1000)) continue;
     try { Bun.listen({ hostname: "127.0.0.1", port: p, socket: { data() {} } }).stop(true); port = p; } catch {}
   }
+  reserved.add(port);
+  reserved.add(port + 1000);
   const dir = join(RUNS, String(port));
   await mkdir(join(dir, "data"), { recursive: true });
   const logPath = join(dir, "game.log");
@@ -248,6 +255,9 @@ export class Game {
     try { await this.cmd("quit"); await Bun.sleep(500); } catch {}
     try { process.kill(-this.child.pid!, "SIGTERM"); } catch {}
     running.delete(this.port);
+    const reserved: Set<number> | undefined = (globalThis as any).__gdevPorts;
+    reserved?.delete(this.port);
+    reserved?.delete(this.port + 1000);
   }
 }
 

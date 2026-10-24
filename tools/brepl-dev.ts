@@ -287,7 +287,10 @@ const MONKEY: [string, Record<string, number>?][] = [  // a scripted "kid with a
  *  "client1".., port, net: {start, afterJoin, end}, errors, fps, sound, frozen, sheets}], sheets[]} in
  *  ~/.cache/sweep/<id>-net.json. Problems name the machine ("client 2 not connected (fell back to local)",
  *  "client1's P3 is not seated on the host", "host: 1 distinct error(s): ..."). One group at a time by default. */
-export async function sweep(o: { only?: string[]; seconds?: number; concurrency?: number; vr?: boolean; net?: boolean; clients?: number; project?: string } = {}) {
+/** deck: true = test as a Steam Deck would run it: 1280x800 (16:10) and DUO_MACHINE_KIND=deck. Or set width/height/env. */
+export async function sweep(o: { only?: string[]; seconds?: number; concurrency?: number; vr?: boolean; net?: boolean; clients?: number; project?: string; deck?: boolean; width?: number; height?: number; env?: Record<string, string> } = {}) {
+  if (o.deck) o = { ...o, width: o.width ?? 1280, height: o.height ?? 800, env: { DUO_MACHINE_KIND: "deck", ...(o.env ?? {}) } };
+  sweepScreen = { w: o.width ?? 1920, h: o.height ?? 1080, env: o.env ?? {} };
   const proj = o.project ?? STAGE;
   const ids = o.only ?? (await readdir(join(proj, "games"))).filter(d => d !== "engine_template").sort();
   await mkdir(SWEEP, { recursive: true });
@@ -324,12 +327,15 @@ export async function parallelGames() {
 
 // vr: the game's VR player in fake VR too (BOT_VR=1): it looks around, swings both hands and pulls the trigger
 // while the TV pad mashes, and the sheets include the headset view (span-vr-*).
+// The screen the current sweep runs at (checks use it; never assume 1920x1080).
+let sweepScreen = { w: 1920, h: 1080, env: {} as Record<string, string> };
+
 async function sweepOne(id: string, seconds: number, vr = false, project = STAGE) {
   const godot = (globalThis as any).godot;
   const r: any = { id, ok: false, problems: [] as string[], errors: [] as string[], fps: 0, sound: false, frozen: false, sheets: [] as string[] };
   let g: any;
   try {
-    g = await godot.launch({ project, scene: `res://games/${id}/main.tscn`, vr });
+    g = await godot.launch({ project, scene: `res://games/${id}/main.tscn`, vr, width: sweepScreen.w, height: sweepScreen.h, env: sweepScreen.env });
     const head = vr ? (await g.vr().catch(() => null))?.head : null;
     if (vr && !head) r.problems.push("no VR player in fake VR (BOT_VR=1)");
     await Bun.sleep(3000);
@@ -465,13 +471,13 @@ async function inspect(g: any, r: any, head: any = null) {
     // Text cut off by the screen edge (a classic: set_anchors_preset without resetting the offsets).
     const ui = await g.ui().catch(() => ({ items: [] }));
     const cut = (ui.items ?? []).filter((i: any) => i.text && String(i.text).trim() && i.rect && !String(i.path).includes("/GDev/")
-      && (i.rect[0] < -4 || i.rect[1] < -4 || i.rect[0] + i.rect[2] > 1924 || i.rect[1] + i.rect[3] > 1084))
+      && (i.rect[0] < -4 || i.rect[1] < -4 || i.rect[0] + i.rect[2] > sweepScreen.w + 4 || i.rect[1] + i.rect[3] > sweepScreen.h + 4))
       .map((i: any) => `"${String(i.text).slice(0, 30)}" @${i.rect.map((v: number) => Math.round(v)).join(",")}`);
     if (cut.length) r.problems.push(`text off screen: ${[...new Set(cut)].slice(0, 4).join("; ")}`);
     // Text drawn over other text (e.g. a timer pill on top of a score card).
     // (Labels stretched over most of the screen just centre their text, so their box says nothing: skip them.)
     const labels = (ui.items ?? []).filter((i: any) => i.text && String(i.text).trim() && i.rect && i.rect[2] > 2 && i.rect[3] > 2
-      && i.rect[2] * i.rect[3] < 0.25 * 1920 * 1080 && !String(i.path).includes("/GDev/"));
+      && i.rect[2] * i.rect[3] < 0.25 * sweepScreen.w * sweepScreen.h && !String(i.path).includes("/GDev/"));
     const over: string[] = [];
     for (let x = 0; x < labels.length; x++) for (let y = x + 1; y < labels.length; y++) {
       const [a, b] = [labels[x], labels[y]];

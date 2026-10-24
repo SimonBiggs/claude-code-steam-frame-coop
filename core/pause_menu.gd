@@ -8,6 +8,12 @@ var main
 var panel: ColorRect
 var buttons: Array[Button] = []
 var who := 1  # party games: the slot that opened the menu (sent with the pause, 1 otherwise)
+## Who may drive the open menu: the pad that opened it (-2 = the keyboard). -3 = opened without a local pad (a
+## remote / VR / network pause, or code calling _open()): no local pad drives it until one CLAIMS it with a fresh A
+## (pressed after being released), so a player still playing can't press "Back to Arcade" for everyone.
+## Other players still holding a stick / mashing A must not move the highlight or press Restart.
+var opener_device := -1
+var _a_released := {}  # device -> true once its A was let go after the menu opened (a held A doesn't count)
 
 
 func _ready() -> void:
@@ -63,13 +69,30 @@ func _input(event: InputEvent) -> void:
 	var pad := event as InputEventJoypadButton
 	if pad and pad.pressed and pad.button_index == JOY_BUTTON_START and (panel.visible or _pad_in_play(pad.device)):
 		toggle = true
-	# A presses the highlighted button, B resumes: ui_accept has no pad button, so on a Deck / without Steam's
-	# keyboard mapping A did nothing ("I can't press A to quit game").
+	# While open, only the opener's pad (or the keyboard) drives the menu: swallow everyone else's pad input.
+	var joy_dev := -99
+	if event is InputEventJoypadButton or event is InputEventJoypadMotion:
+		joy_dev = event.device
+	if pad and not pad.pressed and pad.button_index == JOY_BUTTON_A:
+		_a_released[pad.device] = true
+	if panel.visible and joy_dev != -99 and opener_device == -3 and not toggle:
+		get_viewport().set_input_as_handled()
+		if pad and pad.pressed and pad.button_index == JOY_BUTTON_A and _a_released.get(pad.device, false):
+			opener_device = pad.device  # claimed: this pad drives the menu from now on (this press only claims)
+			_a_released[pad.device] = false
+		return
+	if panel.visible and joy_dev != -99 and opener_device >= 0 and joy_dev != opener_device and not toggle:
+		get_viewport().set_input_as_handled()
+		return
+	# A presses the highlighted button (once that pad's A was released since opening), B resumes: ui_accept has no
+	# pad button, so on a Deck / without Steam's keyboard mapping A did nothing ("I can't press A to quit game").
 	if pad and pad.pressed and panel.visible and not toggle:
 		if pad.button_index == JOY_BUTTON_A:
+			get_viewport().set_input_as_handled()
+			if not _a_released.get(pad.device, false):
+				return  # still held from play
 			var f := get_viewport().gui_get_focus_owner()
 			if f is BaseButton and panel.is_ancestor_of(f):
-				get_viewport().set_input_as_handled()
 				(f as BaseButton).pressed.emit()
 			return
 		if pad.button_index == JOY_BUTTON_B:
@@ -81,7 +104,7 @@ func _input(event: InputEvent) -> void:
 		_resume()
 	else:
 		who = _slot_of(-2 if key != null else pad.device)
-		_open()
+		_open(-2 if key != null else pad.device)
 
 
 ## Party games: which slot pressed Start / Esc (-2 = the keyboard). Others: 1, as before.
@@ -116,7 +139,9 @@ func _pad_in_play(device: int) -> bool:
 	return not any_owned
 
 
-func _open() -> void:
+func _open(by_device: int = -3) -> void:
+	opener_device = by_device
+	_a_released.clear()
 	panel.visible = true
 	get_tree().paused = true
 	if main and main.net:

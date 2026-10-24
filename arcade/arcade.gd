@@ -88,7 +88,22 @@ const CATEGORIES := [
 	{"id": "party", "name": "PARTY", "color": Color(1.0, 0.8, 0.3)},
 	{"id": "sports", "name": "SPORTS & RACING", "color": Color(0.35, 0.9, 0.5)},
 	{"id": "cosy", "name": "COSY & PUZZLE", "color": Color(0.45, 0.8, 1.0)},
+	# A filter, not a home category: every game one person can play (SOLO below), made-for-solo ones first.
+	{"id": "solo", "name": "1 PLAYER", "color": Color(1.0, 0.6, 0.85)},
 ]
+## Playable by ONE player (Simon, 2026-10-24: a "supports single player" tier and filter). 2 = made for solo (a solo
+## mode or CPU partners; a ★ badge on the card), 1 = works alone but best with friends, missing = needs people
+## (Hide and Seek, Paint and Guess). From dev.soloCheck() (every game played offscreen with one pad) + each game's
+## own solo features. One table so it lives in one place.
+const SOLO := {
+	"bee_garden": 2, "block_builders": 2, "dodge_ball": 2, "dragon_rider": 2, "duo_arena": 2, "elemental_bender": 2,
+	"ghost_lantern": 2, "giants_table": 2, "kart_race": 2, "kitchen_rush": 2, "marble_maze": 2, "obstacle_rush": 2,
+	"party_board": 2, "penalty_shootout": 2, "rocket_workshop": 2, "roller_coaster": 2, "snowball_blitz": 2,
+	"snowman_maker": 2, "starship_crew": 2, "treasure_dig": 2,
+	"balloon_pop": 1, "bubble_bath": 1, "cannon_cove": 1, "crystal_saga": 1, "dungeon_delve": 1, "fishing_lake": 1,
+	"fruit_catch": 1, "mech_titans": 1, "mini_golf_party": 1, "paper_planes": 1, "rhythm_band": 1,
+	"sheep_round_up": 1, "tiny_town_tycoon": 1, "tower_stack": 1, "whack_a_mole": 1,
+}
 const VrText := preload("res://core/vr_text.gd")
 const DEFAULT_PORT := 7777
 const JOIN_TIMEOUT_MS := 5000
@@ -354,6 +369,9 @@ func _launch(index: int) -> void:
 
 
 func _process(_delta: float) -> void:
+	if not has_meta("pad_ui"):  # here, not only in _ready: a hot-reloaded arcade gets it too
+		set_meta("pad_ui", true)
+		preload("res://core/ui_kit.gd").ensure_pad_ui_actions()
 	_lobby_net(_delta)
 	_ensure_shared_nodes()
 	_ensure_fullscreen()
@@ -424,15 +442,18 @@ func _build_tv_menu() -> void:
 	tab_bar.add_theme_constant_override("separation", 10)
 	box.add_child(tab_bar)
 	grid = GridContainer.new()
-	grid.columns = 3
+	# As many 600 px columns as the screen really fits (a 16:9 TV: 3; a 16:10 Steam Deck: 2), instead of a fixed 3
+	# that ran off the Deck's screen.
+	var vis_w := get_viewport().get_visible_rect().size.x
+	grid.columns = clampi(int((vis_w - 40.0) / 618.0), 1, 3)
 	grid.add_theme_constant_override("h_separation", 18)
 	grid.add_theme_constant_override("v_separation", 16)
 	var center := CenterContainer.new()
-	center.custom_minimum_size = Vector2(1860, 0)
+	center.custom_minimum_size = Vector2(minf(1860.0, vis_w - 20.0), 0)
 	center.add_child(grid)
 	box.add_child(center)
 	var hint := Label.new()
-	hint.text = "LB / RB (Q / E): change category   ·   D-pad / arrows: choose   ·   A / Enter: play   ·   more games: just ask Claude!"
+	hint.text = "LB / RB (Q / E): change category   ·   D-pad / arrows: choose   ·   A / Enter: play" + ("   ·   Start: quit" if _can_quit() else "") + "   ·   more games: just ask Claude!"
 	hint.add_theme_font_size_override("font_size", 20)
 	hint.add_theme_color_override("font_color", Color(0.6, 0.65, 0.8))
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -446,10 +467,16 @@ func tabs() -> Array[int]:
 	var out: Array[int] = []
 	for c in CATEGORIES.size():
 		for g in GAMES:
-			if str(g.get("cat", "action")) == str(CATEGORIES[c].id):
+			if _in_category(g, str(CATEGORIES[c].id)):
 				out.append(c)
 				break
 	return out
+
+
+func _in_category(g: Dictionary, cat_id: String) -> bool:
+	if cat_id == "solo":
+		return int(SOLO.get(str(g.get("id", "")), 0)) > 0
+	return str(g.get("cat", "action")) == cat_id
 
 
 func _cat_index_of(game_index: int) -> int:
@@ -466,9 +493,15 @@ func _games_in(tab: int) -> Array[int]:
 	if t.is_empty():
 		return out
 	var c: int = t[clampi(tab, 0, t.size() - 1)]
+	var id := str(CATEGORIES[c].id)
 	for i in GAMES.size():
-		if str(GAMES[i].get("cat", "action")) == str(CATEGORIES[c].id):
+		if _in_category(GAMES[i], id):
 			out.append(i)
+	if id == "solo":  # made-for-solo games first, otherwise the usual order
+		out.sort_custom(func(a: int, b: int) -> bool:
+			var sa := int(SOLO.get(str(GAMES[a].id), 0))
+			var sb := int(SOLO.get(str(GAMES[b].id), 0))
+			return sa > sb if sa != sb else a < b)
 	return out
 
 
@@ -565,7 +598,7 @@ func _make_card(i: int, colour: Color) -> Button:
 	v.add_theme_constant_override("separation", 6)
 	row.add_child(v)
 	var name_label := Label.new()
-	name_label.text = str(g.name)
+	name_label.text = str(g.name) + ("  ★ SOLO" if int(SOLO.get(str(g.id), 0)) == 2 else "")
 	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	name_label.add_theme_font_size_override("font_size", 28)
 	name_label.add_theme_color_override("font_color", colour)
@@ -584,8 +617,95 @@ func _make_card(i: int, colour: Color) -> Button:
 	return b
 
 
+## gdev hot reload hook: rebuild what _ready built once (the TV menu is sized to the screen at build time).
+func _on_hot_reload() -> void:
+	preload("res://core/ui_kit.gd").ensure_pad_ui_actions()
+	if quit_panel and is_instance_valid(quit_panel):
+		return
+	for c in get_children():
+		if c is CanvasLayer:
+			c.queue_free()
+	buttons.clear()
+	cards.clear()
+	_build_tv_menu.call_deferred()
+
+
+## Quitting the arcade: on handhelds (Steam Deck) and plain local launches; never on the TV, which stays on (kids).
+func _can_quit() -> bool:
+	return my_kind != "tv" or OS.has_environment("ARCADE_ALLOW_QUIT")
+
+
+var quit_panel: PanelContainer
+var quit_opener := -1  # the pad that opened the quit dialog (-2 keyboard); only it may answer (same rule as the pause menu)
+var quit_a_released := false
+
+func _toggle_quit_menu() -> void:
+	if quit_panel and is_instance_valid(quit_panel):
+		quit_panel.queue_free()
+		quit_panel = null
+		if cards.has(selected):
+			(cards[selected] as Button).grab_focus()
+		return
+	var layer := CanvasLayer.new()
+	layer.layer = 20
+	add_child(layer)
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.6)
+	layer.add_child(dim)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	quit_panel = PanelContainer.new()
+	var box := StyleBoxFlat.new()
+	box.bg_color = Color(0.1, 0.09, 0.2)
+	box.border_color = Color(0.45, 0.85, 1.0)
+	box.set_border_width_all(3)
+	box.set_corner_radius_all(18)
+	box.set_content_margin_all(28)
+	quit_panel.add_theme_stylebox_override("panel", box)
+	layer.add_child(quit_panel)
+	preload("res://core/ui_kit.gd").pin(quit_panel, Control.PRESET_CENTER)
+	quit_panel.tree_exited.connect(layer.queue_free)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 14)
+	quit_panel.add_child(v)
+	var t := Label.new()
+	t.text = "Quit the arcade?"
+	t.add_theme_font_size_override("font_size", 34)
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(t)
+	for item in [["Keep playing", _toggle_quit_menu], ["Quit", func() -> void: get_tree().quit()]]:
+		var b := Button.new()
+		b.text = item[0]
+		b.custom_minimum_size = Vector2(360, 64)
+		b.add_theme_font_size_override("font_size", 28)
+		b.pressed.connect(item[1])
+		v.add_child(b)
+	(v.get_child(1) as Button).grab_focus()
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if grid == null or starting:
+		return
+	var start := event as InputEventJoypadButton
+	var esc := event as InputEventKey
+	if _can_quit() and ((start and start.pressed and start.button_index == JOY_BUTTON_START) or (esc and esc.pressed and not esc.echo and esc.physical_keycode == KEY_ESCAPE) or (quit_panel and start and start.pressed and start.button_index == JOY_BUTTON_B)):
+		get_viewport().set_input_as_handled()
+		if not (quit_panel and is_instance_valid(quit_panel)):
+			quit_opener = start.device if start else -2
+			quit_a_released = false
+		_toggle_quit_menu()
+		return
+	if quit_panel and is_instance_valid(quit_panel):
+		# The dialog presses its own focused button on pad A (don't rely on ui_accept having A: a hot-reloaded arcade
+		# never ran ensure_pad_ui_actions at startup, and A did nothing).
+		if start and quit_opener >= 0 and start.device != quit_opener:
+			return  # another player's pad
+		if start and not start.pressed and start.button_index == JOY_BUTTON_A:
+			quit_a_released = true
+		if start and start.pressed and start.button_index == JOY_BUTTON_A and quit_a_released:
+			var f := get_viewport().gui_get_focus_owner()
+			if f is BaseButton and quit_panel.is_ancestor_of(f):
+				get_viewport().set_input_as_handled()
+				(f as BaseButton).pressed.emit()
 		return
 	var step := 0
 	var pad := event as InputEventJoypadButton
