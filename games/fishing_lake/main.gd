@@ -16,6 +16,9 @@ extends Node3D
 ## (day 2), Old Whiskers (late on day 2+) and the night + moonfish (day 3) come one at a time. Off:
 ## target score, upgrades, journal, treasure maps / bottles, frenzy, streaks, multipliers, awards, line
 ## snaps, the stats boards and nearly all text (one short headline at a time).
+## No how-to words at all: the TV views show picture cues (a glowing pad button + an icon, CUES) that
+## fade after the kid has done the move twice; VR gets the shared Cannon Cove ghost hand doing the cast
+## and a glowing arrow over the practice ring.
 
 const VrText := preload("res://core/vr_text.gd")
 const SfxScript := preload("res://core/sfx.gd")
@@ -28,6 +31,18 @@ const BoatScript := preload("res://games/fishing_lake/boat.gd")
 const AnglerScript := preload("res://games/fishing_lake/angler.gd")
 const MusicScript := preload("res://games/fishing_lake/calm_music.gd")
 const JoinListenerScript := preload("res://games/fishing_lake/join_listener.gd")
+const UiKit := preload("res://core/ui_kit.gd")
+const CoveGhostHand := preload("res://games/cannon_cove/ghost_hand.gd")  # shared see-through hand
+
+## Simple mode picture cues on the TV views (no words): [pad button, icons, icon colour].
+const CUES := {
+	"cast": ["A", ["arrow_up"], Color(1.0, 0.92, 0.45)],
+	"reel": ["A", ["play"], Color(0.4, 1.0, 0.5)],
+	"splash": ["A", ["drop"], Color(0.55, 0.85, 1.0)],
+	"scoop": ["A", ["coin"], Color(1.0, 0.85, 0.3)],
+	"row": ["", ["arrow_left", "arrow_up", "arrow_right"], Color(1.0, 0.92, 0.45)],
+	"call": ["X", ["music", "exclaim"], Color(1.0, 0.9, 0.2)],
+}
 
 const SIMPLE_MODE := true
 const PRACTICE_SKIP := 60.0  # the practice gives up waiting after this long
@@ -164,6 +179,7 @@ var practice_pos := Vector3.ZERO
 var practice_misses := 0
 var reel_icon: Node3D
 var ghost_demo: Node3D
+var practice_arrow: Node3D
 var ready_idle_t := 0.0
 
 var center_label: Label
@@ -1216,8 +1232,8 @@ func _end_day() -> void:
 		stars = 1
 	if SIMPLE_MODE:
 		var n := fish_caught()
-		_show_center("SUNSET!  %d FISH" % n, 0.0)
-		day_summary = "SUNSET!\n%d FISH" % n
+		_show_center("SUNSET!", 0.0)  # the count stays on the board (and the HUD): no second copy of it
+		day_summary = "FISH\n%d" % n
 		summary_day = day
 		net.event("board", [day_summary, day])
 		fanfare()
@@ -1841,14 +1857,16 @@ func on_bite_missed(pos: Vector3) -> void:
 func on_hooked(f) -> void:
 	sound("hook", 0.0, 1.0, true)
 	var lp: Vector3 = players[0].lure_pos
-	if SIMPLE_MODE:  # one short word, floating where everybody is looking
-		var word := "FISH ON!"
+	if SIMPLE_MODE:  # the pulsing reel icon says "fish on"; only a special fish gets a word, ABOVE the icon
+		var word := ""
 		if f.kind == FishScript.LEGEND:
 			word = "OLD WHISKERS!"
 			sound("legend", 0.0, 1.3, true)
 		elif float(f.info()["pull"]) >= 0.6:
 			word = "BIG ONE!"
-		popup(lp + Vector3(0, 1.0, 0), word, Color(1.0, 0.85, 0.3), true, 1.5)
+		burst(lp + Vector3(0, 0.3, 0), Color(1.0, 0.85, 0.3), 12)
+		if word != "":
+			popup(lp + Vector3(0, 2.6, 0), word, Color(1.0, 0.85, 0.3), true, 1.5)
 		return
 	var text := "FISH ON!" if not f.is_junk() else "Something heavy..."
 	if f.kind == FishScript.LEGEND:
@@ -2035,8 +2053,7 @@ func _simple_catch(f) -> void:
 		sound("golden", 0.0, 1.0, true)
 		burst(tip, Color(1.0, 0.85, 0.2), 30)
 		fanfare()
-	elif float(d["pull"]) >= 0.6:
-		headline = "BIG ONE!"
+	elif float(d["pull"]) >= 0.6:  # "BIG ONE!" already floated over the bobber when it was hooked
 		sound("catch", 0.0, 0.9, true)
 		fanfare()
 	else:
@@ -2694,7 +2711,7 @@ func tip_text(p) -> String:
 	if net.mode == "client" and not synced:
 		return ""
 	if SIMPLE_MODE:
-		return _simple_tip(p)
+		return ""  # simple mode: picture cues instead (_simple_cue)
 	if state == "over":
 		return "Press A for another day!"
 	var a = players[0]
@@ -2733,38 +2750,111 @@ func tip_text(p) -> String:
 	return "Look for floating treasure (A scoops it) - coins upgrade your boat!"
 
 
-## Simple mode: one short line at most, only when there's something to do right now.
-func _simple_tip(p) -> String:
+## Simple mode: no words. Which picture cue (a glowing button + a little icon, see CUES) this player
+## needs right now, or "" for nothing. Each cue goes away after the player has done it twice.
+func _simple_cue(p) -> String:
 	if state != "play":
 		return ""
 	var a = players[0]
 	var ls: String = a.line_state
 	if p.index == 0:  # split screen angler (VR gets the ghost hand and the reel icon instead)
-		if ls == "ready" and (practice or a.casts < 3 or ready_idle_t > 8.0):
-			return "Hold A ... let go: CAST!"
-		if ls == "bite" or (ls == "fight" and not a.surge):
-			return "Hold A: REEL!"
+		if ls == "ready" and (practice or a.casts < 2 or ready_idle_t > 12.0):
+			return "cast"
+		if (ls == "bite" or (ls == "fight" and not a.surge)) and (practice or fish_caught() < 2):
+			return "reel"
 		return ""
 	var bp: Vector3 = p.global_position
 	if ls == "fight":
-		return "A: SPLASH!" if _flat_dist(bp, a.lure_pos) < 5.0 else ""
+		return _cue_if_new(p, "splash") if _flat_dist(bp, a.lure_pos) < 5.0 else ""
 	var np: Vector3 = p.net_point()
 	for t in treasures:
 		if t.kind >= 0 and _flat_dist(t.position, np) < p.net_reach() + 1.0:
-			return "A: SCOOP!"
-	if state_t < 12.0 and day == 1:
-		return "Left stick: ROW"
+			return _cue_if_new(p, "scoop")
+	if day == 1 and state_t < 20.0:
+		var row := _cue_if_new(p, "row")
+		if row != "":
+			return row
 	if ls == "waiting":
 		for f in fish:
 			if f.kind >= 0 and FishScript.is_species(f.kind) and f.free_to_bite() and _flat_dist(f.position, bp) < 7.0:
-				return "X: call a fish!"
+				return _cue_if_new(p, "call")
 	return ""
 
 
+func _cue_if_new(p, key: String) -> String:
+	var done: Dictionary = p.get_meta("cue_done", {})
+	return key if int(done.get(key, 0)) < 2 else ""
+
+
+## A boat pressed a button (A or X): if that's what its cue was asking for, count it.
+func cue_used(p, button: String) -> void:
+	var key: String = p.get_meta("cue", "")
+	if key == "" or not CUES.has(key) or CUES[key][0] != button:
+		return
+	var done: Dictionary = p.get_meta("cue_done", {})
+	done[key] = int(done.get(key, 0)) + 1
+	p.set_meta("cue_done", done)
+
+
 func update_tip(p, l: Label) -> void:
+	if SIMPLE_MODE:
+		if l.text != "":
+			l.text = ""
+		_update_cue(p, l)
+		return
 	var t := tip_text(p)
 	if l.text != t:
 		l.text = t
+
+
+## The picture cue at the bottom of a TV view: a glowing pad button and an icon, gently pulsing.
+## Rowing shows three arrows that sway. It lives inside the old tip label, so it follows its layout.
+func _update_cue(p, l: Label) -> void:
+	var key := _simple_cue(p)
+	if key == "row" and p.get("row_amount") != null and float(p.row_amount) > 0.5:
+		var rt: float = float(p.get_meta("row_t", 0.0)) + get_process_delta_time()
+		p.set_meta("row_t", rt)
+		if rt > 1.5:  # rowed for a moment: they've got it
+			var done: Dictionary = p.get_meta("cue_done", {})
+			done["row"] = 2
+			p.set_meta("cue_done", done)
+	p.set_meta("cue", key)
+	var box: HBoxContainer = l.get_node_or_null("Cue")
+	if box == null:
+		box = HBoxContainer.new()
+		box.name = "Cue"
+		box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		box.alignment = BoxContainer.ALIGNMENT_CENTER
+		box.add_theme_constant_override("separation", 14)
+		l.add_child(box)
+		box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		box.set_meta("key", "")
+	var s := clampf(float(l.get_theme_font_size("font_size")) / 34.0, 0.5, 1.2) * 1.6
+	if str(box.get_meta("key")) != key or absf(float(box.get_meta("s", 0.0)) - s) > 0.01:
+		box.set_meta("key", key)
+		box.set_meta("s", s)
+		for c in box.get_children():
+			c.queue_free()
+		if key != "":
+			var cue: Array = CUES[key]
+			if str(cue[0]) != "":
+				box.add_child(UiKit.glyph(str(cue[0]), s))
+			for k in cue[1]:
+				box.add_child(UiKit.icon(str(k), cue[2], 40.0 * s))
+	box.visible = key != ""
+	if box.visible:
+		var t := Time.get_ticks_msec() / 1000.0
+		var fast := key == "reel" or key == "splash"
+		var k := absf(sin(t * (7.0 if fast else 3.5)))
+		box.modulate = Color(1, 1, 1, 0.75 + 0.25 * k)
+		var i := 0
+		for c in box.get_children():
+			var ctl := c as Control
+			ctl.pivot_offset = ctl.size * 0.5
+			ctl.scale = Vector2.ONE * (1.0 + 0.15 * k)
+			if key == "row":  # the arrows wave left, forward, right in turn
+				ctl.scale = Vector2.ONE * (1.0 + 0.3 * maxf(0.0, sin(t * 4.0 - i * 1.2)))
+			i += 1
 
 
 func _bar(v: float) -> String:
@@ -2965,11 +3055,16 @@ func _build_ghost_demo() -> void:
 	var pivot := Node3D.new()
 	pivot.name = "Pivot"
 	ghost_demo.add_child(pivot)
-	var hand := MeshInstance3D.new()
-	hand.mesh = sphere_mesh(0.05)
-	hand.scale = Vector3(0.9, 0.75, 1.3)
-	hand.material_override = mat
-	pivot.add_child(hand)
+	# The see-through hand is the shared one from Cannon Cove, curled round the ghost rod.
+	var hand: Node3D = CoveGhostHand.new()
+	hand.name = "Hand"
+	ghost_demo.add_child(hand)  # top_level: placed on the pivot every frame (_update_teaching)
+	hand.visible = true
+	hand.mat.albedo_color = Color(0.6, 1.0, 1.0, 0.45)
+	hand.hand.position = Vector3(0.0, 0.02, 0.05)
+	for fg in hand.fingers:
+		fg.rotation.x = -1.2
+	hand.thumb.rotation.x = -0.7
 	var rod := MeshInstance3D.new()
 	rod.mesh = cyl_mesh(0.006, 0.014, 1.1, 6)
 	rod.rotation.x = PI * 0.5
@@ -2994,7 +3089,7 @@ func _update_teaching(delta: float) -> void:
 	# The reel icon over the bobber.
 	if reel_icon == null:
 		_build_reel_icon()
-	var show_icon: bool = state == "play" and (ls == "bite" or ls == "fight")
+	var show_icon: bool = state == "play" and (ls == "bite" or (ls == "fight" and (practice or fish_caught() < 2)))
 	reel_icon.visible = show_icon
 	if show_icon:
 		var lp: Vector3 = a.lure_pos
@@ -3021,10 +3116,11 @@ func _update_teaching(delta: float) -> void:
 		var d := Vector3(eye.x - lp.x, 0.0, eye.z - lp.z)
 		reel_icon.global_rotation = Vector3(0.0, atan2(d.x, d.z), 0.0)
 		reel_icon.scale = Vector3.ONE * size * pulse
+	_update_practice_arrow(a)
 	# The ghost-hand cast demo (VR, while learning or when the rod has been idle for a while).
 	var vr_cam: Node3D = a.xr_camera if a.vr_like() else null
 	var show_demo: bool = vr_cam != null and state == "play" and ls == "ready" \
-		and (practice or a.casts == 0 or ready_idle_t > 10.0)
+		and (practice or a.casts < 2 or ready_idle_t > 12.0)
 	if ghost_demo == null and show_demo:
 		_build_ghost_demo()
 	if ghost_demo == null:
@@ -3047,6 +3143,9 @@ func _update_teaching(delta: float) -> void:
 		pitch = lerpf(-0.25, 0.3, clampf((k - 1.1) / 0.6, 0.0, 1.0))
 	var pivot := ghost_demo.get_node("Pivot") as Node3D
 	pivot.rotation = Vector3(pitch, 0.0, 0.0)
+	var gh := ghost_demo.get_node_or_null("Hand") as Node3D
+	if gh != null:
+		gh.global_transform = pivot.global_transform
 	var ball := ghost_demo.get_node("Ball") as Node3D
 	var tip_local := pivot.transform * Vector3(0, 0, -1.1)
 	if k < 1.05:
@@ -3056,6 +3155,38 @@ func _update_teaching(delta: float) -> void:
 		var f := (k - 1.05) / 1.0
 		ball.visible = f < 1.0
 		ball.position = Vector3(0.0, -0.1, -1.0) + Vector3(0, 0.6 * sin(f * PI) - f * 0.8, -2.5 * f)
+
+
+## A big glowing arrow bobbing over the practice ring: "cast HERE" (every screen; gone once it's hit).
+func _update_practice_arrow(a) -> void:
+	var on := practice and practice_step == 0 and state == "play"
+	if practice_arrow == null:
+		if not on:
+			return
+		practice_arrow = Node3D.new()
+		practice_arrow.top_level = true
+		add_child(practice_arrow)
+		var mat := _glow_mat(Color(0.55, 1.0, 0.95, 0.9))
+		var head := MeshInstance3D.new()
+		head.mesh = cyl_mesh(0.45, 0.0, 0.6, 12)  # point down
+		head.material_override = mat
+		practice_arrow.add_child(head)
+		var shaft := MeshInstance3D.new()
+		shaft.mesh = cyl_mesh(0.16, 0.16, 0.7, 10)
+		shaft.position.y = 0.6
+		shaft.material_override = mat
+		practice_arrow.add_child(shaft)
+		for c in practice_arrow.get_children():
+			(c as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	practice_arrow.visible = on
+	if not on:
+		return
+	var eye: Vector3 = a.xr_camera.global_position if a.vr_like() and a.xr_camera != null else a.body_pos + Vector3(0, 1.5, 0)
+	var size := clampf(eye.distance_to(practice_pos) * 0.12, 1.0, 2.5)
+	var t := Time.get_ticks_msec() / 1000.0
+	practice_arrow.scale = Vector3.ONE * size
+	practice_arrow.global_position = practice_pos + Vector3(0, size * (0.9 + 0.35 * absf(sin(t * 3.0))), 0)
+	practice_arrow.rotation.y = t * 1.5
 
 
 ## The VR angler only needs the headline: drop the TV boat players' instructions and keep at most
