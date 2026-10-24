@@ -19,7 +19,14 @@ just: **the builder grabs blocks from the tray and makes a path, the runners run
   over, stack them, grab one with the trigger and throw it), balloons that pop and grow back, birds
   that flap away, fluffy clouds that puff, the flag waves, and touching a runner gives them a boop.
 - Solo VR: with no TV machine, P2 is a buddy runner who waits at the gap for your bridge.
-- Text: only a short headline (BLOCK BUILDERS, the level name, HOORAY!); one line of controls on the TV.
+- Text: only a short headline (BLOCK BUILDERS, the level name, HOORAY!, PAUSED). No controls line:
+  visual teaching instead (`cue.gd`). Low in each TV view a pulsing glowing button in that player's own
+  controls plus a picture: STICK / W + arrow + flag (run), then A / SPACE + a hopping runner (jump); in
+  the flat builder's view A / a mouse + arrow + a glowing see-through block (put a block there); a
+  pulsing bolt while a controller is unplugged. Each goes once that player has done it twice, and comes
+  back for whoever takes the seat next. Glowing arrows bob over the hint block (where the block goes)
+  and over the flag (first two levels). A spare controller sees a pulsing A + plus + person; joining,
+  leaving and a full party are soft sounds. Your own name tag is hidden from your own camera.
 
 Everything below describes the full game (SIMPLE_MODE = false).
 

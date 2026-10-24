@@ -28,6 +28,18 @@ const VrText := preload("res://core/vr_text.gd")
 ## away, the flag waves, toy blocks stack, topple and can be thrown, and runners get a gentle boop.
 ## Solo VR: with no TV machine, P2 is a little buddy runner the host drives (it waits at the gap for
 ## your bridge). Text: one short headline at a time. Everything cut stays behind the flag.
+## VISUAL TEACHING (no how-to words at all): low in each TV runner's view a pulsing glowing button in
+## that runner's own controls plus a picture (cue.gd, UiKit glyph / icon, on a soft dark pill): STICK /
+## W + an arrow + the flag (run), then A / SPACE + a hopping runner (jump); in the flat builder's view
+## A / a mouse with its left button lit + an arrow + a glowing see-through block (put a block there);
+## a pulsing bolt while a runner's controller is unplugged. Each goes once that player has done it
+## twice (cue_did / cue_learned); a seat's cues reset when its player leaves. On the course (every
+## screen): a glowing arrow bobs over the see-through hint block (where the block goes) until the
+## builder has put down two blocks (and again at the start of a level until the first block goes in),
+## and one bobs over the flag on the first two levels. The VR builder still gets the game's own ghost
+## hand and the bouncing arrow over the tray (what to grab). A spare controller sees a pulsing A + plus
+## + person; a full party, a runner leaving and controllers coming and going are just soft sounds.
+## Each runner's own name tag is hidden from their own camera (it sat over their head in their view).
 
 const Art := preload("res://games/block_builders/art.gd")
 const Levels := preload("res://games/block_builders/levels.gd")
@@ -40,12 +52,15 @@ const NetScript := preload("res://core/net.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
 const PropsScript := preload("res://games/block_builders/props.gd")
 const GhostHandScript := preload("res://games/block_builders/ghost_hand.gd")
+const CueScript := preload("res://games/block_builders/cue.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 const SIMPLE_MODE := true
 const SIMPLE_INTRO_TIME := 2.5
 const SIMPLE_CLEAR_TIME := 5.0
 
 const MAX_RUNNERS := 6  # TV players 2..7 (player indices 1..6)
+const TAG_LAYERS := 0x3F000  # SIMPLE_MODE: render layers 13..18 = runner 1..6's name tag
 const INTRO_TIME := 9.0
 const CLEAR_TIME := 9.0
 const PLAYER_COLORS: Array[Color] = [Color(1.0, 0.82, 0.25), Color(1.0, 0.45, 0.3), Color(0.3, 0.75, 1.0),
@@ -139,6 +154,13 @@ var ring_state := 0            # practice ring: 0 none, 1 glowing (level 1), 2 j
 var ring_node: MeshInstance3D
 var solo := false              # host with no TV machine: P2 is the buddy runner driven here
 var placed_level := 0          # blocks placed this level (the ghost hand stops after the first)
+var place_total := 0           # blocks the builder has put down in all (the place arrow goes after two)
+var join_cue: Control          # pulsing A + plus + person (a spare controller can join)
+var plug_cue: Control          # pulsing bolt (a runner's controller is unplugged)
+var place_arrow: Node3D        # bobs over the see-through hint block
+var goal_arrow: Node3D         # bobs over the flag (first two levels)
+var goal_clears := 0           # levels this machine has seen cleared
+var cue_state := ""
 
 # Split-screen views
 var view_root: Control
@@ -220,9 +242,8 @@ func _setup_simple(mode: String) -> void:
 		ghost_hand.name = "GhostHand"
 		ghost_hand.main = self
 		add_child(ghost_hand)
-	help_label.text = "Left stick: run    A: jump"
-	if mode == "local":
-		help_label.text = "Runners: left stick + A        Builder: mouse + click"
+	help_label.text = ""
+	help_label.visible = false  # no controls line: picture cues in each view and the join cue instead
 	if mode == "client":
 		_show_center("", 0.0, false)
 		return
@@ -346,11 +367,18 @@ func _ensure_runners(mode: String) -> void:
 		r.mouse_on = i == 1 and mode == "client"
 		r.claimed = i == 1
 		add_child(r)
+		if simple and r.tag != null:
+			r.tag.layers = tag_layer(i)  # its own camera leaves it out (no name tag over your own head)
 		r.global_position = r.start_spot()
 		r.reset_to_start()
 		players.append(r)
 		if i >= 2:
 			r.set_active(false)
+
+
+## The render layer of runner i's name tag (TV-only; its own view leaves it out).
+func tag_layer(i: int) -> int:
+	return 1 << (11 + i)
 
 
 func runners() -> Array:
@@ -385,6 +413,7 @@ func _build_views(mode: String) -> void:
 		right.pose = "aim"
 		origin.add_child(right)
 		builder.setup_vr(origin, cam, left, right)
+		cam.cull_mask &= ~TAG_LAYERS  # runners' name tags are TV-only
 		_build_vr_mirror(cam)
 	elif mode == "client":
 		builder.setup_ghost()
@@ -438,6 +467,10 @@ func _add_view_hud(p, vp: SubViewport) -> void:
 	p.hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hud.add_child(p.hint_label)
 	_scale_hud(p, 1.0)
+	if simple:  # no how-to words: a picture cue low in the view
+		var cue := CueScript.new()
+		hud.add_child(cue)
+		p.set_meta("cue", cue)
 
 
 ## A runner's own split-screen view + HUD, made the first time they're active on this machine.
@@ -449,6 +482,8 @@ func _ensure_view(r) -> void:
 	vp.add_child(cam)
 	cam.current = true
 	r.attach_camera(cam)
+	if simple:
+		cam.cull_mask &= ~tag_layer(r.index)  # not your own name tag over your own head
 	_add_view_hud(r, vp)
 	views_dirty = true
 
@@ -604,6 +639,8 @@ func _on_joy_changed(device: int, connected: bool) -> void:
 		var p = players[who]
 		p.joy = -1
 		print("Joypad %d disconnected (P%d)" % [device, who + 1])
+		if simple:
+			local_sound("boop", -8.0, 0.6)  # no sentence: a soft boop and a pulsing bolt
 		if who == 0:
 			return
 		p.set_meta("lost_pad", device)
@@ -619,6 +656,8 @@ func _on_joy_changed(device: int, connected: bool) -> void:
 		if r.joy < 0 and int(r.get_meta("lost_pad", -1)) == device:
 			r.joy = device
 			r.remove_meta("lost_pad")
+			if simple:
+				local_sound("ding", -8.0, 1.3)  # a happy blip: it's back
 			if r.get_meta("rejoin", false):
 				r.remove_meta("rejoin")
 				request_join(r.index)
@@ -641,7 +680,10 @@ func _input(event: InputEvent) -> void:
 		return
 	var r = _free_runner()
 	if r == null:
-		_show_center("All 6 runner spots are taken!", 1.5, false)
+		if simple:
+			local_sound("boop", -10.0, 0.7)  # no sentence: a soft "no room" boop
+		else:
+			_show_center("All 6 runner spots are taken!", 1.5, false)
 		return
 	r.joy = b.device
 	r.claimed = true
@@ -709,6 +751,8 @@ func debug_join(index: int) -> void:
 
 
 func on_player_activity_changed(p) -> void:
+	if not p.active:
+		p.remove_meta("cue_done")  # whoever takes this seat next sees the picture cues again
 	if p.active and not p.remote:
 		_ensure_view(p)
 	if p.has_meta("view"):
@@ -884,6 +928,8 @@ func put(kind: String, c: Vector3i, rot: int) -> void:
 	burst(Vector3(c.x + 0.5, c.y + 1.0, c.z + 0.5), Art.kind_color(kind), 10, 0.1)
 	last_place_t = level_time
 	placed_level += 1
+	place_total += 1
+	cue_did(builder, "place")
 	builder_stats["placed"] = int(builder_stats["placed"]) + 1
 	thud(Vector3(c.x + 0.5, c.y + 0.5, c.z + 0.5))
 
@@ -1236,6 +1282,10 @@ func _process(delta: float) -> void:
 	_update_ring_visual()
 	if ghost_hand != null:
 		ghost_hand.update_demo(delta)
+	if simple:
+		_update_cues(delta)
+		_update_join_cue()
+		_update_world_arrows()
 	_check_tv_confirm()
 	if net.mode == "client":
 		_check_join(delta)
@@ -1654,6 +1704,201 @@ func _check_tv_confirm() -> void:
 	set_meta("confirm_was", down)
 
 
+# --- Simple mode: visual teaching (picture cues instead of words) ----------------------------
+
+## Player p has done `key` once more ("run", "jump", "place"); its cue goes once done twice.
+## Kept on the machine that draws p's view (and on the host for the builder).
+func cue_did(p, key: String) -> void:
+	if p == null:
+		return
+	var done: Dictionary = p.get_meta("cue_done", {})
+	done[key] = int(done.get(key, 0)) + 1
+	p.set_meta("cue_done", done)
+
+
+func cue_learned(p, key: String) -> bool:
+	if p == null:
+		return false
+	var done: Dictionary = p.get_meta("cue_done", {})
+	return int(done.get(key, 0)) >= 2
+
+
+## What this runner has just done (run a little way, pressed jump), on the machine that drives it.
+func _note_runner(r, delta: float) -> void:
+	if state != "play" or r.finished or r.respawn_t > 0.0:
+		r.set_meta("cue_jw", true)
+		return
+	if r.idle_t <= 0.0:
+		var rt: float = r.get_meta("cue_run_t", 0.0) + delta
+		if rt >= 1.0 and r.get_meta("cue_run_t", 0.0) < 1.0:
+			cue_did(r, "run")  # ran for a second
+		r.set_meta("cue_run_t", rt)
+	elif r.idle_t > 0.6:
+		r.set_meta("cue_run_t", 0.0)
+	var jw: bool = r.jump_was
+	if jw and not r.get_meta("cue_jw", true):
+		cue_did(r, "jump")  # pressed jump
+	r.set_meta("cue_jw", jw)
+
+
+## [key] for p's picture cue: "plug", "run", "jump", "place" or "".
+func _cue_now(p) -> String:
+	if not p.active or get_tree().paused or (net.mode == "client" and not synced):
+		return ""
+	if p.index > 0 and p.has_meta("lost_pad"):
+		return "plug"
+	if state != "play":
+		return ""
+	if p.index == 0:  # the flat builder: put a block in the glowing see-through spot
+		if hint.size() < 3 or cue_learned(p, "place"):
+			return ""
+		return "place"
+	if p.finished or p.respawn_t > 0.0:
+		return ""
+	if not cue_learned(p, "run"):
+		return "run"
+	if not cue_learned(p, "jump"):
+		return "jump"
+	return ""
+
+
+func _move_button(p, sc: float) -> Control:
+	if p.joy >= 0 or p.key_set != 0:
+		return UiKit.glyph("STICK", sc)
+	return UiKit.glyph("W", sc)
+
+
+func _jump_button(p, sc: float) -> Control:
+	if p.joy >= 0 or p.key_set != 0:
+		return UiKit.glyph("A", sc)
+	return UiKit.glyph("SPACE", sc)
+
+
+## Every frame (every machine): what each local player has done, and the picture cue in their view.
+func _update_cues(delta: float) -> void:
+	if state != cue_state:
+		if state == "clear" or state == "won":
+			goal_clears += 1
+		cue_state = state
+	for p in players:
+		if not p.has_meta("cue"):
+			continue
+		if p.index > 0 and not p.remote and not p.buddy:
+			_note_runner(p, delta)
+		var cue = p.get_meta("cue")
+		var k := _cue_now(p)
+		p.set_meta("cue_key", k)
+		cue.set_cue(k, "%d|%d" % [int(p.joy >= 0), int(p.get("key_set") if p.get("key_set") != null else -1)],
+			func(sc: float) -> Array:
+				match k:
+					"plug":
+						return [UiKit.icon("bolt", Color(1.0, 0.8, 0.3), 64.0 * sc)]
+					"run":
+						return [_move_button(p, sc), UiKit.icon("arrow_up", Color(1.0, 0.9, 0.45), 44.0 * sc),
+							UiKit.icon("flag", Color(1.0, 0.45, 0.4), 50.0 * sc)]
+					"jump":
+						return [_jump_button(p, sc), CueScript.jump_icon(52.0 * sc, p.color)]
+					"place":
+						var btn: Control = UiKit.glyph("A", sc) if p.joy >= 0 else CueScript.mouse_icon(48.0 * sc)
+						return [btn, UiKit.icon("arrow_right", Color(1.0, 0.9, 0.45), 44.0 * sc), CueScript.block_icon(52.0 * sc)]
+				return [], delta)
+
+
+## A pulsing A + plus + person in the corner while a spare controller could join, and a pulsing bolt
+## in the other corner while a runner's controller is unplugged (no words).
+func _update_join_cue() -> void:
+	if help_label == null:
+		return
+	if join_cue == null:
+		join_cue = HBoxContainer.new()
+		join_cue.name = "JoinCue"
+		join_cue.alignment = BoxContainer.ALIGNMENT_CENTER
+		join_cue.add_theme_constant_override("separation", 12)
+		join_cue.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		join_cue.add_child(UiKit.glyph("A", 1.4))
+		join_cue.add_child(UiKit.icon("plus", Color(1.0, 0.9, 0.6), 34.0))
+		join_cue.add_child(UiKit.icon("person", Color(1.0, 0.9, 0.6), 58.0))
+		for c in join_cue.get_children():
+			(c as Control).size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		help_label.get_parent().add_child(join_cue)
+		join_cue.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+		join_cue.offset_left = -200
+		join_cue.offset_top = -74
+		join_cue.offset_right = -16
+		join_cue.offset_bottom = -10
+		var tw := join_cue.create_tween().set_loops()
+		tw.tween_property(join_cue, "modulate:a", 0.5, 0.7)
+		tw.tween_property(join_cue, "modulate:a", 1.0, 0.7)
+		plug_cue = UiKit.icon("bolt", Color(1.0, 0.8, 0.3), 64.0)
+		plug_cue.name = "PlugCue"
+		help_label.get_parent().add_child(plug_cue)
+		plug_cue.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
+		plug_cue.offset_left = 20
+		plug_cue.offset_top = -84
+		plug_cue.offset_right = 84
+		plug_cue.offset_bottom = -20
+		var tp := plug_cue.create_tween().set_loops()
+		tp.tween_property(plug_cue, "modulate:a", 0.35, 0.5)
+		tp.tween_property(plug_cue, "modulate:a", 1.0, 0.5)
+	var spare := false
+	var lost := false
+	if net.mode != "host" and not get_tree().paused:
+		if _free_runner() != null:
+			for dev in Input.get_connected_joypads():
+				if pad_owner(dev) < 0:
+					spare = true
+		for r in runners():
+			if not r.remote and not r.active and r.has_meta("lost_pad") and r.get_meta("rejoin", false):
+				lost = true  # that runner left with their controller: it's waiting to be plugged back in
+	join_cue.visible = spare and not lost
+	plug_cue.visible = lost
+
+
+## A glowing 3D arrow (cone head + shaft) pointing down, origin at the tip.
+func _make_arrow(col: Color, length: float) -> Node3D:
+	var root := Node3D.new()
+	var mat := Art.mat(col, 2.4)
+	var hl := length * 0.45
+	var head := MeshInstance3D.new()
+	head.mesh = Art.cyl(0.0, length * 0.3, hl, 12)
+	head.rotation.x = PI
+	head.position.y = hl * 0.5
+	var shaft := MeshInstance3D.new()
+	shaft.mesh = Art.cyl(length * 0.1, length * 0.1, length - hl, 8)
+	shaft.position.y = hl + (length - hl) * 0.5
+	for m in [head, shaft]:
+		m.material_override = mat
+		m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		root.add_child(m)
+	root.visible = false
+	return root
+
+
+## Every machine: a glowing arrow bobs over the see-through hint block (where the block goes) until the
+## builder has put down two blocks (and at the start of each level until its first block goes in), and
+## one bobs over the flag on the first two levels.
+func _update_world_arrows() -> void:
+	if place_arrow == null:
+		place_arrow = _make_arrow(Color(0.45, 0.95, 1.0), 1.0)
+		place_arrow.name = "PlaceArrow"
+		add_child(place_arrow)
+		goal_arrow = _make_arrow(Color(0.45, 1.0, 0.55), 1.0)
+		goal_arrow.name = "GoalArrow"
+		add_child(goal_arrow)
+	var paused := get_tree().paused
+	var t := Time.get_ticks_msec() / 1000.0
+	var bob := absf(sin(t * 4.0))
+	place_arrow.visible = state == "play" and hint.size() >= 3 and not paused and (place_total < 2 or placed_level == 0)
+	if place_arrow.visible:
+		var hc: Vector3 = hint[1]
+		place_arrow.global_position = Vector3(hc.x + 0.5, hc.y + 1.25 + 0.35 * bob, hc.z + 0.5)
+		place_arrow.rotation.y = t * 2.0
+	goal_arrow.visible = state == "play" and goal_clears < 2 and not paused and course != null
+	if goal_arrow.visible:
+		goal_arrow.global_position = course.flag_pos + Vector3(0.0, 2.6 + 0.3 * bob, 0.0)
+		goal_arrow.rotation.y = t * 2.0
+
+
 # --- Networking ----------------------------------------------------------------------------
 
 func on_client_joined() -> void:
@@ -1709,7 +1954,9 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 				r.set_active(false)
 				r.finished = false
 				on_player_activity_changed(r)
-				if not simple:
+				if simple:
+					sound("pop", -10.0, 0.6)  # no sentence: a soft puff
+				else:
 					_show_center("PLAYER %d LEFT" % (index + 1), 1.5)
 				print("Player %d left the game" % (index + 1))
 		"flag":
@@ -1733,7 +1980,9 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 
 
 func _set_pause_banner(paused: bool, who: String) -> void:
-	_show_center("PAUSED\n" + who if paused else "", 0.0, false)
+	if simple:
+		who = ""  # just PAUSED (no sentence)
+	_show_center(("PAUSED" + ("\n" + who if who != "" else "")) if paused else "", 0.0, false)
 	if paused and vr_center != null:
 		VrText.snap(vr_center)
 	_update_vr_text()
@@ -1755,7 +2004,7 @@ func make_snapshot() -> Array:
 		rs.append(r.net_state())
 	return [level, level_seq, state, state_t, level_time, time_left, score, water_y, b, course.pack_blocks(),
 		builder.net_state(), rs, stars_taken, balloon_state, balloon_pos, hint, ring_state,
-		props.net_state() if props != null else []]
+		props.net_state() if props != null else [], place_total, placed_level]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -1801,6 +2050,9 @@ func apply_snapshot(s: Array) -> void:
 		ring_state = s[16]
 		if props != null:
 			props.apply_net_state(s[17])
+	if s.size() >= 20:
+		place_total = s[18]
+		placed_level = s[19]
 
 
 func apply_event(kind: String, args: Array) -> void:
