@@ -69,7 +69,9 @@ by every machine, so bots shouldn't assert it on a flat host (the client's press
    (set `party.allow_slot0 = true` there, give it a camera/HUD like local play, no VR rig).
 5. **Classic games** (players array + on_p2_action): use `core/classic_seats.gd` (below), never a copy.
 6. Opt in (`multi_machine`, arcade `"multi": true`), then test: `dev.sweep({ net: true, clients: 2,
-   only: [id] })` (host + 2 TV machines offscreen, sheets per machine), the bot test, and a flat-host run.
+   only: [id] })` (host + 2 TV machines offscreen, sheets per machine), the bot test, a flat-host run, and the bot
+   with several joining machines: `tools/multibot.ts -n 3 [--host-env DUO_FLAT_HOST=1] res://tests/<id>_bot.tscn`
+   (docs/GAME_DEV_GUIDE.md "Several machines in ONE game").
 
 ## Classic games: core/classic_seats.gd
 

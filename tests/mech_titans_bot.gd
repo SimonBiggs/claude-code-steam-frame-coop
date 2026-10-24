@@ -664,7 +664,7 @@ func _checks() -> void:
 		return
 	var mode: String = main.net.mode
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
-	kit.assert_eq(main.party.player_count(), want, "%s: all %d TV players are seated" % [mode, want])
+	kit.assert_eq(main.party.player_count(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
 	kit.assert_true(saw_play, "%s: the mission was played" % mode)
 	kit.assert_true(saw_kaiju, "%s: kaiju showed up" % mode)
 	kit.assert_true(saw_results, "%s: the mission ended with results" % mode)
@@ -693,7 +693,7 @@ func _simple_checks() -> void:
 	var mode: String = main.net.mode
 	_cue_checks()
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
-	kit.assert_eq(main.party.player_count(), want, "%s: all %d TV players are seated" % [mode, want])
+	kit.assert_eq(main.party.player_count(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
 	kit.assert_true(main.vr_menu == null and main.tv_menu == null, "%s: no hangar menus" % mode)
 	kit.assert_true(saw_play, "%s: round 1 was played" % mode)
 	kit.assert_true(saw_kaiju, "%s: kaiju showed up" % mode)
