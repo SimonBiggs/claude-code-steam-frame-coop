@@ -1,0 +1,3 @@
+#!/bin/bash
+# LAN update multi-machine tests (see tools/lan-update-test.py). Usage: tools/lan-update-test [a b c d e f g h]
+exec python3 -I "$(dirname "$(readlink -f "$0")")/lan-update-test.py" "$@"

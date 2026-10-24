@@ -1087,6 +1087,14 @@ func _ensure_shared_nodes() -> void:
 		var n: Node = (load(pair[1]) as GDScript).new()
 		root.set_meta(pair[0], n)
 		root.add_child.call_deferred(n)
+	# LAN updates (core/lan_update.gd): needs a fixed name (/root/LanUpdate) so its RPCs reach the same node on every
+	# machine, and the pinned root key (addons/lan_update, installed with the game: older installs simply don't update).
+	if not root.has_meta("lan_update") and FileAccess.file_exists("res://addons/lan_update/root.pub.pem") \
+			and ResourceLoader.exists("res://core/lan_update.gd"):
+		var u: Node = (load("res://core/lan_update.gd") as GDScript).new()
+		u.name = "LanUpdate"
+		root.set_meta("lan_update", u)
+		root.add_child.call_deferred(u)
 
 
 ## The TV machine (no VR) runs fullscreen (Simon). Done once per launch, so F11/Alt+Enter still work.
