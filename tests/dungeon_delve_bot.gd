@@ -309,7 +309,14 @@ func _report() -> String:
 		var st: Dictionary = main.net.state_get("d_stats", {})
 		for s in st:
 			hp.append("%s:%d%s" % [s, int(st[s]["hp"]), "x" if bool(st[s]["down"]) else ""])
-		return "BOT %s DEEP %s room %d lock %d foes %d gold %d keys %d hp %s %s" % [main.net.mode, dp.built_key,
+		var few := ""
+		if dp.foes.mons.size() <= 2:
+			for id in dp.foes.mons:
+				var m: Dictionary = dp.foes.mons[id]
+				few += " [k%d st%d %s hp%d]" % [int(m["kind"]), int(m["st"]), str(Vector3(m["p"]).snappedf(0.1)), int(m["hp"])]
+			for h in main.heroes.values():
+				few += " hero %s" % str(h.position.snappedf(0.1))
+		return few + " BOT %s DEEP %s room %d lock %d foes %d gold %d keys %d hp %s %s" % [main.net.mode, dp.built_key,
 			dp._focus_room(), int(main.net.state_get("d_lock", -1)), dp.foes.mons.size(), int(main.net.state_get("d_gold", 0)),
 			int(main.net.state_get("d_keys", 0)), str(hp), str(dp.tally) if main.net.mode != "client" else ""]
 	return "BOT %s: room %d phase %s open %d monsters %d heroes %d bops %s pokes %s dizzy %d throws %d" % [
@@ -369,8 +376,12 @@ func _deep_checks(mode: String) -> void:
 	if goal in ["zone", "floor"]:
 		kit.assert_true(goal_done, "%s: the goal (%s) was reached: %s" % [mode, goal, str(t)])
 		kit.assert_true(int(t["keys"]) >= 1 and int(t["doors"]) >= 1, "%s: a key opened a door (%d keys, %d doors)" % [mode, int(t["keys"]), int(t["doors"])])
+	var pd: Dictionary = dp.progress()
+	kit.assert_true(int(pd["runs"]) >= 1, "%s: the run was saved (%s)" % [mode, str(pd)])
 	if goal == "zone":
 		kit.assert_true(int(t["bosses"]) >= 1, "%s: the boss was beaten" % mode)
+		kit.assert_true(int((pd["bosses"] as Dictionary).get(deep_mode, 0)) & 1 != 0, "%s: the boss win was saved (perk + hat unlocked)" % mode)
+		kit.assert_true(dp.unlocked_hats().has("wizard") and int(dp.perks()["potion"]) == 1, "%s: the Slime King unlocks the wizard hat and a starting potion" % mode)
 		kit.assert_true(int(t["bought"]) >= 1 or main.heroes.is_empty(), "%s: something was bought in a shop (%d)" % [mode, int(t["bought"])])
 	if int(t["downs"]) > 0:
 		kit.assert_true(int(t["revives"]) > 0 or int(t["wipes"]) > 0, "%s: knocked-out heroes got back up (%d downs, %d revives)" % [mode, int(t["downs"]), int(t["revives"])])

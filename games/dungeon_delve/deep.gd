@@ -193,6 +193,15 @@ func _build_lobby() -> void:
 		l.position = PADS[mname] + Vector3(0.0, 1.9, 0.0)
 		lobby.add_child(l)
 		pad_labels[mname] = l
+		var best := Label3D.new()
+		best.font_size = 40
+		best.pixel_size = 0.005
+		best.outline_size = 16
+		best.outline_modulate = Color(0, 0, 0, 0.95)
+		best.position = PADS[mname] + Vector3(0.0, 1.62, 0.0)
+		best.name = "Best"
+		l.add_child(best)
+		best.position = Vector3(0.0, -0.28, 0.0)
 	# The hat stand: bonk it (or touch it) to swap your hat for one you've unlocked.
 	var hb := MeshKit.Builder.new()
 	hb.cylinder(0.05, 0.06, 1.5, MeshKit.at(Vector3(0, 0.75, 0)), Color(0.5, 0.33, 0.2), 8)
@@ -217,11 +226,19 @@ func _animate_lobby(delta: float) -> void:
 		ring.scale = ring.scale.lerp(Vector3.ONE * maxf(0.05, k), 1.0 - exp(-12.0 * delta))
 		ring.visible = show_pads
 		(pad_labels[mname] as Label3D).visible = show_pads
+		var bests: Dictionary = net.state_get("d_best", {})
+		var bl: Label3D = (pad_labels[mname] as Label3D).get_node_or_null("Best")
+		var g := int(bests.get(mname, -1))
+		if bl != null:
+			bl.text = "BEST %d-%d" % [g / FloorGen.FLOORS_PER_ZONE + 1, g % FloorGen.FLOORS_PER_ZONE + 1] if g > 0 else ""
 		i += 1
 
 
 ## Host: the lobby pads fill while players stand on them; full = the run starts.
 func lobby_step(delta: float) -> void:
+	if not net.state_has("d_best") and main.save != null:
+		var pb: Dictionary = progress()["best"]
+		net.state_set("d_best", pb.duplicate())
 	var players := _players(true)
 	var total := maxi(1, players.size())
 	var fills: Array = []
@@ -321,6 +338,7 @@ func _record_depth() -> void:
 	if g > int(best.get(mode, 0)):
 		best[mode] = g
 		main.save.mark_dirty()
+		net.state_set("d_best", best.duplicate())
 
 
 # --- Players ---------------------------------------------------------------------------------------
@@ -554,7 +572,8 @@ func finish(won: bool) -> void:
 	net.state_set("d_phase", "won" if won else "over")
 	var g := FloorGen.global_floor(zone, floor_i)
 	main.end_results("VICTORY!" if won else "THE END", "victory" if won else "defeat",
-		"%s %d-%d" % [FloorGen.ZONES[zone]["short"], zone + 1, floor_i + 1] if not won else "ALL BOSSES BEATEN!")
+		"%s %d-%d" % [FloorGen.ZONES[zone]["short"], zone + 1, floor_i + 1] if not won else "ALL BOSSES BEATEN!",
+		[["DEEPEST", "%d-%d" % [zone + 1, floor_i + 1]], ["GOLD", str(_gold)], ["BOSSES", str(int(tally["bosses"]))], ["HELPED UP", str(int(tally["revives"]))]])
 	print("Dungeon Delve: run over, %s, depth %d" % ["won" if won else "lost", g])
 
 
@@ -1543,6 +1562,11 @@ func _pickups_step(delta: float, alive: Array) -> void:
 			if (k == Loot.COIN or k == Loot.COIN5) and d < 2.2 and d > 0.5:
 				var to := Vector3(fp.x - p.x, 0.0, fp.z - p.z).normalized()
 				pk["p"] = p + to * 5.0 * delta
+			var nope: Dictionary = pk.get("nope", {})
+			if nope.has(s):
+				if d > 1.5:
+					nope.erase(s)
+				continue
 			if d < 0.7 and _collect(s, k, p):
 				pickups.erase(id)
 				break
@@ -1607,6 +1631,7 @@ func _collect(slot: int, k: int, p: Vector3) -> bool:
 			if old != "":
 				var ok: int = Loot.ABILITY_NAMES[old]
 				_spawn_pick(ok, p + Vector3(0, 0.5, 0), true)
+				(pickups[next_pick - 1] as Dictionary)["nope"] = {slot: true}  # not back to them until they step away
 			main.sound_at("power_up", p, -2.0)
 			text = String(Loot.NAMES[k])
 		Loot.MAXHEART:

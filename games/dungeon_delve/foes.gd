@@ -312,6 +312,16 @@ func _walk(m: Dictionary, step: Vector3, rad: float) -> void:
 	var to := p + Vector3(step.x, 0.0, step.z)
 	var room: int = m["room"]
 	var np := FloorGen.clamp_move(room_rects[room], obst, p, to, rad)
+	var want := Vector2(step.x, step.z).length()
+	if want > 0.001 and Vector2(np.x - p.x, np.z - p.z).length() < want * 0.3 and int(m["st"]) != ACT:
+		# Blocked by a pillar: follow its edge (keep turning the same way for a while).
+		var side: float = m.get("side", 1.0)
+		var turned := Vector3(-step.z, 0.0, step.x) * side
+		var np2 := FloorGen.clamp_move(room_rects[room], obst, p, p + turned, rad)
+		if Vector2(np2.x - p.x, np2.z - p.z).length() < want * 0.3:
+			m["side"] = -side
+		else:
+			np = np2
 	np.y = p.y
 	m["p"] = np
 

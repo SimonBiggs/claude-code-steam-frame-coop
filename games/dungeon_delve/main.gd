@@ -322,8 +322,8 @@ func _results() -> void:
 
 
 ## Host: the results screen (the gentle treasure, or the end of a deep run).
-func end_results(title: String, style: String, subtitle: String) -> void:
-	var opts := {"title": title, "style": style, "score_stat": "bops", "score_format": "%d BOPS", "continue": "Again!"}
+func end_results(title: String, style: String, subtitle: String, team: Array = []) -> void:
+	var opts := {"title": title, "style": style, "score_stat": "bops", "score_format": "%d BOPS", "continue": "Again!", "stats": team}
 	if subtitle != "":
 		opts["subtitle"] = subtitle
 	var data := awards.results(opts)
@@ -907,6 +907,10 @@ func show_headline(text: String, secs: float = 3.0) -> void:
 		add_child(headline)
 	var c := Dungeon.center(int(net.state_get("room", 0)))
 	headline.position = Vector3(0.0, 3.3, c.z - Dungeon.HALF + 0.3)
+	if deep != null and deep.active and not deep.f.is_empty():
+		var fr: int = deep._focus_room()
+		var rc: Vector3 = deep.FloorGen.room_center(deep.f, maxi(fr, 0))
+		headline.position = rc + Vector3(0.0, 2.6, -deep.FloorGen.HALF + 0.2)  # high on the room's far wall
 	headline.text = text
 	headline.visible = true
 	headline_t = secs

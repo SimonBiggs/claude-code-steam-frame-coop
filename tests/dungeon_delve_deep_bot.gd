@@ -135,6 +135,8 @@ func _go(slot: int, h: Node3D, p: Vector3, near: float, delta: float) -> bool:
 	if wp == p and to.length() < near:
 		_stick(slot, Vector2.ZERO)
 		return true
+	var step := steer(pos, wp)
+	to = Vector3(step.x - pos.x, 0.0, step.z - pos.z)
 	var dir := Vector2(to.x, to.z).normalized()
 	# Stuck on a pillar? side-step for a moment.
 	var sk: Dictionary = stuck.get(slot, {"p": pos, "t": 0.0, "side": 0.0, "dodge": 0.0})
@@ -152,6 +154,76 @@ func _go(slot: int, h: Node3D, p: Vector3, near: float, delta: float) -> bool:
 			sk["p"] = pos
 	_stick(slot, dir)
 	return false
+
+
+## Round pillars: straight at `to` when the way is clear, else the next cell of a grid search.
+func steer(from: Vector3, to: Vector3) -> Vector3:
+	var dp := deep()
+	if _clear(from, to):
+		return to
+	var cell := 0.5
+	var key := "%d,%d>%d,%d" % [int(round(from.x / cell)), int(round(from.z / cell)), int(round(to.x / cell)), int(round(to.z / cell))]
+	if _wp_cache.has(key):
+		return _wp_cache[key]
+	var start := Vector2i(int(round(from.x / cell)), int(round(from.z / cell)))
+	var goal := Vector2i(int(round(to.x / cell)), int(round(to.z / cell)))
+	var prev := {start: start}
+	var q: Array[Vector2i] = [start]
+	var found := false
+	var guard := 0
+	var nearest := start
+	while not q.is_empty() and guard < 3000:
+		guard += 1
+		var c: Vector2i = q.pop_front()
+		if c.distance_squared_to(goal) < nearest.distance_squared_to(goal):
+			nearest = c
+		if c.distance_squared_to(goal) <= 1:
+			goal = c
+			found = true
+			break
+		for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1), Vector2i(1, 1), Vector2i(-1, 1), Vector2i(1, -1), Vector2i(-1, -1)]:
+			var n: Vector2i = c + d
+			if prev.has(n):
+				continue
+			var wp := Vector3(n.x * cell, 0.0, n.y * cell)
+			if not FloorGen.walkable(dp.view.rects, dp.view.obst, wp, 0.36):
+				continue
+			prev[n] = c
+			q.append(n)
+	if not found and nearest != start:
+		goal = nearest  # the goal itself is in a pillar's shadow: get as close as we can
+		found = true
+	var out := to
+	if found:
+		# Walk back to the furthest cell we can see straight from here.
+		var path: Array[Vector2i] = []
+		var cur := goal
+		while cur != start:
+			path.push_front(cur)
+			cur = prev[cur]
+		for c2 in path:
+			var w := Vector3(c2.x * cell, 0.0, c2.y * cell)
+			if _clear(from, w):
+				out = w
+			else:
+				break
+		if out == to and not path.is_empty():
+			out = Vector3(path[0].x * cell, 0.0, path[0].y * cell)
+	if _wp_cache.size() > 2000:
+		_wp_cache.clear()
+	_wp_cache[key] = out
+	return out
+
+
+func _clear(a: Vector3, b: Vector3) -> bool:
+	var dp := deep()
+	var d := Vector2(b.x - a.x, b.z - a.z).length()
+	var n := int(d / 0.25) + 1
+	for i in range(1, n + 1):
+		var p := a.lerp(b, float(i) / n)
+		if not FloorGen.walkable(dp.view.rects, dp.view.obst, Vector3(p.x, 0.0, p.z), 0.33):
+			return false
+	return true
 
 
 func _face_press(slot: int, h: Node3D, at: Vector3) -> void:
@@ -253,14 +325,14 @@ func _goal(slot: int, pos: Vector3, room: int, index: int) -> Dictionary:
 	if String(f["kind"]) == "shop":
 		var shop: Array = main.net.state_get("d_shop", [])
 		var gold := int(main.net.state_get("d_gold", 0))
-		if not bought.has("%s/%d" % [dp.built_key, slot]):
-			for i in shop.size():
-				var it: Array = shop[i]
-				if int(it[2]) == 0 and int(it[1]) <= gold:
-					var sp := FloorGen.to_world(f, 0, dp.SHOP_SPOTS[i]) + Vector3(0, 0, 0.9)
-					if Vector2(sp.x - pos.x, sp.z - pos.z).length() < 0.4:
-						bought["%s/%d" % [dp.built_key, slot]] = true
-					return {"p": sp, "near": 0.3, "bonk": true}
+		for i in shop.size():
+			var it: Array = shop[i]
+			var tries_key := "%s/%d/%d" % [dp.built_key, slot, i]
+			if int(it[2]) == 0 and int(it[1]) <= gold and int(bought.get(tries_key, 0)) < 40:
+				var sp := FloorGen.to_world(f, 0, dp.SHOP_SPOTS[i]) + Vector3(0, 0, 0.9)
+				if Vector2(sp.x - pos.x, sp.z - pos.z).length() < 0.45:
+					bought[tries_key] = int(bought.get(tries_key, 0)) + 1  # can't use it? give up after a while
+				return {"p": sp, "near": 0.3, "bonk": true}
 		return {"p": dp.view.stairs_at, "near": 0.4}
 	# Loot nearby (same room).
 	var picks: Dictionary = dp.pickups if main.net.mode != "client" else dp._mirror_picks
@@ -363,7 +435,7 @@ func _useful(slot: int, k: int) -> bool:
 		Loot.BOMBS:
 			return int(st.get("bomb", 0)) < 9
 		Loot.DASH, Loot.BASH, Loot.BOW:
-			return String(st.get("abil", "")) != Loot.ability_id(k)
+			return String(st.get("abil", "")) == ""
 	return true
 
 
