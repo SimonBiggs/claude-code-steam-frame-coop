@@ -84,6 +84,9 @@ var results_ui: Control
 var vr_results: Node
 var vr_banner: Node3D
 var tv_banner: Control
+var tags := {}  # slot -> Label3D over that ball (every machine; your own is big and bobs)
+var cam_look := Vector3.ZERO  # Deck follow camera: where it looks (smoothed)
+var cam_follow := -1  # Deck follow camera: the slot it follows (-1: the whole hole)
 
 
 func _ready() -> void:
@@ -285,7 +288,8 @@ func _frame_camera() -> void:
 	var pos := Vector3(c.x, 1.0 + l * 0.6 + w * 0.35, b.end.y + 0.9 + l * 0.2)
 	cam.fov = 55.0
 	cam.global_position = pos
-	cam.look_at(Vector3(c.x, 0.0, c.y - l * 0.08), Vector3.UP)
+	cam_look = Vector3(c.x, 0.0, c.y - l * 0.08)
+	cam.look_at(cam_look, Vector3.UP)
 
 
 ## Slots that have a ball: the VR golfer (host) plus everyone seated.
@@ -320,6 +324,10 @@ func _remove_ball(slot: int) -> void:
 	if arrows.has(slot):
 		(arrows[slot] as Node).queue_free()
 		arrows.erase(slot)
+	if tags.has(slot):
+		if is_instance_valid(tags[slot]):
+			(tags[slot] as Node).queue_free()
+		tags.erase(slot)
 
 
 func _name_of(slot: int) -> String:
@@ -608,6 +616,8 @@ func _process(delta: float) -> void:
 		return
 	_tv_input(delta)
 	_update_arrows()
+	_update_tags()
+	_follow_camera(delta)
 	if prompt != null:
 		var need := false
 		for s in party.local_slots():
@@ -681,6 +691,84 @@ func _update_arrows() -> void:
 		a.scale = Vector3(1.0 + ap.y * 0.6, 1.0, len)
 		var m: StandardMaterial3D = a.get_meta("mat")
 		m.emission_energy_multiplier = 0.4 + ap.y * 2.5 + (0.3 * sin(Time.get_ticks_msec() * 0.008) if ap.y == 0.0 else 0.0)
+
+
+## Every ball carries its player's name (P3...) in their colour, a fixed size on screen and drawn through
+## walls, so on a small Deck screen (7 balls of 9 cm on the whole hole) you can always find yours: your
+## own ball's tag is bigger and bobs (Simon on his Deck, 2026-10-24: "I can't see my ball").
+func _update_tags() -> void:
+	var bob := sin(Time.get_ticks_msec() * 0.006) * 0.012
+	for slot in balls:
+		var b: Ball = balls[slot]
+		var mine := party.is_local(int(slot)) or (int(slot) == 0 and vr_rig != null)
+		var t: Label3D = tags.get(slot)
+		if t == null or not is_instance_valid(t) or bool(t.get_meta("mine", false)) != mine:
+			if t != null and is_instance_valid(t):
+				t.queue_free()
+			t = _make_tag(int(slot), mine)
+			tags[slot] = t
+		t.text = _name_of(int(slot))
+		# Just in front of the ball (towards the camera), hanging down on screen: the aim arrow points the
+		# other way (up the screen), so the tag never covers it.
+		t.position = b.position + Vector3(0.0, 0.03, 0.07 + (bob if mine else 0.0))
+		t.visible = String(net.state_get("phase", "play")) != "results"
+
+
+func _make_tag(slot: int, mine: bool) -> Label3D:
+	var flat := split != null
+	var col: Color = Party.COLORS[slot % Party.COLORS.size()]
+	# Flat screens: fixed_size keeps it readable however far the camera is (height ~ fraction of the view).
+	var t := UiKit.label3d(_name_of(slot), (0.05 if mine else 0.032) if flat else (0.07 if mine else 0.05), col, true)
+	t.fixed_size = flat
+	t.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	t.no_depth_test = true
+	t.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+	if mine:
+		t.render_priority += 2  # your own tag in front of the others when the balls bunch up on the tee
+		t.outline_render_priority += 2
+	t.set_meta("mine", mine)
+	t.set_meta("golf_tag", true)
+	add_child(t)
+	return t
+
+
+## The seat a Deck's camera follows: a Deck is one player on a small screen, so its view moves in on that
+## player's ball and the stretch ahead of it (same direction as the whole-hole view, so the stick still
+## points the same way on screen). -1 everywhere else (the TV keeps the whole hole).
+func _deck_follow_slot() -> int:
+	if split == null or net.machine_kind != "deck":
+		return -1
+	var mine := party.local_slots()
+	if mine.size() != 1 or not balls.has(mine[0]):
+		return -1
+	return mine[0]
+
+
+func _follow_camera(delta: float) -> void:
+	var s := _deck_follow_slot()
+	if s < 0 or course == null or course.outline.is_empty():
+		if cam_follow >= 0:
+			cam_follow = -1
+			_frame_camera()
+		return
+	var b: Ball = balls[s]
+	var bp := Vector2(b.position.x, b.position.z)
+	var ahead := bp + (course.aim_point(bp) - bp).limit_length(1.8)
+	var r := Rect2(bp, Vector2.ZERO).expand(ahead).grow(0.45)
+	var c := r.get_center()
+	var l := r.size.y
+	var w := r.size.x
+	var pos := Vector3(c.x, 0.8 + l * 0.55 + w * 0.3, r.end.y + 0.7 + l * 0.15)
+	var look := Vector3(c.x, 0.0, c.y - l * 0.05)
+	var cam := split.shared_camera()
+	var k := 1.0 - exp(-4.0 * delta)
+	if cam_follow != s:
+		cam_follow = s
+		k = 1.0
+		cam.fov = 55.0
+	cam.global_position = cam.global_position.lerp(pos, k)
+	cam_look = cam_look.lerp(look, k)
+	cam.look_at(cam_look, Vector3.UP)
 
 
 func _arrow(slot: int) -> Node3D:
