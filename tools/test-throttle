@@ -19,5 +19,14 @@ while true; do
       echo "⚠ controller guard: stopped a test Godot that could see the real controllers (use godot-test): $cmd" | "$HOME/.local/bin/brepl" --pipe controller-guard >/dev/null 2>&1
     fi
   done
+  # Guard: an offscreen (headless) gamescope must never hold a low X display (:0-:19): Steam sends Gaming Mode games
+  # to :1, and they were opening inside a hidden test display instead of on the TV. godot.ts reserves :0-:19.
+  ss -xlpn 2>/dev/null | grep -oE '@/tmp/.X11-unix/X[0-9]+ .*pid=[0-9]+' | sed -E 's/.*X([0-9]+) .*pid=([0-9]+).*/\1 \2/' |
+    while read -r n pid; do
+      [ "$n" -lt 20 ] || continue
+      tr '\0' ' ' < /proc/$pid/cmdline 2>/dev/null | grep -q -- '--backend headless' || continue
+      kill "$pid" 2>/dev/null
+      echo "⚠ display guard: stopped an offscreen gamescope holding X display :$n (the TV's games need it)" | "$HOME/.local/bin/brepl" --pipe display-guard >/dev/null 2>&1
+    done
   sleep 3
 done
