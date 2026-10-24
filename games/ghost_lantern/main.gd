@@ -1,5 +1,6 @@
 extends Node3D
 const VrText := preload("res://core/vr_text.gd")
+const Machine := preload("res://core/machine.gd")  # one player per screen on a Deck (view_on)
 ## Ghost Lantern: a spooky-but-cute co-op ghost hunt in a haunted mansion.
 ## Player 1 (VR, or keyboard+mouse in split screen) carries the spirit lantern: ghosts are only visible
 ## in its light cone, and ghosts held in the beam get stunned. TV players vacuum up revealed ghosts.
@@ -585,7 +586,7 @@ func _layout_views() -> void:
 	var n := 0
 	for c in view_grid.get_children():
 		var idx: int = c.get_meta("player_index", 0)
-		var on: bool = idx < players.size() and players[idx].active
+		var on: bool = idx < players.size() and Machine.view_on(self, players[idx])
 		c.visible = on
 		if on:
 			n += 1
@@ -964,7 +965,7 @@ func on_player_activity_changed(p) -> void:
 			p.global_position = _spawn_near_team(p.index)
 		_ensure_view(p)
 	if p.has_meta("view") and is_instance_valid(p.get_meta("view")):
-		p.get_meta("view").visible = p.active
+		p.get_meta("view").visible = Machine.view_on(self, p)
 	_layout_views()
 	print("Player %d is now %s on this screen" % [p.index + 1, "playing" if p.active else "waiting"])
 

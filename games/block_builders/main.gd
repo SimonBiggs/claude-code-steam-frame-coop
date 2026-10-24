@@ -1,5 +1,6 @@
 extends Node3D
 const VrText := preload("res://core/vr_text.gd")
+const Machine := preload("res://core/machine.gd")  # one player per screen on a Deck (view_on)
 ## BLOCK BUILDERS: a co-op platformer on a floating obstacle course.
 ##  - Player 1 (VR, host) is the giant BUILDER: the course is a tabletop diorama (world_scale 8).
 ##    Grab colourful blocks (planks, stairs, springs, fans) from the tray with the right trigger and
@@ -527,7 +528,7 @@ func _layout_views() -> void:
 	for p in players:
 		if p.has_meta("view"):
 			var c: SubViewportContainer = p.get_meta("view")
-			c.visible = p.active and not p.remote
+			c.visible = Machine.view_on(self, p) and not p.remote
 			if c.visible:
 				list.append(p)
 	var n := list.size()
@@ -756,7 +757,7 @@ func on_player_activity_changed(p) -> void:
 	if p.active and not p.remote:
 		_ensure_view(p)
 	if p.has_meta("view"):
-		p.get_meta("view").visible = p.active
+		p.get_meta("view").visible = Machine.view_on(self, p)
 	if p.active:
 		p.remove_meta("want_join")
 	views_dirty = true

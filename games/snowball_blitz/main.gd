@@ -1,5 +1,6 @@
 extends Node3D
 const VrText := preload("res://core/vr_text.gd")
+const Machine := preload("res://core/machine.gd")  # one player per screen on a Deck (view_on)
 ## Snowball Blitz: defend the snow fort in the village square from waves of mischievous snowmen.
 ## VR player (host): the team's sniper, throwing real snowballs with their hands.
 ## TV players: lob charged snowballs and pack the fort walls back up. Hot cocoa warms you up.
@@ -1609,7 +1610,7 @@ func _sync_view_visibility() -> void:
 	for p in players:
 		if p.has_meta("view"):
 			var v: Control = p.get_meta("view")
-			v.visible = p.active
+			v.visible = Machine.view_on(self, p)
 	_layout_views()
 
 

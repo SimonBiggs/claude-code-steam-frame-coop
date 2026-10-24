@@ -234,7 +234,7 @@ class Runner extends Node:
 		if not menus.is_empty():
 			kit.allow_pause = true
 			menus[0]._open(DEV)
-			await frames(2)
+			await frames(30)  # a kid looks at the menu (A in the first 0.4 s is still gameplay)
 			for i in 2:
 				await press(JOY_BUTTON_DPAD_DOWN)
 			var fb := get_viewport().gui_get_focus_owner()

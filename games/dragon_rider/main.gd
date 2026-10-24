@@ -47,6 +47,7 @@ extends Node3D
 ##    sentences are gone. Each cue goes after two goes (cue_did / cue_learned).
 
 const WorldScript := preload("res://games/dragon_rider/world.gd")
+const Machine := preload("res://core/machine.gd")  # one player per screen on a Deck (view_on)
 const DragonScript := preload("res://games/dragon_rider/dragon.gd")
 const CourseScript := preload("res://games/dragon_rider/course.gd")
 const RiderScript := preload("res://games/dragon_rider/rider.gd")
@@ -1911,7 +1912,7 @@ func _ensure_view(p) -> void:
 	p.set_meta("view", container)
 	container.stretch = true
 	container.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	container.visible = p.active
+	container.visible = Machine.view_on(self, p)
 	views_root.add_child(container)
 	var vp := SubViewport.new()
 	vp.world_3d = get_world_3d()
@@ -1940,8 +1941,8 @@ func _layout_views() -> void:
 		if not p.has_meta("view"):
 			continue
 		var c: SubViewportContainer = p.get_meta("view")
-		c.visible = p.active
-		if p.active:
+		c.visible = Machine.view_on(self, p)
+		if c.visible:
 			shown.append(p)
 	var n := shown.size()
 	var area := views_root.size

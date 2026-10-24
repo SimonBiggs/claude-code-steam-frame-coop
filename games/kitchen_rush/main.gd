@@ -1,5 +1,6 @@
 extends Node3D
 const VrText := preload("res://core/vr_text.gd")
+const Machine := preload("res://core/machine.gd")  # one player per screen on a Deck (view_on)
 const UiKit := preload("res://core/ui_kit.gd")
 ## Kitchen Rush: co-op cooking chaos.
 ## Player 1 is the CHEF at the counter (VR hands, or button controls in split screen): chop and stack.
@@ -552,8 +553,8 @@ func _layout_views() -> void:
 	for p in players:
 		if p.has_meta("view"):
 			var c: Control = p.get_meta("view")
-			c.visible = p.active
-			if p.active:
+			c.visible = Machine.view_on(self, p)
+			if c.visible:
 				views.append(c)
 	var n := views.size()
 	var cols := 1

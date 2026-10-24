@@ -1,5 +1,6 @@
 extends Node3D
 const VrText := preload("res://core/vr_text.gd")
+const Machine := preload("res://core/machine.gd")  # one player per screen on a Deck (view_on)
 ## BEE GARDEN: a cosy co-op growing game (no fighting, just a sunny garden).
 ##  - Player 1 (VR, host) is the GARDENER at a big waist-high garden bed: plants seeds from the seed
 ##    tray, waters the plants with the watering can, picks ripe fruit and shoos greedy pests.
@@ -485,7 +486,7 @@ func _layout_views() -> void:
 	for p in players:
 		if p.has_meta("view"):
 			var c: SubViewportContainer = p.get_meta("view")
-			c.visible = p.active and not p.remote
+			c.visible = Machine.view_on(self, p) and not p.remote
 			if c.visible:
 				list.append(p)
 	var n := list.size()
@@ -720,7 +721,7 @@ func on_player_activity_changed(p) -> void:
 	if p.active and not p.remote:
 		_ensure_view(p)
 	if p.has_meta("view"):
-		p.get_meta("view").visible = p.active
+		p.get_meta("view").visible = Machine.view_on(self, p)
 	views_dirty = true
 
 

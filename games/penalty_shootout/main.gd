@@ -38,6 +38,7 @@ extends Node3D
 ## Everything cut is only switched off: SIMPLE_MODE = false brings the full cup game back.
 
 const VrText := preload("res://core/vr_text.gd")
+const Machine := preload("res://core/machine.gd")  # one player per screen on a Deck (view_on)
 const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
 const NetScript := preload("res://core/net.gd")
@@ -575,8 +576,8 @@ func _layout_views() -> void:
 		if not p.has_meta("view"):
 			continue
 		var c: SubViewportContainer = p.get_meta("view")
-		c.visible = p.active
-		if p.active:
+		c.visible = Machine.view_on(self, p)
+		if c.visible:
 			shown.append(p)
 	var n := shown.size()
 	var area := views_root.size

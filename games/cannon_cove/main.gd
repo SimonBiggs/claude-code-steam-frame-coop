@@ -1,5 +1,6 @@
 extends Node3D
 const VrText := preload("res://core/vr_text.gd")
+const Machine := preload("res://core/machine.gd")  # one player per screen on a Deck (view_on)
 ## Cannon Cove: our pirate ship against waves of pirate ships, boarders and a sea monster.
 ## The VR gunner (player 1) swings and fires the cannons; the TV deckhands (players 2 to 7, drop-in:
 ## press A on a spare controller to join) keep the cannons loaded, patch leaks and shoot boarders. Gold for every ship sunk; the game ends when
@@ -880,8 +881,8 @@ func _layout_views() -> void:
 	for p in players:
 		if p.has_meta("view"):
 			var v: Control = p.get_meta("view")
-			v.visible = p.active
-			if p.active:
+			v.visible = Machine.view_on(self, p)
+			if v.visible:
 				views.append(v)
 	var n := views.size()
 	var cols := 1 if n <= 1 else (2 if n <= 4 else (3 if n <= 6 else 4))
@@ -1178,7 +1179,7 @@ func on_player_activity_changed(p) -> void:
 	if p.active and _is_local_flat(p):
 		_ensure_view(p)
 	if p.has_meta("view"):
-		p.get_meta("view").visible = p.active
+		p.get_meta("view").visible = Machine.view_on(self, p)
 	_layout_views()
 	print("Player %d is now %s on this screen" % [p.index + 1, "playing" if p.active else "waiting"])
 

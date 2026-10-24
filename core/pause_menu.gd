@@ -14,6 +14,10 @@ var who := 1  # party games: the slot that opened the menu (sent with the pause,
 ## Other players still holding a stick / mashing A must not move the highlight or press Restart.
 var opener_device := -1
 var _a_held := {}  # device -> true: its A was already held when the menu opened; it counts again once let go (UiKit.held_pads)
+var _open_t := 0.0  # seconds the menu has been open (game time: deterministic in bot tests)
+## A presses this soon after opening are still gameplay (a kid mashing A while steering pressed Restart): ignored.
+## After that the FIRST press counts (it used to need a release first, so "Back to Arcade" took two presses).
+const A_GRACE := 0.4
 
 
 func _ready() -> void:
@@ -77,7 +81,7 @@ func _input(event: InputEvent) -> void:
 		_a_held.erase(pad.device)
 	if panel.visible and joy_dev != -99 and opener_device == -3 and not toggle:
 		get_viewport().set_input_as_handled()
-		if pad and pad.pressed and pad.button_index == JOY_BUTTON_A and not _a_held.has(pad.device):
+		if pad and pad.pressed and pad.button_index == JOY_BUTTON_A and _a_counts(pad.device):
 			opener_device = pad.device  # claimed: this pad drives the menu from now on (this press only claims)
 		return
 	if panel.visible and joy_dev != -99 and opener_device >= 0 and joy_dev != opener_device and not toggle:
@@ -88,8 +92,8 @@ func _input(event: InputEvent) -> void:
 	if pad and pad.pressed and panel.visible and not toggle:
 		if pad.button_index == JOY_BUTTON_A:
 			get_viewport().set_input_as_handled()
-			if _a_held.has(pad.device):
-				return  # still held from play
+			if not _a_counts(pad.device):
+				return  # still held from play, or pressed as part of play just as the menu opened
 			var f := get_viewport().gui_get_focus_owner()
 			if f is BaseButton and panel.is_ancestor_of(f):
 				(f as BaseButton).pressed.emit()
@@ -104,6 +108,15 @@ func _input(event: InputEvent) -> void:
 	else:
 		who = _slot_of(-2 if key != null else pad.device)
 		_open(-2 if key != null else pad.device)
+
+
+func _a_counts(device: int) -> bool:
+	return not _a_held.has(device) and _open_t >= A_GRACE
+
+
+func _process(delta: float) -> void:
+	if panel != null and panel.visible:
+		_open_t += delta
 
 
 ## Party games: which slot pressed Start / Esc (-2 = the keyboard). Others: 1, as before.
@@ -141,6 +154,7 @@ func _pad_in_play(device: int) -> bool:
 func _open(by_device: int = -3) -> void:
 	opener_device = by_device
 	_a_held = preload("res://core/ui_kit.gd").held_pads(JOY_BUTTON_A)
+	_open_t = 0.0
 	panel.visible = true
 	get_tree().paused = true
 	if main and main.net:

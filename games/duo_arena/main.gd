@@ -1,5 +1,6 @@
 extends Node3D
 const VrText := preload("res://core/vr_text.gd")
+const Machine := preload("res://core/machine.gd")  # one player per screen on a Deck (view_on)
 ## Game controller: builds the arena, runs waves, camera and HUD.
 
 const PlayerScript := preload("res://games/duo_arena/player.gd")
@@ -612,7 +613,7 @@ func _ensure_view(p) -> void:
 	p.set_meta("view", container)
 	container.stretch = true
 	container.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	container.visible = p.active
+	container.visible = Machine.view_on(self, p)
 	views_root.add_child(container)
 	var vp := SubViewport.new()
 	vp.world_3d = get_world_3d()
@@ -647,8 +648,8 @@ func _layout_views() -> void:
 		var c: SubViewportContainer = p.get_meta("view")
 		if c.get_parent() != views_root:
 			c.reparent(views_root, false)  # from the old HBox layout (hot reload)
-		c.visible = p.active
-		if p.active:
+		c.visible = Machine.view_on(self, p)
+		if c.visible:
 			shown.append(p)
 	var n := shown.size()
 	var area := views_root.size

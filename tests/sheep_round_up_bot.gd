@@ -83,8 +83,8 @@ func _press(action: String) -> void:
 
 
 func _physics_process(delta: float) -> void:
-	if main == null or not main.ready_to_play:
-		return
+	if main == null or not main.ready_to_play or get_tree().paused:
+		return  # (no playing blind while the pause menu is open: an A there now picks its highlighted button)
 	bark_t -= delta
 	var bark := bark_t <= 0.0
 	if bark:

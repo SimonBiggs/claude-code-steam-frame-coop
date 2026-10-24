@@ -166,6 +166,8 @@ func _press_any(action: String) -> void:
 
 ## Open menus: drivers take the suggested vehicle; results: continue.
 func _menus() -> String:
+	if get_tree().paused:
+		return ""
 	if main.phase() == "complete":
 		saw_complete = true
 	for s in main.party.local_slots():
@@ -245,8 +247,8 @@ func _spot(kind: String) -> Vector2i:
 
 
 func _process(delta: float) -> void:
-	if main == null or not main.ready_to_play or client:
-		return
+	if main == null or not main.ready_to_play or client or get_tree().paused:
+		return  # (no playing blind while the pause menu is open: an A there now picks its highlighted button)
 	if main.phase() != "play":
 		if main.vr_rig != null:
 			kit.vr_idle(main.vr_rig, 1.6)
@@ -504,7 +506,7 @@ func _vr_toys(delta: float) -> bool:
 # --- Drivers ------------------------------------------------------------------------------------------
 
 func _physics_process(delta: float) -> void:
-	if main == null or not main.ready_to_play or main.phase() != "play":
+	if main == null or not main.ready_to_play or main.phase() != "play" or get_tree().paused:
 		return
 	for slot in main.party.local_slots():
 		if slot >= 1:
