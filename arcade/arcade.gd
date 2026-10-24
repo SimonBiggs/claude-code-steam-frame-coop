@@ -652,7 +652,7 @@ func _make_card(i: int, colour: Color) -> Button:
 	blurb.add_theme_color_override("font_color", Color(0.85, 0.87, 0.95))
 	v.add_child(blurb)
 	b.pressed.connect(_start_everywhere.bind(i))
-	b.focus_entered.connect(_select.bind(i, true))
+	b.focus_entered.connect(_on_card_focus.bind(i))
 	return b
 
 
@@ -777,15 +777,26 @@ func _set_status(text: String) -> void:
 		status.text = text
 
 
+var _applying_remote := false  # moving the focus because ANOTHER machine chose: must not broadcast it back
+
+## A card got focus: a local choice is told to the other machines; one applied from them is not (echoing it made
+## machines with different choices bounce the selection forever, rebuilding the menu each time: the Decks "glitched
+## when several were connected", 2026-10-24).
+func _on_card_focus(i: int) -> void:
+	_select(i, not _applying_remote)
+
+
 ## Keep the TV focus and the VR highlight in step (and tell the other machine).
 func _select(index: int, broadcast: bool) -> void:
 	selected = clampi(index, 0, GAMES.size() - 1)
 	if not broadcast and grid != null:
+		_applying_remote = true
 		var want := tabs().find(_cat_index_of(selected))
 		if want >= 0 and want != cat:
 			_show_category(want, false)
 		if cards.has(selected) and not (cards[selected] as Button).has_focus():
 			(cards[selected] as Button).grab_focus()
+		_applying_remote = false
 	if broadcast and mode != "local" and multiplayer.multiplayer_peer != null:
 		_sync_selection.rpc(selected)
 	_refresh_vr()

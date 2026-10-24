@@ -1,0 +1,21 @@
+#!/bin/bash
+# deck-screen-rec: runs ON each family Steam Deck (user service, installed by deck-pair). Keeps a rolling record of
+# what the Deck shows: one 960px JPEG every 5 s in ~/.cache/screen-rec (last 30 minutes), Gaming Mode
+# (gamescopectl) or Desktop Mode (spectacle). The Steam Machine pulls frames on demand: screen-rec at/range --deck NAME
+# (Simon 2026-10-24: "surely the recorders can run locally on each" Deck).
+DIR=~/.cache/screen-rec; TMP=/tmp/deck-screen-rec.png
+export XDG_RUNTIME_DIR=/run/user/$(id -u)
+mkdir -p "$DIR"
+while true; do
+  t=$(date +%s); rm -f "$TMP"
+  if pgrep -x gamescope-wl >/dev/null; then
+    GAMESCOPE_WAYLAND_DISPLAY=$(sed -n 's/^GAMESCOPE_WAYLAND_DISPLAY=//p' "$XDG_RUNTIME_DIR/gamescope-environment" 2>/dev/null) \
+      timeout 10 gamescopectl screenshot "$TMP" >/dev/null 2>&1
+    for _ in $(seq 20); do [ -s "$TMP" ] && break; sleep 0.1; done; sleep 0.2  # written asynchronously
+  else
+    WAYLAND_DISPLAY=wayland-0 timeout 10 spectacle -b -n -f -o "$TMP" >/dev/null 2>&1
+  fi
+  [ -s "$TMP" ] && ffmpeg -loglevel error -y -i "$TMP" -vf "scale=960:-2" -q:v 5 "$DIR/$(date +%Y%m%d-%H%M%S).jpg" </dev/null
+  find "$DIR" -name '20*.jpg' -mmin +30 -delete
+  sleep $(( 5 - ($(date +%s) - t) > 0 ? 5 - ($(date +%s) - t) : 0 ))
+done
