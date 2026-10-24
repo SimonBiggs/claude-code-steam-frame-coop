@@ -424,15 +424,18 @@ func _build_tv_menu() -> void:
 	tab_bar.add_theme_constant_override("separation", 10)
 	box.add_child(tab_bar)
 	grid = GridContainer.new()
-	grid.columns = 3
+	# As many 600 px columns as the screen really fits (a 16:9 TV: 3; a 16:10 Steam Deck: 2), instead of a fixed 3
+	# that ran off the Deck's screen.
+	var vis_w := get_viewport().get_visible_rect().size.x
+	grid.columns = clampi(int((vis_w - 40.0) / 618.0), 1, 3)
 	grid.add_theme_constant_override("h_separation", 18)
 	grid.add_theme_constant_override("v_separation", 16)
 	var center := CenterContainer.new()
-	center.custom_minimum_size = Vector2(1860, 0)
+	center.custom_minimum_size = Vector2(minf(1860.0, vis_w - 20.0), 0)
 	center.add_child(grid)
 	box.add_child(center)
 	var hint := Label.new()
-	hint.text = "LB / RB (Q / E): change category   ·   D-pad / arrows: choose   ·   A / Enter: play   ·   more games: just ask Claude!"
+	hint.text = "LB / RB (Q / E): change category   ·   D-pad / arrows: choose   ·   A / Enter: play" + ("   ·   Start: quit" if _can_quit() else "") + "   ·   more games: just ask Claude!"
 	hint.add_theme_font_size_override("font_size", 20)
 	hint.add_theme_color_override("font_color", Color(0.6, 0.65, 0.8))
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -584,9 +587,67 @@ func _make_card(i: int, colour: Color) -> Button:
 	return b
 
 
+## Quitting the arcade: on handhelds (Steam Deck) and plain local launches; never on the TV, which stays on (kids).
+func _can_quit() -> bool:
+	return my_kind != "tv" or OS.has_environment("ARCADE_ALLOW_QUIT")
+
+
+var quit_panel: PanelContainer
+
+func _toggle_quit_menu() -> void:
+	if quit_panel and is_instance_valid(quit_panel):
+		quit_panel.queue_free()
+		quit_panel = null
+		if cards.has(selected):
+			(cards[selected] as Button).grab_focus()
+		return
+	var layer := CanvasLayer.new()
+	layer.layer = 20
+	add_child(layer)
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.6)
+	layer.add_child(dim)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	quit_panel = PanelContainer.new()
+	var box := StyleBoxFlat.new()
+	box.bg_color = Color(0.1, 0.09, 0.2)
+	box.border_color = Color(0.45, 0.85, 1.0)
+	box.set_border_width_all(3)
+	box.set_corner_radius_all(18)
+	box.set_content_margin_all(28)
+	quit_panel.add_theme_stylebox_override("panel", box)
+	layer.add_child(quit_panel)
+	preload("res://core/ui_kit.gd").pin(quit_panel, Control.PRESET_CENTER)
+	quit_panel.tree_exited.connect(layer.queue_free)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 14)
+	quit_panel.add_child(v)
+	var t := Label.new()
+	t.text = "Quit the arcade?"
+	t.add_theme_font_size_override("font_size", 34)
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(t)
+	for item in [["Keep playing", _toggle_quit_menu], ["Quit", func() -> void: get_tree().quit()]]:
+		var b := Button.new()
+		b.text = item[0]
+		b.custom_minimum_size = Vector2(360, 64)
+		b.add_theme_font_size_override("font_size", 28)
+		b.pressed.connect(item[1])
+		v.add_child(b)
+	(v.get_child(1) as Button).grab_focus()
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if grid == null or starting:
 		return
+	var start := event as InputEventJoypadButton
+	var esc := event as InputEventKey
+	if _can_quit() and ((start and start.pressed and start.button_index == JOY_BUTTON_START) or (esc and esc.pressed and not esc.echo and esc.physical_keycode == KEY_ESCAPE) or (quit_panel and start and start.pressed and start.button_index == JOY_BUTTON_B)):
+		get_viewport().set_input_as_handled()
+		_toggle_quit_menu()
+		return
+	if quit_panel and is_instance_valid(quit_panel):
+		return  # the quit dialog has focus; A presses its buttons (ui_accept has pad A since ensure_pad_ui_actions)
 	var step := 0
 	var pad := event as InputEventJoypadButton
 	if pad and pad.pressed:
