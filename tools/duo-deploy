@@ -34,4 +34,5 @@ cd "$LIVE" && git add -A && git commit -q -m "$msg
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" && git log --oneline -1
 # Back up to GitHub (quietly, in the background; a failed push just waits for the next one).
-(git push -q origin main >/dev/null 2>&1 &)
+# A failed push is said out loud on Claude's channel (the token expired once and 46 commits sat unpushed unnoticed).
+( git push -q origin main >/dev/null 2>&1 || echo "⚠ github: push failed ($(git rev-list --count origin/main..main) commits waiting) - gh auth status" | "$HOME/.local/bin/brepl" --pipe github >/dev/null 2>&1 & )
