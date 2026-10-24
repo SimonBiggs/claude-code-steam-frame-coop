@@ -60,6 +60,7 @@ const JoinListenerScript := preload("res://games/bee_garden/join_listener.gd")
 const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
 const NetScript := preload("res://core/net.gd")
+const ClassicSeats := preload("res://core/classic_seats.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
 const GhostHandScript := preload("res://games/bee_garden/ghost_hand.gd")
 const PropsScript := preload("res://games/bee_garden/props.gd")
@@ -128,6 +129,10 @@ const SOUNDS := {
 }
 
 var players: Array = []
+## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
+var multi_machine := true
+## Which machine flies which bee (core/classic_seats.gd; core/net.gd checks it too).
+var seats: ClassicSeats
 var gardener
 var net: Node
 var ready_to_play := false
@@ -250,6 +255,16 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
+	seats = ClassicSeats.new(self, {
+		"free_actions": ["restart", "pause"],
+		"is_local": func(p) -> bool: return not p.remote,
+		"seat_free": func(p) -> bool: return not p.remote and not p.active and p.joy < 0 and p.key_set < 0 and not p.has_meta("lost_pad") and not p.has_meta(ClassicSeats.WANT),
+		"ghost": _bee_ghost,
+		"moved": _bee_moved,
+		"deactivate": _seat_gone,
+		"layout": _relayout,
+		"full": _bees_full,
+	})
 	Input.joy_connection_changed.connect(_on_joy_changed)
 	best_days = _load_best()
 	if OS.has_environment("DUO_JOIN"):
@@ -267,6 +282,10 @@ func _setup_game(mode: String) -> void:
 	_build_views(mode)
 	_assign_joypads()
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	if seats.deck_alone():
+		seats.deck_solo(0)  # a Deck on its own: the gardener (helper bees do the pollinating)
+	elif mode == "client":
+		players[1].set_meta(ClassicSeats.WANT, true)  # ask the host for P2's bee (it may hand out another one)
 	if mode != "client":
 		_reset_garden()
 	ready_to_play = true
@@ -659,10 +678,7 @@ func handle_join_input(event: InputEvent) -> bool:
 		return false
 	var bee = _free_bee()
 	if bee == null:
-		if SIMPLE_MODE:
-			sound("miss", -6.0)  # no sentence: nothing happens (every bee seat is taken)
-		else:
-			_show_center("All 6 bee seats are taken!", 1.5, false)
+		_bees_full()
 		return true
 	bee.joy = b.device
 	bee.claimed = true
@@ -687,6 +703,41 @@ func _free_bee():
 	return null
 
 
+## Host: a machine's bee goes away (that machine left).
+func _seat_gone(b) -> void:
+	if b.active:
+		_bee_leaves(b)
+
+
+func _relayout() -> void:
+	views_dirty = true
+	_layout_views()
+
+
+func _bees_full() -> void:
+	if SIMPLE_MODE:
+		sound("miss", -6.0)  # no sentence: nothing happens (every bee seat is taken)
+	else:
+		_show_center("All 6 bee seats are taken!", 1.5, false)
+
+
+## TV machine: bee p is another machine's now (on: flown from the snapshots, no view here) or ours again.
+func _bee_ghost(p, on: bool) -> void:
+	p.remote = on
+	if on:
+		p.claimed = false
+		p.net_target = p.global_position
+	elif p.active:
+		_ensure_view(p)
+	on_player_activity_changed(p)
+
+
+## TV machine: our controls moved from bee `from` to bee `to` (another machine has `from`).
+func _bee_moved(from, to) -> void:
+	to.claimed = true
+	from.claimed = false
+
+
 func request_join(i: int) -> void:
 	if i < 1 or i >= players.size():
 		return
@@ -695,7 +746,8 @@ func request_join(i: int) -> void:
 		b.global_position = spawn_pos(i)
 		b.vel = Vector3.ZERO
 	if net.mode == "client":
-		net.send_action("join", [], i)
+		b.set_meta(ClassicSeats.WANT, true)  # seats.request_joins asks the host until the bee is ours
+		seats.ask_soon()
 	else:
 		on_p2_action("join", [], i)
 
@@ -720,7 +772,7 @@ func on_player_activity_changed(p) -> void:
 	if p.active and not p.remote:
 		_ensure_view(p)
 	if p.has_meta("view"):
-		p.get_meta("view").visible = p.active
+		p.get_meta("view").visible = p.active and not p.remote
 	views_dirty = true
 
 
@@ -1858,6 +1910,8 @@ func _process(delta: float) -> void:
 	music.play_track(1 if event == "raid" else 2)
 	music.pitch_scale = lerpf(music.pitch_scale, (1.06 if event == "raid" else [1.0, 1.02, 0.97, 0.95][(maxi(day, 1) - 1) % 4]), 1.0 - exp(-2.0 * delta))
 	if net.mode == "client":
+		seats.sync()
+		seats.request_joins(delta)
 		rain_t = maxf(0.0, rain_t - delta)
 		rainbow_t = maxf(0.0, rainbow_t - delta)
 	_update_hud()
@@ -2140,15 +2194,20 @@ func on_client_joined() -> void:
 	_show_center("BUZZ BUZZ!" if SIMPLE_MODE else "THE BEES HAVE ARRIVED!  Buzz buzz!", 1.5)
 
 
+## Host: one machine left: only its bees fly home (and their seats become free).
+func on_machine_left(peer: int) -> void:
+	seats.machine_left(peer)
+
+
+## Host: the LAST machine left (multi_machine games get this only then).
 func on_client_left() -> void:
 	if not SIMPLE_MODE:
 		_show_center("The bees flew home - waiting for them to come back…", 0.0)
-	for b in bees():
-		if b.index >= 2 and b.active:
-			_bee_leaves(b)
+	seats.all_left()  # each machine asks for its bees again when it reconnects
 
 
 func on_p2_action(action: String, args: Array, index: int = 1) -> void:
+	index = seats.host_action(action, args, index)  # many machines: who flies which bee (core/classic_seats.gd)
 	if index < 1 or index >= players.size():
 		return
 	var b = players[index]
@@ -2296,6 +2355,8 @@ func _sync_pests(list: Array) -> void:
 
 
 func apply_event(kind: String, args: Array) -> void:
+	if seats.handle_event(kind, args):
+		return
 	if not ready_to_play:
 		return
 	match kind:

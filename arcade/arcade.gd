@@ -28,7 +28,7 @@ const GAMES := [
 		"blurb": "VR giant builds bridges and springs; tiny TV runners race to the flag"},
 	{"id": "dragon_rider", "multi": true, "cat": "action", "name": "DRAGON RIDER", "scene": "res://games/dragon_rider/main.tscn",
 		"blurb": "VR steers a friendly dragon with the reins; TV gunners pop balloons from its back"},
-	{"id": "bee_garden", "cat": "cosy", "name": "BEE GARDEN", "scene": "res://games/bee_garden/main.tscn",
+	{"id": "bee_garden", "multi": true, "cat": "cosy", "name": "BEE GARDEN", "scene": "res://games/bee_garden/main.tscn",
 		"blurb": "Cosy, no fighting: VR gardener plants and waters, TV bees make honey"},
 	{"id": "paint_and_guess", "multi": true, "cat": "party", "name": "PAINT AND GUESS", "scene": "res://games/paint_and_guess/main.tscn",
 		"blurb": "VR paints a secret word in the air; TV players race to guess it"},

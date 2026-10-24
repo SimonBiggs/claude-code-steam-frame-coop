@@ -488,6 +488,9 @@ func apply_net_state(st: Array) -> void:
 			set_active(false)
 			main.on_player_activity_changed(self)
 		return
+	if remote:  # TV machine: another machine's bee (core/classic_seats.gd ghost): mirror where it flies
+		net_target = st[0]
+		face = st[1]
 	pollen = st[2]
 	honey_made = st[3]
 	gold = st[5]
