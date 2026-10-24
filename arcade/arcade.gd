@@ -60,7 +60,7 @@ const GAMES := [
 		"blurb": "Be the hero in VR! Swing your sword, raise your hand for magic, and restore the Crystal of Light with your party."},
 	{"id": "balloon_pop", "multi": true, "cat": "party", "name": "BALLOON POP", "scene": "res://games/balloon_pop/main.tscn",
 		"blurb": "Pop the balloons floating up all around you: VR punches and squeezes, TV players run and jump!"},
-	{"id": "sheep_round_up", "cat": "cosy", "name": "SHEEP ROUND-UP", "scene": "res://games/sheep_round_up/main.tscn",
+	{"id": "sheep_round_up", "multi": true, "cat": "cosy", "name": "SHEEP ROUND-UP", "scene": "res://games/sheep_round_up/main.tscn",
 		"blurb": "Sheepdogs herd, the giant farmer scoops - get every fluffy sheep into the pen!"},
 	{"id": "fruit_catch", "multi": true, "cat": "party", "name": "FRUIT CATCH", "scene": "res://games/fruit_catch/main.tscn",
 		"blurb": "Shake the giant tree and catch the falling fruit in your baskets!"},
