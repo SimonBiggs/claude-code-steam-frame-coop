@@ -1,5 +1,6 @@
 extends Node3D
 const VrText := preload("res://core/vr_text.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 ## Kitchen Rush: co-op cooking chaos.
 ## Player 1 is the CHEF at the counter (VR hands, or button controls in split screen): chop and stack.
 ## Players 2-7 are RUNNERS (TV, first person, split screen): fetch ingredients to the pass, carry finished plates
@@ -22,7 +23,13 @@ const VrText := preload("res://core/vr_text.gd")
 ##    a pepper grinder, a cuckoo clock; the bell rings ("ORDER UP!").
 ##  - Solo VR: when no TV runner is connected, kitchen helpers pop missing ingredients onto the pass and
 ##    whisk finished plates to the customers.
-##  - Text: VR one short headline; TV one short line (PRESS A) at most.
+##  - No how-to words (visual teaching): each TV view shows a pulsing glowing button in that player's own
+##    controls plus an icon (hud.gd, UiKit glyph / icon) for what the button does right there - runners:
+##    pick up (up arrow), put down (down arrow), serve (heart), a bolt when unplugged; button chef: chop
+##    (knife), grab / put down, move the hand (arrow). Each cue goes once done twice (cue_did /
+##    cue_learned); the ghost hand's CHOP and STACK demos too. The glowing arrows (guide.gd) lead crate ->
+##    pass -> customer. PAUSED has no sentence.
+##  - Text: VR one short headline; TV titles only.
 
 const L := preload("res://games/kitchen_rush/layout.gd")
 const KitchenScript := preload("res://games/kitchen_rush/kitchen.gd")
@@ -581,13 +588,34 @@ func _layout_views() -> void:
 		f.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		f.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		f.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		var l := _make_label(30)
-		l.text = "Grab a controller\nand press A to join!"
-		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		l.add_theme_color_override("font_color", Color(0.75, 0.8, 0.9))
-		f.add_child(l)
-		l.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		if SIMPLE_MODE:
+			# No words: a pulsing A and a person with a plus (press A on a spare controller to join).
+			var cc := CenterContainer.new()
+			cc.name = "JoinCue"
+			cc.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			f.add_child(cc)
+			cc.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+			var row := HBoxContainer.new()
+			row.alignment = BoxContainer.ALIGNMENT_CENTER
+			row.add_theme_constant_override("separation", 18)
+			row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			row.add_child(UiKit.glyph("A", 2.0))
+			row.add_child(UiKit.icon("plus", Color(0.75, 0.8, 0.9), 48.0))
+			row.add_child(UiKit.icon("person", Color(0.75, 0.8, 0.9), 88.0))
+			for c in row.get_children():
+				(c as Control).size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			cc.add_child(row)
+			var tw := row.create_tween().set_loops()
+			tw.tween_property(row, "modulate:a", 0.5, 0.7)
+			tw.tween_property(row, "modulate:a", 1.0, 0.7)
+		else:
+			var l := _make_label(30)
+			l.text = "Grab a controller\nand press A to join!"
+			l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+			l.add_theme_color_override("font_color", Color(0.75, 0.8, 0.9))
+			f.add_child(l)
+			l.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		grid.add_child(f)
 		fillers.append(f)
 	for i in fillers.size():
@@ -1607,6 +1635,7 @@ func chef_pick_target(point: Vector3, r: float):
 
 
 func chef_grab(it) -> void:
+	cue_did(players[0], "grab")
 	it.holder = 0
 	sfx_local("pickup", -10.0, 1.3)
 
@@ -1695,6 +1724,7 @@ func plate_accepts(plate, it) -> String:
 
 
 func add_to_plate(plate, it) -> void:
+	cue_did(players[0], "stack")
 	plate.contents = plate.contents + [it.kind]
 	remove_item(it)
 	sound("pickup", -6.0, 0.9 + plate.contents.size() * 0.1)
@@ -1735,6 +1765,7 @@ func chop(it) -> bool:
 	sound("chop", 0.0, 0.9 + it.chops * 0.12)
 	burst(it.global_position + Vector3.UP * 0.06, ItemScript.color_of(it.kind), 12, 0.035)
 	if it.is_ready():
+		cue_did(players[0], "chop")
 		popup(it.global_position + Vector3.UP * 0.25, "CHOPPED!", Color(0.6, 1.0, 0.5))
 		sound("pickup", -8.0, 1.4)
 	return true
@@ -2584,6 +2615,7 @@ func _build_hud() -> void:
 	sb.content_margin_bottom = 12
 	help_panel.add_theme_stylebox_override("panel", sb)
 	help_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	help_panel.visible = not SIMPLE_MODE  # simple mode: no how-to panel, not even for a frame
 	layer.add_child(help_panel)
 	help_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
 	help_panel.offset_top = -330
@@ -2947,11 +2979,12 @@ func _update_chef_teaching(delta: float) -> void:
 	var mode := ""
 	var a := Vector3.ZERO
 	var b := Vector3.ZERO
-	if (practice or stats[0].dishes < 2) and it != null and it.holder == -1:
+	if it != null and it.holder == -1:  # each demo stops once the chef has done it twice (cue_learned)
 		if it.needs_chop():
-			mode = "chop"
-			a = it.global_position
-		elif pl != null:
+			if not cue_learned(chef, "chop"):
+				mode = "chop"
+				a = it.global_position
+		elif pl != null and not cue_learned(chef, "stack"):
 			mode = "stack"
 			a = it.global_position
 			b = pl.global_position
@@ -2983,18 +3016,87 @@ func wrist_text() -> String:
 	return status_text() + "\nA: recenter  ·  left stick: slide"
 
 
-## Simple mode, button chef (split screen): one short prompt for what the buttons do here.
-func chef_prompt(chef) -> String:
-	var pad: bool = chef.joy >= 0
-	var sp := L.spot_pos(chef.cursor)
+## Simple mode, button chef (split screen): which picture cue its view shows - {"key": "move" (with "dir"),
+## "chop", "grab" or "drop"} - or {} once that cue is learned (done twice) or there's nothing to do here.
+func chef_cue(chef) -> Dictionary:
+	if chef.vr or input_blocked():
+		return {}
 	var held = chef.held[0]
-	if held != null and is_instance_valid(held):
-		return ("A" if pad else "SPACE") + " DROP"
-	var it = item_at(sp, 0.2)
-	if chef.cursor == 5 or chef.cursor == 7:
-		it = _home_plate(0 if chef.cursor == 5 else 1)
-	if it == null:
-		return ""
-	if it.needs_chop():
-		return ("X" if pad else "SHIFT") + " CHOP!"
-	return ("A" if pad else "SPACE") + " GRAB"
+	if held != null and not is_instance_valid(held):
+		held = null
+	var it = chef_task.get("item")
+	var pl = chef_task.get("plate")
+	if it != null and not is_instance_valid(it):
+		it = null
+	if pl != null and not is_instance_valid(pl):
+		pl = null
+	var target = null
+	if held != null:
+		if pl != null:
+			target = pl.global_position
+		elif chef_task.has("spot"):
+			target = chef_task["spot"]
+	elif it != null and it.holder == -1:
+		target = it.global_position
+	elif chef_task.has("spot"):
+		target = chef_task["spot"]
+	if target != null:
+		var best: int = chef.cursor
+		var best_d := INF
+		for i in L.spot_count():
+			var d := flat_dist(target, L.spot_pos(i))
+			if d < best_d:
+				best_d = d
+				best = i
+		if best != chef.cursor:
+			if cue_learned(chef, "move"):
+				return {}
+			var dc: int = best % 4 - chef.cursor % 4
+			var dr: int = best / 4 - chef.cursor / 4
+			var dir := ("right" if dc > 0 else "left") if dc != 0 else ("down" if dr > 0 else "up")
+			return {"key": "move", "dir": dir}
+	var key := ""
+	if held != null:
+		key = "drop"
+	else:
+		var here = item_at(L.spot_pos(chef.cursor), 0.2)
+		if chef.cursor == 5 or chef.cursor == 7:
+			here = _home_plate(0 if chef.cursor == 5 else 1)
+		if here == null or (here.is_plate() and here.recipe == "" and here.contents.is_empty()):
+			return {}
+		key = "chop" if here.needs_chop() else "grab"
+	if cue_learned(chef, key):
+		return {}
+	return {"key": key}
+
+
+## Simple mode picture cues: player p has done `key` once more ("chop", "stack", "grab", "drop", "move",
+## "take", "serve", "spray"); a cue goes once it has been done twice. Kept on each machine for its own
+## local players (the runners count their own presses, so the TV machine knows too).
+func cue_did(p, key: String) -> void:
+	if p == null:
+		return
+	var done: Dictionary = p.get_meta("cue_done", {})
+	done[key] = int(done.get(key, 0)) + 1
+	p.set_meta("cue_done", done)
+
+
+func cue_learned(p, key: String) -> bool:
+	if p == null:
+		return false
+	var done: Dictionary = p.get_meta("cue_done", {})
+	return int(done.get(key, 0)) >= 2
+
+
+## The picture cue a runner's button press counts towards.
+func runner_cue_key(act: String) -> String:
+	match act:
+		"take", "take_plate", "take_ext":
+			return "take"
+		"drop", "return", "put_ext":
+			return "drop"
+		"serve":
+			return "serve"
+		"spray":
+			return "spray"
+	return ""

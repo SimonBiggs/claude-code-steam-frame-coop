@@ -21,7 +21,16 @@ at the counter; the **TV runners fetch** ingredients to the pass and **carry pla
 - **Off:** fires and the extinguisher, the food critic, the dinner rush, coins / tips / combos / star
   ratings, awards and stats, the help panel, next-step lines, popups, signs, game over (a customer who
   waits too long just leaves under a rain cloud). The raccoon comes back from round 3.
-- **Text:** VR one short headline (wrist: ROUND n); TV one short prompt (PRESS A) at most.
+- **No how-to words (visual teaching):** low in each TV view a pulsing glowing button in that player's own
+  controls plus an icon shows what the button does right there. Runners: A / E / ENTER + an up arrow
+  (pick up) at a crate or a ready plate, + a down arrow (put down) at the pass, + a heart (serve) at the
+  customer; a pulsing bolt when their controller is unplugged. Button chef: X / SHIFT + a knife (chop),
+  A / SPACE + an up / down arrow (grab / put down), and STICK / an arrow key + an arrow (move the hand)
+  towards the next thing. Each cue goes once that player has done it twice. The glowing 3D arrows lead
+  from the crate to the pass to the customer at the window (the chef's to the ingredient, then the
+  plate). VR: the ghost hand's CHOP and STACK demos each stop once the chef has done that twice.
+- **Text:** VR one short headline (wrist: ROUND n); TV titles only (KITCHEN RUSH!, NEW DISH!, ORDER UP!,
+  HOORAY!, PAUSED).
 
 The rest of this file describes the full game (`SIMPLE_MODE := false`).
 
