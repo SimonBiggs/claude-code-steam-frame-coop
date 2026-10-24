@@ -259,7 +259,7 @@ const MONKEY: [string, Record<string, number>?][] = [  // a scripted "kid with a
  *  many of the games in parallel"): monkey inputs for `seconds` while recording at 30 fps, then per game
  *  {id, ok, problems[], errors[], fps, sound, frozen, sheets[]}, also written to ~/.cache/sweep/<id>.json and
  *  posted to the channel as each finishes. Long: run it in bg(). */
-export async function sweep(o: { only?: string[]; seconds?: number; concurrency?: number } = {}) {
+export async function sweep(o: { only?: string[]; seconds?: number; concurrency?: number; vr?: boolean } = {}) {
   const ids = o.only ?? (await readdir(join(STAGE, "games"))).filter(d => d !== "engine_template").sort();
   await mkdir(SWEEP, { recursive: true });
   const results: any[] = [];
@@ -268,9 +268,9 @@ export async function sweep(o: { only?: string[]; seconds?: number; concurrency?
   (globalThis as any).send?.("sweep", `${ids.length} games, ${n} at a time`);
   await Promise.all(Array.from({ length: n }, async () => {
     while (next < ids.length) {
-      const r = await sweepOne(ids[next++], o.seconds ?? 20);
+      const r = await sweepOne(ids[next++], o.seconds ?? 20, !!o.vr);
       results.push(r);
-      await Bun.write(join(SWEEP, `${r.id}.json`), JSON.stringify(r, null, 1));
+      await Bun.write(join(SWEEP, `${r.id}${o.vr ? "-vr" : ""}.json`), JSON.stringify(r, null, 1));
       (globalThis as any).send?.(`sweep ${r.id}`, (r.ok ? "ok" : r.problems.join("\n")) + `\nsheets: ${r.sheets.join(" ")}`);  // text only: show() the sheets when reviewing
     }
   }));
@@ -289,18 +289,29 @@ export async function parallelGames() {
   return n;
 }
 
-async function sweepOne(id: string, seconds: number) {
+// vr: the game's VR player in fake VR too (BOT_VR=1): it looks around, swings both hands and pulls the trigger
+// while the TV pad mashes, and the sheets include the headset view (span-vr-*).
+async function sweepOne(id: string, seconds: number, vr = false) {
   const godot = (globalThis as any).godot;
   const r: any = { id, ok: false, problems: [] as string[], errors: [] as string[], fps: 0, sound: false, frozen: false, sheets: [] as string[] };
   let g: any;
   try {
-    g = await godot.launch({ project: STAGE, scene: `res://games/${id}/main.tscn` });
+    g = await godot.launch({ project: STAGE, scene: `res://games/${id}/main.tscn`, vr });
+    const head = vr ? (await g.vr().catch(() => null))?.head : null;
+    if (vr && !head) r.problems.push("no VR player in fake VR (BOT_VR=1)");
     await Bun.sleep(3000);
     const t0 = Date.now();
     for (let i = 0; Date.now() - t0 < seconds * 1000; i++) {
       const [name, opts] = MONKEY[i % MONKEY.length];
       if (g.child.exitCode !== null) break;
       await g.joy(name, opts ?? {}).catch(() => {});
+      if (head && i % 2 === 0) {
+        const k = i / 2;
+        await g.vr({ look: [head[0] + Math.sin(k) * 3, head[1] + Math.cos(k * 1.3) * 0.5, head[2] - 3] }).catch(() => {});
+        await g.vrSwing(k % 2 ? "left" : "right", [0, 0.2, -0.6], 0.15).catch(() => {});
+        await g.vr({ trigger: k % 3 === 0 ? 1 : 0, a: k % 4 === 1, stick_l: [Math.sin(k), 0] }).catch(() => {});
+        await g.vrSwing(k % 2 ? "left" : "right", [0, -0.2, 0.6], 0.15).catch(() => {});
+      }
       await Bun.sleep(400);
     }
     const alive = g.child.exitCode === null;
@@ -344,6 +355,7 @@ async function sweepOne(id: string, seconds: number) {
       const fr = await g.frames();
       const end = fr.length ? fr[fr.length - 1].t : 0;
       r.sheets = await g.span(1, end, 12 / Math.max(1, end - 1)).catch((e: any) => { r.problems.push(`span failed: ${e}`); return []; });
+      if (head) r.sheets.push(...await g.span(1, end, 12 / Math.max(1, end - 1), { vr: true }).catch(() => []));
       // Frozen: byte-identical JPEGs across the last 5 s mean nothing on screen moved at all.
       const tail = fr.filter((f: any) => f.t > end - 5);
       if (tail.length > 2) {

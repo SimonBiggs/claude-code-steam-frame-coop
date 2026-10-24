@@ -15,6 +15,13 @@ extends Node
 ##   mark   {text}                 show a note in the recording overlay (e.g. "now testing the pause menu")
 ##   speed  {value}                Engine.time_scale
 ##   scene  {path}                 change_scene_to_file
+##   vr     {head?, look?, left?, right?, trigger?, grip?, a?, b?, stick_l?, stick_r?}   drive the VR player in
+##                                 fake VR (launch with BOT_VR=1): world positions [x,y,z] (or {head: [dx,dy,dz],
+##                                 relative: true} to move by), look = point the head faces; trigger/grip 0..1,
+##                                 a/b bools, sticks [x,y]. Sets the XR nodes and every fake_* field games read.
+##                                 Returns the current head/hand positions. {} just reports.
+##   camshot {camera?, path, width?, height?}   PNG from a camera (default: the VR head, the first XRCamera3D):
+##                                 what the headset would show, rendered in its own viewport
 ##   quit
 ## The Bun client is ~/.local/share/gdev/godot.ts (brepl: godot.launch(...)).
 
@@ -60,6 +67,37 @@ func _process(_delta: float) -> void:
 			var img := get_viewport().get_texture().get_image()
 			rec_tasks.append(WorkerThreadPool.add_task(_save_frame.bind(img, "%s/%08d.jpg" % [rec_dir, now - rec_t0])))
 			rec_frames += 1
+			_record_vr(now)
+
+
+# The VR head's view, recorded next to the TV frames (rec/vr/<ms>.jpg) whenever there is an XR camera
+# (fake VR: BOT_VR=1), so span sheets can show what the headset player saw.
+var vr_vp: SubViewport
+var vr_cam: Camera3D
+
+func _record_vr(now: int) -> void:
+	var head: Camera3D = _xr_nodes().head
+	if head == null or not head.is_inside_tree():
+		return
+	if vr_vp == null or not is_instance_valid(vr_vp) or vr_vp.world_3d != head.get_world_3d():
+		if vr_vp and is_instance_valid(vr_vp):
+			vr_vp.queue_free()
+		vr_vp = SubViewport.new()
+		vr_vp.size = Vector2i(rec_width, int(rec_width * 9 / 16))
+		vr_vp.world_3d = head.get_world_3d()
+		vr_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+		vr_cam = Camera3D.new()
+		vr_cam.fov = 90.0
+		vr_vp.add_child(vr_cam)
+		add_child(vr_vp)
+		vr_cam.current = true
+		DirAccess.make_dir_recursive_absolute(rec_dir + "/vr")
+	vr_cam.global_transform = head.global_transform
+	vr_cam.near = head.near
+	vr_cam.cull_mask = head.cull_mask
+	var img := vr_vp.get_texture().get_image()
+	if img:
+		rec_tasks.append(WorkerThreadPool.add_task(_save_frame.bind(img, "%s/vr/%08d.jpg" % [rec_dir, now - rec_t0])))
 
 
 func _pull_audio() -> void:
@@ -222,6 +260,10 @@ func _run(r: Dictionary) -> Dictionary:
 		"speed":
 			Engine.time_scale = float(r.get("value", 1.0))
 			return {"ok": true}
+		"vr":
+			return _vr(r)
+		"camshot":
+			return await _camshot(r)
 		"scene":
 			var err := get_tree().change_scene_to_file(str(r.get("path", "")))
 			await get_tree().process_frame
@@ -399,3 +441,135 @@ func _click(r: Dictionary) -> Dictionary:
 		Input.parse_input_event(e)
 		await get_tree().process_frame
 	return {"ok": true, "at": [at.x, at.y]}
+
+
+# --- fake VR (BOT_VR=1) ------------------------------------------------------------
+
+func _xr_nodes() -> Dictionary:
+	var root := get_tree().root
+	var cams := root.find_children("*", "XRCamera3D", true, false)
+	var ctrls := root.find_children("*", "XRController3D", true, false)
+	var out := {"head": cams[0] if cams.size() else null, "left": null, "right": null}
+	for c in ctrls:
+		var t := str((c as XRController3D).tracker)
+		if t == "left_hand" and out.left == null:
+			out.left = c
+		elif t == "right_hand" and out.right == null:
+			out.right = c
+	return out
+
+
+func _v3(a) -> Vector3:
+	return Vector3(float(a[0]), float(a[1]), float(a[2]))
+
+
+## Every node with a fake_<name> property (core/vr_rig.gd, games' own VR players) gets the value.
+func _set_fake(field: String, value) -> int:
+	var n := 0
+	for node in get_tree().root.find_children("*", "", true, false):
+		if field in node:
+			node.set(field, value)
+			n += 1
+	return n
+
+
+## Fake hand trackers in the XRServer, so games that read the controller directly (hand.get_float("trigger"),
+## is_button_pressed("ax_button"), the pose) get input exactly as from a real headset.
+func _tracker(hand_name: String, node: XRController3D) -> XRPositionalTracker:
+	var t := XRServer.get_tracker(hand_name) as XRPositionalTracker
+	if t == null:
+		t = XRControllerTracker.new()
+		t.name = hand_name
+		t.type = XRServer.TRACKER_CONTROLLER
+		t.hand = XRPositionalTracker.TRACKER_HAND_LEFT if hand_name == "left_hand" else XRPositionalTracker.TRACKER_HAND_RIGHT
+		XRServer.add_tracker(t)
+		if node:
+			_pose(t, node)
+	return t
+
+
+## The tracker pose = the node's transform relative to its XROrigin3D (what a headset would report).
+func _pose(t: XRPositionalTracker, node: XRController3D) -> void:
+	var origin := node.get_parent() as Node3D
+	var local := origin.global_transform.affine_inverse() * node.global_transform if origin else node.transform
+	t.set_pose(node.pose, local, Vector3.ZERO, Vector3.ZERO, XRPose.XR_TRACKING_CONFIDENCE_HIGH)
+
+
+func _vr(r: Dictionary) -> Dictionary:
+	var x := _xr_nodes()
+	if x.head == null:
+		return {"error": "no XRCamera3D: launch with env BOT_VR=1 (and a game that has a VR player)"}
+	var tl := _tracker("left_hand", x.left)
+	var tr := _tracker("right_hand", x.right)
+	var rel := bool(r.get("relative", false))
+	for k in ["head", "left", "right"]:
+		if r.has(k) and x[k] != null:
+			var n: Node3D = x[k]
+			n.global_position = (n.global_position + _v3(r[k])) if rel else _v3(r[k])
+			if k != "head":
+				_pose(tl if k == "left" else tr, n)
+	if r.has("look"):
+		var h: Node3D = x.head
+		var at := _v3(r.look)
+		if at.distance_to(h.global_position) > 0.01:
+			h.look_at(at, Vector3.UP)
+	var changed := {}
+	# Controller inputs (both hands: games differ on which hand fires), then the fake_* fields below.
+	for t in [tl, tr]:
+		if r.has("trigger"):
+			t.set_input("trigger", float(r.trigger))
+			t.set_input("trigger_click", float(r.trigger) > 0.5)
+		if r.has("grip"):
+			t.set_input("grip", float(r.grip))
+			t.set_input("grip_click", float(r.grip) > 0.5)
+		if r.has("a"):
+			t.set_input("ax_button", bool(r.a))
+		if r.has("b"):
+			t.set_input("by_button", bool(r.b))
+	if r.has("stick_l"):
+		tl.set_input("primary", Vector2(float(r.stick_l[0]), float(r.stick_l[1])))
+	if r.has("stick_r"):
+		tr.set_input("primary", Vector2(float(r.stick_r[0]), float(r.stick_r[1])))
+	for pair in [["trigger", "fake_trigger"], ["grip", "fake_grip"], ["a", "fake_a"], ["b", "fake_b"]]:
+		if r.has(pair[0]):
+			changed[pair[0]] = _set_fake(pair[1], r[pair[0]])
+	for pair in [["stick_l", ["fake_stick_l", "fake_stick"]], ["stick_r", ["fake_stick_r"]]]:
+		if r.has(pair[0]):
+			var v := Vector2(float(r[pair[0]][0]), float(r[pair[0]][1]))
+			for f in pair[1]:
+				changed[f] = _set_fake(f, v)
+	if r.has("trigger") or r.has("a"):
+		_note("▶ vr " + str(r.keys().filter(func(k): return k in ["trigger", "a", "b", "grip", "stick_l", "stick_r"]).map(func(k): return "%s=%s" % [k, r[k]])))
+	var pos := func(n): return [snappedf(n.global_position.x, 0.01), snappedf(n.global_position.y, 0.01), snappedf(n.global_position.z, 0.01)] if n else null
+	return {"head": pos.call(x.head), "left": pos.call(x.left), "right": pos.call(x.right), "set": changed}
+
+
+func _camshot(r: Dictionary) -> Dictionary:
+	var src: Camera3D = null
+	if r.has("camera"):
+		src = get_tree().root.get_node_or_null(str(r.camera)) as Camera3D
+	else:
+		src = _xr_nodes().head
+	if src == null:
+		return {"error": "no camera (default is the VR head: launch with BOT_VR=1)"}
+	var vp := SubViewport.new()
+	vp.size = Vector2i(int(r.get("width", 1280)), int(r.get("height", 720)))
+	vp.world_3d = src.get_world_3d()
+	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	var cam := Camera3D.new()
+	cam.fov = 90.0 if src is XRCamera3D else src.fov  # roughly a headset's field of view
+	cam.near = src.near
+	cam.far = src.far
+	cam.cull_mask = src.cull_mask
+	vp.add_child(cam)
+	add_child(vp)
+	cam.global_transform = src.global_transform
+	cam.current = true
+	for i in 3:
+		await RenderingServer.frame_post_draw
+	var img := vp.get_texture().get_image()
+	vp.queue_free()
+	var path := str(r.get("path", ProjectSettings.globalize_path("res://.dev/camshot.png")))
+	var err := img.save_png(path)
+	return {"path": path} if err == OK else {"error": "save failed: %d" % err}
+
