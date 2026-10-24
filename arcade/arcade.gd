@@ -42,7 +42,7 @@ const GAMES := [
 		"blurb": "VR turns a real steering wheel; TV racers drive in split screen, with items and ramps"},
 	{"id": "tiny_town_tycoon", "cat": "cosy", "name": "TINY TOWN TYCOON", "scene": "res://games/tiny_town_tycoon/main.tscn",
 		"blurb": "Build a cosy toy town together: the mayor places the buildings, the drivers bring it to life"},
-	{"id": "party_board", "cat": "party", "name": "PARTY BOARD", "scene": "res://games/party_board/main.tscn",
+	{"id": "party_board", "multi": true, "cat": "party", "name": "PARTY BOARD", "scene": "res://games/party_board/main.tscn",
 		"blurb": "A Mario-Party-style board game on a diorama island: roll, hop, shop and duel for STARS, with a minigame after every round"},
 	{"id": "mech_titans", "cat": "action", "name": "MECH TITANS", "scene": "res://games/mech_titans/main.tscn",
 		"blurb": "Giant robot vs cute kaiju: VR pilot punches and beams from the cockpit, TV jets, trucks, drones and tanks support"},
