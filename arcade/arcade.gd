@@ -80,10 +80,11 @@ const GAMES := [
 		"blurb": "Roll giant snowballs, stack them up, and give every snowman a carrot nose and a hat!"},
 	{"id": "dodge_ball", "multi": true, "cat": "party", "name": "SOFT DODGEBALL", "scene": "res://games/dodge_ball/main.tscn",
 		"blurb": "A friendly VR giant throws squishy balls; dodge them and bop the target on his belly!"},
-	{"id": "quiz_show", "multi": true, "cat": "party", "name": "QUIZ SHOW", "scene": "res://games/quiz_show/main.tscn",
-		"blurb": "A TV quiz for the whole family: pick a level, answer with the coloured buttons, guess the hidden picture!"},
-	{"id": "mystery_manor", "multi": true, "cat": "adventure", "name": "MYSTERY MANOR", "scene": "res://games/mystery_manor/main.tscn",
-		"blurb": "Something is missing! Find the sparkly clues in a spooky old house, then catch who did it."},
+	# Finished 2026-10-24 but reading-based: hidden until the family says yes (.backlog.md). Uncomment to show.
+	# {"id": "quiz_show", "multi": true, "cat": "party", "name": "QUIZ SHOW", "scene": "res://games/quiz_show/main.tscn",
+	# 	"blurb": "A TV quiz for the whole family: pick a level, answer with the coloured buttons, guess the hidden picture!"},
+	# {"id": "mystery_manor", "multi": true, "cat": "adventure", "name": "MYSTERY MANOR", "scene": "res://games/mystery_manor/main.tscn",
+	# 	"blurb": "Something is missing! Find the sparkly clues in a spooky old house, then catch who did it."},
 ]
 ## Tabs on the TV (LB/RB) and in VR (stick left/right). Empty categories are hidden.
 const CATEGORIES := [
@@ -392,6 +393,11 @@ func _process(_delta: float) -> void:
 				c.queue_free()
 		buttons.clear()
 		_build_tv_menu()
+	# The screen changed size (a Deck docked to a TV, a window resized): rebuild the menu for it (columns, scroll area).
+	if grid != null and is_instance_valid(grid) and has_meta("built_for") and not (quit_panel and is_instance_valid(quit_panel)) \
+			and get_viewport().get_visible_rect().size != get_meta("built_for"):
+		_on_hot_reload()
+		set_meta("built_for", get_viewport().get_visible_rect().size)
 	if join_deadline > 0 and Time.get_ticks_msec() > join_deadline:
 		_lobby_offline()
 	# TV: if the VR player already started a game without us, join it (their game broadcasts it).
@@ -422,6 +428,7 @@ func _build_tv_menu() -> void:
 	layer.add_child(bg)
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var glow := ColorRect.new()  # a soft band of colour behind the title
+	glow.name = "TitleBand"
 	glow.color = Color(0.12, 0.08, 0.3)
 	layer.add_child(glow)
 	glow.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
@@ -442,6 +449,7 @@ func _build_tv_menu() -> void:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(title)
 	status = Label.new()
+	status.name = "Status"
 	status.add_theme_font_size_override("font_size", 24)
 	status.add_theme_color_override("font_color", Color(0.75, 0.8, 0.95))
 	status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -463,6 +471,7 @@ func _build_tv_menu() -> void:
 	center.add_child(grid)
 	# Any tab can hold more games than fit (the 1 PLAYER tab has 35): the cards scroll, following the highlight.
 	var scroll := ScrollContainer.new()
+	scroll.name = "Cards"
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.follow_focus = true
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -471,6 +480,7 @@ func _build_tv_menu() -> void:
 	scroll.add_child(center)
 	box.add_child(scroll)
 	var hint := Label.new()
+	hint.name = "Hint"
 	hint.text = "LB / RB (Q / E): change category   ·   D-pad / arrows: choose   ·   A / Enter: play" + ("   ·   Start: quit" if _can_quit() else "") + "   ·   more games: just ask Claude!"
 	hint.add_theme_font_size_override("font_size", 20)
 	hint.add_theme_color_override("font_color", Color(0.6, 0.65, 0.8))
@@ -479,6 +489,7 @@ func _build_tv_menu() -> void:
 	box.add_child(hint)
 	cat = maxi(0, tabs().find(_cat_index_of(selected)))
 	_show_category(cat, false)
+	set_meta("built_for", get_viewport().get_visible_rect().size)
 
 
 ## Categories that have at least one game, as indices into CATEGORIES.
@@ -565,10 +576,17 @@ func _show_category(tab: int, focus_first: bool) -> void:
 ## file so they need no import step; null (a text-only card) when there isn't one.
 func _thumb(id: String) -> Texture2D:
 	var path := "res://arcade/thumbs/%s.jpg" % id
-	if not FileAccess.file_exists(path):
-		return null
-	var img := Image.load_from_file(path)
-	return ImageTexture.create_from_image(img) if img else null
+	var cache: Dictionary = get_meta("thumbs", {})  # node meta: survives hot reloads and menu rebuilds, freed with the arcade
+	if cache.has(path):
+		return cache[path]
+	var tex: Texture2D = null
+	if FileAccess.file_exists(path):
+		var img := Image.new()  # from the bytes: no "loaded resource as image file" warning per card
+		if img.load_jpg_from_buffer(FileAccess.get_file_as_bytes(path)) == OK:
+			tex = ImageTexture.create_from_image(img)
+	cache[path] = tex
+	set_meta("thumbs", cache)
+	return tex
 
 
 func _make_card(i: int, colour: Color) -> Button:
