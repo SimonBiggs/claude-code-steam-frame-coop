@@ -195,6 +195,7 @@ func _setup_game(mode: String) -> void:
 	ready_to_play = true
 	_ensure_join_listener()
 	if mode == "host":
+		net.state_set("host_vr", players[0].vr)
 		for i in range(1, players.size()):
 			players[i].set_active(false)  # TV seats wake up when a machine claims them ("join")
 	elif mode == "client":
@@ -488,7 +489,7 @@ func _add_bubble(hud: Control, source: SubViewport, color: Color) -> void:
 	bubble.position = Vector2(hud.size.x - 330, 30)
 	bubble.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_KEEP_SIZE, 30)
 	var tag := Label.new()
-	tag.text = "P1 (VR)"
+	tag.text = "P1 (VR)" if net.state_get("host_vr", true) else "P1"  # a flat host has no headset
 	tag.add_theme_font_size_override("font_size", 24)
 	tag.add_theme_constant_override("outline_size", 6)
 	tag.add_theme_color_override("font_outline_color", Color.BLACK)
