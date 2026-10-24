@@ -9,10 +9,25 @@ extends Node
 ## Prints progress every 10 s and "Bot: LEVEL COMPLETE" when the first day's jars are full.
 ## Events: the host/local bot starts each surprise event early (golden flower, queen, wasp raid, rain)
 ## because its bees fill the jars long before the day's own schedule; bees then visit the golden
-## flower, bring the Queen her pollen and bump raid wasps away.
+## flower, bring the Queen her pollen and bump raid wasps away. (Not in SIMPLE_MODE: those are off.)
+## SIMPLE_MODE (main.gd): checks the practice (seed -> glowing ring -> water), the ghost glove showing,
+## the bees' halo flower, no pests / no events but rain, one seed kind then two, and prints
+## "Bot: SIMPLE CHECK ..." at 50 s. BOT_VR=1 (local / host): the real VR gardener code runs with fake
+## hands: it does the practice by hand (seed, can tipped over), then touches every prop (flower, gnome,
+## snail, bird bath, chime, butterfly, rake in the soil) and picks, plants and waters like a person.
+## DUO_HOST=1 with nobody joining = solo VR: the helper bees must make honey.
+## Visual teaching (simple mode): records the picture cues each view shows (cue_pollen, cue_hive, cue_up,
+## cue_down, cue_plug for bees; cue_g_seed / cue_g_water / cue_g_pick for the flat gardener), the ones
+## learned (cue_learned_*), the glowing guide arrow, the ghost glove, and that no bee's view draws its own
+## name tag or another bee's arrow; checks the pause banner is just PAUSED, and prints "BOT: ERROR
+## instruction text" if a headline (TV or VR) is anything but a short title, or a tip spot (a bee's hint
+## line, the controls line, the top line) shows words. Local mode also unplugs and replugs P2's (fake)
+## controller to see the bolt.
 
 const W := preload("res://games/bee_garden/world.gd")
 const PlantScript := preload("res://games/bee_garden/plant.gd")
+const G := preload("res://games/bee_garden/gardener.gd")
+const PR := preload("res://games/bee_garden/props.gd")
 
 var main
 var t := 0.0
@@ -33,6 +48,26 @@ var g_tasks := {}
 var test_events: Array[String] = ["golden", "queen", "raid", "rain"]
 var test_event_i := 0
 var events_seen := {}
+# simple-mode checks
+var simple := false
+var ghost_seen := false
+var halo_seen := false
+var glow_seen := false
+var max_pests := 0
+var max_kinds := 0
+var simple_reported := false
+var cues := {}  # simple mode: picture cues seen / learned
+const HEADLINES := "^(BEE GARDEN|BUZZ BUZZ!|BUZZ! P\\d|HOORAY!|PAUSED|Connecting to the gardener…)$"
+var headline_re := RegEx.create_from_string(HEADLINES)
+var plug_phase := 0
+# fake VR gardener: waypoints [grab-point position, trigger 0/1, pitch, hold seconds]
+var vr_queue: Array = []
+var vr_pos := Vector3.ZERO
+var vr_pitch := -0.6
+var vr_hold := 0.0
+var vr_task := ""
+var vr_props_done := false
+var vr_tasks_done := 0
 
 
 func _ready() -> void:
@@ -45,12 +80,18 @@ func _physics_process(delta: float) -> void:
 	if not main.ready_to_play:
 		return
 	_party()
+	simple = main.simple
 	if main.gardener != null and main.gardener.flat and not main.gardener.ghost:
 		_drive_gardener(delta)
+	elif main.gardener != null and main.gardener.fake_vr:
+		_drive_vr(delta)
+	if simple:
+		_simple_checks()
+		_note_cues()
 	for b in main.bees():
 		if not b.remote:
 			_drive_bee(b)
-	if main.net.mode != "client" and main.phase == "day" and main.event == "" and test_event_i < test_events.size() \
+	if not simple and main.net.mode != "client" and main.phase == "day" and main.event == "" and test_event_i < test_events.size() \
 			and t > 4.0 + test_event_i * 7.0:
 		print("Bot: starting event %s" % test_events[test_event_i])
 		main._start_event(test_events[test_event_i])
@@ -298,8 +339,261 @@ func _pick_task() -> void:
 	for i in main.spots.size():
 		if int(main.spots[i].kind) < 0:
 			g_spot = i
-			g_kind = [0, 1, 0, 2][g_seeds % 4]
+			g_kind = (g_seeds % int(main.seed_kinds)) if main.simple else [0, 1, 0, 2][g_seeds % 4]
 			g_state = "fetch_seed"
 			return
 	g_state = "idle"
 	main.gardener.bot_target = Vector3(0.0, 0.0, 0.8)
+
+
+# --- Simple mode checks -----------------------------------------------------------
+
+## Visual teaching: picture cues instead of words; any instruction text in a tip spot is an error.
+func _note_cues() -> void:
+	if main.ghost_hand != null and main.ghost_hand.visible:
+		cues["ghost_hand"] = true
+	if not has_meta("pause_check") and t >= 30.0 and main.net.mode != "client":
+		set_meta("pause_check", true)  # the pause banner is just PAUSED (no sentence)
+		main._set_pause_banner(true, "A bee opened the menu")
+		var pt: String = main.center_label.text
+		print("Bot: pause banner %s" % ("PAUSED" if pt == "PAUSED" else "ERROR: " + pt.replace("\n", " / ")))
+		main._set_pause_banner(false, "")
+	if main.net.mode == "local" and main.bees().size() > 0:
+		var p2 = main.bees()[0]
+		if plug_phase == 0 and t >= 34.0 and p2.active and p2.joy < 0:
+			plug_phase = 1
+			p2.joy = 14  # a fake controller for P2 (it keeps its keyboard when unplugged)
+		elif plug_phase == 1 and t >= 35.0:
+			plug_phase = 2
+			print("Bot: unplugging P2's controller")
+			main._on_joy_changed(14, false)
+		elif plug_phase == 2 and t >= 40.0:
+			plug_phase = 3
+			print("Bot: plugging P2's controller back in")
+			main._on_joy_changed(14, true)
+		elif plug_phase == 3 and t >= 41.0:
+			plug_phase = 4
+			p2.joy = -1
+	if main.center_label.modulate.a > 0.05:
+		_check_headline("TV headline", main.center_label.text)
+	if main.vr_center != null and main.vr_center.modulate.a > 0.05:
+		_check_headline("VR headline", main.vr_center.text)
+	if main.help_label.visible and main.help_label.modulate.a > 0.05 and main.help_label.text.strip_edges() != "":
+		_tip_error("controls line", main.help_label.text)
+	var it: String = main.info_label.text
+	if it != "" and it != "Syncing with the gardener…":
+		_tip_error("top line", it)
+	var g = main.gardener
+	if g != null and g.flat and str(g.get_meta("cue", "")) != "":
+		var gc = g.get_meta("cue_node") if g.has_meta("cue_node") else null
+		if gc != null and gc.visible and not cues.has("cue_g_" + str(g.get_meta("cue"))):
+			cues["cue_g_" + str(g.get_meta("cue"))] = true
+			print("BOT: gardener picture cue %s (t=%.0f)" % [g.get_meta("cue"), t])
+	for b in main.bees():
+		if not b.active or b.remote or b.hint_label == null:
+			continue
+		if b.hint_label.visible and b.hint_label.text.strip_edges() != "":
+			_tip_error("P%d hint line" % (b.index + 1), b.hint_label.text)
+		if b.hud_label != null and b.hud_label.text != "" and b.hud_label.text != "P%d" % (b.index + 1):
+			_tip_error("P%d corner" % (b.index + 1), b.hud_label.text)
+		if b.camera != null:
+			var m := int(b.camera.cull_mask)
+			if m & b.tag_layer():
+				if not cues.has("own_tag_shown"):
+					print("BOT: ERROR P%d's view shows its own name tag" % (b.index + 1))
+				cues["own_tag_shown"] = true
+			else:
+				cues["own_tag_hidden"] = true
+			if m & (W.BEE_ARROW_BITS & ~b.arrow_layer()):
+				if not cues.has("other_arrows_shown"):
+					print("BOT: ERROR P%d's view shows the other bees' arrows" % (b.index + 1))
+				cues["other_arrows_shown"] = true
+		if b.arrow.visible and b.arrow.basis.get_scale().x > 1.5:
+			cues["glow_arrow"] = true
+		if b.cue != null and b.cue.visible and b.cue_key != "":
+			if not cues.has("cue_" + b.cue_key):
+				print("BOT: P%d picture cue %s (t=%.0f)" % [b.index + 1, b.cue_key, t])
+			cues["cue_" + b.cue_key] = true
+	for p in main.players:
+		var done: Dictionary = p.get_meta("cue_done", {})
+		for k in done:
+			if int(done[k]) >= 2 and not cues.has("cue_learned_" + str(k)):
+				cues["cue_learned_" + str(k)] = true
+				print("BOT: P%d learned %s (t=%.0f)" % [p.index + 1, k, t])
+	if int(t) % 10 == 0 and cues.size() != int(get_meta("cues_shown", -1)):
+		set_meta("cues_shown", cues.size())  # networked runs end on a timeout: print the cues as they come
+		var ks: Array = cues.keys()
+		ks.sort()
+		print("BOT CUES so far: mode=%s %s" % [main.net.mode, ",".join(PackedStringArray(ks))])
+
+
+func _check_headline(who: String, text: String) -> void:
+	var tx := text.strip_edges()
+	if tx == "" or headline_re.search(tx) != null:
+		return
+	_tip_error(who, tx)
+
+
+func _tip_error(who: String, text: String) -> void:
+	if not cues.has("tip_text"):
+		print("BOT: ERROR instruction text on %s: %s" % [who, text.replace("\n", " / ")])
+	cues["tip_text"] = true
+
+
+func _exit_tree() -> void:
+	if main != null and is_instance_valid(main) and main.simple:
+		var ks: Array = cues.keys()
+		ks.sort()
+		print("BOT CUES: mode=%s %s" % [main.net.mode, ",".join(PackedStringArray(ks))])
+		for p in main.players:
+			if p.has_meta("cue_done"):
+				print("BOT CUES: P%d done=%s" % [p.index + 1, p.get_meta("cue_done")])
+
+
+func _simple_checks() -> void:
+	if main.ghost_hand != null and main.ghost_hand.visible:
+		ghost_seen = true
+	if main.glow_spot >= 0 and main.plant_nodes[main.glow_spot].ring.visible:
+		glow_seen = true
+	if main.halo_spot >= 0 and main.plant_nodes[main.halo_spot].halo.visible:
+		halo_seen = true
+	max_pests = maxi(max_pests, get_tree().get_nodes_in_group("pests").size())
+	if main.props != null and (absf(main.props.chime_ang) > 0.05 or absf(main.props.gnome_ang) > 0.05):
+		events_seen["props_moving"] = true  # on the TV: the snapshots carry the props
+	max_kinds = maxi(max_kinds, int(main.seed_kinds))
+	if main.event != "" and main.event != "rain" and not events_seen.has("bad_" + main.event):
+		events_seen["bad_" + main.event] = true
+		print("Bot: SIMPLE FAIL: event %s should be off" % main.event)
+	if main.game_over and not events_seen.has("bad_over"):
+		events_seen["bad_over"] = true
+		print("Bot: SIMPLE FAIL: game over in simple mode")
+	if t >= 50.0 and not simple_reported:
+		simple_reported = true
+		var touched: Dictionary = main.props.touched if main.props != null else {}
+		var helped: int = main.helpers.delivered if main.helpers != null else 0
+		print("Bot: SIMPLE CHECK mode=%s practice=%s ghost_glove=%s glow_ring=%s halo=%s max_pests=%d seed_kinds=%d rounds=%d honey=%d game_over=%s helpers_delivered=%d props_moving=%s props=%s" % [
+			main.net.mode, main.practice_g, ghost_seen, glow_seen, halo_seen, max_pests, max_kinds, main.days_done,
+			main.total_honey, main.game_over, helped, events_seen.has("props_moving"), str(touched)])
+		if main.gardener.fake_vr:
+			var missing: Array[String] = []
+			for k in ["flower", "gnome", "snail", "bath", "chime", "butterfly", "rake", "rake_soil"]:
+				if not touched.has(k):
+					missing.append(k)
+			print("Bot: VR props %s" % ("ALL TOUCHED" if missing.is_empty() else "MISSING " + str(missing)))
+
+
+# --- Fake VR gardener --------------------------------------------------------------
+
+func _drive_vr(delta: float) -> void:
+	var g = main.gardener
+	if not g.calibrated:
+		return
+	g.hand_l.global_position = Vector3(-1.5, 2.2, 3.5)  # the left hand stays out of the way
+	if vr_pos == Vector3.ZERO:
+		vr_pos = g.hands[1].pos
+	if vr_queue.is_empty():
+		_plan_vr()
+	if vr_queue.is_empty():
+		return
+	var wp: Array = vr_queue[0]
+	var target: Vector3 = wp[0]
+	vr_pos = vr_pos.move_toward(target, 3.0 * delta)
+	vr_pitch = move_toward(vr_pitch, float(wp[2]), 2.5 * delta)
+	if vr_pos.distance_to(target) < 0.01:
+		g.fake_trigger = float(wp[1])
+		vr_hold += delta
+		if vr_hold >= float(wp[3]):
+			vr_hold = 0.0
+			vr_queue.pop_front()
+	var b := Basis(Vector3.RIGHT, vr_pitch)
+	g.hand_r.global_transform = Transform3D(b, vr_pos - b * G.GRAB_OFFSET)
+
+
+func _wp(p: Vector3, trig: float, hold: float = 0.2, pitch: float = -0.6) -> void:
+	vr_queue.append([p, trig, pitch, hold])
+
+
+func _plan_vr() -> void:
+	if not main.can_interact():
+		return
+	var spot: int = main.glow_spot
+	if main.practice_g == "seed" and spot >= 0:
+		_vr_plant(spot, 0)
+		vr_task = "practice seed"
+	elif main.practice_g == "water" and spot >= 0:
+		_vr_water(spot)
+		vr_task = "practice water"
+	elif not vr_props_done:
+		vr_props_done = true
+		vr_task = "props"
+		var P = main.props
+		_wp(PR.GNOME + Vector3(0.6, 0.35, 0.0), 0.0, 0.0)
+		_wp(PR.GNOME + Vector3(0.0, 0.35, 0.0), 0.0, 0.3)
+		_wp(Vector3(P.snail_x + 0.1 * P.snail_dir, 0.14, PR.SNAIL_Z), 0.0, 0.3)
+		for i in main.spots.size():
+			if main.spots[i].bloom:
+				_wp(main.head_pos(i) + Vector3(0.4, 0.0, 0.0), 0.0, 0.0)
+				_wp(main.head_pos(i), 0.0, 0.3)
+				break
+		_wp(P.flies[0]["pos"] + Vector3(0.0, 0.3, 0.0), 0.0, 0.0)
+		_wp(P.flies[0]["pos"], 0.0, 0.3)
+		_wp(PR.BATH + Vector3(0.0, 0.4, 0.0), 0.0, 0.0)
+		_wp(PR.BATH + Vector3(0.0, 0.05, 0.0), 0.0, 0.3)
+		_wp(PR.CHIME + Vector3(-0.5, 0.0, 0.0), 0.0, 0.0)
+		_wp(PR.CHIME, 0.0, 0.3)
+		_wp(PR.RAKE_HOME + Vector3(0.0, 0.1, 0.0), 0.0, 0.2)
+		_wp(PR.RAKE_HOME + Vector3(0.0, 0.1, 0.0), 1.0, 0.3)
+		for k in 3:
+			_wp(Vector3(1.8, 0.25, 0.9), 1.0, 0.0)
+			_wp(Vector3(3.0, 0.25, 0.9), 1.0, 0.0)
+		_wp(PR.RAKE_HOME + Vector3(0.0, 0.3, 0.0), 1.0, 0.0)
+		_wp(PR.RAKE_HOME + Vector3(0.0, 0.3, 0.0), 0.0, 0.3)
+	else:
+		vr_tasks_done += 1
+		# Like a person: pick ripe fruit, water thirsty plants, plant empty spots.
+		for i in main.spots.size():
+			var s: Dictionary = main.spots[i]
+			if int(s.kind) >= 0 and float(s.fruit) >= 1.0:
+				var fp: Vector3 = main.head_pos(i) + Vector3(0.0, -0.1, 0.08)
+				_wp(fp + Vector3(0.0, 0.3, 0.0), 0.0, 0.0)
+				_wp(fp, 0.0, 0.1)
+				_wp(fp, 1.0, 0.2)
+				_wp(fp + Vector3(0.0, 0.3, 0.0), 0.0, 0.2)
+				vr_task = "pick"
+				return
+		for i in main.spots.size():
+			var s2: Dictionary = main.spots[i]
+			if int(s2.kind) >= 0 and float(s2.water) < 0.3:
+				_vr_water(i)
+				vr_task = "water"
+				return
+		for i in main.spots.size():
+			if int(main.spots[i].kind) < 0:
+				_vr_plant(i, vr_tasks_done % int(main.seed_kinds))
+				vr_task = "plant"
+				return
+		_wp(Vector3(0.0, 1.0, 2.6), 0.0, 0.5)
+		vr_task = "idle"
+
+
+func _vr_plant(spot: int, kind: int) -> void:
+	var slot := W.tray_slot(kind) + Vector3(0.0, 0.05, 0.0)
+	var sp := W.spot_pos(spot)
+	_wp(slot + Vector3(0.0, 0.3, 0.0), 0.0, 0.0)
+	_wp(slot, 0.0, 0.1)
+	_wp(slot, 1.0, 0.3)
+	_wp(sp + Vector3(0.0, 0.6, 0.0), 1.0, 0.0)
+	_wp(sp + Vector3(0.0, 0.3, 0.0), 1.0, 0.3)
+	_wp(sp + Vector3(0.0, 0.3, 0.0), 0.0, 0.6)
+
+
+func _vr_water(spot: int) -> void:
+	var can := W.CAN_HOME + Vector3(0.0, 0.3, 0.0)
+	var over := W.spot_pos(spot) + Vector3(0.0, 1.0, 0.3)
+	_wp(can + Vector3(0.0, 0.3, 0.0), 0.0, 0.0)
+	_wp(can, 0.0, 0.1)
+	_wp(can, 1.0, 0.3)
+	_wp(over, 1.0, 0.0)
+	_wp(over, 1.0, 3.5, -1.3)
+	_wp(can + Vector3(0.0, 0.3, 0.0), 1.0, 0.0)
+	_wp(can + Vector3(0.0, 0.3, 0.0), 0.0, 0.3)

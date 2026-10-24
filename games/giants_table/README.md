@@ -20,7 +20,34 @@ You lose when the campfire has no embers left and none can be won back, or when 
 down for 20 seconds. The end screen lists the HEROES OF THE VILLAGE with a fun award each (GOBLIN BOWLER,
 SQUISHER, SKY CATCHER, KNIGHT TAXI, HUMAN UMBRELLA; GOBLIN BASHER, EMBER HERO, LIFESAVER, KING BREAKER).
 
-**What's new:**
+**Simple mode (`SIMPLE_MODE := true` in main.gd, the default).** The family found the games too
+complicated and too wordy, so the game is now just: grab the goblins walking to the campfire and throw
+them; the knights bonk them. Everything below that needs explaining is switched off behind that flag
+(not deleted):
+- **Practice first** (`practice.gd`): a glowing training goblin drops in near the Giant and a glowing
+  ring lies on the table, with a bouncing arrow and a see-through ghost hand showing reach - squeeze -
+  swing - let go. Throw it into the ring (or off the table, or smack it): confetti and a chime; two of
+  them, then wave 1. Knights' bonks only make the training goblin giggle (it's the Giant's practice).
+- **Gradual:** wave 1-2 plain goblins; then one new thing per wave: 3 rain (a glowing ghost hand over
+  the fire shows the umbrella), 4 balloon goblins, 5 an ogre, 6 the Goblin King (no armour; every 3rd
+  wave from then on), 7 spiky goblins (only with knights). Knights can bonk ogres and the King too.
+- **Everything reacts to the Giant's hands** (`scenery.gd`, `prop.gd`): trees sway and rustle and can be
+  pulled up and thrown or swung at goblins (a new tree grows back), cottages wobble (boing), sheep,
+  villagers and ducks hop, the river splashes. Trees and cottages are MultiMeshes (as cheap as before).
+- **Off:** loose embers to carry (a stolen ember flies home when its goblin is beaten), the growing
+  village, combos, score popups and the HUD stats, the heroes / awards screen, the all-knights-asleep
+  game over (down knights get back up by themselves), tips and the help panel.
+- **Text:** one short headline (WAVE 2!, RAIN!, BALLOONS!, BIG OGRE!, GOBLIN KING!, HOORAY!, OH NO!,
+  PAUSED); the TV shows WAVE n (hidden while the WAVE headline is up). Game over restarts by itself.
+- **No how-to words: picture cues.** Each knight's view shows a pulsing glowing pad button + icon low in
+  the view (the knight's own button: RT / SPACE / ENTER etc.): swaying arrows = walk, RT + sword = bonk
+  (near a goblin, or while the Giant practises), LT + arrow = shoot the balloon (a balloon goblin nearby),
+  A + up arrow = jump (a quiet moment), a pulsing heart while you're down. Each fades once the knight has
+  done it twice. A glowing arrow in the knight's colour bobs over the goblin the cue is about (only that
+  knight's view shows it), and each view hides its own "P2" tag. The Giant's practice and rain umbrella
+  use the shared Cannon Cove ghost hand (`games/cannon_cove/ghost_hand.gd`), Giant-sized.
+
+**What's new (full mode):**
 - **The village lives and grows.** Villagers stroll between the cottages, the well and the campfire, hurry
   indoors when goblins climb onto the table and come out to jump and cheer between waves. Sheep graze in the
   north meadow, ducks paddle along the river, smoke curls from every chimney. After every cleared wave a new
@@ -79,7 +106,7 @@ DUO_PORT=7781 DUO_HOST=1 timeout 75 godot --headless --path . res://tests/giants
 DUO_PORT=7781 DUO_JOIN=127.0.0.1 timeout 68 godot --headless --path . res://tests/giants_table_bot.tscn
 ```
 
-Bot options: `GT_FAKE_VR=1` runs the VR giant code without a headset (the bot moves the controller
+Bot options: `GT_FAKE_VR=1` (or `BOT_VR=1`) runs the VR giant code without a headset (the bot moves the controller
 nodes, grabs and throws with the right hand, smacks with the left and shields the fire from the rain; it
 hosts, so pair it with a `DUO_JOIN` client), `GT_LOSE=1` forces a game over at 20 s (heroes screen), `BOT_LAZY_GIANT=1` makes the giant only rescue knights, `BOT_DOWN=1` knocks P2 down at 25 s,
 `START_WAVE=n` starts at a later wave, and `BOT_PLAYERS=n` (2-6) joins n TV knights (the last one

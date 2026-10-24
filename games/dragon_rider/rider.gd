@@ -47,6 +47,9 @@ var refit_t := 0.0
 var neutral := NEUTRAL_DEFAULT
 var a_was := false
 var rein_input := Vector2.ZERO
+var fake_vr := false        # tests (BOT_VR=1): the VR code runs, the bot moves the hand nodes
+var fake_trigger := 0.0
+var fake_a := false
 
 var figure: Node3D
 var head: Node3D
@@ -145,7 +148,7 @@ func flap_held() -> bool:
 	if bot_drive:
 		return bot_flap
 	if vr:
-		return hand_r.get_float("trigger") > 0.6
+		return _trigger() > 0.6
 	if _key("flap"):
 		return true
 	if mouse_look and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
@@ -157,7 +160,27 @@ func flap_held() -> bool:
 
 
 func vr_trigger_held() -> bool:
-	return vr and hand_r.get_float("trigger") > 0.6
+	return vr and _trigger() > 0.6
+
+
+func _trigger() -> float:
+	return fake_trigger if fake_vr else hand_r.get_float("trigger")
+
+
+func _tracked() -> bool:
+	return fake_vr or (hand_l.get_has_tracking_data() and hand_r.get_has_tracking_data())
+
+
+## The rider's eyes right now, in dragon-local space (hands are measured from here).
+func head_local() -> Vector3:
+	return fit_xf * xr_camera.transform.origin
+
+
+## Both hands in world space (for touching things), or [] when they are not tracked.
+func hand_positions() -> Array:
+	if not vr or not fitted or not _tracked():
+		return []
+	return [hand_l.global_position, hand_r.global_position]
 
 
 func _key(action: String) -> bool:
@@ -192,16 +215,21 @@ func _hand_local(h: XRController3D) -> Vector3:
 
 
 func _vr_input(_delta: float) -> Vector2:
-	var a := hand_r.is_button_pressed("ax_button")
+	var a := fake_a if fake_vr else hand_r.is_button_pressed("ax_button")
 	if a and not a_was:
 		fitted = false
 		fit_t = 0.0
 		print("VR: A pressed, re-centring the seat and reins")
 	a_was = a
-	var stick := hand_l.get_vector2("primary") + hand_r.get_vector2("primary")
+	var stick := Vector2.ZERO if fake_vr else hand_l.get_vector2("primary") + hand_r.get_vector2("primary")
 	var v := Vector2.ZERO
 	if stick.length() > 0.25:
 		v = stick.limit_length(1.0)
+	if main.SIMPLE_MODE:
+		if fitted and _tracked():
+			rein_input = simple_reins(_hand_local(hand_l) - head_local(), _hand_local(hand_r) - head_local())
+			v += rein_input
+		return v.limit_length(1.0)
 	if fitted and hand_l.get_has_tracking_data() and hand_r.get_has_tracking_data():
 		var eye: Vector3 = main.dragon.EYE
 		var l: Vector3 = _hand_local(hand_l) - eye
@@ -218,6 +246,27 @@ func _vr_input(_delta: float) -> Vector2:
 		rein_input = Vector2(_dead(turn, 0.12), _dead(lift, 0.3) + 0.0 * climb)
 		v += rein_input
 	return v.limit_length(1.0)
+
+
+## Simple mode reins, measured from the rider's eyes right now (never from a calibrated rest pose,
+## which drifted between kids and got a dragon stuck at the ceiling): move both hands left / right
+## (or dip one hand) = turn; lift them up to the chin = climb; push them right down = dive gently.
+## Anywhere from the lap to the chest is a wide, comfy "fly level" zone.
+static func simple_reins(l: Vector3, r: Vector3) -> Vector2:
+	var avg := (l + r) * 0.5
+	var turn := clampf(avg.x / 0.18 + (l.y - r.y) / 0.25, -1.0, 1.0)
+	var lift := 0.0
+	if avg.y > -0.26:
+		lift = clampf((avg.y + 0.26) / 0.14, 0.0, 1.0)
+	elif avg.y < -0.72:
+		lift = -0.7 * clampf((-0.72 - avg.y) / 0.14, 0.0, 1.0)
+	return Vector2(_dead_s(turn, 0.3), lift)
+
+
+static func _dead_s(x: float, dz: float) -> float:
+	if absf(x) < dz:
+		return 0.0
+	return signf(x) * (absf(x) - dz) / (1.0 - dz)
 
 
 func _dead(x: float, dz: float) -> float:

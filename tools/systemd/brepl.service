@@ -1,0 +1,12 @@
+[Unit]
+Description=brepl: Claude's persistent Bun REPL (state, offscreen games, channel, alerts)
+
+[Service]
+ExecStartPre=/bin/rm -f %h/.cache/brepl.sock
+ExecStart=%h/.local/bin/bun %h/.local/bin/brepl --serve
+Restart=always
+RestartSec=2
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=default.target

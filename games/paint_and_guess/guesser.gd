@@ -483,7 +483,9 @@ func _update_hud() -> void:
 	streak_label.add_theme_font_size_override("font_size", int(24 * s))
 	hint_label.add_theme_font_size_override("font_size", int(42 * s))
 	banner_label.add_theme_font_size_override("font_size", int(24 * s))
-	banner_label.offset_top = 58.0 * s
+	# Below the score / round lines in the top-left corner (they overlapped the title in a half-width view).
+	hint_label.offset_top = 90.0 * s
+	banner_label.offset_top = 140.0 * s
 	time_label.add_theme_font_size_override("font_size", int(34 * s))
 	status_label.add_theme_font_size_override("font_size", int(30 * s))
 	big_label.add_theme_font_size_override("font_size", int(32 * s))
@@ -506,8 +508,9 @@ func _update_hud() -> void:
 		hint_label.text = "VOTE FOR THE BEST PICTURE!"
 		hint_label.modulate = Color(1.0, 0.85, 0.4)
 	else:
-		hint_label.text = main.hint_text if st == "draw" else ""
-		hint_label.modulate = Color(1, 1, 1)
+		# The guessers' goal in one line (no letters: they gave the word away with four answers).
+		hint_label.text = "GUESS WHAT THEY'RE PAINTING!" if (st == "draw" or st == "intro") and active and not got else ""
+		hint_label.modulate = Color(0.7, 0.95, 1.0)
 	var opts: Array = main.options_for(index)
 	var show_opts: bool = (st == "draw" or st == "reveal") and not team and opts.size() == 4 and active
 	opt_root.visible = show_opts

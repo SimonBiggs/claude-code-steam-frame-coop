@@ -3,6 +3,8 @@ extends Node
 ## BOT_PLAYERS=N: total TV players to have (local split screen: P1 + P2 + drop-ins, up to 6;
 ## TV machine (DUO_JOIN): P2 + drop-ins, up to 6). In local mode it also joins one player with a fake
 ## controller (A press), unplugs it briefly (rejoins), then unplugs it for good (it leaves).
+## SIMPLE_MODE (main.gd): the bot pops the practice targets, checks wave 1 starts, spawns the dinos and
+## a Fishwort dive, then forces the (short) game over. Otherwise (full mode):
 ## Local / host also exercise the new content: pterodactyl, ankylo and raptor spawns, every arena event
 ## (meteor, gold, stampede, surge, dive), then a forced game over (awards) at BOT_END seconds (default 56).
 ## BOT_WAVE=N: jump to wave N first (e.g. 10 = KING REX, 15 = the finale; clearing it = VICTORY).
@@ -128,7 +130,7 @@ func _pad_script() -> void:
 
 ## Spawns the new monsters and starts every arena event once, then ends the round to show the awards.
 func _content_script() -> void:
-	var steps := [
+	var steps := _simple_steps() if main.SIMPLE_MODE else [
 		[1.5, func() -> void:
 			if OS.has_environment("BOT_WAVE"):
 				main.debug_skip_to_wave(int(OS.get_environment("BOT_WAVE")))
@@ -152,6 +154,39 @@ func _content_script() -> void:
 		var f: Callable = steps[script_step][1]
 		f.call()
 		script_step += 1
+
+
+## Simple mode: the practice targets must pop (the bot shoots them), then wave 1 starts with grunts
+## only; later the dinos, a Fishwort dive and the game over (a short end screen, no awards).
+func _simple_steps() -> Array:
+	return [
+		[1.5, func() -> void:
+			if OS.has_environment("BOT_WAVE"):
+				main.practice_step = main.PRACTICE_SPOTS.size()
+				main.debug_skip_to_wave(int(OS.get_environment("BOT_WAVE")))
+				print("BOT: skip to wave %s" % OS.get_environment("BOT_WAVE"))],
+		[6.0, func() -> void:
+			var targets: int = get_tree().get_nodes_in_group("enemies").filter(func(e) -> bool: return e.kind == "target").size()
+			print("BOT: practice step %d/%d, targets up %d, wave %d" % [main.practice_step, main.PRACTICE_SPOTS.size(), targets, main.wave])],
+		[16.0, func() -> void:
+			print("BOT: practice %s, wave %d (want >= 1), center '%s', hint '%s'" % [
+				"done" if main.practice_step >= main.PRACTICE_SPOTS.size() else "NOT DONE", main.wave,
+				main.center_label.text, main.director().hint_label.text])],
+		[24.0, func() -> void:
+			for k in ["ptero", "ankylo", "raptor"]:
+				main.debug_spawn(k)
+			print("BOT: spawned ptero, ankylo, raptor")
+			var p0 = main.players[0]
+			if p0.vr and not p0.ghost:
+				print("BOT VR: sword demo shown=%s, swaps=%d, wrist '%s'" % [p0.has_meta("sword_demo"),
+					int(p0.get_meta("swapped", 0)), p0.wrist_label.text])],
+		[30.0, func() -> void: main.debug_event("dive")],
+		[end_t, func() -> void:
+			if not main.game_over:
+				print("BOT: forcing game over")
+				main._on_game_over()
+				print("BOT: end screen:\n%s" % main.center_label.text)],
+	]
 
 
 ## Fake VR: aim the gun hand at the nearest monster and fire; draw the sword over the left shoulder,

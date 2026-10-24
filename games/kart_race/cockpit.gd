@@ -6,7 +6,8 @@ extends Node3D
 ## from where it is (no fixed "rest pose" anywhere). No hands: it springs back to straight (the left
 ## stick steers too). Right trigger = accelerate, left stick up/down = drive/brake-reverse, A = use your
 ## item (or the boost when the meter on the wheel is full). Right stick up/down raises or lowers your seat.
-## A hard turn held round a bend charges drift sparks; straighten up for a mini-turbo.
+## A hard turn held round a bend charges drift sparks; straighten up for a mini-turbo (not in main.SIMPLE_MODE,
+## which also hides the boost meter and shows see-through ghost mittens turning the wheel when nobody holds it).
 ## Comfort: the seat is a stable frame (yaw only: no roll or pitch of the view; height eased over bumps
 ## and ramps with a speed cap), and the wheel, dash and mittens ride in that same frame so they never
 ## jump at your face. Soft vignette on boosts, spins and teleports. The seat fits your head height
@@ -24,6 +25,7 @@ const HOLD_OUT := 0.36  # ...to here from the centre (generous: kids hold it all
 const HOLD_DEPTH := 0.22
 const FULL_LOCK := 1.5  # radians of wheel turn for full steering
 const FRAME_VY := 3.0  # m/s: the most the seat frame moves up or down (ramps and bumps stay gentle)
+const CoveGhostHand := preload("res://games/cannon_cove/ghost_hand.gd")
 const PANEL_OFF := Vector3(0.78, -0.6, -2.3)  # text panels, relative to the eyes
 const VIGNETTE_SHADER := """
 shader_type spatial;
@@ -91,6 +93,11 @@ var panel_r: Label3D
 var panel_hint: Label3D
 var mitten_l: MeshInstance3D
 var mitten_r: MeshInstance3D
+var ghost_l: Node3D  # simple mode: the shared see-through ghost hands (Cannon Cove) on the rim, showing how
+var ghost_r: Node3D  # to turn the wheel and squeeze the trigger to go
+var idle_t := 0.0  # simple mode: standing still with no trigger (the ghost hands show how to go)
+var wrong_arrow: Node3D  # simple mode: a glowing arrow over the wheel, the way to turn when going backwards
+var wrong_mat: StandardMaterial3D
 var vignette: MeshInstance3D
 var vignette_mat: ShaderMaterial
 
@@ -118,6 +125,9 @@ func setup(k, origin: XROrigin3D, cam: XRCamera3D, left: XRController3D, right: 
 		_build_vignette(cam)
 	mitten_l = _mitten()
 	mitten_r = _mitten()
+	if main.SIMPLE_MODE:
+		hub_bar.visible = false  # no boost meter
+		_build_ghost_hands()
 	kart.sparks.position = Vector3(0, 0.12, -0.6)  # by the front wheels, where the rider can see them
 
 
@@ -418,6 +428,7 @@ func place(delta: float) -> void:
 		grip_mat.emission = kart.color
 		grip_mat.emission_energy_multiplier = 0.3
 	_update_icon(delta)
+	_update_ghost_hands()
 	var texts: Array = main.vr_panel_texts(kart)
 	panel_l.text = texts[0]
 	panel_r.text = texts[1]
@@ -456,6 +467,107 @@ func place(delta: float) -> void:
 	var v := maxf(vignette_k, fade_k)
 	vignette.visible = v > 0.02
 	vignette_mat.set_shader_parameter("strength", v)
+
+
+## Simple mode: two see-through ghost hands (the shared Cannon Cove one, the left one mirrored) grip the
+## rim and turn the wheel left and right whenever nobody holds it (the practice, the countdown, or hands
+## off for a moment): grab it like that. Until the driver has pulled the trigger twice, the right hand's
+## pointing finger also squeezes the trigger whenever the kart stands still.
+func _build_ghost_hands() -> void:
+	ghost_r = CoveGhostHand.new()
+	ghost_l = CoveGhostHand.new()
+	for g in [ghost_l, ghost_r]:
+		seat.add_child(g)  # top_level: placed on the rim every frame
+		g.mat.albedo_color = Color(0.7, 0.95, 1.0, 0.45)
+		g.mat.cull_mode = BaseMaterial3D.CULL_DISABLED  # the mirrored left hand turns its faces inside out
+		g.visible = false
+	ghost_l.hand.scale = Vector3(-1, 1, 1)  # a left hand
+
+
+func _go_learned() -> bool:
+	var done: Dictionary = kart.get_meta("cue_done", {})
+	return int(done.get("go", 0)) >= 2
+
+
+func _update_ghost_hands() -> void:
+	if ghost_l == null:
+		return
+	var dt := get_process_delta_time()
+	var racing: bool = main.state == "wait" or main.state == "race"
+	if racing and kart.throttle < 0.2 and absf(float(kart.speed)) < 1.0 and not kart.finished:
+		idle_t += dt
+	else:
+		idle_t = 0.0
+	var squeeze: bool = not _go_learned() and (idle_t > 1.5 or main.state == "countdown")
+	var vis: bool = (unheld_t > 0.8 or squeeze) and not kart.finished and main.state != "results"
+	ghost_l.visible = vis
+	ghost_r.visible = vis
+	_update_wrong_arrow()
+	if not vis:
+		return
+	var t := Time.get_ticks_msec() * 0.001
+	var a := 0.7 * sin(t * 1.8) if unheld_t > 0.8 else 0.0  # holding it already: just show the trigger
+	var b := wheel_basis()
+	var up := b * Vector3(0, 0, -1)
+	var c := wheel_center()
+	var alpha := 0.3 + 0.2 * sin(t * 4.0)
+	for side in [0, 1]:
+		var g = ghost_r if side == 0 else ghost_l
+		var ang := a + (0.0 if side == 0 else PI)
+		var out := b.x * cos(ang) + up * sin(ang)  # from the hub out to the hand on the rim
+		var p: Vector3 = c + out * WHEEL_R
+		# Fingers point through the rim (away from the driver) and curl round it; the back of the hand
+		# faces outwards.
+		var z := b.y
+		var y := out
+		var x := y.cross(z)
+		var hb := Basis(x, y, z)
+		g.global_transform = seat.global_transform * Transform3D(hb, p + z * 0.035 + out * 0.02)
+		g.mat.albedo_color.a = alpha
+		for f in g.fingers:
+			f.rotation.x = -1.2
+		g.thumb.rotation.x = -0.7
+	if squeeze:  # the right pointing finger pulls the trigger, again and again
+		ghost_r.fingers[0].rotation.x = -0.2 - 1.1 * maxf(0.0, sin(t * 5.0))
+		ghost_r.mat.albedo_color.a = 0.55
+
+
+## Going the wrong way: a big glowing red arrow over the wheel pointing the way to turn (up = just
+## drive forwards). VR only; the TV views get the same arrow as a picture cue.
+func _update_wrong_arrow() -> void:
+	var on: bool = main.state == "race" and kart.wrong_t > 1.5 and not kart.finished
+	if wrong_arrow == null:
+		if not on:
+			return
+		wrong_arrow = Node3D.new()
+		seat.add_child(wrong_arrow)
+		wrong_mat = StandardMaterial3D.new()
+		wrong_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		wrong_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		wrong_mat.albedo_color = Color(1.0, 0.3, 0.25, 0.9)
+		var head := MeshInstance3D.new()
+		head.mesh = main.cyl_mesh(0.0, 0.07, 0.12, 12)  # points along +Y of the arrow
+		head.position.y = 0.1
+		var shaft := MeshInstance3D.new()
+		shaft.mesh = main.cyl_mesh(0.025, 0.025, 0.14, 8)
+		for m in [head, shaft]:
+			m.material_override = wrong_mat
+			m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			wrong_arrow.add_child(m)
+	wrong_arrow.visible = on
+	if not on:
+		return
+	var t := Time.get_ticks_msec() * 0.001
+	var dir: float = kart.wrong_dir
+	var base := wheel_center() + Vector3(0, 0.3, -0.1)
+	if dir == 0.0:  # pointing ahead
+		wrong_arrow.rotation = Vector3(-PI * 0.5, 0, 0)
+		wrong_arrow.position = base + Vector3(0, 0, -0.06 * absf(sin(t * 6.0)))
+	else:  # pointing left (+1) or right (-1)
+		wrong_arrow.rotation = Vector3(0, 0, PI * 0.5 * dir)
+		wrong_arrow.position = base + Vector3(-dir * 0.06 * absf(sin(t * 6.0)), 0, 0)
+	wrong_arrow.scale = Vector3.ONE * (1.0 + 0.15 * absf(sin(t * 6.0)))
+	wrong_mat.albedo_color.a = 0.65 + 0.3 * absf(sin(t * 6.0))
 
 
 ## The item you hold, as a little model on the dash.

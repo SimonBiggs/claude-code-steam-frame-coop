@@ -28,6 +28,33 @@ var folk: Array = []  # per villager: {pos, goal, home, out (0..1), wait, speed}
 var flock: Array = []  # per sheep: {pos, goal, wait}
 var cheer_t := 0.0
 var hide := false
+var duck_hop := PackedFloat32Array([0.0, 0.0, 0.0, 0.0])
+
+
+## Simple mode: the Giant's hand touched near p - the animals and villagers there hop and squeak.
+## Returns how many jumped (scenery.gd plays the sound).
+func poke(p: Vector3, r: float) -> int:
+	var n := 0
+	for f in folk:
+		var fp: Vector3 = f.pos
+		if float(f.out) > 0.5 and float(f.get("hop_t", 0.0)) <= 0.0 and fp.distance_to(p) < r + 0.5:
+			f.hop_t = 0.6
+			n += 1
+	for sh in flock:
+		var sp: Vector3 = sh.pos
+		if float(sh.get("hop_t", 0.0)) <= 0.0 and sp.distance_to(p) < r + 0.6:
+			sh.hop_t = 0.7
+			n += 1
+	for i in DUCKS:
+		if duck_hop[i] <= 0.0 and _duck_pos(i).distance_to(p) < r + 0.4:
+			duck_hop[i] = 0.5
+			n += 1
+	return n
+
+
+## 0..1..0 over a hop that lasts `total` seconds, with `left` seconds to go.
+static func _hop(left: float, total: float) -> float:
+	return sin(clampf(1.0 - left / total, 0.0, 1.0) * PI) if left > 0.0 else 0.0
 
 
 func _ready() -> void:
@@ -122,10 +149,15 @@ func cheer() -> void:
 func _process(delta: float) -> void:
 	t += delta
 	cheer_t = maxf(0.0, cheer_t - delta)
-	hide = main != null and not get_tree().get_nodes_in_group("goblins").is_empty()
+	hide = false
+	if main != null:
+		for g in get_tree().get_nodes_in_group("goblins"):
+			if not g.practice:
+				hide = true
+				break
 	_update_folk(delta)
 	_update_sheep(delta)
-	_update_ducks()
+	_update_ducks(delta)
 	var sails = main.get("growth_sails") if main != null else null
 	if sails != null and is_instance_valid(sails):
 		sails.rotate_object_local(Vector3.BACK, delta * 0.8)
@@ -159,6 +191,9 @@ func _update_folk(delta: float) -> void:
 		var hop := absf(sin(float(f.bob))) * (0.06 if moving else 0.0)
 		if cheer_t > 0.0 and not hide:
 			hop = absf(sin(t * 9.0 + i)) * 0.35
+		if float(f.get("hop_t", 0.0)) > 0.0:
+			f.hop_t = float(f.hop_t) - delta
+			hop += _hop(float(f.hop_t), 0.6) * 0.6
 		var yaw := atan2(-to.x, -to.z) if dist > 0.15 else float(f.get("yaw", 0.0))
 		f.yaw = yaw
 		var s := maxf(float(f.out), 0.001)
@@ -191,17 +226,29 @@ func _update_sheep(delta: float) -> void:
 		var basis := Basis(Vector3.UP, yaw)
 		var p: Vector3 = sh.pos
 		var nod := (sin(t * 3.0 + i) * 0.06 - 0.1) if grazing else 0.0
+		if float(sh.get("hop_t", 0.0)) > 0.0:
+			sh.hop_t = float(sh.hop_t) - delta
+			var k := _hop(float(sh.hop_t), 0.7)
+			p += Vector3.UP * k * 0.7
+			basis = Basis(Vector3.UP, yaw + (1.0 - float(sh.hop_t) / 0.7) * TAU)
 		sheep_body.multimesh.set_instance_transform(i, Transform3D(basis.scaled(Vector3(0.9, 0.8, 1.2)), p + Vector3.UP * 0.32))
 		sheep_head.multimesh.set_instance_transform(i, Transform3D(basis, p + basis * Vector3(0, 0.42 + nod, -0.4)))
 
 
-func _update_ducks() -> void:
+func _duck_pos(i: int) -> Vector3:
+	var x := sin(t * 0.08 + i * 1.7) * 9.0 + (i - 1.5) * 0.6
+	var z := W.river_z(x) + (0.25 if i % 2 == 0 else -0.25)
+	return Vector3(x, W.WATER_Y + 0.05 + sin(t * 2.0 + i) * 0.02, z)
+
+
+func _update_ducks(delta: float) -> void:
 	for i in DUCKS:
-		var x := sin(t * 0.08 + i * 1.7) * 9.0 + (i - 1.5) * 0.6
 		var dx := cos(t * 0.08 + i * 1.7)
-		var z := W.river_z(x) + (0.25 if i % 2 == 0 else -0.25)
 		var yaw := -PI / 2.0 if dx > 0.0 else PI / 2.0  # beak (-Z) points the way it paddles
 		var basis := Basis(Vector3.UP, yaw)
-		var p := Vector3(x, W.WATER_Y + 0.05 + sin(t * 2.0 + i) * 0.02, z)
+		var p := _duck_pos(i)
+		if duck_hop[i] > 0.0:
+			duck_hop[i] -= delta
+			p += Vector3.UP * _hop(duck_hop[i], 0.5) * 0.5
 		duck_body.multimesh.set_instance_transform(i, Transform3D(basis.scaled(Vector3(0.85, 0.7, 1.2)), p + Vector3.UP * 0.08))
 		duck_head.multimesh.set_instance_transform(i, Transform3D(basis, p + basis * Vector3(0, 0.26, -0.15)))

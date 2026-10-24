@@ -172,28 +172,35 @@ static func _toast_stack(parent: Control, where: String, s: float) -> VBoxContai
 	stack.name = n
 	parent.add_child(stack)
 	var m := 28.0 * s
-	match where:
+	match where:  # every case sets its anchors AND all four offsets (see _pin)
 		"top_left":
-			stack.set_anchors_preset(Control.PRESET_TOP_LEFT)
-			stack.position = Vector2(m, m)
+			_pin(stack, Control.PRESET_TOP_LEFT, m, m)
 		"top":
-			stack.set_anchors_preset(Control.PRESET_CENTER_TOP)
+			_pin(stack, Control.PRESET_CENTER_TOP, 0.0, m * 3.0)
 			stack.grow_horizontal = Control.GROW_DIRECTION_BOTH
-			stack.offset_top = m * 3.0
 			stack.alignment = BoxContainer.ALIGNMENT_BEGIN
 		"bottom":
-			stack.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+			_pin(stack, Control.PRESET_CENTER_BOTTOM, 0.0, -m * 6.0)
 			stack.grow_horizontal = Control.GROW_DIRECTION_BOTH
 			stack.grow_vertical = Control.GROW_DIRECTION_BEGIN
-			stack.offset_top = -m * 6.0
-			stack.offset_bottom = -m * 6.0
 		_:
-			stack.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+			_pin(stack, Control.PRESET_TOP_RIGHT, -m, m)
 			stack.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-			stack.offset_left = -m
-			stack.offset_right = -m
-			stack.offset_top = m
 	return stack
+
+
+## Anchor `c` to `preset` and set ALL FOUR offsets: x on left/right, y on top/bottom, so its size comes
+## from its minimum size and its grow directions. set_anchors_preset alone keeps the old offsets,
+## worked out from the parent's size at that moment: a widget made in an already-sized view (a full TV
+## view) ended up at x = 0 (half off the left edge) instead of centred; one made before its split-screen
+## pane was sized happened to look right. Explicit offsets lay out the same at any view size, and later
+## resizes just move the anchors. Setting offsets to these values again afterwards is a no-op.
+static func _pin(c: Control, preset: int, x: float = 0.0, y: float = 0.0) -> void:
+	c.set_anchors_preset(preset as Control.LayoutPreset)
+	c.offset_left = x
+	c.offset_right = x
+	c.offset_top = y
+	c.offset_bottom = y
 
 
 # --- World popups ----------------------------------------------------------------------------------
@@ -215,7 +222,7 @@ static func popup(world: Node, pos: Vector3, text: String, opts: Dictionary = {}
 	l.modulate = col
 	var oc: Color = st[2]
 	l.outline_modulate = Color(oc.r, oc.g, oc.b, 0.95)
-	l.no_depth_test = true
+	l.no_depth_test = false
 	l.render_priority = UiKit.VR_PRIO_TEXT
 	l.outline_render_priority = UiKit.VR_PRIO_TEXT - 1
 	l.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -439,14 +446,10 @@ static func party_bar(root: Control, members: Array, where: String = "bottom") -
 	root.add_child(row)
 	var m := 20.0 * s
 	if where == "top":
-		row.set_anchors_preset(Control.PRESET_TOP_WIDE)
-		row.offset_top = m
-		row.offset_bottom = m
+		_pin(row, Control.PRESET_TOP_WIDE, 0.0, m)
 		row.grow_vertical = Control.GROW_DIRECTION_END
 	else:
-		row.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-		row.offset_top = -m
-		row.offset_bottom = -m
+		_pin(row, Control.PRESET_BOTTOM_WIDE, 0.0, -m)
 		row.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	var w := minf(300.0, (root.size.x / s - 40.0) / maxf(1.0, members.size()) - 14.0) if root.size.x > 10.0 else 300.0
 	for mem in members:
@@ -831,7 +834,7 @@ class Scoreboard extends PanelContainer:
 			"top_right": Control.PRESET_TOP_RIGHT, "bottom_left": Control.PRESET_BOTTOM_LEFT, "bottom_right": Control.PRESET_BOTTOM_RIGHT,
 			"left": Control.PRESET_CENTER_LEFT, "right": Control.PRESET_CENTER_RIGHT}
 		if presets.has(anchor) and get_parent() is Control and not (get_parent() is Container):
-			set_anchors_preset(presets[anchor])
+			HudKit._pin(self, presets[anchor])  # all four offsets 0, then the margins below
 			var m := 24.0 * _s
 			grow_horizontal = Control.GROW_DIRECTION_BOTH
 			grow_vertical = Control.GROW_DIRECTION_BOTH
@@ -1072,7 +1075,7 @@ class TimerPill extends PanelContainer:
 		var presets := {"top": Control.PRESET_CENTER_TOP, "top_left": Control.PRESET_TOP_LEFT, "top_right": Control.PRESET_TOP_RIGHT,
 			"bottom": Control.PRESET_CENTER_BOTTOM}
 		if get_parent() is Control and not (get_parent() is Container):
-			set_anchors_preset(presets.get(anchor, Control.PRESET_CENTER_TOP))
+			HudKit._pin(self, presets.get(anchor, Control.PRESET_CENTER_TOP))  # all four offsets 0 (centred), then the margins
 			grow_horizontal = Control.GROW_DIRECTION_BOTH if anchor in ["top", "bottom"] else (Control.GROW_DIRECTION_END if anchor == "top_left" else Control.GROW_DIRECTION_BEGIN)
 			grow_vertical = Control.GROW_DIRECTION_BEGIN if anchor == "bottom" else Control.GROW_DIRECTION_END
 			var m := 20.0 * _s
@@ -1355,6 +1358,7 @@ class StatusCard extends PanelContainer:
 class Objectives extends PanelContainer:
 	## A small checklist: each goal gets a tick (and a green flash) when done.
 	const UiKit := preload("res://core/ui_kit.gd")
+	const HudKit := preload("res://core/hud_kit.gd")
 	var title_text := "GOALS"
 	var anchor := "top_left"
 	var items: Array = []
@@ -1371,7 +1375,7 @@ class Objectives extends PanelContainer:
 		var presets := {"top_left": Control.PRESET_TOP_LEFT, "top_right": Control.PRESET_TOP_RIGHT, "bottom_left": Control.PRESET_BOTTOM_LEFT,
 			"bottom_right": Control.PRESET_BOTTOM_RIGHT, "left": Control.PRESET_CENTER_LEFT, "right": Control.PRESET_CENTER_RIGHT}
 		if presets.has(anchor) and get_parent() is Control and not (get_parent() is Container):
-			set_anchors_preset(presets[anchor])
+			HudKit._pin(self, presets[anchor])
 			var m := 20.0 * _s
 			grow_horizontal = Control.GROW_DIRECTION_BEGIN if anchor.contains("right") else Control.GROW_DIRECTION_END
 			grow_vertical = Control.GROW_DIRECTION_BEGIN if anchor.begins_with("bottom") else Control.GROW_DIRECTION_END

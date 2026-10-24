@@ -69,6 +69,51 @@ const PANEL_STYLES := {"default": "PanelContainer", "glass": "PanelContainer", "
 
 
 ## Player colour for a party slot / player index (wraps; same as Party.color_of(slot)).
+## Shared helpers that make three bug families hard to write (and give each a single home, so a fix lands once):
+
+## Anchor a Control to a preset AND reset its offsets (set_anchors_preset alone, after add_child, keeps the old
+## offsets: centred / right / bottom panels landed half off screen in 21 games). keep_size: grow from the anchor.
+## Grow directions follow the preset too (centred panels grow both ways, right / bottom ones grow left / up), so a
+## panel whose size isn't known yet still ends up centred / inside the screen.
+static func pin(c: Control, preset: int, keep_size: bool = true) -> void:
+	c.set_anchors_and_offsets_preset(preset, Control.PRESET_MODE_KEEP_SIZE if keep_size else Control.PRESET_MODE_MINSIZE)
+	var right := preset in [Control.PRESET_TOP_RIGHT, Control.PRESET_BOTTOM_RIGHT, Control.PRESET_CENTER_RIGHT, Control.PRESET_RIGHT_WIDE]
+	var bottom := preset in [Control.PRESET_BOTTOM_LEFT, Control.PRESET_BOTTOM_RIGHT, Control.PRESET_CENTER_BOTTOM, Control.PRESET_BOTTOM_WIDE]
+	var hcenter := preset in [Control.PRESET_CENTER, Control.PRESET_CENTER_TOP, Control.PRESET_CENTER_BOTTOM, Control.PRESET_VCENTER_WIDE]
+	var vcenter := preset in [Control.PRESET_CENTER, Control.PRESET_CENTER_LEFT, Control.PRESET_CENTER_RIGHT, Control.PRESET_HCENTER_WIDE]
+	c.grow_horizontal = Control.GROW_DIRECTION_BOTH if hcenter else (Control.GROW_DIRECTION_BEGIN if right else Control.GROW_DIRECTION_END)
+	c.grow_vertical = Control.GROW_DIRECTION_BOTH if vcenter else (Control.GROW_DIRECTION_BEGIN if bottom else Control.GROW_DIRECTION_END)
+
+
+## A basis looking along `dir` that never goes NaN: looking_at(dir, UP) is degenerate when dir is vertical (looking
+## straight down at a wrist, a hand pointing up), so pick whichever of up / alt_up / forward is least parallel.
+static func face(dir: Vector3, up: Vector3 = Vector3.UP, alt_up: Vector3 = Vector3.FORWARD) -> Basis:
+	if dir.length() < 0.0001:
+		return Basis()
+	var d := dir.normalized()
+	# Keep the normal up (no roll) unless it's nearly parallel; only then fall back to alt_up, then RIGHT.
+	for u in [up, alt_up, Vector3.RIGHT]:
+		if absf(d.dot((u as Vector3).normalized())) < 0.98:
+			return Basis.looking_at(d, u)
+	return Basis.looking_at(d, Vector3.BACK)
+
+
+## Controller A / B in Godot's built-in ui_accept / ui_cancel (they only have Enter / Esc by default, so every
+## focus-driven menu ignored the pad unless Steam turned A into Enter). Called once at startup by core/net.gd and
+## the arcade; idempotent.
+static func ensure_pad_ui_actions() -> void:
+	for pair in [["ui_accept", JOY_BUTTON_A], ["ui_cancel", JOY_BUTTON_B]]:
+		var have := false
+		for e in InputMap.action_get_events(pair[0]):
+			if e is InputEventJoypadButton and (e as InputEventJoypadButton).button_index == pair[1]:
+				have = true
+		if not have:
+			var ev := InputEventJoypadButton.new()
+			ev.button_index = pair[1]
+			ev.device = -1  # any pad
+			InputMap.action_add_event(pair[0], ev)
+
+
 static func player_color(index: int) -> Color:
 	return PLAYER_COLORS[posmod(index, PLAYER_COLORS.size())]
 
@@ -730,7 +775,7 @@ static func label3d(text: String, height_m: float = 0.06, color: Variant = "text
 	l.outline_size = 14
 	l.modulate = color_of(color)
 	l.outline_modulate = Color(0.02, 0.02, 0.06, 0.95)
-	l.no_depth_test = true
+	l.no_depth_test = false
 	l.render_priority = VR_PRIO_TEXT
 	l.outline_render_priority = VR_PRIO_TEXT - 1
 	l.double_sided = false

@@ -2,6 +2,27 @@
 
 Pirate co-op: one VR gunner on a Steam Frame plus 1–6 deckhands on the TV (split screen when there's no headset).
 
+**SIMPLE_MODE** (`main.gd`, on): the gunner aims and fires; the deckhands carry cannonballs to the cannons.
+- Target practice first, unchanged, plus a see-through ghost hand (`ghost_hand.gd`) that shows reach,
+  squeeze, swing, let go. The bouncing arrows teach the rest; no hint text or help panel.
+- One new thing per wave: 1–2 a few slow ships whose shots only rock the boat, 3 LEAKS (one at a time:
+  a glowing ring, the deckhands' arrow), 4 BOARDERS (one at a time), 5 the SEA MONSTER's tentacles,
+  6 the KRAKEN (one golden cannonball on the pile). Bonus seas bring back the bomb boats.
+- Touch everything (`props.gd`): beside every cannon a bell (DING), a rope (swings), a barrel (wobbles,
+  deckhands bump it too) with two spare cannonballs; squeeze to pick up a ball or the barrel and throw it
+  overboard (SPLASH), at a boarder (BONK) or a tentacle. Poke Polly and she squawks and jumps.
+- Text: one short headline ("WAVE 3!", "BOARDERS!", "NOW! FIRE!", "HOORAY!"); the wrist shows "WAVE n";
+  TV: "WAVE n" (hidden while the headline says it). No how-to words: each TV view shows a pulsing picture
+  cue in the player's own controls (A/E/SHIFT + cannonball at the pile, + drop by a leak (hold), RT/CLICK/ENTER
+  + skull for boarders and tentacles; the flat gunner RT/SPACE/ENTER + star, LB/RB (Q/E, , .) + arrows when
+  empty) that fades once they've done it twice. VR: the ghost hand opens its fingers over the handle when
+  the ring is on the target (was "LET GO!"). A practice miss shows a glowing arrow towards the target
+  (was "TOO SHORT!" / "TOO FAR!"). The join card is a pulsing A + person; PAUSED has no sentence; no
+  "LOADED!" word in the gunner's face; no words over the Kraken. The water shows as the sea rising up the hull (TV: a bar, no number);
+  the cannon's rack shows its balls (a pulsing red one when empty).
+- Off: treasure ship, supply barrels, streak / double-sink / chain bonuses, gold numbers, parrot speech
+  bubbles, crew awards. Game over ("OH NO!") sets sail again by itself after 7 s.
+
 **The voyage:** target practice (while the TV crew joins), then five waves and the KRAKEN:
 1. CALM SEAS – two slow pirate ships that barely shoot (no boarders): learn the ropes.
 2. RAIDERS! – raiders swing boarders over on ropes.
@@ -50,5 +71,5 @@ The sky changes through the voyage (sunset, dusk, storm, night, dawn after the K
 
 Test: `godot --headless --path . --fixed-fps 60 --quit-after 9000 res://tests/cannon_cove_bot.tscn`
 (`BOT_PLAYERS=6` brings six deckhands aboard; `CC_BOT_RANGE=24` makes the bot gunner wait for close range,
-which brings boarders and leaks into play; `CC_START_WAVE=6` skips to the Kraken; `CC_FAKE_VR=1` runs the real
+which brings boarders and leaks into play; `CC_START_WAVE=6` skips to the Kraken; `CC_FAKE_VR=1` (or `BOT_VR=1`) runs the real
 VR gunner code with bot-driven hands: it misses the handle once, then reaches, squeezes, swings and lets go).

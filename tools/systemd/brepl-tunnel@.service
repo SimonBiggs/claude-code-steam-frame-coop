@@ -1,0 +1,11 @@
+[Unit]
+Description=brepl peer link to %i over SSH (both REPL inboxes)
+After=brepl.service
+
+[Service]
+ExecStart=%h/.local/bin/brepl-tunnel %i
+Restart=always
+RestartSec=20
+
+[Install]
+WantedBy=default.target

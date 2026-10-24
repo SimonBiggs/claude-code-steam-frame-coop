@@ -7,6 +7,8 @@ extends Node3D
 ## Flying is local (instant). The host decides pollen, pollination and honey from the bee's position.
 
 const W := preload("res://games/bee_garden/world.gd")
+const CueScript := preload("res://games/bee_garden/cue.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 const SPEED := 3.1
 const VSPEED := 2.3
@@ -58,6 +60,15 @@ var wings: Array[MeshInstance3D] = []
 var balls: Array[MeshInstance3D] = []
 var arrow: MeshInstance3D
 var tag: Label3D
+# Simple mode picture cue (cue.gd) low in this bee's view, and what it counts towards (main.cue_did).
+var cue: Control
+var cue_key := ""
+var last_pollen := 0
+var last_made := 0
+var rise_was := false
+var sink_was := false
+var goal_pos := Vector3.ZERO
+var goal_on := false
 var crown: MeshInstance3D
 
 
@@ -105,20 +116,20 @@ func _ready() -> void:
 	arrow = MeshInstance3D.new()
 	arrow.mesh = W.cyl(0.0, 0.06, 0.2, 8)
 	arrow.material_override = W.cmat(Color(1.0, 0.75, 0.2), 1.0)
-	arrow.layers = W.TV_LAYER
+	arrow.layers = arrow_layer()  # only this bee's own camera draws its guide arrow
 	arrow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(arrow)
 	tag = Label3D.new()
 	tag.text = "P%d" % (index + 1)
 	tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	tag.no_depth_test = true
+	tag.no_depth_test = false
 	tag.fixed_size = true
 	tag.pixel_size = 0.0012
 	tag.font_size = 28
 	tag.outline_size = 10
 	tag.modulate = color
 	tag.position.y = 0.42
-	tag.layers = W.TV_LAYER
+	tag.layers = tag_layer()  # the others see it; this bee's own view doesn't (its corner already says P%d)
 	add_child(tag)
 
 
@@ -127,9 +138,17 @@ func attach_camera(cam: Camera3D) -> void:
 	camera.fov = 72.0
 	camera.near = 0.05
 	camera.far = 400.0
-	camera.cull_mask = 0xFFFFF
+	camera.cull_mask = (0xFFFFF & ~W.BEE_ARROW_BITS & ~tag_layer()) | arrow_layer()
 	cam_yaw = face
 	_update_camera(1.0)
+
+
+func tag_layer() -> int:
+	return 1 << (1 + clampi(index, 1, 6))
+
+
+func arrow_layer() -> int:
+	return 1 << (12 + clampi(index, 1, 6))
 
 
 func set_active(on: bool) -> void:
@@ -223,6 +242,14 @@ func _move(delta: float) -> void:
 			Input.start_joy_vibration(joy, 0.2, 0.1, 0.1)
 	zoom_was = z
 	var wish := read_move(delta)
+	if main.simple:
+		# Count rise / sink presses towards the up / down picture cues.
+		if wish.y > 0.5 and not rise_was:
+			main.cue_did(self, "up")
+		if wish.y < -0.5 and not sink_was:
+			main.cue_did(self, "down")
+		rise_was = wish.y > 0.5
+		sink_was = wish.y < -0.5
 	var spd := SPEED * (BOOST if boost_t > 0.0 else 1.0)
 	var want := Vector3(wish.x * spd, wish.y * VSPEED * (BOOST if boost_t > 0.0 else 1.0), wish.z * spd)
 	vel = vel.lerp(want, 1.0 - exp(-5.0 * delta))
@@ -261,11 +288,25 @@ func _process(delta: float) -> void:
 	crown.visible = crowned
 	# The arrow points to the HIVE, or to the Queen when we carry the pollen she wants.
 	var goal := W.HIVE_ENTRY
+	var to_flower := false
+	if main.simple and pollen == 0 and honey_made == 0:
+		# Practice: until this bee has made honey once, the arrow shows the way to a glowing flower.
+		var best := INF
+		for i in main.spots.size():
+			if main.spots[i].bloom:
+				var d: float = (main.head_pos(i) as Vector3).distance_to(global_position) - (50.0 if i == main.halo_spot else 0.0)
+				if d < best:
+					best = d
+					goal = main.head_pos(i)
+					to_flower = true
 	if main.event == "queen" and pollen > 0 and (pollen_kinds & (1 << int(main.queen_kind))) != 0:
 		goal = main.events_node.queen_pos()
-	arrow.visible = active and pollen > 0 and global_position.distance_to(goal) > 1.2
+	goal_pos = goal
+	goal_on = pollen > 0 or to_flower
+	arrow.visible = active and (pollen > 0 or to_flower) and global_position.distance_to(goal) > (0.6 if to_flower else 1.2)
 	if arrow.visible:
 		arrow.position = Vector3(0, 0.3, 0)
+
 		var to := goal - global_position
 		var dir := to.normalized()
 		# The cone's tip is +Y: point it at the hive.
@@ -274,6 +315,11 @@ func _process(delta: float) -> void:
 			arrow.basis = Basis(axis.normalized(), Vector3.UP.angle_to(dir))
 		else:
 			arrow.basis = Basis()
+		if main.simple:
+			# A bigger glowing arrow that pulses, so it reads as "this way".
+			var k := absf(sin(t * 4.0))
+			arrow.position = Vector3(0, 0.36, 0)
+			arrow.basis = arrow.basis.scaled(Vector3.ONE * (1.6 + 0.5 * k))
 	_update_camera(delta)
 	_update_hud()
 
@@ -292,7 +338,16 @@ func _update_camera(delta: float) -> void:
 
 
 func _update_hud() -> void:
-	if hud_label:
+	if main.simple:
+		_count_cues()
+	if hud_label and main.simple:
+		hud_label.text = "P%d" % (index + 1)
+		if hint_label:
+			hint_label.text = ""  # no how-to line: the picture cue shows it
+			hint_label.visible = false
+		_update_cue(get_process_delta_time())
+		return
+	elif hud_label:
 		hud_label.text = "P%d  BEE   POLLEN %d / %d   HONEY MADE %d" % [index + 1, pollen, MAX_POLLEN, honey_made]
 	if hint_label:
 		hint_label.text = _hint()
@@ -302,6 +357,11 @@ func _update_hud() -> void:
 func _hint() -> String:
 	if main.game_over or main.phase == "dusk":
 		return ""
+	if main.simple:
+		# One short line, only while this bee is still learning.
+		if honey_made > 0:
+			return ""
+		return "Follow the arrow to the HIVE!" if pollen > 0 else "Fly into the glowing flower!"
 	var want: String = str(W.KINDS[clampi(int(main.queen_kind), 0, 2)].name).to_upper()
 	if main.event == "queen":
 		if pollen > 0 and (pollen_kinds & (1 << int(main.queen_kind))) != 0:
@@ -318,6 +378,89 @@ func _hint() -> String:
 	if pollen > 0:
 		return "Visit a DIFFERENT flower (fruit grows; a different KIND = bouquet bonus),\nor follow the arrow to the HIVE to make honey" + rb
 	return "Fly into a glowing flower to collect pollen" + rb
+
+
+# --- Simple mode picture cues ---------------------------------------------------
+
+## Pollen and honey come from the host (mirrored on the TV): count each new load and each delivery.
+func _count_cues() -> void:
+	if pollen > last_pollen:
+		main.cue_did(self, "pollen")
+	if honey_made > last_made:
+		main.cue_did(self, "hive")
+	last_pollen = pollen
+	last_made = honey_made
+
+
+## What this bee's cue is right now: [key, dir] ("" = none). "plug" (controller unplugged), "up" /
+## "down" (the flower or hive is right above / below), "pollen" (fly to the glowing flower) or "hive"
+## (take the pollen home); each goes once done twice.
+func _cue_now() -> Array:
+	if not active or main.game_over or not main.ready_to_play or main.get_tree().paused \
+			or (main.net.mode == "client" and not main.synced):
+		return ["", ""]
+	if has_meta("lost_pad") and joy < 0:
+		return ["plug", ""]
+	if not goal_on:
+		return ["", ""]
+	var to := goal_pos - global_position
+	var flat := Vector2(to.x, to.z).length()
+	if to.y > 0.6 and flat < 2.0 and not main.cue_learned(self, "up"):
+		return ["up", ""]
+	if to.y < -0.6 and flat < 2.0 and not main.cue_learned(self, "down"):
+		return ["down", ""]
+	var k := "pollen" if pollen == 0 else "hive"
+	if main.cue_learned(self, k):
+		return ["", ""]
+	# Which way to steer, seen from the camera (keyboards turn with left / right).
+	var loc := Basis(Vector3.UP, cam_yaw).inverse() * to
+	var dir := "up"
+	if absf(loc.x) > absf(loc.z) * 1.2 or loc.z > 0.0:
+		dir = "right" if loc.x > 0.0 else "left"
+	return [k, dir]
+
+
+## This bee's own button for a cue.
+func _cue_button(k: String, dir: String, sc: float) -> Control:
+	var pad := joy >= 0
+	match k:
+		"up":
+			if pad:
+				return UiKit.glyph("RT", sc)
+			return UiKit.glyph("CTRL" if key_set == 1 else "SPACE", sc)
+		"down":
+			if pad:
+				return UiKit.glyph("LT", sc)
+			return UiKit.glyph("." if key_set == 1 else "SHIFT", sc)
+	if pad or key_set < 0:
+		return UiKit.glyph("STICK", sc)
+	if key_set == 1:
+		return CueScript.arrow_key(dir, sc)
+	return UiKit.glyph({"up": "W", "left": "A", "right": "D"}.get(dir, "W"), sc)
+
+
+func _update_cue(delta: float) -> void:
+	if hint_label == null:
+		return
+	if cue == null or not is_instance_valid(cue):
+		cue = CueScript.new()
+		hint_label.get_parent().add_child(cue)
+	var kd := _cue_now()
+	cue_key = kd[0]
+	var dir: String = kd[1]
+	var pad := joy >= 0
+	var kk: String = cue_key
+	cue.set_cue(kk, "%s|%s|%d" % [dir, pad, key_set], func(sc: float) -> Array:
+		match kk:
+			"plug":
+				return [UiKit.icon("bolt", Color(1.0, 0.75, 0.3), 64.0 * sc)]
+			"up":
+				return [_cue_button(kk, dir, sc), UiKit.icon("arrow_up", Color(1.0, 0.9, 0.4), 48.0 * sc)]
+			"down":
+				return [_cue_button(kk, dir, sc), UiKit.icon("arrow_down", Color(1.0, 0.9, 0.4), 48.0 * sc)]
+			"hive":
+				return [_cue_button(kk, dir, sc), CueScript.hive_icon(56.0 * sc)]
+		return [_cue_button(kk, dir, sc), CueScript.flower_icon(56.0 * sc)], delta)
 
 
 # --- Network -----------------------------------------------------------------

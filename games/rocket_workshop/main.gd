@@ -12,6 +12,31 @@ extends Node3D
 ## jobs.gd (crew jobs), rocket.gd (rocket + launch fx), space.gd (planets, map, log, launch cam),
 ## operator.gd (pilot), player.gd (crew), world.gd (the workshop), join_listener.gd (drop-in join).
 ## The host is authoritative; modules travel to the TV in snapshots.
+##
+## SIMPLE_MODE (the family: "all of the games have become too complicated", "simple games are the fun
+## games", "everything's being driven by text"). Everything below that it cuts is switched off, not
+## deleted. In simple mode Rocket Workshop is just the talking puzzle:
+##  - Rocket 1 is a PRACTICE: the blueprint shows one big glowing button; the matching real button on the
+##    desk glows too and a see-through ghost hand (ghost_hand.gd, pilot only) presses it. Then the ghost
+##    hand pulls the glowing lever: "the TV tells, the pilot does".
+##  - One new desk control per rocket (button, plugs, dial, switches, shapes; at most two puzzles + the
+##    lever); only the controls this rocket needs are on the desk. The ghost hand shows how a new one moves.
+##  - Blueprints are pictures (colours, shapes, positions), no words. With nobody on the TV, the pilot
+##    sees the blueprint too, floating behind the desk.
+##  - No cockpit wings, crew jobs, surprise events, countdown, penalties, stars, log or end screen.
+##    A wrong press just makes a silly honk and a puff of smoke.
+##  - Everything round the pilot reacts to touch (props.gd): a toy alien, a globe, a rubber chicken,
+##    a fan, a window shutter and bobbleheads.
+##  - Text: VR only gets "3 2 1" and "LIFT OFF!"; the TV gets no how-to words at all (visual teaching):
+##    low in each crew view a pulsing glowing button in that player's own controls plus a picture
+##    (cue.gd, UiKit glyph / icon): STICK / W / an up-arrow key + an arrow + a blueprint board (walk to
+##    a board with a bouncing arrow), STICK / MOUSE / Q E / an arrow key + an arrow with a big glowing
+##    arrow at the view's edge (turn to the board), a talking face + the pilot (tell the pilot what the
+##    board shows), a talking face + the lever (shout PULL THE LEVER), a pulsing bolt while a controller
+##    is unplugged. Each goes once that player has done it twice (cue_did / cue_learned). The pilot gets
+##    a glowing arrow over the practice button and over the lever (plus the ghost hand). A spare
+##    controller sees a pulsing A + plus + person; joining says PLAYER 3!, the TV crew arriving HELLO!,
+##    and a full crew / someone leaving / a lost controller is just a soft sound (and the bolt).
 
 const P := preload("res://games/rocket_workshop/puzzles.gd")
 const WorldScript := preload("res://games/rocket_workshop/world.gd")
@@ -28,9 +53,16 @@ const MusicScript := preload("res://core/music.gd")
 const NetScript := preload("res://core/net.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
 const VrText := preload("res://core/vr_text.gd")
+const PropsScript := preload("res://games/rocket_workshop/props.gd")
+const GhostHandScript := preload("res://games/rocket_workshop/ghost_hand.gd")
+const CueScript := preload("res://games/rocket_workshop/cue.gd")
+const UiKit := preload("res://core/ui_kit.gd")
+const SIMPLE_MODE := true
 
 const MANUAL_LAYER := 512  # blueprint content: drawn for the TV crew only
 const PANEL_LAYER := 1024  # desk controls: drawn for the pilot only
+const TAG_LAYER_0 := 4096  # crew name tags: P(i+1)'s tag is on TAG_LAYER_0 << i (never in its own view)
+const TAG_LAYERS := 0xFF000  # every name tag layer (the pilot doesn't draw them)
 const PAD_POS := Vector3(0, 0, -11.0)
 const HATCH_POS := Vector3(0, 0, -8.0)
 const LAUNCH_TIME := 11.5
@@ -78,6 +110,11 @@ const SOUNDS := {
 	"arrive": [1.1, 523.0, 2093.0, 0.4, "square", 0.0],
 	"star": [0.22, 1320.0, 1980.0, 0.28, "tri", 0.0],
 	"uhoh": [0.6, 520.0, 260.0, 0.35, "square", 0.0],
+	"honk": [0.4, 700.0, 380.0, 0.4, "saw", 0.15],
+	"squeak": [0.3, 1500.0, 2300.0, 0.3, "sine", 0.0],
+	"boing": [0.45, 300.0, 700.0, 0.35, "sine", 0.0],
+	"whirr": [0.8, 180.0, 260.0, 0.25, "saw", 0.5],
+	"tweet": [0.18, 2600.0, 3400.0, 0.25, "sine", 0.0],
 }
 const HELLO_SOUNDS: Array[String] = ["beep", "boopy", "zorp"]
 
@@ -139,6 +176,12 @@ var center_label: Label
 var help_label: Label
 var center_tween: Tween
 var vr_center: Label3D
+var simple := SIMPLE_MODE  # other scripts read main.simple
+var props: Node3D  # simple mode: touchable toys round the pilot
+var ghost_hand: Node3D  # simple mode: shows the pilot how (pilot only)
+var oops_t := 0.0
+var join_cue: Control  # simple mode: pulsing A + plus + person (a spare controller can join)
+var pilot_arrow: MeshInstance3D  # simple mode: a glowing arrow over the practice button / the lever
 
 
 func _ready() -> void:
@@ -159,6 +202,10 @@ func _ready() -> void:
 	jobs.main = self
 	add_child(jobs)
 	_build_hud()
+	if SIMPLE_MODE:
+		props = PropsScript.new()
+		props.main = self
+		add_child(props)
 	best = _load_best()
 	var menu := PauseMenuScript.new()
 	menu.main = self
@@ -190,7 +237,14 @@ func _setup_game(mode: String) -> void:
 	ready_to_play = true
 	_ensure_join_listener()
 	_restore_party()
-	if mode == "host":
+	if SIMPLE_MODE:
+		if mode != "client":
+			ghost_hand = GhostHandScript.new()
+			add_child(ghost_hand)
+			set_layers(ghost_hand, PANEL_LAYER)
+		else:
+			_show_center("", 0.0, false)  # clear "Connecting…"; no words: the first rocket rolls out
+	elif mode == "host":
 		_show_center("Waiting for the TV crew to join…", 0.0)
 	elif mode == "client":
 		_show_center("CONNECTED!\nFind the boards with BOUNCING ARROWS and tell the pilot what they say!", 3.0)
@@ -524,7 +578,7 @@ func popup(pos: Vector3, text: String, color: Color, broadcast: bool = true) -> 
 	l.font_size = 64
 	l.outline_size = 18
 	l.pixel_size = 0.008
-	l.no_depth_test = true
+	l.no_depth_test = false
 	l.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(l)
 	l.global_position = pos
@@ -684,7 +738,7 @@ func crew_count() -> int:
 
 
 func _start_rocket(n: int) -> void:
-	var r := P.make_rocket(n, crew_count())
+	var r := P.make_simple_rocket(n) if SIMPLE_MODE else P.make_rocket(n, crew_count())
 	rocket_n = n
 	rocket_name = r.name
 	modules = r.modules
@@ -714,6 +768,10 @@ func _start_rocket(n: int) -> void:
 				fresh.append(NEW_LINES[m.type])
 	print("Rocket %d (%s) to %s: %s, %.0f s" % [n, rocket_name, P.PLANETS[P.planet(n)], ", ".join(types), time_left])
 	sound("pop", -2.0, 0.8)
+	if SIMPLE_MODE:
+		events_left = 0
+		phase_t = INTRO_TIME if n == 1 else 2.0  # no words: the new rocket rolls out, the arrows bounce
+		return
 	if n == 1:
 		phase_t = FIRST_INTRO_TIME
 		_show_center("ROCKET WORKSHOP!  First stop: %s\nPILOT: you have the buttons, but no instructions.\n" % P.PLANETS[0] \
@@ -734,7 +792,8 @@ func on_panel(kind: String, args: Array) -> void:
 			_start_launch()
 		elif phase == "work" and lever_hint_t <= 0.0:
 			lever_hint_t = 3.0
-			_flash("Not yet! Finish every job first.")
+			if not SIMPLE_MODE:
+				_flash("Not yet! Finish every job first.")
 			sound("boop", -6.0, 0.5)
 		return
 	if phase != "work" and phase != "ready":
@@ -746,6 +805,18 @@ func on_panel(kind: String, args: Array) -> void:
 				return
 			var pressed: Array = m.pressed
 			var answer: Array = m.answer
+			if SIMPLE_MODE:  # each press is right (it lights up) or a silly honk; no mixing to remember
+				var c := int(args[0])
+				if pressed.has(c):
+					return
+				if not answer.has(c):
+					_oops("fuel%d" % c)
+					return
+				pressed.append(c)
+				sound("plug", -4.0, 0.7 + c * 0.15)
+				if pressed.size() >= answer.size():
+					_solve(m)
+				return
 			pressed.append(int(args[0]))
 			sound("plug", -4.0, 0.7 + int(args[0]) * 0.15)
 			if pressed.size() >= answer.size():
@@ -775,6 +846,8 @@ func on_panel(kind: String, args: Array) -> void:
 						all = false
 				if all:
 					_solve(m)
+			elif SIMPLE_MODE:
+				_oops("sock%d" % socket)
 			else:
 				_burp("Wrong socket - zzzap!")
 		"shape":
@@ -790,6 +863,8 @@ func on_panel(kind: String, args: Array) -> void:
 				m.step = step + 1
 				if int(m.step) >= order.size():
 					_solve(m)
+			elif SIMPLE_MODE:
+				_oops("shape%d" % int(args[0]))  # keep the shapes already pressed
 			else:
 				m.step = 0
 				_burp("Wrong shape order!")
@@ -797,6 +872,14 @@ func on_panel(kind: String, args: Array) -> void:
 			var m := module("gauge")
 			if not m.is_empty() and not m.done:
 				m.value = clampi(int(args[0]), 1, 9)
+		"dial_let_go":  # simple mode: no SET button, letting go of the dial checks it
+			var m := module("gauge")
+			if m.is_empty() or m.done:
+				return
+			if int(m.value) == int(m.answer):
+				_solve(m)
+			else:
+				sound("boop", -8.0, 0.6)
 		"set":
 			var m := module("gauge")
 			if m.is_empty() or m.done:
@@ -814,6 +897,8 @@ func on_panel(kind: String, args: Array) -> void:
 			var i := int(args[0])
 			state[i] = not bool(state[i])
 			sound("click", -4.0, 1.0)
+			if SIMPLE_MODE and state == m.answer:  # no CHECK button: right pattern, done
+				_solve(m)
 		"check":
 			var m := module("switches")
 			if m.is_empty() or m.done:
@@ -859,6 +944,8 @@ func _solve(m: Dictionary) -> void:
 	print("Module solved: %s (rocket %d, %.0f s left)" % [m.type, rocket_n, time_left])
 	sound("solve", -2.0)
 	_flash(title + " - DONE!")
+	if SIMPLE_MODE and panel != null and panel.area_centre(m.type) != Vector3.INF:
+		burst(panel.area_centre(m.type), Color(0.4, 1.0, 0.5), 14, 0.02)  # the pilot sees it work too
 	if not P.is_job(m.type) and manual.boards.has(m.type):
 		var root: Node3D = manual.boards[m.type].root
 		burst(root.global_position + root.global_basis.z * 0.5, Color(0.4, 1.0, 0.5), 18, 0.08)
@@ -869,7 +956,8 @@ func _solve(m: Dictionary) -> void:
 		phase = "ready"
 		sound("allset", 0.0)
 		print("All modules done: waiting for the launch lever")
-		_show_center("ALL SYSTEMS GO!\nPULL THE LEVER, CRONK!", 6.0)  # David's wording
+		if not SIMPLE_MODE:  # simple: the lever glows (and the ghost hand pulls it on the practice rocket)
+			_show_center("ALL SYSTEMS GO!\nPULL THE LEVER, CRONK!", 6.0)  # David's wording
 
 
 ## A mistake: the rocket burps and the countdown loses a few seconds (never below 5).
@@ -889,6 +977,21 @@ func _burp(why: String) -> void:
 		players[0].haptic("r", 0.8)
 
 
+## Simple mode: a wrong press is just funny - a honk, a puff of smoke at that control, a wobble. No penalty.
+func _oops(key: String) -> void:
+	mistakes += 1
+	print("Oops (simple): %s" % key)
+	if oops_t <= 0.0:
+		oops_t = 0.5
+		sound("honk", -2.0, randf_range(0.8, 1.25))
+		rocket.burp()
+		net.event("burp", [])
+	if panel != null:
+		burst(panel.control_world(key, 0.05), Color(0.75, 0.75, 0.8), 10, 0.025)
+	if players[0].vr:
+		players[0].haptic("r", 0.5)
+
+
 func _flash(text: String) -> void:
 	msg = text
 	msg_t = 3.0
@@ -902,7 +1005,7 @@ func _start_launch() -> void:
 	last_stars = 1 + (1 if rocket_burps == 0 else 0) + (1 if time_left >= start_time * 0.4 else 0)
 	stars += last_stars
 	streak = streak + 1 if rocket_burps == 0 else 0
-	if streak >= 2:
+	if streak >= 2 and not SIMPLE_MODE:  # simple: no countdown to add to
 		bonus_next = minf(5.0 * streak, 20.0)
 	print("Rocket %d launched! (%d total, %.0f s to spare, %d stars, streak %d)" % [rocket_n, launched, time_left, last_stars, streak])
 	_show_center("3", 0.9)
@@ -916,7 +1019,12 @@ func _launch_beats(prev: float, now: float) -> void:
 			sound("count", 0.0, 1.0)
 	if prev < 2.6 and now >= 2.6:
 		sound("rumble", 2.0, 1.0)
-	if prev < RocketScript.LIFTOFF and now >= RocketScript.LIFTOFF:
+	if prev < RocketScript.LIFTOFF and now >= RocketScript.LIFTOFF and SIMPLE_MODE:
+		_show_center("LIFT OFF!", 2.5)
+		sound("count", 2.0, 2.0)
+		sound("whoosh", 0.0, 1.0)
+		sound("allset", -2.0, 1.2)
+	elif prev < RocketScript.LIFTOFF and now >= RocketScript.LIFTOFF:
 		var line := "LIFT OFF!\nRocket #%d (%s) is off to %s!" % [rocket_n, rocket_name, P.PLANETS[P.planet(rocket_n)]]
 		if streak >= 2:
 			line += "\nPERFECT STREAK x%d!  +%d s on the next rocket" % [streak, int(bonus_next)]
@@ -930,7 +1038,8 @@ func _launch_beats(prev: float, now: float) -> void:
 	if prev < SpaceScript.ARRIVE_AT and now >= SpaceScript.ARRIVE_AT:
 		var star_names: Array[String] = ["", "1 STAR", "2 STARS", "3 STARS!"]
 		var star_txt: String = star_names[clampi(last_stars, 0, 3)]
-		_show_center("TOUCHDOWN ON %s!\n%s   (total %d)" % [P.PLANETS[P.planet(rocket_n)], star_txt, stars], 1.6)
+		if not SIMPLE_MODE:
+			_show_center("TOUCHDOWN ON %s!\n%s   (total %d)" % [P.PLANETS[P.planet(rocket_n)], star_txt, stars], 1.6)
 		sound("arrive", -2.0, 1.0)
 		for k in last_stars:
 			get_tree().create_timer(0.15 * k).timeout.connect(sound.bind("star", -4.0, 1.0 + 0.15 * k))
@@ -1181,13 +1290,15 @@ func _host_update(delta: float) -> void:
 	lever_hint_t -= delta
 	match phase:
 		"wait":
-			if net.mode != "host" or net.connected:
+			if net.mode != "host" or net.connected or SIMPLE_MODE:  # simple: solo VR works too
 				_start_rocket(1)
 		"intro":
 			phase_t -= delta
 			if phase_t <= 0.0:
 				phase = "work"
 		"work", "ready":
+			if SIMPLE_MODE:
+				return  # no countdown, no jobs, no surprises: just the desk and the blueprints
 			if net.mode == "host" and not net.connected:
 				return  # hold the countdown while the TV crew is away
 			time_left -= delta
@@ -1284,6 +1395,8 @@ func _clock() -> String:
 ## Text on the pilot's desk screen (world-space, only the pilot sees it). The status line takes
 ## turns between the useful messages.
 func screen_text() -> String:
+	if SIMPLE_MODE:
+		return ""
 	var status := ""
 	var tips: Array[String] = []
 	match phase:
@@ -1327,6 +1440,8 @@ func launch_cam() -> Dictionary:
 ## A short "what do I do now?" line under each crew member's view.
 func crew_hint(p) -> String:
 	if net.mode == "client" and not synced:
+		return ""
+	if SIMPLE_MODE:  # no words: the picture cue low in the view (_update_crew_cues) shows what to do
 		return ""
 	match phase:
 		"wait":
@@ -1429,6 +1544,51 @@ func _process(delta: float) -> void:
 	_animate_world(delta)
 	_update_hud()
 	_update_vr_center()
+	if SIMPLE_MODE:
+		oops_t -= delta
+		_update_simple(delta)
+		_update_crew_cues(delta)
+		_update_join_cue()
+
+
+## Simple mode (host / local): the practice glow, the ghost hand and the pilot's own blueprint.
+func _update_simple(delta: float) -> void:
+	if net.mode == "client" or panel == null or not panel.detail:
+		return
+	var glow := ""
+	var demo: Array = []
+	var idle: float = panel.idle_t
+	var working := phase == "work"
+	var first := rocket_n == 1
+	if working and not modules.is_empty():
+		var m: Dictionary = modules[0]  # the new control is always first
+		if not m.done:
+			if first and m.type == "fuel":
+				var c := int((m.answer as Array)[0])
+				glow = "fuel%d" % c
+				if idle > 1.2:
+					demo = panel.demo_path(m)
+			elif rocket_n <= P.SIMPLE_ORDER.size() and idle > 4.0:
+				demo = panel.demo_path(m)
+	elif phase == "ready" and idle > (1.2 if first else 6.0):
+		demo = panel.demo_path({"type": "lever"})
+	panel.glow_key = glow
+	if ghost_hand != null:
+		ghost_hand.play(demo, delta)
+	var point := glow
+	if phase == "ready" and launched < 2:
+		point = "lever"
+	_update_pilot_arrow(point)
+	var solo := false
+	if phase == "intro" or phase == "work" or phase == "ready":
+		solo = (net.mode == "host" and not net.connected) or (net.mode == "local" and crew_count() == 0)
+	var show: Dictionary = {}
+	if solo:
+		for m in modules:
+			if not m.done:
+				show = m
+				break
+	manual.update_solo(show, panel)
 
 
 ## Ambient life: the planet mobile turns, clouds drift, gantry lights blink faster when ready.
@@ -1450,6 +1610,206 @@ func _unhandled_input(event: InputEvent) -> void:
 	if k and k.pressed and not k.echo and k.physical_keycode == KEY_F11:
 		var w := get_window()
 		w.mode = Window.MODE_WINDOWED if w.mode == Window.MODE_FULLSCREEN else Window.MODE_FULLSCREEN
+
+
+# --- Simple mode: visual teaching (picture cues instead of words) --------------------
+
+## Player p has done `key` once more ("walk", "turn", "tell", "lever"); its cue goes once done twice.
+## Kept on the machine that draws p's view.
+func cue_did(p, key: String) -> void:
+	if p == null:
+		return
+	var done: Dictionary = p.get_meta("cue_done", {})
+	done[key] = int(done.get(key, 0)) + 1
+	p.set_meta("cue_done", done)
+
+
+func cue_learned(p, key: String) -> bool:
+	if p == null:
+		return false
+	var done: Dictionary = p.get_meta("cue_done", {})
+	return int(done.get(key, 0)) >= 2
+
+
+## The blueprint board p should go to (the nearest one still to do), or null; and the type of the
+## board p is standing in front of ("" if none).
+func _crew_board(p) -> Array:
+	var pos: Vector3 = p.global_position
+	var best = null
+	var best_d := INF
+	var at := ""
+	for m in modules:
+		if m.done or not manual.boards.has(m.type):
+			continue
+		var root: Node3D = manual.boards[m.type].root
+		var to: Vector3 = pos - root.global_position
+		to.y = 0.0
+		var ahead := to.dot(root.global_basis.z)
+		if ahead > 0.3 and ahead < 6.5 and absf(to.dot(root.global_basis.x)) < 2.5:
+			at = m.type
+		var d := to.length()
+		if d < best_d:
+			best_d = d
+			best = root
+	return [best, at]
+
+
+## Is a world point inside this crew member's view (with a margin)?
+func _in_view(p, pos: Vector3) -> bool:
+	var cam: Camera3D = p.camera
+	if cam == null or cam.is_position_behind(pos):
+		return false
+	var vs: Vector2 = cam.get_viewport().get_visible_rect().size
+	var sp := cam.unproject_position(pos)
+	var mg := vs * 0.12
+	return sp.x > mg.x and sp.y > mg.y and sp.x < vs.x - mg.x and sp.y < vs.y - mg.y
+
+
+## [key, dir] for p's picture cue: "plug", "turn", "walk", "tell", "lever" or "".
+func _crew_cue_now(p) -> Array:
+	var edge = p.get_meta("edge") if p.has_meta("edge") else null
+	if edge != null:
+		edge.on = false
+	if not p.active or game_over or get_tree().paused or (net.mode == "client" and not synced):
+		return ["", ""]
+	if p.pad_lost_t >= 0.0:
+		return ["plug", ""]
+	if phase == "ready":
+		return ["", ""] if cue_learned(p, "lever") else ["lever", ""]
+	if phase != "work" and phase != "intro":
+		return ["", ""]
+	var ba := _crew_board(p)
+	var at: String = ba[1]
+	if at != "":
+		return ["", ""] if cue_learned(p, "tell") else ["tell", ""]
+	if ba[0] == null:
+		return ["", ""]
+	var root: Node3D = ba[0]
+	var aim: Vector3 = root.global_position + Vector3(0, 0.6, 0)
+	if not _in_view(p, aim):
+		if cue_learned(p, "turn"):
+			return ["", ""]
+		if edge != null:
+			edge.on = true
+			edge.target = aim
+		var loc: Vector3 = p.camera.global_basis.inverse() * (aim - p.camera.global_position)
+		return ["turn", "right" if loc.x > 0.0 else "left"]
+	return ["", ""] if cue_learned(p, "walk") else ["walk", "up"]
+
+
+## p's own button for a move / turn cue: the stick, the mouse, W / Q E, or an arrow key.
+func _cue_button(p, k: String, dir: String, sc: float) -> Control:
+	if p.joy >= 0 or p.key_set == PlayerScript.NO_KEYS:
+		return UiKit.glyph("STICK", sc)
+	if p.key_set == 1:
+		return CueScript.arrow_key(dir, sc)
+	if k == "turn":
+		if p.mouse_look:
+			return UiKit.glyph("MOUSE", sc)
+		return UiKit.glyph("E" if dir == "right" else "Q", sc)
+	return UiKit.glyph("W", sc)
+
+
+## Every frame (both machines): the picture cue low in each local crew view, and what has been done.
+func _update_crew_cues(delta: float) -> void:
+	for p in players:
+		if p.index == 0 or not p.has_meta("cue"):
+			continue
+		var cue = p.get_meta("cue")
+		var was: String = p.get_meta("cue_key", "")
+		var was_at: String = p.get_meta("at_board", "")
+		var ba := _crew_board(p) if p.active and (phase == "work" or phase == "intro" or phase == "ready") else [null, ""]
+		var at: String = ba[1]
+		if at != "" and was_at == "":
+			cue_did(p, "walk")  # walked up to a board
+		if was_at != "" and module(was_at).get("done", false):
+			cue_did(p, "tell")  # the pilot did what this board showed while p stood there
+			at = ""
+		p.set_meta("at_board", at)
+		var lp: String = p.get_meta("cue_phase", "")
+		if lp == "ready" and phase == "launch" and p.active:
+			cue_did(p, "lever")
+		p.set_meta("cue_phase", phase)
+		var kd := _crew_cue_now(p)
+		var k: String = kd[0]
+		var dir: String = kd[1]
+		if was == "turn" and k != "turn" and k != "plug" and k != "":
+			cue_did(p, "turn")  # turned until the board came into view
+		p.set_meta("cue_key", k)
+		cue.set_cue(k, "%s|%d|%d|%s" % [dir, int(p.joy >= 0), p.key_set, p.mouse_look], func(sc: float) -> Array:
+			match k:
+				"plug":
+					return [UiKit.icon("bolt", Color(1.0, 0.8, 0.3), 64.0 * sc)]
+				"turn":
+					return [_cue_button(p, k, dir, sc), UiKit.icon("arrow_" + dir, Color(1.0, 0.9, 0.45), 48.0 * sc)]
+				"walk":
+					return [_cue_button(p, k, dir, sc), UiKit.icon("arrow_up", Color(1.0, 0.9, 0.45), 44.0 * sc),
+						CueScript.board_icon(46.0 * sc)]
+				"tell":
+					return [CueScript.talk_icon(50.0 * sc), UiKit.icon("person", PLAYER_COLORS[0], 54.0 * sc)]
+				"lever":
+					return [CueScript.talk_icon(50.0 * sc), CueScript.lever_icon(58.0 * sc)]
+			return [], delta)
+
+
+## A pulsing A + plus + person in the corner while a spare controller could join (no words).
+func _update_join_cue() -> void:
+	if net.mode == "host":
+		return
+	var spare := false
+	if not game_over and _next_free_index() >= 0:
+		for dev in Input.get_connected_joypads():
+			if not joy_owner.has(dev):
+				spare = true
+	if join_cue == null:
+		join_cue = HBoxContainer.new()
+		join_cue.name = "JoinCue"
+		join_cue.alignment = BoxContainer.ALIGNMENT_CENTER
+		join_cue.add_theme_constant_override("separation", 12)
+		join_cue.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		join_cue.add_child(UiKit.glyph("A", 1.4))
+		join_cue.add_child(UiKit.icon("plus", Color(1.0, 0.9, 0.6), 34.0))
+		join_cue.add_child(UiKit.icon("person", Color(1.0, 0.9, 0.6), 58.0))
+		for c in join_cue.get_children():
+			(c as Control).size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		center_label.get_parent().add_child(join_cue)
+		join_cue.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+		join_cue.offset_left = -200
+		join_cue.offset_top = -74
+		join_cue.offset_right = -16
+		join_cue.offset_bottom = -10
+		var tw := join_cue.create_tween().set_loops()
+		tw.tween_property(join_cue, "modulate:a", 0.5, 0.7)
+		tw.tween_property(join_cue, "modulate:a", 1.0, 0.7)
+	join_cue.visible = spare
+
+
+## The pilot's glowing arrow: bobs over the desk control `key` ("" = hidden), pointing down at it.
+## Only the pilot sees it (PANEL_LAYER).
+func _update_pilot_arrow(key: String) -> void:
+	if key == "" or panel == null:
+		if pilot_arrow != null:
+			pilot_arrow.visible = false
+		return
+	if pilot_arrow == null:
+		pilot_arrow = MeshInstance3D.new()  # the head (a cone, tip down) with a shaft above it
+		pilot_arrow.name = "PilotArrow"
+		var mat := make_material(Color(1.0, 0.75, 0.2), 2.2)
+		pilot_arrow.mesh = cyl_mesh(0.05, 0.0, 0.08, 12)
+		pilot_arrow.material_override = mat
+		pilot_arrow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var shaft := MeshInstance3D.new()
+		shaft.mesh = cyl_mesh(0.018, 0.018, 0.08, 8)
+		shaft.material_override = mat
+		shaft.position.y = 0.08
+		shaft.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		pilot_arrow.add_child(shaft)
+		add_child(pilot_arrow)
+		set_layers(pilot_arrow, PANEL_LAYER)
+	var bob := absf(sin(status_t * 4.0))
+	pilot_arrow.visible = true
+	pilot_arrow.global_position = panel.control_world(key, 0.02) + Vector3.UP * (0.09 + 0.04 * bob)
+	pilot_arrow.global_basis = Basis(Vector3.UP, status_t * 2.0)
 
 
 # --- Players and views -------------------------------------------------------
@@ -1579,6 +1939,15 @@ func _ensure_view(p) -> void:
 		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		p.hud_label = l
+		if SIMPLE_MODE:  # no hint line: a glowing edge arrow and a picture cue instead
+			l.visible = false
+			var edge := CueScript.EdgeArrow.new()
+			edge.cam = cam
+			hud_layer.add_child(edge)
+			p.set_meta("edge", edge)
+			var cue := CueScript.new()
+			hud_layer.add_child(cue)
+			p.set_meta("cue", cue)
 
 
 ## TV grid: 1 full, 2 side by side, 3-4 as 2x2, 5-6 as 3x2; smaller views render at lower resolution.
@@ -1711,6 +2080,8 @@ func _on_joy_changed(device: int, connected: bool) -> void:
 			return  # unassigned: press A to join
 		pick.joy = device
 		joy_owner[device] = pick.index
+		if SIMPLE_MODE and pick.pad_lost_t >= 0.0 and pick.active:
+			local_sound("pop", -8.0, 1.3)  # no words: the bolt goes and a happy blip
 		pick.pad_lost_t = -1.0
 		if not pick.active and pick.has_meta("left_by_pad"):
 			_request_join(pick)
@@ -1727,7 +2098,10 @@ func _on_joy_changed(device: int, connected: bool) -> void:
 		p.set_meta("last_joy", device)
 		if idx >= 2 and p.active and p.key_set == PlayerScript.NO_KEYS:
 			p.pad_lost_t = 0.0
-			_show_center("P%d: controller disconnected" % (idx + 1), 2.0, false)
+			if SIMPLE_MODE:
+				local_sound("boop", -8.0, 0.6)  # no sentence: a pulsing bolt in their view shows it
+			else:
+				_show_center("P%d: controller disconnected" % (idx + 1), 2.0, false)
 
 
 ## Called by the join listener for every input event: A on a controller nobody owns joins the crew.
@@ -1759,7 +2133,10 @@ func _next_free_index() -> int:
 func _join_slot(device: int):
 	var idx := _next_free_index()
 	if idx < 0:
-		_show_center("All %d crew spots are taken!" % (players.size() - 1), 1.5, false)
+		if SIMPLE_MODE:
+			local_sound("boop", -10.0, 0.7)  # no sentence: a soft "no room" boop
+		else:
+			_show_center("All %d crew spots are taken!" % (players.size() - 1), 1.5, false)
 		return null
 	var p = players[idx]
 	if device >= 0:
@@ -1788,7 +2165,7 @@ func _activate(p) -> void:
 	p.net_started = false
 	if phase == "work" or phase == "ready" or phase == "intro":
 		time_left += 10.0  # a new crew member gets a little welcome time
-	_show_center("PLAYER %d JOINED THE CREW!" % (p.index + 1), 1.5)
+	_show_center(("PLAYER %d!" if SIMPLE_MODE else "PLAYER %d JOINED THE CREW!") % (p.index + 1), 1.5)
 	sound("pop", -2.0, 1.4)
 	on_player_activity_changed(p)
 
@@ -1802,7 +2179,7 @@ func _leave(p) -> void:
 	elif p.active:
 		p.set_active(false)
 		on_player_activity_changed(p)
-		_show_center("PLAYER %d LEFT" % (p.index + 1), 1.5)
+		_left_note(p.index)
 	_save_party()
 
 
@@ -1888,7 +2265,17 @@ func _update_lost_pads(delta: float) -> void:
 				_leave(p)
 
 
+## Someone left the crew: a soft puff in simple mode (no sentence), "PLAYER 3 LEFT" otherwise.
+func _left_note(index: int) -> void:
+	if SIMPLE_MODE:
+		sound("pop", -10.0, 0.6)
+	else:
+		_show_center("PLAYER %d LEFT" % (index + 1), 1.5)
+
+
 func on_player_activity_changed(p) -> void:
+	if not p.active:
+		p.remove_meta("cue_done")  # whoever takes this seat next sees the picture cues again
 	if p.active and is_local(p):
 		_ensure_view(p)
 	if p.active:
@@ -1900,14 +2287,15 @@ func on_player_activity_changed(p) -> void:
 # --- Networked co-op (see docs/GAME_DEV_GUIDE.md) ----------------------------
 
 func on_client_joined() -> void:
-	_show_center("THE TV CREW JOINED!", 1.5)
+	_show_center("HELLO!" if SIMPLE_MODE else "THE TV CREW JOINED!", 1.5)
 
 
 func on_client_left() -> void:
 	for i in range(2, players.size()):
 		if players[i].active:
 			players[i].set_active(false)
-	_show_center("The TV crew left - waiting for them to come back…", 0.0)
+	if not SIMPLE_MODE:  # simple mode just carries on solo
+		_show_center("The TV crew left - waiting for them to come back…", 0.0)
 
 
 func on_p2_action(action: String, args: Array, index: int = 1) -> void:
@@ -1927,7 +2315,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 		"leave":
 			if p.active:
 				p.set_active(false)
-				_show_center("PLAYER %d LEFT" % (index + 1), 1.5)
+				_left_note(index)
 		"restart":
 			if game_over:
 				get_tree().reload_current_scene()
@@ -1938,7 +2326,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 
 
 func _set_pause_banner(paused: bool, who: String) -> void:
-	_show_center("PAUSED\n" + who if paused else "", 0.0, false)
+	_show_center(("PAUSED" if SIMPLE_MODE else "PAUSED\n" + who) if paused else "", 0.0, false)
 	if vr_center != null and paused:
 		VrText.snap(vr_center)
 	_update_vr_center()
@@ -2020,6 +2408,9 @@ func apply_event(kind: String, args: Array) -> void:
 			star_burst(args[0], args[1])
 		"logged":
 			space.add_log(args[0], args[1], args[2], args[3])
+		"prop":
+			if props != null:
+				props.play(args[0])
 		"remote_pause":
 			get_tree().paused = args[0]
 			_set_pause_banner(args[0], "The pilot paused the game")
@@ -2060,6 +2451,8 @@ func _build_hud() -> void:
 	help_label.offset_top = -64
 	help_label.offset_bottom = -12
 	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	if SIMPLE_MODE:
+		return
 	help_label.text = "Crew: left stick / WASD / arrows walk · right stick / mouse / Q E look · hold A / X / Space / Enter to fix pipes · walk into cans, pots, bolts and cats · more crew: press A on another controller\n" \
 		+ "Pilot (split screen): mouse or controller pointer · click buttons · hold and drag plugs, the dial, the crank and the launch lever"
 
@@ -2078,6 +2471,10 @@ func _show_center(text: String, duration: float, broadcast: bool = true) -> void
 
 
 func _update_hud() -> void:
+	if SIMPLE_MODE:
+		info_label.text = ""
+		list_label.text = ""
+		return
 	if help_label.modulate.a > 0.0 and launched >= 2:
 		help_label.modulate.a = maxf(0.0, help_label.modulate.a - get_process_delta_time() * 0.5)
 	if net.mode == "client" and not synced:
@@ -2126,7 +2523,7 @@ func _update_vr_center() -> void:
 		vr_center = Label3D.new()
 		vr_center.font_size = 46
 		vr_center.outline_size = 26
-		vr_center.no_depth_test = true
+		vr_center.no_depth_test = false
 		vr_center.render_priority = 10
 		vr_center.outline_render_priority = 9
 		vr_center.width = 1000.0
@@ -2135,7 +2532,7 @@ func _update_vr_center() -> void:
 		vr_center.modulate = Color(1.0, 0.95, 0.85)
 		add_child(vr_center)
 		set_layers(vr_center, PANEL_LAYER)
-	vr_center.text = center_label.text
+	vr_center.text = preload("res://core/vr_text.gd").short(center_label.text)  # no walls of text in VR
 	vr_center.modulate.a = center_label.modulate.a
 	vr_center.outline_modulate = Color(0, 0, 0, center_label.modulate.a)
 	VrText.follow(vr_center, players[0].xr_camera, self, 0.3, 1.8)

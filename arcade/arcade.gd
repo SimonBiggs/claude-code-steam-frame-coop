@@ -40,6 +40,46 @@ const GAMES := [
 		"blurb": "Relaxing: VR casts and reels from the jetty; TV rowers herd fish and net treasure"},
 	{"id": "kart_race", "cat": "sports", "name": "KART RACE", "scene": "res://games/kart_race/main.tscn",
 		"blurb": "VR turns a real steering wheel; TV racers drive in split screen, with items and ramps"},
+	{"id": "tiny_town_tycoon", "cat": "cosy", "name": "TINY TOWN TYCOON", "scene": "res://games/tiny_town_tycoon/main.tscn",
+		"blurb": "Build a cosy toy town together: the mayor places the buildings, the drivers bring it to life"},
+	{"id": "party_board", "cat": "party", "name": "PARTY BOARD", "scene": "res://games/party_board/main.tscn",
+		"blurb": "A Mario-Party-style board game on a diorama island: roll, hop, shop and duel for STARS, with a minigame after every round"},
+	{"id": "mech_titans", "cat": "action", "name": "MECH TITANS", "scene": "res://games/mech_titans/main.tscn",
+		"blurb": "Giant robot vs cute kaiju: VR pilot punches and beams from the cockpit, TV jets, trucks, drones and tanks support"},
+	{"id": "roller_coaster", "cat": "cosy", "name": "COASTER CREW", "scene": "res://games/roller_coaster/main.tscn",
+		"blurb": "VR builds a roller coaster with their hands on a tabletop park; TV players ride it, hands up!"},
+	{"id": "mini_golf_party", "cat": "sports", "name": "MINI GOLF PARTY", "scene": "res://games/mini_golf_party/main.tscn",
+		"blurb": "Life-size mini golf in a sunny garden: swing a real putter in VR or aim and hold A on the TV, and everyone putts at once!"},
+	{"id": "obstacle_rush", "cat": "party", "name": "OBSTACLE RUSH", "scene": "res://games/obstacle_rush/main.tscn",
+		"blurb": "Race jelly-bean runners over a bouncy toy course while the VR giant lobs beach balls!"},
+	{"id": "starship_crew", "cat": "action", "name": "STARSHIP CREW", "scene": "res://games/starship_crew/main.tscn",
+		"blurb": "Fly the little starship through glowing rings while the crew zaps space rocks and silly aliens all the way home!"},
+	{"id": "dungeon_delve", "cat": "action", "name": "DUNGEON DELVE", "scene": "res://games/dungeon_delve/main.tscn",
+		"blurb": "Bop cute slimes and bats room by room: the knight swings a big toy sword in VR, the heroes bonk on the TV, and the treasure waits at the end!"},
+	{"id": "crystal_saga", "cat": "action", "name": "CRYSTAL SAGA", "scene": "res://games/crystal_saga/main.tscn",
+		"blurb": "Be the hero in VR! Swing your sword, raise your hand for magic, and restore the Crystal of Light with your party."},
+	{"id": "balloon_pop", "multi": true, "cat": "party", "name": "BALLOON POP", "scene": "res://games/balloon_pop/main.tscn",
+		"blurb": "Pop the balloons floating up all around you: VR punches and squeezes, TV players run and jump!"},
+	{"id": "sheep_round_up", "multi": true, "cat": "cosy", "name": "SHEEP ROUND-UP", "scene": "res://games/sheep_round_up/main.tscn",
+		"blurb": "Sheepdogs herd, the giant farmer scoops - get every fluffy sheep into the pen!"},
+	{"id": "fruit_catch", "multi": true, "cat": "party", "name": "FRUIT CATCH", "scene": "res://games/fruit_catch/main.tscn",
+		"blurb": "Shake the giant tree and catch the falling fruit in your baskets!"},
+	{"id": "whack_a_mole", "multi": true, "cat": "party", "name": "WHACK-A-MOLE", "scene": "res://games/whack_a_mole/main.tscn",
+		"blurb": "Silly moles pop out of a big table: bonk them with a giant mallet or a tiny hammer!"},
+	{"id": "tower_stack", "cat": "party", "name": "TOWER STACK", "scene": "res://games/tower_stack/main.tscn",
+		"blurb": "Build the tallest tower together: helpers push jelly blocks to the bouncy pad, the giant stacks them high."},
+	{"id": "elemental_bender", "cat": "action", "name": "ELEMENTAL BENDER", "scene": "res://games/elemental_bender/main.tscn",
+		"blurb": "Bend air, water, earth and fire to defend the island temple from the Shadow Raiders!"},
+	{"id": "treasure_dig", "multi": true, "cat": "party", "name": "TREASURE DIG", "scene": "res://games/treasure_dig/main.tscn",
+		"blurb": "Dig up treasure on a sandy island while the VR giant's magic telescope shows where it hides!"},
+	{"id": "paper_planes", "multi": true, "cat": "party", "name": "PAPER PLANES", "scene": "res://games/paper_planes/main.tscn",
+		"blurb": "Throw and fly paper planes through floating hoops together. Rainbow hoops are worth 3!"},
+	{"id": "bubble_bath", "multi": true, "cat": "party", "name": "BUBBLE BATH", "scene": "res://games/bubble_bath/main.tscn",
+		"blurb": "Steer tiny boats to round up rubber ducks and sail them down the plug-hole, while the giant splashes up waves."},
+	{"id": "snowman_maker", "multi": true, "cat": "cosy", "name": "SNOWMAN MAKER", "scene": "res://games/snowman_maker/main.tscn",
+		"blurb": "Roll giant snowballs, stack them up, and give every snowman a carrot nose and a hat!"},
+	{"id": "dodge_ball", "multi": true, "cat": "party", "name": "SOFT DODGEBALL", "scene": "res://games/dodge_ball/main.tscn",
+		"blurb": "A friendly VR giant throws squishy balls; dodge them and bop the target on his belly!"},
 ]
 ## Tabs on the TV (LB/RB) and in VR (stick left/right). Empty categories are hidden.
 const CATEGORIES := [
@@ -48,7 +88,22 @@ const CATEGORIES := [
 	{"id": "party", "name": "PARTY", "color": Color(1.0, 0.8, 0.3)},
 	{"id": "sports", "name": "SPORTS & RACING", "color": Color(0.35, 0.9, 0.5)},
 	{"id": "cosy", "name": "COSY & PUZZLE", "color": Color(0.45, 0.8, 1.0)},
+	# A filter, not a home category: every game one person can play (SOLO below), made-for-solo ones first.
+	{"id": "solo", "name": "1 PLAYER", "color": Color(1.0, 0.6, 0.85)},
 ]
+## Playable by ONE player (Simon, 2026-10-24: a "supports single player" tier and filter). 2 = made for solo (a solo
+## mode or CPU partners; a ★ badge on the card), 1 = works alone but best with friends, missing = needs people
+## (Hide and Seek, Paint and Guess). From dev.soloCheck() (every game played offscreen with one pad) + each game's
+## own solo features. One table so it lives in one place.
+const SOLO := {
+	"bee_garden": 2, "block_builders": 2, "dodge_ball": 2, "dragon_rider": 2, "duo_arena": 2, "elemental_bender": 2,
+	"ghost_lantern": 2, "giants_table": 2, "kart_race": 2, "kitchen_rush": 2, "marble_maze": 2, "obstacle_rush": 2,
+	"party_board": 2, "penalty_shootout": 2, "rocket_workshop": 2, "roller_coaster": 2, "snowball_blitz": 2,
+	"snowman_maker": 2, "starship_crew": 2, "treasure_dig": 2,
+	"balloon_pop": 1, "bubble_bath": 1, "cannon_cove": 1, "crystal_saga": 1, "dungeon_delve": 1, "fishing_lake": 1,
+	"fruit_catch": 1, "mech_titans": 1, "mini_golf_party": 1, "paper_planes": 1, "rhythm_band": 1,
+	"sheep_round_up": 1, "tiny_town_tycoon": 1, "tower_stack": 1, "whack_a_mole": 1,
+}
 const VrText := preload("res://core/vr_text.gd")
 const DEFAULT_PORT := 7777
 const JOIN_TIMEOUT_MS := 5000
@@ -72,16 +127,50 @@ var hand_r: XRController3D
 var stick_ready := true
 var trigger_was := true  # a trigger still held from leaving a game must be released first
 var starting := false
+# Many machines (2026-10-24): any number of TV machines / Decks / Frames share one lobby. DUO_JOIN=auto finds
+# a lobby (or game) from its LAN beacon; with nobody hosting, this machine hosts a flat lobby (no VR) and the
+# others find it. The lobby host picks each game's host when it starts (a Frame if there is one, else itself)
+# and tells everyone whom to join, so TV + Decks, or just two Decks, play together without the Frame.
+const MAX_LOBBY_MACHINES := 32  # ENet allows 4095; games are limited by seats, not machines
+const FIND_SECONDS := 2.2
+var machines := {}  # lobby host: peer -> {"kind": String, "ip": String}
+var my_kind: String = preload("res://core/machine.gd").kind()
+var host_has_vr := false
+var lobby_id := randi()  # flat hosts that start together: the higher id gives way
+var _finding := 0.0  # seconds left looking for a lobby before hosting one
 
 
 func _ready() -> void:
+	get_tree().paused = false  # the lobby must never start paused (a game can leave the tree paused)
 	XRServer.world_scale = 1.0  # a game (Giant's Table) may have left the world scaled up
 	var wanted := OS.get_environment("ARCADE_GAME") if OS.has_environment("ARCADE_GAME") else ""
+	# ARCADE_GAME only picks the FIRST game: coming back to the arcade must show the lobby, not
+	# start that game again.
+	if get_tree().root.has_meta("arcade_auto_started"):
+		wanted = ""
+	elif wanted != "":
+		get_tree().root.set_meta("arcade_auto_started", true)
 	if wanted != "" or GAMES.size() == 1:
 		_launch(_index_of(wanted))
 		return
 	var xr := XRServer.find_interface("OpenXR")
-	if (xr != null and xr.is_initialized()) or OS.has_environment("DUO_HOST"):
+	if xr != null and xr.is_initialized():
+		my_kind = "frame"
+	if not OS.has_environment("DUO_JOIN_ORIGINAL"):
+		# How this machine networks comes from core/machine.gd: by default "auto" (play locally at once, keep looking
+		# for other devices). A VR host still hosts (below); DUO_JOIN / DUO_SOLO override.
+		var target := preload("res://core/machine.gd").join_target()
+		if my_kind == "frame" or OS.has_environment("DUO_HOST"):
+			target = OS.get_environment("DUO_JOIN") if OS.has_environment("DUO_JOIN") else ""
+		OS.set_environment("DUO_JOIN_ORIGINAL", target)
+		OS.set_environment("DUO_HOST_ORIGINAL", "1" if OS.has_environment("DUO_HOST") else "")
+	# Each lobby visit starts from how the machine was launched (a game may have changed these).
+	_restore_env()
+	Engine.set_meta("duo_full", "-")
+	preload("res://core/ui_kit.gd").ensure_pad_ui_actions()  # pad A/B in the lobby's focus-driven menu  # a game that was full last time may have room now
+	if OS.get_environment("DUO_JOIN") == "auto":
+		_finding = FIND_SECONDS  # _process listens for a lobby, then hosts one if nobody answers
+	elif (xr != null and xr.is_initialized()) or OS.has_environment("DUO_HOST"):
 		_host_lobby(xr != null and xr.is_initialized())
 	elif OS.has_environment("DUO_JOIN"):
 		_join_lobby(OS.get_environment("DUO_JOIN"))
@@ -97,19 +186,70 @@ func _index_of(id: String) -> int:
 
 # --- Lobby networking ----------------------------------------------------------
 
+func _restore_env() -> void:
+	for k in ["DUO_JOIN", "DUO_HOST"]:
+		var v := OS.get_environment(k + "_ORIGINAL")
+		if v == "":
+			OS.unset_environment(k)
+		else:
+			OS.set_environment(k, v)
+	OS.unset_environment("DUO_FLAT_HOST")
+
+
 func _host_lobby(with_vr: bool) -> void:
 	var peer := ENetMultiplayerPeer.new()
-	if peer.create_server(port, 1) != OK:
+	if peer.create_server(port, MAX_LOBBY_MACHINES) != OK:
 		print("Arcade: lobby port busy, picking locally")
 		return
 	mode = "host"
+	host_has_vr = with_vr
 	multiplayer.multiplayer_peer = peer
-	multiplayer.peer_connected.connect(func(_id: int) -> void:
-		_set_status("The TV is connected: pick a game!")
+	multiplayer.peer_connected.connect(func(id: int) -> void:
+		var ip := ""
+		if multiplayer.multiplayer_peer is ENetMultiplayerPeer:
+			ip = (multiplayer.multiplayer_peer as ENetMultiplayerPeer).get_peer(id).get_remote_address()
+		machines[id] = {"kind": "tv", "ip": ip}
+		_lobby_status()
 		_sync_selection.rpc(selected))
+	multiplayer.peer_disconnected.connect(func(id: int) -> void:
+		machines.erase(id)
+		_lobby_status())
 	if with_vr:
 		_build_vr_view()
 	print("Arcade: lobby hosting on %d" % port)
+
+
+func _lobby_status() -> void:
+	var kinds := {}
+	for m in machines.values():
+		kinds[m.kind] = int(kinds.get(m.kind, 0)) + 1
+	if machines.is_empty():
+		_set_status("Pick a game!")
+		return
+	var parts: Array[String] = []
+	for k in kinds:
+		parts.append("%d %s%s" % [kinds[k], k.to_upper() if k == "tv" else k.capitalize(), "s" if kinds[k] > 1 else ""])
+	_set_status("%s connected: pick a game!" % ", ".join(parts))
+
+
+## A joining machine says what it is (tv, deck, frame) so the lobby can pick game hosts.
+@rpc("any_peer", "call_remote", "reliable")
+func _hello(kind: String) -> void:
+	var id := multiplayer.get_remote_sender_id()
+	if mode == "host" and machines.has(id):
+		machines[id].kind = kind
+		_lobby_status()
+
+
+## Lobby host: who hosts this game? A Frame (VR) if there is one, else this machine as a flat host.
+## Returns "" for this machine, or the address of the machine that should host.
+func _pick_game_host() -> String:
+	if host_has_vr:
+		return ""
+	for id in machines:
+		if machines[id].kind == "frame" and machines[id].ip != "":
+			return machines[id].ip
+	return ""
 
 
 func _join_lobby(address: String) -> void:
@@ -123,7 +263,8 @@ func _join_lobby(address: String) -> void:
 		return  # already set up by an earlier attempt: just retry with the new peer
 	multiplayer.connected_to_server.connect(func() -> void:
 		join_deadline = 0
-		_set_status("Connected to the VR player: pick a game!")
+		_hello.rpc_id(1, my_kind)
+		_set_status("Connected: pick a game!")
 		if OS.has_environment("ARCADE_AUTOPICK"):  # headless tests
 			_start_everywhere(int(OS.get_environment("ARCADE_AUTOPICK"))))
 	multiplayer.connection_failed.connect(_lobby_offline)
@@ -137,6 +278,8 @@ func _lobby_offline() -> void:
 	join_deadline = 0
 	_close_peer()
 	mode = "local"
+	if OS.get_environment("DUO_JOIN_ORIGINAL") == "auto":
+		_finding = FIND_SECONDS  # look again, then host a lobby ourselves
 	_set_status("No VR player found yet (still looking…). You can also play on the TV")
 
 
@@ -158,8 +301,37 @@ func _request_start(index: int) -> void:
 
 
 @rpc("authority", "call_local", "reliable")
-func _start(index: int) -> void:
+func _start(index: int, game_host: String = "", lobby_ip: String = "") -> void:
+	# The lobby host chose who hosts this game: "" = the lobby host itself (reach it at the lobby's address).
+	var me_hosting := (mode == "host" and game_host == "") or (game_host != "" and game_host == lobby_ip)
+	var flat := game_host == "" and not host_has_vr and mode == "host" or (mode == "client" and game_host == "" and not bool(get_meta("lobby_vr", false)))
+	if flat and not bool(GAMES[clampi(index, 0, GAMES.size() - 1)].get("multi", false)):
+		# Not converted to many machines / flat hosts yet: every machine plays this game on its own.
+		OS.unset_environment("DUO_HOST")
+		OS.unset_environment("DUO_JOIN")
+		_launch(index)
+		return
+	if mode == "host" and game_host == "":
+		if not host_has_vr:
+			OS.set_environment("DUO_HOST", "1")
+			OS.set_environment("DUO_FLAT_HOST", "1")
+		OS.unset_environment("DUO_JOIN")
+	elif me_hosting:
+		OS.set_environment("DUO_HOST", "1")
+		OS.unset_environment("DUO_JOIN")
+	elif mode == "client":
+		OS.unset_environment("DUO_HOST")
+		OS.set_environment("DUO_JOIN", game_host if game_host != "" else _lobby_address())
 	_launch(index)
+
+
+## Client: the lobby host's address (what we connected to).
+func _lobby_address() -> String:
+	if multiplayer.multiplayer_peer is ENetMultiplayerPeer:
+		var p := (multiplayer.multiplayer_peer as ENetMultiplayerPeer).get_peer(1)
+		if p:
+			return p.get_remote_address()
+	return OS.get_environment("DUO_JOIN")
 
 
 @rpc("any_peer", "call_remote", "unreliable_ordered")
@@ -169,7 +341,12 @@ func _sync_selection(index: int) -> void:
 
 func _start_everywhere(index: int) -> void:
 	if mode == "host":
-		_start.rpc(index)
+		var game_host := _pick_game_host()
+		# Each client needs the chosen host's address; a machine that is itself the chosen host sees its own
+		# address there (lobby_ip = its address as the lobby sees it).
+		for id in machines:
+			_start.rpc_id(id, index, game_host, machines[id].ip)
+		_start(index, game_host, "")
 	elif mode == "client":
 		_request_start.rpc_id(1, index)
 	else:
@@ -188,12 +365,22 @@ func _launch(index: int) -> void:
 	var delay := 0.4 if mode == "host" else (0.9 if mode == "client" else 0.1)
 	if mode == "client":
 		_close_peer()
+	if has_meta("lobby_udp") and get_meta("lobby_udp") != null:
+		(get_meta("lobby_udp") as PacketPeerUDP).close()
+		remove_meta("lobby_udp")
 	get_tree().create_timer(delay).timeout.connect(func() -> void:
 		_close_peer()
 		get_tree().change_scene_to_file(game.scene))
 
 
 func _process(_delta: float) -> void:
+	if not has_meta("pad_ui"):  # here, not only in _ready: a hot-reloaded arcade gets it too
+		set_meta("pad_ui", true)
+		preload("res://core/ui_kit.gd").ensure_pad_ui_actions()
+	_lobby_net(_delta)
+	_ensure_shared_nodes()
+	_ensure_fullscreen()
+	_hide_tv_cursor()
 	if not has_meta("menu_v4") and (not buttons.is_empty() or grid == null) and status != null:
 		set_meta("menu_v4", true)  # hot reload: replace an older TV menu with the category tabs
 		for c in get_children():
@@ -207,14 +394,14 @@ func _process(_delta: float) -> void:
 	if mode != "host" and not starting and OS.has_environment("DUO_JOIN"):
 		_listen_for_game()
 	# TV: keep looking for the VR player's lobby (they may be mid-game or restarting).
-	if mode == "local" and not starting and OS.has_environment("DUO_JOIN") and not OS.has_environment("ARCADE_GAME"):
+	if mode == "local" and not starting and OS.has_environment("DUO_JOIN") and OS.get_environment("DUO_JOIN") != "auto" and not OS.has_environment("ARCADE_GAME"):
 		if Time.get_ticks_msec() > int(get_meta("retry_at", 0)):
 			set_meta("retry_at", Time.get_ticks_msec() + 4000)
 			port = (int(OS.get_environment("DUO_PORT")) if OS.has_environment("DUO_PORT") else DEFAULT_PORT) + 1
 			_join_lobby(OS.get_environment("DUO_JOIN"))
 	if vr_list:
 		_vr_input()
-		VrText.follow(vr_list, vr_cam, self, -0.1, 2.2)  # always findable, wherever you look
+		VrText.follow(vr_list, vr_cam, self, 0.25, 2.4)  # always findable; raised so a seated player's list stays above the floor
 		if not has_meta("vr_floor"):
 			set_meta("vr_floor", true)
 			_build_vr_floor()
@@ -234,13 +421,14 @@ func _build_tv_menu() -> void:
 	glow.color = Color(0.12, 0.08, 0.3)
 	layer.add_child(glow)
 	glow.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
-	glow.custom_minimum_size = Vector2(0, 150)
+	glow.custom_minimum_size = Vector2(0, 172)  # covers the title and the status line under it
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 14)
 	layer.add_child(box)
-	box.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
-	box.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	box.position.y = 28
+	# Fills the screen (28 px top, 14 px bottom) so the card area takes exactly the height that is left, on any screen.
+	box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	box.offset_top = 28
+	box.offset_bottom = -14
 	var title := Label.new()
 	title.text = "LIVING ROOM ARCADE"
 	title.add_theme_font_size_override("font_size", 60)
@@ -260,18 +448,30 @@ func _build_tv_menu() -> void:
 	tab_bar.add_theme_constant_override("separation", 10)
 	box.add_child(tab_bar)
 	grid = GridContainer.new()
-	grid.columns = 3
+	# As many 600 px columns as the screen really fits (a 16:9 TV: 3; a 16:10 Steam Deck: 2), instead of a fixed 3
+	# that ran off the Deck's screen.
+	var vis_w := get_viewport().get_visible_rect().size.x
+	grid.columns = clampi(int((vis_w - 40.0) / 618.0), 1, 3)
 	grid.add_theme_constant_override("h_separation", 18)
 	grid.add_theme_constant_override("v_separation", 16)
 	var center := CenterContainer.new()
-	center.custom_minimum_size = Vector2(1860, 0)
+	center.custom_minimum_size = Vector2(minf(1860.0, vis_w - 20.0), 0)
 	center.add_child(grid)
-	box.add_child(center)
+	# Any tab can hold more games than fit (the 1 PLAYER tab has 35): the cards scroll, following the highlight.
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.follow_focus = true
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	scroll.custom_minimum_size.x = center.custom_minimum_size.x
+	scroll.add_child(center)
+	box.add_child(scroll)
 	var hint := Label.new()
-	hint.text = "LB / RB (Q / E): change category   ·   D-pad / arrows: choose   ·   A / Enter: play   ·   more games: just ask Claude!"
+	hint.text = "LB / RB (Q / E): change category   ·   D-pad / arrows: choose   ·   A / Enter: play" + ("   ·   Start: quit" if _can_quit() else "") + "   ·   more games: just ask Claude!"
 	hint.add_theme_font_size_override("font_size", 20)
 	hint.add_theme_color_override("font_color", Color(0.6, 0.65, 0.8))
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART  # two lines on a narrow screen instead of running off the sides
 	box.add_child(hint)
 	cat = maxi(0, tabs().find(_cat_index_of(selected)))
 	_show_category(cat, false)
@@ -282,10 +482,16 @@ func tabs() -> Array[int]:
 	var out: Array[int] = []
 	for c in CATEGORIES.size():
 		for g in GAMES:
-			if str(g.get("cat", "action")) == str(CATEGORIES[c].id):
+			if _in_category(g, str(CATEGORIES[c].id)):
 				out.append(c)
 				break
 	return out
+
+
+func _in_category(g: Dictionary, cat_id: String) -> bool:
+	if cat_id == "solo":
+		return int(SOLO.get(str(g.get("id", "")), 0)) > 0
+	return str(g.get("cat", "action")) == cat_id
 
 
 func _cat_index_of(game_index: int) -> int:
@@ -302,9 +508,15 @@ func _games_in(tab: int) -> Array[int]:
 	if t.is_empty():
 		return out
 	var c: int = t[clampi(tab, 0, t.size() - 1)]
+	var id := str(CATEGORIES[c].id)
 	for i in GAMES.size():
-		if str(GAMES[i].get("cat", "action")) == str(CATEGORIES[c].id):
+		if _in_category(GAMES[i], id):
 			out.append(i)
+	if id == "solo":  # made-for-solo games first, otherwise the usual order
+		out.sort_custom(func(a: int, b: int) -> bool:
+			var sa := int(SOLO.get(str(GAMES[a].id), 0))
+			var sb := int(SOLO.get(str(GAMES[b].id), 0))
+			return sa > sb if sa != sb else a < b)
 	return out
 
 
@@ -345,10 +557,20 @@ func _show_category(tab: int, focus_first: bool) -> void:
 		(cards[target] as Button).grab_focus()
 
 
+## arcade/thumbs/<id>.jpg (screenshots taken offscreen by Claude's dev.thumbs()), loaded straight from the
+## file so they need no import step; null (a text-only card) when there isn't one.
+func _thumb(id: String) -> Texture2D:
+	var path := "res://arcade/thumbs/%s.jpg" % id
+	if not FileAccess.file_exists(path):
+		return null
+	var img := Image.load_from_file(path)
+	return ImageTexture.create_from_image(img) if img else null
+
+
 func _make_card(i: int, colour: Color) -> Button:
 	var g: Dictionary = GAMES[i]
 	var b := Button.new()
-	b.custom_minimum_size = Vector2(600, 150)
+	b.custom_minimum_size = Vector2(600, 136)  # five rows plus the help line fit on a 1080p TV
 	b.focus_mode = Control.FOCUS_ALL
 	var normal := StyleBoxFlat.new()
 	normal.bg_color = Color(0.08, 0.08, 0.15)
@@ -365,26 +587,46 @@ func _make_card(i: int, colour: Color) -> Button:
 	b.add_theme_stylebox_override("hover", focus)
 	b.add_theme_stylebox_override("pressed", focus)
 	b.add_theme_stylebox_override("focus", focus)
+	# A screenshot of the game on the left (kids pick by picture), name and blurb beside it.
+	var row := HBoxContainer.new()
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_theme_constant_override("separation", 16)
+	b.add_child(row)
+	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	row.offset_left = 12
+	row.offset_right = -18
+	row.offset_top = 12
+	row.offset_bottom = -12
+	var thumb := _thumb(str(g.id))
+	if thumb:
+		var pic := TextureRect.new()
+		pic.texture = thumb
+		pic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		pic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		pic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+		pic.custom_minimum_size = Vector2(198, 112)
+		pic.clip_contents = true
+		row.add_child(pic)
 	var v := VBoxContainer.new()
 	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	v.add_theme_constant_override("separation", 6)
-	b.add_child(v)
-	v.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	v.offset_left = 22
-	v.offset_right = -22
-	v.offset_top = 16
-	v.offset_bottom = -12
+	row.add_child(v)
 	var name_label := Label.new()
-	name_label.text = str(g.name)
+	name_label.text = str(g.name) + (" ★" if int(SOLO.get(str(g.id), 0)) == 2 else "")  # ★ = made for solo (1 PLAYER tab)
+	name_label.clip_text = true
+	name_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	name_label.add_theme_font_size_override("font_size", 30)
+	name_label.add_theme_font_size_override("font_size", 28)
 	name_label.add_theme_color_override("font_color", colour)
 	v.add_child(name_label)
 	var blurb := Label.new()
 	blurb.text = str(g.blurb)
 	blurb.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	blurb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	blurb.add_theme_font_size_override("font_size", 19)
+	blurb.add_theme_font_size_override("font_size", 17)
+	blurb.max_lines_visible = 3  # a long blurb ends in "…" instead of spilling out of the card
+	blurb.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	blurb.add_theme_color_override("font_color", Color(0.85, 0.87, 0.95))
 	v.add_child(blurb)
 	b.pressed.connect(_start_everywhere.bind(i))
@@ -392,8 +634,95 @@ func _make_card(i: int, colour: Color) -> Button:
 	return b
 
 
+## gdev hot reload hook: rebuild what _ready built once (the TV menu is sized to the screen at build time).
+func _on_hot_reload() -> void:
+	preload("res://core/ui_kit.gd").ensure_pad_ui_actions()
+	if quit_panel and is_instance_valid(quit_panel):
+		return
+	for c in get_children():
+		if c is CanvasLayer:
+			c.queue_free()
+	buttons.clear()
+	cards.clear()
+	_build_tv_menu.call_deferred()
+
+
+## Quitting the arcade: on handhelds (Steam Deck) and plain local launches; never on the TV, which stays on (kids).
+func _can_quit() -> bool:
+	return my_kind != "tv" or OS.has_environment("ARCADE_ALLOW_QUIT")
+
+
+var quit_panel: PanelContainer
+var quit_opener := -1  # the pad that opened the quit dialog (-2 keyboard); only it may answer (same rule as the pause menu)
+var quit_a_released := false
+
+func _toggle_quit_menu() -> void:
+	if quit_panel and is_instance_valid(quit_panel):
+		quit_panel.queue_free()
+		quit_panel = null
+		if cards.has(selected):
+			(cards[selected] as Button).grab_focus()
+		return
+	var layer := CanvasLayer.new()
+	layer.layer = 20
+	add_child(layer)
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.6)
+	layer.add_child(dim)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	quit_panel = PanelContainer.new()
+	var box := StyleBoxFlat.new()
+	box.bg_color = Color(0.1, 0.09, 0.2)
+	box.border_color = Color(0.45, 0.85, 1.0)
+	box.set_border_width_all(3)
+	box.set_corner_radius_all(18)
+	box.set_content_margin_all(28)
+	quit_panel.add_theme_stylebox_override("panel", box)
+	layer.add_child(quit_panel)
+	preload("res://core/ui_kit.gd").pin(quit_panel, Control.PRESET_CENTER)
+	quit_panel.tree_exited.connect(layer.queue_free)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 14)
+	quit_panel.add_child(v)
+	var t := Label.new()
+	t.text = "Quit the arcade?"
+	t.add_theme_font_size_override("font_size", 34)
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(t)
+	for item in [["Keep playing", _toggle_quit_menu], ["Quit", func() -> void: get_tree().quit()]]:
+		var b := Button.new()
+		b.text = item[0]
+		b.custom_minimum_size = Vector2(360, 64)
+		b.add_theme_font_size_override("font_size", 28)
+		b.pressed.connect(item[1])
+		v.add_child(b)
+	(v.get_child(1) as Button).grab_focus()
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if grid == null or starting:
+		return
+	var start := event as InputEventJoypadButton
+	var esc := event as InputEventKey
+	if _can_quit() and ((start and start.pressed and start.button_index == JOY_BUTTON_START) or (esc and esc.pressed and not esc.echo and esc.physical_keycode == KEY_ESCAPE) or (quit_panel and start and start.pressed and start.button_index == JOY_BUTTON_B)):
+		get_viewport().set_input_as_handled()
+		if not (quit_panel and is_instance_valid(quit_panel)):
+			quit_opener = start.device if start else -2
+			quit_a_released = false
+		_toggle_quit_menu()
+		return
+	if quit_panel and is_instance_valid(quit_panel):
+		# The dialog presses its own focused button on pad A (don't rely on ui_accept having A: a hot-reloaded arcade
+		# never ran ensure_pad_ui_actions at startup, and A did nothing).
+		if start and quit_opener >= 0 and start.device != quit_opener:
+			return  # another player's pad
+		if start and not start.pressed and start.button_index == JOY_BUTTON_A:
+			quit_a_released = true
+		if start and start.pressed and start.button_index == JOY_BUTTON_A and quit_a_released:
+			var f := get_viewport().gui_get_focus_owner()
+			if f is BaseButton and quit_panel.is_ancestor_of(f):
+				get_viewport().set_input_as_handled()
+				(f as BaseButton).pressed.emit()
 		return
 	var step := 0
 	var pad := event as InputEventJoypadButton
@@ -402,6 +731,14 @@ func _unhandled_input(event: InputEvent) -> void:
 			step = -1
 		elif pad.button_index == JOY_BUTTON_RIGHT_SHOULDER:
 			step = 1
+		elif pad.button_index == JOY_BUTTON_A or pad.button_index == JOY_BUTTON_X:
+			# A picks the highlighted game: ui_accept has no pad button, so A only worked while Steam turned
+			# it into Enter. X too (kids pressed X and nothing happened). _launch ignores a second start.
+			var f := get_viewport().gui_get_focus_owner()
+			if f is BaseButton:
+				get_viewport().set_input_as_handled()
+				(f as BaseButton).pressed.emit()
+				return
 	var key := event as InputEventKey
 	if key and key.pressed and not key.echo:
 		if key.physical_keycode == KEY_Q or key.physical_keycode == KEY_PAGEUP:
@@ -453,7 +790,7 @@ func _build_vr_view() -> void:
 	vr_list = Label3D.new()
 	vr_list.font_size = 44
 	vr_list.outline_size = 22
-	vr_list.pixel_size = 0.003
+	vr_list.pixel_size = 0.0026
 	vr_list.width = 1100.0
 	vr_list.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	vr_list.modulate = Color(0.85, 0.97, 1.0)
@@ -483,7 +820,17 @@ func _refresh_vr() -> void:
 	if last < games.size():
 		lines.append("v more v")
 	lines.append("")
-	lines.append("Stick up/down: choose  ·  left/right: category\nTrigger: play  (or pick on the TV)")
+	lines.append("POINT + TRIGGER: PLAY")
+	# What each text line is, for pointing: a game index, -2 = the category line, -1 = nothing.
+	var rows: Array[int] = []
+	for k in lines.size():
+		rows.append(-1)
+	rows[2] = -2
+	var row := 4 + (1 if first > 0 else 0)
+	for k in range(first, last):
+		rows[row] = games[k]
+		row += 1
+	set_meta("vr_rows", rows)
 	vr_list.text = "\n".join(lines)
 
 
@@ -507,10 +854,80 @@ func _vr_input() -> void:
 				_show_category(next_tab, true)
 	elif absf(stick.x) < 0.3:
 		vr_stick_x_ready = true
+	var aim := _vr_pointed_row()
 	var trig := hand_r.get_float("trigger") > 0.6
+	if aim.x >= 0 and aim.x != selected:
+		_select(aim.x, true)  # pointing at a game highlights it
 	if trig and not trigger_was:
-		_start_everywhere(selected)
+		if aim.x == -2:
+			_switch_vr_tab(1 if aim.y > 0 else -1)
+		else:
+			_start_everywhere(selected)
 	trigger_was = trig
+
+
+## Simon: pick games by pointing. Returns (row value, side): the game index (or -2 for the category
+## line, -1 for nothing) under the right hand's ray, and which half of the line it hits (1 = right).
+## Also draws the pointer laser.
+func _vr_pointed_row() -> Vector2i:
+	var laser: MeshInstance3D = get_meta("vr_laser", null) if has_meta("vr_laser") else null
+	if laser == null:
+		laser = MeshInstance3D.new()
+		var cm := CylinderMesh.new()
+		cm.top_radius = 0.003
+		cm.bottom_radius = 0.003
+		cm.height = 1.0
+		cm.radial_segments = 6
+		cm.rings = 1
+		var m := StandardMaterial3D.new()
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.albedo_color = Color(0.4, 0.9, 1.0)
+		cm.material = m
+		laser.mesh = cm
+		add_child(laser)
+		set_meta("vr_laser", laser)
+	var out := Vector2i(-1, 0)
+	var from := hand_r.global_position
+	var dir := -hand_r.global_basis.z.normalized()
+	var length := 3.0
+	var rows: Array = get_meta("vr_rows", []) if has_meta("vr_rows") else []
+	var xf := vr_list.global_transform
+	var n := xf.basis.z.normalized()
+	var denom := dir.dot(n)
+	if absf(denom) > 0.05:
+		var t := (xf.origin - from).dot(n) / denom
+		if t > 0.0 and t < 6.0:
+			var local := xf.affine_inverse() * (from + dir * t)
+			var font: Font = vr_list.font if vr_list.font != null else ThemeDB.fallback_font
+			var lh := (font.get_height(vr_list.font_size) + vr_list.line_spacing) * vr_list.pixel_size
+			var top := lh * vr_list.text.count("\n") * 0.5 + lh * 0.5
+			var half_w := vr_list.width * vr_list.pixel_size * 0.5
+			var row := int(floor((top - local.y) / lh))
+			if absf(local.x) < half_w and row >= 0 and row < rows.size():
+				out = Vector2i(int(rows[row]), 1 if local.x > 0.0 else 0)
+				length = t
+	laser.visible = hand_r.get_has_tracking_data()
+	laser.global_transform = Transform3D(_laser_basis(dir, length), from + dir * length * 0.5)
+	return out
+
+
+func _laser_basis(dir: Vector3, length: float) -> Basis:
+	var up := dir
+	var side := up.cross(Vector3.UP if absf(up.y) < 0.95 else Vector3.RIGHT).normalized()
+	var fwd := side.cross(up).normalized()
+	return Basis(side, up * length, fwd)
+
+
+func _switch_vr_tab(step: int) -> void:
+	var t := tabs()
+	if t.is_empty():
+		return
+	var next_tab := wrapi(t.find(_cat_index_of(selected)) + step, 0, t.size())
+	var in_next := _games_in(next_tab)
+	if not in_next.is_empty():
+		_select(in_next[0], true)
+		if grid != null:
+			_show_category(next_tab, true)
 
 
 ## A glowing floor and a ring of pillars so the VR lobby isn't a black void.
@@ -540,6 +957,64 @@ func _build_vr_floor() -> void:
 		add_child(pillar)
 
 
+## DUO_JOIN=auto: look for a lobby or a running game on the home network; nobody there after FIND_SECONDS =
+## host a flat lobby. Lobby hosts announce themselves once a second ("ARCADE_LOBBY <id> <vr>"); a flat host
+## that hears a VR host, or a flat host with a lower id, gives way and joins it.
+func _lobby_net(delta: float) -> void:
+	if starting or (OS.get_environment("DUO_JOIN_ORIGINAL") != "auto" and mode != "host"):
+		return
+	var base: int = int(OS.get_environment("DUO_PORT")) if OS.has_environment("DUO_PORT") else DEFAULT_PORT
+	if not has_meta("lobby_udp"):
+		var u := PacketPeerUDP.new()
+		u.set_broadcast_enabled(true)
+		if u.bind(base + 2) != OK:
+			set_meta("lobby_udp", null)
+			return
+		set_meta("lobby_udp", u)
+	var udp = get_meta("lobby_udp")
+	if udp == null:
+		return
+	while (udp as PacketPeerUDP).get_available_packet_count() > 0:
+		var msg := (udp as PacketPeerUDP).get_packet().get_string_from_utf8()
+		var ip := (udp as PacketPeerUDP).get_packet_ip()
+		if msg.begins_with("ARCADE_GAME ") and mode != "host":
+			var scene := msg.substr(12)
+			for i in GAMES.size():
+				if GAMES[i].scene == scene:
+					print("Arcade: %s is already being played at %s, joining" % [GAMES[i].name, ip])
+					OS.set_environment("DUO_JOIN", ip)
+					mode = "client"
+					_launch(i)
+					return
+		elif msg.begins_with("ARCADE_LOBBY "):
+			var f := msg.split(" ")
+			var their_id := int(f[1]) if f.size() > 1 else 0
+			var their_vr := f.size() > 2 and f[2] == "1"
+			if their_id == lobby_id:
+				continue  # our own beacon
+			if mode == "local" and _finding > 0.0:
+				_finding = 0.0
+				set_meta("lobby_vr", their_vr)
+				print("Arcade: found a lobby at %s" % ip)
+				_join_lobby(ip)
+			elif mode == "host" and not host_has_vr and machines.is_empty() and (their_vr or their_id < lobby_id):
+				print("Arcade: another lobby at %s, joining it instead" % ip)
+				_close_peer()
+				mode = "local"
+				_join_lobby(ip)
+	if mode == "local" and _finding > 0.0:
+		_finding -= delta
+		if _finding <= 0.0:
+			print("Arcade: no lobby found, hosting one (no VR)")
+			_host_lobby(false)
+	if mode == "host":
+		set_meta("lobby_beacon_t", float(get_meta("lobby_beacon_t", 0.0)) - delta)
+		if float(get_meta("lobby_beacon_t", 0.0)) <= 0.0:
+			set_meta("lobby_beacon_t", 1.0)
+			(udp as PacketPeerUDP).set_dest_address("255.255.255.255", base + 2)
+			(udp as PacketPeerUDP).put_packet(("ARCADE_LOBBY %d %d" % [lobby_id, 1 if host_has_vr else 0]).to_utf8_buffer())
+
+
 func _listen_for_game() -> void:
 	if not has_meta("listen"):
 		var udp := PacketPeerUDP.new()
@@ -565,3 +1040,38 @@ func _listen_for_game() -> void:
 				mode = "client"
 				_launch(i)
 				return
+
+
+## The lobby doesn't use core/net.gd, so start the same root-level helpers the games get from it:
+## the VR text guard (also a capture mirror, so the live view isn't black here) and Claude's captions.
+func _ensure_shared_nodes() -> void:
+	var root := get_tree().root
+	for pair in [["vr_text_guard", "res://core/vr_text_guard.gd"], ["claude_caption", "res://addons/gdev/caption.gd"]]:
+		if root.has_meta(pair[0]) or not ResourceLoader.exists(pair[1]):
+			continue
+		var n: Node = (load(pair[1]) as GDScript).new()
+		root.set_meta(pair[0], n)
+		root.add_child.call_deferred(n)
+
+
+## The TV machine (no VR) runs fullscreen (Simon). Done once per launch, so F11/Alt+Enter still work.
+func _ensure_fullscreen() -> void:
+	var root := get_tree().root
+	if root.has_meta("fullscreen_done") or DisplayServer.get_name() == "headless":
+		return
+	root.set_meta("fullscreen_done", true)
+	var xr := XRServer.primary_interface
+	if xr != null and xr.is_initialized():
+		return  # the headset draws through OpenXR, not the window
+	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+
+
+## No mouse pointer over the TV picture (Simon); it comes back as soon as the mouse moves.
+func _hide_tv_cursor() -> void:
+	var root := get_tree().root
+	if root.has_meta("cursor_hidden") or DisplayServer.get_name() == "headless":
+		return
+	root.set_meta("cursor_hidden", true)
+	var xr := XRServer.primary_interface
+	if xr == null or not xr.is_initialized():
+		Input.mouse_mode = Input.MOUSE_MODE_HIDDEN

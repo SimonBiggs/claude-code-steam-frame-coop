@@ -380,13 +380,16 @@ func _update_icon() -> void:
 		icon.pixel_size = 0.012
 		icon.outline_size = 24
 		icon.modulate = Color(1.0, 0.9, 0.2)
-		icon.no_depth_test = true
+		icon.no_depth_test = false
 		icon.render_priority = 4
 		add_child(icon)
 	if icon != null:
 		icon.visible = show
 		if show:
-			if legend:
+			if main.SIMPLE_MODE:  # a bouncing "!" says "this one is coming"; no names to read
+				icon.text = "!"
+				icon.modulate = Color(0.75, 0.9, 1.0) if legend and called_t <= 0.0 else Color(1.0, 0.9, 0.2)
+			elif legend:
 				icon.text = "OLD WHISKERS" if called_t <= 0.0 else "!! OLD WHISKERS !!"
 				icon.modulate = Color(0.75, 0.9, 1.0) if called_t <= 0.0 else Color(1.0, 0.9, 0.2)
 			else:

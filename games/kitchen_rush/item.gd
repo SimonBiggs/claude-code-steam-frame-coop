@@ -277,5 +277,6 @@ func _build_plate() -> void:
 		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 		label.modulate = Color(1.0, 0.9, 0.4)
 		label.position.y = 0.28
-		label.no_depth_test = true
+		label.no_depth_test = false
+		label.visible = not main.simple  # simple mode: the food on the plate says it (no word filling a runner's view)
 		visual.add_child(label)

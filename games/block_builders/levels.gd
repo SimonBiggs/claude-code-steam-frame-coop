@@ -14,6 +14,11 @@ extends RefCounted
 ## solution / bot_path: used by the headless bot test (and prove each level can be solved).
 ## bot_path modes: "" walk to it, "rise" stand there until lifted to its height, "jump" keep jumping
 ## on the way (crates), "leap" run and jump at the edge (speed pads).
+## SIMPLE_MODE (main.gd sets Engine meta "bb_simple") uses SIMPLE_LEVELS instead: eight short courses,
+## level 1 is one gap to bridge (the practice level, with a glowing ring to jump through), then ONE new
+## block per level (more planks, stairs, crates, a spring, a fan, a launch pad) and a little finale.
+## No stars, lava, wind, water or speed pads; budgets are the solution plus a spare. The solo buddy
+## runner (main.gd) and the bot follow bot_path; waypoint 0 is where you wait for the path.
 
 const LEVELS := [
 	{
@@ -228,9 +233,127 @@ const LEVELS := [
 ]
 
 
+const SIMPLE_LEVELS := [
+	{
+		"name": "FIRST BRIDGE",
+		"theme": "meadow",
+		"tip": "", "btip": "", "rtip": "",
+		"time": 999.0,
+		"budget": {"plank": 4},
+		"ground": [[-7, -2, -2, 3, 0], [1, 7, -2, 3, 0]],
+		"lava": [], "gusts": [], "water": [],
+		"start": Vector3(-5.0, 0.0, 0.5),
+		"flag": Vector3(5.0, 0.0, 0.5),
+		"ring": Vector3(-0.5, 1.2, 0.5),
+		"solution": [["plank", Vector3i(-2, -1, 0), 0], ["plank", Vector3i(-1, -1, 0), 0], ["plank", Vector3i(0, -1, 0), 0]],
+		"bot_path": [[Vector3(-2.6, 0.0, 0.5), ""], [Vector3(-0.3, 0.0, 0.5), "jump"], [Vector3(5.0, 0.0, 0.5), ""]],
+	},
+	{
+		"name": "TWO BRIDGES",
+		"theme": "beach",
+		"tip": "", "btip": "", "rtip": "",
+		"time": 999.0,
+		"budget": {"plank": 7},
+		"ground": [[-11, -5, -2, 3, 0], [-2, 3, -2, 3, 0], [6, 11, -2, 3, 0]],
+		"lava": [], "gusts": [], "water": [],
+		"start": Vector3(-9.0, 0.0, 0.5),
+		"flag": Vector3(9.0, 0.0, 0.5),
+		"solution": [["plank", Vector3i(-5, -1, 0), 0], ["plank", Vector3i(-4, -1, 0), 0], ["plank", Vector3i(-3, -1, 0), 0],
+			["plank", Vector3i(3, -1, 0), 0], ["plank", Vector3i(4, -1, 0), 0], ["plank", Vector3i(5, -1, 0), 0]],
+		"bot_path": [[Vector3(-6.0, 0.0, 0.5), ""], [Vector3(2.0, 0.0, 0.5), ""], [Vector3(9.0, 0.0, 0.5), ""]],
+	},
+	{
+		"name": "STAIRS",
+		"theme": "autumn",
+		"tip": "", "btip": "", "rtip": "",
+		"time": 999.0,
+		"budget": {"stairs": 4},
+		"ground": [[-9, 2, -2, 3, 0], [2, 9, -2, 3, 3]],
+		"lava": [], "gusts": [], "water": [],
+		"start": Vector3(-7.0, 0.0, 0.5),
+		"flag": Vector3(7.0, 3.0, 0.5),
+		"solution": [["stairs", Vector3i(-1, 0, 0), 0], ["stairs", Vector3i(0, 1, 0), 0], ["stairs", Vector3i(1, 2, 0), 0]],
+		"bot_path": [[Vector3(-1.6, 0.0, 0.5), ""], [Vector3(3.0, 3.0, 0.5), ""], [Vector3(7.0, 3.0, 0.5), ""]],
+	},
+	{
+		"name": "CRATES",
+		"theme": "canyon",
+		"tip": "", "btip": "", "rtip": "",
+		"time": 999.0,
+		"budget": {"crate": 7},
+		"ground": [[-9, 3, -2, 3, 0], [3, 9, -2, 3, 3]],
+		"lava": [], "gusts": [], "water": [],
+		"start": Vector3(-7.0, 0.0, 0.5),
+		"flag": Vector3(7.0, 3.0, 0.5),
+		"solution": [["crate", Vector3i(0, 0, 0), 0], ["crate", Vector3i(1, 0, 0), 0], ["crate", Vector3i(1, 1, 0), 0],
+			["crate", Vector3i(2, 0, 0), 0], ["crate", Vector3i(2, 1, 0), 0], ["crate", Vector3i(2, 2, 0), 0]],
+		"bot_path": [[Vector3(-0.8, 0.0, 0.5), ""], [Vector3(0.5, 1.0, 0.5), "jump"], [Vector3(1.5, 2.0, 0.5), "jump"],
+			[Vector3(2.5, 3.0, 0.5), "jump"], [Vector3(7.0, 3.0, 0.5), ""]],
+	},
+	{
+		"name": "BOING!",
+		"theme": "candy",
+		"tip": "", "btip": "", "rtip": "",
+		"time": 999.0,
+		"budget": {"spring": 2},
+		"ground": [[-9, 3, -2, 3, 0], [3, 9, -2, 3, 4]],
+		"lava": [], "gusts": [], "water": [],
+		"start": Vector3(-7.0, 0.0, 0.5),
+		"flag": Vector3(7.0, 4.0, 0.5),
+		"solution": [["spring", Vector3i(2, 0, 0), 0]],
+		"bot_path": [[Vector3(1.0, 0.0, 0.5), ""], [Vector3(2.5, 0.0, 0.5), ""], [Vector3(5.0, 4.0, 0.5), ""], [Vector3(7.0, 4.0, 0.5), ""]],
+	},
+	{
+		"name": "WHOOSH",
+		"theme": "snow",
+		"tip": "", "btip": "", "rtip": "",
+		"time": 999.0,
+		"budget": {"plank": 2, "fan": 1},
+		"ground": [[-9, 4, -2, 3, 0], [6, 10, -2, 3, 4]],
+		"lava": [], "gusts": [], "water": [],
+		"start": Vector3(-7.0, 0.0, 0.5),
+		"flag": Vector3(8.0, 4.0, 0.5),
+		"solution": [["plank", Vector3i(4, -1, 0), 0], ["fan", Vector3i(5, -1, 0), 0]],
+		"bot_path": [[Vector3(4.5, 0.0, 0.5), ""], [Vector3(5.5, 5.0, 0.5), "rise"], [Vector3(8.0, 4.0, 0.5), ""]],
+	},
+	{
+		"name": "ZOOM!",
+		"theme": "night",
+		"tip": "", "btip": "", "rtip": "",
+		"time": 999.0,
+		"budget": {"launcher": 1},
+		"ground": [[-10, -5, -2, 3, 0], [2, 9, -2, 3, 0]],
+		"lava": [], "gusts": [], "water": [],
+		"start": Vector3(-8.5, 0.0, 0.5),
+		"flag": Vector3(7.0, 0.0, 0.5),
+		"solution": [["launcher", Vector3i(-6, 0, 0), 0]],
+		"bot_path": [[Vector3(-7.2, 0.0, 0.5), ""], [Vector3(4.5, 0.0, 0.5), ""], [Vector3(7.0, 0.0, 0.5), ""]],
+	},
+	{
+		"name": "RAINBOW",
+		"theme": "rainbow",
+		"tip": "", "btip": "", "rtip": "",
+		"time": 999.0,
+		"budget": {"plank": 4, "stairs": 4},
+		"ground": [[-10, -6, -2, 3, 0], [-3, 2, -2, 3, 0], [2, 7, -2, 3, 3]],
+		"lava": [], "gusts": [], "water": [],
+		"start": Vector3(-8.5, 0.0, 0.5),
+		"flag": Vector3(5.5, 3.0, 0.5),
+		"solution": [["plank", Vector3i(-6, -1, 0), 0], ["plank", Vector3i(-5, -1, 0), 0], ["plank", Vector3i(-4, -1, 0), 0],
+			["stairs", Vector3i(-1, 0, 0), 0], ["stairs", Vector3i(0, 1, 0), 0], ["stairs", Vector3i(1, 2, 0), 0]],
+		"bot_path": [[Vector3(-7.0, 0.0, 0.5), ""], [Vector3(-1.6, 0.0, 0.5), ""], [Vector3(3.0, 3.0, 0.5), ""], [Vector3(5.5, 3.0, 0.5), ""]],
+	},
+]
+
+
+static func levels() -> Array:
+	return SIMPLE_LEVELS if Engine.get_meta("bb_simple", false) else LEVELS
+
+
 static func count() -> int:
-	return LEVELS.size()
+	return levels().size()
 
 
 static func get_level(i: int) -> Dictionary:
-	return LEVELS[clampi(i, 0, LEVELS.size() - 1)]
+	var l := levels()
+	return l[clampi(i, 0, l.size() - 1)]

@@ -33,6 +33,7 @@ var fire_cd := 0.0
 var pad_lost_t := -1.0
 var force_fire := false  # test bots
 var net_started := false
+var fire_was := false
 var camera: Camera3D
 var hud
 var shake := 0.0
@@ -124,7 +125,11 @@ func update(delta: float) -> void:
 	muzzle_mat.emission = Color(1.0, 0.85, 0.3) if gold else Color(0.7, 0.95, 1.0)
 	if active and not remote and not ghost:
 		_read_look(delta)
-		if _fire_held() and fire_cd <= 0.0:
+		var held := _fire_held()
+		if held and not fire_was:
+			main.cue_did(self, "fire")  # simple mode: the fire cue goes after two presses
+		fire_was = held
+		if held and fire_cd <= 0.0:
 			_fire()
 		main.net.send_state(Vector3.ZERO, yaw, pitch, index)
 	turret.rotation = Vector3(pitch + recoil * 0.05, yaw, 0.0)

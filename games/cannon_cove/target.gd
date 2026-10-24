@@ -73,6 +73,8 @@ func _ready() -> void:
 	label.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
 	label.position.y = 3.6
 	add_child(label)
+	if kind != "practice" and main != null and main.simple:
+		label.visible = false  # simple mode: a chest bobbing by needs no words
 
 
 func _physics_process(delta: float) -> void:

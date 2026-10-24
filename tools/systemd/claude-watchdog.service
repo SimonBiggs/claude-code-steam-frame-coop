@@ -1,0 +1,7 @@
+[Unit]
+Description=Restart Claude Code in tmux if it is not running
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/claude-watchdog
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin

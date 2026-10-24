@@ -3,7 +3,13 @@
 # and speak it aloud (Kokoro TTS, piper fallback) in the headset and through the TV speakers.
 # FRAME_SAY_QUIET=1 shows the text without speaking it.
 KEY=~/.config/steamos-devkit/devkit_rsa
-printf '%s' "$*" | ssh -i $KEY steamos@frame 'cat > ~/devkit-game/DuoArena/game/.dev/say.txt'
+TL=~/GodotProjects/duo-arena/.dev/voice-timing.log
+# Remember what Claude said, so voice-inject can drop the mic hearing it back from the TV.
+printf '%s\t%s\n' "$(date +%s)" "$*" >> ~/.claude/said.log
+echo "say_called $(date +%s.%N | cut -c1-13) | ${*:0:40}" >> $TL
+# Caption in every game (addons/gdev/caption.gd): on the Frame, and on this machine's copy for the TV.
+printf '%s' "$*" | ssh -i $KEY steamos@frame 'cat > ~/devkit-game/DuoArena/game/.dev/caption.txt'
+mkdir -p ~/GodotProjects/duo-arena/.dev && printf '%s' "$*" > ~/GodotProjects/duo-arena/.dev/caption.txt
 [ -n "$FRAME_SAY_QUIET" ] && exit 0
 (
 	wav=$(mktemp --suffix=.wav)
@@ -12,7 +18,9 @@ printf '%s' "$*" | ssh -i $KEY steamos@frame 'cat > ~/devkit-game/DuoArena/game/
 		|| printf '%s' "$*" | piper -m ~/.local/share/piper/en_GB-alan-medium.onnx -f "$wav" >/dev/null 2>&1 || exit 0
 	# Speak through the TV only: playing in the headset as well echoed (the two are out of sync).
 	# FRAME_SAY_HEADSET=1 also plays it in the headset.
-	[ -n "$FRAME_SAY_HEADSET" ] && ssh -i $KEY steamos@frame 'f=$(mktemp --suffix=.wav); cat > $f; XDG_RUNTIME_DIR=/run/user/1000 pw-play --volume 0.9 $f; rm -f $f' < "$wav" &
-	pw-play --volume 0.8 "$wav" 2>/dev/null
+	# Simon (16:28): speak in the HEADSET (the kids turn the TV down). FRAME_SAY_TV=1 also uses the TV.
+	ssh -i $KEY steamos@frame 'f=$(mktemp --suffix=.wav); cat > $f; XDG_RUNTIME_DIR=/run/user/1000 pw-play --volume 0.9 $f; rm -f $f' < "$wav" &
+	echo "say_audio_start $(date +%s.%N | cut -c1-13) | ${*:0:40}" >> $TL
+	[ -n "$FRAME_SAY_TV" ] && pw-play --volume 0.8 "$wav" 2>/dev/null
 	wait; rm -f "$wav"
 ) >/dev/null 2>&1 &

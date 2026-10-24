@@ -1,6 +1,7 @@
 extends Node3D
 ## A steaming mug of hot cocoa: walk over it (or grab it in VR) to warm up.
-## kind "mega": a glowing MEGA SNOWBALL instead (your next throw is a giant one).
+## kind "mega": a glowing MEGA SNOWBALL instead (your next throw is a giant one). Simple mode: a fat
+## glowing arrow bobs over it (go and get it: no words).
 
 var main
 var kind := "cocoa"
@@ -9,6 +10,7 @@ var net_id := 0
 var life := 25.0
 var t := 0.0
 var mug: Node3D
+var arrow: Node3D  # simple mode, mega: the bobbing "get it" arrow
 
 
 func _ready() -> void:
@@ -107,8 +109,37 @@ func _build_mega() -> void:
 	sparkle.mesh = q
 	sparkle.position.y = 0.3
 	mug.add_child(sparkle)
+	if main.simple:
+		_build_arrow()
 	mug.scale = Vector3.ONE * 0.1
 	create_tween().tween_property(mug, "scale", Vector3.ONE * 1.3, 0.5).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+
+## A glowing arrow pointing down at the MEGA SNOWBALL (tip at the arrow node's origin).
+func _build_arrow() -> void:
+	arrow = Node3D.new()
+	arrow.name = "Arrow"
+	add_child(arrow)
+	var gm := main.make_material(Color(1.0, 0.9, 0.35), 2.5) as StandardMaterial3D
+	var head := CylinderMesh.new()
+	head.top_radius = 0.18
+	head.bottom_radius = 0.0
+	head.height = 0.26
+	head.radial_segments = 10
+	head.rings = 1
+	var shaft := CylinderMesh.new()
+	shaft.top_radius = 0.06
+	shaft.bottom_radius = 0.06
+	shaft.height = 0.28
+	shaft.radial_segments = 8
+	shaft.rings = 1
+	for m in [[head, 0.13], [shaft, 0.4]]:
+		var mi := MeshInstance3D.new()
+		mi.mesh = m[0]
+		mi.material_override = gm
+		mi.position.y = m[1]
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		arrow.add_child(mi)
 
 
 func _part(mesh: Mesh, mat: Material, pos: Vector3) -> MeshInstance3D:
@@ -133,6 +164,9 @@ func _process(delta: float) -> void:
 	t += delta
 	mug.rotation.y = t * 1.2
 	mug.position.y = 0.35 + sin(t * 2.5) * 0.1
+	if arrow != null:
+		arrow.position.y = 1.1 + absf(sin(t * 3.5)) * 0.2
+		arrow.visible = mug.visible
 	if ghost:
 		return
 	life -= delta

@@ -5,14 +5,30 @@ set -e
 msg="$1"
 ST=~/GodotProjects/.duo-arena-stage; LIVE=~/GodotProjects/duo-arena; B=~/GodotProjects/duo-arena-frame-build
 K=~/.config/steamos-devkit/devkit_rsa
+# VR text rule: far text must never draw over nearer things (it hurts to look at in the headset).
+if bad=$(grep -rn "no_depth_test = true" "$ST/core" "$ST/games" "$ST/arcade" --include='*.gd'); then
+  echo "NOT deploying: Label3D.no_depth_test = true breaks VR depth (see docs/GAME_DEV_GUIDE.md):" >&2
+  echo "$bad" >&2; exit 1
+fi
+# Live must not be ahead of staging (e.g. an agent branch merged straight into live): the rsync below
+# would silently roll that work back. Sync it into staging first (rsync live -> stage) and redeploy.
+ahead=$(cd "$LIVE" && for d in core games arcade tests; do find "$d" -type f ! -name "*.uid"; done |
+  while read -r f; do [ -f "$ST/$f" ] && ! cmp -s "$LIVE/$f" "$ST/$f" && [ "$LIVE/$f" -nt "$ST/$f" ] && echo "$f"; done || true)
+# (|| true: the loop's status is its last test's, and under set -e a false one silently ended every deploy)
+if [ -n "$ahead" ]; then
+  echo "NOT deploying: live has newer files than staging (copy them into $ST first):" >&2
+  echo "$ahead" >&2; exit 1
+fi
 for d in core games arcade tests; do rsync -a --delete --exclude '*.uid' "$ST/$d/" "$LIVE/$d/"; done
 cp "$ST/arcade.tscn" "$LIVE/arcade.tscn"
 rsync -a --delete --exclude .git --exclude .dev --exclude .godot --exclude launch.sh --exclude tools "$LIVE/" "$B/game/"
-if timeout 4 bash -c 'echo > /dev/tcp/frame/22' 2>/dev/null; then
+if ssh -o ConnectTimeout=4 -o BatchMode=yes -i $K steamos@frame true 2>/dev/null; then
   rsync -az -e "ssh -i $K" --exclude .godot --exclude .dev "$B/game/" steamos@frame:devkit-game/DuoArena/game/
 else
   echo "Steam Frame offline: run 'duo-deploy-frame' when it's back" >&2
 fi
+# Simon's Steam Deck plays too (another TV-style player, or on its own): ~/DuoArena via duo-deploy-deck.
+duo-deploy-deck >/dev/null || true
 cd "$LIVE" && git add -A && git commit -q -m "$msg
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" && git log --oneline -1

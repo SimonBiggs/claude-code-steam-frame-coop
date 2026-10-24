@@ -7,9 +7,14 @@ extends Node
 ##   Enter on the keyboard (keyboard + mouse is a player too).
 ## - A controller that disconnects keeps its seat for `leave_after` seconds, then the player leaves.
 ##   Plugging it back in (Input.joy_connection_changed) restores the seat, even after leaving.
-## - On the TV machine (net.mode == "client") joins are requested from the host, which confirms them;
-##   on the host the TV machine's slots show up with device REMOTE. The roster survives scene reloads
+## - On a TV machine (net.mode == "client") joins are requested from the host, which confirms them;
+##   on the host TV machines' slots show up with device REMOTE. The roster survives scene reloads
 ##   (restart, reconnect, next game) through Engine metadata.
+## - Many machines (TV, Steam Decks...): the host gives out the seats, moving a request to the next free
+##   seat if another machine has it, answers only the machine that asked, tells every machine which seats
+##   are taken, and frees only a leaving machine's seats. machine_of(slot) / machine_kind(slot) say whose
+##   seat it is ("deck", "tv", "host"...), so a game can treat e.g. Deck players differently. A flat host
+##   (net.has_vr false: TV / Deck hosting) seats its own controllers like local play.
 ## - Per-slot input that reads only that slot's device: pressed / just_pressed / just_released,
 ##   stick, trigger, look, nav (menu navigation with key repeat). Buttons held when a player joins
 ##   or when the game unpauses must be released before they count (no accidental "accept").
@@ -113,6 +118,8 @@ var _mouse_acc := Vector2.ZERO
 var _mouse_frame := Vector2.ZERO
 var _was_paused := false
 var _net_hooked: Node
+var _owner := PackedInt32Array()  # host: the peer that owns each REMOTE seat (0 = this machine)
+var _taken := {}  # client: seats other machines have, slot -> their kind
 var _kb_join_t := -1.0
 var _clock := 0.0  # game seconds (deterministic under --fixed-fps)
 var _last_pad_t := -100.0
@@ -129,6 +136,7 @@ func _init() -> void:
 	_left_msec.resize(MAX_SLOTS)
 	_pending_t.resize(MAX_SLOTS)
 	_names.resize(MAX_SLOTS)
+	_owner.resize(MAX_SLOTS)
 	_now.resize(MAX_SLOTS * 2)
 	_prev.resize(MAX_SLOTS * 2)
 	_latch.resize(MAX_SLOTS * 2)
@@ -256,8 +264,8 @@ func join_device(device: int, slot: int = -1) -> int:
 	var have := owner_of(device)
 	if have >= 0:
 		return have
-	if _mode() == "host":
-		return -1  # the headset has no TV controllers; TV players join from the TV machine
+	if _mode() == "host" and _host_has_vr():
+		return -1  # the headset has no TV controllers; TV players join from the TV machines
 	if slot < 0 or not _slot_free(slot):
 		slot = _free_slot(device)
 	if slot < 0:
@@ -293,8 +301,14 @@ func leave(slot: int, allow_rejoin: bool = false) -> void:
 	if _mode() == "client":
 		_send(["leave", slot])
 	elif _mode() == "host" and dev == REMOTE:
-		_send(["left", slot])
+		var n := _net()
+		if n != null and n.has_method("sys_send_to") and _owner[slot] > 0:
+			n.sys_send_to(_owner[slot], "party", ["left", slot])
+		else:
+			_send(["left", slot])
 	_unseat(slot)
+	if _mode() == "host":
+		_send_roster.call_deferred()
 	if dev >= 0 or dev == KEYBOARD:
 		_last_device[slot] = dev  # pressing A on it again prefers this seat
 		_left_msec[slot] = Time.get_ticks_msec() if allow_rejoin else -REJOIN_WINDOW_MS - 1
@@ -312,6 +326,8 @@ func _seat(slot: int, device: int) -> void:
 	print("Party: %s joined as %s" % [device_label(device), name_of(slot)])
 	_persist()
 	player_joined.emit(slot, device)
+	if _mode() == "host" and device != REMOTE:
+		_send_roster.call_deferred()  # a flat host's own players reach every machine right away
 
 
 func _unseat(slot: int) -> void:
@@ -325,7 +341,7 @@ func _unseat(slot: int) -> void:
 
 
 func _slot_free(slot: int) -> bool:
-	return slot >= _first_slot() and slot <= mini(max_slot, MAX_SLOTS - 1) and _state[slot] == FREE
+	return slot >= _first_slot() and slot <= mini(max_slot, MAX_SLOTS - 1) and _state[slot] == FREE and not _taken.has(slot)
 
 
 func _first_slot() -> int:
@@ -335,12 +351,46 @@ func _first_slot() -> int:
 ## The device's previous seat if it's free, else the lowest free seat.
 func _free_slot(device: int) -> int:
 	for s in range(_first_slot(), mini(max_slot, MAX_SLOTS - 1) + 1):
-		if _state[s] == FREE and _last_device[s] == device:
+		if _state[s] == FREE and _last_device[s] == device and not _taken.has(s):
 			return s
 	for s in range(_first_slot(), mini(max_slot, MAX_SLOTS - 1) + 1):
-		if _state[s] == FREE:
+		if _state[s] == FREE and not _taken.has(s):
 			return s
 	return -1
+
+
+## Host: the seats a machine owns (its players), e.g. to drop their inputs when it leaves.
+func slots_of(peer: int) -> Array[int]:
+	var out: Array[int] = []
+	for s in MAX_SLOTS:
+		if _state[s] == ACTIVE and _device[s] == REMOTE and _owner[s] == peer:
+			out.append(s)
+	return out
+
+
+## Whose seat: the peer id of the machine that owns it on the host (0 = this machine / unknown).
+func machine_of(slot: int) -> int:
+	if slot < 0 or slot >= MAX_SLOTS:
+		return 0
+	return _owner[slot] if _mode() == "host" and _device[slot] == REMOTE else 0
+
+
+## What kind of machine the seat's player is on: "host" (the hosting machine; the VR player there),
+## "tv", "deck", ... (net DUO_MACHINE_KIND), or "" for a free seat. Same answer on every machine.
+func machine_kind(slot: int) -> String:
+	if slot < 0 or slot >= MAX_SLOTS:
+		return ""
+	var n := _net()
+	if _state[slot] != FREE and _device[slot] != REMOTE:
+		return "host" if _mode() != "client" else (str(n.machine_kind) if n != null else "tv")
+	if _mode() == "host" and _device[slot] == REMOTE:
+		return n.machine_kind_of(_owner[slot]) if n != null and n.has_method("machine_kind_of") else "tv"
+	return str(_taken.get(slot, ""))
+
+
+func _host_has_vr() -> bool:
+	var n := _net()
+	return n == null or n.get("has_vr") != false
 
 
 # --- Devices ---------------------------------------------------------------------------
@@ -422,7 +472,7 @@ func _ignored(device: int) -> bool:
 
 
 func _on_joy_changed(device: int, connected: bool) -> void:
-	if _ignored(device) or not _started or _mode() == "host":
+	if _ignored(device) or not _started or (_mode() == "host" and _host_has_vr()):
 		return
 	if connected:
 		_on_pad_connected(device)
@@ -779,7 +829,7 @@ func _latch_button(slot: int, button: int) -> void:
 
 
 func _can_join_now() -> bool:
-	return _started and accept_joins and not get_tree().paused and _mode() != "host"
+	return _started and accept_joins and not get_tree().paused and (_mode() != "host" or not _host_has_vr())
 
 
 func _mode() -> String:
@@ -811,7 +861,7 @@ func _try_start() -> void:
 			return
 	_started = true
 	_hook_net()
-	if _mode() != "host":
+	if _mode() != "host" or not _host_has_vr():  # a flat host seats its own pads like local play
 		_restore()
 		if auto_join_first_pad and local_slots().is_empty() and not _any_pending():
 			var pads := connected_pads()
@@ -836,12 +886,46 @@ func _hook_net() -> void:
 	n.add_sys_handler("party", _on_party_msg)
 	if not n.client_disconnected.is_connected(_on_client_gone):
 		n.client_disconnected.connect(_on_client_gone)
+	if n.has_signal("machine_left") and not n.machine_left.is_connected(_on_machine_gone):
+		n.machine_left.connect(_on_machine_gone)
+	if n.has_signal("machine_joined") and not n.machine_joined.is_connected(_on_machine_hello):
+		n.machine_joined.connect(_on_machine_hello)
 
 
 func _send(args: Array) -> void:
 	var n := _net()
 	if n != null and n.has_method("sys_send"):
 		n.sys_send("party", args)
+
+
+## Host: answer one machine only (the one whose sys message is being handled), so a reply for another
+## machine's request can't seat a player here by mistake.
+func _reply(args: Array) -> void:
+	var n := _net()
+	var to: int = int(n.get("sys_sender")) if n != null and n.get("sys_sender") != null else 0
+	if to > 0 and n.has_method("sys_send_to"):
+		n.sys_send_to(to, "party", args)
+	else:
+		_send(args)
+
+
+## Host: tell every machine which seats are taken and by what kind of machine.
+func _send_roster() -> void:
+	if _mode() != "host":
+		return
+	var taken := {}
+	for s in MAX_SLOTS:
+		if _state[s] != FREE:
+			taken[s] = machine_kind(s)
+	var n := _net()
+	if n == null or not n.has_method("sys_send_to"):
+		return
+	for peer in n.machines.keys():
+		var theirs := {}
+		for s in taken:
+			if not (_device[s] == REMOTE and _owner[s] == peer):
+				theirs[s] = taken[s]
+		n.sys_send_to(peer, "party", ["roster", 0, theirs])
 
 
 func _send_join(slot: int) -> void:
@@ -856,17 +940,41 @@ func _on_party_msg(args: Array) -> void:
 	if slot < 0 or slot >= MAX_SLOTS:
 		return
 	if _mode() == "host":
+		var n := _net()
+		var from: int = int(n.get("sys_sender")) if n != null and n.get("sys_sender") != null else 0
 		match op:
 			"join":
-				_host_join(slot, str(args[2]) if args.size() > 2 else "")
+				_host_join(slot, str(args[2]) if args.size() > 2 else "", from)
 			"leave":
-				if _state[slot] == ACTIVE and _device[slot] == REMOTE:
+				if _state[slot] == ACTIVE and _device[slot] == REMOTE and (from == 0 or _owner[slot] == from):
 					_unseat(slot)
-					print("Party: %s (TV) left" % name_of(slot))
+					print("Party: %s (%s) left" % [name_of(slot), machine_kind(slot)])
 					player_left.emit(slot)
+					_send_roster()
 		return
 	match op:
+		"roster":
+			_taken = (args[2] as Dictionary).duplicate() if args.size() > 2 and args[2] is Dictionary else {}
+			# Other machines' players are seated here too (device REMOTE, not local), so games build their
+			# avatars on player_joined and position them from snapshots; seats they leave are freed.
+			for s in range(0, MAX_SLOTS):  # slot 0 too: a flat host's own player (a VR host never lists it)
+				var theirs := _taken.has(s) or _taken.has(str(s))
+				if theirs and _state[s] == FREE:
+					_seat(s, REMOTE)
+				elif not theirs and _state[s] == ACTIVE and _device[s] == REMOTE:
+					_unseat(s)
+					player_left.emit(s)
 		"ok":
+			# The host may give a different seat (another machine had ours): move the player there.
+			var to := int(args[2]) if args.size() > 2 else slot
+			if to != slot and to > 0 and to < MAX_SLOTS and _state[slot] == PENDING and _state[to] == FREE:
+				var d := _device[slot]
+				_unseat(slot)
+				_state[to] = PENDING
+				_device[to] = d
+				_taken.erase(to)
+				print("Party: the host moved %s to %s" % [device_label(d), name_of(to)])
+				slot = to
 			if _state[slot] == PENDING:
 				_seat(slot, _device[slot])
 		"no":
@@ -885,23 +993,33 @@ func _on_party_msg(args: Array) -> void:
 				player_left.emit(slot)
 
 
-func _host_join(slot: int, player_name: String) -> void:
-	if _state[slot] == ACTIVE and _device[slot] == REMOTE:
-		_send(["ok", slot])  # a retry: they missed our answer
+func _host_join(slot: int, player_name: String, from: int = 0) -> void:
+	if _state[slot] == ACTIVE and _device[slot] == REMOTE and (from == 0 or _owner[slot] == from):
+		_reply(["ok", slot, slot])  # a retry: they missed our answer
 		return
+	var want := slot
 	if slot < 1 or slot > mini(max_slot, MAX_SLOTS - 1) or _state[slot] != FREE:
-		_send(["no", slot, "full"])
-		return
+		# Another machine (or the host) has it: the next free TV seat, if any.
+		slot = -1
+		for s in range(1, mini(max_slot, MAX_SLOTS - 1) + 1):
+			if _state[s] == FREE:
+				slot = s
+				break
+		if slot < 0:
+			_reply(["no", want, "full"])
+			return
 	if not accept_joins:
-		_send(["no", slot, "closed"])
+		_reply(["no", want, "closed"])
 		return
 	if join_filter.is_valid() and not bool(join_filter.call(slot)):
-		_send(["no", slot, "refused"])
+		_reply(["no", want, "refused"])
 		return
 	if player_name != "":
 		_names[slot] = player_name
-	_send(["ok", slot])
+	_owner[slot] = from
+	_reply(["ok", want, slot])
 	_seat(slot, REMOTE)
+	_send_roster()
 
 
 ## Host: the TV machine went away; its players leave (it re-joins them when it reconnects).
@@ -912,6 +1030,23 @@ func _on_client_gone() -> void:
 			player_left.emit(s)
 
 
+## Host: one machine went away; only its players leave.
+func _on_machine_gone(peer: int) -> void:
+	var any := false
+	for s in MAX_SLOTS:
+		if _state[s] == ACTIVE and _device[s] == REMOTE and _owner[s] == peer:
+			_unseat(s)
+			player_left.emit(s)
+			any = true
+	if any:
+		_send_roster()
+
+
+## Host: a machine said hello: tell it which seats are taken before its players ask.
+func _on_machine_hello(_peer: int, _kind: String) -> void:
+	_send_roster()
+
+
 # --- Persistence across scene reloads ----------------------------------------------------
 
 func _persist() -> void:
@@ -919,7 +1054,7 @@ func _persist() -> void:
 		return
 	var slots: Array = []
 	for s in MAX_SLOTS:
-		if _state[s] != FREE:
+		if _state[s] != FREE and _device[s] != REMOTE:  # other machines' players aren't ours to restore
 			slots.append([s, _device[s]])
 	Engine.set_meta(ROSTER_META, {"slots": slots, "names": _names.duplicate()})
 

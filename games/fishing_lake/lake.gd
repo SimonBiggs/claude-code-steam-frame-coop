@@ -725,7 +725,7 @@ func _build_tank() -> void:
 	glass.position = Vector3(0, 0.7, 0)
 	tank_root.add_child(glass)
 	var l := Label3D.new()
-	l.text = "AQUARIUM"
+	l.text = "" if main.SIMPLE_MODE else "AQUARIUM"
 	l.font_size = 40
 	l.pixel_size = 0.0018
 	l.outline_size = 10

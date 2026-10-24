@@ -1,9 +1,17 @@
 extends Control
 ## One TV player's HUD: crosshair with a charge ring, warmth bar, frosty hurt vignette,
 ## repair prompt and a little fort map (wall health, snowmen, friends, cocoa).
+## Simple mode (main.simple): just the crosshair, the hit marker, the frosty splat and which way it came
+## from, and the player's "P2" in their colour. No how-to words (visual teaching): a pulsing glowing
+## button in this player's own controls plus an icon sits under the crosshair - RT / CLICK / SPACE /
+## ENTER + a snowball (throw) until they've thrown twice, STICK / MOUSE / an arrow key + an arrow (turn)
+## while every snowman is off screen, a pulsing bolt when their controller is unplugged - and a glowing
+## arrow round the crosshair points at the nearest snowman when none is in view. Each cue goes once the
+## player has done it twice (main.cue_did / main.cue_learned).
 
 const MAP_RANGE := 22.0
 const MAP_SIZE := 92.0
+const UiKit := preload("res://core/ui_kit.gd")
 
 var player
 var main
@@ -13,6 +21,13 @@ var damage_marks: Array = []
 var name_label: Label
 var prompt: Label
 var bar: ProgressBar
+var cue_box: Control  # simple mode: the picture cue (glow + a row of button and icon)
+var cue_a := 0.0
+var cue_sig := ""
+var turn_ang := 0.0  # simple mode: screen angle of the arrow towards the nearest off-screen snowman
+var turn_a := 0.0
+var off_t := 0.0  # how long every snowman has been off screen
+var turn_shown := false
 
 
 func _ready() -> void:
@@ -88,6 +103,10 @@ func _process(delta: float) -> void:
 	damage_marks = damage_marks.filter(func(m): return m[1] > 0.0)
 	name_label.position = Vector2(28, size.y - 92)
 	bar.position = Vector2(28, size.y - 52)
+	if main.simple:
+		_simple_text()
+		queue_redraw()
+		return
 	bar.value = player.hp
 	name_label.text = "P%d  WARMTH%s" % [player.index + 1, "      * MEGA SNOWBALL READY - throw it!" if player.mega else ""]
 	var text := ""
@@ -104,6 +123,169 @@ func _process(delta: float) -> void:
 	prompt.size = Vector2(size.x, 100)
 	prompt.position = Vector2(0, size.y * 0.62)
 	queue_redraw()
+
+
+func _simple_text() -> void:
+	bar.visible = false
+	name_label.text = "P%d" % (player.index + 1)
+	prompt.text = ""  # no words: picture cues instead (_update_cue)
+	_update_turn(get_process_delta_time())
+	_update_cue(get_process_delta_time())
+
+
+## Simple mode: is any snowman in this player's view? If none is, the turn arrow points at the nearest.
+func _update_turn(delta: float) -> void:
+	var cam: Camera3D = player.camera
+	var want := false
+	if cam != null and player.active and not main.practice and not main.game_over and not player.is_down and not get_tree().paused \
+			and not main.cue_learned(player, "turn"):
+		var nearest = null
+		var nd := INF
+		var seen := false
+		var vs := get_viewport().get_visible_rect().size
+		for s in get_tree().get_nodes_in_group("snowmen"):
+			if s.dead or s.kind == "target":
+				continue
+			var at: Vector3 = s.global_position + Vector3.UP * 1.0
+			if not cam.is_position_behind(at):
+				var sp := cam.unproject_position(at)
+				if sp.x > vs.x * 0.08 and sp.x < vs.x * 0.92 and sp.y > 0.0 and sp.y < vs.y:
+					seen = true
+					break
+			var d: float = s.global_position.distance_to(player.global_position)
+			if d < nd:
+				nd = d
+				nearest = s
+		if seen or nearest == null:
+			if turn_shown and seen:
+				main.cue_did(player, "turn")  # they turned to the snowman the arrow showed
+			turn_shown = false
+			off_t = 0.0
+		else:
+			off_t += delta
+			if off_t > 1.5:
+				want = true
+				turn_shown = true
+				var rel: Vector3 = Basis(Vector3.UP, -player.yaw) * (nearest.global_position - player.global_position)
+				turn_ang = atan2(rel.z, rel.x)
+				if rel.z > 0.0:
+					turn_ang = 0.0 if rel.x >= 0.0 else PI  # behind you: point the way to turn, never down
+	else:
+		turn_shown = false
+		off_t = 0.0
+	turn_a = minf(1.0, turn_a + delta * 4.0) if want else maxf(0.0, turn_a - delta * 3.0)
+
+
+## This player's own button: "throw" or "turn" (dir "left" / "right").
+func _button(action: String, dir: String, s: float) -> Control:
+	if player.joy >= 0:
+		return UiKit.glyph("RT" if action == "throw" else "STICK", s)
+	if action == "throw":
+		if player.mouse_look:
+			return UiKit.glyph("CLICK", s)
+		return UiKit.glyph("ENTER" if player.keys() == 1 else "SPACE", s)
+	if player.keys() == 1:
+		var g := UiKit.glyph("KEY", s)  # an arrow key
+		(g.get_child(0) as Label).text = ""
+		var ic := UiKit.icon("arrow_" + dir, Color.WHITE, 26.0 * s)
+		ic.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		g.add_child(ic)
+		return g
+	return UiKit.glyph("MOUSE", s)
+
+
+func _btn_sig() -> String:
+	return "%d/%d/%s" % [player.joy, player.keys(), player.mouse_look]
+
+
+## The soft halo behind a cue's button.
+class CueGlow extends Control:
+	var r := 30.0
+	var a := 1.0
+
+	func _draw() -> void:
+		for i in 3:
+			draw_circle(Vector2.ZERO, r * (1.0 + 0.35 * i), Color(1.0, 0.95, 0.6, 0.17 * a * (1.0 - 0.3 * i)))
+
+
+func _update_cue(delta: float) -> void:
+	var key := ""
+	var dir := ""
+	var playing: bool = not main.game_over and not get_tree().paused and not player.is_down \
+		and (main.net.mode != "client" or main.synced)
+	if player.joy < 0 and not player.has_keyboard():
+		key = "plug"
+	elif playing and not main.cue_learned(player, "throw") and (main.practice or main.wave > 0):
+		key = "throw"
+	elif playing and turn_a > 0.5 and turn_shown:
+		key = "turn"
+		dir = "left" if cos(turn_ang) < 0.0 else "right"
+	player.set_meta("cue", key)
+	var s := 2.1
+	if cue_box == null:
+		cue_box = Control.new()
+		cue_box.name = "Cue"
+		cue_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		add_child(cue_box)
+		var glow := CueGlow.new()
+		glow.name = "Glow"
+		glow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		cue_box.add_child(glow)
+		player.set_meta("cue_box", cue_box)
+	var full := "%s|%s|%s" % [key, dir, _btn_sig()]
+	if key != "" and full != cue_sig:
+		if cue_sig.get_slice("|", 0) != key:
+			cue_a = 0.0  # a new cue fades in
+		cue_sig = full
+		var old := cue_box.get_node_or_null("Row")
+		if old != null:
+			cue_box.remove_child(old)
+			old.queue_free()
+		var row := HBoxContainer.new()
+		row.name = "Row"
+		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.alignment = BoxContainer.ALIGNMENT_CENTER
+		row.add_theme_constant_override("separation", 10)
+		var items: Array = []
+		match key:
+			"plug":
+				items = [UiKit.icon("bolt", Color(1.0, 0.75, 0.3), 56.0 * s)]
+			"throw":
+				items = [_button("throw", "", s), UiKit.icon("dot", Color(0.95, 0.98, 1.0), 64.0 * s)]
+			"turn":
+				items = [_button("turn", dir, s), UiKit.icon("arrow_" + dir, Color(1.0, 0.9, 0.4), 40.0 * s)]
+		for k in items.size():
+			var c: Control = items[k]
+			if k == 0:
+				c.name = "Button"
+			c.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+			c.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			row.add_child(c)
+		cue_box.add_child(row)
+	cue_a = minf(1.0, cue_a + delta * 4.0) if key != "" else maxf(0.0, cue_a - delta * 2.5)
+	var rw := cue_box.get_node_or_null("Row") as Control
+	cue_box.visible = cue_a > 0.01 and rw != null
+	if not cue_box.visible:
+		if cue_a <= 0.01:
+			cue_sig = ""
+		return
+	rw.size = rw.get_combined_minimum_size()
+	var k2 := absf(sin(Time.get_ticks_msec() * 0.004))
+	var at := Vector2(size.x * 0.5, size.y * 0.8)
+	cue_box.position = at - Vector2(rw.size.x * 0.5, rw.size.y + 10.0 * k2)
+	rw.position = Vector2.ZERO
+	cue_box.modulate = Color(1.0 + 0.3 * k2, 1.0 + 0.3 * k2, 1.0 + 0.3 * k2, cue_a * (0.8 + 0.2 * k2))
+	var btn := rw.get_node_or_null("Button") as Control
+	var glow2 := cue_box.get_node_or_null("Glow") as CueGlow
+	if btn != null:
+		btn.pivot_offset = btn.size * 0.5
+		btn.scale = Vector2.ONE * (1.0 + 0.15 * k2)
+		if glow2 != null:
+			glow2.position = btn.position + btn.size * 0.5
+			glow2.r = btn.size.y * 0.75 * (1.0 + 0.2 * k2)
+			glow2.a = cue_a
+			glow2.queue_redraw()
 
 
 func _draw() -> void:
@@ -132,7 +314,29 @@ func _draw() -> void:
 			var hc := Color(1.0, 0.85, 0.4, hit_flash)
 			for d in [Vector2(1, 1), Vector2(-1, 1), Vector2(1, -1), Vector2(-1, -1)]:
 				draw_line(c + d * 12.0, c + d * 22.0, hc, 3.0)
-	_draw_map(Vector2(size.x - MAP_SIZE - 30.0, size.y - MAP_SIZE - 30.0), MAP_SIZE)
+	if main.simple and turn_a > 0.01:
+		_draw_turn_arrow(c)
+	if not main.simple:
+		_draw_map(Vector2(size.x - MAP_SIZE - 30.0, size.y - MAP_SIZE - 30.0), MAP_SIZE)
+
+
+## Simple mode: a fat glowing arrow round the crosshair pointing at the nearest snowman (off screen).
+func _draw_turn_arrow(c: Vector2) -> void:
+	var k := absf(sin(Time.get_ticks_msec() * 0.006))
+	var d := Vector2(cos(turn_ang), sin(turn_ang))
+	var n := Vector2(-d.y, d.x)
+	var tip := c + d * (205.0 + 18.0 * k)
+	var base := tip - d * 70.0
+	var col := Color(1.0, 0.9, 0.35, turn_a * (0.7 + 0.3 * k))
+	for i in 3:
+		var g := 10.0 * (3 - i)
+		draw_colored_polygon(PackedVector2Array([tip + d * g, base + n * (44.0 + g) - d * g * 0.5, base - n * (44.0 + g) - d * g * 0.5]),
+			Color(1.0, 0.95, 0.6, 0.12 * turn_a))
+	draw_colored_polygon(PackedVector2Array([tip, base + n * 44.0, base - n * 44.0]), col)
+	var tail := PackedVector2Array([base + n * 18.0, base - n * 18.0, base - n * 18.0 - d * 50.0, base + n * 18.0 - d * 50.0])
+	draw_colored_polygon(tail, col)
+	draw_polyline(PackedVector2Array([tip, base + n * 44.0, base + n * 18.0, base + n * 18.0 - d * 50.0, base - n * 18.0 - d * 50.0,
+		base - n * 18.0, base - n * 44.0, tip]), Color(0.2, 0.12, 0.0, 0.8 * turn_a), 3.0)
 
 
 ## Top-down fort map, forward is up.

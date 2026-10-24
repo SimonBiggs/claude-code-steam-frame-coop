@@ -154,7 +154,7 @@ func _ready() -> void:
 	tag = Label3D.new()
 	tag.text = "P%d" % (index + 1)
 	tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	tag.no_depth_test = true
+	tag.no_depth_test = false
 	tag.fixed_size = true
 	tag.pixel_size = 0.0012
 	tag.font_size = 30
@@ -354,10 +354,12 @@ func _process(delta: float) -> void:
 	_update_camera(delta)
 	if hud_label:
 		var lines := "P%d   HP %d / %d" % [index + 1, maxi(0, int(hp)), int(MAX_HP)]
-		if carrying:
+		if carrying and not main.simple:
 			lines += "\nCarrying an ember: take it to the campfire!"
 		hud_label.text = lines
-	if hint_label:
+	if hint_label and main.simple:
+		hint_label.text = ""  # simple mode: no words (main shows a pulsing heart cue while you're down)
+	elif hint_label:
 		if is_down:
 			hint_label.text = "YOU'RE DOWN!\nA friend can stand next to you to revive you,\nor the Giant can carry you to the campfire"
 		elif carried:

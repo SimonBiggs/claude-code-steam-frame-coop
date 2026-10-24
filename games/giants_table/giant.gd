@@ -107,7 +107,7 @@ func setup_vr(origin: XROrigin3D, cam: XRCamera3D, left: XRController3D, right: 
 	wrist_label.outline_size = 26
 	wrist_label.outline_modulate = Color.BLACK
 	wrist_label.modulate = Color(1.0, 0.92, 0.7)
-	wrist_label.no_depth_test = true
+	wrist_label.no_depth_test = false
 	wrist_label.render_priority = 5
 	wrist_label.position = Vector3(0.0, 0.9, 1.4)
 	wrist_label.rotation_degrees = Vector3(-50, 0, 0)
@@ -385,7 +385,7 @@ func _try_grab(h: Hand) -> bool:
 	var best = null
 	var best_d := INF
 	var reach := FLAT_REACH if flat else VR_REACH
-	for group in ["goblins", "boulders", "embers", "knights"]:
+	for group in ["goblins", "boulders", "embers", "props", "knights"]:
 		for o in get_tree().get_nodes_in_group(group):
 			if o.is_queued_for_deletion() or (group == "knights" and not o.active):
 				continue
@@ -400,12 +400,15 @@ func _try_grab(h: Hand) -> bool:
 			if d < reach and d < best_d:
 				best_d = d
 				best = o
+	if best == null and main.scenery != null:
+		best = main.scenery.grab_tree(h.pos, reach, flat)  # simple mode: pull a tree out of the table
 	if best == null:
 		return false
 	if not best.can_grab():
 		if h.refuse_t <= 0.0:
 			h.refuse_t = 1.0
-			main.popup(best.grab_center() + Vector3.UP * 0.9, "OUCH! Too spiky!\nKnights, get this one!", Color(1.0, 0.6, 0.5))
+			main.burst(best.grab_center() + Vector3.UP * 0.5, Color(1.0, 0.4, 0.3), 10, 0.08)
+			main.popup(best.grab_center() + Vector3.UP * 0.9, "OUCH!" if main.simple else "OUCH! Too spiky!\nKnights, get this one!", Color(1.0, 0.6, 0.5))
 			main.sound("hurt", -6.0, 0.7)
 			haptic(h, 0.9, 0.15)
 		return false
@@ -493,9 +496,11 @@ func _vr_controls(delta: float) -> void:
 	var head_y := xr_camera.position.y
 	if calibrated and not has_meta("calib_y"):
 		rc = true  # first frame after this code arrived: fit to whoever is wearing it now
-	elif calibrated and absf(head_y - float(get_meta("calib_y", head_y))) > 0.15:
+	# The camera's tracking position is in world-scaled units (XRServer.world_scale is ~20 here), so
+	# compare in real metres: before, 0.75 cm of leaning re-fitted the table and snapped the Giant back.
+	elif calibrated and absf(head_y - float(get_meta("calib_y", head_y))) / maxf(XRServer.world_scale, 1.0) > 0.15:
 		set_meta("height_off_t", float(get_meta("height_off_t", 0.0)) + delta)
-		if float(get_meta("height_off_t", 0.0)) > 1.5:
+		if float(get_meta("height_off_t", 0.0)) > 3.0:
 			rc = true
 	else:
 		set_meta("height_off_t", 0.0)
@@ -509,6 +514,11 @@ func _vr_controls(delta: float) -> void:
 	else:
 		set_meta("both_t", 0.0)
 	if rc and not recenter_was:
+		print("Giant: table re-fit (A=%s B=%s both_t=%.1f height_off=%.1f head_dy=%.2f m)" % [
+			hand_r.is_button_pressed("ax_button") or hand_l.is_button_pressed("ax_button"),
+			hand_l.is_button_pressed("by_button") or hand_r.is_button_pressed("by_button"),
+			float(get_meta("both_t", 0.0)), float(get_meta("height_off_t", 0.0)),
+			(head_y - float(get_meta("calib_y", head_y))) / maxf(XRServer.world_scale, 1.0)])
 		var flat_pos := Vector2(xr_camera.global_position.x, xr_camera.global_position.z)
 		recenter(atan2(flat_pos.x, flat_pos.y))
 		main.sound("pickup", -8.0, 0.7)
@@ -553,6 +563,9 @@ func _orbit(angle: float) -> void:
 
 
 func _update_wrist() -> void:
+	if main.simple:
+		wrist_label.text = "WAVE %d" % main.wave if main.wave > 0 else ""
+		return
 	var status := ""
 	if main.net.mode == "host" and not main.net.connected:
 		status = "\nWaiting for the knights to join…"

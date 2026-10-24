@@ -14,6 +14,9 @@ extends Node
 ## by pressing A on a fake controller, checks Start does NOT join, and plays again from the final scores.
 ## Real controllers are attached to this machine: their button presses are swallowed (they must not
 ## pause or join the test), and if anything else pauses the game the bot resumes it.
+## Secret-word check (family play-test: "how do you all know what it is?"): during every painting round
+## the bot collects every text a guesser could see (Label3Ds on the layers a TV camera draws, the TV
+## HUD lines and banner) and at the reveal checks none contains the word ("BOT LEAK" = failure).
 
 const FAKE_PAD := 40
 
@@ -37,6 +40,11 @@ var seen_types := {}
 var balloon_tries := 0
 var votes_cast := 0
 var undo_done := -1
+var seen_texts := {}  # every text a guesser could see during this round's intro / draw (secret-word check)
+var scan_t := 0.0
+var leaks := 0
+var word_checks := 0
+var card_seen := ""  # the artist-only word card above the easel, as seen during this round
 
 
 class RealPadFilter extends Node:
@@ -135,6 +143,7 @@ func _process(delta: float) -> void:
 		# Short runs: skip the intros (after a moment to read them).
 		if main.state == "intro" and main.state_t > 1.5 and main.state_t < 4.0:
 			main.state_t = 99.0
+	_scan_guesser_texts(delta)
 	_track(mode)
 	if (main.state == "reveal" or main.state == "over") and main.state_t > 2.0:
 		cont_t -= delta
@@ -349,6 +358,7 @@ func _track(mode: String) -> void:
 	seen_types[main.round_type] = true
 	if st != last_state:
 		if st == "reveal":
+			_check_leaks(mode)
 			rounds_done += 1
 			var got := 0
 			for g in main.active_guessers():
@@ -393,3 +403,59 @@ func _report(mode: String) -> void:
 		mode, t, main.state, main.round_n, main.round_type, main.time_left, main.hint_text, main.players[0].score,
 		main.canvas.strokes.size(), main.canvas.lives.size(), main.canvas.chunks.size(), main.canvas.point_count, max_points, main.canvas.rev,
 		str(main.options_for(1)), views, cell, rounds_done, games_done, ", ".join(act)])
+
+
+func _scan_guesser_texts(delta: float) -> void:
+	scan_t -= delta
+	if scan_t > 0.0 or main.round_type == "team" or not (main.state == "draw" or main.state == "intro"):
+		return
+	scan_t = 0.25
+	var wl: Label3D = main.canvas.word_label
+	if main.net.mode != "client" and main.state == "draw" and wl.is_visible_in_tree() and wl.layers == 2:
+		card_seen = wl.text
+	var mask: int = 0xFFFFF & ~2 & ~8  # what a TV guesser camera draws (no SECRET_LAYER, no VR_LAYER)
+	var stack: Array = [main]
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		stack.append_array(n.get_children())
+		var l3 := n as Label3D
+		if l3 != null and l3.is_visible_in_tree() and (l3.layers & mask) != 0 and l3.text != "":
+			seen_texts[l3.text] = "Label3D " + str(main.get_path_to(l3))
+	var hud: Array = [main.center_label]
+	for i in range(1, main.players.size()):
+		var g = main.players[i]
+		if g.active and g.hud != null:
+			hud.append_array([g.hint_label, g.banner_label, g.status_label, g.hud_label, g.big_label])
+	for l in hud:
+		var lb := l as Label
+		if lb != null and lb.is_visible_in_tree() and lb.text != "" and not lb.text.begins_with("It was"):
+			seen_texts[lb.text] = "Label " + str(lb.name)
+
+
+func _check_leaks(mode: String) -> void:
+	var w: String = str(main.reveal_word).to_upper()
+	if w == "" or main.round_type == "team":
+		seen_texts.clear()
+		return
+	var re := RegEx.new()
+	re.compile("(^|[^A-Z])" + w + "($|[^A-Z])")
+	var bad := 0
+	if mode != "client":
+		print("BOT %s: artist word card above the easel: '%s' (%s)" % [mode, card_seen, "ok" if card_seen == w else "MISSING"])
+		if card_seen != w:
+			print("BOT LEAK-CHECK FAIL %s: the artist's word card did not show '%s'" % [mode, w])
+	card_seen = ""
+	var blanks := RegEx.new()
+	blanks.compile("_ [A-Z_]")  # the old letter hints ("_ A _ _")
+	for txt in seen_texts:
+		if blanks.search(str(txt).to_upper()) != null:
+			bad += 1
+			print("BOT LEAK %s: a guesser could see letter hints in %s: %s" % [mode, seen_texts[txt], str(txt)])
+		if re.search(str(txt).to_upper()) != null:
+			bad += 1
+			print("BOT LEAK %s: a guesser could see the secret word '%s' in %s: %s" % [mode, w, seen_texts[txt], str(txt).replace("\n", " | ")])
+	leaks += bad
+	word_checks += 1
+	print("BOT %s: secret-word check round %d: %d guesser-visible texts, %d leaks (total %d leaks in %d checks)" % [mode,
+		main.round_n, seen_texts.size(), bad, leaks, word_checks])
+	seen_texts.clear()

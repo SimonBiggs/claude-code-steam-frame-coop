@@ -296,7 +296,8 @@ class Batch:
 		return mi
 
 
-static func build(main: Node3D, vr: bool) -> void:
+## skip_scenery: the trees and cottages are built by scenery.gd instead (simple mode: they react to touch).
+static func build(main: Node3D, vr: bool, skip_scenery: bool = false) -> void:
 	# --- Environment: a warm, dim room lit by a lamp and the village campfire.
 	var env := WorldEnvironment.new()
 	var e := Environment.new()
@@ -323,7 +324,7 @@ static func build(main: Node3D, vr: bool) -> void:
 	main.add_child(lamp)
 
 	_build_terrain(main)
-	_build_props(main)
+	_build_props(main, skip_scenery)
 	_build_room(main)
 
 
@@ -423,7 +424,7 @@ static func _build_terrain(main: Node3D) -> void:
 	main.add_child(slab)
 
 
-static func _build_props(main: Node3D) -> void:
+static func _build_props(main: Node3D, skip_scenery: bool = false) -> void:
 	var trunk := Batch.new()
 	var pine := Batch.new()
 	var leaf := Batch.new()
@@ -436,7 +437,7 @@ static func _build_props(main: Node3D) -> void:
 	var flowers_b := Batch.new()
 	var wood := Batch.new()
 
-	for t in trees():
+	for t in ([] if skip_scenery else trees()):
 		var x: float = t[0]
 		var z: float = t[1]
 		var sc: float = t[3]
@@ -450,7 +451,7 @@ static func _build_props(main: Node3D) -> void:
 			leaf.add(sphere(0.75, 10), base * Transform3D(Basis(), Vector3(0, 1.5, 0)))
 			leaf.add(sphere(0.5, 8), base * Transform3D(Basis(), Vector3(0.3, 2.05, 0.1)))
 
-	for c in COTTAGES:
+	for c in ([] if skip_scenery else COTTAGES):
 		var x: float = c[0]
 		var z: float = c[1]
 		var y := height(x, z)

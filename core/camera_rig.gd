@@ -38,6 +38,10 @@ var auto_behind := 0.0
 var avoid_walls := true
 var collision_mask := 1
 var wall_margin := 0.25
+## Follow mode keeps the camera at least this far above the target's feet, so looking up never puts it
+## under a floor the wall check can't see (e.g. a ground that is only a mesh, no collision). -INF = off
+## (flying games that want to look up from below).
+var floor_clearance := 0.4
 ## Extra bodies the wall check ignores (the target itself is always ignored if it is a body).
 var exclude: Array[RID] = []
 
@@ -248,6 +252,7 @@ func _follow_xf(delta: float) -> Transform3D:
 	var rate := 25.0 if want_d < _cur_dist else 3.0
 	_cur_dist = lerpf(_cur_dist, want_d, 1.0 - exp(-rate * delta))
 	var pos := _pivot + _orbit_dir() * maxf(_cur_dist, min_distance)
+	pos.y = maxf(pos.y, tp.y + floor_clearance)
 	return _look_xf(pos, _pivot)
 
 

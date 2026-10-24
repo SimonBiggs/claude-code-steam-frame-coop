@@ -1,0 +1,18 @@
+#!/bin/bash
+# claude-restart [DELAY]: restart the main Claude conversation in place, e.g. so new MCP tools load. After DELAY
+# seconds (default 15, so Claude can finish its reply) it stops the running main-session process and runs
+# claude-main again in the same tmux pane (or in tmux session "claude" if it isn't in one).
+delay=${1:-15}
+pid=$("$HOME/.local/bin/claude-main" --running | grep -E '^[0-9]+$')
+[ -z "$pid" ] && pid=$CLAUDE_PID
+pane=""
+[ -n "$pid" ] && pane=$(tr '\0' '\n' < /proc/$pid/environ 2>/dev/null | sed -n 's/^TMUX_PANE=//p')
+systemd-run --user --collect --quiet --on-active=$delay --unit "claude-restart-$$" /bin/bash -c "
+  [ -n '$pid' ] && kill -TERM $pid; for i in \$(seq 20); do kill -0 $pid 2>/dev/null || break; sleep 0.5; done
+  if [ -n '$pane' ] && /usr/bin/tmux has-session -t '$pane' 2>/dev/null; then
+    /usr/bin/tmux send-keys -t '$pane' 'claude-main \"You restarted yourself (claude-restart)\"' Enter
+  else
+    /usr/bin/tmux new-session -d -s claude 'claude-main \"You restarted yourself (claude-restart)\"'
+  fi
+  echo \"\$(date -Is) claude-restart: restarted main session (was pid $pid, pane $pane)\" >> ~/.claude/watchdog.log"
+echo "restarting the main Claude session in ${delay}s (pid ${pid:-none}, pane ${pane:-none})"

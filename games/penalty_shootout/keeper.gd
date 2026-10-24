@@ -12,6 +12,9 @@ extends Node3D
 ## while a striker lines up - touch it with a glove (flat keeper: it is collected automatically) for
 ## BIG GLOVES, SLOW-MO or DOUBLE SAVE on the next shot.
 ## Replays (TV views) pose the body from a recording (replay_pose).
+## Simple mode picture cue (flat keeper, main.show_cue): while a ball is coming somewhere the gloves
+## won't reach, a pulsing glowing A (keyboard: SPACE) with an arrow the way to dive; it goes once
+## you've dived twice. The VR keeper is taught by the ghost hand (main._update_ghost_hand).
 
 const GLOVE_R := 0.12  # visual glove radius (VR, metres before world scale)
 const VR_FORGIVE := 0.05  # extra save radius in VR
@@ -23,6 +26,7 @@ const DIVE_TIME := 0.95
 const KEEPER_Z := 0.35
 const TARGET_HEAD := 1.7  # world-scaled head height we fit to
 const MeshKit := preload("res://games/penalty_shootout/mesh_kit.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 const BIG_GLOVES := 1.6
 const POWER_NAMES := {"big": "BIG GLOVES", "slow": "SLOW-MO", "double": "DOUBLE SAVE"}
 const POWER_COLORS := {"big": Color(0.3, 1.0, 0.5), "slow": Color(0.4, 0.75, 1.0), "double": Color(1.0, 0.8, 0.25)}
@@ -165,6 +169,7 @@ func attach_xr(origin: XROrigin3D, cam: XRCamera3D, left: XRController3D, right:
 	glove_label.rotation.x = deg_to_rad(-55.0)
 	glove_label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
 	gloves[1].add_child(glove_label)
+	glove_label.visible = not main.simple  # simple mode: no score text on the glove
 
 
 func vr_trigger() -> bool:
@@ -188,6 +193,8 @@ func _process(delta: float) -> void:
 	_update_bubble(delta)
 	if hud_label != null:
 		hud_label.text = main.hud_text(self)
+	if main.simple and not vr and not ghost and hud != null:
+		_update_cue(delta)
 
 
 # --- Power-ups -------------------------------------------------------------------------------
@@ -416,6 +423,7 @@ func _flat_update(delta: float) -> void:
 		dive_t = 0.0
 		dive_dir = want_dive.normalized()
 		main.sound("dive", -6.0)
+		main.cue_did(self, "dive")
 	var e := 0.0
 	if dive_t >= 0.0:
 		dive_t += delta
@@ -625,3 +633,25 @@ func _ghost_update(delta: float) -> void:
 	glove_l = glove_l.lerp(net_gl, k)
 	glove_r = glove_r.lerp(net_gr, k)
 	_pose_body(head_pos, down_dir, glove_l, glove_r)
+
+
+## Simple mode, flat keeper: dive cue (A / SPACE + an arrow) while a ball is coming out of reach.
+func _update_cue(delta: float) -> void:
+	var key := ""
+	var dir := ""
+	var st: String = main.state
+	if st == "flight" and not main.replay_on and not get_tree().paused and dive_t < 0.0 and not main.cue_learned(self, "dive"):
+		var at_x: float = main.pspot.x if main.practice == "keeper" else main.ball.position.x
+		var dx := at_x - kx
+		if absf(dx) > 0.9:
+			key = "dive"
+			dir = "left" if dx > 0.0 else "right"  # the keeper looks down the pitch: world +x is screen left
+	var vs: Vector2 = hud.size
+	var ui := clampf(minf(vs.x / 960.0, vs.y / 540.0), 0.45, 1.3)
+	var s := 1.7 * ui
+	var at := Vector2(vs.x * (0.5 + (0.2 if dir == "right" else -0.2)), vs.y * 0.85)
+	var btn := "A" if joy >= 0 else "SPACE"
+	var make := func() -> Array:
+		var arrow := UiKit.icon("arrow_" + dir, Color(1.0, 0.9, 0.4), 34.0 * s)
+		return [UiKit.glyph(btn, s), arrow]
+	main.show_cue(self, key, "%s/%s/%.2f" % [dir, btn, s], make, at, delta)

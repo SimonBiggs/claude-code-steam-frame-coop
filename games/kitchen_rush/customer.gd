@@ -140,7 +140,7 @@ func _ready() -> void:
 	bubble.outline_size = 18
 	bubble.pixel_size = 0.0055
 	bubble.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	bubble.no_depth_test = true
+	bubble.no_depth_test = false
 	bubble.modulate = Color.WHITE
 	bubble.position.y = 2.95
 	add_child(bubble)
@@ -342,9 +342,11 @@ func _process(delta: float) -> void:
 		spinner.rotation.y += delta * (14.0 if state == "happy" else 5.0)
 	if blinker:
 		blinker.visible = int(bob_t * 1.5) % 2 == 0
+	if main and main.simple:
+		bubble.visible = false  # simple mode: the little dish picture says it all
 	if order_vis:
 		order_vis.rotation.x = sin(bob_t * 0.5) * 0.1
-		order_vis.visible = waiting() and hello_t <= 0.0
+		order_vis.visible = waiting() and (hello_t <= 0.0 or main.simple)
 	bar_fill.scale.z = maxf(frac, 0.001)
 	bar_fill.position.z = -0.44 * (1.0 - frac)
 	var bar_col := Color(1.0, 0.25, 0.2).lerp(Color(0.3, 1.0, 0.4), clampf(frac * 1.6 - 0.2, 0.0, 1.0))

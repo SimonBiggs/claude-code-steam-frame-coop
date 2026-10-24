@@ -23,7 +23,7 @@ func _ready() -> void:
 	add_child(arrow)
 	mat = World.mat(color, 2.5)
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.no_depth_test = true
+	mat.no_depth_test = false
 	mat.render_priority = 5
 	var head := World.cyl(arrow, 0.0, 0.32 * size, 0.42 * size, Vector3(0, 0.21 * size, 0), mat, 10)
 	head.rotation.x = PI  # point down
@@ -38,7 +38,7 @@ func _ready() -> void:
 	var rm := World.mat(color, 2.0)
 	rm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	rm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	rm.no_depth_test = true
+	rm.no_depth_test = false
 	rm.render_priority = 5
 	ring.material_override = rm
 	add_child(ring)
