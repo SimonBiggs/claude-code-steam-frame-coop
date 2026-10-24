@@ -287,6 +287,8 @@ func _setup_game(mode: String) -> void:
 	_assign_joypads()
 	if seats.deck_alone():
 		seats.deck_solo(0)
+	elif mode == "client" and players[1].active:
+		players[1].set_meta(ClassicSeats.WANT, true)  # P2 plays at once, but must still ask (another machine may have it)
 	ready_to_play = true
 	_ensure_join_listener()
 	_restore_party()

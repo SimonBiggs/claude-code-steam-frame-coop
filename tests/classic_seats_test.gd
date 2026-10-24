@@ -7,6 +7,9 @@ extends SceneTree
 ##  - ClassicSeats itself: join arbitration between two machines, owner checks, per-machine leave.
 const ClassicSeats := preload("res://core/classic_seats.gd")
 const COPY_FUNCS := "func (_grant_seat|remote_owner_ok|_free_seats_of|_free_seat|_sync_seats|_on_seat_moved|_move_input|_owners|_foreign|_mine|_deck_solo)\\("
+## A TV machine's P2 starts playing at once, so it must still ask the host for the seat (two machines both
+## drove P2 in Dragon Rider when it didn't).
+const P2_ASKS := "players\\[1\\]\\.set_meta\\((ClassicSeats\\.WANT|\"want_join\")|request_join\\(players\\[1\\]\\)"
 const NEEDS := ["ClassicSeats.new(", "seats.host_action(", "seats.handle_event(", "seats.machine_left(", "seats.all_left(", "seats.sync()", "seats.request_joins("]
 
 
@@ -83,6 +86,8 @@ func _check_games(fails: Array[String]) -> void:
 			var src := _read("res://games/%s/%s" % [id, f])
 			if copy_re.search(src) != null or owners_re.search(src) != null or src.contains("remote_owner_ok"):
 				fails.append("%s/%s: a copy of the seat code (use core/classic_seats.gd)" % [id, f])
+		if multi and RegEx.create_from_string(P2_ASKS).search(main) == null:
+			fails.append("%s: a TV machine's P2 never asks the host for its seat (mark players[1] want_join in client mode)" % id)
 		if multi:
 			for n in NEEDS:
 				if not main.contains(n):
