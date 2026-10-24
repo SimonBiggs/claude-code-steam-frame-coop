@@ -32,7 +32,19 @@ extends Node3D
 ##    horns, swing the lantern, spin the flag, poof passing clouds, startle birds that fly alongside.
 ##    The dragon also pops balloons it flies into, so solo VR is fun too.
 ##  - Off: score / stars / combo readouts, popups, lanterns going out and game over, awards and level
-##    reports, help lines. Text: a single short headline (VR and TV), plus one short TV control line.
+##    reports, help lines. Text: a single short headline (VR and TV).
+##  - No how-to words (visual teaching): each TV view shows a pulsing glowing button in that player's
+##    own controls plus an icon, low in the view (hud.gd). Flat rider: STICK / a W A S D key + an arrow
+##    the way to the next ring (until two rings flown through), RT / SPACE + a forward arrow (flap) when
+##    the ring is far ahead (until flapped twice). Gunners: RT / CLICK / SPACE / ENTER + a bubble (fire,
+##    until two presses), STICK / MOUSE / an arrow key + an arrow when their practice balloon or a storm
+##    sprite is off screen (until they've turned to it twice), a pulsing bolt when the controller is
+##    unplugged. The next-ring and practice-balloon markers are big glowing arrows at the view's edge.
+##    VR: the ghost hands show the rein moves in practice; the shared Cannon Cove ghost hand
+##    (games/cannon_cove/ghost_hand.gd, driven from here) squeezes the trigger when the ring is far ahead,
+##    until the rider has flapped twice; the gold arrow ahead of the nose grows and pulses while the
+##    Storm King's ring is open (no FLY THROUGH! text). PAUSED has no sentence; controller and full-seat
+##    sentences are gone. Each cue goes after two goes (cue_did / cue_learned).
 
 const WorldScript := preload("res://games/dragon_rider/world.gd")
 const DragonScript := preload("res://games/dragon_rider/dragon.gd")
@@ -47,6 +59,7 @@ const BossScript := preload("res://games/dragon_rider/boss.gd")
 const JoinListenerScript := preload("res://games/dragon_rider/join_listener.gd")
 const PropsScript := preload("res://games/dragon_rider/props.gd")
 const GhostHandsScript := preload("res://games/dragon_rider/ghost_hands.gd")
+const CoveGhostHand := preload("res://games/cannon_cove/ghost_hand.gd")
 const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
 const NetScript := preload("res://core/net.gd")
@@ -198,6 +211,9 @@ var idle_t := 0.0              # rider not steering (for the gentle nudge toward
 var next_visitor := 0
 var sounds_added := {}
 var solo_boss_t := 0.0
+var flap_hand: Node3D            # simple mode, VR: the shared Cannon Cove ghost hand squeezing the trigger (flap)
+var flap_idle_t := 0.0
+var flap_was := false
 
 
 func _ready() -> void:
@@ -683,6 +699,7 @@ func _check_rings() -> void:
 		score += pts
 		burst(rp, Color(1.0, 0.85, 0.35), 24, 0.25)
 		popup(Vector3(0, 1.6, -7.0), label, Color(1.0, 0.9, 0.4))
+		cue_did(players[0], "steer")
 		players[0].haptic("l", 0.5)
 		players[0].haptic("r", 0.5)
 	else:
@@ -1041,7 +1058,8 @@ func on_bubble_hit(b: Node3D, target: Node3D) -> void:
 			else:
 				boss.open_ring()
 				sound("thunder", -2.0, 0.7)
-				show_center("FLY THROUGH!" if SIMPLE_MODE else "The Storm King is DIZZY!\nRIDER: fly through the GOLDEN RING in its middle!", 4.0)
+				if not SIMPLE_MODE:  # simple: the gold arrow grows and points at the open ring (_update_arrow)
+					show_center("The Storm King is DIZZY!\nRIDER: fly through the GOLDEN RING in its middle!", 4.0)
 		else:
 			sound("hit", -4.0, 0.9)
 
@@ -1329,6 +1347,7 @@ func _practice_update(delta: float) -> void:
 			players[0].haptic("l", 0.5)
 			players[0].haptic("r", 0.5)
 			print("Practice ring %d (%s) done" % [practice_step + 1, PRACTICE_MOVES[practice_step]])
+			cue_did(players[0], "steer")
 			practice_step += 1
 			if practice_step >= 3:
 				_end_practice()
@@ -1462,6 +1481,61 @@ func _simple_level_complete() -> void:
 	show_center("HOORAY!", SIMPLE_DONE_TIME - 1.0)
 
 
+## Simple mode picture cues: a player has done `key` once more ("steer", "flap", "fire", "aim"); its
+## cue goes after two.
+func cue_did(p, key: String) -> void:
+	var done: Dictionary = p.get_meta("cue_done", {})
+	done[key] = int(done.get(key, 0)) + 1
+	p.set_meta("cue_done", done)
+
+
+func cue_learned(p, key: String) -> bool:
+	var done: Dictionary = p.get_meta("cue_done", {})
+	return int(done.get(key, 0)) >= 2
+
+
+## Simple mode: is the next ring far and straight ahead (a good moment to flap)?
+func flap_moment() -> bool:
+	if phase != "fly" or get_tree().paused:
+		return false
+	var r: Dictionary = next_ring_info()
+	if r.is_empty():
+		return false
+	var to: Vector3 = (r.pos as Vector3) - dragon.core_position()
+	if to.length() < 40.0:
+		return false
+	var err := wrapf(atan2(-to.x, -to.z) - float(dragon.yaw), -PI, PI)
+	return absf(err) < 0.3
+
+
+## Simple mode, VR: the shared Cannon Cove ghost hand sits just over the rider's right hand and its
+## pointing finger squeezes the trigger (flap = faster) when the next ring is far ahead, until the
+## rider has flapped twice. Only the rider's headset builds it.
+func _update_flap_hand(delta: float) -> void:
+	var r = players[0]
+	var want: bool = not cue_learned(r, "flap") and flap_moment() and not r.vr_trigger_held()
+	flap_idle_t = flap_idle_t + delta if want else 0.0
+	var show := flap_idle_t > 1.0
+	if flap_hand == null:
+		if not show:
+			return
+		flap_hand = CoveGhostHand.new()
+		flap_hand.name = "FlapHand"
+		dragon.add_child(flap_hand)  # top_level: placed by the rider's right hand every frame
+	flap_hand.visible = show
+	if not show:
+		return
+	var t := Time.get_ticks_msec() * 0.001
+	var hand_at: Vector3 = r.hand_r.global_position
+	# Fingers forward along the dragon's heading, just above the real hand so they never overlap.
+	flap_hand.global_transform = Transform3D(dragon.global_basis.orthonormalized(), hand_at + dragon.global_basis.y.normalized() * 0.07)
+	flap_hand.mat.albedo_color.a = 0.45 + 0.15 * sin(t * 4.0)
+	for f in flap_hand.fingers:
+		f.rotation.x = -1.2  # a fist round the reins...
+	flap_hand.thumb.rotation.x = -0.7
+	flap_hand.fingers[0].rotation.x = -0.2 - 1.1 * maxf(0.0, sin(t * 5.0))  # ...and the pointing finger pulls the trigger
+
+
 ## Simple mode: the dragon pops balloons it flies into (fun solo, too).
 func _fly_through_balloons() -> void:
 	if course == null:
@@ -1504,7 +1578,6 @@ func _solo_boss(delta: float) -> void:
 	boss.open_ring()
 	burst(boss.global_position, Color(1.0, 0.85, 0.3), 26, 0.3)
 	sound("thunder", -2.0, 0.7)
-	show_center("FLY THROUGH!", 4.0)
 
 
 ## Simple mode (host): comfy flight that can't get stuck. A soft height band around the next ring
@@ -1598,6 +1671,7 @@ func _simple_animate(delta: float) -> void:
 			var ri: Vector2 = players[0].rein_input
 			right_way = (want == "left" and ri.x < -0.1) or (want == "right" and ri.x > 0.1) or (want == "up" and ri.y > 0.1)
 		ghost_hands.show_demo(want, players[0].head_local(), right_way, delta)
+		_update_flap_hand(delta)
 
 
 # --- Main loop -----------------------------------------------------------------
@@ -1634,7 +1708,11 @@ func _process(delta: float) -> void:
 		if SIMPLE_MODE:
 			inp = _simple_assist(inp, delta)
 			_host_props(delta)
-		dragon.fly(delta, inp, players[0].flap_held() and phase != "over")
+		var flap: bool = players[0].flap_held() and phase != "over"
+		if flap and not flap_was:
+			cue_did(players[0], "flap")
+		flap_was = flap
+		dragon.fly(delta, inp, flap)
 		_host_update(delta)
 		if not is_inside_tree():
 			return  # "play again" just reloaded the scene
@@ -1666,6 +1744,10 @@ func _update_arrow(delta: float) -> void:
 	var q := arrow.global_basis.get_rotation_quaternion().slerp(want.get_rotation_quaternion(), 1.0 - exp(-6.0 * delta))
 	arrow.global_basis = Basis(q)
 	arrow.position = Vector3(0, 0.6 + sin(Time.get_ticks_msec() * 0.004) * 0.08, -9.0)
+	# Simple mode: the Storm King's ring is open: the arrow grows and pulses (instead of FLY THROUGH!).
+	var big: bool = SIMPLE_MODE and boss != null and is_instance_valid(boss) and boss.ring_open and not boss.defeated
+	arrow.scale = Vector3.ONE * ((1.8 + 0.3 * absf(sin(Time.get_ticks_msec() * 0.006))) if big else 1.0)
+	arrow.set_meta("boss", big)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -1954,7 +2036,8 @@ func _on_pad_disconnected(device: int) -> void:
 	p.set_meta("last_joy", device)
 	if idx >= 2 and p.active:
 		p.pad_lost_t = 0.0  # leaves after PAD_LEAVE_TIME unless the controller comes back
-		show_center("P%d: controller disconnected" % (idx + 1), 2.0, false)
+		if not SIMPLE_MODE:  # simple: a pulsing bolt in that player's view (hud.gd)
+			show_center("P%d: controller disconnected" % (idx + 1), 2.0, false)
 
 
 func _on_pad_connected(device: int) -> void:
@@ -1982,7 +2065,7 @@ func _on_pad_connected(device: int) -> void:
 	pick.pad_lost_t = -1.0
 	if not pick.active and pick.has_meta("left_by_pad"):
 		_request_join(pick)
-	elif pick.active:
+	elif pick.active and not SIMPLE_MODE:
 		show_center("P%d: controller connected" % (pick.index + 1), 1.2, false)
 
 
@@ -2016,7 +2099,8 @@ func _next_free_index() -> int:
 func _join_slot(device: int):
 	var idx := _next_free_index()
 	if idx < 0:
-		show_center("All the dragon's seats are taken!", 1.5, false)
+		if not SIMPLE_MODE:
+			show_center("All the dragon's seats are taken!", 1.5, false)
 		return null
 	var p = players[idx]
 	if device >= 0:
@@ -2200,7 +2284,10 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 
 
 func _set_pause_banner(paused: bool, who: String) -> void:
-	show_center("PAUSED\n" + who if paused else "", 0.0, false)
+	if SIMPLE_MODE:
+		who = ""  # no explaining sentence: just PAUSED
+	var title := ("PAUSED\n" + who) if who != "" else "PAUSED"
+	show_center(title if paused else "", 0.0, false)
 	if vr_center != null:
 		VrText.snap(vr_center)
 	_update_vr(0.0)
