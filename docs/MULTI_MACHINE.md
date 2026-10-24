@@ -92,3 +92,14 @@ seats = ClassicSeats.new(self, {"no_keys": PlayerScript.NO_KEYS, "free_actions":
   its built-in controls.
 - Game specifics go in as options: `player(i)`, `is_local(p)`, `keys(p)`, `seat_free(p)`, `seat_limit()`,
   `ghost(p, on)`, `moved(from, to)`, `full()`, `deactivate(p)`, `save()`, `layout()`, `ensure_view(p)`.
+- Other machines' players must be MIRRORED on every TV machine: the snapshot carries each active seat's
+  position + yaw, and `apply_net_state` moves a seat when it is a ghost here. Games whose players already
+  glide to `net_target` when `remote` (bee garden, block builders, giant's table, kitchen rush) set
+  `p.remote = on` in the `ghost(p, on)` option; games with their own `ghost` mirror (ghost lantern, hide and
+  seek, snowball blitz) only snap (`net_started = false`).
+- A TV machine's first seat (P2) starts playing locally, so it must still ask: mark it `want_join` in
+  `_setup_game` for client mode (the host may hand out another seat). Never clear `want_join` just because
+  the seat is active (`seats.joined(p)` = active AND ours).
+- A flat host's slot-0 player needs a controller too (`_auto_bind_pad` / base slots: host and not VR).
+- Check: `godot-test --headless --path . -s res://tests/classic_seats_test.gd` (every multi_machine classic
+  game uses the helper, no seat-code copies, arcade `"multi"` matches, the helper's arbitration).
