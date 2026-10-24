@@ -8,6 +8,10 @@ var main
 var panel: ColorRect
 var buttons: Array[Button] = []
 var who := 1  # party games: the slot that opened the menu (sent with the pause, 1 otherwise)
+## Who may drive the open menu: the pad that opened it (-2 = the keyboard; -1 = opened from elsewhere: any pad).
+## Other players still holding a stick / mashing A must not move the highlight or press Restart.
+var opener_device := -1
+var _a_released := {}  # device -> true once its A was let go after the menu opened (a held A doesn't count)
 
 
 func _ready() -> void:
@@ -63,13 +67,24 @@ func _input(event: InputEvent) -> void:
 	var pad := event as InputEventJoypadButton
 	if pad and pad.pressed and pad.button_index == JOY_BUTTON_START and (panel.visible or _pad_in_play(pad.device)):
 		toggle = true
-	# A presses the highlighted button, B resumes: ui_accept has no pad button, so on a Deck / without Steam's
-	# keyboard mapping A did nothing ("I can't press A to quit game").
+	# While open, only the opener's pad (or the keyboard) drives the menu: swallow everyone else's pad input.
+	var joy_dev := -99
+	if event is InputEventJoypadButton or event is InputEventJoypadMotion:
+		joy_dev = event.device
+	if panel.visible and joy_dev != -99 and opener_device >= 0 and joy_dev != opener_device and not toggle:
+		get_viewport().set_input_as_handled()
+		return
+	if pad and not pad.pressed and pad.button_index == JOY_BUTTON_A:
+		_a_released[pad.device] = true
+	# A presses the highlighted button (once that pad's A was released since opening), B resumes: ui_accept has no
+	# pad button, so on a Deck / without Steam's keyboard mapping A did nothing ("I can't press A to quit game").
 	if pad and pad.pressed and panel.visible and not toggle:
 		if pad.button_index == JOY_BUTTON_A:
+			get_viewport().set_input_as_handled()
+			if not _a_released.get(pad.device, false):
+				return  # still held from play
 			var f := get_viewport().gui_get_focus_owner()
 			if f is BaseButton and panel.is_ancestor_of(f):
-				get_viewport().set_input_as_handled()
 				(f as BaseButton).pressed.emit()
 			return
 		if pad.button_index == JOY_BUTTON_B:
@@ -81,6 +96,7 @@ func _input(event: InputEvent) -> void:
 		_resume()
 	else:
 		who = _slot_of(-2 if key != null else pad.device)
+		opener_device = -2 if key != null else pad.device
 		_open()
 
 
@@ -117,6 +133,7 @@ func _pad_in_play(device: int) -> bool:
 
 
 func _open() -> void:
+	_a_released.clear()
 	panel.visible = true
 	get_tree().paused = true
 	if main and main.net:

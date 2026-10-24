@@ -609,6 +609,8 @@ func _can_quit() -> bool:
 
 
 var quit_panel: PanelContainer
+var quit_opener := -1  # the pad that opened the quit dialog (-2 keyboard); only it may answer (same rule as the pause menu)
+var quit_a_released := false
 
 func _toggle_quit_menu() -> void:
 	if quit_panel and is_instance_valid(quit_panel):
@@ -660,12 +662,19 @@ func _unhandled_input(event: InputEvent) -> void:
 	var esc := event as InputEventKey
 	if _can_quit() and ((start and start.pressed and start.button_index == JOY_BUTTON_START) or (esc and esc.pressed and not esc.echo and esc.physical_keycode == KEY_ESCAPE) or (quit_panel and start and start.pressed and start.button_index == JOY_BUTTON_B)):
 		get_viewport().set_input_as_handled()
+		if not (quit_panel and is_instance_valid(quit_panel)):
+			quit_opener = start.device if start else -2
+			quit_a_released = false
 		_toggle_quit_menu()
 		return
 	if quit_panel and is_instance_valid(quit_panel):
 		# The dialog presses its own focused button on pad A (don't rely on ui_accept having A: a hot-reloaded arcade
 		# never ran ensure_pad_ui_actions at startup, and A did nothing).
-		if start and start.pressed and start.button_index == JOY_BUTTON_A:
+		if start and quit_opener >= 0 and start.device != quit_opener:
+			return  # another player's pad
+		if start and not start.pressed and start.button_index == JOY_BUTTON_A:
+			quit_a_released = true
+		if start and start.pressed and start.button_index == JOY_BUTTON_A and quit_a_released:
 			var f := get_viewport().gui_get_focus_owner()
 			if f is BaseButton and quit_panel.is_ancestor_of(f):
 				get_viewport().set_input_as_handled()
