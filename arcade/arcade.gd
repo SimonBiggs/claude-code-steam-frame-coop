@@ -14,7 +14,7 @@ const GAMES := [
 		"blurb": "Cosy snow-fort defence: throw real snowballs in VR, pack the walls on the TV"},
 	{"id": "cannon_cove", "multi": true, "cat": "action", "name": "CANNON COVE", "scene": "res://games/cannon_cove/main.tscn",
 		"blurb": "Pirate co-op: VR gunner aims the cannons, TV deckhands load them and patch leaks"},
-	{"id": "kitchen_rush", "cat": "party", "name": "KITCHEN RUSH", "scene": "res://games/kitchen_rush/main.tscn",
+	{"id": "kitchen_rush", "multi": true, "cat": "party", "name": "KITCHEN RUSH", "scene": "res://games/kitchen_rush/main.tscn",
 		"blurb": "Co-op cooking chaos: VR chef chops and plates, TV runners fetch and serve"},
 	{"id": "giants_table", "multi": true, "cat": "action", "name": "GIANT'S TABLE", "scene": "res://games/giants_table/main.tscn",
 		"blurb": "Be a VR giant protecting a tiny tabletop village; TV players are the knights"},

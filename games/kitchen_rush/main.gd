@@ -42,6 +42,7 @@ const HudScript := preload("res://games/kitchen_rush/hud.gd")
 const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
 const NetScript := preload("res://core/net.gd")
+const ClassicSeats := preload("res://core/classic_seats.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
 const JoinInputScript := preload("res://games/kitchen_rush/join_input.gd")
 const GuideScript := preload("res://games/kitchen_rush/guide.gd")
@@ -97,6 +98,10 @@ void fragment() {
 """
 
 var players: Array = []
+## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
+var multi_machine := true
+## Which machine drives which runner (core/classic_seats.gd; core/net.gd checks it too).
+var seats: ClassicSeats
 var ready_to_play := false
 var net: Node
 var sfx: Node
@@ -113,7 +118,6 @@ var vr_center: Label3D
 var cameras: Array[Camera3D] = []
 var bubble_rect: TextureRect
 var bubble_tag: Label
-var join_cd := {}  # player index -> seconds until another join request may be sent
 
 # Game state (simulated on the host, mirrored on the client).
 var shift := 0
@@ -196,6 +200,14 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
+	seats = ClassicSeats.new(self, {
+		"free_actions": ["restart", "pause"],
+		"is_local": func(p) -> bool: return not p.remote and not p.ghost,
+		"seat_free": func(p) -> bool: return not p.remote and not p.active and p.joy < 0 and p.key_set < 0 and p.lost_joy < 0 and not p.has_meta(ClassicSeats.WANT),
+		"ghost": _runner_ghost,
+		"deactivate": func(p) -> void: _set_runner_active(p, false),
+		"full": func() -> void: sound("wave", -14.0, 0.7),  # no words
+	})
 	Input.joy_connection_changed.connect(_on_joy_changed)
 	if OS.has_environment("DUO_JOIN"):
 		banner("Connecting to the chef…", 0.0, false)
@@ -214,6 +226,10 @@ func _setup_game(mode: String) -> void:
 	_build_views(mode)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_assign_joypads()
+	if seats.deck_alone():
+		seats.deck_solo(0)  # a Deck on its own: the chef (kitchen helpers fetch, like solo VR)
+	elif mode == "client":
+		players[1].set_meta(ClassicSeats.WANT, true)  # ask the host for P2's runner (it may hand out another one)
 	ready_to_play = true
 	print("Kitchen Rush: %s mode" % mode)
 	if SIMPLE_MODE:
@@ -552,8 +568,8 @@ func _layout_views() -> void:
 	for p in players:
 		if p.has_meta("view"):
 			var c: Control = p.get_meta("view")
-			c.visible = p.active
-			if p.active:
+			c.visible = p.active and not p.remote and not p.ghost
+			if c.visible:
 				views.append(c)
 	var n := views.size()
 	var cols := 1
@@ -847,10 +863,8 @@ func request_join(i: int) -> void:
 	if i < 1 or i >= players.size() or players[i].active:
 		return
 	if net.mode == "client":
-		if join_cd.get(i, 0.0) > 0.0:
-			return
-		join_cd[i] = 1.0
-		net.send_action("join", [], i)
+		players[i].set_meta(ClassicSeats.WANT, true)  # seats.request_joins asks the host until it's ours
+		seats.ask_soon()
 	else:
 		_set_runner_active(players[i], true)
 
@@ -940,13 +954,14 @@ func on_player_activity_changed(p) -> void:
 ## Client / split screen: waiting players with their own controls join by pressing their button;
 ## a runner whose controller was unplugged for a while leaves (it rejoins when plugged back in).
 func _drop_in_update(delta: float) -> void:
-	for k in join_cd.keys():
-		join_cd[k] = float(join_cd[k]) - delta
+	if net.mode == "client":
+		seats.sync()
+		seats.request_joins(delta)
 	if not drop_in_allowed() or game_over or get_tree().paused:
 		return
 	for i in range(1, players.size()):
 		var p = players[i]
-		if not p.active and (p.joy >= 0 or p.key_set >= 0) and p.any_input():
+		if not p.active and (p.joy >= 0 or p.key_set >= 0) and not p.has_meta(ClassicSeats.WANT) and p.any_input():
 			request_join(i)
 		if p.lost_joy >= 0 and p.joy < 0:
 			p.lost_t += delta
@@ -2407,6 +2422,8 @@ func on_raccoon_scared(runner_index: int) -> void:
 # --- Networking ----------------------------------------------------------------
 
 func on_client_joined() -> void:
+	if not seats.first_machine():
+		return  # another machine: its runners join when they ask ("join")
 	if SIMPLE_MODE:
 		banner("LET'S COOK!", 2.0)
 		return
@@ -2416,20 +2433,32 @@ func on_client_joined() -> void:
 
 
 func on_client_left() -> void:
-	# The TV machine reloads when it reconnects: its extra players will press to join again.
-	for i in range(2, players.size()):
-		if players[i].active:
-			_drop_carry(players[i])
-			players[i].set_active(false)
+	seats.all_left()  # each machine asks for its runners again when it reconnects
 	if SIMPLE_MODE:
 		return  # the kitchen helpers take over (solo VR)
 	banner("The TV players left - waiting for them to rejoin…", 0.0)
 
 
+## Host: one machine left: only its runners leave (and their seats become free).
+func on_machine_left(peer: int) -> void:
+	seats.machine_left(peer)
+
+
+## TV machine: runner p is another machine's now (on: moved from the snapshots, no view here) or ours again.
+func _runner_ghost(p, on: bool) -> void:
+	p.remote = on
+	if on:
+		p.net_target = p.global_position
+	elif p.active:
+		_ensure_view(p)
+	_layout_views()
+
+
 func on_p2_action(action: String, args: Array, index: int = 1) -> void:
+	_ensure_runners(net.mode)
+	index = seats.host_action(action, args, index)  # many machines: who drives which runner (core/classic_seats.gd)
 	if index < 1 or index > MAX_RUNNERS:
 		return
-	_ensure_runners(net.mode)
 	var p = players[index]
 	match action:
 		"use":
@@ -2554,6 +2583,8 @@ func _make_ghost(kind: String, entry: PackedFloat32Array) -> Node3D:
 
 
 func apply_event(kind: String, args: Array) -> void:
+	if seats.handle_event(kind, args):
+		return
 	if not ready_to_play:
 		return
 	match kind:
@@ -2870,10 +2901,10 @@ func _practice_update(delta: float) -> void:
 		print("Practice done (%.0f s)" % practice_t)
 
 
-## Solo VR (no TV runners connected): kitchen helpers pop missing ingredients onto the pass now and then
+## Solo VR (no TV runners connected) or a Steam Deck chef on its own: kitchen helpers pop missing ingredients onto the pass now and then
 ## and whisk finished plates off to the customers who want them.
 func _helper_update(delta: float) -> void:
-	if net.mode != "host" or net.connected:
+	if not ((net.mode == "host" and not net.connected) or seats.deck_alone()):
 		helper_t = 0.0
 		return
 	helper_t += delta
