@@ -31,13 +31,17 @@ function post(a: Alert, text: string) {
   send(a.name, text);
 }
 
+// An alert posts when its MEANING changes, not its numbers: "load 17.7" and "load 18.2" are the same state. Masking
+// digits here fixes the whole class of chatty alerts (any alert text may include live figures).
+const shape = (t: string | null) => (t === null ? null : t.replace(/\d+(\.\d+)?/g, "#"));
+
 async function runPoll(a: Alert) {
   if (!a.on) return;
   try {
     const now = (await a.check!()) ?? null;
     const first = !a.started;
     a.started = true;
-    if (now !== a.last) {
+    if (shape(now) !== shape(a.last)) {
       if (now !== null && !(first && a.quietStart)) post(a, now);
       else if (now === null && a.last !== null && !first && a.recovered !== "") post(a, a.recovered ?? `ok again (was: ${a.last})`);
     }
@@ -164,23 +168,20 @@ export function startAll() {
     return m.MemAvailable < 1.5 ? `low memory: ${m.MemAvailable.toFixed(1)} GB free of ${m.MemTotal.toFixed(0)} GB` : null;
   }, { recovered: "memory ok again" });
 
-  // CPU (Simon, 2026-10-24: "keep an eye on the RAM and cpu usage"): 1-minute load above the thread count for
-  // 2 checks in a row = the family's game may stutter; name the biggest CPU users (tests are the usual cause).
+  // CPU / memory (Simon, 2026-10-24: "keep an eye on the RAM and cpu usage"). Live figures in the text are fine:
+  // runPoll compares the text with digits masked, so these post only when the state changes.
   let hot = 0;
   add("cpu", 30, async () => {
     const load = parseFloat((await Bun.file("/proc/loadavg").text()).split(" ")[0]);
     const threads = navigator.hardwareConcurrency;
     hot = load > threads ? hot + 1 : 0;
     if (hot < 2) return null;
-    const top = (await $`ps -eo pcpu,comm --sort=-pcpu`.nothrow().quiet()).stdout.toString().split("\n").slice(1, 5).map(l => l.trim().replace(/\s+/, "% ")).join(", ");
-    return `CPU overloaded: load ${load.toFixed(1)} on ${threads} threads (top: ${top})`;
+    const top = (await $`ps -eo pcpu,comm --sort=-pcpu`.nothrow().quiet()).stdout.toString().split("\n").slice(1).filter(l => !/ ps$/.test(l.trim())).slice(0, 3).map(l => l.trim().replace(/\s+/, "% ")).join(", ");
+    return `CPU overloaded: load ${load.toFixed(1)} on ${threads} threads (top: ${top.replace(/\d/g, "")})`;
   }, { recovered: "CPU load back to normal" });
-
-  // Memory headroom, logged as a trend: post when available memory drops below 3 GB (the low-memory alert
-  // above fires at 1.5 GB).
   add("memory-trend", 30, async () => {
     const m = await meminfo();
-    return m.MemAvailable < 3 ? `memory getting tight: ${m.MemAvailable.toFixed(1)} GB available` : null;
+    return m.MemAvailable < 3 ? `memory getting tight: ${m.MemAvailable.toFixed(1)} GB free (new test games wait below 2.5 GB)` : null;
   }, { recovered: "memory headroom back above 3 GB" });
 
   add("disk", 300, async () => {

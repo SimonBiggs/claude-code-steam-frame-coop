@@ -75,6 +75,7 @@ var _since_unpause := 0.0  # game seconds since the last unpause (or start)
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS  # keep the connection alive while the game is paused
+	preload("res://core/ui_kit.gd").ensure_pad_ui_actions()  # every focus-driven menu works with a pad
 	_since_unpause = 0.0  # starting counts as "just unpaused" (held buttons from the arcade)
 	_was_paused = get_tree().paused
 
@@ -877,13 +878,8 @@ static func _face_camera(n: Node3D, cam: Camera3D) -> void:
 	var d := n.global_position - cam.global_position
 	if d.length() < 0.01:
 		return
-	# The "up" least parallel to d: world up, else the head's up or forward (one of them always works).
-	var up := Vector3.UP
-	for u in [cam.global_basis.y, -cam.global_basis.z]:
-		if absf(d.normalized().dot(u.normalized())) < absf(d.normalized().dot(up)):
-			up = u
 	var sc := n.global_basis.get_scale()
 	if not sc.is_finite() or sc.length() < 0.001:
 		sc = Vector3.ONE
-	n.global_basis = Basis.looking_at(d, up).scaled(sc)
+	n.global_basis = preload("res://core/ui_kit.gd").face(d, Vector3.UP, cam.global_basis.y).scaled(sc)
 

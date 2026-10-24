@@ -196,6 +196,21 @@ export const history = async (query: string, n = 10) => (await sh(`claude-histor
  *  tool copies out of sync, broken services. Returns {clean, issues: [{kind, what, fix}]}. */
 export async function debt() {
   const issues: { kind: string; what: string; fix: string }[] = [];
+  // Known bug patterns ("never just one ant"): flag every instance in the staging copy, not just the one we saw.
+  const PATTERNS: { kind: string; files: string; bad: string; unless?: string; fix: string }[] = [
+    { kind: "pad-A", files: "grab_focus", bad: "grab_focus", unless: "JOY_BUTTON_A|ui_input.gd|UiInput", fix: "should now work by design (UiKit.ensure_pad_ui_actions at startup); check the menu reaches it" },
+    { kind: "anchors", files: "set_anchors_preset", bad: "add_child\\([a-z_]+\\)\\n\\s*[a-z_]+\\.set_anchors_preset\\(Control\\.PRESET_(CENTER|RIGHT|BOTTOM)", fix: "use UiKit.pin(control, preset) (core/ui_kit.gd): one helper, offsets always reset" },
+    { kind: "looking_at-UP", files: "looking_at", bad: "looking_at\\([^)]*Vector3\\.UP\\)", unless: "_face_camera", fix: "use UiKit.face(dir) (core/ui_kit.gd): never NaN when the direction is vertical" },
+  ];
+  for (const pt of PATTERNS) {
+    const hits = (await sh(`grep -rlE ${JSON.stringify(pt.files)} --include=*.gd core games arcade`, STAGE)).out.split("\n").filter(Boolean);
+    for (const f of hits) {
+      const txt = await readFile(join(STAGE, f), "utf8").catch(() => "");
+      if (!new RegExp(pt.bad).test(txt)) continue;
+      if (pt.unless && new RegExp(pt.unless).test(txt)) continue;
+      issues.push({ kind: pt.kind, what: f, fix: pt.fix });
+    }
+  }
   const repos: string[] = [];
   for (const d of await readdir(GP)) if ((await stat(join(GP, d, ".git")).catch(() => null))?.isDirectory()) repos.push(d);
   for (const r of repos) {
@@ -561,3 +576,39 @@ export const deck = {
   deploy() { return sh("duo-deploy-deck"); },
 };
 const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+
+/** Which games can be played by ONE player (Simon, 2026-10-24: a "playable as single player" filter): run each game
+ *  locally offscreen with a single pad mashing for `seconds`, then report what's on screen: words that mean it's
+ *  stuck waiting for more players, whether the picture keeps changing, and a sheet to look at. One game at a time. */
+export async function soloCheck(o: { only?: string[]; seconds?: number } = {}) {
+  const godot = (globalThis as any).godot;
+  const ids = o.only ?? (await readdir(join(STAGE, "games"))).filter(d => d !== "engine_template").sort();
+  const out: any[] = [];
+  for (const id of ids) {
+    let g: any;
+    const r: any = { id, waiting: [] as string[], moving: false, sheet: "" };
+    try {
+      g = await godot.launch({ project: STAGE, scene: `res://games/${id}/main.tscn`, env: { DUO_MACHINE_KIND: "deck" } });
+      await Bun.sleep(3000);
+      const t0 = Date.now();
+      for (let i = 0; Date.now() - t0 < (o.seconds ?? 18) * 1000; i++) {
+        const [name, opts] = MONKEY[i % MONKEY.length];
+        await g.joy(name, { ...(opts ?? {}), device: 0 }).catch(() => {});
+        await Bun.sleep(350);
+      }
+      const ui = await g.uiText().catch(() => "");
+      r.waiting = [...new Set((ui.match(/(waiting|wait for|needs? (at least )?\d|player 2|2 players|join to start|press a to join|connecting)[^"\n]{0,40}/gi) ?? []).map((s: string) => s.trim()))].slice(0, 4);
+      const fr = await g.frames();
+      const tail = fr.filter((f: any) => f.t > fr[fr.length - 1].t - 6);
+      const sizes = await Promise.all(tail.map(async (f: any) => (await stat(f.path)).size));
+      r.moving = new Set(sizes).size > 2;
+      const end = fr.length ? fr[fr.length - 1].t : 0;
+      r.sheet = (await g.span(end - 8, end, 1).catch(() => []))[0] ?? "";
+    } catch (e: any) { r.error = String(e?.message ?? e).slice(0, 200); }
+    finally { await g?.quit().catch(() => {}); }
+    out.push(r);
+    (globalThis as any).send?.(`solo ${id}`, `${r.waiting.length ? "WAITING: " + r.waiting.join(" | ") : "no waiting text"}; picture ${r.moving ? "moving" : "still"}${r.error ? "; " + r.error : ""}`, r.sheet ? [r.sheet] : []);
+  }
+  await Bun.write(join(HOME, ".cache/sweep/solo.json"), JSON.stringify(out, null, 1));
+  return out.map(r => `${r.waiting.length || !r.moving || r.error ? "??" : "ok"} ${r.id}${r.waiting.length ? ": " + r.waiting.join(" | ") : ""}`).join("\n");
+}
