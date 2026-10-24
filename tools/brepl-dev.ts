@@ -243,7 +243,11 @@ export function help() {
   dev.screen.at("-10s") / .range(a, b)     TV screen recorder     dev.frame.at(t) / .online()   Steam Frame
   dev.voice.tail(n) / .since("14:30") / .say(text, audio) / .health()
   dev.pace()  dev.backlog.open() / .done(match, note) / .add(text)  dev.history(query)  dev.sh(cmd, cwd)
+  dev.sweep({only, seconds, vr, concurrency, project})   play games offscreen with monkey input: problems + sheets
+  dev.sweep({net: true, clients: 2, only})   host + N TV-machine clients per game over the network: joins, remote seats,
+                                     fallbacks to local, errors/frozen per machine -> ~/.cache/sweep/<id>-net.json
   godot.launch(project) -> g: offscreen run (see godot.ts header): g.uiText() g.joy() g.eval() g.at() g.span() g.video()
+  godot.launchGroup({project, scene, clients, vr}) -> {host, clients, all, port, status(), quit()}   networked machines
   show(...paths)                     hand images back with the result`;
 }
 
@@ -258,20 +262,30 @@ const MONKEY: [string, Record<string, number>?][] = [  // a scripted "kid with a
 /** Offscreen runs of the games (default: all) from the staging copy, many in parallel (Simon: "headlessly test
  *  many of the games in parallel"): monkey inputs for `seconds` while recording at 30 fps, then per game
  *  {id, ok, problems[], errors[], fps, sound, frozen, sheets[]}, also written to ~/.cache/sweep/<id>.json and
- *  posted to the channel as each finishes. Long: run it in bg(). */
-export async function sweep(o: { only?: string[]; seconds?: number; concurrency?: number; vr?: boolean } = {}) {
-  const ids = o.only ?? (await readdir(join(STAGE, "games"))).filter(d => d !== "engine_template").sort();
+ *  posted to the channel as each finishes. Long: run it in bg(). project: another copy of the game (default staging).
+ *  net: true plays each game as a NETWORK group instead (godot.launchGroup): one host + `clients` (default 2) TV
+ *  machines on one port, the clients press A then mash; per game {id, ok, problems[], machines: [{machine: "host" |
+ *  "client1".., port, net: {start, afterJoin, end}, errors, fps, sound, frozen, sheets}], sheets[]} in
+ *  ~/.cache/sweep/<id>-net.json. Problems name the machine ("client 2 not connected (fell back to local)",
+ *  "client1's P3 is not seated on the host", "host: 1 distinct error(s): ..."). One group at a time by default. */
+export async function sweep(o: { only?: string[]; seconds?: number; concurrency?: number; vr?: boolean; net?: boolean; clients?: number; project?: string } = {}) {
+  const proj = o.project ?? STAGE;
+  const ids = o.only ?? (await readdir(join(proj, "games"))).filter(d => d !== "engine_template").sort();
   await mkdir(SWEEP, { recursive: true });
   const results: any[] = [];
   let next = 0;
-  const n = o.concurrency ?? await parallelGames();
-  (globalThis as any).send?.("sweep", `${ids.length} games, ${n} at a time`);
+  // net: a group is 1 + clients games, so one group at a time unless asked.
+  const n = o.concurrency ?? (o.net ? 1 : await parallelGames());
+  const tag = (o.net ? "-net" : "") + (o.vr ? "-vr" : "");
+  (globalThis as any).send?.(o.net ? "sweep net" : "sweep", `${ids.length} games, ${n} ${o.net ? `group(s) of host + ${o.clients ?? 2} clients` : "games"} at a time`);
   await Promise.all(Array.from({ length: n }, async () => {
     while (next < ids.length) {
-      const r = await sweepOne(ids[next++], o.seconds ?? 20, !!o.vr);
+      const id = ids[next++];
+      const r = o.net ? await sweepNetOne(id, o.seconds ?? 20, o.clients ?? 2, !!o.vr, proj) : await sweepOne(id, o.seconds ?? 20, !!o.vr, proj);
       results.push(r);
-      await Bun.write(join(SWEEP, `${r.id}${o.vr ? "-vr" : ""}.json`), JSON.stringify(r, null, 1));
-      (globalThis as any).send?.(`sweep ${r.id}`, (r.ok ? "ok" : r.problems.join("\n")) + `\nsheets: ${r.sheets.join(" ")}`);  // text only: show() the sheets when reviewing
+      await Bun.write(join(SWEEP, `${r.id}${tag}.json`), JSON.stringify(r, null, 1));
+      const sheets = o.net ? r.machines.map((m: any) => `${m.machine}: ${m.sheets.join(" ")}`).join("\n") : `sheets: ${r.sheets.join(" ")}`;
+      (globalThis as any).send?.(`sweep${o.net ? " net" : ""} ${r.id}`, (r.ok ? "ok" : r.problems.join("\n")) + (r.warnings?.length ? `\nwarnings: ${r.warnings.join("; ")}` : "") + `\n${sheets}`);  // text only: show() the sheets when reviewing
     }
   }));
   results.sort((a, b) => a.id.localeCompare(b.id));
@@ -291,12 +305,12 @@ export async function parallelGames() {
 
 // vr: the game's VR player in fake VR too (BOT_VR=1): it looks around, swings both hands and pulls the trigger
 // while the TV pad mashes, and the sheets include the headset view (span-vr-*).
-async function sweepOne(id: string, seconds: number, vr = false) {
+async function sweepOne(id: string, seconds: number, vr = false, project = STAGE) {
   const godot = (globalThis as any).godot;
   const r: any = { id, ok: false, problems: [] as string[], errors: [] as string[], fps: 0, sound: false, frozen: false, sheets: [] as string[] };
   let g: any;
   try {
-    g = await godot.launch({ project: STAGE, scene: `res://games/${id}/main.tscn`, vr });
+    g = await godot.launch({ project, scene: `res://games/${id}/main.tscn`, vr });
     const head = vr ? (await g.vr().catch(() => null))?.head : null;
     if (vr && !head) r.problems.push("no VR player in fake VR (BOT_VR=1)");
     await Bun.sleep(3000);
@@ -305,65 +319,10 @@ async function sweepOne(id: string, seconds: number, vr = false) {
       const [name, opts] = MONKEY[i % MONKEY.length];
       if (g.child.exitCode !== null) break;
       await g.joy(name, opts ?? {}).catch(() => {});
-      if (head && i % 2 === 0) {
-        const k = i / 2;
-        await g.vr({ look: [head[0] + Math.sin(k) * 3, head[1] + Math.cos(k * 1.3) * 0.5, head[2] - 3] }).catch(() => {});
-        await g.vrSwing(k % 2 ? "left" : "right", [0, 0.2, -0.6], 0.15).catch(() => {});
-        await g.vr({ trigger: k % 3 === 0 ? 1 : 0, a: k % 4 === 1, stick_l: [Math.sin(k), 0] }).catch(() => {});
-        await g.vrSwing(k % 2 ? "left" : "right", [0, -0.2, 0.6], 0.15).catch(() => {});
-      }
+      if (head && i % 2 === 0) await vrMash(g, head, i / 2);
       await Bun.sleep(400);
     }
-    const alive = g.child.exitCode === null;
-    if (!alive) r.problems.push(`crashed (exit ${g.child.exitCode})`);
-    const log = await Bun.file(g.logPath).text().catch(() => "");
-    r.errors = [...new Set([...log.matchAll(/^(SCRIPT ERROR|ERROR|USER ERROR|Parse Error)[^\n]*(\n\s+at:[^\n]*)?/gm)].map(m => m[0].replace(/\s+/g, " ").slice(0, 240)))].slice(0, 12);
-    if (r.errors.length) r.problems.push(`${r.errors.length} distinct error(s): ${r.errors[0]}`);
-    const fpsLines = [...log.matchAll(/fps (\d+)/g)].map(m => +m[1]);
-    r.fps = fpsLines.length ? Math.min(...fpsLines.slice(1)) || fpsLines[0] : 0;
-    if (r.fps && r.fps < 45) r.problems.push(`slow: ${r.fps} fps`);
-    // Sound: RMS of the Master bus recording after the first 2 s.
-    const audio = new Float32Array(await Bun.file(join(g.recDir, "audio.f32")).arrayBuffer().catch(() => new ArrayBuffer(0)));
-    const rateTxt = await Bun.file(join(g.recDir, "audio.rate")).text().catch(() => "44100");
-    const a = audio.subarray(Math.min(audio.length, 2 * +rateTxt));
-    let sum = 0; for (let i = 0; i < a.length; i += 16) sum += a[i] * a[i];
-    r.sound = a.length > 0 && Math.sqrt(sum / (a.length / 16)) > 0.002;
-    if (!r.sound) r.problems.push("silent (no sound on the Master bus)");
-    if (alive) {
-      // Text cut off by the screen edge (a classic: set_anchors_preset without resetting the offsets).
-      const ui = await g.ui().catch(() => ({ items: [] }));
-      const cut = (ui.items ?? []).filter((i: any) => i.text && String(i.text).trim() && i.rect && !String(i.path).includes("/GDev/")
-        && (i.rect[0] < -4 || i.rect[1] < -4 || i.rect[0] + i.rect[2] > 1924 || i.rect[1] + i.rect[3] > 1084))
-        .map((i: any) => `"${String(i.text).slice(0, 30)}" @${i.rect.map((v: number) => Math.round(v)).join(",")}`);
-      if (cut.length) r.problems.push(`text off screen: ${[...new Set(cut)].slice(0, 4).join("; ")}`);
-      // Text drawn over other text (e.g. a timer pill on top of a score card).
-      // (Labels stretched over most of the screen just centre their text, so their box says nothing: skip them.)
-      const labels = (ui.items ?? []).filter((i: any) => i.text && String(i.text).trim() && i.rect && i.rect[2] > 2 && i.rect[3] > 2
-        && i.rect[2] * i.rect[3] < 0.25 * 1920 * 1080 && !String(i.path).includes("/GDev/"));
-      const over: string[] = [];
-      for (let x = 0; x < labels.length; x++) for (let y = x + 1; y < labels.length; y++) {
-        const [a, b] = [labels[x], labels[y]];
-        if (String(a.path).startsWith(b.path) || String(b.path).startsWith(a.path)) continue;
-        const vp = (i: any) => String(i.path).match(/.*SubViewport[^/]*/)?.[0] ?? "";  // split views: own coordinates
-        if (vp(a) !== vp(b)) continue;
-        const w = Math.min(a.rect[0] + a.rect[2], b.rect[0] + b.rect[2]) - Math.max(a.rect[0], b.rect[0]);
-        const h = Math.min(a.rect[1] + a.rect[3], b.rect[1] + b.rect[3]) - Math.max(a.rect[1], b.rect[1]);
-        if (w > 0 && h > 0 && w * h > 0.3 * Math.min(a.rect[2] * a.rect[3], b.rect[2] * b.rect[3]))
-          over.push(`"${String(a.text).slice(0, 20)}" / "${String(b.text).slice(0, 20)}"`);
-      }
-      if (over.length) r.problems.push(`overlapping text: ${[...new Set(over)].slice(0, 4).join("; ")}`);
-      const fr = await g.frames();
-      const end = fr.length ? fr[fr.length - 1].t : 0;
-      r.sheets = await g.span(1, end, 12 / Math.max(1, end - 1)).catch((e: any) => { r.problems.push(`span failed: ${e}`); return []; });
-      if (head) r.sheets.push(...await g.span(1, end, 12 / Math.max(1, end - 1), { vr: true }).catch(() => []));
-      // Frozen: byte-identical JPEGs across the last 5 s mean nothing on screen moved at all.
-      const tail = fr.filter((f: any) => f.t > end - 5);
-      if (tail.length > 2) {
-        const sizes = await Promise.all(tail.map(async (f: any) => (await stat(f.path)).size));
-        r.frozen = new Set(sizes).size === 1;
-        if (r.frozen) r.problems.push("frozen: nothing changed on screen for 5 s of input");
-      }
-    }
+    await inspect(g, r, head);
   } catch (e: any) {
     r.problems.push(`launch failed: ${String(e?.message ?? e).slice(0, 400)}`);
   } finally {
@@ -371,6 +330,153 @@ async function sweepOne(id: string, seconds: number, vr = false) {
   }
   r.ok = !r.problems.length;
   return r;
+}
+
+// net: one host + `clients` TV machines of the game over one shared DUO_PORT (godot.launchGroup). Each client presses
+// A (drop-in join) and then mashes like the monkey, all clients at once; the host only moves in fake VR (vr: true).
+// Checks, on top of every machine's normal sweep checks (prefixed "host:" / "client2:"): each client really is a
+// connected client (not fallen back to local play), it stayed connected, each of its seated players shows up on the
+// host as a remote seat in the same slot, no two clients own the same slot, and the host sees one peer per client.
+const LOCAL_KINDS = ["pad", "keyboard", "virtual", "local"];
+async function sweepNetOne(id: string, seconds: number, clients: number, vr = false, project = STAGE) {
+  const godot = (globalThis as any).godot;
+  const r: any = { id, net: true, clients, ok: false, problems: [] as string[], warnings: [] as string[], machines: [] as any[], sheets: [] as string[], port: 0 };
+  let grp: any;
+  try {
+    grp = await godot.launchGroup({ project, scene: `res://games/${id}/main.tscn`, clients, vr });
+    r.port = grp.port;
+    const names = ["host", ...grp.clients.map((_: any, i: number) => `client${i + 1}`)];
+    const atStart = await grp.status();
+    const head = vr ? (await grp.host.vr().catch(() => null))?.head : null;
+    if (vr && !head) r.problems.push("host: no VR player in fake VR (BOT_VR=1)");
+    await Bun.sleep(1500);
+    for (const c of grp.clients) await c.joy("a").catch(() => {});  // drop in
+    await Bun.sleep(2000);
+    const afterJoin = await grp.status();
+    const t0 = Date.now();
+    for (let i = 0; Date.now() - t0 < seconds * 1000; i++) {
+      const [name, opts] = MONKEY[i % MONKEY.length];
+      await Promise.all([
+        ...grp.clients.map((c: any) => c.child.exitCode === null ? c.joy(name, opts ?? {}).catch(() => {}) : null),
+        head && i % 2 === 0 ? vrMash(grp.host, head, i / 2) : null,
+      ]);
+      await Bun.sleep(400);
+    }
+    const atEnd = await grp.status();
+    // Network checks.
+    const H = atEnd[0];
+    if (!H.has_net) r.problems.push("not networked: no core/net.gd node found");
+    else {
+      if (H.mode !== "host") r.problems.push(`host is not hosting (mode ${H.mode})`);
+      const owner: Record<number, string> = {};
+      let connectedClients = 0;
+      grp.clients.forEach((_: any, i: number) => {
+        const name = `client ${i + 1}`, s0 = atStart[i + 1], s1 = atEnd[i + 1];
+        if (s1.error) { r.problems.push(`${name}: no status (${s1.error})`); return; }
+        const ok = s1.mode === "client" && s1.connected;
+        if (!ok) {
+          const was = s0.mode === "client" && s0.connected;
+          r.problems.push(s0.mode === "local" || s1.mode === "local" && !was ? `${name} not connected (fell back to local)`
+            : was ? `${name} dropped: connected at start, now mode ${s1.mode}${s1.connected ? "" : ", not connected"}`
+            : `${name} not connected (mode ${s1.mode}, still trying to join)`);
+          return;
+        }
+        connectedClients++;
+        const mine = s1.seats.filter((x: any) => x.active && LOCAL_KINDS.includes(x.kind));
+        if (!mine.length) r.problems.push(`${name}: connected but pressing A seated nobody${afterJoin[i + 1].pending?.length ? ` (still pending: slots ${afterJoin[i + 1].pending})` : ""}`);
+        for (const seat of mine) {
+          const P = `P${seat.slot + 1}`;
+          if (owner[seat.slot]) r.problems.push(`${name} and ${owner[seat.slot]} both think they own ${P} (slot ${seat.slot})`);
+          owner[seat.slot] = name;
+          const onHost = H.seats.find((x: any) => x.slot === seat.slot);
+          if (!onHost) r.problems.push(`${name}'s ${P} is not seated on the host`);
+          else if (onHost.kind !== "remote" || !onHost.active) r.problems.push(`${name}'s ${P} is on the host as ${onHost.kind}${onHost.active ? "" : " (inactive)"}, not a remote seat`);
+        }
+      });
+      if (H.mode === "host" && H.peers.length !== connectedClients) r.problems.push(`host sees ${H.peers.length} peer(s) but ${connectedClients} client(s) are connected`);
+    }
+    // Every machine's normal checks (errors, crash, fps, sound, text, frozen) + its sheets.
+    for (const [i, g] of grp.all.entries()) {
+      const m: any = { machine: names[i], port: g.port, problems: [] as string[], errors: [] as string[], fps: 0, sound: false, frozen: false, sheets: [] as string[],
+        net: { start: pick(atStart[i]), afterJoin: pick(afterJoin[i]), end: pick(atEnd[i]) } };
+      await inspect(g, m, i === 0 ? head : null).catch((e: any) => m.problems.push(`inspect failed: ${e}`));
+      r.machines.push(m);
+      r.sheets.push(...m.sheets);
+      // Slow fps is a warning here, not a problem: 1 + clients games share this machine's CPU/GPU, so it measures the rig.
+      r.warnings.push(...m.problems.filter((p: string) => p.startsWith("slow:")).map((p: string) => `${names[i]}: ${p}`));
+      r.problems.push(...m.problems.filter((p: string) => !p.startsWith("slow:")).map((p: string) => `${names[i]}: ${p}`));
+    }
+  } catch (e: any) {
+    r.problems.push(`launch failed: ${String(e?.message ?? e).slice(0, 400)}`);
+  } finally {
+    await grp?.quit().catch(() => {});
+  }
+  r.ok = !r.problems.length;
+  return r;
+}
+const pick = (s: any) => s && ({ mode: s.mode, connected: s.connected, peers: s.peers?.length ?? 0, seats: (s.seats ?? []).map((x: any) => `P${x.slot + 1}:${x.kind}${x.active ? "" : "(off)"}`).join(" "), ...(s.error ? { error: s.error } : {}) });
+
+/** One step of the fake-VR monkey: look around, swing a hand, pull the trigger / press A, nudge the stick. */
+async function vrMash(g: any, head: number[], k: number) {
+  await g.vr({ look: [head[0] + Math.sin(k) * 3, head[1] + Math.cos(k * 1.3) * 0.5, head[2] - 3] }).catch(() => {});
+  await g.vrSwing(k % 2 ? "left" : "right", [0, 0.2, -0.6], 0.15).catch(() => {});
+  await g.vr({ trigger: k % 3 === 0 ? 1 : 0, a: k % 4 === 1, stick_l: [Math.sin(k), 0] }).catch(() => {});
+  await g.vrSwing(k % 2 ? "left" : "right", [0, -0.2, 0.6], 0.15).catch(() => {});
+}
+
+/** The checks every sweep runs on one finished offscreen game, into r (problems, errors, fps, sound, frozen, sheets):
+ *  crashed, errors in the log, slow, silent, text off screen / overlapping, frozen screen, plus its contact sheets. */
+async function inspect(g: any, r: any, head: any = null) {
+  const alive = g.child.exitCode === null;
+  if (!alive) r.problems.push(`crashed (exit ${g.child.exitCode})`);
+  const log = await Bun.file(g.logPath).text().catch(() => "");
+  r.errors = [...new Set([...log.matchAll(/^(SCRIPT ERROR|ERROR|USER ERROR|Parse Error)[^\n]*(\n\s+at:[^\n]*)?/gm)].map(m => m[0].replace(/\s+/g, " ").slice(0, 240)))].slice(0, 12);
+  if (r.errors.length) r.problems.push(`${r.errors.length} distinct error(s): ${r.errors[0]}`);
+  const fpsLines = [...log.matchAll(/fps (\d+)/g)].map(m => +m[1]);
+  r.fps = fpsLines.length ? Math.min(...fpsLines.slice(1)) || fpsLines[0] : 0;
+  if (r.fps && r.fps < 45) r.problems.push(`slow: ${r.fps} fps`);
+  // Sound: RMS of the Master bus recording after the first 2 s.
+  const audio = new Float32Array(await Bun.file(join(g.recDir, "audio.f32")).arrayBuffer().catch(() => new ArrayBuffer(0)));
+  const rateTxt = await Bun.file(join(g.recDir, "audio.rate")).text().catch(() => "44100");
+  const a = audio.subarray(Math.min(audio.length, 2 * +rateTxt));
+  let sum = 0; for (let i = 0; i < a.length; i += 16) sum += a[i] * a[i];
+  r.sound = a.length > 0 && Math.sqrt(sum / (a.length / 16)) > 0.002;
+  if (!r.sound) r.problems.push("silent (no sound on the Master bus)");
+  if (alive) {
+    // Text cut off by the screen edge (a classic: set_anchors_preset without resetting the offsets).
+    const ui = await g.ui().catch(() => ({ items: [] }));
+    const cut = (ui.items ?? []).filter((i: any) => i.text && String(i.text).trim() && i.rect && !String(i.path).includes("/GDev/")
+      && (i.rect[0] < -4 || i.rect[1] < -4 || i.rect[0] + i.rect[2] > 1924 || i.rect[1] + i.rect[3] > 1084))
+      .map((i: any) => `"${String(i.text).slice(0, 30)}" @${i.rect.map((v: number) => Math.round(v)).join(",")}`);
+    if (cut.length) r.problems.push(`text off screen: ${[...new Set(cut)].slice(0, 4).join("; ")}`);
+    // Text drawn over other text (e.g. a timer pill on top of a score card).
+    // (Labels stretched over most of the screen just centre their text, so their box says nothing: skip them.)
+    const labels = (ui.items ?? []).filter((i: any) => i.text && String(i.text).trim() && i.rect && i.rect[2] > 2 && i.rect[3] > 2
+      && i.rect[2] * i.rect[3] < 0.25 * 1920 * 1080 && !String(i.path).includes("/GDev/"));
+    const over: string[] = [];
+    for (let x = 0; x < labels.length; x++) for (let y = x + 1; y < labels.length; y++) {
+      const [a, b] = [labels[x], labels[y]];
+      if (String(a.path).startsWith(b.path) || String(b.path).startsWith(a.path)) continue;
+      const vp = (i: any) => String(i.path).match(/.*SubViewport[^/]*/)?.[0] ?? "";  // split views: own coordinates
+      if (vp(a) !== vp(b)) continue;
+      const w = Math.min(a.rect[0] + a.rect[2], b.rect[0] + b.rect[2]) - Math.max(a.rect[0], b.rect[0]);
+      const h = Math.min(a.rect[1] + a.rect[3], b.rect[1] + b.rect[3]) - Math.max(a.rect[1], b.rect[1]);
+      if (w > 0 && h > 0 && w * h > 0.3 * Math.min(a.rect[2] * a.rect[3], b.rect[2] * b.rect[3]))
+        over.push(`"${String(a.text).slice(0, 20)}" / "${String(b.text).slice(0, 20)}"`);
+    }
+    if (over.length) r.problems.push(`overlapping text: ${[...new Set(over)].slice(0, 4).join("; ")}`);
+    const fr = await g.frames();
+    const end = fr.length ? fr[fr.length - 1].t : 0;
+    r.sheets = await g.span(1, end, 12 / Math.max(1, end - 1)).catch((e: any) => { r.problems.push(`span failed: ${e}`); return []; });
+    if (head) r.sheets.push(...await g.span(1, end, 12 / Math.max(1, end - 1), { vr: true }).catch(() => []));
+    // Frozen: byte-identical JPEGs across the last 5 s mean nothing on screen moved at all.
+    const tail = fr.filter((f: any) => f.t > end - 5);
+    if (tail.length > 2) {
+      const sizes = await Promise.all(tail.map(async (f: any) => (await stat(f.path)).size));
+      r.frozen = new Set(sizes).size === 1;
+      if (r.frozen) r.problems.push("frozen: nothing changed on screen for 5 s of input");
+    }
+  }
 }
 
 /** Arcade card pictures: screenshot each game (default: all in arcade.gd GAMES) offscreen from the staging copy

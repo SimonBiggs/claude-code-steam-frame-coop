@@ -4,6 +4,6 @@
 B=~/GodotProjects/duo-arena-deck-build
 rsync -a --delete --exclude .dev --exclude .claude ~/GodotProjects/duo-arena-frame-build/game/ "$B/game/"
 ssh -o ConnectTimeout=4 -o BatchMode=yes simon-deck true 2>/dev/null || { echo "Steam Deck offline: run 'duo-deploy-deck' when it's back" >&2; exit 1; }
-rsync -az --exclude .dev --exclude .claude --exclude duo-arena.desktop "$B/" simon-deck:DuoArena/ &&
-  ssh simon-deck 'mkdir -p ~/.local/share/applications ~/Desktop && cp ~/DuoArena/duo-arena.desktop ~/.local/share/applications/ 2>/dev/null; true' &&
+rsync -az --exclude .dev --exclude .claude "$B/" simon-deck:DuoArena/ &&
+  ssh simon-deck 'mkdir -p ~/.local/share/applications ~/Desktop && cp ~/DuoArena/*.desktop ~/.local/share/applications/ && cp ~/DuoArena/*.desktop ~/Desktop/ && chmod +x ~/Desktop/duo-arena*.desktop; true' &&
   echo "Steam Deck updated"
