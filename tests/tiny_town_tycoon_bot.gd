@@ -72,7 +72,7 @@ func _ready() -> void:
 				kit.info("menu didn't pick: asking the host directly")
 				main.net.request(0, "pick_island", [0])
 		_make_plan())
-	if not host:
+	if not host and BotKit.lead_machine():
 		kit.at(t0 + 7.0, "P2 presses Y: one shared view", func() -> void: _press_driver("y"))
 		kit.at(t0 + 8.0, "shared?", func() -> void:
 			if main.split != null:
@@ -716,7 +716,7 @@ func _checks() -> void:
 	var mode: String = main.net.mode
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
 	if not host:
-		kit.assert_eq(main.party.player_count(), want, "%s: all %d players are seated" % [mode, want])
+		kit.assert_eq(main.party.player_count(), kit.seated_want(want), "%s: all %d players are seated" % [mode, want])
 	kit.assert_true(main.town.buildings.size() >= 8, "%s: the mayor built a town (%d buildings)" % [mode, main.town.buildings.size()])
 	var veh: Dictionary = main.fleet.vehicles
 	kit.assert_true(veh.size() >= 4, "%s: vehicles drive about (%d)" % [mode, veh.size()])

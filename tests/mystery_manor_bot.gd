@@ -239,7 +239,7 @@ func _checks() -> void:
 	if mode == "client":
 		kit.assert_true(main.party.local_slots().size() == want, "client: all %d local players are seated" % want)
 	else:
-		kit.assert_eq(main.party.player_count(), want + (1 if main.flat_host else 0), "%s: all players are seated" % mode)
+		kit.assert_eq(main.party.player_count(), kit.seated_want(want, (1 if main.flat_host else 0)), "%s: all players are seated" % mode)
 	kit.assert_true(max_found >= 2, "%s: clues were found (%d)" % [mode, max_found])
 	kit.assert_true(saw_step_back, "%s: suspects who don't match stepped back" % mode)
 	kit.assert_true(saw_solved, "%s: the case was solved" % mode)
