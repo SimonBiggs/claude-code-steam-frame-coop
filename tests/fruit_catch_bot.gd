@@ -32,7 +32,7 @@ func _ready() -> void:
 	kit.at(t0, "%d TV players press A on their pads" % want, _join)
 	kit.at(t0 + 4.0, "P2 presses Y: one shared view", func() -> void: _press_y())
 	kit.at(t0 + 5.0, "shared?", func() -> void:
-		if main.split != null and not main.flat:
+		if main.split != null and not main.flat_host:
 			kit.assert_true(main.split.is_shared(), "Y switched to the shared view"))
 	kit.at(t0 + 7.0, "P2 presses Y again: split screen", func() -> void: _press_y())
 	if not host:
@@ -72,7 +72,7 @@ func _continue_results() -> String:
 
 func _join() -> void:
 	if main.net.mode == "host":
-		if main.flat:
+		if main.flat_host:
 			kit.join_bot(main.party)  # a flat host (DUO_FLAT_HOST=1): one pad player here, in slot 0
 		return
 	for i in want:
@@ -81,7 +81,7 @@ func _join() -> void:
 
 ## The view (split / shared) is shared by every machine: on a flat host the client's Y presses toggle it too.
 func _press_y() -> void:
-	if not main.flat:
+	if not main.flat_host:
 		_press("y")
 
 
@@ -181,9 +181,9 @@ func _checks() -> void:
 	if mode == "client":
 		kit.assert_eq(main.party.local_slots().size(), want, "client: all %d local players are seated" % want)
 	else:
-		var host_p := 1 if main.flat else 0
+		var host_p := 1 if main.flat_host else 0
 		kit.assert_eq(main.party.player_count(), want + host_p, "%s: all %d TV players (+%d on the host) are seated" % [mode, want, host_p])
-	if main.flat:
+	if main.flat_host:
 		kit.assert_true(main.party.is_local(0) and main.avatars.has(0) and main.cams.has(0), "flat host: slot 0 plays here with a camera")
 	kit.assert_true(int(main.net.state_get("caught", 0)) > 0, "%s: fruit was caught" % mode)
 	kit.assert_true(int(main.net.state_get("round", 0)) >= 2, "%s: round 1 ended and round 2 started" % mode)

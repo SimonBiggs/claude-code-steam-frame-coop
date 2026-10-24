@@ -64,7 +64,7 @@ var sky: SkyKit.SkyRig
 var avatars := {}  # slot -> Node3D (a Creatures.humanoid): TV players (every machine)
 var last_pos := {}  # slot -> Vector3, to animate walking on every machine
 var net_target := {}  # slot -> [pos, yaw]: where another machine's player is (smoothed towards every frame)
-var flat := false  # this machine hosts without VR: slot 0 is a pad / keyboard player here, like local play
+var flat_host := false  # this machine hosts without VR: slot 0 is a pad / keyboard player here, like local play
 var cams := {}  # slot -> CameraRig: one per local view
 var group_cam: CameraRig  # the shared view's camera
 var huds := {}  # slot -> UiKit root (-1 = the shared view's)
@@ -127,8 +127,8 @@ func _ready() -> void:
 
 
 func _setup(mode: String) -> void:
-	flat = mode == "host" and not net.has_vr
-	if VrRig.wanted(mode) and not flat:
+	flat_host = mode == "host" and not net.has_vr
+	if VrRig.wanted(mode) and not flat_host:
 		vr_rig = VrRig.new()
 		vr_rig.bounds = Rect2(-ARENA, -ARENA, ARENA * 2.0, ARENA * 2.0)
 		add_child(vr_rig)
@@ -139,7 +139,7 @@ func _setup(mode: String) -> void:
 		vr_rig.hand_l.add_child(vr_label)
 		hints.set_vr_rig(vr_rig, self)
 	_build_world(vr_rig != null)
-	if mode != "host" or flat:  # every machine with a screen of its own (a flat host too)
+	if mode != "host" or flat_host:  # every machine with a screen of its own (a flat host too)
 		split = SplitView.new()
 		add_child(split)
 		split.bind_party(party)
@@ -153,7 +153,7 @@ func _setup(mode: String) -> void:
 		if vr_rig != null:
 			split.set_bubble(vr_rig.mirror)  # fake VR in bots
 	# Local play without a headset, or a flat host: someone on this machine plays slot 0 ("P1") too.
-	party.allow_slot0 = (mode == "local" and vr_rig == null) or flat
+	party.allow_slot0 = (mode == "local" and vr_rig == null) or flat_host
 	awards.set_player(0, "GIANT" if vr_rig != null or mode == "client" else party.name_of(0))
 	if mode != "client":
 		net.state_set("best", int(save.data["best"]))

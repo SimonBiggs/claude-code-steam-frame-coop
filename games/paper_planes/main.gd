@@ -92,7 +92,7 @@ class Flyer:  # a TV player's plane
 # --- The networking contract ---
 var net: Node
 var ready_to_play := false
-var flat := false  # this machine hosts without VR: slot 0 is a pad / keyboard player here, like local play
+var flat_host := false  # this machine hosts without VR: slot 0 is a pad / keyboard player here, like local play
 var net_target := {}  # slot -> [pos, yaw]: where another machine's player is (smoothed towards every frame)
 # --- Engine modules ---
 var party: Party
@@ -179,8 +179,8 @@ func _ready() -> void:
 
 
 func _setup(mode: String) -> void:
-	flat = mode == "host" and not net.has_vr
-	if VrRig.wanted(mode) and not flat:
+	flat_host = mode == "host" and not net.has_vr
+	if VrRig.wanted(mode) and not flat_host:
 		vr_rig = VrRig.new()
 		vr_rig.bounds = Rect2(-4.0, 2.5, 8.0, 5.0)
 		add_child(vr_rig)
@@ -195,7 +195,7 @@ func _setup(mode: String) -> void:
 		stack_node.add_child(stack_mesh)
 		stack_node.position = VR_FEET + STACK_OFFSET
 		stack_node.visible = vr_rig != null
-	if mode != "host" or flat:  # every machine with a screen of its own (a flat host too)
+	if mode != "host" or flat_host:  # every machine with a screen of its own (a flat host too)
 		split = SplitView.new()
 		add_child(split)
 		split.bind_party(party)
@@ -207,7 +207,7 @@ func _setup(mode: String) -> void:
 		if vr_rig != null:
 			split.set_bubble(vr_rig.mirror)
 		sfx.play_loop("wind", -20.0)
-	party.allow_slot0 = (mode == "local" and vr_rig == null) or flat
+	party.allow_slot0 = (mode == "local" and vr_rig == null) or flat_host
 	if vr_rig != null:
 		awards.set_player(0, "THROWER")
 		hints.hint("vr_grab", "Grab a plane. Throw it!", {"to": "vr", "icon": "play"})

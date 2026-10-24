@@ -51,7 +51,7 @@ var results_wait := 12.0  ## seconds the results stay up before the next round s
 # --- Networking contract ---
 var net: Node
 var ready_to_play := false
-var flat := false  # this machine hosts without VR: slot 0 is a pad / keyboard player here, like local play
+var flat_host := false  # this machine hosts without VR: slot 0 is a pad / keyboard player here, like local play
 var net_target := {}  # slot -> [pos, yaw]: where another machine's player is (smoothed towards every frame)
 var players: Array = []
 # --- Engine modules ---
@@ -150,8 +150,8 @@ func _ready() -> void:
 
 
 func _setup(mode: String) -> void:
-	flat = mode == "host" and not net.has_vr  # a flat host: slot 0 is a runner here, the computer is the giant
-	if VrRig.wanted(mode) and not flat:
+	flat_host = mode == "host" and not net.has_vr  # a flat host: slot 0 is a runner here, the computer is the giant
+	if VrRig.wanted(mode) and not flat_host:
 		Engine.physics_ticks_per_second = 90
 		vr_rig = VrRig.new()
 		vr_rig.bounds = Rect2(-3.2, -8.4, 6.4, 3.6)
@@ -171,7 +171,7 @@ func _setup(mode: String) -> void:
 		vr_board.position = Vector3(0.0, 4.2, WALL_Z.y + 1.0)
 		vr_board.rotation.y = PI  # reads from +Z: turn it to face the giant at -Z
 		add_child(vr_board)
-	if mode != "host" or flat:  # every machine with a screen of its own (a flat host too)
+	if mode != "host" or flat_host:  # every machine with a screen of its own (a flat host too)
 		split = SplitView.new()
 		add_child(split)
 		split.bind_party(party)
@@ -181,7 +181,7 @@ func _setup(mode: String) -> void:
 		add_child(group_cam)
 		group_cam.follow_group([], -35.0, 0.0, 0.0)
 		_make_hud(-1, split.shared_hud())
-	party.allow_slot0 = (mode == "local" and vr_rig == null) or flat
+	party.allow_slot0 = (mode == "local" and vr_rig == null) or flat_host
 	if vr_rig != null:
 		awards.set_player(0, "GIANT")
 	if mode != "client":

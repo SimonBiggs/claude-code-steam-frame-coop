@@ -57,7 +57,7 @@ var round_time := 180.0  ## seconds per round (bots shorten it)
 # --- Networking contract / engine modules ---
 var net: Node
 var ready_to_play := false
-var flat := false  # this machine hosts without VR: slot 0 is a pad / keyboard player here, like local play
+var flat_host := false  # this machine hosts without VR: slot 0 is a pad / keyboard player here, like local play
 var net_target := {}  # slot -> [pos, yaw]: where another machine's player is (smoothed towards every frame)
 var party: Party
 ## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
@@ -163,8 +163,8 @@ func _exit_tree() -> void:
 
 
 func _setup(mode: String) -> void:
-	flat = mode == "host" and not net.has_vr
-	if VrRig.wanted(mode) and not flat:
+	flat_host = mode == "host" and not net.has_vr
+	if VrRig.wanted(mode) and not flat_host:
 		vr_rig = VrRig.new()
 		vr_rig.bounds = Rect2(-ARENA + 1.0, -ARENA + 1.0, ARENA * 2.0 - 2.0, ARENA * 2.0 - 2.0)
 		vr_rig.glove_color = Color(0.3, 0.75, 1.0)
@@ -172,7 +172,7 @@ func _setup(mode: String) -> void:
 		vr_rig.place(VR_START, 0.0)
 		hints.set_vr_rig(vr_rig, self)
 	_build_world(vr_rig != null)
-	if mode != "host" or flat:  # every machine with a screen of its own (a flat host too)
+	if mode != "host" or flat_host:  # every machine with a screen of its own (a flat host too)
 		split = SplitView.new()
 		add_child(split)
 		split.bind_party(party)
@@ -185,7 +185,7 @@ func _setup(mode: String) -> void:
 		hints.add_view(huds[-1], -1)
 		if vr_rig != null:
 			split.set_bubble(vr_rig.mirror)
-	party.allow_slot0 = (mode == "local" and vr_rig == null) or flat
+	party.allow_slot0 = (mode == "local" and vr_rig == null) or flat_host
 	awards.set_player(0, "BUILDER" if vr_rig != null or mode == "client" else party.name_of(0))
 	if mode != "client":
 		net.state_set("best", int(save.data["best"]))
