@@ -110,6 +110,8 @@ const SOLO := {
 	"sheep_round_up": 1, "tiny_town_tycoon": 1, "tower_stack": 1, "whack_a_mole": 1, "quiz_show": 1, "mystery_manor": 1,
 }
 const VrText := preload("res://core/vr_text.gd")
+const Machine := preload("res://core/machine.gd")
+const Who := preload("res://core/who.gd")
 const DEFAULT_PORT := 7777
 const JOIN_TIMEOUT_MS := 5000
 
@@ -140,6 +142,8 @@ const MAX_LOBBY_MACHINES := 32  # ENet allows 4095; games are limited by seats, 
 const FIND_SECONDS := 2.2
 var machines := {}  # lobby host: peer -> {"kind": String, "ip": String}
 var my_kind: String = preload("res://core/machine.gd").kind()
+var _lobby_names: Array = []  # lobby host: the names last shown (to say who joined / left)
+var _lobby_names_seen := false
 var host_has_vr := false
 var lobby_id := randi()  # flat hosts that start together: the higher id gives way
 var _finding := 0.0  # seconds left looking for a lobby before hosting one
@@ -229,25 +233,57 @@ func _host_lobby(with_vr: bool) -> void:
 
 
 func _lobby_status() -> void:
-	var kinds := {}
-	for m in machines.values():
-		kinds[m.kind] = int(kinds.get(m.kind, 0)) + 1
-	if machines.is_empty():
-		_set_status("Pick a game!")
-		return
-	var parts: Array[String] = []
-	for k in kinds:
-		parts.append("%d %s%s" % [kinds[k], k.to_upper() if k == "tv" else k.capitalize(), "s" if kinds[k] > 1 else ""])
-	_set_status("%s connected: pick a game!" % ", ".join(parts))
+	# WHO is here, by name (core/who.gd): "David joined! TV, David and Simon are here: pick a game!"
+	var names: Array = [Machine.display_name(my_kind)]
+	for id in machines:
+		if machines[id].has("name"):  # (a machine is named once its hello arrives)
+			names.append(str(machines[id].name))
+	var news: Array[String] = []
+	for n in names:
+		if not n in _lobby_names:
+			news.append(Who.joined(n))
+	for n in _lobby_names:
+		if not n in names:
+			news.append(Who.left(n))
+	_lobby_names = names
+	var line := "Pick a game!" if names.size() < 2 else "%s are here: pick a game!" % Who.names_line(names)
+	if not news.is_empty() and _lobby_names_seen:
+		line = " ".join(news) + "  " + line
+	_lobby_names_seen = true
+	_set_status(line)
+	if mode == "host" and not machines.is_empty():
+		_lobby_who.rpc(line)
 
 
-## A joining machine says what it is (tv, deck, frame) so the lobby can pick game hosts.
+## Lobby host -> every machine: the same "who is here" line on every screen.
+@rpc("authority", "call_remote", "reliable")
+func _lobby_who(line: String) -> void:
+	_set_status(line)
+
+
+## A joining machine says what it is (tv, deck, frame) and its name ("David": core/machine.gd) so the lobby can
+## pick game hosts and say who is here.
 @rpc("any_peer", "call_remote", "reliable")
-func _hello(kind: String) -> void:
+func _hello(kind: String, who: String = "") -> void:
 	var id := multiplayer.get_remote_sender_id()
 	if mode == "host" and machines.has(id):
 		machines[id].kind = kind
+		machines[id].name = _unique_lobby_name(who if who != "" else Machine.display_name(kind), id)
 		_lobby_status()
+
+
+## "Deck", "Deck 2"...: two machines with the same name still read apart.
+func _unique_lobby_name(wanted: String, id: int) -> String:
+	var taken: Array = [Machine.display_name(my_kind)]
+	for other in machines:
+		if other != id and machines[other].has("name"):
+			taken.append(str(machines[other].name))
+	var nm := wanted
+	var n := 2
+	while nm in taken:
+		nm = "%s %d" % [wanted, n]
+		n += 1
+	return nm
 
 
 ## Lobby host: who hosts this game? A Frame (VR) if there is one, else this machine as a flat host.
@@ -272,7 +308,7 @@ func _join_lobby(address: String) -> void:
 		return  # already set up by an earlier attempt: just retry with the new peer
 	multiplayer.connected_to_server.connect(func() -> void:
 		join_deadline = 0
-		_hello.rpc_id(1, my_kind)
+		_hello.rpc_id(1, my_kind, Machine.display_name(my_kind))
 		_set_status("Connected: pick a game!")
 		if OS.has_environment("ARCADE_AUTOPICK"):  # headless tests
 			_start_everywhere(int(OS.get_environment("ARCADE_AUTOPICK"))))

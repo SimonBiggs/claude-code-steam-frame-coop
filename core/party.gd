@@ -916,12 +916,16 @@ func _send_roster() -> void:
 	if _mode() != "host":
 		return
 	var taken := {}
+	var owners := {}  # seat -> owner peer (1 = this host), so every machine can say WHO sits where (core/who.gd)
 	for s in MAX_SLOTS:
 		if _state[s] != FREE:
 			taken[s] = machine_kind(s)
+			owners[s] = _owner[s] if _device[s] == REMOTE and _owner[s] > 0 else 1
 	var n := _net()
 	if n == null or not n.has_method("sys_send_to"):
 		return
+	if n.has_method("state_set"):
+		n.state_set("_seat_owners", owners)
 	for peer in n.machines.keys():
 		var theirs := {}
 		for s in taken:
