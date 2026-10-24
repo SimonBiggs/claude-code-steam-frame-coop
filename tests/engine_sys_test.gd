@@ -2,10 +2,10 @@ extends Node
 ## Headless test of the engine systems: core/party.gd, core/split_view.gd, core/vr_rig.gd (fake VR
 ## through tests/bot_kit.gd), core/camera_rig.gd, core/save.gd and core/net.gd's additions.
 ## Local run (all modules, deterministic):
-##   godot --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/engine_sys_test.tscn
+##   godot-test --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/engine_sys_test.tscn
 ## Networked state store + party joins + requests + shared pause (real ENet, real time):
-##   DUO_PORT=7990 DUO_HOST=1 ENGINE_NET=1 godot --headless --path . res://tests/engine_sys_test.tscn &
-##   DUO_PORT=7990 DUO_JOIN=127.0.0.1 ENGINE_NET=1 godot --headless --path . res://tests/engine_sys_test.tscn
+##   DUO_PORT=7990 DUO_HOST=1 ENGINE_NET=1 godot-test --headless --path . res://tests/engine_sys_test.tscn &
+##   DUO_PORT=7990 DUO_JOIN=127.0.0.1 ENGINE_NET=1 godot-test --headless --path . res://tests/engine_sys_test.tscn
 ## Passing runs print "BOT RESULT: PASS"; failures print SCRIPT ERROR lines.
 
 const BotKit := preload("res://tests/bot_kit.gd")

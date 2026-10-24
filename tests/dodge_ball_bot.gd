@@ -4,7 +4,7 @@ extends Node
 ## BOT_VR=1 (local / host): a fake VR giant grabs balls from the tray and flings them at runners.
 ## BOT_HOST_VR=1 on the TV machine: the host has a (fake) VR giant, so hits are not checked.
 ## BOT_SOLO=1 with BOT_VR=1: nobody joins on the TV (VR alone: CPU runners fill in).
-## Local:     godot --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/dodge_ball_bot.tscn
+## Local:     godot-test --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/dodge_ball_bot.tscn
 ## Networked: DUO_PORT=81xx DUO_HOST=1 ... & DUO_PORT=81xx DUO_JOIN=127.0.0.1 ... (same scene, real time)
 ## Flat host: add DUO_FLAT_HOST=1 to the host (no VR: one bot pad plays slot 0 on the host).
 

@@ -2,7 +2,7 @@ extends Node
 ## Headless bot for games/bubble_bath. BOT_PLAYERS=n TV boats (default 2) collect ducks and sail them
 ## to the plug-hole. BOT_VR=1 (local / host): a fake VR player slaps the water with the left glove and
 ## grabs ducks with the right glove (trigger) and throws them at the plug-hole.
-## Local:      godot --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/bubble_bath_bot.tscn
+## Local:      godot-test --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/bubble_bath_bot.tscn
 ## Networked:  DUO_PORT=81xx DUO_HOST=1 BOT_VR=1 ... & DUO_PORT=81xx DUO_JOIN=127.0.0.1 ... (same scene, real time)
 ## Flat host: add DUO_FLAT_HOST=1 to the host (no VR: one bot pad plays slot 0 on the host).
 

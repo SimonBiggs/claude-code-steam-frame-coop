@@ -22,7 +22,7 @@ is generated in code (no image, font, audio or model files) and cached in Engine
 | `core/music.gd` | Procedural music (old `play_track` kept) + moods, `add_track`, crossfades |
 | `core/res_cache.gd` | `ResCache.get_or_make(key, maker)`: shared resource cache that survives reloads |
 
-Tested by `tests/engine_ui_test.tscn` (`godot --headless --path . --fixed-fps 60 res://tests/engine_ui_test.tscn`,
+Tested by `tests/engine_ui_test.tscn` (`godot-test --headless --path . --fixed-fps 60 res://tests/engine_ui_test.tscn`,
 `ENGINE_PARTS=ui,world,audio` picks parts). Read its parts in `tests/engine_ui/` for more usage examples.
 
 ## With the engine systems (core/party.gd, core/split_view.gd, core/vr_rig.gd)

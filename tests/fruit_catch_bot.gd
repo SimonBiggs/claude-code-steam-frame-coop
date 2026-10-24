@@ -3,7 +3,7 @@ extends Node
 ## BOT_PLAYERS=n: TV players with virtual pads (default 2); they run under good fruit and dodge rotten
 ## apples. BOT_VR=1 (local / host): a fake VR player shakes a branch with the right glove, catches
 ## fruit with the left glove and puts it in the bowl.
-## Local:      godot --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/fruit_catch_bot.tscn
+## Local:      godot-test --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/fruit_catch_bot.tscn
 ## Networked:  DUO_PORT=81xx DUO_HOST=1 ... & DUO_PORT=81xx DUO_JOIN=127.0.0.1 ... (same scene, real time)
 ## Flat host: add DUO_FLAT_HOST=1 to the host (no VR: one bot pad plays slot 0 on the host).
 

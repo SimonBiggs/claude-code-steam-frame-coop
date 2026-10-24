@@ -228,7 +228,7 @@ slot, ...)`, `join_bot(party)`. Fake VR: `vr_pose`, `vr_idle`, `vr_reach`, `vr_l
 `assert_true/assert_eq/assert_near` (failures print `SCRIPT ERROR: BOT ASSERT FAILED`),
 `finish()` (summary + quit).
 
-Run: `godot --headless --path . --fixed-fps 60 --quit-after 1500 res://tests/<id>_bot.tscn`;
+Run: `godot-test --headless --path . --fixed-fps 60 --quit-after 1500 res://tests/<id>_bot.tscn`;
 networked: same scene with `DUO_HOST=1` and `DUO_JOIN=127.0.0.1` (real time), see the guide.
 The engine's own test: `res://tests/engine_sys_test.tscn` (local, and networked with `ENGINE_NET=1`).
 

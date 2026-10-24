@@ -2,7 +2,7 @@ extends Node
 ## Headless bot for games/tower_stack. TV bots push blocks onto the pad (and one climbs the tower);
 ## BOT_VR=1 adds a fake VR giant that grabs boinged-up blocks and stacks them on the stage.
 ## Without VR the helper crane does the stacking.
-## Local:      godot --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/tower_stack_bot.tscn
+## Local:      godot-test --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/tower_stack_bot.tscn
 ## Networked:  DUO_PORT=8137 DUO_HOST=1 ... & DUO_PORT=8137 DUO_JOIN=127.0.0.1 ... (same scene, real time)
 ## Flat host: add DUO_FLAT_HOST=1 to the host (no VR: one bot pad plays slot 0 on the host).
 

@@ -46,7 +46,7 @@ export const bots = {
     const t0 = Date.now();
     const scene = `res://tests/${id}_bot.tscn`;
     const one = async (env: Record<string, string>, extra = "") => {
-      const r = await $`nice -n 19 timeout ${o.seconds ?? 150} godot --headless --path ${STAGE} ${{ raw: extra }} ${scene}`.env({ ...process.env, ...env }).nothrow().quiet();
+      const r = await $`nice -n 19 timeout ${o.seconds ?? 150} godot-test --headless --path ${STAGE} ${{ raw: extra }} ${scene}`.env({ ...process.env, ...env }).nothrow().quiet();
       return { out: r.stdout.toString() + r.stderr.toString(), code: r.exitCode };
     };
     // Pass (docs/GAME_DEV_GUIDE.md "Testing"): it ran to the end (exit 0, not killed by timeout or a crash), no

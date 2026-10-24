@@ -1,0 +1,8 @@
+#!/bin/bash
+# godot-test ARGS...: run Godot for tests with NO access to the real controllers (Simon's PlayStation pad must never
+# connect to a test game). Hides /dev/input and every /dev/hidraw* (SDL reads pads through hidraw too) in a bwrap
+# sandbox, same as gdev's offscreen runner. Use this instead of plain `godot` for every headless / bot / merge test.
+args=(--dev-bind / / --tmpfs /dev/input --die-with-parent)
+for h in /dev/hidraw*; do [ -e "$h" ] && args+=(--ro-bind /dev/null "$h"); done
+export SDL_JOYSTICK_HIDAPI=0  # SDL HIDAPI pads off too (same as the offscreen runner)
+exec bwrap "${args[@]}" godot "$@"

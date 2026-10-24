@@ -1,7 +1,7 @@
 extends Node
 ## Headless bot for games/whack_a_mole. BOT_PLAYERS=n TV kids drop in and run to moles and press A.
 ## BOT_VR=1 (local / host): a fake VR player walks up and swings the mallet down onto moles.
-## Local:      godot --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/whack_a_mole_bot.tscn
+## Local:      godot-test --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/whack_a_mole_bot.tscn
 ## Networked:  DUO_PORT=81xx DUO_HOST=1 ... & DUO_PORT=81xx DUO_JOIN=127.0.0.1 ... (same scene, real time)
 ## Flat host: add DUO_FLAT_HOST=1 to the host (no VR: one bot pad plays slot 0 on the host).
 

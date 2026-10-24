@@ -5,7 +5,7 @@ extends Node
 ## through the rings, and now and then lets go to press the toys with the left hand.
 ## Design check: all four missions get done and the ship docks (results); both practice targets get
 ## done; the pilot flew through rings; the gunners zapped things; the TV machine mirrors it all.
-## Local:     godot --headless --path . --fixed-fps 60 --quit-after 12000 res://tests/starship_crew_bot.tscn
+## Local:     godot-test --headless --path . --fixed-fps 60 --quit-after 12000 res://tests/starship_crew_bot.tscn
 ## Networked: DUO_PORT=83xx DUO_HOST=1 BOT_VR=1 ... & DUO_PORT=83xx DUO_JOIN=127.0.0.1 ... (real time)
 ## SC_MISSION=n starts at mission n (0..3).
 

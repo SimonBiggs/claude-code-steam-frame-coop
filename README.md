@@ -94,9 +94,9 @@ Everything is generated in code: no imported models, textures or audio.
 ### Running
 
 ```sh
-godot --path .                     # split screen
-DUO_HOST=1 godot --path .          # host (automatic when an OpenXR headset is found)
-DUO_JOIN=<host> godot --path .     # join as the TV player(s)
+godot-test --path .                     # split screen
+DUO_HOST=1 godot-test --path .          # host (automatic when an OpenXR headset is found)
+DUO_JOIN=<host> godot-test --path .     # join as the TV player(s)
 ```
 
 On a Steam Frame, run the Linux Arm64 Godot with `--rendering-method mobile`, installed as a

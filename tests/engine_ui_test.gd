@@ -3,8 +3,8 @@ extends Node
 ## hud_kit, hints, awards, mesh_kit, creatures, sky_kit, sfx, music). Each area is a part script in
 ## tests/engine_ui/ (extending part_base.gd); this runner awaits them one by one and quits with the
 ## number of failed checks as the exit code.
-##   godot --headless --path . --fixed-fps 60 res://tests/engine_ui_test.tscn
-##   ENGINE_PARTS=ui,world godot --headless ...   # only some parts
+##   godot-test --headless --path . --fixed-fps 60 res://tests/engine_ui_test.tscn
+##   ENGINE_PARTS=ui,world godot-test --headless ...   # only some parts
 
 const PARTS := {
 	"ui": "res://tests/engine_ui/ui_test.gd",

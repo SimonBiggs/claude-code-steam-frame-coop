@@ -19,7 +19,7 @@ extends Node
 ## Env: BOT_PLAYERS=n TV pads (default 2; locally without VR the first pad pilots the Titan),
 ## BOT_VR=1 fake VR pilot, MT_MISSION=n play mission n's boss (no practice; default: mission 1 with
 ## the practice warm-up, boss only).
-## Local:      godot --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/mech_titans_bot.tscn
+## Local:      godot-test --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/mech_titans_bot.tscn
 ## Networked:  DUO_PORT=8090 DUO_HOST=1 ... & DUO_PORT=8090 DUO_JOIN=127.0.0.1 ... (same scene, real time)
 
 const BotKit := preload("res://tests/bot_kit.gd")

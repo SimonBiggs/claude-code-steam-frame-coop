@@ -13,7 +13,7 @@ extends Node
 ## temple falls: checks the results screen, the VR card and PLAY AGAIN (a fresh wave 1, no practice).
 ## EB_SHOT=dir (windowed run, not headless): saves screenshots of the TV picture (and the VR mirror)
 ## to dir at a few moments, to check the look.
-## Local:     godot --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/elemental_bender_bot.tscn
+## Local:     godot-test --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/elemental_bender_bot.tscn
 ##            (EB_FAST=1 for short waves: wave 6 inside a minute)
 ## Networked: DUO_PORT=80xx DUO_HOST=1 BOT_VR=1 ... & DUO_PORT=80xx DUO_JOIN=127.0.0.1 ... (real time)
 

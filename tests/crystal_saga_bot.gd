@@ -10,7 +10,7 @@ extends Node
 ## Design check: every zone gets entered, the crystal is restored and the results show; the practice
 ## and the ghost hand happened; sword, fire and thunder all hit; props reacted; the giant stomped; the
 ## TV machine mirrors it all; everyone stays on the path.
-## Local:     godot --headless --path . --fixed-fps 60 --quit-after 30000 res://tests/crystal_saga_bot.tscn
+## Local:     godot-test --headless --path . --fixed-fps 60 --quit-after 30000 res://tests/crystal_saga_bot.tscn
 ## Networked: DUO_PORT=83xx DUO_HOST=1 BOT_VR=1 ... & DUO_PORT=83xx DUO_JOIN=127.0.0.1 ... (real time)
 ## CS_ZONE=n starts in zone n (0..4).
 
