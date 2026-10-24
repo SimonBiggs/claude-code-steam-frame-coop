@@ -18,7 +18,11 @@ extends Node3D
 ## from race 2 the ? boxes come out and give an instant ZOOM (no button); from race 3 some give a
 ## rainbow STAR. Off: drifting / mini-turbos, the boost meter, rocket starts, held items (bananas,
 ## shields, honks, triples), cups, points, awards, results tables, the minimap and every how-to text.
-## Text: VR gets one short headline at a time (3-2-1 GO!, LAP 2, FINISH! 2nd); TV views show place + lap.
+## Text: VR gets one short headline at a time (3-2-1 GO!, LAP 2, FINISH!); TV views show place + lap.
+## No how-to words at all: the TV views show picture cues (a glowing pad button + an icon, CUES: A + up
+## arrow = go, swaying left/right arrows = steer, a big red arrow = wrong way, turn this way) that fade
+## after the kid has done the move twice; the VR wheel gets two shared Cannon Cove ghost hands that turn
+## it and squeeze the trigger, and a glowing arrow over the wheel when going the wrong way.
 
 const VrText := preload("res://core/vr_text.gd")
 const SfxScript := preload("res://core/sfx.gd")
@@ -29,6 +33,17 @@ const TrackScript := preload("res://games/kart_race/track.gd")
 const KartScript := preload("res://games/kart_race/kart.gd")
 const CockpitScript := preload("res://games/kart_race/cockpit.gd")
 const JoinListenerScript := preload("res://games/kart_race/join_listener.gd")
+const UiKit := preload("res://core/ui_kit.gd")
+
+## Simple mode picture cues on the TV views (no words): [pad button, icons, icon colour].
+## The "go" button follows the player's controls (A on a pad, W / up on a keyboard), see _cue_button.
+const CUES := {
+	"go": ["A", ["arrow_up"], Color(0.45, 1.0, 0.5)],
+	"steer": ["", ["arrow_left", "arrow_right"], Color(1.0, 0.92, 0.45)],
+	"wrong_l": ["", ["arrow_left"], Color(1.0, 0.35, 0.3)],
+	"wrong_r": ["", ["arrow_right"], Color(1.0, 0.35, 0.3)],
+	"wrong_go": ["A", ["arrow_up"], Color(1.0, 0.35, 0.3)],
+}
 
 ## Everything cut for the simple game is behind this flag (false = the full Grand Prix game).
 const SIMPLE_MODE := true
@@ -825,6 +840,11 @@ func _ensure_view(p) -> void:
 	vp.add_child(cam)
 	cam.current = true
 	p.camera = cam
+	# Your own name tag floats right in front of your chase camera (a giant "P3" over the road at the
+	# start): each view hides its own kart's tag; everyone else still sees it.
+	if p.index < 8 and p.tag != null:
+		p.tag.layers = 1 << (10 + p.index)
+		cam.cull_mask &= ~(1 << (10 + p.index))
 	var hud_layer := CanvasLayer.new()
 	vp.add_child(hud_layer)
 	var hud := Control.new()
@@ -1256,6 +1276,8 @@ func _process(delta: float) -> void:
 	for p in players:
 		if p.camera != null:
 			p.update_camera(dt)
+		if SIMPLE_MODE and p.active and p.is_local():
+			_track_cues(p, dt)
 		if p.hud != null:
 			_update_hud(p, dt)
 	_update_vr_text(dt)
@@ -1523,7 +1545,7 @@ func _finish(k) -> void:
 	if not k.cpu and first_human_finish < 0.0:
 		first_human_finish = race_t
 	var pl: int = k.place
-	notify(k, "FINISH! %s" % ordinal(pl) if SIMPLE_MODE else "FINISHED %s!" % ordinal(pl).to_upper())
+	notify(k, "FINISH!" if SIMPLE_MODE else "FINISHED %s!" % ordinal(pl).to_upper())  # simple: the place label shows the place
 	burst(k.position + Vector3(0, 1.5, 0), k.color, 24)
 	if not k.cpu:
 		for c in [Color(1.0, 0.3, 0.4), Color(0.3, 0.8, 1.0), Color(1.0, 0.9, 0.3)]:
@@ -1808,16 +1830,155 @@ func _simple_results(order: Array) -> void:
 func _update_simple_hud(p, dt: float) -> void:
 	var racing := state == "race" or state == "countdown"
 	p.hud_label.text = lap_text(p) if racing else ""
-	p.place_label.text = ordinal(p.place) if racing or state == "results" else ""
+	# The place: top right while racing, but never under a big centre headline (3-2-1, GO!) - in a 2x2
+	# grid the screen centre is the corner of every view. On the finish party it moves to the middle
+	# of the view, clear of "X WINS!".
+	var headline: bool = center_label.text != "" and center_label.modulate.a > 0.05
+	var res := state == "results"
+	p.place_label.text = ordinal(p.place) if (state == "race" and not headline) or res else ""
+	var sz: Vector2 = p.hud.size
+	var ui := clampf(minf(sz.x / 940.0, sz.y / 900.0), 0.5, 1.0)
+	var pw := 260.0 * ui
+	p.place_label.position = Vector2((sz.x - pw) * 0.5, sz.y * 0.3) if res else Vector2(sz.x - pw - 16.0, 6.0)
+	p.place_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER if res else HORIZONTAL_ALIGNMENT_RIGHT
 	p.item_label.visible = false
 	p.hud.get_node("BarBg").visible = false
 	p.hud.get_node("DriftBg").visible = false
 	if p.minimap != null:
 		p.minimap.visible = false
 	var h := _hint_for(p, dt)
+	# "LAP 2": the lap counter (top left) grows and glows instead of a second copy in the middle.
+	var lp := 0.0
+	if h.begins_with("LAP "):
+		lp = clampf(float(p.get_meta("hint_t", 0.0)) / 2.2, 0.0, 1.0)
+		h = ""
+	p.hud_label.pivot_offset = Vector2.ZERO
+	p.hud_label.scale = Vector2.ONE * (1.0 + 0.7 * lp)
+	p.hud_label.modulate = Color.WHITE.lerp(Color(1.0, 0.95, 0.4), lp)
 	if p.finished and state == "race":
-		h = "FINISH! %s" % ordinal(p.place)
+		h = "FINISH!"
 	p.hint_label.text = h
+	_update_cue(p, p.hint_label)
+
+
+# --- Simple mode picture cues (no words) ----------------------------------------------------
+
+## Which picture cue this TV player needs right now, or "" for nothing. "go" and "steer" go away
+## after the player has done them twice; the wrong-way arrow shows whenever they're going backwards.
+func _simple_cue(p) -> String:
+	if not p.active or p.finished or get_tree().paused:
+		return ""
+	if net.mode == "client" and not synced:
+		return ""
+	if state == "race" and p.wrong_t > 1.5:
+		return "wrong_go" if p.wrong_dir == 0.0 else ("wrong_l" if p.wrong_dir > 0.0 else "wrong_r")
+	if state != "wait" and state != "countdown" and state != "race":
+		return ""
+	var go := _cue_if_new(p, "go")
+	if go != "":
+		return go
+	if state != "countdown":
+		return _cue_if_new(p, "steer")
+	return ""
+
+
+func _cue_if_new(p, key: String) -> String:
+	var done: Dictionary = p.get_meta("cue_done", {})
+	return key if int(done.get(key, 0)) < 2 else ""
+
+
+## Every local human (TV views and the VR driver): count what they've done so the cues can go away.
+## Go: two presses (or holding it down for a while). Steer: turning one way and then the other (or a
+## good long turn).
+func _track_cues(k, dt: float) -> void:
+	if get_tree().paused or not (state == "wait" or state == "countdown" or state == "race"):
+		return
+	var done: Dictionary = k.get_meta("cue_done", {})
+	var go_on: bool = k.throttle > 0.5
+	if go_on and not bool(k.get_meta("go_was", false)):
+		done["go"] = int(done.get("go", 0)) + 1
+	k.set_meta("go_was", go_on)
+	if go_on and state != "countdown":
+		var ht: float = float(k.get_meta("go_hold", 0.0)) + dt
+		k.set_meta("go_hold", ht)
+		if ht > 2.5:
+			done["go"] = maxi(2, int(done.get("go", 0)))
+	if state != "countdown" and absf(k.speed) > 1.0:
+		var sd := 0
+		if k.steer > 0.5:
+			sd = 1
+		elif k.steer < -0.5:
+			sd = -1
+		if sd != 0 and sd != int(k.get_meta("steer_last", 0)):
+			k.set_meta("steer_last", sd)
+			done["steer"] = int(done.get("steer", 0)) + 1
+		if sd != 0:
+			var st: float = float(k.get_meta("steer_hold", 0.0)) + dt
+			k.set_meta("steer_hold", st)
+			if st > 3.0:
+				done["steer"] = maxi(2, int(done.get("steer", 0)))
+	k.set_meta("cue_done", done)
+
+
+## The go button in the player's own controls.
+func _cue_button(p, key: String) -> String:
+	var b: String = CUES[key][0]
+	if b == "A" and p.joy < 0:
+		return "UP" if p.key_set == KartScript.KEYS_ARROWS else "W"
+	return b
+
+
+## The picture cue in the middle of a TV view: a glowing pad button and an icon, gently pulsing.
+## Steering shows two arrows that sway in turn; wrong way a big red arrow the way to turn. It lives
+## inside the hint label (hidden while that shows FINISH!), so it follows its layout.
+func _update_cue(p, l: Label) -> void:
+	var key := _simple_cue(p) if l.text == "" else ""
+	p.set_meta("cue", key)
+	# Low in the view (about two thirds down), below the road ahead, the rings and the karts' tags.
+	var drop: float = maxf(0.0, p.hud.size.y * 0.66 - l.position.y)
+	var box: HBoxContainer = l.get_node_or_null("Cue")
+	if box == null:
+		box = HBoxContainer.new()
+		box.name = "Cue"
+		box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		box.alignment = BoxContainer.ALIGNMENT_CENTER
+		box.add_theme_constant_override("separation", 18)
+		l.add_child(box)
+		box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		box.set_meta("key", "")
+	box.offset_top = drop
+	box.offset_bottom = drop
+	var s := clampf(float(l.get_theme_font_size("font_size")) / 44.0, 0.5, 1.2) * 1.6
+	var btn := _cue_button(p, key) if key != "" else ""
+	var sig := "%s/%s" % [key, btn]
+	if str(box.get_meta("key")) != sig or absf(float(box.get_meta("s", 0.0)) - s) > 0.01:
+		box.set_meta("key", sig)
+		box.set_meta("s", s)
+		for c in box.get_children():
+			c.queue_free()
+		if key != "":
+			var cue: Array = CUES[key]
+			if btn != "":
+				box.add_child(UiKit.glyph(btn, s))
+			var big := 1.8 if key.begins_with("wrong") else 1.0
+			for k in cue[1]:
+				box.add_child(UiKit.icon(str(k), cue[2], 40.0 * s * big))
+			for c in box.get_children():
+				(c as Control).size_flags_vertical = Control.SIZE_SHRINK_CENTER  # a round A, not a tall pill
+	box.visible = key != ""
+	if box.visible:
+		var t := Time.get_ticks_msec() / 1000.0
+		var fast := key.begins_with("wrong")
+		var k := absf(sin(t * (7.0 if fast else 3.5)))
+		box.modulate = Color(1, 1, 1, 0.75 + 0.25 * k)
+		var i := 0
+		for c in box.get_children():
+			var ctl := c as Control
+			ctl.pivot_offset = ctl.size * 0.5
+			ctl.scale = Vector2.ONE * (1.0 + 0.15 * k)
+			if key == "steer":  # the arrows wave left, then right
+				ctl.scale = Vector2.ONE * (1.0 + 0.35 * maxf(0.0, sin(t * 3.0 + i * PI)))
+			i += 1
 
 
 # --- Items, bananas, bumps ------------------------------------------------------------------
@@ -2288,7 +2449,8 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 
 
 func _set_pause_banner(paused: bool, who: String) -> void:
-	_show_center("PAUSED\n" + who if paused else (results_text if state == "results" else ""), 0.0, false)
+	var title := "PAUSED" if SIMPLE_MODE else "PAUSED\n" + who  # simple: no explaining sentence
+	_show_center(title if paused else (results_text if state == "results" else ""), 0.0, false)
 	if vr_center != null and paused:
 		VrText.snap(vr_center)
 
@@ -2524,8 +2686,9 @@ func _hint_for(k, dt: float) -> String:
 		k.set_meta("hint_t", t - dt)
 		return str(k.get_meta("hint", ""))
 	if k.wrong_t > 1.5 and not k.finished:
-		return "WRONG WAY!" if SIMPLE_MODE else "WRONG WAY! Turn around"
-	if SIMPLE_MODE:  # no how-to texts: the rings, arrows and ghost mittens show it
+		if not SIMPLE_MODE:
+			return "WRONG WAY! Turn around"
+	if SIMPLE_MODE:  # no how-to texts: the rings, picture cues, red arrows and ghost hands show it
 		return ""
 	if k.cockpit != null and not k.cockpit.fake and k.cockpit.unheld_t > 2.5 and (state == "race" or state == "countdown") and not k.finished:
 		return "Hold the wheel with both hands!"
@@ -2585,7 +2748,7 @@ func vr_panel_texts(k) -> Array:
 	if SIMPLE_MODE:  # just your place, low on the left; one headline at a time in the middle
 		var h := _hint_for(k, get_process_delta_time())
 		if k.finished and state == "race":
-			h = "FINISH! %s" % ordinal(k.place)
+			h = "FINISH!"  # the place is on the left panel
 		if state == "results" or center_label.modulate.a > 0.05 and center_label.text != "":
 			h = ""  # the big headline is showing
 		var pl := ordinal(k.place) if state == "race" or state == "countdown" else ""

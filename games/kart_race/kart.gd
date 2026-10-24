@@ -89,6 +89,7 @@ var pad_cd := 0.0
 var bump_cd := 0.0
 var wall_cd := 0.0
 var wrong_t := 0.0
+var wrong_dir := 0.0  # going the wrong way: +1 = the track is to your left (turn left), -1 = right, 0 = drive forward
 var stuck_t := 0.0
 var reverse_t := 0.0
 var item_hold_t := 0.0
@@ -237,6 +238,11 @@ func _ready() -> void:
 	tag.modulate = color.lightened(0.35)
 	tag.position = Vector3(0, 2.1, 0.3)
 	tag.rotation.y = 0.0  # faces backwards (+Z): readable by whoever is chasing
+	# Fade out close to a camera (per camera): a kart right in front of you at the start or in a bump
+	# would otherwise put a giant name over half your view.
+	tag.visibility_range_begin = 5.5
+	tag.visibility_range_begin_margin = 2.0
+	tag.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
 	add_child(tag)
 	visible = active
 
@@ -634,6 +640,7 @@ func sim(delta: float) -> void:
 	# Wrong way hint (for humans).
 	if main.state == "race" and absf(speed) > 2.0 and fwd.dot(tangent) * signf(speed) < -0.3:
 		wrong_t += delta
+		wrong_dir = 0.0 if speed < 0.0 else (1.0 if fwd.cross(tangent).y >= 0.0 else -1.0)  # 0: reversing, just go
 	else:
 		wrong_t = maxf(0.0, wrong_t - delta * 2.0)
 	_update_visual(delta)
