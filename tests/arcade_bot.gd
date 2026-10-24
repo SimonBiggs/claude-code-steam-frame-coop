@@ -58,6 +58,16 @@ class Runner extends Node:
 		pad(button, false)
 		await frames(2)
 
+	## A pad press through Godot's Input, like a real pad (the game runs in the main window).
+	func press(button: JoyButton) -> void:
+		for down in [true, false]:
+			var e := InputEventJoypadButton.new()
+			e.device = DEV
+			e.button_index = button
+			e.pressed = down
+			Input.parse_input_event(e)
+			await frames(2)
+
 	func check(cond: bool, msg: String) -> bool:
 		return kit.assert_true(cond, "[%s] %s" % [label, msg])
 
@@ -75,8 +85,8 @@ class Runner extends Node:
 	func _screen(sc: Dictionary) -> void:
 		label = str(sc.name)
 		OS.set_environment("DUO_MACHINE_KIND", str(sc.kind))
-		if get_tree().current_scene != null and get_tree().current_scene.scene_file_path.begins_with("res://games/"):
-			get_tree().unload_current_scene()  # the game the previous screen launched
+		if get_tree().current_scene != null:
+			get_tree().unload_current_scene()  # this test's scene / what the previous screen ended on
 		vp = SubViewport.new()
 		vp.size = sc.size
 		vp.size_2d_override = Vector2i(stretched(sc.size))
@@ -193,6 +203,11 @@ class Runner extends Node:
 				await tap(JOY_BUTTON_START)
 				await frames(2)
 				check(arcade.quit_panel == null or not is_instance_valid(arcade.quit_panel), "Start closes it")
+				await tap(JOY_BUTTON_START)
+				await frames(2)
+				await tap(JOY_BUTTON_A)  # ONE press on the highlighted "Keep playing"
+				await frames(2)
+				check(arcade.quit_panel == null or not is_instance_valid(arcade.quit_panel), "one A press on \"Keep playing\" closes it")
 		else:
 			check(not open, "Start does NOT open a quit dialog on the %s" % label)
 			if open:
@@ -213,3 +228,20 @@ class Runner extends Node:
 			"A launches the highlighted game %s (now running: %s)" % [want_scene, cur.scene_file_path if cur else "nothing"])
 		vp.queue_free()
 		await frames(30)  # let the game run a moment (its errors count too)
+		# The game's pause menu (core/pause_menu.gd): Start, d-pad down twice, ONE A on "Back to Arcade" -> the arcade.
+		var menus := get_tree().get_nodes_in_group("pause_menu")
+		check(not menus.is_empty(), "the game has the shared pause menu")
+		if not menus.is_empty():
+			kit.allow_pause = true
+			menus[0]._open(DEV)
+			await frames(2)
+			for i in 2:
+				await press(JOY_BUTTON_DPAD_DOWN)
+			var fb := get_viewport().gui_get_focus_owner()
+			check(fb is Button and (fb as Button).text == "Back to Arcade", "d-pad down twice highlights Back to Arcade (got %s)" % (fb.get("text") if fb else "nothing"))
+			await press(JOY_BUTTON_A)
+			await frames(60)  # net.go_to_arcade waits 0.4 s
+			var now := get_tree().current_scene
+			check(now != null and now.scene_file_path == "res://arcade.tscn", "one A press on Back to Arcade goes back to the arcade (now: %s)" % (now.scene_file_path if now else "nothing"))
+			check(not get_tree().paused, "the arcade is not paused")
+			kit.allow_pause = false

@@ -13,7 +13,7 @@ var who := 1  # party games: the slot that opened the menu (sent with the pause,
 ## (pressed after being released), so a player still playing can't press "Back to Arcade" for everyone.
 ## Other players still holding a stick / mashing A must not move the highlight or press Restart.
 var opener_device := -1
-var _a_released := {}  # device -> true once its A was let go after the menu opened (a held A doesn't count)
+var _a_held := {}  # device -> true: its A was already held when the menu opened; it counts again once let go (UiKit.held_pads)
 
 
 func _ready() -> void:
@@ -74,12 +74,11 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventJoypadButton or event is InputEventJoypadMotion:
 		joy_dev = event.device
 	if pad and not pad.pressed and pad.button_index == JOY_BUTTON_A:
-		_a_released[pad.device] = true
+		_a_held.erase(pad.device)
 	if panel.visible and joy_dev != -99 and opener_device == -3 and not toggle:
 		get_viewport().set_input_as_handled()
-		if pad and pad.pressed and pad.button_index == JOY_BUTTON_A and _a_released.get(pad.device, false):
+		if pad and pad.pressed and pad.button_index == JOY_BUTTON_A and not _a_held.has(pad.device):
 			opener_device = pad.device  # claimed: this pad drives the menu from now on (this press only claims)
-			_a_released[pad.device] = false
 		return
 	if panel.visible and joy_dev != -99 and opener_device >= 0 and joy_dev != opener_device and not toggle:
 		get_viewport().set_input_as_handled()
@@ -89,7 +88,7 @@ func _input(event: InputEvent) -> void:
 	if pad and pad.pressed and panel.visible and not toggle:
 		if pad.button_index == JOY_BUTTON_A:
 			get_viewport().set_input_as_handled()
-			if not _a_released.get(pad.device, false):
+			if _a_held.has(pad.device):
 				return  # still held from play
 			var f := get_viewport().gui_get_focus_owner()
 			if f is BaseButton and panel.is_ancestor_of(f):
@@ -141,7 +140,7 @@ func _pad_in_play(device: int) -> bool:
 
 func _open(by_device: int = -3) -> void:
 	opener_device = by_device
-	_a_released.clear()
+	_a_held = preload("res://core/ui_kit.gd").held_pads(JOY_BUTTON_A)
 	panel.visible = true
 	get_tree().paused = true
 	if main and main.net:
