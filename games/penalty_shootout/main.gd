@@ -62,6 +62,8 @@ const FIRE_ROUND := 2  # simple mode: the fireball unlocks from this round (0-ba
 
 const MAX_PLAYERS := 7  # VR keeper + 6 strikers
 const MAX_LOCAL_VIEWS := 6
+## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
+var multi_machine := true
 const PAD_LEAVE_TIME := 20.0
 const FIRST_INTRO_TIME := 9.0
 const INTRO_TIME := 3.5
@@ -236,6 +238,8 @@ func _setup_game(mode: String) -> void:
 	_assign_joypads()
 	ready_to_play = true
 	_ensure_join_listener()
+	if mode == "client":
+		players[1].set_meta("want_join", true)  # ask the host for a striker spot (it may hand out another one)
 	_restore_party()
 	if SIMPLE_MODE:
 		props = PropsScript.new()
@@ -575,8 +579,8 @@ func _layout_views() -> void:
 		if not p.has_meta("view"):
 			continue
 		var c: SubViewportContainer = p.get_meta("view")
-		c.visible = p.active
-		if p.active:
+		c.visible = p.active and is_local(p)
+		if c.visible:
 			shown.append(p)
 	var n := shown.size()
 	var area := views_root.size
@@ -639,7 +643,11 @@ func _assign_joypads() -> void:
 
 
 func _on_joy_changed(device: int, connected: bool) -> void:
-	if not ready_to_play or net.mode == "host":
+	if not ready_to_play:
+		return
+	if net.mode == "host":
+		if connected and not players[0].vr and players[0].joy < 0:
+			players[0].joy = device  # flat host (no VR): the keeper dives with this controller
 		return
 	if connected:
 		print("Joypad %d connected" % device)
@@ -650,7 +658,7 @@ func _on_joy_changed(device: int, connected: bool) -> void:
 			if is_local(p) and p.joy < 0 and int(p.get_meta("last_joy", -2)) == device:
 				pick = p
 				break
-		if pick == null and players[1].joy < 0:
+		if pick == null and players[1].joy < 0 and is_local(players[1]):
 			pick = players[1]
 		if pick == null:
 			return  # unassigned: press A to join
@@ -692,10 +700,10 @@ func handle_join_input(event: InputEvent) -> bool:
 	return _join_slot(device) != null
 
 
-func _next_free_index() -> int:
+func _next_free_index(skip: int = -1) -> int:
 	for i in range(1, players.size()):
 		var p = players[i]
-		if not is_local(p) or p.active or p.has_meta("want_join") or p.joy >= 0 or p.pad_lost_t >= 0.0:
+		if i == skip or _foreign(i) or not is_local(p) or p.active or p.has_meta("want_join") or p.joy >= 0 or p.pad_lost_t >= 0.0:
 			continue
 		return i
 	return -1
@@ -821,7 +829,7 @@ func _check_join(delta: float) -> void:
 	for p in players:
 		if not p.has_meta("want_join") or not is_local(p):
 			continue
-		if p.active:
+		if p.active and _mine(p.index):
 			p.remove_meta("want_join")
 			continue
 		join_t = 1.0
@@ -831,7 +839,7 @@ func _check_join(delta: float) -> void:
 func on_player_activity_changed(p) -> void:
 	if p.active and is_local(p):
 		_ensure_view(p)
-	if p.active:
+	if p.active and _mine(p.index):
 		p.remove_meta("want_join")
 	_layout_views()
 	print("Player %d is now %s" % [p.index + 1, "playing" if p.active else "waiting"])
@@ -1778,6 +1786,7 @@ func _physics_process(delta: float) -> void:
 
 
 func _client_update(delta: float, cont_edge: bool) -> void:
+	_sync_seats()
 	_check_join(delta)
 	_update_lost_pads(delta)
 	state_t += delta
@@ -1912,6 +1921,8 @@ func _update_aim_visuals() -> void:
 # --- Networked co-op (see docs/GAME_DEV_GUIDE.md) --------------------------------------------
 
 func on_client_joined() -> void:
+	if net.peer_count() > 1:
+		return  # another machine: its strikers step up when they join (no restart for everyone)
 	if SIMPLE_MODE:
 		cpu = false
 		_show_center("STRIKERS!", 1.5, true, "")
@@ -1927,7 +1938,19 @@ func on_client_joined() -> void:
 		_begin_match()
 
 
+## Host: one machine left: only its strikers leave (and their spots become free).
+func on_machine_left(peer: int) -> void:
+	var freed := _free_seats_of(peer)
+	for i in freed:
+		if i < players.size():
+			_deactivate(players[i])
+	if not freed.is_empty() and net.peer_count() > 0 and not SIMPLE_MODE:
+		_show_center("PLAYER %d LEFT" % (int(freed[0]) + 1), 1.5)
+
+
+## Host: the LAST machine left (multi_machine games get this only then).
 func on_client_left() -> void:
+	net.state_set("owners", {})
 	for i in range(2, players.size()):
 		if players[i].active:
 			players[i].set_active(false)
@@ -1950,6 +1973,17 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 		index = int(args[0])
 	if index <= 0 or index >= players.size():
 		return
+	if action == "join":
+		# Many machines: the striker spot may belong to another machine; then this one gets the first free one.
+		var peer: int = net.sender_peer()
+		var got := _grant_seat(index, peer)
+		if got != index:
+			net.event_to(peer, "seat", [index, got])
+			if got < 0:
+				return
+			index = got
+	elif action != "continue" and action != "pause" and not remote_owner_ok(index):
+		return  # a striker spot this machine doesn't own
 	var p = players[index]
 	match action:
 		"join":
@@ -1957,6 +1991,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 				_activate(p)
 				print("Net: player %d joined the game" % (index + 1))
 		"leave":
+			_free_seat(index)
 			if p.active:
 				_deactivate(p)
 				_show_center("PLAYER %d LEFT" % (index + 1), 1.5)
@@ -2006,6 +2041,149 @@ func make_snapshot() -> Array:
 		final_goals.get(finalists[1], 0) if finalists.size() == 2 else 0], champion, keeper.power, keeper.bubble, keeper.bubble_pos,
 		ball.fire, last_kmh, sudden, last_shot,
 		[practice, pspot, ptarget, fire_on, props.net_state() if props != null else [], cpu]]
+
+
+# --- Many machines (docs/MULTI_MACHINE.md): the host decides which machine drives which TV seat ---
+
+## {seat index: peer id} for every seat a machine has claimed (set on the host, replicated to every machine).
+func _owners() -> Dictionary:
+	if net == null:
+		return {}
+	return net.state_get("owners", {})
+
+
+## TV machine: a seat another machine drives (a ghost here, mirrored from snapshots, never driven).
+func _foreign(i: int) -> bool:
+	if net == null or net.mode != "client":
+		return false
+	var o := _owners()
+	return o.has(i) and int(o[i]) != net.my_peer_id()
+
+
+## This machine drives seat i (always true on the host / in local play).
+func _mine(i: int) -> bool:
+	return net.mode != "client" or int(_owners().get(i, -1)) == net.my_peer_id()
+
+
+## Host, inside a TV machine's RPC: may that machine drive seat i? (0 = a local / test call)
+func remote_owner_ok(i: int) -> bool:
+	if net == null or net.mode != "host":
+		return true
+	var peer: int = net.sender_peer()
+	return peer == 0 or int(_owners().get(i, -1)) == peer
+
+
+## Host: give seat i to machine `peer`, or the first free seat if another machine has it (-1: all full).
+func _grant_seat(i: int, peer: int) -> int:
+	if peer == 0:
+		return i
+	var o: Dictionary = _owners().duplicate()
+	if int(o.get(i, peer)) != peer:
+		i = -1
+		for j in range(1, MAX_PLAYERS):
+			if not o.has(j):
+				i = j
+				break
+		if i < 0:
+			return -1
+	o[i] = peer
+	net.state_set("owners", o)
+	return i
+
+
+func _free_seat(i: int) -> void:
+	var o: Dictionary = _owners().duplicate()
+	if o.erase(i):
+		net.state_set("owners", o)
+
+
+## Host: forget machine `peer`'s seats; returns them (lowest first).
+func _free_seats_of(peer: int) -> Array:
+	var o: Dictionary = _owners().duplicate()
+	var freed: Array = []
+	for k in o.keys():
+		if int(o[k]) == peer:
+			o.erase(k)
+			freed.append(int(k))
+	freed.sort()
+	net.state_set("owners", o)
+	return freed
+
+
+## TV machine: hand a striker spot's controls (controller, keys, mouse, a pending join) to another striker spot.
+func _move_input(from, to) -> void:
+	if from == to:
+		return
+	to.joy = from.joy
+	if to.joy >= 0:
+		joy_owner[to.joy] = to.index
+	to.key_set = from.key_set
+	if "mouse_look" in from:
+		to.mouse_look = from.mouse_look
+		from.mouse_look = false
+	if from.has_meta("want_join"):
+		to.set_meta("want_join", true)
+	from.joy = -1
+	from.key_set = StrikerScript.NO_KEYS
+	from.remove_meta("want_join")
+
+
+## TV machine: striker spot p becomes a mirror of another machine's player (on) or drivable here again (off).
+func _set_ghost(p, on: bool) -> void:
+	p.ghost = on
+	if on:
+		if p.joy >= 0 and joy_owner.get(p.joy, -1) == p.index:
+			joy_owner.erase(p.joy)
+		p.joy = -1
+		p.key_set = StrikerScript.NO_KEYS
+		if "mouse_look" in p:
+			p.mouse_look = false
+		p.pad_lost_t = -1.0
+		p.remove_meta("want_join")
+	elif p.active:
+		_ensure_view(p)
+
+
+## TV machine, every frame: striker spots other machines took become ghosts (their controls move to a free
+## striker spot); striker spots nobody else owns any more are ours to drive again.
+func _sync_seats() -> void:
+	var changed := false
+	for p in players:
+		if p.index == 0:
+			continue
+		var f := _foreign(p.index)
+		if f and not p.ghost:
+			if p.joy >= 0 or p.key_set != StrikerScript.NO_KEYS or p.has_meta("want_join"):
+				var to_i := _next_free_index(p.index)
+				if to_i >= 0:
+					_move_input(p, players[to_i])
+			_set_ghost(p, true)
+			changed = true
+		elif not f and p.ghost:
+			_set_ghost(p, false)
+			changed = true
+	if changed:
+		_layout_views()
+		_save_party()
+
+
+## TV machine: the host gave striker spot `got` instead of `asked` (another machine has it; -1 = all full).
+func _on_seat_moved(asked: int, got: int) -> void:
+	if asked <= 0 or asked >= players.size():
+		return
+	var from = players[asked]
+	if got < 0:
+		from.remove_meta("want_join")
+		_show_center("FULL!" if SIMPLE_MODE else "All striker spots are taken!", 1.5, false)
+		return
+	var to = players[got]
+	if to.ghost:
+		_set_ghost(to, false)
+	_move_input(from, to)
+	_set_ghost(from, true)
+	print("P%d is taken: playing as P%d" % [asked + 1, got + 1])
+	_layout_views()
+	_save_party()
 
 
 func apply_snapshot(s: Array) -> void:
@@ -2125,6 +2303,8 @@ func apply_event(kind: String, args: Array) -> void:
 		"trophy":
 			champion = int(args[0])
 			_trophy_fx()
+		"seat":
+			_on_seat_moved(int(args[0]), int(args[1]))
 		"remote_pause":
 			get_tree().paused = args[0]
 			_set_pause_banner(args[0], "The keeper paused the game")

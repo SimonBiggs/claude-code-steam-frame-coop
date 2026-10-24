@@ -34,7 +34,7 @@ const GAMES := [
 		"blurb": "VR paints a secret word in the air; TV players race to guess it"},
 	{"id": "rhythm_band", "cat": "party", "name": "RHYTHM BAND", "scene": "res://games/rhythm_band/main.tscn",
 		"blurb": "VR drums with your hands; TV players hit notes on their highways"},
-	{"id": "penalty_shootout", "cat": "sports", "name": "PENALTY SHOOTOUT", "scene": "res://games/penalty_shootout/main.tscn",
+	{"id": "penalty_shootout", "multi": true, "cat": "sports", "name": "PENALTY SHOOTOUT", "scene": "res://games/penalty_shootout/main.tscn",
 		"blurb": "VR goalkeeper saves with big gloves; TV strikers aim, power up and bend shots"},
 	{"id": "fishing_lake", "cat": "cosy", "name": "FISHING LAKE", "scene": "res://games/fishing_lake/main.tscn",
 		"blurb": "Relaxing: VR casts and reels from the jetty; TV rowers herd fish and net treasure"},

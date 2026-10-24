@@ -368,6 +368,8 @@ func _local_turn(delta: float) -> void:
 
 
 func apply_remote_state(pos: Vector3, y: float, p: float) -> void:
+	if main != null and main.has_method("remote_owner_ok") and not main.remote_owner_ok(index):
+		return  # many machines: only the machine that owns this seat drives it
 	aim = Vector2(pos.x, pos.y)
 	power = pos.z
 	curve = y
