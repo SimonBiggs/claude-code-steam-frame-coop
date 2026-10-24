@@ -651,10 +651,13 @@ func apply_net_state(st: Array) -> void:
 			set_active(false)
 			main.on_player_activity_changed(self)
 		return
+	if remote:  # TV machine: another machine's runner (core/classic_seats.gd ghost): mirror where it runs
+		net_target = st[0]
+		face = st[1]
 	var act: bool = st[2]
 	if act != active:
 		set_active(act)
-		if act:
+		if act and not remote:
 			reset_to_start()
 		main.on_player_activity_changed(self)
 	var fin: bool = st[3]
