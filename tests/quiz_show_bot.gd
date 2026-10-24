@@ -39,6 +39,19 @@ func _ready() -> void:
 	if not client and not host:
 		_validate_bank()
 	kit.at(3.0 if client else 1.0, "%d TV players press A on their pads" % want, _join)
+	if not client and not host:
+		kit.at(2.0, "P1 presses A to close the how-to card", func() -> void:
+			kit.assert_true(main.hints.intro_showing(), "the how-to card is up")
+			var slots: Array[int] = main.party.local_slots()
+			if not slots.is_empty():
+				kit.slot_press(main.party, slots[0], "a"))
+		kit.at(2.4, "that A closed the card but didn't vote", func() -> void:
+			var slots: Array[int] = main.party.local_slots()
+			kit.assert_true(not main.hints.intro_showing(), "A closed the how-to card")
+			kit.assert_true(slots.is_empty() or not (main.net.state_get("locked", {}) as Dictionary).has(slots[0]),
+				"the A that closed the card didn't also vote (core/hints.gd guards it)"))
+	else:
+		kit.at(2.0, "close the how-to card", func() -> void: main.hints.dismiss_intro())
 	kit.every(2.0, _report)
 	kit.every(0.25, _continue_results)
 	if host:  # check while the TV machine is still connected (it finishes at 48 s, ~51 s here), then finish
@@ -111,6 +124,8 @@ func _process(delta: float) -> void:
 	if kind == "picture" and main.pic_root.visible and main.pic_root.get_child_count() > 0:
 		saw_picture = true
 	var n: int = (q.get("answers", []) as Array).size()
+	if main.hints.intro_showing():
+		return  # the card is closed on purpose at 2 s (see _ready)
 	for slot in main.party.local_slots():
 		if not answer_at.has(slot):
 			answer_at[slot] = 0.4 + randf() * 0.8
