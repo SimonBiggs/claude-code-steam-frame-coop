@@ -33,12 +33,19 @@ def sign(data: bytes) -> str:
     return base64.b64encode(sig).decode()
 
 
+def need_key():
+    if not os.path.exists(os.path.join(key_dir(), "private.pem")):
+        die(f"no signing key in {key_dir()}: this machine is not an update signer (duo-update-keygen NAME)")
+
+
 def signer_name():
+    need_key()
     with open(os.path.join(key_dir(), "signer")) as f:
         return f.read().strip()
 
 
 def my_public_pem():
+    need_key()
     with open(os.path.join(key_dir(), "public.pem")) as f:
         return f.read().strip()
 
