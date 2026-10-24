@@ -16,6 +16,13 @@ extends Node
 ## BOT_VR=1 (local or DUO_HOST): the giant runs the real VR code with fake hands: the right hand grabs a
 ## handle (after watching the ghost hands for a moment) and tilts the board the way the marbles need.
 ## DUO_HOST alone (no TV machine) in SIMPLE_MODE: the giant's own solo marble rolls home by tilt only.
+## Visual teaching (simple mode): records the picture cues each view shows (cue_roll, cue_turn,
+## cue_tilt, cue_plug), the ones learned (cue_learned_*), the glowing edge arrow, the board arrows
+## (tilt_arrow, goal_arrow, grab_arrow), the ghost hands / marble and the join cue; checks the pause
+## banner is just PAUSED, and prints "BOT: ERROR instruction text" if a headline (TV or VR) is anything
+## but a level name or a short word, or a tip spot (a view's HUD line, the controls line) shows words.
+## P2 looks away from the goal now and then (turn cue); local mode unplugs P3's fake controller (bolt)
+## and plugs it back in.
 
 const FAKE_PAD := 40
 
@@ -42,6 +49,10 @@ var practice_done := false
 var vr_grab_t := 0.0
 var toy_i := 0
 var toy_t := 0.0
+var cues := {}  # simple mode: picture cues seen / learned
+var plug_phase := 0
+const WORDS := ["", "GO!", "HOORAY!", "PAUSED", "HELLO!", "Connecting to the VR player…"]
+const HUD_WORDS := ["", "HOME!", "Syncing with the VR player…"]
 
 
 func _ready() -> void:
@@ -75,6 +86,8 @@ func _physics_process(delta: float) -> void:
 	simple = main.simple
 	if simple:
 		_simple_checks(delta)
+		_look_away()
+		_note_cues()
 	if not joined and t > (3.0 if mode == "client" else 1.0):
 		joined = true
 		join_time = t
@@ -478,3 +491,119 @@ func _count_node(n: Node, c: Dictionary) -> void:
 			c.particles += 1
 	for ch in n.get_children():
 		_count_node(ch, c)
+
+
+# --- Visual teaching checks (simple mode) ------------------------------------------
+
+## P2 turns its camera away from the goal for a moment now and then, so the turn cue (and the edge
+## arrow) shows; letting go, the camera swings back behind the rolling marble.
+func _look_away() -> void:
+	if t < 10.0 or main.players.size() < 2 or main.state != "play":
+		return
+	var p2 = main.players[1]
+	if not p2.is_local() or not p2.active or p2.home or p2.camera == null:
+		return
+	if fmod(t - 10.0, 12.0) < 2.0:
+		var d: Vector2 = main.board.goal - Vector2(p2.lp.x, p2.lp.z)
+		p2.yaw = atan2(d.x, d.y)
+		p2.cam_idle_t = 0.0
+
+
+## Picture cues instead of words; any instruction text in a tip spot is an error.
+func _note_cues() -> void:
+	var gh = main.ghost_hand
+	if gh != null and gh.visible and gh.shown_hands:
+		cues["ghost_hands"] = true
+	if gh != null and gh.marble.visible:
+		cues["ghost_marble"] = true
+	for k in ["tilt_arrow", "goal_arrow", "grab_arrow"]:
+		var n = main.get(k)
+		if n != null and n.is_visible_in_tree():
+			if not cues.has(k):
+				print("BOT: %s glows (t=%.0f)" % [k, t])
+			cues[k] = true
+	if main.join_cue != null and main.join_cue.visible:
+		cues["join_cue"] = true
+	if not has_meta("pause_check") and t >= 25.0 and main.net.mode != "client" and not get_tree().paused:
+		set_meta("pause_check", true)  # the pause banner is just PAUSED (no sentence)
+		main._set_pause_banner(true, "A TV player opened the menu")
+		var pt: String = main.center_label.text
+		print("BOT: pause banner %s" % ("PAUSED" if pt == "PAUSED" else "ERROR: " + pt.replace("\n", " / ")))
+		main._set_pause_banner(false, "")
+	_test_plug()
+	if main.center_label.modulate.a > 0.05:
+		_check_headline("TV headline", main.center_label.text)
+	if main.vr_center != null and main.vr_center.modulate.a > 0.05:
+		_check_headline("VR headline", main.vr_center.text)
+	if main.help_label.visible and main.help_label.modulate.a > 0.05 and main.help_label.text.strip_edges() != "":
+		_tip_error("controls line", main.help_label.text)
+	if main.vr_board != null and main.vr_board.visible and main.vr_board.text != "":
+		_tip_error("VR scoreboard", main.vr_board.text)
+	for p in main.players:
+		if not p.active or not p.has_meta("view"):
+			continue
+		if p.hud_label != null and p.hud_label.is_visible_in_tree() and not HUD_WORDS.has(p.hud_label.text.strip_edges()):
+			_tip_error("P%d HUD line" % (p.index + 1), p.hud_label.text)
+		var edge = p.get_meta("edge") if p.has_meta("edge") else null
+		if edge != null and edge.on:
+			cues["edge_arrow"] = true
+		var cue = p.get_meta("cue") if p.has_meta("cue") else null
+		var key: String = p.get_meta("cue_key", "")
+		if cue != null and cue.visible and key != "":
+			if not cues.has("cue_" + key):
+				print("BOT: P%d picture cue %s (t=%.0f)" % [p.index + 1, key, t])
+			cues["cue_" + key] = true
+	for p in main.players:
+		var done: Dictionary = p.get_meta("cue_done", {})
+		for k in done:
+			if int(done[k]) >= 2 and not cues.has("cue_learned_" + str(k)):
+				cues["cue_learned_" + str(k)] = true
+				print("BOT: P%d learned %s (t=%.0f)" % [p.index + 1, k, t])
+	if int(t) % 10 == 0 and cues.size() != int(get_meta("cues_shown", -1)):
+		set_meta("cues_shown", cues.size())  # networked runs can end on a timeout: print the cues as they come
+		var ks: Array = cues.keys()
+		ks.sort()
+		print("BOT CUES so far: mode=%s %s" % [main.net.mode, ",".join(PackedStringArray(ks))])
+
+
+## Local mode: P3 (on fake controller 40) has its controller unplugged (bolt), then plugged back in.
+func _test_plug() -> void:
+	if main.net.mode != "local" or main.players.size() < 3:
+		return
+	var p3 = main.players[2]
+	if plug_phase == 0 and t > 34.0 and p3.active and p3.joy == FAKE_PAD:
+		plug_phase = 1
+		set_meta("plug_t", t)
+		print("BOT: unplugging P3's controller")
+		main._on_joy_changed(FAKE_PAD, false)
+	elif plug_phase == 1 and t >= float(get_meta("plug_t")) + 3.0:
+		plug_phase = 2
+		print("BOT: plugging P3's controller back in")
+		main._on_joy_changed(FAKE_PAD, true)
+		print("BOT: P3 joy=%d lost=%.1f active=%s" % [p3.joy, p3.pad_lost_t, p3.active])
+
+
+func _check_headline(who: String, text: String) -> void:
+	var tx := text.strip_edges()
+	if WORDS.has(tx):
+		return
+	for n in main.board.levels().size():
+		if tx == main.board.level_name(n + 1):
+			return
+	_tip_error(who, tx)
+
+
+func _tip_error(who: String, text: String) -> void:
+	if not cues.has("tip_text"):
+		print("BOT: ERROR instruction text on %s: %s" % [who, text.replace("\n", " / ")])
+	cues["tip_text"] = true
+
+
+func _exit_tree() -> void:
+	if main != null and is_instance_valid(main) and main.simple:
+		var ks: Array = cues.keys()
+		ks.sort()
+		print("BOT CUES: mode=%s %s" % [main.net.mode, ",".join(PackedStringArray(ks))])
+		for p in main.players:
+			if p.has_meta("cue_done"):
+				print("BOT CUES: P%d done=%s" % [p.index + 1, p.get_meta("cue_done")])
