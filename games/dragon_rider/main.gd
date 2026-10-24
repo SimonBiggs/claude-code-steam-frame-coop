@@ -2146,7 +2146,7 @@ func _request_join(p) -> void:
 			p.set_meta(ClassicSeats.WANT, true)  # seats.request_joins asks the host until the seat is ours
 			seats.ask_soon()
 		else:
-			show_center("ALL ABOARD!" if SIMPLE_MODE else "PLAYER %d CLIMBED ABOARD!" % (p.index + 1), 1.5)
+			show_center("ALL ABOARD!" if SIMPLE_MODE else "%s climbed aboard!" % Who.seat(self, p.index), 1.5)
 			sound("join", -4.0, 1.2)
 	_save_party()
 

@@ -28,7 +28,7 @@ and gets `"multi": true` in `arcade/arcade.gd` GAMES (so the lobby may flat-host
 ## Core API
 
 `core/net.gd`
-- `net.machines` (host): peer id -> {kind}. `net.peer_count()`, `net.my_peer_id()`, `net.machine_kind_of(peer)`.
+- `net.machines` (host): peer id -> {kind, name}. `net.peer_count()`, `net.my_peer_id()`, `net.machine_kind_of(peer)`.
 - `net.sender_peer()`: inside `on_p2_action` / `on_request` / `on_remote_state` / sys handlers on the host,
   the peer id of the machine that sent it.
 - Callbacks on `main` (optional): `on_machine_joined(peer, kind)`, `on_machine_left(peer)`.
@@ -40,6 +40,14 @@ and gets `"multi": true` in `arcade/arcade.gd` GAMES (so the lobby may flat-host
   all but one (re-syncs for a newcomer, relaying a sound the sender already played).
 - `net.connected` still means "at least one machine is connected" (host) / "joined" (client).
 - `net.has_vr` (host): false on a flat host.
+- WHO (2026-10-24): each machine sends its name with the hello (`core/machine.gd` `display_name()`: "TV", "VR",
+  or the person in a Deck's hostname, david-steamdeck -> "David"; `DUO_MACHINE_NAME` overrides, a comma list
+  per `BOT_MACHINE` for tools/multibot.ts). `net.machine_name_of(peer)` works on every machine (the host shares
+  "_names"); `net.last_left_name` is who left last. Every join / leave message and seat label goes through
+  `core/who.gd`: `Who.joined(Who.seat(self, index), "the crew")` -> "David joined the crew!" / "TV (P3) joined
+  the crew!", `Who.left(net.last_left_name)`, `Who.paused_by(...)`; core/party.gd `name_of(slot)` is the same
+  label for networked seats. Never write "THE TV PLAYERS JOINED!" / "PLAYER %d LEFT": `tests/who_test.gd`
+  fails on generic join / leave text.
 
 `core/party.gd`
 - The host gives out seats: a machine asking for a taken seat is moved to the next free one.
