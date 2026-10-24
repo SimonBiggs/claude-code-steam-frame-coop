@@ -326,6 +326,8 @@ func _seat(slot: int, device: int) -> void:
 	print("Party: %s joined as %s" % [device_label(device), name_of(slot)])
 	_persist()
 	player_joined.emit(slot, device)
+	if _mode() == "host" and device != REMOTE:
+		_send_roster.call_deferred()  # a flat host's own players reach every machine right away
 
 
 func _unseat(slot: int) -> void:
