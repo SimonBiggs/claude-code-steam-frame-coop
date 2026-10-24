@@ -142,7 +142,7 @@ func _input(event: InputEvent) -> void:
 func _physics_process(delta: float) -> void:
 	if not active:
 		return
-	if remote:
+	if remote or ghost:  # ghost: another machine's crew member, mirrored from snapshots
 		position = position.lerp(net_target, 1.0 - exp(-18.0 * delta))
 		pivot.rotation.y = yaw
 		return
@@ -302,6 +302,8 @@ func set_active(on: bool) -> void:
 
 ## Host: latest position and view of a TV player.
 func apply_remote_state(pos: Vector3, new_yaw: float, new_pitch: float) -> void:
+	if main != null and main.has_method("remote_owner_ok") and not main.remote_owner_ok(index):
+		return  # many machines: only the machine that owns this seat drives it
 	net_target = Vector3(pos.x, 0.0, pos.z)
 	yaw = new_yaw
 	pitch = new_pitch

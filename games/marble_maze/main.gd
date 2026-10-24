@@ -51,6 +51,8 @@ const SIMPLE_CLEAR_TIME := 4.0
 
 const MAX_PLAYERS := 7  # VR player + 6 marbles
 const MAX_LOCAL_VIEWS := 6
+## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
+var multi_machine := true
 const PAD_LEAVE_TIME := 20.0
 const INTRO_TIME := 3.5
 const FIRST_INTRO_TIME := 7.0
@@ -188,8 +190,18 @@ func _setup_game(mode: String) -> void:
 	_build_views(mode)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_assign_joypads()
+	if mode == "local" and net.machine_kind == "deck":
+		_deck_solo(0)
+		# Like the VR giant's solo: P1 tilts the board and rolls their own marble with the tilt only.
+		players[1].tilt_only = true
+		players[1].set_meta("hide_view", true)
+		players[1].set_active(true)
+		players[1].reset_to_start()
+		on_player_activity_changed(players[1])
 	ready_to_play = true
 	_ensure_join_listener()
+	if mode == "client":
+		players[1].set_meta("want_join", true)  # ask the host for a marble (it may hand out another one)
 	_restore_party()
 	if mode == "host" and simple:
 		_set_solo(true)  # no waiting about: tilt your own marble until the TV players join
@@ -697,11 +709,11 @@ func _ensure_views_root() -> void:
 	bg.color = Color(0.1, 0.12, 0.2)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(bg)
-	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(bg, Control.PRESET_FULL_RECT, false)
 	views_root = Control.new()
 	views_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(views_root)
-	views_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(views_root, Control.PRESET_FULL_RECT, false)
 
 
 ## One split-screen view (SubViewport + camera + HUD) per local player, created when they first play.
@@ -733,7 +745,7 @@ func _ensure_view(p) -> void:
 	var hud := Control.new()
 	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hud_layer.add_child(hud)
-	hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(hud, Control.PRESET_FULL_RECT, false)
 	var tag := ColorRect.new()
 	tag.color = p.color if p.index > 0 else Color(1.0, 0.85, 0.55)
 	tag.size = Vector2(14, 14)
@@ -763,8 +775,8 @@ func _layout_views() -> void:
 		if not p.has_meta("view"):
 			continue
 		var c: SubViewportContainer = p.get_meta("view")
-		c.visible = p.active
-		if p.active:
+		c.visible = p.active and is_local(p) and not p.has_meta("hide_view")
+		if c.visible:
 			shown.append(p)
 	var n := shown.size()
 	var area := views_root.size
@@ -791,7 +803,7 @@ func _layout_views() -> void:
 		var c: SubViewportContainer = p.get_meta("view")
 		var col := k % cols
 		var row := k / cols
-		c.set_anchors_preset(Control.PRESET_TOP_LEFT)
+		UiKit.pin(c, Control.PRESET_TOP_LEFT)
 		c.position = Vector2(col * (cell.x + gap), row * (cell.y + gap))
 		c.size = cell
 		var vp := c.get_child(0) as SubViewport
@@ -808,6 +820,23 @@ func _layout_views() -> void:
 
 
 # --- Controllers and drop-in join ----------------------------------------------------
+
+## A Steam Deck on its own (DUO_MACHINE_KIND=deck): exactly ONE player on the Deck's built-in controls
+## (the first joypad; no keyboard player), full screen. More controllers drop in with A.
+func _deck_solo(solo: int) -> void:
+	var pads := Input.get_connected_joypads()
+	joy_owner.clear()
+	for p in players:
+		p.joy = -1
+		if p.index != solo and p.index > 0 and p.active:
+			p.set_active(false)
+			on_player_activity_changed(p)
+	var me = players[solo]
+	me.joy = pads[0] if pads.size() > 0 else -1
+	if me.joy >= 0:
+		joy_owner[me.joy] = solo
+	_layout_views()
+
 
 func _assign_joypads() -> void:
 	var pads := Input.get_connected_joypads()
@@ -827,7 +856,11 @@ func _assign_joypads() -> void:
 
 
 func _on_joy_changed(device: int, connected: bool) -> void:
-	if not ready_to_play or net.mode == "host":
+	if not ready_to_play:
+		return
+	if net.mode == "host":
+		if connected and not players[0].vr and players[0].joy < 0:
+			players[0].joy = device  # flat host (no VR): P1 tilts with this controller
 		return
 	if connected:
 		print("Joypad %d connected" % device)
@@ -838,7 +871,7 @@ func _on_joy_changed(device: int, connected: bool) -> void:
 			if is_local(p) and p.joy < 0 and int(p.get_meta("last_joy", -2)) == device:
 				pick = p
 				break
-		if pick == null and players[1].joy < 0:
+		if pick == null and players[1].joy < 0 and is_local(players[1]):
 			pick = players[1]
 		if pick == null:
 			return  # unassigned: press A to join
@@ -885,10 +918,10 @@ func handle_join_input(event: InputEvent) -> bool:
 	return _join_slot(device) != null
 
 
-func _next_free_index() -> int:
+func _next_free_index(skip: int = -1) -> int:
 	for i in range(1, players.size()):
 		var p = players[i]
-		if not is_local(p) or p.active or p.has_meta("want_join") or p.joy >= 0 or p.pad_lost_t >= 0.0:
+		if i == skip or _foreign(i) or not is_local(p) or p.active or p.has_meta("want_join") or p.joy >= 0 or p.pad_lost_t >= 0.0:
 			continue
 		return i
 	return -1
@@ -1011,7 +1044,7 @@ func _check_join(delta: float) -> void:
 	for p in players:
 		if not p.has_meta("want_join") or not is_local(p):
 			continue
-		if p.active:
+		if p.active and _mine(p.index):
 			p.remove_meta("want_join")
 			continue
 		join_t = 1.0
@@ -1023,7 +1056,7 @@ func on_player_activity_changed(p) -> void:
 		p.remove_meta("cue_done")  # whoever takes this seat next sees the picture cues again
 	if p.active and is_local(p):
 		_ensure_view(p)
-	if p.active:
+	if p.active and _mine(p.index):
 		p.remove_meta("want_join")
 	_layout_views()
 	print("Player %d is now %s" % [p.index + 1, "playing" if p.active else "waiting"])
@@ -1251,6 +1284,7 @@ func _update_extras(delta: float) -> void:
 
 
 func _client_update(delta: float, cont_edge: bool) -> void:
+	_sync_seats()
 	_check_join(delta)
 	_update_lost_pads(delta)
 	state_t += delta
@@ -1944,7 +1978,7 @@ func _update_join_cue() -> void:
 		for c in join_cue.get_children():
 			(c as Control).size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		help_label.get_parent().add_child(join_cue)
-		join_cue.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+		UiKit.pin(join_cue, Control.PRESET_BOTTOM_RIGHT, false)
 		join_cue.offset_left = -200
 		join_cue.offset_top = -74
 		join_cue.offset_right = -16
@@ -2020,6 +2054,8 @@ func _update_board_arrows() -> void:
 # --- Networked co-op (see docs/GAME_DEV_GUIDE.md) ------------------------------------
 
 func on_client_joined() -> void:
+	if net.peer_count() > 1:
+		return  # another machine: its marbles roll in when they join (no restart for everyone)
 	if simple:
 		_set_solo(false)
 		practiced = false  # the TV players get the practice ring too
@@ -2030,7 +2066,19 @@ func on_client_joined() -> void:
 	_start_level(level if state != "over" else 1)
 
 
+## Host: one machine left: only its marbles leave (and their seats become free).
+func on_machine_left(peer: int) -> void:
+	var freed := _free_seats_of(peer)
+	for i in freed:
+		if i < players.size() and players[i].active:
+			players[i].set_active(false)
+	if not freed.is_empty() and net.peer_count() > 0 and not simple:
+		_show_center("PLAYER %d LEFT" % (int(freed[0]) + 1), 1.5)
+
+
+## Host: the LAST machine left (multi_machine games get this only then).
 func on_client_left() -> void:
+	net.state_set("owners", {})
 	for i in range(2, players.size()):
 		if players[i].active:
 			players[i].set_active(false)
@@ -2047,6 +2095,17 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 		index = int(args[0])
 	if index <= 0 or index >= players.size():
 		return
+	if action == "join":
+		# Many machines: the marble may belong to another machine; then this one gets the first free one.
+		var peer: int = net.sender_peer()
+		var got := _grant_seat(index, peer)
+		if got != index:
+			net.event_to(peer, "seat", [index, got])
+			if got < 0:
+				return
+			index = got
+	elif action != "continue" and action != "pause" and not remote_owner_ok(index):
+		return  # a marble this machine doesn't own
 	var p = players[index]
 	match action:
 		"join":
@@ -2054,6 +2113,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 				_activate(p)
 				print("Net: player %d joined the game" % (index + 1))
 		"leave":
+			_free_seat(index)
 			if p.active:
 				p.set_active(false)
 				if not simple:
@@ -2121,6 +2181,148 @@ func make_snapshot() -> Array:
 	return [state, level, board.t, score, time_left, board.tilt, board_y, board.gem_taken.duplicate(), ms,
 		t.head_transform(), t.hand_l_transform(), t.hand_r_transform(), state_t, best,
 		board.gate_open.duplicate(), board.pad_on.duplicate(), golden, jar, stars, team_cp]
+
+
+# --- Many machines (docs/MULTI_MACHINE.md): the host decides which machine drives which TV seat ---
+
+## {seat index: peer id} for every seat a machine has claimed (set on the host, replicated to every machine).
+func _owners() -> Dictionary:
+	if net == null:
+		return {}
+	return net.state_get("owners", {})
+
+
+## TV machine: a seat another machine drives (a ghost here, mirrored from snapshots, never driven).
+func _foreign(i: int) -> bool:
+	if net == null or net.mode != "client":
+		return false
+	var o := _owners()
+	return o.has(i) and int(o[i]) != net.my_peer_id()
+
+
+## This machine drives seat i (always true on the host / in local play).
+func _mine(i: int) -> bool:
+	return net.mode != "client" or int(_owners().get(i, -1)) == net.my_peer_id()
+
+
+## Host, inside a TV machine's RPC: may that machine drive seat i? (0 = a local / test call)
+func remote_owner_ok(i: int) -> bool:
+	if net == null or net.mode != "host":
+		return true
+	var peer: int = net.sender_peer()
+	return peer == 0 or int(_owners().get(i, -1)) == peer
+
+
+## Host: give seat i to machine `peer`, or the first free seat if another machine has it (-1: all full).
+func _grant_seat(i: int, peer: int) -> int:
+	if peer == 0:
+		return i
+	var o: Dictionary = _owners().duplicate()
+	if int(o.get(i, peer)) != peer:
+		i = -1
+		for j in range(1, MAX_PLAYERS):
+			if not o.has(j):
+				i = j
+				break
+		if i < 0:
+			return -1
+	o[i] = peer
+	net.state_set("owners", o)
+	return i
+
+
+func _free_seat(i: int) -> void:
+	var o: Dictionary = _owners().duplicate()
+	if o.erase(i):
+		net.state_set("owners", o)
+
+
+## Host: forget machine `peer`'s seats; returns them (lowest first).
+func _free_seats_of(peer: int) -> Array:
+	var o: Dictionary = _owners().duplicate()
+	var freed: Array = []
+	for k in o.keys():
+		if int(o[k]) == peer:
+			o.erase(k)
+			freed.append(int(k))
+	freed.sort()
+	net.state_set("owners", o)
+	return freed
+
+
+## TV machine: hand a marble's controls (controller, keys, mouse, a pending join) to another marble.
+func _move_input(from, to) -> void:
+	if from == to:
+		return
+	to.joy = from.joy
+	if to.joy >= 0:
+		joy_owner[to.joy] = to.index
+	to.key_set = from.key_set
+	to.mouse_look = from.mouse_look
+	if from.has_meta("want_join"):
+		to.set_meta("want_join", true)
+	from.joy = -1
+	from.key_set = MarbleScript.NO_KEYS
+	from.mouse_look = false
+	from.remove_meta("want_join")
+
+
+## TV machine: marble p becomes a mirror of another machine's marble (on) or drivable here again (off).
+func _set_ghost(p, on: bool) -> void:
+	p.ghost = on
+	if on:
+		if p.joy >= 0 and joy_owner.get(p.joy, -1) == p.index:
+			joy_owner.erase(p.joy)
+		p.joy = -1
+		p.key_set = MarbleScript.NO_KEYS
+		p.mouse_look = false
+		p.pad_lost_t = -1.0
+		p.remove_meta("want_join")
+		p.target_lp = p.lp
+	elif p.active:
+		_ensure_view(p)
+
+
+## TV machine, every frame: marbles other machines took become ghosts (their controls move to a free
+## marble); marbles nobody else owns any more are ours to drive again.
+func _sync_seats() -> void:
+	var changed := false
+	for p in players:
+		if p.index == 0:
+			continue
+		var f := _foreign(p.index)
+		if f and not p.ghost:
+			if p.joy >= 0 or p.key_set != MarbleScript.NO_KEYS or p.has_meta("want_join"):
+				var to_i := _next_free_index(p.index)
+				if to_i >= 0:
+					_move_input(p, players[to_i])
+			_set_ghost(p, true)
+			changed = true
+		elif not f and p.ghost:
+			_set_ghost(p, false)
+			changed = true
+	if changed:
+		_layout_views()
+		_save_party()
+
+
+## TV machine: the host gave marble `got` instead of `asked` (another machine has it; -1 = all full).
+func _on_seat_moved(asked: int, got: int) -> void:
+	if asked <= 0 or asked >= players.size() or got >= players.size():
+		return
+	var from = players[asked]
+	if got < 0:
+		from.remove_meta("want_join")
+		sound("boop", -10.0, 0.7)  # no room
+		return
+	var to = players[got]
+	if to.ghost:
+		_set_ghost(to, false)
+	_move_input(from, to)
+	_set_ghost(from, true)
+	print("Marble P%d is taken: playing as P%d" % [asked + 1, got + 1])
+	_layout_views()
+	_save_party()
 
 
 func apply_snapshot(s: Array) -> void:
@@ -2219,6 +2421,8 @@ func apply_event(kind: String, args: Array) -> void:
 		"remote_pause":
 			get_tree().paused = args[0]
 			_set_pause_banner(args[0], "The VR player paused the game")
+		"seat":
+			_on_seat_moved(int(args[0]), int(args[1]))
 
 
 # --- HUD -----------------------------------------------------------------------------
@@ -2238,13 +2442,13 @@ func _build_hud() -> void:
 	add_child(layer)
 	center_label = _make_label(46)
 	layer.add_child(center_label)
-	center_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(center_label, Control.PRESET_FULL_RECT, false)
 	center_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	center_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	center_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	help_label = _make_label(20)
 	layer.add_child(help_label)
-	help_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	UiKit.pin(help_label, Control.PRESET_BOTTOM_WIDE, false)
 	help_label.offset_top = -64
 	help_label.offset_bottom = -12
 	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

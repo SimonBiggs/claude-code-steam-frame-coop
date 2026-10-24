@@ -52,6 +52,8 @@ const JoinListenerScript := preload("res://games/rhythm_band/join_listener.gd")
 
 const MAX_PLAYERS := 7  # VR drummer + 6 guitarists
 const MAX_LOCAL_VIEWS := 6
+## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
+var multi_machine := true
 const PAD_LEAVE_TIME := 20.0
 const PERFECT := 0.085  # seconds either side (NORMAL)
 const GOOD := 0.17
@@ -199,8 +201,12 @@ func _setup_game(mode: String) -> void:
 	_build_views(mode)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_assign_joypads()
+	if mode == "local" and net.machine_kind == "deck":
+		_deck_solo(0)
 	ready_to_play = true
 	_ensure_join_listener()
+	if mode == "client":
+		players[1].set_meta("want_join", true)  # ask the host for a band spot (it may hand out another one)
 	_restore_party()
 	stage.set_tags_for_vr(players[0].vr)
 	if mode == "host" and SIMPLE_MODE:
@@ -457,11 +463,11 @@ func _ensure_views_root() -> void:
 	bg.color = Color(0.05, 0.04, 0.1)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(bg)
-	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(bg, Control.PRESET_FULL_RECT, false)
 	views_root = Control.new()
 	views_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(views_root)
-	views_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(views_root, Control.PRESET_FULL_RECT, false)
 
 
 ## One split-screen view (SubViewport + camera + drawn overlay) per local player, made when they join.
@@ -496,7 +502,7 @@ func _ensure_view(p) -> void:
 	hw.main = self
 	hw.p = p
 	hud_layer.add_child(hw)
-	hw.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(hw, Control.PRESET_FULL_RECT, false)
 	p.hud = hw
 	p.highway = hw
 
@@ -510,8 +516,8 @@ func _layout_views() -> void:
 		if not p.has_meta("view"):
 			continue
 		var c: SubViewportContainer = p.get_meta("view")
-		c.visible = p.active
-		if p.active:
+		c.visible = p.active and is_local(p)
+		if c.visible:
 			shown.append(p)
 	var n := shown.size()
 	var area := views_root.size
@@ -538,7 +544,7 @@ func _layout_views() -> void:
 		var c: SubViewportContainer = p.get_meta("view")
 		var col := k % cols
 		var row := k / cols
-		c.set_anchors_preset(Control.PRESET_TOP_LEFT)
+		UiKit.pin(c, Control.PRESET_TOP_LEFT)
 		c.position = Vector2(col * (cell.x + gap), row * (cell.y + gap))
 		c.size = cell
 		var vp := c.get_child(0) as SubViewport
@@ -548,6 +554,23 @@ func _layout_views() -> void:
 
 
 # --- Controllers and drop-in join ----------------------------------------------------
+
+## A Steam Deck on its own (DUO_MACHINE_KIND=deck): exactly ONE player on the Deck's built-in controls
+## (the first joypad; no keyboard player), full screen. More controllers drop in with A.
+func _deck_solo(solo: int) -> void:
+	var pads := Input.get_connected_joypads()
+	joy_owner.clear()
+	for p in players:
+		p.joy = -1
+		if p.index != solo and p.index > 0 and p.active:
+			p.set_active(false)
+			on_player_activity_changed(p)
+	var me = players[solo]
+	me.joy = pads[0] if pads.size() > 0 else -1
+	if me.joy >= 0:
+		joy_owner[me.joy] = solo
+	_layout_views()
+
 
 func _assign_joypads() -> void:
 	var pads := Input.get_connected_joypads()
@@ -567,7 +590,11 @@ func _assign_joypads() -> void:
 
 
 func _on_joy_changed(device: int, connected: bool) -> void:
-	if not ready_to_play or net.mode == "host":
+	if not ready_to_play:
+		return
+	if net.mode == "host":
+		if connected and not players[0].vr and players[0].joy < 0:
+			players[0].joy = device  # flat host (no VR): P1 drums with this controller
 		return
 	if connected:
 		print("Joypad %d connected" % device)
@@ -578,7 +605,7 @@ func _on_joy_changed(device: int, connected: bool) -> void:
 			if is_local(p) and p.joy < 0 and int(p.get_meta("last_joy", -2)) == device:
 				pick = p
 				break
-		if pick == null and players[1].joy < 0:
+		if pick == null and players[1].joy < 0 and is_local(players[1]):
 			pick = players[1]
 		if pick == null:
 			return  # unassigned: press A to join
@@ -620,10 +647,10 @@ func handle_join_input(event: InputEvent) -> bool:
 	return _join_slot(device) != null
 
 
-func _next_free_index() -> int:
+func _next_free_index(skip: int = -1) -> int:
 	for i in range(1, players.size()):
 		var p = players[i]
-		if not is_local(p) or p.active or p.has_meta("want_join") or p.joy >= 0 or p.pad_lost_t >= 0.0 or p.has_meta("no_seat"):
+		if i == skip or _foreign(i) or not is_local(p) or p.active or p.has_meta("want_join") or p.joy >= 0 or p.pad_lost_t >= 0.0 or p.has_meta("no_seat"):
 			continue
 		return i
 	return -1
@@ -738,7 +765,7 @@ func _check_join(delta: float) -> void:
 	for p in players:
 		if not p.has_meta("want_join") or not is_local(p):
 			continue
-		if p.active:
+		if p.active and _mine(p.index):
 			p.remove_meta("want_join")
 			continue
 		join_t = 1.0
@@ -748,7 +775,7 @@ func _check_join(delta: float) -> void:
 func on_player_activity_changed(p) -> void:
 	if p.active and is_local(p):
 		_ensure_view(p)
-	if p.active:
+	if p.active and _mine(p.index):
 		p.remove_meta("want_join")
 	if p.index > 0:
 		stage.set_avatar_visible(p.index, p.active)
@@ -1541,6 +1568,7 @@ func _check_drum_misses() -> void:
 
 
 func _client_update(delta: float, cont_edge: bool) -> void:
+	_sync_seats()
 	_check_join(delta)
 	_update_lost_pads(delta)
 	if cont_edge and ((state == "results" or state == "tour") and state_t > 1.5):
@@ -1608,17 +1636,31 @@ func _save_best(s: int) -> void:
 # --- Networked co-op (see docs/GAME_DEV_GUIDE.md) ------------------------------------
 
 func on_client_joined() -> void:
-	if not SIMPLE_MODE:
+	# Each machine asks for its own guitarists ("join"); the first one opens the setlist menu.
+	if net.peer_count() == 1 and not SIMPLE_MODE:
 		_show_center("THE TV BAND JOINED!", 1.5)
-	if not players[1].active:
-		_activate(players[1])  # the TV machine's first guitarist; more join with A over there
 	if state == "wait":
 		_enter_menu()
-	else:
-		net.event("setlist", [setlist])
 
 
+## Host: a machine joined: it gets the setlist (only it).
+func on_machine_joined(peer: int, _kind: String) -> void:
+	if state != "wait":
+		net.event_to(peer, "setlist", [setlist])
+
+
+## Host: one machine left: only its guitarists leave (and their spots become free).
+func on_machine_left(peer: int) -> void:
+	for i in _free_seats_of(peer):
+		if i < players.size() and players[i].active:
+			players[i].set_active(false)
+			stage.set_avatar_visible(i, false)
+			on_player_activity_changed(players[i])
+
+
+## Host: the LAST machine left (multi_machine games get this only then).
 func on_client_left() -> void:
+	net.state_set("owners", {})
 	for i in range(1, players.size()):
 		if players[i].active:
 			players[i].set_active(false)
@@ -1645,6 +1687,17 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 		index = int(args[0])
 	if index <= 0 or index >= players.size():
 		return
+	if action == "join":
+		# Many machines: the band spot may belong to another machine; then this one gets the first free one.
+		var peer: int = net.sender_peer()
+		var got := _grant_seat(index, peer)
+		if got != index:
+			net.event_to(peer, "seat", [index, got])
+			if got < 0:
+				return
+			index = got
+	elif action != "continue" and action != "pause" and not remote_owner_ok(index):
+		return  # a band spot this machine doesn't own
 	var p = players[index]
 	match action:
 		"join":
@@ -1652,6 +1705,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 				_activate(p)
 				print("Net: player %d joined the band" % (index + 1))
 		"leave":
+			_free_seat(index)
 			if p.active:
 				p.set_active(false)
 				on_player_activity_changed(p)
@@ -1724,6 +1778,149 @@ func make_snapshot() -> Array:
 		d.rig_transform(), d.kit_s, d.head_transform(), d.tip(0), d.tip(1), last_stars, tour_stars,
 		tour_pos, setlist, drum_level, star_meter, star_until, prac_d,
 		d.props.net_state() if d.props != null else [-1]]
+
+
+# --- Many machines (docs/MULTI_MACHINE.md): the host decides which machine drives which TV seat ---
+
+## {seat index: peer id} for every seat a machine has claimed (set on the host, replicated to every machine).
+func _owners() -> Dictionary:
+	if net == null:
+		return {}
+	return net.state_get("owners", {})
+
+
+## TV machine: a seat another machine drives (a ghost here, mirrored from snapshots, never driven).
+func _foreign(i: int) -> bool:
+	if net == null or net.mode != "client":
+		return false
+	var o := _owners()
+	return o.has(i) and int(o[i]) != net.my_peer_id()
+
+
+## This machine drives seat i (always true on the host / in local play).
+func _mine(i: int) -> bool:
+	return net.mode != "client" or int(_owners().get(i, -1)) == net.my_peer_id()
+
+
+## Host, inside a TV machine's RPC: may that machine drive seat i? (0 = a local / test call)
+func remote_owner_ok(i: int) -> bool:
+	if net == null or net.mode != "host":
+		return true
+	var peer: int = net.sender_peer()
+	return peer == 0 or int(_owners().get(i, -1)) == peer
+
+
+## Host: give seat i to machine `peer`, or the first free seat if another machine has it (-1: all full).
+func _grant_seat(i: int, peer: int) -> int:
+	if peer == 0:
+		return i
+	var o: Dictionary = _owners().duplicate()
+	if int(o.get(i, peer)) != peer:
+		i = -1
+		for j in range(1, MAX_PLAYERS):
+			if not o.has(j):
+				i = j
+				break
+		if i < 0:
+			return -1
+	o[i] = peer
+	net.state_set("owners", o)
+	return i
+
+
+func _free_seat(i: int) -> void:
+	var o: Dictionary = _owners().duplicate()
+	if o.erase(i):
+		net.state_set("owners", o)
+
+
+## Host: forget machine `peer`'s seats; returns them (lowest first).
+func _free_seats_of(peer: int) -> Array:
+	var o: Dictionary = _owners().duplicate()
+	var freed: Array = []
+	for k in o.keys():
+		if int(o[k]) == peer:
+			o.erase(k)
+			freed.append(int(k))
+	freed.sort()
+	net.state_set("owners", o)
+	return freed
+
+
+## TV machine: hand a band spot's controls (controller, keys, mouse, a pending join) to another band spot.
+func _move_input(from, to) -> void:
+	if from == to:
+		return
+	to.joy = from.joy
+	if to.joy >= 0:
+		joy_owner[to.joy] = to.index
+	to.key_set = from.key_set
+	if "mouse_look" in from:
+		to.mouse_look = from.mouse_look
+		from.mouse_look = false
+	if from.has_meta("want_join"):
+		to.set_meta("want_join", true)
+	from.joy = -1
+	from.key_set = GuitaristScript.NO_KEYS
+	from.remove_meta("want_join")
+
+
+## TV machine: band spot p becomes a mirror of another machine's player (on) or drivable here again (off).
+func _set_ghost(p, on: bool) -> void:
+	p.ghost = on
+	if on:
+		if p.joy >= 0 and joy_owner.get(p.joy, -1) == p.index:
+			joy_owner.erase(p.joy)
+		p.joy = -1
+		p.key_set = GuitaristScript.NO_KEYS
+		if "mouse_look" in p:
+			p.mouse_look = false
+		p.pad_lost_t = -1.0
+		p.remove_meta("want_join")
+	elif p.active:
+		_ensure_view(p)
+
+
+## TV machine, every frame: band spots other machines took become ghosts (their controls move to a free
+## band spot); band spots nobody else owns any more are ours to drive again.
+func _sync_seats() -> void:
+	var changed := false
+	for p in players:
+		if p.index == 0:
+			continue
+		var f := _foreign(p.index)
+		if f and not p.ghost:
+			if p.joy >= 0 or p.key_set != GuitaristScript.NO_KEYS or p.has_meta("want_join"):
+				var to_i := _next_free_index(p.index)
+				if to_i >= 0:
+					_move_input(p, players[to_i])
+			_set_ghost(p, true)
+			changed = true
+		elif not f and p.ghost:
+			_set_ghost(p, false)
+			changed = true
+	if changed:
+		_layout_views()
+		_save_party()
+
+
+## TV machine: the host gave band spot `got` instead of `asked` (another machine has it; -1 = all full).
+func _on_seat_moved(asked: int, got: int) -> void:
+	if asked <= 0 or asked >= players.size():
+		return
+	var from = players[asked]
+	if got < 0:
+		from.remove_meta("want_join")
+		_show_center("The band is full!", 1.5, false)
+		return
+	var to = players[got]
+	if to.ghost:
+		_set_ghost(to, false)
+	_move_input(from, to)
+	_set_ghost(from, true)
+	print("P%d is taken: playing as P%d" % [asked + 1, got + 1])
+	_layout_views()
+	_save_party()
 
 
 func apply_snapshot(s: Array) -> void:
@@ -1844,6 +2041,8 @@ func apply_event(kind: String, args: Array) -> void:
 		"prop":
 			if players[0].props != null:
 				players[0].props.react(int(args[0]))
+		"seat":
+			_on_seat_moved(int(args[0]), int(args[1]))
 		"remote_pause":
 			get_tree().paused = args[0]
 			_set_pause_banner(args[0], "The VR drummer paused the game")
@@ -1866,13 +2065,13 @@ func _build_hud() -> void:
 	add_child(layer)
 	center_label = _make_label(44)
 	layer.add_child(center_label)
-	center_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(center_label, Control.PRESET_FULL_RECT, false)
 	center_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	center_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	center_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	help_label = _make_label(18)
 	layer.add_child(help_label)
-	help_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	UiKit.pin(help_label, Control.PRESET_BOTTOM_WIDE, false)
 	help_label.offset_top = -30
 	help_label.offset_bottom = -6
 	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

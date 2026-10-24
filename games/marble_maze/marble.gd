@@ -373,6 +373,8 @@ func _sit_in_goal(delta: float) -> void:
 # --- Remote (host) / camera ---------------------------------------------------------
 
 func apply_remote_state(pos: Vector3, y: float, p: float) -> void:
+	if main != null and main.has_method("remote_owner_ok") and not main.remote_owner_ok(index):
+		return  # many machines: only the machine that owns this marble drives it
 	yaw = y
 	pitch = p
 	net_started = true
@@ -384,7 +386,7 @@ func apply_remote_state(pos: Vector3, y: float, p: float) -> void:
 
 
 func _process(delta: float) -> void:
-	if remote and active:
+	if (remote or ghost) and active:  # ghost: another machine's marble, mirrored from snapshots
 		if lp.distance_to(target_lp) > 0.15:
 			lp = target_lp
 		else:
