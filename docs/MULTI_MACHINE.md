@@ -53,6 +53,12 @@ and gets `"multi": true` in `arcade/arcade.gd` GAMES (so the lobby may flat-host
 
 ## Converting a game (checklist)
 
+Reference: `games/engine_template/main.gd` does all of it (`net_target` + `_follow_remote` smoothing,
+`on_machine_left`, `flat_host`, the Deck's single player, the VR avatar only when the host sends a pose) and
+`tests/engine_template_bot.gd` runs a flat host (`DUO_FLAT_HOST=1` on the host: one bot pad in slot 0).
+Name the member `flat_host`, not `flat` (games use local `flat` vectors). The Y split/shared view is shared
+by every machine, so bots shouldn't assert it on a flat host (the client's presses toggle it too).
+
 1. **Avatars of other machines** (party games, "P-AV"): `make_snapshot()` carries every TV avatar's
    slot + position + yaw (+ whatever the game shows: carry state, pitch...); `apply_snapshot()` positions
    every seat that is not `party.is_local(slot)`. Avatars already exist via `player_joined`.

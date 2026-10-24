@@ -407,7 +407,7 @@ func _show_howto(id: String) -> void:
 		_ready_row = UiKit.hbox()
 		_ready_row.alignment = BoxContainer.ALIGNMENT_CENTER
 		v.add_child(_ready_row)
-		card.set_anchors_preset(Control.PRESET_CENTER_TOP)
+		UiKit.pin(card, Control.PRESET_CENTER_TOP)
 		card.grow_horizontal = Control.GROW_DIRECTION_BOTH
 		card.offset_top = 30.0
 		UiKit.pop_in(card)

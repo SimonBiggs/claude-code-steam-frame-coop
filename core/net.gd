@@ -157,6 +157,10 @@ func join(address: String) -> void:
 		print("Net: the host's game was full, staying on this machine")
 		join_finished.emit.call_deferred(false)  # (the arcade lobby clears duo_full: next game, try again)
 		return
+	if Engine.has_meta("follow_ip"):
+		address = str(Engine.get_meta("follow_ip"))
+		Engine.remove_meta("follow_ip")
+		Engine.set_meta("following_now", true)
 	if address == "auto":
 		_join_auto()
 		return
@@ -283,6 +287,7 @@ func _on_peer_disconnected(id: int) -> void:
 
 func _on_connected() -> void:
 	connected = true
+	Engine.remove_meta("following_now")
 	join_deadline = 0
 	Engine.set_meta("duo_joined", true)
 	print("Net: joined the host as a %s" % machine_kind)
@@ -296,6 +301,9 @@ func _give_up() -> void:
 	join_deadline = 0
 	multiplayer.multiplayer_peer = null
 	mode = "local"
+	if Engine.has_meta("following_now"):
+		Engine.remove_meta("following_now")
+		Engine.set_meta("follow_block_until", Time.get_ticks_msec() + 60000)  # don't chase that game again for a minute
 	if Engine.has_meta("duo_joined"):
 		print("Net: host not reachable, retrying")
 		get_tree().create_timer(1.0).timeout.connect(get_tree().reload_current_scene)
@@ -863,19 +871,25 @@ func _follow_headset() -> void:
 		return
 	if not has_meta("follow_udp"):
 		var udp := PacketPeerUDP.new()
-		set_meta("follow_udp", udp if udp.bind(PORT + 2) == OK else null)
-	var u = get_meta("follow_udp")
-	if u == null:
+		set_meta("follow_udp", udp if udp.bind(PORT + 2) == OK else false)  # (a null meta value would delete the key)
+	var u = get_meta("follow_udp", false)
+	if not u is PacketPeerUDP:
 		return
 	var udp: PacketPeerUDP = u
 	while udp.get_available_packet_count() > 0:
 		var msg := udp.get_packet().get_string_from_utf8()
+		var sender := udp.get_packet_ip()
 		if not msg.begins_with("ARCADE_GAME "):
 			continue
 		var scene := msg.substr(12)
 		if Engine.get_meta("duo_full", "-") == scene:
 			continue  # that game turned us away as full: keep playing here
-		print("Net: the headset is playing %s; joining it" % scene)
+		# A follow that failed backs off for a minute: retrying at once reloaded the game every 5 s and the TV
+		# flashed black (2026-10-24: a Deck hosting Balloon Pop, the TV joining the Frame's address instead).
+		if Time.get_ticks_msec() < int(Engine.get_meta("follow_block_until", 0)):
+			continue
+		print("Net: %s is playing %s; joining it" % [sender, scene])
+		Engine.set_meta("follow_ip", sender)  # join() uses the machine that sent the beacon, not DUO_JOIN
 		set_meta("following", true)
 		udp.close()
 		get_tree().paused = false

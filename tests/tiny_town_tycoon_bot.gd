@@ -247,6 +247,8 @@ func _spot(kind: String) -> Vector2i:
 func _process(delta: float) -> void:
 	if main == null or not main.ready_to_play or client:
 		return
+	if get_tree().paused:
+		return  # the mayor's A presses would press the pause menu's highlighted button (Resume) now
 	if main.phase() != "play":
 		if main.vr_rig != null:
 			kit.vr_idle(main.vr_rig, 1.6)

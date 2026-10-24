@@ -12,7 +12,7 @@ Database: ~/.claude/history.db (table messages + FTS5 index messages_fts). Roles
 tool_use, tool_result. Agent transcripts (subagents/*.jsonl) are included, with agent = their id.
 claude-history-index.timer runs `index` every 5 minutes.
 """
-import argparse, glob, json, os, sqlite3, sys
+import re, argparse, glob, json, os, sqlite3, sys
 from pathlib import Path
 
 DB = Path(os.environ.get("CLAUDE_HISTORY_DB", Path.home() / ".claude/history.db"))
@@ -40,6 +40,12 @@ def connect() -> sqlite3.Connection:
 def blocks(entry: dict):
     """Yield (role, tool, text) for one transcript line."""
     t = entry.get("type")
+    # Messages typed while Claude is mid-turn are only stored as queue operations (never as a user line).
+    if t == "queue-operation" and entry.get("operation") == "enqueue":
+        c = entry.get("content")
+        if isinstance(c, str) and c.strip() and not c.startswith("<"):
+            yield "user", None, c
+        return
     msg = entry.get("message") or {}
     content = msg.get("content")
     if t not in ("user", "assistant") or content is None:
@@ -129,7 +135,9 @@ def main() -> None:
         index(db, quiet=True)
         sql = ("SELECT m.id, m.ts, m.role, m.session, m.agent, snippet(messages_fts, 0, '[', ']', '…', 24) "
                "FROM messages_fts JOIN messages m ON m.id = messages_fts.rowid WHERE messages_fts MATCH ?")
-        args: list = [a.query]
+        # FTS5 reads "steamos-add-to-steam" as column filters and crashes: quote any bare word with punctuation.
+        q = re.sub(r'(?<!")\b([\w.]+(?:[-/:][\w.]+)+)\b(?!")', r'"\1"', a.query)
+        args: list = [q]
         if a.role:
             sql += " AND m.role = ?"; args.append(a.role)
         if a.session:

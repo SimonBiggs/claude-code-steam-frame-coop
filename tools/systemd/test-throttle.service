@@ -2,6 +2,7 @@
 Description=Idle priority + 4 threads for Claude's test games (so the family's games never stutter)
 
 [Service]
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin
 ExecStart=%h/.local/bin/test-throttle
 Restart=always
 

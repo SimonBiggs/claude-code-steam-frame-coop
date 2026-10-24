@@ -1,0 +1,10 @@
+[Unit]
+Description=Restart claude rc when the network comes back online
+
+[Service]
+ExecStart=%h/.local/bin/claude-rc-netwatch
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

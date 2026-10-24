@@ -7,6 +7,7 @@ extends Node3D
 ## show_move("", ...) to hide it. Only made on the VR pilot's machine.
 
 const Data := preload("res://games/mech_titans/data.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 const CYCLE := 1.7
 
 var main: Node
@@ -120,7 +121,7 @@ func show_move(kind: String, target: Vector3, delta: float) -> void:
 			var blen := 2.5
 			beam.global_transform = ck.global_transform * Transform3D(_basis_y(aim).scaled_local(Vector3(1.0, blen, 1.0)), p + aim * (0.08 + blen * 0.5))
 			beam_mat.albedo_color.a = 0.25 + 0.2 * sin(t * 30.0)
-	var b := Basis.looking_at(aim, Vector3.UP) if absf(aim.y) < 0.98 else Basis()
+	var b := UiKit.face(aim)
 	hand.global_transform = ck.global_transform * Transform3D(b, p)
 
 

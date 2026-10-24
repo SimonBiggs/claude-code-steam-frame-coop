@@ -1,0 +1,7 @@
+[Unit]
+Description=Deploy the arcade to devices that missed a duo-deploy while offline
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/duo-catch-up
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin
