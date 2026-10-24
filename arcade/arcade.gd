@@ -38,7 +38,7 @@ const GAMES := [
 		"blurb": "VR goalkeeper saves with big gloves; TV strikers aim, power up and bend shots"},
 	{"id": "fishing_lake", "cat": "cosy", "name": "FISHING LAKE", "scene": "res://games/fishing_lake/main.tscn",
 		"blurb": "Relaxing: VR casts and reels from the jetty; TV rowers herd fish and net treasure"},
-	{"id": "kart_race", "cat": "sports", "name": "KART RACE", "scene": "res://games/kart_race/main.tscn",
+	{"id": "kart_race", "multi": true, "cat": "sports", "name": "KART RACE", "scene": "res://games/kart_race/main.tscn",
 		"blurb": "VR turns a real steering wheel; TV racers drive in split screen, with items and ramps"},
 	{"id": "tiny_town_tycoon", "cat": "cosy", "name": "TINY TOWN TYCOON", "scene": "res://games/tiny_town_tycoon/main.tscn",
 		"blurb": "Build a cosy toy town together: the mayor places the buildings, the drivers bring it to life"},
