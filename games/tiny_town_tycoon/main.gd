@@ -24,6 +24,13 @@ extends Node3D
 ## (ghost_hand.gd) show the mayor how to draw a road and put a house beside it; a house blueprint waits
 ## by the town hall so the drivers' first job is one glowing delivery (bricks from the hall to the new
 ## house). Everything on the table reacts to touch (props.gd). Text: one short headline at the start.
+## VISUAL TEACHING (SIMPLE_MODE, no how-to words): low in each TV player's view a pulsing glowing button
+## in that player's own controls plus a picture (cue.gd, drawn by hud.gd); each goes once that player
+## has done it twice (cue_did / cue_learned), and a seat's cues reset when its player leaves. A glowing
+## arrow bobs over the practice spot (where to build) and, for the VR mayor, over the tray block to grab
+## (the practice block, then each new block until it's grabbed); the ghost hand still shows the moves.
+## A spare controller sees a pulsing A + plus + person; a lost controller is a pulsing bolt and a soft
+## boop (a happy ding when it's back), a full party / someone leaving just a soft pop. Pause: PAUSED.
 
 const NetScript := preload("res://core/net.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
@@ -39,6 +46,7 @@ const HudKit := preload("res://core/hud_kit.gd")
 const Hints := preload("res://core/hints.gd")
 const Awards := preload("res://core/awards.gd")
 const SkyKit := preload("res://core/sky_kit.gd")
+const MeshKit := preload("res://core/mesh_kit.gd")
 const Defs := preload("res://games/tiny_town_tycoon/defs.gd")
 const Art := preload("res://games/tiny_town_tycoon/art.gd")
 const Town := preload("res://games/tiny_town_tycoon/town.gd")
@@ -52,6 +60,7 @@ const MayorFlatScript := preload("res://games/tiny_town_tycoon/mayor_flat.gd")
 const HudScript := preload("res://games/tiny_town_tycoon/hud.gd")
 const PropsScript := preload("res://games/tiny_town_tycoon/props.gd")
 const GhostHandScript := preload("res://games/tiny_town_tycoon/ghost_hand.gd")
+const CueScript := preload("res://games/tiny_town_tycoon/cue.gd")
 
 const GAME_ID := "tiny_town_tycoon"
 const DAY_LEN := 420.0  ## seconds for a whole day
@@ -123,12 +132,20 @@ var practice := 2  ## host: 0 = draw a road, 1 = put a house by it, 2 = done
 var practice_road: Array[Vector2i] = []
 var practice_house := Vector2i(-1, -1)
 var _practice_site := -1  ## the drivers' practice delivery (a house blueprint by the hall)
+var cue_done := {}  ## slot -> {cue key: times done} (a picture cue goes once its player did it twice)
+var spot_arrow: Node3D  ## host / local: bobs over the practice spot (where to build)
+var tray_arrow: Node3D  ## VR mayor: bobs over the tray block to grab
+var tray_arrow_kind := ""  ## bots: the block the tray arrow points at
+var _arrow_warm := 4  ## frames the arrows show at load (their pipelines get made then, not mid-game)
+var _held_was := ""
+var pause_menu: Node
 
 
 func _ready() -> void:
 	var menu := PauseMenuScript.new()
 	menu.main = self
 	add_child(menu)
+	pause_menu = menu
 	net = NetScript.new()
 	net.name = "Net"
 	net.main = self
@@ -139,6 +156,13 @@ func _ready() -> void:
 	add_child(party)
 	party.player_joined.connect(_on_player_joined)
 	party.player_left.connect(_on_player_left)
+	if Defs.SIMPLE_MODE:
+		# no sentences: soft sounds (and a pulsing bolt in that player's view while the pad is away)
+		party.device_lost.connect(func(_slot: int) -> void: sound("pop", -8.0, 0.6))
+		party.device_restored.connect(func(_slot: int) -> void: sound("ding", -8.0, 1.3))
+		party.join_refused.connect(func(_dev: int, why: String) -> void:
+			if why == "full":
+				sound("pop", -10.0, 0.7))
 	save = Save.new()
 	save.game_id = GAME_ID
 	save.defaults = {"stars": {}, "towns": {}, "last": 0}
@@ -231,6 +255,14 @@ func _setup(mode: String) -> void:
 			ghost_hand.name = "GhostHand"
 			ghost_hand.set("main", self)
 			add_child(ghost_hand)
+			# the glowing arrows: built once now, sharing the practice spot's glowing material
+			var amat := MeshKit.material(Color(1.0, 0.9, 0.35), 2.5)
+			spot_arrow = CueScript.make_arrow(amat, 0.05)
+			spot_arrow.name = "SpotArrow"
+			add_child(spot_arrow)
+			tray_arrow = CueScript.make_arrow(amat, 0.035)
+			tray_arrow.name = "TrayArrow"
+			add_child(tray_arrow)
 	if vr:
 		mayor = MayorVrScript.new()
 		mayor.name = "Mayor"
@@ -598,6 +630,7 @@ func place(slot: int, kind: String, x: int, z: int, rot: int) -> bool:
 	awards.add(slot, "builds")
 	if Defs.SIMPLE_MODE and slot == 0:
 		_practice_step(kind)
+		cue_did(0, "build")
 	_fx("placed", [id, slot])
 	_publish_town(false)
 	_publish_stats()
@@ -649,6 +682,7 @@ func paint(slot: int, kind: String, cells: Variant) -> void:
 	if changed > 0:
 		if Defs.SIMPLE_MODE and slot == 0:
 			_practice_step(kind)
+			cue_did(0, "build")
 		_fx("painted", [kind, list[list.size() - 1] if list.size() > 0 else 0, changed])
 		_publish_town(false)
 		_publish_stats()
@@ -870,6 +904,9 @@ func _on_player_joined(slot: int, _device: int) -> void:
 
 
 func _on_player_left(slot: int) -> void:
+	cue_done.erase(slot)  # whoever takes this seat next sees the picture cues again
+	if Defs.SIMPLE_MODE:
+		sound("pop", -10.0, 0.6)  # no sentence: a soft puff
 	if cams.has(slot):
 		(cams[slot] as Node).queue_free()
 		cams.erase(slot)
@@ -936,10 +973,66 @@ func _tv_buttons() -> void:
 				hud.call("open_vehicle_menu", slot)
 
 
+# --- SIMPLE_MODE: visual teaching (picture cues instead of words) --------------------------------
+
+## Player `slot` has done `key` once more ("move", "pick", "build", "drive", "grab"); its cue goes
+## once done twice. Kept on the machine that draws that player's view.
+func cue_did(slot: int, key: String) -> void:
+	var done: Dictionary = cue_done.get(slot, {})
+	done[key] = int(done.get(key, 0)) + 1
+	cue_done[slot] = done
+
+
+func cue_learned(slot: int, key: String) -> bool:
+	var done: Dictionary = cue_done.get(slot, {})
+	return int(done.get(key, 0)) >= 2
+
+
+## Every frame (host / local): the glowing arrow over the practice spot (where to build), and for the
+## VR mayor one over the tray block to grab (the practice block, then a new block until it's grabbed).
+## Nothing is made here: the two arrows only move and show / hide.
+func _update_arrows() -> void:
+	var t := Time.get_ticks_msec() / 1000.0
+	var bob := absf(sin(t * 4.0))
+	if _arrow_warm > 0:
+		_arrow_warm -= 1  # shown for a few frames at load, so their first draw isn't mid-game
+		for ar in [spot_arrow, tray_arrow]:
+			(ar as Node3D).visible = true
+			(ar as Node3D).global_position = Defs.CENTER + Vector3(0.0, 0.06, 0.0)
+		return
+	var spot: Node3D = ghost_hand.get("spot")
+	spot_arrow.visible = spot != null and spot.visible and playing()
+	if spot_arrow.visible:
+		spot_arrow.global_position = spot.global_position + Vector3(0.0, 0.035 + 0.02 * bob, 0.0)
+		spot_arrow.rotation.y = t * 2.0
+	tray_arrow_kind = ""
+	if mayor != null and playing():
+		var held := String(mayor.get("held"))
+		if held != "" and _held_was == "":
+			cue_did(0, "grab")
+		_held_was = held
+		if held == "" and not (props != null and props.call("holding")):
+			if practice == 0:
+				tray_arrow_kind = "road"
+			elif practice == 1:
+				tray_arrow_kind = "house"
+			elif float(mayor.get("_sparkle_t")) > 0.2:
+				tray_arrow_kind = String(mayor.get("_sparkle_kind"))  # a new block: grab it!
+	var tp := Vector3.ZERO
+	if tray_arrow_kind != "":
+		tp = mayor.call("tray_point", tray_arrow_kind)
+	tray_arrow.visible = tp != Vector3.ZERO
+	if tray_arrow.visible:
+		tray_arrow.global_position = tp + Vector3(0.0, 0.04 + 0.015 * bob, 0.0)
+		tray_arrow.rotation.y = t * 2.0
+
+
 # --- Pause ---------------------------------------------------------------------------------------
 
 func on_pause_changed(paused: bool, by_slot: int) -> void:
 	var why := "Paused by %s  -  %s" % [party.name_of(by_slot), "wrist MENU: carry on" if vr_rig != null else "Start: menu"]
+	if Defs.SIMPLE_MODE:
+		why = ""  # just PAUSED (no sentence)
 	if vr_rig != null:
 		if paused:
 			vr_banner = HudKit.vr_card(self, vr_rig.camera, "PAUSED", why, {"width": 1.1})
@@ -961,8 +1054,12 @@ func on_pause_changed(paused: bool, by_slot: int) -> void:
 			tv_banner.set_anchors_preset(Control.PRESET_CENTER)
 			tv_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
 			tv_banner.grow_vertical = Control.GROW_DIRECTION_BOTH
-		(tv_banner.find_child("Why", true, false) as Label).text = why
-		tv_banner.visible = paused
+		var wl := tv_banner.find_child("Why", true, false) as Label
+		wl.text = why
+		wl.visible = why != ""
+		# the pause menu open on this machine already says PAUSED: don't draw a second one under it
+		var menu_open: bool = pause_menu != null and pause_menu.get("panel") != null and (pause_menu.panel as Control).visible
+		tv_banner.visible = paused and not (Defs.SIMPLE_MODE and menu_open)
 		if paused:
 			UiKit.pop_in(tv_banner)
 
@@ -995,6 +1092,11 @@ func _process(delta: float) -> void:
 	hud.call("tick", delta)
 	if ghost_hand != null:
 		ghost_hand.call("update_demo", delta)
+	if spot_arrow != null:
+		var _pc := Time.get_ticks_usec()
+		_update_arrows()
+		if Time.get_ticks_usec() - _pc > 4000:
+			print("[perf] arrows %d ms" % ((Time.get_ticks_usec() - _pc) / 1000))
 	_slow_t -= delta
 	if _slow_t <= 0.0:
 		_slow_t = 1.0
@@ -1186,6 +1288,7 @@ func show_fx(kind: String, args: Array) -> void:
 						sfx.play_at("clap", c7, -4.0)
 			if vid >= 1 and vid < 100 and party.is_local(vid):
 				party.rumble(vid, 0.3, 0.0, 0.12)
+				cue_did(vid, "drive")  # drove into the glowing ring
 		"fire_out", "helped", "visited":
 			var vid2 := int(args[1])
 			var v: Node3D = fleet.call("vehicle_of", vid2)

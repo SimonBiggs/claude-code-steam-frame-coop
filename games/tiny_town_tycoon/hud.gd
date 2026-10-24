@@ -8,12 +8,21 @@ extends Node
 ## - the TV machine also draws the VR mayor's held piece as a ghost on the board.
 ## SIMPLE_MODE: no numbers, no goals, no words on the job card (just the arrow; the glowing ring in the
 ## world shows where), no vehicle menu (each driver gets the next free toy vehicle, X swaps it).
+## VISUAL TEACHING (SIMPLE_MODE, no how-to words): low in each TV player's view a pulsing glowing button
+## in that player's own controls plus a picture (cue.gd): the flat mayor gets RB / E + an arrow + the
+## block to pick, STICK / W + an arrow + the glowing ring (move the cursor there), A / SPACE + the block
+## + a down arrow + the ring (build it there); a driver gets STICK / W + a toy car driving into a
+## glowing ring. A pulsing bolt while that player's controller is unplugged. Each goes once that player
+## has done it twice (main.cue_did / cue_learned). The shared view's "A Join" is a pulsing A + plus +
+## person in the corner. The cue rows are built once per view and only shown / hidden after that.
 
 const Defs := preload("res://games/tiny_town_tycoon/defs.gd")
 const Art := preload("res://games/tiny_town_tycoon/art.gd")
 const UiKit := preload("res://core/ui_kit.gd")
 const HudKit := preload("res://core/hud_kit.gd")
 const UiMenu := preload("res://core/ui_menu.gd")
+const Party := preload("res://core/party.gd")
+const CueScript := preload("res://games/tiny_town_tycoon/cue.gd")
 
 const VEHICLE_ICONS := {"truck": "bag", "bus": "person", "fire": "fire", "crane": "plus", "police": "shield"}
 
@@ -93,9 +102,22 @@ func make_view(slot: int, parent: Control) -> void:
 		_make_job_card(ui, v)
 	elif slot == 0:
 		_make_piece_card(ui, v)
+	elif Defs.SIMPLE_MODE:
+		# no words: a pulsing A + plus + person in the corner (a spare controller can join)
+		var jc := CueScript.join_row()
+		ui.add_child(jc)
+		jc.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+		jc.offset_left = -200
+		jc.offset_top = -74
+		jc.offset_right = -16
+		jc.offset_bottom = -10
+		var tw := jc.create_tween().set_loops()
+		tw.tween_property(jc, "modulate:a", 0.5, 0.7)
+		tw.tween_property(jc, "modulate:a", 1.0, 0.7)
+		v["join"] = jc
 	else:
 		var jp := UiKit.panel("pill")
-		jp.add_child(UiKit.prompts([["A", "Join" if Defs.SIMPLE_MODE else "Join and drive a vehicle"]]))
+		jp.add_child(UiKit.prompts([["A", "Join and drive a vehicle"]]))
 		ui.add_child(jp)
 		jp.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
 		jp.grow_horizontal = Control.GROW_DIRECTION_BOTH
@@ -103,6 +125,11 @@ func make_view(slot: int, parent: Control) -> void:
 		jp.offset_top = -60.0
 		jp.offset_bottom = -60.0
 		v["join"] = jp
+	if Defs.SIMPLE_MODE and slot >= 0:
+		var cue := CueScript.new()
+		ui.add_child(cue)
+		v["cue"] = cue
+		v["cue_sig"] = ""
 	refresh()
 
 
@@ -154,10 +181,7 @@ func _make_piece_card(ui: Control, v: Dictionary) -> void:
 	var info := UiKit.label("", "small", "info", HORIZONTAL_ALIGNMENT_CENTER)
 	col.add_child(info)
 	if Defs.SIMPLE_MODE:
-		title.visible = false  # the ghost on the cursor shows the block: one line of buttons only
-		line.visible = false
-		info.visible = false
-		col.add_child(UiKit.prompts([["LB", ""], ["RB", "Pick"], ["A", "Build"]]))
+		pc.visible = false  # no words: the picture cue (cue.gd) shows the buttons instead
 	else:
 		col.add_child(UiKit.prompts([["LB", ""], ["RB", "Pick"], ["A", "Build"], ["X", "Turn"], ["B", "Bulldozer"], ["SELECT", "Islands"]]))
 	v["piece"] = pc
@@ -246,6 +270,11 @@ func tick(delta: float) -> void:
 			_tick_job(int(slot), v)
 		if v.has("piece"):
 			_tick_piece(v)
+		if v.has("cue"):
+			var _pc := Time.get_ticks_usec()
+			_tick_cue(int(slot), v, delta)
+			if Time.get_ticks_usec() - _pc > 4000:
+				print("[perf] cue P%d %d ms" % [int(slot) + 1, (Time.get_ticks_usec() - _pc) / 1000])
 	if main.phase() == "select":
 		_ensure_select_menu()
 	else:
@@ -306,6 +335,9 @@ func _tick_job(slot: int, v: Dictionary) -> void:
 
 
 func _tick_piece(v: Dictionary) -> void:
+	if Defs.SIMPLE_MODE:
+		(v["piece"] as Control).visible = false
+		return
 	if main.flat == null:
 		(v["piece"] as Control).visible = false
 		return
@@ -318,6 +350,89 @@ func _tick_piece(v: Dictionary) -> void:
 	(v["piece_title"] as Label).text = String(info[0])
 	(v["piece_line"] as Label).text = String(info[1])
 	(v["piece_info"] as Label).text = String(info[2])
+
+
+# --- SIMPLE_MODE picture cues (visual teaching) ------------------------------------------------------------
+
+## Build this view's cue rows once (again only if the player's controls or the view's size change).
+func _build_cue_rows(slot: int, cue: CueScript, kb: bool, sc: float) -> void:
+	cue.clear_rows()
+	cue.s = sc
+	var gold := Color(1.0, 0.9, 0.45)
+	cue.add_row("plug", [UiKit.icon("bolt", Color(1.0, 0.8, 0.3), 64.0 * sc)])
+	if slot == 0:
+		var mv := UiKit.glyph("W" if kb else "STICK", sc)
+		var ring := CueScript.ring_icon(46.0 * sc)
+		cue.add_row("move", [mv, UiKit.icon("arrow_up", gold, 44.0 * sc), ring], [ring])
+		for kind in ["road", "house"]:
+			cue.add_row("pick_" + kind, [UiKit.glyph("E" if kb else "RB", sc), UiKit.icon("arrow_right", gold, 40.0 * sc),
+				CueScript.block_icon(kind, 52.0 * sc)])
+			var r2 := CueScript.ring_icon(46.0 * sc)
+			cue.add_row("build_" + kind, [UiKit.glyph("SPACE" if kb else "A", sc), CueScript.block_icon(kind, 52.0 * sc),
+				UiKit.icon("arrow_down", gold, 36.0 * sc), r2], [r2])
+	else:
+		var car := CueScript.car_icon(44.0 * sc, main.party.color_of(slot))
+		var r3 := CueScript.ring_icon(46.0 * sc)
+		cue.add_row("drive", [UiKit.glyph("W" if kb else "STICK", sc), car, r3], [car, r3])
+
+
+## The cue key for a TV seat now ("" = none): plug, move, pick_<kind>, build_<kind>, drive.
+func cue_key(slot: int) -> String:
+	if main.party.is_lost(slot):
+		return "plug"
+	if main.phase() != "play" or main.get_tree().paused or menu_open(slot):
+		return ""
+	if slot == 0:
+		var flat: Node3D = main.flat
+		if flat == null:
+			return ""
+		var k := String(flat.call("kind"))
+		var want := ""
+		var target := Vector2i(-1, -1)
+		if int(main.practice) == 0 and not (main.practice_road as Array).is_empty():
+			want = "road"
+			target = main.practice_road[0]
+		elif int(main.practice) == 1 and (main.practice_house as Vector2i).x >= 0:
+			want = "house"
+			target = main.practice_house
+		if want != "":
+			if k != want:
+				return "pick_" + want
+			if (flat.call("cell") as Vector2i) != target:
+				return "move"
+			return "build_" + want
+		var shown := "road" if Defs.is_tool_kind(k) else "house"
+		if not main.cue_learned(0, "build"):
+			return "build_" + shown
+		if not main.cue_learned(0, "pick"):
+			return "pick_" + ("house" if shown == "road" else "road")
+		return ""
+	var veh: Node3D = main.fleet.call("vehicle_of", slot)
+	var card: Array = main.net.state_get("job%d" % slot, [])
+	if veh == null or card.size() < 8 or main.cue_learned(slot, "drive"):
+		return ""
+	return "drive"
+
+
+func _tick_cue(slot: int, v: Dictionary, delta: float) -> void:
+	var cue: CueScript = v["cue"]
+	var sc := cue.want_scale()
+	if sc <= 0.0:
+		return
+	var kb: bool = main.party.device_of(slot) == Party.KEYBOARD
+	var sig := "%.1f|%d" % [sc, int(kb)]
+	if String(v["cue_sig"]) != sig:
+		v["cue_sig"] = sig
+		_build_cue_rows(slot, cue, kb, sc)
+	var k := cue_key(slot)
+	if cue.key == "move" and k.begins_with("build_"):
+		main.cue_did(slot, "move")  # the cursor got to the glowing spot
+	cue.bottom = -1.0
+	if v.has("job"):
+		var jc: Control = v["job"]
+		if jc.visible:
+			cue.bottom = jc.position.y - 14.0  # just above the job arrow
+	cue.show_cue(k, delta)
 
 
 # --- Phases and menus ------------------------------------------------------------------------------------

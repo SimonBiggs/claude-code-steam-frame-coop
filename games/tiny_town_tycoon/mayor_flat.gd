@@ -120,10 +120,12 @@ func _input_tick(delta: float) -> void:
 		pick = posmod(pick + 1, _tray().size())
 		manual = false
 		main.sound("ui_move", -6.0)
+		main.cue_did(SLOT, "pick")  # SIMPLE_MODE picture cue: picked a block
 	if party.just_pressed(SLOT, "lb"):
 		pick = posmod(pick - 1, _tray().size())
 		manual = false
 		main.sound("ui_move", -6.0)
+		main.cue_did(SLOT, "pick")
 	if party.just_pressed(SLOT, "back") and not Defs.SIMPLE_MODE:
 		if kind() == "bulldozer":
 			pick = _prev_pick
