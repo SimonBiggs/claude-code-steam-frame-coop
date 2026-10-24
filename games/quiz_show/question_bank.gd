@@ -177,20 +177,6 @@ func pick_picture(tier: int) -> Dictionary:
 	return pick_picture(tier)
 
 
-## Four different categories for the CATEGORY BOARD (avoids `avoid` if possible).
-func board_categories(avoid: Array = []) -> Array[String]:
-	var pool: Array[String] = []
-	for c in CATEGORIES:
-		if not avoid.has(c):
-			pool.append(c)
-	_shuffle_s(pool)
-	var out: Array[String] = []
-	for c in pool:
-		if out.size() < 4:
-			out.append(c)
-	return out
-
-
 ## A random category (for warm-up questions and the final), avoiding `avoid` when possible.
 func random_category(avoid: Array = []) -> String:
 	var pool: Array[String] = []
