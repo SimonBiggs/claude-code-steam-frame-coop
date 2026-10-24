@@ -843,7 +843,7 @@ func on_pause_changed(paused: bool, by_slot: int) -> void:
 			var l := UiKit.label("", "small", "dim", HORIZONTAL_ALIGNMENT_CENTER)
 			l.name = "Why"
 			v.add_child(l)
-			_pause_tv.set_anchors_preset(Control.PRESET_CENTER)
+			_pause_tv.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_KEEP_SIZE)
 			_pause_tv.grow_horizontal = Control.GROW_DIRECTION_BOTH
 			_pause_tv.grow_vertical = Control.GROW_DIRECTION_BOTH
 		var wl := _pause_tv.find_child("Why", true, false) as Label

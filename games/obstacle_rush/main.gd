@@ -938,7 +938,7 @@ func on_pause_changed(paused: bool, _by_slot: int) -> void:
 			tv_banner = UiKit.panel("accent")
 			ui.add_child(tv_banner)
 			tv_banner.add_child(UiKit.title("PAUSED"))
-			tv_banner.set_anchors_preset(Control.PRESET_CENTER)
+			tv_banner.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_KEEP_SIZE)
 			tv_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
 			tv_banner.grow_vertical = Control.GROW_DIRECTION_BOTH
 		tv_banner.visible = paused

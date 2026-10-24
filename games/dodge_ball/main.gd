@@ -215,6 +215,8 @@ func _make_hud(slot: int, parent: Control) -> void:
 	var card := UiKit.panel("card")
 	ui.add_child(card)
 	card.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	card.offset_left = 0.0  # set_anchors_preset alone keeps old offsets
+	card.offset_right = 0.0
 	card.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	card.offset_top = 16.0
 	var row := UiKit.hbox()
@@ -227,12 +229,13 @@ func _make_hud(slot: int, parent: Control) -> void:
 	row.add_child(gl)
 	row.add_child(UiKit.label("GIANT", "heading", "bad"))
 	score_labels[slot] = [tv, gl]
-	timers[slot] = HudKit.timer(ui, {"seconds": float(net.state_get("time", round_time))})
+	# Top right: the score card owns the top centre (the timer drew over "GIANT").
+	timers[slot] = HudKit.timer(ui, {"seconds": float(net.state_get("time", round_time)), "anchor": "top_right"})
 	if slot >= 0:
 		var tp := UiKit.panel("accent")
 		tp.add_child(UiKit.prompts([["A", "THROW!"]]))
 		ui.add_child(tp)
-		tp.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+		tp.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_KEEP_SIZE)
 		tp.grow_horizontal = Control.GROW_DIRECTION_BOTH
 		tp.grow_vertical = Control.GROW_DIRECTION_BEGIN
 		tp.offset_top = -50.0
@@ -243,7 +246,7 @@ func _make_hud(slot: int, parent: Control) -> void:
 		join_prompt = UiKit.panel("pill")
 		join_prompt.add_child(UiKit.prompts([["A", "Join"]]))
 		ui.add_child(join_prompt)
-		join_prompt.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+		join_prompt.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_KEEP_SIZE)
 		join_prompt.grow_horizontal = Control.GROW_DIRECTION_BOTH
 		join_prompt.grow_vertical = Control.GROW_DIRECTION_BEGIN
 		join_prompt.offset_top = -60.0
@@ -412,7 +415,7 @@ func on_pause_changed(paused: bool, _by_slot: int) -> void:
 			tv_banner = UiKit.panel("accent")
 			ui.add_child(tv_banner)
 			tv_banner.add_child(UiKit.title("PAUSED"))
-			tv_banner.set_anchors_preset(Control.PRESET_CENTER)
+			tv_banner.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_KEEP_SIZE)
 			tv_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
 			tv_banner.grow_vertical = Control.GROW_DIRECTION_BOTH
 		tv_banner.visible = paused

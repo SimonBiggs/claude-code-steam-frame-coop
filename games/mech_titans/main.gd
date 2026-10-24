@@ -736,7 +736,7 @@ func _make_hud(slot: int, parent: Control) -> void:
 	# Top centre: the boss.
 	var boss := UiKit.panel("pill")
 	ui.add_child(boss)
-	boss.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	boss.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP, Control.PRESET_MODE_KEEP_SIZE)
 	boss.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	boss.offset_top = 120.0 if slot >= 0 else 20.0
 	var bv := UiKit.vbox()
@@ -758,7 +758,7 @@ func _make_hud(slot: int, parent: Control) -> void:
 		# Bottom: what my buttons do; centre: the crosshair.
 		var bottom := UiKit.panel("pill")
 		ui.add_child(bottom)
-		bottom.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+		bottom.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_KEEP_SIZE)
 		bottom.grow_horizontal = Control.GROW_DIRECTION_BOTH
 		bottom.grow_vertical = Control.GROW_DIRECTION_BEGIN
 		bottom.offset_top = -24.0
@@ -767,7 +767,7 @@ func _make_hud(slot: int, parent: Control) -> void:
 		w["bottom"] = bottom
 		var cross := UiKit.icon("plus", Color(1, 1, 1, 0.8), 28.0)
 		ui.add_child(cross)
-		cross.set_anchors_preset(Control.PRESET_CENTER)
+		cross.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_KEEP_SIZE)
 		cross.position -= Vector2(14.0, 14.0)
 		w["cross"] = cross
 		_refresh_vehicle_hud(slot)
@@ -779,7 +779,7 @@ func _make_hud(slot: int, parent: Control) -> void:
 		var jp := UiKit.panel("pill")
 		jp.add_child(UiKit.prompts([["A", "Join the support team"]]))
 		ui.add_child(jp)
-		jp.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+		jp.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_KEEP_SIZE)
 		jp.grow_horizontal = Control.GROW_DIRECTION_BOTH
 		jp.grow_vertical = Control.GROW_DIRECTION_BEGIN
 		jp.offset_top = -60.0
@@ -1436,7 +1436,7 @@ func on_pause_changed(paused: bool, by_slot: int) -> void:
 			var l := UiKit.label("", "small", "dim", HORIZONTAL_ALIGNMENT_CENTER)
 			l.name = "Why"
 			v.add_child(l)
-			tv_banner.set_anchors_preset(Control.PRESET_CENTER)
+			tv_banner.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_KEEP_SIZE)
 			tv_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
 			tv_banner.grow_vertical = Control.GROW_DIRECTION_BOTH
 		var wl := tv_banner.find_child("Why", true, false) as Label

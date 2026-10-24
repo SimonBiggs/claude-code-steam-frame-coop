@@ -291,7 +291,7 @@ func _make_hud(slot: int, parent: Control) -> void:
 		join_prompt = UiKit.panel("pill")
 		join_prompt.add_child(UiKit.prompts([["A", "Join"]]))
 		ui.add_child(join_prompt)
-		join_prompt.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+		join_prompt.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_KEEP_SIZE)
 		join_prompt.grow_horizontal = Control.GROW_DIRECTION_BOTH
 		join_prompt.grow_vertical = Control.GROW_DIRECTION_BEGIN
 		join_prompt.offset_top = -60.0
@@ -457,7 +457,7 @@ func on_pause_changed(paused: bool, by_slot: int) -> void:
 			var l := UiKit.label("", "small", "dim", HORIZONTAL_ALIGNMENT_CENTER)
 			l.name = "Why"
 			v.add_child(l)
-			tv_banner.set_anchors_preset(Control.PRESET_CENTER)
+			tv_banner.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_KEEP_SIZE)
 			tv_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
 			tv_banner.grow_vertical = Control.GROW_DIRECTION_BOTH
 		(tv_banner.find_child("Why", true, false) as Label).text = why

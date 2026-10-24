@@ -2118,8 +2118,7 @@ func hud_text(p) -> String:
 					t += "\nDRAW:  %s" % word.to_upper()
 					if state == "draw":
 						t += "   ·   %d s" % int(ceilf(time_left))
-		t += "\nColour: %s  ·  Mouse/WASD/stick move · Left click/Space/A paint" % canvas.COLOR_NAMES[p.color_idx]
-		t += "\nC/RMB/X colour · Z/LB undo · Backspace/Y clear · N/B new word"
+		# No key-help lines: they covered the word sign, and the easel has CLEAR / UNDO / NEW WORD buttons.
 		return t
 	var line := "P%d   %d pts" % [p.index + 1, p.score]
 	if active_guessers().size() > 1:

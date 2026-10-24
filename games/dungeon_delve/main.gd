@@ -840,6 +840,8 @@ func _make_hud(parent: Control) -> void:
 	pill = UiKit.panel("pill")
 	hud.add_child(pill)
 	pill.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	pill.offset_left = 0.0  # set_anchors_preset alone keeps the old offsets: the pill sat half off the left edge
+	pill.offset_right = 0.0
 	pill.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	pill.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	pill.offset_top = -60.0
@@ -949,7 +951,7 @@ func on_pause_changed(paused: bool, _by_slot: int) -> void:
 			tv_banner = UiKit.panel("accent")
 			ui.add_child(tv_banner)
 			tv_banner.add_child(UiKit.title("PAUSED"))
-			tv_banner.set_anchors_preset(Control.PRESET_CENTER)
+			tv_banner.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_KEEP_SIZE)
 			tv_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
 			tv_banner.grow_vertical = Control.GROW_DIRECTION_BOTH
 		tv_banner.visible = paused

@@ -1078,7 +1078,7 @@ func _make_hud(slot: int, parent: Control) -> void:
 	var pill := UiKit.panel("pill")
 	ui.add_child(pill)
 	pill.add_child(UiKit.prompts([["A", "Hands up!"]]) if slot != 0 or vr_rig != null or net.mode == "client" else UiKit.prompts([["A", "Add"], ["B", "Undo"], ["Y", "Ride!"]]))
-	pill.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	pill.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_KEEP_SIZE)
 	pill.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	pill.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	pill.offset_top = -40.0
@@ -1088,7 +1088,7 @@ func _make_hud(slot: int, parent: Control) -> void:
 		join_prompt = UiKit.panel("pill")
 		join_prompt.add_child(UiKit.prompts([["A", "Join"]]))
 		ui.add_child(join_prompt)
-		join_prompt.set_anchors_preset(Control.PRESET_CENTER_TOP)
+		join_prompt.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP, Control.PRESET_MODE_KEEP_SIZE)
 		join_prompt.grow_horizontal = Control.GROW_DIRECTION_BOTH
 		join_prompt.offset_top = 30.0
 		pill.visible = false
@@ -1181,7 +1181,7 @@ func on_pause_changed(paused: bool, _by_slot: int) -> void:
 			tv_banner = UiKit.panel("accent")
 			ui.add_child(tv_banner)
 			tv_banner.add_child(UiKit.title("PAUSED"))
-			tv_banner.set_anchors_preset(Control.PRESET_CENTER)
+			tv_banner.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_KEEP_SIZE)
 			tv_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
 			tv_banner.grow_vertical = Control.GROW_DIRECTION_BOTH
 		tv_banner.visible = paused

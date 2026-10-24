@@ -119,7 +119,7 @@ func make_view(slot: int, parent: Control) -> void:
 		var jp := UiKit.panel("pill")
 		jp.add_child(UiKit.prompts([["A", "Join and drive a vehicle"]]))
 		ui.add_child(jp)
-		jp.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+		jp.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_KEEP_SIZE)
 		jp.grow_horizontal = Control.GROW_DIRECTION_BOTH
 		jp.grow_vertical = Control.GROW_DIRECTION_BEGIN
 		jp.offset_top = -60.0
@@ -136,7 +136,7 @@ func make_view(slot: int, parent: Control) -> void:
 func _make_job_card(ui: Control, v: Dictionary) -> void:
 	var jc := UiKit.panel("card")
 	ui.add_child(jc)
-	jc.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	jc.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_KEEP_SIZE)
 	jc.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	jc.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	jc.offset_top = -24.0
@@ -167,7 +167,7 @@ func _make_job_card(ui: Control, v: Dictionary) -> void:
 func _make_piece_card(ui: Control, v: Dictionary) -> void:
 	var pc := UiKit.panel("card")
 	ui.add_child(pc)
-	pc.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	pc.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_KEEP_SIZE)
 	pc.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	pc.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	pc.offset_top = -20.0
@@ -467,7 +467,7 @@ func _show_title(on: bool) -> void:
 	title_card.add_child(v)
 	v.add_child(UiKit.label("TINY TOWN TYCOON", "banner", "gold", HORIZONTAL_ALIGNMENT_CENTER))
 	v.add_child(UiKit.label("A cosy little town, built together", "subtitle", null, HORIZONTAL_ALIGNMENT_CENTER))
-	title_card.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	title_card.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP, Control.PRESET_MODE_KEEP_SIZE)
 	title_card.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	title_card.offset_top = 90.0
 	UiKit.pop_in(title_card)

@@ -1051,7 +1051,7 @@ func on_pause_changed(paused: bool, by_slot: int) -> void:
 			var l := UiKit.label("", "small", "dim", HORIZONTAL_ALIGNMENT_CENTER)
 			l.name = "Why"
 			v.add_child(l)
-			tv_banner.set_anchors_preset(Control.PRESET_CENTER)
+			tv_banner.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_KEEP_SIZE)
 			tv_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
 			tv_banner.grow_vertical = Control.GROW_DIRECTION_BOTH
 		var wl := tv_banner.find_child("Why", true, false) as Label
