@@ -2,7 +2,7 @@ extends Node
 ## Headless bot for games/sheep_round_up. BOT_PLAYERS=n sheepdogs drop in with virtual pads
 ## (default 2); they run behind sheep to push them through the gates and bark now and then.
 ## BOT_VR=1 (local / host): a fake farmer grabs sheep with the right glove and drops them in the pen.
-## Local:      godot-test --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/sheep_round_up_bot.tscn
+## Local:      godot --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/sheep_round_up_bot.tscn
 ## Networked:  DUO_PORT=81xx DUO_HOST=1 ... & DUO_PORT=81xx DUO_JOIN=127.0.0.1 ... (same scene, real time)
 ## Flat host: add DUO_FLAT_HOST=1 to the host (no VR: one bot pad plays slot 0 on the host).
 

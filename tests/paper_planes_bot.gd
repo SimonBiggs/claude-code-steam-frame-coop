@@ -2,7 +2,7 @@ extends Node
 ## Headless bot for games/paper_planes. TV bots steer their planes through the nearest hoop; with
 ## BOT_VR=1 (local / host) a fake VR player grabs planes (trigger and touching the stack) and throws
 ## them at the hoops with a flick.
-## Local:      godot-test --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/paper_planes_bot.tscn
+## Local:      godot --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/paper_planes_bot.tscn
 ## Networked:  DUO_PORT=81xx DUO_HOST=1 ... & DUO_PORT=81xx DUO_JOIN=127.0.0.1 ... (same scene, real time)
 ## Flat host: add DUO_FLAT_HOST=1 to the host (no VR: one bot pad plays slot 0 on the host).
 

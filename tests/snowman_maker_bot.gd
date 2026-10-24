@@ -2,7 +2,7 @@ extends Node
 ## Headless bot for games/snowman_maker. BOT_PLAYERS=n TV players (default 2) roll snowballs to the
 ## build circle and carry carrots / hats; BOT_VR=1 adds a fake VR builder that lifts balls onto
 ## each other and puts carrots and hats on.
-## Local:     godot-test --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/snowman_maker_bot.tscn
+## Local:     godot --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/snowman_maker_bot.tscn
 ## Networked: DUO_PORT=81xx DUO_HOST=1 ... & DUO_PORT=81xx DUO_JOIN=127.0.0.1 ... (same scene, real time)
 ## Flat host: add DUO_FLAT_HOST=1 to the host (no VR: one bot pad plays slot 0 on the host).
 

@@ -8,7 +8,7 @@ extends Node
 ## Design check: every room gets entered, the treasure gets opened and the results show; the practice
 ## targets got done; knight and heroes bopped monsters; props reacted; the TV machine mirrors it all;
 ## everything stays inside the walls.
-## Local:     godot-test --headless --path . --fixed-fps 60 --quit-after 12000 res://tests/dungeon_delve_bot.tscn
+## Local:     godot --headless --path . --fixed-fps 60 --quit-after 12000 res://tests/dungeon_delve_bot.tscn
 ## Networked: DUO_PORT=83xx DUO_HOST=1 BOT_VR=1 ... & DUO_PORT=83xx DUO_JOIN=127.0.0.1 ... (real time)
 ## DD_ROOM=n starts in room n (0..4).
 

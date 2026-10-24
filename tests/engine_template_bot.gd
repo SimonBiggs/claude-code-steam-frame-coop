@@ -3,7 +3,7 @@ extends Node
 ## engine (tests/bot_kit.gd does the heavy lifting).
 ## BOT_PLAYERS=n: TV players that drop in with virtual pads (default 2). BOT_VR=1 (local / host):
 ## a fake VR player walks with the stick and grabs stars with its right glove.
-## Local:      godot-test --headless --path . --fixed-fps 60 --quit-after 1500 res://tests/engine_template_bot.tscn
+## Local:      godot --headless --path . --fixed-fps 60 --quit-after 1500 res://tests/engine_template_bot.tscn
 ## Networked:  DUO_PORT=7994 DUO_HOST=1 ... & DUO_PORT=7994 DUO_JOIN=127.0.0.1 ... (same scene, real time)
 ## Flat host: add DUO_FLAT_HOST=1 to the host (no VR: one bot pad plays slot 0 on the host).
 

@@ -4,7 +4,7 @@ extends Node
 ## builder: it does the practice with A, then builds more through main's functions and rides with Y.
 ## BOT_VR=1: a fake VR builder does it with its hands (grab tray pieces, drop them at the glowing end,
 ## pull a hill, drop a star, plop a guest into a car, poke a tree, push the lever, ride along and stop).
-## Local:     godot-test --headless --path . --fixed-fps 60 --quit-after 4800 res://tests/roller_coaster_bot.tscn
+## Local:     godot --headless --path . --fixed-fps 60 --quit-after 4800 res://tests/roller_coaster_bot.tscn
 ## Networked: DUO_PORT=8190 DUO_HOST=1 ... & DUO_PORT=8190 DUO_JOIN=127.0.0.1 ... (same scene, real time)
 
 const BotKit := preload("res://tests/bot_kit.gd")

@@ -7,7 +7,7 @@ extends Node
 ## The host forces a few landings (event, shop, duel, red, blue) and puts the STAR in reach so every
 ## space type, the shop and the star purchase happen. PB_MINIGAME=<id> / PB_ALL_MINIGAMES=1 pick the
 ## minigames (main.gd reads them). PB_ROUNDS overrides the 3 rounds.
-## Local:     godot-test --headless --path . --fixed-fps 60 --quit-after 12000 res://tests/party_board_bot.tscn
+## Local:     godot --headless --path . --fixed-fps 60 --quit-after 12000 res://tests/party_board_bot.tscn
 ## Networked: DUO_PORT=8030 DUO_HOST=1 ... & DUO_PORT=8030 DUO_JOIN=127.0.0.1 ... (same scene, real time)
 ## SIMPLE_MODE (main.simple): the party starts by itself; checks the practice roll (every human), the
 ## glowing A on TV dice blocks, the VR ghost hand, no menus / shop / duels, stars picked up on the board
