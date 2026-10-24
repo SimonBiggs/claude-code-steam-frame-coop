@@ -54,7 +54,7 @@ const GAMES := [
 		"blurb": "Race jelly-bean runners over a bouncy toy course while the VR giant lobs beach balls!"},
 	{"id": "starship_crew", "cat": "action", "name": "STARSHIP CREW", "scene": "res://games/starship_crew/main.tscn",
 		"blurb": "Fly the little starship through glowing rings while the crew zaps space rocks and silly aliens all the way home!"},
-	{"id": "dungeon_delve", "cat": "action", "name": "DUNGEON DELVE", "scene": "res://games/dungeon_delve/main.tscn",
+	{"id": "dungeon_delve", "multi": true, "cat": "action", "name": "DUNGEON DELVE", "scene": "res://games/dungeon_delve/main.tscn",
 		"blurb": "Bop cute slimes and bats room by room: the knight swings a big toy sword in VR, the heroes bonk on the TV, and the treasure waits at the end!"},
 	{"id": "crystal_saga", "multi": true, "cat": "action", "name": "CRYSTAL SAGA", "scene": "res://games/crystal_saga/main.tscn",
 		"blurb": "Be the hero in VR! Swing your sword, raise your hand for magic, and restore the Crystal of Light with your party."},
