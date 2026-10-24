@@ -5,4 +5,8 @@
 args=(--dev-bind / / --tmpfs /dev/input --die-with-parent)
 for h in /dev/hidraw*; do [ -e "$h" ] && args+=(--ro-bind /dev/null "$h"); done
 export SDL_JOYSTICK_HIDAPI=0  # SDL HIDAPI pads off too (same as the offscreen runner)
+# Never the real game's port: a test on 7777 joins the family's live games as a phantom "TV" machine, takes a
+# player slot and its LAN beacon pulls real Decks into the test (2026-10-24: kids couldn't all join). Runs that
+# pair a host and a joiner already pass the same DUO_PORT to both.
+[ -n "$DUO_PORT" ] || export DUO_PORT=$((20000 + RANDOM % 10000))
 exec bwrap "${args[@]}" godot "$@"
