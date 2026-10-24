@@ -480,8 +480,8 @@ func _process(delta: float) -> void:
 
 ## Pads on this machine: A B X Y answer (sent to the host, which decides).
 func _read_pads() -> void:
-	if String(net.state_get("phase", "")) != "ask" or net.just_unpaused():
-		return
+	if String(net.state_get("phase", "")) != "ask" or net.just_unpaused() or hints.intro_showing():
+		return  # (the A that closes the how-to card is guarded by core/hints.gd: it never answers)
 	var locked: Dictionary = net.state_get("locked", {})
 	for slot in party.local_slots():
 		if locked.has(slot):
@@ -580,8 +580,8 @@ func _run_show(delta: float) -> void:
 	var phase := String(net.state_get("phase", ""))
 	match phase:
 		"ask":
-			if contestants().is_empty():
-				phase_t = minf(phase_t, 0.5)  # nobody is playing yet (or everyone left): the clock waits
+			if contestants().is_empty() or (q_kind == "level" and hints.intro_showing()):
+				phase_t = minf(phase_t, 0.5)  # nobody is playing yet (or everyone left), or the how-to card is up: the clock waits
 			var left := maxf(0.0, ask_time - phase_t)
 			if int(ceil(left)) != int(net.state_get("time", 0)):
 				net.state_set("time", int(ceil(left)))
