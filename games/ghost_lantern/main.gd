@@ -44,6 +44,7 @@ const HudScript := preload("res://games/ghost_lantern/hud.gd")
 const SfxScript := preload("res://core/sfx.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
 const NetScript := preload("res://core/net.gd")
+const ClassicSeats := preload("res://core/classic_seats.gd")
 const MusicScript := preload("res://core/music.gd")
 const JoinInputScript := preload("res://games/ghost_lantern/join_input.gd")
 const DirectorScript := preload("res://games/ghost_lantern/director.gd")
@@ -142,6 +143,10 @@ void fragment() {
 """
 
 var players: Array = []
+## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
+var multi_machine := true
+## Which machine drives which ghost vacuum (core/classic_seats.gd; core/net.gd checks it too).
+var seats: ClassicSeats
 var cameras: Array[Camera3D] = []
 var net: Node
 var ready_to_play := false
@@ -187,7 +192,6 @@ var view_grid: GridContainer
 var view_count := 0
 var bubble: TextureRect
 var pad_wait := {}  # player index -> seconds left to plug their controller back in
-var pending_join := {}  # client: player index -> seconds until we may ask the host again
 var simple := SIMPLE_MODE  # other scripts read main.simple
 var props: Node3D  # simple mode: the touchable things around the lantern-bearer
 var ghost_hand: Node3D  # simple mode: the practice ghost hand (VR lantern-bearer only)
@@ -221,6 +225,17 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
+	seats = ClassicSeats.new(self, {
+		"no_keys": 2,  # player.gd key_set 2: controller only
+		"free_actions": ["restart", "pause"],
+		"is_local": _has_local_view,
+		"keys": func(p) -> int: return p.keys() if p.uses_keyboard() else 2,
+		"seat_free": func(p) -> bool: return _has_local_view(p) and not p.active and p.joy < 0 and not p.uses_keyboard() and not p.has_meta(ClassicSeats.WANT),
+		"ghost": _seat_ghost,
+		"deactivate": _seat_gone,
+		"save": _remember_party,
+		"full": func() -> void: local_sound("miss", -8.0),  # no words: nothing happens
+	})
 	Input.joy_connection_changed.connect(_on_joy_changed)
 	if OS.has_environment("DUO_JOIN"):
 		_show_center("Connecting to the lantern-bearer…", 0.0)
@@ -238,6 +253,10 @@ func _setup_game(mode: String) -> void:
 	_build_views(mode)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_assign_joypads()
+	if seats.deck_alone():
+		seats.deck_solo(0)  # a Deck on its own: the lantern-bearer (catches ghosts alone, like solo VR)
+	elif mode == "client":
+		players[1].set_meta(ClassicSeats.WANT, true)  # ask the host for P2's seat (it may hand out another one)
 	ready_to_play = true
 	_restore_party()
 	if SIMPLE_MODE:
@@ -585,7 +604,7 @@ func _layout_views() -> void:
 	var n := 0
 	for c in view_grid.get_children():
 		var idx: int = c.get_meta("player_index", 0)
-		var on: bool = idx < players.size() and players[idx].active
+		var on: bool = idx < players.size() and players[idx].active and _has_local_view(players[idx])
 		c.visible = on
 		if on:
 			n += 1
@@ -658,6 +677,10 @@ func pad_owner(device: int) -> int:
 
 ## A newly seen pad: give it back to a player who lost theirs, else the default slots. Returns the index or -1.
 func _auto_bind_pad(device: int) -> int:
+	if net != null and net.mode == "host" and pad_owner(device) < 0 and not players.is_empty() \
+			and not players[0].vr and players[0].joy < 0:
+		players[0].joy = device  # flat host (no VR): the lantern-bearer uses this controller
+		return 0
 	if pad_owner(device) >= 0 or net == null or net.mode == "host" or players.size() < 2:
 		return pad_owner(device)
 	var keys: Array = pad_wait.keys()
@@ -765,7 +788,7 @@ func on_join_input(event: InputEvent) -> bool:
 	if owner_i >= 0:
 		if players[owner_i].active:
 			return false  # A / Start of a playing pad keep their usual job
-		if not pending_join.has(owner_i):
+		if not players[owner_i].has_meta(ClassicSeats.WANT):
 			request_join(owner_i)
 		return true
 	var slot := _free_slot()
@@ -785,8 +808,8 @@ func request_join(i: int) -> void:
 	if i <= 0 or i >= players.size() or players[i].active:
 		return
 	if net.mode == "client":
-		pending_join[i] = 2.0
-		net.send_action("join", [], i)
+		players[i].set_meta(ClassicSeats.WANT, true)  # seats.request_joins asks the host until it's ours
+		seats.ask_soon()
 		print("Asking the host to let P%d join" % (i + 1))
 	else:
 		_activate_player(i)
@@ -891,12 +914,9 @@ func _update_party(delta: float) -> void:
 		j.main = self
 		add_child(j)
 		set_meta("join_input", j)
-	for k in pending_join.keys():
-		var left: float = pending_join[k] - delta
-		if left <= 0.0 or players[k].active:
-			pending_join.erase(k)
-		else:
-			pending_join[k] = left
+	if net.mode == "client":
+		seats.sync()
+		seats.request_joins(delta)
 	for p in players:
 		if p.has_meta("lost_pad_t"):
 			var lt: float = float(p.get_meta("lost_pad_t")) - delta
@@ -964,7 +984,7 @@ func on_player_activity_changed(p) -> void:
 			p.global_position = _spawn_near_team(p.index)
 		_ensure_view(p)
 	if p.has_meta("view") and is_instance_valid(p.get_meta("view")):
-		p.get_meta("view").visible = p.active
+		p.get_meta("view").visible = p.active and _has_local_view(p)
 	_layout_views()
 	print("Player %d is now %s on this screen" % [p.index + 1, "playing" if p.active else "waiting"])
 
@@ -1633,16 +1653,40 @@ func _unhandled_input(event: InputEvent) -> void:
 # --- Networked co-op ---------------------------------------------------------
 
 func on_client_joined() -> void:
+	if not seats.first_machine():
+		return  # another machine: its hunters join when they ask ("join")
 	_show_center("HELLO!" if SIMPLE_MODE else "GHOST HUNTERS JOINED!", 1.5)
 
 
 func on_client_left() -> void:
 	if not SIMPLE_MODE:
 		_show_center("The TV players left - waiting for them to come back…", 0.0)
-	for p in players:
-		if p.index >= 2 and p.active:
-			p.set_active(false)
-			p.vac_on = false
+	seats.all_left()  # each machine asks for its hunters again when it reconnects
+
+
+## Host: one machine left: only its hunters leave (and their seats become free).
+func on_machine_left(peer: int) -> void:
+	var freed := seats.machine_left(peer)
+	if not freed.is_empty() and net.peer_count() > 0:
+		if SIMPLE_MODE:
+			sound("puff", -8.0, 0.9)
+		else:
+			_show_center("P%d left the hunt" % (int(freed[0]) + 1), 1.5)
+
+
+## Host: a machine's hunter goes away (that machine left).
+func _seat_gone(p) -> void:
+	if p.active:
+		p.set_active(false)
+		p.vac_on = false
+		on_player_activity_changed(p)
+
+
+## TV machine: seat p is another machine's now (on: mirrored from the snapshots, no view here) or ours again.
+func _seat_ghost(p, on: bool) -> void:
+	p.net_started = false  # snap to the first mirrored position, no glide
+	p.vac_on = false
+	on_player_activity_changed(p)
 
 
 var join_t := 0.0
@@ -1652,7 +1696,7 @@ func _check_join(delta: float) -> void:
 	if join_t > 0.0 or game_over or net.mode == "host":
 		return
 	for p in players:
-		if p.index < 2 or p.active or not _has_local_view(p) or pending_join.has(p.index):
+		if p.index < 2 or p.active or not _has_local_view(p) or p.has_meta(ClassicSeats.WANT):
 			continue
 		if (p.joy >= 0 or p.uses_keyboard()) and p._fire_held():
 			join_t = 1.0
@@ -1723,6 +1767,7 @@ func _restore_party() -> void:
 
 
 func on_p2_action(action: String, args: Array, index: int = 1) -> void:
+	index = seats.host_action(action, args, index)  # many machines: who drives which seat (core/classic_seats.gd)
 	if index <= 0 or index >= players.size():
 		return
 	var p = players[index]
@@ -1829,6 +1874,8 @@ func _sync_ghosts(list: Array) -> void:
 
 
 func apply_event(kind: String, args: Array) -> void:
+	if seats.handle_event(kind, args):
+		return
 	if not ready_to_play:
 		return
 	match kind:
