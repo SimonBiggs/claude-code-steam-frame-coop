@@ -180,7 +180,7 @@ const LOITER := [
 	[Vector3(-9.2, 0, 2.6), Vector3(-11.0, 0, -2.6), Vector3(-7.0, 0, 4.6)],
 	[Vector3(7.0, 0, -0.2), Vector3(11.4, 0, -0.1), Vector3(13.2, 0, -4.0)],
 	[Vector3(8.0, 0, 3.0), Vector3(12.4, 0, 3.4), Vector3(8.6, 0, 5.4)],
-	[Vector3(10.0, 0, -15.0), Vector3(6.6, 0, -21.6), Vector3(14.6, 0, -18.4), Vector3(2.0, 0, -18.0)],
+	[Vector3(10.0, 0, -15.0), Vector3(7.1, 0, -22.1), Vector3(14.6, 0, -18.4), Vector3(2.0, 0, -18.0)],
 	[Vector3(0.0, 6, 1.6), Vector3(-1.4, 6, 4.4), Vector3(2.2, 6, -1.6)],
 	[Vector3(0.0, -6, 1.0), Vector3(-1.6, -6, 3.4), Vector3(1.4, -6, -1.8)],
 ]
@@ -638,6 +638,18 @@ class ManorNode extends Node3D:
 					if g.is_in_boundsv(n) and not g.is_point_solid(n):
 						return _cell_pos(lv, n)
 		return p
+
+	## Can you walk from a to b on one level (the connectivity check: nav grid path exists)?
+	func reachable(a: Vector3, b: Vector3) -> bool:
+		var lv := Me.level_of_y(a.y)
+		if Me.level_of_y(b.y) != lv:
+			return false
+		var g: AStarGrid2D = nav[lv]
+		var ca := _cell(lv, a)
+		var cb := _cell(lv, b)
+		if g.is_point_solid(ca) or g.is_point_solid(cb):
+			return false
+		return not g.get_id_path(ca, cb).is_empty()
 
 	## A walking path (floor points). Between levels it goes through the stairs: consecutive points
 	## whose heights differ by more than 2 m mean "blink through the portal here".
