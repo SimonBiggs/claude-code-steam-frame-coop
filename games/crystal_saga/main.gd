@@ -1349,6 +1349,8 @@ func apply_snapshot(s: Array) -> void:
 		return
 	if avatar != null:
 		avatar.apply_pose(s[0])
+	if split != null and (s[0] as PackedFloat32Array).is_empty():
+		split.clear_bubble()  # a flat host: no VR player to show in the bubble
 	var slots: PackedInt32Array = s[1]
 	var pos: PackedVector3Array = s[2]
 	var yaw: PackedFloat32Array = s[3]
