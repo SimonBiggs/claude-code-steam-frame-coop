@@ -685,7 +685,7 @@ func _tv_camera(delta: float) -> void:
 	cam_z = lerpf(cam_z, want, 1.0 - exp(-2.5 * delta))
 	var cam := split.shared_camera()
 	var pos := Vector3(0.0, 10.5, cam_z + 5.0)
-	cam.global_transform = Transform3D(Basis.looking_at(Vector3(0.0, 0.0, cam_z - 0.3) - pos, Vector3.UP), pos)
+	cam.global_transform = Transform3D(UiKit.face(Vector3(0.0, 0.0, cam_z - 0.3) - pos), pos)
 	shake = maxf(0.0, shake - delta * 2.0)
 	if shake > 0.0:
 		cam.global_position += Vector3(randf_range(-1, 1), randf_range(-1, 1), 0.0) * shake * 0.15
@@ -843,9 +843,7 @@ func _make_hud(parent: Control) -> void:
 	card.add_child(key_row)
 	pill = UiKit.panel("pill")
 	hud.add_child(pill)
-	pill.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	pill.offset_left = 0.0  # set_anchors_preset alone keeps the old offsets: the pill sat half off the left edge
-	pill.offset_right = 0.0
+	UiKit.pin(pill, Control.PRESET_CENTER_BOTTOM)
 	pill.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	pill.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	pill.offset_top = -60.0
@@ -955,7 +953,7 @@ func on_pause_changed(paused: bool, _by_slot: int) -> void:
 			tv_banner = UiKit.panel("accent")
 			ui.add_child(tv_banner)
 			tv_banner.add_child(UiKit.title("PAUSED"))
-			tv_banner.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_KEEP_SIZE)
+			UiKit.pin(tv_banner, Control.PRESET_CENTER)
 			tv_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
 			tv_banner.grow_vertical = Control.GROW_DIRECTION_BOTH
 		tv_banner.visible = paused

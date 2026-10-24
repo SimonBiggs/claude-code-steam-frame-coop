@@ -266,7 +266,7 @@ func _vr_branch(br: Dictionary) -> void:
 	var length := 1.2
 	if best >= 0:
 		length = o.distance_to((arrows[best] as Node3D).global_position)
-	laser.global_transform = Transform3D(Basis.looking_at(d, Vector3.UP if absf(d.y) < 0.98 else Vector3.FORWARD), o + d * length * 0.5)
+	laser.global_transform = Transform3D(UiKit.face(d), o + d * length * 0.5)
 	laser.scale = Vector3(1, 1, length)
 	if best >= 0 and best != int(br.get("sel", 0)):
 		main.net.request(0, "branch_sel", [best])

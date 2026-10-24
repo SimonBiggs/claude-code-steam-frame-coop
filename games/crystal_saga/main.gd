@@ -928,7 +928,7 @@ func _tv_camera(delta: float) -> void:
 	var want := c + Vector3(0.0, high, high * 0.95)
 	cam_pos = cam_pos.lerp(want, 1.0 - exp(-2.5 * delta))
 	var cam := split.shared_camera()
-	cam.global_transform = Transform3D(Basis.looking_at(cam_pos + Vector3(0.0, -high, -high * 0.95 - 1.5) - cam_pos, Vector3.UP), cam_pos)
+	cam.global_transform = Transform3D(UiKit.face(cam_pos + Vector3(0.0, -high, -high * 0.95 - 1.5) - cam_pos), cam_pos)
 	shake = maxf(0.0, shake - delta * 2.0)
 	if shake > 0.0:
 		cam.global_position += Vector3(randf_range(-1, 1), randf_range(-1, 1), 0.0) * shake * 0.15
@@ -1192,7 +1192,7 @@ func _make_hud(parent: Control) -> void:
 	card.add_child(gem_row)
 	pill = UiKit.panel("pill")
 	hud.add_child(pill)
-	pill.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_KEEP_SIZE)
+	UiKit.pin(pill, Control.PRESET_CENTER_BOTTOM)
 	pill.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	pill.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	pill.offset_top = -60.0
@@ -1320,7 +1320,7 @@ func on_pause_changed(paused: bool, _by_slot: int) -> void:
 			tv_banner = UiKit.panel("accent")
 			ui.add_child(tv_banner)
 			tv_banner.add_child(UiKit.title("PAUSED"))
-			tv_banner.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_KEEP_SIZE)
+			UiKit.pin(tv_banner, Control.PRESET_CENTER)
 			tv_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
 			tv_banner.grow_vertical = Control.GROW_DIRECTION_BOTH
 		tv_banner.visible = paused
