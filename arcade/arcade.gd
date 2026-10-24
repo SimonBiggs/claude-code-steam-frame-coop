@@ -370,7 +370,7 @@ func _launch(index: int) -> void:
 	var delay := 0.4 if mode == "host" else (0.9 if mode == "client" else 0.1)
 	if mode == "client":
 		_close_peer()
-	if get_meta("lobby_udp", null) is PacketPeerUDP:
+	if (get_meta("lobby_udp") if has_meta("lobby_udp") else null) is PacketPeerUDP:
 		(get_meta("lobby_udp") as PacketPeerUDP).close()
 		remove_meta("lobby_udp")
 	get_tree().create_timer(delay).timeout.connect(func() -> void:
@@ -903,7 +903,7 @@ func _vr_input() -> void:
 ## line, -1 for nothing) under the right hand's ray, and which half of the line it hits (1 = right).
 ## Also draws the pointer laser.
 func _vr_pointed_row() -> Vector2i:
-	var laser: MeshInstance3D = get_meta("vr_laser", null) if has_meta("vr_laser") else null
+	var laser: MeshInstance3D = get_meta("vr_laser") if has_meta("vr_laser") else null
 	if laser == null:
 		laser = MeshInstance3D.new()
 		var cm := CylinderMesh.new()
@@ -997,7 +997,7 @@ func _lobby_net(delta: float) -> void:
 	if starting or (OS.get_environment("DUO_JOIN_ORIGINAL") != "auto" and mode != "host"):
 		return
 	var base: int = int(OS.get_environment("DUO_PORT")) if OS.has_environment("DUO_PORT") else DEFAULT_PORT
-	if not get_meta("lobby_udp", null) is PacketPeerUDP:
+	if not (get_meta("lobby_udp") if has_meta("lobby_udp") else null) is PacketPeerUDP:
 		# Port taken: retry twice a second (a null meta value erases the meta).
 		if Time.get_ticks_msec() < int(get_meta("lobby_retry_ms", 0)):
 			return
@@ -1050,7 +1050,7 @@ func _lobby_net(delta: float) -> void:
 
 
 func _listen_for_game() -> void:
-	if not get_meta("listen", null) is PacketPeerUDP:
+	if not (get_meta("listen") if has_meta("listen") else null) is PacketPeerUDP:
 		# Port taken: retry twice a second (a null meta value erases the meta).
 		if Time.get_ticks_msec() < int(get_meta("listen_retry_ms", 0)):
 			return

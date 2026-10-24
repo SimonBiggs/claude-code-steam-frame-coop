@@ -1043,7 +1043,7 @@ func _update_sword(delta: float) -> void:
 	var prev: Vector3 = get_meta("sword_prev", hand_l.global_position)
 	var speed := hand_l.global_position.distance_to(prev) / maxf(delta, 0.001)
 	set_meta("sword_prev", hand_l.global_position)
-	var blade_mat: StandardMaterial3D = get_meta("blade_mat", null)
+	var blade_mat: StandardMaterial3D = (get_meta("blade_mat") if has_meta("blade_mat") else null)
 	if blade_mat != null:
 		blade_mat.emission_energy_multiplier = lerpf(blade_mat.emission_energy_multiplier, 3.0 + minf(speed, 6.0), 0.3)
 	if speed < 1.2:

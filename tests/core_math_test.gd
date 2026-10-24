@@ -34,6 +34,14 @@ func _initialize() -> void:
 			var src := FileAccess.get_file_as_string(path)
 			for m in null_meta.search_all(src):
 				fails.append("%s: %s (set_meta with null erases the meta)" % [path, m.get_string()])
+	# get_meta(key, null) is not "default null": Godot 4 treats a null default as no default and prints an
+	# error every call while the meta is missing (the follow_udp / lobby_udp spam): guard with has_meta().
+	var null_default := RegEx.create_from_string("get_meta\\([^,()]+,\\s*null\\s*\\)")
+	for dir in ["res://core", "res://arcade", "res://games"]:
+		for path in _gd_files(dir):
+			var src2 := FileAccess.get_file_as_string(path)
+			for m in null_default.search_all(src2):
+				fails.append("%s: %s (get_meta with a null default errors when missing)" % [path, m.get_string()])
 	print("CORE MATH: %s" % ("PASS" if fails.is_empty() else "FAIL " + "; ".join(fails)))
 	quit(1 if not fails.is_empty() else 0)
 

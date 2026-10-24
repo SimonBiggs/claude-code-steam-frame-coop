@@ -362,9 +362,9 @@ func _update_world(delta: float) -> void:
 	elif main.wave >= 3:
 		want = clampf((main.wave - 2) / 4.0, 0.0, 1.0)
 	night = move_toward(night, want, delta * (0.3 if want < night else 0.1))
-	var sky: ProceduralSkyMaterial = main.get_meta("sky_mat", null)
-	var env: Environment = main.get_meta("env", null)
-	var sun: DirectionalLight3D = main.get_meta("sun", null)
+	var sky: ProceduralSkyMaterial = (main.get_meta("sky_mat") if main.has_meta("sky_mat") else null)
+	var env: Environment = (main.get_meta("env") if main.has_meta("env") else null)
+	var sun: DirectionalLight3D = (main.get_meta("sun") if main.has_meta("sun") else null)
 	var sunny := event_name == "sunshine"
 	if sky != null:
 		var top := Color(0.12, 0.12, 0.32)
@@ -393,7 +393,7 @@ func _update_world(delta: float) -> void:
 	if blizzard_fx == null:
 		_build_blizzard()
 	blizzard_fx.emitting = event_name == "blizzard"
-	var snow: CPUParticles3D = main.get_meta("snowfall", null)
+	var snow: CPUParticles3D = (main.get_meta("snowfall") if main.has_meta("snowfall") else null)
 	if snow != null:
 		snow.speed_scale = 2.2 if event_name == "blizzard" else 1.0
 
