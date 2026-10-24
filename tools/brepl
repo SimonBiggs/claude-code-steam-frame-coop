@@ -27,87 +27,153 @@ if (args[0] === "--serve") {
     globalThis.dev = await import(`${process.env.HOME}/.local/share/brepl/dev.ts?t=${t}`);
     return "reloaded godot + dev";
   };
-  const AsyncFunction = (async () => {}).constructor;
+  // Every call runs as a job with its own output (AsyncLocalStorage), so console.log and show() inside
+  // concurrent or background work land in the right place (Simon, 2026-10-24: background by default).
+  // A call that is still running after FG_SECONDS (3 s; a first line of "// bg" backgrounds at once)
+  // becomes a background job: it returns at once and its result arrives in the channel (poll() or the
+  // brepl_poll MCP tool). Finished background jobs post to the channel (below). bg(name, async ({log, show}) => ...) starts one explicitly.
   // show(...paths): images to hand back with the result. The brepl MCP tool (~/.local/share/brepl/mcp.ts)
   // returns them as pictures; the CLI just lists them. Returned image paths (or arrays of them) count too.
+  const FG_SECONDS = Number(process.env.BREPL_FG_SECONDS ?? 3);
   const IMG = /\.(png|jpe?g|webp|gif)$/i;
-  let shown = [];
-  globalThis.show = (...paths) => { for (const p of paths.flat()) if (typeof p === "string") shown.push(p); return paths.flat().length; };
-  // Background jobs (Simon, 2026-10-24): bg(name, async ({log, show}) => ...) returns at once; poll({wait})
-  // hands back every job finished since the last poll (output + images) and lists the running ones. Each
-  // finish is also a line in ~/.cache/brepl/jobs.log, for a Monitor to wake Claude.
-  const JOBS_LOG = `${process.env.HOME}/.cache/brepl/jobs.log`;
   const { mkdirSync, appendFileSync } = await import("node:fs");
+  const { AsyncLocalStorage } = await import("node:async_hooks");
   mkdirSync(`${process.env.HOME}/.cache/brepl`, { recursive: true });
+  const als = new AsyncLocalStorage();
+  const real = { log: console.log, error: console.error };
+  const text = (a) => a.map((x) => (typeof x === "string" ? x : inspect(x, { depth: 3, colors: false }))).join(" ");
+  console.log = console.info = (...a) => { const j = als.getStore(); j ? j.lines.push(text(a)) : real.log(...a); };
+  console.error = console.warn = (...a) => { const j = als.getStore(); j ? j.lines.push(text(a)) : real.error(...a); };
+  globalThis.show = (...paths) => {
+    const ps = paths.flat().filter((p) => typeof p === "string");
+    als.getStore()?.images.push(...ps);
+    return ps.length;
+  };
   const jobs = new Map();
-  let jobSeq = 0, wake = () => {};
-  globalThis.bg = (name, fn) => {
-    if (typeof name === "function") [name, fn] = ["job", name];
-    const job = { id: ++jobSeq, name, started: Date.now(), status: "running", lines: [], images: [], value: undefined, polled: false };
-    jobs.set(job.id, job);
-    const ctx = {
-      log: (...a) => { job.lines.push(a.map((x) => (typeof x === "string" ? x : inspect(x, { depth: 3 }))).join(" ")); },
-      show: (...paths) => { for (const p of paths.flat()) if (typeof p === "string") job.images.push(p); },
-    };
-    Promise.resolve().then(() => fn(ctx)).then(
-      (v) => { job.status = "done"; job.value = v; for (const x of [v].flat()) if (typeof x === "string" && IMG.test(x)) job.images.push(x); },
-      (e) => { job.status = "failed"; job.value = e?.stack ?? String(e); },
+  let jobSeq = 0;
+  const start = (name, fn) => {
+    const job = { id: ++jobSeq, name, started: Date.now(), status: "running", lines: [], images: [], value: undefined, background: false, polled: false };
+    job.promise = als.run(job, () => Promise.resolve().then(fn)).then(
+      (v) => { job.status = "done"; job.value = v; for (const x of [v].flat()) if (typeof x === "string" && IMG.test(x) && !job.images.includes(x)) job.images.push(x); },
+      (e) => { job.status = "failed"; job.value = `Error: ${e?.stack ?? e}`; },
     ).finally(() => {
       job.ended = Date.now();
-      appendFileSync(JOBS_LOG, `${new Date().toTimeString().slice(0, 8)} job #${job.id} ${job.name} ${job.status} (${((job.ended - job.started) / 1000).toFixed(0)}s)\n`);
-      wake();
+      if (!job.background) return;
+      job.polled = true;
+      send(`job #${job.id} ${job.name}`, [`${job.status} in ${((job.ended - job.started) / 1000).toFixed(0)}s`, ...job.lines, ...show_(job.value)].join("\n"), [...new Set(job.images)]);
     });
-    return `started job #${job.id} ${name} (poll() for results)`;
+    return job;
   };
-  globalThis.poll = async ({ wait = 0 } = {}) => {
-    const ready = () => [...jobs.values()].filter((j) => j.status !== "running" && !j.polled);
-    if (!ready().length && wait > 0 && [...jobs.values()].some((j) => j.status === "running"))
-      await Promise.race([new Promise((r) => (wake = r)), Bun.sleep(wait * 1000)]);
-    const done = ready();
-    for (const j of done) { j.polled = true; for (const p of j.images) show(p); }
-    const fmt = (j) => [`── job #${j.id} ${j.name}: ${j.status} in ${(((j.ended ?? Date.now()) - j.started) / 1000).toFixed(0)}s`,
-      ...j.lines, ...(j.value !== undefined ? [typeof j.value === "string" ? j.value : inspect(j.value, { depth: 4 })] : [])].join("\n");
+  const toBackground = (job) => { job.background = true; jobs.set(job.id, job); };
+  // The channel (Simon, 2026-10-24): one stream anything can write to at any time: send(source, text,
+  // images) from code, pipe(source, stream) for a process's output, `cmd | brepl --pipe SOURCE` from the
+  // shell, and every background job when it finishes. poll() / brepl_poll returns all entries not yet
+  // seen (images shown as pictures). Kept in ~/.cache/brepl/channel.jsonl (+ .seen cursor), so unseen
+  // entries survive a restart and a Monitor on that file can wake Claude.
+  const CH = `${process.env.HOME}/.cache/brepl/channel.jsonl`, CH_SEEN = CH.replace(/jsonl$/, "seen");
+  const { readFileSync: rf, writeFileSync: wf, existsSync: ex } = await import("node:fs");
+  let channel = ex(CH) ? rf(CH, "utf8").trim().split("\n").filter(Boolean).slice(-3000).map((l) => JSON.parse(l)) : [];
+  wf(CH, channel.map((e) => JSON.stringify(e) + "\n").join(""));
+  let seen = ex(CH_SEEN) ? Number(rf(CH_SEEN, "utf8")) || 0 : 0;
+  let chSeq = channel.length ? channel[channel.length - 1].seq : 0;
+  globalThis.send = (source, text = "", images = []) => {
+    const e = { seq: ++chSeq, t: new Date().toTimeString().slice(0, 8), source: String(source), text: typeof text === "string" ? text : inspect(text, { depth: 4, colors: false }), images: [images].flat().filter(Boolean) };
+    channel.push(e);
+    if (channel.length > 3000) channel = channel.slice(-2000);
+    appendFileSync(CH, JSON.stringify(e) + "\n");
+    return e.seq;
+  };
+  // pipe(source, readable): stream lines into the channel as they come (a ReadableStream, Bun.spawn(...).stdout,
+  // or an async iterable of strings). Lines arriving together are batched into one entry.
+  globalThis.pipe = (source, readable) => {
+    (async () => {
+      let buf = "", timer = null;
+      const flush = () => { timer = null; const t = buf.replace(/\n$/, ""); buf = ""; if (t) send(source, t); };
+      const dec = new TextDecoder();
+      for await (const chunk of readable) {
+        buf += typeof chunk === "string" ? chunk + (chunk.endsWith("\n") ? "" : "\n") : dec.decode(chunk, { stream: true });
+        if (!timer) timer = setTimeout(flush, 250);
+      }
+      clearTimeout(timer);
+      flush();
+      send(source, "(stream ended)");
+    })().catch((e) => send(source, `pipe error: ${e}`));
+    return `piping into the channel as "${source}"`;
+  };
+  const show_ = (v) => (v === undefined ? [] : [typeof v === "string" ? v : inspect(v, { depth: 4, colors: false })]);
+  const render = (job) => [...job.lines, ...show_(job.value)].join("\n") + "\n" + (job.images.length ? `\u0001SHOW ${JSON.stringify([...new Set(job.images)])}\n` : "");
+  globalThis.bg = (name, fn) => {
+    if (typeof name === "function") [name, fn] = ["job", name];
+    const job = start(name, () => fn({ log: console.log, show }));
+    toBackground(job);
+    return `started job #${job.id} ${name} (result goes to the channel: brepl_poll)`;
+  };
+  // Never waits (Simon): returns at once with whatever arrived; a Monitor on channel.jsonl says when to look.
+  globalThis.poll = ({ max = 200 } = {}) => {
+    const fresh = channel.filter((e) => e.seq > seen);
+    seen = chSeq;
+    wf(CH_SEEN, String(seen));
+    const lines = [];
+    for (const e of fresh) {
+      lines.push(`── [${e.t}] ${e.source}${e.text.includes("\n") ? "" : `: ${e.text}`}`);
+      if (e.text.includes("\n")) lines.push(...e.text.split("\n").map((l) => "   " + l));
+      show(e.images);
+    }
+    const cut = lines.length > max ? lines.length - max : 0;
     const running = [...jobs.values()].filter((j) => j.status === "running").map((j) => `#${j.id} ${j.name} (${((Date.now() - j.started) / 1000).toFixed(0)}s)`);
-    return [...done.map(fmt), running.length ? `still running: ${running.join(", ")}` : done.length ? "" : "nothing running"].filter(Boolean).join("\n");
+    return [cut ? `(${cut} earlier lines not shown: ${CH})` : "", ...lines.slice(cut),
+      running.length ? `still running: ${running.join(", ")}` : fresh.length ? "" : "nothing new, nothing running"].filter(Boolean).join("\n");
   };
   globalThis.jobs = () => [...jobs.values()].map((j) => ({ id: j.id, name: j.name, status: j.status, secs: Math.round(((j.ended ?? Date.now()) - j.started) / 1000), polled: j.polled }));
   const run = async (code) => {
-    shown = [];
-    const out = [];
-    const log = console.log, err = console.error;
-    console.log = console.info = (...a) => out.push(a.map((x) => (typeof x === "string" ? x : inspect(x))).join(" "));
-    console.error = console.warn = console.log;
+    const waitS = /^\s*\/\/\s*bg\b/.test(code) ? 0 : FG_SECONDS;
+    let fn;
     try {
-      let fn;
       try {
         fn = (0, eval)(`(async () => (${code}\n))`);  // a single expression: return its value
       } catch {
         // Statements: return the value of the last expression statement, if any.
         const lines = code.trimEnd().split("\n");
         const last = lines.pop();
-        try {
-          fn = (0, eval)(`(async () => { ${lines.join("\n")}\n return (${last.replace(/;\s*$/, "")}\n) })`);
-        } catch {
-          fn = (0, eval)(`(async () => { ${code}\n })`);
+        // One line of statements ("a = 1; b"): try returning what follows each ";" from the right.
+        if (!lines.length) {
+          for (let i = last.replace(/;\s*$/, "").lastIndexOf(";"); i > 0 && !fn; i = last.lastIndexOf(";", i - 1)) {
+            try { fn = (0, eval)(`(async () => { ${last.slice(0, i + 1)}\n return (${last.slice(i + 1).replace(/;\s*$/, "")}\n) })`); } catch {}
+          }
+        }
+        if (!fn) {
+          try {
+            fn = (0, eval)(`(async () => { ${lines.join("\n")}\n return (${last.replace(/;\s*$/, "")}\n) })`);
+          } catch {
+            fn = (0, eval)(`(async () => { ${code}\n })`);
+          }
         }
       }
-      const v = await fn();
-      for (const x of [v].flat()) if (typeof x === "string" && IMG.test(x) && !shown.includes(x)) shown.push(x);
-      if (v !== undefined) out.push(typeof v === "string" ? v : inspect(v, { depth: 4, colors: false }));
     } catch (e) {
-      out.push(`Error: ${e?.stack ?? e}`);
-    } finally {
-      console.log = console.info = log;
-      console.error = console.warn = err;
+      return `Error: ${e?.stack ?? e}\n`;
     }
-    return out.join("\n") + "\n" + (shown.length ? `\u0001SHOW ${JSON.stringify(shown)}\n` : "");
+    const name = code.trim().split("\n").find((l) => l.trim() && !l.trim().startsWith("//"))?.trim().slice(0, 60) ?? "code";
+    const job = start(name, fn);
+    if (await Promise.race([job.promise.then(() => true), Bun.sleep(waitS * 1000).then(() => false)])) return render(job);
+    toBackground(job);
+    return [...job.lines, `⏳ still running after ${waitS}s -> background job #${job.id} (result goes to the channel: brepl_poll)`].join("\n") + "\n";
   };
   Bun.listen({
     unix: SOCK,
     socket: {
       open(s) { s.data = ""; },
+      close(s) { if (s.pipe) { s.q.push(null); s.wake?.(); } },
       data(s, d) {
         s.data += d.toString();
+        if (s.data.startsWith("\u0002PIPE ")) {  // `cmd | brepl --pipe SOURCE`: stream lines into the channel
+          const nl = s.data.indexOf("\n");
+          if (nl < 0) return;
+          if (!s.pipe) { s.pipe = s.data.slice(6, nl); s.q = []; pipe(s.pipe, { async *[Symbol.asyncIterator]() { while (true) { while (s.q.length) { const x = s.q.shift(); if (x === null) return; yield x; } await new Promise((r) => (s.wake = r)); } } }); }
+          if (s.data.length > nl + 1) s.q.push(s.data.slice(nl + 1));
+          s.data = s.data.slice(0, nl + 1);
+          s.wake?.();
+          return;
+        }
         const i = s.data.indexOf("\0");
         if (i < 0) return;
         run(s.data.slice(0, i)).then((r) => { s.write(r); s.end(); });
@@ -120,6 +186,14 @@ if (args[0] === "--serve") {
     await Bun.sleep(300);
     if (args[0] === "--stop") process.exit(0);
     args.shift();
+  }
+  if (args[0] === "--pipe") {  // stream stdin into the channel: some-command | brepl --pipe SOURCE
+    if (!existsSync(SOCK)) { spawn(process.execPath, [import.meta.path, "--serve"], { detached: true, stdio: "ignore" }).unref(); for (let i = 0; i < 50 && !existsSync(SOCK); i++) await Bun.sleep(50); }
+    const sock = await Bun.connect({ unix: SOCK, socket: { data() {}, error() {} } });
+    sock.write(`\u0002PIPE ${args[1] ?? "pipe"}\n`);
+    for await (const chunk of Bun.stdin.stream()) { process.stdout.write(chunk); sock.write(chunk); }
+    sock.end();
+    process.exit(0);
   }
   const code = args.length ? args.join(" ") : await new Response(Bun.stdin.stream()).text();
   if (!code.trim()) process.exit(0);

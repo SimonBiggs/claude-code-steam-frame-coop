@@ -12,8 +12,8 @@ const MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg
 
 const POLL = {
   name: "brepl_poll",
-  description: "Collect background brepl jobs (started with bg(name, async ({log, show}) => ...)) that finished since the last poll: their output and images, plus which are still running. wait_seconds > 0 blocks until at least one finishes (max 300).",
-  inputSchema: { type: "object", properties: { wait_seconds: { type: "number", description: "Block up to this long for a job to finish (default 0)." } } },
+  description: "Everything posted to the brepl channel since the last poll, returned at once (never waits): finished background jobs (any brepl call running over 3 s moves to the background), send(source, text, images), pipe(source, stream) and `cmd | brepl --pipe SOURCE` output. Images come back as pictures. Also lists jobs still running.",
+  inputSchema: { type: "object", properties: {} },
 };
 
 const TOOL = {
@@ -22,7 +22,7 @@ const TOOL = {
     "Run JavaScript/TypeScript in Claude's persistent async Bun REPL (state survives between calls: bare `x = 1` and globalThis persist; top-level await; the last expression is returned).",
     "Images come back as pictures: call show(path, ...) or return an image path (or array of paths).",
     "Preloaded: godot (offscreen Godot runs: g = await godot.launch('duo-arena'); g.uiText(), g.joy('a'), g.action('ui_accept'), g.eval(gdscript), g.shot(), g.at(t), g.span(from, to, fps) -> frame/movement/motion sheets with sound + inputs, g.video(), g.quit())",
-    "Long work: bg(name, async ({log, show}) => ...) returns at once; collect with the brepl_poll tool (or poll({wait})). Finished jobs are also logged to ~/.cache/brepl/jobs.log (watch it with Monitor).",
+    "Calls return within 3 s: anything longer becomes a background job whose result goes to the channel (collect with brepl_poll; a Monitor on ~/.cache/brepl/channel.jsonl signals new entries). bg(name, async ({log, show}) => ...) backgrounds explicitly; send(source, text, images) and pipe(source, stream) write to the channel.",
     "And dev (dev.help() lists the dev-loop helpers: bots, debt scan, stage/deploy, live game, screen, voice, pace, backlog, history).",
   ].join(" "),
   inputSchema: {
@@ -78,7 +78,7 @@ for await (const chunk of Bun.stdin.stream()) {
       case "tools/call":
         if (msg.params?.name !== "brepl" && msg.params?.name !== "brepl_poll") { fail(msg.id, `unknown tool ${msg.params?.name}`); break; }
         call(msg.params.name === "brepl_poll"
-          ? `await poll({ wait: ${Math.min(300, Math.max(0, Number(msg.params?.arguments?.wait_seconds ?? 0)))} })`
+          ? "poll()"
           : String(msg.params?.arguments?.code ?? "")).then(r => reply(msg.id, r), e => reply(msg.id, { content: [{ type: "text", text: String(e) }], isError: true }));
         break;
       default: fail(msg.id, `method not found: ${msg.method}`);
