@@ -51,6 +51,8 @@ func _ready() -> void:
 	else:
 		kit.at(36.0 if client else 37.0, "finish", func() -> void:
 			_checks()
+			if not client:
+				_check_pen_credit()
 			kit.finish())
 	kit.every(2.0, _report)
 	kit.every(0.5, _watch_results)
@@ -207,3 +209,24 @@ func _checks() -> void:
 	kit.assert_true(main.sheep.size() >= 5, "%s: the flock is on the field (%d)" % [mode, main.sheep.size()])
 	if main.vr_rig != null:
 		kit.assert_true(grabs > 0, "fake farmer grabbed sheep")
+
+
+## Kids (2026-10-24): a dog sitting in the pen got every sheep's point. The dog behind the sheep, pushing it
+## through the gate, must get it; the one in the pen (last in the loop, so the old code credited it) must not.
+func _check_pen_credit() -> void:
+	var slots: Array = main.dogs.keys()
+	if slots.size() < 2:
+		return
+	var herder: int = slots[0]
+	var camper: int = slots[slots.size() - 1]
+	var s: Node3D = main.sheep[0]
+	s.set("penned", false)
+	s.set("state", 0)
+	s.set("last_by", -1)
+	s.position = Vector3(0.0, 0.0, 2.1)  # just outside the south gate
+	(main.dogs[herder] as Node3D).position = Vector3(0.0, 0.0, 3.3)
+	(main.dogs[camper] as Node3D).position = Vector3(0.0, 0.0, 0.5)  # inside the pen
+	main.bark_t.clear()
+	main._sim_sheep(1.0 / 60.0)
+	kit.assert_eq(int(s.get("last_by")), herder, "the dog herding a sheep into the pen gets its point, not the dog waiting inside")
+
