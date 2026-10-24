@@ -367,7 +367,7 @@ func _launch(index: int) -> void:
 	var delay := 0.4 if mode == "host" else (0.9 if mode == "client" else 0.1)
 	if mode == "client":
 		_close_peer()
-	if has_meta("lobby_udp") and get_meta("lobby_udp") != null:
+	if has_meta("lobby_udp"):
 		(get_meta("lobby_udp") as PacketPeerUDP).close()
 		remove_meta("lobby_udp")
 	get_tree().create_timer(delay).timeout.connect(func() -> void:
@@ -967,15 +967,16 @@ func _lobby_net(delta: float) -> void:
 		return
 	var base: int = int(OS.get_environment("DUO_PORT")) if OS.has_environment("DUO_PORT") else DEFAULT_PORT
 	if not has_meta("lobby_udp"):
+		# Port taken: retry twice a second (a null meta value erases the meta).
+		if Time.get_ticks_msec() < int(get_meta("lobby_retry_ms", 0)):
+			return
 		var u := PacketPeerUDP.new()
 		u.set_broadcast_enabled(true)
 		if u.bind(base + 2) != OK:
-			set_meta("lobby_udp", null)
+			set_meta("lobby_retry_ms", Time.get_ticks_msec() + 500)
 			return
 		set_meta("lobby_udp", u)
 	var udp = get_meta("lobby_udp")
-	if udp == null:
-		return
 	while (udp as PacketPeerUDP).get_available_packet_count() > 0:
 		var msg := (udp as PacketPeerUDP).get_packet().get_string_from_utf8()
 		var ip := (udp as PacketPeerUDP).get_packet_ip()
@@ -1019,15 +1020,16 @@ func _lobby_net(delta: float) -> void:
 
 func _listen_for_game() -> void:
 	if not has_meta("listen"):
+		# Port taken: retry twice a second (a null meta value erases the meta).
+		if Time.get_ticks_msec() < int(get_meta("listen_retry_ms", 0)):
+			return
 		var udp := PacketPeerUDP.new()
 		var base: int = int(OS.get_environment("DUO_PORT")) if OS.has_environment("DUO_PORT") else DEFAULT_PORT
 		if udp.bind(base + 2) != OK:
-			set_meta("listen", null)
+			set_meta("listen_retry_ms", Time.get_ticks_msec() + 500)
 			return
 		set_meta("listen", udp)
 	var u = get_meta("listen")
-	if u == null:
-		return
 	var udp: PacketPeerUDP = u
 	while udp.get_available_packet_count() > 0:
 		var msg := udp.get_packet().get_string_from_utf8()
