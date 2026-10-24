@@ -29,11 +29,17 @@ func _initialize() -> void:
 	# Storing null with set_meta ERASES the meta (Godot 4), so a later get_meta(key) errors every frame (the
 	# "follow_udp" spam in core/net.gd): store a real value or remove_meta() instead.
 	var null_meta := RegEx.create_from_string("set_meta\\([^,()]+,\\s*null\\s*\\)|set_meta\\(.*else null\\)")
+	# get_meta(key, null) is the SAME as get_meta(key) in Godot 4 (null = "no default"): it errors when the key
+	# is missing (arcade.gd "listen" / net.gd "follow_udp" spammed every Deck log every frame, 2026-10-24).
+	# Use `get_meta(key) if has_meta(key) else null`.
+	var null_default := RegEx.create_from_string("get_meta\\([^,()]+,\\s*null\\s*\\)")
 	for dir in ["res://core", "res://arcade", "res://games"]:
 		for path in _gd_files(dir):
 			var src := FileAccess.get_file_as_string(path)
 			for m in null_meta.search_all(src):
 				fails.append("%s: %s (set_meta with null erases the meta)" % [path, m.get_string()])
+			for m in null_default.search_all(src):
+				fails.append("%s: %s (a null default is no default: errors when missing)" % [path, m.get_string()])
 	print("CORE MATH: %s" % ("PASS" if fails.is_empty() else "FAIL " + "; ".join(fails)))
 	quit(1 if not fails.is_empty() else 0)
 

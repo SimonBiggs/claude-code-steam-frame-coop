@@ -5,6 +5,9 @@ extends Node
 ## Design check: every hole gets holed by the aiming bots within par + 3 on average.
 ## Local:     godot --headless --path . --fixed-fps 60 --quit-after 12000 res://tests/mini_golf_party_bot.tscn
 ## Networked: DUO_PORT=83xx DUO_HOST=1 BOT_VR=1 ... & DUO_PORT=83xx DUO_JOIN=127.0.0.1 ... (real time)
+## Flat host: add DUO_FLAT_HOST=1 to the host (one bot pad plays on the host). DUO_MACHINE_KIND=deck: the
+## Deck follow camera. Every machine checks it can SEE its own players' balls (in its camera's view, with
+## their name tag) all game long (Simon on his Deck: "I can't see my ball").
 ## MGP_HOLE=n starts at hole n.
 
 const BotKit := preload("res://tests/bot_kit.gd")
@@ -22,6 +25,9 @@ var toy_step := 0
 var saw_results := false
 var holes_seen := {}
 var again_t := -1.0
+var seen_checks := 0
+var unseen: Array[String] = []
+var unseen_streak := {}  # slot -> samples in a row it wasn't seen (a ball made this frame gets its tag next frame)
 
 
 func _ready() -> void:
@@ -37,13 +43,41 @@ func _ready() -> void:
 	kit.at(3.0 if client else 1.0, "%d TV players press A" % want, func() -> void:
 		if main.net.mode != "host":
 			for i in want:
-				kit.join_bot(main.party))
+				kit.join_bot(main.party)
+		elif not main.net.has_vr:
+			kit.join_bot(main.party))  # a flat host (DUO_FLAT_HOST=1): one pad player here
 	kit.every(3.0, _report)
 	kit.every(0.5, _results)
+	kit.every(0.5, _own_balls_seen)
 	var end := 150.0 if host else (140.0 if client else 190.0)
 	kit.at(end, "finish", func() -> void:
 		_checks()
 		kit.finish())
+
+
+## Every machine: each of its own players' balls is on its screen (inside the camera's view, not behind
+## it) and carries a visible name tag. Sampled while a hole is being played.
+func _own_balls_seen() -> String:
+	if main.split == null or String(main.net.state_get("phase", "")) != "play" or main.course == null:
+		return ""
+	var cam: Camera3D = main.split.shared_camera()
+	for slot in main.party.local_slots():
+		if not main.balls.has(slot):
+			continue
+		var b: Node3D = main.balls[slot]
+		seen_checks += 1
+		var tag = main.tags.get(slot)
+		var why := ""
+		if not b.visible or not b.is_inside_tree():
+			why = "hidden"
+		elif not cam.is_position_in_frustum(b.global_position):
+			why = "off screen at %s" % b.global_position
+		elif tag == null or not is_instance_valid(tag) or not (tag as Label3D).visible:
+			why = "no name tag"
+		unseen_streak[slot] = int(unseen_streak.get(slot, 0)) + 1 if why != "" else 0
+		if int(unseen_streak[slot]) >= 2 and unseen.size() < 6:
+			unseen.append("%s ball %d %s (hole %d)" % [main.net.machine_kind, slot, why, int(main.net.state_get("hole", 0)) + 1])
+	return ""
 
 
 func _results() -> String:
@@ -199,8 +233,15 @@ func _checks() -> void:
 	var mode: String = main.net.mode
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
 	if mode != "host":
-		kit.assert_eq(main.party.player_count(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
+		# a client sees other machines' seats too (a flat host's player): count only its own here
+		var seated: int = main.party.local_slots().size() if mode == "client" else main.party.player_count()
+		kit.assert_eq(seated, kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
 	kit.assert_true(holes_seen.size() >= 3, "%s: played through several holes (%d)" % [mode, holes_seen.size()])
+	if main.split != null and not main.party.local_slots().is_empty():
+		kit.assert_true(seen_checks > 0, "%s: own balls were checked for visibility" % mode)
+		kit.assert_true(unseen.is_empty(), "%s (%s): every own ball is on screen with its tag %s" % [mode, main.net.machine_kind, str(unseen)])
+	if main.net.machine_kind == "deck" and main.party.local_slots().size() == 1:
+		kit.assert_true(main.cam_follow == main.party.local_slots()[0], "deck: the camera follows its player's ball")
 	if mode == "client":
 		kit.assert_true(main.balls.size() >= want, "client mirrors the balls")
 		return
