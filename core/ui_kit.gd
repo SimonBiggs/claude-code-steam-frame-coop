@@ -670,9 +670,12 @@ static func sound(name: String, volume_db: float = 0.0, pitch: float = 1.0) -> v
 
 # --- VR (world-space) building blocks ------------------------------------------------------------
 
-## Render priorities for world-space UI (higher draws on top; all of it skips the depth test).
-const VR_PRIO_PANEL := 20
-const VR_PRIO_HILITE := 21
+## Render priorities for world-space UI (higher draws on top). Panels sit BELOW 0 on purpose: in VR
+## core/vr_text_guard.gd resets every Label3D to priority 0, and a panel above that (it was 20) was drawn
+## over its own text, which showed faded through every VR card, countdown and menu panel.
+## tests/core_math_test.gd checks the order.
+const VR_PRIO_PANEL := -4
+const VR_PRIO_HILITE := -3
 const VR_PRIO_TEXT := 23
 
 
@@ -768,10 +771,13 @@ static func vr_panel_material(priority: int = VR_PRIO_PANEL, depth_test: bool = 
 
 
 ## A world-space panel node (MeshInstance3D) of w x h metres in the arcade style. Front faces +Z.
-static func panel3d(size: Vector2, fill: Color = BG, border: Color = Color(1, 1, 1, 0.16), radius: float = 0.05) -> MeshInstance3D:
+## depth_test: false (default) for floating UI that must never hide inside scenery; true for panels that
+## are part of the scenery (a TV screen in a studio with props in front of it, which must hide behind hands).
+static func panel3d(size: Vector2, fill: Color = BG, border: Color = Color(1, 1, 1, 0.16), radius: float = 0.05,
+		depth_test: bool = false) -> MeshInstance3D:
 	var mi := MeshInstance3D.new()
 	mi.mesh = panel_mesh(size, fill, border, radius)
-	mi.material_override = vr_panel_material(VR_PRIO_PANEL)
+	mi.material_override = vr_panel_material(VR_PRIO_PANEL, depth_test)
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	return mi
 

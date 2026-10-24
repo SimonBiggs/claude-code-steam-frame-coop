@@ -1,6 +1,5 @@
 extends Node3D
 const VrText := preload("res://core/vr_text.gd")
-const Machine := preload("res://core/machine.gd")  # one player per screen on a Deck (view_on)
 ## GIANT'S TABLE: a cosy village on a big wooden table. Waves of goblins climb up the table edges
 ## to steal the embers of the village campfire.
 ##  - Player 1 (VR, host) is the GIANT: grab goblins and boulders with your hands and throw them.
@@ -54,6 +53,7 @@ const VillageScript := preload("res://games/giants_table/village.gd")
 const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
 const NetScript := preload("res://core/net.gd")
+const ClassicSeats := preload("res://core/classic_seats.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
 const SceneryScript := preload("res://games/giants_table/scenery.gd")
 const PracticeScript := preload("res://games/giants_table/practice.gd")
@@ -95,6 +95,10 @@ var scenery: Node3D        # simple mode: trees / cottages that react to touch
 var practice: Node3D       # simple mode: the practice moment and the umbrella-hand hint
 var practice_done := not SIMPLE_MODE
 var players: Array = []
+## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
+var multi_machine := true
+## Which machine drives which knight (core/classic_seats.gd; core/net.gd checks it too).
+var seats: ClassicSeats
 var giant
 var net: Node
 var ready_to_play := false
@@ -193,6 +197,15 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
+	seats = ClassicSeats.new(self, {
+		"free_actions": ["restart", "pause"],
+		"is_local": func(p) -> bool: return not p.remote,
+		"seat_free": func(p) -> bool: return not p.remote and not p.active and p.joy < 0 and p.key_set < 0 and not p.has_meta("lost_pad") and not p.has_meta(ClassicSeats.WANT),
+		"ghost": _knight_ghost,
+		"moved": _knight_moved,
+		"deactivate": _seat_gone,
+		"layout": _relayout,
+	})
 	Input.joy_connection_changed.connect(_on_joy_changed)
 	if OS.has_environment("DUO_JOIN"):
 		_show_center("Connecting to the Giant…", 0.0)
@@ -208,6 +221,10 @@ func _setup_game(mode: String) -> void:
 	_build_players(mode)
 	_build_views(mode)
 	_assign_joypads()
+	if seats.deck_alone():
+		seats.deck_solo(0)  # a Deck on its own: the Giant (solo_giant waves)
+	elif mode == "client":
+		players[1].set_meta(ClassicSeats.WANT, true)  # ask the host for P2's knight (it may hand out another one)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	if mode != "client":
 		for i in BOULDER_COUNT:
@@ -247,10 +264,10 @@ func next_net_id() -> int:
 	return net_ids
 
 
-## The Giant is playing alone (hosting, no knights connected): no spiky goblins then (they need
+## The Giant is playing alone (hosting, no knights connected, or a Steam Deck on its own): no spiky goblins then (they need
 ## knights), and the Goblin King comes without armour.
 func solo_giant() -> bool:
-	return net.mode == "host" and not net.connected
+	return (net.mode == "host" and not net.connected) or seats.deck_alone()
 
 
 func knights() -> Array:
@@ -425,7 +442,7 @@ func _layout_views() -> void:
 	for p in players:
 		if p.has_meta("view"):
 			var c: SubViewportContainer = p.get_meta("view")
-			c.visible = Machine.view_on(self, p) and not p.remote
+			c.visible = p.active and not p.remote
 			if c.visible:
 				list.append(p)
 	var n := list.size()
@@ -628,7 +645,8 @@ func request_join(i: int) -> void:
 		k.face = 0.0
 		k.cam_yaw = 0.0
 	if net.mode == "client":
-		net.send_action("join", [], i)
+		k.set_meta(ClassicSeats.WANT, true)  # seats.request_joins asks the host until the knight is ours
+		seats.ask_soon()
 	else:
 		on_p2_action("join", [], i)
 
@@ -653,8 +671,36 @@ func on_player_activity_changed(p) -> void:
 	if p.active and not p.remote:
 		_ensure_view(p)
 	if p.has_meta("view"):
-		p.get_meta("view").visible = Machine.view_on(self, p)
+		p.get_meta("view").visible = p.active and not p.remote
 	views_dirty = true
+
+
+## TV machine: knight p is another machine's now (on: moved from the snapshots, no view here) or ours again.
+func _knight_ghost(p, on: bool) -> void:
+	p.remote = on
+	if on:
+		p.claimed = false
+		p.net_target = p.global_position
+	elif p.active:
+		_ensure_view(p)
+	on_player_activity_changed(p)
+
+
+## TV machine: our controls moved from knight `from` to knight `to` (another machine has `from`).
+func _knight_moved(from, to) -> void:
+	to.claimed = true
+	from.claimed = false
+
+
+## Host: a machine's knight goes away (that machine left).
+func _seat_gone(k) -> void:
+	if k.active:
+		_knight_leaves(k)
+
+
+func _relayout() -> void:
+	views_dirty = true
+	_layout_views()
 
 
 # --- Effects -----------------------------------------------------------------
@@ -836,6 +882,8 @@ func _process(delta: float) -> void:
 		_check_join()
 	if net.mode == "client":
 		_check_join()
+		seats.sync()
+		seats.request_joins(delta)
 		if game_over:
 			game_over_time += delta
 			if game_over_time > 1.5 and _restart_pressed():
@@ -1573,6 +1621,7 @@ func knight_action(k, action: String, args: Array) -> void:
 
 
 func on_p2_action(action: String, args: Array, index: int = 1) -> void:
+	index = seats.host_action(action, args, index)  # many machines: who drives which knight (core/classic_seats.gd)
 	if index < 1 or index >= players.size():
 		return
 	match action:
@@ -1878,15 +1927,20 @@ func ember_home(e, msg: String) -> void:
 # --- Networking --------------------------------------------------------------
 
 func on_client_joined() -> void:
+	if not seats.first_machine():
+		return  # another machine: its knights join when they ask ("join")
 	_show_center("KNIGHTS!" if SIMPLE_MODE else "THE KNIGHTS HAVE ARRIVED!", 1.5)
 
 
 func on_client_left() -> void:
 	if not SIMPLE_MODE:
 		_show_center("The knights left - waiting for them to come back…", 0.0)
-	for k in knights():
-		if k.index >= 2 and k.active:
-			_knight_leaves(k)  # P2 waits as before; drop-in knights rejoin when the TV is back
+	seats.all_left()  # each machine asks for its knights again when it reconnects
+
+
+## Host: one machine left: only its knights leave (and their seats become free).
+func on_machine_left(peer: int) -> void:
+	seats.machine_left(peer)
 
 
 func _set_pause_banner(paused: bool, who: String) -> void:
@@ -2001,6 +2055,8 @@ func _make_ghost(kind: String, item: Array) -> Node3D:
 
 
 func apply_event(kind: String, args: Array) -> void:
+	if seats.handle_event(kind, args):
+		return
 	if not ready_to_play:
 		return
 	match kind:

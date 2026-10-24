@@ -7,9 +7,9 @@ rsync -a --delete --exclude .dev --exclude .claude ~/GodotProjects/duo-arena-fra
 decks=("$@"); [ ${#decks[@]} -eq 0 ] && mapfile -t decks < <(grep -v '^\s*#' ~/.config/duo-arena/decks 2>/dev/null | grep .)
 rc=0
 for d in "${decks[@]}"; do
-  if ! ssh -o ConnectTimeout=4 -o BatchMode=yes "$d" true 2>/dev/null; then echo "$d offline: run 'duo-deploy-deck $d' when it's back" >&2; rc=1; continue; fi
+  if ! ssh -o ConnectTimeout=4 -o BatchMode=yes "$d" true 2>/dev/null; then echo "$d offline: duo-catch-up deploys it when it's back" >&2; mkdir -p ~/.cache/duo-deploy-pending; touch ~/.cache/duo-deploy-pending/"$d"; rc=1; continue; fi
   rsync -az --exclude .dev --exclude .claude "$B/" "$d:DuoArena/" &&
     ssh "$d" 'mkdir -p ~/.local/share/applications ~/Desktop && cp ~/DuoArena/duo-arena*.desktop ~/.local/share/applications/ && cp ~/DuoArena/duo-arena*.desktop ~/Desktop/ && chmod +x ~/Desktop/duo-arena*.desktop; true' &&
-    echo "$d updated"
+    rm -f ~/.cache/duo-deploy-pending/"$d" && echo "$d updated"
 done
 exit $rc

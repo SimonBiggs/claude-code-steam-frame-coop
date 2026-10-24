@@ -156,18 +156,25 @@ score and game over. Use visual-only "ghost" copies of host objects on the clien
 ## Testing (headless only; never open windows on this machine, it's the family's TV)
 
 ```sh
-godot --headless --path . --import                      # once, in a fresh checkout
-godot --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/<id>_bot.tscn
+godot-test --headless --path . --import                      # once, in a fresh checkout
+godot-test --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/<id>_bot.tscn
 # networked: same bot scene on both sides (so node paths match), real time (no --fixed-fps)
-DUO_PORT=78xx DUO_HOST=1 timeout 40 godot --headless --path . res://tests/<id>_bot.tscn &
-DUO_PORT=78xx DUO_JOIN=127.0.0.1 timeout 33 godot --headless --path . res://tests/<id>_bot.tscn
+DUO_PORT=78xx DUO_HOST=1 timeout 40 godot-test --headless --path . res://tests/<id>_bot.tscn &
+DUO_PORT=78xx DUO_JOIN=127.0.0.1 timeout 33 godot-test --headless --path . res://tests/<id>_bot.tscn
 ```
 
 The bot should load the game (`load("res://games/<id>/main.tscn").instantiate()`), drive the
 players (press keys with `Input.parse_input_event`, or set their aim directly) and print progress.
 Done means **zero `SCRIPT ERROR`s** locally, with `BOT_PLAYERS=6`, and networked. Also:
-- This machine has real controllers attached: make bots ignore real pads and resume if something
-  pauses the game.
+- This machine has real controllers attached (the family's pads). **Always run test Godots through
+  `godot-test`** (same arguments as `godot`; it hides /dev/input and /dev/hidraw* in a bwrap sandbox and
+  turns SDL's HIDAPI off), or through brepl's `godot.launch` / `dev.bots`. A test Godot that can see the
+  real controllers is stopped by the test-throttle guard. Bots should still ignore real pads and resume if
+  something pauses the game.
 - Add a fake-VR mode that moves the XR hands, so the VR code path runs headless too.
+- **Steam Deck**: a Deck alone is ONE full-screen player on its own controls (party games: core/party.gd drops the
+  keyboard seat; classic games: `seats.deck_solo()` in core/classic_seats.gd, which also claims a Deck pad that
+  connects late); friends' pads still drop in. `tests/deck_bot.tscn` (+ deck2..deck4) plays every game as a Deck
+  and checks it; `tests/arcade_bot.tscn` checks the arcade menu and pause menu at Deck and TV size.
 - For games with walls and furniture, check that every room, doorway and spawn can be reached on
   foot (see `tests/hide_and_seek_bot.gd`).

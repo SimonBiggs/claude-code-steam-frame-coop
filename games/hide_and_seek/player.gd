@@ -883,6 +883,8 @@ func net_state() -> Array:
 	var st: Array = [active, found, late, prop_kind, snappedf(taunt_cd, 0.1)]
 	if role == "seeker":
 		st.append_array([global_position, yaw, pitch, head_transform(), hand_transform(), left_hand_transform(), torch_flash])
+	elif active:
+		st.append_array([global_position, snappedf(yaw, 0.01)])  # other machines mirror this hider (ghost)
 	return st
 
 
@@ -917,6 +919,12 @@ func apply_net_state(st: Array) -> void:
 		net_hand = st[9]
 		net_lhand = st[10]
 		torch_flash = maxf(torch_flash, float(st[11]))
+		if not net_started:
+			net_started = true
+			global_position = net_target
+	elif ghost and role == "hider" and st.size() >= 7:  # another machine's hider (core/classic_seats.gd)
+		net_target = st[5]
+		yaw = st[6]
 		if not net_started:
 			net_started = true
 			global_position = net_target

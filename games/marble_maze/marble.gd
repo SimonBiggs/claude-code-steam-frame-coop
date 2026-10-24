@@ -384,7 +384,7 @@ func apply_remote_state(pos: Vector3, y: float, p: float) -> void:
 
 
 func _process(delta: float) -> void:
-	if remote and active:
+	if (remote or ghost) and active:  # ghost: another machine's marble, mirrored from snapshots
 		if lp.distance_to(target_lp) > 0.15:
 			lp = target_lp
 		else:

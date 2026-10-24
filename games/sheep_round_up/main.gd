@@ -653,6 +653,9 @@ func _sim_sheep(delta: float) -> void:
 		var scared := false
 		if not penned:
 			var push := Vector3.ZERO
+			var herder := -1  # the dog pushing hardest towards the pen gets the credit
+			var herd_best := 0.0
+			var to_pen := -Vector3(s.position.x, 0.0, s.position.z).normalized()
 			for slot in dogs:
 				var dp: Vector3 = (dogs[slot] as Node3D).position
 				var r := BARK_R if float(bark_t.get(slot, 0.0)) > 0.0 else SCARE_R
@@ -660,8 +663,15 @@ func _sim_sheep(delta: float) -> void:
 				away.y = 0.0
 				var dd := away.length()
 				if dd < r and dd > 0.001:
-					push += away / dd * (1.0 - dd / r) * (2.0 if r > SCARE_R else 1.0)
-					s.set("last_by", int(slot))
+					var f := away / dd * (1.0 - dd / r) * (2.0 if r > SCARE_R else 1.0)
+					push += f
+					# A dog waiting in the pen scares sheep away from it: never its point (kids, 2026-10-24)
+					var toward := f.dot(to_pen)
+					if toward > herd_best and not in_pen(dp):
+						herd_best = toward
+						herder = int(slot)
+			if herder >= 0:
+				s.set("last_by", herder)
 			for hp in hands:
 				var away := s.position - hp
 				away.y = 0.0

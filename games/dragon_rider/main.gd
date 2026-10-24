@@ -47,7 +47,7 @@ extends Node3D
 ##    sentences are gone. Each cue goes after two goes (cue_did / cue_learned).
 
 const WorldScript := preload("res://games/dragon_rider/world.gd")
-const Machine := preload("res://core/machine.gd")  # one player per screen on a Deck (view_on)
+const UiKit := preload("res://core/ui_kit.gd")
 const DragonScript := preload("res://games/dragon_rider/dragon.gd")
 const CourseScript := preload("res://games/dragon_rider/course.gd")
 const RiderScript := preload("res://games/dragon_rider/rider.gd")
@@ -64,12 +64,15 @@ const CoveGhostHand := preload("res://games/cannon_cove/ghost_hand.gd")
 const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
 const NetScript := preload("res://core/net.gd")
+const ClassicSeats := preload("res://core/classic_seats.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
 const VrText := preload("res://core/vr_text.gd")
 
 const SIMPLE_MODE := true
 const MAX_PLAYERS := 7  # rider + 6 gunners
 const MAX_LOCAL_VIEWS := 6
+## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
+var multi_machine := true
 const INTRO_TIME := 6.0
 const DONE_TIME := 7.0
 const PAD_LEAVE_TIME := 20.0
@@ -137,6 +140,8 @@ void fragment() {
 var players: Array = []
 var ready_to_play := false
 var net: Node
+## Which machine drives which gunner seat (core/classic_seats.gd; core/net.gd checks it too).
+var seats: ClassicSeats
 var sfx: Node
 var music: Node
 var world: Node3D
@@ -252,6 +257,14 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
+	seats = ClassicSeats.new(self, {
+		"no_keys": GunnerScript.NO_KEYS,
+		"free_actions": ["restart", "next", "pause"],
+		"index_in_args": ["join", "leave"],  # drop-in seats speak through P2
+		"seat_limit": func() -> int: return MAX_PLAYERS if net.mode == "client" else MAX_LOCAL_VIEWS,
+		"moved": _seat_moved,
+		"full": _seats_full,
+	})
 	Input.joy_connection_changed.connect(_on_joy_changed)
 	if OS.has_environment("DUO_JOIN"):
 		show_center("Connecting to the dragon rider…", 0.0, false)
@@ -272,6 +285,10 @@ func _setup_game(mode: String) -> void:
 	_build_views(mode)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_assign_joypads()
+	if seats.deck_alone():
+		seats.deck_solo(0)
+	elif mode == "client" and players[1].active:
+		players[1].set_meta(ClassicSeats.WANT, true)  # P2 plays at once, but must still ask (another machine may have it)
 	ready_to_play = true
 	_ensure_join_listener()
 	_restore_party()
@@ -1897,11 +1914,11 @@ func _ensure_views_root() -> void:
 	bg.color = Color(0.08, 0.04, 0.1)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(bg)
-	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(bg, Control.PRESET_FULL_RECT, false)
 	views_root = Control.new()
 	views_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(views_root)
-	views_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(views_root, Control.PRESET_FULL_RECT, false)
 
 
 func _ensure_view(p) -> void:
@@ -1912,7 +1929,7 @@ func _ensure_view(p) -> void:
 	p.set_meta("view", container)
 	container.stretch = true
 	container.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	container.visible = Machine.view_on(self, p)
+	container.visible = p.active
 	views_root.add_child(container)
 	var vp := SubViewport.new()
 	vp.world_3d = get_world_3d()
@@ -1941,7 +1958,7 @@ func _layout_views() -> void:
 		if not p.has_meta("view"):
 			continue
 		var c: SubViewportContainer = p.get_meta("view")
-		c.visible = Machine.view_on(self, p)
+		c.visible = p.active and _is_local(p)
 		if c.visible:
 			shown.append(p)
 	var n := shown.size()
@@ -1971,7 +1988,7 @@ func _layout_views() -> void:
 		var c: SubViewportContainer = p.get_meta("view")
 		var col := k % cols
 		var row := int(floorf(float(k) / cols))
-		c.set_anchors_preset(Control.PRESET_TOP_LEFT)
+		UiKit.pin(c, Control.PRESET_TOP_LEFT)
 		c.position = Vector2(col * (cell.x + gap), row * (cell.y + gap))
 		c.size = cell
 		var vp := c.get_child(0) as SubViewport
@@ -1993,7 +2010,7 @@ func _build_fallback_label() -> void:
 	fallback_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	fallback_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(fallback_label)
-	fallback_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(fallback_label, Control.PRESET_FULL_RECT, false)
 
 
 # --- Controllers and drop-in join ----------------------------------------------
@@ -2016,7 +2033,11 @@ func _assign_joypads() -> void:
 
 
 func _on_joy_changed(device: int, connected: bool) -> void:
-	if not ready_to_play or net.mode == "host":
+	if not ready_to_play:
+		return
+	if net.mode == "host":
+		if connected and not players[0].vr and players[0].joy < 0:
+			players[0].joy = device  # flat host (no VR): the rider flies with this controller
 		return
 	if connected:
 		_on_pad_connected(device)
@@ -2087,18 +2108,19 @@ func handle_join_input(event: InputEvent) -> bool:
 	return _join_slot(device) != null
 
 
-func _next_free_index() -> int:
-	var top := MAX_PLAYERS - 1 if net.mode == "client" else MAX_LOCAL_VIEWS - 1
-	for i in range(1, top + 1):
-		var p = players[i]
-		if not _is_local(p) or p.active or p.joy >= 0 or p.pad_lost_t >= 0.0:
-			continue
-		return i
-	return -1
+## TV machine: our controls moved to another gunner seat (another machine took ours): climb into it.
+func _seat_moved(from, to) -> void:
+	if from.active or to.has_meta(ClassicSeats.WANT):
+		_request_join(to)
+
+
+func _seats_full() -> void:
+	if not SIMPLE_MODE:
+		show_center("All the dragon's seats are taken!", 1.5, false)
 
 
 func _join_slot(device: int):
-	var idx := _next_free_index()
+	var idx := seats.free_index()
 	if idx < 0:
 		if not SIMPLE_MODE:
 			show_center("All the dragon's seats are taken!", 1.5, false)
@@ -2120,7 +2142,8 @@ func _request_join(p) -> void:
 		_ensure_view(p)
 		on_player_activity_changed(p)
 		if net.mode == "client":
-			net.send_action("join", [p.index], 1)
+			p.set_meta(ClassicSeats.WANT, true)  # seats.request_joins asks the host until the seat is ours
+			seats.ask_soon()
 		else:
 			show_center("ALL ABOARD!" if SIMPLE_MODE else "PLAYER %d CLIMBED ABOARD!" % (p.index + 1), 1.5)
 			sound("join", -4.0, 1.2)
@@ -2209,6 +2232,8 @@ func _party_tick(delta: float) -> void:
 	_ensure_join_listener()
 	if net.mode == "host":
 		return
+	if net.mode == "client":
+		seats.sync()
 	_update_lost_pads(delta)
 	if views_root != null and is_instance_valid(views_root) and views_root.size != last_view_area:
 		_layout_views()
@@ -2221,36 +2246,45 @@ func on_player_activity_changed(p) -> void:
 	print("Player %d is now %s" % [p.index + 1, "playing" if p.active else "waiting"])
 
 
-## TV machine: keep telling the host which gunners are aboard (cheap, and survives a lost message).
+## TV machine: ask the host for new gunners' seats (seats.request_joins; it may hand out another seat), and
+## keep telling it which gunners are aboard (cheap, and survives a lost message or a host restart).
 func _check_join(delta: float) -> void:
+	seats.request_joins(delta)
 	join_t -= delta
 	if join_t > 0.0:
 		return
 	join_t = 2.0
-	for i in range(2, players.size()):
-		if players[i].active:
+	for i in range(1, players.size()):
+		if players[i].active and _is_local(players[i]) and seats.mine(i):
 			net.send_action("join", [i], 1)
 
 
 # --- Networked co-op (see docs/GAME_DEV_GUIDE.md) ----------------------------
 
 func on_client_joined() -> void:
-	players[1].set_active(true)
+	if not seats.first_machine():
+		return  # each machine's gunners climb aboard when they ask ("join")
 	show_center("ALL ABOARD!" if SIMPLE_MODE else "THE GUNNERS CLIMBED ABOARD!", 1.5)
 	sound("join", -2.0)
 
 
+## Host: one machine left: only its gunners climb down (and their seats become free).
+func on_machine_left(peer: int) -> void:
+	var freed := seats.machine_left(peer)
+	if not freed.is_empty() and net.peer_count() > 0 and not SIMPLE_MODE:
+		show_center("PLAYER %d LEFT" % (int(freed[0]) + 1), 1.5)
+
+
+## Host: the LAST machine left (multi_machine games get this only then).
 func on_client_left() -> void:
-	for i in range(1, players.size()):
-		players[i].set_active(false)
+	seats.all_left()
 	if not SIMPLE_MODE:
 		show_center("The TV gunners left - waiting for them to come back…", 0.0)
 
 
 func on_p2_action(action: String, args: Array, index: int = 1) -> void:
-	if (action == "join" or action == "leave") and args.size() > 0:
-		index = int(args[0])  # drop-in seats speak through P2
-	if index <= 0 or index >= players.size():
+	index = seats.host_action(action, args, index)  # many machines: who drives which seat (core/classic_seats.gd)
+	if index < 0 or index >= players.size():
 		return
 	var g = players[index]
 	match action:
@@ -2261,6 +2295,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 				g.yaw = float(args[0])
 				g.pitch = float(args[1])
 				fire_bubble(index, g.yaw, g.pitch, false)
+				net.event_except(net.sender_peer(), "gfire", [index, g.yaw, g.pitch])  # other machines see it
 		"join":
 			if not g.active:
 				g.set_active(true)
@@ -2268,7 +2303,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 				sound("join", -4.0, 1.2)
 				print("Net: player %d joined the game" % (index + 1))
 		"leave":
-			if g.active and index >= 2:
+			if g.active and index >= 1:
 				g.set_active(false)
 				if not SIMPLE_MODE:
 					show_center("PLAYER %d LEFT" % (index + 1), 1.5)
@@ -2320,7 +2355,17 @@ func make_snapshot() -> Array:
 	return [phase, level, level_seed, course_origin, course_yaw, ring_i, score, stars_got, dragon.lit_mask(), distance,
 		[dragon.global_position, dragon.yaw, dragon.velocity, dragon.yaw_rate, dragon.steer, dragon.climb, dragon.flap_power],
 		gone, sp, players[0].net_pose(), phase_t, level_rings, mission, power_t, cannon_level, rv, bs,
-		[practice_step, practice_pos, practice_normal, _practice_alive_mask()]]
+		[practice_step, practice_pos, practice_normal, _practice_alive_mask()], _gunner_state()]
+
+
+## Every gunner that is aboard: [index, yaw, pitch] (other machines show them as ghosts).
+func _gunner_state() -> Array:
+	var gs: Array = []
+	for i in range(1, players.size()):
+		var g = players[i]
+		if g.active:
+			gs.append([i, snappedf(g.yaw, 0.01), snappedf(g.pitch, 0.01)])
+	return gs
 
 
 func apply_snapshot(s: Array) -> void:
@@ -2382,6 +2427,28 @@ func apply_snapshot(s: Array) -> void:
 			boss.apply_net_state(bs)
 	if s.size() >= 22:
 		_sync_practice(s[21])
+	if s.size() >= 23:
+		_apply_gunners(s[22])
+
+
+## TV machine: other machines' gunners (ghosts here) sit, aim and leave as the host says.
+func _apply_gunners(gs: Array) -> void:
+	var aboard := {}
+	for item in gs:
+		var it: Array = item
+		aboard[int(it[0])] = it
+	for i in range(1, players.size()):
+		var g = players[i]
+		if not g.ghost:
+			continue
+		var on := aboard.has(i)
+		if on != g.active:
+			g.set_active(on)
+			on_player_activity_changed(g)
+		if on:
+			var it: Array = aboard[i]
+			g.yaw = float(it[1])
+			g.pitch = float(it[2])
 
 
 func _sync_sprites(list: Array) -> void:
@@ -2411,6 +2478,8 @@ func _sync_sprites(list: Array) -> void:
 
 
 func apply_event(kind: String, args: Array) -> void:
+	if seats.handle_event(kind, args):
+		return
 	if not ready_to_play:
 		return
 	match kind:
@@ -2428,6 +2497,10 @@ func apply_event(kind: String, args: Array) -> void:
 				players[i].hud.hit_marker()
 		"hurt":
 			_hurt_all()
+		"gfire":
+			var gi: int = args[0]
+			if gi > 0 and gi < players.size() and not _is_local(players[gi]):
+				fire_bubble(gi, float(args[1]), float(args[2]), true)
 		"remote_pause":
 			get_tree().paused = args[0]
 			_set_pause_banner(args[0], "The dragon rider paused the game")

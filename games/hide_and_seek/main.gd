@@ -1,6 +1,5 @@
 extends Node3D
 const VrText := preload("res://core/vr_text.gd")
-const Machine := preload("res://core/machine.gd")  # one player per screen on a Deck (view_on)
 ## Hide and Seek: a playful round game. The map changes every round: the cosy HOUSE, THE CASTLE, THE SPACESHIP.
 ## Player 1 (VR, or keyboard+mouse / controller in split screen) is the SEEKER: counts to 20 with eyes
 ## covered, then searches with a torch. Touch a hider with either hand, or point the torch at one within 3 m
@@ -26,6 +25,7 @@ const HudScript := preload("res://games/hide_and_seek/hud.gd")
 const SfxScript := preload("res://core/sfx.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
 const NetScript := preload("res://core/net.gd")
+const ClassicSeats := preload("res://core/classic_seats.gd")
 const MusicScript := preload("res://core/music.gd")
 const JoinInputScript := preload("res://games/hide_and_seek/join_input.gd")
 const CueScript := preload("res://games/hide_and_seek/cue.gd")
@@ -56,6 +56,10 @@ const JAIL_SLOTS: Array[Vector3] = [Vector3(-0.3, 0, -0.25), Vector3(0.3, 0, -0.
 	Vector3(0.0, 0, 0.0), Vector3(0.0, 0, -0.4)]
 
 var players: Array = []
+## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
+var multi_machine := true
+## Which machine drives which hider (core/classic_seats.gd; core/net.gd checks it too).
+var seats: ClassicSeats
 var cameras: Array[Camera3D] = []
 var net: Node
 var ready_to_play := false
@@ -119,7 +123,6 @@ var view_grid: GridContainer
 var view_count := 0
 var bubble: TextureRect
 var pad_wait := {}  # player index -> seconds left to plug their controller back in
-var pending_join := {}  # client: player index -> seconds until we may ask the host again
 var join_t := 0.0
 
 
@@ -134,6 +137,17 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
+	seats = ClassicSeats.new(self, {
+		"no_keys": 2,  # player.gd key_set 2: controller only
+		"free_actions": ["restart", "pause"],
+		"is_local": _has_local_view,
+		"keys": func(p) -> int: return p.keys() if p.uses_keyboard() else 2,
+		"seat_free": func(p) -> bool: return _has_local_view(p) and not p.active and p.joy < 0 and not p.uses_keyboard() and not p.has_meta(ClassicSeats.WANT),
+		"ghost": _seat_ghost,
+		"deactivate": _seat_gone,
+		"save": _remember_party,
+		"full": func() -> void: local_sound("pop", -8.0, 0.7),  # no words: nothing happens
+	})
 	Input.joy_connection_changed.connect(_on_joy_changed)
 	if OS.has_environment("DUO_JOIN"):
 		_show_center("Connecting to the seeker…", 0.0)
@@ -151,6 +165,10 @@ func _setup_game(mode: String) -> void:
 	_build_views(mode)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_assign_joypads()
+	if seats.deck_alone():
+		seats.deck_solo(0)  # a Deck on its own: the seeker
+	elif mode == "client":
+		players[1].set_meta(ClassicSeats.WANT, true)  # ask the host for P2's seat (it may hand out another one)
 	ready_to_play = true
 	_restore_party()
 	if mode == "host":
@@ -640,7 +658,7 @@ func _layout_views() -> void:
 	var n := 0
 	for c in view_grid.get_children():
 		var idx: int = c.get_meta("player_index", 0)
-		var on: bool = idx < players.size() and Machine.view_on(self, players[idx])
+		var on: bool = idx < players.size() and players[idx].active and _has_local_view(players[idx])
 		c.visible = on
 		if on:
 			n += 1
@@ -707,6 +725,10 @@ func pad_owner(device: int) -> int:
 
 ## A newly seen pad: give it back to a player who lost theirs, else the default slots. Returns the index or -1.
 func _auto_bind_pad(device: int) -> int:
+	if net != null and net.mode == "host" and pad_owner(device) < 0 and not players.is_empty() \
+			and not players[0].vr and players[0].joy < 0:
+		players[0].joy = device  # flat host (no VR): the seeker uses this controller
+		return 0
 	if pad_owner(device) >= 0 or net == null or net.mode == "host" or players.size() < 2:
 		return pad_owner(device)
 	var keys: Array = pad_wait.keys()
@@ -771,7 +793,7 @@ func on_join_input(event: InputEvent) -> bool:
 	if owner_i >= 0:
 		if players[owner_i].active:
 			return false  # A of a playing pad keeps its usual job
-		if not pending_join.has(owner_i):
+		if not players[owner_i].has_meta(ClassicSeats.WANT):
 			request_join(owner_i)
 		return true
 	var slot := _free_slot()
@@ -791,8 +813,8 @@ func request_join(i: int) -> void:
 	if i <= 0 or i >= players.size() or players[i].active:
 		return
 	if net.mode == "client":
-		pending_join[i] = 2.0
-		net.send_action("join", [], i)
+		players[i].set_meta(ClassicSeats.WANT, true)  # seats.request_joins asks the host until it's ours
+		seats.ask_soon()
 		print("Asking the host to let P%d join" % (i + 1))
 	else:
 		_activate_player(i)
@@ -873,12 +895,9 @@ func _update_party(delta: float) -> void:
 		j.main = self
 		add_child(j)
 		set_meta("join_input", j)
-	for k in pending_join.keys():
-		var left: float = pending_join[k] - delta
-		if left <= 0.0 or players[k].active:
-			pending_join.erase(k)
-		else:
-			pending_join[k] = left
+	if net.mode == "client":
+		seats.sync()
+		seats.request_joins(delta)
 	for k in pad_wait.keys():
 		var w: float = pad_wait[k] - delta
 		if w <= 0.0:
@@ -920,7 +939,7 @@ func on_player_activity_changed(p) -> void:
 	if p.active and _has_local_view(p) and ready_to_play:
 		_ensure_view(p)
 	if p.has_meta("view") and is_instance_valid(p.get_meta("view")):
-		p.get_meta("view").visible = Machine.view_on(self, p)
+		p.get_meta("view").visible = p.active and _has_local_view(p)
 	_layout_views()
 	print("Player %d is now %s on this screen" % [p.index + 1, "playing" if p.active else "waiting"])
 
@@ -931,7 +950,7 @@ func _check_join(delta: float) -> void:
 	if join_t > 0.0 or net.mode == "host":
 		return
 	for p in players:
-		if p.index < 2 or p.active or not _has_local_view(p) or pending_join.has(p.index):
+		if p.index < 2 or p.active or not _has_local_view(p) or p.has_meta(ClassicSeats.WANT):
 			continue
 		if (p.joy >= 0 or p.uses_keyboard()) and p._fire_held():
 			join_t = 1.0
@@ -1502,14 +1521,36 @@ func _unhandled_input(event: InputEvent) -> void:
 # --- Networked co-op ---------------------------------------------------------
 
 func on_client_joined() -> void:
+	if not seats.first_machine():
+		return  # another machine: its hiders join when they ask ("join")
 	_show_center("HELLO!", 1.5)
 
 
+## Host: the LAST machine left (multi_machine games get this only then).
 func on_client_left() -> void:
 	_show_center("HIDE AND SEEK", 0.0)
-	for p in players:
-		if p.index >= 2 and p.active:
-			p.set_active(false)
+	seats.all_left()  # each machine asks for its hiders again when it reconnects
+
+
+## Host: one machine left: only its hiders leave (and their seats become free).
+func on_machine_left(peer: int) -> void:
+	if not seats.machine_left(peer).is_empty() and net.peer_count() > 0:
+		sound("pop", -4.0, 0.8)
+
+
+## Host: a machine's hider goes away (that machine left).
+func _seat_gone(p) -> void:
+	if p.active:
+		p.set_active(false)
+		p.set_prop(-1)
+		p.remove_meta("cue_done")
+		on_player_activity_changed(p)
+
+
+## TV machine: seat p is another machine's now (on: mirrored from the snapshots, no view here) or ours again.
+func _seat_ghost(p, _on: bool) -> void:
+	p.net_started = false  # snap to the first mirrored position, no glide
+	on_player_activity_changed(p)
 
 
 func _remember_party() -> void:
@@ -1562,6 +1603,7 @@ func _restore_party() -> void:
 
 
 func on_p2_action(action: String, args: Array, index: int = 1) -> void:
+	index = seats.host_action(action, args, index)  # many machines: who drives which seat (core/classic_seats.gd)
 	if index <= 0 or index >= players.size():
 		return
 	var p = players[index]
@@ -1635,6 +1677,8 @@ func apply_snapshot(s: Array) -> void:
 
 
 func apply_event(kind: String, args: Array) -> void:
+	if seats.handle_event(kind, args):
+		return
 	if not ready_to_play:
 		return
 	match kind:

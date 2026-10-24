@@ -381,7 +381,7 @@ class EdgeArrow extends Control:
 	func _ready() -> void:
 		name = "EdgeArrow"
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
-		set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		UiKit.pin(self, Control.PRESET_FULL_RECT, false)
 
 	## Is the target inside the view (with a margin)?
 	func target_in_view() -> bool:

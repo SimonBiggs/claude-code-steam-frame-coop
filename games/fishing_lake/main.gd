@@ -21,9 +21,9 @@ extends Node3D
 ## and a glowing arrow over the practice ring.
 
 const VrText := preload("res://core/vr_text.gd")
-const Machine := preload("res://core/machine.gd")  # one player per screen on a Deck (view_on)
 const SfxScript := preload("res://core/sfx.gd")
 const NetScript := preload("res://core/net.gd")
+const ClassicSeats := preload("res://core/classic_seats.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
 const Lake := preload("res://games/fishing_lake/lake.gd")
 const FishScript := preload("res://games/fishing_lake/fish.gd")
@@ -50,6 +50,10 @@ const PRACTICE_SKIP := 60.0  # the practice gives up waiting after this long
 const AUTO_NEXT_DAY := 10.0  # simple mode: the next day starts by itself after the sunset
 const MAX_PLAYERS := 7  # angler + 6 boats
 const MAX_LOCAL_VIEWS := 6
+## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
+var multi_machine := true
+## Which machine drives which seat (core/net.gd checks it too).
+var seats: ClassicSeats
 const MAX_FISH := 18
 const MAX_TREASURE := 8
 const PAD_LEAVE_TIME := 20.0
@@ -208,6 +212,12 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
+	seats = ClassicSeats.new(self, {
+		"no_keys": BoatScript.NO_KEYS,
+		"free_actions": ["continue", "pause"],
+		"ghost": func(p, _on: bool) -> void: p.target_pos = p.position; p.target_yaw = p.yaw,
+		"full": func() -> void: _show_center("All boats are taken!", 1.5, false),
+	})
 	Input.joy_connection_changed.connect(_on_joy_changed)
 	best = _load_best()
 	if OS.has_environment("DUO_JOIN"):
@@ -230,6 +240,8 @@ func _setup_game(mode: String) -> void:
 	_build_views(mode)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_assign_joypads()
+	if seats.deck_alone():
+		seats.deck_solo(0)
 	ready_to_play = true
 	_ensure_join_listener()
 	_restore_party()
@@ -791,11 +803,11 @@ func _ensure_views_root() -> void:
 	bg.color = Color(0.1, 0.18, 0.25)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(bg)
-	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(bg, Control.PRESET_FULL_RECT, false)
 	views_root = Control.new()
 	views_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(views_root)
-	views_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(views_root, Control.PRESET_FULL_RECT, false)
 
 
 ## One split-screen view (SubViewport + camera + HUD) per local player, created when they first play.
@@ -827,7 +839,7 @@ func _ensure_view(p) -> void:
 	var hud := Control.new()
 	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hud_layer.add_child(hud)
-	hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(hud, Control.PRESET_FULL_RECT, false)
 	var tag := ColorRect.new()
 	tag.color = p.color
 	tag.size = Vector2(14, 14)
@@ -839,7 +851,7 @@ func _ensure_view(p) -> void:
 	# Contextual "what to do now" tip, big and yellow at the bottom of each view.
 	var tip := _make_label(30)
 	hud.add_child(tip)
-	tip.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	UiKit.pin(tip, Control.PRESET_BOTTOM_WIDE, false)
 	tip.offset_top = -150
 	tip.offset_bottom = -76
 	tip.offset_left = 20
@@ -862,7 +874,7 @@ func _layout_views() -> void:
 		if not p.has_meta("view"):
 			continue
 		var c: SubViewportContainer = p.get_meta("view")
-		c.visible = Machine.view_on(self, p)
+		c.visible = p.active and is_local(p)
 		if c.visible:
 			shown.append(p)
 	var n := shown.size()
@@ -890,7 +902,7 @@ func _layout_views() -> void:
 		var c: SubViewportContainer = p.get_meta("view")
 		var col := k % cols
 		var row := k / cols
-		c.set_anchors_preset(Control.PRESET_TOP_LEFT)
+		UiKit.pin(c, Control.PRESET_TOP_LEFT)
 		c.position = Vector2(col * (cell.x + gap), row * (cell.y + gap))
 		c.size = cell
 		var vp := c.get_child(0) as SubViewport
@@ -927,7 +939,11 @@ func _assign_joypads() -> void:
 
 
 func _on_joy_changed(device: int, connected: bool) -> void:
-	if not ready_to_play or net.mode == "host":
+	if not ready_to_play:
+		return
+	if net.mode == "host":
+		if connected and not players[0].vr and players[0].joy < 0:
+			players[0].joy = device  # flat host (no VR): the angler uses this controller
 		return
 	if connected:
 		print("Joypad %d connected" % device)
@@ -938,7 +954,7 @@ func _on_joy_changed(device: int, connected: bool) -> void:
 			if is_local(p) and p.joy < 0 and int(p.get_meta("last_joy", -2)) == device:
 				pick = p
 				break
-		if pick == null and players[1].joy < 0:
+		if pick == null and players[1].joy < 0 and is_local(players[1]):
 			pick = players[1]
 		if pick == null:
 			return  # unassigned: press A to join
@@ -980,17 +996,8 @@ func handle_join_input(event: InputEvent) -> bool:
 	return _join_slot(device) != null
 
 
-func _next_free_index() -> int:
-	for i in range(1, players.size()):
-		var p = players[i]
-		if not is_local(p) or p.active or p.has_meta("want_join") or p.joy >= 0 or p.pad_lost_t >= 0.0:
-			continue
-		return i
-	return -1
-
-
 func _join_slot(device: int):
-	var idx := _next_free_index()
+	var idx := seats.free_index()
 	if idx < 0:
 		_show_center("All %d boats are taken!" % (players.size() - 1), 1.5, false)
 		return null
@@ -1003,13 +1010,13 @@ func _join_slot(device: int):
 	return p
 
 
-## Local: row out now. TV machine: ask the host (retried by _check_join until it agrees).
+## Local: row out now. TV machine: ask the host (retried by seats.request_joins until it agrees).
 func _request_join(p) -> void:
 	p.remove_meta("left_by_pad")
 	p.pad_lost_t = -1.0
 	if net.mode == "client":
 		p.set_meta("want_join", true)
-		join_t = 0.0
+		seats.ask_soon()
 	elif not p.active:
 		_activate(p)
 	_save_party()
@@ -1092,25 +1099,10 @@ func debug_join(index: int = -1):
 	return p
 
 
-var join_t := 0.0
-func _check_join(delta: float) -> void:
-	join_t -= delta
-	if join_t > 0.0:
-		return
-	for p in players:
-		if not p.has_meta("want_join") or not is_local(p):
-			continue
-		if p.active:
-			p.remove_meta("want_join")
-			continue
-		join_t = 1.0
-		net.send_action("join", [p.index], 1)
-
-
 func on_player_activity_changed(p) -> void:
 	if p.active and is_local(p):
 		_ensure_view(p)
-	if p.active:
+	if seats.joined(p):
 		p.remove_meta("want_join")
 	_layout_views()
 	print("Player %d is now %s" % [p.index + 1, "playing" if p.active else "waiting"])
@@ -1349,7 +1341,8 @@ func _process(delta: float) -> void:
 	cont_was = cont
 	state_t += delta
 	if net.mode == "client":
-		_check_join(delta)
+		seats.sync()
+		seats.request_joins(delta)
 		_update_lost_pads(delta)
 		if cont_edge and state == "over" and state_t > 1.5:
 			net.send_action("continue", [])
@@ -2154,8 +2147,10 @@ func _journal_save() -> void:
 	cfg.save(_journal_file())
 
 
-func _send_journal() -> void:
-	if net != null:
+func _send_journal(peer: int = 0) -> void:
+	if net != null and peer > 0:
+		net.event_to(peer, "journal", [journal_counts, journal_best])
+	elif net != null:
 		net.event("journal", [journal_counts, journal_best])
 
 
@@ -2353,25 +2348,36 @@ func debug_event(what: String) -> void:
 # --- Networked co-op (see docs/GAME_DEV_GUIDE.md) ------------------------------------
 
 func on_client_joined() -> void:
-	if SIMPLE_MODE:
+	if SIMPLE_MODE or net.peer_count() > 1:
 		return  # the boats appear on the lake
 	_show_center("THE TV PLAYERS JOINED!", 1.5)
-	_send_journal()
 
 
+## Host: a machine joined: it gets the journal (only it).
+func on_machine_joined(peer: int, _kind: String) -> void:
+	if not SIMPLE_MODE:
+		_send_journal(peer)
+
+
+## Host: one machine left: only its boats row home (and their seats become free).
+func on_machine_left(peer: int) -> void:
+	var freed := seats.machine_left(peer)
+	target = target_score()
+	if not freed.is_empty() and net.peer_count() > 0 and not SIMPLE_MODE:
+		_show_center("PLAYER %d LEFT" % (int(freed[0]) + 1), 1.5)
+
+
+## Host: the LAST machine left (multi_machine games get this only then).
 func on_client_left() -> void:
-	for i in range(1, players.size()):
-		if players[i].active:
-			players[i].set_active(false)
+	seats.all_left()
 	target = target_score()
 	if not SIMPLE_MODE:
 		_show_center("The TV players left - the lake is all yours", 2.0)
 
 
 func on_p2_action(action: String, args: Array, index: int = 1) -> void:
-	if action == "join" and args.size() > 0:
-		index = int(args[0])
-	if index <= 0 or index >= players.size():
+	index = seats.host_action(action, args, index)  # many machines: who drives which seat (core/classic_seats.gd)
+	if index < 0:
 		return
 	var p = players[index]
 	match action:
@@ -2379,7 +2385,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 			if not p.active:
 				_activate(p)
 				if not SIMPLE_MODE:
-					_send_journal()
+					_send_journal(net.sender_peer())
 				print("Net: player %d joined the game" % (index + 1))
 		"leave":
 			if p.active:
@@ -2446,8 +2452,13 @@ func make_snapshot() -> Array:
 	var ex := PackedFloat32Array([rain, daylight, frenzy_t, frenzy_pos.x, frenzy_pos.z, float(map_state), map_pos.x, map_pos.z,
 		legend_stamina, float(streak), float(theme), float(legend_state),
 		float(practice_step + 1) if practice else 0.0, practice_pos.x, practice_pos.z])
+	# Boat positions: each machine rows its own boats; the others' boats are mirrored from here.
+	var bp := PackedFloat32Array()
+	for i in range(1, players.size()):
+		var b = players[i]
+		bp.append_array([b.position.x, b.position.z, b.yaw] if b.active else [0.0, 0.0, 0.0])
 	return [state, state_t, time_left, round_time, score, target, day, best, fs, ts, bs, players[0].snapshot(),
-		PackedInt32Array(catches), goal_hit, biggest, ex]
+		PackedInt32Array(catches), goal_hit, biggest, ex, bp]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -2511,6 +2522,13 @@ func apply_snapshot(s: Array) -> void:
 			if act:
 				p.reset_to_start()
 			on_player_activity_changed(p)
+	if s.size() > 16:
+		var bp: PackedFloat32Array = s[16]
+		for i in mini(bp.size() / 3, players.size() - 1):
+			var b = players[i + 1]
+			if b.ghost and b.active:
+				b.target_pos = Vector3(bp[i * 3], b.position.y, bp[i * 3 + 1])
+				b.target_yaw = bp[i * 3 + 2]
 	players[0].apply_net(s[11])
 	var cs: PackedInt32Array = s[12]
 	catches = Array(cs)
@@ -2535,6 +2553,8 @@ func apply_snapshot(s: Array) -> void:
 
 
 func apply_event(kind: String, args: Array) -> void:
+	if seats.handle_event(kind, args):
+		return
 	if not ready_to_play:
 		return
 	match kind:
@@ -2620,7 +2640,7 @@ func _build_hud() -> void:
 	add_child(layer)
 	center_label = _make_label(42)
 	layer.add_child(center_label)
-	center_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(center_label, Control.PRESET_FULL_RECT, false)
 	center_label.offset_left = 60
 	center_label.offset_right = -60
 	center_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -2628,7 +2648,7 @@ func _build_hud() -> void:
 	center_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	help_label = _make_label(20)
 	layer.add_child(help_label)
-	help_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	UiKit.pin(help_label, Control.PRESET_BOTTOM_WIDE, false)
 	help_label.offset_top = -64
 	help_label.offset_bottom = -12
 	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -2828,7 +2848,7 @@ func _update_cue(p, l: Label) -> void:
 		box.alignment = BoxContainer.ALIGNMENT_CENTER
 		box.add_theme_constant_override("separation", 14)
 		l.add_child(box)
-		box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		UiKit.pin(box, Control.PRESET_FULL_RECT, false)
 		box.set_meta("key", "")
 	var s := clampf(float(l.get_theme_font_size("font_size")) / 34.0, 0.5, 1.2) * 1.6
 	if str(box.get_meta("key")) != key or absf(float(box.get_meta("s", 0.0)) - s) > 0.01:

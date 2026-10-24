@@ -43,6 +43,8 @@ const VR_GAIN := 1.7  ## ball speed / putter head speed
 var net: Node
 var ready_to_play := false
 var party: Party
+## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
+var multi_machine := true
 var split: SplitView
 var vr_rig: VrRig
 var save: Save
@@ -121,7 +123,8 @@ func _ready() -> void:
 
 
 func _setup(mode: String) -> void:
-	if VrRig.wanted(mode):
+	var flat: bool = mode == "host" and not net.has_vr  # flat host (TV / Deck hosting): slot 0 is a pad golfer here
+	if VrRig.wanted(mode) and not flat:
 		vr_rig = VrRig.new()
 		add_child(vr_rig)
 		vr_rig.place(Vector3(0.6, 0.0, 2.0), 0.0)
@@ -132,7 +135,7 @@ func _setup(mode: String) -> void:
 		add_child(ghost)
 		_make_fade()
 	_build_world(vr_rig != null)
-	if mode != "host":
+	if mode != "host" or vr_rig == null:
 		split = SplitView.new()
 		add_child(split)
 		split.bind_party(party)
@@ -148,7 +151,7 @@ func _setup(mode: String) -> void:
 			add_child(putter)
 		elif vr_rig != null:
 			split.set_bubble(vr_rig.mirror)
-	party.allow_slot0 = mode == "local" and vr_rig == null
+	party.allow_slot0 = mode != "client" and vr_rig == null
 	if mode != "client":
 		_start_course()
 	elif net.state_has("hole"):
@@ -320,7 +323,8 @@ func _remove_ball(slot: int) -> void:
 
 
 func _name_of(slot: int) -> String:
-	return "GOLFER" if slot == 0 and (vr_rig != null or net.mode == "client") else party.name_of(slot)
+	# slot 0 is the VR golfer, unless a flat host seated a pad player there (then it is a seat like any other)
+	return "GOLFER" if slot == 0 and (vr_rig != null or (net.mode == "client" and not party.is_active(0))) else party.name_of(slot)
 
 
 # --- Players ------------------------------------------------------------------------------
@@ -752,7 +756,7 @@ func _make_hud(parent: Control) -> void:
 	prompt = UiKit.panel("pill")
 	prompt.add_child(UiKit.prompts([["A", "Hold, let go!"]]))
 	hud.add_child(prompt)
-	prompt.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_KEEP_SIZE)
+	UiKit.pin(prompt, Control.PRESET_CENTER_BOTTOM)
 	prompt.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	prompt.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	prompt.offset_top = -60.0
@@ -760,7 +764,7 @@ func _make_hud(parent: Control) -> void:
 	join_prompt = UiKit.panel("pill")
 	join_prompt.add_child(UiKit.prompts([["A", "Join"]]))
 	hud.add_child(join_prompt)
-	join_prompt.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_KEEP_SIZE)
+	UiKit.pin(join_prompt, Control.PRESET_CENTER_BOTTOM)
 	join_prompt.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	join_prompt.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	join_prompt.offset_top = -60.0
@@ -853,7 +857,7 @@ func on_pause_changed(paused: bool, _by_slot: int) -> void:
 			tv_banner = UiKit.panel("accent")
 			ui.add_child(tv_banner)
 			tv_banner.add_child(UiKit.title("PAUSED"))
-			tv_banner.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_KEEP_SIZE)
+			UiKit.pin(tv_banner, Control.PRESET_CENTER)
 			tv_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
 			tv_banner.grow_vertical = Control.GROW_DIRECTION_BOTH
 		tv_banner.visible = paused
@@ -884,6 +888,8 @@ func apply_snapshot(s: Array) -> void:
 		return
 	if vr_avatar != null:
 		vr_avatar.apply_pose(s[0])
+	if split != null and (s[0] as PackedFloat32Array).is_empty():
+		split.clear_bubble()  # a flat host: no VR player to show in the bubble
 	var slots: PackedInt32Array = s[1]
 	var pos: PackedVector3Array = s[2]
 	var flags: PackedInt32Array = s[3]

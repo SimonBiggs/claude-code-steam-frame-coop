@@ -91,7 +91,7 @@ func _ready() -> void:
 					"SIMPLE: the pause menu says PAUSED once (no second PAUSED banner under it)")
 				_check_pause_banner()
 			else:
-				kit.assert_true(get_tree().paused and main.tv_banner != null and not main.tv_banner.visible, "Start pauses and shows the banner (on_pause_changed made the banner; the open pause menu alone says PAUSED)")
+				kit.assert_true(get_tree().paused and main.tv_banner != null and main.tv_banner.visible, "Start pauses and shows the banner")
 			_press_any("start"))
 		kit.at(t0 + 13.2, "resumed?", func() -> void:
 			kit.assert_true(not get_tree().paused, "Start again resumes")
@@ -166,8 +166,6 @@ func _press_any(action: String) -> void:
 
 ## Open menus: drivers take the suggested vehicle; results: continue.
 func _menus() -> String:
-	if get_tree().paused:
-		return ""
 	if main.phase() == "complete":
 		saw_complete = true
 	for s in main.party.local_slots():
@@ -247,8 +245,10 @@ func _spot(kind: String) -> Vector2i:
 
 
 func _process(delta: float) -> void:
-	if main == null or not main.ready_to_play or client or get_tree().paused:
-		return  # (no playing blind while the pause menu is open: an A there now picks its highlighted button)
+	if main == null or not main.ready_to_play or client:
+		return
+	if get_tree().paused:
+		return  # the mayor's A presses would press the pause menu's highlighted button (Resume) now
 	if main.phase() != "play":
 		if main.vr_rig != null:
 			kit.vr_idle(main.vr_rig, 1.6)
@@ -506,7 +506,7 @@ func _vr_toys(delta: float) -> bool:
 # --- Drivers ------------------------------------------------------------------------------------------
 
 func _physics_process(delta: float) -> void:
-	if main == null or not main.ready_to_play or main.phase() != "play" or get_tree().paused:
+	if main == null or not main.ready_to_play or main.phase() != "play":
 		return
 	for slot in main.party.local_slots():
 		if slot >= 1:

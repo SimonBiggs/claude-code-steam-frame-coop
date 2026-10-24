@@ -46,7 +46,7 @@ export const bots = {
     const t0 = Date.now();
     const scene = `res://tests/${id}_bot.tscn`;
     const one = async (env: Record<string, string>, extra = "") => {
-      const r = await $`nice -n 19 timeout ${o.seconds ?? 150} godot --headless --path ${STAGE} ${{ raw: extra }} ${scene}`.env({ ...process.env, ...env }).nothrow().quiet();
+      const r = await $`nice -n 19 timeout ${o.seconds ?? 150} godot-test --headless --path ${STAGE} ${{ raw: extra }} ${scene}`.env({ ...process.env, ...env }).nothrow().quiet();
       return { out: r.stdout.toString() + r.stderr.toString(), code: r.exitCode };
     };
     // Pass (docs/GAME_DEV_GUIDE.md "Testing"): it ran to the end (exit 0, not killed by timeout or a crash), no
@@ -200,6 +200,7 @@ export async function debt() {
   const PATTERNS: { kind: string; files: string; bad: string; unless?: string; fix: string }[] = [
     { kind: "pad-A", files: "grab_focus", bad: "grab_focus", unless: "JOY_BUTTON_A|ui_input.gd|UiInput", fix: "should now work by design (UiKit.ensure_pad_ui_actions at startup); check the menu reaches it" },
     { kind: "anchors", files: "set_anchors_preset", bad: "add_child\\([a-z_]+\\)\\n\\s*[a-z_]+\\.set_anchors_preset\\(Control\\.PRESET_(CENTER|RIGHT|BOTTOM)", fix: "use UiKit.pin(control, preset) (core/ui_kit.gd): one helper, offsets always reset" },
+    { kind: "set_meta-null", files: "set_meta", bad: "set_meta\\([^\\n]*(,\\s*null\\)|else null\\))", fix: "set_meta(k, null) DELETES the key, so the next get_meta(k) errors: store false and test with get_meta(k, false) is <Type>" },
     { kind: "looking_at-UP", files: "looking_at", bad: "looking_at\\([^)]*Vector3\\.UP\\)", unless: "_face_camera", fix: "use UiKit.face(dir) (core/ui_kit.gd): never NaN when the direction is vertical" },
   ];
   for (const pt of PATTERNS) {
@@ -235,7 +236,14 @@ export async function debt() {
   const d = await stage.diff();
   if (d.liveNewer.length || d.onlyLive.length) issues.push({ kind: "stage-behind", what: `live has newer files than staging: ${[...d.liveNewer, ...d.onlyLive].slice(0, 5).join(", ")}`, fix: "dev.stage.pull()" });
   if (d.stageNewer.length || d.onlyStage.length) issues.push({ kind: "undeployed", what: `staging has changes not deployed: ${[...d.stageNewer, ...d.onlyStage].slice(0, 5).join(", ")}`, fix: "test, then dev.stage.deploy(msg)" });
-  for (const [src, rel] of Object.entries(TOOL_COPIES)) {
+  // Plus every tools/ file named like an installed command (~/.local/bin) and every tools/systemd unit, so a new
+  // tool never drifts just because nobody added it to TOOL_COPIES.
+  const copies: Record<string, string> = { ...TOOL_COPIES };
+  for (const f of await readdir(join(LIVE, "tools")).catch(() => [] as string[]))
+    if (!Object.values(copies).includes(`tools/${f}`)) copies[join(BIN, f)] = `tools/${f}`;
+  for (const f of await readdir(join(LIVE, "tools/systemd")).catch(() => [] as string[]))
+    if (!Object.values(copies).includes(`tools/systemd/${f}`)) copies[join(HOME, ".config/systemd/user", f)] = `tools/systemd/${f}`;
+  for (const [src, rel] of Object.entries(copies)) {
     const repo = join(LIVE, rel);
     const [a, b] = await Promise.all([readFile(src).catch(() => null), readFile(repo).catch(() => null)]);
     if (a && b && !a.equals(b))

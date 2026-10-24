@@ -38,10 +38,10 @@ extends Node3D
 ## Everything cut is only switched off: SIMPLE_MODE = false brings the full cup game back.
 
 const VrText := preload("res://core/vr_text.gd")
-const Machine := preload("res://core/machine.gd")  # one player per screen on a Deck (view_on)
 const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
 const NetScript := preload("res://core/net.gd")
+const ClassicSeats := preload("res://core/classic_seats.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
 const WorldScript := preload("res://games/penalty_shootout/world.gd")
 const BallScript := preload("res://games/penalty_shootout/ball.gd")
@@ -63,6 +63,10 @@ const FIRE_ROUND := 2  # simple mode: the fireball unlocks from this round (0-ba
 
 const MAX_PLAYERS := 7  # VR keeper + 6 strikers
 const MAX_LOCAL_VIEWS := 6
+## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
+var multi_machine := true
+## Which machine drives which seat (core/net.gd checks it too).
+var seats: ClassicSeats
 const PAD_LEAVE_TIME := 20.0
 const FIRST_INTRO_TIME := 9.0
 const INTRO_TIME := 3.5
@@ -218,6 +222,12 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
+	seats = ClassicSeats.new(self, {
+		"no_keys": StrikerScript.NO_KEYS,
+		"free_actions": ["continue", "pause"],
+		"deactivate": _deactivate,
+		"full": func() -> void: _show_center("All striker spots are taken!", 1.5, false),
+	})
 	Input.joy_connection_changed.connect(_on_joy_changed)
 	if OS.has_environment("DUO_JOIN"):
 		_show_center("Connecting to the keeper…", 0.0, false)
@@ -235,8 +245,12 @@ func _setup_game(mode: String) -> void:
 	_build_views(mode)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_assign_joypads()
+	if seats.deck_alone():
+		seats.deck_solo(0)
 	ready_to_play = true
 	_ensure_join_listener()
+	if mode == "client":
+		players[1].set_meta("want_join", true)  # ask the host for a striker spot (it may hand out another one)
 	_restore_party()
 	if SIMPLE_MODE:
 		props = PropsScript.new()
@@ -487,11 +501,11 @@ func _ensure_views_root() -> void:
 	bg.color = Color(0.05, 0.07, 0.16)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(bg)
-	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(bg, Control.PRESET_FULL_RECT, false)
 	views_root = Control.new()
 	views_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(views_root)
-	views_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(views_root, Control.PRESET_FULL_RECT, false)
 
 
 ## One split-screen view (SubViewport + camera + HUD) per local player, created when they first play.
@@ -524,7 +538,7 @@ func _ensure_view(p) -> void:
 	var hud := Control.new()
 	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hud_layer.add_child(hud)
-	hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(hud, Control.PRESET_FULL_RECT, false)
 	var tag := ColorRect.new()
 	tag.color = p.color
 	tag.size = Vector2(14, 14)
@@ -539,7 +553,7 @@ func _ensure_view(p) -> void:
 	rl.text = "· REPLAY ·"
 	rl.add_theme_color_override("font_color", Color(1.0, 0.35, 0.3))
 	hud.add_child(rl)
-	rl.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	UiKit.pin(rl, Control.PRESET_TOP_RIGHT, false)
 	rl.offset_left = -220
 	rl.offset_right = -16
 	rl.offset_top = 12
@@ -576,7 +590,7 @@ func _layout_views() -> void:
 		if not p.has_meta("view"):
 			continue
 		var c: SubViewportContainer = p.get_meta("view")
-		c.visible = Machine.view_on(self, p)
+		c.visible = p.active and is_local(p)
 		if c.visible:
 			shown.append(p)
 	var n := shown.size()
@@ -604,7 +618,7 @@ func _layout_views() -> void:
 		var c: SubViewportContainer = p.get_meta("view")
 		var col := k % cols
 		var row := k / cols
-		c.set_anchors_preset(Control.PRESET_TOP_LEFT)
+		UiKit.pin(c, Control.PRESET_TOP_LEFT)
 		c.position = Vector2(col * (cell.x + gap), row * (cell.y + gap))
 		c.size = cell
 		var vp := c.get_child(0) as SubViewport
@@ -640,7 +654,11 @@ func _assign_joypads() -> void:
 
 
 func _on_joy_changed(device: int, connected: bool) -> void:
-	if not ready_to_play or net.mode == "host":
+	if not ready_to_play:
+		return
+	if net.mode == "host":
+		if connected and not players[0].vr and players[0].joy < 0:
+			players[0].joy = device  # flat host (no VR): the keeper dives with this controller
 		return
 	if connected:
 		print("Joypad %d connected" % device)
@@ -651,7 +669,7 @@ func _on_joy_changed(device: int, connected: bool) -> void:
 			if is_local(p) and p.joy < 0 and int(p.get_meta("last_joy", -2)) == device:
 				pick = p
 				break
-		if pick == null and players[1].joy < 0:
+		if pick == null and players[1].joy < 0 and is_local(players[1]):
 			pick = players[1]
 		if pick == null:
 			return  # unassigned: press A to join
@@ -693,17 +711,8 @@ func handle_join_input(event: InputEvent) -> bool:
 	return _join_slot(device) != null
 
 
-func _next_free_index() -> int:
-	for i in range(1, players.size()):
-		var p = players[i]
-		if not is_local(p) or p.active or p.has_meta("want_join") or p.joy >= 0 or p.pad_lost_t >= 0.0:
-			continue
-		return i
-	return -1
-
-
 func _join_slot(device: int):
-	var idx := _next_free_index()
+	var idx := seats.free_index()
 	if idx < 0:
 		_show_center("FULL!" if SIMPLE_MODE else "All %d striker spots are taken!" % (players.size() - 1), 1.5, false)
 		return null
@@ -716,13 +725,13 @@ func _join_slot(device: int):
 	return p
 
 
-## Local: step up now. TV machine: ask the host (retried by _check_join until it agrees).
+## Local: step up now. TV machine: ask the host (retried by seats.request_joins until it agrees).
 func _request_join(p) -> void:
 	p.remove_meta("left_by_pad")
 	p.pad_lost_t = -1.0
 	if net.mode == "client":
 		p.set_meta("want_join", true)
-		join_t = 0.0
+		seats.ask_soon()
 	elif not p.active:
 		_activate(p)
 	_save_party()
@@ -814,25 +823,10 @@ func debug_join(index: int = -1):
 	return p
 
 
-var join_t := 0.0
-func _check_join(delta: float) -> void:
-	join_t -= delta
-	if join_t > 0.0:
-		return
-	for p in players:
-		if not p.has_meta("want_join") or not is_local(p):
-			continue
-		if p.active:
-			p.remove_meta("want_join")
-			continue
-		join_t = 1.0
-		net.send_action("join", [p.index], 1)  # sent as P2, like duo_arena's drop-in seats
-
-
 func on_player_activity_changed(p) -> void:
 	if p.active and is_local(p):
 		_ensure_view(p)
-	if p.active:
+	if seats.joined(p):
 		p.remove_meta("want_join")
 	_layout_views()
 	print("Player %d is now %s" % [p.index + 1, "playing" if p.active else "waiting"])
@@ -1779,7 +1773,8 @@ func _physics_process(delta: float) -> void:
 
 
 func _client_update(delta: float, cont_edge: bool) -> void:
-	_check_join(delta)
+	seats.sync()
+	seats.request_joins(delta)
 	_update_lost_pads(delta)
 	state_t += delta
 	if cont_edge and ((state == "over" or state == "intro") and state_t > 1.5):
@@ -1913,6 +1908,8 @@ func _update_aim_visuals() -> void:
 # --- Networked co-op (see docs/GAME_DEV_GUIDE.md) --------------------------------------------
 
 func on_client_joined() -> void:
+	if net.peer_count() > 1:
+		return  # another machine: its strikers step up when they join (no restart for everyone)
 	if SIMPLE_MODE:
 		cpu = false
 		_show_center("STRIKERS!", 1.5, true, "")
@@ -1928,10 +1925,16 @@ func on_client_joined() -> void:
 		_begin_match()
 
 
+## Host: one machine left: only its strikers leave (and their spots become free).
+func on_machine_left(peer: int) -> void:
+	var freed := seats.machine_left(peer)
+	if not freed.is_empty() and net.peer_count() > 0 and not SIMPLE_MODE:
+		_show_center("PLAYER %d LEFT" % (int(freed[0]) + 1), 1.5)
+
+
+## Host: the LAST machine left (multi_machine games get this only then).
 func on_client_left() -> void:
-	for i in range(2, players.size()):
-		if players[i].active:
-			players[i].set_active(false)
+	seats.all_left()
 	state = "wait"
 	shooter = -1
 	ball.place(spot)
@@ -1947,9 +1950,8 @@ func on_client_left() -> void:
 
 
 func on_p2_action(action: String, args: Array, index: int = 1) -> void:
-	if action == "join" and args.size() > 0:
-		index = int(args[0])
-	if index <= 0 or index >= players.size():
+	index = seats.host_action(action, args, index)  # many machines: who drives which seat (core/classic_seats.gd)
+	if index < 0:
 		return
 	var p = players[index]
 	match action:
@@ -2084,6 +2086,8 @@ func apply_snapshot(s: Array) -> void:
 
 
 func apply_event(kind: String, args: Array) -> void:
+	if seats.handle_event(kind, args):
+		return
 	if not ready_to_play:
 		return
 	match kind:
@@ -2148,13 +2152,13 @@ func _build_hud() -> void:
 	add_child(layer)
 	center_label = _make_label(42)
 	layer.add_child(center_label)
-	center_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(center_label, Control.PRESET_FULL_RECT, false)
 	center_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	center_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	center_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	help_label = _make_label(19)
 	layer.add_child(help_label)
-	help_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	UiKit.pin(help_label, Control.PRESET_BOTTOM_WIDE, false)
 	help_label.offset_top = -64
 	help_label.offset_bottom = -12
 	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

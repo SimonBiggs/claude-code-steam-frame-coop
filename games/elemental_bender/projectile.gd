@@ -7,6 +7,7 @@ extends Node3D
 ## earth boulders first rise out of the ground for `rise` seconds.
 
 const E := preload("res://games/elemental_bender/elem.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 const Looks := preload("res://games/elemental_bender/looks.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 
@@ -57,8 +58,7 @@ func _ready() -> void:
 	_model = MeshKit.instance(Looks.shot(element, snappedf(radius, 0.05), team == 1), false)
 	add_child(_model)
 	if velocity.length() > 0.1:
-		var up := Vector3.UP if absf(velocity.normalized().y) < 0.99 else Vector3.RIGHT
-		basis = Basis.looking_at(velocity.normalized(), up)
+		basis = UiKit.face(velocity)
 
 
 func _physics_process(delta: float) -> void:

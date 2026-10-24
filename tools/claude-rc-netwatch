@@ -1,0 +1,17 @@
+#!/bin/bash
+# Restarts claude-rc.service when the network comes back after being offline,
+# so Remote Control re-registers instead of sitting on a dead connection.
+was_online=1
+while sleep 10; do
+  if [ "$(nmcli networking connectivity 2>/dev/null)" = full ]; then
+    if [ "$was_online" = 0 ]; then
+      echo "network back online - restarting claude-rc"
+      sleep 5
+      systemctl --user restart claude-rc.service
+    fi
+    was_online=1
+  else
+    [ "$was_online" = 1 ] && echo "network offline"
+    was_online=0
+  fi
+done

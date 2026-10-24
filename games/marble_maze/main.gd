@@ -31,10 +31,10 @@ extends Node3D
 ## controller sees a pulsing A + plus + person; a full table / someone leaving is just a soft sound.
 
 const VrText := preload("res://core/vr_text.gd")
-const Machine := preload("res://core/machine.gd")  # one player per screen on a Deck (view_on)
 const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
 const NetScript := preload("res://core/net.gd")
+const ClassicSeats := preload("res://core/classic_seats.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
 const BoardScript := preload("res://games/marble_maze/board.gd")
 const MarbleScript := preload("res://games/marble_maze/marble.gd")
@@ -52,6 +52,10 @@ const SIMPLE_CLEAR_TIME := 4.0
 
 const MAX_PLAYERS := 7  # VR player + 6 marbles
 const MAX_LOCAL_VIEWS := 6
+## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
+var multi_machine := true
+## Which machine drives which seat (core/net.gd checks it too).
+var seats: ClassicSeats
 const PAD_LEAVE_TIME := 20.0
 const INTRO_TIME := 3.5
 const FIRST_INTRO_TIME := 7.0
@@ -170,6 +174,12 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
+	seats = ClassicSeats.new(self, {
+		"no_keys": MarbleScript.NO_KEYS,
+		"free_actions": ["continue", "pause"],
+		"ghost": func(p, _on: bool) -> void: p.target_lp = p.lp,  # snap, no glide from a stale target
+		"full": func() -> void: sound("boop", -10.0, 0.7),  # no room
+	})
 	Input.joy_connection_changed.connect(_on_joy_changed)
 	best = _load_best()
 	if OS.has_environment("DUO_JOIN"):
@@ -189,8 +199,18 @@ func _setup_game(mode: String) -> void:
 	_build_views(mode)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_assign_joypads()
+	if seats.deck_alone():
+		seats.deck_solo(0)
+		# Like the VR giant's solo: P1 tilts the board and rolls their own marble with the tilt only.
+		players[1].tilt_only = true
+		players[1].set_meta("hide_view", true)
+		players[1].set_active(true)
+		players[1].reset_to_start()
+		on_player_activity_changed(players[1])
 	ready_to_play = true
 	_ensure_join_listener()
+	if mode == "client":
+		players[1].set_meta("want_join", true)  # ask the host for a marble (it may hand out another one)
 	_restore_party()
 	if mode == "host" and simple:
 		_set_solo(true)  # no waiting about: tilt your own marble until the TV players join
@@ -698,11 +718,11 @@ func _ensure_views_root() -> void:
 	bg.color = Color(0.1, 0.12, 0.2)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(bg)
-	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(bg, Control.PRESET_FULL_RECT, false)
 	views_root = Control.new()
 	views_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(views_root)
-	views_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(views_root, Control.PRESET_FULL_RECT, false)
 
 
 ## One split-screen view (SubViewport + camera + HUD) per local player, created when they first play.
@@ -734,7 +754,7 @@ func _ensure_view(p) -> void:
 	var hud := Control.new()
 	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hud_layer.add_child(hud)
-	hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(hud, Control.PRESET_FULL_RECT, false)
 	var tag := ColorRect.new()
 	tag.color = p.color if p.index > 0 else Color(1.0, 0.85, 0.55)
 	tag.size = Vector2(14, 14)
@@ -764,7 +784,7 @@ func _layout_views() -> void:
 		if not p.has_meta("view"):
 			continue
 		var c: SubViewportContainer = p.get_meta("view")
-		c.visible = Machine.view_on(self, p)
+		c.visible = p.active and is_local(p) and not p.has_meta("hide_view")
 		if c.visible:
 			shown.append(p)
 	var n := shown.size()
@@ -792,7 +812,7 @@ func _layout_views() -> void:
 		var c: SubViewportContainer = p.get_meta("view")
 		var col := k % cols
 		var row := k / cols
-		c.set_anchors_preset(Control.PRESET_TOP_LEFT)
+		UiKit.pin(c, Control.PRESET_TOP_LEFT)
 		c.position = Vector2(col * (cell.x + gap), row * (cell.y + gap))
 		c.size = cell
 		var vp := c.get_child(0) as SubViewport
@@ -828,7 +848,11 @@ func _assign_joypads() -> void:
 
 
 func _on_joy_changed(device: int, connected: bool) -> void:
-	if not ready_to_play or net.mode == "host":
+	if not ready_to_play:
+		return
+	if net.mode == "host":
+		if connected and not players[0].vr and players[0].joy < 0:
+			players[0].joy = device  # flat host (no VR): P1 tilts with this controller
 		return
 	if connected:
 		print("Joypad %d connected" % device)
@@ -839,7 +863,7 @@ func _on_joy_changed(device: int, connected: bool) -> void:
 			if is_local(p) and p.joy < 0 and int(p.get_meta("last_joy", -2)) == device:
 				pick = p
 				break
-		if pick == null and players[1].joy < 0:
+		if pick == null and players[1].joy < 0 and is_local(players[1]):
 			pick = players[1]
 		if pick == null:
 			return  # unassigned: press A to join
@@ -882,21 +906,31 @@ func handle_join_input(event: InputEvent) -> bool:
 		if idx > 0 and not players[idx].active and is_local(players[idx]):
 			_request_join(players[idx])
 			return true
+		if idx > 0 and players[idx].has_meta("hide_view"):
+			_deck_friend_takes(players[idx])  # a Deck alone: a friend's pad takes over P1's tilt-only marble
+			return true
 		return false
+	var p2 = players[1] if players.size() > 1 else null
+	if p2 != null and p2.has_meta("hide_view") and p2.joy < 0:
+		p2.joy = device
+		joy_owner[device] = 1
+		_deck_friend_takes(p2)
+		return true
 	return _join_slot(device) != null
 
 
-func _next_free_index() -> int:
-	for i in range(1, players.size()):
-		var p = players[i]
-		if not is_local(p) or p.active or p.has_meta("want_join") or p.joy >= 0 or p.pad_lost_t >= 0.0:
-			continue
-		return i
-	return -1
+## A Deck alone rolls P2's marble by tilting (no view of its own); a friend pressing A gets it as a real marble.
+func _deck_friend_takes(p) -> void:
+	p.remove_meta("hide_view")
+	p.tilt_only = false
+	_ensure_view(p)
+	_layout_views()
+	if not simple:
+		_show_center("PLAYER %d ROLLS IN!" % (p.index + 1), 1.5)
 
 
 func _join_slot(device: int):
-	var idx := _next_free_index()
+	var idx := seats.free_index()
 	if idx < 0:
 		if simple:
 			sound("boop", -10.0, 0.7)  # no sentence: a soft "no room" boop
@@ -912,13 +946,13 @@ func _join_slot(device: int):
 	return p
 
 
-## Local: roll in now. TV machine: ask the host (retried by _check_join until it agrees).
+## Local: roll in now. TV machine: ask the host (retried by seats.request_joins until it agrees).
 func _request_join(p) -> void:
 	p.remove_meta("left_by_pad")
 	p.pad_lost_t = -1.0
 	if net.mode == "client":
 		p.set_meta("want_join", true)
-		join_t = 0.0
+		seats.ask_soon()
 	elif not p.active:
 		_activate(p)
 	_save_party()
@@ -1004,27 +1038,12 @@ func debug_join(index: int = -1):
 	return p
 
 
-var join_t := 0.0
-func _check_join(delta: float) -> void:
-	join_t -= delta
-	if join_t > 0.0:
-		return
-	for p in players:
-		if not p.has_meta("want_join") or not is_local(p):
-			continue
-		if p.active:
-			p.remove_meta("want_join")
-			continue
-		join_t = 1.0
-		net.send_action("join", [p.index], 1)  # sent as P2, like duo_arena's drop-in seats
-
-
 func on_player_activity_changed(p) -> void:
 	if not p.active:
 		p.remove_meta("cue_done")  # whoever takes this seat next sees the picture cues again
 	if p.active and is_local(p):
 		_ensure_view(p)
-	if p.active:
+	if seats.joined(p):
 		p.remove_meta("want_join")
 	_layout_views()
 	print("Player %d is now %s" % [p.index + 1, "playing" if p.active else "waiting"])
@@ -1252,7 +1271,8 @@ func _update_extras(delta: float) -> void:
 
 
 func _client_update(delta: float, cont_edge: bool) -> void:
-	_check_join(delta)
+	seats.sync()
+	seats.request_joins(delta)
 	_update_lost_pads(delta)
 	state_t += delta
 	board.t += delta
@@ -1929,7 +1949,7 @@ func _update_join_cue() -> void:
 	if net.mode == "host":
 		return
 	var spare := false
-	if _next_free_index() >= 0 and not get_tree().paused:
+	if seats.free_index() >= 0 and not get_tree().paused:
 		for dev in Input.get_connected_joypads():
 			if not joy_owner.has(dev):
 				spare = true
@@ -1945,7 +1965,7 @@ func _update_join_cue() -> void:
 		for c in join_cue.get_children():
 			(c as Control).size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		help_label.get_parent().add_child(join_cue)
-		join_cue.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+		UiKit.pin(join_cue, Control.PRESET_BOTTOM_RIGHT, false)
 		join_cue.offset_left = -200
 		join_cue.offset_top = -74
 		join_cue.offset_right = -16
@@ -2021,6 +2041,8 @@ func _update_board_arrows() -> void:
 # --- Networked co-op (see docs/GAME_DEV_GUIDE.md) ------------------------------------
 
 func on_client_joined() -> void:
+	if net.peer_count() > 1:
+		return  # another machine: its marbles roll in when they join (no restart for everyone)
 	if simple:
 		_set_solo(false)
 		practiced = false  # the TV players get the practice ring too
@@ -2031,10 +2053,16 @@ func on_client_joined() -> void:
 	_start_level(level if state != "over" else 1)
 
 
+## Host: one machine left: only its marbles leave (and their seats become free).
+func on_machine_left(peer: int) -> void:
+	var freed := seats.machine_left(peer)
+	if not freed.is_empty() and net.peer_count() > 0 and not simple:
+		_show_center("PLAYER %d LEFT" % (int(freed[0]) + 1), 1.5)
+
+
+## Host: the LAST machine left (multi_machine games get this only then).
 func on_client_left() -> void:
-	for i in range(2, players.size()):
-		if players[i].active:
-			players[i].set_active(false)
+	seats.all_left()
 	if simple:
 		_set_solo(true)  # carry on with the giant's own marble
 		_start_level(level)
@@ -2044,9 +2072,8 @@ func on_client_left() -> void:
 
 
 func on_p2_action(action: String, args: Array, index: int = 1) -> void:
-	if action == "join" and args.size() > 0:
-		index = int(args[0])
-	if index <= 0 or index >= players.size():
+	index = seats.host_action(action, args, index)  # many machines: who drives which seat (core/classic_seats.gd)
+	if index < 0:
 		return
 	var p = players[index]
 	match action:
@@ -2190,6 +2217,8 @@ func apply_snapshot(s: Array) -> void:
 
 
 func apply_event(kind: String, args: Array) -> void:
+	if seats.handle_event(kind, args):
+		return
 	if not ready_to_play:
 		return
 	match kind:
@@ -2239,13 +2268,13 @@ func _build_hud() -> void:
 	add_child(layer)
 	center_label = _make_label(46)
 	layer.add_child(center_label)
-	center_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(center_label, Control.PRESET_FULL_RECT, false)
 	center_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	center_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	center_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	help_label = _make_label(20)
 	layer.add_child(help_label)
-	help_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	UiKit.pin(help_label, Control.PRESET_BOTTOM_WIDE, false)
 	help_label.offset_top = -64
 	help_label.offset_bottom = -12
 	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

@@ -214,6 +214,9 @@ func apply_remote_state(pos: Vector3, new_yaw: float, new_pitch: float) -> void:
 
 ## Client: the host's view of this runner: [pos, yaw, active, carry_kind]
 func apply_net_state(st: Array) -> void:
+	if remote:  # TV machine: another machine's runner (core/classic_seats.gd ghost): mirror where it goes
+		net_target = st[0]
+		yaw = st[1]
 	carry_kind = st[3]
 	var on: bool = st[2]
 	if on != active:

@@ -1,6 +1,5 @@
 extends Node3D
 const VrText := preload("res://core/vr_text.gd")
-const Machine := preload("res://core/machine.gd")  # one player per screen on a Deck (view_on)
 ## Cannon Cove: our pirate ship against waves of pirate ships, boarders and a sea monster.
 ## The VR gunner (player 1) swings and fires the cannons; the TV deckhands (players 2 to 7, drop-in:
 ## press A on a spare controller to join) keep the cannons loaded, patch leaks and shoot boarders. Gold for every ship sunk; the game ends when
@@ -57,12 +56,15 @@ const GhostHandScript := preload("res://games/cannon_cove/ghost_hand.gd")
 const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
 const NetScript := preload("res://core/net.gd")
+const ClassicSeats := preload("res://core/classic_seats.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
 
 const GRAVITY := 9.8
 const MAX_LEAKS := 7
 const LEAK_RATE := 1.25  # % of the hold per second per leak (two deckhands)
 const MAX_PLAYERS := 7  # the gunner (index 0) plus up to six deckhands (indices 1..6)
+## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
+var multi_machine := true
 const PLAYER_COLORS: Array[Color] = [Color(0.25, 0.45, 0.95), Color(1.0, 0.75, 0.2), Color(1.0, 0.45, 0.8),
 	Color(0.35, 0.9, 0.4), Color(0.3, 0.9, 0.95), Color(1.0, 0.5, 0.15), Color(0.7, 0.45, 1.0)]
 const KEYS2_DEVICE := -2  # pseudo device id for the second keyboard set (arrows + Enter/Shift) on the TV
@@ -107,6 +109,8 @@ var xr_interface: XRInterface
 var mirror_vp: SubViewport
 var mirror_t := 0.0
 var net: Node
+## Which machine drives which deckhand seat (core/classic_seats.gd; core/net.gd checks it too).
+var seats: ClassicSeats
 var ready_to_play := false
 var synced := false
 var net_ids := 0
@@ -188,6 +192,14 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
+	seats = ClassicSeats.new(self, {
+		"free_actions": ["restart", "pause"],
+		"is_local": _is_local_flat,
+		"seat_free": func(p) -> bool: return not p.active and p.joy < 0 and p.key_set < 0 and not p.has_meta("want_join"),
+		"deactivate": _seat_gone,
+		"save": _remember_party,
+		"full": func() -> void: _show_center("FULL!", 1.5, false),
+	})
 	Input.joy_connection_changed.connect(_on_joy_changed)
 	if OS.has_environment("DUO_JOIN"):
 		# TV machine: join the VR gunner's game as the deckhands, or fall back to local split screen.
@@ -206,6 +218,10 @@ func _setup_game(mode: String) -> void:
 	_build_views(mode)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_assign_joypads()
+	if seats.deck_alone():
+		seats.deck_solo(0)
+	elif mode == "client":
+		players[1].set_meta("want_join", true)  # ask the host for a deckhand seat (it may hand out another one)
 	update_manned()
 	ready_to_play = true
 	print("Cannon Cove: %s mode" % mode)
@@ -881,7 +897,7 @@ func _layout_views() -> void:
 	for p in players:
 		if p.has_meta("view"):
 			var v: Control = p.get_meta("view")
-			v.visible = Machine.view_on(self, p)
+			v.visible = p.active and _is_local_flat(p)
 			if v.visible:
 				views.append(v)
 	var n := views.size()
@@ -1059,7 +1075,11 @@ func _poll_joins(delta: float) -> void:
 	join_t -= delta
 	if game_over or join_t > 0.0 or get_tree().paused or net.mode == "host":
 		return
-	for id in Input.get_connected_joypads():
+	var ids: Array = Input.get_connected_joypads()
+	for p in players:  # pads handed to a seat that sits out (a Deck alone: P2 holds a friend's pad) count too
+		if p.joy >= 0 and not ids.has(p.joy):
+			ids.append(p.joy)
+	for id in ids:
 		if not (Input.is_joy_button_pressed(id, JOY_BUTTON_A) or Input.is_joy_button_pressed(id, JOY_BUTTON_X)):
 			continue
 		var owner := device_owner(id)
@@ -1069,7 +1089,10 @@ func _poll_joins(delta: float) -> void:
 				_join_player(p, id)
 		elif not players[owner].active and net.mode == "client":
 			join_t = 1.0
-			net.send_action("join", [], owner)  # the host hasn't answered yet: ask again
+			players[owner].set_meta("want_join", true)  # the host hasn't answered yet: ask again
+			seats.ask_soon()
+		elif not players[owner].active and _is_local_flat(players[owner]):
+			_join_player(players[owner], id)  # local: the seat holding this pad sat out (a Deck alone): it joins
 		return
 	if net.mode == "client":
 		var keys2 := Input.is_physical_key_pressed(KEY_ENTER) or Input.is_physical_key_pressed(KEY_SHIFT) or Input.is_physical_key_pressed(KEY_SLASH)
@@ -1081,7 +1104,8 @@ func _poll_joins(delta: float) -> void:
 					_join_player(p, KEYS2_DEVICE)
 			elif not players[owner].active:
 				join_t = 1.0
-				net.send_action("join", [], owner)
+				players[owner].set_meta("want_join", true)
+				seats.ask_soon()
 
 
 func _free_slot():
@@ -1105,7 +1129,8 @@ func _join_player(p, device: int) -> void:
 	_remember_party()
 	print("Player %d joins with %s" % [p.index + 1, "the arrow keys" if device == KEYS2_DEVICE else "controller %d" % device])
 	if net.mode == "client":
-		net.send_action("join", [], p.index)
+		p.set_meta("want_join", true)
+		seats.ask_soon()
 		_show_center(("PLAYER %d!" if SIMPLE_MODE else "PLAYER %d IS COMING ABOARD!") % (p.index + 1), 1.2, false)
 	else:
 		p.position = spawn_pos(p.index)
@@ -1179,7 +1204,9 @@ func on_player_activity_changed(p) -> void:
 	if p.active and _is_local_flat(p):
 		_ensure_view(p)
 	if p.has_meta("view"):
-		p.get_meta("view").visible = Machine.view_on(self, p)
+		p.get_meta("view").visible = p.active and _is_local_flat(p)
+	if seats.joined(p):
+		p.remove_meta("want_join")
 	_layout_views()
 	print("Player %d is now %s on this screen" % [p.index + 1, "playing" if p.active else "waiting"])
 
@@ -1220,6 +1247,8 @@ func _process(delta: float) -> void:
 		_ensure_players(net.mode)
 	_poll_joins(delta)
 	if net.mode == "client":
+		seats.sync()
+		seats.request_joins(delta)
 		if game_over:
 			game_over_time += delta
 			if game_over_time > 1.5 and _restart_pressed():
@@ -2806,19 +2835,34 @@ func _unhandled_input(event: InputEvent) -> void:
 # --- Networked co-op -----------------------------------------------------------------
 
 func on_client_joined() -> void:
+	if not seats.first_machine():
+		return  # another machine: its deckhands come aboard when they ask ("join")
 	_show_center("ALL ABOARD!" if SIMPLE_MODE else "THE DECKHANDS ARE ABOARD!", 1.5)
 
 
+## Host: one machine left: only its deckhands leave (and their seats become free).
+func on_machine_left(peer: int) -> void:
+	var freed := seats.machine_left(peer)
+	if not freed.is_empty() and net.peer_count() > 0 and not SIMPLE_MODE:
+		_show_center("Player %d left the crew" % (int(freed[0]) + 1), 1.5)
+
+
+## Host: the LAST machine left (multi_machine games get this only then).
 func on_client_left() -> void:
 	_show_center("" if SIMPLE_MODE else "The deckhands left - waiting for them to come back…", 0.0)
-	for p in players:
-		if p.index >= 2 and p.active:
-			p.reset_crew_state()
-			p.set_active(false)  # the TV rejoins them when it reconnects
+	seats.all_left()  # each machine rejoins its crew when it reconnects
+
+
+## Host: a machine's deckhand seat goes away (that machine left).
+func _seat_gone(p) -> void:
+	if p.active:
+		p.reset_crew_state()
+		p.set_active(false)
 
 
 ## Host: a TV deckhand did something.
 func on_p2_action(action: String, args: Array, index: int = 1) -> void:
+	index = seats.host_action(action, args, index)  # many machines: who drives which seat (core/classic_seats.gd)
 	if index < 0 or index >= players.size():
 		return
 	var p = players[index]
@@ -2999,6 +3043,8 @@ func _make_ghost(kind: String, item: Array) -> Node3D:
 
 
 func apply_event(kind: String, args: Array) -> void:
+	if seats.handle_event(kind, args):
+		return
 	if not ready_to_play:
 		return
 	match kind:

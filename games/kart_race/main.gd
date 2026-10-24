@@ -25,10 +25,10 @@ extends Node3D
 ## it and squeeze the trigger, and a glowing arrow over the wheel when going the wrong way.
 
 const VrText := preload("res://core/vr_text.gd")
-const Machine := preload("res://core/machine.gd")  # one player per screen on a Deck (view_on)
 const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
 const NetScript := preload("res://core/net.gd")
+const ClassicSeats := preload("res://core/classic_seats.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
 const TrackScript := preload("res://games/kart_race/track.gd")
 const KartScript := preload("res://games/kart_race/kart.gd")
@@ -54,6 +54,10 @@ const PRACTICE_MAX := 75.0  # seconds: the race starts anyway
 const SIMPLE_NEXT := 9.0  # seconds of finish party before the next race starts by itself
 const MAX_PLAYERS := 7  # VR player + 6 TV karts
 const MAX_LOCAL_VIEWS := 6
+## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
+var multi_machine := true
+## Which machine drives which seat (core/net.gd checks it too).
+var seats: ClassicSeats
 const MAX_CPU := 3
 const GRID_FILL := 4  # CPU buddies fill the grid up to this many karts
 const CPU_BASE := 10  # CPU karts' index
@@ -178,6 +182,13 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
+	seats = ClassicSeats.new(self, {
+		"no_keys": KartScript.NO_KEYS,
+		"free_actions": ["continue", "pause"],
+		"deactivate": _seat_gone,
+		"ghost": func(p, _on: bool) -> void: p.target_pos = p.position; p.target_yaw = p.yaw,
+		"full": func() -> void: _show_center("All karts are taken!", 1.5, false),
+	})
 	Input.joy_connection_changed.connect(_on_joy_changed)
 	if OS.has_environment("DUO_JOIN"):
 		_show_center("Connecting to the VR player…", 0.0, false)
@@ -196,8 +207,12 @@ func _setup_game(mode: String) -> void:
 	_build_views(mode)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_assign_joypads()
+	if seats.deck_alone():
+		seats.deck_solo(0)
 	ready_to_play = true
 	_ensure_join_listener()
+	if mode == "client":
+		players[1].set_meta("want_join", true)  # ask the host for a kart (it may hand out another one)
 	_restore_party()
 	if SIMPLE_MODE:
 		laps = SIMPLE_LAPS
@@ -813,11 +828,11 @@ func _ensure_views_root() -> void:
 	bg.color = Color(0.1, 0.12, 0.2)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(bg)
-	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(bg, Control.PRESET_FULL_RECT, false)
 	views_root = Control.new()
 	views_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(views_root)
-	views_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(views_root, Control.PRESET_FULL_RECT, false)
 
 
 ## One split-screen view (SubViewport + chase camera + HUD) per local kart, created when it joins.
@@ -851,7 +866,7 @@ func _ensure_view(p) -> void:
 	var hud := Control.new()
 	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hud_layer.add_child(hud)
-	hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(hud, Control.PRESET_FULL_RECT, false)
 	p.hud = hud
 	var tagc := ColorRect.new()
 	tagc.color = p.color
@@ -863,14 +878,14 @@ func _ensure_view(p) -> void:
 	p.hud_label.position = Vector2(40, 10)
 	p.place_label = _make_label(72)
 	hud.add_child(p.place_label)
-	p.place_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	UiKit.pin(p.place_label, Control.PRESET_TOP_RIGHT, false)
 	p.place_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	p.item_label = _make_label(28)
 	hud.add_child(p.item_label)
-	p.item_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
+	UiKit.pin(p.item_label, Control.PRESET_BOTTOM_LEFT, false)
 	p.hint_label = _make_label(40)
 	hud.add_child(p.hint_label)
-	p.hint_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	UiKit.pin(p.hint_label, Control.PRESET_CENTER, false)
 	p.hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	p.hint_label.add_theme_color_override("font_color", Color(1.0, 0.95, 0.5))
 	var bar_bg := ColorRect.new()
@@ -915,7 +930,7 @@ func _layout_views() -> void:
 		if not p.has_meta("view"):
 			continue
 		var c: SubViewportContainer = p.get_meta("view")
-		c.visible = Machine.view_on(self, p)
+		c.visible = p.active and p.is_local()
 		if c.visible:
 			shown.append(p)
 	var n := shown.size()
@@ -943,7 +958,7 @@ func _layout_views() -> void:
 		var c: SubViewportContainer = p.get_meta("view")
 		var col := k % cols
 		var row := k / cols
-		c.set_anchors_preset(Control.PRESET_TOP_LEFT)
+		UiKit.pin(c, Control.PRESET_TOP_LEFT)
 		c.position = Vector2(col * (cell.x + gap), row * (cell.y + gap))
 		c.size = cell
 		var vp := c.get_child(0) as SubViewport
@@ -997,7 +1012,11 @@ func _assign_joypads() -> void:
 
 
 func _on_joy_changed(device: int, connected: bool) -> void:
-	if not ready_to_play or net.mode == "host":
+	if not ready_to_play:
+		return
+	if net.mode == "host":
+		if connected and not players[0].vr and players[0].joy < 0:
+			players[0].joy = device  # flat host (no VR): P1 drives with this controller
 		return
 	if connected:
 		print("Joypad %d connected" % device)
@@ -1008,7 +1027,7 @@ func _on_joy_changed(device: int, connected: bool) -> void:
 			if p.is_local() and p.joy < 0 and int(p.get_meta("last_joy", -2)) == device:
 				pick = p
 				break
-		if pick == null and players[1].joy < 0:
+		if pick == null and players[1].joy < 0 and players[1].is_local():
 			pick = players[1]
 		if pick == null:
 			return  # unassigned: press A to join
@@ -1050,17 +1069,8 @@ func handle_join_input(event: InputEvent) -> bool:
 	return _join_slot(device) != null
 
 
-func _next_free_index() -> int:
-	for i in range(1, players.size()):
-		var p = players[i]
-		if not p.is_local() or p.active or p.has_meta("want_join") or p.joy >= 0 or p.pad_lost_t >= 0.0:
-			continue
-		return i
-	return -1
-
-
 func _join_slot(device: int):
-	var idx := _next_free_index()
+	var idx := seats.free_index()
 	if idx < 0:
 		_show_center("All %d karts are taken!" % (players.size() - 1), 1.5, false)
 		return null
@@ -1078,7 +1088,7 @@ func _request_join(p) -> void:
 	p.pad_lost_t = -1.0
 	if net.mode == "client":
 		p.set_meta("want_join", true)
-		join_t = 0.0
+		seats.ask_soon()
 	elif not p.active:
 		_activate(p)
 	_save_party()
@@ -1194,25 +1204,10 @@ func debug_join(index: int = -1):
 	return p
 
 
-var join_t := 0.0
-func _check_join(delta: float) -> void:
-	join_t -= delta
-	if join_t > 0.0:
-		return
-	for p in players:
-		if not p.has_meta("want_join") or not p.is_local():
-			continue
-		if p.active:
-			p.remove_meta("want_join")
-			continue
-		join_t = 1.0
-		net.send_action("join", [p.index], 1)
-
-
 func on_player_activity_changed(p) -> void:
 	if p.active and p.is_local():
 		_ensure_view(p)
-	if p.active:
+	if seats.joined(p):
 		p.remove_meta("want_join")
 	_layout_views()
 	print("Player %d is now %s" % [p.index + 1, "racing" if p.active else "waiting"])
@@ -1335,7 +1330,8 @@ func _host_update(dt: float, cont_edge: bool) -> void:
 
 
 func _client_update(dt: float, cont_edge: bool) -> void:
-	_check_join(dt)
+	seats.sync()
+	seats.request_joins(dt)
 	_update_lost_pads(dt)
 	state_t += dt
 	if state == "race":
@@ -1945,7 +1941,7 @@ func _update_cue(p, l: Label) -> void:
 		box.alignment = BoxContainer.ALIGNMENT_CENTER
 		box.add_theme_constant_override("separation", 18)
 		l.add_child(box)
-		box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		UiKit.pin(box, Control.PRESET_FULL_RECT, false)
 		box.set_meta("key", "")
 	box.offset_top = drop
 	box.offset_bottom = drop
@@ -2394,11 +2390,11 @@ func on_boost(k, text: String) -> void:
 # --- Networked co-op (see docs/GAME_DEV_GUIDE.md) ------------------------------------------
 
 func on_client_joined() -> void:
+	# Each machine asks for its own karts ("join"); only the first one starts the race.
+	if net.peer_count() > 1:
+		return
 	if not SIMPLE_MODE:
 		_show_center("THE TV PLAYERS JOINED!", 1.5)
-	var p = players[1]
-	if not p.active:
-		_activate(p)
 	if state == "wait" and SIMPLE_MODE and practice_gate >= 0:
 		pass  # they join the practice rings; the race starts after the third one
 	elif state == "wait":
@@ -2407,18 +2403,29 @@ func on_client_joined() -> void:
 		_next_race()
 
 
+## Host: one machine left: only its karts leave (and their seats become free).
+func on_machine_left(peer: int) -> void:
+	seats.machine_left(peer)
+
+
+## A machine's kart leaves the race (its machine left).
+func _seat_gone(p) -> void:
+	if p.active:
+		p.set_active(false)
+		if net.peer_count() > 0 and not SIMPLE_MODE:
+			_show_center("%s LEFT" % p.kart_name, 1.5)
+
+
+## Host: the LAST machine left (multi_machine games get this only then).
 func on_client_left() -> void:
-	for i in range(1, players.size()):
-		if players[i].active:
-			players[i].set_active(false)
+	seats.all_left()
 	if not SIMPLE_MODE:
 		_show_center("The TV players left - racing on with the CPU buddies", 2.5)
 
 
 func on_p2_action(action: String, args: Array, index: int = 1) -> void:
-	if action == "join" and args.size() > 0:
-		index = int(args[0])
-	if index <= 0 or index >= players.size():
+	index = seats.host_action(action, args, index)  # many machines: who drives which seat (core/classic_seats.gd)
+	if index < 0:
 		return
 	var p = players[index]
 	match action:
@@ -2555,6 +2562,8 @@ func _relocate_local() -> void:
 
 
 func apply_event(kind: String, args: Array) -> void:
+	if seats.handle_event(kind, args):
+		return
 	if not ready_to_play:
 		return
 	match kind:
@@ -2648,13 +2657,13 @@ func _build_hud() -> void:
 	add_child(layer)
 	center_label = _make_label(42)
 	layer.add_child(center_label)
-	center_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(center_label, Control.PRESET_FULL_RECT, false)
 	center_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	center_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	center_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	help_label = _make_label(20)
 	layer.add_child(help_label)
-	help_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	UiKit.pin(help_label, Control.PRESET_BOTTOM_WIDE, false)
 	help_label.offset_top = -40
 	help_label.offset_bottom = -8
 	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

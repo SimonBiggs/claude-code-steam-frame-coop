@@ -5,6 +5,7 @@ extends Node3D
 ## hole until the first putt, and again whenever the golfer hasn't putted for a while. Host only.
 
 const MeshKit := preload("res://core/mesh_kit.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 const Course := preload("res://games/mini_golf_party/course.gd")
 const CYCLE := 2.6
 
@@ -74,4 +75,4 @@ func show_demo(want: bool, ball: Vector3, fwd: Vector3, delta: float) -> void:
 	var x := y.cross(fwd).normalized()
 	_club.global_transform = Transform3D(Basis(x, y, x.cross(y)).orthonormalized().scaled_local(Vector3(1.0, d.length(), 1.0)), head)
 	# The club's head itself, turned across the swing (the box above is on the shaft's end).
-	_hand.global_transform = Transform3D(Basis.looking_at(d.normalized(), Vector3.UP if absf(d.normalized().y) < 0.98 else fwd), grip)
+	_hand.global_transform = Transform3D(UiKit.face(d, Vector3.UP, fwd), grip)

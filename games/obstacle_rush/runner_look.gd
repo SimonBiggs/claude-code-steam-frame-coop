@@ -6,6 +6,7 @@ extends RefCounted
 ## (TV players) or the CPU palette.
 
 const MeshKit := preload("res://core/mesh_kit.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")
 
 const VERSION := "v2"
@@ -48,7 +49,7 @@ static func _build_body(color: Color, costume: String, pattern: String) -> Array
 			for s in spots:
 				var dir := Vector3(s.x, 0.0, s.z).normalized()
 				var pos := dir * RADIUS * 0.98 + Vector3(0, 0.22 + s.y * 0.7, 0)
-				b.ellipsoid(Vector3(0.08, 0.08, 0.025), MeshKit.aim(pos, Vector3.UP, Vector3.ONE) * Transform3D(Basis.looking_at(dir), Vector3.ZERO), light, 8)
+				b.ellipsoid(Vector3(0.08, 0.08, 0.025), MeshKit.aim(pos, Vector3.UP, Vector3.ONE) * Transform3D(UiKit.face(dir), Vector3.ZERO), light, 8)
 		"belly":
 			b.ellipsoid(Vector3(0.25, 0.3, 0.1), MeshKit.at(Vector3(0, 0.42, -RADIUS * 0.82)), light, 12)
 		_:

@@ -142,7 +142,7 @@ func _input(event: InputEvent) -> void:
 func _physics_process(delta: float) -> void:
 	if not active:
 		return
-	if remote:
+	if remote or ghost:  # ghost: another machine's crew member, mirrored from snapshots
 		position = position.lerp(net_target, 1.0 - exp(-18.0 * delta))
 		pivot.rotation.y = yaw
 		return

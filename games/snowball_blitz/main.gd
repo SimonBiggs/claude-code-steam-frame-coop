@@ -1,6 +1,5 @@
 extends Node3D
 const VrText := preload("res://core/vr_text.gd")
-const Machine := preload("res://core/machine.gd")  # one player per screen on a Deck (view_on)
 ## Snowball Blitz: defend the snow fort in the village square from waves of mischievous snowmen.
 ## VR player (host): the team's sniper, throwing real snowballs with their hands.
 ## TV players: lob charged snowballs and pack the fort walls back up. Hot cocoa warms you up.
@@ -47,6 +46,7 @@ const HudScript := preload("res://games/snowball_blitz/hud.gd")
 const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
 const NetScript := preload("res://core/net.gd")
+const ClassicSeats := preload("res://core/classic_seats.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
 const JoinInputScript := preload("res://games/snowball_blitz/join_input.gd")
 const DirectorScript := preload("res://games/snowball_blitz/director.gd")
@@ -100,6 +100,10 @@ var seg_max := SEG_MAX
 var segments := SEGMENTS
 
 var players: Array = []
+## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
+var multi_machine := true
+## Which machine drives which TV player (core/classic_seats.gd; core/net.gd checks it too).
+var seats: ClassicSeats
 var ready_to_play := false
 var net: Node
 var sfx: Node
@@ -129,7 +133,6 @@ var stats := []
 var view_grid: GridContainer
 var join_listener: Node
 var pad_memory := {}  # joypad device id -> player index it last controlled (rejoins on reconnect)
-var join_sent := {}  # player index -> msec of the last join request sent to the host
 var boss_hp := -1.0  # fraction, -1 when no Snow King is around
 var boss_name := ""
 var dir_node: Node
@@ -173,6 +176,17 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
+	seats = ClassicSeats.new(self, {
+		"no_keys": -2,  # player.gd key_set -2: controller only
+		"free_actions": ["restart", "pause"],
+		"is_local": _is_local_tv,
+		"keys": func(p) -> int: return p.keys() if p.keys() >= 0 else -2,
+		"seat_free": func(p) -> bool: return _is_local_tv(p) and not p.active and p.joy < 0 and p.keys() < 0 and not p.has_meta(ClassicSeats.WANT),
+		"ghost": _seat_ghost,
+		"deactivate": func(p) -> void: _deactivate_player(p.index),
+		"layout": _sync_view_visibility,
+		"full": func() -> void: sound("miss", -8.0),  # no words: nothing happens
+	})
 	Input.joy_connection_changed.connect(_on_joy_changed)
 	if OS.has_environment("DUO_JOIN"):
 		_show_center("Connecting to the VR player…", 0.0)
@@ -189,6 +203,10 @@ func _setup_game(mode: String) -> void:
 	_build_views(mode)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_assign_joypads()
+	if seats.deck_alone():
+		seats.deck_solo(0)  # a Deck on its own: one full-screen player
+	elif mode == "client":
+		players[1].set_meta(ClassicSeats.WANT, true)  # ask the host for P2's seat (it may hand out another one)
 	ready_to_play = true
 	_ensure_party()
 	if SIMPLE_MODE:
@@ -1317,6 +1335,8 @@ func _process(delta: float) -> void:
 	_update_hud()
 	_check_join(delta)
 	if net.mode == "client":
+		seats.sync()
+		seats.request_joins(delta)
 		if game_over:
 			game_over_time += delta
 			if game_over_time > 1.5 and _restart_pressed():
@@ -1454,8 +1474,8 @@ func _build_players(mode: String) -> void:
 		p.main = self
 		p.remote = mode == "host" and i >= 1
 		p.ghost = mode == "client" and i == 0
-		if mode == "local" and i == 0:
-			p.mouse_look = true
+		if i == 0 and (mode == "local" or (mode == "host" and not net.has_vr)):
+			p.mouse_look = true  # local P1 / a flat host's own player (no VR)
 		elif mode != "local" and i == 2:
 			p.key_set = 0
 			p.mouse_look = true
@@ -1610,7 +1630,7 @@ func _sync_view_visibility() -> void:
 	for p in players:
 		if p.has_meta("view"):
 			var v: Control = p.get_meta("view")
-			v.visible = Machine.view_on(self, p)
+			v.visible = p.active and _is_local_tv(p)
 	_layout_views()
 
 
@@ -1743,6 +1763,8 @@ func _base_slots() -> Array[int]:
 		slots.append(1)
 		if not players[0].vr:
 			slots.append(0)
+	elif net.mode == "host" and not players.is_empty() and not players[0].vr:
+		slots.append(0)  # flat host (no VR): the host's own player
 	return slots
 
 
@@ -1831,7 +1853,7 @@ func _check_join(_delta: float) -> void:
 	if game_over or net.mode == "host":
 		return
 	for p in players:
-		if p.active or not _is_local_tv(p) or p.camera == null:
+		if p.active or not _is_local_tv(p) or p.camera == null or p.has_meta(ClassicSeats.WANT):
 			continue
 		if (p.joy >= 0 or p.has_keyboard()) and p._throw_held():
 			_request_join(p.index)
@@ -1839,11 +1861,8 @@ func _check_join(_delta: float) -> void:
 
 func _request_join(i: int) -> void:
 	if net.mode == "client":
-		var now := Time.get_ticks_msec()
-		if now - int(join_sent.get(i, -100000)) < 800:
-			return
-		join_sent[i] = now
-		net.send_action("join", [], i)
+		players[i].set_meta(ClassicSeats.WANT, true)  # seats.request_joins asks the host until it's ours
+		seats.ask_soon()
 	else:
 		_activate_player(i)
 
@@ -1944,6 +1963,8 @@ func on_player_activity_changed(p) -> void:
 # --- Networked co-op (see docs/GAME_DEV_GUIDE.md) ----------------------------
 
 func on_client_joined() -> void:
+	if not seats.first_machine():
+		return  # another machine: its players join when they ask ("join")
 	if SIMPLE_MODE:
 		sound("pickup", 0.0, 0.8)
 		_show_center("HELLO TV!", 1.5)
@@ -1951,13 +1972,30 @@ func on_client_joined() -> void:
 	_show_center("THE TV PLAYERS JOINED!", 1.5)
 
 
+## Host: one machine left: only its players leave (and their seats become free).
+func on_machine_left(peer: int) -> void:
+	seats.machine_left(peer)
+
+
+## TV machine: seat p is another machine's now (on: mirrored from the snapshots, no view here) or ours again.
+func _seat_ghost(p, on: bool) -> void:
+	p.net_started = false  # snap to the first mirrored position, no glide
+	p.charging = false
+	if not on:
+		_ensure_views()
+	on_player_activity_changed(p)
+
+
+## Host: the LAST machine left (multi_machine games get this only then).
 func on_client_left() -> void:
+	seats.all_left()  # each machine asks for its players again when it reconnects
 	if SIMPLE_MODE:
 		return  # keep playing; they can drop back in
 	_show_center("The TV players left - waiting for them to rejoin…", 0.0)
 
 
 func on_p2_action(action: String, args: Array, index: int = 1) -> void:
+	index = seats.host_action(action, args, index)  # many machines: who drives which seat (core/classic_seats.gd)
 	if index < 0 or index >= players.size():
 		return
 	var p = players[index]
@@ -2093,6 +2131,8 @@ func _make_ghost(kind: String, item: Array) -> Node3D:
 
 
 func apply_event(kind: String, args: Array) -> void:
+	if seats.handle_event(kind, args):
+		return
 	if not ready_to_play:
 		return
 	match kind:

@@ -99,11 +99,21 @@ export async function launch(o: LaunchOpts | string): Promise<Game> {
   // No real controllers: hide /dev/input AND every /dev/hidraw* (Godot's SDL reads pads through hidraw too; a
   // family member's PS4 pad was steering offscreen tests), and turn SDL's HIDAPI driver off for good measure.
   const hidraw = (await readdir("/dev").catch(() => [] as string[])).filter(f => f.startsWith("hidraw")).flatMap(f => ["--ro-bind", "/dev/null", `/dev/${f}`]);
-  const args = ["--dev-bind", "/", "/", "--tmpfs", "/dev/input", ...hidraw, "--tmpfs", "/tmp/.X11-unix", "--die-with-parent",
+  // Never take the TV's displays: Gaming Mode's games were opening into an offscreen gamescope that held X display :1
+  // (Steam sends games to :1, and X abstract sockets are shared between namespaces). So each run gets a private /tmp
+  // whose lock files reserve :0-:19 (test displays land on :20-:32; Xwayland only searches up to :32), and its own XDG_RUNTIME_DIR for gamescope-N sockets.
+  // Only gamescope gets the private /tmp: Godot runs in a nested bwrap with the real /tmp bound back (tests save files
+  // there), and still reaches its Xwayland through the abstract X socket.
+  const hostTmp = join(dir, "hosttmp");
+  await mkdir(hostTmp, { recursive: true });
+  const args = ["--dev-bind", "/", "/", "--tmpfs", "/dev/input", ...hidraw, "--bind", "/tmp", hostTmp, "--tmpfs", "/tmp", "--die-with-parent",
+    "sh", "-c", 'for i in $(seq 0 19); do printf "%10d\\n" $$ > /tmp/.X$i-lock; done; exec "$@"', "sh",
     "gamescope", "--backend", "headless", "-W", String(w), "-H", String(h), "-w", String(w), "-h", String(h), "--",
-    "godot", "--path", proj, "--audio-driver", "Dummy", "--xr-mode", "off", "--resolution", `${w}x${h}`, ...(opts.scene ? [opts.scene] : [])];
-  const env = { ...process.env, ...(opts.vr ? { BOT_VR: "1" } : {}), SDL_JOYSTICK_HIDAPI: "0", GDEV_CONTROL_PORT: String(port), XDG_DATA_HOME: join(dir, "data"), DUO_PORT: String(opts.duoPort ?? port + 1000), ...opts.env };
+    "bwrap", "--dev-bind", "/", "/", "--bind", hostTmp, "/tmp", "--die-with-parent", "godot", "--path", proj, "--audio-driver", "Dummy", "--xr-mode", "off", "--resolution", `${w}x${h}`, ...(opts.scene ? [opts.scene] : [])];
+  await mkdir(join(dir, "run"), { recursive: true, mode: 0o700 });
+  const env = { ...process.env, ...(opts.vr ? { BOT_VR: "1" } : {}), SDL_JOYSTICK_HIDAPI: "0", XDG_RUNTIME_DIR: join(dir, "run"), GDEV_CONTROL_PORT: String(port), XDG_DATA_HOME: join(dir, "data"), DUO_PORT: String(opts.duoPort ?? port + 1000), ...opts.env };
   for (const k of ["DUO_HOST", "DUO_JOIN"]) if (!opts.env?.[k]) delete env[k];  // local unless asked
+  for (const k of ["DISPLAY", "WAYLAND_DISPLAY", "GAMESCOPE_WAYLAND_DISPLAY"]) delete env[k];  // never the TV's display
   const log = Bun.file(logPath).writer();
   // Low CPU priority so offscreen tests never make the family's game on the TV stutter.
   const child = spawn("nice", ["-n", "10", "bwrap", ...args], { env, detached: true, stdio: ["ignore", "pipe", "pipe"] });

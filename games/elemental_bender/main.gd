@@ -66,6 +66,8 @@ const INTRO := {
 var net: Node
 var ready_to_play := false
 var party: Party
+## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
+var multi_machine := true
 var split: SplitView
 var vr_rig: VrRig
 var save: Save
@@ -190,7 +192,8 @@ func _ready() -> void:
 
 
 func _setup(mode: String) -> void:
-	var vr := VrRig.wanted(mode)
+	var flat: bool = mode == "host" and not net.has_vr  # flat host (TV / Deck hosting): slot 0 is a pad player here
+	var vr := VrRig.wanted(mode) and not flat
 	world = World.new()
 	world.name = "World"
 	add_child(world)
@@ -214,7 +217,7 @@ func _setup(mode: String) -> void:
 		add_child(master)
 		master.setup(self, vr_rig)
 		hints.set_vr_rig(vr_rig, self)
-	if mode != "host":
+	if mode != "host" or not vr:
 		split = SplitView.new()
 		add_child(split)
 		split.bind_party(party)
@@ -232,7 +235,7 @@ func _setup(mode: String) -> void:
 			split.set_bubble(VrRig.build_mirror(self, avatar.head, false))
 		elif vr_rig != null:
 			split.set_bubble(vr_rig.mirror)
-	party.allow_slot0 = mode == "local" and vr_rig == null
+	party.allow_slot0 = mode != "client" and vr_rig == null
 	if vr_rig != null:
 		awards.set_player(0, "MASTER")
 	if mode != "client":
@@ -1389,7 +1392,8 @@ func on_pause_changed(paused: bool, by_slot: int) -> void:
 # --- Networking --------------------------------------------------------------------------------
 
 ## Host, 30 Hz: [vr pose, raiders, fighters, team]. Raiders: 8 floats each (id, x, y, z, yaw,
-## element, flags, hp fraction); fighters: 6 floats (slot, hp, element, spirit_t, dead, down_t);
+## element, flags, hp fraction); fighters: 10 floats (slot, hp, element, spirit_t, dead, down_t, x, y, z, yaw:
+## other machines' benders are drawn from these);
 ## team: spirit, VR element, dummy id, dummy element, dummy x, z. About 14 * 32 + 7 * 24 bytes.
 func make_snapshot() -> Array:
 	var pose := vr_rig.pack_pose() if vr_rig != null else PackedFloat32Array()
@@ -1404,8 +1408,11 @@ func make_snapshot() -> Array:
 	var fd := PackedFloat32Array()
 	for f in fighters(false):
 		var n: Node3D = f
+		var fp := n.global_position
+		var fy: float = (n as Bender).visual_yaw() if n is Bender else 0.0
 		fd.append_array([float(n.get("slot")), roundf(float(n.get("hp"))), float(n.get("element")),
-			snappedf(float(n.get("spirit_t")), 0.1), 1.0 if bool(n.get("dead")) else 0.0, 0.0])
+			snappedf(float(n.get("spirit_t")), 0.1), 1.0 if bool(n.get("dead")) else 0.0, 0.0,
+			snappedf(fp.x, 0.01), snappedf(fp.y, 0.01), snappedf(fp.z, 0.01), snappedf(fy, 0.02)])
 	var team := PackedFloat32Array([roundf(spirit), float(master.element) if master != null else -1.0,
 		float(dummy.dummy_id) if dummy != null else 0.0, float(dummy.element) if dummy != null else 0.0,
 		dummy.position.x if dummy != null else 0.0, dummy.position.z if dummy != null else 0.0,
@@ -1420,6 +1427,8 @@ func apply_snapshot(s: Array) -> void:
 	var team: PackedFloat32Array = s[3]
 	if avatar != null:
 		avatar.apply_pose(s[0])
+		if split != null and (s[0] as PackedFloat32Array).is_empty():
+			split.clear_bubble()  # a flat host: no VR player to show in the bubble
 		var ve := int(team[1])
 		avatar_glow.visible = ve >= 0
 		if ve >= 0:
@@ -1450,16 +1459,20 @@ func apply_snapshot(s: Array) -> void:
 		if not seen.has(id):
 			(raiders[id] as Node).queue_free()
 			raiders.erase(id)
-	# Our own benders' health and Spirit State come from the host.
+	# Every bender's health and Spirit State come from the host; other machines' benders also their
+	# spot, facing and element (many machines: they are puppets here).
 	var fd: PackedFloat32Array = s[2]
 	var j := 0
-	while j + 5 < fd.size():
+	while j + 9 < fd.size():
 		var b: Bender = benders.get(int(fd[j]))
 		if b != null:
 			b.hp = fd[j + 1]
 			b.spirit_t = fd[j + 3]
 			b.dead = fd[j + 4] > 0.5
-		j += 6
+			if not b.owned:
+				b.element = int(fd[j + 2])
+				b.set_remote(Vector3(fd[j + 6], fd[j + 7], fd[j + 8]), fd[j + 9])
+		j += 10
 	# The practice dummy.
 	var did := int(team[2])
 	if did == 0:
@@ -1509,8 +1522,13 @@ func apply_event(kind: String, args: Array) -> void:
 
 
 func on_client_joined() -> void:
-	print("Elemental Bender: the TV machine joined (wave %d)" % wave)
+	print("Elemental Bender: a TV machine joined (wave %d)" % wave)
 
 
 func on_client_left() -> void:
-	print("Elemental Bender: the TV machine left")
+	print("Elemental Bender: the last TV machine left")
+
+
+## Host: one machine went away (core/party.gd frees its seats; _sync_benders drops their benders).
+func on_machine_left(peer: int) -> void:
+	print("Elemental Bender: machine %d left" % peer)

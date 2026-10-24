@@ -6,57 +6,57 @@ extends Node
 ## With a single game, ARCADE_GAME=<id>, or no lobby partner, it behaves like a plain local menu.
 
 const GAMES := [
-	{"id": "duo_arena", "cat": "action", "name": "DUO ARENA", "scene": "res://games/duo_arena/main.tscn",
+	{"id": "duo_arena", "multi": true, "cat": "action", "name": "DUO ARENA", "scene": "res://games/duo_arena/main.tscn",
 		"blurb": "Neon first-person co-op arena shooter"},
-	{"id": "ghost_lantern", "cat": "action", "name": "GHOST LANTERN", "scene": "res://games/ghost_lantern/main.tscn",
+	{"id": "ghost_lantern", "multi": true, "cat": "action", "name": "GHOST LANTERN", "scene": "res://games/ghost_lantern/main.tscn",
 		"blurb": "Spooky-cute ghost hunt: VR lantern reveals ghosts, TV players vacuum them up"},
-	{"id": "snowball_blitz", "cat": "action", "name": "SNOWBALL BLITZ", "scene": "res://games/snowball_blitz/main.tscn",
+	{"id": "snowball_blitz", "multi": true, "cat": "action", "name": "SNOWBALL BLITZ", "scene": "res://games/snowball_blitz/main.tscn",
 		"blurb": "Cosy snow-fort defence: throw real snowballs in VR, pack the walls on the TV"},
-	{"id": "cannon_cove", "cat": "action", "name": "CANNON COVE", "scene": "res://games/cannon_cove/main.tscn",
+	{"id": "cannon_cove", "multi": true, "cat": "action", "name": "CANNON COVE", "scene": "res://games/cannon_cove/main.tscn",
 		"blurb": "Pirate co-op: VR gunner aims the cannons, TV deckhands load them and patch leaks"},
-	{"id": "kitchen_rush", "cat": "party", "name": "KITCHEN RUSH", "scene": "res://games/kitchen_rush/main.tscn",
+	{"id": "kitchen_rush", "multi": true, "cat": "party", "name": "KITCHEN RUSH", "scene": "res://games/kitchen_rush/main.tscn",
 		"blurb": "Co-op cooking chaos: VR chef chops and plates, TV runners fetch and serve"},
-	{"id": "giants_table", "cat": "action", "name": "GIANT'S TABLE", "scene": "res://games/giants_table/main.tscn",
+	{"id": "giants_table", "multi": true, "cat": "action", "name": "GIANT'S TABLE", "scene": "res://games/giants_table/main.tscn",
 		"blurb": "Be a VR giant protecting a tiny tabletop village; TV players are the knights"},
-	{"id": "rocket_workshop", "cat": "cosy", "name": "ROCKET WORKSHOP", "scene": "res://games/rocket_workshop/main.tscn",
+	{"id": "rocket_workshop", "multi": true, "cat": "cosy", "name": "ROCKET WORKSHOP", "scene": "res://games/rocket_workshop/main.tscn",
 		"blurb": "Cosy rocket puzzle: the VR pilot works the controls, the TV crew read the blueprints out loud"},
-	{"id": "marble_maze", "cat": "sports", "name": "MARBLE MAZE", "scene": "res://games/marble_maze/main.tscn",
+	{"id": "marble_maze", "multi": true, "cat": "sports", "name": "MARBLE MAZE", "scene": "res://games/marble_maze/main.tscn",
 		"blurb": "Ball racing: VR tilts a giant tabletop maze, everyone on the TV is a marble"},
-	{"id": "hide_and_seek", "cat": "party", "name": "HIDE AND SEEK", "scene": "res://games/hide_and_seek/main.tscn",
+	{"id": "hide_and_seek", "multi": true, "cat": "party", "name": "HIDE AND SEEK", "scene": "res://games/hide_and_seek/main.tscn",
 		"blurb": "VR seeker with a torch; TV hiders sneak or disguise as lamps, plants and boxes"},
-	{"id": "block_builders", "cat": "cosy", "name": "BLOCK BUILDERS", "scene": "res://games/block_builders/main.tscn",
+	{"id": "block_builders", "multi": true, "cat": "cosy", "name": "BLOCK BUILDERS", "scene": "res://games/block_builders/main.tscn",
 		"blurb": "VR giant builds bridges and springs; tiny TV runners race to the flag"},
-	{"id": "dragon_rider", "cat": "action", "name": "DRAGON RIDER", "scene": "res://games/dragon_rider/main.tscn",
+	{"id": "dragon_rider", "multi": true, "cat": "action", "name": "DRAGON RIDER", "scene": "res://games/dragon_rider/main.tscn",
 		"blurb": "VR steers a friendly dragon with the reins; TV gunners pop balloons from its back"},
-	{"id": "bee_garden", "cat": "cosy", "name": "BEE GARDEN", "scene": "res://games/bee_garden/main.tscn",
+	{"id": "bee_garden", "multi": true, "cat": "cosy", "name": "BEE GARDEN", "scene": "res://games/bee_garden/main.tscn",
 		"blurb": "Cosy, no fighting: VR gardener plants and waters, TV bees make honey"},
-	{"id": "paint_and_guess", "cat": "party", "name": "PAINT AND GUESS", "scene": "res://games/paint_and_guess/main.tscn",
+	{"id": "paint_and_guess", "multi": true, "cat": "party", "name": "PAINT AND GUESS", "scene": "res://games/paint_and_guess/main.tscn",
 		"blurb": "VR paints a secret word in the air; TV players race to guess it"},
-	{"id": "rhythm_band", "cat": "party", "name": "RHYTHM BAND", "scene": "res://games/rhythm_band/main.tscn",
+	{"id": "rhythm_band", "multi": true, "cat": "party", "name": "RHYTHM BAND", "scene": "res://games/rhythm_band/main.tscn",
 		"blurb": "VR drums with your hands; TV players hit notes on their highways"},
-	{"id": "penalty_shootout", "cat": "sports", "name": "PENALTY SHOOTOUT", "scene": "res://games/penalty_shootout/main.tscn",
+	{"id": "penalty_shootout", "multi": true, "cat": "sports", "name": "PENALTY SHOOTOUT", "scene": "res://games/penalty_shootout/main.tscn",
 		"blurb": "VR goalkeeper saves with big gloves; TV strikers aim, power up and bend shots"},
-	{"id": "fishing_lake", "cat": "cosy", "name": "FISHING LAKE", "scene": "res://games/fishing_lake/main.tscn",
+	{"id": "fishing_lake", "multi": true, "cat": "cosy", "name": "FISHING LAKE", "scene": "res://games/fishing_lake/main.tscn",
 		"blurb": "Relaxing: VR casts and reels from the jetty; TV rowers herd fish and net treasure"},
-	{"id": "kart_race", "cat": "sports", "name": "KART RACE", "scene": "res://games/kart_race/main.tscn",
+	{"id": "kart_race", "multi": true, "cat": "sports", "name": "KART RACE", "scene": "res://games/kart_race/main.tscn",
 		"blurb": "VR turns a real steering wheel; TV racers drive in split screen, with items and ramps"},
-	{"id": "tiny_town_tycoon", "cat": "cosy", "name": "TINY TOWN TYCOON", "scene": "res://games/tiny_town_tycoon/main.tscn",
+	{"id": "tiny_town_tycoon", "multi": true, "cat": "cosy", "name": "TINY TOWN TYCOON", "scene": "res://games/tiny_town_tycoon/main.tscn",
 		"blurb": "Build a cosy toy town together: the mayor places the buildings, the drivers bring it to life"},
-	{"id": "party_board", "cat": "party", "name": "PARTY BOARD", "scene": "res://games/party_board/main.tscn",
+	{"id": "party_board", "multi": true, "cat": "party", "name": "PARTY BOARD", "scene": "res://games/party_board/main.tscn",
 		"blurb": "A Mario-Party-style board game on a diorama island: roll, hop, shop and duel for STARS, with a minigame after every round"},
-	{"id": "mech_titans", "cat": "action", "name": "MECH TITANS", "scene": "res://games/mech_titans/main.tscn",
+	{"id": "mech_titans", "multi": true, "cat": "action", "name": "MECH TITANS", "scene": "res://games/mech_titans/main.tscn",
 		"blurb": "Giant robot vs cute kaiju: VR pilot punches and beams from the cockpit, TV jets, trucks, drones and tanks support"},
 	{"id": "roller_coaster", "cat": "cosy", "name": "COASTER CREW", "scene": "res://games/roller_coaster/main.tscn",
 		"blurb": "VR builds a roller coaster with their hands on a tabletop park; TV players ride it, hands up!"},
-	{"id": "mini_golf_party", "cat": "sports", "name": "MINI GOLF PARTY", "scene": "res://games/mini_golf_party/main.tscn",
+	{"id": "mini_golf_party", "multi": true, "cat": "sports", "name": "MINI GOLF PARTY", "scene": "res://games/mini_golf_party/main.tscn",
 		"blurb": "Life-size mini golf in a sunny garden: swing a real putter in VR or aim and hold A on the TV, and everyone putts at once!"},
-	{"id": "obstacle_rush", "cat": "party", "name": "OBSTACLE RUSH", "scene": "res://games/obstacle_rush/main.tscn",
+	{"id": "obstacle_rush", "multi": true, "cat": "party", "name": "OBSTACLE RUSH", "scene": "res://games/obstacle_rush/main.tscn",
 		"blurb": "Race jelly-bean runners over a bouncy toy course while the VR giant lobs beach balls!"},
-	{"id": "starship_crew", "cat": "action", "name": "STARSHIP CREW", "scene": "res://games/starship_crew/main.tscn",
+	{"id": "starship_crew", "multi": true, "cat": "action", "name": "STARSHIP CREW", "scene": "res://games/starship_crew/main.tscn",
 		"blurb": "Fly the little starship through glowing rings while the crew zaps space rocks and silly aliens all the way home!"},
-	{"id": "dungeon_delve", "cat": "action", "name": "DUNGEON DELVE", "scene": "res://games/dungeon_delve/main.tscn",
+	{"id": "dungeon_delve", "multi": true, "cat": "action", "name": "DUNGEON DELVE", "scene": "res://games/dungeon_delve/main.tscn",
 		"blurb": "Bop cute slimes and bats room by room: the knight swings a big toy sword in VR, the heroes bonk on the TV, and the treasure waits at the end!"},
-	{"id": "crystal_saga", "cat": "action", "name": "CRYSTAL SAGA", "scene": "res://games/crystal_saga/main.tscn",
+	{"id": "crystal_saga", "multi": true, "cat": "action", "name": "CRYSTAL SAGA", "scene": "res://games/crystal_saga/main.tscn",
 		"blurb": "Be the hero in VR! Swing your sword, raise your hand for magic, and restore the Crystal of Light with your party."},
 	{"id": "balloon_pop", "multi": true, "cat": "party", "name": "BALLOON POP", "scene": "res://games/balloon_pop/main.tscn",
 		"blurb": "Pop the balloons floating up all around you: VR punches and squeezes, TV players run and jump!"},
@@ -66,9 +66,9 @@ const GAMES := [
 		"blurb": "Shake the giant tree and catch the falling fruit in your baskets!"},
 	{"id": "whack_a_mole", "multi": true, "cat": "party", "name": "WHACK-A-MOLE", "scene": "res://games/whack_a_mole/main.tscn",
 		"blurb": "Silly moles pop out of a big table: bonk them with a giant mallet or a tiny hammer!"},
-	{"id": "tower_stack", "cat": "party", "name": "TOWER STACK", "scene": "res://games/tower_stack/main.tscn",
+	{"id": "tower_stack", "multi": true, "cat": "party", "name": "TOWER STACK", "scene": "res://games/tower_stack/main.tscn",
 		"blurb": "Build the tallest tower together: helpers push jelly blocks to the bouncy pad, the giant stacks them high."},
-	{"id": "elemental_bender", "cat": "action", "name": "ELEMENTAL BENDER", "scene": "res://games/elemental_bender/main.tscn",
+	{"id": "elemental_bender", "multi": true, "cat": "action", "name": "ELEMENTAL BENDER", "scene": "res://games/elemental_bender/main.tscn",
 		"blurb": "Bend air, water, earth and fire to defend the island temple from the Shadow Raiders!"},
 	{"id": "treasure_dig", "multi": true, "cat": "party", "name": "TREASURE DIG", "scene": "res://games/treasure_dig/main.tscn",
 		"blurb": "Dig up treasure on a sandy island while the VR giant's magic telescope shows where it hides!"},
@@ -80,6 +80,11 @@ const GAMES := [
 		"blurb": "Roll giant snowballs, stack them up, and give every snowman a carrot nose and a hat!"},
 	{"id": "dodge_ball", "multi": true, "cat": "party", "name": "SOFT DODGEBALL", "scene": "res://games/dodge_ball/main.tscn",
 		"blurb": "A friendly VR giant throws squishy balls; dodge them and bop the target on his belly!"},
+	# Finished 2026-10-24 but reading-based: hidden until the family says yes (.backlog.md). Uncomment to show.
+	# {"id": "quiz_show", "multi": true, "cat": "party", "name": "QUIZ SHOW", "scene": "res://games/quiz_show/main.tscn",
+	# 	"blurb": "A TV quiz for the whole family: pick a level, answer with the coloured buttons, guess the hidden picture!"},
+	# {"id": "mystery_manor", "multi": true, "cat": "adventure", "name": "MYSTERY MANOR", "scene": "res://games/mystery_manor/main.tscn",
+	# 	"blurb": "Something is missing! Find the sparkly clues in a spooky old house, then catch who did it."},
 ]
 ## Tabs on the TV (LB/RB) and in VR (stick left/right). Empty categories are hidden.
 const CATEGORIES := [
@@ -102,7 +107,7 @@ const SOLO := {
 	"snowman_maker": 2, "starship_crew": 2, "treasure_dig": 2,
 	"balloon_pop": 1, "bubble_bath": 1, "cannon_cove": 1, "crystal_saga": 1, "dungeon_delve": 1, "fishing_lake": 1,
 	"fruit_catch": 1, "mech_titans": 1, "mini_golf_party": 1, "paper_planes": 1, "rhythm_band": 1,
-	"sheep_round_up": 1, "tiny_town_tycoon": 1, "tower_stack": 1, "whack_a_mole": 1,
+	"sheep_round_up": 1, "tiny_town_tycoon": 1, "tower_stack": 1, "whack_a_mole": 1, "quiz_show": 1, "mystery_manor": 1,
 }
 const VrText := preload("res://core/vr_text.gd")
 const DEFAULT_PORT := 7777
@@ -365,7 +370,7 @@ func _launch(index: int) -> void:
 	var delay := 0.4 if mode == "host" else (0.9 if mode == "client" else 0.1)
 	if mode == "client":
 		_close_peer()
-	if has_meta("lobby_udp") and get_meta("lobby_udp") != null:
+	if has_meta("lobby_udp"):
 		(get_meta("lobby_udp") as PacketPeerUDP).close()
 		remove_meta("lobby_udp")
 	get_tree().create_timer(delay).timeout.connect(func() -> void:
@@ -647,7 +652,7 @@ func _make_card(i: int, colour: Color) -> Button:
 	blurb.add_theme_color_override("font_color", Color(0.85, 0.87, 0.95))
 	v.add_child(blurb)
 	b.pressed.connect(_start_everywhere.bind(i))
-	b.focus_entered.connect(_select.bind(i, true))
+	b.focus_entered.connect(_on_card_focus.bind(i))
 	return b
 
 
@@ -772,15 +777,26 @@ func _set_status(text: String) -> void:
 		status.text = text
 
 
+var _applying_remote := false  # moving the focus because ANOTHER machine chose: must not broadcast it back
+
+## A card got focus: a local choice is told to the other machines; one applied from them is not (echoing it made
+## machines with different choices bounce the selection forever, rebuilding the menu each time: the Decks "glitched
+## when several were connected", 2026-10-24).
+func _on_card_focus(i: int) -> void:
+	_select(i, not _applying_remote)
+
+
 ## Keep the TV focus and the VR highlight in step (and tell the other machine).
 func _select(index: int, broadcast: bool) -> void:
 	selected = clampi(index, 0, GAMES.size() - 1)
 	if not broadcast and grid != null:
+		_applying_remote = true
 		var want := tabs().find(_cat_index_of(selected))
 		if want >= 0 and want != cat:
 			_show_category(want, false)
 		if cards.has(selected) and not (cards[selected] as Button).has_focus():
 			(cards[selected] as Button).grab_focus()
+		_applying_remote = false
 	if broadcast and mode != "local" and multiplayer.multiplayer_peer != null:
 		_sync_selection.rpc(selected)
 	_refresh_vr()
@@ -982,15 +998,16 @@ func _lobby_net(delta: float) -> void:
 		return
 	var base: int = int(OS.get_environment("DUO_PORT")) if OS.has_environment("DUO_PORT") else DEFAULT_PORT
 	if not has_meta("lobby_udp"):
+		# Port taken: retry twice a second (a null meta value erases the meta).
+		if Time.get_ticks_msec() < int(get_meta("lobby_retry_ms", 0)):
+			return
 		var u := PacketPeerUDP.new()
 		u.set_broadcast_enabled(true)
 		if u.bind(base + 2) != OK:
-			set_meta("lobby_udp", null)
+			set_meta("lobby_retry_ms", Time.get_ticks_msec() + 500)
 			return
 		set_meta("lobby_udp", u)
 	var udp = get_meta("lobby_udp")
-	if udp == null:
-		return
 	while (udp as PacketPeerUDP).get_available_packet_count() > 0:
 		var msg := (udp as PacketPeerUDP).get_packet().get_string_from_utf8()
 		var ip := (udp as PacketPeerUDP).get_packet_ip()
@@ -1034,15 +1051,16 @@ func _lobby_net(delta: float) -> void:
 
 func _listen_for_game() -> void:
 	if not has_meta("listen"):
+		# Port taken: retry twice a second (a null meta value erases the meta).
+		if Time.get_ticks_msec() < int(get_meta("listen_retry_ms", 0)):
+			return
 		var udp := PacketPeerUDP.new()
 		var base: int = int(OS.get_environment("DUO_PORT")) if OS.has_environment("DUO_PORT") else DEFAULT_PORT
 		if udp.bind(base + 2) != OK:
-			set_meta("listen", null)
+			set_meta("listen_retry_ms", Time.get_ticks_msec() + 500)
 			return
 		set_meta("listen", udp)
 	var u = get_meta("listen")
-	if u == null:
-		return
 	var udp: PacketPeerUDP = u
 	while udp.get_available_packet_count() > 0:
 		var msg := udp.get_packet().get_string_from_utf8()

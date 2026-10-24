@@ -74,6 +74,8 @@ var ready_to_play := false
 var players: Array = []  ## core/net.gd reads it (the wrist menu); this game uses vr_rig + Party seats
 # --- Engine modules ---
 var party: Party
+## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
+var multi_machine := true
 var split: SplitView
 var vr_rig: VrRig
 var save: Save
@@ -172,10 +174,11 @@ func _ready() -> void:
 
 
 func _setup(mode: String) -> void:
+	var flat: bool = mode == "host" and not net.has_vr  # flat host (TV / Deck hosting): slot 0 is a pad player here
 	world_root = Node3D.new()
 	world_root.name = "World"
 	add_child(world_root)
-	sky = SkyKit.apply(self, "day", VrRig.wanted(mode))
+	sky = SkyKit.apply(self, "day", VrRig.wanted(mode) and not flat)
 	fx = Fx.new()
 	world_root.add_child(fx)
 	mech = Mech.new()
@@ -200,7 +203,7 @@ func _setup(mode: String) -> void:
 	pilot.party = party
 	turn_mode = String(save.data.get("turn", "smooth"))
 	pilot.turn_mode = turn_mode
-	if VrRig.wanted(mode):
+	if VrRig.wanted(mode) and not flat:
 		vr_rig = VrRig.new()
 		vr_rig.locomotion = false  # the Titan walks; the pilot stands in its cockpit
 		vr_rig.turn_mode = "none"
@@ -217,7 +220,7 @@ func _setup(mode: String) -> void:
 		teach = Teach.new()
 		add_child(teach)
 		teach.setup(self)
-	if mode != "host":
+	if mode != "host" or vr_rig == null:
 		split = SplitView.new()
 		add_child(split)
 		split.bind_party(party)
@@ -249,7 +252,7 @@ func _setup(mode: String) -> void:
 			ghost.name = "GhostHand"
 			ghost.main = self
 			mech.cockpit.add_child(ghost)
-	party.allow_slot0 = mode == "local" and vr_rig == null
+	party.allow_slot0 = mode != "client" and vr_rig == null
 	awards.set_player(0, "TITAN")
 	if mode != "client":
 		combat.hp_scale = test_hp_scale
@@ -713,7 +716,7 @@ func _make_hud(slot: int, parent: Control) -> void:
 	# Top right: the Titan and the city.
 	var card2 := UiKit.panel("card")
 	ui.add_child(card2)
-	card2.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	UiKit.pin(card2, Control.PRESET_TOP_RIGHT)
 	card2.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	card2.offset_right = -24.0
 	card2.offset_left = -24.0
@@ -736,7 +739,7 @@ func _make_hud(slot: int, parent: Control) -> void:
 	# Top centre: the boss.
 	var boss := UiKit.panel("pill")
 	ui.add_child(boss)
-	boss.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP, Control.PRESET_MODE_KEEP_SIZE)
+	UiKit.pin(boss, Control.PRESET_CENTER_TOP)
 	boss.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	boss.offset_top = 120.0 if slot >= 0 else 20.0
 	var bv := UiKit.vbox()
@@ -758,7 +761,7 @@ func _make_hud(slot: int, parent: Control) -> void:
 		# Bottom: what my buttons do; centre: the crosshair.
 		var bottom := UiKit.panel("pill")
 		ui.add_child(bottom)
-		bottom.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_KEEP_SIZE)
+		UiKit.pin(bottom, Control.PRESET_CENTER_BOTTOM)
 		bottom.grow_horizontal = Control.GROW_DIRECTION_BOTH
 		bottom.grow_vertical = Control.GROW_DIRECTION_BEGIN
 		bottom.offset_top = -24.0
@@ -767,7 +770,7 @@ func _make_hud(slot: int, parent: Control) -> void:
 		w["bottom"] = bottom
 		var cross := UiKit.icon("plus", Color(1, 1, 1, 0.8), 28.0)
 		ui.add_child(cross)
-		cross.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_KEEP_SIZE)
+		UiKit.pin(cross, Control.PRESET_CENTER)
 		cross.position -= Vector2(14.0, 14.0)
 		w["cross"] = cross
 		_refresh_vehicle_hud(slot)
@@ -779,7 +782,7 @@ func _make_hud(slot: int, parent: Control) -> void:
 		var jp := UiKit.panel("pill")
 		jp.add_child(UiKit.prompts([["A", "Join the support team"]]))
 		ui.add_child(jp)
-		jp.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_KEEP_SIZE)
+		UiKit.pin(jp, Control.PRESET_CENTER_BOTTOM)
 		jp.grow_horizontal = Control.GROW_DIRECTION_BOTH
 		jp.grow_vertical = Control.GROW_DIRECTION_BEGIN
 		jp.offset_top = -60.0
@@ -1436,7 +1439,7 @@ func on_pause_changed(paused: bool, by_slot: int) -> void:
 			var l := UiKit.label("", "small", "dim", HORIZONTAL_ALIGNMENT_CENTER)
 			l.name = "Why"
 			v.add_child(l)
-			tv_banner.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_KEEP_SIZE)
+			UiKit.pin(tv_banner, Control.PRESET_CENTER)
 			tv_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
 			tv_banner.grow_vertical = Control.GROW_DIRECTION_BOTH
 		var wl := tv_banner.find_child("Why", true, false) as Label
@@ -1527,6 +1530,8 @@ func apply_snapshot(s: Array) -> void:
 		return
 	if vr_avatar != null:
 		vr_avatar.apply_pose(s[0])
+	if split != null and (s[0] as PackedFloat32Array).is_empty():
+		split.clear_bubble()  # a flat host: no VR player to show in the bubble
 	mech.apply_net(s[1])
 	combat.apply_kaiju(s[2])
 	support.apply(s[3])

@@ -479,7 +479,7 @@ func apply_remote_state(pos: Vector3, y: float, rowing: float) -> void:
 
 
 func _process(delta: float) -> void:
-	if remote and active:
+	if (remote or ghost) and active:  # ghost: another machine's boat, mirrored from snapshots
 		if position.distance_to(target_pos) > 4.0:
 			position = target_pos
 		else:

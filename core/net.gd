@@ -157,6 +157,10 @@ func join(address: String) -> void:
 		print("Net: the host's game was full, staying on this machine")
 		join_finished.emit.call_deferred(false)  # (the arcade lobby clears duo_full: next game, try again)
 		return
+	if Engine.has_meta("follow_ip"):
+		address = str(Engine.get_meta("follow_ip"))
+		Engine.remove_meta("follow_ip")
+		Engine.set_meta("following_now", true)
 	if address == "auto":
 		_join_auto()
 		return
@@ -186,6 +190,9 @@ func _join_auto() -> void:
 	var until := Time.get_ticks_msec() + int(AUTO_FIND_SECONDS * 1000.0)
 	while Time.get_ticks_msec() < until:
 		await get_tree().process_frame
+		if not is_inside_tree():  # the scene changed while we were looking (await resumed on a freed tree)
+			udp.close()
+			return
 		while udp.get_available_packet_count() > 0:
 			var msg := udp.get_packet().get_string_from_utf8()
 			var ip := udp.get_packet_ip()
@@ -208,7 +215,7 @@ func _close_old_peer() -> void:
 
 
 func _exit_tree() -> void:
-	if has_meta("follow_udp") and get_meta("follow_udp") != null:  # _follow_headset's beacon listener
+	if get_meta("follow_udp", null) is PacketPeerUDP:  # _follow_headset's beacon listener
 		(get_meta("follow_udp") as PacketPeerUDP).close()
 	_close_old_peer()
 
@@ -283,6 +290,7 @@ func _on_peer_disconnected(id: int) -> void:
 
 func _on_connected() -> void:
 	connected = true
+	Engine.remove_meta("following_now")
 	join_deadline = 0
 	Engine.set_meta("duo_joined", true)
 	print("Net: joined the host as a %s" % machine_kind)
@@ -296,6 +304,9 @@ func _give_up() -> void:
 	join_deadline = 0
 	multiplayer.multiplayer_peer = null
 	mode = "local"
+	if Engine.has_meta("following_now"):
+		Engine.remove_meta("following_now")
+		Engine.set_meta("follow_block_until", Time.get_ticks_msec() + 60000)  # don't chase that game again for a minute
 	if Engine.has_meta("duo_joined"):
 		print("Net: host not reachable, retrying")
 		get_tree().create_timer(1.0).timeout.connect(get_tree().reload_current_scene)
@@ -611,7 +622,7 @@ func _px_state(index: int, pos: Vector3, yaw: float, pitch: float) -> void:
 	if mode != "host" or main == null or index <= 0 or index >= MAX_SLOTS:
 		return
 	if _classic_game():
-		if index < main.players.size():
+		if index < main.players.size() and _seat_ok(index, "", []):
 			main.players[index].apply_remote_state(pos, yaw, pitch)
 	elif main.has_method("on_remote_state"):
 		main.on_remote_state(index, pos, yaw, pitch)
@@ -623,7 +634,7 @@ func _px_action(index: int, action: String, args: Array) -> void:
 		return
 	if _classic_game():
 		# Classic games (on_p2_action): the host must have created player index already.
-		if index < main.players.size():
+		if index < main.players.size() and _seat_ok(index, action, args):
 			main.on_p2_action(action, args, index)
 		return
 	_dispatch_request(index, action, args)
@@ -634,6 +645,14 @@ func _px_action(index: int, action: String, args: Array) -> void:
 func _px_request(slot: int, action: String, args: Array) -> void:
 	if mode == "host" and slot > 0 and slot < MAX_SLOTS:
 		_dispatch_request(slot, action, args)
+
+
+## Classic many-machine games (core/classic_seats.gd on main.seats): does the sending machine own seat
+## `index`? Other machines' state and actions are dropped here, so no player script needs its own check.
+## Games without the helper accept everything, as before.
+func _seat_ok(index: int, action: String, args: Array) -> bool:
+	var seats = main.get("seats")
+	return seats == null or not (seats is Object and seats.has_method("remote_ok")) or seats.remote_ok(index, action, args)
 
 
 ## A game written for the classic contract (players array + on_p2_action), like the first 17 games.
@@ -854,20 +873,30 @@ func _follow_headset() -> void:
 	if mode != "local" or not OS.has_environment("DUO_JOIN") or has_meta("following"):
 		return
 	if not has_meta("follow_udp"):
-		var udp := PacketPeerUDP.new()
-		set_meta("follow_udp", udp if udp.bind(PORT + 2) == OK else null)
-	var u = get_meta("follow_udp")
-	if u == null:
-		return
-	var udp: PacketPeerUDP = u
+		# The port may be taken (another TV machine on this computer): retry now and then. Never store
+		# null in a meta: a null value ERASES it (get_meta then errors every frame).
+		if Time.get_ticks_msec() < int(get_meta("follow_retry_ms", 0)):
+			return
+		var bound := PacketPeerUDP.new()
+		if bound.bind(PORT + 2) != OK:
+			set_meta("follow_retry_ms", Time.get_ticks_msec() + 2000)
+			return
+		set_meta("follow_udp", bound)
+	var udp: PacketPeerUDP = get_meta("follow_udp")
 	while udp.get_available_packet_count() > 0:
 		var msg := udp.get_packet().get_string_from_utf8()
+		var sender := udp.get_packet_ip()
 		if not msg.begins_with("ARCADE_GAME "):
 			continue
 		var scene := msg.substr(12)
 		if Engine.get_meta("duo_full", "-") == scene:
 			continue  # that game turned us away as full: keep playing here
-		print("Net: the headset is playing %s; joining it" % scene)
+		# A follow that failed backs off for a minute: retrying at once reloaded the game every 5 s and the TV
+		# flashed black (2026-10-24: a Deck hosting Balloon Pop, the TV joining the Frame's address instead).
+		if Time.get_ticks_msec() < int(Engine.get_meta("follow_block_until", 0)):
+			continue
+		print("Net: %s is playing %s; joining it" % [sender, scene])
+		Engine.set_meta("follow_ip", sender)  # join() uses the machine that sent the beacon, not DUO_JOIN
 		set_meta("following", true)
 		udp.close()
 		get_tree().paused = false

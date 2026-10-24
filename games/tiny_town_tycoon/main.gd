@@ -81,6 +81,8 @@ var net: Node
 var ready_to_play := false
 # --- Engine modules (names core/ looks for) ---
 var party: Party
+## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
+var multi_machine := true
 var split: SplitView
 var vr_rig: VrRig
 var save: Save
@@ -209,7 +211,8 @@ func _setup(mode: String) -> void:
 		jobs.on_reward = _on_reward
 		sim.setup(town, false)
 		jobs.setup(town, sim)
-	if VrRig.wanted(mode):
+	var flat_host: bool = mode == "host" and not net.has_vr  # flat host (TV / Deck hosting): slot 0 is the flat mayor here
+	if VrRig.wanted(mode) and not flat_host:
 		vr_rig = VrRig.new()
 		vr_rig.eye_height = 1.45
 		vr_rig.move_speed = 0.7
@@ -268,7 +271,7 @@ func _setup(mode: String) -> void:
 		mayor.name = "Mayor"
 		add_child(mayor)
 		mayor.call("setup", self, vr_rig, town)
-	if mode != "host":
+	if mode != "host" or vr_rig == null:
 		split = SplitView.new()
 		add_child(split)
 		split.bind_party(party)
@@ -290,7 +293,7 @@ func _setup(mode: String) -> void:
 			split.set_bubble(VrRig.build_mirror(self, vr_avatar.head, false))
 		elif vr_rig != null:
 			split.set_bubble(vr_rig.mirror)
-	party.allow_slot0 = mode == "local" and vr_rig == null
+	party.allow_slot0 = mode != "client" and vr_rig == null
 	awards.set_player(0, "MAYOR")
 	if mode != "client":
 		net.state_set("shared", false)
@@ -1051,7 +1054,7 @@ func on_pause_changed(paused: bool, by_slot: int) -> void:
 			var l := UiKit.label("", "small", "dim", HORIZONTAL_ALIGNMENT_CENTER)
 			l.name = "Why"
 			v.add_child(l)
-			tv_banner.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_KEEP_SIZE)
+			UiKit.pin(tv_banner, Control.PRESET_CENTER)
 			tv_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
 			tv_banner.grow_vertical = Control.GROW_DIRECTION_BOTH
 		var wl := tv_banner.find_child("Why", true, false) as Label
@@ -1412,6 +1415,8 @@ func apply_snapshot(s: Array) -> void:
 		return
 	if vr_avatar != null:
 		vr_avatar.apply_pose(s[0])
+	if split != null and (s[0] as PackedFloat32Array).is_empty():
+		split.clear_bubble()  # a flat host: no VR player to show in the bubble
 	fleet.call("apply", s[1])
 	events.call("apply_snap", s[2])
 	hud.call("mayor_ghost", s[3])

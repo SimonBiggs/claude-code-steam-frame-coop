@@ -1,5 +1,6 @@
 extends Node3D
-## Simple mode, solo VR: when no TV bees are playing (a host with nobody connected yet), two little
+## Simple mode, solo gardener: when no TV bees are playing (a host with nobody connected yet, or a Steam
+## Deck playing on its own as the gardener), two little
 ## helper bees buzz between the flowers and the hive, so the garden still pollinates, fruits and fills
 ## the honey jars. They fly home as soon as a TV bee arrives. Host only (the TV never sees them: by
 ## then they've gone).
@@ -40,7 +41,11 @@ func _ready() -> void:
 
 
 func _wanted() -> bool:
-	return main.net != null and main.net.mode == "host" and not main.net.connected
+	if main.net == null:
+		return false
+	if main.net.mode == "local":  # e.g. a Steam Deck on its own: just the gardener
+		return not main.bees().any(func(b): return b.active)
+	return main.net.mode == "host" and not main.net.connected
 
 
 ## Host: fly, collect pollen, pollinate, make honey (called by main every frame in simple mode).

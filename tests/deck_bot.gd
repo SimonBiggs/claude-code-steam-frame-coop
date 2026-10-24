@@ -148,16 +148,16 @@ class Runner extends Node:
 		Input.joy_connection_changed.emit(PAD1, false)
 		await frames(5)
 
-	## Pattern guard (one ant -> the whole nest): every split-screen game decides a view's visibility with
-	## Machine.view_on() (so a Deck shows one player), and no game re-adds its own Deck keyboard rule (it lives in
-	## core/party.gd).
+	## Pattern guard (one ant -> the whole nest): every split-screen (classic) game goes through core/classic_seats.gd's
+	## deck_solo() on a Deck alone, and no game re-adds its own Deck keyboard rule (it lives in core/party.gd).
 	func _source_checks() -> void:
 		for d in DirAccess.get_directories_at("res://games"):
 			var path := "res://games/%s/main.gd" % d
 			if not FileAccess.file_exists(path):
 				continue
 			var src := FileAccess.get_file_as_string(path)
-			if src.contains("func _layout_views") and not src.contains("Machine.view_on("):
-				kit.assert_true(false, "%s lays out split views without Machine.view_on() (core/machine.gd): a Deck would show two players" % path)
-			if src.contains("party.allow_keyboard = false") and src.contains("deck"):
-				kit.assert_true(false, "%s sets its own Deck keyboard rule: core/party.gd already does it" % path)
+			if src.contains("func _layout_views") and not src.contains("deck_solo("):
+				kit.assert_true(false, "%s lays out split views but never calls seats.deck_solo() (core/classic_seats.gd): a Deck would show two players" % path)
+			for line in src.split("\n"):
+				if line.contains("allow_keyboard") and line.contains("deck") and not line.strip_edges().begins_with("#"):
+					kit.assert_true(false, "%s sets its own Deck keyboard rule (core/party.gd does it): %s" % [path, line.strip_edges()])

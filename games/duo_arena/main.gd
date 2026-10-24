@@ -1,6 +1,6 @@
 extends Node3D
 const VrText := preload("res://core/vr_text.gd")
-const Machine := preload("res://core/machine.gd")  # one player per screen on a Deck (view_on)
+const UiKit := preload("res://core/ui_kit.gd")
 ## Game controller: builds the arena, runs waves, camera and HUD.
 
 const PlayerScript := preload("res://games/duo_arena/player.gd")
@@ -11,6 +11,7 @@ const PauseMenuScript := preload("res://core/pause_menu.gd")
 const WorldScript := preload("res://games/duo_arena/world.gd")
 const HudScript := preload("res://games/duo_arena/hud.gd")
 const NetScript := preload("res://core/net.gd")
+const ClassicSeats := preload("res://core/classic_seats.gd")
 const BulletScript := preload("res://games/duo_arena/bullet.gd")
 const EnemyShotScript := preload("res://games/duo_arena/enemy_shot.gd")
 const MusicScript := preload("res://core/music.gd")
@@ -95,6 +96,11 @@ const MAX_LOCAL_VIEWS := 6
 ## A controller-only player whose controller stays disconnected this long leaves the game.
 const PAD_LEAVE_TIME := 20.0
 
+## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
+var multi_machine := true
+## Which machine drives which seat (core/net.gd checks it too).
+var seats: ClassicSeats
+
 var arena_radius := ARENA_RADIUS
 var players: Array = []
 var cameras: Array[Camera3D] = []
@@ -172,6 +178,16 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
+	seats = ClassicSeats.new(self, {
+		"max_seats": MAX_PLAYERS,
+		"no_keys": PlayerScript.NO_KEYS,
+		"free_actions": ["restart", "pause"],
+		"player": _ensure_player,
+		"seat_limit": func() -> int: return MAX_PLAYERS if net.mode == "client" else MAX_LOCAL_VIEWS,
+		"keys": func(p) -> int: return p.keys() if p.keys() < PlayerScript.KEYS.size() else PlayerScript.NO_KEYS,
+		"ghost": func(p, _on: bool) -> void: p.net_started = false,
+		"full": func() -> void: _show_center("All seats are taken!", 1.5, false),
+	})
 	Input.joy_connection_changed.connect(_on_joy_changed)
 	if OS.has_environment("DUO_JOIN"):
 		# Steam Machine: join the VR player's game as player 2, or fall back to local split screen.
@@ -190,8 +206,16 @@ func _setup_game(mode: String) -> void:
 	_build_views(mode)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_assign_joypads()
+	if seats.deck_alone():
+		seats.deck_solo(0)
 	ready_to_play = true
 	_ensure_join_listener()
+	if mode == "host":
+		net.state_set("host_vr", players[0].vr)
+		for i in range(1, players.size()):
+			players[i].set_active(false)  # TV seats wake up when a machine claims them ("join")
+	elif mode == "client":
+		players[1].set_meta("want_join", true)  # ask the host for a seat (it may hand out another one)
 	_restore_party()
 	if mode == "host":
 		if not SIMPLE_MODE:  # simple mode: the practice targets are up while the TV joins
@@ -398,7 +422,7 @@ func _make_player(i: int, mode: String, as_ghost: bool = false):
 	p.color = PLAYER_COLORS[i % PLAYER_COLORS.size()]
 	p.main = self
 	p.remote = mode == "host" and i >= 1  # host: TV players are driven by the Steam Machine
-	p.ghost = (mode == "client" and i == 0) or as_ghost  # client: player 1 is the VR player, shown from snapshots
+	p.ghost = (mode == "client" and i == 0) or as_ghost or seats.foreign(i)  # client: player 1 (VR / host) and other machines' seats are shown from snapshots
 	if i == 2 and mode != "local":
 		p.key_set = 0  # TV player 3: WASD + mouse (or a second controller)
 		p.mouse_look = true
@@ -476,12 +500,12 @@ func _add_bubble(hud: Control, source: SubViewport, color: Color) -> void:
 	mat.set_shader_parameter("ring_color", color)
 	bubble.material = mat
 	hud.add_child(bubble)
-	bubble.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	UiKit.pin(bubble, Control.PRESET_TOP_RIGHT)
 	bubble.size = Vector2(300, 300)
 	bubble.position = Vector2(hud.size.x - 330, 30)
 	bubble.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_KEEP_SIZE, 30)
 	var tag := Label.new()
-	tag.text = "P1 (VR)"
+	tag.text = "P1 (VR)" if net.state_get("host_vr", true) else "P1"  # a flat host has no headset
 	tag.add_theme_font_size_override("font_size", 24)
 	tag.add_theme_constant_override("outline_size", 6)
 	tag.add_theme_color_override("font_outline_color", Color.BLACK)
@@ -553,6 +577,8 @@ func _build_views(mode: String) -> void:
 		_build_fake_vr()
 	else:
 		print("No VR headset: split screen")
+	if mode == "client":
+		_build_ghost_mirror()  # the host player's view, a bubble on every local view
 	_ensure_views_root()
 	for p in players:
 		if _is_local(p):
@@ -560,8 +586,6 @@ func _build_views(mode: String) -> void:
 	for p in players:
 		if p.index == 2:
 			p.set_active(false)
-	if mode == "client":
-		_add_bubble(players[1].hud, _build_ghost_mirror(), PLAYER_COLORS[0])
 	_layout_views()
 
 
@@ -597,11 +621,11 @@ func _ensure_views_root() -> void:
 	bg.color = Color.BLACK
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(bg)
-	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(bg, Control.PRESET_FULL_RECT, false)
 	views_root = Control.new()
 	views_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(views_root)
-	views_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(views_root, Control.PRESET_FULL_RECT, false)
 
 
 ## One split-screen view (SubViewport + camera + HUD) for a local player, created once.
@@ -613,7 +637,7 @@ func _ensure_view(p) -> void:
 	p.set_meta("view", container)
 	container.stretch = true
 	container.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	container.visible = Machine.view_on(self, p)
+	container.visible = p.active
 	views_root.add_child(container)
 	var vp := SubViewport.new()
 	vp.world_3d = get_world_3d()
@@ -632,7 +656,7 @@ func _ensure_view(p) -> void:
 	hud.main = self
 	hud_layer.add_child(hud)
 	p.hud = hud
-	if net.mode == "client" and mirror_vp != null and p.index != 1:
+	if net.mode == "client" and mirror_vp != null:
 		_add_bubble(hud, mirror_vp, PLAYER_COLORS[0])  # everyone on the TV can watch the VR view
 
 
@@ -648,7 +672,7 @@ func _layout_views() -> void:
 		var c: SubViewportContainer = p.get_meta("view")
 		if c.get_parent() != views_root:
 			c.reparent(views_root, false)  # from the old HBox layout (hot reload)
-		c.visible = Machine.view_on(self, p)
+		c.visible = p.active and _is_local(p)
 		if c.visible:
 			shown.append(p)
 	var n := shown.size()
@@ -677,7 +701,7 @@ func _layout_views() -> void:
 		var c: SubViewportContainer = p.get_meta("view")
 		var col := k % cols
 		var row := int(floorf(float(k) / cols))
-		c.set_anchors_preset(Control.PRESET_TOP_LEFT)
+		UiKit.pin(c, Control.PRESET_TOP_LEFT)
 		c.position = Vector2(col * (cell.x + gap), row * (cell.y + gap))
 		c.size = cell
 		var vp := c.get_child(0) as SubViewport
@@ -732,11 +756,16 @@ func _assign_joypads() -> void:
 	# (or to player 3 on the TV machine). Further controllers join with A / Start (handle_join_input).
 	var pads := Input.get_connected_joypads()
 	joy_owner.clear()
-	players[1].joy = pads[0] if pads.size() > 0 else -1
-	if players.size() > 2 and net.mode != "local":
-		players[2].joy = pads[1] if pads.size() > 1 else -1
-	elif not players[0].vr:
-		players[0].joy = pads[1] if pads.size() > 1 else -1
+	if net.mode == "host":
+		if not players[0].vr:  # flat host (no VR): P1 plays here with keyboard + mouse or the first controller
+			players[0].joy = pads[0] if pads.size() > 0 else -1
+			players[0].mouse_look = true
+	else:
+		players[1].joy = pads[0] if pads.size() > 0 else -1
+		if players.size() > 2 and net.mode != "local":
+			players[2].joy = pads[1] if pads.size() > 1 else -1
+		elif not players[0].vr:
+			players[0].joy = pads[1] if pads.size() > 1 else -1
 	for p in players:
 		if p.joy >= 0 and _is_local(p):
 			joy_owner[p.joy] = p.index
@@ -746,7 +775,7 @@ func _assign_joypads() -> void:
 
 ## Controllers coming and going: each controller keeps driving its own player.
 func _on_joy_changed(device: int, connected: bool) -> void:
-	if not ready_to_play or players.size() < 2 or net.mode == "host":
+	if not ready_to_play or players.size() < 2 or (net.mode == "host" and players[0].vr):
 		return
 	if connected:
 		_on_pad_connected(device)
@@ -789,6 +818,11 @@ func _on_pad_connected(device: int) -> void:
 				pick = p
 				break
 	# 3. The usual seats, as before: player 2, then player 1 (local) or player 3 (TV machine).
+	if pick == null and net.mode == "host":
+		if _is_local(players[0]) and players[0].joy < 0:
+			pick = players[0]  # flat host: P1
+		else:
+			return
 	if pick == null and players[1].joy < 0 and _is_local(players[1]):
 		pick = players[1]
 	if pick == null:
@@ -826,24 +860,9 @@ func handle_join_input(event: InputEvent) -> bool:
 	return _join_slot(device) != null
 
 
-## Next free TV seat: a slot nobody is using and no controller is waiting to reclaim.
-func _next_free_index() -> int:
-	var top := MAX_PLAYERS - 1 if net.mode == "client" else MAX_LOCAL_VIEWS - 1
-	for i in range(1, top + 1):
-		if i >= players.size():
-			return i
-		var p = players[i]
-		if not _is_local(p) or p.active or p.has_meta("want_join"):
-			continue
-		if p.joy >= 0 or p.pad_lost_t >= 0.0:
-			continue
-		return i
-	return -1
-
-
 ## A new controller (or a test bot, device -1) takes the next free seat.
 func _join_slot(device: int):
-	var idx := _next_free_index()
+	var idx := seats.free_index()
 	if idx < 0:
 		_show_center("All %d seats are taken!" % (MAX_PLAYERS - 1 if net.mode == "client" else MAX_LOCAL_VIEWS), 1.5, false)
 		return null
@@ -856,14 +875,13 @@ func _join_slot(device: int):
 	return p
 
 
-## Local: wake the player up now. TV machine: ask the host (retried by _check_join until it says yes).
+## Local: wake the player up now. TV machine: ask the host (retried by seats.request_joins until it says yes).
 func _request_join(p) -> void:
 	p.remove_meta("left_by_pad")
 	p.pad_lost_t = -1.0
 	if net.mode == "client":
 		p.set_meta("want_join", true)
-		join_t = 0.0
-		_check_join(0.0)
+		_check_join(0.0, true)
 	elif not p.active:
 		p.set_active(true)
 		p.hp = p.stat("max_hp")
@@ -1174,6 +1192,8 @@ func _party_tick(delta: float) -> void:
 		if net.connected and players.size() < MAX_PLAYERS:
 			_ensure_player(MAX_PLAYERS - 1)  # seats for every TV player the Steam Machine may send
 		return
+	if net.mode == "client":
+		seats.sync()
 	_update_lost_pads(delta)
 	if views_root != null and is_instance_valid(views_root) and views_root.size != last_view_area:
 		_layout_views()
@@ -1406,7 +1426,7 @@ func achievement_toast(title: String, desc: String, count: int, total: int) -> v
 		toast_label.add_theme_color_override("font_color", Color(1.0, 0.82, 0.3))
 		toast_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		center_label.get_parent().add_child(toast_label)
-		toast_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+		UiKit.pin(toast_label, Control.PRESET_TOP_WIDE, false)
 		toast_label.offset_top = 105
 		toast_label.offset_bottom = 230
 	toast_label.text = text
@@ -1671,55 +1691,52 @@ func build_turret(p) -> void:
 
 
 func on_client_joined() -> void:
-	_ensure_player(MAX_PLAYERS - 1)
-	if solo and not players[1].active:  # the TV arrived after a solo start: wake player 2 up
-		players[1].set_active(true)
-		players[1].hp = players[1].stat("max_hp")
-		players[1].net_started = false
-	_show_center("PLAYER 2 JOINED", 1.5)
+	_ensure_player(MAX_PLAYERS - 1)  # its seats wake up when it claims them ("join")
+
+
+## Host: one more machine (the TV, a Steam Deck...). It asks for its seats itself.
+func on_machine_joined(peer: int, kind: String) -> void:
+	_show_center("%s JOINED" % ("DECK" if kind == "deck" else "TV"), 1.5)
 	if last_say != "" and Time.get_ticks_msec() - last_say_time < 20000:
-		net.event("say", [last_say])  # they were reconnecting when it was said
+		net.event_to(peer, "say", [last_say])  # it was reconnecting when it was said
 
 
+## Host: a machine left: only its seats go to sleep (and become free).
+func on_machine_left(peer: int) -> void:
+	var freed := seats.machine_left(peer)
+	if not freed.is_empty() and net.peer_count() > 0:
+		_show_center("P%d LEFT" % (int(freed[0]) + 1), 1.5)
+
+
+## Host: the LAST machine left (multi_machine games get this only then).
 func on_client_left() -> void:
-	# Extra TV players sit out until the Steam Machine is back (it re-joins its saved party).
-	for i in range(2, players.size()):
-		if players[i].active:
-			players[i].set_active(false)
-	if SIMPLE_MODE:  # keep playing; player 2 wakes up again when the TV rejoins
+	# TV players sit out until a machine is back (it re-joins its saved party).
+	seats.all_left()
+	if SIMPLE_MODE:  # keep playing; the seats wake up again when a machine rejoins
 		solo = true
-		players[1].set_active(false)
-		_show_center("P2 LEFT", 1.5)
+		_show_center("TV LEFT", 1.5)
 		return
-	_show_center("Player 2 left - waiting for them to rejoin…", 0.0)
+	_show_center("The TV left - waiting for it to rejoin…", 0.0)
 
 
 ## Client: player 3 joins by pressing fire on the second controller / keyboard / mouse; drop-in
 ## players (A / Start on a new controller) are marked "want_join". Ask the host until it agrees.
-var join_t := 0.0
-func _check_join(delta: float) -> void:
-	join_t -= delta
-	if join_t > 0.0 or game_over:
+func _check_join(delta: float, now: bool = false) -> void:
+	if game_over:
 		return
-	if players.size() > 2 and not players[2].active and not players[2].has_meta("want_join") \
-			and players[2]._fire_held():
-		players[2].set_meta("want_join", true)
-		_save_party()
-	for p in players:
-		if not p.has_meta("want_join") or not _is_local(p):
-			continue
-		if p.active:
-			p.remove_meta("want_join")
-			continue
-		join_t = 1.0
-		net.send_action("join", [p.index], 1)  # sent as P2 so the host accepts it before it has the seat
+	for p in players:  # the keyboard player joins by pressing fire
+		if p.index > 0 and _is_local(p) and p.keys() == 0 and not p.active and not p.has_meta("want_join") \
+				and p._fire_held():
+			p.set_meta("want_join", true)
+			_save_party()
+	seats.request_joins(delta, now)
 
 
 ## A player slot woke up or went to sleep: show/hide its split-screen view.
 func on_player_activity_changed(p) -> void:
 	if p.active and _is_local(p) and net.mode != "host":
 		_ensure_view(p)
-	if p.active:
+	if seats.joined(p):
 		p.remove_meta("want_join")
 	_layout_views()
 	print("Player %d is now %s on this screen" % [p.index + 1, "playing" if p.active else "waiting"])
@@ -1727,9 +1744,8 @@ func on_player_activity_changed(p) -> void:
 
 ## Host: a TV player did something on the Steam Machine.
 func on_p2_action(action: String, args: Array, index: int = 1) -> void:
-	if action == "join" and args.size() > 0:
-		index = int(args[0])  # drop-in seats ask through P2 (the host may not have their seat yet)
-	if index <= 0 or index >= MAX_PLAYERS:
+	index = seats.host_action(action, args, index)  # many machines: who drives which seat (core/classic_seats.gd)
+	if index < 0:
 		return
 	var p2 = _ensure_player(index)
 	match action:
@@ -1762,7 +1778,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 				get_tree().reload_current_scene()
 		"pause":
 			var paused: bool = args[0]
-			_set_pause_banner(paused, "Player 2 opened the menu")
+			_set_pause_banner(paused, "P%d opened the menu" % (index + 1))
 			get_tree().paused = paused
 
 
@@ -1932,6 +1948,8 @@ func _make_ghost(kind: String, item: Array) -> Node3D:
 
 ## Client: one-off events from the host.
 func apply_event(kind: String, args: Array) -> void:
+	if seats.handle_event(kind, args):
+		return
 	if not ready_to_play:
 		return
 	match kind:
@@ -1958,13 +1976,13 @@ func apply_event(kind: String, args: Array) -> void:
 			spawn_bullet(args[0], args[1], args[2], null, true)
 		"hurt":
 			var hp_index: int = args[0] if args.size() > 1 else 1
-			if hp_index < players.size():
+			if hp_index < players.size() and _is_local(players[hp_index]):
 				players[hp_index].on_remote_hurt(args[-1])
 		"hint", "meteor", "fireworks":
 			director().client_event(kind, args)
 		"hitmark":
 			var hm_index: int = args[0] if args.size() > 0 else 1
-			if hm_index < players.size() and players[hm_index].hud:
+			if hm_index < players.size() and _is_local(players[hm_index]) and players[hm_index].hud:
 				players[hm_index].hud.hit_marker()
 
 
@@ -1986,19 +2004,19 @@ func _build_hud() -> void:
 
 	info_label = _make_label(30)
 	layer.add_child(info_label)
-	info_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+	UiKit.pin(info_label, Control.PRESET_TOP_WIDE, false)
 	info_label.offset_top = 18
 	info_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 
 	center_label = _make_label(60)
 	layer.add_child(center_label)
-	center_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(center_label, Control.PRESET_FULL_RECT, false)
 	center_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	center_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 
 	help_label = _make_label(22)
 	layer.add_child(help_label)
-	help_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+	UiKit.pin(help_label, Control.PRESET_TOP_WIDE, false)
 	help_label.offset_top = 110
 	help_label.offset_bottom = 210
 	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -2050,7 +2068,7 @@ func claude_say(text: String) -> void:
 		claude_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		claude_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		center_label.get_parent().add_child(claude_label)
-		claude_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
+		UiKit.pin(claude_label, Control.PRESET_CENTER_BOTTOM, false)
 		claude_label.offset_left = -760
 		claude_label.offset_right = 760
 		claude_label.offset_top = -250

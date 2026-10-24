@@ -49,6 +49,8 @@ const AFTER_FIRST := 35.0  ## ... or this long after the first person got there
 var net: Node
 var ready_to_play := false
 var party: Party
+## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
+var multi_machine := true
 var split: SplitView
 var vr_rig: VrRig
 var save: Save
@@ -124,7 +126,8 @@ func _ready() -> void:
 
 
 func _setup(mode: String) -> void:
-	if VrRig.wanted(mode):
+	var flat: bool = mode == "host" and not net.has_vr  # flat host (TV / Deck hosting): slot 0 is a pad runner here
+	if VrRig.wanted(mode) and not flat:
 		vr_rig = VrRig.new()
 		add_child(vr_rig)
 	_build_world(vr_rig != null)
@@ -135,7 +138,7 @@ func _setup(mode: String) -> void:
 		ghost = GhostHand.new()
 		ghost.giant = giant
 		add_child(ghost)
-	if mode != "host":
+	if mode != "host" or vr_rig == null:
 		split = SplitView.new()
 		split.camera_far = 900.0
 		add_child(split)
@@ -149,7 +152,7 @@ func _setup(mode: String) -> void:
 			split.set_bubble(VrRig.build_mirror(self, giant.avatar_head, false))
 		elif vr_rig != null:
 			split.set_bubble(vr_rig.mirror)
-	party.allow_slot0 = mode == "local" and vr_rig == null
+	party.allow_slot0 = mode != "client" and vr_rig == null
 	if mode != "client":
 		_start_show()
 	elif net.state_has("course"):
@@ -729,6 +732,8 @@ func on_request(slot: int, action: String, args: Array) -> void:
 		"snd":
 			if args.size() >= 4:
 				sfx.play_at(String(args[0]), args[1], float(args[2]), float(args[3]))
+				# the other TV machines hear it too (the sender already played it)
+				net.event_except(net.sender_peer(), "sfx", [String(args[0]), args[1], float(args[2]), float(args[3])])
 		"stat":
 			if args.size() >= 1 and slot < 10:
 				awards.add(slot, String(args[0]))
@@ -828,7 +833,7 @@ func _make_hud(slot: int, parent: Control) -> void:
 
 
 func _bottom(c: Control) -> void:
-	c.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	UiKit.pin(c, Control.PRESET_CENTER_BOTTOM)
 	c.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	c.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	c.offset_top = -60.0
@@ -938,7 +943,7 @@ func on_pause_changed(paused: bool, _by_slot: int) -> void:
 			tv_banner = UiKit.panel("accent")
 			ui.add_child(tv_banner)
 			tv_banner.add_child(UiKit.title("PAUSED"))
-			tv_banner.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_KEEP_SIZE)
+			UiKit.pin(tv_banner, Control.PRESET_CENTER)
 			tv_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
 			tv_banner.grow_vertical = Control.GROW_DIRECTION_BOTH
 		tv_banner.visible = paused
@@ -968,6 +973,8 @@ func apply_snapshot(s: Array) -> void:
 		return
 	var dt := get_process_delta_time()
 	giant.apply_pose(s[0], 1.0)
+	if split != null and (s[0] as PackedFloat32Array).is_empty():
+		split.clear_bubble()  # a flat host: no VR player to show in the bubble
 	var ids: PackedInt32Array = s[1]
 	var pos: PackedVector3Array = s[2]
 	var yaw: PackedFloat32Array = s[3]

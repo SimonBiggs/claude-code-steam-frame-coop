@@ -53,6 +53,12 @@ var _reader: UiInput
 var _loaded := false
 
 
+func _enter_tree() -> void:
+	# After core/party.gd samples input (-100), before the game's _process (0): when a button closes the
+	# intro, dismiss_intro() guards it before the game can read it as a press.
+	process_priority = -50
+
+
 ## Register a TV view: `root` is that view's UiKit.ui_root; slot = the player index it belongs to
 ## (-1 = a shared screen that shows everyone's hints).
 func add_view(root: Control, slot: int = -1) -> void:
@@ -167,11 +173,16 @@ func intro(data: Dictionary, opts: Dictionary = {}) -> void:
 		intro_done.emit.call_deferred()
 
 
-## Close the intro cards now.
+## Close the intro cards now. The button that closed them is guarded (core/party.gd guard_all, the VR rig's
+## guarded trigger), so it doesn't also act in the game that frame: a quiz counted it as an answer.
 func dismiss_intro() -> void:
 	if _intro_nodes.is_empty():
 		return
 	_close_intro()
+	if _party != null and is_instance_valid(_party) and _party.has_method("guard_all"):
+		_party.call("guard_all")
+	if _vr_rig != null and is_instance_valid(_vr_rig) and _vr_rig.has_method("guard_trigger"):
+		_vr_rig.call("guard_trigger")
 	UiKit.sound("ui_select")
 	intro_done.emit()
 

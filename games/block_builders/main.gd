@@ -1,6 +1,5 @@
 extends Node3D
 const VrText := preload("res://core/vr_text.gd")
-const Machine := preload("res://core/machine.gd")  # one player per screen on a Deck (view_on)
 ## BLOCK BUILDERS: a co-op platformer on a floating obstacle course.
 ##  - Player 1 (VR, host) is the giant BUILDER: the course is a tabletop diorama (world_scale 8).
 ##    Grab colourful blocks (planks, stairs, springs, fans) from the tray with the right trigger and
@@ -50,6 +49,7 @@ const RunnerScript := preload("res://games/block_builders/runner.gd")
 const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
 const NetScript := preload("res://core/net.gd")
+const ClassicSeats := preload("res://core/classic_seats.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
 const PropsScript := preload("res://games/block_builders/props.gd")
 const GhostHandScript := preload("res://games/block_builders/ghost_hand.gd")
@@ -96,6 +96,10 @@ const SOUNDS := {
 }
 
 var players: Array = []
+## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
+var multi_machine := true
+## Which machine drives which runner (core/classic_seats.gd; core/net.gd checks it too).
+var seats: ClassicSeats
 var builder
 var course: Node3D
 var net: Node
@@ -169,7 +173,6 @@ var views_dirty := true
 var last_view_size := Vector2.ZERO
 var view_count := 0
 var lamp: DirectionalLight3D
-var join_t := 0.0
 
 
 func _ready() -> void:
@@ -192,6 +195,16 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
+	seats = ClassicSeats.new(self, {
+		"free_actions": ["confirm", "restart", "pause"],
+		"is_local": func(p) -> bool: return not p.remote,
+		"seat_free": func(p) -> bool: return not p.remote and not p.active and p.joy < 0 and p.key_set < 0 and not p.has_meta("lost_pad") and not p.has_meta(ClassicSeats.WANT),
+		"ghost": _runner_ghost,
+		"moved": _runner_moved,
+		"deactivate": _seat_gone,
+		"layout": _relayout,
+		"full": _runners_full,
+	})
 	Input.joy_connection_changed.connect(_on_joy_changed)
 	if OS.has_environment("DUO_JOIN"):
 		_show_center("Connecting to the Builder…", 0.0)
@@ -207,6 +220,10 @@ func _setup_game(mode: String) -> void:
 	_build_players(mode)
 	_build_views(mode)
 	_assign_joypads()
+	if seats.deck_alone():
+		seats.deck_solo(0)  # a Deck on its own: the builder (simple mode: with the buddy runner)
+	elif mode == "client":
+		players[1].set_meta(ClassicSeats.WANT, true)  # ask the host for P2's runner (it may hand out another one)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_reset_budget()
 	ready_to_play = true
@@ -248,14 +265,15 @@ func _setup_simple(mode: String) -> void:
 	if mode == "client":
 		_show_center("", 0.0, false)
 		return
-	if mode == "host":
+	if mode == "host" or seats.deck_alone():
 		_set_solo(true)
 	_show_center("BLOCK BUILDERS", SIMPLE_INTRO_TIME)
 
 
-## Host only: with no TV machine, P2 is a buddy runner simulated (and walked to the flag) here.
+## Host (or a Steam Deck on its own): with no TV machine, P2 is a buddy runner simulated (and walked to the
+## flag) here.
 func _set_solo(on: bool) -> void:
-	if not simple or net.mode != "host" or players.size() < 2:
+	if not simple or net.mode == "client" or players.size() < 2:
 		return
 	solo = on
 	var r = players[1]
@@ -528,7 +546,7 @@ func _layout_views() -> void:
 	for p in players:
 		if p.has_meta("view"):
 			var c: SubViewportContainer = p.get_meta("view")
-			c.visible = Machine.view_on(self, p) and not p.remote
+			c.visible = p.active and not p.remote and p.get("buddy") != true  # the buddy runner is driven here: no view of its own
 			if c.visible:
 				list.append(p)
 	var n := list.size()
@@ -604,7 +622,7 @@ func _build_vr_mirror(xr_cam: XRCamera3D) -> void:
 ## Any other controller drops in by pressing A.
 func _reserved_slots() -> Array:
 	var slots: Array = []
-	if players.size() > 1 and not players[1].remote:
+	if players.size() > 1 and not players[1].remote and not players[1].buddy:  # (the buddy runner takes no pad: a friend drops in)
 		slots.append(players[1])
 	if builder.flat:
 		slots.append(builder)
@@ -681,10 +699,7 @@ func _input(event: InputEvent) -> void:
 		return
 	var r = _free_runner()
 	if r == null:
-		if simple:
-			local_sound("boop", -10.0, 0.7)  # no sentence: a soft "no room" boop
-		else:
-			_show_center("All 6 runner spots are taken!", 1.5, false)
+		_runners_full()
 		return
 	r.joy = b.device
 	r.claimed = true
@@ -710,9 +725,8 @@ func request_join(i: int) -> void:
 		return
 	var r = players[i]
 	if net.mode == "client":
-		r.set_meta("want_join", true)
-		join_t = 0.0
-		_check_join(0.0)
+		r.set_meta(ClassicSeats.WANT, true)  # seats.request_joins asks the host until the runner is ours
+		seats.ask_soon()
 	else:
 		on_p2_action("join", [], i)
 
@@ -727,19 +741,45 @@ func request_leave(i: int) -> void:
 		on_p2_action("leave", [], i)
 
 
-## TV: keep asking the host until our new runners show up as active in the snapshots.
-func _check_join(delta: float) -> void:
-	join_t -= delta
-	if join_t > 0.0:
-		return
-	for r in runners():
-		if not r.has_meta("want_join"):
-			continue
-		if r.active:
-			r.remove_meta("want_join")
-			continue
-		join_t = 1.0
-		net.send_action("join", [], r.index)
+func _runners_full() -> void:
+	if simple:
+		local_sound("boop", -10.0, 0.7)  # no sentence: a soft "no room" boop
+	else:
+		_show_center("All 6 runner spots are taken!", 1.5, false)
+
+
+## TV machine: runner p is another machine's now (on: moved from the snapshots, no view here) or ours again.
+func _runner_ghost(p, on: bool) -> void:
+	p.remote = on
+	if on:
+		p.claimed = false
+		p.net_target = p.global_position
+		p.mouse_on = false
+	elif p.active:
+		_ensure_view(p)
+	on_player_activity_changed(p)
+
+
+## TV machine: our controls moved from runner `from` to runner `to` (another machine has `from`).
+func _runner_moved(from, to) -> void:
+	to.claimed = true
+	from.claimed = false
+	if from.mouse_on:
+		to.mouse_on = true
+		from.mouse_on = false
+
+
+## Host: a machine's runner goes away (that machine left).
+func _seat_gone(r) -> void:
+	if r.active:
+		r.set_active(false)
+		r.finished = false
+		on_player_activity_changed(r)
+
+
+func _relayout() -> void:
+	views_dirty = true
+	_layout_views()
 
 
 ## Tests: join TV player `index` (1..6) as if a new controller had pressed A.
@@ -757,9 +797,9 @@ func on_player_activity_changed(p) -> void:
 	if p.active and not p.remote:
 		_ensure_view(p)
 	if p.has_meta("view"):
-		p.get_meta("view").visible = Machine.view_on(self, p)
-	if p.active:
-		p.remove_meta("want_join")
+		p.get_meta("view").visible = p.active and not p.remote and p.get("buddy") != true
+	if seats.joined(p):
+		p.remove_meta(ClassicSeats.WANT)
 	views_dirty = true
 
 
@@ -1289,7 +1329,8 @@ func _process(delta: float) -> void:
 		_update_world_arrows()
 	_check_tv_confirm()
 	if net.mode == "client":
-		_check_join(delta)
+		seats.sync()
+		seats.request_joins(delta)
 		state_t += delta
 		if state == "play":
 			level_time += delta
@@ -1903,6 +1944,8 @@ func _update_world_arrows() -> void:
 # --- Networking ----------------------------------------------------------------------------
 
 func on_client_joined() -> void:
+	if not seats.first_machine():
+		return  # another machine: its runners join when they ask ("join")
 	if simple:
 		_set_solo(false)
 		sound("revive", -4.0, 1.2)
@@ -1916,22 +1959,22 @@ func on_client_joined() -> void:
 				_show_intro())
 
 
+## Host: one machine left: only its runners leave (and their seats become free).
+func on_machine_left(peer: int) -> void:
+	seats.machine_left(peer)
+
+
+## Host: the LAST machine left (multi_machine games get this only then).
 func on_client_left() -> void:
+	seats.all_left()  # each machine asks for its runners again when it reconnects
 	if simple:
-		for r in runners():
-			if r.index >= 2 and r.active:
-				r.set_active(false)
-				on_player_activity_changed(r)
 		_set_solo(true)
 		return
 	_show_center("The runners left - waiting for them to come back…", 0.0)
-	for r in runners():
-		if r.index >= 2 and r.active:
-			r.set_active(false)
-			on_player_activity_changed(r)
 
 
 func on_p2_action(action: String, args: Array, index: int = 1) -> void:
+	index = seats.host_action(action, args, index)  # many machines: who drives which runner (core/classic_seats.gd)
 	if index < 1 or index >= players.size():
 		return
 	var r = players[index]
@@ -2057,6 +2100,8 @@ func apply_snapshot(s: Array) -> void:
 
 
 func apply_event(kind: String, args: Array) -> void:
+	if seats.handle_event(kind, args):
+		return
 	if not ready_to_play:
 		return
 	match kind:

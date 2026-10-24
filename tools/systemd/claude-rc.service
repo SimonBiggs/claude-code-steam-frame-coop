@@ -1,0 +1,12 @@
+[Unit]
+Description=Claude Code Remote Control (claude rc) server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=%h/.local/bin/claude-rc-service
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=default.target
