@@ -273,7 +273,8 @@ func peer_ip(peer: int) -> String:
 	if OS.has_environment("DUO_UPDATE_TEST_PEER_IP"):
 		return OS.get_environment("DUO_UPDATE_TEST_PEER_IP")
 	var e := _enet()
-	if e == null:
+	# (only machines we have a direct ENet link to: a client links only to the host; others' messages are relayed)
+	if e == null or not (peer in multiplayer.get_peers() if multiplayer.is_server() else peer == 1):
 		return ""
 	var pp := e.get_peer(peer)
 	return pp.get_remote_address() if pp != null else ""
@@ -284,18 +285,19 @@ func peer_ip(peer: int) -> String:
 func source_problem(peer: int, ip: String) -> String:
 	if _lobby() == null or _enet() == null:
 		return "not in an arcade lobby"
-	if not is_private_ip(ip):
-		return "not a home-network address"
 	if multiplayer.is_server():
 		if not peer in multiplayer.get_peers():
 			return "not a machine in this lobby"
 	elif peer != 1:
 		return "not the lobby host"
+	if not is_private_ip(ip):
+		return "not a home-network address"
 	return ""
 
 
 func _refuse(what: String, peer: int, reason: String) -> void:
-	log_line("REFUSED %s from %s (peer %d): %s" % [what, peer_ip(peer), peer, reason])
+	var ip := peer_ip(peer)
+	log_line("REFUSED %s from %s (peer %d): %s" % [what, ip if ip != "" else "another machine, relayed", peer, reason])
 	refused.emit(what, reason)
 
 

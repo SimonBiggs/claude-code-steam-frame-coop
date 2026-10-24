@@ -14,6 +14,7 @@ PORT = int(os.environ.get("DUO_PORT", random.randint(20000, 29990)))
 W = f"/tmp/lanupd-{PORT}"
 NOW = int(time.time())
 results = []
+OLD_FILE = "games/duo_arena/lan_update_old_note.md"
 procs = []
 
 
@@ -145,6 +146,8 @@ def setup():
     signers(base, "init", ts=NOW - 5000)
     signers(base, "add", "simon-deck", keys("simon-deck") + "/public.pem", ts=NOW - 4900)
     keys("evil")
+    with open(base + "/" + OLD_FILE, "w") as f:  # version N+1 deletes it
+        f.write("old note\n")
     sign(base, "steam-machine", NOW - 3000)  # version N
     return base
 
@@ -156,9 +159,7 @@ def make_newer(src, dst, signer, ts, tag):
         f.write(f"\n# lan-update-test {tag}\n")
     with open(g + "/core/lan_update_test_marker.gd", "w") as f:
         f.write(f'extends RefCounted\nconst TAG := "{tag}"\n')
-    md = sorted(x for x in os.listdir(g + "/games/duo_arena") if x.endswith(".md"))
-    for x in md[:1]:
-        os.remove(f"{g}/games/duo_arena/{x}")
+    os.remove(g + "/" + OLD_FILE)
     sign(g, signer, ts)
     return g
 
@@ -201,7 +202,7 @@ def t_update(base):
     ok("a", line, "joiner updated", line or log(pj)[-800:])
     ok("a", manifest_ver(j) == manifest_ver(h), f"same version on both ({manifest_ver(j)})")
     ok("a", same_code(h, j) == "", "every file identical, the deleted file removed: " + (same_code(h, j) or "yes"))
-    ok("a", not os.path.exists(j + "/games/duo_arena/" + sorted(x for x in os.listdir(base + "/games/duo_arena") if x.endswith(".md"))[0]), "deleted file gone")
+    ok("a", not os.path.exists(j + "/" + OLD_FILE) and "1 removed" in (line or ""), "file deleted in N+1 removed")
     fetched = wait_for(pj, r"\d+ of \d+ files to fetch", 1)
     ok("a", fetched and int(fetched.split()[0]) <= 3, f"only changed files fetched ({fetched})")
     rl = wait_for(pj, r"reloaded res://arcade/arcade.gd", 15)
@@ -231,8 +232,9 @@ def t_tamper(base):
     """(b) tampered file / bad signature / unknown signer / forged signer list / file outside the game: refused."""
     print("(b) tampered and forged updates")
     g = attacker(make_newer(base, f"{W}/b1-host", "steam-machine", NOW - 2000, "b1"))
-    with open(g + "/arcade/arcade.gd", "a") as f:
-        f.write("\n# changed after signing\n")
+    data = bytearray(open(g + "/arcade/arcade.gd", "rb").read())  # same size, one byte different
+    data[-2] = ord("X") if data[-2] != ord("X") else ord("Y")
+    open(g + "/arcade/arcade.gd", "wb").write(bytes(data))
     refusal("b1", "file changed after signing: refused", g, "doesn't match its signed hash", env_host={"EVIL": "1"})
     g = attacker(make_newer(base, f"{W}/b2-host", "steam-machine", NOW - 2000, "b2"))
     sig = open(g + "/.update/manifest.sig").read()
