@@ -1,0 +1,13 @@
+#!/bin/bash
+# claude-desktop: run at desktop-mode login (~/.config/autostart/claude-desktop.desktop, Simon 2026-10-18:
+# "whenever desktop mode is opened, it always opens up a Claude Code and automatically attaches the voice").
+# Attaches to the tmux session "claude" (e.g. one claude-watchdog started) or starts Claude in a new one.
+# Already running (e.g. in another tmux session): attach to the tmux session that holds it.
+if pid=$("$HOME/.local/bin/claude-main" --running | grep -E '^[0-9]+$'); then
+  pane=$(tr '\0' '\n' < /proc/$pid/environ 2>/dev/null | sed -n 's/^TMUX_PANE=//p')
+  sess=$(/usr/bin/tmux display-message -p -t "$pane" '#{session_name}' 2>/dev/null)
+  [ -n "$sess" ] && exec /usr/bin/tmux attach -t "$sess"
+fi
+if /usr/bin/tmux has-session -t claude 2>/dev/null; then exec /usr/bin/tmux attach -t claude; fi
+cd ~ || exit 1
+exec /usr/bin/tmux new-session -s claude "$HOME/.local/bin/claude-main 'Desktop mode just opened'"
