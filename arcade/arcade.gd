@@ -143,6 +143,9 @@ var my_kind: String = preload("res://core/machine.gd").kind()
 var host_has_vr := false
 var lobby_id := randi()  # flat hosts that start together: the higher id gives way
 var _finding := 0.0  # seconds left looking for a lobby before hosting one
+## Counters for tests (tests/arcade_lobby_bot.gd): menu rebuilds, selections sent / received. A storm of either is the
+## sign of machines echoing each other's choices.
+var stats := {"show_category": 0, "sync_out": 0, "sync_in": 0}
 
 
 func _ready() -> void:
@@ -341,6 +344,7 @@ func _lobby_address() -> String:
 
 @rpc("any_peer", "call_remote", "unreliable_ordered")
 func _sync_selection(index: int) -> void:
+	stats.sync_in += 1
 	_select(index, false)
 
 
@@ -540,6 +544,7 @@ func _show_category(tab: int, focus_first: bool) -> void:
 	var t := tabs()
 	if t.is_empty() or grid == null:
 		return
+	stats.show_category += 1
 	cat = wrapi(tab, 0, t.size())
 	for child in tab_bar.get_children():
 		child.queue_free()
@@ -798,6 +803,7 @@ func _select(index: int, broadcast: bool) -> void:
 			(cards[selected] as Button).grab_focus()
 		_applying_remote = false
 	if broadcast and mode != "local" and multiplayer.multiplayer_peer != null:
+		stats.sync_out += 1
 		_sync_selection.rpc(selected)
 	_refresh_vr()
 
