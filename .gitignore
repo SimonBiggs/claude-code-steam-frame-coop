@@ -4,3 +4,4 @@
 *.tmp
 .claude/
 .update/
+__pycache__/
