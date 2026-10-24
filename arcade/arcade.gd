@@ -354,6 +354,9 @@ func _launch(index: int) -> void:
 
 
 func _process(_delta: float) -> void:
+	if not has_meta("pad_ui"):  # here, not only in _ready: a hot-reloaded arcade gets it too
+		set_meta("pad_ui", true)
+		preload("res://core/ui_kit.gd").ensure_pad_ui_actions()
 	_lobby_net(_delta)
 	_ensure_shared_nodes()
 	_ensure_fullscreen()
@@ -647,7 +650,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		_toggle_quit_menu()
 		return
 	if quit_panel and is_instance_valid(quit_panel):
-		return  # the quit dialog has focus; A presses its buttons (ui_accept has pad A since ensure_pad_ui_actions)
+		# The dialog presses its own focused button on pad A (don't rely on ui_accept having A: a hot-reloaded arcade
+		# never ran ensure_pad_ui_actions at startup, and A did nothing).
+		if start and start.pressed and start.button_index == JOY_BUTTON_A:
+			var f := get_viewport().gui_get_focus_owner()
+			if f is BaseButton and quit_panel.is_ancestor_of(f):
+				get_viewport().set_input_as_handled()
+				(f as BaseButton).pressed.emit()
+		return
 	var step := 0
 	var pad := event as InputEventJoypadButton
 	if pad and pad.pressed:
