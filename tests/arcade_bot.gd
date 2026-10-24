@@ -38,6 +38,8 @@ class Runner extends Node:
 		add_child(kit)
 		kit.verbose = false
 		OS.set_environment("DUO_SOLO", "1")  # no lobby networking in the test
+		if not OS.has_environment("DUO_PORT"):
+			OS.set_environment("DUO_PORT", str(20000 + randi() % 10000))  # never the real 7777 (kids' Decks play there)
 		OS.unset_environment("ARCADE_GAME")
 		_run()
 

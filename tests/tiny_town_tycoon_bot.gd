@@ -91,7 +91,7 @@ func _ready() -> void:
 					"SIMPLE: the pause menu says PAUSED once (no second PAUSED banner under it)")
 				_check_pause_banner()
 			else:
-				kit.assert_true(get_tree().paused and main.tv_banner != null and main.tv_banner.visible, "Start pauses and shows the banner")
+				kit.assert_true(get_tree().paused and main.tv_banner != null and not main.tv_banner.visible, "Start pauses and shows the banner (on_pause_changed made the banner; the open pause menu alone says PAUSED)")
 			_press_any("start"))
 		kit.at(t0 + 13.2, "resumed?", func() -> void:
 			kit.assert_true(not get_tree().paused, "Start again resumes")

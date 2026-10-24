@@ -37,6 +37,8 @@ class Runner extends Node:
 		kit.verbose = false
 		OS.set_environment("DUO_MACHINE_KIND", "deck")
 		OS.set_environment("DUO_SOLO", "1")
+		if not OS.has_environment("DUO_PORT"):
+			OS.set_environment("DUO_PORT", str(20000 + randi() % 10000))  # never the real 7777 (kids' Decks play there)
 		for k in ["DUO_JOIN", "DUO_HOST", "BOT_VR"]:
 			OS.unset_environment(k)
 		_run()
