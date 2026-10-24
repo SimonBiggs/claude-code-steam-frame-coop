@@ -234,7 +234,7 @@ func _build_case(c: Dictionary) -> void:
 		rings.append(ring)
 	# the case board: what is missing, in words and as a picture
 	var title := UiKit.label3d(Case.title(c), 0.11, "gold", true, 2.2)
-	title.position = Manor.HALL_BOARD_POS + Vector3(0.08, 0.5, 0.0)
+	title.position = Manor.HALL_BOARD_POS + Vector3(0.08, 1.0, 0.0)  # above the board: clear of the VR how-to card
 	title.rotation.y = PI * 0.5  # a Label3D reads from +Z: turn it to face +X, into the hall
 	add_child(title)
 	table_nodes.append(title)
@@ -564,7 +564,7 @@ func _move_local_players(delta: float) -> void:
 			(parts["prompt"] as Control).visible = playing and near >= 0
 		if playing and near >= 0 and near < rings.size():
 			rings[near].scale = Vector3.ONE * 1.35
-		if playing and near >= 0 and party.just_pressed(slot, "accept") and not net.just_unpaused():
+		if playing and near >= 0 and party.just_pressed(slot, "accept") and not net.just_unpaused() and not hints.intro_showing():
 			net.request(slot, "accuse", [near])
 
 
@@ -841,7 +841,7 @@ func _on_phase(p: String) -> void:
 		"intro":
 			_hide_results()
 			var c: Dictionary = net.state_get("case", {})
-			HudKit.banner(_all_huds(), Case.title(c), "Find the clues!", {"duration": INTRO_TIME, "style": "boss"})
+			HudKit.banner(_all_huds(), Case.title(c), "Find the clues!", {"duration": INTRO_TIME, "style": "boss", "y": 0.14})  # above the how-to card
 			if vr_rig != null:
 				HudKit.vr_banner(self, vr_rig.camera, Case.title(c), "Find the clues!", {"duration": INTRO_TIME, "sound": ""})
 				vr_rig.place(Manor.VR_SPAWN, Manor.VR_SPAWN_YAW)
