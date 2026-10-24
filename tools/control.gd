@@ -10,6 +10,9 @@ extends Node
 ##   click  {x, y} | {node}        left click at a point or a node's centre
 ##   wait   {frames|seconds}
 ##   shot   {path, width?}         save a PNG of the screen (after the next drawn frame)
+##   record {dir, fps?, width?} / record {stop: true}   JPG frames (inputs in a corner overlay), the Master
+##                                 bus as mono float32 (audio.f32 + audio.rate) and inputs/marks (events.txt)
+##   mark   {text}                 show a note in the recording overlay (e.g. "now testing the pause menu")
 ##   speed  {value}                Engine.time_scale
 ##   scene  {path}                 change_scene_to_file
 ##   quit
@@ -17,6 +20,20 @@ extends Node
 
 var server := TCPServer.new()
 var port := 0
+# Recorder: frames go to rec_dir/<ms since start>.jpg; inputs and marks show in an overlay so the video
+# explains itself. Encoding runs on worker threads, which must all be waited on (or their images leak).
+var rec_dir := ""
+var rec_every := 0.1
+var rec_width := 960
+var rec_t0 := 0
+var rec_next := 0
+var rec_frames := 0
+var rec_tasks: Array[int] = []
+var overlay: CanvasLayer
+var rec_audio: FileAccess  # mono float32 samples of the Master bus, from recording start (rec/audio.f32)
+var rec_capture: AudioEffectCapture
+var overlay_label: Label
+var overlay_lines: Array = []  # [text, until_ms]
 
 
 func _ready() -> void:
@@ -31,6 +48,98 @@ func _ready() -> void:
 func _process(_delta: float) -> void:
 	while server.is_listening() and server.is_connection_available():
 		_serve(server.take_connection())
+	for t in rec_tasks.filter(func(t: int) -> bool: return WorkerThreadPool.is_task_completed(t)):
+		WorkerThreadPool.wait_for_task_completion(t)
+		rec_tasks.erase(t)
+	if rec_dir != "":
+		_update_overlay()
+		_pull_audio()
+		var now := Time.get_ticks_msec()
+		if now >= rec_next and rec_tasks.size() < 4:
+			rec_next = now + int(rec_every * 1000.0)
+			var img := get_viewport().get_texture().get_image()
+			rec_tasks.append(WorkerThreadPool.add_task(_save_frame.bind(img, "%s/%08d.jpg" % [rec_dir, now - rec_t0])))
+			rec_frames += 1
+
+
+func _pull_audio() -> void:
+	var n := rec_capture.get_frames_available()
+	if n <= 0:
+		return
+	var st := rec_capture.get_buffer(n)
+	var mono := PackedFloat32Array()
+	mono.resize(st.size())
+	for i in st.size():
+		mono[i] = (st[i].x + st[i].y) * 0.5
+	rec_audio.store_buffer(mono.to_byte_array())
+
+
+func _save_frame(img: Image, path: String) -> void:
+	if rec_width > 0 and rec_width < img.get_width():
+		img.resize(rec_width, int(img.get_height() * float(rec_width) / img.get_width()), Image.INTERPOLATE_BILINEAR)
+	img.save_jpg(path, 0.85)
+
+
+func _note(text: String, seconds := 1.5) -> void:
+	if rec_dir == "":
+		return
+	overlay_lines.append([text, Time.get_ticks_msec() + int(seconds * 1000.0)])
+	var f := FileAccess.open(rec_dir + "/events.txt", FileAccess.READ_WRITE if FileAccess.file_exists(rec_dir + "/events.txt") else FileAccess.WRITE)
+	f.seek_end()
+	f.store_line("%.2f %s" % [(Time.get_ticks_msec() - rec_t0) / 1000.0, text])
+
+
+func _update_overlay() -> void:
+	var now := Time.get_ticks_msec()
+	overlay_lines = overlay_lines.filter(func(l: Array) -> bool: return l[1] > now)
+	var txt := "%.1fs" % ((now - rec_t0) / 1000.0)
+	for l in overlay_lines.slice(-4):
+		txt += "\n" + str(l[0])
+	overlay_label.text = txt
+
+
+func _start_recording(r: Dictionary) -> Dictionary:
+	if r.get("stop", false):
+		if rec_dir == "":
+			return {"error": "not recording"}
+		var dir := rec_dir
+		rec_dir = ""
+		for t in rec_tasks:
+			WorkerThreadPool.wait_for_task_completion(t)
+		rec_tasks.clear()
+		overlay.queue_free()
+		_pull_audio()
+		rec_audio.close()
+		for i in AudioServer.get_bus_effect_count(0):
+			if AudioServer.get_bus_effect(0, i) == rec_capture:
+				AudioServer.remove_bus_effect(0, i)
+				break
+		return {"dir": dir, "frames": rec_frames, "seconds": (Time.get_ticks_msec() - rec_t0) / 1000.0}
+	rec_dir = str(r.get("dir", ""))
+	if rec_dir == "":
+		return {"error": "record needs dir"}
+	DirAccess.make_dir_recursive_absolute(rec_dir)
+	rec_every = 1.0 / maxf(1.0, float(r.get("fps", 10)))
+	rec_width = int(r.get("width", 960))
+	rec_t0 = Time.get_ticks_msec()
+	rec_next = 0
+	rec_frames = 0
+	rec_capture = AudioEffectCapture.new()
+	rec_capture.buffer_length = 2.0
+	AudioServer.add_bus_effect(0, rec_capture)
+	rec_audio = FileAccess.open(rec_dir + "/audio.f32", FileAccess.WRITE)
+	FileAccess.open(rec_dir + "/audio.rate", FileAccess.WRITE).store_string(str(AudioServer.get_mix_rate()))
+	overlay = CanvasLayer.new()
+	overlay.layer = 128
+	overlay_label = Label.new()
+	overlay_label.position = Vector2(16, 12)
+	overlay_label.add_theme_font_size_override("font_size", int(26 * get_viewport().size.y / 1080.0))
+	overlay_label.add_theme_color_override("font_color", Color(1, 1, 0.4))
+	overlay_label.add_theme_color_override("font_outline_color", Color.BLACK)
+	overlay_label.add_theme_constant_override("outline_size", 8)
+	overlay.add_child(overlay_label)
+	add_child(overlay)
+	return {"dir": rec_dir}
 
 
 func _serve(peer: StreamPeerTCP) -> void:
@@ -104,6 +213,11 @@ func _run(r: Dictionary) -> Dictionary:
 			var path := str(r.get("path", ProjectSettings.globalize_path("res://.dev/offscreen.png")))
 			var err := img.save_png(path)
 			return {"path": path, "size": [img.get_width(), img.get_height()]} if err == OK else {"error": "save failed: %d" % err}
+		"record":
+			return _start_recording(r)
+		"mark":
+			_note("# " + str(r.get("text", "")), float(r.get("seconds", 3.0)))
+			return {"ok": true}
 		"speed":
 			Engine.time_scale = float(r.get("value", 1.0))
 			return {"ok": true}
@@ -251,6 +365,7 @@ func _press(r: Dictionary) -> Dictionary:
 		up.device = down.device
 	else:
 		return {"error": "press needs action, key or joy"}
+	_note("▶ " + str(r.get("action", r.get("key", r.get("joy", "")))) + (" %.1f" % float(r.value) if r.has("value") else ""))
 	Input.parse_input_event(down)
 	for i in maxi(1, int(r.get("frames", 2))):
 		await get_tree().process_frame
@@ -266,6 +381,7 @@ func _click(r: Dictionary) -> Dictionary:
 		if not n is Control:
 			return {"error": "no Control at " + str(r.node)}
 		at = (n as Control).get_global_rect().get_center()
+	_note("▶ click %d,%d" % [at.x, at.y])
 	for pressed in [true, false]:
 		var e := InputEventMouseButton.new()
 		e.button_index = MOUSE_BUTTON_LEFT

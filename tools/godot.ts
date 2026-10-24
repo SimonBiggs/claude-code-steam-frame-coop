@@ -19,7 +19,10 @@ const GDEV = join(HOME, ".local/share/gdev");
 const RUNS = join(HOME, ".cache/gdev-offscreen");
 const AUTOLOAD = 'GDev="*res://addons/gdev/bridge.gd"';
 
-export type LaunchOpts = { project: string; scene?: string; width?: number; height?: number; env?: Record<string, string>; timeout?: number };
+export type RecordOpts = { fps?: number; width?: number };
+/** record: on by default (5 fps, 960 px) so g.at(...) can show any past moment; false turns it off. */
+export type LaunchOpts = { project: string; scene?: string; width?: number; height?: number; env?: Record<string, string>; timeout?: number; record?: boolean | RecordOpts };
+const sh = (cmd: string[]) => { const r = Bun.spawnSync(cmd, { stderr: "pipe" }); if (r.exitCode) throw new Error(`${cmd[0]} failed: ${r.stderr.toString().slice(-400)}`); };
 
 const running = new Map<number, Game>();
 
@@ -69,7 +72,11 @@ export async function launch(o: LaunchOpts | string): Promise<Game> {
   const deadline = Date.now() + (opts.timeout ?? 60_000);
   while (Date.now() < deadline) {
     if (child.exitCode !== null) throw new Error(`game exited (${child.exitCode}) before it was ready:\n${g.logTail(25)}`);
-    try { await g.cmd("ping"); return g; } catch { await Bun.sleep(300); }
+    try {
+      await g.cmd("ping");
+      if (opts.record !== false) await g.record(typeof opts.record === "object" ? opts.record : {});
+      return g;
+    } catch { await Bun.sleep(300); }
   }
   await g.quit();
   throw new Error(`no control server after ${(opts.timeout ?? 60_000) / 1000}s:\n${g.logTail(25)}`);
@@ -102,6 +109,87 @@ export class Game {
   speed(value: number) { return this.cmd("speed", { value }); }
   scene(path: string) { return this.cmd("scene", { path }); }
   async shot(path = join(this.dir, "shot.png"), width = 1280) { return (await this.cmd("shot", { path, width })).path as string; }
+  // --- Recorder: frames in <dir>/rec/<ms>.jpg, inputs + marks in rec/events.txt and the overlay ---
+  recDir = "";
+  recStart = 0;  // Date.now() when recording started (frame names are ms after this)
+  async record(o: RecordOpts = {}) {
+    this.recDir = join(this.dir, "rec");
+    Bun.spawnSync(["rm", "-rf", this.recDir]);
+    await this.cmd("record", { dir: this.recDir, fps: o.fps ?? 5, width: o.width ?? 960 });
+    this.recStart = Date.now();
+    return this.recDir;
+  }
+  stopRecording() { return this.cmd("record", { stop: true }); }
+  /** Note shown in the recording overlay and the events list ("trying the pause menu"). */
+  mark(text: string, seconds = 3) { return this.cmd("mark", { text, seconds }); }
+  /** [{t, text}] of inputs and marks, t = seconds since recording started. */
+  events(): { t: number; text: string }[] {
+    try {
+      return readFileSync(join(this.recDir, "events.txt"), "utf8").trim().split("\n").filter(Boolean)
+        .map(l => ({ t: parseFloat(l), text: l.slice(l.indexOf(" ") + 1) }));
+    } catch { return []; }
+  }
+  /** Recorded frames, oldest first: [{t (s), path}]. */
+  frames() {
+    const names = [...new Bun.Glob("*.jpg").scanSync(this.recDir)].sort();
+    return names.map(n => ({ t: parseInt(n) / 1000, path: join(this.recDir, n) }));
+  }
+  /** Seconds since recording started for: a number (as is), "-3s" (3 s ago), or text matching an event
+   *  ("▶ a" = the last A press; "2nd ▶ a" or "#2 ▶ a" = the 2nd one), which picks the moment just after it. */
+  time(when: number | string): number {
+    if (typeof when === "number") return when;
+    const rel = when.match(/^-(\d+(?:\.\d+)?)s?$/);
+    if (rel) return (Date.now() - this.recStart) / 1000 - parseFloat(rel[1]);
+    const nth = when.match(/^(?:#(\d+)|(\d+)(?:st|nd|rd|th))\s+(.*)$/);
+    const text = (nth ? nth[3] : when).toLowerCase();
+    const hits = this.events().filter(e => e.text.toLowerCase().includes(text));
+    if (!hits.length) throw new Error(`no event matching "${text}" (see g.events())`);
+    const e = nth ? hits[parseInt(nth[1] ?? nth[2]) - 1] : hits[hits.length - 1];
+    if (!e) throw new Error(`only ${hits.length} events match "${text}"`);
+    return e.t + 0.4;
+  }
+  /** The recorded frame at `when` (see time()): an image path to Read. */
+  at(when: number | string) {
+    const fr = this.frames();
+    if (!fr.length) throw new Error("nothing recorded (g.record() first)");
+    const t = this.time(when);
+    const out = join(this.dir, "at.jpg");
+    copyFileSync(fr.reduce((a, b) => (Math.abs(b.t - t) < Math.abs(a.t - t) ? b : a)).path, out);
+    return out;
+  }
+  /** Many moments at once, from..to (anything time() takes; default the whole recording) at `fps` frames
+   *  per second (default: whatever gives ~12). Returns image paths to Read: frames sheets, "moves" sheets
+   *  (magenta = changed since the previous tile) and one motion summary (trails, blue early -> red late).
+   *  Every tile also shows a spectrogram of the sound and the inputs pressed since the previous tile. */
+  span(from: number | string = 0, to?: number | string, fps?: number) {
+    const fr = this.frames();
+    if (!fr.length) throw new Error("nothing recorded (g.record() first)");
+    const a = this.time(from), b = to === undefined ? fr[fr.length - 1].t : this.time(to);
+    const step = fps ? 1 / fps : Math.max((b - a) / 11, 0.05);
+    const picks: { t: number; path: string }[] = [];
+    for (let t = a; t <= b + 1e-6; t += step) {
+      const f = fr.reduce((x, y) => (Math.abs(y.t - t) < Math.abs(x.t - t) ? y : x));
+      if (picks[picks.length - 1]?.path !== f.path) picks.push(f);
+    }
+    if (picks.length > 48) throw new Error(`${picks.length} frames is too many to look at: use a lower fps or a shorter span`);
+    const rate = (() => { try { return readFileSync(join(this.recDir, "audio.rate"), "utf8").trim(); } catch { return "44100"; } })();
+    const r = Bun.spawnSync([join(GDEV, "recsheet.py"), join(this.dir, "span"), "--audio", join(this.recDir, "audio.f32"), "--rate", rate,
+      "--events", join(this.recDir, "events.txt"), ...picks.map(p => `${p.t.toFixed(2)}:${p.path}`)], { stderr: "pipe" });
+    if (r.exitCode) throw new Error(`recsheet failed: ${r.stderr.toString().slice(-600)}`);
+    return r.stdout.toString().trim().split("\n");
+  }
+  /** MP4 of the recording (or from..to), real speed. Returns its path (SendUserFile it to Simon). */
+  video(from: number | string = 0, to?: number | string, out = join(this.dir, "run.mp4")) {
+    const fr = this.frames();
+    const a = this.time(from), b = to === undefined ? Infinity : this.time(to);
+    const pick = fr.filter(f => f.t >= a && f.t <= b);
+    const list = pick.map((f, i) => `file '${f.path}'\nduration ${((pick[i + 1]?.t ?? f.t + 0.2) - f.t).toFixed(3)}`).join("\n");
+    writeFileSync(join(this.dir, "frames.txt"), list + `\nfile '${pick[pick.length - 1].path}'\n`);
+    sh(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", join(this.dir, "frames.txt"),
+      "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p", "-c:v", "libx264", "-preset", "veryfast", "-crf", "26", "-r", "30", out]);
+    return out;
+  }
+
   logTail(n = 30) { try { return readFileSync(this.logPath, "utf8").split("\n").filter(l => l && !l.includes("vulkan:") && !l.includes("sockets.c")).slice(-n).join("\n"); } catch { return ""; } }
   log(n = 30) { return this.logTail(n); }
   async quit() {

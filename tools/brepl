@@ -18,8 +18,23 @@ if (args[0] === "--serve") {
   if (existsSync(SOCK)) unlinkSync(SOCK);
   // Offscreen Godot test runs (~/.local/share/gdev/godot.ts): godot.launch("duo-arena"), g.ui(), g.joy("a"), g.shot()...
   globalThis.godot = await import(`${process.env.HOME}/.local/share/gdev/godot.ts`).catch((e) => ({ error: String(e) }));
+  // Dev-loop helpers (~/.local/share/brepl/dev.ts): dev.help(), dev.debt(), dev.bots.all(), dev.stage.diff(), ...
+  globalThis.dev = await import(`${process.env.HOME}/.local/share/brepl/dev.ts`).catch((e) => ({ error: String(e) }));
+  // reload(): pick up edits to godot.ts / dev.ts without restarting (running offscreen games keep their old code).
+  globalThis.reload = async () => {
+    const t = Date.now();
+    globalThis.godot = await import(`${process.env.HOME}/.local/share/gdev/godot.ts?t=${t}`);
+    globalThis.dev = await import(`${process.env.HOME}/.local/share/brepl/dev.ts?t=${t}`);
+    return "reloaded godot + dev";
+  };
   const AsyncFunction = (async () => {}).constructor;
+  // show(...paths): images to hand back with the result. The brepl MCP tool (~/.local/share/brepl/mcp.ts)
+  // returns them as pictures; the CLI just lists them. Returned image paths (or arrays of them) count too.
+  const IMG = /\.(png|jpe?g|webp|gif)$/i;
+  let shown = [];
+  globalThis.show = (...paths) => { for (const p of paths.flat()) if (typeof p === "string") shown.push(p); return paths.flat().length; };
   const run = async (code) => {
+    shown = [];
     const out = [];
     const log = console.log, err = console.error;
     console.log = console.info = (...a) => out.push(a.map((x) => (typeof x === "string" ? x : inspect(x))).join(" "));
@@ -39,6 +54,7 @@ if (args[0] === "--serve") {
         }
       }
       const v = await fn();
+      for (const x of [v].flat()) if (typeof x === "string" && IMG.test(x) && !shown.includes(x)) shown.push(x);
       if (v !== undefined) out.push(typeof v === "string" ? v : inspect(v, { depth: 4, colors: false }));
     } catch (e) {
       out.push(`Error: ${e?.stack ?? e}`);
@@ -46,7 +62,7 @@ if (args[0] === "--serve") {
       console.log = console.info = log;
       console.error = console.warn = err;
     }
-    return out.join("\n") + "\n";
+    return out.join("\n") + "\n" + (shown.length ? `\u0001SHOW ${JSON.stringify(shown)}\n` : "");
   };
   Bun.listen({
     unix: SOCK,
@@ -90,6 +106,7 @@ if (args[0] === "--serve") {
     for (let i = 0; i < 50 && !existsSync(SOCK); i++) await Bun.sleep(50);
     res = await connect();
   }
+  if (process.env.BREPL_RAW !== "1") res = res.replace(/\u0001SHOW (.*)\n/, (_, j) => JSON.parse(j).map((p) => `[image: ${p}]`).join("\n") + "\n");
   process.stdout.write(res);
   if (res.startsWith("Error:")) process.exit(1);
 }
