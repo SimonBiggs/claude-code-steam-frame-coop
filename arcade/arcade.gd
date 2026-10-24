@@ -30,7 +30,7 @@ const GAMES := [
 		"blurb": "VR steers a friendly dragon with the reins; TV gunners pop balloons from its back"},
 	{"id": "bee_garden", "cat": "cosy", "name": "BEE GARDEN", "scene": "res://games/bee_garden/main.tscn",
 		"blurb": "Cosy, no fighting: VR gardener plants and waters, TV bees make honey"},
-	{"id": "paint_and_guess", "cat": "party", "name": "PAINT AND GUESS", "scene": "res://games/paint_and_guess/main.tscn",
+	{"id": "paint_and_guess", "multi": true, "cat": "party", "name": "PAINT AND GUESS", "scene": "res://games/paint_and_guess/main.tscn",
 		"blurb": "VR paints a secret word in the air; TV players race to guess it"},
 	{"id": "rhythm_band", "cat": "party", "name": "RHYTHM BAND", "scene": "res://games/rhythm_band/main.tscn",
 		"blurb": "VR drums with your hands; TV players hit notes on their highways"},
