@@ -22,6 +22,8 @@ const SIGN_POS := Vector3(0.0, 3.1, -6.2)
 const JAR_Z := -2.15
 const MAX_JARS := 8
 const TV_LAYER := 512               # labels only the TV players see (billboards)
+const BEE_TAG_BITS := 0xFC           # bits 2..7: bee n's name tag (1 << (1 + n)); its own camera skips it
+const BEE_ARROW_BITS := 0x7E000      # bits 13..18: bee n's guide arrow (1 << (12 + n)); only its own camera draws it
 
 ## Flower kinds: daisy (quick), sunflower (tall, more honey), sun lily (needs LOTS of water first).
 const KINDS: Array[Dictionary] = [

@@ -38,7 +38,17 @@ const VrText := preload("res://core/vr_text.gd")
 ##    rake scratches the soil, a bird bath splashes, a wind chime tinkles, butterflies flutter off.
 ##  - Solo VR (host with no TV yet): two helper bees (helpers.gd) do the pollinating, so the garden
 ##    still grows. They fly home when a TV bee arrives.
-##  - Text: VR shows at most one short headline; each TV bee gets at most one short line.
+##  - No how-to words (visual teaching): low in each bee's view a pulsing glowing button in that bee's
+##    own controls plus a picture (bee.gd, cue.gd, UiKit glyph / icon): STICK / W A D / an arrow key +
+##    a flower (fly to the glowing flower), + a honeycomb (take the pollen home), RT / SPACE / CTRL + an
+##    up arrow and LT / SHIFT / "." + a down arrow when the flower or hive is right above / below, and
+##    a pulsing bolt when the bee's controller is unplugged. Each goes once done twice (cue_did /
+##    cue_learned). The bee's glowing arrow is bigger and pulses, and only its own view draws it; its
+##    own name tag is hidden from its own view (the corner says P2). The flat gardener gets RT / CLICK +
+##    a down arrow / drop / up arrow while the ghost glove shows planting / watering / picking. The
+##    glove's practice (glowing ring) repeats until the gardener has planted twice and watered twice,
+##    and its picking demo stops after two picks. PAUSED has no sentence.
+##  - Text: titles only (BUZZ BUZZ!, BUZZ! P3, HOORAY!, PAUSED); each TV view's corner says P2 etc.
 
 const W := preload("res://games/bee_garden/world.gd")
 const GardenerScript := preload("res://games/bee_garden/gardener.gd")
@@ -54,6 +64,8 @@ const PauseMenuScript := preload("res://core/pause_menu.gd")
 const GhostHandScript := preload("res://games/bee_garden/ghost_hand.gd")
 const PropsScript := preload("res://games/bee_garden/props.gd")
 const HelpersScript := preload("res://games/bee_garden/helpers.gd")
+const CueScript := preload("res://games/bee_garden/cue.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 const SIMPLE_MODE := true
 const PRACTICE_SPOT := 10      # simple mode: the glowing ring where the first seed goes
@@ -261,7 +273,9 @@ func _setup_game(mode: String) -> void:
 	_ensure_join_listener()
 	print("Bee Garden: %s mode%s" % [mode, "  (simple mode)" if SIMPLE_MODE else ""])
 	if SIMPLE_MODE:
-		help_label.text = "Stick: fly   RT: up   LT: down"
+		# No controls line: each bee's view shows a pulsing button + picture cue (bee.gd / cue.gd).
+		help_label.text = ""
+		help_label.visible = false
 		if mode == "client":
 			_show_center("BUZZ BUZZ!", 2.0)
 		return
@@ -417,7 +431,7 @@ func _ensure_view(b) -> void:
 	vp.add_child(cam)
 	cam.current = true
 	b.attach_camera(cam)
-	cam.cull_mask = 0xFFFFF & ~VR_LAYER
+	cam.cull_mask &= ~VR_LAYER  # (attach_camera hid this bee's own name tag and the other bees' arrows)
 	var hud := CanvasLayer.new()
 	vp.add_child(hud)
 	b.hud_label = _make_label(28)
@@ -645,7 +659,10 @@ func handle_join_input(event: InputEvent) -> bool:
 		return false
 	var bee = _free_bee()
 	if bee == null:
-		_show_center("All 6 bee seats are taken!", 1.5, false)
+		if SIMPLE_MODE:
+			sound("miss", -6.0)  # no sentence: nothing happens (every bee seat is taken)
+		else:
+			_show_center("All 6 bee seats are taken!", 1.5, false)
 		return true
 	bee.joy = b.device
 	bee.claimed = true
@@ -916,6 +933,7 @@ func try_harvest(pos: Vector3, reach: float, flat: bool) -> bool:
 
 
 func _harvest(i: int) -> void:
+	cue_did(gardener, "pick")  # simple mode: the picking demo goes once picked twice
 	var s: Dictionary = spots[i]
 	var k: int = s.kind
 	var kd: Dictionary = W.KINDS[k]
@@ -1083,6 +1101,7 @@ func _seed_landed(kind: int, p: Vector3) -> void:
 	s.water = 0.0 if SIMPLE_MODE else 0.3  # simple: the seed needs watering before it grows
 	s.growth = 0.02
 	spots[best] = s
+	cue_did(gardener, "seed")  # simple mode: the seed demo goes once planted twice
 	if SIMPLE_MODE and practice_g == "seed":
 		practice_g = "water"
 		glow_spot = best
@@ -1114,12 +1133,12 @@ func water_at(tip: Vector3, delta: float) -> void:
 			continue
 		var before: float = s.water
 		s.water = minf(1.0, before + 0.6 * delta)
-		if SIMPLE_MODE and practice_g == "water" and i == glow_spot and float(s.water) >= 0.6:
-			practice_g = "done"
-			glow_spot = -1
+		if before < 0.6 and float(s.water) >= 0.6:
+			cue_did(gardener, "water")  # simple mode: the water demo goes once watered twice
+		if SIMPLE_MODE and practice_g == "water" and (i == glow_spot or cue_learned(gardener, "water")) and float(s.water) >= 0.6:
 			sound("bloom", -2.0, 1.4)
 			burst(W.spot_pos(i) + Vector3.UP * 0.3, Color(0.6, 0.85, 1.0), 16, 0.05)
-			print("Practice: watered - the gardener's practice is done")
+			_practice_next()
 		if before < 0.12 and float(s.water) >= 0.12:
 			popup(head_pos(i) + Vector3.UP * 0.4, "Ahh, water!", Color(0.6, 0.85, 1.0))
 	for b in bees():
@@ -1622,8 +1641,7 @@ func _start_round_simple(n: int) -> void:
 		burst(W.tray_slot(1) + Vector3.UP * 0.3, Color(1.0, 0.85, 0.2), 20, 0.06)
 	print("Round %d: fill %d jars = %d honey, %d seed kinds" % [n, jar_count(), target, seed_kinds])
 	sound("bloom", 0.0, 0.8)
-	if n == 1:
-		_show_center("BEE GARDEN", 3.0)
+	# (No BEE GARDEN headline at the start: the garden's big sign already says it, so it read twice.)
 
 
 func _round_complete_simple() -> void:
@@ -1992,8 +2010,9 @@ func _update_ghost_hand(delta: float) -> void:
 		want = "water"
 		a = W.CAN_HOME
 		b = W.spot_pos(glow_spot)
-	elif gardener_idle > 5.0:
-		# Later: if ripe fruit waits and the gardener hasn't done anything for a while, show picking.
+	elif gardener_idle > 5.0 and not cue_learned(gardener, "pick"):
+		# Later: if ripe fruit waits and the gardener hasn't done anything for a while, show picking
+		# (until the gardener has picked two fruits).
 		for i in spots.size():
 			if int(spots[i].kind) >= 0 and float(spots[i].fruit) >= 1.0:
 				want = "pick"
@@ -2001,6 +2020,82 @@ func _update_ghost_hand(delta: float) -> void:
 				b = W.BASKET_POS + Vector3(0.0, 0.3, 0.0)
 				break
 	ghost_hand.show_demo(want, a, b, busy, delta)
+	if gardener.flat:
+		_update_gardener_cue(want if ghost_hand.visible else "", delta)
+
+
+## Simple mode, flat gardener (split screen): low in its view a pulsing button (RT on a controller,
+## CLICK on the mouse) plus a picture of what the ghost glove is showing (plant: down arrow, water: a
+## drop, pick: up arrow). It goes when the glove's demo goes (each once done twice).
+func _update_gardener_cue(key: String, delta: float) -> void:
+	if not gardener.has_meta("view"):
+		return
+	var cue = gardener.get_meta("cue_node") if gardener.has_meta("cue_node") else null
+	if cue == null or not is_instance_valid(cue):
+		var vp := (gardener.get_meta("view") as Node).get_child(0)
+		var hud := CanvasLayer.new()
+		hud.name = "GardenerHud"
+		vp.add_child(hud)
+		cue = CueScript.new()
+		hud.add_child(cue)
+		gardener.set_meta("cue_node", cue)
+	var pad: bool = gardener.joy >= 0 and not gardener.mouse_on
+	gardener.set_meta("cue", key)
+	cue.set_cue(key, str(pad), func(sc: float) -> Array:
+		var btn := UiKit.glyph("RT" if pad else "CLICK", sc)
+		match key:
+			"seed":
+				return [btn, UiKit.icon("arrow_down", Color(0.55, 1.0, 0.5), 48.0 * sc)]
+			"water":
+				return [btn, UiKit.icon("drop", Color(0.5, 0.8, 1.0), 56.0 * sc)]
+		return [btn, UiKit.icon("arrow_up", Color(1.0, 0.75, 0.3), 48.0 * sc)], delta)
+
+
+## Simple mode picture cues: player p has done `key` once more (bees: "pollen", "hive", "up", "down";
+## gardener: "seed", "water", "pick"); a cue (and the ghost glove's demo) goes once done twice. Kept on
+## each machine for its own players (bees count from the mirrored pollen / honey, so the TV knows too).
+func cue_did(p, key: String) -> void:
+	if p == null:
+		return
+	var done: Dictionary = p.get_meta("cue_done", {})
+	done[key] = int(done.get(key, 0)) + 1
+	p.set_meta("cue_done", done)
+
+
+func cue_learned(p, key: String) -> bool:
+	if p == null:
+		return false
+	var done: Dictionary = p.get_meta("cue_done", {})
+	return int(done.get(key, 0)) >= 2
+
+
+## Simple mode practice: after a watering, show the glowing ring (and the glove) once more until the
+## gardener has planted twice and watered twice.
+func _practice_next() -> void:
+	if not cue_learned(gardener, "seed"):
+		var best := -1
+		var best_d := INF
+		for i in spots.size():
+			if int(spots[i].kind) < 0:
+				var d := W.spot_pos(i).distance_to(W.spot_pos(PRACTICE_SPOT))
+				if d < best_d:
+					best_d = d
+					best = i
+		if best >= 0:
+			practice_g = "seed"
+			glow_spot = best
+			print("Practice: watered - now plant one more seed")
+			return
+	elif not cue_learned(gardener, "water"):
+		for i in spots.size():
+			if int(spots[i].kind) >= 0 and float(spots[i].water) < 0.6:
+				practice_g = "water"
+				glow_spot = i
+				print("Practice: water one more plant")
+				return
+	practice_g = "done"
+	glow_spot = -1
+	print("Practice: watered - the gardener's practice is done")
 
 
 ## Only the unlocked seed kinds show in the tray.
@@ -2042,7 +2137,7 @@ func poke_plant(i: int, push: Vector3) -> void:
 # --- Networked co-op (see docs/GAME_DEV_GUIDE.md) ----------------------------
 
 func on_client_joined() -> void:
-	_show_center("THE BEES HAVE ARRIVED!  Buzz buzz!", 1.5)
+	_show_center("BUZZ BUZZ!" if SIMPLE_MODE else "THE BEES HAVE ARRIVED!  Buzz buzz!", 1.5)
 
 
 func on_client_left() -> void:

@@ -16,6 +16,13 @@ extends Node
 ## hands: it does the practice by hand (seed, can tipped over), then touches every prop (flower, gnome,
 ## snail, bird bath, chime, butterfly, rake in the soil) and picks, plants and waters like a person.
 ## DUO_HOST=1 with nobody joining = solo VR: the helper bees must make honey.
+## Visual teaching (simple mode): records the picture cues each view shows (cue_pollen, cue_hive, cue_up,
+## cue_down, cue_plug for bees; cue_g_seed / cue_g_water / cue_g_pick for the flat gardener), the ones
+## learned (cue_learned_*), the glowing guide arrow, the ghost glove, and that no bee's view draws its own
+## name tag or another bee's arrow; checks the pause banner is just PAUSED, and prints "BOT: ERROR
+## instruction text" if a headline (TV or VR) is anything but a short title, or a tip spot (a bee's hint
+## line, the controls line, the top line) shows words. Local mode also unplugs and replugs P2's (fake)
+## controller to see the bolt.
 
 const W := preload("res://games/bee_garden/world.gd")
 const PlantScript := preload("res://games/bee_garden/plant.gd")
@@ -49,6 +56,10 @@ var glow_seen := false
 var max_pests := 0
 var max_kinds := 0
 var simple_reported := false
+var cues := {}  # simple mode: picture cues seen / learned
+const HEADLINES := "^(BEE GARDEN|BUZZ BUZZ!|BUZZ! P\\d|HOORAY!|PAUSED|Connecting to the gardener…)$"
+var headline_re := RegEx.create_from_string(HEADLINES)
+var plug_phase := 0
 # fake VR gardener: waypoints [grab-point position, trigger 0/1, pitch, hold seconds]
 var vr_queue: Array = []
 var vr_pos := Vector3.ZERO
@@ -76,6 +87,7 @@ func _physics_process(delta: float) -> void:
 		_drive_vr(delta)
 	if simple:
 		_simple_checks()
+		_note_cues()
 	for b in main.bees():
 		if not b.remote:
 			_drive_bee(b)
@@ -335,6 +347,108 @@ func _pick_task() -> void:
 
 
 # --- Simple mode checks -----------------------------------------------------------
+
+## Visual teaching: picture cues instead of words; any instruction text in a tip spot is an error.
+func _note_cues() -> void:
+	if main.ghost_hand != null and main.ghost_hand.visible:
+		cues["ghost_hand"] = true
+	if not has_meta("pause_check") and t >= 30.0 and main.net.mode != "client":
+		set_meta("pause_check", true)  # the pause banner is just PAUSED (no sentence)
+		main._set_pause_banner(true, "A bee opened the menu")
+		var pt: String = main.center_label.text
+		print("Bot: pause banner %s" % ("PAUSED" if pt == "PAUSED" else "ERROR: " + pt.replace("\n", " / ")))
+		main._set_pause_banner(false, "")
+	if main.net.mode == "local" and main.bees().size() > 0:
+		var p2 = main.bees()[0]
+		if plug_phase == 0 and t >= 34.0 and p2.active and p2.joy < 0:
+			plug_phase = 1
+			p2.joy = 14  # a fake controller for P2 (it keeps its keyboard when unplugged)
+		elif plug_phase == 1 and t >= 35.0:
+			plug_phase = 2
+			print("Bot: unplugging P2's controller")
+			main._on_joy_changed(14, false)
+		elif plug_phase == 2 and t >= 40.0:
+			plug_phase = 3
+			print("Bot: plugging P2's controller back in")
+			main._on_joy_changed(14, true)
+		elif plug_phase == 3 and t >= 41.0:
+			plug_phase = 4
+			p2.joy = -1
+	if main.center_label.modulate.a > 0.05:
+		_check_headline("TV headline", main.center_label.text)
+	if main.vr_center != null and main.vr_center.modulate.a > 0.05:
+		_check_headline("VR headline", main.vr_center.text)
+	if main.help_label.visible and main.help_label.modulate.a > 0.05 and main.help_label.text.strip_edges() != "":
+		_tip_error("controls line", main.help_label.text)
+	var it: String = main.info_label.text
+	if it != "" and it != "Syncing with the gardener…":
+		_tip_error("top line", it)
+	var g = main.gardener
+	if g != null and g.flat and str(g.get_meta("cue", "")) != "":
+		var gc = g.get_meta("cue_node") if g.has_meta("cue_node") else null
+		if gc != null and gc.visible and not cues.has("cue_g_" + str(g.get_meta("cue"))):
+			cues["cue_g_" + str(g.get_meta("cue"))] = true
+			print("BOT: gardener picture cue %s (t=%.0f)" % [g.get_meta("cue"), t])
+	for b in main.bees():
+		if not b.active or b.remote or b.hint_label == null:
+			continue
+		if b.hint_label.visible and b.hint_label.text.strip_edges() != "":
+			_tip_error("P%d hint line" % (b.index + 1), b.hint_label.text)
+		if b.hud_label != null and b.hud_label.text != "" and b.hud_label.text != "P%d" % (b.index + 1):
+			_tip_error("P%d corner" % (b.index + 1), b.hud_label.text)
+		if b.camera != null:
+			var m := int(b.camera.cull_mask)
+			if m & b.tag_layer():
+				if not cues.has("own_tag_shown"):
+					print("BOT: ERROR P%d's view shows its own name tag" % (b.index + 1))
+				cues["own_tag_shown"] = true
+			else:
+				cues["own_tag_hidden"] = true
+			if m & (W.BEE_ARROW_BITS & ~b.arrow_layer()):
+				if not cues.has("other_arrows_shown"):
+					print("BOT: ERROR P%d's view shows the other bees' arrows" % (b.index + 1))
+				cues["other_arrows_shown"] = true
+		if b.arrow.visible and b.arrow.basis.get_scale().x > 1.5:
+			cues["glow_arrow"] = true
+		if b.cue != null and b.cue.visible and b.cue_key != "":
+			if not cues.has("cue_" + b.cue_key):
+				print("BOT: P%d picture cue %s (t=%.0f)" % [b.index + 1, b.cue_key, t])
+			cues["cue_" + b.cue_key] = true
+	for p in main.players:
+		var done: Dictionary = p.get_meta("cue_done", {})
+		for k in done:
+			if int(done[k]) >= 2 and not cues.has("cue_learned_" + str(k)):
+				cues["cue_learned_" + str(k)] = true
+				print("BOT: P%d learned %s (t=%.0f)" % [p.index + 1, k, t])
+	if int(t) % 10 == 0 and cues.size() != int(get_meta("cues_shown", -1)):
+		set_meta("cues_shown", cues.size())  # networked runs end on a timeout: print the cues as they come
+		var ks: Array = cues.keys()
+		ks.sort()
+		print("BOT CUES so far: mode=%s %s" % [main.net.mode, ",".join(PackedStringArray(ks))])
+
+
+func _check_headline(who: String, text: String) -> void:
+	var tx := text.strip_edges()
+	if tx == "" or headline_re.search(tx) != null:
+		return
+	_tip_error(who, tx)
+
+
+func _tip_error(who: String, text: String) -> void:
+	if not cues.has("tip_text"):
+		print("BOT: ERROR instruction text on %s: %s" % [who, text.replace("\n", " / ")])
+	cues["tip_text"] = true
+
+
+func _exit_tree() -> void:
+	if main != null and is_instance_valid(main) and main.simple:
+		var ks: Array = cues.keys()
+		ks.sort()
+		print("BOT CUES: mode=%s %s" % [main.net.mode, ",".join(PackedStringArray(ks))])
+		for p in main.players:
+			if p.has_meta("cue_done"):
+				print("BOT CUES: P%d done=%s" % [p.index + 1, p.get_meta("cue_done")])
+
 
 func _simple_checks() -> void:
 	if main.ghost_hand != null and main.ghost_hand.visible:

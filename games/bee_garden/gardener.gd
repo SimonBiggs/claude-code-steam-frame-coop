@@ -115,7 +115,7 @@ func setup_vr(origin: XROrigin3D, cam: XRCamera3D, left: XRController3D, right: 
 	origin.world_scale = W.S
 	cam.near = 0.1
 	cam.far = 600.0
-	cam.cull_mask = 0xFFFFF & ~body_layer() & ~W.TV_LAYER
+	cam.cull_mask = 0xFFFFF & ~body_layer() & ~W.TV_LAYER & ~W.BEE_TAG_BITS & ~W.BEE_ARROW_BITS
 	for c in [left, right]:
 		var h := _make_hand(c == right)
 		h.ctrl = c
@@ -132,7 +132,7 @@ func setup_flat(cam: Camera3D, use_mouse: bool) -> void:
 	camera.fov = 68.0
 	camera.near = 0.1
 	camera.far = 600.0
-	camera.cull_mask = 0xFFFFF & ~body_layer() & ~W.TV_LAYER
+	camera.cull_mask = 0xFFFFF & ~body_layer() & ~W.TV_LAYER & ~W.BEE_TAG_BITS & ~W.BEE_ARROW_BITS
 	camera.global_position = FLAT_CAM_POS
 	camera.look_at(Vector3(-0.6, -0.4, 0.2), Vector3.UP)
 	hands.append(_make_hand(true))
