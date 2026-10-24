@@ -26,7 +26,7 @@ const GAMES := [
 		"blurb": "VR seeker with a torch; TV hiders sneak or disguise as lamps, plants and boxes"},
 	{"id": "block_builders", "cat": "cosy", "name": "BLOCK BUILDERS", "scene": "res://games/block_builders/main.tscn",
 		"blurb": "VR giant builds bridges and springs; tiny TV runners race to the flag"},
-	{"id": "dragon_rider", "cat": "action", "name": "DRAGON RIDER", "scene": "res://games/dragon_rider/main.tscn",
+	{"id": "dragon_rider", "multi": true, "cat": "action", "name": "DRAGON RIDER", "scene": "res://games/dragon_rider/main.tscn",
 		"blurb": "VR steers a friendly dragon with the reins; TV gunners pop balloons from its back"},
 	{"id": "bee_garden", "cat": "cosy", "name": "BEE GARDEN", "scene": "res://games/bee_garden/main.tscn",
 		"blurb": "Cosy, no fighting: VR gardener plants and waters, TV bees make honey"},
