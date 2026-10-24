@@ -66,7 +66,7 @@ const GAMES := [
 		"blurb": "Shake the giant tree and catch the falling fruit in your baskets!"},
 	{"id": "whack_a_mole", "multi": true, "cat": "party", "name": "WHACK-A-MOLE", "scene": "res://games/whack_a_mole/main.tscn",
 		"blurb": "Silly moles pop out of a big table: bonk them with a giant mallet or a tiny hammer!"},
-	{"id": "tower_stack", "cat": "party", "name": "TOWER STACK", "scene": "res://games/tower_stack/main.tscn",
+	{"id": "tower_stack", "multi": true, "cat": "party", "name": "TOWER STACK", "scene": "res://games/tower_stack/main.tscn",
 		"blurb": "Build the tallest tower together: helpers push jelly blocks to the bouncy pad, the giant stacks them high."},
 	{"id": "elemental_bender", "cat": "action", "name": "ELEMENTAL BENDER", "scene": "res://games/elemental_bender/main.tscn",
 		"blurb": "Bend air, water, earth and fire to defend the island temple from the Shadow Raiders!"},

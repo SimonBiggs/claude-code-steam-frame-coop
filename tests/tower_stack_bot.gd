@@ -4,6 +4,7 @@ extends Node
 ## Without VR the helper crane does the stacking.
 ## Local:      godot --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/tower_stack_bot.tscn
 ## Networked:  DUO_PORT=8137 DUO_HOST=1 ... & DUO_PORT=8137 DUO_JOIN=127.0.0.1 ... (same scene, real time)
+## Flat host: add DUO_FLAT_HOST=1 to the host (no VR: one bot pad plays slot 0 on the host).
 
 const BotKit := preload("res://tests/bot_kit.gd")
 const VrRig := preload("res://core/vr_rig.gd")
@@ -68,6 +69,8 @@ func _continue_results() -> String:
 
 func _join() -> void:
 	if main.net.mode == "host":
+		if main.flat_host:
+			kit.join_bot(main.party)  # a flat host (DUO_FLAT_HOST=1): one pad player here, in slot 0
 		return
 	for i in want:
 		kit.join_bot(main.party)
@@ -225,12 +228,14 @@ func _checks() -> void:
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
 	kit.assert_true(int(main.net.state_get("round", 0)) >= 2, "%s: round 1 ended with results and round 2 started" % mode)
 	if mode == "client":
-		kit.assert_eq(main.party.player_count(), want, "client: all %d TV players are seated" % want)
+		kit.assert_eq(main.party.local_slots().size(), want, "client: all %d local players are seated" % want)
 		kit.assert_true(ghosts_seen > 0, "client: ghost blocks mirrored from the host")
 		kit.assert_true(saw_results, "client: saw the results")
 		return
 	if mode == "local":
 		kit.assert_eq(main.party.player_count(), want, "local: all %d TV players are seated" % want)
+	if main.flat_host:
+		kit.assert_true(main.party.is_local(0) and main.avatars.has(0) and main.cams.has(0), "flat host: slot 0 plays here with a camera")
 	if want > 0 and mode == "local" or mode == "host":
 		kit.assert_true(main.total_delivered > 0, "%s: blocks reached the pad" % mode)
 	kit.assert_true(main.max_height > 0.7, "%s: a tower was built (%.1f m)" % [mode, main.max_height])
