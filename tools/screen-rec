@@ -6,13 +6,16 @@
 """screen-rec / screen-at: keep a rolling record of the TV screen so Claude can look at any moment (Simon, 2026-10-17).
 
   screen-rec                 record: one 960px JPEG every 5 s into ~/.cache/screen-rec (keeps 30 minutes)
+  screen-rec decks           record every Deck in ~/.config/duo-arena/decks the same way, over ssh, into
+                             ~/.cache/screen-rec/decks/<deck>/ (Simon 2026-10-24: "record what people are seeing")
+  --deck NAME                (with at / range) look at that Deck's record instead of the TV's
   screen-rec at TIME [N]     contact sheet of N frames (default 6) ending at TIME (HH:MM:SS, or -10s for "10 s ago")
                              -> ~/.cache/screen-rec/at.jpg
   screen-rec range START END [EVERY]   every frame from START to END (same time formats), one per EVERY
                              seconds (default 5 = all of them; recording is one frame per 5 s), in a row
                              -> ~/.cache/screen-rec/at.jpg (Simon 2026-10-18: "time range and frame rate")
 """
-import datetime as dt, os, subprocess, sys, time
+import datetime as dt, os, subprocess, sys, threading, time
 from PIL import Image
 
 DIR = os.path.expanduser("~/.cache/screen-rec")
@@ -47,24 +50,64 @@ def grab(path: str) -> bool:
     return subprocess.run(["spectacle", "-b", "-n", "-f", "-o", path], capture_output=True).returncode == 0
 
 
-def record():
-    os.makedirs(DIR, exist_ok=True)
+# On a Deck: same two ways (gamescopectl in Gaming Mode, spectacle in Desktop Mode), PNG on stdout.
+DECK_GRAB = r'''f=/tmp/screen-rec-shot.png; rm -f $f; export XDG_RUNTIME_DIR=/run/user/$(id -u)
+if pgrep -x gamescope-wl >/dev/null; then
+  GAMESCOPE_WAYLAND_DISPLAY=$(sed -n 's/^GAMESCOPE_WAYLAND_DISPLAY=//p' $XDG_RUNTIME_DIR/gamescope-environment) \
+    timeout 10 gamescopectl screenshot $f >/dev/null 2>&1
+  for i in $(seq 20); do [ -s $f ] && break; sleep 0.1; done; sleep 0.2
+else WAYLAND_DISPLAY=wayland-0 timeout 10 spectacle -b -n -f -o $f >/dev/null 2>&1; fi
+[ -s $f ] && cat $f'''
+
+
+def deck_grabber(deck: str):
+    def grab_deck(path: str) -> bool:
+        with open(path, "wb") as out:
+            r = subprocess.run(["ssh", "-n", "-o", "BatchMode=yes", "-o", "ConnectTimeout=4", deck, DECK_GRAB],
+                               stdout=out, stderr=subprocess.DEVNULL, timeout=30)
+        return r.returncode == 0 and os.path.getsize(path) > 0
+    return grab_deck
+
+
+def record(d: str = DIR, grabber=grab, tmp: str = TMP):
+    os.makedirs(d, exist_ok=True)
     while True:
         t = time.time()
-        if os.path.exists(TMP):
-            os.remove(TMP)  # spectacle can exit 0 without writing; never re-save an old shot as new
-        if grab(TMP) and os.path.exists(TMP):
+        if os.path.exists(tmp):
+            os.remove(tmp)  # spectacle can exit 0 without writing; never re-save an old shot as new
+        try:
+            ok = grabber(tmp) and os.path.exists(tmp)
+        except (subprocess.TimeoutExpired, OSError):
+            ok = False
+        if ok:
             try:
-                im = Image.open(TMP).convert("RGB")
+                im = Image.open(tmp).convert("RGB")
                 im.thumbnail((960, 540))
-                im.save(os.path.join(DIR, time.strftime("%Y%m%d-%H%M%S.jpg")), quality=70)
+                im.save(os.path.join(d, time.strftime("%Y%m%d-%H%M%S.jpg")), quality=70)
             except OSError:
                 pass
-        for f in os.listdir(DIR):
-            p = os.path.join(DIR, f)
+        for f in os.listdir(d):
+            p = os.path.join(d, f)
             if f[:2] == "20" and t - os.path.getmtime(p) > KEEP_S:
                 os.remove(p)
-        time.sleep(max(0.0, 5.0 - (time.time() - t)))  # every 5 s: a 4K grab can make the game hitch
+        # every 5 s: a 4K grab can make the game hitch; an offline/asleep Deck is retried every 30 s
+        time.sleep(max(0.0, (5.0 if ok or grabber is grab else 30.0) - (time.time() - t)))
+
+
+def record_decks():
+    """One recorder per Deck in the deploy list; Decks added later (deck-pair) are picked up within a minute."""
+    started = set()
+    while True:
+        try:
+            decks = [l.strip() for l in open(os.path.expanduser("~/.config/duo-arena/decks")) if l.strip()]
+        except OSError:
+            decks = []
+        for deck in decks:
+            if deck not in started:
+                started.add(deck)
+                threading.Thread(target=record, daemon=True, args=(os.path.join(DIR, "decks", deck),
+                                 deck_grabber(deck), f"/tmp/screen-rec-{deck}.png")).start()
+        time.sleep(60)
 
 
 def when(s: str) -> dt.datetime:
@@ -111,9 +154,15 @@ def frame_range(a: str, b: str, every: float):
 
 
 if __name__ == "__main__":
+    if "--deck" in sys.argv:
+        i = sys.argv.index("--deck")
+        DIR = os.path.join(DIR, "decks", sys.argv[i + 1])
+        del sys.argv[i:i + 2]
     if len(sys.argv) > 3 and sys.argv[1] == "range":
         frame_range(sys.argv[2], sys.argv[3], float(sys.argv[4]) if len(sys.argv) > 4 else 5.0)
     elif len(sys.argv) > 1 and sys.argv[1] == "at":
         at(sys.argv[2] if len(sys.argv) > 2 else "-0s", int(sys.argv[3]) if len(sys.argv) > 3 else 6)
+    elif len(sys.argv) > 1 and sys.argv[1] == "decks":
+        record_decks()
     else:
         record()
