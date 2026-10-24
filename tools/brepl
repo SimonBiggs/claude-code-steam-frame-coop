@@ -33,6 +33,44 @@ if (args[0] === "--serve") {
   const IMG = /\.(png|jpe?g|webp|gif)$/i;
   let shown = [];
   globalThis.show = (...paths) => { for (const p of paths.flat()) if (typeof p === "string") shown.push(p); return paths.flat().length; };
+  // Background jobs (Simon, 2026-10-24): bg(name, async ({log, show}) => ...) returns at once; poll({wait})
+  // hands back every job finished since the last poll (output + images) and lists the running ones. Each
+  // finish is also a line in ~/.cache/brepl/jobs.log, for a Monitor to wake Claude.
+  const JOBS_LOG = `${process.env.HOME}/.cache/brepl/jobs.log`;
+  const { mkdirSync, appendFileSync } = await import("node:fs");
+  mkdirSync(`${process.env.HOME}/.cache/brepl`, { recursive: true });
+  const jobs = new Map();
+  let jobSeq = 0, wake = () => {};
+  globalThis.bg = (name, fn) => {
+    if (typeof name === "function") [name, fn] = ["job", name];
+    const job = { id: ++jobSeq, name, started: Date.now(), status: "running", lines: [], images: [], value: undefined, polled: false };
+    jobs.set(job.id, job);
+    const ctx = {
+      log: (...a) => { job.lines.push(a.map((x) => (typeof x === "string" ? x : inspect(x, { depth: 3 }))).join(" ")); },
+      show: (...paths) => { for (const p of paths.flat()) if (typeof p === "string") job.images.push(p); },
+    };
+    Promise.resolve().then(() => fn(ctx)).then(
+      (v) => { job.status = "done"; job.value = v; for (const x of [v].flat()) if (typeof x === "string" && IMG.test(x)) job.images.push(x); },
+      (e) => { job.status = "failed"; job.value = e?.stack ?? String(e); },
+    ).finally(() => {
+      job.ended = Date.now();
+      appendFileSync(JOBS_LOG, `${new Date().toTimeString().slice(0, 8)} job #${job.id} ${job.name} ${job.status} (${((job.ended - job.started) / 1000).toFixed(0)}s)\n`);
+      wake();
+    });
+    return `started job #${job.id} ${name} (poll() for results)`;
+  };
+  globalThis.poll = async ({ wait = 0 } = {}) => {
+    const ready = () => [...jobs.values()].filter((j) => j.status !== "running" && !j.polled);
+    if (!ready().length && wait > 0 && [...jobs.values()].some((j) => j.status === "running"))
+      await Promise.race([new Promise((r) => (wake = r)), Bun.sleep(wait * 1000)]);
+    const done = ready();
+    for (const j of done) { j.polled = true; for (const p of j.images) show(p); }
+    const fmt = (j) => [`── job #${j.id} ${j.name}: ${j.status} in ${(((j.ended ?? Date.now()) - j.started) / 1000).toFixed(0)}s`,
+      ...j.lines, ...(j.value !== undefined ? [typeof j.value === "string" ? j.value : inspect(j.value, { depth: 4 })] : [])].join("\n");
+    const running = [...jobs.values()].filter((j) => j.status === "running").map((j) => `#${j.id} ${j.name} (${((Date.now() - j.started) / 1000).toFixed(0)}s)`);
+    return [...done.map(fmt), running.length ? `still running: ${running.join(", ")}` : done.length ? "" : "nothing running"].filter(Boolean).join("\n");
+  };
+  globalThis.jobs = () => [...jobs.values()].map((j) => ({ id: j.id, name: j.name, status: j.status, secs: Math.round(((j.ended ?? Date.now()) - j.started) / 1000), polled: j.polled }));
   const run = async (code) => {
     shown = [];
     const out = [];
