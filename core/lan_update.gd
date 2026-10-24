@@ -357,7 +357,10 @@ func consider(peer: int, v: Array) -> void:
 		return
 	var vt := ver_text(v)
 	if vt in GUARD().read_json(META + "/state.json").get("bad", []):
-		return  # rolled back once already
+		if not cooldown.has("bad " + vt):
+			cooldown["bad " + vt] = 0
+			log_line("not fetching %s again: it was rolled back here" % vt)
+		return
 	if Time.get_ticks_msec() < int(cooldown.get(vt, 0)):
 		return
 	var why := source_problem(peer, peer_ip(peer))
@@ -657,6 +660,7 @@ func apply_ready() -> void:
 		G.restore("script error in " + bad)
 		_load_mine()
 		_show_toast("Update failed: kept the old version", 5000)
+		announce()  # the host answers with its version, which is now on the bad list: nothing is fetched again
 		return
 	if r.signers_text != "":
 		G.write_text(SIGNERS_SIG_PATH, r.signers_sig)

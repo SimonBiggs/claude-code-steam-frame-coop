@@ -12,7 +12,7 @@ if bad=$(grep -rn "no_depth_test = true" "$ST/core" "$ST/games" "$ST/arcade" --i
 fi
 # get_meta(key, null): in Godot a null default means "no default", so a missing key prints an error
 # (every frame in the arcade menu once). Use get_meta(k) if has_meta(k) else null, or a typed default.
-if bad=$(grep -rnE 'get_meta\([^()]*,[[:space:]]*null[[:space:]]*\)' "$ST/core" "$ST/games" "$ST/arcade" "$ST/tests" --include='*.gd'); then
+if bad=$(grep -rnE 'get_meta\([^()]*,[[:space:]]*null[[:space:]]*\)' "$ST/core" "$ST/games" "$ST/arcade" "$ST/tests" --include='*.gd' | grep -vE ':[0-9]+:[^#]*#.*get_meta\('); then  # (comments mentioning it are fine)
   echo "NOT deploying: get_meta(key, null) errors when the key is missing - use 'get_meta(k) if has_meta(k) else null':" >&2
   echo "$bad" >&2; exit 1
 fi
@@ -27,6 +27,13 @@ if [ -n "$ahead" ]; then
 fi
 for d in core games arcade tests; do rsync -a --delete --exclude '*.uid' "$ST/$d/" "$LIVE/$d/"; done
 cp "$ST/arcade.tscn" "$LIVE/arcade.tscn"
+# LAN updates (docs/MULTI_MACHINE.md "Updates over the home network"): the boot guard + pinned root key travel with
+# deploys (addons/ is never part of a LAN update), then what's live is signed with this machine's root key, so every
+# machine it plays with picks it up over the home network (the Frame/Deck copies below carry the signed manifest too).
+[ -d "$ST/addons/lan_update" ] && rsync -a --delete --exclude '*.uid' "$ST/addons/lan_update/" "$LIVE/addons/lan_update/"
+if [ -f "$LIVE/addons/lan_update/root.pub.pem" ]; then
+  duo-update-bundle "$LIVE" || echo "⚠ LAN update not signed (duo-update-bundle failed): devices still get this deploy over SSH" >&2
+fi
 rsync -a --delete --exclude .git --exclude .dev --exclude .godot --exclude launch.sh --exclude tools "$LIVE/" "$B/game/"
 if ssh -o ConnectTimeout=4 -o BatchMode=yes -i $K steamos@frame true 2>/dev/null; then
   rsync -az -e "ssh -i $K" --exclude .godot --exclude .dev "$B/game/" steamos@frame:devkit-game/DuoArena/game/

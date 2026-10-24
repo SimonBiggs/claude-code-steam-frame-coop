@@ -362,7 +362,8 @@ def t_rollback(base):
     ok("e", line, "broken update rolled back", line or log(pj)[-800:])
     time.sleep(8)
     ok("e", tree_hash(j) == before and manifest_ver(j) == vbefore, "joiner's game is exactly the old version again")
-    ok("e", log(pj).count("fetching update") == 1, "the bad version is not fetched again")
+    again = wait_for(pj, r"LanUpdate: not fetching \S+ again: it was rolled back here", 10)
+    ok("e", again and log(pj).count("fetching update") == 1, "offered again, the bad version is not fetched again", again or "")
     stop(ph, pj)
     # Boot guard: the arcade itself was broken by an update and the game restarted.
     g = copy(base, f"{W}/e2")
