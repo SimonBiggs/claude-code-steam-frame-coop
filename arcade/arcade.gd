@@ -50,7 +50,7 @@ const GAMES := [
 		"blurb": "VR builds a roller coaster with their hands on a tabletop park; TV players ride it, hands up!"},
 	{"id": "mini_golf_party", "cat": "sports", "name": "MINI GOLF PARTY", "scene": "res://games/mini_golf_party/main.tscn",
 		"blurb": "Life-size mini golf in a sunny garden: swing a real putter in VR or aim and hold A on the TV, and everyone putts at once!"},
-	{"id": "obstacle_rush", "cat": "party", "name": "OBSTACLE RUSH", "scene": "res://games/obstacle_rush/main.tscn",
+	{"id": "obstacle_rush", "multi": true, "cat": "party", "name": "OBSTACLE RUSH", "scene": "res://games/obstacle_rush/main.tscn",
 		"blurb": "Race jelly-bean runners over a bouncy toy course while the VR giant lobs beach balls!"},
 	{"id": "starship_crew", "cat": "action", "name": "STARSHIP CREW", "scene": "res://games/starship_crew/main.tscn",
 		"blurb": "Fly the little starship through glowing rings while the crew zaps space rocks and silly aliens all the way home!"},
