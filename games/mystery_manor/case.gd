@@ -9,7 +9,7 @@ extends RefCounted
 const Manor := preload("res://games/mystery_manor/manor.gd")
 
 ## Hats whose colours don't depend on the coat (core/creatures.gd _hat), with clearly different shapes.
-const HATS: Array[String] = ["chef", "crown", "tricorn", "viking", "straw", "hard_hat"]  ## not deerstalker: the players (detectives) wear it
+const HATS: Array[String] = ["chef", "crown", "tricorn", "viking", "straw", "space_helmet"]  ## not deerstalker (the players wear it), not hard_hat (looks like straw from afar)
 const COLOURS: Array[Color] = [Color(0.9, 0.22, 0.22), Color(0.25, 0.45, 0.95), Color(0.25, 0.75, 0.3),
 	Color(0.98, 0.8, 0.2), Color(0.65, 0.35, 0.9)]
 ## Stolen things: id, title (the case card), what to build (see main.gd _make_item).

@@ -562,6 +562,8 @@ func _move_local_players(delta: float) -> void:
 		var parts: Dictionary = hud_parts.get(slot, {})
 		if parts.has("prompt"):
 			(parts["prompt"] as Control).visible = playing and near >= 0
+		if playing and near >= 0 and near < rings.size():
+			rings[near].scale = Vector3.ONE * 1.35
 		if playing and near >= 0 and party.just_pressed(slot, "accept") and not net.just_unpaused():
 			net.request(slot, "accuse", [near])
 
@@ -679,8 +681,10 @@ func _vr_update(delta: float) -> void:
 func _process(delta: float) -> void:
 	if not ready_to_play:
 		return
+	for r in rings:
+		r.scale = Vector3.ONE
 	if split != null:
-		_move_local_players(delta)
+		_move_local_players(delta)  # grows the ring of the suspect A would pick
 	_follow_remote(delta)
 	_animate(delta)
 	if vr_rig != null:
