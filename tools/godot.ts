@@ -61,8 +61,22 @@ async function install(proj: string) {
   }
 }
 
+/** Wait (up to 3 min) while the machine is short of memory, so test games never push the family's game into the
+ *  kernel's OOM killer (Simon's Steam Machine has 15 GB and often runs a big game; we saw 0.9 GB free). */
+async function waitForMemory(minGB = 2.5) {
+  for (let i = 0; i < 90; i++) {
+    const mem = await readFile("/proc/meminfo", "utf8");
+    const gb = parseInt(mem.match(/MemAvailable:\s+(\d+)/)?.[1] ?? "0") / 1048576;
+    if (gb >= minGB) return;
+    if (i === 0) (globalThis as any).send?.("⚠ godot.launch", `waiting: only ${gb.toFixed(1)} GB free (need ${minGB})`);
+    await Bun.sleep(2000);
+  }
+  throw new Error(`not enough free memory to start a test game (need ${minGB} GB)`);
+}
+
 export async function launch(o: LaunchOpts | string): Promise<Game> {
   const opts: LaunchOpts = typeof o === "string" ? { project: o } : o;
+  await waitForMemory();
   const proj = opts.project.includes("/") ? resolve(opts.project) : join(HOME, "GodotProjects", opts.project);
   if (!(await Bun.file(join(proj, "project.godot")).exists())) throw new Error(`no Godot project at ${proj}`);
   await install(proj);

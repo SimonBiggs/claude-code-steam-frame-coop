@@ -1,0 +1,13 @@
+#!/bin/bash
+# test-throttle: keep Claude's test games from making the family's games stutter (Simon, 2026-10-24: "David's game
+# is stuttering"). Every 3 s, every headless / offscreen test Godot (--headless, or the offscreen runner's
+# --audio-driver Dummy) and its gamescope get SCHED_IDLE (CPU only when nothing else wants it) and the last 4 threads.
+# Also the sheet/video/thumbnail helpers (recsheet.py, ffmpeg, pillow). Real games (the TV game, Steam games) are never touched.
+cores="$(( $(nproc) - 4 ))-$(( $(nproc) - 1 ))"
+while true; do
+  for pid in $(pgrep -f -- 'godot.*(--headless|--audio-driver Dummy)|gamescope --backend headless|recsheet.py|ffmpeg -y -loglevel error|uv run --quiet --with pillow'); do
+    [ "$(chrt -p "$pid" 2>/dev/null | grep -c SCHED_IDLE)" = 1 ] && continue
+    for t in /proc/$pid/task/*; do tid=${t##*/}; chrt -i -p 0 "$tid" 2>/dev/null; taskset -cp "$cores" "$tid" >/dev/null 2>&1; done
+  done
+  sleep 3
+done

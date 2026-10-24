@@ -69,6 +69,43 @@ const PANEL_STYLES := {"default": "PanelContainer", "glass": "PanelContainer", "
 
 
 ## Player colour for a party slot / player index (wraps; same as Party.color_of(slot)).
+## Shared helpers that make three bug families hard to write (and give each a single home, so a fix lands once):
+
+## Anchor a Control to a preset AND reset its offsets (set_anchors_preset alone, after add_child, keeps the old
+## offsets: centred / right / bottom panels landed half off screen in 21 games). keep_size: grow from the anchor.
+static func pin(c: Control, preset: int, keep_size: bool = true) -> void:
+	c.set_anchors_and_offsets_preset(preset, Control.PRESET_MODE_KEEP_SIZE if keep_size else Control.PRESET_MODE_MINSIZE)
+
+
+## A basis looking along `dir` that never goes NaN: looking_at(dir, UP) is degenerate when dir is vertical (looking
+## straight down at a wrist, a hand pointing up), so pick whichever of up / alt_up / forward is least parallel.
+static func face(dir: Vector3, up: Vector3 = Vector3.UP, alt_up: Vector3 = Vector3.FORWARD) -> Basis:
+	if dir.length() < 0.0001:
+		return Basis()
+	var d := dir.normalized()
+	var best := up
+	for u in [alt_up, Vector3.RIGHT]:
+		if absf(d.dot((u as Vector3).normalized())) < absf(d.dot(best.normalized())):
+			best = u
+	return Basis.looking_at(d, best)
+
+
+## Controller A / B in Godot's built-in ui_accept / ui_cancel (they only have Enter / Esc by default, so every
+## focus-driven menu ignored the pad unless Steam turned A into Enter). Called once at startup by core/net.gd and
+## the arcade; idempotent.
+static func ensure_pad_ui_actions() -> void:
+	for pair in [["ui_accept", JOY_BUTTON_A], ["ui_cancel", JOY_BUTTON_B]]:
+		var have := false
+		for e in InputMap.action_get_events(pair[0]):
+			if e is InputEventJoypadButton and (e as InputEventJoypadButton).button_index == pair[1]:
+				have = true
+		if not have:
+			var ev := InputEventJoypadButton.new()
+			ev.button_index = pair[1]
+			ev.device = -1  # any pad
+			InputMap.action_add_event(pair[0], ev)
+
+
 static func player_color(index: int) -> Color:
 	return PLAYER_COLORS[posmod(index, PLAYER_COLORS.size())]
 

@@ -18,6 +18,10 @@ const TOOL_COPIES: Record<string, string> = {  // installed file -> repo copy (k
   [join(BIN, "voice-bridge")]: "tools/voice-bridge", [join(BIN, "claude-watchdog")]: "tools/claude-watchdog",
   [join(HOME, ".local/share/gdev/recsheet.py")]: "tools/recsheet.py", [join(HOME, ".local/share/brepl/dev.ts")]: "tools/brepl-dev.ts",
   [join(HOME, ".local/share/brepl/mcp.ts")]: "tools/brepl-mcp.ts", [join(HOME, ".local/share/brepl/alerts.ts")]: "tools/brepl-alerts.ts",
+  [join(HOME, ".local/share/brepl/peers.ts")]: "tools/brepl-peers.ts", [join(BIN, "brepl-tunnel")]: "tools/brepl-tunnel",
+  [join(HOME, ".config/systemd/user/brepl-tunnel@.service")]: "tools/systemd/brepl-tunnel@.service",
+  [join(BIN, "test-throttle")]: "tools/test-throttle", [join(BIN, "duo-deploy-deck")]: "tools/duo-deploy-deck",
+  [join(HOME, "GodotProjects/duo-arena-deck-build/run.sh")]: "tools/deck-run.sh",
   [join(HOME, ".config/systemd/user/brepl.service")]: "tools/systemd/brepl.service", [join(BIN, "frame-at")]: "tools/frame-at", [join(BIN, "duo-deploy-frame")]: "tools/duo-deploy-frame",
 };
 
@@ -192,6 +196,21 @@ export const history = async (query: string, n = 10) => (await sh(`claude-histor
  *  tool copies out of sync, broken services. Returns {clean, issues: [{kind, what, fix}]}. */
 export async function debt() {
   const issues: { kind: string; what: string; fix: string }[] = [];
+  // Known bug patterns ("never just one ant"): flag every instance in the staging copy, not just the one we saw.
+  const PATTERNS: { kind: string; files: string; bad: string; unless?: string; fix: string }[] = [
+    { kind: "pad-A", files: "grab_focus", bad: "grab_focus", unless: "JOY_BUTTON_A|ui_input.gd|UiInput", fix: "should now work by design (UiKit.ensure_pad_ui_actions at startup); check the menu reaches it" },
+    { kind: "anchors", files: "set_anchors_preset", bad: "add_child\\([a-z_]+\\)\\n\\s*[a-z_]+\\.set_anchors_preset\\(Control\\.PRESET_(CENTER|RIGHT|BOTTOM)", fix: "use UiKit.pin(control, preset) (core/ui_kit.gd): one helper, offsets always reset" },
+    { kind: "looking_at-UP", files: "looking_at", bad: "looking_at\\([^)]*Vector3\\.UP\\)", unless: "_face_camera", fix: "use UiKit.face(dir) (core/ui_kit.gd): never NaN when the direction is vertical" },
+  ];
+  for (const pt of PATTERNS) {
+    const hits = (await sh(`grep -rlE ${JSON.stringify(pt.files)} --include=*.gd core games arcade`, STAGE)).out.split("\n").filter(Boolean);
+    for (const f of hits) {
+      const txt = await readFile(join(STAGE, f), "utf8").catch(() => "");
+      if (!new RegExp(pt.bad).test(txt)) continue;
+      if (pt.unless && new RegExp(pt.unless).test(txt)) continue;
+      issues.push({ kind: pt.kind, what: f, fix: pt.fix });
+    }
+  }
   const repos: string[] = [];
   for (const d of await readdir(GP)) if ((await stat(join(GP, d, ".git")).catch(() => null))?.isDirectory()) repos.push(d);
   for (const r of repos) {
@@ -508,4 +527,88 @@ export async function thumbs(o: { only?: string[] } = {}) {
     }
   }));
   return { done: done.length, failed, dir: out };
+}
+
+// --- Steam Decks (and other devkit-paired SteamOS machines) ------------------------------------------
+// Simon, 2026-10-24: "can you do all this through your brepl?" One place to drive paired handhelds over SSH.
+// Machines: ssh aliases in ~/.ssh/config (simon-deck = Simon's Deck). Long-lived terminal programs run in a
+// tmux session under `systemd-run --user` (SteamOS kills an SSH session's children when it ends).
+export const deck = {
+  host: "simon-deck",
+  /** Run a shell command on the Deck: {code, out}. */
+  sh(cmd: string, host = deck.host) { return sh(`ssh -o BatchMode=yes -o ConnectTimeout=5 ${host} ${shq(cmd)}`); },
+  /** Is it reachable (on, awake, Developer Mode on)? */
+  async up(host = deck.host) { return (await deck.sh("true", host)).code === 0; },
+  /** Start a program in a detached tmux session that outlives SSH (e.g. "claude"). */
+  async start(name: string, cmd: string, host = deck.host) {
+    await deck.sh(`systemctl --user stop ${name} 2>/dev/null; tmux kill-session -t ${name} 2>/dev/null; true`, host);
+    return deck.sh(`systemd-run --user --unit=${name} --property=Type=forking --setenv=TERM=xterm-256color --setenv=BROWSER=true --working-directory=$HOME tmux new-session -d -s ${name} -x 220 -y 50 ${shq(cmd + "; echo EXITED; sleep 900")}`, host);
+  },
+  /** The session's screen (last `lines` non-empty lines). */
+  async screen(name: string, lines = 30, host = deck.host) {
+    const r = await deck.sh(`tmux capture-pane -p -t ${name} -S -200`, host);
+    return r.out.split("\n").filter(l => l.trim()).slice(-lines).join("\n");
+  },
+  /** Type into the session: text then Enter (enter=false to leave it), or tmux key names via keys([...]). */
+  type(name: string, text: string, enter = true, host = deck.host) { return deck.sh(`tmux send-keys -t ${name} -l ${shq(text)}${enter ? `; tmux send-keys -t ${name} Enter` : ""}`, host); },
+  keys(name: string, keys: string[], host = deck.host) { return deck.sh(`tmux send-keys -t ${name} ${keys.join(" ")}`, host); },
+  stop(name: string, host = deck.host) { return deck.sh(`systemctl --user stop ${name}; tmux kill-session -t ${name}; true`, host); },
+  /** Claude Code login without the Deck's browser: starts `claude`, walks the first-run screens, returns the
+   *  sign-in URL to open on any device; then deck.claudeCode(code) types the code it shows. */
+  async claudeLogin(host = deck.host) {
+    await deck.start("claude-login", "$HOME/.local/bin/claude", host);
+    for (let i = 0; i < 12; i++) {
+      await Bun.sleep(2000);
+      const s = await deck.screen("claude-login", 60, host);
+      const m = s.replace(/\n/g, "").match(/https:\/\/claude\.com\/cai\/oauth\S+?(?=Paste code|$)/);
+      if (m) return { url: m[0].replace(/\s+/g, ""), next: 'deck.claudeCode("<code from the page>")' };
+      if (/Choose the text style|Select login method|Press Enter|Security notes|trust/i.test(s)) await deck.keys("claude-login", ["Enter"], host);
+    }
+    return { error: "no sign-in URL appeared", screen: await deck.screen("claude-login", 20, host) };
+  },
+  async claudeCode(code: string, host = deck.host) {
+    await deck.type("claude-login", code.trim(), true, host);
+    await Bun.sleep(4000);
+    const ok = (await deck.sh("test -s ~/.claude/.credentials.json && echo yes", host)).out === "yes";
+    return { loggedIn: ok, screen: await deck.screen("claude-login", 12, host) };
+  },
+  /** Push the arcade to the Deck (same as duo-deploy-deck). */
+  deploy() { return sh("duo-deploy-deck"); },
+};
+const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+
+/** Which games can be played by ONE player (Simon, 2026-10-24: a "playable as single player" filter): run each game
+ *  locally offscreen with a single pad mashing for `seconds`, then report what's on screen: words that mean it's
+ *  stuck waiting for more players, whether the picture keeps changing, and a sheet to look at. One game at a time. */
+export async function soloCheck(o: { only?: string[]; seconds?: number } = {}) {
+  const godot = (globalThis as any).godot;
+  const ids = o.only ?? (await readdir(join(STAGE, "games"))).filter(d => d !== "engine_template").sort();
+  const out: any[] = [];
+  for (const id of ids) {
+    let g: any;
+    const r: any = { id, waiting: [] as string[], moving: false, sheet: "" };
+    try {
+      g = await godot.launch({ project: STAGE, scene: `res://games/${id}/main.tscn`, env: { DUO_MACHINE_KIND: "deck" } });
+      await Bun.sleep(3000);
+      const t0 = Date.now();
+      for (let i = 0; Date.now() - t0 < (o.seconds ?? 18) * 1000; i++) {
+        const [name, opts] = MONKEY[i % MONKEY.length];
+        await g.joy(name, { ...(opts ?? {}), device: 0 }).catch(() => {});
+        await Bun.sleep(350);
+      }
+      const ui = await g.uiText().catch(() => "");
+      r.waiting = [...new Set((ui.match(/(waiting|wait for|needs? (at least )?\d|player 2|2 players|join to start|press a to join|connecting)[^"\n]{0,40}/gi) ?? []).map((s: string) => s.trim()))].slice(0, 4);
+      const fr = await g.frames();
+      const tail = fr.filter((f: any) => f.t > fr[fr.length - 1].t - 6);
+      const sizes = await Promise.all(tail.map(async (f: any) => (await stat(f.path)).size));
+      r.moving = new Set(sizes).size > 2;
+      const end = fr.length ? fr[fr.length - 1].t : 0;
+      r.sheet = (await g.span(end - 8, end, 1).catch(() => []))[0] ?? "";
+    } catch (e: any) { r.error = String(e?.message ?? e).slice(0, 200); }
+    finally { await g?.quit().catch(() => {}); }
+    out.push(r);
+    (globalThis as any).send?.(`solo ${id}`, `${r.waiting.length ? "WAITING: " + r.waiting.join(" | ") : "no waiting text"}; picture ${r.moving ? "moving" : "still"}${r.error ? "; " + r.error : ""}`, r.sheet ? [r.sheet] : []);
+  }
+  await Bun.write(join(HOME, ".cache/sweep/solo.json"), JSON.stringify(out, null, 1));
+  return out.map(r => `${r.waiting.length || !r.moving || r.error ? "??" : "ok"} ${r.id}${r.waiting.length ? ": " + r.waiting.join(" | ") : ""}`).join("\n");
 }
