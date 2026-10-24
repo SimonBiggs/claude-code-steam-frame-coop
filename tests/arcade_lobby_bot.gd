@@ -31,8 +31,6 @@ const QUIET_AFTER := 1.0  # from here on nothing may change hands any more
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	if t0_ms == 0:
-		t0_ms = int(Time.get_unix_time_from_system() * 1000.0) + 4000
 	_make_plan()
 	# The arcade becomes the current scene, so starting a game replaces IT and this bot (a sibling under the root)
 	# keeps watching.
@@ -66,7 +64,11 @@ func _make_plan() -> void:
 			my_presses.append(p)
 
 
+var _game_t := -4.0  # no shared clock (run alone, e.g. --fixed-fps): game time, starting 4 s from now
+
 func _now() -> float:
+	if t0_ms == 0:
+		return _game_t
 	return (Time.get_unix_time_from_system() * 1000.0 - t0_ms) / 1000.0
 
 
@@ -84,7 +86,8 @@ func _press(button: int) -> void:
 		Input.parse_input_event(e)
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	_game_t += delta
 	var now := _now()
 	if phase == "wait":
 		if now >= 0.0:

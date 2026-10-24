@@ -4,6 +4,7 @@
 import { $ } from "bun";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { runGroup, verdict } from "./multibot.ts";  // installed next to this file (TOOL_COPIES)
 
 const HOME = process.env.HOME!;
 const GP = join(HOME, "GodotProjects");
@@ -17,7 +18,7 @@ const TOOL_COPIES: Record<string, string> = {  // installed file -> repo copy (k
   [join(BIN, "brepl")]: "tools/brepl", [join(BIN, "duo-deploy")]: "tools/duo-deploy", [join(BIN, "merge-game")]: "tools/merge-game",
   [join(BIN, "voice-bridge")]: "tools/voice-bridge", [join(BIN, "claude-watchdog")]: "tools/claude-watchdog",
   [join(HOME, ".local/share/gdev/recsheet.py")]: "tools/recsheet.py", [join(HOME, ".local/share/brepl/dev.ts")]: "tools/brepl-dev.ts",
-  [join(HOME, ".local/share/brepl/mcp.ts")]: "tools/brepl-mcp.ts", [join(HOME, ".local/share/brepl/alerts.ts")]: "tools/brepl-alerts.ts",
+  [join(HOME, ".local/share/brepl/mcp.ts")]: "tools/brepl-mcp.ts", [join(HOME, ".local/share/brepl/multibot.ts")]: "tools/multibot.ts", [join(HOME, ".local/share/brepl/alerts.ts")]: "tools/brepl-alerts.ts",
   [join(HOME, ".local/share/brepl/peers.ts")]: "tools/brepl-peers.ts", [join(BIN, "brepl-tunnel")]: "tools/brepl-tunnel",
   [join(HOME, ".config/systemd/user/brepl-tunnel@.service")]: "tools/systemd/brepl-tunnel@.service",
   [join(BIN, "test-throttle")]: "tools/test-throttle", [join(BIN, "duo-deploy-deck")]: "tools/duo-deploy-deck",
@@ -41,32 +42,22 @@ export const bots = {
   async list(): Promise<string[]> {
     return (await readdir(join(STAGE, "tests"))).filter(f => f.endsWith("_bot.tscn")).map(f => f.replace(/_bot\.tscn$/, "")).sort();
   },
-  /** Run one bot test. net: also run it as host + client over a local port. Returns pass/fail, failed checks, errors. */
-  async run(id: string, o: { net?: boolean; seconds?: number } = {}) {
+  /** Run one bot test. net: also run it as ONE shared game: a host + `joiners` (default 1, up to 6) joining machines,
+   *  each its own process (tools/multibot.ts). Returns pass/fail, failed checks, errors, per machine. */
+  async run(id: string, o: { net?: boolean; joiners?: number; seconds?: number } = {}) {
     const t0 = Date.now();
     const scene = `res://tests/${id}_bot.tscn`;
     const one = async (env: Record<string, string>, extra = "") => {
       const r = await $`nice -n 19 timeout ${o.seconds ?? 150} godot-test --headless --path ${STAGE} ${{ raw: extra }} ${scene}`.env({ ...process.env, ...env }).nothrow().quiet();
       return { out: r.stdout.toString() + r.stderr.toString(), code: r.exitCode };
     };
-    // Pass (docs/GAME_DEV_GUIDE.md "Testing"): it ran to the end (exit 0, not killed by timeout or a crash), no
-    // SCRIPT ERROR, and no FAIL line. Only a few bots print "BOT RESULT: ..."; when one does, it must say PASS.
-    const FAIL = /BOT ASSERT FAILED: (.*)|^Bot:? .*\bFAIL\b:? ?(.*)|BOT RESULT: FAIL(.*)/gm;
-    const parse = ({ out, code }: { out: string; code: number }, mode: string) => ({
-      mode,
-      pass: code === 0 && !/SCRIPT ERROR(?!: BOT)/.test(out) && !out.match(FAIL) && (!/BOT RESULT:/.test(out) || /BOT RESULT: PASS/.test(out)),
-      result: out.match(/BOT RESULT: .*/)?.[0] ?? (code === 0 ? "ran to the end" : code === 124 ? "timed out" : `exit ${code} (crashed?)`),
-      failed: [...out.matchAll(FAIL)].map(m => (m[1] ?? m[2] ?? m[3] ?? m[0]).trim()),
-      errors: [...new Set([...out.matchAll(/SCRIPT ERROR: (?!BOT )(.*)\n\s*at: (.*)/g)].map(m => `${m[1]} @ ${m[2]}`))].slice(0, 8),
-    });
-    const runs = [parse(await one({}, "--fixed-fps 60 --quit-after 3600"), "local")];
+    // Pass (docs/GAME_DEV_GUIDE.md "Testing"): multibot.verdict, the one shared rule.
+    const parse = ({ out, code }: { out: string; code: number }, mode: string) => ({ mode, ...verdict(out, code) });
+    const runs: any[] = [parse(await one({}, "--fixed-fps 60 --quit-after 3600"), "local")];
     if (o.net) {
-      const port = String(27000 + Math.floor(Math.random() * 2000));
-      const host = one({ DUO_PORT: port, DUO_HOST: "1" });
-      await Bun.sleep(3000);
-      const client = one({ DUO_PORT: port, DUO_JOIN: "127.0.0.1" });
-      const [h, c] = await Promise.all([host, client]);
-      runs.push(parse(h, "host"), parse(c, "client"));
+      const g = await runGroup({ scene, project: STAGE, joiners: o.joiners ?? 1, seconds: o.seconds ?? 150, quiet: true });
+      runs.push(...g.machines.map(m => ({ mode: m.machine, ...m })));
+      for (const [k, a] of Object.entries(g.agree)) if (!a.ok) runs.push({ mode: `agree ${k}`, pass: false, result: a.values.join(" / "), failed: [], errors: [] });
     }
     return { id, pass: runs.every(r => r.pass), secs: Math.round((Date.now() - t0) / 1000), runs };
   },
@@ -264,7 +255,7 @@ export async function debt() {
 export function help() {
   return `dev — Claude's dev loop (brepl). Image paths returned/shown come back as pictures via the brepl MCP tool.
   dev.debt()                         tech-debt scan: {clean, issues:[{kind, what, fix}]} (fix them straight away)
-  dev.bots.list() / .run(id, {net}) / .all({only, net, concurrency})   headless bot tests in staging
+  dev.bots.list() / .run(id, {net, joiners}) / .all({only, net, concurrency})   headless bot tests in staging (net: host + joiners, tools/multibot.ts)
   dev.stage.diff() / .pull() / .deploy(msg)                            staging <-> live game
   dev.live.status() / start(proj) / stop() / restart(hard) / log(n, errorsOnly) / shot() / at("-30s", {span})   game on the TV (gdev)
   dev.screen.at("-10s") / .range(a, b)     TV screen recorder     dev.frame.at(t) / .online()   Steam Frame
