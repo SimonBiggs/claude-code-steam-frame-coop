@@ -10,7 +10,7 @@ const GAMES := [
 		"blurb": "Neon first-person co-op arena shooter"},
 	{"id": "ghost_lantern", "multi": true, "cat": "action", "name": "GHOST LANTERN", "scene": "res://games/ghost_lantern/main.tscn",
 		"blurb": "Spooky-cute ghost hunt: VR lantern reveals ghosts, TV players vacuum them up"},
-	{"id": "snowball_blitz", "cat": "action", "name": "SNOWBALL BLITZ", "scene": "res://games/snowball_blitz/main.tscn",
+	{"id": "snowball_blitz", "multi": true, "cat": "action", "name": "SNOWBALL BLITZ", "scene": "res://games/snowball_blitz/main.tscn",
 		"blurb": "Cosy snow-fort defence: throw real snowballs in VR, pack the walls on the TV"},
 	{"id": "cannon_cove", "multi": true, "cat": "action", "name": "CANNON COVE", "scene": "res://games/cannon_cove/main.tscn",
 		"blurb": "Pirate co-op: VR gunner aims the cannons, TV deckhands load them and patch leaks"},
