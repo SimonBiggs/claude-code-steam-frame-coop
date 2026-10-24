@@ -190,6 +190,14 @@ func _setup_game(mode: String) -> void:
 	_build_views(mode)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_assign_joypads()
+	if mode == "local" and net.machine_kind == "deck":
+		_deck_solo(0)
+		# Like the VR giant's solo: P1 tilts the board and rolls their own marble with the tilt only.
+		players[1].tilt_only = true
+		players[1].set_meta("hide_view", true)
+		players[1].set_active(true)
+		players[1].reset_to_start()
+		on_player_activity_changed(players[1])
 	ready_to_play = true
 	_ensure_join_listener()
 	if mode == "client":
@@ -767,7 +775,7 @@ func _layout_views() -> void:
 		if not p.has_meta("view"):
 			continue
 		var c: SubViewportContainer = p.get_meta("view")
-		c.visible = p.active and is_local(p)
+		c.visible = p.active and is_local(p) and not p.has_meta("hide_view")
 		if c.visible:
 			shown.append(p)
 	var n := shown.size()
@@ -812,6 +820,23 @@ func _layout_views() -> void:
 
 
 # --- Controllers and drop-in join ----------------------------------------------------
+
+## A Steam Deck on its own (DUO_MACHINE_KIND=deck): exactly ONE player on the Deck's built-in controls
+## (the first joypad; no keyboard player), full screen. More controllers drop in with A.
+func _deck_solo(solo: int) -> void:
+	var pads := Input.get_connected_joypads()
+	joy_owner.clear()
+	for p in players:
+		p.joy = -1
+		if p.index != solo and p.index > 0 and p.active:
+			p.set_active(false)
+			on_player_activity_changed(p)
+	var me = players[solo]
+	me.joy = pads[0] if pads.size() > 0 else -1
+	if me.joy >= 0:
+		joy_owner[me.joy] = solo
+	_layout_views()
+
 
 func _assign_joypads() -> void:
 	var pads := Input.get_connected_joypads()

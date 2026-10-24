@@ -192,6 +192,8 @@ func _setup_game(mode: String) -> void:
 	_build_views(mode)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_assign_joypads()
+	if mode == "local" and net.machine_kind == "deck":
+		_deck_solo(0)
 	ready_to_play = true
 	_ensure_join_listener()
 	if mode == "host":
@@ -731,6 +733,23 @@ func _build_ghost_mirror() -> SubViewport:
 	vp.add_child(ghost_cam)
 	ghost_cam.current = true
 	return vp
+
+
+## A Steam Deck on its own (DUO_MACHINE_KIND=deck): exactly ONE player on the Deck's built-in controls
+## (the first joypad; no keyboard player), full screen. More controllers drop in with A.
+func _deck_solo(solo: int) -> void:
+	var pads := Input.get_connected_joypads()
+	joy_owner.clear()
+	for p in players:
+		p.joy = -1
+		if p.index != solo and p.index > 0 and p.active:
+			p.set_active(false)
+			on_player_activity_changed(p)
+	var me = players[solo]
+	me.joy = pads[0] if pads.size() > 0 else -1
+	if me.joy >= 0:
+		joy_owner[me.joy] = solo
+	_layout_views()
 
 
 func _assign_joypads() -> void:
