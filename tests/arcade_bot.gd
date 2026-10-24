@@ -236,13 +236,14 @@ class Runner extends Node:
 		if not menus.is_empty():
 			kit.allow_pause = true
 			menus[0]._open(DEV)
-			await frames(30)  # a kid looks at the menu (A in the first 0.4 s is still gameplay)
+			await get_tree().create_timer(0.6).timeout  # a kid looks at the menu (A in the first 0.4 s of game time is still gameplay; frames would race it without --fixed-fps)
 			for i in 2:
 				await press(JOY_BUTTON_DPAD_DOWN)
 			var fb := get_viewport().gui_get_focus_owner()
 			check(fb is Button and (fb as Button).text == "Back to Arcade", "d-pad down twice highlights Back to Arcade (got %s)" % (fb.get("text") if fb else "nothing"))
 			await press(JOY_BUTTON_A)
-			await frames(60)  # net.go_to_arcade waits 0.4 s
+			await get_tree().create_timer(1.0).timeout  # net.go_to_arcade waits 0.4 s (game time)
+			await frames(5)
 			var now := get_tree().current_scene
 			check(now != null and now.scene_file_path == "res://arcade.tscn", "one A press on Back to Arcade goes back to the arcade (now: %s)" % (now.scene_file_path if now else "nothing"))
 			check(not get_tree().paused, "the arcade is not paused")
