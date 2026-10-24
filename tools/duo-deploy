@@ -10,6 +10,12 @@ if bad=$(grep -rn "no_depth_test = true" "$ST/core" "$ST/games" "$ST/arcade" --i
   echo "NOT deploying: Label3D.no_depth_test = true breaks VR depth (see docs/GAME_DEV_GUIDE.md):" >&2
   echo "$bad" >&2; exit 1
 fi
+# get_meta(key, null): in Godot a null default means "no default", so a missing key prints an error
+# (every frame in the arcade menu once). Use get_meta(k) if has_meta(k) else null, or a typed default.
+if bad=$(grep -rnE 'get_meta\([^()]*,[[:space:]]*null[[:space:]]*\)' "$ST/core" "$ST/games" "$ST/arcade" "$ST/tests" --include='*.gd'); then
+  echo "NOT deploying: get_meta(key, null) errors when the key is missing - use 'get_meta(k) if has_meta(k) else null':" >&2
+  echo "$bad" >&2; exit 1
+fi
 # Live must not be ahead of staging (e.g. an agent branch merged straight into live): the rsync below
 # would silently roll that work back. Sync it into staging first (rsync live -> stage) and redeploy.
 ahead=$(cd "$LIVE" && for d in core games arcade tests; do find "$d" -type f ! -name "*.uid"; done |

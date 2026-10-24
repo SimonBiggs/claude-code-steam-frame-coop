@@ -115,13 +115,13 @@ func tick(delta: float) -> void:
 		(m as ShaderMaterial).set_shader_parameter("cheer", cheer_level)
 	var want: Vector3 = MOODS.get(mood, MOODS[""])
 	mood_col = mood_col.lerp(want, 1.0 - exp(-3.0 * delta))
-	var floor_mat: ShaderMaterial = main.get_meta("floor_mat", null)
+	var floor_mat: ShaderMaterial = (main.get_meta("floor_mat") if main.has_meta("floor_mat") else null)
 	if floor_mat != null:
 		var pulse := 1.0
 		if mood == "surge":
 			pulse = 1.4 + 0.6 * sin(Time.get_ticks_msec() * 0.012)
 		floor_mat.set_shader_parameter("line_color", mood_col * pulse)
-	var edge_mat: StandardMaterial3D = main.get_meta("edge_mat", null)
+	var edge_mat: StandardMaterial3D = (main.get_meta("edge_mat") if main.has_meta("edge_mat") else null)
 	if edge_mat != null:
 		var c := Color(mood_col.x, mood_col.y, mood_col.z)
 		edge_mat.albedo_color = c
