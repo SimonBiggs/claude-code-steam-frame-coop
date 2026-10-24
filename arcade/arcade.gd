@@ -146,7 +146,8 @@ func _ready() -> void:
 		OS.set_environment("DUO_HOST_ORIGINAL", "1" if OS.has_environment("DUO_HOST") else "")
 	# Each lobby visit starts from how the machine was launched (a game may have changed these).
 	_restore_env()
-	Engine.set_meta("duo_full", "-")  # a game that was full last time may have room now
+	Engine.set_meta("duo_full", "-")
+	preload("res://core/ui_kit.gd").ensure_pad_ui_actions()  # pad A/B in the lobby's focus-driven menu  # a game that was full last time may have room now
 	if OS.get_environment("DUO_JOIN") == "auto":
 		_finding = FIND_SECONDS  # _process listens for a lobby, then hosts one if nobody answers
 	elif (xr != null and xr.is_initialized()) or OS.has_environment("DUO_HOST"):

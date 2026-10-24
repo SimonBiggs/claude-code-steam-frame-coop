@@ -1,0 +1,6 @@
+[Unit]
+Description=Make sure Claude Code Remote Control is running (after sleep / network changes)
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c "tmux has-session -t claude-rc 2>/dev/null || systemctl --user restart claude-rc"
