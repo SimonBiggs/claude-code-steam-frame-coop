@@ -19,6 +19,11 @@ extends Node
 ## Songs 1, 2, 3 play in a row (song 1 must use only the outer lanes, song 2 adds the middle one, song
 ## 3 has NORMAL drums, no gold notes anywhere); the bot prints "BOT CHECK ..." lines and quits after
 ## song 3 (BOT_VR=1 is the same as BOT_FAKE_VR=1).
+## Visual teaching (simple mode): records the picture cues each view shows (cue_lane0.., cue_pad0..), the
+## ones learned (cue_learned_*), the glowing drum arrow, the see-through practice stick, the ghost hand
+## at a maraca and that no view shows its own name tag, and prints "BOT: ERROR instruction text" if a
+## headline is anything but a short title / number, or a tip spot (help line, VR dashboard, lane tags,
+## the stage's song sign, judgement words) shows any words.
 
 const FAKE_PAD := 40
 
@@ -46,6 +51,9 @@ var props_done := false
 var prac_tapped := -1
 var checks := {}
 var quit_t := -1.0
+var cues := {}  # simple mode: picture cues seen / learned
+const HEADLINES := "^(RHYTHM BAND!|SONG \\d+!|\\d+|PLAY!|HOORAY!|PLAYER \\d+!|PLAYER \\d+ LEFT|PAUSED|CONNECTED|The band is full!|P\\d: controller disconnected|Connecting to the VR drummer…)$"
+var headline_re := RegEx.create_from_string(HEADLINES)
 
 
 class RealPadFilter extends Node:
@@ -144,6 +152,8 @@ func _process(delta: float) -> void:
 	if mode == "local" and joined and t > join_time + 0.8 and not has_meta("pad_checked"):
 		set_meta("pad_checked", true)
 		print("BOT: fake controller %d drives P%d" % [FAKE_PAD, int(main.joy_owner.get(FAKE_PAD, -1)) + 1])
+	if simple:
+		_note_cues()
 	if main.state == "practice":
 		_practice(mode, delta)
 	if main.state == "menu":
@@ -230,6 +240,80 @@ func _practice(mode: String, delta: float) -> void:
 	elif not d.vr and float(main.prac_t) > 1.9 and prac_tapped != k:
 		prac_tapped = k
 		_key_press(lane_keys[pad])
+
+
+## Visual teaching: picture cues instead of words; any instruction text in a tip spot is an error.
+func _note_cues() -> void:
+	var d = main.players[0]
+	if d.demo != null and d.demo.visible:
+		cues["ghost_stick"] = true
+	if d.cue_arrow != null and d.cue_arrow.visible:
+		cues["drum_arrow"] = true
+	if d.ghost_hand != null and d.ghost_hand.visible:
+		cues["ghost_hand_maraca"] = true
+	if main.help_label.visible:
+		_check_tip("TV help line", main.help_label.text)
+	if main.center_label.modulate.a > 0.05:
+		_check_headline("TV headline", main.center_label.text)
+	if float(main.vr_msg_t) > 0.0:
+		_check_headline("VR headline", str(main.vr_msg))
+	if d.dash.visible:
+		_check_tip("VR dashboard", d.status_label.text)
+	for lt in d.lane_tags:
+		if lt.visible:
+			_check_tip("VR lane tag", lt.text)
+	var sl = main.stage.song_label
+	if sl != null and sl.visible:
+		_check_tip("stage song sign", sl.text)
+	for p in main.players:
+		if p.index == 0 or not p.active or not p.is_local():
+			continue
+		if float(p.judge_t) > 0.0:
+			_check_tip("P%d judgement" % (p.index + 1), str(p.judge_text))
+		if p.camera != null:
+			if int(p.camera.cull_mask) & int(main.stage.tag_layer(p.index)):
+				if not cues.has("own_tag_shown"):
+					print("BOT: ERROR P%d's view shows its own name tag" % (p.index + 1))
+				cues["own_tag_shown"] = true
+			else:
+				cues["own_tag_hidden"] = true
+	for p in main.players:
+		if p.hud == null or not p.active:
+			continue
+		var box = p.hud.get_node_or_null("Cue")
+		var key := str(p.get_meta("cue", ""))
+		if box != null and box.visible and key != "":
+			cues["cue_" + key] = true
+		var done: Dictionary = p.get_meta("cue_done", {})
+		for k in done:
+			if int(done[k]) >= 2:
+				cues["cue_learned_" + str(k)] = true
+
+
+func _check_headline(who: String, text: String) -> void:
+	for line in text.split("\n"):
+		if line != "" and headline_re.search(line) == null:
+			_check_tip(who, text)
+			return
+
+
+func _check_tip(who: String, text: String) -> void:
+	if text.strip_edges() == "":
+		return
+	if not cues.has("tip_text"):
+		print("BOT: ERROR instruction text on %s: %s" % [who, text.replace("\n", " / ")])
+	cues["tip_text"] = true
+
+
+func _exit_tree() -> void:
+	if main == null or not simple:
+		return
+	var ks: Array = cues.keys()
+	ks.sort()
+	print("BOT CUES: mode=%s %s" % [main.net.mode, ",".join(PackedStringArray(ks))])
+	for p in main.players:
+		if p.has_meta("cue_done"):
+			print("BOT CUES: P%d done=%s" % [p.index + 1, p.get_meta("cue_done")])
 
 
 ## Fake VR: swing each hand through every stage toy, then pick up a maraca, shake it and put it back.

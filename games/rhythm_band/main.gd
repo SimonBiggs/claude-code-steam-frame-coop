@@ -27,8 +27,18 @@ extends Node3D
 ##    microphone, amp, spotlight, maracas to pick up and shake.
 ##  - Text: one short headline at a time (RHYTHM BAND!, SONG 2!, 3-2-1, PLAY!, HOORAY!, PLAYER 3!).
 ##  - Kept: networking, VR comfort (kit fit, walking, snap turn), the wrist MENU, split screen.
+##  - No how-to words (visual teaching): each TV guitarist gets a pulsing glowing pad button and a
+##    glowing arrow pointing at the ring to hit (X / A / B, or an arrow key cap for keyboard players)
+##    in practice and whenever a lane is new (song 2's middle lane); the flat drummer gets the drum's
+##    button (X A B Y / A S D F) floating over the glowing drum. A glowing 3D arrow bobs over the
+##    practice drum on every screen (VR: next to the see-through stick). Each cue fades once that
+##    player has hit that lane / drum twice. Between songs the VR drummer sees the shared ghost hand
+##    (games/cannon_cove/ghost_hand.gd) reach for a maraca, squeeze and shake it, until they have
+##    picked one up twice. The start headline is VR only (the TV sees the RHYTHM BAND sign), PAUSED
+##    has no sentence, and no view shows its own player's name tag.
 
 const VrText := preload("res://core/vr_text.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 const SfxScript := preload("res://core/sfx.gd")
 const NetScript := preload("res://core/net.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
@@ -479,6 +489,7 @@ func _ensure_view(p) -> void:
 	else:
 		p.camera = cam
 		cam.global_transform = stage.tv_camera(p.index)
+		cam.cull_mask &= ~stage.tag_layer(p.index)  # your own name tag never sits in your own view
 	var hud_layer := CanvasLayer.new()
 	vp.add_child(hud_layer)
 	var hw: Control = HighwayScript.new()
@@ -918,7 +929,8 @@ func _start_practice() -> void:
 			p.reset_tour()
 	stage.hide_stars()
 	_load_song(setlist[0], mini(bars_cap, SIMPLE_BARS[0]))
-	_show_center("RHYTHM BAND!", 2.5, true, "RHYTHM BAND!")
+	# TV: no headline (the stage's RHYTHM BAND sign is right there: no duplicate title); VR: the title.
+	_show_center("", 2.5, true, "RHYTHM BAND!")
 	sound("ready", -4.0, 1.0, true)
 	print("Practice: drums %s, lanes %s, then setlist %s" % [str(PRACTICE_PADS), str(PRACTICE_LANES), str(setlist)])
 
@@ -945,6 +957,7 @@ func _check_practice() -> void:
 ## The drummer hit the glowing practice drum: sparks, a rising chime, the next ball sets off.
 func _practice_drum(pad: int) -> void:
 	prac_d += 1
+	cue_did(players[0], "pad%d" % pad)
 	prac_t = 0.0
 	_drum_fx(pad, 0, false)
 	net.event("djudge", [pad, 0, false])
@@ -1283,6 +1296,8 @@ func _drum_result(id: int, q: int) -> void:
 	d.record(q, star)
 	_band_result(q, star, 0, float(song.d_t[id]))
 	var pad: int = song.d_pad[id]
+	if q < 2:
+		cue_did(d, "pad%d" % pad)
 	_drum_fx(pad, q, star)
 	net.event("djudge", [pad, q, star])
 
@@ -1681,7 +1696,10 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 
 
 func _set_pause_banner(paused: bool, who: String) -> void:
-	_show_center("PAUSED\n" + who if paused else "", 0.0, false, ("PAUSED\n" + who) if paused else "")
+	if SIMPLE_MODE:
+		who = ""  # no explaining sentence: just PAUSED
+	var title := ("PAUSED\n" + who) if who != "" else "PAUSED"
+	_show_center(title if paused else "", 0.0, false, title if paused else "")
 	if vr_center != null and paused:
 		VrText.snap(vr_center)
 
@@ -1860,6 +1878,19 @@ func _build_hud() -> void:
 	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	help_label.visible = not SIMPLE_MODE  # simple mode: the rings and arrows show the buttons
 	help_label.text = "Guitar: X / A / B or D-pad (keyboard: arrows) · STAR POWER: Y · more players: press A on another controller · Start / Esc: menu"
+
+
+## Simple mode picture cues: a player has done `key` once more (a guitar lane "lane0".."lane2", a drum
+## "pad0".."pad3"); highway.gd stops showing that cue once it is done twice.
+func cue_did(p, key: String) -> void:
+	var done: Dictionary = p.get_meta("cue_done", {})
+	done[key] = int(done.get(key, 0)) + 1
+	p.set_meta("cue_done", done)
+
+
+func cue_learned(p, key: String) -> bool:
+	var done: Dictionary = p.get_meta("cue_done", {})
+	return int(done.get(key, 0)) >= 2
 
 
 ## Simple mode: the lanes on the TV highway right now (song 1: just the outer two).

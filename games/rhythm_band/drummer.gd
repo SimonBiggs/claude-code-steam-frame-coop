@@ -52,9 +52,15 @@ func _update_practice() -> void:
 ## stage toys (props.gd) hang around the kit; flat drum tags show the key / button instead of names.
 ## Bot "fake VR": the bot moves fake_tips and the same swing detection as VR runs.
 ## On the TV machine this is a ghost: the kit, a head and two sticks drawn from the host's snapshots.
+## Visual teaching (simple mode): a glowing arrow bobs over the drum to hit (the practice drum on every
+## screen; on the host / local machine also the next ball's drum until that drum has been hit twice,
+## main.cue_learned); the flat drummer's view puts the drum's button over it (highway.gd). Between songs
+## the VR drummer sees the shared ghost hand (games/cannon_cove/ghost_hand.gd) reach for a maraca,
+## squeeze and shake it, until they have picked one up twice.
 
 const MeshKit := preload("res://games/rhythm_band/mesh_kit.gd")
 const PropsScript := preload("res://games/rhythm_band/props.gd")
+const GhostHandScript := preload("res://games/cannon_cove/ghost_hand.gd")
 
 const HIT_R := 0.13  # metres from the stick tip to a drum's centre
 const REARM_R := 0.17
@@ -127,6 +133,15 @@ var star_mat: StandardMaterial3D
 var props: PropsScript
 var demo: Node3D  # the see-through practice stick
 var demo_mat: StandardMaterial3D
+var cue_arrow: Node3D  # simple mode: the glowing arrow over the drum to hit
+var cue_arrow_mat: StandardMaterial3D
+var cue_pad := -1  # the drum it points at (-1: none); highway.gd puts the flat drummer's button there
+var ring_next := -1  # the drum whose ball arrives next (from _update_notes)
+var ghost_hand: Node3D  # simple mode, VR: the shared ghost hand showing how to pick up a maraca
+var gh_t := 0.0
+var gh_idle := 0.0
+var grabs := 0  # maracas picked up so far (the ghost hand stops after two)
+var held_was := false
 
 var fitted := false
 var fit_t := 0.8
@@ -464,6 +479,9 @@ func _process(delta: float) -> void:
 		top_mats[i].emission = GOLD if star_on and i == 3 and main.star_ready() else (PAD_COLORS[i].lerp(GOLD, 0.6) if star_on else PAD_COLORS[i])
 		pads[i].scale = Vector3.ONE * (1.0 + flash[i] * 0.12)
 	_update_notes()
+	if main.SIMPLE_MODE:
+		_update_cue_arrow()
+		_update_ghost_hand(delta)
 	_update_tags()
 	if props != null:
 		props.tick(delta, tips, not ghost and (vr or fake_vr))
@@ -686,6 +704,7 @@ func _update_notes() -> void:
 		demo.visible = false
 	var g = main.song
 	var used := 0
+	ring_next = -1
 	var ring_dt: Array[float] = [99.0, 99.0, 99.0, 99.0]
 	var playing: bool = main.state == "play"
 	if g != null and playing:
@@ -719,9 +738,13 @@ func _update_notes() -> void:
 			used += 1
 			if j == 0 and dt >= -0.05 and dt < ring_dt[pad]:
 				ring_dt[pad] = dt
+		var next_dt := 99.0
 		for p in 4:
 			var win: float = 1.2 * g.spb
 			var rd := ring_dt[p]
+			if rd < win and rd < next_dt:
+				next_dt = rd
+				ring_next = p
 			approach[p].visible = rd < win
 			if rd < win:
 				approach[p].scale = Vector3.ONE * (1.0 + 1.8 * maxf(0.0, rd) / win)
@@ -729,6 +752,114 @@ func _update_notes() -> void:
 		for p in 4:
 			approach[p].visible = false
 	notes_mm.visible_instance_count = used
+
+
+## Simple mode: a glowing arrow bobbing over the drum to hit (pointing down at it).
+func _update_cue_arrow() -> void:
+	var pad := -1
+	var st: String = main.state
+	if st == "practice":
+		if int(main.prac_d) < main.PRACTICE_PADS.size():
+			pad = main.PRACTICE_PADS[int(main.prac_d)]
+	elif st == "play" and not ghost and ring_next >= 0 and not main.cue_learned(self, "pad%d" % ring_next):
+		pad = ring_next
+	cue_pad = pad
+	if pad < 0:
+		if cue_arrow != null:
+			cue_arrow.visible = false
+		return
+	if cue_arrow == null:
+		_build_cue_arrow()
+	var now := Time.get_ticks_msec() * 0.001
+	var k := absf(sin(now * 4.0))
+	cue_arrow.visible = true
+	cue_arrow.position = pads[pad].position + Vector3(0.0, 0.3 + 0.06 * k, 0.0)
+	var c: Color = PAD_COLORS[pad].lightened(0.45)
+	c.a = 0.6 + 0.35 * k
+	cue_arrow_mat.albedo_color = c
+
+
+## A fat arrow pointing down (tip at the node's origin): a cone and a shaft, glowing in the drum's colour.
+func _build_cue_arrow() -> void:
+	cue_arrow = Node3D.new()
+	cue_arrow.name = "CueArrow"
+	rig.add_child(cue_arrow)
+	cue_arrow_mat = StandardMaterial3D.new()
+	cue_arrow_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	cue_arrow_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	var head := MeshInstance3D.new()
+	head.mesh = main.cyl_mesh(0.045, 0.0, 0.07, 12)
+	head.position = Vector3(0.0, 0.035, 0.0)
+	var shaft := MeshInstance3D.new()
+	shaft.mesh = main.cyl_mesh(0.016, 0.016, 0.08, 8)
+	shaft.position = Vector3(0.0, 0.11, 0.0)
+	for m in [head, shaft]:
+		var mi: MeshInstance3D = m
+		mi.material_override = cue_arrow_mat
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		cue_arrow.add_child(mi)
+
+
+## Simple mode, VR: between songs (the HOORAY! and the next song's intro) the see-through ghost hand
+## loops reach for a maraca, squeeze (the right trigger), shake it - until they've picked one up twice.
+func _update_ghost_hand(delta: float) -> void:
+	if props == null or ghost or not (vr or fake_vr):
+		return
+	var held: bool = int(props.held) >= 0
+	if held and not held_was:
+		grabs += 1
+	held_was = held
+	var st: String = main.state
+	var want := grabs < 2 and not held and (st == "results" or st == "intro") and not get_tree().paused
+	if not want:
+		gh_idle = 0.0
+		gh_t = 0.0
+		if ghost_hand != null:
+			ghost_hand.visible = false
+		return
+	gh_idle += delta
+	if gh_idle < 1.0:
+		return
+	if ghost_hand == null:
+		ghost_hand = GhostHandScript.new()
+		ghost_hand.name = "GhostHand"
+		main.add_child(ghost_hand)
+	# The maraca nearest the right hand.
+	var best := -1
+	var bd := 99.0
+	for k in props.items.size():
+		if props.items[k].kind != "maraca":
+			continue
+		var dist: float = tips[1].distance_to(props._touch_point(k))
+		if dist < bd:
+			bd = dist
+			best = k
+	if best < 0:
+		return
+	gh_t = fmod(gh_t + delta, 2.6)
+	var grip_at: Vector3 = (props.items[best].node as Node3D).global_position
+	var start := grip_at + rig.global_basis * Vector3(0.08, 0.18, 0.18)
+	var pos := grip_at
+	var grip := 0.0
+	var alpha := 0.55
+	if gh_t < 0.8:
+		pos = start.lerp(grip_at, ease(gh_t / 0.8, -1.8))
+		alpha = 0.55 * minf(1.0, gh_t / 0.3)
+	elif gh_t < 1.1:
+		grip = (gh_t - 0.8) / 0.3  # squeeze
+	elif gh_t < 2.1:
+		grip = 1.0
+		pos = grip_at + Vector3.UP * 0.05 * sin((gh_t - 1.1) * 22.0)  # shake shake shake
+	else:
+		grip = 1.0
+		alpha = 0.55 * maxf(0.0, 1.0 - (gh_t - 2.1) / 0.5)
+	ghost_hand.visible = alpha > 0.01
+	ghost_hand.mat.albedo_color.a = alpha
+	var fwd := -rig.global_basis.z
+	ghost_hand.hand.global_transform = Transform3D(Basis.looking_at(fwd, Vector3.UP), pos + Vector3.UP * 0.03)
+	for f in ghost_hand.fingers:
+		(f as Node3D).rotation.x = -grip * 1.3
+	ghost_hand.thumb.rotation.x = -grip * 0.7
 
 
 ## In the SETLIST menu the drums are buttons: their lane labels say what they pick.
