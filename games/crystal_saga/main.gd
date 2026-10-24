@@ -54,6 +54,8 @@ const SHOT_COLOR := {"magic": Color(0.75, 0.5, 1.0), "arrow": Color(1.0, 0.9, 0.
 var net: Node
 var ready_to_play := false
 var party: Party
+## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
+var multi_machine := true
 var split: SplitView
 var vr_rig: VrRig
 var save: Save
@@ -153,7 +155,8 @@ func _setup(mode: String) -> void:
 	monsters.name = "Monsters"
 	add_child(monsters)
 	_build_beam()
-	if VrRig.wanted(mode):
+	var flat: bool = mode == "host" and not net.has_vr  # flat host (TV / Deck hosting): slot 0 is a pad player here
+	if VrRig.wanted(mode) and not flat:
 		vr_rig = VrRig.new()
 		vr_rig.move_speed = 2.0
 		vr_rig.turn_mode = "snap"
@@ -168,7 +171,7 @@ func _setup(mode: String) -> void:
 		_build_blink()
 	sky = SkyKit.apply(self, SKIES[0], vr_rig != null)
 	_build_arrow()
-	if mode != "host":
+	if mode != "host" or vr_rig == null:
 		split = SplitView.new()
 		add_child(split)
 		split.bind_party(party)
@@ -185,7 +188,7 @@ func _setup(mode: String) -> void:
 			split.set_bubble(VrRig.build_mirror(self, avatar.head, false))
 		elif vr_rig != null:
 			split.set_bubble(vr_rig.mirror)
-	party.allow_slot0 = mode == "local" and vr_rig == null
+	party.allow_slot0 = mode != "client" and vr_rig == null
 	if mode != "client":
 		net.state_set("vr", vr_rig != null)
 		_start_journey()
