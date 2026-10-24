@@ -276,7 +276,7 @@ func _make_hud(slot: int, parent: Control) -> void:
 		join_prompt = UiKit.panel("pill")
 		join_prompt.add_child(UiKit.prompts([["A", "Join"]]))
 		ui.add_child(join_prompt)
-		join_prompt.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_KEEP_SIZE)
+		UiKit.pin(join_prompt, Control.PRESET_CENTER_BOTTOM)
 		join_prompt.grow_horizontal = Control.GROW_DIRECTION_BOTH
 		join_prompt.grow_vertical = Control.GROW_DIRECTION_BEGIN
 		join_prompt.offset_top = -60.0
@@ -871,8 +871,7 @@ func _fly_darts(delta: float) -> void:
 static func _orient_dart(d: Dart, dir: Vector3, roll: float) -> void:
 	if dir.length() < 0.01:
 		return
-	var up := Vector3.UP if absf(dir.y) < 0.98 else Vector3.FORWARD
-	d.node.basis = Basis.looking_at(dir, up) * Basis(Vector3.FORWARD, roll)
+	d.node.basis = UiKit.face(dir) * Basis(Vector3.FORWARD, roll)
 
 
 func _bop(slot: int) -> void:
@@ -984,7 +983,7 @@ func on_pause_changed(paused: bool, by_slot: int) -> void:
 			var l := UiKit.label("", "small", "dim", HORIZONTAL_ALIGNMENT_CENTER)
 			l.name = "Why"
 			v.add_child(l)
-			tv_banner.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_KEEP_SIZE)
+			UiKit.pin(tv_banner, Control.PRESET_CENTER)
 			tv_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
 			tv_banner.grow_vertical = Control.GROW_DIRECTION_BOTH
 		(tv_banner.find_child("Why", true, false) as Label).text = "by %s" % party.name_of(by_slot)

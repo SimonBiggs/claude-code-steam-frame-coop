@@ -221,11 +221,10 @@ func _make_hud(slot: int, parent: Control) -> void:
 	huds[slot] = ui
 	var card := UiKit.panel("card")
 	ui.add_child(card)
-	card.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	card.offset_left = 0.0  # set_anchors_preset alone keeps old offsets
-	card.offset_right = 0.0
+	UiKit.pin(card, Control.PRESET_CENTER_TOP)
 	card.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	card.offset_top = 16.0
+	card.offset_top += 16.0
+	card.offset_bottom += 16.0
 	var row := UiKit.hbox()
 	card.add_child(row)
 	row.add_child(UiKit.icon("person", "gold", 34.0))
@@ -242,7 +241,7 @@ func _make_hud(slot: int, parent: Control) -> void:
 		var tp := UiKit.panel("accent")
 		tp.add_child(UiKit.prompts([["A", "THROW!"]]))
 		ui.add_child(tp)
-		tp.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_KEEP_SIZE)
+		UiKit.pin(tp, Control.PRESET_CENTER_BOTTOM)
 		tp.grow_horizontal = Control.GROW_DIRECTION_BOTH
 		tp.grow_vertical = Control.GROW_DIRECTION_BEGIN
 		tp.offset_top = -50.0
@@ -253,7 +252,7 @@ func _make_hud(slot: int, parent: Control) -> void:
 		join_prompt = UiKit.panel("pill")
 		join_prompt.add_child(UiKit.prompts([["A", "Join"]]))
 		ui.add_child(join_prompt)
-		join_prompt.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_KEEP_SIZE)
+		UiKit.pin(join_prompt, Control.PRESET_CENTER_BOTTOM)
 		join_prompt.grow_horizontal = Control.GROW_DIRECTION_BOTH
 		join_prompt.grow_vertical = Control.GROW_DIRECTION_BEGIN
 		join_prompt.offset_top = -60.0
@@ -443,7 +442,7 @@ func on_pause_changed(paused: bool, _by_slot: int) -> void:
 			tv_banner = UiKit.panel("accent")
 			ui.add_child(tv_banner)
 			tv_banner.add_child(UiKit.title("PAUSED"))
-			tv_banner.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_KEEP_SIZE)
+			UiKit.pin(tv_banner, Control.PRESET_CENTER)
 			tv_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
 			tv_banner.grow_vertical = Control.GROW_DIRECTION_BOTH
 		tv_banner.visible = paused
