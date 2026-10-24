@@ -446,8 +446,10 @@ func apply_net_state(st: Array) -> void:
 	carrying = st[6]
 	var was_carried := carried
 	carried = st[7]
-	if carried:
+	if carried or remote:  # carried by the Giant, or another machine's knight (core/classic_seats.gd ghost)
 		net_target = st[0]
+		if remote:
+			face = st[1]
 		if not was_carried:
 			on_ground = false
 	elif was_carried:

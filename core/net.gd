@@ -619,7 +619,7 @@ func _px_state(index: int, pos: Vector3, yaw: float, pitch: float) -> void:
 	if mode != "host" or main == null or index <= 0 or index >= MAX_SLOTS:
 		return
 	if _classic_game():
-		if index < main.players.size():
+		if index < main.players.size() and _seat_ok(index, "", []):
 			main.players[index].apply_remote_state(pos, yaw, pitch)
 	elif main.has_method("on_remote_state"):
 		main.on_remote_state(index, pos, yaw, pitch)
@@ -631,7 +631,7 @@ func _px_action(index: int, action: String, args: Array) -> void:
 		return
 	if _classic_game():
 		# Classic games (on_p2_action): the host must have created player index already.
-		if index < main.players.size():
+		if index < main.players.size() and _seat_ok(index, action, args):
 			main.on_p2_action(action, args, index)
 		return
 	_dispatch_request(index, action, args)
@@ -642,6 +642,14 @@ func _px_action(index: int, action: String, args: Array) -> void:
 func _px_request(slot: int, action: String, args: Array) -> void:
 	if mode == "host" and slot > 0 and slot < MAX_SLOTS:
 		_dispatch_request(slot, action, args)
+
+
+## Classic many-machine games (core/classic_seats.gd on main.seats): does the sending machine own seat
+## `index`? Other machines' state and actions are dropped here, so no player script needs its own check.
+## Games without the helper accept everything, as before.
+func _seat_ok(index: int, action: String, args: Array) -> bool:
+	var seats = main.get("seats")
+	return seats == null or not (seats is Object and seats.has_method("remote_ok")) or seats.remote_ok(index, action, args)
 
 
 ## A game written for the classic contract (players array + on_p2_action), like the first 17 games.
