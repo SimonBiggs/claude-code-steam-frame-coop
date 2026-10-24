@@ -88,7 +88,22 @@ const CATEGORIES := [
 	{"id": "party", "name": "PARTY", "color": Color(1.0, 0.8, 0.3)},
 	{"id": "sports", "name": "SPORTS & RACING", "color": Color(0.35, 0.9, 0.5)},
 	{"id": "cosy", "name": "COSY & PUZZLE", "color": Color(0.45, 0.8, 1.0)},
+	# A filter, not a home category: every game one person can play (SOLO below), made-for-solo ones first.
+	{"id": "solo", "name": "1 PLAYER", "color": Color(1.0, 0.6, 0.85)},
 ]
+## Playable by ONE player (Simon, 2026-10-24: a "supports single player" tier and filter). 2 = made for solo (a solo
+## mode or CPU partners; a ★ badge on the card), 1 = works alone but best with friends, missing = needs people
+## (Hide and Seek, Paint and Guess). From dev.soloCheck() (every game played offscreen with one pad) + each game's
+## own solo features. One table so it lives in one place.
+const SOLO := {
+	"bee_garden": 2, "block_builders": 2, "dodge_ball": 2, "dragon_rider": 2, "duo_arena": 2, "elemental_bender": 2,
+	"ghost_lantern": 2, "giants_table": 2, "kart_race": 2, "kitchen_rush": 2, "marble_maze": 2, "obstacle_rush": 2,
+	"party_board": 2, "penalty_shootout": 2, "rocket_workshop": 2, "roller_coaster": 2, "snowball_blitz": 2,
+	"snowman_maker": 2, "starship_crew": 2, "treasure_dig": 2,
+	"balloon_pop": 1, "bubble_bath": 1, "cannon_cove": 1, "crystal_saga": 1, "dungeon_delve": 1, "fishing_lake": 1,
+	"fruit_catch": 1, "mech_titans": 1, "mini_golf_party": 1, "paper_planes": 1, "rhythm_band": 1,
+	"sheep_round_up": 1, "tiny_town_tycoon": 1, "tower_stack": 1, "whack_a_mole": 1,
+}
 const VrText := preload("res://core/vr_text.gd")
 const DEFAULT_PORT := 7777
 const JOIN_TIMEOUT_MS := 5000
@@ -452,10 +467,16 @@ func tabs() -> Array[int]:
 	var out: Array[int] = []
 	for c in CATEGORIES.size():
 		for g in GAMES:
-			if str(g.get("cat", "action")) == str(CATEGORIES[c].id):
+			if _in_category(g, str(CATEGORIES[c].id)):
 				out.append(c)
 				break
 	return out
+
+
+func _in_category(g: Dictionary, cat_id: String) -> bool:
+	if cat_id == "solo":
+		return int(SOLO.get(str(g.get("id", "")), 0)) > 0
+	return str(g.get("cat", "action")) == cat_id
 
 
 func _cat_index_of(game_index: int) -> int:
@@ -472,9 +493,15 @@ func _games_in(tab: int) -> Array[int]:
 	if t.is_empty():
 		return out
 	var c: int = t[clampi(tab, 0, t.size() - 1)]
+	var id := str(CATEGORIES[c].id)
 	for i in GAMES.size():
-		if str(GAMES[i].get("cat", "action")) == str(CATEGORIES[c].id):
+		if _in_category(GAMES[i], id):
 			out.append(i)
+	if id == "solo":  # made-for-solo games first, otherwise the usual order
+		out.sort_custom(func(a: int, b: int) -> bool:
+			var sa := int(SOLO.get(str(GAMES[a].id), 0))
+			var sb := int(SOLO.get(str(GAMES[b].id), 0))
+			return sa > sb if sa != sb else a < b)
 	return out
 
 
@@ -571,7 +598,7 @@ func _make_card(i: int, colour: Color) -> Button:
 	v.add_theme_constant_override("separation", 6)
 	row.add_child(v)
 	var name_label := Label.new()
-	name_label.text = str(g.name)
+	name_label.text = str(g.name) + ("  ★ SOLO" if int(SOLO.get(str(g.id), 0)) == 2 else "")
 	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	name_label.add_theme_font_size_override("font_size", 28)
 	name_label.add_theme_color_override("font_color", colour)
