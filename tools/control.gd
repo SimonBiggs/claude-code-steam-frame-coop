@@ -55,8 +55,8 @@ func _process(_delta: float) -> void:
 		_update_overlay()
 		_pull_audio()
 		var now := Time.get_ticks_msec()
-		if now >= rec_next and rec_tasks.size() < 4:
-			rec_next = now + int(rec_every * 1000.0)
+		if now >= rec_next and rec_tasks.size() < 8:
+			rec_next = maxi(rec_next + int(rec_every * 1000.0), now - int(rec_every * 1000.0))  # steady rate, no drift
 			var img := get_viewport().get_texture().get_image()
 			rec_tasks.append(WorkerThreadPool.add_task(_save_frame.bind(img, "%s/%08d.jpg" % [rec_dir, now - rec_t0])))
 			rec_frames += 1

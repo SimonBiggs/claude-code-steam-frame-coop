@@ -2,7 +2,7 @@
 // dev loop tooling into your brepl"). Everything returns data (or image paths, which the brepl MCP tool
 // shows as pictures). dev.help() lists it all.
 import { $ } from "bun";
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const HOME = process.env.HOME!;
@@ -17,7 +17,8 @@ const TOOL_COPIES: Record<string, string> = {  // installed file -> repo copy (k
   [join(BIN, "brepl")]: "tools/brepl", [join(BIN, "duo-deploy")]: "tools/duo-deploy", [join(BIN, "merge-game")]: "tools/merge-game",
   [join(BIN, "voice-bridge")]: "tools/voice-bridge", [join(BIN, "claude-watchdog")]: "tools/claude-watchdog",
   [join(HOME, ".local/share/gdev/recsheet.py")]: "tools/recsheet.py", [join(HOME, ".local/share/brepl/dev.ts")]: "tools/brepl-dev.ts",
-  [join(HOME, ".local/share/brepl/mcp.ts")]: "tools/brepl-mcp.ts", [join(BIN, "frame-at")]: "tools/frame-at", [join(BIN, "duo-deploy-frame")]: "tools/duo-deploy-frame",
+  [join(HOME, ".local/share/brepl/mcp.ts")]: "tools/brepl-mcp.ts", [join(HOME, ".local/share/brepl/alerts.ts")]: "tools/brepl-alerts.ts",
+  [join(HOME, ".config/systemd/user/brepl.service")]: "tools/systemd/brepl.service", [join(BIN, "frame-at")]: "tools/frame-at", [join(BIN, "duo-deploy-frame")]: "tools/duo-deploy-frame",
 };
 
 /** Run a shell command: {code, out} (stdout+stderr, trimmed). Never throws. */
@@ -25,14 +26,16 @@ export async function sh(cmd: string, cwd = HOME) {
   const r = await $`bash -c ${cmd}`.cwd(cwd).nothrow().quiet();
   return { code: r.exitCode, out: (r.stdout.toString() + r.stderr.toString()).trim() };
 }
-const lastPath = (out: string) => out.split("\n").map(l => l.trim()).reverse().find(l => /\.(jpe?g|png)$/i.test(l) && existsSync(l));
+const lastPath = async (out: string) => {
+  for (const l of out.split("\n").map(l => l.trim()).reverse()) if (/\.(jpe?g|png)$/i.test(l) && (await Bun.file(l).exists())) return l;
+};
 
 // --- Bot tests (headless, in the staging copy, at low priority) ------------------------------------
 
 export const bots = {
   /** Game ids that have a bot test. */
-  list(): string[] {
-    return readdirSync(join(STAGE, "tests")).filter(f => f.endsWith("_bot.tscn")).map(f => f.replace(/_bot\.tscn$/, "")).sort();
+  async list(): Promise<string[]> {
+    return (await readdir(join(STAGE, "tests"))).filter(f => f.endsWith("_bot.tscn")).map(f => f.replace(/_bot\.tscn$/, "")).sort();
   },
   /** Run one bot test. net: also run it as host + client over a local port. Returns pass/fail, failed checks, errors. */
   async run(id: string, o: { net?: boolean; seconds?: number } = {}) {
@@ -62,7 +65,7 @@ export const bots = {
   },
   /** Run many (default all) bot tests, `concurrency` at a time. Returns {pass, fail: [...details], table}. */
   async all(o: { only?: string[]; net?: boolean; concurrency?: number } = {}) {
-    const ids = o.only ?? bots.list();
+    const ids = o.only ?? (await bots.list());
     const results: any[] = [];
     let next = 0;
     await Promise.all(Array.from({ length: o.concurrency ?? 3 }, async () => {
@@ -86,7 +89,7 @@ export const stage = {
     const liveNewer: string[] = [], stageNewer: string[] = [], onlyLive: string[] = [], onlyStage: string[] = [];
     for (const l of r.out.split("\n").filter(Boolean)) {
       let m = l.match(/^Files (\S+) and (\S+) differ/);
-      if (m) { (statSync(m[2]).mtimeMs > statSync(m[1]).mtimeMs ? liveNewer : stageNewer).push(m[1].slice(STAGE.length + 1)); continue; }
+      if (m) { ((await stat(m[2])).mtimeMs > (await stat(m[1])).mtimeMs ? liveNewer : stageNewer).push(m[1].slice(STAGE.length + 1)); continue; }
       m = l.match(/^Only in (\S+): (.*)/);
       if (m) (m[1].startsWith(STAGE) ? onlyStage : onlyLive).push(join(m[1], m[2]).replace(/^.*?(duo-arena-stage|duo-arena)\//, ""));
     }
@@ -109,11 +112,11 @@ export const live = {
   restart: (hard = false) => sh(`gdev restart${hard ? " --hard" : ""}`),
   log: async (n = 40, errorsOnly = false) => (await sh(`gdev log -n ${n}${errorsOnly ? " -e" : ""}`)).out,
   /** Screenshot of the running game: image path. */
-  shot: async () => lastPath((await sh("gdev shot")).out) ?? (await sh("gdev shot")).out,
+  shot: async () => (await lastPath((await sh("gdev shot")).out)) ?? (await sh("gdev shot")).out,
   /** Frames + change maps around TIME (HH:MM:SS or -30s). */
   at: async (time: string, o: { span?: number; count?: number } = {}) => {
     const r = await sh(`gdev at ${time}${o.span ? ` --span ${o.span}` : ""}${o.count ? ` --count ${o.count}` : ""}`);
-    return lastPath(r.out) ?? r.out;
+    return (await lastPath(r.out)) ?? r.out;
   },
 };
 
@@ -121,14 +124,14 @@ export const live = {
 
 export const screen = {
   /** Contact sheet of the TV screen ending at TIME (HH:MM:SS or -10s). Needs screen-rec running. */
-  at: async (time: string, n = 6) => { const r = await sh(`screen-rec at ${time} ${n}`); return lastPath(r.out) ?? r.out; },
-  range: async (from: string, to: string, every = "") => { const r = await sh(`screen-rec range ${from} ${to} ${every}`); return lastPath(r.out) ?? r.out; },
+  at: async (time: string, n = 6) => { const r = await sh(`screen-rec at ${time} ${n}`); return (await lastPath(r.out)) ?? r.out; },
+  range: async (from: string, to: string, every = "") => { const r = await sh(`screen-rec range ${from} ${to} ${every}`); return (await lastPath(r.out)) ?? r.out; },
 };
 export const frame = {
   /** What the Steam Frame headset showed around TIME. */
   at: async (time: string, o: { before?: number; after?: number; count?: number } = {}) => {
     const r = await sh(`frame-at ${time}${o.before ? ` --before ${o.before}` : ""}${o.after ? ` --after ${o.after}` : ""}${o.count ? ` --count ${o.count}` : ""}`);
-    return lastPath(r.out) ?? r.out;
+    return (await lastPath(r.out)) ?? r.out;
   },
   online: async () => (await sh("ssh -o ConnectTimeout=3 -o BatchMode=yes -i ~/.config/steamos-devkit/devkit_rsa steamos@frame true")).code === 0,
 };
@@ -136,16 +139,16 @@ export const frame = {
 const VOICE_LOG = join(LIVE, ".dev/voice.log");
 export const voice = {
   /** Last n transcript lines. */
-  tail: (n = 20) => readFileSync(VOICE_LOG, "utf8").trimEnd().split("\n").slice(-n),
+  tail: async (n = 20) => (await readFile(VOICE_LOG, "utf8")).trimEnd().split("\n").slice(-n),
   /** Transcript lines since HH:MM[:SS] today. */
-  since: (time: string) => readFileSync(VOICE_LOG, "utf8").split("\n").filter(l => (l.match(/^\[(\d\d:\d\d:\d\d)\]/)?.[1] ?? "") >= time.padEnd(8, ":00").slice(0, 8)),
+  since: async (time: string) => (await readFile(VOICE_LOG, "utf8")).split("\n").filter(l => (l.match(/^\[(\d\d:\d\d:\d\d)\]/)?.[1] ?? "") >= time.padEnd(8, ":00").slice(0, 8)),
   /** Speak on the TV (text only unless audio). */
   say: (text: string, audio = false) => sh(`${audio ? "CLAUDE_SAY_AUDIO=1 " : ""}claude-say ${JSON.stringify(text)}`),
   /** Is a mic plugged in and is the bridge transcribing? */
   health: async () => ({
     mic: !!(await sh("arecord -l | grep -q card && echo y")).out,
     bridge: (await sh("systemctl --user is-active voice-bridge")).out,
-    lastLine: voice.tail(1)[0],
+    lastLine: (await voice.tail(1))[0],
   }),
 };
 
@@ -163,18 +166,18 @@ export async function pace() {
 
 const BACKLOG = join(GP, ".backlog.md");
 export const backlog = {
-  open: () => readFileSync(BACKLOG, "utf8").split("\n").filter(l => l.startsWith("- [ ]")).map((l, i) => `${i + 1}. ${l.slice(6)}`),
+  open: async () => (await readFile(BACKLOG, "utf8")).split("\n").filter(l => l.startsWith("- [ ]")).map((l, i) => `${i + 1}. ${l.slice(6)}`),
   /** Tick the first open item containing `match`, with a note. */
-  done(match: string, note = "") {
-    const s = readFileSync(BACKLOG, "utf8");
+  async done(match: string, note = "") {
+    const s = await readFile(BACKLOG, "utf8");
     const i = s.split("\n").findIndex(l => l.startsWith("- [ ]") && l.includes(match));
     if (i < 0) throw new Error(`no open item contains "${match}"`);
     const lines = s.split("\n");
     lines[i] = lines[i].replace("- [ ]", `- [x]${note ? ` (${new Date().toISOString().slice(0, 10)}: ${note})` : ""}`);
-    writeFileSync(BACKLOG, lines.join("\n"));
+    await writeFile(BACKLOG, lines.join("\n"));
     return lines[i].slice(0, 160);
   },
-  add(text: string) { writeFileSync(BACKLOG, readFileSync(BACKLOG, "utf8").trimEnd() + `\n- [ ] ${text}\n`); return backlog.open().length; },
+  async add(text: string) { await writeFile(BACKLOG, (await readFile(BACKLOG, "utf8")).trimEnd() + `\n- [ ] ${text}\n`); return (await backlog.open()).length; },
 };
 
 /** Full-text search over every past Claude session on this machine. */
@@ -186,7 +189,8 @@ export const history = async (query: string, n = 10) => (await sh(`claude-histor
  *  tool copies out of sync, broken services. Returns {clean, issues: [{kind, what, fix}]}. */
 export async function debt() {
   const issues: { kind: string; what: string; fix: string }[] = [];
-  const repos = readdirSync(GP).filter(d => existsSync(join(GP, d, ".git")) && statSync(join(GP, d, ".git")).isDirectory());
+  const repos: string[] = [];
+  for (const d of await readdir(GP)) if ((await stat(join(GP, d, ".git")).catch(() => null))?.isDirectory()) repos.push(d);
   for (const r of repos) {
     const dir = join(GP, r);
     const dirty = (await sh("git status --porcelain | grep -v '\\.uid$'", dir)).out;
@@ -211,7 +215,8 @@ export async function debt() {
   if (d.stageNewer.length || d.onlyStage.length) issues.push({ kind: "undeployed", what: `staging has changes not deployed: ${[...d.stageNewer, ...d.onlyStage].slice(0, 5).join(", ")}`, fix: "test, then dev.stage.deploy(msg)" });
   for (const [src, rel] of Object.entries(TOOL_COPIES)) {
     const repo = join(LIVE, rel);
-    if (existsSync(src) && existsSync(repo) && !readFileSync(src).equals(readFileSync(repo)))
+    const [a, b] = await Promise.all([readFile(src).catch(() => null), readFile(repo).catch(() => null)]);
+    if (a && b && !a.equals(b))
       issues.push({ kind: "tool-copy", what: `${rel} differs from ${src.replace(HOME, "~")}`, fix: `cp ${src} ${repo} and commit` });
   }
   for (const s of ["voice-bridge", "claude-watchdog.timer"]) {
@@ -220,8 +225,8 @@ export async function debt() {
   }
   const oom = (await sh("journalctl --since today 2>/dev/null | grep -i earlyoom | grep -i -c -E 'sending SIG(TERM|KILL) to'")).out;
   if (+oom > 0) issues.push({ kind: "oom", what: `earlyoom killed ${oom} processes today`, fix: "journalctl | grep earlyoom" });
-  const leftovers = (await sh("pgrep -f '[b]ackend headless' | wc -l")).out;
-  const ours = (await import(`${HOME}/.local/share/gdev/godot.ts`)).list().length;
+  const leftovers = (await sh("pgrep -f '^gamescope --[b]ackend headless' | wc -l")).out;
+  const ours = ((globalThis as any).godot?.list ? (globalThis as any).godot : await import(`${HOME}/.local/share/gdev/godot.ts`)).list().length;  // the preloaded one (reload() makes a new module)
   if (+leftovers > ours) issues.push({ kind: "orphan", what: `${+leftovers - ours} offscreen game(s) not owned by this brepl`, fix: "pkill -f '[b]ackend headless'" });
   return { clean: issues.length === 0, issues };
 }
@@ -237,4 +242,96 @@ export function help() {
   dev.pace()  dev.backlog.open() / .done(match, note) / .add(text)  dev.history(query)  dev.sh(cmd, cwd)
   godot.launch(project) -> g: offscreen run (see godot.ts header): g.uiText() g.joy() g.eval() g.at() g.span() g.video()
   show(...paths)                     hand images back with the result`;
+}
+
+// --- Sweep: play every game offscreen and collect what's wrong (Simon, 2026-10-24: "use this to reliably
+// debug the full set of games") ----------------------------------------------------------------------
+const SWEEP = join(HOME, ".cache/sweep");
+const MONKEY: [string, Record<string, number>?][] = [  // a scripted "kid with a controller": every input, in turn
+  ["a"], ["lx", { value: 1, frames: 40 }], ["a"], ["ly", { value: -1, frames: 40 }], ["x"], ["lx", { value: -1, frames: 40 }],
+  ["b"], ["rt", { value: 1, frames: 20 }], ["ly", { value: 1, frames: 40 }], ["y"], ["rx", { value: 1, frames: 30 }],
+  ["lt", { value: 1, frames: 20 }], ["a"], ["rb"], ["lb"], ["ry", { value: -1, frames: 30 }], ["a", { frames: 30 }],
+];
+/** Offscreen runs of the games (default: all) from the staging copy, many in parallel (Simon: "headlessly test
+ *  many of the games in parallel"): monkey inputs for `seconds` while recording at 30 fps, then per game
+ *  {id, ok, problems[], errors[], fps, sound, frozen, sheets[]}, also written to ~/.cache/sweep/<id>.json and
+ *  posted to the channel as each finishes. Long: run it in bg(). */
+export async function sweep(o: { only?: string[]; seconds?: number; concurrency?: number } = {}) {
+  const ids = o.only ?? (await readdir(join(STAGE, "games"))).filter(d => d !== "engine_template").sort();
+  await mkdir(SWEEP, { recursive: true });
+  const results: any[] = [];
+  let next = 0;
+  const n = o.concurrency ?? await parallelGames();
+  (globalThis as any).send?.("sweep", `${ids.length} games, ${n} at a time`);
+  await Promise.all(Array.from({ length: n }, async () => {
+    while (next < ids.length) {
+      const r = await sweepOne(ids[next++], o.seconds ?? 20);
+      results.push(r);
+      await Bun.write(join(SWEEP, `${r.id}.json`), JSON.stringify(r, null, 1));
+      (globalThis as any).send?.(`sweep ${r.id}`, r.ok ? "ok" : r.problems.join("\n"), r.sheets);
+    }
+  }));
+  results.sort((a, b) => a.id.localeCompare(b.id));
+  return { ok: results.filter(r => r.ok).map(r => r.id), bad: results.filter(r => !r.ok).map(r => `${r.id}: ${r.problems.join("; ")}`) };
+}
+
+/** How many offscreen games fit at once: ~1 GB of free memory each (keeping 2 GB spare), at most one per 2 CPU
+ *  threads, max 6; at most 2 while someone is playing a game on the TV so theirs stays smooth. */
+export async function parallelGames() {
+  const mem = Object.fromEntries((await readFile("/proc/meminfo", "utf8")).split("\n").map(l => l.split(/:\s+/)).map(([k, v]) => [k, parseInt(v) / 1048576]));
+  let n = Math.max(1, Math.min(6, Math.floor(mem.MemAvailable - 2), Math.floor(navigator.hardwareConcurrency / 2)));
+  // Someone playing on the TV (a game in Steam/Proton, or a Godot game not run by us): keep to 2.
+  const tv = (await sh("pgrep -af 'godot|\\.exe|steamapps/common' | grep -v -e headless -e gamescope -e pgrep -e steamwebhelper")).out;
+  if (tv) n = Math.min(n, 2);
+  return n;
+}
+
+async function sweepOne(id: string, seconds: number) {
+  const godot = (globalThis as any).godot;
+  const r: any = { id, ok: false, problems: [] as string[], errors: [] as string[], fps: 0, sound: false, frozen: false, sheets: [] as string[] };
+  let g: any;
+  try {
+    g = await godot.launch({ project: STAGE, scene: `res://games/${id}/main.tscn` });
+    await Bun.sleep(3000);
+    const t0 = Date.now();
+    for (let i = 0; Date.now() - t0 < seconds * 1000; i++) {
+      const [name, opts] = MONKEY[i % MONKEY.length];
+      if (g.child.exitCode !== null) break;
+      await g.joy(name, opts ?? {}).catch(() => {});
+      await Bun.sleep(400);
+    }
+    const alive = g.child.exitCode === null;
+    if (!alive) r.problems.push(`crashed (exit ${g.child.exitCode})`);
+    const log = await Bun.file(g.logPath).text().catch(() => "");
+    r.errors = [...new Set([...log.matchAll(/^(SCRIPT ERROR|ERROR|USER ERROR|Parse Error)[^\n]*(\n\s+at:[^\n]*)?/gm)].map(m => m[0].replace(/\s+/g, " ").slice(0, 240)))].slice(0, 12);
+    if (r.errors.length) r.problems.push(`${r.errors.length} distinct error(s): ${r.errors[0]}`);
+    const fpsLines = [...log.matchAll(/fps (\d+)/g)].map(m => +m[1]);
+    r.fps = fpsLines.length ? Math.min(...fpsLines.slice(1)) || fpsLines[0] : 0;
+    if (r.fps && r.fps < 45) r.problems.push(`slow: ${r.fps} fps`);
+    // Sound: RMS of the Master bus recording after the first 2 s.
+    const audio = new Float32Array(await Bun.file(join(g.recDir, "audio.f32")).arrayBuffer().catch(() => new ArrayBuffer(0)));
+    const rateTxt = await Bun.file(join(g.recDir, "audio.rate")).text().catch(() => "44100");
+    const a = audio.subarray(Math.min(audio.length, 2 * +rateTxt));
+    let sum = 0; for (let i = 0; i < a.length; i += 16) sum += a[i] * a[i];
+    r.sound = a.length > 0 && Math.sqrt(sum / (a.length / 16)) > 0.002;
+    if (!r.sound) r.problems.push("silent (no sound on the Master bus)");
+    if (alive) {
+      const fr = await g.frames();
+      const end = fr.length ? fr[fr.length - 1].t : 0;
+      r.sheets = await g.span(1, end, 12 / Math.max(1, end - 1)).catch((e: any) => { r.problems.push(`span failed: ${e}`); return []; });
+      // Frozen: byte-identical JPEGs across the last 5 s mean nothing on screen moved at all.
+      const tail = fr.filter((f: any) => f.t > end - 5);
+      if (tail.length > 2) {
+        const sizes = await Promise.all(tail.map(async (f: any) => (await stat(f.path)).size));
+        r.frozen = new Set(sizes).size === 1;
+        if (r.frozen) r.problems.push("frozen: nothing changed on screen for 5 s of input");
+      }
+    }
+  } catch (e: any) {
+    r.problems.push(`launch failed: ${String(e?.message ?? e).slice(0, 400)}`);
+  } finally {
+    await g?.quit().catch(() => {});
+  }
+  r.ok = !r.problems.length;
+  return r;
 }

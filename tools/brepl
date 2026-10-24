@@ -110,6 +110,7 @@ if (args[0] === "--serve") {
   };
   // Never waits (Simon): returns at once with whatever arrived; a Monitor on channel.jsonl says when to look.
   globalThis.poll = ({ max = 200 } = {}) => {
+    seen = Math.max(seen, ex(CH_SEEN) ? Number(rf(CH_SEEN, "utf8")) || 0 : 0);  // brepl_poll may have read the file directly
     const fresh = channel.filter((e) => e.seq > seen);
     seen = chSeq;
     wf(CH_SEEN, String(seen));
@@ -125,6 +126,22 @@ if (args[0] === "--serve") {
       running.length ? `still running: ${running.join(", ")}` : fresh.length ? "" : "nothing new, nothing running"].filter(Boolean).join("\n");
   };
   globalThis.jobs = () => [...jobs.values()].map((j) => ({ id: j.id, name: j.name, status: j.status, secs: Math.round(((j.ended ?? Date.now()) - j.started) / 1000), polled: j.polled }));
+  // Nothing may block (Simon, 2026-10-24: "make sure that none of them block"). JS can't interrupt synchronous
+  // code, so: running jobs are mirrored to jobs.json and channel.jsonl is on disk, letting brepl_poll answer from
+  // the files when the server is frozen; the CLI gives up waiting after FG_SECONDS + 2; and a frozen event loop is
+  // reported to the channel afterwards with the job that caused it.
+  const JOBS_FILE = `${process.env.HOME}/.cache/brepl/jobs.json`;
+  setInterval(() => {
+    const running = [...jobs.values()].filter((j) => j.status === "running").map((j) => ({ id: j.id, name: j.name, started: j.started }));
+    wf(JOBS_FILE, JSON.stringify(running));
+  }, 1000).unref?.();
+  let tick = Date.now(), current = null;
+  setInterval(() => {
+    const lag = Date.now() - tick - 500;
+    tick = Date.now();
+    if (lag > 2000) send("⚠ brepl frozen", `the event loop was blocked for ${(lag / 1000).toFixed(1)}s${current ? ` by: ${current.name}` : ""} (synchronous code: use async versions, e.g. Bun.spawn not spawnSync)`);
+    if (current && current.status !== "running") current = null;  // cleared here, not when it ends, so the report above can name it
+  }, 500).unref?.();
   const run = async (code) => {
     const waitS = /^\s*\/\/\s*bg\b/.test(code) ? 0 : FG_SECONDS;
     let fn;
@@ -154,15 +171,19 @@ if (args[0] === "--serve") {
     }
     const name = code.trim().split("\n").find((l) => l.trim() && !l.trim().startsWith("//"))?.trim().slice(0, 60) ?? "code";
     const job = start(name, fn);
+    current = job;
     if (await Promise.race([job.promise.then(() => true), Bun.sleep(waitS * 1000).then(() => false)])) return render(job);
     toBackground(job);
     return [...job.lines, `⏳ still running after ${waitS}s -> background job #${job.id} (result goes to the channel: brepl_poll)`].join("\n") + "\n";
   };
+  // Alerts (~/.local/share/brepl/alerts.ts): watchers that post to the channel by themselves (crashes, mic, memory,
+  // usage, game errors...), which wakes Claude's Monitor. alerts.list() / .add() / .off().
+  globalThis.alerts = await import(`${process.env.HOME}/.local/share/brepl/alerts.ts`).then((m) => (m.startAll(), m)).catch((e) => { send("⚠ alerts", `failed to load: ${e}`); return { error: String(e) }; });
   Bun.listen({
     unix: SOCK,
     socket: {
       open(s) { s.data = ""; },
-      close(s) { if (s.pipe) { s.q.push(null); s.wake?.(); } },
+      close(s) { s.gone = true; if (s.pipe) { s.q.push(null); s.wake?.(); } },
       data(s, d) {
         s.data += d.toString();
         if (s.data.startsWith("\u0002PIPE ")) {  // `cmd | brepl --pipe SOURCE`: stream lines into the channel
@@ -176,14 +197,23 @@ if (args[0] === "--serve") {
         }
         const i = s.data.indexOf("\0");
         if (i < 0) return;
-        run(s.data.slice(0, i)).then((r) => { s.write(r); s.end(); });
+        const code = s.data.slice(0, i);
+        // The client stops waiting after FG_SECONDS + 2 (e.g. synchronous code froze us): post the answer instead.
+        run(code).then((r) => { if (s.gone || s.write(r) <= 0) send("late result", `${code.trim().split("\n")[0].slice(0, 60)}\n${r.replace(/\u0001SHOW .*\n?/, "")}`, (r.match(/\u0001SHOW (.*)\n/) ? JSON.parse(r.match(/\u0001SHOW (.*)\n/)[1]) : [])); else s.end(); });
       },
     },
   });
 } else {
   if (args[0] === "--stop" || args[0] === "--restart") {
-    spawn("pkill", ["-f", "brepl --serv[e]"]).on("exit", () => { if (existsSync(SOCK)) unlinkSync(SOCK); });
-    await Bun.sleep(300);
+    // Normally the server is the brepl.service systemd unit (always on, restarted if it dies): restart that.
+    const svc = Bun.spawnSync(["systemctl", "--user", "is-enabled", "brepl"]).stdout.toString().trim() === "enabled";
+    if (svc) {
+      Bun.spawnSync(["systemctl", "--user", args[0] === "--stop" ? "stop" : "restart", "brepl"]);
+      for (let i = 0; i < 60 && args[0] === "--restart" && !existsSync(SOCK); i++) await Bun.sleep(50);
+    } else {
+      spawn("pkill", ["-f", "brepl --serv[e]"]).on("exit", () => { if (existsSync(SOCK)) unlinkSync(SOCK); });
+      await Bun.sleep(300);
+    }
     if (args[0] === "--stop") process.exit(0);
     args.shift();
   }
@@ -199,6 +229,10 @@ if (args[0] === "--serve") {
   if (!code.trim()) process.exit(0);
   const connect = () => new Promise((ok, bad) => {
     let buf = "";
+    // Never block the caller: the server answers within FG_SECONDS, so silence past that means synchronous code
+    // has frozen it. Give up; the server posts the answer to the channel when it unfreezes.
+    const fg = Number(process.env.BREPL_FG_SECONDS ?? 3);
+    setTimeout(() => ok(buf + `⏳ brepl server busy for ${fg + 2}s (synchronous code is blocking it). The result will go to the channel (brepl_poll); \`brepl --restart\` kills it.\n`), (fg + 2) * 1000);
     Bun.connect({
       unix: SOCK,
       socket: {
@@ -220,5 +254,5 @@ if (args[0] === "--serve") {
   }
   if (process.env.BREPL_RAW !== "1") res = res.replace(/\u0001SHOW (.*)\n/, (_, j) => JSON.parse(j).map((p) => `[image: ${p}]`).join("\n") + "\n");
   process.stdout.write(res);
-  if (res.startsWith("Error:")) process.exit(1);
+  process.exit(res.startsWith("Error:") ? 1 : 0);  // exit even if we gave up on a still-open socket
 }

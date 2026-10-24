@@ -32,11 +32,31 @@ const TOOL = {
   },
 };
 
-async function call(code: string) {
+// brepl_poll must answer even when synchronous code has frozen the server: then read channel.jsonl and the
+// .seen cursor (which the server re-reads on every poll) straight from disk.
+const CH = `${process.env.HOME}/.cache/brepl/channel.jsonl`, CH_SEEN = CH.replace(/jsonl$/, "seen"), JOBS = CH.replace(/channel\.jsonl$/, "jobs.json");
+async function pollFromDisk() {
+  const seen = Number(await Bun.file(CH_SEEN).text().catch(() => "0")) || 0;
+  const all = (await Bun.file(CH).text().catch(() => "")).split("\n").filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+  const fresh = all.filter((e: any) => e.seq > seen);
+  if (fresh.length) await Bun.write(CH_SEEN, String(fresh[fresh.length - 1].seq));
+  const lines = ["(brepl server is frozen by synchronous code: read the channel from disk)"], images: string[] = [];
+  for (const e of fresh) {
+    lines.push(`── [${e.t}] ${e.source}${e.text.includes("\n") ? "" : `: ${e.text}`}`);
+    if (e.text.includes("\n")) lines.push(...e.text.split("\n").map((l: string) => "   " + l));
+    images.push(...e.images);
+  }
+  const running = await Bun.file(JOBS).json().catch(() => []);
+  if (running.length) lines.push(`still running: ${running.map((j: any) => `#${j.id} ${j.name} (${Math.round((Date.now() - j.started) / 1000)}s)`).join(", ")}`);
+  return lines.join("\n") + "\n" + (images.length ? `\u0001SHOW ${JSON.stringify(images)}\n` : "");
+}
+
+async function call(code: string, isPoll = false) {
   const p = Bun.spawn([BREPL], { stdin: new Blob([code]), stdout: "pipe", stderr: "pipe", env: { ...process.env, BREPL_RAW: "1" } });
   let text = await new Response(p.stdout).text();
   text += await new Response(p.stderr).text();
   const code_ = await p.exited;
+  if (isPoll && text.includes("brepl server busy")) text = await pollFromDisk();
   const content: any[] = [];
   let paths: string[] = [];
   text = text.replace(/\u0001SHOW (.*)\n?/, (_, j) => { paths = JSON.parse(j); return ""; });
@@ -77,9 +97,7 @@ for await (const chunk of Bun.stdin.stream()) {
       case "tools/list": reply(msg.id, { tools: [TOOL, POLL] }); break;
       case "tools/call":
         if (msg.params?.name !== "brepl" && msg.params?.name !== "brepl_poll") { fail(msg.id, `unknown tool ${msg.params?.name}`); break; }
-        call(msg.params.name === "brepl_poll"
-          ? "poll()"
-          : String(msg.params?.arguments?.code ?? "")).then(r => reply(msg.id, r), e => reply(msg.id, { content: [{ type: "text", text: String(e) }], isError: true }));
+        (msg.params.name === "brepl_poll" ? call("poll()", true) : call(String(msg.params?.arguments?.code ?? ""))).then(r => reply(msg.id, r), e => reply(msg.id, { content: [{ type: "text", text: String(e) }], isError: true }));
         break;
       default: fail(msg.id, `method not found: ${msg.method}`);
     }
