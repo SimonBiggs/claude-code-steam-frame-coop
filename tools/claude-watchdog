@@ -9,5 +9,5 @@ for p in $(pgrep -x claude); do
   exit 0  # an interactive Claude is running
 done
 cd ~ || exit 1
-/usr/bin/tmux new-session -d -s claude "claude --continue --remote-control 'Steam Machine' 'You were restarted by claude-watchdog (crash or reboot). Re-arm your monitors (voice: exec ~/.local/bin/voice-inject --all --print), recreate the WORK LOOP cron (CronCreate every 15 min: run claude-pace, then take the top open item in ~/GodotProjects/.backlog.md), check the Frame, and carry on.'"
+/usr/bin/tmux new-session -d -s claude "claude --continue --remote-control 'Steam Machine' 'You were restarted by claude-watchdog (crash or reboot). Re-arm your monitors (voice: exec ~/.local/bin/voice-inject --all --print; brepl channel: exec ~/.local/bin/bun ~/.local/share/brepl/channel-watch.ts), recreate the WORK LOOP cron (CronCreate every 15 min: run claude-pace, then take the top open item in ~/GodotProjects/.backlog.md), check the Frame, and carry on.'"
 echo "$(date -Is) restarted Claude in tmux session 'claude'" >> ~/.claude/watchdog.log
