@@ -1,0 +1,32 @@
+#!/bin/bash
+# deck-pair: pair every family Steam Deck that's asking for a devkit host (Developer Mode → pairing), give it an ssh
+# alias <name>-deck, add it to ~/.config/duo-arena/decks and install the arcade (duo-deploy-deck). Safe to run often:
+# already-paired Decks are skipped (Simon: "every kid in the family has a deck"). Run by hand when Decks are pairing.
+KEY=~/.config/steamos-devkit/devkit_rsa
+LIST=~/.config/duo-arena/decks
+mkdir -p "$(dirname "$LIST")"; touch "$LIST"
+avahi-browse -rtp _steamos-devkit._tcp 2>/dev/null | awk -F';' '$1=="=" && $3=="IPv4"{print $4" "$8" "$9}' | sort -u |
+while read -r host ip port; do
+  name=${host%-steamdeck}; name=${name%-steam-deck}; [ "$name" = "$host" ] && name=$host
+  alias="$name-deck"; [ "$host" = steamdeck ] && alias="steamdeck-$(echo "$ip" | tr . -)"
+  if ! grep -q "^Host $alias\$" ~/.ssh/config 2>/dev/null; then
+    printf '\n# %s (devkit-paired %s by deck-pair): ssh %s\nHost %s\n    HostName %s.local\n    User deck\n    IdentityFile %s\n    ConnectTimeout 5\n    HostKeyAlias %s\n    StrictHostKeyChecking accept-new\n' \
+      "$host" "$(date +%F)" "$alias" "$alias" "$host" "$KEY" "$host" >> ~/.ssh/config
+    echo "added ssh alias $alias"
+  fi
+  if ! ssh -o BatchMode=yes -o ConnectTimeout=5 "$alias" true 2>/dev/null; then
+    echo "pairing $host ($ip): accept the prompt on the Deck"
+    timeout 90 curl -s -X POST --data-binary @"$KEY.pub" "http://$ip:$port/register" >/dev/null || continue
+    for _ in 1 2 3 4 5 6; do ssh -o BatchMode=yes -o ConnectTimeout=5 "$alias" true 2>/dev/null && break; sleep 5; done
+    ssh -o BatchMode=yes -o ConnectTimeout=5 "$alias" true 2>/dev/null || { echo "$host: not paired yet"; continue; }
+    echo "paired $host"
+  fi
+  if ! grep -qx "$alias" "$LIST"; then
+    echo "$alias" >> "$LIST"; echo "added $alias to the deploy list"
+    duo-deploy-deck "$alias"
+  fi
+  # In its Steam library for Gaming Mode (needs Steam running on the Deck; retried every run until it's there).
+  ssh -o BatchMode=yes "$alias" 'grep -qa DuoArena ~/.local/share/Steam/userdata/*/config/shortcuts.vdf 2>/dev/null ||
+    { pgrep -x steam >/dev/null && XDG_SESSION_TYPE=x11 steamos-add-to-steam ~/.local/share/applications/duo-arena.desktop >/dev/null 2>&1 && echo "added Living Room Arcade to the Steam library"; }' 2>/dev/null
+done
+exit 0
