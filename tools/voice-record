@@ -1,0 +1,38 @@
+#!/usr/bin/env python3
+"""voice-record: keep the last 2 hours of the room mic as one raw file per minute (16 kHz s16 mono)
+in ~/GodotProjects/duo-arena/.dev/audio/YYYYmmdd-HHMM.raw, for `voice-at`.
+Approved by Simon (typed, 2026-10-17). Private: stays on this machine (.dev is gitignored)."""
+import os, subprocess, time
+
+DIR = os.path.expanduser("~/GodotProjects/duo-arena/.dev/audio")
+KEEP_S = 2 * 3600
+os.makedirs(DIR, exist_ok=True)
+
+
+def mic_present() -> bool:
+    out = subprocess.run(["pactl", "list", "short", "sources"], capture_output=True, text=True).stdout
+    return any(line and ".monitor" not in line for line in out.splitlines())
+
+
+# No mic plugged in: wait quietly instead of crashing and restarting every few seconds.
+while not mic_present():
+    time.sleep(15)
+proc = subprocess.Popen(["pw-record", "--rate", "16000", "--channels", "1", "--format", "s16", "-"],
+                        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+cur, f, last_clean = None, None, 0
+while True:
+    raw = proc.stdout.read(3200)  # 100 ms
+    if not raw:
+        raise SystemExit("pw-record ended")  # systemd restarts us
+    name = time.strftime("%Y%m%d-%H%M.raw")
+    if name != cur:
+        if f:
+            f.close()
+        cur, f = name, open(os.path.join(DIR, name), "ab")
+    f.write(raw); f.flush()
+    if time.time() - last_clean > 60:
+        last_clean = time.time()
+        for old in os.listdir(DIR):
+            p = os.path.join(DIR, old)
+            if time.time() - os.path.getmtime(p) > KEEP_S:
+                os.remove(p)

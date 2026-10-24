@@ -1,0 +1,12 @@
+[Unit]
+Description=Rolling record of the TV screen every 5 s for Claude (Desktop and Gaming Mode)
+
+[Service]
+ExecStart=%h/.local/bin/screen-rec
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin
+Nice=15
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

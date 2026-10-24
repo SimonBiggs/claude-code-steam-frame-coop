@@ -1,0 +1,119 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["pillow"]
+# ///
+"""screen-rec / screen-at: keep a rolling record of the TV screen so Claude can look at any moment (Simon, 2026-10-17).
+
+  screen-rec                 record: one 960px JPEG every 5 s into ~/.cache/screen-rec (keeps 30 minutes)
+  screen-rec at TIME [N]     contact sheet of N frames (default 6) ending at TIME (HH:MM:SS, or -10s for "10 s ago")
+                             -> ~/.cache/screen-rec/at.jpg
+  screen-rec range START END [EVERY]   every frame from START to END (same time formats), one per EVERY
+                             seconds (default 5 = all of them; recording is one frame per 5 s), in a row
+                             -> ~/.cache/screen-rec/at.jpg (Simon 2026-10-18: "time range and frame rate")
+"""
+import datetime as dt, os, subprocess, sys, time
+from PIL import Image
+
+DIR = os.path.expanduser("~/.cache/screen-rec")
+KEEP_S, TMP = 30 * 60, "/tmp/screen-rec-shot.png"
+
+
+def gaming_display() -> str | None:
+    """The TV's gamescope socket in Gaming Mode (from gamescope-environment), else None (Desktop Mode)."""
+    if not subprocess.run(["pgrep", "-x", "gamescope-wl"], capture_output=True).stdout:
+        return None
+    try:
+        for line in open(f"/run/user/{os.getuid()}/gamescope-environment"):
+            if line.startswith("GAMESCOPE_WAYLAND_DISPLAY="):
+                return line.split("=", 1)[1].strip()
+    except OSError:
+        pass
+    return None
+
+
+def grab(path: str) -> bool:
+    """Screenshot the TV in either mode: gamescopectl in Gaming Mode (spectacle only works in Plasma)."""
+    gs = gaming_display()
+    if gs:
+        r = subprocess.run(["gamescopectl", "screenshot", path], capture_output=True,
+                           env={**os.environ, "GAMESCOPE_WAYLAND_DISPLAY": gs}, timeout=10)
+        for _ in range(20):  # gamescope writes the file asynchronously
+            if os.path.exists(path) and os.path.getsize(path) > 0:
+                time.sleep(0.2)
+                return True
+            time.sleep(0.1)
+        return False
+    return subprocess.run(["spectacle", "-b", "-n", "-f", "-o", path], capture_output=True).returncode == 0
+
+
+def record():
+    os.makedirs(DIR, exist_ok=True)
+    while True:
+        t = time.time()
+        if os.path.exists(TMP):
+            os.remove(TMP)  # spectacle can exit 0 without writing; never re-save an old shot as new
+        if grab(TMP) and os.path.exists(TMP):
+            try:
+                im = Image.open(TMP).convert("RGB")
+                im.thumbnail((960, 540))
+                im.save(os.path.join(DIR, time.strftime("%Y%m%d-%H%M%S.jpg")), quality=70)
+            except OSError:
+                pass
+        for f in os.listdir(DIR):
+            p = os.path.join(DIR, f)
+            if f[:2] == "20" and t - os.path.getmtime(p) > KEEP_S:
+                os.remove(p)
+        time.sleep(max(0.0, 5.0 - (time.time() - t)))  # every 5 s: a 4K grab can make the game hitch
+
+
+def when(s: str) -> dt.datetime:
+    now = dt.datetime.now()
+    if s.startswith("-"):
+        return now - dt.timedelta(seconds=float(s[1:].rstrip("s")))
+    return dt.datetime.combine(now.date(), dt.datetime.strptime(s, "%H:%M:%S").time())
+
+
+def recorded():
+    return sorted((dt.datetime.strptime(f[:-4], "%Y%m%d-%H%M%S"), f) for f in os.listdir(DIR)
+                  if f[:2] == "20" and f.endswith(".jpg"))
+
+
+def sheet(frames):
+    if not frames:
+        sys.exit("no frames recorded in that time")
+    from PIL import ImageDraw
+    cols = 2 if len(frames) > 1 else 1
+    rows = (len(frames) + cols - 1) // cols
+    out_im = Image.new("RGB", (cols * 960, rows * 560), (0, 0, 0))
+    d = ImageDraw.Draw(out_im)
+    for i, f in enumerate(frames):
+        x, y = (i % cols) * 960, (i // cols) * 560
+        out_im.paste(Image.open(os.path.join(DIR, f)), (x, y + 20))
+        d.text((x + 6, y + 4), f[9:11] + ":" + f[11:13] + ":" + f[13:15], fill=(255, 255, 0))
+    out = os.path.join(DIR, "at.jpg")
+    out_im.save(out, quality=80)
+    print(out)
+
+
+def at(t: str, n: int):
+    end = when(t)
+    sheet([f for ts, f in recorded() if ts <= end][-n:])
+
+
+def frame_range(a: str, b: str, every: float):
+    start, end, frames, last = when(a), when(b), [], None
+    for ts, f in recorded():
+        if start <= ts <= end and (last is None or (ts - last).total_seconds() >= every - 0.5):
+            frames.append(f)
+            last = ts
+    sheet(frames[:24])  # at most 24 frames (12 rows) so the sheet stays readable
+
+
+if __name__ == "__main__":
+    if len(sys.argv) > 3 and sys.argv[1] == "range":
+        frame_range(sys.argv[2], sys.argv[3], float(sys.argv[4]) if len(sys.argv) > 4 else 5.0)
+    elif len(sys.argv) > 1 and sys.argv[1] == "at":
+        at(sys.argv[2] if len(sys.argv) > 2 else "-0s", int(sys.argv[3]) if len(sys.argv) > 3 else 6)
+    else:
+        record()
