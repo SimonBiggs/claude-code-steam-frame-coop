@@ -14,6 +14,11 @@ extends Node
 ## net, bottle, flag, mascot, a spare ball) and grabs and throws a spare ball. BOT_VR=1 = PS_FAKE_VR=1.
 ## Real controllers are attached to this machine: their presses are swallowed (they must not pause
 ## or join the test), and if anything else pauses the game the bot resumes it.
+## Visual teaching (simple mode): records the picture cues each view shows (cue_kick, cue_letgo,
+## cue_aim, cue_dive), the ones learned (cue_learned_*), the glowing arrows (ring_arrow, glove_arrow,
+## miss_arrow), the VR ghost hand at the glove spot, the FIREBALL button and that no striker's view
+## shows its own name tag; prints "BOT: ERROR instruction text" if a headline (TV or VR) is anything but
+## a short title / score word, or a tip spot (help line, view HUD lines) shows any words.
 
 const FAKE_PAD := 40
 
@@ -47,6 +52,9 @@ var last_practice := "-"
 var prop_i := 0
 var prop_key := ""
 var throw_key := ""
+var cues := {}  # simple mode: picture cues seen / learned
+const HEADLINES := "^(PENALTY SHOOTOUT|SAVED!|GOAL!|KICK OFF!|FIREBALL!|STRIKERS!|KEEPER WINS!|STRIKERS WIN!|WHAT A MATCH!|PLAYER \\d+!|PLAYER \\d+ LEFT|PAUSED|CONNECTED|FULL!|P\\d: controller disconnected|Connecting to the keeper…|Waiting for strikers…)$"
+var headline_re := RegEx.create_from_string(HEADLINES)
 const PROP_SPOTS: Array = [["post", Vector3(3.72, 1.2, 0.05)], ["net", Vector3(0.0, 1.2, -1.95)],
 	["bottle", Vector3(-4.4, 0.95, 0.9)], ["flag", Vector3(4.75, 1.0, 2.1)], ["mascot", Vector3(-5.0, 1.3, 1.9)],
 	["ball", Vector3(4.33, 0.81, 0.95)]]
@@ -120,6 +128,8 @@ func _physics_process(delta: float) -> void:
 		if get_tree().paused:
 			_pad_press(FAKE_PAD + 1, JOY_BUTTON_START)  # close the menu again
 		my_pause = false
+	if main.simple:
+		_note_cues()
 	if get_tree().paused:
 		return
 	if has_meta("pad_join") and t > join_time + 0.5:
@@ -242,6 +252,12 @@ func _drive_striker(p) -> void:
 			if main.practice == "striker":
 				plan_aim = Vector2(main.ptarget.x, main.ptarget.y) + Vector2(randf_range(-0.5, 0.5), randf_range(-0.4, 0.4))
 				plan_power = randf_range(0.3, 0.7)
+			elif main.shots_total % 4 == 2:
+				plan_aim = Vector2(randf_range(-1.5, 1.5), 3.0)  # a deliberate miss over the bar (the miss arrow)
+	if main.simple and main.practice == "striker" and main.state_t < 1.8:
+		p.bot_stick = Vector2.ZERO  # wait a moment: the aim cue (stick + arrow to the ring) shows first
+		p.bot_hold = false
+		return
 	var aim: Vector2 = p.aim
 	var to := plan_aim - aim
 	p.bot_stick = (to * 3.0).limit_length(1.0) if to.length() > 0.05 else Vector2.ZERO
@@ -278,6 +294,8 @@ func _drive_flat_keeper(k) -> void:
 	if key != keep_key:
 		keep_key = key
 		keeper_try = randf() < 0.6
+	if plan_aim.y >= 2.9:
+		keeper_try = false  # let the deliberate miss go over the bar
 	var pr := _predict(0.6)
 	if pr.is_empty() or not keeper_try:
 		var kx: float = k.kx
@@ -299,6 +317,8 @@ func _drive_vr_keeper(k, delta: float) -> void:
 	if key != keep_key:
 		keep_key = key
 		keeper_try = randf() < 0.7
+	if plan_aim.y >= 2.9:
+		keeper_try = false
 	var head: Vector3 = k.xr_camera.global_position
 	var hr: Node3D = k.hand_r
 	var hl: Node3D = k.hand_l
@@ -355,7 +375,80 @@ func _drive_props(k, hl: Node3D, hr: Node3D, delta: float) -> bool:
 	return false
 
 
+## Visual teaching: picture cues instead of words; any instruction text in a tip spot is an error.
+func _note_cues() -> void:
+	var fx = main.simple_fx
+	if fx != null:
+		for n in ["ring_arrow", "glove_arrow", "miss_arrow"]:
+			var a = fx.get(n)
+			if a != null and a.visible:
+				cues[n] = true
+	if main.ghost_hand != null and main.ghost_hand.visible:
+		cues["ghost_hand_glove"] = true
+	if main.help_label.visible and main.help_label.text.strip_edges() != "":
+		_tip_error("TV help line", main.help_label.text)
+	if main.center_label.modulate.a > 0.05:
+		_check_headline("TV headline", main.center_label.text)
+	if float(main.vr_msg_t) > 0.0:
+		_check_headline("VR headline", str(main.vr_msg))
+	for p in main.players:
+		if not p.active or not main.is_local(p):
+			continue
+		if p.hud_label != null and p.hud_label.text.strip_edges() != "" and p.hud_label.text != "Syncing with the keeper…":
+			_tip_error("P%d HUD line" % (p.index + 1), p.hud_label.text)
+		if p.index > 0:
+			if p.fire_icon != null and p.fire_icon.visible:
+				cues["fire_button"] = true
+			if p.camera != null:
+				if int(p.camera.cull_mask) & int(main.tag_layer(p.index)):
+					if not cues.has("own_tag_shown"):
+						print("BOT: ERROR P%d's view shows its own name tag" % (p.index + 1))
+					cues["own_tag_shown"] = true
+				else:
+					cues["own_tag_hidden"] = true
+		var key := str(p.get_meta("cue", ""))
+		var box = p.get_meta("cue_box") if p.has_meta("cue_box") else null
+		if key != "" and box != null and box.visible:
+			if not cues.has("cue_" + key):
+				print("BOT: P%d picture cue %s" % [p.index + 1, key])
+			cues["cue_" + key] = true
+	for p in main.players:
+		var done: Dictionary = p.get_meta("cue_done", {})
+		for k in done:
+			if int(done[k]) >= 2:
+				cues["cue_learned_" + str(k)] = true
+
+
+func _check_headline(who: String, text: String) -> void:
+	var tx := text.strip_edges()
+	if tx == "" or headline_re.search(tx) != null:
+		return
+	_tip_error(who, tx)
+
+
+func _tip_error(who: String, text: String) -> void:
+	if not cues.has("tip_text"):
+		print("BOT: ERROR instruction text on %s: %s" % [who, text.replace("\n", " / ")])
+	cues["tip_text"] = true
+
+
+func _exit_tree() -> void:
+	if main == null or not main.simple:
+		return
+	var ks: Array = cues.keys()
+	ks.sort()
+	print("BOT CUES: mode=%s %s" % [main.net.mode, ",".join(PackedStringArray(ks))])
+	for p in main.players:
+		if p.has_meta("cue_done"):
+			print("BOT CUES: P%d done=%s" % [p.index + 1, p.get_meta("cue_done")])
+
+
 func _report(mode: String) -> void:
+	if main.simple and cues.size() != int(get_meta("cues_shown", -1)):
+		set_meta("cues_shown", cues.size())  # networked runs end on a timeout: print the cues as they come
+		var ks: Array = cues.keys()
+		ks.sort()
+		print("BOT CUES so far: mode=%s %s" % [mode, ",".join(PackedStringArray(ks))])
 	var act: Array[String] = []
 	for p in main.players:
 		if p.index > 0 and p.active:

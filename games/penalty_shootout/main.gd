@@ -24,6 +24,17 @@ extends Node3D
 ##  - Solo VR: a computer striker (P2) shoots until the TV strikers connect.
 ##  - Touchable goal, spare balls, water bottle, corner flag and mascot (props.gd).
 ##  - Text: VR one short headline ("SAVED!", "GOAL!"); TV one short line.
+##  - No how-to words (visual teaching): no help line, no "YOUR KICK!" / "KICK IT THROUGH THE RING!",
+##    no WIDE! / OVER THE BAR! / TOO SOFT!, PAUSED without a sentence. Instead each TV striker gets a
+##    pulsing glowing pad button plus an icon above their power bar, in their own controls (A / ENTER /
+##    SPACE + a down arrow: press and hold; + an up arrow while charging: let go; in practice STICK /
+##    an arrow key / W A S D + an arrow towards the ring while the reticle is far from it). The flat
+##    keeper gets A / SPACE + an arrow the way to dive. A glowing 3D arrow bobs over the practice glove
+##    spot (every screen) and, in the strikers' views, over the practice ring; after a miss one points
+##    into the goal (or at the ring) from where the ball went. The VR keeper sees the shared ghost hand
+##    (games/cannon_cove/ghost_hand.gd) reach out to the glowing glove spot in practice. Each cue fades
+##    once that player has done it twice (cue_did / cue_learned). The FIREBALL button next to the power
+##    bar is the player's own Y / F / ' with a flame. No view shows its own striker's name tag.
 ## Everything cut is only switched off: SIMPLE_MODE = false brings the full cup game back.
 
 const VrText := preload("res://core/vr_text.gd")
@@ -38,6 +49,8 @@ const StrikerScript := preload("res://games/penalty_shootout/striker.gd")
 const JoinListenerScript := preload("res://games/penalty_shootout/join_listener.gd")
 const SimpleFxScript := preload("res://games/penalty_shootout/simple_fx.gd")
 const PropsScript := preload("res://games/penalty_shootout/props.gd")
+const UiKit := preload("res://core/ui_kit.gd")
+const GhostHandScript := preload("res://games/cannon_cove/ghost_hand.gd")
 
 const SIMPLE_MODE := true
 const KP_STEPS := 5  # keeper practice: glove spots to clear (a save, or two misses, moves on)
@@ -172,6 +185,8 @@ var cpu := false  # solo VR: P2 is a computer striker until the TV connects
 var fire_on := false
 var simple_fx: Node3D
 var props: Node3D
+var ghost_hand: Node3D  # simple mode, VR keeper practice: the shared see-through hand
+var gh_t := 0.0
 
 
 func _ready() -> void:
@@ -502,6 +517,7 @@ func _ensure_view(p) -> void:
 		p.attach_camera(cam)
 	else:
 		p.camera = cam
+		cam.cull_mask &= ~tag_layer(p.index)  # your own name tag never sits in your own view
 	var hud_layer := CanvasLayer.new()
 	vp.add_child(hud_layer)
 	var hud := Control.new()
@@ -911,7 +927,7 @@ func _start_striker_practice() -> void:
 	saves = 0
 	goals_total = 0
 	cur_max_speed = _max_speed()
-	_show_center("KICK IT THROUGH THE RING!", 3.0, true, "")
+	# No words: the glowing ring has a bobbing arrow over it (simple_fx) and each striker their cue.
 	sound("whistle", 0.0, 1.0, true)
 	print("Practice: strikers")
 	_begin_round()
@@ -950,6 +966,7 @@ func _practice_result(res: String) -> void:
 			burst(ball.position, Color(0.4, 1.0, 0.55), 24)
 			world.mascot_cheer("save")
 			net.event("fx", ["save"])
+			cue_did(keeper, "save")
 			_show_center("SAVED!", 1.0, true, "SAVED!")
 		else:
 			kp_miss += 1
@@ -983,6 +1000,7 @@ func _practice_result(res: String) -> void:
 	else:
 		last_result = "MISS"
 		sound("groan", -10.0, 1.2, true)
+		_miss_arrow(ptarget)
 	print("Practice kick by P%d: %s (%d rings hit)" % [shooter + 1, last_result, sp_hits])
 
 
@@ -1443,7 +1461,9 @@ func _on_miss(reason: String) -> void:
 	excite = 0.3
 	popup(ball.position + Vector3(0, 0.6, 0), reason, Color(1.0, 0.75, 0.3))
 	if SIMPLE_MODE:
-		_show_center(reason, 1.4, true, reason)
+		# No WIDE! / OVER THE BAR! / TOO SOFT!: a glowing arrow points from the ball back into the goal.
+		_show_center("", 1.4, true, "")
+		_miss_arrow(Vector3(clampf(ball.position.x, -2.6, 2.6), clampf(ball.position.y, 0.6, 1.8), 0.0))
 	else:
 		_show_center("%s\n%s" % [reason, _score_line()], 1.8, true, reason)
 	result_len = _result_time()
@@ -1676,6 +1696,8 @@ func _process(delta: float) -> void:
 	_place_strikers()
 	_update_aim_visuals()
 	_update_vr_text(delta)
+	if SIMPLE_MODE:
+		_update_ghost_hand(delta)
 	_record(delta)
 	_update_replay(delta)
 	_update_trophy()
@@ -1956,7 +1978,10 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 
 
 func _set_pause_banner(paused: bool, who: String) -> void:
-	_show_center("PAUSED\n" + who if paused else "", 0.0, false, ("PAUSED\n" + who) if paused else "")
+	if SIMPLE_MODE:
+		who = ""  # no explaining sentence: just PAUSED
+	var title := ("PAUSED\n" + who) if who != "" else "PAUSED"
+	_show_center(title if paused else "", 0.0, false, title if paused else "")
 	if vr_center != null and paused:
 		VrText.snap(vr_center)
 
@@ -2085,6 +2110,9 @@ func apply_event(kind: String, args: Array) -> void:
 				"target":
 					if simple_fx != null:
 						simple_fx.flash_target()
+				"miss":
+					if simple_fx != null and args.size() >= 3:
+						simple_fx.show_miss(args[1], args[2])
 				"end":
 					world.fireworks(3)
 					world.confetti_cannons()
@@ -2130,8 +2158,8 @@ func _build_hud() -> void:
 	help_label.offset_bottom = -12
 	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	if SIMPLE_MODE:
-		help_label.text = "Stick: aim  ·  hold A, let go: KICK!" if OS.has_environment("DUO_JOIN") \
-			else "Strikers: stick aims, hold A and let go  ·  Keeper: A-D moves, Space dives"
+		help_label.text = ""  # no how-to line: every view has its own picture cue (show_cue)
+		help_label.visible = false
 	elif OS.has_environment("DUO_JOIN"):
 		help_label.text = "STRIKERS: stick / WASD / mouse aims · HOLD A / Space / click to power up, let go to shoot · X / C: chip · Y / F: FIREBALL · triggers or Q/E bend it\n" \
 			+ "More strikers: press A on another controller · Start / Esc menu"
@@ -2214,9 +2242,7 @@ func hud_text(p) -> String:
 	if SIMPLE_MODE:
 		if p.index == 0 or state not in ["aim", "runup", "flight", "result"] or shooter <= 0:
 			return ""
-		if shooter == p.index:
-			return "YOUR KICK!" if state == "aim" else ""
-		return "P%d kicks" % (shooter + 1)
+		return ""  # no words: the shooter's view has its glowing button cue, the others watch
 	var head := "ROUND %d/%d   SAVES %d · GOALS %d" % [mini(round_i + 1, rounds_total), rounds_total, saves, goals_total]
 	if cup_stage == "final" and finalists.size() == 2:
 		head = "THE FINAL   P%d %d - %d P%d" % [finalists[0] + 1, int(final_goals.get(finalists[0], 0)), int(final_goals.get(finalists[1], 0)), finalists[1] + 1]
@@ -2291,3 +2317,166 @@ func _update_vr_text(delta: float) -> void:
 	# Never cover the incoming ball: hide while a shot is coming.
 	vr_center.visible = state != "runup" and state != "flight"
 	VrText.follow(vr_center, cam, self, 0.35 * w, 1.8 * w)
+
+
+# --- Simple mode: picture cues instead of how-to words -----------------------------------------
+
+## The render layer of striker i's name tag (layers 11-17, unused by anything else in this game):
+## that striker's own camera leaves it out.
+func tag_layer(i: int) -> int:
+	return 1 << (10 + i)
+
+
+## A player has done `key` once more ("kick", "aim", "dive", "save"); its cue goes after two.
+func cue_did(p, key: String) -> void:
+	var done: Dictionary = p.get_meta("cue_done", {})
+	done[key] = int(done.get(key, 0)) + 1
+	p.set_meta("cue_done", done)
+
+
+func cue_learned(p, key: String) -> bool:
+	var done: Dictionary = p.get_meta("cue_done", {})
+	return int(done.get(key, 0)) >= 2
+
+
+## A keyboard key cap with a letter, or an arrow icon in it (a keyboard player sees their own key).
+func keycap(text: String, icon_kind: String, s: float) -> Control:
+	var g := UiKit.glyph("KEY", s)
+	var l := g.get_child(0) as Label
+	l.text = text
+	if icon_kind != "":
+		l.text = ""
+		var ic := UiKit.icon(icon_kind, Color.WHITE, 26.0 * s)
+		ic.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		g.add_child(ic)
+	return g
+
+
+## The soft halo behind a cue's button.
+class CueGlow extends Control:
+	var r := 30.0
+	var a := 1.0
+
+	func _draw() -> void:
+		for i in 3:
+			draw_circle(Vector2.ZERO, r * (1.0 + 0.35 * i), Color(1.0, 0.95, 0.6, 0.17 * a * (1.0 - 0.3 * i)))
+
+
+## A TV view's picture cue: a row (the first item is the button, which pulses on a soft glow) with its
+## bottom centre bobbing at `at` (view pixels). key "" fades the old cue away. sig: rebuild when the
+## controls / size change. make() returns the row's Controls.
+func show_cue(p, key: String, sig: String, make: Callable, at: Vector2, delta: float) -> void:
+	p.set_meta("cue", key)
+	if p.hud == null:
+		return
+	var box: Control = p.get_meta("cue_box") if p.has_meta("cue_box") else null
+	if box == null or not is_instance_valid(box):
+		box = Control.new()
+		box.name = "Cue"
+		box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		p.hud.add_child(box)
+		p.set_meta("cue_box", box)
+		var glow := CueGlow.new()
+		glow.name = "Glow"
+		glow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		box.add_child(glow)
+	var a: float = p.get_meta("cue_a", 0.0)
+	var cur: String = p.get_meta("cue_sig", "")
+	var full := key + "|" + sig
+	if key != "" and full != cur:
+		if cur.get_slice("|", 0) != key:
+			a = 0.0  # a new cue fades in
+		p.set_meta("cue_sig", full)
+		var old := box.get_node_or_null("Row")
+		if old != null:
+			box.remove_child(old)
+			old.queue_free()
+		var row := HBoxContainer.new()
+		row.name = "Row"
+		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.alignment = BoxContainer.ALIGNMENT_CENTER
+		row.add_theme_constant_override("separation", 10)
+		var items: Array = make.call()
+		for k in items.size():
+			var c: Control = items[k]
+			if k == 0:
+				c.name = "Button"
+			c.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+			c.size_flags_vertical = Control.SIZE_SHRINK_CENTER  # a round A, not a tall pill
+			row.add_child(c)
+		box.add_child(row)
+	a = minf(1.0, a + delta * 4.0) if key != "" else maxf(0.0, a - delta * 2.5)
+	p.set_meta("cue_a", a)
+	var rw := box.get_node_or_null("Row") as Control
+	box.visible = a > 0.01 and rw != null
+	if not box.visible:
+		if a <= 0.01:
+			p.set_meta("cue_sig", "")
+		return
+	rw.size = rw.get_combined_minimum_size()
+	var k2 := absf(sin(Time.get_ticks_msec() * 0.004))
+	box.position = at - Vector2(rw.size.x * 0.5, rw.size.y + 10.0 * k2)
+	rw.position = Vector2.ZERO
+	box.modulate = Color(1.0 + 0.3 * k2, 1.0 + 0.3 * k2, 1.0 + 0.3 * k2, a * (0.8 + 0.2 * k2))
+	var btn := rw.get_node_or_null("Button") as Control
+	var glow2 := box.get_node_or_null("Glow") as CueGlow
+	if btn != null:
+		btn.pivot_offset = btn.size * 0.5
+		btn.scale = Vector2.ONE * (1.0 + 0.15 * k2)
+		if glow2 != null:
+			glow2.position = btn.position + btn.size * 0.5
+			glow2.r = btn.size.y * 0.75 * (1.0 + 0.2 * k2)
+			glow2.a = a
+			glow2.queue_redraw()
+
+
+## A simple-mode miss: a glowing arrow from where the ball went to `to` (every screen).
+func _miss_arrow(to: Vector3) -> void:
+	var from: Vector3 = ball.position
+	if simple_fx != null:
+		simple_fx.show_miss(from, to)
+	net.event("fx", ["miss", from, to])
+
+
+## Simple mode, VR keeper practice: the shared see-through hand (games/cannon_cove/ghost_hand.gd) loops
+## reaching out to the glowing glove spot and catching, until the keeper has saved two practice balls.
+func _update_ghost_hand(delta: float) -> void:
+	var want: bool = keeper_in_vr() and practice == "keeper" and (state == "kready" or state == "flight") \
+		and not cue_learned(keeper, "save") and not get_tree().paused
+	if not want:
+		gh_t = 0.0
+		if ghost_hand != null:
+			ghost_hand.visible = false
+		return
+	if ghost_hand == null:
+		ghost_hand = GhostHandScript.new()
+		ghost_hand.name = "GhostHand"
+		add_child(ghost_hand)
+	gh_t = fmod(gh_t + delta, 2.2)
+	var w: float = keeper.ws()
+	var head: Vector3 = keeper.head_pos
+	var chest := head + Vector3(0.0, -0.55, 0.12) * w
+	var to_ball: Vector3 = _kp_from() - pspot
+	to_ball.y = 0.0
+	var f := to_ball.normalized() if to_ball.length() > 0.01 else Vector3(0, 0, 1)
+	var pos := pspot
+	var grip := 0.0
+	var alpha := 0.55
+	if gh_t < 0.9:
+		pos = chest.lerp(pspot, ease(gh_t / 0.9, -1.8))
+		alpha = 0.55 * minf(1.0, gh_t / 0.3)
+	elif gh_t < 1.6:
+		grip = 0.4 * sin(clampf((gh_t - 0.9) / 0.5, 0.0, 1.0) * PI)  # a little catch
+	else:
+		alpha = 0.55 * maxf(0.0, 1.0 - (gh_t - 1.6) / 0.5)
+	ghost_hand.visible = alpha > 0.01
+	ghost_hand.mat.albedo_color.a = alpha
+	# Fingers up, palm facing the ball (the hand's fingers point along its -z, the palm looks down -y).
+	var zl := Vector3.DOWN
+	var yl := -f
+	var xl := yl.cross(zl)
+	ghost_hand.hand.global_transform = Transform3D(Basis(xl * w, yl * w, zl * w), pos - f * 0.04 * w)
+	for fg in ghost_hand.fingers:
+		(fg as Node3D).rotation.x = -grip * 1.3
+	ghost_hand.thumb.rotation.x = -grip * 0.7
