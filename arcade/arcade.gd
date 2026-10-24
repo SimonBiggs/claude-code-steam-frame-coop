@@ -40,7 +40,7 @@ const GAMES := [
 		"blurb": "Relaxing: VR casts and reels from the jetty; TV rowers herd fish and net treasure"},
 	{"id": "kart_race", "cat": "sports", "name": "KART RACE", "scene": "res://games/kart_race/main.tscn",
 		"blurb": "VR turns a real steering wheel; TV racers drive in split screen, with items and ramps"},
-	{"id": "tiny_town_tycoon", "cat": "cosy", "name": "TINY TOWN TYCOON", "scene": "res://games/tiny_town_tycoon/main.tscn",
+	{"id": "tiny_town_tycoon", "multi": true, "cat": "cosy", "name": "TINY TOWN TYCOON", "scene": "res://games/tiny_town_tycoon/main.tscn",
 		"blurb": "Build a cosy toy town together: the mayor places the buildings, the drivers bring it to life"},
 	{"id": "party_board", "multi": true, "cat": "party", "name": "PARTY BOARD", "scene": "res://games/party_board/main.tscn",
 		"blurb": "A Mario-Party-style board game on a diorama island: roll, hop, shop and duel for STARS, with a minigame after every round"},
