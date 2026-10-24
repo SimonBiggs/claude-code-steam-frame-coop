@@ -200,6 +200,7 @@ export async function debt() {
   const PATTERNS: { kind: string; files: string; bad: string; unless?: string; fix: string }[] = [
     { kind: "pad-A", files: "grab_focus", bad: "grab_focus", unless: "JOY_BUTTON_A|ui_input.gd|UiInput", fix: "should now work by design (UiKit.ensure_pad_ui_actions at startup); check the menu reaches it" },
     { kind: "anchors", files: "set_anchors_preset", bad: "add_child\\([a-z_]+\\)\\n\\s*[a-z_]+\\.set_anchors_preset\\(Control\\.PRESET_(CENTER|RIGHT|BOTTOM)", fix: "use UiKit.pin(control, preset) (core/ui_kit.gd): one helper, offsets always reset" },
+    { kind: "set_meta-null", files: "set_meta", bad: "set_meta\\([^\\n]*(,\\s*null\\)|else null\\))", fix: "set_meta(k, null) DELETES the key, so the next get_meta(k) errors: store false and test with get_meta(k, false) is <Type>" },
     { kind: "looking_at-UP", files: "looking_at", bad: "looking_at\\([^)]*Vector3\\.UP\\)", unless: "_face_camera", fix: "use UiKit.face(dir) (core/ui_kit.gd): never NaN when the direction is vertical" },
   ];
   for (const pt of PATTERNS) {

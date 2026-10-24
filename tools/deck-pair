@@ -23,8 +23,9 @@ while read -r host ip port <&3; do
   fi
   if ! grep -qx "$alias" "$LIST"; then
     echo "$alias" >> "$LIST"; echo "added $alias to the deploy list"
-    duo-deploy-deck "$alias"
   fi
+  # Installed (also when an earlier run was cut off between pairing and deploying).
+  ssh -o BatchMode=yes "$alias" 'test -d ~/DuoArena/game' 2>/dev/null || duo-deploy-deck "$alias"
   # In its Steam library for Gaming Mode (needs Steam running on the Deck; retried every run until it's there).
   ssh -o BatchMode=yes "$alias" 'grep -qa DuoArena ~/.local/share/Steam/userdata/*/config/shortcuts.vdf 2>/dev/null ||
     { pgrep -x steam >/dev/null && XDG_SESSION_TYPE=x11 steamos-add-to-steam ~/.local/share/applications/duo-arena.desktop >/dev/null 2>&1 && echo "added Living Room Arcade to the Steam library"; }' 2>/dev/null
