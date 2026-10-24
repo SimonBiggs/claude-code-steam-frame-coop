@@ -44,6 +44,8 @@ var net: Node
 var ready_to_play := false
 # --- Engine modules (names core/ looks for) ---
 var party: Party
+## Any number of TV machines (TV, Steam Decks) may join (core/net.gd multi_machine).
+var multi_machine := true
 var split: SplitView
 var vr_rig: VrRig
 var save: Save

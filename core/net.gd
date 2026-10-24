@@ -1,6 +1,16 @@
 extends Node
-## Networked co-op over the home network. The Steam Frame (VR) hosts and simulates the game;
-## the Steam Machine joins as player 2 (env DUO_JOIN=<host>), renders the shared world and drives its own player.
+## Networked co-op over the home network. One machine hosts and simulates the game (usually the Steam Frame
+## with the VR player); other machines join (env DUO_JOIN=<host>, or DUO_JOIN=auto to find one), render the
+## shared world and drive their own players.
+##
+## MANY MACHINES (2026-10-24): any number of TV-style machines can join (the TV, Steam Decks...), up to
+## `max_machines` (env DUO_MAX_MACHINES, default 32: no practical limit; the game's free seats are). Each says what it is (env DUO_MACHINE_KIND: "tv",
+## "deck", ...; machine_kind_of(peer)), so a game can treat e.g. Deck players differently. A game opts in
+## with `var multi_machine := true` on main; until then it keeps the old contract (ONE TV machine: any more
+## are told the game is full and play on their own). Per-machine signals: machine_joined / machine_left,
+## main.on_machine_joined(peer, kind) / on_machine_left(peer). core/party.gd tracks which machine owns
+## which seat. A host doesn't need VR: host(false) runs a "flat host" (has_vr false; slot 0 is a normal
+## pad/keyboard player), so TV + Decks, or just two Decks, can play together (games opt in, see above).
 ## Host -> client: 30 Hz snapshots plus reliable one-off events. Client -> host: player 2 state and actions.
 ##
 ## Engine additions (docs/engine/systems.md), all optional for a game:
@@ -22,14 +32,19 @@ extends Node
 signal join_finished(ok: bool)
 ## Every machine: a replicated state key changed (value null = the key was erased).
 signal state_changed(key: String, value: Variant)
-## Host: the TV machine connected / went away.
+## Host: a TV machine connected / went away (every machine; old games treat it as "the TV").
 signal client_connected
 signal client_disconnected
+## Host: a machine said hello (peer id, its kind: "tv", "deck", ...) / went away.
+signal machine_joined(peer: int, kind: String)
+signal machine_left(peer: int)
 
 const DEFAULT_PORT := 7777
 var PORT: int = int(OS.get_environment("DUO_PORT")) if OS.has_environment("DUO_PORT") else DEFAULT_PORT  # override for parallel tests
 const SNAP_INTERVAL := 1.0 / 30.0
 const JOIN_TIMEOUT := 5.0
+## DUO_JOIN=auto: how long to listen for a host's beacon (it sends one a second).
+const AUTO_FIND_SECONDS := 1.6
 ## State store deltas are batched and sent at most this often (seconds).
 const STATE_INTERVAL := 1.0 / 30.0
 ## Player slots: 0 is the VR / host player, 1..6 are TV players.
@@ -37,7 +52,17 @@ const MAX_SLOTS := 7
 
 var main
 var mode := "local"  # "local", "host" or "client"
-var connected := false
+var connected := false  # host: at least one machine joined; client: joined the host
+## This machine's kind, sent to the host when joining ("tv", "deck", ...).
+var machine_kind: String = OS.get_environment("DUO_MACHINE_KIND") if OS.has_environment("DUO_MACHINE_KIND") else "tv"
+## Host: how many machines may join a game that supports several (multi_machine on main).
+var max_machines: int = int(OS.get_environment("DUO_MAX_MACHINES")) if OS.has_environment("DUO_MAX_MACHINES") else 32  # ENet allows 4095; seats are the real limit
+## Host: whether the host has a VR player (false: a flat host, see host()).
+var has_vr := true
+## Host: peer id -> {"kind": String} for every joined machine.
+var machines := {}
+## While a sys message handler runs on the host: the peer that sent it (0 = this machine).
+var sys_sender := 0
 var snap_t := 0.0
 var join_deadline := 0  # Time.get_ticks_msec() when an unanswered join gives up (0 = not joining)
 var _state := {}  # replicated key -> value (every machine)
@@ -54,17 +79,64 @@ func _ready() -> void:
 	_was_paused = get_tree().paused
 
 
-## Become the host (the headset, or DUO_HOST=1): listen for the TV machine.
-func host() -> void:
+## Become the host: listen for TV machines. vr false = a flat host without a VR player (TV / Deck hosting).
+func host(vr: bool = true) -> void:
 	mode = "host"
+	has_vr = vr and not OS.has_environment("DUO_FLAT_HOST")  # the arcade picked this machine as a flat host
 	_try_listen()
+
+
+## True when main opted in to several TV machines (and to flat hosts): `var multi_machine := true`.
+func multi_machine_ok() -> bool:
+	return main != null and is_instance_valid(main) and main.get("multi_machine") == true
+
+
+## Host: how many machines this game takes now (1 for old one-TV games).
+func machine_limit() -> int:
+	return maxi(1, max_machines) if multi_machine_ok() else 1
+
+
+## Inside an RPC handler on the host (on_p2_action, on_request, on_remote_state, sys handlers): the peer
+## id of the machine that sent it (0 = this machine).
+func sender_peer() -> int:
+	return sys_sender if sys_sender != 0 else multiplayer.get_remote_sender_id()
+
+
+## Host: how many machines are connected (client: 1 when joined).
+func peer_count() -> int:
+	return machines.size() if mode == "host" else (1 if connected else 0)
+
+
+## This machine's peer id (1 on the host, 0 when not networked).
+func my_peer_id() -> int:
+	return multiplayer.get_unique_id() if mode != "local" and multiplayer.multiplayer_peer != null else 0
+
+
+## Host: a one-off event for one machine only (e.g. a re-sync for a machine that just joined).
+func event_to(peer: int, kind: String, args: Array) -> void:
+	if mode == "host" and peer in multiplayer.get_peers():
+		_event.rpc_id(peer, kind, args)
+
+
+## Host: a one-off event for every machine except one (e.g. relaying a sound a machine already played).
+func event_except(peer: int, kind: String, args: Array) -> void:
+	if mode != "host":
+		return
+	for p in multiplayer.get_peers():
+		if p != peer:
+			_event.rpc_id(p, kind, args)
+
+
+## Host: a joined machine's kind ("tv", "deck", ...; "" if unknown).
+func machine_kind_of(peer: int) -> String:
+	return str(machines.get(peer, {}).get("kind", ""))
 
 
 ## Keeps trying while the port is busy (e.g. an older copy of the game is still shutting down).
 func _try_listen() -> void:
 	_close_old_peer()
 	var peer := ENetMultiplayerPeer.new()
-	if peer.create_server(PORT, 1) != OK:
+	if peer.create_server(PORT, maxi(1, max_machines)) != OK:
 		print("Net: port %d busy, retrying" % PORT)
 		get_tree().create_timer(1.0).timeout.connect(_try_listen)
 		return
@@ -76,8 +148,18 @@ func _try_listen() -> void:
 	print("Net: hosting on port %d" % PORT)
 
 
-## Become the TV machine: join the host at `address` (join_finished tells how it went).
+## Become a TV machine: join the host at `address` (join_finished tells how it went). "auto" listens for a
+## host's beacon on the home network for a moment and joins whoever is hosting (no host: join_finished(false)).
 func join(address: String) -> void:
+	var here := get_tree().current_scene.scene_file_path if get_tree().current_scene else ""
+	if Engine.get_meta("duo_full", "-") == here:
+		print("Net: the host's game was full, staying on this machine")
+		Engine.set_meta("duo_full", "-")  # try again next time this game starts
+		join_finished.emit.call_deferred(false)
+		return
+	if address == "auto":
+		_join_auto()
+		return
 	_close_old_peer()
 	var peer := ENetMultiplayerPeer.new()
 	if peer.create_client(address, PORT) != OK:
@@ -93,6 +175,28 @@ func join(address: String) -> void:
 	var wait := 3600.0 if Engine.has_meta("duo_joined") else JOIN_TIMEOUT
 	join_deadline = Time.get_ticks_msec() + int(wait * 1000.0)
 	print("Net: joining %s:%d" % [address, PORT])
+
+
+func _join_auto() -> void:
+	var udp := PacketPeerUDP.new()
+	if udp.bind(PORT + 2) != OK:
+		print("Net: can't listen for hosts (port %d busy)" % (PORT + 2))
+		join_finished.emit.call_deferred(false)
+		return
+	var until := Time.get_ticks_msec() + int(AUTO_FIND_SECONDS * 1000.0)
+	while Time.get_ticks_msec() < until:
+		await get_tree().process_frame
+		while udp.get_available_packet_count() > 0:
+			var msg := udp.get_packet().get_string_from_utf8()
+			var ip := udp.get_packet_ip()
+			if msg.begins_with("ARCADE_GAME ") and ip != "":
+				udp.close()
+				print("Net: found a host at %s" % ip)
+				join(ip)
+				return
+	udp.close()
+	print("Net: no host on the network")
+	join_finished.emit(false)
 
 
 ## The multiplayer peer belongs to the SceneTree and survives scene reloads; close it so the port is freed.
@@ -136,8 +240,19 @@ func _process(delta: float) -> void:
 # --- Connection events -------------------------------------------------------
 
 func _on_peer_connected(id: int) -> void:
+	if mode != "host":
+		return
+	if machines.size() >= machine_limit():
+		# Full (or an old one-TV game): tell it, so it plays on its own instead of waiting, then drop it.
+		print("Net: machine %d turned away (%d/%d)" % [id, machines.size(), machine_limit()])
+		_sys_down.rpc_id(id, "_full", [machine_limit()])
+		get_tree().create_timer(0.5).timeout.connect(func() -> void:
+			if multiplayer.multiplayer_peer is ENetMultiplayerPeer and id in multiplayer.get_peers():
+				(multiplayer.multiplayer_peer as ENetMultiplayerPeer).disconnect_peer(id))
+		return
+	machines[id] = {"kind": "tv"}
 	connected = true
-	print("Net: player 2 joined")
+	print("Net: machine %d joined (%d now)" % [id, machines.size()])
 	_state_dirty.clear()
 	_state_full.rpc_id(id, _state)  # a late joiner gets the whole store
 	if main != null and main.has_method("on_client_joined"):
@@ -145,19 +260,28 @@ func _on_peer_connected(id: int) -> void:
 	client_connected.emit()
 
 
-func _on_peer_disconnected(_id: int) -> void:
-	connected = false
-	print("Net: player 2 left")
-	if main != null and main.has_method("on_client_left"):
-		main.on_client_left()
-	client_disconnected.emit()
+func _on_peer_disconnected(id: int) -> void:
+	if not machines.has(id):
+		return  # one we turned away
+	machines.erase(id)
+	connected = not machines.is_empty()
+	print("Net: machine %d left (%d now)" % [id, machines.size()])
+	if main != null and main.has_method("on_machine_left"):
+		main.on_machine_left(id)
+	machine_left.emit(id)
+	# Old one-TV games: "the TV left". Multi-machine games get it only when the last machine leaves.
+	if not multi_machine_ok() or machines.is_empty():
+		if main != null and main.has_method("on_client_left"):
+			main.on_client_left()
+		client_disconnected.emit()
 
 
 func _on_connected() -> void:
 	connected = true
 	join_deadline = 0
 	Engine.set_meta("duo_joined", true)
-	print("Net: joined the host")
+	print("Net: joined the host as a %s" % machine_kind)
+	_sys_up.rpc_id(1, "_hello", [machine_kind])
 	join_finished.emit(true)
 
 
@@ -176,6 +300,8 @@ func _give_up() -> void:
 
 
 func _on_server_gone() -> void:
+	if mode != "client":
+		return  # we left on purpose (e.g. the host's game was full)
 	print("Net: host disconnected, reconnecting")
 	connected = false
 	multiplayer.multiplayer_peer = null
@@ -363,7 +489,13 @@ func add_sys_handler(kind: String, handler: Callable) -> void:
 	_sys_handlers[kind] = list
 
 
-## Send an engine message to the other machine (host -> client or client -> host), reliably.
+## Host: send an engine message to one machine only.
+func sys_send_to(peer: int, kind: String, args: Array) -> void:
+	if mode == "host" and peer in multiplayer.get_peers():
+		_sys_down.rpc_id(peer, kind, args)
+
+
+## Send an engine message to the other machine(s) (host -> every client, or client -> host), reliably.
 func sys_send(kind: String, args: Array) -> void:
 	if not connected:
 		return
@@ -375,13 +507,36 @@ func sys_send(kind: String, args: Array) -> void:
 
 @rpc("any_peer", "call_remote", "reliable")
 func _sys_up(kind: String, args: Array) -> void:
-	if mode == "host":
-		_sys_dispatch(kind, args)
+	if mode != "host":
+		return
+	var from := multiplayer.get_remote_sender_id()
+	if not machines.has(from):
+		return  # turned away
+	if kind == "_hello":
+		machines[from] = {"kind": str(args[0]) if args.size() > 0 else "tv"}
+		print("Net: machine %d is a %s" % [from, machines[from].kind])
+		if main != null and main.has_method("on_machine_joined"):
+			main.on_machine_joined(from, machines[from].kind)
+		machine_joined.emit(from, machines[from].kind)
+		return
+	sys_sender = from
+	_sys_dispatch(kind, args)
+	sys_sender = 0
 
 
 @rpc("authority", "call_remote", "reliable")
 func _sys_down(kind: String, args: Array) -> void:
 	if mode != "client":
+		return
+	if kind == "_full":
+		# The host's game takes no more machines: play on our own (no reconnect loop for this game).
+		print("Net: the host's game is full (%d machine(s)), playing on this machine" % int(args[0]))
+		Engine.set_meta("duo_full", get_tree().current_scene.scene_file_path if get_tree().current_scene else "")
+		join_deadline = 0
+		connected = false
+		multiplayer.multiplayer_peer = null
+		mode = "local"
+		join_finished.emit(false)
 		return
 	if kind == "_pause":
 		var paused: bool = bool(args[0])

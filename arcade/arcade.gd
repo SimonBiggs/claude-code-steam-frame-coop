@@ -58,7 +58,7 @@ const GAMES := [
 		"blurb": "Bop cute slimes and bats room by room: the knight swings a big toy sword in VR, the heroes bonk on the TV, and the treasure waits at the end!"},
 	{"id": "crystal_saga", "cat": "action", "name": "CRYSTAL SAGA", "scene": "res://games/crystal_saga/main.tscn",
 		"blurb": "Be the hero in VR! Swing your sword, raise your hand for magic, and restore the Crystal of Light with your party."},
-	{"id": "balloon_pop", "cat": "party", "name": "BALLOON POP", "scene": "res://games/balloon_pop/main.tscn",
+	{"id": "balloon_pop", "multi": true, "cat": "party", "name": "BALLOON POP", "scene": "res://games/balloon_pop/main.tscn",
 		"blurb": "Pop the balloons floating up all around you: VR punches and squeezes, TV players run and jump!"},
 	{"id": "sheep_round_up", "cat": "cosy", "name": "SHEEP ROUND-UP", "scene": "res://games/sheep_round_up/main.tscn",
 		"blurb": "Sheepdogs herd, the giant farmer scoops - get every fluffy sheep into the pen!"},
@@ -112,6 +112,17 @@ var hand_r: XRController3D
 var stick_ready := true
 var trigger_was := true  # a trigger still held from leaving a game must be released first
 var starting := false
+# Many machines (2026-10-24): any number of TV machines / Decks / Frames share one lobby. DUO_JOIN=auto finds
+# a lobby (or game) from its LAN beacon; with nobody hosting, this machine hosts a flat lobby (no VR) and the
+# others find it. The lobby host picks each game's host when it starts (a Frame if there is one, else itself)
+# and tells everyone whom to join, so TV + Decks, or just two Decks, play together without the Frame.
+const MAX_LOBBY_MACHINES := 32  # ENet allows 4095; games are limited by seats, not machines
+const FIND_SECONDS := 2.2
+var machines := {}  # lobby host: peer -> {"kind": String, "ip": String}
+var my_kind: String = OS.get_environment("DUO_MACHINE_KIND") if OS.has_environment("DUO_MACHINE_KIND") else "tv"
+var host_has_vr := false
+var lobby_id := randi()  # flat hosts that start together: the higher id gives way
+var _finding := 0.0  # seconds left looking for a lobby before hosting one
 
 
 func _ready() -> void:
@@ -128,7 +139,16 @@ func _ready() -> void:
 		_launch(_index_of(wanted))
 		return
 	var xr := XRServer.find_interface("OpenXR")
-	if (xr != null and xr.is_initialized()) or OS.has_environment("DUO_HOST"):
+	if xr != null and xr.is_initialized():
+		my_kind = "frame"
+	if not OS.has_environment("DUO_JOIN_ORIGINAL"):
+		OS.set_environment("DUO_JOIN_ORIGINAL", OS.get_environment("DUO_JOIN") if OS.has_environment("DUO_JOIN") else "")
+		OS.set_environment("DUO_HOST_ORIGINAL", "1" if OS.has_environment("DUO_HOST") else "")
+	# Each lobby visit starts from how the machine was launched (a game may have changed these).
+	_restore_env()
+	if OS.get_environment("DUO_JOIN") == "auto":
+		_finding = FIND_SECONDS  # _process listens for a lobby, then hosts one if nobody answers
+	elif (xr != null and xr.is_initialized()) or OS.has_environment("DUO_HOST"):
 		_host_lobby(xr != null and xr.is_initialized())
 	elif OS.has_environment("DUO_JOIN"):
 		_join_lobby(OS.get_environment("DUO_JOIN"))
@@ -144,19 +164,70 @@ func _index_of(id: String) -> int:
 
 # --- Lobby networking ----------------------------------------------------------
 
+func _restore_env() -> void:
+	for k in ["DUO_JOIN", "DUO_HOST"]:
+		var v := OS.get_environment(k + "_ORIGINAL")
+		if v == "":
+			OS.unset_environment(k)
+		else:
+			OS.set_environment(k, v)
+	OS.unset_environment("DUO_FLAT_HOST")
+
+
 func _host_lobby(with_vr: bool) -> void:
 	var peer := ENetMultiplayerPeer.new()
-	if peer.create_server(port, 1) != OK:
+	if peer.create_server(port, MAX_LOBBY_MACHINES) != OK:
 		print("Arcade: lobby port busy, picking locally")
 		return
 	mode = "host"
+	host_has_vr = with_vr
 	multiplayer.multiplayer_peer = peer
-	multiplayer.peer_connected.connect(func(_id: int) -> void:
-		_set_status("The TV is connected: pick a game!")
+	multiplayer.peer_connected.connect(func(id: int) -> void:
+		var ip := ""
+		if multiplayer.multiplayer_peer is ENetMultiplayerPeer:
+			ip = (multiplayer.multiplayer_peer as ENetMultiplayerPeer).get_peer(id).get_remote_address()
+		machines[id] = {"kind": "tv", "ip": ip}
+		_lobby_status()
 		_sync_selection.rpc(selected))
+	multiplayer.peer_disconnected.connect(func(id: int) -> void:
+		machines.erase(id)
+		_lobby_status())
 	if with_vr:
 		_build_vr_view()
 	print("Arcade: lobby hosting on %d" % port)
+
+
+func _lobby_status() -> void:
+	var kinds := {}
+	for m in machines.values():
+		kinds[m.kind] = int(kinds.get(m.kind, 0)) + 1
+	if machines.is_empty():
+		_set_status("Pick a game!")
+		return
+	var parts: Array[String] = []
+	for k in kinds:
+		parts.append("%d %s%s" % [kinds[k], k.to_upper() if k == "tv" else k.capitalize(), "s" if kinds[k] > 1 else ""])
+	_set_status("%s connected: pick a game!" % ", ".join(parts))
+
+
+## A joining machine says what it is (tv, deck, frame) so the lobby can pick game hosts.
+@rpc("any_peer", "call_remote", "reliable")
+func _hello(kind: String) -> void:
+	var id := multiplayer.get_remote_sender_id()
+	if mode == "host" and machines.has(id):
+		machines[id].kind = kind
+		_lobby_status()
+
+
+## Lobby host: who hosts this game? A Frame (VR) if there is one, else this machine as a flat host.
+## Returns "" for this machine, or the address of the machine that should host.
+func _pick_game_host() -> String:
+	if host_has_vr:
+		return ""
+	for id in machines:
+		if machines[id].kind == "frame" and machines[id].ip != "":
+			return machines[id].ip
+	return ""
 
 
 func _join_lobby(address: String) -> void:
@@ -170,7 +241,8 @@ func _join_lobby(address: String) -> void:
 		return  # already set up by an earlier attempt: just retry with the new peer
 	multiplayer.connected_to_server.connect(func() -> void:
 		join_deadline = 0
-		_set_status("Connected to the VR player: pick a game!")
+		_hello.rpc_id(1, my_kind)
+		_set_status("Connected: pick a game!")
 		if OS.has_environment("ARCADE_AUTOPICK"):  # headless tests
 			_start_everywhere(int(OS.get_environment("ARCADE_AUTOPICK"))))
 	multiplayer.connection_failed.connect(_lobby_offline)
@@ -184,6 +256,8 @@ func _lobby_offline() -> void:
 	join_deadline = 0
 	_close_peer()
 	mode = "local"
+	if OS.get_environment("DUO_JOIN_ORIGINAL") == "auto":
+		_finding = FIND_SECONDS  # look again, then host a lobby ourselves
 	_set_status("No VR player found yet (still looking…). You can also play on the TV")
 
 
@@ -205,8 +279,37 @@ func _request_start(index: int) -> void:
 
 
 @rpc("authority", "call_local", "reliable")
-func _start(index: int) -> void:
+func _start(index: int, game_host: String = "", lobby_ip: String = "") -> void:
+	# The lobby host chose who hosts this game: "" = the lobby host itself (reach it at the lobby's address).
+	var me_hosting := (mode == "host" and game_host == "") or (game_host != "" and game_host == lobby_ip)
+	var flat := game_host == "" and not host_has_vr and mode == "host" or (mode == "client" and game_host == "" and not bool(get_meta("lobby_vr", false)))
+	if flat and not bool(GAMES[clampi(index, 0, GAMES.size() - 1)].get("multi", false)):
+		# Not converted to many machines / flat hosts yet: every machine plays this game on its own.
+		OS.unset_environment("DUO_HOST")
+		OS.unset_environment("DUO_JOIN")
+		_launch(index)
+		return
+	if mode == "host" and game_host == "":
+		if not host_has_vr:
+			OS.set_environment("DUO_HOST", "1")
+			OS.set_environment("DUO_FLAT_HOST", "1")
+		OS.unset_environment("DUO_JOIN")
+	elif me_hosting:
+		OS.set_environment("DUO_HOST", "1")
+		OS.unset_environment("DUO_JOIN")
+	elif mode == "client":
+		OS.unset_environment("DUO_HOST")
+		OS.set_environment("DUO_JOIN", game_host if game_host != "" else _lobby_address())
 	_launch(index)
+
+
+## Client: the lobby host's address (what we connected to).
+func _lobby_address() -> String:
+	if multiplayer.multiplayer_peer is ENetMultiplayerPeer:
+		var p := (multiplayer.multiplayer_peer as ENetMultiplayerPeer).get_peer(1)
+		if p:
+			return p.get_remote_address()
+	return OS.get_environment("DUO_JOIN")
 
 
 @rpc("any_peer", "call_remote", "unreliable_ordered")
@@ -216,7 +319,12 @@ func _sync_selection(index: int) -> void:
 
 func _start_everywhere(index: int) -> void:
 	if mode == "host":
-		_start.rpc(index)
+		var game_host := _pick_game_host()
+		# Each client needs the chosen host's address; a machine that is itself the chosen host sees its own
+		# address there (lobby_ip = its address as the lobby sees it).
+		for id in machines:
+			_start.rpc_id(id, index, game_host, machines[id].ip)
+		_start(index, game_host, "")
 	elif mode == "client":
 		_request_start.rpc_id(1, index)
 	else:
@@ -235,12 +343,16 @@ func _launch(index: int) -> void:
 	var delay := 0.4 if mode == "host" else (0.9 if mode == "client" else 0.1)
 	if mode == "client":
 		_close_peer()
+	if has_meta("lobby_udp") and get_meta("lobby_udp") != null:
+		(get_meta("lobby_udp") as PacketPeerUDP).close()
+		remove_meta("lobby_udp")
 	get_tree().create_timer(delay).timeout.connect(func() -> void:
 		_close_peer()
 		get_tree().change_scene_to_file(game.scene))
 
 
 func _process(_delta: float) -> void:
+	_lobby_net(_delta)
 	_ensure_shared_nodes()
 	_ensure_fullscreen()
 	_hide_tv_cursor()
@@ -257,7 +369,7 @@ func _process(_delta: float) -> void:
 	if mode != "host" and not starting and OS.has_environment("DUO_JOIN"):
 		_listen_for_game()
 	# TV: keep looking for the VR player's lobby (they may be mid-game or restarting).
-	if mode == "local" and not starting and OS.has_environment("DUO_JOIN") and not OS.has_environment("ARCADE_GAME"):
+	if mode == "local" and not starting and OS.has_environment("DUO_JOIN") and OS.get_environment("DUO_JOIN") != "auto" and not OS.has_environment("ARCADE_GAME"):
 		if Time.get_ticks_msec() > int(get_meta("retry_at", 0)):
 			set_meta("retry_at", Time.get_ticks_msec() + 4000)
 			port = (int(OS.get_environment("DUO_PORT")) if OS.has_environment("DUO_PORT") else DEFAULT_PORT) + 1
@@ -704,6 +816,64 @@ func _build_vr_floor() -> void:
 		pillar.material_override = m
 		pillar.position = Vector3(sin(a) * 7.0, 1.5, cos(a) * 7.0)
 		add_child(pillar)
+
+
+## DUO_JOIN=auto: look for a lobby or a running game on the home network; nobody there after FIND_SECONDS =
+## host a flat lobby. Lobby hosts announce themselves once a second ("ARCADE_LOBBY <id> <vr>"); a flat host
+## that hears a VR host, or a flat host with a lower id, gives way and joins it.
+func _lobby_net(delta: float) -> void:
+	if starting or (OS.get_environment("DUO_JOIN_ORIGINAL") != "auto" and mode != "host"):
+		return
+	var base: int = int(OS.get_environment("DUO_PORT")) if OS.has_environment("DUO_PORT") else DEFAULT_PORT
+	if not has_meta("lobby_udp"):
+		var u := PacketPeerUDP.new()
+		u.set_broadcast_enabled(true)
+		if u.bind(base + 2) != OK:
+			set_meta("lobby_udp", null)
+			return
+		set_meta("lobby_udp", u)
+	var udp = get_meta("lobby_udp")
+	if udp == null:
+		return
+	while (udp as PacketPeerUDP).get_available_packet_count() > 0:
+		var msg := (udp as PacketPeerUDP).get_packet().get_string_from_utf8()
+		var ip := (udp as PacketPeerUDP).get_packet_ip()
+		if msg.begins_with("ARCADE_GAME ") and mode != "host":
+			var scene := msg.substr(12)
+			for i in GAMES.size():
+				if GAMES[i].scene == scene:
+					print("Arcade: %s is already being played at %s, joining" % [GAMES[i].name, ip])
+					OS.set_environment("DUO_JOIN", ip)
+					mode = "client"
+					_launch(i)
+					return
+		elif msg.begins_with("ARCADE_LOBBY "):
+			var f := msg.split(" ")
+			var their_id := int(f[1]) if f.size() > 1 else 0
+			var their_vr := f.size() > 2 and f[2] == "1"
+			if their_id == lobby_id:
+				continue  # our own beacon
+			if mode == "local" and _finding > 0.0:
+				_finding = 0.0
+				set_meta("lobby_vr", their_vr)
+				print("Arcade: found a lobby at %s" % ip)
+				_join_lobby(ip)
+			elif mode == "host" and not host_has_vr and machines.is_empty() and (their_vr or their_id < lobby_id):
+				print("Arcade: another lobby at %s, joining it instead" % ip)
+				_close_peer()
+				mode = "local"
+				_join_lobby(ip)
+	if mode == "local" and _finding > 0.0:
+		_finding -= delta
+		if _finding <= 0.0:
+			print("Arcade: no lobby found, hosting one (no VR)")
+			_host_lobby(false)
+	if mode == "host":
+		set_meta("lobby_beacon_t", float(get_meta("lobby_beacon_t", 0.0)) - delta)
+		if float(get_meta("lobby_beacon_t", 0.0)) <= 0.0:
+			set_meta("lobby_beacon_t", 1.0)
+			(udp as PacketPeerUDP).set_dest_address("255.255.255.255", base + 2)
+			(udp as PacketPeerUDP).put_packet(("ARCADE_LOBBY %d %d" % [lobby_id, 1 if host_has_vr else 0]).to_utf8_buffer())
 
 
 func _listen_for_game() -> void:
