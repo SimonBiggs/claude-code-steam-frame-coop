@@ -10,7 +10,9 @@
 //   tools/multibot.ts -n 3 --env BOT_PLAYERS=2 --host-env DUO_FLAT_HOST=1 res://tests/engine_template_bot.tscn
 //   options: -n/--joiners N (1..6, default 3)  --seconds S (per-process timeout, default 120)  --project DIR (default:
 //   this repo)  --env K=V (every machine)  --host-env K=V  --join-env K=V  --stagger MS (between starts, default 1500)
-//   --json (machine-readable result on the last line)
+//   --json (machine-readable result on the last line)  --copies (each machine runs its OWN copy of the project, in
+//   /tmp/multibot-<port>/p<k>, like real machines: a bot may change files in it to simulate a deploy reaching that
+//   machine; env BOT_OWN_COPY=1 tells the bot it may)
 //
 // What each machine gets (env): DUO_PORT (shared), DUO_HOST=1 (machine 0) or DUO_JOIN=127.0.0.1 (the rest),
 // BOT_MACHINE=k (0 = host), BOT_MACHINES=N+1, BOT_GROUP_T0=<unix ms> (a shared clock: every machine has been started
@@ -78,7 +80,7 @@ async function waitForMemory(gb: number) {
 }
 
 export type GroupOpts = { scene: string; joiners?: number; seconds?: number; project?: string; env?: Record<string, string>;
-  hostEnv?: Record<string, string>; joinEnv?: Record<string, string>; stagger?: number; quiet?: boolean };
+  hostEnv?: Record<string, string>; joinEnv?: Record<string, string>; stagger?: number; quiet?: boolean; copies?: boolean };
 
 export async function runGroup(o: GroupOpts): Promise<GroupResult> {
   const joiners = Math.max(1, Math.min(6, o.joiners ?? 3));
@@ -108,8 +110,15 @@ export async function runGroup(o: GroupOpts): Promise<GroupResult> {
     delete env.DUO_SOLO;
     if (k === 0) { env.DUO_HOST = "1"; delete env.DUO_JOIN; } else { env.DUO_JOIN = "127.0.0.1"; delete env.DUO_HOST; }
     const file = join(dir, `m${k}.log`);
+    let path = project;
+    if (o.copies) {
+      path = join(dir, `p${k}`);
+      const cp = Bun.spawnSync(["rsync", "-a", "--exclude", ".git", "--exclude", ".dev", `${project}/`, `${path}/`]);
+      if (cp.exitCode !== 0) throw new Error(`copying the project for machine ${k} failed: ${cp.stderr}`);
+      env.BOT_OWN_COPY = "1";
+    }
     runs.push(new Promise(res => {
-      const p = spawn("timeout", [String(o.seconds ?? 120), "godot-test", "--headless", "--path", project, scene], { env });
+      const p = spawn("timeout", [String(o.seconds ?? 120), "godot-test", "--headless", "--path", path, scene], { env });
       let out = "";
       p.stdout.on("data", d => { out += d; });
       p.stderr.on("data", d => { out += d; });
@@ -154,6 +163,7 @@ if (import.meta.main) {
     else if (x === "--host-env") kv(a[++i], o.hostEnv!);
     else if (x === "--join-env") kv(a[++i], o.joinEnv!);
     else if (x === "--json") json = true;
+    else if (x === "--copies") o.copies = true;
     else if (x === "-h" || x === "--help") { console.log((await readFile(import.meta.path, "utf8")).split("\nimport")[0]); process.exit(0); }
     else o.scene = x;
   }

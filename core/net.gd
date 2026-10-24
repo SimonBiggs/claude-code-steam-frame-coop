@@ -600,7 +600,7 @@ func _to_arcade() -> void:
 	# Let the message reach the other machine before this one drops the connection.
 	get_tree().create_timer(0.4).timeout.connect(func() -> void:
 		_close_old_peer()
-		get_tree().change_scene_to_file("res://arcade.tscn"))
+		preload("res://core/safe_apply.gd").change_scene("res://arcade.tscn"))
 
 
 # --- RPCs (same node path /root/Main/Net on both machines) -------------------
@@ -900,7 +900,8 @@ func _follow_headset() -> void:
 		set_meta("following", true)
 		udp.close()
 		get_tree().paused = false
-		get_tree().change_scene_to_file.call_deferred(scene)
+		# Code that waited while this game ran switches on before the next game loads (core/safe_apply.gd).
+		preload("res://core/safe_apply.gd").change_scene(scene)
 		return
 
 
