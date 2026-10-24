@@ -162,6 +162,12 @@ export function startAll() {
     return gb < 20 ? `low disk: ${gb} GB free` : null;
   });
 
+  // Steam Frame (VR headset) online / offline: when it comes back, run duo-deploy-frame if a deploy missed it.
+  add("frame", 60, async () => {
+    const r = await $`ssh -o ConnectTimeout=4 -o BatchMode=yes -i ${HOME}/.config/steamos-devkit/devkit_rsa steamos@frame true`.nothrow().quiet();
+    return r.exitCode === 0 ? "Steam Frame is online (run duo-deploy-frame if a deploy said it was offline)" : null;
+  }, { recovered: "Steam Frame went offline" });
+
   // Usage limits: post when a window crosses 50 / 75 / 90 %.
   add("usage", 60, async () => {
     const u = await Bun.file(join(HOME, ".claude/usage.json")).json().catch(() => null);
