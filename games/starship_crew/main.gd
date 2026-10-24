@@ -55,6 +55,8 @@ const CPU_COLOR := Color(1.0, 0.95, 0.6)
 var net: Node
 var ready_to_play := false
 var party: Party
+## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
+var multi_machine := true
 var split: SplitView
 var vr_rig: VrRig
 var save: Save
@@ -89,6 +91,9 @@ var log_toys := {}  ## bots: toys pressed
 # TV
 var cross := {}  ## slot -> Vector2 (-1..1 screen, y up)
 var cross_ui := {}  ## slot -> Crosshair
+var far_cross := {}  ## other machines' gunners: slot -> Vector2 (host: as they report it; TV machine: from snapshots)
+var far_ui := {}  ## slot -> Crosshair (a dimmer copy of another machine's crosshair)
+var cross_send_t := 0.0
 var zapped := {}  ## slot -> true once they zapped (the "A Zap!" pill goes away)
 var cross_layer: Control
 var hud: Control
@@ -167,7 +172,8 @@ func _ready() -> void:
 
 
 func _setup(mode: String) -> void:
-	if VrRig.wanted(mode):
+	var flat: bool = mode == "host" and not net.has_vr  # flat host (TV / Deck hosting): slot 0 is a pad gunner (the robot flies) here
+	if VrRig.wanted(mode) and not flat:
 		vr_rig = VrRig.new()
 		vr_rig.locomotion = false
 		vr_rig.turn_mode = "none"
@@ -189,7 +195,7 @@ func _setup(mode: String) -> void:
 		ghost = GhostHand.new()
 		add_child(ghost)
 		awards.set_player(0, "PILOT")
-	if mode != "host":
+	if mode != "host" or vr_rig == null:
 		split = SplitView.new()
 		split.camera_far = 1200.0
 		add_child(split)
@@ -207,7 +213,8 @@ func _setup(mode: String) -> void:
 			split.set_bubble(vr_rig.mirror)
 		else:
 			cockpit.add_robot()
-	party.allow_slot0 = mode == "local" and vr_rig == null
+	party.allow_slot0 = mode != "client" and vr_rig == null
+	party.allow_keyboard = net.machine_kind != "deck"  # a Steam Deck: its built-in controls are the one player
 	if mode != "client":
 		_start_show()
 	else:
@@ -218,7 +225,7 @@ func _setup(mode: String) -> void:
 
 
 static func _cam_xf() -> Transform3D:
-	return Transform3D(Basis.looking_at(CAM_LOOK - CAM_POS, Vector3.UP), CAM_POS)
+	return Transform3D(UiKit.face(CAM_LOOK - CAM_POS), CAM_POS)
 
 
 func _build_shield() -> void:
@@ -665,6 +672,38 @@ func _gunners(delta: float) -> void:
 	for slot in cross.keys():
 		if not party.is_local(int(slot)):
 			_remove_cross(int(slot))
+	# Many machines: tell the host where our crosshairs are, and draw the other machines' ones (dimmer).
+	cross_send_t -= delta
+	if net.mode == "client" and cross_send_t <= 0.0:
+		cross_send_t = 1.0 / 15.0
+		for slot in cross:
+			var c2: Vector2 = cross[slot]
+			net.send_state(Vector3(c2.x, c2.y, 0.0), 0.0, 0.0, int(slot))
+	for slot in far_cross:
+		if party.is_local(int(slot)) or not party.is_active(int(slot)):
+			continue
+		if not far_ui.has(slot):
+			var g := Crosshair.new()
+			g.col = party.color_of(int(slot))
+			g.modulate.a = 0.6
+			g.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			cross_layer.add_child(g)
+			far_ui[slot] = g
+		var fc: Vector2 = far_cross[slot]
+		var gu: Crosshair = far_ui[slot]
+		var want := Vector2((fc.x + 1.0) * 0.5 * cross_layer.size.x, (1.0 - fc.y) * 0.5 * cross_layer.size.y)
+		gu.position = gu.position.lerp(want, 1.0 - exp(-15.0 * delta))
+		gu.visible = playing
+	for slot in far_ui.keys():
+		if not far_cross.has(slot) or party.is_local(int(slot)) or not party.is_active(int(slot)):
+			(far_ui[slot] as Node).queue_free()
+			far_ui.erase(slot)
+
+
+## Host: a TV machine's gunner moved their crosshair (x, y in pos).
+func on_remote_state(slot: int, pos: Vector3, _yaw: float, _pitch: float) -> void:
+	if party.is_active(slot) and not party.is_local(slot):
+		far_cross[slot] = Vector2(pos.x, pos.y)
 
 
 func _add_cross(slot: int) -> void:
@@ -673,8 +712,8 @@ func _add_cross(slot: int) -> void:
 	ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	cross_layer.add_child(ui)
 	cross_ui[slot] = ui
-	var n := cross.size()
-	cross[slot] = Vector2(-0.3 + 0.2 * (n % 4), 0.1 - 0.15 * (n >> 2))
+	# start spot by seat, not by how many are local here: other machines' gunners don't land on ours
+	cross[slot] = Vector2(-0.45 + 0.15 * slot, 0.1 - 0.12 * (slot % 2))
 	if vr_rig == null and net.mode != "client":
 		awards.set_player(slot, party.name_of(slot))
 
@@ -694,6 +733,7 @@ func _on_player_joined(slot: int, _device: int) -> void:
 
 func _on_player_left(slot: int) -> void:
 	_remove_cross(slot)
+	far_cross.erase(slot)
 
 
 # --- Effects (every machine) -------------------------------------------------------------------------
@@ -712,7 +752,7 @@ func laser(from: Vector3, to: Vector3, col: Color) -> void:
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(mi)
 	var ln := from.distance_to(to)
-	mi.global_transform = Transform3D(Basis.looking_at(to - from, Vector3.UP).scaled(Vector3(1.0, 1.0, ln)), from)
+	mi.global_transform = Transform3D(UiKit.face(to - from).scaled(Vector3(1.0, 1.0, ln)), from)
 	var tw := mi.create_tween()
 	tw.tween_property(mi, "scale", Vector3(0.05, 0.05, ln), 0.2)
 	tw.tween_callback(mi.queue_free)
@@ -856,7 +896,7 @@ func _headline(delta: float) -> void:
 
 func _make_hud(parent: Control) -> void:
 	cross_layer = Control.new()
-	cross_layer.set_anchors_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(cross_layer, Control.PRESET_FULL_RECT, false)
 	cross_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	parent.add_child(cross_layer)
 	hud = UiKit.ui_root(parent)
@@ -871,7 +911,7 @@ func _make_hud(parent: Control) -> void:
 	col.add_child(star_row)
 	pill = UiKit.panel("pill")
 	hud.add_child(pill)
-	pill.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_KEEP_SIZE)
+	UiKit.pin(pill, Control.PRESET_CENTER_BOTTOM)
 	pill.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	pill.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	pill.offset_top = -60.0
@@ -984,7 +1024,7 @@ func on_pause_changed(paused: bool, _by_slot: int) -> void:
 			tv_banner = UiKit.panel("accent")
 			ui.add_child(tv_banner)
 			tv_banner.add_child(UiKit.title("PAUSED"))
-			tv_banner.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_KEEP_SIZE)
+			UiKit.pin(tv_banner, Control.PRESET_CENTER)
 			tv_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
 			tv_banner.grow_vertical = Control.GROW_DIRECTION_BOTH
 		tv_banner.visible = paused
@@ -997,7 +1037,15 @@ func on_pause_changed(paused: bool, _by_slot: int) -> void:
 func make_snapshot() -> Array:
 	var pose := vr_rig.pack_pose() if vr_rig != null else PackedFloat32Array()
 	var s := space.pack()
-	return [pose, space.off, cockpit.steer, space.speed, s[0], s[1], s[2]]
+	var xs := PackedFloat32Array()  # every gunner's crosshair: slot, x, y (each machine draws the others')
+	for slot in cross:
+		var c: Vector2 = cross[slot]
+		xs.append_array([float(slot), snappedf(c.x, 0.005), snappedf(c.y, 0.005)])
+	for slot in far_cross:
+		if party.is_active(int(slot)):
+			var c2: Vector2 = far_cross[slot]
+			xs.append_array([float(slot), snappedf(c2.x, 0.005), snappedf(c2.y, 0.005)])
+	return [pose, space.off, cockpit.steer, space.speed, s[0], s[1], s[2], xs]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -1006,12 +1054,24 @@ func apply_snapshot(s: Array) -> void:
 	var dt := get_process_delta_time()
 	if avatar != null:
 		avatar.apply_pose(s[0])
+	if split != null and (s[0] as PackedFloat32Array).is_empty():
+		split.clear_bubble()  # a flat host: no VR player to show in the bubble
+		if cockpit.avatar_seat == null:
+			cockpit.add_robot()  # ... and the robot flies, like on the host
 	var off: Vector2 = s[1]
 	space.off = off if space.off.distance_to(off) > 5.0 else space.off.lerp(off, 1.0 - exp(-20.0 * dt))
 	var st: Vector2 = s[2]
 	cockpit.steer = st
 	space.speed = float(s[3])
 	space.unpack([s[4], s[5], s[6]], dt)
+	if s.size() > 7:
+		var xs: PackedFloat32Array = s[7]
+		far_cross.clear()
+		var i := 0
+		while i + 2 < xs.size():
+			if not party.is_local(int(xs[i])):
+				far_cross[int(xs[i])] = Vector2(xs[i + 1], xs[i + 2])
+			i += 3
 
 
 func apply_event(kind: String, args: Array) -> void:

@@ -46,6 +46,8 @@ const BONK_REACH := 0.7
 var net: Node
 var ready_to_play := false
 var party: Party
+## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
+var multi_machine := true
 var split: SplitView
 var vr_rig: VrRig
 var save: Save
@@ -139,7 +141,8 @@ func _setup(mode: String) -> void:
 	monsters = Monsters.new()
 	monsters.name = "Monsters"
 	add_child(monsters)
-	if VrRig.wanted(mode):
+	var flat: bool = mode == "host" and not net.has_vr  # flat host (TV / Deck hosting): slot 0 is a pad player here
+	if VrRig.wanted(mode) and not flat:
 		vr_rig = VrRig.new()
 		vr_rig.move_speed = 1.8
 		vr_rig.turn_mode = "snap"
@@ -155,7 +158,7 @@ func _setup(mode: String) -> void:
 	sky = SkyKit.apply(self, "dungeon", vr_rig != null)
 	sky.env.ambient_light_energy = 1.2
 	_build_arrow()
-	if mode != "host":
+	if mode != "host" or vr_rig == null:
 		split = SplitView.new()
 		add_child(split)
 		split.bind_party(party)
@@ -170,7 +173,8 @@ func _setup(mode: String) -> void:
 			split.set_bubble(VrRig.build_mirror(self, avatar.head, false))
 		elif vr_rig != null:
 			split.set_bubble(vr_rig.mirror)
-	party.allow_slot0 = mode == "local" and vr_rig == null
+	party.allow_slot0 = mode != "client" and vr_rig == null
+	party.allow_keyboard = net.machine_kind != "deck"  # a Steam Deck: its built-in controls are the one player
 	if mode != "client":
 		net.state_set("vr", vr_rig != null)
 		_start_show()
@@ -681,7 +685,7 @@ func _tv_camera(delta: float) -> void:
 	cam_z = lerpf(cam_z, want, 1.0 - exp(-2.5 * delta))
 	var cam := split.shared_camera()
 	var pos := Vector3(0.0, 10.5, cam_z + 5.0)
-	cam.global_transform = Transform3D(Basis.looking_at(Vector3(0.0, 0.0, cam_z - 0.3) - pos, Vector3.UP), pos)
+	cam.global_transform = Transform3D(UiKit.face(Vector3(0.0, 0.0, cam_z - 0.3) - pos), pos)
 	shake = maxf(0.0, shake - delta * 2.0)
 	if shake > 0.0:
 		cam.global_position += Vector3(randf_range(-1, 1), randf_range(-1, 1), 0.0) * shake * 0.15
@@ -839,9 +843,7 @@ func _make_hud(parent: Control) -> void:
 	card.add_child(key_row)
 	pill = UiKit.panel("pill")
 	hud.add_child(pill)
-	pill.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	pill.offset_left = 0.0  # set_anchors_preset alone keeps the old offsets: the pill sat half off the left edge
-	pill.offset_right = 0.0
+	UiKit.pin(pill, Control.PRESET_CENTER_BOTTOM)
 	pill.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	pill.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	pill.offset_top = -60.0
@@ -951,7 +953,7 @@ func on_pause_changed(paused: bool, _by_slot: int) -> void:
 			tv_banner = UiKit.panel("accent")
 			ui.add_child(tv_banner)
 			tv_banner.add_child(UiKit.title("PAUSED"))
-			tv_banner.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_KEEP_SIZE)
+			UiKit.pin(tv_banner, Control.PRESET_CENTER)
 			tv_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
 			tv_banner.grow_vertical = Control.GROW_DIRECTION_BOTH
 		tv_banner.visible = paused
@@ -988,6 +990,8 @@ func apply_snapshot(s: Array) -> void:
 		return
 	if avatar != null:
 		avatar.apply_pose(s[0])
+	if split != null and (s[0] as PackedFloat32Array).is_empty():
+		split.clear_bubble()  # a flat host: no VR player to show in the bubble
 	var slots: PackedInt32Array = s[1]
 	var pos: PackedVector3Array = s[2]
 	var yaw: PackedFloat32Array = s[3]

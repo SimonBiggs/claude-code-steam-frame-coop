@@ -111,6 +111,8 @@ var net: Node
 var ready_to_play := false
 var players: Array = []  ## unused (core/net.gd looks for it); the player records are roster()
 var party: Party
+## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
+var multi_machine := true
 var split: SplitView
 var vr_rig: VrRig
 var save: Save
@@ -211,7 +213,8 @@ func _ready() -> void:
 
 
 func _setup(mode: String) -> void:
-	if VrRig.wanted(mode):
+	var flat: bool = mode == "host" and not net.has_vr  # flat host (TV / Deck hosting): slot 0 is a pad player here
+	if VrRig.wanted(mode) and not flat:
 		vr_rig = VrRig.new()
 		add_child(vr_rig)
 		vr_rig.bounds = Rect2(-TABLE_R - 0.6, -TABLE_R - 0.6, (TABLE_R + 0.6) * 2.0, (TABLE_R + 0.6) * 2.0)
@@ -222,7 +225,7 @@ func _setup(mode: String) -> void:
 	if simple:
 		data.make_simple()
 	_build_world()
-	if mode != "host":
+	if mode != "host" or vr_rig == null:
 		split = SplitView.new()
 		split.camera_near = 0.05 * S
 		split.camera_far = 900.0 * maxf(S, 0.2)
@@ -241,7 +244,8 @@ func _setup(mode: String) -> void:
 			split.set_bubble(VrRig.build_mirror(self, giant.head, false))
 		elif vr_rig != null:
 			split.set_bubble(vr_rig.mirror)
-	party.allow_slot0 = mode == "local" and vr_rig == null
+	party.allow_slot0 = mode != "client" and vr_rig == null
+	party.allow_keyboard = net.machine_kind != "deck"  # a Steam Deck: its built-in controls are the one player
 	dice = DiceScript.new()
 	dice.main = self
 	add_child(dice)
@@ -787,11 +791,19 @@ func on_request(slot: int, action: String, args: Array) -> void:
 
 
 func on_client_joined() -> void:
-	print("Party Board: the TV machine joined")
+	print("Party Board: a TV machine joined")
 
 
 func on_client_left() -> void:
 	remote_in.clear()
+	_press_seen.clear()
+
+
+## Host: one machine went away: forget only its seats' sticks and presses (others keep playing).
+func on_machine_left(peer: int) -> void:
+	for s in party.slots_of(peer):
+		remote_in.erase(s)
+		_press_seen.erase(s)
 
 
 # --- Snapshots ----------------------------------------------------------------------------------------
@@ -814,6 +826,8 @@ func apply_snapshot(s: Array) -> void:
 		return
 	if giant != null:
 		giant.apply_pose(s[0])
+	if split != null and (s[0] as PackedFloat32Array).is_empty():
+		split.clear_bubble()  # a flat host: no VR player to show in the bubble
 	dice.apply_snapshot(s[1])
 	runner.apply_snapshot(s[2])
 
@@ -843,7 +857,7 @@ func on_pause_changed(paused: bool, by_slot: int) -> void:
 			var l := UiKit.label("", "small", "dim", HORIZONTAL_ALIGNMENT_CENTER)
 			l.name = "Why"
 			v.add_child(l)
-			_pause_tv.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_KEEP_SIZE)
+			UiKit.pin(_pause_tv, Control.PRESET_CENTER)
 			_pause_tv.grow_horizontal = Control.GROW_DIRECTION_BOTH
 			_pause_tv.grow_vertical = Control.GROW_DIRECTION_BOTH
 		var wl := _pause_tv.find_child("Why", true, false) as Label
