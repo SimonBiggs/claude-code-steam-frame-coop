@@ -149,6 +149,13 @@ func _reload_script(path: String) -> void:
 		_log("RELOAD FAILED %s: %s (fix it and save again)" % [path, error_string(err)])
 		return
 	_apply_new_defaults(s)
+	# Setup that ran only in _ready goes stale after a reload (pad mappings, layouts sized at build time...): any
+	# node using this script may define _on_hot_reload() to redo it. Deferred, so the new code is fully in place.
+	var users: Array[Node] = []
+	_find_users(get_tree().root, s, users)
+	for n in users:
+		if n.has_method("_on_hot_reload"):
+			n.call_deferred("_on_hot_reload")
 	_log("reloaded " + path)
 
 

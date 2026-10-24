@@ -73,8 +73,16 @@ const PANEL_STYLES := {"default": "PanelContainer", "glass": "PanelContainer", "
 
 ## Anchor a Control to a preset AND reset its offsets (set_anchors_preset alone, after add_child, keeps the old
 ## offsets: centred / right / bottom panels landed half off screen in 21 games). keep_size: grow from the anchor.
+## Grow directions follow the preset too (centred panels grow both ways, right / bottom ones grow left / up), so a
+## panel whose size isn't known yet still ends up centred / inside the screen.
 static func pin(c: Control, preset: int, keep_size: bool = true) -> void:
 	c.set_anchors_and_offsets_preset(preset, Control.PRESET_MODE_KEEP_SIZE if keep_size else Control.PRESET_MODE_MINSIZE)
+	var right := preset in [Control.PRESET_TOP_RIGHT, Control.PRESET_BOTTOM_RIGHT, Control.PRESET_CENTER_RIGHT, Control.PRESET_RIGHT_WIDE]
+	var bottom := preset in [Control.PRESET_BOTTOM_LEFT, Control.PRESET_BOTTOM_RIGHT, Control.PRESET_CENTER_BOTTOM, Control.PRESET_BOTTOM_WIDE]
+	var hcenter := preset in [Control.PRESET_CENTER, Control.PRESET_CENTER_TOP, Control.PRESET_CENTER_BOTTOM, Control.PRESET_VCENTER_WIDE]
+	var vcenter := preset in [Control.PRESET_CENTER, Control.PRESET_CENTER_LEFT, Control.PRESET_CENTER_RIGHT, Control.PRESET_HCENTER_WIDE]
+	c.grow_horizontal = Control.GROW_DIRECTION_BOTH if hcenter else (Control.GROW_DIRECTION_BEGIN if right else Control.GROW_DIRECTION_END)
+	c.grow_vertical = Control.GROW_DIRECTION_BOTH if vcenter else (Control.GROW_DIRECTION_BEGIN if bottom else Control.GROW_DIRECTION_END)
 
 
 ## A basis looking along `dir` that never goes NaN: looking_at(dir, UP) is degenerate when dir is vertical (looking
@@ -83,11 +91,11 @@ static func face(dir: Vector3, up: Vector3 = Vector3.UP, alt_up: Vector3 = Vecto
 	if dir.length() < 0.0001:
 		return Basis()
 	var d := dir.normalized()
-	var best := up
-	for u in [alt_up, Vector3.RIGHT]:
-		if absf(d.dot((u as Vector3).normalized())) < absf(d.dot(best.normalized())):
-			best = u
-	return Basis.looking_at(d, best)
+	# Keep the normal up (no roll) unless it's nearly parallel; only then fall back to alt_up, then RIGHT.
+	for u in [up, alt_up, Vector3.RIGHT]:
+		if absf(d.dot((u as Vector3).normalized())) < 0.98:
+			return Basis.looking_at(d, u)
+	return Basis.looking_at(d, Vector3.BACK)
 
 
 ## Controller A / B in Godot's built-in ui_accept / ui_cancel (they only have Enter / Esc by default, so every

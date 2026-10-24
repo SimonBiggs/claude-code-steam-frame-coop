@@ -60,25 +60,25 @@ const GAMES := [
 		"blurb": "Be the hero in VR! Swing your sword, raise your hand for magic, and restore the Crystal of Light with your party."},
 	{"id": "balloon_pop", "multi": true, "cat": "party", "name": "BALLOON POP", "scene": "res://games/balloon_pop/main.tscn",
 		"blurb": "Pop the balloons floating up all around you: VR punches and squeezes, TV players run and jump!"},
-	{"id": "sheep_round_up", "cat": "cosy", "name": "SHEEP ROUND-UP", "scene": "res://games/sheep_round_up/main.tscn",
+	{"id": "sheep_round_up", "multi": true, "cat": "cosy", "name": "SHEEP ROUND-UP", "scene": "res://games/sheep_round_up/main.tscn",
 		"blurb": "Sheepdogs herd, the giant farmer scoops - get every fluffy sheep into the pen!"},
-	{"id": "fruit_catch", "cat": "party", "name": "FRUIT CATCH", "scene": "res://games/fruit_catch/main.tscn",
+	{"id": "fruit_catch", "multi": true, "cat": "party", "name": "FRUIT CATCH", "scene": "res://games/fruit_catch/main.tscn",
 		"blurb": "Shake the giant tree and catch the falling fruit in your baskets!"},
-	{"id": "whack_a_mole", "cat": "party", "name": "WHACK-A-MOLE", "scene": "res://games/whack_a_mole/main.tscn",
+	{"id": "whack_a_mole", "multi": true, "cat": "party", "name": "WHACK-A-MOLE", "scene": "res://games/whack_a_mole/main.tscn",
 		"blurb": "Silly moles pop out of a big table: bonk them with a giant mallet or a tiny hammer!"},
 	{"id": "tower_stack", "cat": "party", "name": "TOWER STACK", "scene": "res://games/tower_stack/main.tscn",
 		"blurb": "Build the tallest tower together: helpers push jelly blocks to the bouncy pad, the giant stacks them high."},
 	{"id": "elemental_bender", "cat": "action", "name": "ELEMENTAL BENDER", "scene": "res://games/elemental_bender/main.tscn",
 		"blurb": "Bend air, water, earth and fire to defend the island temple from the Shadow Raiders!"},
-	{"id": "treasure_dig", "cat": "party", "name": "TREASURE DIG", "scene": "res://games/treasure_dig/main.tscn",
+	{"id": "treasure_dig", "multi": true, "cat": "party", "name": "TREASURE DIG", "scene": "res://games/treasure_dig/main.tscn",
 		"blurb": "Dig up treasure on a sandy island while the VR giant's magic telescope shows where it hides!"},
-	{"id": "paper_planes", "cat": "party", "name": "PAPER PLANES", "scene": "res://games/paper_planes/main.tscn",
+	{"id": "paper_planes", "multi": true, "cat": "party", "name": "PAPER PLANES", "scene": "res://games/paper_planes/main.tscn",
 		"blurb": "Throw and fly paper planes through floating hoops together. Rainbow hoops are worth 3!"},
-	{"id": "bubble_bath", "cat": "party", "name": "BUBBLE BATH", "scene": "res://games/bubble_bath/main.tscn",
+	{"id": "bubble_bath", "multi": true, "cat": "party", "name": "BUBBLE BATH", "scene": "res://games/bubble_bath/main.tscn",
 		"blurb": "Steer tiny boats to round up rubber ducks and sail them down the plug-hole, while the giant splashes up waves."},
-	{"id": "snowman_maker", "cat": "cosy", "name": "SNOWMAN MAKER", "scene": "res://games/snowman_maker/main.tscn",
+	{"id": "snowman_maker", "multi": true, "cat": "cosy", "name": "SNOWMAN MAKER", "scene": "res://games/snowman_maker/main.tscn",
 		"blurb": "Roll giant snowballs, stack them up, and give every snowman a carrot nose and a hat!"},
-	{"id": "dodge_ball", "cat": "party", "name": "SOFT DODGEBALL", "scene": "res://games/dodge_ball/main.tscn",
+	{"id": "dodge_ball", "multi": true, "cat": "party", "name": "SOFT DODGEBALL", "scene": "res://games/dodge_ball/main.tscn",
 		"blurb": "A friendly VR giant throws squishy balls; dodge them and bop the target on his belly!"},
 ]
 ## Tabs on the TV (LB/RB) and in VR (stick left/right). Empty categories are hidden.
@@ -88,7 +88,22 @@ const CATEGORIES := [
 	{"id": "party", "name": "PARTY", "color": Color(1.0, 0.8, 0.3)},
 	{"id": "sports", "name": "SPORTS & RACING", "color": Color(0.35, 0.9, 0.5)},
 	{"id": "cosy", "name": "COSY & PUZZLE", "color": Color(0.45, 0.8, 1.0)},
+	# A filter, not a home category: every game one person can play (SOLO below), made-for-solo ones first.
+	{"id": "solo", "name": "1 PLAYER", "color": Color(1.0, 0.6, 0.85)},
 ]
+## Playable by ONE player (Simon, 2026-10-24: a "supports single player" tier and filter). 2 = made for solo (a solo
+## mode or CPU partners; a ★ badge on the card), 1 = works alone but best with friends, missing = needs people
+## (Hide and Seek, Paint and Guess). From dev.soloCheck() (every game played offscreen with one pad) + each game's
+## own solo features. One table so it lives in one place.
+const SOLO := {
+	"bee_garden": 2, "block_builders": 2, "dodge_ball": 2, "dragon_rider": 2, "duo_arena": 2, "elemental_bender": 2,
+	"ghost_lantern": 2, "giants_table": 2, "kart_race": 2, "kitchen_rush": 2, "marble_maze": 2, "obstacle_rush": 2,
+	"party_board": 2, "penalty_shootout": 2, "rocket_workshop": 2, "roller_coaster": 2, "snowball_blitz": 2,
+	"snowman_maker": 2, "starship_crew": 2, "treasure_dig": 2,
+	"balloon_pop": 1, "bubble_bath": 1, "cannon_cove": 1, "crystal_saga": 1, "dungeon_delve": 1, "fishing_lake": 1,
+	"fruit_catch": 1, "mech_titans": 1, "mini_golf_party": 1, "paper_planes": 1, "rhythm_band": 1,
+	"sheep_round_up": 1, "tiny_town_tycoon": 1, "tower_stack": 1, "whack_a_mole": 1,
+}
 const VrText := preload("res://core/vr_text.gd")
 const DEFAULT_PORT := 7777
 const JOIN_TIMEOUT_MS := 5000
@@ -119,7 +134,7 @@ var starting := false
 const MAX_LOBBY_MACHINES := 32  # ENet allows 4095; games are limited by seats, not machines
 const FIND_SECONDS := 2.2
 var machines := {}  # lobby host: peer -> {"kind": String, "ip": String}
-var my_kind: String = OS.get_environment("DUO_MACHINE_KIND") if OS.has_environment("DUO_MACHINE_KIND") else "tv"
+var my_kind: String = preload("res://core/machine.gd").kind()
 var host_has_vr := false
 var lobby_id := randi()  # flat hosts that start together: the higher id gives way
 var _finding := 0.0  # seconds left looking for a lobby before hosting one
@@ -142,7 +157,12 @@ func _ready() -> void:
 	if xr != null and xr.is_initialized():
 		my_kind = "frame"
 	if not OS.has_environment("DUO_JOIN_ORIGINAL"):
-		OS.set_environment("DUO_JOIN_ORIGINAL", OS.get_environment("DUO_JOIN") if OS.has_environment("DUO_JOIN") else "")
+		# How this machine networks comes from core/machine.gd: by default "auto" (play locally at once, keep looking
+		# for other devices). A VR host still hosts (below); DUO_JOIN / DUO_SOLO override.
+		var target := preload("res://core/machine.gd").join_target()
+		if my_kind == "frame" or OS.has_environment("DUO_HOST"):
+			target = OS.get_environment("DUO_JOIN") if OS.has_environment("DUO_JOIN") else ""
+		OS.set_environment("DUO_JOIN_ORIGINAL", target)
 		OS.set_environment("DUO_HOST_ORIGINAL", "1" if OS.has_environment("DUO_HOST") else "")
 	# Each lobby visit starts from how the machine was launched (a game may have changed these).
 	_restore_env()
@@ -354,6 +374,9 @@ func _launch(index: int) -> void:
 
 
 func _process(_delta: float) -> void:
+	if not has_meta("pad_ui"):  # here, not only in _ready: a hot-reloaded arcade gets it too
+		set_meta("pad_ui", true)
+		preload("res://core/ui_kit.gd").ensure_pad_ui_actions()
 	_lobby_net(_delta)
 	_ensure_shared_nodes()
 	_ensure_fullscreen()
@@ -398,13 +421,14 @@ func _build_tv_menu() -> void:
 	glow.color = Color(0.12, 0.08, 0.3)
 	layer.add_child(glow)
 	glow.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
-	glow.custom_minimum_size = Vector2(0, 150)
+	glow.custom_minimum_size = Vector2(0, 172)  # covers the title and the status line under it
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 14)
 	layer.add_child(box)
-	box.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
-	box.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	box.position.y = 28
+	# Fills the screen (28 px top, 14 px bottom) so the card area takes exactly the height that is left, on any screen.
+	box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	box.offset_top = 28
+	box.offset_bottom = -14
 	var title := Label.new()
 	title.text = "LIVING ROOM ARCADE"
 	title.add_theme_font_size_override("font_size", 60)
@@ -424,18 +448,30 @@ func _build_tv_menu() -> void:
 	tab_bar.add_theme_constant_override("separation", 10)
 	box.add_child(tab_bar)
 	grid = GridContainer.new()
-	grid.columns = 3
+	# As many 600 px columns as the screen really fits (a 16:9 TV: 3; a 16:10 Steam Deck: 2), instead of a fixed 3
+	# that ran off the Deck's screen.
+	var vis_w := get_viewport().get_visible_rect().size.x
+	grid.columns = clampi(int((vis_w - 40.0) / 618.0), 1, 3)
 	grid.add_theme_constant_override("h_separation", 18)
 	grid.add_theme_constant_override("v_separation", 16)
 	var center := CenterContainer.new()
-	center.custom_minimum_size = Vector2(1860, 0)
+	center.custom_minimum_size = Vector2(minf(1860.0, vis_w - 20.0), 0)
 	center.add_child(grid)
-	box.add_child(center)
+	# Any tab can hold more games than fit (the 1 PLAYER tab has 35): the cards scroll, following the highlight.
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.follow_focus = true
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	scroll.custom_minimum_size.x = center.custom_minimum_size.x
+	scroll.add_child(center)
+	box.add_child(scroll)
 	var hint := Label.new()
-	hint.text = "LB / RB (Q / E): change category   ·   D-pad / arrows: choose   ·   A / Enter: play   ·   more games: just ask Claude!"
+	hint.text = "LB / RB (Q / E): change category   ·   D-pad / arrows: choose   ·   A / Enter: play" + ("   ·   Start: quit" if _can_quit() else "") + "   ·   more games: just ask Claude!"
 	hint.add_theme_font_size_override("font_size", 20)
 	hint.add_theme_color_override("font_color", Color(0.6, 0.65, 0.8))
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART  # two lines on a narrow screen instead of running off the sides
 	box.add_child(hint)
 	cat = maxi(0, tabs().find(_cat_index_of(selected)))
 	_show_category(cat, false)
@@ -446,10 +482,16 @@ func tabs() -> Array[int]:
 	var out: Array[int] = []
 	for c in CATEGORIES.size():
 		for g in GAMES:
-			if str(g.get("cat", "action")) == str(CATEGORIES[c].id):
+			if _in_category(g, str(CATEGORIES[c].id)):
 				out.append(c)
 				break
 	return out
+
+
+func _in_category(g: Dictionary, cat_id: String) -> bool:
+	if cat_id == "solo":
+		return int(SOLO.get(str(g.get("id", "")), 0)) > 0
+	return str(g.get("cat", "action")) == cat_id
 
 
 func _cat_index_of(game_index: int) -> int:
@@ -466,9 +508,15 @@ func _games_in(tab: int) -> Array[int]:
 	if t.is_empty():
 		return out
 	var c: int = t[clampi(tab, 0, t.size() - 1)]
+	var id := str(CATEGORIES[c].id)
 	for i in GAMES.size():
-		if str(GAMES[i].get("cat", "action")) == str(CATEGORIES[c].id):
+		if _in_category(GAMES[i], id):
 			out.append(i)
+	if id == "solo":  # made-for-solo games first, otherwise the usual order
+		out.sort_custom(func(a: int, b: int) -> bool:
+			var sa := int(SOLO.get(str(GAMES[a].id), 0))
+			var sb := int(SOLO.get(str(GAMES[b].id), 0))
+			return sa > sb if sa != sb else a < b)
 	return out
 
 
@@ -565,7 +613,9 @@ func _make_card(i: int, colour: Color) -> Button:
 	v.add_theme_constant_override("separation", 6)
 	row.add_child(v)
 	var name_label := Label.new()
-	name_label.text = str(g.name)
+	name_label.text = str(g.name) + (" ★" if int(SOLO.get(str(g.id), 0)) == 2 else "")  # ★ = made for solo (1 PLAYER tab)
+	name_label.clip_text = true
+	name_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	name_label.add_theme_font_size_override("font_size", 28)
 	name_label.add_theme_color_override("font_color", colour)
@@ -584,8 +634,95 @@ func _make_card(i: int, colour: Color) -> Button:
 	return b
 
 
+## gdev hot reload hook: rebuild what _ready built once (the TV menu is sized to the screen at build time).
+func _on_hot_reload() -> void:
+	preload("res://core/ui_kit.gd").ensure_pad_ui_actions()
+	if quit_panel and is_instance_valid(quit_panel):
+		return
+	for c in get_children():
+		if c is CanvasLayer:
+			c.queue_free()
+	buttons.clear()
+	cards.clear()
+	_build_tv_menu.call_deferred()
+
+
+## Quitting the arcade: on handhelds (Steam Deck) and plain local launches; never on the TV, which stays on (kids).
+func _can_quit() -> bool:
+	return my_kind != "tv" or OS.has_environment("ARCADE_ALLOW_QUIT")
+
+
+var quit_panel: PanelContainer
+var quit_opener := -1  # the pad that opened the quit dialog (-2 keyboard); only it may answer (same rule as the pause menu)
+var quit_a_released := false
+
+func _toggle_quit_menu() -> void:
+	if quit_panel and is_instance_valid(quit_panel):
+		quit_panel.queue_free()
+		quit_panel = null
+		if cards.has(selected):
+			(cards[selected] as Button).grab_focus()
+		return
+	var layer := CanvasLayer.new()
+	layer.layer = 20
+	add_child(layer)
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.6)
+	layer.add_child(dim)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	quit_panel = PanelContainer.new()
+	var box := StyleBoxFlat.new()
+	box.bg_color = Color(0.1, 0.09, 0.2)
+	box.border_color = Color(0.45, 0.85, 1.0)
+	box.set_border_width_all(3)
+	box.set_corner_radius_all(18)
+	box.set_content_margin_all(28)
+	quit_panel.add_theme_stylebox_override("panel", box)
+	layer.add_child(quit_panel)
+	preload("res://core/ui_kit.gd").pin(quit_panel, Control.PRESET_CENTER)
+	quit_panel.tree_exited.connect(layer.queue_free)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 14)
+	quit_panel.add_child(v)
+	var t := Label.new()
+	t.text = "Quit the arcade?"
+	t.add_theme_font_size_override("font_size", 34)
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(t)
+	for item in [["Keep playing", _toggle_quit_menu], ["Quit", func() -> void: get_tree().quit()]]:
+		var b := Button.new()
+		b.text = item[0]
+		b.custom_minimum_size = Vector2(360, 64)
+		b.add_theme_font_size_override("font_size", 28)
+		b.pressed.connect(item[1])
+		v.add_child(b)
+	(v.get_child(1) as Button).grab_focus()
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if grid == null or starting:
+		return
+	var start := event as InputEventJoypadButton
+	var esc := event as InputEventKey
+	if _can_quit() and ((start and start.pressed and start.button_index == JOY_BUTTON_START) or (esc and esc.pressed and not esc.echo and esc.physical_keycode == KEY_ESCAPE) or (quit_panel and start and start.pressed and start.button_index == JOY_BUTTON_B)):
+		get_viewport().set_input_as_handled()
+		if not (quit_panel and is_instance_valid(quit_panel)):
+			quit_opener = start.device if start else -2
+			quit_a_released = false
+		_toggle_quit_menu()
+		return
+	if quit_panel and is_instance_valid(quit_panel):
+		# The dialog presses its own focused button on pad A (don't rely on ui_accept having A: a hot-reloaded arcade
+		# never ran ensure_pad_ui_actions at startup, and A did nothing).
+		if start and quit_opener >= 0 and start.device != quit_opener:
+			return  # another player's pad
+		if start and not start.pressed and start.button_index == JOY_BUTTON_A:
+			quit_a_released = true
+		if start and start.pressed and start.button_index == JOY_BUTTON_A and quit_a_released:
+			var f := get_viewport().gui_get_focus_owner()
+			if f is BaseButton and quit_panel.is_ancestor_of(f):
+				get_viewport().set_input_as_handled()
+				(f as BaseButton).pressed.emit()
 		return
 	var step := 0
 	var pad := event as InputEventJoypadButton

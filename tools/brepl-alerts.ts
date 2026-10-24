@@ -134,6 +134,7 @@ async function newErrors(path: string): Promise<string[]> {
     if (!GODOT_ERR.test(l) || l.includes("BOT ") || EXIT_NOISE.test(l) || seen.has(l)) return;
     seen.add(l);
     const at = lines[i + 1]?.trim().startsWith("at:") ? ` ${lines[i + 1].trim()}` : "";
+    if (at.includes("gdscript://")) return;  // an error in a test tool's own g.eval() snippet, not in the game
     out.push(l.trim().slice(0, 200) + at);
   });
   return out;

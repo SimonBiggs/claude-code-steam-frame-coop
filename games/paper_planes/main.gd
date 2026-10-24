@@ -92,8 +92,12 @@ class Flyer:  # a TV player's plane
 # --- The networking contract ---
 var net: Node
 var ready_to_play := false
+var flat_host := false  # this machine hosts without VR: slot 0 is a pad / keyboard player here, like local play
+var net_target := {}  # slot -> [pos, yaw]: where another machine's player is (smoothed towards every frame)
 # --- Engine modules ---
 var party: Party
+## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
+var multi_machine := true
 var split: SplitView
 var vr_rig: VrRig
 var save: Save
@@ -145,6 +149,8 @@ func _ready() -> void:
 	party = Party.new()
 	party.name = "Party"
 	add_child(party)
+	if net.machine_kind == "deck":
+		party.allow_keyboard = false  # a Steam Deck: one player on its built-in controls; more pads may drop in
 	party.player_joined.connect(_on_player_joined)
 	party.player_left.connect(_on_player_left)
 	save = Save.new()
@@ -173,7 +179,8 @@ func _ready() -> void:
 
 
 func _setup(mode: String) -> void:
-	if VrRig.wanted(mode):
+	flat_host = mode == "host" and not net.has_vr
+	if VrRig.wanted(mode) and not flat_host:
 		vr_rig = VrRig.new()
 		vr_rig.bounds = Rect2(-4.0, 2.5, 8.0, 5.0)
 		add_child(vr_rig)
@@ -188,7 +195,7 @@ func _setup(mode: String) -> void:
 		stack_node.add_child(stack_mesh)
 		stack_node.position = VR_FEET + STACK_OFFSET
 		stack_node.visible = vr_rig != null
-	if mode != "host":
+	if mode != "host" or flat_host:  # every machine with a screen of its own (a flat host too)
 		split = SplitView.new()
 		add_child(split)
 		split.bind_party(party)
@@ -197,14 +204,10 @@ func _setup(mode: String) -> void:
 		sc.look_at(Vector3(0.0, 2.5, -4.0), Vector3.UP)
 		_make_hud(-1, split.shared_hud())
 		hints.add_view(huds[-1], -1)
-		if mode == "client":
-			vr_avatar = VrRig.Avatar.new()
-			add_child(vr_avatar)
-			split.set_bubble(VrRig.build_mirror(self, vr_avatar.head, false))
-		elif vr_rig != null:
+		if vr_rig != null:
 			split.set_bubble(vr_rig.mirror)
 		sfx.play_loop("wind", -20.0)
-	party.allow_slot0 = mode == "local" and vr_rig == null
+	party.allow_slot0 = (mode == "local" and vr_rig == null) or flat_host
 	if vr_rig != null:
 		awards.set_player(0, "THROWER")
 		hints.hint("vr_grab", "Grab a plane. Throw it!", {"to": "vr", "icon": "play"})
@@ -273,7 +276,7 @@ func _make_hud(slot: int, parent: Control) -> void:
 		join_prompt = UiKit.panel("pill")
 		join_prompt.add_child(UiKit.prompts([["A", "Join"]]))
 		ui.add_child(join_prompt)
-		join_prompt.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_KEEP_SIZE)
+		UiKit.pin(join_prompt, Control.PRESET_CENTER_BOTTOM)
 		join_prompt.grow_horizontal = Control.GROW_DIRECTION_BOTH
 		join_prompt.grow_vertical = Control.GROW_DIRECTION_BEGIN
 		join_prompt.offset_top = -60.0
@@ -490,6 +493,22 @@ func on_remote_state(slot: int, pos: Vector3, yaw: float, pitch: float) -> void:
 			_score_hoop(id, slot, pos)
 
 
+## Host: one machine left. core/party.gd frees just its seats (player_left removes their planes and
+## views); this game keeps no other per-machine state.
+func on_machine_left(peer: int) -> void:
+	for slot in party.slots_of(peer):
+		if flyers.has(slot):
+			(flyers[slot] as Flyer).has_target = false
+
+
+## TV machine: the VR player as seen from here (only when the host has one), plus the little window into their view.
+func _make_vr_avatar() -> void:
+	vr_avatar = VrRig.Avatar.new()
+	add_child(vr_avatar)
+	if split != null:
+		split.set_bubble(VrRig.build_mirror(self, vr_avatar.head, false))
+
+
 static func _forward(yaw: float, pitch: float) -> Vector3:
 	return Vector3(-sin(yaw) * cos(pitch), sin(pitch), -cos(yaw) * cos(pitch))
 
@@ -652,7 +671,7 @@ func hoop_fx(at: Vector3, kind: int, ci: int, by: int, pts: int) -> void:
 		var tw := sign_score.create_tween()
 		sign_score.scale = Vector3.ONE * 1.3
 		tw.tween_property(sign_score, "scale", Vector3.ONE, 0.35).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	if by > 0 and party.is_local(by):
+	if by >= 0 and party.is_local(by):
 		party.rumble(by, 0.4, 0.7, 0.25)
 	if by == 0 and vr_rig != null:
 		vr_rig.pulse(VrRig.LEFT, 0.6, 0.1)
@@ -852,8 +871,7 @@ func _fly_darts(delta: float) -> void:
 static func _orient_dart(d: Dart, dir: Vector3, roll: float) -> void:
 	if dir.length() < 0.01:
 		return
-	var up := Vector3.UP if absf(dir.y) < 0.98 else Vector3.FORWARD
-	d.node.basis = Basis.looking_at(dir, up) * Basis(Vector3.FORWARD, roll)
+	d.node.basis = UiKit.face(dir) * Basis(Vector3.FORWARD, roll)
 
 
 func _bop(slot: int) -> void:
@@ -965,7 +983,7 @@ func on_pause_changed(paused: bool, by_slot: int) -> void:
 			var l := UiKit.label("", "small", "dim", HORIZONTAL_ALIGNMENT_CENTER)
 			l.name = "Why"
 			v.add_child(l)
-			tv_banner.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_KEEP_SIZE)
+			UiKit.pin(tv_banner, Control.PRESET_CENTER)
 			tv_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
 			tv_banner.grow_vertical = Control.GROW_DIRECTION_BOTH
 		(tv_banner.find_child("Why", true, false) as Label).text = "by %s" % party.name_of(by_slot)
@@ -1006,7 +1024,7 @@ func _process(delta: float) -> void:
 	if not ready_to_play:
 		return
 	clock += delta
-	if net.mode != "host":
+	if split != null:
 		_fly_local(delta)
 	_animate_flyers(delta)
 	_animate_hoops(delta)
@@ -1057,14 +1075,39 @@ func make_snapshot() -> Array:
 		var p := d.node.global_position
 		var f := -d.node.global_basis.z
 		df.append_array([p.x, p.y, p.z, f.x, f.y, f.z, d.size])
-	return [pose, sp, hids, hf, hk, dids, df]
+	# Every plane (slot, position, yaw, pitch): each machine sees the other machines' flyers.
+	var fs := PackedByteArray()
+	var fp := PackedVector3Array()
+	var fa := PackedFloat32Array()
+	for slot in flyers:
+		var f: Flyer = flyers[slot]
+		fs.append(int(slot))
+		fp.append(f.node.position)
+		fa.append_array([f.yaw, f.pitch])
+	return [pose, sp, hids, hf, hk, dids, df, fs, fp, fa]
 
 
 func apply_snapshot(s: Array) -> void:
-	if not ready_to_play or s.size() < 7:
+	if not ready_to_play or s.size() < 10:
 		return
+	var pose: PackedFloat32Array = s[0]
+	if pose.size() > 0 and vr_avatar == null:
+		_make_vr_avatar()  # only when the host has a VR player (not on a flat host)
 	if vr_avatar != null:
-		vr_avatar.apply_pose(s[0])
+		vr_avatar.apply_pose(pose)
+	var fs: PackedByteArray = s[7]
+	var fp: PackedVector3Array = s[8]
+	var fa: PackedFloat32Array = s[9]
+	for i in fs.size():
+		var slot: int = fs[i]
+		if flyers.has(slot) and not party.is_local(slot):
+			var f: Flyer = flyers[slot]  # _animate_flyers glides it there
+			if not f.has_target:
+				f.has_target = true
+				f.node.position = fp[i]
+			f.target = fp[i]
+			f.target_yaw = fa[i * 2]
+			f.target_pitch = fa[i * 2 + 1]
 	var sp: Vector3 = s[1]
 	if stack_node != null:
 		stack_node.visible = sp.y > -10.0
