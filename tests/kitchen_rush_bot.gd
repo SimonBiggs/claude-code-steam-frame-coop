@@ -4,9 +4,18 @@ extends Node
 # BOT_PLAYERS=N (1..6): N TV runners join (local split screen, or on the TV machine when networked). The last
 # one joins through a fake controller pressing Start (the real drop-in path); with N >= 3 that controller is
 # later "unplugged" (the runner should leave after 15 s) and plugged back in (it should rejoin).
-# KR_FAKE_VR=1: the real VR chef code runs; the bot moves the fake hands like a person, following the
+# SIMPLE_MODE (main.gd): checks the practice order, the ghost hand, the glowing spots / crates / pass,
+# one new dish per round, no game over, and (fake VR) pokes every prop: pans, clock, grinder, bell, a
+# thrown veggie and the spoon. DUO_HOST=1 alone = solo VR: the kitchen helpers must keep it going.
+# KR_FAKE_VR=1 (or BOT_VR=1): the real VR chef code runs; the bot moves the fake hands like a person, following the
 # chef's on-screen "next step" guidance (chop with a knife swing, grab with the right trigger, drop on the plate).
 # KR_START_SHIFT=N starts at shift N (3 = the first dinner, with the rush).
+# Visual teaching (simple mode): records the picture cues each view shows (cue_take, cue_drop, cue_serve,
+# cue_chop, cue_grab, cue_move, cue_plug), the ones learned (cue_learned_*), the glowing arrows (fetch_arrow,
+# pass_arrow, plate_arrow, serve_arrow, chef_arrow), the ghost hand and that no view draws its own name tag,
+# checks the pause banner is just PAUSED, and prints "BOT: ERROR instruction text" if a headline (TV or VR)
+# is anything but a short title word, or a tip spot (a view's hint line, job panel, carry / order lists,
+# the help panel, the VR hint, the wrist, the top line) shows any words.
 const L := preload("res://games/kitchen_rush/layout.gd")
 const M := preload("res://games/kitchen_rush/main.gd")
 
@@ -32,6 +41,13 @@ var vr_target = null
 var vr_from := Vector3.ZERO
 var vr_chops := 0
 var vr_drops := 0
+var play_at := 25.0
+var play_step := 0
+var playing := false
+var grumpy_seen := false
+var cues := {}  # simple mode: picture cues seen / learned
+const HEADLINES := "^(KITCHEN RUSH!|Connecting to the chef…|P\\d!|LET'S COOK!|NEW DISH!|OPEN!|HOORAY!|RACCOON!|ORDER UP!|PAUSED)$"
+var headline_re := RegEx.create_from_string(HEADLINES)
 
 
 func _ready() -> void:
@@ -52,10 +68,25 @@ func _physics_process(delta: float) -> void:
 		main.shift = int(OS.get_environment("KR_START_SHIFT")) - 1
 		print("BOT: starting at shift %d" % (main.shift + 1))
 	_note_features()
+	if main.simple:
+		_note_cues()
+		if not has_meta("pause_check") and t >= 30.0 and mode != "client":
+			set_meta("pause_check", true)  # the pause banner is just PAUSED (no sentence)
+			main._set_pause_banner(true, "A TV player opened the menu")
+			var pt: String = main.center_label.text
+			print("Bot: pause banner %s" % ("PAUSED" if pt == "PAUSED" else "ERROR: " + pt.replace("\n", " / ")))
+			main._set_pause_banner(false, "")
 	if OS.has_environment("KR_LAZY") and mode != "client":
 		# Game-over test: nobody cooks and customers run out of patience fast; then press Enter to restart.
 		for c in main._waiting_customers():
 			c.patience = minf(c.patience, 0.5)
+		if main.simple:
+			# Simple mode has no game over: grumpy customers just leave and new ones keep coming.
+			if main.angry >= 6 and not grumpy_seen:
+				grumpy_seen = true
+				print("BOT: %d grumpy customers left, kitchen still open (game_over=%s)" % [main.angry, main.game_over])
+			main.practice = false
+			return
 		if main.game_over and main.game_over_t > 2.5 and not Engine.has_meta("kr_restarted"):
 			Engine.set_meta("kr_restarted", true)
 			print("BOT: game over seen, pressing Enter to restart")
@@ -170,6 +201,18 @@ func _note_features() -> void:
 		"fire": main.fire_on,
 		"raccoon": main.raccoon.visible,
 		"stats": main.stats_text != "",
+		"practice": main.practice and main.served_total == 0 and main.net.mode != "client",
+		"practice done": not main.practice and main.served_total >= 1,
+		"ghost hand": main.ghost_hand != null and main.ghost_hand.visible,
+		"ghost chop": main.ghost_hand != null and main.ghost_hand.visible and main.ghost_hand.mode == "chop",
+		"ghost stack": main.ghost_hand != null and main.ghost_hand.visible and main.ghost_hand.mode == "stack",
+		"chef spot": main.chef_spot != null and main.chef_spot.visible,
+		"crate glow": _any_glow(),
+		"pass glow": main.pass_glow != null and main.pass_glow.visible,
+		"new dish SALAD": main.unlocked_recipes().has("SALAD"),
+		"new dish BURGER": main.unlocked_recipes().has("BURGER"),
+		"new dish PIZZA": main.unlocked_recipes().has("PIZZA"),
+		"props moving": main.props != null and (absf(float(main.props.pans[0]["ang"])) > 0.05 or main.props.bird_out > 0.0),
 	}
 	for k in checks:
 		if checks[k] and not seen.has(k):
@@ -182,10 +225,98 @@ func _note_features() -> void:
 			elif k == "stars":
 				extra = ": %s" % [main.stars]
 			print("BOT: seen %s (t=%.0f, shift %d)%s" % [k, t, main.shift, extra])
+	if main.props != null:
+		for kind in main.props.touched:
+			if not seen.has("prop:" + kind):
+				seen["prop:" + kind] = true
+				print("BOT: prop %s (t=%.0f)" % [kind, t])
 	for ty in types:
 		if not seen.has("type:" + ty):
 			seen["type:" + ty] = true
 			print("BOT: customer type %s" % ty)
+
+
+func _any_glow() -> bool:
+	for k in main.crate_glows:
+		if main.crate_glows[k].visible:
+			return true
+	return false
+
+
+## Fake VR chef: plays with the props now and then (pans, clock, grinder, a thrown veggie, the spoon).
+## Returns true while busy.
+func _play_props(delta: float) -> bool:
+	var chef = main.players[0]
+	var props = main.props
+	if props == null or main.practice or t < play_at or chef.held[0] != null or chef.held[1] != null:
+		return false
+	if not playing:
+		playing = true
+		vr_t = 0.0
+	var hl: Node3D = chef.hand_l
+	var hr: Node3D = chef.hand_r
+	# The hand point is 6 cm in front of and 2 cm below the controller.
+	var off := Vector3(0, 0.02, 0.06)
+	match play_step:
+		0, 2:  # swing the left hand through a pan from the chef's side
+			var c: Vector3 = props.pan_centre(0 if play_step == 0 else 1)
+			var start := c + Vector3(0.25, 0.0, 0.0) + off
+			var end := c + Vector3(-0.1, 0.0, 0.0) + off
+			if vr_t < 0.6:
+				hl.global_position = hl.global_position.move_toward(start, delta * 3.0)
+			else:
+				hl.global_position = hl.global_position.move_toward(end, delta * 2.0)
+				if hl.global_position.distance_to(end) < 0.01:
+					play_step += 1
+					vr_t = 0.0
+		1:  # touch the cuckoo clock and the pepper grinder
+			var want: Vector3 = (props.CLOCK if vr_t < 0.8 else props.grinder.global_position + Vector3.UP * 0.18) + off
+			hr.global_position = hr.global_position.move_toward(want, delta * 2.5)
+			if vr_t > 1.8:
+				play_step += 1
+				vr_t = 0.0
+		3:  # grab a veggie and throw it towards the runners
+			var vg: Dictionary = props.veg[0]
+			if props.held[1] == "":
+				var want: Vector3 = vg["pos"] + Vector3(0, 0.05, 0.06)
+				hr.global_position = hr.global_position.move_toward(want, delta * 2.0)
+				chef.fake_trigger[1] = 1.0 if hr.global_position.distance_to(want) < 0.01 and chef.fake_trigger[1] == 0.0 else 0.0
+				vr_t = minf(vr_t, 0.99)
+				if t > play_at + 30.0:
+					play_step = 99
+			elif vr_t < 1.3:
+				hr.global_position += Vector3(0.0, 1.5, -3.0) * delta
+			else:
+				chef.fake_trigger[1] = 0.0
+				play_step += 1
+				vr_t = 0.0
+		4:  # pick up the spoon and bang it on the counter, then on the bell
+			var bell: Node3D = main.parts.get("bell")
+			if props.held[1] == "":
+				var want2: Vector3 = props.spoon.global_position + Vector3(0, 0.03, 0.06)
+				hr.global_position = hr.global_position.move_toward(want2, delta * 2.0)
+				chef.fake_trigger[1] = 1.0 if hr.global_position.distance_to(want2) < 0.01 and chef.fake_trigger[1] == 0.0 else 0.0
+				vr_t = minf(vr_t, 0.99)
+				if t > play_at + 30.0:
+					play_step = 99
+			elif vr_t < 1.6:
+				hr.global_position = hr.global_position.move_toward(Vector3(0.7, 1.2, 0.3), delta * 2.0)
+			elif vr_t < 1.9:
+				hr.global_position += Vector3(0.0, -2.5, 0.0) * delta
+			elif vr_t < 2.6:
+				var head: Vector3 = props.spoon_head()
+				hr.global_position += (bell.global_position + Vector3.UP * 0.06 - head).limit_length(delta * 1.5)
+			else:
+				chef.fake_trigger[1] = 0.0
+				play_step += 1
+				vr_t = 0.0
+		_:
+			play_step = 0
+			playing = false
+			play_at = t + 40.0
+			print("BOT VR: played with the props: %s" % [props.touched])
+			return false
+	return true
 
 
 ## Fake VR chef: moves the hands like a person would, following the chef's guidance.
@@ -197,6 +328,8 @@ func _chef_vr(delta: float) -> void:
 	var rest_r := head + Vector3(0.3, -0.55, -0.35)
 	var rest_l := head + Vector3(-0.3, -0.55, -0.35)
 	vr_t += delta
+	if vr_state == "idle" and _play_props(delta):
+		return
 	var task: Dictionary = main.chef_task
 	var it = task.get("item")
 	var plate = task.get("plate")
@@ -206,7 +339,7 @@ func _chef_vr(delta: float) -> void:
 			chef.fake_trigger[1] = 0.0
 			hr.global_position = hr.global_position.lerp(rest_r, 0.2)
 			hl.global_position = hl.global_position.lerp(rest_l, 0.2)
-			if vr_t < 0.4 or main.game_over:
+			if vr_t < (2.5 if main.practice else 0.4) or main.game_over:  # in practice: hesitate, watch the ghost hand
 				return
 			if held != null and is_instance_valid(held):
 				vr_state = "carry"
@@ -525,7 +658,116 @@ func _count_visuals(n: Node) -> int:
 	return c
 
 
+## Visual teaching: picture cues instead of words; any instruction text in a tip spot is an error.
+func _note_cues() -> void:
+	if main.ghost_hand != null and main.ghost_hand.visible:
+		cues["ghost_hand"] = true
+	if main.help_panel != null and main.help_panel.visible:
+		_tip_error("help panel", main.help_label.text)
+	if main.center_label.modulate.a > 0.05:
+		_check_headline("TV headline", main.center_label.text)
+	if main.vr_center != null and main.vr_center.modulate.a > 0.05:
+		_check_headline("VR headline", main.vr_center.text)
+	if main.vr_hint != null and main.vr_hint.visible and main.vr_hint.text.strip_edges() != "":
+		_tip_error("VR hint", main.vr_hint.text)
+	if Engine.get_physics_frames() % 30 == 0:
+		_check_cards(main)
+		for item in main.all_items():
+			if item.label != null and item.label.is_visible_in_tree() and item.label.text != "":
+				_tip_error("a plate's word", item.label.text)
+	var it: String = main.info_label.text
+	if it != "" and it != "Syncing…":
+		_tip_error("top line", it)
+	for p in main.players:
+		if not p.active or p.ghost or p.remote:
+			continue
+		if p.has_meta("guide") and p.get_meta("guide").visible:
+			if p.index == 0:
+				cues["chef_arrow"] = true
+			else:
+				var c: String = p.carry_kind
+				if c.begins_with("plate:"):
+					cues["serve_arrow"] = true
+				elif c != "" and c != "extinguisher":
+					cues["pass_arrow"] = true
+				elif main.runner_job(p).has("kind"):
+					cues["fetch_arrow"] = true
+				elif str(main.runner_job(p).get("text", "")).contains("READY"):
+					cues["plate_arrow"] = true
+		if p.index == 0 and p.vr:
+			if p.wrist_label != null and p.wrist_label.text != "" and not RegEx.create_from_string("^ROUND \\d+$").search(p.wrist_label.text):
+				_tip_error("VR wrist", p.wrist_label.text)
+			continue
+		if p.hud == null:
+			continue
+		var h = p.hud
+		if h.hint_label.visible and h.hint_label.text.strip_edges() != "":
+			_tip_error("P%d hint line" % (p.index + 1), h.hint_label.text)
+		for l in [h.carry_label, h.orders_label]:
+			if l.visible and l.text.strip_edges() != "":
+				_tip_error("P%d list" % (p.index + 1), l.text)
+		if h.job_panel.visible:
+			_tip_error("P%d job panel" % (p.index + 1), h.job_label.text)
+		if p.camera != null:
+			if int(p.camera.cull_mask) & int(p.body_layer()):
+				if not cues.has("own_tag_shown"):
+					print("BOT: ERROR P%d's view shows its own name tag" % (p.index + 1))
+				cues["own_tag_shown"] = true
+			else:
+				cues["own_tag_hidden"] = true
+		var key := str(p.get_meta("cue", ""))
+		var box = p.get_meta("cue_box") if p.has_meta("cue_box") else null
+		if key != "" and box != null and box.visible:
+			if not cues.has("cue_" + key):
+				print("BOT: P%d picture cue %s (t=%.0f)" % [p.index + 1, key, t])
+			cues["cue_" + key] = true
+	for p in main.players:
+		var done: Dictionary = p.get_meta("cue_done", {})
+		for k in done:
+			if int(done[k]) >= 2 and not cues.has("cue_learned_" + str(k)):
+				cues["cue_learned_" + str(k)] = true
+				print("BOT: P%d learned %s (t=%.0f)" % [p.index + 1, k, t])
+	if int(t) % 10 == 0 and cues.size() != int(get_meta("cues_shown", -1)):
+		set_meta("cues_shown", cues.size())  # networked runs end on a timeout: print the cues as they come
+		var ks: Array = cues.keys()
+		ks.sort()
+		print("BOT CUES so far: mode=%s %s" % [main.net.mode, ",".join(PackedStringArray(ks))])
+
+
+## The empty split-screen cells: a pulsing A + person, no "press A to join" words.
+func _check_cards(n: Node) -> void:
+	for c in n.get_children():
+		if c.has_meta("filler"):
+			if c.visible and c.get_node_or_null("JoinCue") != null:
+				cues["join_card_cue"] = true
+			for l in c.get_children():
+				if l is Label and l.visible and l.text != "":
+					_tip_error("join card", l.text)
+		elif c is Control or c is CanvasLayer or c == main or c is SubViewportContainer:
+			_check_cards(c)
+
+
+func _check_headline(who: String, text: String) -> void:
+	var tx := text.strip_edges()
+	if tx == "" or headline_re.search(tx) != null:
+		return
+	_tip_error(who, tx)
+
+
+func _tip_error(who: String, text: String) -> void:
+	if not cues.has("tip_text"):
+		print("BOT: ERROR instruction text on %s: %s" % [who, text.replace("\n", " / ")])
+	cues["tip_text"] = true
+
+
 func _exit_tree() -> void:
+	if main != null and is_instance_valid(main) and main.simple:
+		var ks: Array = cues.keys()
+		ks.sort()
+		print("BOT CUES: mode=%s %s" % [main.net.mode, ",".join(PackedStringArray(ks))])
+		for p in main.players:
+			if p.has_meta("cue_done"):
+				print("BOT CUES: P%d done=%s" % [p.index + 1, p.get_meta("cue_done")])
 	if main != null:
 		print("FINAL mode=%s shift=%d coins=%d served=%d angry=%d stars=%s seen=%s" % [main.net.mode, main.shift, main.coins, main.served_total, main.angry, main.stars, seen.keys()])
 		print("Visual instances in the scene: %d" % _count_visuals(main))

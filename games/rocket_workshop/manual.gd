@@ -15,11 +15,22 @@ const BOARDS := {
 	"alien": [Vector3(-8.2, 1.9, 7.92), 180.0],
 	"crank": [Vector3(8.2, 1.9, 7.92), 180.0],
 }
+## Simple mode (main.simple): the boards are PICTURES only (glowing buttons, plugs in their sockets,
+## shapes in a row, the dial's needle, switches up or down), no words. A board turns green when its
+## puzzle is done and goes grey when this rocket doesn't need it. With nobody on the TV, update_solo()
+## floats a small copy of the current blueprint behind the pilot's desk (pilot only).
 const INK := Color(0.95, 0.97, 1.0)
+const PAPER := Color(0.16, 0.35, 0.66)
+const PAPER_OFF := Color(0.3, 0.32, 0.38)
+const PAPER_DONE := Color(0.2, 0.55, 0.3)
 
 var main
 var boards := {}  # type -> {root, content, stamp, lamp, key, arrow}
 var t := 0.0
+var glow_mats := {}  # colour id -> pulsing material (simple mode's glowing buttons)
+var solo: Node3D
+var solo_content: Node3D
+var solo_key := ""
 
 
 func _ready() -> void:
@@ -35,7 +46,8 @@ func _ready() -> void:
 		root.add_child(frame)
 		var paper := MeshInstance3D.new()
 		paper.mesh = main.box_mesh(Vector3(3.2, 2.25, 0.02))
-		paper.material_override = main.make_material(Color(0.16, 0.35, 0.66), 0.05)
+		var paper_mat: StandardMaterial3D = main.make_material(PAPER, 0.05)
+		paper.material_override = paper_mat
 		paper.position.z = 0.06
 		root.add_child(paper)
 		var sign := MeshInstance3D.new()
@@ -50,6 +62,7 @@ func _ready() -> void:
 		title.outline_size = 0
 		title.modulate = Color(0.35, 0.2, 0.1)
 		title.position = Vector3(0, 1.48, 0.07)
+		title.visible = not main.simple
 		root.add_child(title)
 		var lamp := MeshInstance3D.new()
 		lamp.mesh = main.sphere_mesh(0.14)
@@ -64,6 +77,8 @@ func _ready() -> void:
 		stamp.rotation.z = 0.25
 		stamp.outline_size = 30
 		stamp.visible = false
+		if main.simple:
+			stamp.text = ""
 		main.set_layers(stamp, main.MANUAL_LAYER)
 		var arrow := MeshInstance3D.new()
 		arrow.mesh = main.cyl_mesh(0.22, 0.0, 0.45, 10)
@@ -72,7 +87,7 @@ func _ready() -> void:
 		arrow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		root.add_child(arrow)
 		main.set_layers(arrow, main.MANUAL_LAYER)
-		boards[type] = {"root": root, "content": content, "stamp": stamp, "lamp": lm, "key": "", "arrow": arrow}
+		boards[type] = {"root": root, "content": content, "stamp": stamp, "lamp": lm, "key": "", "arrow": arrow, "paper": paper_mat}
 
 
 ## Called every frame on both machines with the current rocket's modules.
@@ -90,6 +105,9 @@ func update_boards(modules: Array, rocket_n: int) -> void:
 			b.key = key
 			_rebuild(b, type, m)
 		var done: bool = not m.is_empty() and m.done
+		if main.simple:
+			var pm: StandardMaterial3D = b.paper
+			pm.albedo_color = PAPER_OFF if m.is_empty() else (PAPER_DONE if done else PAPER)
 		var stamp: Label3D = b.stamp
 		stamp.visible = done
 		var arrow: MeshInstance3D = b.arrow
@@ -109,13 +127,19 @@ func update_boards(modules: Array, rocket_n: int) -> void:
 			lm.albedo_color = Color(1.0, 0.6, 0.15)
 			lm.emission = lm.albedo_color
 			lm.emission_energy_multiplier = 0.6 + 2.4 * blink
+	for c in glow_mats:
+		var gm: StandardMaterial3D = glow_mats[c]
+		gm.emission_energy_multiplier = 0.4 + 2.6 * blink
 
 
 func _rebuild(b: Dictionary, type: String, m: Dictionary) -> void:
 	var content: Node3D = b.content
 	for c in content.get_children():
 		c.queue_free()
-	if m.is_empty():
+	if main.simple:
+		if not m.is_empty():
+			build_pictures(content, m)
+	elif m.is_empty():
 		_label(content, "Not needed for this rocket\n\nZzz...", Vector3(0, 0, 0), 56, Color(0.7, 0.75, 0.85))
 	else:
 		match type:
@@ -136,6 +160,125 @@ func _rebuild(b: Dictionary, type: String, m: Dictionary) -> void:
 		if m.has("rows") and (m.rows as Array).size() > 1:
 			_label(content, "Ask the pilot: what is this rocket called?", Vector3(0, -0.98, 0), 34, Color(1.0, 0.85, 0.4))
 	main.set_layers(content, main.MANUAL_LAYER)
+
+
+# --- Simple mode: picture blueprints ---------------------------------------------
+
+## Builds the picture for module m into c (board space: about 3.2 x 2.25, facing +Z).
+func build_pictures(c: Node3D, m: Dictionary) -> void:
+	match str(m.type):
+		"fuel":
+			var answer: Array = m.answer
+			var r := 0.42 if answer.size() == 1 else 0.32
+			for k in answer.size():
+				var x := (k - (answer.size() - 1) / 2.0) * 1.1
+				_pic_button(c, int(answer[k]), Vector3(x, 0.0, 0.0), r)
+		"wires":
+			var order: Array = m.order
+			for i in order.size():
+				var x := (i - 1.5) * 0.7
+				_disc(c, Vector3(x, 0.15, 0.0), 0.24, Color(0.85, 0.75, 0.3), 0.3)
+				_disc(c, Vector3(x, 0.15, 0.02), 0.19, Color(0.06, 0.06, 0.08), 0.0)
+				var col := int(order[i])
+				if col >= 0:
+					_blob(c, col, Vector3(x, 0.15, 0.1), 0.17)
+					var cable := MeshInstance3D.new()
+					cable.mesh = main.box_mesh(Vector3(0.06, 0.7, 0.03))
+					cable.material_override = main.color_mat(P.COLORS[col].darkened(0.2), 0.0)
+					cable.position = Vector3(x, -0.3, 0.06)
+					c.add_child(cable)
+		"symbols":
+			var order: Array = m.order
+			for i in order.size():
+				var x := (i - (order.size() - 1) / 2.0) * 1.15
+				var holder := Node3D.new()
+				holder.position = Vector3(x, 0.0, 0.2)
+				c.add_child(holder)
+				holder.add_child(main.shape_node(int(order[i]), 0.42))
+				if i + 1 < order.size():  # an arrow: this one first, then the next
+					var arrow := MeshInstance3D.new()
+					arrow.mesh = main.cyl_mesh(0.0, 0.12, 0.22, 8)
+					arrow.material_override = main.color_mat(Color(1.0, 0.85, 0.3), 0.6)
+					arrow.rotation.z = -PI / 2.0
+					arrow.position = Vector3(x + 0.575, 0.0, 0.06)
+					c.add_child(arrow)
+		"gauge":
+			_build_gauge(c, m)
+		"switches":
+			var pat: Array = m.answer
+			for k in pat.size():
+				var on: bool = pat[k]
+				var x := (k - (pat.size() - 1) / 2.0) * 0.55
+				var base := MeshInstance3D.new()
+				base.mesh = main.box_mesh(Vector3(0.3, 0.5, 0.06))
+				base.material_override = main.color_mat(Color(0.12, 0.12, 0.15), 0.0)
+				base.position = Vector3(x, -0.15, 0.03)
+				c.add_child(base)
+				var stick := MeshInstance3D.new()
+				stick.mesh = main.box_mesh(Vector3(0.08, 0.32, 0.06))
+				stick.material_override = main.color_mat(Color(0.9, 0.9, 0.95), 0.0)
+				stick.position = Vector3(x, -0.15 + (0.14 if on else -0.14), 0.09)
+				c.add_child(stick)
+				var lamp := MeshInstance3D.new()
+				lamp.mesh = main.sphere_mesh(0.1)
+				lamp.material_override = main.color_mat(Color(0.3, 1.0, 0.4), 1.5) if on else main.color_mat(Color(0.3, 0.15, 0.15), 0.0)
+				lamp.position = Vector3(x, 0.4, 0.06)
+				c.add_child(lamp)
+
+
+func _disc(c: Node3D, pos: Vector3, r: float, color: Color, glow: float) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	mi.mesh = main.cyl_mesh(r, r, 0.04, 20)
+	mi.material_override = main.color_mat(color, glow)
+	mi.rotation.x = PI / 2.0
+	mi.position = pos
+	c.add_child(mi)
+	return mi
+
+
+## A big round button like the desk's, glowing and pulsing.
+func _pic_button(c: Node3D, color_id: int, pos: Vector3, r: float) -> void:
+	_disc(c, pos, r + 0.06, Color(0.1, 0.1, 0.12), 0.0)
+	if not glow_mats.has(color_id):
+		glow_mats[color_id] = main.make_material(P.COLORS[color_id], 1.0)
+	var cap := _disc(c, pos + Vector3(0, 0, 0.06), r, Color.WHITE, 0.0)
+	cap.material_override = glow_mats[color_id]
+
+
+## Simple mode, solo pilot: m is the blueprint to show ({} hides it). Pilot-only (PANEL_LAYER).
+func update_solo(m: Dictionary, panel: Node3D) -> void:
+	if m.is_empty():
+		if solo != null:
+			solo.visible = false
+		return
+	if solo == null:
+		solo = Node3D.new()
+		solo.name = "SoloBlueprint"
+		add_child(solo)
+		var frame := MeshInstance3D.new()
+		frame.mesh = main.box_mesh(Vector3(3.4, 2.45, 0.1))
+		frame.material_override = main.make_material(Color(0.55, 0.36, 0.22), 0.0)
+		solo.add_child(frame)
+		var paper := MeshInstance3D.new()
+		paper.mesh = main.box_mesh(Vector3(3.2, 2.25, 0.02))
+		paper.material_override = main.make_material(PAPER, 0.05)
+		paper.position.z = 0.06
+		solo.add_child(paper)
+		solo_content = Node3D.new()
+		solo_content.position.z = 0.08
+		solo.add_child(solo_content)
+		solo.scale = Vector3.ONE * 0.28
+		main.set_layers(solo, main.PANEL_LAYER)
+	solo.visible = true
+	var top: float = panel.top
+	solo.global_position = Vector3(0, top + 0.42, -1.55)  # just behind the desk, under the rocket
+	var key := "%d:%s" % [main.rocket_n, m.type]
+	if key != solo_key:
+		solo_key = key
+		for ch in solo_content.get_children():
+			ch.queue_free()
+		build_pictures(solo_content, m)
+		main.set_layers(solo_content, main.PANEL_LAYER)
 
 
 func _label(parent: Node3D, text: String, pos: Vector3, font: int, color: Color = INK) -> Label3D:
@@ -220,7 +363,8 @@ func _build_symbols(c: Node3D, m: Dictionary) -> void:
 
 
 func _build_gauge(c: Node3D, m: Dictionary) -> void:
-	_label(c, "Turn the dial to this number, then press SET:", Vector3(0, 0.88, 0), 34)
+	if not main.simple:
+		_label(c, "Turn the dial to this number, then press SET:", Vector3(0, 0.88, 0), 34)
 	var rows: Array = m.rows
 	var xs: Array = [[0.0], [-0.75, 0.75], [-1.05, 0.0, 1.05]][rows.size() - 1]
 	var rad := 0.5 if rows.size() == 1 else 0.36
@@ -249,7 +393,14 @@ func _build_gauge(c: Node3D, m: Dictionary) -> void:
 		needle.position = center + Vector3(sin(ta), cos(ta), 0) * rad * 0.31 + Vector3(0, 0, 0.04)
 		needle.rotation.z = -ta
 		c.add_child(needle)
-		_label(c, str(target), Vector3(x, center.y - rad - 0.16, 0), 64, Color(1.0, 0.9, 0.5))
+		if main.simple:  # a glowing dot where the needle points
+			var dot := MeshInstance3D.new()
+			dot.mesh = main.sphere_mesh(0.07)
+			dot.material_override = main.color_mat(Color(1.0, 0.85, 0.2), 1.5)
+			dot.position = center + Vector3(sin(ta), cos(ta), 0) * rad * 0.98 + Vector3(0, 0, 0.05)
+			c.add_child(dot)
+		else:
+			_label(c, str(target), Vector3(x, center.y - rad - 0.16, 0), 64, Color(1.0, 0.9, 0.5))
 
 
 func _build_switches(c: Node3D, m: Dictionary) -> void:

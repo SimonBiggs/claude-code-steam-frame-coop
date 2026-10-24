@@ -41,7 +41,7 @@ const STAR_SPOTS: Array[Vector3] = [
 	Vector3(-7.0, 0, 2.4), Vector3(-4.0, 0, 6.2), Vector3(-1.5, 0, 4.6), Vector3(4.5, 0, 1.8), Vector3(7.5, 0, 2.2),
 	Vector3(4.6, 0, 5.4), Vector3(-6.5, 0, -1.0), Vector3(-3.0, 0, -5.0), Vector3(-6.2, 0, -4.6), Vector3(2.9, 0, -2.4),
 	Vector3(-1.2, 0, -4.8), Vector3(3.0, 0, -6.2), Vector3(5.6, 0, -1.6), Vector3(7.6, 0, -3.8), Vector3(0.5, 0, 0.2),
-	Vector3(-0.6, 0, 6.0), Vector3(-12.0, 0, 1.0), Vector3(-15.0, 0, -4.0), Vector3(-11.0, 0, 4.5),
+	Vector3(-0.6, 0, 6.0), Vector3(-12.0, 0, 1.0), Vector3(-15.0, 0, -4.0), Vector3(-11.0, 0, 3.6),
 ]
 
 ## Decoy props: [kind, position, yaw].
@@ -122,6 +122,18 @@ void fragment() {
 	ROUGHNESS = 0.9;
 }
 """
+
+
+## Map 0 of the rotation (see main.gd MAPS). Every map script has data() and build(root).
+const TITLE := "THE HOUSE"
+## Round start: the seeker faces the front door in the hall; the hiders stand behind them.
+const SPAWNS: Array[Vector3] = [Vector3(0, 0, 5.7), Vector3(-1.4, 0, 2.3), Vector3(1.4, 0, 2.3), Vector3(0, 0, 2.0),
+	Vector3(-2.0, 0, 3.4), Vector3(2.0, 0, 3.4), Vector3(-0.7, 0, 3.2), Vector3(0.7, 0, 3.2)]
+
+
+static func data() -> Dictionary:
+	return {"title": TITLE, "rooms": ROOMS, "doors": DOORS, "hide_spots": HIDE_SPOTS, "star_spots": STAR_SPOTS,
+		"spawns": SPAWNS, "jail": JAIL_POS, "bell": BELL_POS, "bounds": [-HALF_X - GARDEN_W, HALF_X, -HALF_Z, HALF_Z]}
 
 
 static func build(main: Node3D) -> Dictionary:
@@ -392,6 +404,7 @@ static func _environment(main: Node3D) -> void:
 	e.glow_intensity = 0.5
 	e.glow_bloom = 0.05
 	env.environment = e
+	env.set_meta("day_bg", e.background_color)
 	main.add_child(env)
 	var sun := DirectionalLight3D.new()
 	sun.light_color = Color(1.0, 0.92, 0.8)
@@ -833,3 +846,153 @@ static func _fairy_lights(main: Node3D) -> void:
 	mmi.material_override = m
 	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	main.add_child(mmi)
+
+
+# --- Shared builders for the other maps (map_castle.gd, map_ship.gd) ----------------
+
+## A fresh build context: one StaticBody3D for every collision box, batched meshes under `root`.
+static func new_ctx(root: Node3D) -> Dictionary:
+	var ctx := {"tools": {}, "mats": {}, "main": root}
+	var body := StaticBody3D.new()
+	body.name = "MapBody"
+	body.collision_layer = 1
+	body.collision_mask = 0
+	root.add_child(body)
+	ctx["body"] = body
+	return ctx
+
+
+## Sky colour, ambient light and a soft sun (no shadows: phone-class GPU).
+static func environment_for(root: Node3D, bg: Color, ambient: Color, amb_energy: float, sun_energy: float) -> void:
+	var env := WorldEnvironment.new()
+	var e := Environment.new()
+	e.background_mode = Environment.BG_COLOR
+	e.background_color = bg
+	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	e.ambient_light_color = ambient
+	e.ambient_light_energy = amb_energy
+	e.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	e.glow_enabled = true
+	e.glow_intensity = 0.5
+	e.glow_bloom = 0.05
+	env.environment = e
+	env.set_meta("day_bg", bg)
+	env.set_meta("day_ambient", amb_energy)
+	root.add_child(env)
+	var sun := DirectionalLight3D.new()
+	sun.light_color = Color(1.0, 0.92, 0.8)
+	sun.light_energy = sun_energy
+	sun.shadow_enabled = false
+	sun.rotation_degrees = Vector3(-60, 30, 0)
+	root.add_child(sun)
+
+
+## A floor plane with its own shader (one draw call) plus a solid slab to stand on.
+static func shader_floor(ctx: Dictionary, size: Vector2, center: Vector3, code: String) -> void:
+	var root: Node3D = ctx["main"]
+	var mi := MeshInstance3D.new()
+	var pm := PlaneMesh.new()
+	pm.size = size
+	mi.mesh = pm
+	var m := ShaderMaterial.new()
+	m.shader = Shader.new()
+	m.shader.code = code
+	mi.material_override = m
+	mi.position = center
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	root.add_child(mi)
+	_collide_box(ctx, Vector3(size.x + 2.0, 0.2, size.y + 2.0), Transform3D(Basis(), center + Vector3(0, -0.1, 0)))
+
+
+## A vertex-coloured wall along x at `z` from x0 to x1 with doorways centred at `doors` (all in the one merged mesh).
+static func wall_x(ctx: Dictionary, z: float, x0: float, x1: float, doors: Array, color: Color, h: float, dw: float = DOOR_W, dh: float = DOOR_H) -> void:
+	var a := x0 - WALL_T / 2.0
+	var cuts: Array = doors.duplicate()
+	cuts.sort()
+	for d in cuts:
+		var dx: float = d
+		var b := dx - dw / 2.0
+		if b > a:
+			box(ctx, Vector3(b - a, h, WALL_T), Vector3((a + b) / 2.0, h / 2.0, z), color)
+		box(ctx, Vector3(dw, h - dh, WALL_T), Vector3(dx, (h + dh) / 2.0, z), color.darkened(0.08))
+		a = dx + dw / 2.0
+	var e := x1 + WALL_T / 2.0
+	box(ctx, Vector3(e - a, h, WALL_T), Vector3((a + e) / 2.0, h / 2.0, z), color)
+
+
+static func wall_z(ctx: Dictionary, x: float, z0: float, z1: float, doors: Array, color: Color, h: float, dw: float = DOOR_W, dh: float = DOOR_H) -> void:
+	var a := z0
+	var cuts: Array = doors.duplicate()
+	cuts.sort()
+	for d in cuts:
+		var dz: float = d
+		var b := dz - dw / 2.0
+		if b > a:
+			box(ctx, Vector3(WALL_T, h, b - a), Vector3(x, h / 2.0, (a + b) / 2.0), color)
+		box(ctx, Vector3(WALL_T, h - dh, dw), Vector3(x, (h + dh) / 2.0, dz), color.darkened(0.08))
+		a = dz + dw / 2.0
+	box(ctx, Vector3(WALL_T, h, z1 - a), Vector3(x, h / 2.0, (a + z1) / 2.0), color)
+
+
+static func omni_lights(root: Node3D, positions: Array, color: Color, energy: float, light_range: float) -> Array:
+	var out: Array = []
+	for p in positions:
+		var l := OmniLight3D.new()
+		l.light_color = color
+		l.light_energy = energy
+		l.omni_range = light_range
+		l.omni_attenuation = 1.2
+		l.shadow_enabled = false
+		root.add_child(l)
+		l.position = p
+		l.set_meta("day_energy", energy)
+		out.append(l)
+	return out
+
+
+## Bake the decoy props and commit every batched mesh. Returns the decoy list for main.gd.
+static func finish(ctx: Dictionary, decoy_list: Array) -> Array:
+	var out: Array = []
+	for d in decoy_list:
+		var kind: int = d[0]
+		var pos: Vector3 = d[1]
+		var yaw: float = d[2]
+		_bake_prop(ctx, kind, Transform3D(Basis(Vector3.UP, yaw), pos))
+		out.append({"kind": kind, "pos": pos})
+	_commit(ctx)
+	return out
+
+
+## The jail cage + bell, at any position (used by the other maps).
+static func jail_at(ctx: Dictionary, c: Vector3, bell: Vector3, bar: Color, roof: Color) -> void:
+	var h := JAIL_HALF
+	for i in 8:
+		var t := (i + 0.5) / 8.0
+		for p in [c + Vector3(-h + t * 2.0 * h, 0.75, -h), c + Vector3(-h + t * 2.0 * h, 0.75, h),
+				c + Vector3(-h, 0.75, -h + t * 2.0 * h), c + Vector3(h, 0.75, -h + t * 2.0 * h)]:
+			cyl(ctx, 0.025, 0.025, 1.5, p, bar, false)
+	box(ctx, Vector3(h * 2.0 + 0.1, 0.08, h * 2.0 + 0.1), c + Vector3(0, 1.52, 0), roof, false)
+	box(ctx, Vector3(h * 2.0 + 0.1, 0.05, h * 2.0 + 0.1), c + Vector3(0, 0.025, 0), Color(0.45, 0.4, 0.38), false)
+	for side in 4:
+		var horiz := side < 2
+		var off := (-h if side % 2 == 0 else h)
+		var size := Vector3(h * 2.0, 1.5, 0.06) if horiz else Vector3(0.06, 1.5, h * 2.0)
+		var at := c + (Vector3(0, 0.75, off) if horiz else Vector3(off, 0.75, 0))
+		_collide_box(ctx, size, Transform3D(Basis(), at))
+	cyl(ctx, 0.04, 0.05, 1.1, bell + Vector3(0, 0.55, 0), Color(0.45, 0.32, 0.22))
+	cyl(ctx, 0.06, 0.16, 0.2, bell + Vector3(0, 1.15, 0), Color(1.0, 0.85, 0.2), false, 0.6)
+	ball(ctx, 0.04, bell + Vector3(0, 1.03, 0), Color(0.5, 0.35, 0.2))
+
+
+## A glowing window pane in an outer wall (`side` = wall runs along z). Shares the night-dimmed window material.
+static func window_at(ctx: Dictionary, p: Vector3, side: bool, frame: Color, size: Vector2 = Vector2(1.3, 1.0)) -> void:
+	var glass := Vector3(0.05, size.y, size.x) if side else Vector3(size.x, size.y, 0.05)
+	var rim := Vector3(0.03, size.y + 0.14, size.x + 0.14) if side else Vector3(size.x + 0.14, size.y + 0.14, 0.03)
+	box(ctx, rim, p, frame, false)
+	box(ctx, glass, p, Color(0.6, 0.72, 1.0), false, 0.0, 1.4)
+
+
+## The night-dimmed window material (if this map has windows).
+static func window_mat(ctx: Dictionary) -> Material:
+	var wkey := Color(0.6, 0.72, 1.0).to_html() + ("g%.1f" % 1.4)
+	return ctx["mats"].get(wkey)

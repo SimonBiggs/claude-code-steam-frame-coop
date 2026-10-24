@@ -209,7 +209,7 @@ func _ready() -> void:
 	tag = Label3D.new()
 	tag.text = "P%d" % (index + 1)
 	tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	tag.no_depth_test = true
+	tag.no_depth_test = false
 	tag.fixed_size = true
 	tag.pixel_size = 0.0012
 	tag.font_size = 28
@@ -306,7 +306,7 @@ func attach_xr(origin: XROrigin3D, cam: XRCamera3D, left: XRController3D, right:
 	wrist_label.modulate = color.lightened(0.3)
 	wrist_label.position = Vector3(0.0, 0.07, 0.12)
 	wrist_label.rotation_degrees = Vector3(-55, 0, 0)
-	wrist_label.no_depth_test = true
+	wrist_label.no_depth_test = false
 	hand_l.add_child(wrist_label)
 	_set_layers(wrist_label, viewmodel_layer())
 
@@ -575,7 +575,7 @@ func _set_vac(on: bool) -> void:
 func try_ring_bell() -> void:
 	if bell_cd > 0.0 or is_down:
 		return
-	bell_cd = BELL_COOLDOWN
+	bell_cd = 1.5 if main.simple else BELL_COOLDOWN  # simple mode: the bell is just a happy jingle
 	if bell:
 		var tw := bell.create_tween()
 		tw.tween_property(bell, "rotation:z", 0.6, 0.06)
@@ -775,6 +775,9 @@ func _vr_update(delta: float) -> void:
 	var status := "SPOOKED! Friends, come cheer me up!" if is_down else ("Bell ready: shake it!" if bell_cd <= 0.0 else "Bell: %d s" % ceili(bell_cd))
 	if main.net.mode == "host" and not main.net.connected:
 		status = "Waiting for the TV players…"
+	if main.simple:
+		wrist_label.text = ""  # simple mode: no readouts on the hands
+		return
 	wrist_label.text = "COURAGE %d\nNIGHT %d   PHOTOS %d/%d\n%s" % [maxi(0, int(courage)), main.night, main.photos_left(), main.photos.size(), status]
 	_update_lantern_label()
 
@@ -786,7 +789,7 @@ func _update_lantern_label() -> void:
 		lantern_label.font_size = 44
 		lantern_label.outline_size = 14
 		lantern_label.pixel_size = 0.0007
-		lantern_label.no_depth_test = true
+		lantern_label.no_depth_test = false
 		lantern_label.render_priority = 6
 		hand_r.add_child(lantern_label)
 		lantern_label.position = Vector3(0.0, 0.1, 0.02)

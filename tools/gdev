@@ -78,6 +78,11 @@ def install(proj: Path) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
     if not dst.exists() or dst.read_bytes() != BRIDGE_SRC.read_bytes():
         shutil.copyfile(BRIDGE_SRC, dst)
+    # caption.gd: "Claude:" captions; control.gd: the offscreen test control server (godot.ts). Both made by the bridge.
+    for extra in ("caption.gd", "control.gd"):
+        src = GDEV_HOME / extra
+        if src.exists() and (not (dst.parent / extra).exists() or (dst.parent / extra).read_bytes() != src.read_bytes()):
+            shutil.copyfile(src, dst.parent / extra)
     cfg = proj / "project.godot"
     text = cfg.read_text()
     if AUTOLOAD_LINE not in text:

@@ -1,0 +1,63 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# dependencies = ["Pillow"]
+# ///
+"""frame-at TIME [--before S] [--after S] [--count N]: what the Steam Frame headset showed around TIME.
+
+TIME is HH:MM:SS (today) or -30s (seconds ago). The game on the Frame saves a 960px JPG every
+0.1 s to ~/devkit-game/DuoArena/game/.dev/frames/<epoch-ms>.jpg (about 5 minutes are kept).
+Builds a labelled contact sheet of N frames from S seconds before to S seconds after TIME and
+prints its path. Voice messages arrive as "[voice HH:MM:SS] ...", logged when the speaker
+stopped talking, so the default looks back 6 s to cover what they saw while speaking.
+"""
+import argparse, datetime as dt, subprocess, sys, tempfile, time
+from pathlib import Path
+from PIL import Image, ImageDraw
+
+KEY = str(Path.home() / ".config/steamos-devkit/devkit_rsa")
+HOST = "steamos@frame"
+REMOTE = "devkit-game/DuoArena/game/.dev/frames"
+OUT = Path("/tmp/frame-at")
+
+ap = argparse.ArgumentParser()
+ap.add_argument("time")
+ap.add_argument("--before", type=float, default=6.0)
+ap.add_argument("--after", type=float, default=0.5)
+ap.add_argument("--count", type=int, default=6)
+a = ap.parse_args()
+
+if a.time.startswith("-") and a.time.endswith("s"):
+    t = time.time() - float(a.time[1:-1])
+else:
+    hh, mm, ss = (int(x) for x in a.time.split(":"))
+    t = dt.datetime.now().replace(hour=hh, minute=mm, second=ss, microsecond=0).timestamp()
+lo, hi = int((t - a.before) * 1000), int((t + a.after) * 1000)
+
+ssh = ["ssh", "-i", KEY, "-o", "BatchMode=yes", HOST]
+names = subprocess.run(ssh + [f"ls {REMOTE}"], capture_output=True, text=True).stdout.split()
+stamps = sorted(int(n[:-4]) for n in names if n.endswith(".jpg") and n[:-4].isdigit())
+inside = [s for s in stamps if lo <= s <= hi]
+if not inside:
+    span = f"{dt.datetime.fromtimestamp(stamps[0] / 1000):%H:%M:%S}-{dt.datetime.fromtimestamp(stamps[-1] / 1000):%H:%M:%S}" if stamps else "none"
+    sys.exit(f"no frames in that range (the Frame has {span})")
+step = max(1, len(inside) // a.count)
+pick = inside[::step][: a.count]
+
+OUT.mkdir(exist_ok=True)
+with tempfile.TemporaryDirectory() as tmp:
+    subprocess.run(["scp", "-q", "-i", KEY] + [f"{HOST}:{REMOTE}/{s}.jpg" for s in pick] + [tmp], check=True)
+    imgs = [Image.open(Path(tmp) / f"{s}.jpg").convert("RGB") for s in pick]
+w, h = 480, int(480 * imgs[0].height / imgs[0].width)
+cols = 3 if len(imgs) > 4 else len(imgs)
+rows = (len(imgs) + cols - 1) // cols
+sheet = Image.new("RGB", (cols * w, rows * h), "black")
+draw = ImageDraw.Draw(sheet)
+for i, (s, im) in enumerate(zip(pick, imgs)):
+    x, y = (i % cols) * w, (i // cols) * h
+    sheet.paste(im.resize((w, h)), (x, y))
+    label = f"{dt.datetime.fromtimestamp(s / 1000):%H:%M:%S.%f}"[:-5]
+    draw.rectangle((x, y, x + 120, y + 22), fill="black")
+    draw.text((x + 6, y + 4), label, fill="yellow")
+out = OUT / f"at-{dt.datetime.fromtimestamp(t):%H%M%S}.jpg"
+sheet.save(out, quality=85)
+print(out)

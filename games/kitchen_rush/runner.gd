@@ -118,7 +118,7 @@ func _ready() -> void:
 	tag = Label3D.new()
 	tag.text = "P%d" % (index + 1)
 	tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	tag.no_depth_test = true
+	tag.no_depth_test = false
 	tag.fixed_size = true
 	tag.pixel_size = 0.0012
 	tag.font_size = 28
@@ -182,6 +182,11 @@ func _physics_process(delta: float) -> void:
 
 ## Interact: pick up / drop / serve / spray. The host decides what actually happens.
 func press_use() -> void:
+	if main.simple and not main.input_blocked():
+		var r: Dictionary = main.resolve(self)  # simple mode: count it towards this button's picture cue
+		var ck: String = main.runner_cue_key(str(r.get("act", "")))
+		if ck != "":
+			main.cue_did(self, ck)
 	if main.net.mode == "client":
 		main.net.send_action("use", [], index)
 		main.sfx_local("pickup", -14.0, 1.6)

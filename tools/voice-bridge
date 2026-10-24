@@ -8,9 +8,14 @@
 Streams the headset mic (echo-cancelled, so game audio is removed) over SSH, splits it into
 utterances with a simple energy detector, transcribes each with faster-whisper, and appends
 "[HH:MM:SS] text" lines to the game's voice log (watched by Claude).
+Two passes (Simon, 2026-10-17): a small fast model logs each line within ~2 s, then large-v3-turbo re-does the clip
+in a low-priority thread and appends "[HH:MM:SS] ~ Name: text" (same timestamp) when it heard something different.
 """
 import datetime as dt
+import os
 import re
+import time
+import threading
 import subprocess
 import sys
 from pathlib import Path
@@ -26,18 +31,66 @@ HOST = "steamos@frame"
 LOG = Path.home() / "GodotProjects/duo-arena/.dev/voice.log"
 RATE = 16000
 FRAME = 480  # 30 ms
-MODEL = sys.argv[1] if len(sys.argv) > 1 else "medium.en"
+MODEL = sys.argv[1] if len(sys.argv) > 1 else "medium.en"  # the accurate model (the user prefers accuracy)
+# The fast model logs first; "none" goes back to one pass. small.en: ~1.7 s per clip on 3 threads while Minecraft
+# runs (base.en ~0.6 s but noticeably worse).
+FAST = os.environ.get("VOICE_FAST", "small.en")
+FIX_AGE = float(os.environ.get("VOICE_FIX_AGE", "90"))  # give up re-doing clips older than this (backlog)
+# Optional Whisper prompt for the accurate pass. Off by default: on the family's clips a vocabulary prompt fixed
+# "Claude" but made Whisper drop words and end early ("Yay!" -> "Thank you."), so names are fixed by VOCAB instead.
+PROMPT = os.environ.get("VOICE_PROMPT") or None
+# Loudness (RMS) a 30 ms frame needs to count as speech. 180 also hears people across the room,
+# not just the headset wearer (that needed ~500); Whisper's VAD filter drops the extra non-speech.
+FLOOR = float(os.environ.get("VOICE_FLOOR", "180"))
 
 # Whisper tends to "hear" these in noise; ignore them when they are the whole utterance.
-JUNK = {"", "you", "thank you", "thank you.", "thanks for watching!", "bye.", ".", "uh", "um", "hmm"}
+JUNK = {"", "you", "thank you", "thank you.", "thanks for watching!", "bye.", ".", "uh", "um", "hmm", "silence", "silence.", "[silence]", "(silence)"}
 
 
-SPEAKER_MODEL = Path.home() / ".local/share/voice-bridge/wespeaker_en_voxceleb_resnet34_LM.onnx"
-SPEAKERS_FILE = Path.home() / ".local/share/voice-bridge/speakers.json"
-SAME_SPEAKER = 0.5  # cosine similarity needed to match a known voice
-# Only capitalised words count as names (Whisper capitalises names, not "scared"/"still"/"fun").
-NAME_RE = re.compile(r"\b(?:[Tt]his is|[Mm]y name is|I'm|I am)\s+([A-Z][a-z]+)\b")
-NOT_NAMES = {"not", "just", "going", "so", "the", "a", "really", "here", "fine", "good", "okay", "done", "dad", "mum", "mom"}
+LOCAL = os.environ.get("VOICE_SOURCE") == "local"
+DATA = Path.home() / ".local/share/voice-bridge"
+# The room mic uses NeMo TitaNet-L: on the family's own solo recordings it told the kids apart far better
+# than the old ResNet34 (whole utterances 100% vs ~80%; Simon vs David never confused).
+SPEAKER_MODEL = DATA / ("nemo_en_titanet_large.onnx" if LOCAL else "wespeaker_en_voxceleb_resnet34_LM.onnx")
+# Each mic (and model) hears voices differently, so each keeps its own voiceprints.
+SPEAKERS_FILE = DATA / ("speakers-local-titanet.json" if LOCAL else "speakers.json")
+SAME_SPEAKER = float(os.environ.get("VOICE_SAME", "0.5"))  # cosine similarity needed to match a known voice
+MARGIN = 0.1  # only learn from a voice that beats the runner-up by this much (David and Nathanael are close)
+# Only capitalised words count as names (Whisper capitalises names, not "scared"/"still"/"fun"); not "Package's".
+NAME_RE = re.compile(r"\b(?:[Tt]his is|[Mm]y name is|I'm|I am)\s+([A-Z][a-z]+)\b(?!['’])")
+# Whisper's spelling -> the family's spelling (Simon, 2026-10-17)
+NAME_FIX = {"Nathaniel": "Nathanael", "Abby": "Abigail", "Abbie": "Abigail", "Mom": "Mum"}
+# Text clean-up (rules: no local LLM fits next to Minecraft): names, Claude's usual mishearings and game words.
+VOCAB = [(re.compile(r"\b(" + "|".join(NAME_FIX) + r")\b"), lambda m: NAME_FIX[m.group(1)]),
+         (re.compile(r"\b(?:claud|clawed|clawd|clod|clora|closun)\b", re.I), "Claude"),
+         (re.compile(r"\b(hey|hi|ok|okay|also|and|so|um)(,?) (?:cloud|clyde)\b", re.I), r"\1\2 Claude"),
+         (re.compile(r"^(?:Cloud|Clyde),"), "Claude,"),
+         (re.compile(r"\bmine ?craft\b", re.I), "Minecraft"), (re.compile(r"\bbed ?rock\b", re.I), "Bedrock"),
+         (re.compile(r"\bender ?pearl", re.I), "ender pearl"), (re.compile(r"\bnether\b", re.I), "Nether"),
+         (re.compile(r"\bover ?world\b", re.I), "Overworld"), (re.compile(r"\bred ?stone\b", re.I), "redstone"),
+         (re.compile(r"\bnit ?wit\b", re.I), "nitwit"), (re.compile(r"\bspace ship", re.I), "spaceship"),
+         (re.compile(r"\bsteam (machine|frame)\b", re.I), lambda m: "Steam " + m.group(1).title()),
+         (re.compile(r"\bduo ?arena\b", re.I), "Duo Arena"), (re.compile(r"\bgo ?dot\b", re.I), "Godot"),
+         (re.compile(r"\bwhisper\b"), "Whisper")]
+
+
+LOOP = re.compile(r"((?:\b[\w']+\W+){1,4}?)\1{3,}", re.I)  # Whisper stuck repeating: keep 3
+
+
+def tidy(text: str) -> str:
+    for pat, rep_ in VOCAB:
+        text = pat.sub(rep_, text)
+    return LOOP.sub(r"\1\1\1… ", text + " ").strip()
+
+
+def norm(text: str) -> list:
+    """Words only, for "did the accurate pass hear something different?" (case, punctuation and ums ignored)."""
+    return [w for w in re.sub(r"[^a-z0-9' ]", " ", text.lower()).split() if w not in {"um", "uh", "hmm", "ah", "oh"}]
+# The kids prank "I'm Samuel", so saying a name only names a voice with VOICE_SAY_NAMES=1;
+# otherwise enrol people with voice-enroll NAME START END (from saved utterances).
+SAY_NAMES = os.environ.get("VOICE_SAY_NAMES", "0") == "1"
+# Only these can be named by saying "I'm X" (stops "this is humour" becoming a voice); VOICE_NAMES adds more.
+FAMILY = {"Simon", "Mum", "David", "Nathanael", "Samuel", "Abigail"} | set(os.environ.get("VOICE_NAMES", "").split())
 
 
 class Speakers:
@@ -46,35 +99,70 @@ class Speakers:
     def __init__(self) -> None:
         cfg = sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=str(SPEAKER_MODEL), num_threads=2)
         self.ex = sherpa_onnx.SpeakerEmbeddingExtractor(cfg)
+        self.lock = threading.RLock()  # the fast pass and the accurate thread both ask who spoke
+        self.load()
+
+    def load(self) -> None:
         self.voices: dict[str, list] = {}  # name -> [mean embedding, count]
+        self.mtime = SPEAKERS_FILE.stat().st_mtime if SPEAKERS_FILE.exists() else None
         if SPEAKERS_FILE.exists():
             for name, (emb, n) in json.loads(SPEAKERS_FILE.read_text()).items():
-                self.voices[name] = [np.array(emb, dtype=np.float32), n]
+                self.voices[NAME_FIX.get(name, name)] = [np.array(emb, dtype=np.float32), n]
 
     def save(self) -> None:
         SPEAKERS_FILE.write_text(json.dumps({k: [v[0].tolist(), v[1]] for k, v in self.voices.items()}))
+        self.mtime = SPEAKERS_FILE.stat().st_mtime
 
-    def identify(self, audio: np.ndarray, text: str) -> str:
+    def embed(self, audio: np.ndarray) -> np.ndarray:
         st = self.ex.create_stream()
         st.accept_waveform(RATE, audio)
         st.input_finished()
         emb = np.array(self.ex.compute(st), dtype=np.float32)
-        emb /= np.linalg.norm(emb) + 1e-9
-        best, score = None, -1.0
-        for name, (mean, _) in self.voices.items():
-            sim = float(np.dot(emb, mean / (np.linalg.norm(mean) + 1e-9)))
-            if sim > score:
-                best, score = name, sim
-        name = best if best is not None and score >= SAME_SPEAKER else None
-        m = NAME_RE.search(text)
-        said = m.group(1) if m and m.group(1).lower() not in NOT_NAMES else None
+        return emb / (np.linalg.norm(emb) + 1e-9)
+
+    def scores(self, emb: np.ndarray) -> list:
+        """[(similarity, name)] best first."""
+        return sorted(((float(np.dot(emb, m / (np.linalg.norm(m) + 1e-9))), k) for k, (m, _) in self.voices.items()), reverse=True)
+
+    def who(self, audio: np.ndarray):
+        """The best-matching known voice for a short piece of audio (no learning, no new names)."""
+        with self.lock:
+            s = self.scores(self.embed(audio))
+        return s[0][1] if s and s[0][0] >= SAME_SPEAKER else None
+
+    def reload(self) -> None:
+        """Pick up voiceprints changed by voice-enroll while running."""
+        if SPEAKERS_FILE.exists() and SPEAKERS_FILE.stat().st_mtime != self.mtime:
+            self.load()
+
+    def identify(self, audio: np.ndarray, text: str, learn: bool = True) -> str:
+        with self.lock:
+            return self._identify(audio, text, learn)
+
+    def _identify(self, audio: np.ndarray, text: str, learn: bool) -> str:
+        self.reload()
+        emb = self.embed(audio)
+        s = self.scores(emb) + [(-1.0, None), (-1.0, None)]
+        (score, best), second = s[0], s[1][0]
+        name = best if score >= SAME_SPEAKER else None
+        m = NAME_RE.search(text) if SAY_NAMES else None
+        said = NAME_FIX.get(m.group(1), m.group(1)) if m else None
+        said = said if said in FAMILY else None
+        if said and said in self.voices:  # a joke ("I'm David") unless the voice is close to said's
+            said = said if dict((k, v) for v, k in s if k)[said] >= score - MARGIN else None
+        elif said and score >= 0.75 and not best.startswith("Speaker "):
+            said = None  # clearly a known voice claiming a new name: don't steal it
         if said:
             if name and name != said and name.startswith("Speaker "):
                 self.voices[said] = self.voices.pop(name)  # name the anonymous voice
             name = said
+        if not said and best and not SAY_NAMES and (name is None or score - second < 0.03):
+            return best + "?"  # weak or David-vs-Nathanael-close match: best guess, marked unsure, never learnt
         if name is None:
             name = f"Speaker {sum(1 for k in self.voices if k.startswith('Speaker ')) + 1}"
         mean, n = self.voices.get(name, [np.zeros_like(emb), 0])
+        if not learn or name in self.voices and not said and (score < SAME_SPEAKER + 0.1 or score - second < MARGIN):
+            return name  # unsure match: label it, but don't blur the voiceprint with it
         if len(audio) > RATE:  # only learn from utterances over a second
             self.voices[name] = [(mean * n + emb) / (n + 1), min(n + 1, 50)]
             self.save()
@@ -83,25 +171,291 @@ class Speakers:
         return name
 
 
-def log(text: str) -> None:
-    line = f"[{dt.datetime.now():%H:%M:%S}] {text}"
+# Two people talking at once (Simon, 2026-10-17: "make your software split up the speakers").
+# pyannote segmentation-3.0 spots overlapped speech; only then TIGER-tiny (ICLR 2025, 0.8 M params, trained on
+# reverberant noisy rooms) separates the clip into two voices, each transcribed and identified on its own.
+SEG_MODEL = DATA / "pyannote-segmentation-3.0.onnx"
+SEP_MODEL = DATA / "tiger-speech-tiny.onnx"
+OVERLAP_S = float(os.environ.get("VOICE_OVERLAP", "0.5"))  # seconds of overlapped speech that trigger separation
+CLAUDE_RE = re.compile(r"\b(claude|cloud|clawed|clod|claud|clyde|lord|cora|clora)\b", re.I)
+
+
+class Overlap:
+    def __init__(self) -> None:
+        import onnxruntime as ort
+        o = ort.SessionOptions()
+        o.intra_op_num_threads = 2
+        self.seg = ort.InferenceSession(str(SEG_MODEL), o, providers=["CPUExecutionProvider"])
+        self.sep = ort.InferenceSession(str(SEP_MODEL), o, providers=["CPUExecutionProvider"])
+        meta = self.seg.get_modelmeta().custom_metadata_map
+        self.win, self.shift = int(meta["window_size"]), int(meta["receptive_field_shift"])
+        self.hann = (0.5 - 0.5 * np.cos(2 * np.pi * np.arange(640) / 640)).astype(np.float32)
+
+    def seconds(self, audio: np.ndarray) -> float:
+        """How much of the clip has two voices at once (powerset classes 4-6 = two speakers)."""
+        n = 0
+        for s in range(0, len(audio), self.win):
+            c = audio[s:s + self.win]
+            p = np.exp(self.seg.run(None, {"x": np.pad(c, (0, self.win - len(c)))[None, None]})[0][0])
+            n += int((p[:-(-len(c) // self.shift), 4:].sum(1) > 0.5).sum())
+        return n * self.shift / RATE
+
+    def split(self, audio: np.ndarray) -> list:
+        """Two single-voice streams (STFT 640/160 here; the model masks the spectrum)."""
+        n = len(audio)
+        frames = -(-(-(-n // 160) + 1) // 16) * 16  # the model wants a multiple of 16 frames
+        x = np.pad(np.pad(audio, (0, (frames - 1) * 160 - n)), 320, mode="reflect")
+        spec = np.fft.rfft(np.lib.stride_tricks.sliding_window_view(x, 640)[::160][:frames] * self.hann, axis=1).T
+        re_, im = self.sep.run(None, {"re": spec.real[None].astype(np.float32), "im": spec.imag[None].astype(np.float32)})
+        out = []
+        for k in range(re_.shape[0]):
+            fr = np.fft.irfft((re_[k] + 1j * im[k]).T, n=640, axis=1) * self.hann
+            y, w = np.zeros(640 + 160 * (frames - 1)), np.zeros(640 + 160 * (frames - 1))
+            for i, f in enumerate(fr):
+                y[i * 160:i * 160 + 640] += f
+                w[i * 160:i * 160 + 640] += self.hann ** 2
+            out.append((y / np.maximum(w, 1e-8))[320:320 + n].astype(np.float32))
+        return out
+
+
+def separated(audio: np.ndarray, model, speakers, overlap):
+    """Turns for an overlapped clip, or None to use the normal path. Both separated voices are transcribed in
+    one Whisper pass (voice A, 1 s gap, voice B) so it costs little more than the mixed clip."""
+    if overlap is None or len(audio) < RATE or overlap.seconds(audio) < OVERLAP_S:
+        return None
+    streams = overlap.split(audio)
+    names = [speakers.identify(s, "", learn=False) for s in streams]
+    if names[0].rstrip("?") == names[1].rstrip("?") or all(n.endswith("?") for n in names):
+        return None  # one voice split in two, or neither voice is clearly someone: not worth splitting
+    segments, _ = model.transcribe(np.concatenate([streams[0], np.zeros(RATE, np.float32), streams[1]]),
+                                   language="en", beam_size=1, word_timestamps=True, vad_filter=True,
+                                   condition_on_previous_text=False, temperature=0.0)
+    cut = (len(audio) + RATE / 2) / RATE
+    words = [w for seg in segments for w in (seg.words or [])]
+    parts = []
+    for k in (0, 1):
+        ws = [w for w in words if ((w.start + w.end) / 2 < cut) == (k == 0)]
+        t = "".join(w.word for w in ws).strip()
+        if ws and t.lower().strip(" .!?") not in {j.strip(" .!?") for j in JUNK} and "<" not in t and "begin=" not in t:
+            parts.append((ws[0].start - k * cut, names[k], t, streams[k]))
+    if len(parts) < 2:
+        return None  # only one voice said anything: the normal path transcribes the clip better
+    parts.sort(key=lambda p: p[0])  # whoever started first goes first
+    return [(n, t) for _, n, t, _ in parts], [s for *_, s in parts]
+
+
+def split_turns(segments, audio: np.ndarray, speakers, default: str, text: str) -> list:
+    """Split one transcript into speaker turns: cut at pauses over 0.35 s, identify each piece of
+    0.8 s or more, give short pieces their neighbour's speaker, merge runs of the same speaker.
+    (Simon: several people talking should come through as separate messages.)"""
+    words = [w for seg in segments for w in (seg.words or [])]
+    if len(words) < 4:
+        return [(default, text)]
+    chunks, cur = [], [words[0]]
+    for w in words[1:]:
+        if w.start - cur[-1].end > 0.35:
+            chunks.append(cur)
+            cur = [w]
+        else:
+            cur.append(w)
+    chunks.append(cur)
+    if len(chunks) < 2:
+        return [(default, text)]
+    labeled = []
+    for c in chunks:
+        a, b = c[0].start, c[-1].end
+        name = speakers.who(audio[int(a * RATE):int(b * RATE)]) if b - a >= 0.8 else None
+        labeled.append([name, "".join(w.word for w in c).strip()])
+    prev = next((l[0] for l in labeled if l[0]), default)
+    for l in labeled:
+        l[0] = l[0] or prev
+        prev = l[0]
+    runs: list = []
+    for name, t in labeled:
+        if runs and runs[-1][0] == name:
+            runs[-1][1] += " " + t
+        else:
+            runs.append([name, t])
+    if len(runs) == 1:
+        return [(default, text)]
+    return [(n, t) for n, t in runs]
+
+
+# Keep each utterance's audio for testing the speaker splitter (.dev is private and gitignored).
+SAVE_DIR = LOG.parent / "utterances" if os.environ.get("VOICE_SAVE", "1") == "1" else None
+
+
+def write_wav(path, audio: np.ndarray) -> None:
+    import wave
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1), w.setsampwidth(2), w.setframerate(RATE)
+        w.writeframes((np.clip(audio, -1, 1) * 32767).astype(np.int16).tobytes())
+
+
+def save_utterance(stem: Path, audio: np.ndarray) -> None:
+    SAVE_DIR.mkdir(exist_ok=True)
+    write_wav(str(stem) + ".wav", audio)
+    for old in sorted(SAVE_DIR.glob("*.wav"))[:-1000]:  # keep the last 1000 (~1-2 h of talk)
+        for f in SAVE_DIR.glob(old.stem + ".*"):
+            f.unlink()
+
+
+def save_turns(stem: Path, turns: list, streams=None, suffix: str = ".json") -> None:
+    """<stamp>.json holds the final turns (<stamp>.fast.json the fast pass's); separated voices go next to the
+    clip as <stamp>.sep0.wav, .sep1.wav and each turn names its file."""
+    for i, x in enumerate(streams or []):
+        write_wav(f"{stem}.sep{i}.wav", x)
+    Path(str(stem) + suffix).write_text(json.dumps([list(t) + ([f"{stem.name}.sep{i}.wav"] if streams else [])
+                                                    for i, t in enumerate(turns)]))
+
+
+def timing(text: str) -> None:
+    """Latency log for each utterance (.dev/voice-timing.log)."""
+    with open(LOG.parent / "voice-timing.log", "a") as f:
+        f.write(text + "\n")
+
+
+LOG_LOCK = threading.Lock()
+
+
+def log(text: str, stamp: str | None = None) -> None:
+    line = f"[{stamp or f'{dt.datetime.now():%H:%M:%S}'}] {text}"
     print(line, flush=True)
-    with open(LOG, "a") as f:
+    with LOG_LOCK, open(LOG, "a") as f:
         f.write(line + "\n")
+
+
+def junk(text: str) -> bool:
+    # Whisper sometimes hallucinates subtitle markup (<p begin=...>) on noise.
+    return "<" in text or "&lt;" in text or "begin=" in text or text.lower().strip(" .!?") in {j.strip(" .!?") for j in JUNK}
+
+
+def log_turns(turns: list, stamp: str, mark: str = "") -> None:
+    # Whisper often hears "Claude" as cloud/clawed/clod: tag requests aimed at Claude.
+    addressed = CLAUDE_RE.search(" ".join(t for _, t in turns))
+    for name, part in turns:
+        part_addressed = addressed if len(turns) == 1 else CLAUDE_RE.search(part)
+        log(mark + ("TO CLAUDE: " if part_addressed else "") + f"{name}: {part}", stamp)
+
+
+def accurate(model, speakers, overlap, audio: np.ndarray, who: str):
+    """The careful pass: overlap split, large model, speaker turns. Returns (turns, streams, text) or None."""
+    try:
+        sep = separated(audio, model, speakers, overlap)
+    except Exception as e:  # never lose a transcript to the separator
+        print(f"separation failed: {e}", flush=True)
+        sep = None
+    if sep:
+        turns, streams = sep
+        turns = [(n, tidy(t)) for n, t in turns]
+        return turns, streams, " / ".join(t for _, t in turns)
+    segments, _ = model.transcribe(audio, language="en", beam_size=1, word_timestamps=True, vad_filter=True,
+                                   condition_on_previous_text=False, initial_prompt=PROMPT)
+    segments = list(segments)
+    text = tidy(" ".join(s.text.strip() for s in segments).strip())
+    if junk(text):
+        return None
+    who = who or speakers.identify(audio, text)  # single-pass mode
+    try:
+        turns = split_turns(segments, audio, speakers, who, text) if len(audio) > RATE * 2.5 else [(who, text)]
+    except Exception as e:  # never lose a transcript to the splitter
+        print(f"split_turns failed: {e}", flush=True)
+        turns = [(who, text)]
+    return [(n, tidy(t)) for n, t in turns], None, text
+
+
+class Fixer(threading.Thread):
+    """Re-transcribes each clip with the accurate model at nice 19 and logs "~" correction lines.
+    Its model and ONNX sessions are made in this thread so all their worker threads inherit the low priority."""
+
+    def __init__(self, speakers) -> None:
+        super().__init__(daemon=True)
+        self.speakers, self.jobs, self.cv = speakers, [], threading.Condition()
+
+    def add(self, job: dict) -> None:
+        with self.cv:
+            self.jobs.append(job)
+            self.cv.notify()
+
+    def next(self) -> dict:
+        with self.cv:
+            while True:
+                self.jobs = [j for j in self.jobs if time.time() - j["t_end"] < FIX_AGE]
+                if self.jobs:  # requests to Claude first, then oldest first
+                    j = next((j for j in self.jobs if j["addressed"]), self.jobs[0])
+                    self.jobs.remove(j)
+                    return j
+                self.cv.wait()
+
+    def run(self) -> None:
+        os.setpriority(os.PRIO_PROCESS, threading.get_native_id(), 19)
+        model = WhisperModel(MODEL, device="cpu", compute_type="int8", cpu_threads=int(os.environ.get("VOICE_THREADS", "2")))
+        overlap = Overlap() if os.environ.get("VOICE_SPLIT", "1") == "1" and SEG_MODEL.exists() and SEP_MODEL.exists() else None
+        print(f"accurate pass ready ({MODEL})", flush=True)
+        while True:
+            j = self.next()
+            t0 = time.time()
+            try:
+                r = accurate(model, self.speakers, overlap, j["audio"], j["who"])
+            except Exception as e:
+                print(f"accurate pass failed: {e}", flush=True)
+                continue
+            changed = bool(r) and [(n, norm(t)) for n, t in r[0]] != [(n, norm(t)) for n, t in j["turns"]]
+            if changed:
+                log_turns(r[0], j["stamp"], "~ ")
+            if r and SAVE_DIR:
+                try:
+                    save_turns(j["stem"], r[0], r[1])
+                except Exception as e:
+                    print(f"save failed: {e}", flush=True)
+            timing(f"fix speech {j['t_start']:.2f}-{j['t_end']:.2f} queued {t0 - j['t_logged']:.2f}s accurate "
+                   f"{time.time() - t0:.2f}s changed {int(changed)}" + (f" overlap-split {len(r[0])}" if r and r[1] else "")
+                   + f" logged {time.time():.2f} | {(r[2] if r else '')[:40]}")
+
+
+def reader(proc, frames: list, cv) -> None:
+    """Read the mic all the time: while Whisper was busy the pipe filled and speech was lost."""
+    while True:
+        raw = proc.stdout.read(FRAME * 2)
+        with cv:
+            frames.append((time.time(), raw))
+            cv.notify()
+        if not raw or len(raw) < FRAME * 2:
+            return
 
 
 def main() -> None:
     LOG.parent.mkdir(parents=True, exist_ok=True)
-    print(f"loading {MODEL}…", flush=True)
-    model = WhisperModel(MODEL, device="cpu", compute_type="int8", cpu_threads=6)
+    one = FAST == "none"
+    print(f"loading {MODEL if one else FAST + ' (fast) + ' + MODEL + ' (accurate)'}…", flush=True)
+    # Few threads: the family plays Minecraft on this machine (2026-10-17); the service also has CPUQuota.
+    model = WhisperModel(MODEL if one else FAST, device="cpu", compute_type="int8",
+                         cpu_threads=int(os.environ.get("VOICE_FAST_THREADS", "3")))
     speakers = Speakers()
-    cmd = ["ssh", "-i", KEY, "-o", "BatchMode=yes", "-o", "ServerAliveInterval=5", HOST,
-           "XDG_RUNTIME_DIR=/run/user/1000 exec pw-record --target echo_cancel_source "
-           f"--rate {RATE} --channels 1 --format s16 -"]
+    fixer = None
+    if one:
+        overlap = Overlap() if os.environ.get("VOICE_SPLIT", "1") == "1" and SEG_MODEL.exists() and SEP_MODEL.exists() else None
+    else:
+        fixer = Fixer(speakers)
+        fixer.start()
+    record = f"exec pw-record --target \"$src\" --rate {RATE} --channels 1 --format s16 -"
+    # VOICE_SOURCE=local listens to a mic plugged into this machine (its default input) instead of the Frame.
+    local = os.environ.get("VOICE_SOURCE", "frame") == "local"
+    mic = "the Steam Machine mic" if local else "the Steam Frame mic"
+    cmd = ["sh", "-c", "src=$(pactl get-default-source); " + record] if local else \
+          ["ssh", "-i", KEY, "-o", "BatchMode=yes", "-o", "ServerAliveInterval=5", HOST,
+           # Prefer the echo-cancelled mic; it disappears after the Frame sleeps, so fall back to
+           # the default source rather than recording silence.
+           "export XDG_RUNTIME_DIR=/run/user/1000; "
+           "src=$(pactl list short sources | grep -q echo_cancel_source && echo echo_cancel_source "
+           "|| pactl get-default-source); " + record]
     backoff = 3
     was_listening = False
     while True:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        frames: list = []
+        cv = threading.Condition()
+        threading.Thread(target=reader, args=(proc, frames, cv), daemon=True).start()
         got_audio = False
         noise = 300.0
         speech: list[np.ndarray] = []
@@ -109,50 +463,72 @@ def main() -> None:
         silent = 0
         pre: list[np.ndarray] = []
         while True:
-            raw = proc.stdout.read(FRAME * 2)
+            with cv:
+                while not frames:
+                    cv.wait()
+                t_frame, raw = frames.pop(0)
             if not raw or len(raw) < FRAME * 2:
                 break
             if not got_audio:
                 got_audio = True
                 backoff = 3
                 if not was_listening:
-                    print("listening to the Steam Frame mic", flush=True)
+                    print(f"listening to {mic}", flush=True)
                     was_listening = True
             chunk = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
             rms = float(np.sqrt(np.mean(chunk * chunk)))
-            loud = rms > max(500.0, noise * 3.0)
+            loud = rms > max(FLOOR, noise * 3.0)
             if not speech:
                 noise = noise * 0.98 + rms * 0.02 if not loud else noise
                 pre = (pre + [chunk])[-10:]  # keep 300 ms before speech starts
                 voiced = voiced + 1 if loud else 0
                 if voiced >= 3:
                     speech = pre[:]
+                    t_start = t_frame - len(pre) * FRAME / RATE
                     silent = 0
                 continue
             speech.append(chunk)
             silent = 0 if loud else silent + 1
             too_long = len(speech) * FRAME > RATE * 15
-            if silent * FRAME > RATE * 0.8 or too_long:
+            if silent * FRAME > RATE * 0.5 or too_long:  # 0.5 s pause ends an utterance
+                t_end = t_frame - silent * FRAME / RATE
                 audio = np.concatenate(speech) / 32768.0
                 speech, voiced = [], 0
                 if len(audio) < RATE * 0.5:
                     continue
-                segments, _ = model.transcribe(audio, language="en", beam_size=1, without_timestamps=True,
-                                               condition_on_previous_text=False)
-                text = " ".join(s.text.strip() for s in segments).strip()
-                # Whisper sometimes hallucinates subtitle markup (<p begin=...>) on noise: drop it.
-                if "<" in text or "&lt;" in text or "begin=" in text:
-                    continue
-                if text.lower().strip(" .!?") not in {j.strip(" .!?") for j in JUNK}:
-                    # Whisper often hears "Claude" as cloud/clawed/clod: tag requests aimed at Claude.
-                    addressed = re.search(r"\b(claude|cloud|clawed|clod|claud|clyde|lord|cora|clora)\b", text, re.I)
-                    who = speakers.identify(audio.astype(np.float32), text)
-                    log(("TO CLAUDE: " if addressed else "") + f"{who}: {text}")
+                t_tx = time.time()
+                audio = audio.astype(np.float32)
+                now = dt.datetime.now()
+                stamp, stem = f"{now:%H:%M:%S}", (SAVE_DIR / f"{now:%Y%m%d-%H%M%S}" if SAVE_DIR else None)
+                if one:  # the old single pass
+                    r = accurate(model, speakers, overlap, audio, None)
+                    if not r:
+                        continue
+                    turns, streams, text = r
+                else:  # fast pass: small model, no word timings; speaker turns and overlaps wait for the fixer
+                    segments, _ = model.transcribe(audio, language="en", beam_size=1, vad_filter=True,
+                                                   condition_on_previous_text=False, temperature=0.0, max_new_tokens=128)
+                    text = tidy(" ".join(s.text.strip() for s in segments).strip())
+                    if junk(text):
+                        continue  # (a clip the fast model hears as nothing is not re-done either)
+                    turns, streams = [(speakers.identify(audio, text), text)], None
+                log_turns(turns, stamp)
+                if SAVE_DIR:
+                    try:
+                        save_utterance(stem, audio)
+                        save_turns(stem, turns, streams, ".json" if one else ".fast.json")
+                    except Exception as e:
+                        print(f"save failed: {e}", flush=True)
+                if fixer:
+                    fixer.add(dict(audio=audio, who=turns[0][0], turns=turns, stamp=stamp, stem=stem, t_start=t_start,
+                                   t_end=t_end, t_logged=time.time(), addressed=bool(CLAUDE_RE.search(text))))
+                timing(f"speech {t_start:.2f}-{t_end:.2f} silence_wait {t_tx - t_end:.2f}s "
+                       f"transcribe {time.time() - t_tx:.2f}s" + (f" overlap-split {len(turns)}" if streams else "")
+                       + f" {'single' if one else 'fast'} logged {time.time():.2f} | {text[:40]}")
         proc.kill()
         if was_listening and not got_audio or was_listening:
-            print("Steam Frame mic offline (headset off?) - will keep retrying quietly", flush=True)
+            print(f"{mic} offline - will keep retrying quietly", flush=True)
             was_listening = False
-        import time
         time.sleep(backoff)
         backoff = min(backoff * 2, 30)  # retry less often while the headset is off
 

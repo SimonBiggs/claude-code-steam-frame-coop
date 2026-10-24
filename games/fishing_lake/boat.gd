@@ -453,6 +453,7 @@ func swing_net() -> void:
 		return
 	net_cool = 0.7
 	net_anim = 1.0
+	main.cue_used(self, "A")  # the picture cue fades after the kid has done it twice
 	if main.net.mode == "client":
 		main.net.send_action("net", [position, yaw], index)
 	else:
@@ -463,6 +464,7 @@ func call_fish() -> void:
 	if call_cool > 0.0:
 		return
 	call_cool = 3.0
+	main.cue_used(self, "X")
 	if main.net.mode == "client":
 		main.net.send_action("call", [position], index)
 	else:

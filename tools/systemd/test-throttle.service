@@ -1,0 +1,9 @@
+[Unit]
+Description=Idle priority + 4 threads for Claude's test games (so the family's games never stutter)
+
+[Service]
+ExecStart=%h/.local/bin/test-throttle
+Restart=always
+
+[Install]
+WantedBy=default.target

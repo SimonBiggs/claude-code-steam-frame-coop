@@ -51,6 +51,7 @@ var fitted := false
 var fit_head := 0.0
 var refit_t := 0.0
 var mittens: Array[MeshInstance3D] = []
+var fake_trigger := -1.0  # bots (BOT_VR): >= 0 replaces the real right trigger
 
 var net_head := Transform3D()
 var net_hand_r := Transform3D()
@@ -92,6 +93,8 @@ func attach_xr(origin: XROrigin3D, cam: XRCamera3D, left: XRController3D, right:
 
 
 func vr_trigger() -> bool:
+	if fake_trigger >= 0.0:
+		return vr and fake_trigger > 0.6
 	return vr and hand_r.get_float("trigger") > 0.6
 
 

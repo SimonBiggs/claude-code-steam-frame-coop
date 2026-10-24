@@ -117,6 +117,7 @@ func _process(delta: float) -> void:
 		tag.position = Vector3(0, 2.4, 0)
 		add_child(tag)
 	var name_tag: Label3D = get_node("NameTag")
+	name_tag.visible = not main.SIMPLE_MODE  # simple mode: no name/percent floating over the fish
 	name_tag.text = ("FISHWORT  %d%%" % int(100.0 * hp / max_hp)) + ("\nSLICE ME!" if is_low() else "")
 	t = fmod(Time.get_unix_time_from_system(), 3600.0)
 	if dive_u >= 0.0:
@@ -189,7 +190,8 @@ func sword_check(a: Vector3, b: Vector3, player) -> bool:
 	if pts[0].distance_to(pts[1]) > 1.7:
 		return false
 	slice_ok = Time.get_ticks_msec() + 450
-	main.popup(pts[1] + Vector3.UP * 1.0, "FISH SLICE! +200", Color(0.6, 0.95, 1.0))
+	if not main.SIMPLE_MODE:
+		main.popup(pts[1] + Vector3.UP * 1.0, "FISH SLICE! +200", Color(0.6, 0.95, 1.0))
 	main.score += 200
 	main.burst(pts[1], Color(0.6, 0.95, 1.0), 18, 0.12)
 	main.sound("slice", 0.0, 0.8)
@@ -219,8 +221,12 @@ func _die() -> void:
 	respawn_t = RESPAWN
 	main.score += 1500
 	main.explosion(global_position, Color(0.4, 0.8, 1.0), 3.0)
-	main.popup(global_position + Vector3.UP * 2.0, "+1500", Color(0.6, 0.9, 1.0))
-	main._show_center("THE FLYING FISH IS DOWN!\nIt'll be back…", 2.0)
+	if main.SIMPLE_MODE:
+		main._show_center("BYE BYE FISHWORT!", 2.0)
+		main.director().cheer(0.6, 0.5)
+	else:
+		main.popup(global_position + Vector3.UP * 2.0, "+1500", Color(0.6, 0.9, 1.0))
+		main._show_center("THE FLYING FISH IS DOWN!\nIt'll be back…", 2.0)
 	main.achievements().unlock("big_catch")
 
 
@@ -233,7 +239,7 @@ func _respawn(delta: float) -> void:
 		visible = true
 		max_hp = 60.0 + main.wave * 8.0
 		hp = max_hp
-		main._show_center("THE FLYING FISH IS BACK!", 1.5)
+		main._show_center("FISHWORT IS BACK!" if main.SIMPLE_MODE else "THE FLYING FISH IS BACK!", 1.5)
 
 
 ## Client: alive/health (and the current dive) from the host's snapshot.

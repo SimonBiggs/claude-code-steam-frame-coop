@@ -5,5 +5,7 @@ export PATH="$HOME/.local/bin:$PATH"
 STEAMXR="$HOME/.local/share/Steam/steamapps/common/SteamVR/steamxr_linux64.json"
 [ -f "$STEAMXR" ] && export XR_RUNTIME_JSON="$STEAMXR"
 # Join the VR player's game on the Steam Frame as player 2 (falls back to split screen if it isn't running).
-export DUO_JOIN="${DUO_JOIN:-frame}"
+# The name "frame" doesn't always resolve on the LAN, so use the address pinned in ~/.ssh/config.
+FRAME_IP=$(ssh -G frame 2>/dev/null | awk '/^hostname /{print $2}')
+export DUO_JOIN="${DUO_JOIN:-${FRAME_IP:-frame}}"
 exec gdev run "$HOME/GodotProjects/duo-arena"

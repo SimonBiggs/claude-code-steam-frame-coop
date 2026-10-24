@@ -90,6 +90,65 @@ static func make_rocket(n: int, crew: int = 1) -> Dictionary:
 	return {"name": names[0], "modules": mods, "time": time}
 
 
+## Simple mode: one new desk control per rocket, never more than two puzzles (plus the launch lever).
+## Rocket 1 is the practice: press ONE coloured button. Then plugs, the dial, switches, shapes.
+## No crew jobs, no rocket names, no countdown.
+const SIMPLE_ORDER: Array[String] = ["fuel", "wires", "gauge", "switches", "symbols"]
+
+
+static func make_simple_rocket(n: int) -> Dictionary:
+	var names: Array = ROCKET_NAMES.duplicate()
+	names.shuffle()
+	var types: Array = []
+	if n <= SIMPLE_ORDER.size():
+		types.append(SIMPLE_ORDER[n - 1])  # the new one first (the ghost hand shows how it works)
+		if n > 1:
+			types.append(SIMPLE_ORDER[randi() % (n - 1)])
+	else:
+		var all: Array = SIMPLE_ORDER.duplicate()
+		all.shuffle()
+		types = all.slice(0, 2)
+	var mods: Array = []
+	for t in types:
+		mods.append(make_simple(t, n))
+	return {"name": names[0], "modules": mods, "time": 999.0}
+
+
+static func make_simple(type: String, n: int) -> Dictionary:
+	match type:
+		"fuel":  # press 1 (later 2 different) coloured buttons
+			var cols: Array = [0, 1, 2, 3]
+			cols.shuffle()
+			var answer: Array = cols.slice(0, 1 if n <= 2 else 2)
+			answer.sort()
+			return {"type": type, "done": false, "rows": [["", answer]], "answer": answer, "pressed": []}
+		"wires":  # two plugs into two sockets (order[socket] = colour, -1 = leave empty)
+			var cols: Array = [0, 1, 2, 3]
+			cols.shuffle()
+			var socks: Array = [0, 1, 2, 3]
+			socks.shuffle()
+			var order: Array = [-1, -1, -1, -1]
+			for k in 2:
+				order[socks[k]] = cols[k]
+			return {"type": type, "done": false, "order": order, "placed": [-1, -1, -1, -1]}
+		"symbols":  # two shapes, left one first
+			var m := _make("symbols", 1, ROCKET_NAMES.duplicate(), 1)
+			m.order = (m.order as Array).slice(0, 2)
+			return m
+		"switches":  # one or two switches up
+			var state: Array = []
+			var answer: Array = []
+			for k in SWITCH_COUNT:
+				state.append(false)
+				answer.append(false)
+			var ks: Array = range(SWITCH_COUNT)
+			ks.shuffle()
+			for k in (1 if n <= 4 else 2):
+				answer[ks[k]] = true
+			return {"type": type, "done": false, "rows": [["", answer]], "answer": answer, "state": state}
+	return _make(type, n, ROCKET_NAMES.duplicate(), 1)
+
+
 ## Manual rows: [rocket name ("" = any rocket), answer]. answers[0] belongs to this rocket (names[0]).
 static func _rows(names: Array, keyed: int, answers: Array) -> Array:
 	var rows: Array = []

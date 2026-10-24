@@ -24,7 +24,7 @@ func _ready() -> void:
 	mat.emission = color
 	mat.emission_energy_multiplier = 2.5
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.no_depth_test = true
+	mat.no_depth_test = false
 	mat.render_priority = 5
 	var head := MeshInstance3D.new()
 	var cone := CylinderMesh.new()

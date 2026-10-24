@@ -1,6 +1,16 @@
 extends Node
-## Networked co-op over the home network. The Steam Frame (VR) hosts and simulates the game;
-## the Steam Machine joins as player 2 (env DUO_JOIN=<host>), renders the shared world and drives its own player.
+## Networked co-op over the home network. One machine hosts and simulates the game (usually the Steam Frame
+## with the VR player); other machines join (env DUO_JOIN=<host>, or DUO_JOIN=auto to find one), render the
+## shared world and drive their own players.
+##
+## MANY MACHINES (2026-10-24): any number of TV-style machines can join (the TV, Steam Decks...), up to
+## `max_machines` (env DUO_MAX_MACHINES, default 32: no practical limit; the game's free seats are). Each says what it is (env DUO_MACHINE_KIND: "tv",
+## "deck", ...; machine_kind_of(peer)), so a game can treat e.g. Deck players differently. A game opts in
+## with `var multi_machine := true` on main; until then it keeps the old contract (ONE TV machine: any more
+## are told the game is full and play on their own). Per-machine signals: machine_joined / machine_left,
+## main.on_machine_joined(peer, kind) / on_machine_left(peer). core/party.gd tracks which machine owns
+## which seat. A host doesn't need VR: host(false) runs a "flat host" (has_vr false; slot 0 is a normal
+## pad/keyboard player), so TV + Decks, or just two Decks, can play together (games opt in, see above).
 ## Host -> client: 30 Hz snapshots plus reliable one-off events. Client -> host: player 2 state and actions.
 ##
 ## Engine additions (docs/engine/systems.md), all optional for a game:
@@ -22,14 +32,19 @@ extends Node
 signal join_finished(ok: bool)
 ## Every machine: a replicated state key changed (value null = the key was erased).
 signal state_changed(key: String, value: Variant)
-## Host: the TV machine connected / went away.
+## Host: a TV machine connected / went away (every machine; old games treat it as "the TV").
 signal client_connected
 signal client_disconnected
+## Host: a machine said hello (peer id, its kind: "tv", "deck", ...) / went away.
+signal machine_joined(peer: int, kind: String)
+signal machine_left(peer: int)
 
 const DEFAULT_PORT := 7777
 var PORT: int = int(OS.get_environment("DUO_PORT")) if OS.has_environment("DUO_PORT") else DEFAULT_PORT  # override for parallel tests
 const SNAP_INTERVAL := 1.0 / 30.0
 const JOIN_TIMEOUT := 5.0
+## DUO_JOIN=auto: how long to listen for a host's beacon (it sends one a second).
+const AUTO_FIND_SECONDS := 1.6
 ## State store deltas are batched and sent at most this often (seconds).
 const STATE_INTERVAL := 1.0 / 30.0
 ## Player slots: 0 is the VR / host player, 1..6 are TV players.
@@ -37,7 +52,17 @@ const MAX_SLOTS := 7
 
 var main
 var mode := "local"  # "local", "host" or "client"
-var connected := false
+var connected := false  # host: at least one machine joined; client: joined the host
+## This machine's kind, sent to the host when joining ("tv", "deck", ...).
+var machine_kind: String = preload("res://core/machine.gd").kind()  # tv / deck / frame (core/machine.gd)
+## Host: how many machines may join a game that supports several (multi_machine on main).
+var max_machines: int = int(OS.get_environment("DUO_MAX_MACHINES")) if OS.has_environment("DUO_MAX_MACHINES") else 32  # ENet allows 4095; seats are the real limit
+## Host: whether the host has a VR player (false: a flat host, see host()).
+var has_vr := true
+## Host: peer id -> {"kind": String} for every joined machine.
+var machines := {}
+## While a sys message handler runs on the host: the peer that sent it (0 = this machine).
+var sys_sender := 0
 var snap_t := 0.0
 var join_deadline := 0  # Time.get_ticks_msec() when an unanswered join gives up (0 = not joining)
 var _state := {}  # replicated key -> value (every machine)
@@ -50,21 +75,69 @@ var _since_unpause := 0.0  # game seconds since the last unpause (or start)
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS  # keep the connection alive while the game is paused
+	preload("res://core/ui_kit.gd").ensure_pad_ui_actions()  # every focus-driven menu works with a pad
 	_since_unpause = 0.0  # starting counts as "just unpaused" (held buttons from the arcade)
 	_was_paused = get_tree().paused
 
 
-## Become the host (the headset, or DUO_HOST=1): listen for the TV machine.
-func host() -> void:
+## Become the host: listen for TV machines. vr false = a flat host without a VR player (TV / Deck hosting).
+func host(vr: bool = true) -> void:
 	mode = "host"
+	has_vr = vr and not OS.has_environment("DUO_FLAT_HOST")  # the arcade picked this machine as a flat host
 	_try_listen()
+
+
+## True when main opted in to several TV machines (and to flat hosts): `var multi_machine := true`.
+func multi_machine_ok() -> bool:
+	return main != null and is_instance_valid(main) and main.get("multi_machine") == true
+
+
+## Host: how many machines this game takes now (1 for old one-TV games).
+func machine_limit() -> int:
+	return maxi(1, max_machines) if multi_machine_ok() else 1
+
+
+## Inside an RPC handler on the host (on_p2_action, on_request, on_remote_state, sys handlers): the peer
+## id of the machine that sent it (0 = this machine).
+func sender_peer() -> int:
+	return sys_sender if sys_sender != 0 else multiplayer.get_remote_sender_id()
+
+
+## Host: how many machines are connected (client: 1 when joined).
+func peer_count() -> int:
+	return machines.size() if mode == "host" else (1 if connected else 0)
+
+
+## This machine's peer id (1 on the host, 0 when not networked).
+func my_peer_id() -> int:
+	return multiplayer.get_unique_id() if mode != "local" and multiplayer.multiplayer_peer != null else 0
+
+
+## Host: a one-off event for one machine only (e.g. a re-sync for a machine that just joined).
+func event_to(peer: int, kind: String, args: Array) -> void:
+	if mode == "host" and peer in multiplayer.get_peers():
+		_event.rpc_id(peer, kind, args)
+
+
+## Host: a one-off event for every machine except one (e.g. relaying a sound a machine already played).
+func event_except(peer: int, kind: String, args: Array) -> void:
+	if mode != "host":
+		return
+	for p in multiplayer.get_peers():
+		if p != peer:
+			_event.rpc_id(p, kind, args)
+
+
+## Host: a joined machine's kind ("tv", "deck", ...; "" if unknown).
+func machine_kind_of(peer: int) -> String:
+	return str(machines.get(peer, {}).get("kind", ""))
 
 
 ## Keeps trying while the port is busy (e.g. an older copy of the game is still shutting down).
 func _try_listen() -> void:
 	_close_old_peer()
 	var peer := ENetMultiplayerPeer.new()
-	if peer.create_server(PORT, 1) != OK:
+	if peer.create_server(PORT, maxi(1, max_machines)) != OK:
 		print("Net: port %d busy, retrying" % PORT)
 		get_tree().create_timer(1.0).timeout.connect(_try_listen)
 		return
@@ -76,8 +149,17 @@ func _try_listen() -> void:
 	print("Net: hosting on port %d" % PORT)
 
 
-## Become the TV machine: join the host at `address` (join_finished tells how it went).
+## Become a TV machine: join the host at `address` (join_finished tells how it went). "auto" listens for a
+## host's beacon on the home network for a moment and joins whoever is hosting (no host: join_finished(false)).
 func join(address: String) -> void:
+	var here := get_tree().current_scene.scene_file_path if get_tree().current_scene else ""
+	if Engine.get_meta("duo_full", "-") == here:
+		print("Net: the host's game was full, staying on this machine")
+		join_finished.emit.call_deferred(false)  # (the arcade lobby clears duo_full: next game, try again)
+		return
+	if address == "auto":
+		_join_auto()
+		return
 	_close_old_peer()
 	var peer := ENetMultiplayerPeer.new()
 	if peer.create_client(address, PORT) != OK:
@@ -95,6 +177,28 @@ func join(address: String) -> void:
 	print("Net: joining %s:%d" % [address, PORT])
 
 
+func _join_auto() -> void:
+	var udp := PacketPeerUDP.new()
+	if udp.bind(PORT + 2) != OK:
+		print("Net: can't listen for hosts (port %d busy)" % (PORT + 2))
+		join_finished.emit.call_deferred(false)
+		return
+	var until := Time.get_ticks_msec() + int(AUTO_FIND_SECONDS * 1000.0)
+	while Time.get_ticks_msec() < until:
+		await get_tree().process_frame
+		while udp.get_available_packet_count() > 0:
+			var msg := udp.get_packet().get_string_from_utf8()
+			var ip := udp.get_packet_ip()
+			if msg.begins_with("ARCADE_GAME ") and ip != "":
+				udp.close()
+				print("Net: found a host at %s" % ip)
+				join(ip)
+				return
+	udp.close()
+	print("Net: no host on the network")
+	join_finished.emit(false)
+
+
 ## The multiplayer peer belongs to the SceneTree and survives scene reloads; close it so the port is freed.
 func _close_old_peer() -> void:
 	var old := multiplayer.multiplayer_peer
@@ -104,6 +208,8 @@ func _close_old_peer() -> void:
 
 
 func _exit_tree() -> void:
+	if has_meta("follow_udp") and get_meta("follow_udp") != null:  # _follow_headset's beacon listener
+		(get_meta("follow_udp") as PacketPeerUDP).close()
 	_close_old_peer()
 
 
@@ -111,6 +217,13 @@ var menu_was_down := false
 
 
 func _process(delta: float) -> void:
+	if not has_meta("pad_ui"):  # (also in _ready) so a hot-reloaded net.gd adds pad A/B too
+		set_meta("pad_ui", true)
+		preload("res://core/ui_kit.gd").ensure_pad_ui_actions()
+	_ensure_caption()
+	_follow_headset()
+	_ensure_fullscreen()
+	_hide_tv_cursor()
 	_track_pause()
 	if not get_tree().paused:
 		_since_unpause += delta
@@ -130,8 +243,21 @@ func _process(delta: float) -> void:
 # --- Connection events -------------------------------------------------------
 
 func _on_peer_connected(id: int) -> void:
+	if mode != "host":
+		return
+	if machines.size() >= machine_limit():
+		# Full (or an old one-TV game): tell it, so it plays on its own instead of waiting, then drop it.
+		print("Net: machine %d turned away (%d/%d)" % [id, machines.size(), machine_limit()])
+		_sys_down.rpc_id(id, "_full", [machine_limit()])
+		# Drop it once that message is out (not on a timer: meanwhile broadcasts to it would error).
+		if multiplayer.multiplayer_peer is ENetMultiplayerPeer:
+			var pp := (multiplayer.multiplayer_peer as ENetMultiplayerPeer).get_peer(id)
+			if pp:
+				pp.peer_disconnect_later()
+		return
+	machines[id] = {"kind": "tv"}
 	connected = true
-	print("Net: player 2 joined")
+	print("Net: machine %d joined (%d now)" % [id, machines.size()])
 	_state_dirty.clear()
 	_state_full.rpc_id(id, _state)  # a late joiner gets the whole store
 	if main != null and main.has_method("on_client_joined"):
@@ -139,19 +265,28 @@ func _on_peer_connected(id: int) -> void:
 	client_connected.emit()
 
 
-func _on_peer_disconnected(_id: int) -> void:
-	connected = false
-	print("Net: player 2 left")
-	if main != null and main.has_method("on_client_left"):
-		main.on_client_left()
-	client_disconnected.emit()
+func _on_peer_disconnected(id: int) -> void:
+	if not machines.has(id):
+		return  # one we turned away
+	machines.erase(id)
+	connected = not machines.is_empty()
+	print("Net: machine %d left (%d now)" % [id, machines.size()])
+	if main != null and main.has_method("on_machine_left"):
+		main.on_machine_left(id)
+	machine_left.emit(id)
+	# Old one-TV games: "the TV left". Multi-machine games get it only when the last machine leaves.
+	if not multi_machine_ok() or machines.is_empty():
+		if main != null and main.has_method("on_client_left"):
+			main.on_client_left()
+		client_disconnected.emit()
 
 
 func _on_connected() -> void:
 	connected = true
 	join_deadline = 0
 	Engine.set_meta("duo_joined", true)
-	print("Net: joined the host")
+	print("Net: joined the host as a %s" % machine_kind)
+	_sys_up.rpc_id(1, "_hello", [machine_kind])
 	join_finished.emit(true)
 
 
@@ -170,6 +305,8 @@ func _give_up() -> void:
 
 
 func _on_server_gone() -> void:
+	if mode != "client":
+		return  # we left on purpose (e.g. the host's game was full)
 	print("Net: host disconnected, reconnecting")
 	connected = false
 	multiplayer.multiplayer_peer = null
@@ -357,7 +494,13 @@ func add_sys_handler(kind: String, handler: Callable) -> void:
 	_sys_handlers[kind] = list
 
 
-## Send an engine message to the other machine (host -> client or client -> host), reliably.
+## Host: send an engine message to one machine only.
+func sys_send_to(peer: int, kind: String, args: Array) -> void:
+	if mode == "host" and peer in multiplayer.get_peers():
+		_sys_down.rpc_id(peer, kind, args)
+
+
+## Send an engine message to the other machine(s) (host -> every client, or client -> host), reliably.
 func sys_send(kind: String, args: Array) -> void:
 	if not connected:
 		return
@@ -369,13 +512,36 @@ func sys_send(kind: String, args: Array) -> void:
 
 @rpc("any_peer", "call_remote", "reliable")
 func _sys_up(kind: String, args: Array) -> void:
-	if mode == "host":
-		_sys_dispatch(kind, args)
+	if mode != "host":
+		return
+	var from := multiplayer.get_remote_sender_id()
+	if not machines.has(from):
+		return  # turned away
+	if kind == "_hello":
+		machines[from] = {"kind": str(args[0]) if args.size() > 0 else "tv"}
+		print("Net: machine %d is a %s" % [from, machines[from].kind])
+		if main != null and main.has_method("on_machine_joined"):
+			main.on_machine_joined(from, machines[from].kind)
+		machine_joined.emit(from, machines[from].kind)
+		return
+	sys_sender = from
+	_sys_dispatch(kind, args)
+	sys_sender = 0
 
 
 @rpc("authority", "call_remote", "reliable")
 func _sys_down(kind: String, args: Array) -> void:
 	if mode != "client":
+		return
+	if kind == "_full":
+		# The host's game takes no more machines: play on our own (no reconnect loop for this game).
+		print("Net: the host's game is full (%d machine(s)), playing on this machine" % int(args[0]))
+		Engine.set_meta("duo_full", get_tree().current_scene.scene_file_path if get_tree().current_scene else "")
+		join_deadline = 0
+		connected = false
+		multiplayer.multiplayer_peer = null
+		mode = "local"
+		join_finished.emit(false)
 		return
 	if kind == "_pause":
 		var paused: bool = bool(args[0])
@@ -497,7 +663,7 @@ func _check_vr_menu() -> void:
 	if hl.get_parent() is XROrigin3D:
 		ws = (hl.get_parent() as XROrigin3D).world_scale
 	if btn != null:
-		btn.position = Vector3(-0.08, 0.03, 0.1) * ws  # beside the wrist, clear of the games' wrist displays
+		btn.position = Vector3(-0.15, 0.02, 0.12) * ws  # well out beside the wrist: games put their own displays on the glove (Party Board coins, Duo Arena HP)
 		btn.pixel_size = 0.0012 * ws
 	var on_btn := false
 	var trig := false
@@ -515,8 +681,51 @@ func _check_vr_menu() -> void:
 	else:
 		set_meta("touch_t", 0.0)
 	var held_touch: bool = float(get_meta("touch_t", 0.0)) > 0.35
+	var paused := get_tree().paused
+	# While paused, an ARCADE button appears above RESUME: touch it, or point at it and pull the
+	# trigger, to go back to the arcade (Simon: "why can't I just press the menu's buttons?").
+	var abtn := _wrist_arcade_button(hl)
+	abtn.visible = paused
+	if paused and hr != null and btn != null:
+		abtn.position = btn.position + Vector3(0.0, 0.055, 0.0) * ws
+		abtn.pixel_size = btn.pixel_size
+		var to2: Vector3 = abtn.global_position - hr.global_position
+		var fwd2: Vector3 = -hr.global_basis.z
+		var along2 := to2.dot(fwd2)
+		var off2 := (to2 - fwd2 * along2).length()
+		var on_arc := to2.length() < 0.07 * ws or (along2 > 0.0 and off2 < 0.06 * ws)
+		if on_arc and on_btn:
+			# Pointing between the two: the one closer to the ray wins.
+			var to1: Vector3 = btn.global_position - hr.global_position
+			var off1 := (to1 - fwd2 * to1.dot(fwd2)).length()
+			if off1 < off2:
+				on_arc = false
+			else:
+				on_btn = false
+		abtn.modulate = Color(1.0, 0.9, 0.3) if on_arc else Color(1.0, 0.7, 0.55)
+		btn.modulate = Color(1.0, 0.9, 0.3) if on_btn else Color(0.55, 0.95, 1.0)
+		if to2.length() < 0.07 * ws:
+			set_meta("arc_touch_t", float(get_meta("arc_touch_t", 0.0)) + get_process_delta_time())
+		else:
+			set_meta("arc_touch_t", 0.0)
+		if (on_arc and trig and not bool(get_meta("trig_was", false))) or float(get_meta("arc_touch_t", 0.0)) > 0.3:
+			print("Net: VR arcade button")
+			go_to_arcade()
+			return
+	# While paused, a trigger pull on the button resumes only when released quickly, so HOLDING the
+	# trigger (even while pointing near the wrist, e.g. with a fishing rod) always goes to the arcade.
+	var tap_resume := false
+	# Only a pull that STARTED while paused counts: the pull that paused (still held) must not resume
+	# the moment it is released.
+	if paused and on_btn and trig and (float(get_meta("btn_hold", 0.0)) > 0.0 or not bool(get_meta("trig_was", false))):
+		set_meta("btn_hold", float(get_meta("btn_hold", 0.0)) + get_process_delta_time())
+	elif float(get_meta("btn_hold", 0.0)) > 0.0:
+		tap_resume = float(get_meta("btn_hold", 0.0)) < 0.5 and not trig
+		set_meta("btn_hold", 0.0)
 	var down: bool = hl.is_button_pressed("menu_button") or hl.is_button_pressed("by_button") \
-		or held_touch or (on_btn and trig)
+		or held_touch or (on_btn and trig and not paused) or tap_resume
+	if has_meta("leaving"):
+		down = false  # on the way to the arcade: a late trigger release must not pause again
 	if down and not menu_was_down:
 		print("Net: VR pause toggled")
 		if main.has_method("toggle_vr_pause"):
@@ -524,7 +733,7 @@ func _check_vr_menu() -> void:
 		else:
 			toggle_pause(0)
 	# Leaving needs the trigger HELD for 1.5 s while paused, so a stray trigger pull doesn't quit.
-	if trig and not on_btn and get_tree().paused:
+	if trig and paused:
 		set_meta("leave_t", float(get_meta("leave_t", 0.0)) + get_process_delta_time())
 		if float(get_meta("leave_t", 0.0)) > 1.5:
 			go_to_arcade()
@@ -536,6 +745,24 @@ func _check_vr_menu() -> void:
 		btn.text = "RESUME" if get_tree().paused else "MENU"
 
 
+func _wrist_arcade_button(hl: XRController3D) -> Label3D:
+	var b := hl.get_node_or_null("WristArcade") as Label3D
+	if b == null:
+		b = Label3D.new()
+		b.name = "WristArcade"
+		b.text = "ARCADE"
+		b.font_size = 40
+		b.outline_size = 18
+		b.pixel_size = 0.0012
+		b.process_mode = Node.PROCESS_MODE_ALWAYS
+		b.visible = false
+		hl.add_child(b)
+	var cam := get_viewport().get_camera_3d()
+	if cam != null:
+		_face_camera(b, cam)
+	return b
+
+
 func _wrist_button(hl: XRController3D) -> Label3D:
 	var btn := hl.get_node_or_null("WristMenu") as Label3D
 	if btn == null:
@@ -544,11 +771,18 @@ func _wrist_button(hl: XRController3D) -> Label3D:
 		btn.font_size = 40
 		btn.outline_size = 18
 		btn.pixel_size = 0.0012
-		btn.no_depth_test = true
-		btn.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		btn.no_depth_test = false
+		btn.billboard = BaseMaterial3D.BILLBOARD_DISABLED
 		btn.process_mode = Node.PROCESS_MODE_ALWAYS
 		hl.add_child(btn)
 		btn.position = Vector3(0.0, 0.07, 0.1)
+	btn.no_depth_test = false  # (re)applied so buttons made before this fix also let the hand pass in front
+	# No billboard in VR: each eye would see it turned differently (cross-eyed, Abigail/Simon).
+	# Turn it towards the head once per frame instead; a Label3D reads from its +Z side.
+	btn.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+	var cam := get_viewport().get_camera_3d()
+	if cam != null:
+		_face_camera(btn, cam)
 	return btn
 
 
@@ -570,3 +804,85 @@ func _beacon(delta: float) -> void:
 	var scene := get_tree().current_scene
 	if scene != null and scene.scene_file_path != "":
 		u.put_packet(("ARCADE_GAME " + scene.scene_file_path).to_utf8_buffer())
+
+
+## "Claude:" captions from frame-say (addons/gdev/caption.gd, a dev tool that may be missing).
+## Added once to the root so it survives game changes; created here because net.gd hot-reloads,
+## so it switches on in a running game without a restart.
+func _ensure_caption() -> void:
+	var root := get_tree().root
+	if not root.has_meta("vr_text_guard"):
+		var g: Node = (load("res://core/vr_text_guard.gd") as GDScript).new()
+		g.name = "VrTextGuard"
+		root.set_meta("vr_text_guard", g)
+		root.add_child.call_deferred(g)
+	if root.has_meta("claude_caption") or not ResourceLoader.exists("res://addons/gdev/caption.gd"):
+		return
+	var c: Node = (load("res://addons/gdev/caption.gd") as GDScript).new()
+	c.name = "ClaudeCaption"
+	root.set_meta("claude_caption", c)
+	root.add_child.call_deferred(c)
+
+
+## The TV machine (no VR) runs fullscreen (Simon). Done once per launch, so F11/Alt+Enter still work.
+func _ensure_fullscreen() -> void:
+	var root := get_tree().root
+	if root.has_meta("fullscreen_done") or DisplayServer.get_name() == "headless":
+		return
+	root.set_meta("fullscreen_done", true)
+	var xr := XRServer.primary_interface
+	if xr != null and xr.is_initialized():
+		return  # the headset draws through OpenXR, not the window
+	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+
+
+## No mouse pointer over the TV picture (Simon); it comes back as soon as the mouse moves.
+func _hide_tv_cursor() -> void:
+	var root := get_tree().root
+	if root.has_meta("cursor_hidden") or DisplayServer.get_name() == "headless":
+		return
+	root.set_meta("cursor_hidden", true)
+	var xr := XRServer.primary_interface
+	if xr == null or not xr.is_initialized():
+		Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
+
+
+## TV machine playing on its own (it couldn't reach the headset when this game started): listen for the
+## headset's "ARCADE_GAME <scene>" beacon and switch to that game as a client, so the TV and the
+## headset never end up in different games (it happened twice on 2026-10-04).
+func _follow_headset() -> void:
+	if mode != "local" or not OS.has_environment("DUO_JOIN") or has_meta("following"):
+		return
+	if not has_meta("follow_udp"):
+		var udp := PacketPeerUDP.new()
+		set_meta("follow_udp", udp if udp.bind(PORT + 2) == OK else null)
+	var u = get_meta("follow_udp")
+	if u == null:
+		return
+	var udp: PacketPeerUDP = u
+	while udp.get_available_packet_count() > 0:
+		var msg := udp.get_packet().get_string_from_utf8()
+		if not msg.begins_with("ARCADE_GAME "):
+			continue
+		var scene := msg.substr(12)
+		if Engine.get_meta("duo_full", "-") == scene:
+			continue  # that game turned us away as full: keep playing here
+		print("Net: the headset is playing %s; joining it" % scene)
+		set_meta("following", true)
+		udp.close()
+		get_tree().paused = false
+		get_tree().change_scene_to_file.call_deferred(scene)
+		return
+
+
+## Turn a wrist button to face the head. Looking straight down at the wrist made the direction parallel to
+## UP: looking_at gave a NaN basis, the button vanished, and reusing its (now NaN) scale kept it broken.
+static func _face_camera(n: Node3D, cam: Camera3D) -> void:
+	var d := n.global_position - cam.global_position
+	if d.length() < 0.01:
+		return
+	var sc := n.global_basis.get_scale()
+	if not sc.is_finite() or sc.length() < 0.001:
+		sc = Vector3.ONE
+	n.global_basis = preload("res://core/ui_kit.gd").face(d, Vector3.UP, cam.global_basis.y).scaled(sc)
+

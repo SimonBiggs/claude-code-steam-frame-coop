@@ -1,31 +1,39 @@
 extends Node3D
 const VrText := preload("res://core/vr_text.gd")
-## Hide and Seek: a playful round game in a cosy cartoon house.
+## Hide and Seek: a playful round game. The map changes every round: the cosy HOUSE, THE CASTLE, THE SPACESHIP.
 ## Player 1 (VR, or keyboard+mouse / controller in split screen) is the SEEKER: counts to 20 with eyes
 ## covered, then searches with a torch. Touch a hider with either hand, or point the torch at one within 3 m
 ## and pull the trigger. SNIFF (VR: left hand on your nose; flat: Q / LB) makes nearby hiders sneeze.
 ## TV players (P2..P7) are HIDERS: run, hide, disguise as something that fits the room (lamp, pot plant,
-## box, teddy, beach ball), squeak for bonus points. Found hiders go to JAIL in the hall; a free hider who
+## box, teddy, beach ball), squeak for bonus points. Found hiders go to JAIL by the start; a free hider who
 ## rings the jail bell lets everyone out. Rounds take turns: CLASSIC, STAR HUNT (grab golden stars while
 ## hiding) and NIGHT TIME (lights low, glowing eyes, extra-bright torch). Awards after every round.
+## Teaching is visual (no how-to text): each TV view says HIDE! / SEEK! / the countdown and shows a
+## picture cue low down (hud.gd + cue.gd: the player's own button glyph + torch / critter-to-box /
+## squeak / nose / bell pictures, a glowing pointer to the jail bell or the nearest star). Each action
+## cue retires once that player has done it twice (cue_did / cue_learned). VR gets 3D cues instead:
+## TRIGGER over the torch while a hider is in the beam, a pulsing nose ball on the left mitten.
 
 const PlayerScript := preload("res://games/hide_and_seek/player.gd")
 const WorldScript := preload("res://games/hide_and_seek/world.gd")
+const CastleScript := preload("res://games/hide_and_seek/map_castle.gd")
+const ShipScript := preload("res://games/hide_and_seek/map_ship.gd")
+## The maps take turns (Abigail: "every single time you play there's a different map"): each new round, and
+## each new game launch, uses the next one. Every map script has data() and build(root).
+const MAPS := [WorldScript, CastleScript, ShipScript]
 const HudScript := preload("res://games/hide_and_seek/hud.gd")
 const SfxScript := preload("res://core/sfx.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
 const NetScript := preload("res://core/net.gd")
 const MusicScript := preload("res://core/music.gd")
 const JoinInputScript := preload("res://games/hide_and_seek/join_input.gd")
+const CueScript := preload("res://games/hide_and_seek/cue.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 ## P1 (seeker) + up to six TV hiders P2..P7.
 const MAX_PLAYERS := 7
 const PLAYER_COLORS: Array[Color] = [Color(1.0, 0.85, 0.45), Color(0.5, 0.85, 1.0), Color(1.0, 0.55, 0.75),
 	Color(0.55, 0.95, 0.55), Color(1.0, 0.65, 0.35), Color(0.75, 0.6, 1.0), Color(0.4, 0.95, 0.9)]
-## Round start: the seeker faces the front door in the hall; the hiders stand behind them.
-const SEEKER_SPAWN := Vector3(0.0, 0.0, 5.7)
-const SPAWNS: Array[Vector3] = [Vector3(0, 0, 5.7), Vector3(-1.4, 0, 2.3), Vector3(1.4, 0, 2.3), Vector3(0, 0, 2.0),
-	Vector3(-2.0, 0, 3.4), Vector3(2.0, 0, 3.4), Vector3(-0.7, 0, 3.2), Vector3(0.7, 0, 3.2)]
 const PAD_WAIT_TIME := 20.0
 const PARTY_META := "hide_and_seek_party"
 const MUSIC_TRACK := 0
@@ -65,6 +73,10 @@ var lights: Array = []
 var window_mat: StandardMaterial3D
 var night_k := 0.0  # 0 day .. 1 night (eased)
 var star_mm: MultiMesh
+var map_idx := -1  # which MAPS entry is built right now
+var map: Dictionary = {}  # its data(): rooms, doors, spawns, jail, bell, star_spots, hide_spots, bounds
+var world_root: Node3D
+var mood_dirty := true
 
 # Round state (host decides; mirrored to the TV by snapshots).
 var phase := "wait"  # wait, intro, count, seek, over
@@ -95,9 +107,11 @@ var sneezed := {}  # client/local: player index -> seconds the "ACHOO" note show
 
 var info_label: Label
 var center_label: Label
-var help_label: Label
 var center_tween: Tween
-var join_label: Label
+var join_cue: Control  # pulsing A + plus + person while a spare controller could join (no words)
+var info_row: HBoxContainer  # top: clock + time left, person + hiders still hiding
+var vr_torch_cue: Label3D  # VR: TRIGGER over the torch while a hider is in the beam (until learned)
+var vr_sniff_cue: Node3D  # VR: a pulsing pink nose ball on the left mitten (until learned)
 
 # Split screen & drop-in players.
 var view_grid: GridContainer
@@ -110,10 +124,7 @@ var join_t := 0.0
 
 func _ready() -> void:
 	randomize()
-	var built: Dictionary = WorldScript.build(self)
-	decoys = built.decoys
-	lights = built.lights
-	window_mat = built.get("window_mat")
+	_build_map(_saved_next_map())
 	_build_hud()
 	var menu := PauseMenuScript.new()
 	menu.main = self
@@ -142,9 +153,9 @@ func _setup_game(mode: String) -> void:
 	ready_to_play = true
 	_restore_party()
 	if mode == "host":
-		_show_center("HIDE AND SEEK\nWaiting for the hiders on the TV…", 0.0)
+		_show_center("HIDE AND SEEK", 0.0)
 	elif mode == "client":
-		_show_center("CONNECTED", 1.5)
+		_show_center("HELLO!", 1.5)
 
 
 # --- Effects (shown on both machines) ----------------------------------------
@@ -209,12 +220,92 @@ func merged_mesh(parts: Array) -> ArrayMesh:
 	return am
 
 
+# --- Maps ----------------------------------------------------------------------
+
+## The map this launch starts on (the rotation carries on from the last game).
+func _saved_next_map() -> int:
+	var cfg := ConfigFile.new()
+	cfg.load(BEST_FILE)
+	return int(cfg.get_value("maps", "next", 0)) % MAPS.size()
+
+
+func _save_next_map(i: int) -> void:
+	var cfg := ConfigFile.new()
+	cfg.load(BEST_FILE)
+	cfg.set_value("maps", "next", i % MAPS.size())
+	cfg.save(BEST_FILE)
+
+
+## Current map data (lazily filled, e.g. after a hot reload of an older version).
+func md() -> Dictionary:
+	if map.is_empty():
+		map = MAPS[maxi(map_idx, 0)].data()
+	return map
+
+
+func map_title() -> String:
+	return str(md().get("title", "THE HOUSE"))
+
+
+func spawn_pos(i: int) -> Vector3:
+	var sp: Array = md().spawns
+	return sp[i % sp.size()]
+
+
+func jail_pos() -> Vector3:
+	return md().jail
+
+
+func bell_pos() -> Vector3:
+	return md().bell
+
+
+func star_spot(k: int) -> Vector3:
+	var st: Array = md().star_spots
+	return st[k % st.size()]
+
+
+## Throw away the old map's nodes and build map `i` (both machines; the TV follows the snapshot).
+func _build_map(i: int) -> void:
+	i = posmod(i, MAPS.size())
+	if world_root != null and is_instance_valid(world_root):
+		remove_child(world_root)
+		world_root.queue_free()
+	elif has_node("House"):
+		_free_legacy_world()
+	world_root = Node3D.new()
+	world_root.name = "World"
+	add_child(world_root)
+	move_child(world_root, 0)
+	var built: Dictionary = MAPS[i].build(world_root)
+	map_idx = i
+	map = MAPS[i].data()
+	decoys = built.decoys
+	lights = built.lights
+	window_mat = built.get("window_mat")
+	mood_dirty = true
+	print("Map: %s" % map_title())
+
+
+## Hot reload from the one-map version: its house was built straight into Main.
+func _free_legacy_world() -> void:
+	for c in get_children():
+		var legacy := c is WorldEnvironment or c is DirectionalLight3D or c is OmniLight3D or (c is StaticBody3D and c.name == "House")
+		if c is MeshInstance3D and c.get_script() == null:
+			legacy = true
+		if c is MultiMeshInstance3D and (c as MultiMeshInstance3D).multimesh != star_mm:
+			legacy = true
+		if legacy:
+			remove_child(c)
+			c.queue_free()
+
+
 func is_night() -> bool:
 	return round_type == "night" and phase != "over" and phase != "wait"
 
 
 func in_jail(p: Vector3) -> bool:
-	var j: Vector3 = WorldScript.JAIL_POS
+	var j: Vector3 = jail_pos()
 	return absf(p.x - j.x) < WorldScript.JAIL_HALF + 0.1 and absf(p.z - j.z) < WorldScript.JAIL_HALF + 0.1
 
 
@@ -396,7 +487,7 @@ func _make_player(i: int, mode: String) -> void:
 		p.mouse_look = true
 	elif i >= 2:
 		p.key_set = 2  # extra players are controller-only
-	p.position = SPAWNS[i % SPAWNS.size()]
+	p.position = spawn_pos(i)
 	p.yaw = PI if i == 0 else 0.0
 	add_child(p)
 	players.append(p)
@@ -465,7 +556,7 @@ func _build_views(mode: String) -> void:
 		right.pose = "aim"
 		origin.add_child(right)
 		players[0].attach_xr(origin, cam, left, right)
-		players[0].teleport(SEEKER_SPAWN, PI)
+		players[0].teleport(spawn_pos(0), PI)
 		_build_vr_mirror(cam)
 	else:
 		print("No VR headset: split screen (player 1 is the seeker)")
@@ -563,8 +654,8 @@ func _layout_views() -> void:
 		var b := 240.0 if n <= 2 else (190.0 if n <= 4 else 150.0)
 		bubble.size = Vector2(b, b)
 		bubble.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_KEEP_SIZE, 24)
-		var tag: Label = bubble.get_child(0)
-		tag.position = Vector2(b / 6.0, b)
+		var tag: Control = bubble.get_child(0)
+		tag.position = Vector2(b / 2.0 - 20.0, b + 4.0)
 	view_count = n
 
 
@@ -592,14 +683,10 @@ func _build_ghost_mirror() -> void:
 	layer.add_child(bubble)
 	bubble.size = Vector2(240, 240)
 	bubble.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_KEEP_SIZE, 24)
-	var tag := Label.new()
-	tag.text = "SEEKER'S VIEW"
-	tag.add_theme_font_size_override("font_size", 20)
-	tag.add_theme_constant_override("outline_size", 6)
-	tag.add_theme_color_override("font_outline_color", Color.BLACK)
-	tag.add_theme_color_override("font_color", PLAYER_COLORS[0])
+	var tag := UiKit.icon("eye", PLAYER_COLORS[0], 40.0)  # the seeker's eyes (no words)
+	tag.name = "SeekerEye"
 	bubble.add_child(tag)
-	tag.position = Vector2(40, 240)
+	tag.position = Vector2(100, 244)
 
 
 # --- Controllers & drop-in join ----------------------------------------------
@@ -629,7 +716,8 @@ func _auto_bind_pad(device: int) -> int:
 			players[w].joy = device
 			pad_wait.erase(w)
 			print("Pad %d reconnected: P%d is back" % [device, w + 1])
-			_show_center("P%d IS BACK!" % (w + 1), 1.2, false)
+			_show_center("P%d!" % (w + 1), 1.2, false)
+			local_sound("pickup", -6.0, 1.3)
 			return w
 	if players[1].joy < 0:
 		players[1].joy = device
@@ -657,7 +745,7 @@ func _on_joy_changed(device: int, connected: bool) -> void:
 	if p.active and not p.uses_keyboard() and not p.mouse_look:
 		pad_wait[i] = PAD_WAIT_TIME
 		print("Pad %d disconnected: P%d waits %d s for it" % [device, i + 1, int(PAD_WAIT_TIME)])
-		_show_center("P%d's controller disconnected!\nPlug it back in to keep playing" % (i + 1), 2.5, false)
+		local_sound("pop", -4.0, 0.7)  # the view shows a pulsing bolt (cue)
 
 
 ## First free TV slot: one with no controls bound, else a waiting keyboard slot (the pad takes it over).
@@ -726,8 +814,8 @@ func _activate_player(i: int) -> void:
 		p.set_found(true, true)  # no sneaking in mid-round: spectate, hide next round
 	else:
 		p.set_found(false)
-		_place_player(p, SPAWNS[i % SPAWNS.size()], 0.0)
-	_show_center("PLAYER %d JOINED!" % (i + 1), 1.5)
+		_place_player(p, spawn_pos(i), 0.0)
+	_show_center("PLAYER %d!" % (i + 1), 1.5)
 	print("Player %d joined the game (%d players)" % [i + 1, active_count()])
 	on_player_activity_changed(p)
 
@@ -747,7 +835,8 @@ func leave_player(i: int) -> void:
 		return
 	p.set_active(false)
 	p.set_prop(-1)
-	_show_center("P%d left the game" % (i + 1), 1.5)
+	p.remove_meta("cue_done")  # a new kid in this seat learns from scratch
+	sound("pop", -4.0, 0.8)
 	print("Player %d left the game (%d players)" % [i + 1, active_count()])
 	on_player_activity_changed(p)
 
@@ -799,22 +888,31 @@ func _update_party(delta: float) -> void:
 	_update_join_hint()
 
 
+## A pulsing A + plus + person in the corner while a spare controller could join (no words).
 func _update_join_hint() -> void:
-	if join_label == null:
-		join_label = _make_label(22)
-		join_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.6))
-		center_label.get_parent().add_child(join_label)
-		join_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
-		join_label.offset_top = -40
-		join_label.offset_bottom = -8
-		join_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	if join_cue == null:
+		join_cue = HBoxContainer.new()
+		join_cue.name = "JoinCue"
+		join_cue.alignment = BoxContainer.ALIGNMENT_CENTER
+		join_cue.add_theme_constant_override("separation", 12)
+		join_cue.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		join_cue.add_child(UiKit.glyph("A", 1.4))
+		join_cue.add_child(UiKit.icon("plus", Color(1.0, 0.9, 0.6), 34.0))
+		join_cue.add_child(UiKit.icon("person", Color(1.0, 0.9, 0.6), 58.0))
+		for c in join_cue.get_children():
+			(c as Control).size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		center_label.get_parent().add_child(join_cue)
+		join_cue.size = Vector2(184, 64)
+		join_cue.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT, Control.PRESET_MODE_KEEP_SIZE, 12)
+		var tw := join_cue.create_tween().set_loops()
+		tw.tween_property(join_cue, "modulate:a", 0.5, 0.7)
+		tw.tween_property(join_cue, "modulate:a", 1.0, 0.7)
 	var spare := false
 	if net.mode != "host" and _free_slot() >= 0:
 		for dev in Input.get_connected_joypads():
 			if pad_owner(dev) < 0:
 				spare = true
-	join_label.visible = spare
-	join_label.text = "More hiders? Press A on a spare controller to join!"
+	join_cue.visible = spare
 
 
 func on_player_activity_changed(p) -> void:
@@ -888,7 +986,7 @@ func _process(delta: float) -> void:
 	if net.mode == "host" and not net.connected:
 		if phase != "wait":
 			phase = "wait"
-			_show_center("HIDE AND SEEK\nWaiting for the hiders on the TV…", 0.0)
+			_show_center("HIDE AND SEEK", 0.0)
 		return
 	match phase:
 		"wait":
@@ -920,7 +1018,12 @@ func _start_round() -> void:
 	sniff_hits = 0
 	sniff_cd = 0.0
 	results_text = ""
-	round_type = ROUND_TYPES[(round_no - 1) % ROUND_TYPES.size()]
+	# Round types shift by one every lap of the maps, so each map gets every round type in turn.
+	var lap := (round_no - 1) / MAPS.size()
+	round_type = ROUND_TYPES[(round_no - 1 + lap) % ROUND_TYPES.size()]
+	if round_no > 1 or map_idx < 0:
+		_build_map(map_idx + 1)
+	_save_next_map(map_idx + 1)
 	for i in round_scores.size():
 		round_scores[i] = 0
 		survive_acc[i] = 0.0
@@ -933,39 +1036,27 @@ func _start_round() -> void:
 		p.set_found(false)
 		p.taunt_cd = 0.0
 		if p.active:
-			_place_player(p, SPAWNS[p.index % SPAWNS.size()], PI if p.index == 0 else 0.0)
+			_place_player(p, spawn_pos(p.index), PI if p.index == 0 else 0.0)
 	jail_breaks = 1 + (1 if hider_count() >= 4 else 0)
 	star_idx.clear()
 	star_taken.clear()
 	if round_type == "stars":
-		var all: Array = range(WorldScript.STAR_SPOTS.size())
+		var all: Array = range((md().star_spots as Array).size())
 		all.shuffle()
 		for k in STAR_COUNT:
 			star_idx.append(all[k])
 			star_taken.append(false)
 	phase = "intro"
 	phase_t = intro_time if round_no == 1 else 5.0
-	print("Round %d (%s): %d hiders" % [round_no, round_type, hider_count()])
+	print("Round %d (%s) on %s: %d hiders" % [round_no, round_type, map_title(), hider_count()])
 	sound("ready", -4.0, 1.0)
-	var rules := "Found hiders go to JAIL - ring the jail BELL to set your friends free!"
-	if round_no == 1:
-		_show_center("HIDE AND SEEK!\nSEEKER: count with your eyes covered, then find everyone with your torch!\n"
-			+ "HIDERS: hide! Turn into something that fits in. Squeak for bonus points!\n" + rules, intro_time)
-	else:
-		match round_type:
-			"stars":
-				_show_center("ROUND %d: STAR HUNT!\nHiders: grab the golden stars for +%d each - but the seeker might spot you!" % [round_no, STAR_POINTS], 4.5)
-			"night":
-				_show_center("ROUND %d: NIGHT TIME!\nThe lights are low and the torch is extra bright.\nHiders: your eyes glow in the dark - disguise to hide them!" % round_no, 4.5)
-			_:
-				_show_center("ROUND %d: CLASSIC HIDE AND SEEK\n%s" % [round_no, rules], 4.0)
+	_show_center("", 0.0)  # no words: each view says HIDE! / SEEK! with a picture of the round
 
 
 func _begin_count() -> void:
 	phase = "count"
 	phase_t = count_time
 	last_tick = -1
-	_show_center("SEEKER: COUNT TO %d!\nHIDERS: RUN AND HIDE!" % int(count_time), 2.0)
 	print("Round %d: counting (%d s)" % [round_no, int(count_time)])
 
 
@@ -983,7 +1074,7 @@ func _begin_seek() -> void:
 	phase_t = seek_len
 	last_tick = -1
 	sound("ready", -2.0, 1.3)
-	_show_center("READY OR NOT,\nHERE I COME!", 2.0)
+	_show_center("HERE I COME!", 2.0)
 	print("Round %d: seeking (%d s, %d hiders)" % [round_no, int(seek_len), hiders_left()])
 
 
@@ -1022,7 +1113,7 @@ func _check_bell() -> void:
 			jailed.append(p)
 	if jailed.is_empty():
 		return
-	var bell: Vector3 = WorldScript.BELL_POS
+	var bell: Vector3 = bell_pos()
 	for h in players:
 		if not h.is_hiding() or h.prop_kind >= 0:
 			continue
@@ -1041,7 +1132,7 @@ func _check_bell() -> void:
 			burst(j.global_position + Vector3.UP * 0.6, j.color, 12)
 			k += 1
 		popup(bell + Vector3.UP * 1.8, "JAILBREAK!", h.color.lightened(0.3))
-		_show_center("JAILBREAK!\nP%d rang the bell - everyone's free! RUN AND HIDE!" % (h.index + 1), 2.5)
+		_show_center("JAILBREAK!", 2.5)
 		net.event("jailbreak", [])
 		print("Round %d: P%d rang the bell, %d freed (%d breaks left)" % [round_no, h.index + 1, jailed.size(), jail_breaks])
 		return
@@ -1052,7 +1143,7 @@ func _check_stars() -> void:
 	for k in star_idx.size():
 		if star_taken[k]:
 			continue
-		var at: Vector3 = WorldScript.STAR_SPOTS[int(star_idx[k])]
+		var at: Vector3 = star_spot(int(star_idx[k]))
 		for h in players:
 			if not h.is_hiding() or h.prop_kind >= 0:
 				continue
@@ -1082,7 +1173,7 @@ func request_sniff(s) -> void:
 	print("Round %d: the seeker sniffs (%d hiders close by)" % [round_no, near.size()])
 	if near.is_empty():
 		var ahead: Vector3 = s.head_transform().origin + -s.head_transform().basis.z * 1.2
-		popup(ahead, "sniff sniff… nobody close!", Color(0.8, 0.9, 1.0), false)
+		popup(ahead, "sniff sniff…", Color(0.8, 0.9, 1.0), false)
 		return
 	sniff_hits += near.size()
 	get_tree().create_timer(0.7).timeout.connect(func() -> void:
@@ -1110,7 +1201,7 @@ func _achoo(pos: Vector3, index: int) -> void:
 	l.outline_size = 16
 	l.modulate = Color(0.75, 1.0, 0.75)
 	l.outline_modulate = Color(0, 0, 0, 0.9)
-	l.no_depth_test = true
+	l.no_depth_test = false
 	add_child(l)
 	l.global_position = pos + Vector3.UP * 0.5
 	if not players.is_empty() and players[0].vr and players[0].xr_camera != null:
@@ -1243,13 +1334,13 @@ func find_hider(h, how: String) -> void:
 	burst(c, Color(1.0, 0.9, 0.4), 14)
 	ring_fx(Vector3(c.x, 0.05, c.z), 2.0, h.color)
 	net.event("ring", [Vector3(c.x, 0.05, c.z), 2.0, h.color])
-	var what := "FOUND P%d!" % (h.index + 1)
+	popup(c + Vector3.UP * 1.0, "FOUND P%d!" % (h.index + 1), h.color.lightened(0.3))
 	if was >= 0:
-		what = "FOUND P%d!\n(that %s was a hider!)" % [h.index + 1, WorldScript.PROP_NAMES[was]]
-	popup(c + Vector3.UP * 1.0, what, h.color.lightened(0.3))
+		burst(c, Color(0.95, 0.95, 1.0), 12, 0.07)  # the disguise pops off
 	popup(c + Vector3.UP * 0.4, "+%d" % FIND_POINTS, PLAYER_COLORS[0])
 	sound("found", -2.0, 1.0)
-	_show_center("P%d FOUND!  %d to go" % [h.index + 1, hiders_left()] if hiders_left() > 0 else "P%d FOUND!" % (h.index + 1), 1.5)
+	_show_center("P%d FOUND!" % (h.index + 1), 1.5)
+	cue_did(players[0], "torch")  # two finds (torch or bump / touch) and the torch cue goes
 	if players[0].vr:
 		players[0].hand_r.trigger_haptic_pulse("haptic", 0.0, 0.8, 0.25, 0.0)
 		players[0].hand_l.trigger_haptic_pulse("haptic", 0.0, 0.8, 0.25, 0.0)
@@ -1261,7 +1352,7 @@ func find_hider(h, how: String) -> void:
 	for o in players:
 		if o != h and o.active and o.found and not o.late:
 			slot += 1
-	_place_player(h, WorldScript.JAIL_POS + JAIL_SLOTS[slot % JAIL_SLOTS.size()], PI)
+	_place_player(h, jail_pos() + JAIL_SLOTS[slot % JAIL_SLOTS.size()], PI)
 	sound("jail", -6.0, 1.0)
 
 
@@ -1307,11 +1398,11 @@ func _end_round(seeker_won: bool) -> void:
 		var bonus := int(phase_t) * 2
 		round_scores[0] += bonus
 		lines.append("THE SEEKER FOUND EVERYONE!")
-		lines.append("P1 seeker: %d found  +%d  (speedy bonus %d)" % [finds, round_scores[0], bonus])
+		lines.append("P1: %d found  +%d" % [finds, round_scores[0]])
 		sound("clear", -2.0, 1.0)
 	else:
 		lines.append("TIME'S UP! THE HIDERS WIN!" if hiders_left() > 0 else "TIME'S UP!")
-		lines.append("P1 seeker: %d found  +%d" % [finds, round_scores[0]])
+		lines.append("P1: %d found  +%d" % [finds, round_scores[0]])
 		sound("clear", -2.0, 1.25)
 	for p in players:
 		if p.role != "hider" or not p.active or p.late:
@@ -1321,7 +1412,7 @@ func _end_round(seeker_won: bool) -> void:
 		lines.append("P%d: %s  +%d" % [p.index + 1, "found" if p.found else "NEVER FOUND!", round_scores[p.index]])
 	var awards := _awards(seeker_won)
 	if not awards.is_empty():
-		lines.append("AWARDS: " + "  ·  ".join(awards))
+		lines.append("  ·  ".join(awards))
 		print("Awards: %s" % ", ".join(awards))
 	var best := -1
 	for i in totals.size():
@@ -1329,8 +1420,7 @@ func _end_round(seeker_won: bool) -> void:
 		if players[i].active and (best < 0 or totals[i] > totals[best]):
 			best = i
 	if best >= 0:
-		lines.append("Leader after %d round%s: P%d with %d" % [round_no, "" if round_no == 1 else "s", best + 1, totals[best]])
-	lines.append("A / Enter (TV) or trigger (VR): play again")
+		lines.append("TOP: P%d  %d" % [best + 1, totals[best]])
 	results_text = "\n".join(lines)
 	_show_center(results_text, 0.0)
 	_save_best()
@@ -1411,11 +1501,11 @@ func _unhandled_input(event: InputEvent) -> void:
 # --- Networked co-op ---------------------------------------------------------
 
 func on_client_joined() -> void:
-	_show_center("THE HIDERS ARE HERE!", 1.5)
+	_show_center("HELLO!", 1.5)
 
 
 func on_client_left() -> void:
-	_show_center("The TV players left - waiting for them to come back…", 0.0)
+	_show_center("HIDE AND SEEK", 0.0)
 	for p in players:
 		if p.index >= 2 and p.active:
 			p.set_active(false)
@@ -1494,14 +1584,14 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 				_start_round()
 		"pause":
 			var paused: bool = args[0]
-			_show_center("PAUSED\nA TV player opened the menu" if paused else "", 0.0, false)
+			_show_center("PAUSED" if paused else "", 0.0, false)
 			get_tree().paused = paused
 
 
 func toggle_vr_pause() -> void:
 	var paused := not get_tree().paused
 	get_tree().paused = paused
-	_show_center("PAUSED\nTap MENU again to resume · trigger elsewhere: back to the arcade" if paused else "", 0.0, false)
+	_show_center("PAUSED" if paused else "", 0.0, false)
 	if vr_center:
 		VrText.snap(vr_center)
 	net.event("remote_pause", [paused])
@@ -1511,7 +1601,7 @@ func make_snapshot() -> Array:
 	var ps := []
 	for p in players:
 		ps.append(p.net_state())
-	return [phase, phase_t, round_no, seek_len, ps, round_scores, totals, count_time, round_type, jail_breaks, star_idx, star_taken, snappedf(sniff_cd, 0.1)]
+	return [phase, phase_t, round_no, seek_len, ps, round_scores, totals, count_time, round_type, jail_breaks, star_idx, star_taken, snappedf(sniff_cd, 0.1), maxi(map_idx, 0)]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -1521,6 +1611,8 @@ func apply_snapshot(s: Array) -> void:
 	var new_phase: String = s[0]
 	if new_phase != phase:
 		over_t = 0.0
+		if phase == "over":
+			_show_center("", 0.0, false)  # the next round started: the results go
 	phase = new_phase
 	phase_t = s[1]
 	round_no = s[2]
@@ -1534,6 +1626,8 @@ func apply_snapshot(s: Array) -> void:
 		star_idx = s[10]
 		star_taken = s[11]
 		sniff_cd = s[12]
+	if s.size() >= 14 and int(s[13]) != map_idx:
+		_build_map(int(s[13]))  # the seeker moved on to the next map
 	var ps: Array = s[4]
 	for i in mini(players.size(), ps.size()):
 		players[i].apply_net_state(ps[i])
@@ -1567,7 +1661,7 @@ func apply_event(kind: String, args: Array) -> void:
 				players[i].teleport(args[1], args[2])
 		"remote_pause":
 			get_tree().paused = args[0]
-			_show_center("PAUSED\nThe seeker paused the game" if args[0] else "", 0.0, false)
+			_show_center("PAUSED" if args[0] else "", 0.0, false)
 
 
 # --- HUD ---------------------------------------------------------------------
@@ -1597,14 +1691,41 @@ func _build_hud() -> void:
 	center_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	center_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	center_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	help_label = _make_label(20)
-	layer.add_child(help_label)
-	help_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
-	help_label.offset_top = 52
-	help_label.offset_bottom = 120
-	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	help_label.text = "Seeker (P1): WASD + mouse · click / Space / RT: torch tag (3 m) · or bump into hiders\n" \
-		+ "Hiders: stick / arrows move · A / Enter / Space: disguise · X / B / Ctrl / E: squeak (+%d)  ·  Start / Esc: menu  ·  spare pad: A to join" % TAUNT_POINTS
+	# No key-help line: each view teaches with picture cues (hud.gd / cue.gd). Top: clock + time left,
+	# person + how many are still hiding.
+	info_row = HBoxContainer.new()
+	info_row.name = "InfoRow"
+	info_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	info_row.add_theme_constant_override("separation", 10)
+	info_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	info_row.add_child(UiKit.icon("clock", Color(1.0, 0.92, 0.7), 34.0))
+	var tl := _make_label(30)
+	tl.name = "Time"
+	tl.text = "0:00"
+	tl.custom_minimum_size.x = 70
+	tl.add_theme_color_override("font_color", Color(1.0, 0.92, 0.7))
+	info_row.add_child(tl)
+	var gap := Control.new()
+	gap.custom_minimum_size = Vector2(18, 0)
+	info_row.add_child(gap)
+	info_row.add_child(UiKit.icon("person", PLAYER_COLORS[1], 34.0))
+	var hl := _make_label(30)
+	hl.name = "Hiding"
+	hl.text = "0"
+	hl.custom_minimum_size.x = 36
+	hl.add_theme_color_override("font_color", Color(1.0, 0.92, 0.7))
+	info_row.add_child(hl)
+	for c in info_row.get_children():
+		(c as Control).size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var pill := PanelContainer.new()  # one dark pill, so the row reads as one badge over the split line
+	pill.name = "InfoPill"
+	pill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pill.add_theme_stylebox_override("panel", UiKit.stylebox(Color(0.05, 0.05, 0.1, 0.8), 1.0, 22.0))
+	pill.add_child(info_row)
+	layer.add_child(pill)
+	pill.size = pill.get_combined_minimum_size() + Vector2(60, 0)
+	pill.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP, Control.PRESET_MODE_KEEP_SIZE, 8)
+	pill.visible = false
 
 
 func _show_center(text: String, duration: float, broadcast: bool = true) -> void:
@@ -1625,7 +1746,7 @@ func _vr_label(font: int, width: float) -> Label3D:
 	l.font_size = font
 	l.outline_size = 26
 	l.outline_modulate = Color.BLACK
-	l.no_depth_test = true
+	l.no_depth_test = false
 	l.render_priority = 10
 	l.outline_render_priority = 9
 	l.width = width
@@ -1637,7 +1758,8 @@ func _vr_label(font: int, width: float) -> Label3D:
 	return l
 
 
-## VR: world-locked banner (also the countdown while the seeker's eyes are covered) and a small status line.
+## VR: world-locked banner (SEEK! in the intro, the countdown while the seeker's eyes are covered), a
+## small clock line, and the 3D picture cues (_update_vr_cues).
 func _update_vr_text() -> void:
 	if players.is_empty() or not players[0].vr:
 		return
@@ -1647,36 +1769,98 @@ func _update_vr_text() -> void:
 		vr_status.modulate = Color(0.85, 0.95, 1.0)
 	var cam: XRCamera3D = players[0].xr_camera
 	if phase == "count":
-		vr_center.text = "Eyes covered… counting!\n%d" % ceili(phase_t)
+		vr_center.text = str(ceili(phase_t))
+		vr_center.modulate.a = 1.0
+	elif phase == "intro":
+		vr_center.text = {"stars": "STAR HUNT!\nSEEK!", "night": "NIGHT TIME!\nSEEK!"}.get(round_type, "SEEK!")
 		vr_center.modulate.a = 1.0
 	else:
-		vr_center.text = center_label.text
+		vr_center.text = VrText.short(center_label.text)  # no walls of text in VR
 		vr_center.modulate.a = center_label.modulate.a
 	vr_center.outline_modulate.a = vr_center.modulate.a
 	VrText.follow(vr_center, cam, self, -0.12, 1.7)
 	vr_status.visible = phase == "seek"
 	if vr_status.visible:
-		var sniff_txt := "left hand on your nose: SNIFF" if sniff_cd <= 0.0 else "sniff ready in %d s" % ceili(sniff_cd)
-		vr_status.text = "%d:%02d   ·   %d hiding   ·   %d in jail   ·   %d pts\ntrigger: torch tag   ·   %s" % [int(phase_t) / 60, int(phase_t) % 60,
-			hiders_left(), jailed_count(), round_scores[0], sniff_txt]
+		vr_status.text = "%d:%02d   ·   %d LEFT" % [int(phase_t) / 60, int(phase_t) % 60, hiders_left()]
 		VrText.follow(vr_status, cam, self, 0.55, 1.7)
+	_update_vr_cues()
+
+
+## VR picture cues (3D, no sentences): TRIGGER glows over the torch while a hider is in its beam, and a
+## pulsing pink nose ball sits on the left mitten while a sniff would catch someone close by (lift the
+## left hand to your nose). Each goes once the seeker has done it twice (cue_learned). Text faces the
+## head on Y only (no billboard, depth test on).
+func _update_vr_cues() -> void:
+	var s = players[0]
+	var on_seek: bool = phase == "seek" and not get_tree().paused
+	var torch_on: bool = on_seek and not cue_learned(s, "torch") and torch_target(s) != null
+	if vr_torch_cue == null:
+		vr_torch_cue = UiKit.label3d("TRIGGER", 0.035, Color(1.0, 0.9, 0.4), true)
+		vr_torch_cue.name = "VrTorchCue"
+		vr_torch_cue.outline_size = 26
+		vr_torch_cue.outline_modulate = Color.BLACK
+		vr_torch_cue.no_depth_test = false
+		vr_torch_cue.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+		add_child(vr_torch_cue)
+		s._set_layers(vr_torch_cue, s.viewmodel_layer())
+	var k := absf(sin(Time.get_ticks_msec() * 0.008))
+	vr_torch_cue.visible = torch_on
+	var head: Vector3 = s.xr_camera.global_position
+	if torch_on:
+		var at: Vector3 = s.hand_r.global_position + Vector3.UP * (0.1 + 0.015 * k)
+		vr_torch_cue.global_position = at
+		var d := at - head
+		vr_torch_cue.global_basis = Basis(Vector3.UP, atan2(-d.x, -d.z)) * Basis.from_scale(Vector3.ONE * (1.0 + 0.15 * k))
+	var sniff_on: bool = on_seek and sniff_cd <= 0.0 and not cue_learned(s, "sniff") and not torch_on
+	if sniff_on:
+		sniff_on = false
+		for h in players:
+			if h.is_hiding() and Vector2(h.global_position.x - head.x, h.global_position.z - head.z).length() < SNIFF_RANGE:
+				sniff_on = true
+	if vr_sniff_cue == null:
+		var ball := MeshInstance3D.new()
+		ball.name = "VrSniffCue"
+		var m := SphereMesh.new()
+		m.radius = 0.035
+		m.height = 0.07
+		m.radial_segments = 12
+		m.rings = 6
+		ball.mesh = m
+		ball.material_override = make_material(Color(1.0, 0.6, 0.65), 2.0)
+		ball.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		vr_sniff_cue = ball
+		add_child(ball)
+		s._set_layers(ball, s.viewmodel_layer())
+	vr_sniff_cue.visible = sniff_on
+	if sniff_on:
+		vr_sniff_cue.global_position = s.hand_l.global_position + Vector3.UP * 0.06
+		vr_sniff_cue.scale = Vector3.ONE * (1.0 + 0.4 * k)
 
 
 ## Night time: lights dim, windows turn dark blue (both machines, eased).
 func _update_mood(delta: float) -> void:
 	var want := 1.0 if is_night() else 0.0
-	if absf(night_k - want) < 0.001:
+	if absf(night_k - want) < 0.001 and not mood_dirty:
 		return
+	mood_dirty = false
 	night_k = move_toward(night_k, want, delta * 0.6)
 	for l in lights:
-		(l as OmniLight3D).light_energy = lerpf(1.1, 0.28, night_k)
-	for c in get_children():
+		if is_instance_valid(l):
+			var day_e: float = (l as OmniLight3D).get_meta("day_energy", 1.1)
+			(l as OmniLight3D).light_energy = lerpf(day_e, day_e * 0.25, night_k)
+	var holder: Node = world_root if world_root != null and is_instance_valid(world_root) else self
+	for c in holder.get_children():
 		if c is WorldEnvironment:
 			var e: Environment = (c as WorldEnvironment).environment
-			e.ambient_light_energy = lerpf(0.65, 0.22, night_k)
-			e.background_color = Color(0.45, 0.55, 0.8).lerp(Color(0.05, 0.06, 0.15), night_k)
+			var day_bg: Color = c.get_meta("day_bg", Color(0.45, 0.55, 0.8))
+			var day_amb: float = c.get_meta("day_ambient", 0.65)
+			e.ambient_light_energy = lerpf(day_amb, 0.22, night_k)
+			e.background_color = day_bg.lerp(Color(0.05, 0.06, 0.15) if day_bg.v > 0.2 else day_bg * 0.5, night_k)
 		elif c is DirectionalLight3D:
-			(c as DirectionalLight3D).light_energy = lerpf(0.45, 0.08, night_k)
+			if not c.has_meta("day_energy"):
+				c.set_meta("day_energy", (c as DirectionalLight3D).light_energy)
+			var sun_e: float = c.get_meta("day_energy")
+			(c as DirectionalLight3D).light_energy = lerpf(sun_e, sun_e * 0.18, night_k)
 	if window_mat != null:
 		window_mat.albedo_color = Color(0.6, 0.72, 1.0).lerp(Color(0.12, 0.15, 0.4), night_k)
 		window_mat.emission = window_mat.albedo_color
@@ -1704,7 +1888,7 @@ func _update_stars() -> void:
 		if not on:
 			star_mm.set_instance_transform(k, Transform3D(Basis.from_scale(Vector3.ONE * 0.001), Vector3(0, -10, 0)))
 			continue
-		var at: Vector3 = WorldScript.STAR_SPOTS[int(star_idx[k])]
+		var at: Vector3 = star_spot(int(star_idx[k]))
 		var b := Basis(Vector3.UP, t * 2.0 + k) * Basis.from_scale(Vector3.ONE * 0.22)
 		star_mm.set_instance_transform(k, Transform3D(b, at + Vector3(0, 0.75 + sin(t * 3.0 + k) * 0.08, 0)))
 
@@ -1752,22 +1936,33 @@ func pick_disguise(at: Vector3) -> int:
 
 
 func _update_hud() -> void:
-	if round_no >= 2 and help_label.modulate.a > 0.0:
-		help_label.modulate.a = maxf(0.0, help_label.modulate.a - get_process_delta_time() * 0.3)
+	info_row.get_parent().visible = false
 	if net.mode == "client" and not synced:
-		info_label.text = "Syncing with the seeker…"
+		info_label.text = ""
 		return
-	match phase:
-		"wait":
-			info_label.text = "HIDE AND SEEK"
-		"intro":
-			info_label.text = "ROUND %d  ·  GET READY" % round_no
-		"count":
-			info_label.text = "ROUND %d  ·  HIDE! %d" % [round_no, ceili(phase_t)]
-		"seek":
-			info_label.text = "ROUND %d  ·  %d:%02d LEFT  ·  %d STILL HIDING" % [round_no, int(phase_t) / 60, int(phase_t) % 60, hiders_left()]
-		"over":
-			info_label.text = "ROUND %d OVER" % round_no
+	info_label.text = "HIDE AND SEEK" if phase == "wait" else ""
+	if phase == "seek":
+		info_row.get_parent().visible = true
+		(info_row.get_node("Time") as Label).text = "%d:%02d" % [int(phase_t) / 60, int(phase_t) % 60]
+		(info_row.get_node("Hiding") as Label).text = str(hiders_left())
+
+
+## Visual teaching: player p has done `key` once more ("torch", "sniff", "disguise", "squeak", "bell",
+## "star"); its picture cue goes once done twice. Kept on the machine that draws p's view (the seeker's
+## torch finds on the host). A seat's count is cleared when its player leaves.
+func cue_did(p, key: String) -> void:
+	if p == null:
+		return
+	var done: Dictionary = p.get_meta("cue_done", {})
+	done[key] = int(done.get(key, 0)) + 1
+	p.set_meta("cue_done", done)
+
+
+func cue_learned(p, key: String) -> bool:
+	if p == null:
+		return false
+	var done: Dictionary = p.get_meta("cue_done", {})
+	return int(done.get(key, 0)) >= 2
 
 
 func _type_name() -> String:
@@ -1787,9 +1982,13 @@ func jailed_count() -> int:
 	return n
 
 
+const SEEK_HINTS := false
+
 ## Hints for the seeker (David's idea): after 30 s of seeking, every 15 s a gold sparkle and a
 ## chime pop up where one of the remaining hiders is.
 func _seek_hints(delta: float) -> void:
+	if not SEEK_HINTS:
+		return  # off: Abigail asked twice ("it's cheating"); David can ask for it back
 	if net.mode == "client" or phase != "seek":
 		set_meta("hint_t", 30.0)
 		return
@@ -1797,7 +1996,7 @@ func _seek_hints(delta: float) -> void:
 	if t > 0.0:
 		set_meta("hint_t", t)
 		return
-	set_meta("hint_t", 15.0)
+	set_meta("hint_t", 30.0)  # half as often (Abigail wanted no hints; David asked for them)
 	var hiding: Array = []
 	for p in players:
 		if p.active and p.role == "hider" and p.is_hiding():
@@ -1806,6 +2005,5 @@ func _seek_hints(delta: float) -> void:
 		return
 	var h = hiding[randi() % hiding.size()]
 	var at: Vector3 = h.global_position + Vector3.UP * 1.2
-	burst(at, Color(1.0, 0.85, 0.2), 40, 0.1)
-	popup(at + Vector3.UP * 0.4, "HINT!", Color(1.0, 0.85, 0.2), true)
+	burst(at, Color(1.0, 0.85, 0.2), 20, 0.1)  # a faint sparkle, no "HINT!" text
 	sound("pickup", 0.0, 1.4)

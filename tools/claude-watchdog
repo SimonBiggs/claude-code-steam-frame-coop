@@ -1,0 +1,9 @@
+#!/bin/bash
+# claude-watchdog: keep an interactive Claude Code session running in tmux.
+# If the main conversation (claude-main --running) isn't running (crash, reboot, kwin taking the terminal
+# down), resume it in a detached tmux session "claude" (claude-main tells Claude to re-arm its monitors). Run by claude-watchdog.timer every 2 minutes.
+# Simon (2026-10-24): always THE main conversation (~/.claude/main-session), even when other Claude sessions are open.
+"$HOME/.local/bin/claude-main" --running >/dev/null && exit 0
+cd ~ || exit 1
+/usr/bin/tmux new-session -d -s claude "$HOME/.local/bin/claude-main"
+echo "$(date -Is) restarted the main Claude session in tmux session 'claude'" >> ~/.claude/watchdog.log

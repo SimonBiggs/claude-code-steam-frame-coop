@@ -4,6 +4,39 @@ const VrText := preload("res://core/vr_text.gd")
 ## The VR gunner (player 1) swings and fires the cannons; the TV deckhands (players 2 to 7, drop-in:
 ## press A on a spare controller to join) keep the cannons loaded, patch leaks and shoot boarders. Gold for every ship sunk; the game ends when
 ## the hold fills with water and the ship goes down.
+##
+## SIMPLE_MODE (the family: "all of the games have become too complicated", "everything's being driven
+## by text"): the VR gunner aims and fires at pirate ships; the deckhands carry cannonballs to the cannons.
+##  - TARGET PRACTICE first, exactly as before (Simon's favourite), plus a see-through ghost hand
+##    (ghost_hand.gd) that shows reach, squeeze, swing, let go instead of the hint text.
+##  - One new thing per wave: 1-2 a few slow ships whose shots don't hurt, 3 shots make LEAKS (one at a
+##    time: a glowing ring, the deckhands' arrow), 4 BOARDERS (one at a time), 5 the SEA MONSTER's
+##    tentacles, 6 the KRAKEN. Bonus seas after that bring back the bomb boats.
+##  - Everything beside the gunner reacts to touch (props.gd): a bell to ring, a rope to swing, a barrel
+##    that wobbles, Polly squawks when poked, and spare cannonballs / the barrel can be picked up and
+##    thrown overboard (SPLASH) - or at boarders and tentacles.
+##  - Off: hint panels, the help panel, gold / water / ammo numbers (the sea rises up the hull instead,
+##    and the cannon's rack shows its balls), the treasure ship and golden balls, supply barrels,
+##    streaks and bonuses, parrot speech bubbles, crew awards. Text: one short headline ("WAVE 2!").
+##  - No how-to words at all: each TV view shows picture cues low down (a pulsing glowing pad button +
+##    an icon, CUES, in that player's own controls: A / E / SHIFT, RT / CLICK / ENTER ...) that fade
+##    once the player has done it twice: A + cannonball at the pile, A + drop by a leak (hold), RT + skull
+##    for boarders / tentacles; the flat gunner gets RT + star (bang) and LB / RB + arrows for an empty cannon.
+##    The VR gunner gets the ghost hand (reach, squeeze, swing, let go; and opening its fingers over the
+##    handle when the ring is on the target, instead of "LET GO!"). A practice miss shows a glowing arrow
+##    from the splash towards the target instead of "TOO SHORT!" / "TOO FAR!".
+const SIMPLE_MODE := true
+const UiKit := preload("res://core/ui_kit.gd")
+
+## Simple mode picture cues on the TV views (no words): [pad buttons, icons, icon colour]. The buttons
+## follow the player's own controls (see _cue_buttons).
+const CUES := {
+	"grab": [["USE"], ["dot"], Color(0.72, 0.74, 0.82)],
+	"patch": [["USE"], ["drop"], Color(0.45, 0.8, 1.0)],
+	"shoot": [["FIRE"], ["skull"], Color(1.0, 0.92, 0.75)],
+	"fire": [["FIRE"], ["star"], Color(1.0, 0.75, 0.3)],  # BANG (a flame looked like the leak drop)
+	"switch": [["PREV", "NEXT"], ["arrow_left", "arrow_right"], Color(1.0, 0.45, 0.4)],
+}
 
 const World := preload("res://games/cannon_cove/world.gd")
 const PlayerScript := preload("res://games/cannon_cove/player.gd")
@@ -18,6 +51,8 @@ const KrakenScript := preload("res://games/cannon_cove/kraken.gd")
 const ParrotScript := preload("res://games/cannon_cove/parrot.gd")
 const GuideScript := preload("res://games/cannon_cove/guide.gd")
 const HudScript := preload("res://games/cannon_cove/hud.gd")
+const PropsScript := preload("res://games/cannon_cove/props.gd")
+const GhostHandScript := preload("res://games/cannon_cove/ghost_hand.gd")
 const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
 const NetScript := preload("res://core/net.gd")
@@ -133,6 +168,9 @@ var join_t := 0.0
 var view_grid: GridContainer
 var view_count := 0
 var say_t := 0.0
+var simple := SIMPLE_MODE  # other scripts read main.simple
+var props: Node3D  # simple mode: touchable things beside each cannon (props.gd)
+var ghost_hand: Node3D  # simple mode: the practice ghost hand (VR gunner only)
 
 
 func _ready() -> void:
@@ -171,6 +209,10 @@ func _setup_game(mode: String) -> void:
 	ready_to_play = true
 	print("Cannon Cove: %s mode" % mode)
 	_rejoin_party()
+	if SIMPLE_MODE:
+		_show_center("ALL ABOARD!" if mode == "client" else "CANNON COVE!", 2.0)
+		parrot_say("")
+		return
 	if mode == "host":
 		_show_center("CANNON COVE\nTARGET PRACTICE while the TV crew joins!\nGrab the glowing cannon handle and shoot the target", 6.0)
 	elif mode == "client":
@@ -221,6 +263,14 @@ func _build_extras() -> void:
 	parrot = ParrotScript.new()
 	parrot.main = self
 	parrot.perches = parts.parrot_perches
+	if SIMPLE_MODE:
+		gauge.visible = false  # the sea rising up the hull shows the water instead
+		if parts.has("pile_sign"):
+			parts.pile_sign.visible = false
+		props = PropsScript.new()
+		props.main = self
+		add_child(props)
+		parrot.perches = props.perches()  # on a post right beside the gunner, within reach
 	parrot.scale = Vector3.ONE * 1.4
 	add_child(parrot)
 	for i in MAX_PLAYERS:
@@ -407,7 +457,7 @@ func popup(pos: Vector3, text: String, color: Color) -> void:
 	l.outline_size = 26
 	l.pixel_size = 0.008
 	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	l.no_depth_test = true
+	l.no_depth_test = false
 	add_child(l)
 	l.global_position = pos
 	var t := l.create_tween().set_parallel()
@@ -546,6 +596,37 @@ func spawn_ball(origin: Vector3, vel: Vector3, enemy: bool, visual_only: bool, m
 
 
 ## Colourful paper bits (celebrations).
+## Simple mode, target practice: a big glowing arrow over the splash of a miss, pointing at the target
+## and nudging towards it (too short, too far, to the side: the arrow shows which way). Fades in 2.2 s.
+func miss_arrow(from: Vector3, to: Vector3) -> void:
+	var dir := Vector3(to.x - from.x, 0.0, to.z - from.z)
+	if dir.length() < 0.5:
+		return
+	dir = dir.normalized()
+	var arrow := Node3D.new()
+	arrow.name = "MissArrow"
+	add_child(arrow)
+	var m := World.mat(Color(1.0, 0.95, 0.45, 0.85), 3.0)
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	# Built pointing +Z (a cone for the head, a fat shaft), then turned to face the target.
+	var shaft := World.cyl(arrow, 0.35, 0.35, 2.4, Vector3(0, 0, -0.6), m, 10)
+	shaft.rotation.x = PI / 2.0
+	var head := World.cyl(arrow, 0.0, 0.9, 1.4, Vector3(0, 0, 1.3), m, 12)
+	head.rotation.x = PI / 2.0
+	for mi in [shaft, head]:
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var start := Vector3(from.x, maxf(from.y, sea_level) + 2.2, from.z)
+	arrow.global_position = start
+	arrow.global_basis = Basis.looking_at(-dir, Vector3.UP)
+	var tw := arrow.create_tween()
+	for i in 3:
+		tw.tween_property(arrow, "global_position", start + dir * 2.5, 0.35).set_trans(Tween.TRANS_SINE)
+		tw.tween_property(arrow, "global_position", start, 0.3).set_trans(Tween.TRANS_SINE)
+	tw.tween_property(m, "albedo_color:a", 0.0, 0.3)
+	tw.tween_callback(arrow.queue_free)
+
+
 func confetti(pos: Vector3, broadcast: bool = true) -> void:
 	var cols := [Color(1.0, 0.3, 0.3), Color(1.0, 0.85, 0.2), Color(0.3, 0.8, 1.0), Color(0.5, 1.0, 0.4), Color(1.0, 0.5, 0.9)]
 	for i in 3:
@@ -606,6 +687,8 @@ func dolphins(side: float, z0: float) -> void:
 func parrot_say(text: String) -> void:
 	if parrot == null or not is_instance_valid(parrot):
 		return
+	if SIMPLE_MODE:
+		text = ""  # just a squawk and a flap, no speech bubble
 	parrot_t = 0.0
 	parrot.say(text)
 	if net:
@@ -705,7 +788,7 @@ func _build_views(mode: String) -> void:
 		origin.add_child(right)
 		players[0].attach_xr(origin, cam, left, right)
 		_build_vr_mirror(cam)
-	elif OS.has_environment("CC_FAKE_VR") and mode != "client":
+	elif (OS.has_environment("CC_FAKE_VR") or OS.has_environment("BOT_VR")) and mode != "client":
 		# Tests: the VR gunner's code runs without a headset; the bot moves the head and hands.
 		print("Fake VR: the bot drives the VR gunner")
 		var origin := XROrigin3D.new()
@@ -847,6 +930,23 @@ func _make_join_card() -> Control:
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	l.add_theme_color_override("font_color", Color(1.0, 0.88, 0.45))
 	card.add_child(l)
+	if SIMPLE_MODE:
+		# No words: a pulsing A and a person with a plus (press A on a spare controller to join).
+		l.text = ""
+		var row := HBoxContainer.new()
+		row.name = "JoinCue"
+		row.alignment = BoxContainer.ALIGNMENT_CENTER
+		row.add_theme_constant_override("separation", 18)
+		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.add_child(UiKit.glyph("A", 2.0))
+		row.add_child(UiKit.icon("plus", Color(1.0, 0.88, 0.45), 56.0))
+		row.add_child(UiKit.icon("person", Color(1.0, 0.88, 0.45), 96.0))
+		for c in row.get_children():
+			(c as Control).size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		card.add_child(row)
+		var tw := row.create_tween().set_loops()
+		tw.tween_property(row, "modulate:a", 0.55, 0.7)
+		tw.tween_property(row, "modulate:a", 1.0, 0.7)
 	return card
 
 
@@ -1005,12 +1105,12 @@ func _join_player(p, device: int) -> void:
 	print("Player %d joins with %s" % [p.index + 1, "the arrow keys" if device == KEYS2_DEVICE else "controller %d" % device])
 	if net.mode == "client":
 		net.send_action("join", [], p.index)
-		_show_center("PLAYER %d IS COMING ABOARD!" % (p.index + 1), 1.2, false)
+		_show_center(("PLAYER %d!" if SIMPLE_MODE else "PLAYER %d IS COMING ABOARD!") % (p.index + 1), 1.2, false)
 	else:
 		p.position = spawn_pos(p.index)
 		p.set_active(true)
 		on_player_activity_changed(p)
-		_show_center("PLAYER %d JOINED THE CREW!" % (p.index + 1), 1.5)
+		_show_center(("PLAYER %d!" if SIMPLE_MODE else "PLAYER %d JOINED THE CREW!") % (p.index + 1), 1.5)
 
 
 func _leave_player(p) -> void:
@@ -1023,7 +1123,8 @@ func _leave_player(p) -> void:
 	elif p.active:
 		p.set_active(false)
 		on_player_activity_changed(p)
-		_show_center("Player %d left the crew" % (p.index + 1), 1.5)
+		if not SIMPLE_MODE:
+			_show_center("Player %d left the crew" % (p.index + 1), 1.5)
 
 
 ## Keeps who-joined-with-what across scene reloads (restart, reconnect) so the crew stays aboard.
@@ -1112,6 +1213,8 @@ func _process(delta: float) -> void:
 			mirror_vp.render_target_update_mode = SubViewport.UPDATE_ONCE
 	_update_hud()
 	_update_guides()
+	if props:
+		props.tick(delta)
 	if players.size() < MAX_PLAYERS:
 		_ensure_players(net.mode)
 	_poll_joins(delta)
@@ -1125,7 +1228,7 @@ func _process(delta: float) -> void:
 	if game_over:
 		game_over_time += delta
 		var vr_restart: bool = players[0].vr and (players[0].hand_r.is_button_pressed("ax_button") or players[0].hand_l.is_button_pressed("ax_button"))
-		if game_over_time > 1.5 and (_restart_pressed() or vr_restart):
+		if game_over_time > 1.5 and (_restart_pressed() or vr_restart or (SIMPLE_MODE and game_over_time > 7.0)):
 			get_tree().reload_current_scene()
 		return
 	_update_crew(delta)
@@ -1143,7 +1246,7 @@ func _process(delta: float) -> void:
 			phase = "break"
 			in_break = true
 			break_timer = 4.0
-			_show_center("BONUS SEAS!\nKeep sailing - how much gold can you grab?", 3.0)
+			_show_center("BONUS SEAS!" if SIMPLE_MODE else "BONUS SEAS!\nKeep sailing - how much gold can you grab?", 3.0)
 		return
 	if in_break:
 		break_timer -= delta
@@ -1185,7 +1288,8 @@ func _update_practice(delta: float) -> void:
 		if practice_free_t > 1.4:
 			practice_free_t = 0.0
 			c.ammo += 1
-			popup(c.global_position + Vector3.UP * 1.3, "FREE PRACTICE BALL", Color(0.7, 1.0, 0.7))
+			if not SIMPLE_MODE:
+				popup(c.global_position + Vector3.UP * 1.3, "FREE PRACTICE BALL", Color(0.7, 1.0, 0.7))
 			sound("load", -4.0, 1.2)
 	else:
 		practice_free_t = 0.0
@@ -1213,6 +1317,8 @@ func _spawn_target(kind: String) -> void:
 	add_child(tg)
 	if kind != "practice":
 		splash(pos, 1.5)
+		if SIMPLE_MODE:
+			return  # it just bobs by: shoot it!
 		var what := "A SUPPLY BARREL!\nGunner: shoot it for free cannonballs!" if kind == "supply" else "A TREASURE CHEST!\nGunner: shoot it for gold!"
 		_show_center(what, 2.2)
 		parrot_say("SQUAWK! Shoot the barrel!" if kind == "supply" else "SQUAWK! TREASURE!")
@@ -1235,7 +1341,7 @@ func on_target_hit(tg, pos: Vector3) -> void:
 			popup(pos + Vector3.UP * 3.0, msg, Color(1.0, 0.9, 0.3))
 			if left > 0:
 				parrot_say(["SQUAWK! Nice shot!", "Again! Again!", "Ooh, shiny shot!"][practice_hits % 3])
-			elif net.mode == "host" and not net.connected:
+			elif net.mode == "host" and not net.connected and not SIMPLE_MODE:
 				_show_center("GREAT SHOOTING, GUNNER!\nKeep practising while the deckhands on the TV join…", 4.0)
 			print("Practice target hit (%d)" % practice_hits)
 		"supply":
@@ -1247,7 +1353,7 @@ func on_target_hit(tg, pos: Vector3) -> void:
 			print("Supply barrel hit")
 		_:
 			gold += 40
-			popup(pos + Vector3.UP * 3.0, "TREASURE!  +40 GOLD", Color(1.0, 0.85, 0.2))
+			popup(pos + Vector3.UP * 3.0, "TREASURE!" if SIMPLE_MODE else "TREASURE!  +40 GOLD", Color(1.0, 0.85, 0.2))
 			sound("coin", 0.0, 1.0)
 			sound("coin", -2.0, 1.3)
 			print("Treasure chest hit, gold %d" % gold)
@@ -1262,7 +1368,10 @@ func _end_practice() -> void:
 		splash(tg.global_position, 1.2)
 		tg.queue_free()
 	sound("bell", -2.0)
-	_show_center("GREAT SHOOTING!\nPirates are coming - deckhands, keep the cannons loaded!", 4.0)
+	if SIMPLE_MODE:
+		_show_center("PIRATES!", 2.5)
+	else:
+		_show_center("GREAT SHOOTING!\nPirates are coming - deckhands, keep the cannons loaded!", 4.0)
 	parrot_say("SQUAWK! PIRATES AHOY!")
 	print("Practice over (%d hits)" % practice_hits)
 
@@ -1276,11 +1385,16 @@ func _random_events(delta: float) -> void:
 		return
 	event_t = randf_range(30.0, 45.0)
 	event_flip = not event_flip
+	if SIMPLE_MODE:
+		_spawn_target("chest")  # a treasure chest bobbing by: just another thing to shoot (no free-ammo rule)
+		return
 	_spawn_target("supply" if event_flip else "chest")
 
 
 func _plan_wave(w: int) -> Array[String]:
 	var q: Array[String] = []
+	if SIMPLE_MODE:
+		return _plan_simple_wave(w)
 	match w:
 		1:
 			q.assign(["raider", "raider"])
@@ -1309,6 +1423,53 @@ func _plan_wave(w: int) -> Array[String]:
 	if extra >= 3 and w >= 3:
 		q.append("tentacle")
 	return q
+
+
+## Simple mode: one new thing per wave. 1-2 slow ships (their shots don't hurt), 3 leaks, 4 boarders,
+## 5 the sea monster's tentacles, 6 the Kraken; bonus seas bring back the bomb boats.
+func _plan_simple_wave(w: int) -> Array[String]:
+	var q: Array[String] = []
+	match w:
+		1:
+			q.assign(["raider", "raider"])
+		2:
+			q.assign(["raider", "raider", "raider"])
+		3:
+			q.assign(["raider", "raider", "raider"])
+		4:
+			q.assign(["raider", "raider", "galleon", "raider"])
+		5:
+			q.assign(["raider", "tentacle", "raider", "tentacle", "galleon"])
+		BOSS_WAVE:
+			q.assign(["kraken", "wait", "raider"])
+		_:
+			var n := mini(3 + (w - BOSS_WAVE), 8)
+			for i in n:
+				q.append(["raider", "galleon", "raider", "fireship"][i % 4] if w > BOSS_WAVE + 1 else "raider")
+			for i in 1 + (w - BOSS_WAVE) / 3:
+				q.insert(mini(q.size(), 2 + i * 2), "tentacle")
+	var extra := crew_extra()
+	for i in extra / 2:
+		q.append("raider")
+	return q
+
+
+## Simple mode: leaks only from wave 3 and few at a time (wave 3: one, then two, later three).
+func leak_cap() -> int:
+	if not SIMPLE_MODE:
+		return MAX_LEAKS
+	if wave < 3:
+		return 0
+	return 1 if wave == 3 else (2 if wave <= BOSS_WAVE else 3)
+
+
+## Simple mode: boarders only from wave 4, one at a time (two from the Kraken on).
+func boarder_cap() -> int:
+	if not SIMPLE_MODE:
+		return 99
+	if wave < 4:
+		return 0
+	return (1 if wave < BOSS_WAVE else 2) + crew_extra() / 3
 
 
 ## Bouncing arrows: each local player sees their own, over the next thing to do.
@@ -1351,6 +1512,19 @@ func _start_wave() -> void:
 	print("Wave %d started (%d deckhands, plan %s)" % [wave, deckhands().size(), spawn_queue])
 	sound("wave")
 	sound("bell", -4.0)
+	if SIMPLE_MODE:
+		var head_s := "WAVE %d!" % wave
+		match wave:
+			4:
+				head_s = "BOARDERS!"
+			5:
+				head_s = "SEA MONSTER!"
+			BOSS_WAVE:
+				head_s = "THE KRAKEN!"
+				golden_balls += 1  # one golden cannonball for the Kraken (the deckhands' arrow shows it)
+		_show_center(head_s, 2.0)
+		parrot_say("")
+		return
 	var title: String = WAVE_NAMES[wave] if wave < WAVE_NAMES.size() else "BONUS SEAS"
 	var sub := "Pirates ahoy!"
 	match wave:
@@ -1386,6 +1560,15 @@ func _end_wave() -> void:
 	sound("clear")
 	sound("cheer", -4.0)
 	sound("coin", -2.0, 1.0)
+	if SIMPLE_MODE:
+		_show_center("HOORAY!", 2.0)
+		parrot_say("")
+		confetti(Vector3(0, 6.0, 2.0))
+		var ds := -1.0 if randf() < 0.5 else 1.0
+		var dz2 := randf_range(4.0, 12.0)
+		net.event("dolphins", [ds, dz2])
+		dolphins(ds, dz2)
+		return
 	var next := wave + 1
 	var preview := ""
 	if next <= BOSS_WAVE:
@@ -1432,10 +1615,12 @@ func _spawn_next() -> void:
 
 func _spawn_ship(kind: String) -> void:
 	var s := ShipScript.new()
-	if kind == "raider" and wave >= 2 and randf() < 0.15 + wave * 0.03:
+	if kind == "raider" and wave >= (4 if SIMPLE_MODE else 2) and randf() < 0.15 + wave * 0.03:
 		kind = "galleon"
+	if SIMPLE_MODE and kind == "treasure":
+		kind = "galleon"  # no treasure ship / golden-ball rules
 	s.setup(kind, wave, self)
-	s.calm = wave == 1
+	s.calm = wave <= (2 if SIMPLE_MODE else 1)
 	s.net_id = next_net_id()
 	# Come in from port or starboard (where the cannons point), a little fore or aft.
 	var side := -1.0 if randf() < 0.5 else 1.0
@@ -1449,7 +1634,7 @@ func _spawn_ship(kind: String) -> void:
 		"fireship":
 			if not announced.has("fireship"):
 				announced["fireship"] = true
-				_show_center("FIRE SHIP!\nSink the bomb boat before it rams us!", 2.5)
+				_show_center("BOMB BOAT!" if SIMPLE_MODE else "FIRE SHIP!\nSink the bomb boat before it rams us!", 2.5)
 			parrot_say("SQUAWK! BOMB BOAT!")
 			sound("fuse", -6.0)
 		"treasure":
@@ -1468,7 +1653,7 @@ func _spawn_tentacle(side: float, hp: float, z: float = INF) -> Node3D:
 	t.position = Vector3(t.side * randf_range(6.8, 8.0), sea_level, randf_range(-7.0, 7.0) if z == INF else z)
 	add_child(t)
 	sound("tentacle", 0.0, 0.8)
-	if not announced.has("tentacle"):
+	if not announced.has("tentacle") and not SIMPLE_MODE:
 		announced["tentacle"] = true
 		_show_center("THE SEA MONSTER!\nShoot the tentacle before it smashes the deck!", 2.0)
 	splash(t.position, 2.0)
@@ -1498,7 +1683,8 @@ func kraken_summon(k) -> void:
 	for i in n:
 		k.tentacles.append(_spawn_tentacle(k.side, 3.0 + floorf(crew_extra() / 2.0), zs[i] + randf_range(-1.0, 1.0)))
 	sound("roar", -2.0, 1.0)
-	_show_center("THE KRAKEN!\nDeckhands: shoot its TENTACLES so it opens its eyes!", 2.5)
+	if not SIMPLE_MODE:
+		_show_center("THE KRAKEN!\nDeckhands: shoot its TENTACLES so it opens its eyes!", 2.5)
 	parrot_say("SQUAWK! Shoot the wiggly bits!")
 
 
@@ -1511,14 +1697,14 @@ func kraken_roar(k) -> void:
 func kraken_eyes_open(_k) -> void:
 	sound("roar", 0.0, 1.3)
 	sound("bullseye", -2.0, 0.8)
-	_show_center("ITS EYES ARE OPEN!\nGUNNER: FIRE AT THE KRAKEN NOW!", 2.5)
+	_show_center("NOW! FIRE!" if SIMPLE_MODE else "ITS EYES ARE OPEN!\nGUNNER: FIRE AT THE KRAKEN NOW!", 2.5)
 	parrot_say("SQUAWK! NOW! NOW!")
 
 
 func kraken_dive(k) -> void:
 	splash(Vector3(k.position.x, sea_level, k.position.z), 3.0)
 	sound("splash", 0.0, 0.5)
-	if k.hp > 0.0:
+	if k.hp > 0.0 and not SIMPLE_MODE:
 		_show_center("It dived! Watch the OTHER side…", 2.0)
 
 
@@ -1545,6 +1731,9 @@ func on_kraken_defeated(k) -> void:
 			fireworks(Vector3(randf_range(-14.0, 14.0), randf_range(14.0, 22.0), randf_range(-16.0, 10.0))))
 	parrot_say("SQUAWK! WE BEAT THE KRAKEN!")
 	print("VICTORY: the Kraken is beaten, gold %d" % gold)
+	if SIMPLE_MODE:
+		_show_center("VICTORY!", 5.0)
+		return
 	_show_center("VICTORY!\nYou beat the KRAKEN!  +500 GOLD", 6.0)
 	_show_stats("THE COVE IS SAFE!", 16.0)
 
@@ -1560,7 +1749,7 @@ func spawn_boarder(ship) -> void:
 	b.swing_to = Vector3(side * 3.2, 0.0, z)
 	add_child(b)
 	grapple_fx(sp + Vector3.UP * 6.0, Vector3(side * World.HULL_HALF_W, 1.0, z))
-	if not has_meta("boarders_announced"):
+	if not has_meta("boarders_announced") and not SIMPLE_MODE:
 		set_meta("boarders_announced", true)
 		_show_center("BOARDERS!\nDeckhands: shoot them with your muskets!", 2.0)
 
@@ -1601,7 +1790,10 @@ func _update_crew(delta: float) -> void:
 				var idx: int = i
 				stats[idx].patches += 1
 			lk.queue_free()
-			if age < 6.0:
+			if SIMPLE_MODE:
+				gold += 5
+				popup(pos + Vector3.UP * 1.2, "FIXED!", Color(0.5, 1.0, 0.5))
+			elif age < 6.0:
 				gold += 15
 				popup(pos + Vector3.UP * 1.2, "SPEEDY PATCH! +15", Color(0.5, 1.0, 0.7))
 				sound("cheer", -8.0, 1.3)
@@ -1623,15 +1815,20 @@ func _load(p, c) -> void:
 		p.golden = false
 		c.golden += 1
 		sound("golden", -2.0)
-		popup(c.global_position + Vector3.UP * 1.6, "GOLDEN BALL LOADED!", Color(1.0, 0.85, 0.2))
+		if SIMPLE_MODE:
+			coins_fx(c.global_position + Vector3.UP * 1.0)  # a golden sparkle (the word filled the gunner's view)
+		else:
+			popup(c.global_position + Vector3.UP * 1.6, "GOLDEN BALL LOADED!", Color(1.0, 0.85, 0.2))
 		parrot_say("SQUAWK! Fire the golden one!")
-	else:
+	elif not SIMPLE_MODE:  # simple: the new ball on the cannon's rack (and the clunk) say it, no giant word
 		popup(c.global_position + Vector3.UP * 1.6, "LOADED!", Color(0.6, 1.0, 0.6))
 
 
 func _update_water(delta: float) -> void:
 	var leaks := get_tree().get_nodes_in_group("leaks").size()
 	var rate := LEAK_RATE if deckhands().size() >= 2 else LEAK_RATE * 0.7
+	if SIMPLE_MODE:
+		rate *= 0.7  # gentler: one leak at a time to start with
 	rate *= 1.0 + 0.08 * crew_extra()  # more hands patch faster, so holes let in a little more
 	if leaks > 0:
 		water += leaks * rate * delta
@@ -1640,7 +1837,8 @@ func _update_water(delta: float) -> void:
 	water = clampf(water, 0.0, 100.0)
 	if water >= 75.0 and not has_meta("water_warned"):
 		set_meta("water_warned", true)
-		_show_center("THE HOLD IS NEARLY FULL!\nPatch those leaks!", 2.0)
+		if not SIMPLE_MODE:
+			_show_center("THE HOLD IS NEARLY FULL!\nPatch those leaks!", 2.0)
 		parrot_say("SQUAWK! We're sinking!")
 	elif water < 50.0 and has_meta("water_warned"):
 		remove_meta("water_warned")
@@ -1683,7 +1881,7 @@ func set_use(p, held: bool) -> void:
 			golden_balls -= 1
 			p.golden = true
 			sound("golden", -2.0)
-			popup(World.HOLD_POS + Vector3.UP * 2.6, "GOLDEN CANNONBALL!", Color(1.0, 0.85, 0.2))
+			popup(World.HOLD_POS + Vector3.UP * 2.6, "GOLDEN!" if SIMPLE_MODE else "GOLDEN CANNONBALL!", Color(1.0, 0.85, 0.2))
 		else:
 			sound("pickup", -4.0, 0.8)
 		if not has_meta("first_ball"):
@@ -1706,8 +1904,10 @@ func set_use(p, held: bool) -> void:
 
 func create_leak(pos: Vector3) -> void:
 	var leaks := get_tree().get_nodes_in_group("leaks")
-	if leaks.size() >= MAX_LEAKS:
-		water = minf(100.0, water + 4.0)
+	if leak_cap() <= 0:
+		return  # simple mode, waves 1-2: the shots just rock the boat
+	if leaks.size() >= leak_cap():
+		water = minf(100.0, water + (2.0 if SIMPLE_MODE else 4.0))
 		return
 	var p := World.constrain(pos, 0.5, cannon_obstacles())
 	for lk in leaks:
@@ -1720,7 +1920,7 @@ func create_leak(pos: Vector3) -> void:
 	leak.position = p
 	add_child(leak)
 	sound("creak", -2.0, randf_range(0.8, 1.1))
-	if not has_meta("leak_announced"):
+	if not has_meta("leak_announced") and not SIMPLE_MODE:
 		set_meta("leak_announced", true)
 		_show_center("WE'VE GOT A LEAK!\nDeckhands: hold USE next to it to patch it!", 2.5)
 		parrot_say("SQUAWK! LEAK! LEAK!")
@@ -1770,7 +1970,7 @@ func on_ball_hit(target, pos: Vector3, mega: bool = false) -> void:
 		match r:
 			"clang":
 				sound("clang", 0.0, randf_range(0.8, 1.0))
-				popup(pos + Vector3.UP * 2.0, "CLANG! Its eyes are shut!", Color(0.8, 0.7, 1.0))
+				popup(pos + Vector3.UP * 2.0, "CLANG!" if SIMPLE_MODE else "CLANG! Its eyes are shut!", Color(0.8, 0.7, 1.0))
 				return
 			"dead":
 				on_kraken_defeated(target)
@@ -1806,6 +2006,8 @@ func _mega_blast(pos: Vector3, direct) -> void:
 func _streak_hit(pos: Vector3) -> void:
 	streak += 1
 	stats[0].best_streak = maxi(int(stats[0].best_streak), streak)
+	if SIMPLE_MODE:
+		return  # no streak bonuses
 	if streak in [3, 5, 8, 12] or (streak > 12 and streak % 5 == 0):
 		var bonus := streak * 5
 		gold += bonus
@@ -1837,6 +2039,12 @@ func on_ball_splash(pos: Vector3) -> void:
 	var across := to_t.normalized().cross(to_s).y
 	var vr: bool = players[0].vr or players[0].fake_vr
 	var tip := "SO CLOSE!"
+	if SIMPLE_MODE:
+		# No words: a glowing arrow over the splash points the way to the target (every screen).
+		var aim: Vector3 = best.global_position
+		net.event("miss_arrow", [pos, aim])
+		miss_arrow(pos, aim)
+		return
 	if absf(along) > absf(across):
 		if along < 0.0:
 			tip = "TOO SHORT!\n" + ("Push the handle DOWN a little" if vr else "Aim a bit HIGHER")
@@ -1854,13 +2062,13 @@ func on_ship_sunk(s) -> void:
 	gold += s.gold
 	stats[0].sinks += 1
 	var pos: Vector3 = s.global_position + Vector3.UP * 3.0
-	popup(pos + Vector3.UP * 2.0, "SUNK!  +%d GOLD" % s.gold, Color(1.0, 0.85, 0.2))
+	popup(pos + Vector3.UP * 2.0, "SUNK!" if SIMPLE_MODE else "SUNK!  +%d GOLD" % s.gold, Color(1.0, 0.85, 0.2))
 	explosion(pos, Color(1.0, 0.75, 0.3), 2.2)
 	sound("big_kill", 0.0, 0.8)
 	sound("coin", -2.0)
 	splash(s.global_position, 2.5)
 	coins_fx(pos)
-	if t_world - last_sink_t < 5.0:
+	if t_world - last_sink_t < 5.0 and not SIMPLE_MODE:
 		gold += 40
 		popup(pos + Vector3.UP * 4.0, "DOUBLE SINK!  +40", Color(1.0, 0.55, 0.9))
 		sound("cheer", -2.0)
@@ -1891,11 +2099,11 @@ func fireship_boom(s, reached: bool) -> void:
 		create_leak(Vector3(side * 2.6, 0.0, z - 1.0))
 		create_leak(Vector3(side * 2.2, 0.0, z + 1.2))
 		water = minf(100.0, water + 5.0)
-		popup(Vector3(side * 3.0, 2.5, z), "BOOM! IT RAMMED US!", Color(1.0, 0.4, 0.3))
+		popup(Vector3(side * 3.0, 2.5, z), "BOOM!" if SIMPLE_MODE else "BOOM! IT RAMMED US!", Color(1.0, 0.4, 0.3))
 		parrot_say("SQUAWK! OUCH!")
 	else:
 		gold += s.gold
-		popup(pos + Vector3.UP * 2.5, "KABOOM!  +%d" % s.gold, Color(1.0, 0.6, 0.2))
+		popup(pos + Vector3.UP * 2.5, "KABOOM!" if SIMPLE_MODE else "KABOOM!  +%d" % s.gold, Color(1.0, 0.6, 0.2))
 		var chain := 0
 		for o in get_tree().get_nodes_in_group("ships"):
 			if o != s and not o.sinking and o.global_position.distance_to(pos) < 13.0:
@@ -1905,7 +2113,7 @@ func fireship_boom(s, reached: bool) -> void:
 			if t.alive() and t.distance_to_point(pos) < 9.0:
 				t.hit(2.0)
 				chain += 1
-		if chain > 0:
+		if chain > 0 and not SIMPLE_MODE:
 			gold += 30
 			popup(pos + Vector3.UP * 4.5, "CHAIN BLAST! +30", Color(1.0, 0.5, 0.9))
 	s.queue_free()
@@ -1913,12 +2121,15 @@ func fireship_boom(s, reached: bool) -> void:
 
 
 func on_treasure_fleeing(_s) -> void:
+	if SIMPLE_MODE:
+		return
 	_show_center("The treasure ship is getting away!\nQuick, gunner!", 2.0)
 	parrot_say("SQUAWK! Don't let it escape!")
 
 
 func on_treasure_escaped(_s) -> void:
-	popup(Vector3(0, 6.0, -4.0), "The treasure ship got away…", Color(0.9, 0.9, 0.9))
+	if not SIMPLE_MODE:
+		popup(Vector3(0, 6.0, -4.0), "The treasure ship got away…", Color(0.9, 0.9, 0.9))
 	sound("dry", -2.0, 0.6)
 
 
@@ -1940,7 +2151,7 @@ func on_tentacle_slam(_t, pos: Vector3) -> void:
 
 func on_tentacle_killed(t) -> void:
 	gold += 40
-	popup(t.segs[t.SEGMENTS - 1].global_position + Vector3.UP, "BYE BYE MONSTER!  +40", Color(0.9, 0.6, 1.0))
+	popup(t.segs[t.SEGMENTS - 1].global_position + Vector3.UP, "BYE BYE!" if SIMPLE_MODE else "BYE BYE MONSTER!  +40", Color(0.9, 0.6, 1.0))
 	sound("big_kill", 0.0, 0.7)
 	sound("coin", -2.0, 1.2)
 	splash(Vector3(t.position.x, sea_level, t.position.z), 2.5)
@@ -2015,14 +2226,14 @@ func musket_shot(p, from: Vector3, dir: Vector3) -> void:
 		if target.hit(1.0):
 			gold += 10
 			stats[p.index].splashes += 1
-			popup(target.global_position + Vector3.UP * 2.0, "SPLASH! +10", Color(0.6, 0.9, 1.0))
+			popup(target.global_position + Vector3.UP * 2.0, "SPLASH!" if SIMPLE_MODE else "SPLASH! +10", Color(0.6, 0.9, 1.0))
 			sound("dash", -4.0, 0.6)
 			get_tree().create_timer(0.9).timeout.connect(func() -> void:
 				if is_instance_valid(target):
 					splash(Vector3(target.global_position.x, sea_level, target.global_position.z), 1.2))
 	elif target.is_in_group("ships"):
 		stats[p.index].kegs += 1
-		popup(target.global_position + Vector3.UP * 3.0, "NICE SHOT, P%d!" % (p.index + 1), Color(1.0, 0.8, 0.4))
+		popup(target.global_position + Vector3.UP * 3.0, "NICE SHOT!" if SIMPLE_MODE else "NICE SHOT, P%d!" % (p.index + 1), Color(1.0, 0.8, 0.4))
 		target.hit(1.0)
 	else:
 		stats[p.index].monster += 1
@@ -2033,9 +2244,21 @@ func musket_shot(p, from: Vector3, dir: Vector3) -> void:
 func boarder_stole(b, c) -> void:
 	c.ammo = maxi(0, c.ammo - 1)
 	c.golden = mini(c.golden, c.ammo)
-	popup(c.global_position + Vector3.UP * 1.8, "HEY! STOLEN!", Color(1.0, 0.45, 0.4))
+	popup(c.global_position + Vector3.UP * 1.8, "HEY!" if SIMPLE_MODE else "HEY! STOLEN!", Color(1.0, 0.45, 0.4))
 	sound("pickup", -6.0, 0.6)
 	_particles(b.global_position + Vector3.UP, Color(0.15, 0.15, 0.15), 4, 0.1, 2.0, 9.0, 0.5)
+
+
+## Simple mode: the VR gunner threw a spare cannonball (or the barrel) at a boarder: SPLASH!
+func prop_bonk(b, pos: Vector3) -> void:
+	sound("hit", -2.0, 0.8)
+	popup(pos + Vector3.UP * 1.5, "BONK!", Color(1.0, 0.85, 0.4))
+	if b.hit(9.0):
+		gold += 10
+		stats[0].splashes += 1
+		get_tree().create_timer(0.9).timeout.connect(func() -> void:
+			if is_instance_valid(b):
+				splash(Vector3(b.global_position.x, sea_level, b.global_position.z), 1.2))
 
 
 func boarder_hacked(_b, pos: Vector3) -> void:
@@ -2050,6 +2273,7 @@ var coach_point = null  # Vector3 or null: where the gunner's guide arrow points
 var coach_scale := 1.0
 var coach_tip := ""
 var coach_tip_t := 0.0
+var coach_let_go := false  # simple mode, VR: the ring is on the target, so the ghost hand shows "let go"
 var gunner_guide: Node3D
 
 
@@ -2098,6 +2322,12 @@ func _update_coach(delta: float) -> void:
 	coach_text = ""
 	coach_point = null
 	coach_scale = 1.0
+	if SIMPLE_MODE:
+		coach_let_go = false
+		if not game_over:
+			_simple_coach(p, c, vr, holding, focus)
+		_update_ghost_hand(p, c, vr, holding, focus)
+		return
 	if game_over:
 		return
 	var hop := "Press A (or flick the left stick)" if vr else "LB / RB (Q / E)"
@@ -2157,6 +2387,64 @@ func _update_coach(delta: float) -> void:
 			coach_text = "Its eyes are shut! Shoot the TENTACLES first"
 
 
+## Simple mode: the arrow does the coaching, no words. While the gold ring sits on the target during the
+## first shots (VR) the ghost hand opens its fingers over the handle (coach_let_go); the flat gunner gets
+## picture cues on the TV (_simple_cue).
+func _simple_coach(p, c, vr: bool, holding: bool, focus: Array) -> void:
+	if vr and not holding and stats[0].shots < 3:
+		coach_point = c.handle_world()
+		coach_scale = 0.22
+		return
+	if c.ammo <= 0:
+		var other = null
+		for oc in cannons:
+			if oc.ammo > 0 and (other == null or absf(oc.index - c.index) < absf(other.index - c.index)):
+				other = oc
+		if other != null:
+			coach_point = other.global_position + Vector3.UP * 1.2
+			coach_scale = 0.5
+		return
+	if focus.is_empty():
+		return
+	var fpos: Vector3 = focus[0]
+	var my_side := -1.0 if p.station < 2 else 1.0
+	if signf(fpos.x) != my_side and absf(fpos.x) > 4.0:
+		coach_point = cannons[2 if my_side < 0.0 else 0].global_position + Vector3.UP * 1.2
+		coach_scale = 0.5
+		return
+	var dist: float = fpos.distance_to(c.global_position)
+	coach_point = fpos + Vector3.UP * 1.0
+	coach_scale = clampf(dist * 0.06, 0.6, 5.0)
+	if vr and holding and stats[0].shots < 3:
+		var ring: Vector3 = c.land_ring.global_position
+		if Vector2(ring.x - fpos.x, ring.z - fpos.z).length() < 5.0:
+			coach_let_go = true
+	elif stats[0].shots > 8 and phase != "practice" and focus[1] != "THE KRAKEN'S EYES":
+		coach_point = null
+
+
+## Simple mode, VR: a see-through ghost hand at the handle shows reach, squeeze, swing, let go until the
+## gunner has fired a few shots (only when they're idle: never over a hand that's busy). While they hold
+## the handle with the ring on the target, it hovers just above their hand and opens: "let go now".
+func _update_ghost_hand(p, c, vr: bool, holding: bool, focus: Array) -> void:
+	if not vr:
+		return
+	if ghost_hand == null:
+		ghost_hand = GhostHandScript.new()
+		add_child(ghost_hand)
+		p._set_layers(ghost_hand, p.viewmodel_layer())
+	var want: bool = not game_over and not holding and stats[0].shots < 3 and c.ammo > 0 and phase == "practice"
+	var aim := Vector3.ZERO
+	if not focus.is_empty():
+		var fp: Vector3 = focus[0]
+		aim = fp
+	if coach_let_go and holding and not game_over:
+		ghost_hand.show_release(true, c, get_process_delta_time())
+		return
+	ghost_hand.show_release(false, c, 0.0)
+	ghost_hand.show_demo(want, c, aim, get_process_delta_time())
+
+
 ## Where a deckhand's guide arrow points: the most useful job for them right now, or null.
 func deckhand_goal(p):
 	if game_over or p.gunner:
@@ -2188,6 +2476,12 @@ func deckhand_goal(p):
 				bd = d
 				best = b
 		return best.global_position + Vector3.UP * 2.3
+	if SIMPLE_MODE:
+		if golden_balls > 0:
+			return World.HOLD_POS + Vector3.UP * 1.4
+		for t in get_tree().get_nodes_in_group("tentacles"):
+			if t.alive() and t.rise >= 1.0 and p.index % 2 == 0:
+				return t.segs[4].global_position + Vector3.UP * 0.6  # musket the wiggly bits
 	for c in cannons:
 		if c.ammo < c.MAX_AMMO:
 			return World.HOLD_POS + Vector3.UP * 1.4
@@ -2198,6 +2492,8 @@ func deckhand_goal(p):
 func player_prompt(p) -> String:
 	if game_over:
 		return ""
+	if SIMPLE_MODE:
+		return _simple_prompt(p)
 	if p.gunner:
 		var c = cannons[p.station]
 		var keys := "Sticks aim · RT / A fire · LB / RB switch cannon"
@@ -2241,6 +2537,149 @@ func player_prompt(p) -> String:
 	if phase == "practice":
 		return "Target practice! Fetch a cannonball from the pile and load the gunner's cannon"
 	return "Shoot boarders · fetch cannonballs · patch leaks"
+
+
+## Simple mode: no words at the bottom of a TV view (picture cues instead, see update_cue).
+func _simple_prompt(_p) -> String:
+	return ""
+
+
+# --- Simple mode picture cues (no words) -----------------------------------------
+
+## Which picture cue this player's TV view needs right now (a key of CUES), or "" for nothing. The
+## arrow over the next job shows where to go; the cue shows which button. Each goes away once done twice.
+func _simple_cue(p) -> String:
+	if game_over or get_tree().paused or not p.active:
+		return ""
+	if net.mode == "client" and not synced:
+		return ""
+	if p.gunner:
+		var c = cannons[p.station]
+		if c.ammo <= 0:
+			for oc in cannons:
+				if oc.ammo > 0:
+					return _cue_if_new(p, "switch")  # (the arrow points at the loaded one)
+			return ""
+		return _cue_if_new(p, "fire")
+	var lk = nearest_leak(p.global_position, LeakScript.RANGE)
+	if lk != null:
+		return "" if p.patching else _cue_if_new(p, "patch")
+	if p.carrying:
+		return ""
+	if p.global_position.distance_to(World.HOLD_POS) < 2.6:
+		for c in cannons:
+			if c.ammo < c.MAX_AMMO or golden_balls > 0:
+				return _cue_if_new(p, "grab")
+		return ""
+	if not get_tree().get_nodes_in_group("boarders").is_empty() or not get_tree().get_nodes_in_group("tentacles").is_empty():
+		return _cue_if_new(p, "shoot")
+	return ""
+
+
+func _cue_if_new(p, key: String) -> String:
+	var done: Dictionary = p.get_meta("cue_done", {})
+	return key if int(done.get(key, 0)) < 2 else ""
+
+
+## Counts what a local player has done, so their cues can go away: picking up a cannonball, starting
+## a patch, a musket shot, a cannon shot (flat gunner) and hopping to another cannon.
+func _track_cues(p) -> void:
+	var done: Dictionary = p.get_meta("cue_done", {})
+	var now := {"grab": p.carrying, "patch": p.patching, "shoot": p.recoil > 0.9 and not p.gunner}
+	for k in now:
+		if bool(now[k]) and not bool(p.get_meta("cue_was_" + k, false)):
+			done[k] = int(done.get(k, 0)) + 1
+		p.set_meta("cue_was_" + k, now[k])
+	if p.gunner:
+		var shots: int = stats[0].shots
+		var last: int = int(p.get_meta("cue_shots", shots))
+		if shots > last:
+			done["fire"] = int(done.get("fire", 0)) + shots - last
+		p.set_meta("cue_shots", shots)
+		var st: int = int(p.get_meta("cue_station", p.station))
+		if st != p.station:
+			done["switch"] = int(done.get("switch", 0)) + 1
+		p.set_meta("cue_station", p.station)
+	p.set_meta("cue_done", done)
+
+
+## The buttons in the player's own controls: a pad, or their keyboard set.
+func _cue_buttons(p, key: String) -> Array:
+	var pad: bool = p.joy >= 0 or p.key_set < 0
+	var out: Array = []
+	for b in CUES[key][0]:
+		match str(b):
+			"USE":
+				out.append(p.use_name())
+			"FIRE":
+				if p.gunner:
+					out.append("RT" if pad else ("SPACE" if p.key_set == 0 else "ENTER"))
+				else:
+					out.append(p.fire_name())
+			"PREV":
+				out.append("LB" if pad else ("Q" if p.key_set == 0 else ","))
+			"NEXT":
+				out.append("RB" if pad else ("E" if p.key_set == 0 else "."))
+	return out
+
+
+## hud.gd calls this every frame for a local TV player: the picture cue low in their view, a glowing pad
+## button and an icon, gently pulsing ("patch" grows slowly: hold it). It lives inside the (empty) prompt
+## label, so it follows its layout, and fades out once the player has got it.
+func update_cue(p, l: Label, delta: float) -> void:
+	if not game_over and not get_tree().paused and not p.ghost:
+		_track_cues(p)
+	var key := _simple_cue(p)
+	p.set_meta("cue", key)
+	var box: HBoxContainer = l.get_node_or_null("Cue")
+	if box == null:
+		box = HBoxContainer.new()
+		box.name = "Cue"
+		box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		box.alignment = BoxContainer.ALIGNMENT_CENTER
+		box.add_theme_constant_override("separation", 14)
+		l.add_child(box)
+		box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		box.set_meta("key", "")
+		box.set_meta("a", 0.0)
+	var s := 2.0
+	var a: float = float(box.get_meta("a", 0.0))
+	var shown: String = str(box.get_meta("key"))
+	if key != "":
+		var btns := _cue_buttons(p, key)
+		var sig := "%s/%s" % [key, ",".join(PackedStringArray(btns))]
+		if shown != sig:
+			box.set_meta("key", sig)
+			if shown.get_slice("/", 0) != key:
+				a = 0.0  # a new cue fades in
+			for c in box.get_children():
+				c.queue_free()
+			var cue: Array = CUES[key]
+			var icons: Array = cue[1]
+			for i in maxi(btns.size(), icons.size()):
+				if i < btns.size():  # LB + left arrow, RB + right arrow: each button beside its arrow
+					box.add_child(UiKit.glyph(str(btns[i]), s))
+				if i < icons.size():
+					box.add_child(UiKit.icon(str(icons[i]), cue[2], (40.0 if key == "switch" else 56.0) * s))
+			for c in box.get_children():
+				(c as Control).size_flags_vertical = Control.SIZE_SHRINK_CENTER  # a round A, not a tall pill
+		a = minf(1.0, a + delta * 4.0)
+	else:
+		a = maxf(0.0, a - delta * 2.0)  # the old cue fades away
+	box.set_meta("a", a)
+	box.visible = a > 0.01
+	if not box.visible:
+		return
+	var t := Time.get_ticks_msec() / 1000.0
+	var cue_key: String = str(box.get_meta("key")).get_slice("/", 0)
+	var kk := absf(sin(t * (6.0 if cue_key == "shoot" or cue_key == "switch" else 3.5)))
+	if cue_key == "patch":
+		kk = fmod(t, 1.2) / 1.2  # slowly grows, then lets go: HOLD it
+	box.modulate = Color(1, 1, 1, a * (0.75 + 0.25 * kk))
+	for c in box.get_children():
+		var ctl := c as Control
+		ctl.pivot_offset = ctl.size * 0.5
+		ctl.scale = Vector2.ONE * (1.0 + (0.3 if cue_key == "patch" else 0.15) * kk)
 
 
 func _emptiest_cannon() -> String:
@@ -2333,6 +2772,9 @@ func _on_game_over() -> void:
 		cfg.set_value("best", "gold", gold)
 		cfg.set_value("best", "wave", wave)
 		cfg.save("user://cannon_cove_best.cfg")
+	if SIMPLE_MODE:
+		_show_center("OH NO!", 0.0)  # sets sail again by itself after a few seconds
+		return
 	_show_center("THE SHIP SANK!\nWave %d  ·  %d gold\n%s\nPress A or Enter to set sail again" % [wave, gold, best_line], 0.0)
 	_show_stats("CREW AWARDS", 0.0)
 	print("Stats:\n" + _stats_lines())
@@ -2363,11 +2805,11 @@ func _unhandled_input(event: InputEvent) -> void:
 # --- Networked co-op -----------------------------------------------------------------
 
 func on_client_joined() -> void:
-	_show_center("THE DECKHANDS ARE ABOARD!", 1.5)
+	_show_center("ALL ABOARD!" if SIMPLE_MODE else "THE DECKHANDS ARE ABOARD!", 1.5)
 
 
 func on_client_left() -> void:
-	_show_center("The deckhands left - waiting for them to come back…", 0.0)
+	_show_center("" if SIMPLE_MODE else "The deckhands left - waiting for them to come back…", 0.0)
 	for p in players:
 		if p.index >= 2 and p.active:
 			p.reset_crew_state()
@@ -2390,13 +2832,14 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 		"join":
 			if not p.active:
 				p.set_active(true)
-				_show_center("PLAYER %d JOINED THE CREW!" % (index + 1), 1.5)
+				_show_center(("PLAYER %d!" if SIMPLE_MODE else "PLAYER %d JOINED THE CREW!") % (index + 1), 1.5)
 				print("Net: player %d joined the game (%d deckhands)" % [index + 1, deckhands().size()])
 		"leave":
 			if p.active and index >= 1:
 				p.reset_crew_state()
 				p.set_active(false)
-				_show_center("Player %d left the crew" % (index + 1), 1.5)
+				if not SIMPLE_MODE:
+					_show_center("Player %d left the crew" % (index + 1), 1.5)
 				print("Net: player %d left the game" % (index + 1))
 		"restart":
 			if game_over:
@@ -2408,7 +2851,8 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 
 
 func _set_pause_banner(paused: bool, who: String) -> void:
-	_show_center("PAUSED\n" + who if paused else "", 0.0, false)
+	var title := "PAUSED" if SIMPLE_MODE else "PAUSED\n" + who  # simple: no explaining sentence
+	_show_center(title if paused else "", 0.0, false)
 	_update_vr_center()
 
 
@@ -2444,7 +2888,8 @@ func make_snapshot() -> Array:
 	var kr := []
 	for k in get_tree().get_nodes_in_group("krakens"):
 		kr.append(k.net_state())
-	return [wave, gold, water, game_over, in_break, ps, cs, sh, te, bo, lk, phase, tg, kr, golden_balls, streak]
+	return [wave, gold, water, game_over, in_break, ps, cs, sh, te, bo, lk, phase, tg, kr, golden_balls, streak,
+		props.net_state() if props else []]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -2472,6 +2917,8 @@ func apply_snapshot(s: Array) -> void:
 		_sync_ghosts(s[13], "kraken")
 		golden_balls = s[14]
 		streak = s[15]
+	if s.size() > 16 and props:
+		props.apply_net(s[16])
 
 
 func _sync_ghosts(list: Array, kind: String) -> void:
@@ -2568,6 +3015,8 @@ func apply_event(kind: String, args: Array) -> void:
 			spawn_ball(args[0], args[1], args[2], true, args[3] if args.size() > 3 else false)
 		"confetti":
 			confetti(args[0], false)
+		"miss_arrow":
+			miss_arrow(args[0], args[1])
 		"coins":
 			coins_fx(args[0], false)
 		"firework":
@@ -2601,6 +3050,9 @@ func apply_event(kind: String, args: Array) -> void:
 		"remote_pause":
 			get_tree().paused = args[0]
 			_set_pause_banner(args[0], "The VR gunner paused the game")
+		"prop":
+			if props:
+				props.apply_event(args)
 		"hitmark":
 			var hi: int = args[0]
 			if hi < players.size() and players[hi].hud:
@@ -2662,6 +3114,8 @@ func _build_hud() -> void:
 		+ "    A or a left-stick flick hops to the next cannon  ·  flat: sticks aim, RT fire, LB/RB switch\n" \
 		+ "MORE CREW: press A on another controller to jump in (up to 6 deckhands)"
 	help_panel.add_child(help_label)
+	if SIMPLE_MODE:
+		help_panel.visible = false  # the arrows and the practice targets teach instead
 	help_panel.resized.connect(func() -> void: help_panel.position.x = (help_panel.get_parent_area_size().x - help_panel.size.x) * 0.5)
 	# End-of-voyage stats and awards.
 	stats_label = _make_label(28)
@@ -2700,6 +3154,15 @@ func wave_title() -> String:
 
 func _update_hud() -> void:
 	var dt := get_process_delta_time()
+	if SIMPLE_MODE:
+		help_panel.visible = false
+		if net.mode == "client" and not synced:
+			info_label.text = ""
+			return
+		# Hidden while the big headline says the same thing ("WAVE 3!"): no duplicate.
+		var headline: bool = center_label.text.begins_with("WAVE") and center_label.modulate.a > 0.05
+		info_label.text = "" if phase == "practice" or wave <= 0 or headline else ("WAVE %d" % wave)
+		return
 	var show_help := phase == "practice" or wave <= 1
 	help_panel.modulate.a = clampf(help_panel.modulate.a + (dt if show_help else -dt * 0.7), 0.0, 1.0)
 	help_panel.visible = help_panel.modulate.a > 0.0
@@ -2723,7 +3186,7 @@ func _update_vr_center() -> void:
 		vr_center = Label3D.new()
 		vr_center.font_size = 48
 		vr_center.outline_size = 26
-		vr_center.no_depth_test = true
+		vr_center.no_depth_test = false
 		vr_center.render_priority = 10
 		vr_center.outline_render_priority = 9
 		vr_center.width = 900.0
@@ -2732,7 +3195,7 @@ func _update_vr_center() -> void:
 		vr_center.position = Vector3(0.0, 0.05, -1.8)
 		players[0].xr_camera.add_child(vr_center)
 		players[0]._set_layers(vr_center, players[0].viewmodel_layer())
-	vr_center.text = center_label.text
+	vr_center.text = preload("res://core/vr_text.gd").short(center_label.text)  # no walls of text in VR
 	vr_center.modulate.a = center_label.modulate.a
 	vr_center.outline_modulate = Color(0, 0, 0, center_label.modulate.a)
 	VrText.follow(vr_center, players[0].xr_camera, self, 0.08, 1.8)
@@ -2740,7 +3203,7 @@ func _update_vr_center() -> void:
 		vr_hint = Label3D.new()
 		vr_hint.font_size = 40
 		vr_hint.outline_size = 22
-		vr_hint.no_depth_test = true
+		vr_hint.no_depth_test = false
 		vr_hint.render_priority = 10
 		vr_hint.outline_render_priority = 9
 		vr_hint.width = 800.0

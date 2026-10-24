@@ -7,6 +7,8 @@ extends RefCounted
 ## Every note has a LEVEL: 0 = EASY (on the beat, well spaced), 1 = NORMAL, 2 = ROCK (extra notes).
 ## A player plays the notes up to their own level, so a little kid on EASY and a grown-up on ROCK
 ## play the same song together. Notes in the STAR phrases are gold: hitting them charges STAR POWER.
+## Simple mode (main.gd SIMPLE_MODE) sets no_stars (no gold notes) and, for the first song, two_lanes
+## (the middle lane's notes move to the outer lanes, alternating; the pitches stay the same).
 
 const RATE := 22050
 const COUNT_IN := 2  # bars of backing + count-in clicks before the first note
@@ -46,6 +48,8 @@ var d_t := PackedFloat32Array()
 var d_pad := PackedByteArray()
 var d_lvl := PackedByteArray()
 var d_star := PackedByteArray()
+var no_stars := false  # set before setup()
+var two_lanes := false  # set before setup()
 var loop_bytes := PackedByteArray()  # filled by synth_loop() (runs on a worker thread)
 
 
@@ -128,6 +132,8 @@ func lane_pitch_at(t: float, lane: int) -> int:
 
 ## STAR phrases: two bars out of every eight (gold notes).
 func is_star_bar(nb: int) -> bool:
+	if no_stars:
+		return false
 	return nb % 8 == 4 or nb % 8 == 5
 
 
@@ -204,10 +210,16 @@ func _make_charts() -> void:
 	g_pitch = PackedInt32Array()
 	g_lvl = PackedByteArray()
 	g_star = PackedByteArray()
+	var prev_lane := 2
 	for nv in notes:
 		var na: Array = nv
 		g_t.append(float(na[0]))
-		g_lane.append(int(na[1]))
+		var nl := int(na[1])
+		if two_lanes:
+			if nl == 1:
+				nl = 0 if prev_lane == 2 else 2
+			prev_lane = nl
+		g_lane.append(nl)
 		g_pitch.append(int(na[2]))
 		g_lvl.append(int(na[3]))
 		g_star.append(int(na[4]))

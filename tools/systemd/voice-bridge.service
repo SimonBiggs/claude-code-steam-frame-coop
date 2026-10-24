@@ -1,0 +1,14 @@
+[Unit]
+Description=Steam Frame mic -> Whisper transcripts for Claude (voice-bridge)
+
+[Service]
+WorkingDirectory=%h/GodotProjects/duo-arena
+ExecStart=%h/.local/bin/voice-bridge
+StandardOutput=append:%h/GodotProjects/duo-arena/.dev/voice-bridge.out
+StandardError=append:%h/GodotProjects/duo-arena/.dev/voice-bridge.out
+Restart=always
+RestartSec=5
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin
+
+[Install]
+WantedBy=default.target

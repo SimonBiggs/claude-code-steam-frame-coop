@@ -1,0 +1,300 @@
+#!/usr/bin/env bun
+// brepl: a persistent async Bun REPL that Claude talks to from the shell (Simon, 2026-10-18: "you'll be able
+// to do a lot of things quicker if you're using an async Bun REPL").
+//   brepl 'await fetch("http://127.0.0.1:3001").then(r => r.status)'   evaluate, print the result
+//   echo 'x = 41; x + 1' | brepl                                        code from stdin
+//   brepl --restart | --stop                                            restart / stop the server
+// One server per user on ~/.cache/brepl.sock, started on first use. State persists between calls:
+// bare assignments (x = 1) and globalThis.* live on; const/let/var stay local to that call.
+// The last expression is returned (top-level await works). console.log output is printed before the result.
+import { existsSync, unlinkSync } from "node:fs";
+import { inspect } from "node:util";
+import { spawn } from "node:child_process";
+
+const SOCK = `${process.env.HOME}/.cache/brepl.sock`;
+const args = process.argv.slice(2);
+
+if (args[0] === "--serve") {
+  if (existsSync(SOCK)) unlinkSync(SOCK);
+  // Everything beyond this core lives in HOT-RELOADABLE modules (Simon, 2026-10-24: "hot-reload features that mean
+  // you don't have to restart"). Each may export start(ctx) / stop(); saving the file reloads it automatically
+  // (stop the old copy, import the new one, start it) and posts "reloaded <name>" to the channel. reload() reloads
+  // all. Running offscreen games keep their old code until relaunched. This core file itself still needs
+  // `brepl --restart` (it's kept small and stable: socket, jobs, channel, module loader).
+  //   godot  ~/.local/share/gdev/godot.ts    offscreen Godot runs: godot.launch(...), launchGroup(...)
+  //   dev    ~/.local/share/brepl/dev.ts     dev-loop helpers: dev.help()
+  //   alerts ~/.local/share/brepl/alerts.ts  watchers that post to the channel
+  //   peers  ~/.local/share/brepl/peers.ts   peer(name).send/eval/pipe between machines' REPLs
+  const MODULES = {
+    godot: `${process.env.HOME}/.local/share/gdev/godot.ts`,
+    dev: `${process.env.HOME}/.local/share/brepl/dev.ts`,
+    alerts: `${process.env.HOME}/.local/share/brepl/alerts.ts`,
+    peers: `${process.env.HOME}/.local/share/brepl/peers.ts`,
+  };
+  // Every call runs as a job with its own output (AsyncLocalStorage), so console.log and show() inside
+  // concurrent or background work land in the right place (Simon, 2026-10-24: background by default).
+  // A call that is still running after FG_SECONDS (3 s; a first line of "// bg" backgrounds at once)
+  // becomes a background job: it returns at once and its result arrives in the channel (poll() or the
+  // brepl_poll MCP tool). Finished background jobs post to the channel (below). bg(name, async ({log, show}) => ...) starts one explicitly.
+  // show(...paths): images to hand back with the result. The brepl MCP tool (~/.local/share/brepl/mcp.ts)
+  // returns them as pictures; the CLI just lists them. Returned image paths (or arrays of them) count too.
+  const FG_SECONDS = Number(process.env.BREPL_FG_SECONDS ?? 3);
+  const IMG = /\.(png|jpe?g|webp|gif)$/i;
+  const { mkdirSync, appendFileSync } = await import("node:fs");
+  const { AsyncLocalStorage } = await import("node:async_hooks");
+  mkdirSync(`${process.env.HOME}/.cache/brepl`, { recursive: true });
+  const als = new AsyncLocalStorage();
+  const real = { log: console.log, error: console.error };
+  const text = (a) => a.map((x) => (typeof x === "string" ? x : inspect(x, { depth: 3, colors: false }))).join(" ");
+  console.log = console.info = (...a) => { const j = als.getStore(); j ? j.lines.push(text(a)) : real.log(...a); };
+  console.error = console.warn = (...a) => { const j = als.getStore(); j ? j.lines.push(text(a)) : real.error(...a); };
+  globalThis.show = (...paths) => {
+    const ps = paths.flat().filter((p) => typeof p === "string");
+    als.getStore()?.images.push(...ps);
+    return ps.length;
+  };
+  const jobs = new Map();
+  let jobSeq = 0;
+  const start = (name, fn) => {
+    const job = { id: ++jobSeq, name, started: Date.now(), status: "running", lines: [], images: [], value: undefined, background: false, polled: false };
+    job.promise = als.run(job, () => Promise.resolve().then(fn)).then(
+      (v) => { job.status = "done"; job.value = v; for (const x of [v].flat()) if (typeof x === "string" && IMG.test(x) && !job.images.includes(x)) job.images.push(x); },
+      (e) => { job.status = "failed"; job.value = `Error: ${e?.stack ?? e}`; },
+    ).finally(() => {
+      job.ended = Date.now();
+      if (!job.background) return;
+      job.polled = true;
+      send(`job #${job.id} ${job.name}`, [`${job.status} in ${((job.ended - job.started) / 1000).toFixed(0)}s`, ...job.lines, ...show_(job.value)].join("\n"), [...new Set(job.images)]);
+    });
+    return job;
+  };
+  const toBackground = (job) => { job.background = true; jobs.set(job.id, job); };
+  // The channel (Simon, 2026-10-24): one stream anything can write to at any time: send(source, text,
+  // images) from code, pipe(source, stream) for a process's output, `cmd | brepl --pipe SOURCE` from the
+  // shell, and every background job when it finishes. poll() / brepl_poll returns all entries not yet
+  // seen (images shown as pictures). Kept in ~/.cache/brepl/channel.jsonl (+ .seen cursor), so unseen
+  // entries survive a restart and a Monitor on that file can wake Claude.
+  const CH = `${process.env.HOME}/.cache/brepl/channel.jsonl`, CH_SEEN = CH.replace(/jsonl$/, "seen");
+  const { readFileSync: rf, writeFileSync: wf, existsSync: ex } = await import("node:fs");
+  let channel = ex(CH) ? rf(CH, "utf8").trim().split("\n").filter(Boolean).slice(-3000).map((l) => JSON.parse(l)) : [];
+  wf(CH, channel.map((e) => JSON.stringify(e) + "\n").join(""));
+  let seen = ex(CH_SEEN) ? Number(rf(CH_SEEN, "utf8")) || 0 : 0;
+  let chSeq = channel.length ? channel[channel.length - 1].seq : 0;
+  globalThis.send = (source, text = "", images = []) => {
+    const e = { seq: ++chSeq, t: new Date().toTimeString().slice(0, 8), source: String(source), text: typeof text === "string" ? text : inspect(text, { depth: 4, colors: false }), images: [images].flat().filter(Boolean) };
+    channel.push(e);
+    if (channel.length > 3000) channel = channel.slice(-2000);
+    appendFileSync(CH, JSON.stringify(e) + "\n");
+    return e.seq;
+  };
+  // pipe(source, readable): stream lines into the channel as they come (a ReadableStream, Bun.spawn(...).stdout,
+  // or an async iterable of strings). Lines arriving together are batched into one entry.
+  globalThis.pipe = (source, readable) => {
+    (async () => {
+      let buf = "", timer = null;
+      const flush = () => { timer = null; const t = buf.replace(/\n$/, ""); buf = ""; if (t) send(source, t); };
+      const dec = new TextDecoder();
+      for await (const chunk of readable) {
+        buf += typeof chunk === "string" ? chunk + (chunk.endsWith("\n") ? "" : "\n") : dec.decode(chunk, { stream: true });
+        if (!timer) timer = setTimeout(flush, 250);
+      }
+      clearTimeout(timer);
+      flush();
+      send(source, "(stream ended)");
+    })().catch((e) => send(source, `pipe error: ${e}`));
+    return `piping into the channel as "${source}"`;
+  };
+  const show_ = (v) => (v === undefined ? [] : [typeof v === "string" ? v : inspect(v, { depth: 4, colors: false })]);
+  const render = (job) => [...job.lines, ...show_(job.value)].join("\n") + "\n" + (job.images.length ? `\u0001SHOW ${JSON.stringify([...new Set(job.images)])}\n` : "");
+  globalThis.bg = (name, fn) => {
+    if (typeof name === "function") [name, fn] = ["job", name];
+    const job = start(name, () => fn({ log: console.log, show }));
+    toBackground(job);
+    return `started job #${job.id} ${name} (result goes to the channel: brepl_poll)`;
+  };
+  // Never waits (Simon): returns at once with whatever arrived; a Monitor on channel.jsonl says when to look.
+  globalThis.poll = ({ max = 200 } = {}) => {
+    seen = Math.max(seen, ex(CH_SEEN) ? Number(rf(CH_SEEN, "utf8")) || 0 : 0);  // brepl_poll may have read the file directly
+    const fresh = channel.filter((e) => e.seq > seen);
+    seen = chSeq;
+    wf(CH_SEEN, String(seen));
+    const lines = [];
+    for (const e of fresh) {
+      lines.push(`── [${e.t}] ${e.source}${e.text.includes("\n") ? "" : `: ${e.text}`}`);
+      if (e.text.includes("\n")) lines.push(...e.text.split("\n").map((l) => "   " + l));
+      show(e.images);
+    }
+    const cut = lines.length > max ? lines.length - max : 0;
+    const running = [...jobs.values()].filter((j) => j.status === "running").map((j) => `#${j.id} ${j.name} (${((Date.now() - j.started) / 1000).toFixed(0)}s)`);
+    return [cut ? `(${cut} earlier lines not shown: ${CH})` : "", ...lines.slice(cut),
+      running.length ? `still running: ${running.join(", ")}` : fresh.length ? "" : "nothing new, nothing running"].filter(Boolean).join("\n");
+  };
+  // peek(/pattern/, n): the last n channel entries matching, with their images, without moving the poll cursor
+  // (for looking at one result when a full poll would be too big).
+  globalThis.peek = (pattern, n = 1) => {
+    const hits = channel.filter((e) => `${e.source} ${e.text}`.match(pattern)).slice(-n);
+    for (const e of hits) show(e.images);
+    return hits.map((e) => `[${e.t}] ${e.source}\n${e.text}`).join("\n\n") || "no match";
+  };
+  globalThis.jobs = () => [...jobs.values()].map((j) => ({ id: j.id, name: j.name, status: j.status, secs: Math.round(((j.ended ?? Date.now()) - j.started) / 1000), polled: j.polled }));
+  // Nothing may block (Simon, 2026-10-24: "make sure that none of them block"). JS can't interrupt synchronous
+  // code, so: running jobs are mirrored to jobs.json and channel.jsonl is on disk, letting brepl_poll answer from
+  // the files when the server is frozen; the CLI gives up waiting after FG_SECONDS + 2; and a frozen event loop is
+  // reported to the channel afterwards with the job that caused it.
+  const JOBS_FILE = `${process.env.HOME}/.cache/brepl/jobs.json`;
+  setInterval(() => {
+    const running = [...jobs.values()].filter((j) => j.status === "running").map((j) => ({ id: j.id, name: j.name, started: j.started }));
+    wf(JOBS_FILE, JSON.stringify(running));
+  }, 1000).unref?.();
+  let tick = Date.now(), current = null;
+  setInterval(() => {
+    const lag = Date.now() - tick - 500;
+    tick = Date.now();
+    if (lag > 2000) send("⚠ brepl frozen", `the event loop was blocked for ${(lag / 1000).toFixed(1)}s${current ? ` by: ${current.name}` : ""} (synchronous code: use async versions, e.g. Bun.spawn not spawnSync)`);
+    if (current && current.status !== "running") current = null;  // cleared here, not when it ends, so the report above can name it
+  }, 500).unref?.();
+  const run = async (code) => {
+    const waitS = /^\s*\/\/\s*bg\b/.test(code) ? 0 : FG_SECONDS;
+    let fn;
+    try {
+      try {
+        fn = (0, eval)(`(async () => (${code}\n))`);  // a single expression: return its value
+      } catch {
+        // Statements: return the value of the last expression statement, if any.
+        const lines = code.trimEnd().split("\n");
+        const last = lines.pop();
+        // One line of statements ("a = 1; b"): try returning what follows each ";" from the right.
+        if (!lines.length) {
+          for (let i = last.replace(/;\s*$/, "").lastIndexOf(";"); i > 0 && !fn; i = last.lastIndexOf(";", i - 1)) {
+            try { fn = (0, eval)(`(async () => { ${last.slice(0, i + 1)}\n return (${last.slice(i + 1).replace(/;\s*$/, "")}\n) })`); } catch {}
+          }
+        }
+        if (!fn) {
+          // Return the last statement even when it spans lines (bg("x", async () => {\n...\n})): try each
+          // unindented line from the bottom as the start of the returned expression.
+          const all = code.trimEnd().split("\n");
+          for (let k = all.length - 1; k >= 0 && !fn; k--) {
+            if (/^\s/.test(all[k]) || !all[k].trim()) continue;
+            try { fn = (0, eval)(`(async () => { ${all.slice(0, k).join("\n")}\n return (${all.slice(k).join("\n").replace(/;\s*$/, "")}\n) })`); } catch {}
+          }
+          if (!fn) fn = (0, eval)(`(async () => { ${code}\n })`);
+        }
+      }
+    } catch (e) {
+      return `Error: ${e?.stack ?? e}\n`;
+    }
+    const name = code.trim().split("\n").find((l) => l.trim() && !l.trim().startsWith("//"))?.trim().slice(0, 60) ?? "code";
+    const job = start(name, fn);
+    current = job;
+    if (await Promise.race([job.promise.then(() => true), Bun.sleep(waitS * 1000).then(() => false)])) return render(job);
+    toBackground(job);
+    return [...job.lines, `⏳ still running after ${waitS}s -> background job #${job.id} (result goes to the channel: brepl_poll)`].join("\n") + "\n";
+  };
+  const modCtx = { send, show, inspect };
+  globalThis.loadModule = async (name) => {
+    const path = MODULES[name];
+    if (!path || !(await Bun.file(path).exists())) return `${name}: no module`;
+    try { globalThis[name]?.stop?.(); } catch (e) { send("⚠ brepl", `${name}.stop failed: ${e}`); }
+    try {
+      const m = await import(`${path}?t=${Date.now()}`);
+      globalThis[name] = m;
+      await m.start?.(modCtx);
+      return `reloaded ${name}`;
+    } catch (e) {
+      send("⚠ brepl", `${name} failed to load: ${e?.stack ?? e}`);
+      globalThis[name] = { error: String(e) };
+      return `${name} failed: ${e}`;
+    }
+  };
+  globalThis.reload = async (...names) => (await Promise.all((names.length ? names : Object.keys(MODULES)).map((n) => globalThis.loadModule(n)))).join(", ");
+  for (const n of Object.keys(MODULES)) await globalThis.loadModule(n);
+  // Save a module = reload it (debounced; editors write files in several steps).
+  const { watch } = await import("node:fs");
+  const pending = {};
+  for (const [name, path] of Object.entries(MODULES)) {
+    const dir = path.slice(0, path.lastIndexOf("/")), file = path.slice(path.lastIndexOf("/") + 1);
+    try {
+      watch(dir, (_ev, f) => {
+        if (f !== file) return;
+        clearTimeout(pending[name]);
+        pending[name] = setTimeout(async () => send("brepl", await globalThis.loadModule(name)), 400);
+      });
+    } catch {}
+  }
+  Bun.listen({
+    unix: SOCK,
+    socket: {
+      open(s) { s.data = ""; },
+      close(s) { s.gone = true; if (s.pipe) { s.q.push(null); s.wake?.(); } },
+      data(s, d) {
+        s.data += d.toString();
+        if (s.data.startsWith("\u0002PIPE ")) {  // `cmd | brepl --pipe SOURCE`: stream lines into the channel
+          const nl = s.data.indexOf("\n");
+          if (nl < 0) return;
+          if (!s.pipe) { s.pipe = s.data.slice(6, nl); s.q = []; pipe(s.pipe, { async *[Symbol.asyncIterator]() { while (true) { while (s.q.length) { const x = s.q.shift(); if (x === null) return; yield x; } await new Promise((r) => (s.wake = r)); } } }); }
+          if (s.data.length > nl + 1) s.q.push(s.data.slice(nl + 1));
+          s.data = s.data.slice(0, nl + 1);
+          s.wake?.();
+          return;
+        }
+        const i = s.data.indexOf("\0");
+        if (i < 0) return;
+        const code = s.data.slice(0, i);
+        // The client stops waiting after FG_SECONDS + 2 (e.g. synchronous code froze us): post the answer instead.
+        run(code).then((r) => { if (s.gone || s.write(r) <= 0) send("late result", `${code.trim().split("\n")[0].slice(0, 60)}\n${r.replace(/\u0001SHOW .*\n?/, "")}`, (r.match(/\u0001SHOW (.*)\n/) ? JSON.parse(r.match(/\u0001SHOW (.*)\n/)[1]) : [])); else s.end(); });
+      },
+    },
+  });
+} else {
+  if (args[0] === "--stop" || args[0] === "--restart") {
+    // Normally the server is the brepl.service systemd unit (always on, restarted if it dies): restart that.
+    const svc = Bun.spawnSync(["systemctl", "--user", "is-enabled", "brepl"]).stdout.toString().trim() === "enabled";
+    if (svc) {
+      Bun.spawnSync(["systemctl", "--user", args[0] === "--stop" ? "stop" : "restart", "brepl"]);
+      for (let i = 0; i < 60 && args[0] === "--restart" && !existsSync(SOCK); i++) await Bun.sleep(50);
+    } else {
+      spawn("pkill", ["-f", "brepl --serv[e]"]).on("exit", () => { if (existsSync(SOCK)) unlinkSync(SOCK); });
+      await Bun.sleep(300);
+    }
+    if (args[0] === "--stop") process.exit(0);
+    args.shift();
+  }
+  if (args[0] === "--pipe") {  // stream stdin into the channel: some-command | brepl --pipe SOURCE
+    if (!existsSync(SOCK)) { spawn(process.execPath, [import.meta.path, "--serve"], { detached: true, stdio: "ignore" }).unref(); for (let i = 0; i < 50 && !existsSync(SOCK); i++) await Bun.sleep(50); }
+    const sock = await Bun.connect({ unix: SOCK, socket: { data() {}, error() {} } });
+    sock.write(`\u0002PIPE ${args[1] ?? "pipe"}\n`);
+    for await (const chunk of Bun.stdin.stream()) { process.stdout.write(chunk); sock.write(chunk); }
+    sock.end();
+    process.exit(0);
+  }
+  const code = args.length ? args.join(" ") : await new Response(Bun.stdin.stream()).text();
+  if (!code.trim()) process.exit(0);
+  const connect = () => new Promise((ok, bad) => {
+    let buf = "";
+    // Never block the caller: the server answers within FG_SECONDS, so silence past that means synchronous code
+    // has frozen it. Give up; the server posts the answer to the channel when it unfreezes.
+    const fg = Number(process.env.BREPL_FG_SECONDS ?? 3);
+    setTimeout(() => ok(buf + `⏳ brepl server busy for ${fg + 2}s (synchronous code is blocking it). The result will go to the channel (brepl_poll); \`brepl --restart\` kills it.\n`), (fg + 2) * 1000);
+    Bun.connect({
+      unix: SOCK,
+      socket: {
+        open(s) { s.write(code + "\0"); },
+        data(_, d) { buf += d.toString(); },
+        close() { ok(buf); },
+        error(_, e) { bad(e); },
+        connectError(_, e) { bad(e); },
+      },
+    }).catch(bad);
+  });
+  let res;
+  try {
+    res = await connect();
+  } catch {
+    spawn(process.execPath, [import.meta.path, "--serve"], { detached: true, stdio: "ignore" }).unref();
+    for (let i = 0; i < 50 && !existsSync(SOCK); i++) await Bun.sleep(50);
+    res = await connect();
+  }
+  if (process.env.BREPL_RAW !== "1") res = res.replace(/\u0001SHOW (.*)\n/, (_, j) => JSON.parse(j).map((p) => `[image: ${p}]`).join("\n") + "\n");
+  process.stdout.write(res);
+  process.exit(res.startsWith("Error:") ? 1 : 0);  // exit even if we gave up on a still-open socket
+}

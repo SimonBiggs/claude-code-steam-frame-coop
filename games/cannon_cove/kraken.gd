@@ -95,7 +95,7 @@ func _ready() -> void:
 	label.outline_size = 32
 	label.pixel_size = 0.02
 	label.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
-	label.no_depth_test = true
+	label.no_depth_test = false
 	add_child(label)
 	# Health bar.
 	var bar_root := Node3D.new()
@@ -247,7 +247,9 @@ func _update_pose(delta: float) -> void:
 	foam.position = Vector3(0, 0.1 + sin(t * 2.0) * 0.05, 0)
 	foam.rotation.y = t * 0.3
 	label.position = Vector3(0, head.position.y + HEAD_R * 1.25 + 2.2, 0)
-	label.visible = rise > 0.8 and state != "dying"
+	# Simple mode: no words over the Kraken (the gunner's arrow points at its eyes when they open, the
+	# deckhands' arrows at the tentacles, and "NOW! FIRE!" is the one headline).
+	label.visible = rise > 0.8 and state != "dying" and not (main != null and main.simple)
 	if state == "open":
 		label.text = "FIRE AT THE EYES!"
 		label.modulate = Color(1.0, 0.9, 0.2) if int(t * 4.0) % 2 == 0 else Color(1.0, 0.5, 0.2)

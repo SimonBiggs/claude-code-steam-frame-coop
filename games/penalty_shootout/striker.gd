@@ -6,11 +6,20 @@ extends Node3D
 ##   A (Space / left mouse; Enter for split-screen P2): a normal shot
 ##   X (C / right mouse; / for P2): a CHIP - slow and high, floats over a diving keeper
 ##   Y (F; ' for P2): a FIREBALL - the fastest shot there is, once per match
+## Simple mode (main.simple): only A (hold, let go); no curving or chips. From round 3 a FIREBALL (Y,
+## once) - a flame icon with a "Y" next to the power bar shows you have it.
+## Simple mode picture cues (no how-to words, main.show_cue): on your turn a pulsing glowing button in
+## your own controls sits above the power bar - A / ENTER / SPACE with a down arrow (press and hold),
+## then with an up arrow while the meter swings (let go); in practice, while the reticle is far from the
+## ring, STICK / an arrow key / W A S D with an arrow towards it. Each goes once you've done it twice.
+## The FIREBALL button is your own Y / F / ' with a flame. Your own name tag is on a layer only the
+## other views draw (main.tag_layer).
 ## Score and you celebrate (jump-spin, aeroplane or a little dance); win the cup and you lift it.
 ## Local strikers run their own aim (also on the TV machine, so it's instant); the host decides the
 ## shot. On the host, the TV machine's strikers are "remote": their aim arrives via apply_remote_state.
 
 const MeshKit := preload("res://games/penalty_shootout/mesh_kit.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 const NO_KEYS := 99
 const AIM_SPEED := 3.4
 const AIM_X := 4.4
@@ -35,6 +44,9 @@ var hud: Control
 var hud_label: Label
 var power_bg: ColorRect
 var power_fill: ColorRect
+var fire_icon: Control
+var fire_sig := ""
+var aim_hit := false  # practice: the reticle reached the ring this turn (counts towards the aim cue)
 var pad_lost_t := -1.0
 
 var aim := Vector2(0.0, 1.0)
@@ -136,6 +148,7 @@ func _ready() -> void:
 	tag.outline_size = 12
 	tag.modulate = color.lightened(0.3)
 	tag.position = Vector3(0, 2.2, 0)
+	tag.layers = main.tag_layer(index)  # your own camera leaves it out (main._ensure_view)
 	avatar.add_child(tag)
 	visible = active
 
@@ -159,6 +172,7 @@ func prepare_turn() -> void:
 	charge_t = 0.0
 	curve = 0.0
 	idle_aim_t = 0.0
+	aim_hit = false
 	shot = "normal"
 	held_was = true  # a button still held from before doesn't start charging
 	x_was = true
@@ -219,6 +233,8 @@ func charge_held() -> bool:
 
 
 func chip_held() -> bool:
+	if main.simple:
+		return false
 	if bot:
 		return bot_hold and bot_shot == "chip"
 	if joy >= 0 and Input.is_joy_button_pressed(joy, JOY_BUTTON_X):
@@ -231,6 +247,8 @@ func chip_held() -> bool:
 
 
 func fire_held() -> bool:
+	if main.simple and not main.fire_on:
+		return false
 	if bot:
 		return bot_hold and bot_shot == "fire"
 	if joy >= 0 and Input.is_joy_button_pressed(joy, JOY_BUTTON_Y):
@@ -243,6 +261,8 @@ func fire_held() -> bool:
 
 
 func curve_input() -> float:
+	if main.simple:
+		return 0.0
 	if bot:
 		return bot_curve
 	var c := 0.0
@@ -285,6 +305,8 @@ func _process(delta: float) -> void:
 	if hud_label != null:
 		hud_label.text = main.hud_text(self)
 	_update_power_bar()
+	if main.simple and hud != null:
+		_update_cue(delta)
 
 
 func _local_turn(delta: float) -> void:
@@ -335,6 +357,7 @@ func _local_turn(delta: float) -> void:
 			charging = false
 			var shot_power := maxf(power, 0.15)
 			main.request_shot(self, aim, shot_power, curve, shot)
+			main.cue_did(self, "kick")
 			if joy >= 0:
 				Input.start_joy_vibration(joy, 0.5, 0.7, 0.15)
 	held_was = held_a
@@ -444,6 +467,7 @@ func _update_power_bar() -> void:
 		return
 	var mine: bool = main.shooter == index and (main.state == "aim" or main.state == "runup") and not main.replay_on
 	power_bg.visible = mine
+	_update_fire_icon(mine)
 	if not mine:
 		return
 	var vp_size := power_bg.get_parent_control().size if power_bg.get_parent_control() != null else Vector2(800, 600)
@@ -457,5 +481,94 @@ func _update_power_bar() -> void:
 		power_fill.color = Color(1.0, 0.5, 0.1)
 	elif shot == "chip" and charging:
 		power_fill.color = Color(0.5, 0.8, 1.0)
-	if power > 0.85:
+	if power > 0.85 and not main.simple:
 		power_fill.color = Color(1.0, 0.3, 0.2)
+
+
+## Simple mode: your own FIREBALL button (Y / F / ') with a flame, left of the power bar, while you have it.
+func _update_fire_icon(mine: bool) -> void:
+	var show: bool = main.simple and main.fire_on and fire_left > 0 and mine
+	if fire_icon == null and not show:
+		return
+	var h := clampf(power_bg.size.y * 2.2, 40.0, 66.0)
+	var s := h / 34.0
+	var sig := "%s/%.2f" % [_btn_name("fire"), s]
+	if fire_icon == null or sig != fire_sig:
+		if fire_icon != null:
+			fire_icon.queue_free()
+		fire_sig = sig
+		var row := HBoxContainer.new()
+		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.add_theme_constant_override("separation", 4)
+		var flame := UiKit.icon("fire", Color(1.0, 0.55, 0.15), h * 0.9)
+		flame.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		row.add_child(flame)
+		var btn := _button("fire", s)
+		btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		row.add_child(btn)
+		fire_icon = row
+		power_bg.get_parent().add_child(fire_icon)
+	fire_icon.visible = show
+	if not show:
+		return
+	fire_icon.size = fire_icon.get_combined_minimum_size()
+	fire_icon.position = power_bg.position + Vector2(-fire_icon.size.x - 14.0, (power_bg.size.y - fire_icon.size.y) * 0.5)
+	var pulse := 1.0 + 0.08 * sin(Time.get_ticks_msec() * 0.01)
+	fire_icon.pivot_offset = fire_icon.size * 0.5
+	fire_icon.scale = Vector2(pulse, pulse) * (1.25 if charging and shot == "fire" else 1.0)
+
+
+# --- Simple mode picture cues ---------------------------------------------------------------
+
+## This player's own button for an action: "kick", "fire", "aim" (with dir "left" / "right" / "up" / "down").
+func _btn_name(action: String, dir: String = "") -> String:
+	if joy >= 0 or key_set == NO_KEYS:
+		return {"kick": "A", "fire": "Y", "aim": "STICK"}.get(action, "A")
+	if key_set == 0:
+		return {"kick": "ENTER", "fire": "'", "aim": "arrow_" + dir}.get(action, "ENTER")
+	return {"kick": "SPACE", "fire": "F", "aim": {"left": "A", "right": "D", "up": "W", "down": "S"}.get(dir, "W")}.get(action, "SPACE")
+
+
+func _button(action: String, s: float, dir: String = "") -> Control:
+	var b := _btn_name(action, dir)
+	if b.begins_with("arrow_"):
+		return main.keycap("", b, s)  # an arrow key
+	if b.length() == 1 and not (joy >= 0 or key_set == NO_KEYS):
+		return main.keycap(b, "", s)  # a letter key (never a green pad A)
+	return UiKit.glyph(b, s)
+
+
+func _update_cue(delta: float) -> void:
+	var key := ""
+	var dir := ""
+	var mine: bool = active and is_local() and main.is_turn_of(self) and main.can_shoot() and not main.replay_on \
+		and not get_tree().paused and (main.net.mode != "client" or main.synced)
+	if mine and main.practice == "striker":
+		var to := Vector2(main.ptarget.x, main.ptarget.y) - aim
+		if to.length() < 0.6 and not aim_hit:
+			aim_hit = true
+			main.cue_did(self, "aim")
+		if not charging and to.length() >= 0.6 and not main.cue_learned(self, "aim"):
+			key = "aim"
+			if absf(to.x) >= absf(to.y):
+				dir = "right" if to.x > 0.0 else "left"
+			else:
+				dir = "up" if to.y > 0.0 else "down"
+	if mine and key == "" and not main.cue_learned(self, "kick"):
+		key = "letgo" if charging else "kick"
+	var vs: Vector2 = hud.size
+	var ui := clampf(minf(vs.x / 960.0, vs.y / 540.0), 0.45, 1.3)
+	var s := 1.7 * ui
+	var at := Vector2(vs.x * 0.5, vs.y * 0.8)
+	if power_bg != null and power_bg.visible:
+		at = Vector2(vs.x * 0.5, power_bg.position.y - 12.0 * ui)
+	var sig := "%s/%s/%.2f" % [dir, _btn_name("kick" if key != "aim" else "aim", dir), s]
+	var make := func() -> Array:
+		var gold := Color(1.0, 0.9, 0.4)
+		if key == "aim":
+			var items: Array = [_button("aim", s, dir)]
+			if _btn_name("aim", dir) == "STICK" or key_set == 1:
+				items.append(UiKit.icon("arrow_" + dir, gold, 34.0 * s))
+			return items
+		return [_button("kick", s), UiKit.icon("arrow_down" if key == "kick" else "arrow_up", gold, 34.0 * s)]
+	main.show_cue(self, key, sig, make, at, delta)

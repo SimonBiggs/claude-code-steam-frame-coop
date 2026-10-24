@@ -89,6 +89,7 @@ var pad_cd := 0.0
 var bump_cd := 0.0
 var wall_cd := 0.0
 var wrong_t := 0.0
+var wrong_dir := 0.0  # going the wrong way: +1 = the track is to your left (turn left), -1 = right, 0 = drive forward
 var stuck_t := 0.0
 var reverse_t := 0.0
 var item_hold_t := 0.0
@@ -237,6 +238,11 @@ func _ready() -> void:
 	tag.modulate = color.lightened(0.35)
 	tag.position = Vector3(0, 2.1, 0.3)
 	tag.rotation.y = 0.0  # faces backwards (+Z): readable by whoever is chasing
+	# Fade out close to a camera (per camera): a kart right in front of you at the start or in a bump
+	# would otherwise put a giant name over half your view.
+	tag.visibility_range_begin = 5.5
+	tag.visibility_range_begin_margin = 2.0
+	tag.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
 	add_child(tag)
 	visible = active
 
@@ -314,7 +320,7 @@ func reset_race() -> void:
 	slip_t = 0.0
 	star_t = 0.0
 	wobble_t = 0.0
-	charge = 0.3
+	charge = 0.0 if main.SIMPLE_MODE else 0.3
 	wrong_t = 0.0
 	stuck_t = 0.0
 	reverse_t = 0.0
@@ -515,11 +521,11 @@ func sim(delta: float) -> void:
 	wobble_t = maxf(0.0, wobble_t - delta)
 	if slip_t > 0.0:
 		slip_t = maxf(0.0, slip_t - delta)
-	if main.state == "race" and not finished:
+	if main.state == "race" and not finished and not main.SIMPLE_MODE:  # simple mode: no boost meter
 		charge = minf(1.0, charge + delta / 14.0)
 	if want_item and item != "":
 		main.use_item(self)
-	if want_boost and charge >= 1.0:
+	if want_boost and charge >= 1.0 and not main.SIMPLE_MODE:
 		charge = 0.0
 		boost(1.6)
 		main.on_boost(self, "BOOST!")
@@ -634,6 +640,7 @@ func sim(delta: float) -> void:
 	# Wrong way hint (for humans).
 	if main.state == "race" and absf(speed) > 2.0 and fwd.dot(tangent) * signf(speed) < -0.3:
 		wrong_t += delta
+		wrong_dir = 0.0 if speed < 0.0 else (1.0 if fwd.cross(tangent).y >= 0.0 else -1.0)  # 0: reversing, just go
 	else:
 		wrong_t = maxf(0.0, wrong_t - delta * 2.0)
 	_update_visual(delta)
@@ -650,6 +657,11 @@ func net_code() -> int:
 ## Drifting: charge sparks while sliding round a bend, release for a mini-turbo.
 func _drift(delta: float) -> void:
 	var going := false
+	if main.SIMPLE_MODE:  # simple mode: no drifting or mini-turbos (braking just brakes)
+		drift_t = 0.0
+		drift_level = 0
+		drift_dir = 0
+		return
 	if on_ground and speed > 6.5 and slip_t <= 0.0 and main.state == "race":
 		if auto_drift():
 			going = absf(steer_s) > (0.42 if drift_t > 0.0 else 0.52) and (drift_t > 0.0 or speed > 7.5)

@@ -17,6 +17,8 @@ const KINDS := {
 	"ankylo": {"hp": 9.0, "speed": 2.0, "radius": 0.95, "color": Color(0.9, 0.65, 0.3), "dps": 30.0, "points": 600, "drop": 0.4, "dino": true, "armor": 3},
 	"rex": {"hp": 110.0, "speed": 2.2, "radius": 2.0, "color": Color(0.95, 0.2, 0.3), "dps": 60.0, "points": 5000, "drop": 1.0, "dino": true, "scale": 2.3, "boss": true},
 	"boss": {"hp": 80.0, "speed": 2.0, "radius": 1.8, "color": Color(1.0, 0.15, 0.6), "dps": 70.0, "points": 3000, "drop": 1.0, "boss": true},
+	# Practice target (simple mode, before wave 1): floats still, never hurts anyone, pops in one hit.
+	"target": {"hp": 1.0, "speed": 0.0, "radius": 0.5, "color": Color(1.0, 0.9, 0.3), "dps": 0.0, "points": 0, "drop": 0.0},
 	"omega": {"hp": 130.0, "speed": 2.2, "radius": 2.0, "color": Color(1.0, 0.78, 0.2), "dps": 70.0, "points": 8000, "drop": 1.0, "boss": true},
 }
 const BOSS_NAMES := {"boss": "ORB OVERLORD", "rex": "KING REX", "omega": "OMEGA OVERLORD"}
@@ -99,6 +101,11 @@ func setup(k: String, wave: int, main_node) -> void:
 	circle_sign = 1.0 if randf() < 0.5 else -1.0
 	if d.get("flying", false):
 		lift = PTERO_CRUISE
+	if kind == "target":
+		lift = 1.0
+		hp = d.hp
+	if main.SIMPLE_MODE:
+		armor = 0  # no shell rules: the ankylo is just a big friendly-looking dino
 
 
 func is_boss() -> bool:
@@ -141,6 +148,8 @@ func _ready() -> void:
 		add_child(shape_node)
 
 	match kind:
+		"target":
+			_build_target()
 		"ptero":
 			_build_ptero()
 		"ankylo":
@@ -150,7 +159,9 @@ func _ready() -> void:
 				_build_dino()
 			else:
 				_build_orb()
-	if is_boss():
+	if kind == "ankylo" and armor <= 0:
+		_shell_off()
+	if is_boss() and not main.SIMPLE_MODE:  # simple mode: the boss has no name/percent tag
 		tag = Label3D.new()
 		tag.font_size = 64
 		tag.outline_size = 16
@@ -165,6 +176,44 @@ func _ready() -> void:
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	grow.tween_callback(func() -> void: grown = true)
 	blink_t = randf_range(1.0, 4.0)
+
+
+## A glowing bullseye that floats at chest height and pulses: "shoot me!" without any words.
+func _build_target() -> void:
+	base_y = radius + lift
+	bob_amp = 0.12
+	var root := Node3D.new()
+	add_child(root)
+	mesh = root
+	var core := MeshInstance3D.new()
+	var sm := SphereMesh.new()
+	sm.radius = radius * 0.55
+	sm.height = radius * 1.1
+	sm.radial_segments = 16
+	sm.rings = 8
+	core.mesh = sm
+	body_albedo = color
+	mat = main.make_material(color, 3.0)
+	core.material_override = mat
+	root.add_child(core)
+	halo = Node3D.new()
+	root.add_child(halo)
+	for i in 3:
+		var ring := MeshInstance3D.new()
+		var tm := TorusMesh.new()
+		tm.inner_radius = radius * (0.75 + 0.45 * i)
+		tm.outer_radius = radius * (0.88 + 0.45 * i)
+		tm.ring_segments = 6
+		tm.rings = 24
+		ring.mesh = tm
+		var c := Color(1.0, 0.35, 0.3) if i % 2 == 0 else Color.WHITE
+		ring.material_override = main.make_material(c, 2.5)
+		ring.rotation.x = PI / 2.0  # face the players (the bullseye)
+		ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		halo.add_child(ring)
+	var pulse := root.create_tween().set_loops()
+	pulse.tween_property(core, "scale", Vector3.ONE * 1.3, 0.45).set_trans(Tween.TRANS_SINE)
+	pulse.tween_property(core, "scale", Vector3.ONE, 0.45).set_trans(Tween.TRANS_SINE)
 
 
 func _build_orb() -> void:
@@ -478,6 +527,10 @@ func _physics_process(delta: float) -> void:
 		spawn_grace -= delta
 		_place_mesh()
 		return
+	if kind == "target":
+		bob += delta * 3.0
+		_place_mesh()
+		return
 	var target = main.nearest_player(global_position)
 	var dir := Vector3.ZERO
 	if target != null:
@@ -779,7 +832,7 @@ func _animate_common(delta: float) -> void:
 	for e in eyes:
 		e.scale.y = 0.15 if shut else 1.0
 	if halo:
-		halo.rotate_y(delta * 3.0)
+		halo.rotate_y(delta * (0.0 if kind == "target" else 3.0))
 	for w in wings:
 		var side: float = w.get_meta("side")
 		var flap := sin(age * 9.0 + (0.0 if swoop_t <= 0.0 else 1.0)) * (0.7 if lift > 1.5 else 0.3)

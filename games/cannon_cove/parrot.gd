@@ -20,6 +20,7 @@ var head: Node3D
 var wings: Array[Node3D] = []
 var eyes: Array[MeshInstance3D] = []
 var bubble: Label3D
+var poke_t := 0.0
 
 
 func _ready() -> void:
@@ -76,12 +77,21 @@ func _ready() -> void:
 
 func say(text: String) -> void:
 	bubble.text = text
-	bubble.visible = true
+	bubble.visible = text != ""
 	talk_t = 2.6 + text.length() * 0.03
 	flap = 1.0
 	body.scale = Vector3(1.25, 0.8, 1.25)  # squash
 	if main:
 		main._sfx().play("squawk", -6.0, randf_range(0.9, 1.25))
+
+
+## Poked by the VR gunner's hand: SQUAWK, a flap and a startled little hop (simple mode).
+func poke() -> void:
+	flap = 1.0
+	body.scale = Vector3(0.8, 1.35, 0.8)
+	poke_t = 1.0  # a startled little jump, back down onto the perch
+	if main:
+		main._sfx().play("squawk", -3.0, randf_range(1.2, 1.5))
 
 
 func _process(delta: float) -> void:
@@ -107,7 +117,8 @@ func _process(delta: float) -> void:
 		position = hop_from.lerp(hop_to, hop_t) + Vector3.UP * sin(hop_t * PI) * 1.6
 		flap = 1.0
 	else:
-		position = hop_to
+		poke_t = maxf(0.0, poke_t - delta * 2.5)
+		position = hop_to + Vector3.UP * sin(poke_t * PI) * 0.25
 	# Face inboard (towards the gunner), with a little head-tilt and look-around.
 	var inboard := Vector3(-signf(position.x), 0.0, 0.0)
 	rotation.y = atan2(-inboard.x, -inboard.z)

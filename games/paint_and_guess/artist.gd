@@ -20,7 +20,7 @@ const TIP := 0.11  # brush tip ahead of the controller
 const TOUCH_FRONT := 0.12  # tip this close in front of the board paints directly
 const TOUCH_BACK := 0.3  # ...or pushed this far through it
 const LASER_RANGE := 3.5
-const STAND_Z := 0.85
+const STAND_Z := 1.5  # comfortable viewing distance; the laser paints from here (Simon: 0.85 m felt too close)
 const BRUSH_W := 0.022
 const SPARKLE_W := 0.03
 const SEG_POINTS := 90
@@ -481,9 +481,10 @@ func _fit(delta: float) -> void:
 		refit_t = 0.0
 
 
-## Arm's length grows with height: a small kid stands closer so the brush can reach the board.
-func stand_dist(h: float) -> float:
-	return clampf(0.4 * h + 0.22, 0.6, STAND_Z)
+## Stand back far enough to see the whole canvas comfortably (things too close are uncomfortable in
+## VR) and paint with the laser; walk forward (left stick) to paint by touch.
+func stand_dist(_h: float) -> float:
+	return STAND_Z
 
 
 func _do_fit(first: bool) -> void:

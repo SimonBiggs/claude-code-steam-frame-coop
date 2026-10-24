@@ -1,0 +1,18 @@
+#!/bin/bash
+# claude-main: resume THE main Claude conversation, with Remote Control on (Simon, 2026-10-24: "have it always
+# use this conversation"). Its session id is in ~/.claude/main-session. Used by claude-watchdog, claude-desktop
+# and claude-restart. `claude-main --running` exits 0 if it is already running (prints the pid).
+id=$(cat ~/.claude/main-session)
+if [ "$1" = "--running" ]; then
+  for p in $(pgrep -x claude); do
+    tr '\0' ' ' < /proc/$p/cmdline | grep -q -- "--resume $id" && { echo $p; exit 0; }
+  done
+  # Grace period: the conversation file was written in the last 3 minutes (e.g. mid-restart, or the
+  # current process was started some other way).
+  f=~/.claude/projects/-home-deck/$id.jsonl
+  [ -f "$f" ] && [ $(( $(date +%s) - $(stat -c %Y "$f") )) -lt 180 ] && { echo "recently active"; exit 0; }
+  exit 1
+fi
+why=${1:-"You were restarted (crash, reboot or claude-restart)"}
+cd ~ || exit 1
+exec claude --resume "$id" --remote-control 'Steam Machine' "$why. Re-arm your monitors (voice: exec ~/.local/bin/voice-inject --all --print; brepl channel: exec ~/.local/bin/bun ~/.local/share/brepl/channel-watch.ts), check the Frame and claude-pace, and carry on."

@@ -20,7 +20,7 @@ func _physics_process(delta):
 			if best == null or e.global_position.distance_to(p.global_position) < best.global_position.distance_to(p.global_position):
 				best = e
 		if best:
-			var d: Vector3 = best.global_position + Vector3.UP * best.radius - (p.global_position + Vector3.UP * 1.55)
+			var d: Vector3 = best.center() - (p.global_position + Vector3.UP * 1.55)
 			var flat := Vector2(d.x, d.z).length()
 			if flat > 0.1:
 				p.yaw = atan2(-d.x, -d.z)

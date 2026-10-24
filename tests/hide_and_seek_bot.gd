@@ -10,6 +10,18 @@ extends Node
 ## walkable from the counting spot without jumping, for both the seeker's and a hider's size); the seeker
 ## sniffs when close to a hider; a free hider rings the jail bell once someone is in jail; in STAR HUNT
 ## rounds hiders grab the nearest star before hiding. Rounds cycle classic / stars / night.
+## MAPS: the connectivity check runs on EVERY map (each built into its own isolated physics world), and the
+## bot plays at least 3 rounds so the map rotation (house -> castle -> spaceship) happens; it prints
+## "BOT: MAP ROTATION OK" once it has played on 3 different maps (and the TV mirrored each one).
+## Visual teaching: records the picture cue each local view shows (cue_torch, cue_torch_hit, cue_sniff,
+## cue_disguise, cue_squeak, cue_bell, cue_star, cue_jail, cue_watch, cue_plug, cue_again, ...), which
+## ones each player has learned (done twice: learned_*), and that a learned cue never comes back for that
+## player ("retired"); prints "BOT: CUES OK" once this machine's role has shown and retired its cues
+## (local: torch + disguise + squeak; host: torch (just shown with one TV hider); client: disguise +
+## squeak), else "BOT: CUES FAIL". BOT_MAP=0/1/2 starts on that map.
+## "BOT: ERROR instruction text" if a headline (TV centre / a view's big word / the top line / VR) is
+## anything but a short word, or the old key-help line is back. BOT_VR=1 (local): P1 is a fake VR seeker
+## (XR nodes without a headset) whose hands aim the torch and touch hiders, so the 3D VR cues run.
 const WorldScript := preload("res://games/hide_and_seek/world.gd")
 
 var main
@@ -22,9 +34,23 @@ var spots := {}  # player index -> hiding spot
 var rounds_seen := {}
 var conn_done := false
 var conn_ok := true
+var conn_worlds: Array = []  # [SubViewport, map index]
+var maps_seen := {}
+var cues := {}  # picture cues seen / learned / retired on this machine
+var cue_verdict := false
+const HEADLINES := "^(|HIDE AND SEEK|HELLO!|HERE I COME!|P\\d+ FOUND!|JAILBREAK!|PAUSED|PLAYER \\d+!|P\\d+!|Connecting to the seeker…)$"
+const BIG_WORDS := "^(|HIDE!|SEEK!|\\d+|HIDE!\n\\d+|STAR HUNT!\nSEEK!|NIGHT TIME!\nSEEK!)$"
+var headline_re := RegEx.create_from_string(HEADLINES)
+var big_re := RegEx.create_from_string(BIG_WORDS)
+var bot_vr := OS.has_environment("BOT_VR") and not OS.has_environment("DUO_JOIN") and not OS.has_environment("DUO_HOST")
 
 
 func _ready() -> void:
+	if OS.has_environment("BOT_MAP"):  # BOT_MAP=0/1/2: start on this map (house / castle / spaceship)
+		var cfg := ConfigFile.new()
+		cfg.load("user://hide_and_seek_best.cfg")
+		cfg.set_value("maps", "next", int(OS.get_environment("BOT_MAP")))
+		cfg.save("user://hide_and_seek_best.cfg")
 	main = load("res://games/hide_and_seek/main.tscn").instantiate()
 	main.count_time = 5.0
 	main.intro_time = 3.0
@@ -73,13 +99,36 @@ func _physics_process(delta: float) -> void:
 			print("COUNT ", c)
 			get_tree().quit()
 		return
-	if not conn_done and t > 0.3 and main.net.mode != "client":
+	if conn_worlds.is_empty() and not conn_done and t > 0.3 and main.net.mode != "client":
+		for i in main.MAPS.size():
+			var vp := SubViewport.new()
+			vp.own_world_3d = true
+			vp.size = Vector2i(4, 4)
+			vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
+			add_child(vp)
+			var holder := Node3D.new()
+			vp.add_child(holder)
+			main.MAPS[i].build(holder)
+			conn_worlds.append([vp, i])
+	if not conn_done and t > 0.8 and not conn_worlds.is_empty():
 		conn_done = true
-		_connectivity(0.32, 1.6, "seeker")
-		_connectivity(0.3, 0.9, "hider")
+		for cw in conn_worlds:
+			var vp: SubViewport = cw[0]
+			var d: Dictionary = main.MAPS[int(cw[1])].data()
+			var space: PhysicsDirectSpaceState3D = vp.find_world_3d().direct_space_state
+			_connectivity(space, d, 0.32, 1.6, "seeker")
+			_connectivity(space, d, 0.3, 0.9, "hider")
+			vp.queue_free()
+		conn_worlds.clear()
+		print("BOT: CONNECTIVITY %s on all %d maps" % ["OK" if conn_ok else "FAIL", main.MAPS.size()])
 		if OS.has_environment("BOT_CONN_ONLY"):
 			get_tree().quit()
 			return
+	if main.round_no > 0 and main.phase != "wait" and not maps_seen.has(main.map_title()):
+		maps_seen[main.map_title()] = main.round_no
+		print("BOT: round %d is on %s (%s)" % [main.round_no, main.map_title(), main.round_type])
+		if maps_seen.size() >= 3:
+			print("BOT: MAP ROTATION OK (%s)" % ", ".join(maps_seen.keys()))
 	var mode: String = main.net.mode
 	# Real controllers may be plugged into this machine (someone might be playing!): ignore them.
 	var real := Input.get_connected_joypads()
@@ -112,6 +161,9 @@ func _physics_process(delta: float) -> void:
 			main.net.send_action("restart", [])
 	if mode != "host":
 		_hiders(delta)
+	if bot_vr:
+		_fake_vr(delta)
+	_note_cues()
 	if t - last_print >= 4.0:
 		last_print = t
 		var act := []
@@ -127,10 +179,10 @@ func _seeker(delta: float) -> void:
 	if main.phase != "seek" or s.vr:
 		s.bot_fire = false
 		return
-	if main.round_no == 2:
+	if main.round_no == 2 or (main.net.mode == "host" and main.seek_len - main.phase_t < 8.0):
 		s.bot_fire = false
 		s.bot_alt = false
-		return  # dawdle
+		return  # dawdle (networked: give the TV hiders a few seconds to squeak first)
 	var best = null
 	var best_d := INF
 	for h in main.players:
@@ -147,7 +199,16 @@ func _seeker(delta: float) -> void:
 		print("BOT: the seeker sniffs (nearest hider %.1f m)" % best_d)
 	# Torch from 2 m; if a wall is in the way, walk right up and bump into them instead.
 	near_t = near_t + delta if best_d < 2.3 else 0.0
-	s.collision_mask = 1 if near_t < 1.5 else 0  # the bot can't path-find round walls: let it squeeze through
+	# Stuck on a wall far away (no progress for 1.5 s) counts too.
+	var last_d: float = get_meta("seek_last_d", INF)
+	var stuck: float = float(get_meta("seek_stuck", 0.0)) + delta if best_d > last_d - 0.05 and best_d >= 2.3 else 0.0
+	set_meta("seek_stuck", stuck)
+	set_meta("seek_last_d", best_d)
+	var squeeze: float = maxf(0.0, float(get_meta("seek_squeeze", 0.0)) - delta)
+	if stuck >= 1.5:
+		squeeze = 3.0  # squeeze through for a few seconds
+	set_meta("seek_squeeze", squeeze)
+	s.collision_mask = 1 if near_t < 1.5 and squeeze <= 0.0 else 0  # the bot can't path-find round walls: let it squeeze through
 	var there := _walk_to(s, best.global_position, 2.0 if near_t < 1.5 else 0.4, delta, 3.5)
 	_aim(s, best.center())
 	click_t -= delta
@@ -170,7 +231,8 @@ func _hiders(delta: float) -> void:
 			p.bot_alt = false
 			continue
 		if not spots.has(p.index):
-			var choice: Vector3 = WorldScript.HIDE_SPOTS[(p.index * 5 + main.round_no * 3) % WorldScript.HIDE_SPOTS.size()]
+			var hs: Array = main.md().hide_spots
+			var choice: Vector3 = hs[(p.index * 5 + main.round_no * 3) % hs.size()]
 			spots[p.index] = choice
 		var spot: Vector3 = spots[p.index]
 		used[spot] = true
@@ -178,7 +240,7 @@ func _hiders(delta: float) -> void:
 		if main.phase == "seek" and main.jailed_count() > 0 and main.jail_breaks > 0 and p.index == _bell_ringer():
 			if p.prop_kind >= 0:
 				p.toggle_disguise()
-			if _walk_to(p, WorldScript.BELL_POS + Vector3(-0.5, 0, 0), 0.2, delta, 5.0) and not has_meta("rang_%d" % main.round_no):
+			if _walk_to(p, main.bell_pos() + Vector3(-0.5, 0, 0), 0.2, delta, 5.0) and not has_meta("rang_%d" % main.round_no):
 				set_meta("rang_%d" % main.round_no, true)
 				print("BOT: P%d rings the jail bell" % (p.index + 1))
 			continue
@@ -187,18 +249,24 @@ func _hiders(delta: float) -> void:
 			var best_s := Vector3.INF
 			for k in main.star_idx.size():
 				if not main.star_taken[k]:
-					var at: Vector3 = WorldScript.STAR_SPOTS[int(main.star_idx[k])]
+					var at: Vector3 = main.star_spot(int(main.star_idx[k]))
 					if best_s == Vector3.INF or at.distance_to(p.global_position) < best_s.distance_to(p.global_position):
 						best_s = at
 			if best_s != Vector3.INF and best_s.distance_to(p.global_position) < 9.0:
 				_walk_to(p, best_s, 0.1, delta, 5.0)
 				continue
 		if p.prop_kind < 0:
-			var there := _walk_to(p, spot, 0.2, delta, 5.0)
-			if there and main.phase == "count" and (p.index + main.round_no) % 2 == 0:
-				p.toggle_disguise()  # half of the hiders turn into furniture
+			_walk_to(p, spot, 0.2, delta, 5.0)
+			var there: bool = Vector2(p.global_position.x - spot.x, p.global_position.z - spot.z).length() < 0.7  # furniture may push back
+			var wk := "walk_%d_%d" % [p.index, main.round_no]
+			set_meta(wk, float(get_meta(wk, 0.0)) + delta)
+			there = there or float(get_meta(wk)) > 6.0  # can't get there: hide right here
+			if there and (p.index + main.round_no) % 2 == 0:
+				p.toggle_disguise()  # half of the hiders turn into furniture (while counting, or late)
+		elif main.phase == "seek" and fmod(t + p.index * 1.3, 3.0) < delta * 1.5:
+			p.toggle_disguise()  # pops out now and then (and back in once there), like a fidgety kid
 		if main.phase == "seek":
-			p.bot_alt = fmod(t + p.index * 0.7, 7.0) < 0.2  # squeak now and then
+			p.bot_alt = p.taunt_cd <= 0.0 and fmod(t + p.index * 0.7, 1.5) < 0.2  # squeak whenever it's ready
 
 
 ## The free hider with the highest index rings the bell.
@@ -243,18 +311,20 @@ func _test_pads() -> void:
 ## Walk-ability grid (10 cm cells) for a capsule of this size against the house's collision (layer 1),
 ## flood-filled from the seeker's counting spot WITHOUT jumping. Every room, every doorway, every hiding
 ## spot and every spawn must be reachable; otherwise print "CONNECTIVITY FAIL" with what's cut off.
-func _connectivity(radius: float, height: float, who: String) -> void:
-	var space: PhysicsDirectSpaceState3D = main.get_world_3d().direct_space_state
+func _connectivity(space: PhysicsDirectSpaceState3D, md: Dictionary, radius: float, height: float, who: String) -> void:
+	var title: String = md.title
+	var bounds: Array = md.bounds
 	var shape := CapsuleShape3D.new()
 	shape.radius = radius
 	shape.height = height
 	var q := PhysicsShapeQueryParameters3D.new()
 	q.shape = shape
 	q.collision_mask = 1
-	var x0: float = -WorldScript.HALF_X - WorldScript.GARDEN_W
-	var x1: float = WorldScript.HALF_X
-	var z0: float = -WorldScript.HALF_Z
-	var z1: float = WorldScript.HALF_Z
+	var x0: float = bounds[0]
+	var x1: float = bounds[1]
+	var z0: float = bounds[2]
+	var z1: float = bounds[3]
+	var spawns: Array = md.spawns
 	var nx := int((x1 - x0) / 0.1)
 	var nz := int((z1 - z0) / 0.1)
 	var free := PackedByteArray()
@@ -264,7 +334,7 @@ func _connectivity(radius: float, height: float, who: String) -> void:
 			var at := Vector3(x0 + (ix + 0.5) * 0.1, height / 2.0 + 0.02, z0 + (iz + 0.5) * 0.1)
 			q.transform = Transform3D(Basis(), at)
 			free[iz * nx + ix] = 1 if space.intersect_shape(q, 1).is_empty() else 0
-	var start := _cell(Vector3(main.SEEKER_SPAWN), x0, z0, nx, nz)
+	var start := _cell(spawns[0], x0, z0, nx, nz)
 	var seen := PackedByteArray()
 	seen.resize(nx * nz)
 	var stack: Array[int] = [start]
@@ -284,21 +354,27 @@ func _connectivity(radius: float, height: float, who: String) -> void:
 				seen[k] = 1
 				stack.append(k)
 	var problems: Array[String] = []
-	for room in WorldScript.ROOMS:
+	for room in md.rooms:
 		var r: Array = room
 		if not _reach_near(r[1], 1.6, seen, free, x0, z0, nx, nz):
 			problems.append("room %s" % r[0])
-	for door in WorldScript.DOORS:
+	for door in md.doors:
 		var dr: Array = door
 		if not _reach_near(dr[1], 0.25, seen, free, x0, z0, nx, nz):
 			problems.append("doorway %s" % dr[0])
 	if who == "hider":
-		for sp in WorldScript.HIDE_SPOTS:
+		for sp in md.hide_spots:
 			if not _reach_near(sp, 0.6, seen, free, x0, z0, nx, nz):
 				problems.append("hide spot %s" % sp)
-		for i in range(1, main.SPAWNS.size()):
-			if not _reach_near(main.SPAWNS[i], 0.5, seen, free, x0, z0, nx, nz):
-				problems.append("spawn %s" % main.SPAWNS[i])
+		for i in range(1, spawns.size()):
+			if not _reach_near(spawns[i], 0.5, seen, free, x0, z0, nx, nz):
+				problems.append("spawn %s" % spawns[i])
+		for st in md.star_spots:
+			if not _reach_near(st, 0.6, seen, free, x0, z0, nx, nz):
+				problems.append("star spot %s" % st)
+		var bell: Vector3 = md.bell
+		if not _reach_near(bell, 1.0, seen, free, x0, z0, nx, nz):
+			problems.append("jail bell %s" % bell)
 	# Free pockets nobody can walk into (a hider bounced or jumped in there would need to jump out).
 	var pockets: Array[String] = []
 	var pseen := seen.duplicate()
@@ -320,18 +396,18 @@ func _connectivity(radius: float, height: float, who: String) -> void:
 					st2.append(k)
 		if size >= 12:
 			var mid := sum / size
-			var jail: Vector3 = WorldScript.JAIL_POS
+			var jail: Vector3 = md.jail
 			if absf(mid.x - jail.x) < WorldScript.JAIL_HALF and absf(mid.y - jail.z) < WorldScript.JAIL_HALF:
 				continue  # the jail cage: you only get in by being found, and out by a jailbreak
 			pockets.append("%d cells at (%.1f, %.1f)" % [size, mid.x, mid.y])
 	if not pockets.is_empty():
-		print("BOT: walled-off pockets for the %s (jump in/out only): %s" % [who, ", ".join(pockets)])
+		print("BOT: %s: walled-off pockets for the %s (jump in/out only): %s" % [title, who, ", ".join(pockets)])
 	if problems.is_empty():
-		print("BOT: CONNECTIVITY OK for the %s (r %.2f): %d walkable cells reachable, %d rooms, %d doorways" % [
-			who, radius, count, WorldScript.ROOMS.size(), WorldScript.DOORS.size()])
+		print("BOT: %s: CONNECTIVITY OK for the %s (r %.2f): %d walkable cells reachable, %d rooms, %d doorways" % [
+			title, who, radius, count, (md.rooms as Array).size(), (md.doors as Array).size()])
 	else:
 		conn_ok = false
-		print("BOT: CONNECTIVITY FAIL for the %s (r %.2f): cut off: %s" % [who, radius, ", ".join(problems)])
+		print("BOT: %s: CONNECTIVITY FAIL for the %s (r %.2f): cut off: %s" % [title, who, radius, ", ".join(problems)])
 
 
 func _cell(p: Vector3, x0: float, z0: float, nx: int, nz: int) -> int:
@@ -372,3 +448,168 @@ func _count_node(n: Node, mask: int, c: Dictionary) -> void:
 			c.lights += 1
 	for ch in n.get_children():
 		_count_node(ch, mask, c)
+
+
+# --- Visual teaching checks -------------------------------------------------------
+
+func _text_error(where: String, text: String) -> void:
+	var k := "text_err_" + where
+	if not cues.has(k):
+		cues[k] = true
+		print("BOT: ERROR instruction text in %s: '%s'" % [where, text.replace("\n", " / ")])
+
+
+## Picture cues instead of words: record what each view shows; any how-to sentence is an error.
+func _note_cues() -> void:
+	if main.get("help_label") != null:
+		_text_error("key-help line", "help_label is back")
+	var ct: String = main.center_label.text
+	var results: bool = ct.begins_with("THE SEEKER FOUND EVERYONE!") or ct.begins_with("TIME'S UP!")  # (the TV may get it a frame before "over")
+	if main.phase != "over" and not results and main.center_label.modulate.a > 0.05 and headline_re.search(ct) == null:
+		_text_error("TV headline", main.center_label.text)
+	if main.phase == "over" and (main.center_label.text.contains("A / Enter") or main.center_label.text.contains("press")):
+		_text_error("results", main.center_label.text)
+	if main.info_label.text != "" and main.info_label.text != "HIDE AND SEEK":
+		_text_error("top line", main.info_label.text)
+	if main.vr_center != null and main.vr_center.modulate.a > 0.05 and main.phase != "over":
+		var vt: String = main.vr_center.text
+		var vres: bool = vt.begins_with("THE SEEKER FOUND EVERYONE!") or vt.begins_with("TIME'S UP!")  # (a frame behind)
+		if not vres and headline_re.search(vt) == null and big_re.search(vt) == null:
+			_text_error("VR headline", vt)
+	if main.vr_status != null and main.vr_status.visible and main.vr_status.text.contains("\n"):
+		_text_error("VR status", main.vr_status.text)
+	if main.join_cue != null and main.join_cue.visible:
+		cues["join_cue"] = true
+	if main.vr_torch_cue != null and main.vr_torch_cue.visible:
+		if not cues.has("vr_torch_cue"):
+			print("BOT: VR cue TRIGGER over the torch (t=%.0f)" % t)
+		cues["vr_torch_cue"] = true
+		if main.vr_torch_cue.no_depth_test or main.vr_torch_cue.billboard != BaseMaterial3D.BILLBOARD_DISABLED:
+			print("BOT: ERROR VR cue label breaks the VR text rules")
+	if main.vr_sniff_cue != null and main.vr_sniff_cue.visible:
+		if not cues.has("vr_sniff_cue"):
+			print("BOT: VR cue nose ball on the left mitten (t=%.0f)" % t)
+		cues["vr_sniff_cue"] = true
+	for p in main.players:
+		var hud = p.hud
+		if hud == null or not is_instance_valid(hud) or not p.active:
+			continue
+		if hud.big_label.text != "" and big_re.search(hud.big_label.text) == null:
+			_text_error("P%d big word" % (p.index + 1), hud.big_label.text)
+		var key: String = hud.cue_key
+		if key != "" and hud.cue.visible:
+			if not cues.has("cue_" + key):
+				print("BOT: P%d picture cue %s (t=%.0f, phase %s)" % [p.index + 1, key, t, main.phase])
+			cues["cue_" + key] = true
+			var act := "torch" if key == "torch_hit" else key
+			cues["cue_" + act] = true  # (the torch cue with a hider in the beam counts as the torch cue)
+			if main.cue_learned(p, act) and hud.cue.key == key and hud.cue.a >= 1.0:
+				if not cues.has("back_%d_%s" % [p.index, act]):
+					cues["back_%d_%s" % [p.index, act]] = true
+					print("BOT: ERROR P%d's learned cue %s came back" % [p.index + 1, act])
+		if hud.pointer.on and not cues.has("pointer_" + key):
+			cues["pointer_" + key] = true
+			print("BOT: P%d glowing pointer to the %s (t=%.0f)" % [p.index + 1, key, t])
+		if hud.aim_glyph != null and hud.aim_glyph.visible:
+			cues["aim_glyph"] = true
+	for p in main.players:
+		var done: Dictionary = p.get_meta("cue_done", {})
+		for k in done:
+			if int(done[k]) < 2:
+				continue
+			if not cues.has("learned_" + str(k)):
+				cues["learned_" + str(k)] = true
+				print("BOT: P%d learned %s (t=%.0f)" % [p.index + 1, k, t])
+			var hud = p.hud
+			var showing: bool = hud != null and is_instance_valid(hud) and hud.cue.visible \
+				and (hud.cue_key == str(k) or (str(k) == "torch" and hud.cue_key == "torch_hit"))
+			if not showing and cues.has("cue_" + str(k)) and not cues.has("retired_" + str(k)):
+				cues["retired_" + str(k)] = true
+				print("BOT: P%d cue %s retired (t=%.0f)" % [p.index + 1, k, t])
+	if int(t) % 10 == 0 and cues.size() != int(get_meta("cues_shown", -1)):
+		set_meta("cues_shown", cues.size())  # networked runs end on a timeout: print the cues as they come
+		var ks: Array = cues.keys()
+		ks.sort()
+		print("BOT CUES so far: mode=%s %s" % [main.net.mode, ",".join(PackedStringArray(ks))])
+	_cue_verdict()
+
+
+func _cue_verdict() -> void:
+	if cue_verdict:
+		return
+	var mode: String = main.net.mode
+	var need: Array[String] = []
+	set_meta("max_hiders", maxi(int(get_meta("max_hiders", 0)), main.hider_count()))
+	if mode == "host" and int(get_meta("max_hiders")) < 2:
+		need.append("cue_torch")  # one TV hider: only one find fits in a networked run before the timeout
+	elif mode != "client":
+		need.append_array(["cue_torch", "learned_torch", "retired_torch"])
+	if mode != "host":
+		need.append_array(["cue_disguise", "cue_squeak", "learned_squeak", "retired_squeak"])
+	if mode == "local":
+		need.append_array(["learned_disguise", "retired_disguise", "cue_again"])
+	if bot_vr:
+		need = ["vr_torch_cue", "vr_sniff_cue", "cue_disguise", "cue_squeak"]
+	var missing: Array[String] = []
+	for k in need:
+		if not cues.has(k):
+			missing.append(k)
+	for k in cues:
+		if str(k).begins_with("back_") or str(k).begins_with("text_err_"):
+			missing.append(str(k))
+	var deadline := 56.0 if mode == "local" else (36.0 if mode == "host" else 31.0)
+	if missing.is_empty():
+		cue_verdict = true
+		print("BOT: CUES OK (%s): %s" % [mode, ", ".join(need)])
+	elif t >= deadline:
+		cue_verdict = true
+		print("BOT: CUES FAIL (%s): missing %s" % [mode, ", ".join(missing)])
+
+
+## BOT_VR: P1 becomes a VR seeker made of plain XR nodes (no headset): the bot moves the origin, points
+## the right hand (torch) at the nearest hider and touches them with the left hand.
+func _fake_vr(delta: float) -> void:
+	var s = main.players[0]
+	if not s.vr:
+		if t < 1.0:
+			return
+		var origin := XROrigin3D.new()
+		main.add_child(origin)
+		origin.global_position = s.global_position
+		var cam := XRCamera3D.new()
+		origin.add_child(cam)
+		var left := XRController3D.new()
+		left.tracker = "left_hand"
+		origin.add_child(left)
+		var right := XRController3D.new()
+		right.tracker = "right_hand"
+		origin.add_child(right)
+		s.attach_xr(origin, cam, left, right)
+		cam.position = Vector3(0, 1.5, 0)
+		left.position = Vector3(-0.2, 1.2, -0.25)  # (not straight below the head: the wrist menu faces it)
+		right.position = Vector3(0.2, 1.2, -0.25)
+		print("BOT: P1 is a fake VR seeker")
+		return
+	if main.phase != "seek":
+		return
+	var best = null
+	var best_d := INF
+	for h in main.players:
+		if h.is_hiding():
+			var d: float = h.global_position.distance_to(s.global_position)
+			if d < best_d:
+				best_d = d
+				best = h
+	if best == null:
+		return
+	var o: XROrigin3D = s.xr_origin
+	var to: Vector3 = best.global_position - o.global_position
+	to.y = 0.0
+	if to.length() > 1.6:
+		o.global_position += to.normalized() * minf(3.0 * delta, to.length() - 1.6)
+	var c: Vector3 = best.center()
+	var head: Vector3 = s.xr_camera.global_position
+	s.hand_r.global_position = head + Vector3(0.2, -0.3, 0)
+	s.hand_r.look_at(c, Vector3.UP)
+	near_t = near_t + delta if to.length() < 1.8 else 0.0
+	s.hand_l.global_position = c if near_t > 2.0 else head + Vector3(-0.2, -0.3, -0.2)
