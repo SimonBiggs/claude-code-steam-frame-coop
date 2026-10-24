@@ -18,7 +18,7 @@ const GAMES := [
 		"blurb": "Co-op cooking chaos: VR chef chops and plates, TV runners fetch and serve"},
 	{"id": "giants_table", "cat": "action", "name": "GIANT'S TABLE", "scene": "res://games/giants_table/main.tscn",
 		"blurb": "Be a VR giant protecting a tiny tabletop village; TV players are the knights"},
-	{"id": "rocket_workshop", "cat": "cosy", "name": "ROCKET WORKSHOP", "scene": "res://games/rocket_workshop/main.tscn",
+	{"id": "rocket_workshop", "multi": true, "cat": "cosy", "name": "ROCKET WORKSHOP", "scene": "res://games/rocket_workshop/main.tscn",
 		"blurb": "Cosy rocket puzzle: the VR pilot works the controls, the TV crew read the blueprints out loud"},
 	{"id": "marble_maze", "multi": true, "cat": "sports", "name": "MARBLE MAZE", "scene": "res://games/marble_maze/main.tscn",
 		"blurb": "Ball racing: VR tilts a giant tabletop maze, everyone on the TV is a marble"},
