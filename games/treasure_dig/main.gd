@@ -1003,6 +1003,8 @@ func _play_fx(fx_kind: String, args: Array) -> void:
 			Props.burst(beach, pos + Vector3.UP * 0.1, Color(0.95, 0.82, 0.55), 18, 6.0, 0.22)
 			_make_hole(pos)
 			_sound_at("footstep", pos, -2.0, 0.7)
+			if avatars.has(by) and not party.is_local(by):  # other machines' diggers swing their spade here too
+				Creatures.anim(avatars[by]).play("attack", 0.35)
 			if found >= 0:
 				Props.burst(beach, pos + Vector3.UP * 0.5, Color(1.0, 0.9, 0.4), 22, 9.0, 0.2, 2.5, -6.0)
 				_sound_at(["coin", "kaching", "boing"][found], pos, 0.0)
