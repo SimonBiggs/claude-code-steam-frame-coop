@@ -32,7 +32,7 @@ const GAMES := [
 		"blurb": "Cosy, no fighting: VR gardener plants and waters, TV bees make honey"},
 	{"id": "paint_and_guess", "multi": true, "cat": "party", "name": "PAINT AND GUESS", "scene": "res://games/paint_and_guess/main.tscn",
 		"blurb": "VR paints a secret word in the air; TV players race to guess it"},
-	{"id": "rhythm_band", "cat": "party", "name": "RHYTHM BAND", "scene": "res://games/rhythm_band/main.tscn",
+	{"id": "rhythm_band", "multi": true, "cat": "party", "name": "RHYTHM BAND", "scene": "res://games/rhythm_band/main.tscn",
 		"blurb": "VR drums with your hands; TV players hit notes on their highways"},
 	{"id": "penalty_shootout", "multi": true, "cat": "sports", "name": "PENALTY SHOOTOUT", "scene": "res://games/penalty_shootout/main.tscn",
 		"blurb": "VR goalkeeper saves with big gloves; TV strikers aim, power up and bend shots"},
