@@ -217,6 +217,9 @@ var menu_was_down := false
 
 
 func _process(delta: float) -> void:
+	if not has_meta("pad_ui"):  # (also in _ready) so a hot-reloaded net.gd adds pad A/B too
+		set_meta("pad_ui", true)
+		preload("res://core/ui_kit.gd").ensure_pad_ui_actions()
 	_ensure_caption()
 	_follow_headset()
 	_ensure_fullscreen()
