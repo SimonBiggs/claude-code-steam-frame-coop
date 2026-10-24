@@ -190,6 +190,9 @@ func _join_auto() -> void:
 	var until := Time.get_ticks_msec() + int(AUTO_FIND_SECONDS * 1000.0)
 	while Time.get_ticks_msec() < until:
 		await get_tree().process_frame
+		if not is_inside_tree():  # the scene changed while we were looking (await resumed on a freed tree)
+			udp.close()
+			return
 		while udp.get_available_packet_count() > 0:
 			var msg := udp.get_packet().get_string_from_utf8()
 			var ip := udp.get_packet_ip()
@@ -212,7 +215,7 @@ func _close_old_peer() -> void:
 
 
 func _exit_tree() -> void:
-	if has_meta("follow_udp"):  # _follow_headset's beacon listener
+	if get_meta("follow_udp", null) is PacketPeerUDP:  # _follow_headset's beacon listener
 		(get_meta("follow_udp") as PacketPeerUDP).close()
 	_close_old_peer()
 
