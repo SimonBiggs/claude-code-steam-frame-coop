@@ -5,6 +5,7 @@ extends Node
 ## fruit with the left glove and puts it in the bowl.
 ## Local:      godot --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/fruit_catch_bot.tscn
 ## Networked:  DUO_PORT=81xx DUO_HOST=1 ... & DUO_PORT=81xx DUO_JOIN=127.0.0.1 ... (same scene, real time)
+## Flat host: add DUO_FLAT_HOST=1 to the host (no VR: one bot pad plays slot 0 on the host).
 
 const BotKit := preload("res://tests/bot_kit.gd")
 
@@ -29,11 +30,11 @@ func _ready() -> void:
 	var host := OS.has_environment("DUO_HOST")
 	var t0 := 3.0 if client else 1.0
 	kit.at(t0, "%d TV players press A on their pads" % want, _join)
-	kit.at(t0 + 4.0, "P2 presses Y: one shared view", func() -> void: _press("y"))
+	kit.at(t0 + 4.0, "P2 presses Y: one shared view", func() -> void: _press_y())
 	kit.at(t0 + 5.0, "shared?", func() -> void:
-		if main.split != null:
+		if main.split != null and not main.flat_host:
 			kit.assert_true(main.split.is_shared(), "Y switched to the shared view"))
-	kit.at(t0 + 7.0, "P2 presses Y again: split screen", func() -> void: _press("y"))
+	kit.at(t0 + 7.0, "P2 presses Y again: split screen", func() -> void: _press_y())
 	if not host:
 		kit.at(t0 + 9.0, "P2 presses Start: pause menu", func() -> void:
 			kit.allow_pause = true
@@ -71,9 +72,17 @@ func _continue_results() -> String:
 
 func _join() -> void:
 	if main.net.mode == "host":
+		if main.flat_host:
+			kit.join_bot(main.party)  # a flat host (DUO_FLAT_HOST=1): one pad player here, in slot 0
 		return
 	for i in want:
 		kit.join_bot(main.party)
+
+
+## The view (split / shared) is shared by every machine: on a flat host the client's Y presses toggle it too.
+func _press_y() -> void:
+	if not main.flat_host:
+		_press("y")
 
 
 func _press(action: String) -> void:
@@ -169,7 +178,13 @@ func _report() -> String:
 func _checks() -> void:
 	var mode: String = main.net.mode
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
-	kit.assert_eq(main.party.player_count(), want, "%s: all %d TV players are seated" % [mode, want])
+	if mode == "client":
+		kit.assert_eq(main.party.local_slots().size(), want, "client: all %d local players are seated" % want)
+	else:
+		var host_p := 1 if main.flat_host else 0
+		kit.assert_eq(main.party.player_count(), want + host_p, "%s: all %d TV players (+%d on the host) are seated" % [mode, want, host_p])
+	if main.flat_host:
+		kit.assert_true(main.party.is_local(0) and main.avatars.has(0) and main.cams.has(0), "flat host: slot 0 plays here with a camera")
 	kit.assert_true(int(main.net.state_get("caught", 0)) > 0, "%s: fruit was caught" % mode)
 	kit.assert_true(int(main.net.state_get("round", 0)) >= 2, "%s: round 1 ended and round 2 started" % mode)
 	if main.vr_rig != null:

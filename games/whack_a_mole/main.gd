@@ -41,8 +41,12 @@ var round_time := 120.0  ## seconds per round (bots shorten it before adding the
 # --- The networking contract ---
 var net: Node
 var ready_to_play := false
+var flat_host := false  # this machine hosts without VR: slot 0 is a pad / keyboard player here, like local play
+var net_target := {}  # slot -> [pos, yaw]: where another machine's player is (smoothed towards every frame)
 # --- Engine modules (names core/ looks for) ---
 var party: Party
+## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
+var multi_machine := true
 var split: SplitView
 var vr_rig: VrRig
 var save: Save
@@ -108,6 +112,8 @@ func _ready() -> void:
 	party = Party.new()
 	party.name = "Party"
 	add_child(party)
+	if net.machine_kind == "deck":
+		party.allow_keyboard = false  # a Steam Deck: one player on its built-in controls; more pads may drop in
 	party.player_joined.connect(_on_player_joined)
 	party.player_left.connect(_on_player_left)
 	save = Save.new()
@@ -135,7 +141,8 @@ func _ready() -> void:
 
 
 func _setup(mode: String) -> void:
-	if VrRig.wanted(mode):
+	flat_host = mode == "host" and not net.has_vr
+	if VrRig.wanted(mode) and not flat_host:
 		vr_rig = VrRig.new()
 		vr_rig.bounds = Rect2(-4.0, -4.0, 8.0, 8.0)
 		add_child(vr_rig)
@@ -146,7 +153,7 @@ func _setup(mode: String) -> void:
 		vr_rig.hand_r.add_child(mallet)
 		hints.set_vr_rig(vr_rig, self)
 	_build_world(vr_rig != null)
-	if mode != "host":
+	if mode != "host" or flat_host:  # every machine with a screen of its own (a flat host too)
 		split = SplitView.new()
 		add_child(split)
 		split.bind_party(party)
@@ -157,17 +164,9 @@ func _setup(mode: String) -> void:
 		group_cam.follow_group([], -50.0, 0.0, 0.0)
 		_make_hud(-1, split.shared_hud())
 		hints.add_view(huds[-1], -1)
-		if mode == "client":
-			vr_avatar = VrRig.Avatar.new()
-			add_child(vr_avatar)
-			var m2 := Props.mallet()
-			mallet = m2[0]
-			mallet_head = m2[1]
-			vr_avatar.hands[1].add_child(mallet)
-			split.set_bubble(VrRig.build_mirror(self, vr_avatar.head, false))
-		elif vr_rig != null:
+		if vr_rig != null:
 			split.set_bubble(vr_rig.mirror)
-	party.allow_slot0 = mode == "local" and vr_rig == null
+	party.allow_slot0 = (mode == "local" and vr_rig == null) or flat_host
 	awards.set_player(0, "GIANT" if vr_rig != null or mode == "client" else party.name_of(0))
 	if mode != "client":
 		net.state_set("best", int(save.data["best"]))
@@ -264,7 +263,7 @@ func _make_hud(slot: int, parent: Control) -> void:
 		join_prompt = UiKit.panel("pill")
 		join_prompt.add_child(UiKit.prompts([["A", "Join"]]))
 		ui.add_child(join_prompt)
-		join_prompt.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_KEEP_SIZE)
+		UiKit.pin(join_prompt, Control.PRESET_CENTER_BOTTOM)
 		join_prompt.grow_horizontal = Control.GROW_DIRECTION_BOTH
 		join_prompt.grow_vertical = Control.GROW_DIRECTION_BEGIN
 		join_prompt.offset_top = -60.0
@@ -273,7 +272,7 @@ func _make_hud(slot: int, parent: Control) -> void:
 		var pill := UiKit.panel("pill")
 		pill.add_child(UiKit.prompts([["A", "BONK!"]]))
 		ui.add_child(pill)
-		pill.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_KEEP_SIZE)
+		UiKit.pin(pill, Control.PRESET_CENTER_BOTTOM)
 		pill.grow_horizontal = Control.GROW_DIRECTION_BOTH
 		pill.grow_vertical = Control.GROW_DIRECTION_BEGIN
 		pill.offset_top = -40.0
@@ -344,6 +343,7 @@ func _on_player_left(slot: int) -> void:
 			(dict[slot] as Node).queue_free()
 			dict.erase(slot)
 	last_pos.erase(slot)
+	net_target.erase(slot)
 	hop_cd.erase(slot)
 	if huds.has(slot):
 		var h: Control = huds[slot]
@@ -421,11 +421,43 @@ func _animate_avatars(delta: float) -> void:
 		last_pos[slot] = a.position
 
 
+## Host: a player on another machine moved.
 func on_remote_state(slot: int, pos: Vector3, yaw: float, _pitch: float) -> void:
-	if avatars.has(slot):
+	if avatars.has(slot) and not party.is_local(slot):
+		if not net_target.has(slot):
+			(avatars[slot] as Node3D).position = pos  # first update: no glide in from the spawn point
+		net_target[slot] = [pos, yaw]
+
+
+## Every machine: other machines' players glide to where their machine (or the host) says they are.
+func _follow_remote(delta: float) -> void:
+	var k := 1.0 - exp(-18.0 * delta)
+	for slot in net_target:
+		if not avatars.has(slot) or party.is_local(slot):
+			continue
 		var a: Node3D = avatars[slot]
-		a.position = pos
-		a.rotation.y = yaw
+		var t: Array = net_target[slot]
+		a.position = a.position.lerp(t[0], k)
+		a.rotation.y = lerp_angle(a.rotation.y, float(t[1]), k)
+
+
+## Host: one machine left. core/party.gd frees just its seats (player_left for each removes their
+## avatars, views and per-player state); only that machine's leftovers are dropped here.
+func on_machine_left(peer: int) -> void:
+	for slot in party.slots_of(peer):
+		net_target.erase(slot)
+
+
+## TV machine: the VR player (only when the host has one) with their mallet, plus the window into their view.
+func _make_vr_avatar() -> void:
+	vr_avatar = VrRig.Avatar.new()
+	add_child(vr_avatar)
+	var m2 := Props.mallet()
+	mallet = m2[0]
+	mallet_head = m2[1]
+	vr_avatar.hands[1].add_child(mallet)
+	if split != null:
+		split.set_bubble(VrRig.build_mirror(self, vr_avatar.head, false))
 
 
 func on_request(slot: int, action: String, args: Array) -> void:
@@ -435,6 +467,7 @@ func on_request(slot: int, action: String, args: Array) -> void:
 				var a: Node3D = avatars[slot]
 				if not party.is_local(slot):
 					Creatures.anim(a).play("attack", 0.35)
+				net.event("swing", [slot])  # every machine sees the swing (its own machine already played it)
 				var at: Vector3 = args[0] if not args.is_empty() and args[0] is Vector3 else a.position
 				var hole := _mole_near(at, BONK_REACH)
 				if hole >= 0:
@@ -467,7 +500,7 @@ func on_pause_changed(paused: bool, by_slot: int) -> void:
 			var l := UiKit.label("", "small", "dim", HORIZONTAL_ALIGNMENT_CENTER)
 			l.name = "Why"
 			v.add_child(l)
-			tv_banner.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_KEEP_SIZE)
+			UiKit.pin(tv_banner, Control.PRESET_CENTER)
 			tv_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
 			tv_banner.grow_vertical = Control.GROW_DIRECTION_BOTH
 		(tv_banner.find_child("Why", true, false) as Label).text = why
@@ -578,8 +611,9 @@ func results_showing() -> bool:
 func _process(delta: float) -> void:
 	if not ready_to_play:
 		return
-	if net.mode != "host":
+	if split != null:
 		_move_local_players(delta)
+	_follow_remote(delta)
 	_animate_avatars(delta)
 	if net.mode != "client":
 		_simulate(delta)
@@ -820,7 +854,7 @@ func whack_fx(i: int, by: int, pts: int) -> void:
 	else:
 		sfx.play_at("boing", pos, 0.0, randf_range(0.9, 1.2))
 		sfx.play_at("pop", pos, -3.0, randf_range(0.8, 1.1))
-	if by > 0 and avatars.has(by):
+	if by >= 0 and avatars.has(by):
 		Creatures.anim(avatars[by]).play("cheer", 0.6)
 
 
@@ -898,14 +932,35 @@ func make_snapshot() -> Array:
 	for i in holes.size():
 		flags[i] = m_state[i] | (m_gold[i] << 2)
 	var pose := vr_rig.pack_pose() if vr_rig != null else PackedFloat32Array()
-	return [pose, m_h, flags]
+	# Every player avatar (slot, position, yaw): each machine sees the other machines' players.
+	var av_slots := PackedByteArray()
+	var av_pos := PackedVector3Array()
+	var av_yaw := PackedFloat32Array()
+	for slot in avatars:
+		var a: Node3D = avatars[slot]
+		av_slots.append(int(slot))
+		av_pos.append(a.position)
+		av_yaw.append(a.rotation.y)
+	return [pose, m_h, flags, av_slots, av_pos, av_yaw]
 
 
 func apply_snapshot(s: Array) -> void:
-	if not ready_to_play or s.size() < 3:
+	if not ready_to_play or s.size() < 6:
 		return
+	var pose: PackedFloat32Array = s[0]
+	if pose.size() > 0 and vr_avatar == null:
+		_make_vr_avatar()
 	if vr_avatar != null:
-		vr_avatar.apply_pose(s[0])
+		vr_avatar.apply_pose(pose)
+	var av_slots: PackedByteArray = s[3]
+	var av_pos: PackedVector3Array = s[4]
+	var av_yaw: PackedFloat32Array = s[5]
+	for i in av_slots.size():
+		var slot: int = av_slots[i]
+		if avatars.has(slot) and not party.is_local(slot):
+			if not net_target.has(slot):
+				(avatars[slot] as Node3D).position = av_pos[i]
+			net_target[slot] = [av_pos[i], av_yaw[i]]
 	var h: PackedFloat32Array = s[1]
 	var flags: PackedByteArray = s[2]
 	for i in mini(h.size(), holes.size()):
@@ -924,3 +979,7 @@ func apply_event(kind: String, args: Array) -> void:
 			thump(args[0], float(args[1]))
 		"hop":
 			hop(int(args[0]))
+		"swing":
+			var ss := int(args[0])
+			if avatars.has(ss) and not party.is_local(ss):
+				Creatures.anim(avatars[ss]).play("attack", 0.35)

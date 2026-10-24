@@ -51,9 +51,13 @@ var results_wait := 12.0  ## seconds the results stay up before the next round s
 # --- Networking contract ---
 var net: Node
 var ready_to_play := false
+var flat_host := false  # this machine hosts without VR: slot 0 is a pad / keyboard player here, like local play
+var net_target := {}  # slot -> [pos, yaw]: where another machine's player is (smoothed towards every frame)
 var players: Array = []
 # --- Engine modules ---
 var party: Party
+## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
+var multi_machine := true
 var split: SplitView
 var vr_rig: VrRig
 var sfx: Node
@@ -124,6 +128,8 @@ func _ready() -> void:
 	party = Party.new()
 	party.name = "Party"
 	add_child(party)
+	if net.machine_kind == "deck":
+		party.allow_keyboard = false  # a Steam Deck: one player on its built-in controls; more pads may drop in
 	party.player_joined.connect(_on_player_joined)
 	party.player_left.connect(_on_player_left)
 	sfx = SfxScript.new()
@@ -144,7 +150,8 @@ func _ready() -> void:
 
 
 func _setup(mode: String) -> void:
-	if VrRig.wanted(mode):
+	flat_host = mode == "host" and not net.has_vr  # a flat host: slot 0 is a runner here, the computer is the giant
+	if VrRig.wanted(mode) and not flat_host:
 		Engine.physics_ticks_per_second = 90
 		vr_rig = VrRig.new()
 		vr_rig.bounds = Rect2(-3.2, -8.4, 6.4, 3.6)
@@ -164,7 +171,7 @@ func _setup(mode: String) -> void:
 		vr_board.position = Vector3(0.0, 4.2, WALL_Z.y + 1.0)
 		vr_board.rotation.y = PI  # reads from +Z: turn it to face the giant at -Z
 		add_child(vr_board)
-	if mode != "host":
+	if mode != "host" or flat_host:  # every machine with a screen of its own (a flat host too)
 		split = SplitView.new()
 		add_child(split)
 		split.bind_party(party)
@@ -174,7 +181,7 @@ func _setup(mode: String) -> void:
 		add_child(group_cam)
 		group_cam.follow_group([], -35.0, 0.0, 0.0)
 		_make_hud(-1, split.shared_hud())
-	party.allow_slot0 = mode == "local" and vr_rig == null
+	party.allow_slot0 = (mode == "local" and vr_rig == null) or flat_host
 	if vr_rig != null:
 		awards.set_player(0, "GIANT")
 	if mode != "client":
@@ -214,11 +221,10 @@ func _make_hud(slot: int, parent: Control) -> void:
 	huds[slot] = ui
 	var card := UiKit.panel("card")
 	ui.add_child(card)
-	card.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	card.offset_left = 0.0  # set_anchors_preset alone keeps old offsets
-	card.offset_right = 0.0
+	UiKit.pin(card, Control.PRESET_CENTER_TOP)
 	card.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	card.offset_top = 16.0
+	card.offset_top += 16.0
+	card.offset_bottom += 16.0
 	var row := UiKit.hbox()
 	card.add_child(row)
 	row.add_child(UiKit.icon("person", "gold", 34.0))
@@ -235,7 +241,7 @@ func _make_hud(slot: int, parent: Control) -> void:
 		var tp := UiKit.panel("accent")
 		tp.add_child(UiKit.prompts([["A", "THROW!"]]))
 		ui.add_child(tp)
-		tp.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_KEEP_SIZE)
+		UiKit.pin(tp, Control.PRESET_CENTER_BOTTOM)
 		tp.grow_horizontal = Control.GROW_DIRECTION_BOTH
 		tp.grow_vertical = Control.GROW_DIRECTION_BEGIN
 		tp.offset_top = -50.0
@@ -246,7 +252,7 @@ func _make_hud(slot: int, parent: Control) -> void:
 		join_prompt = UiKit.panel("pill")
 		join_prompt.add_child(UiKit.prompts([["A", "Join"]]))
 		ui.add_child(join_prompt)
-		join_prompt.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_KEEP_SIZE)
+		UiKit.pin(join_prompt, Control.PRESET_CENTER_BOTTOM)
 		join_prompt.grow_horizontal = Control.GROW_DIRECTION_BOTH
 		join_prompt.grow_vertical = Control.GROW_DIRECTION_BEGIN
 		join_prompt.offset_top = -60.0
@@ -306,6 +312,7 @@ func _on_player_left(slot: int) -> void:
 			(dict[slot] as Node).queue_free()
 			dict.erase(slot)
 	last_pos.erase(slot)
+	net_target.erase(slot)
 	vels.erase(slot)
 	out.erase(slot)
 	safe.erase(slot)
@@ -384,11 +391,31 @@ func _animate_avatars(delta: float) -> void:
 		a.visible = not hidden and not blink
 
 
+## Host: a player on another machine moved.
 func on_remote_state(slot: int, pos: Vector3, yaw: float, _pitch: float) -> void:
-	if avatars.has(slot):
+	if avatars.has(slot) and not party.is_local(slot):
+		if not net_target.has(slot):
+			(avatars[slot] as Node3D).position = pos  # first update: no glide in from the spawn point
+		net_target[slot] = [pos, yaw]
+
+
+## Every machine: other machines' players glide to where their machine (or the host) says they are.
+func _follow_remote(delta: float) -> void:
+	var k := 1.0 - exp(-18.0 * delta)
+	for slot in net_target:
+		if not avatars.has(slot) or party.is_local(slot):
+			continue
 		var a: Node3D = avatars[slot]
-		a.position = _clamp_court(pos)
-		a.rotation.y = yaw
+		var t: Array = net_target[slot]
+		a.position = a.position.lerp(t[0], k)
+		a.rotation.y = lerp_angle(a.rotation.y, float(t[1]), k)
+
+
+## Host: one machine left. core/party.gd frees just its seats (player_left for each removes their
+## avatars, views and per-player state); only that machine's leftovers are dropped here.
+func on_machine_left(peer: int) -> void:
+	for slot in party.slots_of(peer):
+		net_target.erase(slot)
 
 
 func on_request(slot: int, action: String, _args: Array) -> void:
@@ -415,7 +442,7 @@ func on_pause_changed(paused: bool, _by_slot: int) -> void:
 			tv_banner = UiKit.panel("accent")
 			ui.add_child(tv_banner)
 			tv_banner.add_child(UiKit.title("PAUSED"))
-			tv_banner.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_KEEP_SIZE)
+			UiKit.pin(tv_banner, Control.PRESET_CENTER)
 			tv_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
 			tv_banner.grow_vertical = Control.GROW_DIRECTION_BOTH
 		tv_banner.visible = paused
@@ -525,8 +552,9 @@ func _process(delta: float) -> void:
 	if not ready_to_play:
 		return
 	clock += delta
-	if net.mode != "host":
+	if split != null:
 		_move_local_players(delta)
+	_follow_remote(delta)
 	if net.mode == "client":
 		_client_smooth(delta)
 	else:
@@ -1200,13 +1228,32 @@ func make_snapshot() -> Array:
 		if avatars.has(id):
 			cids.append(int(id))
 			cpos.append((avatars[id] as Node3D).position)
-	return [gp, bp, bh, outs, cids, cpos]
+	# Human runners from every machine (slot, position, yaw): each machine sees the others' players.
+	var hids := PackedByteArray()
+	var hpos := PackedVector3Array()
+	var hyaw := PackedFloat32Array()
+	for id in avatars:
+		if not cpu.has(id):
+			var a: Node3D = avatars[id]
+			hids.append(int(id))
+			hpos.append(a.position)
+			hyaw.append(a.rotation.y)
+	return [gp, bp, bh, outs, cids, cpos, hids, hpos, hyaw]
 
 
 func apply_snapshot(s: Array) -> void:
-	if not ready_to_play or s.size() < 6:
+	if not ready_to_play or s.size() < 9:
 		return
 	_snap_giant = s[0]
+	var hids: PackedByteArray = s[6]
+	var hpos: PackedVector3Array = s[7]
+	var hyaw: PackedFloat32Array = s[8]
+	for i in hids.size():
+		var slot: int = hids[i]
+		if avatars.has(slot) and not party.is_local(slot):
+			if not net_target.has(slot):
+				(avatars[slot] as Node3D).position = hpos[i]
+			net_target[slot] = [hpos[i], hyaw[i]]
 	var bp: PackedVector3Array = s[1]
 	var bh: PackedInt32Array = s[2]
 	for i in mini(bp.size(), balls.size()):
@@ -1231,7 +1278,7 @@ func apply_snapshot(s: Array) -> void:
 			cpu[cids[k]] = {}
 			_refresh_group()
 		a.position = a.position.lerp(cpos[k], 0.5)
-	for id in cpu.keys():
+	for id in cpu.keys():  # only CPU runners: human runners come and go with party seats
 		if not seen.has(id):
 			if avatars.has(id):
 				(avatars[id] as Node).queue_free()

@@ -4,6 +4,7 @@ extends Node
 ## them at the hoops with a flick.
 ## Local:      godot --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/paper_planes_bot.tscn
 ## Networked:  DUO_PORT=81xx DUO_HOST=1 ... & DUO_PORT=81xx DUO_JOIN=127.0.0.1 ... (same scene, real time)
+## Flat host: add DUO_FLAT_HOST=1 to the host (no VR: one bot pad plays slot 0 on the host).
 
 const BotKit := preload("res://tests/bot_kit.gd")
 const VrRig := preload("res://core/vr_rig.gd")
@@ -72,6 +73,8 @@ func _continue_results() -> String:
 
 func _join() -> void:
 	if main.net.mode == "host":
+		if main.flat_host:
+			kit.join_bot(main.party)  # a flat host (DUO_FLAT_HOST=1): one pad player here, in slot 0
 		return
 	for i in want:
 		kit.join_bot(main.party)
@@ -203,7 +206,13 @@ func _report() -> String:
 func _checks() -> void:
 	var mode: String = main.net.mode
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
-	kit.assert_eq(main.party.player_count(), want, "%s: all %d TV players are seated" % [mode, want])
+	if mode == "client":
+		kit.assert_eq(main.party.local_slots().size(), want, "client: all %d local players are seated" % want)
+	else:
+		var host_p := 1 if main.flat_host else 0
+		kit.assert_eq(main.party.player_count(), want + host_p, "%s: all %d TV players (+%d on the host) are seated" % [mode, want, host_p])
+	if main.flat_host:
+		kit.assert_true(main.party.is_local(0) and main.flyers.has(0) and main.huds.has(0), "flat host: slot 0 plays here with a camera")
 	kit.assert_true(int(main.net.state_get("round", 0)) >= 2, "%s: round 1 ended with results and round 2 started" % mode)
 	kit.assert_true(max_hoops >= 3, "%s: hoops are in the sky" % mode)
 	var ghosts := 0
@@ -218,7 +227,7 @@ func _checks() -> void:
 				tv += int(main.scored_by[s])
 		kit.assert_true(tv > 0, "%s: TV planes flew through hoops (%d)" % [mode, tv])
 	else:
-		kit.assert_true(main.flyers.size() == want, "client: every TV player has a plane")
+		kit.assert_true(main.flyers.size() == main.party.player_count(), "client: every player (every machine's) has a plane")
 	if main.vr_rig != null:
 		kit.assert_true(main.throws > 3, "fake VR threw planes (%d)" % main.throws)
 		kit.assert_true(int(main.scored_by.get(0, 0)) > 0, "a VR plane went through a hoop (%d)" % int(main.scored_by.get(0, 0)))

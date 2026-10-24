@@ -60,25 +60,25 @@ const GAMES := [
 		"blurb": "Be the hero in VR! Swing your sword, raise your hand for magic, and restore the Crystal of Light with your party."},
 	{"id": "balloon_pop", "multi": true, "cat": "party", "name": "BALLOON POP", "scene": "res://games/balloon_pop/main.tscn",
 		"blurb": "Pop the balloons floating up all around you: VR punches and squeezes, TV players run and jump!"},
-	{"id": "sheep_round_up", "cat": "cosy", "name": "SHEEP ROUND-UP", "scene": "res://games/sheep_round_up/main.tscn",
+	{"id": "sheep_round_up", "multi": true, "cat": "cosy", "name": "SHEEP ROUND-UP", "scene": "res://games/sheep_round_up/main.tscn",
 		"blurb": "Sheepdogs herd, the giant farmer scoops - get every fluffy sheep into the pen!"},
-	{"id": "fruit_catch", "cat": "party", "name": "FRUIT CATCH", "scene": "res://games/fruit_catch/main.tscn",
+	{"id": "fruit_catch", "multi": true, "cat": "party", "name": "FRUIT CATCH", "scene": "res://games/fruit_catch/main.tscn",
 		"blurb": "Shake the giant tree and catch the falling fruit in your baskets!"},
-	{"id": "whack_a_mole", "cat": "party", "name": "WHACK-A-MOLE", "scene": "res://games/whack_a_mole/main.tscn",
+	{"id": "whack_a_mole", "multi": true, "cat": "party", "name": "WHACK-A-MOLE", "scene": "res://games/whack_a_mole/main.tscn",
 		"blurb": "Silly moles pop out of a big table: bonk them with a giant mallet or a tiny hammer!"},
 	{"id": "tower_stack", "cat": "party", "name": "TOWER STACK", "scene": "res://games/tower_stack/main.tscn",
 		"blurb": "Build the tallest tower together: helpers push jelly blocks to the bouncy pad, the giant stacks them high."},
 	{"id": "elemental_bender", "multi": true, "cat": "action", "name": "ELEMENTAL BENDER", "scene": "res://games/elemental_bender/main.tscn",
 		"blurb": "Bend air, water, earth and fire to defend the island temple from the Shadow Raiders!"},
-	{"id": "treasure_dig", "cat": "party", "name": "TREASURE DIG", "scene": "res://games/treasure_dig/main.tscn",
+	{"id": "treasure_dig", "multi": true, "cat": "party", "name": "TREASURE DIG", "scene": "res://games/treasure_dig/main.tscn",
 		"blurb": "Dig up treasure on a sandy island while the VR giant's magic telescope shows where it hides!"},
-	{"id": "paper_planes", "cat": "party", "name": "PAPER PLANES", "scene": "res://games/paper_planes/main.tscn",
+	{"id": "paper_planes", "multi": true, "cat": "party", "name": "PAPER PLANES", "scene": "res://games/paper_planes/main.tscn",
 		"blurb": "Throw and fly paper planes through floating hoops together. Rainbow hoops are worth 3!"},
-	{"id": "bubble_bath", "cat": "party", "name": "BUBBLE BATH", "scene": "res://games/bubble_bath/main.tscn",
+	{"id": "bubble_bath", "multi": true, "cat": "party", "name": "BUBBLE BATH", "scene": "res://games/bubble_bath/main.tscn",
 		"blurb": "Steer tiny boats to round up rubber ducks and sail them down the plug-hole, while the giant splashes up waves."},
-	{"id": "snowman_maker", "cat": "cosy", "name": "SNOWMAN MAKER", "scene": "res://games/snowman_maker/main.tscn",
+	{"id": "snowman_maker", "multi": true, "cat": "cosy", "name": "SNOWMAN MAKER", "scene": "res://games/snowman_maker/main.tscn",
 		"blurb": "Roll giant snowballs, stack them up, and give every snowman a carrot nose and a hat!"},
-	{"id": "dodge_ball", "cat": "party", "name": "SOFT DODGEBALL", "scene": "res://games/dodge_ball/main.tscn",
+	{"id": "dodge_ball", "multi": true, "cat": "party", "name": "SOFT DODGEBALL", "scene": "res://games/dodge_ball/main.tscn",
 		"blurb": "A friendly VR giant throws squishy balls; dodge them and bop the target on his belly!"},
 ]
 ## Tabs on the TV (LB/RB) and in VR (stick left/right). Empty categories are hidden.
@@ -134,7 +134,7 @@ var starting := false
 const MAX_LOBBY_MACHINES := 32  # ENet allows 4095; games are limited by seats, not machines
 const FIND_SECONDS := 2.2
 var machines := {}  # lobby host: peer -> {"kind": String, "ip": String}
-var my_kind: String = OS.get_environment("DUO_MACHINE_KIND") if OS.has_environment("DUO_MACHINE_KIND") else "tv"
+var my_kind: String = preload("res://core/machine.gd").kind()
 var host_has_vr := false
 var lobby_id := randi()  # flat hosts that start together: the higher id gives way
 var _finding := 0.0  # seconds left looking for a lobby before hosting one
@@ -157,7 +157,12 @@ func _ready() -> void:
 	if xr != null and xr.is_initialized():
 		my_kind = "frame"
 	if not OS.has_environment("DUO_JOIN_ORIGINAL"):
-		OS.set_environment("DUO_JOIN_ORIGINAL", OS.get_environment("DUO_JOIN") if OS.has_environment("DUO_JOIN") else "")
+		# How this machine networks comes from core/machine.gd: by default "auto" (play locally at once, keep looking
+		# for other devices). A VR host still hosts (below); DUO_JOIN / DUO_SOLO override.
+		var target := preload("res://core/machine.gd").join_target()
+		if my_kind == "frame" or OS.has_environment("DUO_HOST"):
+			target = OS.get_environment("DUO_JOIN") if OS.has_environment("DUO_JOIN") else ""
+		OS.set_environment("DUO_JOIN_ORIGINAL", target)
 		OS.set_environment("DUO_HOST_ORIGINAL", "1" if OS.has_environment("DUO_HOST") else "")
 	# Each lobby visit starts from how the machine was launched (a game may have changed these).
 	_restore_env()
