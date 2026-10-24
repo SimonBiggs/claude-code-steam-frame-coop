@@ -16,6 +16,7 @@ var vt := 0.0  # fake VR throw cycle clock
 var left_test := 0  # 0 not yet, 1 reaching for the stack, 2 holding, 3 done
 var left_grabbed := false
 var left_thrown := false
+var max_hoops := 0  # scored hoops respawn after 1.2 s, so the count dips right after a score
 
 
 func _ready() -> void:
@@ -85,6 +86,7 @@ func _press(action: String) -> void:
 func _physics_process(delta: float) -> void:
 	if main == null or not main.ready_to_play:
 		return
+	max_hoops = maxi(max_hoops, main.hoops.size())
 	for slot in main.party.local_slots():
 		_steer(slot)
 	if main.vr_rig != null:
@@ -203,7 +205,7 @@ func _checks() -> void:
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
 	kit.assert_eq(main.party.player_count(), want, "%s: all %d TV players are seated" % [mode, want])
 	kit.assert_true(int(main.net.state_get("round", 0)) >= 2, "%s: round 1 ended with results and round 2 started" % mode)
-	kit.assert_true(main.hoops.size() >= 3, "%s: hoops are in the sky" % mode)
+	kit.assert_true(max_hoops >= 3, "%s: hoops are in the sky" % mode)
 	var ghosts := 0
 	for s in main.flyers:
 		if not main.party.is_active(int(s)):

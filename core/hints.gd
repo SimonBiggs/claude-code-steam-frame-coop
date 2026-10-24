@@ -335,6 +335,10 @@ func _tv_card(root: Control, data: Dictionary, role: Dictionary) -> Control:
 	v.add_child(bar)
 	holder.set_meta("timer_bar", bar)
 	card.set_anchors_preset(Control.PRESET_CENTER)
+	card.offset_left = 0.0  # all four offsets: set_anchors_preset alone kept the old ones, so in an
+	card.offset_right = 0.0  # already-sized view the card sat at the top-left corner, half off screen
+	card.offset_top = 0.0
+	card.offset_bottom = 0.0
 	card.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	card.grow_vertical = Control.GROW_DIRECTION_BOTH
 	card.custom_minimum_size.x = minf(820.0 * s, root.size.x * 0.94 if root.size.x > 10.0 else 820.0 * s)
