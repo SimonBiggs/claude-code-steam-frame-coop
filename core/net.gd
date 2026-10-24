@@ -154,8 +154,7 @@ func join(address: String) -> void:
 	var here := get_tree().current_scene.scene_file_path if get_tree().current_scene else ""
 	if Engine.get_meta("duo_full", "-") == here:
 		print("Net: the host's game was full, staying on this machine")
-		Engine.set_meta("duo_full", "-")  # try again next time this game starts
-		join_finished.emit.call_deferred(false)
+		join_finished.emit.call_deferred(false)  # (the arcade lobby clears duo_full: next game, try again)
 		return
 	if address == "auto":
 		_join_auto()
@@ -246,9 +245,11 @@ func _on_peer_connected(id: int) -> void:
 		# Full (or an old one-TV game): tell it, so it plays on its own instead of waiting, then drop it.
 		print("Net: machine %d turned away (%d/%d)" % [id, machines.size(), machine_limit()])
 		_sys_down.rpc_id(id, "_full", [machine_limit()])
-		get_tree().create_timer(0.5).timeout.connect(func() -> void:
-			if multiplayer.multiplayer_peer is ENetMultiplayerPeer and id in multiplayer.get_peers():
-				(multiplayer.multiplayer_peer as ENetMultiplayerPeer).disconnect_peer(id))
+		# Drop it once that message is out (not on a timer: meanwhile broadcasts to it would error).
+		if multiplayer.multiplayer_peer is ENetMultiplayerPeer:
+			var pp := (multiplayer.multiplayer_peer as ENetMultiplayerPeer).get_peer(id)
+			if pp:
+				pp.peer_disconnect_later()
 		return
 	machines[id] = {"kind": "tv"}
 	connected = true
@@ -860,6 +861,8 @@ func _follow_headset() -> void:
 		if not msg.begins_with("ARCADE_GAME "):
 			continue
 		var scene := msg.substr(12)
+		if Engine.get_meta("duo_full", "-") == scene:
+			continue  # that game turned us away as full: keep playing here
 		print("Net: the headset is playing %s; joining it" % scene)
 		set_meta("following", true)
 		udp.close()

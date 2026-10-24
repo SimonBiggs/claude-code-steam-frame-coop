@@ -326,6 +326,8 @@ func _seat(slot: int, device: int) -> void:
 	print("Party: %s joined as %s" % [device_label(device), name_of(slot)])
 	_persist()
 	player_joined.emit(slot, device)
+	if _mode() == "host" and device != REMOTE:
+		_send_roster.call_deferred()  # a flat host's own players reach every machine right away
 
 
 func _unseat(slot: int) -> void:
@@ -470,7 +472,7 @@ func _ignored(device: int) -> bool:
 
 
 func _on_joy_changed(device: int, connected: bool) -> void:
-	if _ignored(device) or not _started or _mode() == "host":
+	if _ignored(device) or not _started or (_mode() == "host" and _host_has_vr()):
 		return
 	if connected:
 		_on_pad_connected(device)
@@ -827,7 +829,7 @@ func _latch_button(slot: int, button: int) -> void:
 
 
 func _can_join_now() -> bool:
-	return _started and accept_joins and not get_tree().paused and _mode() != "host"
+	return _started and accept_joins and not get_tree().paused and (_mode() != "host" or not _host_has_vr())
 
 
 func _mode() -> String:
@@ -859,7 +861,7 @@ func _try_start() -> void:
 			return
 	_started = true
 	_hook_net()
-	if _mode() != "host":
+	if _mode() != "host" or not _host_has_vr():  # a flat host seats its own pads like local play
 		_restore()
 		if auto_join_first_pad and local_slots().is_empty() and not _any_pending():
 			var pads := connected_pads()
@@ -955,7 +957,7 @@ func _on_party_msg(args: Array) -> void:
 			_taken = (args[2] as Dictionary).duplicate() if args.size() > 2 and args[2] is Dictionary else {}
 			# Other machines' players are seated here too (device REMOTE, not local), so games build their
 			# avatars on player_joined and position them from snapshots; seats they leave are freed.
-			for s in range(1, MAX_SLOTS):
+			for s in range(0, MAX_SLOTS):  # slot 0 too: a flat host's own player (a VR host never lists it)
 				var theirs := _taken.has(s) or _taken.has(str(s))
 				if theirs and _state[s] == FREE:
 					_seat(s, REMOTE)
