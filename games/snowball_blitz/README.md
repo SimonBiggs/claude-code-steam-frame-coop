@@ -10,7 +10,7 @@ from waddling snowmen by throwing snowballs.** Everything below "Full mode" is b
 
 - **Practice first:** the VR player gets glowing target snowmen close by, one at a time, and a
   see-through ghost hand that reaches down, scoops, winds up and throws. Each TV player gets one
-  glowing target in front of them (and "PRESS RT!" until they throw). Then the snowmen come. A solo
+  glowing target in front of them, with a bobbing glowing arrow over it. Then the snowmen come. A solo
   VR player gets extra targets for ~40 s, then the waves start anyway (TV players can drop in).
 - **One new thing per wave:** 1 a few slow plain snowmen that don't throw, 2 they throw (harmless
   splats; the pan lid blocks them), 3 sled riders, 4 snow bunnies, 5 giants (they can drop a MEGA
@@ -20,6 +20,12 @@ from waddling snowmen by throwing snowballs.** Everything below "Full mode" is b
   on a little rack (tinkle; squeeze one to snap it off and throw it), a snowy pine (dumps its snow),
   a sled (shove it), a bell (DING), and the fort wall puffs and packs up a little when you pat it.
 - **TV:** press throw to throw (hold to keep throwing); a gentle aim assist helps.
+- **No how-to words (visual teaching):** each TV view shows a pulsing glowing button in that
+  player's own controls plus an icon under the crosshair: RT / CLICK / SPACE / ENTER + a snowball
+  until they've thrown twice; STICK / MOUSE / an arrow key + an arrow, with a big glowing arrow round
+  the crosshair, when every snowman is off screen (until they've turned to one twice); a pulsing bolt
+  when their controller is unplugged. The VR ghost hand stops after two practice hits. A MEGA SNOWBALL
+  has a glowing arrow over it. PAUSED has no sentence; the small WAVE n hides under a big headline.
 - **Off:** warmth, freezing and hot cocoa; wall packing (the walls snow back up by themselves);
   charged lobs; shield snowmen; weather; fort upgrades; streaks; score / warmth / fort readouts, the
   minimap and popups; hint panels; awards. Text is one headline ("WAVE 2!", "SNOW KING!", "HOORAY!",
