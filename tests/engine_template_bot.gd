@@ -31,11 +31,11 @@ func _ready() -> void:
 	kit.at(t0, "%d TV players press A on their pads" % want, _join)
 	kit.at(t0 + 4.0, "P2 presses Y: one shared view", func() -> void: _press_y())
 	kit.at(t0 + 5.0, "shared?", func() -> void:
-		if main.split != null:
+		if main.split != null and not main.flat:
 			kit.assert_true(main.split.is_shared(), "Y switched to the shared view"))
 	kit.at(t0 + 8.0, "P2 presses Y again: split screen", func() -> void: _press_y())
 	kit.at(t0 + 9.0, "split?", func() -> void:
-		if main.split != null:
+		if main.split != null and not main.flat:
 			kit.assert_true(not main.split.is_shared(), "Y switched back to split screen"))
 	if not host:
 		kit.at(t0 + 10.0, "P2 presses Start: pause menu", func() -> void:
@@ -80,7 +80,8 @@ func _join() -> void:
 
 
 func _press_y() -> void:
-	_press("y")
+	if not main.flat:  # the view is shared by every machine: on a flat host the client's Y presses toggle it too
+		_press("y")
 
 
 func _press(action: String) -> void:
