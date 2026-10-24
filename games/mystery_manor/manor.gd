@@ -188,7 +188,7 @@ const LOITER := [
 const HALL_BOARD_POS := Vector3(-4.86, 1.75, 1.0)  ## centre of the case board (faces +x)
 const EVIDENCE_TABLE := Vector3(-3.75, 0.86, 1.0)    ## top centre of the detective's table
 const LORD_POS := Vector3(-3.1, 0, 3.7)
-const VR_SPAWN := Vector3(-1.3, 0, 1.0)
+const VR_SPAWN := Vector3(1.6, 0, 1.0)  ## behind the suspects' semicircle, so the line-up and the board are in view
 const VR_SPAWN_YAW := PI * 0.5  ## facing -x: the case board
 const TV_SPAWNS: Array[Vector3] = [Vector3(0.4, 0, 2.6), Vector3(0.8, 0, 3.6), Vector3(-0.2, 0, 4.4),
 	Vector3(1.6, 0, 3.0), Vector3(1.4, 0, 4.6), Vector3(0.2, 0, 5.4), Vector3(2.2, 0, 4.0)]

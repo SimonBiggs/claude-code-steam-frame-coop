@@ -84,7 +84,8 @@ var suspects: Array[Node3D] = []
 var suspect_home: Array[Vector3] = []
 var rings: Array[MeshInstance3D] = []
 var clue_nodes: Array[Node3D] = []  # colour, hat, item (in the house)
-var table_nodes: Array[Node3D] = []  # the same, on the evidence table once found
+var table_nodes: Array[Node3D] = []  # everything else this case built (board title, evidence)
+var evidence: Array[Node3D] = []  # the clues on the evidence table once found
 var beam: MeshInstance3D
 var flash_t := 8.0
 var vr_touch_t := 0.0
@@ -194,6 +195,12 @@ func _apply_case() -> void:
 	_refresh_case()
 
 
+## gdev calls this after reloading this script: rebuild the case's nodes with the new code.
+func _on_hot_reload() -> void:
+	case_seed = -1
+	_apply_case()
+
+
 func _build_case(c: Dictionary) -> void:
 	for n in suspects + clue_nodes + table_nodes:
 		(n as Node).queue_free()
@@ -204,6 +211,7 @@ func _build_case(c: Dictionary) -> void:
 	rings.clear()
 	clue_nodes.clear()
 	table_nodes.clear()
+	evidence.clear()
 	for i in (c["suspects"] as Array).size():
 		var s := Creatures.humanoid({"class": "villager", "hat": Case.hat_of(c, i), "outfit": Case.colour_of(c, i),
 			"outfit2": Case.colour_of(c, i).lightened(0.3), "seed": int(c["seed"]) + i * 7, "weapon": "none", "offhand": "none"})
@@ -224,6 +232,17 @@ func _build_case(c: Dictionary) -> void:
 		ring.position = home + Vector3.UP * 0.03
 		add_child(ring)
 		rings.append(ring)
+	# the case board: what is missing, in words and as a picture
+	var title := UiKit.label3d(Case.title(c), 0.11, "gold", true, 2.2)
+	title.position = Manor.HALL_BOARD_POS + Vector3(0.08, 0.5, 0.0)
+	title.rotation.y = PI * 0.5  # a Label3D reads from +Z: turn it to face +X, into the hall
+	add_child(title)
+	table_nodes.append(title)
+	var pic := _make_item(String((Case.ITEMS[int(c["item"])] as Dictionary)["id"]))
+	pic.position = Manor.HALL_BOARD_POS + Vector3(0.25, -0.35, 0.0)
+	pic.scale *= 1.6
+	add_child(pic)
+	table_nodes.append(pic)
 	var spots: Array = c["spots"]
 	for k in 3:
 		var sp: Dictionary = Manor.SPOTS[int(spots[k])]
@@ -239,6 +258,7 @@ func _build_case(c: Dictionary) -> void:
 		t.position = Manor.EVIDENCE_TABLE + Vector3(0.0, 0.12, -0.45 + 0.45 * k)
 		add_child(t)
 		table_nodes.append(t)
+		evidence.append(t)
 
 
 ## A clue: the coat scrap, the hat or the missing thing; `sparkly` adds the sparkles and the bobbing.
@@ -328,10 +348,10 @@ func _refresh_case() -> void:
 		if solved:
 			col = Color(1.0, 0.82, 0.3) if i == int(c["culprit"]) else Color(0.25, 0.25, 0.3)
 		rings[i].material_override = MeshKit.material(col, 1.2 if col.v > 0.5 else 0.0)
-	for k in 3:
+	for k in mini(clue_nodes.size(), evidence.size()):
 		var got := k < found.size() and bool(found[k])
 		clue_nodes[k].visible = not got
-		table_nodes[k].visible = got
+		evidence[k].visible = got
 	_refresh_beam()
 	_refresh_huds()
 
@@ -585,7 +605,9 @@ func _animate(delta: float) -> void:
 		var v := Vector2(a.position.x - prev.x, a.position.z - prev.z).length() / maxf(delta, 0.001)
 		Creatures.anim(a).walk(v if v > 0.3 and v < 30.0 else 0.0)
 		last_pos[slot] = a.position
-	for s in suspects:
+	for i in suspects.size():
+		var s := suspects[i]
+		rings[i].position = s.position + Vector3.UP * 0.03  # the ring goes where the suspect goes
 		var t: Vector3 = s.get_meta("target", s.position)
 		var d := t - s.position
 		if d.length() > 0.02:

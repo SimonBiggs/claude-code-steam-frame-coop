@@ -19,7 +19,8 @@ var saw_results := false
 var saw_step_back := false
 var saw_solved := false
 var max_found := 0
-var vr_path := {}
+var vr_walked := 0.0
+var vr_last := Vector3.INF
 
 
 func _ready() -> void:
@@ -209,6 +210,9 @@ func _drive_vr(delta: float, index: int) -> void:
 	rig.camera.position.y = 1.6
 	var head: Vector3 = rig.head_position()
 	var feet := Vector3(head.x, rig.floor_height, head.z)
+	if vr_last != Vector3.INF and feet.distance_to(vr_last) < 3.0:
+		vr_walked += feet.distance_to(vr_last)
+	vr_last = feet
 	var c: Dictionary = main.net.state_get("case", {})
 	var left: Array[int] = main._still_suspects(c)
 	var goal := _goal(index)
@@ -241,3 +245,5 @@ func _checks() -> void:
 	kit.assert_true(saw_solved, "%s: the case was solved" % mode)
 	kit.assert_true(saw_results, "%s: results were shown" % mode)
 	kit.assert_true(int(main.net.state_get("cases", 0)) >= 2, "%s: a second case started" % mode)
+	if main.vr_rig != null:
+		kit.assert_true(vr_walked > 5.0, "the fake VR detective walked the manor (%.0f m)" % vr_walked)
