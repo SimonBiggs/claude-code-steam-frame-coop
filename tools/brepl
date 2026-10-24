@@ -1,0 +1,95 @@
+#!/usr/bin/env bun
+// brepl: a persistent async Bun REPL that Claude talks to from the shell (Simon, 2026-10-18: "you'll be able
+// to do a lot of things quicker if you're using an async Bun REPL").
+//   brepl 'await fetch("http://127.0.0.1:3001").then(r => r.status)'   evaluate, print the result
+//   echo 'x = 41; x + 1' | brepl                                        code from stdin
+//   brepl --restart | --stop                                            restart / stop the server
+// One server per user on ~/.cache/brepl.sock, started on first use. State persists between calls:
+// bare assignments (x = 1) and globalThis.* live on; const/let/var stay local to that call.
+// The last expression is returned (top-level await works). console.log output is printed before the result.
+import { existsSync, unlinkSync } from "node:fs";
+import { inspect } from "node:util";
+import { spawn } from "node:child_process";
+
+const SOCK = `${process.env.HOME}/.cache/brepl.sock`;
+const args = process.argv.slice(2);
+
+if (args[0] === "--serve") {
+  if (existsSync(SOCK)) unlinkSync(SOCK);
+  // Offscreen Godot test runs (~/.local/share/gdev/godot.ts): godot.launch("duo-arena"), g.ui(), g.joy("a"), g.shot()...
+  globalThis.godot = await import(`${process.env.HOME}/.local/share/gdev/godot.ts`).catch((e) => ({ error: String(e) }));
+  const AsyncFunction = (async () => {}).constructor;
+  const run = async (code) => {
+    const out = [];
+    const log = console.log, err = console.error;
+    console.log = console.info = (...a) => out.push(a.map((x) => (typeof x === "string" ? x : inspect(x))).join(" "));
+    console.error = console.warn = console.log;
+    try {
+      let fn;
+      try {
+        fn = (0, eval)(`(async () => (${code}\n))`);  // a single expression: return its value
+      } catch {
+        // Statements: return the value of the last expression statement, if any.
+        const lines = code.trimEnd().split("\n");
+        const last = lines.pop();
+        try {
+          fn = (0, eval)(`(async () => { ${lines.join("\n")}\n return (${last.replace(/;\s*$/, "")}\n) })`);
+        } catch {
+          fn = (0, eval)(`(async () => { ${code}\n })`);
+        }
+      }
+      const v = await fn();
+      if (v !== undefined) out.push(typeof v === "string" ? v : inspect(v, { depth: 4, colors: false }));
+    } catch (e) {
+      out.push(`Error: ${e?.stack ?? e}`);
+    } finally {
+      console.log = console.info = log;
+      console.error = console.warn = err;
+    }
+    return out.join("\n") + "\n";
+  };
+  Bun.listen({
+    unix: SOCK,
+    socket: {
+      open(s) { s.data = ""; },
+      data(s, d) {
+        s.data += d.toString();
+        const i = s.data.indexOf("\0");
+        if (i < 0) return;
+        run(s.data.slice(0, i)).then((r) => { s.write(r); s.end(); });
+      },
+    },
+  });
+} else {
+  if (args[0] === "--stop" || args[0] === "--restart") {
+    spawn("pkill", ["-f", "brepl --serv[e]"]).on("exit", () => { if (existsSync(SOCK)) unlinkSync(SOCK); });
+    await Bun.sleep(300);
+    if (args[0] === "--stop") process.exit(0);
+    args.shift();
+  }
+  const code = args.length ? args.join(" ") : await new Response(Bun.stdin.stream()).text();
+  if (!code.trim()) process.exit(0);
+  const connect = () => new Promise((ok, bad) => {
+    let buf = "";
+    Bun.connect({
+      unix: SOCK,
+      socket: {
+        open(s) { s.write(code + "\0"); },
+        data(_, d) { buf += d.toString(); },
+        close() { ok(buf); },
+        error(_, e) { bad(e); },
+        connectError(_, e) { bad(e); },
+      },
+    }).catch(bad);
+  });
+  let res;
+  try {
+    res = await connect();
+  } catch {
+    spawn(process.execPath, [import.meta.path, "--serve"], { detached: true, stdio: "ignore" }).unref();
+    for (let i = 0; i < 50 && !existsSync(SOCK); i++) await Bun.sleep(50);
+    res = await connect();
+  }
+  process.stdout.write(res);
+  if (res.startsWith("Error:")) process.exit(1);
+}

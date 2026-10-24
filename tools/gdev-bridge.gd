@@ -13,6 +13,7 @@ const MAX_FRAMES := 2400  # about 20 minutes at 0.5 s
 var dev_dir := ""
 var frames_dir := ""
 var hashes := {}
+var mtimes := {}
 var poll_t := 0.0
 var frame_t := 0.0
 var recording := true
@@ -30,6 +31,11 @@ var stream_server: TCPServer
 var stream_clients: Array[StreamPeerTCP] = []
 var stream_t := 0.0
 var stream_busy := false
+var stream_busy_since := 0
+var caption: Node  # "Claude:" captions (addons/gdev/caption.gd), created lazily
+# Offscreen test run (godot.ts / gdev-offscreen): a control server instead of the cmd file, no recording,
+# stream or captions, so it never touches the live game sharing this project folder.
+var offscreen := OS.has_environment("GDEV_CONTROL_PORT")
 
 
 func _ready() -> void:
@@ -46,7 +52,9 @@ func _ready() -> void:
 			DirAccess.remove_absolute(frames_dir + "/" + f)
 	frames.sort()
 	_scan_files(true)
-	if DisplayServer.get_name() != "headless":
+	if offscreen and ResourceLoader.exists("res://addons/gdev/control.gd"):
+		add_child((load("res://addons/gdev/control.gd") as GDScript).new())
+	if DisplayServer.get_name() != "headless" and not offscreen:
 		stream_server = TCPServer.new()
 		if stream_server.listen(STREAM_PORT) == OK:
 			_log("live view: http://%s:%d/" % [OS.get_environment("HOSTNAME") if OS.has_environment("HOSTNAME") else "localhost", STREAM_PORT])
@@ -55,17 +63,21 @@ func _ready() -> void:
 	rd = RenderingServer.get_rendering_device()
 	if OS.has_environment("GDEV_FRAME_INTERVAL"):
 		frame_interval = float(OS.get_environment("GDEV_FRAME_INTERVAL"))
-	if DisplayServer.get_name() == "headless":
+	if DisplayServer.get_name() == "headless" or offscreen:
 		recording = false  # nothing is rendered, so there is nothing to record
 	_log("bridge ready (pid %d)" % OS.get_process_id())
 
 
 func _process(delta: float) -> void:
+	if not offscreen and not is_instance_valid(caption) and ResourceLoader.exists("res://addons/gdev/caption.gd"):
+		caption = (load("res://addons/gdev/caption.gd") as GDScript).new()
+		add_child(caption)
 	poll_t += delta
 	if poll_t >= 0.25:
 		poll_t = 0.0
 		_scan_files(false)
-		_poll_commands()
+		if not offscreen:
+			_poll_commands()
 	_reap_tasks()
 	_update_stream(delta)
 	fps_t += delta
@@ -102,6 +114,12 @@ func _scan_files(initial: bool) -> void:
 	_list_files("res://", paths)
 	var scene_changed := false
 	for path in paths:
+		# md5 of every script 4x a second cost ~14 ms on the Frame's main thread (VR hitches):
+		# only hash a file when its modified time changed.
+		var mt := FileAccess.get_modified_time(path)
+		if mtimes.get(path, -1) == mt and hashes.has(path):
+			continue
+		mtimes[path] = mt
 		var h := FileAccess.get_md5(path)
 		if hashes.get(path, "") == h:
 			continue
@@ -111,8 +129,8 @@ func _scan_files(initial: bool) -> void:
 			continue
 		if path.ends_with(".gd"):
 			_reload_script(path)
-		else:
-			scene_changed = true
+		elif ResourceLoader.has_cached(path) or path == get_tree().current_scene.scene_file_path:
+			scene_changed = true  # only scenes in use restart the game (a new game's files don't)
 	if scene_changed:
 		_log("scene file changed, restarting scene")
 		_restart()
@@ -240,28 +258,62 @@ func _update_stream(delta: float) -> void:
 		c.poll()
 		return c.get_status() == StreamPeerTCP.STATUS_CONNECTED)
 	stream_t += delta
+	if stream_busy and Time.get_ticks_msec() - stream_busy_since > 2000:
+		stream_busy = false  # a lost frame (e.g. its viewport freed on a scene change) must not freeze the stream
 	if stream_clients.is_empty() or stream_busy or stream_t < 1.0 / STREAM_FPS:
 		return
 	stream_t = 0.0
-	var img := _capture_viewport().get_texture().get_image()
-	if img == null:
-		return
 	stream_busy = true
-	tasks.append(WorkerThreadPool.add_task(func() -> void:
-		while img.get_width() >= 960:
-			img.shrink_x2()
-		img.convert(Image.FORMAT_RGB8)
-		_send_stream_frame.call_deferred(img.save_jpg_to_buffer(0.8))))
+	stream_busy_since = Time.get_ticks_msec()
+	# Read back asynchronously like _capture: a synchronous get_image() 25 times a second stalls the
+	# headset (missed VR frames show as black flashes).
+	var vp := _capture_viewport()
+	var rd_tex := RenderingServer.texture_get_rd_texture(vp.get_texture().get_rid())
+	if rd and rd_tex.is_valid():
+		var fmt := rd.texture_get_format(rd_tex)
+		if fmt.format == RenderingDevice.DATA_FORMAT_R8G8B8A8_UNORM or fmt.format == RenderingDevice.DATA_FORMAT_R8G8B8A8_SRGB:
+			var w := fmt.width
+			var h := fmt.height
+			var err := rd.texture_get_data_async(rd_tex, 0, func(data: PackedByteArray) -> void:
+				if data.size() != w * h * 4:
+					stream_busy = false
+					return
+				tasks.append(WorkerThreadPool.add_task(func() -> void:
+					var img := Image.create_from_data(w, h, false, Image.FORMAT_RGBA8, data)
+					_stream_encode(img))))
+			if err == OK:
+				return
+	var img := vp.get_texture().get_image()  # fallback (can hitch)
+	if img == null:
+		stream_busy = false
+		return
+	tasks.append(WorkerThreadPool.add_task(_stream_encode.bind(img)))
+
+
+func _stream_encode(img: Image) -> void:
+	while img.get_width() >= 960:
+		img.shrink_x2()
+	img.convert(Image.FORMAT_RGB8)
+	_send_stream_frame.call_deferred(img.save_jpg_to_buffer(0.8))
 
 
 func _send_stream_frame(jpeg: PackedByteArray) -> void:
 	stream_busy = false
 	var part := ("--gdevframe\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n" % jpeg.size()).to_utf8_buffer()
+	part.append_array(jpeg)
+	part.append_array("\r\n".to_utf8_buffer())
+	# NEVER block the main thread on a viewer: a background browser tab that stops reading filled the
+	# socket and put_data() froze the whole game. Send what fits; drop viewers that fall behind.
+	var keep: Array[StreamPeerTCP] = []
 	for c in stream_clients:
-		if c.get_status() == StreamPeerTCP.STATUS_CONNECTED:
-			c.put_data(part)
-			c.put_data(jpeg)
-			c.put_data("\r\n".to_utf8_buffer())
+		if c.get_status() != StreamPeerTCP.STATUS_CONNECTED:
+			continue
+		var r := c.put_partial_data(part)
+		if r[0] == OK and int(r[1]) == part.size():
+			keep.append(c)
+		else:
+			c.disconnect_from_host()  # too slow (or a half-sent frame): it can reconnect
+	stream_clients = keep
 
 
 func _capture_viewport() -> Viewport:

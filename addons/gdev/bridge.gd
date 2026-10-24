@@ -33,6 +33,9 @@ var stream_t := 0.0
 var stream_busy := false
 var stream_busy_since := 0
 var caption: Node  # "Claude:" captions (addons/gdev/caption.gd), created lazily
+# Offscreen test run (godot.ts / gdev-offscreen): a control server instead of the cmd file, no recording,
+# stream or captions, so it never touches the live game sharing this project folder.
+var offscreen := OS.has_environment("GDEV_CONTROL_PORT")
 
 
 func _ready() -> void:
@@ -49,7 +52,9 @@ func _ready() -> void:
 			DirAccess.remove_absolute(frames_dir + "/" + f)
 	frames.sort()
 	_scan_files(true)
-	if DisplayServer.get_name() != "headless":
+	if offscreen and ResourceLoader.exists("res://addons/gdev/control.gd"):
+		add_child((load("res://addons/gdev/control.gd") as GDScript).new())
+	if DisplayServer.get_name() != "headless" and not offscreen:
 		stream_server = TCPServer.new()
 		if stream_server.listen(STREAM_PORT) == OK:
 			_log("live view: http://%s:%d/" % [OS.get_environment("HOSTNAME") if OS.has_environment("HOSTNAME") else "localhost", STREAM_PORT])
@@ -58,20 +63,21 @@ func _ready() -> void:
 	rd = RenderingServer.get_rendering_device()
 	if OS.has_environment("GDEV_FRAME_INTERVAL"):
 		frame_interval = float(OS.get_environment("GDEV_FRAME_INTERVAL"))
-	if DisplayServer.get_name() == "headless":
+	if DisplayServer.get_name() == "headless" or offscreen:
 		recording = false  # nothing is rendered, so there is nothing to record
 	_log("bridge ready (pid %d)" % OS.get_process_id())
 
 
 func _process(delta: float) -> void:
-	if not is_instance_valid(caption) and ResourceLoader.exists("res://addons/gdev/caption.gd"):
+	if not offscreen and not is_instance_valid(caption) and ResourceLoader.exists("res://addons/gdev/caption.gd"):
 		caption = (load("res://addons/gdev/caption.gd") as GDScript).new()
 		add_child(caption)
 	poll_t += delta
 	if poll_t >= 0.25:
 		poll_t = 0.0
 		_scan_files(false)
-		_poll_commands()
+		if not offscreen:
+			_poll_commands()
 	_reap_tasks()
 	_update_stream(delta)
 	fps_t += delta
