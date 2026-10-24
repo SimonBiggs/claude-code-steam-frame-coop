@@ -172,6 +172,10 @@ Done means **zero `SCRIPT ERROR`s** locally, with `BOT_PLAYERS=6`, and networked
   real controllers is stopped by the test-throttle guard. Bots should still ignore real pads and resume if
   something pauses the game.
 - Add a fake-VR mode that moves the XR hands, so the VR code path runs headless too.
+- **Steam Deck**: a Deck alone is ONE full-screen player on its own controls (party games: core/party.gd drops the
+  keyboard seat; classic games: `seats.deck_solo()` in core/classic_seats.gd, which also claims a Deck pad that
+  connects late); friends' pads still drop in. `tests/deck_bot.tscn` (+ deck2..deck4) plays every game as a Deck
+  and checks it; `tests/arcade_bot.tscn` checks the arcade menu and pause menu at Deck and TV size.
 - For games with walls and furniture, check that every room, doorway and spawn can be reached on
   foot (see `tests/hide_and_seek_bot.gd`).
 

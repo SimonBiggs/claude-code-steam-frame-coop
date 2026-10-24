@@ -253,7 +253,6 @@ func _setup(mode: String) -> void:
 			ghost.main = self
 			mech.cockpit.add_child(ghost)
 	party.allow_slot0 = mode != "client" and vr_rig == null
-	party.allow_keyboard = net.machine_kind != "deck"  # a Steam Deck: its built-in controls are the one player
 	awards.set_player(0, "TITAN")
 	if mode != "client":
 		combat.hp_scale = test_hp_scale

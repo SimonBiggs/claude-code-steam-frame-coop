@@ -546,7 +546,7 @@ func _layout_views() -> void:
 	for p in players:
 		if p.has_meta("view"):
 			var c: SubViewportContainer = p.get_meta("view")
-			c.visible = p.active and not p.remote
+			c.visible = p.active and not p.remote and p.get("buddy") != true  # the buddy runner is driven here: no view of its own
 			if c.visible:
 				list.append(p)
 	var n := list.size()
@@ -622,7 +622,7 @@ func _build_vr_mirror(xr_cam: XRCamera3D) -> void:
 ## Any other controller drops in by pressing A.
 func _reserved_slots() -> Array:
 	var slots: Array = []
-	if players.size() > 1 and not players[1].remote:
+	if players.size() > 1 and not players[1].remote and not players[1].buddy:  # (the buddy runner takes no pad: a friend drops in)
 		slots.append(players[1])
 	if builder.flat:
 		slots.append(builder)
@@ -797,7 +797,7 @@ func on_player_activity_changed(p) -> void:
 	if p.active and not p.remote:
 		_ensure_view(p)
 	if p.has_meta("view"):
-		p.get_meta("view").visible = p.active and not p.remote
+		p.get_meta("view").visible = p.active and not p.remote and p.get("buddy") != true
 	if seats.joined(p):
 		p.remove_meta(ClassicSeats.WANT)
 	views_dirty = true

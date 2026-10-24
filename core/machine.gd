@@ -13,10 +13,18 @@ static func kind() -> String:
 	var xr := XRServer.find_interface("OpenXR")
 	if xr != null and xr.is_initialized():
 		return "frame"
-	var product := FileAccess.get_file_as_string("/sys/devices/virtual/dmi/id/product_name").strip_edges()
-	if product in ["Jupiter", "Galileo"]:
+	if not Engine.has_meta("machine_dmi_product"):  # read the hardware once (games ask every frame)
+		Engine.set_meta("machine_dmi_product", FileAccess.get_file_as_string("/sys/devices/virtual/dmi/id/product_name").strip_edges())
+	if str(Engine.get_meta("machine_dmi_product")) in ["Jupiter", "Galileo"]:
 		return "deck"
 	return "tv"
+
+
+## One player per screen (Simon: "when I play on the deck I normally just have one player per deck"): a handheld
+## starts local play with ONE player on its own controls, full screen; more pads drop in with A (split screen).
+## Party games: core/party.gd (no keyboard player). Classic games: core/classic_seats.gd deck_solo().
+static func one_player_screen() -> bool:
+	return kind() == "deck"
 
 
 static func join_target() -> String:

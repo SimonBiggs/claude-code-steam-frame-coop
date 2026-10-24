@@ -3,3 +3,5 @@
 .dev/
 *.tmp
 .claude/
+# thumbs are read from the raw bytes (arcade.gd _thumb), the editor import data is not needed
+arcade/thumbs/*.import

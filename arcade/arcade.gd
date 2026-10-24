@@ -697,7 +697,7 @@ func _can_quit() -> bool:
 
 var quit_panel: PanelContainer
 var quit_opener := -1  # the pad that opened the quit dialog (-2 keyboard); only it may answer (same rule as the pause menu)
-var quit_a_released := false
+var quit_a_held := {}  # pads already holding A when the dialog opened (UiKit.held_pads): they must let go first
 
 func _toggle_quit_menu() -> void:
 	if quit_panel and is_instance_valid(quit_panel):
@@ -751,7 +751,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		if not (quit_panel and is_instance_valid(quit_panel)):
 			quit_opener = start.device if start else -2
-			quit_a_released = false
+			quit_a_held = preload("res://core/ui_kit.gd").held_pads(JOY_BUTTON_A)
 		_toggle_quit_menu()
 		return
 	if quit_panel and is_instance_valid(quit_panel):
@@ -760,8 +760,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		if start and quit_opener >= 0 and start.device != quit_opener:
 			return  # another player's pad
 		if start and not start.pressed and start.button_index == JOY_BUTTON_A:
-			quit_a_released = true
-		if start and start.pressed and start.button_index == JOY_BUTTON_A and quit_a_released:
+			quit_a_held.erase(start.device)
+		if start and start.pressed and start.button_index == JOY_BUTTON_A and not quit_a_held.has(start.device):
 			var f := get_viewport().gui_get_focus_owner()
 			if f is BaseButton and quit_panel.is_ancestor_of(f):
 				get_viewport().set_input_as_handled()
