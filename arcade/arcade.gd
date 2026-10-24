@@ -72,7 +72,7 @@ const GAMES := [
 		"blurb": "Bend air, water, earth and fire to defend the island temple from the Shadow Raiders!"},
 	{"id": "treasure_dig", "cat": "party", "name": "TREASURE DIG", "scene": "res://games/treasure_dig/main.tscn",
 		"blurb": "Dig up treasure on a sandy island while the VR giant's magic telescope shows where it hides!"},
-	{"id": "paper_planes", "cat": "party", "name": "PAPER PLANES", "scene": "res://games/paper_planes/main.tscn",
+	{"id": "paper_planes", "multi": true, "cat": "party", "name": "PAPER PLANES", "scene": "res://games/paper_planes/main.tscn",
 		"blurb": "Throw and fly paper planes through floating hoops together. Rainbow hoops are worth 3!"},
 	{"id": "bubble_bath", "multi": true, "cat": "party", "name": "BUBBLE BATH", "scene": "res://games/bubble_bath/main.tscn",
 		"blurb": "Steer tiny boats to round up rubber ducks and sail them down the plug-hole, while the giant splashes up waves."},
