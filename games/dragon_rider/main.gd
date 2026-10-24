@@ -47,6 +47,7 @@ extends Node3D
 ##    sentences are gone. Each cue goes after two goes (cue_did / cue_learned).
 
 const WorldScript := preload("res://games/dragon_rider/world.gd")
+const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
 const UiKit := preload("res://core/ui_kit.gd")
 const DragonScript := preload("res://games/dragon_rider/dragon.gd")
 const CourseScript := preload("res://games/dragon_rider/course.gd")
@@ -2159,7 +2160,7 @@ func _leave(p) -> void:
 		if net.mode == "client":
 			net.send_action("leave", [p.index], 1)
 		elif not SIMPLE_MODE:
-			show_center("PLAYER %d LEFT" % (p.index + 1), 1.5)
+			show_center(Who.left(Who.seat(self, p.index)), 1.5)
 	_save_party()
 
 
@@ -2264,7 +2265,8 @@ func _check_join(delta: float) -> void:
 func on_client_joined() -> void:
 	if not seats.first_machine():
 		return  # each machine's gunners climb aboard when they ask ("join")
-	show_center("ALL ABOARD!" if SIMPLE_MODE else "THE GUNNERS CLIMBED ABOARD!", 1.5)
+	if SIMPLE_MODE:
+		show_center("ALL ABOARD!", 1.5)  # (no "they joined" line here: each seat's "join" says WHO, core/who.gd)
 	sound("join", -2.0)
 
 
@@ -2272,14 +2274,14 @@ func on_client_joined() -> void:
 func on_machine_left(peer: int) -> void:
 	var freed := seats.machine_left(peer)
 	if not freed.is_empty() and net.peer_count() > 0 and not SIMPLE_MODE:
-		show_center("PLAYER %d LEFT" % (int(freed[0]) + 1), 1.5)
+		show_center(Who.left(net.machine_name_of(peer)), 1.5)
 
 
 ## Host: the LAST machine left (multi_machine games get this only then).
 func on_client_left() -> void:
 	seats.all_left()
 	if not SIMPLE_MODE:
-		show_center("The TV gunners left - waiting for them to come back…", 0.0)
+		show_center(Who.left(net.last_left_name) + " - waiting for them to come back…", 0.0)
 
 
 func on_p2_action(action: String, args: Array, index: int = 1) -> void:
@@ -2299,14 +2301,14 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 		"join":
 			if not g.active:
 				g.set_active(true)
-				show_center("ALL ABOARD!" if SIMPLE_MODE else "PLAYER %d CLIMBED ABOARD!" % (index + 1), 1.5)
+				show_center("ALL ABOARD!" if SIMPLE_MODE else "%s climbed aboard!" % Who.seat(self, index), 1.5)
 				sound("join", -4.0, 1.2)
 				print("Net: player %d joined the game" % (index + 1))
 		"leave":
 			if g.active and index >= 1:
 				g.set_active(false)
 				if not SIMPLE_MODE:
-					show_center("PLAYER %d LEFT" % (index + 1), 1.5)
+					show_center(Who.left(Who.seat(self, index)), 1.5)
 		"restart":
 			if phase == "over":
 				get_tree().reload_current_scene()
@@ -2315,7 +2317,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 				phase_t = 0.0
 		"pause":
 			var paused: bool = args[0]
-			_set_pause_banner(paused, "A gunner opened the menu")
+			_set_pause_banner(paused, Who.paused_by(net.machine_name_of(net.sender_peer())))
 			get_tree().paused = paused
 
 

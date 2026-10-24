@@ -1,5 +1,6 @@
 extends Node3D
 const VrText := preload("res://core/vr_text.gd")
+const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
 const UiKit := preload("res://core/ui_kit.gd")
 ## Game controller: builds the arena, runs waves, camera and HUD.
 
@@ -887,7 +888,7 @@ func _request_join(p) -> void:
 		p.hp = p.stat("max_hp")
 		_ensure_view(p)
 		on_player_activity_changed(p)
-		_show_center("PLAYER %d JOINED!" % (p.index + 1), 1.5)
+		_show_center(Who.joined(Who.seat(self, p.index)), 1.5)
 		sound("revive", -4.0, 1.2)
 	_save_party()
 
@@ -902,7 +903,7 @@ func _leave(p) -> void:
 	elif p.active:
 		p.set_active(false)
 		on_player_activity_changed(p)
-		_show_center("PLAYER %d LEFT" % (p.index + 1), 1.5)
+		_show_center(Who.left(Who.seat(self, p.index)), 1.5)
 	_save_party()
 
 
@@ -1696,7 +1697,7 @@ func on_client_joined() -> void:
 
 ## Host: one more machine (the TV, a Steam Deck...). It asks for its seats itself.
 func on_machine_joined(peer: int, kind: String) -> void:
-	_show_center("%s JOINED" % ("DECK" if kind == "deck" else "TV"), 1.5)
+	_show_center(Who.joined(net.machine_name_of(peer)), 1.5)
 	if last_say != "" and Time.get_ticks_msec() - last_say_time < 20000:
 		net.event_to(peer, "say", [last_say])  # it was reconnecting when it was said
 
@@ -1705,7 +1706,7 @@ func on_machine_joined(peer: int, kind: String) -> void:
 func on_machine_left(peer: int) -> void:
 	var freed := seats.machine_left(peer)
 	if not freed.is_empty() and net.peer_count() > 0:
-		_show_center("P%d LEFT" % (int(freed[0]) + 1), 1.5)
+		_show_center(Who.left(net.machine_name_of(peer)), 1.5)
 
 
 ## Host: the LAST machine left (multi_machine games get this only then).
@@ -1714,9 +1715,9 @@ func on_client_left() -> void:
 	seats.all_left()
 	if SIMPLE_MODE:  # keep playing; the seats wake up again when a machine rejoins
 		solo = true
-		_show_center("TV LEFT", 1.5)
+		_show_center(Who.left(net.last_left_name), 1.5)
 		return
-	_show_center("The TV left - waiting for it to rejoin…", 0.0)
+	_show_center(Who.left(net.last_left_name) + " - waiting for them to come back…", 0.0)
 
 
 ## Client: player 3 joins by pressing fire on the second controller / keyboard / mouse; drop-in
@@ -1765,20 +1766,20 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 				p2.set_active(true)
 				p2.hp = p2.stat("max_hp")
 				p2.net_started = false
-				_show_center("PLAYER %d JOINED!" % (index + 1), 1.5)
+				_show_center(Who.joined(Who.seat(self, index)), 1.5)
 				sound("revive", -4.0, 1.2)
 				print("Net: player %d joined the game" % (index + 1))
 		"leave":
 			if p2.active:
 				p2.set_active(false)
-				_show_center("PLAYER %d LEFT" % (index + 1), 1.5)
+				_show_center(Who.left(Who.seat(self, index)), 1.5)
 				print("Net: player %d left the game" % (index + 1))
 		"restart":
 			if game_over:
 				get_tree().reload_current_scene()
 		"pause":
 			var paused: bool = args[0]
-			_set_pause_banner(paused, "P%d opened the menu" % (index + 1))
+			_set_pause_banner(paused, Who.paused_by(net.machine_name_of(net.sender_peer())))
 			get_tree().paused = paused
 
 

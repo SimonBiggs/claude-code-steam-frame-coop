@@ -1,5 +1,6 @@
 extends Node3D
 const VrText := preload("res://core/vr_text.gd")
+const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
 ## GIANT'S TABLE: a cosy village on a big wooden table. Waves of goblins climb up the table edges
 ## to steal the embers of the village campfire.
 ##  - Player 1 (VR, host) is the GIANT: grab goblins and boulders with your hands and throw them.
@@ -1639,7 +1640,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 					k.global_position = at
 					k.net_target = at
 				on_player_activity_changed(k)
-				_show_center("PLAYER %d JOINED!" % (index + 1), 1.5)
+				_show_center(Who.joined(Who.seat(self, index)), 1.5)
 				print("Net: player %d joined the game" % (index + 1))
 		"leave":
 			var k = players[index]
@@ -1650,7 +1651,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 				get_tree().reload_current_scene()
 		"pause":
 			var paused: bool = args[0]
-			_set_pause_banner(paused, "A knight opened the menu")
+			_set_pause_banner(paused, Who.paused_by(net.machine_name_of(net.sender_peer())))
 			get_tree().paused = paused
 		_:
 			do_knight_action(index, action, args)
@@ -1673,7 +1674,7 @@ func _knight_leaves(k) -> void:
 	k.revive_progress = 0.0
 	k.set_active(false)
 	on_player_activity_changed(k)
-	popup(k.global_position + Vector3.UP * 1.6, "P%d left - see you soon!" % (k.index + 1), k.color)
+	popup(k.global_position + Vector3.UP * 1.6, Who.left(Who.seat(self, k.index)) + " - see you soon!", k.color)
 	print("P%d left the game" % (k.index + 1))
 
 
@@ -1929,12 +1930,13 @@ func ember_home(e, msg: String) -> void:
 func on_client_joined() -> void:
 	if not seats.first_machine():
 		return  # another machine: its knights join when they ask ("join")
-	_show_center("KNIGHTS!" if SIMPLE_MODE else "THE KNIGHTS HAVE ARRIVED!", 1.5)
+	if SIMPLE_MODE:
+		_show_center("KNIGHTS!", 1.5)  # (no "they joined" line here: each seat's "join" says WHO, core/who.gd)
 
 
 func on_client_left() -> void:
 	if not SIMPLE_MODE:
-		_show_center("The knights left - waiting for them to come back…", 0.0)
+		_show_center(Who.left(net.last_left_name) + " - waiting for them to come back…", 0.0)
 	seats.all_left()  # each machine asks for its knights again when it reconnects
 
 

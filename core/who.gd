@@ -15,12 +15,28 @@ extends RefCounted
 
 ## The person / machine on a seat: "David", "TV (P3)", "P3" (local play). main: the game (main.net, and main.seats
 ## for classic games or main.party for core/party.gd games say which machine owns the seat).
-static func seat(main: Object, index: int) -> String:
-	var net: Object = main.get("net") if main != null else null
+## peer: the machine, when known; -1 (usual) works it out: the machine whose seats are being freed as it leaves,
+## else the seat's owner, else (on the host, inside an RPC such as on_p2_action: a seat is already free when its
+## "leave" arrives) the machine that sent it, else this machine.
+static func seat(main: Object, index: int, peer: int = -1) -> String:
+	var net: Variant = main.get("net") if main != null else null
+	for key in ["seats", "party"]:
+		var o: Variant = main.get(key) if main != null else null
+		if peer < 0 and o is Object and o.get("leaving") != null and int(o.get("leaving")) > 0:
+			peer = int(o.get("leaving"))  # its machine is leaving (classic_seats machine_left / party)
+	return seat_in(net if net is Object else null, seat_owners(main), index, peer)
+
+
+## seat() given the net and the {seat: owner peer} map directly (core/party.gd name_of uses this).
+static func seat_in(net: Object, owners: Dictionary, index: int, peer: int = -1) -> String:
 	if net == null or str(net.get("mode")) == "local" or not net.has_method("machine_name_of"):
 		return "P%d" % (index + 1)
-	var owners := seat_owners(main)
-	var peer := int(owners.get(index, owners.get(str(index), 1)))
+	if peer < 0:
+		peer = int(owners.get(index, owners.get(str(index), -1)))
+	if peer < 0 and str(net.get("mode")) == "host" and net.has_method("sender_peer"):
+		peer = int(net.sender_peer())
+	if peer <= 0:
+		peer = int(net.my_peer_id()) if net.has_method("my_peer_id") else 1
 	var mine := 0
 	for k in owners:
 		if int(owners[k]) == peer:
@@ -37,14 +53,16 @@ static func seat_label(machine: String, index: int, seats_on_machine: int = 1) -
 	return machine
 
 
-## {seat index: owner peer id} on any machine. Classic games: main.seats.owners(); core/party.gd games: the
-## party's "_seat_owners" store key. Seats missing here are the host's own (peer 1).
+## {seat index: owner peer id} on any machine: main.seats.owners() (classic games) or main.party.seat_owners()
+## (core/party.gd games). Classic games leave the host's own seats out (they count as this machine / the host).
 static func seat_owners(main: Object) -> Dictionary:
-	var seats: Object = main.get("seats") if main != null else null
-	if seats != null and seats.has_method("owners"):
-		return seats.owners()
-	var net: Object = main.get("net") if main != null else null
-	return net.state_get("_seat_owners", {}) if net != null and net.has_method("state_get") else {}
+	for key in ["seats", "party"]:
+		var o: Variant = main.get(key) if main != null else null
+		if o is Object and o.has_method("owners"):
+			return o.owners()
+		if o is Object and o.has_method("seat_owners"):
+			return o.seat_owners()
+	return {}
 
 
 ## "David joined!"  /  "David joined the crew!"

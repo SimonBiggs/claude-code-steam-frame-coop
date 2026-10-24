@@ -33,6 +33,7 @@ extends Node3D
 ## boop (a happy ding when it's back), a full party / someone leaving just a soft pop. Pause: PAUSED.
 
 const NetScript := preload("res://core/net.gd")
+const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
 const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
@@ -1033,7 +1034,7 @@ func _update_arrows() -> void:
 # --- Pause ---------------------------------------------------------------------------------------
 
 func on_pause_changed(paused: bool, by_slot: int) -> void:
-	var why := "Paused by %s  -  %s" % [party.name_of(by_slot), "wrist MENU: carry on" if vr_rig != null else "Start: menu"]
+	var why := "Paused by %s  -  %s" % [Who.seat(self, by_slot), "wrist MENU: carry on" if vr_rig != null else "Start: menu"]
 	if Defs.SIMPLE_MODE:
 		why = ""  # just PAUSED (no sentence)
 	if vr_rig != null:

@@ -38,6 +38,7 @@ extends Node3D
 ## Everything cut is only switched off: SIMPLE_MODE = false brings the full cup game back.
 
 const VrText := preload("res://core/vr_text.gd")
+const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
 const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
 const NetScript := preload("res://core/net.gd")
@@ -742,7 +743,7 @@ func _activate(p) -> void:
 	p.reset_match()
 	if state in ["aim", "runup", "flight", "result", "intro"] and not order.has(p.index):
 		order.append(p.index)  # gets a shot at the end of this round
-	_show_center(("PLAYER %d!" if SIMPLE_MODE else "PLAYER %d JOINS THE SHOOTOUT!") % (p.index + 1), 1.5, true, "")
+	_show_center(("PLAYER %d!" % (p.index + 1)) if SIMPLE_MODE else Who.joined(Who.seat(self, p.index), "the shootout"), 1.5, true, "")
 	sound("join", -4.0, 1.2, true)
 	on_player_activity_changed(p)
 	if state == "wait" and net.mode == "host" and net.connected:
@@ -766,7 +767,7 @@ func _leave(p) -> void:
 		net.send_action("leave", [], p.index)
 	elif p.active:
 		_deactivate(p)
-		_show_center("PLAYER %d LEFT" % (p.index + 1), 1.5)
+		_show_center(Who.left(Who.seat(self, p.index)), 1.5)
 	_save_party()
 
 
@@ -1920,7 +1921,7 @@ func on_client_joined() -> void:
 		else:
 			_begin_match()
 		return
-	_show_center("THE STRIKERS ARE HERE!", 1.5)
+	# (no "they joined" line: each seat's join says WHO, core/who.gd)
 	if state == "wait" or state == "over":
 		_begin_match()
 
@@ -1929,7 +1930,7 @@ func on_client_joined() -> void:
 func on_machine_left(peer: int) -> void:
 	var freed := seats.machine_left(peer)
 	if not freed.is_empty() and net.peer_count() > 0 and not SIMPLE_MODE:
-		_show_center("PLAYER %d LEFT" % (int(freed[0]) + 1), 1.5)
+		_show_center(Who.left(net.machine_name_of(peer)), 1.5)
 
 
 ## Host: the LAST machine left (multi_machine games get this only then).
@@ -1946,7 +1947,7 @@ func on_client_left() -> void:
 		cpu = true  # play on against the computer striker
 		_begin_match()
 		return
-	_show_center("The strikers left - waiting for them to come back…", 0.0)
+	_show_center(Who.left(net.last_left_name) + " - waiting for them to come back…", 0.0)
 
 
 func on_p2_action(action: String, args: Array, index: int = 1) -> void:
@@ -1962,7 +1963,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 		"leave":
 			if p.active:
 				_deactivate(p)
-				_show_center("PLAYER %d LEFT" % (index + 1), 1.5)
+				_show_center(Who.left(Who.seat(self, index)), 1.5)
 		"continue":
 			_on_continue()
 		"shoot":
@@ -1974,7 +1975,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 				_on_shoot(index, a, pw, cv, shot)
 		"pause":
 			var paused: bool = args[0]
-			_set_pause_banner(paused, "A TV player opened the menu")
+			_set_pause_banner(paused, Who.paused_by(net.machine_name_of(net.sender_peer())))
 			get_tree().paused = paused
 			if not paused:
 				keeper.trig_block = true

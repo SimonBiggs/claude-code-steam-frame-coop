@@ -39,6 +39,7 @@ extends Node3D
 ##    and a full crew / someone leaving / a lost controller is just a soft sound (and the bolt).
 
 const P := preload("res://games/rocket_workshop/puzzles.gd")
+const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
 const WorldScript := preload("res://games/rocket_workshop/world.gd")
 const PanelScript := preload("res://games/rocket_workshop/panel.gd")
 const ManualScript := preload("res://games/rocket_workshop/manual.gd")
@@ -2176,7 +2177,7 @@ func _activate(p) -> void:
 	p.net_started = false
 	if phase == "work" or phase == "ready" or phase == "intro":
 		time_left += 10.0  # a new crew member gets a little welcome time
-	_show_center(("PLAYER %d!" if SIMPLE_MODE else "PLAYER %d JOINED THE CREW!") % (p.index + 1), 1.5)
+	_show_center(("PLAYER %d!" % (p.index + 1)) if SIMPLE_MODE else Who.joined(Who.seat(self, p.index), "the crew"), 1.5)
 	sound("pop", -2.0, 1.4)
 	on_player_activity_changed(p)
 
@@ -2267,12 +2268,12 @@ func _update_lost_pads(delta: float) -> void:
 				_leave(p)
 
 
-## Someone left the crew: a soft puff in simple mode (no sentence), "PLAYER 3 LEFT" otherwise.
+## Someone left the crew: a soft puff in simple mode (no sentence), "David left" otherwise (core/who.gd).
 func _left_note(index: int) -> void:
 	if SIMPLE_MODE:
 		sound("pop", -10.0, 0.6)
 	else:
-		_show_center("PLAYER %d LEFT" % (index + 1), 1.5)
+		_show_center(Who.left(Who.seat(self, index)), 1.5)
 
 
 func on_player_activity_changed(p) -> void:
@@ -2289,7 +2290,8 @@ func on_player_activity_changed(p) -> void:
 # --- Networked co-op (see docs/GAME_DEV_GUIDE.md) ----------------------------
 
 func on_client_joined() -> void:
-	_show_center("HELLO!" if SIMPLE_MODE else "THE TV CREW JOINED!", 1.5)
+	if SIMPLE_MODE:
+		_show_center("HELLO!", 1.5)  # (no "they joined" line: each seat's join says WHO, core/who.gd)
 
 
 ## Host: one machine left: only its crew leave (and their spots become free).
@@ -2309,7 +2311,7 @@ func _seat_gone(p) -> void:
 func on_client_left() -> void:
 	seats.all_left()
 	if not SIMPLE_MODE:  # simple mode just carries on solo
-		_show_center("The TV crew left - waiting for them to come back…", 0.0)
+		_show_center(Who.left(net.last_left_name) + " - waiting for them to come back…", 0.0)
 
 
 func on_p2_action(action: String, args: Array, index: int = 1) -> void:
@@ -2334,7 +2336,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 				get_tree().reload_current_scene()
 		"pause":
 			var paused: bool = args[0]
-			_set_pause_banner(paused, "A TV player opened the menu")
+			_set_pause_banner(paused, Who.paused_by(net.machine_name_of(net.sender_peer())))
 			get_tree().paused = paused
 
 

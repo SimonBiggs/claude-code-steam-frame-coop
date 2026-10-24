@@ -55,6 +55,9 @@ var no_keys: Variant = -1
 var free_actions: Array = ["pause"]
 var index_in_args: Array = ["join"]
 var _cb := {}
+## Host: while a leaving machine's seats are being freed (machine_left / all_left), its peer id, so a "left"
+## message shown from deactivate() can still say WHO (core/who.gd); 0 otherwise.
+var leaving := 0
 
 
 func _init(game: Node, opts: Dictionary = {}) -> void:
@@ -218,10 +221,12 @@ func machine_left(peer: int) -> Array:
 			freed.append(int(k))
 	freed.sort()
 	_net().state_set("owners", o)
+	leaving = peer
 	for i in freed:
 		var p = player(i)
 		if p != null:
 			_deactivate(p)
+	leaving = 0
 	return freed
 
 
@@ -234,7 +239,9 @@ func all_left() -> void:
 	for k in o:
 		var p = player(int(k))
 		if p != null:
+			leaving = int(o[k])
 			_deactivate(p)
+	leaving = 0
 
 
 func _deactivate(p) -> void:

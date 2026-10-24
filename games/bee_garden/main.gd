@@ -1,5 +1,6 @@
 extends Node3D
 const VrText := preload("res://core/vr_text.gd")
+const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
 ## BEE GARDEN: a cosy co-op growing game (no fighting, just a sunny garden).
 ##  - Player 1 (VR, host) is the GARDENER at a big waist-high garden bed: plants seeds from the seed
 ##    tray, waters the plants with the watering can, picks ripe fruit and shoos greedy pests.
@@ -2191,7 +2192,8 @@ func poke_plant(i: int, push: Vector3) -> void:
 # --- Networked co-op (see docs/GAME_DEV_GUIDE.md) ----------------------------
 
 func on_client_joined() -> void:
-	_show_center("BUZZ BUZZ!" if SIMPLE_MODE else "THE BEES HAVE ARRIVED!  Buzz buzz!", 1.5)
+	if SIMPLE_MODE:
+		_show_center("BUZZ BUZZ!", 1.5)  # (no "they joined" line here: each seat's "join" says WHO, core/who.gd)
 
 
 ## Host: one machine left: only its bees fly home (and their seats become free).
@@ -2202,7 +2204,7 @@ func on_machine_left(peer: int) -> void:
 ## Host: the LAST machine left (multi_machine games get this only then).
 func on_client_left() -> void:
 	if not SIMPLE_MODE:
-		_show_center("The bees flew home - waiting for them to come back…", 0.0)
+		_show_center("%s flew home - waiting for them to come back…" % net.last_left_name, 0.0)
 	seats.all_left()  # each machine asks for its bees again when it reconnects
 
 
@@ -2223,7 +2225,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 					b.global_position = spawn_pos(index)
 					b.net_target = b.global_position
 				on_player_activity_changed(b)
-				_show_center("BUZZ! P%d" % (index + 1) if SIMPLE_MODE else "PLAYER %d JOINED THE HIVE!" % (index + 1), 1.5)
+				_show_center("BUZZ! P%d" % (index + 1) if SIMPLE_MODE else Who.joined(Who.seat(self, index), "the hive"), 1.5)
 				sound("buzz", -4.0, 1.0 + index * 0.05)
 				print("Net: player %d joined the game" % (index + 1))
 		"leave":
@@ -2234,7 +2236,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 				get_tree().reload_current_scene()
 		"pause":
 			var paused: bool = args[0]
-			_set_pause_banner(paused, "A bee opened the menu")
+			_set_pause_banner(paused, Who.paused_by(net.machine_name_of(net.sender_peer())))
 			get_tree().paused = paused
 
 
@@ -2243,7 +2245,7 @@ func _bee_leaves(b) -> void:
 	b.pollen_value = 0
 	b.set_active(false)
 	on_player_activity_changed(b)
-	popup(b.global_position + Vector3.UP * 0.4, "P%d flew home - see you soon!" % (b.index + 1), b.color)
+	popup(b.global_position + Vector3.UP * 0.4, "%s flew home - see you soon!" % Who.seat(self, b.index), b.color)
 	print("P%d left the game" % (b.index + 1))
 
 
