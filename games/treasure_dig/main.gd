@@ -50,7 +50,11 @@ var round_time := 120.0  ## seconds per round (bots shorten it)
 # --- The networking contract ---
 var net: Node
 var ready_to_play := false
+var flat_host := false  # this machine hosts without VR: slot 0 is a pad / keyboard player here, like local play
+var net_target := {}  # slot -> [pos, yaw]: where another machine's player is (smoothed towards every frame)
 var party: Party
+## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
+var multi_machine := true
 var split: SplitView
 var vr_rig: VrRig
 var save: Save
@@ -113,6 +117,8 @@ func _ready() -> void:
 	party = Party.new()
 	party.name = "Party"
 	add_child(party)
+	if net.machine_kind == "deck":
+		party.allow_keyboard = false  # a Steam Deck: one player on its built-in controls; more pads may drop in
 	party.player_joined.connect(_on_player_joined)
 	party.player_left.connect(_on_player_left)
 	save = Save.new()
@@ -141,8 +147,9 @@ func _ready() -> void:
 
 
 func _setup(mode: String) -> void:
+	flat_host = mode == "host" and not net.has_vr
 	_build_world()
-	if VrRig.wanted(mode):
+	if VrRig.wanted(mode) and not flat_host:
 		vr_rig = VrRig.new()
 		vr_rig.move_speed = 1.2
 		vr_rig.move_filter = _keep_in_sea
@@ -150,7 +157,7 @@ func _setup(mode: String) -> void:
 		vr_rig.place(Vector3(0.0, 0.0, ISLAND * S + 0.25), 0.0)
 		_build_telescope()
 		hints.set_vr_rig(vr_rig, self)
-	if mode != "host":
+	if mode != "host" or flat_host:  # every machine with a screen of its own (a flat host too)
 		split = SplitView.new()
 		add_child(split)
 		split.bind_party(party)
@@ -163,13 +170,9 @@ func _setup(mode: String) -> void:
 		group_cam.shot_look(beach.to_global(Vector3(0, 0, 9.0)) + Vector3.UP * 1.6, beach.global_position, 0.0)
 		_make_hud(-1, split.shared_hud())
 		hints.add_view(huds[-1], -1)
-		if mode == "client":
-			vr_avatar = VrRig.Avatar.new()
-			add_child(vr_avatar)
-			split.set_bubble(VrRig.build_mirror(self, vr_avatar.head, false))
-		elif vr_rig != null:
+		if vr_rig != null:
 			split.set_bubble(vr_rig.mirror)
-	party.allow_slot0 = mode == "local" and vr_rig == null
+	party.allow_slot0 = (mode == "local" and vr_rig == null) or flat_host
 	awards.set_player(0, "GIANT" if vr_rig != null or mode == "client" else party.name_of(0))
 	if mode != "client":
 		net.state_set("best", int(save.data["best"]))
@@ -358,6 +361,7 @@ func _on_player_left(slot: int) -> void:
 			(dict[slot] as Node).queue_free()
 			dict.erase(slot)
 	last_pos.erase(slot)
+	net_target.erase(slot)
 	if huds.has(slot):
 		var h: Control = huds[slot]
 		if is_instance_valid(h):
@@ -443,11 +447,39 @@ func _animate_avatars(delta: float) -> void:
 		last_pos[slot] = a.position
 
 
+## Host: a player on another machine moved.
 func on_remote_state(slot: int, pos: Vector3, yaw: float, _pitch: float) -> void:
-	if avatars.has(slot):
+	if avatars.has(slot) and not party.is_local(slot):
+		if not net_target.has(slot):
+			(avatars[slot] as Node3D).position = pos  # first update: no glide in from the spawn point
+		net_target[slot] = [pos, yaw]
+
+
+## Every machine: other machines' players glide to where their machine (or the host) says they are.
+func _follow_remote(delta: float) -> void:
+	var k := 1.0 - exp(-18.0 * delta)
+	for slot in net_target:
+		if not avatars.has(slot) or party.is_local(slot):
+			continue
 		var a: Node3D = avatars[slot]
-		a.position = pos
-		a.rotation.y = yaw
+		var t: Array = net_target[slot]
+		a.position = a.position.lerp(t[0], k)
+		a.rotation.y = lerp_angle(a.rotation.y, float(t[1]), k)
+
+
+## Host: one machine left. core/party.gd frees just its seats (player_left for each removes their
+## avatars, views and per-player state); only that machine's leftovers are dropped here.
+func on_machine_left(peer: int) -> void:
+	for slot in party.slots_of(peer):
+		net_target.erase(slot)
+
+
+## TV machine: the VR player as seen from here (only when the host has one), plus the little window into their view.
+func _make_vr_avatar() -> void:
+	vr_avatar = VrRig.Avatar.new()
+	add_child(vr_avatar)
+	if split != null:
+		split.set_bubble(VrRig.build_mirror(self, vr_avatar.head, false))
 
 
 func on_request(slot: int, action: String, args: Array) -> void:
@@ -619,8 +651,9 @@ func _bounce_lid() -> void:
 func _process(delta: float) -> void:
 	if not ready_to_play:
 		return
-	if net.mode != "host":
+	if split != null:
 		_move_local_players(delta)
+	_follow_remote(delta)
 	_animate_avatars(delta)
 	_animate_items(delta)
 	_animate_sparkles(delta)
@@ -994,7 +1027,7 @@ func _play_fx(fx_kind: String, args: Array) -> void:
 			Props.burst(beach, Vector3(0.0, 1.2, 0.0), Color(1.0, 0.85, 0.3), 20, 6.0, 0.18, 2.5)
 			_sound_at("kaching" if kind == Props.KIND_GEM else "coin", Vector3(0, 1, 0), 0.0, 1.0 + randf() * 0.15)
 			HudKit.score(self, beach.to_global(Vector3(0.0, 3.0, 0.0)), int(Props.VALUES[kind]),
-				{"color": party.color_of(by) if by > 0 else "gold", "size": 0.8})
+				{"color": party.color_of(by) if by > 0 or (by == 0 and avatars.has(0)) else "gold", "size": 0.8})
 			if avatars.has(by):
 				Creatures.anim(avatars[by]).play("cheer", 0.6)
 		"sparkle":
@@ -1135,14 +1168,35 @@ func make_snapshot() -> Array:
 	for s in sparkles:
 		sp.append(s[0])
 	var pose := vr_rig.pack_pose() if vr_rig != null else PackedFloat32Array()
-	return [pose, ids, info, pos, sp]
+	# Every player avatar (slot, position, yaw): each machine sees the other machines' players.
+	var av_slots := PackedByteArray()
+	var av_pos := PackedVector3Array()
+	var av_yaw := PackedFloat32Array()
+	for slot in avatars:
+		var a: Node3D = avatars[slot]
+		av_slots.append(int(slot))
+		av_pos.append(a.position)
+		av_yaw.append(a.rotation.y)
+	return [pose, ids, info, pos, sp, av_slots, av_pos, av_yaw]
 
 
 func apply_snapshot(s: Array) -> void:
-	if not ready_to_play or s.size() < 5:
+	if not ready_to_play or s.size() < 8:
 		return
+	var pose: PackedFloat32Array = s[0]
+	if pose.size() > 0 and vr_avatar == null:
+		_make_vr_avatar()
 	if vr_avatar != null:
-		vr_avatar.apply_pose(s[0])
+		vr_avatar.apply_pose(pose)
+	var av_slots: PackedByteArray = s[5]
+	var av_pos: PackedVector3Array = s[6]
+	var av_yaw: PackedFloat32Array = s[7]
+	for i in av_slots.size():
+		var slot: int = av_slots[i]
+		if avatars.has(slot) and not party.is_local(slot):
+			if not net_target.has(slot):
+				(avatars[slot] as Node3D).position = av_pos[i]
+			net_target[slot] = [av_pos[i], av_yaw[i]]
 	var ids: PackedInt32Array = s[1]
 	var info: PackedInt32Array = s[2]
 	var pos: PackedVector3Array = s[3]

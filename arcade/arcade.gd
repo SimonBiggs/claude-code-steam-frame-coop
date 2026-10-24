@@ -70,7 +70,7 @@ const GAMES := [
 		"blurb": "Build the tallest tower together: helpers push jelly blocks to the bouncy pad, the giant stacks them high."},
 	{"id": "elemental_bender", "cat": "action", "name": "ELEMENTAL BENDER", "scene": "res://games/elemental_bender/main.tscn",
 		"blurb": "Bend air, water, earth and fire to defend the island temple from the Shadow Raiders!"},
-	{"id": "treasure_dig", "cat": "party", "name": "TREASURE DIG", "scene": "res://games/treasure_dig/main.tscn",
+	{"id": "treasure_dig", "multi": true, "cat": "party", "name": "TREASURE DIG", "scene": "res://games/treasure_dig/main.tscn",
 		"blurb": "Dig up treasure on a sandy island while the VR giant's magic telescope shows where it hides!"},
 	{"id": "paper_planes", "multi": true, "cat": "party", "name": "PAPER PLANES", "scene": "res://games/paper_planes/main.tscn",
 		"blurb": "Throw and fly paper planes through floating hoops together. Rainbow hoops are worth 3!"},
