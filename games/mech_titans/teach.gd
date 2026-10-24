@@ -119,7 +119,7 @@ func add_view(slot: int, ui: Control) -> void:
 func make_join(ui: Control) -> Control:
 	var jc := CueScript.join_row()
 	ui.add_child(jc)
-	jc.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+	UiKit.pin(jc, Control.PRESET_BOTTOM_RIGHT, false)
 	jc.offset_left = -200
 	jc.offset_top = -74
 	jc.offset_right = -16
