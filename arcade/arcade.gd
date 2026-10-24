@@ -6,7 +6,7 @@ extends Node
 ## With a single game, ARCADE_GAME=<id>, or no lobby partner, it behaves like a plain local menu.
 
 const GAMES := [
-	{"id": "duo_arena", "cat": "action", "name": "DUO ARENA", "scene": "res://games/duo_arena/main.tscn",
+	{"id": "duo_arena", "multi": true, "cat": "action", "name": "DUO ARENA", "scene": "res://games/duo_arena/main.tscn",
 		"blurb": "Neon first-person co-op arena shooter"},
 	{"id": "ghost_lantern", "cat": "action", "name": "GHOST LANTERN", "scene": "res://games/ghost_lantern/main.tscn",
 		"blurb": "Spooky-cute ghost hunt: VR lantern reveals ghosts, TV players vacuum them up"},
