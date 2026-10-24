@@ -1,5 +1,6 @@
 extends Node3D
 const VrText := preload("res://core/vr_text.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 ## Game controller: builds the arena, runs waves, camera and HUD.
 
 const PlayerScript := preload("res://games/duo_arena/player.gd")
@@ -486,7 +487,7 @@ func _add_bubble(hud: Control, source: SubViewport, color: Color) -> void:
 	mat.set_shader_parameter("ring_color", color)
 	bubble.material = mat
 	hud.add_child(bubble)
-	bubble.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	UiKit.pin(bubble, Control.PRESET_TOP_RIGHT)
 	bubble.size = Vector2(300, 300)
 	bubble.position = Vector2(hud.size.x - 330, 30)
 	bubble.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_KEEP_SIZE, 30)
@@ -607,11 +608,11 @@ func _ensure_views_root() -> void:
 	bg.color = Color.BLACK
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(bg)
-	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(bg, Control.PRESET_FULL_RECT, false)
 	views_root = Control.new()
 	views_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(views_root)
-	views_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(views_root, Control.PRESET_FULL_RECT, false)
 
 
 ## One split-screen view (SubViewport + camera + HUD) for a local player, created once.
@@ -687,7 +688,7 @@ func _layout_views() -> void:
 		var c: SubViewportContainer = p.get_meta("view")
 		var col := k % cols
 		var row := int(floorf(float(k) / cols))
-		c.set_anchors_preset(Control.PRESET_TOP_LEFT)
+		UiKit.pin(c, Control.PRESET_TOP_LEFT)
 		c.position = Vector2(col * (cell.x + gap), row * (cell.y + gap))
 		c.size = cell
 		var vp := c.get_child(0) as SubViewport
@@ -1447,7 +1448,7 @@ func achievement_toast(title: String, desc: String, count: int, total: int) -> v
 		toast_label.add_theme_color_override("font_color", Color(1.0, 0.82, 0.3))
 		toast_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		center_label.get_parent().add_child(toast_label)
-		toast_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+		UiKit.pin(toast_label, Control.PRESET_TOP_WIDE, false)
 		toast_label.offset_top = 105
 		toast_label.offset_bottom = 230
 	toast_label.text = text
@@ -2189,19 +2190,19 @@ func _build_hud() -> void:
 
 	info_label = _make_label(30)
 	layer.add_child(info_label)
-	info_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+	UiKit.pin(info_label, Control.PRESET_TOP_WIDE, false)
 	info_label.offset_top = 18
 	info_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 
 	center_label = _make_label(60)
 	layer.add_child(center_label)
-	center_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(center_label, Control.PRESET_FULL_RECT, false)
 	center_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	center_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 
 	help_label = _make_label(22)
 	layer.add_child(help_label)
-	help_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+	UiKit.pin(help_label, Control.PRESET_TOP_WIDE, false)
 	help_label.offset_top = 110
 	help_label.offset_bottom = 210
 	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -2253,7 +2254,7 @@ func claude_say(text: String) -> void:
 		claude_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		claude_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		center_label.get_parent().add_child(claude_label)
-		claude_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
+		UiKit.pin(claude_label, Control.PRESET_CENTER_BOTTOM, false)
 		claude_label.offset_left = -760
 		claude_label.offset_right = 760
 		claude_label.offset_top = -250

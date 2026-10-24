@@ -794,11 +794,11 @@ func _ensure_views_root() -> void:
 	bg.color = Color(0.1, 0.18, 0.25)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(bg)
-	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(bg, Control.PRESET_FULL_RECT, false)
 	views_root = Control.new()
 	views_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(views_root)
-	views_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(views_root, Control.PRESET_FULL_RECT, false)
 
 
 ## One split-screen view (SubViewport + camera + HUD) per local player, created when they first play.
@@ -830,7 +830,7 @@ func _ensure_view(p) -> void:
 	var hud := Control.new()
 	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hud_layer.add_child(hud)
-	hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(hud, Control.PRESET_FULL_RECT, false)
 	var tag := ColorRect.new()
 	tag.color = p.color
 	tag.size = Vector2(14, 14)
@@ -842,7 +842,7 @@ func _ensure_view(p) -> void:
 	# Contextual "what to do now" tip, big and yellow at the bottom of each view.
 	var tip := _make_label(30)
 	hud.add_child(tip)
-	tip.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	UiKit.pin(tip, Control.PRESET_BOTTOM_WIDE, false)
 	tip.offset_top = -150
 	tip.offset_bottom = -76
 	tip.offset_left = 20
@@ -893,7 +893,7 @@ func _layout_views() -> void:
 		var c: SubViewportContainer = p.get_meta("view")
 		var col := k % cols
 		var row := k / cols
-		c.set_anchors_preset(Control.PRESET_TOP_LEFT)
+		UiKit.pin(c, Control.PRESET_TOP_LEFT)
 		c.position = Vector2(col * (cell.x + gap), row * (cell.y + gap))
 		c.size = cell
 		var vp := c.get_child(0) as SubViewport
@@ -2836,7 +2836,7 @@ func _build_hud() -> void:
 	add_child(layer)
 	center_label = _make_label(42)
 	layer.add_child(center_label)
-	center_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(center_label, Control.PRESET_FULL_RECT, false)
 	center_label.offset_left = 60
 	center_label.offset_right = -60
 	center_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -2844,7 +2844,7 @@ func _build_hud() -> void:
 	center_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	help_label = _make_label(20)
 	layer.add_child(help_label)
-	help_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	UiKit.pin(help_label, Control.PRESET_BOTTOM_WIDE, false)
 	help_label.offset_top = -64
 	help_label.offset_bottom = -12
 	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -3044,7 +3044,7 @@ func _update_cue(p, l: Label) -> void:
 		box.alignment = BoxContainer.ALIGNMENT_CENTER
 		box.add_theme_constant_override("separation", 14)
 		l.add_child(box)
-		box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		UiKit.pin(box, Control.PRESET_FULL_RECT, false)
 		box.set_meta("key", "")
 	var s := clampf(float(l.get_theme_font_size("font_size")) / 34.0, 0.5, 1.2) * 1.6
 	if str(box.get_meta("key")) != key or absf(float(box.get_meta("s", 0.0)) - s) > 0.01:

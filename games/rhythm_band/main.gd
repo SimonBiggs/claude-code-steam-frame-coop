@@ -463,11 +463,11 @@ func _ensure_views_root() -> void:
 	bg.color = Color(0.05, 0.04, 0.1)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(bg)
-	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(bg, Control.PRESET_FULL_RECT, false)
 	views_root = Control.new()
 	views_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(views_root)
-	views_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(views_root, Control.PRESET_FULL_RECT, false)
 
 
 ## One split-screen view (SubViewport + camera + drawn overlay) per local player, made when they join.
@@ -502,7 +502,7 @@ func _ensure_view(p) -> void:
 	hw.main = self
 	hw.p = p
 	hud_layer.add_child(hw)
-	hw.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(hw, Control.PRESET_FULL_RECT, false)
 	p.hud = hw
 	p.highway = hw
 
@@ -544,7 +544,7 @@ func _layout_views() -> void:
 		var c: SubViewportContainer = p.get_meta("view")
 		var col := k % cols
 		var row := k / cols
-		c.set_anchors_preset(Control.PRESET_TOP_LEFT)
+		UiKit.pin(c, Control.PRESET_TOP_LEFT)
 		c.position = Vector2(col * (cell.x + gap), row * (cell.y + gap))
 		c.size = cell
 		var vp := c.get_child(0) as SubViewport
@@ -2065,13 +2065,13 @@ func _build_hud() -> void:
 	add_child(layer)
 	center_label = _make_label(44)
 	layer.add_child(center_label)
-	center_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(center_label, Control.PRESET_FULL_RECT, false)
 	center_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	center_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	center_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	help_label = _make_label(18)
 	layer.add_child(help_label)
-	help_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	UiKit.pin(help_label, Control.PRESET_BOTTOM_WIDE, false)
 	help_label.offset_top = -30
 	help_label.offset_bottom = -6
 	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

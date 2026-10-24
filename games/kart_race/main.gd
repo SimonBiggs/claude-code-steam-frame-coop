@@ -818,11 +818,11 @@ func _ensure_views_root() -> void:
 	bg.color = Color(0.1, 0.12, 0.2)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(bg)
-	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(bg, Control.PRESET_FULL_RECT, false)
 	views_root = Control.new()
 	views_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(views_root)
-	views_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(views_root, Control.PRESET_FULL_RECT, false)
 
 
 ## One split-screen view (SubViewport + chase camera + HUD) per local kart, created when it joins.
@@ -856,7 +856,7 @@ func _ensure_view(p) -> void:
 	var hud := Control.new()
 	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hud_layer.add_child(hud)
-	hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(hud, Control.PRESET_FULL_RECT, false)
 	p.hud = hud
 	var tagc := ColorRect.new()
 	tagc.color = p.color
@@ -868,14 +868,14 @@ func _ensure_view(p) -> void:
 	p.hud_label.position = Vector2(40, 10)
 	p.place_label = _make_label(72)
 	hud.add_child(p.place_label)
-	p.place_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	UiKit.pin(p.place_label, Control.PRESET_TOP_RIGHT, false)
 	p.place_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	p.item_label = _make_label(28)
 	hud.add_child(p.item_label)
-	p.item_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
+	UiKit.pin(p.item_label, Control.PRESET_BOTTOM_LEFT, false)
 	p.hint_label = _make_label(40)
 	hud.add_child(p.hint_label)
-	p.hint_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	UiKit.pin(p.hint_label, Control.PRESET_CENTER, false)
 	p.hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	p.hint_label.add_theme_color_override("font_color", Color(1.0, 0.95, 0.5))
 	var bar_bg := ColorRect.new()
@@ -948,7 +948,7 @@ func _layout_views() -> void:
 		var c: SubViewportContainer = p.get_meta("view")
 		var col := k % cols
 		var row := k / cols
-		c.set_anchors_preset(Control.PRESET_TOP_LEFT)
+		UiKit.pin(c, Control.PRESET_TOP_LEFT)
 		c.position = Vector2(col * (cell.x + gap), row * (cell.y + gap))
 		c.size = cell
 		var vp := c.get_child(0) as SubViewport
@@ -1972,7 +1972,7 @@ func _update_cue(p, l: Label) -> void:
 		box.alignment = BoxContainer.ALIGNMENT_CENTER
 		box.add_theme_constant_override("separation", 18)
 		l.add_child(box)
-		box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		UiKit.pin(box, Control.PRESET_FULL_RECT, false)
 		box.set_meta("key", "")
 	box.offset_top = drop
 	box.offset_bottom = drop
@@ -2845,13 +2845,13 @@ func _build_hud() -> void:
 	add_child(layer)
 	center_label = _make_label(42)
 	layer.add_child(center_label)
-	center_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(center_label, Control.PRESET_FULL_RECT, false)
 	center_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	center_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	center_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	help_label = _make_label(20)
 	layer.add_child(help_label)
-	help_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	UiKit.pin(help_label, Control.PRESET_BOTTOM_WIDE, false)
 	help_label.offset_top = -40
 	help_label.offset_bottom = -8
 	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

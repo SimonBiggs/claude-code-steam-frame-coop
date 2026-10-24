@@ -492,11 +492,11 @@ func _ensure_views_root() -> void:
 	bg.color = Color(0.05, 0.07, 0.16)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(bg)
-	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(bg, Control.PRESET_FULL_RECT, false)
 	views_root = Control.new()
 	views_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(views_root)
-	views_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(views_root, Control.PRESET_FULL_RECT, false)
 
 
 ## One split-screen view (SubViewport + camera + HUD) per local player, created when they first play.
@@ -529,7 +529,7 @@ func _ensure_view(p) -> void:
 	var hud := Control.new()
 	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hud_layer.add_child(hud)
-	hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(hud, Control.PRESET_FULL_RECT, false)
 	var tag := ColorRect.new()
 	tag.color = p.color
 	tag.size = Vector2(14, 14)
@@ -544,7 +544,7 @@ func _ensure_view(p) -> void:
 	rl.text = "· REPLAY ·"
 	rl.add_theme_color_override("font_color", Color(1.0, 0.35, 0.3))
 	hud.add_child(rl)
-	rl.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	UiKit.pin(rl, Control.PRESET_TOP_RIGHT, false)
 	rl.offset_left = -220
 	rl.offset_right = -16
 	rl.offset_top = 12
@@ -609,7 +609,7 @@ func _layout_views() -> void:
 		var c: SubViewportContainer = p.get_meta("view")
 		var col := k % cols
 		var row := k / cols
-		c.set_anchors_preset(Control.PRESET_TOP_LEFT)
+		UiKit.pin(c, Control.PRESET_TOP_LEFT)
 		c.position = Vector2(col * (cell.x + gap), row * (cell.y + gap))
 		c.size = cell
 		var vp := c.get_child(0) as SubViewport
@@ -2346,13 +2346,13 @@ func _build_hud() -> void:
 	add_child(layer)
 	center_label = _make_label(42)
 	layer.add_child(center_label)
-	center_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.pin(center_label, Control.PRESET_FULL_RECT, false)
 	center_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	center_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	center_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	help_label = _make_label(19)
 	layer.add_child(help_label)
-	help_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	UiKit.pin(help_label, Control.PRESET_BOTTOM_WIDE, false)
 	help_label.offset_top = -64
 	help_label.offset_bottom = -12
 	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
