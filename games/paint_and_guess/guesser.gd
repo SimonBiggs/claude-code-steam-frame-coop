@@ -98,8 +98,6 @@ func is_local() -> bool:
 
 ## Host: a TV machine player's team-paint brush.
 func apply_remote_state(pos: Vector3, yaw_v: float, _pitch: float) -> void:
-	if main != null and main.has_method("remote_owner_ok") and not main.remote_owner_ok(index):
-		return  # many machines: only the machine that owns this seat drives it
 	tv_cursor = Vector2(pos.x, pos.y)
 	tv_down = yaw_v > 0.5
 

@@ -774,8 +774,6 @@ func _update_visual(delta: float) -> void:
 
 ## Host: a TV player's kart, following the positions the TV machine sends.
 func apply_remote_state(pos: Vector3, y: float, p: float) -> void:
-	if main != null and main.has_method("remote_owner_ok") and not main.remote_owner_ok(index):
-		return  # many machines: only the machine that owns this seat drives it
 	if tp_guard > 0.0:
 		return  # an old position from before a teleport
 	target_pos = pos
