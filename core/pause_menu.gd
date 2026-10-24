@@ -117,6 +117,11 @@ func _a_counts(device: int) -> bool:
 func _process(delta: float) -> void:
 	if panel != null and panel.visible:
 		_open_t += delta
+		# The game's own "PAUSED by P1" card (main.tv_banner: for a pause from another machine) sat under this menu,
+		# showing through its buttons: this menu already says PAUSED.
+		var b: Variant = main.get("tv_banner") if main != null and is_instance_valid(main) else null
+		if b is CanvasItem and is_instance_valid(b) and (b as CanvasItem).visible:
+			(b as CanvasItem).visible = false
 
 
 ## Party games: which slot pressed Start / Esc (-2 = the keyboard). Others: 1, as before.

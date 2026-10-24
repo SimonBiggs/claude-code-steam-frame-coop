@@ -5,14 +5,14 @@ extends Node
 ## - the Deck's own controls (a pad connecting, then pressing A) give ONE player and at most ONE view on screen;
 ## - a second pad pressing A still drops in a second player (split screen, 2 views);
 ## - zero SCRIPT ERRORs (dev.bots greps them).
-## Split in PARTS scenes (deck_bot, deck2_bot, deck3_bot: every 3rd game) so each fits dev.bots' 3600 frames.
-## DECK_BOT_ONLY=id,id runs just those games (in any part). Run: dev.bots.all({only: ["deck", "deck2", "deck3"]}), or
+## Split in PARTS scenes (deck_bot, deck2_bot .. deck4_bot: every 4th game) so each fits dev.bots' 3600 frames.
+## DECK_BOT_ONLY=id,id runs just those games (in any part). Run: dev.bots.all({only: ["deck", "deck2", "deck3", "deck4"]}), or
 ##   godot-test --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/deck_bot.tscn
 
 const BotKit := preload("res://tests/bot_kit.gd")
 const PAD1 := 41  # the Deck's built-in controls
 const PAD2 := 42  # a friend's pad
-const PARTS := 3
+const PARTS := 4
 
 ## Which share of the games this scene runs (0..PARTS-1).
 @export var part := 0
@@ -128,6 +128,20 @@ class Runner extends Node:
 		var p2 := local_players()
 		kit.assert_true(p2 == 2 or views() == 2, "%s: a second pad pressing A drops in a second player (%d players, %d views)" % [id, p2, views()])
 		kit.info("%s: deck alone %d view(s) / %d player(s); with a friend %d view(s) / %d player(s)" % [id, v1, p1, views(), p2])
+		# Start's pause menu: it alone says PAUSED (a game's own PAUSED card used to show through its buttons).
+		var menus := get_tree().get_nodes_in_group("pause_menu")
+		if not menus.is_empty() and is_instance_valid(menus[0]):
+			kit.allow_pause = true
+			menus[0]._open(PAD1)
+			await frames(10)
+			var paused_labels := 0
+			for l in get_tree().root.find_children("*", "Label", true, false):
+				if (l as Label).is_visible_in_tree() and (l as Label).text.strip_edges().begins_with("PAUSED"):
+					paused_labels += 1
+			kit.assert_true(paused_labels == 1, "%s: the pause menu says PAUSED once (%d PAUSED labels on screen)" % [id, paused_labels])
+			menus[0]._resume()
+			await frames(5)
+			kit.allow_pause = false
 		Input.joy_connection_changed.emit(PAD2, false)
 		Input.joy_connection_changed.emit(PAD1, false)
 		await frames(5)
