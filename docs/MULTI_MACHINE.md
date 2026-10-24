@@ -61,9 +61,34 @@ and gets `"multi": true` in `arcade/arcade.gd` GAMES (so the lobby may flat-host
 3. **Per-machine join**: re-syncs go to the newcomer (`event_to`), restarts only on the first machine.
 4. **Flat host**: with `net.mode == "host" and not net.has_vr`, slot 0 is a pad/keyboard player on the host
    (set `party.allow_slot0 = true` there, give it a camera/HUD like local play, no VR rig).
-5. **Classic games** (players array + on_p2_action): the host owns seat assignment. Keep owners in the
-   state store (`net.state_set("owners", {index: peer})`), accept "join" via `net.sender_peer()`, treat seats
-   owned by other machines as ghosts (mirrors) on clients, give pads only to owned seats, and free only
-   the leaving machine's seats in `on_machine_left`.
+5. **Classic games** (players array + on_p2_action): use `core/classic_seats.gd` (below), never a copy.
 6. Opt in (`multi_machine`, arcade `"multi": true`), then test: `dev.sweep({ net: true, clients: 2,
    only: [id] })` (host + 2 TV machines offscreen, sheets per machine), the bot test, and a flat-host run.
+
+## Classic games: core/classic_seats.gd
+
+One shared home for seat ownership in classic games (a `players` array + `on_p2_action`). The game makes
+one helper and passes only what is special about it; everything else (owners in the state store, join
+arbitration, ghosts, per-machine leave, Deck solo) lives in the helper. The API is at the top of the file.
+
+```gdscript
+const ClassicSeats := preload("res://core/classic_seats.gd")
+var seats: ClassicSeats  # core/net.gd finds it here
+# in _ready, right after add_child(net):
+seats = ClassicSeats.new(self, {"no_keys": PlayerScript.NO_KEYS, "free_actions": ["pause", "restart"],
+	"full": func() -> void: _show_center("All seats are taken!", 1.5, false)})
+```
+
+- Host: `on_p2_action` starts with `index = seats.host_action(action, args, index)` / `if index < 0: return`
+  (grants "join" or redirects it to a free seat, frees on "leave", drops other machines' actions).
+  core/net.gd also drops TV state / actions for seats the sender doesn't own (`seats.remote_ok`), so
+  player scripts need no owner checks. `on_machine_left(peer)`: `seats.machine_left(peer)` (returns the
+  freed seats); `on_client_left()`: `seats.all_left()`; `on_client_joined()`: start / restart only
+  `if seats.first_machine()`.
+- TV machine: `seats.sync()` every frame, `seats.request_joins(delta)` for seats marked `want_join`
+  (cleared only when `seats.joined(p)`: active AND ours), `if seats.handle_event(kind, args): return` at
+  the top of `apply_event`, `seats.foreign(i)` (another machine's seat: a ghost here), `seats.free_index()`.
+- Local: `if seats.deck_alone(): seats.deck_solo(0)`: a Deck on its own is one full-screen player on
+  its built-in controls.
+- Game specifics go in as options: `player(i)`, `is_local(p)`, `keys(p)`, `seat_free(p)`, `seat_limit()`,
+  `ghost(p, on)`, `moved(from, to)`, `full()`, `deactivate(p)`, `save()`, `layout()`, `ensure_view(p)`.
