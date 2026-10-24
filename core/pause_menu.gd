@@ -63,6 +63,17 @@ func _input(event: InputEvent) -> void:
 	var pad := event as InputEventJoypadButton
 	if pad and pad.pressed and pad.button_index == JOY_BUTTON_START and (panel.visible or _pad_in_play(pad.device)):
 		toggle = true
+	# A presses the highlighted button, B resumes: ui_accept has no pad button, so on a Deck / without Steam's
+	# keyboard mapping A did nothing ("I can't press A to quit game").
+	if pad and pad.pressed and panel.visible and not toggle:
+		if pad.button_index == JOY_BUTTON_A:
+			var f := get_viewport().gui_get_focus_owner()
+			if f is BaseButton and panel.is_ancestor_of(f):
+				get_viewport().set_input_as_handled()
+				(f as BaseButton).pressed.emit()
+			return
+		if pad.button_index == JOY_BUTTON_B:
+			toggle = true
 	if not toggle:
 		return
 	get_viewport().set_input_as_handled()

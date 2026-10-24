@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Arcade (Deck only)
+Comment=Play the arcade games on this Deck by itself
+Exec=/home/deck/DuoArena/run.sh --solo
+Icon=applications-games
+Terminal=false
+Categories=Game;

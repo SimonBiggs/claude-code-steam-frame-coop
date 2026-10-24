@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Claude Code
+Comment=Claude Code in a terminal
+Exec=/home/deck/DuoArena/claude-terminal.sh
+Icon=utilities-terminal
+Terminal=false
+Categories=Development;

@@ -1,0 +1,15 @@
+[Unit]
+Description=Claude Code with Remote Control (always on, in tmux session claude-rc)
+
+[Service]
+Type=forking
+Environment=TERM=xterm-256color
+Environment=BROWSER=true
+WorkingDirectory=%h
+ExecStart=/usr/bin/tmux new-session -d -s claude-rc -x 200 -y 50 %h/DuoArena/claude-rc.sh
+ExecStop=/usr/bin/tmux kill-session -t claude-rc
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=default.target
