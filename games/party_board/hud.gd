@@ -10,11 +10,22 @@ extends Node
 ## SIMPLE_MODE: almost no text. TV: a card per player with just their name and STARS, a "PIP'S TURN"
 ## pill (no hints), no round pill, no title screen text. VR: the scoreboard is a row of little gold
 ## stars per player (their colour dot bounces on their turn), nothing on the glove.
+## VISUAL TEACHING (SIMPLE_MODE, no how-to words): each TV seat on this machine has a picture cue
+## (cue.gd) on the shared view: a pulsing glowing button in that player's own controls plus a picture,
+## on a dark pill with a rim in their colour. On the board it sits just above their card: A / SPACE + an
+## arrow + a die (hit your dice block). In a minigame the seats' cues sit side by side low on the
+## screen: STICK / WASD + a runner catching a coin (Coin Catch), A / SPACE + a zooming kart (Kart Dash:
+## mash), A / SPACE + an arrow + a balloon (Balloon Pop). A pulsing bolt while that player's controller
+## is unplugged. Each goes once that player has done it twice (main.cue_did / cue_learned); a seat's
+## cues reset when its player leaves. The "A JOIN!" pill is a pulsing A + plus + person. The cue rows
+## are built once (when the view first has a size) and only shown / hidden after that.
 
 const UiKit := preload("res://core/ui_kit.gd")
 const HudKit := preload("res://core/hud_kit.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 const Rules := preload("res://games/party_board/rules.gd")
+const Party := preload("res://core/party.gd")
+const CueScript := preload("res://games/party_board/cue.gd")
 
 var main: Node
 var cards_row: HBoxContainer
@@ -42,6 +53,13 @@ var _marker_pid := -1
 var round_pill: Control
 var vr_stars: Array[Node3D] = []  # SIMPLE: one row of star meshes per player
 var _star_mesh: Mesh
+var seat_cues := {}  ## SIMPLE, TV: slot -> {"cue": cue.gd, "sig": String} (built once)
+var join_cue: Control  ## SIMPLE, TV: pulsing A + plus + person (a spare controller can join)
+var _cue_warm := 3  ## frames the cue rows are drawn (almost invisible) at load
+var _dice_seen := ""  ## "dice id:values" already counted for the roll cue
+var _mg_seen := -1  ## the minigame the scores below belong to
+var _mg_score := {}  ## slot -> last score seen (catch / pop cues)
+var _mash := {}  ## slot -> A presses in Kart Dash (every 5 = one "mash")
 
 
 func _ready() -> void:
@@ -71,7 +89,9 @@ func _build_tv(ui: Control) -> void:
 	rrow.add_child(final_badge)
 	turn_pill = UiKit.panel("card")
 	ui.add_child(turn_pill)
-	turn_pill.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	# anchors AND offsets: set_anchors_preset() alone kept the pill's old x (0), so "PIP'S TURN" was
+	# cut off at the left edge of the TV
+	turn_pill.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
 	turn_pill.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	turn_pill.offset_top = 18.0 * s
 	var tv := UiKit.vbox(2, s)
@@ -84,19 +104,40 @@ func _build_tv(ui: Control) -> void:
 	cards_row = UiKit.hbox(12, s)
 	cards_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	ui.add_child(cards_row)
-	cards_row.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	cards_row.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)  # centred (it sat at the left)
 	cards_row.offset_top = -18.0 * s
 	cards_row.offset_bottom = -18.0 * s
 	cards_row.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	join_pill = UiKit.panel("pill")
-	join_pill.add_child(UiKit.prompts([["A", "JOIN!" if main.simple else "on a spare controller: JOIN!"]], s))
-	ui.add_child(join_pill)
-	join_pill.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	join_pill.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	join_pill.offset_left = -24.0 * s
-	join_pill.offset_right = -24.0 * s
-	join_pill.offset_top = 22.0 * s
-	if not main.simple:
+	if main.simple:
+		# no words: a pulsing A + plus + person in the corner (a spare controller can join)
+		join_pill = CueScript.join_row()
+		ui.add_child(join_pill)
+		join_pill.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+		join_pill.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+		join_pill.offset_left = -200.0 * s
+		join_pill.offset_right = -24.0 * s
+		join_pill.offset_top = 18.0 * s
+		join_pill.offset_bottom = 82.0 * s
+		var tw := join_pill.create_tween().set_loops()
+		tw.tween_property(join_pill, "modulate:a", 0.5, 0.7)
+		tw.tween_property(join_pill, "modulate:a", 1.0, 0.7)
+		join_cue = join_pill
+		for slot in Party.MAX_SLOTS:
+			if slot == 0 and not main.party.allow_slot0:
+				continue  # slot 0 is the VR giant
+			var cue := CueScript.new()
+			cue.color = (main.color_of(slot) as Color).lightened(0.2)
+			ui.add_child(cue)
+			seat_cues[slot] = {"cue": cue, "sig": ""}
+	else:
+		join_pill = UiKit.panel("pill")
+		join_pill.add_child(UiKit.prompts([["A", "on a spare controller: JOIN!"]], s))
+		ui.add_child(join_pill)
+		join_pill.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+		join_pill.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+		join_pill.offset_left = -24.0 * s
+		join_pill.offset_right = -24.0 * s
+		join_pill.offset_top = 22.0 * s
 		_build_title(ui, s)
 
 
@@ -169,7 +210,7 @@ func _refresh_cards() -> void:
 		card.modulate = Color(1, 1, 1, 1) if on or cur < 0 else Color(0.82, 0.82, 0.86, 0.92)
 		var lift: Control = card.get_meta("lift")
 		lift.custom_minimum_size.y = (18.0 if on else 0.0) * s
-	if join_pill != null:
+	if join_pill != null and not main.simple:
 		join_pill.visible = ps.size() < 7 and main.net.mode != "host"
 
 
@@ -490,6 +531,11 @@ func _build_3d() -> void:
 
 func _process(delta: float) -> void:
 	_t += delta
+	if main.simple and main.tv_ui != null:
+		var _pc := Time.get_ticks_usec()
+		_tick_cues(delta)
+		if Time.get_ticks_usec() - _pc > 4000:
+			print("[perf] party board cues %d ms" % ((Time.get_ticks_usec() - _pc) / 1000))
 	var cur := int(main.net.state_get("cur", -1))
 	var phase := String(main.net.state_get("phase", ""))
 	if main.simple and vr_board != null:  # SIMPLE: whose turn it is: their colour dot bounces
@@ -515,6 +561,143 @@ func _process(delta: float) -> void:
 			steps_label.global_basis = Basis(Vector3.UP, atan2(-d.x, -d.z)).scaled(steps_label.global_basis.get_scale())
 	else:
 		steps_label.visible = false
+
+
+# --- SIMPLE_MODE picture cues (visual teaching) ----------------------------------------------------
+
+## Build one seat's cue rows once (again only if its controls or the view's size change).
+func _build_cue_rows(slot: int, cue: CueScript, kb: bool, sc: float) -> void:
+	cue.clear_rows()
+	cue.s = sc
+	var gold := Color(1.0, 0.9, 0.45)
+	var col: Color = main.color_of(slot)
+	var press := "SPACE" if kb else "A"
+	cue.add_row("plug", [UiKit.icon("bolt", Color(1.0, 0.8, 0.3), 64.0 * sc)])
+	var die := CueScript.die_icon(50.0 * sc)
+	cue.add_row("roll", [UiKit.glyph(press, sc), UiKit.icon("arrow_up", gold, 40.0 * sc), die], [die])
+	var run := CueScript.catch_icon(54.0 * sc, col)
+	cue.add_row("catch", [UiKit.glyph("WASD" if kb else "STICK", sc), run], [run])
+	var kart := CueScript.kart_icon(50.0 * sc, col)
+	cue.add_row("mash", [UiKit.glyph(press, sc), kart], [kart])
+	var bal := CueScript.balloon_icon(56.0 * sc)
+	cue.add_row("pop", [UiKit.glyph(press, sc), UiKit.icon("arrow_up", gold, 40.0 * sc), bal], [bal])
+
+
+## The cue key for a TV seat now ("" = none): plug, roll, catch, mash or pop.
+func cue_key(slot: int) -> String:
+	var party: Node = main.party
+	if not party.is_active(slot) or not main.is_local_tv(slot):
+		return ""
+	if party.is_lost(slot):
+		return "plug"
+	if main.get_tree().paused:
+		return ""
+	var phase := String(main.net.state_get("phase", ""))
+	if phase == "board":
+		var d: Dictionary = main.net.state_get("dice", {}) if main.net.state_get("dice", {}) is Dictionary else {}
+		if String(main.net.state_get("step", "")) == "roll" and int(d.get("pid", -1)) == slot and String(d.get("mode", "")) == "tv" \
+				and (d.get("values", []) as Array).size() < int(d.get("n", 1)) and not main.cue_learned(slot, "roll"):
+			return "roll"
+		return ""
+	if phase != "minigame":
+		return ""
+	var mg: Node = main.runner.mg
+	var mph := String(main.net.state_get("mg_phase", ""))
+	if mg == null or not is_instance_valid(mg) or not (mph == "howto" or mph == "play") or not (mg.pids as Array).has(slot):
+		return ""
+	var k := String({"coin_catch": "catch", "kart_dash": "mash", "balloon_pop": "pop"}.get(String(mg.cfg.get("id", "")), ""))
+	if k == "" or main.cue_learned(slot, k):
+		return ""
+	return k
+
+
+## What each local TV player has just done (it counts towards their cue going away).
+func _note_done() -> void:
+	var d: Dictionary = main.net.state_get("dice", {}) if main.net.state_get("dice", {}) is Dictionary else {}
+	var pid := int(d.get("pid", -1))
+	if String(d.get("mode", "")) == "tv" and main.is_local_tv(pid):
+		var n := (d.get("values", []) as Array).size()
+		var was := _dice_seen.split(":")
+		var before := int(was[1]) if was.size() == 2 and int(was[0]) == int(d.get("id", -1)) else 0
+		for i in maxi(0, n - before):
+			main.cue_did(pid, "roll")  # hit their dice block
+		_dice_seen = "%d:%d" % [int(d.get("id", -1)), n]
+	var mg: Node = main.runner.mg
+	if mg == null or not is_instance_valid(mg):
+		return
+	if int(main.runner.mg_seq) != _mg_seen:
+		_mg_seen = int(main.runner.mg_seq)
+		_mg_score.clear()
+		_mash.clear()
+	var id := String(mg.cfg.get("id", ""))
+	var mph := String(main.net.state_get("mg_phase", ""))
+	for slot in seat_cues:
+		if not main.is_local_tv(int(slot)) or not (mg.pids as Array).has(int(slot)):
+			continue
+		var sc := int(mg.score.get(slot, 0.0))
+		if id == "coin_catch" or id == "balloon_pop":
+			if _mg_score.has(slot) and sc > int(_mg_score[slot]) and mph == "play":
+				main.cue_did(int(slot), "catch" if id == "coin_catch" else "pop")  # caught a coin / popped a balloon
+			_mg_score[slot] = sc
+		elif id == "kart_dash" and (mph == "play" or mph == "howto") and not main.get_tree().paused \
+				and main.party.just_pressed(int(slot), "accept"):
+			_mash[slot] = int(_mash.get(slot, 0)) + 1
+			if int(_mash[slot]) % 5 == 0:
+				main.cue_did(int(slot), "mash")  # five quick A presses: one mash
+
+
+## Every frame (TV machines): each seat's picture cue, laid out on the shared view; the join cue.
+func _tick_cues(delta: float) -> void:
+	var ui: Control = main.tv_ui
+	_note_done()
+	var phase := String(main.net.state_get("phase", ""))
+	var showing: Array = []
+	for slot in seat_cues:
+		var v: Dictionary = seat_cues[slot]
+		var cue: CueScript = v["cue"]
+		var sc := cue.want_scale()
+		if sc <= 0.0:
+			continue
+		var kb: bool = main.party.device_of(int(slot)) == Party.KEYBOARD
+		var sig := "%.1f|%d" % [sc, int(kb)]
+		if String(v["sig"]) != sig:
+			v["sig"] = sig
+			_build_cue_rows(int(slot), cue, kb, sc)
+		v["key"] = cue_key(int(slot))
+		if String(v["key"]) != "":
+			showing.append(slot)
+	if _cue_warm > 0:
+		_cue_warm -= 1  # every row drawn (almost invisible) for a few frames at load
+		for slot in seat_cues:
+			(seat_cues[slot]["cue"] as CueScript).warm(_cue_warm > 0)
+		return
+	var n := showing.size()
+	for slot in seat_cues:
+		var v: Dictionary = seat_cues[slot]
+		var cue: CueScript = v["cue"]
+		var k := String(v.get("key", ""))
+		var i := showing.find(slot)
+		if i >= 0:
+			var card: Control = cards.get(slot, null)
+			if phase == "board" and card != null and is_instance_valid(card) and card.is_visible_in_tree():
+				var r := card.get_global_rect()
+				var o := ui.get_global_rect().position
+				cue.shrink = 1.0
+				var half := cue.row_size(k).x * 0.5 + 24.0 * cue.s  # keep the whole pill on screen
+				var cx := clampf(r.position.x - o.x + r.size.x * 0.5, half, maxf(half, ui.size.x - half))
+				cue.at = Vector2(cx, r.position.y - o.y - 16.0)
+			else:
+				cue.at = Vector2(ui.size.x * (float(i) + 0.5) / float(n), ui.size.y * 0.93)
+				cue.shrink = 1.0 if n <= 2 else (0.8 if n <= 3 else (0.62 if n <= 4 else 0.45))
+		cue.show_cue(k, delta)
+	if join_cue != null:
+		var spare := false
+		if main.party.player_count() < Party.MAX_SLOTS and not main.get_tree().paused:
+			for dev in main.party.connected_pads():
+				if int(main.party.owner_of(dev)) < 0:
+					spare = true
+					break
+		join_cue.visible = spare
 
 
 # --- Replicated state -------------------------------------------------------------------------------

@@ -353,6 +353,8 @@ func _on_phase(phase: String) -> void:
 				_make_scores()
 			if main.tv_ui != null and (_timer == null or not is_instance_valid(_timer)):
 				_timer = HudKit.timer(main.tv_ui, {"seconds": float(main.net.state_get("mg_time", 30)), "warn": 5.0})
+				_timer.offset_left = 0.0  # centred at the top (its anchors kept x = 0: the time was cut off)
+				_timer.offset_right = 0.0
 		"result":
 			_hide_howto()
 			_hide_demo()
@@ -432,7 +434,8 @@ func _show_demo(id: String) -> void:
 	_hide_demo()
 	_demo_on = true
 	var m := meta(id)
-	main.hud.banner(String(m.get("name", id.to_upper())), "", "info", SIMPLE_DEMO_T)
+	# gone before the 3-2-1 (it was drawn over the countdown numbers)
+	main.hud.banner(String(m.get("name", id.to_upper())), "", "info", maxf(1.2, _w(SIMPLE_DEMO_T) - 0.8))
 	var uses_a := false
 	for c in m.get("tv", []):
 		if String((c as Array)[0]) == "A":

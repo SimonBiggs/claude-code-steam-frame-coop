@@ -33,6 +33,17 @@ extends Node3D
 ## to touch (props.gd): trees and flowers wobble, the STAR spins, the windmill whirls, the volcano
 ## puffs, the lighthouse flashes, boats rock, clouds puff away, houses jiggle and tokens get a boop.
 ## Text: one short headline at a time. Everything cut stays behind the flag.
+## VISUAL TEACHING (SIMPLE_MODE, no how-to words at all): each TV seat gets a picture cue on the shared
+## view (cue.gd, drawn by hud.gd): a pulsing glowing button in that player's own controls plus a picture
+## (A / SPACE + an arrow + a die over their card when it's their roll; STICK / WASD + a runner catching a
+## coin, A / SPACE + a zooming kart, A / SPACE + an arrow + a balloon in the minigames; a pulsing bolt
+## while their controller is unplugged). Each goes once that player has done it twice (cue_did /
+## cue_learned); a seat's cues reset when its player leaves. Glowing arrows: one bobs over the STAR on
+## the first two rounds (where everyone is heading, every screen); for the VR giant one bobs over the
+## dice to grab until they've grabbed it twice, and one over the spot to touch in a minigame until it
+## has worked twice (with the ghost hand, ghost_hand.gd, unchanged). A spare controller sees a pulsing
+## A + plus + person; a lost controller is a soft pop (a happy ding when it's back), a full party /
+## someone leaving is a soft pop. Pause: just PAUSED (never a second one under the pause menu).
 
 const NetScript := preload("res://core/net.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
@@ -64,6 +75,7 @@ const CeremonyScript := preload("res://games/party_board/ceremony.gd")
 const UiMenu := preload("res://core/ui_menu.gd")
 const PropsScript := preload("res://games/party_board/props.gd")
 const GhostHand := preload("res://games/party_board/ghost_hand.gd")
+const CueScript := preload("res://games/party_board/cue.gd")
 
 const SIMPLE_MODE := true
 
@@ -136,12 +148,22 @@ var _cam_orbit := 0.0
 var _pause_vr: Node3D
 var _pause_tv: Control
 var _synced := false
+var pause_menu: Node
+var cue_done := {}  ## SIMPLE: slot -> {cue key: times done} (a picture cue / arrow goes once done twice)
+var star_arrow: Node3D  ## SIMPLE: bobs over the STAR on the first two rounds (every screen)
+var dice_arrow: Node3D  ## SIMPLE, VR: bobs over the dice to grab
+var touch_arrow: Node3D  ## SIMPLE, VR: bobs over the spot to touch in a minigame
+var _arrow_warm := 4  ## frames the arrows show at load (their pipelines are made then, not mid-game)
+var _held_was := -1
+var _giant_score := -1.0
+var _giant_mg := -1
 
 
 func _ready() -> void:
 	var menu := PauseMenuScript.new()
 	menu.main = self
 	add_child(menu)
+	pause_menu = menu
 	net = NetScript.new()
 	net.name = "Net"
 	net.main = self
@@ -152,6 +174,13 @@ func _ready() -> void:
 	add_child(party)
 	party.player_joined.connect(_on_player_joined)
 	party.player_left.connect(_on_player_left)
+	if simple:
+		# no sentences: soft sounds (and a pulsing bolt in that player's cue while the pad is away)
+		party.device_lost.connect(func(_slot: int) -> void: sfx.play("pop", -8.0, 0.6))
+		party.device_restored.connect(func(_slot: int) -> void: sfx.play("ding", -8.0, 1.3))
+		party.join_refused.connect(func(_dev: int, why: String) -> void:
+			if why == "full":
+				sfx.play("pop", -10.0, 0.7))
 	save = Save.new()
 	save.game_id = GAME_ID
 	save.version = 1
@@ -237,6 +266,8 @@ func _setup(mode: String) -> void:
 			ghost = GhostHand.new()
 			ghost.name = "GhostHand"
 			add_child(ghost)
+	if simple:
+		_build_arrows()
 	if mode != "client":
 		flow = TurnFlow.new()
 		flow.main = self
@@ -409,7 +440,7 @@ func token(pid: int) -> TokenScript:
 	t.hopped.connect(func(_tk: Node3D) -> void: sfx.play("jump", -10.0, 1.3))
 	tokens[pid] = t
 	if split != null and vr_rig == null:
-		HudKit.nameplate(t.body, name_of(pid), color_of(pid), 1.9, 0.42)
+		t.set_meta("plate", HudKit.nameplate(t.body, name_of(pid), color_of(pid), 1.9, 0.42))
 	return t
 
 
@@ -421,6 +452,9 @@ func _sync_tokens() -> void:
 		var pid := int(pd["pid"])
 		seen[pid] = true
 		var t := token(pid)
+		var plate: Label3D = (t.get_meta("plate") if t.has_meta("plate") else null)
+		if plate != null and is_instance_valid(plate) and plate.text != name_of(pid):
+			plate.text = name_of(pid)  # a CPU seat taken over: the name over the token follows the card
 		var sp := int(pd.get("space", 0))
 		if t.space == sp:
 			continue
@@ -456,6 +490,10 @@ func _spread_tokens() -> void:
 			else:
 				var a := TAU * float(i) / float(list.size()) + 0.4
 				t.offset = Vector3(cos(a), 0.0, sin(a)) * 0.55
+			# names of tokens sharing a space stack up instead of being drawn over each other
+			var plate: Label3D = (t.get_meta("plate") if t.has_meta("plate") else null)
+			if plate != null and is_instance_valid(plate):
+				plate.position.y = 1.9 + 0.5 * float(i if list.size() > 1 else 0)
 
 
 func _on_player_joined(slot: int, _device: int) -> void:
@@ -465,6 +503,9 @@ func _on_player_joined(slot: int, _device: int) -> void:
 
 
 func _on_player_left(slot: int) -> void:
+	cue_done.erase(slot)  # whoever takes this seat next sees the picture cues again
+	if simple:
+		sfx.play("pop", -10.0, 0.6)  # no sentence: a soft puff
 	if flow != null:
 		flow.on_human_left(slot)
 
@@ -616,6 +657,11 @@ func _process(delta: float) -> void:
 	if split != null:
 		_tv_input(delta)
 	_update_camera(delta)
+	if star_arrow != null:
+		var _pc := Time.get_ticks_usec()
+		_update_arrows()
+		if Time.get_ticks_usec() - _pc > 4000:
+			print("[perf] party board arrows %d ms" % ((Time.get_ticks_usec() - _pc) / 1000))
 	if net.mode != "client":
 		runner.host_tick(delta)
 		consume_presses()
@@ -777,6 +823,8 @@ func apply_snapshot(s: Array) -> void:
 func on_pause_changed(paused: bool, by_slot: int) -> void:
 	var who := "the Giant" if by_slot == 0 and has_vr() else party.name_of(by_slot)
 	var why := "Paused by %s  -  %s" % [who, "wrist MENU: carry on" if vr_rig != null else "START: menu"]
+	if simple:
+		why = ""  # just PAUSED (no sentence)
 	if vr_rig != null:
 		if paused:
 			_pause_vr = HudKit.vr_card(self, vr_rig.camera, "PAUSED", why, {"width": 1.1})
@@ -798,10 +846,115 @@ func on_pause_changed(paused: bool, by_slot: int) -> void:
 			_pause_tv.set_anchors_preset(Control.PRESET_CENTER)
 			_pause_tv.grow_horizontal = Control.GROW_DIRECTION_BOTH
 			_pause_tv.grow_vertical = Control.GROW_DIRECTION_BOTH
-		(_pause_tv.find_child("Why", true, false) as Label).text = why
-		_pause_tv.visible = paused
+		var wl := _pause_tv.find_child("Why", true, false) as Label
+		wl.text = why
+		wl.visible = why != ""
+		# the pause menu open on this machine already says PAUSED: don't draw a second one under it
+		var menu_open: bool = pause_menu != null and pause_menu.get("panel") != null and (pause_menu.panel as Control).visible
+		_pause_tv.visible = paused and not (simple and menu_open)
 		if paused:
 			UiKit.pop_in(_pause_tv)
+
+
+# --- SIMPLE_MODE: visual teaching (picture cues and glowing arrows instead of words) ------------------
+
+## Player `slot` has done `key` once more ("roll", "catch", "mash", "pop", "grab", "touch_<game>"); its
+## cue / arrow goes once done twice. Kept on the machine that draws that player's cue.
+func cue_did(slot: int, key: String) -> void:
+	var done: Dictionary = cue_done.get(slot, {})
+	done[key] = int(done.get(key, 0)) + 1
+	cue_done[slot] = done
+
+
+func cue_learned(slot: int, key: String) -> bool:
+	var done: Dictionary = cue_done.get(slot, {})
+	return int(done.get(key, 0)) >= 2
+
+
+## The glowing arrows, built once at load (one shared glowing material each).
+func _build_arrows() -> void:
+	star_arrow = CueScript.make_arrow(MeshKit.material(Color(1.0, 0.9, 0.35), 2.5), 1.6)
+	star_arrow.name = "StarArrow"
+	stage.add_child(star_arrow)  # board units
+	if vr_rig != null:
+		var amat := MeshKit.material(Color(0.45, 1.0, 0.55), 2.5)
+		dice_arrow = CueScript.make_arrow(amat, 0.07)
+		dice_arrow.name = "DiceArrow"
+		add_child(dice_arrow)  # metres
+		touch_arrow = CueScript.make_arrow(amat, 0.07)
+		touch_arrow.name = "TouchArrow"
+		add_child(touch_arrow)
+
+
+## Where the VR giant should reach in this minigame (arena units), or INF.
+func _touch_goal(mg: Node) -> Vector3:
+	match String(mg.cfg.get("id", "")):
+		"coin_catch":
+			return (mg.get_script().get_script_constant_map().get("CANOPY", Vector3(0, 4, 0)) as Vector3) + Vector3(0, 0.6, 1.5)
+		"kart_dash":
+			var k: Node3D = (mg.get("karts") as Dictionary).get(0, null)
+			return (k.position if k != null else Vector3.ZERO) + Vector3(0, 3.6, 2.0)
+		"balloon_pop":
+			return mg.bot_vr_goal() + Vector3(0, 1.0, 0)
+	return Vector3.INF
+
+
+## Every frame: the arrows only move and show / hide (nothing is made here).
+func _update_arrows() -> void:
+	var t := Time.get_ticks_msec() / 1000.0
+	var bob := absf(sin(t * 4.0))
+	if _arrow_warm > 0:
+		_arrow_warm -= 1  # shown for a few frames at load, so their first draw isn't mid-game
+		for ar: Node3D in [star_arrow, dice_arrow, touch_arrow]:
+			if ar != null:
+				ar.visible = _arrow_warm > 0
+				ar.position = Vector3(0, 0.5, 0) if ar == star_arrow else Vector3(0, TABLE_Y + 0.4, 0)
+		return
+	var paused := get_tree().paused
+	var phase := String(net.state_get("phase", ""))
+	# Where everyone is heading: the STAR (first two rounds).
+	star_arrow.visible = (phase == "board" or phase == "intro") and int(net.state_get("round", 0)) <= 2 \
+		and board.star_node != null and board.star_node.visible and not paused
+	if star_arrow.visible:
+		star_arrow.position = board.star_top() + Vector3(0, 0.5 + 0.35 * bob, 0)
+		star_arrow.rotation.y = t * 2.0
+	if vr_rig == null:
+		return
+	# VR: grab the dice here (until grabbed twice).
+	var held: int = dice._held
+	if held >= 0 and _held_was < 0:
+		cue_did(0, "grab")
+	_held_was = held
+	dice_arrow.visible = not dice.vr_dice.is_empty() and dice.vr_waiting() and held < 0 and not cue_learned(0, "grab") and not paused
+	if dice_arrow.visible:
+		var i := 0
+		for k in dice.vr_dice.size():
+			if dice._released_t[k] < 0.0:
+				i = k
+				break
+		dice_arrow.global_position = dice.pedestal(i) + Vector3(0, 0.07 + 0.02 * bob, 0)
+		dice_arrow.rotation.y = t * 2.0
+	# VR: touch here in a minigame (until it has worked twice in that game).
+	var mg: Node = runner.mg
+	var show := false
+	if mg != null and is_instance_valid(mg) and bool(mg.giant) and phase == "minigame" and not paused:
+		var id := String(mg.cfg.get("id", ""))
+		if int(runner.mg_seq) != _giant_mg:
+			_giant_mg = int(runner.mg_seq)
+			_giant_score = float(mg.score.get(0, 0.0))
+		var sc := float(mg.score.get(0, 0.0))
+		var step := 10.0 if id == "kart_dash" else 1.0  # karts score distance: one pump-burst = 10
+		if sc >= _giant_score + step and String(net.state_get("mg_phase", "")) == "play":
+			_giant_score = sc
+			cue_did(0, "touch_" + id)
+		var mph := String(net.state_get("mg_phase", ""))
+		if (mph == "howto" or mph == "play") and not cue_learned(0, "touch_" + id):
+			var g := _touch_goal(mg)
+			if g != Vector3.INF:
+				show = true
+				touch_arrow.global_position = mg.to_global(g) + Vector3(0, 0.03 * bob, 0)
+				touch_arrow.rotation.y = t * 2.0
+	touch_arrow.visible = show
 
 
 func _exit_tree() -> void:
