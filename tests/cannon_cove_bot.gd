@@ -8,6 +8,10 @@ extends Node
 ## the bot moves the fake hands to the glowing handle, squeezes the trigger, swings it and lets go
 ## (BOT_VR=1 does the same). In SIMPLE_MODE the fake VR gunner also rings the bell, pokes Polly and
 ## throws a spare cannonball overboard (props.gd) after the first shot.
+## Visual teaching (simple mode): records the picture cues each TV view shows (cue_grab, cue_shoot, ...),
+## the ones learned (cue_learned_*), the VR ghost hand (ghost_hand, ghost_let_go), practice miss arrows
+## and the join card picture, and prints "BOT: ERROR instruction text" if a prompt label, the VR hint,
+## the help panel or the Kraken's label shows any words.
 
 const World := preload("res://games/cannon_cove/world.gd")
 
@@ -25,6 +29,7 @@ var skipped := false
 var prop_step := 0  # simple mode, fake VR: 0 not yet, 1 bell, 2 parrot, 3 reach ball, 4 throw, 5 done
 var prop_t := 0.0
 var seen := {}
+var cues := {}  # simple mode: picture cues seen / learned
 
 
 func _wanted_deckhands() -> int:
@@ -49,6 +54,8 @@ func _physics_process(delta: float) -> void:
 		main.practice_hits = 99
 		print("Bot: skipping ahead to wave %d" % (main.wave + 1))
 	_note_features()
+	if main.simple:
+		_note_cues()
 	if OS.has_environment("CC_SINK") and t > 30.0 and not main.game_over and main.net.mode != "client" and not has_meta("sunk"):
 		set_meta("sunk", true)
 		main.water = 100.0  # tests the game-over screen with stats and awards
@@ -361,6 +368,8 @@ func _drive_gunner(p) -> void:
 		p.bot_aim_on = false
 		return
 	var pitch := atan((v * v - sqrt(disc)) / (g * r))
+	if main.simple and main.phase == "practice" and main.stats[0].shots == 0:
+		pitch -= 0.025  # the first practice shot falls short (shows the miss arrow)
 	p.bot_aim_on = true
 	p.bot_aim = Vector2(yaw, pitch)
 	var settled: bool = absf(c.aim_yaw - clampf(yaw, -c.YAW_LIMIT, c.YAW_LIMIT)) < 0.03 and absf(c.aim_pitch - pitch) < 0.03
@@ -443,8 +452,58 @@ func _musket_target(p):
 	return null
 
 
+## Visual teaching: picture cues instead of words; any instruction text in a tip spot is an error.
+func _note_cues() -> void:
+	var gh = main.ghost_hand
+	if gh != null and gh.visible:
+		cues["ghost_let_go" if gh.release_t >= 0.0 else "ghost_hand"] = true
+	if main.get_node_or_null("MissArrow") != null:
+		cues["miss_arrow"] = true
+	if main.help_panel != null and main.help_panel.visible:
+		_check_tip("TV help", main.help_label.text)
+	if main.vr_hint != null and main.vr_hint.visible:
+		_check_tip("VR hint", main.vr_hint.text)
+	for k in get_tree().get_nodes_in_group("krakens"):
+		if k.label.visible:
+			_check_tip("Kraken", k.label.text)
+	if main.view_grid != null:
+		for card in main.view_grid.get_children():
+			if card.has_meta("join_card") and card.visible:
+				if card.get_node_or_null("JoinCue") != null:
+					cues["join_card_cue"] = true
+				for c in card.get_children():
+					if c is Label:
+						_check_tip("join card", c.text)
+	for p in main.players:
+		if p.hud == null or p.ghost or p.remote:
+			continue
+		_check_tip("P%d prompt" % (p.index + 1), p.hud.prompt.text)
+		var box = p.hud.prompt.get_node_or_null("Cue")
+		if box != null and box.visible and str(p.get_meta("cue", "")) != "":
+			cues["cue_" + str(p.get_meta("cue", ""))] = true
+		var done: Dictionary = p.get_meta("cue_done", {})
+		for key in done:
+			if int(done[key]) >= 2:
+				cues["cue_learned_" + str(key)] = true
+
+
+func _check_tip(who: String, text: String) -> void:
+	if text == "":
+		return
+	if not cues.has("tip_text"):
+		print("BOT: ERROR instruction text on %s: %s" % [who, text.replace("\n", " / ")])
+	cues["tip_text"] = true
+
+
 func _exit_tree() -> void:
 	if main != null:
+		if main.simple:
+			var ks: Array = cues.keys()
+			ks.sort()
+			print("BOT CUES: mode=%s %s" % [main.net.mode, ",".join(PackedStringArray(ks))])
+			for p in main.players:
+				if p.has_meta("cue_done"):
+					print("BOT CUES: P%d done=%s" % [p.index + 1, p.get_meta("cue_done")])
 		var active := 0
 		for p in main.players:
 			if p.active:

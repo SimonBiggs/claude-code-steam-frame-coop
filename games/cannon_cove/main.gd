@@ -18,7 +18,25 @@ const VrText := preload("res://core/vr_text.gd")
 ##  - Off: hint panels, the help panel, gold / water / ammo numbers (the sea rises up the hull instead,
 ##    and the cannon's rack shows its balls), the treasure ship and golden balls, supply barrels,
 ##    streaks and bonuses, parrot speech bubbles, crew awards. Text: one short headline ("WAVE 2!").
+##  - No how-to words at all: each TV view shows picture cues low down (a pulsing glowing pad button +
+##    an icon, CUES, in that player's own controls: A / E / SHIFT, RT / CLICK / ENTER ...) that fade
+##    once the player has done it twice: A + cannonball at the pile, A + drop by a leak (hold), RT + skull
+##    for boarders / tentacles; the flat gunner gets RT + star (bang) and LB / RB + arrows for an empty cannon.
+##    The VR gunner gets the ghost hand (reach, squeeze, swing, let go; and opening its fingers over the
+##    handle when the ring is on the target, instead of "LET GO!"). A practice miss shows a glowing arrow
+##    from the splash towards the target instead of "TOO SHORT!" / "TOO FAR!".
 const SIMPLE_MODE := true
+const UiKit := preload("res://core/ui_kit.gd")
+
+## Simple mode picture cues on the TV views (no words): [pad buttons, icons, icon colour]. The buttons
+## follow the player's own controls (see _cue_buttons).
+const CUES := {
+	"grab": [["USE"], ["dot"], Color(0.72, 0.74, 0.82)],
+	"patch": [["USE"], ["drop"], Color(0.45, 0.8, 1.0)],
+	"shoot": [["FIRE"], ["skull"], Color(1.0, 0.92, 0.75)],
+	"fire": [["FIRE"], ["star"], Color(1.0, 0.75, 0.3)],  # BANG (a flame looked like the leak drop)
+	"switch": [["PREV", "NEXT"], ["arrow_left", "arrow_right"], Color(1.0, 0.45, 0.4)],
+}
 
 const World := preload("res://games/cannon_cove/world.gd")
 const PlayerScript := preload("res://games/cannon_cove/player.gd")
@@ -578,6 +596,37 @@ func spawn_ball(origin: Vector3, vel: Vector3, enemy: bool, visual_only: bool, m
 
 
 ## Colourful paper bits (celebrations).
+## Simple mode, target practice: a big glowing arrow over the splash of a miss, pointing at the target
+## and nudging towards it (too short, too far, to the side: the arrow shows which way). Fades in 2.2 s.
+func miss_arrow(from: Vector3, to: Vector3) -> void:
+	var dir := Vector3(to.x - from.x, 0.0, to.z - from.z)
+	if dir.length() < 0.5:
+		return
+	dir = dir.normalized()
+	var arrow := Node3D.new()
+	arrow.name = "MissArrow"
+	add_child(arrow)
+	var m := World.mat(Color(1.0, 0.95, 0.45, 0.85), 3.0)
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	# Built pointing +Z (a cone for the head, a fat shaft), then turned to face the target.
+	var shaft := World.cyl(arrow, 0.35, 0.35, 2.4, Vector3(0, 0, -0.6), m, 10)
+	shaft.rotation.x = PI / 2.0
+	var head := World.cyl(arrow, 0.0, 0.9, 1.4, Vector3(0, 0, 1.3), m, 12)
+	head.rotation.x = PI / 2.0
+	for mi in [shaft, head]:
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var start := Vector3(from.x, maxf(from.y, sea_level) + 2.2, from.z)
+	arrow.global_position = start
+	arrow.global_basis = Basis.looking_at(-dir, Vector3.UP)
+	var tw := arrow.create_tween()
+	for i in 3:
+		tw.tween_property(arrow, "global_position", start + dir * 2.5, 0.35).set_trans(Tween.TRANS_SINE)
+		tw.tween_property(arrow, "global_position", start, 0.3).set_trans(Tween.TRANS_SINE)
+	tw.tween_property(m, "albedo_color:a", 0.0, 0.3)
+	tw.tween_callback(arrow.queue_free)
+
+
 func confetti(pos: Vector3, broadcast: bool = true) -> void:
 	var cols := [Color(1.0, 0.3, 0.3), Color(1.0, 0.85, 0.2), Color(0.3, 0.8, 1.0), Color(0.5, 1.0, 0.4), Color(1.0, 0.5, 0.9)]
 	for i in 3:
@@ -881,6 +930,23 @@ func _make_join_card() -> Control:
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	l.add_theme_color_override("font_color", Color(1.0, 0.88, 0.45))
 	card.add_child(l)
+	if SIMPLE_MODE:
+		# No words: a pulsing A and a person with a plus (press A on a spare controller to join).
+		l.text = ""
+		var row := HBoxContainer.new()
+		row.name = "JoinCue"
+		row.alignment = BoxContainer.ALIGNMENT_CENTER
+		row.add_theme_constant_override("separation", 18)
+		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.add_child(UiKit.glyph("A", 2.0))
+		row.add_child(UiKit.icon("plus", Color(1.0, 0.88, 0.45), 56.0))
+		row.add_child(UiKit.icon("person", Color(1.0, 0.88, 0.45), 96.0))
+		for c in row.get_children():
+			(c as Control).size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		card.add_child(row)
+		var tw := row.create_tween().set_loops()
+		tw.tween_property(row, "modulate:a", 0.55, 0.7)
+		tw.tween_property(row, "modulate:a", 1.0, 0.7)
 	return card
 
 
@@ -1749,9 +1815,12 @@ func _load(p, c) -> void:
 		p.golden = false
 		c.golden += 1
 		sound("golden", -2.0)
-		popup(c.global_position + Vector3.UP * 1.6, "GOLDEN!" if SIMPLE_MODE else "GOLDEN BALL LOADED!", Color(1.0, 0.85, 0.2))
+		if SIMPLE_MODE:
+			coins_fx(c.global_position + Vector3.UP * 1.0)  # a golden sparkle (the word filled the gunner's view)
+		else:
+			popup(c.global_position + Vector3.UP * 1.6, "GOLDEN BALL LOADED!", Color(1.0, 0.85, 0.2))
 		parrot_say("SQUAWK! Fire the golden one!")
-	else:
+	elif not SIMPLE_MODE:  # simple: the new ball on the cannon's rack (and the clunk) say it, no giant word
 		popup(c.global_position + Vector3.UP * 1.6, "LOADED!", Color(0.6, 1.0, 0.6))
 
 
@@ -1971,12 +2040,10 @@ func on_ball_splash(pos: Vector3) -> void:
 	var vr: bool = players[0].vr or players[0].fake_vr
 	var tip := "SO CLOSE!"
 	if SIMPLE_MODE:
-		# One or two words where it splashed; the gold ring on the sea shows the rest.
-		if absf(along) > absf(across):
-			tip = "TOO SHORT!" if along < 0.0 else "TOO FAR!"
-		elif absf(across) > 2.5:
-			tip = "MISSED!"
-		popup(pos + Vector3.UP * 2.5, tip, Color(1.0, 1.0, 0.7))
+		# No words: a glowing arrow over the splash points the way to the target (every screen).
+		var aim: Vector3 = best.global_position
+		net.event("miss_arrow", [pos, aim])
+		miss_arrow(pos, aim)
 		return
 	if absf(along) > absf(across):
 		if along < 0.0:
@@ -2206,6 +2273,7 @@ var coach_point = null  # Vector3 or null: where the gunner's guide arrow points
 var coach_scale := 1.0
 var coach_tip := ""
 var coach_tip_t := 0.0
+var coach_let_go := false  # simple mode, VR: the ring is on the target, so the ghost hand shows "let go"
 var gunner_guide: Node3D
 
 
@@ -2255,11 +2323,12 @@ func _update_coach(delta: float) -> void:
 	coach_point = null
 	coach_scale = 1.0
 	if SIMPLE_MODE:
+		coach_let_go = false
+		if not game_over:
+			_simple_coach(p, c, vr, holding, focus)
 		_update_ghost_hand(p, c, vr, holding, focus)
-	if game_over:
 		return
-	if SIMPLE_MODE:
-		_simple_coach(p, c, vr, holding, focus)
+	if game_over:
 		return
 	var hop := "Press A (or flick the left stick)" if vr else "LB / RB (Q / E)"
 	if vr and not holding and stats[0].shots < 3:
@@ -2318,8 +2387,9 @@ func _update_coach(delta: float) -> void:
 			coach_text = "Its eyes are shut! Shoot the TENTACLES first"
 
 
-## Simple mode: the arrow does the coaching. The only words: "LET GO!" while the gold ring sits on the
-## target during the first shots (VR), and the flat gunner's buttons until they've fired a few times.
+## Simple mode: the arrow does the coaching, no words. While the gold ring sits on the target during the
+## first shots (VR) the ghost hand opens its fingers over the handle (coach_let_go); the flat gunner gets
+## picture cues on the TV (_simple_cue).
 func _simple_coach(p, c, vr: bool, holding: bool, focus: Array) -> void:
 	if vr and not holding and stats[0].shots < 3:
 		coach_point = c.handle_world()
@@ -2348,13 +2418,14 @@ func _simple_coach(p, c, vr: bool, holding: bool, focus: Array) -> void:
 	if vr and holding and stats[0].shots < 3:
 		var ring: Vector3 = c.land_ring.global_position
 		if Vector2(ring.x - fpos.x, ring.z - fpos.z).length() < 5.0:
-			coach_text = "LET GO!"
+			coach_let_go = true
 	elif stats[0].shots > 8 and phase != "practice" and focus[1] != "THE KRAKEN'S EYES":
 		coach_point = null
 
 
 ## Simple mode, VR: a see-through ghost hand at the handle shows reach, squeeze, swing, let go until the
-## gunner has fired a few shots (only when they're idle: never over a hand that's busy).
+## gunner has fired a few shots (only when they're idle: never over a hand that's busy). While they hold
+## the handle with the ring on the target, it hovers just above their hand and opens: "let go now".
 func _update_ghost_hand(p, c, vr: bool, holding: bool, focus: Array) -> void:
 	if not vr:
 		return
@@ -2367,6 +2438,10 @@ func _update_ghost_hand(p, c, vr: bool, holding: bool, focus: Array) -> void:
 	if not focus.is_empty():
 		var fp: Vector3 = focus[0]
 		aim = fp
+	if coach_let_go and holding and not game_over:
+		ghost_hand.show_release(true, c, get_process_delta_time())
+		return
+	ghost_hand.show_release(false, c, 0.0)
 	ghost_hand.show_demo(want, c, aim, get_process_delta_time())
 
 
@@ -2464,31 +2539,147 @@ func player_prompt(p) -> String:
 	return "Shoot boarders · fetch cannonballs · patch leaks"
 
 
-## Simple mode: one short line at most (the arrow shows where to go). A leading "!" makes it red.
-func _simple_prompt(p) -> String:
+## Simple mode: no words at the bottom of a TV view (picture cues instead, see update_cue).
+func _simple_prompt(_p) -> String:
+	return ""
+
+
+# --- Simple mode picture cues (no words) -----------------------------------------
+
+## Which picture cue this player's TV view needs right now (a key of CUES), or "" for nothing. The
+## arrow over the next job shows where to go; the cue shows which button. Each goes away once done twice.
+func _simple_cue(p) -> String:
+	if game_over or get_tree().paused or not p.active:
+		return ""
+	if net.mode == "client" and not synced:
+		return ""
 	if p.gunner:
 		var c = cannons[p.station]
 		if c.ammo <= 0:
-			return "!EMPTY!  " + ("LB / RB" if p.joy >= 0 or p.key_set < 0 else ("Q / E" if p.key_set == 0 else ", / ."))
-		if stats[0].shots >= 3:
+			for oc in cannons:
+				if oc.ammo > 0:
+					return _cue_if_new(p, "switch")  # (the arrow points at the loaded one)
 			return ""
-		if p.joy >= 0 or p.key_set < 0:
-			return "RT  FIRE"
-		return "SPACE  FIRE" if p.key_set == 0 else "ENTER  FIRE"
-	var use: String = p.use_name()
+		return _cue_if_new(p, "fire")
 	var lk = nearest_leak(p.global_position, LeakScript.RANGE)
 	if lk != null:
-		return "" if p.patching else "!HOLD  %s" % use
+		return "" if p.patching else _cue_if_new(p, "patch")
 	if p.carrying:
 		return ""
 	if p.global_position.distance_to(World.HOLD_POS) < 2.6:
 		for c in cannons:
 			if c.ammo < c.MAX_AMMO or golden_balls > 0:
-				return "PRESS  %s" % use
+				return _cue_if_new(p, "grab")
 		return ""
 	if not get_tree().get_nodes_in_group("boarders").is_empty() or not get_tree().get_nodes_in_group("tentacles").is_empty():
-		return "!%s  SHOOT" % p.fire_name()
+		return _cue_if_new(p, "shoot")
 	return ""
+
+
+func _cue_if_new(p, key: String) -> String:
+	var done: Dictionary = p.get_meta("cue_done", {})
+	return key if int(done.get(key, 0)) < 2 else ""
+
+
+## Counts what a local player has done, so their cues can go away: picking up a cannonball, starting
+## a patch, a musket shot, a cannon shot (flat gunner) and hopping to another cannon.
+func _track_cues(p) -> void:
+	var done: Dictionary = p.get_meta("cue_done", {})
+	var now := {"grab": p.carrying, "patch": p.patching, "shoot": p.recoil > 0.9 and not p.gunner}
+	for k in now:
+		if bool(now[k]) and not bool(p.get_meta("cue_was_" + k, false)):
+			done[k] = int(done.get(k, 0)) + 1
+		p.set_meta("cue_was_" + k, now[k])
+	if p.gunner:
+		var shots: int = stats[0].shots
+		var last: int = int(p.get_meta("cue_shots", shots))
+		if shots > last:
+			done["fire"] = int(done.get("fire", 0)) + shots - last
+		p.set_meta("cue_shots", shots)
+		var st: int = int(p.get_meta("cue_station", p.station))
+		if st != p.station:
+			done["switch"] = int(done.get("switch", 0)) + 1
+		p.set_meta("cue_station", p.station)
+	p.set_meta("cue_done", done)
+
+
+## The buttons in the player's own controls: a pad, or their keyboard set.
+func _cue_buttons(p, key: String) -> Array:
+	var pad: bool = p.joy >= 0 or p.key_set < 0
+	var out: Array = []
+	for b in CUES[key][0]:
+		match str(b):
+			"USE":
+				out.append(p.use_name())
+			"FIRE":
+				if p.gunner:
+					out.append("RT" if pad else ("SPACE" if p.key_set == 0 else "ENTER"))
+				else:
+					out.append(p.fire_name())
+			"PREV":
+				out.append("LB" if pad else ("Q" if p.key_set == 0 else ","))
+			"NEXT":
+				out.append("RB" if pad else ("E" if p.key_set == 0 else "."))
+	return out
+
+
+## hud.gd calls this every frame for a local TV player: the picture cue low in their view, a glowing pad
+## button and an icon, gently pulsing ("patch" grows slowly: hold it). It lives inside the (empty) prompt
+## label, so it follows its layout, and fades out once the player has got it.
+func update_cue(p, l: Label, delta: float) -> void:
+	if not game_over and not get_tree().paused and not p.ghost:
+		_track_cues(p)
+	var key := _simple_cue(p)
+	p.set_meta("cue", key)
+	var box: HBoxContainer = l.get_node_or_null("Cue")
+	if box == null:
+		box = HBoxContainer.new()
+		box.name = "Cue"
+		box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		box.alignment = BoxContainer.ALIGNMENT_CENTER
+		box.add_theme_constant_override("separation", 14)
+		l.add_child(box)
+		box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		box.set_meta("key", "")
+		box.set_meta("a", 0.0)
+	var s := 2.0
+	var a: float = float(box.get_meta("a", 0.0))
+	var shown: String = str(box.get_meta("key"))
+	if key != "":
+		var btns := _cue_buttons(p, key)
+		var sig := "%s/%s" % [key, ",".join(PackedStringArray(btns))]
+		if shown != sig:
+			box.set_meta("key", sig)
+			if shown.get_slice("/", 0) != key:
+				a = 0.0  # a new cue fades in
+			for c in box.get_children():
+				c.queue_free()
+			var cue: Array = CUES[key]
+			var icons: Array = cue[1]
+			for i in maxi(btns.size(), icons.size()):
+				if i < btns.size():  # LB + left arrow, RB + right arrow: each button beside its arrow
+					box.add_child(UiKit.glyph(str(btns[i]), s))
+				if i < icons.size():
+					box.add_child(UiKit.icon(str(icons[i]), cue[2], (40.0 if key == "switch" else 56.0) * s))
+			for c in box.get_children():
+				(c as Control).size_flags_vertical = Control.SIZE_SHRINK_CENTER  # a round A, not a tall pill
+		a = minf(1.0, a + delta * 4.0)
+	else:
+		a = maxf(0.0, a - delta * 2.0)  # the old cue fades away
+	box.set_meta("a", a)
+	box.visible = a > 0.01
+	if not box.visible:
+		return
+	var t := Time.get_ticks_msec() / 1000.0
+	var cue_key: String = str(box.get_meta("key")).get_slice("/", 0)
+	var kk := absf(sin(t * (6.0 if cue_key == "shoot" or cue_key == "switch" else 3.5)))
+	if cue_key == "patch":
+		kk = fmod(t, 1.2) / 1.2  # slowly grows, then lets go: HOLD it
+	box.modulate = Color(1, 1, 1, a * (0.75 + 0.25 * kk))
+	for c in box.get_children():
+		var ctl := c as Control
+		ctl.pivot_offset = ctl.size * 0.5
+		ctl.scale = Vector2.ONE * (1.0 + (0.3 if cue_key == "patch" else 0.15) * kk)
 
 
 func _emptiest_cannon() -> String:
@@ -2660,7 +2851,8 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 
 
 func _set_pause_banner(paused: bool, who: String) -> void:
-	_show_center("PAUSED\n" + who if paused else "", 0.0, false)
+	var title := "PAUSED" if SIMPLE_MODE else "PAUSED\n" + who  # simple: no explaining sentence
+	_show_center(title if paused else "", 0.0, false)
 	_update_vr_center()
 
 
@@ -2823,6 +3015,8 @@ func apply_event(kind: String, args: Array) -> void:
 			spawn_ball(args[0], args[1], args[2], true, args[3] if args.size() > 3 else false)
 		"confetti":
 			confetti(args[0], false)
+		"miss_arrow":
+			miss_arrow(args[0], args[1])
 		"coins":
 			coins_fx(args[0], false)
 		"firework":
@@ -2965,7 +3159,9 @@ func _update_hud() -> void:
 		if net.mode == "client" and not synced:
 			info_label.text = ""
 			return
-		info_label.text = "" if phase == "practice" or wave <= 0 else ("WAVE %d" % wave)
+		# Hidden while the big headline says the same thing ("WAVE 3!"): no duplicate.
+		var headline: bool = center_label.text.begins_with("WAVE") and center_label.modulate.a > 0.05
+		info_label.text = "" if phase == "practice" or wave <= 0 or headline else ("WAVE %d" % wave)
 		return
 	var show_help := phase == "practice" or wave <= 1
 	help_panel.modulate.a = clampf(help_panel.modulate.a + (dt if show_help else -dt * 0.7), 0.0, 1.0)
