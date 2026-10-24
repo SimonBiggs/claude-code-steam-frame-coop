@@ -723,10 +723,10 @@ func _show_toast(text: String, ms: int) -> void:
 		toast.add_theme_constant_override("outline_size", 6)
 		toast.modulate = Color(0.8, 0.95, 1.0, 0.85)
 		toast_layer.add_child(toast)
-		toast.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT, Control.PRESET_MODE_KEEP_SIZE)
-		toast.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+		# Bottom-LEFT: core/safe_apply.gd's "update ready" label owns bottom-right.
+		toast.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT, Control.PRESET_MODE_KEEP_SIZE)
 		toast.grow_vertical = Control.GROW_DIRECTION_BEGIN
-		toast.position -= Vector2(24, 18)
+		toast.position += Vector2(24, -18)
 	toast.text = text
 	toast_until = Time.get_ticks_msec() + ms
 

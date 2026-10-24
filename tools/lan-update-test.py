@@ -409,8 +409,16 @@ def t_dev(base):
     stop(ph, pj)
 
 
+def t_future(base):
+    """A bundle stamped more than FUTURE_SLACK (5 min) ahead of the receiver's clock is refused (it would otherwise
+    win every comparison for as long as it stays 'newer')."""
+    print("(i) bundle from the future")
+    g = make_newer(base, f"{W}/i-host", "steam-machine", NOW + 3600, "i")
+    refusal("i", "bundle stamped an hour ahead: refused", g, "stamped in the future")
+
+
 TESTS = {"a": t_update, "b": t_tamper, "c": t_source, "d": t_three_decks, "e": t_rollback, "f": t_midgame,
-         "g": t_revoke, "h": t_dev}
+         "g": t_revoke, "h": t_dev, "i": t_future}
 
 if __name__ == "__main__":
     want = sys.argv[1:] or list(TESTS)

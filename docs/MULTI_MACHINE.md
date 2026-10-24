@@ -111,3 +111,38 @@ seats = ClassicSeats.new(self, {"no_keys": PlayerScript.NO_KEYS, "free_actions":
 - A flat host's slot-0 player needs a controller too (`_auto_bind_pad` / base slots: host and not VR).
 - Check: `godot-test --headless --path . -s res://tests/classic_seats_test.gd` (every multi_machine classic
   game uses the helper, no seat-code copies, arcade `"multi"` matches, the helper's arbitration).
+
+## Updates over the home network (core/lan_update.gd)
+
+Game code travels inside the arcade: whoever hosts a lobby passes its version to the machines that join, so every
+machine in a lobby runs the same code, with no SSH or devkit pairing (Simon: "it updates via the host and only over the
+local network"). It works with the Steam Machine switched off: any machine holding a newer signed version serves it.
+
+- **Signed.** `tools/duo-update-bundle GAME_DIR` writes `GAME_DIR/.update/manifest.json` (timestamp, signer, content
+  hash, every file's SHA-256) + `manifest.sig` (RSA-SHA256). Signers: the Steam Machine = the ROOT (public key pinned in
+  `addons/lan_update/root.pub.pem`) and code signers listed in `core/lan_update/signers.json` (+ `.sig`), a list only
+  the root can sign (`tools/duo-update-signers`). Private keys live only in `~/.config/duo-arena/update-key/` on their
+  own machine (`tools/duo-update-keygen NAME`), never committed or copied. `duo-deploy` signs the live copy;
+  a signer Deck ships with `tools/duo-update-ship`. Other machines can RELAY a signed update but not make one.
+- **Newest wins**: versions compare by (timestamp, signer, content hash); a bundle stamped more than 5 minutes in the
+  future is refused. A joiner takes a newer version from its lobby host; the host takes a newer version from a member
+  (so a fresh deploy spreads both ways). A revoked signer's bundles are refused by every machine that has seen the root's
+  newer signer list (lists are adopted only with the root's signature and only if newer).
+- **Local, host only**: transfers run over the arcade lobby's ENet connection, only in the lobby, only with private
+  addresses (10/8, 172.16/12, 192.168/16, link-local, loopback), and a joiner only from peer 1 (its host). Everything
+  else is refused and logged (`LanUpdate: REFUSED ...`). Limits: 4000 files, 8 MB/file, 64 MB total, 1 MB/s served.
+- **Only game code**: core/ games/ arcade/ tests/ arcade.tscn. Never addons/ (gdev can't hot-reload itself; the guard
+  and the root key must survive a bad update), project.godot or the signer list (that travels on its own signature).
+- **Safe apply**: only changed files are fetched into `res://.update/staging` and checked against the signed hashes,
+  then swapped in (temp file + rename) while the arcade MENU shows, never during a game. The old files go to
+  `res://.update/backup` first. Every changed script is compiled at once; an error rolls everything back and that
+  version is never fetched again. `addons/lan_update/guard.gd` (autoload LanUpdateGuard) also rolls back if the arcade
+  isn't running 15 s after an update or the game was started 3 times without getting healthy. The gdev bridge then
+  hot-reloads the new files.
+- Copies run from a git checkout (the TV's live copy, worktrees) are where code is made: they serve but never take
+  updates (`DUO_UPDATE_RECEIVE=1` overrides). The source of truth is git: a signer Deck commits and pushes to the Steam
+  Machine's repo before `duo-update-ship`.
+- Tests: `godot-test --headless --path . -s res://tests/lan_update_test.gd` (addresses, paths, version order, every
+  script passes the post-apply compile check) and `tools/lan-update-test` (host + joiners as separate processes with
+  their own game copies and test keys on a private port: update, tampering, forged/unknown/revoked signers, wrong
+  machine, public address, three Decks with no Steam Machine, rollback, boot guard, mid-game deferral, future stamps).
