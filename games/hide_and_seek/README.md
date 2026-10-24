@@ -7,8 +7,7 @@ through the living room's garden door.
 **Three maps take turns** (Abigail's idea): every new round, and every new launch, moves on to the next
 one: THE HOUSE (`world.gd`), THE CASTLE (`map_castle.gd`: armoury, great hall, kitchen, bedchamber, an
 open-sky courtyard, library, throne room, tower room) and THE SPACESHIP (`map_ship.gd`: crew quarters,
-mess hall, cargo bay, corridor, engine room, bridge with a starry window, hydroponics). The round banner
-names the map; the host sends the map index in the snapshot so the TV builds the same one. Round types
+mess hall, cargo bay, corridor, engine room, bridge with a starry window, hydroponics). The host sends the map index in the snapshot so the TV builds the same one. Round types
 shift by one each lap, so every map gets every round type.
 
 - **Player 1, the SEEKER (VR on the Steam Frame, or flat in split screen).** Counts to 20 with eyes
@@ -41,3 +40,11 @@ Test: `godot --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/hi
 **connectivity check**: every room, doorway, hiding spot and spawn must be walkable from the counting spot
 without jumping, for both the seeker's and a hider's size (prints `CONNECTIVITY OK` / `FAIL`).
 `BOT_CONN_ONLY=1` runs just that check.
+
+## Visual teaching
+
+No how-to text: each TV view shows a big word at most (HIDE!, SEEK!, the countdown) and a picture cue
+low down (`cue.gd`, built in `hud.gd`): the player's own button glyph plus a torch, a critter turning
+into a box, a squeak, a sniffing nose or the jail bell, and a glowing pointer to the bell (friends in
+jail) or the nearest star. Each action cue retires once that player has done it twice. The VR seeker
+gets 3D cues (TRIGGER over the torch while a hider is in the beam, a nose ball on the left mitten).

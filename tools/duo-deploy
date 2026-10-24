@@ -27,6 +27,8 @@ if ssh -o ConnectTimeout=4 -o BatchMode=yes -i $K steamos@frame true 2>/dev/null
 else
   echo "Steam Frame offline: run 'duo-deploy-frame' when it's back" >&2
 fi
+# Simon's Steam Deck plays too (another TV-style player, or on its own): ~/DuoArena via duo-deploy-deck.
+duo-deploy-deck >/dev/null || true
 cd "$LIVE" && git add -A && git commit -q -m "$msg
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" && git log --oneline -1
