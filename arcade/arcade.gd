@@ -145,7 +145,8 @@ var lobby_id := randi()  # flat hosts that start together: the higher id gives w
 var _finding := 0.0  # seconds left looking for a lobby before hosting one
 ## Counters for tests (tests/arcade_lobby_bot.gd): menu rebuilds, selections sent / received. A storm of either is the
 ## sign of machines echoing each other's choices.
-var stats := {"show_category": 0, "sync_out": 0, "sync_in": 0}
+var stats := {"show_category": 0, "sync_out": 0, "sync_in": 0, "relay": 0}
+var _sel_seq := 0  # how many choices this machine has sent (see _sync_selection)
 
 
 func _ready() -> void:
@@ -218,7 +219,7 @@ func _host_lobby(with_vr: bool) -> void:
 			ip = (multiplayer.multiplayer_peer as ENetMultiplayerPeer).get_peer(id).get_remote_address()
 		machines[id] = {"kind": "tv", "ip": ip}
 		_lobby_status()
-		_sync_selection.rpc(selected))
+		_sync_selection.rpc_id(id, selected, 1, 0))  # the newcomer shows what everyone has chosen
 	multiplayer.peer_disconnected.connect(func(id: int) -> void:
 		machines.erase(id)
 		_lobby_status())
@@ -342,9 +343,24 @@ func _lobby_address() -> String:
 	return OS.get_environment("DUO_JOIN")
 
 
-@rpc("any_peer", "call_remote", "unreliable_ordered")
-func _sync_selection(index: int) -> void:
+## One shared selection for every machine in the lobby. The lobby host puts all choices in ONE order: a joiner's own
+## choice goes only to the host, which applies it and passes it on to everyone (the chooser too), so every machine
+## ends on the host's last word. Before, each machine told all the others directly: two machines choosing at the same
+## moment each got the other's choice last and stayed apart for good (tests/arcade_lobby_bot.gd, 2026-10-24).
+## origin/seq: who chose and their count, so a joiner skips its own older choices coming back while it moves on.
+## Reliable: a lost last choice would leave the machines apart.
+@rpc("any_peer", "call_remote", "reliable")
+func _sync_selection(index: int, origin: int = 0, seq: int = 0) -> void:
 	stats.sync_in += 1
+	if mode == "host":
+		_select(index, false)
+		stats.relay += 1
+		_sync_selection.rpc(selected, origin if origin != 0 else multiplayer.get_remote_sender_id(), seq)
+		return
+	if multiplayer.get_remote_sender_id() != 1:
+		return  # only the lobby host's order counts
+	if origin == multiplayer.get_unique_id() and seq < _sel_seq:
+		return  # one of our own earlier choices coming back: we have moved on since
 	_select(index, false)
 
 
@@ -804,7 +820,11 @@ func _select(index: int, broadcast: bool) -> void:
 		_applying_remote = false
 	if broadcast and mode != "local" and multiplayer.multiplayer_peer != null:
 		stats.sync_out += 1
-		_sync_selection.rpc(selected)
+		_sel_seq += 1
+		if mode == "host":
+			_sync_selection.rpc(selected, 1, _sel_seq)
+		else:
+			_sync_selection.rpc_id(1, selected, multiplayer.get_unique_id(), _sel_seq)
 	_refresh_vr()
 
 
