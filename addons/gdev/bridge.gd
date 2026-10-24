@@ -125,7 +125,8 @@ func _scan_files(initial: bool) -> void:
 			continue
 		var known := hashes.has(path)
 		hashes[path] = h
-		if initial or not known or path == SELF_PATH:
+		# Never hot-reload gdev's own files: replacing control.gd mid-command (a suspended _press) crashed Godot.
+		if initial or not known or path == SELF_PATH or path.begins_with("res://addons/gdev/"):
 			continue
 		if path.ends_with(".gd"):
 			_reload_script(path)

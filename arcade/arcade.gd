@@ -452,8 +452,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			step = -1
 		elif pad.button_index == JOY_BUTTON_RIGHT_SHOULDER:
 			step = 1
-		elif pad.button_index == JOY_BUTTON_X:
-			# X picks the highlighted game too (kids pressed X and nothing happened).
+		elif pad.button_index == JOY_BUTTON_A or pad.button_index == JOY_BUTTON_X:
+			# A picks the highlighted game: ui_accept has no pad button, so A only worked while Steam turned
+			# it into Enter. X too (kids pressed X and nothing happened). _launch ignores a second start.
 			var f := get_viewport().gui_get_focus_owner()
 			if f is BaseButton:
 				get_viewport().set_input_as_handled()
