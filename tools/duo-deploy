@@ -25,7 +25,8 @@ rsync -a --delete --exclude .git --exclude .dev --exclude .godot --exclude launc
 if ssh -o ConnectTimeout=4 -o BatchMode=yes -i $K steamos@frame true 2>/dev/null; then
   rsync -az -e "ssh -i $K" --exclude .godot --exclude .dev "$B/game/" steamos@frame:devkit-game/DuoArena/game/
 else
-  echo "Steam Frame offline: run 'duo-deploy-frame' when it's back" >&2
+  echo "Steam Frame offline: duo-catch-up deploys it when it's back" >&2
+  mkdir -p ~/.cache/duo-deploy-pending; touch ~/.cache/duo-deploy-pending/frame
 fi
 # Simon's Steam Deck plays too (another TV-style player, or on its own): ~/DuoArena via duo-deploy-deck.
 duo-deploy-deck >/dev/null || true

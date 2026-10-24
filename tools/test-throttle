@@ -9,5 +9,15 @@ while true; do
     [ "$(chrt -p "$pid" 2>/dev/null | grep -c SCHED_IDLE)" = 1 ] && continue
     for t in /proc/$pid/task/*; do tid=${t##*/}; chrt -i -p 0 "$tid" 2>/dev/null; taskset -cp "$cores" "$tid" >/dev/null 2>&1; done
   done
+  # Guard (Simon: his PlayStation pad must never connect to a test game): a test Godot that can see the real
+  # controllers was started without godot-test / gdev's sandbox. Stop it and say so on Claude's channel.
+  for pid in $(pgrep -f -- '^(\S*/)?(godot|Godot_v\S*) .*(--headless|--audio-driver Dummy)'); do
+    [ "$(tr '\0' ' ' < /proc/$pid/cmdline 2>/dev/null | cut -d' ' -f1)" = timeout ] && continue
+    if ls /proc/$pid/root/dev/input/ 2>/dev/null | grep -q '^event'; then
+      cmd=$(tr '\0' ' ' < /proc/$pid/cmdline 2>/dev/null | cut -c1-160)
+      kill "$pid" 2>/dev/null
+      echo "⚠ controller guard: stopped a test Godot that could see the real controllers (use godot-test): $cmd" | "$HOME/.local/bin/brepl" --pipe controller-guard >/dev/null 2>&1
+    fi
+  done
   sleep 3
 done

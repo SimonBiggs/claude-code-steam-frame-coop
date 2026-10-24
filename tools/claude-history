@@ -40,6 +40,12 @@ def connect() -> sqlite3.Connection:
 def blocks(entry: dict):
     """Yield (role, tool, text) for one transcript line."""
     t = entry.get("type")
+    # Messages typed while Claude is mid-turn are only stored as queue operations (never as a user line).
+    if t == "queue-operation" and entry.get("operation") == "enqueue":
+        c = entry.get("content")
+        if isinstance(c, str) and c.strip() and not c.startswith("<"):
+            yield "user", None, c
+        return
     msg = entry.get("message") or {}
     content = msg.get("content")
     if t not in ("user", "assistant") or content is None:

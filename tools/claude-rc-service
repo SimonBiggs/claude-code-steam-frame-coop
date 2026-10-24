@@ -1,0 +1,7 @@
+#!/bin/bash
+# Started by claude-rc.service at boot (gaming + desktop mode).
+# Runs `claude remote-control` so sessions can be started from claude.ai/code or the Claude app.
+cd "$HOME/GodotProjects" || exit 1
+export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin"
+# script gives claude a pseudo-terminal; output goes to the journal
+exec script -qfec "claude remote-control --name 'Steam Machine RC' --permission-mode auto" /dev/null
