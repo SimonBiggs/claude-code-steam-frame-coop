@@ -5,13 +5,15 @@ extends Node3D
 ##  table, squashing or smacking it all count too; knights' bonks just make it giggle): confetti, a chime, and
 ##  the next one. After STEPS of them (or MAX_TIME seconds) wave 1 starts.
 ##  A bouncing arrow points at the goblin (at the ring while you hold it), and a see-through ghost
-##  hand shows the move: reach down, squeeze, swing over to the ring, let go.
+##  hand (the shared Cannon Cove one, Giant-sized) shows the move: reach down, squeeze, swing over to
+##  the ring, let go.
 ##  RAIN: the same ghost hand, open, hovers over the campfire (an umbrella) until the Giant's hand
 ##  is there.
 ## Host runs the logic; the TV draws the ring and arrow from the snapshot (active, ring_pos).
 
 const W := preload("res://games/giants_table/world.gd")
 const GoblinScript := preload("res://games/giants_table/goblin.gd")
+const CoveGhostHand := preload("res://games/cannon_cove/ghost_hand.gd")  # the shared see-through hand
 const GOBLIN_SPOTS := [Vector3(1.2, 0.0, 8.8), Vector3(-1.4, 0.0, 9.2)]
 const RING_SPOTS := [Vector3(-4.6, 0.0, 7.4), Vector3(4.0, 0.0, 6.8)]
 const STEPS := 2
@@ -29,10 +31,7 @@ var ring_pos := Vector3.ZERO
 var ring: MeshInstance3D
 var ring_mat: StandardMaterial3D
 var arrow: MeshInstance3D
-var hand: Node3D
-var hand_mat: StandardMaterial3D
-var fingers: Array = []
-var thumb: Node3D
+var hand: Node3D  # the shared ghost hand (games/cannon_cove/ghost_hand.gd), scaled up to the Giant
 var demo_t := 0.0
 var idle_t := 0.0
 var anim_t := 0.0
@@ -64,57 +63,17 @@ func _ready() -> void:
 	_build_hand()
 
 
-## A see-through glowing copy of the giant's hand (fingers point -Z, palm down).
+## The shared see-through ghost hand (real size in metres, so W.S times bigger on the table).
 func _build_hand() -> void:
-	hand = Node3D.new()
+	hand = CoveGhostHand.new()
+	hand.name = "GhostHand"
+	add_child(hand)  # top_level: placed every frame (_place_hand)
+	hand.mat.albedo_color = Color(0.75, 0.95, 1.0, 0.5)
 	hand.visible = false
-	add_child(hand)
-	hand_mat = StandardMaterial3D.new()
-	hand_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	hand_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	hand_mat.albedo_color = Color(0.75, 0.95, 1.0, 0.5)
-	var palm := MeshInstance3D.new()
-	palm.mesh = W.box(Vector3(1.45, 0.45, 1.5))
-	palm.position = Vector3(0.0, 0.0, 0.25)
-	hand.add_child(palm)
-	for i in 4:
-		var f := Node3D.new()
-		f.position = Vector3(-0.54 + i * 0.36, 0.0, -0.45)
-		hand.add_child(f)
-		var fm := MeshInstance3D.new()
-		var cap := CapsuleMesh.new()
-		cap.radius = 0.16
-		cap.height = 0.95
-		cap.radial_segments = 8
-		cap.rings = 2
-		fm.mesh = cap
-		fm.rotation.x = PI / 2.0
-		fm.position.z = -0.4
-		f.add_child(fm)
-		fingers.append(f)
-	thumb = Node3D.new()
-	thumb.position = Vector3(-0.75, -0.05, 0.25)
-	thumb.rotation.y = -0.7
-	hand.add_child(thumb)
-	var tmi := MeshInstance3D.new()
-	var tcap := CapsuleMesh.new()
-	tcap.radius = 0.17
-	tcap.height = 0.8
-	tcap.radial_segments = 8
-	tcap.rings = 2
-	tmi.mesh = tcap
-	tmi.rotation.x = PI / 2.0
-	tmi.position.z = -0.3
-	thumb.add_child(tmi)
-	_style(hand)
 
 
-func _style(n: Node) -> void:
-	if n is MeshInstance3D:
-		n.material_override = hand_mat
-		n.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	for c in n.get_children():
-		_style(c)
+func _place_hand(p: Vector3, b: Basis) -> void:
+	hand.global_transform = Transform3D(b.scaled(Vector3.ONE * W.S), p)
 
 
 # --- Host logic ----------------------------------------------------------------------
@@ -215,10 +174,9 @@ func _update_hand(delta: float, g) -> void:
 	if mine and main.rain_t > 0.0 and not main.shield and not main.game_over:
 		# Umbrella: an open hand, palm down, bobbing over the campfire.
 		hand.visible = true
-		hand.position = Vector3(0.0, 5.0 + 0.4 * sin(anim_t * 3.0), 0.0)
-		hand.basis = _face_basis(Vector3.ZERO)
+		_place_hand(Vector3(0.0, 5.0 + 0.4 * sin(anim_t * 3.0), 0.0), _face_basis(Vector3.ZERO))
 		_grip(0.0)
-		hand_mat.albedo_color.a = 0.3 + 0.2 * (0.5 + 0.5 * sin(anim_t * 4.0))
+		hand.mat.albedo_color.a = 0.3 + 0.2 * (0.5 + 0.5 * sin(anim_t * 4.0))
 		return
 	var holding := false
 	if giant != null:
@@ -261,10 +219,9 @@ func _update_hand(delta: float, g) -> void:
 		p = ring_top
 		alpha = 0.5 * maxf(0.0, 1.0 - (d - 2.5) / 0.6)
 	hand.visible = alpha > 0.01
-	hand.position = p + Vector3.UP * 0.35
-	hand.basis = _face_basis(p)
+	_place_hand(p + Vector3.UP * 0.35, _face_basis(p))
 	_grip(grip)
-	hand_mat.albedo_color.a = alpha
+	hand.mat.albedo_color.a = alpha
 
 
 ## Fingers pointing away from the Giant's eyes, towards p.
@@ -277,6 +234,6 @@ func _face_basis(p: Vector3) -> Basis:
 
 
 func _grip(g: float) -> void:
-	for f in fingers:
+	for f in hand.fingers:
 		f.rotation.x = -g * 1.25
-	thumb.rotation.x = -g * 0.6
+	hand.thumb.rotation.x = -g * 0.6

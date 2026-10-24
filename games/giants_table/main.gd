@@ -23,7 +23,24 @@ const VrText := preload("res://core/vr_text.gd")
 ##  - Off: embers dropping on the table (a stolen ember flies home when its goblin is beaten), village
 ##    growth, combos, score popups, awards, the all-knights-asleep game over (down knights get back up by
 ##    themselves), the help panel and the tips. Text: one short headline ("WAVE 2!", "RAIN!").
+##  - No how-to words at all: each knight's TV view shows picture cues (a pulsing glowing pad button +
+##    an icon, CUES: swaying arrows = walk, RT + sword = bonk, LT + arrow = shoot the balloon, A + up
+##    arrow = jump, a pulsing heart while you're down) that fade once the knight has done it twice, and
+##    a glowing arrow in the knight's colour bobs over the goblin to bonk (only in that knight's view).
+##    The Giant gets the shared Cannon Cove ghost hand (practice grab-and-throw, rain umbrella).
 const SIMPLE_MODE := true
+const UiKit := preload("res://core/ui_kit.gd")
+
+## Simple mode picture cues on the knights' TV views (no words): [pad button, icons, icon colour].
+## The button follows the knight's own controls (a pad, or their keyboard set), see _cue_button.
+const CUES := {
+	"move": ["", ["arrow_left", "arrow_up", "arrow_right"], Color(1.0, 0.92, 0.45)],
+	"sword": ["RT", ["sword"], Color(1.0, 0.85, 0.4)],
+	"bow": ["LT", ["arrow_up"], Color(0.55, 0.85, 1.0)],
+	"jump": ["A", ["arrow_up"], Color(0.45, 1.0, 0.5)],
+	"down": ["", ["heart"], Color(1.0, 0.45, 0.6)],
+}
+const CUE_BUTTON_KEYS := [{"sword": "SPACE", "bow": "F", "jump": "SHIFT"}, {"sword": "ENTER", "bow": "CTRL", "jump": "/"}]
 
 const W := preload("res://games/giants_table/world.gd")
 const GiantScript := preload("res://games/giants_table/giant.gd")
@@ -46,6 +63,7 @@ const BOULDER_COUNT := 8
 const DOWN_GRACE := 20.0  # seconds the giant has to carry a knight to the fire when all knights are down
 const FIRE_HOME := 2.6    # drop an ember this close to the fire and it goes home
 const MAX_KNIGHTS := 6     # TV players 2..7 (player indices 1..6)
+const ARROW_LAYERS := 0x3F << 4  # render layers 5-10: knight i's goblin arrow is on bit 3 + i
 const KING_EVERY := 5     # the Goblin King comes every 5th wave
 const RAIN_TIME := 16.0
 const NO_RAIN := true  # David (2026-10-16): no rain cloud
@@ -150,7 +168,7 @@ func _ready() -> void:
 	randomize()
 	var xr := XRServer.find_interface("OpenXR")
 	vr_on = xr != null and xr.is_initialized() and not OS.has_environment("DUO_JOIN")
-	if OS.has_environment("GT_FAKE_VR") and not OS.has_environment("DUO_JOIN"):
+	if (OS.has_environment("GT_FAKE_VR") or OS.has_environment("BOT_VR")) and not OS.has_environment("DUO_JOIN"):
 		vr_on = true  # tests: run the VR code paths headless, without a headset
 	W.build(self, vr_on, SIMPLE_MODE)
 	village = VillageScript.new()
@@ -197,7 +215,7 @@ func _setup_game(mode: String) -> void:
 	ready_to_play = true
 	print("Giant's Table: %s mode" % mode)
 	if SIMPLE_MODE:
-		help_label.text = "" if mode == "host" else "RT sword   LT crossbow   A jump"  # one short TV line (fades at wave 2)
+		help_label.text = ""  # no words: each knight's view shows picture cues instead (_update_cue)
 		if mode == "client":
 			_show_center("GIANT'S TABLE!", 2.0)
 		elif mode == "local":
@@ -331,6 +349,7 @@ func _build_views(mode: String) -> void:
 		vp.add_child(cam)
 		cam.current = true
 		giant.setup_flat(cam, true)
+		cam.cull_mask &= ~ARROW_LAYERS  # the knights' own goblin arrows
 	for k in knights():
 		if not k.remote and k.active:
 			_ensure_view(k)
@@ -347,6 +366,13 @@ func _ensure_view(k) -> void:
 	vp.add_child(cam)
 	cam.current = true
 	k.attach_camera(cam)
+	# Your own "P2" tag floats right over your knight in your own view: each view hides its own tag
+	# (everyone else still sees it). The glowing goblin arrow is the other way round: only your view.
+	if k.tag != null:
+		k.tag.layers = 1 << (10 + k.index)
+	cam.cull_mask &= ~(1 << (10 + k.index))
+	cam.cull_mask &= ~ARROW_LAYERS
+	cam.cull_mask |= 1 << (3 + k.index)
 	var hud := CanvasLayer.new()
 	vp.add_child(hud)
 	k.hud_label = _make_label(30)
@@ -794,6 +820,8 @@ func _process(delta: float) -> void:
 	_update_rain_visuals(delta)
 	if not SIMPLE_MODE:
 		_update_knight_hints()
+	else:
+		_update_knight_cues(delta)
 	if mirror_vp:
 		mirror_t -= delta
 		if mirror_t <= 0.0:
@@ -1093,7 +1121,7 @@ func _on_game_over(reason: String) -> void:
 	print("Game over: %s wave=%d score=%d" % [reason, wave, score])
 	sound("gameover")
 	if SIMPLE_MODE:
-		_show_center("OH NO!\nThe fire went out", 0.0)
+		_show_center("OH NO!", 0.0)  # the dark campfire shows why
 		return
 	var how := "Press A / X (VR) or attack (knights) to play again"
 	_show_center("GAME OVER\n%s\nWave %d   ·   Score %d   ·   Village %d/%d\n%s" % [reason, wave, score, built, W.GROWTH.size(), how], 0.0)
@@ -1861,7 +1889,8 @@ func on_client_left() -> void:
 
 
 func _set_pause_banner(paused: bool, who: String) -> void:
-	_show_center("PAUSED\n" + who if paused else "", 0.0, false)
+	var title := "PAUSED" if SIMPLE_MODE else "PAUSED\n" + who  # simple: no explaining sentence
+	_show_center(title if paused else "", 0.0, false)
 	_update_vr_center()
 
 
@@ -1998,6 +2027,201 @@ func apply_event(kind: String, args: Array) -> void:
 			_apply_stats(args[0])
 
 
+# --- Simple mode picture cues (no words) -----------------------------------------
+
+## Every local knight with a view: count what they've done (so the cues can go away), pick their cue,
+## and draw it (plus the glowing arrow over the goblin to bonk) in their own view.
+func _update_knight_cues(delta: float) -> void:
+	for k in knights():
+		if k.remote or k.hint_label == null:
+			continue
+		if k.active and not k.is_down and not get_tree().paused:
+			_track_cues(k, delta)
+		var target = null
+		var key := _simple_cue(k)
+		if key == "sword" or key == "bow":
+			target = _cue_target(k, key == "bow")
+		_update_cue(k, k.hint_label, key, delta)
+		_update_cue_arrow(k, target)
+
+
+func _cue_done(k, key: String) -> int:
+	var done: Dictionary = k.get_meta("cue_done", {})
+	return int(done.get(key, 0))
+
+
+func _cue_if_new(k, key: String) -> String:
+	return key if _cue_done(k, key) < 2 else ""
+
+
+## Sword swings, crossbow and jump presses each count once. Walking: a few steps' worth counts as done.
+func _track_cues(k, delta: float) -> void:
+	var done: Dictionary = k.get_meta("cue_done", {})
+	for b in ["sword", "bow", "jump"]:
+		# Sword: every swing counts (holding RT down keeps swinging); crossbow and jump: each new press.
+		var on: bool = float(k.swing_t) > 0.2 if b == "sword" else (k.bow_held() if b == "bow" else k.jump_held())
+		if on and not bool(k.get_meta(b + "_was", false)):
+			done[b] = int(done.get(b, 0)) + 1
+		k.set_meta(b + "_was", on)
+	var here: Vector3 = k.global_position
+	var last: Vector3 = k.get_meta("cue_last_pos", here)
+	k.set_meta("cue_last_pos", here)
+	var step := Vector2(here.x - last.x, here.z - last.z).length()
+	if not k.carried and step < 2.0:  # (not a respawn / being carried)
+		var walked: float = float(k.get_meta("cue_walked", 0.0)) + step
+		k.set_meta("cue_walked", walked)
+		if walked > 4.0:
+			done["move"] = maxi(2, int(done.get("move", 0)))
+	k.set_meta("cue_done", done)
+
+
+## Which picture cue this knight needs right now, or "" for nothing. Walk first; then RT near a goblin
+## (or while the Giant practises); LT when a balloon goblin floats nearby; A for jump in a quiet moment.
+func _simple_cue(k) -> String:
+	if not k.active or game_over or get_tree().paused:
+		return ""
+	if net.mode == "client" and not synced:
+		return ""
+	if k.is_down:
+		return "down"
+	if k.carried:
+		return ""
+	var mv := _cue_if_new(k, "move")
+	if mv != "":
+		return mv
+	if _cue_if_new(k, "bow") != "" and _cue_target(k, true) != null:
+		return "bow"
+	var sw := _cue_if_new(k, "sword")
+	if sw != "" and ((practice != null and practice.active) or _cue_target(k, false) != null):
+		return sw
+	if sw == "" and _cue_if_new(k, "jump") != "" and _cue_target(k, false) == null:
+		return "jump"
+	return ""
+
+
+## The goblin a knight's cue is about: the nearest one on the ground to bonk, or a balloon goblin
+## floating down (crossbow). Never the Giant's training goblin.
+func _cue_target(k, balloon: bool):
+	var best = null
+	var best_d := 14.0 if balloon else 8.0
+	var kp: Vector3 = k.global_position
+	for g in get_tree().get_nodes_in_group("goblins"):
+		if g.practice or g.held or g.is_queued_for_deletion():
+			continue
+		if balloon != bool(g.floating):
+			continue
+		if not balloon and g.flying:
+			continue
+		var gp: Vector3 = g.global_position
+		var d := Vector2(gp.x - kp.x, gp.z - kp.z).length()
+		if d < best_d:
+			best_d = d
+			best = g
+	return best
+
+
+## The button in the knight's own controls: the pad button, or their keyboard set's key.
+func _cue_button(k, key: String) -> String:
+	var b: String = CUES[key][0]
+	if b != "" and k.joy < 0 and k.key_set >= 0 and k.key_set < CUE_BUTTON_KEYS.size():
+		return str(CUE_BUTTON_KEYS[k.key_set].get(key, b))
+	return b
+
+
+## The picture cue low in a knight's view: a glowing pad button and an icon, gently pulsing. Walking
+## shows three arrows that sway in turn. It lives inside the (empty) hint label, so it follows its
+## layout, and fades out once the knight has got it.
+func _update_cue(k, l: Label, key: String, delta: float) -> void:
+	k.set_meta("cue", key)
+	var box: HBoxContainer = l.get_node_or_null("Cue")
+	if box == null:
+		box = HBoxContainer.new()
+		box.name = "Cue"
+		box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		box.alignment = BoxContainer.ALIGNMENT_CENTER
+		box.add_theme_constant_override("separation", 14)
+		l.add_child(box)
+		box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		box.set_meta("key", "")
+		box.set_meta("a", 0.0)
+	var s := clampf(float(l.get_theme_font_size("font_size")) / 34.0, 0.4, 1.2) * 1.6
+	var a: float = float(box.get_meta("a", 0.0))
+	var shown: String = str(box.get_meta("key"))
+	if key != "":
+		var btn := _cue_button(k, key)
+		var sig := "%s/%s" % [key, btn]
+		if shown != sig or absf(float(box.get_meta("s", 0.0)) - s) > 0.01:
+			box.set_meta("key", sig)
+			box.set_meta("s", s)
+			if shown.get_slice("/", 0) != key:
+				a = 0.0  # a new cue fades in
+			for c in box.get_children():
+				c.queue_free()
+			var cue: Array = CUES[key]
+			if btn != "":
+				box.add_child(UiKit.glyph(btn, s))
+			for ic in cue[1]:
+				box.add_child(UiKit.icon(str(ic), cue[2], (40.0 if key == "move" else (84.0 if key == "sword" else 56.0)) * s))  # the thin sword needs room
+			for c in box.get_children():
+				(c as Control).size_flags_vertical = Control.SIZE_SHRINK_CENTER  # a round A, not a tall pill
+		a = minf(1.0, a + delta * 4.0)
+	else:
+		a = maxf(0.0, a - delta * 2.0)  # the old cue fades away
+	box.set_meta("a", a)
+	box.visible = a > 0.01
+	if not box.visible:
+		return
+	var t := Time.get_ticks_msec() / 1000.0
+	var cue_key: String = str(box.get_meta("key")).get_slice("/", 0)
+	var fast := cue_key == "bow" or cue_key == "sword"
+	var kk := absf(sin(t * (6.0 if fast else 3.5)))
+	box.modulate = Color(1, 1, 1, a * (0.75 + 0.25 * kk))
+	var i := 0
+	for c in box.get_children():
+		var ctl := c as Control
+		ctl.pivot_offset = ctl.size * 0.5
+		ctl.scale = Vector2.ONE * (1.0 + 0.15 * kk)
+		if cue_key == "move":  # the arrows wave left, forward, right in turn
+			ctl.scale = Vector2.ONE * (1.0 + 0.3 * maxf(0.0, sin(t * 4.0 - i * 1.2)))
+		i += 1
+
+
+## A glowing arrow in the knight's colour bobbing over the goblin their cue is about. It's on that
+## knight's own render layer, so only their view shows it.
+func _update_cue_arrow(k, target) -> void:
+	var arrow: Node3D = k.get_meta("cue_arrow") if k.has_meta("cue_arrow") else null
+	if arrow != null and not is_instance_valid(arrow):
+		arrow = null
+	if arrow == null:
+		if target == null:
+			return
+		arrow = Node3D.new()
+		arrow.name = "CueArrowP%d" % (k.index + 1)
+		add_child(arrow)
+		var m := W.mat(k.color.lightened(0.35), 3.0)
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.albedo_color.a = 0.9
+		var head := MeshInstance3D.new()
+		head.mesh = W.cyl(0.32, 0.0, 0.45, 10)  # wide end up: points down at the goblin
+		var shaft := MeshInstance3D.new()
+		shaft.mesh = W.cyl(0.11, 0.11, 0.45, 8)
+		shaft.position.y = 0.45
+		for mi in [head, shaft]:
+			mi.material_override = m
+			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			mi.layers = 1 << (3 + k.index)
+			arrow.add_child(mi)
+		k.set_meta("cue_arrow", arrow)
+	arrow.visible = target != null
+	if target == null:
+		return
+	var t := Time.get_ticks_msec() / 1000.0
+	var top: Vector3 = target.grab_center() + Vector3.UP * (0.7 if not target.floating else 2.2)
+	arrow.global_position = top + Vector3.UP * (0.4 + 0.3 * absf(sin(t * 4.0)))
+	arrow.rotation.y = t * 2.0
+
+
 # --- HUD ---------------------------------------------------------------------
 
 func _make_label(size: int) -> Label:
@@ -2131,7 +2355,9 @@ func _update_hud() -> void:
 		info_label.text = "Syncing with the Giant…"
 		return
 	if SIMPLE_MODE:
-		info_label.text = "WAVE %d" % wave if wave > 0 else ""  # one short line: the fire shows the embers
+		# One short line (the fire shows the embers); hidden while the big headline says the same thing.
+		var headline: bool = center_label.text.begins_with("WAVE") and center_label.modulate.a > 0.05
+		info_label.text = "WAVE %d" % wave if wave > 0 and not headline else ""
 		return
 	info_label.text = "WAVE %d      SCORE %d      CAMPFIRE EMBERS %d / %d      VILLAGE %d / %d" % [wave, score, embers, MAX_EMBERS, built, W.GROWTH.size()]
 	if combo >= 3 and clock - last_kill_t < 2.5:
