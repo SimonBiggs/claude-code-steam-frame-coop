@@ -11,6 +11,7 @@ const PauseMenuScript := preload("res://core/pause_menu.gd")
 const WorldScript := preload("res://games/duo_arena/world.gd")
 const HudScript := preload("res://games/duo_arena/hud.gd")
 const NetScript := preload("res://core/net.gd")
+const ClassicSeats := preload("res://core/classic_seats.gd")
 const BulletScript := preload("res://games/duo_arena/bullet.gd")
 const EnemyShotScript := preload("res://games/duo_arena/enemy_shot.gd")
 const MusicScript := preload("res://core/music.gd")
@@ -97,6 +98,8 @@ const PAD_LEAVE_TIME := 20.0
 
 ## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
 var multi_machine := true
+## Which machine drives which seat (core/net.gd checks it too).
+var seats: ClassicSeats
 
 var arena_radius := ARENA_RADIUS
 var players: Array = []
@@ -175,6 +178,16 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
+	seats = ClassicSeats.new(self, {
+		"max_seats": MAX_PLAYERS,
+		"no_keys": PlayerScript.NO_KEYS,
+		"free_actions": ["restart", "pause"],
+		"player": _ensure_player,
+		"seat_limit": func() -> int: return MAX_PLAYERS if net.mode == "client" else MAX_LOCAL_VIEWS,
+		"keys": func(p) -> int: return p.keys() if p.keys() < PlayerScript.KEYS.size() else PlayerScript.NO_KEYS,
+		"ghost": func(p, _on: bool) -> void: p.net_started = false,
+		"full": func() -> void: _show_center("All seats are taken!", 1.5, false),
+	})
 	Input.joy_connection_changed.connect(_on_joy_changed)
 	if OS.has_environment("DUO_JOIN"):
 		# Steam Machine: join the VR player's game as player 2, or fall back to local split screen.
@@ -193,8 +206,8 @@ func _setup_game(mode: String) -> void:
 	_build_views(mode)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_assign_joypads()
-	if mode == "local" and net.machine_kind == "deck":
-		_deck_solo(0)
+	if seats.deck_alone():
+		seats.deck_solo(0)
 	ready_to_play = true
 	_ensure_join_listener()
 	if mode == "host":
@@ -409,7 +422,7 @@ func _make_player(i: int, mode: String, as_ghost: bool = false):
 	p.color = PLAYER_COLORS[i % PLAYER_COLORS.size()]
 	p.main = self
 	p.remote = mode == "host" and i >= 1  # host: TV players are driven by the Steam Machine
-	p.ghost = (mode == "client" and i == 0) or as_ghost or _foreign(i)  # client: player 1 (VR / host) and other machines' seats are shown from snapshots
+	p.ghost = (mode == "client" and i == 0) or as_ghost or seats.foreign(i)  # client: player 1 (VR / host) and other machines' seats are shown from snapshots
 	if i == 2 and mode != "local":
 		p.key_set = 0  # TV player 3: WASD + mouse (or a second controller)
 		p.mouse_look = true
@@ -736,23 +749,6 @@ func _build_ghost_mirror() -> SubViewport:
 	return vp
 
 
-## A Steam Deck on its own (DUO_MACHINE_KIND=deck): exactly ONE player on the Deck's built-in controls
-## (the first joypad; no keyboard player), full screen. More controllers drop in with A.
-func _deck_solo(solo: int) -> void:
-	var pads := Input.get_connected_joypads()
-	joy_owner.clear()
-	for p in players:
-		p.joy = -1
-		if p.index != solo and p.index > 0 and p.active:
-			p.set_active(false)
-			on_player_activity_changed(p)
-	var me = players[solo]
-	me.joy = pads[0] if pads.size() > 0 else -1
-	if me.joy >= 0:
-		joy_owner[me.joy] = solo
-	_layout_views()
-
-
 func _assign_joypads() -> void:
 	if players.size() < 2:
 		return
@@ -864,26 +860,9 @@ func handle_join_input(event: InputEvent) -> bool:
 	return _join_slot(device) != null
 
 
-## Next free TV seat: a slot nobody is using, no controller is waiting to reclaim, and no other machine owns.
-func _next_free_index(skip: int = -1) -> int:
-	var top := MAX_PLAYERS - 1 if net.mode == "client" else MAX_LOCAL_VIEWS - 1
-	for i in range(1, top + 1):
-		if i == skip or _foreign(i):
-			continue
-		if i >= players.size():
-			return i
-		var p = players[i]
-		if not _is_local(p) or p.active or p.has_meta("want_join"):
-			continue
-		if p.joy >= 0 or p.pad_lost_t >= 0.0:
-			continue
-		return i
-	return -1
-
-
 ## A new controller (or a test bot, device -1) takes the next free seat.
 func _join_slot(device: int):
-	var idx := _next_free_index()
+	var idx := seats.free_index()
 	if idx < 0:
 		_show_center("All %d seats are taken!" % (MAX_PLAYERS - 1 if net.mode == "client" else MAX_LOCAL_VIEWS), 1.5, false)
 		return null
@@ -896,14 +875,13 @@ func _join_slot(device: int):
 	return p
 
 
-## Local: wake the player up now. TV machine: ask the host (retried by _check_join until it says yes).
+## Local: wake the player up now. TV machine: ask the host (retried by seats.request_joins until it says yes).
 func _request_join(p) -> void:
 	p.remove_meta("left_by_pad")
 	p.pad_lost_t = -1.0
 	if net.mode == "client":
 		p.set_meta("want_join", true)
-		join_t = 0.0
-		_check_join(0.0)
+		_check_join(0.0, true)
 	elif not p.active:
 		p.set_active(true)
 		p.hp = p.stat("max_hp")
@@ -1215,7 +1193,7 @@ func _party_tick(delta: float) -> void:
 			_ensure_player(MAX_PLAYERS - 1)  # seats for every TV player the Steam Machine may send
 		return
 	if net.mode == "client":
-		_sync_seats()
+		seats.sync()
 	_update_lost_pads(delta)
 	if views_root != null and is_instance_valid(views_root) and views_root.size != last_view_area:
 		_layout_views()
@@ -1725,28 +1703,15 @@ func on_machine_joined(peer: int, kind: String) -> void:
 
 ## Host: a machine left: only its seats go to sleep (and become free).
 func on_machine_left(peer: int) -> void:
-	var o: Dictionary = _owners().duplicate()
-	var first := -1
-	for k in o.keys():
-		if int(o[k]) != peer:
-			continue
-		o.erase(k)
-		var i := int(k)
-		first = i if first < 0 else mini(first, i)
-		if i < players.size() and players[i].active:
-			players[i].set_active(false)
-	net.state_set("owners", o)
-	if first > 0 and net.peer_count() > 0:
-		_show_center("P%d LEFT" % (first + 1), 1.5)
+	var freed := seats.machine_left(peer)
+	if not freed.is_empty() and net.peer_count() > 0:
+		_show_center("P%d LEFT" % (int(freed[0]) + 1), 1.5)
 
 
 ## Host: the LAST machine left (multi_machine games get this only then).
 func on_client_left() -> void:
 	# TV players sit out until a machine is back (it re-joins its saved party).
-	for i in range(1, players.size()):
-		if players[i].active:
-			players[i].set_active(false)
-	net.state_set("owners", {})
+	seats.all_left()
 	if SIMPLE_MODE:  # keep playing; the seats wake up again when a machine rejoins
 		solo = true
 		_show_center("TV LEFT", 1.5)
@@ -1754,143 +1719,24 @@ func on_client_left() -> void:
 	_show_center("The TV left - waiting for it to rejoin…", 0.0)
 
 
-# --- Many machines (docs/MULTI_MACHINE.md): the host decides which machine drives which TV seat ---
-
-## {seat index: peer id} for every seat a machine has claimed (set on the host, replicated to every machine).
-func _owners() -> Dictionary:
-	if net == null:
-		return {}
-	return net.state_get("owners", {})
-
-
-## TV machine: a seat another machine drives (a ghost here, mirrored from snapshots, never driven).
-func _foreign(i: int) -> bool:
-	if net == null or net.mode != "client":
-		return false
-	var o := _owners()
-	return o.has(i) and int(o[i]) != net.my_peer_id()
-
-
-## This machine drives seat i (always true on the host / in local play).
-func _mine(i: int) -> bool:
-	return net.mode != "client" or int(_owners().get(i, -1)) == net.my_peer_id()
-
-
-## Host, inside a TV machine's RPC: may that machine drive seat i? (0 = a local / test call)
-func remote_owner_ok(i: int) -> bool:
-	if net == null or net.mode != "host":
-		return true
-	var peer: int = net.sender_peer()
-	return peer == 0 or int(_owners().get(i, -1)) == peer
-
-
-## Host: give seat i to machine `peer`, or the first free seat if another machine has it (-1: all full).
-func _grant_seat(i: int, peer: int) -> int:
-	if peer == 0:
-		return i
-	var o: Dictionary = _owners().duplicate()
-	if int(o.get(i, peer)) != peer:
-		i = -1
-		for j in range(1, MAX_PLAYERS):
-			if not o.has(j):
-				i = j
-				break
-		if i < 0:
-			return -1
-	o[i] = peer
-	net.state_set("owners", o)
-	return i
-
-
-func _free_seat(i: int) -> void:
-	var o: Dictionary = _owners().duplicate()
-	if o.erase(i):
-		net.state_set("owners", o)
-
-
-## TV machine: hand a seat's controls (controller, keys, mouse, a pending join) to another seat.
-func _move_input(from, to) -> void:
-	if from == to:
-		return
-	to.joy = from.joy
-	if to.joy >= 0:
-		joy_owner[to.joy] = to.index
-	to.key_set = from.keys() if from.keys() < PlayerScript.KEYS.size() else PlayerScript.NO_KEYS
-	to.mouse_look = from.mouse_look
-	if from.has_meta("want_join"):
-		to.set_meta("want_join", true)
-	from.joy = -1
-	from.key_set = PlayerScript.NO_KEYS
-	from.mouse_look = false
-	from.remove_meta("want_join")
-
-
-## TV machine: seat p becomes a mirror of another machine's player (on) or drivable here again (off).
-func _set_ghost(p, on: bool) -> void:
-	p.ghost = on
-	p.net_started = false
-	if on:
-		if p.joy >= 0 and joy_owner.get(p.joy, -1) == p.index:
-			joy_owner.erase(p.joy)
-		p.joy = -1
-		p.key_set = PlayerScript.NO_KEYS
-		p.mouse_look = false
-		p.pad_lost_t = -1.0
-		p.remove_meta("want_join")
-	elif p.active:
-		_ensure_view(p)
-
-
-## TV machine, every frame: seats other machines took become ghosts (their controls move to a free seat);
-## seats nobody else owns any more are ours to drive again.
-func _sync_seats() -> void:
-	var changed := false
-	for p in players:
-		if p.index == 0:
-			continue
-		var f := _foreign(p.index)
-		if f and not p.ghost:
-			if p.joy >= 0 or p.keys() < PlayerScript.KEYS.size() or p.has_meta("want_join"):
-				var to_i := _next_free_index(p.index)
-				if to_i >= 0:
-					_move_input(p, _ensure_player(to_i))
-			_set_ghost(p, true)
-			changed = true
-		elif not f and p.ghost:
-			_set_ghost(p, false)
-			changed = true
-	if changed:
-		_layout_views()
-		_save_party()
-
-
 ## Client: player 3 joins by pressing fire on the second controller / keyboard / mouse; drop-in
 ## players (A / Start on a new controller) are marked "want_join". Ask the host until it agrees.
-var join_t := 0.0
-func _check_join(delta: float) -> void:
-	join_t -= delta
-	if join_t > 0.0 or game_over:
+func _check_join(delta: float, now: bool = false) -> void:
+	if game_over:
 		return
 	for p in players:  # the keyboard player joins by pressing fire
 		if p.index > 0 and _is_local(p) and p.keys() == 0 and not p.active and not p.has_meta("want_join") \
 				and p._fire_held():
 			p.set_meta("want_join", true)
 			_save_party()
-	for p in players:
-		if not p.has_meta("want_join") or not _is_local(p):
-			continue
-		if p.active and _mine(p.index):
-			p.remove_meta("want_join")
-			continue
-		join_t = 1.0
-		net.send_action("join", [p.index], 1)  # sent as P2 so the host accepts it before it has the seat
+	seats.request_joins(delta, now)
 
 
 ## A player slot woke up or went to sleep: show/hide its split-screen view.
 func on_player_activity_changed(p) -> void:
 	if p.active and _is_local(p) and net.mode != "host":
 		_ensure_view(p)
-	if p.active and _mine(p.index):
+	if seats.joined(p):
 		p.remove_meta("want_join")
 	_layout_views()
 	print("Player %d is now %s on this screen" % [p.index + 1, "playing" if p.active else "waiting"])
@@ -1898,21 +1744,9 @@ func on_player_activity_changed(p) -> void:
 
 ## Host: a TV player did something on the Steam Machine.
 func on_p2_action(action: String, args: Array, index: int = 1) -> void:
-	if action == "join" and args.size() > 0:
-		index = int(args[0])  # drop-in seats ask through P2 (the host may not have their seat yet)
-	if index <= 0 or index >= MAX_PLAYERS:
+	index = seats.host_action(action, args, index)  # many machines: who drives which seat (core/classic_seats.gd)
+	if index < 0:
 		return
-	if action == "join":
-		# Many machines: the seat may belong to another machine; then this one gets the first free seat.
-		var peer: int = net.sender_peer()
-		var got := _grant_seat(index, peer)
-		if got != index:
-			net.event_to(peer, "seat", [index, got])
-			if got < 0:
-				return
-			index = got
-	elif action != "restart" and action != "pause" and not remote_owner_ok(index):
-		return  # a seat this machine doesn't own
 	var p2 = _ensure_player(index)
 	match action:
 		"fire":
@@ -1935,7 +1769,6 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 				sound("revive", -4.0, 1.2)
 				print("Net: player %d joined the game" % (index + 1))
 		"leave":
-			_free_seat(index)
 			if p2.active:
 				p2.set_active(false)
 				_show_center("PLAYER %d LEFT" % (index + 1), 1.5)
@@ -2015,25 +1848,6 @@ func make_snapshot() -> Array:
 	for t in get_tree().get_nodes_in_group("turrets"):
 		tu.append([t.net_id, t.global_position, t.head.rotation.y, t.color])
 	return [wave, score, upg, upg_names, game_over, ps, es, pk, sh, fish_state, tu, director().pack()]
-
-
-## TV machine: the host gave seat `got` instead of `asked` (another machine has it; -1 = all full).
-func _on_seat_moved(asked: int, got: int) -> void:
-	if asked <= 0 or asked >= players.size():
-		return
-	var from = players[asked]
-	if got < 0:
-		from.remove_meta("want_join")
-		_show_center("All seats are taken!", 1.5, false)
-		return
-	var to = _ensure_player(got)
-	if to.ghost:
-		_set_ghost(to, false)
-	_move_input(from, to)
-	_set_ghost(from, true)
-	print("Seat P%d is taken: playing as P%d" % [asked + 1, got + 1])
-	_layout_views()
-	_save_party()
 
 
 ## Client: mirror the host's world.
@@ -2134,6 +1948,8 @@ func _make_ghost(kind: String, item: Array) -> Node3D:
 
 ## Client: one-off events from the host.
 func apply_event(kind: String, args: Array) -> void:
+	if seats.handle_event(kind, args):
+		return
 	if not ready_to_play:
 		return
 	match kind:
@@ -2154,8 +1970,6 @@ func apply_event(kind: String, args: Array) -> void:
 			explosion(args[0], args[1], args[2])
 		"say":
 			claude_say(args[0])
-		"seat":
-			_on_seat_moved(int(args[0]), int(args[1]))
 		"center":
 			_show_center(args[0], args[1])
 		"bullet":

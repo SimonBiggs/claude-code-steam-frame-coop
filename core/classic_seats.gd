@@ -225,11 +225,15 @@ func machine_left(peer: int) -> Array:
 	return freed
 
 
-## Host: the LAST machine left: nobody owns a seat; every TV seat sits out until a machine is back.
+## Host: the LAST machine left (on_client_left): nobody owns a seat any more; machines' seats sit out until
+## a machine is back. (net.gd already called on_machine_left for it; seats no machine owned, like a solo
+## seat the host plays itself, are left alone.)
 func all_left() -> void:
+	var o := owners()
 	_net().state_set("owners", {})
-	for p in main.players:
-		if p.index > 0:
+	for k in o:
+		var p = player(int(k))
+		if p != null:
 			_deactivate(p)
 
 
@@ -312,6 +316,11 @@ func request_joins(delta: float, now: bool = false) -> void:
 			continue
 		_ask_t = 1.0
 		_net().send_action("join", [p.index], 1)  # sent as P2: the host may not have this seat yet
+
+
+## Client: ask again on the next request_joins() (a seat was just marked want_join).
+func ask_soon() -> void:
+	_ask_t = 0.0
 
 
 ## Next free local seat: nobody uses it, no controller waits to reclaim it, and no other machine owns it.
