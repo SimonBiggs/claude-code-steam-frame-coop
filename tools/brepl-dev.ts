@@ -43,13 +43,16 @@ export const bots = {
     const scene = `res://tests/${id}_bot.tscn`;
     const one = async (env: Record<string, string>, extra = "") => {
       const r = await $`nice -n 19 timeout ${o.seconds ?? 150} godot --headless --path ${STAGE} ${{ raw: extra }} ${scene}`.env({ ...process.env, ...env }).nothrow().quiet();
-      return r.stdout.toString() + r.stderr.toString();
+      return { out: r.stdout.toString() + r.stderr.toString(), code: r.exitCode };
     };
-    const parse = (out: string, mode: string) => ({
+    // Pass (docs/GAME_DEV_GUIDE.md "Testing"): it ran to the end (exit 0, not killed by timeout or a crash), no
+    // SCRIPT ERROR, and no FAIL line. Only a few bots print "BOT RESULT: ..."; when one does, it must say PASS.
+    const FAIL = /BOT ASSERT FAILED: (.*)|^Bot:? .*\bFAIL\b:? ?(.*)|BOT RESULT: FAIL(.*)/gm;
+    const parse = ({ out, code }: { out: string; code: number }, mode: string) => ({
       mode,
-      pass: /BOT RESULT: PASS/.test(out) && !/SCRIPT ERROR(?!: BOT)/.test(out),
-      result: out.match(/BOT RESULT: .*/)?.[0] ?? "no BOT RESULT line (crashed or timed out?)",
-      failed: [...out.matchAll(/BOT ASSERT FAILED: (.*)/g)].map(m => m[1]),
+      pass: code === 0 && !/SCRIPT ERROR(?!: BOT)/.test(out) && !out.match(FAIL) && (!/BOT RESULT:/.test(out) || /BOT RESULT: PASS/.test(out)),
+      result: out.match(/BOT RESULT: .*/)?.[0] ?? (code === 0 ? "ran to the end" : code === 124 ? "timed out" : `exit ${code} (crashed?)`),
+      failed: [...out.matchAll(FAIL)].map(m => (m[1] ?? m[2] ?? m[3] ?? m[0]).trim()),
       errors: [...new Set([...out.matchAll(/SCRIPT ERROR: (?!BOT )(.*)\n\s*at: (.*)/g)].map(m => `${m[1]} @ ${m[2]}`))].slice(0, 8),
     });
     const runs = [parse(await one({}, "--fixed-fps 60 --quit-after 3600"), "local")];
@@ -268,7 +271,7 @@ export async function sweep(o: { only?: string[]; seconds?: number; concurrency?
       const r = await sweepOne(ids[next++], o.seconds ?? 20);
       results.push(r);
       await Bun.write(join(SWEEP, `${r.id}.json`), JSON.stringify(r, null, 1));
-      (globalThis as any).send?.(`sweep ${r.id}`, r.ok ? "ok" : r.problems.join("\n"), r.sheets);
+      (globalThis as any).send?.(`sweep ${r.id}`, (r.ok ? "ok" : r.problems.join("\n")) + `\nsheets: ${r.sheets.join(" ")}`);  // text only: show() the sheets when reviewing
     }
   }));
   results.sort((a, b) => a.id.localeCompare(b.id));
@@ -316,6 +319,26 @@ async function sweepOne(id: string, seconds: number) {
     r.sound = a.length > 0 && Math.sqrt(sum / (a.length / 16)) > 0.002;
     if (!r.sound) r.problems.push("silent (no sound on the Master bus)");
     if (alive) {
+      // Text cut off by the screen edge (a classic: set_anchors_preset without resetting the offsets).
+      const ui = await g.ui().catch(() => ({ items: [] }));
+      const cut = (ui.items ?? []).filter((i: any) => i.text && String(i.text).trim() && i.rect && !String(i.path).includes("/GDev/")
+        && (i.rect[0] < -4 || i.rect[1] < -4 || i.rect[0] + i.rect[2] > 1924 || i.rect[1] + i.rect[3] > 1084))
+        .map((i: any) => `"${String(i.text).slice(0, 30)}" @${i.rect.map((v: number) => Math.round(v)).join(",")}`);
+      if (cut.length) r.problems.push(`text off screen: ${[...new Set(cut)].slice(0, 4).join("; ")}`);
+      // Text drawn over other text (e.g. a timer pill on top of a score card).
+      const labels = (ui.items ?? []).filter((i: any) => i.text && String(i.text).trim() && i.rect && i.rect[2] > 2 && i.rect[3] > 2 && !String(i.path).includes("/GDev/"));
+      const over: string[] = [];
+      for (let x = 0; x < labels.length; x++) for (let y = x + 1; y < labels.length; y++) {
+        const [a, b] = [labels[x], labels[y]];
+        if (String(a.path).startsWith(b.path) || String(b.path).startsWith(a.path)) continue;
+        const vp = (i: any) => String(i.path).match(/.*SubViewport[^/]*/)?.[0] ?? "";  // split views: own coordinates
+        if (vp(a) !== vp(b)) continue;
+        const w = Math.min(a.rect[0] + a.rect[2], b.rect[0] + b.rect[2]) - Math.max(a.rect[0], b.rect[0]);
+        const h = Math.min(a.rect[1] + a.rect[3], b.rect[1] + b.rect[3]) - Math.max(a.rect[1], b.rect[1]);
+        if (w > 0 && h > 0 && w * h > 0.3 * Math.min(a.rect[2] * a.rect[3], b.rect[2] * b.rect[3]))
+          over.push(`"${String(a.text).slice(0, 20)}" / "${String(b.text).slice(0, 20)}"`);
+      }
+      if (over.length) r.problems.push(`overlapping text: ${[...new Set(over)].slice(0, 4).join("; ")}`);
       const fr = await g.frames();
       const end = fr.length ? fr[fr.length - 1].t : 0;
       r.sheets = await g.span(1, end, 12 / Math.max(1, end - 1)).catch((e: any) => { r.problems.push(`span failed: ${e}`); return []; });

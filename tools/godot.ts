@@ -11,7 +11,7 @@
 //   await g.shot()                                       // PNG path (Read it), default ~/.cache/gdev-offscreen/<port>/shot.png
 //   await g.log(30); await g.quit()                      // godot.list(), godot.stopAll()
 import { spawn, type ChildProcess } from "node:child_process";
-import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 const HOME = process.env.HOME!;
@@ -63,10 +63,13 @@ export async function launch(o: LaunchOpts | string): Promise<Game> {
   const dir = join(RUNS, String(port));
   await mkdir(join(dir, "data"), { recursive: true });
   const logPath = join(dir, "game.log");
-  const args = ["--dev-bind", "/", "/", "--tmpfs", "/dev/input", "--tmpfs", "/tmp/.X11-unix", "--die-with-parent",
+  // No real controllers: hide /dev/input AND every /dev/hidraw* (Godot's SDL reads pads through hidraw too; a
+  // family member's PS4 pad was steering offscreen tests), and turn SDL's HIDAPI driver off for good measure.
+  const hidraw = (await readdir("/dev").catch(() => [] as string[])).filter(f => f.startsWith("hidraw")).flatMap(f => ["--ro-bind", "/dev/null", `/dev/${f}`]);
+  const args = ["--dev-bind", "/", "/", "--tmpfs", "/dev/input", ...hidraw, "--tmpfs", "/tmp/.X11-unix", "--die-with-parent",
     "gamescope", "--backend", "headless", "-W", String(w), "-H", String(h), "-w", String(w), "-h", String(h), "--",
     "godot", "--path", proj, "--audio-driver", "Dummy", "--xr-mode", "off", "--resolution", `${w}x${h}`, ...(opts.scene ? [opts.scene] : [])];
-  const env = { ...process.env, GDEV_CONTROL_PORT: String(port), XDG_DATA_HOME: join(dir, "data"), DUO_PORT: String(port + 1000), ...opts.env };
+  const env = { ...process.env, SDL_JOYSTICK_HIDAPI: "0", GDEV_CONTROL_PORT: String(port), XDG_DATA_HOME: join(dir, "data"), DUO_PORT: String(port + 1000), ...opts.env };
   for (const k of ["DUO_HOST", "DUO_JOIN"]) if (!opts.env?.[k]) delete env[k];  // local unless asked
   const log = Bun.file(logPath).writer();
   // Low CPU priority so offscreen tests never make the family's game on the TV stutter.

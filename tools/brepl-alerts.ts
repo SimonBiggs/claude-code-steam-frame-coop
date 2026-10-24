@@ -112,6 +112,8 @@ export function test(text = "test alert") { send("test", text); return "sent"; }
 // --- Log watching: new error lines in Godot logs, each distinct message once -----------------------
 const offsets = new Map<string, number>();
 const seenErr = new Map<string, Set<string>>();
+// What Godot prints while being killed or quitting; not a game bug.
+const EXIT_NOISE = /Unreferenced static string|Pages in use exist at exit|ObjectDB instances leaked|resources still in use at exit|RID allocations .* were leaked|Condition "!_initialized"|BUG: /;
 const GODOT_ERR = /^(SCRIPT ERROR|ERROR|Parse Error|USER ERROR|FATAL)|handle_crash|Program crashed/;
 async function newErrors(path: string): Promise<string[]> {
   let size: number;
@@ -125,7 +127,7 @@ async function newErrors(path: string): Promise<string[]> {
   const out: string[] = [];
   const lines = text.split("\n");
   lines.forEach((l, i) => {
-    if (!GODOT_ERR.test(l) || l.includes("BOT ") || seen.has(l)) return;
+    if (!GODOT_ERR.test(l) || l.includes("BOT ") || EXIT_NOISE.test(l) || seen.has(l)) return;
     seen.add(l);
     const at = lines[i + 1]?.trim().startsWith("at:") ? ` ${lines[i + 1].trim()}` : "";
     out.push(l.trim().slice(0, 200) + at);

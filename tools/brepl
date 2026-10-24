@@ -125,6 +125,13 @@ if (args[0] === "--serve") {
     return [cut ? `(${cut} earlier lines not shown: ${CH})` : "", ...lines.slice(cut),
       running.length ? `still running: ${running.join(", ")}` : fresh.length ? "" : "nothing new, nothing running"].filter(Boolean).join("\n");
   };
+  // peek(/pattern/, n): the last n channel entries matching, with their images, without moving the poll cursor
+  // (for looking at one result when a full poll would be too big).
+  globalThis.peek = (pattern, n = 1) => {
+    const hits = channel.filter((e) => `${e.source} ${e.text}`.match(pattern)).slice(-n);
+    for (const e of hits) show(e.images);
+    return hits.map((e) => `[${e.t}] ${e.source}\n${e.text}`).join("\n\n") || "no match";
+  };
   globalThis.jobs = () => [...jobs.values()].map((j) => ({ id: j.id, name: j.name, status: j.status, secs: Math.round(((j.ended ?? Date.now()) - j.started) / 1000), polled: j.polled }));
   // Nothing may block (Simon, 2026-10-24: "make sure that none of them block"). JS can't interrupt synchronous
   // code, so: running jobs are mirrored to jobs.json and channel.jsonl is on disk, letting brepl_poll answer from
@@ -159,11 +166,14 @@ if (args[0] === "--serve") {
           }
         }
         if (!fn) {
-          try {
-            fn = (0, eval)(`(async () => { ${lines.join("\n")}\n return (${last.replace(/;\s*$/, "")}\n) })`);
-          } catch {
-            fn = (0, eval)(`(async () => { ${code}\n })`);
+          // Return the last statement even when it spans lines (bg("x", async () => {\n...\n})): try each
+          // unindented line from the bottom as the start of the returned expression.
+          const all = code.trimEnd().split("\n");
+          for (let k = all.length - 1; k >= 0 && !fn; k--) {
+            if (/^\s/.test(all[k]) || !all[k].trim()) continue;
+            try { fn = (0, eval)(`(async () => { ${all.slice(0, k).join("\n")}\n return (${all.slice(k).join("\n").replace(/;\s*$/, "")}\n) })`); } catch {}
           }
+          if (!fn) fn = (0, eval)(`(async () => { ${code}\n })`);
         }
       }
     } catch (e) {

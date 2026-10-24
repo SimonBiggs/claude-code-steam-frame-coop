@@ -72,6 +72,7 @@ func _pull_audio() -> void:
 	for i in st.size():
 		mono[i] = (st[i].x + st[i].y) * 0.5
 	rec_audio.store_buffer(mono.to_byte_array())
+	rec_audio.flush()  # so span() sheets made right now have the latest sound, not a silent last tile
 
 
 func _save_frame(img: Image, path: String) -> void:
@@ -241,6 +242,11 @@ func _eval(code: String) -> Dictionary:
 	var lines := code.strip_edges().split("\n")
 	var single := lines.size() == 1 and not _STATEMENT.any(func(k: String) -> bool: return lines[0].begins_with(k)) \
 		and not RegEx.create_from_string("^[\\w.\\[\\]\"]+\\s*[-+*/]?=[^=]").search(lines[0])
+	# Several lines: the last one is returned too when it's an unindented expression (like the brepl).
+	var last := lines[lines.size() - 1]
+	if not single and not last.begins_with("\t") and not last.begins_with(" ") and not _STATEMENT.any(func(k: String) -> bool: return last.begins_with(k)) \
+			and not RegEx.create_from_string("^[\\w.\\[\\]\"]+\\s*[-+*/]?=[^=]").search(last):
+		lines[lines.size() - 1] = "return " + last
 	var body := "\treturn " + lines[0] if single else "\n".join(Array(lines).map(func(l: String) -> String: return "\t" + l))
 	var src := "extends RefCounted\nvar tree: SceneTree\nvar root: Node\nvar scene: Node\n" \
 		+ "func find(pattern: String) -> Array: return root.find_children(pattern, \"\", true, false)\n" \
@@ -297,8 +303,10 @@ func _describe(n: Node) -> Dictionary:
 	if "text" in n and n.text is String and n.text != "":
 		d["text"] = n.text
 	if n is Control:
-		var r := (n as Control).get_global_rect()
-		d["rect"] = [roundi(r.position.x), roundi(r.position.y), roundi(r.size.x), roundi(r.size.y)]
+		# Screen pixels: get_global_rect() ignores CanvasLayer offsets and split-view SubViewports.
+		var xf := (n as Control).get_screen_transform()
+		var sz := (n as Control).size * xf.get_scale()
+		d["rect"] = [roundi(xf.origin.x), roundi(xf.origin.y), roundi(sz.x), roundi(sz.y)]
 		if (n as Control).has_focus():
 			d["focus"] = true
 	elif n is Node3D:
