@@ -421,13 +421,14 @@ func _build_tv_menu() -> void:
 	glow.color = Color(0.12, 0.08, 0.3)
 	layer.add_child(glow)
 	glow.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
-	glow.custom_minimum_size = Vector2(0, 150)
+	glow.custom_minimum_size = Vector2(0, 172)  # covers the title and the status line under it
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 14)
 	layer.add_child(box)
-	box.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
-	box.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	box.position.y = 28
+	# Fills the screen (28 px top, 14 px bottom) so the card area takes exactly the height that is left, on any screen.
+	box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	box.offset_top = 28
+	box.offset_bottom = -14
 	var title := Label.new()
 	title.text = "LIVING ROOM ARCADE"
 	title.add_theme_font_size_override("font_size", 60)
@@ -456,12 +457,21 @@ func _build_tv_menu() -> void:
 	var center := CenterContainer.new()
 	center.custom_minimum_size = Vector2(minf(1860.0, vis_w - 20.0), 0)
 	center.add_child(grid)
-	box.add_child(center)
+	# Any tab can hold more games than fit (the 1 PLAYER tab has 35): the cards scroll, following the highlight.
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.follow_focus = true
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	scroll.custom_minimum_size.x = center.custom_minimum_size.x
+	scroll.add_child(center)
+	box.add_child(scroll)
 	var hint := Label.new()
 	hint.text = "LB / RB (Q / E): change category   ·   D-pad / arrows: choose   ·   A / Enter: play" + ("   ·   Start: quit" if _can_quit() else "") + "   ·   more games: just ask Claude!"
 	hint.add_theme_font_size_override("font_size", 20)
 	hint.add_theme_color_override("font_color", Color(0.6, 0.65, 0.8))
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART  # two lines on a narrow screen instead of running off the sides
 	box.add_child(hint)
 	cat = maxi(0, tabs().find(_cat_index_of(selected)))
 	_show_category(cat, false)
@@ -603,7 +613,9 @@ func _make_card(i: int, colour: Color) -> Button:
 	v.add_theme_constant_override("separation", 6)
 	row.add_child(v)
 	var name_label := Label.new()
-	name_label.text = str(g.name) + ("  ★ SOLO" if int(SOLO.get(str(g.id), 0)) == 2 else "")
+	name_label.text = str(g.name) + (" ★" if int(SOLO.get(str(g.id), 0)) == 2 else "")  # ★ = made for solo (1 PLAYER tab)
+	name_label.clip_text = true
+	name_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	name_label.add_theme_font_size_override("font_size", 28)
 	name_label.add_theme_color_override("font_color", colour)
