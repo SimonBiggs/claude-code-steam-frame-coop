@@ -91,11 +91,11 @@ static func face(dir: Vector3, up: Vector3 = Vector3.UP, alt_up: Vector3 = Vecto
 	if dir.length() < 0.0001:
 		return Basis()
 	var d := dir.normalized()
-	var best := up
-	for u in [alt_up, Vector3.RIGHT]:
-		if absf(d.dot((u as Vector3).normalized())) < absf(d.dot(best.normalized())):
-			best = u
-	return Basis.looking_at(d, best)
+	# Keep the normal up (no roll) unless it's nearly parallel; only then fall back to alt_up, then RIGHT.
+	for u in [up, alt_up, Vector3.RIGHT]:
+		if absf(d.dot((u as Vector3).normalized())) < 0.98:
+			return Basis.looking_at(d, u)
+	return Basis.looking_at(d, Vector3.BACK)
 
 
 ## Controller A / B in Godot's built-in ui_accept / ui_cancel (they only have Enter / Esc by default, so every

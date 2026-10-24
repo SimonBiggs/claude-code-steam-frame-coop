@@ -1,9 +1,15 @@
 #!/bin/bash
-# duo-deploy-deck: push the arcade to Simon's Steam Deck (~/DuoArena: x86_64 Godot + the game + run.sh).
-# The game files come from the Frame build (duo-deploy keeps it current); run by duo-deploy when the Deck is up.
+# duo-deploy-deck [ALIAS...]: push the arcade to the family's Steam Decks (~/DuoArena: x86_64 Godot + the game +
+# run.sh + launchers). Decks = ssh aliases, from the arguments or ~/.config/duo-arena/decks (one per line); adding a
+# Deck = pair it (devkit), add an ssh alias, add a line there. Run by every duo-deploy; offline Decks are skipped.
 B=~/GodotProjects/duo-arena-deck-build
 rsync -a --delete --exclude .dev --exclude .claude ~/GodotProjects/duo-arena-frame-build/game/ "$B/game/"
-ssh -o ConnectTimeout=4 -o BatchMode=yes simon-deck true 2>/dev/null || { echo "Steam Deck offline: run 'duo-deploy-deck' when it's back" >&2; exit 1; }
-rsync -az --exclude .dev --exclude .claude "$B/" simon-deck:DuoArena/ &&
-  ssh simon-deck 'mkdir -p ~/.local/share/applications ~/Desktop && cp ~/DuoArena/*.desktop ~/.local/share/applications/ && cp ~/DuoArena/*.desktop ~/Desktop/ && chmod +x ~/Desktop/duo-arena*.desktop; true' &&
-  echo "Steam Deck updated"
+decks=("$@"); [ ${#decks[@]} -eq 0 ] && mapfile -t decks < <(grep -v '^\s*#' ~/.config/duo-arena/decks 2>/dev/null | grep .)
+rc=0
+for d in "${decks[@]}"; do
+  if ! ssh -o ConnectTimeout=4 -o BatchMode=yes "$d" true 2>/dev/null; then echo "$d offline: run 'duo-deploy-deck $d' when it's back" >&2; rc=1; continue; fi
+  rsync -az --exclude .dev --exclude .claude "$B/" "$d:DuoArena/" &&
+    ssh "$d" 'mkdir -p ~/.local/share/applications ~/Desktop && cp ~/DuoArena/duo-arena*.desktop ~/.local/share/applications/ && cp ~/DuoArena/duo-arena*.desktop ~/Desktop/ && chmod +x ~/Desktop/duo-arena*.desktop; true' &&
+    echo "$d updated"
+done
+exit $rc

@@ -134,7 +134,7 @@ var starting := false
 const MAX_LOBBY_MACHINES := 32  # ENet allows 4095; games are limited by seats, not machines
 const FIND_SECONDS := 2.2
 var machines := {}  # lobby host: peer -> {"kind": String, "ip": String}
-var my_kind: String = OS.get_environment("DUO_MACHINE_KIND") if OS.has_environment("DUO_MACHINE_KIND") else "tv"
+var my_kind: String = preload("res://core/machine.gd").kind()
 var host_has_vr := false
 var lobby_id := randi()  # flat hosts that start together: the higher id gives way
 var _finding := 0.0  # seconds left looking for a lobby before hosting one
@@ -157,7 +157,12 @@ func _ready() -> void:
 	if xr != null and xr.is_initialized():
 		my_kind = "frame"
 	if not OS.has_environment("DUO_JOIN_ORIGINAL"):
-		OS.set_environment("DUO_JOIN_ORIGINAL", OS.get_environment("DUO_JOIN") if OS.has_environment("DUO_JOIN") else "")
+		# How this machine networks comes from core/machine.gd: by default "auto" (play locally at once, keep looking
+		# for other devices). A VR host still hosts (below); DUO_JOIN / DUO_SOLO override.
+		var target := preload("res://core/machine.gd").join_target()
+		if my_kind == "frame" or OS.has_environment("DUO_HOST"):
+			target = OS.get_environment("DUO_JOIN") if OS.has_environment("DUO_JOIN") else ""
+		OS.set_environment("DUO_JOIN_ORIGINAL", target)
 		OS.set_environment("DUO_HOST_ORIGINAL", "1" if OS.has_environment("DUO_HOST") else "")
 	# Each lobby visit starts from how the machine was launched (a game may have changed these).
 	_restore_env()

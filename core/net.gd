@@ -54,7 +54,7 @@ var main
 var mode := "local"  # "local", "host" or "client"
 var connected := false  # host: at least one machine joined; client: joined the host
 ## This machine's kind, sent to the host when joining ("tv", "deck", ...).
-var machine_kind: String = OS.get_environment("DUO_MACHINE_KIND") if OS.has_environment("DUO_MACHINE_KIND") else "tv"
+var machine_kind: String = preload("res://core/machine.gd").kind()  # tv / deck / frame (core/machine.gd)
 ## Host: how many machines may join a game that supports several (multi_machine on main).
 var max_machines: int = int(OS.get_environment("DUO_MAX_MACHINES")) if OS.has_environment("DUO_MAX_MACHINES") else 32  # ENet allows 4095; seats are the real limit
 ## Host: whether the host has a VR player (false: a flat host, see host()).
