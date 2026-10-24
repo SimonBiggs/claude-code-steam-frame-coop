@@ -172,5 +172,41 @@ Done means **zero `SCRIPT ERROR`s** locally, with `BOT_PLAYERS=6`, and networked
   real controllers is stopped by the test-throttle guard. Bots should still ignore real pads and resume if
   something pauses the game.
 - Add a fake-VR mode that moves the XR hands, so the VR code path runs headless too.
+- **Steam Deck**: a Deck alone is ONE full-screen player on its own controls (party games: core/party.gd drops the
+  keyboard seat; classic games: `seats.deck_solo()` in core/classic_seats.gd, which also claims a Deck pad that
+  connects late); friends' pads still drop in. `tests/deck_bot.tscn` (+ deck2..deck4) plays every game as a Deck
+  and checks it; `tests/arcade_bot.tscn` checks the arcade menu and pause menu at Deck and TV size.
 - For games with walls and furniture, check that every room, doorway and spawn can be reached on
   foot (see `tests/hide_and_seek_bot.gd`).
+
+### Several machines in ONE game (host + joining bots)
+
+Bugs between machines only show with several of them (2026-10-24: in the arcade lobby a choice received from another
+machine was sent back out, so with a few Decks connected the selection bounced forever). `tools/multibot.ts` runs
+**one shared test game or lobby**: a host plus N joining machines (N = 1..6), each its own `godot-test` process with
+its own user data, all on one private random `DUO_PORT` (also used for the lobby (+1) and the LAN beacons (+2)), every
+one running the same bot scene:
+
+```sh
+tools/multibot.ts res://tests/arcade_lobby_bot.tscn                  # host + 3 joiners in one arcade lobby
+tools/multibot.ts -n 3 --seconds 150 res://tests/balloon_pop_bot.tscn
+tools/multibot.ts -n 3 --host-env DUO_FLAT_HOST=1 res://tests/engine_template_bot.tscn
+#   --env K=V (all machines)  --join-env K=V  --stagger MS  --json  --project DIR
+```
+
+It prints ok / FAIL per machine (exit 0 from the bot itself, no `SCRIPT ERROR`, no `BOT ASSERT FAILED` /
+`BOT RESULT: FAIL`) with each log (`/tmp/multibot-<port>/m<k>.log`), and exits non-zero if anything failed. From brepl:
+`dev.bots.run(id, {net: true, joiners: 3})`. Keep N at 3–4 while the family is playing.
+
+What a bot gets: `BOT_MACHINE` (0 = host, 1.. = joiners), `BOT_MACHINES` (how many in all) and `BOT_GROUP_T0` (a
+shared clock in unix ms, after every machine has started: schedule inputs on it so machines press at chosen moments,
+see `tests/arcade_lobby_bot.gd`). Group checks: print `BOT AGREE <key>=<value>` and every machine must print the same
+value (the game everyone settled on, the round they are in...). Writing bots that work with several joiners:
+- The host sees EVERY joining machine's players: assert `kit.seated_want(want, host_p)`, not `want`.
+- Whole-game toggles (Start = pause for all, Y = shared view) are tested by one machine only:
+  `if not host and BotKit.lead_machine():`. Another machine may still pause the game under you: a check that needs
+  movement should skip while paused (see the jump check in `tests/balloon_pop_bot.gd`).
+- `tests/arcade_lobby_bot.gd` (host + 3): joiners press LB/RB/d-pad one after another, then all at the same moment;
+  every machine must settle on the same game, rebuild its menu / send / receive selections no more than the presses
+  explain (`arcade.stats`), stay quiet once settled, and all start the same game when one presses A. Run it after
+  any change to the arcade lobby.

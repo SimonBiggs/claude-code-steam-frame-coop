@@ -215,7 +215,7 @@ func _close_old_peer() -> void:
 
 
 func _exit_tree() -> void:
-	if get_meta("follow_udp", null) is PacketPeerUDP:  # _follow_headset's beacon listener
+	if get_meta("follow_udp", false) is PacketPeerUDP:  # _follow_headset's beacon listener
 		(get_meta("follow_udp") as PacketPeerUDP).close()
 	_close_old_peer()
 
@@ -872,7 +872,7 @@ func _hide_tv_cursor() -> void:
 func _follow_headset() -> void:
 	if mode != "local" or not OS.has_environment("DUO_JOIN") or has_meta("following"):
 		return
-	if not get_meta("follow_udp", null) is PacketPeerUDP:  # (not has_meta: a hot-reloaded old build stored false)
+	if not get_meta("follow_udp", false) is PacketPeerUDP:  # (not has_meta: a hot-reloaded old build stored false)
 		# The port may be taken (another TV machine on this computer): retry now and then. Never store
 		# null in a meta: a null value ERASES it (get_meta then errors every frame).
 		if Time.get_ticks_msec() < int(get_meta("follow_retry_ms", 0)):

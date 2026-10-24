@@ -174,7 +174,6 @@ func _setup(mode: String) -> void:
 		elif vr_rig != null:
 			split.set_bubble(vr_rig.mirror)
 	party.allow_slot0 = mode != "client" and vr_rig == null
-	party.allow_keyboard = net.machine_kind != "deck"  # a Steam Deck: its built-in controls are the one player
 	if mode != "client":
 		net.state_set("vr", vr_rig != null)
 		_start_show()

@@ -335,7 +335,7 @@ func _checks() -> void:
 	var mode: String = main.net.mode
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
 	if mode != "host":
-		kit.assert_eq(main.party.player_count(), want, "%s: all %d TV players are seated" % [mode, want])
+		kit.assert_eq(main.party.player_count(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
 		kit.assert_true(main.log_tv_shots > 0, "%s: TV benders bent" % mode)
 	if mode == "client":
 		kit.assert_true(client_saw_raiders > 0, "client: raider ghosts mirrored from the host")

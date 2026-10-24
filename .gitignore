@@ -3,5 +3,8 @@
 .dev/
 *.tmp
 .claude/
+# thumbs are read from the raw bytes (arcade.gd _thumb), the editor import data is not needed
+arcade/thumbs/*.import
+# LAN update state of this copy (signed manifest, staging, backup: core/lan_update.gd) and Python caches of tools/
 .update/
 __pycache__/

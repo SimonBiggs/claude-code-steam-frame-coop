@@ -157,6 +157,8 @@ func _ready() -> void:
 	if not Input.joy_connection_changed.is_connected(_on_joy_changed):
 		Input.joy_connection_changed.connect(_on_joy_changed)
 	_was_paused = get_tree().paused
+	if preload("res://core/machine.gd").one_player_screen():
+		allow_keyboard = false  # a Steam Deck: one player on its built-in controls; more pads may drop in
 
 
 # --- Roster ----------------------------------------------------------------------------

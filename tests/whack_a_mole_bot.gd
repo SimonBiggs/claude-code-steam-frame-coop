@@ -30,12 +30,12 @@ func _ready() -> void:
 	var host := OS.has_environment("DUO_HOST")
 	var t0 := 3.0 if client else 1.0
 	kit.at(t0, "%d TV players press A on their pads" % want, _join)
-	if not host:
+	if not host and BotKit.lead_machine():
 		kit.at(t0 + 6.0, "P1 presses Start: pause menu", func() -> void:
 			kit.allow_pause = true
 			_press("start"))
 		kit.at(t0 + 6.6, "paused?", func() -> void:
-			kit.assert_true(get_tree().paused and main.tv_banner != null and main.tv_banner.visible, "Start pauses")
+			kit.assert_true(get_tree().paused and main.tv_banner != null and not main.tv_banner.visible, "Start pauses (on_pause_changed made the banner; the open pause menu alone says PAUSED)")
 			_press("start"))
 		kit.at(t0 + 7.2, "resumed?", func() -> void:
 			kit.assert_true(not get_tree().paused, "Start again resumes")
@@ -189,7 +189,7 @@ func _checks() -> void:
 		kit.assert_eq(main.party.local_slots().size(), want, "client: all %d local players are seated" % want)
 	else:
 		var host_p := 1 if main.flat_host else 0
-		kit.assert_eq(main.party.player_count(), want + host_p, "%s: all %d TV players (+%d on the host) are seated" % [mode, want, host_p])
+		kit.assert_eq(main.party.player_count(), kit.seated_want(want, host_p), "%s: all %d TV players (+%d on the host) are seated" % [mode, want, host_p])
 	if main.flat_host:
 		kit.assert_true(main.party.is_local(0) and main.avatars.has(0) and main.cams.has(0), "flat host: slot 0 plays here with a camera")
 	kit.assert_true(int(main.net.state_get("whacked", 0)) > 1, "%s: moles were whacked" % mode)

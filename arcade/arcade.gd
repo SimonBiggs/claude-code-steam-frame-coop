@@ -143,6 +143,10 @@ var my_kind: String = preload("res://core/machine.gd").kind()
 var host_has_vr := false
 var lobby_id := randi()  # flat hosts that start together: the higher id gives way
 var _finding := 0.0  # seconds left looking for a lobby before hosting one
+## Counters for tests (tests/arcade_lobby_bot.gd): menu rebuilds, selections sent / received. A storm of either is the
+## sign of machines echoing each other's choices.
+var stats := {"show_category": 0, "sync_out": 0, "sync_in": 0, "relay": 0}
+var _sel_seq := 0  # how many choices this machine has sent (see _sync_selection)
 
 
 func _ready() -> void:
@@ -215,7 +219,7 @@ func _host_lobby(with_vr: bool) -> void:
 			ip = (multiplayer.multiplayer_peer as ENetMultiplayerPeer).get_peer(id).get_remote_address()
 		machines[id] = {"kind": "tv", "ip": ip}
 		_lobby_status()
-		_sync_selection.rpc(selected))
+		_sync_selection.rpc_id(id, selected, 1, 0))  # the newcomer shows what everyone has chosen
 	multiplayer.peer_disconnected.connect(func(id: int) -> void:
 		machines.erase(id)
 		_lobby_status())
@@ -339,8 +343,24 @@ func _lobby_address() -> String:
 	return OS.get_environment("DUO_JOIN")
 
 
-@rpc("any_peer", "call_remote", "unreliable_ordered")
-func _sync_selection(index: int) -> void:
+## One shared selection for every machine in the lobby. The lobby host puts all choices in ONE order: a joiner's own
+## choice goes only to the host, which applies it and passes it on to everyone (the chooser too), so every machine
+## ends on the host's last word. Before, each machine told all the others directly: two machines choosing at the same
+## moment each got the other's choice last and stayed apart for good (tests/arcade_lobby_bot.gd, 2026-10-24).
+## origin/seq: who chose and their count, so a joiner skips its own older choices coming back while it moves on.
+## Reliable: a lost last choice would leave the machines apart.
+@rpc("any_peer", "call_remote", "reliable")
+func _sync_selection(index: int, origin: int = 0, seq: int = 0) -> void:
+	stats.sync_in += 1
+	if mode == "host":
+		_select(index, false)
+		stats.relay += 1
+		_sync_selection.rpc(selected, origin if origin != 0 else multiplayer.get_remote_sender_id(), seq)
+		return
+	if multiplayer.get_remote_sender_id() != 1:
+		return  # only the lobby host's order counts
+	if origin == multiplayer.get_unique_id() and seq < _sel_seq:
+		return  # one of our own earlier choices coming back: we have moved on since
 	_select(index, false)
 
 
@@ -370,7 +390,7 @@ func _launch(index: int) -> void:
 	var delay := 0.4 if mode == "host" else (0.9 if mode == "client" else 0.1)
 	if mode == "client":
 		_close_peer()
-	if get_meta("lobby_udp", null) is PacketPeerUDP:
+	if get_meta("lobby_udp", false) is PacketPeerUDP:
 		(get_meta("lobby_udp") as PacketPeerUDP).close()
 		remove_meta("lobby_udp")
 	get_tree().create_timer(delay).timeout.connect(func() -> void:
@@ -540,6 +560,7 @@ func _show_category(tab: int, focus_first: bool) -> void:
 	var t := tabs()
 	if t.is_empty() or grid == null:
 		return
+	stats.show_category += 1
 	cat = wrapi(tab, 0, t.size())
 	for child in tab_bar.get_children():
 		child.queue_free()
@@ -676,7 +697,7 @@ func _can_quit() -> bool:
 
 var quit_panel: PanelContainer
 var quit_opener := -1  # the pad that opened the quit dialog (-2 keyboard); only it may answer (same rule as the pause menu)
-var quit_a_released := false
+var quit_a_held := {}  # pads already holding A when the dialog opened (UiKit.held_pads): they must let go first
 
 func _toggle_quit_menu() -> void:
 	if quit_panel and is_instance_valid(quit_panel):
@@ -730,7 +751,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		if not (quit_panel and is_instance_valid(quit_panel)):
 			quit_opener = start.device if start else -2
-			quit_a_released = false
+			quit_a_held = preload("res://core/ui_kit.gd").held_pads(JOY_BUTTON_A)
 		_toggle_quit_menu()
 		return
 	if quit_panel and is_instance_valid(quit_panel):
@@ -739,8 +760,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		if start and quit_opener >= 0 and start.device != quit_opener:
 			return  # another player's pad
 		if start and not start.pressed and start.button_index == JOY_BUTTON_A:
-			quit_a_released = true
-		if start and start.pressed and start.button_index == JOY_BUTTON_A and quit_a_released:
+			quit_a_held.erase(start.device)
+		if start and start.pressed and start.button_index == JOY_BUTTON_A and not quit_a_held.has(start.device):
 			var f := get_viewport().gui_get_focus_owner()
 			if f is BaseButton and quit_panel.is_ancestor_of(f):
 				get_viewport().set_input_as_handled()
@@ -798,7 +819,12 @@ func _select(index: int, broadcast: bool) -> void:
 			(cards[selected] as Button).grab_focus()
 		_applying_remote = false
 	if broadcast and mode != "local" and multiplayer.multiplayer_peer != null:
-		_sync_selection.rpc(selected)
+		stats.sync_out += 1
+		_sel_seq += 1
+		if mode == "host":
+			_sync_selection.rpc(selected, 1, _sel_seq)
+		else:
+			_sync_selection.rpc_id(1, selected, multiplayer.get_unique_id(), _sel_seq)
 	_refresh_vr()
 
 
@@ -903,7 +929,7 @@ func _vr_input() -> void:
 ## line, -1 for nothing) under the right hand's ray, and which half of the line it hits (1 = right).
 ## Also draws the pointer laser.
 func _vr_pointed_row() -> Vector2i:
-	var laser: MeshInstance3D = get_meta("vr_laser", null) if has_meta("vr_laser") else null
+	var laser: MeshInstance3D = get_meta("vr_laser", false) if has_meta("vr_laser") else null
 	if laser == null:
 		laser = MeshInstance3D.new()
 		var cm := CylinderMesh.new()
@@ -997,7 +1023,7 @@ func _lobby_net(delta: float) -> void:
 	if starting or (OS.get_environment("DUO_JOIN_ORIGINAL") != "auto" and mode != "host"):
 		return
 	var base: int = int(OS.get_environment("DUO_PORT")) if OS.has_environment("DUO_PORT") else DEFAULT_PORT
-	if not get_meta("lobby_udp", null) is PacketPeerUDP:
+	if not get_meta("lobby_udp", false) is PacketPeerUDP:
 		# Port taken: retry twice a second (a null meta value erases the meta).
 		if Time.get_ticks_msec() < int(get_meta("lobby_retry_ms", 0)):
 			return
@@ -1050,7 +1076,7 @@ func _lobby_net(delta: float) -> void:
 
 
 func _listen_for_game() -> void:
-	if not get_meta("listen", null) is PacketPeerUDP:
+	if not get_meta("listen", false) is PacketPeerUDP:
 		# Port taken: retry twice a second (a null meta value erases the meta).
 		if Time.get_ticks_msec() < int(get_meta("listen_retry_ms", 0)):
 			return

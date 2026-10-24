@@ -131,8 +131,6 @@ func _ready() -> void:
 	party = Party.new()
 	party.name = "Party"
 	add_child(party)
-	if net.machine_kind == "deck":
-		party.allow_keyboard = false  # a Steam Deck: one player on its built-in controls; more pads may drop in
 	party.player_joined.connect(_on_player_joined)
 	party.player_left.connect(_on_player_left)
 	save = Save.new()

@@ -906,8 +906,27 @@ func handle_join_input(event: InputEvent) -> bool:
 		if idx > 0 and not players[idx].active and is_local(players[idx]):
 			_request_join(players[idx])
 			return true
+		if idx > 0 and players[idx].has_meta("hide_view"):
+			_deck_friend_takes(players[idx])  # a Deck alone: a friend's pad takes over P1's tilt-only marble
+			return true
 		return false
+	var p2 = players[1] if players.size() > 1 else null
+	if p2 != null and p2.has_meta("hide_view") and p2.joy < 0:
+		p2.joy = device
+		joy_owner[device] = 1
+		_deck_friend_takes(p2)
+		return true
 	return _join_slot(device) != null
+
+
+## A Deck alone rolls P2's marble by tilting (no view of its own); a friend pressing A gets it as a real marble.
+func _deck_friend_takes(p) -> void:
+	p.remove_meta("hide_view")
+	p.tilt_only = false
+	_ensure_view(p)
+	_layout_views()
+	if not simple:
+		_show_center("PLAYER %d ROLLS IN!" % (p.index + 1), 1.5)
 
 
 func _join_slot(device: int):
