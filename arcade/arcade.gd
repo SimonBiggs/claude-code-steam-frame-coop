@@ -80,6 +80,10 @@ const GAMES := [
 		"blurb": "Roll giant snowballs, stack them up, and give every snowman a carrot nose and a hat!"},
 	{"id": "dodge_ball", "multi": true, "cat": "party", "name": "SOFT DODGEBALL", "scene": "res://games/dodge_ball/main.tscn",
 		"blurb": "A friendly VR giant throws squishy balls; dodge them and bop the target on his belly!"},
+	{"id": "quiz_show", "multi": true, "cat": "party", "name": "QUIZ SHOW", "scene": "res://games/quiz_show/main.tscn",
+		"blurb": "A TV quiz for the whole family: pick a level, answer with the coloured buttons, guess the hidden picture!"},
+	{"id": "mystery_manor", "multi": true, "cat": "adventure", "name": "MYSTERY MANOR", "scene": "res://games/mystery_manor/main.tscn",
+		"blurb": "Something is missing! Find the sparkly clues in a spooky old house, then catch who did it."},
 ]
 ## Tabs on the TV (LB/RB) and in VR (stick left/right). Empty categories are hidden.
 const CATEGORIES := [
@@ -102,7 +106,7 @@ const SOLO := {
 	"snowman_maker": 2, "starship_crew": 2, "treasure_dig": 2,
 	"balloon_pop": 1, "bubble_bath": 1, "cannon_cove": 1, "crystal_saga": 1, "dungeon_delve": 1, "fishing_lake": 1,
 	"fruit_catch": 1, "mech_titans": 1, "mini_golf_party": 1, "paper_planes": 1, "rhythm_band": 1,
-	"sheep_round_up": 1, "tiny_town_tycoon": 1, "tower_stack": 1, "whack_a_mole": 1,
+	"sheep_round_up": 1, "tiny_town_tycoon": 1, "tower_stack": 1, "whack_a_mole": 1, "quiz_show": 1, "mystery_manor": 1,
 }
 const VrText := preload("res://core/vr_text.gd")
 const DEFAULT_PORT := 7777
@@ -365,7 +369,7 @@ func _launch(index: int) -> void:
 	var delay := 0.4 if mode == "host" else (0.9 if mode == "client" else 0.1)
 	if mode == "client":
 		_close_peer()
-	if get_meta("lobby_udp", false) is PacketPeerUDP:
+	if has_meta("lobby_udp"):
 		(get_meta("lobby_udp") as PacketPeerUDP).close()
 		remove_meta("lobby_udp")
 	get_tree().create_timer(delay).timeout.connect(func() -> void:
@@ -965,15 +969,16 @@ func _lobby_net(delta: float) -> void:
 		return
 	var base: int = int(OS.get_environment("DUO_PORT")) if OS.has_environment("DUO_PORT") else DEFAULT_PORT
 	if not has_meta("lobby_udp"):
+		# Port taken: retry twice a second (a null meta value erases the meta).
+		if Time.get_ticks_msec() < int(get_meta("lobby_retry_ms", 0)):
+			return
 		var u := PacketPeerUDP.new()
 		u.set_broadcast_enabled(true)
 		if u.bind(base + 2) != OK:
-			set_meta("lobby_udp", false)  # (a null meta value would delete the key)
+			set_meta("lobby_retry_ms", Time.get_ticks_msec() + 500)
 			return
 		set_meta("lobby_udp", u)
-	var udp = get_meta("lobby_udp", false)
-	if not udp is PacketPeerUDP:
-		return
+	var udp = get_meta("lobby_udp")
 	while (udp as PacketPeerUDP).get_available_packet_count() > 0:
 		var msg := (udp as PacketPeerUDP).get_packet().get_string_from_utf8()
 		var ip := (udp as PacketPeerUDP).get_packet_ip()
@@ -1017,15 +1022,16 @@ func _lobby_net(delta: float) -> void:
 
 func _listen_for_game() -> void:
 	if not has_meta("listen"):
+		# Port taken: retry twice a second (a null meta value erases the meta).
+		if Time.get_ticks_msec() < int(get_meta("listen_retry_ms", 0)):
+			return
 		var udp := PacketPeerUDP.new()
 		var base: int = int(OS.get_environment("DUO_PORT")) if OS.has_environment("DUO_PORT") else DEFAULT_PORT
 		if udp.bind(base + 2) != OK:
-			set_meta("listen", false)  # (a null meta value would delete the key)
+			set_meta("listen_retry_ms", Time.get_ticks_msec() + 500)
 			return
 		set_meta("listen", udp)
-	var u = get_meta("listen", false)
-	if not u is PacketPeerUDP:
-		return
+	var u = get_meta("listen")
 	var udp: PacketPeerUDP = u
 	while udp.get_available_packet_count() > 0:
 		var msg := udp.get_packet().get_string_from_utf8()

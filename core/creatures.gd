@@ -149,6 +149,17 @@ static func humanoid(opts: Dictionary = {}) -> Node3D:
 	return _assemble(spec, "humanoid", o)
 
 
+## Just a hat (HATS), as worn by a humanoid, for a hat lying on its own (a dropped clue, a hat stand).
+## Its origin is the head pivot: the hat sits about HC.y above it. outfit / outfit2 colour the hats that
+## use them (wizard, cap, hood...). Cached per look.
+static func hat_mesh(hat: String, outfit: Color = Color(0.5, 0.5, 0.55), outfit2: Color = Color(0.85, 0.75, 0.4), cls: String = "villager") -> ArrayMesh:
+	var key := "cr_hat_%s_%s_%s_%s_v1" % [hat, outfit.to_html(), outfit2.to_html(), cls]
+	return ResCache.get_or_make(key, func() -> Resource:
+		var b := MeshKit.Builder.new()
+		_hat(b, hat, {"outfit": outfit, "outfit2": outfit2, "class": cls})
+		return b.build()) as ArrayMesh
+
+
 ## Fill in every humanoid option (class defaults, random skin/hair from the seed). Handy for saving a look.
 static func resolve_humanoid(opts: Dictionary) -> Dictionary:
 	var cls: String = str(opts.get("class", "villager"))

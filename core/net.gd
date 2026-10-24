@@ -212,7 +212,7 @@ func _close_old_peer() -> void:
 
 
 func _exit_tree() -> void:
-	if has_meta("follow_udp") and get_meta("follow_udp") != null:  # _follow_headset's beacon listener
+	if has_meta("follow_udp"):  # _follow_headset's beacon listener
 		(get_meta("follow_udp") as PacketPeerUDP).close()
 	_close_old_peer()
 
@@ -862,12 +862,16 @@ func _follow_headset() -> void:
 	if mode != "local" or not OS.has_environment("DUO_JOIN") or has_meta("following"):
 		return
 	if not has_meta("follow_udp"):
-		var udp := PacketPeerUDP.new()
-		set_meta("follow_udp", udp if udp.bind(PORT + 2) == OK else false)  # (a null meta value would delete the key)
-	var u = get_meta("follow_udp", false)
-	if not u is PacketPeerUDP:
-		return
-	var udp: PacketPeerUDP = u
+		# The port may be taken (another TV machine on this computer): retry now and then. Never store
+		# null in a meta: a null value ERASES it (get_meta then errors every frame).
+		if Time.get_ticks_msec() < int(get_meta("follow_retry_ms", 0)):
+			return
+		var bound := PacketPeerUDP.new()
+		if bound.bind(PORT + 2) != OK:
+			set_meta("follow_retry_ms", Time.get_ticks_msec() + 2000)
+			return
+		set_meta("follow_udp", bound)
+	var udp: PacketPeerUDP = get_meta("follow_udp")
 	while udp.get_available_packet_count() > 0:
 		var msg := udp.get_packet().get_string_from_utf8()
 		var sender := udp.get_packet_ip()
