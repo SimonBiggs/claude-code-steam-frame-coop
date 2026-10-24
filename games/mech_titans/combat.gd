@@ -499,7 +499,7 @@ func _grabbed_fx(at: Vector3, text: String) -> void:
 	held_t = 0.0
 	emit_fx("sfx", ["pickup", at, 4.0, 0.6])
 	main.pulse(1, 0.7, 0.12)
-	main.cockpit_message(text + " SWING TO THROW", Color(1.0, 0.8, 0.3), 2.0)
+	main.cockpit_message(text if Data.SIMPLE_MODE else text + " SWING TO THROW", Color(1.0, 0.8, 0.3), 2.0)
 
 
 func _tick_held(delta: float) -> void:
@@ -665,7 +665,7 @@ func stun_kaiju(k: Kaiju, by: int) -> void:
 	if not k.is_mini:
 		var what := "KNOCKED DOWN!" if st == "downed" else "STUNNED!"
 		announce(what, "PUNCH IT NOW!" if st == "downed" else "Hit it while it's dizzy!", "info")
-		main.cockpit_message(what + " PUNCH!", Color(0.6, 0.9, 1.0), 2.0)
+		main.cockpit_message(what if Data.SIMPLE_MODE else what + " PUNCH!", Color(0.6, 0.9, 1.0), 2.0)
 	if by > 0:
 		main.awards.add(by, "stuns")
 
@@ -684,8 +684,12 @@ func _defeated(k: Kaiju) -> void:
 		k.anim.call("play", "hurt", 1.0)
 	emit_fx("burst", ["stars", k.center() + Vector3.UP * k.height * 0.5, 4.0])
 	emit_fx("sfx", ["faint", k.center(), 6.0, 0.6])
-	announce("%s IS DIZZY!" % String(k.info["name"]), "Titan: PUNCH it to send it home!", "victory")
-	main.cockpit_message("DIZZY! PUNCH IT!", Color(1.0, 0.85, 0.3), 3.0)
+	if Data.SIMPLE_MODE:
+		# no "PUNCH IT!": a glowing arrow bobs over the dizzy kaiju (teach.gd) and the X cue shows on the TV
+		announce("DIZZY!", "", "victory")
+	else:
+		announce("%s IS DIZZY!" % String(k.info["name"]), "Titan: PUNCH it to send it home!", "victory")
+		main.cockpit_message("DIZZY! PUNCH IT!", Color(1.0, 0.85, 0.3), 3.0)
 	main.hint_vr("finish", "PUNCH the dizzy kaiju!")
 
 
@@ -713,7 +717,10 @@ func send_home(k: Kaiju, punched: bool) -> void:
 		k.anim.call("revive")
 	if not k.is_mini:
 		emit_fx("burst", ["stars", k.center(), 5.0])
-		announce("%s WENT HOME!" % String(k.info["name"]), "Bye bye, %s!" % String(k.info["name"]).to_lower().capitalize(), "victory")
+		if Data.SIMPLE_MODE:
+			announce("BYE BYE!", "", "victory")
+		else:
+			announce("%s WENT HOME!" % String(k.info["name"]), "Bye bye, %s!" % String(k.info["name"]).to_lower().capitalize(), "victory")
 		main.missions.add_score(0, 500, "bosses")
 		main.music.play_mood("victory")
 	main.missions.on_kaiju_home(k)

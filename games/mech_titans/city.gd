@@ -569,6 +569,7 @@ func _build_shelters() -> void:
 		sign.pixel_size = 0.02
 		sign.outline_size = 24
 		sign.modulate = Color(0.6, 1.0, 0.7)
+		sign.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y  # readable from every side (it was mirrored from behind)
 		sign.position = p + Vector3(0, 4.6, 1.3)
 		add_child(sign)
 
