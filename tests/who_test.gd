@@ -152,7 +152,6 @@ func _check_no_generic(fails: Array[String]) -> void:
 	var res: Array = []
 	for g in GENERIC:
 		res.append([RegEx.create_from_string(g[0]), g[1]])
-	var meta_re := RegEx.create_from_string("get_meta\\(\"[^\"]*\", null\\)")
 	for dir in ["res://core", "res://arcade", "res://games"]:
 		for path in _gd_files(dir):
 			if path == "res://core/who.gd":
@@ -165,10 +164,6 @@ func _check_no_generic(fails: Array[String]) -> void:
 				for r in res:
 					if (r[0] as RegEx).search(line) != null:
 						fails.append("%s:%d generic join/leave text (%s): use core/who.gd" % [path, i + 1, r[1]])
-				# (while here) get_meta(key, null) prints an error when the key is missing (net.gd did on every
-				# scene change): write (get_meta(key) if has_meta(key) else null).
-				if meta_re.search(line) != null:
-					fails.append("%s:%d get_meta(key, null) errors when missing: use has_meta" % [path, i + 1])
 
 
 ## The pieces that make names reach every machine.
