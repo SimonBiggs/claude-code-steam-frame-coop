@@ -590,6 +590,19 @@ func _make_card(i: int, colour: Color) -> Button:
 	return b
 
 
+## gdev hot reload hook: rebuild what _ready built once (the TV menu is sized to the screen at build time).
+func _on_hot_reload() -> void:
+	preload("res://core/ui_kit.gd").ensure_pad_ui_actions()
+	if quit_panel and is_instance_valid(quit_panel):
+		return
+	for c in get_children():
+		if c is CanvasLayer:
+			c.queue_free()
+	buttons.clear()
+	cards.clear()
+	_build_tv_menu.call_deferred()
+
+
 ## Quitting the arcade: on handhelds (Steam Deck) and plain local launches; never on the TV, which stays on (kids).
 func _can_quit() -> bool:
 	return my_kind != "tv" or OS.has_environment("ARCADE_ALLOW_QUIT")
