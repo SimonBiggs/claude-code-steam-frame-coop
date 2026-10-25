@@ -275,7 +275,7 @@ static func device_label(device: int) -> String:
 	if device == KEYBOARD:
 		return "keyboard"
 	if device == REMOTE:
-		return "TV"
+		return "another machine"  # (name_of says which: core/who.gd)
 	if device == NONE:
 		return "nobody"
 	if device >= VIRTUAL_PAD_BASE:

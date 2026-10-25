@@ -1696,7 +1696,7 @@ func on_client_joined() -> void:
 
 
 ## Host: one more machine (the TV, a Steam Deck...). It asks for its seats itself.
-func on_machine_joined(peer: int, kind: String) -> void:
+func on_machine_joined(peer: int, _kind: String) -> void:
 	_show_center(Who.joined(net.machine_name_of(peer)), 1.5)
 	if last_say != "" and Time.get_ticks_msec() - last_say_time < 20000:
 		net.event_to(peer, "say", [last_say])  # it was reconnecting when it was said

@@ -250,6 +250,7 @@ func _lobby_status() -> void:
 	if not news.is_empty() and _lobby_names_seen:
 		line = " ".join(news) + "  " + line
 	_lobby_names_seen = true
+	print("Arcade: " + line)
 	_set_status(line)
 	if mode == "host" and not machines.is_empty():
 		_lobby_who.rpc(line)
