@@ -927,7 +927,7 @@ func _deck_friend_takes(p) -> void:
 	_ensure_view(p)
 	_layout_views()
 	if not simple:
-		_show_center("PLAYER %d ROLLS IN!" % (p.index + 1), 1.5)
+		_show_center("%s rolls in!" % Who.seat(self, p.index), 1.5)
 
 
 func _join_slot(device: int):
