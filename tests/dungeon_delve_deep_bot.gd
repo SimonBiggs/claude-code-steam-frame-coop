@@ -563,12 +563,17 @@ func knight(delta: float) -> void:
 			break
 		if main.heroes.is_empty():
 			var g := _goal(0, feet, room, 0)
+			if OS.has_environment("BOT_DEBUG") and Engine.get_process_frames() % 120 == 0:
+				print("KNIGHT feet %s room %d goal %s" % [feet.snappedf(0.1), room, str(g)])
 			if not g.is_empty():
 				goal = g["p"]
-				if bool(g.get("bonk", false)) and feet.distance_to(goal) < 1.2:
-					kit.vr_reach(rig, VrRig.RIGHT, (g.get("at", goal) as Vector3) + Vector3(swing_side * 0.4, 0.6, 0.0), 6.0, delta)
-					if rig.hand_point(VrRig.RIGHT).distance_to((g.get("at", goal) as Vector3) + Vector3(swing_side * 0.4, 0.6, 0.0)) < 0.05:
+				if bool(g.get("bonk", false)) and feet.distance_to(Vector3(goal.x, 0, goal.z)) < 1.3:
+					var aim: Vector3 = (g.get("at", goal) as Vector3) + Vector3(swing_side * 0.2, 0.3, 0.0)
+					kit.vr_reach(rig, VrRig.RIGHT, aim, 6.0, delta)
+					if rig.hand_point(VrRig.RIGHT).distance_to(aim) < 0.08:
 						swing_side = -swing_side
+					if feet.distance_to(Vector3(goal.x, 0, goal.z)) < 0.9:
+						goal = Vector3.INF
 	if goal == Vector3.INF:
 		return
 	var b := FloorGen.room_at(f, goal)
@@ -582,6 +587,9 @@ func knight(delta: float) -> void:
 			var dw := FloorGen.door_world(f, di)
 			var across := absf(feet.x - dw.x) if int(dd["dir"]) % 2 == 0 else absf(feet.z - dw.z)
 			wp = inside if feet.distance_to(inside) > 0.5 and across > 0.4 else FloorGen.door_inside(f, di, FloorGen.other_side(dd, room), 1.4)
-	var to := Vector3(wp.x - feet.x, 0.0, wp.z - feet.z)
-	if to.length() > 0.3:
+	var stp := steer(feet, wp)
+	var to := Vector3(stp.x - feet.x, 0.0, stp.z - feet.z)
+	if OS.has_environment("BOT_DEBUG") and Engine.get_process_frames() % 120 == 0:
+		print("KSTEER wp %s stp %s walk %s loco %s" % [wp.snappedf(0.1), stp.snappedf(0.1), FloorGen.walkable(dp.view.rects, dp.view.obst, feet, 0.25), rig.locomotion])
+	if to.length() > (0.3 if stp == wp else 0.05):
 		kit.vr_stick(rig, Vector2(to.x, -to.z).normalized())
