@@ -23,7 +23,7 @@ const CHAPTERS: Array[Dictionary] = [
 		"who": "GRUMPY CLOUDS", "intro": "Grr! Grumpy clouds float up here.", "new": "Fly around the grey clouds!",
 		"done": "The clouds smiled! Snug hut is fixed."},
 	{"name": "CLOUD CASTLE", "sky": "dawn", "ground": Color(0.62, 0.8, 0.5), "place": "CLOUD CASTLE", "pic": "sprite",
-		"who": "GUST", "intro": "Hee hee! I'm Gust. I blew the letters away!", "new": "Catch my golden hoop! It's worth 5!",
+		"who": "GUST", "intro": "Hee hee! I'm Gust. I blew the letters away!", "new": "Catch Gust's golden hoop! It's worth 5!",
 		"done": "Gust was lonely. Now she has friends!"},
 	{"name": "BONUS SKY", "sky": "day", "ground": Color(0.5, 0.78, 0.38), "place": "", "pic": "envelope",
 		"who": "PIP", "intro": "Extra letters! Let's fly!", "new": "",

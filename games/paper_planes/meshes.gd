@@ -153,9 +153,14 @@ static func place(chapter: int, stage: int) -> ArrayMesh:
 			b.box(Vector3(0.9, 0.9, 0.9), MeshKit.at(Vector3(0.6, 0.45, 0.4)), wood)
 			b.cylinder(0.04, 0.04, 2.0, MeshKit.at(Vector3(-0.6, 1.0, 0.0)), wood.darkened(0.3), 6)
 			b.box(Vector3(0.7, 0.45, 0.03), MeshKit.at(Vector3(-0.25, 1.75, 0.0)), Color(1.0, 0.85, 0.3))
-			b.disc(2.2, MeshKit.at(Vector3(0.0, 0.02, 0.0)), Color(0.62, 0.5, 0.36), 16)
+			if chapter == 4:  # the castle's lot is a little cloud in the sky
+				for q in [[Vector3(-1.0, -0.2, 0.2), 0.9], [Vector3(0, -0.35, 0), 1.2], [Vector3(1.0, -0.2, 0.1), 0.9]]:
+					b.sphere(q[1], MeshKit.at(q[0], Vector3(1.0, 0.5, 1.0)), Color.WHITE, 12)
+			else:
+				b.disc(2.2, MeshKit.at(Vector3(0.0, 0.02, 0.0)), Color(0.62, 0.5, 0.36), 16)
 			return b.build()
-		b.disc(2.6, MeshKit.at(Vector3(0.0, 0.02, 0.0)), Color(0.62, 0.5, 0.36), 18)
+		if chapter != 4:
+			b.disc(2.6, MeshKit.at(Vector3(0.0, 0.02, 0.0)), Color(0.62, 0.5, 0.36), 18)
 		match chapter:
 			0:  # farmhouse: walls, then roof and door, then chimney, windows and fence
 				var red := Color(0.9, 0.35, 0.3)

@@ -324,6 +324,7 @@ func _build_world() -> void:
 		pa.set("flying", true)
 	gust = MeshKit.instance(Meshes.gust(), false)
 	gust.name = "Gust"
+	gust.scale = Vector3.ONE * 1.8
 	gust.visible = false
 	add_child(gust)
 	_build_village([0, 0, 0, 0, 0])
@@ -755,7 +756,7 @@ func _make_hoop(id: int, kind: int, ci: int, pos: Vector3) -> Hoop:
 			return bm)
 		h.node.add_child(sp)
 	if kind == SkyGen.CHAIN or kind == SkyGen.GATE:
-		h.label = UiKit.label3d("", 0.75 if kind == SkyGen.CHAIN else 0.55, Meshes.CHAIN_COLOR.lightened(0.4) if kind == SkyGen.CHAIN else "text", true)
+		h.label = UiKit.label3d("", 0.75 if kind == SkyGen.CHAIN else 0.45, Meshes.CHAIN_COLOR.lightened(0.4) if kind == SkyGen.CHAIN else "text", true)
 		h.label.outline_size = 22
 		h.label.position = Vector3(0.0, Meshes.radius(kind) + (0.6 if kind == SkyGen.CHAIN else 0.75), 0.0)
 		h.label.double_sided = true
@@ -779,7 +780,7 @@ func _label_hoop(h: Hoop) -> void:
 	var id := String(gates[h.ci]) if gates is Array and h.ci < (gates as Array).size() else ""
 	if id == Story.DAILY_GATE:
 		var best := int(net.state_get("daily_best", 0))
-		h.label.text = "DAILY SKY" + ("\nBEST TODAY %d" % best if best > 0 else "\nSAME FOR ALL TODAY")
+		h.label.text = "DAILY SKY" + ("\nBEST %d" % best if best > 0 else "")
 		h.label.modulate = Color(0.45, 0.85, 1.0)
 	elif Story.BREEZES.has(id):
 		h.label.text = String(Story.BREEZES[id][0])
@@ -830,7 +831,7 @@ func _animate_hoops(delta: float) -> void:
 			gold = h
 	gust.visible = gold != null
 	if gold != null:
-		var want := gold.node.position + Vector3(0.0, 1.5, 0.0) - gold.node.global_basis.x * 0.6
+		var want := gold.node.position + Vector3(0.0, 1.9, 0.0) - gold.node.global_basis.x * 0.8
 		gust.position = gust.position.lerp(want, 1.0 - exp(-6.0 * delta)) if gust.position.distance_to(want) < 6.0 else want
 		gust.rotation.y = gold.node.rotation.y
 		gust.position.y += sin(clock * 4.0) * 0.004
@@ -1474,13 +1475,17 @@ func _next_formation() -> void:
 	form_t = 0.0
 	var f: Dictionary = forms[form_i % forms.size()]
 	var specs: Array = f.hoops
+	var kept := 0
 	for id in hoops.keys():
 		var h: Hoop = hoops[id]
-		var clash := h.kind == SkyGen.CHAIN or h.kind == SkyGen.GOLD
+		# Up to two leftovers stay (someone may be about to fly through); the rest flutter away.
+		var clash := h.kind == SkyGen.CHAIN or h.kind == SkyGen.GOLD or kept >= 2
 		for s in specs:
 			if h.node.position.distance_to(s.pos) < SkyGen.MIN_GAP:
 				clash = true
-		if clash:
+		if not clash:
+			kept += 1
+		else:
 			burst(h.node.position, [Color.WHITE], 12, 0.5)
 			h.node.queue_free()
 			hoops.erase(id)

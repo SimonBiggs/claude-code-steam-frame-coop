@@ -260,7 +260,7 @@ static func gold_pos(t: float) -> Vector3:
 
 ## The three pick-a-breeze gates (same spots every time).
 static func gate_positions() -> Array:
-	return [Vector3(-4.6, 3.0, -3.0), Vector3(0.0, 3.6, -5.0), Vector3(4.6, 3.0, -3.0)]
+	return [Vector3(-5.4, 3.0, -2.6), Vector3(0.0, 3.8, -5.4), Vector3(5.4, 3.0, -2.6)]
 
 
 # --- Validator ------------------------------------------------------------------------------
