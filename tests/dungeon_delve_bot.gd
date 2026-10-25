@@ -94,6 +94,8 @@ func _watch() -> String:
 			var reached := false
 			if goal == "zone":
 				reached = int(t["bosses"]) >= 1 and (t["floors"] as Array).has(FloorGen.FLOORS_PER_ZONE)
+			elif goal == "boss":
+				reached = int(t["bosses"]) >= 1
 			elif goal == "floor":
 				reached = (t["floors"] as Array).size() >= 2
 			if reached:
@@ -375,6 +377,8 @@ func _deep_checks(mode: String) -> void:
 	for i in range(1, fl.size()):
 		kit.assert_true(int(fl[i]) == int(fl[i - 1]) + 1 or int(t["wipes"]) > 0, "%s: floors went down in order (%s)" % [mode, str(fl)])
 	kit.assert_true(int(t["kills"]) > 0, "%s: monsters were beaten (%d)" % [mode, int(t["kills"])])
+	if goal == "boss":
+		kit.assert_true(goal_done, "%s: the boss was beaten: %s" % [mode, str(t)])
 	if goal in ["zone", "floor"]:
 		kit.assert_true(goal_done, "%s: the goal (%s) was reached: %s" % [mode, goal, str(t)])
 		kit.assert_true(int(t["keys"]) >= 1 and int(t["doors"]) >= 1, "%s: a key opened a door (%d keys, %d doors)" % [mode, int(t["keys"]), int(t["doors"])])

@@ -279,7 +279,7 @@ func hit(id: int, dmg: float, from: Vector3, pierce: bool = false) -> String:
 func _shield_blocks(m: Dictionary, from: Vector3) -> bool:
 	var kind: int = m["kind"]
 	var shielded := kind == FloorGen.F_SHIELD or (kind == FloorGen.B_BONE and int(m["phase"]) >= 2)
-	if not shielded or int(m["st"]) == STUN:
+	if not shielded or int(m["st"]) in [STUN, RECOVER]:  # after a shove the shield drops for a moment
 		return false
 	var p: Vector3 = m["p"]
 	var to := Vector2(from.x - p.x, from.z - p.z)
@@ -504,7 +504,16 @@ func _spitter(id: int, m: Dictionary, delta: float, targets: Array, spd: float) 
 
 
 func _shield(id: int, m: Dictionary, delta: float, targets: Array, spd: float) -> void:
+	# Sticks with one target for a few seconds, so a friend can get round the back.
 	var tg := _nearest(m["p"], targets, int(m["room"]))
+	if float(m.get("stick_t", 0.0)) > 0.0:
+		m["stick_t"] = float(m["stick_t"]) - delta
+		for t2 in targets:
+			if int((t2 as Dictionary)["key"]) == int(m.get("stick_key", -99)) and FloorGen.room_at(f, (t2 as Dictionary)["p"]) == int(m["room"]):
+				tg = t2
+	elif not tg.is_empty():
+		m["stick_t"] = 3.5
+		m["stick_key"] = int(tg["key"])
 	if tg.is_empty():
 		return
 	var tp: Vector3 = tg["p"]
@@ -528,7 +537,7 @@ func _shield(id: int, m: Dictionary, delta: float, targets: Array, spd: float) -
 			if float(m["t"]) <= 0.0:
 				m["st"] = MOVE
 		_:
-			_face(m, tp, 1.5 * spd, delta)
+			_face(m, tp, 1.1 * spd, delta)
 			var yaw2: float = m["yaw"]
 			var fwd := Vector3(sin(yaw2), 0.0, cos(yaw2))
 			var d := Vector2(tp.x - p.x, tp.z - p.z).length()

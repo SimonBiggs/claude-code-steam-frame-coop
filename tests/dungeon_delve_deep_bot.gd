@@ -207,7 +207,7 @@ func steer(from: Vector3, to: Vector3) -> Vector3:
 			if prev.has(n):
 				continue
 			var wp := Vector3(n.x * cell, 0.0, n.y * cell)
-			if not FloorGen.walkable(dp.view.rects, dp.view.obst, wp, 0.36):
+			if not _ok(wp, 0.36):
 				continue
 			prev[n] = c
 			q.append(n)
@@ -236,13 +236,38 @@ func steer(from: Vector3, to: Vector3) -> Vector3:
 	return out
 
 
+## Walkable, and not a hole / raised spikes / a boulder lane about to roll.
+func _ok(p: Vector3, rad: float) -> bool:
+	var dp := deep()
+	if not FloorGen.walkable(dp.view.rects, dp.view.obst, p, rad):
+		return false
+	for t in dp.view.traps:
+		var td: Dictionary = t
+		match String(td["kind"]):
+			"collapse":
+				var bad := int(td["s"]) | int(td["v"])
+				var tiles: Array = td["tiles"]
+				for k in tiles.size():
+					if bad & (1 << k) != 0:
+						var tp: Vector3 = tiles[k]["p"]
+						if absf(p.x - tp.x) < FloorGen.TILE * 0.5 + 0.2 and absf(p.z - tp.z) < FloorGen.TILE * 0.5 + 0.2:
+							return false
+			"spikes":
+				if float(td["s"]) >= 0.5:
+					for w in td["tiles"]:
+						var wp: Vector3 = w
+						if absf(p.x - wp.x) < FloorGen.TILE * 0.5 + 0.2 and absf(p.z - wp.z) < FloorGen.TILE * 0.5 + 0.2:
+							return false
+	return true
+
+
 func _clear(a: Vector3, b: Vector3) -> bool:
 	var dp := deep()
 	var d := Vector2(b.x - a.x, b.z - a.z).length()
 	var n := int(d / 0.25) + 1
 	for i in range(1, n + 1):
 		var p := a.lerp(b, float(i) / n)
-		if not FloorGen.walkable(dp.view.rects, dp.view.obst, Vector3(p.x, 0.0, p.z), 0.33):
+		if not _ok(Vector3(p.x, 0.0, p.z), 0.33):
 			return false
 	return true
 
@@ -364,6 +389,9 @@ func _fight(slot: int, h: Node3D, id: int, st: Dictionary, delta: float) -> void
 			return
 	if Foes.is_boss(kind) and int(st.get("bomb", 0)) > 0 and Vector2(p.x - pos.x, p.z - pos.z).length() < 3.2:
 		_press(slot, "back", "b", 2.5)
+	if int(m["st"]) == Foes.RECOVER and Vector2(p.x - pos.x, p.z - pos.z).length() < reach + 0.2:
+		_face_press(slot, h, p)  # its shield is down while it gets its breath back
+		return
 	var dist := Vector2(goal.x - pos.x, goal.z - pos.z).length()
 	if dist > 0.4 and not (not shielded and Vector2(p.x - pos.x, p.z - pos.z).length() < reach):
 		_go(slot, h, goal, 0.35, delta)
