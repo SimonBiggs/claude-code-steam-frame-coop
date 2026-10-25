@@ -276,6 +276,12 @@ def t_source(base):
             env_join={"DUO_UPDATE_TEST_PEER_IP": "8.8.8.8"})
     # Non-host: an attacker JOINER sends version offers and an unasked-for manifest straight to another joiner.
     h = copy(base, f"{W}/c2-host")
+    # The real lobby host doesn't relay between joiners at all (arcade.gd: server_relay = false), so joiner-to-joiner
+    # messages never arrive. Turn relaying back on in this host's copy to test the receiver's own checks too.
+    ap = h + "/arcade/arcade.gd"
+    asrc = open(ap).read()
+    ok("c2", "server_relay = false" in asrc, "the lobby host doesn't relay between joiners", "server_relay = false missing")
+    open(ap, "w").write(asrc.replace("server_relay = false", "server_relay = true"))
     ev = attacker(make_newer(base, f"{W}/c2-evil", "steam-machine", NOW - 2000, "c2"))
     p = ev + "/core/lan_update.gd"
     s = open(p).read()

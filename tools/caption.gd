@@ -49,11 +49,14 @@ func show_text(text: String) -> void:
 			label3d.outline_size = 14
 			label3d.width = 900.0
 			label3d.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-			label3d.no_depth_test = true
+			label3d.no_depth_test = false  # nearer objects may pass in front (Simon)
 			label3d.render_priority = 20
 			label3d.modulate = Color(1.0, 0.95, 0.75)
 			get_tree().root.add_child(label3d)
 		label3d.text = text
+		# Anchor at the top so long captions grow downwards, away from the game's own text.
+		label3d.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+		label3d.no_depth_test = false
 		label3d.visible = true
 		_place(true)
 	else:
@@ -92,7 +95,7 @@ func _place(force: bool = false) -> void:
 	to_label.y = 0.0
 	if not force and to_label.length() > 0.01 and rad_to_deg(fwd.angle_to(to_label.normalized())) < FOLLOW_DEG:
 		return  # still roughly in view: stay world-locked
-	label3d.global_position = cam.global_position + fwd * DIST * s + Vector3(0.0, -0.3 * s, 0.0)
+	label3d.global_position = cam.global_position + fwd * DIST * s + Vector3(0.0, -0.6 * s, 0.0)  # below where games put their own text
 	label3d.pixel_size = 0.0022 * s
 	var d := label3d.global_position - cam.global_position
 	# A Label3D's readable side is +Z: point +Z back at the player (the other sign mirrors it).

@@ -110,6 +110,7 @@ const SOLO := {
 	"sheep_round_up": 1, "tiny_town_tycoon": 1, "tower_stack": 1, "whack_a_mole": 1, "quiz_show": 1, "mystery_manor": 1,
 }
 const VrText := preload("res://core/vr_text.gd")
+const SafeApply := preload("res://core/safe_apply.gd")
 const DEFAULT_PORT := 7777
 const JOIN_TIMEOUT_MS := 5000
 
@@ -132,6 +133,7 @@ var hand_r: XRController3D
 var stick_ready := true
 var trigger_was := true  # a trigger still held from leaving a game must be released first
 var starting := false
+var pending_start := -1  # lobby host: a start waiting until every machine has the same code (core/safe_apply.gd)
 # Many machines (2026-10-24): any number of TV machines / Decks / Frames share one lobby. DUO_JOIN=auto finds
 # a lobby (or game) from its LAN beacon; with nobody hosting, this machine hosts a flat lobby (no VR) and the
 # others find it. The lobby host picks each game's host when it starts (a Frame if there is one, else itself)
@@ -151,6 +153,8 @@ var _sel_seq := 0  # how many choices this machine has sent (see _sync_selection
 
 func _ready() -> void:
 	get_tree().paused = false  # the lobby must never start paused (a game can leave the tree paused)
+	SafeApply.ensure()  # deploys switch on only here in the menu, all lobby machines together
+	_restore_menu_state()
 	XRServer.world_scale = 1.0  # a game (Giant's Table) may have left the world scaled up
 	var wanted := OS.get_environment("ARCADE_GAME") if OS.has_environment("ARCADE_GAME") else ""
 	# ARCADE_GAME only picks the FIRST game: coming back to the arcade must show the lobby, not
@@ -212,20 +216,34 @@ func _host_lobby(with_vr: bool) -> void:
 		return
 	mode = "host"
 	host_has_vr = with_vr
+	# Joiners only talk to the host (it passes things on itself), so no relaying between them: with it on, a joiner
+	# leaving for a game made the host tell the others, who had just left too ("Unable to send packet on channel 0").
+	if multiplayer is SceneMultiplayer:
+		(multiplayer as SceneMultiplayer).server_relay = false
 	multiplayer.multiplayer_peer = peer
-	multiplayer.peer_connected.connect(func(id: int) -> void:
-		var ip := ""
-		if multiplayer.multiplayer_peer is ENetMultiplayerPeer:
-			ip = (multiplayer.multiplayer_peer as ENetMultiplayerPeer).get_peer(id).get_remote_address()
-		machines[id] = {"kind": "tv", "ip": ip}
-		_lobby_status()
-		_sync_selection.rpc_id(id, selected, 1, 0))  # the newcomer shows what everyone has chosen
-	multiplayer.peer_disconnected.connect(func(id: int) -> void:
-		machines.erase(id)
-		_lobby_status())
+	if not multiplayer.peer_connected.is_connected(_on_lobby_peer_joined):  # (hosting again: connect once)
+		multiplayer.peer_connected.connect(_on_lobby_peer_joined)
+	if not multiplayer.peer_disconnected.is_connected(_on_lobby_peer_left):
+		multiplayer.peer_disconnected.connect(_on_lobby_peer_left)
 	if with_vr:
 		_build_vr_view()
 	print("Arcade: lobby hosting on %d" % port)
+
+
+func _on_lobby_peer_joined(id: int) -> void:
+	if mode != "host":
+		return
+	var ip := ""
+	if multiplayer.multiplayer_peer is ENetMultiplayerPeer:
+		ip = (multiplayer.multiplayer_peer as ENetMultiplayerPeer).get_peer(id).get_remote_address()
+	machines[id] = {"kind": "tv", "ip": ip}
+	_lobby_status()
+	_sync_selection.rpc_id(id, selected, 1, 0)  # the newcomer shows what everyone has chosen
+
+
+func _on_lobby_peer_left(id: int) -> void:
+	machines.erase(id)
+	_lobby_status()
 
 
 func _lobby_status() -> void:
@@ -268,17 +286,24 @@ func _join_lobby(address: String) -> void:
 	mode = "client"
 	multiplayer.multiplayer_peer = peer
 	join_deadline = Time.get_ticks_msec() + JOIN_TIMEOUT_MS
-	if multiplayer.connected_to_server.get_connections().size() > 0:
-		return  # already set up by an earlier attempt: just retry with the new peer
-	multiplayer.connected_to_server.connect(func() -> void:
-		join_deadline = 0
-		_hello.rpc_id(1, my_kind)
-		_set_status("Connected: pick a game!")
-		if OS.has_environment("ARCADE_AUTOPICK"):  # headless tests
-			_start_everywhere(int(OS.get_environment("ARCADE_AUTOPICK"))))
-	multiplayer.connection_failed.connect(_lobby_offline)
-	multiplayer.server_disconnected.connect(_lobby_offline)
+	# Named methods, checked one by one: other nodes listen to the same signals (core/lan_update.gd), so "anyone
+	# connected?" said yes after a game and the arcade never heard its own connection (joiners dropped out of the
+	# lobby every 5 s).
+	if not multiplayer.connected_to_server.is_connected(_on_lobby_connected):
+		multiplayer.connected_to_server.connect(_on_lobby_connected)
+	if not multiplayer.connection_failed.is_connected(_lobby_offline):
+		multiplayer.connection_failed.connect(_lobby_offline)
+	if not multiplayer.server_disconnected.is_connected(_lobby_offline):
+		multiplayer.server_disconnected.connect(_lobby_offline)
 	print("Arcade: joining lobby at %s:%d" % [address, port])
+
+
+func _on_lobby_connected() -> void:
+	join_deadline = 0
+	_hello.rpc_id(1, my_kind)
+	_set_status("Connected: pick a game!")
+	if OS.has_environment("ARCADE_AUTOPICK"):  # headless tests
+		_start_everywhere(int(OS.get_environment("ARCADE_AUTOPICK")))
 
 
 func _lobby_offline() -> void:
@@ -292,15 +317,33 @@ func _lobby_offline() -> void:
 	_set_status("No VR player found yet (still looking…). You can also play on the TV")
 
 
+## True once the lobby connection is up (a joiner's peer exists while it is still connecting, and an RPC sent then
+## only logs "Trying to call an RPC via a multiplayer peer which is not connected").
+func _lobby_connected() -> bool:
+	var p := multiplayer.multiplayer_peer
+	return p != null and not p is OfflineMultiplayerPeer and p.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTED
+
+
 func _close_peer() -> void:
 	var old := multiplayer.multiplayer_peer
 	if old != null and not old is OfflineMultiplayerPeer:
 		old.close()
 	multiplayer.multiplayer_peer = null
+	if multiplayer is SceneMultiplayer:
+		(multiplayer as SceneMultiplayer).server_relay = true  # (the default, for the games)
 
 
 func _exit_tree() -> void:
 	_close_peer()
+	# Back in the menu (after a game, or the menu scene reloaded by a deploy): the same tab and game highlighted.
+	get_tree().root.set_meta("arcade_menu_state", {"selected": selected, "cat": cat})
+
+
+func _restore_menu_state() -> void:
+	var st = get_tree().root.get_meta("arcade_menu_state") if get_tree().root.has_meta("arcade_menu_state") else null
+	if st is Dictionary:
+		selected = clampi(int(st.get("selected", 0)), 0, GAMES.size() - 1)
+		cat = int(st.get("cat", 0))
 
 
 @rpc("any_peer", "call_remote", "reliable")
@@ -365,6 +408,13 @@ func _sync_selection(index: int, origin: int = 0, seq: int = 0) -> void:
 
 
 func _start_everywhere(index: int) -> void:
+	if mode == "host" and not SafeApply.start_ok():
+		# A deploy is still reaching a lobby machine (or waits to switch on): start once everyone has the same code.
+		if pending_start < 0:
+			_set_status("Getting the newest version on every machine...")
+		pending_start = index
+		return
+	pending_start = -1
 	if mode == "host":
 		var game_host := _pick_game_host()
 		# Each client needs the chosen host's address; a machine that is itself the chosen host sees its own
@@ -373,7 +423,8 @@ func _start_everywhere(index: int) -> void:
 			_start.rpc_id(id, index, game_host, machines[id].ip)
 		_start(index, game_host, "")
 	elif mode == "client":
-		_request_start.rpc_id(1, index)
+		if _lobby_connected():  # (still connecting: the lobby can't hear us yet)
+			_request_start.rpc_id(1, index)
 	else:
 		_launch(index)
 
@@ -381,6 +432,11 @@ func _start_everywhere(index: int) -> void:
 ## Close the lobby connection and load the game; the game sets up its own networking.
 func _launch(index: int) -> void:
 	if starting:
+		return
+	# Code that arrived while playing / in the menu switches on first, so the game starts on one version. The switch
+	# happens at the end of this frame (this script may be one of the files); launch again a moment later.
+	if SafeApply.flush():
+		get_tree().create_timer(0.15).timeout.connect(_launch.bind(index))
 		return
 	starting = true
 	var game: Dictionary = GAMES[clampi(index, 0, GAMES.size() - 1)]
@@ -404,6 +460,11 @@ func _process(_delta: float) -> void:
 		preload("res://core/ui_kit.gd").ensure_pad_ui_actions()
 	_lobby_net(_delta)
 	_ensure_shared_nodes()
+	if pending_start >= 0 and not starting:
+		if mode != "host":
+			pending_start = -1
+		elif SafeApply.start_ok():
+			_start_everywhere(pending_start)
 	_ensure_fullscreen()
 	_hide_tv_cursor()
 	if not has_meta("menu_v4") and (not buttons.is_empty() or grid == null) and status != null:
@@ -507,7 +568,10 @@ func _build_tv_menu() -> void:
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART  # two lines on a narrow screen instead of running off the sides
 	box.add_child(hint)
-	cat = maxi(0, tabs().find(_cat_index_of(selected)))
+	# Keep the tab on screen when it shows the selected game (rebuilt after a deploy or a resize, or back from a game);
+	# a game can be in two tabs (1 PLAYER and its own), so don't jump to its own tab.
+	if cat < 0 or cat >= tabs().size() or not _games_in(cat).has(selected):
+		cat = maxi(0, tabs().find(_cat_index_of(selected)))
 	_show_category(cat, false)
 	set_meta("built_for", get_viewport().get_visible_rect().size)
 
@@ -682,12 +746,23 @@ func _on_hot_reload() -> void:
 	preload("res://core/ui_kit.gd").ensure_pad_ui_actions()
 	if quit_panel and is_instance_valid(quit_panel):
 		return
+	_rebuild_tv_menu.call_deferred()
+
+
+## Build the new menu first, then drop the old one in the same frame: no blank (black) frame in between, and the
+## same tab, highlighted game and focus as before.
+func _rebuild_tv_menu() -> void:
+	var old: Array[Node] = []
 	for c in get_children():
 		if c is CanvasLayer:
-			c.queue_free()
+			old.append(c)
+			c.name = "OldMenu"  # the new one gets the real name (TvMenu)
 	buttons.clear()
 	cards.clear()
-	_build_tv_menu.call_deferred()
+	_build_tv_menu()
+	for c in old:
+		remove_child(c)
+		c.queue_free()
 
 
 ## Quitting the arcade: on handhelds (Steam Deck) and plain local launches; never on the TV, which stays on (kids).
@@ -813,12 +888,12 @@ func _select(index: int, broadcast: bool) -> void:
 	if not broadcast and grid != null:
 		_applying_remote = true
 		var want := tabs().find(_cat_index_of(selected))
-		if want >= 0 and want != cat:
+		if want >= 0 and want != cat and not cards.has(selected):  # (already on screen in this tab: stay)
 			_show_category(want, false)
 		if cards.has(selected) and not (cards[selected] as Button).has_focus():
 			(cards[selected] as Button).grab_focus()
 		_applying_remote = false
-	if broadcast and mode != "local" and multiplayer.multiplayer_peer != null:
+	if broadcast and mode != "local" and _lobby_connected():
 		stats.sync_out += 1
 		_sel_seq += 1
 		if mode == "host":
@@ -1107,6 +1182,7 @@ func _listen_for_game() -> void:
 ## the VR text guard (also a capture mirror, so the live view isn't black here) and Claude's captions.
 func _ensure_shared_nodes() -> void:
 	var root := get_tree().root
+	SafeApply.ensure()
 	for pair in [["vr_text_guard", "res://core/vr_text_guard.gd"], ["claude_caption", "res://addons/gdev/caption.gd"]]:
 		if root.has_meta(pair[0]) or not ResourceLoader.exists(pair[1]):
 			continue
@@ -1115,6 +1191,8 @@ func _ensure_shared_nodes() -> void:
 		root.add_child.call_deferred(n)
 	# LAN updates (core/lan_update.gd): needs a fixed name (/root/LanUpdate) so its RPCs reach the same node on every
 	# machine, and the pinned root key (addons/lan_update, installed with the game: older installs simply don't update).
+	if root.get_node_or_null("Boot") != null:
+		return  # services (LanUpdate, SafeApply, the VR text guard) are Boot's (core/services.gd); below: older installs
 	if not root.has_meta("lan_update") and FileAccess.file_exists("res://addons/lan_update/root.pub.pem") \
 			and ResourceLoader.exists("res://core/lan_update.gd"):
 		var u: Node = (load("res://core/lan_update.gd") as GDScript).new()

@@ -205,7 +205,7 @@ func _arcade() -> void:
 		main.net.go_to_arcade()
 	else:
 		get_tree().paused = false
-		get_tree().change_scene_to_file("res://arcade.tscn")
+		preload("res://core/safe_apply.gd").change_scene("res://arcade.tscn")
 
 
 func _fullscreen() -> void:

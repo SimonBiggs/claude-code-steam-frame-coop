@@ -43,6 +43,12 @@ else
 fi
 # Simon's Steam Deck plays too (another TV-style player, or on its own): ~/DuoArena via duo-deploy-deck.
 duo-deploy-deck >/dev/null || true
+# New code switches on at the next safe point (the arcade menu, all lobby machines together: core/safe_apply.gd).
+# DUO_APPLY_NOW=1 duo-deploy "msg": switch it on at once, even mid-game (only when Simon asks for it live).
+if [ -n "$DUO_APPLY_NOW" ]; then
+  mkdir -p "$LIVE/.dev" && touch "$LIVE/.dev/apply_now"
+  ssh -o ConnectTimeout=4 -o BatchMode=yes -i $K steamos@frame 'mkdir -p devkit-game/DuoArena/game/.dev && touch devkit-game/DuoArena/game/.dev/apply_now' 2>/dev/null || true
+fi
 cd "$LIVE" && git add -A && git commit -q -m "$msg
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" && git log --oneline -1

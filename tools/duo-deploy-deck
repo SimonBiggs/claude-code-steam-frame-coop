@@ -11,5 +11,7 @@ for d in "${decks[@]}"; do
   rsync -az --exclude .dev --exclude .claude "$B/" "$d:DuoArena/" &&
     ssh "$d" 'mkdir -p ~/.local/share/applications ~/Desktop && cp ~/DuoArena/duo-arena*.desktop ~/.local/share/applications/ && cp ~/DuoArena/duo-arena*.desktop ~/Desktop/ && chmod +x ~/Desktop/duo-arena*.desktop; python3 ~/DuoArena/apply-art.py >/dev/null 2>&1; true' &&
     rm -f ~/.cache/duo-deploy-pending/"$d" && echo "$d updated"
+  # DUO_APPLY_NOW=1 (from duo-deploy): switch the new code on at once instead of at the next safe point.
+  [ -n "$DUO_APPLY_NOW" ] && ssh "$d" 'mkdir -p ~/DuoArena/game/.dev && touch ~/DuoArena/game/.dev/apply_now'
 done
 exit $rc

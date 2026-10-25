@@ -604,7 +604,8 @@ func _process(delta: float) -> void:
 		log_line("left the lobby during the update: will resume next time")
 		_abort("left lobby")
 	var lobby := _lobby()
-	if not waiting.is_empty() and lobby != null and lobby.get("starting") != true and Time.get_ticks_msec() >= int(waiting.at):
+	# The same "safe point" as every deploy (core/safe_apply.gd): the arcade menu, no game starting.
+	if not waiting.is_empty() and preload("res://core/safe_apply.gd").safe_now() and Time.get_ticks_msec() >= int(waiting.at):
 		apply_ready()
 	_update_toast(lobby != null)
 

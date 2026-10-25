@@ -23,7 +23,7 @@ anti_aliasing/quality/msaa_3d=2
 [autoload]
 
 GDev="*res://addons/gdev/bridge.gd"
-LanUpdateGuard="*res://addons/lan_update/guard.gd"
+Boot="*res://addons/boot/boot.gd"
 
 [xr]
 
