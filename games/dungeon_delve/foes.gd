@@ -427,6 +427,7 @@ func _dmg(base: int, m: Dictionary) -> int:
 
 func _touch(id: int, m: Dictionary, targets: Array, reach: float, dmg: int, once: bool) -> void:
 	var p: Vector3 = m["p"]
+	deep.src = "touch%d" % int(m["kind"])
 	for t in targets:
 		var tp: Vector3 = (t as Dictionary)["p"]
 		var key: int = (t as Dictionary)["key"]
@@ -491,13 +492,13 @@ func _spitter(id: int, m: Dictionary, delta: float, targets: Array, spd: float) 
 			var p: Vector3 = m["p"]
 			var from := p + Vector3(0.0, 0.6, 0.0)
 			var aim := (tp + Vector3(0.0, 0.7, 0.0) - from).normalized()
-			shoot("ball", from, aim * (5.0 + zone * 0.6) * spd, id)
+			shoot("ball", from, aim * (3.8 + zone * 0.5) * spd, id)
 			deep.sound_at("spit" if zone != 1 else "bow", p, -2.0, 1.1)
 			m["st"] = IDLE
-			m["cd"] = randf_range(2.2, 3.2) / spd
+			m["cd"] = randf_range(2.8, 3.8) / spd
 		return
 	_face(m, tp, 5.0, delta)
-	_keep_range(id, m, delta, tp, 3.5, 6.5, 1.5 * spd)
+	_keep_range(id, m, delta, tp, 3.5, 6.0, 1.15 * spd)
 	if float(m["cd"]) <= 0.0:
 		_wind(m, 0.8)
 
@@ -561,6 +562,7 @@ func _swarm(id: int, m: Dictionary, delta: float, targets: Array, spd: float) ->
 	if float(m["cd"]) <= 0.0 and not tg.is_empty():
 		var tp2: Vector3 = tg["p"]
 		if Vector2(tp2.x - np.x, tp2.z - np.z).length() < 0.6:
+			deep.src = "swarm"
 			if deep.hurt(int(tg["key"]), _dmg(1, m), np, true) != "":
 				m["cd"] = 1.6
 				m["v"] = -v
@@ -592,14 +594,16 @@ func _healer(id: int, m: Dictionary, delta: float, targets: Array, spd: float) -
 	var friends := Vector3.ZERO
 	var nf := 0
 	for oid in mons:
-		if int(oid) != id and int(mons[oid]["room"]) == room:
+		if int(oid) != id and int(mons[oid]["room"]) == room and int(mons[oid]["st"]) != SLEEP:
 			friends += Vector3(mons[oid]["p"])
 			nf += 1
 	var dir := Vector3.ZERO
 	if not tg.is_empty():
 		var tp: Vector3 = tg["p"]
 		var away := Vector3(p.x - tp.x, 0.0, p.z - tp.z)
-		if away.length() < 4.0:
+		if nf == 0:
+			dir -= away.normalized() * 0.6  # all alone: it gives up hiding and wanders over (no endless chase)
+		elif away.length() < 4.0:
 			dir += away.normalized()
 		_face(m, tp, 4.0, delta)
 	if nf > 0:
@@ -1106,6 +1110,7 @@ func _step_shots(delta: float, targets: Array) -> void:
 					aim = deep.knight_head() + Vector3(0.0, -0.35, 0.0)
 				if aim.distance_to(np2) < r + (0.45 if bool((tg as Dictionary)["knight"]) else 0.4):
 					var dmg2 := 2 if String(s["kind"]) == "orb" else 1
+					deep.src = "shot_" + String(s["kind"])
 					deep.hurt(int((tg as Dictionary)["key"]), dmg2 + int(cfg["dmg"]), np2, true)
 					gone = true
 					break

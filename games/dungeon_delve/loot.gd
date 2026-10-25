@@ -38,7 +38,7 @@ static func chest_loot(rng: RandomNumberGenerator, g: int, big: bool) -> Array:
 		out.append(COIN5)
 	var x := rng.randf()
 	if big:
-		out.append([MAXHEART, ABILITIES[rng.randi_range(0, 2)], POTION, BOMBS][rng.randi_range(0, 3)])
+		out.append([SWORD, ABILITIES[rng.randi_range(0, 2)], POTION, BOMBS][rng.randi_range(0, 3)])
 	elif x < 0.3:
 		out.append(POTION)
 	elif x < 0.5:

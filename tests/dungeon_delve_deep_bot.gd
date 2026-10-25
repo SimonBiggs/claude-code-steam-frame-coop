@@ -23,6 +23,7 @@ var stuck := {}  ## slot -> {"p", "t", "side", "dodge"}
 var bought := {}
 var swing_side := 1.0
 var _wp_cache := {}
+var stall := {}
 
 
 func deep() -> Node:
@@ -73,6 +74,20 @@ func hero(slot: int, delta: float, index: int) -> void:
 		return
 	var f: Dictionary = dp.f
 	var my_room := FloorGen.room_at(f, pos)
+	# Stalled for a while (cornered, a pillar, a stand-off)? wander a bit.
+	var sv: Dictionary = stall.get(slot, {"p": pos, "t": 0.0, "go": 0.0, "dir": Vector2.ZERO})
+	stall[slot] = sv
+	if float(sv["go"]) > 0.0:
+		sv["go"] = float(sv["go"]) - delta
+		_stick(slot, sv["dir"])
+		return
+	sv["t"] = float(sv["t"]) + delta
+	if float(sv["t"]) > 5.0:
+		if (sv["p"] as Vector3).distance_to(pos) < 0.5 and dp.foes.count_in(my_room) > 0:
+			sv["go"] = 1.2
+			sv["dir"] = Vector2.from_angle(randf() * TAU)
+		sv["t"] = 0.0
+		sv["p"] = pos
 	# Potions.
 	if int(st.get("hp", 5)) <= 2 and int(st.get("pot", 0)) > 0:
 		_press(slot, "y", "y", 1.0)
@@ -80,6 +95,10 @@ func hero(slot: int, delta: float, index: int) -> void:
 	var away := _danger_escape(pos)
 	if away != Vector3.ZERO:
 		_stick(slot, Vector2(away.x, away.z).normalized())
+		return
+	if OS.has_environment("BOT_DEBUG") and Engine.get_process_frames() % 120 == 0:
+		print("HERO %d pos %s room %d escape %s foe %d" % [slot, pos.snappedf(0.1), my_room, _danger_escape(pos), _pick_foe(pos, my_room)])
+	if _incoming(slot, h):
 		return
 	# Monsters in my room.
 	var foe := _pick_foe(pos, my_room)
@@ -106,7 +125,7 @@ func hero(slot: int, delta: float, index: int) -> void:
 	var gp: Vector3 = goal["p"]
 	var near: float = goal.get("near", 0.35)
 	if _go(slot, h, gp, near, delta) and bool(goal.get("bonk", false)):
-		_face_press(slot, h, gp)
+		_face_press(slot, h, goal.get("at", gp))
 
 
 ## Walk towards p through doors; true once within `near`.
@@ -137,6 +156,8 @@ func _go(slot: int, h: Node3D, p: Vector3, near: float, delta: float) -> bool:
 		return true
 	var step := steer(pos, wp)
 	to = Vector3(step.x - pos.x, 0.0, step.z - pos.z)
+	if OS.has_environment("BOT_DEBUG") and Engine.get_process_frames() % 120 == 0:
+		print("GO slot %d pos %s p %s wp %s step %s clear %s" % [slot, pos.snappedf(0.1), p.snappedf(0.1), wp.snappedf(0.1), step.snappedf(0.1), _clear(pos, wp)])
 	var dir := Vector2(to.x, to.z).normalized()
 	# Stuck on a pillar? side-step for a moment.
 	var sk: Dictionary = stuck.get(slot, {"p": pos, "t": 0.0, "side": 0.0, "dodge": 0.0})
@@ -229,7 +250,7 @@ func _clear(a: Vector3, b: Vector3) -> bool:
 func _face_press(slot: int, h: Node3D, at: Vector3) -> void:
 	var to := Vector3(at.x - h.position.x, 0.0, at.z - h.position.z)
 	if to.length() > 0.05:
-		_stick(slot, Vector2(to.x, to.z).normalized() * 0.25)
+		_stick(slot, Vector2(to.x, to.z).normalized() * 0.45)
 	var fwd := Vector3(sin(h.rotation.y), 0.0, cos(h.rotation.y))
 	if to.length() < 0.3 or fwd.dot(to.normalized()) > 0.6:
 		_press(slot, "accept", "a", 0.36)
@@ -252,8 +273,45 @@ func _danger_escape(pos: Vector3) -> Vector3:
 			if out.length() < 0.1:
 				out = Vector3(1, 0, 0)
 			return out.normalized()
-	# Spikes up / about to be up.
+	# Spikes about to come up under me: off the band.
+	for t in dp.view.traps:
+		var td: Dictionary = t
+		if String(td["kind"]) == "spikes" and float(td["s"]) >= 0.5:
+			for w in td["tiles"]:
+				var wp: Vector3 = w
+				if absf(pos.x - wp.x) < FloorGen.TILE * 0.6 and absf(pos.z - wp.z) < FloorGen.TILE * 0.6:
+					var c2 := FloorGen.room_center(dp.f, int(td["room"]))
+					var first: Vector3 = td["tiles"][0]
+					var last: Vector3 = td["tiles"][td["tiles"].size() - 1]
+					var along := (last - first).normalized()
+					var off := Vector3(pos.x - c2.x, 0.0, pos.z - c2.z)
+					var side := off - along * off.dot(along)
+					return side.normalized() if side.length() > 0.2 else Vector3(-along.z, 0.0, along.x)
 	return Vector3.ZERO
+
+
+## A goo ball coming at me: swat it when close, else step aside.
+func _incoming(slot: int, h: Node3D) -> bool:
+	if main.net.mode == "client":
+		return false
+	var pos := h.position
+	for sid in deep().foes.shots:
+		var s: Dictionary = deep().foes.shots[sid]
+		if int(s.get("owner", 0)) == -2 or not s.has("v") or String(s["kind"]) == "bomb":
+			continue
+		var sp: Vector3 = s["p"]
+		var v: Vector3 = s["v"]
+		var to := Vector3(pos.x - sp.x, 0.0, pos.z - sp.z)
+		var d := to.length()
+		if d > 3.0 or Vector3(v.x, 0, v.z).normalized().dot(to.normalized()) < 0.85:
+			continue
+		if d < 1.4:
+			_face_press(slot, h, sp)
+		else:
+			var side := Vector3(-v.z, 0.0, v.x).normalized()
+			_stick(slot, Vector2(side.x, side.z))
+		return true
+	return false
 
 
 func _pick_foe(pos: Vector3, room: int) -> int:
@@ -300,7 +358,7 @@ func _fight(slot: int, h: Node3D, id: int, st: Dictionary, delta: float) -> void
 		if d < 7.0 and d > 2.0:
 			var to2 := Vector3(p.x - pos.x, 0.0, p.z - pos.z).normalized()
 			var hf := Vector3(sin(h.rotation.y), 0.0, cos(h.rotation.y))
-			_stick(slot, Vector2(to2.x, to2.z) * 0.25)
+			_stick(slot, Vector2(to2.x, to2.z) * 0.45)
 			if hf.dot(to2) > 0.8:
 				_press(slot, "x", "x", 0.5)
 			return
@@ -332,7 +390,7 @@ func _goal(slot: int, pos: Vector3, room: int, index: int) -> Dictionary:
 				var sp := FloorGen.to_world(f, 0, dp.SHOP_SPOTS[i]) + Vector3(0, 0, 0.9)
 				if Vector2(sp.x - pos.x, sp.z - pos.z).length() < 0.45:
 					bought[tries_key] = int(bought.get(tries_key, 0)) + 1  # can't use it? give up after a while
-				return {"p": sp, "near": 0.3, "bonk": true}
+				return {"p": sp, "near": 0.3, "bonk": true, "at": sp - Vector3(0, 0, 0.9)}
 		return {"p": dp.view.stairs_at, "near": 0.4}
 	# Loot nearby (same room).
 	var picks: Dictionary = dp.pickups if main.net.mode != "client" else dp._mirror_picks
@@ -352,10 +410,10 @@ func _goal(slot: int, pos: Vector3, room: int, index: int) -> Dictionary:
 	for cid in dp.view.chests.size():
 		if not dp.view.chest_open(cid) and int(dp.view.chests[cid]["room"]) in reach_rooms:
 			var cp: Vector3 = dp.view.chests[cid]["p"]
-			return {"p": cp, "near": 0.85, "bonk": true}
+			return {"p": cp, "near": 0.85, "bonk": true, "at": cp}
 	for pid in dp.view.pots.size():
 		if not dp.view.pot_broken(pid) and int(dp.view.pots[pid]["room"]) == room:
-			return {"p": dp.view.pots[pid]["p"], "near": 0.7, "bonk": true}
+			return {"p": dp.view.pots[pid]["p"], "near": 0.7, "bonk": true, "at": dp.view.pots[pid]["p"]}
 	# Puzzle doors.
 	var doors: Array = f["doors"]
 	var ob := int(main.net.state_get("d_open", 0))
@@ -388,7 +446,7 @@ func _goal(slot: int, pos: Vector3, room: int, index: int) -> Dictionary:
 		var dd2: Dictionary = doors[di]
 		if int(dd2["type"]) == FloorGen.SECRET and ob & (1 << di) == 0 and int(dd2["a"]) in reach_rooms:
 			var inside := FloorGen.door_inside(f, di, int(dd2["a"]), 0.75)
-			return {"p": inside, "near": 0.3, "bonk": true}
+			return {"p": inside, "near": 0.3, "bonk": true, "at": FloorGen.door_world(f, di)}
 	# Keys to locked doors.
 	if int(main.net.state_get("d_keys", 0)) > 0:
 		for di in doors.size():

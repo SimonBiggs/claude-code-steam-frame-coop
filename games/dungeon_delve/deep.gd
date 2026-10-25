@@ -106,7 +106,8 @@ var _gold := 0
 var _keys := 0
 var tally := {"kills": 0, "floors": [], "bosses": 0, "wipes": 0, "revives": 0, "keys": 0, "doors": 0, "secrets": 0,
 	"puzzles": 0, "bought": 0, "potions": 0, "hurts": 0, "blocks": 0, "reflects": 0, "rooms": 0, "downs": 0,
-	"pickups": 0, "checkpoints": 0, "zones": {}, "bombs": 0, "abilities": 0, "traps": 0, "chests": 0}
+	"pickups": 0, "checkpoints": 0, "zones": {}, "bombs": 0, "abilities": 0, "traps": 0, "chests": 0, "by": {}}
+var src := ""  ## what is hurting someone right now (tests: tally["by"])
 
 # Every machine.
 var pick_nodes := {}
@@ -380,9 +381,14 @@ func _players(alive_only: bool = false) -> Array:
 func _new_stats(slot: int) -> Dictionary:
 	var d := diff()
 	var pk := perks()
-	var hearts := int(d["hearts"]) + int(pk["heart"]) + (1 if _is_knight(slot) else 0)
+	var hearts := int(d["hearts"]) + int(pk["heart"]) + (1 if _is_knight(slot) else 0) + (1 if _solo_brave() else 0)
 	return {"hp": hearts, "max": hearts, "pot": int(d["potions"]) + int(pk["potion"]), "bomb": int(pk["bombs"]),
 		"abil": "", "dmg": 2 if _is_knight(slot) else 1, "charm": 0, "down": false}
+
+
+## Alone on BRAVE (a Deck kid on their own): one more heart, and a lucky charm on every floor.
+func _solo_brave() -> bool:
+	return mode == "brave" and _players().size() == 1
 
 
 func _ensure_stats() -> void:
@@ -492,6 +498,9 @@ func load_floor(z: int, fl: int, k: String) -> void:
 		elif checkpoint.is_empty():
 			checkpoint = {"zone": z, "stats": stats.duplicate(true), "gold": _gold, "floor": fl}
 		(tally["floors"] as Array).append(FloorGen.global_floor(z, fl))
+		if _solo_brave():
+			for s in stats:
+				(stats[s] as Dictionary)["charm"] = 1
 		(tally["zones"] as Dictionary)[z] = true
 		_record_depth()
 	net.state_set("d_floor", [seed_v, z, fl, k, mode == "heroic"])
@@ -852,9 +861,16 @@ func _spawn_room(r: int) -> void:
 	var rd: Dictionary = (f["rooms"] as Array)[r]
 	foes.cfg = _cfg()
 	var boss := false
+	var solo := _players().size() == 1
+	var thin := RandomNumberGenerator.new()
+	thin.seed = hash([seed_v, zone, floor_i, r, "solo"])
+	var placed := 0
 	for fo in rd["foes"]:
 		var a: Array = fo
 		var k: int = a[0]
+		if solo and placed > 0 and not Foes.is_boss(k) and thin.randf() < 0.25:
+			continue  # alone: a few less monsters per room
+		placed += 1
 		var p := FloorGen.to_world(f, r, a[1])
 		foes.spawn(k, p, r, bool(a[2]))
 		poof(p + Vector3(0.0, 0.5, 0.0), Color(0.8, 0.7, 1.0), 14)
@@ -1087,6 +1103,7 @@ func _hazards_step(delta: float) -> void:
 func _hazard_hurt_players(h: Dictionary) -> void:
 	if int(h["pdmg"]) <= 0:
 		return
+	src = "area_" + String(h["shape"])
 	for pl in _players(true):
 		var p: Vector3 = (pl as Dictionary)["p"]
 		if Tele.inside(String(h["shape"]), h["pos"], h["dir"], h["size"], p, 0.25):
@@ -1138,6 +1155,7 @@ func hurt(key: int, dmg: int, from: Vector3, blockable: bool) -> String:
 		main.vr_rig.pulse(VrRig.RIGHT, 0.9, 0.12)
 		return "block"
 	st["hp"] = int(st["hp"]) - dmg
+	(tally["by"] as Dictionary)[src] = int((tally["by"] as Dictionary).get(src, 0)) + dmg
 	iframes[key] = IFRAMES
 	tally["hurts"] = int(tally["hurts"]) + 1
 	stats_dirty = true
@@ -1245,6 +1263,7 @@ func _revive_step(delta: float, alive: Array) -> void:
 
 func _traps_step(delta: float, alive: Array) -> void:
 	trap_clock += delta
+	src = "trap"
 	var tl: Array = f["traps"]
 	traps_out.resize(tl.size() * 2)
 	for ti in tl.size():
@@ -1635,6 +1654,8 @@ func _collect(slot: int, k: int, p: Vector3) -> bool:
 			main.sound_at("power_up", p, -2.0)
 			text = String(Loot.NAMES[k])
 		Loot.MAXHEART:
+			if int(st["max"]) >= 10:
+				return false
 			st["max"] = int(st["max"]) + 1
 			st["hp"] = int(st["hp"]) + 1
 			main.sound_at("level_up", p, -2.0)
@@ -2137,6 +2158,16 @@ func owned_input(delta: float, h: Hero, slot: int) -> void:
 	var fwd := Vector3(sin(yaw), 0.0, cos(yaw))
 	if (party.just_pressed(slot, "accept") or party.just_pressed(slot, "rt")) and float(cd.get("a", 0.0)) <= 0.0:
 		cd["a"] = 0.32
+		# Soft aim: turn to the nearest monster in reach (kids rarely line up exactly).
+		var best := 2.0
+		for id in foes.mons:
+			var m: Dictionary = foes.mons[id]
+			var mp: Vector3 = (m["node"] as Node3D).position
+			var d := Vector2(mp.x - h.position.x, mp.z - h.position.z).length()
+			if d < best and int(m["st"]) != Foes.SLEEP:
+				best = d
+				yaw = atan2(mp.x - h.position.x, mp.z - h.position.z)
+		h.rotation.y = yaw
 		h.bonk_anim()
 		main.bonked[slot] = true
 		party.rumble(slot, 0.2, 0.0, 0.06)
