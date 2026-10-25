@@ -5,6 +5,7 @@ extends Node
 ## Local:     godot --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/snowman_maker_bot.tscn
 ## Networked: DUO_PORT=81xx DUO_HOST=1 ... & DUO_PORT=81xx DUO_JOIN=127.0.0.1 ... (same scene, real time)
 ## Flat host: add DUO_FLAT_HOST=1 to the host (no VR: one bot pad plays slot 0 on the host).
+## BOT_CHAPTER=n plays chapter n's garden (pines 1+, ice 2+, drifts 3+, crowns 4; 5 = mixed).
 
 const BotKit := preload("res://tests/bot_kit.gd")
 const Snowman := preload("res://games/snowman_maker/snowman.gd")
@@ -24,6 +25,8 @@ func _ready() -> void:
 	add_child(kit)
 	main = load("res://games/snowman_maker/main.tscn").instantiate()
 	main.set("round_time", 26.0)
+	if OS.has_environment("BOT_CHAPTER"):
+		main.set("force_chapter", int(OS.get_environment("BOT_CHAPTER")))
 	add_child(main)
 	kit.main = main
 	want = BotKit.bot_players(2, 6)
@@ -108,7 +111,7 @@ func _needy() -> Array:
 	for sid in main.stack_nodes:
 		var n: Snowman = main.stack_nodes[sid]
 		if is_instance_valid(n) and n.radii.size() == 3 and not n.done:
-			return [n, 0 if not n.carrot else 1]
+			return [n, 0 if not n.carrot else int(main._wish_hat())]
 	return []
 
 
@@ -120,7 +123,7 @@ func _tv_goal(slot: int, idx: int) -> Vector3:
 		var kind: int = need[1]
 		if int(main.carry.get(slot, -1)) == kind:
 			return (need[0] as Node3D).position
-		return main.BOX_POS[kind]
+		return main.box_for(kind)
 	# Push the nearest loose ball to the biggest one in the circle (or to the circle).
 	var anchor := _anchor()
 	var best: Node3D = null
@@ -209,7 +212,7 @@ func _drive_vr(delta: float) -> void:
 		var need := _needy()
 		if not need.is_empty():
 			vr_task = "box"
-			vr_target = main.BOX_POS[int(need[1])] + Vector3.UP * (main.BOX_TOP + 0.1)
+			vr_target = main.box_for(int(need[1])) + Vector3.UP * (main.BOX_TOP + 0.1)
 		else:
 			var pick := _vr_pick_ball()
 			if pick == null:
@@ -339,3 +342,15 @@ func _checks() -> void:
 		kit.assert_true(main.total_stacked > 0, "%s: snowballs were stacked" % mode)
 	if main.vr_rig != null:
 		kit.assert_true(main.total_made > 0, "%s: the VR builder finished a snowman" % mode)
+	# The snow day: a seeded garden on every machine, the same one; the story HUD; the visitor.
+	var d: Dictionary = main.net.state_get("day", {})
+	kit.assert_true(not main.garden.is_empty() and main.garden_key == "%d:%d" % [int(d.get("seed", -1)), int(d.get("chapter", -1))],
+		"%s: this machine built the day's garden (%s)" % [mode, main.garden_key])
+	kit.assert_eq(main.boxes.size(), (main.Story.chapter(int(d.get("chapter", 0))).hats as Array).size() + 1, "%s: a carrot box + one per hat" % mode)
+	kit.assert_true((d.get("goals", []) as Array).size() == 3, "%s: the day has star goals" % mode)
+	kit.assert_true(main.visitor != null and is_instance_valid(main.visitor), "%s: a visitor is wishing" % mode)
+	if main.split != null:
+		kit.assert_true(main.star_icons.has(-1), "%s: the stars show on the TV" % mode)
+	if mode != "client":
+		var runs: Array = main.Telemetry.read("snowman_maker")
+		kit.assert_true(not runs.is_empty() and runs[runs.size() - 1].has("stars"), "%s: a telemetry line per day" % mode)

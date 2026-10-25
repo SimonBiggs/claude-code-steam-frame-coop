@@ -31,7 +31,7 @@ const CHAPTERS: Array[Dictionary] = [
 	{"name": "DEEP DRIFTS", "sky": "sunset", "place": "SLED HILL", "pic": "cloud", "hats": [TOP_HAT, BEANIE],
 		"who": "BIG BUNNY", "intro": "So much snow fell last night!", "new": "Deep snow makes big snowballs fast!",
 		"done": "Sleds ready! Whoosh!"},
-	{"name": "NORTH STAR", "sky": "stormy", "place": "ICE CASTLE", "pic": "castle", "hats": [TOP_HAT, BEANIE, CROWN],
+	{"name": "NORTH STAR", "sky": "snowy", "place": "ICE CASTLE", "pic": "castle", "hats": [TOP_HAT, BEANIE, CROWN],
 		"who": "THE SNOW QUEEN", "intro": "I come for the Winter Fair!", "new": "A crown! Make a royal snowman!",
 		"done": "The Winter Fair is ready! Hooray!"},
 	{"name": "SNOW DAY", "sky": "day", "place": "", "pic": "snowman", "hats": [TOP_HAT, BEANIE, CROWN],
