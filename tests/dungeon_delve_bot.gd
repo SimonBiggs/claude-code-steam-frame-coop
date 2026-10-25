@@ -40,7 +40,8 @@ var poke_list: Array[int] = []
 var thrown := false
 var outside := 0
 var brain: DeepBot
-var deep_mode := OS.get_environment("DD_MODE") if OS.has_environment("DD_MODE") else ""
+var pad := OS.get_environment("BOT_PAD") if OS.has_environment("BOT_PAD") else ""  ## walk onto this lobby pad
+var deep_mode := OS.get_environment("DD_MODE") if OS.has_environment("DD_MODE") else pad
 var goal := OS.get_environment("BOT_GOAL") if OS.has_environment("BOT_GOAL") else ""
 var off_floor := 0
 var max_foes := 0
@@ -94,6 +95,8 @@ func _watch() -> String:
 			var reached := false
 			if goal == "zone":
 				reached = int(t["bosses"]) >= 1 and (t["floors"] as Array).has(FloorGen.FLOORS_PER_ZONE)
+			elif goal == "boss":
+				reached = int(t["bosses"]) >= 1
 			elif goal == "floor":
 				reached = (t["floors"] as Array).size() >= 2
 			if reached:
@@ -170,6 +173,8 @@ func _tv_bot(slot: int, delta: float) -> void:
 	var room := _room()
 	var dg = main.dungeon
 	match phase:
+		_ when pad != "" and phase in ["practice", "cleared"] and room == 0:
+			target = main.deep.PADS[pad] + Vector3(0.3 * (slot % 3 - 1), 0.0, 0.0)
 		"practice":
 			if not dg.is_used(0):
 				target = dg.prop_center(0)
@@ -375,6 +380,8 @@ func _deep_checks(mode: String) -> void:
 	for i in range(1, fl.size()):
 		kit.assert_true(int(fl[i]) == int(fl[i - 1]) + 1 or int(t["wipes"]) > 0, "%s: floors went down in order (%s)" % [mode, str(fl)])
 	kit.assert_true(int(t["kills"]) > 0, "%s: monsters were beaten (%d)" % [mode, int(t["kills"])])
+	if goal == "boss":
+		kit.assert_true(goal_done, "%s: the boss was beaten: %s" % [mode, str(t)])
 	if goal in ["zone", "floor"]:
 		kit.assert_true(goal_done, "%s: the goal (%s) was reached: %s" % [mode, goal, str(t)])
 		kit.assert_true(int(t["keys"]) >= 1 and int(t["doors"]) >= 1, "%s: a key opened a door (%d keys, %d doors)" % [mode, int(t["keys"]), int(t["doors"])])
@@ -382,7 +389,8 @@ func _deep_checks(mode: String) -> void:
 	kit.assert_true(int(pd["runs"]) >= 1, "%s: the run was saved (%s)" % [mode, str(pd)])
 	if goal == "zone":
 		kit.assert_true(int(t["bosses"]) >= 1, "%s: the boss was beaten" % mode)
-		kit.assert_true(int((pd["bosses"] as Dictionary).get(deep_mode, 0)) & 1 != 0, "%s: the boss win was saved (perk + hat unlocked)" % mode)
+		kit.assert_true(int(t.get("relics", 0)) >= mini(1, main.heroes.size()), "%s: heroes each picked one boss treasure (%d)" % [mode, int(t.get("relics", 0))])
+		kit.assert_true(int((pd["bosses"] as Dictionary).get(dp.mode, 0)) & 1 != 0, "%s: the boss win was saved (perk + hat unlocked)" % mode)
 		kit.assert_true(dp.unlocked_hats().has("wizard") and int(dp.perks()["potion"]) == 1, "%s: the Slime King unlocks the wizard hat and a starting potion" % mode)
 		kit.assert_true(int(t["bought"]) >= 1 or main.heroes.is_empty(), "%s: something was bought in a shop (%d)" % [mode, int(t["bought"])])
 	if int(t["downs"]) > 0:

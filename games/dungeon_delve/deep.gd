@@ -12,7 +12,11 @@ extends Node3D
 ##    together; a cracked wall hides a treasure room (3 hits or a bomb); traps: spikes, boulders,
 ##    crumbly floor. The stairs fill like the pads: stand on them together.
 ##  - Loot (loot.gd): gold, potions (Y), bombs (B), abilities on X (dash, shield bash, bow), heart
-##    containers; the shop sells more, plus SWORD +1 and a LUCKY CHARM.
+##    containers; the shop sells more, plus SWORD +1 and a LUCKY CHARM. Each boss leaves three
+##    treasures: everyone picks ONE (that's your build for the next zone).
+##  - Alone on BRAVE (a Deck on its own): one more heart, a lucky charm on every floor, a few less
+##    monsters per room. Attacks soft-aim at the nearest monster in reach. HEROIC opens after the
+##    Slime King has been beaten on BRAVE.
 ##  - The VR knight: a real sword that hits for 2, swats goo balls and boss ORBS back (big damage),
 ##    BLOCKS sweeps and shoves when the blade is between him and the hit; bosses aim at him a lot.
 ##    His hearts sit on the blade. Touch pickups, chests, levers and shop items with either hand.
@@ -45,8 +49,8 @@ const REVIVE_R := 1.5
 const IFRAMES := 1.0
 const STAIRS_R := 1.5
 const ATTACK_REACH := 1.05
-const PADS := {"brave": Vector3(-2.2, 0.0, -2.5), "heroic": Vector3(2.2, 0.0, -2.5)}
-const PAD_COLORS := {"brave": Color(1.0, 0.6, 0.2), "heroic": Color(1.0, 0.3, 0.35)}
+const PADS := {"brave": Vector3(-2.2, 0.0, -2.5), "heroic": Vector3(2.2, 0.0, -2.5), "daily": Vector3(-3.5, 0.0, 2.7)}
+const PAD_COLORS := {"brave": Color(1.0, 0.6, 0.2), "heroic": Color(1.0, 0.3, 0.35), "daily": Color(0.35, 0.8, 1.0)}
 const HAT_RACK := Vector3(3.7, 0.0, 2.6)
 const HAT_UNLOCKS: Array = [["none", ""], ["party", "run"], ["viking", "floor3"], ["wizard", "boss0"], ["crown", "boss1"], ["halo", "boss2"]]
 const SHOP_SPOTS: Array[Vector2] = [Vector2(-3.0, 0.2), Vector2(-1.0, 0.2), Vector2(1.0, 0.2), Vector2(3.0, 0.2)]
@@ -67,6 +71,7 @@ var built_key := ""
 
 # Host.
 var mode := ""
+var daily := false
 var seed_v := 0
 var zone := 0
 var floor_i := 0
@@ -97,7 +102,7 @@ var portal := Vector3.INF
 var checkpoint := {}
 var phase_t := 0.0
 var shop: Array = []
-var pad_fill := {"brave": 0.0, "heroic": 0.0}
+var pad_fill := {"brave": 0.0, "heroic": 0.0, "daily": 0.0}
 var hat_cd := {}
 var sword_cd := {}
 var _poke_cd := {}
@@ -108,6 +113,8 @@ var tally := {"kills": 0, "floors": [], "bosses": 0, "wipes": 0, "revives": 0, "
 	"puzzles": 0, "bought": 0, "potions": 0, "hurts": 0, "blocks": 0, "reflects": 0, "rooms": 0, "downs": 0,
 	"pickups": 0, "checkpoints": 0, "zones": {}, "bombs": 0, "abilities": 0, "traps": 0, "chests": 0, "by": {}}
 var src := ""  ## what is hurting someone right now (tests: tally["by"])
+var relic_group := 0
+var relic_taken := {}  ## group -> {slot: true}: boss treasures, one each
 
 # Every machine.
 var pick_nodes := {}
@@ -168,6 +175,9 @@ func _build_lobby() -> void:
 			b.box(Vector3(0.08, 0.6, 0.02), MeshKit.at(Vector3(0, 1.35, 0)), Color(0.85, 0.92, 1.0), true)
 			b.box(Vector3(0.3, 0.05, 0.05), MeshKit.at(Vector3(0, 1.05, 0)), Color(1.0, 0.8, 0.3), true)
 			b.cylinder(0.035, 0.035, 0.16, MeshKit.at(Vector3(0, 0.95, 0)), Color(0.5, 0.3, 0.2), 6)
+		elif mname == "daily":
+			b.star(8, 0.3, 0.16, 0.06, MeshKit.at(Vector3(0, 1.2, 0)), Color(1.0, 0.9, 0.4), true)
+			b.sphere(0.13, MeshKit.at(Vector3(0, 1.2, 0.02)), Color(1.0, 0.75, 0.3), 10, true)
 		else:
 			b.cylinder(0.22, 0.24, 0.16, MeshKit.at(Vector3(0, 1.1, 0)), Color(1.0, 0.8, 0.3), 12, true)
 			for k in 5:
@@ -230,7 +240,7 @@ func _animate_lobby(delta: float) -> void:
 		(pad_labels[mname] as Label3D).visible = show_pads
 		var bests: Dictionary = net.state_get("d_best", {})
 		var bl: Label3D = (pad_labels[mname] as Label3D).get_node_or_null("Best")
-		var g := int(bests.get(mname, -1))
+		var g := int(bests.get(daily_key() if mname == "daily" else mname, -1))
 		if mname == "heroic" and not bool(net.state_get("d_heroic_ok", true)):
 			(pad_labels[mname] as Label3D).text = "LOCKED"
 			(pad_labels[mname] as Label3D).modulate = Color(0.6, 0.6, 0.65)
@@ -262,7 +272,7 @@ func lobby_step(delta: float) -> void:
 			var p: Vector3 = (pl as Dictionary)["p"]
 			if Vector2(p.x - c.x, p.z - c.z).length() < 0.95:
 				on += 1
-		var fv: float = pad_fill[mname]
+		var fv: float = pad_fill.get(mname, 0.0)
 		if on > 0:
 			fv += delta * (0.3 + 0.7 * float(on) / total) / 2.2
 		else:
@@ -355,8 +365,9 @@ func _record_depth() -> void:
 	var pd := progress()
 	var g := FloorGen.global_floor(zone, floor_i)
 	var best: Dictionary = pd["best"]
-	if g > int(best.get(mode, 0)):
-		best[mode] = g
+	var key := daily_key() if daily else mode
+	if g > int(best.get(key, 0)):
+		best[key] = g
 		main.save.mark_dirty()
 		net.state_set("d_best", best.duplicate())
 
@@ -432,9 +443,17 @@ func _alive(slot: int) -> bool:
 
 # --- Runs and floors -------------------------------------------------------------------------------
 
+static func daily_key() -> String:
+	return "daily:" + Time.get_date_string_from_system()
+
+
+## m: "brave", "heroic" or "daily" (BRAVE rules, the same dungeon for everyone all day: beat your best).
 func start_run(m: String) -> void:
-	mode = m
+	daily = m == "daily"
+	mode = "brave" if daily else m
 	seed_v = int(OS.get_environment("DD_SEED")) if OS.has_environment("DD_SEED") else randi() % 1000000
+	if daily:
+		seed_v = absi(hash(Time.get_date_string_from_system())) % 1000000
 	zone = 0
 	floor_i = 0
 	if OS.has_environment("DD_FLOOR") and not main.has_meta("deep_started"):
@@ -442,7 +461,7 @@ func start_run(m: String) -> void:
 		zone = g / FloorGen.FLOORS_PER_ZONE
 		floor_i = g % FloorGen.FLOORS_PER_ZONE
 	main.set_meta("deep_started", true)
-	net.state_set("mode", m)
+	net.state_set("mode", mode)
 	stats.clear()
 	_gold = 0
 	_keys = 0
@@ -1010,7 +1029,17 @@ func _boss_down(kind: int, at: Vector3) -> void:
 	for s in stats:
 		if bool((stats[s] as Dictionary)["down"]):
 			_revive(int(s))
-	_spawn_pick(Loot.MAXHEART, at + Vector3(0.0, 0.6, 1.0), true)
+	# The boss's treasure: three things, everyone picks ONE (your build: harder hits, more hearts, ...).
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash([seed_v, zone, "relic"])
+	var pool: Array = [Loot.SWORD, Loot.MAXHEART, Loot.CHARM, Loot.BOMBS, Loot.ABILITIES[rng.randi_range(0, 2)]]
+	FloorGen._shuffle(pool, rng)
+	relic_group += 1
+	relic_taken[relic_group] = {}
+	for k in 3:
+		_spawn_pick(int(pool[k]), at + Vector3(-1.6 + k * 1.6, 0.35, 1.6), false)
+		(pickups[next_pick - 1] as Dictionary)["relic"] = relic_group
+	net.event("d_banner", ["PICK ONE!", "level"])
 	if zone >= FloorGen.ZONE_COUNT - 1:
 		phase_t = 0.0
 		get_tree().create_timer(4.0).timeout.connect(func() -> void:
@@ -1564,6 +1593,8 @@ func _spawn_pick(k: int, p: Vector3, pop: bool) -> void:
 
 func _pickups_step(delta: float, alive: Array) -> void:
 	for id in pickups.keys():
+		if not pickups.has(id):
+			continue  # (a boss treasure group vanished together)
 		var pk: Dictionary = pickups[id]
 		pk["t"] = float(pk["t"]) + delta
 		var p: Vector3 = pk["p"]
@@ -1605,7 +1636,19 @@ func _pickups_step(delta: float, alive: Array) -> void:
 				if d > 1.5:
 					nope.erase(s)
 				continue
+			var rg := int(pk.get("relic", 0))
+			if rg > 0 and (relic_taken.get(rg, {}) as Dictionary).has(s):
+				continue  # already took one of these
 			if d < 0.7 and _collect(s, k, p):
+				if rg > 0:
+					(relic_taken[rg] as Dictionary)[s] = true
+					tally["relics"] = int(tally.get("relics", 0)) + 1
+					if (relic_taken[rg] as Dictionary).size() < _players().size():
+						break  # the others still get to choose
+					for id2 in pickups.keys():
+						if int((pickups[id2] as Dictionary).get("relic", 0)) == rg:
+							pickups.erase(id2)
+					break
 				pickups.erase(id)
 				break
 
