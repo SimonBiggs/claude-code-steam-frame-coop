@@ -24,6 +24,7 @@ var bought := {}
 var swing_side := 1.0
 var _wp_cache := {}
 var stall := {}
+var ignore := {}
 
 
 func deep() -> Node:
@@ -430,6 +431,11 @@ func _goal(slot: int, pos: Vector3, room: int, index: int) -> Dictionary:
 		if FloorGen.room_at(f, pp) != room:
 			continue
 		var d := pos.distance_to(Vector3(pp.x, 0, pp.z))
+		var nope_key := "%s/%d/%d" % [dp.built_key, slot, int(id)]
+		if d < 0.45:
+			ignore[nope_key] = float(ignore.get(nope_key, 0.0)) + 0.016
+		if float(ignore.get(nope_key, 0.0)) > 2.0:
+			continue  # standing on it and it won't come: not for me
 		if d < bd and _useful(slot, int(pk["kind"])):
 			bd = d
 			best = {"p": Vector3(pp.x, 0, pp.z), "near": 0.3}
@@ -522,6 +528,10 @@ func _useful(slot: int, k: int) -> bool:
 			return int(st.get("bomb", 0)) < 9
 		Loot.DASH, Loot.BASH, Loot.BOW:
 			return String(st.get("abil", "")) == ""
+		Loot.MAXHEART:
+			return int(st.get("max", 0)) < 10
+		Loot.CHARM:
+			return int(st.get("charm", 0)) == 0
 	return true
 
 
