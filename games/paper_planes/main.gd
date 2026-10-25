@@ -1,9 +1,17 @@
 extends Node3D
-## PAPER PLANES: everyone sends paper planes through slowly drifting hoops for one team score.
+## PAPER PLANES: Pip the post bird's letters blew away! Everyone flies (TV / Deck) or throws (VR)
+## paper planes through hoops to carry them home, one team score.
 ## VR: grab a plane from the paper stack beside you (touch it, or pull the trigger anywhere) and
 ## throw it with a flick (or let go of the trigger). TV: each player flies a little plane with the
-## left stick. A rainbow hoop is worth 3. Rounds last `round_time` s, then a results screen and an
-## automatic next round. Built on the shared engine (see games/engine_template).
+## left stick. Built on the shared engine (see games/engine_template).
+##
+## Each round: PICK A BREEZE (fly or throw through one of three gates: two helpful breezes, or
+## today's DAILY SKY), then a FLIGHT: seeded formations of hoops (games/paper_planes/skygen.gd) for
+## `round_time` s, with 1-3 star goals. Story: five chapters x three flights (story.gd); a flight
+## with a star builds a piece of that chapter's place in the valley (saved, it stays). Later
+## chapters bring numbered chain hoops, tiny hoops, grumpy clouds (bump = combo lost) and Gust's
+## golden hoop. Quick passes build a COMBO (x2, x3). Stars unlock trails, golden planes, crowns.
+## Every flight writes one telemetry line (core/telemetry.gd) so goals can be tuned from real play.
 
 const NetScript := preload("res://core/net.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
@@ -21,13 +29,16 @@ const MeshKit := preload("res://core/mesh_kit.gd")
 const Creatures := preload("res://core/creatures.gd")
 const SkyKit := preload("res://core/sky_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")
+const Seeded := preload("res://core/seeded.gd")
+const StoryCard := preload("res://core/story_card.gd")
+const Telemetry := preload("res://core/telemetry.gd")
 const Meshes := preload("res://games/paper_planes/meshes.gd")
+const SkyGen := preload("res://games/paper_planes/skygen.gd")
+const Story := preload("res://games/paper_planes/story.gd")
 
 const GAME_ID := "paper_planes"
+const SAVE_VERSION := 2
 const VR_FEET := Vector3(0.0, 0.0, 5.0)
-const HOOP_MIN := Vector3(-6.5, 1.4, -10.0)  ## hoops drift around inside this box
-const HOOP_MAX := Vector3(6.5, 4.8, 1.8)
-const HOOP_COUNT := 5
 const FLY_SPEED := 6.5  ## TV planes always fly forward
 const TURN_RATE := 1.9
 const PITCH_MAX := 0.65
@@ -36,17 +47,27 @@ const MAX_DARTS := 10
 const STACK_OFFSET := Vector3(0.5, 0.0, -0.35)  ## from the VR rig's origin: right, a bit ahead
 const STACK_TOP := 0.95
 const SIGN_POS := Vector3(0.0, 8.0, -19.0)
+const FORM_TIME := 22.0  ## a formation's leftovers make way for the next one after this long (half that with 2 left)
+const COMBO_TIME := 5.0  ## seconds between passes to keep the combo going
+const CHAIN_BONUS := 5
+const BIG_SCALE := 1.3
+## The places of the valley (story chapters 0-4): position, yaw (they face the middle of the park).
+const PLACES := [[Vector3(-16.0, 0.0, -3.0), 1.2], [Vector3(16.0, 0.0, -6.0), -1.2], [Vector3(-14.5, 0.0, -17.0), 0.7],
+	[Vector3(14.5, 0.0, -18.0), -0.7], [Vector3(-9.0, 10.5, -26.0), 0.3]]
 
-var round_time := 150.0  ## seconds per round (bots shorten it)
+var round_time := 100.0  ## seconds per flight (bots shorten it)
+var pick_time := 14.0  ## seconds to pick a breeze (then the first gate is picked for you)
 var results_wait := 12.0  ## then the next round starts by itself
+var force_chapter := -1  ## tests: fly this chapter instead of the save's
 
 
 class Hoop:
 	var id := 0
-	var kind := 0  # 0 plain, 1 rainbow (3 points)
-	var ci := 0
+	var kind := 0  # skygen.gd kinds: 0 plain, 1 rainbow, 2 chain, 3 tiny, 4 gate, 5 gold
+	var ci := 0  # colour (plain), number (chain), gate index (gate)
 	var node: Node3D
 	var mesh: MeshInstance3D
+	var label: Label3D
 	var home := Vector3.ZERO
 	var amp := 1.0
 	var phase := 0.0
@@ -76,6 +97,8 @@ class Flyer:  # a TV player's plane
 	var slot := 0
 	var node: Node3D
 	var body: Node3D
+	var trail: CPUParticles3D
+	var look := ""
 	var yaw := PI
 	var pitch := 0.0
 	var roll := 0.0
@@ -86,6 +109,7 @@ class Flyer:  # a TV player's plane
 	var target_pitch := 0.0
 	var has_target := false
 	var bop_cd := 0.0
+	var cloud_cd := 0.0
 	var cam_ready := false
 
 
@@ -112,7 +136,6 @@ var darts := {}  # id -> Dart
 var flyers := {}  # slot -> Flyer
 var held: Array = [null, null]  # VR: the Dart in each hand
 var hand_cd := PackedFloat32Array([0.0, 0.0])
-var respawns: Array[float] = []
 var next_id := 0
 var clock := 0.0
 var time_left := 0.0
@@ -121,10 +144,15 @@ var send_t := 0.0
 var stack_node: Node3D
 var stack_mesh: MeshInstance3D
 var stack_wob := 0.0
+var ground: MeshInstance3D
 var sign_score: Label3D
 var sign_time: Label3D
+var sign_chapter: Label3D
 var huds := {}  # slot -> UiKit root (-1 = shared view)
 var score_labels := {}
+var goal_labels := {}
+var star_icons := {}  # slot -> Array of 3 icon Controls
+var combo_labels := {}
 var timers := {}
 var join_prompt: Control
 var vr_avatar: VrRig.Avatar
@@ -134,7 +162,27 @@ var results_ui: Control
 var vr_results: Node
 var throws := 0  # host: darts thrown (bots read it)
 var hoops_passed := 0  # host / local: hoops flown through this session
-var scored_by := {}  # host / local: slot -> hoops this session (bots)
+var scored_by := {}  # host / local: slot -> hoops this session (gates not counted; bots)
+# --- The story flight (host simulates; every machine builds clouds / village / looks from net state) ---
+var layout := {}  # SkyGen.flight() of the current flight
+var layout_key := ""
+var form_i := -1
+var form_t := 0.0
+var chain_next := 1
+var chain_len := 0
+var combo := 0
+var last_pass_t := -100.0
+var clouds: Array = []  # [{node, pos, zap}]
+var cloud_key := ""
+var gust: Node3D
+var pip: Node3D
+var pip_talk := 0.0
+var village_nodes: Array = []
+var village_shown: Array = []
+var story_queue: Array = []  # host: [seconds left, beat]
+var tele := {}  # host: what happened this flight (core/telemetry.gd)
+var flights_done := 0  # host: flights finished this session (bots)
+var gate_picked := ""  # host: the last breeze / DAILY picked (bots)
 
 
 func _ready() -> void:
@@ -153,7 +201,8 @@ func _ready() -> void:
 	party.player_left.connect(_on_player_left)
 	save = Save.new()
 	save.game_id = GAME_ID
-	save.defaults = {"best": 0}
+	save.version = SAVE_VERSION
+	save.defaults = Story.save_defaults()
 	add_child(save)
 	sfx = SfxScript.new()
 	add_child(sfx)
@@ -164,6 +213,8 @@ func _ready() -> void:
 	music.prepare(["victory"])
 	awards = Awards.new()
 	awards.define("rainbow", "RAINBOW ACE", "%s rainbow hoops", "rainbows")
+	awards.define("chain", "CHAIN CHAMP", "%s chains", "chains")
+	awards.define("gold", "GOLD CATCHER", "%s golden hoops", "golds")
 	hints = Hints.new()
 	add_child(hints)
 	hints.bind_party(party)
@@ -211,7 +262,8 @@ func _setup(mode: String) -> void:
 		hints.hint("vr_grab", "Grab a plane. Throw it!", {"to": "vr", "icon": "play"})
 	if mode != "client":
 		net.state_set("best", int(save.data["best"]))
-		_start_round()
+		_publish_progress()
+		_start_pick()
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	ready_to_play = true
 	print("Paper Planes: %s mode%s" % [mode, " with a VR player" if vr_rig != null else ""])
@@ -221,7 +273,7 @@ func _setup(mode: String) -> void:
 
 func _build_world() -> void:
 	sky = SkyKit.apply(self, "day", vr_rig != null)
-	var ground := MeshInstance3D.new()
+	ground = MeshInstance3D.new()
 	var disc := CylinderMesh.new()
 	disc.top_radius = 45.0
 	disc.bottom_radius = 45.0
@@ -251,6 +303,58 @@ func _build_world() -> void:
 	sign_time.outline_size = 26
 	sign_time.position = SIGN_POS + Vector3(0.0, -1.9, 0.0)
 	add_child(sign_time)
+	sign_chapter = UiKit.label3d("", 0.75, "accent", true)
+	sign_chapter.outline_size = 22
+	sign_chapter.position = SIGN_POS + Vector3(0.0, 1.9, 0.0)
+	add_child(sign_chapter)
+	# Pip the post bird (flies around; comes close when talking).
+	pip = Creatures.monster("bird", {"color": Color(1.0, 0.62, 0.25), "color2": Color(1.0, 0.9, 0.7), "scale": 0.9})
+	pip.name = "Pip"
+	var cap := MeshKit.Builder.new()
+	cap.cylinder(0.2, 0.22, 0.12, MeshKit.at(Vector3(0.0, 0.0, 0.0)), Color(0.25, 0.45, 0.95), 12)
+	cap.box(Vector3(0.2, 0.03, 0.14), MeshKit.at(Vector3(0.0, -0.05, 0.18)), Color(0.2, 0.35, 0.8))
+	cap.box(Vector3(0.36, 0.24, 0.02), MeshKit.at(Vector3(0.0, -0.55, 0.45), Vector3.ONE, Vector3(0.3, 0.0, 0.0)), Color(1.0, 1.0, 0.95))
+	var cap_mi := MeshKit.instance(cap.build(), false)
+	cap_mi.position = Vector3(0.0, Creatures.height_of(pip) * 0.95, 0.0)
+	pip.add_child(cap_mi)
+	add_child(pip)
+	pip.position = Vector3(6.0, 6.0, -6.0)
+	var pa: Variant = Creatures.anim(pip)
+	if pa != null:
+		pa.set("flying", true)
+	gust = MeshKit.instance(Meshes.gust(), false)
+	gust.name = "Gust"
+	gust.visible = false
+	add_child(gust)
+	_build_village([0, 0, 0, 0, 0])
+
+
+## The valley's places, built up to their stage (from net state "village"); a new piece pops in.
+func _build_village(stages: Array) -> void:
+	for c in PLACES.size():
+		var stage := int(stages[c]) if c < stages.size() else 0
+		var shown := int(village_shown[c]) if c < village_shown.size() else -1
+		if stage == shown:
+			continue
+		if c < village_nodes.size() and is_instance_valid(village_nodes[c]):
+			(village_nodes[c] as Node3D).queue_free()
+		var mi := MeshKit.instance(Meshes.place(c, stage), true)
+		mi.name = "Place%d" % c
+		mi.position = PLACES[c][0]
+		mi.rotation.y = PLACES[c][1]
+		add_child(mi)
+		while village_nodes.size() <= c:
+			village_nodes.append(null)
+			village_shown.append(-1)
+		village_nodes[c] = mi
+		if shown >= 0 and stage > shown:  # built just now: pop + confetti
+			mi.scale = Vector3.ONE * 0.3
+			var tw := mi.create_tween()
+			tw.tween_property(mi, "scale", Vector3.ONE, 0.7).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+			burst(mi.position + Vector3.UP * 2.5, Meshes.RAINBOW, 50, 1.2)
+			sfx.play_at("achievement", mi.position, 0.0)
+			HudKit.popup(self, mi.position + Vector3.UP * 4.5, "BUILT!", {"style": "crit", "size": 3.0, "time": 2.5})
+		village_shown[c] = stage
 
 
 # --- HUD ----------------------------------------------------------------------------------
@@ -261,14 +365,30 @@ func _make_hud(slot: int, parent: Control) -> void:
 	var card := UiKit.panel("card")
 	ui.add_child(card)
 	card.position = Vector2(24.0, 20.0)
+	var col := UiKit.vbox(4)
+	card.add_child(col)
 	var row := UiKit.hbox()
-	card.add_child(row)
+	col.add_child(row)
 	if slot >= 0:
 		row.add_child(UiKit.badge(party.name_of(slot), slot))
 	row.add_child(UiKit.icon("star", "gold", 38.0))
 	var l := UiKit.label("0", "number")
 	row.add_child(l)
 	score_labels[slot] = l
+	var g := UiKit.label("", "heading", "dim")
+	row.add_child(g)
+	goal_labels[slot] = g
+	var row2 := UiKit.hbox(6)
+	col.add_child(row2)
+	var stars: Array = []
+	for i in 3:
+		var ic := UiKit.icon("star", "gold", 30.0)
+		row2.add_child(ic)
+		stars.append(ic)
+	star_icons[slot] = stars
+	var cb := UiKit.label("", "heading", "gold")
+	row2.add_child(cb)
+	combo_labels[slot] = cb
 	timers[slot] = HudKit.timer(ui, {"seconds": float(net.state_get("time", round_time)), "warn": 10})
 	if slot < 0:
 		join_prompt = UiKit.panel("pill")
@@ -282,16 +402,61 @@ func _make_hud(slot: int, parent: Control) -> void:
 	_refresh_hud()
 
 
+func _flight() -> Dictionary:
+	var f: Variant = net.state_get("flight", {})
+	return f if f is Dictionary else {}
+
+
+func _breeze() -> String:
+	return String(_flight().get("breeze", ""))
+
+
 func _refresh_hud() -> void:
 	var score := int(net.state_get("score", 0))
+	var fl := _flight()
+	var goals: Array = fl.get("goals", [])
+	var playing := String(net.state_get("phase", "")) != "pick" and not goals.is_empty()
+	var got := Story.stars_for(score, goals) if playing else 0
+	var goal_text := ""
+	if playing:
+		goal_text = "/ %d" % int(goals[got]) if got < goals.size() else "WOW!"
+	var c := int(net.state_get("combo", 0))
+	var mult := _mult(c)
 	for slot in score_labels:
 		var l: Label = score_labels[slot]
 		if is_instance_valid(l):
 			l.text = str(score)
+		var g: Label = goal_labels.get(slot)
+		if g != null and is_instance_valid(g):
+			g.text = goal_text
+		var cb: Label = combo_labels.get(slot)
+		if cb != null and is_instance_valid(cb):
+			cb.text = ("COMBO x%d" % mult) if mult > 1 else ""
+		var st: Array = star_icons.get(slot, [])
+		for i in st.size():
+			var ic: Control = st[i]
+			if is_instance_valid(ic):
+				ic.visible = playing
+				ic.modulate = Color.WHITE if i < got else Color(1.0, 1.0, 1.0, 0.22)
 	if join_prompt != null:
 		join_prompt.visible = party.local_slots().is_empty()
 	if sign_score != null:
-		sign_score.text = str(score)
+		sign_score.text = str(score) + ((" x%d" % mult) if mult > 1 else "")
+	if sign_chapter != null:
+		sign_chapter.text = _flight_title(fl)
+
+
+func _flight_title(fl: Dictionary) -> String:
+	match String(fl.get("mode", "")):
+		"pick":
+			return "PICK A BREEZE!"
+		"daily":
+			return "DAILY SKY"
+		"bonus":
+			return "BONUS SKY"
+		"story":
+			return "%s  %d/%d" % [Story.chapter(int(fl.get("chapter", 0))).name, int(fl.get("flight", 0)) + 1, Story.FLIGHTS_PER_CHAPTER]
+	return ""
 
 
 func _all_huds() -> Array:
@@ -326,6 +491,9 @@ func _on_player_left(slot: int) -> void:
 			h.queue_free()
 		huds.erase(slot)
 	score_labels.erase(slot)
+	goal_labels.erase(slot)
+	star_icons.erase(slot)
+	combo_labels.erase(slot)
 	timers.erase(slot)
 	hints.remove_view(slot)
 	_refresh_hud()
@@ -341,37 +509,7 @@ func _ensure_flyer(slot: int) -> Flyer:
 	add_child(f.node)
 	f.body = Node3D.new()
 	f.node.add_child(f.body)
-	var mi := MeshInstance3D.new()
-	mi.mesh = Meshes.plane()
-	mi.material_override = Meshes.plane_material(party.color_of(slot).lerp(Color.WHITE, 0.2))
-	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	f.body.add_child(mi)
-	var pilot := Creatures.humanoid({"class": "pilot", "outfit": party.color_of(slot), "seed": slot, "scale": 0.3, "lod": "far"})
-	pilot.position = Vector3(0.0, 0.0, 0.12)
-	pilot.rotation.y = PI  # creatures face +Z, the plane's nose is -Z
-	f.body.add_child(pilot)
-	var trail := CPUParticles3D.new()
-	trail.amount = 16
-	trail.lifetime = 0.6
-	trail.local_coords = false
-	trail.gravity = Vector3.ZERO
-	trail.initial_velocity_min = 0.0
-	trail.initial_velocity_max = 0.1
-	trail.scale_amount_min = 0.6
-	trail.scale_amount_max = 1.0
-	var curve := Curve.new()
-	curve.add_point(Vector2(0.0, 1.0))
-	curve.add_point(Vector2(1.0, 0.0))
-	trail.scale_amount_curve = curve
-	var sm := SphereMesh.new()
-	sm.radius = 0.06
-	sm.height = 0.12
-	sm.radial_segments = 6
-	sm.rings = 3
-	sm.material = MeshKit.material(party.color_of(slot).lerp(Color.WHITE, 0.5), 1.0)
-	trail.mesh = sm
-	trail.position = Vector3(0.0, 0.0, 0.5)
-	f.node.add_child(trail)
+	_apply_look(f)
 	if vr_rig == null:  # nameplates billboard: TV only
 		HudKit.nameplate(f.node, party.name_of(slot), slot, 0.6, 0.18)
 	var lane := float((slot - 1) % 5) - 2.0
@@ -383,27 +521,101 @@ func _ensure_flyer(slot: int) -> Flyer:
 	return f
 
 
+func _unlocks() -> Array:
+	var u: Variant = net.state_get("unlocks", [])
+	return u if u is Array else []
+
+
+## The plane, pilot and trail of a flyer, dressed in what the stars unlocked (rebuilt when that changes).
+func _apply_look(f: Flyer) -> void:
+	var un := _unlocks()
+	var key := ",".join(PackedStringArray(un.map(func(x: Variant) -> String: return str(x))))
+	if f.look == key and f.body.get_child_count() > 0:
+		return
+	f.look = key
+	for c in f.body.get_children():
+		c.queue_free()
+	if f.trail != null and is_instance_valid(f.trail):
+		f.trail.queue_free()
+	var col := party.color_of(f.slot)
+	var mi := MeshInstance3D.new()
+	mi.mesh = Meshes.plane()
+	mi.material_override = Meshes.plane_material(Meshes.GOLD_COLOR if un.has("gold") else col.lerp(Color.WHITE, 0.2))
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	f.body.add_child(mi)
+	var popts := {"class": "pilot", "outfit": col, "seed": f.slot, "scale": 0.3, "lod": "far"}
+	if un.has("crown"):
+		popts["hat"] = "crown"
+	var pilot := Creatures.humanoid(popts)
+	pilot.position = Vector3(0.0, 0.0, 0.12)
+	pilot.rotation.y = PI  # creatures face +Z, the plane's nose is -Z
+	f.body.add_child(pilot)
+	var trail := CPUParticles3D.new()
+	var comet := un.has("comet_trail")
+	trail.amount = 28 if comet else 16
+	trail.lifetime = 1.1 if comet else 0.6
+	trail.local_coords = false
+	trail.gravity = Vector3.ZERO
+	trail.initial_velocity_min = 0.0
+	trail.initial_velocity_max = 0.1
+	trail.scale_amount_min = 0.6
+	trail.scale_amount_max = 1.4 if comet else 1.0
+	trail.scale_amount_curve = ResCache.get_or_make("pp_trail_curve_v1", func() -> Resource:
+		var curve := Curve.new()
+		curve.add_point(Vector2(0.0, 1.0))
+		curve.add_point(Vector2(1.0, 0.0))
+		return curve)
+	var sparkle := un.has("sparkle_trail")
+	var rainbow := un.has("rainbow_trail")
+	var tcol := Color.WHITE if rainbow else col.lerp(Color.WHITE, 0.5)
+	trail.mesh = ResCache.get_or_make("pp_trail_%s_%s" % [tcol.to_html(false), str(sparkle)], func() -> Resource:
+		var sm := SphereMesh.new()
+		sm.radius = 0.06
+		sm.height = 0.12
+		sm.radial_segments = 6
+		sm.rings = 3
+		var m := MeshKit.material(tcol, 1.6 if sparkle else 1.0).duplicate() as StandardMaterial3D
+		if rainbow:
+			m.vertex_color_use_as_albedo = true
+		sm.material = m
+		return sm)
+	if rainbow:
+		trail.color_ramp = ResCache.get_or_make("pp_trail_rainbow_v1", func() -> Resource:
+			var g := Gradient.new()
+			g.offsets = PackedFloat32Array([0.0])
+			g.colors = PackedColorArray([Meshes.RAINBOW[0]])
+			for i in range(1, Meshes.RAINBOW.size()):
+				g.add_point(float(i) / float(Meshes.RAINBOW.size() - 1), Meshes.RAINBOW[i])
+			return g)
+	trail.position = Vector3(0.0, 0.0, 0.5)
+	f.node.add_child(trail)
+	f.trail = trail
+
+
 ## The TV machine (and local play) flies its own planes instantly and tells the host where they are.
 func _fly_local(delta: float) -> void:
 	send_t -= delta
 	var send := send_t <= 0.0
 	if send:
 		send_t = 1.0 / 30.0
-	var playing := String(net.state_get("phase", "play")) == "play"
+	var phase := String(net.state_get("phase", "play"))
+	var steering := phase != "results"
+	var magnet := _breeze() == "magnet"
 	for slot in party.local_slots():
 		if not flyers.has(slot):
 			continue
 		var f: Flyer = flyers[slot]
-		var mv := party.stick(slot, "move") if playing else Vector2.ZERO
+		var mv := party.stick(slot, "move") if steering else Vector2.ZERO
 		var yaw_rate := -mv.x * TURN_RATE
 		var want_pitch := -mv.y * PITCH_MAX
 		var p := f.node.position
 		var fwd := _forward(f.yaw, f.pitch)
-		# A gentle helping hand towards a hoop just ahead.
-		var aim: Variant = _assist_target(p, fwd, 11.0, 0.5)
+		# A gentle helping hand towards a hoop just ahead (a stronger one with the MAGNET breeze).
+		var aim: Variant = _assist_target(p, fwd, 15.0 if magnet else 11.0, 0.8 if magnet else 0.5)
 		if aim != null:
 			var d: Vector3 = (aim as Vector3) - p
-			yaw_rate += clampf(wrapf(atan2(-d.x, -d.z) - f.yaw, -PI, PI) * 1.4, -0.9, 0.9)
+			var k := 2.2 if magnet else 1.4
+			yaw_rate += clampf(wrapf(atan2(-d.x, -d.z) - f.yaw, -PI, PI) * k, -0.9 * k / 1.4, 0.9 * k / 1.4)
 			if absf(mv.y) < 0.3:
 				want_pitch = clampf(atan2(d.y, Vector2(d.x, d.z).length()), -PITCH_MAX, PITCH_MAX)
 		# Stay in the sky over the park.
@@ -424,7 +636,7 @@ func _fly_local(delta: float) -> void:
 		if net.mode == "client":
 			if send:
 				net.send_state(p, f.yaw, f.pitch, slot)
-		elif playing:
+		elif _passable():
 			var id := _check_pass(f.prev, p, 0.3)
 			if id >= 0:
 				_score_hoop(id, slot, p)
@@ -454,6 +666,7 @@ func _animate_flyers(delta: float) -> void:
 	for slot in flyers:
 		var f: Flyer = flyers[slot]
 		f.bop_cd -= delta
+		f.cloud_cd -= delta
 		if f.has_target and not party.is_local(int(slot)):
 			var k := 1.0 - exp(-15.0 * delta)
 			var old_yaw := f.yaw
@@ -485,7 +698,7 @@ func on_remote_state(slot: int, pos: Vector3, yaw: float, pitch: float) -> void:
 	if not f.has_target:
 		f.has_target = true
 		f.node.position = pos
-	if String(net.state_get("phase", "")) == "play":
+	if _passable():
 		var id := _check_pass(from, pos, 0.3)
 		if id >= 0:
 			_score_hoop(id, slot, pos)
@@ -522,10 +735,12 @@ func _make_hoop(id: int, kind: int, ci: int, pos: Vector3) -> Hoop:
 	h.node.name = "Hoop%d" % id
 	add_child(h.node)
 	h.node.position = pos
+	if _breeze() == "big" and kind != SkyGen.GATE:
+		h.node.scale = Vector3.ONE * BIG_SCALE
 	h.mesh = MeshKit.instance(Meshes.hoop(kind, ci), false)
 	h.mesh.scale = Vector3.ONE * 0.01
 	h.node.add_child(h.mesh)
-	if kind == 1:
+	if kind == SkyGen.RAINBOW or kind == SkyGen.GOLD:
 		var sp := CPUParticles3D.new()
 		sp.amount = 12
 		sp.lifetime = 1.2
@@ -539,49 +754,66 @@ func _make_hoop(id: int, kind: int, ci: int, pos: Vector3) -> Hoop:
 			bm.material = MeshKit.material(Color(1.0, 0.95, 0.6), 2.0)
 			return bm)
 		h.node.add_child(sp)
+	if kind == SkyGen.CHAIN or kind == SkyGen.GATE:
+		h.label = UiKit.label3d("", 0.75 if kind == SkyGen.CHAIN else 0.55, Meshes.CHAIN_COLOR.lightened(0.4) if kind == SkyGen.CHAIN else "text", true)
+		h.label.outline_size = 22
+		h.label.position = Vector3(0.0, Meshes.radius(kind) + (0.6 if kind == SkyGen.CHAIN else 0.75), 0.0)
+		h.label.double_sided = true
+		if vr_rig == null:
+			h.label.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
+		h.node.add_child(h.label)
+		_label_hoop(h)
 	h.target = pos
 	hoops[id] = h
 	return h
 
 
-func _spawn_hoop(first: bool = false) -> void:
+## The words on a hoop: a chain hoop's number, a gate's breeze (or DAILY SKY with today's best).
+func _label_hoop(h: Hoop) -> void:
+	if h.label == null:
+		return
+	if h.kind == SkyGen.CHAIN:
+		h.label.text = str(h.ci)
+		return
+	var gates: Variant = net.state_get("gates", [])
+	var id := String(gates[h.ci]) if gates is Array and h.ci < (gates as Array).size() else ""
+	if id == Story.DAILY_GATE:
+		var best := int(net.state_get("daily_best", 0))
+		h.label.text = "DAILY SKY" + ("\nBEST TODAY %d" % best if best > 0 else "\nSAME FOR ALL TODAY")
+		h.label.modulate = Color(0.45, 0.85, 1.0)
+	elif Story.BREEZES.has(id):
+		h.label.text = String(Story.BREEZES[id][0])
+		h.label.modulate = Story.BREEZES[id][2]
+
+
+func _spawn_spec(spec: Dictionary) -> Hoop:
 	next_id += 1
-	var kind := 0
-	var has_rainbow := false
-	for id in hoops:
-		if (hoops[id] as Hoop).kind == 1:
-			has_rainbow = true
-	if not first and not has_rainbow and randf() < 0.25:
-		kind = 1
-	var home := Vector3(0.0, 1.5, 2.3)
-	if not first:
-		for attempt in 14:
-			home = Vector3(randf_range(HOOP_MIN.x, HOOP_MAX.x), randf_range(HOOP_MIN.y, HOOP_MAX.y), randf_range(HOOP_MIN.z, HOOP_MAX.z))
-			var ok := true
-			for id in hoops:
-				if (hoops[id] as Hoop).home.distance_to(home) < 3.2:
-					ok = false
-			if ok:
-				break
-	var h := _make_hoop(next_id, kind, next_id % Meshes.HOOP_COLORS.size(), home)
+	var home: Vector3 = spec.pos
+	var h := _make_hoop(next_id, int(spec.kind), int(spec.ci), home)
 	h.home = home
-	h.amp = 0.25 if first else randf_range(0.7, 1.1)
-	h.phase = randf() * TAU
-	var to_vr := VR_FEET - home
-	h.yaw0 = atan2(to_vr.x, to_vr.z) + (0.0 if first else randf_range(-0.4, 0.4))
+	h.amp = float(spec.amp)
+	h.phase = float(spec.phase)
+	h.yaw0 = float(spec.yaw)
 	_move_hoop(h)
-	sfx.play("pop", -10.0, 1.4)
+	return h
 
 
 func _move_hoop(h: Hoop) -> void:
 	var t := clock
-	h.node.position = h.home + Vector3(sin(t * 0.33 + h.phase) * 1.3, sin(t * 0.51 + h.phase * 1.7) * 0.45,
-		sin(t * 0.26 + h.phase * 0.6) * 0.9) * h.amp
-	h.node.rotation.y = h.yaw0 + sin(t * 0.21 + h.phase) * 0.3 * h.amp
+	if h.kind == SkyGen.GOLD:
+		var p := SkyGen.gold_pos(t + h.phase)
+		h.node.position = p
+		h.node.rotation.y = SkyGen.yaw_to_vr(p)
+		return
+	var amp := h.amp * (0.4 if _breeze() == "slow" else 1.0)
+	h.node.position = h.home + Vector3(sin(t * 0.33 + h.phase) * SkyGen.DRIFT.x, sin(t * 0.51 + h.phase * 1.7) * SkyGen.DRIFT.y,
+		sin(t * 0.26 + h.phase * 0.6) * SkyGen.DRIFT.z) * amp
+	h.node.rotation.y = h.yaw0 + sin(t * 0.21 + h.phase) * 0.3 * amp
 
 
-## Every machine: pop-in, wobble and the rainbow's spin.
+## Every machine: pop-in, wobble and the rainbow's spin; Gust rides along with the golden hoop.
 func _animate_hoops(delta: float) -> void:
+	var gold: Hoop = null
 	for id in hoops:
 		var h: Hoop = hoops[id]
 		h.age += delta
@@ -589,18 +821,29 @@ func _animate_hoops(delta: float) -> void:
 		var grow := clampf(h.age / 0.5, 0.0, 1.0)
 		var s := (1.0 + sin(grow * PI) * 0.25) * grow if grow < 1.0 else 1.0
 		s *= 1.0 + sin(clock * 20.0) * 0.14 * h.wob
+		if h.kind == SkyGen.GATE:
+			s *= 1.0 + sin(clock * 3.0 + h.ci) * 0.04
 		h.mesh.scale = Vector3.ONE * maxf(s, 0.01)
-		if h.kind == 1:
+		if h.kind == SkyGen.RAINBOW or h.kind == SkyGen.GOLD:
 			h.mesh.rotation.z += delta * 1.2
+		if h.kind == SkyGen.GOLD:
+			gold = h
+	gust.visible = gold != null
+	if gold != null:
+		var want := gold.node.position + Vector3(0.0, 1.5, 0.0) - gold.node.global_basis.x * 0.6
+		gust.position = gust.position.lerp(want, 1.0 - exp(-6.0 * delta)) if gust.position.distance_to(want) < 6.0 else want
+		gust.rotation.y = gold.node.rotation.y
+		gust.position.y += sin(clock * 4.0) * 0.004
 
 
 ## Which hoop the segment from -> to flies through (its id), or -1.
 func _check_pass(from: Vector3, to: Vector3, margin: float) -> int:
 	if from.is_equal_approx(to):
 		return -1
+	var picking := String(net.state_get("phase", "")) == "pick"
 	for id in hoops:
 		var h: Hoop = hoops[id]
-		if h.age < 0.4:
+		if h.age < 0.4 or (picking != (h.kind == SkyGen.GATE)):
 			continue
 		var inv := h.node.global_transform.affine_inverse()
 		var a := inv * from
@@ -608,9 +851,15 @@ func _check_pass(from: Vector3, to: Vector3, margin: float) -> int:
 		if (a.z > 0.0) == (b.z > 0.0):
 			continue
 		var c := a.lerp(b, a.z / (a.z - b.z))
-		if Vector2(c.x, c.y).length() < Meshes.HOOP_R + margin:
+		if Vector2(c.x, c.y).length() < Meshes.radius(h.kind) + margin:
 			return int(id)
 	return -1
+
+
+## Hoops can be flown through now (gates while picking, the rest while flying).
+func _passable() -> bool:
+	var ph := String(net.state_get("phase", ""))
+	return ph == "play" or ph == "pick"
 
 
 ## The centre of the best hoop ahead of `pos` along `dir` (within `max_angle` rad), or null.
@@ -625,24 +874,57 @@ func _assist_target(pos: Vector3, dir: Vector3, max_dist: float, max_angle: floa
 		if d.length() > max_dist or d.length() < 0.3:
 			continue
 		var a := dir.angle_to(d)
-		var facing := absf(d.normalized().dot(h.node.global_basis.z))
+		var facing := absf(d.normalized().dot(h.node.global_basis.z.normalized()))
 		if a < best_a and facing > 0.35:
 			best_a = a
 			best = h.node.position
 	return best
 
 
+static func _mult(c: int) -> int:
+	return 3 if c >= 10 else (2 if c >= 4 else 1)
+
+
 func _score_hoop(id: int, by: int, pos: Vector3) -> void:
 	var h: Hoop = hoops[id]
-	var pts := 3 if h.kind == 1 else 1
+	if h.kind == SkyGen.GATE:
+		_pick_gate(h, by)
+		return
 	hoops.erase(id)
 	var at := h.node.position
 	h.node.queue_free()
-	respawns.append(1.2)
 	hoops_passed += 1
 	scored_by[by] = int(scored_by.get(by, 0)) + 1
+	# Combo: passes close together multiply.
+	var window := COMBO_TIME * (1.6 if _breeze() == "streak" else 1.0)
+	combo = combo + 1 if clock - last_pass_t <= window else 1
+	last_pass_t = clock
+	tele["max_combo"] = maxi(int(tele.get("max_combo", 0)), combo)
+	net.state_set("combo", combo)
+	var mult := _mult(combo)
+	var pts: int = int(SkyGen.POINTS[h.kind]) * mult
+	var kname: String = ["plain", "rainbow", "chain", "tiny", "gate", "gold"][h.kind]
+	var kinds: Dictionary = tele.get("kinds", {})
+	kinds[kname] = int(kinds.get(kname, 0)) + 1
+	tele["kinds"] = kinds
+	var extra := ""
+	if h.kind == SkyGen.CHAIN:
+		if h.ci == chain_next:
+			chain_next += 1
+			if chain_next > chain_len:
+				pts += CHAIN_BONUS * mult
+				extra = "CHAIN!"
+				tele["chains"] = int(tele.get("chains", 0)) + 1
+				awards.add(by, "chains")
+		elif chain_next <= chain_len:
+			chain_next = 99  # out of order: this chain's bonus is gone
+			tele["chain_breaks"] = int(tele.get("chain_breaks", 0)) + 1
+	if h.kind == SkyGen.GOLD:
+		tele["golds"] = int(tele.get("golds", 0)) + 1
+		awards.add(by, "golds")
+		extra = "GOLD!"
 	awards.add(by, "score", pts)
-	if h.kind == 1:
+	if h.kind == SkyGen.RAINBOW:
 		awards.add(by, "rainbows")
 	var score := int(net.state_get("score", 0)) + pts
 	net.state_set("score", score)
@@ -650,20 +932,30 @@ func _score_hoop(id: int, by: int, pos: Vector3) -> void:
 		save.data["best"] = score
 		save.mark_dirty()
 		net.state_set("best", score)
-	hoop_fx(at, h.kind, h.ci, by, pts)
-	net.event("pass", [id, at, by, h.kind, h.ci, pts])
+	hoop_fx(at, h.kind, h.ci, by, pts, extra)
+	net.event("pass", [id, at, by, h.kind, h.ci, pts, extra])
 
 
 ## Burst, "+1", sounds, rumble: on both machines.
-func hoop_fx(at: Vector3, kind: int, ci: int, by: int, pts: int) -> void:
+func hoop_fx(at: Vector3, kind: int, ci: int, by: int, pts: int, extra: String = "") -> void:
 	var cols: Array[Color] = [Meshes.HOOP_COLORS[ci % Meshes.HOOP_COLORS.size()], Color.WHITE]
-	if kind == 1:
-		cols = Meshes.RAINBOW.duplicate()
-	burst(at, cols, 40 if kind == 1 else 22, 1.0 if kind == 1 else 0.7)
-	HudKit.score(self, at + Vector3.UP * 1.1, pts, {"color": "gold" if kind == 1 else party.color_of(by), "size": 3.0 if kind == 1 else 2.2})
-	sfx.play_at("ding", at, 0.0, 1.0 + randf() * 0.15)
+	match kind:
+		SkyGen.RAINBOW:
+			cols = Meshes.RAINBOW.duplicate()
+		SkyGen.CHAIN:
+			cols = [Meshes.CHAIN_COLOR, Color.WHITE]
+		SkyGen.TINY:
+			cols = [Meshes.TINY_COLOR, Color.WHITE]
+		SkyGen.GOLD:
+			cols = [Meshes.GOLD_COLOR, Color(1.0, 1.0, 0.7)]
+	var big := kind == SkyGen.RAINBOW or kind == SkyGen.GOLD or extra != ""
+	burst(at, cols, 40 if big else 22, 1.0 if big else 0.7)
+	HudKit.score(self, at + Vector3.UP * 1.1, pts, {"color": "gold" if big else party.color_of(by), "size": 3.0 if big else 2.2})
+	if extra != "":
+		HudKit.popup(self, at + Vector3.UP * 2.0, extra, {"style": "crit", "size": 2.6, "time": 1.6})
+	sfx.play_at("ding", at, 0.0, 1.0 + randf() * 0.15 + (0.1 * (ci - 1) if kind == SkyGen.CHAIN else 0.0))
 	sfx.play("sparkle", -6.0)
-	if kind == 1:
+	if big:
 		sfx.play("achievement", -2.0)
 	if sign_score != null:
 		var tw := sign_score.create_tween()
@@ -712,6 +1004,116 @@ func burst(at: Vector3, cols: Array[Color], amount: int, speed: float) -> void:
 	get_tree().create_timer(1.3).timeout.connect(p.queue_free)
 
 
+# --- Grumpy clouds (every machine builds them from the seed; the host decides bumps) -----------
+
+func _layout_for(sky_state: Dictionary) -> Dictionary:
+	var key := "%d:%d:%s" % [int(sky_state.get("seed", 0)), int(sky_state.get("chapter", 0)), str(sky_state.get("lucky", false))]
+	if key != layout_key:
+		layout_key = key
+		layout = SkyGen.flight(int(sky_state.get("seed", 0)), int(sky_state.get("chapter", 0)), {"lucky": bool(sky_state.get("lucky", false))})
+	return layout
+
+
+func _build_clouds(sky_state: Dictionary) -> void:
+	var form := int(sky_state.get("form", -1))
+	var key := "%d:%d:%d" % [int(sky_state.get("seed", 0)), int(sky_state.get("chapter", 0)), form]
+	if key == cloud_key:
+		return
+	cloud_key = key
+	for c in clouds:
+		var n: Node3D = c.node
+		if is_instance_valid(n):
+			var tw := n.create_tween()
+			tw.tween_property(n, "scale", Vector3.ONE * 0.01, 0.4)
+			tw.tween_callback(n.queue_free)
+	clouds.clear()
+	if form < 0:
+		return
+	var fl := _layout_for(sky_state)
+	var forms: Array = fl.get("formations", [])
+	if form >= forms.size():
+		return
+	for p in forms[form].get("clouds", []):
+		var n := Node3D.new()
+		n.name = "StormCloud"
+		add_child(n)
+		n.position = p
+		n.rotation.y = SkyGen.yaw_to_vr(p) * 0.5
+		var mi := MeshKit.instance(Meshes.storm_cloud(), false)
+		n.add_child(mi)
+		var zap := MeshKit.instance(Meshes.zap(), false)
+		zap.position = Vector3(0.1, -0.9, 0.3)
+		zap.visible = false
+		n.add_child(zap)
+		n.scale = Vector3.ONE * 0.01
+		var tw := n.create_tween()
+		tw.tween_property(n, "scale", Vector3.ONE, 0.6).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		clouds.append({"node": n, "pos": p, "zap": zap, "mesh": mi})
+
+
+## Every machine: clouds bob and grumble (a little zap now and then is the "keep away" tell).
+func _animate_clouds(_delta: float) -> void:
+	for i in clouds.size():
+		var c: Dictionary = clouds[i]
+		var mi: Node3D = c.mesh
+		mi.position.y = sin(clock * 1.3 + i) * 0.15
+		var z: Node3D = c.zap
+		z.visible = fmod(clock + i * 0.7, 2.4) < 0.18
+
+
+## Host: planes and VR paper planes that fly into a grumpy cloud.
+func _cloud_hits() -> void:
+	if clouds.is_empty():
+		return
+	for slot in flyers:
+		var f: Flyer = flyers[slot]
+		if f.cloud_cd > 0.0:
+			continue
+		for i in clouds.size():
+			if f.node.position.distance_to(clouds[i].pos) < SkyGen.CLOUD_R + 0.25:
+				_cloud_bump(int(slot), i)
+				break
+	for id in darts:
+		var d: Dart = darts[id]
+		if d.state != 1:
+			continue
+		for i in clouds.size():
+			if d.node.position.distance_to(clouds[i].pos) < SkyGen.CLOUD_R:
+				d.state = 2
+				d.t = 0.0
+				d.vel = Vector3.ZERO
+				tele["cloud_darts"] = int(tele.get("cloud_darts", 0)) + 1
+				sfx.play_at("boing", d.node.position, -4.0, 0.7)
+				break
+
+
+func _cloud_bump(slot: int, ci: int) -> void:
+	var f: Flyer = flyers[slot]
+	f.cloud_cd = 2.0
+	tele["cloud_hits"] = int(tele.get("cloud_hits", 0)) + 1
+	if combo > 0:
+		combo = 0
+		net.state_set("combo", 0)
+	cloud_fx(slot, ci)
+	net.event("cloud", [slot, ci])
+
+
+func cloud_fx(slot: int, ci: int) -> void:
+	if flyers.has(slot):
+		var f: Flyer = flyers[slot]
+		f.loop_t = 0.0
+		HudKit.popup(self, f.node.position + Vector3.UP * 0.9, "BUMP!", {"style": "miss", "size": 2.0})
+		sfx.play_at("boing", f.node.position, 0.0, 0.7)
+		if party.is_local(slot):
+			party.rumble(slot, 0.7, 0.5, 0.3)
+			if split != null and huds.has(slot):
+				HudKit.toast(huds[slot], "Grumpy cloud! Combo lost", {"icon": "cross", "duration": 1.8, "where": "top"})
+	if ci >= 0 and ci < clouds.size():
+		var z: Node3D = clouds[ci].zap
+		z.visible = true
+		sfx.play_at("zap", clouds[ci].pos, -4.0)
+
+
 # --- The VR player's paper planes (host / local) --------------------------------------------
 
 func _make_dart(id: int, ci: int) -> Dart:
@@ -723,7 +1125,8 @@ func _make_dart(id: int, ci: int) -> Dart:
 	add_child(d.node)
 	d.body = MeshInstance3D.new()
 	(d.body as MeshInstance3D).mesh = Meshes.plane()
-	(d.body as MeshInstance3D).material_override = Meshes.plane_material(Meshes.HOOP_COLORS[ci % Meshes.HOOP_COLORS.size()].lerp(Color.WHITE, 0.45))
+	var tint: Color = Meshes.GOLD_COLOR if _unlocks().has("gold") else Meshes.HOOP_COLORS[ci % Meshes.HOOP_COLORS.size()].lerp(Color.WHITE, 0.45)
+	(d.body as MeshInstance3D).material_override = Meshes.plane_material(tint)
 	(d.body as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	d.body.scale = Vector3.ONE * DART_SCALE
 	d.node.add_child(d.body)
@@ -766,7 +1169,7 @@ func _vr_hands(delta: float) -> void:
 		var hand_i := -1
 		for w in 2:
 			var lp := h.node.global_transform.affine_inverse() * vr_rig.hand_point(w)
-			if absf(Vector2(lp.x, lp.y).length() - Meshes.HOOP_R - 0.1) < 0.2 and absf(lp.z) < 0.25:
+			if absf(Vector2(lp.x, lp.y).length() - Meshes.radius(h.kind) - 0.1) < 0.2 and absf(lp.z) < 0.25:
 				hand_i = w
 		if hand_i >= 0 and h.wob < 0.4:
 			h.wob = 1.0
@@ -806,6 +1209,7 @@ func _throw(w: int) -> void:
 	d.t = 0.0
 	d.prev = d.node.global_position
 	throws += 1
+	tele["throws"] = int(tele.get("throws", 0)) + 1
 	sfx.play_at("whoosh", d.prev, 0.0, 1.2)
 	vr_rig.pulse(w, 0.5, 0.06)
 	net.event("whoosh", [d.prev])
@@ -824,8 +1228,11 @@ func _trim_darts() -> void:
 
 
 func _fly_darts(delta: float) -> void:
-	var playing := String(net.state_get("phase", "")) == "play"
+	var passable := _passable()
+	var magnet := _breeze() == "magnet"
 	for id in darts.keys():
+		if not darts.has(id):
+			continue  # a gate pass started the flight and cleared the sky
 		var d: Dart = darts[id]
 		if d.state == 1:
 			d.t += delta
@@ -833,22 +1240,25 @@ func _fly_darts(delta: float) -> void:
 			var hs := Vector2(v.x, v.z).length()
 			v.y += (-4.3 + minf(hs * 0.4, 3.6)) * delta
 			v -= v * 0.07 * delta
-			var aim: Variant = _assist_target(d.node.position, v, 14.0, 0.55)
+			var aim: Variant = _assist_target(d.node.position, v, 18.0 if magnet else 14.0, 0.8 if magnet else 0.55)
 			if aim != null:
 				var want := ((aim as Vector3) - d.node.position).normalized()
 				var dir := v.normalized()
 				var ang := dir.angle_to(want)
 				if ang > 0.001:
-					v = dir.slerp(want, minf(1.0, 1.8 * delta / ang)) * v.length()
+					v = dir.slerp(want, minf(1.0, (2.6 if magnet else 1.8) * delta / ang)) * v.length()
 			d.vel = v
 			d.prev = d.node.position
 			var p := d.prev + v * delta
 			_orient_dart(d, v.normalized(), sin(d.t * 9.0) * 0.25)
 			d.node.position = p
-			if playing:
+			if passable:
 				var hid := _check_pass(d.prev, p, 0.15)
 				if hid >= 0:
+					tele["dart_hits"] = int(tele.get("dart_hits", 0)) + 1
 					_score_hoop(hid, 0, p)
+					if not darts.has(id):
+						continue
 			if p.y < 0.04 or d.t > 8.0:
 				d.state = 2
 				d.t = 0.0
@@ -858,6 +1268,8 @@ func _fly_darts(delta: float) -> void:
 				sfx.play_at("pop", d.node.position, -12.0, 0.8)
 		elif d.state == 2:
 			d.t += delta
+			if d.node.position.y > 0.05:  # bounced off a cloud: flutter down
+				d.node.position.y = maxf(0.03, d.node.position.y - delta * 2.5)
 			if d.t > 1.6:
 				d.size = maxf(0.0, 1.0 - (d.t - 1.6) / 0.5)
 				d.body.scale = Vector3.ONE * DART_SCALE * maxf(d.size, 0.01)
@@ -888,9 +1300,63 @@ func sound(sound_name: String, volume_db: float = 0.0, pitch: float = 1.0) -> vo
 	sfx.play(sound_name, volume_db, pitch)
 
 
-# --- Rounds -------------------------------------------------------------------------------
+# --- Story beats ----------------------------------------------------------------------------
 
-func _start_round() -> void:
+## Host: tell a story beat on every machine after `delay` seconds.
+func _story(beat: Dictionary, delay: float = 0.0) -> void:
+	story_queue.append([delay, beat])
+
+
+func _run_story_queue(delta: float) -> void:
+	for i in range(story_queue.size() - 1, -1, -1):
+		story_queue[i][0] -= delta
+		if story_queue[i][0] <= 0.0:
+			var beat: Dictionary = story_queue[i][1]
+			story_queue.remove_at(i)
+			show_story(beat)
+			net.event("story", [beat])
+
+
+## Every machine: the card on each TV view and in VR; Pip flies over to say it.
+func show_story(beat: Dictionary) -> void:
+	var opts := beat.duplicate()
+	opts["color"] = Color.html(String(beat.get("color", "ffb347")))
+	if split != null:
+		StoryCard.show(_all_huds(), opts)
+	if vr_rig != null:
+		StoryCard.show_vr(self, vr_rig.camera, opts)
+	pip_talk = float(beat.get("duration", 4.0))
+
+
+func _pip_beat(line: String, duration: float = 3.5) -> Dictionary:
+	return {"who": "PIP", "line": line, "pic": "bird", "color": "ffb347", "duration": duration}
+
+
+func _chapter_beat(chap: int, line_key: String, duration: float = 4.5) -> Dictionary:
+	var ch := Story.chapter(chap)
+	var colors := ["ff7a6b", "e0503f", "4da6ff", "8c93b8", "9fd8ff", "ffb347"]
+	return {"who": String(ch.who), "line": String(ch[line_key]), "pic": String(ch.pic), "color": colors[clampi(chap, 0, 5)], "duration": duration}
+
+
+## Every machine: Pip circles the park, and flies close to the VR deck to talk.
+func _animate_pip(delta: float) -> void:
+	pip_talk = maxf(0.0, pip_talk - delta)
+	var want: Vector3
+	if pip_talk > 0.0:
+		want = VR_FEET + Vector3(1.1, 2.2, -2.2) + Vector3(0.0, sin(clock * 5.0) * 0.12, 0.0)
+	else:
+		var a := clock * 0.25
+		want = Vector3(sin(a) * 9.0, 6.5 + sin(a * 2.0) * 1.2, -5.0 + cos(a) * 7.0)
+	var to := want - pip.position
+	pip.position += to * minf(1.0, delta * (2.0 if pip_talk > 0.0 else 1.2))
+	var face := VR_FEET + Vector3.UP * 1.6 - pip.position if pip_talk > 0.0 else to
+	if Vector2(face.x, face.z).length() > 0.05:
+		pip.rotation.y = lerp_angle(pip.rotation.y, atan2(face.x, face.z), 1.0 - exp(-4.0 * delta))
+
+
+# --- Rounds: PICK A BREEZE, then a FLIGHT, then RESULTS ---------------------------------------
+
+func _clear_sky() -> void:
 	for id in hoops:
 		(hoops[id] as Hoop).node.queue_free()
 	hoops.clear()
@@ -898,28 +1364,216 @@ func _start_round() -> void:
 		(darts[id] as Dart).node.queue_free()
 	darts.clear()
 	held = [null, null]
-	respawns.clear()
+
+
+## The next story flight from the save: [chapter, flight, mode].
+func _next_story() -> Array:
+	var chap := mini(int(save.data["chapter"]), Story.MIXED)
+	return [chap, int(save.data["flight"]), "bonus" if chap >= Story.MIXED else "story"]
+
+
+## Host: share the saved progress (village pieces, unlocks, today's best) with every machine.
+func _publish_progress() -> void:
+	var stars: Dictionary = save.data["stars"]
+	net.state_set("village", Story.village(stars))
+	var stamps := Story.stamps(stars) + int(save.data.get("extra_stamps", 0))
+	net.state_set("stamps", stamps)
+	net.state_set("unlocks", Story.unlocked(stamps))
+	var daily: Dictionary = save.data["daily"]
+	net.state_set("daily_best", int(daily.get(Seeded.daily_key(), 0)))
+
+
+func _start_pick() -> void:
+	_clear_sky()
 	awards.reset()
-	time_left = round_time
-	_spawn_hoop(true)
-	for i in HOOP_COUNT - 1:
-		_spawn_hoop()
+	combo = 0
+	net.state_set("combo", 0)
+	time_left = pick_time
+	var choices := Story.gate_choices(Seeded.rng(Seeded.fresh_seed(), "gates"))
+	net.state_set("gates", choices)
+	var nx := _next_story()
+	net.state_set("flight", {"mode": "pick", "chapter": nx[0], "flight": nx[1]})
+	net.state_set("sky", {"seed": 0, "chapter": 0, "lucky": false, "form": -1})
+	var gp := SkyGen.gate_positions()
+	for i in gp.size():
+		var h := _spawn_spec({"pos": gp[i], "kind": SkyGen.GATE, "ci": i, "amp": 0.12, "phase": i * 2.0, "yaw": SkyGen.yaw_to_vr(gp[i])})
+		h.age = 0.0
 	net.state_set("score", 0)
 	net.state_set("time", int(ceil(time_left)))
-	net.state_set("phase", "play")
-	net.state_set("round", int(net.state_get("round", 0)) + 1)
+	net.state_set("phase", "pick")
+	# What Pip says before this flight.
+	var chap: int = nx[0]
+	if chap < Story.MIXED and int(nx[1]) == 0 and int(save.data["misses"]) == 0:
+		_story(_chapter_beat(chap, "intro"), 0.6)
+	elif int(save.data["misses"]) > 0:
+		_story(_pip_beat(Story.PIP_RETRY[int(save.data["misses"]) % Story.PIP_RETRY.size()]), 0.6)
+	else:
+		_story(_pip_beat(Story.PIP_LINES[int(save.data["flights"]) % Story.PIP_LINES.size()]), 0.6)
 	if vr_rig != null:
 		vr_rig.guard_trigger()
 
 
-func _end_round() -> void:
+## Host: a gate was flown (or thrown) through: that breeze (or the DAILY SKY) it is.
+func _pick_gate(h: Hoop, by: int) -> void:
+	var gates: Array = net.state_get("gates", [])
+	var choice := String(gates[h.ci]) if h.ci < gates.size() else String(gates[0])
+	burst(h.node.position, [Color.WHITE, Meshes.GOLD_COLOR], 40, 1.0)
+	net.event("gate", [h.node.position, by])
+	sfx.play("magic", -2.0)
+	_start_flight(choice, "gate" if by >= 0 else "timeout")
+
+
+func _start_flight(choice: String, how: String) -> void:
+	_clear_sky()
+	gate_picked = choice
+	var daily := choice == Story.DAILY_GATE
+	var breeze := "" if daily else choice
+	var nx := _next_story()
+	var chap: int = Story.MIXED if daily else int(nx[0])
+	if force_chapter >= 0 and not daily:
+		chap = force_chapter
+	var mode := "daily" if daily else String(nx[2])
+	var seed_v := Seeded.daily_seed(GAME_ID) if daily else Seeded.fresh_seed()
+	var lucky := breeze == "lucky"
+	var secs := round_time + (20.0 if breeze == "tail" else 0.0)
+	var players := party.player_count() + (1 if vr_rig != null else 0)
+	var misses := 0 if daily else int(save.data["misses"])
+	var laps := int(save.data["laps"]) if mode == "bonus" else 0
+	var goals := Story.goals(players, chap, misses, laps, secs)
+	net.state_set("flight", {"mode": mode, "chapter": chap, "flight": int(nx[1]), "breeze": breeze, "goals": goals,
+		"seed": seed_v, "lucky": lucky, "players": players})
+	tele = {"mode": mode, "chapter": chap, "flight": int(nx[1]), "seed": seed_v, "breeze": breeze, "pick": how,
+		"players": players, "vr": vr_rig != null, "tv_players": party.player_count(), "goals": goals,
+		"misses_before": misses, "seconds": secs, "kinds": {}, "t0": clock}
+	time_left = secs
+	combo = 0
+	last_pass_t = -100.0
+	form_i = -1
+	layout_key = ""
+	_layout_for({"seed": seed_v, "chapter": chap, "lucky": lucky})
+	net.state_set("combo", 0)
+	net.state_set("score", 0)
+	net.state_set("time", int(ceil(time_left)))
+	net.state_set("phase", "play")
+	net.state_set("round", int(net.state_get("round", 0)) + 1)
+	_next_formation()
+	if chap < Story.MIXED and int(nx[1]) == 0 and String(Story.chapter(chap).new) != "" and not daily:
+		_story(_pip_beat(String(Story.chapter(chap).new), 4.0), 2.6)
+	elif daily:
+		_story(_pip_beat("Today's sky! The same for everyone.", 3.5), 2.6)
+	if vr_rig != null:
+		vr_rig.guard_trigger()
+
+
+## Host: the next formation of the flight (leftover hoops stay unless they're in the way).
+func _next_formation() -> void:
+	var forms: Array = layout.get("formations", [])
+	if forms.is_empty():
+		return
+	form_i += 1
+	form_t = 0.0
+	var f: Dictionary = forms[form_i % forms.size()]
+	var specs: Array = f.hoops
+	for id in hoops.keys():
+		var h: Hoop = hoops[id]
+		var clash := h.kind == SkyGen.CHAIN or h.kind == SkyGen.GOLD
+		for s in specs:
+			if h.node.position.distance_to(s.pos) < SkyGen.MIN_GAP:
+				clash = true
+		if clash:
+			burst(h.node.position, [Color.WHITE], 12, 0.5)
+			h.node.queue_free()
+			hoops.erase(id)
+	chain_next = 1
+	chain_len = 0
+	for s in specs:
+		_spawn_spec(s)
+		if int(s.kind) == SkyGen.CHAIN:
+			chain_len += 1
+	if bool(f.get("gold", false)):
+		_spawn_spec({"pos": SkyGen.gold_pos(clock), "kind": SkyGen.GOLD, "ci": 0, "amp": 0.0, "phase": 0.0, "yaw": 0.0})
+	var fl := _flight()
+	net.state_set("sky", {"seed": int(fl.get("seed", 0)), "chapter": int(fl.get("chapter", 0)), "lucky": bool(fl.get("lucky", false)),
+		"form": form_i % forms.size()})
+	sfx.play("pop", -8.0, 1.3)
+
+
+func _end_round(how: String = "time") -> void:
 	var score := int(net.state_get("score", 0))
-	var data := awards.results({"title": "GREAT FLYING!", "subtitle": "%d hoops together!" % score,
-		"style": "victory", "stats": [["HOOPS", str(score)], ["BEST", str(int(net.state_get("best", 0)))]],
-		"score_format": "%d"})
+	var fl := _flight()
+	var goals: Array = fl.get("goals", [1, 2, 3])
+	var stars := Story.stars_for(score, goals)
+	var mode := String(fl.get("mode", "story"))
+	var chap := int(fl.get("chapter", 0))
+	var fnum := int(fl.get("flight", 0))
+	var stars_d: Dictionary = save.data["stars"]
+	var before := Story.stamps(stars_d) + int(save.data.get("extra_stamps", 0))
+	var adv := {}
+	if mode == "story" and force_chapter < 0:
+		var key := "%d-%d" % [chap, fnum]
+		stars_d[key] = maxi(int(stars_d.get(key, 0)), stars)
+		adv = Story.advance(chap, fnum, int(save.data["laps"]), int(save.data["misses"]), stars)
+	elif mode == "bonus" and force_chapter < 0:
+		save.data["extra_stamps"] = int(save.data.get("extra_stamps", 0)) + stars
+		adv = Story.advance(Story.MIXED, fnum, int(save.data["laps"]), int(save.data["misses"]), stars)
+	elif mode == "daily":
+		var daily: Dictionary = save.data["daily"]
+		var dk := Seeded.daily_key()
+		daily[dk] = maxi(int(daily.get(dk, 0)), score)
+		for k in daily.keys():  # keep the last few days only
+			if daily.size() > 14 and String(k) < dk:
+				daily.erase(k)
+	if not adv.is_empty():
+		save.data["chapter"] = int(adv.chapter)
+		save.data["flight"] = int(adv.flight)
+		save.data["laps"] = int(adv.laps)
+		save.data["misses"] = int(adv.misses)
+	save.data["flights"] = int(save.data["flights"]) + 1
+	save.mark_dirty()
+	flights_done += 1
+	var after := Story.stamps(stars_d) + int(save.data.get("extra_stamps", 0))
+	var news := Story.newly_unlocked(before, after)
+	_publish_progress()
+	# Telemetry: one line per flight.
+	var t := tele.duplicate(true)
+	t["score"] = score
+	t["stars"] = stars
+	t["end"] = how
+	t["played_s"] = int(clock - float(t.get("t0", clock)))
+	t.erase("t0")
+	t["formations"] = form_i + 1
+	t["chapter_done"] = bool(adv.get("chapter_done", false))
+	Telemetry.run(GAME_ID, t)
+	tele = {}
+	# The results screen.
+	var titles := ["NEARLY!", "LETTERS DELIVERED!", "GREAT FLYING!", "AMAZING!"]
+	var stats: Array = [["POINTS", str(score)], ["STARS", "%d OF 3" % stars]]
+	if stars < 3:
+		stats.append(["NEXT STAR", str(int(goals[stars]))])
+	if mode == "daily":
+		stats.append(["BEST TODAY", str(int(net.state_get("daily_best", score)))])
+	stats.append(["STAMPS", str(after)])
+	for n in news:
+		stats.append(["NEW!", n])
+	var sub := "%d points together!" % score
+	if mode == "story" and stars > 0:
+		sub = "A new piece of the %s!" % String(Story.chapter(chap).place).to_lower()
+	var data := awards.results({"title": titles[stars], "subtitle": sub,
+		"style": "victory", "stats": stats, "score_format": "%d"})
+	data["stars"] = stars
 	net.state_set("results", data)
 	net.state_set("phase", "results")
 	results_t = 0.0
+	# Story beats.
+	if bool(adv.get("story_done", false)):
+		_story(_chapter_beat(4, "done", 5.0), 1.5)
+		_story(_pip_beat("Every letter is home! Thank you, pilots!", 5.0), 7.0)
+	elif bool(adv.get("chapter_done", false)):
+		_story(_chapter_beat(chap, "done", 5.0), 1.5)
+	elif stars == 0 and mode != "daily":
+		_story(_pip_beat(Story.PIP_RETRY[int(save.data["misses"]) % Story.PIP_RETRY.size()]), 1.5)
+	for i in news.size():
+		_story({"who": "NEW!", "line": "You unlocked %s!" % String(news[i]).to_lower(), "pic": "star", "color": "ffd24d", "duration": 3.5}, 6.5 + i * 4.0)
 
 
 func _show_results(data: Dictionary) -> void:
@@ -928,7 +1582,7 @@ func _show_results(data: Dictionary) -> void:
 	for i in 3:
 		burst(SIGN_POS + Vector3(randf_range(-5.0, 5.0), -3.0, 3.0), Meshes.RAINBOW, 50, 1.4)
 	sfx.play("party_horn")
-	sfx.play("cheer", -4.0)
+	sfx.play("cheer" if int(data.get("stars", 1)) > 0 else "boing", -4.0)
 	if split != null:
 		split.set_shared(true)
 		var screen := Awards.results_screen(huds[-1], data, {"party": party})
@@ -959,7 +1613,7 @@ func results_showing() -> bool:
 
 func on_request(_slot: int, action: String, _args: Array) -> void:
 	if action == "next_round" and results_showing():
-		_start_round()
+		_start_pick()
 
 
 func on_pause_changed(paused: bool, by_slot: int) -> void:
@@ -992,8 +1646,15 @@ func on_pause_changed(paused: bool, by_slot: int) -> void:
 
 func _on_state_changed(key: String, value: Variant) -> void:
 	match key:
-		"score", "best":
+		"score", "best", "combo", "flight":
 			_refresh_hud()
+			if key == "flight" and value is Dictionary:
+				var chap := int((value as Dictionary).get("chapter", 0))
+				var ch := Story.chapter(chap)
+				if sky != null and sky.preset != SkyKit.resolve(String(ch.sky)):
+					sky.set_preset(String(ch.sky), 2.0)
+				if ground != null:
+					ground.material_override = MeshKit.material(ch.ground)
 		"time":
 			for slot in timers:
 				var t: HudKit.TimerPill = timers[slot]
@@ -1001,19 +1662,45 @@ func _on_state_changed(key: String, value: Variant) -> void:
 					t.set_time(float(value))
 			if sign_time != null:
 				sign_time.text = HudKit.clock_text(float(value))
-			if int(value) <= 5 and int(value) > 0 and not results_showing():
+			if int(value) <= 5 and int(value) > 0 and String(net.state_get("phase", "")) == "play":
 				sfx.play("tick", -2.0)
 		"round":
-			HudKit.banner(_all_huds(), "PAPER PLANES", "Fly through the hoops!", {"duration": 2.5})
+			var fl := _flight()
+			var title := _flight_title(fl)
+			var sub := "Fly through the hoops!"
+			var breeze := String(fl.get("breeze", ""))
+			if Story.BREEZES.has(breeze):
+				sub = "Breeze: %s!" % String(Story.BREEZES[breeze][0])
+			HudKit.banner(_all_huds(), title, sub, {"duration": 2.5})
 			if vr_rig != null:
-				HudKit.vr_banner(self, vr_rig.camera, "PAPER PLANES", "Throw through the hoops!", {"duration": 2.5, "sound": ""})
+				HudKit.vr_banner(self, vr_rig.camera, title, "Throw through the hoops!" if breeze == "" else sub, {"duration": 2.5, "sound": ""})
 			sfx.play("go", -4.0)
+		"gates", "daily_best":
+			for id in hoops:
+				_label_hoop(hoops[id])
+		"sky":
+			if value is Dictionary:
+				_build_clouds(value)
+		"village":
+			if value is Array:
+				_build_village(value)
+		"unlocks":
+			for slot in flyers:
+				_apply_look(flyers[slot])
 		"phase":
-			if String(value) == "results":
-				_show_results(net.state_get("results", {}))
-			else:
-				_hide_results()
-				music.play_mood("party")
+			match String(value):
+				"results":
+					_show_results(net.state_get("results", {}))
+				"pick":
+					_hide_results()
+					music.play_mood("party")
+					HudKit.banner(_all_huds(), "PICK A BREEZE!", "Fly through a gate", {"duration": 2.6, "style": "info"})
+					if vr_rig != null:
+						HudKit.vr_banner(self, vr_rig.camera, "PICK A BREEZE!", "Throw a plane through a gate", {"duration": 2.6, "sound": ""})
+				_:
+					_hide_results()
+					music.play_mood("party")
+			_refresh_hud()
 
 
 # --- Game loop ----------------------------------------------------------------------------
@@ -1026,29 +1713,58 @@ func _process(delta: float) -> void:
 		_fly_local(delta)
 	_animate_flyers(delta)
 	_animate_hoops(delta)
+	_animate_clouds(delta)
+	_animate_pip(delta)
 	if net.mode == "client":
 		_mirror_darts(delta)
 		return
+	_run_story_queue(delta)
 	if vr_rig != null:
 		_vr_hands(delta)
 	_fly_darts(delta)
 	for id in hoops:
 		_move_hoop(hoops[id])
-	if results_showing():
+	var phase := String(net.state_get("phase", ""))
+	if phase == "results":
 		results_t += delta
 		if results_t > results_wait:
-			_start_round()
+			_start_pick()
 		return
-	for i in range(respawns.size() - 1, -1, -1):
-		respawns[i] -= delta
-		if respawns[i] <= 0.0:
-			respawns.remove_at(i)
-			_spawn_hoop()
 	time_left -= delta
 	if int(ceil(time_left)) != int(net.state_get("time", 0)):
 		net.state_set("time", maxi(0, int(ceil(time_left))))
+	if phase == "pick":
+		if time_left <= 0.0:
+			var gates: Array = net.state_get("gates", [])
+			_start_flight(String(gates[0]) if not gates.is_empty() else "big", "timeout")
+		return
+	_cloud_hits()
+	if combo > 0 and clock - last_pass_t > COMBO_TIME * (1.6 if _breeze() == "streak" else 1.0):
+		combo = 0
+		net.state_set("combo", 0)
+	form_t += delta
+	var left := 0
+	for id in hoops:
+		if (hoops[id] as Hoop).kind != SkyGen.GOLD:
+			left += 1
+	if left <= 1 or (left <= 2 and form_t > FORM_TIME * 0.5) or form_t > FORM_TIME:
+		_next_formation()
 	if time_left <= 0.0:
 		_end_round()
+
+
+## A flight that's cut short (the arcade menu, a quit) still writes its telemetry line.
+func _exit_tree() -> void:
+	if net != null and net.mode != "client" and not tele.is_empty() and String(net.state_get("phase", "")) == "play":
+		var t := tele.duplicate(true)
+		t["score"] = int(net.state_get("score", 0))
+		t["stars"] = Story.stars_for(int(t["score"]), t.get("goals", [1, 2, 3]))
+		t["end"] = "quit"
+		t["played_s"] = int(clock - float(t.get("t0", clock)))
+		t.erase("t0")
+		t["formations"] = form_i + 1
+		Telemetry.run(GAME_ID, t)
+		tele = {}
 
 
 # --- Networking ---------------------------------------------------------------------------
@@ -1167,7 +1883,15 @@ func apply_event(kind: String, args: Array) -> void:
 			if hoops.has(id):
 				(hoops[id] as Hoop).node.queue_free()
 				hoops.erase(id)
-			hoop_fx(args[1], int(args[3]), int(args[4]), int(args[2]), int(args[5]))
+			hoop_fx(args[1], int(args[3]), int(args[4]), int(args[2]), int(args[5]), String(args[6]) if args.size() > 6 else "")
+		"gate":
+			burst(args[0], [Color.WHITE, Meshes.GOLD_COLOR], 40, 1.0)
+			sfx.play("magic", -2.0)
+		"story":
+			if args.size() > 0 and args[0] is Dictionary:
+				show_story(args[0])
+		"cloud":
+			cloud_fx(int(args[0]), int(args[1]))
 		"whoosh":
 			sfx.play_at("whoosh", args[0], 0.0, 1.2)
 		"wob":

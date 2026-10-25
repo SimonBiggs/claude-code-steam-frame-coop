@@ -49,7 +49,7 @@ const DAILY_GATE := "daily"
 
 ## Unlocks by stamps (total stars ever): [stamps, id, label].
 const UNLOCKS: Array = [[3, "rainbow_trail", "RAINBOW TRAILS"], [9, "sparkle_trail", "SPARKLE TRAILS"],
-	[18, "striped", "STRIPY PLANES"], [30, "gold", "GOLDEN PLANES"], [45, "crown", "ROYAL POST BADGE"]]
+	[18, "comet_trail", "COMET TRAILS"], [30, "gold", "GOLDEN PLANES"], [45, "crown", "PILOT CROWNS"]]
 
 
 static func chapter(c: int) -> Dictionary:
@@ -59,7 +59,7 @@ static func chapter(c: int) -> Dictionary:
 ## The save's default data (core/save.gd fills missing keys from this, so old saves just gain them).
 static func save_defaults() -> Dictionary:
 	return {"best": 0, "chapter": 0, "flight": 0, "stars": {}, "misses": 0, "laps": 0, "daily": {},
-		"flights": 0, "told": {}}
+		"flights": 0, "extra_stamps": 0}
 
 
 ## Total stars ever earned (each flight counts its best).
