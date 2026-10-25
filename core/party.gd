@@ -37,6 +37,7 @@ signal device_lost(slot: int)
 ## The controller came back in time.
 signal device_restored(slot: int)
 
+const Who := preload("res://core/who.gd")  # seat labels: who is on a seat (David, TV (P3))
 const MAX_SLOTS := 7
 const NONE := -1
 const KEYBOARD := -2
@@ -120,6 +121,9 @@ var _was_paused := false
 var _net_hooked: Node
 var _owner := PackedInt32Array()  # host: the peer that owns each REMOTE seat (0 = this machine)
 var _taken := {}  # client: seats other machines have, slot -> their kind
+## Host: while a leaving machine's seats are freed, its peer id (so "David left" still knows who: core/who.gd).
+var leaving := 0
+var _peers := {}  # client: every taken seat -> the peer id of the machine it's on (from the host's roster)
 var _kb_join_t := -1.0
 var _clock := 0.0  # game seconds (deterministic under --fixed-fps)
 var _last_pad_t := -100.0
@@ -228,11 +232,31 @@ func is_lost(slot: int) -> bool:
 	return is_active(slot) and _lost_t[slot] >= 0.0
 
 
-## "P1".."P7", or the name given with set_player_name().
+## The seat's label: the name given with set_player_name(), else WHO is on it when several machines play
+## ("David" on his Deck, "TV (P3)" for a TV pad: core/who.gd), else "P1".."P7" (local play).
 func name_of(slot: int) -> String:
 	if slot >= 0 and slot < MAX_SLOTS and _names[slot] != "":
 		return _names[slot]
+	if _mode() != "local" and slot >= 0 and slot < MAX_SLOTS and _state[slot] != FREE:
+		return Who.seat_in(_net(), seat_owners(), slot)
 	return "P%d" % (slot + 1)
+
+
+## {seat: peer id of the machine it's on} for every taken seat (the host is 1), on every machine.
+func seat_owners() -> Dictionary:
+	if _mode() != "host":
+		var mine := _peers.duplicate()
+		var n := _net()
+		var me: int = n.my_peer_id() if n != null and n.has_method("my_peer_id") else 0
+		for s in MAX_SLOTS:
+			if _state[s] != FREE and _device[s] != REMOTE and me > 0:
+				mine[s] = me
+		return mine
+	var o := {}
+	for s in MAX_SLOTS:
+		if _state[s] != FREE:
+			o[s] = _owner[s] if _device[s] == REMOTE and _owner[s] > 0 else 1
+	return o
 
 
 ## Give a seat a name (shown by name_of; sent to the host with the join request).
@@ -251,7 +275,7 @@ static func device_label(device: int) -> String:
 	if device == KEYBOARD:
 		return "keyboard"
 	if device == REMOTE:
-		return "TV"
+		return "another machine"  # (name_of says which: core/who.gd)
 	if device == NONE:
 		return "nobody"
 	if device >= VIRTUAL_PAD_BASE:
@@ -919,6 +943,7 @@ func _send_roster() -> void:
 	for s in MAX_SLOTS:
 		if _state[s] != FREE:
 			taken[s] = machine_kind(s)
+	var owners := seat_owners()  # every machine can say WHO sits where (name_of, core/who.gd)
 	var n := _net()
 	if n == null or not n.has_method("sys_send_to"):
 		return
@@ -927,7 +952,7 @@ func _send_roster() -> void:
 		for s in taken:
 			if not (_device[s] == REMOTE and _owner[s] == peer):
 				theirs[s] = taken[s]
-		n.sys_send_to(peer, "party", ["roster", 0, theirs])
+		n.sys_send_to(peer, "party", ["roster", 0, theirs, owners])
 
 
 func _send_join(slot: int) -> void:
@@ -957,6 +982,7 @@ func _on_party_msg(args: Array) -> void:
 	match op:
 		"roster":
 			_taken = (args[2] as Dictionary).duplicate() if args.size() > 2 and args[2] is Dictionary else {}
+			_peers = (args[3] as Dictionary).duplicate() if args.size() > 3 and args[3] is Dictionary else {}
 			# Other machines' players are seated here too (device REMOTE, not local), so games build their
 			# avatars on player_joined and position them from snapshots; seats they leave are freed.
 			for s in range(0, MAX_SLOTS):  # slot 0 too: a flat host's own player (a VR host never lists it)
@@ -1035,11 +1061,13 @@ func _on_client_gone() -> void:
 ## Host: one machine went away; only its players leave.
 func _on_machine_gone(peer: int) -> void:
 	var any := false
+	leaving = peer
 	for s in MAX_SLOTS:
 		if _state[s] == ACTIVE and _device[s] == REMOTE and _owner[s] == peer:
 			_unseat(s)
 			player_left.emit(s)
 			any = true
+	leaving = 0
 	if any:
 		_send_roster()
 

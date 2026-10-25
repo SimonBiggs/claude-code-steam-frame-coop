@@ -39,6 +39,7 @@ signal client_disconnected
 signal machine_joined(peer: int, kind: String)
 signal machine_left(peer: int)
 
+const Machine := preload("res://core/machine.gd")
 const DEFAULT_PORT := 7777
 var PORT: int = int(OS.get_environment("DUO_PORT")) if OS.has_environment("DUO_PORT") else DEFAULT_PORT  # override for parallel tests
 const SNAP_INTERVAL := 1.0 / 30.0
@@ -54,12 +55,17 @@ var main
 var mode := "local"  # "local", "host" or "client"
 var connected := false  # host: at least one machine joined; client: joined the host
 ## This machine's kind, sent to the host when joining ("tv", "deck", ...).
-var machine_kind: String = preload("res://core/machine.gd").kind()  # tv / deck / frame (core/machine.gd)
+var machine_kind: String = Machine.kind()  # tv / deck / frame (core/machine.gd)
+## This machine's short name ("TV", "VR", "David"...: core/machine.gd display_name), sent with the hello so join /
+## leave messages and seat labels say WHO (core/who.gd). The host replicates every machine's name ("_names").
+var machine_name: String = Machine.display_name(machine_kind)
+## Host: the name of the machine that left last (on_client_left / on_machine_left can say who went).
+var last_left_name := ""
 ## Host: how many machines may join a game that supports several (multi_machine on main).
 var max_machines: int = int(OS.get_environment("DUO_MAX_MACHINES")) if OS.has_environment("DUO_MAX_MACHINES") else 32  # ENet allows 4095; seats are the real limit
 ## Host: whether the host has a VR player (false: a flat host, see host()).
 var has_vr := true
-## Host: peer id -> {"kind": String} for every joined machine.
+## Host: peer id -> {"kind": String, "name": String} for every joined machine.
 var machines := {}
 ## While a sys message handler runs on the host: the peer that sent it (0 = this machine).
 var sys_sender := 0
@@ -131,6 +137,31 @@ func event_except(peer: int, kind: String, args: Array) -> void:
 ## Host: a joined machine's kind ("tv", "deck", ...; "" if unknown).
 func machine_kind_of(peer: int) -> String:
 	return str(machines.get(peer, {}).get("kind", ""))
+
+
+## Any machine: a machine's short name ("TV", "VR", "David"; this machine for 0 / its own id). Names stay known
+## after the machine leaves, so a leave message can still say who. Labels for people: core/who.gd.
+func machine_name_of(peer: int) -> String:
+	if peer <= 0 or peer == my_peer_id():
+		return machine_name
+	if machines.has(peer) and str(machines[peer].get("name", "")) != "":
+		return str(machines[peer].name)
+	var names: Dictionary = state_get("_names", {})
+	return str(names.get(peer, names.get(str(peer), "TV")))
+
+
+## Host: `wanted`, or "wanted 2", "wanted 3"... if another machine here already has that name.
+func _unique_name(wanted: String, peer: int) -> String:
+	var taken := [machine_name]
+	for p in machines:
+		if p != peer:
+			taken.append(str(machines[p].get("name", "")))
+	var nm := wanted
+	var n := 2
+	while nm in taken:
+		nm = "%s %d" % [wanted, n]
+		n += 1
+	return nm
 
 
 ## Keeps trying while the port is busy (e.g. an older copy of the game is still shutting down).
@@ -275,9 +306,10 @@ func _on_peer_connected(id: int) -> void:
 func _on_peer_disconnected(id: int) -> void:
 	if not machines.has(id):
 		return  # one we turned away
+	last_left_name = machine_name_of(id)
 	machines.erase(id)
 	connected = not machines.is_empty()
-	print("Net: machine %d left (%d now)" % [id, machines.size()])
+	print("Net: machine %d (%s) left (%d now)" % [id, last_left_name, machines.size()])
 	if main != null and main.has_method("on_machine_left"):
 		main.on_machine_left(id)
 	machine_left.emit(id)
@@ -293,8 +325,8 @@ func _on_connected() -> void:
 	Engine.remove_meta("following_now")
 	join_deadline = 0
 	Engine.set_meta("duo_joined", true)
-	print("Net: joined the host as a %s" % machine_kind)
-	_sys_up.rpc_id(1, "_hello", [machine_kind])
+	print("Net: joined the host as a %s (%s)" % [machine_kind, machine_name])
+	_sys_up.rpc_id(1, "_hello", [machine_kind, machine_name])
 	join_finished.emit(true)
 
 
@@ -447,7 +479,8 @@ func state_all() -> Dictionary:
 ## Host / local: erase every key (e.g. a new match). Erasures replicate like changes.
 func state_clear() -> void:
 	for k in _state.keys():
-		state_set(str(k), null)
+		if not str(k).begins_with("_"):  # engine keys (machine names, seat owners: core/who.gd) outlive a new match
+			state_set(str(k), null)
 
 
 func _flush_state(delta: float) -> void:
@@ -529,8 +562,14 @@ func _sys_up(kind: String, args: Array) -> void:
 	if not machines.has(from):
 		return  # turned away
 	if kind == "_hello":
-		machines[from] = {"kind": str(args[0]) if args.size() > 0 else "tv"}
-		print("Net: machine %d is a %s" % [from, machines[from].kind])
+		var k := str(args[0]) if args.size() > 0 else "tv"
+		var wanted := str(args[1]) if args.size() > 1 and str(args[1]) != "" else Machine.display_name(k)
+		machines[from] = {"kind": k, "name": _unique_name(wanted, from)}
+		var names: Dictionary = state_get("_names", {}).duplicate()
+		names[1] = machine_name
+		names[from] = machines[from].name
+		state_set("_names", names)  # every machine can label every seat (core/who.gd)
+		print("Net: machine %d is a %s (%s)" % [from, k, machines[from].name])
 		if main != null and main.has_method("on_machine_joined"):
 			main.on_machine_joined(from, machines[from].kind)
 		machine_joined.emit(from, machines[from].kind)

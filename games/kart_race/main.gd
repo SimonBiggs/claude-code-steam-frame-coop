@@ -25,6 +25,7 @@ extends Node3D
 ## it and squeeze the trigger, and a glowing arrow over the wheel when going the wrong way.
 
 const VrText := preload("res://core/vr_text.gd")
+const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
 const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
 const NetScript := preload("res://core/net.gd")
@@ -1100,7 +1101,7 @@ func _activate(p) -> void:
 	p.reset_race()
 	_place_new(p)
 	if not SIMPLE_MODE:
-		_show_center("%s JOINS THE RACE!" % p.kart_name, 1.5)
+		_show_center(Who.joined(Who.seat(self, p.index), "the race"), 1.5)
 	burst(p.position + Vector3(0, 1.5, 0), p.color, 16)
 	sound("box", -4.0, 0.8, true)
 	on_player_activity_changed(p)
@@ -1147,7 +1148,7 @@ func _leave(p) -> void:
 	elif p.active:
 		p.set_active(false)
 		on_player_activity_changed(p)
-		_show_center("%s LEFT" % p.kart_name, 1.5)
+		_show_center(Who.left(Who.seat(self, p.index)), 1.5)
 	_save_party()
 
 
@@ -2393,8 +2394,7 @@ func on_client_joined() -> void:
 	# Each machine asks for its own karts ("join"); only the first one starts the race.
 	if net.peer_count() > 1:
 		return
-	if not SIMPLE_MODE:
-		_show_center("THE TV PLAYERS JOINED!", 1.5)
+	# (no "they joined" line: each seat's join says WHO, core/who.gd)
 	if state == "wait" and SIMPLE_MODE and practice_gate >= 0:
 		pass  # they join the practice rings; the race starts after the third one
 	elif state == "wait":
@@ -2413,14 +2413,14 @@ func _seat_gone(p) -> void:
 	if p.active:
 		p.set_active(false)
 		if net.peer_count() > 0 and not SIMPLE_MODE:
-			_show_center("%s LEFT" % p.kart_name, 1.5)
+			_show_center(Who.left(Who.seat(self, p.index)), 1.5)
 
 
 ## Host: the LAST machine left (multi_machine games get this only then).
 func on_client_left() -> void:
 	seats.all_left()
 	if not SIMPLE_MODE:
-		_show_center("The TV players left - racing on with the CPU buddies", 2.5)
+		_show_center(Who.left(net.last_left_name) + " - racing on with the CPU buddies", 2.5)
 
 
 func on_p2_action(action: String, args: Array, index: int = 1) -> void:
@@ -2437,7 +2437,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 			if p.active:
 				p.set_active(false)
 				if not SIMPLE_MODE:
-					_show_center("%s LEFT" % p.kart_name, 1.5)
+					_show_center(Who.left(Who.seat(self, p.index)), 1.5)
 		"continue":
 			_on_continue()
 		"use":
@@ -2452,7 +2452,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 						p.st_turbo += 1
 		"pause":
 			var paused: bool = args[0]
-			_set_pause_banner(paused, "A TV player opened the menu")
+			_set_pause_banner(paused, Who.paused_by(net.machine_name_of(net.sender_peer())))
 			get_tree().paused = paused
 
 

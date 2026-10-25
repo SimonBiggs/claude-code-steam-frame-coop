@@ -14,6 +14,7 @@ extends Node3D
 ## a flat host (no VR) plays slot 0 itself.
 
 const NetScript := preload("res://core/net.gd")
+const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
 const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
@@ -949,7 +950,7 @@ func _hide_results() -> void:
 
 
 func on_pause_changed(paused: bool, by_slot: int) -> void:
-	var why := "Paused by %s" % party.name_of(by_slot)
+	var why := "Paused by %s" % Who.seat(self, by_slot)
 	if vr_rig != null:
 		if paused:
 			vr_banner = HudKit.vr_card(self, vr_rig.camera, "PAUSED", why, {"width": 1.1})

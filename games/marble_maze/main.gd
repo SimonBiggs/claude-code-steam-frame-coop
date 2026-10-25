@@ -31,6 +31,7 @@ extends Node3D
 ## controller sees a pulsing A + plus + person; a full table / someone leaving is just a soft sound.
 
 const VrText := preload("res://core/vr_text.gd")
+const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
 const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
 const NetScript := preload("res://core/net.gd")
@@ -926,7 +927,7 @@ func _deck_friend_takes(p) -> void:
 	_ensure_view(p)
 	_layout_views()
 	if not simple:
-		_show_center("PLAYER %d ROLLS IN!" % (p.index + 1), 1.5)
+		_show_center("%s rolls in!" % Who.seat(self, p.index), 1.5)
 
 
 func _join_slot(device: int):
@@ -964,7 +965,7 @@ func _activate(p) -> void:
 	if state == "play" or state == "intro":
 		time_left += EXTRA_TIME_PER_PLAYER
 	if not simple:
-		_show_center("PLAYER %d ROLLS IN!" % (p.index + 1), 1.5)
+		_show_center("%s rolls in!" % Who.seat(self, p.index), 1.5)
 	sound("home", -4.0, 1.2, true)
 	on_player_activity_changed(p)
 
@@ -981,7 +982,7 @@ func _leave(p) -> void:
 		if simple:
 			sound("pop", -10.0, 0.6)  # no sentence: a soft puff
 		else:
-			_show_center("PLAYER %d LEFT" % (p.index + 1), 1.5)
+			_show_center(Who.left(Who.seat(self, p.index)), 1.5)
 	_save_party()
 
 
@@ -2049,7 +2050,7 @@ func on_client_joined() -> void:
 		sound("home", -2.0, 1.2, true)
 		_start_level(level)
 		return
-	_show_center("THE TV PLAYERS JOINED!", 1.5)
+	# (no "they joined" line: each seat's join says WHO, core/who.gd)
 	_start_level(level if state != "over" else 1)
 
 
@@ -2057,7 +2058,7 @@ func on_client_joined() -> void:
 func on_machine_left(peer: int) -> void:
 	var freed := seats.machine_left(peer)
 	if not freed.is_empty() and net.peer_count() > 0 and not simple:
-		_show_center("PLAYER %d LEFT" % (int(freed[0]) + 1), 1.5)
+		_show_center(Who.left(net.machine_name_of(peer)), 1.5)
 
 
 ## Host: the LAST machine left (multi_machine games get this only then).
@@ -2068,7 +2069,7 @@ func on_client_left() -> void:
 		_start_level(level)
 		return
 	state = "wait"
-	_show_center("The TV players left - waiting for them to come back…", 0.0)
+	_show_center(Who.left(net.last_left_name) + " - waiting for them to come back…", 0.0)
 
 
 func on_p2_action(action: String, args: Array, index: int = 1) -> void:
@@ -2085,7 +2086,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 			if p.active:
 				p.set_active(false)
 				if not simple:
-					_show_center("PLAYER %d LEFT" % (index + 1), 1.5)
+					_show_center(Who.left(Who.seat(self, index)), 1.5)
 		"continue":
 			_on_continue()
 		"home":
@@ -2121,7 +2122,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 					burst(args[1], p.color, 10, false)
 		"pause":
 			var paused: bool = args[0]
-			_set_pause_banner(paused, "A TV player opened the menu")
+			_set_pause_banner(paused, Who.paused_by(net.machine_name_of(net.sender_peer())))
 			get_tree().paused = paused
 
 

@@ -14,6 +14,7 @@ extends Node
 ## duels, final turns or catch-up. A minigame after every round: the winner gets a STAR.
 
 const Seq := preload("res://games/party_board/sequencer.gd")
+const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
 const Rules := preload("res://games/party_board/rules.gd")
 const BD := preload("res://games/party_board/board_data.gd")
 const Awards := preload("res://core/awards.gd")
@@ -155,7 +156,7 @@ func on_human_joined(slot: int) -> void:
 			if int(main.net.state_get("cur", -1)) == slot and String(main.net.state_get("phase", "")) == "board":
 				takeover[slot] = true
 				if not main.simple:
-					main.fx("toast", ["%s takes over from %s next turn!" % [main.party.name_of(slot), String(pl[slot]["name"])], slot, "person"])
+					main.fx("toast", ["%s takes over from %s next turn!" % [Who.seat(main, slot), String(pl[slot]["name"])], slot, "person"])
 			else:
 				_take_over(slot)
 		return
@@ -172,7 +173,7 @@ func on_human_joined(slot: int) -> void:
 	main.net.state_set("order", order.duplicate())
 	_publish()
 	if not main.simple:
-		main.fx("toast", ["%s joined the party with %d coins!" % [String(r["name"]), avg], slot, "person"])
+		main.fx("toast", ["%s with %d coins!" % [Who.joined(Who.seat(main, slot), "the party"), avg], slot, "person"])
 	main.fx("sfx", ["party_horn", -4.0])
 
 
@@ -199,7 +200,7 @@ func on_human_left(slot: int) -> void:
 		pl[slot]["name"] = _name_for(slot, true)
 		_publish()
 		if not main.simple:
-			main.fx("toast", ["%s left - %s plays for them" % [main.party.name_of(slot), String(pl[slot]["name"])], slot, "person"])
+			main.fx("toast", ["%s - %s plays for them" % [Who.left(Who.seat(main, slot)), String(pl[slot]["name"])], slot, "person"])
 
 
 func _cpu(pid: int) -> bool:

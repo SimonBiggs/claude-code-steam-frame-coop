@@ -22,6 +22,7 @@ extends Node3D
 ## EB_FAST=1: short practice, small waves (tests).
 
 const NetScript := preload("res://core/net.gd")
+const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
 const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
@@ -1363,7 +1364,7 @@ func choose_end(id: String) -> void:
 
 
 func on_pause_changed(paused: bool, by_slot: int) -> void:
-	var why := "Paused by %s" % ("THE MASTER" if by_slot == 0 and vr_rig != null else party.name_of(by_slot))
+	var why := "Paused by %s" % ("THE MASTER" if by_slot == 0 and vr_rig != null else Who.seat(self, by_slot))
 	if vr_rig != null:
 		if paused:
 			vr_banner = HudKit.vr_card(self, vr_rig.camera, "PAUSED", "wrist MENU: carry on", {"width": 1.1})

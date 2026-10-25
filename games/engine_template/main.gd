@@ -14,6 +14,7 @@ extends Node3D
 ## core/hints.gd (how-to-play cards + hints), core/awards.gd (results).
 
 const NetScript := preload("res://core/net.gd")
+const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
 const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
@@ -381,7 +382,7 @@ func on_request(_slot: int, action: String, _args: Array) -> void:
 ## Every machine: the game was paused or resumed (wrist MENU, or a TV pause menu). Nothing in
 ## the paused game processes, so the banners are made to process while paused.
 func on_pause_changed(paused: bool, by_slot: int) -> void:
-	var why := "Paused by %s  -  %s" % [party.name_of(by_slot), "wrist MENU: carry on" if vr_rig != null else "Start: menu"]
+	var why := "Paused by %s  -  %s" % [Who.seat(self, by_slot), "wrist MENU: carry on" if vr_rig != null else "Start: menu"]
 	if vr_rig != null:
 		if paused:
 			vr_banner = HudKit.vr_card(self, vr_rig.camera, "PAUSED", why, {"width": 1.1})
