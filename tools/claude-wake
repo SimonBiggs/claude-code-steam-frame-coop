@@ -12,9 +12,14 @@ one-shot "claude -p" sends a cross-session message to the main session's UNIX so
   claude-wake after-reset --check
                                  same, but never waits: arms (records) the wake-up and exits; sends only once the time
                                  has come. claude-watchdog runs this every 2 minutes, so nothing has to stay running.
-  claude-wake status             what is armed / last fired
+  claude-wake keep-going --check if the main conversation has been idle >= 20 min, no subagent transcript or brepl
+                                 job wrote in 20 min, usage allows (claude-pace recommends >= 1 agent or the weekly
+                                 window is at/below its ideal pace; never at >= 90 %) and no nudge in 45 min: send the
+                                 keep-improving message. Run by claude-watchdog every 2 min.
+  claude-wake status             what is armed / last fired / keep-going decision, plus the log tail
 Options: --dry-run (decide and print, never send). Env: CLAUDE_WAKE_USAGE (usage.json path),
-CLAUDE_WAKE_SESSION (session jsonl path), CLAUDE_WAKE_STATE (state file), CLAUDE_WAKE_NOW (fake epoch, for tests).
+CLAUDE_WAKE_SESSION (session jsonl path), CLAUDE_WAKE_STATE (state file), CLAUDE_WAKE_NOW (fake epoch, for tests),
+CLAUDE_WAKE_SUBAGENTS (subagent dir), CLAUDE_WAKE_CHANNEL (brepl channel), CLAUDE_WAKE_PACE_OUT (fake claude-pace output).
 Fires once per reset (state file ~/.claude/wake-state.json) and never if the main session is busy working normally.
 Log: ~/.claude/wake.log
 """
@@ -237,6 +242,137 @@ def after_reset(check):
     save_state(s)
     return 1
 
+# ---- keep-going: nudge the idle main conversation to start the next improvement (Simon: "please don't stop") ----
+KEEP_IDLE = 20 * 60  # main transcript, subagent transcripts and brepl jobs all quiet this long
+KEEP_EVERY = 45 * 60  # at most one nudge per 45 min
+KEEP_MAX_PCT = 90  # never when either window is at/above this
+KEEP_GOING = ("Keep improving (Simon's standing rule: don't stop). No agents are running and the budget allows: run "
+              "claude-pace, then start the next improvement agent(s) — deeper games with story + procedural generation "
+              "(most-played first, per the TV/Deck logs), Dungeon Delve follow-ups, fixes for anything frustrating in "
+              "the logs — and make sure the continuous deploy steward is running. Then tell Simon one line.")
+CHANNEL = os.environ.get("CLAUDE_WAKE_CHANNEL", f"{HOME}/.cache/brepl/channel.jsonl")
+
+
+def mtime(p):
+    try:
+        return os.stat(p).st_mtime
+    except OSError:
+        return 0.0
+
+
+def active_subagent():
+    """Newest subagent transcript of the main session written within KEEP_IDLE: (name, age secs) or None."""
+    d = os.environ.get("CLAUDE_WAKE_SUBAGENTS") or (session_file()[:-len(".jsonl")] + "/subagents")
+    best = None
+    for f in glob.glob(f"{d}/*.jsonl"):
+        age = now() - mtime(f)
+        if age < KEEP_IDLE and (best is None or age < best[1]):
+            best = (os.path.basename(f), age)
+    return best
+
+
+def active_job():
+    """A brepl background-job channel entry from the last KEEP_IDLE: (source, age secs) or None.
+    Entries carry only a local HH:MM:SS, so ages are taken modulo a day and only when the file itself is fresh."""
+    if now() - mtime(CHANNEL) >= KEEP_IDLE:
+        return None
+    try:
+        with open(CHANNEL, "rb") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - 200_000))
+            lines = f.read().decode("utf-8", "replace").splitlines()
+    except OSError:
+        return None
+    lt = time.localtime(now())
+    tod = lt.tm_hour * 3600 + lt.tm_min * 60 + lt.tm_sec
+    for line in reversed(lines):
+        try:
+            e = json.loads(line)
+            h, m, sec = (int(x) for x in str(e.get("t", "")).split(":"))
+        except Exception:
+            continue
+        age = (tod - (h * 3600 + m * 60 + sec)) % 86400
+        if age >= KEEP_IDLE:
+            break  # older entries only get older
+        if str(e.get("source", "")).startswith("job"):
+            return e["source"], age
+    return None
+
+
+def pace_info():
+    """Parse claude-pace: {'rec': N, '5-hour': (used, ideal), 'weekly': (used, ideal)}."""
+    import re
+    out = os.environ.get("CLAUDE_WAKE_PACE_OUT")
+    if out is None:
+        try:
+            out = subprocess.run([f"{HOME}/.local/bin/claude-pace"], capture_output=True, text=True, timeout=60).stdout
+        except Exception:
+            out = ""
+    info = {}
+    m = re.search(r"RECOMMENDED AGENTS:\s*(\d+)", out)
+    if m:
+        info["rec"] = int(m.group(1))
+    for name in ("5-hour", "weekly"):
+        m = re.search(rf"^{name}: (\d+(?:\.\d+)?)% used.*?ideal now (\d+(?:\.\d+)?)%", out, re.M)
+        if m:
+            info[name] = (float(m.group(1)), float(m.group(2)))
+    return info
+
+
+def keep_going_reason():
+    """None if a nudge should go now, else why not."""
+    s = load(STATE, {})
+    last = s.get("keep_going_at", 0)
+    if now() - last < KEEP_EVERY:
+        return f"nudged {int((now() - last) / 60)} min ago (at most every {KEEP_EVERY // 60} min)"
+    idle = now() - mtime(session_file())
+    if idle < KEEP_IDLE:
+        return f"main session busy (transcript written {int(idle / 60)} min ago)"
+    a = active_subagent()
+    if a:
+        return f"agent active ({a[0]} written {int(a[1] / 60)} min ago)"
+    j = active_job()
+    if j:
+        return f"brepl job active ({j[0]} posted {int(j[1] / 60)} min ago)"
+    u = load(USAGE, {}).get("rate_limits", {})
+    for name, w in u.items():
+        if isinstance(w, dict) and (w.get("used_percentage") or 0) >= KEEP_MAX_PCT:
+            return f"{name} window at {w['used_percentage']}% (>= {KEEP_MAX_PCT}%)"
+    p = pace_info()
+    for name in ("5-hour", "weekly"):
+        if name in p and p[name][0] >= KEEP_MAX_PCT:
+            return f"{name} window at {p[name][0]:.0f}% (>= {KEEP_MAX_PCT}%)"
+    if "rec" not in p:
+        return "could not read claude-pace"
+    wk = p.get("weekly")
+    if p["rec"] >= 1:
+        return None
+    if wk and wk[0] <= wk[1]:
+        return None
+    return f"budget tight (claude-pace recommends 0 agents, weekly {wk[0]:.0f}% vs ideal {wk[1]:.0f}%)" if wk else \
+        "budget tight (claude-pace recommends 0 agents)"
+
+
+def keep_going(check):
+    why = keep_going_reason()
+    if why:
+        print(f"keep-going: no nudge: {why}")
+        return 0
+    s = load(STATE, {})
+    if now() - s.get("keep_going_fail", 0) < 600:
+        print("keep-going: last send failed under 10 min ago; retrying later")
+        return 0
+    log("keep-going: main idle, no agents/jobs, budget allows -> nudging")
+    if send(KEEP_GOING):
+        s = load(STATE, {})
+        s.update(keep_going_at=now(), keep_going_result="sent")
+        save_state(s)
+        return 0
+    s = load(STATE, {})
+    s["keep_going_fail"] = now()
+    save_state(s)
+    return 1
+
 
 def main():
     a = [x for x in sys.argv[1:] if x != "--dry-run"]
@@ -247,12 +383,22 @@ def main():
         return 0 if send(" ".join(a[1:]) or RESUME) else 1
     if a[0] == "after-reset":
         return after_reset("--check" in a)
+    if a[0] == "keep-going":
+        return keep_going("--check" in a)
     if a[0] == "status":
         s = load(STATE, {})
         for k in ("armed", "fired"):
             if s.get(k):
                 print(f"{k}: reset {hm(s[k])} (wake {hm(s[k] + GRACE)})")
+        if s.get("keep_going_at"):
+            print(f"last keep-going nudge: {hm(s['keep_going_at'])} ({s.get('keep_going_result')})")
+        print(f"keep-going now: {keep_going_reason() or 'would nudge'}")
         print(json.dumps(s))
+        try:
+            print("--- " + LOG + " (last 10)")
+            print("".join(open(LOG).readlines()[-10:]), end="")
+        except OSError:
+            pass
         return 0
     print(__doc__)
     return 2
