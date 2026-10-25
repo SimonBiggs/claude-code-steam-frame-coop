@@ -13,6 +13,7 @@ extends Node3D
 
 const MeshKit := preload("res://core/mesh_kit.gd")
 const Creatures := preload("res://core/creatures.gd")
+const ResCache := preload("res://core/res_cache.gd")
 
 const ROOMS := 5
 const ROOM := 9.0  ## room size (square)
@@ -152,10 +153,10 @@ func _add(kind: int, room: int, home: Vector3, node: Node3D, r: float, c: Vector
 
 
 func _build_props() -> void:
-	_pot_mesh = _make_pot()
-	var chest_base := _make_chest_base()
-	_lid_mesh = _make_lid()
-	var flame := _make_flame()
+	_pot_mesh = make_pot()
+	var chest_base := make_chest_base()
+	_lid_mesh = make_lid()
+	var flame := make_flame()
 	for r in ROOMS:
 		var c := center(r)
 		for p in _pot_spots(r):
@@ -218,7 +219,12 @@ func _ring(col: Color) -> MeshInstance3D:
 	return mi
 
 
-func _make_pot() -> ArrayMesh:
+## Shared with the deep floors (cached).
+static func make_pot() -> ArrayMesh:
+	return ResCache.get_or_make("dd_pot_v1", func() -> Resource: return _build_pot()) as ArrayMesh
+
+
+static func _build_pot() -> ArrayMesh:
 	var b := MeshKit.Builder.new()
 	var clay := Color(0.85, 0.5, 0.32)
 	b.sphere(0.17, MeshKit.at(Vector3(0, 0.17, 0), Vector3(1.0, 1.05, 1.0)), clay, 12)
@@ -228,7 +234,12 @@ func _make_pot() -> ArrayMesh:
 	return b.build()
 
 
-func _make_chest_base() -> ArrayMesh:
+## Shared with the deep floors (cached).
+static func make_chest_base() -> ArrayMesh:
+	return ResCache.get_or_make("dd_chest_v1", func() -> Resource: return _build_chest_base()) as ArrayMesh
+
+
+static func _build_chest_base() -> ArrayMesh:
 	var b := MeshKit.Builder.new()
 	var wood := Color(0.6, 0.36, 0.2)
 	var gold := Color(1.0, 0.8, 0.3)
@@ -239,7 +250,12 @@ func _make_chest_base() -> ArrayMesh:
 	return b.build()
 
 
-func _make_lid() -> ArrayMesh:
+## Shared with the deep floors (cached).
+static func make_lid() -> ArrayMesh:
+	return ResCache.get_or_make("dd_lid_v1", func() -> Resource: return _build_lid()) as ArrayMesh
+
+
+static func _build_lid() -> ArrayMesh:
 	var b := MeshKit.Builder.new()
 	var wood := Color(0.66, 0.4, 0.22)
 	var gold := Color(1.0, 0.8, 0.3)
@@ -250,7 +266,12 @@ func _make_lid() -> ArrayMesh:
 	return b.build()
 
 
-func _make_flame() -> ArrayMesh:
+## Shared with the deep floors (cached).
+static func make_flame() -> ArrayMesh:
+	return ResCache.get_or_make("dd_flame_v1", func() -> Resource: return _build_flame()) as ArrayMesh
+
+
+static func _build_flame() -> ArrayMesh:
 	var b := MeshKit.Builder.new()
 	b.sphere(0.09, MeshKit.at(Vector3(0, 0.0, 0), Vector3(1, 1.2, 1)), Color(1.0, 0.55, 0.15), 8, true)
 	b.cone(0.07, 0.22, MeshKit.at(Vector3(0, 0.14, 0)), Color(1.0, 0.85, 0.3), 8, true)

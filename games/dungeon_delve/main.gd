@@ -16,6 +16,11 @@ extends Node3D
 ## - Text: VR gets one short headline on the far wall; the TV shows one short line at most.
 ## Modes as in games/engine_template: local (one shared TV view), host (VR on the Steam Frame,
 ## simulates everything), client (the TV machine: mirrors the host, moves its own heroes).
+## DIFFICULTY: all of the above is GENTLE. The practice room also has an orange BRAVE and a red
+## HEROIC pad: stand on one until it fills and the deep dungeon starts (deep.gd: procedural floors,
+## hearts, knock-outs and revives, keys, puzzles, traps, monsters with tells, three bosses, loot, a
+## shop, unlocks saved between runs). Env DD_MODE=brave|heroic starts there (tests, launchers),
+## DD_FLOOR=n on floor n (0..11), DD_SEED=n a fixed dungeon.
 
 const NetScript := preload("res://core/net.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
@@ -35,6 +40,7 @@ const Monsters := preload("res://games/dungeon_delve/monsters.gd")
 const Hero := preload("res://games/dungeon_delve/hero.gd")
 const VrHands := preload("res://games/dungeon_delve/vr_hands.gd")
 const GhostHand := preload("res://games/dungeon_delve/ghost_hand.gd")
+const Deep := preload("res://games/dungeon_delve/deep.gd")
 
 const GAME_ID := "dungeon_delve"
 const NAMES: Array[String] = ["DUNGEON DELVE", "SLIMES!", "BATS!", "SLIME KING!", "TREASURE!"]
@@ -58,6 +64,7 @@ var sky: SkyKit.SkyRig
 
 var dungeon: Dungeon
 var monsters: Monsters
+var deep: Deep  ## BRAVE / HEROIC (every machine)
 var heroes := {}  ## slot -> Hero (every machine)
 var hands: VrHands
 var ghost: GhostHand
@@ -87,6 +94,8 @@ var bonked := {}  ## slot -> true once they bonked (the "A Bonk!" pill goes away
 var results_ui: Control
 var tv_banner: Control
 var cam_z := 0.0
+var deep_cam := Vector3.ZERO
+var deep_cam_h := 12.0
 var shake := 0.0
 var _moved_pots := {}
 
@@ -124,6 +133,8 @@ func _ready() -> void:
 	awards.define("smasher", "POT SMASHER", "%s pots smashed", "pots")
 	awards.define("pal", "SKELETON PAL", "%s bony rattles", "rattles")
 	awards.define("finder", "TREASURE FINDER", "%s chests opened", "chests")
+	awards.define("helper", "BEST BUDDY", "%s seconds helping friends up", "helps")
+	awards.define("rich", "GOLD DIGGER", "%s gold found", "gold")
 	if OS.has_environment("DUO_JOIN"):
 		net.join_finished.connect(func(ok: bool) -> void: _setup("client" if ok else "local"))
 		net.join(OS.get_environment("DUO_JOIN"))
@@ -146,7 +157,7 @@ func _setup(mode: String) -> void:
 		vr_rig = VrRig.new()
 		vr_rig.move_speed = 1.8
 		vr_rig.turn_mode = "snap"
-		vr_rig.move_filter = func(from: Vector3, to: Vector3) -> Vector3: return dungeon.walk_clamp(from, to, 0.25)
+		vr_rig.move_filter = func(from: Vector3, to: Vector3) -> Vector3: return walk_clamp(from, to, 0.25)
 		add_child(vr_rig)
 		vr_rig.place(Vector3(0.0, 0.0, 2.9), 0.0)
 		hands = VrHands.new()
@@ -174,12 +185,18 @@ func _setup(mode: String) -> void:
 		elif vr_rig != null:
 			split.set_bubble(vr_rig.mirror)
 	party.allow_slot0 = mode != "client" and vr_rig == null
+	deep = Deep.new()
+	deep.name = "Deep"
+	add_child(deep)
+	deep.setup(self)
 	if mode != "client":
 		net.state_set("vr", vr_rig != null)
 		_start_show()
 	else:
 		dungeon.set_open(int(net.state_get("open", 0)))
 		dungeon.set_used(int(net.state_get("used", 0)))
+		for k in net.state_all():
+			deep.on_state(String(k), net.state_get(String(k)))  # a late joiner: build the deep floor now
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	ready_to_play = true
 	print("Dungeon Delve: %s mode%s" % [mode, " with a VR knight" if vr_rig != null else ""])
@@ -188,6 +205,9 @@ func _setup(mode: String) -> void:
 # --- The show (host / local) ---------------------------------------------------------------------
 
 func _start_show() -> void:
+	if deep.active:
+		deep.stop()
+	net.state_set("mode", "gentle")
 	awards.reset()
 	if vr_rig != null:
 		awards.set_player(0, "KNIGHT")
@@ -218,6 +238,20 @@ func _start_show() -> void:
 	for s in heroes:
 		_warp_hero(int(s), at)
 	_enter_room(first)
+	if OS.has_environment("DD_MODE") and not has_meta("deep_mode_started"):
+		set_meta("deep_mode_started", true)
+		var dm := OS.get_environment("DD_MODE")
+		if dm in ["brave", "heroic"]:
+			deep.start_run(dm)
+
+
+## Bodies stay inside whichever dungeon is on (gentle rooms or a deep floor).
+func walk_clamp(from: Vector3, to: Vector3, r: float) -> Vector3:
+	if deep != null and deep.active:
+		if vr_rig != null and r == 0.25 and not deep._alive(0) and deep.stats.has(0):
+			return from  # a knocked-out knight waits for a friend
+		return deep.view.clamp(from, to, r)
+	return dungeon.walk_clamp(from, to, r)
 
 
 func _enter_room(r: int) -> void:
@@ -283,8 +317,15 @@ func _open_treasure(id: int) -> void:
 
 
 func _results() -> void:
-	var data := awards.results({"title": "TREASURE!", "style": "victory", "score_stat": "bops",
-		"score_format": "%d BOPS", "continue": "Again!"})
+	end_results("TREASURE!", "victory", "")
+
+
+## Host: the results screen (the gentle treasure, or the end of a deep run).
+func end_results(title: String, style: String, subtitle: String, team: Array = []) -> void:
+	var opts := {"title": title, "style": style, "score_stat": "bops", "score_format": "%d BOPS", "continue": "Again!", "stats": team}
+	if subtitle != "":
+		opts["subtitle"] = subtitle
+	var data := awards.results(opts)
 	net.state_set("results", data)
 	net.state_set("phase", "results")
 	phase_t = 0.0
@@ -295,6 +336,14 @@ func _results() -> void:
 func _host_step(delta: float) -> void:
 	var phase := String(net.state_get("phase", ""))
 	var room := int(net.state_get("room", 0))
+	if deep.active and phase != "results":
+		deep.host_step(delta)
+		return
+	if phase in ["practice", "cleared"] and room == 0 and not deep.active:
+		deep.lobby_step(delta)
+	if phase == "results" and vr_rig != null and phase_t > 4.0 and (vr_rig.a_pressed() or vr_rig.trigger_pressed()) and deep.active:
+		on_request(0, "again", [])
+		return
 	phase_t += delta
 	for k in poke_cd.keys():
 		poke_cd[k] = float(poke_cd[k]) - delta
@@ -527,6 +576,9 @@ func _step_pots(delta: float) -> void:
 
 ## Host / local: a player asked for something (from any machine).
 func on_request(slot: int, action: String, args: Array) -> void:
+	if action != "again" and deep.active:
+		deep.on_request(slot, action, args)
+		return
 	match action:
 		"bonk":
 			if args.size() >= 2:
@@ -538,6 +590,9 @@ func on_request(slot: int, action: String, args: Array) -> void:
 
 ## Host: a hero bonks what's in front of them (generous: anything within reach, low enough).
 func _bonk(slot: int, pos: Vector3, yaw: float) -> void:
+	if deep.try_hat(slot, pos + Vector3(sin(yaw), 0.0, cos(yaw)) * 0.6):
+		net.event("bonk", [slot])
+		return
 	net.event("bonk", [slot])
 	if heroes.has(slot) and not party.is_local(slot):
 		(heroes[slot] as Hero).bonk_anim()
@@ -591,8 +646,12 @@ func _process(delta: float) -> void:
 	for h in heroes.values():
 		(h as Hero).animate(delta)
 	monsters.animate(delta)
+	deep.process(delta)
+	if net.mode != "client":
+		deep.host_visuals()
 	var focus := int(net.state_get("room", 0))
-	dungeon.animate(delta, focus)
+	if not deep.active:
+		dungeon.animate(delta, focus)
 	_animate_arrow(delta)
 	_headline(delta)
 	var big: Node3D = dungeon.props[dungeon.big_id]["node"]
@@ -616,6 +675,8 @@ func _sync_heroes() -> void:
 			add_child(h)
 			h.setup(s, party.color_of(s))
 			var sp: Vector3 = net.state_get("spawn", Dungeon.entrance(0))
+			if deep.active and not deep.f.is_empty():
+				sp = deep.FloorGen.room_center(deep.f, maxi(0, deep._focus_room()))
 			h.position = sp + _spawn_offset(s)
 			heroes[s] = h
 			if net.mode != "client":
@@ -635,6 +696,9 @@ func _step_owned(delta: float) -> void:
 		var h: Hero = heroes[s]
 		h.owned = party.is_local(int(s))
 		if not h.owned:
+			continue
+		if deep.active:
+			deep.owned_input(delta, h, int(s))
 			continue
 		var mv := party.stick(int(s), "move") if can_move else Vector2.ZERO
 		var dir := Vector3(mv.x, 0.0, mv.y)
@@ -668,6 +732,19 @@ func _on_player_joined(slot: int, _device: int) -> void:
 
 
 func _tv_camera(delta: float) -> void:
+	if deep.active and not deep.f.is_empty():
+		var ct: Array = deep.camera_target()
+		var want_at: Vector3 = ct[0]
+		var hgt: float = ct[1]
+		deep_cam = deep_cam.lerp(want_at, 1.0 - exp(-3.0 * delta)) if deep_cam.distance_to(want_at) < 20.0 else want_at
+		deep_cam_h = lerpf(deep_cam_h, hgt, 1.0 - exp(-2.0 * delta))
+		var cam2 := split.shared_camera()
+		var p2 := deep_cam + Vector3(0.0, deep_cam_h, deep_cam_h * 0.5)
+		cam2.global_transform = Transform3D(UiKit.face(deep_cam + Vector3(0.0, 0.0, -0.3) - p2), p2)
+		shake = maxf(0.0, shake - delta * 2.0)
+		if shake > 0.0:
+			cam2.global_position += Vector3(randf_range(-1, 1), randf_range(-1, 1), 0.0) * shake * 0.15
+		return
 	var zs := 0.0
 	var n := 0
 	for h in heroes.values():
@@ -789,6 +866,17 @@ func _build_blink() -> void:
 	vr_rig.camera.add_child(mi)
 
 
+## VR: a short red flash when the knight gets hit (deep).
+func hurt_flash() -> void:
+	if blink_mat == null:
+		return
+	var tw := create_tween()
+	blink_mat.albedo_color = Color(0.8, 0.05, 0.05, 0.0)
+	tw.tween_property(blink_mat, "albedo_color:a", 0.35, 0.05)
+	tw.tween_property(blink_mat, "albedo_color:a", 0.0, 0.3)
+	tw.tween_callback(func() -> void: blink_mat.albedo_color = Color(0, 0, 0, 0))
+
+
 func blink(then: Callable) -> void:
 	if blink_mat == null:
 		then.call()
@@ -818,6 +906,10 @@ func show_headline(text: String, secs: float = 3.0) -> void:
 		add_child(headline)
 	var c := Dungeon.center(int(net.state_get("room", 0)))
 	headline.position = Vector3(0.0, 3.3, c.z - Dungeon.HALF + 0.3)
+	if deep != null and deep.active and not deep.f.is_empty():
+		var fr: int = deep._focus_room()
+		var rc: Vector3 = deep.FloorGen.room_center(deep.f, maxi(fr, 0))
+		headline.position = rc + Vector3(0.0, 2.6, -deep.FloorGen.HALF + 0.2)  # high on the room's far wall
 	headline.text = text
 	headline.visible = true
 	headline_t = secs
@@ -865,6 +957,12 @@ func _refresh_hud() -> void:
 
 func _update_pill() -> void:
 	var want := ""
+	if deep.active:
+		pill.visible = false
+		pill_text = "-"
+		key_row.get_parent().visible = false
+		return
+	key_row.get_parent().visible = true
 	if party.local_slots().is_empty():
 		want = "Join"
 	else:
@@ -885,6 +983,8 @@ func _update_pill() -> void:
 # --- Store, results, pause -----------------------------------------------------------------------
 
 func _on_state_changed(key: String, value: Variant) -> void:
+	if deep != null:
+		deep.on_state(key, value)
 	match key:
 		"open":
 			dungeon.set_open(int(value))
@@ -981,7 +1081,7 @@ func make_snapshot() -> Array:
 	for id in moving:
 		var pp: Vector3 = (dungeon.props[id]["node"] as Node3D).global_position
 		pots.append_array([float(id), pp.x, pp.y, pp.z])
-	return [pose, slots, pos, yaw, flags, monsters.pack(), pots]
+	return [pose, slots, pos, yaw, flags, monsters.pack(), pots, deep.deep_pack()]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -1013,9 +1113,14 @@ func apply_snapshot(s: Array) -> void:
 		if not now.has(id):
 			(dungeon.props[id]["node"] as Node3D).position = dungeon.props[id]["home"]
 	_moved_pots = now
+	if s.size() > 7:
+		deep.deep_unpack(s[7])
 
 
 func apply_event(kind: String, args: Array) -> void:
+	if kind.begins_with("d_"):
+		deep.apply_event(kind, args)
+		return
 	match kind:
 		"sfx":
 			sfx.play_at(String(args[0]), args[1], float(args[2]), float(args[3]))

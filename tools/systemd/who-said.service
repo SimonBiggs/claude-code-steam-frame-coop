@@ -1,0 +1,22 @@
+[Unit]
+Description=Who is talking: Deck-mic differential speaker attribution + per-Deck transcripts (asked for by Simon 2026-10-24)
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/GodotProjects/duo-arena
+ExecStart=%h/.local/bin/who-said --serve
+StandardOutput=append:%h/GodotProjects/duo-arena/.dev/who/who-said.out
+StandardError=append:%h/GodotProjects/duo-arena/.dev/who/who-said.out
+Restart=always
+RestartSec=10
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin
+Environment=OMP_NUM_THREADS=2 WHO_ASR=small.en WHO_ASR_THREADS=2
+# Family games first: low priority, batch scheduling, capped CPU (Whisper threads go SCHED_IDLE themselves)
+Nice=15
+CPUSchedulingPolicy=batch
+CPUQuota=150%
+IOSchedulingClass=idle
+MemoryHigh=1500M
+
+[Install]
+WantedBy=default.target

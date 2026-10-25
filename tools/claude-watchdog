@@ -3,7 +3,14 @@
 # If the main conversation (claude-main --running) isn't running (crash, reboot, kwin taking the terminal
 # down), resume it in a detached tmux session "claude" (claude-main tells Claude to re-arm its monitors). Run by claude-watchdog.timer every 2 minutes.
 # Simon (2026-10-24): always THE main conversation (~/.claude/main-session), even when other Claude sessions are open.
-"$HOME/.local/bin/claude-main" --running >/dev/null && exit 0
+if "$HOME/.local/bin/claude-main" --running >/dev/null; then
+  # Usage-limit wake-up (Simon, 2026-10-25: "always auto schedule a wake back up for just after a token limit reset").
+  # Cloud send_later is refused for the main (Remote Control) session, so claude-wake does it locally: it arms when a
+  # window hits 95 % or the main turn ends on a rate-limit error, and sends the resume message once, ~2 min after the
+  # reset, unless the session is already working. Quick no-op otherwise; logs to ~/.claude/wake.log.
+  timeout 330 "$HOME/.local/bin/claude-wake" after-reset --check >/dev/null 2>&1
+  exit 0
+fi
 cd ~ || exit 1
 /usr/bin/tmux new-session -d -s claude "$HOME/.local/bin/claude-main"
 echo "$(date -Is) restarted the main Claude session in tmux session 'claude'" >> ~/.claude/watchdog.log
