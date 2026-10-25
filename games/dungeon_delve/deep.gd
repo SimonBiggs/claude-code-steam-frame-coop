@@ -227,6 +227,12 @@ func _build_lobby() -> void:
 
 
 func _animate_lobby(delta: float) -> void:
+	if pad_rings.size() != PADS.size() or pad_labels.size() != PADS.size():
+		# Pads added by a hot reload (the TV runs the game while it's updated): build them again now.
+		lobby.queue_free()
+		pad_rings.clear()
+		pad_labels.clear()
+		_build_lobby()
 	var show_pads: bool = not active and String(net.state_get("phase", "")) in ["practice", "cleared"] and int(net.state_get("room", 0)) == 0
 	lobby.visible = show_pads or (not active and int(net.state_get("room", 0)) == 0)
 	var fills: Array = net.state_get("d_pads", [0.0, 0.0])

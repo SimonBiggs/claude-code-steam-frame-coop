@@ -70,6 +70,17 @@ func _ready() -> void:
 		elif not main.net.has_vr:
 			kit.join_bot(main.party))  # a flat host: one pad player here, in slot 0
 	kit.every(4.0, _report)
+	if not client and deep_mode == "":
+		kit.at(2.0, "old save + hot-reloaded pads", func() -> void:
+			# An old save from before the deep dungeon had most keys (and a pad the lobby didn't build yet).
+			main.save.data["deep"] = {"best": {"brave": 2}}
+			var pd: Dictionary = main.deep.progress()
+			kit.assert_true(pd.has("bosses") and pd.has("hat") and pd.has("runs") and pd.has("wins"), "an old save gets every deep key")
+			kit.assert_eq(main.deep.unlocked_hats()[0], "none", "hats work with an old save")
+			main.deep.perks()
+			main.deep.pad_rings.erase("daily")
+			main.deep.process(0.016)
+			kit.assert_true(main.deep.pad_rings.has("daily"), "a pad added by a hot reload gets built"))
 	kit.every(0.25, _watch)
 	var end := 150.0 if host else (140.0 if client else 170.0)
 	if OS.has_environment("BOT_END"):
@@ -338,8 +349,10 @@ func _checks() -> void:
 		_deep_checks(mode)
 		return
 	kit.assert_eq(outside, 0, "%s: heroes stayed inside the dungeon" % mode)
-	if mode != "host":
+	if mode == "local":
 		kit.assert_eq(main.party.player_count(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
+	elif mode == "client":  # (a flat host seats its own player too: count only this machine's)
+		kit.assert_eq(main.party.local_slots().size(), want, "client: all %d TV players here are seated" % want)
 	if mode == "client":
 		kit.assert_true(max_mons >= 2, "client mirrors the monsters (%d)" % max_mons)
 		kit.assert_true(int(main.net.state_get("open", 0)) >= 2 or saw_results or again_sent, "client saw gates open")
