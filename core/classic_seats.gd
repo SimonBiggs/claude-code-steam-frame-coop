@@ -432,6 +432,52 @@ func deck_solo(solo: int = 0) -> void:
 	me.joy = pads[0] if pads.size() > 0 else -1
 	if me.joy >= 0 and jo is Dictionary:
 		jo[me.joy] = solo
+	# The Deck's controls may show up a moment AFTER this (Godot lists joypads a frame or two after start, a pad
+	# reconnecting after sleep): the first pad to connect while the solo seat has none is the Deck's, not a friend
+	# who should get the second seat (two views on one Deck, tests/deck_bot.gd).
+	_deck_solo_slot = solo
+	_deck_remember_seats.call_deferred()  # after the game finished setting up (some keep a helper seat active)
+	if not Input.joy_connection_changed.is_connected(_deck_pad_changed):
+		Input.joy_connection_changed.connect(_deck_pad_changed)
+	if _cb.has("layout"):
+		_cb["layout"].call()
+	else:
+		_main_call("_layout_views")
+
+
+var _deck_solo_slot := -1
+var _deck_seated := {}  # seat index -> true: active once the Deck-alone setup was done
+
+
+func _deck_remember_seats() -> void:
+	_deck_seated.clear()
+	if main != null and is_instance_valid(main):
+		for p in main.players:
+			if p.active:
+				_deck_seated[int(p.index)] = true
+
+
+func _deck_pad_changed(device: int, connected: bool) -> void:
+	if connected:
+		_deck_claim.call_deferred(device)  # after the game's own handler (connected earlier) placed it
+
+
+func _deck_claim(device: int) -> void:
+	if _deck_solo_slot < 0 or main == null or not is_instance_valid(main) or not deck_alone():
+		return
+	var me = player(_deck_solo_slot)
+	if me == null or int(me.joy) >= 0:
+		return
+	for p in main.players:
+		if p != me and int(p.joy) == device:
+			p.joy = -1  # the game handed it to another seat: that seat sits out again, as deck_solo left it
+			if p.active and p.index != _deck_solo_slot and not _deck_seated.has(int(p.index)):
+				p.set_active(false)
+				_main_call("on_player_activity_changed", [p])
+	me.joy = device
+	var jo = main.get("joy_owner")
+	if jo is Dictionary:
+		jo[device] = _deck_solo_slot
 	if _cb.has("layout"):
 		_cb["layout"].call()
 	else:

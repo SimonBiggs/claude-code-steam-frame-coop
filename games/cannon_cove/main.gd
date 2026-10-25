@@ -1075,7 +1075,11 @@ func _poll_joins(delta: float) -> void:
 	join_t -= delta
 	if game_over or join_t > 0.0 or get_tree().paused or net.mode == "host":
 		return
-	for id in Input.get_connected_joypads():
+	var ids: Array = Input.get_connected_joypads()
+	for p in players:  # pads handed to a seat that sits out (a Deck alone: P2 holds a friend's pad) count too
+		if p.joy >= 0 and not ids.has(p.joy):
+			ids.append(p.joy)
+	for id in ids:
 		if not (Input.is_joy_button_pressed(id, JOY_BUTTON_A) or Input.is_joy_button_pressed(id, JOY_BUTTON_X)):
 			continue
 		var owner := device_owner(id)
@@ -1087,6 +1091,8 @@ func _poll_joins(delta: float) -> void:
 			join_t = 1.0
 			players[owner].set_meta("want_join", true)  # the host hasn't answered yet: ask again
 			seats.ask_soon()
+		elif not players[owner].active and _is_local_flat(players[owner]):
+			_join_player(players[owner], id)  # local: the seat holding this pad sat out (a Deck alone): it joins
 		return
 	if net.mode == "client":
 		var keys2 := Input.is_physical_key_pressed(KEY_ENTER) or Input.is_physical_key_pressed(KEY_SHIFT) or Input.is_physical_key_pressed(KEY_SLASH)

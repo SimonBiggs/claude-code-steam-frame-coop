@@ -38,7 +38,7 @@ func _ready() -> void:
 			kit.allow_pause = true
 			_press("start"))
 		kit.at(t0 + 6.6, "paused?", func() -> void:
-			kit.assert_true(get_tree().paused and main.tv_banner != null and main.tv_banner.visible, "Start pauses and shows the banner")
+			kit.assert_true(get_tree().paused and main.tv_banner != null and not main.tv_banner.visible, "Start pauses and shows the banner (on_pause_changed made the banner; the open pause menu alone says PAUSED)")
 			_press("start"))
 		kit.at(t0 + 7.2, "resumed?", func() -> void:
 			kit.assert_true(not get_tree().paused, "Start again resumes everyone")

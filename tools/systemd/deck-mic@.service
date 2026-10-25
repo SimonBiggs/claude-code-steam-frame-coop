@@ -1,0 +1,12 @@
+[Unit]
+Description=Rolling 2-hour raw mic stream from Steam Deck %i (asked for by Simon 2026-10-24)
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 %h/.local/bin/deck-mic %i
+Restart=always
+RestartSec=30
+Nice=10
+
+[Install]
+WantedBy=default.target
