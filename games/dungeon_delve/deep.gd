@@ -12,7 +12,11 @@ extends Node3D
 ##    together; a cracked wall hides a treasure room (3 hits or a bomb); traps: spikes, boulders,
 ##    crumbly floor. The stairs fill like the pads: stand on them together.
 ##  - Loot (loot.gd): gold, potions (Y), bombs (B), abilities on X (dash, shield bash, bow), heart
-##    containers; the shop sells more, plus SWORD +1 and a LUCKY CHARM.
+##    containers; the shop sells more, plus SWORD +1 and a LUCKY CHARM. Each boss leaves three
+##    treasures: everyone picks ONE (that's your build for the next zone).
+##  - Alone on BRAVE (a Deck on its own): one more heart, a lucky charm on every floor, a few less
+##    monsters per room. Attacks soft-aim at the nearest monster in reach. HEROIC opens after the
+##    Slime King has been beaten on BRAVE.
 ##  - The VR knight: a real sword that hits for 2, swats goo balls and boss ORBS back (big damage),
 ##    BLOCKS sweeps and shoves when the blade is between him and the hit; bosses aim at him a lot.
 ##    His hearts sit on the blade. Touch pickups, chests, levers and shop items with either hand.
@@ -108,6 +112,8 @@ var tally := {"kills": 0, "floors": [], "bosses": 0, "wipes": 0, "revives": 0, "
 	"puzzles": 0, "bought": 0, "potions": 0, "hurts": 0, "blocks": 0, "reflects": 0, "rooms": 0, "downs": 0,
 	"pickups": 0, "checkpoints": 0, "zones": {}, "bombs": 0, "abilities": 0, "traps": 0, "chests": 0, "by": {}}
 var src := ""  ## what is hurting someone right now (tests: tally["by"])
+var relic_group := 0
+var relic_taken := {}  ## group -> {slot: true}: boss treasures, one each
 
 # Every machine.
 var pick_nodes := {}
@@ -1010,7 +1016,17 @@ func _boss_down(kind: int, at: Vector3) -> void:
 	for s in stats:
 		if bool((stats[s] as Dictionary)["down"]):
 			_revive(int(s))
-	_spawn_pick(Loot.MAXHEART, at + Vector3(0.0, 0.6, 1.0), true)
+	# The boss's treasure: three things, everyone picks ONE (your build: harder hits, more hearts, ...).
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash([seed_v, zone, "relic"])
+	var pool: Array = [Loot.SWORD, Loot.MAXHEART, Loot.CHARM, Loot.BOMBS, Loot.ABILITIES[rng.randi_range(0, 2)]]
+	FloorGen._shuffle(pool, rng)
+	relic_group += 1
+	relic_taken[relic_group] = {}
+	for k in 3:
+		_spawn_pick(int(pool[k]), at + Vector3(-1.6 + k * 1.6, 0.35, 1.6), false)
+		(pickups[next_pick - 1] as Dictionary)["relic"] = relic_group
+	net.event("d_banner", ["PICK ONE!", "level"])
 	if zone >= FloorGen.ZONE_COUNT - 1:
 		phase_t = 0.0
 		get_tree().create_timer(4.0).timeout.connect(func() -> void:
@@ -1564,6 +1580,8 @@ func _spawn_pick(k: int, p: Vector3, pop: bool) -> void:
 
 func _pickups_step(delta: float, alive: Array) -> void:
 	for id in pickups.keys():
+		if not pickups.has(id):
+			continue  # (a boss treasure group vanished together)
 		var pk: Dictionary = pickups[id]
 		pk["t"] = float(pk["t"]) + delta
 		var p: Vector3 = pk["p"]
@@ -1605,7 +1623,19 @@ func _pickups_step(delta: float, alive: Array) -> void:
 				if d > 1.5:
 					nope.erase(s)
 				continue
+			var rg := int(pk.get("relic", 0))
+			if rg > 0 and (relic_taken.get(rg, {}) as Dictionary).has(s):
+				continue  # already took one of these
 			if d < 0.7 and _collect(s, k, p):
+				if rg > 0:
+					(relic_taken[rg] as Dictionary)[s] = true
+					tally["relics"] = int(tally.get("relics", 0)) + 1
+					if (relic_taken[rg] as Dictionary).size() < _players().size():
+						break  # the others still get to choose
+					for id2 in pickups.keys():
+						if int((pickups[id2] as Dictionary).get("relic", 0)) == rg:
+							pickups.erase(id2)
+					break
 				pickups.erase(id)
 				break
 

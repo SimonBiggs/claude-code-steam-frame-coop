@@ -386,6 +386,7 @@ func _deep_checks(mode: String) -> void:
 	kit.assert_true(int(pd["runs"]) >= 1, "%s: the run was saved (%s)" % [mode, str(pd)])
 	if goal == "zone":
 		kit.assert_true(int(t["bosses"]) >= 1, "%s: the boss was beaten" % mode)
+		kit.assert_true(int(t.get("relics", 0)) >= mini(1, main.heroes.size()), "%s: heroes each picked one boss treasure (%d)" % [mode, int(t.get("relics", 0))])
 		kit.assert_true(int((pd["bosses"] as Dictionary).get(deep_mode, 0)) & 1 != 0, "%s: the boss win was saved (perk + hat unlocked)" % mode)
 		kit.assert_true(dp.unlocked_hats().has("wizard") and int(dp.perks()["potion"]) == 1, "%s: the Slime King unlocks the wizard hat and a starting potion" % mode)
 		kit.assert_true(int(t["bought"]) >= 1 or main.heroes.is_empty(), "%s: something was bought in a shop (%d)" % [mode, int(t["bought"])])
