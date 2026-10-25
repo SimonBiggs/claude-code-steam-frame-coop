@@ -104,7 +104,7 @@ const SOLO := {
 	"bee_garden": 2, "block_builders": 2, "dodge_ball": 2, "dragon_rider": 2, "duo_arena": 2, "elemental_bender": 2,
 	"ghost_lantern": 2, "giants_table": 2, "kart_race": 2, "kitchen_rush": 2, "marble_maze": 2, "obstacle_rush": 2,
 	"party_board": 2, "penalty_shootout": 2, "rocket_workshop": 2, "roller_coaster": 2, "snowball_blitz": 2,
-	"snowman_maker": 2, "starship_crew": 2, "treasure_dig": 2,
+	"snowman_maker": 2, "starship_crew": 2, "treasure_dig": 2, "paper_planes": 2,
 	"balloon_pop": 1, "bubble_bath": 1, "cannon_cove": 1, "crystal_saga": 1, "dungeon_delve": 1, "fishing_lake": 1,
 	"fruit_catch": 1, "mech_titans": 1, "mini_golf_party": 1, "rhythm_band": 1,
 	"sheep_round_up": 1, "tiny_town_tycoon": 1, "tower_stack": 1, "whack_a_mole": 1, "quiz_show": 1, "mystery_manor": 1,
