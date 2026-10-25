@@ -1,0 +1,17 @@
+#!/bin/bash
+# duo-update-ship [SRC] [GAME_DIR]: on a signer Deck (Simon's), ship the code in a git checkout SRC (default
+# ~/GodotProjects/duo-arena) into this Deck's arcade GAME_DIR (default ~/DuoArena/game) and sign it as a LAN update.
+# The running arcade hot-reloads it, and the next lobby it's in passes it on (newest wins). Like duo-deploy: only
+# core/ games/ arcade/ tests/ arcade.tscn (+ the guard addon) are copied. Commit + push SRC first, so the Steam
+# Machine's repo (the source of truth) has the same code: an unpushed change made here is overwritten the next time
+# the Steam Machine deploys something newer.
+set -euo pipefail
+SRC="${1:-$HOME/GodotProjects/duo-arena}"; G="${2:-$HOME/DuoArena/game}"
+[ -f "$SRC/project.godot" ] && [ -f "$G/project.godot" ] || { echo "usage: duo-update-ship [SRC checkout] [GAME_DIR]" >&2; exit 2; }
+if [ -d "$SRC/.git" ] && [ -n "$(git -C "$SRC" status --porcelain -- core games arcade tests arcade.tscn)" ]; then
+  echo "NOT shipping: $SRC has uncommitted changes (commit and push them to the Steam Machine first)" >&2; exit 1
+fi
+for d in core games arcade tests; do rsync -a --delete --exclude '*.uid' --exclude '.*' "$SRC/$d/" "$G/$d/"; done
+cp "$SRC/arcade.tscn" "$G/arcade.tscn"
+[ -d "$SRC/addons/lan_update" ] && rsync -a --delete --exclude '*.uid' "$SRC/addons/lan_update/" "$G/addons/lan_update/"
+duo-update-bundle "$G"
