@@ -134,7 +134,8 @@ var _hud_t := 0.0
 var _prev_reboot := false
 var parade: Node3D  ## SIMPLE_MODE: the kaiju friends made so far, waving from the hills
 var parade_key := ""
-var round_t0 := 0.0  ## host: when this round's fight began (telemetry)
+var test_start_round := 0  ## bots (SIMPLE_MODE): start at this round (3+ = the made rounds)
+var story_count := 0  ## story pictures shown on this machine (bots)
 
 
 func _ready() -> void:
@@ -297,7 +298,7 @@ func _setup(mode: String) -> void:
 	if mode != "client" and SIMPLE_MODE:
 		net.state_set("run_seed", Seeded.fresh_seed())  # this session's made rounds (roundgen.gd)
 		_publish_friends()
-		_launch(0)  # straight into round 1 (no hangar)
+		_launch(test_start_round)  # straight into round 1 (no hangar)
 
 
 func _mask_mirror(vp: SubViewport, mask: int) -> void:
@@ -402,6 +403,7 @@ func story(beat: Dictionary) -> void:
 
 
 func show_story(beat: Dictionary) -> void:
+	story_count += 1
 	var opts := beat.duplicate()
 	opts["color"] = Color.html(String(beat.get("color", "ffd25a")))
 	opts["sound"] = String(beat.get("sound", "ui_notify"))
