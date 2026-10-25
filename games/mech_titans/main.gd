@@ -64,9 +64,9 @@ const Creatures := preload("res://core/creatures.gd")
 const Seeded := preload("res://core/seeded.gd")
 const StoryCard := preload("res://core/story_card.gd")
 const Telemetry := preload("res://core/telemetry.gd")
-## Where the kaiju friends stand and cheer (north hills, beyond the city), up to this many.
+## Where the kaiju friends stand and cheer (just outside the east and west edges), up to this many.
 const PARADE_MAX := 8
-const PARADE_Z := -84.0
+const PARADE_X := 68.0
 
 const SIMPLE_MODE := Data.SIMPLE_MODE
 const CHEER_TIME := 5.5  ## SIMPLE_MODE: seconds of cheering between rounds
@@ -132,7 +132,7 @@ var vr_results: Node
 var turn_mode := "smooth"
 var _hud_t := 0.0
 var _prev_reboot := false
-var parade: Node3D  ## SIMPLE_MODE: the kaiju friends made so far, waving from the hills
+var parade: Node3D  ## SIMPLE_MODE: the kaiju friends made so far, waving from the city's edges
 var parade_key := ""
 var test_start_round := 0  ## bots (SIMPLE_MODE): start at this round (3+ = the made rounds)
 var story_count := 0  ## story pictures shown on this machine (bots)
@@ -370,9 +370,10 @@ func _build_parade(list: Array) -> void:
 		var m := Creatures.monster(String(info["monster"]), opts)
 		var h := maxf(0.2, Creatures.height_of(m))
 		m.scale = Vector3.ONE * (6.0 / h)
-		var x := (float(i) - float(list.size() - 1) * 0.5) * 13.0
-		m.position = Vector3(x, 0.0, PARADE_Z - absf(x) * 0.15)
-		m.rotation.y = 0.0  # creatures face +Z: towards the city and the Titan
+		# Along the east and west edges of the city, facing in (the Titan and the planes see them).
+		var side := -1.0 if i % 2 == 0 else 1.0
+		m.position = Vector3(side * PARADE_X, 0.0, 24.0 - 15.0 * float(i / 2))
+		m.rotation.y = -side * PI * 0.5  # creatures face +Z: turn them towards the middle
 		parade.add_child(m)
 		var a: Variant = Creatures.anim(m)
 		if a != null:

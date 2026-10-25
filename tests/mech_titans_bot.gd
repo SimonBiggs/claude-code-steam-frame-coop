@@ -129,7 +129,7 @@ func _simple_timeline(t0: float) -> void:
 		kit.at(t0 + 1.0, "the VR pilot pokes the cockpit toys", func() -> void:
 			for toy in ["button", "horn", "bobble", "dice", "wiper"]:
 				_pokes.append([toy, 0.5]))
-	if not client:
+	if not client and made_round < 0:  # (a made round may be on the moon: no trees)
 		kit.at(40.0, "the Titan picks up a tree and a building wobbles", func() -> void:
 			var f: Vector3 = main.mech.fist_world(1)
 			var i: int = main.toys._tree_near(f, 400.0)

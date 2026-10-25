@@ -23,9 +23,9 @@ const BOSSES := {"downtown": ["lizard", "jelly", "eel"], "harbour": ["eel", "jel
 	"snowy": ["moth", "jelly", "eel"], "volcano": ["lizard_queen", "lizard", "jelly"], "moon": ["jelly", "eel", "moth"]}
 const MINIS := {"downtown": "slimelet", "harbour": "jellylet", "powerplant": "batlet", "snowy": "mothlet", "volcano": "froglet", "moon": "slimelet"}
 ## Colour variants: [name word, colour, second colour].
-const PAINTS: Array = [["PINK", Color(1.0, 0.5, 0.75), Color(1.0, 0.85, 0.95)], ["BLUE", Color(0.4, 0.6, 1.0), Color(0.8, 0.9, 1.0)],
-	["MINTY", Color(0.45, 0.9, 0.7), Color(0.9, 1.0, 0.85)], ["SUNNY", Color(1.0, 0.8, 0.3), Color(1.0, 0.95, 0.7)],
-	["PURPLE", Color(0.65, 0.45, 0.95), Color(0.9, 0.8, 1.0)], ["", Color(), Color()]]
+const PAINTS: Array = [["PINK", Color(1.0, 0.45, 0.72), Color(1.0, 0.68, 0.85)], ["BLUE", Color(0.35, 0.55, 1.0), Color(0.6, 0.78, 1.0)],
+	["MINTY", Color(0.35, 0.88, 0.62), Color(0.65, 0.98, 0.8)], ["SUNNY", Color(1.0, 0.78, 0.2), Color(1.0, 0.9, 0.5)],
+	["PURPLE", Color(0.62, 0.4, 0.95), Color(0.8, 0.66, 1.0)], ["", Color(), Color()]]
 const GOLDEN := ["GOLDEN", Color(1.0, 0.82, 0.25), Color(1.0, 0.97, 0.75)]
 const HP_MIN := 0.4
 const HP_MAX := 0.95
