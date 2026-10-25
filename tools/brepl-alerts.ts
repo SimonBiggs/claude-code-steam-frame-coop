@@ -204,7 +204,13 @@ export function startAll() {
     const band = (p: number) => (p >= 90 ? 90 : p >= 75 ? 75 : p >= 50 ? 50 : 0);
     const parts = [["5-hour", u.rate_limits?.five_hour?.used_percentage], ["weekly", u.rate_limits?.seven_day?.used_percentage]]
       .filter(([, p]) => band(p ?? 0)).map(([n, p]) => `${n} ${band(p)}%+ used (${p}%)`);
-    return parts.length ? `usage: ${parts.join(", ")}` : null;
+    if (!parts.length) return null;
+    // Simon: always schedule a wake-up for just after a limit reset, so work resumes by itself.
+    const five = u.rate_limits?.five_hour;
+    const r = five?.resets_at ?? five?.reset_at;
+    const when = r ? new Date(typeof r === "number" ? (r < 1e12 ? r * 1000 : r) : r).toISOString() : "see claude-usage";
+    const wake = (five?.used_percentage ?? 0) >= 75 ? ` → make sure a send_later wake-up exists for ~2 min after the reset (${when})` : "";
+    return `usage: ${parts.join(", ")}${wake}`;
   });
 
   // Any process crashing (kwin, Godot, Steam...), and the kernel killing things for memory.

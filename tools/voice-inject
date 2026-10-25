@@ -10,6 +10,10 @@ new end instead of replaying old lines.
   voice-inject --print  print each new request to stdout instead (for a Claude Code Monitor)
 The bridge's accurate pass appends "[HH:MM:SS] ~ Name: text" corrections (same timestamp as the fast line);
 these come through as "[voice HH:MM:SS fix] Name: text" when they say something different.
+Speaker labels (who-said service, 2026-10-24): when it is running, lines gain a "[Name]" field after the voice
+prefix: "[voice HH:MM:SS] [David] David?: text" (room mic; the old bridge name stays as it was), and each
+Deck's own "near this Deck" transcript comes through as "[voice HH:MM:SS deck] [David] text" (one line per
+person, also when several talk at once). "[unknown]" = not sure who. WHO_LABELS=0 turns both off.
 """
 import difflib, os, re, subprocess, sys, time
 
@@ -92,6 +96,99 @@ def echo_of_claude(text: str) -> bool:
     return False
 
 
+WHO_DIR = os.path.join(os.path.dirname(LOG), "who")
+WHO_ON = os.environ.get("WHO_LABELS", "1") == "1"
+WHO_WAIT = float(os.environ.get("WHO_WAIT", "2.0"))  # max seconds to wait for a room line's speaker label
+who_cache: dict = {}
+
+
+def who_state():
+    try:
+        import json
+        st = json.load(open(os.path.join(WHO_DIR, "state.json")))
+        return st if time.time() - st["heartbeat"] < 15 else None
+    except Exception:
+        return None
+
+
+def who_label(ts: str) -> str:
+    """'[Name] ' for a room-mic line (from who-said's labels.jsonl), waiting briefly; '' if who-said is not running."""
+    if not WHO_ON:
+        return ""
+    if ts in who_cache:
+        return who_cache[ts]
+    st = who_state()
+    if not st or not st.get("room_live"):
+        return ""
+    import json
+    deadline = time.time() + WHO_WAIT
+    while True:
+        try:
+            with open(os.path.join(WHO_DIR, "labels.jsonl"), "rb") as f:
+                f.seek(max(0, os.fstat(f.fileno()).st_size - 20000))
+                for raw in f.read().splitlines()[::-1]:
+                    try:
+                        r = json.loads(raw)
+                    except ValueError:
+                        continue
+                    if r.get("stamp") == ts:
+                        who_cache[ts] = f"[{r['name']}] "
+                        if len(who_cache) > 300:
+                            for k in list(who_cache)[:100]:
+                                who_cache.pop(k)
+                        return who_cache[ts]
+        except FileNotFoundError:
+            pass
+        if time.time() > deadline:
+            return "[unknown] "
+        time.sleep(0.1)
+
+
+feed_pos = None  # who-said's per-Deck transcript feed (feed.log); start at its end like the voice log
+
+
+def who_feed() -> list:
+    """New per-Deck lines from who-said: '[HH:MM:SS] [Name] text' -> ('[voice HH:MM:SS deck] [Name] text', text)."""
+    global feed_pos
+    if not WHO_ON:
+        return []
+    p = os.path.join(WHO_DIR, "feed.log")
+    try:
+        size = os.path.getsize(p)
+    except OSError:
+        feed_pos = 0  # not there yet: read it from the start once it appears
+        return []
+    if feed_pos is None or size < feed_pos:
+        feed_pos = size if feed_pos is None else 0
+        return [] if size == feed_pos else who_feed()
+    if size == feed_pos:
+        return []
+    with open(p, "rb") as f:
+        f.seek(feed_pos)
+        data = f.read(size - feed_pos)
+    keep = data.rfind(b"\n") + 1
+    feed_pos += keep
+    out = []
+    for line in data[:keep].decode("utf-8", "replace").splitlines():
+        m = re.match(r"\[(\d\d:\d\d:\d\d)\] (\[[^\]]+\]) (.*)", line)
+        if m:
+            out.append((f"[voice {m.group(1)} deck] {m.group(2)} {m.group(3)}", m.group(3)))
+    return out
+
+
+def deliver(msg: str) -> None:
+    msg = clean(msg)
+    mc_show(msg)
+    if PRINT:
+        print(msg, flush=True)
+        with open(os.path.join(os.path.dirname(LOG), "voice-timing.log"), "a") as f:
+            f.write(f"event_sent {time.time():.2f} | {msg[:50]}\n")
+        return
+    p = pane()
+    subprocess.run(["/usr/bin/tmux", "send-keys", "-t", p, "-l", msg])
+    subprocess.run(["/usr/bin/tmux", "send-keys", "-t", p, "Enter"])
+
+
 def stat():
     try:
         st = os.stat(LOG)
@@ -117,6 +214,9 @@ sent: set = set()  # timestamps whose fast line was passed on (their corrections
 FIX_RE = re.compile(r"\[(\d\d:\d\d:\d\d)\] ~ (TO CLAUDE: )?([^:]+): (.*)")
 while True:
     time.sleep(0.1)
+    for msg, text in who_feed():
+        if not echo_of_claude(text):
+            deliver(msg)
     new_ino, size = stat()
     if new_ino != ino or size < pos:  # replaced or truncated: skip to the end
         ino, pos, buf = new_ino, size, b""
@@ -157,13 +257,6 @@ while True:
             continue  # the mic heard Claude's own speech from the TV
         if not fix:
             sent.add(line[1:9])
-        msg = clean(msg)
-        mc_show(msg)
-        if PRINT:
-            print(msg, flush=True)
-            with open(os.path.join(os.path.dirname(LOG), "voice-timing.log"), "a") as f:
-                f.write(f"event_sent {time.time():.2f} | {msg[:50]}\n")
-            continue
-        p = pane()
-        subprocess.run(["/usr/bin/tmux", "send-keys", "-t", p, "-l", msg])
-        subprocess.run(["/usr/bin/tmux", "send-keys", "-t", p, "Enter"])
+        head, _, rest = msg.partition("] ")
+        msg = f"{head}] {who_label(head.split()[1])}{rest}"
+        deliver(msg)
