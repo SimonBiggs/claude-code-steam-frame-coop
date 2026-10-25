@@ -9,6 +9,9 @@ if "$HOME/.local/bin/claude-main" --running >/dev/null; then
   # window hits 95 % or the main turn ends on a rate-limit error, and sends the resume message once, ~2 min after the
   # reset, unless the session is already working. Quick no-op otherwise; logs to ~/.claude/wake.log.
   timeout 330 "$HOME/.local/bin/claude-wake" after-reset --check >/dev/null 2>&1
+  # Keep improving (Simon, 2026-10-25: "just keep improving things — please don't stop"): if the main conversation and
+  # all its agents/jobs have been quiet 20 min and the budget allows, nudge it (at most every 45 min). Logs to wake.log.
+  timeout 330 "$HOME/.local/bin/claude-wake" keep-going --check >/dev/null 2>&1
   exit 0
 fi
 cd ~ || exit 1
