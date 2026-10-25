@@ -115,7 +115,7 @@ func hero(slot: int, delta: float, index: int) -> void:
 			var fp2: Vector3 = (main.heroes[s4] as Node3D).position
 			var safe := true
 			for id in dp.foes.mons:
-				if Vector3(dp.foes.mons[id]["p"]).distance_to(fp2) < 2.0 and int(dp.foes.mons[id]["st"]) != Foes.SLEEP:
+				if Vector3(dp.foes.mons[id]["p"]).distance_to(fp2) < 4.0 and int(dp.foes.mons[id]["st"]) != Foes.SLEEP:
 					safe = false
 			if safe:
 				_go(slot, h, fp2, 0.6, delta)
@@ -297,8 +297,8 @@ func _face_press(slot: int, h: Node3D, at: Vector3) -> void:
 	if to.length() > 0.05:
 		_stick(slot, Vector2(to.x, to.z).normalized() * 0.45)
 	var fwd := Vector3(sin(h.rotation.y), 0.0, cos(h.rotation.y))
-	if to.length() < 0.3 or fwd.dot(to.normalized()) > 0.6:
-		_press(slot, "accept", "a", 0.36)
+	if to.length() < 1.7 or fwd.dot(to.normalized()) > 0.6:
+		_press(slot, "accept", "a", 0.42)  # (the game's soft aim turns us to a monster in reach)
 
 
 func _danger_escape(pos: Vector3) -> Vector3:
@@ -556,6 +556,8 @@ func _useful(slot: int, k: int) -> bool:
 			return int(st.get("max", 0)) < 8
 		Loot.CHARM:
 			return int(st.get("charm", 0)) == 0
+		Loot.SWORD:
+			return int(st.get("dmg", 1)) < 3
 	return true
 
 

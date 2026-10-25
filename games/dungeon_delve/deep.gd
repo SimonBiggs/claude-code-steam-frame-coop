@@ -47,7 +47,7 @@ const DIFF := {
 }
 const REVIVE_TIME := 3.5  ## seconds a friend must stand by you (a hit on the helper starts it again)
 const REVIVE_R := 1.5
-const IFRAMES := 1.0
+const IFRAMES := 1.2
 const STAIRS_R := 1.5
 const ATTACK_REACH := 1.05
 const PADS := {"brave": Vector3(-2.2, 0.0, -2.5), "heroic": Vector3(2.2, 0.0, -2.5), "daily": Vector3(-3.5, 0.0, 2.7)}
@@ -476,6 +476,16 @@ func start_run(m: String) -> void:
 	_gold = 0
 	_keys = 0
 	_ensure_stats()
+	if FloorGen.global_floor(zone, floor_i) > 0:
+		# Starting deeper (DD_FLOOR, tests): the gear a run would have found by then.
+		var g0 := FloorGen.global_floor(zone, floor_i)
+		for s in stats:
+			var st0: Dictionary = stats[s]
+			st0["dmg"] = int(st0["dmg"]) + g0 / 3
+			st0["max"] = mini(8, int(st0["max"]) + g0 / 3)
+			st0["hp"] = st0["max"]
+			st0["pot"] = int(st0["pot"]) + 1 + g0 / 4
+		_gold = 20 * g0
 	checkpoint = {}
 	var pd := progress()
 	pd["runs"] = int(pd["runs"]) + 1
@@ -588,7 +598,7 @@ func _cfg() -> Dictionary:
 	var n := maxi(1, _players().size())
 	var g := FloorGen.global_floor(zone, floor_i)
 	# Difficulty climbs every floor: health, speed, and from the Lava Forge (HEROIC: the Crypt) harder hits.
-	return {"hp": float(d["hp"]) * (1.0 + 0.13 * g) * (1.0 + 0.25 * (n - 1)),
+	return {"hp": float(d["hp"]) * (1.0 + 0.11 * g) * (1.0 + 0.25 * (n - 1)),
 		"boss_hp": float(d["hp"]) * (1.0 + 0.45 * (n - 1)) * (1.0 + 0.15 * zone),
 		"dmg": (1 if mode == "heroic" and zone >= 1 else 0),
 		"spd": float(d["spd"]) * (1.0 + 0.04 * g)}
@@ -1806,6 +1816,8 @@ func _collect(slot: int, k: int, p: Vector3) -> bool:
 			main.sound_at("level_up", p, -2.0)
 			text = "+1 HEART"
 		Loot.SWORD:
+			if int(st["dmg"]) >= (4 if knight else 3):
+				return false  # swords stop getting better at +2
 			st["dmg"] = int(st["dmg"]) + 1
 			text = "SWORD +1"
 		Loot.CHARM:

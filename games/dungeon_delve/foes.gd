@@ -32,7 +32,7 @@ const BOSSES: Array[int] = [FloorGen.B_SLIME, FloorGen.B_BONE, FloorGen.B_FORGE]
 const BOSS_NAMES := {FloorGen.B_SLIME: "SLIME KING", FloorGen.B_BONE: "BONE LORD", FloorGen.B_FORGE: "FORGE GOLEM"}
 const BASE_HP := {FloorGen.F_SLIME: 2.0, FloorGen.F_SPITTER: 2.0, FloorGen.F_SHIELD: 4.0, FloorGen.F_SWARM: 1.0,
 	FloorGen.F_HEALER: 3.0, FloorGen.F_MIMIC: 6.0, FloorGen.F_CHARGER: 4.0, FloorGen.F_BOMBER: 3.0,
-	FloorGen.B_SLIME: 70.0, FloorGen.B_BONE: 95.0, FloorGen.B_FORGE: 120.0}  # boss fights last about a minute or two
+	FloorGen.B_SLIME: 55.0, FloorGen.B_BONE: 80.0, FloorGen.B_FORGE: 100.0}  # boss fights last about a minute or two
 const GOLD := {FloorGen.F_SLIME: 1, FloorGen.F_SPITTER: 2, FloorGen.F_SHIELD: 3, FloorGen.F_SWARM: 1,
 	FloorGen.F_HEALER: 3, FloorGen.F_MIMIC: 15, FloorGen.F_CHARGER: 4, FloorGen.F_BOMBER: 3,
 	FloorGen.B_SLIME: 40, FloorGen.B_BONE: 60, FloorGen.B_FORGE: 80}
@@ -274,7 +274,7 @@ func hit(id: int, dmg: float, from: Vector3, pierce: bool = false) -> String:
 	if int(m["st"]) == STUN:
 		dmg *= 2.0
 	m["hp"] = float(m["hp"]) - dmg
-	m["inv"] = 0.12 if not is_boss(kind) else 0.3
+	m["inv"] = 0.12 if not is_boss(kind) else 0.45
 	m["anim"].hurt(Color(1, 1, 1))
 	m["punch"] = 1.0
 	if not is_boss(kind):
@@ -442,7 +442,8 @@ func step(delta: float, targets: Array, active_room: int) -> void:
 
 
 func _dmg(base: int, m: Dictionary) -> int:
-	return base + int(cfg["dmg"]) + (1 if bool(m["elite"]) and base > 0 else 0)
+	var elite_bonus := 1 if bool(m["elite"]) and base > 0 and int(m["kind"]) not in [FloorGen.F_SLIME, FloorGen.F_SWARM] else 0
+	return base + int(cfg["dmg"]) + elite_bonus
 
 
 ## cone: only targets in front (dot with facing above this; -1 = all round).
@@ -466,7 +467,7 @@ func _touch(id: int, m: Dictionary, targets: Array, reach: float, dmg: int, once
 func _slime(id: int, m: Dictionary, delta: float, targets: Array, spd: float) -> void:
 	var hop: float = m["hop"]
 	if float(m["t"]) <= 0.0 and hop <= 0.0:
-		m["t"] = randf_range(0.7, 1.3) / spd
+		m["t"] = randf_range(0.7, 1.3) / minf(spd, 1.15)
 		var tg := _nearest(m["p"], targets, int(m["room"]))
 		var dir := Vector3(randf_range(-1, 1), 0, randf_range(-1, 1)).normalized()
 		if not tg.is_empty() and randf() < 0.85:
@@ -486,7 +487,12 @@ func _slime(id: int, m: Dictionary, delta: float, targets: Array, spd: float) ->
 		var p: Vector3 = m["p"]
 		p.y = sin(PI * (1.0 - hop / 0.55)) * 0.35
 		m["p"] = p
-		_touch(id, m, targets, 0.45, 1, true)
+		if hop < 0.3:  # it hurts when it lands on you, not on the way up
+			_touch(id, m, targets, 0.4, 1, true)
+			if not (m["hit"] as Dictionary).is_empty():
+				m["t"] = maxf(float(m["t"]), 1.3)  # a slime that got you bounces off and rests a moment
+				m["hop"] = 0.0
+				m["v"] = Vector3.ZERO
 	else:
 		var p2: Vector3 = m["p"]
 		p2.y = 0.0
@@ -790,7 +796,7 @@ func _boss_slime(id: int, m: Dictionary, delta: float, targets: Array, spd: floa
 				m["p"] = Vector3(b.x, 0.0, b.z)
 				deep.sound_at("crash", b, 0.0, 0.6)
 				deep.shake(0.6)
-				if ph >= 2:
+				if ph >= 2 and count_in(room) <= 3:  # never more than a few helpers at once
 					for k2 in 2:
 						var sp := FloorGen.room_clamp(f, room, b + Vector3(randf_range(-2.0, 2.0), 0.0, randf_range(-2.0, 2.0)), 0.6)
 						spawn(FloorGen.F_SLIME, sp, room)
@@ -946,7 +952,7 @@ func _boss_bone_attack(id: int, m: Dictionary, targets: Array, ph: int) -> void:
 			m["count"] = 3 if ph < 3 else 4
 			m["t"] = 0.0
 		"summon":
-			var n := 2 if ph < 3 else 3
+			var n := clampi((2 if ph < 3 else 3), 0, 5 - count_in(room))
 			for k in n:
 				var sp := FloorGen.room_clamp(f, room, p + Vector3(randf_range(-3.0, 3.0), 0.0, randf_range(-3.0, 3.0)), 0.8)
 				spawn(FloorGen.F_SHIELD if k % 2 == 0 else FloorGen.F_SPITTER, sp, room)
