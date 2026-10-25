@@ -5,9 +5,12 @@ extends Node
 ## Local:      godot --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/paper_planes_bot.tscn
 ## Networked:  DUO_PORT=81xx DUO_HOST=1 ... & DUO_PORT=81xx DUO_JOIN=127.0.0.1 ... (same scene, real time)
 ## Flat host: add DUO_FLAT_HOST=1 to the host (no VR: one bot pad plays slot 0 on the host).
+## BOT_CHAPTER=N flies story chapter N (3 = grumpy clouds, 4 = Gust's golden hoop) instead of the save's.
+## Each round the bots pick a breeze by flying through a gate, fly the seeded flight, see the results.
 
 const BotKit := preload("res://tests/bot_kit.gd")
 const VrRig := preload("res://core/vr_rig.gd")
+const Telemetry := preload("res://core/telemetry.gd")
 
 var kit: BotKit
 var main: Node
@@ -18,6 +21,11 @@ var left_test := 0  # 0 not yet, 1 reaching for the stack, 2 holding, 3 done
 var left_grabbed := false
 var left_thrown := false
 var max_hoops := 0  # scored hoops respawn after 1.2 s, so the count dips right after a score
+var max_clouds := 0
+var saw_gold := false
+var saw_story := false
+var saw_gates := false
+var max_form := -1
 
 
 func _ready() -> void:
@@ -27,6 +35,9 @@ func _ready() -> void:
 	main = load("res://games/paper_planes/main.tscn").instantiate()
 	main.set("round_time", 28.0)
 	main.set("results_wait", 6.0)
+	main.set("pick_time", 6.0)
+	if OS.has_environment("BOT_CHAPTER"):
+		main.set("force_chapter", int(OS.get_environment("BOT_CHAPTER")))
 	add_child(main)
 	kit.main = main
 	want = BotKit.bot_players(2, 6)
@@ -49,10 +60,10 @@ func _ready() -> void:
 	kit.drop_in_out(main.party, t0 + 11.0, 3.0, func(slot: int) -> bool:
 		return main.flyers.has(slot) and main.huds.has(slot))
 	if host:
-		kit.at(40.0, "host checks (the TV machine is still connected)", _checks)
-		kit.at(50.0, "finish", kit.finish)
+		kit.at(54.0, "host checks (the TV machine is still connected)", _checks)
+		kit.at(62.0, "finish", kit.finish)
 	else:
-		kit.at(44.0 if client else 37.0, "finish", func() -> void:
+		kit.at(58.0 if client else 52.0, "finish", func() -> void:
 			_checks()
 			kit.finish())
 	kit.every(3.0, _report)
@@ -90,6 +101,15 @@ func _physics_process(delta: float) -> void:
 	if main == null or not main.ready_to_play:
 		return
 	max_hoops = maxi(max_hoops, main.hoops.size())
+	max_clouds = maxi(max_clouds, main.clouds.size())
+	saw_story = saw_story or main.pip_talk > 0.0
+	saw_gold = saw_gold or main.gust.visible
+	var sky: Variant = main.net.state_get("sky", {})
+	if sky is Dictionary:
+		max_form = maxi(max_form, int((sky as Dictionary).get("form", -1)))
+	for id in main.hoops:
+		if main.hoops[id].kind == 4:
+			saw_gates = true
 	for slot in main.party.local_slots():
 		_steer(slot)
 	if main.vr_rig != null:
@@ -198,9 +218,9 @@ func _nearest_hoop(from: Vector3) -> Vector3:
 
 
 func _report() -> String:
-	return "BOT %s: players %s, hoops %d, darts %d, score %d, round %d, scored_by %s, throws %d" % [main.net.mode,
-		str(main.party.active_slots()), main.hoops.size(), main.darts.size(), int(main.net.state_get("score", 0)),
-		int(main.net.state_get("round", 0)), str(main.scored_by), main.throws]
+	return "BOT %s: %s, players %s, hoops %d, clouds %d, darts %d, score %d, combo %d, round %d, scored_by %s, throws %d" % [main.net.mode,
+		String(main.net.state_get("phase", "")), str(main.party.active_slots()), main.hoops.size(), main.clouds.size(), main.darts.size(),
+		int(main.net.state_get("score", 0)), int(main.net.state_get("combo", 0)), int(main.net.state_get("round", 0)), str(main.scored_by), main.throws]
 
 
 func _checks() -> void:
@@ -228,6 +248,25 @@ func _checks() -> void:
 		kit.assert_true(tv > 0, "%s: TV planes flew through hoops (%d)" % [mode, tv])
 	else:
 		kit.assert_true(main.flyers.size() == main.party.player_count(), "client: every player (every machine's) has a plane")
+	# The story flight structure.
+	kit.assert_true(saw_gates, "%s: pick-a-breeze gates appeared" % mode)
+	kit.assert_true(saw_story, "%s: a story card was shown" % mode)
+	kit.assert_true(max_form >= 1, "%s: the flight moved on to a second formation (%d)" % [mode, max_form])
+	var village: Variant = main.net.state_get("village", [])
+	kit.assert_true(village is Array and (village as Array).size() == 5, "%s: the valley's places are shared" % mode)
+	var fl: Dictionary = main.net.state_get("flight", {})
+	kit.assert_true(fl.has("mode"), "%s: flight info is shared (%s)" % [mode, str(fl)])
+	var ch := int(OS.get_environment("BOT_CHAPTER")) if OS.has_environment("BOT_CHAPTER") else -1
+	if ch >= 3:
+		kit.assert_true(max_clouds > 0, "%s: grumpy clouds were built (chapter %d)" % [mode, ch])
+	if ch >= 4:
+		kit.assert_true(saw_gold, "%s: Gust's golden hoop flew (chapter %d)" % [mode, ch])
+	if mode != "client":
+		kit.assert_true(main.flights_done >= 1 and main.gate_picked != "", "%s: a breeze was picked (%s) and a flight finished" % [mode, main.gate_picked])
+		var runs: Array = Telemetry.read("paper_planes")
+		kit.assert_true(not runs.is_empty() and (runs[-1] as Dictionary).has("stars"), "%s: the flight wrote a telemetry line" % mode)
+		if not runs.is_empty():
+			print("BOT last RUN: %s" % JSON.stringify(runs[-1]))
 	if main.vr_rig != null:
 		kit.assert_true(main.throws > 3, "fake VR threw planes (%d)" % main.throws)
 		kit.assert_true(int(main.scored_by.get(0, 0)) > 0, "a VR plane went through a hoop (%d)" % int(main.scored_by.get(0, 0)))
