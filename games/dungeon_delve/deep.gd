@@ -49,8 +49,8 @@ const REVIVE_R := 1.5
 const IFRAMES := 1.0
 const STAIRS_R := 1.5
 const ATTACK_REACH := 1.05
-const PADS := {"brave": Vector3(-2.2, 0.0, -2.5), "heroic": Vector3(2.2, 0.0, -2.5)}
-const PAD_COLORS := {"brave": Color(1.0, 0.6, 0.2), "heroic": Color(1.0, 0.3, 0.35)}
+const PADS := {"brave": Vector3(-2.2, 0.0, -2.5), "heroic": Vector3(2.2, 0.0, -2.5), "daily": Vector3(-3.5, 0.0, 2.7)}
+const PAD_COLORS := {"brave": Color(1.0, 0.6, 0.2), "heroic": Color(1.0, 0.3, 0.35), "daily": Color(0.35, 0.8, 1.0)}
 const HAT_RACK := Vector3(3.7, 0.0, 2.6)
 const HAT_UNLOCKS: Array = [["none", ""], ["party", "run"], ["viking", "floor3"], ["wizard", "boss0"], ["crown", "boss1"], ["halo", "boss2"]]
 const SHOP_SPOTS: Array[Vector2] = [Vector2(-3.0, 0.2), Vector2(-1.0, 0.2), Vector2(1.0, 0.2), Vector2(3.0, 0.2)]
@@ -71,6 +71,7 @@ var built_key := ""
 
 # Host.
 var mode := ""
+var daily := false
 var seed_v := 0
 var zone := 0
 var floor_i := 0
@@ -101,7 +102,7 @@ var portal := Vector3.INF
 var checkpoint := {}
 var phase_t := 0.0
 var shop: Array = []
-var pad_fill := {"brave": 0.0, "heroic": 0.0}
+var pad_fill := {"brave": 0.0, "heroic": 0.0, "daily": 0.0}
 var hat_cd := {}
 var sword_cd := {}
 var _poke_cd := {}
@@ -174,6 +175,9 @@ func _build_lobby() -> void:
 			b.box(Vector3(0.08, 0.6, 0.02), MeshKit.at(Vector3(0, 1.35, 0)), Color(0.85, 0.92, 1.0), true)
 			b.box(Vector3(0.3, 0.05, 0.05), MeshKit.at(Vector3(0, 1.05, 0)), Color(1.0, 0.8, 0.3), true)
 			b.cylinder(0.035, 0.035, 0.16, MeshKit.at(Vector3(0, 0.95, 0)), Color(0.5, 0.3, 0.2), 6)
+		elif mname == "daily":
+			b.star(8, 0.3, 0.16, 0.06, MeshKit.at(Vector3(0, 1.2, 0)), Color(1.0, 0.9, 0.4), true)
+			b.sphere(0.13, MeshKit.at(Vector3(0, 1.2, 0.02)), Color(1.0, 0.75, 0.3), 10, true)
 		else:
 			b.cylinder(0.22, 0.24, 0.16, MeshKit.at(Vector3(0, 1.1, 0)), Color(1.0, 0.8, 0.3), 12, true)
 			for k in 5:
@@ -236,7 +240,7 @@ func _animate_lobby(delta: float) -> void:
 		(pad_labels[mname] as Label3D).visible = show_pads
 		var bests: Dictionary = net.state_get("d_best", {})
 		var bl: Label3D = (pad_labels[mname] as Label3D).get_node_or_null("Best")
-		var g := int(bests.get(mname, -1))
+		var g := int(bests.get(daily_key() if mname == "daily" else mname, -1))
 		if mname == "heroic" and not bool(net.state_get("d_heroic_ok", true)):
 			(pad_labels[mname] as Label3D).text = "LOCKED"
 			(pad_labels[mname] as Label3D).modulate = Color(0.6, 0.6, 0.65)
@@ -268,7 +272,7 @@ func lobby_step(delta: float) -> void:
 			var p: Vector3 = (pl as Dictionary)["p"]
 			if Vector2(p.x - c.x, p.z - c.z).length() < 0.95:
 				on += 1
-		var fv: float = pad_fill[mname]
+		var fv: float = pad_fill.get(mname, 0.0)
 		if on > 0:
 			fv += delta * (0.3 + 0.7 * float(on) / total) / 2.2
 		else:
@@ -361,8 +365,9 @@ func _record_depth() -> void:
 	var pd := progress()
 	var g := FloorGen.global_floor(zone, floor_i)
 	var best: Dictionary = pd["best"]
-	if g > int(best.get(mode, 0)):
-		best[mode] = g
+	var key := daily_key() if daily else mode
+	if g > int(best.get(key, 0)):
+		best[key] = g
 		main.save.mark_dirty()
 		net.state_set("d_best", best.duplicate())
 
@@ -438,9 +443,17 @@ func _alive(slot: int) -> bool:
 
 # --- Runs and floors -------------------------------------------------------------------------------
 
+static func daily_key() -> String:
+	return "daily:" + Time.get_date_string_from_system()
+
+
+## m: "brave", "heroic" or "daily" (BRAVE rules, the same dungeon for everyone all day: beat your best).
 func start_run(m: String) -> void:
-	mode = m
+	daily = m == "daily"
+	mode = "brave" if daily else m
 	seed_v = int(OS.get_environment("DD_SEED")) if OS.has_environment("DD_SEED") else randi() % 1000000
+	if daily:
+		seed_v = absi(hash(Time.get_date_string_from_system())) % 1000000
 	zone = 0
 	floor_i = 0
 	if OS.has_environment("DD_FLOOR") and not main.has_meta("deep_started"):
@@ -448,7 +461,7 @@ func start_run(m: String) -> void:
 		zone = g / FloorGen.FLOORS_PER_ZONE
 		floor_i = g % FloorGen.FLOORS_PER_ZONE
 	main.set_meta("deep_started", true)
-	net.state_set("mode", m)
+	net.state_set("mode", mode)
 	stats.clear()
 	_gold = 0
 	_keys = 0

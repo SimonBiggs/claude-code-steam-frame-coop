@@ -242,7 +242,7 @@ func _start_show() -> void:
 	if OS.has_environment("DD_MODE") and not has_meta("deep_mode_started"):
 		set_meta("deep_mode_started", true)
 		var dm := OS.get_environment("DD_MODE")
-		if dm in ["brave", "heroic"]:
+		if dm in ["brave", "heroic", "daily"]:
 			deep.start_run(dm)
 
 

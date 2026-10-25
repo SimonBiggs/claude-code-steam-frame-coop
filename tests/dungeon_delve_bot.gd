@@ -40,7 +40,8 @@ var poke_list: Array[int] = []
 var thrown := false
 var outside := 0
 var brain: DeepBot
-var deep_mode := OS.get_environment("DD_MODE") if OS.has_environment("DD_MODE") else ""
+var pad := OS.get_environment("BOT_PAD") if OS.has_environment("BOT_PAD") else ""  ## walk onto this lobby pad
+var deep_mode := OS.get_environment("DD_MODE") if OS.has_environment("DD_MODE") else pad
 var goal := OS.get_environment("BOT_GOAL") if OS.has_environment("BOT_GOAL") else ""
 var off_floor := 0
 var max_foes := 0
@@ -172,6 +173,8 @@ func _tv_bot(slot: int, delta: float) -> void:
 	var room := _room()
 	var dg = main.dungeon
 	match phase:
+		_ when pad != "" and phase in ["practice", "cleared"] and room == 0:
+			target = main.deep.PADS[pad] + Vector3(0.3 * (slot % 3 - 1), 0.0, 0.0)
 		"practice":
 			if not dg.is_used(0):
 				target = dg.prop_center(0)
@@ -387,7 +390,7 @@ func _deep_checks(mode: String) -> void:
 	if goal == "zone":
 		kit.assert_true(int(t["bosses"]) >= 1, "%s: the boss was beaten" % mode)
 		kit.assert_true(int(t.get("relics", 0)) >= mini(1, main.heroes.size()), "%s: heroes each picked one boss treasure (%d)" % [mode, int(t.get("relics", 0))])
-		kit.assert_true(int((pd["bosses"] as Dictionary).get(deep_mode, 0)) & 1 != 0, "%s: the boss win was saved (perk + hat unlocked)" % mode)
+		kit.assert_true(int((pd["bosses"] as Dictionary).get(dp.mode, 0)) & 1 != 0, "%s: the boss win was saved (perk + hat unlocked)" % mode)
 		kit.assert_true(dp.unlocked_hats().has("wizard") and int(dp.perks()["potion"]) == 1, "%s: the Slime King unlocks the wizard hat and a starting potion" % mode)
 		kit.assert_true(int(t["bought"]) >= 1 or main.heroes.is_empty(), "%s: something was bought in a shop (%d)" % [mode, int(t["bought"])])
 	if int(t["downs"]) > 0:
