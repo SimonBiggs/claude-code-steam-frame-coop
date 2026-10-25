@@ -38,8 +38,28 @@ var _chest_bits := 0
 var _pot_bits := 0
 
 
+## Back to nothing (the gentle dungeon is on).
+func clear() -> void:
+	for c in get_children():
+		c.queue_free()
+	f = {}
+	doors.clear()
+	chests.clear()
+	pots.clear()
+	switches.clear()
+	traps.clear()
+	rects = []
+	obst = []
+	stairs_ring = null
+	stairs_at = Vector3.INF
+	light = null
+
+
 ## Build floor fl (a floorgen dictionary). Frees the old one.
 func build(fl: Dictionary) -> void:
+	if (fl.get("rooms", []) as Array).is_empty():
+		clear()  # (stop() once built an empty floor here and crashed on room 0: TV, 25 Oct)
+		return
 	for c in get_children():
 		c.queue_free()
 	f = fl

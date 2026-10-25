@@ -316,6 +316,8 @@ func _report() -> String:
 				few += " [k%d st%d %s hp%d]" % [int(m["kind"]), int(m["st"]), str(Vector3(m["p"]).snappedf(0.1)), int(m["hp"])]
 			for h in main.heroes.values():
 				few += " hero %s" % str(h.position.snappedf(0.1))
+			if main.vr_rig != null:
+				few += " knight %s swings %d" % [str(main.vr_rig.head_position().snappedf(0.1)), main.hands.swings]
 		return few + " BOT %s DEEP %s room %d lock %d foes %d gold %d keys %d hp %s %s" % [main.net.mode, dp.built_key,
 			dp._focus_room(), int(main.net.state_get("d_lock", -1)), dp.foes.mons.size(), int(main.net.state_get("d_gold", 0)),
 			int(main.net.state_get("d_keys", 0)), str(hp), str(dp.tally) if main.net.mode != "client" else ""]
@@ -361,7 +363,7 @@ func _deep_checks(mode: String) -> void:
 	var dp = main.deep
 	kit.assert_true(off_floor < 8, "%s: heroes stayed on walkable ground (%d)" % [mode, off_floor])
 	if mode != "host":
-		kit.assert_eq(main.party.player_count(), want, "%s: all %d TV players are seated" % [mode, want])
+		kit.assert_eq(main.party.local_slots().size(), want, "%s: all %d TV players here are seated" % [mode, want])
 	if mode == "client":
 		kit.assert_true(floors_seen.size() >= 1, "client built the deep floors (%d)" % floors_seen.size())
 		kit.assert_true(max_foes >= 1, "client mirrors the monsters (%d)" % max_foes)
@@ -387,3 +389,8 @@ func _deep_checks(mode: String) -> void:
 		kit.assert_true(int(t["revives"]) > 0 or int(t["wipes"]) > 0, "%s: knocked-out heroes got back up (%d downs, %d revives)" % [mode, int(t["downs"]), int(t["revives"])])
 	if main.vr_rig != null:
 		kit.assert_true(main.hands.swings > 0, "the knight hit monsters (%d)" % main.hands.swings)
+	# The run ends and "Again!" goes back to the gentle practice room (crashed on the TV, 25 Oct).
+	dp.finish(false)
+	kit.assert_eq(String(main.net.state_get("phase", "")), "results", "%s: a finished run shows the results" % mode)
+	main.on_request(0, "again", [])
+	kit.assert_true(not dp.active and String(main.net.state_get("phase", "")) == "practice" and main.dungeon.visible, "%s: Again goes back to the gentle practice room" % mode)

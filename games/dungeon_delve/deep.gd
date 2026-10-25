@@ -224,15 +224,23 @@ func _animate_lobby(delta: float) -> void:
 	for mname in PADS:
 		var ring: Node3D = pad_rings[mname]
 		var k: float = float(fills[i]) if i < fills.size() else 0.0
+		i += 1
 		ring.scale = ring.scale.lerp(Vector3.ONE * maxf(0.05, k), 1.0 - exp(-12.0 * delta))
 		ring.visible = show_pads
 		(pad_labels[mname] as Label3D).visible = show_pads
 		var bests: Dictionary = net.state_get("d_best", {})
 		var bl: Label3D = (pad_labels[mname] as Label3D).get_node_or_null("Best")
 		var g := int(bests.get(mname, -1))
+		if mname == "heroic" and not bool(net.state_get("d_heroic_ok", true)):
+			(pad_labels[mname] as Label3D).text = "LOCKED"
+			(pad_labels[mname] as Label3D).modulate = Color(0.6, 0.6, 0.65)
+			if bl != null:
+				bl.text = "beat the Slime King"
+			continue
+		(pad_labels[mname] as Label3D).text = String(mname).to_upper()
+		(pad_labels[mname] as Label3D).modulate = (PAD_COLORS[mname] as Color).lightened(0.3)
 		if bl != null:
 			bl.text = "BEST %d-%d" % [g / FloorGen.FLOORS_PER_ZONE + 1, g % FloorGen.FLOORS_PER_ZONE + 1] if g > 0 else ""
-		i += 1
 
 
 ## Host: the lobby pads fill while players stand on them; full = the run starts.
@@ -240,12 +248,16 @@ func lobby_step(delta: float) -> void:
 	if not net.state_has("d_best") and main.save != null:
 		var pb: Dictionary = progress()["best"]
 		net.state_set("d_best", pb.duplicate())
+		net.state_set("d_heroic_ok", heroic_unlocked())
 	var players := _players(true)
 	var total := maxi(1, players.size())
 	var fills: Array = []
 	for mname in PADS:
 		var on := 0
 		var c: Vector3 = PADS[mname]
+		if mname == "heroic" and not heroic_unlocked():
+			fills.append(0.0)
+			continue  # beat the Slime King on BRAVE first
 		for pl in players:
 			var p: Vector3 = (pl as Dictionary)["p"]
 			if Vector2(p.x - c.x, p.z - c.z).length() < 0.95:
@@ -304,6 +316,13 @@ func progress() -> Dictionary:
 	if not pd.has("runs"):
 		pd["runs"] = 0
 	return pd
+
+
+## HEROIC opens once the Slime King is beaten on BRAVE (kids kept stumbling onto it and losing in a minute).
+func heroic_unlocked() -> bool:
+	if OS.has_environment("DD_MODE"):
+		return true
+	return _bosses_beaten() & 1 != 0
 
 
 func _bosses_beaten() -> int:
@@ -594,8 +613,7 @@ func stop() -> void:
 	built_key = ""
 	foes.clear()
 	tele.clear()
-	view.build({"seed": 0, "zone": 0, "floor": 0, "kind": "none", "rooms": [], "doors": [], "switches": [], "traps": []})
-	view.f = {}
+	view.clear()
 	for id in pick_nodes:
 		(pick_nodes[id] as Node3D).queue_free()
 	pick_nodes.clear()
@@ -988,6 +1006,7 @@ func _boss_down(kind: int, at: Vector3) -> void:
 	var bosses: Dictionary = pd["bosses"]
 	bosses[mode] = int(bosses.get(mode, 0)) | (1 << zone)
 	main.save.mark_dirty()
+	net.state_set("d_heroic_ok", heroic_unlocked())
 	for s in stats:
 		if bool((stats[s] as Dictionary)["down"]):
 			_revive(int(s))

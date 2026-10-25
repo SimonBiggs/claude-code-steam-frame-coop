@@ -11,6 +11,7 @@ extends SceneTree
 ## Prints "SCRIPT ERROR: FLOORS ..." for each failure (the bot runner greps for SCRIPT ERROR).
 
 const FloorGen := preload("res://games/dungeon_delve/floorgen.gd")
+const FloorView := preload("res://games/dungeon_delve/floor_view.gd")
 
 var fails := 0
 var checks := 0
@@ -24,7 +25,10 @@ func _init() -> void:
 			for fl in FloorGen.FLOORS_PER_ZONE:
 				for s in seeds:
 					_check(1000 + s * 7919, zone, fl, heroic)
+				for s2 in [930279, 542184, 666233, 42, 71, 33]:  # seeds the family / bots played
+					_check(s2, zone, fl, heroic)
 	_check_shop()
+	_check_view()
 	print("FLOORS: %d floors checked, %d failures (%d ms)" % [checks, fails, Time.get_ticks_msec() - t0])
 	quit(1 if fails > 0 else 0)
 
@@ -33,6 +37,20 @@ func _fail(msg: String) -> void:
 	fails += 1
 	if fails < 40:
 		print("SCRIPT ERROR: FLOORS %s" % msg)
+
+
+## The floor view survives an empty floor (deep.stop() used to build one: crash on the TV, 25 Oct),
+## a real floor, and clear().
+func _check_view() -> void:
+	var v := FloorView.new()
+	root.add_child(v)
+	v.build({"seed": 0, "zone": 0, "floor": 0, "kind": "none", "rooms": [], "doors": [], "switches": [], "traps": []})
+	v.build(FloorGen.generate(930279, 0, 0, true))
+	v.clear()
+	v.animate(0.016, 0)
+	if not v.f.is_empty():
+		_fail("FloorView.clear leaves a floor")
+	v.queue_free()
 
 
 func _check_shop() -> void:
