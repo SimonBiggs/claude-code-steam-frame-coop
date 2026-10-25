@@ -1,0 +1,8 @@
+#!/bin/bash
+# duo-update-bundle GAME_DIR: sign the game in GAME_DIR as a LAN update (docs/MULTI_MACHINE.md "Updates over the home
+# network"). Writes GAME_DIR/.update/manifest.json (timestamp, signer, content hash, every file's SHA-256) and
+# manifest.sig (RSA-SHA256 by this machine's key in ~/.config/duo-arena/update-key/). The arcade on this machine then
+# serves it to the machines it plays with, and they pass it on. Runs on any trusted signer: the Steam Machine
+# (duo-deploy calls it for the live copy) or Simon's Deck. Refuses if this machine's key isn't trusted by the game.
+# Options (tests): DUO_UPDATE_KEY_DIR=<key dir>  DUO_UPDATE_TIMESTAMP=<unix seconds>
+exec python3 -I "$(dirname "$(readlink -f "$0")")/duo-update-bundle.py" "$@"

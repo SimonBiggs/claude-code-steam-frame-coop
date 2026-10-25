@@ -1,0 +1,6 @@
+#!/bin/bash
+# duo-update-signers REPO init|add NAME PUBLIC.pem|revoke NAME|list: manage which machines may sign LAN updates
+# (core/lan_update/signers.json + signers.sig, signed by the ROOT key). ROOT ONLY: runs on the Steam Machine, whose key
+# is pinned in addons/lan_update/root.pub.pem. Commit the change and deploy; every machine adopts the newer list when it
+# next updates (a list is only ever accepted with the root's signature, so a Deck key can't add or keep itself).
+exec python3 -I "$(dirname "$(readlink -f "$0")")/duo-update-signers.py" "$@"
