@@ -41,7 +41,11 @@ var held := {}  # path -> md5 of the version still running
 var last_change_ms := -100000  # last time a game file changed on disk
 var held_since_ms := 0
 var members := {}  # lobby host: peer -> {"ver": String, "held": int}
-var stats := {"held": 0, "released": 0, "applies": 0, "lobby_applies": 0}
+var stats := {"held": 0, "released": 0, "applies": 0, "lobby_applies": 0, "scan_us": 0, "scan_us_max": 0}
+var _apply_now_until := 0
+var _since_scan := 0.0
+const SCAN_EVERY := 1.0  # seconds between file checks while holding (the bridge's own 0.25 s cadence is slowed to this:
+# two checks a second cost more than the bridge's four did, and held code doesn't need to be noticed sooner)  # .dev/apply_now was touched: anything arriving until then applies at once
 var last_apply := {}  # {"ms": int, "unix": float, "paths": int, "why": String}
 var _ver := ""
 var _ver_dirty := true
@@ -94,7 +98,10 @@ static func held_count() -> int:
 ## functions is running. Returns true if anything waits: the caller should go on a moment later (next frame or after).
 static func flush(why: String = "starting a game", for_scene_change: bool = false) -> bool:
 	var n := node()
-	if n == null or n.held.is_empty():
+	if n == null:
+		return false
+	n.check_now()  # (files that arrived since the last check count too)
+	if n.held.is_empty():
 		return false
 	n.apply_all.call_deferred(why, for_scene_change)
 	return true
@@ -136,10 +143,23 @@ func _process(delta: float) -> void:
 	if b == null:
 		return
 	var due := float(b.poll_t) + delta >= 0.25  # the bridge scans this frame
+	_since_scan += delta
+	if mode == "safe" and due and _since_scan < SCAN_EVERY and held.is_empty() \
+			and Time.get_ticks_msec() >= _apply_now_until:
+		b.set("poll_t", -delta)  # skip this one (the bridge adds delta: 0)
+		due = false
 	if mode == "safe" and due:
+		_since_scan = 0.0
+		var t := Time.get_ticks_usec()
 		_intercept(b)
-	if due and not held.is_empty():
-		_decide()
+		stats.scan_us = Time.get_ticks_usec() - t
+		stats.scan_us_max = maxi(int(stats.scan_us_max), int(stats.scan_us))
+		if FileAccess.file_exists("res://.dev/apply_now"):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path("res://.dev/apply_now"))
+			_apply_now_until = Time.get_ticks_msec() + 15000
+			print("SafeApply: asked to apply now (.dev/apply_now)")
+	if due and (not held.is_empty() or (_lobby_role() == "host" and _anyone_waiting())):
+		_decide()  # (a lobby host also leads when only joiners have something waiting)
 	_lobby_talk()
 	_update_note()
 
@@ -182,6 +202,13 @@ func _intercept(b: Node) -> void:
 		hs[path] = h
 
 
+## Look for changed files right now (not only at the next check). Never reloads anything itself.
+func check_now() -> void:
+	var b := _bridge()
+	if b != null and mode == "safe":
+		_intercept(b)
+
+
 func _changed() -> void:
 	last_change_ms = Time.get_ticks_msec()
 	_ver_dirty = true
@@ -218,8 +245,7 @@ func _connected() -> bool:
 
 
 func _decide() -> void:
-	if FileAccess.file_exists("res://.dev/apply_now"):
-		DirAccess.remove_absolute(ProjectSettings.globalize_path("res://.dev/apply_now"))
+	if Time.get_ticks_msec() < _apply_now_until:
 		apply_all("asked (.dev/apply_now)", false)
 		return
 	if not settled():
@@ -382,6 +408,7 @@ func _apply_lobby() -> void:
 func _start_ok() -> bool:
 	if mode != "safe" or _lobby_role() != "host":
 		return true
+	check_now()
 	var now := Time.get_ticks_msec()
 	var all_same := _all_match()
 	var waiting := _anyone_waiting() or (not held.is_empty() and now - _lobby_applied_ms < 1000)

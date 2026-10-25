@@ -111,3 +111,28 @@ seats = ClassicSeats.new(self, {"no_keys": PlayerScript.NO_KEYS, "free_actions":
 - A flat host's slot-0 player needs a controller too (`_auto_bind_pad` / base slots: host and not VR).
 - Check: `godot-test --headless --path . -s res://tests/classic_seats_test.gd` (every multi_machine classic
   game uses the helper, no seat-code copies, arcade `"multi"` matches, the helper's arbitration).
+
+## Deploys while playing (core/safe_apply.gd)
+
+Deploys reach every machine straight away (duo-deploy rsync, LAN updates), but new code only **switches on at a
+safe point**, so a deploy never changes a game someone is playing:
+- **Mid-game** the running game's code waits: core/, tests/, the game's own folder, and anything already loaded.
+  arcade/ scripts and other games' files go through, because nothing is running them. A small "• update ready" note
+  shows bottom-right (no popup).
+- **Leaving a game** is a safe point. Use `SafeApply.change_scene(path)` instead of `change_scene_to_file` when a
+  game leaves for the arcade or follows another machine into a game (net.gd and pause_menu.gd already do).
+- **In the arcade menu** changes wait until files have been quiet for 1 s, so a half-copied deploy never applies. A
+  machine on its own applies right away. In a lobby every machine switches **together**: each joiner tells the host
+  its disk version (a hash of every game script), and the host says "apply now" once all match (after 20 s at most).
+- **Starting a game** applies everything first. The lobby host holds a start while a machine's files are still
+  arriving or waiting to switch on (15 s at most), so nobody plays a mixed-version game. A machine whose code
+  differs permanently (it missed a deploy) doesn't block a start: LAN updates bring it up to date.
+- The menu rebuilds in place: same tab, same highlighted game, same lobby connection, no blank frame.
+- Your game can mark its own safe moment (between levels): `get_tree().current_scene.set_meta("safe_to_apply",
+  true)`. It only counts when the game isn't networked.
+- Switch on at once: `DUO_APPLY_NOW=1 duo-deploy "msg"`, or `touch <game>/.dev/apply_now` on one machine.
+  `GDEV_APPLY=now` restores the old way (offscreen godot.ts runs already apply at once).
+- How it works: no gdev bridge change. SafeApply runs just before the bridge's file scan and records held files'
+  new mtime/md5 in the bridge's own tables, so the bridge only reloads them when they're released.
+- Test: `tools/multibot.ts --copies -n 2 --seconds 120 res://tests/safe_apply_bot.tscn`. Each machine runs its
+  own copy and fake deploys reach them one after another.

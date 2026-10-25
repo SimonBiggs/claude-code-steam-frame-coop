@@ -216,6 +216,10 @@ func _host_lobby(with_vr: bool) -> void:
 		return
 	mode = "host"
 	host_has_vr = with_vr
+	# Joiners only talk to the host (it passes things on itself), so no relaying between them: with it on, a joiner
+	# leaving for a game made the host tell the others, who had just left too ("Unable to send packet on channel 0").
+	if multiplayer is SceneMultiplayer:
+		(multiplayer as SceneMultiplayer).server_relay = false
 	multiplayer.multiplayer_peer = peer
 	multiplayer.peer_connected.connect(func(id: int) -> void:
 		var ip := ""
@@ -308,6 +312,8 @@ func _close_peer() -> void:
 	if old != null and not old is OfflineMultiplayerPeer:
 		old.close()
 	multiplayer.multiplayer_peer = null
+	if multiplayer is SceneMultiplayer:
+		(multiplayer as SceneMultiplayer).server_relay = true  # (the default, for the games)
 
 
 func _exit_tree() -> void:

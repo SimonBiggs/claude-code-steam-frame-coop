@@ -248,6 +248,9 @@ func _check_end(v: int) -> void:
 
 
 func _finish() -> void:
+	var n := SafeApply.node()
+	if n != null:
+		print("SAFE APPLY BOT: machine %d: file check %d us (max %d us), stats %s" % [me, n.stats.scan_us, n.stats.scan_us_max, n.stats])
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(PROBE))
 	print("BOT RESULT: %s (machine %d)" % ["PASS" if failures == 0 else "FAIL", me])
 	phase = "quit"
