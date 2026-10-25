@@ -415,9 +415,10 @@ func _goal(slot: int, pos: Vector3, room: int, index: int) -> Dictionary:
 		for i in shop.size():
 			var it: Array = shop[i]
 			var tries_key := "%s/%d/%d" % [dp.built_key, slot, i]
-			if int(it[2]) == 0 and int(it[1]) <= gold and int(bought.get(tries_key, 0)) < 40:
+			var knight_cant: bool = dp._is_knight(slot) and int(it[0]) in [Loot.BOMBS, Loot.DASH, Loot.BASH, Loot.BOW]
+			if int(it[2]) == 0 and int(it[1]) <= gold and int(bought.get(tries_key, 0)) < 150 and not knight_cant:
 				var sp := FloorGen.to_world(f, 0, dp.SHOP_SPOTS[i]) + Vector3(0, 0, 0.9)
-				if Vector2(sp.x - pos.x, sp.z - pos.z).length() < 0.45:
+				if Vector2(sp.x - pos.x, sp.z - pos.z).length() < 1.0:
 					bought[tries_key] = int(bought.get(tries_key, 0)) + 1  # can't use it? give up after a while
 				return {"p": sp, "near": 0.3, "bonk": true, "at": sp - Vector3(0, 0, 0.9)}
 		return {"p": dp.view.stairs_at, "near": 0.4}
@@ -607,6 +608,8 @@ func knight(delta: float) -> void:
 				goal = g["p"]
 				if bool(g.get("bonk", false)) and feet.distance_to(Vector3(goal.x, 0, goal.z)) < 1.3:
 					var aim: Vector3 = (g.get("at", goal) as Vector3) + Vector3(swing_side * 0.2, 0.3, 0.0)
+					if String(f["kind"]) == "shop":
+						aim = (g.get("at", goal) as Vector3) + Vector3(swing_side * 0.1, 1.25, 0.0)  # touch the item on the pedestal
 					kit.vr_reach(rig, VrRig.RIGHT, aim, 6.0, delta)
 					if rig.hand_point(VrRig.RIGHT).distance_to(aim) < 0.08:
 						swing_side = -swing_side
