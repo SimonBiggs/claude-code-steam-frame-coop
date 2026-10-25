@@ -214,7 +214,6 @@ func _setup(mode: String) -> void:
 		else:
 			cockpit.add_robot()
 	party.allow_slot0 = mode != "client" and vr_rig == null
-	party.allow_keyboard = net.machine_kind != "deck"  # a Steam Deck: its built-in controls are the one player
 	if mode != "client":
 		_start_show()
 	else:

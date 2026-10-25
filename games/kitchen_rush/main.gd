@@ -1,5 +1,6 @@
 extends Node3D
 const VrText := preload("res://core/vr_text.gd")
+const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
 const UiKit := preload("res://core/ui_kit.gd")
 ## Kitchen Rush: co-op cooking chaos.
 ## Player 1 is the CHEF at the counter (VR hands, or button controls in split screen): chop and stack.
@@ -895,10 +896,10 @@ func _set_runner_active(p, on: bool) -> void:
 			banner("P%d!" % (p.index + 1), 1.5)
 			sound("wave", -6.0, 1.3)
 	elif on:
-		banner("P%d JOINED THE KITCHEN!  (%d runners)" % [p.index + 1, n], 1.5)
+		banner("%s  (%d runners)" % [Who.joined(Who.seat(self, p.index), "the kitchen"), n], 1.5)
 		sound("wave", -6.0, 1.3)
 	else:
-		banner("P%d left the kitchen  (%d runners)" % [p.index + 1, n], 1.5)
+		banner("%s  (%d runners)" % [Who.left(Who.seat(self, p.index), "the kitchen"), n], 1.5)
 	print("Net: player %d %s (%d runners)" % [p.index + 1, "joined" if on else "left", n])
 	if not p.remote:
 		on_player_activity_changed(p)
@@ -2427,7 +2428,7 @@ func on_client_joined() -> void:
 	if SIMPLE_MODE:
 		banner("LET'S COOK!", 2.0)
 		return
-	banner("THE RUNNERS ARE HERE!\nLet's cook!", 2.0)
+	banner("LET'S COOK!", 2.0)  # (no "they joined" line: each seat's join says WHO, core/who.gd)
 	if shift == 0:
 		break_t = 3.0
 
@@ -2436,7 +2437,7 @@ func on_client_left() -> void:
 	seats.all_left()  # each machine asks for its runners again when it reconnects
 	if SIMPLE_MODE:
 		return  # the kitchen helpers take over (solo VR)
-	banner("The TV players left - waiting for them to rejoin…", 0.0)
+	banner(Who.left(net.last_left_name) + " - waiting for them to come back…", 0.0)
 
 
 ## Host: one machine left: only its runners leave (and their seats become free).
@@ -2473,7 +2474,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 				get_tree().reload_current_scene()
 		"pause":
 			var paused: bool = args[0]
-			_set_pause_banner(paused, "A TV player opened the menu")
+			_set_pause_banner(paused, Who.paused_by(net.machine_name_of(net.sender_peer())))
 			get_tree().paused = paused
 
 

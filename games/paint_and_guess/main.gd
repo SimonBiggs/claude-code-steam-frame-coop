@@ -21,6 +21,7 @@ extends Node3D
 ## state (send_state) to the host, which turns them into strokes like the artist's.
 
 const VrText := preload("res://core/vr_text.gd")
+const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
 const UiKit := preload("res://core/ui_kit.gd")
 const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
@@ -736,7 +737,7 @@ func _activate(p) -> void:
 	p.reset_round()
 	p.reset_stats()
 	p.score = 0
-	_show_center("PLAYER %d JOINS THE GUESSING!" % (p.index + 1), 1.5)
+	_show_center(Who.joined(Who.seat(self, p.index), "the guessing"), 1.5)
 	sound("join", -4.0, 1.0, true)
 	on_player_activity_changed(p)
 
@@ -750,7 +751,7 @@ func _leave(p) -> void:
 	elif p.active:
 		p.set_active(false)
 		on_player_activity_changed(p)
-		_show_center("PLAYER %d LEFT" % (p.index + 1), 1.5)
+		_show_center(Who.left(Who.seat(self, p.index)), 1.5)
 	_save_party()
 
 
@@ -1772,7 +1773,7 @@ func _scoreboard() -> String:
 func on_client_joined() -> void:
 	if net.peer_count() > 1:
 		return  # another machine: on_machine_joined catches it up (no restart for everyone)
-	_show_center("THE TV PLAYERS JOINED!", 1.5)
+	# (no "they joined" line: each seat's join says WHO, core/who.gd)
 	if state == "wait" or state == "over":
 		_start_game()
 
@@ -1788,7 +1789,7 @@ func on_machine_joined(peer: int, _kind: String) -> void:
 func on_machine_left(peer: int) -> void:
 	var freed := seats.machine_left(peer)
 	if not freed.is_empty() and net.peer_count() > 0:
-		_show_center("PLAYER %d LEFT" % (int(freed[0]) + 1), 1.5)
+		_show_center(Who.left(net.machine_name_of(peer)), 1.5)
 
 
 ## Host: the LAST machine left (multi_machine games get this only then).
@@ -1796,7 +1797,7 @@ func on_client_left() -> void:
 	seats.all_left()
 	state = "wait"
 	canvas.hide_vote()
-	_show_center("The TV players left - waiting for them to come back…", 0.0)
+	_show_center(Who.left(net.last_left_name) + " - waiting for them to come back…", 0.0)
 
 
 ## peer 0: every machine; else only that one (a newcomer / a machine that fell out of step).
@@ -1821,7 +1822,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 		"leave":
 			if p.active:
 				p.set_active(false)
-				_show_center("PLAYER %d LEFT" % (index + 1), 1.5)
+				_show_center(Who.left(Who.seat(self, index)), 1.5)
 		"continue":
 			_on_continue()
 		"guess":
@@ -1839,7 +1840,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 			_send_sync(net.sender_peer())
 		"pause":
 			var paused: bool = args[0]
-			_set_pause_banner(paused, "A TV player opened the menu")
+			_set_pause_banner(paused, Who.paused_by(net.machine_name_of(net.sender_peer())))
 			get_tree().paused = paused
 			if not paused:
 				players[0].trig_block = true

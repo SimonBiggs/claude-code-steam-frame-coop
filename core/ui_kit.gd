@@ -114,6 +114,18 @@ static func ensure_pad_ui_actions() -> void:
 			InputMap.action_add_event(pair[0], ev)
 
 
+## Menus that open mid-play (pause menu, quit dialog): which pads are HOLDING `button` right now (device -> true).
+## Take it when the menu opens; a press from a pad in it is ignored until that pad lets go (erase it on release).
+## Every other press counts at once. (The old rule "A counts only after a release since opening" made the first A
+## after opening do nothing: kids had to press A twice to pick "Back to Arcade".)
+static func held_pads(button: JoyButton = JOY_BUTTON_A) -> Dictionary:
+	var out := {}
+	for d in 64:  # real pads (0..) and virtual bot pads (40..)
+		if Input.is_joy_button_pressed(d, button):
+			out[d] = true
+	return out
+
+
 static func player_color(index: int) -> Color:
 	return PLAYER_COLORS[posmod(index, PLAYER_COLORS.size())]
 

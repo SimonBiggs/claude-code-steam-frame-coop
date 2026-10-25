@@ -18,6 +18,7 @@ var vr_t := 0.0
 
 
 var jump_peak := 0.0
+var jump_paused := false
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -33,12 +34,12 @@ func _ready() -> void:
 	var host := OS.has_environment("DUO_HOST")
 	var t0 := 3.0 if client else 1.0
 	kit.at(t0, "%d TV players press A on their pads" % want, _join)
-	if not host:
+	if not host and BotKit.lead_machine():
 		kit.at(t0 + 6.0, "P2 presses Start: pause menu", func() -> void:
 			kit.allow_pause = true
 			_press("start"))
 		kit.at(t0 + 6.6, "paused?", func() -> void:
-			kit.assert_true(get_tree().paused and main.tv_banner != null and main.tv_banner.visible, "Start pauses")
+			kit.assert_true(get_tree().paused and main.tv_banner != null and not main.tv_banner.visible, "Start pauses (on_pause_changed made the banner; the open pause menu alone says PAUSED)")
 			_press("start"))
 		kit.at(t0 + 7.2, "resumed?", func() -> void:
 			kit.assert_true(not get_tree().paused and not main.tv_banner.visible, "Start again resumes")
@@ -49,12 +50,14 @@ func _ready() -> void:
 	# Sample the jump height over half a second (networked runs are not frame-locked).
 	for i in 10:
 		kit.at(t0 + 3.05 + i * 0.05, "", func() -> void:
+			if get_tree().paused:
+				jump_paused = true  # another machine paused everyone (tools/multibot.ts runs): nobody moves
 			var slots: Array[int] = main.party.local_slots()
 			if not slots.is_empty() and main.avatars.has(slots[0]):
 				jump_peak = maxf(jump_peak, (main.avatars[slots[0]] as Node3D).position.y))
 	kit.at(t0 + 3.6, "in the air?", func() -> void:
 		var slots: Array[int] = main.party.local_slots()
-		if not slots.is_empty() and main.avatars.has(slots[0]):
+		if not slots.is_empty() and main.avatars.has(slots[0]) and not jump_paused:
 			kit.assert_true(jump_peak > 0.5, "A makes a TV player jump"))
 	if host:
 		kit.at(22.0, "host checks (the TV machine is still connected)", _checks)
@@ -184,7 +187,7 @@ func _checks() -> void:
 		kit.assert_eq(main.party.local_slots().size(), want, "client: all %d local players are seated" % want)
 	else:
 		var host_p := 1 if main.flat_host else 0
-		kit.assert_eq(main.party.player_count(), want + host_p, "%s: all %d TV players (+%d on the host) are seated" % [mode, want, host_p])
+		kit.assert_eq(main.party.player_count(), kit.seated_want(want, host_p), "%s: all %d TV players (+%d on the host) are seated" % [mode, want, host_p])
 	if main.flat_host:
 		kit.assert_true(main.party.is_local(0) and main.avatars.has(0) and main.cams.has(0), "flat host: slot 0 plays here with a camera")
 	kit.assert_true(int(main.net.state_get("popped", 0)) > 0, "%s: balloons were popped" % mode)

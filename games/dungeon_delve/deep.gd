@@ -232,9 +232,11 @@ func _animate_lobby(delta: float) -> void:
 	var fills: Array = net.state_get("d_pads", [0.0, 0.0])
 	var i := 0
 	for mname in PADS:
-		var ring: Node3D = pad_rings[mname]
 		var k: float = float(fills[i]) if i < fills.size() else 0.0
 		i += 1
+		if not pad_rings.has(mname) or not pad_labels.has(mname):
+			continue  # a pad added by a hot reload: built at the next game start
+		var ring: Node3D = pad_rings[mname]
 		ring.scale = ring.scale.lerp(Vector3.ONE * maxf(0.05, k), 1.0 - exp(-12.0 * delta))
 		ring.visible = show_pads
 		(pad_labels[mname] as Label3D).visible = show_pads

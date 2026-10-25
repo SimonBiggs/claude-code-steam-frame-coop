@@ -1,5 +1,6 @@
 extends Node3D
 const VrText := preload("res://core/vr_text.gd")
+const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
 ## Cannon Cove: our pirate ship against waves of pirate ships, boarders and a sea monster.
 ## The VR gunner (player 1) swings and fires the cannons; the TV deckhands (players 2 to 7, drop-in:
 ## press A on a spare controller to join) keep the cannons loaded, patch leaks and shoot boarders. Gold for every ship sunk; the game ends when
@@ -1075,7 +1076,11 @@ func _poll_joins(delta: float) -> void:
 	join_t -= delta
 	if game_over or join_t > 0.0 or get_tree().paused or net.mode == "host":
 		return
-	for id in Input.get_connected_joypads():
+	var ids: Array = Input.get_connected_joypads()
+	for p in players:  # pads handed to a seat that sits out (a Deck alone: P2 holds a friend's pad) count too
+		if p.joy >= 0 and not ids.has(p.joy):
+			ids.append(p.joy)
+	for id in ids:
 		if not (Input.is_joy_button_pressed(id, JOY_BUTTON_A) or Input.is_joy_button_pressed(id, JOY_BUTTON_X)):
 			continue
 		var owner := device_owner(id)
@@ -1087,6 +1092,8 @@ func _poll_joins(delta: float) -> void:
 			join_t = 1.0
 			players[owner].set_meta("want_join", true)  # the host hasn't answered yet: ask again
 			seats.ask_soon()
+		elif not players[owner].active and _is_local_flat(players[owner]):
+			_join_player(players[owner], id)  # local: the seat holding this pad sat out (a Deck alone): it joins
 		return
 	if net.mode == "client":
 		var keys2 := Input.is_physical_key_pressed(KEY_ENTER) or Input.is_physical_key_pressed(KEY_SHIFT) or Input.is_physical_key_pressed(KEY_SLASH)
@@ -1125,12 +1132,12 @@ func _join_player(p, device: int) -> void:
 	if net.mode == "client":
 		p.set_meta("want_join", true)
 		seats.ask_soon()
-		_show_center(("PLAYER %d!" if SIMPLE_MODE else "PLAYER %d IS COMING ABOARD!") % (p.index + 1), 1.2, false)
+		_show_center(("PLAYER %d!" % (p.index + 1)) if SIMPLE_MODE else "%s is coming aboard!" % Who.seat(self, p.index), 1.2, false)
 	else:
 		p.position = spawn_pos(p.index)
 		p.set_active(true)
 		on_player_activity_changed(p)
-		_show_center(("PLAYER %d!" if SIMPLE_MODE else "PLAYER %d JOINED THE CREW!") % (p.index + 1), 1.5)
+		_show_center(("PLAYER %d!" % (p.index + 1)) if SIMPLE_MODE else Who.joined(Who.seat(self, p.index), "the crew"), 1.5)
 
 
 func _leave_player(p) -> void:
@@ -1144,7 +1151,7 @@ func _leave_player(p) -> void:
 		p.set_active(false)
 		on_player_activity_changed(p)
 		if not SIMPLE_MODE:
-			_show_center("Player %d left the crew" % (p.index + 1), 1.5)
+			_show_center(Who.left(Who.seat(self, p.index), "the crew"), 1.5)
 
 
 ## Keeps who-joined-with-what across scene reloads (restart, reconnect) so the crew stays aboard.
@@ -2831,19 +2838,20 @@ func _unhandled_input(event: InputEvent) -> void:
 func on_client_joined() -> void:
 	if not seats.first_machine():
 		return  # another machine: its deckhands come aboard when they ask ("join")
-	_show_center("ALL ABOARD!" if SIMPLE_MODE else "THE DECKHANDS ARE ABOARD!", 1.5)
+	if SIMPLE_MODE:
+		_show_center("ALL ABOARD!", 1.5)  # (no "they joined" line here: each seat's "join" says WHO, core/who.gd)
 
 
 ## Host: one machine left: only its deckhands leave (and their seats become free).
 func on_machine_left(peer: int) -> void:
 	var freed := seats.machine_left(peer)
 	if not freed.is_empty() and net.peer_count() > 0 and not SIMPLE_MODE:
-		_show_center("Player %d left the crew" % (int(freed[0]) + 1), 1.5)
+		_show_center(Who.left(net.machine_name_of(peer), "the crew"), 1.5)
 
 
 ## Host: the LAST machine left (multi_machine games get this only then).
 func on_client_left() -> void:
-	_show_center("" if SIMPLE_MODE else "The deckhands left - waiting for them to come back…", 0.0)
+	_show_center("" if SIMPLE_MODE else Who.left(net.last_left_name) + " - waiting for them to come back…", 0.0)
 	seats.all_left()  # each machine rejoins its crew when it reconnects
 
 
@@ -2871,21 +2879,21 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 		"join":
 			if not p.active:
 				p.set_active(true)
-				_show_center(("PLAYER %d!" if SIMPLE_MODE else "PLAYER %d JOINED THE CREW!") % (index + 1), 1.5)
+				_show_center(("PLAYER %d!" % (index + 1)) if SIMPLE_MODE else Who.joined(Who.seat(self, index), "the crew"), 1.5)
 				print("Net: player %d joined the game (%d deckhands)" % [index + 1, deckhands().size()])
 		"leave":
 			if p.active and index >= 1:
 				p.reset_crew_state()
 				p.set_active(false)
 				if not SIMPLE_MODE:
-					_show_center("Player %d left the crew" % (index + 1), 1.5)
+					_show_center(Who.left(Who.seat(self, index), "the crew"), 1.5)
 				print("Net: player %d left the game" % (index + 1))
 		"restart":
 			if game_over:
 				get_tree().reload_current_scene()
 		"pause":
 			var paused: bool = args[0]
-			_set_pause_banner(paused, "A deckhand opened the menu")
+			_set_pause_banner(paused, Who.paused_by(net.machine_name_of(net.sender_peer())))
 			get_tree().paused = paused
 
 

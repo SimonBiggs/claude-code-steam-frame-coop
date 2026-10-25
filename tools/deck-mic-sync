@@ -1,0 +1,9 @@
+#!/bin/sh
+# Enable deck-mic@ALIAS for every Deck in ~/.config/duo-arena/mic-decks; stop any that are not listed.
+conf=~/.config/duo-arena/mic-decks
+want=$(grep -v '^#' "$conf" | sed '/^\s*$/d')
+for a in $want; do systemctl --user enable --now "deck-mic@$a.service"; done
+for u in $(systemctl --user list-units --all --plain --no-legend 'deck-mic@*' | awk '{print $1}'); do
+  a=${u#deck-mic@}; a=${a%.service}
+  echo "$want" | grep -qx "$a" || systemctl --user disable --now "$u"
+done

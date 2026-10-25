@@ -38,6 +38,7 @@ extends Node3D
 ##    has no sentence, and no view shows its own player's name tag.
 
 const VrText := preload("res://core/vr_text.gd")
+const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
 const UiKit := preload("res://core/ui_kit.gd")
 const SfxScript := preload("res://core/sfx.gd")
 const NetScript := preload("res://core/net.gd")
@@ -669,7 +670,7 @@ func _activate(p) -> void:
 	p.set_active(true)
 	if p.index > 0:
 		p.reset_for_song()
-	_show_center(("PLAYER %d!" if SIMPLE_MODE else "PLAYER %d JOINS THE BAND!") % (p.index + 1), 1.5)
+	_show_center(("PLAYER %d!" % (p.index + 1)) if SIMPLE_MODE else Who.joined(Who.seat(self, p.index), "the band"), 1.5)
 	sound("join", -4.0, 1.0, true)
 	on_player_activity_changed(p)
 
@@ -683,7 +684,7 @@ func _leave(p) -> void:
 	elif p.active:
 		p.set_active(false)
 		on_player_activity_changed(p)
-		_show_center("PLAYER %d LEFT" % (p.index + 1), 1.5, true, "" if SIMPLE_MODE else "\u0001")
+		_show_center(Who.left(Who.seat(self, p.index)), 1.5, true, "" if SIMPLE_MODE else "\u0001")
 	_save_party()
 
 
@@ -1605,8 +1606,7 @@ func _save_best(s: int) -> void:
 
 func on_client_joined() -> void:
 	# Each machine asks for its own guitarists ("join"); the first one opens the setlist menu.
-	if net.peer_count() == 1 and not SIMPLE_MODE:
-		_show_center("THE TV BAND JOINED!", 1.5)
+	# (no "they joined" line: each seat's join says WHO, core/who.gd)
 	if state == "wait":
 		_enter_menu()
 
@@ -1634,7 +1634,7 @@ func _seat_gone(p) -> void:
 func on_client_left() -> void:
 	seats.all_left()
 	if not SIMPLE_MODE:
-		_show_center("The TV players left - keep drumming!", 2.0)
+		_show_center(Who.left(net.last_left_name) + " - keep drumming!", 2.0)
 
 
 ## A TV player changed their level / readiness in the SETLIST menu (local: nothing to send).
@@ -1664,7 +1664,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 			if p.active:
 				p.set_active(false)
 				on_player_activity_changed(p)
-				_show_center("PLAYER %d LEFT" % (index + 1), 1.5)
+				_show_center(Who.left(Who.seat(self, index)), 1.5)
 		"continue":
 			_on_continue(false)
 		"level":
@@ -1698,7 +1698,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 			stage.strum(index, false)
 		"pause":
 			var paused: bool = args[0]
-			_set_pause_banner(paused, "A TV player opened the menu")
+			_set_pause_banner(paused, Who.paused_by(net.machine_name_of(net.sender_peer())))
 			get_tree().paused = paused
 			if not paused:
 				players[0].trig_block = true

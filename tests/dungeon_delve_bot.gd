@@ -339,7 +339,7 @@ func _checks() -> void:
 		return
 	kit.assert_eq(outside, 0, "%s: heroes stayed inside the dungeon" % mode)
 	if mode != "host":
-		kit.assert_eq(main.party.player_count(), want, "%s: all %d TV players are seated" % [mode, want])
+		kit.assert_eq(main.party.player_count(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
 	if mode == "client":
 		kit.assert_true(max_mons >= 2, "client mirrors the monsters (%d)" % max_mons)
 		kit.assert_true(int(main.net.state_get("open", 0)) >= 2 or saw_results or again_sent, "client saw gates open")

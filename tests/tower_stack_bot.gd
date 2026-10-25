@@ -33,12 +33,12 @@ func _ready() -> void:
 	var host := OS.has_environment("DUO_HOST")
 	var t0 := 3.0 if client else 1.0
 	kit.at(t0, "%d TV players press A on their pads" % want, _join)
-	if not host:
+	if not host and BotKit.lead_machine():
 		kit.at(t0 + 6.0, "P2 presses Start: pause menu", func() -> void:
 			kit.allow_pause = true
 			_press("start"))
 		kit.at(t0 + 6.6, "paused?", func() -> void:
-			kit.assert_true(get_tree().paused and main.tv_banner != null and main.tv_banner.visible, "Start pauses and shows the banner")
+			kit.assert_true(get_tree().paused and main.tv_banner != null and not main.tv_banner.visible, "Start pauses and shows the banner (on_pause_changed made the banner; the open pause menu alone says PAUSED)")
 			_press("start"))
 		kit.at(t0 + 7.2, "resumed?", func() -> void:
 			kit.assert_true(not get_tree().paused, "Start again resumes everyone")
@@ -233,7 +233,7 @@ func _checks() -> void:
 		kit.assert_true(saw_results, "client: saw the results")
 		return
 	if mode == "local":
-		kit.assert_eq(main.party.player_count(), want, "local: all %d TV players are seated" % want)
+		kit.assert_eq(main.party.player_count(), kit.seated_want(want), "local: all %d TV players are seated" % want)
 	if main.flat_host:
 		kit.assert_true(main.party.is_local(0) and main.avatars.has(0) and main.cams.has(0), "flat host: slot 0 plays here with a camera")
 	if want > 0 and mode == "local" or mode == "host":

@@ -294,7 +294,7 @@ func _checks() -> void:
 	var cars: Array = main.net.state_get("cars", [])
 	kit.assert_true(cars.size() >= 4 and main.train.cars.size() == cars.size(), "%s: a car per rider (%d)" % [mode, cars.size()])
 	if mode != "host":
-		kit.assert_eq(main.party.player_count(), want, "%s: all %d players seated" % [mode, want])
+		kit.assert_eq(main.party.player_count(), kit.seated_want(want), "%s: all %d players seated" % [mode, want])
 	if mode != "client":
 		kit.assert_true(vmax > vmin + 3.0, "%s: speed follows the hills (%.1f..%.1f)" % [mode, vmin, vmax])
 		kit.assert_true(saw_lift, "%s: the chain lift pulled the train up" % mode)

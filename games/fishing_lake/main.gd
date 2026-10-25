@@ -21,6 +21,7 @@ extends Node3D
 ## and a glowing arrow over the practice ring.
 
 const VrText := preload("res://core/vr_text.gd")
+const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
 const SfxScript := preload("res://core/sfx.gd")
 const NetScript := preload("res://core/net.gd")
 const ClassicSeats := preload("res://core/classic_seats.gd")
@@ -1042,7 +1043,7 @@ func _leave(p) -> void:
 		p.set_active(false)
 		on_player_activity_changed(p)
 		if not SIMPLE_MODE:
-			_show_center("PLAYER %d LEFT" % (p.index + 1), 1.5)
+			_show_center(Who.left(Who.seat(self, p.index)), 1.5)
 	_save_party()
 
 
@@ -2348,15 +2349,14 @@ func debug_event(what: String) -> void:
 # --- Networked co-op (see docs/GAME_DEV_GUIDE.md) ------------------------------------
 
 func on_client_joined() -> void:
-	if SIMPLE_MODE or net.peer_count() > 1:
-		return  # the boats appear on the lake
-	_show_center("THE TV PLAYERS JOINED!", 1.5)
+	pass  # the boats appear on the lake; on_machine_joined says WHO came (core/who.gd)
 
 
 ## Host: a machine joined: it gets the journal (only it).
 func on_machine_joined(peer: int, _kind: String) -> void:
 	if not SIMPLE_MODE:
 		_send_journal(peer)
+		_show_center(Who.joined(net.machine_name_of(peer)), 1.5)
 
 
 ## Host: one machine left: only its boats row home (and their seats become free).
@@ -2364,7 +2364,7 @@ func on_machine_left(peer: int) -> void:
 	var freed := seats.machine_left(peer)
 	target = target_score()
 	if not freed.is_empty() and net.peer_count() > 0 and not SIMPLE_MODE:
-		_show_center("PLAYER %d LEFT" % (int(freed[0]) + 1), 1.5)
+		_show_center(Who.left(net.machine_name_of(peer)), 1.5)
 
 
 ## Host: the LAST machine left (multi_machine games get this only then).
@@ -2372,7 +2372,7 @@ func on_client_left() -> void:
 	seats.all_left()
 	target = target_score()
 	if not SIMPLE_MODE:
-		_show_center("The TV players left - the lake is all yours", 2.0)
+		_show_center(Who.left(net.last_left_name) + " - the lake is all yours", 2.0)
 
 
 func on_p2_action(action: String, args: Array, index: int = 1) -> void:
@@ -2392,7 +2392,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 				p.set_active(false)
 				target = target_score()
 				if not SIMPLE_MODE:
-					_show_center("PLAYER %d LEFT" % (index + 1), 1.5)
+					_show_center(Who.left(Who.seat(self, index)), 1.5)
 		"continue":
 			_on_continue()
 		"net":
@@ -2407,7 +2407,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 				on_boat_call(p)
 		"pause":
 			var paused: bool = args[0]
-			_set_pause_banner(paused, "A TV player opened the menu")
+			_set_pause_banner(paused, Who.paused_by(net.machine_name_of(net.sender_peer())))
 			get_tree().paused = paused
 			if not paused:
 				players[0].trig_lock = true

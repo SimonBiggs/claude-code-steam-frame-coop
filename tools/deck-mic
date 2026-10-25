@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+"""deck-mic ALIAS: pull the raw internal-mic stream from one Steam Deck over ssh and keep the last
+2 hours as one raw file per minute (16 kHz s16 mono) in
+~/GodotProjects/duo-arena/.dev/audio-decks/ALIAS/YYYYmmdd-HHMM.raw, each with a YYYYmmdd-HHMM.json
+timing sidecar (see ~/.local/lib/duo-audio/chunktime.py) so Decks and the room mic line up in time
+(used to tell who is talking by comparing loudness across Decks).
+Asked for by Simon (2026-10-24). Private: stays on this machine (.dev is gitignored).
+Only Decks listed in ~/.config/duo-arena/mic-decks are recorded.
+Deck off/asleep: retries quietly with backoff (15 s -> 5 min), logs only connect/disconnect changes."""
+import os, subprocess, sys, time
+sys.path.insert(0, os.path.expanduser("~/.local/lib/duo-audio"))
+from chunktime import Writer
+
+alias = sys.argv[1]
+CONF = os.path.expanduser("~/.config/duo-arena/mic-decks")
+allowed = {l.strip() for l in open(CONF) if l.strip() and not l.startswith("#")} if os.path.exists(CONF) else set()
+if alias not in allowed:
+    print(f"deck-mic: {alias} is not in {CONF}; not recording", flush=True)
+    while True:          # stay idle instead of restart-looping
+        time.sleep(3600)
+
+DIR = os.path.expanduser(f"~/GodotProjects/duo-arena/.dev/audio-decks/{alias}")
+KEEP_S = 2 * 3600
+os.makedirs(DIR, mode=0o700, exist_ok=True)
+os.chmod(os.path.dirname(DIR), 0o700); os.chmod(DIR, 0o700)
+
+# On the Deck: answer 5 clock pings (one line in -> its clock out), print NTP state, then stream the
+# built-in mic (nau8821 or acp5x "Internal_Mic"), niced so games are not disturbed.
+PINGS = 5
+REMOTE = (f"for i in $(seq {PINGS}); do read x; date +%s.%N; done; timedatectl show -p NTPSynchronized --value; "
+          "src=$(pactl list short sources | awk '/Internal_Mic/ && !/monitor/ {print $2; exit}'); "
+          'exec nice -n 10 pw-record ${src:+--target "$src"} --rate 16000 --channels 1 --format s16 -')
+SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15",
+       "-o", "ServerAliveCountMax=3", alias, REMOTE]
+
+last_clean = 0
+
+
+def clean():
+    global last_clean
+    if time.time() - last_clean < 60:
+        return
+    last_clean = time.time()
+    for old in os.listdir(DIR):
+        p = os.path.join(DIR, old)
+        try:
+            if time.time() - os.path.getmtime(p) > KEEP_S:
+                os.remove(p)
+        except FileNotFoundError:
+            pass
+
+
+backoff, online = 15, None
+while True:
+    proc = subprocess.Popen(SSH, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.PIPE)
+    w, got = None, False
+    try:
+        best = None                       # NTP-style: offset from the ping with the smallest round trip
+        for _ in range(PINGS):
+            t_send = time.time(); proc.stdin.write(b"\n"); proc.stdin.flush()
+            deck_t = float(proc.stdout.readline()); t_recv = time.time()
+            rtt = t_recv - t_send
+            if best is None or rtt < best[0]:
+                best = (rtt, deck_t - (t_send + t_recv) / 2)
+        proc.stdin.close()
+        ntp = proc.stdout.readline().strip()
+        extra = dict(source=alias, deck_clock_minus_local_s=round(best[1], 4), clock_ping_rtt_s=round(best[0], 4),
+                     deck_ntp_synced=(ntp == b"yes"), measured_unix=round(time.time(), 1))
+        w = Writer(DIR, extra)
+    except Exception:
+        pass
+    while w:
+        raw = proc.stdout.read(3200)  # 100 ms
+        if not raw:
+            break
+        if not got:
+            got = True
+            if online is not True:
+                print(f"deck-mic: {alias} streaming (deck clock {extra['deck_clock_minus_local_s']*1000:+.0f} ms, "
+                      f"rtt {extra['clock_ping_rtt_s']*1000:.0f} ms, ntp {'ok' if extra['deck_ntp_synced'] else 'NOT synced'})", flush=True)
+                online = True
+        backoff = 15
+        w.write(raw)
+        clean()
+    if w:
+        w.close()
+    proc.kill(); proc.wait()
+    if online is not False:
+        print(f"deck-mic: {alias} not reachable; retrying quietly", flush=True)
+        online = False
+    clean()
+    time.sleep(backoff)
+    backoff = min(backoff * 2, 300)

@@ -1,5 +1,6 @@
 extends Node3D
 const VrText := preload("res://core/vr_text.gd")
+const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
 ## Snowball Blitz: defend the snow fort in the village square from waves of mischievous snowmen.
 ## VR player (host): the team's sniper, throwing real snowballs with their hands.
 ## TV players: lob charged snowballs and pack the fort walls back up. Hot cocoa warms you up.
@@ -1933,7 +1934,7 @@ func _activate_player(i: int) -> void:
 		p.net_started = false  # snap to the TV player's next reported position
 	elif not p.vr:
 		p.global_position = _spawn_spot(i, net.mode)
-	_show_center(("PLAYER %d!" if SIMPLE_MODE else "PLAYER %d JOINED!") % (i + 1), 1.5)
+	_show_center(("PLAYER %d!" % (i + 1)) if SIMPLE_MODE else Who.joined(Who.seat(self, i)), 1.5)
 	print("Net: player %d joined the game (%d playing)" % [i + 1, party_size()])
 	on_player_activity_changed(p)
 
@@ -1950,7 +1951,7 @@ func _deactivate_player(i: int) -> void:
 		p.is_down = false
 		p._apply_down_pose(false)
 	if not SIMPLE_MODE:
-		_show_center("PLAYER %d LEFT" % (i + 1), 1.5)
+		_show_center(Who.left(Who.seat(self, i)), 1.5)
 	print("Net: player %d left the game (%d playing)" % [i + 1, party_size()])
 	on_player_activity_changed(p)
 
@@ -1969,7 +1970,7 @@ func on_client_joined() -> void:
 		sound("pickup", 0.0, 0.8)
 		_show_center("HELLO TV!", 1.5)
 		return
-	_show_center("THE TV PLAYERS JOINED!", 1.5)
+	# (no "they joined" line: each seat's join says WHO, core/who.gd)
 
 
 ## Host: one machine left: only its players leave (and their seats become free).
@@ -1991,7 +1992,7 @@ func on_client_left() -> void:
 	seats.all_left()  # each machine asks for its players again when it reconnects
 	if SIMPLE_MODE:
 		return  # keep playing; they can drop back in
-	_show_center("The TV players left - waiting for them to rejoin…", 0.0)
+	_show_center(Who.left(net.last_left_name) + " - waiting for them to come back…", 0.0)
 
 
 func on_p2_action(action: String, args: Array, index: int = 1) -> void:
@@ -2023,7 +2024,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 				get_tree().reload_current_scene()
 		"pause":
 			var paused: bool = args[0]
-			_set_pause_banner(paused, "A TV player opened the menu")
+			_set_pause_banner(paused, Who.paused_by(net.machine_name_of(net.sender_peer())))
 			get_tree().paused = paused
 
 

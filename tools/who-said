@@ -1,0 +1,631 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.12"
+# dependencies = ["numpy", "faster-whisper", "sherpa-onnx", "pillow"]
+# ///
+"""who-said: who is talking, from the family's Steam Deck mics (each Deck sits next to its owner).
+
+  who-said [RANGE]              recent segments: time, speaker, confidence, why, Deck, words
+                                RANGE: 10m (default), 2h, 20:30 (since), 20:30-20:45
+  who-said --enroll NAME [HH:MM:SS]   confirm that the segment at that time (default: the latest) was NAME;
+                                its voice goes into NAME's profile (counts as 3 samples)
+  who-said --profiles           voice profiles and how many samples each has
+  who-said --timeline [RANGE] [-o FILE.png]   picture: one row per Deck, "near this Deck" energy over time,
+                                coloured by who was talking (default last 5 min -> .dev/who/timeline.png)
+  who-said --status             daemon health, Deck offsets, queue
+  who-said --test-synth [N]     mix pairs of confident single-speaker clips from different Decks (real
+                                multichannel recordings, summed) and measure word accuracy, separated vs clean
+  who-said --replay RANGE       run the daemon's pipeline over recorded audio (logs, no feed to Claude)
+  who-said --serve              the daemon (systemd user service who-said)
+
+How it decides: see ~/.local/lib/duo-audio/whocore.py. Everything stays on this machine; data in
+~/GodotProjects/duo-arena/.dev/who/ (gitignored). Asked for by Simon, 2026-10-24.
+"""
+import fcntl, json, os, re, sys, threading, time, wave
+from pathlib import Path
+
+sys.path.insert(0, str(Path.home() / ".local/lib/duo-audio"))
+import numpy as np
+import whocore as W
+
+WHO = W.WHO
+SEGS = WHO / "segments.jsonl"      # every emitted speech segment (full detail)
+LOG = WHO / "who.log"              # human-readable "[HH:MM:SS] [Name 0.91] words"
+FEED = WHO / "feed.log"            # lines voice-inject passes to Claude: "[HH:MM:SS] [Name] words"
+LABELS = WHO / "labels.jsonl"      # speaker for each voice-bridge (room mic) line, keyed by its stamp
+STATE = WHO / "state.json"
+CLIPS = WHO / "clips"
+VOICE_LOG = W.DEV / "voice.log"
+UTT = W.DEV / "utterances"
+LAG = float(os.environ.get("WHO_LAG", "1.0"))       # seconds behind real time (Deck audio arrives ~0.1 s late)
+ASR_MODEL = os.environ.get("WHO_ASR", "small.en")
+ASR_THREADS = int(os.environ.get("WHO_ASR_THREADS", "2"))
+KEEP_CLIPS = 600
+
+
+def write_wav(path, audio):
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1), w.setsampwidth(2), w.setframerate(W.RATE)
+        w.writeframes((np.clip(audio, -1, 1) * 32767).astype(np.int16).tobytes())
+
+
+def read_wav(path):
+    with wave.open(str(path)) as w:
+        return np.frombuffer(w.readframes(w.getnframes()), np.int16) / 32768.0
+
+
+def low_priority_thread():
+    """Whisper/TitaNet threads: idle scheduling + nice 19, so games always win."""
+    try:
+        os.setpriority(os.PRIO_PROCESS, threading.get_native_id(), 19)
+        os.sched_setscheduler(0, os.SCHED_IDLE, os.sched_param(0))
+    except OSError:
+        pass
+
+
+LOOP = re.compile(r"((?:\b[\w']+\W+){1,14}?)\1{2,}", re.I)   # Whisper stuck repeating a phrase: keep 2
+
+
+class ASR:
+    def __init__(self):
+        from faster_whisper import WhisperModel
+        from faster_whisper.vad import VadOptions, get_speech_timestamps
+        self.model = WhisperModel(ASR_MODEL, device="cpu", compute_type="int8", cpu_threads=ASR_THREADS)
+        self.vad = lambda a: get_speech_timestamps(a, VadOptions(min_silence_duration_ms=300))
+
+    def speech_s(self, audio):
+        return sum(t["end"] - t["start"] for t in self.vad(audio.astype(np.float32))) / W.RATE
+
+    def __call__(self, audio):
+        segs, _ = self.model.transcribe(audio.astype(np.float32), language="en", beam_size=1, vad_filter=True,
+                                        condition_on_previous_text=False, temperature=0.0)
+        segs = list(segs)
+        text = LOOP.sub(r"\1\1… ", " ".join(s.text.strip() for s in segs).strip() + " ").strip()
+        lp = float(np.mean([s.avg_logprob for s in segs])) if segs else -9.0
+        nsp = float(np.mean([s.no_speech_prob for s in segs])) if segs else 1.0
+        return text, lp, nsp
+
+
+# ======================================================================== daemon
+class Daemon:
+    def __init__(self):
+        WHO.mkdir(parents=True, exist_ok=True)
+        CLIPS.mkdir(exist_ok=True)
+        os.chmod(WHO, 0o700)
+        self.src = W.FileSource()
+        st = json.loads(STATE.read_text()) if STATE.exists() else {}
+        self.eng = W.Engine(self.src, offsets=st.get("offsets"), on_segment=self.on_segment)
+        self.prof = W.Profiles(threads=1)
+        self.jobs, self.cv = [], threading.Condition()
+        self.done: list = []                     # finished segments waiting to be emitted
+        self.busy: set = set()                   # ids queued or being processed
+        self.lock = threading.Lock()
+        self.stats = dict(segments=0, leaks=0, nonspeech=0, junk=0, dups=0, emitted=0, asr_s=0.0, dropped_backlog=0)
+        self.seq = 0
+        self.room_utts: list = []                # (t0, t1) of voice-bridge utterances (room mic)
+
+    # ---- engine callback (main thread): leak filter, cut out the masked audio, queue it
+    def on_segment(self, seg):
+        self.stats["segments"] += 1
+        if "leak" in seg:
+            self.stats["leaks"] += 1
+            return
+        self.seq += 1
+        seg["id"] = self.seq
+        seg["audio"] = self.eng.masked_audio(seg["chan"], seg["ka"], seg["kb"])
+        with self.cv:
+            self.busy.add(seg["id"])
+            self.jobs.append(seg)
+            self.cv.notify()
+
+    # ---- worker thread: speech check, voice profile, Whisper, decision
+    def worker(self):
+        low_priority_thread()
+        asr = ASR()
+        print(f"who-said: ASR ready ({ASR_MODEL}, {ASR_THREADS} threads)", flush=True)
+        while True:
+            with self.cv:
+                while not self.jobs:
+                    self.cv.wait()
+                # overlaps first (several Decks at once), then oldest; drop a backlog older than 60 s
+                now = time.time()
+                for j in [j for j in self.jobs if now - j["t1"] > 60]:
+                    self.jobs.remove(j); self.busy.discard(j["id"]); self.stats["dropped_backlog"] += 1
+                if not self.jobs:
+                    continue
+                seg = self.jobs.pop(0)
+            t0 = time.time()
+            try:
+                self.process(seg, asr)
+            except Exception as e:
+                print(f"who-said: segment failed: {e!r}", flush=True)
+                seg["status"] = "error"
+            seg["asr_s"] = round(time.time() - t0, 2)
+            self.stats["asr_s"] += seg["asr_s"]
+            with self.lock:
+                self.done.append(seg)
+                self.busy.discard(seg["id"])
+
+    def process(self, seg, asr):
+        a = seg["audio"]
+        sp = asr.speech_s(a)
+        seg["speech_s"] = round(sp, 2)
+        if sp < 0.3:
+            seg["status"] = "nonspeech"; self.stats["nonspeech"] += 1
+            return
+        emb = self.prof.embed(a)
+        sc = self.prof.scores(emb, "deck") if emb is not None else []
+        text, lp, nsp = asr(a)
+        seg.update(text=text, logprob=round(lp, 2), no_speech=round(nsp, 2))
+        if W.is_junk(text) or (nsp > 0.6 and lp < -1.0):
+            seg["status"] = "junk"; self.stats["junk"] += 1
+            return
+        label, conf, why = W.decide(seg["owner"], seg["margin_db"], sc)
+        seg.update(label=label, conf=conf, why=why, status="ok",
+                   voice=[[round(s, 3), n] for s, n, _ in sc[:3]])
+        stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(seg["t0"]))
+        clip = CLIPS / f"{stamp}-{seg['chan']}.wav"
+        write_wav(clip, a)
+        seg["clip"] = clip.name
+        if emb is not None:
+            np.save(CLIPS / f"{stamp}-{seg['chan']}.emb.npy", emb)
+        for old in sorted(CLIPS.glob("*.wav"))[:-KEEP_CLIPS]:
+            for f in CLIPS.glob(old.name[:-4] + ".*"):
+                f.unlink()
+        # learn the owner's Deck voice only from clear cases
+        o = seg["owner"]
+        contradicted = sc and sc[0][1] != o and sc[0][2] >= 10 and sc[0][0] > 0.6
+        if (emb is not None and o and label == o and (seg["margin_db"] or 0) >= 8 and sp >= 1.2
+                and len(W.words(text)) >= 3 and not contradicted):
+            self.prof.learn(o, emb, "deck")
+            seg["learned"] = True
+
+    # ---- emission (main thread): wait for overlapping segments, drop duplicates, write logs
+    def emit_ready(self):
+        with self.lock:
+            done = list(self.done)
+            busy = set(self.busy)
+        open_vad = [(self.eng.chans[i], v["start"] / W.FPS) for i, v in enumerate(self.eng.vad) if v["on"]]
+        pending = [j for j in self.jobs]
+        for seg in sorted(done, key=lambda s: s["t0"]):
+            if seg["status"] != "ok":
+                self.retire(seg)
+                continue
+            waiting = any(j["t0"] < seg["t1"] and j["t1"] > seg["t0"] for j in pending) or \
+                any(st < seg["t1"] for c, st in open_vad if c != seg["chan"])
+            if waiting and time.time() - seg["t1"] < 20:
+                continue
+            over = [s for s in done if s is not seg and s.get("status") == "ok" and s["t0"] < seg["t1"] and s["t1"] > seg["t0"]]
+            for o in over:
+                ov = min(o["t1"], seg["t1"]) - max(o["t0"], seg["t0"])
+                if ov > 0.5 * min(o["t1"] - o["t0"], seg["t1"] - seg["t0"]) and W.similar(o["text"], seg["text"]) >= 0.6:
+                    score = lambda s: (s["margin_db"] or 0) / 10 + s["logprob"] + s["conf"]
+                    loser = seg if score(seg) < score(o) else o
+                    loser["status"] = "dup"; self.stats["dups"] += 1
+            if seg["status"] == "dup":
+                self.retire(seg)
+                continue
+            others = [o for o in over if o.get("status") in ("ok", "emitted") and o.get("label") != seg.get("label")]
+            seg["with"] = sorted({o["label"] for o in others})
+            self.write(seg)
+            seg["status"] = "emitted"
+            self.retire(seg, keep=True)
+
+    def retire(self, seg, keep=False):
+        with self.lock:
+            if seg in self.done and not keep:
+                self.done.remove(seg)
+            # emitted ones stay 30 s so later overlapping segments can see them
+            self.done = [s for s in self.done if not (s.get("status") == "emitted" and time.time() - s["t1"] > 30)]
+
+    def room_live(self):
+        x, ok = self.src.read("room", time.time() - 12, 16000 * 10)
+        return ok.mean() > 0.5
+
+    def write(self, seg):
+        self.stats["emitted"] += 1
+        name = W.label_text(seg["label"], seg["conf"])
+        rec = {k: v for k, v in seg.items() if k not in ("audio", "ka", "kb")}
+        rec["name"] = name
+        rec["time"] = W.hms(seg["t0"])
+        if getattr(self, "replaying", False):
+            rec["feed"] = False
+            rec["replayed"] = True
+            with open(SEGS, "a") as f:
+                f.write(json.dumps(rec) + "\n")
+            w = f" (with {', '.join(seg['with'])})" if seg["with"] else ""
+            with open(LOG, "a") as f:
+                f.write(f"[{rec['time']}] [{name} {seg['conf']:.2f}]{w} {seg['text']}\n")
+            return
+        room = self.room_live()
+        covered = any(a < seg["t1"] and b > seg["t0"] for a, b in self.room_utts)
+        rec["feed"] = (not room) or bool(seg["with"]) or not covered
+        with open(SEGS, "a") as f:
+            f.write(json.dumps(rec) + "\n")
+        w = f" (with {', '.join(seg['with'])})" if seg["with"] else ""
+        with open(LOG, "a") as f:
+            f.write(f"[{rec['time']}] [{name} {seg['conf']:.2f}]{w} {seg['text']}\n")
+        if rec["feed"]:
+            with open(FEED, "a") as f:
+                f.write(f"[{rec['time']}] [{name}] {seg['text']}\n")
+
+    # ---- room mic lines from voice-bridge: who said them (for voice-inject's prefix)
+    def room_labels(self):
+        """Tail voice.log; for each new fast line find its saved clip, place it in time, label it."""
+        pos = VOICE_LOG.stat().st_size if VOICE_LOG.exists() else 0
+        rx = re.compile(r"^\[(\d\d:\d\d:\d\d)\] (?!~)")
+        while True:
+            time.sleep(0.2)
+            try:
+                size = VOICE_LOG.stat().st_size
+            except FileNotFoundError:
+                continue
+            if size < pos:
+                pos = 0
+            if size == pos:
+                continue
+            with open(VOICE_LOG, "rb") as f:
+                f.seek(pos)
+                chunk = f.read(size - pos)
+            pos = size
+            for line in chunk.decode("utf-8", "replace").splitlines():
+                m = rx.match(line)
+                if m:
+                    try:
+                        self.label_room(m.group(1))
+                    except Exception as e:
+                        print(f"who-said: room label failed: {e!r}", flush=True)
+
+    def label_room(self, stamp):
+        day = time.strftime("%Y%m%d")
+        wav = UTT / f"{day}-{stamp.replace(':', '')}.wav"
+        for _ in range(20):
+            if wav.exists():
+                break
+            time.sleep(0.1)
+        t_stamp = time.mktime(time.strptime(f"{day} {stamp}", "%Y%m%d %H:%M:%S"))
+        audio = read_wav(wav) if wav.exists() else None
+        dur = len(audio) / W.RATE if audio is not None else 2.0
+        t1 = t_stamp + 0.5 - 0.55          # stamp is ~0.55 s after the speech ended (second resolution)
+        t0 = t1 - dur
+        self.room_utts = [u for u in self.room_utts if time.time() - u[1] < 120] + [(t0, t1)]
+        while self.eng.k is None or self.eng.k / W.FPS < t1 + 0.3:
+            time.sleep(0.1)
+        f = self.eng.frames(int(t0 * W.FPS), int(t1 * W.FPS))
+        owner, margin, levels = None, None, {}
+        if f is not None:
+            E = f[0]
+            decks = [i for i, c in enumerate(self.eng.chans) if c != "room" and not np.isnan(E[:, i]).all()]
+            if decks:
+                med = {i: float(np.nanpercentile(E[:, i], 80)) for i in decks}
+                levels = {self.eng.chans[i]: round(v, 1) for i, v in med.items()}
+                best = max(med, key=med.get)
+                if med[best] > W.ON_DB:
+                    owner = W.OWNERS.get(self.eng.chans[best])
+                    rest = [v for i, v in med.items() if i != best]
+                    margin = med[best] - max(rest) if rest else None
+        emb = self.prof.embed(audio) if audio is not None else None
+        sc = self.prof.scores(emb, "room") if emb is not None else []
+        label, conf, why = W.decide(owner, margin, sc)
+        rec = dict(stamp=stamp, t0=round(t0, 2), t1=round(t1, 2), label=label, conf=conf, why=why,
+                   name=W.label_text(label, conf), levels=levels, margin_db=None if margin is None else round(margin, 1),
+                   voice=[[round(s, 3), n] for s, n, _ in sc[:3]])
+        with open(LABELS, "a") as fh:
+            fh.write(json.dumps(rec) + "\n")
+        if emb is not None and owner and label == owner and (margin or 0) >= 8 and dur >= 1.2:
+            self.prof.learn(owner, emb, "room")
+
+    # ---- offline: the same pipeline over recorded audio (no feed to Claude)
+    def replay(self, t0, t1):
+        low_priority_thread()
+        self.replaying = True
+        asr = ASR()
+        self.eng.k = int((t0 - 20) * W.FPS)
+        for k in range(self.eng.k + W.FPS, int(t1 * W.FPS) + W.FPS, W.FPS):
+            self.eng.step(min(k, int(t1 * W.FPS)))
+            if (k // W.FPS) % 5 == 0:
+                self.eng.align(k / W.FPS)
+            if k >= int(t1 * W.FPS):
+                self.eng.flush()
+            while self.jobs:
+                seg = self.jobs.pop(0)
+                if seg["t0"] < t0:
+                    self.busy.discard(seg["id"]); continue
+                self.process(seg, asr)
+                self.done.append(seg); self.busy.discard(seg["id"])
+            self.emit_ready()
+        print("replay counts:", self.stats)
+
+    # ---- main loop
+    def serve(self):
+        lockf = open(WHO / "serve.lock", "w")
+        try:
+            fcntl.flock(lockf, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            sys.exit("who-said: already running")
+        threading.Thread(target=self.worker, daemon=True).start()
+        threading.Thread(target=self.room_labels, daemon=True).start()
+        print("who-said: listening to", ", ".join(self.eng.chans), flush=True)
+        last_align = last_state = 0.0
+        cpu0, wall0 = time.process_time(), time.time()
+        while True:
+            now = time.time()
+            k_end = int((now - LAG) * W.FPS)
+            if self.eng.k is not None and k_end - self.eng.k > 30 * W.FPS:
+                self.eng.k = k_end - W.FPS          # fell far behind (suspend?): skip ahead
+            self.eng.step(k_end)
+            if now - last_align > 5:
+                last_align = now
+                self.eng.align(now - LAG)
+            self.emit_ready()
+            if now - last_state > 5:
+                last_state = now
+                live = [c for i, c in enumerate(self.eng.chans)
+                        if not np.isnan(self.eng.E[(self.eng.k - 1) % W.RING, i])]
+                cpu = time.process_time() - cpu0
+                st = dict(heartbeat=now, live=live, room_live=self.room_live(), offsets=self.eng.off,
+                          queue=len(self.jobs), stats=self.stats, cpu_pct=round(100 * cpu / max(now - wall0, 1), 1),
+                          align=self.eng.align_log[-1][2:] if self.eng.align_log else None)
+                tmp = STATE.with_suffix(".tmp")
+                tmp.write_text(json.dumps(st, indent=1))
+                os.replace(tmp, STATE)
+            time.sleep(max(0.05, 1.0 - (time.time() - now)))
+
+
+# ======================================================================== CLI helpers
+def parse_range(arg, default_s=600):
+    now = time.time()
+    if not arg:
+        return now - default_s, now
+    m = re.fullmatch(r"(\d+)([smh])", arg)
+    if m:
+        return now - int(m.group(1)) * {"s": 1, "m": 60, "h": 3600}[m.group(2)], now
+
+    def at(t):
+        t = t if t.count(":") == 2 else t + ":00"
+        x = time.mktime(time.strptime(time.strftime("%Y%m%d ") + t, "%Y%m%d %H:%M:%S"))
+        return x - 86400 if x > now + 60 else x
+    if "-" in arg:
+        a, b = arg.split("-", 1)
+        return at(a), at(b)
+    return at(arg), now
+
+
+def load_segs(t0, t1):
+    out = []
+    if SEGS.exists():
+        for line in SEGS.read_text().splitlines():
+            try:
+                s = json.loads(line)
+            except ValueError:
+                continue
+            if s["t1"] >= t0 and s["t0"] <= t1:
+                out.append(s)
+    return out
+
+
+def cmd_list(arg):
+    t0, t1 = parse_range(arg)
+    segs = load_segs(t0, t1)
+    if not segs:
+        print("no speech segments in that range" + ("" if STATE.exists() else " (is the who-said service running?)"))
+    for s in segs:
+        m = "" if s.get("margin_db") is None else f"{s['margin_db']:+.0f}dB"
+        w = f" +{','.join(s['with'])}" if s.get("with") else ""
+        print(f"{s['time']}  {s['name']:<11} {s['conf']:.2f}  {s['why']:<11} {m:>6} {s['chan']:<15}{w} {s['text'][:70]}")
+
+
+def cmd_enroll(name, when):
+    if name not in W.NAMES:
+        sys.exit(f"who-said: unknown name {name!r}; family names: {', '.join(W.NAMES)}")
+    segs = load_segs(time.time() - 7200, time.time())
+    if not segs:
+        sys.exit("who-said: no recent segments to enroll from")
+    if when:
+        t = parse_range(when)[0]
+        seg = min(segs, key=lambda s: abs(s["t0"] - t))
+        if abs(seg["t0"] - t) > 30:
+            sys.exit(f"who-said: no segment near {when}")
+    else:
+        seg = segs[-1]
+    emb_f = CLIPS / (seg.get("clip", "x.wav")[:-4] + ".emb.npy")
+    prof = W.Profiles()
+    emb = np.load(emb_f) if emb_f.exists() else (prof.embed(read_wav(CLIPS / seg["clip"])) if seg.get("clip") and (CLIPS / seg["clip"]).exists() else None)
+    if emb is None:
+        sys.exit("who-said: that segment's audio is gone or too short")
+    kind = "room" if seg["chan"] == "room" else "deck"
+    for _ in range(3):
+        prof.learn(name, emb, kind)
+    with open(WHO / "enrolled.jsonl", "a") as f:
+        f.write(json.dumps(dict(t=time.time(), name=name, seg_time=seg["time"], chan=seg["chan"], was=seg["name"])) + "\n")
+    print(f"enrolled {seg['time']} ({seg['chan']}, was {seg['name']}: \"{seg['text'][:40]}\") as {name}")
+
+
+def cmd_profiles():
+    prof = W.Profiles()
+    for name in W.NAMES:
+        k = prof.p.get(name, {})
+        print(f"{name:<10} deck {k.get('deck', [0, 0])[1]:>3} samples   room {k.get('room', [0, 0])[1]:>3} samples")
+
+
+def cmd_status():
+    if not STATE.exists():
+        sys.exit("who-said: no state yet (service not running?)")
+    st = json.loads(STATE.read_text())
+    age = time.time() - st["heartbeat"]
+    print(f"daemon {'alive' if age < 15 else 'STALE'} ({age:.0f} s ago), cpu {st['cpu_pct']}% of one core, queue {st['queue']}")
+    print("live mics:", ", ".join(st["live"]) or "none", "| room mic", "on" if st["room_live"] else "off")
+    print("offsets ms:", {c: round(v * 1000, 1) for c, v in st["offsets"].items() if v})
+    if st.get("align"):
+        print("alignment fit residual ms:", st["align"][0], "\n  pair spread (IQR) ms:", st["align"][1])
+    print("counts:", st["stats"])
+
+
+# ======================================================================== timeline picture
+COLORS = {"Simon": (66, 133, 244), "Mum": (219, 68, 160), "David": (52, 168, 83), "Nathanael": (251, 140, 0),
+          "Abigail": (171, 71, 188), "Samuel": (0, 172, 193), "unknown": (150, 150, 150)}
+
+
+def replay(t0, t1, offsets=None):
+    """Re-run the frame pipeline over files for [t0, t1] (with 20 s warm-up). Returns (engine, E (frames, C))."""
+    src = W.FileSource()
+    chans = [c for c in src.channels()]
+    eng = W.Engine(src, chans, offsets=offsets, on_segment=lambda s: None)
+    k0, k1 = int((t0 - 20) * W.FPS), int(t1 * W.FPS)
+    eng.k = k0
+    out = []
+    for k in range(k0 + W.FPS, k1 + W.FPS, W.FPS):
+        eng.step(min(k, k1))
+        if eng.k > t0 * W.FPS:
+            ks = np.arange(max(eng.k - W.FPS, int(t0 * W.FPS)), eng.k)
+            out.append(eng.E[ks % W.RING].copy())
+    return eng, (np.vstack(out) if out else np.zeros((0, len(chans))))
+
+
+def cmd_timeline(arg, outfile):
+    from PIL import Image, ImageDraw, ImageFont
+    t0, t1 = parse_range(arg, 300)
+    st = json.loads(STATE.read_text()) if STATE.exists() else {}
+    eng, E = replay(t0, t1, st.get("offsets"))
+    rows = [i for i in range(E.shape[1]) if not np.isnan(E[:, i]).all()]
+    if not rows:
+        sys.exit("who-said: no mic audio in that range")
+    segs = [s for s in load_segs(t0, t1) if s.get("status") in ("emitted", "ok")]
+    Wd, left, rowh, top = 1400, 150, 70, 30
+    H = top + rowh * len(rows) + 40
+    img = Image.new("RGB", (Wd, H), (18, 18, 22))
+    d = ImageDraw.Draw(img)
+    font = ImageFont.load_default(size=14)
+    px = lambda t: left + (t - t0) / (t1 - t0) * (Wd - left - 10)
+    span = t1 - t0
+    step = next(s for s in (5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600) if span / s <= 14)
+    for tt in np.arange(np.ceil(t0 / step) * step, t1, step):
+        d.line([(px(tt), top), (px(tt), H - 30)], fill=(50, 50, 58))
+        d.text((px(tt) - 25, H - 25), W.hms(tt), fill=(170, 170, 170), font=font)
+    nfr = len(E)
+    for r, ci in enumerate(rows):
+        c = eng.chans[ci]
+        y0 = top + r * rowh
+        d.text((8, y0 + rowh / 2 - 16), c, fill=(220, 220, 220), font=font)
+        d.text((8, y0 + rowh / 2 + 2), W.OWNERS.get(c, "room mic"), fill=COLORS.get(W.OWNERS.get(c), (150, 150, 150)), font=font)
+        d.line([(left, y0 + rowh - 2), (Wd - 10, y0 + rowh - 2)], fill=(60, 60, 66))
+        e = np.nan_to_num(E[:, ci], nan=0)
+        cols = np.full((nfr, 3), 90)
+        for s in segs:
+            if s["chan"] == c:
+                a, b = int((s["t0"] - t0) * W.FPS), int((s["t1"] - t0) * W.FPS)
+                cols[max(a, 0):max(b, 0)] = COLORS.get(s["label"], COLORS["unknown"])
+        xs = np.linspace(0, nfr, Wd - left - 10, endpoint=False).astype(int)
+        for i, k in enumerate(xs):
+            kk = slice(k, max(k + 1, int(xs[i + 1]) if i + 1 < len(xs) else nfr))
+            v = float(e[kk].max())
+            h = min(v / 40.0, 1.0) * (rowh - 8)
+            if h > 0.5:
+                d.line([(left + i, y0 + rowh - 3), (left + i, y0 + rowh - 3 - h)], fill=tuple(int(x) for x in cols[kk].max(0)))
+        for s in segs:
+            if s["chan"] == c:
+                d.text((max(px(s["t0"]), left) + 2, y0 + 2), f"{s['name']} {s['conf']:.1f}", fill=COLORS.get(s["label"], COLORS["unknown"]), font=font)
+    d.text((left, 6), f"who-said  {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(t0))} - {W.hms(t1)}   "
+           f"bars = residual (\"near this Deck\") energy, 0-40 dB; colour = attributed speaker (grey = none)",
+           fill=(200, 200, 200), font=font)
+    out = Path(outfile) if outfile else WHO / "timeline.png"
+    img.save(out)
+    print(out)
+
+
+# ======================================================================== synthetic overlap test
+def cmd_test_synth(n_pairs):
+    """Pairs of confident, single-speaker segments from different Decks. For each pair the real multichannel
+    recordings (all Decks) of both moments are summed sample by sample (with their measured offsets), so the
+    mixture has real room acoustics. Then the same pipeline separates it and Whisper reads each Deck's part.
+    Reference words = Whisper large-v3-turbo on the clean (unmixed) owner Deck audio."""
+    from faster_whisper import WhisperModel
+    low_priority_thread()
+    segs = [s for s in load_segs(time.time() - 7000, time.time())
+            if s.get("label") == s.get("owner") and (s.get("margin_db") or 0) >= 8 and not s.get("with")
+            and len(W.words(s.get("text", ""))) >= 4 and 1.5 <= s["t1"] - s["t0"] <= 8]
+    by = {}
+    for s in segs:
+        by.setdefault(s["chan"], []).append(s)
+    decks = sorted(by)
+    if len(decks) < 2:
+        sys.exit(f"who-said: need confident segments from 2+ Decks (have {', '.join(f'{d}:{len(by[d])}' for d in decks) or 'none'})")
+    st = json.loads(STATE.read_text()) if STATE.exists() else {}
+    off = st.get("offsets", {})
+    src = W.FileSource()
+    chans = list(src.channels())
+    ref_model = WhisperModel("large-v3-turbo", device="cpu", compute_type="int8", cpu_threads=ASR_THREADS)
+    asr = ASR()
+
+    def ref_text(a):
+        r, _ = ref_model.transcribe(a.astype(np.float32), language="en", beam_size=1, vad_filter=True, condition_on_previous_text=False)
+        return " ".join(x.text.strip() for x in r)
+
+    rng = np.random.default_rng(1)
+    results = []
+    for p in range(n_pairs):
+        da, db = rng.choice(decks, 2, replace=False)
+        A, B = by[da][rng.integers(len(by[da]))], by[db][rng.integers(len(by[db]))]
+        L = max(A["t1"] - A["t0"], B["t1"] - B["t0"]) + 2.0
+        n = int(L * W.RATE)
+        mix, clean = {}, {}
+        for c in chans:
+            xa, oka = src.read(c, A["t0"] - 1 + off.get(c, 0), n)
+            xb, okb = src.read(c, B["t0"] - 1 + off.get(c, 0), n)
+            if oka.mean() > 0.9 and okb.mean() > 0.9:
+                mix[c] = (0.0, xa + xb)
+                clean[c] = (xa, xb)
+        if da not in mix or db not in mix:
+            continue
+        # the mixture starts "at time 0"; warm the floors with 20 s of the A recording's past
+        eng = W.Engine(W.ArraySource({c: (-20.0, np.concatenate([src.read(c, A["t0"] - 21 + off.get(c, 0), 20 * W.RATE)[0], v[1]]))
+                                      for c, v in mix.items()}), list(mix))
+        eng.k = -20 * W.FPS
+        eng.step(int(L * W.FPS) - 1)
+        ka, kb = W.FPS // 2, int(L * W.FPS) - W.FPS // 2
+        row = {}
+        for who, d, S, i in (("A", da, A, 0), ("B", db, B, 1)):
+            ref = ref_text(clean[d][i])
+            sep = asr(eng.masked_audio(d, ka, kb))[0]
+            raw = asr(mix[d][1][ka * W.HOP:kb * W.HOP])[0]
+            cl = asr(eng.masked_audio(d, ka, kb, use_mask=False) * 0 + clean[d][i][ka * W.HOP:kb * W.HOP])[0]
+            row[who] = dict(deck=d, ref=ref, wer_sep=W.wer(ref, sep), wer_raw_mix=W.wer(ref, raw), wer_clean_small=W.wer(ref, cl))
+        results.append(row)
+        print(f"pair {p + 1}: {da} + {db}: " + "  ".join(f"{k}: sep {v['wer_sep']:.0%} rawmix {v['wer_raw_mix']:.0%} clean {v['wer_clean_small']:.0%}" for k, v in row.items()), flush=True)
+    if results:
+        allv = [v for r in results for v in r.values()]
+        print(f"\nword error rate over {len(allv)} voices in {len(results)} overlapping pairs (reference = large-v3-turbo on clean audio):")
+        for k, name in (("wer_clean_small", "clean speech, small.en"), ("wer_sep", "overlap, separated (residual mask)"),
+                        ("wer_raw_mix", "overlap, raw Deck mic (no separation)")):
+            print(f"  {name:<40} {np.mean([v[k] for v in allv]):.0%}")
+        (WHO / "test-synth.json").write_text(json.dumps(results, indent=1))
+
+
+# ======================================================================== main
+def main():
+    a = sys.argv[1:]
+    if not a or not a[0].startswith("--"):
+        return cmd_list(a[0] if a else None)
+    if a[0] == "--serve":
+        return Daemon().serve()
+    if a[0] == "--replay":
+        return Daemon().replay(*parse_range(a[1] if len(a) > 1 else None))
+    if a[0] == "--enroll":
+        if len(a) < 2:
+            sys.exit("usage: who-said --enroll NAME [HH:MM:SS]")
+        return cmd_enroll(a[1], a[2] if len(a) > 2 else None)
+    if a[0] == "--profiles":
+        return cmd_profiles()
+    if a[0] == "--status":
+        return cmd_status()
+    if a[0] == "--timeline":
+        out = a[a.index("-o") + 1] if "-o" in a else None
+        rest = [x for i, x in enumerate(a[1:], 1) if x != "-o" and a[i - 1] != "-o"]
+        return cmd_timeline(rest[0] if rest else None, out)
+    if a[0] == "--test-synth":
+        return cmd_test_synth(int(a[1]) if len(a) > 1 else 6)
+    print(__doc__)
+
+
+if __name__ == "__main__":
+    main()

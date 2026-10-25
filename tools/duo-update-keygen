@@ -1,0 +1,23 @@
+#!/bin/bash
+# duo-update-keygen NAME: make THIS machine an update signer for LAN updates (docs/MULTI_MACHINE.md "Updates over
+# the home network"). Creates an RSA-3072 key pair in ~/.config/duo-arena/update-key/ (dir 700, private.pem 600).
+# The private key never leaves this machine: never commit it, never copy it (each signer makes its own here).
+#   Steam Machine (the ROOT signer):  duo-update-keygen steam-machine   then copy public.pem to the game's
+#                                     addons/lan_update/root.pub.pem and run `duo-update-signers <repo> init`
+#   Simon's Deck:                     duo-update-keygen simon-deck      then, ON THE STEAM MACHINE:
+#                                     duo-update-signers <repo> add simon-deck <the printed public key file>
+# DUO_UPDATE_KEY_DIR overrides the directory (tests).
+set -euo pipefail
+name="${1:?usage: duo-update-keygen NAME (e.g. steam-machine, simon-deck)}"
+[[ "$name" =~ ^[a-z0-9][a-z0-9-]{0,31}$ ]] || { echo "name: lowercase letters, digits and -" >&2; exit 2; }
+D="${DUO_UPDATE_KEY_DIR:-$HOME/.config/duo-arena/update-key}"
+if [ -e "$D/private.pem" ]; then echo "$D/private.pem already exists: not overwriting (delete it by hand to start over; then re-trust the new key)" >&2; exit 1; fi
+umask 077
+mkdir -p "$D"; chmod 700 "$D"
+openssl genrsa -out "$D/private.pem" 3072 2>/dev/null
+chmod 600 "$D/private.pem"
+openssl rsa -in "$D/private.pem" -pubout -out "$D/public.pem" 2>/dev/null
+chmod 644 "$D/public.pem"
+echo "$name" > "$D/signer"
+echo "Signer '$name' key made in $D (private.pem stays here, mode 600). Public key:"
+cat "$D/public.pem"

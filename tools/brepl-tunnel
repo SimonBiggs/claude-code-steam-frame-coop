@@ -3,8 +3,16 @@
 # REPL inboxes: here ~/.cache/brepl/peer-PEER.sock -> PEER's inbox, and on PEER ~/.cache/brepl/peer-$(hostname).sock
 # -> this machine's inbox. Send-only sockets (messages into the REPL channel), nothing listens on the network.
 peer="$1"; me="$(cat /etc/hostname)"; c="$HOME/.cache/brepl"
+sshopts=(-o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=3)
+mkdir -p "$c"
+# Stale local socket (left by a crash) would block -L; StreamLocalBindUnlink below also covers it.
 rm -f "$c/peer-$peer.sock"
-exec ssh -N -o BatchMode=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes \
+# Stale REMOTE socket: after PEER reboots/crashes, the old peer-$me.sock file stays on PEER and sshd won't unlink it
+# (that needs StreamLocalBindUnlink in PEER's sshd_config), so -R fails forever. Remove it first. If PEER is
+# unreachable this fails quietly and the main ssh below fails too; systemd retries.
+ssh "${sshopts[@]}" "$peer" "mkdir -p ~/.cache/brepl && rm -f ~/.cache/brepl/peer-$me.sock" \
+  || echo "brepl-tunnel: could not clear stale remote socket on $peer (unreachable?)" >&2
+exec ssh -N "${sshopts[@]}" -o ExitOnForwardFailure=yes \
   -o StreamLocalBindUnlink=yes \
   -L "$c/peer-$peer.sock:$c/peer-in.sock" \
   -R "$c/peer-$me.sock:$c/peer-in.sock" "$peer"

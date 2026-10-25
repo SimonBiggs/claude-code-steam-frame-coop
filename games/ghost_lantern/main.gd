@@ -1,5 +1,6 @@
 extends Node3D
 const VrText := preload("res://core/vr_text.gd")
+const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
 ## Ghost Lantern: a spooky-but-cute co-op ghost hunt in a haunted mansion.
 ## Player 1 (VR, or keyboard+mouse in split screen) carries the spirit lantern: ghosts are only visible
 ## in its light cone, and ghosts held in the beam get stunned. TV players vacuum up revealed ghosts.
@@ -864,7 +865,7 @@ func _activate_player(i: int) -> void:
 		p.revive(1.0)
 	if not p.remote:
 		p.global_position = _spawn_near_team(i)
-	_show_center(("PLAYER %d!" if SIMPLE_MODE else "PLAYER %d JOINED THE HUNT!") % (i + 1), 1.5)
+	_show_center(("PLAYER %d!" % (i + 1)) if SIMPLE_MODE else Who.joined(Who.seat(self, i), "the hunt"), 1.5)
 	print("Player %d joined the game (%d players)" % [i + 1, active_count()])
 	on_player_activity_changed(p)
 
@@ -894,7 +895,7 @@ func leave_player(i: int) -> void:
 	if SIMPLE_MODE:
 		sound("puff", -8.0, 0.9)  # no sentence: their view just goes
 	else:
-		_show_center("P%d left the hunt" % (i + 1), 1.5)
+		_show_center(Who.left(Who.seat(self, i), "the hunt"), 1.5)
 	print("Player %d left the game (%d players)" % [i + 1, active_count()])
 	on_player_activity_changed(p)
 
@@ -1655,12 +1656,13 @@ func _unhandled_input(event: InputEvent) -> void:
 func on_client_joined() -> void:
 	if not seats.first_machine():
 		return  # another machine: its hunters join when they ask ("join")
-	_show_center("HELLO!" if SIMPLE_MODE else "GHOST HUNTERS JOINED!", 1.5)
+	if SIMPLE_MODE:
+		_show_center("HELLO!", 1.5)  # (no "they joined" line here: each seat's "join" says WHO, core/who.gd)
 
 
 func on_client_left() -> void:
 	if not SIMPLE_MODE:
-		_show_center("The TV players left - waiting for them to come back…", 0.0)
+		_show_center(Who.left(net.last_left_name) + " - waiting for them to come back…", 0.0)
 	seats.all_left()  # each machine asks for its hunters again when it reconnects
 
 
@@ -1671,7 +1673,7 @@ func on_machine_left(peer: int) -> void:
 		if SIMPLE_MODE:
 			sound("puff", -8.0, 0.9)
 		else:
-			_show_center("P%d left the hunt" % (int(freed[0]) + 1), 1.5)
+			_show_center(Who.left(net.machine_name_of(peer), "the hunt"), 1.5)
 
 
 ## Host: a machine's hunter goes away (that machine left).
@@ -1787,7 +1789,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 				_restart()
 		"pause":
 			var paused: bool = args[0]
-			_pause_banner(paused, "A TV player opened the menu")
+			_pause_banner(paused, Who.paused_by(net.machine_name_of(net.sender_peer())))
 			get_tree().paused = paused
 
 

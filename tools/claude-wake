@@ -1,0 +1,262 @@
+#!/usr/bin/env python3
+"""claude-wake: LOCAL wake-up for the main Claude conversation (no cloud needed).
+
+Cloud send_later / routines are refused for the main conversation (it is a Remote Control session), so when the
+usage limit hits, nothing would resume it after the reset. This wakes it from the machine itself: a headless
+one-shot "claude -p" sends a cross-session message to the main session's UNIX socket
+(/run/user/1000/cc-socks/<pid>.sock), which is delivered into the conversation even when it is idle.
+
+  claude-wake now "TEXT"         send TEXT into the main conversation right now
+  claude-wake after-reset        if a usage window is at its limit (>= 95 %) or the main session's last turn ended on
+                                 a rate-limit error: wait until the reset + 2 min, then send the standard resume message
+  claude-wake after-reset --check
+                                 same, but never waits: arms (records) the wake-up and exits; sends only once the time
+                                 has come. claude-watchdog runs this every 2 minutes, so nothing has to stay running.
+  claude-wake status             what is armed / last fired
+Options: --dry-run (decide and print, never send). Env: CLAUDE_WAKE_USAGE (usage.json path),
+CLAUDE_WAKE_SESSION (session jsonl path), CLAUDE_WAKE_STATE (state file), CLAUDE_WAKE_NOW (fake epoch, for tests).
+Fires once per reset (state file ~/.claude/wake-state.json) and never if the main session is busy working normally.
+Log: ~/.claude/wake.log
+"""
+import json, os, subprocess, sys, time, glob
+
+HOME = os.path.expanduser("~")
+USAGE = os.environ.get("CLAUDE_WAKE_USAGE", f"{HOME}/.claude/usage.json")
+STATE = os.environ.get("CLAUDE_WAKE_STATE", f"{HOME}/.claude/wake-state.json")
+LOG = os.environ.get("CLAUDE_WAKE_LOG", os.path.join(os.path.dirname(STATE), "wake.log"))
+SOCKS = "/run/user/1000/cc-socks"
+LIMIT_PCT = 95
+GRACE = 120  # seconds after the reset before waking
+BUSY_SECS = 120  # main session wrote its transcript this recently -> it is working
+RESUME = ("Usage window has reset. Resume: re-arm the brepl channel watch, run claude-pace, resume every agent that "
+          "stopped on the limit with SendMessage (their work is saved), restart the continuous deploy steward if it "
+          "stopped, land tested branches, then give Simon a short status.")
+DRY = "--dry-run" in sys.argv
+
+
+def now():
+    return float(os.environ.get("CLAUDE_WAKE_NOW") or time.time())
+
+
+def log(msg):
+    line = f"{time.strftime('%Y-%m-%dT%H:%M:%S%z')} {msg}"
+    print(line)
+    if not DRY:
+        with open(LOG, "a") as f:
+            f.write(line + "\n")
+
+
+def hm(t):
+    return time.strftime("%a %H:%M", time.localtime(t))
+
+
+def session_file():
+    if os.environ.get("CLAUDE_WAKE_SESSION"):
+        return os.environ["CLAUDE_WAKE_SESSION"]
+    sid = open(f"{HOME}/.claude/main-session").read().strip()
+    return f"{HOME}/.claude/projects/-home-deck/{sid}.jsonl"
+
+
+def main_pid():
+    r = subprocess.run([f"{HOME}/.local/bin/claude-main", "--running"], capture_output=True, text=True)
+    p = r.stdout.strip().splitlines()
+    return p[0] if r.returncode == 0 and p and p[0].isdigit() else None
+
+
+def load(path, default):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+
+def save_state(s):
+    if DRY:
+        return
+    tmp = STATE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(s, f, indent=1)
+    os.replace(tmp, STATE)
+
+
+def epoch(v):
+    if v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return v / 1000 if v > 1e12 else float(v)
+    try:
+        from datetime import datetime
+        return datetime.fromisoformat(str(v).replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return None
+
+
+def last_assistant(path):
+    """The main session's last top-level assistant entry (from the transcript's tail)."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - 4_000_000))
+            lines = f.read().decode("utf-8", "replace").splitlines()
+    except OSError:
+        return None
+    for line in reversed(lines):
+        if '"type":"assistant"' not in line:
+            continue
+        try:
+            e = json.loads(line)
+        except Exception:
+            continue
+        if e.get("type") == "assistant" and not e.get("isSidechain"):
+            return e
+    return None
+
+
+def limit_error(e):
+    """(reset epoch, kind) if this entry is a usage/rate-limit error, else None."""
+    if not e:
+        return None
+    if not (e.get("isApiErrorMessage") and (e.get("error") == "rate_limit" or e.get("apiErrorStatus") == 429)):
+        return None
+    q = e.get("quotaLimits") or (e.get("apiErrorParams") or {}).get("rate_limit_info") or {}
+    r = epoch(q.get("resetsAt"))
+    if r is None:  # fall back to the usage file
+        u = load(USAGE, {}).get("rate_limits", {})
+        rs = [epoch(w.get("resets_at")) for w in u.values() if isinstance(w, dict) and (w.get("used_percentage") or 0) >= LIMIT_PCT]
+        rs = [x for x in rs if x]
+        r = max(rs) if rs else None
+    return (r, q.get("rateLimitType") or "rate limit") if r else None
+
+
+def send(text):
+    pid = main_pid()
+    if not pid:
+        log("main Claude is not running (claude-watchdog restarts it); not sending")
+        return False
+    sock = f"{SOCKS}/{pid}.sock"
+    if not os.path.exists(sock):
+        log(f"no socket {sock}; not sending")
+        return False
+    if DRY:
+        print(f"DRY RUN: would send to {sock}: {text}")
+        return True
+    prompt = (f"Use the SendMessage tool exactly once, with to set to \"uds:{sock}\" and message set to the exact text "
+              f"between the markers (verbatim, nothing added).\n<<<\n{text}\n>>>\nThen stop and reply DONE.")
+    os.makedirs(f"{HOME}/GodotProjects", exist_ok=True)
+    try:
+        r = subprocess.run([f"{HOME}/.local/bin/claude", "-p", "--model", "haiku", "--strict-mcp-config",
+                            "--tools", "SendMessage", "--allowedTools", "SendMessage", "--output-format", "json", prompt],
+                           cwd=f"{HOME}/GodotProjects", capture_output=True, text=True, timeout=300)
+    except subprocess.TimeoutExpired:
+        log("headless send timed out")
+        return False
+    out = (r.stdout + r.stderr).strip()
+    try:
+        res = json.loads(r.stdout)
+        ok = not res.get("is_error") and res.get("num_turns", 0) >= 2 and not res.get("permission_denials")
+    except Exception:
+        res, ok = None, False
+    log(f"sent to pid {pid}: {'ok' if ok else 'FAILED'}: {text[:80]!r}" + ("" if ok else f" | {out[-400:]}"))
+    return ok
+
+
+def decide():
+    """Work out whether a wake-up is needed: returns (reset epoch, why) or None."""
+    s = load(STATE, {})
+    sess = session_file()
+    e = last_assistant(sess)
+    err = limit_error(e)
+    if err:
+        return err[0], f"main session stopped on a {err[1]} limit"
+    u = load(USAGE, {}).get("rate_limits", {})
+    hits = []
+    for name, w in u.items():
+        if isinstance(w, dict) and (w.get("used_percentage") or 0) >= LIMIT_PCT and epoch(w.get("resets_at")):
+            hits.append((epoch(w["resets_at"]), f"{name} window at {w['used_percentage']}%"))
+    hits = [h for h in hits if h[0] + GRACE > now() - 6 * 3600]
+    if hits:
+        return max(hits)  # the later reset is the one that actually frees requests
+    if s.get("armed") and s["armed"] != s.get("fired"):  # armed earlier; usage file has since dropped (reset happened)
+        return s["armed"], s.get("why", "armed earlier")
+    return None
+
+
+def busy(reset):
+    """The main conversation is working normally: transcript written recently and not ending on a limit error."""
+    sess = session_file()
+    try:
+        m = os.stat(sess).st_mtime
+    except OSError:
+        return False
+    if limit_error(last_assistant(sess)):
+        return False
+    if m > reset:  # something happened in the conversation since the reset: it is already going again
+        return True
+    return now() - m < BUSY_SECS
+
+
+def after_reset(check):
+    d = decide()
+    s = load(STATE, {})
+    if not d:
+        print("no wake-up needed (no window at its limit, last turn not a rate-limit error)")
+        return 0
+    reset, why = d
+    if s.get("fired") and abs(s["fired"] - reset) < 60:
+        print(f"already woke the session for the {hm(reset)} reset")
+        return 0
+    if s.get("armed") != reset:
+        s.update(armed=reset, why=why, armed_at=now())
+        save_state(s)
+        log(f"local wake-up armed for {hm(reset + GRACE)} ({why})")
+    due = reset + GRACE
+    if now() < due:
+        if check:
+            print(f"armed for {hm(due)} ({why}); not due yet")
+            return 0
+        print(f"waiting until {hm(due)} ({why})")
+        while now() < due:
+            time.sleep(min(60, max(1, due - now())))
+    if now() - s.get("last_fail", 0) < 600:
+        print("last send failed under 10 min ago; retrying later")
+        return 0
+    if busy(reset):
+        log(f"reset {hm(reset)} passed and the main session is already working; no wake-up needed")
+        s.update(fired=reset, fired_at=now(), result="skipped (busy)")
+        save_state(s)
+        return 0
+    ok = send(RESUME)
+    if ok:
+        s.update(fired=reset, fired_at=now(), result="sent")
+        save_state(s)
+        return 0
+    s["failures"] = s.get("failures", 0) + 1
+    s["last_fail"] = now()
+    save_state(s)
+    return 1
+
+
+def main():
+    a = [x for x in sys.argv[1:] if x != "--dry-run"]
+    if not a or a[0] in ("-h", "--help"):
+        print(__doc__)
+        return 0
+    if a[0] == "now":
+        return 0 if send(" ".join(a[1:]) or RESUME) else 1
+    if a[0] == "after-reset":
+        return after_reset("--check" in a)
+    if a[0] == "status":
+        s = load(STATE, {})
+        for k in ("armed", "fired"):
+            if s.get(k):
+                print(f"{k}: reset {hm(s[k])} (wake {hm(s[k] + GRACE)})")
+        print(json.dumps(s))
+        return 0
+    print(__doc__)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

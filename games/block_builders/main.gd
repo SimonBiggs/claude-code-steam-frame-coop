@@ -1,5 +1,6 @@
 extends Node3D
 const VrText := preload("res://core/vr_text.gd")
+const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
 ## BLOCK BUILDERS: a co-op platformer on a floating obstacle course.
 ##  - Player 1 (VR, host) is the giant BUILDER: the course is a tabletop diorama (world_scale 8).
 ##    Grab colourful blocks (planks, stairs, springs, fans) from the tray with the right trigger and
@@ -546,7 +547,7 @@ func _layout_views() -> void:
 	for p in players:
 		if p.has_meta("view"):
 			var c: SubViewportContainer = p.get_meta("view")
-			c.visible = p.active and not p.remote
+			c.visible = p.active and not p.remote and p.get("buddy") != true  # the buddy runner is driven here: no view of its own
 			if c.visible:
 				list.append(p)
 	var n := list.size()
@@ -622,7 +623,7 @@ func _build_vr_mirror(xr_cam: XRCamera3D) -> void:
 ## Any other controller drops in by pressing A.
 func _reserved_slots() -> Array:
 	var slots: Array = []
-	if players.size() > 1 and not players[1].remote:
+	if players.size() > 1 and not players[1].remote and not players[1].buddy:  # (the buddy runner takes no pad: a friend drops in)
 		slots.append(players[1])
 	if builder.flat:
 		slots.append(builder)
@@ -797,7 +798,7 @@ func on_player_activity_changed(p) -> void:
 	if p.active and not p.remote:
 		_ensure_view(p)
 	if p.has_meta("view"):
-		p.get_meta("view").visible = p.active and not p.remote
+		p.get_meta("view").visible = p.active and not p.remote and p.get("buddy") != true
 	if seats.joined(p):
 		p.remove_meta(ClassicSeats.WANT)
 	views_dirty = true
@@ -1951,7 +1952,6 @@ func on_client_joined() -> void:
 		sound("revive", -4.0, 1.2)
 		burst(course.start + Vector3.UP * 1.0, Color(1.0, 0.9, 0.4), 16, 0.1)
 		return
-	_show_center("THE RUNNERS HAVE ARRIVED!", 1.5)
 	if state == "intro":
 		state_t = 0.0
 		get_tree().create_timer(1.6).timeout.connect(func() -> void:
@@ -1970,7 +1970,7 @@ func on_client_left() -> void:
 	if simple:
 		_set_solo(true)
 		return
-	_show_center("The runners left - waiting for them to come back…", 0.0)
+	_show_center(Who.left(net.last_left_name) + " - waiting for them to come back…", 0.0)
 
 
 func on_p2_action(action: String, args: Array, index: int = 1) -> void:
@@ -1989,8 +1989,8 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 				if simple:
 					burst(course.start + Vector3.UP * 1.0, r.color, 16, 0.1)
 				else:
-					popup(course.start + Vector3.UP * 2.0, "P%d JOINED!" % (index + 1), r.color)
-					_show_center("PLAYER %d JOINED!" % (index + 1), 1.5)
+					popup(course.start + Vector3.UP * 2.0, Who.joined(Who.seat(self, index)), r.color)
+					_show_center(Who.joined(Who.seat(self, index)), 1.5)
 				sound("revive", -4.0, 1.2)
 				print("Player %d joined the game" % (index + 1))
 		"leave":
@@ -2001,7 +2001,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 				if simple:
 					sound("pop", -10.0, 0.6)  # no sentence: a soft puff
 				else:
-					_show_center("PLAYER %d LEFT" % (index + 1), 1.5)
+					_show_center(Who.left(Who.seat(self, index)), 1.5)
 				print("Player %d left the game" % (index + 1))
 		"flag":
 			if args.size() > 0 and int(args[0]) == level_seq:
@@ -2019,7 +2019,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 			confirm()
 		"pause":
 			var paused: bool = args[0]
-			_set_pause_banner(paused, "A runner opened the menu")
+			_set_pause_banner(paused, Who.paused_by(net.machine_name_of(net.sender_peer())))
 			get_tree().paused = paused
 
 

@@ -33,12 +33,12 @@ func _ready() -> void:
 	var host := OS.has_environment("DUO_HOST")
 	var t0 := 3.0 if client else 1.0
 	kit.at(t0, "%d TV players press A on their pads" % want, _join)
-	if not host:
+	if not host and BotKit.lead_machine():
 		kit.at(t0 + 6.0, "P2 presses Start: pause menu", func() -> void:
 			kit.allow_pause = true
 			_press("start"))
 		kit.at(t0 + 6.6, "paused?", func() -> void:
-			kit.assert_true(get_tree().paused and main.tv_banner != null and main.tv_banner.visible, "Start pauses and shows the banner")
+			kit.assert_true(get_tree().paused and main.tv_banner != null and not main.tv_banner.visible, "Start pauses and shows the banner (on_pause_changed made the banner; the open pause menu alone says PAUSED)")
 			_press("start"))
 		kit.at(t0 + 7.2, "resumed?", func() -> void:
 			kit.assert_true(not get_tree().paused and not main.tv_banner.visible, "Start again resumes everyone")
@@ -85,8 +85,8 @@ func _press(action: String) -> void:
 
 
 func _physics_process(delta: float) -> void:
-	if main == null or not main.ready_to_play:
-		return
+	if main == null or not main.ready_to_play or get_tree().paused:
+		return  # (no playing blind while the pause menu is open: an A there now picks its highlighted button)
 	bark_t -= delta
 	var bark := bark_t <= 0.0
 	if bark:
@@ -201,7 +201,7 @@ func _checks() -> void:
 		kit.assert_eq(main.party.local_slots().size(), want, "client: all %d local players are seated" % want)
 	else:
 		var host_p := 1 if main.flat_host else 0
-		kit.assert_eq(main.party.player_count(), want + host_p, "%s: all %d TV players (+%d on the host) are seated" % [mode, want, host_p])
+		kit.assert_eq(main.party.player_count(), kit.seated_want(want, host_p), "%s: all %d TV players (+%d on the host) are seated" % [mode, want, host_p])
 	if main.flat_host:
 		kit.assert_true(main.party.is_local(0) and main.dogs.has(0) and main.cams.has(0), "flat host: slot 0 plays here with a camera")
 	kit.assert_true(max_home > 0 or int(main.net.state_get("round", 0)) >= 2, "%s: sheep got into the pen" % mode)

@@ -13,6 +13,7 @@ extends Node3D
 ## Many machines: any number of TV machines and Decks; a flat host (no VR) plays slot 0 itself.
 
 const NetScript := preload("res://core/net.gd")
+const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
 const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
@@ -135,8 +136,6 @@ func _ready() -> void:
 	party = Party.new()
 	party.name = "Party"
 	add_child(party)
-	if net.machine_kind == "deck":
-		party.allow_keyboard = false  # a Steam Deck: one player on its built-in controls; more pads may drop in
 	party.player_joined.connect(_on_player_joined)
 	party.player_left.connect(_on_player_left)
 	save = Save.new()
@@ -980,7 +979,7 @@ func _hide_results() -> void:
 
 ## Every machine: shared pause (wrist MENU or a TV pause menu).
 func on_pause_changed(paused: bool, by_slot: int) -> void:
-	var why := "Paused by %s" % party.name_of(by_slot)
+	var why := "Paused by %s" % Who.seat(self, by_slot)
 	if vr_rig != null:
 		if paused:
 			vr_banner = HudKit.vr_card(self, vr_rig.camera, "PAUSED", why, {"width": 1.1})

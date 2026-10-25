@@ -30,6 +30,7 @@ extends Node3D
 ## sounds (and a pulsing bolt). Pause: just PAUSED.
 
 const NetScript := preload("res://core/net.gd")
+const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
 const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
@@ -253,7 +254,6 @@ func _setup(mode: String) -> void:
 			ghost.main = self
 			mech.cockpit.add_child(ghost)
 	party.allow_slot0 = mode != "client" and vr_rig == null
-	party.allow_keyboard = net.machine_kind != "deck"  # a Steam Deck: its built-in controls are the one player
 	awards.set_player(0, "TITAN")
 	if mode != "client":
 		combat.hp_scale = test_hp_scale
@@ -1419,7 +1419,7 @@ func on_client_joined() -> void:
 
 
 func on_pause_changed(paused: bool, by_slot: int) -> void:
-	var why := "Paused by %s" % ("the pilot" if by_slot == 0 else party.name_of(by_slot))
+	var why := "Paused by %s" % ("the pilot" if by_slot == 0 else Who.seat(self, by_slot))
 	if SIMPLE_MODE:
 		why = ""  # just PAUSED (no sentence)
 	if vr_rig != null:

@@ -79,7 +79,8 @@ def install(proj: Path) -> None:
     if not dst.exists() or dst.read_bytes() != BRIDGE_SRC.read_bytes():
         shutil.copyfile(BRIDGE_SRC, dst)
     # caption.gd: "Claude:" captions; control.gd: the offscreen test control server (godot.ts). Both made by the bridge.
-    for extra in ("caption.gd", "control.gd"):
+    # gdev_main.gd: the bridge logic itself (bridge.gd is only a frozen loader; a project's core/dev/gdev_main.gd wins).
+    for extra in ("caption.gd", "control.gd", "gdev_main.gd"):
         src = GDEV_HOME / extra
         if src.exists() and (not (dst.parent / extra).exists() or (dst.parent / extra).read_bytes() != src.read_bytes()):
             shutil.copyfile(src, dst.parent / extra)

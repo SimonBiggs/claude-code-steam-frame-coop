@@ -46,6 +46,7 @@ extends Node3D
 ## someone leaving is a soft pop. Pause: just PAUSED (never a second one under the pause menu).
 
 const NetScript := preload("res://core/net.gd")
+const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
 const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
@@ -245,7 +246,6 @@ func _setup(mode: String) -> void:
 		elif vr_rig != null:
 			split.set_bubble(vr_rig.mirror)
 	party.allow_slot0 = mode != "client" and vr_rig == null
-	party.allow_keyboard = net.machine_kind != "deck"  # a Steam Deck: its built-in controls are the one player
 	dice = DiceScript.new()
 	dice.main = self
 	add_child(dice)
@@ -835,7 +835,7 @@ func apply_snapshot(s: Array) -> void:
 # --- Pause --------------------------------------------------------------------------------------------
 
 func on_pause_changed(paused: bool, by_slot: int) -> void:
-	var who := "the Giant" if by_slot == 0 and has_vr() else party.name_of(by_slot)
+	var who := "the Giant" if by_slot == 0 and has_vr() else Who.seat(self, by_slot)
 	var why := "Paused by %s  -  %s" % [who, "wrist MENU: carry on" if vr_rig != null else "START: menu"]
 	if simple:
 		why = ""  # just PAUSED (no sentence)

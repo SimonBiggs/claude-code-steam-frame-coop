@@ -130,6 +130,31 @@ static func bot_players(default: int, cap: int = 6) -> int:
 	return clampi(n, 1, cap)
 
 
+## Machines joining this host: tools/multibot.ts sets BOT_MACHINES (host + joiners); a plain host + client run is 1.
+static func joiners() -> int:
+	return maxi(1, int(OS.get_environment("BOT_MACHINES")) - 1) if OS.has_environment("BOT_MACHINES") else 1
+
+
+## Whole-game toggles (Start = pause for everyone, Y = the shared view) are tested by ONE machine only: with several
+## joining bot machines (tools/multibot.ts) each one pressing them undid the others' presses (two Y presses = back to
+## split, one machine's Start resumed another's pause). True on a local run, the host and the first joiner.
+static func lead_machine() -> bool:
+	return int(OS.get_environment("BOT_MACHINE")) <= 1 if OS.has_environment("BOT_MACHINE") else true
+
+
+## Players the host / local machine should see seated: `want` per TV machine (on a multi_machine game's host every
+## joining machine brings its own bots, up to the free seats), plus `host_p` on the host itself. Bots used to
+## assert `want` alone, which only held with ONE joining machine.
+func seated_want(want: int, host_p: int = 0) -> int:
+	var n := want
+	if main != null and main.get("net") != null and str(main.net.mode) == "host" and bool(main.get("multi_machine")):
+		var seats := 6
+		if main.get("party") != null:
+			seats = mini(int(main.party.max_slot), 6)
+		n = mini(want * joiners(), seats)
+	return n + host_p
+
+
 # --- Assertions -------------------------------------------------------------------------------
 
 ## Count a check; a failure prints a SCRIPT ERROR-style line (test runs grep for those).

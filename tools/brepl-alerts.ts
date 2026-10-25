@@ -204,7 +204,15 @@ export function startAll() {
     const band = (p: number) => (p >= 90 ? 90 : p >= 75 ? 75 : p >= 50 ? 50 : 0);
     const parts = [["5-hour", u.rate_limits?.five_hour?.used_percentage], ["weekly", u.rate_limits?.seven_day?.used_percentage]]
       .filter(([, p]) => band(p ?? 0)).map(([n, p]) => `${n} ${band(p)}%+ used (${p}%)`);
-    return parts.length ? `usage: ${parts.join(", ")}` : null;
+    if (!parts.length) return null;
+    // Simon: always wake back up just after a limit reset. Cloud send_later is refused for the main (Remote Control)
+    // session, so claude-wake does it locally (run by claude-watchdog every 2 min; state in ~/.claude/wake-state.json).
+    const at = (r: any) => r ? new Date(typeof r === "number" ? (r < 1e12 ? r * 1000 : r) : r).toLocaleTimeString("en-IE", { hour: "2-digit", minute: "2-digit" }) : "?";
+    const ws = await Bun.file(join(HOME, ".claude/wake-state.json")).json().catch(() => ({} as any));
+    const top = Math.max(u.rate_limits?.five_hour?.used_percentage ?? 0, u.rate_limits?.seven_day?.used_percentage ?? 0);
+    const wake = ws.armed && ws.armed !== ws.fired ? ` → local wake-up armed for ${at(ws.armed + 120)}`
+      : top >= 75 ? " → local wake-up (claude-wake) arms itself at 95% or on a rate-limit stop" : "";
+    return `usage: ${parts.join(", ")}${wake}`;
   });
 
   // Any process crashing (kwin, Godot, Steam...), and the kernel killing things for memory.
