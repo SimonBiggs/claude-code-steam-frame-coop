@@ -1436,7 +1436,7 @@ func _start_flight(choice: String, how: String) -> void:
 	var mode := "daily" if daily else String(nx[2])
 	var seed_v := Seeded.daily_seed(GAME_ID) if daily else Seeded.fresh_seed()
 	var lucky := breeze == "lucky"
-	var secs := round_time + (20.0 if breeze == "tail" else 0.0)
+	var secs := round_time * (1.2 if breeze == "tail" else 1.0)  # MORE TIME: +20% (100 s -> 120 s)
 	var players := party.player_count() + (1 if vr_rig != null else 0)
 	var misses := 0 if daily else int(save.data["misses"])
 	var laps := int(save.data["laps"]) if mode == "bonus" else 0
