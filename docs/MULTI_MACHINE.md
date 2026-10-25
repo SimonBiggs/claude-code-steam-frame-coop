@@ -171,3 +171,29 @@ local network"). It works with the Steam Machine switched off: any machine holdi
   script passes the post-apply compile check) and `tools/lan-update-test` (host + joiners as separate processes with
   their own game copies and test keys on a private port: update, tampering, forged/unknown/revoked signers, wrong
   machine, public address, three Decks with no Steam Machine, rollback, boot guard, mid-game deferral, future stamps).
+
+## Everything hot-reloads (addons/boot, core/services.gd, core/dev/gdev_main.gd)
+
+No change should need a game restart on the TV, a Frame or a Deck (Simon, 2026-10-25). Changes go live at the next
+safe point (above).
+- **Services, not autoloads.** project.godot has only two autoloads, and both are FROZEN loaders: `GDev` (gdev's
+  bridge loader) and `Boot` (addons/boot/boot.gd). Never add another one. A node that should live for the whole run
+  is a service: add its line to `core/services.gd` (name, path, optional meta/needs) and Boot starts it under
+  `/root/<name>` within a second, with no restart. A service can hand state to its replacement with `_handoff()` and
+  `_adopt(state)`. Removing the line stops it. Today's services: RuntimeSettings, SafeApply, LanUpdate, VrTextGuard.
+  The LAN update guard is Boot's one ESSENTIAL (it lives in addons/ and must work even with broken game code).
+- **Broken files never break the running game.** The bridge compiles a changed script as a copy first. If it doesn't
+  compile, it isn't reloaded ("NOT RELOADED ... the old version keeps running"); an in-place reload that fails would
+  strip the live script's methods from every node. A registry (core/services.gd) that doesn't compile is refused and the
+  last good one keeps running. It is also kept in user:// for the next start.
+- **The bridge logic hot-reloads.** addons/gdev/bridge.gd is only a loader. The logic (hot reload, recording, stream,
+  commands) is `core/dev/gdev_main.gd` (gdev's default copy: addons/gdev/gdev_main.gd). Edit it and the loader swaps
+  in the new copy live, keeping the file tables, frames, stream viewers and the test control server. A copy that
+  doesn't compile is refused and the old one keeps going.
+- **Runtime settings from code**: `core/runtime_settings.gd` (stretch size/mode/aspect, MSAA). Edit it, not
+  project.godot.
+- **Still needs a relaunch** (engine-level, read once at start): the renderer, OpenXR on/off and its shaders, the
+  project name (it names user://), the main scene, the two frozen loaders (addons/boot/boot.gd, addons/gdev/bridge.gd)
+  and the autoload list. Normal work never touches these.
+- Test: `tools/hot-everything-test` adds a service at runtime, edits and breaks a service, the bridge logic and the
+  registry, and changes a runtime setting, all in a throwaway copy.

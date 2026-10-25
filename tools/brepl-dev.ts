@@ -14,7 +14,8 @@ const BIN = join(HOME, ".local/bin");
 const DEPLOYED = ["core", "games", "arcade", "tests"];  // what duo-deploy copies stage -> live
 const TOOL_COPIES: Record<string, string> = {  // installed file -> repo copy (keep in sync)
   [join(BIN, "gdev")]: "tools/gdev", [join(HOME, ".local/share/gdev/bridge.gd")]: "tools/gdev-bridge.gd",
-  [join(HOME, ".local/share/gdev/control.gd")]: "tools/control.gd", [join(HOME, ".local/share/gdev/godot.ts")]: "tools/godot.ts",
+  [join(HOME, ".local/share/gdev/control.gd")]: "tools/control.gd",
+  [join(HOME, ".local/share/gdev/gdev_main.gd")]: "addons/gdev/gdev_main.gd", [join(HOME, ".local/share/gdev/caption.gd")]: "tools/caption.gd", [join(HOME, ".local/share/gdev/godot.ts")]: "tools/godot.ts",
   [join(BIN, "brepl")]: "tools/brepl", [join(BIN, "duo-deploy")]: "tools/duo-deploy", [join(BIN, "merge-game")]: "tools/merge-game",
   [join(BIN, "voice-bridge")]: "tools/voice-bridge", [join(BIN, "claude-watchdog")]: "tools/claude-watchdog",
   [join(HOME, ".local/share/gdev/recsheet.py")]: "tools/recsheet.py", [join(HOME, ".local/share/brepl/dev.ts")]: "tools/brepl-dev.ts",

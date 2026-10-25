@@ -221,19 +221,29 @@ func _host_lobby(with_vr: bool) -> void:
 	if multiplayer is SceneMultiplayer:
 		(multiplayer as SceneMultiplayer).server_relay = false
 	multiplayer.multiplayer_peer = peer
-	multiplayer.peer_connected.connect(func(id: int) -> void:
-		var ip := ""
-		if multiplayer.multiplayer_peer is ENetMultiplayerPeer:
-			ip = (multiplayer.multiplayer_peer as ENetMultiplayerPeer).get_peer(id).get_remote_address()
-		machines[id] = {"kind": "tv", "ip": ip}
-		_lobby_status()
-		_sync_selection.rpc_id(id, selected, 1, 0))  # the newcomer shows what everyone has chosen
-	multiplayer.peer_disconnected.connect(func(id: int) -> void:
-		machines.erase(id)
-		_lobby_status())
+	if not multiplayer.peer_connected.is_connected(_on_lobby_peer_joined):  # (hosting again: connect once)
+		multiplayer.peer_connected.connect(_on_lobby_peer_joined)
+	if not multiplayer.peer_disconnected.is_connected(_on_lobby_peer_left):
+		multiplayer.peer_disconnected.connect(_on_lobby_peer_left)
 	if with_vr:
 		_build_vr_view()
 	print("Arcade: lobby hosting on %d" % port)
+
+
+func _on_lobby_peer_joined(id: int) -> void:
+	if mode != "host":
+		return
+	var ip := ""
+	if multiplayer.multiplayer_peer is ENetMultiplayerPeer:
+		ip = (multiplayer.multiplayer_peer as ENetMultiplayerPeer).get_peer(id).get_remote_address()
+	machines[id] = {"kind": "tv", "ip": ip}
+	_lobby_status()
+	_sync_selection.rpc_id(id, selected, 1, 0)  # the newcomer shows what everyone has chosen
+
+
+func _on_lobby_peer_left(id: int) -> void:
+	machines.erase(id)
+	_lobby_status()
 
 
 func _lobby_status() -> void:
@@ -276,17 +286,24 @@ func _join_lobby(address: String) -> void:
 	mode = "client"
 	multiplayer.multiplayer_peer = peer
 	join_deadline = Time.get_ticks_msec() + JOIN_TIMEOUT_MS
-	if multiplayer.connected_to_server.get_connections().size() > 0:
-		return  # already set up by an earlier attempt: just retry with the new peer
-	multiplayer.connected_to_server.connect(func() -> void:
-		join_deadline = 0
-		_hello.rpc_id(1, my_kind)
-		_set_status("Connected: pick a game!")
-		if OS.has_environment("ARCADE_AUTOPICK"):  # headless tests
-			_start_everywhere(int(OS.get_environment("ARCADE_AUTOPICK"))))
-	multiplayer.connection_failed.connect(_lobby_offline)
-	multiplayer.server_disconnected.connect(_lobby_offline)
+	# Named methods, checked one by one: other nodes listen to the same signals (core/lan_update.gd), so "anyone
+	# connected?" said yes after a game and the arcade never heard its own connection (joiners dropped out of the
+	# lobby every 5 s).
+	if not multiplayer.connected_to_server.is_connected(_on_lobby_connected):
+		multiplayer.connected_to_server.connect(_on_lobby_connected)
+	if not multiplayer.connection_failed.is_connected(_lobby_offline):
+		multiplayer.connection_failed.connect(_lobby_offline)
+	if not multiplayer.server_disconnected.is_connected(_lobby_offline):
+		multiplayer.server_disconnected.connect(_lobby_offline)
 	print("Arcade: joining lobby at %s:%d" % [address, port])
+
+
+func _on_lobby_connected() -> void:
+	join_deadline = 0
+	_hello.rpc_id(1, my_kind)
+	_set_status("Connected: pick a game!")
+	if OS.has_environment("ARCADE_AUTOPICK"):  # headless tests
+		_start_everywhere(int(OS.get_environment("ARCADE_AUTOPICK")))
 
 
 func _lobby_offline() -> void:
@@ -1174,6 +1191,8 @@ func _ensure_shared_nodes() -> void:
 		root.add_child.call_deferred(n)
 	# LAN updates (core/lan_update.gd): needs a fixed name (/root/LanUpdate) so its RPCs reach the same node on every
 	# machine, and the pinned root key (addons/lan_update, installed with the game: older installs simply don't update).
+	if root.get_node_or_null("Boot") != null:
+		return  # services (LanUpdate, SafeApply, the VR text guard) are Boot's (core/services.gd); below: older installs
 	if not root.has_meta("lan_update") and FileAccess.file_exists("res://addons/lan_update/root.pub.pem") \
 			and ResourceLoader.exists("res://core/lan_update.gd"):
 		var u: Node = (load("res://core/lan_update.gd") as GDScript).new()

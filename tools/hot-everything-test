@@ -1,0 +1,20 @@
+#!/bin/bash
+# hot-everything-test: tests/hot_everything_bot.tscn in a throwaway copy of this project (the bot changes game files):
+# new service at runtime, service/bridge-logic/registry edits and syntax errors, runtime settings. Pass = the bot's
+# PASS, and the only SCRIPT ERRORs are the bot's deliberate syntax errors (parse errors from the copies it breaks).
+set -u
+REPO=$(cd "$(dirname "$0")/.." && pwd)
+PORT=${DUO_PORT:-$((20000 + RANDOM % 9990))}
+W=/tmp/hot-everything-$PORT
+rm -rf "$W"; mkdir -p "$W/data"
+rsync -a --exclude .git --exclude .dev "$REPO/" "$W/p/"
+DUO_PORT=$PORT XDG_DATA_HOME="$W/data" BOT_OWN_COPY=1 DUO_SOLO=1 timeout 120 godot-test --headless --path "$W/p" res://tests/hot_everything_bot.tscn > "$W/log" 2>&1
+code=$?
+grep -E "HOT BOT|Boot:|NOT RELOADED|doesn't compile|swapped in|BOT ASSERT|BOT RESULT|reloaded res://core/zz" "$W/log"
+# Allowed errors: parse errors (the bot's deliberate syntax errors) only.
+bad=$(grep -A1 "SCRIPT ERROR" "$W/log" | grep -v -- "--" | paste - - | grep -v "Parse Error" || true)
+if [ -n "$bad" ]; then echo "UNEXPECTED ERRORS:"; echo "$bad" | head; code=1; fi
+grep -q "BOT RESULT: PASS" "$W/log" || code=1
+echo "log: $W/log"
+[ $code -eq 0 ] && echo "HOT-EVERYTHING PASS" || echo "HOT-EVERYTHING FAIL"
+exit $code

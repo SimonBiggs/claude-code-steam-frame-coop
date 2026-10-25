@@ -71,7 +71,8 @@ static func node() -> Node:
 ## Make the node once per launch (the arcade calls this). Needs the gdev bridge: without it nothing hot-reloads anyway.
 static func ensure() -> void:
 	var tree := Engine.get_main_loop() as SceneTree
-	if tree == null or tree.root.has_meta("safe_apply") or tree.root.get_node_or_null("GDev") == null:
+	if tree == null or tree.root.has_meta("safe_apply") or tree.root.get_node_or_null("GDev") == null \
+			or tree.root.get_node_or_null("Boot") != null:  # (Boot starts it as a service: core/services.gd)
 		return
 	tree.root.set_meta("safe_apply", true)  # (the node is added at the end of the frame: never make two)
 	var n: Node = (load(SELF) as GDScript).new()
@@ -127,6 +128,8 @@ static func start_ok() -> bool:
 
 func _bridge() -> Node:
 	var b := get_node_or_null("/root/GDev")
+	if b != null and not ("mtimes" in b) and b.get("impl") is Node:
+		b = b.get("impl")  # the bridge loader runs the hot-reloadable logic (core/dev/gdev_main.gd) as a child
 	if b == null or not ("mtimes" in b and "hashes" in b and "poll_t" in b):
 		return null
 	return b
@@ -200,6 +203,15 @@ func _intercept(b: Node) -> void:
 			held.erase(path)  # changed back to what is running
 		mt[path] = m
 		hs[path] = h
+
+
+## May a file that is read directly (not through the bridge: Boot's core/services.gd) switch on now? Only once safe
+## apply has let it go (it waits like every other file: mid-game, or until the lobby switches together).
+func may_apply(path: String) -> bool:
+	if mode != "safe":
+		return true
+	check_now()
+	return not held.has(path)
 
 
 ## Look for changed files right now (not only at the next check). Never reloads anything itself.
