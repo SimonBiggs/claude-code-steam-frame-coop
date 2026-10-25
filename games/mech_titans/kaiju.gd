@@ -65,15 +65,16 @@ var _broken_mat: StandardMaterial3D
 var _practice_fx: Node3D  ## PRACTICE: a glowing target ring + arrow (every machine, lazily)
 
 
-## Build the body. k: a Data.KAIJU or Data.MINIS key.
-func setup(p_id: int, k: String, p_split_gen: int = 0) -> void:
+## Build the body. k: a Data.KAIJU or Data.MINIS key. variant (a made round's lost kaiju, roundgen.gd):
+## color / color2 (a new paint), size (height multiplier), golden (today's kaiju: sparkles).
+func setup(p_id: int, k: String, p_split_gen: int = 0, variant: Dictionary = {}) -> void:
 	id = p_id
 	kind = k
 	split_gen = p_split_gen
 	is_mini = Data.MINIS.has(k)
 	info = Data.MINIS[k] if is_mini else Data.KAIJU[k]
 	name = "Kaiju%d" % id
-	height = float(info["height"])
+	height = float(info["height"]) * float(variant.get("size", 1.0))
 	if kind == "jelly" and split_gen > 0:
 		height *= pow(0.66, split_gen)
 	hp_max = float(info["hp"])
@@ -87,6 +88,9 @@ func setup(p_id: int, k: String, p_split_gen: int = 0) -> void:
 		opts["color2"] = info["color2"]
 	if info.has("eye"):
 		opts["eye_color"] = info["eye"]
+	if variant.has("color"):
+		opts["color"] = variant["color"]
+		opts["color2"] = variant.get("color2", variant["color"])
 	if bool(info.get("boss", false)):
 		opts["boss"] = true
 	model = Creatures.monster(String(info["monster"]), opts)
@@ -116,6 +120,20 @@ func setup(p_id: int, k: String, p_split_gen: int = 0) -> void:
 				w2["broken"] = true  # opens in phase 3 (bosses.gd)
 				(w2["node"] as Node3D).visible = false
 	_build_dizzy()
+	if bool(variant.get("golden", false)):
+		var sp := CPUParticles3D.new()
+		sp.amount = 24
+		sp.lifetime = 1.4
+		sp.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+		sp.emission_sphere_radius = height * 0.45
+		sp.gravity = Vector3(0.0, 1.2, 0.0)
+		sp.initial_velocity_max = 0.6
+		var bm := BoxMesh.new()
+		bm.size = Vector3.ONE * 0.25
+		bm.material = MeshKit.material(Color(1.0, 0.92, 0.5), 2.5)
+		sp.mesh = bm
+		sp.position = Vector3(0.0, height * 0.5, 0.0)
+		add_child(sp)
 	# Ground shadow marker for flyers (helps everyone judge where it is).
 	if fly_alt > 0.0:
 		_ground_marker = MeshInstance3D.new()

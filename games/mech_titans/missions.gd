@@ -43,7 +43,7 @@ var practice_target := Vector3.INF
 ## Host: begin mission i (the city is already built for it).
 func start(i: int) -> void:
 	index = i
-	info = Data.mission(i)
+	info = main.mission_info(i)
 	step = -1
 	step_t = 2.5
 	extra_t = 0.0
