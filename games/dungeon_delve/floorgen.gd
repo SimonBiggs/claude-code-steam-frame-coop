@@ -413,14 +413,14 @@ static func _fill_room(f: Dictionary, i: int, rng: RandomNumberGenerator, zd: Di
 	var budget := 0.0
 	match role:
 		"fight":
-			budget = 3.0 + g * 0.75 + (1.5 if heroic else 0.0)
+			budget = 4.0 + g * 0.9 + (1.5 if heroic else 0.0)
 		"trap":
-			budget = 1.0 + g * 0.3
+			budget = 2.0 + g * 0.5  # traps AND monsters
 		"exit":
-			budget = 2.5 + g * 0.6
+			budget = 3.5 + g * 0.8
 	if budget > 0.0:
 		var table: Dictionary = zd["foes"]
-		var elite_p := 0.05 + g * 0.025 + (0.12 if heroic else 0.0)
+		var elite_p := 0.1 + g * 0.03 + (0.12 if heroic else 0.0)
 		var guard := 0
 		while budget > 0.5 and guard < 20:
 			guard += 1
@@ -431,7 +431,7 @@ static func _fill_room(f: Dictionary, i: int, rng: RandomNumberGenerator, zd: Di
 				cost = 1.0
 			budget -= cost
 			var p := free_spot(f, i, rng, taken, 0.7, 4.0)
-			var elite := g >= 1 and rng.randf() < elite_p
+			var elite := (g >= 1 or heroic) and rng.randf() < elite_p
 			if kind == F_SWARM:
 				for s in 3:
 					var sp := p + Vector2(rng.randf_range(-0.8, 0.8), rng.randf_range(-0.8, 0.8))

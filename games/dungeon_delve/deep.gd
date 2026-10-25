@@ -3,7 +3,7 @@ extends Node3D
 ## Picked in the practice room by standing on the orange BRAVE or red HEROIC pad (it fills up; faster
 ## the more of you stand on it). Then: 3 zones (Slime Caves, Bone Crypt, Lava Forge) x 4 seeded floors
 ## (floorgen.gd), the 4th ending in the zone's boss; a shop camp between floors.
-##  - Hearts: heroes have 5 (HEROIC 4), the knight one more. At zero you're knocked out; a friend
+##  - Hearts: heroes have 4 (HEROIC 3), the knight one more (heart containers: up to 8). At zero you're knocked out; a friend
 ##    standing next to you fills your ring and you pop back up (2 hearts). Everyone out = back to the
 ##    first floor of the zone (the checkpoint) with what you had then; HEROIC has no checkpoints: the
 ##    run ends. BRAVE also helps knocked-out heroes up when a room is cleared.
@@ -39,12 +39,13 @@ const MeshKit := preload("res://core/mesh_kit.gd")
 const HudKit := preload("res://core/hud_kit.gd")
 const UiKit := preload("res://core/ui_kit.gd")
 const Creatures := preload("res://core/creatures.gd")
+const Telemetry := preload("res://core/telemetry.gd")
 
 const DIFF := {
-	"brave": {"hp": 1.0, "spd": 1.0, "dmg": 0, "checkpoints": true, "potions": 1, "auto_revive": true, "hearts": 5},
-	"heroic": {"hp": 1.45, "spd": 1.15, "dmg": 0, "checkpoints": false, "potions": 0, "auto_revive": false, "hearts": 4},
+	"brave": {"hp": 1.1, "spd": 1.05, "dmg": 0, "checkpoints": true, "potions": 1, "auto_revive": true, "hearts": 4},
+	"heroic": {"hp": 1.55, "spd": 1.2, "dmg": 0, "checkpoints": false, "potions": 0, "auto_revive": false, "hearts": 3},
 }
-const REVIVE_TIME := 2.2
+const REVIVE_TIME := 3.5  ## seconds a friend must stand by you (a hit on the helper starts it again)
 const REVIVE_R := 1.5
 const IFRAMES := 1.0
 const STAIRS_R := 1.5
@@ -113,6 +114,7 @@ var tally := {"kills": 0, "floors": [], "bosses": 0, "wipes": 0, "revives": 0, "
 	"puzzles": 0, "bought": 0, "potions": 0, "hurts": 0, "blocks": 0, "reflects": 0, "rooms": 0, "downs": 0,
 	"pickups": 0, "checkpoints": 0, "zones": {}, "bombs": 0, "abilities": 0, "traps": 0, "chests": 0, "by": {}}
 var src := ""  ## what is hurting someone right now (tests: tally["by"])
+var runrec := {}  ## this run, for core/telemetry.gd (written at the end or on quit)
 var relic_group := 0
 var relic_taken := {}  ## group -> {slot: true}: boss treasures, one each
 
@@ -419,12 +421,12 @@ func _players(alive_only: bool = false) -> Array:
 func _new_stats(slot: int) -> Dictionary:
 	var d := diff()
 	var pk := perks()
-	var hearts := int(d["hearts"]) + int(pk["heart"]) + (1 if _is_knight(slot) else 0) + (1 if _solo_brave() else 0)
+	var hearts := int(d["hearts"]) + int(pk["heart"]) + (1 if _is_knight(slot) else 0)
 	return {"hp": hearts, "max": hearts, "pot": int(d["potions"]) + int(pk["potion"]), "bomb": int(pk["bombs"]),
 		"abil": "", "dmg": 2 if _is_knight(slot) else 1, "charm": 0, "down": false}
 
 
-## Alone on BRAVE (a Deck kid on their own): one more heart, and a lucky charm on every floor.
+## Alone on BRAVE (a Deck kid on their own): a lucky charm on every floor (that's all: Simon found it too easy).
 func _solo_brave() -> bool:
 	return mode == "brave" and _players().size() == 1
 
@@ -483,6 +485,14 @@ func start_run(m: String) -> void:
 		var s: int = (pl as Dictionary)["slot"]
 		main.awards.set_player(s, "KNIGHT" if _is_knight(s) else party.name_of(s))
 	active = true
+	var kinds: Array = []
+	for pl in _players():
+		var s0: int = (pl as Dictionary)["slot"]
+		kinds.append("vr" if _is_knight(s0) else party.machine_kind(s0))
+	runrec = {"mode": mode, "daily": daily, "seed": seed_v, "players": kinds, "solo": kinds.size() == 1,
+		"floor_times": [], "kos": [], "gold_in": 0, "gold_out": 0, "items": [], "relics": [], "bosses": [],
+		"clock": 0.0, "floor_t0": 0.0, "boss_t0": 0.0, "boss_phase": 1, "done": false,
+		"start_floor": FloorGen.global_floor(zone, floor_i)}
 	net.state_set("phase", "deep")
 	main.monsters.clear()
 	load_floor(zone, floor_i, "floor")
@@ -535,7 +545,7 @@ func load_floor(z: int, fl: int, k: String) -> void:
 			if bool(st["down"]):
 				st["down"] = false
 				st["hp"] = 1
-			st["hp"] = mini(int(st["max"]), int(st["hp"]) + 2)
+			st["hp"] = mini(int(st["max"]), int(st["hp"]) + 1)
 		stats_dirty = true
 	else:
 		if fl == 0 and bool(diff()["checkpoints"]):
@@ -543,6 +553,9 @@ func load_floor(z: int, fl: int, k: String) -> void:
 			tally["checkpoints"] = int(tally["checkpoints"]) + 1
 		elif checkpoint.is_empty():
 			checkpoint = {"zone": z, "stats": stats.duplicate(true), "gold": _gold, "floor": fl}
+		if not runrec.is_empty() and not (tally["floors"] as Array).is_empty():
+			(runrec["floor_times"] as Array).append([int((tally["floors"] as Array).back()), snappedf(float(runrec.get("clock", 0.0)) - float(runrec["floor_t0"]), 0.1)])
+			runrec["floor_t0"] = float(runrec.get("clock", 0.0))
 		(tally["floors"] as Array).append(FloorGen.global_floor(z, fl))
 		if _solo_brave():
 			for s in stats:
@@ -574,10 +587,11 @@ func _cfg() -> Dictionary:
 	var d := diff()
 	var n := maxi(1, _players().size())
 	var g := FloorGen.global_floor(zone, floor_i)
-	return {"hp": float(d["hp"]) * (1.0 + 0.1 * g) * (1.0 + 0.3 * (n - 1)),
-		"boss_hp": float(d["hp"]) * (1.0 + 0.45 * (n - 1)) * (1.0 + 0.1 * zone),
+	# Difficulty climbs every floor: health, speed, and from the Lava Forge (HEROIC: the Crypt) harder hits.
+	return {"hp": float(d["hp"]) * (1.0 + 0.13 * g) * (1.0 + 0.25 * (n - 1)),
+		"boss_hp": float(d["hp"]) * (1.0 + 0.45 * (n - 1)) * (1.0 + 0.15 * zone),
 		"dmg": (1 if mode == "heroic" and zone >= 1 else 0),
-		"spd": float(d["spd"]) * (1.0 + 0.03 * g)}
+		"spd": float(d["spd"]) * (1.0 + 0.04 * g)}
 
 
 func _sync_doors() -> void:
@@ -616,8 +630,45 @@ func _after_wipe() -> void:
 		finish(false)
 
 
+## Host: one telemetry line for this run (end: "win", "wipe" or "quit"). Once per run.
+func _telemetry(end: String) -> void:
+	if runrec.is_empty() or bool(runrec["done"]) or not is_host():
+		return
+	runrec["done"] = true
+	var r := runrec.duplicate(true)
+	for k in ["clock", "floor_t0", "boss_t0", "done"]:
+		r.erase(k)
+	var kinds: Array = []
+	for pl in _players():
+		var s0: int = (pl as Dictionary)["slot"]
+		kinds.append("vr" if _is_knight(s0) else party.machine_kind(s0))
+	r["players"] = kinds
+	r["solo"] = kinds.size() == 1
+	r["end"] = end
+	r["depth"] = FloorGen.global_floor(zone, floor_i)
+	r["zone"] = zone + 1
+	r["floor"] = floor_i + 1
+	r["secs"] = snappedf(float(runrec.get("clock", 0.0)), 0.1)
+	if lock_room >= 0 and String(((f["rooms"] as Array)[lock_room] as Dictionary)["role"]) == "boss":
+		r["boss_phase_reached"] = int(runrec["boss_phase"])
+	for k2 in ["kills", "wipes", "revives", "downs", "potions", "bombs", "secrets", "puzzles", "keys", "chests", "bought", "hurts", "blocks", "reflects", "traps"]:
+		r[k2] = tally.get(k2, 0)
+	r["dmg_by"] = (tally["by"] as Dictionary).duplicate()
+	r["gold_left"] = _gold
+	Telemetry.run("dungeon_delve", r)
+
+
+## The game is closing / back to the arcade mid-run: that counts as a quit.
+func _exit_tree() -> void:
+	if active:
+		_telemetry("quit")
+
+
 ## Host: the run is over (won: beat the last boss).
 func finish(won: bool) -> void:
+	_telemetry("win" if won else "wipe")
+	var key := daily_key() if daily else mode
+	var new_best := FloorGen.global_floor(zone, floor_i) > int((progress()["best"] as Dictionary).get(key, 0))
 	_record_depth()
 	if won:
 		var pd := progress()
@@ -628,7 +679,9 @@ func finish(won: bool) -> void:
 	var g := FloorGen.global_floor(zone, floor_i)
 	main.end_results("VICTORY!" if won else "THE END", "victory" if won else "defeat",
 		"%s %d-%d" % [FloorGen.ZONES[zone]["short"], zone + 1, floor_i + 1] if not won else "ALL BOSSES BEATEN!",
-		[["DEEPEST", "%d-%d" % [zone + 1, floor_i + 1]], ["GOLD", str(_gold)], ["BOSSES", str(int(tally["bosses"]))], ["HELPED UP", str(int(tally["revives"]))]])
+		[["DEEPEST", "%d-%d%s" % [zone + 1, floor_i + 1, "  NEW BEST!" if new_best else ""]], ["MONSTERS", str(int(tally["kills"]))],
+		["BOSSES", str(int(tally["bosses"]))], ["SECRETS", str(int(tally["secrets"]))], ["HELPED UP", str(int(tally["revives"]))],
+		["TIME", HudKit.clock_text(float(runrec.get("clock", 0.0)))]])
 	print("Dungeon Delve: run over, %s, depth %d" % ["won" if won else "lost", g])
 
 
@@ -798,6 +851,8 @@ func host_step(delta: float) -> void:
 	if f.is_empty():
 		return
 	_ensure_stats()
+	if not runrec.is_empty():
+		runrec["clock"] = float(runrec.get("clock", 0.0)) + delta  # game time (tests run faster than real time)
 	var ph := String(net.state_get("d_phase", "play"))
 	if ph == "wipe":
 		if phase_t > 3.5:
@@ -877,7 +932,7 @@ func _rooms_step(delta: float, alive: Array) -> void:
 			if foes.count_in(r) == 0:
 				_room_clear(r, false)
 			continue
-		_spawn_room(r)
+		_spawn_room(r, p)
 		_lock(r, p)
 	if lock_room >= 0:
 		if foes.count_in(lock_room) == 0:
@@ -902,25 +957,33 @@ func _pull_stragglers() -> void:
 		main.blink(func() -> void: main.vr_rig.place(to, NAN))
 
 
-func _spawn_room(r: int) -> void:
+## from: where the players came in. Mixed groups: shooters and healers stand at the far side, behind
+## the shield bearers and slimes, so you have to get through (or round) them.
+func _spawn_room(r: int, from: Vector3 = Vector3.INF) -> void:
 	var rd: Dictionary = (f["rooms"] as Array)[r]
 	foes.cfg = _cfg()
 	var boss := false
-	var solo := _players().size() == 1
-	var thin := RandomNumberGenerator.new()
-	thin.seed = hash([seed_v, zone, floor_i, r, "solo"])
 	var placed := 0
 	for fo in rd["foes"]:
 		var a: Array = fo
 		var k: int = a[0]
-		if solo and placed > 0 and not Foes.is_boss(k) and thin.randf() < 0.25:
-			continue  # alone: a few less monsters per room
 		placed += 1
 		var p := FloorGen.to_world(f, r, a[1])
+		if from != Vector3.INF and k in [FloorGen.F_SPITTER, FloorGen.F_HEALER, FloorGen.F_BOMBER]:
+			var c := FloorGen.room_center(f, r)
+			var in_dir := Vector3(from.x - c.x, 0.0, from.z - c.z).normalized()
+			var off := p - c
+			if off.dot(in_dir) > -1.0:
+				var back := c + (off - in_dir * (off.dot(in_dir) + 2.8))
+				back = FloorGen.room_clamp(f, r, back, 0.8)
+				if FloorGen.walkable(view.rects, view.obst, back, 0.4):
+					p = back
 		foes.spawn(k, p, r, bool(a[2]))
 		poof(p + Vector3(0.0, 0.5, 0.0), Color(0.8, 0.7, 1.0), 14)
 		if Foes.is_boss(k):
 			boss = true
+			runrec["boss_t0"] = float(runrec.get("clock", 0.0))
+			runrec["boss_phase"] = 1
 			net.state_set("d_boss", [String(Foes.BOSS_NAMES[k]), 1.0])
 			net.event("d_banner", [String(Foes.BOSS_NAMES[k]), "boss"])
 			main.show_headline(String(Foes.BOSS_NAMES[k]), 3.0)
@@ -959,7 +1022,7 @@ func _room_clear(r: int, fought: bool) -> void:
 			var st: Dictionary = stats[s]
 			if bool(st["down"]):
 				_revive(int(s))
-	if randf() < 0.35:
+	if randf() < 0.15:
 		_spawn_pick(Loot.HEART, c + Vector3(0.0, 0.5, 0.0), true)
 	if String(((f["rooms"] as Array)[r] as Dictionary)["role"]) != "boss":
 		music_mood("dungeon" if zone != 2 else "tension")
@@ -1007,15 +1070,17 @@ func _foe_died(id: int, m: Dictionary, slot: int) -> void:
 		var k := Loot.COIN5 if gold >= 5 else Loot.COIN
 		gold -= 5 if k == Loot.COIN5 else 1
 		_spawn_pick(k, Vector3(p.x, 0.5, p.z), true)
-	if bool(m["elite"]) and randf() < 0.5 or randf() < 0.06:
+	if bool(m["elite"]) and randf() < 0.4 or randf() < 0.03:
 		_spawn_pick(Loot.POTION, Vector3(p.x, 0.5, p.z), true)
-	elif randf() < 0.08:
+	elif randf() < 0.04:
 		_spawn_pick(Loot.HEART, Vector3(p.x, 0.5, p.z), true)
 	if boss:
 		_boss_down(kind, Vector3(p.x, 0.0, p.z))
 
 
 func _boss_down(kind: int, at: Vector3) -> void:
+	if runrec.has("bosses"):
+		(runrec["bosses"] as Array).append({"name": String(Foes.BOSS_NAMES[kind]), "secs": snappedf(float(runrec.get("clock", 0.0)) - float(runrec["boss_t0"]), 0.1)})
 	tally["bosses"] = int(tally["bosses"]) + 1
 	net.state_set("d_boss", [])
 	for k in 4:
@@ -1076,6 +1141,7 @@ func shot_gone(_sid: int, p: Vector3, k: String) -> void:
 
 
 func boss_phase(id: int, ph: int) -> void:
+	runrec["boss_phase"] = ph
 	var c := foes.center_of(id)
 	main.sound_at("alarm", c, -2.0)
 	shake(0.5)
@@ -1210,6 +1276,10 @@ func hurt(key: int, dmg: int, from: Vector3, blockable: bool) -> String:
 		net_popup(knight_head() + (from - knight_head()).normalized() * 0.6, "BLOCK!", "heal")
 		main.vr_rig.pulse(VrRig.RIGHT, 0.9, 0.12)
 		return "block"
+	# Getting hit while helping a friend up starts their ring again.
+	for ds in revive.keys():
+		if Vector2(_feet_of(int(ds)).x - at.x, _feet_of(int(ds)).z - at.z).length() < REVIVE_R and float(revive[ds]) > 0.0:
+			revive[ds] = 0.0
 	st["hp"] = int(st["hp"]) - dmg
 	(tally["by"] as Dictionary)[src] = int((tally["by"] as Dictionary).get(src, 0)) + dmg
 	iframes[key] = IFRAMES
@@ -1230,6 +1300,8 @@ func hurt(key: int, dmg: int, from: Vector3, blockable: bool) -> String:
 		else:
 			st["hp"] = 0
 			st["down"] = true
+			if not runrec.is_empty():
+				(runrec["kos"] as Array).append({"slot": key, "by": src, "floor": FloorGen.global_floor(zone, floor_i)})
 			revive[key] = 0.0
 			tally["downs"] = int(tally["downs"]) + 1
 			main.sound_at("faint", at, -2.0)
@@ -1309,7 +1381,7 @@ func _revive_step(delta: float, alive: Array) -> void:
 				helpers += 1
 				main.awards.add(int((pl as Dictionary)["slot"]), "helps", delta)
 		var k: float = revive.get(int(s), 0.0)
-		k += delta * helpers / REVIVE_TIME
+		k = k + delta * helpers / REVIVE_TIME if helpers > 0 else maxf(0.0, k - delta * 0.25)
 		revive[int(s)] = k
 		if k >= 1.0:
 			_revive(int(s))
@@ -1560,7 +1632,7 @@ func _break_pot(pid: int) -> void:
 	net.event("confetti", [p + Vector3(0, 0.3, 0), Color(0.95, 0.55, 0.35), 24])
 	main.sound_at("crash", p, -10.0, 1.6)
 	var x := randf()
-	_spawn_pick(Loot.COIN if x < 0.6 else (Loot.COIN5 if x < 0.85 else Loot.HEART), p + Vector3(0, 0.4, 0), true)
+	_spawn_pick(Loot.COIN if x < 0.6 else (Loot.COIN5 if x < 0.92 else Loot.HEART), p + Vector3(0, 0.4, 0), true)
 
 
 func _open_chest(cid: int, slot: int) -> void:
@@ -1650,6 +1722,8 @@ func _pickups_step(delta: float, alive: Array) -> void:
 			if d < 0.7 and _collect(s, k, p):
 				if rg > 0:
 					(relic_taken[rg] as Dictionary)[s] = true
+					if runrec.has("relics"):
+						(runrec["relics"] as Array).append(String(Loot.NAMES[k]))
 					tally["relics"] = int(tally.get("relics", 0)) + 1
 					if (relic_taken[rg] as Dictionary).size() < _players().size():
 						break  # the others still get to choose
@@ -1672,6 +1746,7 @@ func _collect(slot: int, k: int, p: Vector3) -> bool:
 		Loot.COIN, Loot.COIN5:
 			var n := 1 if k == Loot.COIN else 5
 			_gold += n
+			runrec["gold_in"] = int(runrec.get("gold_in", 0)) + n
 			_sync_money()
 			main.awards.add(slot, "gold", n)
 			main.sound_at("coin", p, -6.0, randf_range(1.0, 1.2))
@@ -1724,7 +1799,7 @@ func _collect(slot: int, k: int, p: Vector3) -> bool:
 			main.sound_at("power_up", p, -2.0)
 			text = String(Loot.NAMES[k])
 		Loot.MAXHEART:
-			if int(st["max"]) >= 10:
+			if int(st["max"]) >= 8:
 				return false
 			st["max"] = int(st["max"]) + 1
 			st["hp"] = int(st["hp"]) + 1
@@ -1738,6 +1813,8 @@ func _collect(slot: int, k: int, p: Vector3) -> bool:
 			text = "LUCKY!"
 	tally["pickups"] = int(tally["pickups"]) + 1
 	stats_dirty = true
+	if k not in [Loot.COIN, Loot.COIN5] and runrec.has("items"):
+		(runrec["items"] as Array).append(String(Loot.NAMES[k]))
 	if text != "" and k != Loot.COIN:
 		net_popup(p + Vector3(0, 0.8, 0), text, "score" if k in [Loot.COIN5] else "heal")
 	return true
@@ -1816,6 +1893,7 @@ func _buy(slot: int, i: int) -> bool:
 		main.sound_at("ui_error", at, -2.0)
 		return true
 	_gold -= int(it[1])
+	runrec["gold_out"] = int(runrec.get("gold_out", 0)) + int(it[1])
 	it[2] = 1
 	_sync_money()
 	net.state_set("d_shop", shop.duplicate(true))
@@ -2115,6 +2193,10 @@ func _animate_pickups(delta: float) -> void:
 			var mi := MeshKit.instance(Loot.mesh(k), false)
 			add_child(mi)
 			mi.position = pk["p"]
+			mi.scale = Vector3.ONE * 0.2  # pop in
+			var tw := mi.create_tween()
+			tw.tween_property(mi, "scale", Vector3.ONE * 1.25, 0.14).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+			tw.tween_property(mi, "scale", Vector3.ONE, 0.12)
 			pick_nodes[id] = mi
 			pick_kinds[id] = k
 		var n: Node3D = pick_nodes[id]
@@ -2227,7 +2309,7 @@ func owned_input(delta: float, h: Hero, slot: int) -> void:
 	var yaw := h.rotation.y
 	var fwd := Vector3(sin(yaw), 0.0, cos(yaw))
 	if (party.just_pressed(slot, "accept") or party.just_pressed(slot, "rt")) and float(cd.get("a", 0.0)) <= 0.0:
-		cd["a"] = 0.32
+		cd["a"] = 0.4
 		# Soft aim: turn to the nearest monster in reach (kids rarely line up exactly).
 		var best := 2.0
 		for id in foes.mons:

@@ -66,7 +66,7 @@ static func shop_stock(rng: RandomNumberGenerator, zone: int, heroic: bool) -> A
 			out.append([k, 0])
 	for o in out:
 		var a: Array = o
-		var price := float(PRICES[int(a[0])]) * (1.0 + 0.3 * zone) * (1.25 if heroic else 1.0)
+		var price := float(PRICES[int(a[0])]) * 1.3 * (1.0 + 0.35 * zone) * (1.25 if heroic else 1.0)
 		a[1] = int(round(price))
 	return out
 

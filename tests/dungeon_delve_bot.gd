@@ -105,7 +105,9 @@ func _watch() -> String:
 			var t: Dictionary = dp.tally
 			var reached := false
 			if goal == "zone":
-				reached = int(t["bosses"]) >= 1 and (t["floors"] as Array).has(FloorGen.FLOORS_PER_ZONE)
+				var fl0: Array = t["floors"]
+				var zg := int(fl0[0]) / FloorGen.FLOORS_PER_ZONE if not fl0.is_empty() else 0
+				reached = int(t["bosses"]) >= 1 and (fl0.has((zg + 1) * FloorGen.FLOORS_PER_ZONE) or zg >= FloorGen.ZONE_COUNT - 1)
 			elif goal == "boss":
 				reached = int(t["bosses"]) >= 1
 			elif goal == "floor":
@@ -412,6 +414,8 @@ func _deep_checks(mode: String) -> void:
 		kit.assert_true(main.hands.swings > 0, "the knight hit monsters (%d)" % main.hands.swings)
 	# The run ends and "Again!" goes back to the gentle practice room (crashed on the TV, 25 Oct).
 	dp.finish(false)
+	var runs: Array = preload("res://core/telemetry.gd").read("dungeon_delve")
+	kit.assert_true(not runs.is_empty() and String((runs.back() as Dictionary).get("end", "")) == "wipe" and (runs.back() as Dictionary).has("dmg_by") and (runs.back() as Dictionary).has("floor_times"), "%s: the run was written to telemetry (%s)" % [mode, str(runs.back()).left(200) if not runs.is_empty() else "none"])
 	kit.assert_eq(String(main.net.state_get("phase", "")), "results", "%s: a finished run shows the results" % mode)
 	main.on_request(0, "again", [])
 	kit.assert_true(not dp.active and String(main.net.state_get("phase", "")) == "practice" and main.dungeon.visible, "%s: Again goes back to the gentle practice room" % mode)

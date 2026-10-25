@@ -1,0 +1,63 @@
+#!/usr/bin/env bun
+// dd-balance: how did the family's Dungeon Delve runs go? Collects "RUN: {json}" telemetry
+// (core/telemetry.gd) from the TV's game log + user:// file and from every Deck
+// (~/.config/duo-arena/decks: one ssh alias per line; ~/DuoArena/game/.dev/game.log* and the Deck's
+// user://telemetry.jsonl), then prints per mode: runs, median depth / length, how runs ended, where
+// people quit, what knocked heroes out, damage by source, boss kill times.
+//   tools/dd-balance            # TV + Decks
+//   tools/dd-balance --local    # just this machine
+//   tools/dd-balance --since 2026-10-25
+import { $ } from "bun";
+import { homedir } from "node:os";
+const H = homedir();
+const args = process.argv.slice(2);
+const since = args.includes("--since") ? args[args.indexOf("--since") + 1] : "";
+const lines: string[] = [];
+async function grab(cmd: string, label: string) {
+  const r = await $`bash -c ${cmd}`.nothrow().quiet();
+  const out = r.stdout.toString();
+  for (const l of out.split("\n")) if (l.trim()) lines.push(l.replace(/^RUN: /, ""));
+  if (r.exitCode && !out) console.error(`(${label}: nothing)`);
+}
+const local = `grep -ah '^RUN: ' ${H}/GodotProjects/duo-arena/.dev/game.log* 2>/dev/null; cat "${H}/.local/share/godot/app_userdata/Duo Arena/telemetry.jsonl" 2>/dev/null`;
+await grab(local, "TV");
+if (!args.includes("--local")) {
+  const decks = (await Bun.file(`${H}/.config/duo-arena/decks`).text().catch(() => "")).split("\n").map(s => s.trim()).filter(Boolean);
+  await Promise.all(decks.map(d => grab(`timeout 15 ssh -o ConnectTimeout=5 -o BatchMode=yes ${d} 'grep -ah "^RUN: " ~/DuoArena/game/.dev/game.log* 2>/dev/null; cat ~/.local/share/godot/app_userdata/*/telemetry.jsonl 2>/dev/null'`, d)));
+}
+const seen = new Set<string>();
+const runs: any[] = [];
+for (const l of lines) {
+  try {
+    const r = JSON.parse(l);
+    if (r.game !== "dungeon_delve") continue;
+    const key = `${r.t}/${r.seed}/${r.host}/${r.machine}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (since && String(r.date) < since) continue;
+    runs.push(r);
+  } catch {}
+}
+const med = (a: number[]) => { if (!a.length) return 0; const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
+const top = (m: Record<string, number>, n = 6) => Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, v]) => `${k} ${v}`).join(", ");
+const modes = [...new Set(runs.map(r => (r.daily ? "daily" : r.mode)))];
+console.log(`${runs.length} Dungeon Delve runs${since ? " since " + since : ""}`);
+for (const m of modes) {
+  const rs = runs.filter(r => (r.daily ? "daily" : r.mode) === m);
+  const ends: Record<string, number> = {}, kos: Record<string, number> = {}, dmg: Record<string, number> = {}, quits: Record<string, number> = {}, solo = rs.filter(r => r.solo).length;
+  const bossT: Record<string, number[]> = {};
+  for (const r of rs) {
+    ends[r.end] = (ends[r.end] || 0) + 1;
+    if (r.end === "quit") quits[`${r.zone}-${r.floor}`] = (quits[`${r.zone}-${r.floor}`] || 0) + 1;
+    for (const k of r.kos || []) kos[k.by || "?"] = (kos[k.by || "?"] || 0) + 1;
+    for (const [k, v] of Object.entries(r.dmg_by || {})) dmg[k] = (dmg[k] || 0) + (v as number);
+    for (const b of r.bosses || []) (bossT[b.name] ||= []).push(b.secs);
+  }
+  console.log(`\n== ${m.toUpperCase()}: ${rs.length} runs (${solo} solo)`);
+  console.log(`  median depth ${med(rs.map(r => r.depth))} (zone-floor of the deepest: ${rs.reduce((a, r) => (r.depth > a.depth ? r : a), rs[0]).zone}-${rs.reduce((a, r) => (r.depth > a.depth ? r : a), rs[0]).floor}), median length ${Math.round(med(rs.map(r => r.secs)) / 60)} min`);
+  console.log(`  ended: ${top(ends)}   quit at: ${top(quits) || "-"}`);
+  console.log(`  knocked out by: ${top(kos) || "-"}`);
+  console.log(`  damage by: ${top(dmg) || "-"}`);
+  console.log(`  bosses: ${Object.entries(bossT).map(([k, v]) => `${k} ${v.length}x, median ${Math.round(med(v))} s`).join("; ") || "none beaten"}`);
+  console.log(`  per run: median wipes ${med(rs.map(r => r.wipes || 0))}, revives ${med(rs.map(r => r.revives || 0))}, potions ${med(rs.map(r => r.potions || 0))}, gold ${med(rs.map(r => r.gold_in || 0))} found / ${med(rs.map(r => r.gold_out || 0))} spent`);
+}
