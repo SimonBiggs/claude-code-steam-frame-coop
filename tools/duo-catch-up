@@ -7,4 +7,10 @@ for m in ~/.cache/duo-deploy-pending/*; do
   d=$(basename "$m")
   if [ "$d" = frame ]; then duo-deploy-frame; else duo-deploy-deck "$d"; fi >/dev/null 2>&1 && echo "caught up: $d"
 done
+# One-off jobs for a device that was offline (e.g. installing tools on a Deck): ~/.cache/duo-pending-cmds/*.sh, each
+# exits non-zero while its device is unreachable and is deleted once it succeeds.
+for s in ~/.cache/duo-pending-cmds/*.sh; do
+  [ -e "$s" ] || continue
+  timeout 120 bash "$s" >/dev/null 2>&1 && rm -f "$s" && echo "ran: $(basename "$s")"
+done
 exit 0
