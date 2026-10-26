@@ -24,7 +24,8 @@ func _ready() -> void:
 	kit = BotKit.new()
 	add_child(kit)
 	main = load("res://games/snowman_maker/main.tscn").instantiate()
-	main.set("round_time", 26.0)
+	var rt := float(OS.get_environment("BOT_ROUND")) if OS.has_environment("BOT_ROUND") else 26.0  # BOT_ROUND=150: a real day
+	main.set("round_time", rt)
 	if OS.has_environment("BOT_CHAPTER"):
 		main.set("force_chapter", int(OS.get_environment("BOT_CHAPTER")))
 	add_child(main)
@@ -51,11 +52,11 @@ func _ready() -> void:
 		kit.drop_in_out(main.party, t0 + 11.0, 3.0, func(slot: int) -> bool:
 			return main.avatars.has(slot) and main.huds.has(slot) and main.cams.has(slot))
 	if host:
-		kit.at(29.0, "host checks (the TV machine is still connected)", _checks)
-		var end := float(OS.get_environment("BOT_HOST_END")) if OS.has_environment("BOT_HOST_END") else 35.0  # late-join tests
+		kit.at(rt + 3.0, "host checks (the TV machine is still connected)", _checks)
+		var end := float(OS.get_environment("BOT_HOST_END")) if OS.has_environment("BOT_HOST_END") else rt + 9.0  # late-join tests
 		kit.at(end, "finish", kit.finish)
 	else:
-		kit.at(31.0 if client else 36.0, "finish", func() -> void:
+		kit.at(rt + (5.0 if client else 10.0), "finish", func() -> void:
 			_checks()
 			kit.finish())
 	kit.every(2.0, _report)

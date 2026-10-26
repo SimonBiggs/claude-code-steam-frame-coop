@@ -126,6 +126,7 @@ var visitor_cheer := 0.0
 var village_nodes: Array = []
 var village_shown: Array = []
 var story_queue: Array = []  # host: [seconds left, beat]
+var vr_story: Node3D
 var tele := {}  # host: this day's telemetry
 var clock := 0.0
 var wishes_granted := 0
@@ -433,8 +434,8 @@ func _make_hud(slot: int, parent: Control) -> void:
 	var wrow := UiKit.hbox(8)
 	wish.add_child(wrow)
 	var holder := Control.new()
-	holder.custom_minimum_size = Vector2(72, 72) * UiKit.scale_of(ui)
-	wrow.add_child(StoryCard.picture("heart", 34.0, Color(1.0, 0.45, 0.6)))
+	holder.custom_minimum_size = Vector2(84, 84)
+	wrow.add_child(StoryCard.picture("heart", 44.0, Color(1.0, 0.45, 0.6)))
 	wrow.add_child(holder)
 	wish.visible = false
 	wish_boxes[slot] = [wish, holder]
@@ -723,9 +724,10 @@ func _on_state_changed(key: String, value: Variant) -> void:
 			_refresh_hud()
 		"time":
 			for slot in timers:
+				if not is_instance_valid(timers[slot]):
+					continue
 				var t: HudKit.TimerPill = timers[slot]
-				if is_instance_valid(t):
-					t.set_time(float(value))
+				t.set_time(float(value))
 			if sign_time != null:
 				var s := maxi(0, int(value))
 				sign_time.text = "%d:%02d" % [s / 60, s % 60]
@@ -801,16 +803,17 @@ func _start_round() -> void:
 		_spawn_ball()
 	# What Tumble (or the chapter's friend) says.
 	var ch := Story.chapter(chap)
+	var first := 6.5 if int(net.state_get("round", 0)) <= 1 else 0.8  # after the how-to-play card
 	if mode == "daily":
-		_story(_tumble_beat("Today's garden! The same for everyone.", 4.0), 0.8)
+		_story(_tumble_beat("Today's garden! The same for everyone.", 4.0), first)
 	elif mode == "story" and day_n == 0 and misses == 0:
-		_story(_chapter_beat(chap, "intro"), 0.8)
+		_story(_chapter_beat(chap, "intro"), first)
 		if String(ch.new) != "":
-			_story(_tumble_beat(String(ch.new), 4.0), 5.6)
+			_story(_tumble_beat(String(ch.new), 4.0), first + 4.8)
 	elif misses > 0:
-		_story(_tumble_beat(Story.TUMBLE_RETRY[misses % Story.TUMBLE_RETRY.size()]), 0.8)
+		_story(_tumble_beat(Story.TUMBLE_RETRY[misses % Story.TUMBLE_RETRY.size()]), first)
 	else:
-		_story(_tumble_beat(Story.TUMBLE_LINES[int(save.data["days"]) % Story.TUMBLE_LINES.size()]), 0.8)
+		_story(_tumble_beat(Story.TUMBLE_LINES[int(save.data["days"]) % Story.TUMBLE_LINES.size()]), first)
 
 
 ## Host: more builders joined during the day: the star goals grow with them (never shrink mid-day).
@@ -969,7 +972,10 @@ func show_story(beat: Dictionary) -> void:
 	if split != null:
 		StoryCard.show(_all_huds(), opts)
 	if vr_rig != null:
-		StoryCard.show_vr(self, vr_rig.camera, opts)
+		if vr_story != null and is_instance_valid(vr_story):
+			vr_story.call("hide_card")
+		opts["vr_height"] = 0.18  # above the hints (they sit low)
+		vr_story = StoryCard.show_vr(self, vr_rig.camera, opts)
 
 
 func _tumble_beat(line: String, duration: float = 3.5) -> Dictionary:
@@ -1765,12 +1771,12 @@ func _make_visitor(v: int, hat: int, fresh: bool) -> void:
 	visitor_bubble.position.y = h + 0.15
 	visitor.add_child(visitor_bubble)
 	var bub := MeshKit.instance(Village.bubble(), false)
-	bub.scale = Vector3.ONE * 1.3
+	bub.scale = Vector3.ONE * 0.85
 	visitor_bubble.add_child(bub)
 	visitor_hat = MeshInstance3D.new()
 	visitor_hat.mesh = Snowman.hat_of(maxi(1, hat))
-	visitor_hat.position = Vector3(0.0, 0.62 * 1.3 - 0.12, 0.25)
-	visitor_hat.scale = Vector3.ONE * 1.5
+	visitor_hat.position = Vector3(0.0, 0.62 * 0.85 - 0.08, 0.16)
+	visitor_hat.scale = Vector3.ONE * 0.95
 	visitor_bubble.add_child(visitor_hat)
 	if fresh:  # a new friend arrives
 		visitor.scale = Vector3.ONE * 0.2

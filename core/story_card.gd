@@ -6,7 +6,7 @@ extends RefCounted
 ##   const StoryCard := preload("res://core/story_card.gd")
 ##   StoryCard.show(huds_array, {"who": "PIP", "line": "The wind took my letters!", "pic": "bird",
 ##       "color": Color(1, 0.7, 0.3), "duration": 4.0})
-##   StoryCard.show_vr(self, vr_rig.camera, same_opts)
+##   StoryCard.show_vr(self, vr_rig.camera, same_opts)   # opts.vr_height: card height vs the eyes (-0.22)
 ##   StoryCard.picture("envelope", 96.0, color)   # just the picture Control (results screens, maps)
 ## Pictures (drawn in code, no textures): bird, envelope, cloud, storm, house, sprite (a wind sprite),
 ## sun, wave, tree, castle, penguin (Tumble, with a scarf), snowman, tophat, beanie; anything else is a core/ui_kit.gd icon kind ("star", "heart", "crown"...).
@@ -46,7 +46,7 @@ static func show_vr(world: Node, cam: Node3D, opts: Dictionary) -> Node3D:
 		return null
 	return HudKit.vr_card(world, cam, String(opts.get("who", "")), String(opts.get("line", "")),
 		{"duration": float(opts.get("duration", 4.0)), "color": opts.get("color", "accent"), "width": 1.0,
-		"height": -0.22, "title_size": 0.07, "body_size": 0.055})
+		"height": float(opts.get("vr_height", -0.22)), "title_size": 0.07, "body_size": 0.055})
 
 
 ## A picture Control `px` pixels square (see PICTURES; other names use UiKit icons).

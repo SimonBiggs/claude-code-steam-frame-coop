@@ -71,7 +71,10 @@ static func garden(seed_value: int, chapter: int) -> Dictionary:
 	for attempt in 40:
 		var a := r.randf_range(-PI * 0.85, -PI * 0.15)
 		var p := Vector3(cos(a), 0.0, sin(a)) * r.randf_range(2.6, 3.2)
-		if p.distance_to(SIGN_POS) > 1.4:
+		var clear := p.distance_to(SIGN_POS) > 1.4
+		for s in MAX_SLOTS:
+			clear = clear and _flat(p - player_start(s)) > 1.6
+		if clear:
 			g.visitor = p
 			break
 	# Trees.
@@ -325,6 +328,9 @@ static func check(g: Dictionary) -> Array:
 	for b in boxes:
 		if not _reached(walk, b.pos):
 			out.append("box %d can't be walked to" % int(b.kind))
+	for s in MAX_SLOTS:
+		if _flat((g.visitor as Vector3) - player_start(s)) < 1.5:
+			out.append("the visitor stands on player %d's start" % s)
 	if not _reached(walk, YARD) or not _reached(walk, g.visitor):
 		out.append("the circle or the visitor can't be walked to")
 	var roll := reach_map(g, YARD, BALL_MAX + 0.08)
