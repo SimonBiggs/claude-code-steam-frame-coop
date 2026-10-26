@@ -79,11 +79,13 @@ func setup(root: Control, p_party: Node) -> void:
 
 func set_floor(f: Dictionary) -> void:
 	var z := int(f["zone"]) % FloorGen.ZONES.size()
-	var zd: Dictionary = FloorGen.ZONES[z]
+	var zd: Dictionary = FloorGen.zone_data(z)
 	if String(f["kind"]) == "shop":
 		zone_label.text = "SHOP"
 	else:
 		zone_label.text = "%s %d-%d" % [String(zd["short"]), z + 1, int(f["floor"]) + 1]
+		if int(f["zone"]) >= FloorGen.ZONE_COUNT:
+			zone_label.text = "DEPTH %d %s" % [FloorGen.global_floor(int(f["zone"]), int(f["floor"])) + 1, String(f.get("mod", ""))]
 	map.f = f
 	map.queue_redraw()
 	pill_t = 10.0

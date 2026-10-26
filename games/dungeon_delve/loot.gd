@@ -38,7 +38,7 @@ static func chest_loot(rng: RandomNumberGenerator, g: int, big: bool) -> Array:
 		out.append(COIN5)
 	var x := rng.randf()
 	if big:
-		out.append([SWORD, ABILITIES[rng.randi_range(0, 2)], POTION, BOMBS][rng.randi_range(0, 3)])
+		out.append([CHARM, ABILITIES[rng.randi_range(0, 2)], POTION, BOMBS][rng.randi_range(0, 3)])
 	elif x < 0.3:
 		out.append(POTION)
 	elif x < 0.5:
@@ -66,7 +66,7 @@ static func shop_stock(rng: RandomNumberGenerator, zone: int, heroic: bool) -> A
 			out.append([k, 0])
 	for o in out:
 		var a: Array = o
-		var price := float(PRICES[int(a[0])]) * (1.0 + 0.3 * zone) * (1.25 if heroic else 1.0)
+		var price := float(PRICES[int(a[0])]) * 1.3 * (1.0 + 0.35 * zone) * (1.25 if heroic else 1.0)
 		a[1] = int(round(price))
 	return out
 
