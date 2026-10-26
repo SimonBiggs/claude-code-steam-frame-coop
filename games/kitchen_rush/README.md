@@ -32,6 +32,35 @@ at the counter; the **TV runners fetch** ingredients to the pass and **carry pla
 - **Text:** VR one short headline (wrist: ROUND n); TV titles only (KITCHEN RUSH!, NEW DISH!, ORDER UP!,
   HOORAY!, PAUSED).
 
+### Gran's café (simple mode: story, parties, gifts)
+
+- **Story:** GRAN welcomes the chefs to her café on a picture card (core/story_card.gd: a picture plus one
+  short line, on every TV view and in VR). Each round a **party** comes: GRAN'S FRIENDS, KIDS' PARTY,
+  PIRATES, ROBOTS, ALIENS or KNIGHTS, all wearing their hats.
+- **Made from a seed** (`parties.gd`): who comes, the menu (dishes they like out of the ones the kitchen
+  knows), the exact list of orders (never three of a kind in a row), now and then a **STAR GUEST** with a
+  gold crown, the pace and the patience. Round 1 is Gran's friends (toasties); round 2 is **TODAY'S
+  PARTY** (the same on every machine all day, golden gift once a day); rounds 2-4 still bring the lesson
+  dishes SALAD, BURGER, PIZZA first.
+- **Choice:** from round 3, two **invitations** (a guest head + the gift they'd bring) float over the pass;
+  the chef grabs one (VR hand or button chef at the pass) or a runner taps one at the pass. Nobody picks in
+  14 s: the first one comes.
+- **Grows and stays:** every party leaves a thank-you **gift** on Gran's shelf right of the back door
+  (teapot, balloon, treasure chest, toy robot, little UFO, knight's shield; golden for today's party or a
+  served star guest). Saved in `user://saves/kitchen_rush` (newest 15 on the shelf).
+- **Unlocks:** gifts bring new guests (robots at 2, aliens at 4, knights at 6); a party that has visited
+  twice teaches its dish (robots MELT = patty + cheese + tomato, aliens WRAP = dough + lettuce + cucumber,
+  knights SANDWICH = bun + lettuce + cucumber), on the menus from round 5 and first in line the first time.
+- **Gran helps:** once a round (twice in a solo kitchen) she gives a customer who's about to go grumpy a
+  cookie (more patience).
+- **Fair:** a made round is eased (slower pace, fewer waiting) until a simple kitchen model (one runner or
+  the solo helpers, one dish at a time) serves every order in time. `tests/kitchen_rush_rounds_test.gd`
+  checks 1000+ round lists (rounds 1-30, many save states): known dishes only, no dish inside another
+  (the plate would DING too early), every ingredient has a crate, lesson dish first, star guest in range,
+  limits, short title names, doable in time, two different open invitations, deterministic.
+- **Telemetry:** one `RUN: {json}` line per round (party, daily, who picked, menu, served, grumpy, seconds,
+  star served, cookies left, runners, vr, solo, gifts, seed, end).
+
 The rest of this file describes the full game (`SIMPLE_MODE := false`).
 
 **A day in the kitchen:** BREAKFAST, LUNCH and DINNER shifts. Each shift is rated with up to three big
@@ -107,4 +136,7 @@ BOT_VR=1 godot --headless --path . --fixed-fps 60 --quit-after 4800 res://tests/
 KR_START_SHIFT=3 BOT_PLAYERS=4 godot --headless --path . --fixed-fps 60 --quit-after 5400 res://tests/kitchen_rush_bot.tscn  # dinner rush + day end
 KR_LAZY=1 godot --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/kitchen_rush_bot.tscn  # simple: no game over; full: game over + awards + restart
 DUO_PORT=7784 DUO_HOST=1 BOT_VR=1 timeout 100 godot --headless --path . res://tests/kitchen_rush_bot.tscn  # solo VR: kitchen helpers
+KR_START_SHIFT=5 KR_TAUGHT=1 BOT_PLAYERS=6 godot --headless --path . --fixed-fps 60 --quit-after 9000 res://tests/kitchen_rush_bot.tscn  # party dishes
+godot --headless --path . -s res://tests/kitchen_rush_rounds_test.gd   # party round validator (SEEDS=300 for more)
 ```
+(Use `godot-test` with an explicit `DUO_PORT` for all of these on the Steam Machine.)

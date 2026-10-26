@@ -373,6 +373,7 @@ static func _decorate(main: Node3D, out: Dictionary) -> void:
 	out["open_sign"] = open_sign
 	var board := _box(main, Vector3(2.35, 1.15, -hz + 0.18), Vector3(2.0, 1.1, 0.05), Color(0.12, 0.2, 0.16))
 	board.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	out["menu_board"] = board
 	_box(main, Vector3(2.35, 1.15, -hz + 0.165), Vector3(2.12, 1.22, 0.03), Color(0.6, 0.4, 0.22))
 	var menu := Label3D.new()
 	menu.font_size = 30

@@ -2776,6 +2776,9 @@ func _build_hud() -> void:
 
 ## Big centre message on both machines (and on a floating panel in VR).
 func banner(text: String, duration: float, broadcast: bool = true) -> void:
+	if SIMPLE_MODE and text != "Connecting to the chef…" and (text.contains("\n") or text.to_upper() != text or text.length() > 18):
+		print("Kitchen Rush: a sentence kept off the screen (simple mode shows titles only): %s" % text.replace("\n", " / "))
+		return  # the family's rule: no how-to sentences; story cards say the rest with pictures
 	if net and broadcast:
 		net.event("center", [text, duration])
 	center_label.text = text
@@ -2918,6 +2921,8 @@ func _simplify_kitchen() -> void:
 	for c in get_children():
 		if c is Label3D:
 			c.visible = false
+	if parts.has("menu_board"):
+		parts["menu_board"].visible = false  # no words on it in simple mode: Gran's gift shelf hangs there
 	props = PropsScript.new()
 	props.main = self
 	add_child(props)

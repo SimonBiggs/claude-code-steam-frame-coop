@@ -136,7 +136,7 @@ func _simulate(delta: float) -> void:
 			main.popup(global_position + Vector3.UP * 1.0, "SNATCH!", Color(0.8, 0.8, 0.9))
 		state = "escape"
 	elif state != "sneak" and global_position.distance_to(L.RACCOON_EXIT) < 0.2:
-		if carry_kind != "" and state == "escape":
+		if carry_kind != "" and state == "escape" and not main.simple:  # simple mode: no sentences (the raccoon just runs off)
 			main.banner("The raccoon got away with the %s!" % ItemScript.display_name(carry_kind), 2.0)
 		state = "off"
 		carry_kind = ""
