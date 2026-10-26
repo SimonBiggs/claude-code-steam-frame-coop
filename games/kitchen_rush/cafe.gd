@@ -1,15 +1,16 @@
 extends RefCounted
-## KITCHEN RUSH: Gran's café that fills up. The THANK-YOU SHELF on the back wall (right of the door)
-## holds the gifts parties leave (saved, newest 15 shown); little guest heads for the invitations; a
+## KITCHEN RUSH: Gran's café that fills up. The THANK-YOU SHELF on the back wall (right of the door, on the old menu board)
+## holds the gifts parties leave (saved, newest 12 shown); little guest heads for the invitations; a
 ## golden crown for star guests. Everything is plain meshes with main.mat() materials (no textures).
 ##   Cafe.build_shelf(main) -> Node3D        Cafe.show_gifts(shelf, main, gifts, pop_last)
 ##   Cafe.gift_model(main, kind, golden)     Cafe.guest_head(main, party)     Cafe.crown(main)
 
 const GIFTS := ["teapot", "balloon", "treasure", "robot", "ufo", "shield"]
-const SHELF_X := 3.0
-const SHELF_Z := -5.72
-const ROWS: Array = [1.35, 1.75, 2.15]
-const COLS := 5
+const SHELF_X := 2.35  # on the old menu board's wooden frame, right of the back door
+const SHELF_Z := -5.68
+const ROWS: Array = [0.68, 1.12, 1.56]
+const COLS := 4
+const GIFT_SCALE := 1.5  # big enough to see from the counter
 const GOLD := Color(1.0, 0.8, 0.22)
 const PARTY_COLORS := {"granny": Color(0.92, 0.75, 0.9), "kid": Color(1.0, 0.6, 0.4), "pirate": Color(0.95, 0.75, 0.55),
 	"robot": Color(0.72, 0.76, 0.82), "alien": Color(0.45, 0.95, 0.4), "knight": Color(0.75, 0.77, 0.82)}
@@ -22,7 +23,7 @@ static func slot_count() -> int:
 static func slot_pos(i: int) -> Vector3:
 	var row := i / COLS
 	var col := i % COLS
-	return Vector3(SHELF_X - 0.8 + col * 0.4, float(ROWS[row]) + 0.025, SHELF_Z)
+	return Vector3(SHELF_X - 0.75 + col * 0.5, float(ROWS[row]) + 0.025, SHELF_Z + 0.02)
 
 
 static func build_shelf(main: Node3D) -> Node3D:
@@ -32,7 +33,7 @@ static func build_shelf(main: Node3D) -> Node3D:
 	for y in ROWS:
 		var board := MeshInstance3D.new()
 		var bm := BoxMesh.new()
-		bm.size = Vector3(2.1, 0.05, 0.3)
+		bm.size = Vector3(2.08, 0.05, 0.3)
 		board.mesh = bm
 		board.material_override = main.mat(Color(0.8, 0.55, 0.32))
 		board.position = Vector3(SHELF_X, float(y), SHELF_Z)
@@ -57,12 +58,13 @@ static func show_gifts(shelf: Node3D, main: Node3D, gifts: Array, pop_last: bool
 		var m := gift_model(main, String(g[0]), bool(g[1]) if g.size() > 1 else false)
 		m.position = slot_pos(i - start)
 		m.rotation.y = 0.25 * sin(float(i) * 1.7)
+		m.scale = Vector3.ONE * GIFT_SCALE
 		holder.add_child(m)
 		if pop_last and i == gifts.size() - 1:
 			m.scale = Vector3.ONE * 0.05
 			var tw := m.create_tween()
-			tw.tween_property(m, "scale", Vector3.ONE * 1.3, 0.35).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-			tw.tween_property(m, "scale", Vector3.ONE, 0.25)
+			tw.tween_property(m, "scale", Vector3.ONE * GIFT_SCALE * 1.4, 0.35).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+			tw.tween_property(m, "scale", Vector3.ONE * GIFT_SCALE, 0.25)
 			if main.has_method("burst"):
 				main.burst(m.position + Vector3.UP * 0.12, GOLD, 24, 0.05)
 

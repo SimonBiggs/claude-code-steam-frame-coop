@@ -47,7 +47,7 @@ at the counter; the **TV runners fetch** ingredients to the pass and **carry pla
   14 s: the first one comes.
 - **Grows and stays:** every party leaves a thank-you **gift** on Gran's shelf right of the back door
   (teapot, balloon, treasure chest, toy robot, little UFO, knight's shield; golden for today's party or a
-  served star guest). Saved in `user://saves/kitchen_rush` (newest 15 on the shelf).
+  served star guest). Saved in `user://saves/kitchen_rush` (newest 12 on the shelf).
 - **Unlocks:** gifts bring new guests (robots at 2, aliens at 4, knights at 6); a party that has visited
   twice teaches its dish (robots MELT = patty + cheese + tomato, aliens WRAP = dough + lettuce + cucumber,
   knights SANDWICH = bun + lettuce + cucumber), on the menus from round 5 and first in line the first time.

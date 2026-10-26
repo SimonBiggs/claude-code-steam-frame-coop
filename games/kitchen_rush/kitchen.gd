@@ -282,7 +282,7 @@ static func _decorate(main: Node3D, out: Dictionary) -> void:
 	# Potted plants in the corners.
 	var pot_x: Array = []
 	var bush_x: Array = []
-	for pp in [Vector3(-6.4, 0, -5.4), Vector3(6.0, 0, 5.4), Vector3(-6.4, 0, 5.4), Vector3(1.9, 0, -5.4)]:
+	for pp in [Vector3(-6.4, 0, -5.4), Vector3(6.0, 0, 5.4), Vector3(-6.4, 0, 5.4), Vector3(4.5, 0, -5.4)]:  # (not in front of the board / gift shelf)
 		var ppos: Vector3 = pp
 		pot_x.append(Transform3D(Basis(), ppos + Vector3(0, 0.22, 0)))
 		bush_x.append(Transform3D(Basis().scaled(Vector3(1.0, 1.25, 1.0)), ppos + Vector3(0, 0.75, 0)))
@@ -374,7 +374,7 @@ static func _decorate(main: Node3D, out: Dictionary) -> void:
 	var board := _box(main, Vector3(2.35, 1.15, -hz + 0.18), Vector3(2.0, 1.1, 0.05), Color(0.12, 0.2, 0.16))
 	board.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	out["menu_board"] = board
-	_box(main, Vector3(2.35, 1.15, -hz + 0.165), Vector3(2.12, 1.22, 0.03), Color(0.6, 0.4, 0.22))
+	_box(main, Vector3(2.35, 1.15, -hz + 0.165), Vector3(2.12, 1.22, 0.03), Color(0.6, 0.4, 0.22))  # its frame (simple mode: the gift shelf's back)
 	var menu := Label3D.new()
 	menu.font_size = 30
 	menu.outline_size = 0
