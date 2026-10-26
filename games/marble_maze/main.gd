@@ -29,6 +29,13 @@ extends Node3D
 ## lies from the start to the practice ring, one bobs over the goal (first two levels) and, for a VR
 ## giant, one bobs over the handle until they've grabbed it twice (plus the ghost hands). A spare
 ## controller sees a pulsing A + plus + person; a full table / someone leaving is just a soft sound.
+## STORY (story.gd, mazegen.gd, town.gd): after the seven lessons (once per save) BOBO's Marble Town:
+## TODAY'S MAZE first each day, then seeded story mazes, three per place (FLOWER PARK, SEASIDE, CANDY
+## SHOP, ICE CAVE, CASTLE, STAR PARK, RAINBOW HILL), then bonus laps that get harder. Each maze hides a
+## SHINY marble on a detour (into Bobo's jar by the table, saved); a place's third maze lights it up in
+## the little town round the table. Story cards (picture + a few words) on every TV view and in VR. The
+## host decides each level (level_desc) and the TV machine rebuilds the same maze from it. RUN lines
+## (core/telemetry.gd) per maze cleared and at quit.
 
 const VrText := preload("res://core/vr_text.gd")
 const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
