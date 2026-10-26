@@ -31,6 +31,7 @@ var rows: Array[String] = []
 var W := 12
 var H := 10
 var level_n := 0
+var cur: Dictionary = {}  # the level being played (hand-made or generated): name, theme, new, map...
 var hazard_speed := 1.0
 var theme := "garden"
 var starts: Array[Vector2] = []
@@ -72,14 +73,18 @@ func levels() -> Array:
 	return Levels.SIMPLE_LEVELS if main.simple else Levels.LEVELS
 
 
-## Level n (1-based): map (n-1) % count, mirrored and faster on every second lap.
-func load_level(n: int) -> void:
+## Level n (1-based): map (n-1) % count, mirrored and faster on every second lap. Or, with `def`
+## (a generated maze or a lesson from main.level_def), exactly that level.
+func load_level(n: int, def: Dictionary = {}) -> void:
 	level_n = n
 	var count: int = levels().size()
 	var idx := (n - 1) % count
 	var lap := (n - 1) / count
+	var lv: Dictionary = def if not def.is_empty() else levels()[idx]
+	if not def.is_empty():
+		lap = 0
+	cur = lv
 	hazard_speed = 1.0 + 0.3 * lap
-	var lv: Dictionary = levels()[idx]
 	theme = str(lv.get("theme", "garden"))
 	var src: Array = lv["map"]
 	rows.clear()
@@ -140,25 +145,32 @@ func load_level(n: int) -> void:
 	_build_level(idx)
 
 
+## The level dictionary for level n: the one loaded when n is the current level, else the list's.
+func level_dict(n: int) -> Dictionary:
+	if n == level_n and not cur.is_empty():
+		return cur
+	return levels()[(n - 1) % levels().size()]
+
+
 func level_name(n: int) -> String:
-	var lv: Dictionary = levels()[(n - 1) % levels().size()]
+	var lv: Dictionary = level_dict(n)
 	return str(lv["name"])
 
 
 func level_tip(n: int) -> String:
-	var lv: Dictionary = levels()[(n - 1) % levels().size()]
+	var lv: Dictionary = level_dict(n)
 	return str(lv["tip"])
 
 
 ## A one-time "NEW: ..." line for a level that brings a new idea ("" if none).
 func level_new(n: int) -> String:
-	var lv: Dictionary = levels()[(n - 1) % levels().size()]
+	var lv: Dictionary = level_dict(n)
 	return str(lv.get("new", ""))
 
 
 ## SIMPLE_MODE: the one tile kind that's new on this level ("" if none).
 func level_new_tile(n: int) -> String:
-	var lv: Dictionary = levels()[(n - 1) % levels().size()]
+	var lv: Dictionary = level_dict(n)
 	return str(lv.get("new", ""))
 
 
@@ -178,8 +190,8 @@ func practice_spot() -> Vector2:
 
 
 func level_time(n: int) -> float:
-	var lv: Dictionary = levels()[(n - 1) % levels().size()]
-	return float(lv["time"])
+	var lv: Dictionary = level_dict(n)
+	return float(lv.get("time", 0))
 
 
 func theme_color(i: int) -> Color:
@@ -656,11 +668,16 @@ func _build_level(_idx: int) -> void:
 	level_root.add_child(mi)
 
 	var gem_mat: StandardMaterial3D = main.make_material(Color(0.3, 0.95, 1.0), 1.2)
+	if main.simple:  # a story maze's '*' is a SHINY marble to collect (story.gd)
+		gem_mat = main.make_material(cur.get("shiny_color", Color(1.0, 0.85, 0.2)), 0.9)
 	for g in gems:
 		var gn := MeshInstance3D.new()
-		var pm := PrismMesh.new()
-		pm.size = Vector3(0.03, 0.035, 0.03)
-		gn.mesh = pm
+		if main.simple:
+			gn.mesh = main.sphere_mesh(0.022)
+		else:
+			var pm := PrismMesh.new()
+			pm.size = Vector3(0.03, 0.035, 0.03)
+			gn.mesh = pm
 		gn.material_override = gem_mat
 		gn.position = Vector3(g.x, 0.035, g.y)
 		gn.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

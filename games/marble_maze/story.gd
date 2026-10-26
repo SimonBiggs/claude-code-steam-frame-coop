@@ -62,7 +62,7 @@ static func place(i: int) -> Dictionary:
 ## The save's default data (core/save.gd fills missing keys from this).
 static func save_defaults() -> Dictionary:
 	return {"lessons_done": false, "story_i": 0, "world": -1, "shinies": {}, "places": 0, "daily": {},
-		"mazes": 0, "falls": 0}
+		"mazes": 0, "falls": 0, "jar": []}
 
 
 ## Story maze index i -> [place index (0..), maze within it (0..2), lap (0 = the story, 1+ bonus)].

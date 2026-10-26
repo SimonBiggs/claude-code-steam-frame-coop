@@ -45,6 +45,15 @@ const PropsScript := preload("res://games/marble_maze/props.gd")
 const GhostHandScript := preload("res://games/marble_maze/ghost_hand.gd")
 const CueScript := preload("res://games/marble_maze/cue.gd")
 const UiKit := preload("res://core/ui_kit.gd")
+const Story := preload("res://games/marble_maze/story.gd")
+const LevelsData := preload("res://games/marble_maze/levels.gd")
+const TownScript := preload("res://games/marble_maze/town.gd")
+const Seeded := preload("res://core/seeded.gd")
+const Save := preload("res://core/save.gd")
+const Telemetry := preload("res://core/telemetry.gd")
+const StoryCard := preload("res://core/story_card.gd")
+const MazeGen := preload("res://games/marble_maze/mazegen.gd")
+const JAR_SAVE_MAX := 200
 
 const SIMPLE_MODE := true
 const SIMPLE_INTRO_TIME := 2.2
@@ -162,6 +171,17 @@ var goal_clears := 0  # levels this machine has seen cleared (the goal arrow goe
 var cue_state := ""
 var grab_was := false
 var solo := false  # host with no TV machine: P2 is the giant's own marble (rolled by tilting only)
+# STORY (simple mode, story.gd): Bobo's Marble Town. The host owns the save and the session plan.
+var save: Save
+var session := {}  # {lessons: bool, daily: bool, base: int} decided when a session starts
+var level_desc := {}  # what level `level` is: {k: lesson/story/daily, i, w, d} (sent to the TV machine)
+var def_cache := {}
+var town: Node3D
+var vr_story: Node3D
+var maze_falls0 := 0
+var run_mazes := 0
+var run_shinies := 0
+var story_queue: Array = []  # host: [delay, beat] story cards still to show
 
 
 func _ready() -> void:
@@ -183,6 +203,14 @@ func _ready() -> void:
 	})
 	Input.joy_connection_changed.connect(_on_joy_changed)
 	best = _load_best()
+	save = Save.new()
+	save.game_id = "marble_maze"
+	save.version = 1
+	save.defaults = Story.save_defaults()
+	add_child(save)
+	if int(save.data.world) < 0:
+		save.data.world = Seeded.fresh_seed()  # this family's own Marble Town mazes
+		save.mark_dirty()
 	if OS.has_environment("DUO_JOIN"):
 		_show_center("Connecting to the VR player…", 0.0, false)
 		net.join_finished.connect(func(ok: bool) -> void: _setup_game("client" if ok else "local"))
@@ -213,6 +241,8 @@ func _setup_game(mode: String) -> void:
 	if mode == "client":
 		players[1].set_meta("want_join", true)  # ask the host for a marble (it may hand out another one)
 	_restore_party()
+	if mode != "client":
+		_begin_session()
 	if mode == "host" and simple:
 		_set_solo(true)  # no waiting about: tilt your own marble until the TV players join
 		_start_level(1)
@@ -228,6 +258,9 @@ func _setup_game(mode: String) -> void:
 
 func _exit_tree() -> void:
 	XRServer.world_scale = 1.0  # global: never leave another game's scale behind
+	if simple and run_mazes > 0 and net != null and net.mode != "client" and save != null:
+		Telemetry.run("marble_maze", {"end": "quit", "mazes": run_mazes, "shinies": run_shinies,
+			"story_i": int(save.data.story_i), "places": int(save.data.places), "jar": (save.data.jar as Array).size()})
 
 
 # --- Helpers -------------------------------------------------------------------------
@@ -467,6 +500,10 @@ func _build_world() -> void:
 		ghost_hand.name = "GhostHand"
 		ghost_hand.main = self
 		add_child(ghost_hand)
+		town = TownScript.new()
+		town.name = "Town"
+		town.main = self
+		add_child(town)
 
 
 ## The cosy play-room round the table, baked into ONE mesh: floorboards, walls with windows, a rug,
@@ -1104,6 +1141,7 @@ func _process(delta: float) -> void:
 		_client_update(delta, cont_edge)
 		return
 	_update_lost_pads(delta)
+	_run_story_queue(delta)
 	state_t += delta
 	board.t += delta
 	var target := Vector2.ZERO
@@ -1221,7 +1259,7 @@ func _sparkle_new(delta: float) -> void:
 	if sparkle_t > 0.0:
 		return
 	sparkle_t = 0.6
-	var kinds := {">": "<>^v", "H": "HV"}
+	var kinds := {">": "<>^v", "H": "HV", "P": "PD"}
 	var match_set: String = kinds.get(tile, tile)
 	var n := 0
 	for r in board.H:
@@ -1324,7 +1362,12 @@ func _on_continue() -> void:
 
 func _start_level(n: int) -> void:
 	level = n
-	board.load_level(n)
+	var def := {}
+	if simple and net.mode != "client":
+		level_desc = desc_for(n)
+		def = def_from_desc(level_desc)
+	board.load_level(n, def)
+	maze_falls0 = _falls_now()
 	board.tilt = Vector2.ZERO
 	players[0].want_tilt = Vector2.ZERO
 	players[0].grab_tilt = Vector2.ZERO
@@ -1367,7 +1410,10 @@ func _start_level(n: int) -> void:
 	else:
 		_show_center(title + "\n" + board.level_tip(n), INTRO_TIME)
 	sound("clear", -4.0, 1.0, true)
-	net.event("level", [n])
+	net.event("level", [n, level_desc])
+	if simple:
+		_send_town()
+		_story_intro()
 	print("Level %d started: %s (%d marbles, %.0f s)" % [n, board.level_name(n), count, time_left])
 
 
@@ -1382,6 +1428,7 @@ func _apply_theme() -> void:
 
 
 func _restart() -> void:
+	_begin_session()
 	score = 0
 	levels_cleared = 0
 	stars = 0
@@ -1403,6 +1450,9 @@ func _authority_checks() -> void:
 				continue
 			if pos.distance_to(board.gems[i]) < 0.5 * board.CELL:
 				board.gem_taken[i] = true
+				if simple:
+					_shiny_found(p, board.gems[i])
+					continue
 				_gem_scored(p, board.gems[i], 10, GEM_TIME, Color(0.4, 1.0, 1.0))
 		if golden != NONE and pos.distance_to(golden) < 0.55 * board.CELL:
 			var at := golden
@@ -1486,8 +1536,9 @@ func _team_pads(marbles: Array) -> void:
 		var need: int = mini(pad_total[g], maxi(1, marbles.size()))
 		if on_count[g] >= need:
 			board.gate_open[g] = true
-			var col_name := "BLUE" if g == 0 else "PURPLE"
-			_show_center("TEAMWORK!  The %s gate is open!" % col_name, 2.0)
+			if not simple:  # simple mode: no words, the gate sinks with a sound and sparkles
+				var col_name := "BLUE" if g == 0 else "PURPLE"
+				_show_center("TEAMWORK!  The %s gate is open!" % col_name, 2.0)
 			sound("gate", 0.0, 1.0, true)
 			for idx in on_who[g]:
 				_stat(int(idx), "pads", 1.0)
@@ -1582,6 +1633,7 @@ func _level_clear() -> void:
 		if props != null:
 			props.ring_bell()
 		print("Level %d cleared!" % level)
+		_progress()
 		return
 	var bonus := int(time_left) * 2
 	score += bonus
@@ -1658,6 +1710,221 @@ func _save_best(s: int) -> void:
 	var cfg := ConfigFile.new()
 	cfg.set_value("best", "score", s)
 	cfg.save("user://marble_maze_best.cfg")
+
+
+# --- STORY: Bobo's Marble Town (simple mode; story.gd, mazegen.gd, town.gd) --------------------
+
+## Host / local: a new session's plan: the seven lessons until they've been done once, then TODAY'S
+## MAZE (the first game of the day), then the story from where the family got to.
+## Bots: BOT_STORY=1 skips the lessons, BOT_STORY_I=n starts at story maze n, BOT_NO_DAILY=1.
+func _begin_session() -> void:
+	if not simple or save == null:
+		return
+	var d: Dictionary = save.data
+	var skip := bool(d.lessons_done) or OS.has_environment("BOT_STORY") or OS.has_environment("BOT_STORY_I")
+	var daily_due := not (d.daily as Dictionary).has(Seeded.today()) and not OS.has_environment("BOT_NO_DAILY")
+	session = {"lessons": not skip, "daily": daily_due, "base": int(d.story_i)}
+	if OS.has_environment("BOT_STORY_I"):
+		session.base = int(OS.get_environment("BOT_STORY_I"))
+	run_mazes = 0
+	run_shinies = 0
+	_send_town(true)
+	print("Marble Town: lessons %s, daily %s, story maze %d, %d places lit, %d shinies (world %d)" % [
+		session.lessons, session.daily, session.base, int(d.places), (d.jar as Array).size(), int(d.world)])
+
+
+## Host / local: what level n of this session is ({} outside simple mode: the old level list).
+func desc_for(n: int) -> Dictionary:
+	if not simple:
+		return {}
+	var k := n
+	if bool(session.get("lessons", true)):
+		var count: int = LevelsData.SIMPLE_LEVELS.size()
+		if k <= count:
+			return {"k": "lesson", "i": k}
+		k -= count
+	if bool(session.get("daily", false)):
+		if k == 1:
+			return {"k": "daily", "d": Seeded.today()}
+		k -= 1
+	var world: int = int(save.data.world) if save != null else 0
+	return {"k": "story", "i": int(session.get("base", 0)) + k - 1, "w": world}
+
+
+## Every machine: the level dictionary for a description (the generator is deterministic, so the TV
+## machine makes the very same maze from the few numbers the host sends).
+func def_from_desc(desc: Dictionary) -> Dictionary:
+	if desc.is_empty():
+		return {}
+	var key := var_to_str(desc)
+	if def_cache.has(key):
+		return def_cache[key]
+	var def: Dictionary
+	match str(desc.get("k", "")):
+		"lesson":
+			var count: int = LevelsData.SIMPLE_LEVELS.size()
+			def = (LevelsData.SIMPLE_LEVELS[clampi(int(desc.get("i", 1)) - 1, 0, count - 1)] as Dictionary).duplicate(true)
+		"daily":
+			def = Story.daily(str(desc.get("d", "")))
+			def["shiny_color"] = Story.GOLDEN[1]
+		_:
+			var i := int(desc.get("i", 0))
+			def = Story.maze(int(desc.get("w", 0)), i)
+			def["shiny_color"] = Story.shiny_of(i)[1]
+	if def_cache.size() > 8:
+		def_cache.clear()
+	def_cache[key] = def
+	return def
+
+
+func _falls_now() -> int:
+	var f := 0
+	for p in players:
+		if p.index > 0:
+			f += int(p.falls)
+	return f
+
+
+## Host: queue a story card (after `delay` seconds) for every machine.
+func _story(beat: Dictionary, delay: float = 0.0) -> void:
+	story_queue.append([delay, beat])
+
+
+func _run_story_queue(delta: float) -> void:
+	for i in range(story_queue.size() - 1, -1, -1):
+		story_queue[i][0] -= delta
+		if story_queue[i][0] <= 0.0:
+			var beat: Dictionary = story_queue[i][1]
+			story_queue.remove_at(i)
+			show_story(beat)
+			net.event("story", [beat])
+
+
+## Every machine: the card at the top of each TV view and in front of the VR giant.
+func show_story(beat: Dictionary) -> void:
+	var huds: Array = []
+	for p in players:
+		if p.hud != null and is_instance_valid(p.hud) and p.has_meta("view") and (p.get_meta("view") as Control).visible:
+			huds.append(p.hud)
+	if not huds.is_empty():
+		StoryCard.show(huds, beat)
+	var tl = players[0] if not players.is_empty() else null
+	if tl != null and tl.vr and tl.xr_camera != null:
+		if vr_story != null and is_instance_valid(vr_story):
+			vr_story.call("hide_card")
+		vr_story = StoryCard.show_vr(self, tl.xr_camera, beat)
+	print("Story card: %s - %s" % [beat.get("who", ""), beat.get("line", "")])
+
+
+func _place_beat(pl: Dictionary, key: String) -> Dictionary:
+	return {"who": str(pl.name), "line": str(pl[key]), "pic": str(pl.pic), "color": pl.color, "duration": 4.0}
+
+
+func _bobo(line: String) -> Dictionary:
+	return {"who": "BOBO", "line": line, "pic": "kaiju", "color": Story.BOBO_COLOR, "duration": 3.5}
+
+
+## Host: the story beat as a level starts (a few words and a picture; never in the way).
+func _story_intro() -> void:
+	if net.mode == "client":
+		return
+	story_queue.clear()
+	match str(level_desc.get("k", "")):
+		"lesson":
+			if int(level_desc.get("i", 0)) == 1:
+				_story(_bobo("Hi! I'm Bobo!"), 0.5)
+		"daily":
+			_story({"who": "TODAY", "line": "A brand new maze!", "pic": "sun", "color": Color(1.0, 0.8, 0.3), "duration": 3.5}, 0.5)
+		"story":
+			var i := int(level_desc.get("i", 0))
+			var w := Story.where(i)
+			var pl := Story.place(int(w[0]))
+			var first_today := run_mazes == 0 and int(w[1]) != 0
+			if i == 0 or first_today:
+				_story(_bobo("Oops! My shiny marbles!" if i == 0 else "Let's find more marbles!"), 0.5)
+			if int(w[1]) == 0:
+				_story(_place_beat(pl, "intro"), 4.2 if i == 0 else 0.5)
+			elif int(w[1]) == Story.MAZES_PER_PLACE - 1 and not first_today:
+				_story(_bobo("Last one here!"), 1.0)
+
+
+## Host: a marble rolled over the maze's shiny: into Bobo's jar it goes (saved).
+func _shiny_found(p, at: Vector2) -> void:
+	var idx := -1 if str(level_desc.get("k", "")) == "daily" else int(level_desc.get("i", 0))
+	var sh: Array = Story.shiny_of(idx)
+	var wp := board_world(at, 0.05)
+	burst(wp, sh[1], 26)
+	burst(wp, Color(1.0, 1.0, 0.8), 12)
+	sound("golden", 0.0, 1.0, true)
+	run_shinies += 1
+	if save != null:
+		var d: Dictionary = save.data
+		var got: Dictionary = d.shinies
+		got[str(sh[0])] = int(got.get(str(sh[0]), 0)) + 1
+		var jar_l: Array = d.jar
+		jar_l.append(idx)
+		if jar_l.size() > JAR_SAVE_MAX:
+			jar_l.remove_at(0)
+		save.mark_dirty()
+	_send_town()
+	_story({"who": str(sh[0]), "line": "Into Bobo's jar!", "pic": "dot", "color": sh[1], "duration": 3.0})
+	print("P%d found the %s shiny marble" % [p.index + 1, sh[0]])
+
+
+## Host: the town (places lit) and the jar for every machine.
+func _send_town(quiet: bool = false) -> void:
+	if save == null or town == null or net.mode == "client":
+		return
+	var lit := int(save.data.places)
+	var jar_l: Array = save.data.jar
+	if jar_l.size() > TownScript.JAR_MAX:
+		jar_l = jar_l.slice(jar_l.size() - TownScript.JAR_MAX)
+	town.set_lit(lit, quiet)
+	town.set_jar(jar_l, quiet)
+	net.event("town", [lit, jar_l, quiet])
+
+
+## Host / local, a maze cleared: progress (saved), the place lighting up, and a RUN line.
+func _progress() -> void:
+	if net.mode == "client" or save == null:
+		return
+	var d: Dictionary = save.data
+	var k := str(level_desc.get("k", ""))
+	var falls := _falls_now() - maze_falls0
+	d.falls = int(d.falls) + falls
+	d.mazes = int(d.mazes) + 1
+	run_mazes += 1
+	var info := {"kind": k, "i": int(level_desc.get("i", 0)), "name": board.level_name(level), "secs": snappedf(level_t, 0.1),
+		"falls": falls, "marbles": active_marbles().size(), "vr": bool(players[0].vr), "solo": solo, "mode": net.mode,
+		"shiny": board.gem_taken.has(true), "feat": MazeGen.features(board.cur)}
+	match k:
+		"lesson":
+			if int(level_desc.get("i", 0)) >= LevelsData.SIMPLE_LEVELS.size() and not bool(d.lessons_done):
+				d.lessons_done = true
+				_story(_bobo("Now help me find my marbles!"), 1.0)
+		"daily":
+			var days: Dictionary = d.daily
+			days[str(level_desc.get("d", ""))] = true
+			while days.size() > 40:
+				days.erase(days.keys()[0])
+			_story({"who": "TODAY", "line": "Well done!", "pic": "sun", "color": Color(1.0, 0.8, 0.3), "duration": 3.0}, 1.0)
+		"story":
+			var i := int(level_desc.get("i", 0))
+			var w := Story.where(i)
+			info["place"] = str(Story.place(int(w[0])).name)
+			info["lap"] = int(w[2])
+			d.story_i = maxi(int(d.story_i), i + 1)
+			var lit := Story.places_lit(int(d.story_i))
+			if lit > int(d.places):
+				d.places = lit
+				_story(_place_beat(Story.place(lit - 1), "done"), 1.0)
+				_send_town()
+			elif int(w[1]) == Story.MAZES_PER_PLACE - 1:
+				_story(_bobo(Story.BOBO_LINES[i % Story.BOBO_LINES.size()]), 1.0)
+				if town != null:
+					town.cheer(int(w[0]))
+	save.mark_dirty()
+	Telemetry.run("marble_maze", info)
 
 
 # --- Marble callbacks (from whichever machine simulates the marble) -------------------
@@ -2042,6 +2309,7 @@ func _update_board_arrows() -> void:
 # --- Networked co-op (see docs/GAME_DEV_GUIDE.md) ------------------------------------
 
 func on_client_joined() -> void:
+	_send_town(true)
 	if net.peer_count() > 1:
 		return  # another machine: its marbles roll in when they join (no restart for everyone)
 	if simple:
@@ -2149,17 +2417,19 @@ func make_snapshot() -> Array:
 	var t = players[0]
 	return [state, level, board.t, score, time_left, board.tilt, board_y, board.gem_taken.duplicate(), ms,
 		t.head_transform(), t.hand_l_transform(), t.hand_r_transform(), state_t, best,
-		board.gate_open.duplicate(), board.pad_on.duplicate(), golden, jar, stars, team_cp]
+		board.gate_open.duplicate(), board.pad_on.duplicate(), golden, jar, stars, team_cp, level_desc]
 
 
 func apply_snapshot(s: Array) -> void:
 	if not ready_to_play or s.size() < 14:
 		return
 	var lv: int = s[1]
-	if lv != board.level_n or not synced:
+	var desc: Dictionary = s[20] if s.size() > 20 and s[20] is Dictionary else {}
+	if lv != board.level_n or not synced or var_to_str(desc) != var_to_str(level_desc):
 		synced = true
 		level = lv
-		board.load_level(lv)
+		level_desc = desc
+		board.load_level(lv, def_from_desc(desc))
 		_apply_theme()
 		for p in players:
 			if p.index > 0:
@@ -2233,17 +2503,25 @@ func apply_event(kind: String, args: Array) -> void:
 			_show_center(args[0], args[1], false)
 		"level":
 			var lv: int = args[0]
+			var desc: Dictionary = args[1] if args.size() > 1 and args[1] is Dictionary else {}
 			team_cp = -1
 			golden = NONE
-			if lv != board.level_n:
+			if lv != board.level_n or var_to_str(desc) != var_to_str(level_desc):
 				level = lv
-				board.load_level(lv)
+				level_desc = desc
+				board.load_level(lv, def_from_desc(desc))
 			_apply_theme()
 			for p in players:
 				if p.index > 0:
 					p.reset_to_start()
 			state = "intro"
 			state_t = 0.0
+		"story":
+			show_story(args[0])
+		"town":
+			if town != null:
+				town.set_lit(int(args[0]), bool(args[2]) if args.size() > 2 else false)
+				town.set_jar(args[1])
 		"prop":
 			if props != null:
 				props.react(int(args[0]), false)

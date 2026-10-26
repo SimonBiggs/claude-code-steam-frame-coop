@@ -38,6 +38,7 @@ var last_level := 1
 var max_home := 0
 var join_time := 0.0
 var pad_dist := {}  # pad index -> {cell: dist}
+var gem_dist := {}  # story mazes: the way to the shiny marble (P2 detours for it)
 var tour_i := 0
 const TOUR := [1, 3, 5, 7, 9, 10, 12]
 var forced_over := false
@@ -118,6 +119,7 @@ func _physics_process(delta: float) -> void:
 		for i in board.pads.size():
 			var pd: Array = board.pads[i]
 			pad_dist[i] = _bfs_from([board.cell_of(pd[0])])
+		gem_dist = _bfs_from([board.cell_of(board.gems[0])]) if simple and not board.gems.is_empty() else {}
 	if main.level > last_level:
 		cleared += main.level - last_level
 		print("BOT: level %d cleared (%d so far)" % [last_level, cleared])
@@ -359,6 +361,8 @@ func _bfs_from(targets: Array) -> Dictionary:
 func _target_map(p, k: int) -> Dictionary:
 	var board = main.board
 	var c: Vector2i = board.cell_of(Vector2(p.lp.x, p.lp.z))
+	if k == 0 and not gem_dist.is_empty() and not board.gem_taken[0] and gem_dist.has(c) and not OS.has_environment("BOT_NO_SHINY"):
+		return gem_dist  # the first marble takes the detour for the shiny
 	if dist.has(c) or board.pads.is_empty():
 		return dist
 	for g in 2:
@@ -590,6 +594,8 @@ func _check_headline(who: String, text: String) -> void:
 	for n in main.board.levels().size():
 		if tx == main.board.level_name(n + 1):
 			return
+	if tx == main.board.level_name(main.level) or tx == str(main.board.cur.get("name", "")):
+		return
 	_tip_error(who, tx)
 
 
@@ -604,6 +610,11 @@ func _exit_tree() -> void:
 		var ks: Array = cues.keys()
 		ks.sort()
 		print("BOT CUES: mode=%s %s" % [main.net.mode, ",".join(PackedStringArray(ks))])
+		if main.save != null:
+			var d: Dictionary = main.save.data
+			print("BOT STORY: mode=%s level=%d desc=%s story_i=%d places=%d jar=%d lessons_done=%s town_lit=%d" % [main.net.mode,
+				main.level, str(main.level_desc), int(d.story_i), int(d.places), (d.jar as Array).size(), d.lessons_done,
+				main.town.lit if main.town != null else -1])
 		for p in main.players:
 			if p.has_meta("cue_done"):
 				print("BOT CUES: P%d done=%s" % [p.index + 1, p.get_meta("cue_done")])
