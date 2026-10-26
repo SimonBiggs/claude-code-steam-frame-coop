@@ -104,7 +104,9 @@ func spawn(k: String, from: Vector3, goal: Vector3, split_gen: int = 0, blocking
 
 func _make_kaiju(id: int, k: String, split_gen: int) -> Kaiju:
 	var n := Kaiju.new()
-	n.setup(id, k, split_gen)
+	# SIMPLE_MODE made rounds: the lost kaiju wear this round's look (every machine reads round_info).
+	var variant: Dictionary = main.round_variant() if not Data.MINIS.has(k) and main.has_method("round_variant") else {}
+	n.setup(id, k, split_gen, variant)
 	main.world_root.add_child(n)
 	kaiju[id] = n
 	return n
@@ -132,7 +134,10 @@ func spawn_boss(k: String, index: int, count: int) -> Kaiju:
 	var x := 0.0 if count <= 1 else (-22.0 if index == 0 else 22.0)
 	var n: Kaiju
 	if Data.SIMPLE_MODE:
-		n = spawn(k, Vector3(x, 0, -44.0), Vector3(x * 0.6, 0, 4.0))  # closer: no long wait for little ones
+		# Closer: no long wait for little ones. Two lost kaiju walk in side by side down the clear
+		# north boulevard (x = +-22 would start inside a block of buildings).
+		var sx := 0.0 if count <= 1 else (-6.5 if index == 0 else 6.5)
+		n = spawn(k, Vector3(sx, 0, -44.0 - 8.0 * index), Vector3(sx * 2.0, 0, 4.0))
 	else:
 		n = spawn(k, Vector3(x, 0, -Data.MAP - 14.0), Vector3(x * 0.6, 0, -22.0))
 	emit_fx("sfx", ["explosion", n.global_position, 6.0, 0.4])

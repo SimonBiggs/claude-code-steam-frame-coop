@@ -9,13 +9,14 @@ extends RefCounted
 ##   StoryCard.show_vr(self, vr_rig.camera, same_opts)   # opts.vr_height: card height vs the eyes (-0.22)
 ##   StoryCard.picture("envelope", 96.0, color)   # just the picture Control (results screens, maps)
 ## Pictures (drawn in code, no textures): bird, envelope, cloud, storm, house, sprite (a wind sprite),
-## sun, wave, tree, castle, penguin (Tumble, with a scarf), snowman, tophat, beanie; anything else is a core/ui_kit.gd icon kind ("star", "heart", "crown"...).
+## sun, wave, tree, castle, kaiju (a friendly monster face in `color`), penguin (Tumble, with a scarf),
+## snowman, tophat, beanie; anything else is a core/ui_kit.gd icon kind ("star", "heart", "crown"...).
 ## Keep lines short and kind: kids read the screen.
 
 const UiKit := preload("res://core/ui_kit.gd")
 const HudKit := preload("res://core/hud_kit.gd")
 
-const PICTURES: Array[String] = ["bird", "envelope", "cloud", "storm", "house", "sprite", "sun", "wave", "tree", "castle",
+const PICTURES: Array[String] = ["bird", "envelope", "cloud", "storm", "house", "sprite", "sun", "wave", "tree", "castle", "kaiju",
 	"penguin", "snowman", "tophat", "beanie"]
 
 
@@ -256,6 +257,19 @@ class Picture extends Control:
 				_poly(dome, Color(0.9, 0.22, 0.28))
 				_poly([[0.1, 0.7 + bob], [0.9, 0.7 + bob], [0.9, 0.84 + bob], [0.1, 0.84 + bob]], white)
 				_circle(0.5, 0.3 + bob, 0.09, white)
+			"kaiju":
+				for k in 3:  # back spikes
+					var x := 0.32 + k * 0.18
+					_poly([[x - 0.07, 0.3 + bob], [x, 0.1 + bob], [x + 0.07, 0.3 + bob]], color.lightened(0.35))
+				_circle(0.5, 0.55 + bob, 0.33, color)
+				_circle(0.5, 0.68 + bob, 0.2, color.lightened(0.4))
+				_eye(0.39, 0.47 + bob, 0.08)
+				_eye(0.61, 0.47 + bob, 0.08)
+				draw_arc(_p(0.5, 0.64 + bob), 0.11 * size.x, 0.25, PI - 0.25, 12, Color(0.2, 0.1, 0.12), 0.025 * size.x)
+				_poly([[0.44, 0.7 + bob], [0.47, 0.75 + bob], [0.5, 0.7 + bob]], Color.WHITE)
+				_poly([[0.5, 0.7 + bob], [0.53, 0.75 + bob], [0.56, 0.7 + bob]], Color.WHITE)
+				_circle(0.3, 0.6 + bob, 0.04, Color(1.0, 0.55, 0.65, 0.8))
+				_circle(0.7, 0.6 + bob, 0.04, Color(1.0, 0.55, 0.65, 0.8))
 			"castle":
 				_poly([[0.2, 0.45], [0.8, 0.45], [0.8, 0.85], [0.2, 0.85]], Color(0.85, 0.88, 1.0))
 				for x in [0.2, 0.44, 0.68]:

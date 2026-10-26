@@ -59,6 +59,14 @@ const Kaiju := preload("res://games/mech_titans/kaiju.gd")
 const Toys := preload("res://games/mech_titans/toys.gd")
 const GhostHand := preload("res://games/mech_titans/ghost_hand.gd")
 const Teach := preload("res://games/mech_titans/teach.gd")
+const RoundGen := preload("res://games/mech_titans/roundgen.gd")
+const Creatures := preload("res://core/creatures.gd")
+const Seeded := preload("res://core/seeded.gd")
+const StoryCard := preload("res://core/story_card.gd")
+const Telemetry := preload("res://core/telemetry.gd")
+## Where the kaiju friends stand and cheer (just outside the east and west edges), up to this many.
+const PARADE_MAX := 8
+const PARADE_X := 68.0
 
 const SIMPLE_MODE := Data.SIMPLE_MODE
 const CHEER_TIME := 5.5  ## SIMPLE_MODE: seconds of cheering between rounds
@@ -124,6 +132,10 @@ var vr_results: Node
 var turn_mode := "smooth"
 var _hud_t := 0.0
 var _prev_reboot := false
+var parade: Node3D  ## SIMPLE_MODE: the kaiju friends made so far, waving from the city's edges
+var parade_key := ""
+var test_start_round := 0  ## bots (SIMPLE_MODE): start at this round (3+ = the made rounds)
+var story_count := 0  ## story pictures shown on this machine (bots)
 
 
 func _ready() -> void:
@@ -144,7 +156,8 @@ func _ready() -> void:
 	save = Save.new()
 	save.game_id = Data.GAME_ID
 	save.version = Data.SAVE_VERSION
-	save.defaults = {"parts": 0, "cleared": [], "stars": [], "owned": [], "paint": "classic", "paints": ["classic"], "turn": "smooth"}
+	save.defaults = {"parts": 0, "cleared": [], "stars": [], "owned": [], "paint": "classic", "paints": ["classic"], "turn": "smooth",
+		"friends": [], "best_round": 0, "rounds": 0}
 	add_child(save)
 	sfx = SfxScript.new()
 	add_child(sfx)
@@ -283,7 +296,9 @@ func _setup(mode: String) -> void:
 		net.state_set("sel", auto_launch)
 		_set_map(auto_launch)
 	if mode != "client" and SIMPLE_MODE:
-		_launch(0)  # straight into round 1 (no hangar)
+		net.state_set("run_seed", Seeded.fresh_seed())  # this session's made rounds (roundgen.gd)
+		_publish_friends()
+		_launch(test_start_round)  # straight into round 1 (no hangar)
 
 
 func _mask_mirror(vp: SubViewport, mask: int) -> void:
@@ -296,12 +311,161 @@ func _mask_mirror(vp: SubViewport, mask: int) -> void:
 
 func _exit_tree() -> void:
 	Engine.time_scale = 1.0
+	# A round cut short (back to the arcade, a quit) still writes its telemetry line.
+	if SIMPLE_MODE and net != null and net.mode != "client" and String(net.state_get("phase", "")) == "play" and missions != null:
+		_round_telemetry(int(net.state_get("mission", 0)), "quit")
+
+
+# --- Made rounds, kaiju friends, story pictures (SIMPLE_MODE) -----------------------------------
+
+## The mission / round table entry for i (SIMPLE_MODE: lessons, then seeded rounds from roundgen.gd;
+## every machine reads the host's "round_info" so it's the same everywhere).
+func mission_info(i: int) -> Dictionary:
+	if not SIMPLE_MODE:
+		return Data.mission(i)
+	var ri: Variant = net.state_get("round_info", {})
+	if ri is Dictionary and int((ri as Dictionary).get("index", -1)) == i:
+		return ri
+	return RoundGen.make(i, int(net.state_get("run_seed", 0)), _friend_count())
+
+
+## This round's lost-kaiju look ({} for the lessons and the full game).
+func round_variant() -> Dictionary:
+	if not SIMPLE_MODE or net == null:
+		return {}
+	return mission_info(int(net.state_get("mission", net.state_get("map", 0)))).get("variant", {})
+
+
+func _friend_count() -> int:
+	if save == null:
+		return 0
+	return (save.data.get("friends", []) as Array).size()
+
+
+## Host: the friends made so far (the last few, for the hills) for every machine.
+func _publish_friends() -> void:
+	var f: Array = save.data.get("friends", [])
+	net.state_set("friends_list", f.slice(maxi(0, f.size() - PARADE_MAX)))
+	net.state_set("friends_n", f.size())
+
+
+## Every machine: the kaiju friends waving from the north hills.
+func _build_parade(list: Array) -> void:
+	var key := var_to_str(list)
+	if key == parade_key and parade != null:
+		return
+	parade_key = key
+	if parade != null:
+		parade.queue_free()
+	parade = Node3D.new()
+	parade.name = "FriendsParade"
+	world_root.add_child(parade)
+	for i in list.size():
+		var e: Array = list[i]
+		var info: Dictionary = Data.KAIJU.get(String(e[0]), Data.KAIJU["lizard"])
+		var opts := {"color": info["color"], "lod": "far"}
+		if e.size() > 1 and String(e[1]) != "":
+			opts["color"] = Color.html(String(e[1]))
+			opts["color2"] = Color.html(String(e[2])) if e.size() > 2 else opts["color"]
+		var m := Creatures.monster(String(info["monster"]), opts)
+		var h := maxf(0.2, Creatures.height_of(m))
+		m.scale = Vector3.ONE * (6.0 / h)
+		# Along the east and west edges of the city, facing in (the Titan and the planes see them).
+		var side := -1.0 if i % 2 == 0 else 1.0
+		m.position = Vector3(side * PARADE_X, 0.0, 24.0 - 15.0 * float(i / 2))
+		m.rotation.y = -side * PI * 0.5  # creatures face +Z: turn them towards the middle
+		parade.add_child(m)
+		var a: Variant = Creatures.anim(m)
+		if a != null:
+			a.call("play", "wave")
+		m.set_meta("phase", float(i) * 0.7)
+
+
+## Every machine: friends wave now and then, and cheer while the round's cheer plays.
+func _animate_parade(delta: float) -> void:
+	if parade == null:
+		return
+	var cheering := String(net.state_get("phase", "")) == "results"
+	for m in parade.get_children():
+		var ph := float(m.get_meta("phase", 0.0)) + delta
+		m.set_meta("phase", ph)
+		if ph > (1.3 if cheering else 6.0):
+			m.set_meta("phase", 0.0)
+			var a: Variant = Creatures.anim(m)
+			if a != null:
+				a.call("play", "cheer" if cheering else "wave")
+
+
+## Host: a story picture on every machine (one or two capital words: SIMPLE_MODE has no how-to text).
+func story(beat: Dictionary) -> void:
+	show_story(beat)
+	if net.mode == "host":
+		net.event("story", [beat])
+
+
+func show_story(beat: Dictionary) -> void:
+	story_count += 1
+	var opts := beat.duplicate()
+	opts["color"] = Color.html(String(beat.get("color", "ffd25a")))
+	opts["sound"] = String(beat.get("sound", "ui_notify"))
+	if split != null:
+		StoryCard.show(_all_huds(), opts)
+	if vr_rig != null:
+		StoryCard.show_vr(self, vr_rig.camera, opts)
+
+
+func _kaiju_color(m: Dictionary) -> String:
+	var v: Dictionary = m.get("variant", {})
+	var steps: Array = m.get("steps", [{}])
+	var bosses: Array = (steps[0] as Dictionary).get("boss", ["lizard"]) if not steps.is_empty() else ["lizard"]
+	var c: Color = v.get("color", Data.KAIJU.get(String(bosses[0]), Data.KAIJU["lizard"])["color"])
+	return c.to_html(false)
+
+
+## Host: the round's kaiju went home: they're friends now (saved), maybe a new place opens.
+func _make_friends(i: int) -> void:
+	var m := mission_info(i)
+	var v: Dictionary = m.get("variant", {})
+	var friends: Array = save.data["friends"]
+	var before := friends.size()
+	var steps: Array = m.get("steps", [])
+	var bosses: Array = (steps[0] as Dictionary).get("boss", []) if not steps.is_empty() else []
+	for b in bosses:
+		var e: Array = [String(b), "", ""]
+		if v.has("color"):
+			e = [String(b), (v["color"] as Color).to_html(false), (v.get("color2", v["color"]) as Color).to_html(false)]
+		friends.append(e)
+	while friends.size() > 60:
+		friends.pop_front()
+	save.data["best_round"] = maxi(int(save.data["best_round"]), i + 1)
+	save.data["rounds"] = int(save.data["rounds"]) + 1
+	save.mark_dirty()
+	_publish_friends()
+	var who := String(m.get("name", "")) if bool(m.get("gen", false)) else String(Data.KAIJU.get(String(bosses[0]) if not bosses.is_empty() else "lizard", Data.KAIJU["lizard"])["name"])
+	story({"who": "NEW FRIEND!", "line": who, "pic": "kaiju", "color": _kaiju_color(m), "duration": 3.5, "sound": "achievement"})
+	var opened := RoundGen.place_opened(before, friends.size())
+	if opened != "":
+		get_tree().create_timer(3.8).timeout.connect(func() -> void:
+			story({"who": "NEW PLACE!", "line": String(Data.PLACES[opened]["name"]), "pic": "castle", "color": "7ad7ff", "duration": 3.5, "sound": "fanfare"}))
+
+
+## Host: one line per round for tuning from real play (core/telemetry.gd).
+func _round_telemetry(i: int, how: String) -> void:
+	var m := mission_info(i)
+	var steps: Array = m.get("steps", [])
+	Telemetry.run(Data.GAME_ID, {"round": i + 1, "made": bool(m.get("gen", false)), "daily": bool(m.get("daily", false)),
+		"name": String(m.get("name", "")), "place": String(m.get("place", "")), "sky": String(m.get("sky", "")),
+		"kaiju": (steps[0] as Dictionary).get("boss", []) if not steps.is_empty() else [], "hp": float(m.get("hp", 1.0)),
+		"seconds": int(missions.time), "reboots": missions.reboots, "tv_players": party.player_count(), "vr": vr_rig != null,
+		"friends": _friend_count(), "end": how})
 
 
 # --- World ------------------------------------------------------------------------------------------
 
 ## Host: show mission i's city on every machine (a new "map_gen" always rebuilds it fresh).
 func _set_map(i: int) -> void:
+	if SIMPLE_MODE and net.mode != "client":
+		net.state_set("round_info", RoundGen.make(i, int(net.state_get("run_seed", 0)), _friend_count()))
 	net.state_set("map", i)
 	net.state_set("map_gen", int(net.state_get("map_gen", 0)) + 1)
 
@@ -311,7 +475,7 @@ func _build_map(i: int) -> void:
 	if i == built_map and city != null:
 		return
 	built_map = i
-	var m := Data.mission(i)
+	var m := mission_info(i)
 	if toys != null:
 		toys.reset_world()
 	if combat != null:
@@ -518,7 +682,7 @@ func _refresh_ai() -> void:
 		else:
 			humans.append(String(veh[k]))
 	var needed: Array[String] = ["jet", "truck", "drone"]
-	var m := Data.mission(int(net.state_get("map", 0)))
+	var m := mission_info(int(net.state_get("map", 0)))
 	for st in m["steps"]:
 		var d: Dictionary = st
 		if d.has("boss") and ((d["boss"] as Array).has("moth") or (d["boss"] as Array).has("crab")):
@@ -857,7 +1021,7 @@ func _refresh_hud() -> void:
 
 
 func _landmark_title() -> String:
-	var m := Data.mission(int(net.state_get("map", 0)))
+	var m := mission_info(int(net.state_get("map", 0)))
 	return {"hospital": "HOSPITAL", "plant": "POWER PLANT", "dome": "MOON DOME"}.get(String(m["protect"]), "")
 
 
@@ -940,7 +1104,7 @@ func _menu_items(page: String, vr: bool) -> Array:
 	var items: Array = []
 	match page:
 		"main":
-			var m := Data.mission(sel)
+			var m := mission_info(sel)
 			items.append({"id": "launch", "text": "LAUNCH: %s" % String(m["name"]), "icon": "play", "desc": Data.PLACES[m["place"]]["name"]})
 			items.append({"id": "missions", "text": "CHOOSE MISSION", "icon": "flag", "right": "%d / %d" % [sel + 1, Data.MISSIONS.size()]})
 			items.append({"id": "upgrades", "text": "UPGRADES", "icon": "bolt", "right": "%d PARTS" % parts})
@@ -949,7 +1113,7 @@ func _menu_items(page: String, vr: bool) -> Array:
 				items.append({"id": "turn", "text": "TURNING: %s" % turn_mode.to_upper(), "icon": "arrow_right", "desc": "Smooth or snap turns"})
 		"missions":
 			for i in Data.MISSIONS.size():
-				var mm := Data.mission(i)
+				var mm := mission_info(i)
 				var ok := _mission_unlocked(i)
 				items.append({"id": "m%d" % i, "text": "%d. %s" % [i + 1, String(mm["name"])], "right": "%d/3" % _stars_of(i) if ok else "",
 					"disabled": not ok, "reason": "Finish mission %d first" % i, "icon": "star" if _stars_of(i) > 0 else "flag"})
@@ -1154,7 +1318,7 @@ func _launch(i: int) -> void:
 
 func _play_briefing(i: int) -> void:
 	var lines: Array = []
-	var m := Data.mission(i)
+	var m := mission_info(i)
 	lines.append({"speaker": Data.COMMANDER, "color": Data.COMMANDER_COLOR, "text": "MISSION %d: %s" % [i + 1, String(m["name"])], "auto": 2.5})
 	for t in m["brief"]:
 		lines.append({"speaker": Data.COMMANDER, "color": Data.COMMANDER_COLOR, "text": String(t), "auto": 5.0})
@@ -1184,6 +1348,12 @@ func _start_play() -> void:
 		_refresh_all_vehicle_huds()
 		net.event("unlocks", [])
 		var r := int(net.state_get("mission", 0))
+		var rm := mission_info(r)
+		if bool(rm.get("gen", false)):
+			# A made round: the lost kaiju's picture (TODAY'S KAIJU for the daily golden one).
+			story({"who": "TODAY'S KAIJU" if bool(rm.get("daily", false)) else String(rm.get("name", "")),
+				"line": String(rm.get("name", "")) if bool(rm.get("daily", false)) else "HELP!",
+				"pic": "kaiju", "color": _kaiju_color(rm), "duration": 3.2})
 		var kinds := vehicle_kinds()
 		if r > 0 and kinds.size() > Data.simple_vehicles(r - 1).size():
 			# A new vehicle this round: its name + Y on the TV.
@@ -1217,6 +1387,8 @@ func mission_finished(i: int, win: bool, stars: int, parts: int, data: Dictionar
 
 ## SIMPLE_MODE (host): the round's kaiju went home. Cheer for a moment, then the next round.
 func round_cleared(i: int) -> void:
+	_round_telemetry(i, "home")
+	_make_friends(i)
 	net.state_set("results", {"win": true, "mission": i, "simple": true})
 	net.state_set("phase", "results")
 	results_t = 0.0
@@ -1299,6 +1471,13 @@ func _on_state_changed(key: String, value: Variant) -> void:
 		"rings":
 			if toys != null:
 				toys.sync_rings(value)
+		"round_info":
+			if net.mode == "client" and value is Dictionary and int((value as Dictionary).get("index", -1)) == int(net.state_get("map", -1)):
+				built_map = -2  # a made round arrived after the map: build it with the right look
+				_build_map(int(net.state_get("map", 0)))
+		"friends_list":
+			if value is Array and world_root != null:
+				_build_parade(value)
 
 
 func _on_phase(phase: String) -> void:
@@ -1331,6 +1510,11 @@ func _boss_intro(list: Array) -> void:
 		var info: Dictionary = Data.KAIJU.get(k, {})
 		if info.is_empty():
 			continue
+		if SIMPLE_MODE and list.size() == 1:
+			var rm := mission_info(int(net.state_get("mission", 0)))
+			if bool(rm.get("gen", false)):
+				info = info.duplicate()
+				info["name"] = String(rm.get("name", info["name"]))  # TINY ZAPPY, PINK WOBBLES...
 		var delay := float(i) * 2.6
 		get_tree().create_timer(delay + 0.5).timeout.connect(func() -> void:
 			if split != null and SIMPLE_MODE:
@@ -1461,6 +1645,7 @@ func _process(delta: float) -> void:
 	if not ready_to_play or city == null:
 		return
 	var phase := String(net.state_get("phase", "hangar"))
+	_animate_parade(delta)
 	if net.mode == "client":
 		mech.client_tick(delta)
 		combat.client_tick(delta)
@@ -1543,6 +1728,9 @@ func apply_event(kind: String, args: Array) -> void:
 	if combat == null:
 		return
 	match kind:
+		"story":
+			if args.size() > 0 and args[0] is Dictionary:
+				show_story(args[0])
 		"fx":
 			combat.play_fx(String(args[0]), args[1])
 		"announce":
@@ -1569,7 +1757,7 @@ func apply_event(kind: String, args: Array) -> void:
 ## TV machine: mirror the host's briefing line by line.
 func _client_dialogue(index: int) -> void:
 	if not dlg.is_playing():
-		var m := Data.mission(int(net.state_get("mission", 0)))
+		var m := mission_info(int(net.state_get("mission", 0)))
 		var lines: Array = [{"speaker": Data.COMMANDER, "color": Data.COMMANDER_COLOR, "text": "MISSION %d: %s" % [int(net.state_get("mission", 0)) + 1, String(m["name"])]}]
 		for t in m["brief"]:
 			lines.append({"speaker": Data.COMMANDER, "color": Data.COMMANDER_COLOR, "text": String(t)})

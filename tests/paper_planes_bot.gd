@@ -63,7 +63,7 @@ func _ready() -> void:
 		kit.at(54.0, "host checks (the TV machine is still connected)", _checks)
 		kit.at(62.0, "finish", kit.finish)
 	else:
-		kit.at(58.0 if client else 52.0, "finish", func() -> void:
+		kit.at(58.0 if client else 55.0, "finish", func() -> void:
 			_checks()
 			kit.finish())
 	kit.every(3.0, _report)

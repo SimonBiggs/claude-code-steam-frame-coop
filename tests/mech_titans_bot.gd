@@ -26,6 +26,7 @@ const BotKit := preload("res://tests/bot_kit.gd")
 const Data := preload("res://games/mech_titans/data.gd")
 const Kaiju := preload("res://games/mech_titans/kaiju.gd")
 const VrRig := preload("res://core/vr_rig.gd")
+const Telemetry := preload("res://core/telemetry.gd")
 
 var kit: BotKit
 var main: Node
@@ -61,6 +62,8 @@ var seen := {}  ## SIMPLE_MODE: cues / arrows seen on this machine
 var bad_text := {}  ## SIMPLE_MODE: how-to text found (reported once each)
 var unplug_dev := -1
 var unplug_slot := -1
+var made_round := -1  ## MT_ROUND: the made round the bot starts at (0-based)
+var saw_variant := false  ## a lost kaiju wore the made round's size
 
 
 func _ready() -> void:
@@ -72,6 +75,9 @@ func _ready() -> void:
 	if OS.has_environment("MT_MISSION"):
 		mission = clampi(int(OS.get_environment("MT_MISSION")), 0, Data.MISSIONS.size() - 1)
 		practice = false
+	if simple and OS.has_environment("MT_ROUND"):  # SIMPLE_MODE: start at a made round (4 = today's kaiju)
+		made_round = maxi(3, int(OS.get_environment("MT_ROUND")) - 1)
+		main.set("test_start_round", made_round)
 	main.set("test_boss_only", true)
 	main.set("test_practice", practice)
 	main.set("test_hp_scale", 1.0 if practice else 0.6)
@@ -123,7 +129,7 @@ func _simple_timeline(t0: float) -> void:
 		kit.at(t0 + 1.0, "the VR pilot pokes the cockpit toys", func() -> void:
 			for toy in ["button", "horn", "bobble", "dice", "wiper"]:
 				_pokes.append([toy, 0.5]))
-	if not client:
+	if not client and made_round < 0:  # (a made round may be on the moon: no trees)
 		kit.at(40.0, "the Titan picks up a tree and a building wobbles", func() -> void:
 			var f: Vector3 = main.mech.fist_world(1)
 			var i: int = main.toys._tree_near(f, 400.0)
@@ -136,7 +142,7 @@ func _simple_timeline(t0: float) -> void:
 			_tree_done = true)
 	kit.every(0.1, _record)
 	kit.every(0.5, _scan_text)
-	if not client and not host:
+	if not client and not host and made_round < 0:
 		_teach_timeline()
 	var end := 100.0
 	if host:
@@ -245,6 +251,9 @@ func _is_instruction(t: String) -> bool:
 	var txt := t.strip_edges()
 	if txt == "":
 		return false
+	for sl in main.party.active_slots():  # a seat's name ("TV 2 (P3)", core/who.gd) is a name, not how-to text
+		if txt == main.party.name_of(sl):
+			return false
 	for w in ["JOIN", "SWAP", "PRESS", "HOLD", "PUNCH IT", "TO THROW", "PAUSED BY", "CARRY ON", "MENU", "ON BOARD", ":"]:
 		if txt.to_upper().contains(w):
 			return true
@@ -279,6 +288,25 @@ func _scan_text() -> String:
 
 
 ## SIMPLE_MODE: the picture cues and arrows this machine should have shown.
+## SIMPLE_MODE: kaiju friends, story pictures, telemetry (and with MT_ROUND, the made round itself).
+func _story_checks() -> void:
+	var mode: String = main.net.mode
+	kit.assert_true(main.story_count > 0, "%s: a story picture was shown" % mode)
+	kit.assert_true(saw_results, "%s: the round's kaiju went home (cheer)" % mode)
+	kit.assert_true(main.parade != null and main.parade.get_child_count() > 0, "%s: a kaiju friend waves from the hills" % mode)
+	if mode != "client":
+		kit.assert_true((main.save.data.get("friends", []) as Array).size() > 0, "%s: the kaiju friend is saved" % mode)
+		var runs: Array = Telemetry.read("mech_titans")
+		kit.assert_true(not runs.is_empty() and String((runs[-1] as Dictionary).get("end", "")) == "home", "%s: the round wrote a telemetry line" % mode)
+		if not runs.is_empty():
+			print("BOT last RUN: %s" % JSON.stringify(runs[-1]))
+	if made_round >= 0:
+		var ri: Dictionary = main.mission_info(made_round)
+		kit.assert_true(bool(ri.get("gen", false)), "%s: round %d is a made round (%s)" % [mode, made_round + 1, String(ri.get("name", ""))])
+		kit.assert_true(saw_variant, "%s: the lost kaiju wore its made look" % mode)
+		kit.assert_true(saw_play and saw_kaiju, "%s: the made round was played" % mode)
+
+
 func _cue_checks() -> void:
 	var ks: Array = seen.keys()
 	ks.sort()
@@ -368,6 +396,10 @@ func _physics_process(delta: float) -> void:
 	for id in main.combat.kaiju:
 		var k: Kaiju = main.combat.kaiju[id]
 		saw_kaiju = true
+		if made_round >= 0 and not k.is_mini:
+			var v: Dictionary = main.round_variant()
+			if absf(k.height - float(Data.KAIJU[k.kind]["height"]) * float(v.get("size", 1.0))) < 0.01 and not v.is_empty():
+				saw_variant = true
 		if k.state == "practice":
 			saw_practice = true
 		if k.any_painted():
@@ -691,6 +723,9 @@ func _checks() -> void:
 
 func _simple_checks() -> void:
 	var mode: String = main.net.mode
+	_story_checks()
+	if made_round >= 0:
+		return
 	_cue_checks()
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
 	kit.assert_eq(main.party.player_count(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
