@@ -10,7 +10,11 @@ const SNOW := Color(0.97, 0.98, 1.0)
 
 var radii: Array[float] = []
 var carrot := false
-var hat := false
+var hat := false  # wearing any hat
+var hat_kind := 0  # 0 none, 1 top hat, 2 woolly hat, 3 crown (story.gd)
+var ghost_kind := 1  # the hat the see-through guide shows (the visitor's wish)
+var style: Array = []  # unlocked looks (story.gd UNLOCKS ids): scarf, buttons, gold_carrot, rainbow
+var tint := Color.WHITE  # rainbow snow: a soft colour per snowman
 var done := false
 
 var body: Node3D  # everything that wobbles / dances
@@ -26,6 +30,17 @@ var dance_seed := 0.0
 
 func _ready() -> void:
 	dance_seed = randf() * 10.0
+	tint = Color.from_hsv(randf(), 0.22, 1.0)
+
+
+## Rainbow snow: a soft pastel snow material (cached per hue step).
+static func tinted_snow(c: Color) -> Material:
+	var step := int(c.h * 8.0) % 8
+	return ResCache.get_or_make("snowman_snow_tint_%d_v1" % step, func() -> Resource:
+		var m := (snow_material() as StandardMaterial3D).duplicate() as StandardMaterial3D
+		m.albedo_color = Color.from_hsv(step / 8.0, 0.22, 1.0)
+		m.emission = Color.from_hsv(step / 8.0, 0.35, 0.75)
+		return m)
 
 
 # --- Shapes shared with main.gd ---------------------------------------------------------------
@@ -95,6 +110,52 @@ static func hat_mesh() -> Mesh:
 		return b.build())
 
 
+## A woolly hat with a bobble: base at the origin.
+static func beanie_mesh() -> Mesh:
+	return ResCache.get_or_make("snowman_beanie_v1", func() -> Resource:
+		var b := MeshKit.Builder.new()
+		var red := Color(0.9, 0.22, 0.28)
+		b.cylinder(0.2, 0.21, 0.07, MeshKit.at(Vector3(0.0, 0.035, 0.0)), Color(0.97, 0.97, 1.0), 14)
+		b.dome(0.19, MeshKit.at(Vector3(0.0, 0.06, 0.0), Vector3(1.0, 1.05, 1.0)), red)
+		b.sphere(0.07, MeshKit.at(Vector3(0.0, 0.27, 0.0)), Color(0.97, 0.97, 1.0), 8)
+		return b.build())
+
+
+## A golden crown with jewels: base at the origin.
+static func crown_mesh() -> Mesh:
+	return ResCache.get_or_make("snowman_crown_v1", func() -> Resource:
+		var b := MeshKit.Builder.new()
+		var gold := Color(1.0, 0.8, 0.2)
+		b.cylinder(0.17, 0.17, 0.1, MeshKit.at(Vector3(0.0, 0.05, 0.0)), gold, 14)
+		for i in 5:
+			var a := TAU * i / 5.0
+			b.cone(0.05, 0.13, MeshKit.at(Vector3(cos(a) * 0.15, 0.16, sin(a) * 0.15)), gold, 6)
+			b.sphere(0.025, MeshKit.at(Vector3(cos(a) * 0.15, 0.24, sin(a) * 0.15)), gold.lightened(0.3), 6)
+		for i in 3:
+			var a := -0.6 + i * 0.6 + PI * 0.5
+			b.sphere(0.03, MeshKit.at(Vector3(cos(a) * 0.17, 0.05, sin(a) * 0.17)), [Color(0.9, 0.15, 0.3), Color(0.2, 0.5, 1.0), Color(0.2, 0.85, 0.4)][i], 6)
+		return b.build())
+
+
+## The hat mesh of a kind (1 top hat, 2 woolly hat, 3 crown).
+static func hat_of(kind: int) -> Mesh:
+	match kind:
+		2:
+			return beanie_mesh()
+		3:
+			return crown_mesh()
+	return hat_mesh()
+
+
+## The golden carrot (an unlock).
+static func gold_carrot_mesh() -> Mesh:
+	return ResCache.get_or_make("snowman_gcarrot_v1", func() -> Resource:
+		var b := MeshKit.Builder.new()
+		b.cone(0.05, 0.24, MeshKit.aim(Vector3(0.0, 0.0, 0.12), Vector3.BACK), Color(1.0, 0.82, 0.2), 8, true)
+		b.cone(0.03, 0.06, MeshKit.aim(Vector3(0.0, 0.0, -0.02), Vector3.FORWARD), Color(0.3, 0.75, 0.2))
+		return b.build())
+
+
 static func arm_mesh() -> Mesh:
 	return ResCache.get_or_make("snowman_arm_v1", func() -> Resource:
 		var b := MeshKit.Builder.new()
@@ -107,12 +168,17 @@ static func arm_mesh() -> Mesh:
 
 # --- Data -> visuals --------------------------------------------------------------------------
 
-func set_data(new_radii: Array[float], new_carrot: bool, new_hat: bool, new_done: bool) -> void:
-	var grew := new_radii.size() > radii.size() or (new_carrot and not carrot) or (new_hat and not hat)
-	var changed := new_radii != radii or new_carrot != carrot or new_hat != hat or new_done != done
+## new_hat: 0 none, else the hat kind. ghost: the hat kind the guide shows. looks: unlocked styles.
+func set_data(new_radii: Array[float], new_carrot: bool, new_hat: int, new_done: bool, ghost: int = 1, looks: Array = []) -> void:
+	var grew := new_radii.size() > radii.size() or (new_carrot and not carrot) or (new_hat > 0 and hat_kind == 0)
+	var changed := new_radii != radii or new_carrot != carrot or new_hat != hat_kind or new_done != done \
+		or (new_hat == 0 and ghost != ghost_kind) or looks != style
 	radii = new_radii.duplicate()
 	carrot = new_carrot
-	hat = new_hat
+	hat_kind = new_hat
+	hat = new_hat > 0
+	ghost_kind = maxi(1, ghost)
+	style = looks.duplicate()
 	done = new_done
 	if changed:
 		_rebuild()
@@ -133,7 +199,7 @@ func _rebuild() -> void:
 	for i in radii.size():
 		var mi := MeshInstance3D.new()
 		mi.mesh = ball_mesh()
-		mi.material_override = snow_material()
+		mi.material_override = snow_material() if not style.has("rainbow") else tinted_snow(tint)
 		mi.scale = Vector3.ONE * radii[i]
 		mi.position.y = center_y(radii, i)
 		body.add_child(mi)
@@ -143,9 +209,16 @@ func _rebuild() -> void:
 	if n >= 2:
 		var r1 := radii[1]
 		var y1 := center_y(radii, 1)
-		for k in 3:  # buttons
+		var sweets: Array[Color] = [Color(1.0, 0.3, 0.45), Color(1.0, 0.85, 0.2), Color(0.3, 0.75, 1.0)]
+		for k in 3:  # buttons (sweeties once unlocked)
 			var a := -0.45 + k * 0.42
-			deco.sphere(r1 * 0.09, MeshKit.at(Vector3(0.0, y1 + sin(a) * r1, cos(a) * r1 * 0.98)), coal, 8)
+			var bc: Color = sweets[k] if style.has("buttons") else coal
+			deco.sphere(r1 * (0.12 if style.has("buttons") else 0.09), MeshKit.at(Vector3(0.0, y1 + sin(a) * r1, cos(a) * r1 * 0.98)), bc, 8)
+		if style.has("scarf") and n >= 3:  # a scarf where the head meets the body
+			var sy := center_y(radii, 1) + r1 * 0.8
+			var sc := Color.from_hsv(fmod(tint.h + 0.5, 1.0) if style.has("rainbow") else 0.0, 0.75, 0.95)
+			deco.torus(r1 * 0.62, r1 * 0.12, MeshKit.at(Vector3(0.0, sy, 0.0)), sc)
+			deco.box(Vector3(r1 * 0.22, r1 * 0.7, r1 * 0.08), MeshKit.at(Vector3(r1 * 0.35, sy - r1 * 0.35, r1 * 0.62), Vector3.ONE, Vector3(0.3, 0.0, 0.15)), sc)
 		for side in [-1.0, 1.0]:
 			var pivot := Node3D.new()
 			pivot.position = Vector3(side * r1 * 0.85, y1 + r1 * 0.25, 0.0)
@@ -165,12 +238,12 @@ func _rebuild() -> void:
 			var a := (k - 2) * 0.28
 			deco.sphere(r2 * 0.07, MeshKit.at(Vector3(sin(a) * r2 * 0.5, y2 - r2 * 0.3 + absf(a) * r2 * 0.18, r2 * 0.9)), coal, 6)
 		var nose := MeshInstance3D.new()
-		nose.mesh = carrot_mesh()
+		nose.mesh = gold_carrot_mesh() if style.has("gold_carrot") else carrot_mesh()
 		nose.position = Vector3(0.0, y2 + r2 * 0.02, r2 * 0.92)
 		nose.scale = Vector3.ONE * clampf(r2 / 0.22, 0.8, 1.4)
 		body.add_child(nose)
 		var top := MeshInstance3D.new()
-		top.mesh = hat_mesh()
+		top.mesh = hat_of(hat_kind if hat_kind > 0 else ghost_kind)
 		top.position = Vector3(0.0, y2 + r2 * 0.78, 0.0)
 		top.rotation.z = -0.12
 		top.scale = Vector3.ONE * clampf(r2 / 0.22, 0.8, 1.4)

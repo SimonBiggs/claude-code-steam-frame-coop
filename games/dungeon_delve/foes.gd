@@ -32,7 +32,7 @@ const BOSSES: Array[int] = [FloorGen.B_SLIME, FloorGen.B_BONE, FloorGen.B_FORGE]
 const BOSS_NAMES := {FloorGen.B_SLIME: "SLIME KING", FloorGen.B_BONE: "BONE LORD", FloorGen.B_FORGE: "FORGE GOLEM"}
 const BASE_HP := {FloorGen.F_SLIME: 2.0, FloorGen.F_SPITTER: 2.0, FloorGen.F_SHIELD: 4.0, FloorGen.F_SWARM: 1.0,
 	FloorGen.F_HEALER: 3.0, FloorGen.F_MIMIC: 6.0, FloorGen.F_CHARGER: 4.0, FloorGen.F_BOMBER: 3.0,
-	FloorGen.B_SLIME: 30.0, FloorGen.B_BONE: 42.0, FloorGen.B_FORGE: 54.0}
+	FloorGen.B_SLIME: 55.0, FloorGen.B_BONE: 80.0, FloorGen.B_FORGE: 100.0}  # boss fights last about a minute or two
 const GOLD := {FloorGen.F_SLIME: 1, FloorGen.F_SPITTER: 2, FloorGen.F_SHIELD: 3, FloorGen.F_SWARM: 1,
 	FloorGen.F_HEALER: 3, FloorGen.F_MIMIC: 15, FloorGen.F_CHARGER: 4, FloorGen.F_BOMBER: 3,
 	FloorGen.B_SLIME: 40, FloorGen.B_BONE: 60, FloorGen.B_FORGE: 80}
@@ -209,6 +209,16 @@ func _make(id: int, kind: int, p: Vector3, room: int, elite: bool) -> Dictionary
 		"elite": elite, "st": IDLE, "t": 0.5, "cd": 1.0, "hop": 0.0, "node": node, "anim": an, "bang": bang,
 		"h": float(_heights[kind]), "sz": sz, "goal": p, "dir": Vector3.FORWARD, "hit": {}, "phase": 1, "pat": 0,
 		"inv": 0.0, "kb": Vector3.ZERO, "frac": 1.0, "flash": 0.0, "fly": 0.0, "from": p, "to": p, "count": 0}
+	if kind == FloorGen.F_MIMIC:
+		# The tell: a sleeping mimic breathes, and every few seconds it wobbles and peeks with glowing eyes.
+		var eb := MeshKit.Builder.new()
+		for sx in [-0.12, 0.12]:
+			eb.sphere(0.055, MeshKit.at(Vector3(sx, 0.0, 0.0)), Color(1.0, 0.85, 0.2), 8, true)
+		var eyes := MeshKit.instance(eb.build(), false)
+		eyes.position = Vector3(0.0, float(_heights[kind]) * 0.55, 0.32)
+		eyes.visible = false
+		node.add_child(eyes)
+		m["eyes"] = eyes
 	if is_boss(kind):
 		var bar := HudKit.bar3d(node, {"max": 1.0, "value": 1.0, "width": 1.6, "offset": Vector3(0, float(_heights[kind]) + 0.5, 0), "name": BOSS_NAMES[kind]})
 		m["bar"] = bar
@@ -251,12 +261,22 @@ func hit(id: int, dmg: float, from: Vector3, pierce: bool = false) -> String:
 		_wake(m)
 	if not pierce and _shield_blocks(m, from):
 		m["inv"] = 0.12
+		m["blocks"] = int(m.get("blocks", 0)) + 1
+		if int(m["blocks"]) >= (4 if not is_boss(kind) else 8):
+			# Keep hitting a shield and it gives: the bearer reels (dizzy), open from every side.
+			m["blocks"] = 0
+			m["st"] = STUN
+			m["t"] = 1.8 if not is_boss(kind) else 2.2
+			if deep != null:
+				deep.net_popup(center_of(id) + Vector3(0, 0.6, 0), "CRACK!", "crit")
+				deep.sound_at("crash", m["p"], 0.0, 1.3)
 		return "block"
 	if int(m["st"]) == STUN:
 		dmg *= 2.0
 	m["hp"] = float(m["hp"]) - dmg
-	m["inv"] = 0.12 if not is_boss(kind) else 0.18
+	m["inv"] = 0.12 if not is_boss(kind) else 0.45
 	m["anim"].hurt(Color(1, 1, 1))
+	m["punch"] = 1.0
 	if not is_boss(kind):
 		var away := Vector3(m["p"]) - from
 		away.y = 0.0
@@ -422,16 +442,22 @@ func step(delta: float, targets: Array, active_room: int) -> void:
 
 
 func _dmg(base: int, m: Dictionary) -> int:
-	return base + int(cfg["dmg"]) + (1 if bool(m["elite"]) and base > 0 else 0)
+	var elite_bonus := 1 if bool(m["elite"]) and base > 0 and int(m["kind"]) not in [FloorGen.F_SLIME, FloorGen.F_SWARM] else 0
+	return base + int(cfg["dmg"]) + elite_bonus
 
 
-func _touch(id: int, m: Dictionary, targets: Array, reach: float, dmg: int, once: bool) -> void:
+## cone: only targets in front (dot with facing above this; -1 = all round).
+func _touch(id: int, m: Dictionary, targets: Array, reach: float, dmg: int, once: bool, cone: float = -1.0) -> void:
 	var p: Vector3 = m["p"]
+	var fwd := Vector2(sin(float(m["yaw"])), cos(float(m["yaw"])))
 	deep.src = "touch%d" % int(m["kind"])
 	for t in targets:
 		var tp: Vector3 = (t as Dictionary)["p"]
 		var key: int = (t as Dictionary)["key"]
-		if Vector2(tp.x - p.x, tp.z - p.z).length() < reach + radius_of(id) * 0.6:
+		var to := Vector2(tp.x - p.x, tp.z - p.z)
+		if to.length() < reach + radius_of(id) * 0.6:
+			if cone > -1.0 and to.length() > 0.2 and fwd.dot(to.normalized()) < cone:
+				continue  # beside or behind a shove: missed
 			if once and (m["hit"] as Dictionary).has(key):
 				continue
 			if deep.hurt(key, _dmg(dmg, m), p, true) != "":
@@ -441,13 +467,16 @@ func _touch(id: int, m: Dictionary, targets: Array, reach: float, dmg: int, once
 func _slime(id: int, m: Dictionary, delta: float, targets: Array, spd: float) -> void:
 	var hop: float = m["hop"]
 	if float(m["t"]) <= 0.0 and hop <= 0.0:
-		m["t"] = randf_range(0.8, 1.5) / spd
+		m["t"] = randf_range(0.7, 1.3) / minf(spd, 1.15)
 		var tg := _nearest(m["p"], targets, int(m["room"]))
 		var dir := Vector3(randf_range(-1, 1), 0, randf_range(-1, 1)).normalized()
 		if not tg.is_empty() and randf() < 0.85:
 			var tp: Vector3 = tg["p"]
-			dir = Vector3(tp.x - Vector3(m["p"]).x, 0.0, tp.z - Vector3(m["p"]).z).normalized()
-		m["v"] = dir * 2.0 * spd
+			var to := Vector3(tp.x - Vector3(m["p"]).x, 0.0, tp.z - Vector3(m["p"]).z)
+			dir = to.normalized()
+			if to.length() > 2.0:
+				dir = dir.rotated(Vector3.UP, 0.6 if id % 2 == 0 else -0.6)  # slimes spread out and come from the sides
+		m["v"] = dir * 2.2 * spd
 		m["yaw"] = atan2(dir.x, dir.z)
 		m["hop"] = 0.55
 		m["hit"] = {}
@@ -458,7 +487,12 @@ func _slime(id: int, m: Dictionary, delta: float, targets: Array, spd: float) ->
 		var p: Vector3 = m["p"]
 		p.y = sin(PI * (1.0 - hop / 0.55)) * 0.35
 		m["p"] = p
-		_touch(id, m, targets, 0.45, 1, true)
+		if hop < 0.3:  # it hurts when it lands on you, not on the way up
+			_touch(id, m, targets, 0.4, 1, true)
+			if not (m["hit"] as Dictionary).is_empty():
+				m["t"] = maxf(float(m["t"]), 1.3)  # a slime that got you bounces off and rests a moment
+				m["hop"] = 0.0
+				m["v"] = Vector3.ZERO
 	else:
 		var p2: Vector3 = m["p"]
 		p2.y = 0.0
@@ -492,7 +526,7 @@ func _spitter(id: int, m: Dictionary, delta: float, targets: Array, spd: float) 
 			var p: Vector3 = m["p"]
 			var from := p + Vector3(0.0, 0.6, 0.0)
 			var aim := (tp + Vector3(0.0, 0.7, 0.0) - from).normalized()
-			shoot("ball", from, aim * (3.8 + zone * 0.5) * spd, id)
+			shoot("ball", from, aim * (4.3 + zone * 0.5) * spd, id)
 			deep.sound_at("spit" if zone != 1 else "bow", p, -2.0, 1.1)
 			m["st"] = IDLE
 			m["cd"] = randf_range(2.8, 3.8) / spd
@@ -529,7 +563,7 @@ func _shield(id: int, m: Dictionary, delta: float, targets: Array, spd: float) -
 		ACT:
 			var yaw: float = m["yaw"]
 			_walk(m, Vector3(sin(yaw), 0.0, cos(yaw)) * 6.5 * delta, radius_of(id) * 0.8)
-			_touch(id, m, targets, 0.6, 1, true)
+			_touch(id, m, targets, 0.6, 1, true, 0.3)
 			if float(m["t"]) <= 0.0:
 				m["st"] = RECOVER
 				m["t"] = 0.9
@@ -545,8 +579,9 @@ func _shield(id: int, m: Dictionary, delta: float, targets: Array, spd: float) -
 				_walk(m, fwd * 1.3 * spd * delta, radius_of(id) * 0.8)
 			var facing := fwd.dot(Vector3(tp.x - p.x, 0.0, tp.z - p.z).normalized())
 			if d < 1.9 and facing > 0.8 and float(m["cd"]) <= 0.0:
-				_wind(m, 0.7)
+				_wind(m, 0.75)
 				m["cd"] = 2.2 / spd
+				deep.telegraph("line", p, fwd, Vector2(2.6 + radius_of(id), 1.4 + radius_of(id)), 0.75)  # where the shove will go (as big as it really reaches)
 
 
 func _swarm(id: int, m: Dictionary, delta: float, targets: Array, spd: float) -> void:
@@ -573,7 +608,7 @@ func _swarm(id: int, m: Dictionary, delta: float, targets: Array, spd: float) ->
 		if Vector2(tp2.x - np.x, tp2.z - np.z).length() < 0.6:
 			deep.src = "swarm"
 			if deep.hurt(int(tg["key"]), _dmg(1, m), np, true) != "":
-				m["cd"] = 1.6
+				m["cd"] = 1.2
 				m["v"] = -v
 			else:
 				m["cd"] = 0.5
@@ -596,7 +631,7 @@ func _healer(id: int, m: Dictionary, delta: float, targets: Array, spd: float) -
 					deep.heal_fx(center_of(int(oid)))
 			deep.sound_at("heal", p, -2.0)
 			m["st"] = IDLE
-			m["cd"] = randf_range(4.0, 5.0) / spd
+			m["cd"] = randf_range(4.5, 5.5) / spd
 		return
 	# Stay behind friends, away from heroes.
 	var tg := _nearest(p, targets, room)
@@ -658,7 +693,7 @@ func _mimic(id: int, m: Dictionary, delta: float, targets: Array, spd: float) ->
 		ACT:
 			var yaw: float = m["yaw"]
 			_walk(m, Vector3(sin(yaw), 0.0, cos(yaw)) * 5.5 * delta, radius_of(id) * 0.8)
-			_touch(id, m, targets, 0.55, 1, true)
+			_touch(id, m, targets, 0.55, 1, true, 0.2)
 			if float(m["t"]) <= 0.0:
 				m["st"] = RECOVER
 				m["t"] = 0.8
@@ -747,7 +782,7 @@ func _boss_slime(id: int, m: Dictionary, delta: float, targets: Array, spd: floa
 	var p: Vector3 = m["p"]
 	var room: int = m["room"]
 	var ph: int = m["phase"]
-	var fast := 1.0 + 0.2 * (ph - 1)
+	var fast := 1.0 + 0.3 * (ph - 1)
 	var st: int = m["st"]
 	match st:
 		FLY:
@@ -761,7 +796,7 @@ func _boss_slime(id: int, m: Dictionary, delta: float, targets: Array, spd: floa
 				m["p"] = Vector3(b.x, 0.0, b.z)
 				deep.sound_at("crash", b, 0.0, 0.6)
 				deep.shake(0.6)
-				if ph >= 2:
+				if ph >= 2 and count_in(room) <= 3:  # never more than a few helpers at once
 					for k2 in 2:
 						var sp := FloorGen.room_clamp(f, room, b + Vector3(randf_range(-2.0, 2.0), 0.0, randf_range(-2.0, 2.0)), 0.6)
 						spawn(FloorGen.F_SLIME, sp, room)
@@ -850,7 +885,7 @@ func _boss_bone(id: int, m: Dictionary, delta: float, targets: Array, spd: float
 	var p: Vector3 = m["p"]
 	var room: int = m["room"]
 	var ph: int = m["phase"]
-	var fast := 1.0 + 0.18 * (ph - 1)
+	var fast := 1.0 + 0.28 * (ph - 1)
 	var st: int = m["st"]
 	match st:
 		WIND:
@@ -917,7 +952,7 @@ func _boss_bone_attack(id: int, m: Dictionary, targets: Array, ph: int) -> void:
 			m["count"] = 3 if ph < 3 else 4
 			m["t"] = 0.0
 		"summon":
-			var n := 2 if ph < 3 else 3
+			var n := clampi((2 if ph < 3 else 3), 0, 5 - count_in(room))
 			for k in n:
 				var sp := FloorGen.room_clamp(f, room, p + Vector3(randf_range(-3.0, 3.0), 0.0, randf_range(-3.0, 3.0)), 0.8)
 				spawn(FloorGen.F_SHIELD if k % 2 == 0 else FloorGen.F_SPITTER, sp, room)
@@ -939,7 +974,7 @@ func _boss_forge(id: int, m: Dictionary, delta: float, targets: Array, spd: floa
 	var p: Vector3 = m["p"]
 	var room: int = m["room"]
 	var ph: int = m["phase"]
-	var fast := 1.0 + 0.18 * (ph - 1)
+	var fast := 1.0 + 0.28 * (ph - 1)
 	var st: int = m["st"]
 	match st:
 		WIND:
@@ -1079,6 +1114,8 @@ func reflect(sid: int, toward: Vector3) -> bool:
 
 func _step_shots(delta: float, targets: Array) -> void:
 	for sid in shots.keys():
+		if not shots.has(sid):
+			continue  # a boss went down and took every shot with it (foes.clear())
 		var s: Dictionary = shots[sid]
 		s["t"] = float(s["t"]) + delta
 		var t: float = s["t"]
@@ -1135,6 +1172,12 @@ func animate(delta: float) -> void:
 		var m: Dictionary = mons[id]
 		var n: Node3D = m["node"]
 		var target: Vector3 = m["p"]
+		var punch: float = m.get("punch", 0.0)
+		if punch > 0.0:
+			# Hit-stop: the monster freezes for a blink and bulges, so a hit feels solid.
+			m["punch"] = maxf(0.0, punch - delta * 12.0)
+			n.scale = Vector3.ONE * float(m["sz"]) * (1.0 + 0.25 * punch)
+			continue
 		if n.position.distance_to(target) > 3.5:
 			n.position = target
 		else:
@@ -1147,6 +1190,14 @@ func animate(delta: float) -> void:
 			squash = 1.0 + 0.12 * sin(_t * 30.0)
 			if fmod(_t, 0.25) < delta * 1.5:
 				m["anim"].flash(Color(1.0, 0.5, 0.2), 0.12)
+		if st == SLEEP and int(m["kind"]) == FloorGen.F_MIMIC:
+			var ph := fmod(_t + float(id) * 0.7, 3.5)
+			squash = 1.0 + 0.04 * sin(_t * 2.2)  # breathing (real chests never move)
+			n.rotation.z = sin(ph * 40.0) * 0.08 if ph < 0.35 else 0.0
+			(m["eyes"] as Node3D).visible = ph > 0.2 and ph < 1.1
+		elif m.has("eyes"):
+			(m["eyes"] as Node3D).visible = st != SLEEP
+			n.rotation.z = 0.0
 		n.scale = n.scale.lerp(Vector3(s * squash, s / squash, s * squash), 1.0 - exp(-14.0 * delta))
 		(m["bang"] as Node3D).visible = st == WIND and fmod(_t, 0.2) < 0.14
 		var moving := st in [MOVE, IDLE, ACT, FLY] and st != SLEEP
@@ -1240,6 +1291,9 @@ func unpack(a: PackedFloat32Array) -> void:
 		m["yaw"] = a[i + 5]
 		m["st"] = flags & 15
 		m["phase"] = flags >> 5
+		if a[i + 7] < float(m.get("frac", 1.0)) - 0.001:
+			m["punch"] = 1.0  # mirrors feel the hit too
+			m["anim"].hurt(Color(1, 1, 1))
 		m["frac"] = a[i + 7]
 		i += 8
 	for id in mons.keys():

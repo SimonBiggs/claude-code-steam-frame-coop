@@ -27,6 +27,19 @@ func _init() -> void:
 					_check(1000 + s * 7919, zone, fl, heroic)
 				for s2 in [930279, 542184, 666233, 42, 71, 33]:  # seeds the family / bots played
 					_check(s2, zone, fl, heroic)
+	# Endless depths: the zones go round again with twists.
+	for zone2 in range(FloorGen.ZONE_COUNT, FloorGen.ZONE_COUNT + 4):
+		for fl2 in FloorGen.FLOORS_PER_ZONE:
+			for s3 in maxi(4, seeds / 6):
+				_check(5000 + s3 * 131, zone2, fl2, s3 % 2 == 0)
+	if FloorGen.modifier(1, 0, 0) != "" or FloorGen.modifier(1, FloorGen.ZONE_COUNT, 0) == "":
+		_fail("twists only in the endless depths")
+	for path in ["res://games/dungeon_delve/deep.gd", "res://games/dungeon_delve/deep_hud.gd", "res://games/dungeon_delve/floor_view.gd", "res://games/dungeon_delve/foes.gd"]:
+		var src := FileAccess.get_file_as_string(path)
+		if RegEx.create_from_string("ZONES\\[(zone|z)\\]").search(src) != null:
+			_fail("%s indexes ZONES with a raw zone (use FloorGen.zone_data: endless zones go past 3)" % path)
+	if FloorGen.room_door_bits(FloorGen.generate(3, 0, 0, false), 99) != 0:
+		_fail("room_door_bits with a stale room index from another floor must be 0")
 	_check_shop()
 	_check_view()
 	print("FLOORS: %d floors checked, %d failures (%d ms)" % [checks, fails, Time.get_ticks_msec() - t0])

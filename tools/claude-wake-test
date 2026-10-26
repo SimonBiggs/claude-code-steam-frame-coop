@@ -1,0 +1,141 @@
+#!/usr/bin/env python3
+"""claude-wake-test: regression test for claude-wake, replaying Sunday 25 Oct 2026 (never sends a real message).
+
+Sunday: the main session hit its five_hour limit at 18:41 (resets 21:00), the after-reset wake was armed for 21:02,
+keep-going nevertheless nudged at 19:28/19:40/19:52 (all 429 usage_limit_reached), agents' task-notifications land in
+the main transcript around the reset, and nothing woke the session. Each scenario steps a fake clock every 2 minutes
+from 18:42 to 21:20 and runs exactly what claude-watchdog runs (after-reset --check, then keep-going --check) with
+CLAUDE_WAKE_FAKE_SEND (the headless send is replaced by a canned result: 429 before the reset, success after).
+  claude-wake-test [path/to/claude-wake]      exit 0 = all scenarios pass
+"""
+import json, os, subprocess, sys, tempfile
+
+WAKE = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "claude-wake")
+RESET = 1792962000  # Sun 25 Oct 2026 21:00 UTC (= 9pm Europe/Dublin, after the clocks went back)
+T0 = RESET - 2 * 3600 - 18 * 60  # 18:42, just after the limit hit
+END = RESET + 20 * 60  # before keep-going may legitimately nudge again (20 min idle)
+PACE = "RECOMMENDED AGENTS: 2\n5-hour: 10% used, ideal now 20%\nweekly: 40% used, ideal now 50%\n"
+FAIL429 = json.dumps({"type": "result", "subtype": "success", "is_error": True, "num_turns": 1,
+                      "api_error_status": 429, "api_error": "usage_limit_reached",
+                      "result": "You've hit your session limit · resets 9pm (Europe/Dublin)"})
+OK = json.dumps({"type": "result", "subtype": "success", "is_error": False, "num_turns": 2, "result": "DONE"})
+
+
+def iso(t):
+    import datetime
+    return datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+def assistant(t, text="Working on it."):
+    return {"type": "assistant", "isSidechain": False, "timestamp": iso(t),
+            "message": {"role": "assistant", "model": "claude-opus-5-5", "content": [{"type": "text", "text": text}]}}
+
+
+def limit_err(t):
+    q = {"status": "rejected", "resetsAt": RESET, "rateLimitType": "five_hour"}
+    return {"type": "assistant", "isSidechain": False, "timestamp": iso(t), "isApiErrorMessage": True,
+            "error": "rate_limit", "apiErrorStatus": 429, "apiError": "usage_limit_reached", "quotaLimits": q,
+            "apiErrorParams": {"rate_limit_info": q},
+            "message": {"role": "assistant", "model": "<synthetic>",
+                        "content": [{"type": "text", "text": "You've hit your session limit · resets 9pm (Europe/Dublin)"}]}}
+
+
+def notification(t, text):
+    return {"type": "user", "isSidechain": False, "timestamp": iso(t), "userType": "external",
+            "origin": {"kind": "task-notification", "producer": "session-task"},
+            "message": {"role": "user", "content": f"<task-notification>\n<summary>{text}</summary>\n</task-notification>"}}
+
+
+def system(t):
+    return {"type": "system", "subtype": "stop_hook_summary", "isSidechain": False, "timestamp": iso(t)}
+
+
+def sunday(limit_in_transcript=True):
+    """Transcript entries with the times they appear."""
+    e = [(T0 - 400, assistant(T0 - 400, "Mech Titans is live")), (T0 - 390, system(T0 - 390))]
+    if limit_in_transcript:
+        e += [(T0 - 60, notification(T0 - 60, "agent finished")), (T0 - 59, limit_err(T0 - 59)),
+              (RESET - 6900, notification(RESET - 6900, "Monitor event")), (RESET - 6898, limit_err(RESET - 6898))]
+    # around the reset: agents fail on the limit / monitors fire -> lines appended, but no assistant turn
+    for k, dt in enumerate((-30, 5, 40, 75)):
+        e.append((RESET + dt, notification(RESET + dt, f"Agent {k} stopped: usage limit reached")))
+    e.append((RESET + 76, system(RESET + 76)))
+    return e
+
+
+def run(name, entries, state, expect_resume_at=None, expect_skip=False, expect_kg_sends=0, assistant_after_send=False,
+        allowed_early=0):
+    d = tempfile.mkdtemp(prefix="wake-test-")
+    sess, st, log = f"{d}/main.jsonl", f"{d}/state.json", f"{d}/wake.log"
+    os.makedirs(f"{d}/subagents")
+    json.dump(state, open(st, "w"))
+    json.dump({"rate_limits": {}}, open(f"{d}/usage.json", "w"))  # Sunday: usage.json had no five_hour data
+    open(f"{d}/ok", "w").write(OK)
+    open(f"{d}/429", "w").write(FAIL429)
+    entries = sorted(entries, key=lambda x: x[0])
+    sends, problems = [], []
+    t = T0
+    while t <= END:
+        with open(sess, "w") as f:
+            for at, e in entries:
+                if at <= t:
+                    f.write(json.dumps(e, separators=(",", ":")) + "\n")  # compact, like real transcripts
+        env = dict(os.environ, CLAUDE_WAKE_NOW=str(t), CLAUDE_WAKE_SESSION=sess, CLAUDE_WAKE_STATE=st,
+                   CLAUDE_WAKE_LOG=log, CLAUDE_WAKE_USAGE=f"{d}/usage.json", CLAUDE_WAKE_SUBAGENTS=f"{d}/subagents",
+                   CLAUDE_WAKE_CHANNEL=f"{d}/none.jsonl", CLAUDE_WAKE_PACE_OUT=PACE, CLAUDE_WAKE_NO_INHIBIT="1",
+                   CLAUDE_WAKE_FAKE_SEND=f"{d}/429" if t < RESET else f"{d}/ok", TZ="Europe/Dublin")
+        before = open(log).read() if os.path.exists(log) else ""
+        for cmd in (["after-reset", "--check"], ["keep-going", "--check"]):
+            r = subprocess.run([sys.executable, WAKE] + cmd, env=env, capture_output=True, text=True)
+            if r.returncode not in (0, 1) or "Traceback" in r.stderr:
+                problems.append(f"{iso(t)} {cmd[0]} crashed: {r.stderr[-300:]}")
+        new = (open(log).read() if os.path.exists(log) else "")[len(before):]
+        for line in new.splitlines():
+            if "sent to pid" in line:
+                kind = "resume" if "Usage window has reset" in line else "keep-going"
+                sends.append((t, kind, "ok" if ": ok:" in line else "FAILED"))
+                if kind == "resume" and assistant_after_send:
+                    entries.append((t + 30, assistant(t + 30, "Resuming after the reset.")))
+        t += 120
+    resume = [x for x in sends if x[1] == "resume"]
+    kg = [x for x in sends if x[1] == "keep-going"]
+    early = [x for x in sends if x[0] < RESET]
+    if len(early) > allowed_early or any(r == "ok" for _, _, r in early):
+        problems.append(f"sent while the limit was active: {[(iso(a), k) for a, k, _ in early]}")
+    if expect_resume_at is not None:
+        if len(resume) != 1 or resume[0][0] != expect_resume_at:
+            problems.append(f"expected one resume send at {iso(expect_resume_at)}, got {[(iso(a), r) for a, _, r in resume]}")
+    elif resume:
+        problems.append(f"expected no resume send, got {[(iso(a), r) for a, _, r in resume]}")
+    if len(kg) != expect_kg_sends:
+        problems.append(f"expected {expect_kg_sends} keep-going sends, got {[(iso(a), r) for a, _, r in kg]}")
+    s = json.load(open(st))
+    if expect_skip and s.get("result") != "skipped (busy)":
+        problems.append(f"expected result 'skipped (busy)', state {s}")
+    print(f"{'PASS' if not problems else 'FAIL'}: {name}")
+    for p in problems:
+        print("   ", p)
+    if problems:
+        print("    log:\n      " + open(log).read().replace("\n", "\n      ") if os.path.exists(log) else "    (no log)")
+    return not problems
+
+
+def first_check_at_or_after(x):
+    return T0 + -(-(x - T0) // 120) * 120
+
+
+ARMED = {"armed": float(RESET), "why": "main session stopped on a five_hour limit", "armed_at": T0 + 59}
+DUE = first_check_at_or_after(RESET + 120)
+ok = all([
+    run("Sunday replay: armed, notifications at the reset, no assistant turn -> one resume at reset+2min",
+        sunday(), dict(ARMED), expect_resume_at=DUE, assistant_after_send=True),
+    run("same, but the main session has a real assistant turn after the reset -> skip (busy)",
+        sunday() + [(RESET + 60, assistant(RESET + 60, "Back after the reset."))], dict(ARMED), expect_skip=True),
+    run("not armed yet (fresh state): the transcript's limit error alone blocks keep-going and arms the wake",
+        sunday(), {}, expect_resume_at=DUE, assistant_after_send=True),
+    run("limit only visible through a 429 send failure: one failed nudge, no retries, resume at 9pm+2min",
+        sunday(limit_in_transcript=False), {}, expect_resume_at=DUE, expect_kg_sends=1, assistant_after_send=True,
+        allowed_early=1),
+])
+print("ALL PASS" if ok else "SOME FAILED")
+sys.exit(0 if ok else 1)

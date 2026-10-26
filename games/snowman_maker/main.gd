@@ -4,6 +4,12 @@ extends Node3D
 ## from the two boxes. Every finished snowman cheers and dances. Make as many as you can in 3 minutes.
 ## Rolling a ball into another ball (or a half-built snowman) makes them stack, so TV players (and the no-VR local
 ## game) can build too; TV players run into a box to carry a carrot or hat to a snowman.
+## STORY + DEPTH: Tumble the penguin gets the village ready for the Winter Fair. Each round is a snow
+## day in a seeded garden (games/snowman_maker/gardengen.gd: boxes, pines, ice, deep drifts, spawns);
+## visitors wish for a snowman with a certain hat (a picture in a bubble), a granted wish counts double;
+## star goals per day; days with a star build the village round the garden (saved); unlocks dress the
+## snowmen; the first game of each date is the DAILY GARDEN. Tumble helps a lone builder.
+## Story data: story.gd; village meshes: village.gd. One telemetry line per day (core/telemetry.gd).
 ## Built on the engine template: net modes, party seats, split view, VR rig, state store, awards.
 
 const NetScript := preload("res://core/net.gd")
@@ -24,6 +30,12 @@ const Creatures := preload("res://core/creatures.gd")
 const SkyKit := preload("res://core/sky_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")
 const Snowman := preload("res://games/snowman_maker/snowman.gd")
+const Story := preload("res://games/snowman_maker/story.gd")
+const GardenGen := preload("res://games/snowman_maker/gardengen.gd")
+const Village := preload("res://games/snowman_maker/village.gd")
+const Seeded := preload("res://core/seeded.gd")
+const StoryCard := preload("res://core/story_card.gd")
+const Telemetry := preload("res://core/telemetry.gd")
 
 const GAME_ID := "snowman_maker"
 const ARENA := 9.0
@@ -36,11 +48,14 @@ const MAX_FREE := 6
 const YARD := Vector3(0.0, 0.0, 0.0)  # the glowing build circle in front of the VR player
 const YARD_R := 1.8
 const VR_START := Vector3(0.0, 0.0, 2.3)
-const BOX_POS: Array[Vector3] = [Vector3(-1.0, 0.0, 1.5), Vector3(1.0, 0.0, 1.5)]  # carrots, hats
 const BOX_TOP := 0.5
 const SIGN_POS := Vector3(2.9, 0.0, -1.2)
-const CARROT := 0
+const CARROT := 0  # item kinds: 0 carrot, 1.. hats (story.gd)
 const HAT := 1
+const TREE_R := 0.5  # gardengen.gd TREE_R
+const HAT_PICS := ["", "tophat", "beanie", "crown"]
+const HAT_COLORS := [Color(1.0, 0.55, 0.15), Color(0.95, 0.25, 0.3), Color(0.9, 0.22, 0.28), Color(1.0, 0.8, 0.2)]
+const BOX_COLORS := [Color(0.75, 0.5, 0.25), Color(0.3, 0.3, 0.4), Color(0.85, 0.2, 0.3), Color(0.95, 0.75, 0.2)]
 const GROUND := 0
 const HELD := 1
 const FLYING := 2
@@ -52,7 +67,8 @@ const INTRO := {
 	"tv": {"role": "THE ROLLERS", "controls": [["L-STICK", "Roll snow"]], "tips": ["Push snowballs to the circle!"]},
 }
 
-var round_time := 180.0  ## seconds per round (bots shorten it)
+var round_time := 150.0  ## seconds per snow day (bots shorten it)
+var force_chapter := -1  ## tests: play this chapter's garden (progress isn't saved)
 
 # --- Networking contract / engine modules ---
 var net: Node
@@ -87,10 +103,34 @@ var vr_results: Node
 var sign_label: Label3D
 var sign_time: Label3D
 var boxes: Array[Node3D] = []
+var box_pos: Array[Vector3] = []  # this garden's boxes (every machine builds them from the seed)
+var box_kind: Array[int] = []
 var sign_node: Node3D
 var sign_wob := 0.0
+var sign_day: Label3D
 var setup_msec := 0
-var box_bounce: Array[float] = [0.0, 0.0]
+var box_bounce: Array[float] = []
+
+# --- The snow day (every machine builds the garden from net state "day": {seed, chapter, ...}) ---
+var garden := {}
+var garden_key := ""
+var garden_root: Node3D
+var star_icons := {}  # slot -> [3 star icons]
+var goal_labels := {}
+var wish_boxes := {}  # slot -> [panel, picture holder]
+var wish_shown := -2
+var visitor: Node3D
+var visitor_bubble: Node3D
+var visitor_hat: MeshInstance3D
+var visitor_cheer := 0.0
+var village_nodes: Array = []
+var village_shown: Array = []
+var story_queue: Array = []  # host: [seconds left, beat]
+var vr_story: Node3D
+var tele := {}  # host: this day's telemetry
+var clock := 0.0
+var wishes_granted := 0
+var snowmen_made := 0
 
 # --- World objects (host simulates; the TV machine mirrors) ---
 var balls := {}  # id -> {n: Node3D, m: MeshInstance3D, r, s, v, off, by, tgt}
@@ -129,7 +169,7 @@ func _ready() -> void:
 	party.player_left.connect(_on_player_left)
 	save = Save.new()
 	save.game_id = GAME_ID
-	save.defaults = {"best": 0}
+	save.defaults = Story.save_defaults()
 	add_child(save)
 	sfx = SfxScript.new()
 	add_child(sfx)
@@ -158,6 +198,8 @@ func _ready() -> void:
 
 func _exit_tree() -> void:
 	XRServer.world_scale = 1.0
+	if not tele.is_empty() and net != null and net.mode != "client":  # left mid-day: still one line
+		_telemetry("quit")
 
 
 func _setup(mode: String) -> void:
@@ -187,6 +229,7 @@ func _setup(mode: String) -> void:
 	awards.set_player(0, "BUILDER" if vr_rig != null or mode == "client" else party.name_of(0))
 	if mode != "client":
 		net.state_set("best", int(save.data["best"]))
+		_publish_progress()
 		_start_round()
 	hints.intro(INTRO, {"duration": 6.0})
 	if vr_rig != null:
@@ -200,7 +243,7 @@ func _setup(mode: String) -> void:
 # --- World --------------------------------------------------------------------------------
 
 func _build_world(vr: bool) -> void:
-	sky = SkyKit.apply(self, "day", vr)
+	sky = SkyKit.apply(self, String(Story.chapter(int(_day().get("chapter", 0))).sky), vr)
 	sky.set_snow(true)
 	var ground := MeshInstance3D.new()
 	var disc := CylinderMesh.new()
@@ -228,29 +271,6 @@ func _build_world(vr: bool) -> void:
 	add_child(MeshKit.scatter_random(MeshKit.prop("pine"), 26, Vector3.ZERO, ARENA + 12.0, ARENA + 2.5, 0.9, 1.5, PackedColorArray(), 3))
 	add_child(MeshKit.scatter_random(MeshKit.prop("bush"), 14, Vector3.ZERO, ARENA + 2.4, ARENA + 1.2, 0.8, 1.2,
 		PackedColorArray([Color(0.95, 0.97, 1.0)]), 4))
-	# The two boxes: carrots and hats.
-	for k in 2:
-		var box := Node3D.new()
-		box.position = BOX_POS[k]
-		add_child(box)
-		var b := MeshKit.Builder.new()
-		var col := Color(0.75, 0.5, 0.25) if k == CARROT else Color(0.85, 0.2, 0.3)
-		b.rounded_box(Vector3(0.6, BOX_TOP, 0.5), 0.05, MeshKit.at(Vector3(0.0, BOX_TOP * 0.5, 0.0)), col)
-		b.box(Vector3(0.62, 0.06, 0.52), MeshKit.at(Vector3(0.0, BOX_TOP - 0.06, 0.0)), col.lightened(0.3))
-		box.add_child(MeshKit.instance(b.build(), false))
-		for j in 3:  # what is inside, poking out
-			var mi := MeshInstance3D.new()
-			if k == CARROT:
-				mi.mesh = Snowman.carrot_mesh()
-				mi.position = Vector3(-0.16 + j * 0.16, BOX_TOP + 0.02, 0.0)
-				mi.rotation = Vector3(-1.2 + j * 0.2, 0.3 * j, 0.0)
-			else:
-				mi.mesh = Snowman.hat_mesh()
-				mi.position = Vector3(-0.15 + j * 0.15, BOX_TOP - 0.02 + j * 0.03, 0.0)
-				mi.rotation.z = -0.3 + j * 0.3
-				mi.scale = Vector3.ONE * 0.8
-			box.add_child(mi)
-		boxes.append(box)
 	# The score sign (world-locked, big, far from the eyes, turned to face the VR start).
 	var post := MeshKit.Builder.new()
 	post.cylinder(0.06, 0.06, 2.0, MeshKit.at(Vector3(0.0, 1.0, 0.0)), Color(0.45, 0.3, 0.15))
@@ -270,6 +290,108 @@ func _build_world(vr: bool) -> void:
 	sign_time.outline_size = 26
 	sign_time.position = Vector3(0.0, 1.88, 0.06)
 	sign_node.add_child(sign_time)
+	sign_day = UiKit.label3d("", 0.12, "accent", true)
+	sign_day.outline_size = 22
+	sign_day.position = Vector3(0.0, 2.95, 0.06)
+	sign_node.add_child(sign_day)
+	_build_village(net.state_get("village", [0, 0, 0, 0, 0]))
+
+
+## Every machine: build this snow day's garden from {seed, chapter} (boxes, pines, ice, drifts).
+func _apply_garden(seed_v: int, chap: int) -> void:
+	var key := "%d:%d" % [seed_v, chap]
+	if key == garden_key:
+		return
+	garden_key = key
+	garden = GardenGen.garden(seed_v, chap)
+	if garden_root != null:
+		garden_root.queue_free()
+	garden_root = Node3D.new()
+	garden_root.name = "Garden"
+	add_child(garden_root)
+	boxes.clear()
+	box_pos.clear()
+	box_kind.clear()
+	box_bounce.clear()
+	for bx in garden.boxes:
+		var k := int(bx.kind)
+		var box := Node3D.new()
+		box.position = bx.pos
+		var to := VR_START - (bx.pos as Vector3)
+		box.rotation.y = atan2(to.x, to.z)
+		garden_root.add_child(box)
+		var b := MeshKit.Builder.new()
+		var col: Color = BOX_COLORS[clampi(k, 0, BOX_COLORS.size() - 1)]
+		b.rounded_box(Vector3(0.6, BOX_TOP, 0.5), 0.05, MeshKit.at(Vector3(0.0, BOX_TOP * 0.5, 0.0)), col)
+		b.box(Vector3(0.62, 0.06, 0.52), MeshKit.at(Vector3(0.0, BOX_TOP - 0.06, 0.0)), col.lightened(0.3))
+		box.add_child(MeshKit.instance(b.build(), false))
+		for j in 3:  # what is inside, poking out
+			var mi := MeshInstance3D.new()
+			if k == CARROT:
+				mi.mesh = Snowman.carrot_mesh()
+				mi.position = Vector3(-0.16 + j * 0.16, BOX_TOP + 0.02, 0.0)
+				mi.rotation = Vector3(-1.2 + j * 0.2, 0.3 * j, 0.0)
+			else:
+				mi.mesh = Snowman.hat_of(k)
+				mi.position = Vector3(-0.15 + j * 0.15, BOX_TOP - 0.02 + j * 0.03, 0.0)
+				mi.rotation.z = -0.3 + j * 0.3
+				mi.scale = Vector3.ONE * 0.8
+			box.add_child(mi)
+		boxes.append(box)
+		box_pos.append(bx.pos)
+		box_kind.append(k)
+		box_bounce.append(0.0)
+	var pines: Array = []
+	for t in garden.trees:
+		pines.append(Transform3D(Basis(Vector3.UP, (t as Vector3).x * 1.7).scaled(Vector3.ONE * 1.1), t))
+	if not pines.is_empty():
+		garden_root.add_child(MeshKit.scatter(Village.snowy_pine(), pines))
+	for kind in ["ice", "drifts"]:
+		var xs: Array = []
+		for q in garden.get(kind, []):
+			var rad := float(q[1])
+			xs.append(Transform3D(Basis.from_scale(Vector3(rad, 1.0, rad)), (q[0] as Vector3) + Vector3.UP * 0.005))
+		if not xs.is_empty():
+			var mm := MeshKit.scatter(Village.ice_patch() if kind == "ice" else Village.drift(), xs)
+			mm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			garden_root.add_child(mm)
+	if visitor != null:
+		visitor.position = garden.visitor
+	wish_shown = -2  # rebuild the visitor for this garden
+
+
+## The box position holding `kind` (or the first box).
+func box_for(kind: int) -> Vector3:
+	var i := box_kind.find(kind)
+	return box_pos[i] if i >= 0 else (box_pos[0] if not box_pos.is_empty() else Vector3(-1.0, 0.0, 1.5))
+
+
+## The village round the garden, built up to its stages (net state "village"); a new piece pops in.
+func _build_village(stages: Array) -> void:
+	for c in Village.PLACES.size():
+		var stage := int(stages[c]) if c < stages.size() else 0
+		var shown := int(village_shown[c]) if c < village_shown.size() else -1
+		if stage == shown:
+			continue
+		if c < village_nodes.size() and is_instance_valid(village_nodes[c]):
+			(village_nodes[c] as Node3D).queue_free()
+		var mi := MeshKit.instance(Village.place(c, stage), true)
+		mi.name = "Place%d" % c
+		mi.position = Village.PLACES[c][0]
+		mi.rotation.y = float(Village.PLACES[c][1])
+		add_child(mi)
+		while village_nodes.size() <= c:
+			village_nodes.append(null)
+			village_shown.append(-1)
+		village_nodes[c] = mi
+		if shown >= 0 and stage > shown:  # built just now: pop + confetti
+			mi.scale = Vector3.ONE * 0.3
+			var tw := mi.create_tween()
+			tw.tween_property(mi, "scale", Vector3.ONE, 0.7).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+			_burst(mi.position + Vector3.UP * 2.5, 50, [Color(1.0, 0.3, 0.4), Color(1.0, 0.85, 0.2), Color(0.3, 0.8, 1.0)], 5.0)
+			sfx.play_at("achievement", mi.position, 0.0)
+			HudKit.popup(self, mi.position + Vector3.UP * 4.5, "BUILT!", {"style": "crit", "size": 3.0, "time": 2.5})
+		village_shown[c] = stage
 
 
 # --- HUD ----------------------------------------------------------------------------------
@@ -280,13 +402,43 @@ func _make_hud(slot: int, parent: Control) -> void:
 	var card := UiKit.panel("card")
 	ui.add_child(card)
 	card.position = Vector2(24.0, 20.0)
+	var col := UiKit.vbox(4)
+	card.add_child(col)
 	var row := UiKit.hbox()
-	card.add_child(row)
+	col.add_child(row)
 	if slot >= 0:
 		row.add_child(UiKit.badge(party.name_of(slot), slot))
+	row.add_child(StoryCard.picture("snowman", 44.0))
 	var l := UiKit.label("0", "number")
 	row.add_child(l)
 	score_labels[slot] = l
+	var g := UiKit.label("", "heading", "dim")
+	row.add_child(g)
+	goal_labels[slot] = g
+	var row2 := UiKit.hbox(6)
+	col.add_child(row2)
+	var stars: Array = []
+	for i in 3:
+		var ic := UiKit.icon("star", "gold", 30.0)
+		row2.add_child(ic)
+		stars.append(ic)
+	star_icons[slot] = stars
+	# The visitor's wish: a picture of the hat they want (no words: little ones read pictures).
+	var wish := UiKit.panel("card")
+	ui.add_child(wish)
+	UiKit.pin(wish, Control.PRESET_TOP_RIGHT)
+	wish.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	wish.offset_left = -24.0
+	wish.offset_right = -24.0
+	wish.offset_top = 96.0
+	var wrow := UiKit.hbox(8)
+	wish.add_child(wrow)
+	var holder := Control.new()
+	holder.custom_minimum_size = Vector2(84, 84)
+	wrow.add_child(StoryCard.picture("heart", 44.0, Color(1.0, 0.45, 0.6)))
+	wrow.add_child(holder)
+	wish.visible = false
+	wish_boxes[slot] = [wish, holder]
 	timers[slot] = HudKit.timer(ui, {"seconds": float(net.state_get("time", round_time)), "warn": 15})
 	if slot < 0:
 		join_prompt = UiKit.panel("pill")
@@ -300,16 +452,69 @@ func _make_hud(slot: int, parent: Control) -> void:
 	_refresh_hud()
 
 
+func _day() -> Dictionary:
+	var d: Variant = net.state_get("day", {})
+	return d if d is Dictionary else {}
+
+
 func _refresh_hud() -> void:
 	var score := int(net.state_get("score", 0))
+	var goals: Array = _day().get("goals", [])
+	var got := Story.stars_for(score, goals) if not goals.is_empty() else 0
+	var goal_text := ""
+	if not goals.is_empty():
+		goal_text = "/ %d" % int(goals[got]) if got < goals.size() else "WOW!"
 	for slot in score_labels:
 		var l: Label = score_labels[slot]
 		if is_instance_valid(l):
-			l.text = "SNOWMEN %d" % score
+			l.text = str(score)
+		var g: Label = goal_labels.get(slot)
+		if g != null and is_instance_valid(g):
+			g.text = goal_text
+		var st: Array = star_icons.get(slot, [])
+		for i in st.size():
+			var ic: Control = st[i]
+			if is_instance_valid(ic):
+				ic.visible = not goals.is_empty()
+				ic.modulate = Color.WHITE if i < got else Color(1.0, 1.0, 1.0, 0.22)
 	if join_prompt != null:
 		join_prompt.visible = party.local_slots().is_empty()
 	if sign_label != null:
 		sign_label.text = str(score)
+	if sign_day != null:
+		sign_day.text = _day_title(_day())
+	_refresh_wish_hud()
+
+
+func _day_title(d: Dictionary) -> String:
+	match String(d.get("mode", "")):
+		"daily":
+			return "DAILY GARDEN"
+		"bonus":
+			return "SNOW DAY"
+		"story":
+			return "%s  %d/%d" % [Story.chapter(int(d.get("chapter", 0))).name, int(d.get("day", 0)) + 1, Story.DAYS_PER_CHAPTER]
+	return ""
+
+
+## The wish picture on every view (hidden while nobody is wishing).
+func _refresh_wish_hud() -> void:
+	var w: Dictionary = net.state_get("wish", {}) if net.state_get("wish", {}) is Dictionary else {}
+	var hat := int(w.get("hat", 0))
+	for slot in wish_boxes:
+		var pair: Array = wish_boxes[slot]
+		if not is_instance_valid(pair[0]):
+			continue
+		var panel: Control = pair[0]
+		var holder: Control = pair[1]
+		panel.visible = hat > 0 and not results_showing()
+		if int(holder.get_meta("hat", -1)) != hat and hat > 0:
+			holder.set_meta("hat", hat)
+			for c in holder.get_children():
+				c.queue_free()
+			var pic := StoryCard.picture(HAT_PICS[hat], holder.custom_minimum_size.x, HAT_COLORS[hat])
+			holder.add_child(pic)
+			UiKit.pop_in(panel)
 
 
 func _all_huds() -> Array:
@@ -358,6 +563,9 @@ func _on_player_left(slot: int) -> void:
 			h.queue_free()
 		huds.erase(slot)
 	score_labels.erase(slot)
+	goal_labels.erase(slot)
+	star_icons.erase(slot)
+	wish_boxes.erase(slot)
 	timers.erase(slot)
 	hints.remove_view(slot)
 	_refresh_group()
@@ -371,8 +579,7 @@ func _ensure_avatar(slot: int) -> Node3D:
 		"hat": "beanie"})
 	a.name = "Avatar%d" % slot
 	add_child(a)
-	var ang := slot * 1.1
-	a.position = Vector3(sin(ang), 0.0, -cos(ang)) * 4.0
+	a.position = GardenGen.player_start(slot)
 	HudKit.nameplate(a, party.name_of(slot), slot, Creatures.height_of(a) + 0.35, 0.18)
 	avatars[slot] = a
 	last_pos[slot] = a.position
@@ -412,10 +619,25 @@ func _move_local_players(delta: float) -> void:
 			var dir := r * mv.x - f * mv.y
 			var p := a.position + dir * SPEED * delta
 			p.y = 0.0
-			a.position = p.limit_length(ARENA - 0.3)
+			a.position = _out_of_trees(p.limit_length(ARENA - 0.3), BODY_R)
 			Creatures.anim(a).face(dir)
 		if net.mode == "client" and send:
 			net.send_state(a.position, a.rotation.y, 0.0, slot)
+
+
+## Push a point (a player, a helper, a snowball of radius `rad`) out of the garden's pines.
+func _out_of_trees(p: Vector3, rad: float) -> Vector3:
+	for t in garden.get("trees", []):
+		var tp: Vector3 = t
+		var d := Vector2(p.x - tp.x, p.z - tp.z)
+		var need := TREE_R + rad
+		if d.length() < need:
+			if d.length() < 0.001:
+				d = Vector2(1.0, 0.0)
+			var push := d.normalized() * need
+			p.x = tp.x + push.x
+			p.z = tp.z + push.y
+	return p
 
 
 func _animate_avatars(delta: float) -> void:
@@ -502,14 +724,29 @@ func _on_state_changed(key: String, value: Variant) -> void:
 			_refresh_hud()
 		"time":
 			for slot in timers:
+				if not is_instance_valid(timers[slot]):
+					continue
 				var t: HudKit.TimerPill = timers[slot]
-				if is_instance_valid(t):
-					t.set_time(float(value))
+				t.set_time(float(value))
 			if sign_time != null:
 				var s := maxi(0, int(value))
 				sign_time.text = "%d:%02d" % [s / 60, s % 60]
 		"stacks":
 			_sync_stacks(value)
+		"day":
+			var d: Dictionary = value if value is Dictionary else {}
+			_apply_garden(int(d.get("seed", 0)), int(d.get("chapter", 0)))
+			_refresh_hud()
+			if sky != null:
+				sky.set_preset(String(Story.chapter(int(d.get("chapter", 0))).sky))
+				sky.set_snow(true)
+		"wish":
+			_refresh_wish_hud()
+			_sync_stacks(net.state_get("stacks", {}))
+		"village":
+			_build_village(value)
+		"unlocks":
+			_sync_stacks(net.state_get("stacks", {}))
 		"made":
 			if Time.get_ticks_msec() - setup_msec > 2000:  # not for a TV machine that just (re)joined
 				_celebrate()
@@ -534,32 +771,221 @@ func _start_round() -> void:
 	awards.reset()
 	time_left = round_time
 	spawn_t = 0.0
+	wishes_granted = 0
+	snowmen_made = 0
+	# Which day: the daily garden (first game of the date), the story, or bonus days.
+	var nx := Story.next_round(save.data, Seeded.daily_key())
+	var mode := String(nx[0])
+	var chap := int(nx[1])
+	var day_n := int(nx[2])
+	if force_chapter >= 0:
+		mode = "test"
+		chap = force_chapter
+	var seed_v := Seeded.daily_seed(GAME_ID) if mode == "daily" else Seeded.fresh_seed()
+	var builders := _builders()
+	var misses := int(save.data["misses"]) if mode == "story" or mode == "bonus" else 0
+	var laps := int(save.data["laps"]) if mode == "bonus" else 0
+	var goals := Story.goals(builders, chap, misses, laps, round_time)
+	_apply_garden(seed_v, chap)
 	net.state_set("stacks", {})
 	net.state_set("score", 0)
 	net.state_set("time", int(ceil(time_left)))
+	net.state_set("day", {"mode": mode, "chapter": chap, "day": day_n, "seed": seed_v, "goals": goals, "builders": builders})
+	net.state_set("wish", {"i": 0, "hat": int(garden.wishes[0][0]), "v": int(garden.wishes[0][1])})
 	net.state_set("phase", "play")
 	net.state_set("round", int(net.state_get("round", 0)) + 1)
+	tele = {"mode": mode, "chapter": chap, "day": day_n, "seed": seed_v, "goals": goals, "builders": builders,
+		"tv_players": party.player_count(), "vr": vr_rig != null, "flat_host": flat_host, "misses_before": misses,
+		"seconds": round_time, "t0": clock, "helpers": 0}
 	if vr_rig != null:
 		vr_rig.guard_trigger()
 	for k in 4:
 		_spawn_ball()
+	# What Tumble (or the chapter's friend) says.
+	var ch := Story.chapter(chap)
+	var first := 6.5 if int(net.state_get("round", 0)) <= 1 else 0.8  # after the how-to-play card
+	if mode == "daily":
+		_story(_tumble_beat("Today's garden! The same for everyone.", 4.0), first)
+	elif mode == "story" and day_n == 0 and misses == 0:
+		_story(_chapter_beat(chap, "intro"), first)
+		if String(ch.new) != "":
+			_story(_tumble_beat(String(ch.new), 4.0), first + 4.8)
+	elif misses > 0:
+		_story(_tumble_beat(Story.TUMBLE_RETRY[misses % Story.TUMBLE_RETRY.size()]), first)
+	else:
+		_story(_tumble_beat(Story.TUMBLE_LINES[int(save.data["days"]) % Story.TUMBLE_LINES.size()]), first)
 
 
-func _end_round() -> void:
+## Host: more builders joined during the day: the star goals grow with them (never shrink mid-day).
+func _rescale_goals() -> void:
+	var d := _day()
+	if d.is_empty() or results_showing() or _builders() <= int(d.get("builders", 1)):
+		return
+	var nd := d.duplicate()
+	var misses := int(tele.get("misses_before", 0))
+	var laps := int(save.data["laps"]) if String(d.get("mode", "")) == "bonus" else 0
+	nd["builders"] = _builders()
+	nd["goals"] = Story.goals(_builders(), int(d.get("chapter", 0)), misses, laps, round_time)
+	net.state_set("day", nd)
+	if not tele.is_empty():
+		tele["builders"] = _builders()
+		tele["goals"] = nd["goals"]
+		tele["tv_players"] = maxi(int(tele.get("tv_players", 0)), party.player_count())
+
+
+## Everyone building this day: TV players + the VR builder (at least one).
+func _builders() -> int:
+	return maxi(1, party.player_count() + (1 if vr_rig != null else 0))
+
+
+func _end_round(how: String = "time") -> void:
 	if held_ball >= 0 and balls.has(held_ball):
 		(balls[held_ball] as Dictionary)["s"] = FLYING
 	held_ball = -1
 	var score := int(net.state_get("score", 0))
-	if score > int(save.data["best"]):
-		save.data["best"] = score
+	var d := _day()
+	var goals: Array = d.get("goals", [1, 2, 3])
+	var stars := Story.stars_for(score, goals)
+	var mode := String(d.get("mode", "story"))
+	var chap := int(d.get("chapter", 0))
+	var day_n := int(d.get("day", 0))
+	var stars_d: Dictionary = save.data["stars"]
+	var before := Story.flakes(stars_d, int(save.data["extra_flakes"]))
+	var adv := {}
+	if mode == "story":
+		var key := "%d-%d" % [chap, day_n]
+		stars_d[key] = maxi(int(stars_d.get(key, 0)), stars)
+		adv = Story.advance(chap, day_n, int(save.data["laps"]), int(save.data["misses"]), stars)
+	elif mode == "bonus":
+		save.data["extra_flakes"] = int(save.data["extra_flakes"]) + stars
+		adv = Story.advance(Story.MIXED, day_n, int(save.data["laps"]), int(save.data["misses"]), stars)
+	elif mode == "daily":
+		var daily: Dictionary = save.data["daily"]
+		var dk := Seeded.daily_key()
+		daily[dk] = maxi(int(daily.get(dk, 0)), score)
+		save.data["extra_flakes"] = int(save.data["extra_flakes"]) + stars
+		for k in daily.keys():  # keep the last two weeks only
+			if daily.size() > 14 and String(k) < dk:
+				daily.erase(k)
+	if not adv.is_empty():
+		save.data["chapter"] = int(adv.chapter)
+		save.data["day"] = int(adv.day)
+		save.data["laps"] = int(adv.laps)
+		save.data["misses"] = int(adv.misses)
+	if mode != "test":
+		save.data["days"] = int(save.data["days"]) + 1
+		save.data["made"] = int(save.data["made"]) + snowmen_made
+		save.data["wishes"] = int(save.data["wishes"]) + wishes_granted
+		if score > int(save.data["best"]):
+			save.data["best"] = score
 		save.mark_dirty()
+	var after := Story.flakes(stars_d, int(save.data["extra_flakes"]))
+	var news := Story.newly_unlocked(before, after)
+	_publish_progress()
 	net.state_set("best", int(save.data["best"]))
-	var data := awards.results({"title": "%d SNOWMEN!" % score if score != 1 else "1 SNOWMAN!",
-		"subtitle": "Brilliant building!", "style": "victory",
-		"stats": [["BEST", str(int(save.data["best"]))]], "score_format": "%d"})
+	tele["chapter_done"] = bool(adv.get("chapter_done", false))
+	_telemetry(how)
+	# The results screen.
+	var titles := ["NEARLY!", "LOVELY SNOWMEN!", "SUPER BUILDERS!", "SNOW AMAZING!"]
+	var stats: Array = [["SNOWMEN", str(snowmen_made)], ["WISHES", str(wishes_granted)], ["STARS", "%d OF 3" % stars]]
+	if stars < 3:
+		stats.append(["NEXT STAR", str(int(goals[stars]))])
+	if mode == "daily":
+		stats.append(["BEST TODAY", str(int(net.state_get("daily_best", score)))])
+	else:
+		stats.append(["BEST", str(int(save.data["best"]))])
+	stats.append(["SNOWFLAKES", str(after)])
+	for n in news:
+		stats.append(["NEW!", n])
+	var sub := "%d points together!" % score
+	if mode == "story" and stars > 0:
+		sub = "A new piece of the %s!" % String(Story.chapter(chap).place).to_lower()
+	var data := awards.results({"title": titles[stars], "subtitle": sub, "style": "victory", "stats": stats,
+		"score_format": "%d"})
+	data["stars"] = stars
 	net.state_set("results", data)
 	net.state_set("phase", "results")
 	results_t = 0.0
+	# Story beats.
+	if bool(adv.get("story_done", false)):
+		_story(_chapter_beat(4, "done", 5.0), 1.5)
+		_story(_tumble_beat("Every friend came to the fair! Thank you!", 5.0), 7.0)
+	elif bool(adv.get("chapter_done", false)):
+		_story(_chapter_beat(chap, "done", 5.0), 1.5)
+	elif stars == 0 and mode != "daily":
+		_story(_tumble_beat(Story.TUMBLE_RETRY[int(save.data["misses"]) % Story.TUMBLE_RETRY.size()]), 1.5)
+	for i in news.size():
+		_story({"who": "NEW!", "line": "You unlocked %s!" % String(news[i]).to_lower(), "pic": "star", "color": "ffd24d", "duration": 3.5}, 6.5 + i * 4.0)
+
+
+## Host: one telemetry line for this day (also when the game is left mid-day).
+func _telemetry(how: String) -> void:
+	if tele.is_empty():
+		return
+	var t := tele.duplicate(true)
+	var goals: Array = t.get("goals", [1, 2, 3])
+	t["score"] = int(net.state_get("score", 0))
+	t["stars"] = Story.stars_for(int(t["score"]), goals)
+	t["snowmen"] = snowmen_made
+	t["wishes"] = wishes_granted
+	t["stacked"] = total_stacked
+	t["rolled_m"] = int(total_rolled)
+	t["end"] = how
+	t["played_s"] = int(clock - float(t.get("t0", clock)))
+	t.erase("t0")
+	tele = {}
+	Telemetry.run(GAME_ID, t)
+
+
+## Host: share the saved progress (village pieces, unlocks, today's best) with every machine.
+func _publish_progress() -> void:
+	var stars_d: Dictionary = save.data["stars"]
+	net.state_set("village", Story.village(stars_d))
+	var flakes := Story.flakes(stars_d, int(save.data["extra_flakes"]))
+	net.state_set("flakes", flakes)
+	net.state_set("unlocks", Story.unlocked(flakes))
+	var daily: Dictionary = save.data["daily"]
+	net.state_set("daily_best", int(daily.get(Seeded.daily_key(), 0)))
+
+
+# --- Story beats ----------------------------------------------------------------------------
+
+## Host: tell a story beat on every machine after `delay` seconds.
+func _story(beat: Dictionary, delay: float = 0.0) -> void:
+	story_queue.append([delay, beat])
+
+
+func _run_story_queue(delta: float) -> void:
+	for i in range(story_queue.size() - 1, -1, -1):
+		story_queue[i][0] -= delta
+		if story_queue[i][0] <= 0.0:
+			var beat: Dictionary = story_queue[i][1]
+			story_queue.remove_at(i)
+			show_story(beat)
+			net.event("story", [beat])
+
+
+## Every machine: the card on each TV view and in VR.
+func show_story(beat: Dictionary) -> void:
+	var opts := beat.duplicate()
+	opts["color"] = Color.html(String(beat.get("color", "8ec5ff")))
+	if split != null:
+		StoryCard.show(_all_huds(), opts)
+	if vr_rig != null:
+		if vr_story != null and is_instance_valid(vr_story):
+			vr_story.call("hide_card")
+		opts["vr_height"] = 0.18  # above the hints (they sit low)
+		vr_story = StoryCard.show_vr(self, vr_rig.camera, opts)
+
+
+func _tumble_beat(line: String, duration: float = 3.5) -> Dictionary:
+	return {"who": "TUMBLE", "line": line, "pic": "penguin", "color": "8ec5ff", "duration": duration}
+
+
+func _chapter_beat(chap: int, line_key: String, duration: float = 4.5) -> Dictionary:
+	var ch := Story.chapter(chap)
+	var colors := ["8ec5ff", "7fd36a", "9fd8ff", "f2a7c3", "c9a0ff", "8ec5ff"]
+	return {"who": String(ch.who), "line": String(ch[line_key]), "pic": String(ch.pic), "color": colors[clampi(chap, 0, 5)], "duration": duration}
 
 
 func _show_results(data: Dictionary) -> void:
@@ -603,7 +1029,9 @@ func _process(delta: float) -> void:
 		_move_local_players(delta)
 	_follow_remote(delta)
 	_animate_avatars(delta)
-	for k in 2:
+	clock += delta
+	_animate_visitor(delta)
+	for k in boxes.size():
 		box_bounce[k] = maxf(0.0, box_bounce[k] - delta * 3.0)
 		var s := sin(box_bounce[k] * PI * 3.0) * box_bounce[k] * 0.2
 		boxes[k].scale = Vector3(1.0 + s, 1.0 - s, 1.0 + s)
@@ -618,6 +1046,8 @@ func _process(delta: float) -> void:
 	if net.mode == "client":
 		_mirror_motion(delta)
 		return
+	_run_story_queue(delta)
+	_rescale_goals()
 	if results_showing():
 		results_t += delta
 		if results_t > 12.0:
@@ -649,9 +1079,9 @@ func _free_count() -> int:
 # --- Snowballs ------------------------------------------------------------------------------
 
 func _spawn_ball() -> void:
+	var spots: Array = garden.get("spawns", [])
 	for attempt in 12:
-		var ang := randf() * TAU
-		var p := Vector3(cos(ang), 0.0, sin(ang)) * randf_range(3.2, ARENA - 1.0)
+		var p: Vector3 = spots[randi() % spots.size()] if not spots.is_empty() else Vector3(cos(attempt), 0.0, sin(attempt)) * 5.0
 		if _space_free(p, 1.2):
 			next_id += 1
 			var b := _make_ball(next_id, p, BALL_MIN)
@@ -744,14 +1174,35 @@ func _simulate_balls(delta: float) -> void:
 						p.x += push.x
 						p.z += push.y
 						b["by"] = int(q[1])
+				var under := GardenGen.ground_at(garden, p)
+				var slide: Vector3 = b.get("slide", Vector3.ZERO)
+				if under == "ice":  # icy: keeps sliding the way it was pushed
+					var pushed := (p - start) / maxf(delta, 0.001)
+					pushed.y = 0.0
+					if pushed.length() > 0.2:
+						slide = pushed.limit_length(5.0)
+					else:
+						p += slide * delta
+					slide *= exp(-0.9 * delta)
+					if slide.length() < 0.05:
+						slide = Vector3.ZERO
+				else:
+					slide = Vector3.ZERO
+				var before_tree := p
+				p = _out_of_trees(p, r)
+				if not before_tree.is_equal_approx(p):
+					slide = slide.bounce(Vector3(p.x - before_tree.x, 0.0, p.z - before_tree.z).normalized()) * 0.6 if slide.length() > 0.01 else slide
 				var fl := Vector2(p.x, p.z)
 				if fl.length() > ARENA - r:
 					fl = fl.normalized() * (ARENA - r)
 					p.x = fl.x
 					p.z = fl.y
+					slide = Vector3.ZERO
+				b["slide"] = slide
 				var dist := _flat(p - start)
 				if dist > 0.0005:
-					r = minf(BALL_MAX, r + dist * GROW)
+					var grow := 0.0 if under == "ice" else (GROW * 3.0 if under == "drifts" else GROW)
+					r = minf(BALL_MAX, r + dist * grow)
 					b["r"] = r
 					p.y = r
 					n.position = p
@@ -852,7 +1303,7 @@ func _ball_to_stack(id: int) -> int:
 	_free_ball(id)
 	next_id += 1
 	var radii: Array[float] = [r]
-	stack_data[next_id] = {"pos": Vector3(p.x, 0.0, p.z), "radii": radii, "carrot": false, "hat": false, "done": false}
+	stack_data[next_id] = {"pos": Vector3(p.x, 0.0, p.z), "radii": radii, "carrot": false, "hat": 0, "done": false}
 	return next_id
 
 
@@ -919,7 +1370,7 @@ func _publish_stacks() -> void:
 	for sid in stack_data:
 		var st: Dictionary = stack_data[sid]
 		var p: Vector3 = st["pos"]
-		var flags := (1 if bool(st["carrot"]) else 0) | (2 if bool(st["hat"]) else 0) | (4 if bool(st["done"]) else 0)
+		var flags := (1 if bool(st["carrot"]) else 0) | (4 if bool(st["done"]) else 0) | (int(st["hat"]) << 3)
 		out[sid] = [snappedf(p.x, 0.01), snappedf(p.z, 0.01), PackedFloat32Array(st["radii"] as Array), flags]
 	net.state_set("stacks", out)
 
@@ -947,7 +1398,7 @@ func _sync_stacks(value: Variant) -> void:
 			radii.append(x)
 		var flags := int(e[3])
 		var was_done := node.done
-		node.set_data(radii, flags & 1 != 0, flags & 2 != 0, flags & 4 != 0)
+		node.set_data(radii, flags & 1 != 0, flags >> 3, flags & 4 != 0, _wish_hat(), _looks())
 		if node.done and not was_done and not fresh:  # (a TV machine joining late: no cheer storm)
 			_cheer_fx(node)
 	for sid in stack_nodes.keys():
@@ -956,8 +1407,24 @@ func _sync_stacks(value: Variant) -> void:
 			stack_nodes.erase(sid)
 
 
+## The hat the current visitor wishes for (1 = top hat when nobody wishes).
+func _wish_hat() -> int:
+	var w: Variant = net.state_get("wish", {})
+	return maxi(1, int((w as Dictionary).get("hat", 1))) if w is Dictionary else 1
+
+
+## Unlocked snowman looks (story.gd UNLOCKS ids).
+func _looks() -> Array:
+	var u: Variant = net.state_get("unlocks", [])
+	return u if u is Array else []
+
+
 func _cheer_fx(node: Node3D) -> void:
 	_burst(node.position + Vector3.UP * 1.2, 40, [Color(1.0, 0.3, 0.4), Color(1.0, 0.85, 0.2), Color(0.3, 0.8, 1.0), Color(0.5, 1.0, 0.4)], 5.0)
+	if _looks().has("fireworks"):
+		for i in 3:
+			_burst(node.position + Vector3(randf_range(-1.0, 1.0), 2.5 + i * 0.6, randf_range(-1.0, 1.0)), 30,
+				[Color(1.0, 0.4, 0.8), Color(0.4, 1.0, 0.9), Color(1.0, 1.0, 0.5)], 6.0)
 	sfx.play_at("party_horn", node.position, 0.0)
 	sfx.play("cheer", -4.0)
 
@@ -978,18 +1445,32 @@ func _complete(sid: int) -> void:
 	st["done"] = true
 	_publish_stacks()
 	total_made += 1
-	net.state_set("score", int(net.state_get("score", 0)) + 1)
+	snowmen_made += 1
+	var pts := 1
+	var w: Dictionary = net.state_get("wish", {})
+	if int(st["hat"]) == int(w.get("hat", -1)):  # the visitor's wish came true: worth double
+		pts += 1
+		wishes_granted += 1
+		var i := int(w.get("i", 0)) + 1
+		var wishes: Array = garden.get("wishes", [[1, 0]])
+		var nxt: Array = wishes[i % wishes.size()]
+		net.state_set("wish", {"i": i, "hat": int(nxt[0]), "v": int(nxt[1])})
+		fx("wish", [], "achievement", -2.0)
+	net.state_set("score", int(net.state_get("score", 0)) + pts)
 	net.state_set("made", total_made)
 
 
 ## A carrot or hat touched a snowman's head (or a TV player brought one): put it on.
 func _dress(sid: int, kind: int, by: int) -> void:
 	var st: Dictionary = stack_data[sid]
-	st["carrot" if kind == CARROT else "hat"] = true
+	if kind == CARROT:
+		st["carrot"] = true
+	else:
+		st["hat"] = kind
 	awards.add(by, "dressed")
 	var node: Snowman = stack_nodes.get(sid)
-	fx("sparkle", [node.head_world() if node != null else (st["pos"] as Vector3)], "ding", 0.0, 1.2 if kind == HAT else 1.0)
-	if bool(st["carrot"]) and bool(st["hat"]):
+	fx("sparkle", [node.head_world() if node != null else (st["pos"] as Vector3)], "ding", 0.0, 1.2 if kind != CARROT else 1.0)
+	if bool(st["carrot"]) and int(st["hat"]) > 0:
 		_complete(sid)
 	else:
 		_publish_stacks()
@@ -1002,7 +1483,7 @@ func _head_near(p: Vector3, kind: int, reach: float, flat: bool = false) -> int:
 	for sid in stack_data:
 		var st: Dictionary = stack_data[sid]
 		var radii: Array[float] = st["radii"]
-		if bool(st["done"]) or radii.size() < 3 or bool(st["carrot" if kind == CARROT else "hat"]):
+		if bool(st["done"]) or radii.size() < 3 or (bool(st["carrot"]) if kind == CARROT else int(st["hat"]) > 0):
 			continue
 		var node: Snowman = stack_nodes.get(sid)
 		if node == null:
@@ -1050,8 +1531,8 @@ func _vr_hands() -> void:
 					fx("wob", [int(sid), dir, clampf(0.4 + hv.length() * 0.4, 0.4, 1.0)], "boing", -10.0, 1.4)
 					vr_rig.pulse(k, 0.25, 0.05)
 					break
-		for b in 2:
-			if not touch_cd.has("box%d" % b) and _flat(hp - BOX_POS[b]) < 0.36 and hp.y < BOX_TOP + 0.1:
+		for b in boxes.size():
+			if not touch_cd.has("box%d" % b) and _flat(hp - box_pos[b]) < 0.36 and hp.y < BOX_TOP + 0.1:
 				touch_cd["box%d" % b] = 0.4
 				fx("box", [b], "bounce", -6.0)
 				vr_rig.pulse(k, 0.2, 0.04)
@@ -1105,10 +1586,10 @@ func _grab(rp: Vector3) -> void:
 		vr_rig.pulse(VrRig.RIGHT, 0.5, 0.08)
 		return
 	# 3) a carrot or a hat from a box
-	for k in 2:
-		if _flat(rp - BOX_POS[k]) < 0.42 and rp.y < BOX_TOP + 0.35:
+	for k in boxes.size():
+		if _flat(rp - box_pos[k]) < 0.42 and rp.y < BOX_TOP + 0.35:
 			next_id += 1
-			var it := _make_item(next_id, k, rp)
+			var it := _make_item(next_id, box_kind[k], rp)
 			it["s"] = HELD
 			held_item = next_id
 			fx("box", [k], "pickup", -2.0, 1.4)
@@ -1126,7 +1607,7 @@ func _pop_top(sid: int) -> int:
 	var c := p + Vector3.UP * Snowman.center_y(radii, radii.size() - 1)
 	radii.pop_back()
 	st["carrot"] = false
-	st["hat"] = false
+	st["hat"] = 0
 	next_id += 1
 	var id := next_id
 	_make_ball(id, c, r)
@@ -1157,7 +1638,7 @@ func _release_ball() -> void:
 
 func _make_item(id: int, kind: int, p: Vector3) -> Dictionary:
 	var n := MeshInstance3D.new()
-	n.mesh = Snowman.carrot_mesh() if kind == CARROT else Snowman.hat_mesh()
+	n.mesh = Snowman.carrot_mesh() if kind == CARROT else Snowman.hat_of(kind)
 	add_child(n)
 	n.position = p
 	var it := {"n": n, "k": kind, "s": FLYING, "v": Vector3.ZERO, "t": 0.0, "tgt": p}
@@ -1222,9 +1703,9 @@ func _tv_carry() -> void:
 				carry.erase(slot)
 				_dress(sid, kind, int(slot))
 				continue
-		for k in 2:  # touching a box picks up (or swaps to) what is in it
-			if _flat(p - BOX_POS[k]) < 0.75 and int(carry.get(slot, -1)) != k:
-				carry[slot] = k
+		for k in boxes.size():  # touching a box picks up (or swaps to) what is in it
+			if _flat(p - box_pos[k]) < 0.75 and int(carry.get(slot, -1)) != box_kind[k]:
+				carry[slot] = box_kind[k]
 				fx("box", [k], "pickup", -4.0, 1.4)
 				break
 
@@ -1240,7 +1721,7 @@ func _update_carry_visuals(delta: float) -> void:
 		var a: Node3D = avatars[slot]
 		if not carry_nodes.has(slot):
 			var mi := MeshInstance3D.new()
-			mi.mesh = Snowman.carrot_mesh() if int(carry[slot]) == CARROT else Snowman.hat_mesh()
+			mi.mesh = Snowman.carrot_mesh() if int(carry[slot]) == CARROT else Snowman.hat_of(int(carry[slot]))
 			mi.scale = Vector3.ONE * 1.6
 			mi.set_meta("k", int(carry[slot]))
 			add_child(mi)
@@ -1250,13 +1731,68 @@ func _update_carry_visuals(delta: float) -> void:
 		n.rotate_y(delta * 2.5)
 
 
-# --- CPU helpers (only when nobody rolls: VR alone) -----------------------------------------
+# --- Visitors (every machine, from net state "wish") ------------------------------------------
+
+func _animate_visitor(delta: float) -> void:
+	var wv: Variant = net.state_get("wish", {})
+	var w: Dictionary = wv if wv is Dictionary else {}
+	var key := int(w.get("i", -1))
+	if key != wish_shown and not garden.is_empty() and w.has("v"):
+		wish_shown = key
+		_make_visitor(int(w.get("v", 0)), int(w.get("hat", 1)), key > 0)
+	if visitor == null or not is_instance_valid(visitor):
+		return
+	visitor_cheer = maxf(0.0, visitor_cheer - delta)
+	var home: Vector3 = garden.get("visitor", Vector3(-2.7, 0.0, -0.9))
+	visitor.position = home + Vector3.UP * (absf(sin(clock * 9.0)) * 0.35 if visitor_cheer > 0.0 else 0.0)
+	var to := VR_START - home
+	visitor.rotation.y = atan2(to.x, to.z) + (clock * 8.0 if visitor_cheer > 0.0 else 0.0)
+	Creatures.anim(visitor).walk(0.0)
+	if visitor_bubble != null:
+		visitor_bubble.visible = String(net.state_get("phase", "play")) == "play"
+		visitor_bubble.position.y = float(visitor_bubble.get_meta("y", 1.2)) + sin(clock * 2.5) * 0.06
+		visitor_bubble.global_rotation.y = atan2(to.x, to.z)
+	if visitor_hat != null:
+		visitor_hat.rotation.y += delta * 1.5
+
+
+## A visitor who wishes for a snowman with `hat` (a picture in a bubble over their head).
+func _make_visitor(v: int, hat: int, fresh: bool) -> void:
+	if visitor != null and is_instance_valid(visitor):
+		visitor.queue_free()
+	var info: Array = Story.VISITORS[clampi(v, 0, Story.VISITORS.size() - 1)]
+	visitor = Creatures.monster(String(info[0]), {"scale": 1.0})
+	visitor.name = "Visitor"
+	add_child(visitor)
+	visitor.position = garden.get("visitor", Vector3(-2.7, 0.0, -0.9))
+	var h := Creatures.height_of(visitor)
+	visitor_bubble = Node3D.new()
+	visitor_bubble.set_meta("y", h + 0.15)
+	visitor_bubble.position.y = h + 0.15
+	visitor.add_child(visitor_bubble)
+	var bub := MeshKit.instance(Village.bubble(), false)
+	bub.scale = Vector3.ONE * 0.85
+	visitor_bubble.add_child(bub)
+	visitor_hat = MeshInstance3D.new()
+	visitor_hat.mesh = Snowman.hat_of(maxi(1, hat))
+	visitor_hat.position = Vector3(0.0, 0.62 * 0.85 - 0.08, 0.16)
+	visitor_hat.scale = Vector3.ONE * 0.95
+	visitor_bubble.add_child(visitor_hat)
+	if fresh:  # a new friend arrives
+		visitor.scale = Vector3.ONE * 0.2
+		var tw := visitor.create_tween()
+		tw.tween_property(visitor, "scale", Vector3.ONE, 0.5).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		_burst(visitor.position + Vector3.UP * 0.6, 16, [Color(1, 1, 1)], 2.5)
+
+
+# --- CPU helpers: Tumble helps a lone builder; two penguins roll for a VR builder alone ---------
 
 func _update_helpers(delta: float) -> void:
-	var want := 2 if vr_rig != null and avatars.is_empty() else 0
+	var want := 2 if vr_rig != null and avatars.is_empty() else (1 if _builders() <= 1 else 0)
+	if not tele.is_empty():
+		tele["helpers"] = maxi(int(tele.get("helpers", 0)), want)
 	while helpers.size() < want:
-		var n := Creatures.monster("penguin", {"scale": 1.1})
-		add_child(n)
+		var n := _make_penguin(helpers.size() == 0)
 		n.position = Vector3(randf_range(-3.0, 3.0), 0.0, -4.0)
 		helpers.append({"n": n, "ball": -1, "goal": YARD, "t": 0.0, "tgt": n.position})
 	while helpers.size() > want:
@@ -1301,11 +1837,24 @@ func _update_helpers(delta: float) -> void:
 		to.y = 0.0
 		if to.length() > 0.01:
 			to = to.normalized()
-			n.position += to * 2.3 * delta
+			n.position = _out_of_trees(n.position + to * 2.3 * delta, BODY_R)
 			Creatures.anim(n).face(to)
 			Creatures.anim(n).walk(2.3)
 		else:
 			Creatures.anim(n).walk(0.0)
+
+
+## A helper penguin; the first is Tumble (bigger, with a red scarf).
+func _make_penguin(tumble: bool) -> Node3D:
+	var n := Creatures.monster("penguin", {"scale": 1.25 if tumble else 1.1})
+	n.name = "Tumble" if tumble else "Penguin"
+	add_child(n)
+	if tumble:
+		var sc := MeshKit.instance(Village.scarf(), false)
+		sc.position.y = Creatures.height_of(n) * 0.62
+		sc.scale = Vector3.ONE * 1.25
+		n.add_child(sc)
+	return n
 
 
 func _helper_pick(from: Vector3) -> int:
@@ -1357,8 +1906,16 @@ func _fx_local(kind: String, args: Array, sound: String, vol: float, pitch: floa
 				node.wobble(args[1], float(args[2]))
 				at = node.position + Vector3.UP
 		"box":
-			box_bounce[int(args[0])] = 1.0
-			at = BOX_POS[int(args[0])]
+			var bi := int(args[0])
+			if bi < box_bounce.size():
+				box_bounce[bi] = 1.0
+				at = box_pos[bi]
+		"wish":
+			visitor_cheer = 2.0
+			if visitor != null:
+				at = visitor.position + Vector3.UP
+				_burst(at + Vector3.UP, 30, [Color(1.0, 0.45, 0.6), Color(1.0, 0.85, 0.3)], 4.0)
+				HudKit.popup(self, at + Vector3.UP * 1.6, "+1", {"style": "crit", "size": 2.0, "time": 1.5})
 		"sign":
 			sign_wob = 1.0
 			at = SIGN_POS + Vector3.UP * 1.5
@@ -1505,8 +2062,7 @@ func apply_snapshot(s: Array) -> void:
 	var hf: PackedFloat32Array = s[5]
 	var count := hf.size() / 3
 	while helpers.size() < count:
-		var n := Creatures.monster("penguin", {"scale": 1.1})
-		add_child(n)
+		var n := _make_penguin(helpers.size() == 0)
 		helpers.append({"n": n, "ball": -1, "goal": YARD, "t": 0.0, "tgt": Vector3(hf[helpers.size() * 3], 0.0, hf[helpers.size() * 3 + 1])})
 		n.position = (helpers[helpers.size() - 1] as Dictionary)["tgt"]
 	while helpers.size() > count:
@@ -1548,3 +2104,5 @@ func _mirror_motion(delta: float) -> void:
 func apply_event(kind: String, args: Array) -> void:
 	if kind == "fx":
 		_fx_local(String(args[0]), args[1], String(args[2]), float(args[3]), float(args[4]))
+	elif kind == "story":
+		show_story(args[0])

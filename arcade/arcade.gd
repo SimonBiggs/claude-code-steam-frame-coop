@@ -77,7 +77,7 @@ const GAMES := [
 	{"id": "bubble_bath", "multi": true, "cat": "party", "name": "BUBBLE BATH", "scene": "res://games/bubble_bath/main.tscn",
 		"blurb": "Steer tiny boats to round up rubber ducks and sail them down the plug-hole, while the giant splashes up waves."},
 	{"id": "snowman_maker", "multi": true, "cat": "cosy", "name": "SNOWMAN MAKER", "scene": "res://games/snowman_maker/main.tscn",
-		"blurb": "Roll giant snowballs, stack them up, and give every snowman a carrot nose and a hat!"},
+		"blurb": "Help Tumble the penguin get the village ready for the Winter Fair! Roll, stack and dress snowmen - give the visitors the hat they wish for."},
 	{"id": "dodge_ball", "multi": true, "cat": "party", "name": "SOFT DODGEBALL", "scene": "res://games/dodge_ball/main.tscn",
 		"blurb": "A friendly VR giant throws squishy balls; dodge them and bop the target on his belly!"},
 	# Finished 2026-10-24 but reading-based: hidden until the family says yes (.backlog.md). Uncomment to show.

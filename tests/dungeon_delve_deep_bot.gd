@@ -42,6 +42,8 @@ func _set_cd(slot: int, k: String, v: float) -> void:
 
 
 func tick(delta: float) -> void:
+	if Engine.get_process_frames() % 20 == 0:
+		_wp_cache.clear()  # traps change (spikes, holes): plan again
 	for s in cd:
 		var d: Dictionary = cd[s]
 		for k in d.keys():
@@ -101,6 +103,23 @@ func hero(slot: int, delta: float, index: int) -> void:
 		print("HERO %d pos %s room %d escape %s foe %d" % [slot, pos.snappedf(0.1), my_room, _danger_escape(pos), _pick_foe(pos, my_room)])
 	if _incoming(slot, h):
 		return
+	# Most friends are out: help one up when no monster is right on them.
+	var downs := 0
+	for s3 in main.heroes:
+		if bool(_stats(int(s3)).get("down", false)):
+			downs += 1
+	if downs * 2 >= main.heroes.size() and downs > 0:
+		for s4 in main.heroes:
+			if int(s4) == slot or not bool(_stats(int(s4)).get("down", false)):
+				continue
+			var fp2: Vector3 = (main.heroes[s4] as Node3D).position
+			var safe := true
+			for id in dp.foes.mons:
+				if Vector3(dp.foes.mons[id]["p"]).distance_to(fp2) < 4.0 and int(dp.foes.mons[id]["st"]) != Foes.SLEEP:
+					safe = false
+			if safe:
+				_go(slot, h, fp2, 0.6, delta)
+				return
 	# Monsters in my room.
 	var foe := _pick_foe(pos, my_room)
 	if foe >= 0:
@@ -278,8 +297,8 @@ func _face_press(slot: int, h: Node3D, at: Vector3) -> void:
 	if to.length() > 0.05:
 		_stick(slot, Vector2(to.x, to.z).normalized() * 0.45)
 	var fwd := Vector3(sin(h.rotation.y), 0.0, cos(h.rotation.y))
-	if to.length() < 0.3 or fwd.dot(to.normalized()) > 0.6:
-		_press(slot, "accept", "a", 0.36)
+	if to.length() < 1.7 or fwd.dot(to.normalized()) > 0.6:
+		_press(slot, "accept", "a", 0.42)  # (the game's soft aim turns us to a monster in reach)
 
 
 func _danger_escape(pos: Vector3) -> Vector3:
@@ -370,14 +389,17 @@ func _fight(slot: int, h: Node3D, id: int, st: Dictionary, delta: float) -> void
 	var reach: float = 0.85 + foes.radius_of(id) * 0.8
 	var shielded := kind == FloorGen.F_SHIELD or (kind == FloorGen.B_BONE and int(m["phase"]) >= 2)
 	var goal := p
+	if shielded and int(Time.get_ticks_msec() / 6000 + slot) % 3 == 2:
+		shielded = false  # now and then just go at it: enough hits crack a shield anyway
 	if shielded and int(m["st"]) != Foes.STUN:
 		goal = p - fwd * (reach * 0.9)
 		var to_me := Vector3(pos.x - p.x, 0.0, pos.z - p.z)
 		if to_me.normalized().dot(fwd) > -0.3:
 			# Circle round instead of walking into the shield.
 			var side := Vector3(-fwd.z, 0.0, fwd.x)
-			if side.dot(to_me) < 0.0:
-				side = -side
+			var order: int = main.party.local_slots().find(slot)
+			if order % 2 == 1:
+				side = -side  # friends split up: one each side, so someone gets behind
 			goal = p + side * (reach + 0.6) - fwd * 0.5
 	if abil == "bow" and not shielded:
 		var d := Vector2(p.x - pos.x, p.z - pos.z).length()
@@ -390,6 +412,9 @@ func _fight(slot: int, h: Node3D, id: int, st: Dictionary, delta: float) -> void
 			return
 	if Foes.is_boss(kind) and int(st.get("bomb", 0)) > 0 and Vector2(p.x - pos.x, p.z - pos.z).length() < 3.2:
 		_press(slot, "back", "b", 2.5)
+	if Vector2(p.x - pos.x, p.z - pos.z).length() < reach and (int(m["st"]) == Foes.RECOVER or shielded):
+		_face_press(slot, h, p)  # its shield is down after a shove; and enough hits on a shield crack it
+		return
 	if int(m["st"]) == Foes.RECOVER and Vector2(p.x - pos.x, p.z - pos.z).length() < reach + 0.2:
 		_face_press(slot, h, p)  # its shield is down while it gets its breath back
 		return
@@ -437,7 +462,7 @@ func _goal(slot: int, pos: Vector3, room: int, index: int) -> Dictionary:
 			ignore[nope_key] = float(ignore.get(nope_key, 0.0)) + 0.016
 		if float(ignore.get(nope_key, 0.0)) > 2.0:
 			continue  # standing on it and it won't come: not for me
-		if d < bd and _useful(slot, int(pk["kind"])):
+		if d < bd and (_useful(slot, int(pk["kind"])) or pk.has("relic")):
 			bd = d
 			best = {"p": Vector3(pp.x, 0, pp.z), "near": 0.3}
 	if not best.is_empty():
@@ -530,9 +555,11 @@ func _useful(slot: int, k: int) -> bool:
 		Loot.DASH, Loot.BASH, Loot.BOW:
 			return String(st.get("abil", "")) == ""
 		Loot.MAXHEART:
-			return int(st.get("max", 0)) < 10
+			return int(st.get("max", 0)) < 8
 		Loot.CHARM:
 			return int(st.get("charm", 0)) == 0
+		Loot.SWORD:
+			return int(st.get("dmg", 1)) < 3
 	return true
 
 
