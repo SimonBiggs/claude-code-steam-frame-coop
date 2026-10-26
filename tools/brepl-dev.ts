@@ -56,7 +56,7 @@ export const bots = {
     const parse = ({ out, code }: { out: string; code: number }, mode: string) => ({ mode, ...verdict(out, code) });
     const runs: any[] = [parse(await one({}, "--fixed-fps 60 --quit-after 3600"), "local")];
     if (o.net) {
-      const g = await runGroup({ scene, project: STAGE, joiners: o.joiners ?? 1, seconds: o.seconds ?? 150, quiet: true });
+      const g = await runGroup({ scene, project: STAGE, joiners: o.joiners ?? 1, seconds: o.seconds ?? 180, quiet: true });
       runs.push(...g.machines.map(m => ({ mode: m.machine, ...m })));
       for (const [k, a] of Object.entries(g.agree)) if (!a.ok) runs.push({ mode: `agree ${k}`, pass: false, result: a.values.join(" / "), failed: [], errors: [] });
     }

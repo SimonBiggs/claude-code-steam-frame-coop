@@ -41,6 +41,7 @@ var flap_seen_t := 0.0
 
 
 func _ready() -> void:
+	preload("res://tests/bot_end.gd").arm(self)  # end by itself in networked runs
 	main = load("res://games/dragon_rider/main.tscn").instantiate()
 	add_child(main)
 

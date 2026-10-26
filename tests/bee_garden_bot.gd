@@ -71,6 +71,7 @@ var vr_tasks_done := 0
 
 
 func _ready() -> void:
+	preload("res://tests/bot_end.gd").arm(self)  # end by itself in networked runs
 	main = load("res://games/bee_garden/main.tscn").instantiate()
 	add_child(main)
 

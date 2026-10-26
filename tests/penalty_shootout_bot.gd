@@ -70,6 +70,7 @@ class RealPadFilter extends Node:
 
 
 func _ready() -> void:
+	preload("res://tests/bot_end.gd").arm(self)  # end by itself in networked runs
 	process_mode = Node.PROCESS_MODE_ALWAYS  # keeps running if the Start check opened the pause menu
 	if OS.has_environment("BOT_VR") and not OS.has_environment("DUO_JOIN"):
 		OS.set_environment("PS_FAKE_VR", "1")

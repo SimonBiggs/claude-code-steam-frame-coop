@@ -55,6 +55,7 @@ var headline_re := RegEx.create_from_string(HEADLINES)
 
 
 func _ready() -> void:
+	preload("res://tests/bot_end.gd").arm(self)  # end by itself in networked runs
 	main = load("res://games/kitchen_rush/main.tscn").instantiate()
 	add_child(main)
 	if main.save != null and not OS.has_environment("KR_KEEP_SAVE"):

@@ -40,6 +40,7 @@ var plug_phase := 0
 
 
 func _ready() -> void:
+	preload("res://tests/bot_end.gd").arm(self)  # end by itself in networked runs
 	main = load("res://games/ghost_lantern/main.tscn").instantiate()
 	add_child(main)
 	simple = main.simple

@@ -26,6 +26,7 @@ var end_t := float(OS.get_environment("BOT_END")) if OS.has_environment("BOT_END
 
 
 func _ready() -> void:
+	preload("res://tests/bot_end.gd").arm(self)  # end by itself in networked runs
 	main = load("res://games/duo_arena/main.tscn").instantiate()
 	add_child(main)
 	if not OS.has_environment("DUO_JOIN") and not OS.has_environment("DUO_HOST"):

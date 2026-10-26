@@ -47,6 +47,7 @@ const HUD_WORDS := ["", "YOU MADE IT!", "Syncing with the Builder…"]
 
 
 func _ready() -> void:
+	preload("res://tests/bot_end.gd").arm(self)  # end by itself in networked runs
 	if OS.get_environment("BOT_VR") == "1" and not OS.has_environment("DUO_JOIN"):
 		OS.set_environment("BB_FAKE_VR", "1")
 	main = load("res://games/block_builders/main.tscn").instantiate()

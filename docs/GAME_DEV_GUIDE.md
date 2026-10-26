@@ -197,6 +197,10 @@ tools/multibot.ts -n 3 --host-env DUO_FLAT_HOST=1 res://tests/engine_template_bo
 It prints ok / FAIL per machine (exit 0 from the bot itself, no `SCRIPT ERROR`, no `BOT ASSERT FAILED` /
 `BOT RESULT: FAIL`) with each log (`/tmp/multibot-<port>/m<k>.log`), and exits non-zero if anything failed. From brepl:
 `dev.bots.run(id, {net: true, joiners: 3})`. Keep N at 3–4 while the family is playing.
+Every bot must **end by itself** in a networked run, or multibot reports "timed out: the bot never ended by itself": call
+`bot_kit` `finish()`, `quit()`, or arm `preload("res://tests/bot_end.gd").arm(self)` in `_ready` (quits after `BOT_END`
+seconds when networked; default host 150 s, joiners 140 s). `godot-test --headless --path . -s res://tests/bot_end_test.gd`
+checks every bot.
 
 What a bot gets: `BOT_MACHINE` (0 = host, 1.. = joiners), `BOT_MACHINES` (how many in all) and `BOT_GROUP_T0` (a
 shared clock in unix ms, after every machine has started: schedule inputs on it so machines press at chosen moments,
