@@ -132,6 +132,10 @@ var n := 0
 var length := 0.0
 var ramps: Array = []  # [s0, len, height, lat, half width]
 var pads: Array = []  # [s0, len, lat, half width]
+var splits: Array = []  # split lanes: [s0, len, extra half width, island half width, shortcut side] (trackgen.gd)
+var key := ""  # what is built (main compares it: "classic:2", "gen:...")
+var build_n := 0  # counts builds (views redraw the minimap / gate when it changes)
+var look := 0  # seed for the scenery (a generated track's own seed)
 var boxes: Array[Vector3] = []
 var box_t: Array[float] = []  # > 0: respawning
 var box_nodes: Array[MeshInstance3D] = []
@@ -164,6 +168,66 @@ func wall_limit() -> float:
 
 func is_night() -> bool:
 	return bool(info.get("night", false))
+
+
+## Split lanes (generated tracks): the road widens round a flower-bed island for a bend, so there are two
+## lanes (the inside one is shorter and has a boost arrow: the secret shortcut). TAPER metres to widen.
+const TAPER := 9.0
+const NOSE := 6.0  # the island's pointy ends
+
+
+## Extra half width of the road at s (0 except in split lanes).
+func extra_at(s: float) -> float:
+	for sp in splits:
+		var a: Array = sp
+		var ds := fposmod(s - float(a[0]), length)
+		var ln: float = a[1]
+		if ds <= ln:
+			var f := clampf(minf(ds, ln - ds) / TAPER, 0.0, 1.0)
+			return float(a[2]) * f * f * (3.0 - 2.0 * f)
+	return 0.0
+
+
+## The wall's distance from the centre line at s.
+func wall_at(s: float) -> float:
+	return wall_limit() + extra_at(s)
+
+
+## Half width of the island in the middle of the road at s (0: no island).
+func island_at(s: float) -> float:
+	for sp in splits:
+		var a: Array = sp
+		var ds := fposmod(s - float(a[0]), length) - TAPER
+		var ln: float = float(a[1]) - 2.0 * TAPER
+		if ds >= 0.0 and ds <= ln:
+			return float(a[3]) * clampf(minf(ds, ln - ds) / NOSE, 0.0, 1.0)
+	return 0.0
+
+
+## Is s in a split (with `ahead` metres of warning)? Returns the split or [].
+func split_near(s: float, ahead: float = 0.0) -> Array:
+	for sp in splits:
+		var a: Array = sp
+		var ds := fposmod(s - float(a[0]) + ahead, length)
+		if ds <= float(a[1]) + ahead:
+			return a
+	return []
+
+
+## Which side (-1 / +1 lat) the shortcut lane of the split near s is on (0: no split near).
+func shortcut_side(s: float) -> float:
+	var sp := split_near(s, 14.0)
+	return 0.0 if sp.is_empty() else float(sp[4])
+
+
+## Where to drive at s to stay in lane `side` (-1 / +1) of a split: the middle of that lane (else want).
+func lane_lat(s: float, side: float, want: float) -> float:
+	var sp := split_near(s, 14.0)
+	if sp.is_empty():
+		return want
+	var isl := float(sp[3])
+	var hw := WIDTH * 0.5 + float(sp[2])
+	return signf(side if side != 0.0 else 1.0) * (isl + hw) * 0.5
 
 
 # --- Queries -------------------------------------------------------------------------
@@ -279,10 +343,19 @@ func grid_point(slot: int) -> Array:
 
 func build(i: int) -> void:
 	i = posmod(i, TRACKS.size())
-	if i == track_i and built != null:
+	var d: Dictionary = (TRACKS[i] as Dictionary).duplicate()
+	d["palette"] = i
+	d["seed"] = i
+	build_info(d, "classic:%d" % i)
+
+
+## Build any track description (a TRACKS entry or a trackgen.gd track); `k` names it (no rebuild if the same).
+func build_info(d: Dictionary, k: String) -> void:
+	if k == key and built != null:
 		return
-	track_i = i
-	info = TRACKS[i]
+	key = k
+	build_n += 1
+	prepare(d)
 	if built != null:
 		built.queue_free()
 	built = Node3D.new()
@@ -290,8 +363,6 @@ func build(i: int) -> void:
 	add_child(built)
 	dinos.clear()
 	snow = null
-	_sample()
-	_features()
 	_build_sky()
 	_build_road()
 	_build_pads()
@@ -300,7 +371,18 @@ func build(i: int) -> void:
 	_build_scenery()
 	_build_crowd()
 	_build_theme()
-	print("Track %d: %s, %.0f m, %d samples" % [i, info["name"], length, n])
+	if not splits.is_empty():
+		_build_islands()
+	print("Track %s: %s, %.0f m, %d samples" % [key, info["name"], length, n])
+
+
+## Just the numbers (centre line, ramps, pads, boxes, split lanes): no nodes. trackgen.gd checks use it.
+func prepare(d: Dictionary) -> void:
+	info = d
+	track_i = int(d.get("palette", 0))
+	look = int(d.get("seed", track_i))
+	_sample()
+	_features()
 
 
 func _cp(i: int) -> Vector3:
@@ -353,6 +435,10 @@ func _features() -> void:
 	for p in info["pads"]:
 		var pa: Array = p
 		pads.append([float(pa[0]) * length, 5.0, float(pa[1]), 1.6])
+	splits.clear()
+	for sp in info.get("splits", []):
+		var sa: Array = sp
+		splits.append([float(sa[0]) * length, float(sa[1]), float(sa[2]), float(sa[3]), float(sa[4]) if sa.size() > 4 else 1.0])
 	boxes.clear()
 	box_t.clear()
 	for f in info["items"]:
@@ -407,7 +493,7 @@ func _build_sky() -> void:
 		return
 	# A few puffy clouds (three squashed spheres each, one MultiMesh).
 	var rng := RandomNumberGenerator.new()
-	rng.seed = 55 + track_i
+	rng.seed = 55 + look
 	var xf: Array[Transform3D] = []
 	for i in 12:
 		var a := rng.randf() * TAU
@@ -439,6 +525,12 @@ func _build_road() -> void:
 		var b := pts[j]
 		var ra := Vector3(-tans[i].z, 0, tans[i].x)
 		var rb := Vector3(-tans[j].z, 0, tans[j].x)
+		var ea := extra_at(cum[i])
+		var eb := extra_at(cum[j])
+		var hwa := hw + ea
+		var hwb := hw + eb
+		var wla := wl + ea
+		var wlb := wl + eb
 		var up := Vector3.UP
 		var lift := Vector3(0, 0.02, 0)
 		var stripe := road if (i / 3) % 2 == 0 else road.lightened(0.06)
@@ -452,7 +544,7 @@ func _build_road() -> void:
 				_quad(st, a + ra * l0 + lift, a + ra * l1 + lift, b + rb * l1 + lift, b + rb * l0 + lift,
 					Color(0.1, 0.1, 0.1) if dark else Color(1, 1, 1), up)
 		else:
-			_quad(st, a - ra * hw + lift, a + ra * hw + lift, b + rb * hw + lift, b - rb * hw + lift, stripe, up)
+			_quad(st, a - ra * hwa + lift, a + ra * hwa + lift, b + rb * hwb + lift, b - rb * hwb + lift, stripe, up)
 			# Dashed centre line.
 			if (i / 2) % 2 == 0:
 				var l2 := Vector3(0, 0.03, 0)
@@ -460,11 +552,11 @@ func _build_road() -> void:
 		var curb := wa if i % 2 == 0 else wb
 		for side in [-1.0, 1.0]:
 			var sd: float = side
-			_quad(st, a + ra * hw * sd + lift, a + ra * wl * sd + lift, b + rb * wl * sd + lift, b + rb * hw * sd + lift, curb, up)
+			_quad(st, a + ra * hwa * sd + lift, a + ra * wla * sd + lift, b + rb * wlb * sd + lift, b + rb * hwb * sd + lift, curb, up)
 			# Wall: low striped barrier on top of an earth bank down to the ground.
 			var wcol := wa if (i / 2) % 2 == 0 else wb
-			var ia := a + ra * wl * sd
-			var ib := b + rb * wl * sd
+			var ia := a + ra * wla * sd
+			var ib := b + rb * wlb * sd
 			var inward := -ra * sd
 			_quad(st, ia, ib, ib + Vector3(0, WALL_H, 0), ia + Vector3(0, WALL_H, 0), wcol, inward)
 			_quad(st, Vector3(ia.x, -0.2, ia.z), Vector3(ib.x, -0.2, ib.z), ib, ia, earth, -inward)
@@ -518,6 +610,49 @@ func _build_road() -> void:
 	g.material_override = gm
 	g.position = Vector3(20, -0.15, -35)
 	built.add_child(g)
+
+
+## Split lanes: a raised flower-bed island down the middle (striped curb sides, flowers and bushes on top).
+func _build_islands() -> void:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var top_c: Color = (info["grass"] as Color).lightened(0.08)
+	var wa: Color = info["wall_a"]
+	var wb: Color = info["wall_b"]
+	var hh := Vector3(0, 0.45, 0)
+	var bush: Array[Transform3D] = []
+	var bush_c: Array[Color] = []
+	var cols: Array = info["trees"]
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 77 + look
+	for i in n:
+		var j := (i + 1) % n
+		var wa_i := island_at(cum[i])
+		var wb_j := island_at(cum[j] if j > 0 else length)
+		if wa_i <= 0.0 and wb_j <= 0.0:
+			continue
+		var a := pts[i]
+		var b := pts[j]
+		var ra := Vector3(-tans[i].z, 0, tans[i].x)
+		var rb := Vector3(-tans[j].z, 0, tans[j].x)
+		var la := a + ra * -wa_i
+		var lb := b + rb * -wb_j
+		var ra2 := a + ra * wa_i
+		var rb2 := b + rb * wb_j
+		_quad(st, la + hh, ra2 + hh, rb2 + hh, lb + hh, top_c, Vector3.UP)
+		var curb := wa if i % 2 == 0 else wb
+		_quad(st, la, lb, lb + hh, la + hh, curb, -ra)
+		_quad(st, ra2, rb2, rb2 + hh, ra2 + hh, curb, ra)
+		if wa_i > 1.0 and i % 2 == 0:
+			var sc := rng.randf_range(0.5, 0.9)
+			bush.append(Transform3D(Basis().scaled(Vector3(sc, sc * 0.8, sc)), a + ra * rng.randf_range(-wa_i + 0.6, wa_i - 0.6) + Vector3(0, 0.45 + sc * 0.4, 0)))
+			bush_c.append(cols[rng.randi() % cols.size()])
+	var mi := MeshInstance3D.new()
+	mi.mesh = st.commit()
+	mi.material_override = _vcol_mat(false)
+	built.add_child(mi)
+	if not bush.is_empty():
+		_mm(main.sphere_mesh(1.0), _vc(0.15 if is_night() else 0.0), bush, bush_c)
 
 
 func _build_pads() -> void:
@@ -695,11 +830,11 @@ func _side_spots(rng: RandomNumberGenerator, count_want: int, near: float, far: 
 		tries += 1
 		var s := rng.randf() * length
 		var side := -1.0 if rng.randf() < 0.5 else 1.0
-		var lat := side * (wall_limit() + rng.randf_range(near, far))
+		var lat := side * (wall_at(s) + rng.randf_range(near, far))
 		var pa: Array = point_at(s, lat)
 		var p: Vector3 = pa[0]
 		var r: Array = locate(p, -1)
-		if absf(float(r[2])) < wall_limit() + near * 0.8:
+		if absf(float(r[2])) < wall_at(float(r[1])) + near * 0.8:
 			continue  # another part of the track runs past here
 		if s < 30.0 or s > length - 40.0:
 			continue  # the grandstands live by the start
@@ -710,7 +845,7 @@ func _side_spots(rng: RandomNumberGenerator, count_want: int, near: float, far: 
 
 func _build_scenery() -> void:
 	var rng := RandomNumberGenerator.new()
-	rng.seed = 1234 + track_i * 77
+	rng.seed = 1234 + look * 77
 	var theme := str(info["theme"])
 	var cols: Array = info["trees"]
 	var spots: Array[Vector3] = []
@@ -723,7 +858,8 @@ func _build_scenery() -> void:
 		var lat: float = r[2]
 		var q: Vector3 = pts[int(r[0])]
 		var d := Vector2(p.x - q.x, p.z - q.z).length()
-		if absf(lat) < wall_limit() + 4.0 or d < wall_limit() + 4.0:
+		var wl := wall_at(float(r[1]))
+		if absf(lat) < wl + 4.0 or d < wl + 4.0:
 			continue
 		spots.append(p)
 	if not spots.is_empty():
@@ -796,7 +932,7 @@ func _build_scenery() -> void:
 ## and smaller crowds by the ramps.
 func _build_crowd() -> void:
 	var rng := RandomNumberGenerator.new()
-	rng.seed = 900 + track_i
+	rng.seed = 900 + look
 	var stands: Array[Transform3D] = []
 	var people: Array[Transform3D] = []
 	var shirts: Array[Color] = []
@@ -815,7 +951,7 @@ func _build_crowd() -> void:
 		var rows: int = spa[2]
 		var per: int = spa[3]
 		for row in rows:
-			var lat := side * (wall_limit() + 2.2 + row * 1.1)
+			var lat := side * (wall_at(s0) + 2.2 + row * 1.1)
 			var h := 0.35 + row * 0.6
 			for k in per:
 				var s := s0 + (k - per * 0.5) * 1.15
@@ -875,7 +1011,7 @@ func _build_crowd() -> void:
 ## Theme props: what makes each track feel different.
 func _build_theme() -> void:
 	var rng := RandomNumberGenerator.new()
-	rng.seed = 4321 + track_i * 13
+	rng.seed = 4321 + look * 13
 	match str(info["theme"]):
 		"meadow":
 			var fl: Array[Transform3D] = []
@@ -941,7 +1077,7 @@ func _build_theme() -> void:
 			var k := 0
 			while s < length - 6.0:
 				var side := -1.0 if k % 2 == 0 else 1.0
-				var pa: Array = point_at(s, side * (wall_limit() + 0.9))
+				var pa: Array = point_at(s, side * (wall_at(s) + 0.9))
 				var p: Vector3 = pa[0]
 				var y := pts[int(pa[2])].y
 				posts.append(Transform3D(Basis(), Vector3(p.x, y + 1.3, p.z)))

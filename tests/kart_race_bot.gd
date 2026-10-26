@@ -122,7 +122,7 @@ func _process(delta: float) -> void:
 		var uses := 0
 		for k in main.karts:
 			uses += int(k.get_meta("uses", 0))
-		print("BOT %s: RACE %d FINISHED on %s (items used %d)" % [mode, races, main.track.track_name(main.track_i), uses])
+		print("BOT %s: RACE %d FINISHED on %s (items used %d)" % [mode, races, str(main.track.info["name"]), uses])
 	was_results = res
 	if res and main.state_t > 2.5:
 		cont_t -= delta
@@ -303,5 +303,5 @@ func _report(mode: String) -> void:
 	extra += " cup=%s r%d pts=%s turbos=%d items_seen=%s lights=%d" % [main.cup_info()["name"], main.cup_race + 1,
 		str(main.cup_pts), turbo, ",".join(PackedStringArray(items_seen.keys())), main.lights]
 	print("BOT %s t=%.0f race=%d state=%s race_t=%.0f track=%s views=%d remote_synced=%d bananas=%d races_done=%d%s [%s]" % [
-		mode, t, main.round_n, main.state, main.race_t, main.track.track_name(main.track_i), views, synced,
+		mode, t, main.round_n, main.state, main.race_t, str(main.track.info["name"]), views, synced,
 		main.bananas.size(), races, extra, ", ".join(act)])
