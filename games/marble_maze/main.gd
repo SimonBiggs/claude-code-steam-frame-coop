@@ -1812,7 +1812,9 @@ func show_story(beat: Dictionary) -> void:
 	if tl != null and tl.vr and tl.xr_camera != null:
 		if vr_story != null and is_instance_valid(vr_story):
 			vr_story.call("hide_card")
-		vr_story = StoryCard.show_vr(self, tl.xr_camera, beat)
+		var opts := beat.duplicate()
+		opts["vr_height"] = 0.18  # above the level's headline
+		vr_story = StoryCard.show_vr(self, tl.xr_camera, opts)
 	print("Story card: %s - %s" % [beat.get("who", ""), beat.get("line", "")])
 
 

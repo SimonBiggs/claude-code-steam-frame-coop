@@ -16,6 +16,11 @@ extends Node
 ## BOT_VR=1 (local or DUO_HOST): the giant runs the real VR code with fake hands: the right hand grabs a
 ## handle (after watching the ghost hands for a moment) and tilts the board the way the marbles need.
 ## DUO_HOST alone (no TV machine) in SIMPLE_MODE: the giant's own solo marble rolls home by tilt only.
+## STORY (simple mode, games/marble_maze/story.gd): after the seven lessons come TODAY'S MAZE and Bobo's
+## seeded story mazes. BOT_STORY=1 skips the lessons, BOT_STORY_I=n starts at story maze n (12 = CASTLE:
+## team pads, 15 = STAR PARK: teleporters, 18 = RAINBOW HILL: everything), BOT_NO_DAILY=1 skips today's
+## maze, BOT_NO_SHINY=1 stops P2's detour for the shiny marble. Zoom arrows are one-way in the bot's paths.
+## Prints "BOT STORY: ..." (save progress, places lit, jar) at the end. Generator: marble_maze_gen_test.gd.
 ## Visual teaching (simple mode): records the picture cues each view shows (cue_roll, cue_turn,
 ## cue_tilt, cue_plug), the ones learned (cue_learned_*), the glowing edge arrow, the board arrows
 ## (tilt_arrow, goal_arrow, grab_arrow), the ghost hands / marble and the join cue; checks the pause
@@ -111,7 +116,8 @@ func _physics_process(delta: float) -> void:
 		set_meta("pad_checked", true)
 		print("BOT: fake controller %d drives P%d, paused=%s" % [FAKE_PAD, int(main.joy_owner.get(FAKE_PAD, -1)) + 1, get_tree().paused])
 	var board = main.board
-	var key: int = board.level_n * 4 + int(board.gate_open[0]) + int(board.gate_open[1]) * 2
+	# The map itself is in the key: a story maze can replace the first lesson with the same level number.
+	var key: int = hash([board.level_n, board.rows, board.gate_open[0], board.gate_open[1]])
 	if key != dist_level and board.rows.size() > 0:
 		dist_level = key
 		dist = _bfs_from([board.cell_of(board.goal)])
@@ -324,6 +330,12 @@ func _step_ok(board, a: Vector2i, b: Vector2i) -> bool:
 		return false
 	if a.x == b.x and (ka == "-" or kb == "-"):
 		return false
+	# Zoom arrows are one-way: no rolling against one (leaving it or entering it).
+	var arrows := {">": Vector2i(1, 0), "<": Vector2i(-1, 0), "^": Vector2i(0, -1), "v": Vector2i(0, 1)}
+	if arrows.has(ka) and arrows[ka] == a - b:
+		return false
+	if arrows.has(kb) and arrows[kb] == a - b:
+		return false
 	return true
 
 
@@ -361,7 +373,8 @@ func _bfs_from(targets: Array) -> Dictionary:
 func _target_map(p, k: int) -> Dictionary:
 	var board = main.board
 	var c: Vector2i = board.cell_of(Vector2(p.lp.x, p.lp.z))
-	if k == 0 and not gem_dist.is_empty() and not board.gem_taken[0] and gem_dist.has(c) and not OS.has_environment("BOT_NO_SHINY"):
+	if k == 0 and main.state == "play" and not gem_dist.is_empty() and not board.gem_taken[0] and gem_dist.has(c) \
+			and not OS.has_environment("BOT_NO_SHINY"):
 		return gem_dist  # the first marble takes the detour for the shiny
 	if dist.has(c) or board.pads.is_empty():
 		return dist
@@ -473,8 +486,8 @@ func _report(mode: String) -> void:
 		if p.index > 0 and p.remote and p.active and p.net_started:
 			synced += 1
 	if simple:
-		print("BOT %s t=%.0f level=%d state=%s home=%d/%d falls=%d views=%d remote_synced=%d tilt=%s solo=%s [%s]" % [
-			mode, t, main.level, main.state, main.home_count(), main.active_marbles().size(), falls, views, synced,
+		print("BOT %s t=%.0f level=%d (%s) state=%s home=%d/%d falls=%d views=%d remote_synced=%d tilt=%s solo=%s [%s]" % [
+			mode, t, main.level, main.board.level_name(main.level), main.state, main.home_count(), main.active_marbles().size(), falls, views, synced,
 			main.board.tilt.snapped(Vector2(0.01, 0.01)), main.solo, ", ".join(act)])
 		return
 	print("BOT %s t=%.0f level=%d state=%s time=%.0f score=%d stars=%d jar=%d home=%d/%d gems=%d falls=%d cleared=%d views=%d remote_synced=%d gates=%s tilt=%s [%s]" % [
