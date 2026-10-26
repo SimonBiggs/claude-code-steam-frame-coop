@@ -9,6 +9,8 @@ extends Node
 # thrown veggie and the spoon. DUO_HOST=1 alone = solo VR: the kitchen helpers must keep it going.
 # KR_FAKE_VR=1 (or BOT_VR=1): the real VR chef code runs; the bot moves the fake hands like a person, following the
 # chef's on-screen "next step" guidance (chop with a knife swing, grab with the right trigger, drop on the plate).
+# Ends by itself after BOT_SECONDS (default 110 s host, 100 s client, 600 s local: local runs use --quit-after)
+# with "BOT RESULT: PASS (n checks)" or "SCRIPT ERROR: BOT RESULT: FAIL" (also printed on exit).
 # KR_START_SHIFT=N starts at shift N (3 = the first dinner, with the rush). KR_TAUGHT=1: the save already
 # has gifts and two visits from robots, aliens and knights (MELT, WRAP, SANDWICH on the menus from round 5).
 # Gran's café (simple mode): checks the party rounds (parties.gd): story cards (a short title + one short
@@ -25,6 +27,11 @@ const M := preload("res://games/kitchen_rush/main.gd")
 
 var main
 var t := 0.0
+var bot_errors := 0  # "BOT: ERROR" lines printed
+var finished := false
+## Run length before the bot checks and quits by itself (BOT_SECONDS; see _ready). The result also prints
+## on exit (--quit-after).
+var end_at := 140.0
 var chef_t := 0.0
 var use_t := {}
 var last_pos := {}
@@ -64,10 +71,19 @@ func _ready() -> void:
 	var default_players := 2 if OS.has_environment("DUO_JOIN") else 1
 	want_players = clampi(int(OS.get_environment("BOT_PLAYERS")) if OS.has_environment("BOT_PLAYERS") else default_players, 1, 6)
 	print("BOT: %d TV runner(s) requested" % want_players)
+	# Networked runs are real time with no --quit-after (tools/multibot.ts); local runs pass --quit-after
+	# (the result prints on exit), so their own end is only a safety net.
+	end_at = 100.0 if OS.has_environment("DUO_JOIN") else (110.0 if OS.has_environment("DUO_HOST") else 600.0)  # inside multibot's 120 s
+	if OS.has_environment("BOT_SECONDS"):
+		end_at = float(OS.get_environment("BOT_SECONDS"))
 
 
 func _physics_process(delta: float) -> void:
 	t += delta
+	if t >= end_at and not finished:
+		_finish()
+		get_tree().quit(0 if _result() else 1)
+		return
 	if not main.ready_to_play:
 		return
 	var mode: String = main.net.mode
@@ -263,6 +279,7 @@ func _note_features() -> void:
 		var b: Dictionary = main.last_story
 		print("BOT: story card %s / %s (%s)" % [b.get("who", ""), b.get("line", ""), b.get("pic", "")])
 		if not RegEx.create_from_string("^[A-Z][A-Z' !]{1,15}$").search(str(b.get("who", ""))) or str(b.get("line", "")).length() > 28:
+			bot_errors += 1
 			print("BOT: ERROR story card text too long: %s / %s" % [b.get("who", ""), b.get("line", "")])
 	for ty in types:
 		if not seen.has("type:" + ty):
@@ -773,6 +790,7 @@ func _note_cues() -> void:
 		if p.camera != null:
 			if int(p.camera.cull_mask) & int(p.body_layer()):
 				if not cues.has("own_tag_shown"):
+					bot_errors += 1
 					print("BOT: ERROR P%d's view shows its own name tag" % (p.index + 1))
 				cues["own_tag_shown"] = true
 			else:
@@ -818,11 +836,60 @@ func _check_headline(who: String, text: String) -> void:
 
 func _tip_error(who: String, text: String) -> void:
 	if not cues.has("tip_text"):
+		bot_errors += 1
 		print("BOT: ERROR instruction text on %s: %s" % [who, text.replace("\n", " / ")])
 	cues["tip_text"] = true
 
 
+## The checks behind "BOT RESULT": [label, ok] pairs.
+func _checks() -> Array:
+	var out: Array = []
+	var mode: String = main.net.mode
+	out.append(["no BOT: ERROR lines", bot_errors == 0])
+	out.append(["the kitchen started", main.ready_to_play])
+	if OS.has_environment("KR_LAZY"):
+		out.append(["grumpy customers seen" if main.simple else "game over and restart", grumpy_seen if main.simple else Engine.has_meta("kr_restarted")])
+		return out
+	if mode == "client":
+		out.append(["synced with the host", main.synced])
+		out.append(["a round started", main.shift >= 1])
+		if main.simple:
+			out.append(["a story card arrived", main.story_count > 0])
+		return out
+	out.append(["customers were served", main.served_total >= 1])
+	out.append(["got past the first round", max_shift >= 2 or OS.has_environment("KR_START_SHIFT")])
+	if main.simple:
+		out.append(["story cards shown", main.story_count > 0])
+		out.append(["a party round was made", not main.round_info.is_empty()])
+		out.append(["a gift went on the shelf", not main.gifts_shown.is_empty()])
+	return out
+
+
+func _result() -> bool:
+	for c in _checks():
+		if not c[1]:
+			return false
+	return true
+
+
+func _finish() -> void:
+	if finished or main == null or not is_instance_valid(main) or main.net == null:
+		return
+	finished = true
+	var cs := _checks()
+	var bad := 0
+	for c in cs:
+		if not c[1]:
+			bad += 1
+			print("SCRIPT ERROR: BOT ASSERT FAILED: %s: %s" % [main.net.mode, c[0]])
+	if bad == 0:
+		print("[%6.1fs] BOT RESULT: PASS (%d checks)" % [t, cs.size()])
+	else:
+		print("SCRIPT ERROR: BOT RESULT: FAIL (%d of %d checks failed)" % [bad, cs.size()])
+
+
 func _exit_tree() -> void:
+	_finish()
 	if main != null and is_instance_valid(main) and main.simple:
 		var ks: Array = cues.keys()
 		ks.sort()
