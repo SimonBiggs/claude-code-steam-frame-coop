@@ -6,7 +6,8 @@ usage limit hits, nothing would resume it after the reset. This wakes it from th
 one-shot "claude -p" sends a cross-session message to the main session's UNIX socket
 (/run/user/1000/cc-socks/<pid>.sock), which is delivered into the conversation even when it is idle.
 
-  claude-wake now "TEXT"         send TEXT into the main conversation right now
+  claude-wake now "TEXT"         send TEXT into the main conversation right now (refused while a usage limit is
+                                 active, unless --force)
   claude-wake after-reset        if a usage window is at its limit (>= 95 %) or the main session's last turn ended on
                                  a rate-limit error: wait until the reset + 2 min, then send the standard resume message
   claude-wake after-reset --check
@@ -19,8 +20,14 @@ one-shot "claude -p" sends a cross-session message to the main session's UNIX so
   claude-wake status             what is armed / last fired / keep-going decision, plus the log tail
 Options: --dry-run (decide and print, never send). Env: CLAUDE_WAKE_USAGE (usage.json path),
 CLAUDE_WAKE_SESSION (session jsonl path), CLAUDE_WAKE_STATE (state file), CLAUDE_WAKE_NOW (fake epoch, for tests),
-CLAUDE_WAKE_SUBAGENTS (subagent dir), CLAUDE_WAKE_CHANNEL (brepl channel), CLAUDE_WAKE_PACE_OUT (fake claude-pace output).
-Fires once per reset (state file ~/.claude/wake-state.json) and never if the main session is busy working normally.
+CLAUDE_WAKE_SUBAGENTS (subagent dir), CLAUDE_WAKE_CHANNEL (brepl channel), CLAUDE_WAKE_PACE_OUT (fake claude-pace output),
+CLAUDE_WAKE_FAKE_SEND (tests: file whose text is used as the headless claude result instead of really sending),
+CLAUDE_WAKE_NO_INHIBIT=1 (don't hold the sleep inhibitor). Regression test: claude-wake-test.
+Fires once per reset (state file ~/.claude/wake-state.json) and never if the main session has had a real assistant
+turn since the reset. Never sends anything while a usage limit is active (armed future reset, a recent limit error in
+the main transcript, a window >= 95 %, or a send that just failed with 429 -> "blocked_until" in the state file).
+While a wake-up is pending (due within 6 h) it holds a logind sleep inhibitor (systemd user unit claude-wake-inhibit),
+because Steam auto-suspends the machine after 1 h without input (Sun 25 Oct: suspended 20:00, the 21:02 wake never ran).
 Log: ~/.claude/wake.log
 """
 import json, os, subprocess, sys, time, glob
@@ -32,7 +39,6 @@ LOG = os.environ.get("CLAUDE_WAKE_LOG", os.path.join(os.path.dirname(STATE), "wa
 SOCKS = "/run/user/1000/cc-socks"
 LIMIT_PCT = 95
 GRACE = 120  # seconds after the reset before waking
-BUSY_SECS = 120  # main session wrote its transcript this recently -> it is working
 RESUME = ("Usage window has reset. Resume: re-arm the brepl channel watch, run claude-pace, resume every agent that "
           "stopped on the limit with SendMessage (their work is saved), restart the continuous deploy steward if it "
           "stopped, land tested branches, then give Simon a short status.")
@@ -97,8 +103,8 @@ def epoch(v):
         return None
 
 
-def last_assistant(path):
-    """The main session's last top-level assistant entry (from the transcript's tail)."""
+def tail_entries(path, kinds=("assistant", "user")):
+    """Top-level transcript entries of the given types from the transcript's tail (oldest first)."""
     try:
         with open(path, "rb") as f:
             f.seek(0, 2)
@@ -106,24 +112,58 @@ def last_assistant(path):
             f.seek(max(0, size - 4_000_000))
             lines = f.read().decode("utf-8", "replace").splitlines()
     except OSError:
-        return None
-    for line in reversed(lines):
-        if '"type":"assistant"' not in line:
+        return []
+    out = []
+    for line in lines:
+        if not any(f'"type":"{k}"' in line or f'"type": "{k}"' in line for k in kinds):
             continue
         try:
             e = json.loads(line)
         except Exception:
             continue
-        if e.get("type") == "assistant" and not e.get("isSidechain"):
-            return e
-    return None
+        if e.get("type") in kinds and not e.get("isSidechain"):
+            out.append(e)
+    return out
+
+
+def last_assistant(path):
+    """The main session's last top-level assistant entry (from the transcript's tail)."""
+    a = tail_entries(path, ("assistant",))
+    return a[-1] if a else None
+
+
+def real_assistant(e):
+    """A real model turn: an assistant entry that is not an API error / synthetic message."""
+    m = e.get("message") or {}
+    return (e.get("type") == "assistant" and not e.get("isApiErrorMessage") and not e.get("apiError")
+            and m.get("model") != "<synthetic>")
+
+
+def human_prompt(e):
+    """Something Simon typed (not a task-notification, tool result or injected system text)."""
+    if e.get("type") != "user" or e.get("isMeta") or (e.get("origin") or {}).get("kind") not in (None, "human", "user"):
+        return False
+    c = (e.get("message") or {}).get("content")
+    return isinstance(c, str) and not c.lstrip().startswith("<")
+
+
+def last_real_turn(path, humans=False):
+    """Epoch of the newest real assistant turn (and, with humans=True, typed prompt) in the main transcript."""
+    best = None
+    for e in tail_entries(path):
+        if real_assistant(e) or (humans and human_prompt(e)):
+            t = epoch(e.get("timestamp"))
+            if t and (best is None or t > best):
+                best = t
+    return best
 
 
 def limit_error(e):
     """(reset epoch, kind) if this entry is a usage/rate-limit error, else None."""
     if not e:
         return None
-    if not (e.get("isApiErrorMessage") and (e.get("error") == "rate_limit" or e.get("apiErrorStatus") == 429)):
+    if not (e.get("isApiErrorMessage") and (e.get("error") == "rate_limit" or e.get("apiErrorStatus") == 429
+                                            or e.get("apiError") == "usage_limit_reached")):
         return None
     q = e.get("quotaLimits") or (e.get("apiErrorParams") or {}).get("rate_limit_info") or {}
     r = epoch(q.get("resetsAt"))
@@ -135,13 +175,114 @@ def limit_error(e):
     return (r, q.get("rateLimitType") or "rate limit") if r else None
 
 
-def send(text):
-    pid = main_pid()
+def parse_reset(text):
+    """Reset epoch from a usage-limit error: a resetsAt field, else "resets 9pm (Europe/Dublin)" / "resets Oct 27, 3:30am"."""
+    import re
+    m = re.search(r'"resets_?[aA]t"\s*:\s*"?(\d{9,13})', text)
+    if m:
+        return epoch(int(m.group(1)))
+    m = re.search(r"resets\s+(?:([A-Z][a-z]{2})\s+(\d{1,2}),?\s+)?(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*([ap]m)\s*(?:\(([^)]+)\))?",
+                  text, re.I)
+    if not m:
+        return None
+    from datetime import datetime, timedelta
+    try:
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo(m.group(6)) if m.group(6) else None
+    except Exception:
+        tz = None
+    cur = datetime.fromtimestamp(now(), tz) if tz else datetime.fromtimestamp(now())
+    h = int(m.group(3)) % 12 + (12 if m.group(5).lower() == "pm" else 0)
+    t = cur.replace(hour=h, minute=int(m.group(4) or 0), second=0, microsecond=0)
+    if m.group(1):
+        try:
+            mon = datetime.strptime(m.group(1), "%b").month
+            t = t.replace(month=mon, day=int(m.group(2)))
+            if t.timestamp() < now() - 86400:
+                t = t.replace(year=t.year + 1)
+        except ValueError:
+            pass
+    elif t.timestamp() <= now():
+        t += timedelta(days=1)
+    return t.timestamp()
+
+
+def limit_until():
+    """(epoch, why) while a usage limit is active (nothing may be sent until then), else None."""
+    t = now()
+    s = load(STATE, {})
+    found = []
+    if s.get("blocked_until", 0) > t:
+        found.append((s["blocked_until"], "a send failed with 429 usage_limit_reached"))
+    if s.get("armed") and s["armed"] != s.get("fired") and s["armed"] > t:
+        found.append((s["armed"], s.get("why") or "wake-up armed for the reset"))
+    try:
+        ents = tail_entries(session_file())
+    except Exception:
+        ents = []
+    for e in reversed(ents):
+        if real_assistant(e):
+            break  # the session worked after any earlier limit error
+        err = limit_error(e) if e.get("type") == "assistant" else None
+        if err and err[0] > t:
+            found.append((err[0], f"main session hit its {err[1]} limit"))
+            break
+    for name, w in load(USAGE, {}).get("rate_limits", {}).items():
+        if isinstance(w, dict) and (w.get("used_percentage") or 0) >= LIMIT_PCT and (epoch(w.get("resets_at")) or 0) > t:
+            found.append((epoch(w["resets_at"]), f"{name} window at {w['used_percentage']}%"))
+    return max(found) if found else None
+
+
+INHIBIT_UNIT = "claude-wake-inhibit"
+
+
+def inhibit(until):
+    """Hold (or with until=None release) a logind sleep block until `until`, in its own user unit so it outlives
+    claude-watchdog.service. Steam's 1 h idle auto-suspend (a deck-user Suspend call) is refused while it is held."""
+    if DRY or os.environ.get("CLAUDE_WAKE_NO_INHIBIT") or os.environ.get("CLAUDE_WAKE_FAKE_SEND"):
+        return
+    s = load(STATE, {})
+    active = subprocess.run(["systemctl", "--user", "is-active", "--quiet", INHIBIT_UNIT]).returncode == 0
+    if until is None:
+        if active:
+            subprocess.run(["systemctl", "--user", "stop", INHIBIT_UNIT], capture_output=True)
+            log("released the sleep inhibitor")
+        if "inhibit_until" in s:
+            s.pop("inhibit_until")
+            save_state(s)
+        return
+    if active and abs(s.get("inhibit_until", 0) - until) < 300:
+        return
+    if active:
+        subprocess.run(["systemctl", "--user", "stop", INHIBIT_UNIT], capture_output=True)
+    secs = int(until - now())
+    if secs <= 0:
+        return
+    r = subprocess.run(["systemd-run", "--user", "--quiet", "--collect", f"--unit={INHIBIT_UNIT}",
+                        "systemd-inhibit", "--what=sleep", "--mode=block", "--who=claude-wake",
+                        f"--why=Claude wake-up pending for {hm(until - 900)} (usage-limit reset)",
+                        "sleep", str(secs)], capture_output=True, text=True)
+    if r.returncode == 0:
+        s["inhibit_until"] = until
+        save_state(s)
+        log(f"holding a sleep inhibitor until {hm(until)} so the machine stays awake for the wake-up")
+    else:
+        log(f"could not start the sleep inhibitor: {(r.stderr or r.stdout).strip()[:200]}")
+
+
+def send(text, force=False):
+    if not force:
+        lim = limit_until()
+        if lim:
+            log(f"not sending (usage limit active until {hm(lim[0])}: {lim[1]}): {text[:60]!r}")
+            return False
+    fake = os.environ.get("CLAUDE_WAKE_FAKE_SEND")
+    pid = "fake" if fake else main_pid()
     if not pid:
         log("main Claude is not running (claude-watchdog restarts it); not sending")
         return False
     sock = f"{SOCKS}/{pid}.sock"
-    if not os.path.exists(sock):
+    if not fake and not os.path.exists(sock):
         log(f"no socket {sock}; not sending")
         return False
     if DRY:
@@ -151,7 +292,7 @@ def send(text):
               f"between the markers (verbatim, nothing added).\n<<<\n{text}\n>>>\nThen stop and reply DONE.")
     os.makedirs(f"{HOME}/GodotProjects", exist_ok=True)
     try:
-        r = subprocess.run([f"{HOME}/.local/bin/claude", "-p", "--model", "haiku", "--strict-mcp-config",
+        r = subprocess.CompletedProcess([], 0, open(fake).read(), "") if fake else subprocess.run([f"{HOME}/.local/bin/claude", "-p", "--model", "haiku", "--strict-mcp-config",
                             "--tools", "SendMessage", "--allowedTools", "SendMessage", "--output-format", "json", prompt],
                            cwd=f"{HOME}/GodotProjects", capture_output=True, text=True, timeout=300)
     except subprocess.TimeoutExpired:
@@ -164,6 +305,12 @@ def send(text):
     except Exception:
         res, ok = None, False
     log(f"sent to pid {pid}: {'ok' if ok else 'FAILED'}: {text[:80]!r}" + ("" if ok else f" | {out[-400:]}"))
+    if not ok and ("usage_limit_reached" in out or '"api_error_status":429' in out or "hit your" in out):
+        b = parse_reset(out) or now() + 1800  # unparseable reset: back off 30 min
+        st = load(STATE, {})
+        st["blocked_until"] = b
+        save_state(st)
+        log(f"usage limit active: no more sends until {hm(b)}")
     return ok
 
 
@@ -181,6 +328,9 @@ def decide():
         if isinstance(w, dict) and (w.get("used_percentage") or 0) >= LIMIT_PCT and epoch(w.get("resets_at")):
             hits.append((epoch(w["resets_at"]), f"{name} window at {w['used_percentage']}%"))
     hits = [h for h in hits if h[0] + GRACE > now() - 6 * 3600]
+    b = s.get("blocked_until")
+    if b and b != s.get("fired") and b + GRACE > now() - 6 * 3600:
+        hits.append((b, "a send failed with 429 usage_limit_reached"))
     if hits:
         return max(hits)  # the later reset is the one that actually frees requests
     if s.get("armed") and s["armed"] != s.get("fired"):  # armed earlier; usage file has since dropped (reset happened)
@@ -189,17 +339,10 @@ def decide():
 
 
 def busy(reset):
-    """The main conversation is working normally: transcript written recently and not ending on a limit error."""
-    sess = session_file()
-    try:
-        m = os.stat(sess).st_mtime
-    except OSError:
-        return False
-    if limit_error(last_assistant(sess)):
-        return False
-    if m > reset:  # something happened in the conversation since the reset: it is already going again
-        return True
-    return now() - m < BUSY_SECS
+    """The main conversation is already going again: a REAL assistant turn (not a limit error, not a task-notification
+    or system line someone appended to the transcript) is timestamped after the reset."""
+    t = last_real_turn(session_file())
+    return bool(t and t > reset)
 
 
 def after_reset(check):
@@ -211,12 +354,15 @@ def after_reset(check):
     reset, why = d
     if s.get("fired") and abs(s["fired"] - reset) < 60:
         print(f"already woke the session for the {hm(reset)} reset")
+        inhibit(None)
         return 0
     if s.get("armed") != reset:
         s.update(armed=reset, why=why, armed_at=now())
         save_state(s)
         log(f"local wake-up armed for {hm(reset + GRACE)} ({why})")
     due = reset + GRACE
+    if due - now() < 6 * 3600 and now() < due + 3600:
+        inhibit(max(due, now()) + 900)  # keep the machine awake (Steam idle-suspends after 1 h) until the wake-up
     if now() < due:
         if check:
             print(f"armed for {hm(due)} ({why}); not due yet")
@@ -231,11 +377,14 @@ def after_reset(check):
         log(f"reset {hm(reset)} passed and the main session is already working; no wake-up needed")
         s.update(fired=reset, fired_at=now(), result="skipped (busy)")
         save_state(s)
+        inhibit(None)
         return 0
     ok = send(RESUME)
+    s = load(STATE, {})  # send() may have recorded blocked_until
     if ok:
         s.update(fired=reset, fired_at=now(), result="sent")
         save_state(s)
+        inhibit(None)
         return 0
     s["failures"] = s.get("failures", 0) + 1
     s["last_fail"] = now()
@@ -325,9 +474,17 @@ def keep_going_reason():
     last = s.get("keep_going_at", 0)
     if now() - last < KEEP_EVERY:
         return f"nudged {int((now() - last) / 60)} min ago (at most every {KEEP_EVERY // 60} min)"
-    idle = now() - mtime(session_file())
+    lim = limit_until()
+    if lim:
+        return f"usage limit active until {hm(lim[0])} ({lim[1]})"
+    if s.get("armed") and s["armed"] != s.get("fired") and now() - s["armed"] < 6 * 3600:
+        return f"after-reset wake-up pending for {hm(s['armed'] + GRACE)} (it sends the resume message)"
+    if s.get("result") == "sent" and now() - s.get("fired_at", 0) < KEEP_IDLE:
+        return f"after-reset wake-up sent {int((now() - s['fired_at']) / 60)} min ago"
+    last_turn = last_real_turn(session_file(), humans=True) or 0
+    idle = now() - last_turn
     if idle < KEEP_IDLE:
-        return f"main session busy (transcript written {int(idle / 60)} min ago)"
+        return f"main session busy (last real turn {int(idle / 60)} min ago)"
     a = active_subagent()
     if a:
         return f"agent active ({a[0]} written {int(a[1] / 60)} min ago)"
@@ -375,12 +532,12 @@ def keep_going(check):
 
 
 def main():
-    a = [x for x in sys.argv[1:] if x != "--dry-run"]
+    a = [x for x in sys.argv[1:] if x not in ("--dry-run", "--force")]
     if not a or a[0] in ("-h", "--help"):
         print(__doc__)
         return 0
     if a[0] == "now":
-        return 0 if send(" ".join(a[1:]) or RESUME) else 1
+        return 0 if send(" ".join(a[1:]) or RESUME, force="--force" in sys.argv) else 1
     if a[0] == "after-reset":
         return after_reset("--check" in a)
     if a[0] == "keep-going":
@@ -392,6 +549,8 @@ def main():
                 print(f"{k}: reset {hm(s[k])} (wake {hm(s[k] + GRACE)})")
         if s.get("keep_going_at"):
             print(f"last keep-going nudge: {hm(s['keep_going_at'])} ({s.get('keep_going_result')})")
+        lim = limit_until()
+        print(f"usage limit: {'active until ' + hm(lim[0]) + ' (' + lim[1] + ')' if lim else 'none active'}")
         print(f"keep-going now: {keep_going_reason() or 'would nudge'}")
         print(json.dumps(s))
         try:
