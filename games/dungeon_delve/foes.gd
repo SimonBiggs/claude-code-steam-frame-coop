@@ -1114,6 +1114,8 @@ func reflect(sid: int, toward: Vector3) -> bool:
 
 func _step_shots(delta: float, targets: Array) -> void:
 	for sid in shots.keys():
+		if not shots.has(sid):
+			continue  # a boss went down and took every shot with it (foes.clear())
 		var s: Dictionary = shots[sid]
 		s["t"] = float(s["t"]) + delta
 		var t: float = s["t"]

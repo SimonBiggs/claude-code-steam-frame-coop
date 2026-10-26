@@ -51,6 +51,24 @@ const LAYOUTS: Array = [
 ]
 
 
+## ENDLESS: after the third boss the zones go round again (deeper = tougher) and every floor gets a
+## twist: SWIFT (monsters faster), SWARM (more of them), ELITES (lots of gold-ringed ones), STONE
+## (tougher hides). "" for the first three zones.
+const MODS: Array[String] = ["SWIFT", "SWARM", "ELITES", "STONE"]
+
+
+static func modifier(seed_value: int, zone: int, floor_i: int) -> String:
+	if zone < ZONE_COUNT:
+		return ""
+	return MODS[absi(hash([seed_value, zone, floor_i, "mod"])) % MODS.size()]
+
+
+## A zone's look and monsters (the endless depths go round the three zones again). Always use this,
+## never ZONES[zone] directly (zone 3+ is past the end of the list).
+static func zone_data(zone: int) -> Dictionary:
+	return ZONES[posmod(zone, ZONES.size())]
+
+
 static func global_floor(zone: int, floor_i: int) -> int:
 	return zone * FLOORS_PER_ZONE + floor_i
 
@@ -181,7 +199,9 @@ static func generate(seed_value: int, zone: int, floor_i: int, heroic: bool, kin
 			var pdi: int = cands[rng.randi_range(0, cands.size() - 1)]
 			(doors[pdi] as Dictionary)["type"] = PUZZLE
 	# Pillars, roles, monsters, traps, chests.
-	var zd: Dictionary = ZONES[zone % ZONES.size()]
+	var zd: Dictionary = zone_data(zone)
+	var mod := modifier(seed_value, zone, floor_i)
+	f["mod"] = mod
 	var trap_left := 0 if g == 0 else (1 if g < 4 else 2)
 	for i in rooms.size():
 		var r: Dictionary = rooms[i]
@@ -227,7 +247,7 @@ static func generate(seed_value: int, zone: int, floor_i: int, heroic: bool, kin
 		if found:
 			break
 	for i in rooms.size():
-		_fill_room(f, i, rng, zd, g, heroic)
+		_fill_room(f, i, rng, zd, g, heroic, mod)
 	return f
 
 
@@ -398,7 +418,7 @@ static func door_local(d: int) -> Vector2:
 	return Vector2(v.x * HALF, v.y * HALF)
 
 
-static func _fill_room(f: Dictionary, i: int, rng: RandomNumberGenerator, zd: Dictionary, g: int, heroic: bool) -> void:
+static func _fill_room(f: Dictionary, i: int, rng: RandomNumberGenerator, zd: Dictionary, g: int, heroic: bool, mod: String = "") -> void:
 	var r: Dictionary = (f["rooms"] as Array)[i]
 	var role: String = r["role"]
 	var taken: Array = []
@@ -418,9 +438,12 @@ static func _fill_room(f: Dictionary, i: int, rng: RandomNumberGenerator, zd: Di
 			budget = 2.0 + g * 0.5  # traps AND monsters
 		"exit":
 			budget = 3.5 + g * 0.8
+	if mod == "SWARM":
+		budget *= 1.5
+	budget = minf(budget, 16.0)  # endless depths: a full room, not a wall of monsters
 	if budget > 0.0:
 		var table: Dictionary = zd["foes"]
-		var elite_p := 0.1 + g * 0.03 + (0.12 if heroic else 0.0)
+		var elite_p := minf(0.1 + g * 0.03 + (0.12 if heroic else 0.0) + (0.3 if mod == "ELITES" else 0.0), 0.6)
 		var guard := 0
 		while budget > 0.5 and guard < 20:
 			guard += 1
@@ -505,7 +528,7 @@ static func _make_trap(f: Dictionary, i: int, kind: String, rng: RandomNumberGen
 					var across := (off_i + w) * TILE
 					tiles.append(Vector2(along, across) if horizontal else Vector2(across, along))
 			t["tiles"] = tiles
-			t["period"] = rng.randf_range(3.2, 4.2)
+			t["period"] = rng.randf_range(4.0, 5.0)  # down long enough to walk across (2.3 s+)
 		"boulder":
 			var along_x := rng.randf() < 0.5
 			var lane := rng.randf_range(-2.8, 2.8)
@@ -775,8 +798,8 @@ static func start_open_bits(f: Dictionary) -> int:
 ## Doors of room ri (bits).
 static func room_door_bits(f: Dictionary, ri: int) -> int:
 	var bits := 0
-	if ri < 0:
-		return 0
+	if ri < 0 or ri >= (f.get("rooms", []) as Array).size():
+		return 0  # (a lock from the previous floor can arrive before the new one: TV/test 26 Oct)
 	for d in (((f["rooms"] as Array)[ri] as Dictionary)["doors"] as Dictionary).values():
 		bits |= 1 << int(d)
 	return bits

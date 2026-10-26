@@ -389,6 +389,8 @@ func _fight(slot: int, h: Node3D, id: int, st: Dictionary, delta: float) -> void
 	var reach: float = 0.85 + foes.radius_of(id) * 0.8
 	var shielded := kind == FloorGen.F_SHIELD or (kind == FloorGen.B_BONE and int(m["phase"]) >= 2)
 	var goal := p
+	if shielded and int(Time.get_ticks_msec() / 6000 + slot) % 3 == 2:
+		shielded = false  # now and then just go at it: enough hits crack a shield anyway
 	if shielded and int(m["st"]) != Foes.STUN:
 		goal = p - fwd * (reach * 0.9)
 		var to_me := Vector3(pos.x - p.x, 0.0, pos.z - p.z)
@@ -460,7 +462,7 @@ func _goal(slot: int, pos: Vector3, room: int, index: int) -> Dictionary:
 			ignore[nope_key] = float(ignore.get(nope_key, 0.0)) + 0.016
 		if float(ignore.get(nope_key, 0.0)) > 2.0:
 			continue  # standing on it and it won't come: not for me
-		if d < bd and _useful(slot, int(pk["kind"])):
+		if d < bd and (_useful(slot, int(pk["kind"])) or pk.has("relic")):
 			bd = d
 			best = {"p": Vector3(pp.x, 0, pp.z), "near": 0.3}
 	if not best.is_empty():

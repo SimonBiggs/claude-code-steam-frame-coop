@@ -467,7 +467,7 @@ func start_run(m: String) -> void:
 	zone = 0
 	floor_i = 0
 	if OS.has_environment("DD_FLOOR") and not main.has_meta("deep_started"):
-		var g := clampi(int(OS.get_environment("DD_FLOOR")), 0, FloorGen.ZONE_COUNT * FloorGen.FLOORS_PER_ZONE - 1)
+		var g := clampi(int(OS.get_environment("DD_FLOOR")), 0, 99)
 		zone = g / FloorGen.FLOORS_PER_ZONE
 		floor_i = g % FloorGen.FLOORS_PER_ZONE
 	main.set_meta("deep_started", true)
@@ -558,7 +558,7 @@ func load_floor(z: int, fl: int, k: String) -> void:
 			st["hp"] = mini(int(st["max"]), int(st["hp"]) + 1)
 		stats_dirty = true
 	else:
-		if fl == 0 and bool(diff()["checkpoints"]):
+		if fl == 0 and bool(diff()["checkpoints"]) and z < FloorGen.ZONE_COUNT:  # no checkpoints in the endless depths
 			checkpoint = {"zone": z, "stats": stats.duplicate(true), "gold": _gold}
 			tally["checkpoints"] = int(tally["checkpoints"]) + 1
 		elif checkpoint.is_empty():
@@ -598,6 +598,15 @@ func _cfg() -> Dictionary:
 	var n := maxi(1, _players().size())
 	var g := FloorGen.global_floor(zone, floor_i)
 	# Difficulty climbs every floor: health, speed, and from the Lava Forge (HEROIC: the Crypt) harder hits.
+	# Endless depths (after the third boss): every lap round the zones is tougher, plus the floor's twist.
+	var tier := maxi(0, zone - FloorGen.ZONE_COUNT + 1)
+	var mod := String(f.get("mod", ""))
+	if tier > 0:
+		g = mini(g, 13)  # the per-floor climb levels off; tiers take over
+		return {"hp": float(d["hp"]) * (1.0 + 0.11 * g) * (1.0 + 0.25 * tier) * (1.3 if mod == "STONE" else 1.0) * (1.0 + 0.25 * (n - 1)),
+			"boss_hp": float(d["hp"]) * (1.0 + 0.45 * (n - 1)) * (1.0 + 0.15 * zone),
+			"dmg": (1 if mode == "heroic" else 0) + tier / 2,
+			"spd": float(d["spd"]) * (1.0 + 0.04 * g) * (1.0 + 0.04 * tier) * (1.2 if mod == "SWIFT" else 1.0)}
 	return {"hp": float(d["hp"]) * (1.0 + 0.11 * g) * (1.0 + 0.25 * (n - 1)),
 		"boss_hp": float(d["hp"]) * (1.0 + 0.45 * (n - 1)) * (1.0 + 0.15 * zone),
 		"dmg": (1 if mode == "heroic" and zone >= 1 else 0),
@@ -605,8 +614,8 @@ func _cfg() -> Dictionary:
 
 
 func _sync_doors() -> void:
-	net.state_set("d_open", open_bits)
 	net.state_set("d_lock", lock_room)
+	net.state_set("d_open", open_bits)
 
 
 func _sync_money() -> void:
@@ -624,7 +633,7 @@ func _wipe() -> void:
 
 
 func _after_wipe() -> void:
-	if bool(diff()["checkpoints"]) and not checkpoint.is_empty():
+	if bool(diff()["checkpoints"]) and not checkpoint.is_empty() and zone < FloorGen.ZONE_COUNT:
 		stats = (checkpoint["stats"] as Dictionary).duplicate(true)
 		for s in stats:
 			var st: Dictionary = stats[s]
@@ -687,8 +696,9 @@ func finish(won: bool) -> void:
 		main.save.mark_dirty()
 	net.state_set("d_phase", "won" if won else "over")
 	var g := FloorGen.global_floor(zone, floor_i)
-	main.end_results("VICTORY!" if won else "THE END", "victory" if won else "defeat",
-		"%s %d-%d" % [FloorGen.ZONES[zone]["short"], zone + 1, floor_i + 1] if not won else "ALL BOSSES BEATEN!",
+	var beat := won or bool(runrec.get("won", false))
+	main.end_results("VICTORY!" if beat else "THE END", "victory" if beat else "defeat",
+		"DEPTH %d" % (FloorGen.global_floor(zone, floor_i) + 1) + ("  -  ALL BOSSES BEATEN!" if beat else ""),
 		[["DEEPEST", "%d-%d%s" % [zone + 1, floor_i + 1, "  NEW BEST!" if new_best else ""]], ["MONSTERS", str(int(tally["kills"]))],
 		["BOSSES", str(int(tally["bosses"]))], ["SECRETS", str(int(tally["secrets"]))], ["HELPED UP", str(int(tally["revives"]))],
 		["TIME", HudKit.clock_text(float(runrec.get("clock", 0.0)))]])
@@ -723,7 +733,7 @@ func stop() -> void:
 
 
 func _floor_banner(z: int, fl: int, k: String) -> void:
-	var zd: Dictionary = FloorGen.ZONES[z % FloorGen.ZONES.size()]
+	var zd: Dictionary = FloorGen.zone_data(z)
 	if k == "shop":
 		main.show_headline("SHOP", 3.0)
 		if hud != null:
@@ -731,6 +741,14 @@ func _floor_banner(z: int, fl: int, k: String) -> void:
 		music_mood("shop")
 	else:
 		var sub := "BOSS FLOOR" if FloorGen.is_boss_floor(fl) else ""
+		var mod := FloorGen.modifier(seed_v, z, fl)
+		if z >= FloorGen.ZONE_COUNT:
+			sub = "DEPTH %d" % (FloorGen.global_floor(z, fl) + 1) + ("  " + mod if mod != "" else "") + ("  BOSS" if FloorGen.is_boss_floor(fl) else "")
+			main.show_headline("DEPTH %d %s" % [FloorGen.global_floor(z, fl) + 1, mod], 3.0)
+			if hud != null:
+				HudKit.banner([main.hud], String(zd["name"]), sub, {"duration": 2.4})
+			music_mood("tension")
+			return
 		main.show_headline("%s %d" % [String(zd["short"]), fl + 1], 3.0)
 		if hud != null:
 			HudKit.banner([main.hud], String(zd["name"]), "%s%d-%d" % [sub + "  " if sub != "" else "", z + 1, fl + 1], {"duration": 2.0})
@@ -1004,7 +1022,7 @@ func _spawn_room(r: int, from: Vector3 = Vector3.INF) -> void:
 		var extra := maxi(0, (n - 2) / 2)
 		var rng := RandomNumberGenerator.new()
 		rng.seed = hash([seed_v, zone, floor_i, r, "extra"])
-		var table: Dictionary = FloorGen.ZONES[zone]["foes"]
+		var table: Dictionary = FloorGen.zone_data(zone)["foes"]
 		for k2 in extra:
 			var taken: Array = []
 			var sp := FloorGen.to_world(f, r, FloorGen.free_spot(f, r, rng, taken, 0.7, 4.0))
@@ -1072,7 +1090,8 @@ func _foe_died(id: int, m: Dictionary, slot: int) -> void:
 	tally["kills"] = int(tally["kills"]) + 1
 	main.awards.add(maxi(slot, 0), "bops")
 	var cols: Array[Color] = [Color(0.6, 1.0, 0.6), Color(0.8, 0.7, 1.0), Color(1.0, 0.7, 0.4)]
-	poof(c, cols[zone], 90 if boss else 32)
+	poof(c, cols[zone % cols.size()], 90 if boss else 32)
+	shake(0.9 if boss else 0.12)  # (TV / Deck camera only: the VR view never shakes)
 	main.sound_at("pop", c, 0.0, randf_range(0.85, 1.1))
 	main.sound_at("sparkle", c, -6.0)
 	var gold := int(Foes.GOLD[kind]) * (3 if bool(m["elite"]) else 1)
@@ -1115,20 +1134,41 @@ func _boss_down(kind: int, at: Vector3) -> void:
 	# The boss's treasure: three things, everyone picks ONE (your build: harder hits, more hearts, ...).
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash([seed_v, zone, "relic"])
-	var pool: Array = [Loot.SWORD, Loot.MAXHEART, Loot.CHARM, Loot.BOMBS, Loot.ABILITIES[rng.randi_range(0, 2)]]
+	var pool: Array = [Loot.SWORD, Loot.MAXHEART, Loot.CHARM, Loot.BOMBS, Loot.ABILITIES[rng.randi_range(0, 2)], Loot.POTION]
+	# Only treasures somebody can still use (no SWORD when every sword is at +2...).
+	var can := func(k: int) -> bool:
+		for s in stats:
+			var sd: Dictionary = stats[s]
+			match k:
+				Loot.SWORD:
+					if int(sd["dmg"]) < (4 if _is_knight(int(s)) else 3):
+						return true
+				Loot.MAXHEART:
+					if int(sd["max"]) < 8:
+						return true
+				Loot.CHARM:
+					if int(sd["charm"]) == 0:
+						return true
+				_:
+					return true
+		return false
+	pool = pool.filter(func(k: int) -> bool: return can.call(k))
 	FloorGen._shuffle(pool, rng)
 	relic_group += 1
 	relic_taken[relic_group] = {}
-	for k in 3:
+	for k in mini(3, pool.size()):
 		_spawn_pick(int(pool[k]), at + Vector3(-1.6 + k * 1.6, 0.35, 1.6), false)
 		(pickups[next_pick - 1] as Dictionary)["relic"] = relic_group
 	net.event("d_banner", ["PICK ONE!", "level"])
-	if zone >= FloorGen.ZONE_COUNT - 1:
-		phase_t = 0.0
-		get_tree().create_timer(4.0).timeout.connect(func() -> void:
-			if active and String(net.state_get("d_phase", "")) == "play":
-				finish(true))
-		return
+	if zone == FloorGen.ZONE_COUNT - 1:
+		# Beat the whole dungeon! It counts as a win; the stairs keep going down (endless depths).
+		runrec["won"] = true
+		var pdw := progress()
+		var wins: Dictionary = pdw["wins"]
+		wins[daily_key() if daily else mode] = int(wins.get(daily_key() if daily else mode, 0)) + 1
+		main.save.mark_dirty()
+		net.event("d_banner", ["YOU BEAT THE DUNGEON!", "victory"])
+		main.show_headline("YOU WON! KEEP GOING?", 5.0)
 	portal = FloorGen.room_center(f, int(f["boss"])) + Vector3(0.0, 0.0, -2.5)
 	net.state_set("d_portal", portal)
 
@@ -1415,7 +1455,7 @@ func _traps_step(delta: float, alive: Array) -> void:
 			"spikes":
 				var period: float = td["period"]
 				var tm := fmod(trap_clock + float(td["phase"]), period)
-				var s := 0.0 if tm < period - 1.8 else (1.0 if tm < period - 1.0 else 2.0)
+				var s := 0.0 if tm < period - 1.8 else (1.0 if tm < period - 0.9 else 2.0)
 				traps_out[ti * 2] = s
 				traps_out[ti * 2 + 1] = 0.0
 				if s >= 2.0:
@@ -1426,6 +1466,17 @@ func _traps_step(delta: float, alive: Array) -> void:
 							if absf(p.x - w.x) < FloorGen.TILE * 0.5 and absf(p.z - w.z) < FloorGen.TILE * 0.5:
 								if hurt(int((pl as Dictionary)["slot"]), 1, w, false) != "":
 									tally["traps"] = int(tally["traps"]) + 1
+									# Bounced off the spikes towards the nearer side of the band (no standing in them).
+									var tl0: Array = td["tiles"]
+									var a0 := FloorGen.to_world(f, r, tl0[0])
+									var a1 := FloorGen.to_world(f, r, tl0[tl0.size() - 1])
+									var along := (a1 - a0).normalized()
+									var mid := (a0 + a1) * 0.5
+									var off := Vector3(p.x - mid.x, 0.0, p.z - mid.z)
+									var side := off - along * off.dot(along)
+									if side.length() < 0.05:
+										side = Vector3(-along.z, 0.0, along.x)
+									_knock(int((pl as Dictionary)["slot"]), side.normalized() * 9.0, 0.22)
 								break
 			"boulder":
 				var period2: float = td["period"]
@@ -1873,10 +1924,7 @@ func _next_floor() -> void:
 		load_floor(int(after[0]), int(after[1]), "floor")
 		return
 	if FloorGen.is_boss_floor(floor_i):
-		if zone >= FloorGen.ZONE_COUNT - 1:
-			finish(true)
-			return
-		after = [zone + 1, 0]
+		after = [zone + 1, 0]  # (past the third zone: the endless depths)
 	else:
 		after = [zone, floor_i + 1]
 	load_floor(zone, floor_i, "shop")
@@ -2004,6 +2052,8 @@ func _attack(slot: int, pos: Vector3, yaw: float, dmg: float, reach: float, bash
 				foes.mons[id]["t"] = 1.0
 	# Swat goo balls and orbs back.
 	for sid in foes.shots.keys():
+		if not foes.shots.has(sid):
+			continue
 		var sp2: Vector3 = foes.shots[sid]["p"]
 		var to2 := Vector3(sp2.x - pos.x, 0.0, sp2.z - pos.z)
 		if to2.length() < reach + 0.5 and sp2.y < 2.0 and (to2.length() < 0.5 or fwd.dot(to2.normalized()) > 0.2):
@@ -2076,6 +2126,8 @@ func _knight_step(delta: float) -> void:
 					main.hands.swings += 1
 					rig.pulse(VrRig.RIGHT, 0.8 if res != "block" else 0.3, 0.08)
 	for sid in foes.shots.keys():
+		if not foes.shots.has(sid):
+			continue
 		var sp: Vector3 = foes.shots[sid]["p"]
 		if main.hands.seg_dist(sp, base, tip) < float(foes.shots[sid]["r"]) + 0.15 and speed > 0.6:
 			if foes.reflect(int(sid), head + rig.head_forward() * 6.0):
@@ -2172,7 +2224,7 @@ func _focus_room() -> int:
 	if lock_room >= 0 and is_host():
 		return lock_room
 	var lr := int(net.state_get("d_lock", -1))
-	if lr >= 0:
+	if lr >= 0 and lr < (f["rooms"] as Array).size():
 		return lr
 	var cnt := {}
 	for s in main.heroes:

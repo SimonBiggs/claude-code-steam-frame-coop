@@ -73,7 +73,7 @@ func build(fl: Dictionary) -> void:
 	stairs_at = Vector3.INF
 	_chest_bits = 0
 	_pot_bits = 0
-	var zd: Dictionary = FloorGen.ZONES[zone]
+	var zd: Dictionary = FloorGen.zone_data(zone)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash([int(f["seed"]), int(f["zone"]), int(f["floor"]), "look"])
 	var b := MeshKit.Builder.new()
@@ -387,7 +387,7 @@ func _build_traps(_zd: Dictionary) -> void:
 				e["axis"] = int(td["axis"])
 			"collapse":
 				var tiles: Array = []
-				var zd: Dictionary = FloorGen.ZONES[zone]
+				var zd: Dictionary = FloorGen.zone_data(zone)
 				var fc: Array = zd["floor"]
 				var tb := MeshKit.Builder.new()
 				tb.box(Vector3(FloorGen.TILE - 0.06, 0.1, FloorGen.TILE - 0.06), MeshKit.at(Vector3(0.0, -0.05, 0.0)), (fc[1] as Color).darkened(0.08))
