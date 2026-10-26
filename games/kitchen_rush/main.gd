@@ -31,6 +31,14 @@ const UiKit := preload("res://core/ui_kit.gd")
 ##    cue_learned); the ghost hand's CHOP and STACK demos too. The glowing arrows (guide.gd) lead crate ->
 ##    pass -> customer. PAUSED has no sentence.
 ##  - Text: VR one short headline; TV titles only.
+##  - GRAN'S CAFÉ (parties.gd, cafe.gd): every round is a PARTY made from a seed (pirates, robots, aliens,
+##    knights, kids or Gran's friends) with its own menu and order list, sometimes a STAR GUEST (gold
+##    crown). Round 1 is Gran's friends, round 2 TODAY'S PARTY (the same everywhere all day); from
+##    round 3 two invitations float over the pass and the chef grabs one / a runner taps one (else the
+##    first comes). Each party leaves a thank-you GIFT on the shelf right of the back door (saved);
+##    gifts bring new guests and parties that visited twice teach their dish (MELT, WRAP, SANDWICH).
+##    Gran tells the story on picture cards (core/story_card.gd) and gives one grumpy-looking customer
+##    a cookie each round (more patience). One RUN telemetry line per round (core/telemetry.gd).
 
 const L := preload("res://games/kitchen_rush/layout.gd")
 const KitchenScript := preload("res://games/kitchen_rush/kitchen.gd")
@@ -49,17 +57,20 @@ const JoinInputScript := preload("res://games/kitchen_rush/join_input.gd")
 const GuideScript := preload("res://games/kitchen_rush/guide.gd")
 const PropsScript := preload("res://games/kitchen_rush/props.gd")
 const GhostHandScript := preload("res://games/kitchen_rush/ghost_hand.gd")
+const Parties := preload("res://games/kitchen_rush/parties.gd")
+const Cafe := preload("res://games/kitchen_rush/cafe.gd")
+const Save := preload("res://core/save.gd")
+const Seeded := preload("res://core/seeded.gd")
+const StoryCard := preload("res://core/story_card.gd")
+const Telemetry := preload("res://core/telemetry.gd")
 const SIMPLE_MODE := true
 ## Simple mode: one dish to start with, then one new dish per round.
 const SIMPLE_UNLOCKS := [["TOASTIE"], ["SALAD"], ["BURGER"], ["PIZZA"]]
 const HELPER_DELAY := 6.0  # solo VR: seconds before a kitchen helper drops a missing ingredient on the pass
 
-const RECIPES := {
-	"SALAD": ["lettuce", "tomato", "cucumber"],
-	"TOASTIE": ["bun", "cheese"],
-	"BURGER": ["bun", "patty", "lettuce", "tomato"],
-	"PIZZA": ["dough", "tomato", "cheese"],
-}
+const RECIPES := Parties.DISHES  # SALAD, TOASTIE, BURGER, PIZZA (+ the party dishes WRAP, SANDWICH, MELT)
+const INVITE_WAIT := 14.0  # seconds the invitations wait for someone to choose (then the first one comes)
+const SAVE_VERSION := 1
 const UNLOCKS := [["SALAD", "TOASTIE"], ["BURGER"], ["PIZZA"]]  # new recipes at shifts 1, 2 and 3
 const MAX_ANGRY := 5
 const MAX_CUSTOMERS := 4
@@ -162,6 +173,27 @@ var practice := SIMPLE_MODE  # simple mode: the practice order before round 1 (h
 var practice_t := 0.0
 var new_dish := ""  # simple mode: the dish that just unlocked (the round's first customer orders it)
 var helper_t := 0.0
+# Gran's café (simple mode): see parties.gd / cafe.gd.
+var save: Node
+var run_seed := 0
+var round_info: Dictionary = {}  # this round's party (host makes it, clients get it in a "round" event)
+var round_spawned := 0  # orders handed out this round
+var last_party := ""
+var chosen_party := ""  # the invitation picked for the next round ("" = the default)
+var picked_by := ""  # chef / runner / auto
+var offers: Array = []
+var invite_t := 0.0
+var invite_wait := -1.0  # seconds until the invitations float in (after the thank-you cards; -1 = none coming)
+var fresh_done: Array = []  # taught dishes already put first this session
+var cookies := 0
+var star_served := false
+var round_t := 0.0
+var round_angry0 := 0
+var round_served0 := 0
+var shelf: Node3D
+var gifts_shown: Array = []
+var story_count := 0
+var last_story: Dictionary = {}
 var props: Node3D
 var ghost_hand: Node3D
 var chef_spot: MeshInstance3D
@@ -191,6 +223,14 @@ func _ready() -> void:
 	_build_fire_and_extinguisher()
 	ext_node.visible = not SIMPLE_MODE
 	_build_tickets()
+	if SIMPLE_MODE:
+		save = Save.new()
+		save.game_id = Parties.GAME_ID
+		save.version = SAVE_VERSION
+		save.defaults = {"gifts": [], "visits": {}, "rounds": 0, "best_round": 0, "served": 0, "daily": ""}
+		add_child(save)
+		run_seed = int(OS.get_environment("KR_SEED")) if OS.has_environment("KR_SEED") else Seeded.fresh_seed()
+		shelf = Cafe.build_shelf(self)
 	raccoon = RaccoonScript.new()
 	raccoon.main = self
 	add_child(raccoon)
@@ -233,6 +273,8 @@ func _setup_game(mode: String) -> void:
 		players[1].set_meta(ClassicSeats.WANT, true)  # ask the host for P2's runner (it may hand out another one)
 	ready_to_play = true
 	print("Kitchen Rush: %s mode" % mode)
+	if SIMPLE_MODE and mode != "client":
+		_show_gifts(save.data["gifts"], false)
 	if SIMPLE_MODE:
 		banner("KITCHEN RUSH!", 2.5, mode != "client")
 	elif mode == "host":
@@ -1324,12 +1366,16 @@ func _extra_runners() -> int:
 
 func shift_target() -> int:
 	if SIMPLE_MODE:
+		if _has_round():
+			return int(round_info["count"]) + mini(int(_extra_runners() / 2.0), Parties.SPARE)
 		return 2 + mini(shift, 4) + int(_extra_runners() / 2.0)
 	return 2 + shift * 2 + int((_extra_runners() + 1) / 2.0)
 
 
 func _spawn_interval() -> float:
 	if SIMPLE_MODE:
+		if _has_round():
+			return float(round_info["interval"]) / (1.0 + 0.1 * _extra_runners())
 		return maxf(6.0, 14.0 - shift) / (1.0 + 0.1 * _extra_runners())
 	return maxf(4.0, (15.0 - shift * 2.0) / (1.0 + 0.1 * _extra_runners()))
 
@@ -1341,6 +1387,8 @@ func _chaos_scale() -> float:
 
 func _patience() -> float:
 	if SIMPLE_MODE:
+		if _has_round():
+			return float(round_info["patience"])
 		return maxf(60.0, 110.0 - shift * 6.0)
 	return maxf(35.0, 85.0 - shift * 8.0)
 
@@ -1352,6 +1400,13 @@ func recipe_items(r: String) -> Array:
 func unlocked_recipes() -> Array:
 	var out := []
 	if SIMPLE_MODE:
+		if _has_round() or (not round_info.is_empty() and in_break):
+			out = (round_info["menu"] as Array).duplicate()
+			# Customers still waiting from the last party can still get their dish.
+			for c in get_tree().get_nodes_in_group("kr_customers"):
+				if c.waiting() and not out.has(c.recipe) and RECIPES.has(c.recipe):
+					out.append(c.recipe)
+			return out
 		for i in mini(maxi(shift, 1), SIMPLE_UNLOCKS.size()):
 			out.append_array(SIMPLE_UNLOCKS[i])
 		return out
@@ -1385,8 +1440,9 @@ func _start_shift() -> void:
 			burst(it.global_position, Color(1.0, 1.0, 1.0), 8, 0.04)
 			remove_item(it)
 	if SIMPLE_MODE:
-		var fresh: bool = shift > 1 and shift - 1 < SIMPLE_UNLOCKS.size()
-		new_dish = SIMPLE_UNLOCKS[shift - 1][0] if fresh else ""
+		_start_party()
+		var fresh: bool = String(round_info.get("fresh", "")) != ""
+		new_dish = ""
 		banner("NEW DISH!" if fresh else ("LET'S COOK!" if shift == 1 else "OPEN!"), 2.0)
 		sound("wave")
 		sound("ding", -6.0, 1.0)
@@ -1414,6 +1470,7 @@ func _end_shift() -> void:
 		# A happy little party: three gold stars over the counter, no ratings or scores.
 		break_t = 5.0
 		print("Shift %d complete: served %d, angry %d" % [shift, served_total, angry])
+		_party_done("served")
 		banner("HOORAY!", 2.5)
 		show_stars(3)
 		net.event("stars", [3])
@@ -1484,7 +1541,7 @@ func _spawn_customer() -> void:
 		if it.is_plate() and it.recipe != "":
 			if wanted.has(it.recipe):
 				wanted.erase(it.recipe)
-			elif randf() < 0.75:
+			elif randf() < 0.75 and not _has_round():
 				c.recipe = it.recipe
 				break
 	c.color_index = randi() % CustomerScript.COLORS.size()
@@ -1499,12 +1556,19 @@ func _spawn_customer() -> void:
 		if new_dish != "":
 			c.recipe = new_dish  # the round's new dish comes first
 			new_dish = ""
+		if _has_round():
+			var orders: Array = round_info["orders"]
+			var idx := mini(round_spawned, orders.size() - 1)
+			c.recipe = String(orders[idx])
+			c.ctype = String(round_info["party"])
+			c.star = idx == int(round_info["star"])
+			round_spawned += 1
 	elif shift >= 2 and not critic_done and served_shift >= 1 and randf() < 0.35:
 		critic_done = true
 		c.ctype = "critic"
 		banner("A VIP FOOD CRITIC is here!\nServe the %s fast for a big tip!" % c.recipe, 2.5)
 		sound("ding", -2.0, 1.3)
-	c.max_patience = _patience() * float(CustomerScript.TYPES[c.ctype][0])
+	c.max_patience = _patience() * float(CustomerScript.TYPES[c.ctype][0]) * (Parties.STAR_PATIENCE if c.star else 1.0)
 	c.patience = c.max_patience
 	c.position = Vector3(10.5, 0.0, L.CUSTOMER_Z[c.slot] + (2.5 if c.slot >= 2 else -2.5))
 	add_child(c)
@@ -1644,6 +1708,8 @@ func chef_pick_target(point: Vector3, r: float):
 		if it.holder != -1:
 			continue
 		var d: float = (it.global_position + Vector3.UP * 0.04).distance_to(point)
+		if it.kind == "invite":  # floating over the pass: reach the guest's head, or point at the pass under it
+			d = minf((it.global_position + Vector3.UP * ItemScript.INVITE_LIFT).distance_to(point) * 0.8, flat_dist(it.global_position, point) * 0.8)
 		if d < best_d:
 			best_d = d
 			best = it
@@ -1651,6 +1717,12 @@ func chef_pick_target(point: Vector3, r: float):
 
 
 func chef_grab(it) -> void:
+	if it.kind == "invite":
+		for h in players[0].held.size():
+			if players[0].held[h] == it:
+				players[0].held[h] = null
+		_pick_party(Parties.PARTY_ORDER[clampi(it.chops, 0, Parties.PARTY_ORDER.size() - 1)], "chef")
+		return
 	cue_did(players[0], "grab")
 	it.holder = 0
 	sfx_local("pickup", -10.0, 1.3)
@@ -1820,6 +1892,9 @@ func resolve(p) -> Dictionary:
 				if d < best:
 					best = d
 					plate = it
+		var inv = _invite_near(pos)
+		if inv != null and (plate == null or flat_dist(pos, inv.global_position) < best):
+			return {"act": "pick_invite", "item": inv, "text": ""}
 		if plate != null:
 			return {"act": "take_plate", "item": plate, "text": "Pick up the %s" % plate.recipe}
 		if fire_on and ext_holder == -1 and flat_dist(pos, L.EXT_POS) < 1.8:
@@ -1908,6 +1983,10 @@ func runner_use(p) -> void:
 			sound("pickup", -6.0, 1.0)
 		"spray":
 			_spray(p)
+		"pick_invite":
+			var inv = r["item"]
+			if is_instance_valid(inv):
+				_pick_party(Parties.PARTY_ORDER[clampi(inv.chops, 0, Parties.PARTY_ORDER.size() - 1)], "runner")
 		"put_ext":
 			ext_holder = -1
 			p.carry_kind = ""
@@ -1958,6 +2037,10 @@ func _serve_done(cust, who: int) -> void:
 	frac_sum += cust.frac
 	if who >= 0:
 		stats[who].served += 1
+	if cust.star:
+		star_served = true
+		burst(cust.global_position + Vector3.UP * 2.0, Cafe.GOLD, 30, 0.07)
+		sound("achievement", -2.0, 1.0)
 	print("Served %s to a %s: +%d coins (combo %d), total %d" % [cust.recipe, cust.ctype, gain, combo, coins])
 	var text := "+%d coins" % gain
 	if combo > 1:
@@ -2304,6 +2387,9 @@ func runner_job(p) -> Dictionary:
 		return {"text": "Bring the %s to the PASS (the front edge of the counter)" % ItemScript.display_name(c), "pos": Vector3(0, 1.4, -0.13)}
 	var idle := _idle_runners()
 	var my := idle.find(p.index)
+	for it in all_items():
+		if it.kind == "invite":
+			return {"text": "", "pos": it.global_position + Vector3.UP * (ItemScript.INVITE_LIFT + 0.3), "invite": true}
 	if fire_on and ext_holder == -1 and my == 0:
 		return {"text": "FIRE! Grab the EXTINGUISHER (by the back door)", "pos": L.EXT_POS + Vector3.UP * 1.3}
 	if raccoon.visible and raccoon.carry_kind == "" and my == idle.size() - 1:
@@ -2423,6 +2509,10 @@ func on_raccoon_scared(runner_index: int) -> void:
 # --- Networking ----------------------------------------------------------------
 
 func on_client_joined() -> void:
+	if SIMPLE_MODE:
+		net.event("gifts", [save.data["gifts"], false])
+		if not round_info.is_empty():
+			net.event("round", [round_info])
 	if not seats.first_machine():
 		return  # another machine: its runners join when they ask ("join")
 	if SIMPLE_MODE:
@@ -2579,6 +2669,8 @@ func _make_ghost(kind: String, entry: PackedFloat32Array) -> Node3D:
 	c.slot = int(entry[8])
 	if entry.size() > 9:
 		c.ctype = CustomerScript.type_from(int(entry[9]))
+	if entry.size() > 10:
+		c.star = entry[10] > 0.5
 	add_child(c)
 	return c
 
@@ -2606,6 +2698,12 @@ func apply_event(kind: String, args: Array) -> void:
 			_apply_stats(args[0], args[1])
 		"bell":
 			bell_t = 1.0
+		"story":
+			show_story(args[0])
+		"round":
+			round_info = args[0]
+		"gifts":
+			_show_gifts(args[0], args[1])
 
 
 # --- HUD -------------------------------------------------------------------------
@@ -2858,10 +2956,21 @@ func _simple_update(delta: float) -> void:
 		_practice_update(delta)
 		return
 	if in_break:
+		if invite_wait >= 0.0:
+			invite_wait -= delta
+			if invite_wait < 0.0:
+				_offer_invites()
+			return
+		if not offers.is_empty():
+			invite_t -= delta
+			if invite_t <= 0.0:
+				_pick_party(String(offers[0]), "auto")
+			return
 		break_t -= delta
 		if break_t <= 0.0:
 			_start_shift()
 		return
+	round_t += delta
 	spawn_t -= delta
 	var waiting := _waiting_customers()
 	if waiting.is_empty():
@@ -2869,7 +2978,9 @@ func _simple_update(delta: float) -> void:
 	if spawn_t <= 0.0 and waiting.size() < _max_waiting():
 		_spawn_customer()
 		spawn_t = _spawn_interval() * randf_range(0.8, 1.2)
-	if shift >= 3:  # a little cosy chaos once everyone knows the ropes
+	_gran_cookie(waiting)
+	var chaos: bool = bool(round_info["raccoon"]) if _has_round() else shift >= 3
+	if chaos:  # a little cosy chaos once everyone knows the ropes (the party decides)
 		raccoon_t -= delta
 		if raccoon_t <= 0.0 and not raccoon.active():
 			raccoon_t = randf_range(40.0, 60.0) / _chaos_scale()
@@ -2879,7 +2990,8 @@ func _simple_update(delta: float) -> void:
 
 
 func _max_waiting() -> int:
-	return mini(MAX_CUSTOMERS, 1 + shift / 2 + (1 if _extra_runners() > 0 else 0))
+	var base := int(round_info["max_wait"]) if _has_round() else 1 + shift / 2
+	return mini(MAX_CUSTOMERS, base + (1 if _extra_runners() > 0 else 0))
 
 
 ## The practice order: one patient granny wants a TOASTIE. The cheese waits on the chopping board; the
@@ -2891,6 +3003,7 @@ func _practice_update(delta: float) -> void:
 		set_meta("practice_set", true)
 		spawn_item("cheese", L.BOARD, -1)
 		_spawn_customer()
+		story({"who": "GRAN", "line": "Welcome to my café!", "pic": "granny", "color": "f0b8e6", "duration": 4.5})
 		print("Practice: chop the cheese, stack the toastie, serve the granny")
 	if served_total >= 1:
 		practice = false
@@ -3123,7 +3236,7 @@ func cue_learned(p, key: String) -> bool:
 ## The picture cue a runner's button press counts towards.
 func runner_cue_key(act: String) -> String:
 	match act:
-		"take", "take_plate", "take_ext":
+		"take", "take_plate", "take_ext", "pick_invite":
 			return "take"
 		"drop", "return", "put_ext":
 			return "drop"
@@ -3132,3 +3245,207 @@ func runner_cue_key(act: String) -> String:
 		"spray":
 			return "spray"
 	return ""
+
+
+# --- Gran's café: party rounds, invitations, gifts, story (SIMPLE_MODE) -----------------------------
+
+## Pass spots where the two invitations float (between the pass slots, so they never block one).
+const INVITE_SPOTS: Array = [Vector3(-0.4, 0.95, -0.2), Vector3(0.4, 0.95, -0.2)]
+
+
+## True while a made party round is on (every machine: the host makes round_info, clients get it).
+func _has_round() -> bool:
+	return SIMPLE_MODE and shift > 0 and not round_info.is_empty() and int(round_info.get("round", -1)) == shift
+
+
+## Saved progress the party maker needs: {"gifts": n, "visits": {party: n}}.
+func _progress() -> Dictionary:
+	if save == null:
+		return {"gifts": 0, "visits": {}}
+	return {"gifts": (save.data["gifts"] as Array).size(), "visits": save.data["visits"]}
+
+
+func _solo_kitchen() -> bool:
+	return (net.mode == "host" and not net.connected) or seats.deck_alone()
+
+
+## Host: make this round's party (shift was just bumped) and tell everyone who's coming.
+func _start_party() -> void:
+	_clear_invites(false)
+	offers = []
+	invite_wait = -1.0
+	var fresh := ""
+	if shift >= Parties.MENU_FROM:
+		for d in Parties.taught(_progress()):
+			if not fresh_done.has(d):
+				fresh = d
+				fresh_done.append(d)
+				break
+	round_info = Parties.make(shift, run_seed, _progress(), chosen_party, fresh)
+	round_info["picked"] = picked_by if shift >= Parties.CHOICE_FROM and not bool(round_info["daily"]) else ""
+	chosen_party = ""
+	picked_by = ""
+	round_spawned = 0
+	cookies = 2 if _solo_kitchen() else 1
+	star_served = false
+	round_t = 0.0
+	round_angry0 = angry
+	round_served0 = served_total
+	net.event("round", [round_info])
+	var party := String(round_info["party"])
+	print("Party %d: %s%s menu=%s orders=%s star=%d" % [shift, party, " (today's party)" if bool(round_info["daily"]) else "",
+		round_info["menu"], (round_info["orders"] as Array).slice(0, int(round_info["count"])), int(round_info["star"])])
+	story({"who": String(round_info["word"]), "line": String(round_info["line"]), "pic": party,
+		"color": Cafe.PARTY_COLORS[party].to_html(false), "duration": 4.0})
+
+
+## Host: the party is over (everyone served). Their thank-you gift goes on the shelf (saved), new dishes
+## and guests are told on cards, and the next round's invitations float over the pass.
+func _party_done(how: String) -> void:
+	if not _has_round() or round_info.has("done"):
+		return
+	round_info["done"] = true
+	var before := _progress()
+	var party := String(round_info["party"])
+	var today := Seeded.today()
+	var golden := star_served or (bool(round_info["daily"]) and String(save.data["daily"]) != today)
+	if bool(round_info["daily"]):
+		save.data["daily"] = today
+	var gifts: Array = save.data["gifts"]
+	gifts.append([String(round_info["gift"]), golden, party])
+	while gifts.size() > 500:
+		gifts.pop_front()
+	var visits: Dictionary = save.data["visits"]
+	visits[party] = int(visits.get(party, 0)) + 1
+	save.data["rounds"] = int(save.data["rounds"]) + 1
+	save.data["best_round"] = maxi(int(save.data["best_round"]), shift)
+	save.data["served"] = int(save.data["served"]) + served_total - round_served0
+	save.mark_dirty()
+	_round_telemetry(how)
+	last_party = party
+	_show_gifts(gifts, true)
+	net.event("gifts", [gifts, true])
+	var news := Parties.news(before, _progress())
+	var beats: Array = [{"who": "THANK YOU!", "line": "A gift for Gran's shelf!" if not golden else "A GOLDEN gift!", "pic": "gift",
+		"color": "ffd25a", "duration": 3.5, "sound": "achievement"}]
+	if String(news["teach"]) != "":
+		beats.append({"who": "NEW DISH!", "line": String(news["teach"]), "pic": party, "color": "7ad7ff", "duration": 3.5, "sound": "fanfare"})
+	if String(news["guests"]) != "":
+		var g := String(news["guests"])
+		beats.append({"who": "NEW GUESTS!", "line": String(Parties.PARTIES[g]["word"]), "pic": g, "color": Cafe.PARTY_COLORS[g].to_html(false), "duration": 3.5, "sound": "fanfare"})
+	for i in beats.size():
+		var b: Dictionary = beats[i]
+		get_tree().create_timer(2.6 + 3.8 * i, false).timeout.connect(func() -> void: story(b))
+	# The next round waits for the cards; then the invitations float in (from round 3).
+	var cards_end := 2.6 + 3.8 * beats.size()
+	if Parties.offers(shift + 1, run_seed, _progress(), last_party).is_empty():
+		break_t = maxf(break_t, cards_end)
+	else:
+		invite_wait = cards_end - 1.2
+
+
+## Host: the two invitations for the next round float over the pass (none before rounds 1-2).
+func _offer_invites() -> void:
+	offers = Parties.offers(shift + 1, run_seed, _progress(), last_party)
+	if offers.is_empty():
+		return
+	invite_t = INVITE_WAIT
+	for i in 2:
+		var it = spawn_item("invite", INVITE_SPOTS[i], -1)
+		it.chops = Parties.PARTY_ORDER.find(String(offers[i]))
+	print("Invitations: %s" % [offers])
+	sound("wave", -6.0, 1.4)
+
+
+## Host: someone chose the next party (who: chef, runner or auto).
+func _pick_party(party: String, who: String) -> void:
+	if offers.is_empty() or not offers.has(party):
+		return
+	chosen_party = party
+	picked_by = who
+	offers = []
+	_clear_invites(true)
+	break_t = 2.5
+	sound("ding", -4.0, 1.2)
+	print("Next party: %s (picked by %s)" % [party, who])
+
+
+func _clear_invites(pop: bool) -> void:
+	for it in all_items():
+		if it.kind == "invite":
+			if pop:
+				burst(it.global_position + Vector3.UP * ItemScript.INVITE_LIFT, Cafe.GOLD, 16, 0.05)
+			remove_item(it)
+
+
+## An invitation near a runner standing at pos (null if none).
+func _invite_near(pos: Vector3):
+	var best = null
+	var best_d := 1.4
+	for it in all_items():
+		if it.kind == "invite" and it.holder == -1:
+			var d := flat_dist(pos, it.global_position)
+			if d < best_d:
+				best_d = d
+				best = it
+	return best
+
+
+## Host: Gran helps once a round (twice in a solo kitchen): a cookie for a customer about to go grumpy.
+func _gran_cookie(waiting: Array) -> void:
+	if cookies <= 0 or not _has_round():
+		return
+	for c in waiting:
+		if c.state == "wait" and c.frac < 0.22:
+			cookies -= 1
+			c.patience = minf(c.max_patience, c.patience + c.max_patience * 0.4)
+			burst(c.global_position + Vector3.UP * 2.0, Color(0.85, 0.6, 0.35), 18, 0.05)
+			sound("pickup", -4.0, 0.8)
+			story({"who": "GRAN", "line": "Have a cookie, dear!", "pic": "granny", "color": "f0b8e6", "duration": 3.0})
+			print("Gran gave a %s a cookie" % c.ctype)
+			return
+
+
+## Host: a picture card on every machine (a title word or two and one short line: no how-to text).
+func story(beat: Dictionary) -> void:
+	show_story(beat)
+	if net.mode == "host":
+		net.event("story", [beat])
+
+
+func show_story(beat: Dictionary) -> void:
+	story_count += 1
+	last_story = beat
+	var opts := beat.duplicate()
+	opts["color"] = Color.html(String(beat.get("color", "ffd25a")))
+	opts["sound"] = String(beat.get("sound", "ui_notify"))
+	var huds: Array = []
+	for p in players:
+		if p.ghost or p.remote or not p.active and p.index > 0:
+			continue
+		if p.hud != null and is_instance_valid(p.hud) and p.hud.is_visible_in_tree():
+			huds.append(p.hud)
+	if not huds.is_empty():
+		StoryCard.show(huds, opts)
+	var chef = players[0] if not players.is_empty() else null
+	if chef != null and chef.vr and not chef.ghost and chef.xr_camera != null:
+		StoryCard.show_vr(self, chef.xr_camera, opts)
+
+
+func _show_gifts(gifts: Array, pop: bool) -> void:
+	gifts_shown = gifts.duplicate(true)
+	Cafe.show_gifts(shelf, self, gifts_shown, pop)
+
+
+## Host: one line per party round for tuning from real play (core/telemetry.gd).
+func _round_telemetry(how: String) -> void:
+	Telemetry.run(Parties.GAME_ID, {"round": shift, "party": String(round_info["party"]), "daily": bool(round_info["daily"]),
+		"picked": String(round_info.get("picked", "")), "menu": round_info["menu"], "count": shift_target(),
+		"served": served_total - round_served0, "grumpy": angry - round_angry0, "seconds": int(round_t), "star": int(round_info["star"]) >= 0,
+		"star_served": star_served, "cookies_left": cookies, "runners": active_runners(), "vr": not players.is_empty() and players[0].vr,
+		"solo": _solo_kitchen(), "gifts": (save.data["gifts"] as Array).size(), "seed": run_seed, "end": how})
+
+
+func _exit_tree() -> void:
+	if SIMPLE_MODE and net != null and net.mode != "client" and _has_round() and not in_break and not round_info.has("done"):
+		_round_telemetry("quit")

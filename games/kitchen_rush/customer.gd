@@ -6,6 +6,7 @@ extends Node3D
 
 const L := preload("res://games/kitchen_rush/layout.gd")
 const ItemScript := preload("res://games/kitchen_rush/item.gd")
+const Cafe := preload("res://games/kitchen_rush/cafe.gd")
 const COLORS: Array[Color] = [Color(1.0, 0.55, 0.75), Color(0.55, 0.75, 1.0), Color(0.7, 0.55, 1.0),
 	Color(1.0, 0.7, 0.35), Color(0.45, 0.9, 0.7), Color(1.0, 0.9, 0.4)]
 const TYPE_NAMES := ["kid", "granny", "robot", "pirate", "alien", "knight", "critic"]
@@ -26,6 +27,7 @@ var recipe := "SALAD"
 var slot := 0
 var color_index := 0
 var ctype := "kid"
+var star := false  # a STAR GUEST (golden crown): serving them makes the party's gift golden
 var patience := 60.0
 var max_patience := 60.0
 var state := "walk_in"  # walk_in, wait, happy, angry
@@ -134,6 +136,10 @@ func _ready() -> void:
 	mouth.position = Vector3(-0.46, -0.08, 0.0)
 	body.add_child(mouth)
 	_accessories()
+	if star:
+		var crown := Cafe.crown(main)
+		crown.position = Vector3(0, 0.72, 0)
+		body.add_child(crown)
 	# Order bubble.
 	bubble = Label3D.new()
 	bubble.font_size = 56
@@ -431,10 +437,10 @@ func serve() -> void:
 const STATES := ["walk_in", "wait", "happy", "angry"]
 
 
-## Snapshot entry, packed as floats: [id, recipe, x, y, z, patience fraction, state, colour, slot, type]
+## Snapshot entry, packed as floats: [id, recipe, x, y, z, patience fraction, state, colour, slot, type, star]
 func net_state() -> PackedFloat32Array:
 	var p := global_position
-	return PackedFloat32Array([net_id, ItemScript.RECIPE_NAMES.find(recipe), p.x, p.y, p.z, frac, STATES.find(state), color_index, slot, type_index(ctype)])
+	return PackedFloat32Array([net_id, ItemScript.RECIPE_NAMES.find(recipe), p.x, p.y, p.z, frac, STATES.find(state), color_index, slot, type_index(ctype), 1.0 if star else 0.0])
 
 
 func apply_net(st: PackedFloat32Array) -> void:

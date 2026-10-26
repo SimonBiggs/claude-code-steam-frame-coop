@@ -9,13 +9,15 @@ extends RefCounted
 ##   StoryCard.show_vr(self, vr_rig.camera, same_opts)
 ##   StoryCard.picture("envelope", 96.0, color)   # just the picture Control (results screens, maps)
 ## Pictures (drawn in code, no textures): bird, envelope, cloud, storm, house, sprite (a wind sprite),
-## sun, wave, tree, castle, kaiju (a friendly monster face in `color`); anything else is a core/ui_kit.gd icon kind ("star", "heart", "crown"...).
+## sun, wave, tree, castle, kaiju (a friendly monster face in `color`), gift (a present), and guest faces
+## granny, kid, pirate, robot, alien, knight; anything else is a core/ui_kit.gd icon kind ("star", "heart", "crown"...).
 ## Keep lines short and kind: kids read the screen.
 
 const UiKit := preload("res://core/ui_kit.gd")
 const HudKit := preload("res://core/hud_kit.gd")
 
-const PICTURES: Array[String] = ["bird", "envelope", "cloud", "storm", "house", "sprite", "sun", "wave", "tree", "castle", "kaiju"]
+const PICTURES: Array[String] = ["bird", "envelope", "cloud", "storm", "house", "sprite", "sun", "wave", "tree", "castle", "kaiju",
+	"gift", "granny", "kid", "pirate", "robot", "alien", "knight"]
 
 
 ## Show a story card on one view root or an Array of them. Returns the first card made (or null).
@@ -231,6 +233,15 @@ class Picture extends Control:
 				_poly([[0.5, 0.7 + bob], [0.53, 0.75 + bob], [0.56, 0.7 + bob]], Color.WHITE)
 				_circle(0.3, 0.6 + bob, 0.04, Color(1.0, 0.55, 0.65, 0.8))
 				_circle(0.7, 0.6 + bob, 0.04, Color(1.0, 0.55, 0.65, 0.8))
+			"gift":
+				_poly([[0.18, 0.45 + bob], [0.82, 0.45 + bob], [0.82, 0.9 + bob], [0.18, 0.9 + bob]], color)
+				_poly([[0.12, 0.34 + bob], [0.88, 0.34 + bob], [0.88, 0.47 + bob], [0.12, 0.47 + bob]], color.lightened(0.2))
+				_poly([[0.45, 0.34 + bob], [0.55, 0.34 + bob], [0.55, 0.9 + bob], [0.45, 0.9 + bob]], Color(0.95, 0.3, 0.4))
+				_circle(0.4, 0.27 + bob, 0.09, Color(0.95, 0.3, 0.4))
+				_circle(0.6, 0.27 + bob, 0.09, Color(0.95, 0.3, 0.4))
+				_circle(0.5, 0.31 + bob, 0.05, Color(1.0, 0.5, 0.55))
+			"granny", "kid", "pirate", "robot", "alien", "knight":
+				_guest(kind, bob)
 			"castle":
 				_poly([[0.2, 0.45], [0.8, 0.45], [0.8, 0.85], [0.2, 0.85]], Color(0.85, 0.88, 1.0))
 				for x in [0.2, 0.44, 0.68]:
@@ -238,3 +249,54 @@ class Picture extends Control:
 				_poly([[0.42, 0.62], [0.58, 0.62], [0.58, 0.85], [0.42, 0.85]], Color(0.5, 0.55, 0.85))
 				for b in [[0.15, 0.85, 0.12], [0.35, 0.9, 0.14], [0.65, 0.9, 0.14], [0.85, 0.85, 0.12]]:
 					_circle(b[0], b[1], b[2], white)
+
+
+	## A round friendly guest face with their hat (the Kitchen Rush party guests).
+	func _guest(who: String, bob: float) -> void:
+		var skin := {"granny": Color(0.98, 0.82, 0.78), "kid": Color(1.0, 0.75, 0.55), "pirate": Color(0.95, 0.75, 0.55),
+			"robot": Color(0.72, 0.76, 0.82), "alien": Color(0.45, 0.95, 0.4), "knight": Color(0.95, 0.8, 0.65)}.get(who, color) as Color
+		var y := 0.58 + bob
+		if who == "knight":
+			_circle(0.5, y - 0.04, 0.33, Color(0.75, 0.77, 0.82))
+			_poly([[0.47, y - 0.36], [0.53, y - 0.36], [0.6, y - 0.52], [0.4, y - 0.52]], Color(0.95, 0.2, 0.25))
+		if who == "robot":
+			_poly([[0.22, y - 0.25], [0.78, y - 0.25], [0.78, y + 0.27], [0.22, y + 0.27]], skin)
+			draw_line(_p(0.5, y - 0.25), _p(0.5, y - 0.4), Color(0.4, 0.4, 0.45), 0.02 * size.x)
+			_circle(0.5, y - 0.42, 0.05, Color(1.0, 0.25, 0.25) if fmod(t, 1.0) < 0.5 else Color(0.6, 0.15, 0.15))
+			_poly([[0.3, y - 0.08], [0.43, y - 0.08], [0.43, y + 0.02], [0.3, y + 0.02]], Color(0.4, 0.9, 1.0))
+			_poly([[0.57, y - 0.08], [0.7, y - 0.08], [0.7, y + 0.02], [0.57, y + 0.02]], Color(0.4, 0.9, 1.0))
+			_poly([[0.38, y + 0.13], [0.62, y + 0.13], [0.62, y + 0.17], [0.38, y + 0.17]], Color(0.25, 0.25, 0.3))
+			return
+		if who == "alien":
+			for x in [0.35, 0.65]:
+				draw_line(_p(0.5 + (x - 0.5) * 0.6, y - 0.22), _p(x, y - 0.42), Color(0.3, 0.75, 0.3), 0.02 * size.x)
+				_circle(x, y - 0.43, 0.05, Color(1.0, 0.4, 0.9))
+		_circle(0.5, y, 0.28 if who != "knight" else 0.2, skin)
+		if who == "granny":
+			_circle(0.5, y - 0.3, 0.1, Color(0.92, 0.92, 0.95))
+			_circle(0.3, y - 0.18, 0.1, Color(0.92, 0.92, 0.95))
+			_circle(0.7, y - 0.18, 0.1, Color(0.92, 0.92, 0.95))
+		var er := 0.055 if who != "knight" else 0.045
+		_eye(0.4, y - 0.03, er)
+		_eye(0.6, y - 0.03, er)
+		if who == "alien":
+			_eye(0.5, y - 0.15, 0.045)
+		if who == "granny":
+			draw_arc(_p(0.4, y - 0.03), 0.075 * size.x, 0.0, TAU, 14, Color(0.75, 0.6, 0.2), 0.015 * size.x)
+			draw_arc(_p(0.6, y - 0.03), 0.075 * size.x, 0.0, TAU, 14, Color(0.75, 0.6, 0.2), 0.015 * size.x)
+		draw_arc(_p(0.5, y + 0.07), 0.09 * size.x, 0.3, PI - 0.3, 10, Color(0.35, 0.1, 0.12), 0.022 * size.x)
+		_circle(0.32, y + 0.08, 0.035, Color(1.0, 0.55, 0.65, 0.7))
+		_circle(0.68, y + 0.08, 0.035, Color(1.0, 0.55, 0.65, 0.7))
+		match who:
+			"kid":
+				_poly([[0.25, y - 0.18], [0.75, y - 0.18], [0.65, y - 0.3], [0.35, y - 0.3]], Color(0.3, 0.6, 1.0))
+				var spin := sin(t * 10.0) * 0.18
+				draw_line(_p(0.5, y - 0.3), _p(0.5, y - 0.38), Color(0.3, 0.3, 0.3), 0.02 * size.x)
+				draw_line(_p(0.5 - spin, y - 0.39), _p(0.5 + spin, y - 0.39), Color(1.0, 0.3, 0.3), 0.04 * size.x)
+			"pirate":
+				_poly([[0.15, y - 0.2], [0.85, y - 0.2], [0.72, y - 0.42], [0.5, y - 0.36], [0.28, y - 0.42]], Color(0.12, 0.1, 0.12))
+				_circle(0.5, y - 0.3, 0.035, Color.WHITE)
+				_circle(0.6, y - 0.03, 0.065, Color(0.08, 0.08, 0.1))
+				draw_line(_p(0.6, y - 0.03), _p(0.78, y - 0.2), Color(0.08, 0.08, 0.1), 0.015 * size.x)
+			"knight":
+				_poly([[0.3, y - 0.07], [0.7, y - 0.07], [0.7, y - 0.03], [0.3, y - 0.03]], Color(0.75, 0.77, 0.82, 0.6))

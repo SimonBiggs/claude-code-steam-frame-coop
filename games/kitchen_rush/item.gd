@@ -13,11 +13,15 @@ const INFO := {
 	"cucumber": ["CUCUMBER", Color(0.18, 0.62, 0.26), 3],
 	"cheese": ["CHEESE", Color(1.0, 0.84, 0.2), 2],
 	"plate": ["PLATE", Color(0.97, 0.97, 1.0), 0],
+	"invite": ["PARTY", Color(1.0, 0.8, 0.3), 0],  # an invitation (chops = which party, parties.gd PARTY_ORDER)
 }
 
 # Snapshots send small ints instead of strings (keeps a 30 Hz snapshot under the network MTU).
-const KINDS := ["bun", "patty", "dough", "lettuce", "tomato", "cucumber", "cheese", "plate"]
-const RECIPE_NAMES := ["SALAD", "TOASTIE", "BURGER", "PIZZA"]
+const KINDS := ["bun", "patty", "dough", "lettuce", "tomato", "cucumber", "cheese", "plate", "invite"]
+const RECIPE_NAMES := ["SALAD", "TOASTIE", "BURGER", "PIZZA", "WRAP", "SANDWICH", "MELT"]
+const Cafe := preload("res://games/kitchen_rush/cafe.gd")
+const Parties := preload("res://games/kitchen_rush/parties.gd")
+const INVITE_LIFT := 0.3  # invitations float this high over the pass
 
 var main
 var kind := "lettuce"
@@ -78,6 +82,9 @@ func _process(delta: float) -> void:
 		squash = maxf(0.0, squash - delta * 5.0)
 		var want := Vector3(s * (1.0 + 0.35 * squash), s * (1.0 - 0.45 * squash), s * (1.0 + 0.35 * squash))
 		visual.scale = visual.scale.lerp(want, 1.0 - exp(-14.0 * delta)) if squash <= 0.0 else want
+		if kind == "invite":
+			visual.position.y = sin(Time.get_ticks_msec() * 0.003 + net_id) * 0.03
+			visual.rotation.y = Time.get_ticks_msec() * 0.0012 + net_id  # turns slowly: runners and chef both see the face
 	if holder >= 1 and holder < main.players.size():
 		# Carried by a runner: always follow that runner (instant for our own runner on the TV).
 		var p = main.players[holder]
@@ -178,6 +185,23 @@ func _raw_mesh() -> Node3D:
 	var root := Node3D.new()
 	var col := color_of(kind)
 	match kind:
+		"invite":
+			# A guest's head floating over the pass with the gift they'd bring, on a glowing stick.
+			var party: String = Parties.PARTY_ORDER[clampi(chops, 0, Parties.PARTY_ORDER.size() - 1)]
+			var head := Cafe.guest_head(main, party)
+			head.position = Vector3(0, INVITE_LIFT - 0.09, 0)
+			head.scale = Vector3.ONE * 1.3
+			root.add_child(head)
+			var gift := Cafe.gift_model(main, String(Parties.PARTIES[party]["gift"]))
+			gift.position = Vector3(0.0, INVITE_LIFT + 0.2, 0)
+			gift.scale = Vector3.ONE * 0.6
+			root.add_child(gift)
+			var stick := _mi(_cyl(0.008, INVITE_LIFT - 0.08), Color(1.0, 0.85, 0.4), Vector3(0, (INVITE_LIFT - 0.08) * 0.5, 0))
+			stick.material_override = main.mat(Color(1.0, 0.85, 0.4), 1.5)
+			root.add_child(stick)
+			var ring := _mi(_cyl(0.1, 0.006), Color(1.0, 0.85, 0.4), Vector3(0, 0.003, 0))
+			ring.material_override = main.mat(Color(1.0, 0.85, 0.4), 2.0)
+			root.add_child(ring)
 		"bun":
 			root.add_child(_mi(_sphere(0.075, 0.075), col, Vector3(0, 0.045, 0)))
 			root.add_child(_mi(_cyl(0.072, 0.025), col.darkened(0.15), Vector3(0, 0.0125, 0)))

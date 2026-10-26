@@ -9,7 +9,11 @@ extends Node
 # thrown veggie and the spoon. DUO_HOST=1 alone = solo VR: the kitchen helpers must keep it going.
 # KR_FAKE_VR=1 (or BOT_VR=1): the real VR chef code runs; the bot moves the fake hands like a person, following the
 # chef's on-screen "next step" guidance (chop with a knife swing, grab with the right trigger, drop on the plate).
-# KR_START_SHIFT=N starts at shift N (3 = the first dinner, with the rush).
+# KR_START_SHIFT=N starts at shift N (3 = the first dinner, with the rush). KR_TAUGHT=1: the save already
+# has gifts and two visits from robots, aliens and knights (MELT, WRAP, SANDWICH on the menus from round 5).
+# Gran's café (simple mode): checks the party rounds (parties.gd): story cards (a short title + one short
+# line), the invitations (a runner taps one, the chef grabs one when no runner does, else the first comes),
+# star guests, Gran's cookie, the gift shelf growing, one RUN telemetry line per round.
 # Visual teaching (simple mode): records the picture cues each view shows (cue_take, cue_drop, cue_serve,
 # cue_chop, cue_grab, cue_move, cue_plug), the ones learned (cue_learned_*), the glowing arrows (fetch_arrow,
 # pass_arrow, plate_arrow, serve_arrow, chef_arrow), the ghost hand and that no view draws its own name tag,
@@ -53,6 +57,9 @@ var headline_re := RegEx.create_from_string(HEADLINES)
 func _ready() -> void:
 	main = load("res://games/kitchen_rush/main.tscn").instantiate()
 	add_child(main)
+	if main.save != null and not OS.has_environment("KR_KEEP_SAVE"):
+		main.save.data = main.save.defaults.duplicate(true)  # every bot run starts a new café (KR_KEEP_SAVE=1 keeps it)
+		main._show_gifts([], false)
 	var default_players := 2 if OS.has_environment("DUO_JOIN") else 1
 	want_players = clampi(int(OS.get_environment("BOT_PLAYERS")) if OS.has_environment("BOT_PLAYERS") else default_players, 1, 6)
 	print("BOT: %d TV runner(s) requested" % want_players)
@@ -65,6 +72,15 @@ func _physics_process(delta: float) -> void:
 	var mode: String = main.net.mode
 	if OS.has_environment("KR_START_SHIFT") and mode != "client" and not has_meta("skipped"):
 		set_meta("skipped", true)
+		if OS.has_environment("KR_TAUGHT") and main.save != null:
+			main.save.data["visits"] = {"robot": 2, "alien": 2, "knight": 2}
+			var g: Array = []
+			for i in 8:
+				g.append(["teapot", false, "granny"])
+			main.save.data["gifts"] = g
+			main.practice = false
+			main.served_total = maxi(main.served_total, 1)
+			print("BOT: save has 8 gifts, taught %s" % [main.Parties.taught(main._progress())])
 		main.shift = int(OS.get_environment("KR_START_SHIFT")) - 1
 		print("BOT: starting at shift %d" % (main.shift + 1))
 	_note_features()
@@ -213,6 +229,13 @@ func _note_features() -> void:
 		"new dish BURGER": main.unlocked_recipes().has("BURGER"),
 		"new dish PIZZA": main.unlocked_recipes().has("PIZZA"),
 		"props moving": main.props != null and (absf(float(main.props.pans[0]["ang"])) > 0.05 or main.props.bird_out > 0.0),
+		"story card": main.story_count > 0,
+		"invitations": _invites().size() == 2,
+		"party chosen": main.round_info.has("picked") and str(main.round_info["picked"]) != "",
+		"star guest": _star_guest(),
+		"gift shelf": not main.gifts_shown.is_empty(),
+		"golden gift": main.gifts_shown.any(func(g) -> bool: return bool(g[1])),
+		"party dish": main.unlocked_recipes().has("MELT") or main.unlocked_recipes().has("WRAP") or main.unlocked_recipes().has("SANDWICH"),
 	}
 	for k in checks:
 		if checks[k] and not seen.has(k):
@@ -224,16 +247,37 @@ func _note_features() -> void:
 				extra = ": " + str(main.runner_job(main.players[1]).get("text", ""))
 			elif k == "stars":
 				extra = ": %s" % [main.stars]
+			elif k == "party chosen":
+				extra = ": %s by %s" % [main.round_info["party"], main.round_info["picked"]]
+			elif k == "party dish":
+				extra = ": %s" % [main.unlocked_recipes()]
 			print("BOT: seen %s (t=%.0f, shift %d)%s" % [k, t, main.shift, extra])
 	if main.props != null:
 		for kind in main.props.touched:
 			if not seen.has("prop:" + kind):
 				seen["prop:" + kind] = true
 				print("BOT: prop %s (t=%.0f)" % [kind, t])
+	if main.story_count != int(get_meta("stories", 0)):
+		set_meta("stories", main.story_count)
+		var b: Dictionary = main.last_story
+		print("BOT: story card %s / %s (%s)" % [b.get("who", ""), b.get("line", ""), b.get("pic", "")])
+		if not RegEx.create_from_string("^[A-Z][A-Z' !]{1,15}$").search(str(b.get("who", ""))) or str(b.get("line", "")).length() > 28:
+			print("BOT: ERROR story card text too long: %s / %s" % [b.get("who", ""), b.get("line", "")])
 	for ty in types:
 		if not seen.has("type:" + ty):
 			seen["type:" + ty] = true
 			print("BOT: customer type %s" % ty)
+
+
+func _invites() -> Array:
+	return main.all_items().filter(func(it) -> bool: return it.kind == "invite")
+
+
+func _star_guest() -> bool:
+	for c in get_tree().get_nodes_in_group("kr_customers"):
+		if c.star:
+			return true
+	return false
 
 
 func _any_glow() -> bool:
@@ -329,6 +373,14 @@ func _chef_vr(delta: float) -> void:
 	var rest_l := head + Vector3(-0.3, -0.55, -0.35)
 	vr_t += delta
 	if vr_state == "idle" and _play_props(delta):
+		return
+	var inv := _invites()
+	if vr_state == "idle" and not inv.is_empty() and main.invite_t < main.INVITE_WAIT - 4.0 and main.invite_t > 1.0 and chef.held[1] == null:
+		var head_pos: Vector3 = inv[1].global_position + Vector3(0, main.ItemScript.INVITE_LIFT, 0.06)
+		hr.global_position = hr.global_position.move_toward(head_pos, delta * 1.5)
+		if hr.global_position.distance_to(head_pos) < 0.03:
+			chef.fake_trigger[1] = 1.0
+			print("BOT VR: reached for an invitation")
 		return
 	var task: Dictionary = main.chef_task
 	var it = task.get("item")
@@ -470,6 +522,12 @@ func _chef(delta: float) -> void:
 		return
 	chef_t = 0.15
 	var chef = main.players[0]
+	var inv := _invites()
+	if not inv.is_empty() and chef.held[0] == null and main.invite_t < main.INVITE_WAIT - 4.0 and main.invite_t > 2.0:
+		chef.cursor = _spot_of(inv[0])
+		chef.do_grab()
+		print("BOT: the chef grabbed an invitation")
+		return
 	var plan := _plan()
 	var held = chef.held[0]
 	if held != null:
@@ -573,7 +631,10 @@ func _runner(p, delta: float) -> void:
 		for it in main.all_items():
 			if it.is_plate() and it.recipe != "" and it.holder == -1 and need.has(it.recipe):
 				plate = it
-		if main.fire_on and main.ext_holder == -1 and p.index == want_players:
+		var inv := _invites()
+		if not inv.is_empty() and p.index == 1:
+			goal = Vector3(inv[0].global_position.x, 0.0, -0.8)
+		elif main.fire_on and main.ext_holder == -1 and p.index == want_players:
 			goal = L.EXT_POS + Vector3(0, 0, 1.0)
 		elif plate != null:
 			goal = Vector3(plate.global_position.x, 0.0, -0.8)
