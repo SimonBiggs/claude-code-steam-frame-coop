@@ -8,9 +8,16 @@ decks=("$@"); [ ${#decks[@]} -eq 0 ] && mapfile -t decks < <(grep -v '^\s*#' ~/.
 rc=0
 for d in "${decks[@]}"; do
   if ! ssh -o ConnectTimeout=4 -o BatchMode=yes "$d" true 2>/dev/null; then echo "$d offline: duo-catch-up deploys it when it's back" >&2; mkdir -p ~/.cache/duo-deploy-pending; touch ~/.cache/duo-deploy-pending/"$d"; rc=1; continue; fi
-  rsync -az --exclude .dev --exclude .claude "$B/" "$d:DuoArena/" &&
-    ssh "$d" 'mkdir -p ~/.local/share/applications ~/Desktop && cp ~/DuoArena/duo-arena*.desktop ~/.local/share/applications/ && cp ~/DuoArena/duo-arena*.desktop ~/Desktop/ && chmod +x ~/Desktop/duo-arena*.desktop; python3 ~/DuoArena/apply-art.py >/dev/null 2>&1; true' &&
+  mkdir -p ~/.cache/duo-deploy-pending; touch ~/.cache/duo-deploy-pending/"$d"  # cleared only by a full success
+  # A full disk would leave a half-updated copy (some files new, some old): need room for a whole new copy first.
+  need=$(( $(du -sk "$B" | cut -f1) + 102400 )); free=$(ssh -o BatchMode=yes "$d" 'df -Pk ~ | awk "NR==2{print \$4}"' 2>/dev/null)
+  if [ -n "$free" ] && [ "$free" -lt "$need" ]; then echo "⚠ $d: disk full ($((free / 1024)) MB free, needs $((need / 1024)) MB): not updated, duo-catch-up retries" >&2; rc=1; continue; fi
+  if rsync -az --exclude .dev --exclude .claude "$B/" "$d:DuoArena/" &&
+    ssh "$d" 'mkdir -p ~/.local/share/applications ~/Desktop && cp ~/DuoArena/duo-arena*.desktop ~/.local/share/applications/ && cp ~/DuoArena/duo-arena*.desktop ~/Desktop/ && chmod +x ~/Desktop/duo-arena*.desktop; python3 ~/DuoArena/apply-art.py >/dev/null 2>&1; true'; then
     rm -f ~/.cache/duo-deploy-pending/"$d" && echo "$d updated"
+  else
+    echo "⚠ $d: update FAILED (see above): duo-catch-up retries" >&2; rc=1
+  fi
   # DUO_APPLY_NOW=1 (from duo-deploy): switch the new code on at once instead of at the next safe point.
   [ -n "$DUO_APPLY_NOW" ] && ssh "$d" 'mkdir -p ~/DuoArena/game/.dev && touch ~/DuoArena/game/.dev/apply_now'
 done
