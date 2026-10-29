@@ -36,6 +36,16 @@ extends Node3D
 ##    (games/cannon_cove/ghost_hand.gd) reach for a maraca, squeeze and shake it, until they have
 ##    picked one up twice. The start headline is VR only (the TV sees the RHYTHM BAND sign), PAUSED
 ##    has no sentence, and no view shows its own player's name tag.
+##
+## STORY + DEPTH (games/rhythm_band/songgen.gd, fans.gd, story_pictures.gd): every song is generated from a
+## seed (name, tempo, key, chords, style, charts), the show gets gently harder song by song, and
+## tests/rhythm_band_gen_test.gd proves every song is playable by small kids. DOODLE the frog sings on top of the
+## RHYTHM BAND sign and tells the story on picture cards; each finished song brings a new animal fan
+## to the FAN CLUB ledge over the LED wall (saved, user://saves/rhythm_band; fans grow each day played).
+## TODAY'S SONG: the second song of the day's first show is the same gold song on every machine. One
+## telemetry RUN line per song and on quit. Networked: the host sends one int song code per song (the
+## snapshot's song + setlist) and the fan club as replicated state ("fans", "days"); story cards are
+## "story" events.
 
 const VrText := preload("res://core/vr_text.gd")
 const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
@@ -51,6 +61,12 @@ const DrummerScript := preload("res://games/rhythm_band/drummer.gd")
 const GuitaristScript := preload("res://games/rhythm_band/guitarist.gd")
 const HighwayScript := preload("res://games/rhythm_band/highway.gd")
 const JoinListenerScript := preload("res://games/rhythm_band/join_listener.gd")
+const SongGen := preload("res://games/rhythm_band/songgen.gd")
+const FanClubScript := preload("res://games/rhythm_band/fans.gd")
+const Seeded := preload("res://core/seeded.gd")
+const Save := preload("res://core/save.gd")
+const Telemetry := preload("res://core/telemetry.gd")
+const StoryCard := preload("res://core/story_card.gd")
 
 const MAX_PLAYERS := 7  # VR drummer + 6 guitarists
 const MAX_LOCAL_VIEWS := 6
@@ -113,9 +129,9 @@ var headless := false
 var state := "wait"  # wait, menu, intro, play, results, tour
 var state_t := 0.0
 var song = null
-var song_idx := 0  # index into song.gd SONGS
+var song_idx := 0  # the song's code (songgen.gd: seed, level, daily)
 var tour_pos := 0  # 0..2: which song of the tour
-var setlist: Array[int] = [0, 3, 5]
+var setlist: Array[int] = [SongGen.code_of(1, 1, false), SongGen.code_of(2, 3, false), SongGen.code_of(3, 5, false)]
 var song_bars := NOTE_BARS
 var song_serial := 0
 var song_t := -1.0
@@ -161,6 +177,14 @@ var center_tween: Tween
 var vr_center: Label3D
 var vr_msg := ""
 var vr_msg_t := 0.0
+var save: Save
+var fan_club: FanClubScript
+var session_seed := 0
+var story_queue: Array = []  # [line, pic, color] waiting to show
+var story_t := 0.0
+var song_live := false  # host: a song is being played (a RUN line is due)
+var songs_played := 0  # this session
+var story_shown: Array[String] = []  # pictures of the story cards shown (bots check them)
 
 
 func _ready() -> void:
@@ -179,6 +203,18 @@ func _ready() -> void:
 	backing.volume_db = -9.0
 	add_child(backing)
 	bars_cap = song_bars
+	session_seed = Seeded.fresh_seed()
+	save = Save.new()
+	save.game_id = SongGen.GAME_ID
+	# fans: [[kind, play-day joined, golden], ...] (oldest first); songs: songs finished in all; days: days
+	# played; daily: the date TODAY'S SONG was played.
+	save.defaults = {"best": 0, "fans": [], "fans_total": 0, "songs": 0, "days": 0, "last_day": "", "daily": "", "sessions": 0}
+	add_child(save)
+	fan_club = FanClubScript.new()
+	fan_club.name = "FanClub"
+	fan_club.main = self
+	add_child(fan_club)
+	fan_club.build()
 	_build_hud()
 	var menu := PauseMenuScript.new()
 	menu.main = self
@@ -187,6 +223,7 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
+	net.state_changed.connect(_on_state_changed)
 	seats = ClassicSeats.new(self, {
 		"no_keys": GuitaristScript.NO_KEYS,
 		"free_actions": ["continue", "pause"],
@@ -194,7 +231,7 @@ func _ready() -> void:
 		"full": func() -> void: _show_center("The band is full!", 1.5, false),
 	})
 	Input.joy_connection_changed.connect(_on_joy_changed)
-	best = _load_best()
+	best = maxi(_load_best(), int(save.data.best))
 	if OS.has_environment("DUO_JOIN"):
 		_show_center("Connecting to the VR drummer…", 0.0, false)
 		net.join_finished.connect(func(ok: bool) -> void: _setup_game("client" if ok else "local"))
@@ -219,6 +256,8 @@ func _setup_game(mode: String) -> void:
 		players[1].set_meta("want_join", true)  # ask the host for a band spot (it may hand out another one)
 	_restore_party()
 	stage.set_tags_for_vr(players[0].vr)
+	if mode != "client":
+		_start_fan_club()
 	if mode == "host" and SIMPLE_MODE:
 		_start_practice()
 	elif mode == "host":
@@ -234,6 +273,7 @@ func _setup_game(mode: String) -> void:
 
 
 func _exit_tree() -> void:
+	_run_line("quit")
 	XRServer.world_scale = 1.0  # global: never leave a scale behind for the next game
 	if synth_task >= 0:
 		WorkerThreadPool.wait_for_task_completion(synth_task)
@@ -771,15 +811,12 @@ func _loop_cache() -> Dictionary:
 func _load_song(i: int, bars: int) -> void:
 	song_idx = i
 	song_bars = bars
-	song = SongScript.new()
 	if SIMPLE_MODE:
-		song.no_stars = true
-		song.two_lanes = tour_pos == 0
-		drum_level = 0 if tour_pos < 2 else 1
+		drum_level = SongGen.drum_level_for(tour_pos)
 		for p in players:
 			if p.index > 0:
 				p.level = 0
-	song.setup(i, bars)
+	song = SongGen.build(i, tour_pos, bars, SIMPLE_MODE)
 	d_judged = PackedByteArray()
 	d_judged.resize(song.d_t.size())
 	_apply_drum_level()
@@ -831,8 +868,7 @@ func _ensure_audio() -> void:
 func _prefetch(i: int) -> void:
 	if synth_task >= 0:
 		return
-	var s = SongScript.new()
-	s.setup(i, 2)
+	var s = SongGen.build(i, 1, 2, false)
 	if _loop_cache().has(s.loop_key()):
 		return
 	synth_obj = s
@@ -881,7 +917,7 @@ func _enter_menu() -> void:
 		return
 	state = "menu"
 	state_t = 0.0
-	setlist = SongScript.make_setlist(randi())
+	setlist = SongGen.make_setlist(randi() % Seeded.SEED_MAX)
 	tour_pos = 0
 	score = 0
 	tour_stars = 0
@@ -900,7 +936,7 @@ func _enter_menu() -> void:
 	_load_song(setlist[0], song_bars)
 	var names: PackedStringArray = []
 	for s in setlist:
-		names.append(SongScript.song_name(s))
+		names.append(SongGen.song_name(s))
 	_show_center("TONIGHT'S SETLIST\n%s\n\nTV: LEFT / RIGHT picks EASY · NORMAL · ROCK, A = READY!\nVR drummer: hit a drum to pick your level, the CRASH starts the show" % \
 		"  ·  ".join(names), 0.0, true, "SETLIST: hit a drum for your level\nCRASH = START!")
 	sound("ready", -4.0, 1.0, true)
@@ -914,7 +950,7 @@ func _start_practice() -> void:
 	prac_d = 0
 	prac_t = 0.0
 	prac_first_done = -1.0
-	setlist = SongScript.make_setlist(randi())
+	setlist = SongGen.setlist(session_seed, daily_due())
 	tour_pos = 0
 	score = 0
 	players[0].reset_tour()
@@ -928,7 +964,8 @@ func _start_practice() -> void:
 	# TV: no headline (the stage's RHYTHM BAND sign is right there: no duplicate title); VR: the title.
 	_show_center("", 2.5, true, "RHYTHM BAND!")
 	sound("ready", -4.0, 1.0, true)
-	print("Practice: drums %s, lanes %s, then setlist %s" % [str(PRACTICE_PADS), str(PRACTICE_LANES), str(setlist)])
+	print("Practice: drums %s, lanes %s, then setlist %s (%s), session seed %d" % [str(PRACTICE_PADS), str(PRACTICE_LANES), str(setlist),
+		", ".join(setlist.map(func(c: int) -> String: return SongGen.song_name(c))), session_seed])
 
 
 ## Practice is over when everyone has done theirs, or a while after the first one finished.
@@ -987,7 +1024,7 @@ func _start_song(pos: int) -> void:
 	if SIMPLE_MODE:
 		# The songs keep coming: after the slow / middle / fast three, random ones (encores get faster).
 		while setlist.size() <= pos:
-			setlist.append(randi() % (SongScript.song_count() * 2))
+			setlist.append(SongGen.code_at(session_seed, setlist.size(), false))
 		_load_song(setlist[pos], mini(bars_cap, SIMPLE_BARS[mini(pos, SIMPLE_BARS.size() - 1)]))
 	else:
 		_load_song(setlist[clampi(pos, 0, setlist.size() - 1)], song_bars)
@@ -1019,8 +1056,12 @@ func _start_song(pos: int) -> void:
 		_show_center(head + "\n" + ["Nice and easy!", "A bit faster…", "FULL SPEED - rock out!"][mini(pos, 2)], INTRO_TIME, true,
 			"SONG %d: %s" % [pos + 1, song.title])
 	sound("go", -6.0, 0.8, true)
-	print("Song %d started: %s (%s), %d BPM, %d bars, %d guitar notes (easy %d), %d drum notes, drum level %s" % [pos + 1, song.title,
-		song.style, int(song.bpm), song.total_bars, song.g_t.size(), song.guitar_count(0), song.d_t.size(), LEVEL_NAMES[drum_level]])
+	song_live = true
+	if song.daily:
+		_story("TODAY'S SONG!", "goldrecord", Color(1.0, 0.8, 0.2))
+	_story("%s!" % song.title, str(SongGen.STYLE_PICS.get(song.style, "musicnote")), SongGen.STYLE_COLORS.get(song.style, Color(1.0, 0.7, 0.4)))
+	print("Song %d started: %s (%s, level %d, seed %d%s), %d BPM, %d bars, %d guitar notes (easy %d), %d drum notes, drum level %s" % [pos + 1, song.title,
+		song.style, song.level, song.seed_v, ", TODAY'S SONG" if song.daily else "", int(song.bpm), song.total_bars, song.g_t.size(), song.guitar_count(0), song.d_t.size(), LEVEL_NAMES[drum_level]])
 
 
 ## Beat-synced effects on every machine (lights, count-in sticks and numbers, star-power fireworks).
@@ -1337,6 +1378,8 @@ func _song_done() -> void:
 	state = "results"
 	state_t = 0.0
 	var acc := float(band_hits) / maxf(1.0, float(band_hits + band_misses))
+	_new_fan()
+	_run_line("song")
 	if SIMPLE_MODE:
 		# No stars, no numbers: everyone cheers.
 		_show_center("HOORAY!", 3.0, true, "HOORAY!")
@@ -1477,6 +1520,8 @@ func _process(delta: float) -> void:
 	_beat_fx()
 	var beat_pos: float = song_t / float(song.spb) if song != null and state == "play" else state_t * 1.6
 	stage.update(delta, beat_pos, crowd, state == "play", 1.0 if star_active() else 0.0)
+	fan_club.update(delta, beat_pos, crowd if state == "play" else 0.35, song != null and song.daily)
+	_update_story(delta)
 	_update_vr_text(delta)
 	if net.mode == "client":
 		_client_update(delta, cont_edge)
@@ -1597,9 +1642,8 @@ func _load_best() -> int:
 
 
 func _save_best(s: int) -> void:
-	var cfg := ConfigFile.new()
-	cfg.set_value("best", "score", s)
-	cfg.save("user://rhythm_band_best.cfg")
+	save.data.best = maxi(int(save.data.best), s)
+	save.mark_dirty()
 
 
 # --- Networked co-op (see docs/GAME_DEV_GUIDE.md) ------------------------------------
@@ -1852,6 +1896,8 @@ func apply_event(kind: String, args: Array) -> void:
 			_star_fx()
 		"setlist":
 			pass
+		"story":
+			_story(str(args[0]), str(args[1]), args[2], false)
 		"prop":
 			if players[0].props != null:
 				players[0].props.react(int(args[0]))
@@ -1993,3 +2039,119 @@ func _update_vr_text(delta: float) -> void:
 	vr_center.modulate.a = alpha
 	vr_center.outline_modulate = Color(0, 0, 0, alpha)
 	VrText.follow(vr_center, cam, self, 0.34, 1.8)  # above the dashboard, between the lanes
+
+
+# --- Story, the fan club and telemetry (songgen.gd, fans.gd) ------------------------------------
+
+## Host / local: TODAY'S SONG is still to play today.
+func daily_due() -> bool:
+	return save != null and String(save.data.daily) != Seeded.today()
+
+
+## Host / local: a new play-day grows the fans; send the fan club to every machine; Doodle says hello.
+func _start_fan_club() -> void:
+	var grew := false
+	if String(save.data.last_day) != Seeded.today():
+		var days := int(save.data.days)
+		save.data.days = days + 1
+		save.data.last_day = Seeded.today()
+		for e in save.data.fans:
+			if SongGen.fan_stage(int(e[1]), days + 1) > SongGen.fan_stage(int(e[1]), days):
+				grew = true
+	save.data.sessions = int(save.data.sessions) + 1
+	save.mark_dirty()
+	_send_fans()
+	var fans: Array = save.data.fans
+	if int(save.data.songs) == 0:
+		_story("Let's make a band!", "frog", Color(1.0, 0.4, 0.6))
+	else:
+		_story("Let's play!", "frog", Color(1.0, 0.4, 0.6))
+	if grew and not fans.is_empty():
+		_story("Our fans grew!", SongGen.FAN_KINDS[int((fans[-1] as Array)[0]) % SongGen.FAN_KINDS.size()], Color(0.5, 0.85, 1.0))
+	if daily_due():
+		_story("A gold song today!", "goldrecord", Color(1.0, 0.8, 0.2))
+	print("Rhythm Band fan club: %d fans (%d in all), %d songs played, day %d, today's song %s, session seed %d" % [fans.size(),
+		int(save.data.fans_total), int(save.data.songs), int(save.data.days), "due" if daily_due() else "done", session_seed])
+
+
+func _send_fans() -> void:
+	net.state_set("days", int(save.data.days))
+	net.state_set("fans", (save.data.fans as Array).duplicate(true))
+
+
+## Host / local: a finished song brings a new fan (golden for TODAY'S SONG).
+func _new_fan() -> void:
+	if song == null or save == null:
+		return
+	var total := int(save.data.fans_total)
+	var kind := SongGen.fan_kind(song.code, total)
+	var list: Array = save.data.fans
+	list.append([kind, int(save.data.days), bool(song.daily)])
+	while list.size() > SongGen.FAN_KEEP:
+		list.pop_front()
+	save.data.fans_total = total + 1
+	save.data.songs = int(save.data.songs) + 1
+	if song.daily:
+		save.data.daily = Seeded.today()
+	save.save_now()
+	_send_fans()
+	fan_club.cheer()
+	songs_played += 1
+	var pic: String = SongGen.FAN_KINDS[kind]
+	if song.daily:
+		_story("A gold fan!", pic, Color(1.0, 0.8, 0.2))
+	else:
+		_story("A new fan!", pic, Color(0.6, 0.9, 1.0))
+	if (total + 1) % 10 == 0:
+		_story("%d fans!" % (total + 1), "fanclub", Color(1.0, 0.5, 0.8))
+
+
+## Every machine: the fan club follows the host's replicated state.
+func _on_state_changed(key: String, _value: Variant) -> void:
+	if key == "fans" or key == "days":
+		fan_club.set_fans(net.state_get("fans", []), int(net.state_get("days", 0)))
+
+
+## Host / local: one RUN line per song (end = "song") or when the game closes mid-song (end = "quit").
+func _run_line(end: String) -> void:
+	if not song_live or song == null or net == null or net.mode == "client":
+		return
+	song_live = false
+	var d = players[0]
+	var gh := 0
+	var gm := 0
+	for p in active_guitarists():
+		gh += int(p.hits)
+		gm += int(p.misses)
+	Telemetry.run(SongGen.GAME_ID, {"end": end, "pos": tour_pos + 1, "song": song.title, "code": song.code, "seed": song.seed_v,
+		"level": song.level, "daily": song.daily, "style": song.style, "bpm": int(song.bpm), "bars": song.bars,
+		"secs": snappedf(maxf(song_t, 0.0), 0.1), "length": snappedf(song.length, 0.1), "hits": band_hits, "misses": band_misses,
+		"best_combo": best_combo, "drum_hits": int(d.hits), "drum_misses": int(d.misses), "drum_level": drum_level,
+		"guitar_hits": gh, "guitar_misses": gm, "guitarists": active_guitarists().size(), "vr": bool(d.vr),
+		"mode": str(net.mode), "fans": (save.data.fans as Array).size(), "fans_total": int(save.data.fans_total),
+		"songs": int(save.data.songs), "days": int(save.data.days), "session_songs": songs_played})
+
+
+## Doodle says something (host / local: every machine sees it; beats wait their turn).
+func _story(line: String, pic: String, color: Color, broadcast: bool = true) -> void:
+	if broadcast and net != null and net.mode == "host":
+		net.event("story", [line, pic, color])
+	story_queue.append([line, pic, color])
+
+
+func _update_story(delta: float) -> void:
+	story_t -= delta
+	if story_t > 0.0 or story_queue.is_empty():
+		return
+	var b: Array = story_queue.pop_front()
+	story_t = 2.6
+	story_shown.append(str(b[1]))
+	var opts := {"who": "DOODLE", "line": b[0], "pic": b[1], "color": b[2], "duration": 2.5}
+	var huds: Array = []
+	for p in players:
+		if p.active and p.has_meta("view") and p.hud != null and is_instance_valid(p.hud):
+			huds.append(p.hud)
+	StoryCard.show(huds, opts)
+	var d = players[0]
+	if d.vr and d.xr_camera != null:
+		StoryCard.show_vr(self, d.xr_camera, opts)
