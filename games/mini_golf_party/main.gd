@@ -12,6 +12,14 @@ extends Node3D
 ##   took only a few putts. No numbers anywhere. After six putts the ball hops in by itself.
 ## Modes as in games/engine_template: local (split-screen fallback, one shared TV view), host (VR on
 ## the Steam Frame), client (the TV machine mirrors the host; its players putt via net.request).
+## STORY + DEPTH: GUS the gopher keeps the garden course. Every course's holes come from one course seed
+## (holegen.gd: seeded fairways - straight, L, dogleg - each with one gimmick, proven sinkable by a validator
+## and a putting simulation, tests/mini_golf_party_gen_test.gd). TODAY'S COURSE: the first course each day is
+## the same on every machine. Gus's garden (garden.gd) GROWS and stays: an ornament for every play-day round
+## the hole and a flower by the board for every gold star; more play-days unlock bendier holes and the pinball
+## garden. Gus pops out of his molehill by the board and cheers every sink; picture cards (story_pictures.gd)
+## tell the story. Telemetry: one RUN line per course (and on quit). Networked: the host sends
+## [course seed, hole, level, try] ("hdesc") and [days, stars] ("garden"); every machine rebuilds the same hole.
 
 const NetScript := preload("res://core/net.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
@@ -31,6 +39,12 @@ const Ball := preload("res://games/mini_golf_party/ball.gd")
 const Putter := preload("res://games/mini_golf_party/putter.gd")
 const GhostHand := preload("res://games/mini_golf_party/ghost_hand.gd")
 const Props := preload("res://games/mini_golf_party/props.gd")
+const HoleGen := preload("res://games/mini_golf_party/holegen.gd")
+const Garden := preload("res://games/mini_golf_party/garden.gd")
+const Gus := preload("res://games/mini_golf_party/gus.gd")
+const Seeded := preload("res://core/seeded.gd")
+const Telemetry := preload("res://core/telemetry.gd")
+const StoryCard := preload("res://core/story_card.gd")
 
 const GAME_ID := "mini_golf_party"
 const MAX_STROKES := 6
@@ -87,6 +101,21 @@ var tv_banner: Control
 var tags := {}  # slot -> Label3D over that ball (every machine; your own is big and bobs)
 var cam_look := Vector3.ZERO  # Deck follow camera: where it looks (smoothed)
 var cam_follow := -1  # Deck follow camera: the slot it follows (-1: the whole hole)
+# --- Gus's garden course (host / local decide; every machine builds from "hdesc" + "garden") ---
+var course_seed := 0
+var course_level := 1
+var course_daily := false
+var hole_def: Dictionary = {}
+var gus: Gus
+var garden: Node3D
+var garden_key := []  # [days, stars, hole seed] the garden was built for
+var course_t := 0.0
+var hole_log_from := 0  # sink_log index where this hole's sinks start
+var hole_stats: Array = []  # per hole: {"g", "shape", "par", "putts": [...], "secs", "seed"}
+var course_running := false
+var greeted := false
+var story_queue: Array = []
+var story_t := 0.0
 
 
 func _ready() -> void:
@@ -105,7 +134,10 @@ func _ready() -> void:
 	party.player_left.connect(_on_player_left)
 	save = Save.new()
 	save.game_id = GAME_ID
-	save.defaults = {"best_stars": 0}
+	# days: play-days; last_day: the last one; daily: the date TODAY'S COURSE was played; stars_total: every gold
+	# star ever (the garden's flowers); level: the course level reached (more play-days, bendier holes).
+	save.defaults = {"best_stars": 0, "days": 0, "last_day": "", "daily": "", "courses": 0, "stars_total": 0,
+		"holes_in_one": 0, "level": 1}
 	add_child(save)
 	sfx = SfxScript.new()
 	add_child(sfx)
@@ -157,8 +189,8 @@ func _setup(mode: String) -> void:
 	party.allow_slot0 = mode != "client" and vr_rig == null
 	if mode != "client":
 		_start_course()
-	elif net.state_has("hole"):
-		_build_hole(int(net.state_get("hole", 0)))
+	elif net.state_has("hdesc"):
+		_build_from_desc(net.state_get("hdesc"))
 	if vr_rig != null:
 		HudKit.vr_banner(self, vr_rig.camera, "PUTT IT IN!", "", {"duration": 3.0})
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -187,6 +219,9 @@ func _build_world(vr: bool) -> void:
 	course = Course.new()
 	course.name = "Course"
 	add_child(course)
+	gus = Gus.new()
+	gus.name = "Gus"
+	add_child(gus)
 	props = Props.new()
 	props.main = self
 	add_child(props)
@@ -228,6 +263,7 @@ func blink() -> void:
 # --- Holes (host / local decide; every machine builds the course from "hole") -----------------
 
 func _start_course() -> void:
+	_new_course()
 	awards.reset()
 	for s in _ball_slots():
 		awards.set_player(s, _name_of(s))
@@ -241,16 +277,33 @@ func _start_course() -> void:
 
 func _go_hole(i: int) -> void:
 	hole_t = 0.0
+	var d := HoleGen.hole(course_seed, i, course_level)
+	hole_log_from = sink_log.size()
 	net.state_set("phase", "play")
-	net.state_set("hole", i)  # the TV machine builds it when this arrives
-	_build_hole(i)
+	net.state_set("hole", i)
+	net.state_set("hdesc", [course_seed, i, course_level, int(d["try"])])  # the TV machine rebuilds it from this
+	_build_hole(d)
 
 
-func _build_hole(i: int) -> void:
-	course.build(i)
+## TV machine: rebuild the host's hole from [course seed, hole, level, try] (no re-checking: the same hole).
+func _build_from_desc(v: Variant) -> void:
+	if not (v is Array) or (v as Array).size() < 4:
+		return
+	_build_hole(HoleGen.hole_try(int(v[0]), int(v[1]), int(v[2]), int(v[3])))
+
+
+func _build_hole(d: Dictionary) -> void:
+	hole_def = d
+	var i := int(d["index"])
+	course.build(d)
 	props.move_to(Vector3(course.tee.x, 0.0, course.tee.y))
+	var gp := HoleGen.gus_pos(d)
+	gus.position = Vector3(gp.x, 0.0, gp.y)
+	gus.pop()
+	_build_garden()
 	var tw := Vector3(course.tee.x, 0.0, course.tee.y)
-	board.position = Vector3(course.cup.x, 0.0, course.cup.y - 0.9)
+	var bp := HoleGen.board_pos(d)
+	board.position = Vector3(bp.x, 0.0, bp.y)
 	_refresh_board()
 	if net.mode != "client":
 		var slots := _ball_slots()
@@ -381,11 +434,16 @@ func _sink(slot: int, b: Ball) -> void:
 	row[hole] = mark
 	card[slot] = row
 	net.state_set("card", card)
-	sink_log.append([hole, slot, b.strokes, mark])
+	sink_log.append([hole, slot, b.strokes, mark, course.par])
 	if mark >= 2:
 		awards.add(slot, "stars")
+		save.data["stars_total"] = int(save.data["stars_total"]) + 1
+		save.mark_dirty()
+		_send_garden()
 	if mark == 3:
 		awards.add(slot, "holes_in_one")
+		save.data["holes_in_one"] = int(save.data["holes_in_one"]) + 1
+		_story_for_all("Hole in one! WOW!", "golfball", Party.COLORS[slot % Party.COLORS.size()])
 	celebrate(slot, Vector3(course.cup.x, 0.05, course.cup.y), mark)
 
 
@@ -423,6 +481,8 @@ func celebrate(slot: int, p: Vector3, mark: int) -> void:
 	elif mark == 2:
 		HudKit.popup(self, p + Vector3.UP * 0.5, "*", {"style": "score", "color": "gold", "size": 1.6})
 	props.cheer()
+	if gus != null:
+		gus.cheer()
 	course.flag_wave = 1.2
 	if vr_rig != null and slot == 0:
 		vr_rig.pulse(VrRig.RIGHT, 0.7, 0.15)
@@ -527,6 +587,7 @@ func _hole_rules() -> void:
 				_sound_at("boing", b.position, -4.0, 1.3)
 				_sink(int(s), b)
 	if all_in:
+		_hole_done()
 		net.state_set("phase", "cheer")
 		phase_t = 0.0
 
@@ -601,7 +662,12 @@ func _end_course() -> void:
 				stars += 1
 	if stars > int(save.data["best_stars"]):
 		save.data["best_stars"] = stars
-		save.mark_dirty()
+	save.data["courses"] = int(save.data["courses"]) + 1
+	save.mark_dirty()
+	_send_garden()
+	_log_course("done", stars)
+	course_running = false
+	_story_for_all("Stars for my garden!" if stars > 0 else "What fun!", "trophy" if stars > 0 else "gopher", Color(1.0, 0.85, 0.3))
 	var data := awards.results({"title": "WHAT A PARTY!", "style": "victory",
 		"stats": [["STARS", str(stars)], ["BEST", str(int(save.data["best_stars"]))]], "score_format": "%d STARS"})
 	net.state_set("results", data)
@@ -615,6 +681,9 @@ func _process(delta: float) -> void:
 	if not ready_to_play:
 		return
 	_tv_input(delta)
+	_update_story(delta)
+	if net.mode != "client" and course_running:
+		course_t += delta
 	_update_arrows()
 	_update_tags()
 	_follow_camera(delta)
@@ -891,9 +960,11 @@ func _refresh_hud() -> void:
 
 func _on_state_changed(key: String, value: Variant) -> void:
 	match key:
-		"hole":
+		"hdesc":
 			if net.mode == "client":
-				_build_hole(int(value))
+				_build_from_desc(value)
+		"garden":
+			_build_garden()
 		"card":
 			_refresh_board()
 			_refresh_hud()
@@ -1016,3 +1087,115 @@ func apply_event(kind: String, args: Array) -> void:
 			celebrate(int(args[0]), args[1], int(args[2]))
 		"prop":
 			props.poke(String(args[0]))
+		"story":
+			_story(String(args[0]), String(args[1]), args[2])
+
+
+# --- Gus's garden course: seeds, growth, story, telemetry -------------------------------------------
+
+## Host / local: a new course. Count the play-day (the garden grows an ornament, the level may rise), pick the
+## course seed (TODAY'S COURSE first each day, the same on every machine) and say hello.
+func _new_course() -> void:
+	if course_running and not hole_stats.is_empty():
+		_log_course("restart", 0)
+	var today := Seeded.today()
+	var new_day := String(save.data["last_day"]) != today
+	if new_day:
+		save.data["days"] = int(save.data["days"]) + 1
+		save.data["last_day"] = today
+	var days := int(save.data["days"])
+	course_level = HoleGen.level_for(days)
+	var level_up := course_level > int(save.data["level"])
+	save.data["level"] = maxi(int(save.data["level"]), course_level)
+	course_daily = String(save.data["daily"]) != today
+	course_seed = HoleGen.daily_seed() if course_daily else maxi(1, Seeded.fresh_seed())
+	if OS.has_environment("MGP_SEED"):
+		course_seed = int(OS.get_environment("MGP_SEED"))
+	if course_daily:
+		save.data["daily"] = today
+	save.mark_dirty()
+	course_t = 0.0
+	hole_stats.clear()
+	course_running = true
+	net.state_set("course", [course_seed, course_level, course_daily])
+	_send_garden()
+	print("Mini Golf Party course: seed %d level %d%s | day %d, %d stars in the garden" % [course_seed, course_level,
+		" (TODAY'S COURSE)" if course_daily else "", days, int(save.data["stars_total"])])
+	if not greeted:
+		greeted = true
+		_story_for_all("Hi! I'm Gus!", "gopher", Color(0.25, 0.7, 0.4))
+	if course_daily:
+		_story_for_all("TODAY'S COURSE!", "golfflag", Color(1.0, 0.8, 0.2))
+	if level_up:
+		_story_for_all("New holes to try!", "golfflag", Color(0.4, 0.65, 1.0))
+	elif new_day and days > 1:
+		_story_for_all("My garden grew!", "gnome", Color(0.9, 0.25, 0.3))
+
+
+## Host / local: every ball is in - note the hole for the course's RUN line.
+func _hole_done() -> void:
+	var h := int(net.state_get("hole", 0))
+	var putts: Array = []
+	for e in sink_log.slice(hole_log_from):
+		putts.append(int(e[2]))
+	hole_stats.append({"hole": h + 1, "g": String(hole_def.get("gimmick", "")), "shape": String(hole_def.get("shape", "")),
+		"par": course.par, "putts": putts, "secs": snappedf(hole_t, 0.1), "seed": int(hole_def.get("seed", 0)), "try": int(hole_def.get("try", 0))})
+
+
+## One RUN line per course (and on quit / restart part-way).
+func _log_course(end: String, stars: int) -> void:
+	Telemetry.run(GAME_ID, {"end": end, "seed": course_seed, "level": course_level, "daily": course_daily,
+		"holes": hole_stats.duplicate(true), "secs": snappedf(course_t, 0.1), "stars": stars, "players": balls.size(),
+		"vr": vr_rig != null, "net": net.mode, "machines": net.peer_count() + 1,
+		"days": int(save.data["days"]), "stars_total": int(save.data["stars_total"]), "courses": int(save.data["courses"])})
+
+
+func _exit_tree() -> void:
+	if save != null and net != null and net.mode != "client" and course_running and not hole_stats.is_empty():
+		_log_course("quit", 0)
+
+
+func _send_garden() -> void:
+	net.state_set("garden", [int(save.data["days"]), int(save.data["stars_total"])])
+
+
+## Every machine: Gus's garden round this hole (rebuilt when the hole or the garden changes).
+func _build_garden() -> void:
+	if hole_def.is_empty():
+		return
+	var g: Variant = net.state_get("garden", [0, 0])
+	if not (g is Array) or (g as Array).size() < 2:
+		return
+	var key := [int(g[0]), int(g[1]), int(hole_def.get("seed", 0)), int(hole_def.get("index", 0))]
+	if key == garden_key and garden != null and is_instance_valid(garden):
+		return
+	garden_key = key
+	if garden != null and is_instance_valid(garden):
+		garden.queue_free()
+	garden = Garden.build(hole_def, int(g[0]), int(g[1]))
+	add_child(garden)
+
+
+## Host / local: a story card on every machine.
+func _story_for_all(line: String, pic: String, color: Color) -> void:
+	_story(line, pic, color)
+	if net.mode == "host":
+		net.event("story", [line, pic, color])
+
+
+func _story(line: String, pic: String, color: Variant) -> void:
+	if story_queue.size() < 4:
+		story_queue.append([line, pic, color if color is Color else Color.WHITE])
+
+
+func _update_story(delta: float) -> void:
+	story_t -= delta
+	if story_t > 0.0 or story_queue.is_empty():
+		return
+	var b: Array = story_queue.pop_front()
+	story_t = 2.8
+	var opts := {"who": "GUS", "line": b[0], "pic": b[1], "color": b[2], "duration": 2.6}
+	if hud != null and is_instance_valid(hud):
+		StoryCard.show([hud], opts)
+	if vr_rig != null:
+		StoryCard.show_vr(self, vr_rig.camera, opts)

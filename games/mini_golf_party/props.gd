@@ -4,7 +4,8 @@ extends Node3D
 ##     on the lawn and pop back into the bucket a few seconds later);
 ##   - a rubber duck on a little pond: touch it and it quacks and hops (it also cheers every sink);
 ##   - two round bushes: touch them and they wobble and rustle;
-##   - (in course.gd) the flag at the cup waves when touched and the windmill sails spin faster.
+##   - (in course.gd) the flag at the cup waves when touched and the windmill sails spin faster;
+##   - Gus the gopher (gus.gd) by the flag board: boop his nose and he hops.
 ## Host simulates; touches go to the TV as "prop" events and the spare balls' positions ride in the
 ## snapshot. Cheap: one merged mesh per toy.
 
@@ -12,9 +13,10 @@ const MeshKit := preload("res://core/mesh_kit.gd")
 const VrRig := preload("res://core/vr_rig.gd")
 
 const SPARES := 3
-const BUCKET := Vector3(-0.8, 0.0, 0.3)  # from the tee
+const BUCKET := Vector3(-0.95, 0.0, 0.3)  # from the tee
 const POND := Vector3(1.3, 0.0, -0.2)
-const BUSHES: Array[Vector3] = [Vector3(-1.15, 0.0, -0.9), Vector3(1.2, 0.0, -1.5)]
+## Beside and behind the tee (never on the fairway: holegen.gd check() keeps every hole clear of the toys).
+const BUSHES: Array[Vector3] = [Vector3(-1.2, 0.0, -0.5), Vector3(1.25, 0.0, 0.75)]
 const SPARE_COLORS: Array[Color] = [Color(1.0, 0.95, 0.4), Color(1.0, 0.55, 0.8), Color(0.55, 0.95, 1.0)]
 
 var main
@@ -121,6 +123,8 @@ func _touches(rig) -> void:
 		_touch("flag", c.flag.global_position + Vector3(0.15, -0.1, 0.0), 0.2, rig)
 	if c != null and c.sails != null:
 		_touch("mill", c.sails.global_position, 0.6, rig)
+	if main.gus != null and main.gus.up > 0.9:
+		_touch("gus", main.gus.global_position + Vector3.UP * 0.35, 0.16, rig)
 
 
 func _touch(key: String, p: Vector3, r: float, rig) -> void:
@@ -150,6 +154,10 @@ func poke(key: String) -> void:
 			if main.course != null:
 				main.course.mill_boost = 3.0
 			main.sfx.play("whoosh", -4.0)
+		"gus":  # boop Gus's nose
+			if main.gus != null:
+				main.gus.boop()
+			main.sfx.play("boop", -4.0, 1.2)
 		_:
 			if key.begins_with("bush"):
 				var i := int(key.substr(4))
