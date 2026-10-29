@@ -317,8 +317,8 @@ static func _hall(root: Node3D, out: Dictionary) -> void:
 	# Coat stand and pumpkins.
 	cyl(root, 0.04, 0.05, 1.8, Vector3(6.2, 0.9, 6.9), wood, 8)
 	ball(root, 0.2, Vector3(6.2, 1.75, 6.9), mat(Color(0.25, 0.1, 0.3)), 0.6)
-	_pumpkin(root, Vector3(-2.2, 0, -7.2))
-	_pumpkin(root, Vector3(2.2, 0, -7.2))
+	_pumpkin(root, Vector3(-5.3, 0, -7.3))
+	_pumpkin(root, Vector3(5.3, 0, -7.3))
 
 
 static func _library(root: Node3D, out: Dictionary) -> void:
