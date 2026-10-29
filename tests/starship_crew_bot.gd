@@ -7,7 +7,10 @@ extends Node
 ## done; the pilot flew through rings; the gunners zapped things; the TV machine mirrors it all.
 ## Local:     godot --headless --path . --fixed-fps 60 --quit-after 12000 res://tests/starship_crew_bot.tscn
 ## Networked: DUO_PORT=83xx DUO_HOST=1 BOT_VR=1 ... & DUO_PORT=83xx DUO_JOIN=127.0.0.1 ... (real time)
-## SC_MISSION=n starts at mission n (0..3).
+## SC_MISSION=n starts at mission n (0..3). SC_TRIPS=n flies trip n (default 0: the lessons, then AGAIN
+## flies trip 1, a seeded one); the family's save isn't touched by the trip count then.
+## Story checks: Captain Whiskers' cards show, one RUN line per mission, the station grows a part on the
+## way home and the TV machine's cockpit model follows.
 
 const BotKit := preload("res://tests/bot_kit.gd")
 const VrRig := preload("res://core/vr_rig.gd")
@@ -29,6 +32,8 @@ var again_done := 0
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	if not OS.has_environment("SC_TRIPS"):
+		OS.set_environment("SC_TRIPS", "0")
 	kit = BotKit.new()
 	add_child(kit)
 	main = load("res://games/starship_crew/main.tscn").instantiate()
@@ -162,10 +167,14 @@ func _checks() -> void:
 		kit.assert_eq(kit.seated(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
 		kit.assert_true(main.lasers_seen > 0, "%s: lasers were drawn (%d)" % [mode, main.lasers_seen])
 	kit.assert_true(seen_missions.size() >= 3, "%s: played through several missions (%d)" % [mode, seen_missions.size()])
+	kit.assert_true(main.stories_shown >= 3, "%s: Captain Whiskers' story cards showed (%d)" % [mode, main.stories_shown])
+	kit.assert_true(main.cockpit.model_parts == int(main.net.state_get("parts", -1)), "%s: the dashboard station model has every part (%d)" % [mode, main.cockpit.model_parts])
 	if mode == "client":
 		kit.assert_true(max_objs >= 3, "client mirrors the space objects (%d)" % max_objs)
 		return
 	kit.assert_true(saw_results, "%s: the ship docked and the results showed" % mode)
+	kit.assert_true(main.runs_logged >= 4, "%s: a RUN line for every mission (%d)" % [mode, main.runs_logged])
+	kit.assert_true(int(main.net.state_get("parts", 0)) >= 1 + int(OS.get_environment("SC_TRIPS")), "%s: the station grew a part on the way home" % mode)
 	if not OS.has_environment("SC_MISSION"):
 		kit.assert_eq(int(main.net.state_get("practice", 0)), 3, "both practice targets got done")
 	var tv_pops := 0

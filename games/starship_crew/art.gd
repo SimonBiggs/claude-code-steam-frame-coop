@@ -172,11 +172,14 @@ static func ufo() -> ArrayMesh:
 
 
 ## The space station at the end: a big friendly wheel with a glowing docking ring at its centre
-## (facing +Z, the dock opening about 5 m across).
-static func station() -> ArrayMesh:
-	return _cached("station", func() -> Resource:
+## (facing +Z, the dock opening about 5 m across), plus the first `parts` of story.gd PARTS the crew has
+## built on their trips home (they stay): solar panels, a garden dome, an antenna, party lights, a second
+## wheel, a rocket dock, a disco ball, a sky bridge, a giant star, and at last a golden wheel.
+static func station(parts: int = 0) -> ArrayMesh:
+	parts = clampi(parts, 0, 10)
+	return _cached("station%d" % parts, func() -> Resource:
 		var b := MeshKit.Builder.new()
-		var cream := Color(1.0, 0.95, 0.88)
+		var cream := Color(1.0, 0.95, 0.88) if parts < 10 else Color(1.0, 0.82, 0.3)
 		var pink := Color(1.0, 0.62, 0.78)
 		var x90 := Vector3(PI * 0.5, 0, 0)
 		b.torus(22.0, 3.0, MeshKit.at(Vector3(0, 0, -6.0), Vector3.ONE, x90), cream, 36, 10)
@@ -188,7 +191,62 @@ static func station() -> ArrayMesh:
 		for k in 24:
 			var a2 := k * TAU / 24.0
 			b.sphere(0.7, MeshKit.at(Vector3(cos(a2) * 22.0, sin(a2) * 22.0, -2.8)), [Color(1, 0.5, 0.6), Color(0.5, 0.9, 1), Color(1, 0.9, 0.4)][k % 3], 6, true)
+		if parts >= 1:  # solar panels on long arms
+			for sx in [-1.0, 1.0]:
+				var s: float = sx
+				b.capsule_between(Vector3(s * 25.0, 0, -6.0), Vector3(s * 40.0, 0, -6.0), 0.6, DARK, 6)
+				for k in 3:
+					b.box(Vector3(4.0, 9.0, 0.3), MeshKit.at(Vector3(s * (29.0 + k * 4.6), 0, -6.0)), Color(0.25, 0.4, 0.95))
+					b.box(Vector3(4.2, 0.3, 0.35), MeshKit.at(Vector3(s * (29.0 + k * 4.6), 0, -6.0)), Color(0.8, 0.85, 0.95))
+		if parts >= 2:  # a glass garden dome on the back of the hub, with little trees
+			b.cylinder(6.5, 6.5, 2.0, MeshKit.at(Vector3(0, 0, -10.0), Vector3.ONE, x90), cream, 24)
+			for k in 7:
+				var a3 := k * TAU / 7.0
+				var tp := Vector3(cos(a3) * 3.5, sin(a3) * 3.5, -12.0)
+				b.capsule_between(tp, tp + Vector3(0, 0, -1.5), 0.3, Color(0.55, 0.35, 0.2), 6)
+				b.sphere(1.3, MeshKit.at(tp + Vector3(0, 0, -2.6)), Color(0.35, 0.85, 0.4), 8)
+			b.dome(6.0, MeshKit.at(Vector3(0, 0, -11.0), Vector3.ONE, Vector3(-PI * 0.5, 0, 0)), Color(0.7, 0.95, 1.0), 20)
+		if parts >= 3:  # a tall antenna with a blinking tip
+			b.capsule_between(Vector3(0, 25.0, -6.0), Vector3(0, 42.0, -6.0), 0.5, Color(0.8, 0.82, 0.9), 6)
+			b.disc(3.5, MeshKit.at(Vector3(0, 34.0, -6.0), Vector3.ONE, Vector3(0.6, 0, 0)), Color(0.9, 0.92, 1.0), 16)
+			b.sphere(1.2, MeshKit.at(Vector3(0, 43.0, -6.0)), Color(1.0, 0.3, 0.3), 8, true)
+		if parts >= 4:  # party lights round the spokes
+			for k in 6:
+				var a4 := k * TAU / 6.0 + 0.26
+				for j in 4:
+					var rr := 8.0 + j * 3.5
+					b.sphere(0.55, MeshKit.at(Vector3(cos(a4) * rr, sin(a4) * rr, -4.8)), [Color(1, 0.4, 0.9), Color(0.4, 1, 0.6), Color(1, 0.8, 0.3), Color(0.4, 0.7, 1)][(k + j) % 4], 6, true)
+		if parts >= 5:  # a second wheel behind
+			b.torus(15.0, 2.2, MeshKit.at(Vector3(0, 0, -20.0), Vector3.ONE, x90), cream.darkened(0.05), 32, 8)
+			for k in 4:
+				var a5 := k * TAU / 4.0
+				b.capsule_between(Vector3(cos(a5) * 3.0, sin(a5) * 3.0, -20.0), Vector3(cos(a5) * 13.5, sin(a5) * 13.5, -20.0), 0.8, pink, 6)
+			b.capsule_between(Vector3(0, 0, -12.0), Vector3(0, 0, -20.0), 2.5, Color(0.6, 0.85, 1.0), 12)
+		if parts >= 6:  # a rocket parked at the side
+			var rp := Vector3(-27.0, -14.0, -6.0)
+			b.capsule_between(rp, rp + Vector3(0, 9.0, 0), 1.6, Color(0.95, 0.96, 1.0), 10)
+			b.cone(1.6, 3.0, MeshKit.at(rp + Vector3(0, 10.5, 0)), Color(0.95, 0.3, 0.35), 10)
+			b.sphere(0.8, MeshKit.at(rp + Vector3(0, 6.5, 1.4)), Color(0.5, 0.85, 1.0), 8, true)
+			b.capsule_between(rp + Vector3(1.5, 4.0, 0), Vector3(-21.0, -11.0, -6.0), 0.5, DARK, 6)
+		if parts >= 7:  # a disco ball under the hub
+			b.capsule_between(Vector3(0, -25.0, -6.0), Vector3(0, -30.0, -6.0), 0.3, Color(0.8, 0.82, 0.9), 6)
+			b.sphere(3.0, MeshKit.at(Vector3(0, -33.0, -6.0)), Color(0.85, 0.9, 1.0), 10, true)
+		if parts >= 8:  # sky bridges from the wheel to the solar arms
+			for sx in [-1.0, 1.0]:
+				var s2: float = sx
+				b.capsule_between(Vector3(s2 * 15.0, 15.0, -6.0), Vector3(s2 * 34.0, 5.0, -6.0), 0.9, Color(0.7, 0.95, 1.0), 8)
+		if parts >= 9:  # a giant star on top
+			b.star(5, 6.0, 2.6, 1.6, MeshKit.at(Vector3(0, 52.0, -6.0)), Color(1.0, 0.85, 0.2), true)
 		return b.build())
+
+
+## A tiny glowing model of the station for the pilot's dashboard (the same parts, see-through blue).
+static func station_model(parts: int) -> ArrayMesh:
+	parts = clampi(parts, 0, 10)
+	return _cached("stationmodel%d" % parts, func() -> Resource:
+		var b := MeshKit.Builder.new()
+		b.add_mesh(station(parts), MeshKit.at(Vector3.ZERO), Color.WHITE)
+		return b.build(MeshKit.additive_material()))
 
 
 ## A ringed planet (radius 1; scale it).
