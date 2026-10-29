@@ -19,6 +19,7 @@ const JUMP_BUFFER := 0.16
 const FALL_Y := -2.5  ## below this (relative to the lowest floor) you pop back
 const TUMBLE_TIME := 0.7
 const SAFE_AFTER := 1.0
+const CPU_SPEED := 0.85  ## CPU runners are a little slower than people (coursegen.gd proves courses at this speed)
 
 var main: Node
 var rid := 0  ## slot 0..6 for people, 10+ for CPU runners
