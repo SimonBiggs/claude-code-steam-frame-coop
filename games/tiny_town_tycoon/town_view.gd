@@ -41,6 +41,7 @@ var _roads := {}  # shape -> MultiMeshInstance3D
 var _rails := {}
 var _cross: MultiMeshInstance3D
 var _lamps: MultiMeshInstance3D
+var _bridges: MultiMeshInstance3D
 var _groups := {}  # look key -> MultiMeshInstance3D
 var _sites := {}  # building id -> Node3D (blueprint + scaffold + material pile)
 var _sails: MultiMeshInstance3D
@@ -115,7 +116,7 @@ func rebuild_island(p_isl: Dictionary) -> void:
 	_sea.material_override = Art.sea_material(isl.get("sea", Color(0.25, 0.62, 0.85)))
 	if _terrain != null:
 		_terrain.queue_free()
-	_terrain = MeshKit.instance(Art.terrain_mesh(town.ter, isl))
+	_terrain = MeshKit.instance(Art.terrain_mesh(town.ter, isl, town.res))
 	_terrain.name = "Terrain"
 	add_child(_terrain)
 	_lay_ver = -1
@@ -201,6 +202,7 @@ func _rebuild_roads() -> void:
 		rail_xf[s] = b
 	var cross_xf: Array[Transform3D] = []
 	var lamp_xf: Array[Transform3D] = []
+	var bridge_xf: Array[Transform3D] = []
 	var n := Defs.GRID
 	for z in n:
 		for x in n:
@@ -211,6 +213,8 @@ func _rebuild_roads() -> void:
 				var mask := town.road_mask(x, z)
 				var sh: Array = Art.shape_for(mask)
 				(road_xf[String(sh[0])] as Array).append(_cell_xf(x, z, int(sh[1]), 0.0004))
+				if town.terrain(x, z) == Defs.T_RIVER:
+					bridge_xf.append(_cell_xf(x, z, 1 if (mask & 5) == 0 and (mask & 10) != 0 else 0, 0.0))
 				if l == Defs.L_CROSS:
 					var rm := town.rail_mask(x, z)
 					cross_xf.append(_cell_xf(x, z, 0 if (rm & 5) != 0 or rm == 0 else 1, 0.0006))
@@ -244,6 +248,9 @@ func _rebuild_roads() -> void:
 		_lamps = _mm(Art.lamp_mesh(), true)
 	_fill(_cross, cross_xf)
 	_fill(_lamps, lamp_xf)
+	if _bridges == null:
+		_bridges = _mm(Art.bridge_mesh(), true)
+	_fill(_bridges, bridge_xf)
 	_route_ver = -1
 
 
