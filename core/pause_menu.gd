@@ -117,11 +117,19 @@ func _a_counts(device: int) -> bool:
 func _process(delta: float) -> void:
 	if panel != null and panel.visible:
 		_open_t += delta
-		# The game's own "PAUSED by P1" card (main.tv_banner: for a pause from another machine) sat under this menu,
-		# showing through its buttons: this menu already says PAUSED.
-		var b: Variant = main.get("tv_banner") if main != null and is_instance_valid(main) else null
-		if b is CanvasItem and is_instance_valid(b) and (b as CanvasItem).visible:
-			(b as CanvasItem).visible = false
+		hide_game_banner()
+
+
+## The game's own "PAUSED by P1" card (main.tv_banner: for a pause from another machine) sat under this menu,
+## showing through its buttons: this menu already says PAUSED. Also called right after main.on_pause_changed shows
+## it (here and in core/net.gd), so it never shows for even one frame: treasure_dig_bot's "Start pauses" check
+## caught that frame ~1 run in 21 under load (2026-10-29).
+func hide_game_banner() -> void:
+	if panel == null or not panel.visible:
+		return
+	var b: Variant = main.get("tv_banner") if main != null and is_instance_valid(main) else null
+	if b is CanvasItem and is_instance_valid(b) and (b as CanvasItem).visible:
+		(b as CanvasItem).visible = false
 
 
 ## Party games: which slot pressed Start / Esc (-2 = the keyboard). Others: 1, as before.
@@ -184,6 +192,7 @@ func _tell_main(paused: bool) -> void:
 	if main != null and main.has_method("on_pause_changed") and main.get("net") != null \
 			and str(main.net.mode) == "local":
 		main.on_pause_changed(paused, who)
+		hide_game_banner()
 
 
 ## The other machine resumed (VR wrist RESUME, or the TV's menu): close this menu without

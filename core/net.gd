@@ -416,6 +416,7 @@ func _set_paused(paused: bool, by_slot: int, from_vr: bool) -> void:
 		get_tree().call_group("pause_menu", "sync_remote_pause", paused)
 	if main != null and main.has_method("on_pause_changed"):
 		main.on_pause_changed(paused, by_slot)
+		get_tree().call_group("pause_menu", "hide_game_banner")  # this machine's open menu already says PAUSED
 
 
 ## True for `window` seconds after the game was unpaused (or started): ignore buttons that are
@@ -600,6 +601,7 @@ func _sys_down(kind: String, args: Array) -> void:
 		get_tree().call_group("pause_menu", "sync_remote_pause", paused)
 		if main != null and main.has_method("on_pause_changed"):
 			main.on_pause_changed(paused, int(args[1]))
+			get_tree().call_group("pause_menu", "hide_game_banner")  # this machine's open menu already says PAUSED
 		return
 	_sys_dispatch(kind, args)
 
