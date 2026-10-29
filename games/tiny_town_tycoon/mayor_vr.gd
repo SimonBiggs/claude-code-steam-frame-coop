@@ -101,10 +101,7 @@ func setup(p_main: Node, p_rig: VrRig, p_town: Town) -> void:
 func _tray_kinds() -> Array[String]:
 	var out: Array[String] = []
 	if Defs.SIMPLE_MODE:
-		var n := clampi(int(main.net.state_get("unl", 2)), 2, Defs.SIMPLE_TRAY.size())
-		for i in n:
-			out.append(Defs.SIMPLE_TRAY[i])
-		return out
+		return Defs.simple_tray(int(main.net.state_get("unl", 2)), bool(main.net.state_get("boat", false)))
 	for k in Defs.TRAY:
 		out.append(k)
 	out.append("islands")

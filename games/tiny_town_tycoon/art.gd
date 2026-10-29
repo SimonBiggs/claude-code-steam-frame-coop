@@ -170,6 +170,10 @@ static func _make_building(kind: String, v: int, lvl: int, snow: bool) -> ArrayM
 			_ferris_base(b)
 		"hall":
 			_town_hall(b, snow)
+		"lighthouse":
+			_lighthouse(b, snow)
+		"boat":
+			_boat(b)
 		_:
 			b.box(Vector3(0.6, 0.4, 0.6), at(Vector3(0, 0.2, 0)), Color(1, 0, 1))
 	return _build(b)
@@ -471,6 +475,47 @@ static func _clock_tower(b: MeshKit.Builder, snow: bool) -> void:
 	if snow:
 		b.cone(0.3, 0.3, at(Vector3(0, 2.13, 0), Vector3.ONE, Vector3(0, PI * 0.25, 0)), SNOW, 4)
 	b.sphere(0.07, at(Vector3(0, 2.38, 0)), Color(1.0, 0.82, 0.3), 8)
+
+
+## A district landmark by the sea: a red and white striped tower with a glowing lamp room.
+static func _lighthouse(b: MeshKit.Builder, snow: bool) -> void:
+	b.cylinder(0.46, 0.48, 0.08, at(Vector3(0, 0.04, 0)), STONE.darkened(0.08), 14)
+	var red := Color(0.9, 0.25, 0.22)
+	for k in 5:
+		var y0 := 0.08 + k * 0.3
+		var r0 := 0.3 - k * 0.025
+		b.cylinder(r0 - 0.025, r0, 0.3, at(Vector3(0, y0 + 0.15, 0)), red if k % 2 == 0 else Color(0.98, 0.97, 0.94), 14)
+	b.cylinder(0.24, 0.24, 0.04, at(Vector3(0, 1.6, 0)), DARK, 14)
+	b.cylinder(0.15, 0.15, 0.22, at(Vector3(0, 1.73, 0)), GLASS, 10, true)
+	b.cone(0.2, 0.2, at(Vector3(0, 1.94, 0)), SNOW if snow else red.darkened(0.15), 12)
+	b.sphere(0.04, at(Vector3(0, 2.06, 0)), Color(1.0, 0.82, 0.3), 6)
+	window(b, Vector3(0, 0.75, 0.27), 0.1, 0.14)
+	b.box(Vector3(0.18, 0.26, 0.04), at(Vector3(0, 0.21, 0.29)), WOOD)
+
+
+## The tray's boat (drop it to sail to TODAY'S ISLAND and back): a little sailing boat.
+static func _boat(b: MeshKit.Builder) -> void:
+	var hull := Color(0.85, 0.3, 0.25)
+	b.rounded_box(Vector3(0.38, 0.16, 0.8), 0.07, at(Vector3(0, 0.1, 0)), hull, 1)
+	b.box(Vector3(0.34, 0.03, 0.74), at(Vector3(0, 0.19, 0)), Color(0.98, 0.93, 0.8))
+	b.cone(0.19, 0.2, at(Vector3(0, 0.1, 0.48), Vector3(1, 1, 0.8), Vector3(PI * 0.5, 0, 0)), hull, 8)
+	b.cylinder(0.025, 0.025, 0.8, at(Vector3(0, 0.6, -0.02)), WOOD, 6)
+	b.box(Vector3(0.015, 0.55, 0.42), at(Vector3(0, 0.58, 0.2)), Color(1.0, 0.98, 0.94))
+	b.box(Vector3(0.015, 0.4, 0.26), at(Vector3(0, 0.52, -0.18)), Color(1.0, 0.82, 0.3))
+	b.box(Vector3(0.01, 0.07, 0.14), at(Vector3(0, 0.98, 0.06)), Color(0.35, 0.65, 1.0))
+
+
+## A wooden bridge under a road over the river (cell units; rails along Z).
+static func bridge_mesh() -> ArrayMesh:
+	return cached("bridge", func() -> Resource:
+		var b := MeshKit.Builder.new()
+		b.box(Vector3(0.9, 0.08, 1.0), at(Vector3(0, -0.05, 0)), WOOD)
+		for sx in [-0.46, 0.46]:
+			var px: float = sx
+			b.box(Vector3(0.05, 0.05, 1.0), at(Vector3(px, 0.12, 0)), WOOD.lightened(0.1))
+			for pz in [-0.4, 0.0, 0.4]:
+				b.box(Vector3(0.05, 0.14, 0.05), at(Vector3(px, 0.06, float(pz))), WOOD.darkened(0.1))
+		return b.build())
 
 
 static func _ferris_base(b: MeshKit.Builder) -> void:
@@ -924,7 +969,7 @@ static func citizen_mesh(look: int) -> Mesh:
 # --- Island, table, garden (metres) --------------------------------------------------------------------------
 
 ## The island: one block per land cell (grass / sand / rock hills), coloured for the island.
-static func terrain_mesh(ter: PackedByteArray, isl: Dictionary) -> ArrayMesh:
+static func terrain_mesh(ter: PackedByteArray, isl: Dictionary, res: PackedByteArray = PackedByteArray()) -> ArrayMesh:
 	var b := MeshKit.Builder.new()
 	var n := Defs.GRID
 	var cs := Defs.CELL
@@ -942,14 +987,39 @@ static func terrain_mesh(ter: PackedByteArray, isl: Dictionary) -> ArrayMesh:
 			if t == Defs.T_WATER:
 				continue
 			var c := Defs.cell_center(x, z)
+			if t == Defs.T_RIVER:
+				# a stream: a sandy bed a little below the grass, with water in it
+				var bed := Defs.GROUND_Y - 0.016
+				b.box(Vector3(cs, bed - base_y, cs), at(Vector3(c.x, base_y + (bed - base_y) * 0.5, c.z)), sand.darkened(0.15))
+				var sea: Color = isl.get("sea", Color(0.25, 0.62, 0.85))
+				b.box(Vector3(cs, 0.006, cs), at(Vector3(c.x, bed + 0.003, c.z)), sea.lightened(0.12 + rng.randf() * 0.06))
+				continue
+			var rk := int(res[z * n + x]) if res.size() == n * n else 0
 			var top := Defs.GROUND_Y
 			var col := grass if (x + z) % 2 == 0 else grass2
 			col = col.lerp(Color(1, 1, 0.8), rng.randf() * 0.05)
 			if t == Defs.T_SAND:
 				top = Defs.GROUND_Y - 0.005
 				col = sand.lerp(Color(1, 1, 1), rng.randf() * 0.06)
+			if rk == 1:  # a golden field (farms love it): wheat in rows
+				col = Color(0.93, 0.8, 0.36).lerp(Color(1, 1, 0.8), rng.randf() * 0.08)
 			var h := top - base_y
 			b.box(Vector3(cs, h, cs), at(Vector3(c.x, base_y + h * 0.5, c.z)), col)
+			match rk:
+				1:
+					for k in 3:
+						b.box(Vector3(cs * 0.9, 0.006, cs * 0.12), at(Vector3(c.x, top + 0.003, c.z + (k - 1) * cs * 0.3)), Color(0.98, 0.86, 0.42).darkened(0.08))
+				2:  # a spring: a little blue pool with stones round it
+					b.cylinder(cs * 0.3, cs * 0.3, 0.004, at(Vector3(c.x, top + 0.002, c.z)), Color(0.4, 0.75, 0.98), 10)
+					for k in 5:
+						var a := k * TAU / 5.0
+						b.sphere(cs * 0.06, at(Vector3(c.x + cos(a) * cs * 0.32, top + 0.002, c.z + sin(a) * cs * 0.32)), STONE, 5)
+				3:  # a breezy hilltop: a little red flag flapping on a pole
+					b.box(Vector3(0.0015, 0.03, 0.0015), at(Vector3(c.x, top + 0.015, c.z)), Color(0.9, 0.9, 0.92))
+					b.box(Vector3(0.012, 0.008, 0.001), at(Vector3(c.x + 0.006, top + 0.026, c.z)), Color(0.95, 0.3, 0.3))
+				4:  # the heart of the woods: a log pile
+					for k in 3:
+						b.cylinder(cs * 0.08, cs * 0.08, cs * 0.5, at(Vector3(c.x - cs * 0.1 + k * cs * 0.1, top + cs * 0.08 + (0.0 if k != 1 else cs * 0.1), c.z + cs * 0.3), Vector3.ONE, Vector3(0, 0, PI * 0.5)), WOOD, 6)
 			if t == Defs.T_ROCK:
 				var hh := rng.randf_range(0.03, 0.07)
 				b.rounded_box(Vector3(cs * 1.05, hh, cs * 1.05), cs * 0.25, at(Vector3(c.x, top + hh * 0.5, c.z)), rock, 1)
