@@ -310,24 +310,34 @@ const rport = () => 20000 + Math.floor(Math.random() * 10000);
  *  check live == staging, copy into staging, run its gen tests + bot_end_test + core_math, the Deck bot
  *  (DECK_BOT_ONLY=botId), the arcade bot, botId networked (180 s) and otherBots; then duo-deploy + duo-deploy-deck,
  *  merge merge-arcade into live main, fast-forward wt-merge, remove the branch's worktree (~/GodotProjects/wt-<branch>)
- *  and branch. Stops (nothing deployed) with {stop, ...} on a conflict, live/staging drift, a branch that touched
- *  core/story_card.gd (pictures belong in games/<game>/story_pictures.gd) or any failing test. */
+ *  and branch. Stops (nothing deployed) with {stop, ...} on a conflict, live/staging drift, or any failing test
+ *  (story_pictures_test always runs: pictures belong in games/<game>/story_pictures.gd). */
 export async function land(branch: string, genTests: string[], botId: string, otherBots: string[], msg: string) {
   const m = await sh(`cd ${GP}/wt-${branch} && git status --short | grep -v '^??' | head -3; cd ${GP}/wt-merge && git merge --no-edit ${branch} 2>&1 | tail -1; git diff --name-only --diff-filter=U`);
   if (/CONFLICT|fatal/.test(m.out)) return { stop: "merge", out: m.out };
-  const sc = (await sh(`git diff --stat main...${branch} -- core/story_card.gd`, LIVE)).out;
-  if (sc) return { stop: "story_card", out: `${sc}\nmove its pictures to games/<game>/story_pictures.gd (in wt-merge, commit), then land again` };
   const drift = await sh(`for d in ${DEPLOYED.join(" ")}; do diff -rq --exclude='*.uid' --exclude='*.import' duo-arena/$d .duo-arena-stage/$d; done`, GP);
-  // (Staging already holding exactly wt-merge, with live clean, is a retry after a stopped landing, e.g. a flaky bot.)
-  const retry = drift.out.trim() && !(await sh(`git status --porcelain -- ${DEPLOYED.join(" ")} | grep -v '\\.uid$'`, LIVE)).out
-    && !(await sh(`for d in ${DEPLOYED.join(" ")}; do diff -rq --exclude='*.uid' --exclude='*.import' wt-merge/$d .duo-arena-stage/$d; done`, GP)).out.trim();
+  // A retry after a stopped landing (a flaky bot, a fix committed in wt-merge): live is clean and every file where
+  // staging differs from live is one merge-arcade changes (so it came from the earlier copy), not someone's edit.
+  let retry = false;
+  if (drift.out.trim() && !(await sh(`git status --porcelain -- ${DEPLOYED.join(" ")} | grep -v '\\.uid$'`, LIVE)).out) {
+    const ours = new Set((await sh("git diff --name-only main merge-arcade", join(GP, "wt-merge"))).out.split("\n").filter(Boolean));
+    const differing = [...drift.out.matchAll(/^Files duo-arena\/(\S+) and|^Only in \.duo-arena-stage\/(\S+): (\S+)|^Only in duo-arena\/(\S+): (\S+)/gm)]
+      .map(m => m[1] ?? (m[2] ? `${m[2]}/${m[3]}` : `${m[4]}/${m[5]}`));
+    retry = differing.length > 0 && differing.every(f => ours.has(f) || [...ours].some(o => o.startsWith(f + "/")));
+  }
   if (drift.out.trim() && !retry) return { stop: "live!=stage", out: drift.out };
   await sh(`for d in ${DEPLOYED.join(" ")} tools; do rsync -a --delete --exclude '*.import' --exclude '__pycache__' wt-merge/$d/ .duo-arena-stage/$d/; done; cp wt-merge/arcade.tscn .duo-arena-stage/`, GP);
   const out: Record<string, string> = {};
   let ok = true;
-  for (const t of [...genTests, "bot_end_test", "core_math_test"].filter(Boolean)) {
-    out[t] = (await sh(`DUO_PORT=${rport()} timeout 600 godot-test --headless --path . -s res://tests/${t}.gd 2>&1 | grep -v OpenXR | grep -E "PASS|FAIL|SCRIPT ERROR" | tail -3; echo exit=\${PIPESTATUS[0]}`, STAGE)).out;
-    ok &&= /exit=0/.test(out[t]) && !/FAIL|SCRIPT ERROR/.test(out[t]);
+  // story_pictures_test always: it pins core/story_card.gd SHARED_PICTURES (a game's pictures belong in its own
+  // games/<game>/story_pictures.gd) and catches one name drawn by two games.
+  for (const t of [...new Set([...genTests, "story_pictures_test", "bot_end_test", "core_math_test"])].filter(Boolean)) {
+    // A test with a scene (extends Node, e.g. engine_ui_test) runs as that scene; a SceneTree script runs with -s.
+    const scene = await stat(join(STAGE, `tests/${t}.tscn`)).then(() => true, () => false);
+    const how = scene ? `--fixed-fps 60 res://tests/${t}.tscn`  /* ends itself (exit code = failures); timeout 600 caps it */ : `-s res://tests/${t}.gd`;
+    out[t] = (await sh(`DUO_PORT=${rport()} timeout 600 godot-test --headless --path . ${how} 2>&1 | grep -v OpenXR | grep -E "PASS|FAIL|SCRIPT ERROR" | tail -3; echo exit=\${PIPESTATUS[0]}`, STAGE)).out;
+    if (scene && !/PASS/.test(out[t])) out[t] += " (no PASS line)";
+    ok &&= /exit=0/.test(out[t]) && !/FAIL|SCRIPT ERROR|no PASS line/.test(out[t]);
   }
   out.deck = (await sh(`DECK_BOT_ONLY=${botId} DUO_PORT=${rport()} timeout 300 godot-test --headless --path . --fixed-fps 60 --quit-after 6000 res://tests/deck_bot.tscn 2>&1 | grep -E "BOT RESULT|SCRIPT ERROR" | tail -3`, STAGE)).out;
   ok &&= /BOT RESULT: PASS/.test(out.deck) && !/SCRIPT ERROR/.test(out.deck);
