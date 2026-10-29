@@ -122,6 +122,7 @@ export async function launch(o: LaunchOpts | string): Promise<Game> {
   child.stderr!.on("data", write);
   const g = new Game(port, proj, child, logPath, dir);
   running.set(port, g);
+  startReaper();
   child.on("exit", () => running.delete(port));
   const deadline = Date.now() + (opts.timeout ?? 60_000);
   while (Date.now() < deadline) {
@@ -137,9 +138,11 @@ export async function launch(o: LaunchOpts | string): Promise<Game> {
 }
 
 export class Game {
+  lastUsed = Date.now();  // the last g.* call (the reaper quits games nobody drives)
   constructor(public port: number, public project: string, public child: ChildProcess, public logPath: string, public dir: string) {}
 
   async cmd(cmd: string, args: Record<string, unknown> = {}): Promise<any> {
+    this.lastUsed = Date.now();
     const r = await fetch(`http://127.0.0.1:${this.port}/`, { method: "POST", body: JSON.stringify({ cmd, ...args }) });
     const out = await r.json();
     if (out && typeof out === "object" && "error" in out) throw new Error(`${cmd}: ${out.error}${out.source ? `\n${out.source}\n${await this.logTail(8)}` : ""}`);
@@ -269,6 +272,24 @@ export class Game {
     reserved?.delete(this.port);
     reserved?.delete(this.port + 1000);
   }
+}
+
+/** Orphans: a bg() job that threw between launch() and quit() left its offscreen game running for an hour, and a
+ *  game whose worktree was removed spammed "getcwd ... is null" game-errors (2026-10-29). Every minute, quit games
+ *  whose project folder is gone or that nobody has driven (no g.* call) for REAP_IDLE_MIN minutes. */
+const REAP_IDLE_MIN = 15;
+function startReaper() {
+  if ((globalThis as any).__gdevReaper) return;
+  (globalThis as any).__gdevReaper = setInterval(async () => {
+    for (const g of [...running.values()]) {
+      const gone = !(await Bun.file(join(g.project, "project.godot")).exists());
+      const idle = Date.now() - g.lastUsed > REAP_IDLE_MIN * 60_000;
+      if (gone || idle) {
+        (globalThis as any).send?.("godot reaper", `quit the offscreen game on port ${g.port} (${gone ? "its project folder is gone" : `idle ${REAP_IDLE_MIN} min`}): ${g.project}`);
+        await g.quit();
+      }
+    }
+  }, 60_000);
 }
 
 export function list() { return [...running.values()].map(g => ({ port: g.port, project: g.project, pid: g.child.pid })); }
