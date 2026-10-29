@@ -50,6 +50,7 @@ const COLORS: Array[Color] = [Color(0.3, 0.7, 1.0), Color(1.0, 0.75, 0.25), Colo
 ## Engine metadata: the roster (survives scene reloads), virtual pads, and the bot "ignore real pads" flag.
 const ROSTER_META := "core_party_roster"
 const VIRTUAL_META := "core_party_virtual_pads"
+const UNPLUGGED_META := "core_party_unplugged_pads"  ## virtual-range pads unplugged since (see _plugged)
 const BOT_IGNORE_META := "bot_ignore_real_pads"
 const REJOIN_WINDOW_MS := 600000  # a pad that left within 10 minutes rejoins its seat when plugged in
 
@@ -494,8 +495,26 @@ func _virtual_pads() -> Array[int]:
 ## unplugged it re-seated that player (treasure_dig_bot flaked under load: 3 players, want 2). Such a
 ## stale A must never seat anyone. Only virtual pads are checked: the offscreen runner (addons/gdev)
 ## injects presses for device 0 with no pad connected, and those must still join.
+## A virtual-range pad counts as plugged unless it was unplugged since (remove_virtual_pad or a disconnect): bots
+## also "plug in" pads by emitting Input.joy_connection_changed for a fixed id (tests/deck_bot.gd), and checking
+## only add_virtual_pad's list refused their A (the Deck bot's friend's pad no longer dropped in, 2026-10-29).
 func _plugged(device: int) -> bool:
-	return device < VIRTUAL_PAD_BASE or _virtual_pads().has(device)
+	return device < VIRTUAL_PAD_BASE or _virtual_pads().has(device) or not _unplugged().has(device)
+
+
+func _unplugged() -> Array:
+	return Engine.get_meta(UNPLUGGED_META, [])
+
+
+func _note_plug(device: int, connected: bool) -> void:
+	if device < VIRTUAL_PAD_BASE:
+		return
+	var gone: Array = _unplugged().duplicate()
+	if connected:
+		gone.erase(device)
+	elif not gone.has(device):
+		gone.append(device)
+	Engine.set_meta(UNPLUGGED_META, gone)
 
 
 func _ignored(device: int) -> bool:
@@ -507,6 +526,7 @@ func _ignored(device: int) -> bool:
 
 
 func _on_joy_changed(device: int, connected: bool) -> void:
+	_note_plug(device, connected)
 	if _ignored(device) or not _started or (_mode() == "host" and _host_has_vr()):
 		return
 	if connected:

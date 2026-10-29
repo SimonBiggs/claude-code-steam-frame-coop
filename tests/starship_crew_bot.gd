@@ -40,12 +40,15 @@ func _ready() -> void:
 	kit.at(3.0 if client else 1.0, "%d TV players press A" % want, func() -> void:
 		if main.net.mode != "host":
 			for i in want:
-				kit.join_bot(main.party))
+				kit.join_bot(main.party)
+		elif not main.net.has_vr:
+			kit.join_bot(main.party))  # a flat host (TV / Deck hosting): one pad hero here, in slot 0
 	kit.every(4.0, _report)
 	kit.every(0.5, _results)
 	var end := 125.0 if host else (115.0 if client else 160.0)
 	if OS.has_environment("BOT_END"):
 		end = float(OS.get_environment("BOT_END"))
+	end = preload("res://tests/bot_end.gd").within_deadline(end)
 	kit.at(end, "finish", func() -> void:
 		_checks()
 		kit.finish())
@@ -156,7 +159,7 @@ func _checks() -> void:
 	var mode: String = main.net.mode
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
 	if mode != "host":
-		kit.assert_eq(main.party.player_count(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
+		kit.assert_eq(kit.seated(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
 		kit.assert_true(main.lasers_seen > 0, "%s: lasers were drawn (%d)" % [mode, main.lasers_seen])
 	kit.assert_true(seen_missions.size() >= 3, "%s: played through several missions (%d)" % [mode, seen_missions.size()])
 	if mode == "client":
