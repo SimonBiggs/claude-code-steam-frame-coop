@@ -12,6 +12,7 @@ extends SceneTree
 const WaveGen := preload("res://games/balloon_pop/wavegen.gd")
 const Story := preload("res://games/balloon_pop/story.gd")
 const Seeded := preload("res://core/seeded.gd")
+const StoryCard := preload("res://core/story_card.gd")
 
 var fails := 0
 
@@ -120,6 +121,12 @@ func _init() -> void:
 		_expect(String(r.intro).length() <= 26 and String(r.done).length() <= 26, "%s lines are short" % r.id)
 	for k in Story.KIND_LINES:
 		_expect(String(Story.KIND_LINES[k]).length() <= 26, "the %s line is short" % WaveGen.KIND_NAMES[int(k)])
+	# Every picture Poppy shows exists (story_card.gd pictures, or the UiKit icons flag / star).
+	var pics: Array = ["seller", "balloon"]
+	for r in Story.RIDES:
+		pics.append(String(r.pic))
+	for pic in pics:
+		_expect(StoryCard.PICTURES.has(pic) or ["flag", "star"].has(pic), "the %s picture exists" % pic)
 	print("balloon gen: %d rounds checked, %d failures" % [total, fails])
 	print("BOT RESULT: %s" % ("PASS" if fails == 0 else "FAIL"))
 	quit(0 if fails == 0 else 1)
