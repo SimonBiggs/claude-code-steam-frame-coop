@@ -1003,12 +1003,22 @@ func _move_giant(delta: float, playing: bool) -> void:
 ## FAIR: whoever has had the fewest throws this round (courtgen.gd pick_target), never one who is out or blinking.
 func _pick_runner() -> int:
 	var ids: Array = []
+	var waiting: Array = []
+	var least := -1
+	for id in aimed:
+		least = int(aimed[id]) if least < 0 else mini(least, int(aimed[id]))
 	for id in avatars:
+		if not aimed.has(int(id)) and least >= 0:
+			aimed[int(id)] = least  # a runner who just joined starts level with the others (no pile-on)
 		if not out.has(id) and not safe.has(id):
 			ids.append(int(id))
+		else:
+			waiting.append(int(id))
 	if ids.is_empty() or rd.is_empty():
 		return -1
-	var aim := CourtGen.pick_target(rd, aimed, ids, throw_k)
+	var aim := CourtGen.pick_target(rd, aimed, ids, throw_k, waiting)
+	if aim < 0:
+		return -1
 	throw_k += 1
 	aimed[aim] = int(aimed.get(aim, 0)) + 1
 	return aim

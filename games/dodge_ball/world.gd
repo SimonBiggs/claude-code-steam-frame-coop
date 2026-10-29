@@ -32,7 +32,7 @@ func build(main: Node, vr: bool) -> void:
 	add_child(MeshKit.instance(_ground_mesh(), false))
 	add_child(MeshKit.instance(_stage_mesh()))
 	add_child(MeshKit.scatter_random(MeshKit.prop("tree"), 18, Vector3(0.0, 0.0, -1.0), 22.0, 11.5, 0.9, 1.4, PackedColorArray(), 3))
-	add_child(MeshKit.scatter_random(MeshKit.prop("bush"), 14, Vector3(0.0, 0.0, -1.0), 11.0, 9.5, 0.8, 1.2, PackedColorArray(), 4))
+	add_child(MeshKit.scatter_random(MeshKit.prop("bush"), 16, Vector3(0.0, 0.0, -1.0), 12.8, 11.4, 0.8, 1.2, PackedColorArray(), 4))
 	# The ball tray in front of the giant (wobbles when touched).
 	var tray := Node3D.new()
 	tray.position = Vector3(0.0, STAGE_H, TRAY_Z)
@@ -199,8 +199,8 @@ func update_giant(head: Vector3, yaw: float, hands: Array[Vector3], delta: float
 			c["squish"] = move_toward(sq, 0.0, delta * 2.5)
 			var n: Node3D = c["node"]
 			if n.scale.y > 0.98 or sq > 0.0:
-				var s := 0.18 * sq * sin(sq * 14.0)
-				n.scale = Vector3(1.0 + s, 1.0 - s, 1.0 + s)
+				var w := 0.18 * sq * sin(sq * 14.0)
+				n.scale = Vector3(1.0 + w, 1.0 - w, 1.0 + w)
 	for p: Dictionary in props:
 		p["wob"] = move_toward(float(p["wob"]), 0.0, delta * 1.2)
 		p["cool"] = float(p["cool"]) - delta

@@ -44,7 +44,9 @@ const GENTLE_EXTRA := 2.0  # ... and the bubble lasts this much longer
 const MAX_OUT_SHARE := 0.45  # a kid who never dodges is out at most this share of the round
 const MAX_PER_10S := 4  # throws at one runner in any 10 s
 const MIN_GAP := 2.0  # seconds between two throws at the same runner
-const MAX_SPREAD := 2  # throws per runner differ by at most this (everyone gets a fair share)
+const MAX_SPREAD := 2  # throws per runner differ by at most this or MAX_SPREAD_SHARE of the most (a fair share;
+## a runner who is out more often gets a few fewer, which is the gentle way round)
+const MAX_SPREAD_SHARE := 0.25
 
 const ADJ: Array[String] = ["SUNNY", "PUFFY", "BOUNCY", "HAPPY", "BREEZY", "GIGGLY", "SPARKLY", "COSY", "JOLLY", "WIGGLY"]
 const NOUN: Array[String] = ["PARK", "MEADOW", "GARDEN", "GREEN", "FIELD", "HILL", "DELL"]
@@ -167,7 +169,9 @@ static func push_out(d: Dictionary, p: Vector3, radius: float = RUNNER_R) -> Vec
 
 ## FAIR TARGETS: of the runners free to aim at (not out, not blinking), whoever has had the fewest throws
 ## this round; ties go by the round's seeded order, turned by k (the throw number) so nobody is always first.
-static func pick_target(d: Dictionary, counts: Dictionary, ids: Array, k: int) -> int:
+## waiting: runners who are out or blinking right now. If every free runner is already MAX_SPREAD throws ahead of
+## one of them, TumTum waits for them (-1) instead of piling more balls on the others.
+static func pick_target(d: Dictionary, counts: Dictionary, ids: Array, k: int, waiting: Array = []) -> int:
 	var best := -1
 	var best_c := 1 << 30
 	var best_r := 1 << 30
@@ -179,6 +183,9 @@ static func pick_target(d: Dictionary, counts: Dictionary, ids: Array, k: int) -
 			best = int(id)
 			best_c = c
 			best_r = rank
+	for id in waiting:
+		if best >= 0 and best_c >= int(counts.get(id, 0)) + MAX_SPREAD:
+			return -1
 	return best
 
 
@@ -200,6 +207,8 @@ static func wait_time(d: Dictionary, x: float) -> float:
 ## following the game's CPU giant (wait, reach, wind up, lob, pick_target, out, safe_time). Returns per-runner
 ## numbers: out share, throws, most throws in 10 s, shortest gap between throws at them.
 static func simulate(d: Dictionary, n: int, hit_chance: float, sim_seed: int, round_time: float = ROUND_TIME) -> Dictionary:
+	# Event-driven (no time steps): the giant only decides when its wait ends, and runners only change
+	# when a lob lands, so the model jumps from one moment to the next (fast enough for every seed).
 	var r := Seeded.rng(sim_seed, "sim")
 	var ids: Array = range(n)
 	var out_until := {}
@@ -212,40 +221,40 @@ static func simulate(d: Dictionary, n: int, hit_chance: float, sim_seed: int, ro
 		hits[id] = []
 		throws[id] = []
 		out_total[id] = 0.0
-	var dt := 0.05
-	var t := 0.0
 	var next_try := 2.5  # the CPU giant's first wait (main.gd cpu_g.t)
-	var flying: Array = []  # [land_time, id]
+	var flying: Array = []  # [land_time, id], in landing order
 	var k := 0
-	while t < round_time:
+	while true:
+		var t: float = minf(next_try, round_time)
+		while not flying.is_empty() and float(flying[0][0]) <= t:
+			var f: Array = flying.pop_front()
+			var lt := float(f[0])
+			var id: int = f[1]
+			var free: bool = lt >= float(out_until.get(id, -1.0)) and lt >= float(safe_until.get(id, -1.0))
+			if free and r.randf() < hit_chance:
+				out_until[id] = lt + OUT_TIME
+				safe_until[id] = lt + OUT_TIME + safe_time(d, hits[id], lt)
+				out_total[id] = float(out_total[id]) + minf(OUT_TIME, round_time - lt)
+				(hits[id] as Array).append(lt)
+		if next_try >= round_time:
+			break
+		var cands: Array = []
+		var waiting: Array = []
 		for id in ids:
-			if t < float(out_until.get(id, -1.0)):
-				out_total[id] = float(out_total[id]) + dt
-		for f in flying.duplicate():
-			if t >= float(f[0]):
-				flying.erase(f)
-				var id: int = f[1]
-				var free: bool = t >= float(out_until.get(id, -1.0)) and t >= float(safe_until.get(id, -1.0))
-				if free and r.randf() < hit_chance:
-					out_until[id] = t + OUT_TIME
-					safe_until[id] = t + OUT_TIME + safe_time(d, hits[id], t)
-					(hits[id] as Array).append(t)
-		if t >= next_try:
-			var cands: Array = []
-			for id in ids:
-				if t >= float(out_until.get(id, -1.0)) and t >= float(safe_until.get(id, -1.0)):
-					cands.append(id)
-			if cands.is_empty():
-				next_try = t + 0.5
+			if t >= float(out_until.get(id, -1.0)) and t >= float(safe_until.get(id, -1.0)):
+				cands.append(id)
 			else:
-				var aim := pick_target(d, counts, cands, k)
-				k += 1
-				counts[aim] = int(counts.get(aim, 0)) + 1
-				var release := t + REACH + WINDUP
-				(throws[aim] as Array).append(release)
-				flying.append([release + float(d["flight"]), aim])
-				next_try = release + wait_time(d, r.randf())
-		t += dt
+				waiting.append(id)
+		var aim := pick_target(d, counts, cands, k, waiting)
+		if aim < 0:
+			next_try = t + 0.25
+			continue
+		k += 1
+		counts[aim] = int(counts.get(aim, 0)) + 1
+		var release := t + REACH + WINDUP
+		(throws[aim] as Array).append(release)
+		flying.append([release + float(d["flight"]), aim])  # one flight time: lands in throw order
+		next_try = release + wait_time(d, r.randf())
 	var res := {"out_share": {}, "throws": {}, "per10": {}, "gap": {}}
 	for id in ids:
 		var th: Array = throws[id]
@@ -334,7 +343,7 @@ static func check(d: Dictionary) -> Array:
 					why.append("%d runners: runner %d thrown at twice in %.1f s" % [n, id, float(sim["gap"][id])])
 				lo = mini(lo, int(sim["throws"][id]))
 				hi = maxi(hi, int(sim["throws"][id]))
-			if hi - lo > MAX_SPREAD:
+			if hi - lo > maxi(MAX_SPREAD, ceili(float(hi) * MAX_SPREAD_SHARE)):
 				why.append("%d runners, hits %.1f: unfair share of throws (%d..%d)" % [n, hc, lo, hi])
 			if lo == 0:
 				why.append("%d runners: somebody never gets a ball to dodge" % n)

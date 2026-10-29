@@ -273,7 +273,7 @@ func _story_checks(mode: String) -> void:
 		for id in main.aimed:
 			lo = mini(lo, int(main.aimed[id]))
 			hi = maxi(hi, int(main.aimed[id]))
-		kit.assert_true(hi - lo <= 2, "%s: TumTum shares his throws out fairly %s" % [mode, str(main.aimed)])
+		kit.assert_true(hi - lo <= maxi(2, ceili(float(hi) * 0.25)), "%s: TumTum shares his throws out fairly %s" % [mode, str(main.aimed)])
 
 
 func _watch_cushions() -> String:

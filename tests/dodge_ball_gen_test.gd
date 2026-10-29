@@ -73,6 +73,8 @@ func _init() -> void:
 	var d1 := G.build(G.code_of(11, 3, false))
 	_expect(G.pick_target(d1, {0: 2, 1: 1, 2: 2}, [0, 1, 2], 0) == 1, "the giant aims at whoever had the fewest throws")
 	_expect(G.pick_target(d1, {}, [], 0) == -1, "nobody to aim at")
+	_expect(G.pick_target(d1, {0: 3, 1: 1}, [0], 0, [1]) == -1, "TumTum waits for a runner who is out instead of piling on")
+	_expect(G.pick_target(d1, {0: 2, 1: 1}, [0], 0, [1]) == 0, "... but not when the shares are close")
 	var firsts := {}
 	for k in 8:
 		firsts[G.pick_target(d1, {}, [0, 1, 2, 3], k)] = true
@@ -99,7 +101,7 @@ func _init() -> void:
 	for i in G.PARK_SLOTS:
 		var at := G.park_slot(i)
 		_expect(absf(at.x) > Main.WALL_X + 0.6 or at.z > Main.WALL_Z.y + 0.6, "park spot %d is outside the court (%s)" % [i, str(at)])
-		_expect(Vector2(at.x, at.z + 1.0).length() < 9.6, "park spot %d is inside the bushes (%s)" % [i, str(at)])
+		_expect(Vector2(at.x, at.z + 1.0).length() < 11.2, "park spot %d is inside the bushes (%s)" % [i, str(at)])
 		for o in spots:
 			_expect((o as Vector3).distance_to(at) > 1.0, "park spot %d has room" % i)
 		spots.append(at)
@@ -118,7 +120,7 @@ func _init() -> void:
 	var m: Node = Main.new()
 	_expect(is_equal_approx(G.ROUND_TIME, float(m.get("round_time"))), "the round time matches main.gd")
 	m.free()
-	var pics: Array = ["tumtum", "squishball", "goldball", "cushion"]
+	var pics: Array = ["tumtum", "squishball", "goldball", "cushion", "tree"]
 	pics.append_array(G.PARK_KINDS)
 	for pic in pics:
 		_expect(StoryCard.has_picture(pic), "story picture %s exists" % pic)
