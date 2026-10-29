@@ -693,13 +693,18 @@ func _report() -> String:
 		main.combat.kaiju.size(), bosses, int(hp), int(main.mech.armour), int(main.net.state_get("score", 0)), int(main.net.state_get("rescued", 0))] + dbg
 
 
+## A flat host seats one pad player of its own (_join).
+func _host_p() -> int:
+	return 1 if main.net.mode == "host" and not main.net.has_vr else 0
+
+
 func _checks() -> void:
 	if simple:
 		_simple_checks()
 		return
 	var mode: String = main.net.mode
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
-	kit.assert_eq(kit.seated(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
+	kit.assert_eq(kit.seated(), kit.seated_want(want, _host_p()), "%s: all %d TV players are seated" % [mode, want])
 	kit.assert_true(saw_play, "%s: the mission was played" % mode)
 	kit.assert_true(saw_kaiju, "%s: kaiju showed up" % mode)
 	kit.assert_true(saw_results, "%s: the mission ended with results" % mode)
@@ -731,7 +736,7 @@ func _simple_checks() -> void:
 		return
 	_cue_checks()
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
-	kit.assert_eq(kit.seated(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
+	kit.assert_eq(kit.seated(), kit.seated_want(want, _host_p()), "%s: all %d TV players are seated" % [mode, want])
 	kit.assert_true(main.vr_menu == null and main.tv_menu == null, "%s: no hangar menus" % mode)
 	kit.assert_true(saw_play, "%s: round 1 was played" % mode)
 	kit.assert_true(saw_kaiju, "%s: kaiju showed up" % mode)
