@@ -23,6 +23,9 @@ const SLIME_COLORS: Array[Color] = [Color(0.45, 0.9, 0.45), Color(1.0, 0.55, 0.7
 var mons := {}  ## id -> Dictionary
 var next_id := 1
 var giant_hits := 12  ## set by main for the party size
+var speed := 1.0  ## the journey's tier makes monsters a little quicker (sagagen.gd plan.speed)
+var stomp_gap: Array = [4.5, 6.5]  ## seconds between the giant's stomps (plan.stomp)
+var giant_look: Array = []  ## [body, glow] colours of this journey's giant (plan.giant)
 var stomps: Array = []  ## host: [Vector3] stomps that happened this step
 var windups: Array = []  ## host: [Vector3] wind-ups that started this step
 var _heights := {}
@@ -56,7 +59,9 @@ func _make(id: int, kind: int, p: Vector3) -> Dictionary:
 		MUSHY:
 			node = Creatures.monster("mushroom", {"color": Color(0.95, 0.35, 0.4), "seed": id})
 		GIANT:
-			var inner := Creatures.monster("golem", {"color": Color(0.5, 0.45, 0.6), "color2": Color(0.8, 0.4, 1.0), "boss": true})
+			var body_col: Color = giant_look[0] if giant_look.size() == 2 else Color(0.5, 0.45, 0.6)
+			var glow_col: Color = giant_look[1] if giant_look.size() == 2 else Color(0.8, 0.4, 1.0)
+			var inner := Creatures.monster("golem", {"color": body_col, "color2": glow_col, "boss": true})
 			inner.scale = Vector3.ONE * GIANT_SCALE
 			node = Node3D.new()
 			node.add_child(inner)
@@ -79,7 +84,7 @@ func _make(id: int, kind: int, p: Vector3) -> Dictionary:
 	var m := {"kind": kind, "zone": World.zone_of(p), "p": p, "v": Vector3.ZERO, "yaw": 0.0, "t": randf_range(0.3, 1.2),
 		"hop": 0.0, "hits": 0, "node": node, "anim": an, "h": float(_heights[kind]), "sz": 1.0,
 		"ang": randf() * TAU, "swoop": randf_range(2.0, 5.0), "dive": 0.0, "goal": p, "cd": 0.0,
-		"stomp": 2.0, "wind": 0.0, "aura": aura, "ring": ring}
+		"stomp": 2.0, "wind": 0.0, "aura": aura, "ring": ring, "ice": 0.0}
 	mons[id] = m
 	return m
 
@@ -144,8 +149,21 @@ func giant_id() -> int:
 	return -1
 
 
+## Host: ICE: a monster stands still (can't bump anyone) for `secs`.
+func freeze(id: int, secs: float) -> void:
+	if mons.has(id):
+		mons[id]["ice"] = maxf(float(mons[id]["ice"]), secs)
+		mons[id]["hop"] = 0.0
+		mons[id]["wind"] = 0.0
+
+
+func frozen(id: int) -> bool:
+	return mons.has(id) and float(mons[id]["ice"]) > 0.0
+
+
 ## Host: a hit. Returns "poof" (gone), "hit" (the Giant's mist shrank) or "" (too soon again).
-func hit(id: int) -> String:
+## power: how much the Giant's mist shrinks (the MIGHTY sword trick makes it more).
+func hit(id: int, power: int = 1) -> String:
 	if not mons.has(id):
 		return ""
 	var m: Dictionary = mons[id]
@@ -155,7 +173,7 @@ func hit(id: int) -> String:
 	if float(m["cd"]) > 0.0:
 		return ""
 	m["cd"] = 0.45
-	m["hits"] = int(m["hits"]) + 1
+	m["hits"] = int(m["hits"]) + maxi(1, power)
 	m["sz"] = maxf(0.0, 1.0 - float(m["hits"]) / float(giant_hits))
 	m["anim"].hurt(Color(1, 1, 1))
 	if int(m["hits"]) >= giant_hits:
@@ -176,6 +194,9 @@ func step(delta: float, targets: Array) -> Array:
 		var p: Vector3 = m["p"]
 		m["cd"] = maxf(0.0, float(m["cd"]) - delta)
 		var zone: int = m["zone"]
+		if float(m["ice"]) > 0.0:
+			m["ice"] = float(m["ice"]) - delta
+			continue
 		if kind == BAT:
 			_bat(m, delta, targets)
 			continue
@@ -194,7 +215,7 @@ func step(delta: float, targets: Array) -> Array:
 			var dir := Vector3(randf_range(-1, 1), 0, randf_range(-1, 1)).normalized()
 			if best != Vector3.INF and randf() < 0.75:
 				dir = Vector3(best.x - p.x, 0.0, best.z - p.z).normalized()
-			m["v"] = dir * (1.4 if kind == MUSHY else 1.7)
+			m["v"] = dir * (1.4 if kind == MUSHY else 1.7) * speed
 			m["hop"] = hop_len
 			m["yaw"] = atan2(dir.x, dir.z)
 		var hop: float = m["hop"]
@@ -237,7 +258,7 @@ func _giant(m: Dictionary, delta: float, best: Vector3, targets: Array, bumps: A
 		return
 	m["stomp"] = float(m["stomp"]) - delta
 	if float(m["stomp"]) <= 0.0 and best != Vector3.INF and best.distance_to(p) < STOMP_R + 1.5:
-		m["stomp"] = randf_range(4.5, 6.5)
+		m["stomp"] = randf_range(float(stomp_gap[0]), float(stomp_gap[1]))
 		m["wind"] = WIND_TIME
 		windups.append(p)
 		return
@@ -246,7 +267,7 @@ func _giant(m: Dictionary, delta: float, best: Vector3, targets: Array, bumps: A
 		var to := Vector3(best.x - p.x, 0.0, best.z - p.z)
 		m["yaw"] = lerp_angle(float(m["yaw"]), atan2(to.x, to.z), 1.0 - exp(-3.0 * delta))
 		if to.length() > 2.2:
-			p += to.normalized() * 0.9 * delta
+			p += to.normalized() * 0.9 * speed * delta
 			moving = 1.0
 	m["p"] = _zone_clamp(p, int(m["zone"]), 1.2)
 	m["hop"] = moving
@@ -254,7 +275,7 @@ func _giant(m: Dictionary, delta: float, best: Vector3, targets: Array, bumps: A
 
 func _bat(m: Dictionary, delta: float, targets: Array) -> void:
 	var c := World.center(int(m["zone"]))
-	m["ang"] = float(m["ang"]) + delta * 0.6
+	m["ang"] = float(m["ang"]) + delta * 0.6 * speed
 	var a: float = m["ang"]
 	var home := c + Vector3(cos(a) * 3.4, 1.9 + 0.3 * sin(a * 3.0), sin(a) * 4.5)
 	m["swoop"] = float(m["swoop"]) - delta
