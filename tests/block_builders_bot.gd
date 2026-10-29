@@ -21,6 +21,7 @@ extends Node
 ## view's HUD / hint line, the controls line, the status line) shows words.
 
 const Levels := preload("res://games/block_builders/levels.gd")
+const Story := preload("res://games/block_builders/story.gd")
 
 var main
 var t := 0.0
@@ -51,6 +52,7 @@ func _ready() -> void:
 	if OS.get_environment("BOT_VR") == "1" and not OS.has_environment("DUO_JOIN"):
 		OS.set_environment("BB_FAKE_VR", "1")
 	main = load("res://games/block_builders/main.tscn").instantiate()
+	main.set("fresh_save", true)  # a brand-new sky story every run (story.gd)
 	add_child(main)
 
 
@@ -86,6 +88,14 @@ func _physics_process(delta: float) -> void:
 		if main.state == "clear" or main.state == "won":
 			cleared_seen += 1
 			print("Bot: LEVEL %d CLEARED (%d so far) score=%d stars=%d" % [main.level + 1, cleared_seen, main.score, main.stars_taken])
+			if main.simple and main.net.mode != "client" and Story.is_adventure(main.level):
+				# The bot path detours to the lost cloud friend (coursegen.gd), so it must be home now.
+				if main.friend_state == 2 and (main.save.data.friends as Array).size() > 0:
+					print("Bot: FRIEND rescued on %s (%d home)" % [str(main.level_data().name), (main.save.data.friends as Array).size()])
+				else:
+					printerr("SCRIPT ERROR: Bot: the lost friend on %s wasn't rescued (state %d) %s friend %s ground %s path %s" % [str(main.level_data().name), main.friend_state, str(main.level_data().get("challenges")), str(main.level_data().get("friend")), str(main.level_data().ground), str(main.level_data().bot_path)])
+				if int(main.save.data.adventure) < Story.adventure_of(main.level) + 1 and not Story.is_daily(main.level):
+					printerr("SCRIPT ERROR: Bot: the adventure wasn't saved (%d)" % int(main.save.data.adventure))
 		if main.simple and main.state == "failed":
 			print("Bot: FAIL - a level failed in SIMPLE_MODE")
 		last_state = main.state
@@ -410,8 +420,10 @@ func _check_headline(who: String, text: String) -> void:
 	var tx := text.strip_edges()
 	if WORDS.has(tx):
 		return
-	for n in Levels.count():
-		if tx == str(Levels.get_level(n).name):
+	if tx == str(main.level_data().name) or Story.is_course_name(tx):
+		return  # (the sky adventures' names: coursegen.gd; a TV machine may show the next one before its snapshot)
+	for n in Levels.levels().size():
+		if tx == str(Levels.levels()[n].name):
 			return
 	_tip_error(who, tx)
 

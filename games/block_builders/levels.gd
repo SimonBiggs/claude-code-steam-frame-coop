@@ -20,6 +20,8 @@ extends RefCounted
 ## No stars, lava, wind, water or speed pads; budgets are the solution plus a spare. The solo buddy
 ## runner (main.gd) and the bot follow bot_path; waypoint 0 is where you wait for the path.
 
+const Story := preload("res://games/block_builders/story.gd")
+
 const LEVELS := [
 	{
 		"name": "FIRST BRIDGE",
@@ -350,10 +352,25 @@ static func levels() -> Array:
 	return SIMPLE_LEVELS if Engine.get_meta("bb_simple", false) else LEVELS
 
 
+## SIMPLE_MODE: after the lessons come the seeded SKY ADVENTURES (story.gd / coursegen.gd), seeded from
+## the family's world seed (Engine meta "bb_world": the host's save, sent to the TV machines in the
+## snapshot), and TODAY'S SKY at story.gd DAILY_INDEX.
 static func count() -> int:
+	if Engine.get_meta("bb_simple", false):
+		return Story.DAILY_INDEX + 1
 	return levels().size()
 
 
+static var _gen_cache := {}
+
 static func get_level(i: int) -> Dictionary:
 	var l := levels()
+	if Engine.get_meta("bb_simple", false) and i >= l.size():
+		var world := int(Engine.get_meta("bb_world", 0))
+		var key := "%d:%d:%s" % [world, i, Story.Seeded.today() if Story.is_daily(i) else ""]
+		if not _gen_cache.has(key):
+			if _gen_cache.size() > 16:
+				_gen_cache.clear()
+			_gen_cache[key] = Story.course(world, mini(i, Story.DAILY_INDEX))
+		return _gen_cache[key]
 	return l[clampi(i, 0, l.size() - 1)]
