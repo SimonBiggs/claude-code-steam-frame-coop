@@ -10,6 +10,10 @@ extends Node
 ## walkable from the counting spot without jumping, for both the seeker's and a hider's size); the seeker
 ## sniffs when close to a hider; a free hider rings the jail bell once someone is in jail; in STAR HUNT
 ## rounds hiders grab the nearest star before hiding. Rounds cycle classic / stars / night.
+## HOUSES: the house is generated (games/hide_and_seek/housegen.gd); the connectivity check builds the
+## current house, TODAY'S HOUSE and a small and a big house with real physics (cross-checking housegen's own
+## grid validator, tests/hide_and_seek_gen_test.gd). PIP: in round 2 a hider runs to Pip while the seeker
+## looks; prints "BOT: PIP OK" once Pip is found (and, on the TV, once the find and his new toy arrived).
 ## MAPS: the connectivity check runs on EVERY map (each built into its own isolated physics world), and the
 ## bot plays at least 3 rounds so the map rotation (house -> castle -> spaceship) happens; it prints
 ## "BOT: MAP ROTATION OK" once it has played on 3 different maps (and the TV mirrored each one).
@@ -24,6 +28,7 @@ extends Node
 ## (XR nodes without a headset) whose hands aim the torch and touch hiders, so the 3D VR cues run.
 const UiKit := preload("res://core/ui_kit.gd")
 const WorldScript := preload("res://games/hide_and_seek/world.gd")
+const Story := preload("res://games/hide_and_seek/story.gd")
 
 var main
 var t := 0.0
@@ -35,7 +40,7 @@ var spots := {}  # player index -> hiding spot
 var rounds_seen := {}
 var conn_done := false
 var conn_ok := true
-var conn_worlds: Array = []  # [SubViewport, map index]
+var conn_worlds: Array = []  # [SubViewport, map index, spec]
 var maps_seen := {}
 var cues := {}  # picture cues seen / learned / retired on this machine
 var cue_verdict := false
@@ -102,7 +107,10 @@ func _physics_process(delta: float) -> void:
 			get_tree().quit()
 		return
 	if conn_worlds.is_empty() and not conn_done and t > 0.3 and main.net.mode != "client":
-		for i in main.MAPS.size():
+		var builds: Array = [[0, main.map_spec if main.map_idx == 0 else Story.daily()], [0, Story.daily()],
+			[0, {"seed": 4242, "level": 0, "theme": 1}], [0, {"seed": 777, "level": 6, "theme": 3}], [1, {}], [2, {}]]
+		for bi in builds:
+			var i: int = bi[0]
 			var vp := SubViewport.new()
 			vp.own_world_3d = true
 			vp.size = Vector2i(4, 4)
@@ -110,19 +118,19 @@ func _physics_process(delta: float) -> void:
 			add_child(vp)
 			var holder := Node3D.new()
 			vp.add_child(holder)
-			main.MAPS[i].build(holder)
-			conn_worlds.append([vp, i])
+			main.MAPS[i].build(holder, bi[1])
+			conn_worlds.append([vp, i, bi[1]])
 	if not conn_done and t > 0.8 and not conn_worlds.is_empty():
 		conn_done = true
 		for cw in conn_worlds:
 			var vp: SubViewport = cw[0]
-			var d: Dictionary = main.MAPS[int(cw[1])].data()
+			var d: Dictionary = main.MAPS[int(cw[1])].data(cw[2])
 			var space: PhysicsDirectSpaceState3D = vp.find_world_3d().direct_space_state
 			_connectivity(space, d, 0.32, 1.6, "seeker")
 			_connectivity(space, d, 0.3, 0.9, "hider")
 			vp.queue_free()
 		conn_worlds.clear()
-		print("BOT: CONNECTIVITY %s on all %d maps" % ["OK" if conn_ok else "FAIL", main.MAPS.size()])
+		print("%sBOT: CONNECTIVITY %s on all %d maps (4 houses)" % ["" if conn_ok else "SCRIPT ERROR: ", "OK" if conn_ok else "FAIL", main.MAPS.size()])
 		if OS.has_environment("BOT_CONN_ONLY"):
 			get_tree().quit()
 			return
@@ -132,6 +140,9 @@ func _physics_process(delta: float) -> void:
 		if maps_seen.size() >= 3:
 			print("BOT: MAP ROTATION OK (%s)" % ", ".join(maps_seen.keys()))
 	var mode: String = main.net.mode
+	if main.pip_finder >= 0 and not has_meta("pip_ok") and (mode != "host" or main.toys > 0):
+		set_meta("pip_ok", true)
+		print("BOT: PIP OK (found by P%d, %d toys at his kennel, on %s)" % [main.pip_finder + 1, main.toys, main.map_title()])
 	# Real controllers may be plugged into this machine (someone might be playing!): ignore them.
 	var real := Input.get_connected_joypads()
 	for p in main.players:
@@ -238,6 +249,17 @@ func _hiders(delta: float) -> void:
 			spots[p.index] = choice
 		var spot: Vector3 = spots[p.index]
 		used[spot] = true
+		# Pip: in round 2 (the seeker dawdles) the first hider runs to him (squeezing past furniture).
+		if main.phase == "seek" and main.pip_on and main.round_no == 2 and p.index == _pip_hunter():
+			if p.prop_kind >= 0:
+				p.toggle_disguise()
+			p.collision_mask = 0
+			if not has_meta("pip_run"):
+				set_meta("pip_run", true)
+				print("BOT: P%d runs to Pip at %s" % [p.index + 1, main.pip_spot])
+			_walk_to(p, main.pip_spot, 0.2, delta, 6.0)
+			continue
+		p.collision_mask = 1
 		# Jailbreak: the last free hider (not disguised) dashes to the bell once a friend is in jail.
 		if main.phase == "seek" and main.jailed_count() > 0 and main.jail_breaks > 0 and p.index == _bell_ringer():
 			if p.prop_kind >= 0:
@@ -269,6 +291,14 @@ func _hiders(delta: float) -> void:
 			p.toggle_disguise()  # pops out now and then (and back in once there), like a fidgety kid
 		if main.phase == "seek":
 			p.bot_alt = p.taunt_cd <= 0.0 and fmod(t + p.index * 0.7, 1.5) < 0.2  # squeak whenever it's ready
+
+
+## The free local hider with the lowest index looks for Pip.
+func _pip_hunter() -> int:
+	for p in main.players:
+		if p.index > 0 and p.is_hiding() and not p.remote and not p.ghost:
+			return p.index
+	return -1
 
 
 ## The free hider with the highest index rings the bell.
@@ -409,7 +439,7 @@ func _connectivity(space: PhysicsDirectSpaceState3D, md: Dictionary, radius: flo
 			title, who, radius, count, (md.rooms as Array).size(), (md.doors as Array).size()])
 	else:
 		conn_ok = false
-		print("BOT: %s: CONNECTIVITY FAIL for the %s (r %.2f): cut off: %s" % [title, who, radius, ", ".join(problems)])
+		print("SCRIPT ERROR: BOT: %s: CONNECTIVITY FAIL for the %s (r %.2f): cut off: %s" % [title, who, radius, ", ".join(problems)])
 
 
 func _cell(p: Vector3, x0: float, z0: float, nx: int, nz: int) -> int:

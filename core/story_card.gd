@@ -13,7 +13,8 @@ extends RefCounted
 ## snowman, tophat, beanie, gift (a present), and the Kitchen Rush guest faces granny, kid, pirate, robot,
 ## alien, knight; Kart Race's kart (a little race kart in `color`), partyhat, cowboy (hat), wizard (hat);
 ## Whack-a-Mole's farmer (Fig), mole (fur = color), bunny and crops lettuce, carrot, pumpkin, sunflower,
-## strawberry, corn, melon, apple; Party Board's toucan (Mango); anything else is a core/ui_kit.gd icon kind ("star", "heart", "crown"...).
+## strawberry, corn, melon, apple; Party Board's toucan (Mango); Hide and Seek's puppy (Pip: fur = color,
+## floppy ears, a wagging tongue); anything else is a core/ui_kit.gd icon kind ("star", "heart", "crown"...).
 ## Keep lines short and kind: kids read the screen.
 
 const UiKit := preload("res://core/ui_kit.gd")
@@ -23,7 +24,7 @@ const PICTURES: Array[String] = ["bird", "envelope", "cloud", "storm", "house", 
 	"penguin", "snowman", "tophat", "beanie", "gift", "granny", "kid", "pirate", "robot", "alien", "knight",
 	"kart", "partyhat", "cowboy", "wizard",
 	"farmer", "mole", "bunny", "lettuce", "carrot", "pumpkin", "sunflower", "strawberry", "corn", "melon", "apple",
-	"toucan"]
+	"toucan", "puppy"]
 
 
 ## Show a story card on one view root or an Array of them. Returns the first card made (or null).
@@ -343,6 +344,19 @@ class Picture extends Control:
 					_poly([[0.46, 0.66 + bob], [0.54, 0.66 + bob], [0.54, 0.71 + bob], [0.46, 0.71 + bob]], white)
 			"lettuce", "carrot", "pumpkin", "sunflower", "strawberry", "corn", "melon", "apple":
 				_veg(kind, bob)
+			"puppy":  # Pip (Hide and Seek): a round puppy face (fur = color), floppy brown ears, a pink tongue
+				var ear := Color(0.38, 0.24, 0.16)
+				var wag := sin(t * 5.0) * 0.03
+				_poly([[0.22, 0.3 + bob], [0.34, 0.26 + bob], [0.3, 0.62 + bob + wag], [0.16, 0.58 + bob + wag]], ear)
+				_poly([[0.78, 0.3 + bob], [0.66, 0.26 + bob], [0.7, 0.62 + bob - wag], [0.84, 0.58 + bob - wag]], ear)
+				_circle(0.5, 0.5 + bob, 0.28, color)
+				_circle(0.5, 0.64 + bob, 0.14, Color(1.0, 0.93, 0.82))
+				_eye(0.4, 0.45 + bob, 0.055)
+				_eye(0.6, 0.45 + bob, 0.055)
+				_circle(0.5, 0.58 + bob, 0.045, Color(0.2, 0.12, 0.1))
+				if fmod(t, 1.6) < 1.0:
+					_poly([[0.46, 0.68 + bob], [0.54, 0.68 + bob], [0.54, 0.78 + bob], [0.5, 0.8 + bob], [0.46, 0.78 + bob]], Color(1.0, 0.5, 0.6))
+				_poly([[0.3, 0.76 + bob], [0.7, 0.76 + bob], [0.68, 0.8 + bob], [0.32, 0.8 + bob]], Color(0.9, 0.2, 0.25))
 			"toucan":  # Mango (Party Board): a black toucan with a huge orange beak and a party hat
 				_circle(0.42, 0.6 + bob, 0.27, Color(0.12, 0.12, 0.16))
 				_circle(0.42, 0.68 + bob, 0.15, Color(1.0, 0.95, 0.8))
