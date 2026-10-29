@@ -315,9 +315,11 @@ static func _wave(shape: String, rng: RandomNumberGenerator, gap: float) -> Arra
 		"stack":  # four at one spot, one after another (a column)
 			for k in 4:
 				out.append([k * 1.9, c.x, c.y, -1])
-		_:  # scatter
+		_:  # scatter (the middle one comes up near the VR player: TV players run faster)
 			for k in 3:
 				var q := Vector2(rng.randf_range(-4.5, 4.5), rng.randf_range(-4.5, 3.5))
+				if k == 1:
+					q = VR_HOME + Vector2(rng.randf_range(-1.4, 1.4), rng.randf_range(-1.6, 0.4))
 				out.append([k * gap, q.x, q.y, -1])
 	return out
 

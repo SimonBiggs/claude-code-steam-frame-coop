@@ -7,12 +7,15 @@ extends Node
 ## Flat host: add DUO_FLAT_HOST=1 to the host (no VR: one bot pad plays slot 0 on the host).
 
 const BotKit := preload("res://tests/bot_kit.gd")
+const Story := preload("res://games/balloon_pop/story.gd")
 
 var kit: BotKit
 var main: Node
 var want := 2
 var saw_results := false
 var saw_finale := false
+var saw_pick := false  # Poppy's ride was finished and the next round began with the ride pick (story.gd)
+var saw_play := false
 var jumps := 0
 var vr_t := 0.0
 
@@ -27,6 +30,8 @@ func _ready() -> void:
 	main = load("res://games/balloon_pop/main.tscn").instantiate()
 	main.set("round_time", 14.0)
 	main.set("results_wait", 4.0)  # the next round starts by itself (nobody presses anything)
+	main.set("fresh_save", true)  # a brand-new fair every run
+	main.set("need_scale", 0.12)  # tiny rides: round 1 finishes one, round 2 starts with the ride pick
 	add_child(main)
 	kit.main = main
 	want = BotKit.bot_players(2, 6)
@@ -71,6 +76,11 @@ func _ready() -> void:
 
 
 func _watch_results() -> String:
+	var ph := String(main.net.state_get("phase", ""))
+	if ph == "pick":
+		saw_pick = true
+	elif ph == "play":
+		saw_play = true
 	if main.results_showing() and not saw_results:
 		saw_results = true
 		kit.assert_true(main.balloons.is_empty(), "the finale popped every balloon")
@@ -164,7 +174,7 @@ func _nearest(from: Vector3, friendly: bool) -> Node3D:
 		var b: Node3D = main.balloons[id]
 		if not is_instance_valid(b) or b.is_queued_for_deletion():
 			continue
-		if friendly and int(b.get("kind")) == 2:
+		if friendly and (int(b.get("kind")) == 2 or (int(b.get("kind")) == 8 and int(b.get("col")) != 0)):
 			continue
 		var dd := from.distance_to(b.position)
 		if dd < bd:
@@ -196,3 +206,9 @@ func _checks() -> void:
 		kit.assert_true(main.popped_by_tv > 0, "TV players popped balloons")
 	if main.vr_rig != null:
 		kit.assert_true(main.popped_by_vr > 0, "the fake VR player popped balloons")
+	kit.assert_true(saw_play, "%s: a generated round played" % mode)
+	kit.assert_true((main.net.state_get("fair", {}) as Dictionary).has("rides"), "%s: the fair state reached this machine" % mode)
+	if mode != "client":
+		kit.assert_true(Story.rides_built(main.save.data.rides) >= 1, "Poppy's first ride was built (%s)" % str(main.save.data.rides))
+		kit.assert_true(saw_pick, "%s: the next round began with the ride pick" % mode)
+		kit.assert_true(not main.round_desc.is_empty() and int(main.save.data.rounds) >= 1, "%s: rounds came from a seed and were saved" % mode)
