@@ -25,7 +25,7 @@ func _ready() -> void:
 	kit = BotKit.new()
 	add_child(kit)
 	main = load("res://games/tower_stack/main.tscn").instantiate()
-	main.set("round_time", 24.0)
+	main.set("round_time", 45.0)
 	add_child(main)
 	kit.main = main
 	want = BotKit.bot_players(2, 6)
@@ -46,10 +46,10 @@ func _ready() -> void:
 	kit.drop_in_out(main.party, t0 + 9.0, 3.0, func(slot: int) -> bool:
 		return main.avatars.has(slot) and main.huds.has(slot) and main.cams.has(slot))
 	if host:
-		kit.at(34.0, "host checks", _checks)
-		kit.at(38.0, "finish", kit.finish)
+		kit.at(56.0, "host checks", _checks)
+		kit.at(60.0, "finish", kit.finish)
 	else:
-		kit.at(30.0 if client else 36.0, "finish", func() -> void:
+		kit.at(53.0 if client else 58.0, "finish", func() -> void:
 			_checks()
 			kit.finish())
 	kit.every(2.0, _report)
@@ -209,7 +209,10 @@ func _drive_vr(delta: float) -> void:
 					vr_phase = "find"
 				return
 			var top := Vector3(main.top_xz.x, float(main.tower_h), main.top_xz.y)
-			var goal := Vector3(top.x, maxf(top.y, main.BASE_H) + main.H + 0.12, top.z)
+			var goal := Vector3(top.x, maxf(top.y, main.BASE_H) + main._half(main.held_id).y + 0.12, top.z)
+			var spot: Array = main._crane_spot(main.held_id)
+			if not spot.is_empty():  # the plan's next spot: hold it just above, the snap lines it up
+				goal = Vector3(float(spot[1]), float(spot[2]) + 0.1, float(spot[3]))
 			if kit.vr_reach(rig, VrRig.RIGHT, goal, 3.0, delta):
 				kit.vr_trigger(rig, 0.0)
 				vr_phase = "find"
@@ -217,16 +220,26 @@ func _drive_vr(delta: float) -> void:
 
 
 func _report() -> String:
-	return "BOT %s: players %s, blocks %d, hover %s, height %.1f, rec %.1f, best %.1f, delivered %d, placed %d" % [
+	return "BOT %s: players %s, blocks %d, hover %s, height %.1f / %.2f, rec %.1f, best %.1f, delivered %d, placed %d, job %d %s fill %d, built %d, town %d" % [
 		main.net.mode, str(main.party.active_slots()), main.blocks.size(), str(main.hover),
-		float(main.net.state_get("height", 0.0)), float(main.net.state_get("rec", 0.0)),
-		float(main.net.state_get("best", 0.0)), main.total_delivered, main.total_placed]
+		float(main.net.state_get("height", 0.0)), float(main.site.get("top", 0.0)), float(main.net.state_get("rec", 0.0)),
+		float(main.net.state_get("best", 0.0)), main.total_delivered, main.total_placed, main.job_n,
+		String(main.site.get("building", "")), main.fill, main.total_built, main.town.entries.size()]
 
 
 func _checks() -> void:
 	var mode: String = main.net.mode
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
 	kit.assert_true(int(main.net.state_get("round", 0)) >= 2, "%s: round 1 ended with results and round 2 started" % mode)
+	# The job (towergen.gd) is the same on every machine, with its see-through plan, hoop and Wren.
+	kit.assert_true(not main.site.is_empty() and main.site == main.G.from_job(main.net.state_get("job", [])), "%s: the job is rebuilt from the job state" % mode)
+	kit.assert_eq(main.ghosts.size(), (main.site.get("plan", []) as Array).size(), "%s: the plan shows as see-through blocks" % mode)
+	kit.assert_true(absf(main.ring.position.y - float(main.site.top)) < 0.01, "%s: the gold hoop marks the goal height" % mode)
+	kit.assert_true(main.wren != null and main.wren.is_inside_tree(), "%s: Wren the builder bird is here" % mode)
+	kit.assert_eq(main.town.entries.size(), mini((main.net.state_get("town", []) as Array).size(), main.G.town_size()), "%s: the town shows every saved tower" % mode)
+	for id in main.blocks:
+		kit.assert_true(main.bkind.has(id), "%s: block %d knows its kind" % [mode, int(id)])
+		break
 	if mode == "client":
 		kit.assert_eq(main.party.local_slots().size(), want, "client: all %d local players are seated" % want)
 		kit.assert_true(ghosts_seen > 0, "client: ghost blocks mirrored from the host")
@@ -239,6 +252,8 @@ func _checks() -> void:
 	if want > 0 and mode == "local" or mode == "host":
 		kit.assert_true(main.total_delivered > 0, "%s: blocks reached the pad" % mode)
 	kit.assert_true(main.max_height > 0.7, "%s: a tower was built (%.1f m)" % [mode, main.max_height])
+	kit.assert_true(main.total_built >= 1, "%s: a tower reached the hoop, got its roof and joined the town (%d)" % [mode, main.total_built])
+	kit.assert_true(int(main.save.data.built) >= main.total_built and (main.save.data.town as Array).size() >= 1, "%s: finished towers are saved" % mode)
 	if main.vr_rig != null:
 		kit.assert_true(main.total_placed > 0, "the fake VR giant placed blocks (%d)" % main.total_placed)
 	if mode == "local" and want >= 2:

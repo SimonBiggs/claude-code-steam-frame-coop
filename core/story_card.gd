@@ -25,7 +25,8 @@ extends RefCounted
 ## (Lumi: a little glowing crystal fairy), shard (a crystal shard), the skills bigfire, snowflake (ice), twin (two
 ## sparks), longsword, spin (a sword in a whirl), mighty (a big golden sword), and Willowbrook's windmill, fountain
 ## and rainbow; Rocket Workshop's engineer (Sprocket: a teal robot in an orange hard hat with a spanner) and
-## toyrocket (the rocket with its nose and fins in color); anything else is a core/ui_kit.gd icon kind ("star", "heart", "crown"...).
+## toyrocket (the rocket with its nose and fins in color); Tower Stack's wren (Wren: a little brown builder bird in
+## a blue hard hat) and tower (a stack of jelly blocks in color under a red roof); anything else is a core/ui_kit.gd icon kind ("star", "heart", "crown"...).
 ## Keep lines short and kind: kids read the screen.
 
 const UiKit := preload("res://core/ui_kit.gd")
@@ -39,7 +40,8 @@ const PICTURES: Array[String] = ["bird", "envelope", "cloud", "storm", "house", 
 	"beaver", "island", "boat",
 	"captain", "planet", "station", "rocket", "seller", "icecream", "carousel", "ferris", "tent",
 	"lumi", "shard", "bigfire", "snowflake", "twin", "longsword", "spin", "mighty", "windmill", "fountain", "rainbow",
-	"engineer", "toyrocket"]
+	"engineer", "toyrocket",
+	"wren", "tower"]
 
 
 ## Show a story card on one view root or an Array of them. Returns the first card made (or null).
@@ -586,6 +588,33 @@ class Picture extends Control:
 				var sw := sin(t * 4.0) * 0.04
 				draw_line(_p(0.86, 0.86 + sw), _p(0.92, 0.6 + sw), Color(0.75, 0.75, 0.8), 0.05 * size.x)
 				draw_arc(_p(0.92, 0.57 + sw), 0.05 * size.x, PI * 0.9, PI * 2.1, 10, Color(0.75, 0.75, 0.8), 0.035 * size.x)
+			"wren":  # Wren (Tower Stack): a round brown builder bird with a perky tail and a blue hard hat
+				var brown := Color(0.62, 0.42, 0.25)
+				_poly([[0.22, 0.55 + bob], [0.06, 0.2 + bob], [0.16, 0.18 + bob], [0.32, 0.5 + bob]], brown.darkened(0.2))
+				_circle(0.5, 0.58 + bob, 0.3, brown)
+				_circle(0.55, 0.66 + bob, 0.17, Color(0.95, 0.85, 0.7))
+				_poly([[0.78, 0.48 + bob], [0.97, 0.53 + bob], [0.78, 0.58 + bob]], Color(1.0, 0.65, 0.2))
+				_eye(0.64, 0.46 + bob, 0.065)
+				var flap := sin(t * 9.0) * 0.07
+				_poly([[0.36, 0.58 + bob], [0.14, 0.5 + bob - flap], [0.3, 0.76 + bob]], brown.darkened(0.3))
+				_poly([[0.3, 0.32 + bob], [0.72, 0.32 + bob], [0.66, 0.15 + bob], [0.36, 0.15 + bob]], Color(0.25, 0.55, 0.95))
+				_poly([[0.24, 0.35 + bob], [0.8, 0.35 + bob], [0.8, 0.3 + bob], [0.24, 0.3 + bob]], Color(0.2, 0.45, 0.85))
+				_poly([[0.47, 0.32 + bob], [0.55, 0.32 + bob], [0.53, 0.15 + bob], [0.49, 0.15 + bob]], Color(1.0, 0.85, 0.3))
+				draw_line(_p(0.4, 0.86 + bob), _p(0.38, 0.97), Color(1.0, 0.65, 0.2), 0.025 * size.x)
+				draw_line(_p(0.56, 0.86 + bob), _p(0.58, 0.97), Color(1.0, 0.65, 0.2), 0.025 * size.x)
+			"tower":  # a jelly-block tower in color under a red roof, with a little flag
+				var wob := sin(t * 3.0) * 0.015
+				for k in 3:
+					var y0 := 0.94 - 0.2 * (k + 1)
+					var x0 := 0.3 + wob * (k + 1)
+					var col := color.lightened(0.15 * k) if k != 1 else color.darkened(0.15)
+					_poly([[x0, y0], [x0 + 0.4, y0], [x0 + 0.4, y0 + 0.19], [x0, y0 + 0.19]], col)
+					_circle(x0 + 0.14, y0 + 0.08, 0.025, Color(0.1, 0.1, 0.15))
+					_circle(x0 + 0.26, y0 + 0.08, 0.025, Color(0.1, 0.1, 0.15))
+				var tx := 0.3 + wob * 4.0
+				_poly([[tx - 0.05, 0.34], [tx + 0.45, 0.34], [tx + 0.2, 0.12]], Color(0.9, 0.3, 0.3))
+				draw_line(_p(tx + 0.2, 0.13), _p(tx + 0.2, 0.02), Color(0.4, 0.3, 0.25), 0.02 * size.x)
+				_poly([[tx + 0.2, 0.02], [tx + 0.34, 0.05 + sin(t * 6.0) * 0.01], [tx + 0.2, 0.08]], Color(1.0, 0.85, 0.3))
 			"rocket", "toyrocket":  # toyrocket: the nose and fins in color
 				var trim := color if kind == "toyrocket" else Color(0.95, 0.3, 0.35)
 				var flame := 0.04 * sin(t * 20.0)
