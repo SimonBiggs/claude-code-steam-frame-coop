@@ -68,6 +68,11 @@ score and game over. Use visual-only "ghost" copies of host objects on the clien
 
 ## VR (Steam Frame, OpenXR via SteamVR)
 
+- **VR-only world UI goes on ONE render layer** (`core/vr_layer.gd`, `UiKit.VR_LAYER`, bit 18): the TV split views share
+  the VR world, so a VR card on layer 1 shows its dark back on the TV. Core VR helpers (HudKit.vr_*, VrMenu, StoryCard.show_vr,
+  dialogue, awards, UiKit.vr_place/vr_follow, VrText.follow) do it already; for anything else call `VrLayer.mark(node)`.
+  The VrLayerGuard service fixes every camera's cull_mask each frame. Never use bits 18-19 for a game's own layers
+  (tests/engine_ui/vr_layer_test.gd lints games/).
 - Put XR on the **main viewport**: `get_viewport().use_xr = true`. A SubViewport gives a flat "theatre" view.
 - `XROrigin3D` > `XRCamera3D` + `XRController3D` (`tracker = "left_hand" / "right_hand"`, `pose = "aim"`).
 - Actions (default map): `get_vector2("primary")` (thumbstick), `get_float("trigger")`,
