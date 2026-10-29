@@ -261,7 +261,7 @@ static func keep_clear(d: Dictionary) -> Array:
 	var bp := board_pos(d)
 	for k in 5:
 		out.append([bp + Vector2(-0.8 + k * 0.4, 0.0), 0.12])
-	out.append([gus_pos(d), 0.18])
+	out.append([gus_pos(d), 0.22])
 	return out
 
 

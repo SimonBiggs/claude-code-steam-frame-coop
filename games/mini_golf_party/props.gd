@@ -124,7 +124,7 @@ func _touches(rig) -> void:
 	if c != null and c.sails != null:
 		_touch("mill", c.sails.global_position, 0.6, rig)
 	if main.gus != null and main.gus.up > 0.9:
-		_touch("gus", main.gus.global_position + Vector3.UP * 0.35, 0.16, rig)
+		_touch("gus", main.gus.global_position + Vector3.UP * 0.5, 0.2, rig)
 
 
 func _touch(key: String, p: Vector3, r: float, rig) -> void:

@@ -18,8 +18,8 @@ var _t := 0.0
 
 func _ready() -> void:
 	var hb := MeshKit.Builder.new()
-	hb.dome(0.17, MeshKit.at(Vector3.ZERO, Vector3(1.0, 0.55, 1.0)), Color(0.55, 0.38, 0.22), 12)
-	hb.disc(0.09, MeshKit.at(Vector3(0.0, 0.094, 0.0)), Color(0.15, 0.1, 0.06), 12)
+	hb.dome(0.24, MeshKit.at(Vector3.ZERO, Vector3(1.0, 0.5, 1.0)), Color(0.55, 0.38, 0.22), 12)
+	hb.disc(0.13, MeshKit.at(Vector3(0.0, 0.122, 0.0)), Color(0.15, 0.1, 0.06), 12)
 	add_child(MeshKit.instance(hb.build(), false))
 	body = Node3D.new()
 	var b := MeshKit.Builder.new()
@@ -37,7 +37,7 @@ func _ready() -> void:
 	b.dome(0.06, MeshKit.at(Vector3(0.0, 0.265, 0.0)), Color(0.25, 0.7, 0.4), 10)
 	b.box(Vector3(0.07, 0.008, 0.05), MeshKit.at(Vector3(0.0, 0.27, 0.06)), Color(0.2, 0.6, 0.35))
 	body.add_child(MeshKit.instance(b.build(), false))
-	body.scale = Vector3.ONE * 1.5
+	body.scale = Vector3.ONE * 2.2  # big enough to spot on a Deck
 	add_child(body)
 	_place()
 
@@ -72,6 +72,6 @@ func _place() -> void:
 		return
 	var u := clampf(up, 0.0, 1.0)
 	var h := sin(hop / 0.7 * PI) * 0.18 if hop > 0.0 else 0.0
-	body.position.y = -0.42 + u * 0.42 + h + sin(_t * 2.2) * 0.006
+	body.position.y = -0.72 + u * 0.72 + h + sin(_t * 2.2) * 0.006
 	body.rotation.y = spin + sin(_t * 0.7) * 0.35
 	body.visible = u > 0.05

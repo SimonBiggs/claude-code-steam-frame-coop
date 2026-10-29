@@ -1103,6 +1103,8 @@ func _new_course() -> void:
 	if new_day:
 		save.data["days"] = int(save.data["days"]) + 1
 		save.data["last_day"] = today
+	if OS.has_environment("MGP_DAYS"):  # debug / screenshots: pretend this many play-days
+		save.data["days"] = int(OS.get_environment("MGP_DAYS"))
 	var days := int(save.data["days"])
 	course_level = HoleGen.level_for(days)
 	var level_up := course_level > int(save.data["level"])
