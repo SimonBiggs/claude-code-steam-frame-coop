@@ -10,6 +10,7 @@ const FRUIT_COLORS: Array[Color] = [Color(0.95, 0.12, 0.12), Color(1.0, 0.55, 0.
 const LEAF := Color(0.25, 0.75, 0.25)
 const STUMP_TOP := 0.45  ## Nutmeg sits on a stump this high
 const STUMP_R := 0.35
+const NUTMEG_SCALE := 1.7  ## Nutmeg is a big, easy-to-see squirrel
 const SIGN_LOW_Y := 1.15  ## the sign's lower board (Nutmeg's recipe)
 const FUR := Color(0.85, 0.45, 0.18)
 const BARK := Color(0.5, 0.32, 0.18)

@@ -106,7 +106,6 @@ var branch_hand: Array[int] = []  # which VR hand holds the branch (-1)
 var branch_energy: Array[float] = []
 var fruits := {}  # id -> Dictionary {node, shadow, kind, state, vel, hand, t}
 var next_fruit := 0
-var drop_t := 1.5
 var send_t := 0.0
 var time_left := 0.0
 var results_t := 0.0
@@ -280,6 +279,7 @@ func _build_world(vr: bool) -> void:
 	var sq := MeshKit.instance(Art.squirrel())
 	sq.name = "Body"
 	sq.position.y = Art.STUMP_TOP
+	sq.scale = Vector3.ONE * Art.NUTMEG_SCALE
 	nutmeg.add_child(sq)
 	orchard = Node3D.new()
 	orchard.name = "Orchard"
@@ -874,7 +874,7 @@ func _vr_hands(delta: float) -> void:
 			elif Vector2(p.x - BOWL_POS.x, p.z - BOWL_POS.z).length() < BOWL_R + 0.1 and p.y < BOWL_TOP + 0.15:
 				touch_t = 0.6
 				fx("bowl", BOWL_POS, Color.WHITE, 0)
-			elif p.distance_to(NUTMEG_POS + Vector3.UP * (Art.STUMP_TOP + 0.3)) < 0.4:
+			elif p.distance_to(NUTMEG_POS + Vector3.UP * (Art.STUMP_TOP + 0.4 * Art.NUTMEG_SCALE)) < 0.5:
 				touch_t = 0.8
 				vr_rig.pulse(h, 0.3, 0.05)
 				fx("nutmeg", NUTMEG_POS + Vector3.UP * Art.STUMP_TOP, Color.WHITE, 0)
@@ -1229,17 +1229,22 @@ func _refresh_sign_recipe() -> void:
 	for k in G.GOOD:
 		if int(need[k]) > 0:
 			kinds.append(k)
-	var w := 1.2 / maxf(1.0, kinds.size())
+	var cols := mini(kinds.size(), 2)  # up to 2 x 2 on the board
+	var rows := (kinds.size() + 1) / 2
+	var w := 1.3 / maxf(1.0, cols)
+	var hh := 0.46 / maxf(1.0, rows)
+	var sc := 1.0 if rows == 1 else 0.62
 	for i in kinds.size():
 		var k: int = kinds[i]
-		var x := -0.6 + w * (i + 0.5)
+		var x := -0.65 + w * (i % cols + 0.5)
+		var y := 0.23 - hh * (i / cols + 0.5)
 		var fm := MeshKit.instance(Art.fruit(k), false)
-		fm.position = Vector3(x - 0.13, 0.0, 0.05)
-		fm.scale = Vector3.ONE * 0.9
+		fm.position = Vector3(x - 0.2 * sc, y, 0.06)
+		fm.scale = Vector3.ONE * sc
 		sign_recipe.add_child(fm)
 		var done := int(got[k]) >= int(need[k])
-		var l := UiKit.label3d("%d/%d" % [mini(int(got[k]), int(need[k])), int(need[k])], 0.17, "gold" if done else "text", true)
-		l.position = Vector3(x + 0.12, 0.0, 0.03)
+		var l := UiKit.label3d("%d/%d" % [mini(int(got[k]), int(need[k])), int(need[k])], 0.18 * sc, "gold" if done else "text", true)
+		l.position = Vector3(x + 0.14 * sc, y, 0.05)
 		sign_recipe.add_child(l)
 
 
