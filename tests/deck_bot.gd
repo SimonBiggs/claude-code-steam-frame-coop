@@ -47,6 +47,18 @@ class Runner extends Node:
 		for i in n:
 			await get_tree().process_frame
 
+	## A pad (dis)connects. Party games (core/party.gd) only seat bot pad ids (>= VIRTUAL_PAD_BASE) that are
+	## plugged in as virtual pads (stale presses from unplugged pads are ignored), so register it there too.
+	func plug(device: int, on: bool) -> void:
+		var meta := "core_party_virtual_pads"  # core/party.gd VIRTUAL_META
+		var pads: Array = Engine.get_meta(meta, [])
+		if on and not pads.has(device):
+			pads.append(device)
+		elif not on:
+			pads.erase(device)
+		Engine.set_meta(meta, pads)
+		Input.joy_connection_changed.emit(device, on)
+
 	func press(device: int, button: JoyButton) -> void:
 		for down in [true, false]:
 			var e := InputEventJoypadButton.new()
@@ -153,7 +165,7 @@ class Runner extends Node:
 		kit.main = game
 		await frames(60)
 		# The Deck's controls appear (connected) and press A, like someone starting to play.
-		Input.joy_connection_changed.emit(PAD1, true)
+		plug(PAD1, true)
 		await frames(10)
 		await press(PAD1, JOY_BUTTON_A)
 		await frames(40)
@@ -166,7 +178,7 @@ class Runner extends Node:
 		await frames(20)
 		kit.assert_true(views() <= 1, "%s: pressing A again on the Deck's own controls adds nobody (%d views)" % [id, views()])
 		# A friend's pad drops in: split screen.
-		Input.joy_connection_changed.emit(PAD2, true)
+		plug(PAD2, true)
 		await frames(10)
 		await press(PAD2, JOY_BUTTON_A)
 		await frames(60)
@@ -188,8 +200,8 @@ class Runner extends Node:
 			menus[0]._resume()
 			await frames(5)
 			kit.allow_pause = false
-		Input.joy_connection_changed.emit(PAD2, false)
-		Input.joy_connection_changed.emit(PAD1, false)
+		plug(PAD2, false)
+		plug(PAD1, false)
 		await frames(5)
 
 	## Pattern guard (one ant -> the whole nest): every split-screen (classic) game goes through core/classic_seats.gd's
