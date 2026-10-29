@@ -391,7 +391,9 @@ func _final_checks(mode: String) -> void:
 	var pics_ok := true
 	for pic in main.story_shown:
 		pics_ok = pics_ok and main.StoryCard.has_picture(pic)
-	var story_ok: bool = want_fans >= mini(songs_done, main.SongGen.FAN_KEEP) and shown == mini(want_fans, main.SongGen.FAN_SLOTS) \
+	# (a TV machine may quit a moment before the host's last fan reaches it)
+	var need := mini(songs_done - (1 if mode == "client" else 0), main.SongGen.FAN_KEEP)
+	var story_ok: bool = want_fans >= need and shown == mini(want_fans, main.SongGen.FAN_SLOTS) \
 		and main.story_shown.size() >= songs_done and pics_ok and main.fan_club.doodle != null
 	print("BOT CHECK story %s: fans shown %d of %d, story cards %s -> %s" % [mode, shown, want_fans, str(main.story_shown),
 		"PASS" if story_ok else "FAIL"])
