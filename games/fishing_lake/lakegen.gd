@@ -48,7 +48,7 @@ const UNLOCK := {MINNOW: 0, PERCH: 0, BLUEGILL: 0, TROUT: 0, CATFISH: 1, PIKE: 1
 	PUFFER: 2, MOONFISH: 2, LEGEND: 2, KOI: 3, GOLDEN: 3}
 const WEATHERS: Array[String] = ["sunny", "rain", "evening"]
 ## Sky phases per weather (main.gd THEMES order): theme index, p0 / p1 ranges.
-const SKY := {"sunny": [0, 0.0, 0.08, 1.0, 1.08], "rain": [1, 0.02, 0.1, 1.0, 1.08], "evening": [2, 0.4, 0.5, 1.4, 1.48]}
+const SKY := {"sunny": [0, 0.0, 0.08, 1.0, 1.08], "rain": [1, 0.02, 0.1, 1.0, 1.08], "evening": [2, 0.55, 0.65, 1.5, 1.56]}  # evening: the stars come out a bit past halfway
 const SPOT_R := 1.8
 const JETTY_END := Vector3(0.0, 0.0, Lake.JETTY_END_Z)
 const CAST_MIN := 6.0

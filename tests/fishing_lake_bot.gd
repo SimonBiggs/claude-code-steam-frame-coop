@@ -14,8 +14,12 @@ extends Node
 ## SIMPLE_MODE (main.gd): the game starts with the practice (cast into the glowing ring, reel in the
 ## fish, then the clock starts); only OLD WHISKERS (day 2) and the night (late day 2) are forced, since
 ## frenzies, maps, upgrades and the journal are off. The summary checks the practice ended.
+## SEEDED LAKES (lakegen.gd, book.gd): the angler casts at Ollie's wish spot now and then; every machine
+## must build the same lake (the client rebuilds it from the snapshot), the fish book board, the story
+## cards and a RUN line per day. BOT RESULT checks them (host / local / client).
 
 const FAKE_PAD := 40
+const StoryCardScript := preload("res://core/story_card.gd")
 
 var main
 var t := 0.0
@@ -37,6 +41,7 @@ var flicks := 0
 var max_crank := 0.0
 var events_done := {}
 var seen := {}  # things that happened (both machines), for the summary
+var lakes := {}  # lake keys seen
 
 
 func _ready() -> void:
@@ -173,6 +178,25 @@ func _watch() -> void:
 			seen["kind_%d" % f.kind] = true
 	if main.journal_text != "":
 		seen["journal"] = true
+	# Seeded lakes, Ollie's wish and the fish book.
+	if not main.lake_key.is_empty():
+		seen["lake"] = true
+		seen["lake_spots_%d" % main.lake.spots_root.get_child_count()] = true
+		lakes[str(main.lake_key)] = true
+	if main.lake.wish_root != null and main.lake.wish_root.visible:
+		seen["wish_marker"] = true
+	if main.wish_done:
+		seen["wish_done"] = true
+	if main.lake.book_root != null and main.lake.book_root.is_visible_in_tree() and main.lake.book_count.text != "":
+		seen["book_board"] = true
+	for p in main.players:
+		if p.hud != null and is_instance_valid(p.hud):
+			for c in p.hud.get_children():
+				if c is StoryCardScript.Card:
+					seen["story_card"] = true
+	for f in main.fish:
+		if f.kind >= 0 and f.home != Vector3.INF and not f.ghost:
+			seen["fish_at_spot"] = true
 	# Visual teaching (simple mode): picture cues instead of words.
 	if main.get("practice_arrow") != null and main.practice_arrow.visible:
 		seen["practice_arrow"] = true
@@ -225,6 +249,10 @@ func _event_target(from: Vector3) -> Vector3:
 			return f.position + Vector3(0.6, 0, 0.6)
 	if main.map_state == 2:
 		return main.map_pos
+	# Ollie's wish: fish its spot half the time.
+	var ws = main._wish_spot() if not main.wish_done else null
+	if ws != null and fmod(t, 20.0) < 10.0:
+		return ws.pos
 	if main.frenzy_t > 2.0:
 		return main.frenzy_pos
 	return Vector3.INF
@@ -452,3 +480,18 @@ func _exit_tree() -> void:
 	var keys: Array = seen.keys()
 	keys.sort()
 	print("BOT SEEN: %s" % " ".join(PackedStringArray(keys)))
+	print("BOT LAKES: %s wish=%s book=%d days_saved=%s" % [" ".join(PackedStringArray(lakes.keys())), main._wish_name(), main._journal_found(),
+		str(main.save.data.days) if main.net.mode != "client" else "-"])
+	var fails: Array[String] = []
+	var mode: String = main.net.mode
+	if t > 12.0:
+		for k in ["lake", "book_board"]:
+			if not seen.has(k):
+				fails.append("never saw " + k)
+		if mode != "client" and days_done >= 1 and not seen.has("story_card"):
+			fails.append("no story card")
+		if mode != "client" and days_done >= 1 and not seen.has("fish_at_spot"):
+			fails.append("no fish at a spot")
+		if mode != "client" and days_done >= 2 and lakes.size() < 2:
+			fails.append("the same lake two days running")
+	print("BOT RESULT: %s" % ("PASS" if fails.is_empty() else "FAIL " + "; ".join(fails)))

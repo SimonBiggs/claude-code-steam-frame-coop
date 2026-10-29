@@ -18,7 +18,7 @@ const MILESTONES := {4: "A third of the book!", 6: "Half the book!", 9: "Nearly 
 
 static func save_defaults() -> Dictionary:
 	# book: fish name -> [times caught, best kg]; days: days fished; daily: date -> fish caught.
-	return {"world": -1, "days": 0, "book": {}, "daily": {}, "wishes": 0, "migrated": false}
+	return {"world": -1, "days": 0, "book": {}, "daily": {}, "wishes": 0, "last_wish": -1, "migrated": false}
 
 
 ## The level (0..3) after `days` days fished: what can swim in the lake.
@@ -43,13 +43,15 @@ static func missing(book: Dictionary, lvl: int) -> Array:
 	return out
 
 
-## Ollie's wish for a normal day: a missing page (one of the first two missing, by the seed), else any
-## fish that's unlocked (a new record to chase).
-static func pick_wish(book: Dictionary, lvl: int, seed_value: int) -> int:
+## Ollie's wish for a normal day: a missing page (one of the first three missing, by the seed, not
+## yesterday's again when there's another), else any fish that's unlocked (a new record to chase).
+static func pick_wish(book: Dictionary, lvl: int, seed_value: int, last: int = -1) -> int:
 	var r := Seeded.rng(seed_value, "wish")
-	var miss := missing(book, lvl)
+	var miss := missing(book, lvl).slice(0, 3)
+	if miss.size() > 1:
+		miss.erase(last)
 	if not miss.is_empty():
-		return int(miss[r.randi() % mini(2, miss.size())])
+		return int(miss[r.randi() % miss.size()])
 	var all: Array = []
 	for k in LakeGen.species():
 		if LakeGen.unlocked(k, lvl) and k != LakeGen.LEGEND:

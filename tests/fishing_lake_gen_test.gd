@@ -107,7 +107,11 @@ func _init() -> void:
 	(bad4.mix as Dictionary)[LakeGen.MOONFISH] = 5
 	_expect(not LakeGen.check(bad4).is_empty(), "moonfish in the sunshine is caught")
 	# Story.
-	_expect(Book.pick_wish({}, 0, 1) in [LakeGen.MINNOW, LakeGen.PERCH], "the first wish is an easy fish")
+	_expect(Book.pick_wish({}, 0, 1) in [LakeGen.MINNOW, LakeGen.PERCH, LakeGen.BLUEGILL], "the first wish is an easy fish")
+	var wishes := {}
+	for s in 30:
+		wishes[Book.pick_wish({}, 3, s, LakeGen.MINNOW)] = true
+	_expect(wishes.size() >= 2 and not wishes.has(LakeGen.MINNOW), "the wish changes from day to day (%s)" % str(wishes.keys()))
 	var bk := {}
 	_expect(Book.add(bk, LakeGen.TROUT, 1.2) and not Book.add(bk, LakeGen.TROUT, 2.0), "a new page once")
 	_expect(is_equal_approx(float(bk["Rainbow Trout"][1]), 2.0), "the book keeps the best weight")
