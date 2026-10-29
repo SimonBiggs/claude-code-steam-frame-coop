@@ -12,6 +12,7 @@ extends Node3D
 const MeshKit := preload("res://games/penalty_shootout/mesh_kit.gd")
 const MatchGen := preload("res://games/penalty_shootout/matchgen.gd")
 const GOLD := Color(1.0, 0.82, 0.2)
+const CUB_SCALE := 1.3
 const SCARVES: Array[Color] = [Color(0.9, 0.2, 0.2), Color(0.2, 0.5, 1.0), Color(0.2, 0.85, 0.4), Color(1.0, 0.85, 0.15),
 	Color(0.8, 0.4, 1.0), Color(1.0, 0.55, 0.15)]
 
@@ -60,7 +61,7 @@ func build() -> void:
 	var hm := StandardMaterial3D.new()
 	hm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	hm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	hm.albedo_color = Color(1.0, 0.9, 0.4, 0.22)
+	hm.albedo_color = Color(1.0, 0.97, 0.75, 0.4)
 	goal_star_glow.material_override = hm
 	goal_star_glow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	goal_star_glow.scale = Vector3(1.0, 1.0, 0.15)
@@ -133,8 +134,9 @@ func set_family(prizes: Array, days: int, crowned: bool) -> void:
 		cub.position = MatchGen.cub_slot(i)
 		cub.rotation.y = 0.5
 		cubs_root.add_child(cub)
+		cub.scale = Vector3.ONE * CUB_SCALE
 		if grown and i >= old_cubs:
-			_pop_in(cub, 1.0)
+			_pop_in(cub, CUB_SCALE)
 	for i in mini(prizes.size(), MatchGen.PRIZE_KEEP):
 		var e: Array = prizes[i]
 		var pr := MeshInstance3D.new()
@@ -215,7 +217,7 @@ func _process(delta: float) -> void:
 		goal_star.global_position = Vector3(sn.x, sn.y, 0.08)
 		goal_star.rotation = Vector3(0.0, sin(t * 2.0) * 0.6, t * 0.6)
 		var pulse := 0.85 + 0.12 * sin(t * 6.0)
-		goal_star.scale = Vector3.ONE * pulse * 1.25
+		goal_star.scale = Vector3.ONE * pulse * 1.6
 	# Sockets turn gently.
 	for i in sockets.size():
 		if sockets[i].visible:

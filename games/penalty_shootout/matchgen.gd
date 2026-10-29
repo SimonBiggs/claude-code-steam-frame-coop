@@ -327,19 +327,18 @@ static func cubs(days: int) -> int:
 	return clampi(days, 0, CUBS_MAX)
 
 
-## Where cub i sits (world): two rows beside Leo, on the side away from the goal.
+## Where cub i sits (world): rows of four beside Leo, on the side away from the goal, towards the strikers.
 static func cub_slot(i: int) -> Vector3:
-	return LEO + Vector3(-0.85 - 0.6 * (i % 6), 0.0, 0.55 + 0.7 * (i / 6))
+	return LEO + Vector3(-0.7 - 0.6 * (i % 4), 0.0, 0.3 + 0.65 * (i / 4))
 
 
-## Where prize i stands (world): two rows on the far side of Leo, Vector3.INF past the end.
+## Where prize i stands (world): rows of four behind Leo, beside the goal net, Vector3.INF past the end.
 static func prize_slot(i: int) -> Vector3:
 	if i < 0 or i >= PRIZE_KEEP:
 		return Vector3.INF
-	return Vector3(-7.4 - 0.95 * (i % 6), 0.0, 0.2 + 1.1 * (i / 6))
+	return Vector3(-5.0 - 0.95 * (i % 4) - 0.3 * (i / 4), 0.0, 0.6 - 1.05 * (i / 4))
 
 
-## Where star socket i of `count` floats over Leo's head (world), facing the strikers.
+## Where star socket i of `count` floats (world): a row high up between Leo and the left post, facing the strikers.
 static func star_socket(i: int, count: int) -> Vector3:
-	var w := 0.5
-	return LEO + Vector3((i - (count - 1) * 0.5) * w, 3.0, 0.0)
+	return Vector3(-4.9 + (i - (count - 1) * 0.5) * 0.45, 3.1, 1.6)

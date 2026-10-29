@@ -111,12 +111,12 @@ func _init() -> void:
 	# Cubs and prizes fit beside Leo, off the pitch's goal mouth.
 	for i in G.CUBS_MAX:
 		var c := G.cub_slot(i)
-		_expect(c.x < -G.GOAL_HALF - 2.0, "cub %d sits clear of the goal" % i)
+		_expect(c.x < -G.GOAL_HALF - 2.0 and c.distance_to(G.LEO) > 0.6, "cub %d sits clear of the goal and of Leo" % i)
 		for j in i:
 			_expect(c.distance_to(G.cub_slot(j)) > 0.45, "cubs %d and %d don't overlap" % [i, j])
 	for i in G.PRIZE_KEEP:
 		var p := G.prize_slot(i)
-		_expect(p.x < -G.GOAL_HALF - 2.0, "prize %d sits clear of the goal" % i)
+		_expect(p.x < -G.GOAL_HALF - 1.0 and p.distance_to(G.LEO) > 0.8, "prize %d sits clear of the goal and of Leo" % i)
 		for j in G.CUBS_MAX:
 			_expect(Vector2(p.x, p.z).distance_to(Vector2(G.cub_slot(j).x, G.cub_slot(j).z)) > 0.4, "prize %d doesn't stand on cub %d" % [i, j])
 	_expect(G.prize_slot(G.PRIZE_KEEP) == Vector3.INF, "no prize slot past the end")
