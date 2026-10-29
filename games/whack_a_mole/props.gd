@@ -41,11 +41,81 @@ static func table_mesh() -> ArrayMesh:
 	return b.build()
 
 
+## Fur colour of each mole kind (roundgen.gd kinds) and its story-card colour (helmet red, speedy blue).
+const KIND_FUR: Array[Color] = [Color(0.55, 0.36, 0.24), Color(1.0, 0.78, 0.15), Color(0.55, 0.36, 0.24),
+	Color(0.5, 0.42, 0.36), Color(0.97, 0.97, 1.0), Color(0.45, 0.3, 0.5), Color.WHITE, Color(0.55, 0.36, 0.24)]
+const KIND_CARD: Array[Color] = [Color(0.55, 0.36, 0.24), Color(1.0, 0.8, 0.2), Color(0.95, 0.3, 0.3),
+	Color(0.35, 0.6, 1.0), Color(0.97, 0.97, 1.0), Color(0.7, 0.45, 0.9), Color.WHITE, Color(0.55, 0.36, 0.24)]
+
+
+## A mole of roundgen.gd kind: 0 plain, 1 golden (a crown), 2 helmet (a red bump helmet), 3 speedy
+## (blue headband and sunglasses), 4 bunny (a white friend with long ears), 5 KING (a big crown and a
+## red cape: drawn 1.5x), 7 a helmet mole whose helmet popped off (the plain look).
+static func kind_mesh(kind: int) -> ArrayMesh:
+	match kind:
+		1:
+			return mole_mesh(true)
+		2:
+			var b := _mole(KIND_FUR[0], Color(0.9, 0.74, 0.55))
+			b.dome(0.155, MeshKit.at(Vector3(0.0, 0.36, 0.0)), Color(0.95, 0.25, 0.25), 14)
+			b.cylinder(0.165, 0.165, 0.025, MeshKit.at(Vector3(0.0, 0.365, 0.0)), Color(1.0, 0.95, 0.9), 14)
+			b.sphere(0.03, MeshKit.at(Vector3(0.0, 0.52, 0.0)), Color(1.0, 0.85, 0.3), 8)
+			return b.build()
+		3:
+			var b := _mole(KIND_FUR[3], Color(0.85, 0.78, 0.7))
+			b.cylinder(0.143, 0.143, 0.04, MeshKit.at(Vector3(0.0, 0.4, 0.0)), Color(0.3, 0.55, 1.0), 14)
+			b.box(Vector3(0.17, 0.045, 0.02), MeshKit.at(Vector3(0.0, 0.335, 0.15)), Color(0.08, 0.08, 0.12))
+			for s in [-1.0, 1.0]:
+				var sf: float = s
+				b.box(Vector3(0.04, 0.02, 0.1), MeshKit.at(Vector3(sf * 0.11, 0.42, -0.1), Vector3.ONE, Vector3(0.0, sf * 0.5, 0.0)), Color(0.3, 0.55, 1.0))
+			return b.build()
+		4:
+			var b := MeshKit.builder()
+			var fur := KIND_FUR[4]
+			var pink := Color(1.0, 0.6, 0.72)
+			b.capsule(0.13, 0.4, MeshKit.at(Vector3(0.0, 0.19, 0.0)), fur, 14)
+			b.ellipsoid(Vector3(0.09, 0.1, 0.05), MeshKit.at(Vector3(0.0, 0.16, 0.1)), Color(1.0, 0.92, 0.95), 12)
+			for s in [-1.0, 1.0]:
+				var sf: float = s
+				b.ellipsoid(Vector3(0.035, 0.13, 0.02), MeshKit.at(Vector3(sf * 0.055, 0.5, 0.0), Vector3.ONE, Vector3(0.0, 0.0, sf * -0.15)), fur, 10)
+				b.ellipsoid(Vector3(0.02, 0.1, 0.01), MeshKit.at(Vector3(sf * 0.055, 0.5, 0.012), Vector3.ONE, Vector3(0.0, 0.0, sf * -0.15)), pink, 8)
+				b.sphere(0.03, MeshKit.at(Vector3(sf * 0.05, 0.31, 0.11)), Color(0.08, 0.08, 0.12), 10)
+				b.sphere(0.01, MeshKit.at(Vector3(sf * 0.045, 0.32, 0.138)), Color.WHITE, 6)
+			b.sphere(0.025, MeshKit.at(Vector3(0.0, 0.26, 0.13)), pink, 8)
+			return b.build()
+		5:
+			var b := _mole(KIND_FUR[5], Color(0.85, 0.75, 0.9))
+			b.cylinder(0.11, 0.12, 0.08, MeshKit.at(Vector3(0.0, 0.43, 0.0)), Color(1.0, 0.82, 0.2), 10, true)
+			for k in 5:
+				var a := k * TAU / 5.0
+				b.cone(0.03, 0.07, MeshKit.at(Vector3(cos(a) * 0.1, 0.5, sin(a) * 0.1)), Color(1.0, 0.85, 0.25), 5, true)
+			b.sphere(0.025, MeshKit.at(Vector3(0.0, 0.44, 0.115)), Color(0.95, 0.2, 0.3), 8, true)
+			b.ellipsoid(Vector3(0.16, 0.14, 0.06), MeshKit.at(Vector3(0.0, 0.16, -0.08)), Color(0.85, 0.15, 0.25), 12)
+			return b.build()
+	return mole_mesh(false)
+
+
+## A seed packet on a stick for the pick phase: a white packet in the crop's colour with the crop's own
+## plant on top (garden.gd plant_mesh), so kids see what they'd grow.
+static func seed_mesh(color: Color, plant: Mesh) -> ArrayMesh:
+	var b := MeshKit.builder()
+	b.cylinder(0.02, 0.02, 0.2, MeshKit.at(Vector3(0.0, 0.1, 0.0)), Color(0.75, 0.55, 0.35), 6)
+	b.rounded_box(Vector3(0.26, 0.3, 0.05), 0.02, MeshKit.at(Vector3(0.0, 0.33, 0.0)), Color(1.0, 0.97, 0.9))
+	b.rounded_box(Vector3(0.22, 0.2, 0.055), 0.02, MeshKit.at(Vector3(0.0, 0.31, 0.0)), color)
+	b.add_mesh(plant, MeshKit.at(Vector3(0.0, 0.48, 0.0), Vector3.ONE * 0.75))
+	return b.build()
+
+
 ## A silly mole, origin at its base, facing +Z (towards the VR player). About 0.42 m tall.
 static func mole_mesh(gold: bool) -> ArrayMesh:
+	var b := _mole(Color(1.0, 0.78, 0.15) if gold else Color(0.55, 0.36, 0.24), Color(1.0, 0.95, 0.6) if gold else Color(0.9, 0.74, 0.55), gold)
+	if gold:
+		b.cone(0.07, 0.1, MeshKit.at(Vector3(0.0, 0.47, 0.0)), Color(1.0, 0.9, 0.3), 5, true)  # a little crown
+	return b.build()
+
+
+static func _mole(fur: Color, belly: Color, gold: bool = false) -> MeshKit.Builder:
 	var b := MeshKit.builder()
-	var fur := Color(1.0, 0.78, 0.15) if gold else Color(0.55, 0.36, 0.24)
-	var belly := Color(1.0, 0.95, 0.6) if gold else Color(0.9, 0.74, 0.55)
 	var pink := Color(1.0, 0.55, 0.65)
 	b.capsule(0.14, 0.44, MeshKit.at(Vector3(0.0, 0.2, 0.0)), fur, 14, gold)
 	b.ellipsoid(Vector3(0.1, 0.12, 0.06), MeshKit.at(Vector3(0.0, 0.17, 0.1)), belly, 12)
@@ -57,9 +127,7 @@ static func mole_mesh(gold: bool) -> ArrayMesh:
 		b.ellipsoid(Vector3(0.045, 0.03, 0.035), MeshKit.at(Vector3(sf * 0.13, 0.17, 0.08)), pink, 8)
 	b.sphere(0.04, MeshKit.at(Vector3(0.0, 0.28, 0.14)), pink, 10)
 	b.box(Vector3(0.05, 0.035, 0.012), MeshKit.at(Vector3(0.0, 0.23, 0.135)), Color.WHITE)
-	if gold:
-		b.cone(0.07, 0.1, MeshKit.at(Vector3(0.0, 0.47, 0.0)), Color(1.0, 0.9, 0.3), 5, true)  # a little crown
-	return b.build()
+	return b
 
 
 ## The giant soft mallet, in the right controller's space ("aim" pose: -Z forward).
