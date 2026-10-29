@@ -192,6 +192,7 @@ void fragment() { ALBEDO = vec3(0.0); ALPHA = strength * smoothstep(0.75, 0.35, 
 	vignette.material_override = vm
 	vignette.visible = false
 	rig.camera.add_child(vignette)
+	preload("res://core/vr_layer.gd").mark(vignette)  # on the headset: never on the TV cameras
 
 
 func _glow_mat(c: Color) -> StandardMaterial3D:

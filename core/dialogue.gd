@@ -58,7 +58,7 @@ var sounds := true
 var vars := {}                    ## {name} substitutions, set/if
 var vr_distance := 1.5            ## metres (times vr_text COMFORT 1.6)
 var vr_height := -0.28            ## metres below eye level (times COMFORT)
-var vr_layers := 1
+var vr_layers := UiKit.VR_LAYER  ## VR box layers (VR-only: core/vr_layer.gd)
 
 # --- State ---
 var lines: Array = []
@@ -740,7 +740,7 @@ class VrBox extends Node3D:
 	var cam: Node3D
 	var distance := 1.5
 	var height := -0.28
-	var vis_layers := 1
+	var vis_layers := UiKit.VR_LAYER
 	var panel: MeshInstance3D
 	var name_l: Label3D
 	var text_l: Label3D

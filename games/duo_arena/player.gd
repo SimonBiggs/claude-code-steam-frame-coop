@@ -101,13 +101,15 @@ var slice_streak_t := 0.0
 var pad_lost_t := -1.0  # seconds since this player's controller disconnected (-1: not lost)
 
 
-## Bodies: visual layers 2-4 for P1-P3, 17-20 for P4-P7 (hidden from this player's own camera).
-const ALL_BODIES := 14 | (15 << 16)
+## Bodies: visual layers 2-4 for P1-P3, 5, 6, 11, 12 for P4-P7 (hidden from this player's own camera).
+## Never layers 19-20 (bits 18-19): core/vr_layer.gd (VR-only UI) and VrRig.AVATAR_LAYER are engine-wide.
+const BODY_BITS: Array[int] = [2, 4, 8, 16, 32, 1024, 2048]
+const ALL_BODIES := 2 | 4 | 8 | 16 | 32 | 1024 | 2048
 const NO_KEYS := 99  # key_set for controller-only drop-in players
 
 
 func body_layer() -> int:
-	return 2 << index if index < 3 else 1 << (13 + index)
+	return BODY_BITS[clampi(index, 0, BODY_BITS.size() - 1)]
 
 
 ## Viewmodel: visual layers 7-9 for P1-P3, 13-16 for P4-P7 (only this player's camera sees it).

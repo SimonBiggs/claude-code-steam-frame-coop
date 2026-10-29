@@ -17,6 +17,7 @@ const SERVICES := [
 	{"name": "SafeApply", "path": "res://core/safe_apply.gd", "meta": "safe_apply"},
 	{"name": "LanUpdate", "path": "res://core/lan_update.gd", "meta": "lan_update", "needs": "res://addons/lan_update/root.pub.pem"},
 	{"name": "VrTextGuard", "path": "res://core/vr_text_guard.gd", "meta": "vr_text_guard"},
+	{"name": "VrLayerGuard", "path": "res://core/vr_layer_guard.gd"},
 	{"name": "QuitAfter", "path": "res://core/quit_after.gd", "needs": "res://tests/bot_end.gd"},
 ]
 
