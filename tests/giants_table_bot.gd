@@ -32,6 +32,7 @@ var cues := {}  # simple mode: picture cues seen / learned
 
 
 func _ready() -> void:
+	preload("res://tests/bot_end.gd").arm(self)  # end by itself in networked runs
 	main = load("res://games/giants_table/main.tscn").instantiate()
 	add_child(main)
 	if OS.has_environment("START_WAVE"):

@@ -204,6 +204,11 @@ export async function debt() {
       issues.push({ kind: pt.kind, what: f, fix: pt.fix });
     }
   }
+  // Screenshots: spectacle only works in Desktop Mode (it SIGABRTs in Gaming Mode / without a Wayland display), so
+  // every tool takes its one shot through tv-shot, which picks gamescopectl or spectacle. Flag any direct call.
+  const spec = (await sh(`grep -rnIE "[\"']spectacle[\"']|(^|[;&|(]|\\s)spectacle\\s+-" ${BIN} ${HOME}/.local/share/brepl ${HOME}/.local/share/gdev ${LIVE}/tools 2>/dev/null | grep -v -e '/tv-shot:' -e '^[^:]*:[0-9]*:\\s*#'`)).out;
+  for (const l of spec.split("\n").filter(Boolean))
+    issues.push({ kind: "direct-spectacle", what: l.replace(HOME, "~").slice(0, 160), fix: "take the screenshot with tv-shot OUT.png (one shot, right tool for the mode), never spectacle directly" });
   const repos: string[] = [];
   for (const d of await readdir(GP)) if ((await stat(join(GP, d, ".git")).catch(() => null))?.isDirectory()) repos.push(d);
   for (const r of repos) {

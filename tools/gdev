@@ -193,8 +193,10 @@ def cmd_shot(proj: Path, args) -> None:
     if args.screen:
         raw = d / "screen.png"
         raw.unlink(missing_ok=True)
-        subprocess.run(["spectacle", "-b", "-n", "-f", "-o", str(raw)], check=True,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # ONE shot via tv-shot: gamescopectl in Gaming Mode, spectacle only in Desktop Mode (spectacle crashes in gamescope)
+        r = subprocess.run(["tv-shot", str(raw)], capture_output=True, text=True)
+        if r.returncode:
+            sys.exit(f"gdev: screen shot failed: {r.stderr.strip()}")
         from PIL import Image
         img = Image.open(raw).convert("RGB")
         img.thumbnail((1600, 1600))

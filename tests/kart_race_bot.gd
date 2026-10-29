@@ -51,6 +51,7 @@ var seen := {}  # simple mode: picture cues seen / learned
 
 
 func _ready() -> void:
+	preload("res://tests/bot_end.gd").arm(self)  # end by itself in networked runs
 	process_mode = Node.PROCESS_MODE_ALWAYS  # keeps running if the Start check opened the pause menu
 	main = load("res://games/kart_race/main.tscn").instantiate()
 	add_child(main)

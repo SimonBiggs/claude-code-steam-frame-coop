@@ -1,0 +1,29 @@
+#!/bin/bash
+# tv-shot OUT.png: ONE screenshot of this machine's screen (the TV here, the Deck's own screen on a Deck), in
+# whichever mode is running. The ONLY place allowed to call spectacle (dev.debt flags any other caller).
+#   Gaming Mode  -> gamescopectl screenshot, on the TV's gamescope socket from
+#                   $XDG_RUNTIME_DIR/gamescope-environment (never gamescope-0 blindly: that may be a test gamescope)
+#   Desktop Mode -> spectacle, pointed at kwin's Wayland socket (it SIGABRTs with "could not connect to display"
+#                   when run from a service/agent without WAYLAND_DISPLAY, and always in Gaming Mode: 2026-10-26..29)
+#   neither      -> exit 2, nothing launched
+# Single shots only: never call this in a tight loop (repeated gamescope screenshots made gamescope glitch/crash).
+# Concurrent calls queue on a lock instead of overlapping. Exit 0 only when OUT exists and is non-empty.
+out=${1:?usage: tv-shot OUT.png}
+export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+exec 9>"$XDG_RUNTIME_DIR/tv-shot.lock"; flock -w 20 9 || { echo "tv-shot: another shot is stuck" >&2; exit 1; }
+rm -f "$out"
+if pgrep -x gamescope-wl >/dev/null; then
+  gs=$(sed -n 's/^GAMESCOPE_WAYLAND_DISPLAY=//p' "$XDG_RUNTIME_DIR/gamescope-environment" 2>/dev/null)
+  [ -n "$gs" ] || { echo "tv-shot: Gaming Mode but no GAMESCOPE_WAYLAND_DISPLAY in gamescope-environment" >&2; exit 2; }
+  GAMESCOPE_WAYLAND_DISPLAY=$gs timeout 10 gamescopectl screenshot "$out" >/dev/null 2>&1
+  for _ in $(seq 30); do [ -s "$out" ] && break; sleep 0.1; done; sleep 0.2  # written asynchronously
+elif pid=$(pgrep -xo kwin_wayland); then
+  sock=$(tr '\0' '\n' </proc/"$pid"/cmdline | sed -n '/^--socket$/{n;p}')
+  sock=${sock:-wayland-0}
+  [ -S "$XDG_RUNTIME_DIR/$sock" ] || { echo "tv-shot: kwin socket $sock missing" >&2; exit 2; }
+  WAYLAND_DISPLAY=$sock QT_QPA_PLATFORM=wayland timeout 15 spectacle -b -n -f -o "$out" >/dev/null 2>&1
+else
+  echo "tv-shot: no gamescope session and no Plasma (kwin) running" >&2; exit 2
+fi
+[ -s "$out" ] || { echo "tv-shot: no image written" >&2; exit 1; }
+echo "$out"

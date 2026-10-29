@@ -75,6 +75,7 @@ func _check(check_name: String, ok: bool, detail: String = "") -> void:
 
 
 func _ready() -> void:
+	preload("res://tests/bot_end.gd").arm(self)  # end by itself in networked runs
 	if Engine.has_meta("rw_bot_restarts"):
 		print("Bot: game restarted")
 		var up := InputEventKey.new()

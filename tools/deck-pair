@@ -28,9 +28,10 @@ while read -r host ip port <&3; do
   ssh -o BatchMode=yes "$alias" 'test -d ~/DuoArena/game' 2>/dev/null || duo-deploy-deck "$alias"
   # Its own screen recorder, installed but OFF: 5 s gamescopectl screenshots made gamescope glitch/crash on the TV
   # (2026-10-24). Start it by hand for a short look (systemctl --user start deck-screen-rec), then stop it.
-  if ! ssh -o BatchMode=yes "$alias" 'cat ~/.local/bin/deck-screen-rec 2>/dev/null' | cmp -s - ~/.local/bin/deck-screen-rec; then
-    scp -q ~/.local/bin/deck-screen-rec "$alias:/tmp/deck-screen-rec" && ssh -o BatchMode=yes "$alias" 'mkdir -p ~/.local/bin ~/.config/systemd/user &&
-      install -m755 /tmp/deck-screen-rec ~/.local/bin/deck-screen-rec &&
+  # deck-screen-rec takes its shots with tv-shot (the one gamescopectl-or-spectacle helper), so both go together.
+  if ! ssh -o BatchMode=yes "$alias" 'cat ~/.local/bin/deck-screen-rec ~/.local/bin/tv-shot 2>/dev/null' | cmp -s - <(cat ~/.local/bin/deck-screen-rec ~/.local/bin/tv-shot); then
+    scp -q ~/.local/bin/deck-screen-rec ~/.local/bin/tv-shot "$alias:/tmp/" && ssh -o BatchMode=yes "$alias" 'mkdir -p ~/.local/bin ~/.config/systemd/user &&
+      install -m755 /tmp/deck-screen-rec /tmp/tv-shot ~/.local/bin/ &&
       printf "[Unit]\nDescription=Rolling record of this Deck'"'"'s screen for Claude on the Steam Machine\n\n[Service]\nExecStart=%%h/.local/bin/deck-screen-rec\nNice=15\nRestart=always\nRestartSec=10\n\n[Install]\nWantedBy=default.target\n" > ~/.config/systemd/user/deck-screen-rec.service &&
       systemctl --user daemon-reload && systemctl --user disable --now deck-screen-rec >/dev/null 2>&1; true' &&
       echo "$alias: screen recorder installed"

@@ -46,6 +46,7 @@ var bot_vr := OS.has_environment("BOT_VR") and not OS.has_environment("DUO_JOIN"
 
 
 func _ready() -> void:
+	preload("res://tests/bot_end.gd").arm(self)  # end by itself in networked runs
 	if OS.has_environment("BOT_MAP"):  # BOT_MAP=0/1/2: start on this map (house / castle / spaceship)
 		var cfg := ConfigFile.new()
 		cfg.load("user://hide_and_seek_best.cfg")

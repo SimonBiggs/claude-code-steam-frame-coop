@@ -39,6 +39,7 @@ func _wanted_deckhands() -> int:
 
 
 func _ready() -> void:
+	preload("res://tests/bot_end.gd").arm(self)  # end by itself in networked runs
 	main = load("res://games/cannon_cove/main.tscn").instantiate()
 	add_child(main)
 

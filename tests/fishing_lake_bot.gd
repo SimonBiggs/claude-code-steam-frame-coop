@@ -40,6 +40,7 @@ var seen := {}  # things that happened (both machines), for the summary
 
 
 func _ready() -> void:
+	preload("res://tests/bot_end.gd").arm(self)  # end by itself in networked runs
 	process_mode = Node.PROCESS_MODE_ALWAYS  # keeps running if the Start check opened the pause menu
 	main = load("res://games/fishing_lake/main.tscn").instantiate()
 	add_child(main)

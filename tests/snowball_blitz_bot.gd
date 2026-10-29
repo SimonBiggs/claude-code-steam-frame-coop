@@ -34,6 +34,7 @@ var turn_gap := 0.0
 
 
 func _ready() -> void:
+	preload("res://tests/bot_end.gd").arm(self)  # end by itself in networked runs
 	if Engine.has_meta("sb_bot_restarts"):
 		print("Bot: game restarted")
 		var up := InputEventKey.new()

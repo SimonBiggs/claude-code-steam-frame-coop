@@ -22,32 +22,9 @@ DIR = os.path.expanduser("~/.cache/screen-rec")
 KEEP_S, TMP = 30 * 60, "/tmp/screen-rec-shot.png"
 
 
-def gaming_display() -> str | None:
-    """The TV's gamescope socket in Gaming Mode (from gamescope-environment), else None (Desktop Mode)."""
-    if not subprocess.run(["pgrep", "-x", "gamescope-wl"], capture_output=True).stdout:
-        return None
-    try:
-        for line in open(f"/run/user/{os.getuid()}/gamescope-environment"):
-            if line.startswith("GAMESCOPE_WAYLAND_DISPLAY="):
-                return line.split("=", 1)[1].strip()
-    except OSError:
-        pass
-    return None
-
-
 def grab(path: str) -> bool:
-    """Screenshot the TV in either mode: gamescopectl in Gaming Mode (spectacle only works in Plasma)."""
-    gs = gaming_display()
-    if gs:
-        r = subprocess.run(["gamescopectl", "screenshot", path], capture_output=True,
-                           env={**os.environ, "GAMESCOPE_WAYLAND_DISPLAY": gs}, timeout=10)
-        for _ in range(20):  # gamescope writes the file asynchronously
-            if os.path.exists(path) and os.path.getsize(path) > 0:
-                time.sleep(0.2)
-                return True
-            time.sleep(0.1)
-        return False
-    return subprocess.run(["spectacle", "-b", "-n", "-f", "-o", path], capture_output=True).returncode == 0
+    """One screenshot of the TV in either mode, via tv-shot (the one place that picks gamescopectl or spectacle)."""
+    return subprocess.run(["tv-shot", path], capture_output=True, timeout=40).returncode == 0
 
 
 def record(d: str = DIR, grabber=grab, tmp: str = TMP):
@@ -55,7 +32,7 @@ def record(d: str = DIR, grabber=grab, tmp: str = TMP):
     while True:
         t = time.time()
         if os.path.exists(tmp):
-            os.remove(tmp)  # spectacle can exit 0 without writing; never re-save an old shot as new
+            os.remove(tmp)  # never re-save an old shot as new
         try:
             ok = grabber(tmp) and os.path.exists(tmp)
         except (subprocess.TimeoutExpired, OSError):
