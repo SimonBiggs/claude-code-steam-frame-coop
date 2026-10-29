@@ -8,6 +8,7 @@ extends Node
 
 const BotKit := preload("res://tests/bot_kit.gd")
 const SheepScript := preload("res://games/sheep_round_up/sheep.gd")
+const FieldGen := preload("res://games/sheep_round_up/fieldgen.gd")
 
 var kit: BotKit
 var main: Node
@@ -26,6 +27,7 @@ func _ready() -> void:
 	main = load("res://games/sheep_round_up/main.tscn").instantiate()
 	main.set("round_time", 22.0)
 	main.set("results_wait", 4.0)
+	main.set("fresh_save", true)  # a brand-new farm every run (SRU_LEVEL=n plays a later field)
 	add_child(main)
 	kit.main = main
 	want = BotKit.bot_players(2, 6)
@@ -97,12 +99,17 @@ func _physics_process(delta: float) -> void:
 		_drive_vr(delta)
 
 
-## A gate's outside point nearest to p (sheep go in through the middle of a side).
+## The open gate's outside point nearest to p (sheep go in through the middle of a side).
 func _gate_for(p: Vector3) -> Vector3:
-	var pen: float = main.PEN
-	if absf(p.x) > absf(p.z):
-		return Vector3(signf(p.x) * (pen + 0.3), 0.0, 0.0)
-	return Vector3(0.0, 0.0, signf(p.z) * (pen + 0.3))
+	var best := Vector3.ZERO
+	var bd := INF
+	for side in 4:
+		if FieldGen.gate_open(int(main.field.get("gates", 15)), side):
+			var g := FieldGen.gate_point(side, 0.3)
+			if g.distance_to(p) < bd:
+				bd = g.distance_to(p)
+				best = g
+	return best
 
 
 ## Run to the spot behind the nearest loose sheep (away from its gate), then push it in.
@@ -207,6 +214,14 @@ func _checks() -> void:
 	kit.assert_true(max_home > 0 or int(main.net.state_get("round", 0)) >= 2, "%s: sheep got into the pen" % mode)
 	kit.assert_true(int(main.net.state_get("round", 0)) >= 2, "%s: round 1 ended with results and round 2 started" % mode)
 	kit.assert_true(main.sheep.size() >= 5, "%s: the flock is on the field (%d)" % [mode, main.sheep.size()])
+	var fd: Dictionary = main.net.state_get("field", {})
+	kit.assert_true(not main.field.is_empty() and int(main.field.seed) == int(fd.get("seed", -1)), "%s: this machine built the host's field (%s)" % [mode, str(main.field.get("name", "?"))])
+	kit.assert_true(main.farm_node != null and is_instance_valid(main.farm_node), "%s: Bo's home farm is built" % mode)
+	if mode == "client" and main.sheep.size() == (main.field.sheep as Array).size():
+		var same := true
+		for i in main.sheep.size():
+			same = same and int(main.sheep[i].get("breed")) == int(main.field.sheep[i][2])
+		kit.assert_true(same, "client: every sheep has the host's breed")
 	if main.vr_rig != null:
 		kit.assert_true(grabs > 0, "fake farmer grabbed sheep")
 
@@ -220,6 +235,7 @@ func _check_pen_credit() -> void:
 	var herder: int = slots[0]
 	var camper: int = slots[slots.size() - 1]
 	var s: Node3D = main.sheep[0]
+	main.field = {}  # a plain field: every gate open, nothing in the way
 	s.set("penned", false)
 	s.set("state", 0)
 	s.set("last_by", -1)
