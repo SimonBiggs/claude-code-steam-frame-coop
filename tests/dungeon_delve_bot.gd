@@ -85,6 +85,7 @@ func _ready() -> void:
 	var end := 150.0 if host else (140.0 if client else 170.0)
 	if OS.has_environment("BOT_END"):
 		end = float(OS.get_environment("BOT_END"))
+	end = preload("res://tests/bot_end.gd").within_deadline(end)
 	kit.at(end, "finish", func() -> void:
 		_checks()
 		kit.finish())

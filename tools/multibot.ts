@@ -17,7 +17,7 @@
 // What each machine gets (env): DUO_PORT (shared), DUO_HOST=1 (machine 0) or DUO_JOIN=127.0.0.1 (the rest),
 // BOT_MACHINE=k (0 = host), BOT_MACHINES=N+1, BOT_GROUP_T0=<unix ms> (a shared clock: every machine has been started
 // and has had a few seconds to load by then, so bots can schedule inputs on the same timeline), XDG_DATA_HOME (own
-// user://), DUO_MACHINE_KIND=tv unless given.
+// user://), DUO_MACHINE_KIND=tv unless given, BOT_DEADLINE=<--seconds> (tests/bot_end.gd ends a bot early enough for it).
 //
 // Pass per machine (the same rule as brepl dev.bots.run, docs/GAME_DEV_GUIDE.md "Testing"): exit 0 (the bot quit by
 // itself: not the timeout, not a crash), no SCRIPT ERROR, no "BOT ASSERT FAILED" / "BOT RESULT: FAIL" / "Bot ... FAIL"
@@ -104,7 +104,7 @@ export async function runGroup(o: GroupOpts): Promise<GroupResult> {
     await mkdir(data, { recursive: true });
     const env: Record<string, string> = {
       ...(process.env as Record<string, string>), DUO_MACHINE_KIND: "tv", ...o.env, ...(k === 0 ? o.hostEnv : o.joinEnv),
-      DUO_PORT: String(port), BOT_MACHINE: String(k), BOT_MACHINES: String(joiners + 1), BOT_GROUP_T0: String(t0),
+      DUO_PORT: String(port), BOT_DEADLINE: String(o.seconds ?? 180), BOT_MACHINE: String(k), BOT_MACHINES: String(joiners + 1), BOT_GROUP_T0: String(t0),
       XDG_DATA_HOME: data,
     };
     delete env.DUO_SOLO;
