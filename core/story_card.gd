@@ -18,8 +18,9 @@ extends RefCounted
 ## fur = color, floppy ears, a wagging tongue); Obstacle Rush's coach (Coach Jelly: an orange jelly bean in a blue
 ## cap with a whistle) and balloon (in color); Sheep Round-Up's shepherd (Bo: a bonnet in color, curls, a crook)
 ## and sheep (wool = color); Starship Crew's captain (Captain Whiskers: a ginger cat in a bubble helmet), planet
-## (in color, with a ring), station (the space station wheel) and rocket; anything else is a core/ui_kit.gd icon
-## kind ("star", "heart", "crown"...).
+## (in color, with a ring), station (the space station wheel) and rocket; Balloon Pop's seller (Poppy: a smiling
+## face in a party hat with a bunch of balloons) and her fair rides icecream, carousel, ferris (the big wheel) and
+## tent (the big top); anything else is a core/ui_kit.gd icon kind ("star", "heart", "crown"...).
 ## Keep lines short and kind: kids read the screen.
 
 const UiKit := preload("res://core/ui_kit.gd")
@@ -30,7 +31,7 @@ const PICTURES: Array[String] = ["bird", "envelope", "cloud", "storm", "house", 
 	"kart", "partyhat", "cowboy", "wizard",
 	"farmer", "mole", "bunny", "lettuce", "carrot", "pumpkin", "sunflower", "strawberry", "corn", "melon", "apple",
 	"toucan", "fish", "otter", "puppy", "coach", "balloon", "shepherd", "sheep",
-	"captain", "planet", "station", "rocket"]
+	"captain", "planet", "station", "rocket", "seller", "icecream", "carousel", "ferris", "tent"]
 
 
 ## Show a story card on one view root or an Array of them. Returns the first card made (or null).
@@ -428,6 +429,58 @@ class Picture extends Control:
 				_poly(bl, color)
 				_circle(0.42 + sway, 0.26 + bob, 0.06, color.lightened(0.5))
 				_poly([[0.46 + sway, 0.67 + bob], [0.54 + sway, 0.67 + bob], [0.5 + sway, 0.62 + bob]], color.darkened(0.2))
+			"seller":  # Poppy (Balloon Pop): a smiling face in a pink party hat, holding a bunch of balloons
+				var cols: Array[Color] = [Color(1.0, 0.35, 0.4), Color(1.0, 0.85, 0.3), Color(0.35, 0.65, 1.0), Color(0.5, 0.9, 0.45)]
+				for k in 4:
+					var bx := 0.72 + (k % 2) * 0.14 + sin(t * 2.0 + k) * 0.015
+					var by := 0.16 + (k / 2) * 0.15 + bob
+					draw_line(_p(bx, by + 0.08), _p(0.74, 0.72 + bob), Color(0.9, 0.9, 0.95), 1.5)
+					_circle(bx, by, 0.08, cols[k])
+				_circle(0.42, 0.58 + bob, 0.27, Color(1.0, 0.85, 0.72))
+				_poly([[0.22, 0.4 + bob], [0.62, 0.4 + bob], [0.42, 0.06 + bob]], color)
+				_circle(0.42, 0.06 + bob, 0.05, Color(1.0, 0.9, 0.4))
+				for k in 3:
+					_circle(0.3 + k * 0.12, 0.38 + bob, 0.035, Color(1.0, 0.9, 0.4))
+				_eye(0.34, 0.56 + bob, 0.055)
+				_eye(0.5, 0.56 + bob, 0.055)
+				_circle(0.28, 0.66 + bob, 0.04, Color(1.0, 0.55, 0.6))
+				_circle(0.56, 0.66 + bob, 0.04, Color(1.0, 0.55, 0.6))
+				draw_arc(_p(0.42, 0.66 + bob), 0.09 * size.x, 0.3, PI - 0.3, 10, Color(0.6, 0.2, 0.25), 2.5)
+			"icecream":
+				_poly([[0.34, 0.5 + bob], [0.66, 0.5 + bob], [0.5, 0.95 + bob]], Color(0.88, 0.62, 0.32))
+				draw_line(_p(0.4, 0.6 + bob), _p(0.58, 0.75 + bob), Color(0.7, 0.45, 0.2), 2.0)
+				draw_line(_p(0.6, 0.6 + bob), _p(0.44, 0.78 + bob), Color(0.7, 0.45, 0.2), 2.0)
+				_circle(0.5, 0.45 + bob, 0.18, Color(1.0, 0.75, 0.85))
+				_circle(0.5, 0.28 + bob, 0.15, Color(0.55, 0.35, 0.25))
+				_circle(0.5, 0.12 + bob, 0.05, Color(0.9, 0.15, 0.2))
+			"carousel":
+				var spin := t * 1.5
+				_poly([[0.5, 0.08 + bob], [0.9, 0.32 + bob], [0.1, 0.32 + bob]], Color(0.4, 0.7, 1.0))
+				for k in 3:
+					_poly([[0.5, 0.08 + bob], [0.23 + k * 0.27, 0.32 + bob], [0.36 + k * 0.27, 0.32 + bob]], white)
+				_poly([[0.12, 0.84], [0.88, 0.84], [0.88, 0.92], [0.12, 0.92]], Color(0.95, 0.85, 0.6))
+				for k in 3:
+					var hx := 0.5 + sin(spin + k * TAU / 3.0) * 0.3
+					var hy := 0.6 + sin(spin * 2.0 + k) * 0.04
+					draw_line(_p(hx, 0.32 + bob), _p(hx, 0.84), Color(1.0, 0.85, 0.3), 2.0)
+					_circle(hx, hy, 0.07, [Color(1.0, 0.35, 0.4), Color(0.5, 0.9, 0.45), Color(0.85, 0.5, 1.0)][k])
+			"ferris":
+				draw_line(_p(0.5, 0.48), _p(0.25, 0.95), Color(0.75, 0.75, 0.82), 3.0)
+				draw_line(_p(0.5, 0.48), _p(0.75, 0.95), Color(0.75, 0.75, 0.82), 3.0)
+				draw_arc(_p(0.5, 0.48), 0.36 * size.x, 0.0, TAU, 32, Color(1.0, 0.8, 0.25), 3.0)
+				for k in 8:
+					var a := k * TAU / 8.0 + t * 0.6
+					var q := Vector2(0.5 + cos(a) * 0.36, 0.48 + sin(a) * 0.36)
+					draw_line(_p(0.5, 0.48), _p(q.x, q.y), white, 1.5)
+					_circle(q.x, q.y + 0.04, 0.05, [Color(1.0, 0.35, 0.4), Color(0.35, 0.65, 1.0), Color(0.5, 0.9, 0.45), Color(1.0, 0.55, 0.15)][k % 4])
+			"tent":
+				for k in 5:
+					var x0 := 0.15 + k * 0.14
+					_poly([[x0, 0.45], [x0 + 0.14, 0.45], [x0 + 0.14, 0.9], [x0, 0.9]], Color(0.95, 0.25, 0.3) if k % 2 == 0 else white)
+				_poly([[0.08, 0.47 + bob * 0.5], [0.92, 0.47 + bob * 0.5], [0.5, 0.12 + bob * 0.5]], Color(0.95, 0.25, 0.3))
+				_poly([[0.42, 0.9], [0.58, 0.9], [0.5, 0.62]], Color(0.2, 0.15, 0.2))
+				draw_line(_p(0.5, 0.12 + bob * 0.5), _p(0.5, 0.0 + bob * 0.5), white, 2.0)
+				_poly([[0.5, 0.0 + bob * 0.5], [0.66, 0.04 + bob * 0.5], [0.5, 0.08 + bob * 0.5]], Color(1.0, 0.85, 0.3))
 			"captain":  # Captain Whiskers (Starship Crew): a ginger space cat in a glass bubble helmet
 				var fur := Color(1.0, 0.62, 0.25)
 				_poly([[0.25, 0.72 + bob], [0.75, 0.72 + bob], [0.82, 0.98], [0.18, 0.98]], Color(0.92, 0.94, 1.0))
