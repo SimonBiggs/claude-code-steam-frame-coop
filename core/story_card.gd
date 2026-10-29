@@ -18,7 +18,9 @@ extends RefCounted
 ## fur = color, floppy ears, a wagging tongue); Obstacle Rush's coach (Coach Jelly: an orange jelly bean in a blue
 ## cap with a whistle) and balloon (in color); Sheep Round-Up's shepherd (Bo: a bonnet in color, curls, a crook)
 ## and sheep (wool = color); Starship Crew's captain (Captain Whiskers: a ginger cat in a bubble helmet), planet
-## (in color, with a ring), station (the space station wheel) and rocket; anything else is a core/ui_kit.gd icon
+## (in color, with a ring), station (the space station wheel) and rocket; Tiny Town Tycoon's beaver (Benny the
+## builder beaver in a yellow hard hat), island (a little green island with a palm in the sea) and boat (a sailing
+## boat on the waves, sail in color); anything else is a core/ui_kit.gd icon
 ## kind ("star", "heart", "crown"...).
 ## Keep lines short and kind: kids read the screen.
 
@@ -30,6 +32,7 @@ const PICTURES: Array[String] = ["bird", "envelope", "cloud", "storm", "house", 
 	"kart", "partyhat", "cowboy", "wizard",
 	"farmer", "mole", "bunny", "lettuce", "carrot", "pumpkin", "sunflower", "strawberry", "corn", "melon", "apple",
 	"toucan", "fish", "otter", "puppy", "coach", "balloon", "shepherd", "sheep",
+	"beaver", "island", "boat",
 	"captain", "planet", "station", "rocket"]
 
 
@@ -428,6 +431,47 @@ class Picture extends Control:
 				_poly(bl, color)
 				_circle(0.42 + sway, 0.26 + bob, 0.06, color.lightened(0.5))
 				_poly([[0.46 + sway, 0.67 + bob], [0.54 + sway, 0.67 + bob], [0.5 + sway, 0.62 + bob]], color.darkened(0.2))
+			"beaver":  # Benny (Tiny Town Tycoon): a brown beaver in a yellow hard hat, big front teeth
+				var fur := Color(0.62, 0.4, 0.24)
+				_poly([[0.3, 0.72 + bob], [0.7, 0.72 + bob], [0.8, 0.98], [0.2, 0.98]], fur.darkened(0.1))
+				_poly([[0.66, 0.9], [0.95, 0.8], [0.98, 0.95], [0.7, 0.99]], Color(0.4, 0.27, 0.18))
+				_circle(0.3, 0.32 + bob, 0.07, fur.darkened(0.15))
+				_circle(0.7, 0.32 + bob, 0.07, fur.darkened(0.15))
+				_circle(0.5, 0.5 + bob, 0.25, fur)
+				_circle(0.5, 0.62 + bob, 0.13, Color(0.85, 0.68, 0.5))
+				_eye(0.41, 0.46 + bob, 0.055)
+				_eye(0.59, 0.46 + bob, 0.055)
+				_circle(0.5, 0.56 + bob, 0.045, Color(0.2, 0.12, 0.1))
+				_poly([[0.45, 0.66 + bob], [0.55, 0.66 + bob], [0.55, 0.75 + bob], [0.45, 0.75 + bob]], white)
+				draw_line(_p(0.5, 0.66 + bob), _p(0.5, 0.75 + bob), Color(0.7, 0.7, 0.7), 1.5)
+				# the hard hat
+				_poly([[0.26, 0.32 + bob], [0.74, 0.32 + bob], [0.68, 0.16 + bob], [0.5, 0.11 + bob], [0.32, 0.16 + bob]], Color(1.0, 0.82, 0.15))
+				_poly([[0.2, 0.33 + bob], [0.8, 0.33 + bob], [0.8, 0.37 + bob], [0.2, 0.37 + bob]], Color(0.95, 0.7, 0.1))
+				_poly([[0.47, 0.12 + bob], [0.53, 0.12 + bob], [0.53, 0.32 + bob], [0.47, 0.32 + bob]], Color(1.0, 0.9, 0.45))
+			"island":
+				_poly([[0.0, 0.7], [1.0, 0.7], [1.0, 1.0], [0.0, 1.0]], Color(0.3, 0.62, 0.9))
+				for k in 4:
+					var wx := k * 0.27 + fmod(t * 0.08, 0.27)
+					draw_arc(_p(wx, 0.8), 0.06 * size.x, PI, TAU, 8, Color(0.8, 0.92, 1.0), 2.0)
+				_poly([[0.12, 0.72], [0.3, 0.6], [0.7, 0.58], [0.9, 0.72]], Color(0.98, 0.88, 0.6))
+				_poly([[0.22, 0.64], [0.38, 0.5], [0.62, 0.49], [0.8, 0.64]], Color(0.45, 0.78, 0.35))
+				draw_line(_p(0.56, 0.52), _p(0.6, 0.24 + bob), Color(0.55, 0.38, 0.22), 0.04 * size.x)
+				for a in [-2.6, -1.9, -1.2, -0.5]:
+					var tip := Vector2(0.6 + cos(a) * 0.2, 0.24 + bob + sin(a) * 0.1 + 0.08)
+					_poly([[0.6, 0.22 + bob], [tip.x, tip.y], [0.6 + cos(a) * 0.1, 0.27 + bob]], Color(0.3, 0.7, 0.3))
+				_circle(0.82, 0.18, 0.08, Color(1.0, 0.85, 0.3))
+			"boat":
+				var rock := sin(t * 2.0) * 0.02
+				_poly([[0.0, 0.76], [1.0, 0.76], [1.0, 1.0], [0.0, 1.0]], Color(0.3, 0.62, 0.9))
+				_poly([[0.15, 0.62 + rock], [0.85, 0.62 - rock], [0.72, 0.8], [0.28, 0.8]], Color(0.85, 0.3, 0.25))
+				_poly([[0.15, 0.62 + rock], [0.85, 0.62 - rock], [0.84, 0.66 - rock], [0.16, 0.66 + rock]], white)
+				draw_line(_p(0.5, 0.62), _p(0.5, 0.14 + bob), Color(0.5, 0.35, 0.2), 0.03 * size.x)
+				_poly([[0.53, 0.18 + bob], [0.53, 0.56], [0.82, 0.56]], color)
+				_poly([[0.47, 0.24 + bob], [0.47, 0.56], [0.24, 0.56]], white)
+				_poly([[0.5, 0.14 + bob], [0.64, 0.17 + bob], [0.5, 0.2 + bob]], Color(1.0, 0.85, 0.3))
+				for k in 3:
+					var wx2 := k * 0.4 + fmod(t * 0.1, 0.4)
+					draw_arc(_p(wx2, 0.86), 0.07 * size.x, PI, TAU, 8, Color(0.8, 0.92, 1.0), 2.0)
 			"captain":  # Captain Whiskers (Starship Crew): a ginger space cat in a glass bubble helmet
 				var fur := Color(1.0, 0.62, 0.25)
 				_poly([[0.25, 0.72 + bob], [0.75, 0.72 + bob], [0.82, 0.98], [0.18, 0.98]], Color(0.92, 0.94, 1.0))
