@@ -17,6 +17,7 @@ const MeshKit := preload("res://core/mesh_kit.gd")
 const S := 10.0  ## XR world scale: 10 units = 1 real metre (a runner is 11 cm)
 const TABLE_Y := -3.5
 const BALLS := 5
+const WALK_X := 17.0  ## the giant walks along the table this far each way (coursegen.gd GIANT_X)
 const BALL_R := 0.5
 const GRAB_R := 1.4
 const TOUCH_R := 0.9
@@ -52,7 +53,7 @@ func setup(m: Node, r: VrRig, is_host: bool) -> void:
 	if rig != null:
 		rig.set_scale_of_world(S)
 		rig.move_speed = 0.5 * S
-		rig.bounds = Rect2(-14.0, 5.0, 28.0, 5.0)
+		rig.bounds = Rect2(-WALK_X, 5.0, WALK_X * 2.0, 5.0)
 		rig.camera.far = 3000.0
 		rig.camera.near = 0.05
 		rig.place(feet(), 0.0)
@@ -171,7 +172,7 @@ func step(delta: float) -> void:
 
 func _bucket_follow(delta: float) -> void:
 	var hx := rig.head_position().x
-	bucket_x = lerpf(bucket_x, clampf(hx + 3.4, -13.0, 15.0), 1.0 - exp(-2.0 * delta))
+	bucket_x = lerpf(bucket_x, clampf(hx + 3.4, -WALK_X + 1.0, WALK_X + 1.0), 1.0 - exp(-2.0 * delta))
 	bucket.position.x = bucket_x
 
 

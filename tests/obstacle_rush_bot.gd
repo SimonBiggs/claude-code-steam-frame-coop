@@ -7,11 +7,16 @@ extends Node
 ## with the results; the giant's practice target gets hit.
 ## Local:     godot --headless --path . --fixed-fps 60 --quit-after 15000 res://tests/obstacle_rush_bot.tscn
 ## Networked: DUO_PORT=83xx DUO_HOST=1 BOT_VR=1 ... & DUO_PORT=83xx DUO_JOIN=127.0.0.1 ... (real time)
-## OR_COURSE=n starts at course n (0..3).
+## OR_COURSE=n starts at lesson n (0..3). OR_SHOWS=n plays as if n shows were done (default 0: the lessons,
+## then the next show is seeded; OR_SHOWS=3 starts on seeded courses at tier 2). BOT_NO_DAILY skips TODAY'S
+## COURSE. Also checks: stars get grabbed and the grandstand gains fans (story.gd), every seeded course
+## the show plays passes coursegen.gd check(), and the client builds the very same course as the host.
 
 const BotKit := preload("res://tests/bot_kit.gd")
 const VrRig := preload("res://core/vr_rig.gd")
 const CpuBrain := preload("res://games/obstacle_rush/cpu_brain.gd")
+const CourseGen := preload("res://games/obstacle_rush/coursegen.gd")
+const Story := preload("res://games/obstacle_rush/story.gd")
 
 var kit: BotKit
 var main: Node
@@ -26,6 +31,10 @@ var vr_throws := 0
 var pokes := {}
 var throw_to := Vector3.ZERO
 var poke_i := 0
+var fans0 := -1
+var grabs := 0
+var course_keys := {}  # var_to_str(cdesc) -> course name
+var gen_checked := 0
 
 
 func _ready() -> void:
@@ -33,6 +42,7 @@ func _ready() -> void:
 	kit = BotKit.new()
 	add_child(kit)
 	main = load("res://games/obstacle_rush/main.tscn").instantiate()
+	main.force_shows = int(OS.get_environment("OR_SHOWS")) if OS.has_environment("OR_SHOWS") else 0
 	add_child(main)
 	kit.main = main
 	want = BotKit.bot_players(2, 6)
@@ -44,6 +54,10 @@ func _ready() -> void:
 				kit.join_bot(main.party)
 		elif not main.net.has_vr:
 			kit.join_bot(main.party))  # a flat host (TV / Deck hosting): one pad hero here, in slot 0
+	main.fake_door_hit.connect(func(rid: int, k: int) -> void:
+		if brains.has(rid) and k < main.course.doors.size():
+			var d: Dictionary = main.course.doors[k]
+			(brains[rid] as CpuBrain).bonked_door(float(d["x"]), float(d["z"])))
 	kit.every(4.0, _report)
 	kit.every(0.5, _results)
 	var end := 150.0 if host else (140.0 if client else 230.0)
@@ -57,6 +71,25 @@ func _ready() -> void:
 
 func _results() -> String:
 	seen_courses[int(main.net.state_get("course", 0))] = true
+	if fans0 < 0 and main.ready_to_play:
+		fans0 = int(main.net.state_get("fans", 0))
+	var bits := int(main.net.state_get("stars", 0))
+	var got := 0
+	for k in 8:
+		got += 1 if bits & (1 << k) else 0
+	grabs = maxi(grabs, got)
+	var d: Dictionary = main.net.state_get("cdesc", {})
+	var key := var_to_str(d)
+	if not d.is_empty() and not course_keys.has(key) and main.built_key == key:
+		course_keys[key] = main.course.course_name()
+		var c: Dictionary = CourseGen.make(d)
+		for w in CourseGen.check(c):
+			kit.assert_true(false, "%s course %s passes the validator: %s" % [main.net.mode, c.name, w])
+		gen_checked += 1
+		if gen_checked == 1:
+			print("BOT AGREE first_course=%s/%d" % [String(c.name), int(d.get("s", 0))])
+		kit.assert_eq(var_to_str(main.course.desc.floors), var_to_str(c.floors), "%s built the described course %s" % [main.net.mode, c.name])
+		kit.info("course %s (%s, tier %d): pieces %s, %d stars" % [c.name, String(d.get("k", "")), int(d.get("tier", -1)), str(c.pieces), (c.stars as Array).size()])
 	if main.results_showing():
 		if not saw_results:
 			saw_results = true
@@ -91,11 +124,10 @@ func _tv_bot(slot: int, delta: float) -> void:
 		b.reset(slot * 17 + 3)
 		brains[slot] = b
 	var br: CpuBrain = brains[slot]
+	if br.get_meta("course", "") != main.built_key:  # a new course: forget the old doors
+		br.set_meta("course", main.built_key)
+		br.reset(slot * 17 + 3 + main.built_key.length())
 	br.think(r, main.course, delta)
-	for e in r.events:
-		if String(e[0]) == "fake" and int(e[1]) < main.course.doors.size():
-			var d: Dictionary = main.course.doors[int(e[1])]
-			br.bonked_door(float(d["x"]), float(d["z"]))
 	var cam: Camera3D = main.split.active_camera(slot)
 	var f := -cam.global_basis.z
 	f.y = 0.0
@@ -177,7 +209,7 @@ func _poke_spot() -> Vector3:
 	match poke_i % 5:
 		0:
 			if c.spinner != null:
-				return Vector3(0.0, 1.85, 0.0)
+				return c.spin_c + Vector3(0.0, 1.85, 0.0)
 		1:
 			if not c.pads.is_empty():
 				return c.pads[0] + Vector3(0, 0.4, 0)
@@ -208,11 +240,15 @@ func _checks() -> void:
 	if mode != "host":
 		kit.assert_eq(kit.seated(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
 	kit.assert_true(seen_courses.size() >= 3, "%s: played through several courses (%d)" % [mode, seen_courses.size()])
+	kit.assert_true(gen_checked >= 3, "%s: checked the courses it built (%d)" % [mode, gen_checked])
+	kit.assert_true(main.stands.fans == mini(int(main.net.state_get("fans", 0)), Story.MAX_FANS), "%s: the grandstand shows the fans (%d)" % [mode, main.stands.fans])
 	if mode == "client":
 		kit.assert_true(main.runners.size() >= 3, "client mirrors the runners (%d)" % main.runners.size())
 		kit.assert_true(main.course.checkpoints.size() > 0, "client built the course")
 		return
 	kit.assert_true(saw_results, "%s: the show ended with the results" % mode)
+	kit.assert_true(int(main.net.state_get("fans", 0)) > fans0, "%s: fans joined the grandstand (%d -> %d)" % [mode, fans0, int(main.net.state_get("fans", 0))])
+	kit.assert_true(grabs > 0, "%s: a star got grabbed" % mode)
 	var natural := {}
 	var log_by_course := {}
 	for e in main.finish_log:
@@ -230,6 +266,6 @@ func _checks() -> void:
 	if main.vr_rig != null:
 		kit.assert_true(vr_throws > 0, "the fake VR giant threw balls (%d)" % vr_throws)
 		kit.assert_true(main.ghost.shown, "the ghost glove showed the throw")
-		if not OS.has_environment("OR_COURSE"):
+		if not OS.has_environment("OR_COURSE") and int(OS.get_environment("OR_SHOWS")) == 0:  # (the target is on the first lesson)
 			kit.assert_true(int(main.net.state_get("target_hit", 0)) > 0, "the practice target got hit")
 		kit.assert_true(pokes.size() >= 3, "the giant poked things (%d)" % pokes.size())

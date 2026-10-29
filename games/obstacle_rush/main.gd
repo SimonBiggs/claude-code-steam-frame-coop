@@ -7,10 +7,18 @@ extends Node3D
 ##   bucket by your right hip (right trigger) and throw them at the runners; touch anything to play
 ##   with it (boop runners, hold or spin the spinner, poke bounce pads, lift doors, flick the flag).
 ##   Left stick walks along the table. (giant.gd)
-## - Four short courses, one new thing each (course.gd): gaps, a spinner, bounce pads, doors (some
-##   are pretend), then the golden crown. When everyone is at the flag: cheers, confetti, a flag on the
-##   board goes up, next course. No timers, no numbers: four flags show how far the show has got.
+## - A SHOW is four courses (course.gd). The family's very first show is the four lessons, one new
+##   thing each: gaps, a spinner, bounce pads, doors (some are pretend). After that every show is four
+##   SEEDED courses mixing those pieces (coursegen.gd), a little harder show by show (story.gd), and the
+##   first show of the day opens with TODAY'S COURSE. The last course of a show has the golden crown.
+##   When everyone is at the flag: cheers, confetti, a flag on the board goes up, next course. No
+##   timers, no numbers: four flags show how far the show has got, stars show the stars still out.
 ##   Stragglers hop to the finish by themselves after a while, so nobody waits long.
+## - STORY (story.gd): COACH JELLY dreams of a full grandstand. Every course cleared and every golden
+##   STAR grabbed (on bold spots: over a gap, on the spinner, high in a pad's flight, behind a door)
+##   brings a fan bean to the stands behind the course (stands.gd); the fans stay (saved), new stands
+##   get built, and the stands get flags, balloons, a band, fireworks, a trophy and gold as they fill.
+##   Story cards (a picture + a few words) tell it. One RUN telemetry line per course (and on quit).
 ## - PRACTICE (the first course): the TV runners get a glowing ring over the first gap; the giant gets
 ##   a glowing target on the course and a see-through ghost glove that shows the throw (ghost_hand.gd).
 ## - Text: the TV shows one short line at most (A Jump!, the course name); VR gets one short headline.
@@ -39,11 +47,23 @@ const RunnerLook := preload("res://games/obstacle_rush/runner_look.gd")
 const CpuBrain := preload("res://games/obstacle_rush/cpu_brain.gd")
 const Giant := preload("res://games/obstacle_rush/giant.gd")
 const GhostHand := preload("res://games/obstacle_rush/ghost_hand.gd")
+const CourseGen := preload("res://games/obstacle_rush/coursegen.gd")
+const Story := preload("res://games/obstacle_rush/story.gd")
+const Stands := preload("res://games/obstacle_rush/stands.gd")
+const Seeded := preload("res://core/seeded.gd")
+const Telemetry := preload("res://core/telemetry.gd")
+const StoryCard := preload("res://core/story_card.gd")
+
+## A runner owned here bumped pretend door k (bots learn from it like the CPU brains do).
+signal fake_door_hit(rid: int, k: int)
 
 const GAME_ID := "obstacle_rush"
 const MIN_RUNNERS := 3
 const HOP_IN_TIME := 70.0  ## after this, runners still on the course hop to the flag by themselves
 const AFTER_FIRST := 35.0  ## ... or this long after the first person got there
+const FLAG_DOWN := 3.6  ## the board's flags (above the grandstand) ...
+const FLAG_UP := 7.0  ## ... and raised for a course done
+const TABLE_W := 42.0  ## the picnic table (coursegen.gd keeps courses within x -19..19)
 
 # --- The networking contract ---
 var net: Node
@@ -83,7 +103,16 @@ var headline_t := 0.0
 var again_btn: Node3D
 var results_ui: Control
 var tv_banner: Control
-var built_key := Vector2i(-1, -1)
+var built_key := ""  ## var_to_str of the course description built here
+var stands: Stands
+var show_no := 0  ## host: which show this is (0 = the lessons)
+var daily_show := false  ## host: this show opens with TODAY'S COURSE
+var force_shows := -1  ## bots: pretend this many shows were played (0 = the lessons)
+var star_rows := {}  ## slot -> HBoxContainer (stars on this course)
+var asked_stars := {}  ## client: stars already asked for this course
+var run := {}  ## host: this course's numbers (telemetry)
+var vr_story: Node3D
+var story_rng := RandomNumberGenerator.new()
 
 
 func _ready() -> void:
@@ -102,8 +131,12 @@ func _ready() -> void:
 	party.player_left.connect(_on_player_left)
 	save = Save.new()
 	save.game_id = GAME_ID
-	save.defaults = {"crowns": 0}
+	save.defaults = Story.save_defaults()
 	add_child(save)
+	if int(save.data.world) < 0:
+		save.data.world = Seeded.fresh_seed()  # this family's own courses
+		save.mark_dirty()
+	story_rng.randomize()
 	sfx = SfxScript.new()
 	add_child(sfx)
 	sfx.warm([], true)
@@ -116,6 +149,7 @@ func _ready() -> void:
 	awards.define("bouncy", "BOUNCIEST", "%s big bonks", "tumbles", "max", 2.0)
 	awards.define("hopper", "HOP STAR", "%s jumps", "jumps", "max", 5.0)
 	awards.define("thrower", "BALL WIZARD", "%s bonks with a ball", "bonks")
+	awards.define("starry", "STAR GRABBER", "%s stars", "grabs")
 	if OS.has_environment("DUO_JOIN"):
 		net.join_finished.connect(func(ok: bool) -> void: _setup("client" if ok else "local"))
 		net.join(OS.get_environment("DUO_JOIN"))
@@ -154,9 +188,18 @@ func _setup(mode: String) -> void:
 			split.set_bubble(vr_rig.mirror)
 	party.allow_slot0 = mode != "client" and vr_rig == null
 	if mode != "client":
+		if force_shows < 0 and OS.has_environment("OR_SHOWS"):  # (tests, screenshots: OR_SHOWS=3 starts on seeded courses)
+			force_shows = int(OS.get_environment("OR_SHOWS"))
+		if force_shows >= 0:
+			save.data.shows = force_shows
+		net.state_set("fans", int(save.data.fans))
+		stands.apply(int(save.data.fans))
+		print("Coach Jelly's show: %d shows done, %d fans, world %d" % [int(save.data.shows), int(save.data.fans), int(save.data.world)])
 		_start_show()
-	elif net.state_has("course"):
-		_build_course(int(net.state_get("course", 0)), int(net.state_get("seed", 1)))
+	else:
+		stands.apply(int(net.state_get("fans", 0)))
+		if net.state_has("cdesc"):
+			_build_course(net.state_get("cdesc", {}))
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	ready_to_play = true
 	print("Obstacle Rush: %s mode%s" % [mode, " with a VR giant" if vr_rig != null else ""])
@@ -170,13 +213,13 @@ func _build_world(vr: bool) -> void:
 	var floor_y := ty - 0.8 * Giant.S
 	# The picnic table (with a gingham cloth) and the lawn far below: one mesh each.
 	var b := MeshKit.Builder.new()
-	b.box(Vector3(36.0, 0.8, 15.0), MeshKit.at(Vector3(0, ty - 0.4, -1.0)), Color(0.72, 0.5, 0.32))
-	for i in 12:
+	b.box(Vector3(TABLE_W, 0.8, 15.0), MeshKit.at(Vector3(0, ty - 0.4, -1.0)), Color(0.72, 0.5, 0.32))
+	for i in 14:
 		for j in 5:
 			if (i + j) % 2 == 0:
-				b.box(Vector3(3.0, 0.02, 3.0), MeshKit.at(Vector3(-16.5 + i * 3.0, ty + 0.01, -7.0 + j * 3.0)), Color(1.0, 0.55, 0.6))
-	b.box(Vector3(36.0, 0.015, 15.0), MeshKit.at(Vector3(0, ty + 0.005, -1.0)), Color(0.98, 0.95, 0.92))
-	for sx in [-16.0, 16.0]:
+				b.box(Vector3(3.0, 0.02, 3.0), MeshKit.at(Vector3(-19.5 + i * 3.0, ty + 0.01, -7.0 + j * 3.0)), Color(1.0, 0.55, 0.6))
+	b.box(Vector3(TABLE_W, 0.015, 15.0), MeshKit.at(Vector3(0, ty + 0.005, -1.0)), Color(0.98, 0.95, 0.92))
+	for sx in [-TABLE_W * 0.5 + 2.0, TABLE_W * 0.5 - 2.0]:
 		for sz in [-7.0, 5.0]:
 			b.box(Vector3(1.2, 0.8 * Giant.S - 0.8, 1.2), MeshKit.at(Vector3(sx, (floor_y + ty - 0.8) * 0.5, sz)), Color(0.6, 0.42, 0.27))
 	add_child(MeshKit.instance(b.build()))
@@ -184,7 +227,7 @@ func _build_world(vr: bool) -> void:
 	table.collision_layer = 1
 	var cs := CollisionShape3D.new()
 	var bs := BoxShape3D.new()
-	bs.size = Vector3(36.0, 0.8, 15.0)
+	bs.size = Vector3(TABLE_W, 0.8, 15.0)
 	cs.shape = bs
 	cs.position = Vector3(0, ty - 0.4, -1.0)
 	table.add_child(cs)
@@ -206,22 +249,25 @@ func _build_world(vr: bool) -> void:
 	course = Course.new()
 	course.name = "Course"
 	add_child(course)
+	stands = Stands.new()
+	stands.name = "Stands"
+	add_child(stands)
 	_build_board()
 
 
 ## Four flags on poles behind the course: one goes up for every course done (every machine).
 func _build_board() -> void:
 	board = Node3D.new()
-	board.position = Vector3(0.0, Giant.TABLE_Y, -6.2)
+	board.position = Vector3(0.0, Giant.TABLE_Y, -7.8)  # behind the grandstand
 	add_child(board)
 	for k in Course.COUNT:
 		var pole := MeshKit.Builder.new()
 		var x := -6.0 + k * 4.0
-		pole.cylinder(0.09, 0.12, 7.5, MeshKit.at(Vector3(x, 3.75, 0)), Color(0.98, 0.97, 0.94), 8)
-		pole.sphere(0.25, MeshKit.at(Vector3(x, 7.6, 0)), Color(1.0, 0.85, 0.3), 10)
+		pole.cylinder(0.09, 0.12, 8.5, MeshKit.at(Vector3(x, 4.25, 0)), Color(0.98, 0.97, 0.94), 8)
+		pole.sphere(0.25, MeshKit.at(Vector3(x, 8.6, 0)), Color(1.0, 0.85, 0.3), 10)
 		board.add_child(MeshKit.instance(pole.build()))
 		var f := Node3D.new()
-		f.position = Vector3(x, 1.2, 0)
+		f.position = Vector3(x, FLAG_DOWN, 0)
 		board.add_child(f)
 		var fb := MeshKit.Builder.new()
 		fb.box(Vector3(1.6, 1.0, 0.06), MeshKit.at(Vector3(0.82, 0, 0)), Course.CANDY[k])
@@ -235,7 +281,7 @@ func _update_board(delta: float) -> void:
 	var t := Time.get_ticks_msec() * 0.001
 	for k in board_flags.size():
 		var f := board_flags[k]
-		var want := 6.6 if k < done else 1.2
+		var want := FLAG_UP if k < done else FLAG_DOWN
 		f.position.y = lerpf(f.position.y, want, 1.0 - exp(-2.5 * delta))
 		f.rotation.y = sin(t * 3.0 + k) * (0.25 if k < done else 0.05)
 		f.scale = Vector3.ONE * (1.0 + (sin(t * 5.0) * 0.08 if k == int(net.state_get("course", 0)) and k >= done else 0.0))
@@ -246,28 +292,46 @@ func _update_board(delta: float) -> void:
 func _start_show() -> void:
 	awards.reset()
 	net.state_set("flags", 0)
+	show_no = int(save.data.shows)
 	var first := 0
 	if OS.has_environment("OR_COURSE") and not has_meta("started"):
 		first = clampi(int(OS.get_environment("OR_COURSE")), 0, Course.COUNT - 1)
+		show_no = 0
 	set_meta("started", true)
+	daily_show = show_no > 0 and not (save.data.daily as Dictionary).has(Seeded.today()) and not OS.has_environment("BOT_NO_DAILY")
 	_go_course(first)
+	if show_no == 0 and first == 0:
+		_story(_coach(String(Story.LINES.welcome)))
+	elif daily_show:
+		_story(_coach(String(Story.LINES.daily), "star"))
+	elif show_no > 0:
+		_story(_coach(Story.pick(story_rng, "new_show")))
 
 
 func _go_course(i: int) -> void:
 	course_t = 0.0
 	first_t = -1.0
-	var seed_value := randi() % 100000 + 1
+	var d := Story.describe(Story.recipe(show_no, int(save.data.world), i, daily_show))
 	net.state_set("done", {})
+	net.state_set("stars", 0)
 	net.state_set("phase", "play")
-	net.state_set("seed", seed_value)
 	net.state_set("course", i)
-	_build_course(i, seed_value)
+	net.state_set("cdesc", d)
+	_build_course(d)
+	run = {"show": show_no, "course_i": i, "tumbles": 0, "falls": 0, "fakes": 0, "grabs": 0, "bonks": 0}
+	sound_at("whistle", Vector3(course.start_x, 2.0, -course.half_w), -6.0)
 
 
-func _build_course(i: int, seed_value: int) -> void:
-	built_key = Vector2i(i, seed_value)
-	course.build(i, seed_value)
+## Every machine: build the course the host described (compact: coursegen.gd make()).
+func _build_course(d: Dictionary) -> void:
+	built_key = var_to_str(d)
+	course.build_desc(CourseGen.make(d))
+	course.set_star_bits(int(net.state_get("stars", 0)))
+	asked_stars.clear()
+	stands.place_coach(course.start_x, course.half_w)
+	stands.whistle()
 	ring_done.clear()
+	var i := int(net.state_get("course", 0))
 	var n := 0
 	var ids := runners.keys()
 	ids.sort()
@@ -279,11 +343,13 @@ func _build_course(i: int, seed_value: int) -> void:
 			r.place(course.start_spot(n, ids.size()))
 		n += 1
 		if brains.has(rid):
-			(brains[rid] as CpuBrain).reset(int(rid) * 31 + seed_value)
-	if split != null and i > 0:
-		HudKit.banner(_all_huds(), Course.NAMES[i], "", {"duration": 1.8})
+			(brains[rid] as CpuBrain).reset(int(rid) * 31 + int(d.get("s", 1)))
+	var first_lesson := String(d.get("k", "")) == "lesson" and i == 0
+	if split != null and not first_lesson:
+		HudKit.banner(_all_huds(), course.course_name(), "", {"duration": 1.8})
 	if vr_rig != null:
-		show_headline("THROW A BALL!" if i == 0 else Course.NAMES[i] + "!")
+		show_headline("THROW A BALL!" if first_lesson else course.course_name() + "!")
+	_refresh_hud()
 	for slot in cams:
 		var c: CameraRig = cams[slot]
 		c.yaw = -PI * 0.5
@@ -320,7 +386,7 @@ func _make_runner(rid: int, owned: bool) -> Runner:
 	r.rid = rid
 	r.owned = owned
 	r.is_cpu = rid >= 10
-	r.speed_scale = 0.85 if rid >= 10 else 1.0
+	r.speed_scale = Runner.CPU_SPEED if rid >= 10 else 1.0
 	if rid >= 10:
 		r.look = RunnerLook.cpu_look(rid - 10)
 	else:
@@ -331,7 +397,7 @@ func _make_runner(rid: int, owned: bool) -> Runner:
 	runners[rid] = r
 	if rid >= 10 and net.mode != "client":
 		var br := CpuBrain.new()
-		br.reset(rid * 31 + int(net.state_get("seed", 1)))
+		br.reset(rid * 31 + int((net.state_get("cdesc", {}) as Dictionary).get("s", 1)))
 		brains[rid] = br
 	if rid < 10:
 		if vr_rig == null:
@@ -478,6 +544,7 @@ func _step_owned(delta: float) -> void:
 			_runner_event(r, e)
 		r.events.clear()
 		_practice_ring(r)
+		_grab_star(r)
 	send_t -= delta
 	if net.mode == "client" and send_t <= 0.0:
 		send_t = 1.0 / 30.0
@@ -501,6 +568,7 @@ func _runner_event(r: Runner, e: Array) -> void:
 			_local_sound("boing", p, -2.0, 1.0)
 		"fell":
 			_local_sound("boing", p, -2.0, 0.8)
+			_tell_host(r.rid, "stat", ["falls"])
 		"bonk":
 			_local_sound("crowd_oh", p, -10.0, 1.2)
 			_local_sound("bounce", p, -4.0, 1.3)
@@ -509,8 +577,10 @@ func _runner_event(r: Runner, e: Array) -> void:
 			_local_sound("pop", p, -6.0, 1.6)
 		"fake":
 			_local_sound("boing", p, 0.0, 0.7)
+			_tell_host(r.rid, "stat", ["fakes"])
 			var k := int(e[1])
 			course.wobble_door(k)
+			fake_door_hit.emit(r.rid, k)
 			if brains.has(r.rid) and k < course.doors.size():
 				(brains[r.rid] as CpuBrain).bonked_door(float(course.doors[k]["x"]), float(course.doors[k]["z"]))
 
@@ -526,9 +596,75 @@ func _local_sound(n: String, p: Vector3, db: float, pitch: float) -> void:
 
 func _tell_host(rid: int, action: String, args: Array) -> void:
 	if net.mode == "client":
-		net.request(rid, action, args)
-	elif rid < 10:
-		awards.add(rid, String(args[0]))
+		if rid < 10:
+			net.request(rid, action, args)
+	else:
+		_stat(rid, String(args[0]))
+
+
+## Host: count a runner's stat (awards for people; the course's telemetry for everyone).
+func _stat(rid: int, what: String) -> void:
+	if rid < 10:
+		awards.add(rid, what)
+	if run.has(what):
+		run[what] = int(run[what]) + 1
+
+
+## A runner owned here touches a star: the host takes it (and a fan joins the stands).
+func _grab_star(r: Runner) -> void:
+	if r.done or String(net.state_get("phase", "play")) != "play":
+		return
+	var k := course.star_hit(r.position)
+	if k < 0:
+		return
+	if net.mode == "client":
+		if not asked_stars.has(k):
+			asked_stars[k] = true
+			sfx.play_at("sparkle", course.stars[k], 0.0)
+			net.request(r.rid, "star", [k])
+	else:
+		_take_star(k, r.rid)
+
+
+## Host: star k is taken by runner rid.
+func _take_star(k: int, rid: int) -> void:
+	var bits := int(net.state_get("stars", 0))
+	if k < 0 or k >= course.stars.size() or bits & (1 << k):
+		return
+	bits |= 1 << k
+	net.state_set("stars", bits)
+	course.set_star_bits(bits)
+	_refresh_hud()
+	var p := course.stars[k]
+	sound_at("sparkle", p, 0.0)
+	sound_at("coin", p, -4.0, 1.3)
+	confetti(p, Course.STAR_COLOR, 30)
+	if net.mode == "host":
+		net.event("confetti", [p, Course.STAR_COLOR, 30])
+	_stat(rid, "grabs")
+	save.data.stars = int(save.data.stars) + 1
+	var first := int(save.data.stars) == 1
+	_add_fans(Story.FAN_STAR)
+	if first:
+		_story(_coach(String(Story.LINES.star), "star"))
+
+
+## Host: fans join the stands (saved). New stands and milestones get a story card.
+func _add_fans(n: int) -> void:
+	var before := int(save.data.fans)
+	save.data.fans = before + n  # (the count keeps going; the stands show the first MAX_FANS)
+	save.mark_dirty()
+	var after := int(save.data.fans)
+	net.state_set("fans", after)
+	stands.apply(after)
+	if before < Story.MAX_FANS:
+		sound_at("pop", Stands.seat(mini(after, Story.MAX_FANS) - 1), -4.0, 1.2)
+	var ms := Story.new_milestones(before, after)
+	if not ms.is_empty():
+		var m: Dictionary = ms[-1]
+		_story(_coach(String(m.line), String(m.pic)))
+	elif Story.stands_for(after) > Story.stands_for(before):
+		_story(_coach(String(Story.LINES.seats), "person"))
 
 
 ## TV practice: fly through the glowing ring over the first gap.
@@ -557,7 +693,7 @@ func _finish_rules() -> void:
 		var natural := course.finished(r.position)
 		if natural or late:
 			if not natural:
-				_warp(r, Vector3(11.0, course.finish_y + 0.5, 0.0))
+				_warp(r, Vector3(course.finish_x + 1.7, course.finish_y + 0.5, 0.0))
 			done = done.duplicate()
 			done[rid] = done.size()
 			changed = true
@@ -568,6 +704,9 @@ func _finish_rules() -> void:
 			if rid < 10:
 				awards.add(rid, "stars")
 			finish_log.append([int(net.state_get("course", 0)), int(rid), natural, course_t])
+			run[("natural" if natural else "hops")] = int(run.get("natural" if natural else "hops", 0)) + 1
+			if natural and not run.has("first_t"):
+				run["first_t"] = snappedf(course_t, 0.1)
 			_celebrate_finish(int(rid))
 		else:
 			all_in = false
@@ -580,11 +719,58 @@ func _finish_rules() -> void:
 		net.state_set("flags", int(net.state_get("course", 0)) + 1)
 		net.state_set("phase", "cheer")
 		phase_t = 0.0
-		sound_at("applause", Vector3(10.0, 2.0, 0.0), -2.0)
-		sound_at("fanfare", Vector3(10.0, 2.0, 0.0), -4.0)
+		sound_at("applause", Vector3(course.finish_x, 2.0, 0.0), -2.0)
+		sound_at("fanfare", Vector3(course.finish_x, 2.0, 0.0), -4.0)
+		_course_cleared()
 		if vr_rig != null:
 			vr_rig.pulse(VrRig.RIGHT, 0.6, 0.2)
 			vr_rig.pulse(VrRig.LEFT, 0.6, 0.2)
+
+
+## Host: everyone is in. A fan for the course, TODAY'S COURSE done, fireworks once unlocked, a RUN line.
+func _course_cleared() -> void:
+	var d: Dictionary = net.state_get("cdesc", {})
+	save.data.courses = int(save.data.courses) + 1
+	if String(d.get("k", "")) == "daily":
+		var dd: Dictionary = save.data.daily
+		dd[Seeded.today()] = true
+		while dd.size() > 30:
+			var keys := dd.keys()
+			keys.sort()
+			dd.erase(keys[0])
+	_telemetry("clear")
+	_add_fans(Story.FAN_COURSE)
+	if Story.unlocked(int(save.data.fans)).has("fireworks"):
+		for k in 3:
+			var p := Vector3(-8.0 + k * 8.0, 9.0, -6.0)
+			var col: Color = Stands.STAND_COLS[k]
+			confetti(p, col, 40)
+			if net.mode == "host":
+				net.event("confetti", [p, col, 40])
+		sound_at("explosion", Vector3(0.0, 9.0, -6.0), -14.0, 1.6)
+
+
+## Host: one RUN line per course (or quit mid-course): how the family really plays (balance).
+func _telemetry(end: String) -> void:
+	if net.mode == "client" or course.desc.is_empty():
+		return
+	var d: Dictionary = net.state_get("cdesc", {})
+	var info := run.duplicate()
+	var people := 0
+	for rid in runners:
+		people += 1 if int(rid) < 10 else 0
+	info.merge({"end": end, "mode": net.mode, "vr": vr_rig != null, "flat_host": net.mode == "host" and vr_rig == null,
+		"players": people + (1 if vr_rig != null else 0), "runners": runners.size(), "kind": String(d.get("k", "")),
+		"name": course.course_name(), "seed": int(d.get("s", 0)), "tier": int(d.get("tier", -1)), "attempt": int(d.get("a", -1)),
+		"pieces": course.desc.get("pieces", []), "played_s": snappedf(course_t, 0.1), "stars": course.stars.size(),
+		"stars_got": course.stars.size() - course.stars_left(), "fans": int(save.data.fans), "shows": int(save.data.shows),
+		"throws": giant.throws if giant != null else 0}, true)
+	Telemetry.run(GAME_ID, info)
+
+
+func _exit_tree() -> void:
+	if ready_to_play and net != null and net.mode != "client" and String(net.state_get("phase", "")) == "play":
+		_telemetry("quit")
 
 
 func _warp(r: Runner, p: Vector3) -> void:
@@ -599,8 +785,9 @@ func _celebrate_finish(rid: int) -> void:
 	var r: Runner = runners.get(rid)
 	if r == null:
 		return
+	stands.cheer()
 	var col: Color = r.look.get("color", Color.WHITE)
-	var p := Vector3(Course.FINISH_X, course.finish_y + 3.4, 0.0)
+	var p := Vector3(course.finish_x, course.finish_y + 3.4, 0.0)
 	confetti(p, col, 36)
 	sound_at("cheer", p, -4.0)
 	sound_at("party_horn", p, -8.0)
@@ -616,6 +803,7 @@ func bonk_runner(rid: int, v: Vector3, _ball: int) -> void:
 	if vr_rig != null:
 		awards.add(0, "bonks")
 		vr_rig.pulse(VrRig.RIGHT, 0.5, 0.08)
+	run["bonks"] = int(run.get("bonks", 0)) + 1
 	sound_at("ball_hit", r.position, -2.0, 1.1)
 	if r.owned:
 		r.bonk(v, 1.0)
@@ -683,7 +871,10 @@ func target_hit(p: Vector3) -> void:
 
 func _end_show() -> void:
 	save.data["crowns"] = int(save.data["crowns"]) + 1
+	save.data.shows = int(save.data.shows) + 1
 	save.mark_dirty()
+	_add_fans(Story.FAN_SHOW)
+	_story(_coach(Story.pick(story_rng, "show_end"), "crown"))
 	var data := awards.results({"title": "WHAT A SHOW!", "style": "victory", "score_stat": "stars",
 		"score_format": "%d STARS", "continue": "Again!"})
 	net.state_set("results", data)
@@ -736,7 +927,10 @@ func on_request(slot: int, action: String, args: Array) -> void:
 				net.event_except(net.sender_peer(), "sfx", [String(args[0]), args[1], float(args[2]), float(args[3])])
 		"stat":
 			if args.size() >= 1 and slot < 10:
-				awards.add(slot, String(args[0]))
+				_stat(slot, String(args[0]))
+		"star":
+			if args.size() >= 1 and String(net.state_get("phase", "")) == "play":
+				_take_star(int(args[0]), slot)
 
 
 ## Host: a TV player's runner moved on the TV machine.
@@ -770,7 +964,7 @@ func _process(delta: float) -> void:
 
 func _ghost(delta: float) -> void:
 	var playing := String(net.state_get("phase", "play")) == "play"
-	var first := int(net.state_get("course", 0)) == 0 and course.target != null and giant.throws == 0
+	var first := giant.throws == 0  # a giant who hasn't thrown yet (any course: a new VR player in a later show too)
 	var idle := giant.throws > 0 and giant.last_throw_t > 30.0
 	var on := playing and giant.held < 0 and (first or idle) and course_t > 1.5
 	var to := course.target_pos if course.target != null else Vector3(vr_rig.head_position().x, 0.3, 0.0)
@@ -840,7 +1034,8 @@ func _bottom(c: Control) -> void:
 	c.offset_bottom = -60.0
 
 
-## Top-left on every view: the four course flags (gold = done). No numbers.
+## Top-left on every view: the four course flags (gold = done), then this course's stars (gold =
+## grabbed). No numbers.
 func _refresh_hud() -> void:
 	var done := int(net.state_get("flags", 0))
 	for slot in flag_rows:
@@ -851,6 +1046,32 @@ func _refresh_hud() -> void:
 			c.queue_free()
 		for k in Course.COUNT:
 			row.add_child(UiKit.icon("flag", "gold" if k < done else "dim", 28.0))
+		if course != null and not course.stars.is_empty():
+			var gap := Control.new()
+			gap.custom_minimum_size = Vector2(14.0, 0.0)
+			row.add_child(gap)
+			for k in course.stars.size():
+				row.add_child(UiKit.icon("star", "gold" if course.star_bits & (1 << k) else "dim", 28.0))
+
+
+## A story beat: Coach Jelly (or a picture) and a few words, on every machine.
+func _story(beat: Dictionary) -> void:
+	if net.mode == "host":
+		net.event("story", [beat.get("who", ""), beat.get("line", ""), beat.get("pic", ""), (beat.get("color", Story.COACH_COLOR) as Color).to_html()])
+	show_story(beat)
+
+
+func show_story(beat: Dictionary) -> void:
+	if not huds.is_empty():
+		StoryCard.show(_all_huds(), beat)
+	if vr_rig != null:
+		if vr_story != null and is_instance_valid(vr_story):
+			vr_story.queue_free()
+		vr_story = StoryCard.show_vr(self, vr_rig.camera, beat)
+
+
+func _coach(line: String, pic: String = "coach") -> Dictionary:
+	return {"who": "COACH JELLY", "line": line, "pic": pic, "color": Story.COACH_COLOR, "duration": 3.5}
 
 
 func _all_huds() -> Array:
@@ -865,14 +1086,20 @@ func _all_huds() -> Array:
 
 func _on_state_changed(key: String, value: Variant) -> void:
 	match key:
-		"course", "seed":
-			var k := Vector2i(int(net.state_get("course", 0)), int(net.state_get("seed", 1)))
-			if net.mode == "client" and k != built_key:
-				_build_course(k.x, k.y)
+		"cdesc":
+			if net.mode == "client" and value is Dictionary and var_to_str(value) != built_key:
+				_build_course(value)
+		"stars":
+			course.set_star_bits(int(value))
+			_refresh_hud()
+		"fans":
+			stands.apply(int(value))
 		"flags":
 			_refresh_hud()
 		"done":
 			var d: Dictionary = value if value is Dictionary else {}
+			if net.mode == "client" and d.size() > 0:
+				stands.cheer()
 			for rid in runners:
 				var r: Runner = runners[rid]
 				var was := r.done
@@ -1019,3 +1246,7 @@ func apply_event(kind: String, args: Array) -> void:
 			if course.target != null:
 				course.target.queue_free()
 				course.target = null
+		"story":
+			if args.size() >= 4:
+				show_story({"who": String(args[0]), "line": String(args[1]), "pic": String(args[2]),
+					"color": Color.from_string(String(args[3]), Story.COACH_COLOR), "duration": 3.5})
