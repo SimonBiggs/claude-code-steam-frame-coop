@@ -49,15 +49,25 @@ static func quit_quietly(tree: SceneTree, code := 0) -> void:
 	# In REAL time: under --fixed-fps a 0.2 s game timer passes in a few real ms, before the audio thread mixes once
 	# (local --quit-after runs still leaked, 2026-10-29). Block briefly so it mixes, then let the main thread's
 	# AudioServer update free the dropped playbacks.
-	for i in 2:  # twice: a sound started on the frame after the first stop leaked too
-		await tree.process_frame
+	# Until a frame passes with nothing playing (UI sounds keep working while paused, so one can start on the way out;
+	# fishing_lake still leaked one in half its runs, 2026-10-29). At most 6 passes.
+	for i in 6:
 		_stop_sounds(tree)
 		OS.delay_msec(100)
+		await tree.process_frame
+		if not _any_playing(tree):
+			break
 	# Caches kept on Engine metadata (synthesized sounds, materials: rhythm_band, block_builders, fishing_lake, ...)
 	# live for the whole process and were reported as leaks at exit: drop them, the process is ending anyway.
+	# (Only caches: flags like save_test_mode must stay, or a save on the way out would go to the real saves.)
 	for m in Engine.get_meta_list():
-		Engine.remove_meta(m)
-	await tree.process_frame
+		var v = Engine.get_meta(m)
+		if v is Object or v is Dictionary or v is Array:
+			Engine.remove_meta(m)
+	# This run's own test saves (core/save.gd test_dir(): fresh per process).
+	var Save := load("res://core/save.gd")
+	if Save.test_mode() or Engine.has_meta(Save.TEST_META):
+		Save.remove_tree(Save.test_dir())
 	await tree.process_frame
 	tree.quit(code)
 
@@ -66,3 +76,11 @@ static func _stop_sounds(tree: SceneTree) -> void:
 	for type in ["AudioStreamPlayer", "AudioStreamPlayer2D", "AudioStreamPlayer3D"]:
 		for n in tree.root.find_children("*", type, true, false):
 			n.stop()
+
+
+static func _any_playing(tree: SceneTree) -> bool:
+	for type in ["AudioStreamPlayer", "AudioStreamPlayer2D", "AudioStreamPlayer3D"]:
+		for n in tree.root.find_children("*", type, true, false):
+			if n.playing:
+				return true
+	return false
