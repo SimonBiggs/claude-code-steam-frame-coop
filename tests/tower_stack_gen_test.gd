@@ -117,8 +117,8 @@ func _init() -> void:
 	_expect(is_equal_approx(G.BASE_R, Main.BASE_R) and is_equal_approx(G.BASE_H, Main.BASE_H), "stage size matches main.gd")
 	_expect(is_equal_approx(G.ARENA, Main.ARENA), "park size matches main.gd")
 	_expect(is_equal_approx(G.VR_SPOT.y, Main.VR_SPOT.z), "the giant's spot matches main.gd")
-	for pic in ["wren", "tower"]:
-		_expect(StoryCard.PICTURES.has(pic), "story picture %s exists" % pic)
+	for pic in ["wren", "tower", "cloud", "wave", "house"]:  # every picture Wren shows
+		_expect(StoryCard.has_picture(pic), "story picture %s exists" % pic)
 	print("BOT RESULT: %s" % ("PASS" if fails == 0 else "FAIL (%d)" % fails))
 	quit(0 if fails == 0 else 1)
 

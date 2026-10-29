@@ -36,7 +36,14 @@ const SEASON_LAWN: Array[Color] = [Color(0.45, 0.78, 0.32), Color(0.55, 0.78, 0.
 const SEASON_LEAF: Array[Color] = [Color(0.4, 0.75, 0.3), Color(0.3, 0.62, 0.22), Color(0.95, 0.55, 0.2), Color(0.85, 0.35, 0.2)]
 
 
+## The garden bed's spots [[x, z] x 12] (main.gd sets them from gardengen.gd each garden; empty = the
+## plain 4 x 3 grid). Static so every script (plants, bots, props) reads the same bed.
+static var layout: Array = []
+
+
 static func spot_pos(i: int) -> Vector3:
+	if i >= 0 and i < layout.size():
+		return Vector3(float(layout[i][0]), 0.0, float(layout[i][1]))
 	return Vector3(SPOT_X[i % 4], 0.0, SPOT_Z[clampi(i / 4, 0, 2)])
 
 
@@ -236,11 +243,7 @@ static func build(main: Node3D, vr: bool) -> void:
 	soil.material_override = mat(Color(0.36, 0.24, 0.16))
 	soil.position.y = -0.05
 	main.add_child(soil)
-	# little soil rows
-	var rows := Batch.new()
-	for z in SPOT_Z:
-		rows.add(box(Vector3(BED_X * 2.0 - 0.3, 0.06, 0.5)), Transform3D(Basis(), Vector3(0, 0.0, z)))
-	rows.build(main, mat(Color(0.42, 0.29, 0.19)))
+	# (The soil patches, pond, stones, rocks and toadstools come from the seeded garden: bedview.gd.)
 
 	_build_hive(main)
 	_build_tools(main)
@@ -271,7 +274,7 @@ static func _build_hive(main: Node3D) -> void:
 	tag.modulate = Color(1.0, 0.85, 0.3)
 	tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	tag.layers = TV_LAYER
-	tag.position = Vector3(0, 1.6, 0)
+	tag.position = Vector3(0, 2.1, 0)  # (above Queen Bea on the roof, jarshelf.gd)
 	hive.add_child(tag)
 
 
