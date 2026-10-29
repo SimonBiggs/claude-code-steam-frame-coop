@@ -11,6 +11,9 @@ extends Node
 ## cue_sword, ...), the ones learned (cue_learned_*), the knights' goblin arrows and the Giant's ghost
 ## hand, and prints "BOT: ERROR instruction text" if a hint label, the TV help panel or the VR hint
 ## panel shows any words. BOT_VR=1 is the same as GT_FAKE_VR=1 (main reads it).
+## Story (raidgen.gd / table_story.gd): notes the goblin ladders, Sparky's face, a saved night and a gift on the rim
+## (START_WAVE=5 reaches the night's end quickly; GT_SEED=n fixes the raid), and prints a SCRIPT ERROR when waves
+## came but no ladders stood (also on TV machines, which build them from the snapshot) or Sparky never showed.
 
 const W := preload("res://games/giants_table/world.gd")
 
@@ -103,6 +106,10 @@ func _note_features() -> void:
 		"king armour broken": king_broken,
 		"rain": main.rain_t > 0.0,
 		"giant shielding the fire": main.shield,
+		"ladders up": main.table_story != null and not main.table_story.ladder_nodes.is_empty(),
+		"sparky's face": main.table_story != null and main.table_story.face.visible,
+		"night saved": main.night_saved,
+		"gift on the rim": not main.keep_gifts.is_empty(),
 	}
 	if not main.simple:
 		checks.merge({"village grew": main.built > 0, "combo": main.combo >= 3,
@@ -443,6 +450,10 @@ func _count_visuals(n: Node) -> int:
 
 
 func _exit_tree() -> void:
+	if main != null and main.wave >= 2 and not seen.has("ladders up"):
+		print("SCRIPT ERROR: GT BOT: waves came but no goblin ladders stood on the table (mode %s)" % main.net.mode)
+	if main != null and main.wave >= 1 and not seen.has("sparky's face"):
+		print("SCRIPT ERROR: GT BOT: Sparky's face never showed in the fire (mode %s)" % main.net.mode)
 	if main != null:
 		print("FINAL mode=%s wave=%d score=%d embers=%d built=%d smacks=%d kills=%s seen=%s" % [main.net.mode, main.wave, main.score, main.embers, main.built, smacks, main.kills, seen.keys()])
 		if main.simple:

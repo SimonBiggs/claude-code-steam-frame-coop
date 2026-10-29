@@ -120,7 +120,7 @@ func _init() -> void:
 		_expect(Vector2(p.x, p.z).length() > W.R and Vector2(p.x, p.z).length() < W.EDGE, "gift %d sits on the rim" % i)
 		_expect(p.z < -W.R * 0.6, "gift %d is on the far side, facing the Giant" % i)
 		for j in G.LANTERNS_MAX:
-			_expect(p.distance_to(G.lantern_slot(j)) > 0.9, "gift %d and lantern %d don't overlap" % [i, j])
+			_expect(p.distance_to(G.lantern_slot(j)) > 1.8, "gift %d and lantern %d don't overlap" % [i, j])
 	_expect(G.gift_slot(G.GIFT_KEEP) == Vector3.INF and G.lantern_slot(G.LANTERNS_MAX) == Vector3.INF, "no slots past the end")
 	for j in G.LANTERNS_MAX:
 		var q := G.lantern_slot(j)

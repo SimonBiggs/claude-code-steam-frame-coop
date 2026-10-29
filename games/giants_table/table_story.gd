@@ -11,9 +11,10 @@ const W := preload("res://games/giants_table/world.gd")
 const RaidGen := preload("res://games/giants_table/raidgen.gd")
 const UiKit := preload("res://core/ui_kit.gd")
 
-const WOOD := Color(0.5, 0.31, 0.15)
+const WOOD := Color(0.72, 0.47, 0.24)
 const FLAG := Color(0.95, 0.25, 0.2)
 const GOLD := Color(1.0, 0.8, 0.25)
+const GIFT_SIZE := 1.6  # gifts read from the VR seat (20x) and the knights' views
 
 var main
 var face: Node3D
@@ -124,25 +125,25 @@ func set_ladders(angles: Array) -> void:
 		var n := Node3D.new()
 		ladder_root.add_child(n)
 		var d := Vector3(cos(float(a)), 0.0, sin(float(a)))
-		n.position = d * (W.EDGE + 0.55)
+		n.position = d * (W.EDGE + 0.22)
 		n.basis = Basis(Vector3.UP, atan2(d.x, d.z))  # +Z points out from the table
 		var b := W.Batch.new()
 		var rail := W.box(Vector3(0.09, 4.0, 0.09))
-		var lean := Basis(Vector3.RIGHT, -0.16)  # the top leans in onto the table edge
+		var lean := Basis(Vector3.RIGHT, -0.07)  # the top leans in onto the table edge
 		for sx in [-0.32, 0.32]:
-			b.add(rail, Transform3D(lean, lean * Vector3(sx, -1.5, 0.0)))
+			b.add(rail, Transform3D(lean, lean * Vector3(sx, -1.3, 0.0)))
 		var rung := W.box(Vector3(0.7, 0.07, 0.07))
 		for k in 7:
-			b.add(rung, Transform3D(lean, lean * Vector3(0.0, -3.2 + k * 0.5, 0.0)))
+			b.add(rung, Transform3D(lean, lean * Vector3(0.0, -3.0 + k * 0.5, 0.0)))
 		b.build(n, wood)
 		var pole := MeshInstance3D.new()
 		pole.mesh = W.cyl(0.03, 0.03, 1.0, 6)
 		pole.material_override = wood
-		pole.position = lean * Vector3(0.32, 0.9, 0.0)
+		pole.position = lean * Vector3(0.32, 1.1, 0.0)
 		n.add_child(pole)
 		var fl := MeshInstance3D.new()
 		var pm := PrismMesh.new()
-		pm.size = Vector3(0.4, 0.45, 0.03)
+		pm.size = Vector3(0.5, 0.6, 0.03)
 		fl.mesh = pm
 		fl.material_override = flag
 		fl.rotation.z = -PI / 2.0
@@ -173,23 +174,23 @@ func set_keepsakes(gifts: Array, days: int, crowned: bool) -> void:
 	for i in shown.size():
 		var g: Array = shown[i]
 		var pos := RaidGen.gift_slot(i)
-		var xf := Transform3D(Basis(Vector3.UP, atan2(-pos.x, -pos.z)), pos)
+		var xf := Transform3D(Basis(Vector3.UP, atan2(-pos.x, -pos.z)).scaled(Vector3.ONE * GIFT_SIZE), pos)
 		_gift(parts, String(g[0]), xf)
 		if g.size() > 2 and bool(g[2]):
 			var sp := MeshInstance3D.new()
 			sp.mesh = W.sphere(0.09, 8)
 			sp.material_override = _unshaded(GOLD)
 			sp.scale = Vector3(1.0, 1.4, 1.0)
-			sp.position = pos + Vector3.UP * 1.05
+			sp.position = pos + Vector3.UP * 1.05 * GIFT_SIZE
 			sp.set_meta("y", sp.position.y)
 			sp.set_meta("k", i)
 			keep_root.add_child(sp)
 			sparkles.append(sp)
 	for i in RaidGen.lanterns(days):
 		var pos := RaidGen.lantern_slot(i)
-		_add(parts, WOOD.darkened(0.2), W.cyl(0.035, 0.045, 1.2, 6), Transform3D(Basis(), pos + Vector3.UP * 0.6))
-		_add(parts, WOOD.darkened(0.3), W.cyl(0.12, 0.12, 0.04, 8), Transform3D(Basis(), pos + Vector3.UP * 1.43))
-		_add(parts, Color(1.0, 0.78, 0.35), W.sphere(0.15, 10), Transform3D(Basis().scaled(Vector3(1.0, 1.25, 1.0)), pos + Vector3.UP * 1.27))
+		_add(parts, WOOD.darkened(0.2), W.cyl(0.045, 0.055, 1.6, 6), Transform3D(Basis(), pos + Vector3.UP * 0.8))
+		_add(parts, WOOD.darkened(0.3), W.cyl(0.19, 0.19, 0.05, 8), Transform3D(Basis(), pos + Vector3.UP * 1.93))
+		_add(parts, Color(1.0, 0.78, 0.35), W.sphere(0.24, 10), Transform3D(Basis().scaled(Vector3(1.0, 1.25, 1.0)), pos + Vector3.UP * 1.65))
 	for c in parts:
 		var glow := 2.5 if c == Color(1.0, 0.78, 0.35) else 0.0
 		var mi: MeshInstance3D = parts[c].build(keep_root, W.mat(c, glow) if glow == 0.0 else _unshaded(c))
