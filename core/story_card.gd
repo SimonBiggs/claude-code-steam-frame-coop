@@ -63,13 +63,18 @@ static func show(root: Variant, opts: Dictionary) -> Control:
 	return c
 
 
-## The VR card (a HudKit VrCard): title = who, body = the line. Returns it.
+## The VR card (a HudKit VrCard): title = who, body = the line, and the same picture as the TV card on a round
+## medallion at its left edge (opts.pic; the card's child "StoryPicture"). Returns it.
 static func show_vr(world: Node, cam: Node3D, opts: Dictionary) -> Node3D:
 	if world == null or cam == null:
 		return null
-	return HudKit.vr_card(world, cam, String(opts.get("who", "")), String(opts.get("line", "")),
+	var card := HudKit.vr_card(world, cam, String(opts.get("who", "")), String(opts.get("line", "")),
 		{"duration": float(opts.get("duration", 4.0)), "color": opts.get("color", "accent"), "width": 1.0,
 		"height": float(opts.get("vr_height", -0.22)), "title_size": 0.07, "body_size": 0.055})
+	var pic := String(opts.get("pic", ""))
+	if pic != "":
+		card.add_child(StoryCardPics.vr_medallion(pic, UiKit.color_of(opts.get("color", "accent"), UiKit.ACCENT), card))
+	return card
 
 
 ## A picture Control `px` pixels square (see SHARED_PICTURES and games/*/story_pictures.gd; other names use UiKit icons).
@@ -158,6 +163,32 @@ class StoryCardPics:
 		p.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		p.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		return p
+
+	## The VR card's picture: the TV card's round disc + picture, drawn into a little SubViewport shown on a
+	## Sprite3D (depth-tested like the card, drawn over its panel) half over the card's left edge.
+	static func vr_medallion(kind: String, col: Color, card: Node3D) -> Sprite3D:
+		const PX := 256
+		var vp := SubViewport.new()
+		vp.size = Vector2i(PX, PX)
+		vp.transparent_bg = true
+		vp.disable_3d = true
+		vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+		var disc := PanelContainer.new()
+		disc.add_theme_stylebox_override("panel", UiKit.stylebox(col.darkened(0.45), 1.0, 200.0, col.lightened(0.3), 6.0, 0.0, Vector2(12, 12)))
+		disc.size = Vector2(PX, PX)
+		disc.add_child(make(kind, PX * 0.8, col.lightened(0.15)))
+		vp.add_child(disc)
+		var s := Sprite3D.new()
+		s.name = "StoryPicture"
+		s.add_child(vp)
+		s.texture = vp.get_texture()
+		s.pixel_size = 0.3 / PX
+		s.render_priority = UiKit.VR_PRIO_TEXT
+		s.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var w: float = card.get("width") if card.get("width") != null else 1.0
+		s.layers = card.get("vis_layers") if card.get("vis_layers") != null else 1
+		s.position = Vector3(-w * 0.5 - 0.04, 0.0, 0.012)
+		return s
 
 
 ## Simple friendly vector pictures, drawn in a unit box scaled to the control.

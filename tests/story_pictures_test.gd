@@ -1,7 +1,8 @@
 extends SceneTree
 ## STORY CARD PICTURES: every picture has a drawing, no name is in two places, core/story_card.gd's shared list
 ## stays frozen (a game's new picture goes in games/<game>/story_pictures.gd, found by core/story_pictures.gd, so
-## two games never edit the same line), and every picture draws without a script error.
+## two games never edit the same line), every picture draws without a script error, and a VR story card shows its
+## picture (StoryCard.show_vr: the "StoryPicture" medallion) - VR players never lose the picture the TV shows.
 ##   godot-test --headless --path . -s res://tests/story_pictures_test.gd     Prints STORY PICTURES: PASS / FAIL.
 
 const StoryCard := preload("res://core/story_card.gd")
@@ -11,6 +12,7 @@ const FROZEN: Array[String] = ["bird", "envelope", "cloud", "storm", "house", "s
 var fails := 0
 var frames := 0
 var box: Control
+var vr_cards: Array = []
 
 
 func _expect(ok: bool, what: String) -> void:
@@ -36,12 +38,27 @@ func _initialize() -> void:
 	root.add_child.call_deferred(box)
 	for n in names:
 		box.add_child(StoryCard.picture(n, 64.0, Color(0.9, 0.5, 0.3)))
+	var world := Node3D.new()
+	var cam := Camera3D.new()
+	world.add_child(cam)
+	root.add_child.call_deferred(world)
+	world.ready.connect(func() -> void:
+		for pic in ["beaver", "castle", "star", ""]:
+			vr_cards.append([pic, StoryCard.show_vr(world, cam, {"who": "TEST", "line": "a line", "pic": pic, "duration": 30.0})]))
 
 
 func _process(_delta: float) -> bool:
 	frames += 1
 	if frames < 4:
 		return false
+	_expect(vr_cards.size() == 4, "VR cards made")
+	for pc in vr_cards:
+		var card: Node = pc[1]
+		var sp := card.find_child("StoryPicture", false, false) as Sprite3D if card != null else null
+		if String(pc[0]) == "":
+			_expect(sp == null, "a VR card without a picture has no medallion")
+		else:
+			_expect(sp != null and sp.texture != null, "the VR story card shows its picture %s" % pc[0])
 	print("STORY PICTURES: %s (%d pictures, %d games)" % ["PASS" if fails == 0 else "FAIL", StoryCard.names().size(), Registry.files().size()])
 	quit(1 if fails > 0 else 0)
 	return true
