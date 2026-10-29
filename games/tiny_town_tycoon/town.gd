@@ -24,6 +24,7 @@ var dist := PackedByteArray()
 var open_mask := 0xFF
 var lm: Array = []
 var seed_value := 0
+var dist_version := 0  ## bumped when the districts change (a new island): the mist redraws
 var next_id := 1
 ## Bumped on every change: views compare it to know when to rebuild.
 var version := 0
@@ -597,6 +598,7 @@ func apply_island(isl: Dictionary) -> void:
 	dist = (isl["dist"] as PackedByteArray).duplicate()
 	open_mask = int(isl.get("open", 1))
 	lm = (isl.get("lm", []) as Array).duplicate(true)
+	dist_version += 1
 	_touch(true, true)
 
 
@@ -772,6 +774,7 @@ func deserialize(d: Dictionary) -> void:
 	open_mask = int(d.get("open", 0xFF))
 	lm = (d.get("lm", []) as Array).duplicate(true)
 	seed_value = int(d.get("seed", 0))
+	dist_version += 1
 	for e in d.get("b", []):
 		var arr: Array = e
 		var id := int(arr[0])

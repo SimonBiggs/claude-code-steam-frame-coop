@@ -193,7 +193,7 @@ static func features(isl: Dictionary, owner: PackedInt32Array, lay: PackedByteAr
 	var lm: Array = [[]]
 	for k in range(1, DISTRICTS + 1):
 		var kind: String = "lighthouse" if k == coast_d else String(others.pop_front())
-		var spot := _landmark_spot(ter, dist, used, kind, k, r, sea0)
+		var spot := _landmark_spot(ter, dist, used, kind, k, r, sea0, _reach_all(ter, used, dist, (1 << (k + 1)) - 1))
 		lm.append([kind, spot.x, spot.y] if spot.x >= 0 else [])
 		if spot.x >= 0:
 			var s := Defs.size_of(kind)
@@ -330,7 +330,7 @@ static func features(isl: Dictionary, owner: PackedInt32Array, lay: PackedByteAr
 
 ## Cells a road could get to from the first street (all districts open), avoiding `used` cells
 ## (except roads, which are already roads).
-static func _reach_all(ter: PackedByteArray, used: PackedByteArray) -> PackedByteArray:
+static func _reach_all(ter: PackedByteArray, used: PackedByteArray, dist := PackedByteArray(), mask := 0xFF) -> PackedByteArray:
 	var out := PackedByteArray()
 	out.resize(N * N)
 	out.fill(0)
@@ -347,7 +347,7 @@ static func _reach_all(ter: PackedByteArray, used: PackedByteArray) -> PackedByt
 			if not _inside(n.x, n.y) or out[n.y * N + n.x] == 1:
 				continue
 			var i := n.y * N + n.x
-			if _roadable_ter(ter[i]) and used[i] == 0:
+			if _roadable_ter(ter[i]) and used[i] == 0 and (dist.is_empty() or (mask >> int(dist[i])) & 1 == 1):
 				out[i] = 1
 				q.append(n)
 	return out
@@ -384,7 +384,7 @@ static func sea_mask(ter: PackedByteArray) -> PackedByteArray:
 ## A good landmark spot inside district k: fits on flat land, far out (but not on the beach edge for
 ## the big ones), the lighthouse right by the sea.
 static func _landmark_spot(ter: PackedByteArray, dist: PackedByteArray, used: PackedByteArray, kind: String, k: int,
-		r: RandomNumberGenerator, sea: PackedByteArray) -> Vector2i:
+		r: RandomNumberGenerator, sea: PackedByteArray, reach: PackedByteArray) -> Vector2i:
 	var s := Defs.size_of(kind)
 	var best := Vector2i(-1, -1)
 	var bs := -INF
@@ -411,7 +411,7 @@ static func _landmark_spot(ter: PackedByteArray, dist: PackedByteArray, used: Pa
 			# a drivable cell beside it (the crane must reach it)
 			var side := false
 			for c in _ring(x, z, s):
-				if _inside(c.x, c.y) and _roadable_ter(ter[c.y * N + c.x]) and used[c.y * N + c.x] == 0:
+				if _inside(c.x, c.y) and reach[c.y * N + c.x] == 1:
 					side = true
 			if not side:
 				continue

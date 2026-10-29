@@ -20,6 +20,9 @@ const Defs := preload("res://games/tiny_town_tycoon/defs.gd")
 const VrRig := preload("res://core/vr_rig.gd")
 const UiMenu := preload("res://core/ui_menu.gd")
 const Save := preload("res://core/save.gd")
+const StoryCardScript := preload("res://core/story_card.gd")
+const Wishes := preload("res://games/tiny_town_tycoon/wishes.gd")
+const Telemetry := preload("res://core/telemetry.gd")
 
 var kit: BotKit
 var main: Node
@@ -49,6 +52,8 @@ var seen := {}  ## SIMPLE_MODE: cues / arrows seen on this machine
 var bad_text := {}  ## SIMPLE_MODE: how-to text found (reported once each)
 var unplug_dev := -1
 var unplug_slot := -1
+var home_n := 0  ## buildings in the home town when the boat sailed
+var granted := 0  ## wishes the bot mayor granted on purpose
 
 
 func _ready() -> void:
@@ -266,6 +271,16 @@ func _process(delta: float) -> void:
 
 
 func _next_step() -> Array:
+	# a wish first: put the wished building at the spot the game suggests (when a road is already there)
+	if simple and main.wishes != null and main.practice >= 2:
+		for w in main.wishes.list:
+			var wk := String(w["kind"])
+			if main.place_problem(wk, 0, 0).begins_with("Unlocks"):
+				continue
+			var sp: Vector2i = main.wishes.spot_for(w)
+			if sp.x >= 0 and main.town.on_road({"kind": wk, "x": sp.x, "z": sp.y}):
+				granted += 1
+				return [wk, [sp]]
 	while step < plan.size():
 		var st: Array = plan[step]
 		var kind := String(st[0])
@@ -566,6 +581,31 @@ func _drive(slot: int, delta: float) -> void:
 
 func _simple_timeline() -> void:
 	if not client:
+		kit.at(38.0, "the mist lifts off the first district (forced if the wishes haven't yet)", func() -> void:
+			if (int(main.town.open_mask) >> 1) & 1 == 0:
+				main._open_district(1)
+			kit.assert_true((int(main.town.open_mask) >> 1) & 1 == 1, "district 1 is open")
+			var l: Array = main.town.lm[1]
+			if not l.is_empty():
+				var b: Dictionary = main.town.building_at(int(l[1]), int(l[2]))
+				kit.assert_true(not b.is_empty() and String(b["kind"]) == String(l[0]), "the district's landmark (%s) is a blueprint" % String(l[0])))
+		kit.at(41.0, "the mayor drops the BOAT: off to TODAY'S ISLAND", func() -> void:
+			var tray: Array = main.flat._tray() if main.flat != null else (main.mayor._tray_kinds() if main.mayor != null else [])
+			if main.flat != null or main.mayor != null:
+				kit.assert_true(tray.has("boat"), "the boat is in the mayor's tray after the practice")
+			home_n = main.town.buildings.size()
+			main.net.request(0, "place", ["boat", 11, 11, 0]))
+		kit.at(43.5, "on TODAY'S ISLAND?", func() -> void:
+			kit.assert_eq(String(main.place_key), "today", "the boat sailed to TODAY'S ISLAND")
+			if not OS.has_environment("TT_SEED"):
+				kit.assert_eq(int(main.town.seed_value), Wishes.today_seed(), "today's island is today's seed")
+			kit.assert_true(main.town.buildings.size() <= 2, "today's island is a new little town (%d)" % main.town.buildings.size())
+			var runs := Telemetry.read("tiny_town_tycoon").filter(func(r: Dictionary) -> bool: return String(r.get("end", "")) == "sail")
+			kit.assert_true(not runs.is_empty(), "a RUN line when the boat sailed"))
+		kit.at(46.0, "the boat sails home", func() -> void: main.net.request(0, "place", ["boat", 11, 11, 0]))
+		kit.at(48.0, "home again?", func() -> void:
+			kit.assert_eq(String(main.place_key), "home", "the boat sailed home")
+			kit.assert_eq(main.town.buildings.size(), home_n, "the home town is just as we left it"))
 		# the flat mayor (local, or on a flat host) picks blocks with RB / LB
 		kit.at(26.0, "the flat mayor presses RB", func() -> void:
 			if main.flat != null:
@@ -643,6 +683,10 @@ func _record() -> String:
 		_see("tray_arrow_" + String(main.tray_arrow_kind))
 	if main.ghost_hand != null and main.ghost_hand.shown:
 		_see("ghost_hand")
+	if main.wish_view != null and main.wish_view.bubble_count() > 0:
+		_see("wish_bubble")
+	if main.wish_view != null and main.wish_view._mist.multimesh.instance_count > 0:
+		_see("mist")
 	return ""
 
 
@@ -660,6 +704,15 @@ func _is_instruction(t: String) -> bool:
 	return txt.split(" ", false).size() >= 3
 
 
+func _in_story_card(n: Node) -> bool:
+	var p := n
+	while p != null and p != main:
+		if p is StoryCardScript.Card or (main._vr_story != null and is_instance_valid(main._vr_story) and p == main._vr_story):
+			return true
+		p = p.get_parent()
+	return false
+
+
 ## Every 0.5 s: no how-to text in the game's HUD or VR text (the core pause menu is not the game's).
 func _scan_text() -> String:
 	if main == null or not main.ready_to_play:
@@ -671,6 +724,9 @@ func _scan_text() -> String:
 		if main.pause_menu != null and main.pause_menu.is_ancestor_of(n):
 			continue
 		if not (n as Node).call("is_visible_in_tree"):
+			continue
+		if _in_story_card(n):
+			seen["story_card"] = true  # Benny's picture cards: a picture and one short line are the story
 			continue
 		var t := String(n.get("text"))
 		if _is_instruction(t) and not bad_text.has(t):
@@ -695,7 +751,12 @@ func _save_reload() -> void:
 	main.save.reload()
 	main.island = -1
 	main.town.clear()
-	main.load_island(isl)
+	if simple:
+		var where: String = main.place_key
+		main.place_key = ""
+		main.load_town(where)
+	else:
+		main.load_island(isl)
 	var roads2 := 0
 	for i in main.town.lay.size():
 		roads2 += 1 if main.town.lay[i] != Defs.L_NONE else 0
@@ -732,6 +793,9 @@ func _checks() -> void:
 			kit.assert_true(main.fleet.vehicle_of(s) != null, "%s: P%d has a vehicle" % [mode, s + 1])
 	if simple:
 		_cue_checks()
+		kit.assert_true(seen.has("wish_bubble"), "%s: a wish bubble floated over the town" % mode)
+		kit.assert_true(seen.has("mist"), "%s: mist covered the closed districts" % mode)
+		kit.assert_true(seen.has("story_card"), "%s: Benny's picture cards showed" % mode)
 	if client:
 		var lay := 0
 		for i in main.town.lay.size():
@@ -781,6 +845,8 @@ func _cue_checks() -> void:
 
 
 func _simple_checks() -> void:
+	kit.info("wishes granted %d (bot aimed %d), districts open %d" % [int(main.wishes.done), granted, int(main.town.open_mask)])
+	kit.assert_true(int(main.wishes.done) >= 1, "SIMPLE: a townsfolk wish came true")
 	kit.assert_true(int(main.sim.pop) >= 8, "SIMPLE: people moved into the houses (pop %d)" % int(main.sim.pop))
 	kit.assert_true(int(main.sim.unl) >= 4, "SIMPLE: new blocks joined the tray one at a time (%d unlocked)" % int(main.sim.unl))
 	kit.assert_true(int(main.sim.counters["loads"]) > 0, "SIMPLE: bricks were brought to new buildings")
