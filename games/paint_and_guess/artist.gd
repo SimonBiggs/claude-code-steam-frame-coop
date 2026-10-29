@@ -1,5 +1,4 @@
 extends Node3D
-const UiKit := preload("res://core/ui_kit.gd")
 ## Player 1: the ARTIST (players[0]).
 ## VR (Steam Frame): hold the RIGHT trigger to paint with the glowing brush in your right hand. Paint
 ## by touching the easel with the brush tip, or from further away by pointing at it (a laser shows
@@ -16,6 +15,7 @@ const UiKit := preload("res://core/ui_kit.gd")
 ## clears, Z / LB undoes, N / B new word.
 ## fake_vr (bots): the VR code path driven by a virtual head and hand (bot_* fields).
 ## On the TV machine this is a ghost: a floating brush that follows the host's brush cursor.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const TIP := 0.11  # brush tip ahead of the controller
 const TOUCH_FRONT := 0.12  # tip this close in front of the board paints directly

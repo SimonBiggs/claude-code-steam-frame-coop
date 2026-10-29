@@ -1,7 +1,7 @@
 extends MeshInstance3D
-const UiKit := preload("res://core/ui_kit.gd")
 ## A flying snowball (ballistic). Team "p" = thrown by the players, "e" = thrown by snowmen.
 ## On the host it decides hits; visual_only copies (client, or the client's own throws) just splat.
+const UiKit := preload("res://core/ui_kit.gd")
 
 var main
 var vel := Vector3.ZERO

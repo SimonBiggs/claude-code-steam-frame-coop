@@ -1,10 +1,10 @@
 extends Node3D
-const UiKit := preload("res://core/ui_kit.gd")
 ## Simple mode, VR practice: a see-through glowing hand that shows the thrower what to do instead of
 ## hint text. It loops: reach down to the snow, squeeze (a snowball appears), lift it back over the
 ## shoulder, swing towards the glowing target and let go (the ghost snowball flies off).
 ## Only the VR player's headset sees it (main puts it on their view-model layer). main calls show_demo()
 ## every frame; it fades in after the thrower has been idle for a moment.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const LOOP := 3.2
 

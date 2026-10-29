@@ -1,11 +1,11 @@
 extends Node
-const UiKit := preload("res://core/ui_kit.gd")
 ## Snowball Blitz director: weather events (blizzard, sunshine, cocoa party), fort upgrades (snowball
 ## catapult, ice walls, campfire), hit streaks, per-player awards, short hints on the TV and in VR, and
 ## the sky going from dusk to an aurora night (and to morning when the village is saved).
 ## The host decides; the TV machine mirrors pack()/unpack() and gets one-off events.
 ## Simple mode (main.simple): only the sky (dusk -> aurora night -> sunrise) and the odd MEGA SNOWBALL
 ## from wave 6 on; no weather, upgrades, streaks, hints or awards.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const VrText := preload("res://core/vr_text.gd")
 

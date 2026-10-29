@@ -1,5 +1,4 @@
 extends Node3D
-const UiKit := preload("res://core/ui_kit.gd")
 ## Player 1: the CHEF behind the counter.
 ## VR: BOTH hands hold knives: swing one down through an ingredient to chop it (no buttons needed, so the
 ##     left hand works on the Steam Frame too). Grab with the right trigger (the knife tucks away while you
@@ -8,6 +7,7 @@ const UiKit := preload("res://core/ui_kit.gd")
 ## Buttons (no headset): move a hand cursor between the counter spots, grab/place, chop.
 ##     Keyboard: WASD move cursor, Space grab / place, Shift (or F) chop.  Controller: d-pad / stick, A grab, X / RT chop.
 ## On the TV machine the chef is a ghost drawn from the host's snapshots.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const L := preload("res://games/kitchen_rush/layout.gd")
 

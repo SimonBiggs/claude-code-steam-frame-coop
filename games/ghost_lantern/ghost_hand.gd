@@ -1,10 +1,10 @@
 extends Node3D
-const UiKit := preload("res://core/ui_kit.gd")
 ## Simple mode: a see-through glowing hand holding a little lantern that SHOWS the VR lantern-bearer what
 ## to do (instead of text): it rests where the right hand is, then sweeps its beam across until it
 ## points at the sleepy practice ghost, holds the light on it for a moment, and starts again.
 ## Only the lantern-bearer sees it (main puts it on the VR viewmodel layer). main calls show_demo()
 ## every frame; it fades in when the practice ghost hasn't been lit for a moment.
+const UiKit := preload("res://core/ui_kit.gd")
 
 var hand: Node3D
 var fingers: Array[Node3D] = []

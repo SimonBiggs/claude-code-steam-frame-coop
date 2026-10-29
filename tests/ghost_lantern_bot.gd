@@ -1,5 +1,4 @@
 extends Node
-const UiKit := preload("res://core/ui_kit.gd")
 ## Headless bot for Ghost Lantern. Same scene on host and client (so node paths match).
 ## Local/host: player 1 points the lantern at the ghost nearest player 2 (and rings the bell now and then).
 ## Local/client: vacuum players walk up to the nearest ghost, aim at it and hold fire. On the client,
@@ -21,6 +20,7 @@ const UiKit := preload("res://core/ui_kit.gd")
 ## tip spot (a view's hint line or corner, the controls line, the top line, the join line) shows words.
 ## P2 looks away now and then (to see the turn cue); local mode unplugs and replugs P2's (fake)
 ## controller to see the bolt.
+const UiKit := preload("res://core/ui_kit.gd")
 var main
 var t := 0.0
 var last_print := -100.0

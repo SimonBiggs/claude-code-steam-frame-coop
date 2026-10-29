@@ -1,10 +1,10 @@
 extends Node3D
-const UiKit := preload("res://core/ui_kit.gd")
 ## The floating obstacle course: static islands, lava, wind gusts, rising water, the flag, and the
 ## blocks the builder has placed. Also the collision queries the runners use (simple column spans,
 ## no physics engine): every solid is a vertical span [bottom, top] over an area of the XZ plane.
 ## Built the same way on the host and on the TV (deterministic from the level index); blocks arrive
 ## in snapshots on the TV.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const Art := preload("res://games/block_builders/art.gd")
 const Levels := preload("res://games/block_builders/levels.gd")

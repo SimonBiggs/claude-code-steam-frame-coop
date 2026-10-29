@@ -1,5 +1,4 @@
 extends Node
-const UiKit := preload("res://core/ui_kit.gd")
 ## Headless test of the engine systems: core/party.gd, core/split_view.gd, core/vr_rig.gd (fake VR
 ## through tests/bot_kit.gd), core/camera_rig.gd, core/save.gd and core/net.gd's additions.
 ## Local run (all modules, deterministic):
@@ -8,6 +7,7 @@ const UiKit := preload("res://core/ui_kit.gd")
 ##   DUO_PORT=7990 DUO_HOST=1 ENGINE_NET=1 godot --headless --path . res://tests/engine_sys_test.tscn &
 ##   DUO_PORT=7990 DUO_JOIN=127.0.0.1 ENGINE_NET=1 godot --headless --path . res://tests/engine_sys_test.tscn
 ## Passing runs print "BOT RESULT: PASS"; failures print SCRIPT ERROR lines.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const BotKit := preload("res://tests/bot_kit.gd")
 const NetScript := preload("res://core/net.gd")

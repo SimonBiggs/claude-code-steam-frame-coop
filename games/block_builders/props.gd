@@ -1,5 +1,4 @@
 extends Node3D
-const UiKit := preload("res://core/ui_kit.gd")
 ## SIMPLE_MODE toys in the VR builder's reach (Simon's rule: everything you can reach does something).
 ## Touch them with either hand:
 ##   - a little toy cloud by your LEFT hip (mirroring the tray on the right) holds five toy blocks:
@@ -13,6 +12,7 @@ const UiKit := preload("res://core/ui_kit.gd")
 ## Cheap for the Frame: the clouds are one MultiMesh, the rest is a handful of small meshes, and five
 ## physics boxes on the host only. The host simulates; touches go to the TV as "prop" events and the toy
 ## blocks' poses go in the snapshot.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const Art := preload("res://games/block_builders/art.gd")
 

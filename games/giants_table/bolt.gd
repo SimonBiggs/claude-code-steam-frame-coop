@@ -1,6 +1,6 @@
 extends Node3D
-const UiKit := preload("res://core/ui_kit.gd")
 ## A little crossbow bolt. On the host it hits goblins; on the TV it's just for show.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const W := preload("res://games/giants_table/world.gd")
 const SPEED := 24.0

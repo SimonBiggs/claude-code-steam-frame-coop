@@ -1,9 +1,9 @@
 extends Node3D
-const UiKit := preload("res://core/ui_kit.gd")
 ## The sky: a procedural sky with a low sun, a soft sea of clouds far below and big cloud puffs that
 ## drift past the dragon (recycled ahead of it, so the sky never ends). Each level has its own palette
 ## (sunset, morning, golden afternoon, storm, night with stars and a moon, dawn), plus a flock of
 ## birds and hot-air balloons far off. Puffs and birds are MultiMeshes (one draw call each).
+const UiKit := preload("res://core/ui_kit.gd")
 
 const SEA_SHADER := """
 shader_type spatial;

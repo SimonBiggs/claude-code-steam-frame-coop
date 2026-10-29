@@ -1,5 +1,4 @@
 extends Node3D
-const UiKit := preload("res://core/ui_kit.gd")
 ## Player 1: the DRUMMER. Four floating drums (hi-hat, snare, tom, crash) hang around them; glowing
 ## balls fly down a lane into each drum and a shrinking ring shows when to hit. GOLD balls are star
 ## notes: they charge STAR POWER, and the CRASH sets it off when it's ready.
@@ -9,6 +8,7 @@ const UiKit := preload("res://core/ui_kit.gd")
 ## when someone shorter or taller takes the headset (it is measured from your head, not a rest pose).
 ## PRACTICE (simple mode): one ball floats slowly into one drum at a time and waits there; the drum
 ## glows and its ring pulses; once the ball has arrived a see-through stick swings onto the drum.
+const UiKit := preload("res://core/ui_kit.gd")
 func _update_practice() -> void:
 	var now := Time.get_ticks_msec() * 0.001
 	var used := 0

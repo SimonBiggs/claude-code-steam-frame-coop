@@ -1,5 +1,4 @@
 extends Node3D
-const UiKit := preload("res://core/ui_kit.gd")
 ## Player 1: the friendly GIANT sitting at the table.
 ## VR: XROrigin3D.world_scale makes the village a miniature. Grip or trigger near a goblin, boulder,
 ##   ember or knight picks it up; let go to drop it, or throw it (hand speed from recent positions).
@@ -10,6 +9,7 @@ const UiKit := preload("res://core/ui_kit.gd")
 ## Flat fallback (split screen / no headset): a big hand cursor moved with the mouse (or the second
 ##   controller's left stick); hold the left mouse button (or RT / A) to grab, release to throw.
 ## TV: a ghost of the giant (big friendly head + hands) placed from the host's snapshots.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const W := preload("res://games/giants_table/world.gd")
 const GRAB_OFFSET := Vector3(0.0, -0.35, -0.75)  # grab point in hand space (fingers point -Z)

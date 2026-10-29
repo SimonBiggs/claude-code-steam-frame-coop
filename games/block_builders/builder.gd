@@ -1,5 +1,4 @@
 extends Node3D
-const UiKit := preload("res://core/ui_kit.gd")
 ## Player 1: the giant BUILDER standing over the floating course.
 ## VR (Steam Frame: only the sticks, the right trigger, A and controller positions reach the game):
 ##   XROrigin3D.world_scale = 8, so the course is a tabletop diorama (a block is 12.5 cm).
@@ -12,6 +11,7 @@ const UiKit := preload("res://core/ui_kit.gd")
 ##   controller left stick moves it; left click / RT / A places, right click / B removes; Q/E or
 ##   LB/RB (or 1-4) picks the block; mouse wheel / D-pad up-down raises the layer; R / Y turns it.
 ## TV (client): a ghost of the builder (big hard-hat head + glove) drawn from the host's snapshots.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const Art := preload("res://games/block_builders/art.gd")
 

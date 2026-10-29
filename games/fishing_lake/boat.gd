@@ -1,5 +1,4 @@
 extends Node3D
-const UiKit := preload("res://core/ui_kit.gd")
 ## A TV player: a little rowing boat on the lake, seen from a third-person chase camera.
 ## Row with the left stick (relative to the camera), turn the camera with the right stick.
 ## A: swing the net (scoops up floating treasure, or splashes to scare fish the other way).
@@ -9,6 +8,7 @@ const UiKit := preload("res://core/ui_kit.gd")
 ## Upgrades: scooping treasure and helping the angler earns coins; at 3 / 7 / 12 coins the boat gets a
 ## SAIL (faster), a BIG NET (scoops from further) and a LANTERN MOTOR (fastest, sparkly wake). The host
 ## decides the level and sends it in the snapshots.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const Lake := preload("res://games/fishing_lake/lake.gd")
 const NO_KEYS := 99

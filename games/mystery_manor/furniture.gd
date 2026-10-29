@@ -1,10 +1,10 @@
 extends RefCounted
-const UiKit := preload("res://core/ui_kit.gd")
 ## MYSTERY MANOR: furnishes every room of the manor (manor.gd ManorNode) with merged, vertex-coloured
 ## props: bookshelves, a grand piano, a dining table with candelabras, an oven, trunks, jam shelves,
 ## hedges and a fountain... Every piece that you can bump into gets a collision box (and a nav-grid
 ## footprint) through m.solid(). Positions match the spots / surfaces / paintings / scenes tables
 ## in manor.gd. Front of a piece = +Z before its yaw.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const MeshKit := preload("res://core/mesh_kit.gd")
 

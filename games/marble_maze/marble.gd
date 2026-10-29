@@ -1,5 +1,4 @@
 extends Node3D
-const UiKit := preload("res://core/ui_kit.gd")
 ## A TV player: a marble rolling around the tilting board, seen from a third-person chase camera.
 ## Lives under the board node, so `lp` (board-local position, y up from the floor) is its transform.
 ## Local marbles simulate themselves (also on the TV machine: instant response); on the host, the
@@ -7,6 +6,7 @@ const UiKit := preload("res://core/ui_kit.gd")
 ## Teamwork: marbles bump softly (a friend can never be shoved hard, and never over an edge or into a
 ## hole), and once you're HOME you steer a GUIDE STAR: touch a friend's marble with it to tow them
 ## along. Every marble has a little face that looks where it's rolling (and blinks).
+const UiKit := preload("res://core/ui_kit.gd")
 
 const R := 0.028
 const STEER := 0.45  # own push (m/s^2); the board's tilt gives up to ~0.9

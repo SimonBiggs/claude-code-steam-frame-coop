@@ -1,5 +1,4 @@
 extends Node3D
-const UiKit := preload("res://core/ui_kit.gd")
 ## One kart: the VR player's (index 0), a TV player's (1-6) or a CPU buddy.
 ## Arcade driving without the physics engine: speed + yaw, the track keeps it between the walls,
 ## ramps launch it, bumps push it, nothing ever wrecks it.
@@ -12,6 +11,7 @@ const UiKit := preload("res://core/ui_kit.gd")
 ## countdown (after the second red light) for a boost at GO.
 ## VR comfort: the VR kart's speed changes are rate-limited (no jolts from bananas, walls or boosts),
 ## wall nudges turn it gently, bumps push it softly and ramps toss it less.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const MAX_SPEED := 14.0
 const ACCEL := 9.0

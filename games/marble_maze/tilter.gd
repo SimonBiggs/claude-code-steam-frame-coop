@@ -1,5 +1,4 @@
 extends Node3D
-const UiKit := preload("res://core/ui_kit.gd")
 ## Player 1: the giant who tilts the maze.
 ## VR (Steam Frame): squeeze the RIGHT trigger near either side handle to grab the board, then move your
 ## hand: up/down tilts it sideways, push/pull tilts it away/towards you. Rest your LEFT hand on the
@@ -7,6 +6,7 @@ const UiKit := preload("res://core/ui_kit.gd")
 ## A: level the board. Right stick up/down: raise or lower the table. The table fits your height.
 ## Flat (split screen / non-VR host): WASD or the left stick tilts, mouse nudges, Space / A levels it.
 ## On the TV machine this is a ghost: a big friendly face and two hands drawn from the host's snapshots.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const GRAB_DIST := 0.13
 const HAND_GAIN := 8.0  # tilt units per metre of hand movement (0.12 m = full tilt)

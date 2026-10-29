@@ -1,5 +1,4 @@
 extends Node
-const UiKit := preload("res://core/ui_kit.gd")
 ## BotKit: shared helpers for headless bot tests.
 ## - Ignores the REAL controllers attached to this machine (their presses are swallowed and
 ##   core/party.gd skips them), so a pad on the couch can't pause or join a test.
@@ -16,6 +15,7 @@ const UiKit := preload("res://core/ui_kit.gd")
 ##   main = load("res://games/<id>/main.tscn").instantiate(); add_child(main); kit.main = main
 ##   kit.at(2.0, "join a pad", func() -> void: kit.join_bot(main.party))
 ##   kit.assert_true(main.party.player_count() == 1, "the pad joined")
+const UiKit := preload("res://core/ui_kit.gd")
 
 ## First device id of virtual pads (same as core/party.gd); lower ids are real hardware.
 const FAKE_PAD_BASE := 40

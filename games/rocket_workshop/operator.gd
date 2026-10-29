@@ -1,5 +1,4 @@
 extends Node3D
-const UiKit := preload("res://core/ui_kit.gd")
 ## Player 1, the pilot at the control desk.
 ## VR (Steam Frame): touch buttons and switches with either hand (a glowing fingertip shows the touch
 ## point); squeeze the RIGHT trigger near a plug, the dial knob or the launch lever to grab it and move
@@ -10,6 +9,7 @@ const UiKit := preload("res://core/ui_kit.gd")
 ## Split screen / non-VR host: a pointer. Mouse: click to press, hold and drag to grab.
 ## Controller: left stick moves the pointer, A / RT clicks and holds.
 ## On the TV machine this is a "ghost": a helmet and two mittens drawn from the host's snapshots.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const TIP := Vector3(0.0, -0.01, -0.07)  # fingertip, relative to the aim pose
 const POINTER_SPEED := 750.0

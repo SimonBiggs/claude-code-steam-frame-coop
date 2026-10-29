@@ -1,5 +1,4 @@
 extends Node
-const UiKit := preload("res://core/ui_kit.gd")
 ## Headless bot for Duo Arena party mode. Every local player aims at the nearest enemy and fires.
 ## BOT_PLAYERS=N: total TV players to have (local split screen: P1 + P2 + drop-ins, up to 6;
 ## TV machine (DUO_JOIN): P2 + drop-ins, up to 6). In local mode it also joins one player with a fake
@@ -12,6 +11,7 @@ const UiKit := preload("res://core/ui_kit.gd")
 ## BOT_GOD=1: players can't be hurt (so the finale can be cleared).
 ## BOT_VR=1 (local): player 1 runs the real VR code with fake hands: it draws the sword over the
 ## shoulder, walks up to monsters and swings (slices, shell cracks), and shoots with the right hand.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const FAKE_PAD := 40
 

@@ -1,5 +1,4 @@
 extends Node3D
-const UiKit := preload("res://core/ui_kit.gd")
 ## The stadium: a striped night-time pitch with markings, a full-size goal (7.32 x 2.44 m) with a net,
 ## four roofed stands packed with a crowd that bounces and waves (one MultiMesh per stand, animated in
 ## a shader), waving flags, camera flashes, floodlights, glowing advertising boards, a dancing lion
@@ -8,6 +7,7 @@ const UiKit := preload("res://core/ui_kit.gd")
 ## Cheap on the Steam Frame: all static geometry is merged into a few meshes (mesh_kit.gd); the crowd,
 ## flags and flashes are animated on the GPU from one "excite" value.
 ## Goal line at z = 0, the pitch runs towards +z, penalty spot at z = 11.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const MeshKit := preload("res://games/penalty_shootout/mesh_kit.gd")
 

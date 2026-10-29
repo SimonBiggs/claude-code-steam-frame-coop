@@ -1,5 +1,4 @@
 extends Node3D
-const UiKit := preload("res://core/ui_kit.gd")
 ## Simple mode: everything around the pilot reacts to touch (Simon's rule). Two little side tables stand
 ## where the cockpit wings used to be, within arm's reach of the pilot (who stands at (0, 0, 0.12)
 ## facing the desk, -Z):
@@ -10,6 +9,7 @@ const UiKit := preload("res://core/ui_kit.gd")
 ## VR hands touch them; a split-screen pilot clicks them with the pointer. The host (or local game)
 ## checks the touches and sends a "prop" event so the TV plays the same thing. Cheap: about 30 meshes,
 ## mostly merged, no lights, no physics.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const TOUCH := {
 	# name: [touch point, radius]

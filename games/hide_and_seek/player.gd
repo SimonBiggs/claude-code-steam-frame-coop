@@ -1,5 +1,4 @@
 extends CharacterBody3D
-const UiKit := preload("res://core/ui_kit.gd")
 ## One Hide and Seek player.
 ## Player 1 (role "seeker"): VR, or first person with keyboard+mouse / controller in split screen. Counts with
 ## eyes covered, then hunts with a torch in the right hand: touch a hider with either hand, or point the torch
@@ -10,6 +9,7 @@ const UiKit := preload("res://core/ui_kit.gd")
 ## Found hiders go to JAIL (the cage in the hall) and spectate: their camera follows the seeker. A free
 ## hider who rings the jail bell lets them all out.
 ## The seeker can SNIFF (Q / LB, or in VR put your left hand on your nose): hiders close by sneeze.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const HIDER_SPEED := 4.2
 const SEEKER_SPEED := 3.8

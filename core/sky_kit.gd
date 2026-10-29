@@ -1,5 +1,4 @@
 extends RefCounted
-const UiKit := preload("res://core/ui_kit.gd")
 ## SkyKit: mobile-safe environment presets (sky, sun/moon light, ambient, fog on the TV, and cheap
 ## extras: stars, moon, clouds, rain, snow, bubbles, dust, fireflies, a planet, light shafts).
 ##
@@ -16,6 +15,7 @@ const UiKit := preload("res://core/ui_kit.gd")
 ## Draw calls (besides the sky itself): day 1 (clouds), dawn/sunset 1, night 4 (stars, moon, halo,
 ## clouds), spooky 5 (+ fireflies), dungeon/indoor 1 (dust), space 2 (stars, planet), underwater 2
 ## (bubbles, shafts), stormy 2 (clouds, rain), snowy 2 (clouds, snow).
+const UiKit := preload("res://core/ui_kit.gd")
 
 const MeshKit := preload("res://core/mesh_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")

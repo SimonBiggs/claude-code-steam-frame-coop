@@ -1,5 +1,4 @@
 extends Node3D
-const UiKit := preload("res://core/ui_kit.gd")
 ## Player 1: the angler on the jetty, with a fishing rod.
 ## VR (Steam Frame): the rod is in your RIGHT hand. FLICK it forward to cast (faster flick = further),
 ## or press A for an easy cast. Wait for the bobber to dip (you feel it), then REEL: hold the right
@@ -14,6 +13,7 @@ const UiKit := preload("res://core/ui_kit.gd")
 ## Flat (split screen / non-VR host): WASD / left stick walk, mouse / right stick aim, hold Space / LMB /
 ## A / RT to charge a cast and release, then hold it to reel; RMB / Shift / B / X yanks the rod back.
 ## On the TV machine this is a ghost drawn from the host's snapshots.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const Lake := preload("res://games/fishing_lake/lake.gd")
 const FishScript := preload("res://games/fishing_lake/fish.gd")

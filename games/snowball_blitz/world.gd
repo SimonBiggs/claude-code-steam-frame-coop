@@ -1,7 +1,7 @@
 extends RefCounted
-const UiKit := preload("res://core/ui_kit.gd")
 ## Builds the snowy village square at dusk: sky, warm lamps, pine trees, cottages, fairy lights
 ## and falling snow. Everything is procedural and batched (MultiMesh) to keep draw calls low.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const BULB_SHADER := """
 shader_type spatial;

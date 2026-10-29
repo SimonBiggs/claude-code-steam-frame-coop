@@ -1,5 +1,4 @@
 extends Node3D
-const UiKit := preload("res://core/ui_kit.gd")
 ## A crew member.
 ## Player 1 (index 0) is the GUNNER. In VR they grab a cannon's glowing handle (grip or trigger),
 ## swing it to aim and fire with the trigger; A/B (or a left-stick flick) hops between the four
@@ -7,6 +6,7 @@ const UiKit := preload("res://core/ui_kit.gd")
 ## headset) the gunner aims with the sticks, mouse or keys.
 ## Players 2 to 7 are DECKHANDS in first person: carry cannonballs from the pile to the cannons,
 ## hold "use" next to a leak to patch it, and shoot boarding pirates with a musket.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const World := preload("res://games/cannon_cove/world.gd")
 

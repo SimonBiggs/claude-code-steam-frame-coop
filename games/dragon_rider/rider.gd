@@ -1,5 +1,4 @@
 extends Node3D
-const UiKit := preload("res://core/ui_kit.gd")
 ## Player 1, the dragon rider (players[0]), sitting in the saddle holding the reins.
 ## VR (Steam Frame): steer with your HANDS, like holding reins: raise both hands (relative to your
 ## eyes) = climb, lower them = dive (tummy height = level flight, with a wide comfy middle zone),
@@ -10,6 +9,7 @@ const UiKit := preload("res://core/ui_kit.gd")
 ## Flat (split screen / non-VR host): W/S or stick up/down = climb/dive, A/D or stick = turn,
 ## Space / click / RT / A = flap, mouse / right stick look around.
 ## On the TV machine this is a ghost: a rider with a helmet and mittens, from the host's snapshots.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const NEUTRAL_DEFAULT := Vector3(0.0, -0.5, -0.38)  # hands relative to the eyes when the reins are slack
 const MOUSE_SENS := 0.0028

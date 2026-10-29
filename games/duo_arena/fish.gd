@@ -1,9 +1,9 @@
 extends Node3D
-const UiKit := preload("res://core/ui_kit.gd")
 ## A giant neon flying fish that swoops around the sky above the arena (Abigail's request).
 ## It spits fireballs, can be shot down (host decides), and comes back after a while.
 ## Sometimes it DIVES: a big swoop down through the arena at sword height (bullets do double damage and
 ## the VR sword slices it). The dive is a shared-clock path, so both machines draw the same swoop.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const ORBIT := 22.0
 const HEIGHT := 11.0

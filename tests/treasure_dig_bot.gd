@@ -1,5 +1,4 @@
 extends Node
-const UiKit := preload("res://core/ui_kit.gd")
 ## Headless bot for games/treasure_dig. TV bots run to sparkles (or loose treasure), dig with A and
 ## carry what they find to the chest. BOT_VR=1: a fake giant points the telescope and pulls the
 ## trigger, pokes sparkles with its left glove, grabs treasure with the right and drops / throws it
@@ -7,6 +6,7 @@ const UiKit := preload("res://core/ui_kit.gd")
 ## Local:     godot --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/treasure_dig_bot.tscn
 ## Networked: DUO_PORT=81xx DUO_HOST=1 ... & DUO_PORT=81xx DUO_JOIN=127.0.0.1 ... (same scene, real time)
 ## Flat host: add DUO_FLAT_HOST=1 to the host (no VR: one bot pad plays slot 0 on the host).
+const UiKit := preload("res://core/ui_kit.gd")
 
 const BotKit := preload("res://tests/bot_kit.gd")
 

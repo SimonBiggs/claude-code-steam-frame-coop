@@ -1,5 +1,4 @@
 extends Node
-const UiKit := preload("res://core/ui_kit.gd")
 ## Headless bot for games/mech_titans (MECH TITANS), built on tests/bot_kit.gd.
 ## SIMPLE_MODE (data.gd, on): no hangar: round 1 starts by itself. The bot checks the practice (ghost hand
 ## in VR, one glowing ring per TV player), that round 1 is jets + punches only (the beam stays off), the
@@ -22,6 +21,7 @@ const UiKit := preload("res://core/ui_kit.gd")
 ## the practice warm-up, boss only).
 ## Local:      godot --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/mech_titans_bot.tscn
 ## Networked:  DUO_PORT=8090 DUO_HOST=1 ... & DUO_PORT=8090 DUO_JOIN=127.0.0.1 ... (same scene, real time)
+const UiKit := preload("res://core/ui_kit.gd")
 
 const BotKit := preload("res://tests/bot_kit.gd")
 const Data := preload("res://games/mech_titans/data.gd")

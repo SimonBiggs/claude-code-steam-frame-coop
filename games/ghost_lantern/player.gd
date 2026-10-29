@@ -1,11 +1,11 @@
 extends CharacterBody3D
-const UiKit := preload("res://core/ui_kit.gd")
 ## One Ghost Lantern player.
 ## Player 1 (role "lantern"): carries the spirit lantern. In VR it's the right hand (trigger focuses the
 ## beam) and the left hand holds a bell (shake it, or pull the left trigger, to scare ghosts away).
 ## On a flat screen the lantern is held in front of the camera: Space / left click focus, E rings the bell.
 ## TV players (role "vacuum"): first-person ghost vacuums. Hold fire (RT / Space / click / Enter) to suck
 ## in a ghost that the lantern is lighting up.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const SPEED := 4.6
 const MAX_COURAGE := 100.0

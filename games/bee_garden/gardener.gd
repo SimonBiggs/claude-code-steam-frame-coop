@@ -1,5 +1,4 @@
 extends Node3D
-const UiKit := preload("res://core/ui_kit.gd")
 ## Player 1: the GARDENER at the big raised bed.
 ## VR (Steam Frame; only the sticks, RIGHT trigger, A and hand positions reach the game):
 ##   XROrigin3D.world_scale = 4 makes the bed a waist-high diorama. RIGHT trigger near the seed tray
@@ -12,6 +11,7 @@ const UiKit := preload("res://core/ui_kit.gd")
 ## Flat fallback (split screen / no headset): a glove moved by the mouse (or the second controller's
 ##   left stick); hold left click (or RT / A) to grab, drag, let go. Holding the can pours.
 ## TV: a ghost of the gardener (big friendly head in a straw hat + gloves) from the host's snapshots.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const W := preload("res://games/bee_garden/world.gd")
 

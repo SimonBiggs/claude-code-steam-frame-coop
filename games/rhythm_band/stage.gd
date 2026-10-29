@@ -1,5 +1,4 @@
 extends Node3D
-const UiKit := preload("res://core/ui_kit.gd")
 ## The concert: a stage with a disco floor, an LED equalizer wall, chase lights along the stage lip,
 ## swinging light beams, speaker stacks, amps and monitors, a big waving crowd and the guitarists'
 ## avatars. The drummer stands at the back on a riser (DRUM_SPOT, facing -Z towards the crowd); the
@@ -7,6 +6,7 @@ const UiKit := preload("res://core/ui_kit.gd")
 ## Cheap on the Steam Frame: the static set is ONE merged mesh; the crowd (120 fans with waving arms
 ## and glow sticks), the LED wall and the chase lights are MultiMeshes animated in shaders from a few
 ## uniforms (beat, energy, star power) - no per-frame CPU work per fan or bulb.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const MeshKit := preload("res://games/rhythm_band/mesh_kit.gd")
 

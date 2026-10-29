@@ -1,7 +1,7 @@
 extends RefCounted
-const UiKit := preload("res://core/ui_kit.gd")
 ## Builds the pirate world: sunset sky, animated sea, islands and our ship. Also the deck geometry
 ## helpers (walkable area, obstacles) shared by players, boarders and leaks.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const SEA_SHADER := """
 shader_type spatial;

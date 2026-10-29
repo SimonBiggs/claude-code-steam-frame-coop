@@ -1,11 +1,11 @@
 extends Node3D
-const UiKit := preload("res://core/ui_kit.gd")
 ## A tiny knight on the tabletop (TV players 2 to 7), seen in third person.
 ## Controller: left stick move, right stick turn the camera, RT/RB/B sword, LT/LB/X crossbow, A jump.
 ## Keyboard set 0: W/S move, A/D turn, Space sword, F crossbow, Shift jump.
 ## Keyboard set 1: arrows (left/right turn), Enter sword, Right Ctrl / . crossbow, / jump.
 ## Players 4-7 have no keyboard set (key_set = -1): one controller each, picked by device id.
 ## Their own movement is local (instant); the host decides hits, damage, embers and reviving.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const W := preload("res://games/giants_table/world.gd")
 const BoltScript := preload("res://games/giants_table/bolt.gd")

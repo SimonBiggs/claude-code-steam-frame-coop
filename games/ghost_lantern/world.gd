@@ -1,7 +1,7 @@
 extends RefCounted
-const UiKit := preload("res://core/ui_kit.gd")
 ## Builds the haunted mansion: library (west), hall (middle), ballroom (east), all procedural.
 ## Rooms span x -21..21, z -8..8; interior walls at x = ±7 with a doorway at |z| < 1.6.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const HALF_X := 21.0
 const HALF_Z := 8.0

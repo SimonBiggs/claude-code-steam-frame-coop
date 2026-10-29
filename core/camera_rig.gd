@@ -1,5 +1,4 @@
 extends Node
-const UiKit := preload("res://core/ui_kit.gd")
 ## CameraRig: drives one TV Camera3D (e.g. core/split_view.gd's camera(slot) or shared_camera()).
 ## Modes, switchable any time with a smooth blend between them:
 ## - "follow": third person behind a target. Orbit with the slot's right stick / mouse (give it a
@@ -16,6 +15,7 @@ const UiKit := preload("res://core/ui_kit.gd")
 ##   add_child(rig); rig.follow(avatar)            # or rig.follow_group(avatars) / rig.shot_look(a, b)
 ##   rig.shake(0.4)                                # on a big hit
 ## Call it from anywhere; it updates in _process (cameras move per rendered frame, no judder).
+const UiKit := preload("res://core/ui_kit.gd")
 
 ## Which mode is running: "follow", "group", "shot" or "free".
 var mode := "free"

@@ -1,11 +1,11 @@
 extends Node3D
-const UiKit := preload("res://core/ui_kit.gd")
 ## A tiny runner (TV players 2 to 7), third person: run, jump, reach the flag.
 ## Controller: left stick move, right stick turn the camera, A (or RB / RT) jump.
 ## Keyboard (P2 only): WASD move, Space jump, arrow keys or mouse turn the camera.
 ## Players 3-7: one controller each (press A on a spare controller to drop in).
 ## A runner's own movement is simulated on its own machine (instant); the host decides who has
 ## reached the flag. Hazards (falling, lava, water) send you back to your last safe spot.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const Art := preload("res://games/block_builders/art.gd")
 

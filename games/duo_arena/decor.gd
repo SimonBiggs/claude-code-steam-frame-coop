@@ -1,8 +1,8 @@
 extends RefCounted
-const UiKit := preload("res://core/ui_kit.gd")
 ## Arena decoration, built once: bleachers full of cheering neon spectators, stars, a ringed planet,
 ## slowly turning holo rings and drifting sparks. Repeated props are MultiMeshes (one draw call each).
 ## The crowd's ShaderMaterials are kept as main metas ("crowd_mats") so the director can make them cheer.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const CROWD_SHADER := """
 shader_type spatial;

@@ -1,5 +1,4 @@
 extends Node3D
-const UiKit := preload("res://core/ui_kit.gd")
 ## Where the rockets go. Every rocket flies to the next planet on the SPACE MAP:
 ## - the destination planet hangs huge in the sky (everyone sees it, the pilot included) and the
 ##   rocket curves off towards it after lift-off;
@@ -9,6 +8,7 @@ const UiKit := preload("res://core/ui_kit.gd")
 ##   little space scene (crew-only layer, far below the world) where the rocket lands on the planet.
 ## Everything is driven by (rocket number, phase, launch time), so host and TV agree without events,
 ## except the log lines (event "logged").
+const UiKit := preload("res://core/ui_kit.gd")
 
 const P := preload("res://games/rocket_workshop/puzzles.gd")
 const SKY_PLANET := Vector3(28.0, 190.0, -240.0)  # high enough to clear the roof beams from the desk

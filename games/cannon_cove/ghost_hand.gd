@@ -1,11 +1,11 @@
 extends Node3D
-const UiKit := preload("res://core/ui_kit.gd")
 ## Simple mode, VR practice: a see-through glowing hand that shows the gunner what to do, instead of
 ## hint text. It loops: reach to the cannon's glowing handle, squeeze, swing towards the target, let go.
 ## Only the gunner's headset sees it (main puts it on their view-model layer). main calls show_demo()
 ## every frame; it fades in after the gunner has been idle for a moment. show_release() is the other
 ## lesson: while the gunner holds the handle with the ring on the target, the hand hovers just above
 ## theirs, squeezed, and opens its fingers again and again ("let go now"), instead of the words.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const LOOP := 3.0
 

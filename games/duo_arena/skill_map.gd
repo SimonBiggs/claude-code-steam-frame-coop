@@ -1,8 +1,8 @@
 extends Node3D
-const UiKit := preload("res://core/ui_kit.gd")
 ## Simon's skill map v2: a glowing star on the arena floor. Six branches, three tiers each.
 ## Each player earns their own XP from their kills and buys nodes for themselves by shooting them.
 ## Only the first ring is visible at first; buying a node reveals the next one on that branch.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const BRANCHES := [
 	# key, name, colour, effect per tier: [stat, "mul"/"add", amount]

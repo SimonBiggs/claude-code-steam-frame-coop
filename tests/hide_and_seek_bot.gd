@@ -1,5 +1,4 @@
 extends Node
-const UiKit := preload("res://core/ui_kit.gd")
 ## Headless bot for Hide and Seek. Same scene on host and client (so node paths match).
 ## Seeker (local / host): once the count is over, walks up to the nearest hider still hiding, aims the
 ## torch and clicks. In round 2 the seeker dawdles, so the hiders win on time.
@@ -23,6 +22,7 @@ const UiKit := preload("res://core/ui_kit.gd")
 ## "BOT: ERROR instruction text" if a headline (TV centre / a view's big word / the top line / VR) is
 ## anything but a short word, or the old key-help line is back. BOT_VR=1 (local): P1 is a fake VR seeker
 ## (XR nodes without a headset) whose hands aim the torch and touch hiders, so the 3D VR cues run.
+const UiKit := preload("res://core/ui_kit.gd")
 const WorldScript := preload("res://games/hide_and_seek/world.gd")
 
 var main
