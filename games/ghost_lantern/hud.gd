@@ -169,6 +169,20 @@ func _target():
 	return best
 
 
+## The nearest ghost hiding in the house (snoozy / peekaboo), or null.
+func _hiding_target():
+	var best = null
+	var best_d := 22.0
+	for g in main.get_tree().get_nodes_in_group("ghosts"):
+		if not g.hiding:
+			continue
+		var d: float = g.global_position.distance_to(player.global_position)
+		if d < best_d:
+			best_d = d
+			best = g
+	return best
+
+
 ## Is pos inside this view (with a margin)?
 func _on_screen(pos: Vector3) -> bool:
 	var cam: Camera3D = player.camera
@@ -189,6 +203,12 @@ func _cue_now() -> Array:
 		return ["plug", ""]
 	var g = _target()
 	if g == null:
+		# Nothing lit: a soft glowing edge arrow towards the nearest hiding ghost (Granny Boo's house).
+		var h = _hiding_target()
+		if h != null and player.role != "lantern" and not main.practice:
+			var hp: Vector3 = h.peeker.global_position if h.peeker != null else h.global_position
+			edge_on = not _on_screen(hp)
+			edge_pos = hp
 		return ["", ""]
 	var pos: Vector3 = g.global_position
 	var on := _on_screen(pos)
