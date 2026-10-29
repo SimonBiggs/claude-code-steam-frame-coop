@@ -7,6 +7,7 @@ extends Node3D
 ## Buttons (no headset): move a hand cursor between the counter spots, grab/place, chop.
 ##     Keyboard: WASD move cursor, Space grab / place, Shift (or F) chop.  Controller: d-pad / stick, A grab, X / RT chop.
 ## On the TV machine the chef is a ghost drawn from the host's snapshots.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const L := preload("res://games/kitchen_rush/layout.gd")
 
@@ -471,7 +472,7 @@ func _button_update(delta: float) -> void:
 	var sp := L.spot_pos(cursor)
 	var look := (sp - (L.CHEF_POS + Vector3.UP * L.CHEF_HEAD_HEIGHT))
 	var head_pos := L.CHEF_POS + Vector3.UP * L.CHEF_HEAD_HEIGHT + Vector3(sp.x * 0.3, 0, 0)
-	head_t = Transform3D(Basis.looking_at(look.normalized(), Vector3.UP), head_pos)
+	head_t = Transform3D(UiKit.aim(look.normalized(), Vector3.UP), head_pos)
 	var lpos := sp + Vector3(-0.09, 0.22, 0.06)
 	lhand_vis.global_transform = Transform3D(Basis(Vector3.RIGHT, -0.4), lpos)
 	var down := sin(chop_anim * PI)
@@ -493,7 +494,7 @@ func _update_camera(delta: float) -> void:
 	var sp := L.spot_pos(cursor)
 	cam_x = lerpf(cam_x, sp.x * 0.45, 1.0 - exp(-6.0 * delta))
 	camera.global_position = Vector3(cam_x, 2.05, 1.6)
-	camera.look_at(Vector3(cam_x * 0.8, 0.95, -0.15), Vector3.UP)
+	UiKit.look(camera, Vector3(cam_x * 0.8, 0.95, -0.15), Vector3.UP)
 
 
 func _pressed(id: String, down: bool) -> bool:

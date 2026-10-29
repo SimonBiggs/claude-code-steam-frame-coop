@@ -6,6 +6,7 @@ extends Node3D
 ## Cheap on the Steam Frame: the static set is ONE merged mesh; the crowd (120 fans with waving arms
 ## and glow sticks), the LED wall and the chase lights are MultiMeshes animated in shaders from a few
 ## uniforms (beat, energy, star power) - no per-frame CPU work per fan or bulb.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const MeshKit := preload("res://games/rhythm_band/mesh_kit.gd")
 
@@ -601,7 +602,7 @@ func strum(i: int, good: bool) -> void:
 func tv_camera(i: int) -> Transform3D:
 	var ax := AVATAR_X[clampi(i - 1, 0, AVATAR_X.size() - 1)]
 	var pos := Vector3(ax * 0.5, 1.8, -6.6)
-	return Transform3D(Basis(), pos).looking_at(Vector3(ax * 0.35, 1.75, 0.5), Vector3.UP)
+	return UiKit.aim_from(pos, Vector3(ax * 0.35, 1.75, 0.5), Vector3.UP)
 
 
 func on_beat(b: int, crowd: float) -> void:

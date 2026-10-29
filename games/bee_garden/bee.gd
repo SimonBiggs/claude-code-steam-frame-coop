@@ -334,7 +334,7 @@ func _update_camera(delta: float) -> void:
 	camera.global_position = cp
 	var look := global_position + Vector3.UP * 0.2
 	if camera.global_position.distance_to(look) > 0.05:
-		camera.look_at(look, Vector3.UP)
+		UiKit.look(camera, look, Vector3.UP)
 
 
 func _update_hud() -> void:

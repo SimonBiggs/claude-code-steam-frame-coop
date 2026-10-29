@@ -1,6 +1,7 @@
 extends MeshInstance3D
 ## A flying snowball (ballistic). Team "p" = thrown by the players, "e" = thrown by snowmen.
 ## On the host it decides hits; visual_only copies (client, or the client's own throws) just splat.
+const UiKit := preload("res://core/ui_kit.gd")
 
 var main
 var vel := Vector3.ZERO
@@ -49,7 +50,7 @@ func _physics_process(delta: float) -> void:
 			return
 	if look == "icicle":
 		if vel.length() > 0.1:
-			look_at(global_position + vel, Vector3.UP if absf(vel.normalized().y) < 0.99 else Vector3.RIGHT)
+			UiKit.look(self, global_position + vel, Vector3.UP if absf(vel.normalized().y) < 0.99 else Vector3.RIGHT)
 			rotate_object_local(Vector3.RIGHT, PI / 2.0)  # the cone's point (-Y) leads
 	else:
 		rotation += spin * delta

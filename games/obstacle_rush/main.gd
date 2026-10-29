@@ -145,7 +145,7 @@ func _setup(mode: String) -> void:
 		split.bind_party(party)
 		var sc := split.shared_camera()
 		sc.global_position = Vector3(0.0, 13.0, -21.0)  # across the table: the giant waves from behind the course
-		sc.look_at(Vector3(0.0, 0.5, 1.0), Vector3.UP)
+		UiKit.look(sc, Vector3(0.0, 0.5, 1.0), Vector3.UP)
 		_make_hud(-1, split.shared_hud())
 		if mode == "client":
 			giant.make_avatar()

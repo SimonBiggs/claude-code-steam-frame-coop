@@ -7,6 +7,7 @@ extends Node3D
 ## Cheap on the Steam Frame: all static geometry is merged into a few meshes (mesh_kit.gd); the crowd,
 ## flags and flashes are animated on the GPU from one "excite" value.
 ## Goal line at z = 0, the pitch runs towards +z, penalty spot at z = 11.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const MeshKit := preload("res://games/penalty_shootout/mesh_kit.gd")
 
@@ -351,7 +352,7 @@ func _build_lights_and_boards(lit: Array, glow: Array) -> void:
 	for p in [Vector3(-32, 0, -8), Vector3(32, 0, -8), Vector3(-32, 0, 56), Vector3(32, 0, 56)]:
 		var pos: Vector3 = p
 		lit.append([MeshKit.cyl(0.35, 0.5, 22.0, 8), MeshKit.at(pos + Vector3(0, 11, 0)), Color(0.4, 0.42, 0.48)])
-		var look := Transform3D(Basis(), pos + Vector3(0, 22.5, 0)).looking_at(Vector3(0, 0, 20), Vector3.UP)
+		var look := UiKit.aim_from(pos + Vector3(0, 22.5, 0), Vector3(0, 0, 20), Vector3.UP)
 		glow.append([MeshKit.box(Vector3(5, 3, 0.5)), look, Color(1.0, 1.0, 0.85)])
 		lit.append([MeshKit.box(Vector3(5.4, 3.4, 0.4)), look * MeshKit.at(Vector3(0, 0, 0.3)), Color(0.3, 0.3, 0.35)])
 	# Advertising boards around the pitch (glowing).

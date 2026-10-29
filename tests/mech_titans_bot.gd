@@ -21,6 +21,7 @@ extends Node
 ## the practice warm-up, boss only).
 ## Local:      godot --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/mech_titans_bot.tscn
 ## Networked:  DUO_PORT=8090 DUO_HOST=1 ... & DUO_PORT=8090 DUO_JOIN=127.0.0.1 ... (same scene, real time)
+const UiKit := preload("res://core/ui_kit.gd")
 
 const BotKit := preload("res://tests/bot_kit.gd")
 const Data := preload("res://games/mech_titans/data.gd")
@@ -664,7 +665,7 @@ func _drive_vr(delta: float, phase: String) -> void:
 	var hr: Node3D = rig.hand_r
 	var dir := (aim - hr.global_position).normalized()
 	if absf(dir.y) < 0.99:
-		hr.global_basis = Basis.looking_at(dir, Vector3.UP)
+		hr.global_basis = UiKit.aim(dir, Vector3.UP)
 	var on: bool = absf(ang) < 0.6 and main.mech.energy > 10.0
 	kit.vr_trigger(rig, 1.0 if on else 0.0)
 	if on:

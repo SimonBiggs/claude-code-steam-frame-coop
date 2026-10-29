@@ -15,6 +15,7 @@ extends Node
 ##   main = load("res://games/<id>/main.tscn").instantiate(); add_child(main); kit.main = main
 ##   kit.at(2.0, "join a pad", func() -> void: kit.join_bot(main.party))
 ##   kit.assert_true(main.party.player_count() == 1, "the pad joined")
+const UiKit := preload("res://core/ui_kit.gd")
 
 ## First device id of virtual pads (same as core/party.gd); lower ids are real hardware.
 const FAKE_PAD_BASE := 40
@@ -82,6 +83,8 @@ func _process(delta: float) -> void:
 	for step in _timeline:
 		var s: Array = step
 		if not bool(s[3]) and t >= float(s[0]):
+			if _settling(s):
+				continue
 			s[3] = true
 			info(str(s[1]))
 			var c: Callable = s[2]
@@ -96,6 +99,20 @@ func _process(delta: float) -> void:
 				var out: Variant = c2.call()
 				if out is String and str(out) != "":
 					info(str(out))
+
+
+## The pause checks every bot makes ("paused?" / "resumed?" steps right after pressing Start): a TV
+## machine's Start goes to the host and the pause comes back over the network, which takes longer on a
+## busy machine than the 0.6 s the timelines allow (joiners flaked "Start pauses" under load). Such a
+## step waits up to PAUSE_WAIT seconds for the pause state it checks, then runs (and checks) anyway.
+const PAUSE_WAIT := 2.0
+
+func _settling(s: Array) -> bool:
+	var label := str(s[1])
+	if label != "paused?" and label != "resumed?":
+		return false
+	var want := label == "paused?"
+	return get_tree().paused != want and t < float(s[0]) + PAUSE_WAIT
 
 
 # --- Timeline and printing ------------------------------------------------------------------
@@ -366,7 +383,7 @@ func vr_look_at(rig: Node, world_point: Vector3) -> void:
 	var cam: Node3D = rig.camera
 	var to := world_point - cam.global_position
 	if to.length() > 0.01:
-		cam.global_basis = Basis.looking_at(to.normalized(), Vector3.UP if absf(to.normalized().y) < 0.98 else Vector3.FORWARD)
+		cam.global_basis = UiKit.aim(to.normalized(), Vector3.UP if absf(to.normalized().y) < 0.98 else Vector3.FORWARD)
 
 
 ## Pull the right trigger (0..1), press A, push the sticks (VR sticks: y UP positive).

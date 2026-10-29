@@ -6,6 +6,7 @@ extends Node
 ## Local:     godot --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/treasure_dig_bot.tscn
 ## Networked: DUO_PORT=81xx DUO_HOST=1 ... & DUO_PORT=81xx DUO_JOIN=127.0.0.1 ... (same scene, real time)
 ## Flat host: add DUO_FLAT_HOST=1 to the host (no VR: one bot pad plays slot 0 on the host).
+const UiKit := preload("res://core/ui_kit.gd")
 
 const BotKit := preload("res://tests/bot_kit.gd")
 
@@ -24,6 +25,10 @@ var vr_target := Vector3.ZERO
 var vr_throw := false
 var max_items_seen := 0
 var max_sparkles_seen := 0
+var saw_pick := false  # round 2 starts with Peg's two island signposts
+var max_maps := 0
+var saw_x := false
+var kinds_seen := {}
 
 
 func _ready() -> void:
@@ -32,6 +37,7 @@ func _ready() -> void:
 	add_child(kit)
 	main = load("res://games/treasure_dig/main.tscn").instantiate()
 	main.set("round_time", 18.0)
+	main.set("fresh_save", true)  # a brand-new collection every run (story.gd)
 	add_child(main)
 	kit.main = main
 	want = 0 if OS.has_environment("BOT_SOLO") else BotKit.bot_players(2, 6)  # BOT_SOLO=1 BOT_VR=1: the giant alone
@@ -102,6 +108,11 @@ func _physics_process(delta: float) -> void:
 	if main == null or not main.ready_to_play:
 		return
 	max_items_seen = maxi(max_items_seen, main.items.size())
+	saw_pick = saw_pick or String(main.net.state_get("phase", "")) == "pick"
+	max_maps = maxi(max_maps, int(main.net.state_get("maps", 0)))
+	saw_x = saw_x or main.net.state_get("x", false) is Vector3
+	if main.island.has("kind"):
+		kinds_seen[String(main.island.kind)] = true
 	var sp := 0
 	for n in main.sparkle_nodes:
 		if n.visible:
@@ -123,7 +134,9 @@ func _steer(slot: int, delta: float) -> void:
 	for id in main.items:
 		if int(main.items[id]["carrier"]) == slot:
 			carrying = true
-	if carrying:
+	if String(main.net.state_get("phase", "")) == "pick":
+		target = main.SIGN_POS[slot % 2]  # dig at a signpost: pick that island
+	elif carrying:
 		target = Vector3.ZERO
 	else:
 		target = _nearest_loose(a.position)
@@ -190,7 +203,7 @@ func _drive_vr(delta: float) -> void:
 			vr_target = main.hidden[0][0]
 			var g := beach.to_global(vr_target)
 			var hr: Node3D = rig.hand_r
-			hr.global_basis = Basis.looking_at((g - hr.global_position).normalized(), Vector3.UP)
+			hr.global_basis = UiKit.aim((g - hr.global_position).normalized(), Vector3.UP)
 			kit.vr_trigger(rig, 1.0 if vr_t > 0.2 and vr_t < 0.4 else 0.0)
 			if vr_t > 0.6:
 				_vr_next("poke")
@@ -212,13 +225,14 @@ func _drive_vr(delta: float) -> void:
 				return
 			kit.vr_reach(rig, 1, beach.to_global(p + Vector3.UP * 0.4), 1.5, delta)
 		"carry":
-			kit.vr_reach(rig, 1, beach.to_global(Vector3(0.0, 2.0, 0.0)), 1.2, delta)
-			if _vr_held() < 0 or vr_t > 3.0:
+			# (the glove that holds it: the left one can pick treasure up while poking)
+			kit.vr_reach(rig, _held_hand(), beach.to_global(Vector3(0.0, 2.0, 0.0)), 2.5, delta)
+			if _vr_held() < 0 or vr_t > 5.0:
 				_vr_next("aim")
 		"throw":
 			if vr_t < 0.5:
 				return
-			kit.vr_reach(rig, 1, beach.to_global(Vector3(0.0, 6.0, 0.0)), 5.0, delta)
+			kit.vr_reach(rig, _held_hand(), beach.to_global(Vector3(0.0, 6.0, 0.0)), 5.0, delta)
 			if _vr_held() < 0 or vr_t > 1.5:
 				_vr_next("aim")
 
@@ -227,6 +241,11 @@ func _vr_next(phase: String) -> void:
 	vr_phase = phase
 	vr_t = 0.0
 	kit.vr_trigger(main.vr_rig, 0.0)
+
+
+func _held_hand() -> int:
+	var id := _vr_held()
+	return clampi(int(main.items[id]["carrier"]) - 10, 0, 1) if id >= 0 else 1
 
 
 func _vr_held() -> int:
@@ -255,6 +274,13 @@ func _checks() -> void:
 	kit.assert_true(int(main.net.state_get("found", 0)) > 0, "%s: treasure was dug up" % mode)
 	kit.assert_true(int(main.net.state_get("round", 0)) >= 2, "%s: round 1 ended with results and round 2 started" % mode)
 	kit.assert_true(saw_results, "%s: the results were shown" % mode)
+	kit.assert_true(main.island.has("spots") and not main.x_node == null, "%s: the island came from islandgen.gd (%s)" % [mode, str(kinds_seen.keys())])
+	if mode != "client":
+		kit.assert_true(saw_pick, "%s: round 2 began with Peg's island signposts" % mode)
+		kit.assert_true(int(main.save.data.islands) >= 1, "%s: the islands done were saved" % mode)
+		kit.info("map pieces banked (most in a round): %d, X shown: %s, relics: %s" % [max_maps, saw_x, str(main.save.data.relics)])
+		if want > 0:
+			kit.assert_true(max_maps >= 1, "%s: map pieces were dug up and banked" % mode)
 	if mode == "client":
 		kit.assert_true(max_items_seen > 0, "client: treasure items mirrored from the host")
 		kit.assert_true(max_sparkles_seen > 0, "client: sparkles mirrored from the host")

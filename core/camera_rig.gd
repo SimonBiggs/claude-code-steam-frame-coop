@@ -15,6 +15,7 @@ extends Node
 ##   add_child(rig); rig.follow(avatar)            # or rig.follow_group(avatars) / rig.shot_look(a, b)
 ##   rig.shake(0.4)                                # on a big hit
 ## Call it from anywhere; it updates in _process (cameras move per rendered frame, no judder).
+const UiKit := preload("res://core/ui_kit.gd")
 
 ## Which mode is running: "follow", "group", "shot" or "free".
 var mode := "free"
@@ -133,7 +134,7 @@ func shot(xf: Transform3D, blend: float = -1.0, drift: Vector3 = Vector3.ZERO) -
 ## A fixed camera at `from` looking at `at`.
 func shot_look(from: Vector3, at: Vector3, blend: float = -1.0, drift: Vector3 = Vector3.ZERO) -> void:
 	var up := Vector3.UP if absf((at - from).normalized().y) < 0.98 else Vector3.FORWARD
-	shot(Transform3D(Basis(), from).looking_at(at, up), blend, drift)
+	shot(UiKit.aim_from(from, at, up), blend, drift)
 
 
 ## Stop driving the camera (your code moves it).
@@ -296,7 +297,7 @@ func _look_xf(from: Vector3, at: Vector3) -> Transform3D:
 	if from.distance_to(at) < 0.001:
 		return Transform3D(Basis(), from)
 	var up := Vector3.UP if absf((at - from).normalized().y) < 0.98 else Vector3.FORWARD
-	return Transform3D(Basis(), from).looking_at(at, up)
+	return UiKit.aim_from(from, at, up)
 
 
 func _shaken(xf: Transform3D, delta: float) -> Transform3D:

@@ -9,6 +9,7 @@ extends Node3D
 ## Flat (split screen / non-VR host): W/S or stick up/down = climb/dive, A/D or stick = turn,
 ## Space / click / RT / A = flap, mouse / right stick look around.
 ## On the TV machine this is a ghost: a rider with a helmet and mittens, from the host's snapshots.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const NEUTRAL_DEFAULT := Vector3(0.0, -0.5, -0.38)  # hands relative to the eyes when the reins are slack
 const MOUSE_SENS := 0.0028
@@ -346,7 +347,7 @@ func _flat_place(delta: float) -> void:
 		var cam_pos := pivot + dt.basis * (orbit * Vector3(0, 1.9, 7.2))
 		var look_at_pt := pivot + dt.basis * (orbit * Vector3(0, -0.6, -14.0))
 		camera.global_position = cam_pos
-		camera.look_at(look_at_pt, Vector3.UP)
+		UiKit.look(camera, look_at_pt, Vector3.UP)
 
 
 # --- Ghost (TV machine) / shared ------------------------------------------------

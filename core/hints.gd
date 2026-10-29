@@ -450,7 +450,11 @@ class HintPill extends Control:
 		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		var max_w := 900.0 * _s
 		var tw := UiKit.font(false).get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, UiKit.font_size("body", _s)).x
-		l.custom_minimum_size.x = minf(tw + 4.0, max_w)
+		# (the label's own font can be wider than UiKit.font's measure: one word never wraps, longer text
+		# gets a little room, so "DIG!" doesn't break into "DI / G!")
+		if not text.strip_edges().contains(" "):
+			l.autowrap_mode = TextServer.AUTOWRAP_OFF
+		l.custom_minimum_size.x = minf(tw * 1.1 + 8.0 * _s, max_w)
 		h.add_child(l)
 		_line = ColorRect.new()
 		(_line as ColorRect).color = Color(accent.r, accent.g, accent.b, 0.8)

@@ -176,7 +176,7 @@ func _camera(delta: float) -> void:
 	if main.split != null and main.split.is_shared():
 		return
 	cam.global_position = _cam_pos
-	cam.look_at(_cam_at, Vector3.UP)
+	UiKit.look(cam, _cam_at, Vector3.UP)
 
 
 func _draw() -> void:

@@ -237,7 +237,7 @@ func _build_world(vr: bool) -> void:
 func _pose_branch(k: int) -> void:
 	var b: Node3D = branch_nodes[k]
 	var tip: Vector3 = branch_rest[k] + branch_off[k]
-	b.look_at(tip, Vector3.UP)
+	UiKit.look(b, tip, Vector3.UP)
 	var rest_len := b.position.distance_to(branch_rest[k])
 	var s := 1.0  # the branches breathe until someone grabs one: "touch me"
 	if vr_rig != null and not grabbed_once:

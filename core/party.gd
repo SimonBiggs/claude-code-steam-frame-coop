@@ -489,6 +489,15 @@ func _virtual_pads() -> Array[int]:
 	return out
 
 
+## Is this pad still plugged in? A press can reach _input after its pad was unplugged (events are queued
+## and flushed a frame later): a bot that pressed A on a late player's pad in the frame it left and
+## unplugged it re-seated that player (treasure_dig_bot flaked under load: 3 players, want 2). Such a
+## stale A must never seat anyone. Only virtual pads are checked: the offscreen runner (addons/gdev)
+## injects presses for device 0 with no pad connected, and those must still join.
+func _plugged(device: int) -> bool:
+	return device < VIRTUAL_PAD_BASE or _virtual_pads().has(device)
+
+
 func _ignored(device: int) -> bool:
 	if device < 0:
 		return false
@@ -814,7 +823,7 @@ func _input(event: InputEvent) -> void:
 		if s >= 0:
 			_latch_button(s, jb.button_index)
 			return
-		if jb.button_index == JOY_BUTTON_A and _can_join_now():
+		if jb.button_index == JOY_BUTTON_A and _can_join_now() and _plugged(jb.device):
 			if join_device(jb.device) >= 0:
 				get_viewport().set_input_as_handled()
 		return

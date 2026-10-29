@@ -1483,7 +1483,7 @@ func _update_decor(delta: float) -> void:
 			var p := c + Vector3(cos(a) * r, sin(amb_t * 1.7 + i) * 0.6, sin(a) * r * 0.7)
 			var flap := 0.25 + absf(sin(amb_t * 14.0 + i * 2.0)) * 0.9
 			var fwd := Vector3(-sin(a), 0.0, cos(a) * 0.7).normalized()
-			mm.set_instance_transform(i, Transform3D(Basis.looking_at(fwd, Vector3.UP).scaled(Vector3(flap, 1.0, 1.0) * 1.3), p))
+			mm.set_instance_transform(i, Transform3D(UiKit.aim(fwd, Vector3.UP).scaled(Vector3(flap, 1.0, 1.0) * 1.3), p))
 		var cmm: MultiMesh = ambient[1]
 		var shift := delta * 0.8
 		for i in cmm.instance_count:

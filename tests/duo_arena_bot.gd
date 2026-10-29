@@ -11,6 +11,7 @@ extends Node
 ## BOT_GOD=1: players can't be hurt (so the finale can be cleared).
 ## BOT_VR=1 (local): player 1 runs the real VR code with fake hands: it draws the sword over the
 ## shoulder, walks up to monsters and swings (slices, shell cracks), and shoots with the right hand.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const FAKE_PAD := 40
 
@@ -222,7 +223,7 @@ func _drive_vr(p, delta: float) -> void:
 	var diving: bool = main.sky_fish != null and main.sky_fish.dive_progress() >= 0.0
 	if to.length() > best.radius + 1.0 and not diving:  # hold still while Fishwort dives at us
 		origin.global_position += to.normalized() * 3.0 * delta
-	p.hand_r.global_basis = Basis.looking_at((c - p.hand_r.global_position).normalized(), Vector3.UP)
+	p.hand_r.global_basis = UiKit.aim((c - p.hand_r.global_position).normalized(), Vector3.UP)
 	if not has_meta("vr_sword_seen") and sword != null and sword.visible:
 		set_meta("vr_sword_seen", true)
 		print("BOT VR: sword drawn")
