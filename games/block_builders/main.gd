@@ -56,6 +56,12 @@ const PropsScript := preload("res://games/block_builders/props.gd")
 const GhostHandScript := preload("res://games/block_builders/ghost_hand.gd")
 const CueScript := preload("res://games/block_builders/cue.gd")
 const UiKit := preload("res://core/ui_kit.gd")
+const Story := preload("res://games/block_builders/story.gd")
+const FlockScript := preload("res://games/block_builders/flock.gd")
+const Save := preload("res://core/save.gd")
+const Seeded := preload("res://core/seeded.gd")
+const Telemetry := preload("res://core/telemetry.gd")
+const StoryCard := preload("res://core/story_card.gd")
 
 const SIMPLE_MODE := true
 const SIMPLE_INTRO_TIME := 2.5
@@ -154,6 +160,15 @@ var vr_info: Label3D
 
 # SIMPLE_MODE
 var simple := SIMPLE_MODE
+# STORY (SIMPLE_MODE, story.gd): Puff's lost cloud friends on seeded sky adventures after the lessons.
+var save: Save
+var fresh_save := false  ## bots: a brand-new save
+var flock: FlockScript
+var friend_id := -1  ## this course's lost friend (story.gd FRIENDS index), -1 none
+var friend_state := 0  ## 0 none, 1 waiting on its side island, 2 rescued
+var story_root: Control
+var vr_story: Node3D
+var run := {}  ## this level's numbers (RUN line)
 var props: Node3D
 var ghost_hand: Node3D
 var ring_state := 0            # practice ring: 0 none, 1 glowing (level 1), 2 jumped through
@@ -179,6 +194,16 @@ var lamp: DirectionalLight3D
 func _ready() -> void:
 	randomize()
 	Engine.set_meta("bb_simple", simple)  # levels.gd: the short SIMPLE_LEVELS
+	save = Save.new()
+	save.game_id = "block_builders"
+	save.defaults = Story.save_defaults()
+	add_child(save)
+	if fresh_save:
+		save.data = Story.save_defaults().duplicate(true)
+	if int(save.data.world) < 0:
+		save.data.world = Seeded.fresh_seed()  # this family's own sky adventures
+		save.mark_dirty()
+	Engine.set_meta("bb_world", int(save.data.world) if not OS.has_environment("DUO_JOIN") else 0)  # TV machines: from the snapshot
 	var xr := XRServer.find_interface("OpenXR")
 	vr_on = xr != null and xr.is_initialized() and not OS.has_environment("DUO_JOIN")
 	if (OS.has_environment("BB_FAKE_VR") or OS.has_environment("BOT_VR")) and not OS.has_environment("DUO_JOIN"):
@@ -188,6 +213,9 @@ func _ready() -> void:
 	course.main = self
 	add_child(course)
 	course.load_level(0)
+	flock = FlockScript.new()
+	flock.name = "Flock"
+	add_child(flock)
 	_build_hud()
 	var menu := PauseMenuScript.new()
 	menu.main = self
@@ -1032,6 +1060,7 @@ func _start_level(i: int) -> void:
 	if props != null:
 		props.on_level()
 	if simple:
+		_story_level()
 		ring_state = 1 if level_data().has("ring") else 0
 		hint_t = 0.0
 		_show_center(str(d.name), SIMPLE_INTRO_TIME)  # one short headline; the glowing ghost block shows the rest
@@ -1060,7 +1089,7 @@ func confirm() -> void:
 				return
 			_start_level(0)
 		"clear":
-			_start_level(level + 1)
+			_start_level(_next_level(level) if simple else level + 1)
 		"failed":
 			_start_level(level)
 		"won":
@@ -1244,11 +1273,10 @@ func _simple_clear() -> void:
 	if props != null:
 		props.wave_flag()
 	print("Level %d cleared!" % (level + 1))
-	if level + 1 >= Levels.count():
-		state = "won"
-		fireworks_t = 0.0
+	_story_clear()
+	if level == Story.LESSONS - 1:  # the lessons' finale: a rainbow, then on to Puff's sky adventures
 		course.show_rainbow(true)
-		_show_center("YOU DID IT!", 0.0)
+		_show_center("YOU DID IT!", SIMPLE_CLEAR_TIME - 1.0)
 	else:
 		_show_center("HOORAY!", SIMPLE_CLEAR_TIME - 1.0)
 
@@ -1341,7 +1369,7 @@ func _process(delta: float) -> void:
 		"intro":
 			if simple:
 				if state_t > SIMPLE_INTRO_TIME:
-					_start_level(0)
+					_start_level(_first_level())
 				return
 			if net.mode == "host" and not net.connected:
 				return
@@ -1375,12 +1403,127 @@ func _process(delta: float) -> void:
 		"clear":
 			_check_high_fives()
 			if state_t > (SIMPLE_CLEAR_TIME if simple else CLEAR_TIME):
-				_start_level(level + 1)
+				_start_level(_next_level(level) if simple else level + 1)
 		"won":
 			_check_high_fives()
 			_fireworks(delta)
 			if simple and state_t > 25.0:
 				_start_level(0)  # no button to find: round again from the first level
+
+
+# --- Story: Puff's lost cloud friends (story.gd, coursegen.gd) --------------------------------------
+
+## Host: where a session starts: the lessons until they're done, then TODAY'S SKY (once a day) or the
+## next sky adventure.
+func _first_level() -> int:
+	if not simple or not bool(save.data.lessons_done):
+		return 0
+	if not (save.data.daily as Dictionary).has(Seeded.today()) and not OS.has_environment("BOT_NO_DAILY"):
+		return Story.DAILY_INDEX
+	return Story.level_index(int(save.data.adventure))
+
+
+## Host: what comes after level i (the last lesson leads into the adventures; today's sky back to them).
+func _next_level(i: int) -> int:
+	if Story.is_daily(i) or i + 1 == Story.LESSONS:
+		if i + 1 == Story.LESSONS and not (save.data.daily as Dictionary).has(Seeded.today()) and not OS.has_environment("BOT_NO_DAILY"):
+			return Story.DAILY_INDEX
+		return Story.level_index(int(save.data.adventure))
+	return mini(i + 1, Story.DAILY_INDEX - 1)
+
+
+## Every level start (host): this course's lost friend and a word from Puff.
+func _story_level() -> void:
+	var d := level_data()
+	run = {"t0": Time.get_ticks_msec(), "falls": 0}
+	friend_id = -1
+	friend_state = 0
+	if d.has("friend"):
+		friend_id = Story.friend_for(save.data.friends)
+		friend_state = 1 if friend_id >= 0 else 0
+	flock.set_course(course.start, d.get("friend", null) if friend_state == 1 else null, friend_id)
+	flock.set_rescued(save.data.friends)
+	if Story.is_daily(level):
+		_show_story(_puff("TODAY!"))
+	elif level == Story.LESSONS - 1 and not bool(save.data.lessons_done):
+		pass
+	elif Story.is_adventure(level) and friend_state == 1:
+		_show_story({"who": String(Story.FRIENDS[friend_id][0]), "line": "HELP!", "pic": "cloud",
+			"color": Story.FRIENDS[friend_id][1], "duration": 3.5})
+
+
+## Host: a runner reached the lost friend on its side island: it's rescued and flies up to the flock.
+func _check_friend() -> void:
+	if friend_state != 1:
+		return
+	var fp: Variant = level_data().get("friend", null)
+	if not fp is Vector3:
+		return
+	for r in runners():
+		if r.active and (r.global_position - (fp as Vector3)).length() < 1.1:
+			friend_state = 2
+			var fr: Array = save.data.friends
+			if not fr.has(friend_id):
+				fr.append(friend_id)
+			save.mark_dirty()
+			run["friend"] = friend_id
+			flock.set_rescued(fr)
+			confetti(fp as Vector3 + Vector3.UP, 60, 0.8)
+			sound("hooray", -4.0)
+			_show_story({"who": String(Story.FRIENDS[friend_id][0]), "line": "THANK YOU!", "pic": "cloud",
+				"color": Story.FRIENDS[friend_id][1], "duration": 3.0})
+			print("Friend %s rescued by P%d" % [String(Story.FRIENDS[friend_id][0]), r.index + 1])
+			return
+
+
+## Host: a level cleared: progress is saved (lessons done, the next adventure, today's sky) + a RUN line.
+func _story_clear() -> void:
+	var sd: Dictionary = save.data
+	if level == Story.LESSONS - 1 and not bool(sd.lessons_done):
+		sd.lessons_done = true
+		_show_story(_puff("FIND MY FRIENDS!"))
+	if Story.is_daily(level):
+		(sd.daily as Dictionary)[Seeded.today()] = true
+		var dd: Dictionary = sd.daily
+		while dd.size() > 30:
+			var ks := dd.keys()
+			ks.sort()
+			dd.erase(ks[0])
+	elif Story.is_adventure(level):
+		sd.adventure = maxi(int(sd.adventure), Story.adventure_of(level) + 1)
+	sd.courses = int(sd.courses) + 1
+	sd.best_level = maxi(int(sd.best_level), level)
+	save.mark_dirty()
+	_telemetry("clear")
+
+
+func _telemetry(end: String) -> void:
+	if not simple or net.mode == "client" or run.is_empty():
+		return
+	var d := level_data()
+	var info := {"end": end, "level": level, "name": str(d.get("name", "")), "kind": "daily" if Story.is_daily(level) else ("adventure" if Story.is_adventure(level) else "lesson"),
+		"seed": int(d.get("seed", 0)), "challenges": d.get("challenges", []), "secs": int(level_time), "placed": placed_level,
+		"runners": active_runner_count(), "solo": solo, "vr": builder != null and builder.vr, "mode": net.mode,
+		"friend_waiting": friend_state == 1, "friend": int(run.get("friend", -1)), "friends": (save.data.friends as Array).size(),
+		"falls": level_tumbles}
+	Telemetry.run("block_builders", info)
+	run = {}
+
+
+func _puff(line: String) -> Dictionary:
+	return {"who": "PUFF", "line": line, "pic": "cloud", "color": Story.PUFF_COLOR, "duration": 3.5}
+
+
+## A story card on this machine's screen (and the VR builder's view); the host sends it to the TV machines.
+func _show_story(beat: Dictionary, broadcast: bool = true) -> void:
+	if broadcast and net != null and net.mode == "host":
+		net.event("story", [beat.who, beat.line, beat.pic, (beat.color as Color).to_html()])
+	if story_root != null:
+		StoryCard.show(story_root, beat)
+	if builder != null and builder.vr and builder.xr_camera != null:
+		if vr_story != null and is_instance_valid(vr_story):
+			vr_story.queue_free()
+		vr_story = StoryCard.show_vr(self, builder.xr_camera, beat)
 
 
 ## SIMPLE_MODE play (host / local): no clock and no way to fail. The buddy runner, the practice ring,
@@ -1392,6 +1535,7 @@ func _simple_play(delta: float) -> void:
 	_update_hint(delta)
 	_check_high_fives()
 	_check_ring()
+	_check_friend()
 	var act := 0
 	var done := 0
 	for r in runners():
@@ -2048,13 +2192,17 @@ func make_snapshot() -> Array:
 		rs.append(r.net_state())
 	return [level, level_seq, state, state_t, level_time, time_left, score, water_y, b, course.pack_blocks(),
 		builder.net_state(), rs, stars_taken, balloon_state, balloon_pos, hint, ring_state,
-		props.net_state() if props != null else [], place_total, placed_level]
+		props.net_state() if props != null else [], place_total, placed_level,
+		int(save.data.world), friend_id, friend_state, (save.data.friends as Array).duplicate()]
 
 
 func apply_snapshot(s: Array) -> void:
 	if not ready_to_play or s.size() < 12:
 		return
 	synced = true
+	if s.size() >= 24 and int(Engine.get_meta("bb_world", 0)) != int(s[20]):
+		Engine.set_meta("bb_world", int(s[20]))  # the host's sky adventures (levels.gd)
+		level_seq = -1  # reload the course from the right world
 	var seq: int = s[1]
 	if seq != level_seq:
 		level = s[0]
@@ -2097,6 +2245,15 @@ func apply_snapshot(s: Array) -> void:
 	if s.size() >= 20:
 		place_total = s[18]
 		placed_level = s[19]
+	if s.size() >= 24:
+		var fid := int(s[21])
+		var fst := int(s[22])
+		if fid != friend_id or (fst == 1) != (friend_state == 1):
+			friend_id = fid
+			friend_state = fst
+			flock.set_course(course.start, level_data().get("friend", null) if fst == 1 else null, fid)
+		friend_state = fst
+		flock.set_rescued(s[23])
 
 
 func apply_event(kind: String, args: Array) -> void:
@@ -2124,6 +2281,8 @@ func apply_event(kind: String, args: Array) -> void:
 		"prop":
 			if props != null:
 				props.react(str(args[0]), int(args[1]), false)
+		"story":
+			_show_story({"who": str(args[0]), "line": str(args[1]), "pic": str(args[2]), "color": Color.html(str(args[3])), "duration": 3.5}, false)
 		"remote_pause":
 			get_tree().paused = args[0]
 			_set_pause_banner(args[0], "The Builder paused the game")
@@ -2162,6 +2321,10 @@ func _build_hud() -> void:
 	help_label.offset_top = -70
 	help_label.offset_bottom = -10
 	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	story_root = Control.new()
+	story_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layer.add_child(story_root)
+	story_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 
 func _show_center(text: String, duration: float, broadcast: bool = true) -> void:
@@ -2308,6 +2471,8 @@ func _make_vr_label(font: int, color: Color) -> Label3D:
 
 
 func _exit_tree() -> void:
+	if state == "play":
+		_telemetry("quit")
 	XRServer.world_scale = 1.0  # XR world scale is global: don't leave other games giant-sized
 	for key in Engine.get_meta_list():
 		if str(key).begins_with("bb_"):
