@@ -1,4 +1,5 @@
 extends Node3D
+const UiKit := preload("res://core/ui_kit.gd")
 ## A TV player: a little rowing boat on the lake, seen from a third-person chase camera.
 ## Row with the left stick (relative to the camera), turn the camera with the right stick.
 ## A: swing the net (scoops up floating treasure, or splashes to scare fish the other way).
@@ -536,4 +537,4 @@ func _update_camera(delta: float) -> void:
 		camera.global_position = want_pos
 	camera.global_position = camera.global_position.lerp(want_pos, 1.0 - exp(-6.0 * delta))
 	var look := global_position + Basis(Vector3.UP, cam_yaw) * Vector3(0, 0.6, -3.0)
-	camera.look_at(look, Vector3.UP)
+	UiKit.look(camera, look, Vector3.UP)

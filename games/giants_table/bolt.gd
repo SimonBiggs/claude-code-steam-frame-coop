@@ -1,4 +1,5 @@
 extends Node3D
+const UiKit := preload("res://core/ui_kit.gd")
 ## A little crossbow bolt. On the host it hits goblins; on the TV it's just for show.
 
 const W := preload("res://games/giants_table/world.gd")
@@ -28,7 +29,7 @@ func _physics_process(delta: float) -> void:
 	vel.y -= 5.0 * delta
 	global_position += vel * delta
 	if vel.length() > 0.1 and absf(vel.normalized().y) < 0.99:
-		look_at(global_position + vel, Vector3.UP)
+		UiKit.look(self, global_position + vel, Vector3.UP)
 	var p := global_position
 	if life <= 0.0 or p.y < W.height(p.x, p.z) or p.y < -5.0:
 		queue_free()

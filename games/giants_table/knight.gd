@@ -1,4 +1,5 @@
 extends Node3D
+const UiKit := preload("res://core/ui_kit.gd")
 ## A tiny knight on the tabletop (TV players 2 to 7), seen in third person.
 ## Controller: left stick move, right stick turn the camera, RT/RB/B sword, LT/LB/X crossbow, A jump.
 ## Keyboard set 0: W/S move, A/D turn, Space sword, F crossbow, Shift jump.
@@ -382,7 +383,7 @@ func _update_camera(delta: float) -> void:
 	camera.global_position = camera.global_position.lerp(target, k) if delta < 0.5 else target
 	var look := global_position + Vector3.UP * 0.8
 	if camera.global_position.distance_to(look) > 0.1:
-		camera.look_at(look, Vector3.UP)
+		UiKit.look(camera, look, Vector3.UP)
 
 
 func _animate_sword(delta: float) -> void:

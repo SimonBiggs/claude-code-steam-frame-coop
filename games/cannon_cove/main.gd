@@ -636,7 +636,7 @@ func miss_arrow(from: Vector3, to: Vector3) -> void:
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var start := Vector3(from.x, maxf(from.y, sea_level) + 2.2, from.z)
 	arrow.global_position = start
-	arrow.global_basis = Basis.looking_at(-dir, Vector3.UP)
+	arrow.global_basis = UiKit.aim(-dir, Vector3.UP)
 	var tw := arrow.create_tween()
 	for i in 3:
 		tw.tween_property(arrow, "global_position", start + dir * 2.5, 0.35).set_trans(Tween.TRANS_SINE)

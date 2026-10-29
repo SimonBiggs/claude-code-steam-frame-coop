@@ -1,4 +1,5 @@
 extends Node3D
+const UiKit := preload("res://core/ui_kit.gd")
 ## Simple mode: everything around the pilot reacts to touch (Simon's rule). Two little side tables stand
 ## where the cockpit wings used to be, within arm's reach of the pilot (who stands at (0, 0, 0.12)
 ## facing the desk, -Z):
@@ -154,7 +155,7 @@ func _build_globe() -> void:
 	var parts: Array = [[main.sphere_mesh(0.1), Transform3D(), Color(0.25, 0.5, 0.95)]]
 	for c in [Vector3(0.6, 0.4, 0.5), Vector3(-0.7, 0.1, 0.6), Vector3(0.1, -0.5, -0.8), Vector3(-0.3, 0.6, -0.7), Vector3(0.8, -0.3, -0.4)]:
 		var d: Vector3 = c.normalized()
-		parts.append([main.sphere_mesh(0.045), Transform3D(Basis.looking_at(d) * Basis.from_scale(Vector3(1.0, 1.0, 0.35)), d * 0.088), Color(0.35, 0.8, 0.3)])
+		parts.append([main.sphere_mesh(0.045), Transform3D(UiKit.aim(d) * Basis.from_scale(Vector3(1.0, 1.0, 0.35)), d * 0.088), Color(0.35, 0.8, 0.3)])
 	_merged(globe, "globe", parts, Vector3.ZERO)
 
 

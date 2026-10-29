@@ -1,4 +1,5 @@
 extends Node3D
+const UiKit := preload("res://core/ui_kit.gd")
 ## Player 1: the giant BUILDER standing over the floating course.
 ## VR (Steam Frame: only the sticks, the right trigger, A and controller positions reach the game):
 ##   XROrigin3D.world_scale = 8, so the course is a tabletop diorama (a block is 12.5 cm).
@@ -171,7 +172,7 @@ func setup_flat(cam: Camera3D, use_mouse: bool) -> void:
 	camera.far = 400.0
 	camera.cull_mask = 0xFFFFF & ~Art.BODY_LAYER
 	camera.global_position = Vector3(cam_x, 12.0, 12.5)
-	camera.look_at(Vector3(cam_x, 0.0, -0.5), Vector3.UP)
+	UiKit.look(camera, Vector3(cam_x, 0.0, -0.5), Vector3.UP)
 
 
 func setup_ghost() -> void:
@@ -717,7 +718,7 @@ func _flat_camera(delta: float) -> void:
 		return
 	cam_x = lerpf(cam_x, clampf(cursor.x * 0.75, -6.0, 6.0), 1.0 - exp(-3.0 * delta))
 	camera.global_position = Vector3(cam_x, 12.0, 12.5)
-	camera.look_at(Vector3(cam_x, 0.0, -0.5), Vector3.UP)
+	UiKit.look(camera, Vector3(cam_x, 0.0, -0.5), Vector3.UP)
 
 
 ## Glove, held block, placement preview (the same on every machine).

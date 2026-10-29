@@ -1,4 +1,5 @@
 extends RefCounted
+const UiKit := preload("res://core/ui_kit.gd")
 ## Builds the snowy village square at dusk: sky, warm lamps, pine trees, cottages, fairy lights
 ## and falling snow. Everything is procedural and batched (MultiMesh) to keep draw calls low.
 
@@ -161,7 +162,7 @@ static func _add_cottages(main: Node3D, radius: float, rng: RandomNumberGenerato
 		var house := Node3D.new()
 		house.position = Vector3(cos(a) * d, 0, sin(a) * d)
 		main.add_child(house)
-		house.look_at(Vector3(0, 0, 0), Vector3.UP)
+		UiKit.look(house, Vector3(0, 0, 0), Vector3.UP)
 		var w := rng.randf_range(4.0, 6.0)
 		var h := rng.randf_range(2.8, 3.8)
 		var body := MeshInstance3D.new()

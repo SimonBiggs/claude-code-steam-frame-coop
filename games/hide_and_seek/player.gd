@@ -1,4 +1,5 @@
 extends CharacterBody3D
+const UiKit := preload("res://core/ui_kit.gd")
 ## One Hide and Seek player.
 ## Player 1 (role "seeker"): VR, or first person with keyboard+mouse / controller in split screen. Counts with
 ## eyes covered, then hunts with a torch in the right hand: touch a hider with either hand, or point the torch
@@ -623,7 +624,7 @@ func _update_torch(_delta: float) -> void:
 		var head := head_transform()
 		var hold := head.origin + head.basis * Vector3(0.2, -0.2, -0.3)
 		var aim_at := head.origin + head.basis * Vector3(0, 0, -6.0)
-		torch.global_transform = Transform3D(Basis.looking_at(aim_at - hold, Vector3.UP), hold)
+		torch.global_transform = Transform3D(UiKit.aim(aim_at - hold, Vector3.UP), hold)
 	var on: bool = active and main.phase == "seek"
 	torch_light.visible = on
 	torch_beam.visible = on

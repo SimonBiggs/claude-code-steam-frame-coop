@@ -1,4 +1,5 @@
 extends Node3D
+const UiKit := preload("res://core/ui_kit.gd")
 ## The stadium: a striped night-time pitch with markings, a full-size goal (7.32 x 2.44 m) with a net,
 ## four roofed stands packed with a crowd that bounces and waves (one MultiMesh per stand, animated in
 ## a shader), waving flags, camera flashes, floodlights, glowing advertising boards, a dancing lion
@@ -351,7 +352,7 @@ func _build_lights_and_boards(lit: Array, glow: Array) -> void:
 	for p in [Vector3(-32, 0, -8), Vector3(32, 0, -8), Vector3(-32, 0, 56), Vector3(32, 0, 56)]:
 		var pos: Vector3 = p
 		lit.append([MeshKit.cyl(0.35, 0.5, 22.0, 8), MeshKit.at(pos + Vector3(0, 11, 0)), Color(0.4, 0.42, 0.48)])
-		var look := Transform3D(Basis(), pos + Vector3(0, 22.5, 0)).looking_at(Vector3(0, 0, 20), Vector3.UP)
+		var look := UiKit.aim_from(pos + Vector3(0, 22.5, 0), Vector3(0, 0, 20), Vector3.UP)
 		glow.append([MeshKit.box(Vector3(5, 3, 0.5)), look, Color(1.0, 1.0, 0.85)])
 		lit.append([MeshKit.box(Vector3(5.4, 3.4, 0.4)), look * MeshKit.at(Vector3(0, 0, 0.3)), Color(0.3, 0.3, 0.35)])
 	# Advertising boards around the pitch (glowing).

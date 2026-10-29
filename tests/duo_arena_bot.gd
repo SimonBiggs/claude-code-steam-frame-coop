@@ -1,4 +1,5 @@
 extends Node
+const UiKit := preload("res://core/ui_kit.gd")
 ## Headless bot for Duo Arena party mode. Every local player aims at the nearest enemy and fires.
 ## BOT_PLAYERS=N: total TV players to have (local split screen: P1 + P2 + drop-ins, up to 6;
 ## TV machine (DUO_JOIN): P2 + drop-ins, up to 6). In local mode it also joins one player with a fake
@@ -222,7 +223,7 @@ func _drive_vr(p, delta: float) -> void:
 	var diving: bool = main.sky_fish != null and main.sky_fish.dive_progress() >= 0.0
 	if to.length() > best.radius + 1.0 and not diving:  # hold still while Fishwort dives at us
 		origin.global_position += to.normalized() * 3.0 * delta
-	p.hand_r.global_basis = Basis.looking_at((c - p.hand_r.global_position).normalized(), Vector3.UP)
+	p.hand_r.global_basis = UiKit.aim((c - p.hand_r.global_position).normalized(), Vector3.UP)
 	if not has_meta("vr_sword_seen") and sword != null and sword.visible:
 		set_meta("vr_sword_seen", true)
 		print("BOT VR: sword drawn")

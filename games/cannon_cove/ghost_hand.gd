@@ -1,4 +1,5 @@
 extends Node3D
+const UiKit := preload("res://core/ui_kit.gd")
 ## Simple mode, VR practice: a see-through glowing hand that shows the gunner what to do, instead of
 ## hint text. It loops: reach to the cannon's glowing handle, squeeze, swing towards the target, let go.
 ## Only the gunner's headset sees it (main puts it on their view-model layer). main calls show_demo()
@@ -108,7 +109,7 @@ func show_demo(want: bool, c, aim: Vector3, delta: float) -> void:
 	visible = alpha > 0.01
 	mat.albedo_color.a = alpha
 	# Palm down, fingers pointing out to sea, sitting just above the handle.
-	hand.global_transform = Transform3D(Basis.looking_at(out, Vector3.UP), p + Vector3.UP * 0.03)
+	hand.global_transform = Transform3D(UiKit.aim(out, Vector3.UP), p + Vector3.UP * 0.03)
 	for f in fingers:
 		f.rotation.x = -grip * 1.3
 	thumb.rotation.x = -grip * 0.7
@@ -133,7 +134,7 @@ func show_release(want: bool, c, delta: float) -> void:
 	var p: Vector3 = c.handle_world() + Vector3.UP * (0.12 + 0.04 * open) - out * 0.05
 	visible = true
 	mat.albedo_color.a = alpha
-	hand.global_transform = Transform3D(Basis.looking_at(out, Vector3.UP), p)
+	hand.global_transform = Transform3D(UiKit.aim(out, Vector3.UP), p)
 	for f in fingers:
 		f.rotation.x = -(1.0 - open) * 1.3 + open * 0.25  # fingers flick open (a little past flat)
 	thumb.rotation.x = -(1.0 - open) * 0.7

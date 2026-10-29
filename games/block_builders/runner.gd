@@ -1,4 +1,5 @@
 extends Node3D
+const UiKit := preload("res://core/ui_kit.gd")
 ## A tiny runner (TV players 2 to 7), third person: run, jump, reach the flag.
 ## Controller: left stick move, right stick turn the camera, A (or RB / RT) jump.
 ## Keyboard (P2 only): WASD move, Space jump, arrow keys or mouse turn the camera.
@@ -623,7 +624,7 @@ func _update_camera(delta: float) -> void:
 		shake = maxf(0.0, shake - delta)
 		look += Vector3(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)) * shake * 0.25
 	if camera.global_position.distance_to(look) > 0.1:
-		camera.look_at(look, Vector3.UP)
+		UiKit.look(camera, look, Vector3.UP)
 
 
 # --- Network ---------------------------------------------------------------------

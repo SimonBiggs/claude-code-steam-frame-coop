@@ -1,4 +1,5 @@
 extends Node3D
+const UiKit := preload("res://core/ui_kit.gd")
 ## Where the rockets go. Every rocket flies to the next planet on the SPACE MAP:
 ## - the destination planet hangs huge in the sky (everyone sees it, the pilot included) and the
 ##   rocket curves off towards it after lift-off;
@@ -546,7 +547,7 @@ func launch_cam(n: int, phase: String, launch_t: float) -> Dictionary:
 		var u := clampf((launch_t - SPACE_FROM) / (ARRIVE_AT - SPACE_FROM), 0.0, 1.0)
 		var cam := rp + Vector3(9.0 - u * 3.0, 4.0 + u * 4.0, 16.0 - u * 2.0)
 		var look := rp.lerp(D_PLANET, 0.25 + u * 0.15)
-		return {"xf": Transform3D(Basis.looking_at(look - cam, Vector3.UP), DIORAMA + cam), "env": space_env}
+		return {"xf": Transform3D(UiKit.aim(look - cam, Vector3.UP), DIORAMA + cam), "env": space_env}
 	var rocket_pos: Vector3 = main.rocket.flight_pos(launch_t)
 	var low: Vector3 = main.PAD_POS + Vector3(3.6, 0.7, 5.0)
 	var cam := low
@@ -555,4 +556,4 @@ func launch_cam(n: int, phase: String, launch_t: float) -> Dictionary:
 		var k := smoothstep(3.0, 5.5, launch_t)
 		cam = low.lerp(rocket_pos + Vector3(7.0, -5.0, 12.0), k)
 		look = rocket_pos + Vector3(0, 2.5, 0)
-	return {"xf": Transform3D(Basis.looking_at(look - cam, Vector3.UP), cam), "env": null}
+	return {"xf": Transform3D(UiKit.aim(look - cam, Vector3.UP), cam), "env": null}

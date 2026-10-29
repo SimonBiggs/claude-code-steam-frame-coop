@@ -1,4 +1,5 @@
 extends Node3D
+const UiKit := preload("res://core/ui_kit.gd")
 ## A crew member.
 ## Player 1 (index 0) is the GUNNER. In VR they grab a cannon's glowing handle (grip or trigger),
 ## swing it to aim and fire with the trigger; A/B (or a left-stick flick) hops between the four
@@ -512,7 +513,7 @@ func _flat_gunner_update(delta: float) -> void:
 		var dir: Vector3 = c.aim_dir()
 		var flat := Vector3(dir.x, 0.0, dir.z).normalized()
 		camera.global_position = c.global_position - flat * 2.4 + Vector3.UP * (1.05 + shake * randf_range(-0.05, 0.05))
-		camera.look_at(c.muzzle_pos() + dir * 14.0 + Vector3.UP * 1.0)
+		UiKit.look(camera, c.muzzle_pos() + dir * 14.0 + Vector3.UP * 1.0)
 
 
 func _station_input() -> void:

@@ -1,4 +1,5 @@
 extends Node3D
+const UiKit := preload("res://core/ui_kit.gd")
 ## SIMPLE_MODE toys in the VR builder's reach (Simon's rule: everything you can reach does something).
 ## Touch them with either hand:
 ##   - a little toy cloud by your LEFT hip (mirroring the tray on the right) holds five toy blocks:
@@ -390,7 +391,7 @@ func _update_birds(delta: float) -> void:
 			var pos := home.origin + loop
 			var fwd := Vector3(cos(a) * 1.6, cos(k * PI) * 2.2 * PI / TAU, sin(a) * -0.9)
 			if fwd.length() > 0.01:
-				b.global_transform = Transform3D(Basis.looking_at(fwd.normalized(), Vector3.UP), pos)
+				b.global_transform = Transform3D(UiKit.aim(fwd.normalized(), Vector3.UP), pos)
 			m.scale = Vector3(0.9 * (1.0 + sin(t * 26.0) * 0.4), 0.9, 0.9)
 		else:
 			b.global_transform = home

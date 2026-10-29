@@ -1,4 +1,5 @@
 extends CharacterBody3D
+const UiKit := preload("res://core/ui_kit.gd")
 ## One Ghost Lantern player.
 ## Player 1 (role "lantern"): carries the spirit lantern. In VR it's the right hand (trigger focuses the
 ## beam) and the left hand holds a bell (shake it, or pull the left trigger, to scare ghosts away).
@@ -615,7 +616,7 @@ func _update_tools(delta: float) -> void:
 			var head := head_transform()
 			var hold := head.origin + head.basis * Vector3(0.22, -0.2, -0.35)
 			var aim_at := head.origin + head.basis * Vector3(0, 0, -8.0)
-			lantern.global_transform = Transform3D(Basis.looking_at(aim_at - hold, Vector3.UP), hold)
+			lantern.global_transform = Transform3D(UiKit.aim(aim_at - hold, Vector3.UP), hold)
 		var lit := lantern_lit()
 		var ang: float = main.lantern_angle()
 		var rng: float = main.lantern_range()

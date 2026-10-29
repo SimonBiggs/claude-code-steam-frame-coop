@@ -1,4 +1,5 @@
 extends Node
+const UiKit := preload("res://core/ui_kit.gd")
 ## Headless bot for games/mech_titans (MECH TITANS), built on tests/bot_kit.gd.
 ## SIMPLE_MODE (data.gd, on): no hangar: round 1 starts by itself. The bot checks the practice (ghost hand
 ## in VR, one glowing ring per TV player), that round 1 is jets + punches only (the beam stays off), the
@@ -662,7 +663,7 @@ func _drive_vr(delta: float, phase: String) -> void:
 	var hr: Node3D = rig.hand_r
 	var dir := (aim - hr.global_position).normalized()
 	if absf(dir.y) < 0.99:
-		hr.global_basis = Basis.looking_at(dir, Vector3.UP)
+		hr.global_basis = UiKit.aim(dir, Vector3.UP)
 	var on: bool = absf(ang) < 0.6 and main.mech.energy > 10.0
 	kit.vr_trigger(rig, 1.0 if on else 0.0)
 	if on:

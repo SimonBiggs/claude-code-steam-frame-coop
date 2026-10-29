@@ -1,4 +1,5 @@
 extends Node3D
+const UiKit := preload("res://core/ui_kit.gd")
 ## One kart: the VR player's (index 0), a TV player's (1-6) or a CPU buddy.
 ## Arcade driving without the physics engine: speed + yaw, the track keeps it between the walls,
 ## ramps launch it, bumps push it, nothing ever wrecks it.
@@ -844,6 +845,6 @@ func update_camera(delta: float) -> void:
 	camera.global_position = camera.global_position.lerp(want, 1.0 - exp(-7.0 * delta))
 	var look := position + fwd * 4.0 + Vector3(0, 1.0, 0)
 	if camera.global_position.distance_to(look) > 0.1:
-		camera.look_at(look, Vector3.UP)
+		UiKit.look(camera, look, Vector3.UP)
 	var fov := 70.0 + (10.0 if boost_t > 0.0 else 0.0) + clampf(absf(speed) - 10.0, 0.0, 6.0)
 	camera.fov = lerpf(camera.fov, fov, 1.0 - exp(-4.0 * delta))

@@ -1,4 +1,5 @@
 extends Node3D
+const UiKit := preload("res://core/ui_kit.gd")
 ## Player 1, the dragon rider (players[0]), sitting in the saddle holding the reins.
 ## VR (Steam Frame): steer with your HANDS, like holding reins: raise both hands (relative to your
 ## eyes) = climb, lower them = dive (tummy height = level flight, with a wide comfy middle zone),
@@ -346,7 +347,7 @@ func _flat_place(delta: float) -> void:
 		var cam_pos := pivot + dt.basis * (orbit * Vector3(0, 1.9, 7.2))
 		var look_at_pt := pivot + dt.basis * (orbit * Vector3(0, -0.6, -14.0))
 		camera.global_position = cam_pos
-		camera.look_at(look_at_pt, Vector3.UP)
+		UiKit.look(camera, look_at_pt, Vector3.UP)
 
 
 # --- Ghost (TV machine) / shared ------------------------------------------------

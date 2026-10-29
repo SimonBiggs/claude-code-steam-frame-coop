@@ -1,4 +1,5 @@
 extends Node3D
+const UiKit := preload("res://core/ui_kit.gd")
 ## Player 1: the angler on the jetty, with a fishing rod.
 ## VR (Steam Frame): the rod is in your RIGHT hand. FLICK it forward to cast (faster flick = further),
 ## or press A for an easy cast. Wait for the bobber to dip (you feel it), then REEL: hold the right
@@ -667,7 +668,7 @@ func _flat_rod(delta: float) -> void:
 			camera.set_meta("placed", true)
 			camera.global_position = want_pos
 		camera.global_position = camera.global_position.lerp(want_pos, 1.0 - exp(-8.0 * delta))
-		camera.look_at(look, Vector3.UP)
+		UiKit.look(camera, look, Vector3.UP)
 
 
 # --- Fishing simulation (host / local) ------------------------------------------------

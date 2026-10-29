@@ -1,4 +1,5 @@
 extends Node
+const UiKit := preload("res://core/ui_kit.gd")
 ## Snowball Blitz director: weather events (blizzard, sunshine, cocoa party), fort upgrades (snowball
 ## catapult, ice walls, campfire), hit streaks, per-player awards, short hints on the TV and in VR, and
 ## the sky going from dusk to an aurora night (and to morning when the village is saved).
@@ -448,7 +449,7 @@ func _build_catapult() -> void:
 	catapult = Node3D.new()
 	main.add_child(catapult)
 	catapult.position = catapult_pos()
-	catapult.look_at(Vector3(catapult.position.x * 3.0, 0.0, catapult.position.z * 3.0), Vector3.UP)
+	UiKit.look(catapult, Vector3(catapult.position.x * 3.0, 0.0, catapult.position.z * 3.0), Vector3.UP)
 	var wood := main.make_material(Color(0.5, 0.32, 0.18), 0.0) as StandardMaterial3D
 	_box(catapult, Vector3(1.0, 0.25, 1.5), Vector3(0, 0.3, 0), wood)
 	for x in [-0.55, 0.55]:

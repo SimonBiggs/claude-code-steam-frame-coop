@@ -1,4 +1,5 @@
 extends Node3D
+const UiKit := preload("res://core/ui_kit.gd")
 ## Player 1: the giant who tilts the maze.
 ## VR (Steam Frame): squeeze the RIGHT trigger near either side handle to grab the board, then move your
 ## hand: up/down tilts it sideways, push/pull tilts it away/towards you. Rest your LEFT hand on the
@@ -224,7 +225,7 @@ func attach_camera(cam: Camera3D) -> void:
 func _place_camera() -> void:
 	var by: float = main.board_y
 	camera.position = Vector3(0.0, by + 1.0, 0.95)
-	camera.look_at(Vector3(0.0, by - 0.05, -0.08), Vector3.UP)
+	UiKit.look(camera, Vector3(0.0, by - 0.05, -0.08), Vector3.UP)
 
 
 func _input(event: InputEvent) -> void:

@@ -1,4 +1,5 @@
 extends Node3D
+const UiKit := preload("res://core/ui_kit.gd")
 ## Simple mode, VR practice: a see-through glowing hand that shows the thrower what to do instead of
 ## hint text. It loops: reach down to the snow, squeeze (a snowball appears), lift it back over the
 ## shoulder, swing towards the glowing target and let go (the ghost snowball flies off).
@@ -131,7 +132,7 @@ func show_demo(want: bool, head: Vector3, aim: Vector3, delta: float) -> void:
 	visible = alpha > 0.01
 	mat.albedo_color.a = alpha
 	# Palm down, fingers pointing at the target.
-	hand.global_transform = Transform3D(Basis.looking_at(fwd, Vector3.UP), p)
+	hand.global_transform = Transform3D(UiKit.aim(fwd, Vector3.UP), p)
 	for f in fingers:
 		f.rotation.x = -grip * 1.3
 	thumb.rotation.x = -grip * 0.7

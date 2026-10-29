@@ -1,4 +1,5 @@
 extends Node3D
+const UiKit := preload("res://core/ui_kit.gd")
 ## Player 1: the friendly GIANT sitting at the table.
 ## VR: XROrigin3D.world_scale makes the village a miniature. Grip or trigger near a goblin, boulder,
 ##   ember or knight picks it up; let go to drop it, or throw it (hand speed from recent positions).
@@ -125,7 +126,7 @@ func setup_flat(cam: Camera3D, use_mouse: bool) -> void:
 	camera.far = 1000.0
 	camera.cull_mask = 0xFFFFF & ~body_layer()
 	camera.global_position = FLAT_CAM_POS
-	camera.look_at(Vector3(0.0, 0.0, 1.0), Vector3.UP)
+	UiKit.look(camera, Vector3(0.0, 0.0, 1.0), Vector3.UP)
 	hands.append(_make_hand(false))
 	_ensure_head()
 
@@ -348,7 +349,7 @@ func _flat_controls(h: Hand, delta: float) -> void:
 	_pose_hand(h, xf, maxf(grip, 0.6 if h.held != null else 0.0))
 	if head:
 		head.global_position = FLAT_CAM_POS + Vector3(0.0, 2.0, 3.0)
-		head.look_at(h.pos, Vector3.UP)
+		UiKit.look(head, h.pos, Vector3.UP)
 
 
 ## Grab / hold / throw. Runs on the host (and in local split screen).

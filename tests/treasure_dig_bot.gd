@@ -1,4 +1,5 @@
 extends Node
+const UiKit := preload("res://core/ui_kit.gd")
 ## Headless bot for games/treasure_dig. TV bots run to sparkles (or loose treasure), dig with A and
 ## carry what they find to the chest. BOT_VR=1: a fake giant points the telescope and pulls the
 ## trigger, pokes sparkles with its left glove, grabs treasure with the right and drops / throws it
@@ -190,7 +191,7 @@ func _drive_vr(delta: float) -> void:
 			vr_target = main.hidden[0][0]
 			var g := beach.to_global(vr_target)
 			var hr: Node3D = rig.hand_r
-			hr.global_basis = Basis.looking_at((g - hr.global_position).normalized(), Vector3.UP)
+			hr.global_basis = UiKit.aim((g - hr.global_position).normalized(), Vector3.UP)
 			kit.vr_trigger(rig, 1.0 if vr_t > 0.2 and vr_t < 0.4 else 0.0)
 			if vr_t > 0.6:
 				_vr_next("poke")

@@ -1,4 +1,5 @@
 extends Node
+const UiKit := preload("res://core/ui_kit.gd")
 ## BotKit: shared helpers for headless bot tests.
 ## - Ignores the REAL controllers attached to this machine (their presses are swallowed and
 ##   core/party.gd skips them), so a pad on the couch can't pause or join a test.
@@ -342,7 +343,7 @@ func vr_look_at(rig: Node, world_point: Vector3) -> void:
 	var cam: Node3D = rig.camera
 	var to := world_point - cam.global_position
 	if to.length() > 0.01:
-		cam.global_basis = Basis.looking_at(to.normalized(), Vector3.UP if absf(to.normalized().y) < 0.98 else Vector3.FORWARD)
+		cam.global_basis = UiKit.aim(to.normalized(), Vector3.UP if absf(to.normalized().y) < 0.98 else Vector3.FORWARD)
 
 
 ## Pull the right trigger (0..1), press A, push the sticks (VR sticks: y UP positive).

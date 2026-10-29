@@ -1,4 +1,5 @@
 extends Node3D
+const UiKit := preload("res://core/ui_kit.gd")
 ## Simple mode: a see-through glowing hand holding a little lantern that SHOWS the VR lantern-bearer what
 ## to do (instead of text): it rests where the right hand is, then sweeps its beam across until it
 ## points at the sleepy practice ghost, holds the light on it for a moment, and starts again.
@@ -101,6 +102,6 @@ func show_demo(on: bool, head: Transform3D, target: Vector3, lit: bool, delta: f
 	mat.albedo_color.a = alpha
 	cone_mat.albedo_color.a = alpha * (0.16 if t > 1.7 else 0.1)
 	var up := Vector3.UP if absf(dir.y) < 0.95 else Vector3.BACK
-	hand.global_transform = Transform3D(Basis.looking_at(dir, up), rest + Vector3(0, sin(t * 3.0) * 0.01, 0))
+	hand.global_transform = Transform3D(UiKit.aim(dir, up), rest + Vector3(0, sin(t * 3.0) * 0.01, 0))
 	for f in fingers:
 		f.rotation.x = -1.0

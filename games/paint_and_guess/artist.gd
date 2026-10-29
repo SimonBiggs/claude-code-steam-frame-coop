@@ -1,4 +1,5 @@
 extends Node3D
+const UiKit := preload("res://core/ui_kit.gd")
 ## Player 1: the ARTIST (players[0]).
 ## VR (Steam Frame): hold the RIGHT trigger to paint with the glowing brush in your right hand. Paint
 ## by touching the easel with the brush tip, or from further away by pointing at it (a laser shows
@@ -285,7 +286,7 @@ func _vr_update(delta: float) -> void:
 	if fake_vr:
 		hand.global_position = bot_hand_pos
 		if bot_hand_fwd.length() > 0.01:
-			hand.look_at(bot_hand_pos + bot_hand_fwd, Vector3.UP if absf(bot_hand_fwd.normalized().y) < 0.95 else Vector3.FORWARD)
+			UiKit.look(hand, bot_hand_pos + bot_hand_fwd, Vector3.UP if absf(bot_hand_fwd.normalized().y) < 0.95 else Vector3.FORWARD)
 	_fit(delta)
 	_move(delta)
 	var canvas = main.canvas
@@ -352,7 +353,7 @@ func _vr_update(delta: float) -> void:
 		var from := hand.global_position + fwd * TIP
 		var mid := (from + hit_w) * 0.5
 		var seg_len := from.distance_to(hit_w)
-		laser.global_transform = Transform3D(Basis.looking_at(hit_w - from, Vector3.UP if absf(fwd.y) < 0.95 else Vector3.FORWARD) \
+		laser.global_transform = Transform3D(UiKit.aim(hit_w - from, Vector3.UP if absf(fwd.y) < 0.95 else Vector3.FORWARD) \
 			* Basis(Vector3.RIGHT, PI * 0.5), mid)
 		laser.scale = Vector3(1.0, seg_len, 1.0)
 		laser_mat.albedo_color = Color(col.r, col.g, col.b).lerp(Color(1, 1, 1), 0.3)

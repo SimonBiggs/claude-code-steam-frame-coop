@@ -1,4 +1,5 @@
 extends Node3D
+const UiKit := preload("res://core/ui_kit.gd")
 ## The concert: a stage with a disco floor, an LED equalizer wall, chase lights along the stage lip,
 ## swinging light beams, speaker stacks, amps and monitors, a big waving crowd and the guitarists'
 ## avatars. The drummer stands at the back on a riser (DRUM_SPOT, facing -Z towards the crowd); the
@@ -601,7 +602,7 @@ func strum(i: int, good: bool) -> void:
 func tv_camera(i: int) -> Transform3D:
 	var ax := AVATAR_X[clampi(i - 1, 0, AVATAR_X.size() - 1)]
 	var pos := Vector3(ax * 0.5, 1.8, -6.6)
-	return Transform3D(Basis(), pos).looking_at(Vector3(ax * 0.35, 1.75, 0.5), Vector3.UP)
+	return UiKit.aim_from(pos, Vector3(ax * 0.35, 1.75, 0.5), Vector3.UP)
 
 
 func on_beat(b: int, crowd: float) -> void:

@@ -1,4 +1,5 @@
 extends RefCounted
+const UiKit := preload("res://core/ui_kit.gd")
 ## Builds the haunted mansion: library (west), hall (middle), ballroom (east), all procedural.
 ## Rooms span x -21..21, z -8..8; interior walls at x = ±7 with a doorway at |z| < 1.6.
 
@@ -517,7 +518,7 @@ static func _bats(root: Node3D, center: Vector3, radius: float, count: int, secs
 	for i in count:
 		var a := TAU * i / count
 		var at := Vector3(cos(a) * radius, sin(a * 3.0) * 0.2, sin(a) * radius)
-		var face := Basis.looking_at(Vector3(-sin(a), 0.0, cos(a)) * signf(secs), Vector3.UP)
+		var face := UiKit.aim(Vector3(-sin(a), 0.0, cos(a)) * signf(secs), Vector3.UP)
 		bodies.append(Transform3D(face, at))
 		wings.append(Transform3D(face, at))
 		custom.append(Color(randf(), 0, 0, 0))

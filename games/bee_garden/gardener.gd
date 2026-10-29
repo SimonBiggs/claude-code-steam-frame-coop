@@ -1,4 +1,5 @@
 extends Node3D
+const UiKit := preload("res://core/ui_kit.gd")
 ## Player 1: the GARDENER at the big raised bed.
 ## VR (Steam Frame; only the sticks, RIGHT trigger, A and hand positions reach the game):
 ##   XROrigin3D.world_scale = 4 makes the bed a waist-high diorama. RIGHT trigger near the seed tray
@@ -134,7 +135,7 @@ func setup_flat(cam: Camera3D, use_mouse: bool) -> void:
 	camera.far = 600.0
 	camera.cull_mask = 0xFFFFF & ~body_layer() & ~W.TV_LAYER & ~W.BEE_TAG_BITS & ~W.BEE_ARROW_BITS
 	camera.global_position = FLAT_CAM_POS
-	camera.look_at(Vector3(-0.6, -0.4, 0.2), Vector3.UP)
+	UiKit.look(camera, Vector3(-0.6, -0.4, 0.2), Vector3.UP)
 	hands.append(_make_hand(true))
 	_ensure_head()
 
@@ -273,7 +274,7 @@ func _flat_controls(h: Hand, delta: float) -> void:
 	_update_hand(h, grip, delta)
 	if head:
 		head.global_position = FLAT_CAM_POS + Vector3(0.0, 0.5, 1.2)
-		head.look_at(h.pos, Vector3.UP)
+		UiKit.look(head, h.pos, Vector3.UP)
 
 
 ## Grab / hold / let go. Runs on the host (and in local split screen).

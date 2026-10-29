@@ -1,4 +1,5 @@
 extends Node3D
+const UiKit := preload("res://core/ui_kit.gd")
 ## A giant neon flying fish that swoops around the sky above the arena (Abigail's request).
 ## It spits fireballs, can be shot down (host decides), and comes back after a while.
 ## Sometimes it DIVES: a big swoop down through the arena at sword height (bullets do double damage and
@@ -135,11 +136,11 @@ func _process(delta: float) -> void:
 		var vel := (p1 - p0) * 2.0 * (1.0 - u) + (p2 - p1) * 2.0 * u
 		global_position = pos
 		if vel.length() > 0.01:
-			look_at(pos + vel, Vector3.UP)
+			UiKit.look(self, pos + vel, Vector3.UP)
 	else:
 		var pos := _orbit(t)
 		global_position = pos
-		look_at(_orbit(t + 0.1), Vector3.UP)
+		UiKit.look(self, _orbit(t + 0.1), Vector3.UP)
 		rotation.z = 0.35  # bank into the turn
 	for i in segments.size():
 		segments[i].rotation.y = sin(t * 7.0 - i * 0.9) * (0.05 + i * 0.07)  # swimming wave

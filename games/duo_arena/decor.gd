@@ -1,4 +1,5 @@
 extends RefCounted
+const UiKit := preload("res://core/ui_kit.gd")
 ## Arena decoration, built once: bleachers full of cheering neon spectators, stars, a ringed planet,
 ## slowly turning holo rings and drifting sparks. Repeated props are MultiMeshes (one draw call each).
 ## The crowd's ShaderMaterials are kept as main metas ("crowd_mats") so the director can make them cheer.
@@ -152,7 +153,7 @@ static func _add_stands(main: Node3D, radius: float) -> void:
 			var s := rng.randf_range(0.8, 1.2)
 			var at := Vector3(cos(a) * r, h + 0.42 * s, sin(a) * r)
 			var face := Vector3(-cos(a), 0.0, -sin(a))  # towards the arena
-			var basis := Basis.looking_at(face, Vector3.UP)
+			var basis := UiKit.aim(face, Vector3.UP)
 			bodies.append(Transform3D(basis.scaled(Vector3.ONE * s), at))
 			body_cols.append(CROWD_COLORS[rng.randi() % CROWD_COLORS.size()])
 			var custom := Color(rng.randf(), rng.randf(), 0.0, 0.0)

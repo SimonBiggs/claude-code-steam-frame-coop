@@ -1,4 +1,5 @@
 extends Node
+const UiKit := preload("res://core/ui_kit.gd")
 ## Headless bot for Ghost Lantern. Same scene on host and client (so node paths match).
 ## Local/host: player 1 points the lantern at the ghost nearest player 2 (and rings the bell now and then).
 ## Local/client: vacuum players walk up to the nearest ghost, aim at it and hold fire. On the client,
@@ -144,7 +145,7 @@ func _physics_process(delta: float) -> void:
 			vg = null  # simple: look away first so the practice ghost hand shows how
 			p1.hand_r.global_basis = Basis(Vector3.UP, PI)
 		if vg:
-			p1.hand_r.global_basis = Basis.looking_at((vg.global_position - p1.hand_r.global_position).normalized(), Vector3.UP)
+			p1.hand_r.global_basis = UiKit.aim((vg.global_position - p1.hand_r.global_position).normalized(), Vector3.UP)
 			var to: Vector3 = vg.global_position - p1.global_position
 			to.y = 0.0
 			if to.length() > 5.0:

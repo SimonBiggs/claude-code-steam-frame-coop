@@ -1,4 +1,5 @@
 extends Node
+const UiKit := preload("res://core/ui_kit.gd")
 ## Headless bot for Hide and Seek. Same scene on host and client (so node paths match).
 ## Seeker (local / host): once the count is over, walks up to the nearest hider still hiding, aims the
 ## torch and clicks. In round 2 the seeker dawdles, so the hiders win on time.
@@ -611,6 +612,6 @@ func _fake_vr(delta: float) -> void:
 	var c: Vector3 = best.center()
 	var head: Vector3 = s.xr_camera.global_position
 	s.hand_r.global_position = head + Vector3(0.2, -0.3, 0)
-	s.hand_r.look_at(c, Vector3.UP)
+	UiKit.look(s.hand_r, c, Vector3.UP)
 	near_t = near_t + delta if to.length() < 1.8 else 0.0
 	s.hand_l.global_position = c if near_t > 2.0 else head + Vector3(-0.2, -0.3, -0.2)

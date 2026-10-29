@@ -1,4 +1,5 @@
 extends RefCounted
+const UiKit := preload("res://core/ui_kit.gd")
 ## MYSTERY MANOR: furnishes every room of the manor (manor.gd ManorNode) with merged, vertex-coloured
 ## props: bookshelves, a grand piano, a dining table with candelabras, an oven, trunks, jam shelves,
 ## hedges and a fountain... Every piece that you can bump into gets a collision box (and a nav-grid
@@ -422,7 +423,7 @@ static func sack(b: MeshKit.Builder, t: Transform3D, c: Vector3, s: float) -> vo
 
 
 static func painting(b: MeshKit.Builder, pos: Vector3, normal: Vector3, pic: int, w: float = 1.0, h: float = 0.8) -> void:
-	var basis := Basis.looking_at(-normal, Vector3.UP)  # -Z towards the wall, +Z out of it
+	var basis := UiKit.aim(-normal, Vector3.UP)  # -Z towards the wall, +Z out of it
 	var t := Transform3D(basis, pos)
 	var gold := Color(0.92, 0.72, 0.3)
 	_box(b, t, Vector3(0, 0, -0.01), Vector3(w + 0.16, h + 0.16, 0.05), gold)

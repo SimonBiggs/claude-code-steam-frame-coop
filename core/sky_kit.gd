@@ -1,4 +1,5 @@
 extends RefCounted
+const UiKit := preload("res://core/ui_kit.gd")
 ## SkyKit: mobile-safe environment presets (sky, sun/moon light, ambient, fog on the TV, and cheap
 ## extras: stars, moon, clouds, rain, snow, bubbles, dust, fireflies, a planet, light shafts).
 ##
@@ -422,7 +423,7 @@ class SkyRig extends Node3D:
 	func _place_moon() -> void:
 		var dir := sun.basis.z.normalized()
 		_moon.position = dir * Me.DOME * 0.92
-		_moon.basis = Basis.looking_at(-dir, Vector3.UP if absf(dir.y) < 0.98 else Vector3.FORWARD, true)
+		_moon.basis = UiKit.aim(-dir, Vector3.UP if absf(dir.y) < 0.98 else Vector3.FORWARD, true)
 
 	func _set_extras(p: Dictionary) -> void:
 		var star_n := int(p["stars"])

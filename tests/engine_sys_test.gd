@@ -1,4 +1,5 @@
 extends Node
+const UiKit := preload("res://core/ui_kit.gd")
 ## Headless test of the engine systems: core/party.gd, core/split_view.gd, core/vr_rig.gd (fake VR
 ## through tests/bot_kit.gd), core/camera_rig.gd, core/save.gd and core/net.gd's additions.
 ## Local run (all modules, deterministic):
@@ -429,7 +430,7 @@ func _local_timeline() -> void:
 		shape.shape = box
 		w.add_child(shape)
 		main.add_child(w)
-		w.global_transform = Transform3D(Basis.looking_at(f, Vector3.UP), Vector3(h.x, 1.0, h.z) + f * 1.0)
+		w.global_transform = Transform3D(UiKit.aim(f, Vector3.UP), Vector3(h.x, 1.0, h.z) + f * 1.0)
 		mark["vr_wall"] = w
 		rig.collision_mask = 1)
 	kit.at(19.95, "vr rig: walk into it", func() -> void:
@@ -517,7 +518,7 @@ func _point_at_wrist_menu() -> void:
 	var btn := rig.wrist_menu_position()
 	var hr := rig.hand_r
 	hr.global_position = btn + Vector3(0.3, 0.05, -0.2)
-	hr.global_basis = Basis.looking_at((btn - hr.global_position).normalized(), Vector3.UP)
+	hr.global_basis = UiKit.aim((btn - hr.global_position).normalized(), Vector3.UP)
 	kit.assert_true(rig.on_wrist_menu(), "pointing at the wrist MENU")
 
 

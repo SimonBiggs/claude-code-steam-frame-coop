@@ -289,7 +289,7 @@ func _frame_camera() -> void:
 	cam.fov = 55.0
 	cam.global_position = pos
 	cam_look = Vector3(c.x, 0.0, c.y - l * 0.08)
-	cam.look_at(cam_look, Vector3.UP)
+	UiKit.look(cam, cam_look, Vector3.UP)
 
 
 ## Slots that have a ball: the VR golfer (host) plus everyone seated.
@@ -771,7 +771,7 @@ func _follow_camera(delta: float) -> void:
 		cam.fov = 55.0
 	cam.global_position = cam.global_position.lerp(pos, k)
 	cam_look = cam_look.lerp(look, k)
-	cam.look_at(cam_look, Vector3.UP)
+	UiKit.look(cam, cam_look, Vector3.UP)
 
 
 func _arrow(slot: int) -> Node3D:

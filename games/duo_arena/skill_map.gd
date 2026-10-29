@@ -1,4 +1,5 @@
 extends Node3D
+const UiKit := preload("res://core/ui_kit.gd")
 ## Simon's skill map v2: a glowing star on the arena floor. Six branches, three tiers each.
 ## Each player earns their own XP from their kills and buys nodes for themselves by shooting them.
 ## Only the first ring is visible at first; buying a node reveals the next one on that branch.
@@ -83,7 +84,7 @@ func _make_node(key: String, tier: int, title: String, color: Color, pos: Vector
 	line.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(line)
 	line.position = (from + pos) * 0.5 + Vector3.UP * 0.03
-	line.look_at(pos + Vector3.UP * 0.03, Vector3.UP)
+	UiKit.look(line, pos + Vector3.UP * 0.03, Vector3.UP)
 	# Owner pips: a small ring in each owner's colour.
 	var pips: Array = []
 	for i in 3:

@@ -1,4 +1,5 @@
 extends Node3D
+const UiKit := preload("res://core/ui_kit.gd")
 ## Player 1, the pilot at the control desk.
 ## VR (Steam Frame): touch buttons and switches with either hand (a glowing fingertip shows the touch
 ## point); squeeze the RIGHT trigger near a plug, the dial knob or the launch lever to grab it and move
@@ -165,7 +166,7 @@ func attach_camera(cam: Camera3D) -> void:
 	camera.fov = 84.0  # wide enough to see both cockpit wings
 	var top: float = main.panel.top
 	camera.position = Vector3(0, top + 1.0, 0.75)
-	camera.look_at(Vector3(0, top - 0.08, -0.5))
+	UiKit.look(camera, Vector3(0, top - 0.08, -0.5))
 	global_position = Vector3(0, 0, 0.3)
 	cursor_ball = MeshInstance3D.new()
 	cursor_ball.mesh = main.sphere_mesh(0.016)

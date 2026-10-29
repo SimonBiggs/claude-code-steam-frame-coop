@@ -1,4 +1,5 @@
 extends Node3D
+const UiKit := preload("res://core/ui_kit.gd")
 ## A TV player: a marble rolling around the tilting board, seen from a third-person chase camera.
 ## Lives under the board node, so `lp` (board-local position, y up from the floor) is its transform.
 ## Local marbles simulate themselves (also on the TV machine: instant response); on the host, the
@@ -476,4 +477,4 @@ func _update_camera(delta: float) -> void:
 	camera.global_position = camera.global_position.lerp(want_pos, 1.0 - exp(-8.0 * delta))
 	var look := target + Basis(Vector3.UP, yaw) * Vector3(0, 0, -0.08)
 	if camera.global_position.distance_to(look) > 0.01:
-		camera.look_at(look, Vector3.UP)
+		UiKit.look(camera, look, Vector3.UP)
