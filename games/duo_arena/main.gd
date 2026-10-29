@@ -2090,6 +2090,7 @@ func claude_say(text: String) -> void:
 			claude_3d.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			claude_3d.modulate = Color(1.0, 0.85, 0.55)
 			players[0].xr_camera.add_child(claude_3d)
+			preload("res://core/vr_layer.gd").mark(claude_3d)  # VR-only: never on the TV cameras
 			claude_3d.position = Vector3(0.0, -0.42, -1.6)
 			players[0]._set_layers(claude_3d, players[0].viewmodel_layer())
 		claude_3d.text = line
