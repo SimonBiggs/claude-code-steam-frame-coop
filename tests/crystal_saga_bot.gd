@@ -15,6 +15,7 @@ extends Node
 ## CS_ZONE=n starts in zone n (0..4).
 
 const BotKit := preload("res://tests/bot_kit.gd")
+const BotEnd := preload("res://tests/bot_end.gd")
 const VrRig := preload("res://core/vr_rig.gd")
 const World := preload("res://games/crystal_saga/world.gd")
 
@@ -51,12 +52,15 @@ func _ready() -> void:
 	kit.at(3.0 if client else 1.0, "%d TV players press A" % want, func() -> void:
 		if main.net.mode != "host":
 			for i in want:
-				kit.join_bot(main.party))
+				kit.join_bot(main.party)
+		elif not main.net.has_vr:
+			kit.join_bot(main.party))  # a flat host (TV / Deck hosting): one pad hero here, in slot 0
 	kit.every(5.0, _report)
 	kit.every(0.25, _watch)
-	var end := 240.0 if host else (230.0 if client else 300.0)
+	var end := 150.0 if host else (140.0 if client else 300.0)
 	if OS.has_environment("BOT_END"):
 		end = float(OS.get_environment("BOT_END"))
+	end = BotEnd.within_deadline(end)
 	kit.at(end, "finish", func() -> void:
 		_checks()
 		kit.finish())
@@ -159,8 +163,10 @@ func _tv_bot(slot: int, delta: float) -> void:
 	var wp := _waypoint(pos, target)
 	var to := Vector3(wp.x - pos.x, 0.0, wp.z - pos.z)
 	if wp == target and to.length() < reach:
-		# Close enough: face it (a light push) and shoot.
-		kit.slot_stick(main.party, slot, "left", Vector2(to.x, to.z).normalized() * 0.2 if to.length() > 1.0 else Vector2.ZERO)
+		# Close enough: face it and shoot. The push must turn the hero: past core/party.gd's 0.2 deadzone AND hero.gd's
+		# 0.2 turn threshold after it (0.5 -> 0.375); the old 0.2 push did nothing, so a hero shot whichever way it
+		# arrived (the TV heroes shot past the cave orb for 100 s, 2026-10-29).
+		kit.slot_stick(main.party, slot, "left", Vector2(to.x, to.z).normalized() * 0.5 if to.length() > 0.3 else Vector2.ZERO)
 		if reach > 0.5 and float(shoot_cd[slot]) <= 0.0:
 			shoot_cd[slot] = 0.5
 			kit.slot_press(main.party, slot, "accept")
@@ -296,7 +302,7 @@ func _checks() -> void:
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
 	kit.assert_eq(outside, 0, "%s: heroes stayed on the path" % mode)
 	if mode != "host":
-		kit.assert_eq(main.party.player_count(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
+		kit.assert_eq(kit.seated(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
 	if mode == "client":
 		kit.assert_true(max_mons >= 2, "client mirrors the monsters (%d)" % max_mons)
 		kit.assert_true(int(main.net.state_get("open", 0)) >= 2 or saw_results, "client saw barriers open")

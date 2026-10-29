@@ -80,10 +80,17 @@ class RealPadFilter extends Node:
 func _process(delta: float) -> void:
 	t += delta
 	_unstick(delta)
+	# A settling pause check holds back every step due at or after it (a "resumed?" ran before its "paused?"
+	# while that one waited, and pressed Start the wrong way round, 2026-10-29).
+	var hold := INF
+	for step in _timeline:
+		var s0: Array = step
+		if not bool(s0[3]) and t >= float(s0[0]) and _settling(s0):
+			hold = minf(hold, float(s0[0]))
 	for step in _timeline:
 		var s: Array = step
 		if not bool(s[3]) and t >= float(s[0]):
-			if _settling(s):
+			if float(s[0]) >= hold:
 				continue
 			s[3] = true
 			info(str(s[1]))
@@ -147,6 +154,19 @@ static func bot_players(default: int, cap: int = 6) -> int:
 	return clampi(n, 1, cap)
 
 
+## A networked host that is NOT a flat host (DUO_HOST without DUO_FLAT_HOST) is a VR host: core/net.gd sets has_vr,
+## so core/party.gd seats no pads on it, and on a machine without a headset nobody would play there at all (a real
+## headset-less host is always a flat host: the arcade sets DUO_FLAT_HOST). For games whose host must have its VR
+## player (the mayor builds the town, the hero walks the saga), call this before instancing the game: it turns on
+## the fake VR player (BOT_VR=1). True when it did. Flat hosts seat a pad player instead (join_bot when vr_rig == null).
+static func vr_host_plays() -> bool:
+	if OS.has_environment("DUO_HOST") and not OS.has_environment("DUO_FLAT_HOST") and not OS.has_environment("BOT_VR") \
+			and not OS.has_environment("DUO_JOIN"):
+		OS.set_environment("BOT_VR", "1")
+		return true
+	return false
+
+
 ## Machines joining this host: tools/multibot.ts sets BOT_MACHINES (host + joiners); a plain host + client run is 1.
 static func joiners() -> int:
 	return maxi(1, int(OS.get_environment("BOT_MACHINES")) - 1) if OS.has_environment("BOT_MACHINES") else 1
@@ -157,6 +177,17 @@ static func joiners() -> int:
 ## split, one machine's Start resumed another's pause). True on a local run, the host and the first joiner.
 static func lead_machine() -> bool:
 	return int(OS.get_environment("BOT_MACHINE")) <= 1 if OS.has_environment("BOT_MACHINE") else true
+
+
+## Seated players to compare with seated_want: every seat on the host / a local game, but only THIS machine's own
+## seats on a joining TV machine (its party also lists the other machines' players: a flat host's P1, other joiners'
+## bots), so a client's check holds with a flat host and with several joining machines.
+func seated() -> int:
+	if main == null or main.get("party") == null:
+		return 0
+	if main.get("net") != null and str(main.net.mode) == "client":
+		return main.party.local_slots().size()
+	return main.party.player_count()
 
 
 ## Players the host / local machine should see seated: `want` per TV machine (on a multi_machine game's host every
@@ -270,14 +301,27 @@ func slot_press(party: Node, slot: int, action: String) -> void:
 	if dev < 0:
 		assert_true(false, "slot_press: slot %d has no pad" % slot)
 		return
+	if _menu_eats(action):
+		return
 	pad_press(dev, BUTTONS.get(action, JOY_BUTTON_A))
 
 
 ## Hold or release a standard action on a party slot's pad.
 func slot_hold(party: Node, slot: int, action: String, down: bool) -> void:
 	var dev: int = party.device_of(slot)
-	if dev >= 0:
+	if dev >= 0 and not (down and _menu_eats(action)):
 		pad_hold(dev, BUTTONS.get(action, JOY_BUTTON_A), down)
+
+
+## Gameplay presses while the game is paused would drive the open pause menu: after its 0.4 s grace the opener's
+## A presses the highlighted Resume (B resumes too). Bots keep "playing" while paused (they process ALWAYS), so a
+## dig / jump A landing 0.4-0.6 s after a test's Start resumed the game before its "paused?" check: treasure_dig's
+## "Start pauses" flaked 1 run in 6 (2026-10-29). While paused, only Start (the test's own toggle) gets through the
+## party-slot helpers; set menu_presses = true to drive a pause menu with A / B / the d-pad on purpose.
+var menu_presses := false
+
+func _menu_eats(action: String) -> bool:
+	return not menu_presses and is_inside_tree() and get_tree().paused and action != "start"
 
 
 ## Move a stick on a party slot's pad (y DOWN positive).

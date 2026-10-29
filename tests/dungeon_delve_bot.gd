@@ -85,6 +85,7 @@ func _ready() -> void:
 	var end := 150.0 if host else (140.0 if client else 170.0)
 	if OS.has_environment("BOT_END"):
 		end = float(OS.get_environment("BOT_END"))
+	end = preload("res://tests/bot_end.gd").within_deadline(end)
 	kit.at(end, "finish", func() -> void:
 		_checks()
 		kit.finish())
@@ -213,7 +214,8 @@ func _tv_bot(slot: int, delta: float) -> void:
 	var to := Vector3(wp.x - pos.x, 0.0, wp.z - pos.z)
 	var reach := 0.75 if phase in ["fight", "practice"] else 0.3
 	if wp == target and to.length() < reach:
-		kit.slot_stick(main.party, slot, "left", Vector2(to.x, to.z).normalized() * 0.2)
+		# face it: past core/party.gd's 0.2 deadzone and hero.gd's 0.2 turn threshold (a 0.2 push did nothing)
+		kit.slot_stick(main.party, slot, "left", Vector2(to.x, to.z).normalized() * 0.5)
 		var low: bool = target.y < 1.4
 		if (low or phase != "fight") and float(bonk_cd[slot]) <= 0.0:
 			bonk_cd[slot] = 0.45
@@ -354,7 +356,7 @@ func _checks() -> void:
 		return
 	kit.assert_eq(outside, 0, "%s: heroes stayed inside the dungeon" % mode)
 	if mode == "local":
-		kit.assert_eq(main.party.player_count(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
+		kit.assert_eq(kit.seated(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
 	elif mode == "client":  # (a flat host seats its own player too: count only this machine's)
 		kit.assert_eq(main.party.local_slots().size(), want, "client: all %d TV players here are seated" % want)
 	if mode == "client":

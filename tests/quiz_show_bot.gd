@@ -172,7 +172,7 @@ func _checks() -> void:
 		kit.assert_true(main.party.local_slots().size() == want, "client: all %d local players are seated" % want)
 	else:
 		var host_p := 1 if main.flat_host else 0
-		kit.assert_eq(main.party.player_count(), kit.seated_want(want, host_p), "%s: all players are seated" % mode)
+		kit.assert_eq(kit.seated(), kit.seated_want(want, host_p), "%s: all players are seated" % mode)
 	if main.flat_host:
 		kit.assert_true(main.party.is_local(0) and main.contestants().has(0), "flat host: slot 0 plays here")
 	for k in ["level", "warmup", "picture", "lightning", "final"]:
