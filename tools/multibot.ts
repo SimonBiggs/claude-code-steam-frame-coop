@@ -118,7 +118,7 @@ export async function runGroup(o: GroupOpts): Promise<GroupResult> {
       env.BOT_OWN_COPY = "1";
     }
     runs.push(new Promise(res => {
-      const p = spawn("timeout", [String(o.seconds ?? 180), "godot-test", "--headless", "--path", path, scene], { env });
+      const p = spawn("timeout", [String(o.seconds ?? 180), "godot-test", "--headless", "--path", path, scene], { env, cwd: path });  // never a deleted cwd
       let out = "";
       p.stdout.on("data", d => { out += d; });
       p.stderr.on("data", d => { out += d; });

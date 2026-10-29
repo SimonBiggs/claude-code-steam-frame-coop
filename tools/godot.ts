@@ -21,6 +21,7 @@
 //   await godot.netStatus(g)  // the same for one Game;  godot.launch({..., duoPort}) picks the network port (default control+1000)
 import { spawn, type ChildProcess } from "node:child_process";
 import { copyFile, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const HOME = process.env.HOME!;
@@ -36,11 +37,18 @@ export type RecordOpts = { fps?: number; width?: number };
 export type LaunchOpts = { project: string; scene?: string; width?: number; height?: number; env?: Record<string, string>; timeout?: number; record?: boolean | RecordOpts; vr?: boolean; duoPort?: number };
 // Async on purpose: a spawnSync here would freeze the whole brepl (no 3 s backgrounding, no polls) while it runs.
 const sh = async (cmd: string[]) => {
-  const p = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
+  const p = Bun.spawn(cmd, { cwd: safeCwd(), stdout: "pipe", stderr: "pipe" });
   const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
   if (code) throw new Error(`${cmd[0]} failed: ${err.slice(-600)}`);
   return out;
 };
+
+/** A child started from a deleted folder (a removed worktree as brepl's cwd) logs "getcwd(...) is null" and can't open
+ *  res:// (2026-10-29). Every spawn here runs from a folder that exists: brepl itself goes HOME when its cwd is gone. */
+export function safeCwd(dir?: string): string {
+  try { if (!existsSync(process.cwd())) process.chdir(process.env.HOME!); } catch { process.chdir(process.env.HOME!); }
+  return dir && existsSync(dir) ? dir : process.env.HOME!;
+}
 
 const running = new Map<number, Game>();
 
@@ -116,7 +124,7 @@ export async function launch(o: LaunchOpts | string): Promise<Game> {
   for (const k of ["DISPLAY", "WAYLAND_DISPLAY", "GAMESCOPE_WAYLAND_DISPLAY"]) delete env[k];  // never the TV's display
   const log = Bun.file(logPath).writer();
   // Low CPU priority so offscreen tests never make the family's game on the TV stutter.
-  const child = spawn("nice", ["-n", "10", "bwrap", ...args], { env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn("nice", ["-n", "10", "bwrap", ...args], { env, cwd: safeCwd(proj), detached: true, stdio: ["ignore", "pipe", "pipe"] });
   const write = (b: Buffer) => { log.write(b); log.flush(); };
   child.stdout!.on("data", write);
   child.stderr!.on("data", write);

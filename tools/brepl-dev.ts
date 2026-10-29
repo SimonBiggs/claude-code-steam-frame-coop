@@ -29,7 +29,8 @@ const TOOL_COPIES: Record<string, string> = {  // installed file -> repo copy (k
 
 /** Run a shell command: {code, out} (stdout+stderr, trimmed). Never throws. */
 export async function sh(cmd: string, cwd = HOME) {
-  const r = await $`bash -c ${cmd}`.cwd(cwd).nothrow().quiet();
+  const { safeCwd } = await import(`${HOME}/.local/share/gdev/godot.ts`);
+  const r = await $`bash -c ${cmd}`.cwd(safeCwd(cwd)).nothrow().quiet();  // a deleted cwd (removed worktree) falls back to HOME
   return { code: r.exitCode, out: (r.stdout.toString() + r.stderr.toString()).trim() };
 }
 const lastPath = async (out: string) => {
@@ -209,6 +210,12 @@ export async function debt() {
   const spec = (await sh(`grep -rnIE "[\\"']spectacle[\\"']|(^|[;&|(]|\\s)spectacle\\s+-" ${BIN} ${HOME}/.local/share/brepl ${HOME}/.local/share/gdev ${LIVE}/tools 2>/dev/null | grep -v -e '/tv-shot:' -e '^[^:]*:[0-9]*:\\s*#'`)).out;
   for (const l of spec.split("\n").filter(Boolean))
     issues.push({ kind: "direct-spectacle", what: l.replace(HOME, "~").slice(0, 160), fix: "take the screenshot with tv-shot OUT.png (one shot, right tool for the mode), never spectacle directly" });
+  // Godots (tests or offscreen runs) running from a deleted folder: a removed worktree as cwd or --path logs
+  // "getcwd(...) is null" / can't open res:// (2026-10-29). godot.ts / dev.sh / multibot now always pick a folder
+  // that exists and the godot.ts reaper quits orphans; anything left here was started some other way.
+  const dead = (await sh(`for p in $(pgrep -x godot); do c=$(readlink /proc/$p/cwd); a=$(tr '\\0' ' ' < /proc/$p/cmdline); pp=$(echo "$a" | grep -oP '(?<=--path )\\S+'); if [[ "$c" == *"(deleted)"* ]] || { [ -n "$pp" ] && [ ! -d "$pp" ]; }; then echo "$p $c $pp"; fi; done`)).out;
+  for (const l of dead.split("\n").filter(Boolean))
+    issues.push({ kind: "dead-cwd-godot", what: `godot ${l.replace(HOME, "~")}`, fix: "quit it (its folder is gone); start test Godots via godot.launch / dev.sh / multibot (they set a cwd that exists)" });
   const repos: string[] = [];
   for (const d of await readdir(GP)) if ((await stat(join(GP, d, ".git")).catch(() => null))?.isDirectory()) repos.push(d);
   for (const r of repos) {
