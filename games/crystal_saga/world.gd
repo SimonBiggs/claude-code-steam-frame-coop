@@ -20,13 +20,26 @@ const ZL := 16.0  ## zone length along Z
 const HALF_L := 8.0
 const HALF_W := 5.0  ## the path's half width (walkable)
 
-enum { WELL, CHICKEN, FLOWER, SIGN, CHEST, CRYSTAL, MUSHROOM, HOUSE, TREE, VILLAGER, DUMMY, TARGET, STONE, ORB, BIG, FRIEND }
+enum { WELL, CHICKEN, FLOWER, SIGN, CHEST, CRYSTAL, MUSHROOM, HOUSE, TREE, VILLAGER, DUMMY, TARGET, STONE, ORB, BIG, FRIEND, ROCK, CHOICE }
+## The glade's giants (sagagen.gd GIANTS: name, body, glow), here so the world needn't load the generator.
+const SAGA_GIANTS: Array = [["STONE", Color(0.5, 0.45, 0.6), Color(0.8, 0.4, 1.0)], ["MOSS", Color(0.4, 0.55, 0.38), Color(0.6, 1.0, 0.4)],
+	["SNOW", Color(0.8, 0.85, 0.95), Color(0.5, 0.8, 1.0)], ["SAND", Color(0.78, 0.66, 0.45), Color(1.0, 0.75, 0.3)],
+	["ROSE", Color(0.7, 0.45, 0.55), Color(1.0, 0.5, 0.75)], ["CLAY", Color(0.7, 0.42, 0.32), Color(1.0, 0.55, 0.35)]]
+const KIND_NAMES: Array[String] = ["well", "chicken", "flower", "sign", "chest", "crystal", "mushroom", "house", "tree",
+	"villager", "dummy", "target", "stone", "orb", "crystal of light", "friend", "rock", "level-up stone"]
 ## Kinds the sword passes through without poking (only spells hit the target).
 const SPELL_ONLY: Array[int] = [TARGET]
 
 ## id -> {"kind", "zone", "home": Vector3, "node": Node3D, "r": touch radius, "c": centre offset,
 ##        "anim"/"lid"/"board"/"bubble": extra nodes}
 var props: Array[Dictionary] = []
+## The journey's plan (sagagen.gd generate()): the forest, cave and glade come from it.
+var plan := {}
+var choice_ids: Array[int] = []  ## the two level-up stones (hidden until an offer)
+var offer: Array = []  ## skill ids on the stones right now
+var places: Array[Node3D] = []  ## Willowbrook's places (restored ones visible)
+var ruins: Array[Node3D] = []  ## ...and the rubble where they will be
+var village := 0
 var barriers: Array[Node3D] = []
 var open_count := 0
 var used_bits := 0
@@ -89,11 +102,14 @@ func walk_clamp(from: Vector3, to: Vector3, r: float) -> Vector3:
 
 # --- Building ------------------------------------------------------------------------------------
 
-func build() -> void:
+func build(p: Dictionary, village_places: int = 0) -> void:
+	plan = p
 	_scenery()
 	_trees()
 	_barriers()
 	_props()
+	_village()
+	set_village(village_places, false)
 	cave_light = OmniLight3D.new()
 	cave_light.omni_range = 14.0
 	cave_light.light_energy = 1.4
@@ -144,7 +160,7 @@ func _scenery() -> void:
 		for i in 6:
 			var z2 := c2.z + HALF_L - 1.4 - i * 2.7
 			b.rounded_box(Vector3(2.6, 5.5 + (i % 2) * 1.2, 3.2), 0.6, MeshKit.at(Vector3(sx * 6.9, 2.6, z2), Vector3.ONE, Vector3(0.0, 0.2 * (i % 3), 0.0)), Color(0.36, 0.33, 0.46))
-			_crystal_bits(b, Vector3(sx * 5.75, 3.2 + (i % 2) * 0.7, z2 + 0.6), Color(0.5, 0.85, 1.0) if i % 2 == 0 else Color(0.85, 0.55, 1.0), 0.7)
+			_crystal_bits(b, Vector3(sx * 5.75, 3.2 + (i % 2) * 0.7, z2 + 0.6), (plan.get("gem", Color(0.5, 0.85, 1.0)) as Color) if i % 2 == 0 else Color(0.85, 0.55, 1.0), 0.7)
 	for i in 3:
 		var za := c2.z + 5.0 - i * 5.0
 		b.torus(6.6, 0.9, MeshKit.at(Vector3(0.0, 0.0, za), Vector3(1.0, 1.0, 1.0), Vector3(PI * 0.5, 0.0, 0.0)), Color(0.33, 0.3, 0.42), 20, 6)
@@ -188,14 +204,15 @@ func _trees() -> void:
 	var xfs: Array = []
 	var cols := PackedColorArray()
 	var rng := RandomNumberGenerator.new()
-	rng.seed = 7
+	rng.seed = int(plan.get("seed", 7)) + 7
+	var leaf: Color = plan.get("leaf", Color(0.8, 1.0, 0.8))
 	# Forest zone: thick on both sides; a few around the village and the glade.
 	for i in 70:
 		var side := -1.0 if i % 2 == 0 else 1.0
 		var z := rng.randf_range(wall_z(0) - 0.5, wall_z(1) + 0.5)
 		var x := side * rng.randf_range(6.8, 16.0)
 		xfs.append(MeshKit.at(Vector3(x, 0.0, z), Vector3.ONE * rng.randf_range(1.6, 2.6), Vector3(0.0, rng.randf() * TAU, 0.0)))
-		cols.append(Color(0.8, 1.0, 0.8).lerp(Color(1.0, 0.95, 0.75), rng.randf()))
+		cols.append(leaf.lerp(Color(1.0, 0.95, 0.75), rng.randf() * 0.5))
 	for i in 22:
 		var a := rng.randf() * TAU
 		var r := rng.randf_range(15.0, 26.0)
@@ -277,34 +294,39 @@ func _props() -> void:
 	_villager(Vector3(-2.6, 0.0, -5.0), 0, Color(0.9, 0.4, 0.3))
 	_villager(Vector3(3.9, 0.0, 5.9), 1, Color(0.3, 0.6, 0.9))
 	_chest(Vector3(-4.3, 0.0, -6.4))
-	# --- Zone 1: the forest ---
-	var c1 := center(1)
-	for tp in [Vector3(-5.6, 0.0, -11.0), Vector3(5.6, 0.0, -15.5), Vector3(-5.6, 0.0, -20.5)]:
-		_mesh_prop(TREE, tp, MeshKit.prop("tree"), 0.8, Vector3(signf(-tp.x) * 0.3, 1.4, 0.0))
-	for mp in [Vector3(4.3, 0.0, -11.5), Vector3(-4.3, 0.0, -16.0), Vector3(4.2, 0.0, -21.5)]:
-		_mesh_prop(MUSHROOM, mp, _mushroom_mesh(), 0.7, Vector3(0.0, 1.15, 0.0))
-	for fp2 in [Vector3(-4.6, 0.0, -13.5), Vector3(4.6, 0.0, -18.5)]:
-		_mesh_prop(FLOWER, fp2, _planter_mesh(int(-fp2.z)), 0.5, Vector3(0.0, 0.75, 0.0))
-	_sign(c1 + Vector3(-2.6, 0.0, 6.2))
-	_chest(c1 + Vector3(-4.3, 0.0, -6.0))
-	# --- Zone 2: the crystal cave ---
+	# --- Zones 1-3: the forest, the cave, the glade: from the journey's plan (sagagen.gd) ---
+	var gem: Color = plan.get("gem", Color(0.5, 0.85, 1.0))
+	for q in plan.get("props", []):
+		var kind := int(q[0])
+		var pos := Vector3(float(q[1]), 0.0, float(q[2]))
+		var r: float = q[3]
+		var z := zone_of(pos)
+		match kind:
+			TREE:
+				_mesh_prop(TREE, pos, MeshKit.prop("tree"), r, Vector3(signf(-pos.x) * 0.3, 1.4, 0.0))
+			MUSHROOM:
+				_mesh_prop(MUSHROOM, pos, _mushroom_mesh(), r, Vector3(0.0, 1.15, 0.0))
+			FLOWER:
+				_mesh_prop(FLOWER, pos, _planter_mesh(int(absf(pos.z) * 3.0 + pos.x)), r, Vector3(0.0, 0.75, 0.0))
+			SIGN:
+				_sign(pos)
+			CHEST:
+				_chest(pos)
+			CRYSTAL:
+				var cb := MeshKit.Builder.new()
+				var col := gem.lerp(Color(0.85, 0.55, 1.0), 0.35 * float(props.size() % 3))
+				_crystal_bits(cb, Vector3(0.0, 0.55, 0.0), col, 1.4)
+				cb.rounded_box(Vector3(0.7, 0.5, 0.7), 0.1, MeshKit.at(Vector3(0.0, 0.25, 0.0)), Color(0.4, 0.37, 0.5))
+				_mesh_prop(CRYSTAL, pos, cb.build(), r, Vector3(0.0, 1.0, 0.0))
+			ROCK:
+				_mesh_prop(ROCK, pos, _rock_mesh(z, r, gem, props.size()), r, Vector3(0.0, r * 0.8, 0.0), float(props.size()) * 1.7)
+				blockers.append([Vector2(pos.x, pos.z), r])
 	var c2 := center(2)
-	var zs: Array[float] = [5.0, 1.5, -2.0, -5.5]
-	for k in 4:
-		var sx := -1.0 if k % 2 == 0 else 1.0
-		var col := [Color(0.5, 0.85, 1.0), Color(0.85, 0.55, 1.0), Color(0.5, 1.0, 0.75), Color(1.0, 0.75, 0.45)][k] as Color
-		var cb := MeshKit.Builder.new()
-		_crystal_bits(cb, Vector3(0.0, 0.55, 0.0), col, 1.4)
-		cb.rounded_box(Vector3(0.7, 0.5, 0.7), 0.1, MeshKit.at(Vector3(0.0, 0.25, 0.0)), Color(0.4, 0.37, 0.5))
-		_mesh_prop(CRYSTAL, c2 + Vector3(sx * 4.6, 0.0, zs[k]), cb.build(), 0.6, Vector3(0.0, 1.0, 0.0))
 	orb_id = _mesh_prop(ORB, c2 + Vector3(0.0, 0.0, -1.0), _orb_mesh(), 0.5, Vector3(0.0, 1.35, 0.0))
 	blockers.append([Vector2(0.0, c2.z - 1.0), 0.45])
-	_chest(c2 + Vector3(4.3, 0.0, -6.2))
-	# --- Zone 3: the Stone Giant's glade ---
 	var c3 := center(3)
-	for fp3 in [Vector3(-4.5, 0.0, 4.5), Vector3(4.5, 0.0, 3.5)]:
-		_mesh_prop(FLOWER, c3 + fp3, _planter_mesh(5 + int(fp3.x)), 0.5, Vector3(0.0, 0.75, 0.0))
-	var giant := Creatures.monster("golem", {"color": Color(0.65, 0.68, 0.6), "color2": Color(0.5, 0.85, 0.5)})
+	var gl: Array = SAGA_GIANTS[clampi(int(plan.get("giant", 0)), 0, SAGA_GIANTS.size() - 1)]
+	var giant := Creatures.monster("golem", {"color": (gl[1] as Color).lightened(0.15), "color2": (gl[2] as Color).lerp(Color(0.5, 0.85, 0.5), 0.4)})
 	var gh := Node3D.new()
 	gh.add_child(giant)
 	giant.scale = Vector3.ONE * 2.2
@@ -312,6 +334,17 @@ func _props() -> void:
 	friend_id = _add(FRIEND, c3 + Vector3(3.6, 0.0, -5.2), gh, 1.2, Vector3(-0.6, 1.4, 0.4))
 	props[friend_id]["anim"] = Creatures.anim(giant)
 	gh.visible = false
+	# The level-up stones (main.gd shows them in a cleared zone with a spell and a sword trick on top).
+	for i in 2:
+		var sn := Node3D.new()
+		sn.add_child(MeshKit.instance(_choice_base_mesh(i), false))
+		var icon := Node3D.new()
+		icon.position.y = 1.35
+		sn.add_child(icon)
+		var cid := _add(CHOICE, Vector3(0.0, 0.0, 30.0 + i * 3.0), sn, 0.55, Vector3(0.0, 1.0, 0.0))
+		props[cid]["icon"] = icon
+		sn.visible = false
+		choice_ids.append(cid)
 	# --- Zone 4: the shrine ---
 	var c4 := center(4)
 	big_id = _mesh_prop(BIG, c4 + Vector3(0.0, 0.0, -2.0), _big_base_mesh(), 1.0, Vector3(0.0, 1.9, 0.0))
@@ -392,6 +425,234 @@ func _chest(p: Vector3) -> void:
 	n.rotation.y = PI * 0.5 * signf(p.x)
 	var id := _add(CHEST, p, n, 0.55, Vector3(0.0, 0.5, 0.0))
 	props[id]["lid"] = lid
+
+
+# --- Generated rocks, the level-up stones ---------------------------------------------------------
+
+## A rock in the way: a mossy boulder and log (forest), a crystal cluster (cave), a standing stone (glade).
+static func _rock_mesh(zone: int, r: float, gem: Color, salt: int) -> ArrayMesh:
+	var b := MeshKit.Builder.new()
+	match zone:
+		2:
+			b.rounded_box(Vector3(r * 1.6, r * 0.6, r * 1.6), 0.1, MeshKit.at(Vector3(0.0, r * 0.3, 0.0)), Color(0.38, 0.35, 0.48))
+			_crystal_bits(b, Vector3(0.0, r * 0.9, 0.0), gem, r * 2.0)
+		3:
+			b.rounded_box(Vector3(r * 1.4, r * 3.4, r * 1.0), 0.15, MeshKit.at(Vector3(0.0, r * 1.6, 0.0), Vector3.ONE, Vector3(0.0, 0.0, 0.06)), Color(0.6, 0.6, 0.63))
+			b.star(5, r * 0.35, r * 0.15, 0.03, MeshKit.at(Vector3(0.0, r * 2.2, r * 0.5)), Color(0.6, 1.0, 0.8), true)
+		_:
+			if salt % 2 == 0:
+				b.ellipsoid(Vector3(r, r * 0.75, r * 0.9), MeshKit.at(Vector3(0.0, r * 0.6, 0.0)), Color(0.55, 0.56, 0.58), 10)
+				b.dome(r * 0.7, MeshKit.at(Vector3(0.1, r * 1.2, 0.0), Vector3(1.0, 0.35, 1.0)), Color(0.35, 0.65, 0.3), 10)
+			else:
+				b.cylinder(r * 0.55, r * 0.55, r * 2.4, MeshKit.at(Vector3(0.0, r * 0.55, 0.0), Vector3.ONE, Vector3(0.0, 0.0, PI * 0.5)), Color(0.55, 0.38, 0.22), 10)
+				b.cylinder(r * 0.42, r * 0.42, 0.04, MeshKit.at(Vector3(r * 1.21, r * 0.55, 0.0), Vector3.ONE, Vector3(0.0, 0.0, PI * 0.5)), Color(0.85, 0.7, 0.45), 10)
+				b.sphere(r * 0.18, MeshKit.at(Vector3(-r * 0.4, r * 1.1, 0.0)), Color(0.95, 0.3, 0.35), 6)
+	return b.build()
+
+
+## A rune stone with a glowing ring (0 = the spell stone, 1 = the sword-trick stone).
+static func _choice_base_mesh(i: int) -> ArrayMesh:
+	var b := MeshKit.Builder.new()
+	var glow := Color(0.85, 0.55, 1.0) if i == 0 else Color(0.6, 0.9, 1.0)
+	b.cylinder(0.38, 0.48, 0.9, MeshKit.at(Vector3(0.0, 0.45, 0.0)), Color(0.55, 0.52, 0.62), 8)
+	b.cylinder(0.45, 0.4, 0.1, MeshKit.at(Vector3(0.0, 0.92, 0.0)), Color(0.65, 0.62, 0.72), 8)
+	b.torus(0.62, 0.05, MeshKit.at(Vector3(0.0, 0.05, 0.0)), glow, 24, 4, true)
+	b.star(4, 0.14, 0.06, 0.03, MeshKit.at(Vector3(0.0, 0.5, 0.44)), glow, true)
+	return b.build()
+
+
+## The picture on top of a level-up stone, in 3D: a big fireball, a snowflake, twin sparks, a long sword,
+## a sword in a spinning ring, a big golden sword.
+static func skill_mesh(id: String) -> ArrayMesh:
+	var b := MeshKit.Builder.new()
+	var up := Vector3(0.0, 0.0, 0.0)
+	match id:
+		"splash":
+			b.sphere(0.24, MeshKit.at(Vector3.ZERO), Color(1.0, 0.55, 0.15), 12, true)
+			b.cone(0.2, 0.35, MeshKit.at(Vector3(0.0, 0.3, 0.0)), Color(1.0, 0.85, 0.3), 8, true)
+			b.sphere(0.12, MeshKit.at(Vector3(0.0, 0.0, 0.16)), Color(1.0, 0.95, 0.6), 8, true)
+		"ice":
+			for k in 3:
+				b.box(Vector3(0.06, 0.62, 0.06), MeshKit.at(Vector3.ZERO, Vector3.ONE, Vector3(0.0, 0.0, k * PI / 3.0)), Color(0.75, 0.95, 1.0), true)
+			b.sphere(0.09, MeshKit.at(Vector3.ZERO), Color(1.0, 1.0, 1.0), 8, true)
+		"twin":
+			b.star(4, 0.17, 0.07, 0.05, MeshKit.at(Vector3(-0.17, 0.05, 0.0)), Color(0.85, 0.6, 1.0), true)
+			b.star(4, 0.17, 0.07, 0.05, MeshKit.at(Vector3(0.17, -0.05, 0.0)), Color(0.6, 0.85, 1.0), true)
+		"long", "spin", "mighty":
+			var col := Color(0.85, 0.92, 1.0) if id != "mighty" else Color(1.0, 0.85, 0.35)
+			var ln := 0.95 if id == "long" else 0.7
+			var s := 1.4 if id == "mighty" else 1.0
+			b.box(Vector3(0.08 * s, ln, 0.03 * s), MeshKit.at(Vector3(0.0, 0.08 + ln * 0.5 - 0.3, 0.0)), col, id == "mighty")
+			b.box(Vector3(0.3 * s, 0.05, 0.06), MeshKit.at(Vector3(0.0, -0.24, 0.0)), Color(1.0, 0.8, 0.3))
+			b.cylinder(0.03, 0.03, 0.18, MeshKit.at(Vector3(0.0, -0.35, 0.0)), Color(0.35, 0.25, 0.5), 6)
+			if id == "spin":
+				b.torus(0.38, 0.03, MeshKit.at(Vector3(0.0, 0.05, 0.0), Vector3.ONE, up), Color(0.5, 1.0, 0.8), 20, 4, true)
+			if id == "mighty":
+				b.star(5, 0.12, 0.05, 0.03, MeshKit.at(Vector3(0.0, 0.25, 0.05)), Color(1.0, 1.0, 0.7), true)
+	return b.build()
+
+
+## Main: show the level-up stones in `zone` with these skills (spell, trick), or hide them (empty).
+func set_offer(zone: int, ids: Array) -> void:
+	offer = ids.duplicate()
+	for i in choice_ids.size():
+		var p: Dictionary = props[choice_ids[i]]
+		var n: Node3D = p["node"]
+		var icon: Node3D = p["icon"]
+		for ch in icon.get_children():
+			ch.queue_free()
+		if i >= ids.size():
+			n.visible = false
+			continue
+		icon.add_child(MeshKit.instance(skill_mesh(String(ids[i])), false))
+		var at: Vector2 = CHOICE_SPOTS[i]
+		var pos := center(zone) + Vector3(at.x, 0.0, at.y)
+		n.position = pos
+		p["home"] = pos
+		p["zone"] = zone
+		if not n.visible and is_inside_tree():
+			n.scale = Vector3.ONE * 0.1
+			n.create_tween().tween_property(n, "scale", Vector3.ONE, 0.5).set_trans(Tween.TRANS_BACK)
+		n.visible = true
+
+
+## The skill on level-up stone `id` ("" if it isn't one, or nothing is offered).
+func skill_on(id: int) -> String:
+	var i := choice_ids.find(id)
+	return String(offer[i]) if i >= 0 and i < offer.size() else ""
+
+
+# --- Willowbrook's places (crystal shards bring them back; saga.gd PLACES order) ----------------------
+
+## Where each place stands (x, z) and which way it faces the path.
+const PLACE_AT: Array[Vector2] = [Vector2(-9.2, -5.0), Vector2(8.8, 2.2), Vector2(-7.9, -1.4), Vector2(0.0, 0.0),
+	Vector2(12.6, -4.6), Vector2(-14.6, -1.8), Vector2(9.4, -7.0), Vector2(-13.4, -7.2), Vector2(7.6, 6.4), Vector2(0.0, -4.6)]
+const CHOICE_SPOTS: Array[Vector2] = [Vector2(-1.8, -4.4), Vector2(1.8, -4.4)]  ## = sagagen.gd CHOICE_AT
+
+var _blades: Node3D
+
+
+func _village() -> void:
+	for i in PLACE_AT.size():
+		var at := Vector3(PLACE_AT[i].x, 0.0, PLACE_AT[i].y)
+		var n := Node3D.new()
+		n.position = at
+		n.add_child(MeshKit.instance(_place_mesh(i), false))
+		if i == 0:
+			_blades = Node3D.new()
+			_blades.position = Vector3(1.05, 4.6, 0.0)
+			_blades.rotation.y = PI * 0.5
+			var bb := MeshKit.Builder.new()
+			for k in 4:
+				var a := k * PI * 0.5
+				bb.box(Vector3(0.5, 2.6, 0.05), MeshKit.at(Vector3(-sin(a) * 1.4, cos(a) * 1.4, 0.0), Vector3.ONE, Vector3(0.0, 0.0, a)), Color(0.95, 0.92, 0.85))
+			bb.sphere(0.22, MeshKit.at(Vector3.ZERO), Color(0.75, 0.3, 0.25), 8)
+			_blades.add_child(MeshKit.instance(bb.build(), false))
+			n.add_child(_blades)
+		n.visible = false
+		add_child(n)
+		places.append(n)
+		var ru := Node3D.new()
+		ru.position = at
+		if i != 3 and i != 9:  # the lanterns and the rainbow leave no rubble
+			ru.add_child(MeshKit.instance(_ruin_mesh(i), false))
+		add_child(ru)
+		ruins.append(ru)
+
+
+## Show the first `n` places (animate: they pop up with a bounce).
+func set_village(n: int, animate: bool) -> void:
+	village = n
+	for i in places.size():
+		var on := i < n
+		var pl: Node3D = places[i]
+		if on and not pl.visible and animate and is_inside_tree():
+			pl.scale = Vector3(1.0, 0.05, 1.0)
+			pl.create_tween().tween_property(pl, "scale", Vector3.ONE, 0.9).set_trans(Tween.TRANS_BACK)
+		pl.visible = on
+		ruins[i].visible = not on
+
+
+func place_center(i: int) -> Vector3:
+	return Vector3(PLACE_AT[i].x, 1.5, PLACE_AT[i].y)
+
+
+static func _ruin_mesh(i: int) -> ArrayMesh:
+	var b := MeshKit.Builder.new()
+	for k in 4:
+		var a := TAU * k / 4.0 + i
+		b.rounded_box(Vector3(0.7, 0.35 + 0.15 * (k % 2), 0.55), 0.08, MeshKit.at(Vector3(cos(a) * 0.7, 0.18, sin(a) * 0.6), Vector3.ONE, Vector3(0.0, a, 0.1 * k)), Color(0.55, 0.53, 0.56))
+	_crystal_bits(b, Vector3(0.0, 0.9, 0.0), Color(0.45, 0.3, 0.6), 0.6)
+	return b.build()
+
+
+static func _place_mesh(i: int) -> ArrayMesh:
+	var b := MeshKit.Builder.new()
+	match i:
+		0:  # the windmill (blades are their own node)
+			b.cylinder(0.9, 1.3, 4.6, MeshKit.at(Vector3(0.0, 2.3, 0.0)), Color(0.96, 0.92, 0.82), 10)
+			b.cone(1.25, 1.5, MeshKit.at(Vector3(0.0, 5.3, 0.0)), Color(0.8, 0.35, 0.28), 10)
+			b.box(Vector3(0.1, 1.2, 0.7), MeshKit.at(Vector3(1.2, 0.6, 0.0)), Color(0.5, 0.32, 0.2))
+		1:  # the fountain
+			b.cylinder(1.3, 1.4, 0.5, MeshKit.at(Vector3(0.0, 0.25, 0.0)), Color(0.82, 0.82, 0.86), 16)
+			b.cylinder(1.15, 1.15, 0.06, MeshKit.at(Vector3(0.0, 0.48, 0.0)), Color(0.4, 0.7, 1.0), 16, true)
+			b.cylinder(0.16, 0.22, 1.3, MeshKit.at(Vector3(0.0, 0.9, 0.0)), Color(0.85, 0.85, 0.9), 8)
+			b.cylinder(0.5, 0.35, 0.18, MeshKit.at(Vector3(0.0, 1.55, 0.0)), Color(0.85, 0.85, 0.9), 12)
+			b.sphere(0.28, MeshKit.at(Vector3(0.0, 1.85, 0.0), Vector3(1.0, 1.4, 1.0)), Color(0.55, 0.85, 1.0), 10, true)
+		2:  # the flower garden: beds of flowers
+			for k in 3:
+				var z := -1.0 + k * 1.0
+				b.box(Vector3(2.4, 0.25, 0.7), MeshKit.at(Vector3(0.0, 0.12, z)), Color(0.45, 0.3, 0.18))
+				for f in 6:
+					var x := -1.0 + f * 0.4
+					var col: Color = [Color(1.0, 0.45, 0.6), Color(1.0, 0.85, 0.3), Color(0.6, 0.5, 1.0), Color(1.0, 0.55, 0.3)][(f + k) % 4]
+					b.cylinder(0.02, 0.02, 0.4, MeshKit.at(Vector3(x, 0.4, z)), Color(0.3, 0.6, 0.25), 4)
+					b.sphere(0.11, MeshKit.at(Vector3(x, 0.62, z), Vector3(1.0, 0.6, 1.0)), col, 6)
+		3:  # lanterns down both sides of the path
+			for sx in [-1.0, 1.0]:
+				for k in 4:
+					var z2 := 6.0 - k * 4.0
+					b.cylinder(0.05, 0.07, 2.2, MeshKit.at(Vector3(sx * 5.45, 1.1, z2)), Color(0.3, 0.28, 0.35), 6)
+					b.box(Vector3(0.3, 0.06, 0.06), MeshKit.at(Vector3(sx * 5.35, 2.15, z2)), Color(0.3, 0.28, 0.35))
+					b.sphere(0.16, MeshKit.at(Vector3(sx * 5.25, 1.98, z2)), Color(1.0, 0.85, 0.45), 8, true)
+		4:  # the bakery: a cottage with a chimney and a big golden loaf on the roof
+			_house(b, Vector3.ZERO, Color(1.0, 0.85, 0.65), Color(0.6, 0.38, 0.25), -1.0)
+			b.box(Vector3(0.4, 1.2, 0.4), MeshKit.at(Vector3(0.6, 3.8, 0.6)), Color(0.6, 0.35, 0.3))
+			b.capsule(0.3, 1.1, MeshKit.at(Vector3(-1.7, 2.1, 0.0), Vector3.ONE, Vector3(PI * 0.5, 0.0, 0.0)), Color(0.9, 0.65, 0.3))
+		5:  # the duck pond
+			b.cylinder(2.2, 2.2, 0.05, MeshKit.at(Vector3(0.0, 0.03, 0.0), Vector3(1.0, 1.0, 0.7)), Color(0.35, 0.65, 1.0), 20, true)
+			for k in 3:
+				var dp := Vector3(-0.8 + k * 0.8, 0.15, -0.3 + 0.3 * (k % 2))
+				b.ellipsoid(Vector3(0.22, 0.14, 0.15), MeshKit.at(dp), Color(1.0, 0.95, 0.5), 8)
+				b.sphere(0.1, MeshKit.at(dp + Vector3(0.18, 0.15, 0.0)), Color(1.0, 0.95, 0.5), 6)
+				b.cone(0.04, 0.1, MeshKit.at(dp + Vector3(0.3, 0.14, 0.0), Vector3.ONE, Vector3(0.0, 0.0, -PI * 0.5)), Color(1.0, 0.55, 0.15), 4)
+		6:  # the market stall: a striped awning and fruit
+			b.box(Vector3(2.0, 0.9, 0.9), MeshKit.at(Vector3(0.0, 0.45, 0.0)), Color(0.65, 0.45, 0.28))
+			for sx2 in [-0.95, 0.95]:
+				b.cylinder(0.05, 0.05, 2.2, MeshKit.at(Vector3(sx2, 1.1, -0.4)), Color(0.55, 0.38, 0.22), 6)
+			for k2 in 5:
+				b.box(Vector3(0.42, 0.08, 1.2), MeshKit.at(Vector3(-0.84 + k2 * 0.42, 2.2, 0.1), Vector3.ONE, Vector3(-0.3, 0.0, 0.0)), Color(1.0, 0.35, 0.35) if k2 % 2 == 0 else Color(1.0, 1.0, 0.95))
+			for f2 in 6:
+				b.sphere(0.13, MeshKit.at(Vector3(-0.7 + f2 * 0.28, 1.0, 0.1 * (f2 % 2))), [Color(1.0, 0.3, 0.3), Color(1.0, 0.65, 0.2), Color(0.5, 0.9, 0.3)][f2 % 3], 6)
+		7:  # the tall tower with a flag
+			b.cylinder(1.2, 1.4, 7.0, MeshKit.at(Vector3(0.0, 3.5, 0.0)), Color(0.8, 0.78, 0.74), 10)
+			b.cone(1.6, 2.4, MeshKit.at(Vector3(0.0, 8.2, 0.0)), Color(0.35, 0.45, 0.85), 10)
+			b.cylinder(0.04, 0.04, 1.4, MeshKit.at(Vector3(0.0, 10.0, 0.0)), Color(0.4, 0.3, 0.2), 4)
+			b.box(Vector3(0.9, 0.5, 0.04), MeshKit.at(Vector3(0.45, 10.4, 0.0)), Color(1.0, 0.85, 0.3))
+			for k3 in 3:
+				b.box(Vector3(0.1, 0.6, 0.45), MeshKit.at(Vector3(1.27, 2.0 + k3 * 1.8, 0.0)), Color(1.0, 0.9, 0.5), true)
+		8:  # a statue of the hero, sword up
+			b.box(Vector3(1.2, 0.8, 1.2), MeshKit.at(Vector3(0.0, 0.4, 0.0)), Color(0.8, 0.8, 0.84))
+			b.capsule(0.32, 1.3, MeshKit.at(Vector3(0.0, 1.45, 0.0)), Color(0.85, 0.85, 0.9))
+			b.sphere(0.26, MeshKit.at(Vector3(0.0, 2.3, 0.0)), Color(0.85, 0.85, 0.9), 10)
+			b.box(Vector3(0.08, 1.2, 0.04), MeshKit.at(Vector3(0.35, 2.7, 0.0)), Color(0.75, 0.9, 1.0), true)
+			b.box(Vector3(0.3, 0.06, 0.06), MeshKit.at(Vector3(0.35, 2.1, 0.0)), Color(1.0, 0.8, 0.3))
+		9:  # a crystal rainbow over the village
+			var cols: Array[Color] = [Color(1.0, 0.35, 0.35), Color(1.0, 0.65, 0.25), Color(1.0, 0.95, 0.35), Color(0.4, 0.9, 0.4),
+				Color(0.4, 0.65, 1.0), Color(0.7, 0.45, 1.0)]
+			for k4 in 6:
+				b.torus(9.0 - k4 * 0.3, 0.14, MeshKit.at(Vector3(0.0, -2.0, 0.0), Vector3.ONE, Vector3(PI * 0.5, 0.0, 0.0)), cols[k4], 40, 4, true)
+	return b.build()
 
 
 # --- Prop meshes ---
@@ -612,3 +873,10 @@ func animate(delta: float, zone: int) -> void:
 		sn.scale = Vector3.ONE * lerpf(1.0, 2.2, restored)
 		i += 1
 	shards.position.y = 1.9 + 0.1 * sin(_t * 1.5)
+	# The level-up stones' pictures spin and bob; the windmill turns.
+	for cid in choice_ids:
+		var ic: Node3D = props[cid]["icon"]
+		ic.rotation.y += delta * 1.6
+		ic.position.y = 1.35 + 0.08 * sin(_t * 2.5 + cid)
+	if _blades != null and village > 0:
+		_blades.rotate_object_local(Vector3.FORWARD, delta * 0.8)

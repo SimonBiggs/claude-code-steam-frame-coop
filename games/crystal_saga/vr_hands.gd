@@ -25,6 +25,7 @@ var rig: VrRig
 var sword: MeshInstance3D
 var sword_glow: MeshInstance3D
 var flame: MeshInstance3D
+var blade_len := BLADE  ## the LONG SWORD trick makes it longer (main.gd apply_skills)
 var idle_t := 0.0  ## seconds since the sword last hit a monster (the ghost hand comes back)
 var swings := 0  ## bots: sword hits on monsters
 var fires := 0  ## bots: fireballs cast
@@ -79,7 +80,7 @@ func setup(m: Node, r: VrRig) -> void:
 func blade() -> Array:
 	var hp := rig.hand_point(VrRig.RIGHT)
 	var fwd := -rig.hand_r.global_basis.z
-	return [hp + fwd * 0.08, hp + fwd * BLADE]
+	return [hp + fwd * 0.08, hp + fwd * blade_len]
 
 
 static func seg_dist(p: Vector3, a: Vector3, b: Vector3) -> float:
@@ -100,7 +101,7 @@ func update(delta: float, thunder_on: bool) -> void:
 	flame.scale = Vector3.ONE * ready_k * (1.0 + 0.12 * sin(_t * 9.0))
 	sword_glow.visible = thunder_on and thunder_cd <= 0.0
 	if sword_glow.visible:
-		sword_glow.scale = Vector3(1.0 + 0.2 * sin(_t * 7.0), 1.0, 1.0)
+		sword_glow.scale = Vector3(1.0 + 0.2 * sin(_t * 7.0), 1.0, blade_len / BLADE)
 	var bl := blade()
 	var base: Vector3 = bl[0]
 	var tip: Vector3 = bl[1]
@@ -115,7 +116,7 @@ func update(delta: float, thunder_on: bool) -> void:
 		for id in main.monsters.mons.keys():
 			var c: Vector3 = main.monsters.center_of(id)
 			if seg_dist(c, base, tip) < main.monsters.radius_of(id) + 0.1:
-				if main.hit_monster(int(id), 0, c):
+				if main.hit_monster(int(id), 0, c, "sword"):
 					swings += 1
 					idle_t = 0.0
 					rig.pulse(VrRig.RIGHT, 0.7, 0.08)
@@ -162,6 +163,14 @@ func _spells(head: Vector3, thunder_on: bool) -> void:
 				thunders += 1
 				main.cast_thunder(blade()[1])
 				rig.pulse(VrRig.RIGHT, 0.9, 0.2)
+
+
+## The LONG SWORD trick: a longer blade (the sword and its glow stretch to match).
+func set_blade(length: float) -> void:
+	blade_len = length
+	var k := length / BLADE
+	sword.scale = Vector3(1.0, 1.0, k)
+	sword_glow.scale.z = k
 
 
 ## A new journey: forget swings in progress.
