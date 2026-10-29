@@ -112,10 +112,12 @@ static func build(root: Node3D, spec: Dictionary = {}) -> Dictionary:
 	var lights: Array = W.omni_lights(root, lamps, Color(1.0, 0.85, 0.65) if th.id != "spooky" else Color(0.9, 0.7, 1.0), 1.1, 6.5)
 	var decoys: Array = W.finish(ctx, g.decoys)
 	var kennel := Vector3.ZERO
+	var kennel_n := Vector3.FORWARD
 	for pc in g.pieces:
 		if pc.k == "kennel":
 			kennel = HouseGen.to_world(pc, Vector3(0, 0, 1.3))
-	return {"decoys": decoys, "lights": lights, "window_mat": W.window_mat(ctx), "kennel": kennel}
+			kennel_n = pc.n
+	return {"decoys": decoys, "lights": lights, "window_mat": W.window_mat(ctx), "kennel": kennel, "kennel_n": kennel_n}
 
 
 ## Pip's toys in front of his kennel (one merged mesh; main.gd rebuilds it when a toy comes home).
@@ -446,7 +448,7 @@ static func _piece(ctx: Dictionary, pc: Dictionary, th: Dictionary) -> void:
 			_s(ctx, pc, Vector3(-0.6, 2.4, -0.6), 0.12, Color(1.0, 0.3, 0.3))
 		"slide":
 			_b(ctx, pc, Vector3(0, 0.6, 1.1), Vector3(0.7, 1.2, 0.7), Color(0.95, 0.6, 0.25))
-			var tilt := Transform3D(Basis(Vector3.RIGHT, 0.5), Vector3.ZERO)
+			var tilt := Transform3D(Basis(Vector3.RIGHT, -0.5), Vector3.ZERO)  # high end on the steps
 			var chute := BoxMesh.new()
 			chute.size = Vector3(0.6, 0.06, 2.3)
 			W._add_mesh(ctx, chute, _xf(pc, Vector3(0, 0.62, -0.25)) * tilt, Color(0.35, 0.65, 1.0))

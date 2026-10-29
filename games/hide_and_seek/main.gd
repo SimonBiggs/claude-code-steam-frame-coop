@@ -103,7 +103,8 @@ var pip_on := false  # Pip is hiding this round (not found yet)
 var pip_finder := -1
 var toys := 0  # Pip's toys at home (mirrored to the TV)
 var toys_node: Node3D
-var kennel := Vector3.ZERO
+var kennel := Vector3.ZERO  # in front of Pip's kennel (the house's garden), where his toys lie
+var kennel_n := Vector3.FORWARD  # out of the kennel
 var run: Dictionary = {}  # this round's telemetry (host)
 var vr_story: Node3D
 var last_gen_ms := 0.0
@@ -370,6 +371,7 @@ func _build_map(i: int, spec: Dictionary = {}) -> void:
 	lights = built.lights
 	window_mat = built.get("window_mat")
 	kennel = built.get("kennel", Vector3.ZERO)
+	kennel_n = built.get("kennel_n", Vector3.FORWARD)
 	mood_dirty = true
 	toys_node = null
 	_update_toys()
@@ -1854,7 +1856,7 @@ func _hide_pip() -> void:
 func _place_pip(at: Vector3) -> void:
 	pip_spot = at
 	var to := spawn_pos(0) - at
-	pip.hide_at(at, atan2(-to.x, -to.z) + PI)
+	pip.hide_at(at, atan2(-to.x, -to.z))  # facing the counting spot
 
 
 ## Host: someone found Pip? (a hider, not disguised, bumping into him while the seeker looks; the flat
@@ -1931,6 +1933,12 @@ func _pip_fx(i: int, n_toys: int) -> void:
 	popup(c + Vector3.UP * 0.9, "PIP! +%d" % Story.PIP_POINTS, col.lightened(0.3))
 	local_sound("pickup", -2.0, 1.2)
 	local_sound("squeak", -6.0, 1.6)
+	if map_idx == 0 and kennel != Vector3.ZERO:  # then he trots home and sits by his kennel with the new toy
+		var home := kennel + kennel_n * 0.7
+		var face := atan2(-kennel_n.x, -kennel_n.z)
+		get_tree().create_timer(1.6).timeout.connect(func() -> void:
+			if not pip_on and map_idx == 0 and is_instance_valid(pip):
+				pip.hide_at(home, face))
 	var toy: Array = Story.toy(n_toys - 1)
 	var beat := {"who": "PIP", "line": "A %s for my kennel!" % String(toy[0]).to_lower(), "pic": "puppy", "color": Story.PIP_COLOR, "duration": 3.5}
 	_show_story(beat)
@@ -1956,6 +1964,8 @@ func _story(beat: Dictionary) -> void:
 
 
 func _show_story(beat: Dictionary) -> void:
+	beat = beat.duplicate()
+	beat["y"] = beat.get("y", 0.36)  # under the big HIDE! / SEEK! word, above the picture cues
 	var huds: Array = []
 	for p in players:
 		if p.hud != null and is_instance_valid(p.hud) and _has_local_view(p) and p.active:

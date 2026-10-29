@@ -321,6 +321,7 @@ static func _try(seed_value: int, spec: Dictionary, attempt: int) -> Dictionary:
 	reserved.append(Rect2(Vector2(bell.x, bell.z), Vector2.ZERO).grow(0.9))
 	for sp in spawns:
 		reserved.append(Rect2(Vector2(sp.x, sp.z), Vector2.ZERO).grow(0.55))
+	reserved.append(Rect2(Vector2(seeker.x - 1.0, seeker.z), Vector2(2.0, HALF_Z - seeker.z)))  # the seeker faces the front door
 	# Pip's kennel first (on the house wall in the garden, clear of the garden door), then furniture.
 	var pieces: Array = []
 	var foot: Array = []
