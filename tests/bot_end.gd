@@ -44,14 +44,18 @@ static func quit_quietly(tree: SceneTree, code := 0) -> void:
 	if tree.has_meta("bot_quitting"):
 		return
 	tree.set_meta("bot_quitting", true)
-	tree.paused = true  # the game stops starting new sounds (one started in the last frames leaked too)
+	tree.paused = true  # the game stops starting new sounds
+	# Free the game first: with no game code left nothing can start a sound on the way out (paused UI code still
+	# could, and one started in the very last frame leaked: fishing_lake, kart_race, rhythm_band, dodge_ball,
+	# 2026-10-29). A static coroutine, so it keeps going after the bot that called it is freed.
+	if tree.current_scene != null:
+		tree.current_scene.queue_free()
 	_stop_sounds(tree)
-	# In REAL time: under --fixed-fps a 0.2 s game timer passes in a few real ms, before the audio thread mixes once
-	# (local --quit-after runs still leaked, 2026-10-29). Block briefly so it mixes, then let the main thread's
-	# AudioServer update free the dropped playbacks.
-	# Until a frame passes with nothing playing (UI sounds keep working while paused, so one can start on the way out;
-	# fishing_lake still leaked one in half its runs, 2026-10-29). At most 6 passes.
+	# In REAL time: under --fixed-fps a 0.2 s game timer passes in a few real ms, before the audio thread mixes once.
+	# Block briefly so it mixes, then let the main thread's AudioServer update free the dropped playbacks; repeat
+	# until a frame passes with nothing playing (at most 6 passes).
 	for i in 6:
+		await tree.process_frame
 		_stop_sounds(tree)
 		OS.delay_msec(100)
 		await tree.process_frame
