@@ -189,18 +189,19 @@ func build_pictures(c: Node3D, m: Dictionary) -> void:
 					c.add_child(cable)
 		"symbols":
 			var order: Array = m.order
+			var step := 1.15 if order.size() <= 3 else 0.85  # four shapes (level 3) still fit the board
 			for i in order.size():
-				var x := (i - (order.size() - 1) / 2.0) * 1.15
+				var x := (i - (order.size() - 1) / 2.0) * step
 				var holder := Node3D.new()
 				holder.position = Vector3(x, 0.0, 0.2)
 				c.add_child(holder)
-				holder.add_child(main.shape_node(int(order[i]), 0.42))
+				holder.add_child(main.shape_node(int(order[i]), 0.42 if order.size() <= 3 else 0.34))
 				if i + 1 < order.size():  # an arrow: this one first, then the next
 					var arrow := MeshInstance3D.new()
 					arrow.mesh = main.cyl_mesh(0.0, 0.12, 0.22, 8)
 					arrow.material_override = main.color_mat(Color(1.0, 0.85, 0.3), 0.6)
 					arrow.rotation.z = -PI / 2.0
-					arrow.position = Vector3(x + 0.575, 0.0, 0.06)
+					arrow.position = Vector3(x + step * 0.5, 0.0, 0.06)
 					c.add_child(arrow)
 		"gauge":
 			_build_gauge(c, m)

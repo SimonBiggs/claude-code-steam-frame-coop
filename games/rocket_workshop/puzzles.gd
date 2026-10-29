@@ -6,6 +6,8 @@ extends RefCounted
 ## Two modules turn the talking round: ALIEN HELLO (the pilot describes the alien on the desk, the crew
 ## look it up) and the PAINT job (only the pilot's screen says which colour the rocket wants).
 
+const Seeded := preload("res://core/seeded.gd")
+
 const COLOR_NAMES: Array[String] = ["RED", "BLUE", "YELLOW", "GREEN"]
 const COLORS: Array[Color] = [Color(0.95, 0.25, 0.22), Color(0.25, 0.5, 1.0), Color(1.0, 0.82, 0.15), Color(0.3, 0.82, 0.3)]
 const SHAPE_NAMES: Array[String] = ["BALL", "CUBE", "CONE", "RING", "PILL", "TENT"]
@@ -51,14 +53,12 @@ static func planet(n: int) -> int:
 	return (maxi(n, 1) - 1) % PLANETS.size()
 
 
-static func make_rocket(n: int, crew: int = 1) -> Dictionary:
-	var names: Array = ROCKET_NAMES.duplicate()
-	names.shuffle()
+static func make_rocket(n: int, crew: int, r: RandomNumberGenerator) -> Dictionary:
+	var names: Array = Seeded.shuffled(r, ROCKET_NAMES)
 	var vr_count := clampi(1 + floori((n + 1) / 2.0), 2, 4)  # 2, 2, 3, 3, 4, 4...
 	if n >= 9:
 		vr_count = 5
-	var types: Array = VR_TYPES.duplicate()
-	types.shuffle()
+	var types: Array = Seeded.shuffled(r, VR_TYPES)
 	# Rocket 2 shows off the alien, rocket 3 the crank; later rockets pick from everything.
 	if n == 2 or n == 3:
 		var fresh: String = NEW_TYPES[n - 2]
@@ -71,20 +71,19 @@ static func make_rocket(n: int, crew: int = 1) -> Dictionary:
 	var keyed := 1 if n < 3 else (2 if n < 5 else 3)
 	var mods: Array = []
 	for i in vr_count:
-		mods.append(_make(types[i], n, names, keyed))
+		mods.append(_make(types[i], n, names, keyed, r))
 	var job_count := 0 if n < 2 else (1 if n < 5 else 2)
 	if n >= 2 and crew >= 3:
 		job_count += 1  # a big crew gets more to do
 	if n >= 4 and crew >= 5:
 		job_count += 1
-	var jobs: Array = JOB_TYPES.duplicate()
-	jobs.shuffle()
+	var jobs: Array = Seeded.shuffled(r, JOB_TYPES)
 	if n == 3:  # the first paint job comes early so everyone meets it
 		jobs.erase("paint")
 		jobs.push_front("paint")
 	job_count = mini(job_count, jobs.size())
 	for i in job_count:
-		mods.append(_make(jobs[i], n, names, keyed))
+		mods.append(_make(jobs[i], n, names, keyed, r))
 	var time := 50.0 + 40.0 * vr_count + 30.0 * job_count - minf(n, 6.0) * 3.0
 	time += 60.0 if n <= 2 else 0.0  # extra learning time for the first rockets
 	return {"name": names[0], "modules": mods, "time": time}
@@ -92,113 +91,115 @@ static func make_rocket(n: int, crew: int = 1) -> Dictionary:
 
 ## Simple mode: one new desk control per rocket, never more than two puzzles (plus the launch lever).
 ## Rocket 1 is the practice: press ONE coloured button. Then plugs, the dial, switches, shapes.
-## No crew jobs, no rocket names, no countdown.
+## No crew jobs, no rocket names, no countdown. After the five teaching rockets the challenge grows in
+## readable steps (simple_level): level 2 (rockets 6-9) has longer blueprints (more buttons, plugs,
+## shapes, switches), level 3 (rocket 10 on) has three puzzles. The rocket grows taller with the level.
 const SIMPLE_ORDER: Array[String] = ["fuel", "wires", "gauge", "switches", "symbols"]
+const SIMPLE_LEVEL_AT: Array[int] = [1, 6, 10]  # first rocket of each level
 
 
-static func make_simple_rocket(n: int) -> Dictionary:
-	var names: Array = ROCKET_NAMES.duplicate()
-	names.shuffle()
+static func simple_level(n: int) -> int:
+	var lv := 1
+	for i in SIMPLE_LEVEL_AT.size():
+		if n >= SIMPLE_LEVEL_AT[i]:
+			lv = i + 1
+	return lv
+
+
+static func make_simple_rocket(n: int, r: RandomNumberGenerator) -> Dictionary:
+	var names: Array = Seeded.shuffled(r, ROCKET_NAMES)
 	var types: Array = []
 	if n <= SIMPLE_ORDER.size():
 		types.append(SIMPLE_ORDER[n - 1])  # the new one first (the ghost hand shows how it works)
 		if n > 1:
-			types.append(SIMPLE_ORDER[randi() % (n - 1)])
+			types.append(SIMPLE_ORDER[r.randi() % (n - 1)])
 	else:
-		var all: Array = SIMPLE_ORDER.duplicate()
-		all.shuffle()
-		types = all.slice(0, 2)
+		types = Seeded.shuffled(r, SIMPLE_ORDER).slice(0, 3 if simple_level(n) >= 3 else 2)
 	var mods: Array = []
 	for t in types:
-		mods.append(make_simple(t, n))
+		mods.append(make_simple(t, n, r))
 	return {"name": names[0], "modules": mods, "time": 999.0}
 
 
-static func make_simple(type: String, n: int) -> Dictionary:
+static func make_simple(type: String, n: int, r: RandomNumberGenerator) -> Dictionary:
+	var lv := simple_level(n)
 	match type:
-		"fuel":  # press 1 (later 2 different) coloured buttons
-			var cols: Array = [0, 1, 2, 3]
-			cols.shuffle()
-			var answer: Array = cols.slice(0, 1 if n <= 2 else 2)
+		"fuel":  # press 1 (later 2, then 3 different) coloured buttons
+			var cols: Array = Seeded.shuffled(r, [0, 1, 2, 3])
+			var answer: Array = cols.slice(0, 1 if n <= 2 else (3 if lv >= 3 else 2))
 			answer.sort()
 			return {"type": type, "done": false, "rows": [["", answer]], "answer": answer, "pressed": []}
-		"wires":  # two plugs into two sockets (order[socket] = colour, -1 = leave empty)
-			var cols: Array = [0, 1, 2, 3]
-			cols.shuffle()
-			var socks: Array = [0, 1, 2, 3]
-			socks.shuffle()
+		"wires":  # 2 (level 2: 3, level 3: 4) plugs into their sockets (order[socket] = colour, -1 = leave empty)
+			var cols: Array = Seeded.shuffled(r, [0, 1, 2, 3])
+			var socks: Array = Seeded.shuffled(r, [0, 1, 2, 3])
 			var order: Array = [-1, -1, -1, -1]
-			for k in 2:
+			for k in lv + 1:
 				order[socks[k]] = cols[k]
 			return {"type": type, "done": false, "order": order, "placed": [-1, -1, -1, -1]}
-		"symbols":  # two shapes, left one first
-			var m := _make("symbols", 1, ROCKET_NAMES.duplicate(), 1)
-			m.order = (m.order as Array).slice(0, 2)
+		"symbols":  # 2 (3, 4) shapes, left one first
+			var m := _make("symbols", 4, ROCKET_NAMES.duplicate(), 1, r)
+			m.order = (m.order as Array).slice(0, lv + 1)
 			return m
-		"switches":  # one or two switches up
+		"switches":  # one or two (later three) switches up
 			var state: Array = []
 			var answer: Array = []
 			for k in SWITCH_COUNT:
 				state.append(false)
 				answer.append(false)
-			var ks: Array = range(SWITCH_COUNT)
-			ks.shuffle()
-			for k in (1 if n <= 4 else 2):
+			var ks: Array = Seeded.shuffled(r, range(SWITCH_COUNT))
+			for k in (1 if n <= 4 else maxi(2, lv)):
 				answer[ks[k]] = true
 			return {"type": type, "done": false, "rows": [["", answer]], "answer": answer, "state": state}
-	return _make(type, n, ROCKET_NAMES.duplicate(), 1)
+	return _make(type, n, ROCKET_NAMES.duplicate(), 1, r)
 
 
 ## Manual rows: [rocket name ("" = any rocket), answer]. answers[0] belongs to this rocket (names[0]).
-static func _rows(names: Array, keyed: int, answers: Array) -> Array:
+static func _rows(names: Array, keyed: int, answers: Array, r: RandomNumberGenerator) -> Array:
 	var rows: Array = []
 	for i in keyed:
 		rows.append([names[i] if keyed > 1 else "", answers[i]])
-	rows.shuffle()
-	return rows
+	return Seeded.shuffled(r, rows)
 
 
-static func make(type: String, n: int) -> Dictionary:
-	return _make(type, n, ROCKET_NAMES.duplicate(), 1)
+## One module of a type (tests and bots). r: null = a fresh random one.
+static func make(type: String, n: int, r: RandomNumberGenerator = null) -> Dictionary:
+	if r == null:
+		r = Seeded.rng(Seeded.fresh_seed())
+	return _make(type, n, ROCKET_NAMES.duplicate(), 1, r)
 
 
-static func _make(type: String, n: int, names: Array, keyed: int) -> Dictionary:
+static func _make(type: String, n: int, names: Array, keyed: int, r: RandomNumberGenerator) -> Dictionary:
 	match type:
 		"fuel":
 			var length := clampi(n + 1, 2, 4)
 			var answers: Array = []
 			while answers.size() < keyed:
-				var r: Array = []
+				var row: Array = []
 				for k in length:
-					r.append(randi() % COLORS.size())
-				r.sort()
-				if not answers.has(r):
-					answers.append(r)
-			return {"type": type, "done": false, "rows": _rows(names, keyed, answers), "answer": answers[0], "pressed": []}
+					row.append(r.randi() % COLORS.size())
+				row.sort()
+				if not answers.has(row):
+					answers.append(row)
+			return {"type": type, "done": false, "rows": _rows(names, keyed, answers, r), "answer": answers[0], "pressed": []}
 		"wires":
-			var order: Array = [0, 1, 2, 3]
-			order.shuffle()
+			var order: Array = Seeded.shuffled(r, [0, 1, 2, 3])
 			order.resize(3 if n < 3 else 4)
 			return {"type": type, "done": false, "order": order, "placed": [-1, -1, -1, -1]}
 		"symbols":
-			var all: Array = [0, 1, 2, 3, 4, 5]
-			all.shuffle()
-			var layout: Array = all.slice(0, 4)
-			var order: Array = layout.duplicate()
-			order.shuffle()
+			var layout: Array = Seeded.shuffled(r, [0, 1, 2, 3, 4, 5]).slice(0, 4)
+			var order: Array = Seeded.shuffled(r, layout)
 			order.resize(3 if n < 4 else 4)
 			return {"type": type, "done": false, "layout": layout, "order": order, "step": 0}
 		"gauge":
-			var nums: Array = [2, 3, 4, 5, 6, 7, 8, 9]
-			nums.shuffle()
-			return {"type": type, "done": false, "rows": _rows(names, keyed, nums.slice(0, keyed)), "answer": nums[0], "value": 1}
+			var nums: Array = Seeded.shuffled(r, [2, 3, 4, 5, 6, 7, 8, 9])
+			return {"type": type, "done": false, "rows": _rows(names, keyed, nums.slice(0, keyed), r), "answer": nums[0], "value": 1}
 		"switches":
 			var answers: Array = []
 			while answers.size() < keyed:
 				var pat: Array = []
 				var on := 0
 				for k in SWITCH_COUNT:
-					var b := randf() < 0.5
+					var b := r.randf() < 0.5
 					pat.append(b)
 					on += int(b)
 				if on >= 1 and on <= 4 and not answers.has(pat):
@@ -206,7 +207,7 @@ static func _make(type: String, n: int, names: Array, keyed: int) -> Dictionary:
 			var state: Array = []
 			for k in SWITCH_COUNT:
 				state.append(false)
-			return {"type": type, "done": false, "rows": _rows(names, keyed, answers), "answer": answers[0], "state": state}
+			return {"type": type, "done": false, "rows": _rows(names, keyed, answers, r), "answer": answers[0], "state": state}
 		"alien":
 			# Six different aliens on the crew's chart, each with its hello word. The pilot's desk shows one.
 			var combos: Array = []
@@ -214,33 +215,31 @@ static func _make(type: String, n: int, names: Array, keyed: int) -> Dictionary:
 				for e in 3:
 					for tp in ALIEN_TOPS.size():
 						combos.append([c, e + 1, tp])
-			combos.shuffle()
+			combos = Seeded.shuffled(r, combos)
 			var cast: Array = []
 			var count := 4 if n < 4 else 6
 			for i in count:
 				var a: Array = combos[i]
 				cast.append([int(a[0]), int(a[1]), int(a[2]), i % HELLO_WORDS.size()])
-			cast.shuffle()
-			var pick := randi() % cast.size()
+			cast = Seeded.shuffled(r, cast)
+			var pick := r.randi() % cast.size()
 			var answer: int = (cast[pick] as Array)[3]
 			return {"type": type, "done": false, "cast": cast, "pick": pick, "answer": answer}
 		"crank":
-			var nums: Array = [2, 3, 4, 5] if n < 5 else [2, 3, 4, 5, 6]
-			nums.shuffle()
-			return {"type": type, "done": false, "rows": _rows(names, keyed, nums.slice(0, keyed)), "answer": nums[0], "turns": 0}
+			var nums: Array = Seeded.shuffled(r, [2, 3, 4, 5] if n < 5 else [2, 3, 4, 5, 6])
+			return {"type": type, "done": false, "rows": _rows(names, keyed, nums.slice(0, keyed), r), "answer": nums[0], "turns": 0}
 		"canister":
-			var spot := randi() % CAN_SPOTS.size()
+			var spot := r.randi() % CAN_SPOTS.size()
 			return {"type": type, "done": false, "spot": spot, "pos": CAN_SPOTS[spot], "carrier": -1}
 		"pipe":
-			return {"type": type, "done": false, "spot": randi() % PIPE_SPOTS.size(), "progress": 0.0}
+			return {"type": type, "done": false, "spot": r.randi() % PIPE_SPOTS.size(), "progress": 0.0}
 		"bolts":
-			var spots: Array = range(BOLT_SPOTS.size())
-			spots.shuffle()
+			var spots: Array = Seeded.shuffled(r, range(BOLT_SPOTS.size()))
 			return {"type": type, "done": false, "spots": spots.slice(0, 3), "got": [false, false, false]}
 		"paint":
-			return {"type": type, "done": false, "answer": randi() % COLORS.size(), "carrier": -1, "carry": -1}
+			return {"type": type, "done": false, "answer": r.randi() % COLORS.size(), "carrier": -1, "carry": -1}
 		"cat":
-			var start: Vector3 = BOLT_SPOTS[randi() % BOLT_SPOTS.size()]
+			var start: Vector3 = BOLT_SPOTS[r.randi() % BOLT_SPOTS.size()]
 			return {"type": type, "done": false, "pos": start, "carrier": -1, "tired": 0.0}
 	return {"type": type, "done": true}
 
