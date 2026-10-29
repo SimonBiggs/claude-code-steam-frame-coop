@@ -727,7 +727,7 @@ func hit_monster(id: int, slot: int, at: Vector3, src: String = "") -> bool:
 	if not monsters.mons.has(id):
 		return false
 	var kind: int = monsters.mons[id]["kind"]
-	var res := monsters.hit(id, 1 + _lvl("mighty") if kind == Monsters.GIANT else 1)
+	var res := monsters.hit(id, 1.0 + 0.5 * _lvl("mighty") if kind == Monsters.GIANT else 1.0)
 	if res != "" and not src in ["splash", "spin", ""]:
 		_skill_followups(id, slot, at, src)
 	if res == "":
@@ -748,6 +748,7 @@ func hit_monster(id: int, slot: int, at: Vector3, src: String = "") -> bool:
 	return true
 
 
+## (MIGHTY: each hit on the giant counts 1.5 / 2 / 2.5.)
 ## Host: what the party's skills add to a hit: BIG FIRE splashes, ICE freezes, SPIN (the VR sword) whirls.
 func _skill_followups(id: int, slot: int, at: Vector3, src: String) -> void:
 	var splash := _lvl("splash")
@@ -762,7 +763,8 @@ func _skill_followups(id: int, slot: int, at: Vector3, src: String) -> void:
 		var rad2 := 1.5 + 0.5 * ice
 		for other2 in monsters.mons.keys():
 			var c2: Vector3 = monsters.center_of(other2)
-			if c2.distance_to(at) < rad2 and not monsters.frozen(int(other2)):
+			# (Never the giant: one TV hero tapping A would keep him frozen for good, and he'd never stomp.)
+			if c2.distance_to(at) < rad2 and not monsters.frozen(int(other2)) and int(monsters.mons[other2]["kind"]) != Monsters.GIANT:
 				monsters.freeze(int(other2), 1.5 + ice)
 				sparkle_all(c2, Color(0.7, 0.95, 1.0), 16)
 		sound_at("ding", at, -8.0, 2.2)

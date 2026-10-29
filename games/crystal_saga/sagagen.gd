@@ -56,7 +56,7 @@ static func generate(seed_value: int, tier: int) -> Dictionary:
 	var waves: Array = [[], _forest_waves(Seeded.rng(seed_value, "w1"), tier, props), _cave_waves(Seeded.rng(seed_value, "w2"), tier, props), [], []]
 	return {"seed": seed_value, "tier": tier, "names": names, "leaf": LEAVES[lr.randi() % LEAVES.size()],
 		"gem": GEMS[lr.randi() % GEMS.size()], "giant": g, "props": props, "waves": waves,
-		"giant_hits": [12 + 2 * tier, 2, 14, 26 + 2 * tier], "speed": 1.0 + 0.07 * tier,
+		"giant_hits": [14 + 2 * tier, 2, 16, 28 + 2 * tier], "speed": 1.0 + 0.07 * tier,
 		"stomp": [4.5 - 0.3 * tier, 6.5 - 0.4 * tier]}
 
 

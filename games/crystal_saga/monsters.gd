@@ -163,7 +163,7 @@ func frozen(id: int) -> bool:
 
 ## Host: a hit. Returns "poof" (gone), "hit" (the Giant's mist shrank) or "" (too soon again).
 ## power: how much the Giant's mist shrinks (the MIGHTY sword trick makes it more).
-func hit(id: int, power: int = 1) -> String:
+func hit(id: int, power: float = 1.0) -> String:
 	if not mons.has(id):
 		return ""
 	var m: Dictionary = mons[id]
@@ -173,10 +173,10 @@ func hit(id: int, power: int = 1) -> String:
 	if float(m["cd"]) > 0.0:
 		return ""
 	m["cd"] = 0.45
-	m["hits"] = int(m["hits"]) + maxi(1, power)
+	m["hits"] = float(m["hits"]) + maxf(1.0, power)
 	m["sz"] = maxf(0.0, 1.0 - float(m["hits"]) / float(giant_hits))
 	m["anim"].hurt(Color(1, 1, 1))
-	if int(m["hits"]) >= giant_hits:
+	if float(m["hits"]) >= giant_hits - 0.01:
 		remove(id)
 		return "poof"
 	return "hit"
