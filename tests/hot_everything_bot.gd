@@ -32,7 +32,7 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	if OS.get_environment("BOT_OWN_COPY") != "1":
 		print("BOT ASSERT FAILED: this bot changes game files: run it with tools/hot-everything-test")
-		get_tree().quit(1)
+		preload("res://tests/bot_end.gd").quit_quietly(get_tree(), 1)
 		return
 	reg_orig = FileAccess.get_file_as_string(REG)
 	impl_orig = FileAccess.get_file_as_string(IMPL)
@@ -135,4 +135,4 @@ func _process(delta: float) -> void:
 		var i := _impl()
 		print("HOT BOT: bridge reload stats %s" % (i.get("reload_stats") if i else "?"))
 		print("BOT RESULT: %s" % ("PASS" if failures == 0 else "FAIL"))
-		get_tree().quit(0 if failures == 0 else 1)
+		preload("res://tests/bot_end.gd").quit_quietly(get_tree(), 0 if failures == 0 else 1)

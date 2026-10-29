@@ -199,7 +199,7 @@ func _end_run(mode: String) -> void:
 		mode, races, tracks_seen.size(), gen, ",".join(PackedStringArray(kinds_seen.keys())), splits_seen, shortcut_uses,
 		main.story_count, main.hats_won, logged_races])
 	print("BOT RESULT: %s" % ("PASS" if fails.is_empty() else "FAIL"))
-	get_tree().quit(0 if fails.is_empty() else 1)
+	preload("res://tests/bot_end.gd").quit_quietly(get_tree(), 0 if fails.is_empty() else 1)
 
 
 func _join_players(mode: String) -> void:

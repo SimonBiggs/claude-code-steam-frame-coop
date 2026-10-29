@@ -147,7 +147,7 @@ func _count() -> void:
 	var c := {"mesh": 0, "multimesh": 0, "label": 0, "particles": 0, "lights": 0}
 	_count_node(main, mask, c)
 	print("COUNT ", c, " modules=", main.modules.size())
-	get_tree().quit()
+	preload("res://tests/bot_end.gd").quit_quietly(get_tree())
 
 
 func _count_node(n: Node, mask: int, c: Dictionary) -> void:
@@ -628,7 +628,7 @@ func _simple_checks(delta: float) -> void:
 				if not checks[k]:
 					failed.append(k)
 			print("Bot: simple checks %d passed, %d failed %s" % [checks.size() - failed.size(), failed.size(), str(failed)])
-			get_tree().quit()
+			preload("res://tests/bot_end.gd").quit_quietly(get_tree())
 
 
 ## Host / local: Sprocket, Rocket Row, parts and TODAY'S ROCKET (rocketgen.gd, museum.gd, sprocket.gd).
