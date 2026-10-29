@@ -28,6 +28,11 @@ var wob := 0.0
 var wob_v := 0.0
 
 
+## Stand on this spot in the current garden bed (world.gd layout).
+func place() -> void:
+	position = W.spot_pos(spot)
+
+
 static func head_pos(i: int, st: Dictionary) -> Vector3:
 	var k: int = st.get("kind", -1)
 	if k < 0:
@@ -38,7 +43,7 @@ static func head_pos(i: int, st: Dictionary) -> Vector3:
 
 
 func _ready() -> void:
-	position = W.spot_pos(spot)
+	place()
 	var soil := W.cmat(Color(0.3, 0.2, 0.13))
 	mound = W.mesh_node(self, W.sphere(0.22, 10), soil, Vector3(0, 0.0, 0), Vector3(1.0, 0.3, 1.0))
 	var green := W.cmat(Color(0.3, 0.68, 0.28))

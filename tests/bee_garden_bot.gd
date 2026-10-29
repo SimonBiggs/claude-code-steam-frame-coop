@@ -57,7 +57,7 @@ var max_pests := 0
 var max_kinds := 0
 var simple_reported := false
 var cues := {}  # simple mode: picture cues seen / learned
-const HEADLINES := "^(BEE GARDEN|BUZZ BUZZ!|BUZZ! P\\d|HOORAY!|PAUSED|Connecting to the gardener…)$"
+const HEADLINES := "^(BEE GARDEN|BUZZ BUZZ!|BUZZ! P\\d|HOORAY!|PAUSED|TODAY'S GARDEN|Connecting to the gardener…)$"
 var headline_re := RegEx.create_from_string(HEADLINES)
 var plug_phase := 0
 # fake VR gardener: waypoints [grab-point position, trigger 0/1, pitch, hold seconds]
@@ -73,6 +73,7 @@ var vr_tasks_done := 0
 func _ready() -> void:
 	preload("res://tests/bot_end.gd").arm(self)  # end by itself in networked runs
 	main = load("res://games/bee_garden/main.tscn").instantiate()
+	main.fresh_save = not OS.has_environment("BEE_KEEP_SAVE")  # a brand-new family garden (BEE_KEEP_SAVE=1: keep the last one)
 	add_child(main)
 
 
@@ -462,7 +463,7 @@ func _simple_checks() -> void:
 	if main.props != null and (absf(main.props.chime_ang) > 0.05 or absf(main.props.gnome_ang) > 0.05):
 		events_seen["props_moving"] = true  # on the TV: the snapshots carry the props
 	max_kinds = maxi(max_kinds, int(main.seed_kinds))
-	if main.event != "" and main.event != "rain" and not events_seen.has("bad_" + main.event):
+	if main.event != "" and main.event != "rain" and main.event != "golden" and not events_seen.has("bad_" + main.event):
 		events_seen["bad_" + main.event] = true
 		print("Bot: SIMPLE FAIL: event %s should be off" % main.event)
 	if main.game_over and not events_seen.has("bad_over"):

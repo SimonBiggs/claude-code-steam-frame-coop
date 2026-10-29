@@ -49,7 +49,19 @@ const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV p
 ##    a down arrow / drop / up arrow while the ghost glove shows planting / watering / picking. The
 ##    glove's practice (glowing ring) repeats until the gardener has planted twice and watered twice,
 ##    and its picking demo stops after two picks. PAUSED has no sentence.
-##  - Text: titles only (BUZZ BUZZ!, BUZZ! P3, HOORAY!, PAUSED); each TV view's corner says P2 etc.
+##  - Text: titles only (BUZZ BUZZ!, BUZZ! P3, HOORAY!, PAUSED, TODAY'S GARDEN); each TV view's corner says P2 etc.
+##
+## STORY + SEEDED GARDENS (story.gd, gardengen.gd, bedview.gd, jarshelf.gd): QUEEN BEA sits on the hive roof.
+##  - Every session plants a seeded garden bed: where the 12 spots sit round a little pond, stepping stones,
+##    rocks or toadstools, and which flowers already bloom. The first garden each day is TODAY'S GARDEN (the
+##    same bed on every machine); later ones come from the family's own world seed (saved).
+##  - Every round has a seeded plan: weather (sun, a shower, two showers, a hot day that dries the soil),
+##    Queen Bea's favourite flower (a picture card; its pollen makes a drop of extra honey), gentle aphid
+##    visits from round 3 (they nibble a flower until a bee bumps them or the gardener shoos them, or they
+##    get bored), a golden flower from round 4, and a honey goal the validator proved fair.
+##  - Saved and growing: every full round's jars go on Queen Bea's JAR SHELF behind the hive (it fills, then
+##    the jars turn gold), new seeds arrive as it fills (sunflowers at 4 jars, sun lilies at 20), and the
+##    decorations that moved in stay. One RUN telemetry line per round (and on quit).
 
 const W := preload("res://games/bee_garden/world.gd")
 const GardenerScript := preload("res://games/bee_garden/gardener.gd")
@@ -68,6 +80,14 @@ const PropsScript := preload("res://games/bee_garden/props.gd")
 const HelpersScript := preload("res://games/bee_garden/helpers.gd")
 const CueScript := preload("res://games/bee_garden/cue.gd")
 const UiKit := preload("res://core/ui_kit.gd")
+const GardenGen := preload("res://games/bee_garden/gardengen.gd")
+const Story := preload("res://games/bee_garden/story.gd")
+const BedViewScript := preload("res://games/bee_garden/bedview.gd")
+const JarShelfScript := preload("res://games/bee_garden/jarshelf.gd")
+const Save := preload("res://core/save.gd")
+const Seeded := preload("res://core/seeded.gd")
+const Telemetry := preload("res://core/telemetry.gd")
+const StoryCard := preload("res://core/story_card.gd")
 
 const SIMPLE_MODE := true
 const PRACTICE_SPOT := 10      # simple mode: the glowing ring where the first seed goes
@@ -193,6 +213,24 @@ var ambient: Array = []
 var amb_t := 0.0
 # Simple mode (host decides; the snapshots tell the TV)
 var simple := SIMPLE_MODE      # other scripts read main.simple
+## Story + seeded gardens (host owns the save; TVs rebuild the bed from garden_seed in the snapshot).
+var save: Save
+var fresh_save := false        # bots: a brand-new family garden
+var garden := {}               # gardengen.gd generate()
+var garden_seed := -1
+var today_garden := false
+var plan := {}                 # gardengen.gd day_plan() for this round
+var fav_kind := 0              # Queen Bea's favourite flower this round
+var weather := "sun"
+var shelf_jars := 0            # jars on Queen Bea's shelf (saved)
+var plan_rain := 0
+var plan_aphid := 0
+var golden_done := false
+var practice_spot := PRACTICE_SPOT
+var bedview: Node3D
+var jarshelf: Node3D
+var vr_story: Node3D
+var run_info := {}             # this round's telemetry
 var practice_g := "seed" if SIMPLE_MODE else "done"   # gardener practice: seed -> water -> done
 var glow_spot := PRACTICE_SPOT if SIMPLE_MODE else -1  # the glowing ring (plant / water here)
 var halo_spot := PRACTICE_FLOWER if SIMPLE_MODE else -1  # the bees' glowing flower
@@ -225,7 +263,24 @@ func _ready() -> void:
 	randomize()
 	var xr := XRServer.find_interface("OpenXR")
 	vr_on = xr != null and xr.is_initialized() and not OS.has_environment("DUO_JOIN")
+	W.layout = []  # (static: a previous run's garden must not leak into this one)
 	W.build(self, vr_on)
+	bedview = BedViewScript.new()
+	bedview.name = "Bed"
+	add_child(bedview)
+	jarshelf = JarShelfScript.new()
+	add_child(jarshelf)
+	save = Save.new()
+	save.game_id = Story.GAME_ID
+	save.defaults = Story.save_defaults()
+	add_child(save)
+	if fresh_save or OS.has_environment("BEE_FRESH"):
+		save.data = Story.save_defaults().duplicate(true)
+	if int(save.data.world) < 0:
+		save.data.world = Seeded.fresh_seed()  # this family's own gardens
+		save.mark_dirty()
+	shelf_jars = int(save.data.jars)
+	jarshelf.set_jars(shelf_jars)
 	sun = get_node("Sun")
 	sun_ball = get_node("SunBall")
 	sign_label = get_node("Sign")
@@ -233,8 +288,8 @@ func _ready() -> void:
 	_build_plants()
 	_build_jars()
 	if SIMPLE_MODE:
-		decor_count = 2  # the gnome and the bird bath are touchable props from the start (props.gd)
-		decor_built = 2
+		decor_built = 2  # the gnome and the bird bath are touchable props from the start (props.gd)
+		decor_count = clampi(int(save.data.decor), 2, W.DECOR.size())  # the rest that moved in stay (saved)
 		props = PropsScript.new()
 		props.main = self
 		add_child(props)
@@ -288,6 +343,7 @@ func _setup_game(mode: String) -> void:
 	elif mode == "client":
 		players[1].set_meta(ClassicSeats.WANT, true)  # ask the host for P2's bee (it may hand out another one)
 	if mode != "client":
+		_new_garden()
 		_reset_garden()
 	ready_to_play = true
 	_ensure_join_listener()
@@ -566,6 +622,15 @@ func _add_view(p) -> SubViewport:
 	vp.msaa_3d = Viewport.MSAA_2X
 	vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA
 	container.add_child(vp)
+	# Story cards (Queen Bea) slide in at the top of each view.
+	var story_layer := CanvasLayer.new()
+	story_layer.layer = 5
+	vp.add_child(story_layer)
+	var story_root := Control.new()
+	story_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	story_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	story_layer.add_child(story_root)
+	p.set_meta("story_root", story_root)
 	return vp
 
 
@@ -875,6 +940,76 @@ func mist(from: Vector3, to: Vector3) -> void:
 
 # --- Garden state (host) -------------------------------------------------------
 
+## Host: plant this session's seeded garden bed (TODAY'S GARDEN first each day, then the family's own).
+func _new_garden() -> void:
+	var gs: Array = Story.garden_seed(save.data)
+	today_garden = bool(gs[1])
+	if OS.has_environment("BEE_GARDEN_SEED"):
+		gs[0] = int(OS.get_environment("BEE_GARDEN_SEED"))  # tests: a chosen garden
+	if today_garden:
+		save.data.daily = Seeded.today()
+	else:
+		save.data.gardens = int(save.data.gardens) + 1
+	save.mark_dirty()
+	_apply_garden(GardenGen.generate(int(gs[0]), Story.spec(save.data)))
+	print("Queen Bea's garden: %s %d (%s, %d features, practice spot %d, %d blooming), %d jars on the shelf, %d rounds ever, decor %d" % [
+		"TODAY'S GARDEN" if today_garden else "garden", garden_seed, garden.plan, (garden.features as Array).size(), int(garden.practice),
+		(garden.blooms as Array).size(), int(save.data.jars), int(save.data.rounds), int(save.data.decor)])
+
+
+## Lay out the bed (both machines): spots, plants, pond / stones / rocks / toadstools.
+func _apply_garden(g: Dictionary) -> void:
+	garden = g
+	garden_seed = int(g.seed)
+	W.layout = g.spots
+	for pn in plant_nodes:
+		pn.place()
+	bedview.show_garden(g)
+
+
+## A story beat: Queen Bea (or a flower / jar picture) and a few words, on every screen.
+func _story(beat: Dictionary) -> void:
+	if net != null and net.mode != "client":
+		net.event("story", [beat.get("who", ""), beat.get("line", ""), beat.get("pic", ""), (beat.get("color", Story.QUEEN_COLOR) as Color).to_html()])
+	show_story(beat)
+
+
+func show_story(beat: Dictionary) -> void:
+	var b := beat.duplicate()
+	b["duration"] = float(b.get("duration", 3.5))
+	var roots: Array = []
+	for p in players:
+		if p.has_meta("story_root") and p.has_meta("view") and (p.get_meta("view") as Control).visible:
+			roots.append(p.get_meta("story_root"))
+	StoryCard.show(roots, b)
+	if gardener != null and gardener.vr and gardener.xr_camera != null:
+		if vr_story != null and is_instance_valid(vr_story):
+			vr_story.queue_free()
+		vr_story = StoryCard.show_vr(self, gardener.xr_camera, b)
+		if vr_story != null:
+			# The garden is a diorama (XR world scale W.S): the card scales with it, VR eyes only.
+			vr_story.distance *= W.S
+			vr_story.height *= W.S
+			vr_story.scale = Vector3.ONE * W.S
+			for c in vr_story.get_children():
+				(c as VisualInstance3D).layers = VR_LAYER
+			UiKit.vr_place(vr_story, gardener.xr_camera, vr_story.distance, vr_story.height)
+	print("Story: %s: %s (%s)" % [b.get("who", ""), b.get("line", ""), b.get("pic", "")])
+
+
+## One RUN line per round (or quit mid-round): how the family really plays (balance).
+func _telemetry(end: String) -> void:
+	if run_info.is_empty() or net == null or net.mode == "client":
+		return
+	var info := run_info.duplicate()
+	info.merge({"end": end, "mode": net.mode, "vr": gardener != null and gardener.vr, "bees": active_bee_count(),
+		"bees_start": int(plan.get("bees", 0)), "honey": honey, "jars": jar_count(), "played_s": int(round_t),
+		"planted": int(gardener_day.get("planted", 0)), "stats": stats.duplicate(), "shelf": int(save.data.jars),
+		"rounds_ever": int(save.data.rounds), "decor": decor_count}, true)
+	Telemetry.run(Story.GAME_ID, info)
+	run_info = {}
+
+
 func _empty_spot() -> Dictionary:
 	return {"kind": -1, "growth": 0.0, "water": 0.0, "bloom": false, "pollen_t": 0.0, "ready": false,
 		"fruit": -1.0, "bug": false, "harvests": 0}
@@ -885,13 +1020,19 @@ func _reset_garden() -> void:
 	for i in W.SPOTS:
 		spots.append(_empty_spot())
 	if SIMPLE_MODE:
-		# Two daisies already bloom (the bees' practice flower glows); the glowing ring waits for a seed.
-		for i in [PRACTICE_FLOWER, 2]:
-			var d: Dictionary = spots[i]
-			d.kind = 0
+		# The seeded garden's flowers already bloom (the bees' practice flower glows); the glowing ring waits
+		# for a seed (gardengen.gd: the empty spot nearest the gardener).
+		for b in garden.get("blooms", [[PRACTICE_FLOWER, 0], [2, 0]]):
+			var d: Dictionary = spots[int(b[0])]
+			d.kind = int(b[1])
 			d.growth = 1.0
 			d.water = 1.0
 			d.bloom = true
+		practice_spot = int(garden.get("practice", PRACTICE_SPOT))
+		if practice_g == "seed":
+			glow_spot = practice_spot
+		if halo_spot >= 0:
+			halo_spot = int(garden.get("halo", PRACTICE_FLOWER))
 		return
 	# A few flowers are already blooming so the bees can start right away; the sun lily needs water.
 	for e in [[1, 0], [2, 1], [5, 0], [6, 0], [10, 1]]:
@@ -1243,7 +1384,7 @@ func _sim(delta: float) -> void:
 	var season := (maxi(day, 1) - 1) % 4
 	var drain := 0.02 * (1.4 if season == 1 else 1.0)
 	if SIMPLE_MODE:
-		drain = 0.012  # gentle: a watered flower stays happy for over a minute
+		drain = 0.012 * (1.7 if weather == "hot" else 1.0)  # gentle: a watered flower stays happy for over a minute
 	for s in spots:
 		s.bug = false
 	for p in get_tree().get_nodes_in_group("pests"):
@@ -1296,7 +1437,7 @@ func _host_bees(delta: float) -> void:
 		var pos: Vector3 = b.global_position
 		# Bees bump wasps away (no stings, just a startled wasp).
 		for p in get_tree().get_nodes_in_group("pests"):
-			if p.kind == "wasp" and not p.is_fleeing() and not p.is_queued_for_deletion() and pos.distance_to(p.global_position) < 0.5:
+			if (p.kind == "wasp" or SIMPLE_MODE) and not p.is_fleeing() and not p.is_queued_for_deletion() and pos.distance_to(p.global_position) < 0.5:
 				p.shoo(pos)
 				_bee_stat(b.index, "wasps", 1)
 				_wish_add("shoo")
@@ -1401,6 +1542,9 @@ func _deliver(b) -> void:
 			extra.append("TEAM BUZZ +2")
 			break
 	last_delivery[b.index] = now
+	if SIMPLE_MODE and (int(b.pollen_kinds) & (1 << fav_kind)) != 0:
+		v += 1  # Queen Bea's favourite flower today: a drop of extra honey
+		burst(W.HIVE_ENTRY + Vector3.UP * 0.4, W.KINDS[fav_kind].petal, 10, 0.05)
 	if rainbow_t > 0.0:
 		v *= 2
 		extra.append("RAINBOW x2")
@@ -1560,7 +1704,8 @@ func _start_event(kind: String) -> void:
 			event_t = GOLDEN_TIME
 			sound("golden", 0.0)
 			burst(head_pos(golden_spot), Color(1.0, 0.9, 0.3), 24, 0.07)
-			_show_center("A RARE GOLDEN FLOWER!\nBees: its sparkly GOLDEN pollen makes LOTS of honey - quick!", 3.5)
+			if not SIMPLE_MODE:
+				_show_center("A RARE GOLDEN FLOWER!\nBees: its sparkly GOLDEN pollen makes LOTS of honey - quick!", 3.5)
 		"raid":
 			raid_left = 3
 			event_t = RAID_TIME
@@ -1683,17 +1828,40 @@ func _start_round_simple(n: int) -> void:
 	round_t = 0.0
 	rain_done = false
 	day_bees = active_bee_count()
-	target = mini(12 + 6 * (n - 1), 36)
 	phase = "intro"
 	phase_t = 2.0
 	event = ""
+	event_t = 0.0
 	rain_t = 0.0
 	rainbow_t = 0.0
-	if n == 2:
-		seed_kinds = 2  # sunflower seeds appear in the tray (with a sparkle)
-		burst(W.tray_slot(1) + Vector3.UP * 0.3, Color(1.0, 0.85, 0.2), 20, 0.06)
-	print("Round %d: fill %d jars = %d honey, %d seed kinds" % [n, jar_count(), target, seed_kinds])
+	golden_spot = -1
+	# Today's seeded plan (gardengen.gd): weather, Queen Bea's favourite, aphids, a golden flower, the goal.
+	plan = GardenGen.day_plan(garden, n, Story.spec(save.data, active_bee_count()))
+	target = int(plan.target)
+	fav_kind = int(plan.fav)
+	weather = String(plan.weather)
+	plan_rain = 0
+	plan_aphid = 0
+	golden_done = false
+	var kinds := Story.kinds_for(int(save.data.jars))
+	if kinds > seed_kinds:
+		for k in range(seed_kinds, kinds):  # new seeds appear in the tray (with a sparkle)
+			burst(W.tray_slot(k) + Vector3.UP * 0.3, Color(1.0, 0.85, 0.2), 20, 0.06)
+	seed_kinds = kinds
+	run_info = {"round": n, "garden": garden_seed, "plan": String(garden.get("plan", "")), "today": today_garden,
+		"weather": weather, "fav": fav_kind, "target": target, "aphids": (plan.aphids as Array).size(),
+		"golden": float(plan.golden) >= 0.0, "kinds": seed_kinds, "jars_before": int(save.data.jars)}
+	print("Round %d: fill %d jars = %d honey, %d seed kinds, %s, Queen Bea loves %s (garden %d %s)" % [n, jar_count(), target,
+		seed_kinds, weather, W.KINDS[fav_kind].name, garden_seed, garden.get("plan", "")])
 	sound("bloom", 0.0, 0.8)
+	if n == 1:
+		if today_garden:
+			_show_center("TODAY'S GARDEN", 2.5)
+		_story({"who": Story.QUEEN, "line": Story.LINES.hello, "pic": "queenbee", "color": Story.QUEEN_COLOR})
+	else:
+		var kd: Dictionary = W.KINDS[fav_kind]
+		_story({"who": Story.QUEEN, "line": Story.LINES.fav if weather != "hot" else Story.LINES.hot,
+			"pic": Story.KIND_PICS[fav_kind] if weather != "hot" else "sun", "color": kd.petal if weather != "hot" else Color(1.0, 0.6, 0.2)})
 	# (No BEE GARDEN headline at the start: the garden's big sign already says it, so it read twice.)
 
 
@@ -1710,6 +1878,24 @@ func _round_complete_simple() -> void:
 		_end_event(true)
 	if day >= 2:
 		_unlock_decor()
+	# Queen Bea's shelf: this round's jars go up and stay (saved); new seeds arrive as it fills.
+	var kinds_before := Story.kinds_for(int(save.data.jars))
+	save.data.jars = int(save.data.jars) + jar_count()
+	save.data.rounds = int(save.data.rounds) + 1
+	save.data.best_round = maxi(int(save.data.best_round), day)
+	save.data.decor = maxi(int(save.data.decor), decor_count)
+	save.mark_dirty()
+	shelf_jars = int(save.data.jars)
+	jarshelf.set_jars(shelf_jars)
+	jarshelf.cheer()
+	if net:
+		net.event("cheer", [])
+	_telemetry("round")
+	var kinds_now := Story.kinds_for(shelf_jars)
+	if kinds_now > kinds_before:
+		_story({"who": Story.QUEEN, "line": Story.LINES.seeds, "pic": Story.KIND_PICS[kinds_now - 1], "color": W.KINDS[kinds_now - 1].petal})
+	else:
+		_story({"who": Story.QUEEN, "line": Story.LINES.jars, "pic": "honeyjar", "color": Story.QUEEN_COLOR})
 	_show_center("HOORAY!", 3.0)
 	if gardener.vr:
 		gardener.buzz_right(0.6)
@@ -1728,20 +1914,65 @@ func _host_update_simple(delta: float) -> void:
 					phase = "day"
 			elif phase == "day":
 				round_t += delta
-				# From round 3, a cosy rain shower once a round (then a rainbow). No text, no rules to learn.
+				# The round's seeded plan: rain showers (then a rainbow), aphid visits, a golden flower.
+				# No text, no rules to learn: the world shows it.
 				rain_t = maxf(0.0, rain_t - delta)
 				rainbow_t = maxf(0.0, rainbow_t - delta)
-				if day >= 3 and not rain_done and round_t > 40.0:
-					rain_done = true
-					_start_event("rain")
-				if event == "rain" and rain_t <= 0.0:
-					_end_event(true)
+				_host_plan_simple(delta)
 				if honey >= target:
 					_round_complete_simple()
 			else:
 				phase_t -= delta
 				if phase_t <= 0.0:
 					_start_round_simple(day + 1)
+
+
+## Simple mode: run the round's seeded plan (gardengen.gd day_plan).
+func _host_plan_simple(delta: float) -> void:
+	if plan.is_empty():
+		return
+	var rains: Array = plan.rains
+	if event == "" and plan_rain < rains.size() and round_t >= float(rains[plan_rain]):
+		plan_rain += 1
+		rain_done = true
+		_start_event("rain")
+	if event == "rain" and rain_t <= 0.0:
+		_end_event(true)
+	var aphids: Array = plan.aphids
+	if plan_aphid < aphids.size() and round_t >= float(aphids[plan_aphid]):
+		plan_aphid += 1
+		_spawn_aphid()
+	if event == "" and not golden_done and float(plan.golden) >= 0.0 and round_t >= float(plan.golden):
+		golden_done = true
+		_start_event("golden")
+		if event == "golden":
+			_story({"who": Story.QUEEN, "line": Story.LINES.golden, "pic": "queenbee", "color": Color(1.0, 0.9, 0.35)})
+	if event == "golden":
+		event_t -= delta
+		if event_t <= 0.0:
+			_end_event(true)
+
+
+## A gentle aphid visit (simple mode): it nibbles a flower until a bee bumps it or the gardener shoos it,
+## or it gets bored and flies off on its own (no harm, no fail).
+func _spawn_aphid() -> void:
+	var tgt := pick_aphid_target()
+	if tgt < 0:
+		return
+	var p := PestScript.new()
+	p.kind = "aphid"
+	p.main = self
+	p.target = tgt
+	p.leave_after = 18.0
+	p.net_id = next_net_id()
+	p.position = Vector3(randf_range(-6.0, 6.0), 3.5, -7.0)
+	add_child(p)
+	sound("buzz", -8.0, 1.4)
+	print("An aphid arrived (spot %d)" % tgt)
+	if not bool(save.data.get("seen_aphid", false)):
+		save.data["seen_aphid"] = true
+		save.mark_dirty()
+		_story({"who": Story.QUEEN, "line": Story.LINES.aphid, "pic": "queenbee", "color": Color(0.5, 0.85, 0.25)})
 
 
 func _start_day(n: int) -> void:
@@ -2013,6 +2244,10 @@ func _update_sky() -> void:
 	env.background_color = sky
 	sun.light_color = Color(1.0, 0.95, 0.82).lerp(Color(1.0, 0.65, 0.4), evening)
 	sun.light_energy = lerpf(1.15, 0.7, evening)
+	if weather == "hot":
+		sun.light_color = Color(1.0, 0.85, 0.6)
+		sun.light_energy = 1.4
+		env.background_color = Color(0.7, 0.85, 1.0)
 	var season := (maxi(day, 1) - 1) % 4
 	if season != season_shown:
 		season_shown = season
@@ -2132,7 +2367,7 @@ func _practice_next() -> void:
 		var best_d := INF
 		for i in spots.size():
 			if int(spots[i].kind) < 0:
-				var d := W.spot_pos(i).distance_to(W.spot_pos(PRACTICE_SPOT))
+				var d := W.spot_pos(i).distance_to(W.spot_pos(practice_spot))
 				if d < best_d:
 					best_d = d
 					best = i
@@ -2276,7 +2511,8 @@ func make_snapshot() -> Array:
 			pe.append(p.net_item())
 	return [phase, day, day_t, honey, target, total_honey, days_done, sp, ps, pe, game_over, basket_count,
 		event, rain_t, rainbow_t, golden_spot, queen_kind, decor_count, wish, wish_progress, wish_done,
-		practice_g, glow_spot, halo_spot, seed_kinds, props.net_state() if props != null else PackedFloat32Array()]
+		practice_g, glow_spot, halo_spot, seed_kinds, props.net_state() if props != null else PackedFloat32Array(),
+		garden_seed, shelf_jars, fav_kind, weather]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -2329,6 +2565,13 @@ func apply_snapshot(s: Array) -> void:
 		seed_kinds = s[24]
 		if props != null:
 			props.apply_net(s[25])
+	if s.size() >= 30:
+		if int(s[26]) != garden_seed and int(s[26]) >= 0:
+			_apply_garden(GardenGen.generate(int(s[26])))  # the bed's layout depends only on the seed
+		shelf_jars = s[27]
+		jarshelf.set_jars(shelf_jars)
+		fav_kind = s[28]
+		weather = s[29]
 	for i in spots.size():
 		spots[i]["golden"] = i == golden_spot
 
@@ -2380,6 +2623,10 @@ func apply_event(kind: String, args: Array) -> void:
 			var pi: int = args[0]
 			if pi >= 0 and pi < plant_nodes.size():
 				plant_nodes[pi].poke(args[1])
+		"story":
+			show_story({"who": args[0], "line": args[1], "pic": args[2], "color": Color.html(String(args[3]))})
+		"cheer":
+			jarshelf.cheer()
 		"remote_pause":
 			get_tree().paused = args[0]
 			_set_pause_banner(args[0], "The gardener paused the game")
@@ -2506,6 +2753,8 @@ func _update_hud() -> void:
 
 
 func _exit_tree() -> void:
+	if phase == "day" or phase == "intro":
+		_telemetry("quit")
 	if Engine.has_meta("bg_mats"):
 		Engine.remove_meta("bg_mats")  # shared material cache: rebuilt by the next run
 	XRServer.world_scale = 1.0  # XR world scale is global: don't leave other games diorama-sized
