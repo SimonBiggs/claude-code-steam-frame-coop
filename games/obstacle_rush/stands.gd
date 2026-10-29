@@ -17,7 +17,8 @@ const TABLE_Y := -3.5  ## (giant.gd TABLE_Y)
 const STAND_X: Array[float] = [0.0, -7.2, 7.2, -14.4, 14.4]
 const STAND_W := 6.6
 const PER_ROW := Story.SEATS / 2
-const ROW_Y: Array[float] = [2.3, 3.0]  ## seat tops above the table
+const ROW_Y: Array[float] = [1.7, 2.4]  ## seat tops above the table (low: the TV camera looks over the stands)
+const RAIL := 0.5  ## the back rail above the back row
 const ROW_Z: Array[float] = [-5.1, -6.1]
 const FAN_S := 0.78
 const STAND_COLS: Array[Color] = [Color(0.55, 0.8, 1.0), Color(1.0, 0.6, 0.75), Color(0.6, 0.9, 0.62), Color(1.0, 0.85, 0.45), Color(0.8, 0.65, 1.0)]
@@ -158,19 +159,23 @@ func _build_static() -> void:
 			var z := ROW_Z[row]
 			b.box(Vector3(STAND_W, h, 1.0), MeshKit.at(Vector3(x, TABLE_Y + h * 0.5, z)), col if row == 0 else col.darkened(0.12))
 			b.box(Vector3(STAND_W + 0.1, 0.1, 1.05), MeshKit.at(Vector3(x, TABLE_Y + h + 0.03, z)), trim)
-		b.box(Vector3(STAND_W, ROW_Y[1] + 1.4, 0.2), MeshKit.at(Vector3(x, TABLE_Y + (ROW_Y[1] + 1.4) * 0.5, ROW_Z[1] - 0.6)), col.darkened(0.25))
-		b.box(Vector3(STAND_W + 0.2, 0.18, 0.3), MeshKit.at(Vector3(x, TABLE_Y + ROW_Y[1] + 1.45, ROW_Z[1] - 0.6)), trim)
+		var rail_y := TABLE_Y + ROW_Y[1] + RAIL
+		b.box(Vector3(STAND_W, ROW_Y[1] + RAIL, 0.2), MeshKit.at(Vector3(x, TABLE_Y + (ROW_Y[1] + RAIL) * 0.5, ROW_Z[1] - 0.6)), col.darkened(0.25))
+		b.box(Vector3(STAND_W + 0.2, 0.16, 0.3), MeshKit.at(Vector3(x, rail_y + 0.05, ROW_Z[1] - 0.6)), trim)
+		for s in [-1.0, 1.0]:  # end posts (the bunting string and the balloons hang on them)
+			b.cylinder(0.06, 0.06, 1.0, MeshKit.at(Vector3(x + s * (STAND_W * 0.5 - 0.05), rail_y + 0.5, ROW_Z[1] - 0.6)), trim, 6)
 		if unlocked.has("flags"):  # bunting along the back
+			b.tube(Vector3(x - STAND_W * 0.5, rail_y + 0.95, ROW_Z[1] - 0.6), Vector3(x + STAND_W * 0.5, rail_y + 0.95, ROW_Z[1] - 0.6), 0.015, 0.015, Color(0.95, 0.95, 0.95), 4)
 			for k in 11:
 				var fx := x - STAND_W * 0.5 + 0.3 + k * (STAND_W - 0.6) / 10.0
 				var fc := STAND_COLS[(k + st) % STAND_COLS.size()]
-				b.cone(0.22, 0.45, MeshKit.at(Vector3(fx, TABLE_Y + ROW_Y[1] + 1.15, ROW_Z[1] - 0.45), Vector3(1.0, 1.0, 0.25), Vector3(PI, 0, 0)), fc, 3)
+				b.cone(0.17, 0.34, MeshKit.at(Vector3(fx, rail_y + 0.78, ROW_Z[1] - 0.6), Vector3(1.0, 1.0, 0.25), Vector3(PI, 0, 0)), fc, 3)
 		if unlocked.has("band") and st == 0:  # a drum and a horn at the front of the centre stand
 			b.cylinder(0.55, 0.55, 0.6, MeshKit.at(Vector3(x - STAND_W * 0.5 - 0.7, TABLE_Y + 0.3, -5.0), Vector3.ONE, Vector3(PI * 0.5, 0, 0)), Color(0.95, 0.3, 0.35), 16)
 			b.cylinder(0.5, 0.5, 0.62, MeshKit.at(Vector3(x - STAND_W * 0.5 - 0.7, TABLE_Y + 0.3, -5.0), Vector3.ONE, Vector3(PI * 0.5, 0, 0)), Color(0.98, 0.97, 0.94), 16)
 			b.cone(0.35, 0.9, MeshKit.at(Vector3(x + STAND_W * 0.5 + 0.7, TABLE_Y + 0.9, -5.0), Vector3.ONE, Vector3(0, 0, PI * 0.5)), GOLD, 12, true)
 	if unlocked.has("trophy"):  # a giant golden cup on top of the centre stand
-		var tp := Vector3(0.0, TABLE_Y + ROW_Y[1] + 1.55, ROW_Z[1] - 0.6)
+		var tp := Vector3(0.0, TABLE_Y + ROW_Y[1] + RAIL + 0.1, ROW_Z[1] - 0.6)
 		b.cylinder(0.5, 0.7, 0.3, MeshKit.at(tp + Vector3(0, 0.15, 0)), GOLD, 16, true)
 		b.cylinder(0.12, 0.12, 0.6, MeshKit.at(tp + Vector3(0, 0.6, 0)), GOLD, 8, true)
 		b.cylinder(0.9, 0.35, 1.1, MeshKit.at(tp + Vector3(0, 1.45, 0)), GOLD, 18, true)
@@ -184,9 +189,9 @@ func _build_static() -> void:
 		var bb := MeshKit.Builder.new()
 		for st in built_stands:
 			for s in [-1.0, 1.0]:
-				var base := Vector3(STAND_X[st] + s * (STAND_W * 0.5 - 0.1), TABLE_Y + ROW_Y[1] + 1.5, ROW_Z[1] - 0.6)
+				var base := Vector3(STAND_X[st] + s * (STAND_W * 0.5 - 0.05), TABLE_Y + ROW_Y[1] + RAIL + 1.0, ROW_Z[1] - 0.6)
 				for k in 3:
-					var top := base + Vector3(s * 0.3 * (k - 1), 1.6 + k * 0.35, 0.2 * (k - 1))
+					var top := base + Vector3(s * 0.3 * (k - 1), 0.8 + k * 0.3, 0.2 * (k - 1))
 					bb.tube(base, top, 0.015, 0.015, Color(0.95, 0.95, 0.95), 4)
 					bb.ellipsoid(Vector3(0.32, 0.4, 0.32), MeshKit.at(top + Vector3(0, 0.38, 0)), STAND_COLS[(k + st * 2) % STAND_COLS.size()], 10)
 		deco.add_child(MeshKit.instance(bb.build(), false))

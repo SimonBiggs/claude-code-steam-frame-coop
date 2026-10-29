@@ -61,8 +61,8 @@ const GAME_ID := "obstacle_rush"
 const MIN_RUNNERS := 3
 const HOP_IN_TIME := 70.0  ## after this, runners still on the course hop to the flag by themselves
 const AFTER_FIRST := 35.0  ## ... or this long after the first person got there
-const FLAG_DOWN := 4.3  ## the board's flags (above the grandstand) ...
-const FLAG_UP := 7.6  ## ... and raised for a course done
+const FLAG_DOWN := 3.6  ## the board's flags (above the grandstand) ...
+const FLAG_UP := 7.0  ## ... and raised for a course done
 const TABLE_W := 42.0  ## the picnic table (coursegen.gd keeps courses within x -19..19)
 
 # --- The networking contract ---
@@ -188,6 +188,8 @@ func _setup(mode: String) -> void:
 			split.set_bubble(vr_rig.mirror)
 	party.allow_slot0 = mode != "client" and vr_rig == null
 	if mode != "client":
+		if force_shows < 0 and OS.has_environment("OR_SHOWS"):  # (tests, screenshots: OR_SHOWS=3 starts on seeded courses)
+			force_shows = int(OS.get_environment("OR_SHOWS"))
 		if force_shows >= 0:
 			save.data.shows = force_shows
 		net.state_set("fans", int(save.data.fans))
