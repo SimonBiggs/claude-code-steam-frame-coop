@@ -193,14 +193,14 @@ class Daemon:
                 continue
             waiting = any(j["t0"] < seg["t1"] and j["t1"] > seg["t0"] for j in pending) or \
                 any(st < seg["t1"] for c, st in open_vad if c != seg["chan"])
-            if waiting and time.time() - seg["t1"] < 20:
+            if waiting and self.now() - seg["t1"] < 20:
                 continue
             over = [s for s in done if s is not seg and s.get("status") == "ok" and s["t0"] < seg["t1"] and s["t1"] > seg["t0"]]
             for o in over:
                 ov = min(o["t1"], seg["t1"]) - max(o["t0"], seg["t0"])
                 if ov > 0.5 * min(o["t1"] - o["t0"], seg["t1"] - seg["t0"]) and W.similar(o["text"], seg["text"]) >= 0.6:
                     score = lambda s: (s["margin_db"] or 0) / 10 + s["logprob"] + s["conf"]
-                    loser = seg if score(seg) < score(o) else o
+                    loser = seg if o.get("status") == "emitted" or score(seg) < score(o) else o
                     loser["status"] = "dup"; self.stats["dups"] += 1
             if seg["status"] == "dup":
                 self.retire(seg)
@@ -211,12 +211,16 @@ class Daemon:
             seg["status"] = "emitted"
             self.retire(seg, keep=True)
 
+    def now(self):
+        """Engine time in replay, wall time live."""
+        return self.eng.k / W.FPS if getattr(self, "replaying", False) else time.time()
+
     def retire(self, seg, keep=False):
         with self.lock:
             if seg in self.done and not keep:
                 self.done.remove(seg)
             # emitted ones stay 30 s so later overlapping segments can see them
-            self.done = [s for s in self.done if not (s.get("status") == "emitted" and time.time() - s["t1"] > 30)]
+            self.done = [s for s in self.done if not (s.get("status") == "emitted" and self.now() - s["t1"] > 30)]
 
     def room_live(self):
         x, ok = self.src.read("room", time.time() - 12, 16000 * 10)
@@ -588,7 +592,7 @@ def cmd_test_synth(n_pairs):
             ref = ref_text(clean[d][i])
             sep = asr(eng.masked_audio(d, ka, kb))[0]
             raw = asr(mix[d][1][ka * W.HOP:kb * W.HOP])[0]
-            cl = asr(eng.masked_audio(d, ka, kb, use_mask=False) * 0 + clean[d][i][ka * W.HOP:kb * W.HOP])[0]
+            cl = asr(clean[d][i][ka * W.HOP:kb * W.HOP])[0]
             row[who] = dict(deck=d, ref=ref, wer_sep=W.wer(ref, sep), wer_raw_mix=W.wer(ref, raw), wer_clean_small=W.wer(ref, cl))
         results.append(row)
         print(f"pair {p + 1}: {da} + {db}: " + "  ".join(f"{k}: sep {v['wer_sep']:.0%} rawmix {v['wer_raw_mix']:.0%} clean {v['wer_clean_small']:.0%}" for k, v in row.items()), flush=True)

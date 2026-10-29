@@ -7,6 +7,11 @@ if [ "$1" = "--running" ]; then
   for p in $(pgrep -x claude); do
     tr '\0' ' ' < /proc/$p/cmdline | grep -q -- "--resume $id" && { echo $p; exit 0; }
   done
+  # The main conversation may be running as a Remote Control session (spawned by `claude rc` with its cloud id).
+  rid=$(cat ~/.claude/main-session-remote 2>/dev/null)
+  if [ -n "$rid" ]; then
+    for p in $(pgrep -f -- "--session-id $rid"); do echo $p; exit 0; done
+  fi
   # Grace period: the conversation file was written in the last 3 minutes (e.g. mid-restart, or the
   # current process was started some other way).
   f=~/.claude/projects/-home-deck/$id.jsonl
