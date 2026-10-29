@@ -29,7 +29,25 @@ const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV p
 ##    two practice targets; a MEGA SNOWBALL has a bobbing arrow over it. PAUSED has no sentence, and
 ##    the small WAVE n at the top hides while the big headline shows. Each cue goes after two goes
 ##    (cue_did / cue_learned).
+##
+## STORY + DEPTH (simple mode): BOBO the polar bear cub lives in the snowy village; each game is a SIEGE
+## made from a seed (siegegen.gd: the gates the snowmen march in from, which new kind each wave brings,
+## the gaps), and the snowmen want to pinch one of Bobo's things (cocoa, scarf, mittens, fish), shown on
+## picture cards (story_pictures.gd). Every game where a wave is beaten builds an IGLOO in Bobo's village
+## round the square (saved; igloos grow a stage each play-day, the more igloos the bigger the next siege).
+## TODAY'S BLIZZARD: the first game each day is the same siege on every machine and builds a golden
+## igloo. Telemetry: one RUN line per game and on quit. Networked: the host spawns the snowmen as before
+## and sends the village and the story cards as events (every machine builds the igloos itself).
 const SIMPLE_MODE := true
+const UiKit := preload("res://core/ui_kit.gd")
+const SiegeGen := preload("res://games/snowball_blitz/siegegen.gd")
+const Seeded := preload("res://core/seeded.gd")
+const Save := preload("res://core/save.gd")
+const Telemetry := preload("res://core/telemetry.gd")
+const StoryCard := preload("res://core/story_card.gd")
+const GAME_ID := "snowball_blitz"
+const VILLAGE_CHEERS := {1: "Our first igloo!", 5: "Five igloos!", 10: "Ten igloos!", 24: "A whole village!"}
+const KIND_PICS := {"snowman": "snowman", "sled": "sledman", "bunny": "bunny", "giant": "snowman", "balloon": "balloon", "king": "snowking", "yeti": "yeti"}
 const PropsScript := preload("res://games/snowball_blitz/props.gd")
 const GhostHandScript := preload("res://games/snowball_blitz/ghost_hand.gd")
 const VR_PRACTICE := 3  # glowing targets the VR player knocks over before the snowmen come
@@ -157,6 +175,20 @@ var vr_hits := 0
 var vr_target_t := 1.0
 var tv_given := {}  # player index -> true once their practice target appeared
 var simple_new_left := 0
+# --- Bobo's village + the seeded siege (host / local own them; TV machines get the village + cards) ---
+var save: Node
+var siege := {}
+var wave_spawned := 0  # spawns of this wave's plan used so far
+var built := false  # this game's igloo is built (once per game)
+var logged := false  # this game's RUN line is written
+var siege_t := 0.0
+var village: Node3D
+var village_list: Array = []  # [[built play-day, golden, waves beaten, want], ...]
+var village_days := 0
+var village_count := -1
+var village_resend := 0.0
+var story_queue: Array = []  # [line, pic, color]
+var story_t := 0.0
 
 
 func _ready() -> void:
@@ -212,6 +244,8 @@ func _setup_game(mode: String) -> void:
 	_ensure_party()
 	if SIMPLE_MODE:
 		_show_center("SNOWBALL BLITZ!", 2.5)
+		if mode != "client":
+			_start_siege()
 		return
 	if mode == "host":
 		_show_center("Waiting for the TV players to join…", 0.0)
@@ -942,6 +976,9 @@ func _pick_kind() -> String:
 
 
 func _spawn_wave_snowman() -> void:
+	if SIMPLE_MODE and not siege.is_empty():
+		_spawn_planned()
+		return
 	var best_pos := Vector3.ZERO
 	var best_d := -1.0
 	for attempt in 3:
@@ -962,8 +999,26 @@ func _spawn_wave_snowman() -> void:
 	_spawn_snowman(kind, best_pos)
 
 
-## Simple mode: mostly plain snowmen; this wave's new kind shows up a few times (it's guaranteed),
-## earlier waves' kinds join the mix. No shield snowmen (they need explaining).
+## Simple mode: the next snowman of this wave's seeded plan (siegegen.gd) walks in at its gate. A bigger
+## party gets extra snowmen: the plan goes round again from its start. Sets the gap to the next one.
+func _spawn_planned() -> void:
+	var plan := SiegeGen.wave_plan(siege, wave)
+	var spawns: Array = plan.spawns
+	var sp: Array = spawns[wave_spawned % spawns.size()]
+	wave_spawned += 1
+	var pos := SiegeGen.spawn_pos(plan, sp)
+	var kind := String(sp[1])
+	if kind == "bunny":
+		var side := Vector3(pos.z, 0.0, -pos.x).normalized()
+		for i in 3:
+			_spawn_snowman("bunny", pos + side * (i - 1) * 1.1)
+	else:
+		_spawn_snowman(kind, pos)
+	var nx: Array = spawns[wave_spawned % spawns.size()]
+	spawn_timer = float(nx[0]) / (1.0 + 0.15 * extra_players())
+
+
+## Simple mode without a siege (never in play; kept for old saves of the code): mostly plain snowmen.
 func _pick_simple_kind() -> String:
 	if simple_new_left > 0 and (randf() < 0.5 or to_spawn <= simple_new_left):
 		simple_new_left -= 1
@@ -978,31 +1033,29 @@ func _pick_simple_kind() -> String:
 
 
 func _simple_boss() -> String:
-	if wave == SIMPLE_FINALE:
-		return "yeti"
-	if wave == SIMPLE_KING or (wave > SIMPLE_FINALE and wave % 4 == 2):
-		return "king"
-	return ""
+	return SiegeGen.boss_for(wave)
 
 
 func _start_simple_wave() -> void:
 	wave += 1
 	in_break = false
-	var base: int = [3, 5, 6][wave - 1] if wave <= 3 else 5 + wave
-	to_spawn = int(base * (1.0 + 0.22 * extra_players()))
+	if siege.is_empty():
+		_start_siege()
+	var plan := SiegeGen.wave_plan(siege, wave)
+	to_spawn = int((plan.spawns as Array).size() * (1.0 + 0.22 * extra_players()))
+	wave_spawned = 0
 	simple_new_left = 0
-	if SIMPLE_NEW.has(wave):
-		simple_new_left = 2 if SIMPLE_NEW[wave] == "giant" else 3
-	spawn_timer = 0.5
+	spawn_timer = float((plan.spawns as Array)[0][0])
+	var nk := SiegeGen.new_kind(siege, wave)
+	if nk != "":
+		_story_for_all("Look out!", KIND_PICS.get(nk, "snowman"), Color(0.6, 0.85, 1.0))
 	print("Wave %d started (simple, %d snowmen)" % [wave, to_spawn])
 	sound("wave")
 	var boss := _simple_boss()
 	director().on_wave_started(wave, boss)
 	var head := "WAVE %d!" % wave
-	if boss != "":
-		to_spawn /= 2
-		var a := randf() * TAU
-		_spawn_snowman(boss, Vector3(cos(a), 0, sin(a)) * (ARENA_RADIUS - 1.0), 1.5)
+	if boss != "":  # (the plan already sends half as many snowmen with a boss)
+		_spawn_snowman(boss, SiegeGen.boss_pos(plan), 1.5)
 		head = "THE YETI!" if boss == "yeti" else "SNOW KING!"
 		sound("roar", 0.0, 0.7 if boss == "yeti" else 1.0)
 	_show_center(head, 2.0)
@@ -1021,6 +1074,10 @@ func _end_simple_wave() -> void:
 		sound("fanfare", 0.0)
 		print("VICTORY: the village is safe (simple)")
 		_show_center("VICTORY!", 6.0)
+		_story_for_all("Thank you!", "polarbear", SiegeGen.WANT_COLORS[int(siege.get("want", 0))])
+		_story_for_all("My %s is safe!" % SiegeGen.WANT_NAMES[int(siege.get("want", 0))].to_lower(), SiegeGen.WANTS[int(siege.get("want", 0))], SiegeGen.WANT_COLORS[int(siege.get("want", 0))])
+		_build_igloo()
+		_log_run("victory")
 		return
 	_show_center("HOORAY!", 2.0)
 	print("Wave %d cleared, fort %d%%" % [wave, int(fort_fraction() * 100.0)])
@@ -1324,6 +1381,12 @@ func _process(delta: float) -> void:
 	if music.has_method("play_track"):
 		music.play_track(1 if boss_hp >= 0.0 else maxi(wave - 1, 0) / 3)
 	director().tick(delta)
+	_update_story(delta)
+	siege_t += delta
+	if net.mode == "host" and net.connected and not siege.is_empty():
+		village_resend -= delta
+		if village_resend <= 0.0:
+			_send_village()  # a machine that missed it (or joined mid-game) catches up
 	if props:
 		props.tick(delta)
 	if ghost_cam:
@@ -1377,11 +1440,9 @@ func _process(delta: float) -> void:
 		var alive := get_tree().get_nodes_in_group("snowmen").size()
 		var extra := extra_players()
 		if spawn_timer <= 0.0 and alive < 6 + wave + extra * 2:
-			_spawn_wave_snowman()
-			to_spawn -= 1
 			spawn_timer = maxf(0.45, (1.8 - wave * 0.1) / (1.0 + 0.15 * extra))
-			if SIMPLE_MODE and wave <= 2:
-				spawn_timer = 3.0 if wave == 1 else 2.2  # a gentle trickle to start
+			_spawn_wave_snowman()  # (simple mode: the plan sets the next gap)
+			to_spawn -= 1
 	elif get_tree().get_nodes_in_group("snowmen").is_empty():
 		_end_wave()
 	var all_down := true
@@ -1401,6 +1462,9 @@ func _on_game_over(reason: String) -> void:
 	print("Game over (%s): wave %d, score %d" % [reason, wave, score])
 	if SIMPLE_MODE:
 		_show_center("OH NO!", 0.0)  # it starts again by itself
+		if net.mode != "client":
+			_build_igloo()
+			_log_run({"THE FORT FELL!": "fort", "EVERYONE FROZE SOLID!": "frozen"}.get(reason, "ended"))
 		return
 	var best := _load_best()
 	var best_line := "Best: wave %d  ·  score %d" % [best.wave, best.score]
@@ -1964,6 +2028,9 @@ func on_player_activity_changed(p) -> void:
 # --- Networked co-op (see docs/GAME_DEV_GUIDE.md) ----------------------------
 
 func on_client_joined() -> void:
+	if SIMPLE_MODE and not siege.is_empty():
+		_send_village()
+		net.event("story", [_want_line(), SiegeGen.WANTS[int(siege.want)], SiegeGen.WANT_COLORS[int(siege.want)]])
 	if not seats.first_machine():
 		return  # another machine: its players join when they ask ("join")
 	if SIMPLE_MODE:
@@ -2164,6 +2231,10 @@ func apply_event(kind: String, args: Array) -> void:
 		"prop":
 			if props:
 				props.client_event(args)
+		"village":
+			_build_village(args[0], int(args[1]))
+		"story":
+			_story(args[0], args[1], args[2])
 
 
 # --- HUD ---------------------------------------------------------------------
@@ -2294,3 +2365,217 @@ func _update_vr_hurt(delta: float) -> void:
 	vr_hurt = maxf(0.0, vr_hurt - delta * 3.0)
 	var cold := 0.25 if p.is_down else (0.08 if p.hp < 30.0 else 0.0)
 	vr_hurt_mat.albedo_color.a = maxf(vr_hurt * 0.35, cold)
+
+
+# --- Bobo's village and the seeded siege ---------------------------------------------------------
+
+## Host / local: a new game. Count the play-day (igloos grow a stage each day), pick the siege (TODAY'S
+## BLIZZARD first each day), show the village and tell the story.
+func _start_siege() -> void:
+	if save == null:
+		save = Save.new()
+		save.game_id = GAME_ID
+		# village: [[play-day built, golden, waves beaten, want], ...]; days: days played; daily: the date
+		# TODAY'S BLIZZARD was played.
+		save.defaults = {"village": [], "igloos": 0, "days": 0, "last_day": "", "daily": "", "games": 0, "best_wave": 0, "wins": 0}
+		add_child(save)
+	var today := Seeded.today()
+	var new_day := String(save.data.last_day) != today
+	if new_day:
+		save.data.days = int(save.data.days) + 1
+		save.data.last_day = today
+	save.data.games = int(save.data.games) + 1
+	save.mark_dirty()
+	var daily := String(save.data.daily) != today
+	var lv := SiegeGen.DAILY_LEVEL if daily else SiegeGen.level(int(save.data.igloos))
+	var seed_value := SiegeGen.daily_seed() if daily else Seeded.fresh_seed()
+	if OS.has_environment("SB_SEED"):
+		seed_value = int(OS.get_environment("SB_SEED"))
+	siege = SiegeGen.siege(seed_value, lv, daily)
+	siege_t = 0.0
+	built = false
+	logged = false
+	print("Snowball Blitz siege: seed %d level %d%s want %s new %s gates %s | village %d igloos, day %d" % [
+		seed_value, lv, " (TODAY'S BLIZZARD)" if daily else "", SiegeGen.WANT_NAMES[int(siege.want)], str(siege.new),
+		str((siege.waves as Array).map(func(w: Dictionary) -> int: return (w.gates as Array).size())),
+		(save.data.village as Array).size(), int(save.data.days)])
+	village_days = int(save.data.days)
+	_build_village(save.data.village, village_days)
+	_send_village()
+	var want := int(siege.want)
+	if daily:
+		_story_for_all("TODAY'S BLIZZARD!", "igloo", Color(1.0, 0.85, 0.3))
+	_story_for_all("Hi! I'm Bobo!", "polarbear", SiegeGen.WANT_COLORS[want])
+	_story_for_all(_want_line(), SiegeGen.WANTS[want], SiegeGen.WANT_COLORS[want])
+	if new_day and not (save.data.village as Array).is_empty():
+		_story_for_all("Our igloos grew!", "igloo", Color(0.6, 0.85, 1.0))
+
+
+func _want_line() -> String:
+	return "Save my %s!" % SiegeGen.WANT_NAMES[int(siege.get("want", 0))].to_lower()
+
+
+## Host / local: this game's igloo joins the village (once per game, when at least one wave was beaten).
+func _build_igloo() -> void:
+	if built or siege.is_empty() or save == null:
+		return
+	var beaten := wave - (0 if in_break else 1)
+	if director().won:
+		beaten = maxi(beaten, SIMPLE_FINALE)
+	save.data.best_wave = maxi(int(save.data.best_wave), beaten)
+	if director().won:
+		save.data.wins = int(save.data.wins) + 1
+	if beaten < 1:
+		save.mark_dirty()
+		return
+	built = true
+	var list: Array = save.data.village
+	list.append([int(save.data.days), bool(siege.daily), beaten, int(siege.want)])
+	while list.size() > SiegeGen.VILLAGE_KEEP:
+		list.pop_front()
+	save.data.igloos = int(save.data.igloos) + 1
+	if siege.daily:
+		save.data.daily = Seeded.today()
+	save.mark_dirty()
+	_build_village(list, int(save.data.days))
+	_send_village()
+	var n := list.size()
+	_story_for_all(VILLAGE_CHEERS.get(n, "A new igloo!"), "igloo", Color(1.0, 0.85, 0.3) if siege.daily else SiegeGen.WANT_COLORS[int(siege.want)])
+	print("Snowball Blitz: igloo %d built (%d waves beaten%s)" % [n, beaten, ", golden" if siege.daily else ""])
+
+
+func _send_village() -> void:
+	village_resend = 8.0
+	if net and net.mode == "host" and save != null:
+		net.event("village", [(save.data.village as Array).duplicate(true), int(save.data.days)])
+
+
+## One RUN line per game (and on quit).
+func _log_run(end: String) -> void:
+	if logged or siege.is_empty():
+		return
+	logged = true
+	Telemetry.run(GAME_ID, {"end": end, "wave": wave, "seed": int(siege.seed), "level": int(siege.level),
+		"daily": bool(siege.daily), "secs": snappedf(siege_t, 0.1), "score": score, "won": director().won,
+		"players": party_size(), "vr": not players.is_empty() and players[0].vr, "net": net.mode,
+		"fort": snappedf(fort_fraction(), 0.01), "igloos": (save.data.village as Array).size() if save else 0,
+		"days": int(save.data.days) if save else 0})
+
+
+func _exit_tree() -> void:
+	if net and net.mode != "client" and SIMPLE_MODE and not siege.is_empty() and not game_over:
+		_log_run("quit")
+
+
+## Every machine: Bobo's igloos round the square (each grows a stage every play-day; today's is golden).
+func _build_village(list: Array, days: int) -> void:
+	village_list = list.duplicate(true)
+	village_days = days
+	if village == null:
+		village = Node3D.new()
+		village.name = "Village"
+		add_child(village)
+	if village_count == list.size() and village.get_child_count() == list.size() and village.get_meta("days", -1) == days:
+		return
+	for c in village.get_children():
+		village.remove_child(c)
+		c.queue_free()
+	village.set_meta("days", days)
+	for i in mini(list.size(), SiegeGen.VILLAGE_SLOTS):
+		var e: Array = list[i]
+		var ig := _igloo(SiegeGen.igloo_stage(int(e[0]), days), bool(e[1]), SiegeGen.WANT_COLORS[int(e[3]) % SiegeGen.WANT_COLORS.size()])
+		ig.position = SiegeGen.village_slot(i)
+		UiKit.look(ig, Vector3.ZERO, Vector3.UP)
+		village.add_child(ig)
+		if village_count >= 0 and i >= village_count:
+			ig.scale = Vector3.ONE * 0.05
+			ig.create_tween().tween_property(ig, "scale", Vector3.ONE, 1.2).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+			puff(ig.position + Vector3.UP, Color(1, 1, 1), 30, 0.14)
+	village_count = list.size()
+
+
+## One igloo: stage 1 a small dome, 2 a full igloo with a door, 3 a lit door and a flag in `flag`.
+func _igloo(stage: int, golden: bool, flag: Color) -> Node3D:
+	var root := Node3D.new()
+	var snow: StandardMaterial3D = make_material(Color(1.0, 0.85, 0.35) if golden else Color(0.93, 0.96, 1.0), 0.6 if golden else 0.0)
+	var k := 0.7 if stage <= 1 else 1.0
+	var dome := MeshInstance3D.new()
+	var dm := SphereMesh.new()
+	dm.radius = 1.3 * k
+	dm.height = 2.6 * k
+	dm.is_hemisphere = true
+	dm.radial_segments = 16
+	dm.rings = 6
+	dome.mesh = dm
+	dome.material_override = snow
+	root.add_child(dome)
+	if stage >= 2:
+		var door := MeshInstance3D.new()
+		var cm := CylinderMesh.new()
+		cm.top_radius = 0.45
+		cm.bottom_radius = 0.45
+		cm.height = 0.9
+		cm.radial_segments = 10
+		door.mesh = cm
+		door.material_override = snow
+		door.rotation_degrees = Vector3(90, 0, 0)
+		door.position = Vector3(0, 0.35, -1.2)  # faces the fort (look() turns -Z to the square)
+		root.add_child(door)
+		var hole := MeshInstance3D.new()
+		var hm := SphereMesh.new()
+		hm.radius = 0.33
+		hm.height = 0.66
+		hm.radial_segments = 8
+		hm.rings = 4
+		hole.mesh = hm
+		hole.material_override = make_material(Color(1.0, 0.7, 0.3), 2.5) if stage >= 3 else make_material(Color(0.25, 0.3, 0.45), 0.0)
+		hole.scale = Vector3(1.0, 1.0, 0.3)
+		hole.position = Vector3(0, 0.35, -1.65)
+		root.add_child(hole)
+	if stage >= 3:
+		var pole := MeshInstance3D.new()
+		var pm := CylinderMesh.new()
+		pm.top_radius = 0.03
+		pm.bottom_radius = 0.03
+		pm.height = 1.1
+		pole.mesh = pm
+		pole.material_override = make_material(Color(0.4, 0.3, 0.2), 0.0)
+		pole.position = Vector3(0, 1.3 * k + 0.5, 0)
+		root.add_child(pole)
+		var fl := MeshInstance3D.new()
+		var fm := BoxMesh.new()
+		fm.size = Vector3(0.5, 0.32, 0.03)
+		fl.mesh = fm
+		fl.material_override = make_material(flag, 0.4)
+		fl.position = Vector3(0.27, 1.3 * k + 0.88, 0)
+		root.add_child(fl)
+	return root
+
+
+## Host / local: a story card on every machine.
+func _story_for_all(line: String, pic: String, color: Color) -> void:
+	_story(line, pic, color)
+	if net and net.mode == "host":
+		net.event("story", [line, pic, color])
+
+
+func _story(line: String, pic: String, color: Color) -> void:
+	if story_queue.size() < 4:
+		story_queue.append([line, pic, color])
+
+
+func _update_story(delta: float) -> void:
+	story_t -= delta
+	if story_t > 0.0 or story_queue.is_empty() or players.is_empty():
+		return
+	var b: Array = story_queue.pop_front()
+	story_t = 2.6
+	var opts := {"who": "BOBO", "line": b[0], "pic": b[1], "color": b[2], "duration": 2.4}
+	var huds: Array = []
+	for p in players:
+		if p.hud != null and is_instance_valid(p.hud) and p.hud.is_visible_in_tree():
+			huds.append(p.hud)
+	if not huds.is_empty():
+		StoryCard.show(huds, opts)
+	if players[0].vr and players[0].xr_camera != null:
+		StoryCard.show_vr(self, players[0].xr_camera, opts)

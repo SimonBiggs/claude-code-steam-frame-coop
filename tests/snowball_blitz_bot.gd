@@ -71,6 +71,9 @@ func _physics_process(delta: float) -> void:
 		if p.index == 1 and not main.simple and _repair_role(p):
 			continue
 		_throw_role(p, delta)
+	if main.net.mode == "client" and main.simple and t >= (float(OS.get_environment("BOT_END")) - 10.0 if OS.has_environment("BOT_END") else 60.0) and not has_meta("client_checked"):
+		set_meta("client_checked", true)
+		_check_siege()
 	if main.net.mode != "client":
 		_content_script()
 		if OS.has_environment("BOT_GOD"):
@@ -155,12 +158,14 @@ func _simple_script() -> void:
 		var pt: String = main.center_label.text
 		print("Bot: pause banner %s" % ("PAUSED" if pt == "PAUSED" else "ERROR: " + pt.replace("\n", " / ")))
 		main._set_pause_banner(false, "")
-	var end_t: float = float(OS.get_environment("BOT_END")) if OS.has_environment("BOT_END") else 56.0
+	# (BOT_END also ends the run: tests/bot_end.gd. Game over a little before, so its checks run.)
+	var end_t: float = maxf(20.0, float(OS.get_environment("BOT_END")) - 10.0) if OS.has_environment("BOT_END") else 56.0
 	if script_step == 2 and t >= end_t:
 		script_step = 3
 		if not main.game_over:
 			print("Bot: forcing game over")
 			main._on_game_over("TIME FOR COCOA!")
+		_check_siege.call_deferred()
 
 
 ## BOT_VR + simple mode: the left hand touches every prop in turn; the right hand snaps off an icicle.
@@ -500,3 +505,19 @@ func _pad_test() -> void:
 		pad_step = 4
 		var owner = main._player_with_pad(7)
 		print("Bot: pad test done, controller 7 -> P%d active=%s, playing=%d" % [owner.index + 1 if owner else 0, owner.active if owner else false, main.party_size()])
+
+
+## Bobo's story (simple mode): the host / local game made a seeded siege, logged a RUN line at game over and
+## built an igloo once a wave was beaten; a TV machine got the village from the host.
+func _check_siege() -> void:
+	if main.net.mode == "client":
+		_bot_check(main.village_count >= 0, "the TV machine got Bobo's village (%d igloos)" % main.village_count)
+		return
+	_bot_check(not main.siege.is_empty(), "a seeded siege (seed %s)" % str(main.siege.get("seed", "-")))
+	_bot_check(main.logged, "a RUN line at game over")
+	_bot_check(main.built or main.wave < 2, "an igloo built after %d waves (village %d)" % [main.wave, main.village_count])
+	_bot_check(main.village != null and main.village.get_child_count() == main.village_count, "the village shows every igloo")
+
+
+func _bot_check(ok: bool, what: String) -> void:
+	print(("Bot: OK " if ok else "SCRIPT ERROR: BOT: FAILED ") + what)
