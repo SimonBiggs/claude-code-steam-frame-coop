@@ -11,7 +11,7 @@ const MeshKit := preload("res://core/mesh_kit.gd")
 const Creatures := preload("res://core/creatures.gd")
 const ResCache := preload("res://core/res_cache.gd")
 
-const RADIUS := 3.7
+const RADIUS := 4.1
 const PLANTS := 8  ## per bed: 2 rows of 4
 const BED := Vector2(1.5, 0.7)
 const GIANT := 1.6
@@ -51,16 +51,19 @@ func _ready() -> void:
 		root.add_child(mmi)
 		beds.append(mm)
 		bed_roots.append(root)
-	fig = Creatures.humanoid({"class": "farmer", "outfit": Story.FIG_COLOR, "seed": 7, "scale": 0.8})
+	fig = Creatures.humanoid({"class": "farmer", "outfit": Story.FIG_COLOR, "seed": 7, "scale": 0.55})
 	fig.name = "Fig"
 	add_child(fig)
 	apply({"beds": {}, "cur": Story.FIRST_CROP, "fill": 0, "need": Story.bed_need(0)})
 
 
-## Where crop bed i sits: a ring behind and beside the table, facing it (the front stays open).
+## Where crop bed i sits: a ring behind and beside the table, facing it (the front stays open). The first
+## crops sit straight behind the table (in every TV view and in front of the VR giant), later ones round
+## the sides.
+const ANGLES: Array[float] = [-24.0, 24.0, -58.0, 58.0, -92.0, 92.0, -124.0, 124.0]
+
 static func spot(i: int) -> Transform3D:
-	var n := Story.CROPS.size()
-	var a := deg_to_rad(lerpf(-118.0, 118.0, float(i) / float(n - 1)))
+	var a := deg_to_rad(ANGLES[i % ANGLES.size()])
 	var p := Vector3(sin(a) * RADIUS, 0.0, -cos(a) * RADIUS * 0.85)
 	return Transform3D(Basis(Vector3.UP, -a), p)
 
@@ -84,8 +87,10 @@ func apply(s: Dictionary) -> void:
 				size = lerpf(1.0, GIANT, frac)
 		var n := 0
 		for k in PLANTS:
-			var sc := size if times >= 1 or id != cur else clampf(grow * PLANTS - k, 0.0, 1.0) * size
-			if times >= 1 and id != cur:
+			var sc := 0.0
+			if id == cur:
+				sc = size if times >= 1 else clampf(grow * PLANTS - k, 0.0, 1.0) * size
+			elif times >= 1:
 				sc = size
 			if sc <= 0.02:
 				continue
@@ -134,6 +139,18 @@ func _process(delta: float) -> void:
 			cheer_bed = -1
 	if fig != null:
 		Creatures.anim(fig).walk(0.0)
+
+
+## The veg itself for a seed packet (a pulled-up carrot shows its orange root; the rest show the plant).
+static func icon_mesh(id: String) -> Mesh:
+	if id != "CARROTS":
+		return plant_mesh(id)
+	return ResCache.get_or_make("wam_icon_" + id, func() -> Resource:
+		var b := MeshKit.builder()
+		b.cone(0.06, 0.22, MeshKit.at(Vector3(0.0, 0.11, 0.0), Vector3.ONE, Vector3(PI, 0.0, 0.0)), Story.crop(id).color, 10)
+		for k in 3:
+			b.cone(0.025, 0.14, MeshKit.at(Vector3((k - 1) * 0.025, 0.28, 0.0), Vector3.ONE, Vector3(0.0, 0.0, (k - 1) * 0.35)), Color(0.35, 0.72, 0.3), 5)
+		return b.build())
 
 
 ## One veg plant (about 0.2-0.6 m), origin on the soil. Cached per crop.

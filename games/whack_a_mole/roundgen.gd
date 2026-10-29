@@ -22,10 +22,11 @@ const SPEEDY := 3  ## quick: in and out
 const BUNNY := 4  ## a friend: DON'T bonk; left alone it leaves a carrot (+2)
 const KING := 5  ## the big crowned mole near the end: five bonks from anyone
 const SEED := 6  ## a seed packet in the pick phase (not in rounds)
-const KIND_NAMES: Array[String] = ["MOLE", "GOLDEN", "HELMET", "SPEEDY", "BUNNY", "KING", "SEEDS"]
-const POINTS: Array[int] = [1, 5, 3, 2, 2, 10, 0]  ## a bunny's 2 is its carrot (left alone)
-const HITS: Array[int] = [1, 1, 2, 1, 1, 5, 1]
-const STAY_MULT: Array[float] = [1.0, 0.75, 1.4, 0.6, 1.25, 1.0, 1.0]
+const BARE := 7  ## a helmet mole whose helmet popped off (not in rounds: main.gd turns HELMET into it)
+const KIND_NAMES: Array[String] = ["MOLE", "GOLDEN", "HELMET", "SPEEDY", "BUNNY", "KING", "SEEDS", "BARE"]
+const POINTS: Array[int] = [1, 5, 3, 2, 2, 14, 0, 3]  ## a bunny's 2 is its carrot (left alone); the king: 1 per bonk + 10
+const HITS: Array[int] = [1, 1, 2, 1, 1, 5, 1, 1]
+const STAY_MULT: Array[float] = [1.0, 0.75, 1.4, 0.6, 1.25, 1.0, 1.0, 1.0]
 ## Seconds a hole needs after a mole's stay before the next one (rise, bonk / fall, rest).
 const HOLE_REST := 1.0
 const KING_STAY := 9.0
@@ -126,7 +127,7 @@ static func generate(seed_value: int, spec: Dictionary) -> Dictionary:
 ## The star goal: points for 1, 2 and 3 stars. A share of every point the round holds, a bit higher with
 ## more players (each one bonks some), never above 85% of everything.
 static func goal(mx: int, players: int) -> Array:
-	var f: float = [0.2, 0.28, 0.34, 0.38, 0.42][clampi(players, 1, 5) - 1]
+	var f: float = [0.15, 0.24, 0.3, 0.35, 0.4][clampi(players, 1, 5) - 1]
 	var one := maxi(1, roundi(mx * f))
 	var two := maxi(one + 1, roundi(mx * f * 1.6))
 	var three := maxi(two + 1, mini(roundi(mx * f * 2.2), roundi(mx * 0.85)))
