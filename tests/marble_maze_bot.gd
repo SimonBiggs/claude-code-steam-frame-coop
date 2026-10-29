@@ -88,7 +88,7 @@ func _physics_process(delta: float) -> void:
 			var c := {"mesh": 0, "multimesh": 0, "label": 0, "particles": 0}
 			_count_node(main, c)
 			print("COUNT ", c)
-			get_tree().quit()
+			preload("res://tests/bot_end.gd").quit_quietly(get_tree())
 		return
 	var mode: String = main.net.mode
 	simple = main.simple

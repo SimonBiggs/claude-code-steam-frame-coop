@@ -23,6 +23,10 @@ func _initialize() -> void:
 		# quit() alone is not enough (often only a BOT_COUNT-style side mode quits): it must come with a BOT RESULT line.
 		if not ("finish(" in src or "bot_end.gd" in src or ("quit(" in src and "BOT RESULT" in src)):
 			bad.append(f)
+		# Quitting straight away while a sound plays leaks its AudioStreamWAV + playback at exit: bots quit through
+		# tests/bot_end.gd quit_quietly (2026-10-29).
+		if "get_tree().quit(" in src or "tree.quit(" in src:
+			flat.append(f + " (quits with get_tree().quit: use tests/bot_end.gd quit_quietly)")
 		# A long networked end of its own ("150.0 if host else (140.0 if client ...") must stay inside the runner's
 		# limit: tools/multibot.ts kills at --seconds (default 180, dev.bots.run callers pass less), so it goes through
 		# bot_end.gd within_deadline (crystal_saga ended at 240 s and always timed out, 2026-10-29).

@@ -122,7 +122,7 @@ func _process(delta: float) -> void:
 		return
 	if phase == "done" and now >= float(get_meta("done_at")) + 2.0:
 		print("BOT RESULT: %s (machine %d)" % ["PASS" if failures == 0 else "FAIL", me])
-		get_tree().quit(0 if failures == 0 else 1)
+		preload("res://tests/bot_end.gd").quit_quietly(get_tree(), 0 if failures == 0 else 1)
 		phase = "quit"
 
 

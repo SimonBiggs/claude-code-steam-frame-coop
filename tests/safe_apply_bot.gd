@@ -43,7 +43,7 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	if OS.get_environment("BOT_OWN_COPY") != "1":
 		print("BOT ASSERT FAILED: this bot changes game files: run it with tools/multibot.ts --copies")
-		get_tree().quit(1)
+		preload("res://tests/bot_end.gd").quit_quietly(get_tree(), 1)
 		return
 	_write(PROBE, _probe_src(1))
 	probe = load(PROBE)
@@ -254,4 +254,4 @@ func _finish() -> void:
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(PROBE))
 	print("BOT RESULT: %s (machine %d)" % ["PASS" if failures == 0 else "FAIL", me])
 	phase = "quit"
-	get_tree().quit(0 if failures == 0 else 1)
+	preload("res://tests/bot_end.gd").quit_quietly(get_tree(), 0 if failures == 0 else 1)

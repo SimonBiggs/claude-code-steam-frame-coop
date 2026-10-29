@@ -106,7 +106,7 @@ func _physics_process(delta: float) -> void:
 			var c := {"mesh": 0, "multimesh": 0, "label": 0, "particles": 0, "lights": 0}
 			_count_node(main, main.players[0].camera_cull_mask(), c)
 			print("COUNT ", c)
-			get_tree().quit()
+			preload("res://tests/bot_end.gd").quit_quietly(get_tree())
 		return
 	if conn_worlds.is_empty() and not conn_done and t > 0.3 and main.net.mode != "client":
 		var builds: Array = [[0, main.map_spec if main.map_idx == 0 else Story.daily()], [0, Story.daily()],
@@ -134,7 +134,7 @@ func _physics_process(delta: float) -> void:
 		conn_worlds.clear()
 		print("%sBOT: CONNECTIVITY %s on all %d maps (4 houses)" % ["" if conn_ok else "SCRIPT ERROR: ", "OK" if conn_ok else "FAIL", main.MAPS.size()])
 		if OS.has_environment("BOT_CONN_ONLY"):
-			get_tree().quit()
+			preload("res://tests/bot_end.gd").quit_quietly(get_tree())
 			return
 	if main.round_no > 0 and main.phase != "wait" and not maps_seen.has(main.map_title()):
 		maps_seen[main.map_title()] = main.round_no
@@ -315,7 +315,7 @@ func _result(mode: String) -> void:
 		fails.append("pip")
 	print("BOT RESULT: %s (4 checks)%s" % ["PASS" if fails.is_empty() else "FAIL", "" if fails.is_empty() else " failed: " + ", ".join(fails)])
 	if mode == "local":
-		get_tree().quit()
+		preload("res://tests/bot_end.gd").quit_quietly(get_tree())
 
 
 ## The free local hider with the lowest index looks for Pip.
