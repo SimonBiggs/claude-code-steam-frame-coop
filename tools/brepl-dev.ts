@@ -253,6 +253,12 @@ export async function debt() {
       if (merged && !busy) issues.push({ kind: "stale-worktree", what: `${r}: worktree ${path} (branch ${br} already merged)`, fix: `git worktree remove --force ${path} && git branch -D ${br}` });
     }
   }
+  // brepl modules on disk must compile: the loader keeps a running copy when a save doesn't, so a broken file
+  // only shows at the next brepl start (2026-10-29). Edit them with writeModule(path, text) (build-checked).
+  for (const f of [join(HOME, ".local/share/gdev/godot.ts"), ...["dev", "alerts", "peers", "multibot"].map(n => join(HOME, `.local/share/brepl/${n}.ts`))]) {
+    const b = await sh(`${process.execPath} build --no-bundle ${f} >/dev/null 2>/tmp/brepl-build-check.err || head -c 300 /tmp/brepl-build-check.err`);
+    if (b.out) issues.push({ kind: "module-broken", what: `${f.replace(HOME, "~")}: ${b.out}`, fix: "fix it (write with writeModule(path, text)); brepl runs the last good copy until then" });
+  }
   const d = await stage.diff();
   if (d.liveNewer.length || d.onlyLive.length) issues.push({ kind: "stage-behind", what: `live has newer files than staging: ${[...d.liveNewer, ...d.onlyLive].slice(0, 5).join(", ")}`, fix: "dev.stage.pull()" });
   if (d.stageNewer.length || d.onlyStage.length) issues.push({ kind: "undeployed", what: `staging has changes not deployed: ${[...d.stageNewer, ...d.onlyStage].slice(0, 5).join(", ")}`, fix: "test, then dev.stage.deploy(msg)" });
@@ -298,7 +304,10 @@ export async function land(branch: string, genTests: string[], botId: string, ot
   const sc = (await sh(`git diff --stat main...${branch} -- core/story_card.gd`, LIVE)).out;
   if (sc) return { stop: "story_card", out: `${sc}\nmove its pictures to games/<game>/story_pictures.gd (in wt-merge, commit), then land again` };
   const drift = await sh(`for d in ${DEPLOYED.join(" ")}; do diff -rq --exclude='*.uid' --exclude='*.import' duo-arena/$d .duo-arena-stage/$d; done`, GP);
-  if (drift.out.trim()) return { stop: "live!=stage", out: drift.out };
+  // (Staging already holding exactly wt-merge, with live clean, is a retry after a stopped landing, e.g. a flaky bot.)
+  const retry = drift.out.trim() && !(await sh(`git status --porcelain -- ${DEPLOYED.join(" ")} | grep -v '\\.uid$'`, LIVE)).out
+    && !(await sh(`for d in ${DEPLOYED.join(" ")}; do diff -rq --exclude='*.uid' --exclude='*.import' wt-merge/$d .duo-arena-stage/$d; done`, GP)).out.trim();
+  if (drift.out.trim() && !retry) return { stop: "live!=stage", out: drift.out };
   await sh(`for d in ${DEPLOYED.join(" ")} tools; do rsync -a --delete --exclude '*.import' --exclude '__pycache__' wt-merge/$d/ .duo-arena-stage/$d/; done; cp wt-merge/arcade.tscn .duo-arena-stage/`, GP);
   const out: Record<string, string> = {};
   let ok = true;

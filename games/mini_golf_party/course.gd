@@ -2,8 +2,9 @@ extends Node3D
 ## MINI GOLF PARTY: one hole at a time. Holds the hole's shape for the ball physics (walls as 2D
 ## segments on the XZ plane, round bumpers, a height bump, the windmill gate, the loop) and builds
 ## what it looks like: the green, wooden rails, the cup and flag, and the hole's one gimmick, baked
-## into a handful of merged meshes (cheap for the Frame). Built the same way on every machine from
-## the hole number, so only the windmill angle needs to travel over the network.
+## into a handful of merged meshes (cheap for the Frame). The shape is a plain Dictionary from
+## holegen.gd (seeded), built the same way on every machine, so only the windmill angle travels.
+## setup(def) = physics only (the generator's validator and simulation use it); build(def) = + the look.
 ## Coordinates: Vector2(x, z). Every hole starts near +Z (the tee) and ends near -Z (the cup).
 
 const MeshKit := preload("res://core/mesh_kit.gd")
@@ -19,35 +20,6 @@ const WOOD := Color(0.95, 0.62, 0.32)
 const WOOD2 := Color(1.0, 0.85, 0.45)
 const HOLES := 5
 
-## The holes. outline: the walls (closed polygon). rects: the green's floor [x0, z0, x1, z1].
-## path: where to aim, in order (the last one is the cup). par: strokes for a star (kids' par).
-static func hole_def(i: int) -> Dictionary:
-	match i:
-		0:  # PRACTICE: a short straight putt.
-			return {"outline": [Vector2(-0.5, 1.7), Vector2(0.5, 1.7), Vector2(0.5, -1.6), Vector2(-0.5, -1.6)],
-				"rects": [[-0.5, -1.6, 0.5, 1.7]], "tee": Vector2(0.0, 1.25), "cup": Vector2(0.0, -1.1), "par": 2,
-				"path": [Vector2(0.0, -1.1)], "gimmick": ""}
-		1:  # Round the corner, with a springy bumper in the bend.
-			return {"outline": [Vector2(-0.55, 2.2), Vector2(0.55, 2.2), Vector2(0.55, -1.7), Vector2(-2.5, -1.7),
-				Vector2(-2.5, -0.55), Vector2(-0.55, -0.55)],
-				"rects": [[-0.55, -1.7, 0.55, 2.2], [-2.5, -1.7, -0.55, -0.55]], "tee": Vector2(0.0, 1.8),
-				"cup": Vector2(-2.0, -1.12), "par": 3, "path": [Vector2(0.0, -1.0), Vector2(-2.0, -1.12)],
-				"gimmick": "bumper", "bumpers": [[Vector2(0.28, -1.42), 0.2]]}
-		2:  # The windmill: sneak through when the sails are up.
-			return {"outline": [Vector2(-0.6, 2.7), Vector2(0.6, 2.7), Vector2(0.6, -2.6), Vector2(-0.6, -2.6)],
-				"rects": [[-0.6, -2.6, 0.6, 2.7]], "tee": Vector2(0.0, 2.25), "cup": Vector2(0.0, -2.05), "par": 3,
-				"path": [Vector2(0.0, 0.3), Vector2(0.0, -2.05)], "gimmick": "windmill", "mill_z": 0.0}
-		3:  # Over the hill.
-			return {"outline": [Vector2(-0.6, 2.9), Vector2(0.6, 2.9), Vector2(0.6, -2.8), Vector2(-0.6, -2.8)],
-				"rects": [[-0.6, -2.8, 0.6, 2.9]], "tee": Vector2(0.0, 2.45), "cup": Vector2(0.0, -2.2), "par": 3,
-				"path": [Vector2(0.0, -2.2)], "gimmick": "hill", "hill_z": 0.0, "hill_w": 0.75, "hill_h": 0.17}
-		_:  # Loop-the-loop: give it a big whack!
-			return {"outline": [Vector2(-0.6, 3.0), Vector2(0.6, 3.0), Vector2(0.6, -3.0), Vector2(-0.6, -3.0)],
-				"rects": [[-0.6, -3.0, 0.6, 3.0]], "tee": Vector2(0.0, 2.55), "cup": Vector2(0.0, -2.4), "par": 3,
-				"path": [Vector2(0.0, 0.4), Vector2(0.0, -2.4)], "gimmick": "loop", "loop_z": 0.0}
-
-
-var index := 0
 var def: Dictionary = {}
 var walls: Array = []  # [a: Vector2, b: Vector2]
 var bumpers: Array = []  # [center: Vector2, radius: float]
@@ -62,11 +34,15 @@ var mill_angle := 0.0
 var mill_speed := 1.1
 var mill_boost := 0.0
 var mill_z := 0.0
+var mill_x := 0.0
+var hw := 0.6  ## half the width of the fairway (gimmick walls run wall to wall)
 var sails: Node3D
 var hill_z := 0.0
 var hill_w := 1.0
 var hill_h := 0.0
+var hill_x := 0.0
 var loop_z := 0.0
+var loop_x := 0.0
 const LOOP_R := 0.38
 const LOOP_GAP := 0.24
 const MILL_GAP := 0.15
@@ -75,16 +51,23 @@ var flag_wave := 0.0
 var _t := 0.0
 
 
-func build(i: int) -> void:
+## Physics and look (every machine).
+func build(d: Dictionary) -> void:
 	for c in get_children():
 		c.queue_free()
-	index = clampi(i, 0, HOLES - 1)
-	def = hole_def(index)
+	setup(d)
+	_build_look()
+
+
+## Physics only: walls, bumpers and the gimmick from a hole description (holegen.gd).
+func setup(d: Dictionary) -> void:
+	def = d
 	tee = def["tee"]
 	cup = def["cup"]
 	par = int(def["par"])
 	path = def["path"]
 	gimmick = String(def["gimmick"])
+	hw = float(def.get("hw", 0.6))
 	outline = PackedVector2Array()
 	for p in def["outline"]:
 		outline.append(p)
@@ -95,34 +78,42 @@ func build(i: int) -> void:
 	for b in def.get("bumpers", []):
 		bumpers.append(b)
 	mill_z = float(def.get("mill_z", 0.0))
+	mill_x = float(def.get("mill_x", 0.0))
 	hill_z = float(def.get("hill_z", 0.0))
+	hill_x = float(def.get("hill_x", 0.0))
 	hill_w = float(def.get("hill_w", 1.0))
 	hill_h = float(def.get("hill_h", 0.0))
 	loop_z = float(def.get("loop_z", 0.0))
+	loop_x = float(def.get("loop_x", 0.0))
+	mill_angle = 0.0
 	sails = null
+	flag = null
+	var l := -hw - 0.01
+	var r := hw + 0.01
 	if gimmick == "windmill":
 		# The windmill house: two front walls, a tunnel through it, two back walls.
 		var g := MILL_GAP
 		var back := mill_z - 0.36
-		walls.append([Vector2(-0.6, mill_z), Vector2(-g, mill_z)])
-		walls.append([Vector2(g, mill_z), Vector2(0.6, mill_z)])
-		walls.append([Vector2(-g, mill_z), Vector2(-g, back)])
-		walls.append([Vector2(g, mill_z), Vector2(g, back)])
-		walls.append([Vector2(-0.6, back), Vector2(-g, back)])
-		walls.append([Vector2(g, back), Vector2(0.6, back)])
+		var x := mill_x
+		walls.append([Vector2(x + l, mill_z), Vector2(x - g, mill_z)])
+		walls.append([Vector2(x + g, mill_z), Vector2(x + r, mill_z)])
+		walls.append([Vector2(x - g, mill_z), Vector2(x - g, back)])
+		walls.append([Vector2(x + g, mill_z), Vector2(x + g, back)])
+		walls.append([Vector2(x + l, back), Vector2(x - g, back)])
+		walls.append([Vector2(x + g, back), Vector2(x + r, back)])
 	elif gimmick == "loop":
-		walls.append([Vector2(-0.6, loop_z), Vector2(-LOOP_GAP, loop_z)])
-		walls.append([Vector2(LOOP_GAP, loop_z), Vector2(0.6, loop_z)])
-		walls.append([Vector2(-LOOP_GAP, loop_z), Vector2(-LOOP_GAP, loop_z - 0.05)])
-		walls.append([Vector2(LOOP_GAP, loop_z), Vector2(LOOP_GAP, loop_z - 0.05)])
-	_build_look()
+		var x := loop_x
+		walls.append([Vector2(x + l, loop_z), Vector2(x - LOOP_GAP, loop_z)])
+		walls.append([Vector2(x + LOOP_GAP, loop_z), Vector2(x + r, loop_z)])
+		walls.append([Vector2(x - LOOP_GAP, loop_z), Vector2(x - LOOP_GAP, loop_z - 0.05)])
+		walls.append([Vector2(x + LOOP_GAP, loop_z), Vector2(x + LOOP_GAP, loop_z - 0.05)])
 
 
 # --- Physics shape ------------------------------------------------------------------------
 
 ## Ground height of the green at p (the hill hole has a bump).
 func height(p: Vector2) -> float:
-	if gimmick != "hill":
+	if gimmick != "hill" or absf(p.x - hill_x) > hw + 0.05:
 		return 0.0
 	var d := absf(p.y - hill_z)
 	if d >= hill_w:
@@ -132,7 +123,7 @@ func height(p: Vector2) -> float:
 
 ## Slope (dh/dx, dh/dz).
 func grad(p: Vector2) -> Vector2:
-	if gimmick != "hill":
+	if gimmick != "hill" or absf(p.x - hill_x) > hw + 0.05:
 		return Vector2.ZERO
 	var d := p.y - hill_z
 	if absf(d) >= hill_w:
@@ -148,7 +139,7 @@ func inside(p: Vector2) -> bool:
 func active_walls() -> Array:
 	if gimmick == "windmill" and mill_blocking():
 		var out := walls.duplicate()
-		out.append([Vector2(-MILL_GAP, mill_z + 0.04), Vector2(MILL_GAP, mill_z + 0.04)])
+		out.append([Vector2(mill_x - MILL_GAP, mill_z + 0.04), Vector2(mill_x + MILL_GAP, mill_z + 0.04)])
 		return out
 	return walls
 
@@ -196,13 +187,18 @@ func bounds() -> Rect2:
 	return r
 
 
-func _process(delta: float) -> void:
-	_t += delta
+## The windmill turns (host / local; the generator's simulation calls it too).
+func tick(delta: float) -> void:
 	if gimmick == "windmill":
 		mill_boost = maxf(0.0, mill_boost - delta)
 		mill_angle = fmod(mill_angle + delta * mill_speed * (3.0 if mill_boost > 0.0 else 1.0), TAU)
-		if sails != null:
-			sails.rotation.z = mill_angle
+
+
+func _process(delta: float) -> void:
+	_t += delta
+	tick(delta)
+	if gimmick == "windmill" and sails != null:
+		sails.rotation.z = mill_angle
 	if flag != null:
 		flag_wave = maxf(0.0, flag_wave - delta)
 		flag.rotation.y = sin(_t * 2.0) * 0.15 + sin(_t * 14.0) * flag_wave * 0.5
@@ -258,7 +254,7 @@ func _build_look() -> void:
 	add_child(flag)
 	if gimmick == "windmill":
 		sails = Node3D.new()
-		sails.position = Vector3(0.0, 0.55, mill_z + 0.08)
+		sails.position = Vector3(mill_x, 0.55, mill_z + 0.08)
 		var sb := MeshKit.Builder.new()
 		for s in 4:
 			var ang := s * PI * 0.5
@@ -274,25 +270,26 @@ func _hill(b: MeshKit.Builder) -> void:
 	for s in n:
 		var z0 := hill_z - hill_w + 2.0 * hill_w * float(s) / n
 		var z1 := hill_z - hill_w + 2.0 * hill_w * float(s + 1) / n
-		var y0 := height(Vector2(0.0, z0))
-		var y1 := height(Vector2(0.0, z1))
+		var y0 := height(Vector2(hill_x, z0))
+		var y1 := height(Vector2(hill_x, z1))
 		var len := Vector2(z1 - z0, y1 - y0).length()
-		var mid := Vector3(0.0, (y0 + y1) * 0.5 - 0.02, (z0 + z1) * 0.5)
-		b.box(Vector3(1.2, 0.04, len + 0.01), Transform3D(Basis(Vector3.RIGHT, atan2(y1 - y0, -(z1 - z0))), mid),
+		var mid := Vector3(hill_x, (y0 + y1) * 0.5 - 0.02, (z0 + z1) * 0.5)
+		b.box(Vector3(hw * 2.0, 0.04, len + 0.01), Transform3D(Basis(Vector3.RIGHT, atan2(y1 - y0, -(z1 - z0))), mid),
 			GREEN2 if s % 2 == 0 else GREEN)
 		# Fill under it (so it looks solid from the side).
-		b.box(Vector3(1.19, maxf(0.005, (y0 + y1) * 0.5), z1 - z0), MeshKit.at(Vector3(0.0, (y0 + y1) * 0.25, mid.z)), Color(0.5, 0.35, 0.22))
+		b.box(Vector3(hw * 2.0 - 0.01, maxf(0.005, (y0 + y1) * 0.5), z1 - z0), MeshKit.at(Vector3(hill_x, (y0 + y1) * 0.25, mid.z)), Color(0.5, 0.35, 0.22))
 
 
 func _mill_house(b: MeshKit.Builder) -> void:
 	var z := mill_z - 0.18
+	var w := hw * 2.0
 	for sx in [-1.0, 1.0]:
-		var x: float = sx * (0.6 + MILL_GAP) * 0.5
-		b.box(Vector3(0.6 - MILL_GAP, 0.5, 0.36), MeshKit.at(Vector3(x, 0.25, z)), Color(0.98, 0.9, 0.75))
-	b.box(Vector3(1.2, 0.2, 0.36), MeshKit.at(Vector3(0.0, 0.6, z)), Color(0.98, 0.9, 0.75))
-	b.cone(0.62, 0.45, MeshKit.at(Vector3(0.0, 0.92, z), Vector3(1.0, 1.0, 0.5)), Color(0.9, 0.3, 0.3), 4)
-	b.box(Vector3(0.12, 0.08, 0.05), MeshKit.at(Vector3(-0.32, 0.3, mill_z + 0.01)), Color(0.4, 0.75, 1.0))
-	b.box(Vector3(0.12, 0.08, 0.05), MeshKit.at(Vector3(0.32, 0.3, mill_z + 0.01)), Color(0.4, 0.75, 1.0))
+		var x: float = mill_x + sx * (hw + MILL_GAP) * 0.5
+		b.box(Vector3(hw - MILL_GAP, 0.5, 0.36), MeshKit.at(Vector3(x, 0.25, z)), Color(0.98, 0.9, 0.75))
+	b.box(Vector3(w, 0.2, 0.36), MeshKit.at(Vector3(mill_x, 0.6, z)), Color(0.98, 0.9, 0.75))
+	b.cone(hw + 0.02, 0.45, MeshKit.at(Vector3(mill_x, 0.92, z), Vector3(1.0, 1.0, 0.5)), Color(0.9, 0.3, 0.3), 4)
+	b.box(Vector3(0.12, 0.08, 0.05), MeshKit.at(Vector3(mill_x - hw * 0.53, 0.3, mill_z + 0.01)), Color(0.4, 0.75, 1.0))
+	b.box(Vector3(0.12, 0.08, 0.05), MeshKit.at(Vector3(mill_x + hw * 0.53, 0.3, mill_z + 0.01)), Color(0.4, 0.75, 1.0))
 
 
 func _loop(b: MeshKit.Builder) -> void:
@@ -305,8 +302,8 @@ func _loop(b: MeshKit.Builder) -> void:
 		var p0 := _loop_point(a0)
 		var p1 := _loop_point(a1)
 		b.tube(p0, p1, 0.035, 0.035, colors[s % colors.size()], 6)
-	b.box(Vector3(0.1, 0.06, 0.1), MeshKit.at(Vector3(-0.08, 0.03, loop_z)), Color(0.9, 0.9, 0.95))
-	b.box(Vector3(0.1, 0.06, 0.1), MeshKit.at(Vector3(0.08, 0.03, loop_z)), Color(0.9, 0.9, 0.95))
+	b.box(Vector3(0.1, 0.06, 0.1), MeshKit.at(Vector3(loop_x - 0.08, 0.03, loop_z)), Color(0.9, 0.9, 0.95))
+	b.box(Vector3(0.1, 0.06, 0.1), MeshKit.at(Vector3(loop_x + 0.08, 0.03, loop_z)), Color(0.9, 0.9, 0.95))
 
 
 ## Ball centre on the loop at angle a (0 = the bottom going in, TAU = the bottom coming out).
@@ -315,7 +312,7 @@ func loop_ball(a: float, x: float) -> Vector3:
 
 
 func _loop_point(a: float) -> Vector3:
-	var p := loop_ball(a, 0.0)
+	var p := loop_ball(a, loop_x)
 	# The track sits just outside the ball's path.
-	var c := Vector3(p.x, LOOP_R + BALL_R, loop_z)
+	var c := Vector3(p.x, LOOP_R + BALL_R, loop_z)  # (the hoop drifts sideways a touch, like the ball)
 	return c + (p - c) * ((LOOP_R + BALL_R * 1.6) / LOOP_R)
