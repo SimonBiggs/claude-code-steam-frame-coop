@@ -21,7 +21,7 @@ static func arm(node: Node, host_s := 150.0, joiner_s := 140.0) -> void:
 	var tree := node.get_tree()  # (the tree, not the node: a bot may be freed by a scene change before its end)
 	tree.create_timer(s, true, false, true).timeout.connect(func() -> void:
 		print("BOT END: ran %d s, quitting (tests/bot_end.gd)" % int(s))
-		tree.quit(0))
+		quit_quietly(tree, 0))
 
 
 ## `s` seconds, or less when the runner (BOT_DEADLINE: tools/multibot.ts --seconds) would kill this machine first:
@@ -33,3 +33,18 @@ static func within_deadline(s: float, joining := OS.has_environment("DUO_JOIN"))
 		return s
 	var limit := float(OS.get_environment("BOT_DEADLINE")) - DEADLINE_SPARE - (10.0 if joining else 0.0)
 	return clampf(s, 5.0, maxf(5.0, limit))
+
+
+## Every bot quits through here (never get_tree().quit(): tests/bot_end_test.gd checks). Stops every sound, gives the
+## audio thread a moment to drop the stopped playbacks, then quits. Quitting while a sound plays leaked its
+## AudioStreamWAV + playback ("ObjectDB instances were leaked at exit"): the AudioServer frees a stopped playback only
+## on its next mix, which never comes after quit() (stopping in _exit_tree is too late, 2026-10-29).
+static func quit_quietly(tree: SceneTree, code := 0) -> void:
+	if tree.has_meta("bot_quitting"):
+		return
+	tree.set_meta("bot_quitting", true)
+	for type in ["AudioStreamPlayer", "AudioStreamPlayer2D", "AudioStreamPlayer3D"]:
+		for n in tree.root.find_children("*", type, true, false):
+			n.stop()
+	await tree.create_timer(0.2, true, false, true).timeout
+	tree.quit(code)

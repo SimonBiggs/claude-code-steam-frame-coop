@@ -237,7 +237,7 @@ func finish(quit: bool = true) -> void:
 	else:
 		printerr("SCRIPT ERROR: BOT RESULT: FAIL (%d of %d checks failed)" % [failures, checks])
 	if quit:
-		get_tree().quit(1 if failures > 0 else 0)
+		preload("res://tests/bot_end.gd").quit_quietly(get_tree(), 1 if failures > 0 else 0)
 
 
 # --- Pause guard ----------------------------------------------------------------------------

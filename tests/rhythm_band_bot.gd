@@ -194,7 +194,7 @@ func _process(delta: float) -> void:
 			main.debug_continue()
 	if quit_t > 0.0 and t > quit_t:
 		print("BOT %s: done" % mode)
-		get_tree().quit()
+		preload("res://tests/bot_end.gd").quit_quietly(get_tree())
 		quit_t = 1e9
 	report_t -= delta
 	if report_t <= 0.0:

@@ -33,4 +33,4 @@ func _physics_process(delta):
 func _process(_d):
 	if OS.has_environment("SHOT") and t > 14.0 and t < 14.05:
 		get_viewport().get_texture().get_image().save_png(OS.get_environment("SHOT"))
-		get_tree().quit()
+		preload("res://tests/bot_end.gd").quit_quietly(get_tree())

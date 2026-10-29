@@ -81,7 +81,7 @@ func _physics_process(delta: float) -> void:
 	t += delta
 	if t >= end_at and not finished:
 		_finish()
-		get_tree().quit(0 if _result() else 1)
+		preload("res://tests/bot_end.gd").quit_quietly(get_tree(), 0 if _result() else 1)
 		return
 	if not main.ready_to_play:
 		return

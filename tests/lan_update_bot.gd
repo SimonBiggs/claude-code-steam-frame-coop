@@ -27,7 +27,7 @@ func _process(delta: float) -> void:
 	t += delta
 	if t > 120.0:
 		print("BOT RESULT: FAIL (timed out in phase %s)" % phase)
-		get_tree().quit(1)
+		preload("res://tests/bot_end.gd").quit_quietly(get_tree(), 1)
 		return
 	var u := get_node_or_null("/root/LanUpdate")
 	if u == null:
@@ -56,7 +56,7 @@ func _process(delta: float) -> void:
 				u.applied.connect(func(v: String) -> void:
 					print("BOT: applied %s after returning to the arcade" % v)
 					print("BOT RESULT: PASS")
-					get_tree().quit(0))
+					preload("res://tests/bot_end.gd").quit_quietly(get_tree(), 0))
 				get_tree().change_scene_to_file(ARCADE)
 				phase = "back"
 				t = 60.0
