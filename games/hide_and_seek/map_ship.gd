@@ -92,12 +92,12 @@ const CYAN := Color(0.3, 0.9, 1.0)
 const LAMP := Color(0.85, 0.95, 1.0)
 
 
-static func data() -> Dictionary:
+static func data(_spec: Dictionary = {}) -> Dictionary:
 	return {"title": TITLE, "rooms": ROOMS, "doors": DOORS, "hide_spots": HIDE_SPOTS, "star_spots": STAR_SPOTS,
 		"spawns": SPAWNS, "jail": JAIL_POS, "bell": BELL_POS, "bounds": [-9.0, 9.0, -7.0, 7.0]}
 
 
-static func build(root: Node3D) -> Dictionary:
+static func build(root: Node3D, spec: Dictionary = {}) -> Dictionary:
 	var ctx: Dictionary = W.new_ctx(root)
 	W.environment_for(root, Color(0.03, 0.03, 0.09), Color(0.85, 0.9, 1.0), 0.6, 0.3)
 	W.shader_floor(ctx, Vector2(18.0, 14.0), Vector3.ZERO, FLOOR_SHADER)
@@ -112,7 +112,7 @@ static func build(root: Node3D) -> Dictionary:
 	var lights: Array = W.omni_lights(root, [Vector3(-6.0, 2.5, 4.5), Vector3(0, 2.5, 4.5), Vector3(6.0, 2.5, 4.5),
 		Vector3(0, 2.5, 0.5), Vector3(-6.0, 2.5, -4.0), Vector3(0, 2.5, -4.0), Vector3(6.0, 2.5, -4.0)],
 		Color(0.9, 0.95, 1.0), 1.1, 6.5)
-	var decoys: Array = W.finish(ctx, DECOYS)
+	var decoys: Array = W.finish(ctx, W.round_decoys(DECOYS, int(spec.get("seed", 0))))
 	return {"decoys": decoys, "lights": lights, "window_mat": W.window_mat(ctx)}
 
 
