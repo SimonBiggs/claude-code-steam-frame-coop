@@ -10,7 +10,10 @@ extends Node3D
 ##
 ## Files: puzzles.gd (module generation), panel.gd (pilot's desk), manual.gd (blueprint boards),
 ## jobs.gd (crew jobs), rocket.gd (rocket + launch fx), space.gd (planets, map, log, launch cam),
-## operator.gd (pilot), player.gd (crew), world.gd (the workshop), join_listener.gd (drop-in join).
+## operator.gd (pilot), player.gd (crew), world.gd (the workshop), join_listener.gd (drop-in join),
+## rocketgen.gd (seeded rockets: puzzles + look, parts unlocks, TODAY'S ROCKET, the validator),
+## museum.gd (ROCKET ROW: every rocket that lands comes home as a model, saved), sprocket.gd (Sprocket
+## the robot engineer, who acts out every beat; story cards with his picture say a few words).
 ## The host is authoritative; modules travel to the TV in snapshots.
 ##
 ## SIMPLE_MODE (the family: "all of the games have become too complicated", "simple games are the fun
@@ -210,6 +213,7 @@ var work_t := 0.0  # seconds spent on this rocket
 var session_t := 0.0
 var museum_send_t := 0.0
 var quit_logged := false
+var host_museum := 0  # TV: how many models the host's Rocket Row has (snapshots)
 
 
 func _ready() -> void:
@@ -2571,8 +2575,9 @@ func apply_snapshot(s: Array) -> void:
 	stars = s[10]
 	streak = s[11]
 	last_stars = s[12]
-	if s.size() > 13 and s[13] is Array:
+	if s.size() > 14 and s[13] is Array:
 		rocket_look = s[13]
+		host_museum = int(s[14])
 	if game_over != (phase == "over"):
 		game_over = phase == "over"
 		game_over_time = 0.0
