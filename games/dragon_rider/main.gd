@@ -2726,17 +2726,18 @@ func _build_charms(list: Array, days: int) -> void:
 		var e: Array = list[i]
 		var ch := _charm(String(e[0]), bool(e[2]))
 		ch.position = RouteGen.charm_slot(i)
+		ch.scale = Vector3.ONE * 1.8  # big enough to spot from the deck and the saddle
 		charm_root.add_child(ch)
 		if grown and i == list.size() - 1:
 			ch.scale = Vector3.ONE * 0.05
-			ch.create_tween().tween_property(ch, "scale", Vector3.ONE, 0.8).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+			ch.create_tween().tween_property(ch, "scale", Vector3.ONE * 1.8, 0.8).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	# The garland: blossoms along the top of both rails, front first.
 	var blossoms := RouteGen.garland(days)
 	var petal_cols: Array[Color] = [Color(1.0, 0.6, 0.75), Color(1.0, 1.0, 1.0), Color(1.0, 0.85, 0.35)]
 	for i in blossoms:
 		var side := -1.0 if i % 2 == 0 else 1.0
 		var b := MeshInstance3D.new()
-		b.mesh = sphere_mesh(0.07)
+		b.mesh = sphere_mesh(0.09)
 		b.material_override = color_mat(petal_cols[(i / 2) % petal_cols.size()], 0.4)
 		b.scale = Vector3(1.0, 0.6, 1.0)
 		b.position = Vector3(1.12 * side, 0.37, 0.9 + (i / 2) * 0.45)
