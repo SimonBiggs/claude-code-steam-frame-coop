@@ -13,7 +13,8 @@ extends RefCounted
 ## snowman, tophat, beanie, gift (a present), and the Kitchen Rush guest faces granny, kid, pirate, robot,
 ## alien, knight; Kart Race's kart (a little race kart in `color`), partyhat, cowboy (hat), wizard (hat);
 ## Whack-a-Mole's farmer (Fig), mole (fur = color), bunny and crops lettuce, carrot, pumpkin, sunflower,
-## strawberry, corn, melon, apple; Party Board's toucan (Mango); anything else is a core/ui_kit.gd icon kind ("star", "heart", "crown"...).
+## strawberry, corn, melon, apple; Party Board's toucan (Mango);
+## Fishing Lake's fish (body = color) and otter (Ollie, who keeps the fish book); anything else is a core/ui_kit.gd icon kind ("star", "heart", "crown"...).
 ## Keep lines short and kind: kids read the screen.
 
 const UiKit := preload("res://core/ui_kit.gd")
@@ -23,7 +24,7 @@ const PICTURES: Array[String] = ["bird", "envelope", "cloud", "storm", "house", 
 	"penguin", "snowman", "tophat", "beanie", "gift", "granny", "kid", "pirate", "robot", "alien", "knight",
 	"kart", "partyhat", "cowboy", "wizard",
 	"farmer", "mole", "bunny", "lettuce", "carrot", "pumpkin", "sunflower", "strawberry", "corn", "melon", "apple",
-	"toucan"]
+	"toucan", "fish", "otter"]
 
 
 ## Show a story card on one view root or an Array of them. Returns the first card made (or null).
@@ -355,6 +356,31 @@ class Picture extends Control:
 				_circle(0.34, 0.06 + bob, 0.04, white)
 				var flap := sin(t * 6.0) * 0.05
 				_poly([[0.22, 0.58 + bob], [0.08, 0.72 + bob - flap], [0.3, 0.78 + bob]], Color(0.2, 0.2, 0.26))
+			"fish":  # a friendly fish swimming right, body = color
+				var wag := sin(t * 6.0) * 0.05
+				_poly([[0.22, 0.52 + bob], [0.04, 0.32 + bob + wag], [0.06, 0.72 + bob + wag]], color.darkened(0.25))
+				var body := []
+				for i in 20:
+					var a := TAU * float(i) / 20.0
+					body.append([0.52 + cos(a) * 0.34, 0.52 + bob + sin(a) * 0.22])
+				_poly(body, color)
+				_poly([[0.42, 0.34 + bob], [0.6, 0.2 + bob], [0.62, 0.34 + bob]], color.darkened(0.2))
+				_circle(0.52, 0.6 + bob, 0.1, color.lightened(0.35))
+				_eye(0.72, 0.46 + bob, 0.06)
+				_circle(0.84, 0.58 + bob, 0.02, Color(0.15, 0.1, 0.1))
+			"otter":  # Ollie: a round brown otter face with a cream muzzle and whiskers
+				var fur := Color(0.62, 0.42, 0.25)
+				_circle(0.24, 0.24 + bob, 0.09, fur.darkened(0.15))
+				_circle(0.76, 0.24 + bob, 0.09, fur.darkened(0.15))
+				_circle(0.5, 0.52 + bob, 0.36, fur)
+				_circle(0.5, 0.66 + bob, 0.2, Color(0.95, 0.86, 0.7))
+				_eye(0.37, 0.44 + bob, 0.07)
+				_eye(0.63, 0.44 + bob, 0.07)
+				_circle(0.5, 0.58 + bob, 0.06, Color(0.15, 0.1, 0.1))
+				for sy in [-0.03, 0.03]:
+					draw_line(_p(0.38, 0.66 + bob + sy), _p(0.12, 0.62 + bob + sy * 2.0), Color(0.3, 0.2, 0.15), 2.0)
+					draw_line(_p(0.62, 0.66 + bob + sy), _p(0.88, 0.62 + bob + sy * 2.0), Color(0.3, 0.2, 0.15), 2.0)
+				_poly([[0.44, 0.74 + bob], [0.56, 0.74 + bob], [0.5, 0.8 + bob]], Color(0.75, 0.35, 0.4))
 			"castle":
 				_poly([[0.2, 0.45], [0.8, 0.45], [0.8, 0.85], [0.2, 0.85]], Color(0.85, 0.88, 1.0))
 				for x in [0.2, 0.44, 0.68]:
