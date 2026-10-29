@@ -279,7 +279,7 @@ func _make_hud(slot: int, parent: Control) -> void:
 	row.add_child(UiKit.label("  :  ", "number", "dim"))
 	var gl := UiKit.label("0", "number", "bad")
 	row.add_child(gl)
-	row.add_child(UiKit.label("GIANT", "heading", "bad"))
+	row.add_child(UiKit.label("TUMTUM", "heading", "bad"))
 	score_labels[slot] = [tv, gl]
 	# Top right: the score card owns the top centre (the timer drew over "GIANT").
 	timers[slot] = HudKit.timer(ui, {"seconds": float(net.state_get("time", round_time)), "anchor": "top_right"})
