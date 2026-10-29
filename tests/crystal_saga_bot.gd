@@ -45,6 +45,7 @@ var outside := 0
 var saw_choose := 0
 var saw_offer_client := false
 var plan_ok := true
+var first_road := 0  ## the first journey's road (a hash), once the party is in the forest
 
 
 func _ready() -> void:
@@ -85,6 +86,8 @@ func _watch() -> String:
 		saw_choose += 1
 		if main.world.offer.size() == 2 and main.world.choice_ids.size() == 2 and (main.world.props[main.world.choice_ids[0]]["node"] as Node3D).visible:
 			saw_offer_client = true
+	if first_road == 0 and _zone() >= 1:
+		first_road = var_to_str(main.world.plan.get("props", [])).hash()
 	var pl: Array = main.net.state_get("plan", [])
 	if not pl.is_empty() and int(main.world.plan.get("seed", -1)) != int(pl[0]) and _phase() != "results":
 		plan_ok = false
@@ -352,6 +355,8 @@ func _checks() -> void:
 	if mode != "host":
 		kit.assert_eq(kit.seated(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
 	kit.assert_true(plan_ok, "%s: the world was built from the journey's plan" % mode)
+	if mode != "local":
+		print("BOT AGREE road=%d" % first_road)  # every machine built the same (first) road
 	kit.assert_true(main.stories_shown > 0, "%s: Lumi's story cards showed (%d)" % [mode, main.stories_shown])
 	if mode == "client":
 		kit.assert_true(saw_choose == 0 or saw_offer_client, "client showed the level-up stones")

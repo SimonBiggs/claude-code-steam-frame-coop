@@ -1738,8 +1738,8 @@ func _telemetry(end: String) -> void:
 
 
 func _exit_tree() -> void:
-	if net != null and ready_to_play and String(net.state_get("phase", "")) != "results":
-		_telemetry("quit")
+	if net != null and ready_to_play and String(net.state_get("phase", "")) != "results" and journey_t > 5.0:
+		_telemetry("quit")  # (not for a peek: opened and left at once)
 
 
 # --- Networking ----------------------------------------------------------------------------------
