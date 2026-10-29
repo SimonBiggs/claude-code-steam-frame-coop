@@ -2478,6 +2478,7 @@ func _build_village(list: Array, days: int) -> void:
 	if village_count == list.size() and village.get_child_count() == list.size() and village.get_meta("days", -1) == days:
 		return
 	for c in village.get_children():
+		village.remove_child(c)
 		c.queue_free()
 	village.set_meta("days", days)
 	for i in mini(list.size(), SiegeGen.VILLAGE_SLOTS):

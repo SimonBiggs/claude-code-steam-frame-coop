@@ -71,6 +71,9 @@ func _physics_process(delta: float) -> void:
 		if p.index == 1 and not main.simple and _repair_role(p):
 			continue
 		_throw_role(p, delta)
+	if main.net.mode == "client" and main.simple and t >= (float(OS.get_environment("BOT_END")) - 10.0 if OS.has_environment("BOT_END") else 60.0) and not has_meta("client_checked"):
+		set_meta("client_checked", true)
+		_check_siege()
 	if main.net.mode != "client":
 		_content_script()
 		if OS.has_environment("BOT_GOD"):
