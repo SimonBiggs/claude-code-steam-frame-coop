@@ -122,12 +122,10 @@ func _init() -> void:
 	_expect(not IslandGen.check(b5).is_empty(), "an island without resources is caught")
 	# Pictures: every story card picture has a drawing, and the ones the town uses exist.
 	var StoryCard := load("res://core/story_card.gd")
-	var src := FileAccess.get_file_as_string("res://core/story_card.gd")
-	for pic in StoryCard.PICTURES:
-		var re := RegEx.create_from_string("\\n\\t+(\"[a-z]+\", )*\"%s\"(, \"[a-z]+\")*:" % pic)
-		_expect(re.search(src) != null, "story card picture %s has a drawing" % pic)
+	for e in StoryCard.check():  # (tests/story_pictures_test.gd checks the pictures in depth)
+		_expect(false, e)
 	for pic in Wishes.PICTURES_USED:
-		_expect(StoryCard.PICTURES.has(pic) or ["star", "heart", "crown", "music", "trophy", "flag"].has(pic), "picture %s exists" % pic)
+		_expect(StoryCard.has_picture(pic) or ["star", "heart", "crown", "music", "trophy", "flag"].has(pic), "picture %s exists" % pic)
 	for w in Wishes.self_check():
 		_fail("wishes: " + w)
 	print("island gen: %d failures" % fails)

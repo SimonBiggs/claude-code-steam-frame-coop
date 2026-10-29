@@ -140,7 +140,7 @@ func _init() -> void:
 	var pics: Array = ["queenbee", "hive", "honeyjar", "cloud", "sun"]
 	pics.append_array(Story.KIND_PICS)
 	for pic in pics:
-		_expect(StoryCard.PICTURES.has(pic), "the %s picture exists" % pic)
+		_expect(StoryCard.has_picture(pic), "the %s picture exists" % pic)
 	print("bee gen: %d gardens checked, %d round plans, plans %s, features %s, weather %s, %d failures" % [total, days, str(plans), str(feats), str(weathers), fails])
 	print("BOT RESULT: %s" % ("PASS" if fails == 0 else "FAIL"))
 	quit(0 if fails == 0 else 1)

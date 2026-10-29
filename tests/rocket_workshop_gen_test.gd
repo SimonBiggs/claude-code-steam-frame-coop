@@ -111,7 +111,7 @@ func _init() -> void:
 	_expect(G.MUSEUM_KEEP >= slots, "the save keeps at least a full row")
 	# Pictures Sprocket shows.
 	for pic in ["engineer", "toyrocket"]:
-		_expect(StoryCard.PICTURES.has(pic), "story picture %s exists" % pic)
+		_expect(StoryCard.has_picture(pic), "story picture %s exists" % pic)
 	print("BOT RESULT: %s" % ("PASS" if fails == 0 else "FAIL (%d)" % fails))
 	quit(0 if fails == 0 else 1)
 

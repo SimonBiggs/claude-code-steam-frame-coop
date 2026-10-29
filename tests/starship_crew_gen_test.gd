@@ -116,16 +116,13 @@ func _init() -> void:
 	_expect(not MissionGen.check(b6).is_empty(), "targets all on one side are caught")
 	# Pictures: every story card picture has a drawing (all games), and every picture the captain uses exists.
 	var StoryCard := load("res://core/story_card.gd")
-	var src := FileAccess.get_file_as_string("res://core/story_card.gd")
-	for pic in StoryCard.PICTURES:
-		var re := RegEx.create_from_string("\\n\\t+(\"[a-z]+\", )*\"%s\"(, \"[a-z]+\")*:" % pic)
-		_expect(re.search(src) != null, "story card picture %s has a drawing" % pic)
-	_expect(RegEx.create_from_string("\\n\\t+(\"[a-z]+\", )*\"%s\"(, \"[a-z]+\")*:" % "nopicture").search(src) == null, "the picture check can fail")
+	for e in StoryCard.check():  # (tests/story_pictures_test.gd checks the pictures in depth)
+		_expect(false, e)
 	var icons := ["star", "crown", "music", "trophy", "flag", "heart"]
 	for part in Story.PARTS:
-		_expect(StoryCard.PICTURES.has(String(part.pic)) or icons.has(String(part.pic)), "station part picture %s exists" % part.pic)
+		_expect(StoryCard.has_picture(String(part.pic)) or icons.has(String(part.pic)), "station part picture %s exists" % part.pic)
 	for pic in ["captain", "planet"]:
-		_expect(StoryCard.PICTURES.has(pic), "picture %s exists" % pic)
+		_expect(StoryCard.has_picture(pic), "picture %s exists" % pic)
 	# Story.
 	for w in Story.self_check():
 		_fail("story: " + w)

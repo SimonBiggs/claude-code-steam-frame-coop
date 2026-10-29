@@ -126,7 +126,7 @@ func _init() -> void:
 	for r in Story.RIDES:
 		pics.append(String(r.pic))
 	for pic in pics:
-		_expect(StoryCard.PICTURES.has(pic) or ["flag", "star"].has(pic), "the %s picture exists" % pic)
+		_expect(StoryCard.has_picture(pic) or ["flag", "star"].has(pic), "the %s picture exists" % pic)
 	print("balloon gen: %d rounds checked, %d failures" % [total, fails])
 	print("BOT RESULT: %s" % ("PASS" if fails == 0 else "FAIL"))
 	quit(0 if fails == 0 else 1)
