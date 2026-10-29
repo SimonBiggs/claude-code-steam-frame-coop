@@ -28,7 +28,7 @@ const TOYS := {
 }
 const BOBBLE_AT := Vector3(0.14, 0.8, -0.7)
 const AGAIN_AT := Vector3(0.0, 0.84, -0.5)
-const MODEL_AT := Vector3(-0.02, 1.0, -1.05)
+const MODEL_AT := Vector3(0.46, 0.98, -0.8)
 const MODEL_SCALE := 0.0035
 const STARS := 8
 const MISSIONS := 4
