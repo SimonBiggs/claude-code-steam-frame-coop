@@ -214,6 +214,14 @@ func _checks() -> void:
 	kit.assert_true(max_home > 0 or int(main.net.state_get("round", 0)) >= 2, "%s: sheep got into the pen" % mode)
 	kit.assert_true(int(main.net.state_get("round", 0)) >= 2, "%s: round 1 ended with results and round 2 started" % mode)
 	kit.assert_true(main.sheep.size() >= 5, "%s: the flock is on the field (%d)" % [mode, main.sheep.size()])
+	var fd: Dictionary = main.net.state_get("field", {})
+	kit.assert_true(not main.field.is_empty() and int(main.field.seed) == int(fd.get("seed", -1)), "%s: this machine built the host's field (%s)" % [mode, str(main.field.get("name", "?"))])
+	kit.assert_true(main.farm_node != null and is_instance_valid(main.farm_node), "%s: Bo's home farm is built" % mode)
+	if mode == "client" and main.sheep.size() == (main.field.sheep as Array).size():
+		var same := true
+		for i in main.sheep.size():
+			same = same and int(main.sheep[i].get("breed")) == int(main.field.sheep[i][2])
+		kit.assert_true(same, "client: every sheep has the host's breed")
 	if main.vr_rig != null:
 		kit.assert_true(grabs > 0, "fake farmer grabbed sheep")
 
