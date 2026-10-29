@@ -96,6 +96,7 @@ func _update_mirror(cam: Camera3D, delta: float) -> void:
 		mirror.render_target_update_mode = SubViewport.UPDATE_DISABLED
 		mirror_cam = Camera3D.new()
 		mirror_cam.fov = 90.0
+		mirror_cam.add_to_group(preload("res://core/vr_layer.gd").GROUP_VIEW)
 		mirror.add_child(mirror_cam)
 		add_child(mirror)
 		mirror.add_to_group("gdev_capture")

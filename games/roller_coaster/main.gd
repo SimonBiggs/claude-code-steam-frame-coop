@@ -107,6 +107,9 @@ var ride_prompts := {}
 var build_prompt: Control
 var join_prompt: Control
 var tv_banner: Control
+## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
+var multi_machine := true
+var flat_host := false  # this machine hosts without VR: P1 builds with a pad here, like local play
 var vr_avatar: VrRig.Avatar
 var giant: Node3D  # TV: the builder's big head and hands peeking over the table
 var cam_t := 0.0
@@ -184,15 +187,17 @@ func _exit_tree() -> void:
 
 
 func _setup(mode: String) -> void:
-	_build_world(VrRig.wanted(mode))
-	if VrRig.wanted(mode):
+	flat_host = mode == "host" and not net.has_vr
+	var want_vr := VrRig.wanted(mode) and not flat_host
+	_build_world(want_vr)
+	if want_vr:
 		vr_rig = VrRig.new()
 		add_child(vr_rig)
 		builder = BuilderScript.new()
 		builder.name = "Builder"
 		add_child(builder)
 		builder.setup(self, vr_rig)
-	if mode != "host":
+	if mode != "host" or flat_host:  # every machine with a screen of its own (a flat host too)
 		split = SplitView.new()
 		add_child(split)
 		split.bind_party(party)
@@ -200,15 +205,9 @@ func _setup(mode: String) -> void:
 		shared.position = Vector3(0, 13, 19)
 		UiKit.look(shared, Vector3(0, 0, 0))
 		_make_hud(-1, split.shared_hud())
-		if mode == "client":
-			vr_avatar = VrRig.Avatar.new()
-			add_child(vr_avatar)
-			vr_avatar.visible = false
-			split.set_bubble(VrRig.build_mirror(self, vr_avatar.head, false))
-			_build_giant()
-		elif vr_rig != null:
+		if vr_rig != null:
 			split.set_bubble(vr_rig.mirror)
-	party.allow_slot0 = mode == "local" and vr_rig == null
+	party.allow_slot0 = _pad_builds()
 	if mode != "client":
 		net.state_set("track", [])
 		net.state_set("closed", false)
@@ -262,6 +261,21 @@ func _build_world(vr: bool) -> void:
 		guest_vel.append(Vector3.ZERO)
 		guest_goal.append(park.guests[i].position)
 		guest_car.append(-1)
+
+
+## P1 builds with a pad on this machine: local play or a flat host, without a headset.
+func _pad_builds() -> bool:
+	return vr_rig == null and net.mode != "client"
+
+
+## TV machine, once the host sends a VR pose: the VR builder's avatar, its view bubble and the giant.
+func _make_vr_avatar() -> void:
+	vr_avatar = VrRig.Avatar.new()
+	add_child(vr_avatar)
+	vr_avatar.visible = false
+	if split != null:
+		split.set_bubble(VrRig.build_mirror(self, vr_avatar.head, false))
+	_build_giant()
 
 
 ## TV machine: the builder's big friendly head and mittens above the table.
@@ -542,7 +556,7 @@ func _simulate(delta: float) -> void:
 
 
 func _has_builder() -> bool:
-	return vr_rig != null or (net.mode == "local" and party.is_active(0))
+	return vr_rig != null or (_pad_builds() and party.is_active(0))
 
 
 ## Nobody to build (a host without a headset, or nobody on P1's pad yet): build a demo coaster.
@@ -637,13 +651,13 @@ func _local_input(delta: float) -> void:
 	send_t -= delta
 	for slot in party.local_slots():
 		var up := party.pressed(slot, "accept")
-		if slot == 0 and net.mode == "local" and vr_rig == null and phase == "build":
+		if slot == 0 and _pad_builds() and phase == "build":
 			_pad_builder(slot)
 			up = false
 		if bool(my_hands.get(slot, false)) != up:
 			my_hands[slot] = up
 			net.request(slot, "hands", [up])
-	if net.mode == "local" or vr_rig == null:
+	if _pad_builds():
 		_pad_ghost_update()
 
 
@@ -1060,7 +1074,7 @@ func _pad_builder(slot: int) -> void:
 
 
 func _pad_ghost_update() -> void:
-	var show: bool = net.mode == "local" and vr_rig == null and party.is_active(0) and phase == "build"
+	var show: bool = _pad_builds() and party.is_active(0) and phase == "build"
 	if pad_ghost == null:
 		if not show:
 			return
@@ -1101,7 +1115,7 @@ func _update_cameras(delta: float) -> void:
 			var pos := cx.origin + cx.basis.z * 3.4 + cx.basis.y * 1.5
 			target = Transform3D(UiKit.aim(cx.origin - cx.basis.z * 3.0 + cx.basis.y * 0.6 - pos, cx.basis.y.lerp(Vector3.UP, 0.4).normalized()), pos)
 			k = 1.0 - exp(-9.0 * delta)
-		elif slot == 0 and net.mode == "local" and vr_rig == null:
+		elif slot == 0 and _pad_builds():
 			var end: Array = track.get("end", [Track.station_end(), 0.0])
 			var focus := park.to_global((end[0] as Vector3) * 0.5)
 			var pos := focus + Vector3(0, 13.0, 13.0)
@@ -1150,7 +1164,7 @@ func _make_hud(slot: int, parent: Control) -> void:
 	star_labels[slot] = l
 	var pill := UiKit.panel("pill")
 	ui.add_child(pill)
-	pill.add_child(UiKit.prompts([["A", "Hands up!"]]) if slot != 0 or vr_rig != null or net.mode == "client" else UiKit.prompts([["A", "Add"], ["B", "Undo"], ["Y", "Ride!"]]))
+	pill.add_child(UiKit.prompts([["A", "Hands up!"]]) if slot != 0 or not _pad_builds() else UiKit.prompts([["A", "Add"], ["B", "Undo"], ["Y", "Ride!"]]))
 	pill.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_KEEP_SIZE)
 	pill.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	pill.grow_vertical = Control.GROW_DIRECTION_BEGIN
@@ -1178,7 +1192,7 @@ func _refresh_hud() -> void:
 		var p: Control = ride_prompts[slot]
 		if not is_instance_valid(p) or int(slot) < 0:
 			continue
-		var builder_pad: bool = int(slot) == 0 and net.mode == "local" and vr_rig == null
+		var builder_pad: bool = int(slot) == 0 and _pad_builds()
 		p.visible = (phase == "build") if builder_pad else (phase == "ride")
 	if join_prompt != null:
 		join_prompt.visible = party.local_slots().is_empty()
@@ -1282,6 +1296,8 @@ func apply_snapshot(s: Array) -> void:
 	if not ready_to_play or s.size() < 7:
 		return
 	var pose: PackedFloat32Array = s[0]
+	if pose.size() > 0 and vr_avatar == null:
+		_make_vr_avatar()  # only when the host has a VR builder (not on a flat host)
 	if vr_avatar != null and pose.size() > 0:
 		vr_avatar.apply_pose(pose)
 	park.rotation.y = float(s[1])

@@ -148,7 +148,7 @@ func tag_layer() -> int:
 
 
 func arrow_layer() -> int:
-	return 1 << (12 + clampi(index, 1, 6))
+	return 1 << (10 + clampi(index, 1, 6))  # bits 11..16 (W.BEE_ARROW_BITS)
 
 
 func set_active(on: bool) -> void:

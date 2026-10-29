@@ -246,7 +246,7 @@ static func vr_summary(world: Node, cam: Node3D, data: Dictionary, hand: Node3D 
 		s.cam = s.rig.get("camera")
 		s.hand = s.rig.get("hand_r")
 	s.min_time = float(opts.get("min_time", 2.5))
-	s.vis_layers = int(opts.get("layers", 1))
+	s.vis_layers = int(opts.get("layers", UiKit.VR_LAYER))
 	world.add_child(s)
 	return s
 
@@ -476,7 +476,7 @@ class VrSummary extends Node3D:
 	var hand: Node3D
 	var rig: Node = null
 	var min_time := 2.5
-	var vis_layers := 1
+	var vis_layers := UiKit.VR_LAYER
 	var t := 0.0
 	var card: Node3D
 	var reader: UiInput
