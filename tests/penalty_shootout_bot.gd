@@ -53,6 +53,7 @@ var prop_i := 0
 var prop_key := ""
 var throw_key := ""
 var cues := {}  # simple mode: picture cues seen / learned
+var leo := {}  # simple mode: Leo's story seen (star in the goal, stars flown, sockets, cards, cubs / prizes)
 const HEADLINES := "^(PENALTY SHOOTOUT|SAVED!|GOAL!|KICK OFF!|FIREBALL!|STRIKERS!|KEEPER WINS!|STRIKERS WIN!|WHAT A MATCH!|PLAYER \\d+!|PLAYER \\d+ LEFT|PAUSED|CONNECTED|FULL!|P\\d: controller disconnected|Connecting to the keeper…|Waiting for strikers…)$"
 var headline_re := RegEx.create_from_string(HEADLINES)
 const PROP_SPOTS: Array = [["post", Vector3(3.72, 1.2, 0.05)], ["net", Vector3(0.0, 1.2, -1.95)],
@@ -131,6 +132,7 @@ func _physics_process(delta: float) -> void:
 		my_pause = false
 	if main.simple:
 		_note_cues()
+		_note_leo()
 	if get_tree().paused:
 		return
 	if has_meta("pad_join") and t > join_time + 0.5:
@@ -255,6 +257,8 @@ func _drive_striker(p) -> void:
 				plan_power = randf_range(0.3, 0.7)
 			elif main.shots_total % 4 == 2:
 				plan_aim = Vector2(randf_range(-1.5, 1.5), 3.0)  # a deliberate miss over the bar (the miss arrow)
+			elif main.star_now != Vector2.INF and randf() < 0.75:
+				plan_aim = main.star_now  # Leo's star
 	if main.simple and main.practice == "striker" and main.state_t < 1.8:
 		p.bot_stick = Vector2.ZERO  # wait a moment: the aim cue (stick + arrow to the ring) shows first
 		p.bot_hold = false
@@ -420,6 +424,33 @@ func _note_cues() -> void:
 				cues["cue_learned_" + str(k)] = true
 
 
+## Leo's story: what this machine shows.
+func _note_leo() -> void:
+	var lc = main.leo
+	if lc == null:
+		return
+	if lc.goal_star.visible:
+		leo["star_shown"] = true
+	if not lc.flyers.is_empty():
+		leo["star_flew"] = true
+	leo["stars"] = maxi(int(leo.get("stars", 0)), int(main.leo_stars))
+	leo["goal"] = int(main.leo_goal)
+	if int(main.leo_goal) > 0 and lc.sockets[0].visible:
+		leo["sockets"] = true
+	leo["cubs"] = lc.cubs_root.get_child_count()
+	leo["prizes"] = lc.prizes_root.get_child_count()
+	leo["plan"] = not main.mplan.is_empty()
+	for h in main.players:
+		if h.hud != null and is_instance_valid(h.hud):
+			for c in h.hud.get_children():
+				if c is Control and c.get("opts") is Dictionary and str(c.get("opts").get("who", "")) == "LEO":
+					leo["card_tv"] = true
+	if main.keeper_in_vr():
+		for c in main.get_children():
+			if c.has_node("StoryPicture"):
+				leo["card_vr"] = true
+
+
 func _check_headline(who: String, text: String) -> void:
 	var tx := text.strip_edges()
 	if tx == "" or headline_re.search(tx) != null:
@@ -439,6 +470,11 @@ func _exit_tree() -> void:
 	var ks: Array = cues.keys()
 	ks.sort()
 	print("BOT CUES: mode=%s %s" % [main.net.mode, ",".join(PackedStringArray(ks))])
+	print("BOT LEO: mode=%s matches=%d %s" % [main.net.mode, matches_done, str(leo)])
+	if matches_done >= 1 and not (leo.get("plan", false) and leo.get("star_shown", false) and leo.get("sockets", false)):
+		print("SCRIPT ERROR: BOT LEO: a whole match without Leo's plan, star or sockets (%s)" % str(leo))
+	if main.net.mode != "client" and leo.get("cubs", 0) < 1:
+		print("SCRIPT ERROR: BOT LEO: no lion cub beside Leo (%s)" % str(leo))
 	for p in main.players:
 		if p.has_meta("cue_done"):
 			print("BOT CUES: P%d done=%s" % [p.index + 1, p.get_meta("cue_done")])
