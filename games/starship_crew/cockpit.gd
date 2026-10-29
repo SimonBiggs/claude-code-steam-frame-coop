@@ -9,7 +9,9 @@ extends Node3D
 ##  - three big toy buttons: HONK (purple), DISCO lights (yellow), BUBBLES (blue);
 ##  - a wobbly alien bobble-head; the eight star lamps (the mission's progress) and four planet lamps
 ##    (missions done) chime when touched;
-##  - at the end a big green AGAIN button pops up on the dashboard.
+##  - at the end a big green AGAIN button pops up on the dashboard;
+##  - a little glowing model of the crew's space station spins over the dashboard (it grows a new part
+##    with every trip home: story.gd PARTS).
 ## Host with VR: update_vr() reads the hands and returns the steering; toys call main.on_toy(what).
 
 const Art := preload("res://games/starship_crew/art.gd")
@@ -26,6 +28,8 @@ const TOYS := {
 }
 const BOBBLE_AT := Vector3(0.14, 0.8, -0.7)
 const AGAIN_AT := Vector3(0.0, 0.84, -0.5)
+const MODEL_AT := Vector3(0.46, 0.98, -0.8)
+const MODEL_SCALE := 0.0035
 const STARS := 8
 const MISSIONS := 4
 
@@ -45,6 +49,8 @@ var planet_mm: MultiMeshInstance3D
 var again_btn: Node3D
 var light: OmniLight3D
 var avatar_seat: Node3D  ## robot autopilot head (local play without a headset)
+var model: MeshInstance3D  ## the station model over the dashboard
+var model_parts := -1
 
 var _grab_at := Vector3.ZERO
 var _grab_trigger := false
@@ -109,6 +115,25 @@ func setup(m: Node, r: VrRig) -> void:
 	light.light_energy = 0.0
 	light.shadow_enabled = false
 	add_child(light)
+
+
+## The station model shows this many parts (story.gd PARTS); it bounces when a part is added.
+func set_station(parts: int) -> void:
+	if model == null:
+		model = MeshInstance3D.new()
+		model.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		model.position = MODEL_AT
+		model.scale = Vector3.ONE * MODEL_SCALE
+		add_child(model)
+	if parts == model_parts:
+		return
+	var grew := model_parts >= 0 and parts > model_parts
+	model_parts = parts
+	model.mesh = Art.station_model(parts)
+	if grew:
+		var tw := model.create_tween()
+		tw.tween_property(model, "scale", Vector3.ONE * MODEL_SCALE * 1.6, 0.25).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		tw.tween_property(model, "scale", Vector3.ONE * MODEL_SCALE, 0.4)
 
 
 func _star_xf(i: int) -> Transform3D:
@@ -251,3 +276,5 @@ func animate(delta: float) -> void:
 		again_btn.scale = Vector3.ONE * (1.0 + sin(_t * 6.0) * 0.1)
 	if avatar_seat != null:
 		avatar_seat.rotation = Vector3(0.0, -steer.x * 0.4, steer.x * 0.15)
+	if model != null:
+		model.rotation = Vector3(0.25, _t * 0.4, 0.0)

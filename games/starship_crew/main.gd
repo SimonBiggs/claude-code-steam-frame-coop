@@ -6,9 +6,15 @@ extends Node3D
 ## - TV players (slots 1..6, or 0 too in local play without a headset) are the GUNNERS: each moves
 ##   a crosshair in their colour with the left stick and zaps space rocks and silly aliens with A.
 ## - Rings, rocks and aliens all give stars; eight stars fill the dashboard and finish a mission.
-##   Four short missions, one new thing each: rings (with practice), a rock shower, silly aliens,
-##   then home to the space station (the ship docks by itself). No failure: a rock that reaches the
+##   A TRIP is four short missions, the last one always HOME to the space station (the ship docks by
+##   itself). The very first trip is the lessons, one new thing each: rings (with practice), a rock
+##   shower, silly aliens, home. After that every trip is seeded (story.gd, missiongen.gd): three
+##   missions picked from rings / rocks / aliens / STAR PARTY at a new planet each, a little harder
+##   every trip; the day's first trip opens with TODAY'S MISSION. No failure: a rock that reaches the
 ##   ship just bounces off the shield. No numbers: stars and planet lamps show the progress.
+## - STORY: CAPTAIN WHISKERS (a space cat) talks in picture cards. Every trip home builds the station
+##   a new part that stays (saved); the pilot has a little glowing model of it on the dashboard.
+##   Planets visited go on the captain's star map. One RUN telemetry line per mission (and on quit).
 ## - PRACTICE: the pilot gets a glowing ring that waits, and a ghost glove that shows how to push the
 ##   stick towards it (ghost_hand.gd); the gunners get one glowing rock that waits to be zapped.
 ## - Text: VR gets one short headline far out in front; the TV shows one short line at most.
@@ -33,21 +39,21 @@ const Art := preload("res://games/starship_crew/art.gd")
 const Space := preload("res://games/starship_crew/space.gd")
 const Cockpit := preload("res://games/starship_crew/cockpit.gd")
 const GhostHand := preload("res://games/starship_crew/ghost_hand.gd")
+const MissionGen := preload("res://games/starship_crew/missiongen.gd")
+const Story := preload("res://games/starship_crew/story.gd")
+const Seeded := preload("res://core/seeded.gd")
+const Telemetry := preload("res://core/telemetry.gd")
+const StoryCard := preload("res://core/story_card.gd")
 
 const GAME_ID := "starship_crew"
-const NEED := 8  ## stars per mission
-const MISSIONS := 4
-const NAMES: Array[String] = ["STAR RINGS!", "SPACE ROCKS!", "SILLY ALIENS!", "HOME!"]
-## Seconds between new rings / rocks / aliens per mission (0 = none).
-const RING_EVERY: Array[float] = [3.6, 5.5, 5.5, 4.5]
-const ROCK_EVERY: Array[float] = [3.2, 1.1, 3.0, 2.0]
-const UFO_EVERY: Array[float] = [0.0, 0.0, 3.2, 6.0]
-const STEER_SPEED := 5.0
+const NEED := MissionGen.NEED  ## stars per mission
+const MISSIONS := Story.MISSIONS
+const STEER_SPEED := MissionGen.STEER
 ## The TV camera never moves (the ship stays at the origin), so the host can aim the TV crosshairs too.
-const CAM_POS := Vector3(0.0, 3.4, 10.5)
-const CAM_LOOK := Vector3(0.0, 0.6, -30.0)
-const CAM_FOV := 60.0
-const ASPECT := 16.0 / 9.0
+const CAM_POS := MissionGen.CAM_POS
+const CAM_LOOK := MissionGen.CAM_LOOK
+const CAM_FOV := MissionGen.CAM_FOV
+const ASPECT := MissionGen.ASPECT
 const CROSS_SPEED := 1.3
 const CPU_COLOR := Color(1.0, 0.95, 0.6)
 
@@ -77,10 +83,16 @@ var beam_mats := {}  ## colour html -> material
 var vel := Vector2.ZERO
 var mission_t := 0.0
 var phase_t := 0.0
-var ring_t := 2.0
-var rock_t := 1.0
-var ufo_t := 2.0
 var cpu_t := 3.0
+var trip_no := 0  ## trips home before this one (0 = the lessons)
+var trip_plan: Array = []  ## story.gd trip(): this trip's four missions
+var plan: Dictionary = {}  ## missiongen.gd: the mission's timeline (this lap)
+var plan_t := 0.0
+var plan_i := 0
+var lap := 0
+var daily_trip := false
+var story_rng := RandomNumberGenerator.new()
+var tel := {}  ## this mission's numbers for the RUN line
 var prac_ring := -1
 var prac_rock := -1
 var station := -1
@@ -109,6 +121,9 @@ var lasers_seen := 0  ## bots (TV machine): laser beams drawn
 # VR
 var headline: Label3D
 var headline_t := 0.0
+var vr_story: Node3D
+var stories_shown := 0  ## bots: story cards shown here
+var runs_logged := 0  ## bots: RUN lines written
 var demo_tilt := Vector2.ZERO
 
 
@@ -148,8 +163,12 @@ func _ready() -> void:
 	party.player_left.connect(_on_player_left)
 	save = Save.new()
 	save.game_id = GAME_ID
-	save.defaults = {"trips": 0}
+	save.defaults = Story.save_defaults()
 	add_child(save)
+	if int(save.data.world) < 0:
+		save.data.world = Seeded.fresh_seed()  # this family's own trips
+		save.mark_dirty()
+	story_rng.seed = Seeded.fresh_seed()
 	sfx = SfxScript.new()
 	add_child(sfx)
 	sfx.warm([], true)
@@ -217,14 +236,16 @@ func _setup(mode: String) -> void:
 	if mode != "client":
 		_start_show()
 	else:
-		space.set_planet(int(net.state_get("mission", 0)))
+		space.set_planet(Story.planet_look(int(net.state_get("planet", -1))))
+		space.station_parts = int(net.state_get("parts", 0))
+		cockpit.set_station(space.station_parts)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	ready_to_play = true
 	print("Starship Crew: %s mode%s" % [mode, " with a VR pilot" if vr_rig != null else ""])
 
 
 static func _cam_xf() -> Transform3D:
-	return Transform3D(UiKit.face(CAM_LOOK - CAM_POS), CAM_POS)
+	return MissionGen.cam_xf()
 
 
 func _build_shield() -> void:
@@ -267,19 +288,44 @@ func _start_show() -> void:
 	if not has_meta("started"):
 		net.state_set("practice", 0 if first == 0 else 3)
 		net.state_set("missions", first)
+	trip_no = int(save.data.trips)
+	if OS.has_environment("SC_TRIPS"):
+		trip_no = int(OS.get_environment("SC_TRIPS")) + (int(get_meta("again", 0)) if has_meta("started") else 0)
+	daily_trip = trip_no > 0 and not (save.data.daily as Dictionary).has(Seeded.today()) and not OS.has_environment("BOT_NO_DAILY")
+	trip_plan = Story.trip(trip_no, int(save.data.world), daily_trip)
+	var parts := Story.parts_for(trip_no)
+	net.state_set("parts", parts)
+	space.station_parts = parts
+	cockpit.set_station(parts)
 	set_meta("started", true)
+	print("Captain Whiskers: trip %d (tier %d), %d planets on the map, world %d%s" % [trip_no, Story.tier_for(trip_no),
+		(save.data.planets as Array).size(), int(save.data.world), ", TODAY'S MISSION first" if daily_trip else ""])
+	if trip_no == 0:
+		_story(_captain(String(Story.LINES.welcome)))
+	elif daily_trip:
+		_story(_captain(String(Story.LINES.daily), "star"))
+	else:
+		_story(_captain(Story.pick(story_rng, "new_trip")))
 	_go_mission(first)
 
 
 func _go_mission(i: int) -> void:
 	mission_t = 0.0
-	ring_t = 2.0
-	rock_t = 1.5
-	ufo_t = 1.0
+	var m: Dictionary = trip_plan[i]
+	lap = 0
+	plan = MissionGen.generate(int(m.s), String(m.k), int(m.tier), lap)
+	plan_t = 0.0
+	plan_i = 0
+	space.speed = float(plan.speed)
+	tel = {"rings": 0, "missed": 0, "zaps": 0, "ufos": 0, "bumps": 0}
 	net.state_set("stars", 0)
+	net.state_set("planet", int(m.planet))
+	net.state_set("mname", Story.mission_name(m))
 	net.state_set("mission", i)
 	net.state_set("phase", "play")
-	space.set_planet(i)
+	space.set_planet(Story.planet_look(int(m.planet)))
+	if i > 0:
+		_story(_captain(Story.pick(story_rng, String(m.k)), "captain"))
 	if i == 0 and int(net.state_get("practice", 0)) != 3:
 		var pr := int(net.state_get("practice", 0))
 		if vr_rig == null:
@@ -294,9 +340,26 @@ func _go_mission(i: int) -> void:
 
 func _mission_done() -> void:
 	var m := int(net.state_get("mission", 0))
+	_telemetry("done")
+	save.data.missions = int(save.data.missions) + 1
+	var pl := int((trip_plan[m] as Dictionary).planet)
+	if pl >= 0:  # a new planet for the captain's star map
+		var pname := Story.planet_name(pl)
+		var map: Array = save.data.planets
+		if not map.has(pname):
+			map.append(pname)
+			while map.size() > Story.STAR_MAP_MAX:
+				map.remove_at(0)
+		var look := Story.planet_look(pl)
+		_story({"who": Story.CAPTAIN, "line": String(Story.LINES.planet) % pname, "pic": "planet", "color": look[0], "duration": 3.5})
+	if bool((trip_plan[m] as Dictionary).get("daily", false)):
+		(save.data.daily as Dictionary)[Seeded.today()] = true
+	save.mark_dirty()
 	net.state_set("missions", m + 1)
 	if m + 1 >= MISSIONS:
 		net.state_set("phase", "dock")
+		space.station_parts = Story.parts_for(trip_no + 1)  # the new part is already built when we get home
+		net.state_set("parts", space.station_parts)
 		station = space.add(Space.STATION, Vector3(space.off.x * 0.5, space.off.y * 0.5, -120.0))
 	else:
 		net.state_set("phase", "cheer")
@@ -307,8 +370,17 @@ func _mission_done() -> void:
 
 
 func _arrived() -> void:
-	save.data["trips"] = int(save.data["trips"]) + 1
+	if not OS.has_environment("SC_TRIPS"):
+		save.data["trips"] = int(save.data["trips"]) + 1
+	set_meta("again", int(get_meta("again", 0)) + 1)
 	save.mark_dirty()
+	cockpit.set_station(space.station_parts)
+	var parts_before := Story.parts_for(trip_no)
+	if space.station_parts > parts_before:
+		var part: Dictionary = Story.PARTS[space.station_parts - 1]
+		_story(_captain(String(part.line), String(part.pic)))
+	else:
+		_story(_captain(Story.pick(story_rng, "docked")))
 	sound_at("party_horn", Vector3(0, 1, -4), -2.0)
 	sound_at("cheer", Vector3(0, 1, -4), -2.0)
 	confetti(Vector3(0, 2.5, -6), Color(1.0, 0.5, 0.7), 60)
@@ -393,31 +465,34 @@ func _autopilot() -> Vector2:
 func _spawn(mission: int, delta: float) -> void:
 	if mission == 0 and int(net.state_get("practice", 3)) != 3 and mission_t < 40.0:
 		return
-	var off := space.off
-	ring_t -= delta
-	if ring_t <= 0.0:
-		ring_t = RING_EVERY[mission]
-		var p := Vector3(off.x * 0.6 + randf_range(-5.0, 5.0), off.y * 0.6 + randf_range(-2.5, 2.5), Space.SPAWN_Z)
-		p.x = clampf(p.x, -Space.LIMIT.x, Space.LIMIT.x)
-		p.y = clampf(p.y, -Space.LIMIT.y, Space.LIMIT.y)
-		space.add(Space.RING, p)
-	rock_t -= delta
-	if rock_t <= 0.0:
-		rock_t = ROCK_EVERY[mission] * randf_range(0.8, 1.2)
-		var n := 3 if mission == 1 and randf() < 0.35 else 1
-		var c := Vector3(off.x + randf_range(-7.0, 7.0), off.y + randf_range(-3.0, 4.0), Space.SPAWN_Z + randf_range(0.0, 10.0))
-		for k in n:
-			var id := space.add(Space.ROCK, c + Vector3(k * 2.6, k * 1.2, k * 3.0))
-			space.objs[id]["v"] = Vector3(randf_range(-0.6, 0.6), randf_range(-0.3, 0.3), randf_range(-2.0, 2.0))
-	if UFO_EVERY[mission] > 0.0:
-		ufo_t -= delta
-		var ufos := 0
-		for id in space.objs:
-			if int(space.objs[id]["kind"]) == Space.UFO:
-				ufos += 1
-		if ufo_t <= 0.0 and ufos < 3:
-			ufo_t = UFO_EVERY[mission]
-			space.add(Space.UFO, Vector3(off.x + randf_range(-4.0, 4.0), off.y + randf_range(0.5, 2.5), -95.0))
+	plan_t += delta
+	var ev: Array = plan.events
+	while plan_i < ev.size() and float(ev[plan_i][0]) <= plan_t:
+		_spawn_one(ev[plan_i])
+		plan_i += 1
+	if plan_t >= float(plan.len):  # the next lap of the same mission
+		lap += 1
+		plan = MissionGen.generate(int(plan.seed), String(plan.kind), int(plan.tier), lap)
+		plan_t -= float(plan.len)
+		plan_i = 0
+
+
+## One thing from the mission's timeline: rings at their place on the path; rocks and aliens near the ship.
+func _spawn_one(e: Array) -> void:
+	match int(e[1]):
+		Space.RING:
+			space.add(Space.RING, Vector3(float(e[2]), float(e[3]), Space.SPAWN_Z))
+		Space.ROCK:
+			var id := space.add(Space.ROCK, Vector3(space.off.x + float(e[2]), space.off.y + float(e[3]), Space.SPAWN_Z + float(e[4])))
+			space.objs[id]["v"] = Vector3(float(e[5]), float(e[6]), float(e[7]))
+		Space.UFO:
+			var ufos := 0
+			for id in space.objs:
+				if int(space.objs[id]["kind"]) == Space.UFO:
+					ufos += 1
+			if ufos < 3 + int(plan.tier) / 2:
+				var uid := space.add(Space.UFO, Vector3(space.off.x + float(e[2]), space.off.y + float(e[3]), Space.UFO_Z))
+				space.objs[uid]["sway"] = float(e[8])
 
 
 ## The practice ring waits until the pilot lines up with it, then flies through.
@@ -436,6 +511,7 @@ func _space_event(e: Array) -> void:
 			var p := Vector3(0.0, Space.SHIP_Y, -0.5)
 			if bool(e[2]):
 				log_rings += 1
+				tel.rings = int(tel.get("rings", 0)) + 1
 				sound_at("ding", p, -2.0, 1.3)
 				sound_at("whoosh", p, -6.0, 1.4)
 				confetti(p + Vector3(0, 0, -3), Color(0.5, 1.0, 0.95), 30)
@@ -449,6 +525,7 @@ func _space_event(e: Array) -> void:
 				_add_stars(2, p + Vector3(0, 0, -3), 0)
 			else:
 				sound_at("whoosh", p, -12.0, 0.8)
+				tel.missed = int(tel.get("missed", 0)) + 1
 				if id == prac_ring:  # missed the practice ring somehow: another one waits
 					prac_ring = space.add(Space.RING, Vector3(space.off.x - 4.0, space.off.y, -16.0), true)
 		"bump":
@@ -456,6 +533,7 @@ func _space_event(e: Array) -> void:
 			sound_at("bounce", w, -2.0, 0.9)
 			sound_at("boing", w, -6.0, 0.8)
 			_bump_fx()
+			tel.bumps = int(tel.get("bumps", 0)) + 1
 			net.event("bump", [])
 			_pulse_both(0.4, 0.12)
 
@@ -485,16 +563,11 @@ func _cpu_crew(delta: float) -> void:
 
 ## Where a world point shows on the TV screen (-1..1, y up), or far off-screen behind the camera.
 static func project(w: Vector3) -> Vector2:
-	var q := _cam_xf().affine_inverse() * w
-	if q.z > -0.5:
-		return Vector2(9.0, 9.0)
-	var t := tan(deg_to_rad(CAM_FOV) * 0.5)
-	return Vector2(q.x / (-q.z * t * ASPECT), q.y / (-q.z * t))
+	return MissionGen.project(w)
 
 
 static func screen_ray(uv: Vector2) -> Vector3:
-	var t := tan(deg_to_rad(CAM_FOV) * 0.5)
-	return (_cam_xf().basis * Vector3(uv.x * t * ASPECT, uv.y * t, -1.0)).normalized()
+	return MissionGen.screen_ray(uv)
 
 
 ## Host: a gunner (slot, or -1 = the CPU gunner) zaps at a point on the TV screen. Generous aim.
@@ -530,6 +603,9 @@ func _pop(id: int, slot: int, col: Color) -> void:
 	var kind: int = space.objs[id]["kind"]
 	space.remove(id)
 	log_pops[slot] = int(log_pops.get(slot, 0)) + 1
+	tel.zaps = int(tel.get("zaps", 0)) + 1
+	if kind == Space.UFO:
+		tel.ufos = int(tel.get("ufos", 0)) + 1
 	pop_fx(w, col, kind)
 	net.event("pop", [w, col, kind])
 	if kind == Space.UFO:
@@ -552,6 +628,7 @@ func _add_stars(n: int, from: Vector3, slot: int) -> void:
 	if String(net.state_get("phase", "play")) != "play":
 		return
 	net.state_set("stars", mini(NEED, int(net.state_get("stars", 0)) + n))
+	save.data.stars = int(save.data.stars) + n
 	if slot >= 0:
 		awards.add(slot, "stars", n)
 	fly_stars(from, n)
@@ -610,6 +687,8 @@ func _process(delta: float) -> void:
 	cockpit.animate(delta)
 	space.animate(delta)
 	cockpit.set_progress(int(net.state_get("stars", 0)), int(net.state_get("missions", 0)))
+	if String(net.state_get("phase", "")) == "play":
+		space.planet_near = float(net.state_get("stars", 0)) / float(NEED)
 	_headline(delta)
 	if shield.visible:
 		var c: Color = shield_mat.get_shader_parameter("col")
@@ -959,8 +1038,12 @@ func _on_state_changed(key: String, value: Variant) -> void:
 	match key:
 		"stars", "missions":
 			_refresh_hud()
-		"mission":
-			space.set_planet(int(value))
+		"planet":
+			space.set_planet(Story.planet_look(int(value)))
+		"parts":
+			space.station_parts = int(value)
+			cockpit.set_station(int(value))
+			space.refresh_station()
 		"phase":
 			var ph := String(value)
 			if ph == "results":
@@ -970,13 +1053,14 @@ func _on_state_changed(key: String, value: Variant) -> void:
 			match ph:
 				"play":
 					var m := int(net.state_get("mission", 0))
+					var mname := String(net.state_get("mname", "GO!"))
 					music.play_mood("space")
 					if split != null:
-						HudKit.banner([hud], NAMES[m], "", {"duration": 1.8})
+						HudKit.banner([hud], mname, "", {"duration": 1.8})
 					if m == 0 and int(net.state_get("practice", 3)) & 1 == 0:
 						show_headline("FLY THROUGH THE RING!", 6.0)
 					else:
-						show_headline(NAMES[m])
+						show_headline(mname)
 				"cheer":
 					music.play_mood("victory")
 					show_headline("HOORAY!")
@@ -1089,3 +1173,49 @@ func apply_event(kind: String, args: Array) -> void:
 			toy_fx(String(args[0]))
 		"bump":
 			_bump_fx()
+		"story":
+			show_story({"who": String(args[0]), "line": String(args[1]), "pic": String(args[2]),
+				"color": Color.from_string(String(args[3]), Story.CAPTAIN_COLOR), "duration": 3.5})
+
+
+# --- Story and telemetry ------------------------------------------------------------------------------
+
+## A story beat: Captain Whiskers (or a picture) and a few words, on every machine.
+func _story(beat: Dictionary) -> void:
+	if net.mode == "host":
+		net.event("story", [beat.get("who", ""), beat.get("line", ""), beat.get("pic", ""), (beat.get("color", Story.CAPTAIN_COLOR) as Color).to_html()])
+	show_story(beat)
+
+
+func show_story(beat: Dictionary) -> void:
+	stories_shown += 1
+	if hud != null:
+		StoryCard.show([hud], beat)
+	if vr_rig != null:
+		if vr_story != null and is_instance_valid(vr_story):
+			vr_story.queue_free()
+		vr_story = StoryCard.show_vr(self, vr_rig.camera, beat)
+
+
+func _captain(line: String, pic: String = "captain") -> Dictionary:
+	return {"who": Story.CAPTAIN, "line": line, "pic": pic, "color": Story.CAPTAIN_COLOR, "duration": 3.5}
+
+
+## Host: one RUN line per mission (or quit mid-mission): how the family really plays (balance).
+func _telemetry(end: String) -> void:
+	if trip_plan.is_empty() or tel.is_empty():
+		return
+	var mi := int(net.state_get("mission", 0))
+	var m: Dictionary = trip_plan[clampi(mi, 0, trip_plan.size() - 1)]
+	var info := tel.duplicate()
+	info.merge({"end": end, "trip": trip_no, "mission": mi, "kind": String(m.k), "tier": int(m.tier), "seed": int(m.s),
+		"daily": bool(m.get("daily", false)), "secs": snappedf(mission_t, 0.1), "laps": lap, "stars": int(net.state_get("stars", 0)),
+		"crew": _crew_slots().size(), "vr": vr_rig != null, "mode": String(net.mode), "planets": (save.data.planets as Array).size()})
+	Telemetry.run(GAME_ID, info)
+	runs_logged += 1
+	tel = {}
+
+
+func _exit_tree() -> void:
+	if net != null and net.mode != "client" and String(net.state_get("phase", "")) == "play":
+		_telemetry("quit")

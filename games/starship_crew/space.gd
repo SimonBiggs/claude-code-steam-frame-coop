@@ -17,6 +17,9 @@ const RING_R := 2.4  ## fly within this of a ring's centre and it counts
 const SPAWN_Z := -110.0
 const GONE_Z := 14.0
 const DUST := 90
+const UFO_Z := -95.0  ## where aliens appear (they swoop in to UFO_NEAR and wiggle there)
+const UFO_NEAR := -32.0
+const UFO_STAY := 16.0  ## seconds an alien hangs about before it zooms off by itself
 const GLOW_SHADER := """
 shader_type spatial;
 render_mode unshaded, blend_add, cull_disabled, depth_draw_never, shadows_disabled;
@@ -35,6 +38,8 @@ var speed := 10.0  ## forward speed (m/s)
 var objs := {}
 var next_id := 1
 var rng := RandomNumberGenerator.new()
+var station_parts := 0  ## how many parts the space station has (story.gd PARTS; set before it's added)
+var planet_near := 0.0  ## 0..1: the mission's planet grows as the stars fill up (we're getting closer)
 
 var _dust: MultiMeshInstance3D
 var _dust_p := PackedVector3Array()
@@ -42,6 +47,8 @@ var _planet: MeshInstance3D
 var _glow_mat: ShaderMaterial
 var _ring_mat: StandardMaterial3D
 var _t := 0.0
+var _planet_at := Vector3(-160, 60, -420)
+var _near := 0.0
 
 
 func _ready() -> void:
@@ -66,14 +73,13 @@ func _ready() -> void:
 	_ring_mat.albedo_color = Color(0.5, 1.0, 0.95)
 
 
-## A big planet far away; a different one for every mission.
-func set_planet(i: int) -> void:
-	var cols: Array[Color] = [Color(1.0, 0.6, 0.4), Color(0.5, 0.75, 1.0), Color(0.75, 0.5, 1.0), Color(0.5, 0.95, 0.6)]
-	var rings: Array[Color] = [Color(1.0, 0.9, 0.6), Color(0, 0, 0, 0), Color(1.0, 0.7, 0.9), Color(0.9, 1.0, 0.8)]
-	_planet.mesh = Art.planet(cols[i % 4], rings[i % 4])
+## A big planet far away, the mission's own (story.gd planet_look: [colour, ring colour, spot 0..3]).
+func set_planet(look: Array) -> void:
+	_planet.mesh = Art.planet(look[0], look[1])
 	var spots: Array[Vector3] = [Vector3(-160, 60, -420), Vector3(170, -30, -400), Vector3(-120, -50, -380), Vector3(140, 70, -420)]
-	_planet.position = spots[i % 4]
-	_planet.scale = Vector3.ONE * 70.0
+	_planet_at = spots[int(look[2]) % 4]
+	planet_near = 0.0
+	_near = 0.0
 
 
 func world_of(p: Vector3) -> Vector3:
@@ -106,7 +112,7 @@ func add(kind: int, p: Vector3, held: bool = false, id: int = -1) -> int:
 			mi.mesh = Art.ufo()
 			r = 1.6
 		STATION:
-			mi.mesh = Art.station()
+			mi.mesh = Art.station(station_parts)
 	n.add_child(mi)
 	if held:  # a practice target: a soft glowing shell round it
 		var g := MeshInstance3D.new()
@@ -126,6 +132,13 @@ func add(kind: int, p: Vector3, held: bool = false, id: int = -1) -> int:
 	n.position = world_of(p)
 	objs[id] = {"kind": kind, "p": p, "v": Vector3.ZERO, "held": held, "t": 0.0, "base": p, "node": n, "r": r}
 	return id
+
+
+## The station got a new part (TV machines: the host said so after the station appeared).
+func refresh_station() -> void:
+	for id in objs:
+		if int(objs[id]["kind"]) == STATION:
+			((objs[id]["node"] as Node).get_child(0) as MeshInstance3D).mesh = Art.station(station_parts)
 
 
 func remove(id: int) -> void:
@@ -180,13 +193,13 @@ func step(delta: float) -> Array:
 			pass
 		elif k == UFO:
 			var base: Vector3 = o["base"]
-			if t < 16.0:
-				base.z = minf(-32.0, base.z + (speed + 6.0) * delta)
+			if t < UFO_STAY:
+				base.z = minf(UFO_NEAR, base.z + (speed + 6.0) * delta)
 				o["base"] = base
-				p = base + Vector3(sin(t * 1.1 + id) * 3.5, sin(t * 2.3) * 1.2, 0.0)
+				p = base + Vector3(sin(t * 1.1 + id) * float(o.get("sway", 3.5)), sin(t * 2.3) * 1.2, 0.0)
 			else:
 				p += Vector3(0.0, 14.0, -10.0) * delta
-				if t > 19.0:
+				if t > UFO_STAY + 3.0:
 					ev.append(["ufo_gone", int(id)])
 					remove(int(id))
 					continue
@@ -233,6 +246,10 @@ func animate(delta: float) -> void:
 				n.rotation = Vector3(sin(_t * 3.0 + id) * 0.25, _t * 2.0, cos(_t * 2.6 + id) * 0.2)
 		if bool(o["held"]):
 			n.scale = Vector3.ONE * (1.0 + sin(_t * 5.0) * 0.08)
+	# The planet comes closer as the stars fill up.
+	_near = lerpf(_near, planet_near, 1.0 - exp(-1.5 * delta))
+	_planet.position = _planet_at * (1.0 - 0.3 * _near)
+	_planet.scale = Vector3.ONE * 70.0 * (1.0 + 0.5 * _near)
 	# Space dust: streams past, wraps around ahead of the ship.
 	var mm := _dust.multimesh
 	var stretch := clampf(speed * 0.3, 0.3, 4.0)
