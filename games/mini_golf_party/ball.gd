@@ -118,7 +118,7 @@ func step(dt: float) -> void:
 			vel += to_cup / dc * ASSIST * h
 		var prev := pos
 		pos += vel * h
-		if course.gimmick == "loop" and prev.y > course.loop_z and pos.y <= course.loop_z and absf(pos.x) < Course.LOOP_GAP:
+		if course.gimmick == "loop" and prev.y > course.loop_z and pos.y <= course.loop_z and absf(pos.x - course.loop_x) < Course.LOOP_GAP:
 			if vel.length() >= LOOP_MIN:
 				state = "loop"
 				loop_a = 0.0

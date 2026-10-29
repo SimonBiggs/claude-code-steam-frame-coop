@@ -107,18 +107,9 @@ func _physics_process(delta: float) -> void:
 		_vr_bot(delta)
 
 
-## Speed a putt needs to reach `to` from `from` on this hole.
+## Speed a putt needs to reach `to` from `from` on this hole (the generator's proof uses the same rule).
 func _speed_for(from: Vector2, to: Vector2) -> float:
-	var c = main.course
-	var d := from.distance_to(to)
-	var v := sqrt(2.0 * 1.15 * d) + 0.15
-	if c.gimmick == "hill" and from.y > c.hill_z - 0.2 and to.y < c.hill_z:
-		v = sqrt(v * v + 2.0 * 9.8 * 5.0 / 7.0 * c.hill_h + 0.6)
-	if c.gimmick == "loop" and from.y > c.loop_z:
-		v = 3.6
-	if c.gimmick == "windmill" and from.y > c.mill_z:
-		v = maxf(v, 2.2)
-	return minf(v, 3.9)
+	return main.HoleGen.putt_speed(main.course, from, to)
 
 
 func _tv_bot(slot: int, delta: float) -> void:
@@ -241,9 +232,19 @@ func _checks() -> void:
 		kit.assert_true(unseen.is_empty(), "%s (%s): every own ball is on screen with its tag %s" % [mode, main.net.machine_kind, str(unseen)])
 	if main.net.machine_kind == "deck" and main.party.local_slots().size() == 1:
 		kit.assert_true(main.cam_follow == main.party.local_slots()[0], "deck: the camera follows its player's ball")
+	# Gus's garden course: a seeded hole built from the host's description, the garden and Gus on every machine.
+	kit.assert_true(not main.hole_def.is_empty() and int(main.hole_def.get("course_seed", 0)) > 0, "%s: the hole came from a course seed" % mode)
+	kit.assert_true(main.gus != null and main.gus.is_inside_tree(), "%s: Gus is by the board" % mode)
+	kit.assert_true(main.garden != null and is_instance_valid(main.garden), "%s: Gus's garden is built" % mode)
 	if mode == "client":
 		kit.assert_true(main.balls.size() >= want, "client mirrors the balls")
+		var hd: Array = main.net.state_get("hdesc", [])
+		kit.assert_true(hd.size() == 4 and int(hd[0]) == int(main.hole_def["course_seed"]) and int(hd[1]) == int(main.hole_def["index"]),
+			"client: built the host's hole %s" % str(hd))
 		return
+	kit.assert_true(main.course_seed > 0, "%s: a seeded course (%d)" % [mode, main.course_seed])
+	kit.assert_true(int(main.save.data["days"]) >= 1, "%s: the play-day was counted" % mode)
+	kit.assert_true(int(main.save.data["courses"]) >= 1, "%s: a finished course was saved" % mode)
 	kit.assert_true(saw_results, "%s: the course ended with the results" % mode)
 	# Design check: aiming bots hole out within par + 3 (6 putts = automatic pick-up).
 	var per_hole := {}
@@ -258,7 +259,7 @@ func _checks() -> void:
 		for n in arr:
 			tot += int(n)
 		var avg := float(tot) / arr.size()
-		var par: int = main.Course.hole_def(int(h))["par"]
+		var par: int = int(main.sink_log.filter(func(e: Array) -> bool: return int(e[0]) == int(h))[0][4])
 		kit.info("hole %d: putts %s (par %d)" % [int(h) + 1, str(arr), par])
 		kit.assert_true(avg <= par + 3, "hole %d is completable within par+3 (avg %.1f)" % [int(h) + 1, avg])
 	if main.vr_rig != null:
