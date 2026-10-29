@@ -530,7 +530,7 @@ func _draw_menu(w: float, h: float, ui: float) -> void:
 	var sl: Array = main.setlist
 	for k in sl.size():
 		var si: int = sl[k]
-		var line := "%d.  %s   (%d BPM)" % [k + 1, main.SongScript.song_name(si), int(main.SongScript.song_bpm(si))]
+		var line := "%d.  %s   (%d BPM)" % [k + 1, main.SongGen.song_name(si), int(main.SongGen.song_bpm(si))]
 		_text(Vector2(x0, y), line, int(24 * ui), Color(0.75, 0.9, 1.0), HORIZONTAL_ALIGNMENT_CENTER, cw)
 		y += 30 * ui
 	y += 18 * ui
