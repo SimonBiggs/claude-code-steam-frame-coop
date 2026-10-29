@@ -4,6 +4,8 @@ extends Node
 ## just have one player per deck". Per game:
 ## - the Deck's own controls (a pad connecting, then pressing A) give ONE player and at most ONE view on screen;
 ## - a second pad pressing A still drops in a second player (split screen, 2 views);
+## - every view on screen has a current camera; run rendered (brepl godot.launch of this scene at 1280x800 with
+##   DUO_MACHINE_KIND=deck) it also checks no view is plain clear-colour grey (sampled pixels);
 ## - zero SCRIPT ERRORs (dev.bots greps them).
 ## Split in PARTS scenes (deck_bot, deck2_bot .. deck4_bot: every 4th game) so each fits dev.bots' 3600 frames.
 ## DECK_BOT_ONLY=id,id runs just those games (in any part). Run: dev.bots.all({only: ["deck", "deck2", "deck3", "deck4"]}), or
