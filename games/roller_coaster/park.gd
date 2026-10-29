@@ -17,6 +17,12 @@ const BELL := Vector3(0.3, 0, 7.2)
 ## Decorations, in the order they arrive (one per ride).
 const DECOR: Array = [["balloons", Vector3(7.2, 0, 3.5)], ["carousel", Vector3(-6.1, 0, -4.8)],
 	["wheel", Vector3(5.6, 0, -7.2)], ["fountain", Vector3(0.0, 0, -8.8)], ["flags", Vector3(-9.9, 0, 0.0)]]
+## BUTTONS the bear (the park keeper, story cards), his ticket board (a golden ticket per finished plan, saved)
+## and the bunting round the table (a flag a play-day, saved): set_growth() on every machine.
+const BEAR := Vector3(-7.3, 0, 8.0)
+const BOARD := Vector3(-4.6, 0, 9.5)
+const BOARD_SLOTS := 12
+const BUNTING_MAX := 24
 const GUEST_COUNT := 6
 const GUEST_SCALE := 0.8
 
@@ -31,6 +37,12 @@ var scoop_t := 0.0
 var fountain_fx: CPUParticles3D
 var guests: Array[Node3D] = []
 var decor_count := 0
+var bear: Node3D
+var bear_arm: Node3D
+var wave_t := 0.0
+var board_tickets: Node3D
+var bunting: MeshInstance3D
+var shown_growth := Vector2i(-1, -1)
 var _t := 0.0
 
 
@@ -47,6 +59,7 @@ func _ready() -> void:
 		trees.append(tr)
 		springs["tree%d" % i] = [Vector2.ZERO, Vector2.ZERO, tr, 30.0]
 	_build_ice_cream()
+	_build_bear()
 	for i in GUEST_COUNT:
 		var g := Creatures.humanoid({"class": "villager", "seed": 40 + i, "scale": GUEST_SCALE})
 		g.name = "Guest%d" % i
@@ -123,6 +136,118 @@ func _build_ice_cream() -> void:
 	scoop = MeshKit.instance(_ball_mesh(Color(0.75, 1.0, 0.75)), false)
 	scoop.visible = false
 	n.add_child(scoop)
+
+
+## Buttons: a big round teddy bear in a blue waistcoat and a red conductor's cap, by the station.
+func _build_bear() -> void:
+	bear = Node3D.new()
+	bear.name = "Buttons"
+	bear.position = BEAR
+	add_child(bear)
+	var fur := Color(0.72, 0.48, 0.28)
+	var muzzle := Color(0.96, 0.85, 0.68)
+	var b := MeshKit.builder()
+	b.ellipsoid(Vector3(0.55, 0.65, 0.5), Transform3D(Basis(), Vector3(0, 0.75, 0)), Color(0.25, 0.45, 0.85), 14)
+	b.ellipsoid(Vector3(0.36, 0.42, 0.1), Transform3D(Basis(), Vector3(0, 0.75, 0.42)), muzzle, 12)
+	for k in 3:
+		b.sphere(0.06, Transform3D(Basis(), Vector3(0, 0.55 + k * 0.2, 0.5)), Color(1.0, 0.8, 0.2), 8)
+	for sx in [-0.28, 0.28]:
+		b.ellipsoid(Vector3(0.18, 0.14, 0.24), Transform3D(Basis(), Vector3(sx, 0.12, 0.12)), fur, 10)  # feet
+	b.ellipsoid(Vector3(0.13, 0.3, 0.13), Transform3D(Basis(Vector3.BACK, -0.3), Vector3(-0.55, 0.85, 0.05)), fur, 10)  # resting arm
+	b.sphere(0.48, Transform3D(Basis(), Vector3(0, 1.72, 0)), fur, 16)
+	b.ellipsoid(Vector3(0.22, 0.17, 0.16), Transform3D(Basis(), Vector3(0, 1.6, 0.38)), muzzle, 12)
+	b.sphere(0.07, Transform3D(Basis(), Vector3(0, 1.67, 0.53)), Color(0.2, 0.12, 0.1), 8)
+	for sx in [-0.17, 0.17]:
+		b.sphere(0.06, Transform3D(Basis(), Vector3(sx, 1.84, 0.41)), Color(0.08, 0.08, 0.1), 8)
+		b.sphere(0.02, Transform3D(Basis(), Vector3(sx + 0.02, 1.86, 0.46)), Color.WHITE, 6)
+	for sx in [-0.36, 0.36]:
+		b.sphere(0.16, Transform3D(Basis(), Vector3(sx, 2.12, 0)), fur, 10)
+		b.sphere(0.08, Transform3D(Basis(), Vector3(sx, 2.12, 0.08)), muzzle, 8)
+	b.cylinder(0.36, 0.4, 0.28, Transform3D(Basis(), Vector3(0, 2.2, 0)), Color(0.9, 0.2, 0.25), 14)
+	b.box(Vector3(0.6, 0.05, 0.28), Transform3D(Basis(), Vector3(0, 2.08, 0.38)), Color(0.2, 0.2, 0.3))
+	b.sphere(0.06, Transform3D(Basis(), Vector3(0, 2.2, 0.38)), Color(1.0, 0.8, 0.2), 8)
+	var body := MeshKit.instance(b.build(), false)
+	body.rotation.y = 0.35  # half turned to the station and the builder
+	bear.add_child(body)
+	bear_arm = Node3D.new()
+	bear_arm.position = Vector3(0.5, 1.05, 0.05)
+	body.add_child(bear_arm)
+	var ab := MeshKit.builder()
+	ab.ellipsoid(Vector3(0.13, 0.32, 0.13), Transform3D(Basis(), Vector3(0, 0.28, 0)), fur, 10)
+	ab.sphere(0.15, Transform3D(Basis(), Vector3(0, 0.58, 0)), fur, 10)
+	bear_arm.add_child(MeshKit.instance(ab.build(), false))
+	bear_arm.rotation.z = -0.5
+	springs["bear"] = [Vector2.ZERO, Vector2.ZERO, bear, 45.0]
+	# The ticket board.
+	var bb := MeshKit.builder()
+	for sx in [-1.1, 1.1]:
+		bb.cylinder(0.07, 0.07, 2.2, Transform3D(Basis(), Vector3(sx, 1.1, 0)), Color(0.5, 0.35, 0.2), 6)
+	bb.box(Vector3(2.5, 1.5, 0.12), Transform3D(Basis(), Vector3(0, 1.45, 0)), Color(0.2, 0.42, 0.85))
+	bb.box(Vector3(2.7, 0.18, 0.18), Transform3D(Basis(), Vector3(0, 2.25, 0)), Color(0.9, 0.2, 0.25))
+	var board := MeshKit.instance(bb.build(), false)
+	board.position = BOARD
+	board.rotation.y = 0.15
+	board.name = "TicketBoard"
+	add_child(board)
+	board_tickets = Node3D.new()
+	board.add_child(board_tickets)
+
+
+## Buttons waves (a story card, a touch).
+func bear_wave() -> void:
+	wave_t = 1.6
+	_kick("bear", Vector2(0.4, 0.0))
+
+
+## The saved growth: golden tickets on the board and a bunting flag round the table for each play-day.
+func set_growth(tickets: int, days: int, animate: bool) -> void:
+	var g := Vector2i(tickets, days)
+	if g == shown_growth:
+		return
+	var more_tickets := shown_growth.x >= 0 and tickets > shown_growth.x
+	shown_growth = g
+	for c in board_tickets.get_children():
+		c.queue_free()
+	var tb := MeshKit.builder()
+	var shown := mini(tickets, BOARD_SLOTS)
+	for i in shown:
+		var col := i % 4
+		var row := i / 4
+		var at := Vector3(-0.85 + col * 0.57, 1.9 - row * 0.42, 0.08)
+		tb.box(Vector3(0.46, 0.26, 0.04), Transform3D(Basis(Vector3.BACK, 0.08 * ((i % 3) - 1)), at), Color(1.0, 0.8, 0.2))
+		tb.sphere(0.06, Transform3D(Basis(), at + Vector3(0, 0, 0.03)), Color(1.0, 0.45, 0.2), 6)
+	if not tb.is_empty():
+		var mi := MeshKit.instance(tb.build(), false)
+		board_tickets.add_child(mi)
+		if animate and more_tickets:
+			mi.scale = Vector3.ONE * 0.6
+			create_tween().tween_property(mi, "scale", Vector3.ONE, 0.6).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	if bunting != null:
+		bunting.queue_free()
+		bunting = null
+	var flags := clampi(days, 0, BUNTING_MAX)
+	if flags == 0:
+		return
+	var b := MeshKit.builder()
+	var cols: Array[Color] = [Color(1.0, 0.35, 0.4), Color(1.0, 0.8, 0.2), Color(0.35, 0.65, 1.0), Color(0.5, 0.85, 0.4), Color(0.85, 0.5, 1.0)]
+	var r := Track.TABLE_R - 0.15
+	var step := TAU / BUNTING_MAX
+	var poles: Array[Vector3] = []
+	for j in flags + 1:  # centred on the far side of the table, growing both ways
+		var a := -PI * 0.5 + step * (j - flags * 0.5)
+		poles.append(Vector3(cos(a) * r, 0.0, sin(a) * r))
+		b.cylinder(0.05, 0.05, 1.3, Transform3D(Basis(), poles[j] + Vector3(0, 0.65, 0)), Color.WHITE, 5)
+	for i in flags:
+		var p0 := poles[i] + Vector3(0, 1.25, 0)
+		var p1 := poles[i + 1] + Vector3(0, 1.25, 0)
+		b.tube(p0, p1, 0.015, 0.015, Color(0.95, 0.95, 0.9), 3, false, false)
+		var yaw := atan2(p1.x - p0.x, p1.z - p0.z) - PI * 0.5
+		for k in 3:
+			var p := p0.lerp(p1, (k + 0.5) / 3.0) - Vector3(0, 0.17, 0)
+			b.cone(0.17, 0.3, Transform3D(Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, PI).scaled(Vector3(1, 1, 0.2)), p), cols[(i * 3 + k) % cols.size()], 3)
+	bunting = MeshKit.instance(b.build(), false)
+	bunting.name = "Bunting"
+	add_child(bunting)
 
 
 func _ball_mesh(c: Color) -> ArrayMesh:
@@ -252,6 +377,7 @@ func touch_points() -> Array:
 		out.append([trees[i].position + Vector3(0, 2.0, 0), 1.3, "tree", i])
 	out.append([BELL + Vector3(0.4, 1.8, 0), 0.6, "bell", 0])
 	out.append([ICE_CREAM + Vector3(0, 1.2, 0), 1.0, "ice", 0])
+	out.append([BEAR + Vector3(0, 1.6, 0), 1.0, "bear", 0])
 	for k in ["balloons", "carousel", "wheel", "fountain", "flags"]:
 		if props.has(k):
 			var n: Node3D = props[k]
@@ -305,6 +431,10 @@ func poke(kind: String, idx: int, dir: Vector3, sfx: Node) -> void:
 			var sp: Array = spin["flags"]
 			sp[1] = 9.0
 			_sound(sfx, "swish", at, -3.0, 1.3)
+		"bear":
+			bear_wave()
+			at = BEAR
+			_sound(sfx, "boing", at, -3.0, 0.7)
 		"guest":
 			if idx < guests.size():
 				Creatures.anim(guests[idx]).play("jump")
@@ -347,6 +477,9 @@ func _process(delta: float) -> void:
 			sp[1] = move_toward(float(sp[1]), 0.0, delta * 3.0)
 		else:
 			node.rotation.y += float(sp[1]) * delta
+	if bear_arm != null:
+		wave_t = maxf(0.0, wave_t - delta)
+		bear_arm.rotation.z = -0.5 - (0.5 + 0.5 * sin(_t * 12.0)) * minf(1.0, wave_t * 2.0) * 1.4 if wave_t > 0.0 else -0.5 + 0.05 * sin(_t * 1.5)
 	if scoop.visible:
 		scoop_t += delta
 		scoop.position = Vector3(0.45, 1.9 + scoop_t * 2.5 - scoop_t * scoop_t * 3.0, 0)

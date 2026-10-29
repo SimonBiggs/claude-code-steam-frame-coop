@@ -340,3 +340,28 @@ static func piece_mesh(t: String, h: float, col: Color) -> ArrayMesh:
 			var u := right.cross(f)
 			b.box(Vector3.ONE, Transform3D(Basis(right * (GAUGE * 2.0 + 0.2), u * 0.08, f * 0.18), pts[i] - u * 0.08), col.darkened(0.3))
 	return b.build()
+
+
+## Buttons' plan: a see-through glowing outline of the track between distances s0 and s1 (rails and ties only).
+static func outline(tr: Dictionary, s0: float, s1: float, col: Color = Color(0.55, 0.85, 1.0, 0.5)) -> ArrayMesh:
+	var b := MeshKit.builder()
+	var pts: PackedVector3Array = tr["pts"]
+	var dist: PackedFloat32Array = tr["dist"]
+	var tie_acc := 0.0
+	for i in range(pts.size() - 1):
+		var s := dist[i]
+		if s < s0 - 0.01 or s >= s1:
+			continue
+		var seg := pts[i].distance_to(pts[i + 1])
+		if seg < 0.001:
+			continue
+		var xa := sample(tr, s + 0.001)
+		var xb := sample(tr, s + seg - 0.001)
+		for side in [-1.0, 1.0]:
+			_beam(b, xa.origin + xa.basis.x * GAUGE * side, xb.origin + xb.basis.x * GAUGE * side, xa.basis.y.lerp(xb.basis.y, 0.5), Vector2(0.13, 0.13), col)
+		tie_acc += seg
+		if tie_acc > 0.7:
+			tie_acc = 0.0
+			var tb := Basis(xa.basis.x * (GAUGE * 2.0 + 0.2), xa.basis.y * 0.07, xa.basis.z * 0.16)
+			b.box(Vector3.ONE, Transform3D(tb, xa.origin - xa.basis.y * 0.08), Color(col, col.a * 0.7))
+	return b.build(MeshKit.vertex_material(true, true)) if not b.is_empty() else null

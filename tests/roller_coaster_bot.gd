@@ -92,6 +92,17 @@ func _pad_after_ride() -> String:
 		return ""
 	step += 1
 	if step == 1:
+		# Buttons' plan: the pad builder's pick jumps to the plan's next piece, so A alone builds it.
+		var p: Array = main.net.state_get("plan", [])
+		kit.assert_true(p.size() >= 7 and main.plan_match() == 0, "Buttons rolled out a plan after the practice (%s)" % str(p))
+		var guard := 0
+		while main.plan_piece() != "" and guard < 12:
+			guard += 1
+			main._pad_builder(0)
+			kit.assert_eq(main.Track.TYPES[main.pick], main.plan_piece(), "the pad picks the plan's next piece")
+			main.add_piece(main.Track.TYPES[main.pick])
+		kit.assert_true(main.plan_complete(), "P1 built the whole plan by pressing A")
+		kit.assert_true(not main.outline_mi.visible, "the outline goes once the plan is built")
 		var n0: int = main.pieces.size()
 		_add_some(["down", "right", "loop", "up", "down", "splash", "right"])
 		main.set_end_height(1.5)
@@ -287,6 +298,7 @@ func _report() -> String:
 
 func _checks() -> void:
 	var mode: String = main.net.mode
+	_story_checks(mode)
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
 	kit.assert_true(saw_ride, "%s: the train rode" % mode)
 	kit.assert_true(int(main.net.state_get("rides", 0)) >= (1 if mode == "client" else 2), "%s: rides finished (%d)" % [mode, int(main.net.state_get("rides", 0))])
@@ -304,3 +316,18 @@ func _checks() -> void:
 		kit.assert_true(saw_vr_ride, "the VR builder rode along")
 		kit.assert_true(not main.builder.riding and is_equal_approx(float(main.vr_rig.world_scale), main.builder.WS), "the trigger stopped the VR ride: back to giant size")
 		kit.assert_true(guest_rode, "a guest rode in a car")
+
+
+## Buttons' plans, tickets and the saved park (checked at the end).
+func _story_checks(mode: String) -> void:
+	kit.assert_true(int(main.net.state_get("days", 0)) >= 1, "%s: today counts as a play-day" % mode)
+	kit.assert_true(main.park.bunting != null, "%s: the bunting is up" % mode)
+	kit.assert_true(main.park.bear != null, "%s: Buttons is in the park" % mode)
+	if mode == "client":
+		return
+	kit.assert_true(main.save != null and int(main.plan.get("seed", 0)) > 0, "%s: a seeded plan" % mode)
+	kit.assert_true(int(main.save.data.rides) >= 1, "%s: rides are saved" % mode)
+	if mode == "local" and main.vr_rig == null:
+		kit.assert_true(int(main.net.state_get("tickets", 0)) >= 1, "local: the finished plan earned a golden ticket")
+	if mode == "host" and main.vr_rig == null:
+		kit.assert_true(int(main.save.data.plans) >= 1, "host: the demo builder followed a plan to the end")
