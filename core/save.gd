@@ -108,7 +108,29 @@ static func path_for(id: String) -> String:
 	var clean := ""
 	for ch in id:
 		clean += ch if (ch >= "a" and ch <= "z") or (ch >= "A" and ch <= "Z") or (ch >= "0" and ch <= "9") or ch == "_" or ch == "-" else "_"
-	return (TEST_DIR if test_mode() else SAVE_DIR) + clean + ".save"
+	return (test_dir() if test_mode() else SAVE_DIR) + clean + ".save"
+
+
+## Test runs save into their own folder per process (user://test_saves/run_<pid>/), so every bot run starts from
+## fresh defaults: a shared test folder piled up progress run after run, and later runs met harder levels than the
+## bot can manage (2026-10-29: tower_stack failed 2 runs in 5 once its test save reached windy level-3 castles).
+## Folders of runs that are gone are swept when a test run first saves; tests/bot_end.gd quit_quietly removes its own.
+static func test_dir() -> String:
+	var d := TEST_DIR + "run_%d/" % OS.get_process_id()
+	if not Engine.has_meta("save_test_swept"):
+		Engine.set_meta("save_test_swept", true)
+		for sub in DirAccess.get_directories_at(TEST_DIR):
+			if sub.begins_with("run_") and not DirAccess.dir_exists_absolute("/proc/" + sub.trim_prefix("run_")):
+				remove_tree(TEST_DIR + sub)
+	return d
+
+
+static func remove_tree(path: String) -> void:
+	for f in DirAccess.get_files_at(path):
+		DirAccess.remove_absolute(path.path_join(f))
+	for sub in DirAccess.get_directories_at(path):
+		remove_tree(path.path_join(sub))
+	DirAccess.remove_absolute(path)
 
 
 ## Load a game's data: defaults filled in, migrated to `current_version`. Never fails: a missing or
