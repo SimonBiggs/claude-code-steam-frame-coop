@@ -29,6 +29,14 @@ const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV p
 ##    arrow = jump, a pulsing heart while you're down) that fade once the knight has done it twice, and
 ##    a glowing arrow in the knight's colour bobs over the goblin to bonk (only in that knight's view).
 ##    The Giant gets the shared Cannon Cove ghost hand (practice grab-and-throw, rain umbrella).
+## STORY + DEPTH (raidgen.gd, table_story.gd, story_pictures.gd): SPARKY, the campfire's little flame (a face in the
+## fire), tells the story on picture cards. Every wave's goblins come up LADDERS on the table edge (seeded: they appear
+## in the break before the wave, the first always on the Giant's side), and tests/giants_table_gen_test.gd proves every
+## wave fair for a small kid. Clear the Goblin King's wave (RaidGen.NIGHT_WAVES) and the village is saved for the night:
+## the villagers leave a GIFT on the far rim (saved), a LANTERN joins the rim every play-day, Sparky gets a crown after
+## RaidGen.CROWN_NIGHTS nights. TODAY'S RAID: the first game each day uses the day's seed on every machine.
+## Telemetry: one RUN line per wave and at game over / quit. Networked: the snapshot's last entry is
+## [raid seed, daily, ladder wave, gifts (kind * 2 + gold), play-days, crown]; every machine rebuilds ladders and gifts.
 const SIMPLE_MODE := true
 const UiKit := preload("res://core/ui_kit.gd")
 
@@ -59,6 +67,16 @@ const PauseMenuScript := preload("res://core/pause_menu.gd")
 const SceneryScript := preload("res://games/giants_table/scenery.gd")
 const PracticeScript := preload("res://games/giants_table/practice.gd")
 const PropScript := preload("res://games/giants_table/prop.gd")
+const RaidGen := preload("res://games/giants_table/raidgen.gd")
+const TableStory := preload("res://games/giants_table/table_story.gd")
+const Seeded := preload("res://core/seeded.gd")
+const Telemetry := preload("res://core/telemetry.gd")
+const StoryCard := preload("res://core/story_card.gd")
+const Save := preload("res://core/save.gd")
+const SPARKY := "SPARKY"
+const SPARKY_COLOR := Color(1.0, 0.6, 0.2)
+const GIFT_LINES := {"pie": "A yummy pie!", "cake": "A big cake!", "teddy": "A teddy bear!", "scarf": "A cosy scarf!",
+	"bunting": "Party flags!", "daisy": "Pretty flowers!"}
 
 const MAX_EMBERS := 10
 const BOULDER_COUNT := 8
@@ -168,6 +186,24 @@ var giant_tip := ""
 var giant_tip_t := 0.0
 var tips_said := {}
 var help_panel: PanelContainer
+# Story and the seeded raid (see the header).
+var save: Node  # core/save.gd (host / local only)
+var table_story: Node3D
+var raid_seed := 0
+var raid_daily := false
+var ladder_wave := 0  # whose ladders stand on the table (the next wave's during a break)
+var keep_gifts: Array = []  # [[kind, play-day, golden], ...] (host: from the save; TV: from the snapshot)
+var keep_days := 0
+var keep_crown := false
+var wave_plan := {}
+var wave_lost := 0  # embers that got away this wave (telemetry)
+var game_lost := 0
+var night_saved := false
+var story_queue: Array = []
+var story_t := 0.0
+var vr_story: Node3D
+var game_t := 0.0
+var run_logged := false
 
 
 func _ready() -> void:
@@ -177,6 +213,9 @@ func _ready() -> void:
 	if (OS.has_environment("GT_FAKE_VR") or OS.has_environment("BOT_VR")) and not OS.has_environment("DUO_JOIN"):
 		vr_on = true  # tests: run the VR code paths headless, without a headset
 	W.build(self, vr_on, SIMPLE_MODE)
+	table_story = TableStory.new()
+	table_story.main = self
+	add_child(table_story)
 	village = VillageScript.new()
 	village.main = self
 	add_child(village)
@@ -233,6 +272,8 @@ func _setup_game(mode: String) -> void:
 			_spawn_boulder(Vector3(cos(a) * (W.R - 0.2), 0.0, sin(a) * (W.R - 0.2)), false)
 	ready_to_play = true
 	print("Giant's Table: %s mode" % mode)
+	if mode != "client":
+		_start_raid()
 	if SIMPLE_MODE:
 		help_label.text = ""  # no words: each knight's view shows picture cues instead (_update_cue)
 		if mode == "client":
@@ -863,7 +904,13 @@ func _process(delta: float) -> void:
 		add_child(music)
 	music.play_track(1 if _king_alive() else maxi(wave - 1, 0) / 2)
 	clock += delta
+	game_t += delta
 	_update_fire(delta)
+	_update_story(delta)
+	table_story.update_face(delta, clampf(float(embers) / MAX_EMBERS, 0.0, 1.0), embers > 0, _giant_eyes())
+	if net.mode != "client":
+		ladder_wave = (wave if not in_break else wave + 1) if practice_done and not game_over else 0
+		table_story.set_ladders(RaidGen.ladders(raid_seed, ladder_wave) if ladder_wave > 0 else [])
 	_update_growth()
 	_update_rain_visuals(delta)
 	if not SIMPLE_MODE:
@@ -921,9 +968,13 @@ func _process(delta: float) -> void:
 		spawn_timer -= delta
 		var alive := get_tree().get_nodes_in_group("goblins").size()
 		var extra := _extra_knights()
+		if alive == 0 and spawn_timer > 0.8:
+			spawn_timer = 0.8  # nobody left to catch: the next one comes straight away (a quick Giant never waits)
 		if spawn_timer <= 0.0 and alive < mini(6 + wave * 2, 18) + extra * 3:
 			_spawn_goblin(spawn_queue.pop_back())
-			spawn_timer = maxf(0.5, 1.6 - wave * 0.08) / (1.0 + 0.15 * extra)
+			var nxt = null if spawn_queue.is_empty() else spawn_queue.back()
+			# The seeded plan says when the next one comes (raidgen.gd: spread out for a small kid).
+			spawn_timer = float(nxt[2]) if nxt is Array else maxf(0.5, 1.6 - wave * 0.08) / (1.0 + 0.15 * extra)
 	elif get_tree().get_nodes_in_group("goblins").is_empty():
 		_end_wave()
 	_check_lose(delta)
@@ -971,25 +1022,18 @@ func practice_finished() -> void:
 
 
 ## Simple mode: plain goblins, plus one new thing per wave from wave 3 on (then a gentle mix).
+## The goblins come from the seeded plan (raidgen.gd: what comes up which ladder and when, fair for a small kid).
 func _simple_wave() -> void:
-	var party := _extra_knights()
-	var more := 1.0 + 0.3 * party
-	for i in roundi((3 + wave) * more):
-		spawn_queue.append("goblin")
+	var solo := solo_giant()
+	wave_plan = RaidGen.plan(raid_seed, wave, 0 if solo else _extra_knights(), solo)
+	spawn_queue = (wave_plan.spawns as Array).duplicate(true)
+	spawn_queue.reverse()  # pop_back: in the plan's order
 	rain_at = randf_range(6.0, 10.0) if wave == 3 or (wave > 6 and randf() < 0.35) else -1.0
-	if wave >= 4:
-		for i in roundi(mini(wave - 2, 5) * more):
-			spawn_queue.append("balloon")
-	if wave >= 5:
-		for i in 1 + (wave - 5) / 3:
-			spawn_queue.append("ogre")
-	if wave >= 7 and not solo_giant():
-		for i in roundi(mini(wave - 6, 4) * more):
-			spawn_queue.append("armored")
-	spawn_queue.shuffle()
-	if wave >= 6 and wave % 3 == 0:
-		spawn_queue.insert(0, "king")  # pop_back: the king comes last, after his army
-	spawn_queue.append("goblin")  # the first one out is always an easy one
+	var lad: int = (wave_plan.ladders as Array).size()
+	if wave == 1:
+		_story_for_all("Goblins! Up the ladder!", "ladder", Color(1.0, 0.75, 0.4))
+	elif lad > RaidGen.ladders(raid_seed, wave - 1).size():
+		_story_for_all("Two ladders!" if lad == 2 else "Three ladders!", "ladder", Color(1.0, 0.75, 0.4))
 	var headline := "WAVE %d!" % wave
 	match wave:
 		4:
@@ -1055,6 +1099,15 @@ func _end_wave() -> void:
 	break_timer = 6.0
 	rain_t = 0.0
 	embers = mini(embers + 1, MAX_EMBERS)
+	_log_run("wave")
+	wave_lost = 0
+	if save != null:
+		save.data.best_wave = maxi(int(save.data.best_wave), wave)
+		save.mark_dirty()
+	if wave == RaidGen.NIGHT_WAVES and not night_saved:
+		_night_saved()
+	elif wave == 1:
+		_story_for_all("Thank you, Giant!", "sparky", SPARKY_COLOR)
 	for k in knights():
 		if not k.active:
 			continue
@@ -1084,10 +1137,18 @@ func _end_wave() -> void:
 	net.event("cheer", [])
 
 
-func _spawn_goblin(kind: String) -> void:
+## entry: a plan spawn [kind, angle, gap, balloon landing radius] (raidgen.gd), or just a kind (full mode: it
+## comes up one of this wave's ladders).
+func _spawn_goblin(entry) -> void:
+	var kind: String = String(entry[0]) if entry is Array else String(entry)
 	if kind == "armored" and solo_giant():
 		kind = "goblin"  # spiky ones need knights: without any, send plain goblins (Simon)
-	var a := randf() * TAU
+	var a := 0.0
+	if entry is Array:
+		a = float(entry[1])
+	else:
+		var lad := RaidGen.ladders(raid_seed, wave)
+		a = float(lad[randi() % lad.size()]) + randf_range(-RaidGen.JITTER, RaidGen.JITTER)
 	var dir := Vector3(cos(a), 0.0, sin(a))
 	var g := GoblinScript.new()
 	g.setup(kind, self)
@@ -1095,7 +1156,7 @@ func _spawn_goblin(kind: String) -> void:
 	if kind == "balloon":
 		# Floats in from the sky and drifts down towards the village.
 		var start := dir * randf_range(7.0, 11.0) + Vector3.UP * 13.0
-		var land := dir * randf_range(3.0, 4.5)
+		var land := dir * (float(entry[3]) if entry is Array and float(entry[3]) > 0.0 else randf_range(3.0, 4.5))
 		land.y = W.height(land.x, land.z)
 		g.floating = true
 		g.position = start
@@ -1169,6 +1230,8 @@ func _on_game_over(reason: String) -> void:
 	game_over_time = 0.0
 	giant.release_all()
 	print("Game over: %s wave=%d score=%d" % [reason, wave, score])
+	_log_run("over")
+	_story_for_all("Oh no! Let's try again!", "sparky", Color(0.6, 0.6, 0.75))
 	sound("gameover")
 	if SIMPLE_MODE:
 		_show_center("OH NO!", 0.0)  # the dark campfire shows why
@@ -1208,6 +1271,8 @@ func goblin_escaped(g) -> void:
 	if g.has_meta("dead"):
 		return
 	g.set_meta("dead", true)
+	wave_lost += 1
+	game_lost += 1
 	if not SIMPLE_MODE:
 		popup(g.grab_center() + Vector3.UP * 0.8, "An ember got away!", Color(1.0, 0.4, 0.3))
 	sound("hurt", -2.0, 0.6)
@@ -1225,6 +1290,9 @@ func goblin_defeated(g, how: String, by) -> void:
 		return
 	var points: int = GoblinScript.KINDS[g.kind].points
 	score += points
+	if save != null:
+		save.data.goblins = int(save.data.goblins) + 1
+		save.mark_dirty()
 	var stat_key := "%s:%s" % [g.kind, how]
 	kills[stat_key] = kills.get(stat_key, 0) + 1
 	# Who gets the credit (for the end-of-game awards).
@@ -1980,7 +2048,11 @@ func make_snapshot() -> Array:
 			props.append(o.net_item())
 	var gone: Array = scenery.gone_list() if scenery != null else []
 	var prac: Array = [practice.active, practice.ring_pos] if practice != null else [false, Vector3.ZERO]
-	return [wave, score, embers, game_over, down_t, ps, gs, bs, es, built, rain_t, shield, props, gone, prac]
+	var packed: Array = []
+	for gift in keep_gifts:
+		packed.append(maxi(0, RaidGen.GIFTS.find(String(gift[0]))) * 2 + (1 if gift.size() > 2 and bool(gift[2]) else 0))
+	var story := [raid_seed, raid_daily, ladder_wave, packed, keep_days, keep_crown]
+	return [wave, score, embers, game_over, down_t, ps, gs, bs, es, built, rain_t, shield, props, gone, prac, story]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -2013,6 +2085,19 @@ func apply_snapshot(s: Array) -> void:
 		if practice != null:
 			practice.active = prac[0]
 			practice.ring_pos = prac[1]
+	if s.size() > 15:
+		var st: Array = s[15]
+		raid_seed = int(st[0])
+		raid_daily = bool(st[1])
+		ladder_wave = int(st[2])
+		table_story.set_ladders(RaidGen.ladders(raid_seed, ladder_wave) if ladder_wave > 0 else [])
+		var gifts: Array = []
+		for v in st[3]:
+			gifts.append([RaidGen.GIFTS[clampi(int(v) / 2, 0, RaidGen.GIFTS.size() - 1)], 0, int(v) % 2 == 1])
+		keep_gifts = gifts
+		keep_days = int(st[4])
+		keep_crown = bool(st[5])
+		table_story.set_keepsakes(keep_gifts, keep_days, keep_crown)
 
 
 func _sync_ghosts(list: Array, kind: String) -> void:
@@ -2082,6 +2167,8 @@ func apply_event(kind: String, args: Array) -> void:
 			built = args[0]
 		"cheer":
 			village.cheer()
+		"story":
+			_story(args[0], args[1], args[2])
 		"stats":
 			_apply_stats(args[0])
 
@@ -2429,4 +2516,132 @@ func _update_hud() -> void:
 
 
 func _exit_tree() -> void:
+	if ready_to_play and not game_over and wave > 0:
+		_log_run("quit")
 	XRServer.world_scale = 1.0  # XR world scale is global: don't leave other games giant-sized
+
+
+# --- Sparky's story, the seeded raid and the keepsakes -------------------------------------------
+
+## Host / local, once per game: count the play-day (a new lantern), pick the raid seed (TODAY'S RAID first each
+## day), put the gifts and lanterns on the rim and say hello.
+func _start_raid() -> void:
+	save = Save.new()
+	save.game_id = RaidGen.GAME_ID
+	# gifts: [[kind, play-day, today's raid], ...]; days: play-days; daily: the date TODAY'S RAID ran; nights: saved.
+	save.defaults = {"days": 0, "last_day": "", "daily": "", "games": 0, "nights": 0, "gifts": [], "best_wave": 0, "goblins": 0}
+	add_child(save)
+	var today := Seeded.today()
+	var new_day := String(save.data.last_day) != today
+	if new_day:
+		save.data.days = int(save.data.days) + 1
+		save.data.last_day = today
+	save.data.games = int(save.data.games) + 1
+	raid_daily = String(save.data.daily) != today
+	raid_seed = RaidGen.daily_seed() if raid_daily else Seeded.fresh_seed()
+	if OS.has_environment("GT_SEED"):
+		raid_seed = int(OS.get_environment("GT_SEED"))
+	if raid_daily:
+		save.data.daily = today  # (one TODAY'S RAID a day)
+	save.mark_dirty()
+	_load_keepsakes()
+	print("Giant's Table: raid seed %d%s | %d gifts, %d nights, day %d" % [raid_seed, " (TODAY'S RAID)" if raid_daily else "",
+		(save.data.gifts as Array).size(), int(save.data.nights), int(save.data.days)])
+	story_t = 2.5  # after the title
+	if not Engine.has_meta("gt_said_hi"):
+		Engine.set_meta("gt_said_hi", true)  # (once per session: a game over restarts the scene)
+		_story_for_all("Hi Giant! I'm Sparky!", "sparky", SPARKY_COLOR)
+	if raid_daily:
+		_story_for_all("TODAY'S RAID!", "ladder", Color(1.0, 0.85, 0.3))
+	if new_day and int(save.data.days) > 1:
+		_story_for_all("A new lantern!", "lantern", Color(1.0, 0.8, 0.35))
+
+
+func _load_keepsakes() -> void:
+	keep_gifts = (save.data.gifts as Array).duplicate(true)
+	keep_days = int(save.data.days)
+	keep_crown = int(save.data.nights) >= RaidGen.CROWN_NIGHTS
+	table_story.set_keepsakes(keep_gifts, keep_days, keep_crown)
+
+
+## The Goblin King's wave is cleared: the village is safe tonight. The villagers leave the Giant a gift (saved).
+func _night_saved() -> void:
+	night_saved = true
+	if save == null:
+		return
+	var k := int(save.data.nights)
+	var kind := RaidGen.gift_for(k)
+	save.data.nights = k + 1
+	var list: Array = save.data.gifts
+	list.append([kind, int(save.data.days), raid_daily])
+	while list.size() > RaidGen.GIFT_KEEP:
+		list.pop_front()
+	save.data.gifts = list
+	save.mark_dirty()
+	_load_keepsakes()
+	print("Night saved: gift %s (%d nights)" % [kind, k + 1])
+	_story_for_all("You saved the village!", "sparky", Color(1.0, 0.85, 0.3))
+	_story_for_all(GIFT_LINES.get(kind, "A gift for you!"), kind, Color(1.0, 0.85, 0.3))
+	if k + 1 == RaidGen.CROWN_NIGHTS:
+		_story_for_all("A crown for me!", "crown", Color(1.0, 0.85, 0.25))
+
+
+## Where Sparky looks: the Giant's eyes (VR, or the big friendly head on the TV), else the Giant's side.
+func _giant_eyes() -> Vector3:
+	if giant != null and giant.vr and giant.xr_camera != null:
+		return giant.xr_camera.global_position
+	if giant != null and giant.head != null and is_instance_valid(giant.head) and giant.head.is_inside_tree():
+		return giant.head.global_position
+	return Vector3(0.0, 10.0, 19.0)
+
+
+## Host / local: a story card on every machine.
+func _story_for_all(line: String, pic: String, color: Color) -> void:
+	_story(line, pic, color)
+	if net != null and net.mode == "host":
+		net.event("story", [line, pic, color])
+
+
+func _story(line: String, pic: String, color: Color) -> void:
+	if story_queue.size() < 5:
+		story_queue.append([line, pic, color])
+
+
+## One card at a time, on every view this machine shows (and in front of the VR Giant).
+func _update_story(delta: float) -> void:
+	story_t -= delta
+	if story_t > 0.0 or story_queue.is_empty():
+		return
+	var b: Array = story_queue.pop_front()
+	story_t = 2.8
+	var opts := {"who": SPARKY, "line": b[0], "pic": b[1], "color": b[2], "duration": 2.6}
+	var roots: Array = []
+	for p in players:
+		if p.has_meta("view") and (p.get_meta("view") as Control).visible:
+			roots.append(p.get_meta("view"))
+	if not roots.is_empty():
+		StoryCard.show(roots, opts)
+	if giant != null and giant.vr and giant.xr_camera != null:
+		if vr_story != null and is_instance_valid(vr_story):
+			vr_story.queue_free()
+		vr_story = StoryCard.show_vr(self, giant.xr_camera, opts.merged({"world_scale": W.S}))
+	table_story.cheer()  # Sparky bounces as he talks
+	print("Story: %s (%s)" % [b[0], b[1]])
+
+
+## One RUN line per wave ("wave"), at game over ("over") and on quit (core/telemetry.gd).
+func _log_run(end: String) -> void:
+	if net == null or net.mode == "client" or wave <= 0 or run_logged:
+		return
+	run_logged = end != "wave"
+	var beaten := 0
+	for key in kills:
+		if not String(key).begins_with("practice"):
+			beaten += int(kills[key])
+	Telemetry.run(RaidGen.GAME_ID, {"end": end, "wave": wave, "seed": raid_seed, "daily": raid_daily,
+		"secs": snappedf(game_t, 0.1), "wave_secs": snappedf(wave_t, 0.1), "lost": wave_lost, "lost_game": game_lost,
+		"embers": embers, "beaten": beaten, "knights": 0 if solo_giant() else active_knight_count(), "solo": solo_giant(),
+		"vr": giant != null and giant.vr, "flat": giant != null and giant.flat, "net": net.mode,
+		"ladders": (wave_plan.get("ladders", []) as Array).size(), "planned": (wave_plan.get("spawns", []) as Array).size(),
+		"night": night_saved, "gifts": keep_gifts.size(), "days": keep_days,
+		"nights": int(save.data.nights) if save != null else 0})

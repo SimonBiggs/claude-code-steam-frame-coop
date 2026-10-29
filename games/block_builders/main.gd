@@ -1523,7 +1523,7 @@ func _show_story(beat: Dictionary, broadcast: bool = true) -> void:
 	if builder != null and builder.vr and builder.xr_camera != null:
 		if vr_story != null and is_instance_valid(vr_story):
 			vr_story.queue_free()
-		vr_story = StoryCard.show_vr(self, builder.xr_camera, beat)
+		vr_story = StoryCard.show_vr(self, builder.xr_camera, beat.merged({"world_scale": XRServer.world_scale}))  # (a diorama)
 
 
 ## SIMPLE_MODE play (host / local): no clock and no way to fail. The buddy runner, the practice ring,
