@@ -8,6 +8,11 @@ const ROTTEN := 4  ## fruit kind index of the rotten apple
 const FRUIT_COLORS: Array[Color] = [Color(0.95, 0.12, 0.12), Color(1.0, 0.55, 0.05), Color(0.75, 0.9, 0.15),
 	Color(0.62, 0.2, 0.85), Color(0.42, 0.3, 0.12)]
 const LEAF := Color(0.25, 0.75, 0.25)
+const STUMP_TOP := 0.45  ## Nutmeg sits on a stump this high
+const STUMP_R := 0.35
+const NUTMEG_SCALE := 1.7  ## Nutmeg is a big, easy-to-see squirrel
+const SIGN_LOW_Y := 1.15  ## the sign's lower board (Nutmeg's recipe)
+const FUR := Color(0.85, 0.45, 0.18)
 const BARK := Color(0.5, 0.32, 0.18)
 
 
@@ -111,10 +116,70 @@ static func shadow_mesh() -> Mesh:
 
 ## A wooden sign post (board centred at 2.1 m, facing +Z).
 static func sign_post() -> Mesh:
-	return ResCache.get_or_make("fruit_catch_sign_v1", func() -> Mesh:
+	return ResCache.get_or_make("fruit_catch_sign_v2", func() -> Mesh:
 		var b := MeshKit.Builder.new()
 		b.cylinder(0.07, 0.08, 1.7, MeshKit.at(Vector3(-0.55, 0.85, -0.05)), BARK, 8)
 		b.cylinder(0.07, 0.08, 1.7, MeshKit.at(Vector3(0.55, 0.85, -0.05)), BARK, 8)
 		b.rounded_box(Vector3(1.4, 0.95, 0.1), 0.06, MeshKit.at(Vector3(0.0, 2.1, 0.0)), Color(0.72, 0.5, 0.3))
 		b.sphere(0.12, MeshKit.at(Vector3(0.0, 2.65, 0.02)), FRUIT_COLORS[0], 10)
+		b.rounded_box(Vector3(1.4, 0.5, 0.08), 0.05, MeshKit.at(Vector3(0.0, SIGN_LOW_Y, -0.01)), Color(0.95, 0.88, 0.7))
+		return b.build())
+
+
+## Nutmeg's tree stump (top at STUMP_TOP).
+static func stump() -> Mesh:
+	return ResCache.get_or_make("fruit_catch_stump_v1", func() -> Mesh:
+		var b := MeshKit.Builder.new()
+		b.cylinder(STUMP_R * 0.9, STUMP_R, STUMP_TOP, MeshKit.at(Vector3(0.0, STUMP_TOP * 0.5, 0.0)), BARK, 12)
+		b.disc(STUMP_R * 0.85, MeshKit.at(Vector3(0.0, STUMP_TOP + 0.001, 0.0)), Color(0.85, 0.68, 0.45), 12)
+		b.ellipsoid(Vector3(0.12, 0.08, 0.12), MeshKit.at(Vector3(STUMP_R * 0.9, 0.04, 0.1)), LEAF, 8)
+		return b.build())
+
+
+## Nutmeg the squirrel (sits at the origin, faces +Z): round body, big curly tail, a white chef's hat.
+static func squirrel() -> Mesh:
+	return ResCache.get_or_make("fruit_catch_squirrel_v1", func() -> Mesh:
+		var b := MeshKit.Builder.new()
+		var cream := Color(1.0, 0.9, 0.75)
+		b.ellipsoid(Vector3(0.17, 0.2, 0.15), MeshKit.at(Vector3(0.0, 0.2, 0.0)), FUR, 12)  # body
+		b.ellipsoid(Vector3(0.1, 0.13, 0.06), MeshKit.at(Vector3(0.0, 0.2, 0.11)), cream, 10)  # tummy
+		b.sphere(0.14, MeshKit.at(Vector3(0.0, 0.47, 0.03)), FUR, 12)  # head
+		b.ellipsoid(Vector3(0.07, 0.05, 0.05), MeshKit.at(Vector3(0.0, 0.43, 0.14)), cream, 8)  # muzzle
+		b.sphere(0.022, MeshKit.at(Vector3(0.0, 0.45, 0.19)), Color(0.25, 0.12, 0.1), 6)  # nose
+		for s in [-1.0, 1.0]:
+			b.sphere(0.03, MeshKit.at(Vector3(0.055 * s, 0.51, 0.13)), Color(0.08, 0.06, 0.06), 6)  # eyes
+			b.sphere(0.01, MeshKit.at(Vector3(0.05 * s, 0.52, 0.157)), Color.WHITE, 4)
+			b.cone(0.045, 0.1, MeshKit.at(Vector3(0.08 * s, 0.6, 0.0)), FUR.darkened(0.15), 6)  # ears
+			b.ellipsoid(Vector3(0.05, 0.05, 0.07), MeshKit.at(Vector3(0.08 * s, 0.03, 0.08)), FUR.darkened(0.1), 8)  # feet
+			b.ellipsoid(Vector3(0.035, 0.06, 0.035), MeshKit.at(Vector3(0.1 * s, 0.24, 0.12)), FUR, 6)  # paws
+		b.sphere(0.06, MeshKit.at(Vector3(0.0, 0.25, 0.18)), FRUIT_COLORS[0], 8)  # she holds an apple
+		# The tail: a big fluffy curl up the back.
+		b.ellipsoid(Vector3(0.12, 0.2, 0.12), MeshKit.at(Vector3(0.0, 0.25, -0.2)), FUR.darkened(0.05), 10)
+		b.ellipsoid(Vector3(0.13, 0.15, 0.13), MeshKit.at(Vector3(0.0, 0.5, -0.27)), FUR.darkened(0.05), 10)
+		b.ellipsoid(Vector3(0.1, 0.1, 0.1), MeshKit.at(Vector3(0.0, 0.65, -0.2)), FUR.lightened(0.15), 10)
+		# Chef's hat.
+		b.cylinder(0.09, 0.09, 0.08, MeshKit.at(Vector3(0.0, 0.62, 0.02)), Color.WHITE, 10)
+		b.ellipsoid(Vector3(0.13, 0.08, 0.13), MeshKit.at(Vector3(0.0, 0.69, 0.02)), Color.WHITE, 10)
+		return b.build())
+
+
+## An orchard tree: stage 1 sapling, 2 blossom, 3 full of fruit (kind's colour); golden = TODAY'S HARVEST.
+static func orchard_tree(kind: int, stage: int, golden: bool) -> Mesh:
+	return ResCache.get_or_make("fruit_catch_otree_v1_%d_%d_%d" % [kind, stage, int(golden)], func() -> Mesh:
+		var b := MeshKit.Builder.new()
+		var s := [0.0, 0.45, 0.75, 1.0][clampi(stage, 1, 3)] as float
+		var leaf := Color(0.95, 0.78, 0.25) if golden else LEAF.darkened(0.05 * kind)
+		b.cylinder(0.08 * s + 0.03, 0.13 * s + 0.04, 1.6 * s, MeshKit.at(Vector3(0.0, 0.8 * s, 0.0)), BARK, 8)
+		b.ellipsoid(Vector3(0.9, 0.75, 0.9) * s, MeshKit.at(Vector3(0.0, 1.9 * s, 0.0)), leaf, 12)
+		b.ellipsoid(Vector3(0.55, 0.45, 0.55) * s, MeshKit.at(Vector3(0.5 * s, 1.6 * s, 0.2 * s)), leaf.darkened(0.08), 10)
+		b.ellipsoid(Vector3(0.5, 0.42, 0.5) * s, MeshKit.at(Vector3(-0.45 * s, 1.65 * s, -0.15 * s)), leaf.darkened(0.12), 10)
+		if stage >= 2:
+			var dots := 6 if stage == 2 else 9
+			for i in dots:
+				var a := i * 2.4
+				var p := Vector3(cos(a) * 0.75 * s, 1.75 * s + sin(i * 1.7) * 0.35 * s, sin(a) * 0.75 * s)
+				var c: Color = Color(1.0, 0.75, 0.85) if stage == 2 else FRUIT_COLORS[clampi(kind, 0, 3)]
+				b.sphere(0.07 if stage == 2 else 0.11, MeshKit.at(p), c, 6)
+		if golden:
+			b.sphere(0.12, MeshKit.at(Vector3(0.0, 1.9 * s + 0.8 * s, 0.0)), Color(1.0, 0.9, 0.3), 8)
 		return b.build())
