@@ -16,6 +16,7 @@ const BotKit := preload("res://tests/bot_kit.gd")
 const VrRig := preload("res://core/vr_rig.gd")
 const CpuBrain := preload("res://games/obstacle_rush/cpu_brain.gd")
 const CourseGen := preload("res://games/obstacle_rush/coursegen.gd")
+const Story := preload("res://games/obstacle_rush/story.gd")
 
 var kit: BotKit
 var main: Node
@@ -50,7 +51,9 @@ func _ready() -> void:
 	kit.at(3.0 if client else 1.0, "%d TV players press A" % want, func() -> void:
 		if main.net.mode != "host":
 			for i in want:
-				kit.join_bot(main.party))
+				kit.join_bot(main.party)
+		elif not main.net.has_vr:
+			kit.join_bot(main.party))  # a flat host (TV / Deck hosting): one pad hero here, in slot 0
 	main.fake_door_hit.connect(func(rid: int, k: int) -> void:
 		if brains.has(rid) and k < main.course.doors.size():
 			var d: Dictionary = main.course.doors[k]
@@ -60,6 +63,7 @@ func _ready() -> void:
 	var end := 150.0 if host else (140.0 if client else 230.0)
 	if OS.has_environment("BOT_END"):
 		end = float(OS.get_environment("BOT_END"))
+	end = preload("res://tests/bot_end.gd").within_deadline(end)
 	kit.at(end, "finish", func() -> void:
 		_checks()
 		kit.finish())
@@ -234,10 +238,10 @@ func _checks() -> void:
 	var mode: String = main.net.mode
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
 	if mode != "host":
-		kit.assert_eq(main.party.player_count(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
+		kit.assert_eq(kit.seated(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
 	kit.assert_true(seen_courses.size() >= 3, "%s: played through several courses (%d)" % [mode, seen_courses.size()])
 	kit.assert_true(gen_checked >= 3, "%s: checked the courses it built (%d)" % [mode, gen_checked])
-	kit.assert_true(main.stands.fans == int(main.net.state_get("fans", 0)), "%s: the grandstand shows the fans (%d)" % [mode, main.stands.fans])
+	kit.assert_true(main.stands.fans == mini(int(main.net.state_get("fans", 0)), Story.MAX_FANS), "%s: the grandstand shows the fans (%d)" % [mode, main.stands.fans])
 	if mode == "client":
 		kit.assert_true(main.runners.size() >= 3, "client mirrors the runners (%d)" % main.runners.size())
 		kit.assert_true(main.course.checkpoints.size() > 0, "client built the course")
@@ -262,6 +266,6 @@ func _checks() -> void:
 	if main.vr_rig != null:
 		kit.assert_true(vr_throws > 0, "the fake VR giant threw balls (%d)" % vr_throws)
 		kit.assert_true(main.ghost.shown, "the ghost glove showed the throw")
-		if not OS.has_environment("OR_COURSE"):
+		if not OS.has_environment("OR_COURSE") and int(OS.get_environment("OR_SHOWS")) == 0:  # (the target is on the first lesson)
 			kit.assert_true(int(main.net.state_get("target_hit", 0)) > 0, "the practice target got hit")
 		kit.assert_true(pokes.size() >= 3, "the giant poked things (%d)" % pokes.size())

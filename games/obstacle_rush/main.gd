@@ -964,7 +964,7 @@ func _process(delta: float) -> void:
 
 func _ghost(delta: float) -> void:
 	var playing := String(net.state_get("phase", "play")) == "play"
-	var first := int(net.state_get("course", 0)) == 0 and course.target != null and giant.throws == 0
+	var first := giant.throws == 0  # a giant who hasn't thrown yet (any course: a new VR player in a later show too)
 	var idle := giant.throws > 0 and giant.last_throw_t > 30.0
 	var on := playing and giant.held < 0 and (first or idle) and course_t > 1.5
 	var to := course.target_pos if course.target != null else Vector3(vr_rig.head_position().x, 0.3, 0.0)

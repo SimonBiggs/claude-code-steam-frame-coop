@@ -55,6 +55,7 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	kit = BotKit.new()
 	add_child(kit)
+	BotKit.vr_host_plays()  # a networked VR host (not a flat one) without a headset: the fake VR mayor plays
 	if not OS.has_environment("TT_KEEP_SAVE"):
 		Save.erase("tiny_town_tycoon")  # a fresh island each run (test saves only)
 	main = load("res://games/tiny_town_tycoon/main.tscn").instantiate()
@@ -134,6 +135,10 @@ func _ready() -> void:
 
 func _join() -> void:
 	if host:
+		# A flat host (TV / Deck hosting, no headset): slot 0 is the mayor's seat on this machine, so someone
+		# here presses A to be the flat mayor (the drivers are on the joining machines). A headset host needs nobody.
+		if not main.net.has_vr:
+			kit.join_bot(main.party)
 		return
 	for i in want:
 		kit.join_bot(main.party)
@@ -560,6 +565,14 @@ func _drive(slot: int, delta: float) -> void:
 # --- SIMPLE_MODE: visual teaching ---------------------------------------------------------------------
 
 func _simple_timeline() -> void:
+	if not client:
+		# the flat mayor (local, or on a flat host) picks blocks with RB / LB
+		kit.at(26.0, "the flat mayor presses RB", func() -> void:
+			if main.flat != null:
+				kit.slot_press(main.party, 0, "rb"))
+		kit.at(26.5, "the flat mayor presses LB", func() -> void:
+			if main.flat != null:
+				kit.slot_press(main.party, 0, "lb"))
 	if host or client:
 		return
 	kit.at(20.0, "P2's controller is unplugged (bolt)", func() -> void:
@@ -585,12 +598,6 @@ func _simple_timeline() -> void:
 		kit.assert_true(main.tv_banner != null and main.tv_banner.visible, "SIMPLE: a pause from the other machine shows the PAUSED banner")
 		_check_pause_banner()
 		main.on_pause_changed(false, 0))
-	kit.at(26.0, "the flat mayor presses RB", func() -> void:
-		if main.flat != null:
-			kit.slot_press(main.party, 0, "rb"))
-	kit.at(26.5, "the flat mayor presses LB", func() -> void:
-		if main.flat != null:
-			kit.slot_press(main.party, 0, "lb"))
 	kit.drop_in_out(main.party, 30.0, 6.0, func(sl: int) -> bool: return main.hud.views.has(sl))
 	kit.at(37.5, "the late player's cues were forgotten?", func() -> void:
 		for sl in main.cue_done:
@@ -716,7 +723,7 @@ func _checks() -> void:
 	var mode: String = main.net.mode
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
 	if not host:
-		kit.assert_eq(main.party.player_count(), kit.seated_want(want), "%s: all %d players are seated" % [mode, want])
+		kit.assert_eq(kit.seated(), kit.seated_want(want), "%s: all %d players are seated" % [mode, want])
 	kit.assert_true(main.town.buildings.size() >= 8, "%s: the mayor built a town (%d buildings)" % [mode, main.town.buildings.size()])
 	var veh: Dictionary = main.fleet.vehicles
 	kit.assert_true(veh.size() >= 4, "%s: vehicles drive about (%d)" % [mode, veh.size()])

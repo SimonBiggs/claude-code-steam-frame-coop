@@ -1,6 +1,13 @@
 extends Node3D
 const VrText := preload("res://core/vr_text.gd")
-## Hide and Seek: a playful round game. The map changes every round: the cosy HOUSE, THE CASTLE, THE SPACESHIP.
+## Hide and Seek: a playful round game. The map changes every round: THE HOUSE (a new one every visit:
+## housegen.gd + map_house.gd, from a seed; TODAY'S HOUSE first each day; bigger houses as the family
+## explores more), THE CASTLE, THE SPACESHIP (their decoys shuffle every round).
+## STORY: PIP the puppy hides on every map too (pip.gd, story.gd). Whoever finds him first (the seeker's
+## torch or touch; a hider who dares to leave their spot while the seeker is looking) gets points and Pip
+## brings a new toy home: the toys pile up in front of his kennel in the garden for good (saved), and they
+## unlock new house looks (seaside, snowy, spooky). Story cards (core/story_card.gd) tell it with pictures.
+## One telemetry RUN line per round (and on quit mid-round).
 ## Player 1 (VR, or keyboard+mouse / controller in split screen) is the SEEKER: counts to 20 with eyes
 ## covered, then searches with a torch. Touch a hider with either hand, or point the torch at one within 3 m
 ## and pull the trigger. SNIFF (VR: left hand on your nose; flat: Q / LB) makes nearby hiders sneeze.
@@ -16,11 +23,19 @@ const VrText := preload("res://core/vr_text.gd")
 
 const PlayerScript := preload("res://games/hide_and_seek/player.gd")
 const WorldScript := preload("res://games/hide_and_seek/world.gd")
+const HouseScript := preload("res://games/hide_and_seek/map_house.gd")
 const CastleScript := preload("res://games/hide_and_seek/map_castle.gd")
 const ShipScript := preload("res://games/hide_and_seek/map_ship.gd")
 ## The maps take turns (Abigail: "every single time you play there's a different map"): each new round, and
 ## each new game launch, uses the next one. Every map script has data() and build(root).
-const MAPS := [WorldScript, CastleScript, ShipScript]
+## data(spec) / build(root, spec): spec is {seed, ...} (the house: Story.house_spec / Story.daily).
+const MAPS := [HouseScript, CastleScript, ShipScript]
+const Story := preload("res://games/hide_and_seek/story.gd")
+const PipScript := preload("res://games/hide_and_seek/pip.gd")
+const Seeded := preload("res://core/seeded.gd")
+const Save := preload("res://core/save.gd")
+const Telemetry := preload("res://core/telemetry.gd")
+const StoryCard := preload("res://core/story_card.gd")
 const HudScript := preload("res://games/hide_and_seek/hud.gd")
 const SfxScript := preload("res://core/sfx.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
@@ -80,6 +95,19 @@ var night_k := 0.0  # 0 day .. 1 night (eased)
 var star_mm: MultiMesh
 var map_idx := -1  # which MAPS entry is built right now
 var map: Dictionary = {}  # its data(): rooms, doors, spawns, jail, bell, star_spots, hide_spots, bounds
+var map_spec: Dictionary = {}  # what it was built from ({seed, level, theme, daily} for the house)
+var save: Save  # Story.save_defaults(): Pip's toys, houses explored, today's house (the host's)
+var pip: Node3D
+var pip_spot := Vector3.ZERO
+var pip_on := false  # Pip is hiding this round (not found yet)
+var pip_finder := -1
+var toys := 0  # Pip's toys at home (mirrored to the TV)
+var toys_node: Node3D
+var kennel := Vector3.ZERO  # in front of Pip's kennel (the house's garden), where his toys lie
+var kennel_n := Vector3.FORWARD  # out of the kennel
+var run: Dictionary = {}  # this round's telemetry (host)
+var vr_story: Node3D
+var last_gen_ms := 0.0
 var world_root: Node3D
 var mood_dirty := true
 
@@ -128,7 +156,20 @@ var join_t := 0.0
 
 func _ready() -> void:
 	randomize()
-	_build_map(_saved_next_map())
+	save = Save.new()
+	save.game_id = Story.GAME_ID
+	save.defaults = Story.save_defaults()
+	add_child(save)
+	if int(save.data.world) < 0:
+		save.data.world = Seeded.fresh_seed()  # this family's own houses
+		save.mark_dirty()
+	toys = int(save.data.toys)
+	pip = PipScript.new()
+	pip.name = "Pip"
+	pip.visible = false
+	add_child(pip)
+	var first := _saved_next_map()
+	_build_map(first, _spec_for(first))
 	_build_hud()
 	var menu := PauseMenuScript.new()
 	menu.main = self
@@ -258,7 +299,7 @@ func _save_next_map(i: int) -> void:
 ## Current map data (lazily filled, e.g. after a hot reload of an older version).
 func md() -> Dictionary:
 	if map.is_empty():
-		map = MAPS[maxi(map_idx, 0)].data()
+		map = MAPS[maxi(map_idx, 0)].data(map_spec)
 	return map
 
 
@@ -284,9 +325,35 @@ func star_spot(k: int) -> Vector3:
 	return st[k % st.size()]
 
 
-## Throw away the old map's nodes and build map `i` (both machines; the TV follows the snapshot).
-func _build_map(i: int) -> void:
+## What map i is built from next (host): the house is this family's next one (or TODAY'S HOUSE first
+## each day); the castle and the ship just get a fresh seed (their decoys shuffle).
+func _spec_for(i: int) -> Dictionary:
+	if posmod(i, MAPS.size()) != 0:
+		return {"seed": Seeded.fresh_seed()}
+	if _daily_due():
+		return Story.daily()
+	return Story.house_spec(int(save.data.world), int(save.data.houses), int(save.data.toys))
+
+
+func _daily_due() -> bool:
+	return not (save.data.daily as Dictionary).has(Seeded.today()) and not OS.has_environment("BOT_NO_DAILY")
+
+
+func _spec_array(spec: Dictionary) -> Array:
+	return [int(spec.get("seed", 0)), int(spec.get("level", 0)), int(spec.get("theme", 0)), bool(spec.get("daily", false))]
+
+
+func _spec_from(a: Array) -> Dictionary:
+	return {"seed": int(a[0]), "level": int(a[1]), "theme": int(a[2]), "daily": bool(a[3])}
+
+
+## Throw away the old map's nodes and build map `i` from `spec` (both machines; the TV follows the
+## snapshot). Nothing happens when that exact map is already built.
+func _build_map(i: int, spec: Dictionary = {}) -> void:
 	i = posmod(i, MAPS.size())
+	if i == map_idx and _spec_array(spec) == _spec_array(map_spec) and world_root != null and is_instance_valid(world_root):
+		return
+	var t0 := Time.get_ticks_usec()
 	if world_root != null and is_instance_valid(world_root):
 		remove_child(world_root)
 		world_root.queue_free()
@@ -296,14 +363,36 @@ func _build_map(i: int) -> void:
 	world_root.name = "World"
 	add_child(world_root)
 	move_child(world_root, 0)
-	var built: Dictionary = MAPS[i].build(world_root)
+	map_spec = spec.duplicate()
+	var built: Dictionary = MAPS[i].build(world_root, map_spec)
 	map_idx = i
-	map = MAPS[i].data()
+	map = MAPS[i].data(map_spec)
 	decoys = built.decoys
 	lights = built.lights
 	window_mat = built.get("window_mat")
+	kennel = built.get("kennel", Vector3.ZERO)
+	kennel_n = built.get("kennel_n", Vector3.FORWARD)
 	mood_dirty = true
-	print("Map: %s" % map_title())
+	toys_node = null
+	_update_toys()
+	if pip != null:
+		pip.visible = false
+	pip_on = false
+	var ms := (Time.get_ticks_usec() - t0) / 1000.0
+	last_gen_ms = snappedf(ms, 0.1)
+	print("Map: %s (%s, %.0f ms)" % [map_title(), _spec_array(map_spec), ms])
+
+
+## Pip's toys in front of his kennel (the house's garden), rebuilt when one comes home.
+func _update_toys() -> void:
+	var want := toys if map_idx == 0 else 0
+	if toys_node != null and is_instance_valid(toys_node) and int(toys_node.get_meta("toys", -1)) == want:
+		return
+	if toys_node != null and is_instance_valid(toys_node):
+		toys_node.queue_free()
+	toys_node = HouseScript.toys_node(map_spec, want) if map_idx == 0 else Node3D.new()
+	toys_node.set_meta("toys", want)
+	world_root.add_child(toys_node)
 
 
 ## Hot reload from the one-map version: its house was built straight into Main.
@@ -972,6 +1061,8 @@ func _process(delta: float) -> void:
 		return
 	_ensure_players(net.mode)
 	_seek_hints(delta)
+	if not run.is_empty():
+		run.t0 = float(run.t0) + delta
 	if music == null:
 		music = MusicScript.new()
 		add_child(music)
@@ -1041,9 +1132,10 @@ func _start_round() -> void:
 	# Round types shift by one every lap of the maps, so each map gets every round type in turn.
 	var lap := (round_no - 1) / MAPS.size()
 	round_type = ROUND_TYPES[(round_no - 1 + lap) % ROUND_TYPES.size()]
-	if round_no > 1 or map_idx < 0:
-		_build_map(map_idx + 1)
+	var next := map_idx + 1 if (round_no > 1 or map_idx < 0) else map_idx
+	_build_map(next, _spec_for(next))
 	_save_next_map(map_idx + 1)
+	_hide_pip()
 	for i in round_scores.size():
 		round_scores[i] = 0
 		survive_acc[i] = 0.0
@@ -1069,6 +1161,9 @@ func _start_round() -> void:
 	phase = "intro"
 	phase_t = intro_time if round_no == 1 else 5.0
 	print("Round %d (%s) on %s: %d hiders" % [round_no, round_type, map_title(), hider_count()])
+	run = {"round": round_no, "map": map_title(), "type": round_type, "hiders": hider_count(), "spec": _spec_array(map_spec),
+		"gen_ms": last_gen_ms, "spots": (md().hide_spots as Array).size(), "toys": toys, "t0": 0.0}
+	_round_story()
 	sound("ready", -4.0, 1.0)
 	_show_center("", 0.0)  # no words: each view says HIDE! / SEEK! with a picture of the round
 
@@ -1111,6 +1206,7 @@ func _update_seek(delta: float) -> void:
 	_check_touch()
 	_check_bell()
 	_check_stars()
+	_check_pip()
 	var n := ceili(phase_t)
 	if n <= 10 and n != last_tick and n > 0:
 		last_tick = n
@@ -1332,6 +1428,9 @@ func torch_click(s) -> void:
 	if h != null:
 		find_hider(h, "torch")
 		return
+	if _pip_in_beam(s):
+		find_pip(0)
+		return
 	var di := _decoy_target(s)
 	if di >= 0:
 		var kind: int = decoys[di].kind
@@ -1441,9 +1540,12 @@ func _end_round(seeker_won: bool) -> void:
 			best = i
 	if best >= 0:
 		lines.append("TOP: P%d  %d" % [best + 1, totals[best]])
+	if pip_finder >= 0:
+		lines.append("PIP: P%d" % (pip_finder + 1))
 	results_text = "\n".join(lines)
 	_show_center(results_text, 0.0)
 	_save_best()
+	_round_done(seeker_won)
 	print("Round %d over: %s, scores %s, totals %s" % [round_no, "seeker wins" if seeker_won else "hiders win", round_scores, totals])
 
 
@@ -1568,6 +1670,10 @@ func _remember_party() -> void:
 
 func _exit_tree() -> void:
 	XRServer.world_scale = 1.0  # global: never leak a changed scale into other games
+	if (phase == "count" or phase == "seek") and not run.is_empty():
+		_telemetry("quit", false)  # left mid-round
+	if save != null:
+		save.save_now()
 	if ready_to_play:
 		_remember_party()
 
@@ -1644,7 +1750,8 @@ func make_snapshot() -> Array:
 	var ps := []
 	for p in players:
 		ps.append(p.net_state())
-	return [phase, phase_t, round_no, seek_len, ps, round_scores, totals, count_time, round_type, jail_breaks, star_idx, star_taken, snappedf(sniff_cd, 0.1), maxi(map_idx, 0)]
+	return [phase, phase_t, round_no, seek_len, ps, round_scores, totals, count_time, round_type, jail_breaks, star_idx, star_taken, snappedf(sniff_cd, 0.1), maxi(map_idx, 0),
+		_spec_array(map_spec), [pip_spot, pip_on, pip_finder], toys]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -1669,8 +1776,21 @@ func apply_snapshot(s: Array) -> void:
 		star_idx = s[10]
 		star_taken = s[11]
 		sniff_cd = s[12]
-	if s.size() >= 14 and int(s[13]) != map_idx:
-		_build_map(int(s[13]))  # the seeker moved on to the next map
+	if s.size() >= 17:
+		_build_map(int(s[13]), _spec_from(s[14]))  # the seeker moved on to the next map (nothing if it's built)
+		var pp: Array = s[15]
+		if (pp[0] as Vector3) != pip_spot or bool(pp[1]) != pip_on:
+			if bool(pp[1]):
+				_place_pip(pp[0])
+			elif pip_on:
+				pip.found()
+			pip_on = bool(pp[1])
+		pip_finder = int(pp[2])
+		if int(s[16]) != toys:
+			toys = int(s[16])
+			_update_toys()
+	elif s.size() >= 14 and int(s[13]) != map_idx:
+		_build_map(int(s[13]))
 	var ps: Array = s[4]
 	for i in mini(players.size(), ps.size()):
 		players[i].apply_net_state(ps[i])
@@ -1700,6 +1820,10 @@ func apply_event(kind: String, args: Array) -> void:
 			_achoo(args[0], args[1])
 		"jailbreak":
 			pass
+		"pip":
+			_pip_fx(args[0], args[1])
+		"story":
+			_show_story(args[0])
 		"teleport":
 			var i: int = args[0]
 			if i < players.size() and _has_local_view(players[i]):
@@ -1707,6 +1831,187 @@ func apply_event(kind: String, args: Array) -> void:
 		"remote_pause":
 			get_tree().paused = args[0]
 			_show_center("PAUSED" if args[0] else "", 0.0, false)
+
+
+# --- Pip, story cards, saves and telemetry (story.gd) ---------------------------------
+
+## Host: Pip hides at one of the map's hiding spots (further from the counting spot in later houses).
+func _hide_pip() -> void:
+	pip_finder = -1
+	var spots: Array = (md().hide_spots as Array).duplicate()
+	var start: Vector3 = spawn_pos(0)
+	spots = spots.filter(func(p: Vector3) -> bool: return p.distance_to(start) > 3.0)
+	if spots.is_empty():
+		pip_on = false
+		pip.visible = false
+		return
+	spots.sort_custom(func(a: Vector3, b: Vector3) -> bool: return a.distance_to(start) < b.distance_to(start))
+	var r := Seeded.rng(Seeded.fresh_seed(), "pip")
+	var level := int(map_spec.get("level", 0)) if map_idx == 0 else 2
+	var from := mini(spots.size() - 1, spots.size() * mini(level, 4) / 8)  # later houses: only the far half
+	_place_pip(spots[r.randi_range(from, spots.size() - 1)])
+	pip_on = true
+
+
+func _place_pip(at: Vector3) -> void:
+	pip_spot = at
+	var to := spawn_pos(0) - at
+	pip.hide_at(at, atan2(-to.x, -to.z))  # facing the counting spot
+
+
+## Host: someone found Pip? (a hider, not disguised, bumping into him while the seeker looks; the flat
+## seeker bumping into him; a VR hand touching him). The torch finds him in torch_click.
+func _check_pip() -> void:
+	if not pip_on:
+		return
+	var c: Vector3 = pip.center()
+	var closest := INF
+	for p in players:
+		if not p.active or (p.role == "hider" and not p.is_hiding()):
+			continue
+		var d := Vector2(p.global_position.x - c.x, p.global_position.z - c.z).length()
+		closest = minf(closest, d)
+		if p.role == "hider":
+			if p.prop_kind < 0 and d < 0.75:
+				find_pip(p.index)
+				return
+		elif p.vr:
+			if p.hand_l.global_position.distance_to(c) < HAND_TOUCH or p.hand_r.global_position.distance_to(c) < HAND_TOUCH:
+				find_pip(p.index)
+				return
+		elif d < BODY_TOUCH:
+			find_pip(p.index)
+			return
+	pip.excite = clampf(1.0 - (closest - 1.0) / 3.0, 0.0, 1.0)
+
+
+## Is Pip in the seeker's torch beam (in range, not behind a wall)?
+func _pip_in_beam(s) -> bool:
+	if not pip_on:
+		return false
+	var xf := _seeker_aim(s)
+	var c: Vector3 = pip.center()
+	var to := c - xf.origin
+	var d := to.length()
+	if d > TAG_RANGE + 0.3 or d < 0.01:
+		return false
+	var ang := rad_to_deg(acos(clampf((-xf.basis.z.normalized()).dot(to / d), -1.0, 1.0)) - atan(0.3 / d))
+	return ang <= TAG_ANGLE and ray(xf.origin, c).is_empty()
+
+
+## Host: player `i` found Pip: points, a new toy for his kennel (saved), maybe a new house look.
+func find_pip(i: int) -> void:
+	if not pip_on or phase != "seek":
+		return
+	pip_on = false
+	pip_finder = i
+	round_scores[i] += Story.PIP_POINTS
+	var before := toys
+	toys += 1
+	save.data.toys = toys
+	save.data.pips = int(save.data.pips) + 1
+	save.mark_dirty()
+	_update_toys()
+	run["pip"] = "seeker" if i == 0 else "hider"
+	print("Round %d: P%d found Pip (toy %d)" % [round_no, i + 1, toys])
+	_pip_fx(i, toys)
+	net.event("pip", [i, toys])
+	var th := Story.new_theme(before, toys)
+	if th >= 0:
+		var t := Story.theme(th)
+		_story({"who": String(t.name), "line": "New look!", "pic": String(t.pic), "color": Color(0.6, 0.85, 1.0), "duration": 4.0})
+
+
+## Both machines: Pip hops and pops, hearts, a popup and a story card with his new toy.
+func _pip_fx(i: int, n_toys: int) -> void:
+	toys = n_toys
+	pip.found()
+	var c: Vector3 = pip.center()
+	var col: Color = PLAYER_COLORS[i % PLAYER_COLORS.size()]
+	burst(c + Vector3.UP * 0.3, Color(1.0, 0.45, 0.6), 18, 0.08)
+	burst(c, Story.PIP_COLOR, 10)
+	popup(c + Vector3.UP * 0.9, "PIP! +%d" % Story.PIP_POINTS, col.lightened(0.3))
+	local_sound("pickup", -2.0, 1.2)
+	local_sound("squeak", -6.0, 1.6)
+	if map_idx == 0 and kennel != Vector3.ZERO:  # then he trots home and sits by his kennel with the new toy
+		var home := kennel + kennel_n * 0.7
+		var face := atan2(-kennel_n.x, -kennel_n.z)
+		get_tree().create_timer(1.6).timeout.connect(func() -> void:
+			if not pip_on and map_idx == 0 and is_instance_valid(pip):
+				pip.hide_at(home, face))
+	var toy: Array = Story.toy(n_toys - 1)
+	var beat := {"who": "PIP", "line": "A %s for my kennel!" % String(toy[0]).to_lower(), "pic": "puppy", "color": Story.PIP_COLOR, "duration": 3.5}
+	_show_story(beat)
+
+
+## Round-start story beats (host decides, every machine shows them).
+func _round_story() -> void:
+	var beat := {}
+	if int(save.data.pips) == 0 and round_no == 1:
+		beat = {"who": "PIP", "line": "I'm hiding too! Find me!", "pic": "puppy", "color": Story.PIP_COLOR}
+	elif map_idx == 0:
+		var th := Story.theme(int(map_spec.get("theme", 0)))
+		var who := "TODAY'S HOUSE" if bool(map_spec.get("daily", false)) else "HOUSE %d" % (int(map_spec.get("level", 0)) + 1)
+		beat = {"who": who, "line": String(th.line), "pic": String(th.pic), "color": Color(1.0, 0.8, 0.5)}
+	if not beat.is_empty():
+		beat["duration"] = 4.0
+		_story(beat)
+
+
+func _story(beat: Dictionary) -> void:
+	_show_story(beat)
+	net.event("story", [beat])
+
+
+func _show_story(beat: Dictionary) -> void:
+	beat = beat.duplicate()
+	beat["y"] = beat.get("y", 0.36)  # under the big HIDE! / SEEK! word, above the picture cues
+	var huds: Array = []
+	for p in players:
+		if p.hud != null and is_instance_valid(p.hud) and _has_local_view(p) and p.active:
+			huds.append(p.hud)
+	StoryCard.show(huds, beat)
+	if not players.is_empty() and players[0].vr and players[0].xr_camera != null and net.mode != "client":
+		if vr_story != null and is_instance_valid(vr_story):
+			vr_story.queue_free()
+		vr_story = StoryCard.show_vr(self, players[0].xr_camera, beat)
+
+
+## Host: the round is over: count the house, today's house, and one telemetry line.
+func _round_done(seeker_won: bool) -> void:
+	if net.mode == "client":
+		return
+	var sd: Dictionary = save.data
+	if map_idx == 0:
+		if bool(map_spec.get("daily", false)):
+			(sd.daily as Dictionary)[Seeded.today()] = finds
+			while (sd.daily as Dictionary).size() > 30:
+				(sd.daily as Dictionary).erase((sd.daily as Dictionary).keys()[0])
+		else:
+			sd.houses = int(sd.houses) + 1
+	sd.best_finds = maxi(int(sd.best_finds), finds)
+	save.mark_dirty()
+	_telemetry("seeker" if seeker_won else "hiders", seeker_won)
+
+
+func _telemetry(end: String, seeker_won: bool) -> void:
+	if run.is_empty() or net.mode == "client":
+		return
+	var info := run.duplicate()
+	info.erase("t0")
+	info["end"] = end
+	info["seeker_won"] = seeker_won
+	info["finds"] = finds
+	info["secs"] = snappedf(float(run.t0), 0.1)  # game seconds since the round started
+	info["seek_left"] = snappedf(phase_t, 0.1) if phase == "seek" or phase == "over" else -1.0
+	info["breaks"] = (1 + (1 if hider_count() >= 4 else 0)) - jail_breaks
+	info["sniffs"] = sniff_hits
+	info["toys"] = toys
+	info["houses"] = int(save.data.houses)
+	info["vr"] = not players.is_empty() and players[0].vr
+	info["net"] = net.mode
+	Telemetry.run(Story.GAME_ID, info)
+	run = {}
 
 
 # --- HUD ---------------------------------------------------------------------

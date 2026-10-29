@@ -50,6 +50,7 @@ func _ready() -> void:
 	kit.every(0.5, _results)
 	kit.every(0.5, _own_balls_seen)
 	var end := 150.0 if host else (140.0 if client else 190.0)
+	end = preload("res://tests/bot_end.gd").within_deadline(end)
 	kit.at(end, "finish", func() -> void:
 		_checks()
 		kit.finish())
@@ -233,9 +234,7 @@ func _checks() -> void:
 	var mode: String = main.net.mode
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
 	if mode != "host":
-		# a client sees other machines' seats too (a flat host's player): count only its own here
-		var seated: int = main.party.local_slots().size() if mode == "client" else main.party.player_count()
-		kit.assert_eq(seated, kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
+		kit.assert_eq(kit.seated(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
 	kit.assert_true(holes_seen.size() >= 3, "%s: played through several holes (%d)" % [mode, holes_seen.size()])
 	if main.split != null and not main.party.local_slots().is_empty():
 		kit.assert_true(seen_checks > 0, "%s: own balls were checked for visibility" % mode)

@@ -82,12 +82,12 @@ void fragment() {
 """
 
 
-static func data() -> Dictionary:
+static func data(_spec: Dictionary = {}) -> Dictionary:
 	return {"title": TITLE, "rooms": ROOMS, "doors": DOORS, "hide_spots": HIDE_SPOTS, "star_spots": STAR_SPOTS,
 		"spawns": SPAWNS, "jail": JAIL_POS, "bell": BELL_POS, "bounds": [-9.0, 9.0, -7.0, 7.0]}
 
 
-static func build(root: Node3D) -> Dictionary:
+static func build(root: Node3D, spec: Dictionary = {}) -> Dictionary:
 	var ctx: Dictionary = W.new_ctx(root)
 	W.environment_for(root, Color(0.5, 0.68, 0.95), Color(1.0, 0.88, 0.75), 0.6, 0.6)
 	W.shader_floor(ctx, Vector2(18.0, 14.0), Vector3.ZERO, FLOOR_SHADER)
@@ -103,7 +103,7 @@ static func build(root: Node3D) -> Dictionary:
 	var lights: Array = W.omni_lights(root, [Vector3(-6.5, 2.8, 5.0), Vector3(0, 2.8, 5.0), Vector3(6.5, 2.8, 5.0),
 		Vector3(-6.0, 2.8, 0.0), Vector3(6.0, 2.8, 0.0), Vector3(-3.0, 2.8, -5.0), Vector3(6.0, 2.8, -5.0)],
 		Color(1.0, 0.78, 0.55), 1.2, 6.5)
-	var decoys: Array = W.finish(ctx, DECOYS)
+	var decoys: Array = W.finish(ctx, W.round_decoys(DECOYS, int(spec.get("seed", 0))))
 	return {"decoys": decoys, "lights": lights, "window_mat": W.window_mat(ctx)}
 
 

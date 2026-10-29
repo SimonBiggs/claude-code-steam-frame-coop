@@ -78,7 +78,9 @@ func _ready() -> void:
 
 func _join() -> void:
 	if main.net.mode == "host":
-		return
+		if not main.net.has_vr:
+			kit.join_bot(main.party)  # a flat host (TV / Deck hosting): one pad player here, in slot 0
+		return  # the TV machines bring their own pads
 	for i in want:
 		kit.join_bot(main.party)
 
@@ -442,7 +444,7 @@ func _checks() -> void:
 	var mode: String = main.net.mode
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
 	if mode != "host":
-		kit.assert_eq(main.party.player_count(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
+		kit.assert_eq(kit.seated(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
 	kit.assert_true(seen.has("phase:results"), "%s: the party reached the results screen" % mode)
 	kit.assert_true(main.roster().size() >= 4, "%s: at least 4 players (CPUs fill up)" % mode)
 	for s in ["step:roll", "step:move", "step:land", "phase:minigame"]:
