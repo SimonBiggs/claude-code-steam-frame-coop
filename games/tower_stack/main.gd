@@ -5,6 +5,12 @@ extends Node3D
 ## right trigger and stacks them on the round stage. The gold hoop is the record: beat it! A falling
 ## tower is just a funny WOBBLE: keep going. 3-minute rounds, then results and an automatic replay.
 ## TV players can jump (A) and climb the tower. Without VR a helper crane does the stacking.
+## Story + depth: WREN the builder bird (wren.gd) asks for one building after another (towergen.gd: a
+## seeded JOB: the silhouette to match shown as a see-through plan on the stage, which blocks come
+## (cubes, planks, slabs, heavy stones), wind and a wobbly jelly stage on later jobs, the gold hoop at
+## the goal height). Reach the hoop and hold it: the tower gets its roof and joins THE TOWN behind the
+## park (skyline.gd, saved, grows over days). TODAY'S TOWER: job 2 of the first round each day is gold.
+## Telemetry: one RUN line per round and on quit.
 ## Built on the shared engine (see games/engine_template/main.gd and docs/engine/).
 
 const NetScript := preload("res://core/net.gd")
@@ -27,6 +33,16 @@ const SkyKit := preload("res://core/sky_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")
 const Looks := preload("res://games/tower_stack/looks.gd")
 const JellyScript := preload("res://games/tower_stack/jelly.gd")
+const G := preload("res://games/tower_stack/towergen.gd")
+const WrenScript := preload("res://games/tower_stack/wren.gd")
+const SkylineScript := preload("res://games/tower_stack/skyline.gd")
+const Seeded := preload("res://core/seeded.gd")
+const Telemetry := preload("res://core/telemetry.gd")
+const StoryCard := preload("res://core/story_card.gd")
+const WREN_COLOR := Color(0.62, 0.42, 0.25)
+const TOWN_CHEERS := {1: "Our town!", 5: "Five towers!", 10: "Ten towers!", 20: "A big town!", 30: "A city!"}
+const CHEER := 3.5  # seconds a finished tower stands with its roof before it flies to the town
+const SNAP_R := 0.22  # a gentle place this close to a plan spot of the same block snaps onto it
 
 const GAME_ID := "tower_stack"
 const ARENA := 9.0
@@ -114,6 +130,8 @@ var crane_state := "idle"
 var crane_id := -1
 var crane_goal := Vector3.ZERO
 var crane_wait := 0.0
+var crane_yaw := 0.0
+var pad_idle_t := 0.0  # host: seconds the pad has had room but no block
 var touch_cd := {}  # "pad" / "ring" -> clock time when it may react again
 
 var time_left := 0.0
@@ -131,6 +149,34 @@ var send_t := 0.0
 var total_delivered := 0
 var total_placed := 0
 var max_height := 0.0
+var total_built := 0
+# Jobs (towergen.gd): the tower being built now, every machine rebuilds it from the "job" state.
+var site := {}
+var job_n := 0
+var job_t := 0.0
+var set_i := 0  # host: next block of the job's set to drop
+var bkind := {}  # id -> towergen kind (every machine)
+var bcolor := {}  # id -> colour index (every machine)
+var fill := 0  # bitmask of plan spots holding a matching block ("fill" state)
+var stable_t := 0.0
+var done_t := -1.0  # host: >= 0 while a finished tower shows off its roof
+var built_round := 0
+var round_jobs: Array = []  # this round's finished jobs for telemetry [level, secs, perfect, daily]
+var round_wobbles := 0
+var session_seed := 0
+var session_t := 0.0
+var quit_logged := false
+var wren: Node3D
+var town: Node3D
+var ghost_root: Node3D
+var ghosts: Array[MeshInstance3D] = []
+var sock: Node3D
+var stage: Node3D  # the round stage: an AnimatableBody3D (host / local) that rocks on wobbly sites
+var tilt := Vector2.ZERO
+var ground_mi: MeshInstance3D
+var path_mi: MeshInstance3D
+var topper: Node3D
+var built_labels := {}  # slot -> Label (towers built this round)
 
 
 func _ready() -> void:
@@ -149,7 +195,7 @@ func _ready() -> void:
 	party.player_left.connect(_on_player_left)
 	save = Save.new()
 	save.game_id = GAME_ID
-	save.defaults = {"best": 0.0}
+	save.defaults = {"best": 0.0, "built": 0, "town": [], "daily": "", "sessions": 0}
 	add_child(save)
 	sfx = SfxScript.new()
 	add_child(sfx)
@@ -173,6 +219,23 @@ func _ready() -> void:
 
 func _exit_tree() -> void:
 	XRServer.world_scale = 1.0  # global: never leave the giant scale behind for the next game
+	_log_round("quit")
+
+
+## One telemetry line per round (and when the game closes mid-round). Host / local only, once each.
+func _log_round(end: String) -> void:
+	if quit_logged or net == null or net.mode == "client" or not ready_to_play:
+		return
+	if end == "quit":
+		quit_logged = true
+		if results_showing() or job_n == 0:
+			return  # the round already logged itself
+	Telemetry.run(GAME_ID, {"end": end, "round": int(net.state_get("round", 0)), "towers": built_round,
+		"jobs": round_jobs, "reached": job_n, "level": int(site.get("level", 0)), "rec": float(net.state_get("rec", 0.0)),
+		"best": float(save.data.best), "wobbles": round_wobbles, "delivered": total_delivered, "placed": total_placed,
+		"crew": party.player_count(), "vr": vr_rig != null, "secs": int(session_t), "seed": session_seed,
+		"built": int(save.data.built), "town": (save.data.town as Array).size()})
+	save.save_now()
 
 
 func _setup(mode: String) -> void:
@@ -191,6 +254,7 @@ func _setup(mode: String) -> void:
 		vr_glove_label.position = Vector3(0.0, 0.05, 0.06) * WS  # back of the hand, clear of the wrist MENU
 		vr_glove_label.rotation = Vector3(-1.2, 0.0, 0.0)
 		vr_rig.hand_l.add_child(vr_glove_label)
+	session_seed = int(OS.get_environment("TS_SEED")) if OS.has_environment("TS_SEED") else Seeded.fresh_seed()
 	_build_world()
 	if mode != "host" or flat_host:  # every machine with a screen of its own (a flat host too)
 		split = SplitView.new()
@@ -209,6 +273,12 @@ func _setup(mode: String) -> void:
 	awards.set_player(0, "GIANT" if vr_rig != null or mode == "client" else party.name_of(0))
 	if mode != "client":
 		net.state_set("best", float(save.data["best"]))
+		net.state_set("town", (save.data.town as Array).duplicate(true))
+		save.data.sessions = int(save.data.sessions) + 1
+		save.mark_dirty()
+		print("Tower Stack town: %d towers (%d built in all), today's tower %s, session seed %d" % [
+			(save.data.town as Array).size(), int(save.data.built),
+			"done" if String(save.data.daily) == Seeded.today() else "due", session_seed])
 		_start_round()
 	hints.intro(INTRO, {"duration": 7.0})
 	if vr_rig != null:
@@ -232,6 +302,7 @@ func _build_world() -> void:
 	ground.material_override = MeshKit.material(Color(0.45, 0.75, 0.38))
 	ground.position.y = -0.1
 	add_child(ground)
+	ground_mi = ground
 	var path := MeshInstance3D.new()
 	var pdisc := CylinderMesh.new()
 	pdisc.top_radius = ARENA
@@ -242,12 +313,43 @@ func _build_world() -> void:
 	path.material_override = MeshKit.material(Color(0.55, 0.82, 0.45))
 	path.position.y = 0.005
 	add_child(path)
+	path_mi = path
 	add_child(MeshKit.scatter_random(MeshKit.prop("tree"), 20, Vector3.ZERO, ARENA + 12.0, ARENA + 4.0, 0.9, 1.4, PackedColorArray(), 3))
 	add_child(MeshKit.scatter_random(MeshKit.prop("flower"), 40, Vector3.ZERO, ARENA - 0.5, 2.5, 0.7, 1.1,
 		PackedColorArray([Color(1.0, 0.5, 0.6), Color(1.0, 0.9, 0.4), Color(0.7, 0.6, 1.0)]), 5))
 	# Physics floor + the tower stage (host / local only; the TV machine draws ghosts).
-	var base := MeshKit.instance(Looks.base_mesh(BASE_R, BASE_H))
-	add_child(base)
+	# The stage: rocks gently on wobbly sites (host / local: an AnimatableBody3D carrying the blocks;
+	# TV machines tilt a plain node from the snapshot).
+	if net.mode != "client":
+		var ab := AnimatableBody3D.new()
+		ab.sync_to_physics = true
+		var bs := CollisionShape3D.new()
+		var cyl := CylinderShape3D.new()
+		cyl.radius = BASE_R
+		cyl.height = BASE_H
+		bs.shape = cyl
+		bs.position.y = BASE_H * 0.5
+		ab.add_child(bs)
+		var spm := PhysicsMaterial.new()
+		spm.friction = 1.0
+		ab.physics_material_override = spm
+		stage = ab
+	else:
+		stage = Node3D.new()
+	stage.name = "Stage"
+	add_child(stage)
+	stage.add_child(MeshKit.instance(Looks.base_mesh(BASE_R, BASE_H)))
+	ghost_root = Node3D.new()
+	ghost_root.name = "Plan"
+	stage.add_child(ghost_root)
+	sock = MeshKit.instance(Looks.sock_mesh())
+	sock.position = Vector3(-2.3, 0.0, -1.2)
+	sock.visible = false
+	add_child(sock)
+	town = SkylineScript.new()
+	add_child(town)
+	wren = WrenScript.new()
+	add_child(wren)
 	var pad := MeshKit.instance(Looks.pad_mesh(PAD_R), false)
 	pad.name = "Pad"
 	pad.position = PAD
@@ -260,13 +362,6 @@ func _build_world() -> void:
 		fs.shape = fbox
 		fs.position.y = -0.5
 		floor_body.add_child(fs)
-		var bs := CollisionShape3D.new()
-		var cyl := CylinderShape3D.new()
-		cyl.radius = BASE_R
-		cyl.height = BASE_H
-		bs.shape = cyl
-		bs.position.y = BASE_H * 0.5
-		floor_body.add_child(bs)
 		var pm := PhysicsMaterial.new()
 		pm.friction = 1.0
 		floor_body.physics_material_override = pm
@@ -277,15 +372,63 @@ func _build_world() -> void:
 	if vr_rig == null:
 		ring_label.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y  # TV only (VR text never billboards)
 	add_child(ring_label)
-	_place_ring(float(net.state_get("best", 0.0)))
+	_place_ring(1.2)
 
 
-func _place_ring(best: float) -> void:
-	var y := maxf(best, 1.2)
+## The gold hoop marks the job's goal height (Wren perches on it).
+func _place_ring(y: float) -> void:
 	if ring != null:
 		ring.position = Vector3(0.0, y, 0.0)
 		ring_label.position = Vector3(-BASE_R - 0.6, y + 0.3, 0.6)
-		ring_label.text = "BEST %.1f m" % best if best > 0.0 else "BEAT ME!"
+		ring_label.text = "%.1f m" % y
+	if wren != null:
+		wren.perch(Vector3(-(BASE_R + 0.35), y + 0.04, 0.0))
+
+
+## Every machine: show a job (from the "job" state): the plan ghosts, the hoop, wind sock, ground.
+func _apply_site(s: Dictionary) -> void:
+	site = s
+	if s.is_empty():
+		return
+	_place_ring(float(s.top))
+	for g in ghosts:
+		g.queue_free()
+	ghosts.clear()
+	for b in s.plan:
+		var mi := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = G.size_of(int(b[0])) * 1.02
+		mi.mesh = bm
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mi.material_override = MeshKit.material(Color(1.0, 1.0, 1.0, 0.18))
+		mi.position = Vector3(float(b[1]), float(b[2]), float(b[3]))
+		mi.rotation.y = PI * 0.5 * int(b[4])
+		ghost_root.add_child(mi)
+		ghosts.append(mi)
+	_show_fill(int(net.state_get("fill", 0)))
+	var windy := float(s.wind) > 0.0
+	sock.visible = windy
+	sock.rotation.y = -float(s.wind_dir)
+	var cols: Array = G.GROUND_COLORS.get(String(s.ground), G.GROUND_COLORS["meadow"])
+	if ground_mi != null:
+		ground_mi.material_override = MeshKit.material(cols[0])
+		path_mi.material_override = MeshKit.material(cols[1])
+	if topper != null:
+		topper.queue_free()
+		topper = null
+
+
+## Plan spots already holding the right block glow green; the rest stay a faint white outline.
+func _show_fill(mask: int) -> void:
+	for i in ghosts.size():
+		var on := (mask >> i) & 1 == 1
+		ghosts[i].material_override = MeshKit.material(Color(0.4, 1.0, 0.5, 0.28) if on else Color(1.0, 1.0, 1.0, 0.18))
+
+
+## Wind direction as a flat vector (the sock points downwind).
+func _wind_vec() -> Vector3:
+	var a := float(site.get("wind_dir", 0.0))
+	return Vector3(cos(a), 0.0, sin(a))
 
 
 # --- HUD ----------------------------------------------------------------------------------
@@ -306,6 +449,12 @@ func _make_hud(slot: int, parent: Control) -> void:
 	var l := UiKit.label("0.0 m", "number")
 	row.add_child(l)
 	height_labels[slot] = l
+	var row2 := UiKit.hbox()
+	v.add_child(row2)
+	row2.add_child(StoryCard.picture("tower", 40.0, Looks.COLORS[2]))
+	var tl := UiKit.label("0", "number")
+	row2.add_child(tl)
+	built_labels[slot] = tl
 	var bl := UiKit.label("", "small", "dim")
 	v.add_child(bl)
 	best_labels[slot] = bl
@@ -332,6 +481,9 @@ func _refresh_hud() -> void:
 		var bl: Label = best_labels.get(slot)
 		if bl != null and is_instance_valid(bl):
 			bl.text = "BEST %.1f m" % best
+		var tl: Label = built_labels.get(slot)
+		if tl != null and is_instance_valid(tl):
+			tl.text = str(int(net.state_get("built", 0)))
 	if join_prompt != null:
 		join_prompt.visible = party.local_slots().is_empty()
 
@@ -408,6 +560,7 @@ func _on_player_left(slot: int) -> void:
 		huds.erase(slot)
 	height_labels.erase(slot)
 	best_labels.erase(slot)
+	built_labels.erase(slot)
 	timers.erase(slot)
 	hints.remove_view(slot)
 	_refresh_group()
@@ -491,8 +644,9 @@ func _ground_at(p: Vector3) -> float:
 			continue
 		var b: Node3D = blocks[id]
 		var bp := b.global_position
-		if absf(p.x - bp.x) < H + 0.15 and absf(p.z - bp.z) < H + 0.15:
-			var top := bp.y + H
+		var e := _half(int(id))
+		if absf(p.x - bp.x) < e.x + 0.15 and absf(p.z - bp.z) < e.z + 0.15:
+			var top := bp.y + e.y
 			if top <= p.y + STEP and top > g:
 				g = top
 	return g
@@ -503,18 +657,32 @@ func _push_out(p: Vector3) -> Vector3:
 	for id in blocks:
 		var b: Node3D = blocks[id]
 		var bp := b.global_position
-		if p.y >= bp.y + H - STEP or p.y + 1.0 < bp.y - H:
+		var e := _half(int(id))
+		if p.y >= bp.y + e.y - STEP or p.y + 1.0 < bp.y - e.y:
 			continue
 		var dx := p.x - bp.x
 		var dz := p.z - bp.z
-		var ox := H + BODY_R - absf(dx)
-		var oz := H + BODY_R - absf(dz)
+		var ox := e.x + BODY_R - absf(dx)
+		var oz := e.z + BODY_R - absf(dz)
 		if ox > 0.0 and oz > 0.0:
 			if ox < oz:
 				p.x += ox * (1.0 if dx >= 0.0 else -1.0)
 			else:
 				p.z += oz * (1.0 if dz >= 0.0 else -1.0)
 	return p
+
+
+## A block's half size along the world axes (its turn included).
+func _half(id: int) -> Vector3:
+	var b: Node3D = blocks.get(id)
+	var h := G.size_of(int(bkind.get(id, 0))) * 0.5
+	if b == null:
+		return h
+	var bas := b.global_basis.orthonormalized()
+	return Vector3(
+		h.x * absf(bas.x.x) + h.y * absf(bas.y.x) + h.z * absf(bas.z.x),
+		h.x * absf(bas.x.y) + h.y * absf(bas.y.y) + h.z * absf(bas.z.y),
+		h.x * absf(bas.x.z) + h.y * absf(bas.y.z) + h.z * absf(bas.z.z))
 
 
 func _hop(slot: int) -> void:
@@ -606,21 +774,27 @@ func _on_state_changed(key: String, value: Variant) -> void:
 	match key:
 		"height":
 			_refresh_hud()
-		"best":
+		"best", "built":
 			_refresh_hud()
-			_place_ring(float(value))
+		"job":
+			_apply_site(G.from_job(value) if value is Array else {})
+		"fill":
+			_show_fill(int(value))
+		"town":
+			town.set_entries(value if value is Array else [])
 		"time":
 			for slot in timers:
 				var t: HudKit.TimerPill = timers[slot]
 				if is_instance_valid(t):
 					t.set_time(float(value))
 		"round":
-			HudKit.banner(_all_huds(), "STACK IT!", "", {"duration": 1.8})
-			_vr_say("STACK IT!", 2.0)
+			pass  # (each job's story card says what to build)
 		"new_record":
 			if int(value) > 0:
-				HudKit.banner(_all_huds(), "NEW RECORD!", "", {"style": "victory", "duration": 2.2})
-				_vr_say("NEW RECORD!", 2.5)
+				# A small toast, not a banner: the record often comes with a finished tower's own banner.
+				HudKit.toast(_all_huds(), "NEW RECORD!", {"icon": "crown", "color": "gold", "where": "top_right", "duration": 2.5})
+				if vr_head_t <= 0.0:
+					_vr_say("NEW RECORD!", 2.0)
 				sound("fanfare", -2.0)
 		"phase":
 			if String(value) == "results":
@@ -643,6 +817,11 @@ func _start_round() -> void:
 	spawn_t = 2.5
 	tower_h = 0.0
 	peak = 0.0
+	job_n = 0
+	built_round = 0
+	round_jobs = []
+	round_wobbles = 0
+	net.state_set("built", 0)
 	net.state_set("height", 0.0)
 	net.state_set("rec", 0.0)
 	net.state_set("new_record", 0)
@@ -652,7 +831,111 @@ func _start_round() -> void:
 	if vr_rig != null:
 		vr_rig.recenter()
 		vr_rig.guard_trigger()
+	_next_job()
 	_spawn_block(PAD + Vector3(0.0, 6.0, 0.0))  # the first block bounces up for the giant (or the crane)
+
+
+## Host: Wren asks for the next building (job n of this round; job DAILY_N is TODAY'S TOWER once a day).
+func _next_job() -> void:
+	job_n += 1
+	var daily := job_n == G.DAILY_N and String(save.data.daily) != Seeded.today()
+	var built := int(save.data.built)
+	var seed_value := G.daily_seed() if daily else G.job_seed(session_seed, int(net.state_get("round", 1)), job_n)
+	var s := G.site(seed_value, G.DAILY_LEVEL if daily else G.level(job_n, built), daily)
+	set_i = 0
+	stable_t = 0.0
+	done_t = -1.0
+	job_t = 0.0
+	fill = 0
+	net.state_set("fill", 0)
+	net.state_set("job", G.job_of(s))  # every machine rebuilds it (_apply_site)
+	print("Tower Stack job %d: %s level %d, %d blocks to %.2f m, wind %.2f, sway %.3f, seed %d%s" % [job_n, s.building,
+		int(s.level), (s.plan as Array).size(), float(s.top), float(s.wind), float(s.sway), seed_value, " (TODAY'S TOWER)" if daily else ""])
+	var beats: Array = []
+	if job_n == 1 and int(net.state_get("round", 1)) == 1:
+		beats.append(["Hi! I'm Wren!" if built == 0 else "Let's build!", "wren", WREN_COLOR])
+	if daily:
+		beats.append(["TODAY'S TOWER!", "tower", Color(1.0, 0.8, 0.2)])
+	beats.append([String(s.name) + "!", "tower", Looks.COLORS[int(s.palette[0])]])
+	if float(s.wind) > 0.0:
+		beats.append(["Windy!", "cloud", Color(0.6, 0.8, 1.0)])
+	if float(s.sway) > 0.0:
+		beats.append(["Wobbly jelly!", "wave", Color(0.4, 0.9, 1.0)])
+	for i in beats.size():
+		var b: Array = beats[i]
+		get_tree().create_timer(0.3 + 2.6 * i).timeout.connect(func() -> void:
+			if is_inside_tree():
+				story(b[0], b[1], b[2]))
+
+
+## A story beat: a picture and a few words on every view; VR: the giant's headline. Host broadcasts.
+func story(line: String, pic: String = "wren", color: Color = WREN_COLOR, broadcast: bool = true) -> void:
+	StoryCard.show(_all_huds(), {"who": "WREN" if pic == "wren" else "", "line": line, "pic": pic, "color": color, "duration": 2.8})
+	_vr_say(line, 2.4)
+	if broadcast and net.mode == "host":
+		net.event("story", [line, pic, color])
+
+
+## Host: the tower reached the hoop and held: roof on, Wren cheers, it joins the town, next job.
+func _tower_built() -> void:
+	done_t = 0.0
+	var perfect := fill == (1 << (site.plan as Array).size()) - 1
+	built_round += 1
+	total_built += 1
+	net.state_set("built", built_round)
+	round_jobs.append([int(site.level), snappedf(job_t, 0.1), perfect, bool(site.daily)])
+	save.data.built = int(save.data.built) + 1
+	var list: Array = save.data.town
+	list.append(G.job_of(site))
+	while list.size() > G.TOWN_KEEP:
+		list.pop_front()
+	if site.daily:
+		save.data.daily = Seeded.today()
+	save.mark_dirty()
+	for id in blocks:  # the finished tower holds still while it shows off
+		if String(bstate.get(id, "")) == "free" and _in_tower_zone((blocks[id] as Node3D).global_position):
+			bstate[id] = "done"
+			(blocks[id] as RigidBody3D).freeze = true
+	awards.add(0, "built")
+	print("Tower built: %s in %.1f s%s (%d this round, %d in all)" % [site.building, job_t, " PERFECT" if perfect else "", built_round, int(save.data.built)])
+	built_fx(Vector3(top_xz.x, tower_h, top_xz.y), perfect)
+
+
+## Every machine: roof pops on, Wren hops up, fanfare.
+func built_fx(top: Vector3, perfect: bool) -> void:
+	if site.is_empty():
+		return
+	if topper != null:
+		topper.queue_free()
+	topper = MeshKit.instance(Looks.topper_mesh(String(site.building), Looks.COLORS[int(site.palette[0])], bool(site.daily)))
+	topper.position = top
+	add_child(topper)
+	topper.scale = Vector3.ONE * 0.01
+	create_tween().tween_property(topper, "scale", Vector3.ONE, 0.5).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	wren.visit(top + Vector3(0.25, 0.0, 0.25), CHEER - 0.5)
+	sound("fanfare", -3.0)
+	sfx.play_at("ding", top, 0.0, 1.2)
+	HudKit.banner(_all_huds(), "PERFECT!" if perfect else "BUILT!", "", {"style": "victory", "duration": 2.0, "sound": ""})
+	_vr_say("PERFECT!" if perfect else "BUILT!", 2.0)
+	for slot in avatars:
+		Creatures.anim(avatars[slot]).play("cheer", 1.0)
+	if net.mode != "client":
+		net.event("built", [top, perfect])
+
+
+## Host: the finished tower flies off to the town (its blocks go), and Wren asks for the next one.
+func _tower_to_town() -> void:
+	for id in blocks.keys():
+		if String(bstate.get(id, "")) == "done":
+			sfx.play_at("pop", (blocks[id] as Node3D).global_position, -8.0, 1.0 + randf() * 0.3)
+			_remove_block(int(id))
+	net.state_set("town", (save.data.town as Array).duplicate(true))
+	peak = 0.0
+	tower_h = 0.0
+	var count := int(save.data.built)
+	if TOWN_CHEERS.has(count):
+		story(TOWN_CHEERS[count], "house", Looks.COLORS[int(site.palette[0])])
+	_next_job()
 
 
 func _end_round() -> void:
@@ -660,10 +943,11 @@ func _end_round() -> void:
 		_release_held()
 	var rec := float(net.state_get("rec", 0.0))
 	var best := float(net.state_get("best", 0.0))
-	var data := awards.results({"title": "TOWER %.1f m!" % rec,
+	var data := awards.results({"title": "%d TOWER%s!" % [built_round, "" if built_round == 1 else "S"] if built_round > 0 else "TOWER %.1f m!" % rec,
 		"subtitle": "NEW RECORD!" if int(net.state_get("new_record", 0)) > 0 else "Best ever %.1f m" % best,
-		"style": "victory", "stats": [["TOWER", "%.1f m" % rec], ["BEST", "%.1f m" % best]],
+		"style": "victory", "stats": [["TOWERS", str(built_round)], ["TALLEST", "%.1f m" % rec], ["TOWN", str((save.data.town as Array).size())]],
 		"score_format": "%d BLOCKS", "continue": "Play again"})
+	_log_round("time")
 	net.state_set("results", data)
 	net.state_set("phase", "results")
 	results_t = 0.0
@@ -704,6 +988,7 @@ func _process(delta: float) -> void:
 	if not ready_to_play:
 		return
 	clock += delta
+	session_t += delta
 	if split != null:
 		_move_local_players(delta)
 	_follow_remote(delta)
@@ -725,6 +1010,12 @@ func _process(delta: float) -> void:
 			_start_round()  # automatic play again
 		return
 	time_left -= delta
+	job_t += delta
+	if done_t >= 0.0:
+		done_t += delta
+		if done_t >= CHEER:
+			done_t = -1.0
+			_tower_to_town()
 	if int(ceil(time_left)) != int(net.state_get("time", 0)):
 		net.state_set("time", maxi(0, int(ceil(time_left))))
 	if time_left <= 0.0:
@@ -732,8 +1023,13 @@ func _process(delta: float) -> void:
 		return
 	spawn_t -= delta
 	if spawn_t <= 0.0:
-		spawn_t = 2.2
+		spawn_t = G.SPAWN_SECS
 		_maybe_spawn()
+	# Helpers busy or stuck? Wren drops the block the plan needs next straight onto the pad.
+	pad_idle_t = pad_idle_t + delta if hover.has(-1) and done_t < 0.0 else 0.0
+	if pad_idle_t > G.PAD_HELP and blocks.size() < MAX_BLOCKS:
+		pad_idle_t = 0.0
+		_spawn_block(PAD + Vector3(0.0, 6.0, 0.0), _needed_kind())
 	height_t -= delta
 	if height_t <= 0.0:
 		height_t = 0.2
@@ -750,6 +1046,7 @@ func _physics_process(delta: float) -> void:
 	elif not results_showing():
 		_run_crane(delta)
 	_update_hover(delta)
+	_weather(delta)
 	_push_blocks()
 	_check_pad()
 	_cleanup()
@@ -757,11 +1054,14 @@ func _physics_process(delta: float) -> void:
 
 # --- Blocks -------------------------------------------------------------------------------
 
-func _make_block_node(id: int, authority: bool) -> Node3D:
+func _make_block_node(id: int, authority: bool, kind: int = 0, ci: int = 0) -> Node3D:
+	kind = clampi(kind, 0, G.KINDS.size() - 1)
+	bkind[id] = kind
+	bcolor[id] = ci
 	var n: Node3D
 	if authority:
 		var rb := RigidBody3D.new()
-		rb.mass = 1.0
+		rb.mass = G.MASS[kind]
 		rb.linear_damp = 0.3
 		rb.angular_damp = 1.5
 		rb.freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
@@ -771,9 +1071,9 @@ func _make_block_node(id: int, authority: bool) -> Node3D:
 			pm.bounce = 0.05
 			return pm)
 		var cs := CollisionShape3D.new()
-		cs.shape = ResCache.get_or_make("tower_stack_block_shape_v1", func() -> Resource:
+		cs.shape = ResCache.get_or_make("tower_stack_block_shape_v2_%d" % kind, func() -> Resource:
 			var box := BoxShape3D.new()
-			box.size = Vector3.ONE * B
+			box.size = G.size_of(kind)
 			return box)
 		rb.add_child(cs)
 		n = rb
@@ -785,7 +1085,7 @@ func _make_block_node(id: int, authority: bool) -> Node3D:
 	jelly.name = "Jelly"
 	jelly.set("on_bump", _on_bump.bind(id))
 	n.add_child(jelly)
-	var mi := MeshKit.instance(Looks.block_mesh(id))
+	var mi := MeshKit.instance(Looks.block_mesh(kind, ci))
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	jelly.add_child(mi)
 	add_child(n)
@@ -805,9 +1105,15 @@ func _poke(id: int, amount: float) -> void:
 			j.call("poke", amount)
 
 
-func _spawn_block(pos: Vector3) -> void:
+## Host: drop the job's next block (then spares: cubes) at pos.
+func _spawn_block(pos: Vector3, kind: int = -1) -> void:
 	next_id += 1
-	var rb := _make_block_node(next_id, true) as RigidBody3D
+	var set: Array = site.get("set", [])
+	if kind < 0:
+		kind = int(set[set_i]) if set_i < set.size() else G.K_CUBE
+		set_i += 1
+	var pal: Array = site.get("palette", [0, 1, 2])
+	var rb := _make_block_node(next_id, true, kind, int(pal[next_id % pal.size()])) as RigidBody3D
 	rb.global_position = pos
 	rb.rotation = Vector3(randf() * TAU, randf() * TAU, randf() * TAU)
 	rb.angular_velocity = Vector3(randf_range(-2, 2), randf_range(-2, 2), randf_range(-2, 2))
@@ -827,6 +1133,8 @@ func _remove_block(id: int) -> void:
 	placed.erase(id)
 	poke_cd.erase(id)
 	ghost_t.erase(id)
+	bkind.erase(id)
+	bcolor.erase(id)
 	var hi := hover.find(id)
 	if hi >= 0:
 		hover[hi] = -1
@@ -834,6 +1142,15 @@ func _remove_block(id: int) -> void:
 		held_id = -1
 	if crane_id == id:
 		crane_id = -1
+
+
+## The kind of block the lowest empty plan spot wants (a cube when the plan is full).
+func _needed_kind() -> int:
+	var plan: Array = site.get("plan", [])
+	for i in plan.size():
+		if (fill >> i) & 1 == 0:
+			return int(plan[i][0])
+	return G.K_CUBE
 
 
 ## Drop a new block: onto the pad when nobody is on the TV, else into the field for the TV players.
@@ -868,20 +1185,20 @@ func _measure_tower() -> void:
 	var h := 0.0
 	var xz := Vector2.ZERO
 	for id in blocks:
-		if String(bstate.get(id, "")) != "free":
+		if not String(bstate.get(id, "")) in ["free", "done"]:
 			continue
 		var rb: RigidBody3D = blocks[id]
 		var p := rb.global_position
 		if not _in_tower_zone(p) or rb.linear_velocity.length() > 0.6:
 			continue
-		var bas := rb.global_basis
-		var top := p.y + H * (absf(bas.x.y) + absf(bas.y.y) + absf(bas.z.y))
+		var top := p.y + _half(int(id)).y
 		if top > h:
 			h = top
 			xz = Vector2(p.x, p.z)
 	tower_h = h
 	top_xz = xz
 	max_height = maxf(max_height, h)
+	_measure_job()
 	var shown := snappedf(h, 0.1)
 	if absf(shown - float(net.state_get("height", 0.0))) > 0.05:
 		net.state_set("height", shown)
@@ -897,6 +1214,9 @@ func _measure_tower() -> void:
 			save.mark_dirty()
 	# A big drop = the tower fell over: make it funny, not sad.
 	wobble_cd -= 0.2
+	if done_t >= 0.0:
+		peak = h
+		return
 	if h >= peak:
 		peak = h
 		peak_t = 0.0
@@ -907,7 +1227,74 @@ func _measure_tower() -> void:
 	if peak - h >= 1.0 and wobble_cd <= 0.0:
 		wobble_cd = 5.0
 		peak = h
+		round_wobbles += 1
 		wobble(Vector3(0.0, maxf(h, 1.0), 0.0))
+
+
+## Host, 5 times a second: which plan spots hold a matching block, and is the tower at the hoop?
+func _measure_job() -> void:
+	if site.is_empty() or done_t >= 0.0:
+		return
+	var plan: Array = site.plan
+	var mask := 0
+	for i in plan.size():
+		if _spot_block(plan[i]) >= 0:
+			mask |= 1 << i
+	if mask != fill:
+		fill = mask
+		net.state_set("fill", mask)
+	if tower_h >= float(site.top) - 0.12:
+		stable_t += 0.2
+		if stable_t >= 1.0:
+			_tower_built()
+	else:
+		stable_t = 0.0
+
+
+## The resting block of the right kind sitting in plan spot b ([kind, x, y, z, rot]), or -1.
+func _spot_block(b: Array) -> int:
+	var at := stage.global_transform * Vector3(float(b[1]), float(b[2]), float(b[3]))
+	for id in blocks:
+		if String(bstate.get(id, "")) != "free" or int(bkind.get(id, -1)) != int(b[0]):
+			continue
+		var rb: RigidBody3D = blocks[id]
+		var p := rb.global_position
+		if Vector2(p.x - at.x, p.z - at.z).length() > 0.2 or absf(p.y - at.y) > 0.2 or rb.linear_velocity.length() > 0.6:
+			continue
+		if int(b[0]) == G.K_PLANK:  # a plank must lie along the plan's line
+			var ax := rb.global_basis.x
+			var want := Vector3.RIGHT if int(b[4]) == 0 else Vector3.BACK
+			if absf(Vector3(ax.x, 0.0, ax.z).normalized().dot(want)) < 0.85:
+				continue
+		return int(id)
+	return -1
+
+
+## Host: wind gusts push the tower's blocks; the jelly stage rocks (both capped by towergen.gd).
+func _weather(_delta: float) -> void:
+	if site.is_empty():
+		return
+	var sway := float(site.sway)
+	if sway > 0.0 and stage is AnimatableBody3D:
+		var w := TAU / maxf(1.0, float(site.sway_period))
+		var a := clock * w * 0.3
+		tilt = Vector2(cos(a), sin(a)) * sway * sin(clock * w)
+		stage.rotation = Vector3(tilt.y, 0.0, -tilt.x)
+	elif tilt != Vector2.ZERO:
+		tilt = Vector2.ZERO
+		stage.rotation = Vector3.ZERO
+	var wind := float(site.wind)
+	if wind <= 0.0 or results_showing():
+		return
+	var gust := 0.7 + 0.3 * sin(clock * 1.1) * sin(clock * 0.37 + 1.0)
+	var f := _wind_vec() * wind * gust
+	for id in blocks:
+		if String(bstate.get(id, "")) != "free":
+			continue
+		var rb: RigidBody3D = blocks[id]
+		if rb.freeze or not _in_tower_zone(rb.global_position) or rb.global_position.y < BASE_H + 0.25:
+			continue
+		rb.apply_central_force(f * rb.mass)
 
 
 ## The tower fell: boing, crash, shake (every machine).
@@ -916,6 +1303,8 @@ func wobble(pos: Vector3) -> void:
 	sound("boing", 0.0, 0.8)
 	HudKit.banner(_all_huds(), "WOBBLE!", "Keep going!", {"duration": 1.8, "sound": ""})
 	_vr_say("WOBBLE!", 1.8)
+	if wren != null:
+		wren.flutter()
 	for slot in cams:
 		(cams[slot] as CameraRig).shake(0.35)
 	for slot in avatars:
@@ -944,7 +1333,7 @@ func _push_blocks() -> void:
 			if absf(d.x) > H + BODY_R + 0.15 or absf(d.z) > H + BODY_R + 0.15 or d.dot(dir) <= 0.0:
 				continue
 			var lv := rb.linear_velocity
-			var push := dir * maxf(sp + 0.3, 2.5)
+			var push := dir * maxf(sp + 0.3, 2.5) * (0.6 if int(bkind.get(id, 0)) == G.K_STONE else 1.0)
 			if Vector2(lv.x, lv.z).length() < push.length():
 				rb.linear_velocity = Vector3(push.x, maxf(lv.y, 0.6), push.z)
 				rb.sleeping = false
@@ -990,6 +1379,7 @@ func _check_pad() -> void:
 		hover_from[id] = p
 		var by := int(pusher.get(id, -1))
 		total_delivered += 1
+		pad_idle_t = 0.0
 		if by >= 0:  # (pushers are avatars: TV players, or a flat host's slot 0)
 			awards.add(by, "score")
 			awards.add(by, "delivered")
@@ -1151,6 +1541,7 @@ func _release_held() -> void:
 		var f := rb.global_basis.z
 		rb.global_basis = Basis(Vector3.UP, atan2(f.x, f.z))
 		rb.linear_velocity = v * 0.1
+		_snap_to_plan(id)
 	else:
 		rb.linear_velocity = v.limit_length(9.0)  # a throw
 	vr_rig.pulse(VrRig.RIGHT, 0.3, 0.04)
@@ -1159,6 +1550,24 @@ func _release_held() -> void:
 		total_placed += 1
 		awards.add(0, "score")
 		awards.add(0, "placed")
+
+
+## A gentle place near an empty plan spot for this block snaps onto it (lined up, a tiny drop).
+func _snap_to_plan(id: int) -> void:
+	if site.is_empty():
+		return
+	var rb: RigidBody3D = blocks[id]
+	var plan: Array = site.plan
+	for i in plan.size():
+		var b: Array = plan[i]
+		if (fill >> i) & 1 == 1 or int(b[0]) != int(bkind.get(id, -1)):
+			continue
+		var at := Vector3(float(b[1]), float(b[2]), float(b[3]))
+		var p := rb.global_position
+		if Vector2(p.x - at.x, p.z - at.z).length() < SNAP_R and p.y > at.y - 0.15 and p.y < at.y + 0.45:
+			rb.global_transform = Transform3D(Basis(Vector3.UP, PI * 0.5 * int(b[4])), Vector3(at.x, maxf(p.y, at.y + 0.03), at.z))
+			_poke(id, 0.4)
+			return
 
 
 func _let_go(id: int) -> void:
@@ -1199,15 +1608,23 @@ func _run_crane(delta: float) -> void:
 					bstate[crane_id] = "crane"
 					_poke(crane_id, 0.4)
 					sfx.play_at("pop", target, -4.0)
-					var off := Vector2(randf_range(-0.14, 0.14), randf_range(-0.14, 0.14))
-					var xz := top_xz if tower_h > 0.3 else Vector2.ZERO
-					crane_goal = Vector3(xz.x + off.x, 0.0, xz.y + off.y)
+					var spot := _crane_spot(crane_id)
+					if spot.is_empty():
+						var off := Vector2(randf_range(-0.14, 0.14), randf_range(-0.14, 0.14))
+						var xz := top_xz if tower_h > 0.3 else Vector2.ZERO
+						crane_goal = Vector3(xz.x + off.x, -1.0, xz.y + off.y)
+						crane_yaw = randf_range(-0.2, 0.2)
+					else:
+						crane_goal = Vector3(float(spot[1]), float(spot[2]), float(spot[3]))
+						crane_yaw = PI * 0.5 * int(spot[4])
 					crane_state = "carry"
 		"carry", "lower":
 			if not blocks.has(crane_id):
 				crane_state = "up"
 			else:
-				var hi := maxf(tower_h, BASE_H) + H + 0.62
+				var hi := maxf(tower_h, BASE_H) + _half(crane_id).y + 0.62
+				if crane_goal.y > 0.0:  # a plan spot: lower it right into place
+					hi = crane_goal.y + 0.04 + 0.62
 				if crane_state == "carry":
 					target = Vector3(crane_goal.x, maxf(hi + 1.2, 4.0), crane_goal.z)
 					if crane.position.distance_to(target) < 0.05:
@@ -1217,7 +1634,7 @@ func _run_crane(delta: float) -> void:
 					if crane.position.distance_to(target) < 0.05:
 						var rb: RigidBody3D = blocks[crane_id]
 						_let_go(crane_id)
-						rb.global_basis = Basis(Vector3.UP, randf_range(-0.2, 0.2))
+						rb.global_basis = Basis(Vector3.UP, crane_yaw)
 						rb.linear_velocity = Vector3.ZERO
 						crane_id = -1
 						crane_state = "up"
@@ -1228,7 +1645,20 @@ func _run_crane(delta: float) -> void:
 	crane.position = crane.position.move_toward(target, 3.5 * delta)
 	if crane_id >= 0 and blocks.has(crane_id) and String(bstate.get(crane_id, "")) == "crane":
 		var rb2: RigidBody3D = blocks[crane_id]
-		rb2.global_transform = Transform3D(Basis(Vector3.UP, sin(clock * 3.0) * 0.08), crane.position - Vector3.UP * 0.62)
+		var yaw := crane_yaw if crane_state in ["carry", "lower"] else 0.0
+		rb2.global_transform = Transform3D(Basis(Vector3.UP, yaw + sin(clock * 3.0) * 0.04), crane.position - Vector3.UP * 0.62)
+
+
+## The plan spot the crane fills with this block: the lowest empty spot, if it takes this kind
+## (otherwise [] and the block goes on top).
+func _crane_spot(id: int) -> Array:
+	if site.is_empty():
+		return []
+	var plan: Array = site.plan
+	for i in plan.size():
+		if (fill >> i) & 1 == 0:
+			return plan[i] if int(plan[i][0]) == int(bkind.get(id, -1)) else []
+	return []
 
 
 func _make_crane() -> Node3D:
@@ -1274,7 +1704,11 @@ func make_snapshot() -> Array:
 		av_slots.append(int(slot))
 		av_pos.append(a.position)
 		av_yaw.append(a.rotation.y)
-	return [pose, ids, xf, cr, av_slots, av_pos, av_yaw]
+	# Each block's look: kind * 8 + colour (same order as ids); the stage's tilt.
+	var looks := PackedByteArray()
+	for id in blocks:
+		looks.append(int(bkind.get(id, 0)) * 8 + int(bcolor.get(id, 0)))
+	return [pose, ids, xf, cr, av_slots, av_pos, av_yaw, looks, tilt]
 
 
 ## TV machine: mirror the host's world (ghost blocks glide to their targets).
@@ -1297,6 +1731,10 @@ func apply_snapshot(s: Array) -> void:
 			net_target[slot] = [av_pos[i], av_yaw[i]]
 	var ids: PackedInt32Array = s[1]
 	var xf: PackedFloat32Array = s[2]
+	var looks: PackedByteArray = s[7] if s.size() > 8 and s[7] is PackedByteArray else PackedByteArray()
+	if s.size() > 8 and s[8] is Vector2:
+		tilt = s[8]
+		stage.rotation = Vector3(tilt.y, 0.0, -tilt.x)
 	var seen := {}
 	for i in ids.size():
 		var id := ids[i]
@@ -1304,7 +1742,8 @@ func apply_snapshot(s: Array) -> void:
 		var o := i * 7
 		var t := Transform3D(Basis(Quaternion(xf[o + 3], xf[o + 4], xf[o + 5], xf[o + 6]).normalized()), Vector3(xf[o], xf[o + 1], xf[o + 2]))
 		if not blocks.has(id):
-			_make_block_node(id, false).global_transform = t
+			var lk: int = looks[i] if i < looks.size() else 0
+			_make_block_node(id, false, lk / 8, lk % 8).global_transform = t
 		ghost_t[id] = t
 	for id in blocks.keys():
 		if not seen.has(id):
@@ -1334,3 +1773,7 @@ func apply_event(kind: String, args: Array) -> void:
 		"boop":
 			if party.is_local(int(args[0])):
 				_hop(int(args[0]))
+		"built":
+			built_fx(args[0], bool(args[1]))
+		"story":
+			story(String(args[0]), String(args[1]), args[2], false)
