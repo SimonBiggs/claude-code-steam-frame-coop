@@ -791,8 +791,10 @@ func _on_state_changed(key: String, value: Variant) -> void:
 			pass  # (each job's story card says what to build)
 		"new_record":
 			if int(value) > 0:
-				HudKit.banner(_all_huds(), "NEW RECORD!", "", {"style": "victory", "duration": 2.2})
-				_vr_say("NEW RECORD!", 2.5)
+				# A small toast, not a banner: the record often comes with a finished tower's own banner.
+				HudKit.toast(_all_huds(), "NEW RECORD!", {"icon": "crown", "color": "gold", "where": "top_right", "duration": 2.5})
+				if vr_head_t <= 0.0:
+					_vr_say("NEW RECORD!", 2.0)
 				sound("fanfare", -2.0)
 		"phase":
 			if String(value) == "results":
