@@ -94,9 +94,21 @@ func tick(dt: float, kinds: Array) -> Dictionary:
 	if not w.is_empty():
 		list.append(w)
 		dry = 0
-	elif list.is_empty():
+	elif list.is_empty() and town_full():
 		dry += 1
 	return w
+
+
+## No room left for houses where the roads can reach (the open land is full): time to lift a mist.
+func town_full() -> bool:
+	var spots := 0
+	for z in Defs.GRID:
+		for x in Defs.GRID:
+			if town.can_place("house", x, z) == "" and town.reach(Vector2i(x, z), 1):
+				spots += 1
+				if spots >= 4:
+					return false
+	return true
 
 
 ## A new wish the mayor can grant (or {} when there's nothing sensible to wish for).
@@ -235,7 +247,8 @@ static func self_play(isl: Dictionary, rounds: int, seed_value: int) -> Dictiona
 		var tray: Array = Defs.simple_tray(unl, false)
 		var made: Dictionary = w.make(tray)
 		if made.is_empty():
-			w.dry += 1
+			if w.town_full():
+				w.dry += 1
 			if w.dry >= 2:
 				w.dry = 0
 				t.open_mask |= next_open(t.open_mask)

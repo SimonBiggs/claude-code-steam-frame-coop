@@ -11,8 +11,8 @@ const Art := preload("res://games/tiny_town_tycoon/art.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 const Town := preload("res://games/tiny_town_tycoon/town.gd")
 
-const BUBBLE_R := 0.03
-const BUBBLE_UP := 0.085
+const BUBBLE_R := 0.038
+const BUBBLE_UP := 0.095
 const PUFFS := 2  ## per misty cell
 const LEAVE_T := 1.8
 
@@ -36,7 +36,7 @@ func setup(p_main: Node, p_town: Town) -> void:
 	town = p_town
 	_bubble_mat = StandardMaterial3D.new()
 	_bubble_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	_bubble_mat.albedo_color = Color(1.0, 1.0, 1.0, 0.32)
+	_bubble_mat.albedo_color = Color(0.92, 0.97, 1.0, 0.42)
 	_bubble_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_bubble_mat.rim_enabled = false
 	_ring_mat = MeshKit.material(Color(1.0, 0.9, 0.4), 2.2)
@@ -92,8 +92,8 @@ func _process(delta: float) -> void:
 		var age := _t - float(n.get_meta("born"))
 		var pop := minf(1.0, age * 3.0)
 		n.scale = Vector3.ONE * (pop + sin(minf(age * 3.0, 1.0) * PI) * 0.25)
-		var ring: Node3D = n.get_meta("ring", null)
-		if ring != null:
+		if n.has_meta("ring"):
+			var ring: Node3D = n.get_meta("ring")
 			ring.scale = Vector3.ONE * (1.0 + 0.12 * sin(_t * 4.0))
 
 
@@ -196,7 +196,7 @@ func _make_bubble(a: Array) -> Node3D:
 	root.set_meta("inner", inner)
 	var s := Defs.size_of(kind)
 	var model := MeshKit.instance(Art.building_mesh(kind, 0, 1, bool(Defs.island(town.island).get("snow", false))))
-	var sc := Defs.CELL * 0.62 / float(s)
+	var sc := Defs.CELL * 0.85 / float(s)
 	model.scale = Vector3.ONE * sc
 	model.position = Vector3(0, -BUBBLE_R * 0.62, 0)
 	model.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
