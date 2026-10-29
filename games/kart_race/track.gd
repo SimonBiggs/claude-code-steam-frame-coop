@@ -549,12 +549,17 @@ func _build_road() -> void:
 			if (i / 2) % 2 == 0:
 				var l2 := Vector3(0, 0.03, 0)
 				_quad(st, a - ra * 0.12 + l2, a + ra * 0.12 + l2, b + rb * 0.12 + l2, b - rb * 0.12 + l2, Color(1, 1, 0.85), up)
+		var rainbow := bool(info.get("rainbow", false))
 		var curb := wa if i % 2 == 0 else wb
+		if rainbow:
+			curb = Color.from_hsv(fmod(cum[i] * 0.004, 1.0), 0.65, 1.0) if i % 2 == 0 else wb
 		for side in [-1.0, 1.0]:
 			var sd: float = side
 			_quad(st, a + ra * hwa * sd + lift, a + ra * wla * sd + lift, b + rb * wlb * sd + lift, b + rb * hwb * sd + lift, curb, up)
 			# Wall: low striped barrier on top of an earth bank down to the ground.
 			var wcol := wa if (i / 2) % 2 == 0 else wb
+			if rainbow:
+				wcol = Color.from_hsv(fmod(cum[i] * 0.004 + 0.5 * float((i / 2) % 2), 1.0), 0.6, 1.0)
 			var ia := a + ra * wla * sd
 			var ib := b + rb * wlb * sd
 			var inward := -ra * sd
@@ -616,10 +621,10 @@ func _build_road() -> void:
 func _build_islands() -> void:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var top_c: Color = (info["grass"] as Color).lightened(0.08)
+	var top_c: Color = Color(0.35, 0.7, 0.3) if not is_night() else Color(0.2, 0.45, 0.3)
 	var wa: Color = info["wall_a"]
 	var wb: Color = info["wall_b"]
-	var hh := Vector3(0, 0.45, 0)
+	var hh := Vector3(0, 0.6, 0)
 	var bush: Array[Transform3D] = []
 	var bush_c: Array[Color] = []
 	var cols: Array = info["trees"]
@@ -640,12 +645,15 @@ func _build_islands() -> void:
 		var ra2 := a + ra * wa_i
 		var rb2 := b + rb * wb_j
 		_quad(st, la + hh, ra2 + hh, rb2 + hh, lb + hh, top_c, Vector3.UP)
+		var rainbow := bool(info.get("rainbow", false))
 		var curb := wa if i % 2 == 0 else wb
+		if rainbow:
+			curb = Color.from_hsv(fmod(cum[i] * 0.004, 1.0), 0.65, 1.0) if i % 2 == 0 else wb
 		_quad(st, la, lb, lb + hh, la + hh, curb, -ra)
 		_quad(st, ra2, rb2, rb2 + hh, ra2 + hh, curb, ra)
-		if wa_i > 1.0 and i % 2 == 0:
+		if wa_i > 1.0:
 			var sc := rng.randf_range(0.5, 0.9)
-			bush.append(Transform3D(Basis().scaled(Vector3(sc, sc * 0.8, sc)), a + ra * rng.randf_range(-wa_i + 0.6, wa_i - 0.6) + Vector3(0, 0.45 + sc * 0.4, 0)))
+			bush.append(Transform3D(Basis().scaled(Vector3(sc, sc * 0.8, sc)), a + ra * rng.randf_range(-wa_i + 0.6, wa_i - 0.6) + Vector3(0, 0.6 + sc * 0.4, 0)))
 			bush_c.append(cols[rng.randi() % cols.size()])
 	var mi := MeshInstance3D.new()
 	mi.mesh = st.commit()

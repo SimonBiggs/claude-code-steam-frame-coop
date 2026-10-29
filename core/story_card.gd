@@ -308,7 +308,7 @@ class Picture extends Control:
 				_poly([[0.31, 0.58 + bob], [0.69, 0.58 + bob], [0.69, 0.64 + bob], [0.31, 0.64 + bob]], Color(0.95, 0.3, 0.3))
 			"wizard":
 				_poly([[0.08, 0.8 + bob], [0.92, 0.8 + bob], [0.82, 0.88 + bob], [0.18, 0.88 + bob]], color.darkened(0.2))
-				_poly([[0.26, 0.82 + bob], [0.74, 0.82 + bob], [0.56, 0.1 + bob], [0.68, 0.06 + bob]], color)
+				_poly([[0.26, 0.82 + bob], [0.74, 0.82 + bob], [0.6, 0.35 + bob], [0.72, 0.1 + bob], [0.5, 0.3 + bob]], color)
 				for st_p in [[0.45, 0.6], [0.58, 0.42], [0.5, 0.74]]:
 					_circle(st_p[0], st_p[1] + bob, 0.035 + 0.01 * sin(t * 5.0 + st_p[0] * 9.0), Color(1.0, 0.92, 0.35))
 			"castle":

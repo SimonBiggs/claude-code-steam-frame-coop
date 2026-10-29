@@ -158,8 +158,14 @@ static func _attempt(r: RandomNumberGenerator, seed_value: int, spec: Dictionary
 	info["splits"] = []
 	info["palette"] = pal
 	info["seed"] = seed_value
-	if spec.has("night"):
-		info["night"] = bool(spec["night"])
+	if bool(spec.get("night", false)) and not bool(base_info.get("night", false)):
+		# A night-time version of a day place: the moonlit sky, darker ground.
+		var moon: Dictionary = Track.TRACKS[3]
+		info["night"] = true
+		info["sky"] = moon["sky"]
+		info["sky_top"] = moon["sky_top"]
+		info["grass"] = (info["grass"] as Color).darkened(0.45)
+		info["earth"] = (info["earth"] as Color).darkened(0.4)
 	if bool(spec.get("rainbow", false)):
 		info["rainbow"] = true
 		info["wall_a"] = RAINBOW_WALLS[r.randi() % RAINBOW_WALLS.size()]
@@ -408,6 +414,12 @@ static func _check_track(t: Track, why: Array) -> void:
 		var lane := Track.WIDTH * 0.5 + float(sa[2]) - float(sa[3])
 		if lane < Track.WIDTH * 0.6:
 			why.append("split lane too narrow (%.1f m)" % lane)
+		# The shortcut lane (boost arrow side) really is the shorter way round.
+		var mid := (Track.WIDTH * 0.5 + float(sa[2]) + float(sa[3])) * 0.5
+		var short_len := _lane_length(t, float(sa[0]) + Track.TAPER, float(sa[0]) + float(sa[1]) - Track.TAPER, float(sa[4]) * mid)
+		var long_len := _lane_length(t, float(sa[0]) + Track.TAPER, float(sa[0]) + float(sa[1]) - Track.TAPER, -float(sa[4]) * mid)
+		if short_len > long_len - 1.0:
+			why.append("the shortcut lane is not shorter (%.1f vs %.1f m)" % [short_len, long_len])
 	for b in t.boxes.size():
 		var r: Array = t.locate(t.boxes[b], -1)
 		var bs: float = r[1]
@@ -439,6 +451,19 @@ static func _check_track(t: Track, why: Array) -> void:
 		if absf(float(lr[2])) < t.wall_at(float(lr[1])) + 0.3:
 			why.append("a prop spot on the road")
 			break
+
+
+## Driving distance along a lane at sideways offset lat from a to b.
+static func _lane_length(t: Track, a: float, b: float, lat: float) -> float:
+	var total := 0.0
+	var prev: Vector3 = t.point_at(a, lat)[0]
+	var s := a + 1.0
+	while s <= b:
+		var q: Vector3 = t.point_at(s, lat)[0]
+		total += Vector2(q.x - prev.x, q.z - prev.z).length()
+		prev = q
+		s += 1.0
+	return total
 
 
 ## Clear of the start (grid + line) and the practice rings.
