@@ -1,4 +1,5 @@
 extends Area3D
+const UiKit := preload("res://core/ui_kit.gd")
 
 var direction := Vector3(0, 0, -1)
 var speed := 34.0
@@ -35,7 +36,7 @@ func _ready() -> void:
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	mi.scale = Vector3(1, 1, 3)
 	add_child(mi)
-	basis = Basis.looking_at(direction)
+	basis = UiKit.aim(direction)
 	body_entered.connect(_on_body_entered)
 	area_entered.connect(_on_area_entered)
 

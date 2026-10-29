@@ -4,6 +4,7 @@ extends Node3D
 ## shoulder, swing towards the glowing target and let go (the ghost snowball flies off).
 ## Only the VR player's headset sees it (main puts it on their view-model layer). main calls show_demo()
 ## every frame; it fades in after the thrower has been idle for a moment.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const LOOP := 3.2
 
@@ -131,7 +132,7 @@ func show_demo(want: bool, head: Vector3, aim: Vector3, delta: float) -> void:
 	visible = alpha > 0.01
 	mat.albedo_color.a = alpha
 	# Palm down, fingers pointing at the target.
-	hand.global_transform = Transform3D(Basis.looking_at(fwd, Vector3.UP), p)
+	hand.global_transform = Transform3D(UiKit.aim(fwd, Vector3.UP), p)
 	for f in fingers:
 		f.rotation.x = -grip * 1.3
 	thumb.rotation.x = -grip * 0.7

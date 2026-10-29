@@ -11,6 +11,7 @@ extends Node3D
 ## Flat fallback (split screen / no headset): a glove moved by the mouse (or the second controller's
 ##   left stick); hold left click (or RT / A) to grab, drag, let go. Holding the can pours.
 ## TV: a ghost of the gardener (big friendly head in a straw hat + gloves) from the host's snapshots.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const W := preload("res://games/bee_garden/world.gd")
 
@@ -134,7 +135,7 @@ func setup_flat(cam: Camera3D, use_mouse: bool) -> void:
 	camera.far = 600.0
 	camera.cull_mask = 0xFFFFF & ~body_layer() & ~W.TV_LAYER & ~W.BEE_TAG_BITS & ~W.BEE_ARROW_BITS
 	camera.global_position = FLAT_CAM_POS
-	camera.look_at(Vector3(-0.6, -0.4, 0.2), Vector3.UP)
+	UiKit.look(camera, Vector3(-0.6, -0.4, 0.2), Vector3.UP)
 	hands.append(_make_hand(true))
 	_ensure_head()
 
@@ -273,7 +274,7 @@ func _flat_controls(h: Hand, delta: float) -> void:
 	_update_hand(h, grip, delta)
 	if head:
 		head.global_position = FLAT_CAM_POS + Vector3(0.0, 0.5, 1.2)
-		head.look_at(h.pos, Vector3.UP)
+		UiKit.look(head, h.pos, Vector3.UP)
 
 
 ## Grab / hold / let go. Runs on the host (and in local split screen).

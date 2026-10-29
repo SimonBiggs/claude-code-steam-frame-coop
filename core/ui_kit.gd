@@ -98,6 +98,40 @@ static func face(dir: Vector3, up: Vector3 = Vector3.UP, alt_up: Vector3 = Vecto
 	return Basis.looking_at(d, Vector3.BACK)
 
 
+
+## Basis.looking_at(dir, up, model_front) without the NaN / error: identical whenever up isn't (anti)parallel to dir;
+## only then falls back to alt_up, then RIGHT, then BACK. Use for every "aim this way" basis (the core/debt check
+## rejects raw looking_at / look_at anywhere in core, arcade and games).
+static func aim(dir: Vector3, up: Vector3 = Vector3.UP, model_front := false, alt_up: Vector3 = Vector3.FORWARD) -> Basis:
+	if not dir.is_finite() or dir.length() < 0.00001:
+		return Basis()
+	var d := dir.normalized()
+	for u in [up, alt_up, Vector3.RIGHT, Vector3.BACK]:
+		var uu := u as Vector3
+		if uu.is_finite() and uu.cross(d).length() > 0.0001:
+			return Basis.looking_at(d, uu, model_front)
+	return Basis()
+
+
+## Transform3D(Basis(), from).looking_at(at, up), never degenerate.
+static func aim_from(from: Vector3, at: Vector3, up: Vector3 = Vector3.UP) -> Transform3D:
+	return Transform3D(aim(at - from, up), from)
+
+
+## node.look_at(target, up, model_front) without the "aligned" error or a NaN basis: keeps the node's scale like
+## Node3D.look_at, does nothing when the target is the node's own position, and works before the node is in the tree.
+static func look(node: Node3D, target: Vector3, up: Vector3 = Vector3.UP, model_front := false) -> void:
+	var inside := node.is_inside_tree()
+	var pos := node.global_position if inside else node.position
+	if not target.is_finite() or (target - pos).length() < 0.00001:
+		return
+	var sc := node.scale
+	if inside:
+		node.global_basis = aim(target - pos, up, model_front)
+	else:
+		node.basis = aim(target - pos, up, model_front)
+	node.scale = sc
+
 ## Controller A / B in Godot's built-in ui_accept / ui_cancel (they only have Enter / Esc by default, so every
 ## focus-driven menu ignored the pad unless Steam turned A into Enter). Called once at startup by core/net.gd and
 ## the arcade; idempotent.

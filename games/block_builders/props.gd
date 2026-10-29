@@ -12,6 +12,7 @@ extends Node3D
 ## Cheap for the Frame: the clouds are one MultiMesh, the rest is a handful of small meshes, and five
 ## physics boxes on the host only. The host simulates; touches go to the TV as "prop" events and the toy
 ## blocks' poses go in the snapshot.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const Art := preload("res://games/block_builders/art.gd")
 
@@ -390,7 +391,7 @@ func _update_birds(delta: float) -> void:
 			var pos := home.origin + loop
 			var fwd := Vector3(cos(a) * 1.6, cos(k * PI) * 2.2 * PI / TAU, sin(a) * -0.9)
 			if fwd.length() > 0.01:
-				b.global_transform = Transform3D(Basis.looking_at(fwd.normalized(), Vector3.UP), pos)
+				b.global_transform = Transform3D(UiKit.aim(fwd.normalized(), Vector3.UP), pos)
 			m.scale = Vector3(0.9 * (1.0 + sin(t * 26.0) * 0.4), 0.9, 0.9)
 		else:
 			b.global_transform = home

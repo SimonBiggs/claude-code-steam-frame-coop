@@ -461,18 +461,18 @@ func _flat_update(delta: float) -> void:
 	_pose_body(head_pos, down_dir, glove_l, glove_r)
 	if camera != null and main.replay_on:
 		camera.global_position = main.REPLAY_CAM
-		camera.look_at(main.replay_look(), Vector3.UP)
+		UiKit.look(camera, main.replay_look(), Vector3.UP)
 	elif camera != null and main.state == "trophy":
 		var ct: Array = main.ceremony_camera()
 		camera.global_position = camera.global_position.lerp(ct[0], 1.0 - exp(-4.0 * delta))
-		camera.look_at(ct[1], Vector3.UP)
+		UiKit.look(camera, ct[1], Vector3.UP)
 	elif camera != null:
 		var cp := Vector3(kx * 0.45, 2.3, -1.7)
 		if not camera.has_meta("placed"):
 			camera.set_meta("placed", true)
 			camera.global_position = cp
 		camera.global_position = camera.global_position.lerp(cp, 1.0 - exp(-6.0 * delta))
-		camera.look_at(Vector3(kx * 0.25, 0.9, 11.0), Vector3.UP)
+		UiKit.look(camera, Vector3(kx * 0.25, 0.9, 11.0), Vector3.UP)
 		var sh: float = main.shake
 		if sh > 0.0:
 			camera.global_position += Vector3(randf_range(-1, 1), randf_range(-1, 1), 0) * sh * 0.15

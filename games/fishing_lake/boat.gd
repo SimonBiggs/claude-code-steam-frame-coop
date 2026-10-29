@@ -8,6 +8,7 @@ extends Node3D
 ## Upgrades: scooping treasure and helping the angler earns coins; at 3 / 7 / 12 coins the boat gets a
 ## SAIL (faster), a BIG NET (scoops from further) and a LANTERN MOTOR (fastest, sparkly wake). The host
 ## decides the level and sends it in the snapshots.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const Lake := preload("res://games/fishing_lake/lake.gd")
 const NO_KEYS := 99
@@ -536,4 +537,4 @@ func _update_camera(delta: float) -> void:
 		camera.global_position = want_pos
 	camera.global_position = camera.global_position.lerp(want_pos, 1.0 - exp(-6.0 * delta))
 	var look := global_position + Basis(Vector3.UP, cam_yaw) * Vector3(0, 0.6, -3.0)
-	camera.look_at(look, Vector3.UP)
+	UiKit.look(camera, look, Vector3.UP)

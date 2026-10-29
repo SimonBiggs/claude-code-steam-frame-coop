@@ -22,6 +22,7 @@ extends Node
 ## "BOT: ERROR instruction text" if a headline (TV centre / a view's big word / the top line / VR) is
 ## anything but a short word, or the old key-help line is back. BOT_VR=1 (local): P1 is a fake VR seeker
 ## (XR nodes without a headset) whose hands aim the torch and touch hiders, so the 3D VR cues run.
+const UiKit := preload("res://core/ui_kit.gd")
 const WorldScript := preload("res://games/hide_and_seek/world.gd")
 
 var main
@@ -611,6 +612,6 @@ func _fake_vr(delta: float) -> void:
 	var c: Vector3 = best.center()
 	var head: Vector3 = s.xr_camera.global_position
 	s.hand_r.global_position = head + Vector3(0.2, -0.3, 0)
-	s.hand_r.look_at(c, Vector3.UP)
+	UiKit.look(s.hand_r, c, Vector3.UP)
 	near_t = near_t + delta if to.length() < 1.8 else 0.0
 	s.hand_l.global_position = c if near_t > 2.0 else head + Vector3(-0.2, -0.3, -0.2)

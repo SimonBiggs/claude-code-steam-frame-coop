@@ -14,6 +14,10 @@ const Story := preload("res://games/marble_maze/story.gd")
 const Seeded := preload("res://core/seeded.gd")
 
 var fails := 0
+## The old 2026-10-29 daily maze: the shiny (and the rooms round it) only reachable by leaving the zoom
+## arrows at (2,3) / (3,3) sideways, which BOOST never lets a marble do.
+const OLD_2026_10_29 := ["############", "#S..#T.....#", "#..##..##.##", "#T>>...O#.G#", "##..#..#####",
+	"#....O..O..#", "#..######.##", "#O..*B.B#II#", "#...#....II#", "############"]
 
 
 func _init() -> void:
@@ -71,6 +75,22 @@ func _init() -> void:
 		days["\n".join(PackedStringArray(lv.map))] = true
 		total += 1
 	_expect(days.size() > 100, "daily mazes differ day to day (%d unique of 120)" % days.size())
+	# 2026-10-29 (the shiny below a zoom arrow: the bot looped for 230 s) and the next 60 days, plus the
+	# 60 days from whenever the test runs: fair, and not the plain fallback.
+	var t29 := Time.get_unix_time_from_datetime_string("2026-10-29T12:00:00")
+	var now := Time.get_unix_time_from_system()
+	for base in [t29, now]:
+		for d in 61:
+			var date := Time.get_date_string_from_unix_time(int(base) + d * 86400)
+			var lv := Story.daily(date)
+			var why := MazeGen.check(lv)
+			if lv.has("fallback"):
+				why.append("fell back")
+			for w in why:
+				_fail("daily %s (seed %d): %s" % [date, int(lv.seed), w])
+			total += 1
+	_expect(Story.daily("2026-10-29").map != OLD_2026_10_29, "2026-10-29's daily maze is no longer the unfair one")
+	_expect(not MazeGen.check({"map": OLD_2026_10_29}).is_empty(), "a shiny only reachable by rolling sideways off a zoom arrow is caught")
 	# A hand check: a gate with its pads behind it must fail; a trap after an arrow must fail.
 	_expect(not MazeGen.check({"map": ["############", "#S.........#", "#..........#", "#######D####", "#.P......P.#",
 		"#..........#", "#..........#", "#..........#", "#.........G#", "############"]}).is_empty(), "pads behind the gate are caught")

@@ -9,6 +9,7 @@ extends Node3D
 ## VR hands touch them; a split-screen pilot clicks them with the pointer. The host (or local game)
 ## checks the touches and sends a "prop" event so the TV plays the same thing. Cheap: about 30 meshes,
 ## mostly merged, no lights, no physics.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const TOUCH := {
 	# name: [touch point, radius]
@@ -154,7 +155,7 @@ func _build_globe() -> void:
 	var parts: Array = [[main.sphere_mesh(0.1), Transform3D(), Color(0.25, 0.5, 0.95)]]
 	for c in [Vector3(0.6, 0.4, 0.5), Vector3(-0.7, 0.1, 0.6), Vector3(0.1, -0.5, -0.8), Vector3(-0.3, 0.6, -0.7), Vector3(0.8, -0.3, -0.4)]:
 		var d: Vector3 = c.normalized()
-		parts.append([main.sphere_mesh(0.045), Transform3D(Basis.looking_at(d) * Basis.from_scale(Vector3(1.0, 1.0, 0.35)), d * 0.088), Color(0.35, 0.8, 0.3)])
+		parts.append([main.sphere_mesh(0.045), Transform3D(UiKit.aim(d) * Basis.from_scale(Vector3(1.0, 1.0, 0.35)), d * 0.088), Color(0.35, 0.8, 0.3)])
 	_merged(globe, "globe", parts, Vector3.ZERO)
 
 

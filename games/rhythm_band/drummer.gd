@@ -8,6 +8,7 @@ extends Node3D
 ## when someone shorter or taller takes the headset (it is measured from your head, not a rest pose).
 ## PRACTICE (simple mode): one ball floats slowly into one drum at a time and waits there; the drum
 ## glows and its ring pulses; once the ball has arrived a see-through stick swings onto the drum.
+const UiKit := preload("res://core/ui_kit.gd")
 func _update_practice() -> void:
 	var now := Time.get_ticks_msec() * 0.001
 	var used := 0
@@ -673,7 +674,7 @@ func flat_hit(pad: int) -> void:
 func _flat_update(delta: float) -> void:
 	if camera != null:
 		var from := rig.to_global(Vector3(0.0, 0.6, 0.6))
-		camera.global_transform = Transform3D(Basis(), from).looking_at(rig.to_global(Vector3(0.0, -0.4, -1.6)), Vector3.UP)
+		camera.global_transform = UiKit.aim_from(from, rig.to_global(Vector3(0.0, -0.4, -1.6)), Vector3.UP)
 	var head := rig.global_position
 	av_head.global_position = head
 	av_body.global_position = head + Vector3(0.0, -0.55, 0.05)
@@ -856,7 +857,7 @@ func _update_ghost_hand(delta: float) -> void:
 	ghost_hand.visible = alpha > 0.01
 	ghost_hand.mat.albedo_color.a = alpha
 	var fwd := -rig.global_basis.z
-	ghost_hand.hand.global_transform = Transform3D(Basis.looking_at(fwd, Vector3.UP), pos + Vector3.UP * 0.03)
+	ghost_hand.hand.global_transform = Transform3D(UiKit.aim(fwd, Vector3.UP), pos + Vector3.UP * 0.03)
 	for f in ghost_hand.fingers:
 		(f as Node3D).rotation.x = -grip * 1.3
 	ghost_hand.thumb.rotation.x = -grip * 0.7

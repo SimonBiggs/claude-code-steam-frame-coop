@@ -157,7 +157,7 @@ func _setup(mode: String) -> void:
 		split.bind_party(party)
 		var shared := split.shared_camera()
 		shared.position = Vector3(0, 13, 19)
-		shared.look_at(Vector3(0, 0, 0))
+		UiKit.look(shared, Vector3(0, 0, 0))
 		_make_hud(-1, split.shared_hud())
 		if mode == "client":
 			vr_avatar = VrRig.Avatar.new()
@@ -1026,17 +1026,17 @@ func _update_cameras(delta: float) -> void:
 		if phase == "ride" and car >= 0 and car < train.cars.size():
 			var cx: Transform3D = (train.cars[car] as Node3D).global_transform
 			var pos := cx.origin + cx.basis.z * 3.4 + cx.basis.y * 1.5
-			target = Transform3D(Basis.looking_at(cx.origin - cx.basis.z * 3.0 + cx.basis.y * 0.6 - pos, cx.basis.y.lerp(Vector3.UP, 0.4).normalized()), pos)
+			target = Transform3D(UiKit.aim(cx.origin - cx.basis.z * 3.0 + cx.basis.y * 0.6 - pos, cx.basis.y.lerp(Vector3.UP, 0.4).normalized()), pos)
 			k = 1.0 - exp(-9.0 * delta)
 		elif slot == 0 and net.mode == "local" and vr_rig == null:
 			var end: Array = track.get("end", [Track.station_end(), 0.0])
 			var focus := park.to_global((end[0] as Vector3) * 0.5)
 			var pos := focus + Vector3(0, 13.0, 13.0)
-			target = Transform3D(Basis.looking_at(focus - pos, Vector3.UP), pos)
+			target = Transform3D(UiKit.aim(focus - pos, Vector3.UP), pos)
 		else:
 			var a: float = cam_t * 0.12 + slot * 0.9
 			var pos := Vector3(sin(a) * 19.0, 11.0, cos(a) * 19.0)
-			target = Transform3D(Basis.looking_at(-pos + Vector3(0, 1.0, 0), Vector3.UP), pos)
+			target = Transform3D(UiKit.aim(-pos + Vector3(0, 1.0, 0), Vector3.UP), pos)
 		cam.global_transform = cam.global_transform.interpolate_with(target, k)
 
 

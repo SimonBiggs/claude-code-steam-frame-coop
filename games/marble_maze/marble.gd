@@ -6,6 +6,7 @@ extends Node3D
 ## Teamwork: marbles bump softly (a friend can never be shoved hard, and never over an edge or into a
 ## hole), and once you're HOME you steer a GUIDE STAR: touch a friend's marble with it to tow them
 ## along. Every marble has a little face that looks where it's rolling (and blinks).
+const UiKit := preload("res://core/ui_kit.gd")
 
 const R := 0.028
 const STEER := 0.45  # own push (m/s^2); the board's tilt gives up to ~0.9
@@ -476,4 +477,4 @@ func _update_camera(delta: float) -> void:
 	camera.global_position = camera.global_position.lerp(want_pos, 1.0 - exp(-8.0 * delta))
 	var look := target + Basis(Vector3.UP, yaw) * Vector3(0, 0, -0.08)
 	if camera.global_position.distance_to(look) > 0.01:
-		camera.look_at(look, Vector3.UP)
+		UiKit.look(camera, look, Vector3.UP)
