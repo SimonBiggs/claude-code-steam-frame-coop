@@ -58,6 +58,7 @@ const FIXED: Array = [
 	[-11.5, 3.9, -10.5, 5.1, 1.4, false],  # rocking chair
 	[-9.4, -6.4, -8.6, -5.6, 1.5, false],  # globe
 	[5.9, 6.6, 6.5, 7.2, 1.9, false],  # coat stand
+	[-3.7, -7.7, -2.3, -5.9, 2.2, false],  # Granny Boo floats here, by her shelf (museum.gd GRANNY_AT)
 	[-4.4, 1.0, 4.4, 7.2, 2.0, false],  # the start corner: the touchable props and the players
 	[-8.8, -2.4, -5.2, 2.4, 2.7, false], [5.2, -2.4, 8.8, 2.4, 2.7, false],  # keep the doorways clear
 ]
