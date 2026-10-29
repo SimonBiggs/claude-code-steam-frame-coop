@@ -74,6 +74,7 @@ func _process(delta: float) -> void:
 	if main.SIMPLE_MODE:
 		_note_cues()
 		_pause_check()
+	_check_story(mode)
 	for i in range(1, main.players.size()):
 		var g = main.players[i]
 		if g.active and not g.remote:
@@ -409,3 +410,23 @@ func _report(mode: String) -> void:
 		mode, t, main.phase, main.level, main.mission, main.ring_i, total, main.score, main.stars_got, main.dragon.lit_count(),
 		get_tree().get_nodes_in_group("dr_sprites").size(), main.sprites_popped, main.dragon.global_position.y,
 		", ".join(act), views, cell, levels_done, main.power_t, extra])
+
+
+## Sunny's story: the host / local flight has a seed, the first finished stage hangs a charm (and the rail shows
+## every one); a TV machine gets the charms from the host. Checked once, 50 s in (or when BOT_END is near).
+func _check_story(mode: String) -> void:
+	var at := minf(50.0, float(OS.get_environment("BOT_END")) - 8.0) if OS.has_environment("BOT_END") else 50.0
+	if has_meta("story_checked") or t < at:
+		return
+	set_meta("story_checked", true)
+	if mode == "client":
+		_ok(main.charm_count >= 0, "the TV machine got Sunny's charms (%d)" % main.charm_count)
+		return
+	_ok(main.flight_seed > 0, "a seeded flight (%d)" % main.flight_seed)
+	_ok(main.level_seed == main.RouteGen.stage_seed(main.flight_seed, main.level), "the stage seed comes from the flight seed")
+	_ok(main.level < 2 or main.charm_count >= 1, "a charm after stage 1 (stage %d, %d charms)" % [main.level, main.charm_count])
+	_ok(main.charm_root != null and main.charm_root.get_child_count() >= main.charm_count, "the rail shows the charms")
+
+
+func _ok(ok: bool, what: String) -> void:
+	print(("Bot: OK " if ok else "SCRIPT ERROR: BOT: FAILED ") + what)
