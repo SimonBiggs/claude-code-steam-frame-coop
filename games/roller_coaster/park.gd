@@ -19,8 +19,8 @@ const DECOR: Array = [["balloons", Vector3(7.2, 0, 3.5)], ["carousel", Vector3(-
 	["wheel", Vector3(5.6, 0, -7.2)], ["fountain", Vector3(0.0, 0, -8.8)], ["flags", Vector3(-9.9, 0, 0.0)]]
 ## BUTTONS the bear (the park keeper, story cards), his ticket board (a golden ticket per finished plan, saved)
 ## and the bunting round the table (a flag a play-day, saved): set_growth() on every machine.
-const BEAR := Vector3(-7.3, 0, 8.0)
-const BOARD := Vector3(-4.6, 0, 9.5)
+const BEAR := Vector3(-5.9, 0, 8.7)
+const BOARD := Vector3(-4.4, 0, 10.0)
 const BOARD_SLOTS := 12
 const BUNTING_MAX := 24
 const GUEST_COUNT := 6
@@ -264,6 +264,8 @@ func set_decor(count: int, animate: bool) -> void:
 		var n := _make_decor(String(d[0]))
 		n.position = d[1]
 		add_child(n)
+		if fountain_fx != null and not fountain_fx.emitting:
+			fountain_fx.emitting = true
 		props[String(d[0])] = n
 		springs[String(d[0])] = [Vector2.ZERO, Vector2.ZERO, n, 50.0]
 		if animate:
@@ -331,8 +333,7 @@ func _make_decor(kind: String) -> Node3D:
 			b.cylinder(1.15, 1.15, 0.05, Transform3D(Basis(), Vector3(0, 0.38, 0)), Color(0.35, 0.65, 1.0), 18)
 			b.cylinder(0.15, 0.2, 1.0, Transform3D(Basis(), Vector3(0, 0.8, 0)), Color(0.85, 0.85, 0.9), 8)
 			n.add_child(MeshKit.instance(b.build(), false))
-			fountain_fx = _water_fx(n, Vector3(0, 1.3, 0), 24, 2.5)
-			fountain_fx.emitting = true
+			fountain_fx = _water_fx(n, Vector3(0, 1.3, 0), 24, 2.5)  # set_decor starts it once it's in the tree
 		"flags":
 			b.cylinder(0.06, 0.06, 4.0, Transform3D(Basis(), Vector3(0, 2.0, 0)), Color.WHITE, 6)
 			b.sphere(0.12, Transform3D(Basis(), Vector3(0, 4.05, 0)), Color(1, 0.85, 0.3), 8)

@@ -111,6 +111,10 @@ static func _piece(t: String, h: float, pos: Vector3, yaw: float, out) -> Array:
 	var p := pos
 	var cur_yaw := yaw
 	var base := pos
+	# Packed arrays are values: a cast like (out["pts"] as PackedVector3Array).append() changes a COPY (every piece
+	# was silently dropped, 2026-10-29). Collect here, then write back into `out` once.
+	var new_pts := PackedVector3Array()
+	var new_ups := PackedVector3Array()
 	for i in range(1, n + 1):
 		var k := float(i) / n
 		var up := Vector3.UP
@@ -135,9 +139,15 @@ static func _piece(t: String, h: float, pos: Vector3, yaw: float, out) -> Array:
 			if turn != 0.0:
 				var inward := fwd(cur_yaw + signf(turn) * PI * 0.5)
 				up = (Vector3.UP + inward * 0.35 * sin(k * PI)).normalized()
-		if out != null:
-			(out["pts"] as PackedVector3Array).append(p)
-			(out["ups"] as PackedVector3Array).append(up)
+		new_pts.append(p)
+		new_ups.append(up)
+	if out != null:
+		var op: PackedVector3Array = out["pts"]
+		var ou: PackedVector3Array = out["ups"]
+		op.append_array(new_pts)
+		ou.append_array(new_ups)
+		out["pts"] = op
+		out["ups"] = ou
 	return [Vector3(p.x, y1, p.z), yaw + turn]
 
 
@@ -151,9 +161,13 @@ static func build(pieces: Array) -> Dictionary:
 	var a := station_start()
 	var b := station_end()
 	var ns := int(ceil(STATION_LEN / STEP))
+	var sp := PackedVector3Array()
+	var su := PackedVector3Array()
 	for i in ns + 1:
-		(out["pts"] as PackedVector3Array).append(a.lerp(b, float(i) / ns))
-		(out["ups"] as PackedVector3Array).append(Vector3.UP)
+		sp.append(a.lerp(b, float(i) / ns))
+		su.append(Vector3.UP)
+	out["pts"] = sp
+	out["ups"] = su
 	var pos := b
 	var yaw := 0.0
 	for pc in pieces:
@@ -343,7 +357,7 @@ static func piece_mesh(t: String, h: float, col: Color) -> ArrayMesh:
 
 
 ## Buttons' plan: a see-through glowing outline of the track between distances s0 and s1 (rails and ties only).
-static func outline(tr: Dictionary, s0: float, s1: float, col: Color = Color(0.55, 0.85, 1.0, 0.5)) -> ArrayMesh:
+static func outline(tr: Dictionary, s0: float, s1: float, col: Color = Color(0.6, 1.0, 1.0, 0.85)) -> ArrayMesh:
 	var b := MeshKit.builder()
 	var pts: PackedVector3Array = tr["pts"]
 	var dist: PackedFloat32Array = tr["dist"]
@@ -358,7 +372,7 @@ static func outline(tr: Dictionary, s0: float, s1: float, col: Color = Color(0.5
 		var xa := sample(tr, s + 0.001)
 		var xb := sample(tr, s + seg - 0.001)
 		for side in [-1.0, 1.0]:
-			_beam(b, xa.origin + xa.basis.x * GAUGE * side, xb.origin + xb.basis.x * GAUGE * side, xa.basis.y.lerp(xb.basis.y, 0.5), Vector2(0.13, 0.13), col)
+			_beam(b, xa.origin + xa.basis.x * GAUGE * side, xb.origin + xb.basis.x * GAUGE * side, xa.basis.y.lerp(xb.basis.y, 0.5), Vector2(0.16, 0.16), col)
 		tie_acc += seg
 		if tie_acc > 0.7:
 			tie_acc = 0.0

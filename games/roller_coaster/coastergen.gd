@@ -59,16 +59,23 @@ static func size_for(k: int) -> int:
 ## A new section that continues `base` (a piece list). Deterministic: same seed + base + k -> same plan.
 static func section(seed_value: int, base: Array, k: int) -> Dictionary:
 	var want := size_for(k)
-	for attempt in TRIES:
+	var attempt := 0
+	var stuck := 0
+	while attempt < TRIES:
 		var n := want if attempt < 14 else maxi(2, want - 1 - (attempt - 14) / 5)  # crowded table: smaller plans
 		if base.size() + n > MAX_PIECES:
 			n = MAX_PIECES - base.size()
 		if n < 2:
 			break
 		var r := Seeded.rng(seed_value, "try%d" % attempt)
+		attempt += 1
 		var pcs := _walk(r, base, n, k)
 		if pcs.size() != n:
+			stuck += 1
+			if stuck >= 4 and attempt < 14:
+				attempt = 14  # no room for a long plan here: try shorter ones
 			continue
+		stuck = 0
 		var plan := _plan(seed_value, base, k, pcs)
 		if check(plan).is_empty():
 			return plan
@@ -186,11 +193,15 @@ static func check(plan: Dictionary) -> Array:
 		out.append("more than one loop or splash")
 	if not types.has(String(plan.wish)):
 		out.append("the wish (%s) isn't in the plan" % plan.wish)
+	if not out.is_empty():
+		return out  # (cheap checks first: generation retries fast)
 	var all := base.duplicate(true)
 	all.append_array(pcs)
 	var tr := Track.build(all)
 	var from_s := Track.STATION_LEN if base.is_empty() else float((tr.piece_s as Array)[base.size() - 1])
 	out.append_array(track_problems(tr, from_s))
+	if not out.is_empty():
+		return out
 	var st := ride_stats(tr)
 	if float(st.secs) > MAX_LAP_SECS:
 		out.append("a lap takes too long (%.1f s)" % float(st.secs))
@@ -235,7 +246,7 @@ static func track_problems(tr: Dictionary, from_s: float) -> Array:
 				for j in grid.get(c + Vector2i(dx, dz), []):
 					var ds := absf(dist[j] - s)
 					ds = minf(ds, length - ds)
-					if ds < 5.0 or (Track.in_ranges(loops, s) and Track.in_ranges(loops, dist[j]) and _same_loop(loops, s, dist[j])):
+					if ds < 5.0 or _same_loop(loops, s, dist[j]):
 						continue
 					var q := pts[j]
 					if Vector2(p.x - q.x, p.z - q.z).length() < CLEAR_XZ and absf(p.y - q.y) < CLEAR_Y:
@@ -246,7 +257,7 @@ static func track_problems(tr: Dictionary, from_s: float) -> Array:
 
 static func _same_loop(loops: Array, a: float, b: float) -> bool:
 	for l in loops:
-		if a >= float(l[0]) - 0.5 and a <= float(l[1]) + 0.5 and b >= float(l[0]) - 0.5 and b <= float(l[1]) + 0.5:
+		if a >= float(l[0]) - 1.5 and a <= float(l[1]) + 1.5 and b >= float(l[0]) - 1.5 and b <= float(l[1]) + 1.5:
 			return true
 	return false
 
@@ -298,12 +309,22 @@ static func stars(seed_value: int, ride: int, tr: Dictionary, practice: bool) ->
 	var wiggle := maxf(0.0, (span - STAR_GAP) * 0.45)
 	for i in want:
 		var s := lo + span * (i + 0.5) + r.randf_range(-wiggle, wiggle)
+		if not out.is_empty():
+			s = maxf(s, float(out[-1][0]) + STAR_GAP)  # pushed along, never closer than the gap
 		for l in tr.loops:
 			if s >= float(l[0]) - 0.2 and s <= float(l[1]) + 0.2:
 				s = float(l[1]) + 0.4  # just after the loop
-		if s > hi or (not out.is_empty() and s - float(out[-1][0]) < STAR_GAP):
-			continue
+		if s > hi:
+			break
 		out.append([s, "balloon" if out.size() % 2 == 1 else "star"])
+	var x := lo
+	while out.size() < want and x <= hi:  # loops pushed some out: fill any free gap from the start
+		var free := not Track.in_ranges(tr.loops, x)
+		for o in out:
+			free = free and absf(float(o[0]) - x) >= STAR_GAP
+		if free:
+			out.append([x, "balloon" if out.size() % 2 == 1 else "star"])
+		x += 0.5
 	out.sort_custom(func(a: Array, b: Array) -> bool: return float(a[0]) < float(b[0]))
 	return out
 

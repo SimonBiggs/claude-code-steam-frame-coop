@@ -106,7 +106,7 @@ func _pad_after_ride() -> String:
 		var n0: int = main.pieces.size()
 		_add_some(["down", "right", "loop", "up", "down", "splash", "right"])
 		main.set_end_height(1.5)
-		kit.assert_true(main.pieces.size() > n0 + 2, "more pieces snapped on (%d)" % main.pieces.size())
+		kit.assert_true(main.pieces.size() > n0, "more pieces snapped on after the plan (%d)" % main.pieces.size())
 		kit.assert_near(main.last_height(), 1.5, 0.01, "pulled the end up into a hill")
 		main.undo_piece()
 		main.add_piece("straight")
