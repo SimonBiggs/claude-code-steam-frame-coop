@@ -3425,7 +3425,7 @@ func _build_treasures(list: Array, days: int, crowned: bool) -> void:
 		f.material_override = make_material(FLAG_COLORS[i % FLAG_COLORS.size()], 0.25)
 		f.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		f.position = VoyageGen.flag_slot(i) + Vector3.DOWN * 0.32
-		f.rotation = Vector3(0.0, PI / 2.0, PI)  # point down, faces port and starboard
+		f.rotation = Vector3(0.0, 0.7 if i % 2 == 0 else -0.7, PI)  # point down, turned this way and that (seen from the deck and the cannons)
 		treasure_root.add_child(f)
 	treasure_count = list.size()
 
