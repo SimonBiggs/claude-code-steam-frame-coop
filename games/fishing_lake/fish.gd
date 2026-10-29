@@ -65,6 +65,8 @@ var wiggle := 0.0
 var pirate := false  # host: the treasure-map chest
 var helpers: Array[int] = []  # host: boats that splashed to help land it
 var puff := 0.0
+var home := Vector3.INF  # host: the fishing spot this fish lives at (lakegen.gd), INF = anywhere
+var home_r := 2.0
 
 var net_pos := Vector3.ZERO
 var net_yaw := 0.0
@@ -112,6 +114,7 @@ func spawn(k: int, pos: Vector3, shoal_id: int) -> void:
 	pirate = false
 	helpers.clear()
 	puff = 0.0
+	home = Vector3.INF
 	position = pos
 	position.y = depth
 	vel = Vector3.ZERO
@@ -525,6 +528,11 @@ func _pick_wander() -> void:
 	# A fish frenzy pulls nearby fish into the bubbles.
 	if main.frenzy_t > 0.0 and _flat(position - main.frenzy_pos).length() < 12.0 and randf() < 0.7:
 		wander = main.frenzy_pos + Vector3(randf_range(-2.5, 2.5), 0.0, randf_range(-2.5, 2.5))
+		return
+	# Fish with a home spot (lily pads, reeds, the deep hole...) mostly stay round it.
+	if home != Vector3.INF and randf() < 0.8:
+		var ha := randf() * TAU
+		wander = home + Vector3(sin(ha), 0.0, cos(ha)) * randf() * (home_r + 1.0)
 		return
 	var a := randf() * TAU
 	var r := sqrt(randf()) * (Lake.LAKE_R - 3.0)

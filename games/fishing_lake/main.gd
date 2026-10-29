@@ -8,6 +8,14 @@ extends Node3D
 ## fish). Mini-events: FISH FRENZY (double points in the bubbles), TREASURE MAPS (a boat finds the X
 ## and drops a buoy, the angler fishes up the pirate chest) and OLD WHISKERS, the lake legend, who
 ## needs everybody to land him. A fish journal remembers every species you have ever caught.
+## SEEDED LAKES + OLLIE'S FISH BOOK (lakegen.gd, book.gd): every day is a new seeded lake - its weather
+## and sky, 2-4 fishing spots in casting reach (lily pads, reeds, a deep hole, rocks, sandy shallows) and
+## who swims where (koi under the lilies, pike and eels in the reeds, catfish, moonfish and OLD WHISKERS in
+## the deep hole, puffers by the rocks, the GOLDEN FISH visiting the shallows). Ollie the otter keeps the
+## fish book (saved, the picture board by the jetty: caught fish in colour, missing ones as shadows); each
+## morning he wishes for one fish (a missing page first, a story card with its picture) and a glowing
+## picture of it floats over the spot where it lives. More days fished = more fish to find. The first
+## day each date is TODAY'S LAKE (the same everywhere). A RUN line per day (core/telemetry.gd).
 ## Modes, networking and party join follow docs/GAME_DEV_GUIDE.md and games/marble_maze.
 ##
 ## SIMPLE_MODE (the family found the game too complicated and too wordy): just fish until sunset and
@@ -35,6 +43,13 @@ const MusicScript := preload("res://games/fishing_lake/calm_music.gd")
 const JoinListenerScript := preload("res://games/fishing_lake/join_listener.gd")
 const UiKit := preload("res://core/ui_kit.gd")
 const CoveGhostHand := preload("res://games/cannon_cove/ghost_hand.gd")  # shared see-through hand
+const LakeGen := preload("res://games/fishing_lake/lakegen.gd")
+const Book := preload("res://games/fishing_lake/book.gd")
+const Seeded := preload("res://core/seeded.gd")
+const Save := preload("res://core/save.gd")
+const Telemetry := preload("res://core/telemetry.gd")
+const StoryCard := preload("res://core/story_card.gd")
+const GAME_ID := "fishing_lake"
 
 ## Simple mode picture cues on the TV views (no words): [pad button, icons, icon colour].
 const CUES := {
@@ -195,15 +210,34 @@ var vr_center: Label3D
 var vr_hint: Label3D
 var bobber_label: Label3D
 var rain_player: AudioStreamPlayer
+# The seeded lake and Ollie's fish book (lakegen.gd, book.gd). The host owns the save; every machine
+# rebuilds the lake from [seed, level, wish, daily] in the snapshot.
+var save: Save
+var lake_desc := {}
+var lake_key: Array = []
+var wish_done := false
+var golden_done := false
+var day_logged := false
+var vr_story: Node3D
+var day_play_t := 0.0  # seconds fished today (game time, for the RUN line)
 
 
 func _ready() -> void:
 	randomize()
+	save = Save.new()
+	save.game_id = GAME_ID
+	save.defaults = Book.save_defaults()
+	add_child(save)
+	if int(save.data.world) < 0:
+		save.data.world = Seeded.fresh_seed()  # this family's own lakes
+		save.mark_dirty()
+	_migrate_journal()
 	_journal_load()
 	lake = Lake.new()
 	lake.main = self
 	add_child(lake)
 	lake.build()
+	lake.build_book(LakeGen.species())
 	_build_pools()
 	_build_hud()
 	var menu := PauseMenuScript.new()
@@ -258,6 +292,10 @@ func _setup_game(mode: String) -> void:
 
 func _exit_tree() -> void:
 	XRServer.world_scale = 1.0  # global: never leave a scale behind for the next game
+	if state == "play" and ready_to_play and day_play_t > 20.0:
+		_log_day("quit")
+	if save != null:
+		save.save_now()
 
 
 # --- Helpers -------------------------------------------------------------------------
@@ -594,13 +632,12 @@ func _castable_point(min_d: float, max_d: float) -> Vector3:
 	return end + Vector3(0, 0, -10.0)
 
 
-func _kind_allowed(d: Dictionary) -> bool:
-	if SIMPLE_MODE:
-		var nm: String = d["name"]
-		if day <= 1 and not nm in ["Minnow", "Stripy Perch", "Rainbow Trout", "Sunny Bluegill"]:
-			return false  # day 1: just the common fish
-		if day <= 2 and nm in ["Bubble Puffer", "Spotted Koi"]:
-			return false  # the rare ones from day 3
+func _kind_allowed(k: int) -> bool:
+	var d: Dictionary = FishScript.TYPES[k]
+	# Today's lake decides who swims here (lakegen.gd: the level, the spots, the weather).
+	var mix: Dictionary = lake_desc.get("mix", {})
+	if not mix.is_empty() and int(mix.get(k, 0)) <= 0:
+		return false
 	match int(d.get("when", 0)):
 		1:
 			return not raining()
@@ -616,18 +653,22 @@ func _kind_allowed(d: Dictionary) -> bool:
 func _pick_kind() -> int:
 	var total := 0
 	for k in FishScript.TYPES.size():
-		var d: Dictionary = FishScript.TYPES[k]
-		if _kind_allowed(d):
-			total += int(d["spawn"])
+		if _kind_allowed(k):
+			total += _spawn_weight(k)
 	var roll := randi() % maxi(total, 1)
 	for k in FishScript.TYPES.size():
-		var d: Dictionary = FishScript.TYPES[k]
-		if not _kind_allowed(d):
+		if not _kind_allowed(k):
 			continue
-		roll -= int(d["spawn"])
+		roll -= _spawn_weight(k)
 		if roll < 0:
 			return k
 	return FishScript.MINNOW
+
+
+## Today's spawn weight of a fish kind (the lake's mix; Ollie's wish swims a little more often).
+func _spawn_weight(k: int) -> int:
+	var mix: Dictionary = lake_desc.get("mix", {})
+	return int(mix.get(k, FishScript.TYPES[k]["spawn"]))
 
 
 func _free_fish_slot():
@@ -655,17 +696,28 @@ func _spawn_shoal(force_kind: int = -1, at: Vector3 = Vector3.INF) -> void:
 		if f.kind == FishScript.GOLDEN:
 			golden_present = true
 	var kind := _pick_kind() if force_kind < 0 else force_kind
-	if force_kind < 0 and not golden_present and (not SIMPLE_MODE or day >= 3) and randf() < 0.02 + 0.005 * day:
-		kind = FishScript.GOLDEN
+	if force_kind < 0 and not golden_present and not SIMPLE_MODE and randf() < 0.02 + 0.005 * day:
+		kind = FishScript.GOLDEN  # (simple mode: the golden fish visits the sandy shallows, lakegen.gd)
 	var d: Dictionary = FishScript.TYPES[kind]
 	var n: int = d["shoal"]
+	# Fish with a home spot swim there (and stay round it); the common fish are anywhere, a few at the spots.
+	var homes: Array = LakeGen.spots_for(lake_desc, kind) if not lake_desc.is_empty() else []
+	var home = null
+	if not homes.is_empty() and (LakeGen.HOME.has(kind) or randf() < 0.35):
+		home = homes[randi() % homes.size()]
 	var c := _random_lake_point(4.0) if at == Vector3.INF else at
+	if home != null and at == Vector3.INF:
+		var ha := randf() * TAU
+		c = home.pos + Vector3(sin(ha), 0.0, cos(ha)) * randf() * float(home.r)
 	shoal_next += 1
 	for i in n:
 		var f = _free_fish_slot()
 		if f == null:
 			return
 		f.spawn(kind, c + Vector3(randf_range(-1.0, 1.0), 0.0, randf_range(-1.0, 1.0)), shoal_next if n > 1 else -1)
+		if home != null:
+			f.home = home.pos
+			f.home_r = float(home.r)
 
 
 func _spawn_treasure(force_kind: int = -1, at: Vector3 = Vector3.INF) -> void:
@@ -1152,9 +1204,9 @@ func _start_day(n: int) -> void:
 	biggest_kg = 0.0
 	golden_bait = false
 	last_tick = -1
-	theme = (n - 1) % THEMES.size()
+	_new_lake(n)
 	var th := _theme()
-	daylight = float(th["p0"])
+	daylight = float(lake_desc.p0)
 	rain = 0.0
 	was_raining = false
 	was_night = daylight > 1.15
@@ -1169,7 +1221,11 @@ func _start_day(n: int) -> void:
 	map_by = -1
 	legend_state = 0
 	legend_stamina = 1.0
-	legend_at = randf_range(0.55, 0.7) if n >= 2 else 2.0  # day 1: only as a reward for filling the tank
+	legend_at = float(lake_desc.legend_at) if bool(lake_desc.legend) else 2.0  # no deep hole / too early: only as a reward
+	wish_done = false
+	golden_done = not bool(lake_desc.golden)
+	day_play_t = 0.0
+	day_logged = false
 	extend_t = 0.0
 	last_fish_said = false
 	awards_text = ""
@@ -1199,7 +1255,7 @@ func _start_day(n: int) -> void:
 			ripple(practice_pos, 4.0)
 			_show_center("", 0.0)
 		else:
-			_show_center("DAY %d!" % n, 2.0)
+			_show_center("TODAY'S LAKE!" if bool(lake_desc.daily) else "DAY %d!" % n, 2.0)
 	elif n == 1:
 		_show_center("FISHING LAKE - fill the aquarium before sunset!\n" \
 			+ "VR: FLICK the rod to cast (or A)  -  trigger REELS  -  PULL BACK when it's tired\n" \
@@ -1207,9 +1263,83 @@ func _start_day(n: int) -> void:
 	else:
 		_show_center("DAY %d - %s\nTarget %d points\n%s" % [n, str(th["name"]), target, str(th["tip"])], 4.5)
 	sound("day", -2.0, 1.0, true)
-	if not SIMPLE_MODE:
-		_send_journal()
-	print("Day %d started (%s, target %d, %d boats, %.0f s)" % [n, str(th["name"]), target, active_boats().size(), round_time])
+	_send_journal()
+	if not practice:
+		_wish_card(2.5)
+	print("Day %d started (%s, target %d, %d boats, %.0f s) lake seed %d level %d %s spots %s wish %s%s" % [n, str(th["name"]), target,
+		active_boats().size(), round_time, int(lake_desc.seed), int(lake_desc.level), str(lake_desc.weather),
+		",".join(PackedStringArray((lake_desc.spots as Array).map(func(s: Dictionary) -> String: return str(s.hab)))),
+		_wish_name(), " (TODAY'S LAKE)" if bool(lake_desc.daily) else ""])
+
+
+## Host: today's lake. The first day each date is TODAY'S LAKE (the same everywhere), then this family's
+## own lakes (world seed + days fished). Ollie wishes for a missing page and the lake is shaped for it.
+func _new_lake(n: int) -> void:
+	var days := int(save.data.days)
+	var lvl := Book.level(days)
+	var today_due := n == 1 and not (save.data.daily as Dictionary).has(Seeded.today()) and not OS.has_environment("BOT_NO_DAILY")
+	var desc: Dictionary
+	if today_due:
+		desc = LakeGen.generate(Seeded.daily_seed(GAME_ID), {"level": lvl, "daily": true})
+		desc.wish = Book.pick_daily_wish(save.data.book, desc)
+	else:
+		var sd := Seeded.derive(int(save.data.world), "day%d" % days) if not OS.has_environment("FISH_SEED") else int(OS.get_environment("FISH_SEED"))
+		desc = LakeGen.generate(sd, {"level": lvl, "wish": Book.pick_wish(save.data.book, lvl, sd, int(save.data.last_wish))})
+	save.data.last_wish = int(desc.wish)
+	save.mark_dirty()
+	_apply_lake([int(desc.seed), lvl, int(desc.wish), today_due])
+
+
+## Every machine: build the lake from its compact description [seed, level, wish, daily].
+func _apply_lake(key: Array) -> void:
+	if key == lake_key:
+		return
+	lake_key = key.duplicate()
+	lake_desc = LakeGen.generate(int(key[0]), {"level": int(key[1]), "wish": int(key[2]), "daily": bool(key[3])})
+	lake_desc.wish = int(key[2])
+	theme = int(lake_desc.theme)
+	lake.set_spots(lake_desc.spots)
+
+
+func _wish_spot():
+	var w := int(lake_desc.get("wish", -1))
+	if w < 0:
+		return null
+	var sp: Array = LakeGen.spots_for(lake_desc, w)
+	if sp.is_empty():
+		return null
+	return sp[0]
+
+
+func _wish_name() -> String:
+	var w := int(lake_desc.get("wish", -1))
+	return str(FishScript.TYPES[w]["name"]) if w >= 0 else "-"
+
+
+## Host: Ollie's wish for the day, picture first (the fish, in its colours).
+func _wish_card(delay: float) -> void:
+	var w := int(lake_desc.get("wish", -1))
+	if w < 0:
+		return
+	get_tree().create_timer(delay).timeout.connect(func() -> void:
+		if state == "play" and not wish_done:
+			story({"who": "OLLIE", "line": "%s, please!" % str(FishScript.TYPES[w]["name"]), "pic": "fish",
+				"color": FishScript.TYPES[w]["col"], "duration": 4.5}))
+
+
+## A story card on every view of every machine (host broadcasts) and in VR.
+func story(beat: Dictionary, broadcast: bool = true) -> void:
+	if broadcast and net != null and net.mode != "client":
+		net.event("story", [beat])
+	var huds: Array = []
+	for p in players:
+		if p.get("hud") != null and is_instance_valid(p.hud) and p.has_meta("view") and (p.get_meta("view") as Control).visible:
+			huds.append(p.hud)
+	StoryCard.show(huds, beat)
+	if players.size() > 0 and players[0].vr_like() and players[0].xr_camera != null and players[0].is_local():
+		if vr_story != null and is_instance_valid(vr_story):
+			vr_story.queue_free()  # a newer card replaces the one showing (as on the TV)
+		vr_story = StoryCard.show_vr(self, players[0].xr_camera, beat)
 
 
 func _end_day() -> void:
@@ -1217,6 +1347,12 @@ func _end_day() -> void:
 	state_t = 0.0
 	if frenzy_t > 0.0:
 		frenzy_t = 0.0
+	save.data.days = int(save.data.days) + 1
+	if bool(lake_desc.get("daily", false)):
+		var dl: Dictionary = save.data.daily
+		dl[Seeded.today()] = maxi(int(dl.get(Seeded.today(), 0)), fish_caught())
+	_journal_save()
+	_log_day("sunset")
 	var stars := 0
 	if score >= target:
 		stars = 3
@@ -1260,6 +1396,27 @@ func _end_day() -> void:
 	fanfare()
 	sound("catch", 0.0, 0.8, true)
 	print("Day %d over: score %d / %d, %d catches, stars %d\nAWARDS: %s" % [day, score, target, catches.size(), stars, awards_text.replace("\n", " | ")])
+
+
+## One RUN line per day on the lake (core/telemetry.gd), and when the game is left mid-day.
+func _log_day(end: String) -> void:
+	if day_logged or net == null or net.mode == "client" or lake_desc.is_empty():
+		return
+	day_logged = true
+	var kinds := {}
+	for k in catches:
+		if FishScript.is_species(int(k)):
+			kinds[str(FishScript.TYPES[int(k)]["name"])] = int(kinds.get(str(FishScript.TYPES[int(k)]["name"]), 0)) + 1
+	var spots: Array = []
+	for s in lake_desc.spots:
+		spots.append(str(s.hab))
+	Telemetry.run(GAME_ID, {"end": end, "day": day, "seed": int(lake_desc.seed), "daily": bool(lake_desc.daily),
+		"level": int(lake_desc.level), "weather": str(lake_desc.weather), "spots": spots, "fish": fish_caught(),
+		"kinds": kinds, "new": new_today.size(), "wish": _wish_name(), "wish_caught": wish_done,
+		"legend": legend_state, "golden": bool(lake_desc.golden), "book": _journal_found(),
+		"days": int(save.data.days), "boats": active_boats().size(), "vr": players.size() > 0 and bool(players[0].vr),
+		"mode": str(net.mode), "practice": practice, "secs": int(day_play_t),
+		"round": int(round_time), "snaps": int(stat_get(0, "snap"))})
 
 
 ## Everybody gets a fun award for the day (the best thing they did).
@@ -1328,6 +1485,9 @@ func _process(delta: float) -> void:
 	lake.set_frenzy(frenzy_t > 0.0 or ring_on, practice_pos if ring_on else frenzy_pos)
 	lake.set_map(map_state, map_pos)
 	lake.update(delta)
+	lake.update_seeded(delta)
+	var ws = _wish_spot() if not wish_done and state == "play" and not practice else null
+	lake.set_wish(int(lake_desc.wish) if ws != null else -1, ws.pos if ws != null else Vector3.ZERO)
 	lake.update_tank(catches, delta)
 	var bp: Vector3 = players[0].body_pos
 	lake.rain_near.position = Vector3(bp.x, 9.0, bp.z - 1.5)
@@ -1359,12 +1519,12 @@ func _host_update(delta: float, cont_edge: bool) -> void:
 		t.sim(delta)
 	match state:
 		"play":
+			day_play_t += delta
 			if practice:
 				_practice_update(delta)  # the clock waits until the practice is done
 			else:
 				time_left -= delta
-				var th := _theme()
-				daylight = lerpf(float(th["p0"]), float(th["p1"]), day_frac())
+				daylight = lerpf(float(lake_desc.p0), float(lake_desc.p1), day_frac())
 				var secs := int(ceilf(time_left))
 				if secs <= 10 and secs != last_tick and secs > 0:
 					last_tick = secs
@@ -1417,13 +1577,14 @@ func _host_update(delta: float, cont_edge: bool) -> void:
 func _events(delta: float) -> void:
 	var th := _theme()
 	var frac := day_frac()
-	var want_rain := 1.0 if bool(th["rain"]) and frac > 0.08 and frac < 0.8 else 0.0
+	var want_rain := 1.0 if frac > float(lake_desc.rain_from) and frac < float(lake_desc.rain_to) else 0.0
 	rain = move_toward(rain, want_rain, delta * 0.12)
 	if raining() and not was_raining:
 		was_raining = true
 		if not SIMPLE_MODE:  # simple mode: the rain says it all
 			_show_center("IT'S RAINING!\nFish bite faster - and the Wiggly Eel comes out to play", 3.0)
-		_spawn_shoal(FishScript.EEL)
+		if _kind_allowed(FishScript.EEL):
+			_spawn_shoal(FishScript.EEL)
 	elif not raining() and was_raining and rain < 0.1:
 		was_raining = false
 		if not SIMPLE_MODE:
@@ -1433,7 +1594,21 @@ func _events(delta: float) -> void:
 		if not SIMPLE_MODE:
 			_show_center("THE STARS ARE OUT!\nLook for the glowing MOONFISH", 3.0)
 		sound("owl", -6.0, 1.0, true)
-		_spawn_shoal(FishScript.MOONFISH)
+		if _kind_allowed(FishScript.MOONFISH):
+			_spawn_shoal(FishScript.MOONFISH)
+	# The golden fish visits the sandy shallows on some lakes (lakegen.gd).
+	if not golden_done and frac > float(lake_desc.get("golden_at", 2.0)) and time_left > 20.0:
+		golden_done = true
+		var sandy = LakeGen.spot_of(lake_desc, "sandy")
+		var gp: Vector3 = sandy.pos if sandy != null else _castable_point(8.0, 13.0)
+		_spawn_shoal(FishScript.GOLDEN, gp)
+		for f in fish:
+			if f.kind == FishScript.GOLDEN and f.home == Vector3.INF:
+				f.home = gp
+		ripple(gp, 3.0)
+		burst(gp + Vector3(0, 0.3, 0), Color(1.0, 0.85, 0.2), 20)
+		sound("golden", -4.0, 1.0, true)
+		print("Event: the GOLDEN FISH visits the shallows at %s" % str(gp))
 	# Fish frenzy: double points inside the bubbles for a little while.
 	if not frenzy_done and frac > frenzy_at - 0.04 and not frenzy_warned:
 		frenzy_warned = true
@@ -1523,7 +1698,8 @@ func _spawn_legend() -> void:
 				break
 	if slot == null:
 		return
-	var p := _castable_point(11.0, 17.0)
+	var deep = LakeGen.spot_of(lake_desc, "deep") if not lake_desc.is_empty() else null
+	var p: Vector3 = deep.pos if deep != null else _castable_point(11.0, 17.0)  # he lives in the deep hole
 	slot.spawn(FishScript.LEGEND, p, -1)
 	legend_state = 1
 	legend_stamina = 1.0
@@ -1759,6 +1935,7 @@ func _end_practice() -> void:
 	time_left = round_time
 	_show_center("GO!", 1.5)
 	sound("day", -2.0, 1.2, true)
+	_wish_card(7.0)  # after the practice catch's own cards (a new page)
 	print("Practice done after %.0f s: the day's clock starts" % practice_t)
 
 
@@ -2013,6 +2190,7 @@ func on_catch(f) -> void:
 	# The fish journal: a brand-new species is a big moment.
 	if FishScript.is_species(f.kind):
 		_journal_add(f.kind, kg)
+		_check_wish(f.kind)
 	_show_center(text, 2.8)
 	print("Caught %s (%.1f kg) +%d%s%s, score %d" % [nm, kg, total, (" helper P%d" % (helper + 1)) if helper > 0 else "",
 		" FRENZY" if mult > 1 else "", score])
@@ -2060,9 +2238,29 @@ func _simple_catch(f) -> void:
 		var hi: int = h
 		if hi > 0 and hi < players.size():
 			burst(players[hi].global_position + Vector3(0, 1.4, 0), players[hi].color.lightened(0.3), 14)
+	if FishScript.is_species(f.kind):
+		_journal_add(f.kind, kg)
+		_check_wish(f.kind)
 	if practice:
 		_end_practice()
 	print("Caught %s (%.1f kg), %d fish today" % [str(d["name"]), kg, fish_caught()])
+
+
+## Ollie's wish came true: thanks, a big sparkle, and the floating picture goes.
+func _check_wish(kind: int) -> void:
+	if wish_done or kind != int(lake_desc.get("wish", -1)):
+		return
+	wish_done = true
+	save.data.wishes = int(save.data.wishes) + 1
+	save.mark_dirty()
+	lake.ollie_cheer()
+	fanfare()
+	var spot = _wish_spot()
+	if spot != null:
+		burst(Vector3(spot.pos.x, 1.9, spot.pos.z), Color(1.0, 0.9, 0.4), 30)
+	get_tree().create_timer(0.6).timeout.connect(func() -> void:
+		story({"who": "OLLIE", "line": "Thank you!", "pic": "otter", "color": Book.OLLIE, "duration": 3.5}))
+	print("Ollie's wish caught: %s" % str(FishScript.TYPES[kind]["name"]))
 
 
 func fish_caught() -> int:
@@ -2082,7 +2280,23 @@ func _journal_add(kind: int, kg: float) -> void:
 	journal_counts[kind] += 1
 	var record := kg > journal_best[kind] and not first
 	journal_best[kind] = maxf(journal_best[kind], kg)
-	if first:
+	if first and SIMPLE_MODE:
+		new_today.append(kind)
+		_journal_save()
+		var found := _journal_found()
+		var nm: String = FishScript.TYPES[kind]["name"]
+		var tip: Vector3 = players[0].tip_pos()
+		for c in [Color(1.0, 0.4, 0.5), Color(0.4, 0.9, 1.0), Color(1.0, 0.9, 0.3)]:
+			burst(tip + Vector3(0, 0.3, 0), c, 14)
+		sound("new", 0.0, 1.0, true)
+		lake.ollie_cheer()
+		# Picture first: the fish and its name; Ollie's milestone after it.
+		get_tree().create_timer(3.4).timeout.connect(func() -> void:
+			story({"who": nm.to_upper(), "line": "New page!", "pic": "fish", "color": FishScript.TYPES[kind]["col"], "duration": 3.5}))
+		if Book.MILESTONES.has(found):
+			get_tree().create_timer(7.4).timeout.connect(func() -> void:
+				story({"who": "OLLIE", "line": str(Book.MILESTONES[found]), "pic": "otter", "color": Book.OLLIE, "duration": 4.0}))
+	elif first:
 		new_today.append(kind)
 		var nm: String = FishScript.TYPES[kind]["name"]
 		var found := _journal_found()
@@ -2094,6 +2308,8 @@ func _journal_add(kind: int, kg: float) -> void:
 			burst(tip + Vector3(0, 0.3, 0), c, 14)
 		fanfare()
 		sound("new", 0.0, 1.0, true)
+		_journal_save()
+	elif SIMPLE_MODE:
 		_journal_save()
 	elif record:
 		popup(players[0].lure_pos + Vector3(0, 1.6, 0), "NEW RECORD %s!" % str(FishScript.TYPES[kind]["name"]).to_upper(), Color(1.0, 0.9, 0.4), true, 1.2)
@@ -2123,29 +2339,47 @@ func _journal_file() -> String:
 	return "user://fishing_lake_journal.cfg"
 
 
+## The fish book lives in the save (book.gd: fish name -> [times caught, best kg]); these arrays mirror it.
 func _journal_load() -> void:
 	journal_counts = PackedInt32Array()
 	journal_counts.resize(FishScript.TYPES.size())
 	journal_best = PackedFloat32Array()
 	journal_best.resize(FishScript.TYPES.size())
+	var book: Dictionary = save.data.book
+	for k in FishScript.TYPES.size():
+		var e: Array = book.get(str(FishScript.TYPES[k]["name"]), [0, 0.0])
+		journal_counts[k] = int(e[0])
+		journal_best[k] = float(e[1])
+
+
+## Once: the old journal file (before the save) goes into the book.
+func _migrate_journal() -> void:
+	if bool(save.data.get("migrated", false)):
+		return
+	save.data.migrated = true
+	save.mark_dirty()
 	var cfg := ConfigFile.new()
 	if cfg.load(_journal_file()) != OK:
 		return
 	var c: PackedInt32Array = cfg.get_value("journal", "counts", PackedInt32Array())
 	var b: PackedFloat32Array = cfg.get_value("journal", "best", PackedFloat32Array())
-	for i in mini(c.size(), journal_counts.size()):
-		journal_counts[i] = c[i]
-	for i in mini(b.size(), journal_best.size()):
-		journal_best[i] = b[i]
+	var book: Dictionary = save.data.book
+	for i in mini(c.size(), FishScript.TYPES.size()):
+		if c[i] > 0 and FishScript.is_species(i):
+			var nm: String = FishScript.TYPES[i]["name"]
+			var e: Array = book.get(nm, [0, 0.0])
+			book[nm] = [maxi(int(e[0]), c[i]), maxf(float(e[1]), b[i] if i < b.size() else 0.0)]
+	print("Fishing Lake: the old journal went into the fish book (%d pages)" % Book.found(book).size())
 
 
 func _journal_save() -> void:
 	if net != null and net.mode == "client":
 		return
-	var cfg := ConfigFile.new()
-	cfg.set_value("journal", "counts", journal_counts)
-	cfg.set_value("journal", "best", journal_best)
-	cfg.save(_journal_file())
+	var book: Dictionary = save.data.book
+	for k in FishScript.TYPES.size():
+		if FishScript.is_species(k) and k < journal_counts.size() and journal_counts[k] > 0:
+			book[str(FishScript.TYPES[k]["name"])] = [journal_counts[k], snappedf(journal_best[k], 0.01)]
+	save.mark_dirty()
 
 
 func _send_journal(peer: int = 0) -> void:
@@ -2341,9 +2575,14 @@ func debug_event(what: String) -> void:
 			if legend_state != 1:
 				_spawn_legend()
 		"rain":
-			theme = 1
+			lake_desc.rain_from = 0.0
+			lake_desc.rain_to = 1.0
 		"night":
-			theme = 2
+			lake_desc.p0 = 0.45
+			lake_desc.p1 = 1.45
+		"golden":
+			lake_desc.golden_at = 0.0
+			golden_done = false
 
 
 # --- Networked co-op (see docs/GAME_DEV_GUIDE.md) ------------------------------------
@@ -2354,8 +2593,8 @@ func on_client_joined() -> void:
 
 ## Host: a machine joined: it gets the journal (only it).
 func on_machine_joined(peer: int, _kind: String) -> void:
+	_send_journal(peer)  # the fish book (simple mode too: it's the picture board)
 	if not SIMPLE_MODE:
-		_send_journal(peer)
 		_show_center(Who.joined(net.machine_name_of(peer)), 1.5)
 
 
@@ -2451,7 +2690,10 @@ func make_snapshot() -> Array:
 	# Weather, sky, events: a few numbers.
 	var ex := PackedFloat32Array([rain, daylight, frenzy_t, frenzy_pos.x, frenzy_pos.z, float(map_state), map_pos.x, map_pos.z,
 		legend_stamina, float(streak), float(theme), float(legend_state),
-		float(practice_step + 1) if practice else 0.0, practice_pos.x, practice_pos.z])
+		float(practice_step + 1) if practice else 0.0, practice_pos.x, practice_pos.z,
+		float(lake_key[0]) if lake_key.size() == 4 else -1.0, float(lake_key[1]) if lake_key.size() == 4 else 0.0,
+		float(lake_key[2]) if lake_key.size() == 4 else -1.0, (1.0 if bool(lake_key[3]) else 0.0) if lake_key.size() == 4 else 0.0,
+		1.0 if wish_done else 0.0])
 	# Boat positions: each machine rows its own boats; the others' boats are mirrored from here.
 	var bp := PackedFloat32Array()
 	for i in range(1, players.size()):
@@ -2550,6 +2792,9 @@ func apply_snapshot(s: Array) -> void:
 		practice = ex[12] > 0.0
 		practice_step = maxi(0, int(ex[12]) - 1)
 		practice_pos = Vector3(ex[13], 0.0, ex[14])
+	if ex.size() >= 20 and ex[15] >= 0.0:  # the host's seeded lake: rebuild it here
+		_apply_lake([int(ex[15]), int(ex[16]), int(ex[17]), ex[18] > 0.5])
+		wish_done = ex[19] > 0.5
 
 
 func apply_event(kind: String, args: Array) -> void:
@@ -2576,9 +2821,14 @@ func apply_event(kind: String, args: Array) -> void:
 			day_summary = args[0]
 			summary_day = args[1]
 		"journal":
+			var had := _journal_found()
 			journal_counts = args[0]
 			journal_best = args[1]
 			journal_text = ""
+			if had > 0 and _journal_found() > had:
+				lake.ollie_cheer()
+		"story":
+			story(args[0], false)
 		"remote_pause":
 			get_tree().paused = args[0]
 			_set_pause_banner(args[0], "The VR player paused the game")
@@ -2892,8 +3142,8 @@ func _update_board() -> void:
 			board_text = bt
 			lake.board_label.text = bt
 			lake.board_label.font_size = 150
-		if lake.journal_label.get_parent().visible:
-			lake.journal_label.get_parent().visible = false  # no journal in simple mode
+		lake.journal_label.visible = false  # simple mode: the picture fish book instead of the text journal
+		_update_book()
 		return
 	if state == "over" and summary_day == day and day_summary != "":
 		if board_text != day_summary:
@@ -2924,7 +3174,19 @@ func _update_board() -> void:
 	_update_journal_board()
 
 
+## The picture fish book on the right board (every machine: the host's book arrives as "journal").
+func _update_book() -> void:
+	var counts := {}
+	for k in mini(journal_counts.size(), FishScript.TYPES.size()):
+		if journal_counts[k] > 0:
+			counts[k] = journal_counts[k]
+	var w := int(lake_desc.get("wish", -1))
+	lake.update_book(counts, w if not wish_done else -1)
+
+
 func _update_journal_board() -> void:
+	if lake.book_root != null:
+		lake.book_root.visible = false
 	var lines: Array[String] = ["FISH JOURNAL   %d / %d found" % [_journal_found(), _species_total()]]
 	for k in FishScript.TYPES.size():
 		if not FishScript.is_species(k):
