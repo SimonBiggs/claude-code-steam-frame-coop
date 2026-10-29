@@ -41,7 +41,9 @@ func _ready() -> void:
 	kit.at(3.0 if client else 1.0, "%d TV players press A" % want, func() -> void:
 		if main.net.mode != "host":
 			for i in want:
-				kit.join_bot(main.party))
+				kit.join_bot(main.party)
+		elif not main.net.has_vr:
+			kit.join_bot(main.party))  # a flat host (TV / Deck hosting): one pad hero here, in slot 0
 	kit.every(4.0, _report)
 	kit.every(0.5, _results)
 	var end := 150.0 if host else (140.0 if client else 230.0)
@@ -204,7 +206,7 @@ func _checks() -> void:
 	var mode: String = main.net.mode
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
 	if mode != "host":
-		kit.assert_eq(main.party.player_count(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
+		kit.assert_eq(kit.seated(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
 	kit.assert_true(seen_courses.size() >= 3, "%s: played through several courses (%d)" % [mode, seen_courses.size()])
 	if mode == "client":
 		kit.assert_true(main.runners.size() >= 3, "client mirrors the runners (%d)" % main.runners.size())

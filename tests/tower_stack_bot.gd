@@ -233,7 +233,7 @@ func _checks() -> void:
 		kit.assert_true(saw_results, "client: saw the results")
 		return
 	if mode == "local":
-		kit.assert_eq(main.party.player_count(), kit.seated_want(want), "local: all %d TV players are seated" % want)
+		kit.assert_eq(kit.seated(), kit.seated_want(want), "local: all %d TV players are seated" % want)
 	if main.flat_host:
 		kit.assert_true(main.party.is_local(0) and main.avatars.has(0) and main.cams.has(0), "flat host: slot 0 plays here with a camera")
 	if want > 0 and mode == "local" or mode == "host":
