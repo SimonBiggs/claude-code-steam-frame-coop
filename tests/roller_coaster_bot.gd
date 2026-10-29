@@ -6,6 +6,7 @@ extends Node
 ## pull a hill, drop a star, plop a guest into a car, poke a tree, push the lever, ride along and stop).
 ## Local:     godot --headless --path . --fixed-fps 60 --quit-after 4800 res://tests/roller_coaster_bot.tscn
 ## Networked: DUO_PORT=8190 DUO_HOST=1 ... & DUO_PORT=8190 DUO_JOIN=127.0.0.1 ... (same scene, real time)
+## Flat host: add DUO_FLAT_HOST=1 to the host (no VR: one bot pad builds in slot 0, any number of machines join).
 
 const BotKit := preload("res://tests/bot_kit.gd")
 const VrRig := preload("res://core/vr_rig.gd")
@@ -38,13 +39,14 @@ func _ready() -> void:
 	var client := OS.has_environment("DUO_JOIN")
 	var host := OS.has_environment("DUO_HOST")
 	var vr := OS.has_environment("BOT_VR")
+	var flat := host and OS.has_environment("DUO_FLAT_HOST")  # a flat host: P1 builds with a pad, like local play
 	var t0 := 3.0 if client else 1.0
 	kit.at(t0, "%d TV players press A" % want, _join)
-	if host or client:
+	if (host or client) and not flat:
 		kit.at(62.0 if client else 70.0, "finish", func() -> void:
 			_checks()
 			kit.finish())
-	elif vr:
+	elif vr and not flat:
 		kit.at(2.0, "fake VR: the builder does the practice with its hands", func() -> void:
 			for t in ["straight", "left", "up"]:
 				tasks.append(["piece", t])
@@ -327,7 +329,7 @@ func _story_checks(mode: String) -> void:
 		return
 	kit.assert_true(main.save != null and int(main.plan.get("seed", 0)) > 0, "%s: a seeded plan" % mode)
 	kit.assert_true(int(main.save.data.rides) >= 1, "%s: rides are saved" % mode)
-	if mode == "local" and main.vr_rig == null:
-		kit.assert_true(int(main.net.state_get("tickets", 0)) >= 1, "local: the finished plan earned a golden ticket")
-	if mode == "host" and main.vr_rig == null:
+	if main._pad_builds():
+		kit.assert_true(int(main.net.state_get("tickets", 0)) >= 1, "%s: the finished plan earned a golden ticket" % mode)
+	if mode == "host" and main.vr_rig == null and not main.flat_host:
 		kit.assert_true(int(main.save.data.plans) >= 1, "host: the demo builder followed a plan to the end")
