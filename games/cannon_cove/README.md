@@ -23,6 +23,20 @@ Pirate co-op: one VR gunner on a Steam Frame plus 1–6 deckhands on the TV (spl
 - Off: treasure ship, supply barrels, streak / double-sink / chain bonuses, gold numbers, parrot speech
   bubbles, crew awards. Game over ("OH NO!") sets sail again by itself after 7 s.
 
+**Polly's story (story + depth):** Polly the parrot tells it on picture cards (`story_pictures.gd`: parrot, doubloon,
+pearl, anchor, starfish, bunting, treasuremap; the Kraken's crown is Dragon Rider's "crown"). Every wave cleared puts a
+TREASURE on the shelf on top of the stern castle (a gold coin for ship waves, a pearl for the leak wave, an anchor for
+the boarders, a starfish for the sea monster, the Kraken's crown; the newest 13 stay, saved in `user://saves/cannon_cove`),
+a string of flags down the stay from the main mast grows a flag every play-day, and once the crew has beaten the
+Kraken Polly wears a little gold crown for good. **Seeded voyages** (`voyagegen.gd`): every wave's plan (which ships,
+tentacles and the Kraken, their order, side, approach angle, orbit and first shot) comes from the voyage seed;
+`tests/cannon_cove_gen_test.gd` proves over many seeds, both modes and crews of 1-6 that every wave is fair (one new
+thing per wave, a ship to shoot first, wave 1 on the gunner's side, everything inside the cannons' swing and range)
+and that waves 1-5 never get calmer. **TODAY'S VOYAGE:** the first voyage each day uses the day's seed (the same on
+every machine) and its treasures are golden. `CC_SEED=n` forces a seed. Telemetry: a RUN line per wave cleared, the
+Kraken beaten, the ship sinking and on quit. Networked: the host sends "treasures" and "story" events (TV machines
+show the shelf, flags, crown and cards); ships are snapshots as before.
+
 **The voyage:** target practice (while the TV crew joins), then five waves and the KRAKEN:
 1. CALM SEAS – two slow pirate ships that barely shoot (no boarders): learn the ropes.
 2. RAIDERS! – raiders swing boarders over on ropes.
@@ -69,6 +83,7 @@ The sky changes through the voyage (sunset, dusk, storm, night, dawn after the K
   barrels, a golden sea-dragon figurehead and glowing portholes. Islands, rocks, clouds and stars are
   MultiMeshes, so the scene has fewer draw calls than before.
 
+Generator test: `godot-test --headless --path . -s res://tests/cannon_cove_gen_test.gd` (SEEDS=500 for more).
 Test: `godot --headless --path . --fixed-fps 60 --quit-after 9000 res://tests/cannon_cove_bot.tscn`
 (`BOT_PLAYERS=6` brings six deckhands aboard; `CC_BOT_RANGE=24` makes the bot gunner wait for close range,
 which brings boarders and leaks into play; `CC_START_WAVE=6` skips to the Kraken; `CC_FAKE_VR=1` (or `BOT_VR=1`) runs the real
