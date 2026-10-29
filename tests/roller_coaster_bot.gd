@@ -42,11 +42,11 @@ func _ready() -> void:
 	var flat := host and OS.has_environment("DUO_FLAT_HOST")  # a flat host: P1 builds with a pad, like local play
 	var t0 := 3.0 if client else 1.0
 	kit.at(t0, "%d TV players press A" % want, _join)
-	if (host or client) and not flat:
+	if client or (host and not flat and not vr):
 		kit.at(62.0 if client else 70.0, "finish", func() -> void:
 			_checks()
 			kit.finish())
-	elif vr and not flat:
+	elif vr and not flat:  # local, or a VR host (the TV machines ride)
 		kit.at(2.0, "fake VR: the builder does the practice with its hands", func() -> void:
 			for t in ["straight", "left", "up"]:
 				tasks.append(["piece", t])
@@ -270,7 +270,8 @@ func _touch(rig: VrRig, task: Array, at: Vector3, cond: Callable, msg: String, d
 	if task.size() == 1:
 		if _reach(rig, VrRig.LEFT, at, delta):
 			task.append(task_t)
-	elif task_t - float(task[1]) > 0.2:
+			task.append(Engine.get_process_frames())
+	elif task_t - float(task[1]) > 0.2 and Engine.get_process_frames() - int(task[2]) >= 3:  # real-time runs: the game's _process must see it
 		_away(rig)
 		_done_later(cond, msg)
 
