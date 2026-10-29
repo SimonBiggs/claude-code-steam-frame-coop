@@ -385,6 +385,16 @@ func _final_checks(mode: String) -> void:
 			gs += " P%d %d/%d" % [p.index + 1, int(p.hits), int(p.hits) + int(p.misses)]
 	print("BOT CHECK %s: practice seen %s, songs %d, menus %d, star power %d -> %s" % [mode, checks.has("practice_seen"), songs_done,
 		menus_seen, stars_used, "PASS" if checks.has("practice_seen") and menus_seen == 0 and stars_used == 0 else "FAIL"])
+	# Story + fan club: every machine shows Doodle's cards and the host's fans (one per finished song).
+	var want_fans: int = (main.net.state_get("fans", []) as Array).size()
+	var shown: int = main.fan_club.fans.size()
+	var pics_ok := true
+	for pic in main.story_shown:
+		pics_ok = pics_ok and main.StoryCard.has_picture(pic)
+	var story_ok: bool = want_fans >= mini(songs_done, main.SongGen.FAN_KEEP) and shown == mini(want_fans, main.SongGen.FAN_SLOTS) \
+		and main.story_shown.size() >= songs_done and pics_ok and main.fan_club.doodle != null
+	print("BOT CHECK story %s: fans shown %d of %d, story cards %s -> %s" % [mode, shown, want_fans, str(main.story_shown),
+		"PASS" if story_ok else "FAIL"])
 	print("BOT %s: last song drums %d/%d%s" % [mode, int(d.hits), int(d.hits) + int(d.misses), gs])
 
 

@@ -39,9 +39,9 @@ extends Node3D
 ##
 ## STORY + DEPTH (games/rhythm_band/songgen.gd, fans.gd, story_pictures.gd): every song is generated from a
 ## seed (name, tempo, key, chords, style, charts), the show gets gently harder song by song, and
-## tests/rhythm_band_gen_test.gd proves every song is playable by small kids. DOODLE the frog sings on the
-## left speaker stack and tells the story on picture cards; each finished song brings a new animal fan
-## to the FAN CLUB stands beside the stage (saved, user://saves/rhythm_band; fans grow each day played).
+## tests/rhythm_band_gen_test.gd proves every song is playable by small kids. DOODLE the frog sings on top of the
+## RHYTHM BAND sign and tells the story on picture cards; each finished song brings a new animal fan
+## to the FAN CLUB ledge over the LED wall (saved, user://saves/rhythm_band; fans grow each day played).
 ## TODAY'S SONG: the second song of the day's first show is the same gold song on every machine. One
 ## telemetry RUN line per song and on quit. Networked: the host sends one int song code per song (the
 ## snapshot's song + setlist) and the fan club as replicated state ("fans", "days"); story cards are
@@ -184,6 +184,7 @@ var story_queue: Array = []  # [line, pic, color] waiting to show
 var story_t := 0.0
 var song_live := false  # host: a song is being played (a RUN line is due)
 var songs_played := 0  # this session
+var story_shown: Array[String] = []  # pictures of the story cards shown (bots check them)
 
 
 func _ready() -> void:
@@ -2144,6 +2145,7 @@ func _update_story(delta: float) -> void:
 		return
 	var b: Array = story_queue.pop_front()
 	story_t = 2.6
+	story_shown.append(str(b[1]))
 	var opts := {"who": "DOODLE", "line": b[0], "pic": b[1], "color": b[2], "duration": 2.5}
 	var huds: Array = []
 	for p in players:

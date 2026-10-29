@@ -106,12 +106,14 @@ func _init() -> void:
 	_expect(G.daily_seed("2026-10-29") != G.daily_seed("2026-10-30"), "a new TODAY'S SONG each day")
 	_expect(not G.daily_of(G.code_at(77, 0, true)) and not G.daily_of(G.code_at(77, 2, true)), "only one TODAY'S SONG per show")
 	_expect(not G.daily_of(G.code_at(77, G.DAILY_POS, false)), "no TODAY'S SONG once it's done")
-	# The fan club: room for every fan, beside the stage (never on it or in the crowd), facing in.
+	# The fan club: room for every fan on the ledges behind the band (over the LED wall, clear of the sign
+	# and of Doodle), so every TV view sees them.
 	var spots: Array = []
 	for i in G.FAN_SLOTS:
 		var at := G.fan_slot(i)
-		_expect(absf(at.x) > 4.95, "fan spot %d stands beside the stage (%s)" % [i, str(at)])
-		_expect(at.z > -2.7 and at.z < 0.5, "fan spot %d is level with the stage, not in the crowd (%s)" % [i, str(at)])
+		_expect(absf(at.x) < 4.6 and at.z > 2.5 and at.z < 3.15 and at.y >= G.LEDGE_Y, "fan spot %d is on a ledge behind the band (%s)" % [i, str(at)])
+		_expect(at.y < G.HIGH_Y - 0.1 or absf(at.x) > G.SIGN_HALF + 0.2, "fan spot %d is clear of the sign (%s)" % [i, str(at)])
+		_expect(at.distance_to(G.DOODLE_POS) > 0.6, "fan spot %d leaves Doodle room" % i)
 		for o in spots:
 			_expect((o as Vector3).distance_to(at) > 0.55, "fan spot %d has room" % i)
 		spots.append(at)

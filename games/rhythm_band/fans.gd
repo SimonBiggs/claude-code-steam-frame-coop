@@ -1,6 +1,6 @@
 extends Node3D
-## The story you can see: DOODLE the frog singing on top of the left speaker stack, and the FAN CLUB
-## stands left and right of the stage, where every song the band finishes brings a new animal fan
+## The story you can see: DOODLE the frog singing on top of the RHYTHM BAND sign, and
+## the FAN CLUB on the ledge over the LED wall behind the band and the high ledges by the sign, where every song the band finishes brings a new animal fan
 ## (saved; songgen.gd fan_slot / fan_stage). Fans grow a little each day the family plays (a glow stick
 ## at full size); fans from TODAY'S SONG are golden with a crown. Everyone bounces on the beat.
 ## Cheap: each fan is one merged mesh (mesh_kit.gd); a few dozen nodes moved per frame at most.
@@ -38,17 +38,18 @@ func build() -> void:
 	_build_doodle()
 
 
-## The two FAN CLUB stands: three steps each, beside the stage.
+## The FAN CLUB ledges: one along the top of the LED wall, two high ones beside the sign.
 func _build_stands() -> void:
 	var parts: Array = []
 	var wood := Color(0.32, 0.22, 0.4)
+	parts.append([MeshKit.box(Vector3(9.0, 0.08, 0.5)), MeshKit.at(Vector3(0.0, G.LEDGE_Y - 0.04, G.LEDGE_Z + 0.02)), wood])
+	parts.append([MeshKit.box(Vector3(9.02, 0.04, 0.04)), MeshKit.at(Vector3(0.0, G.LEDGE_Y - 0.03, G.LEDGE_Z - 0.24)), Color(1.0, 0.45, 0.8)])
 	for side in [-1.0, 1.0]:
 		var sd: float = side
-		for row in 3:
-			var x := sd * (G.STAND_X + row * G.ROW_STEP.x)
-			var h := 0.25 + row * G.ROW_STEP.y
-			parts.append([MeshKit.box(Vector3(G.ROW_STEP.x, h, 3.2)), MeshKit.at(Vector3(x, h * 0.5, -1.27)), wood.lightened(0.08 * row)])
-			parts.append([MeshKit.box(Vector3(G.ROW_STEP.x + 0.02, 0.04, 3.22)), MeshKit.at(Vector3(x, h, -1.27)), Color(1.0, 0.45, 0.8) if row % 2 == 0 else Color(0.4, 0.8, 1.0)])
+		var x := sd * (G.SIGN_HALF + 0.95)
+		parts.append([MeshKit.box(Vector3(1.9, 0.08, 0.5)), MeshKit.at(Vector3(x, G.HIGH_Y - 0.04, G.LEDGE_Z + 0.02)), wood.lightened(0.1)])
+		parts.append([MeshKit.box(Vector3(1.92, 0.04, 0.04)), MeshKit.at(Vector3(x, G.HIGH_Y - 0.03, G.LEDGE_Z - 0.24)), Color(0.4, 0.8, 1.0)])
+	parts.append([MeshKit.box(Vector3(0.9, 0.06, 0.45)), MeshKit.at(G.DOODLE_POS + Vector3(0, -0.03, 0)), Color(1.0, 0.8, 0.25)])  # Doodle's perch
 	stands = MeshInstance3D.new()
 	stands.mesh = MeshKit.merge(parts)
 	stands.material_override = MeshKit.vertex_material(main.mats)
@@ -56,12 +57,12 @@ func _build_stands() -> void:
 	add_child(stands)
 
 
-## Doodle: a round green frog with a bow tie and a microphone, on the left speaker stack.
+## Doodle: a round green frog with a bow tie and a microphone, on his perch on top of the sign.
 func _build_doodle() -> void:
 	doodle = Node3D.new()
 	doodle.name = "Doodle"
 	doodle.position = G.DOODLE_POS
-	doodle.rotation.y = PI + 0.5  # face the crowd, turned a little to the middle
+	doodle.rotation.y = PI  # face the crowd
 	add_child(doodle)
 	var green := Color(0.35, 0.8, 0.3)
 	var parts: Array = [
@@ -121,7 +122,7 @@ func set_fans(list: Array, days: int) -> void:
 		var stage_n := G.fan_stage(int(e[1]), days)
 		var f := _fan(G.FAN_KINDS[posmod(int(e[0]), G.FAN_KINDS.size())], stage_n, bool(e[2]) if e.size() > 2 else false, i)
 		f.position = at
-		f.rotation.y = -PI * 0.5 * signf(at.x) + (at.z + 1.2) * 0.25 * signf(at.x)  # face the stage
+		f.rotation.y = PI + at.x * 0.06  # face the crowd, turned a little to the middle
 		add_child(f)
 		fans.append(f)
 		fan_base.append(at.y)

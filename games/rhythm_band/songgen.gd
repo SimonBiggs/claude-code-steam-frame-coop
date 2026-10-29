@@ -5,8 +5,8 @@ extends RefCounted
 ##   var d := SongGen.song(seed, level, daily)   # {seed, level, daily, code, name, bpm, key, prog, style, busy}
 ##   var s := SongGen.build(code, pos)           # the Song (song.gd) for show position pos (0 = warm-up)
 ##   SongGen.check(code, pos) -> Array of reasons (empty = a small kid can play it)
-## Story: DOODLE the frog sings with the band from the top of the speaker stack. Every song the band
-## finishes brings a new animal FAN to the FAN CLUB stands beside the stage (saved): fans grow a little
+## Story: DOODLE the frog sings with the band from a perch on top of the RHYTHM BAND sign. Every song the band
+## finishes brings a new animal FAN to the FAN CLUB ledges beside Doodle (saved): fans grow a little
 ## each day the family plays, and the TODAY'S SONG fans are golden. TODAY'S SONG: the second song of the
 ## first show each day (after the two-lane warm-up) is the same song on every machine all day.
 ## The show gets gently harder song by song (level_for(pos)): faster tempos, busier drums, more styles.
@@ -61,13 +61,14 @@ const MAX_SECS: Array[float] = [52.0, 60.0, 70.0, 80.0]  # a song is never longe
 
 # --- Fan club (the growth that stays) ---
 const FAN_KINDS: Array[String] = ["bunny", "puppy", "penguin", "polarbear", "toucan", "sheep"]
-const FAN_SLOTS := 24  # two stands of three rows of four
+const FAN_SLOTS := 18  # 12 on the ledge over the LED wall, 6 on the high ledges beside the sign
 const FAN_KEEP := 24
 const FAN_STAGES := 3  # fans grow a stage a day: 0 little, 1, 2 big with a glow stick
-const STAND_X := 5.35  # == stage.gd edge 4.7 + a gap
-const ROW_STEP := Vector2(0.62, 0.36)  # each row further out and higher
-const SEAT_Z: Array[float] = [-2.4, -1.65, -0.9, -0.15]
-const DOODLE_POS := Vector3(-4.3, 3.05, -1.6)  # on top of the left speaker stack (stage.gd)
+const LEDGE_Y := 2.98  # == the LED wall's top (stage.gd: 1.05 + 6 * 0.29 + 0.14)
+const HIGH_Y := 3.75  # the high ledges, under the RHYTHM BAND sign's ends
+const LEDGE_Z := 2.92  # just in front of the LED wall (z 3.18)
+const SIGN_HALF := 2.75  # the RHYTHM BAND sign spans x -2.75..2.75 above HIGH_Y
+const DOODLE_POS := Vector3(0.0, 5.0, 2.95)  # on a perch on top of the RHYTHM BAND sign (above every TV highway)
 
 
 static func code_of(seed_value: int, level: int, daily: bool) -> int:
@@ -177,16 +178,17 @@ static func fan_kind(code: int, fans_total: int) -> int:
 	return (Seeded.rng(seed_of(code), "fan%d" % fans_total).randi() + fans_total) % FAN_KINDS.size()
 
 
-## Where fan number i stands: the FAN CLUB stands left and right of the stage, three rows each, the front
-## rows filling first. Returns the position (Vector3.INF past the end).
+## Where fan number i stands: on the ledge over the LED wall behind the band (seen from every TV view),
+## filling outwards from the middle, left and right in turn, then the high ledges beside the
+## sign. Returns the position (Vector3.INF past the end).
 static func fan_slot(i: int) -> Vector3:
 	if i < 0 or i >= FAN_SLOTS:
 		return Vector3.INF
 	var side := -1.0 if i % 2 == 0 else 1.0
 	var k := i / 2
-	var row := k / SEAT_Z.size()
-	var seat := k % SEAT_Z.size()
-	return Vector3(side * (STAND_X + row * ROW_STEP.x), 0.25 + row * ROW_STEP.y, SEAT_Z[seat])
+	if k < 6:
+		return Vector3(side * (0.42 + k * 0.68), LEDGE_Y, LEDGE_Z)
+	return Vector3(side * (3.05 + (k - 6) * 0.62), HIGH_Y, LEDGE_Z)
 
 
 ## A fan's size stage: one more for each day the family has played since it joined.
