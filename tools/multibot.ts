@@ -12,7 +12,10 @@
 //   this repo)  --env K=V (every machine)  --host-env K=V  --join-env K=V  --stagger MS (between starts, default 1500)
 //   --json (machine-readable result on the last line)  --copies (each machine runs its OWN copy of the project, in
 //   /tmp/multibot-<port>/p<k>, like real machines: a bot may change files in it to simulate a deploy reaching that
-//   machine; env BOT_OWN_COPY=1 tells the bot it may)
+//   machine; env BOT_OWN_COPY=1 tells the bot it may)  --late S (the LAST joiner starts S seconds after the others: a
+//   machine joining a game already running; it gets BOT_LATE=S and a deadline S shorter, so it still leaves before
+//   the host)  --expect-late KIND,KIND (default with --late: story) the late joiner must catch up on these sticky
+//   events (core/net.gd sticky_event: "Net: got <kind> <ms> ms after joining" within 4 s), or it FAILs
 //
 // What each machine gets (env): DUO_PORT (shared), DUO_HOST=1 (machine 0) or DUO_JOIN=127.0.0.1 (the rest),
 // BOT_MACHINE=k (0 = host), BOT_MACHINES=N+1, BOT_GROUP_T0=<unix ms> (a shared clock: every machine has been started
@@ -80,7 +83,22 @@ async function waitForMemory(gb: number) {
 }
 
 export type GroupOpts = { scene: string; joiners?: number; seconds?: number; project?: string; env?: Record<string, string>;
-  hostEnv?: Record<string, string>; joinEnv?: Record<string, string>; stagger?: number; quiet?: boolean; copies?: boolean };
+  hostEnv?: Record<string, string>; joinEnv?: Record<string, string>; stagger?: number; quiet?: boolean; copies?: boolean;
+  late?: number; expectLate?: string[] };
+
+/** A machine that joins late must get each expected sticky event (core/net.gd) this soon after joining. */
+export const LATE_CATCHUP_MS = 4000;
+/** Why a late joiner's log fails the catch-up check (empty: it passed). */
+export function lateCheck(out: string, kinds: string[]): string[] {
+  if (!/Net: joined the host/.test(out)) return ["late joiner never joined the host"];
+  const bad: string[] = [];
+  for (const k of kinds) {
+    const ms = out.match(new RegExp(`Net: got ${k} (-?\\d+) ms after joining`))?.[1];
+    if (ms === undefined) bad.push(`late joiner never got the "${k}" event (sticky replay, core/net.gd)`);
+    else if (Number(ms) > LATE_CATCHUP_MS) bad.push(`late joiner got "${k}" only ${ms} ms after joining (a re-send, not the join replay)`);
+  }
+  return bad;
+}
 
 export async function runGroup(o: GroupOpts): Promise<GroupResult> {
   const joiners = Math.max(1, Math.min(6, o.joiners ?? 3));
@@ -94,18 +112,25 @@ export async function runGroup(o: GroupOpts): Promise<GroupResult> {
   const dir = `/tmp/multibot-${port}`;
   await mkdir(dir, { recursive: true });
   const t0 = Date.now() + joiners * stagger + 5000;
-  const names = ["host", ...Array.from({ length: joiners }, (_, i) => `join${i + 1}`)];
+  const late = Math.max(0, o.late ?? 0);
+  const seconds = o.seconds ?? 180;
+  if (late && seconds - late < 60) throw new Error(`--late ${late} leaves the late joiner under 60 s of its --seconds ${seconds}`);
+  const expectLate = late ? (o.expectLate?.length ? o.expectLate : ["story"]) : [];
+  const names = ["host", ...Array.from({ length: joiners }, (_, i) => `join${i + 1}${late && i + 1 === joiners ? "(late)" : ""}`)];
   const log = (s: string) => { if (!o.quiet) console.error(s); };
   log(`multibot: ${scene}, host + ${joiners} on DUO_PORT ${port}, logs in ${dir}`);
   const runs: Promise<MachineResult>[] = [];
   for (let k = 0; k <= joiners; k++) {
     if (k > 0) await Bun.sleep(stagger);
+    const isLate = late > 0 && k === joiners;
+    if (isLate) { log(`multibot: join${k} joins ${late} s late`); await Bun.sleep(late * 1000); }
+    const mySeconds = isLate ? seconds - late : seconds;
     const data = join(dir, `m${k}`);
     await mkdir(data, { recursive: true });
     const env: Record<string, string> = {
       ...(process.env as Record<string, string>), DUO_MACHINE_KIND: "tv", ...o.env, ...(k === 0 ? o.hostEnv : o.joinEnv),
-      DUO_PORT: String(port), BOT_DEADLINE: String(o.seconds ?? 180), BOT_MACHINE: String(k), BOT_MACHINES: String(joiners + 1), BOT_GROUP_T0: String(t0),
-      XDG_DATA_HOME: data,
+      DUO_PORT: String(port), BOT_DEADLINE: String(mySeconds), BOT_MACHINE: String(k), BOT_MACHINES: String(joiners + 1), BOT_GROUP_T0: String(t0),
+      XDG_DATA_HOME: data, ...(isLate ? { BOT_LATE: String(late) } : {}),
     };
     delete env.DUO_SOLO;
     if (k === 0) { env.DUO_HOST = "1"; delete env.DUO_JOIN; } else { env.DUO_JOIN = "127.0.0.1"; delete env.DUO_HOST; }
@@ -118,13 +143,18 @@ export async function runGroup(o: GroupOpts): Promise<GroupResult> {
       env.BOT_OWN_COPY = "1";
     }
     runs.push(new Promise(res => {
-      const p = spawn("timeout", [String(o.seconds ?? 180), "godot-test", "--headless", "--path", path, scene], { env, cwd: path });  // never a deleted cwd
+      const p = spawn("timeout", [String(mySeconds), "godot-test", "--headless", "--path", path, scene], { env, cwd: path });  // never a deleted cwd
       let out = "";
       p.stdout.on("data", d => { out += d; });
       p.stderr.on("data", d => { out += d; });
       p.on("close", async code => {
         await writeFile(file, out);
         const v = verdict(out, code ?? 1);
+        if (isLate) {
+          const bad = lateCheck(out, expectLate);
+          if (bad.length) { v.pass = false; v.failed.push(...bad); v.result += " (late-join catch-up FAILED)"; }
+          else v.result += ` (late join: got ${expectLate.join(", ")})`;
+        }
         const agree: Record<string, string> = {};
         for (const m of out.matchAll(/^BOT AGREE (\S+?)=(.*)$/gm)) agree[m[1]] = m[2].trim();
         log(`multibot: ${names[k]} ${v.pass ? "ok" : "FAIL"} (${v.result})`);
@@ -164,6 +194,8 @@ if (import.meta.main) {
     else if (x === "--join-env") kv(a[++i], o.joinEnv!);
     else if (x === "--json") json = true;
     else if (x === "--copies") o.copies = true;
+    else if (x === "--late") o.late = Number(a[++i]);
+    else if (x === "--expect-late") o.expectLate = a[++i].split(",").filter(Boolean);
     else if (x === "-h" || x === "--help") { console.log((await readFile(import.meta.path, "utf8")).split("\nimport")[0]); process.exit(0); }
     else o.scene = x;
   }
