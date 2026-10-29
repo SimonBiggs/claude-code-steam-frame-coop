@@ -50,6 +50,14 @@ const MusicScript := preload("res://core/music.gd")
 const JoinInputScript := preload("res://games/ghost_lantern/join_input.gd")
 const DirectorScript := preload("res://games/ghost_lantern/director.gd")
 const UiKit := preload("res://core/ui_kit.gd")
+const HouseGen := preload("res://games/ghost_lantern/housegen.gd")
+const HouseScript := preload("res://games/ghost_lantern/house.gd")
+const MuseumScript := preload("res://games/ghost_lantern/museum.gd")
+const Save := preload("res://core/save.gd")
+const Seeded := preload("res://core/seeded.gd")
+const Telemetry := preload("res://core/telemetry.gd")
+const StoryCard := preload("res://core/story_card.gd")
+const GAME_ID := "ghost_lantern"
 
 ## Survive night 6 to see the sunrise (then bonus nights). Nights 3 and 6 bring the GHOST KING.
 const FINAL_NIGHT := 6
@@ -88,7 +96,7 @@ const BEST_FILE := "user://ghost_lantern_best.cfg"
 const PHOTO_SPOTS := [
 	[Vector3(-18.0, 2.0, 7.82), PI], [Vector3(-14.0, 2.0, 7.82), PI], [Vector3(-10.0, 2.1, 7.82), PI],
 	[Vector3(-7.18, 2.0, 5.0), -PI / 2.0],
-	[Vector3(0.0, 2.3, -7.82), 0.0], [Vector3(-4.2, 2.0, 7.82), PI], [Vector3(4.2, 2.0, 7.82), PI],
+	[Vector3(0.0, 3.0, -7.82), 0.0], [Vector3(-4.2, 2.0, 7.82), PI], [Vector3(4.2, 2.0, 7.82), PI],
 	[Vector3(10.0, 2.0, 7.82), PI], [Vector3(14.0, 2.2, 7.82), PI], [Vector3(18.0, 2.0, 7.82), PI],
 	[Vector3(20.82, 2.0, -3.0), -PI / 2.0], [Vector3(20.82, 2.0, 3.0), -PI / 2.0],
 ]
@@ -205,6 +213,18 @@ var tv_caught := {}  # player index -> true once they vacuumed a ghost
 var tv_catches := {}  # player index -> ghosts vacuumed (mirrored: the picture cue goes after two)
 var practice_arrow: MeshInstance3D  # simple mode: a glowing arrow above the sleepy practice ghost
 var join_cue: Control  # simple mode: pulsing A + a person (a spare controller can join)
+# Granny Boo's house (housegen.gd, house.gd, museum.gd). The host owns the save; every machine rebuilds
+# the house from house_key = [seed, level, daily, kept, jars] in the snapshot.
+var save: Save
+var house := {}
+var house_key: Array = []
+var house_node: Node3D
+var museum: Node3D
+var vr_story: Node3D
+var night_stats := {}  # this night: ghosts planned, caught, floated, found (lantern / bump / self), seconds
+var night_live := false  # a night is being played (for the quit RUN line)
+var night_time := 0.0  # seconds played tonight (game time)
+var story_count := 0  # story cards shown (the bot checks Granny Boo speaks)
 
 
 func _ready() -> void:
@@ -213,6 +233,23 @@ func _ready() -> void:
 	candles = built.candles
 	anims = built.anim
 	world_refs = built
+	save = Save.new()
+	save.game_id = GAME_ID
+	save.defaults = {"world": -1, "houses": 0, "kept": 0, "jars": {}, "daily": {}, "best_night": 0, "nights": 0}
+	add_child(save)
+	if int(save.data.world) < 0:
+		save.data.world = Seeded.fresh_seed()  # this family's own houses
+		save.mark_dirty()
+	house_node = HouseScript.new()
+	house_node.main = self
+	house_node.name = "House"
+	add_child(house_node)
+	museum = MuseumScript.new()
+	museum.main = self
+	if SIMPLE_MODE:
+		museum.kept = int(save.data.kept)
+		museum.jars = (save.data.jars as Dictionary).duplicate()
+		add_child(museum)
 	_build_photos()
 	_build_hud()
 	if SIMPLE_MODE:
@@ -260,6 +297,8 @@ func _setup_game(mode: String) -> void:
 		players[1].set_meta(ClassicSeats.WANT, true)  # ask the host for P2's seat (it may hand out another one)
 	ready_to_play = true
 	_restore_party()
+	if SIMPLE_MODE and mode != "client":
+		_new_house()
 	if SIMPLE_MODE:
 		_show_center("GHOST LANTERN", 3.0, false)
 		help_label.text = ""
@@ -1124,6 +1163,8 @@ func capture_ghost(g, by) -> void:
 		tv_caught[by.index] = true
 		tv_catches[by.index] = int(tv_catches.get(by.index, 0)) + 1
 	g.drop_photo(by)
+	if SIMPLE_MODE and g.kind in HouseGen.GHOSTS and net.mode != "client":
+		_keep_ghost(g.kind)
 	if g.kind == "sleepy":
 		vr_woken += 1
 		vr_ghost_t = 1.0
@@ -1156,10 +1197,17 @@ func _remove_ghost(g) -> void:
 
 # --- Ghosts & photos (host) --------------------------------------------------
 
-func _spawn_ghost(kind: String):
+func _spawn_ghost(kind: String, hide: int = -1):
 	var g := GhostScript.new()
 	g.setup(kind, night, self)
 	g.net_id = next_net_id()
+	if hide >= 0 and house_node != null and hide < house_node.count():
+		g.position = house_node.hide_point(hide)
+		add_child(g)
+		g.start_hiding(hide, HouseGen.WAKE_MAX if kind == "snoozy" else randf_range(4.0, HouseGen.PEEK_MAX))
+		ghost_by_id[g.net_id] = g
+		director().on_ghost_spawned(kind)
+		return g
 	var pos := Vector3.ZERO
 	var best := -1.0
 	for attempt in 4:
@@ -1465,6 +1513,8 @@ func _process(delta: float) -> void:
 			director().howto()  # the lantern-bearer reads how to play while waiting
 		return  # hold the nights until a TV player joins
 	_update_vacuums(delta)
+	if not in_break:
+		night_time += delta
 	if SIMPLE_MODE:
 		_update_ghost_hand(delta)
 		if practice:
@@ -1483,7 +1533,7 @@ func _process(delta: float) -> void:
 	elif not to_spawn.is_empty():
 		spawn_timer -= delta
 		var at_once := mini(2 + night / 2 + (crowd_bonus() + 1) / 2, 6) if SIMPLE_MODE else 3 + night + (crowd_bonus() + 1) / 2
-		if spawn_timer <= 0.0 and ghost_by_id.size() < at_once:
+		if spawn_timer <= 0.0 and _ghosts_about() < at_once:
 			_spawn_ghost(to_spawn.pop_back())
 			spawn_timer = maxf(2.0, 5.0 - night * 0.4) if SIMPLE_MODE else maxf(0.8, 3.0 - night * 0.25 - crowd_bonus() * 0.15)
 	elif ghost_by_id.is_empty() and king_t <= 0.0:
@@ -1729,6 +1779,8 @@ func _remember_party() -> void:
 func _exit_tree() -> void:
 	if net != null and net.mode == "client" and game_over:
 		_remember_party()
+	if net != null and SIMPLE_MODE and night_live:
+		_night_done("quit")
 
 
 func _restore_party() -> void:
@@ -1818,7 +1870,7 @@ func make_snapshot() -> Array:
 	var ph := []
 	for p in photos:
 		ph.append(p.state)
-	return [night, score, caught, saved, game_over, ps, gs, ph, in_break, director().pack(), practice, tv_caught.keys(), tv_catches]
+	return [night, score, caught, saved, game_over, ps, gs, ph, in_break, director().pack(), practice, tv_caught.keys(), tv_catches, house_key]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -1849,6 +1901,8 @@ func apply_snapshot(s: Array) -> void:
 		var tc: Dictionary = s[12]
 		for k in tc:
 			tv_catches[k] = int(tc[k])
+	if s.size() > 13 and (s[13] as Array).size() == 5:
+		_apply_house(s[13])
 
 
 func _sync_ghosts(list: Array) -> void:
@@ -1905,6 +1959,11 @@ func apply_event(kind: String, args: Array) -> void:
 		"prop":
 			if props != null:
 				props.play(args[0])
+		"story":
+			_show_story(args[0])
+		"shake":
+			if house_node != null:
+				house_node.shake(int(args[0]), float(args[1]))
 
 
 ## Lightning flashes, party lights and the sunrise (both machines).
@@ -1915,8 +1974,9 @@ func _update_mood() -> void:
 		var night_bg := Color(0.02, 0.01, 0.04)
 		var dawn_bg := Color(0.95, 0.6, 0.45)
 		e.background_color = night_bg.lerp(dawn_bg, d.dawn)
-		e.ambient_light_color = Color(0.42, 0.32, 0.6).lerp(Color(1.0, 0.82, 0.65), d.dawn)
-		e.ambient_light_energy = 0.55 + d.dawn * 0.6 + storm_flash * 1.4
+		var cosy: float = museum.warmth() if museum != null and museum.is_inside_tree() else 0.0
+		e.ambient_light_color = Color(0.42, 0.32, 0.6).lerp(Color(0.62, 0.48, 0.55), cosy * 0.7).lerp(Color(1.0, 0.82, 0.65), d.dawn)
+		e.ambient_light_energy = 0.55 + cosy * 0.25 + d.dawn * 0.6 + storm_flash * 1.4
 	var pane: StandardMaterial3D = world_refs.get("pane", null)
 	if pane != null:
 		var c := Color(0.55, 0.65, 1.0).lerp(Color(1.0, 0.65, 0.35), d.dawn)
@@ -2102,26 +2162,41 @@ func _start_simple_night() -> void:
 	night += 1
 	in_break = false
 	to_spawn = []
-	var bonus := crowd_bonus()
-	var plain := 3 if night == 1 else mini(2 + night / 2, 6)
-	for i in plain + bonus / 2:
-		to_spawn.append("plain")
-	if night >= 2:
-		for i in 2 if night == 2 else 1 + (night - 2) / 3:
-			to_spawn.append("sprite")
-	if night >= 3:
-		for i in 2 if night == 3 else 1 + (night - 3) / 3:
-			to_spawn.append("spooker")
-	if night >= 4:
-		to_spawn.append("golden")
-	to_spawn.shuffle()
+	if house.is_empty():
+		_new_house()
+	# Tonight's ghosts from the house (housegen.gd): hiding ones go straight into their hiding places,
+	# the rest drift in through the ceiling one by one.
+	var plan := HouseGen.night_plan(house, night, active_count())
+	var hidden := 0
+	for g in plan:
+		if int(g.hide) >= 0:
+			_spawn_ghost(String(g.kind), int(g.hide))
+			hidden += 1
+		else:
+			to_spawn.append(String(g.kind))
+	to_spawn.reverse()  # pop_back() takes them in plan order
 	spawn_timer = 1.5
-	var king_night := night % 5 == 0
+	var king_night := HouseGen.king_night(night)
 	king_t = 6.0 if king_night else -1.0
 	director().on_night_started(night, king_night)
 	sound("wave", -2.0, 0.7)
-	print("Night %d started (%d ghosts%s)" % [night, to_spawn.size(), ", KING" if king_night else ""])
+	night_stats = {"ghosts": plan.size() + (1 if king_night else 0), "hidden": hidden, "caught": 0, "floated": 0,
+		"lantern": 0, "bump": 0, "self": 0, "crew": active_count()}
+	night_time = 0.0
+	night_live = true
+	print("Night %d started (%d ghosts, %d hiding%s) in %s" % [night, plan.size(), hidden, ", KING" if king_night else "", HouseGen.room_for(house, night)])
 	_show_center("NIGHT %d" % night, 2.0)
+	var st := HouseGen.night_story(night)
+	_story({"who": "GRANNY BOO", "pic": st[0], "line": st[1], "color": _story_color(String(st[0])), "duration": 4.5})
+
+
+## Ghosts out and about (not hiding): the cap on how many float about at once.
+func _ghosts_about() -> int:
+	var n := 0
+	for g in ghost_by_id.values():
+		if is_instance_valid(g) and not g.hiding:
+			n += 1
+	return n
 
 
 func _end_simple_night() -> void:
@@ -2129,6 +2204,7 @@ func _end_simple_night() -> void:
 	break_timer = 5.0
 	director().on_night_ended()
 	print("Night %d done (caught %d)" % [night, caught])
+	_night_done("night")
 	if night == FINAL_NIGHT and not director().won:
 		director().won = true
 		break_timer = 10.0
@@ -2141,10 +2217,182 @@ func _end_simple_night() -> void:
 
 ## A ghost nobody caught: a giggle, a puff of sparkles, gone.
 func ghost_floated_away(g) -> void:
+	night_stats["floated"] = int(night_stats.get("floated", 0)) + 1
 	sound("giggle", -6.0, 0.9)
 	burst(g.global_position, g.color, 10, 0.06)
 	print("A %s ghost floated away" % g.kind)
 	_remove_ghost(g)
+
+
+# --- Granny Boo's house (housegen.gd, house.gd, museum.gd) --------------------------
+
+## Host / local: this visit's house. The first visit each day is TODAY'S HOUSE (the same everywhere),
+## then this family's own houses (world seed + houses visited, more hiding places as they go).
+func _new_house() -> void:
+	var sd: Dictionary = save.data
+	var today_due := not (sd.daily as Dictionary).has(Seeded.today()) and not OS.has_environment("BOT_NO_DAILY")
+	var level := int(sd.houses)
+	var seed_value: int
+	if OS.has_environment("GHOST_HOUSE"):
+		seed_value = int(OS.get_environment("GHOST_HOUSE"))
+		today_due = false
+	elif today_due:
+		seed_value = Seeded.daily_seed(GAME_ID)
+	else:
+		seed_value = Seeded.derive(int(sd.world), "house%d" % level)
+	sd.houses = level + 1
+	save.mark_dirty()
+	_apply_house([seed_value, level, today_due, int(sd.kept), _jar_list(sd.jars)])
+	var h := house.duplicate()
+	print("House: %s seed %d level %d%s, hiding places %s" % [h.name, seed_value, level, " (TODAY'S HOUSE)" if today_due else "",
+		",".join(PackedStringArray((h.spots as Array).map(func(s2: Dictionary) -> String: return "%s@%s" % [s2.kind, s2.room])))])
+	get_tree().create_timer(3.4).timeout.connect(func() -> void:
+		if is_inside_tree():
+			_story({"who": "GRANNY BOO", "pic": "grannyboo", "color": Color(1.0, 0.6, 0.75), "duration": 4.5,
+				"line": "Today's house!" if bool(house.get("daily", false)) else "Tidy my house, dears!"}))
+
+
+## Jar counts as a plain list in MuseumScript.KIND_ORDER (small and stable over the network).
+func _jar_list(j: Dictionary) -> Array:
+	var out: Array = []
+	for k in MuseumScript.KIND_ORDER:
+		out.append(int(j.get(k, 0)))
+	return out
+
+
+## Every machine: build the house from [seed, level, daily, kept, jars] (only what changed).
+func _apply_house(key: Array) -> void:
+	if key.size() != 5:
+		return
+	var same_house := house_key.size() == 5 and int(house_key[0]) == int(key[0]) and int(house_key[1]) == int(key[1]) and bool(house_key[2]) == bool(key[2])
+	var first := house_key.is_empty()
+	house_key = key.duplicate(true)
+	if not same_house:
+		house = HouseGen.generate(int(key[0]), {"level": int(key[1]), "daily": bool(key[2])})
+		house_node.build(house)
+	if museum != null and museum.is_inside_tree():
+		var j := {}
+		var arr: Array = key[4]
+		for i in mini(arr.size(), MuseumScript.KIND_ORDER.size()):
+			j[MuseumScript.KIND_ORDER[i]] = int(arr[i])
+		museum.apply(int(key[3]), j, first)
+
+
+## Host: a caught ghost goes into a jar on Granny Boo's shelf (saved); new kinds and cosy steps get a card.
+func _keep_ghost(kind: String) -> void:
+	var sd: Dictionary = save.data
+	var jars: Dictionary = sd.jars
+	var before := int(jars.get(kind, 0))
+	jars[kind] = before + 1
+	var lv_before := MuseumScript.cosy_level(int(sd.kept))
+	sd.kept = int(sd.kept) + 1
+	save.mark_dirty()
+	night_stats["caught"] = int(night_stats.get("caught", 0)) + 1
+	_apply_house([house_key[0], house_key[1], house_key[2], int(sd.kept), _jar_list(jars)] if house_key.size() == 5 else [0, 0, false, int(sd.kept), _jar_list(jars)])
+	if MuseumScript.cosy_level(int(sd.kept)) > lv_before:
+		sound("fanfare", -6.0, 1.2)
+		_story({"who": "GRANNY BOO", "pic": "grannyboo", "line": "My house is so cosy!", "color": Color(1.0, 0.8, 0.45), "duration": 4.0})
+	elif before == 0:
+		_story({"who": "GRANNY BOO", "pic": "jar", "line": "A new jar!", "color": _story_color(kind), "duration": 3.5})
+
+
+## Host: a hiding ghost came out (found by the lantern, bumped by a player, or it got bored).
+func ghost_came_out(g, how: String) -> void:
+	night_stats[how] = int(night_stats.get(how, 0)) + 1
+	if house_node != null:
+		house_node.shake(g.hide_spot, 0.8)
+		net.event("shake", [g.hide_spot, 0.8])
+	sound("giggle", -4.0, 1.1 if g.kind == "spooker" else 0.8)
+	burst(g.global_position, g.color, 14, 0.06)
+	print("A %s ghost came out of the %s (%s)" % [g.kind, house.spots[g.hide_spot].kind if not house.is_empty() else "?", how])
+
+
+## Host: a hiding place nobody is in or heading to (peekaboo goes back to hide), nearest first; -1 if none.
+func free_hideout(me) -> int:
+	if house_node == null or house_node.count() == 0:
+		return -1
+	var taken := {}
+	for g in ghost_by_id.values():
+		if is_instance_valid(g) and g != me:
+			if g.hiding:
+				taken[g.hide_spot] = true
+			if g.going_home >= 0:
+				taken[g.going_home] = true
+	var best := -1
+	var best_d := INF
+	for i in house_node.count():
+		if taken.has(i) or i == me.hide_spot:
+			continue
+		var d: float = house_node.hide_point(i).distance_to(me.global_position)
+		if d < best_d:
+			best_d = d
+			best = i
+	return best
+
+
+## Is any active player within `r` metres of `pos` (on the floor)?
+func player_near(pos: Vector3, r: float) -> bool:
+	for p in players:
+		if p.active and not p.ghost:
+			var d := Vector2(p.global_position.x - pos.x, p.global_position.z - pos.z)
+			if d.length() < r:
+				return true
+	return false
+
+
+## Host: one RUN line per night (and when a night is left half-played), and TODAY'S HOUSE / best night.
+func _night_done(end: String) -> void:
+	if not night_live or net.mode == "client":
+		return
+	night_live = false
+	var sd: Dictionary = save.data
+	if end == "night":
+		sd.nights = int(sd.nights) + 1
+		sd.best_night = maxi(int(sd.best_night), night)
+		if bool(house.get("daily", false)):
+			var dl: Dictionary = sd.daily
+			dl[Seeded.today()] = maxi(int(dl.get(Seeded.today(), 0)), night)
+		save.mark_dirty()
+	Telemetry.run(GAME_ID, {"end": end, "night": night, "seed": int(house.get("seed", 0)), "daily": bool(house.get("daily", false)),
+		"level": int(house.get("level", 0)), "crew": active_count(), "vr": players[0].vr if not players.is_empty() else false,
+		"ghosts": int(night_stats.get("ghosts", 0)), "hidden": int(night_stats.get("hidden", 0)),
+		"caught": int(night_stats.get("caught", 0)), "floated": int(night_stats.get("floated", 0)),
+		"found_lantern": int(night_stats.get("lantern", 0)), "found_bump": int(night_stats.get("bump", 0)),
+		"woke_alone": int(night_stats.get("self", 0)),
+		"secs": snappedf(night_time, 0.1),
+		"kept": int(sd.kept), "cosy": MuseumScript.cosy_level(int(sd.kept))})
+
+
+func _story_color(pic: String) -> Color:
+	match pic:
+		"snoozy": return Color(0.62, 0.78, 1.0)
+		"zippy", "sprite": return Color(1.0, 0.62, 0.9)
+		"peekaboo", "spooker": return Color(0.78, 0.58, 1.0)
+		"goldie", "golden", "sun": return Color(1.0, 0.85, 0.3)
+		"kingghost", "king": return Color(0.75, 0.9, 1.0)
+		"grannyboo": return Color(1.0, 0.6, 0.75)
+	return Color(0.6, 1.0, 0.75)
+
+
+## Host: a story card on every machine (Granny Boo with a picture and a few words).
+func _story(beat: Dictionary) -> void:
+	if net.mode == "client":
+		return
+	_show_story(beat)
+	net.event("story", [beat])
+
+
+func _show_story(beat: Dictionary) -> void:
+	story_count += 1
+	var huds: Array = []
+	for p in players:
+		if p.hud != null and is_instance_valid(p.hud) and _has_local_view(p) and p.active and not p.vr:
+			huds.append(p.hud)
+	StoryCard.show(huds, beat)
+	if not players.is_empty() and players[0].vr and players[0].xr_camera != null and net.mode != "client":
+		if vr_story != null and is_instance_valid(vr_story):
+			vr_story.queue_free()
+		vr_story = StoryCard.show_vr(self, players[0].xr_camera, beat)
 
 
 # --- HUD ---------------------------------------------------------------------

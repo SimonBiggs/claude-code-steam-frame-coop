@@ -216,6 +216,7 @@ static func build(main: Node3D) -> Dictionary:
 	floor_mi.name = "Floor"
 	box(root, Vector3(HALF_X * 2.0 + 1.0, 0.2, HALF_Z * 2.0 + 1.0), Vector3(0, WALL_H + 0.1, 0), mat(Color(0.09, 0.05, 0.11)), false)
 	var wall := shader_mat(WALL_SHADER)
+	out["wall"] = wall  # house.gd tints the wallpaper per house
 	box(root, Vector3(HALF_X * 2.0 + 0.6, WALL_H, 0.3), Vector3(0, WALL_H / 2.0, -HALF_Z - 0.15), wall)
 	box(root, Vector3(HALF_X * 2.0 + 0.6, WALL_H, 0.3), Vector3(0, WALL_H / 2.0, HALF_Z + 0.15), wall)
 	box(root, Vector3(0.3, WALL_H, HALF_Z * 2.0), Vector3(-HALF_X - 0.15, WALL_H / 2.0, 0), wall)
@@ -317,8 +318,8 @@ static func _hall(root: Node3D, out: Dictionary) -> void:
 	# Coat stand and pumpkins.
 	cyl(root, 0.04, 0.05, 1.8, Vector3(6.2, 0.9, 6.9), wood, 8)
 	ball(root, 0.2, Vector3(6.2, 1.75, 6.9), mat(Color(0.25, 0.1, 0.3)), 0.6)
-	_pumpkin(root, Vector3(-2.2, 0, -7.2))
-	_pumpkin(root, Vector3(2.2, 0, -7.2))
+	_pumpkin(root, Vector3(-5.3, 0, -7.3))
+	_pumpkin(root, Vector3(5.3, 0, -7.3))
 
 
 static func _library(root: Node3D, out: Dictionary) -> void:

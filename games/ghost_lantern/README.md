@@ -31,6 +31,25 @@ the friendly ghosts up and makes them dizzy; the TV players vacuum them.**
   twice. A glowing arrow bobs above the sleepy practice ghost for the lantern-bearer; "press A to join" is a
   pulsing A + a person; PAUSED has no sentence.
 
+## Granny Boo's house (simple mode: housegen.gd, house.gd, museum.gd)
+
+- **Seeded houses**: every visit is a new house with its own hiding places (wardrobes, trunks, big vases,
+  laundry baskets, curtains, plus the grandfather clock, piano and fireplace) and wallpaper. The first visit
+  each day is **TODAY'S HOUSE** (the same on every machine); later houses get more hiding places.
+- **Readable ghosts**: Wobble drifts about; **Snooze** (nightcap) sleeps in a hiding place - its eyes and
+  bubbles show and the furniture wobbles - until the lantern finds it, someone bumps it, or it wakes by itself
+  (30 s); **Zip** (bow) zooms, then stops for a dizzy rest; **Peekaboo** (witch hat) hides, pops out, hides
+  again; Goldie flies away from people; the Ghost King comes on night 5. Hidden ghosts sparkle after 10 s
+  and TV views get a glowing edge arrow to the nearest one.
+- **Granny Boo** (an old ghost with spectacles and a pink shawl) floats by her jar shelf in the hall and
+  tells the story with picture cards. Every caught ghost goes into a jar on her shelf (saved), and the
+  mansion gets cosier as ghosts are kept: fairy lights, a reading lamp, bunting, paper lanterns, glowing
+  windows, floating candles, rainbow lights.
+- **Validator** (`tests/ghost_lantern_gen_test.gd`): every hiding place inside its room and clear of
+  furniture, doors, windows and the start; every floor cell still reachable; every hiding place reachable on
+  foot and in the lantern's sight; every night fair for crews of 1..7. The bot checks the real collision
+  boxes match the validator's map. One `RUN:` line per night and on quit.
+
 Everything below describes the full game (`SIMPLE_MODE := false`).
 
 ## Roles
