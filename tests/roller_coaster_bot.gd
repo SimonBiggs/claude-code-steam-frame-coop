@@ -41,7 +41,7 @@ func _ready() -> void:
 	var t0 := 3.0 if client else 1.0
 	kit.at(t0, "%d TV players press A" % want, _join)
 	if host or client:
-		kit.at(45.0 if client else 52.0, "finish", func() -> void:
+		kit.at(62.0 if client else 70.0, "finish", func() -> void:
 			_checks()
 			kit.finish())
 	elif vr:

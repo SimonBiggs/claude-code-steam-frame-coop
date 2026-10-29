@@ -3,9 +3,9 @@ extends RefCounted
 ## here (a name in NAMES + its case in draw) and never touches core/story_card.gd. Drawn in a unit box:
 ## pic._p(x, y) / pic._circle(x, y, r, c) / pic._poly(pts, c) / pic._eye(x, y, r), size = pic.size,
 ## t = the picture's clock, bob = its gentle bob, color = the card's colour.
-## (The new rides use Ice Cream's "carousel" / "ferris" and Snowball Blitz's "fountain": any picture works anywhere.)
+## (The new rides use Ice Cream's "carousel" / "ferris", Snowball Blitz's "fountain" and Cannon Cove's "bunting": any picture works anywhere.)
 
-const NAMES: Array[String] = ["bear", "blueprint", "ticket", "coastercar", "loopdeloop", "splashpool", "bunting"]
+const NAMES: Array[String] = ["bear", "blueprint", "ticket", "coastercar", "loopdeloop", "splashpool"]
 
 const FUR := Color(0.72, 0.48, 0.28)
 const MUZZLE := Color(0.96, 0.85, 0.68)
@@ -88,11 +88,3 @@ static func draw(pic, kind: String, t: float, bob: float, color: Color) -> void:
 				var a := -PI * 0.9 + PI * 0.8 * i / 5.0
 				var r := 0.18 + 0.1 * fmod(t * 1.5 + i * 0.2, 1.0)
 				pic._circle(0.5 + cos(a) * r, 0.62 + sin(a) * r + bob, 0.03, Color(0.85, 0.95, 1.0))
-		"bunting":  # a string of party flags (one more every day you play)
-			var cols: Array[Color] = [Color(1.0, 0.35, 0.4), GOLD, Color(0.35, 0.65, 1.0), Color(0.5, 0.85, 0.4), color]
-			for i in 5:
-				var x := 0.1 + i * 0.18
-				var y := 0.32 + 0.06 * sin(i / 4.0 * PI) + bob
-				var sway := sin(t * 3.0 + i) * 0.02
-				pic._poly([[x, y], [x + 0.16, y + 0.01], [x + 0.08 + sway, y + 0.26]], cols[i % cols.size()])
-			pic._poly([[0.06, 0.3 + bob], [0.94, 0.3 + bob], [0.94, 0.33 + bob], [0.06, 0.33 + bob]], Color(0.95, 0.95, 0.9))
