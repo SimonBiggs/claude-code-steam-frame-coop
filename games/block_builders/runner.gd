@@ -5,6 +5,7 @@ extends Node3D
 ## Players 3-7: one controller each (press A on a spare controller to drop in).
 ## A runner's own movement is simulated on its own machine (instant); the host decides who has
 ## reached the flag. Hazards (falling, lava, water) send you back to your last safe spot.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const Art := preload("res://games/block_builders/art.gd")
 
@@ -623,7 +624,7 @@ func _update_camera(delta: float) -> void:
 		shake = maxf(0.0, shake - delta)
 		look += Vector3(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)) * shake * 0.25
 	if camera.global_position.distance_to(look) > 0.1:
-		camera.look_at(look, Vector3.UP)
+		UiKit.look(camera, look, Vector3.UP)
 
 
 # --- Network ---------------------------------------------------------------------

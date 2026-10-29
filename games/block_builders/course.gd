@@ -4,6 +4,7 @@ extends Node3D
 ## no physics engine): every solid is a vertical span [bottom, top] over an area of the XZ plane.
 ## Built the same way on the host and on the TV (deterministic from the level index); blocks arrive
 ## in snapshots on the TV.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const Art := preload("res://games/block_builders/art.gd")
 const Levels := preload("res://games/block_builders/levels.gd")
@@ -290,7 +291,7 @@ func _update_birds() -> void:
 		var pos := Vector3(cos(a) * r, 7.0 + sin(anim_t * 0.7 + i) * 0.6 + (i % 2) * 0.8, -10.0 + sin(a) * r * 0.6)
 		var fwd := Vector3(-sin(a), 0.0, cos(a) * 0.6).normalized()
 		var flap := 1.0 + sin(anim_t * 9.0 + i * 1.7) * 0.45
-		var b := Basis.looking_at(fwd, Vector3.UP).scaled(Vector3(flap, 1.0, 1.0) * 1.4)
+		var b := UiKit.aim(fwd, Vector3.UP).scaled(Vector3(flap, 1.0, 1.0) * 1.4)
 		bird_mm.set_instance_transform(i, Transform3D(b, pos))
 
 

@@ -577,7 +577,7 @@ func _update_pointer() -> void:
 	var length := o.distance_to(end)
 	_laser.visible = length > 0.02
 	if _laser.visible:
-		var b := Basis.looking_at(d, Vector3.UP if absf(d.y) < 0.99 else Vector3.RIGHT) * Basis.from_scale(Vector3(1, 1, length))
+		var b := UiKit.aim(d, Vector3.UP if absf(d.y) < 0.99 else Vector3.RIGHT) * Basis.from_scale(Vector3(1, 1, length))
 		_laser.global_transform = Transform3D(b, o + d * length * 0.5)
 		_laser.transparency = 0.0 if hit_ok else 0.7
 	_dot.visible = hit_ok

@@ -290,7 +290,7 @@ func _test_vr_menu() -> void:
 	# Point at the 2nd row: aim the hand at its centre.
 	var rect: Rect2 = m._cell_rects[1]
 	var target: Vector3 = m.to_global(Vector3(rect.get_center().x, rect.get_center().y, 0))
-	hand.look_at(target, Vector3.UP)
+	UiKit.look(hand, target, Vector3.UP)
 	await frames(2)
 	check(m.index == 1, "pointing focuses the row (%d)" % m.index)
 	check(m._laser.visible and m._dot.visible, "laser and dot visible on the panel")
@@ -309,7 +309,7 @@ func _test_vr_menu() -> void:
 	m2.chosen.connect(func(id: String, _it: Dictionary) -> void: got2.append(id))
 	m2.rejected.connect(func(id: String, _it: Dictionary) -> void: rej.append(id))
 	hand.position = Vector3(0.6, 0.5, 0.5)
-	hand.look_at(Vector3(2, 0, 2))
+	UiKit.look(hand, Vector3(2, 0, 2))
 	await frames(2)
 	hand.set_meta("primary", Vector2(0, -1))
 	await frames(2)
@@ -322,7 +322,7 @@ func _test_vr_menu() -> void:
 	check(rej == ["no"], "stick + A on a disabled VR item is rejected (%s)" % [rej])
 	var r3: Rect2 = m2._cell_rects[2]
 	var tip_target: Vector3 = m2.to_global(Vector3(r3.get_center().x, r3.get_center().y, 0))
-	hand.look_at(tip_target + Vector3(0, 0, -0.01), Vector3.UP)
+	UiKit.look(hand, tip_target + Vector3(0, 0, -0.01), Vector3.UP)
 	hand.global_position = tip_target + hand.global_basis.z * 0.04
 	await frames(3)
 	check(got2 == ["Maybe"], "touching a VR option chooses it (%s)" % [got2])
@@ -817,7 +817,7 @@ func _test_systems() -> void:
 	await frames(3)
 	check(vm.cam == rig.camera and vm.hand == rig.hand_r, "VR menu takes the rig's camera and right hand")
 	var rect: Rect2 = vm._cell_rects[2]
-	rig.hand_r.look_at(vm.to_global(Vector3(rect.get_center().x, rect.get_center().y, 0)), Vector3.UP)
+	UiKit.look(rig.hand_r, vm.to_global(Vector3(rect.get_center().x, rect.get_center().y, 0)), Vector3.UP)
 	await frames(3)
 	check(vm.index == 2 and vgot.is_empty(), "held-over trigger doesn't choose while pointing (%d)" % vm.index)
 	rig.fake_trigger = 0.0

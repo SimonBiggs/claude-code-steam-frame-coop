@@ -9,6 +9,7 @@ extends CharacterBody3D
 ## Found hiders go to JAIL (the cage in the hall) and spectate: their camera follows the seeker. A free
 ## hider who rings the jail bell lets them all out.
 ## The seeker can SNIFF (Q / LB, or in VR put your left hand on your nose): hiders close by sneeze.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const HIDER_SPEED := 4.2
 const SEEKER_SPEED := 3.8
@@ -623,7 +624,7 @@ func _update_torch(_delta: float) -> void:
 		var head := head_transform()
 		var hold := head.origin + head.basis * Vector3(0.2, -0.2, -0.3)
 		var aim_at := head.origin + head.basis * Vector3(0, 0, -6.0)
-		torch.global_transform = Transform3D(Basis.looking_at(aim_at - hold, Vector3.UP), hold)
+		torch.global_transform = Transform3D(UiKit.aim(aim_at - hold, Vector3.UP), hold)
 	var on: bool = active and main.phase == "seek"
 	torch_light.visible = on
 	torch_beam.visible = on

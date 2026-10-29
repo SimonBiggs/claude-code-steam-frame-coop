@@ -15,6 +15,7 @@ extends Node
 ##   main = load("res://games/<id>/main.tscn").instantiate(); add_child(main); kit.main = main
 ##   kit.at(2.0, "join a pad", func() -> void: kit.join_bot(main.party))
 ##   kit.assert_true(main.party.player_count() == 1, "the pad joined")
+const UiKit := preload("res://core/ui_kit.gd")
 
 ## First device id of virtual pads (same as core/party.gd); lower ids are real hardware.
 const FAKE_PAD_BASE := 40
@@ -342,7 +343,7 @@ func vr_look_at(rig: Node, world_point: Vector3) -> void:
 	var cam: Node3D = rig.camera
 	var to := world_point - cam.global_position
 	if to.length() > 0.01:
-		cam.global_basis = Basis.looking_at(to.normalized(), Vector3.UP if absf(to.normalized().y) < 0.98 else Vector3.FORWARD)
+		cam.global_basis = UiKit.aim(to.normalized(), Vector3.UP if absf(to.normalized().y) < 0.98 else Vector3.FORWARD)
 
 
 ## Pull the right trigger (0..1), press A, push the sticks (VR sticks: y UP positive).

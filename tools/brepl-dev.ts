@@ -193,7 +193,7 @@ export async function debt() {
     { kind: "pad-A", files: "grab_focus", bad: "grab_focus", unless: "JOY_BUTTON_A|ui_input.gd|UiInput", fix: "should now work by design (UiKit.ensure_pad_ui_actions at startup); check the menu reaches it" },
     { kind: "anchors", files: "set_anchors_preset", bad: "add_child\\([a-z_]+\\)\\n\\s*[a-z_]+\\.set_anchors_preset\\(Control\\.PRESET_(CENTER|RIGHT|BOTTOM)", fix: "use UiKit.pin(control, preset) (core/ui_kit.gd): one helper, offsets always reset" },
     { kind: "set_meta-null", files: "_meta(", bad: "set_meta\\([^\\n]*(,\\s*null\\)|else null\\))|get_meta\\([^)\\n]*,\\s*null\\)", fix: "set_meta(k, null) DELETES the key and get_meta(k, null) has NO default (errors when missing): store false and test with get_meta(k, false) is <Type>" },
-    { kind: "looking_at-UP", files: "looking_at", bad: "looking_at\\([^)]*Vector3\\.UP\\)", unless: "_face_camera", fix: "use UiKit.face(dir) (core/ui_kit.gd): never NaN when the direction is vertical" },
+    { kind: "raw-look_at", files: "look(ing)?_at\\(", bad: "(^|\\n)[^#\\n]*(\\blooking_at\\(|[^A-Za-z0-9_]look_at\\()", unless: "static func aim\\(dir", fix: "use UiKit.aim(dir) / aim_from(from, at) / look(node, target) (core/ui_kit.gd): raw looking_at / look_at go NaN or error when the direction is vertical (tests/core_math_test.gd fails on any)" },
   ];
   for (const pt of PATTERNS) {
     const hits = (await sh(`grep -rlE ${JSON.stringify(pt.files)} --include=*.gd core games arcade`, STAGE)).out.split("\n").filter(Boolean);

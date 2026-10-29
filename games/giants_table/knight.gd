@@ -5,6 +5,7 @@ extends Node3D
 ## Keyboard set 1: arrows (left/right turn), Enter sword, Right Ctrl / . crossbow, / jump.
 ## Players 4-7 have no keyboard set (key_set = -1): one controller each, picked by device id.
 ## Their own movement is local (instant); the host decides hits, damage, embers and reviving.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const W := preload("res://games/giants_table/world.gd")
 const BoltScript := preload("res://games/giants_table/bolt.gd")
@@ -382,7 +383,7 @@ func _update_camera(delta: float) -> void:
 	camera.global_position = camera.global_position.lerp(target, k) if delta < 0.5 else target
 	var look := global_position + Vector3.UP * 0.8
 	if camera.global_position.distance_to(look) > 0.1:
-		camera.look_at(look, Vector3.UP)
+		UiKit.look(camera, look, Vector3.UP)
 
 
 func _animate_sword(delta: float) -> void:

@@ -11,6 +11,7 @@ extends Node3D
 ##   controller left stick moves it; left click / RT / A places, right click / B removes; Q/E or
 ##   LB/RB (or 1-4) picks the block; mouse wheel / D-pad up-down raises the layer; R / Y turns it.
 ## TV (client): a ghost of the builder (big hard-hat head + glove) drawn from the host's snapshots.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const Art := preload("res://games/block_builders/art.gd")
 
@@ -171,7 +172,7 @@ func setup_flat(cam: Camera3D, use_mouse: bool) -> void:
 	camera.far = 400.0
 	camera.cull_mask = 0xFFFFF & ~Art.BODY_LAYER
 	camera.global_position = Vector3(cam_x, 12.0, 12.5)
-	camera.look_at(Vector3(cam_x, 0.0, -0.5), Vector3.UP)
+	UiKit.look(camera, Vector3(cam_x, 0.0, -0.5), Vector3.UP)
 
 
 func setup_ghost() -> void:
@@ -717,7 +718,7 @@ func _flat_camera(delta: float) -> void:
 		return
 	cam_x = lerpf(cam_x, clampf(cursor.x * 0.75, -6.0, 6.0), 1.0 - exp(-3.0 * delta))
 	camera.global_position = Vector3(cam_x, 12.0, 12.5)
-	camera.look_at(Vector3(cam_x, 0.0, -0.5), Vector3.UP)
+	UiKit.look(camera, Vector3(cam_x, 0.0, -0.5), Vector3.UP)
 
 
 ## Glove, held block, placement preview (the same on every machine).

@@ -250,7 +250,7 @@ func _setup(mode: String) -> void:
 		split.bind_party(party)
 		var sc := split.shared_camera()
 		sc.position = Vector3(0.0, 9.0, 17.0)
-		sc.look_at(Vector3(0.0, 2.5, -4.0), Vector3.UP)
+		UiKit.look(sc, Vector3(0.0, 2.5, -4.0), Vector3.UP)
 		_make_hud(-1, split.shared_hud())
 		hints.add_view(huds[-1], -1)
 		if vr_rig != null:
@@ -659,7 +659,7 @@ func _chase_camera(f: Flyer, delta: float) -> void:
 	cam.global_position = cam.global_position.lerp(want, 1.0 - exp(-5.0 * delta))
 	var look := p + _forward(f.yaw, f.pitch) * 3.0 + Vector3.UP * 0.3
 	if cam.global_position.distance_to(look) > 0.1:
-		cam.look_at(look, Vector3.UP)
+		UiKit.look(cam, look, Vector3.UP)
 
 
 ## Every machine: planes the host only hears about glide to their reported spot; barrel rolls.

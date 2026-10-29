@@ -3,6 +3,7 @@ extends Node3D
 ## drift past the dragon (recycled ahead of it, so the sky never ends). Each level has its own palette
 ## (sunset, morning, golden afternoon, storm, night with stars and a moon, dawn), plus a flock of
 ## birds and hot-air balloons far off. Puffs and birds are MultiMeshes (one draw call each).
+const UiKit := preload("res://core/ui_kit.gd")
 
 const SEA_SHADER := """
 shader_type spatial;
@@ -322,7 +323,7 @@ func follow(center: Vector3, vel: Vector3) -> void:
 		var pos := bird_base + Vector3(cos(a) * r, sin(bird_t * 0.8 + i) * 1.5 + (i % 2) * 2.0, sin(a) * r)
 		var fwd := Vector3(-sin(a), 0.0, cos(a))
 		var flap := 1.0 + sin(bird_t * 8.0 + i * 1.3) * 0.5
-		bird_mm.set_instance_transform(i, Transform3D(Basis.looking_at(fwd, Vector3.UP).scaled(Vector3(flap, 1.0, 1.0) * 1.6), pos))
+		bird_mm.set_instance_transform(i, Transform3D(UiKit.aim(fwd, Vector3.UP).scaled(Vector3(flap, 1.0, 1.0) * 1.6), pos))
 	for n in hot_air:
 		var hb: Node3D = n
 		hb.position += Vector3(1.2, 0.0, 0.6) * dt

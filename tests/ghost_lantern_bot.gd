@@ -20,6 +20,7 @@ extends Node
 ## tip spot (a view's hint line or corner, the controls line, the top line, the join line) shows words.
 ## P2 looks away now and then (to see the turn cue); local mode unplugs and replugs P2's (fake)
 ## controller to see the bolt.
+const UiKit := preload("res://core/ui_kit.gd")
 var main
 var t := 0.0
 var last_print := -100.0
@@ -144,7 +145,7 @@ func _physics_process(delta: float) -> void:
 			vg = null  # simple: look away first so the practice ghost hand shows how
 			p1.hand_r.global_basis = Basis(Vector3.UP, PI)
 		if vg:
-			p1.hand_r.global_basis = Basis.looking_at((vg.global_position - p1.hand_r.global_position).normalized(), Vector3.UP)
+			p1.hand_r.global_basis = UiKit.aim((vg.global_position - p1.hand_r.global_position).normalized(), Vector3.UP)
 			var to: Vector3 = vg.global_position - p1.global_position
 			to.y = 0.0
 			if to.length() > 5.0:
