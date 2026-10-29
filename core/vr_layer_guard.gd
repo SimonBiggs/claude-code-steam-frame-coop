@@ -24,12 +24,19 @@ func _sweep(n: Node) -> void:
 
 
 func _on_node_added(n: Node) -> void:
+	if n is Camera3D and _dev_tool(n):
+		return  # the gdev bridge's own cameras (camshot, VR recording) copy a camera's mask as it is
 	if n is Camera3D:
 		if not cams.has(n):
 			cams.append(n)
 		VrLayer.fix_camera(n)
 	elif n is RemoteTransform3D:
 		_check_follow.call_deferred(n)
+
+
+func _dev_tool(n: Node) -> bool:
+	var dev := get_tree().root.get_node_or_null("GDev")
+	return dev != null and dev.is_ancestor_of(n)
 
 
 ## A camera driven from an XR camera is a mirror of the VR view.

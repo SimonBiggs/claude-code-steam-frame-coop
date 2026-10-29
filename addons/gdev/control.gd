@@ -88,7 +88,6 @@ func _record_vr(now: int) -> void:
 		vr_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 		vr_cam = Camera3D.new()
 		vr_cam.fov = 90.0
-		vr_cam.add_to_group("vr_view")  # core/vr_layer.gd: the VR recording shows VR-only UI
 		vr_vp.add_child(vr_cam)
 		add_child(vr_vp)
 		vr_cam.current = true
@@ -565,8 +564,6 @@ func _camshot(r: Dictionary) -> Dictionary:
 	cam.near = src.near
 	cam.far = src.far
 	cam.cull_mask = src.cull_mask
-	if src is XRCamera3D or src.is_in_group("vr_view"):
-		cam.add_to_group("vr_view")  # core/vr_layer.gd: VR-only UI stays in the headset view
 	vp.add_child(cam)
 	add_child(vp)
 	cam.global_transform = src.global_transform
