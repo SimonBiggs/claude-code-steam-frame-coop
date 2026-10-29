@@ -235,13 +235,14 @@ func tick(delta: float) -> void:
 
 func _tray_look(building: bool) -> void:
 	var want: String = main.practice_piece()
+	var next: String = main.plan_piece() if want == "" else ""  # Buttons' plan: its next piece bobs gently
 	for i in items.size():
 		var n := items[i]
 		if held.get("item", -1) == i or _is_flying(n):
 			continue
 		var t := TRAY_ITEMS[i]
 		n.visible = building and (want == "" or t == want) and not (t == "star" and want != "")
-		var glow := want != "" and t == want
+		var glow := (want != "" and t == want) or (next != "" and t == next)
 		var s := 1.0 + (0.18 * sin(glow_t * 6.0) if glow else 0.0)
 		n.scale = Vector3.ONE * s
 		n.position = homes[i] + Vector3.UP * (0.25 + 0.15 * sin(glow_t * 4.0) if glow else 0.0)
@@ -264,11 +265,14 @@ func _end_markers(building: bool) -> void:
 	if held.get("kind", "") != "knob":
 		knob.position = ep + Vector3.UP * 0.6
 	var practice: String = main.practice_piece()
-	spot.visible = building and (practice != "" or held.get("kind", "") == "piece")
+	spot.visible = building and (practice != "" or held.get("kind", "") == "piece" or main.plan_piece() != "")
 	spot.position = ep + Track.fwd(eyaw) * 1.2 + Vector3.UP * 0.2
 	spot.scale = Vector3.ONE * (1.0 + 0.2 * sin(glow_t * 6.0))
+	var next: String = main.plan_piece() if practice == "" else ""
 	if practice != "" and held.is_empty():
 		_show_ghost(practice, ep, eyaw, true)
+	elif next != "" and held.is_empty():
+		_show_ghost(next, ep, eyaw, main.can_add(next))
 	elif held.get("kind", "") != "piece":
 		ghost.visible = false
 

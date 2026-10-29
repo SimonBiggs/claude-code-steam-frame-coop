@@ -10,6 +10,14 @@ extends Node3D
 ## host without a builder (bots / networked tests) builds a demo track by itself.
 ## Files: track.gd (pieces -> polyline + baked mesh), park.gd (table, scenery, touch reactions),
 ## train.gd (cars + riders), builder.gd (the VR hands, tray, lever, opt-in VR ride).
+## STORY + DEPTH: BUTTONS the bear keeps the park. After the practice he rolls out a PLAN (coastergen.gd: the
+## next few pieces from a seed, checked by a validator): a glowing see-through outline on the table, the next
+## piece glowing in the VR tray / picked for the pad builder (just press A). Follow it to the end and the ride
+## earns a GOLDEN TICKET for his board (saved); plans grow and a full table starts a brand-new coaster. The park
+## keeps its new rides between sessions, and a bunting flag goes up round the table each play-day (saved).
+## TODAY'S COASTER: the first plan each day is the same on every machine. Stars come from the seed too and
+## grow in number ride by ride. Picture cards (story_pictures.gd) tell it. One telemetry RUN line per ride and
+## on quit. Networked: plan / tickets / days in the state store, cards as "story" events.
 
 const NetScript := preload("res://core/net.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
@@ -27,6 +35,15 @@ const Track := preload("res://games/roller_coaster/track.gd")
 const ParkScript := preload("res://games/roller_coaster/park.gd")
 const TrainScript := preload("res://games/roller_coaster/train.gd")
 const BuilderScript := preload("res://games/roller_coaster/builder.gd")
+const CoasterGen := preload("res://games/roller_coaster/coastergen.gd")
+const Seeded := preload("res://core/seeded.gd")
+const Save := preload("res://core/save.gd")
+const Telemetry := preload("res://core/telemetry.gd")
+const StoryCard := preload("res://core/story_card.gd")
+const BUTTONS_COL := Color(0.25, 0.5, 0.95)
+const GOLD_COL := Color(1.0, 0.8, 0.25)
+const DECOR_PICS := {"balloons": "balloon", "carousel": "carousel", "wheel": "ferris", "fountain": "fountain", "flags": "bunting"}
+const TICKET_CHEERS := {1: "A golden ticket!", 5: "Five tickets!", 12: "A board full of tickets!"}
 
 const GAME_ID := "roller_coaster"
 const PRACTICE: Array[String] = ["straight", "left", "up"]
@@ -37,6 +54,7 @@ const VMIN := 3.0
 const VMAX := 15.0
 const VMAX_VR := 5.5
 const LIFT_V := 3.2
+const FRICTION := 0.15
 const LAPS := 2
 const CHEER_TIME := 4.5
 const STAR_REACH := 1.1
@@ -100,6 +118,24 @@ var send_t := 0.0
 var snap_s := 0.0
 var snap_ws := 1.0
 var bot_hands_t := 0.0
+# --- Buttons' plans and the saved park (host / local own them; TV machines get plan / tickets / days) ---
+var save: Node
+var plan: Dictionary = {}  # host: the current plan (coastergen.gd section)
+var plan_daily := false  # host: the current plan is TODAY'S COASTER
+var plan_k := 0
+var plan_cheered := false
+var ride_plan_done := false
+var ride_seed := 0
+var ride_t := 0.0
+var build_t := 0.0
+var ride_stars := 0
+var ride_score0 := 0
+var outline_mi: MeshInstance3D
+var outline_key := ""
+var pad_plan_n := -1
+var story_queue: Array = []
+var story_t := 0.0
+var new_day := false
 var _rng := RandomNumberGenerator.new()
 
 
@@ -142,6 +178,11 @@ func _ready() -> void:
 		_setup(net.mode)
 
 
+func _exit_tree() -> void:
+	if save != null and net != null and net.mode != "client":
+		_log_ride("quit")
+
+
 func _setup(mode: String) -> void:
 	_build_world(VrRig.wanted(mode))
 	if VrRig.wanted(mode):
@@ -178,6 +219,7 @@ func _setup(mode: String) -> void:
 		net.state_set("vr_ride", false)
 		_set_phase("build")
 		_refresh_cars()
+		_open_park()
 	_rebuild_track()
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	ready_to_play = true
@@ -208,6 +250,10 @@ func _build_world(vr: bool) -> void:
 	ghost_mi.name = "TrackGhost"
 	ghost_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	park.add_child(ghost_mi)
+	outline_mi = MeshInstance3D.new()
+	outline_mi.name = "PlanOutline"
+	outline_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	park.add_child(outline_mi)
 	train = TrainScript.new()
 	train.name = "Train"
 	park.add_child(train)
@@ -250,6 +296,7 @@ func _rebuild_track() -> void:
 		train_s = _station_s()
 		train.place(track, train_s)
 	_place_stars()
+	_refresh_outline()
 
 
 func _station_s() -> float:
@@ -291,6 +338,10 @@ func add_piece(t: String) -> bool:
 	var end: Array = track["end"]
 	_click_fx(end[0])
 	net.event("click", [end[0]])
+	if plan_complete() and not plan_cheered:
+		plan_cheered = true
+		park.bear_wave()
+		_story_for_all("Yay! Ride it!", "coastercar", GOLD_COL)
 	return true
 
 
@@ -397,12 +448,14 @@ func _start_ride() -> void:
 	net.state_set("practiced", true)
 	var list: Array = []
 	var length: float = track["length"]
-	if practice_ride:
-		for f in [0.35, 0.55, 0.78]:
-			list.append([_new_star_id(), length * f, "star"])
-	else:
-		for k in 4:
-			list.append([_new_star_id(), length * _rng.randf_range(0.25, 0.92), "balloon" if k % 2 == 1 else "star"])
+	ride_plan_done = plan_complete()
+	ride_seed = Seeded.derive(int(plan.get("seed", 1)), "ride%d" % rides_done)
+	for st in CoasterGen.stars(ride_seed, rides_done + 1, track, practice_ride):
+		list.append([_new_star_id(), float(st[0]), String(st[1])])
+	ride_stars = list.size() + vr_stars.size()
+	ride_score0 = int(net.state_get("score", 0))
+	ride_t = 0.0
+	if not practice_ride:
 		for s in vr_stars:
 			list.append([_new_star_id(), float(s), "star"])
 	vr_stars.clear()
@@ -427,7 +480,9 @@ func _end_ride() -> void:
 	cheer_t = CHEER_TIME
 	_publish_stars([])
 	var decor := int(net.state_get("decor", 0)) + 1
-	net.state_set("decor", decor)
+	var more := decor <= ParkScript.DECOR.size()
+	net.state_set("decor", mini(decor, ParkScript.DECOR.size()))
+	_ride_rewards(more)
 	# Guests hop out at the station and wander off again.
 	for g in guest_state.size():
 		if guest_state[g] == "ride":
@@ -456,12 +511,19 @@ func _process(delta: float) -> void:
 	train.set_hands(hand_bits, delta)
 	_effects(delta)
 	_spin_stars(delta)
+	_update_story(delta)
+	if outline_mi.visible:
+		outline_mi.transparency = 0.35 * absf(sin(cam_t * 2.5))
 	_update_cameras(delta)
 	_update_giant()
 	_animate_guests(delta)
 
 
 func _simulate(delta: float) -> void:
+	if phase == "ride":
+		ride_t += delta
+	elif phase == "build":
+		build_t += delta
 	if builder != null:
 		builder.tick(delta)
 	_guests(delta)
@@ -476,6 +538,7 @@ func _simulate(delta: float) -> void:
 			cheer_t -= delta
 			if cheer_t <= 0.0:
 				_set_phase("build")
+				_after_ride_plan()
 
 
 func _has_builder() -> bool:
@@ -491,6 +554,12 @@ func _auto_build(delta: float) -> void:
 	var want := practice_piece()
 	if want != "":
 		add_piece(want)
+		return
+	var next := plan_piece()
+	if next != "" and add_piece(next):
+		return
+	if plan_complete():
+		pull_lever()
 		return
 	if pieces.size() < 7 + rides_done % 3:
 		var order: Array[String] = ["down", "straight", "right", "up", "loop", "down", "splash", "left", "straight", "right"]
@@ -514,7 +583,7 @@ func _ride(delta: float) -> void:
 	var remaining := ride_len - ride_d
 	if remaining < 9.0:
 		v = minf(v, maxf(0.8, remaining * 0.8))
-	energy = 0.5 * v * v + G * y - 0.15 * delta
+	energy = 0.5 * v * v + G * y - FRICTION * delta
 	train_v = v
 	ride_d += v * delta
 	train_s = ride_s0 + ride_d
@@ -969,8 +1038,12 @@ func _spin_stars(delta: float) -> void:
 func _pad_builder(slot: int) -> void:
 	var step := party.nav(slot)
 	var want := practice_piece()
+	var next := plan_piece()
 	if want != "":
 		pick = Track.TYPES.find(want)
+	elif next != "" and pieces.size() != pad_plan_n:
+		pick = Track.TYPES.find(next)  # Buttons' plan: just press A
+		pad_plan_n = pieces.size()
 	elif step.x != 0:
 		pick = posmod(pick + step.x, Track.TYPES.size())
 		sound("ui_move", -6.0)
@@ -1136,6 +1209,7 @@ func _on_state_changed(key: String, value: Variant) -> void:
 			var was := phase
 			phase = String(value)
 			_refresh_hud()
+			_refresh_outline()
 			if phase == "ride":
 				music.play_mood("race")
 				if not _all_huds().is_empty():
@@ -1160,9 +1234,14 @@ func _on_state_changed(key: String, value: Variant) -> void:
 		"score":
 			_refresh_hud()
 		"decor":
+			var had: int = park.decor_count
 			park.set_decor(int(value), true)
-			if int(value) > 0:
+			if park.decor_count > had and had >= 0 and ready_to_play:
 				sfx.play("achievement", -4.0)
+		"plan":
+			_refresh_outline()
+		"tickets", "days":
+			park.set_growth(int(net.state_get("tickets", 0)), int(net.state_get("days", 0)), true)
 
 
 func on_pause_changed(paused: bool, _by_slot: int) -> void:
@@ -1231,3 +1310,217 @@ func apply_event(kind: String, args: Array) -> void:
 			poke_fx(String(args[0]), int(args[1]), args[2])
 		"sound":
 			sound(String(args[0]), -2.0)
+		"story":
+			_story(String(args[0]), String(args[1]), args[2])
+
+
+# --- Buttons' plans and the saved park ----------------------------------------------------------
+
+## Host / local: open the park. Load the save (the rides the park has, tickets, play-days), count today, and
+## roll out the first plan (TODAY'S COASTER the first time each day) for after the practice.
+func _open_park() -> void:
+	if save == null:
+		save = Save.new()
+		save.game_id = GAME_ID
+		# decor: rides in the park; tickets: plans finished; days: play-days; daily: the date of TODAY'S COASTER.
+		save.defaults = {"decor": 0, "tickets": 0, "days": 0, "last_day": "", "daily": "", "rides": 0, "plans": 0, "coasters": 0}
+		add_child(save)
+	var today := Seeded.today()
+	new_day = String(save.data.last_day) != today
+	if new_day:
+		save.data.days = int(save.data.days) + 1
+		save.data.last_day = today
+	save.mark_dirty()
+	park.set_decor(int(save.data.decor), false)
+	net.state_set("decor", mini(int(save.data.decor), ParkScript.DECOR.size()))
+	net.state_set("tickets", int(save.data.tickets))
+	net.state_set("days", int(save.data.days))
+	park.set_growth(int(save.data.tickets), int(save.data.days), false)
+	plan_daily = String(save.data.daily) != today
+	var seed_value := CoasterGen.daily_seed() if plan_daily else Seeded.fresh_seed()
+	if OS.has_environment("RC_SEED"):
+		seed_value = int(OS.get_environment("RC_SEED"))
+	if plan_daily:
+		save.data.daily = today
+	plan_k = 0
+	_new_plan(seed_value, CoasterGen.practice_base())
+	print("Coaster Crew park: plan seed %d%s | decor %d, tickets %d, day %d" % [seed_value, " (TODAY'S COASTER)" if plan_daily else "",
+		int(save.data.decor), int(save.data.tickets), int(save.data.days)])
+	_story_for_all("Hi! I'm Buttons!", "bear", BUTTONS_COL)
+	if plan_daily:
+		_story_for_all("TODAY'S COASTER!", "blueprint", GOLD_COL)
+	if new_day and int(save.data.days) > 1:
+		_story_for_all("A new flag!", "bunting", Color(1.0, 0.45, 0.5))
+
+
+## Host / local: a new plan continuing `base` (published in the state store as [seed, section, base count,
+## base types, piece types, wish, daily]).
+func _new_plan(seed_value: int, base: Array) -> void:
+	plan_k += 1
+	plan = CoasterGen.section(seed_value, base, plan_k)
+	plan_cheered = false
+	pad_plan_n = -1
+	if bool(plan.full):
+		net.state_set("plan", [])
+		return
+	var types: Array = (plan.pieces as Array).map(func(p: Array) -> String: return String(p[0]))
+	net.state_set("plan", [seed_value, plan_k, base.size(), _types_of(base), types, String(plan.wish), plan_daily])
+
+
+func _types_of(list: Array) -> String:
+	return ",".join(list.map(func(p: Array) -> String: return String(p[0])))
+
+
+## How many of the plan's pieces are built (-1: no plan, the practice is on, or the track went its own way).
+func plan_match() -> int:
+	var p: Array = net.state_get("plan", [])
+	if p.size() < 7 or practice_piece() != "":
+		return -1
+	var base := int(p[2])
+	var types: Array = p[4]
+	if pieces.size() < base or _types_of(pieces.slice(0, base)) != String(p[3]):
+		return -1
+	var m := mini(pieces.size() - base, types.size())
+	for i in m:
+		if String((pieces[base + i] as Array)[0]) != String(types[i]):
+			return -1
+	return m
+
+
+## The plan's next piece ("" when there's none to follow).
+func plan_piece() -> String:
+	var m := plan_match()
+	var p: Array = net.state_get("plan", [])
+	if m < 0 or m >= (p[4] as Array).size():
+		return ""
+	return String((p[4] as Array)[m])
+
+
+func plan_complete() -> bool:
+	var p: Array = net.state_get("plan", [])
+	return p.size() >= 7 and plan_match() == (p[4] as Array).size()
+
+
+## Every machine: the see-through glowing outline of the rest of the plan.
+func _refresh_outline() -> void:
+	if outline_mi == null:
+		return
+	var p: Array = net.state_get("plan", [])
+	var m := plan_match()
+	var show := phase == "build" and m >= 0 and m < (p[4] as Array).size() if p.size() >= 7 else false
+	outline_mi.visible = show
+	if not show:
+		return
+	var key := "%s|%s" % [str(p), str(pieces)]
+	if key == outline_key:
+		return
+	outline_key = key
+	var all := pieces.duplicate(true)
+	for i in range(m, (p[4] as Array).size()):
+		all.append([String((p[4] as Array)[i]), 0.0])
+	var tr := Track.build(all)
+	var s0 := Track.STATION_LEN if pieces.is_empty() else float((tr.piece_s as Array)[pieces.size() - 1])
+	outline_mi.mesh = Track.outline(tr, s0, float((tr.piece_s as Array)[all.size() - 1]))
+
+
+## Host / local, at the end of a ride: a ticket for a finished plan, a new ride in the park, the save, a RUN line.
+func _ride_rewards(more_decor: bool) -> void:
+	if save == null:
+		return
+	save.data.rides = int(save.data.rides) + 1
+	if more_decor:
+		save.data.decor = mini(int(save.data.decor) + 1, ParkScript.DECOR.size())
+	if ride_plan_done:
+		save.data.tickets = int(save.data.tickets) + 1
+		save.data.plans = int(save.data.plans) + 1
+		net.state_set("tickets", int(save.data.tickets))
+		park.set_growth(int(save.data.tickets), int(save.data.days), true)
+		park.bear_wave()
+		var n := int(save.data.tickets)
+		_story_for_all(TICKET_CHEERS.get(n, "A golden ticket!"), "ticket", GOLD_COL)
+	save.mark_dirty()
+	if more_decor:
+		var kind := String((ParkScript.DECOR[mini(int(save.data.decor), ParkScript.DECOR.size()) - 1] as Array)[0])
+		_story_for_all("A new ride!", String(DECOR_PICS.get(kind, "carousel")), Color(1.0, 0.55, 0.7))
+	_log_ride("ride")
+	build_t = 0.0
+
+
+## Host / local, back to building: a finished (or abandoned) plan makes way for the next one; when nothing more
+## fits on a big track, a brand-new coaster.
+func _after_ride_plan() -> void:
+	if save == null:
+		return
+	var m := plan_match()
+	if m > 0 and not plan_complete():
+		return  # half way through: keep going
+	if m == 0:
+		if plan_k == 1 and rides_done == 1:
+			_plan_card()  # after the practice ride: here's the plan
+		return
+	plan_daily = false
+	_new_plan(Seeded.fresh_seed(), pieces.duplicate(true))
+	if bool(plan.full) and pieces.size() >= CoasterGen.NEW_COASTER_AT:
+		pieces = CoasterGen.practice_base()  # a brand-new coaster from the practice start (plans grow from it)
+		closed = false
+		_store_track()
+		save.data.coasters = int(save.data.coasters) + 1
+		save.mark_dirty()
+		plan_k = 0
+		_new_plan(Seeded.fresh_seed(), pieces.duplicate(true))
+		_story_for_all("A new coaster!", "blueprint", BUTTONS_COL)
+	if not bool(plan.full):
+		_plan_card()
+
+
+func _plan_card() -> void:
+	park.bear_wave()
+	match String(plan.get("wish", "")):
+		"loop":
+			_story_for_all("Build a loop!", "loopdeloop", BUTTONS_COL)
+		"splash":
+			_story_for_all("Build a splash!", "splashpool", BUTTONS_COL)
+		_:
+			_story_for_all("Build my plan!", "blueprint", BUTTONS_COL)
+
+
+## One RUN line per ride (and on quit).
+func _log_ride(end: String) -> void:
+	Telemetry.run(GAME_ID, {"end": end, "ride": rides_done, "plan_seed": int(plan.get("seed", 0)), "section": plan_k,
+		"daily": plan_daily, "plan_done": ride_plan_done if end == "ride" else plan_complete(), "ride_seed": ride_seed,
+		"pieces": pieces.size(), "length": snappedf(float(track.get("length", 0.0)), 0.1), "ride_secs": snappedf(ride_t, 0.1),
+		"build_secs": snappedf(build_t, 0.1), "stars": ride_stars, "got": int(net.state_get("score", 0)) - ride_score0,
+		"riders": _humans_riding(), "vr": vr_rig != null, "net": net.mode, "decor": int(save.data.decor),
+		"tickets": int(save.data.tickets), "days": int(save.data.days), "coasters": int(save.data.coasters)})
+
+
+## Host / local: a story card on every machine.
+func _story_for_all(line: String, pic: String, color: Color) -> void:
+	_story(line, pic, color)
+	if net != null and net.mode == "host":
+		net.event("story", [line, pic, color])
+
+
+func _story(line: String, pic: String, color: Variant) -> void:
+	if story_queue.size() < 4:
+		story_queue.append([line, pic, color])
+
+
+func _update_story(delta: float) -> void:
+	story_t -= delta
+	if story_t > 0.0 or story_queue.is_empty():
+		return
+	var b: Array = story_queue.pop_front()
+	story_t = 2.8
+	var opts := {"who": "BUTTONS", "line": b[0], "pic": b[1], "color": b[2], "duration": 2.6}
+	var hs := _all_huds()
+	if not hs.is_empty():
+		StoryCard.show(hs, opts)
+	if vr_rig != null and vr_rig.camera != null:
+		var card := StoryCard.show_vr(self, vr_rig.camera, opts)
+		if card != null:
+			var ws := float(vr_rig.world_scale)  # the giant: keep the card at a comfy real distance and size
+			card.scale = Vector3.ONE * ws
+			card.distance *= ws
+			card.height = -0.22 * ws
+			UiKit.vr_place(card, vr_rig.camera, card.distance, card.height)
