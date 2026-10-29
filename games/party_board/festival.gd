@@ -15,14 +15,14 @@ const FLAGS := 12
 const MANGO_COLOR := Color(1.0, 0.6, 0.15)
 ## The festival pieces: id, the menu word and icon (core/ui_kit.gd icons), Mango's line when built.
 const DECOS: Array[Dictionary] = [
-	{"id": "bunting", "word": "FLAGS", "icon": "flag", "line": "Party flags!"},
-	{"id": "arch", "word": "BALLOONS", "icon": "heart", "line": "A balloon arch!"},
-	{"id": "lanterns", "word": "LANTERNS", "icon": "bolt", "line": "Lanterns! So bright!"},
-	{"id": "stage", "word": "MUSIC", "icon": "music", "line": "A music stage!"},
-	{"id": "fountain", "word": "FOUNTAIN", "icon": "gem", "line": "A candy fountain!"},
-	{"id": "fireworks", "word": "FIREWORKS", "icon": "star", "line": "Fireworks! Boom!"},
-	{"id": "trophy", "word": "TROPHY", "icon": "trophy", "line": "A giant trophy!"},
-	{"id": "cake", "word": "CAKE", "icon": "crown", "line": "A party cake! Yum!"},
+	{"id": "bunting", "word": "FLAGS", "icon": "flag", "line": "FLAGS!"},
+	{"id": "arch", "word": "BALLOONS", "icon": "heart", "line": "BALLOONS!"},
+	{"id": "lanterns", "word": "LANTERNS", "icon": "bolt", "line": "LANTERNS!"},
+	{"id": "stage", "word": "MUSIC", "icon": "music", "line": "MUSIC!"},
+	{"id": "fountain", "word": "FOUNTAIN", "icon": "gem", "line": "FOUNTAIN!"},
+	{"id": "fireworks", "word": "FIREWORKS", "icon": "star", "line": "FIREWORKS!"},
+	{"id": "trophy", "word": "TROPHY", "icon": "trophy", "line": "TROPHY!"},
+	{"id": "cake", "word": "CAKE", "icon": "crown", "line": "CAKE! YUM!"},
 ]
 ## Where each piece stands: angle round the island (degrees, 0 = south / START, 90 = east) and radius.
 const SPOTS := {"stage": [252.0, 12.25], "fountain": [104.0, 12.4], "fireworks": [150.0, 12.6], "trophy": [206.0, 13.0],

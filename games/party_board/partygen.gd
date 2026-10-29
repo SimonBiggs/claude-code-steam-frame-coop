@@ -2,7 +2,8 @@ extends RefCounted
 ## PARTY BOARD parties from a seed (SIMPLE_MODE board): every party on Party Island is laid out fresh -
 ## which spaces are red (slide back) and which blue (bonus hops), where the STAR sits first and the
 ## whole route it flies along after each pick-up, which minigame comes after each round, and the party's
-## THEME (Mango's beach / candy / volcano / lagoon party: the sky and the music). Rising: the more
+## THEME (Mango's beach / candy / volcano / lagoon party: the sky and the music). Party Board is the
+## strictest SIMPLE_MODE game: story lines are UPPERCASE and at most two words (tests/party_board_bot.gd). Rising: the more
 ## parties the family has had (level = festival pieces built), the more red spaces (never two in a row).
 ## Same (seed, spec) -> same party on every machine: the host sends {seed, level, rounds, daily} and the
 ## TV machines rebuild it. check() is the validator (tests/party_board_gen_test.gd runs it over many seeds).
@@ -18,11 +19,11 @@ const FIRST_STAR := Vector2i(4, 8)  ## the first STAR sits this many hops from S
 const ROUTE_LEN := 24
 ## Party themes: Mango's party for this seed (sky preset, music mood, story picture, Mango's line).
 const THEMES: Array[Dictionary] = [
-	{"id": "beach", "name": "BEACH PARTY", "sky": "day", "music": "party", "pic": "wave", "line": "Beach party!"},
-	{"id": "candy", "name": "CANDY PARTY", "sky": "day", "music": "party", "pic": "heart", "line": "Candy party!"},
-	{"id": "volcano", "name": "VOLCANO PARTY", "sky": "sunset", "music": "tension", "pic": "sun", "line": "Volcano party!"},
-	{"id": "lagoon", "name": "LAGOON PARTY", "sky": "day", "music": "party", "pic": "wave", "line": "Splash party!"},
-	{"id": "lantern", "name": "LANTERN PARTY", "sky": "sunset", "music": "town", "pic": "star", "line": "Lantern party!"},
+	{"id": "beach", "name": "BEACH PARTY", "sky": "day", "music": "party", "pic": "wave", "line": "BEACH PARTY!"},
+	{"id": "candy", "name": "CANDY PARTY", "sky": "day", "music": "party", "pic": "heart", "line": "CANDY PARTY!"},
+	{"id": "volcano", "name": "VOLCANO PARTY", "sky": "sunset", "music": "tension", "pic": "sun", "line": "VOLCANO PARTY!"},
+	{"id": "lagoon", "name": "LAGOON PARTY", "sky": "day", "music": "party", "pic": "wave", "line": "SPLASH PARTY!"},
+	{"id": "lantern", "name": "LANTERN PARTY", "sky": "sunset", "music": "town", "pic": "star", "line": "LANTERN PARTY!"},
 ]
 
 

@@ -55,6 +55,7 @@ func _ready() -> void:
 	main = load("res://games/party_board/main.tscn").instantiate()
 	main.set("rounds_override", int(OS.get_environment("PB_ROUNDS")) if OS.has_environment("PB_ROUNDS") else 3)
 	main.set("quick", true)
+	main.set("fresh_save", true)  # a brand-new festival every run (festival.gd)
 	main.set("mg_time_scale", 0.4)
 	add_child(main)
 	kit.main = main
@@ -161,8 +162,14 @@ func _watch() -> String:
 					kit.slot_press(main.party, seats[0], "accept")
 				else:
 					main.net.request(0, "again", [])
-				kit.at(kit.t + 3.0, "back at the start?", func() -> void:
-					kit.assert_true(seen.has("phase:title"), "A on the winner moment starts a new party")
+				kit.at(kit.t + 3.0, "the winner picks Mango's next festival piece?", func() -> void:
+					kit.assert_true(seen.has("phase:festival") and seen.has("menu:festival"), "A on the winner moment: the winner picks what Mango builds"))
+				kit.at(kit.t + 9.0, "back at the start?", func() -> void:
+					kit.assert_true(seen.has("phase:title"), "after the festival pick a new party starts")
+					var built: Array = main.save.data["festival"]
+					kit.assert_true(built.size() == 1, "a festival piece was built and saved (%s)" % str(built))
+					kit.assert_true(main.festival.built.size() == 1 and main.festival.deco_mi.mesh != null, "the festival piece stands on the island")
+					kit.assert_true((main.save.data["flags"] as Array).size() >= 1, "the winner planted a flag (%s)" % str(main.save.data["flags"]))
 					kit.finish())
 				return ""
 			if main.ceremony.results_ui != null and not seats.is_empty():
@@ -245,6 +252,11 @@ func _drive_tv(slot: int) -> void:
 	var phase := String(main.net.state_get("phase", ""))
 	var step := String(main.net.state_get("step", ""))
 	var party: Node = main.party
+	if phase == "festival":  # the winner picks Mango's next festival piece
+		var fm = main.menus.tv_menu
+		if fm != null and is_instance_valid(fm) and int((main.net.state_get("menu", {}) as Dictionary).get("pid", -1)) == slot and _may_press(slot, 1.0):
+			kit.slot_press(party, slot, "accept")
+		return
 	if phase == "board":
 		kit.slot_stick(party, slot, "left", Vector2.ZERO)
 		if step == "roll":
@@ -474,7 +486,7 @@ func _checks_simple(mode: String) -> void:
 	var menus: PackedStringArray = []
 	var mgs: PackedStringArray = []
 	for k in seen:
-		if String(k).begins_with("menu:") and String(k) != "menu:":
+		if String(k).begins_with("menu:") and String(k) != "menu:" and String(k) != "menu:festival":
 			menus.append(String(k))
 		if String(k).begins_with("mg:"):
 			mgs.append(String(k).substr(3))
@@ -484,6 +496,12 @@ func _checks_simple(mode: String) -> void:
 	for id in mgs:
 		kit.assert_true(main.runner.SIMPLE_GAMES.has(id), "%s: %s is one of the simple minigames" % [mode, id])
 	kit.info("minigames played: %s" % ", ".join(mgs))
+	var plan: Dictionary = main.net.state_get("plan", {})
+	kit.assert_true(plan.has("seed"), "%s: the party board came from partygen.gd (%s)" % [mode, str(plan)])
+	var reds := 0
+	for i in main.data.count():
+		reds += 1 if main.data.type_of(i) == "red" else 0
+	kit.assert_true(reds >= 3, "%s: the seeded red spaces are on this machine's board (%d)" % [mode, reds])
 	var stars := 0
 	for p in _final_roster:
 		stars += int((p as Dictionary)["stars"])
@@ -494,7 +512,8 @@ func _checks_simple(mode: String) -> void:
 		for p in _final_roster:
 			grabbed += int((p as Dictionary)["stars_bought"])
 		kit.assert_true(grabbed > 0, "%s: someone picked up the STAR on the board" % mode)
-		kit.assert_true(not main.flow.practiced.is_empty(), "%s: practice rolls happened %s" % [mode, str(main.flow.practiced)])
+		if mode == "local":  # (networked: the TV machines' players join after the party started, in CPU seats)
+			kit.assert_true(not main.flow.practiced.is_empty(), "%s: practice rolls happened %s" % [mode, str(main.flow.practiced)])
 	if main.split != null and main.party.player_count() > 0:
 		kit.assert_true(seen.has("tv:press_a"), "%s: TV dice blocks show the glowing A" % mode)
 	if main.tv_ui != null:
@@ -648,11 +667,25 @@ func _scan_text() -> String:
 		if in_cue or (main.hud.join_cue != null and main.hud.join_cue.is_ancestor_of(n)):
 			continue
 		var t := String(n.get("text"))
+		if _is_name(t):
+			continue  # a player's name tag ("TV 2 (P3)": core/party.gd names networked seats by machine)
 		if _is_instruction(t) and not bad_text.has(t):
 			bad_text[t] = true
 			print("BOT: ERROR how-to text in SIMPLE_MODE: \"%s\" (%s)" % [t.replace("\n", " / "), str(main.get_path_to(n))])
 			kit.assert_true(false, "SIMPLE: no how-to text (\"%s\")" % t.replace("\n", " / "))
 	return ""
+
+
+## True when t is just a seated player's name (name tags are not how-to text).
+func _is_name(t: String) -> bool:
+	var txt := t.strip_edges()
+	for p in main.roster():
+		if String((p as Dictionary).get("name", "")) == txt:
+			return true
+	for sl in main.party.active_slots():
+		if main.party.name_of(sl) == txt:
+			return true
+	return false
 
 
 ## SIMPLE_MODE: the picture cues and arrows this machine should have shown.

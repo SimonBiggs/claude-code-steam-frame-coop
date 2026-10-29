@@ -7,7 +7,8 @@ extends Node
 ##  - the title-screen SETUP menu (turns, kid mode, start) for the first TV seat and the VR player;
 ##  - board input for local seats: hit the dice block (A), pick a branch (stick / point), Quick Draw.
 ## SIMPLE_MODE: no setup menu (the party starts by itself) and no menus at all during play (turn_flow
-## never asks); A / TRIGGER on the winner moment starts the next party sooner.
+## never asks); A / TRIGGER on the winner moment starts the next party sooner. The one menu is after a
+## party: the winner picks Mango's next festival piece (two pictures + one word each, no button prompts).
 
 const UiKit := preload("res://core/ui_kit.gd")
 const UiMenu := preload("res://core/ui_menu.gd")
@@ -89,7 +90,7 @@ func _on_menu(m: Dictionary) -> void:
 		main.vr_rig.guard_trigger()
 	elif main.is_local_tv(pid) and main.tv_ui != null:
 		tv_menu = UiMenu.open(main.tv_ui, {"title": title, "items": items, "party": main.party, "slot": pid,
-			"anchor": "right", "allow_cancel": false, "desc": true, "width": 600.0})
+			"anchor": "right", "allow_cancel": false, "desc": not main.simple, "prompts": not main.simple, "width": 600.0})
 		tv_menu.chosen.connect(func(id: String, _it: Dictionary) -> void: main.net.request(pid, "menu", [seq, id]))
 
 

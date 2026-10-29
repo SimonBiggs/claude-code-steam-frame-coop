@@ -77,6 +77,11 @@ const UiMenu := preload("res://core/ui_menu.gd")
 const PropsScript := preload("res://games/party_board/props.gd")
 const GhostHand := preload("res://games/party_board/ghost_hand.gd")
 const CueScript := preload("res://games/party_board/cue.gd")
+const PartyGen := preload("res://games/party_board/partygen.gd")
+const Festival := preload("res://games/party_board/festival.gd")
+const Seeded := preload("res://core/seeded.gd")
+const StoryCard := preload("res://core/story_card.gd")
+const MANGO_COLOR := Color(1.0, 0.6, 0.15)  ## Mango the toucan (festival.gd), the party host in the story cards
 
 const SIMPLE_MODE := true
 
@@ -103,6 +108,9 @@ var mg_force := ""  ## a minigame id every round (PB_MINIGAME)
 var mg_all := false  ## cycle through every minigame (PB_ALL_MINIGAMES)
 var mg_time_scale := 1.0  ## bots shorten minigames
 var quick := false  ## bots: shorter pauses between steps
+var fresh_save := false  ## bots: a brand-new festival
+var festival: Festival  ## SIMPLE: Mango's festival pieces and the winners' flags (every machine)
+var vr_story: Node3D
 var simple := SIMPLE_MODE
 var props: PropsScript  ## SIMPLE: touchable island (every machine; touches are found where the VR player is)
 var ghost: GhostHand  ## SIMPLE, VR player only: the see-through teaching hand
@@ -187,8 +195,14 @@ func _ready() -> void:
 	save = Save.new()
 	save.game_id = GAME_ID
 	save.version = 1
-	save.defaults = {"parties": 0, "giant_wins": 0, "best_stars": 0, "most_coins": 0, "wins": {}, "mg_played": {}}
+	save.defaults = {"parties": 0, "giant_wins": 0, "best_stars": 0, "most_coins": 0, "wins": {}, "mg_played": {},
+		"world": -1, "festival": [], "flags": [], "daily": {}}
 	add_child(save)
+	if fresh_save:
+		save.data = save.defaults.duplicate(true)
+	if int(save.data["world"]) < 0:
+		save.data["world"] = Seeded.fresh_seed()  # this family's own run of parties
+		save.mark_dirty()
 	sfx = SfxScript.new()
 	add_child(sfx)
 	sfx.warm([], true)
@@ -299,6 +313,10 @@ func _build_world() -> void:
 	board.name = "Board"
 	stage.add_child(board)
 	board.build(data, vr_rig != null)
+	festival = Festival.new()
+	festival.name = "Festival"
+	festival.main = self
+	stage.add_child(festival)
 
 
 ## The VR player's surroundings: a big round picnic table in a garden.
@@ -322,6 +340,23 @@ func _build_vr_room() -> void:
 	vr_room.add_child(MeshKit.scatter_random(MeshKit.prop("flower"), 40, Vector3.ZERO, 8.5, 3.0, 0.7, 1.1,
 		PackedColorArray([Color(1.0, 0.5, 0.6), Color(1.0, 0.9, 0.4), Color(0.7, 0.6, 1.0)]), 22))
 	vr_room.add_child(MeshKit.scatter_random(MeshKit.prop("bush"), 10, Vector3.ZERO, 9.0, 6.0, 0.8, 1.2, PackedColorArray(), 23))
+
+
+## Every machine: lay out the seeded party desc {seed, level, rounds} (partygen.gd) on the board.
+## Returns the generated party.
+func apply_plan(desc: Dictionary) -> Dictionary:
+	var p := PartyGen.generate(data, int(desc.get("seed", 0)), desc)
+	data.set_types(p.types)
+	board.apply_types()
+	return p
+
+
+## Host: tell every machine what Mango's festival looks like (saved pieces and winners' flags).
+func publish_festival() -> void:
+	var st := {"built": (save.data["festival"] as Array).duplicate(), "flags": (save.data["flags"] as Array).duplicate()}
+	net.state_set("festival", st)
+	if festival != null:
+		festival.apply(st)
 
 
 ## Board units -> world.
@@ -528,6 +563,12 @@ func _on_state_changed(key: String, value: Variant) -> void:
 			_on_phase(String(value))
 		"sky":
 			sky.set_preset(String(value), 4.0)
+		"plan":  # the TV machines rebuild the host's seeded party board (partygen.gd)
+			if flow == null and value is Dictionary and not (value as Dictionary).is_empty():
+				apply_plan(value)
+		"festival":
+			if festival != null and value is Dictionary:
+				festival.apply(value)
 		"music":
 			music.play_mood(String(value), 1.2)
 	hud.on_state(key, value)
@@ -712,6 +753,15 @@ func _do_fx(kind: String, args: Array) -> void:
 			dice.on_fx(String(args[0]), args[1])
 		"intro":
 			hints.intro(INTRO, {"duration": 9.0, "min_time": 1.0})
+		"story":  # [who, line, picture, colour html]: a picture card on the TV and in VR (core/story_card.gd)
+			var beat := {"who": String(args[0]), "line": String(args[1]), "pic": String(args[2]),
+				"color": Color.html(String(args[3])), "duration": 3.5}
+			if tv_ui != null:
+				StoryCard.show(tv_ui, beat)
+			if vr_rig != null:
+				if vr_story != null and is_instance_valid(vr_story):
+					vr_story.queue_free()
+				vr_story = StoryCard.show_vr(self, vr_rig.camera, beat.merged({"vr_height": vr_ui_height(0.3)}))
 		"prop":
 			if props != null:
 				props.react(String(args[0]), int(args[1]))
