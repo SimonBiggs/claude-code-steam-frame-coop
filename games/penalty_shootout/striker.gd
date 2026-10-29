@@ -436,7 +436,7 @@ func _update_camera(delta: float) -> void:
 		want_pos = main.REPLAY_CAM
 		look = main.replay_look()
 		camera.global_position = want_pos
-		camera.look_at(look, Vector3.UP)
+		UiKit.look(camera, look, Vector3.UP)
 		return
 	if main.state == "trophy":
 		var ct: Array = main.ceremony_camera()
@@ -456,7 +456,7 @@ func _update_camera(delta: float) -> void:
 		camera.set_meta("placed", true)
 		camera.global_position = want_pos
 	camera.global_position = camera.global_position.lerp(want_pos, 1.0 - exp(-5.0 * delta))
-	camera.look_at(look, Vector3.UP)
+	UiKit.look(camera, look, Vector3.UP)
 	var sh: float = main.shake
 	if sh > 0.0:
 		camera.global_position += Vector3(randf_range(-1, 1), randf_range(-1, 1), 0) * sh * 0.12

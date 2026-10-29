@@ -6,6 +6,7 @@ extends Node
 ## Local:     godot --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/treasure_dig_bot.tscn
 ## Networked: DUO_PORT=81xx DUO_HOST=1 ... & DUO_PORT=81xx DUO_JOIN=127.0.0.1 ... (same scene, real time)
 ## Flat host: add DUO_FLAT_HOST=1 to the host (no VR: one bot pad plays slot 0 on the host).
+const UiKit := preload("res://core/ui_kit.gd")
 
 const BotKit := preload("res://tests/bot_kit.gd")
 
@@ -202,7 +203,7 @@ func _drive_vr(delta: float) -> void:
 			vr_target = main.hidden[0][0]
 			var g := beach.to_global(vr_target)
 			var hr: Node3D = rig.hand_r
-			hr.global_basis = Basis.looking_at((g - hr.global_position).normalized(), Vector3.UP)
+			hr.global_basis = UiKit.aim((g - hr.global_position).normalized(), Vector3.UP)
 			kit.vr_trigger(rig, 1.0 if vr_t > 0.2 and vr_t < 0.4 else 0.0)
 			if vr_t > 0.6:
 				_vr_next("poke")

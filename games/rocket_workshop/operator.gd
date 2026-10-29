@@ -9,6 +9,7 @@ extends Node3D
 ## Split screen / non-VR host: a pointer. Mouse: click to press, hold and drag to grab.
 ## Controller: left stick moves the pointer, A / RT clicks and holds.
 ## On the TV machine this is a "ghost": a helmet and two mittens drawn from the host's snapshots.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const TIP := Vector3(0.0, -0.01, -0.07)  # fingertip, relative to the aim pose
 const POINTER_SPEED := 750.0
@@ -165,7 +166,7 @@ func attach_camera(cam: Camera3D) -> void:
 	camera.fov = 84.0  # wide enough to see both cockpit wings
 	var top: float = main.panel.top
 	camera.position = Vector3(0, top + 1.0, 0.75)
-	camera.look_at(Vector3(0, top - 0.08, -0.5))
+	UiKit.look(camera, Vector3(0, top - 0.08, -0.5))
 	global_position = Vector3(0, 0, 0.3)
 	cursor_ball = MeshInstance3D.new()
 	cursor_ball.mesh = main.sphere_mesh(0.016)

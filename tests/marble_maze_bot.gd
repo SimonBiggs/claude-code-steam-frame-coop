@@ -31,6 +31,7 @@ extends Node
 
 const FAKE_PAD := 40
 
+const STUCK_SECS := 90.0
 var main
 var t := 0.0
 var joined := false
@@ -201,6 +202,12 @@ func _tour() -> void:
 	if mode_is_client() or OS.has_environment("BOT_LEVEL") or OS.has_environment("BOT_CHAOS"):
 		return
 	if simple:
+		# A maze nobody can finish (2026-10-29: the daily's shiny sat below a zoom arrow and P2 looped for
+		# 230 s) must fail the run, not just "run to the end".
+		if main.state == "play" and main.state_t > STUCK_SECS and not has_meta("stuck_%d" % main.level):
+			set_meta("stuck_%d" % main.level, true)
+			print("BOT ASSERT FAILED: level %d (%s) not cleared after %d s (home %d/%d)" % [main.level,
+				main.board.level_name(main.level), int(STUCK_SECS), main.home_count(), main.active_marbles().size()])
 		if main.state == "clear" and main.state_t > 1.6 and not has_meta("clear_%d" % main.level):
 			set_meta("clear_%d" % main.level, true)
 			print("BOT: simple level %d (%s) cleared, falls so far %d" % [main.level, main.board.level_name(main.level), _falls()])
@@ -334,6 +341,9 @@ func _step_ok(board, a: Vector2i, b: Vector2i) -> bool:
 	# Zoom arrows are one-way: no rolling against one (leaving it or entering it).
 	var arrows := {">": Vector2i(1, 0), "<": Vector2i(-1, 0), "^": Vector2i(0, -1), "v": Vector2i(0, 1)}
 	if arrows.has(ka) and arrows[ka] == a - b:
+		return false
+	# ...and never sideways off one (BOOST carries you along it), unless it points into a wall (mazegen._moves).
+	if arrows.has(ka) and arrows[ka] != b - a and _open_here(board, a + (arrows[ka] as Vector2i)):
 		return false
 	if arrows.has(kb) and arrows[kb] == a - b:
 		return false

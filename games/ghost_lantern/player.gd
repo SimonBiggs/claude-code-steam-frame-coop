@@ -5,6 +5,7 @@ extends CharacterBody3D
 ## On a flat screen the lantern is held in front of the camera: Space / left click focus, E rings the bell.
 ## TV players (role "vacuum"): first-person ghost vacuums. Hold fire (RT / Space / click / Enter) to suck
 ## in a ghost that the lantern is lighting up.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const SPEED := 4.6
 const MAX_COURAGE := 100.0
@@ -615,7 +616,7 @@ func _update_tools(delta: float) -> void:
 			var head := head_transform()
 			var hold := head.origin + head.basis * Vector3(0.22, -0.2, -0.35)
 			var aim_at := head.origin + head.basis * Vector3(0, 0, -8.0)
-			lantern.global_transform = Transform3D(Basis.looking_at(aim_at - hold, Vector3.UP), hold)
+			lantern.global_transform = Transform3D(UiKit.aim(aim_at - hold, Vector3.UP), hold)
 		var lit := lantern_lit()
 		var ang: float = main.lantern_angle()
 		var rng: float = main.lantern_range()

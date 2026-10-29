@@ -582,12 +582,18 @@ static func _passable(k: String, open: bool) -> bool:
 
 
 ## Where a marble at c can get to next: four ways, except back against a zoom arrow (leaving one or
-## entering one); rolling onto a teleporter lands you on its twin.
+## entering one) and never sideways off one: BOOST beats any steering, so a marble on an arrow is carried
+## along it (only an arrow that points into a wall lets you slide off to the side). Today's maze on
+## 2026-10-29 hid the shiny below an arrow; the bot looped teleporter -> arrow -> teleporter for minutes.
+## Rolling onto a teleporter lands you on its twin.
 static func _moves(g: Array, c: Vector2i, open: bool) -> Array[Vector2i]:
 	var out: Array[Vector2i] = []
 	var kc := _at(g, c)
+	var carried := ARROWS.has(kc) and _passable(_at(g, c + (ARROWS[kc] as Vector2i)), open)
 	for d in DIRS:
 		if ARROWS.has(kc) and ARROWS[kc] == -d:
+			continue
+		if carried and ARROWS[kc] != d:
 			continue
 		var b: Vector2i = c + d
 		var kb := _at(g, b)

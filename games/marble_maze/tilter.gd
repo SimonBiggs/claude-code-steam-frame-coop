@@ -6,6 +6,7 @@ extends Node3D
 ## A: level the board. Right stick up/down: raise or lower the table. The table fits your height.
 ## Flat (split screen / non-VR host): WASD or the left stick tilts, mouse nudges, Space / A levels it.
 ## On the TV machine this is a ghost: a big friendly face and two hands drawn from the host's snapshots.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const GRAB_DIST := 0.13
 const HAND_GAIN := 8.0  # tilt units per metre of hand movement (0.12 m = full tilt)
@@ -224,7 +225,7 @@ func attach_camera(cam: Camera3D) -> void:
 func _place_camera() -> void:
 	var by: float = main.board_y
 	camera.position = Vector3(0.0, by + 1.0, 0.95)
-	camera.look_at(Vector3(0.0, by - 0.05, -0.08), Vector3.UP)
+	UiKit.look(camera, Vector3(0.0, by - 0.05, -0.08), Vector3.UP)
 
 
 func _input(event: InputEvent) -> void:

@@ -1,6 +1,7 @@
 extends RefCounted
 ## Builds the pirate world: sunset sky, animated sea, islands and our ship. Also the deck geometry
 ## helpers (walkable area, obstacles) shared by players, boarders and leaks.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const SEA_SHADER := """
 shader_type spatial;
@@ -224,7 +225,7 @@ static func rope_xf(a: Vector3, b: Vector3, thick: float) -> Transform3D:
 	var mid := (a + b) * 0.5
 	var dir := (b - a)
 	var up := Vector3.UP if absf(dir.normalized().y) < 0.98 else Vector3.RIGHT
-	var basis := Basis.looking_at(dir, up)
+	var basis := UiKit.aim(dir, up)
 	return Transform3D(basis.scaled(Vector3(thick, thick, dir.length())), mid)
 
 

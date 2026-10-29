@@ -5,6 +5,7 @@ extends Node
 ## The host decides; the TV machine mirrors pack()/unpack() and gets one-off events.
 ## Simple mode (main.simple): only the sky (dusk -> aurora night -> sunrise) and the odd MEGA SNOWBALL
 ## from wave 6 on; no weather, upgrades, streaks, hints or awards.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const VrText := preload("res://core/vr_text.gd")
 
@@ -448,7 +449,7 @@ func _build_catapult() -> void:
 	catapult = Node3D.new()
 	main.add_child(catapult)
 	catapult.position = catapult_pos()
-	catapult.look_at(Vector3(catapult.position.x * 3.0, 0.0, catapult.position.z * 3.0), Vector3.UP)
+	UiKit.look(catapult, Vector3(catapult.position.x * 3.0, 0.0, catapult.position.z * 3.0), Vector3.UP)
 	var wood := main.make_material(Color(0.5, 0.32, 0.18), 0.0) as StandardMaterial3D
 	_box(catapult, Vector3(1.0, 0.25, 1.5), Vector3(0, 0.3, 0), wood)
 	for x in [-0.55, 0.55]:

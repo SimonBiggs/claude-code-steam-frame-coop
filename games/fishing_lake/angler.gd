@@ -13,6 +13,7 @@ extends Node3D
 ## Flat (split screen / non-VR host): WASD / left stick walk, mouse / right stick aim, hold Space / LMB /
 ## A / RT to charge a cast and release, then hold it to reel; RMB / Shift / B / X yanks the rod back.
 ## On the TV machine this is a ghost drawn from the host's snapshots.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const Lake := preload("res://games/fishing_lake/lake.gd")
 const FishScript := preload("res://games/fishing_lake/fish.gd")
@@ -667,7 +668,7 @@ func _flat_rod(delta: float) -> void:
 			camera.set_meta("placed", true)
 			camera.global_position = want_pos
 		camera.global_position = camera.global_position.lerp(want_pos, 1.0 - exp(-8.0 * delta))
-		camera.look_at(look, Vector3.UP)
+		UiKit.look(camera, look, Vector3.UP)
 
 
 # --- Fishing simulation (host / local) ------------------------------------------------

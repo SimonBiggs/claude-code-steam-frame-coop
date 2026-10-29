@@ -6,6 +6,7 @@ extends Node3D
 ## headset) the gunner aims with the sticks, mouse or keys.
 ## Players 2 to 7 are DECKHANDS in first person: carry cannonballs from the pile to the cannons,
 ## hold "use" next to a leak to patch it, and shoot boarding pirates with a musket.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const World := preload("res://games/cannon_cove/world.gd")
 
@@ -512,7 +513,7 @@ func _flat_gunner_update(delta: float) -> void:
 		var dir: Vector3 = c.aim_dir()
 		var flat := Vector3(dir.x, 0.0, dir.z).normalized()
 		camera.global_position = c.global_position - flat * 2.4 + Vector3.UP * (1.05 + shake * randf_range(-0.05, 0.05))
-		camera.look_at(c.muzzle_pos() + dir * 14.0 + Vector3.UP * 1.0)
+		UiKit.look(camera, c.muzzle_pos() + dir * 14.0 + Vector3.UP * 1.0)
 
 
 func _station_input() -> void:

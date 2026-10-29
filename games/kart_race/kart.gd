@@ -11,6 +11,7 @@ extends Node3D
 ## countdown (after the second red light) for a boost at GO.
 ## VR comfort: the VR kart's speed changes are rate-limited (no jolts from bananas, walls or boosts),
 ## wall nudges turn it gently, bumps push it softly and ramps toss it less.
+const UiKit := preload("res://core/ui_kit.gd")
 
 const MAX_SPEED := 14.0
 const ACCEL := 9.0
@@ -903,6 +904,6 @@ func update_camera(delta: float) -> void:
 	camera.global_position = camera.global_position.lerp(want, 1.0 - exp(-7.0 * delta))
 	var look := position + fwd * 4.0 + Vector3(0, 1.0, 0)
 	if camera.global_position.distance_to(look) > 0.1:
-		camera.look_at(look, Vector3.UP)
+		UiKit.look(camera, look, Vector3.UP)
 	var fov := 70.0 + (10.0 if boost_t > 0.0 else 0.0) + clampf(absf(speed) - 10.0, 0.0, 6.0)
 	camera.fov = lerpf(camera.fov, fov, 1.0 - exp(-4.0 * delta))
