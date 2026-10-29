@@ -34,6 +34,7 @@ const T_WATER := 0
 const T_GRASS := 1
 const T_SAND := 2
 const T_ROCK := 3
+const T_RIVER := 4  ## a stream across the island (islandgen.gd): no buildings, but a road over it is a bridge
 
 # Transport layer per cell.
 const L_NONE := 0
@@ -66,7 +67,8 @@ const TIER_POP: Array[int] = [0, 15, 40, 80]
 ## homes / jobs: residents and workplaces. makes / needs: produced / consumed resource.
 ## power / water / fun / safety: radius (cells) of the service. mats: construction loads.
 const KINDS: Array[String] = ["road", "house", "farm", "shop", "windmill", "water", "park", "bulldozer",
-	"bakery", "sawmill", "school", "fire_station", "rail", "station", "landmark", "ferris", "hall"]
+	"bakery", "sawmill", "school", "fire_station", "rail", "station", "landmark", "ferris", "hall", "boat", "lighthouse"]
+## (new kinds go on the END of KINDS: saved towns store a building's kind as its index here)
 const B := {
 	"road": {"name": "ROAD", "size": 1, "cost": 0, "tier": 0, "tool": true, "icon": "road",
 		"desc": "Hold the trigger and draw roads. They join up by themselves!"},
@@ -102,6 +104,13 @@ const B := {
 		"desc": "A funfair wheel for a real city!"},
 	"hall": {"name": "TOWN HALL", "size": 2, "cost": 0, "tier": 99, "jobs": 2, "fun": 2, "mats": 0,
 		"desc": "The mayor's office and the builders' yard (BRICKS)."},
+	## The boat in the tray (SIMPLE_MODE, after the practice): drop it anywhere to sail between the home
+	## island and TODAY'S ISLAND. Never a building.
+	"boat": {"name": "BOAT", "size": 1, "cost": 0, "tier": 99, "mats": 0, "sail": true,
+		"desc": "Sail to TODAY'S ISLAND (and home again)."},
+	## A district's landmark (islandgen.gd): appears as a blueprint when the mist lifts off its district.
+	"lighthouse": {"name": "LIGHTHOUSE", "size": 1, "cost": 0, "tier": 99, "fun": 6, "mats": 3,
+		"desc": "A lighthouse by the sea."},
 }
 
 ## The building blocks in the tray (the town hall is placed at the start, not bought).
@@ -155,6 +164,7 @@ const NAME_PARTS := {
 	"windmill": ["Breezy", "Whirly", "Old"],
 	"water": ["Splashy", "Blue", "Tall"],
 	"landmark": ["Town"],
+	"lighthouse": ["Harbour", "Sunset", "Starry"],
 	"ferris": ["Twinkle"],
 	"hall": ["Town"],
 }
@@ -162,6 +172,7 @@ const NAME_SUFFIX := {
 	"house": "Cottage", "farm": "Farm", "shop": "Shop", "bakery": "Bakery", "sawmill": "Sawmill",
 	"school": "School", "fire_station": "Fire Station", "station": "Station", "park": "Park",
 	"windmill": "Windmill", "water": "Water Tower", "landmark": "Clock Tower", "ferris": "Big Wheel", "hall": "Hall",
+	"lighthouse": "Lighthouse",
 }
 
 
@@ -195,6 +206,16 @@ static func tier_for_pop(pop: int) -> int:
 		if pop >= TIER_POP[i]:
 			t = i
 	return t
+
+
+## SIMPLE_MODE: the mayor's tray: the first `unl` blocks, then the boat once the practice is done.
+static func simple_tray(unl: int, boat: bool) -> Array[String]:
+	var out: Array[String] = []
+	for i in clampi(unl, 2, SIMPLE_TRAY.size()):
+		out.append(SIMPLE_TRAY[i])
+	if boat:
+		out.append("boat")
+	return out
 
 
 ## SIMPLE_MODE: how many tray blocks a town with `n` buildings (not the hall) has unlocked.

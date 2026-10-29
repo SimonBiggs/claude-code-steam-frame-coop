@@ -16,6 +16,15 @@ var trees := PackedByteArray()  ## 0 = none, 1..3 = that many trees on the cell
 var lay := PackedByteArray()  ## Defs.L_* per cell
 var owner_id := PackedInt32Array()  ## building id covering the cell (0 = none)
 var buildings := {}  ## id -> Dictionary (see PACK; "kind" is a String here)
+## islandgen.gd features: resources per cell (IslandGen.R_*), district per cell (0 = the open middle,
+## 1..3 under the mist until opened), which districts are open (bit k), each district's landmark
+## ([kind, x, z] or []) and the island's seed (0 = an old town made before seeded islands).
+var res := PackedByteArray()
+var dist := PackedByteArray()
+var open_mask := 0xFF
+var lm: Array = []
+var seed_value := 0
+var dist_version := 0  ## bumped when the districts change (a new island): the mist redraws
 var next_id := 1
 ## Bumped on every change: views compare it to know when to rebuild.
 var version := 0
@@ -39,6 +48,13 @@ func clear() -> void:
 	lay.fill(Defs.L_NONE)
 	owner_id.resize(N * N)
 	owner_id.fill(0)
+	res.resize(N * N)
+	res.fill(0)
+	dist.resize(N * N)
+	dist.fill(0)
+	open_mask = 0xFF
+	lm = []
+	seed_value = 0
 	buildings.clear()
 	next_id = 1
 	_touch(true, true)
@@ -66,6 +82,15 @@ func terrain(x: int, z: int) -> int:
 
 func layer(x: int, z: int) -> int:
 	return int(lay[idx(x, z)]) if inside(x, z) else Defs.L_NONE
+
+
+## A district's number (0 = the middle) and whether its mist has lifted.
+func district(x: int, z: int) -> int:
+	return int(dist[idx(x, z)]) if inside(x, z) else 0
+
+
+func is_open(x: int, z: int) -> bool:
+	return (open_mask >> district(x, z)) & 1 == 1
 
 
 func is_land(x: int, z: int) -> bool:
@@ -177,10 +202,12 @@ func footprint(kind: String, x: int, z: int) -> Array[Vector2i]:
 func can_place(kind: String, x: int, z: int) -> String:
 	match kind:
 		"road":
-			if not inside(x, z) or not is_land(x, z):
+			if not inside(x, z) or not (is_land(x, z) or terrain(x, z) == Defs.T_RIVER):
 				return "Roads go on land"
 			if owner_id[idx(x, z)] > 0:
 				return "A building is there"
+			if not is_open(x, z):
+				return "Misty"
 			return ""
 		"rail":
 			if not inside(x, z) or not is_land(x, z):
@@ -192,18 +219,27 @@ func can_place(kind: String, x: int, z: int) -> String:
 			if not inside(x, z) or layer(x, z) == Defs.L_NONE:
 				return "Nothing to clear"
 			return ""
-	for c in footprint(kind, x, z):
-		if not inside(c.x, c.y):
-			return "Off the island"
-		var t := terrain(c.x, c.y)
-		if t == Defs.T_WATER:
-			return "That's water!"
-		if t == Defs.T_ROCK:
-			return "Too rocky"
-		if owner_id[idx(c.x, c.y)] > 0:
-			return "Something is there"
-		if lay[idx(c.x, c.y)] != Defs.L_NONE:
-			return "A road is there"
+	var s := Defs.size_of(kind)
+	for dz in s:
+		for dx in s:
+			var cx := x + dx
+			var cz := z + dz
+			if cx < 0 or cz < 0 or cx >= N or cz >= N:
+				return "Off the island"
+			var i := cz * N + cx
+			var t := int(ter[i])
+			if t == Defs.T_WATER:
+				return "That's water!"
+			if t == Defs.T_ROCK:
+				return "Too rocky"
+			if t == Defs.T_RIVER:
+				return "That's the river!"
+			if (open_mask >> int(dist[i])) & 1 == 0:
+				return "Misty"
+			if owner_id[i] > 0:
+				return "Something is there"
+			if lay[i] != Defs.L_NONE:
+				return "A road is there"
 	return ""
 
 
@@ -429,7 +465,7 @@ func near_kind(b: Dictionary, kind: String, radius: float) -> bool:
 
 ## Is this cell something a vehicle can drive on?
 func _drivable(x: int, z: int) -> bool:
-	return inside(x, z) and is_land(x, z) and owner_id[idx(x, z)] == 0
+	return inside(x, z) and (is_land(x, z) or (terrain(x, z) == Defs.T_RIVER and has_road(x, z))) and owner_id[idx(x, z)] == 0
 
 
 func drivable_at(p: Vector3) -> bool:
@@ -549,6 +585,113 @@ func rail_route(a: Dictionary, b: Dictionary) -> Array[Vector2i]:
 	return out
 
 
+# --- Seeded islands (islandgen.gd) --------------------------------------------------------------------
+
+## Start a fresh town on a generated island (IslandGen.generate()).
+func apply_island(isl: Dictionary) -> void:
+	clear()
+	island = int(isl.get("biome", 0))
+	seed_value = int(isl.get("seed", 0))
+	ter = (isl["ter"] as PackedByteArray).duplicate()
+	trees = (isl["trees"] as PackedByteArray).duplicate()
+	res = (isl["res"] as PackedByteArray).duplicate()
+	dist = (isl["dist"] as PackedByteArray).duplicate()
+	open_mask = int(isl.get("open", 1))
+	lm = (isl.get("lm", []) as Array).duplicate(true)
+	dist_version += 1
+	_touch(true, true)
+
+
+var _reach := PackedByteArray()
+var _reach_version := -1
+
+
+## Cells a road could reach from the town's roads right now (open land / bridges, no buildings).
+func _ensure_reach() -> void:
+	if _reach_version == version and _reach.size() == N * N:
+		return
+	_reach_version = version
+	_reach.resize(N * N)
+	_reach.fill(0)
+	var q: Array[Vector2i] = []
+	for z in N:
+		for x in N:
+			if has_road(x, z):
+				_reach[idx(x, z)] = 1
+				q.append(Vector2i(x, z))
+	var head := 0
+	while head < q.size():
+		var c := q[head]
+		head += 1
+		for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+			var n: Vector2i = c + d
+			if not inside(n.x, n.y) or _reach[idx(n.x, n.y)] == 1:
+				continue
+			var t := terrain(n.x, n.y)
+			if (t == Defs.T_GRASS or t == Defs.T_SAND or t == Defs.T_RIVER) and owner_id[idx(n.x, n.y)] == 0 and is_open(n.x, n.y):
+				_reach[idx(n.x, n.y)] = 1
+				q.append(n)
+
+
+## Could a road join a building of footprint `size` with its corner at `c` to the town's roads?
+func reach(c: Vector2i, size: int) -> bool:
+	_ensure_reach()
+	for r in ring_at(c.x, c.y, size):
+		if inside(r.x, r.y) and _reach[idx(r.x, r.y)] == 1:
+			return true
+	return false
+
+
+static func ring_at(x: int, z: int, s: int) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	for k in s:
+		out.append(Vector2i(x + k, z + s))
+		out.append(Vector2i(x + s, z + k))
+		out.append(Vector2i(x + k, z - 1))
+		out.append(Vector2i(x - 1, z + k))
+	return out
+
+
+## Does a footprint (corner x, z, size s) cover or touch cell c?
+static func touches(x: int, z: int, s: int, c: Vector2i) -> bool:
+	return c.x >= x - 1 and c.x <= x + s and c.y >= z - 1 and c.y <= z + s and \
+		not ((c.x == x - 1 or c.x == x + s) and (c.y == z - 1 or c.y == z + s))
+
+
+## The best free, reachable spot for `kind` covering or touching the resource cell `c` ((-1, -1): none).
+func res_spot(kind: String, c: Vector2i) -> Vector2i:
+	var s := Defs.size_of(kind)
+	var best := Vector2i(-1, -1)
+	var bd := INF
+	for z in range(c.y - s, c.y + 2):
+		for x in range(c.x - s, c.x + 2):
+			if not touches(x, z, s, c) or can_place(kind, x, z) != "" or not reach(Vector2i(x, z), s):
+				continue
+			var d := Vector2(x + s * 0.5, z + s * 0.5).distance_to(Vector2(c.x + 0.5, c.y + 0.5)) + (0.0 if on_road({"kind": kind, "x": x, "z": z}) else 0.6)
+			if d < bd:
+				bd = d
+				best = Vector2i(x, z)
+	return best
+
+
+## The best free, reachable spot for `kind` whose centre is within `radius` cells of cell c's centre.
+func near_spot(kind: String, c: Vector2i, radius: float) -> Vector2i:
+	var s := Defs.size_of(kind)
+	var best := Vector2i(-1, -1)
+	var bd := INF
+	var ri := int(ceil(radius)) + s
+	for z in range(c.y - ri, c.y + ri + 1):
+		for x in range(c.x - ri, c.x + ri + 1):
+			var d := Vector2(x + s * 0.5, z + s * 0.5).distance_to(Vector2(c.x + 0.5, c.y + 0.5))
+			if d > radius or can_place(kind, x, z) != "" or not reach(Vector2i(x, z), s):
+				continue
+			d += 0.0 if on_road({"kind": kind, "x": x, "z": z}) else 0.6
+			if d < bd:
+				bd = d
+				best = Vector2i(x, z)
+	return best
+
+
 # --- Packing (net store / saves) ------------------------------------------------------------------------
 
 static func pack_building(b: Dictionary) -> PackedInt32Array:
@@ -606,7 +749,8 @@ func serialize() -> Dictionary:
 	for id in buildings:
 		bl.append([int(id), pack_building(buildings[id])])
 	return {"island": island, "ter": ter.duplicate(), "trees": trees.duplicate(), "lay": lay.duplicate(), "b": bl,
-		"next_id": next_id}
+		"next_id": next_id, "res": res.duplicate(), "dist": dist.duplicate(), "open": open_mask, "lm": lm.duplicate(true),
+		"seed": seed_value}
 
 
 func deserialize(d: Dictionary) -> void:
@@ -621,6 +765,16 @@ func deserialize(d: Dictionary) -> void:
 		trees = tr.duplicate()
 	if l.size() == N * N:
 		lay = l.duplicate()
+	var rs: PackedByteArray = d.get("res", PackedByteArray())
+	var ds: PackedByteArray = d.get("dist", PackedByteArray())
+	if rs.size() == N * N:
+		res = rs.duplicate()
+	if ds.size() == N * N:
+		dist = ds.duplicate()
+	open_mask = int(d.get("open", 0xFF))
+	lm = (d.get("lm", []) as Array).duplicate(true)
+	seed_value = int(d.get("seed", 0))
+	dist_version += 1
 	for e in d.get("b", []):
 		var arr: Array = e
 		var id := int(arr[0])
