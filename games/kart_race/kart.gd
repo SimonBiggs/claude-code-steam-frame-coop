@@ -105,6 +105,8 @@ var drift_off_t := 0.0
 
 # Race stats (host), for the fun awards.
 var st_air := 0
+var st_short := 0  # trips through a split's shortcut lane
+var short_cd := 0.0
 var st_turbo := 0
 var st_items := 0
 var st_walls := 0
@@ -149,6 +151,11 @@ var flame: CPUParticles3D
 var sparks: CPUParticles3D
 var spark_level := -1
 var tag: Label3D
+var body_mi: MeshInstance3D
+var driver_mi: MeshInstance3D
+var helmet_mi: MeshInstance3D
+var hat := -1  # story.gd HATS index this driver wears (-1: none)
+var hat_node: Node3D
 var spin_vis := 0.0
 var wheel_roll := 0.0
 
@@ -162,6 +169,7 @@ func _ready() -> void:
 	body_mat.roughness = 0.45
 	body_mat.metallic = 0.1
 	var bm := MeshInstance3D.new()
+	body_mi = bm
 	bm.mesh = main.kart_body_mesh(color)
 	bm.material_override = body_mat
 	bm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -183,6 +191,7 @@ func _ready() -> void:
 	driver = Node3D.new()
 	body.add_child(driver)
 	var dm := MeshInstance3D.new()
+	driver_mi = dm
 	dm.mesh = main.driver_mesh(color)
 	dm.material_override = body_mat
 	dm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -191,6 +200,7 @@ func _ready() -> void:
 	driver.add_child(head)
 	head.position = Vector3(0, 1.25, 0.32)
 	var hm := MeshInstance3D.new()
+	helmet_mi = hm
 	hm.mesh = main.helmet_mesh(color)
 	hm.material_override = body_mat
 	hm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -245,6 +255,34 @@ func _ready() -> void:
 	tag.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
 	add_child(tag)
 	visible = active
+
+
+## A new name and colour (the story's champ of each place drives a CPU kart).
+func set_look(nm: String, col: Color) -> void:
+	if nm == kart_name and col == color:
+		return
+	kart_name = nm
+	color = col
+	if body_mi == null:
+		return
+	body_mi.mesh = main.kart_body_mesh(col)
+	driver_mi.mesh = main.driver_mesh(col)
+	helmet_mi.mesh = main.helmet_mesh(col)
+	tag.text = nm
+	tag.modulate = col.lightened(0.35)
+
+
+## Put on hat h (story.gd HATS, -1 = none) on top of the helmet.
+func set_hat(h: int) -> void:
+	if h == hat and (hat_node != null or h < 0):
+		return
+	hat = h
+	if hat_node != null:
+		hat_node.queue_free()
+		hat_node = null
+	if h >= 0 and head != null:
+		hat_node = main.hat_model(h)
+		head.add_child(hat_node)
 
 
 func _mesh(parent: Node3D, mesh: Mesh, mat: Material, pos: Vector3) -> MeshInstance3D:
@@ -330,6 +368,7 @@ func reset_race() -> void:
 	drift_level = 0
 	drift_dir = 0
 	st_air = 0
+	st_short = 0
 	st_turbo = 0
 	st_items = 0
 	st_walls = 0
@@ -472,7 +511,9 @@ func _auto_drive(delta: float) -> void:
 func auto_inputs(delta: float) -> void:
 	var ahead := 9.0 + absf(speed) * 0.5
 	cpu_lane = sin(main.race_t * 0.25 + index * 1.7) * 2.2
-	var p: Array = main.track.point_at(s + ahead, cpu_lane)
+	# Split lanes: pick one (every other kart takes the shortcut lane with the boost arrow).
+	var lane_side: float = main.track.shortcut_side(s + ahead) * (1.0 if index % 2 == 0 else -1.0)
+	var p: Array = main.track.point_at(s + ahead, main.track.lane_lat(s + ahead, lane_side, cpu_lane))
 	var tp: Vector3 = p[0]
 	var to := tp - position
 	var want := atan2(-to.x, -to.z)
@@ -497,6 +538,29 @@ func auto_inputs(delta: float) -> void:
 
 
 # --- Simulation --------------------------------------------------------------------------
+
+## Bumped a wall or island on side o (-1 / +1 along rt): turn along it, lose a little speed, bounce off.
+func _hit_side(rt: Vector3, o: float, fwd: Vector3, delta: float) -> void:
+	var into := fwd.dot(rt) * o * signf(speed if absf(speed) > 0.01 else 1.0)
+	if into <= 0.0:
+		return
+	var along := atan2(-tangent.x, -tangent.z)
+	if fwd.dot(tangent) < 0.0:
+		along = wrapf(along + PI, -PI, PI)
+	# VR: turn along the wall gently over a few frames instead of snapping the view round.
+	var w := clampf(into * 0.5, 0.0, 0.5) if cockpit == null else clampf(into * 3.0 * delta, 0.0, 0.06)
+	yaw = lerp_angle(yaw, along, w)
+	var impact := absf(speed) * into
+	var loss := absf(speed) * 0.35 * into
+	if cockpit != null:
+		loss = minf(loss, VR_DECEL * delta)
+	speed -= signf(speed) * loss
+	push_v -= rt * o * minf(impact * 0.3, 3.0) * (0.35 if cockpit != null else 1.0)
+	if impact > 3.0 and wall_cd <= 0.0:
+		wall_cd = 0.4
+		st_walls += 1
+		main.on_wall(self, impact)
+
 
 func sim(delta: float) -> void:
 	if not active:
@@ -581,30 +645,25 @@ func sim(delta: float) -> void:
 		ds -= L
 	total += ds
 	# Walls: slide along them, never stop dead.
-	var limit: float = main.track.wall_limit() - R * 0.7
+	var limit: float = main.track.wall_at(s) - R * 0.7
+	var rt := Vector3(-tangent.z, 0.0, tangent.x)
 	if absf(lat) > limit:
-		var rt := Vector3(-tangent.z, 0.0, tangent.x)
 		var sd := signf(lat)
 		position -= rt * (absf(lat) - limit) * sd
-		var into := fwd.dot(rt) * sd * signf(speed if absf(speed) > 0.01 else 1.0)
-		if into > 0.0:
-			var along := atan2(-tangent.x, -tangent.z)
-			if fwd.dot(tangent) < 0.0:
-				along = wrapf(along + PI, -PI, PI)
-			# VR: turn along the wall gently over a few frames instead of snapping the view round.
-			var w := clampf(into * 0.5, 0.0, 0.5) if cockpit == null else clampf(into * 3.0 * delta, 0.0, 0.06)
-			yaw = lerp_angle(yaw, along, w)
-			var impact := absf(speed) * into
-			var loss := absf(speed) * 0.35 * into
-			if cockpit != null:
-				loss = minf(loss, VR_DECEL * delta)
-			speed -= signf(speed) * loss
-			push_v -= rt * sd * minf(impact * 0.3, 3.0) * (0.35 if cockpit != null else 1.0)
-			if impact > 3.0 and wall_cd <= 0.0:
-				wall_cd = 0.4
-				st_walls += 1
-				main.on_wall(self, impact)
+		_hit_side(rt, sd, fwd, delta)
 		lat = limit * sd
+	# Split lanes: the flower-bed island in the middle is a wall too (pointy ends: you glance off).
+	var isl: float = main.track.island_at(s)
+	if isl > 0.0 and absf(lat) < isl + R * 0.7:
+		var edge := isl + R * 0.7
+		var sd := signf(lat) if absf(lat) > 0.01 else (1.0 if index % 2 == 0 else -1.0)
+		position += rt * (edge - absf(lat)) * sd
+		_hit_side(rt, -sd, fwd, delta)
+		lat = edge * sd
+	short_cd -= delta
+	if isl > 1.0 and short_cd <= 0.0 and signf(lat) == float(main.track.shortcut_side(s)):
+		short_cd = 6.0
+		st_short += 1
 	# Ground, hills and ramps.
 	var g: float = main.track.ground(s, lat, road_h)
 	if on_ground:

@@ -23,6 +23,13 @@ extends Node3D
 ## arrow = go, swaying left/right arrows = steer, a big red arrow = wrong way, turn this way) that fade
 ## after the kid has done the move twice; the VR wheel gets two shared Cannon Cove ghost hands that turn
 ## it and squeeze the trigger, and a glowing arrow over the wheel when going the wrong way.
+##
+## THE GRAND TOUR (story.gd, trackgen.gd): every track is generated from a seed (the host sends a few numbers,
+## each machine builds the same track). The session starts on TODAY'S TRACK (the same all day, with a see-
+## through GHOST of the day's best run); then BOLT the robot's tour: six places x three new tracks, each place's
+## CHAMP races in CPU slot 0 wearing the hat you win by finishing the place; won hats are worn by the drivers
+## (saved). Split lanes round flower-bed islands have a shorter shortcut lane with a boost arrow. Picture story
+## cards (TV + VR), a row of place pictures on the results, and one RUN telemetry line per race.
 
 const VrText := preload("res://core/vr_text.gd")
 const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
@@ -36,6 +43,12 @@ const KartScript := preload("res://games/kart_race/kart.gd")
 const CockpitScript := preload("res://games/kart_race/cockpit.gd")
 const JoinListenerScript := preload("res://games/kart_race/join_listener.gd")
 const UiKit := preload("res://core/ui_kit.gd")
+const TrackGen := preload("res://games/kart_race/trackgen.gd")
+const Story := preload("res://games/kart_race/story.gd")
+const Seeded := preload("res://core/seeded.gd")
+const StoryCard := preload("res://core/story_card.gd")
+const Telemetry := preload("res://core/telemetry.gd")
+const SaveScript := preload("res://core/save.gd")
 
 ## Simple mode picture cues on the TV views (no words): [pad button, icons, icon colour].
 ## The "go" button follows the player's controls (A on a pad, W / up on a keyboard), see _cue_button.
@@ -165,6 +178,17 @@ var gate_mat: StandardMaterial3D
 var gate_shown := -2
 var gate_track := -1
 var items_given := {}  # simple mode: which instant box effects happened (for the bot)
+# The Grand Tour story (story.gd): generated tracks, champs, hats, today's track and its ghost.
+var save: Node  # host / local only (core/save.gd)
+var track_desc: Array = []  # story.gd description of the generated track (empty: a hand-made track)
+var hats_won := 0
+var race_logged := false  # telemetry written for this race
+var ghost_rec: Array = []  # today's track: the best human's path this race (5 a second)
+var ghost_rec_t := 0.0
+var ghost_path: Array = []  # the ghost to race (today's best), [Vector3 ...] 5 a second
+var ghost_node: Node3D
+var story_count := 0  # story cards shown (bot)
+var tour_strips: Array = []  # results: a row of place pictures on each TV view
 
 var center_label: Label
 var help_label: Label
@@ -203,8 +227,15 @@ func _ready() -> void:
 
 
 func _setup_game(mode: String) -> void:
-	track.build(0)
+	if mode != "client":
+		_load_story()
+	if SIMPLE_MODE and mode != "client":
+		track_desc = Story.daily_desc()  # every session starts on TODAY'S TRACK (the practice too)
+		_build_desc()
+	else:
+		track.build(0)
 	_build_players(mode)
+	_apply_looks()
 	_build_views(mode)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_assign_joypads()
@@ -244,6 +275,8 @@ func _setup_game(mode: String) -> void:
 
 func _exit_tree() -> void:
 	XRServer.world_scale = 1.0
+	if net != null and net.mode != "client" and state == "race" and not race_logged and race_t > 5.0:
+		_race_telemetry("quit", [])
 
 
 # --- Helpers ----------------------------------------------------------------------------
@@ -510,6 +543,49 @@ func helmet_mesh(col: Color) -> ArrayMesh:
 	var m := _commit(st)
 	meshes[key] = m
 	return m
+
+
+## A hat (story.gd HATS) to sit on a helmet (the helmet's centre is the origin, radius 0.24).
+func hat_model(h: int) -> Node3D:
+	var root := Node3D.new()
+	root.name = "Hat"
+	var col: Color = Story.HATS[posmod(h, Story.HATS.size())][2]
+	var add := func(mesh: Mesh, c: Color, pos: Vector3, glow: float = 0.0) -> MeshInstance3D:
+		var mi := MeshInstance3D.new()
+		mi.mesh = mesh
+		mi.material_override = make_material(c, glow)
+		mi.position = pos
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		root.add_child(mi)
+		return mi
+	match posmod(h, Story.HATS.size()):
+		0:  # party hat
+			add.call(cyl_mesh(0.0, 0.15, 0.42, 12), col, Vector3(0, 0.4, 0))
+			add.call(cyl_mesh(0.105, 0.125, 0.06, 12), Color(1.0, 0.95, 0.4), Vector3(0, 0.3, 0))
+			add.call(sphere_mesh(0.06), Color(1, 1, 1), Vector3(0, 0.62, 0))
+		1:  # top hat
+			add.call(cyl_mesh(0.28, 0.28, 0.03, 16), col, Vector3(0, 0.2, 0))
+			add.call(cyl_mesh(0.17, 0.16, 0.32, 16), col, Vector3(0, 0.36, 0))
+			add.call(cyl_mesh(0.165, 0.165, 0.06, 16), Color(0.95, 0.2, 0.25), Vector3(0, 0.25, 0))
+		2:  # cowboy hat
+			add.call(cyl_mesh(0.36, 0.36, 0.03, 18), col.darkened(0.1), Vector3(0, 0.18, 0))
+			add.call(cyl_mesh(0.16, 0.19, 0.2, 14), col, Vector3(0, 0.28, 0))
+			add.call(cyl_mesh(0.19, 0.19, 0.04, 14), Color(0.95, 0.3, 0.3), Vector3(0, 0.2, 0))
+		3:  # wizard hat
+			add.call(cyl_mesh(0.32, 0.32, 0.03, 18), col.darkened(0.2), Vector3(0, 0.18, 0))
+			add.call(cyl_mesh(0.0, 0.17, 0.4, 14), col, Vector3(0, 0.39, 0))
+			add.call(sphere_mesh(0.05), Color(1.0, 0.92, 0.35), Vector3(0.0, 0.42, -0.14), 1.5)
+		4:  # woolly hat
+			add.call(sphere_mesh(0.255), col, Vector3(0, 0.05, 0))
+			add.call(cyl_mesh(0.26, 0.26, 0.08, 16), Color(1, 1, 1), Vector3(0, 0.04, 0))
+			add.call(sphere_mesh(0.08), Color(1, 1, 1), Vector3(0, 0.32, 0))
+		_:  # crown
+			add.call(cyl_mesh(0.2, 0.18, 0.14, 16), col, Vector3(0, 0.27, 0), 0.3)
+			for k in 5:
+				var a := TAU * k / 5.0
+				add.call(sphere_mesh(0.045), col.lightened(0.2), Vector3(cos(a) * 0.19, 0.37, sin(a) * 0.19), 0.3)
+			add.call(sphere_mesh(0.045), Color(0.95, 0.2, 0.3), Vector3(0, 0.27, -0.19), 0.8)
+	return root
 
 
 ## A spectator: body + head + arms (vertex colour R = skin, G = arm, so the crowd shader can wave).
@@ -1265,6 +1341,7 @@ func _process(delta: float) -> void:
 	track.update(dt, net.mode != "client")
 	_follow_weather()
 	_update_trophies(dt)
+	_update_ghost(dt)
 	_update_bananas_visual()
 	track.boxes_on = boxes_live()
 	_update_gate(dt)
@@ -1394,7 +1471,9 @@ func _on_continue() -> void:
 
 ## The next race of the Grand Prix (after the third race, a new cup on new tracks).
 func _next_race() -> void:
-	if SIMPLE_MODE:  # no cups: just the next track
+	if SIMPLE_MODE:  # no cups: the next track of the Grand Tour
+		if save != null:
+			track_desc = Story.story_desc(int(save.data["world"]), int(save.data["story_i"]))
 		_start_race(track_i + 1)
 		return
 	if cup_race >= 2:
@@ -1444,18 +1523,26 @@ func finish_distance() -> float:
 
 
 func _start_race(ti: int) -> void:
-	track_i = posmod(ti, TrackScript.count())
+	if SIMPLE_MODE and not track_desc.is_empty():
+		_build_desc()
+	else:
+		track_i = posmod(ti, TrackScript.count())
+		track.build(track_i)
+		_apply_track_look()
 	round_n += 1
-	track.build(track_i)
-	_apply_track_look()
+	race_logged = false
+	ghost_rec.clear()
+	ghost_rec_t = 0.0
 	_clear_trophies()
+	_clear_tour_strips()
 	set_lights(0)
 	if cup_pts.size() != karts.size():
 		cup_pts.resize(karts.size())
 	bananas.clear()
 	for i in track.box_t.size():
 		track.box_t[i] = 0.0
-	net.event("race", [track_i, laps, round_n, finish_frac])  # before the teleports: the TV builds the track first
+	net.event("race", [track_i, laps, round_n, finish_frac, track_desc, hats_won])  # before the teleports: the TV builds the track first
+	_race_story_start()
 	# CPU buddies fill the grid (fewer as more people play).
 	var humans := human_count()
 	var want_cpu := clampi(GRID_FILL - humans, 0, MAX_CPU)
@@ -1481,7 +1568,8 @@ func _start_race(ti: int) -> void:
 	solo_t = 0.0
 	if SIMPLE_MODE:
 		_show_center("", 0.0)
-		print("Race %d on %s: %d karts (%d human), %d laps, %.0f m to go" % [round_n, TrackScript.track_name(track_i), racer_count(), humans, laps, finish_distance()])
+		print("Race %d on %s: %d karts (%d human), %d laps, %.0f m to go%s" % [round_n, str(track.info["name"]), racer_count(), humans, laps,
+			finish_distance(), (" [%s, %d ramps, %d split lanes]" % [str(track_desc), track.ramps.size(), track.splits.size()]) if not track_desc.is_empty() else ""])
 		return
 	var title := "%s - RACE %d of 3\n%s · %d LAP%s" % [str(cup_info()["name"]), cup_race + 1, TrackScript.track_name(track_i), laps, "S" if laps > 1 else ""]
 	if round_n == 1:
@@ -1678,6 +1766,316 @@ func rubber(k) -> float:
 	return f
 
 
+# --- The Grand Tour (story.gd): generated tracks, champs, hats, today's track and its ghost -----------
+
+## Host / local: the save (story progress, hats, today's best ghost).
+func _load_story() -> void:
+	save = SaveScript.new()
+	save.game_id = Story.GAME_ID
+	save.defaults = Story.save_defaults()
+	add_child(save)
+	var d: Dictionary = save.data
+	if int(d["world"]) < 0:
+		d["world"] = Seeded.fresh_seed()
+		save.mark_dirty()
+	if OS.has_environment("KART_WORLD"):  # tests: a known tour
+		d["world"] = int(OS.get_environment("KART_WORLD"))
+	if OS.has_environment("KART_STORY"):
+		d["story_i"] = int(OS.get_environment("KART_STORY"))
+		d["hats"] = mini(Story.HATS.size(), int(d["story_i"]) / Story.RACES_PER_PLACE)
+	hats_won = int(d["hats"])
+	print("Grand Tour: world %d, race %d (%s), %d hats, %d golds" % [int(d["world"]), int(d["story_i"]),
+		str(Story.place(int(Story.where(int(d["story_i"]))[0])).name), hats_won, int(d["golds"])])
+
+
+## Build the generated track track_desc describes (every machine makes the same one from the numbers).
+func _build_desc() -> void:
+	if track.key == Story.key_for(track_desc) and track.built != null:
+		_apply_looks()
+		return
+	var t0 := Time.get_ticks_msec()
+	var r: Array = Story.track_for(track_desc)
+	var info: Dictionary = r[0]
+	track.build_info(info, String(r[1]))
+	track_i = track.track_i
+	_apply_track_look()
+	_apply_looks()
+	if info.has("fallback"):
+		print("SCRIPT ERROR: KART TRACK fell back to a hand-made track for %s" % str(track_desc))
+	print("Generated %s in %d ms (attempt %d)" % [str(info["name"]), Time.get_ticks_msec() - t0, int(info.get("attempt", -1))])
+
+
+## The place's champ drives CPU slot 0 (wearing the hat you can win there); won hats on the drivers.
+func _apply_looks() -> void:
+	if karts.is_empty():
+		return
+	var pl_i := Story.desc_place(track_desc) if not track_desc.is_empty() and not Story.is_daily(track_desc) else -1
+	var champ := String(Story.place(pl_i).champ) if pl_i >= 0 else ""
+	for j in cpus.size():
+		var c = cpus[j]
+		if j == 0 and pl_i >= 0:
+			c.set_look(champ, Story.place(pl_i).champ_color)
+			c.set_hat(pl_i)
+		else:
+			var nm: String = CPU_NAMES[j] if CPU_NAMES[j] != champ else CPU_NAMES[0]
+			c.set_look(nm, CPU_COLORS[j])
+			c.set_hat(-1)
+	for p in players:
+		p.set_hat(Story.hat_for(p.index, hats_won))
+
+
+## Host: a picture card on every machine (a word or two and one short line: no how-to text).
+func story(beat: Dictionary) -> void:
+	show_story(beat)
+	if net.mode == "host":
+		net.event("story", [beat])
+
+
+func show_story(beat: Dictionary) -> void:
+	story_count += 1
+	var opts := beat.duplicate()
+	opts["color"] = Color.html(String(beat.get("color", "ffd25a")))
+	var huds: Array = []
+	for p in players:
+		if p.active and p.is_local() and p.hud != null and is_instance_valid(p.hud) and p.hud.is_visible_in_tree():
+			huds.append(p.hud)
+	if not huds.is_empty():
+		StoryCard.show(huds, opts)
+	if cockpit != null and not cockpit.fake and cockpit.xr_camera != null:
+		StoryCard.show_vr(self, cockpit.xr_camera, opts)
+	print("Story card: %s - %s" % [String(beat.get("who", "")), String(beat.get("line", ""))])
+
+
+## Host / local at the countdown: tell the place's story, set up today's ghost.
+func _race_story_start() -> void:
+	if track_desc.is_empty():
+		return
+	_set_ghost([])
+	if Story.is_daily(track_desc):
+		var dd: Dictionary = save.data["daily"] if save != null else {}
+		var has_ghost := String(dd.get("date", "")) == Seeded.today() and int(dd.get("laps", 0)) == laps \
+			and absf(float(dd.get("frac", 1.0)) - finish_frac) < 0.01 and not (dd.get("ghost", []) as Array).is_empty()
+		if has_ghost:
+			_set_ghost(dd["ghost"])
+			net.event("ghost", [dd["ghost"]])
+		story({"who": "TODAY'S TRACK", "line": "Race your ghost!" if has_ghost else "A new track today!", "pic": "sun",
+			"color": "ffd25a", "duration": 4.0})
+		return
+	var w := Story.where(int(track_desc[2]))
+	var pl := Story.place(int(w[0]))
+	if int(w[1]) == 0:
+		story({"who": String(pl.name), "line": String(pl.intro) if int(w[2]) == 0 else "Bonus tour! Go go go!",
+			"pic": String(pl.pic), "color": (pl.color as Color).to_html(false), "duration": 4.0})
+	elif int(w[1]) == Story.RACES_PER_PLACE - 1 and cpus[0].active:
+		story({"who": String(pl.champ), "line": "Win my hat if you can!", "pic": String(Story.HATS[int(w[0])][1]),
+			"color": (pl.champ_color as Color).to_html(false), "duration": 3.5})
+
+
+## Host / local after each race: story progress (hats, champs), today's best and ghost, telemetry, cards.
+func _story_after_race(order: Array) -> void:
+	if save == null or track_desc.is_empty():
+		return
+	var d: Dictionary = save.data
+	var best = null
+	for k in order:
+		if not k.cpu:
+			best = k
+			break
+	d["races"] = int(d["races"]) + 1
+	if best != null and best.place == 1:
+		d["golds"] = int(d["golds"]) + 1
+	var beats: Array = []
+	if Story.is_daily(track_desc):
+		var dd: Dictionary = d["daily"]
+		var today := Seeded.today()
+		var same := String(dd.get("date", "")) == today and int(dd.get("laps", 0)) == laps and absf(float(dd.get("frac", 1.0)) - finish_frac) < 0.01
+		if best != null and best.finished and (not same or best.finish_time < float(dd.get("time", 0.0))):
+			d["daily"] = {"date": today, "time": best.finish_time, "ghost": ghost_rec.duplicate(), "laps": laps, "frac": finish_frac}
+			beats.append({"who": "BEST TODAY!", "line": "Your ghost will race you!", "pic": "trophy", "color": "ffd25a", "duration": 3.5})
+	else:
+		var i := int(track_desc[2])
+		var w := Story.where(i)
+		var pl := Story.place(int(w[0]))
+		var last := int(w[1]) == Story.RACES_PER_PLACE - 1
+		d["story_i"] = maxi(int(d["story_i"]), i + 1)
+		var champ = cpus[0]
+		if last and champ.active and best != null and best.place < champ.place:
+			d["champs"] = int(d["champs"]) + 1
+			beats.append({"who": "YOU BEAT %s!" % String(pl.champ), "line": "What a race!", "pic": "trophy",
+				"color": (pl.champ_color as Color).to_html(false), "duration": 3.0})
+		if last:
+			var won := Story.hats_after(i)
+			if won > hats_won:
+				var h: Array = Story.HATS[won - 1]
+				beats.append({"who": "NEW HAT!", "line": "A %s for you!" % String(h[0]).to_lower(), "pic": String(h[1]),
+					"color": (h[2] as Color).to_html(false), "duration": 3.5})
+				hats_won = won
+				d["hats"] = hats_won
+				_apply_looks()
+			beats.append({"who": String(pl.name), "line": String(pl.done), "pic": String(pl.pic),
+				"color": (pl.color as Color).to_html(false), "duration": 3.0})
+			if int(w[0]) == Story.PLACES.size() - 1:
+				d["tours"] = int(d["tours"]) + 1
+	save.mark_dirty()
+	_race_telemetry("finish", order)
+	net.event("race_hats", [hats_won])
+	for j in beats.size():
+		var b: Dictionary = beats[j]
+		if j == 0:
+			story(b)
+		else:
+			get_tree().create_timer(3.2 * j).timeout.connect(func() -> void:
+				if state == "results":
+					story(b))
+
+
+## One RUN line per race (core/telemetry.gd) for balancing from real play.
+func _race_telemetry(how: String, order: Array) -> void:
+	if race_logged or track_desc.is_empty():
+		return
+	race_logged = true
+	var humans := 0
+	var best_place := 99
+	var first_t := -1.0
+	var last_t := 0.0
+	var walls := 0
+	var air := 0
+	var short := 0
+	var items := 0
+	for k in karts:
+		if not k.active or k.cpu:
+			continue
+		humans += 1
+		best_place = mini(best_place, k.place)
+		walls += k.st_walls
+		air += k.st_air
+		short += k.st_short
+		items += k.st_items
+		if k.finished:
+			first_t = k.finish_time if first_t < 0.0 else minf(first_t, k.finish_time)
+			last_t = maxf(last_t, k.finish_time)
+	var cpu_n := 0
+	for c in cpus:
+		if c.active:
+			cpu_n += 1
+	var daily := Story.is_daily(track_desc)
+	var w := Story.where(int(track_desc[2])) if not daily else [Story.desc_place(track_desc), -1, -1]
+	Telemetry.run(Story.GAME_ID, {"race": round_n, "daily": daily, "story_i": int(track_desc[2]), "place": int(w[0]),
+		"step": int(w[1]), "tour": int(w[2]), "seed": int(track_desc[1]), "len": int(track.length), "laps": laps, "frac": finish_frac,
+		"ramps": track.ramps.size(), "splits": track.splits.size(), "humans": humans, "cpus": cpu_n, "best_place": best_place,
+		"first_t": snappedf(first_t, 0.1), "last_t": snappedf(last_t, 0.1), "race_t": snappedf(race_t, 0.1), "walls": walls,
+		"air": air, "shortcut": short, "items": items, "hats": hats_won, "vr": cockpit != null and not cockpit.fake,
+		"net": net.mode, "solo": humans == 1, "end": how})
+
+
+## Today's ghost: a see-through kart that drives the day's best run (path sampled 5 times a second).
+func _set_ghost(path: Array) -> void:
+	ghost_path = path
+	if ghost_node == null:
+		ghost_node = Node3D.new()
+		ghost_node.name = "Ghost"
+		add_child(ghost_node)
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = Color(0.75, 0.9, 1.0, 0.38)
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.emission_enabled = true
+		mat.emission = Color(0.4, 0.7, 1.0)
+		mat.emission_energy_multiplier = 0.6
+		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		for m in [kart_body_mesh(Color(0.8, 0.9, 1.0)), driver_mesh(Color(0.8, 0.9, 1.0)), helmet_mesh(Color(0.8, 0.9, 1.0))]:
+			var mi := MeshInstance3D.new()
+			mi.mesh = m
+			mi.material_override = mat
+			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			ghost_node.add_child(mi)
+		(ghost_node.get_child(2) as Node3D).position = Vector3(0, 1.25, 0.32)
+	ghost_node.visible = false
+
+
+func _update_ghost(dt: float) -> void:
+	# Host / local on today's track: record the leading human's run.
+	if net.mode != "client" and state == "race" and Story.is_daily(track_desc):
+		ghost_rec_t -= dt
+		if ghost_rec_t <= 0.0:
+			ghost_rec_t += 0.2
+			var who = null
+			for p in players:
+				if p.active and not p.finished and (who == null or p.total > who.total):
+					who = p
+			if who != null and ghost_rec.size() < 3000:
+				ghost_rec.append(who.position)
+	if ghost_node == null:
+		return
+	var show := not ghost_path.is_empty() and (state == "race" or state == "countdown")
+	ghost_node.visible = show
+	if not show:
+		return
+	var f := (race_t if state == "race" else 0.0) * 5.0
+	var i := clampi(int(f), 0, ghost_path.size() - 1)
+	var j := mini(i + 1, ghost_path.size() - 1)
+	var a: Vector3 = ghost_path[i]
+	var b: Vector3 = ghost_path[j]
+	ghost_node.position = a.lerp(b, clampf(f - i, 0.0, 1.0))
+	var dir := b - a
+	if Vector2(dir.x, dir.z).length() > 0.05:
+		ghost_node.rotation.y = lerp_angle(ghost_node.rotation.y, atan2(-dir.x, -dir.z), 1.0 - exp(-10.0 * dt))
+	if i >= ghost_path.size() - 1:
+		ghost_node.visible = false
+
+
+## Results: a row of the tour's place pictures on every TV view (done ones bright, this one bouncing,
+## dots for its three races). Pictures only.
+func _show_tour_strips() -> void:
+	_clear_tour_strips()
+	if track_desc.is_empty() or Story.is_daily(track_desc):
+		return
+	var w := Story.where(int(track_desc[2]))
+	var cur := int(w[0])
+	var step := int(w[1])
+	var tour := int(w[2])
+	for p in players:
+		if not (p.active and p.is_local() and p.hud != null and is_instance_valid(p.hud)):
+			continue
+		var row := HBoxContainer.new()
+		row.name = "TourStrip"
+		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.alignment = BoxContainer.ALIGNMENT_CENTER
+		var sc := clampf(p.hud.size.y / 540.0, 0.5, 1.4)
+		row.add_theme_constant_override("separation", int(14 * sc))
+		for i in Story.PLACES.size():
+			var pl := Story.place(i)
+			var col := VBoxContainer.new()
+			col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			col.alignment = BoxContainer.ALIGNMENT_CENTER
+			var done := tour > 0 or i < cur or (i == cur and step == Story.RACES_PER_PLACE - 1)
+			var pic := StoryCard.picture(String(pl.pic), (84.0 if i == cur else 60.0) * sc, pl.color)
+			pic.modulate = Color(1, 1, 1) if done or i == cur else Color(0.35, 0.35, 0.4, 0.8)
+			col.add_child(pic)
+			if i == cur:
+				var dots := HBoxContainer.new()
+				dots.alignment = BoxContainer.ALIGNMENT_CENTER
+				dots.mouse_filter = Control.MOUSE_FILTER_IGNORE
+				for k in Story.RACES_PER_PLACE:
+					var dot := UiKit.icon("dot", Color(1.0, 0.85, 0.3) if k <= step else Color(1, 1, 1, 0.3), 20.0 * sc)
+					dots.add_child(dot)
+				col.add_child(dots)
+			elif i < Story.HATS.size() and i < hats_won:
+				col.add_child(StoryCard.picture(String(Story.HATS[i][1]), 34.0 * sc, Story.HATS[i][2]))
+			row.add_child(col)
+		p.hud.add_child(row)
+		row.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
+		row.position.y -= 24.0 * sc
+		row.grow_horizontal = Control.GROW_DIRECTION_BOTH
+		tour_strips.append(row)
+
+
+func _clear_tour_strips() -> void:
+	for r in tour_strips:
+		if is_instance_valid(r):
+			r.queue_free()
+	tour_strips.clear()
+
+
 # --- Simple mode: practice rings, instant ? boxes, the finish party -------------------------
 
 ## Race 1 is just driving; the ? boxes come out from race 2.
@@ -1760,9 +2158,9 @@ func _update_gate(dt: float) -> void:
 		arrow.material_override = make_material(Color(1.0, 0.9, 0.2), 1.5)
 		arrow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		gate_node.add_child(arrow)
-	if want != gate_shown or track.track_i != gate_track:
+	if want != gate_shown or track.build_n != gate_track:
 		gate_shown = want
-		gate_track = track.track_i
+		gate_track = track.build_n
 		var gp: Array = gate_pos(want)
 		gate_node.position = gp[0]
 		gate_node.rotation = Vector3(0, float(gp[1]), 0)
@@ -1822,6 +2220,8 @@ func _simple_results(order: Array) -> void:
 	for k in order:
 		row.append("%s %s" % [ordinal(k.place), k.kart_name])
 	print("Results: " + " | ".join(row))
+	_story_after_race(order)
+	_show_tour_strips()
 
 
 ## TV view in simple mode: place (big, top right) and lap (top left); short headlines only.
@@ -2484,19 +2884,29 @@ func make_snapshot() -> Array:
 	if cockpit != null:
 		head = cockpit.head_local()
 	return [state, track_i, state_t, race_t, kd, bn, track.box_state(), head, round_n, laps, finish_frac,
-		cup_i, cup_race, PackedInt32Array(cup_pts), practice_gate]
+		cup_i, cup_race, PackedInt32Array(cup_pts), practice_gate, track_desc, hats_won]
 
 
 func apply_snapshot(s: Array) -> void:
 	if not ready_to_play or s.size() < 14:
 		return
 	var ti: int = s[1]
-	if ti != track.track_i or not synced:
+	var desc: Array = s[15] if s.size() > 15 else []
+	var hw: int = int(s[16]) if s.size() > 16 else hats_won
+	if desc != track_desc or not synced or (desc.is_empty() and ti != track.track_i):
 		synced = true
-		track_i = ti
-		track.build(ti)
-		_apply_track_look()
+		track_desc = desc
+		hats_won = hw
+		if desc.is_empty():
+			track_i = ti
+			track.build(ti)
+			_apply_track_look()
+		else:
+			_build_desc()
 		_relocate_local()
+	elif hw != hats_won:
+		hats_won = hw
+		_apply_looks()
 	var new_state: String = s[0]
 	if new_state != state:
 		state = new_state
@@ -2580,8 +2990,15 @@ func apply_event(kind: String, args: Array) -> void:
 			laps = args[1]
 			round_n = args[2]
 			finish_frac = args[3]
-			track.build(track_i)
-			_apply_track_look()
+			track_desc = args[4] if args.size() > 4 else []
+			hats_won = int(args[5]) if args.size() > 5 else hats_won
+			if track_desc.is_empty():
+				track.build(track_i)
+				_apply_track_look()
+			else:
+				_build_desc()
+			_clear_tour_strips()
+			_set_ghost([])
 			_relocate_local()
 			_clear_trophies()
 			state = "countdown"
@@ -2635,6 +3052,14 @@ func apply_event(kind: String, args: Array) -> void:
 			var k = kart_by_index(int(args[0]))
 			if k != null and k.is_local():
 				k.boost(float(args[1]))
+		"story":
+			show_story(args[0])
+		"ghost":
+			_set_ghost(args[0])
+		"race_hats":
+			hats_won = int(args[0])
+			_apply_looks()
+			_show_tour_strips()
 		"remote_pause":
 			get_tree().paused = args[0]
 			_set_pause_banner(args[0], "The VR player paused the game")
@@ -2791,8 +3216,8 @@ func _update_minimap(p) -> void:
 	var mm: Control = p.minimap
 	if mm == null:
 		return
-	if map_track != track.track_i:
-		map_track = track.track_i
+	if map_track != track.build_n:
+		map_track = track.build_n
 		var lo := Vector2(INF, INF)
 		var hi := Vector2(-INF, -INF)
 		for q in track.pts:
