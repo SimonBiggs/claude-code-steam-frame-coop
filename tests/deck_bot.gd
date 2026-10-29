@@ -65,6 +65,48 @@ class Runner extends Node:
 				n += 1
 		return n
 
+	## Every view on screen shows the game, not the plain grey clear colour of a SubViewport with no camera
+	## (a split view whose Camera3D isn't current, e.g. a hidden prebuilt view: Deck mode builds the second
+	## player's view before anyone joins). Headless: a current camera per view. Rendering (godot.launch of this
+	## scene at 1280x800): also most sampled pixels must not be the default clear colour.
+	func _views_render(id: String) -> void:
+		var clear: Color = ProjectSettings.get_setting("rendering/environment/defaults/default_clear_color", Color(0.3, 0.3, 0.3))
+		var drawn := DisplayServer.get_name() != "headless"
+		if drawn:
+			await RenderingServer.frame_post_draw
+		for c in game.find_children("*", "SubViewportContainer", true, false):
+			var svc := c as SubViewportContainer
+			if not svc.is_visible_in_tree() or svc.size.x <= 8.0 or svc.size.y <= 8.0:
+				continue
+			for vp in svc.get_children():
+				if not vp is SubViewport:
+					continue
+				var v := vp as SubViewport
+				var cam3: Camera3D = v.get_camera_3d()
+				var has_cam := (cam3 != null and cam3.is_inside_tree()) or _draws_2d(v)
+				kit.assert_true(has_cam, "%s: view %s has a camera (no camera = a plain grey view)" % [id, svc.name])
+				if not drawn or not has_cam:
+					continue
+				var img := v.get_texture().get_image()
+				if img == null or img.is_empty():
+					continue
+				var greyish := 0
+				var n := 0
+				for yi in 12:
+					for xi in 12:
+						var px := img.get_pixel(int((xi + 0.5) * img.get_width() / 12.0), int((yi + 0.5) * img.get_height() / 12.0))
+						n += 1
+						if absf(px.r - clear.r) < 0.02 and absf(px.g - clear.g) < 0.02 and absf(px.b - clear.b) < 0.02:
+							greyish += 1
+				kit.assert_true(greyish * 10 < n * 6, "%s: view %s shows the game, not plain grey (%d/%d clear-colour pixels)" % [id, svc.name, greyish, n])
+
+	## A view with no 3D camera at all is fine when it draws 2D (a Camera2D, or Node2D content of its own);
+	## a view holding Camera3Ds none of which is current renders plain grey.
+	func _draws_2d(v: SubViewport) -> bool:
+		if not v.find_children("*", "Camera3D", true, false).is_empty():
+			return false
+		return not v.find_children("*", "Node2D", true, false).is_empty()
+
 	## Players this machine controls: party seats, or classic players that have a view.
 	func local_players() -> int:
 		var party: Variant = game.get("party")
@@ -119,6 +161,7 @@ class Runner extends Node:
 		var p1 := local_players()
 		kit.assert_true(v1 <= 1, "%s: the Deck shows one view, not split screen (%d views)" % [id, v1])
 		kit.assert_true(p1 <= 1, "%s: one player on the Deck (%d local players)" % [id, p1])
+		await _views_render(id)
 		await press(PAD1, JOY_BUTTON_A)
 		await frames(20)
 		kit.assert_true(views() <= 1, "%s: pressing A again on the Deck's own controls adds nobody (%d views)" % [id, views()])
@@ -129,6 +172,7 @@ class Runner extends Node:
 		await frames(60)
 		var p2 := local_players()
 		kit.assert_true(p2 == 2 or views() == 2, "%s: a second pad pressing A drops in a second player (%d players, %d views)" % [id, p2, views()])
+		await _views_render(id)
 		kit.info("%s: deck alone %d view(s) / %d player(s); with a friend %d view(s) / %d player(s)" % [id, v1, p1, views(), p2])
 		# Start's pause menu: it alone says PAUSED (a game's own PAUSED card used to show through its buttons).
 		var menus := get_tree().get_nodes_in_group("pause_menu")
