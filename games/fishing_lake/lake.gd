@@ -7,6 +7,7 @@ extends Node3D
 ## markers. Repeated props are MultiMeshes, so it stays a few dozen draw calls.
 
 const FishScript := preload("res://games/fishing_lake/fish.gd")
+const OLLIE_FUR := Color(0.62, 0.42, 0.25)  # Ollie the otter's fur (book.gd OLLIE)
 
 const LAKE_C := Vector3(0.0, 0.0, -10.0)  # centre of the round lake (water level y = 0)
 const LAKE_R := 22.0
@@ -1054,3 +1055,324 @@ func set_daylight(p: float, rain: float, vr: bool) -> void:
 	fireflies2.emitting = ff_on
 	if vr:
 		sun.shadow_enabled = false
+
+
+# --- The seeded lake: fishing spots, Ollie's wish, the fish book, Ollie ---------------------------
+
+var spots_root: Node3D
+var spot_bubbles: Array[CPUParticles3D] = []
+var wish_root: Node3D
+var wish_fish: MeshInstance3D
+var wish_beam_mat: StandardMaterial3D
+var book_root: Node3D
+var book_slots: Array = []  # [kind, MeshInstance3D fish, MeshInstance3D frame, Label3D count]
+var book_count: Label3D
+var book_wish := -1
+var ollie: Node3D
+var ollie_head: Node3D
+var ollie_jump := 0.0
+var _spots_key := ""
+
+
+## Build the day's fishing spots on the water (lakegen.gd spots: hab, pos, r).
+func set_spots(spots: Array) -> void:
+	var key := var_to_str(spots)
+	if key == _spots_key:
+		return
+	_spots_key = key
+	if spots_root != null:
+		spots_root.queue_free()
+	spot_bubbles.clear()
+	spots_root = Node3D.new()
+	add_child(spots_root)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(key)
+	for s in spots:
+		var root := Node3D.new()
+		spots_root.add_child(root)
+		var p: Vector3 = s.pos
+		root.position = Vector3(p.x, 0.0, p.z)
+		var r: float = s.r
+		match String(s.hab):
+			"lily":
+				var pads: Array[Transform3D] = []
+				for i in 9:
+					var a := rng.randf() * TAU
+					var d := sqrt(rng.randf()) * r * 0.9
+					var sz := rng.randf_range(0.3, 0.55)
+					pads.append(Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(sz, 1.0, sz)), Vector3(sin(a) * d, 0.03, cos(a) * d)))
+				_multimesh(main.cyl_mesh(1.0, 1.0, 0.03, 12), main.make_material(Color(0.25, 0.65, 0.25), 0.05), pads, [], root)
+				for i in 3:
+					var fl := MeshInstance3D.new()
+					fl.mesh = main.sphere_mesh(0.12)
+					fl.material_override = main.make_material(Color(1.0, 0.6, 0.8) if i != 1 else Color(1.0, 0.95, 0.95), 0.25)
+					fl.position = pads[i * 3].origin + Vector3(0, 0.08, 0)
+					fl.scale = Vector3(1.0, 0.7, 1.0)
+					root.add_child(fl)
+			"reeds":
+				var stems: Array[Transform3D] = []
+				var tops: Array[Transform3D] = []
+				for i in 22:
+					var a := rng.randf() * TAU
+					var d := sqrt(rng.randf()) * r * 0.85
+					var h := rng.randf_range(1.0, 1.9)
+					var tilt := Basis(Vector3(cos(a), 0, -sin(a)), rng.randf_range(-0.12, 0.12))
+					var base := Vector3(sin(a) * d, 0.0, cos(a) * d)
+					stems.append(Transform3D(tilt.scaled(Vector3(1.0, h, 1.0)), base + tilt * Vector3(0, h * 0.5, 0)))
+					if i % 2 == 0:
+						tops.append(Transform3D(tilt, base + tilt * Vector3(0, h - 0.1, 0)))
+				_multimesh(main.cyl_mesh(0.025, 0.035, 1.0, 5), main.make_material(Color(0.4, 0.6, 0.25), 0.0), stems, [], root)
+				_multimesh(main.cyl_mesh(0.06, 0.06, 0.3, 6), main.make_material(Color(0.4, 0.25, 0.15), 0.0), tops, [], root)
+			"deep":
+				var disc := MeshInstance3D.new()
+				disc.mesh = main.cyl_mesh(r, r, 0.01, 24)
+				var dm := StandardMaterial3D.new()
+				dm.albedo_color = Color(0.02, 0.08, 0.2, 0.55)
+				dm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+				dm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+				disc.material_override = dm
+				disc.position.y = 0.015
+				disc.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+				root.add_child(disc)
+				var bub := CPUParticles3D.new()
+				bub.amount = 10
+				bub.lifetime = 1.4
+				bub.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+				bub.emission_sphere_radius = r * 0.6
+				bub.direction = Vector3.UP
+				bub.gravity = Vector3.ZERO
+				bub.initial_velocity_min = 0.15
+				bub.initial_velocity_max = 0.35
+				bub.mesh = main.sphere_mesh(0.06)
+				bub.material_override = main.make_material(Color(0.8, 0.95, 1.0), 0.6)
+				bub.scale = Vector3(1.0, 0.12, 1.0)
+				root.add_child(bub)
+				spot_bubbles.append(bub)
+			"rocks":
+				var stones: Array[Transform3D] = []
+				for i in 5:
+					var a := rng.randf() * TAU
+					var d := rng.randf_range(0.4, r * 0.85)
+					var sz := rng.randf_range(0.35, 0.75)
+					stones.append(Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(sz * 1.2, sz * 0.7, sz)), Vector3(sin(a) * d, -0.05, cos(a) * d)))
+				_multimesh(main.sphere_mesh(1.0), main.make_material(Color(0.55, 0.55, 0.58), 0.0), stones, [], root)
+			"sandy":
+				var sand := MeshInstance3D.new()
+				sand.mesh = main.cyl_mesh(r, r, 0.01, 24)
+				var sm := StandardMaterial3D.new()
+				sm.albedo_color = Color(0.95, 0.88, 0.6, 0.45)
+				sm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+				sm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+				sand.material_override = sm
+				sand.position.y = 0.012
+				sand.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+				root.add_child(sand)
+				var shells: Array[Transform3D] = []
+				for i in 4:
+					var a := rng.randf() * TAU
+					var d := rng.randf_range(0.3, r * 0.8)
+					shells.append(Transform3D(Basis().scaled(Vector3(1.0, 0.5, 1.0)), Vector3(sin(a) * d, 0.02, cos(a) * d)))
+				_multimesh(main.sphere_mesh(0.1), main.make_material(Color(1.0, 0.8, 0.75), 0.2), shells, [], root)
+
+
+## Ollie's wish: a glowing picture of the fish floating over the spot where it lives (kind < 0: none).
+func set_wish(kind: int, pos: Vector3) -> void:
+	if wish_root == null:
+		wish_root = Node3D.new()
+		add_child(wish_root)
+		wish_fish = MeshInstance3D.new()
+		wish_fish.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		wish_root.add_child(wish_fish)
+		var beam := MeshInstance3D.new()
+		beam.mesh = main.cyl_mesh(0.12, 0.5, 2.2, 10)
+		wish_beam_mat = StandardMaterial3D.new()
+		wish_beam_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		wish_beam_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		wish_beam_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		beam.material_override = wish_beam_mat
+		beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		beam.position.y = 1.1
+		wish_root.add_child(beam)
+	wish_root.visible = kind >= 0
+	if kind < 0:
+		return
+	wish_root.position = Vector3(pos.x, 0.0, pos.z)
+	if int(wish_fish.get_meta("kind", -1)) != kind:
+		wish_fish.set_meta("kind", kind)
+		wish_fish.mesh = main.fish_mesh(kind)
+		wish_fish.material_override = main.fish_material(kind)
+		var len: float = FishScript.TYPES[kind]["len"]
+		wish_fish.scale = Vector3.ONE * clampf(0.9 / len, 0.6, 3.5)
+		var c: Color = FishScript.TYPES[kind]["col"]
+		wish_beam_mat.albedo_color = Color(c.r, c.g, c.b, 0.3).lerp(Color(1.0, 0.95, 0.6, 0.3), 0.5)
+
+
+## The fish book: a picture board (caught fish in colour, missing ones as dark shadows, Ollie's wish framed).
+func build_book(kinds: Array) -> void:
+	var board := journal_label.get_parent() as Node3D
+	book_root = Node3D.new()
+	board.add_child(book_root)
+	var dark := StandardMaterial3D.new()
+	dark.albedo_color = Color(0.06, 0.08, 0.14)
+	dark.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	var frame_mat: StandardMaterial3D = main.make_material(Color(1.0, 0.85, 0.3), 1.5)
+	for i in kinds.size():
+		var k: int = kinds[i]
+		var x := -1.05 + 0.7 * float(i % 4)
+		var y := 3.0 - 0.6 * float(i / 4)
+		var frame := MeshInstance3D.new()
+		frame.mesh = main.box_mesh(Vector3(0.64, 0.52, 0.02))
+		frame.material_override = frame_mat
+		frame.position = Vector3(x, y, -0.05)
+		frame.visible = false
+		book_root.add_child(frame)
+		var bg := MeshInstance3D.new()
+		bg.mesh = main.box_mesh(Vector3(0.58, 0.46, 0.02))
+		bg.material_override = main.make_material(Color(0.85, 0.93, 0.95), 0.1)
+		bg.position = Vector3(x, y, -0.04)
+		book_root.add_child(bg)
+		var f := MeshInstance3D.new()
+		f.mesh = main.fish_mesh(k)
+		f.set_meta("dark", dark)
+		f.material_override = dark
+		var len: float = FishScript.TYPES[k]["len"]
+		f.scale = Vector3.ONE * (0.4 / maxf(len, 0.3)) * (0.75 if k == FishScript.LEGEND else 1.0)
+		f.rotation.y = PI * 0.5
+		f.position = Vector3(x, y, 0.06)
+		f.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		book_root.add_child(f)
+		var cl := Label3D.new()
+		cl.font_size = 44
+		cl.pixel_size = 0.0028
+		cl.outline_size = 10
+		cl.position = Vector3(x + 0.2, y - 0.16, 0.1)
+		cl.text = ""
+		book_root.add_child(cl)
+		book_slots.append([k, f, frame, cl])
+	book_count = Label3D.new()
+	book_count.font_size = 90
+	book_count.pixel_size = 0.0032
+	book_count.outline_size = 16
+	book_count.modulate = Color(1.0, 0.95, 0.7)
+	book_count.position = Vector3(0.0, 3.55, 0.08)
+	book_root.add_child(book_count)
+	_build_ollie(board)
+
+
+## counts: kind -> times caught (0 / missing = a shadow); wish: Ollie's fish (framed, pulsing).
+var _book_key := ""
+
+
+func update_book(counts: Dictionary, wish: int) -> void:
+	if book_root == null:
+		return
+	var key := "%s/%d" % [str(counts), wish]
+	if key == _book_key:
+		return
+	_book_key = key
+	var n := 0
+	for s in book_slots:
+		var k: int = s[0]
+		var c := int(counts.get(k, 0))
+		var f: MeshInstance3D = s[1]
+		if c > 0:
+			n += 1
+			f.material_override = main.fish_material(k)
+		else:
+			f.material_override = f.get_meta("dark")
+		(s[3] as Label3D).text = ("x%d" % c) if c > 1 else ""
+		(s[2] as MeshInstance3D).visible = k == wish
+	book_wish = wish
+	book_count.text = "%d / %d" % [n, book_slots.size()]
+
+
+## Ollie the otter sits on a log beside the book (he keeps it).
+func _build_ollie(board: Node3D) -> void:
+	ollie = Node3D.new()
+	add_child(ollie)
+	var bp := board.global_position if board.is_inside_tree() else board.position
+	ollie.position = Vector3(bp.x + 1.9, DECK - 0.05, bp.z + 0.4)
+	ollie.rotation.y = atan2(-ollie.position.x, JETTY_END_Z + 2.0 - ollie.position.z)
+	var log_m := MeshInstance3D.new()
+	log_m.mesh = main.cyl_mesh(0.28, 0.28, 1.1, 10)
+	log_m.material_override = main.make_material(Color(0.45, 0.3, 0.18), 0.0)
+	log_m.rotation.z = PI * 0.5
+	log_m.position.y = -0.2
+	ollie.add_child(log_m)
+	var fur: StandardMaterial3D = main.make_material(OLLIE_FUR, 0.05)
+	var belly: StandardMaterial3D = main.make_material(Color(0.92, 0.82, 0.65), 0.05)
+	var body := MeshInstance3D.new()
+	body.mesh = main.sphere_mesh(0.22)
+	body.material_override = fur
+	body.scale = Vector3(1.0, 1.5, 0.9)
+	body.position.y = 0.3
+	ollie.add_child(body)
+	var tum := MeshInstance3D.new()
+	tum.mesh = main.sphere_mesh(0.16)
+	tum.material_override = belly
+	tum.scale = Vector3(1.0, 1.5, 0.6)
+	tum.position = Vector3(0, 0.27, 0.12)
+	ollie.add_child(tum)
+	var tail := MeshInstance3D.new()
+	tail.mesh = main.cyl_mesh(0.03, 0.09, 0.5, 8)
+	tail.material_override = fur
+	tail.rotation.x = -1.2
+	tail.position = Vector3(0, 0.1, -0.35)
+	ollie.add_child(tail)
+	ollie_head = Node3D.new()
+	ollie_head.position.y = 0.68
+	ollie.add_child(ollie_head)
+	var head := MeshInstance3D.new()
+	head.mesh = main.sphere_mesh(0.17)
+	head.material_override = fur
+	head.scale = Vector3(1.1, 0.95, 1.0)
+	ollie_head.add_child(head)
+	var snout := MeshInstance3D.new()
+	snout.mesh = main.sphere_mesh(0.09)
+	snout.material_override = belly
+	snout.scale = Vector3(1.2, 0.8, 0.9)
+	snout.position = Vector3(0, -0.04, 0.13)
+	ollie_head.add_child(snout)
+	var black: StandardMaterial3D = main.make_material(Color(0.08, 0.06, 0.06), 0.0)
+	for e in [[-0.07, 0.04, 0.14, 0.03], [0.07, 0.04, 0.14, 0.03], [0.0, -0.01, 0.22, 0.035]]:
+		var m := MeshInstance3D.new()
+		m.mesh = main.sphere_mesh(e[3])
+		m.material_override = black
+		m.position = Vector3(e[0], e[1], e[2])
+		ollie_head.add_child(m)
+	for sx in [-1.0, 1.0]:
+		var ear := MeshInstance3D.new()
+		ear.mesh = main.sphere_mesh(0.05)
+		ear.material_override = fur
+		ear.position = Vector3(0.12 * sx, 0.12, -0.02)
+		ollie_head.add_child(ear)
+	# His book (a little red one in his paws).
+	var bk := MeshInstance3D.new()
+	bk.mesh = main.box_mesh(Vector3(0.22, 0.16, 0.05))
+	bk.material_override = main.make_material(Color(0.85, 0.2, 0.2), 0.1)
+	bk.position = Vector3(0, 0.36, 0.22)
+	bk.rotation.x = -0.4
+	ollie.add_child(bk)
+
+
+## A new page: Ollie jumps for joy.
+func ollie_cheer() -> void:
+	ollie_jump = 1.0
+
+
+func update_seeded(delta: float) -> void:
+	if wish_root != null and wish_root.visible:
+		wish_fish.position = Vector3(0, 1.9 + sin(t * 2.0) * 0.15, 0)
+		wish_fish.rotation.y += delta * 1.2
+		wish_beam_mat.albedo_color.a = 0.22 + 0.1 * sin(t * 3.0)
+	if book_root != null:
+		for s in book_slots:
+			var fr: MeshInstance3D = s[2]
+			if fr.visible:
+				fr.scale = Vector3.ONE * (1.0 + 0.05 * sin(t * 4.0))
+	if ollie != null:
+		ollie_jump = maxf(0.0, ollie_jump - delta * 0.8)
+		var hop := absf(sin(ollie_jump * PI * 3.0)) * 0.35 * ollie_jump
+		ollie.position.y = DECK - 0.05 + hop
+		ollie_head.rotation.y = sin(t * 0.7) * 0.4
+		ollie_head.rotation.z = sin(t * 1.1) * 0.08
