@@ -27,6 +27,25 @@ const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV p
 ##    handle when the ring is on the target, instead of "LET GO!"). A practice miss shows a glowing arrow
 ##    from the splash towards the target instead of "TOO SHORT!" / "TOO FAR!".
 const SIMPLE_MODE := true
+## STORY + DEPTH: POLLY the parrot sails with the crew. Every wave's plan comes from a seed (voyagegen.gd: which ships,
+## tentacles and the Kraken come, in what order, from which side and angle, checked by a validator), all waves of a
+## voyage from one voyage seed. Every wave cleared puts a TREASURE on the stern castle's shelf (a gold coin for ship
+## waves, a pearl, an anchor, a starfish, the Kraken's crown: saved), a string of flags in the rigging grows a flag each
+## play-day, and once the crew has beaten the Kraken Polly wears a little gold crown. TODAY'S VOYAGE: the first voyage
+## each day is the same on every machine and its treasures are golden. Picture cards (story_pictures.gd) tell it.
+## Telemetry: one RUN line per wave, when the ship sinks and on quit. Networked: the host sends the treasures, flags
+## and crown ("treasures") and the cards ("story") as events; the wave plans stay on the host (ships are snapshots).
+const VoyageGen := preload("res://games/cannon_cove/voyagegen.gd")
+const Seeded := preload("res://core/seeded.gd")
+const Save := preload("res://core/save.gd")
+const Telemetry := preload("res://core/telemetry.gd")
+const StoryCard := preload("res://core/story_card.gd")
+const GAME_ID := "cannon_cove"
+const TREASURE_COLORS := {"doubloon": Color(1.0, 0.8, 0.2), "pearl": Color(1.0, 0.75, 0.85), "anchor": Color(0.6, 0.75, 0.95),
+	"starfish": Color(1.0, 0.55, 0.25), "crown": Color(1.0, 0.85, 0.25)}
+const TREASURE_CHEERS := {1: "Our first treasure!", 5: "Five treasures!", 10: "Ten treasures!", 25: "So much treasure!"}
+const TREASURE_LINES := {"doubloon": "A gold coin!", "pearl": "A shiny pearl!", "anchor": "An anchor!", "starfish": "A starfish!", "crown": "The Kraken's crown!"}
+const FLAG_COLORS: Array[Color] = [Color(0.95, 0.2, 0.15), Color(1.0, 0.85, 0.2), Color(0.2, 0.45, 1.0), Color(0.2, 0.8, 0.3), Color(0.97, 0.95, 0.88)]
 const UiKit := preload("res://core/ui_kit.gd")
 
 ## Simple mode picture cues on the TV views (no words): [pad buttons, icons, icon colour]. The buttons
@@ -141,7 +160,7 @@ var hammer_t := 0.0
 # The voyage.
 var phase := "practice"  # practice, wave, break, victory
 var parts: Dictionary = {}  # pieces of the world that animate (see world.gd build())
-var spawn_queue: Array[String] = []
+var spawn_queue: Array = []  # this wave's plan (voyagegen.gd entries), consumed from the front
 var practice_hits := 0
 var practice_t := 0.0
 var practice_spawn_t := 1.0
@@ -177,6 +196,20 @@ var say_t := 0.0
 var simple := SIMPLE_MODE  # other scripts read main.simple
 var props: Node3D  # simple mode: touchable things beside each cannon (props.gd)
 var ghost_hand: Node3D  # simple mode: the practice ghost hand (VR gunner only)
+# --- Polly's treasures + the seeded voyage (host / local own them; TV machines get the treasures + cards) ---
+var save: Node
+var voyage_seed := 0
+var voyage_daily := false
+var wave_t := 0.0
+var wave_plan_kinds: Array = []
+var treasure_list: Array = []  # [[kind, play-day, golden], ...]
+var treasure_days := 0
+var treasure_crowned := false
+var treasure_root: Node3D
+var treasure_count := -1
+var treasure_resend := 0.0
+var story_queue: Array = []
+var story_t := 0.0
 
 
 func _ready() -> void:
@@ -227,6 +260,8 @@ func _setup_game(mode: String) -> void:
 	ready_to_play = true
 	print("Cannon Cove: %s mode" % mode)
 	_rejoin_party()
+	if mode != "client":
+		_start_voyage()
 	if SIMPLE_MODE:
 		_show_center("ALL ABOARD!" if mode == "client" else "CANNON COVE!", 2.0)
 		parrot_say("")
@@ -1242,6 +1277,11 @@ func _process(delta: float) -> void:
 			mirror_vp.render_target_update_mode = SubViewport.UPDATE_ONCE
 	_update_hud()
 	_update_guides()
+	_update_story(delta)
+	if net.mode == "host" and net.connected and save != null:
+		treasure_resend -= delta
+		if treasure_resend <= 0.0:
+			_send_treasures()  # a machine that missed them (or joined later) catches up
 	if props:
 		props.tick(delta)
 	if players.size() < MAX_PLAYERS:
@@ -1271,6 +1311,7 @@ func _process(delta: float) -> void:
 		return  # hold the waves until the deckhands join
 	_update_water(delta)
 	_random_events(delta)
+	wave_t += delta
 	if phase == "victory":
 		victory_t -= delta
 		if victory_t <= 0.0:
@@ -1422,67 +1463,13 @@ func _random_events(delta: float) -> void:
 	_spawn_target("supply" if event_flip else "chest")
 
 
-func _plan_wave(w: int) -> Array[String]:
-	var q: Array[String] = []
-	if SIMPLE_MODE:
-		return _plan_simple_wave(w)
-	match w:
-		1:
-			q.assign(["raider", "raider"])
-		2:
-			q.assign(["raider", "raider", "raider"])
-		3:
-			q.assign(["raider", "fireship", "galleon", "fireship", "raider"])
-		4:
-			q.assign(["raider", "tentacle", "treasure", "galleon", "raider", "tentacle"])
-		5:
-			q.assign(["raider", "fireship", "galleon", "tentacle", "raider", "fireship", "galleon"])
-		BOSS_WAVE:
-			q.assign(["kraken", "wait", "raider"])
-		_:
-			var n := mini(3 + (w - BOSS_WAVE), 9)
-			for i in n:
-				q.append(["raider", "galleon", "raider", "fireship"][i % 4])
-			for i in 1 + (w - BOSS_WAVE) / 2:
-				q.insert(mini(q.size(), 2 + i * 2), "tentacle")
-			if w % 2 == 0:
-				q.insert(2, "treasure")
-	# A bigger crew (more than two deckhands) faces a few more ships and tentacles.
-	var extra := crew_extra()
-	for i in extra / 2:
-		q.append("raider")
-	if extra >= 3 and w >= 3:
-		q.append("tentacle")
-	return q
-
-
-## Simple mode: one new thing per wave. 1-2 slow ships (their shots don't hurt), 3 leaks, 4 boarders,
-## 5 the sea monster's tentacles, 6 the Kraken; bonus seas bring back the bomb boats.
-func _plan_simple_wave(w: int) -> Array[String]:
-	var q: Array[String] = []
-	match w:
-		1:
-			q.assign(["raider", "raider"])
-		2:
-			q.assign(["raider", "raider", "raider"])
-		3:
-			q.assign(["raider", "raider", "raider"])
-		4:
-			q.assign(["raider", "raider", "galleon", "raider"])
-		5:
-			q.assign(["raider", "tentacle", "raider", "tentacle", "galleon"])
-		BOSS_WAVE:
-			q.assign(["kraken", "wait", "raider"])
-		_:
-			var n := mini(3 + (w - BOSS_WAVE), 8)
-			for i in n:
-				q.append(["raider", "galleon", "raider", "fireship"][i % 4] if w > BOSS_WAVE + 1 else "raider")
-			for i in 1 + (w - BOSS_WAVE) / 3:
-				q.insert(mini(q.size(), 2 + i * 2), "tentacle")
-	var extra := crew_extra()
-	for i in extra / 2:
-		q.append("raider")
-	return q
+## This wave's plan from the voyage seed (voyagegen.gd; simple mode: one new thing per wave - 1-2 slow ships whose
+## shots don't hurt, 3 leaks, 4 boarders, 5 the sea monster's tentacles, 6 the Kraken; bonus seas bring back the bomb
+## boats). A bigger crew (more than two deckhands) faces a few more ships.
+func _plan_wave(w: int) -> Array:
+	if voyage_seed <= 0:
+		voyage_seed = Seeded.fresh_seed() + 1
+	return VoyageGen.wave_plan(voyage_seed, w, SIMPLE_MODE, crew_extra())
 
 
 ## Simple mode: leaks only from wave 3 and few at a time (wave 3: one, then two, later three).
@@ -1540,7 +1527,9 @@ func _start_wave() -> void:
 	spawn_queue = _plan_wave(wave)
 	spawn_timer = 0.5
 	ships_to_spawn = spawn_queue.size()
-	print("Wave %d started (%d deckhands, plan %s)" % [wave, deckhands().size(), spawn_queue])
+	wave_t = 0.0
+	wave_plan_kinds = spawn_queue.map(func(e: Dictionary) -> String: return e.k)
+	print("Wave %d started (%d deckhands, voyage %d, plan %s)" % [wave, deckhands().size(), voyage_seed, wave_plan_kinds])
 	sound("wave")
 	sound("bell", -4.0)
 	if SIMPLE_MODE:
@@ -1588,6 +1577,8 @@ func _end_wave() -> void:
 	var bonus := 25 * wave
 	gold += bonus
 	print("Wave %d cleared, gold %d" % [wave, gold])
+	_add_treasure(VoyageGen.treasure_for(wave))
+	_log_wave("cleared")
 	sound("clear")
 	sound("cheer", -4.0)
 	sound("coin", -2.0, 1.0)
@@ -1614,7 +1605,8 @@ func _end_wave() -> void:
 
 
 func _spawn_next() -> void:
-	var kind: String = spawn_queue[0]
+	var e: Dictionary = spawn_queue[0]
+	var kind: String = e.k
 	var normal := 0
 	for sh in get_tree().get_nodes_in_group("ships"):
 		if not sh.is_fireship():
@@ -1628,34 +1620,40 @@ func _spawn_next() -> void:
 		"tentacle":
 			if get_tree().get_nodes_in_group("tentacles").size() >= 1 + wave / 4 + crew_extra() / 3 + (2 if wave == BOSS_WAVE else 0):
 				return
-			_spawn_tentacle(-1.0 if randf() < 0.5 else 1.0, 4.0 + floorf(wave / 3.0))
+			_spawn_tentacle(float(e.side), 4.0 + floorf(wave / 3.0), float(e.z))
 			spawn_timer = 5.0
 		"kraken":
-			_spawn_kraken()
+			_spawn_kraken(e)
 			spawn_timer = 6.0
 		"fireship":
-			_spawn_ship(kind)
+			_spawn_ship(e)
 			spawn_timer = 4.0
 		_:
 			if normal >= cap:
 				return
-			_spawn_ship(kind)
+			_spawn_ship(e)
 			spawn_timer = 10.0 if wave == 1 else maxf(4.0, 9.0 - wave * 0.6)
 	spawn_queue.pop_front()
 
 
-func _spawn_ship(kind: String) -> void:
+## One ship from its plan entry (voyagegen.gd): side (0 = the side the gunner's cannon faces), approach angle,
+## orbit, orbit direction and first shot all come from the voyage seed.
+func _spawn_ship(e: Dictionary) -> void:
 	var s := ShipScript.new()
-	if kind == "raider" and wave >= (4 if SIMPLE_MODE else 2) and randf() < 0.15 + wave * 0.03:
-		kind = "galleon"
+	var kind: String = e.k
 	if SIMPLE_MODE and kind == "treasure":
 		kind = "galleon"  # no treasure ship / golden-ball rules
 	s.setup(kind, wave, self)
+	s.orbit_r = float(ShipScript.KINDS[kind][2]) + float(e.get("orbit", 0.0))
+	s.orbit_dir = float(e.get("dir", 1.0))
+	s.fire_t = float(e.get("fire", 3.0))
 	s.calm = wave <= (2 if SIMPLE_MODE else 1)
 	s.net_id = next_net_id()
 	# Come in from port or starboard (where the cannons point), a little fore or aft.
-	var side := -1.0 if randf() < 0.5 else 1.0
-	var a := randf_range(-0.9, 0.9)
+	var side: float = e.get("side", 1.0)
+	if side == 0.0:
+		side = gunner_side()
+	var a: float = e.get("a", 0.0)
 	var dir := Vector3(side * cos(a), 0.0, sin(a))
 	var dist := 95.0 if kind != "fireship" else 70.0
 	s.position = dir * dist + Vector3(0, sea_level, 0)
@@ -1693,14 +1691,14 @@ func _spawn_tentacle(side: float, hp: float, z: float = INF) -> Node3D:
 
 # --- The Kraken (final wave) ----------------------------------------------------------------
 
-func _spawn_kraken() -> void:
+func _spawn_kraken(e: Dictionary) -> void:
 	var k := KrakenScript.new()
 	k.main = self
 	k.net_id = next_net_id()
-	k.side = -1.0 if randf() < 0.5 else 1.0
+	k.side = float(e.get("side", 1.0))
 	k.max_hp = 9.0 + 2.0 * crew_extra()
 	k.hp = k.max_hp
-	k.position = Vector3(k.side * k.DIST, sea_level, randf_range(-3.0, 4.0))
+	k.position = Vector3(k.side * k.DIST, sea_level, float(e.get("z", 0.0)))
 	add_child(k)
 	sound("roar", 0.0, 0.8)
 	add_shake(Vector3.ZERO, 0.5)
@@ -1762,6 +1760,10 @@ func on_kraken_defeated(k) -> void:
 			fireworks(Vector3(randf_range(-14.0, 14.0), randf_range(14.0, 22.0), randf_range(-16.0, 10.0))))
 	parrot_say("SQUAWK! WE BEAT THE KRAKEN!")
 	print("VICTORY: the Kraken is beaten, gold %d" % gold)
+	if save != null:
+		save.data.kraken_wins = int(save.data.kraken_wins) + 1
+	_add_treasure("crown")
+	_log_wave("kraken")
 	if SIMPLE_MODE:
 		_show_center("VICTORY!", 5.0)
 		return
@@ -2794,6 +2796,7 @@ func _on_game_over() -> void:
 	game_over_time = 0.0
 	sound("gameover")
 	print("Game over: wave %d, gold %d" % [wave, gold])
+	_log_wave("sunk")
 	var cfg := ConfigFile.new()
 	cfg.load("user://cannon_cove_best.cfg")
 	var best: int = cfg.get_value("best", "gold", 0)
@@ -2836,6 +2839,7 @@ func _unhandled_input(event: InputEvent) -> void:
 # --- Networked co-op -----------------------------------------------------------------
 
 func on_client_joined() -> void:
+	_send_treasures()
 	if not seats.first_machine():
 		return  # another machine: its deckhands come aboard when they ask ("join")
 	if SIMPLE_MODE:
@@ -3102,6 +3106,10 @@ func apply_event(kind: String, args: Array) -> void:
 		"prop":
 			if props:
 				props.apply_event(args)
+		"treasures":
+			_build_treasures(args[0], int(args[1]), bool(args[2]))
+		"story":
+			_story(args[0], args[1], args[2])
 		"hitmark":
 			var hi: int = args[0]
 			if hi < players.size() and players[hi].hud:
@@ -3298,3 +3306,199 @@ func claude_say(text: String) -> void:
 		net.event("say", [text])
 	_show_center("Claude: " + text, 5.0 + text.length() * 0.08, false)
 	_sfx().play("pickup", -6.0, 0.8)
+
+
+# --- Polly's treasures and the seeded voyage ---------------------------------------------------
+
+## The side (-1 port, 1 starboard) the gunner's cannon faces: wave 1's ships come there.
+func gunner_side() -> float:
+	var s: int = players[0].station if not players.is_empty() else 1
+	if s < 0 or s >= cannons.size():
+		return -1.0
+	return -1.0 if cannons[s].position.x < 0.0 else 1.0
+
+
+## Host / local: a new voyage. Count the play-day (a new flag in the rigging), pick the voyage seed (TODAY'S
+## VOYAGE first each day), put the treasures on the shelf and say hello.
+func _start_voyage() -> void:
+	if save == null:
+		save = Save.new()
+		save.game_id = GAME_ID
+		# treasures: [[kind, play-day, golden], ...]; days: days played; daily: the date TODAY'S VOYAGE sailed.
+		save.defaults = {"treasures": [], "total": 0, "days": 0, "last_day": "", "daily": "", "voyages": 0, "best_wave": 0, "kraken_wins": 0}
+		add_child(save)
+	var today := Seeded.today()
+	var new_day := String(save.data.last_day) != today
+	if new_day:
+		save.data.days = int(save.data.days) + 1
+		save.data.last_day = today
+	save.data.voyages = int(save.data.voyages) + 1
+	voyage_daily = String(save.data.daily) != today
+	voyage_seed = VoyageGen.daily_seed() if voyage_daily else Seeded.fresh_seed()
+	if OS.has_environment("CC_SEED"):
+		voyage_seed = int(OS.get_environment("CC_SEED"))
+	if voyage_daily:
+		save.data.daily = today  # (one TODAY'S VOYAGE a day, however far it goes)
+	save.mark_dirty()
+	print("Cannon Cove voyage: seed %d%s | %d treasures, day %d" % [voyage_seed, " (TODAY'S VOYAGE)" if voyage_daily else "",
+		(save.data.treasures as Array).size(), int(save.data.days)])
+	_build_treasures(save.data.treasures, int(save.data.days), int(save.data.kraken_wins) > 0)
+	_send_treasures()
+	_story_for_all("Hi! I'm Polly!", "parrot", Color(0.95, 0.2, 0.15))
+	if voyage_daily:
+		_story_for_all("TODAY'S VOYAGE!", "treasuremap", Color(1.0, 0.85, 0.3))
+	if new_day and int(save.data.days) > 1:
+		_story_for_all("A new flag!", "bunting", Color(0.2, 0.45, 1.0))
+
+
+## Host / local: a cleared wave's treasure joins the shelf (the oldest makes room when it's full).
+func _add_treasure(kind: String) -> void:
+	if save == null:
+		return
+	var list: Array = save.data.treasures
+	list.append([kind, int(save.data.days), voyage_daily])
+	while list.size() > VoyageGen.TREASURE_KEEP:
+		list.pop_front()
+	save.data.total = int(save.data.total) + 1
+	save.data.best_wave = maxi(int(save.data.best_wave), wave)
+	save.mark_dirty()
+	_build_treasures(list, int(save.data.days), int(save.data.kraken_wins) > 0)
+	_send_treasures()
+	var n := int(save.data.total)
+	var line: String = TREASURE_CHEERS.get(n, TREASURE_LINES.get(kind, "Treasure!"))
+	_story_for_all(line, kind, Color(1.0, 0.85, 0.3) if voyage_daily else TREASURE_COLORS.get(kind, Color.WHITE))
+
+
+func _send_treasures() -> void:
+	treasure_resend = 8.0
+	if net and net.mode == "host" and save != null:
+		net.event("treasures", [(save.data.treasures as Array).duplicate(true), int(save.data.days), int(save.data.kraken_wins) > 0])
+
+
+## One RUN line per wave (cleared / kraken / sunk) and on quit.
+func _log_wave(end: String) -> void:
+	if net == null or net.mode == "client":
+		return
+	Telemetry.run(GAME_ID, {"end": end, "wave": wave, "phase": phase, "seed": voyage_seed, "daily": voyage_daily,
+		"secs": snappedf(wave_t, 0.1), "plan": wave_plan_kinds, "water": snappedf(water, 0.1), "gold": gold,
+		"deckhands": deckhands().size(), "vr": not players.is_empty() and players[0].vr, "net": net.mode,
+		"treasures": (save.data.treasures as Array).size() if save else 0, "days": int(save.data.days) if save else 0})
+
+
+func _exit_tree() -> void:
+	if save != null and wave > 0 and not game_over:
+		_log_wave("quit")
+
+
+## Every machine: the treasures on the stern castle's shelf, the flags in the rigging (one a play-day) and Polly's crown.
+func _build_treasures(list: Array, days: int, crowned: bool) -> void:
+	if parrot != null:
+		parrot.set_crown(crowned)
+	treasure_crowned = crowned
+	if treasure_root == null:
+		treasure_root = Node3D.new()
+		treasure_root.name = "Treasures"
+		add_child(treasure_root)
+	if treasure_count == list.size() and treasure_days == days and treasure_list == list:
+		return
+	var grown := treasure_count >= 0 and list.size() > treasure_count
+	treasure_list = list.duplicate(true)
+	treasure_days = days
+	for c in treasure_root.get_children():
+		treasure_root.remove_child(c)
+		c.queue_free()
+	for i in mini(list.size(), VoyageGen.TREASURE_SLOTS):
+		var e: Array = list[i]
+		var tr := _treasure(String(e[0]), bool(e[2]))
+		tr.position = VoyageGen.treasure_slot(i)
+		tr.scale = Vector3.ONE * 1.6  # big enough to spot from the cannons and the deck
+		treasure_root.add_child(tr)
+		if grown and i == list.size() - 1:
+			tr.scale = Vector3.ONE * 0.05
+			tr.create_tween().tween_property(tr, "scale", Vector3.ONE * 1.6, 0.8).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	# The flags: pennants down the stay from the main mast to the stern castle, one per play-day.
+	var flag_mesh := PrismMesh.new()
+	flag_mesh.size = Vector3(0.5, 0.6, 0.03)
+	for i in VoyageGen.flags(days):
+		var f := MeshInstance3D.new()
+		f.mesh = flag_mesh
+		f.material_override = make_material(FLAG_COLORS[i % FLAG_COLORS.size()], 0.25)
+		f.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		f.position = VoyageGen.flag_slot(i) + Vector3.DOWN * 0.32
+		f.rotation = Vector3(0.0, 0.7 if i % 2 == 0 else -0.7, PI)  # point down, turned this way and that (seen from the deck and the cannons)
+		treasure_root.add_child(f)
+	treasure_count = list.size()
+
+
+## One treasure on the shelf: a gold coin, a pearl in a shell, an anchor, a starfish or a crown (all gold on TODAY'S VOYAGE).
+func _treasure(kind: String, golden: bool) -> Node3D:
+	var root := Node3D.new()
+	var col: Color = Color(1.0, 0.85, 0.25) if golden else TREASURE_COLORS.get(kind, Color.WHITE)
+	var m := make_material(col, 1.0 if golden else 0.25)
+	match kind:
+		"doubloon":
+			var coin := World.cyl(root, 0.12, 0.12, 0.03, Vector3(0, 0.13, 0), m, 14)
+			coin.rotation.x = PI / 2.0  # stands up, facing the deck
+			World.cyl(coin, 0.06, 0.06, 0.035, Vector3.ZERO, make_material(col.lightened(0.3), 0.6), 5)
+		"pearl":
+			var shell := World.sphere(root, 0.12, Vector3(0, 0.05, 0), m, 10)
+			shell.scale = Vector3(1.0, 0.35, 0.8)
+			var lid := World.sphere(root, 0.12, Vector3(0, 0.13, 0.06), m, 10)
+			lid.scale = Vector3(1.0, 0.35, 0.8)
+			lid.rotation.x = -0.9
+			World.sphere(root, 0.06, Vector3(0, 0.1, -0.02), make_material(Color(0.97, 0.97, 1.0), 0.5), 8)
+		"anchor":
+			World.box(root, Vector3(0.035, 0.24, 0.035), Vector3(0, 0.14, 0), m)
+			World.box(root, Vector3(0.16, 0.035, 0.035), Vector3(0, 0.22, 0), m)
+			World.box(root, Vector3(0.22, 0.035, 0.035), Vector3(0, 0.03, 0), m)
+			for sx in [-1.0, 1.0]:
+				var prong := World.box(root, Vector3(0.035, 0.08, 0.035), Vector3(sx * 0.11, 0.06, 0), m)
+				prong.rotation.z = -sx * 0.4
+			var ring := World.sphere(root, 0.035, Vector3(0, 0.28, 0), m, 6)
+			ring.scale = Vector3(1.0, 1.0, 0.5)
+		"starfish":
+			for k in 5:
+				var a := TAU * k / 5.0
+				var arm := World.box(root, Vector3(0.05, 0.13, 0.03), Vector3(sin(a) * 0.06, 0.13 + cos(a) * 0.06, 0), m)
+				arm.rotation.z = -a
+			World.sphere(root, 0.04, Vector3(0, 0.13, 0), m, 6)
+		_:  # the Kraken's crown
+			World.cyl(root, 0.1, 0.09, 0.08, Vector3(0, 0.04, 0), m, 10)
+			for k in 5:
+				var a := TAU * k / 5.0
+				World.cyl(root, 0.0, 0.025, 0.08, Vector3(cos(a) * 0.085, 0.12, sin(a) * 0.085), m, 4)
+	for c in root.get_children():
+		if c is GeometryInstance3D:
+			c.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return root
+
+
+## Host / local: a story card on every machine.
+func _story_for_all(line: String, pic: String, color: Color) -> void:
+	_story(line, pic, color)
+	if net and net.mode == "host":
+		net.event("story", [line, pic, color])
+
+
+func _story(line: String, pic: String, color: Color) -> void:
+	if story_queue.size() < 4:
+		story_queue.append([line, pic, color])
+
+
+func _update_story(delta: float) -> void:
+	story_t -= delta
+	if story_t > 0.0 or story_queue.is_empty() or players.is_empty():
+		return
+	var b: Array = story_queue.pop_front()
+	story_t = 2.6
+	var opts := {"who": "POLLY", "line": b[0], "pic": b[1], "color": b[2], "duration": 2.4}
+	var huds: Array = []
+	for p in players:
+		if p.hud != null and is_instance_valid(p.hud) and p.hud is Control and p.hud.is_visible_in_tree():
+			huds.append(p.hud)
+	if not huds.is_empty():
+		StoryCard.show(huds, opts)
+	if players[0].vr and players[0].xr_camera != null and not players[0].remote:
+		StoryCard.show_vr(self, players[0].xr_camera, opts)
+	if parrot != null:
+		parrot.poke()  # Polly squawks and hops as she "says" it

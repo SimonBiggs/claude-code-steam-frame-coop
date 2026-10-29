@@ -55,6 +55,7 @@ func _physics_process(delta: float) -> void:
 		main.practice_hits = 99
 		print("Bot: skipping ahead to wave %d" % (main.wave + 1))
 	_note_features()
+	_check_story(main.net.mode)
 	if main.simple:
 		_note_cues()
 	if OS.has_environment("CC_SINK") and t > 30.0 and not main.game_over and main.net.mode != "client" and not has_meta("sunk"):
@@ -521,3 +522,25 @@ func _count_visuals(n: Node) -> int:
 	for ch in n.get_children():
 		c += _count_visuals(ch)
 	return c
+
+
+## Polly's story: the host / local voyage has a seed, waves come from it, a cleared wave puts a treasure on the shelf
+## (and the shelf shows every one); a TV machine gets the treasures from the host. Checked once, 70 s in (or when
+## BOT_END is near).
+func _check_story(mode: String) -> void:
+	var at := minf(70.0, float(OS.get_environment("BOT_END")) - 8.0) if OS.has_environment("BOT_END") else 70.0
+	if has_meta("story_checked") or t < at:
+		return
+	set_meta("story_checked", true)
+	if mode == "client":
+		_ok(main.treasure_count >= 0, "the TV machine got Polly's treasures (%d)" % main.treasure_count)
+		return
+	_ok(main.voyage_seed > 0, "a seeded voyage (%d)" % main.voyage_seed)
+	_ok(main.save != null and int(main.save.data.days) >= 1, "the play-day was counted")
+	_ok(main.wave < 2 or int(main.save.data.total) >= 1, "a treasure after wave 1 (wave %d, %d treasures)" % [main.wave, int(main.save.data.total)])
+	_ok(main.treasure_root != null and main.treasure_root.get_child_count() >= main.treasure_count, "the shelf shows the treasures")
+	_ok(main.parrot != null and (main.parrot.crown != null) == main.treasure_crowned, "Polly's crown matches the save")
+
+
+func _ok(ok: bool, what: String) -> void:
+	print(("Bot: OK " if ok else "SCRIPT ERROR: BOT: FAILED ") + what)
