@@ -48,6 +48,13 @@ var boxes_in_race1 := false
 var ghost_seen := false
 var max_vr_lines := 0  # simple mode: the most lines of text on any VR label
 var seen := {}  # simple mode: picture cues seen / learned
+# The Grand Tour (story.gd): generated tracks, story cards, telemetry, the bot ends by itself.
+var tracks_seen := {}  # track keys built
+var kinds_seen := {}  # "daily" / "story"
+var splits_seen := 0
+var shortcut_uses := 0
+var logged_races := 0
+var ending := false
 
 
 func _ready() -> void:
@@ -115,6 +122,7 @@ func _process(delta: float) -> void:
 	if main.SIMPLE_MODE:
 		_simple_checks()
 	var res: bool = main.state == "results"
+	_tour_checks(res and not was_results)
 	if res and not was_results:
 		races += 1
 		if main.cup_race >= 2 and not main.SIMPLE_MODE:
@@ -123,7 +131,7 @@ func _process(delta: float) -> void:
 		var uses := 0
 		for k in main.karts:
 			uses += int(k.get_meta("uses", 0))
-		print("BOT %s: RACE %d FINISHED on %s (items used %d)" % [mode, races, main.track.track_name(main.track_i), uses])
+		print("BOT %s: RACE %d FINISHED on %s (items used %d)" % [mode, races, str(main.track.info["name"]), uses])
 	was_results = res
 	if res and main.state_t > 2.5:
 		cont_t -= delta
@@ -134,6 +142,64 @@ func _process(delta: float) -> void:
 	if report_t <= 0.0:
 		report_t = 4.0
 		_report(mode)
+
+
+## Story checks every frame; at each results: count; after BOT_RACES races (default 3) end with a verdict.
+func _tour_checks(new_results: bool) -> void:
+	var key: String = main.track.key
+	if key != "" and not tracks_seen.has(key):
+		tracks_seen[key] = true
+		splits_seen += main.track.splits.size()
+		if not main.track_desc.is_empty():
+			kinds_seen["daily" if main.Story.is_daily(main.track_desc) else "story"] = true
+	if new_results:
+		for k in main.karts:
+			if k.active:
+				shortcut_uses += k.st_short
+		if main.race_logged:
+			logged_races += 1
+	var want := int(OS.get_environment("BOT_RACES")) if OS.has_environment("BOT_RACES") else 3
+	var mode: String = main.net.mode
+	if not ending and main.SIMPLE_MODE and races >= want and main.state == "results" and (main.state_t > 2.0 or mode == "client"):
+		_end_run(mode)
+		return
+	if not ending and mode == "client" and races >= 1 and not main.net.connected:
+		print("BOT: the host left")
+		_end_run(mode)
+		return
+	var max_t := float(OS.get_environment("BOT_MAX_T")) if OS.has_environment("BOT_MAX_T") else 600.0
+	if not ending and t > max_t:
+		set_meta("too_slow", "only %d races in %.0f s" % [races, t])
+		_end_run(mode)
+
+
+func _end_run(mode: String) -> void:
+	ending = true
+	var fails: Array[String] = []
+	if has_meta("too_slow"):
+		fails.append(str(get_meta("too_slow")))
+	var gen := 0
+	for k in tracks_seen:
+		if str(k).begins_with("gen:"):
+			gen += 1
+	if gen < 1:
+		fails.append("no generated track built")
+	if main.story_count < 1:
+		fails.append("no story card shown")
+	if mode != "client":
+		if not kinds_seen.has("daily") or not kinds_seen.has("story"):
+			fails.append("today's track and a story track both raced (%s)" % str(kinds_seen.keys()))
+		if logged_races < races:
+			fails.append("a RUN line for every race (%d of %d)" % [logged_races, races])
+		if splits_seen < 1:
+			fails.append("split lanes on some track")
+	for f in fails:
+		print("SCRIPT ERROR: BOT ASSERT FAILED: " + f)
+	print("BOT TOUR: mode=%s races=%d tracks=%d (generated %d) kinds=%s splits=%d shortcut_trips=%d story_cards=%d hats=%d runs=%d" % [
+		mode, races, tracks_seen.size(), gen, ",".join(PackedStringArray(kinds_seen.keys())), splits_seen, shortcut_uses,
+		main.story_count, main.hats_won, logged_races])
+	print("BOT RESULT: %s" % ("PASS" if fails.is_empty() else "FAIL"))
+	get_tree().quit(0 if fails.is_empty() else 1)
 
 
 func _join_players(mode: String) -> void:
@@ -304,5 +370,5 @@ func _report(mode: String) -> void:
 	extra += " cup=%s r%d pts=%s turbos=%d items_seen=%s lights=%d" % [main.cup_info()["name"], main.cup_race + 1,
 		str(main.cup_pts), turbo, ",".join(PackedStringArray(items_seen.keys())), main.lights]
 	print("BOT %s t=%.0f race=%d state=%s race_t=%.0f track=%s views=%d remote_synced=%d bananas=%d races_done=%d%s [%s]" % [
-		mode, t, main.round_n, main.state, main.race_t, main.track.track_name(main.track_i), views, synced,
+		mode, t, main.round_n, main.state, main.race_t, str(main.track.info["name"]), views, synced,
 		main.bananas.size(), races, extra, ", ".join(act)])
