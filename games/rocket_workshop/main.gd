@@ -59,6 +59,15 @@ const PropsScript := preload("res://games/rocket_workshop/props.gd")
 const GhostHandScript := preload("res://games/rocket_workshop/ghost_hand.gd")
 const CueScript := preload("res://games/rocket_workshop/cue.gd")
 const UiKit := preload("res://core/ui_kit.gd")
+const G := preload("res://games/rocket_workshop/rocketgen.gd")
+const MuseumScript := preload("res://games/rocket_workshop/museum.gd")
+const SprocketScript := preload("res://games/rocket_workshop/sprocket.gd")
+const Save := preload("res://core/save.gd")
+const Seeded := preload("res://core/seeded.gd")
+const Telemetry := preload("res://core/telemetry.gd")
+const StoryCard := preload("res://core/story_card.gd")
+const SPROCKET_COLOR := Color(0.25, 0.75, 0.8)
+const MUSEUM_CHEERS := {1: "My museum!", 5: "Five rockets!", 10: "Ten rockets!", 20: "Twenty!", 30: "So many!", 40: "Rocket Row is full!"}
 const SIMPLE_MODE := true
 
 const MANUAL_LAYER := 512  # blueprint content: drawn for the TV crew only
@@ -188,6 +197,19 @@ var ghost_hand: Node3D  # simple mode: shows the pilot how (pilot only)
 var oops_t := 0.0
 var join_cue: Control  # simple mode: pulsing A + plus + person (a spare controller can join)
 var pilot_arrow: MeshInstance3D  # simple mode: a glowing arrow over the practice button / the lever
+# Story and progress (rocketgen.gd): Sprocket, Rocket Row, parts, TODAY'S ROCKET.
+var save: Node  # core/save.gd: {launched (all time), museum [{look, planet, date, daily, n}], daily (date done)}
+var museum: Node3D
+var sprocket: Node3D
+var session_seed := 0
+var rocket_seed := 0
+var rocket_daily := false
+var rocket_look: Array = [0, 0, 0, 0, 0, 0]  # rocketgen look (the TV gets it in snapshots)
+var unlock_from := -1  # all-time launches when the last rocket started (new parts show on the next one)
+var work_t := 0.0  # seconds spent on this rocket
+var session_t := 0.0
+var museum_send_t := 0.0
+var quit_logged := false
 
 
 func _ready() -> void:
@@ -207,6 +229,17 @@ func _ready() -> void:
 	jobs = JobsScript.new()
 	jobs.main = self
 	add_child(jobs)
+	museum = MuseumScript.new()
+	museum.main = self
+	add_child(museum)
+	sprocket = SprocketScript.new()
+	sprocket.main = self
+	add_child(sprocket)
+	save = Save.new()
+	save.game_id = G.GAME_ID
+	save.defaults = {"launched": 0, "museum": [], "daily": "", "sessions": 0}
+	add_child(save)
+	session_seed = int(OS.get_environment("RW_SEED")) if OS.has_environment("RW_SEED") else Seeded.fresh_seed()
 	_build_hud()
 	if SIMPLE_MODE:
 		props = PropsScript.new()
@@ -253,6 +286,13 @@ func _setup_game(mode: String) -> void:
 	if mode == "client":
 		players[1].set_meta("want_join", true)  # ask the host for a crew spot (it may hand out another one)
 	_restore_party()
+	if mode != "client":
+		museum.set_entries(_museum_packed())
+		save.data.sessions = int(save.data.sessions) + 1
+		save.mark_dirty()
+		print("Rocket Row: %d rockets, %d launched in all, parts %s, today's rocket %s, session seed %d" % [
+			(save.data.museum as Array).size(), int(save.data.launched), str(G.unlocked(int(save.data.launched))),
+			"done" if String(save.data.daily) == Seeded.today() else "due", session_seed])
 	if SIMPLE_MODE:
 		if mode != "client":
 			ghost_hand = GhostHandScript.new()
@@ -270,6 +310,41 @@ func _setup_game(mode: String) -> void:
 
 func _exit_tree() -> void:
 	XRServer.world_scale = 1.0  # global: never leave another game's scale behind
+	_log_quit()
+
+
+## One telemetry line when the session ends (host / local only; once).
+func _log_quit() -> void:
+	if quit_logged or net == null or net.mode == "client" or rocket_n == 0:
+		return
+	quit_logged = true
+	Telemetry.run(G.GAME_ID, {"end": "quit", "mode": "simple" if SIMPLE_MODE else "full", "rockets": launched,
+		"reached": rocket_n, "oops": mistakes, "secs": int(session_t), "crew": crew_count(), "seed": session_seed,
+		"total": int(save.data.launched), "museum": (save.data.museum as Array).size()})
+	save.save_now()
+
+
+## The saved museum as the compact arrays museum.gd draws (newest last).
+func _museum_packed() -> Array:
+	var out: Array = []
+	for e in save.data.museum:
+		out.append(G.entry_pack(e))
+	return out
+
+
+## A story beat: Sprocket's picture and a few words, on every crew view, the pilot's view (VR: a card
+## in front of the headset) and the TV (event "story").
+func story(line: String, pic: String = "engineer", color: Color = SPROCKET_COLOR, broadcast: bool = true) -> void:
+	var opts := {"who": "SPROCKET" if pic == "engineer" else "", "line": line, "pic": pic, "color": color, "duration": 3.5}
+	var roots: Array = []
+	for p in players:
+		if p.has_meta("story") and is_instance_valid(p.get_meta("story")):
+			roots.append(p.get_meta("story"))
+	StoryCard.show(roots, opts)
+	if not players.is_empty() and players[0].vr and players[0].xr_camera != null:
+		StoryCard.show_vr(self, players[0].xr_camera, opts)
+	if broadcast and net != null and net.mode == "host":
+		net.event("story", [line, pic, color])
 
 
 # --- Shared materials, meshes and effects ------------------------------------
@@ -754,7 +829,14 @@ func crew_count() -> int:
 
 
 func _start_rocket(n: int) -> void:
-	var r := P.make_simple_rocket(n) if SIMPLE_MODE else P.make_rocket(n, crew_count())
+	var total := int(save.data.launched)
+	rocket_daily = n == G.DAILY_N and String(save.data.daily) != Seeded.today()
+	rocket_seed = G.daily_seed() if rocket_daily else G.rocket_seed(session_seed, n)
+	var r := G.rocket(rocket_seed, n, crew_count(), SIMPLE_MODE, total, rocket_daily)
+	rocket_look = r.look
+	work_t = 0.0
+	_rocket_story(n, total)
+	unlock_from = total
 	rocket_n = n
 	rocket_name = r.name
 	modules = r.modules
@@ -782,7 +864,8 @@ func _start_rocket(n: int) -> void:
 			seen_types[m.type] = true
 			if NEW_LINES.has(m.type) and n > 1:
 				fresh.append(NEW_LINES[m.type])
-	print("Rocket %d (%s) to %s: %s, %.0f s" % [n, rocket_name, P.PLANETS[P.planet(n)], ", ".join(types), time_left])
+	print("Rocket %d (%s) to %s: %s, %.0f s, seed %d%s, look %s" % [n, rocket_name, P.PLANETS[P.planet(n)], ", ".join(types), time_left,
+		rocket_seed, " (TODAY'S ROCKET)" if rocket_daily else "", str(rocket_look)])
 	sound("pop", -2.0, 0.8)
 	if SIMPLE_MODE:
 		events_left = 0
@@ -799,6 +882,55 @@ func _start_rocket(n: int) -> void:
 			_show_center(head + "\nCrew: find the bouncing arrows.  Pilot: say the rocket's name!", phase_t)
 		else:
 			_show_center(head + "\n" + "\n".join(fresh), phase_t)
+
+
+## Host: Sprocket's beat as a new rocket rolls out (hello, a new part, TODAY'S ROCKET).
+func _rocket_story(n: int, total: int) -> void:
+	var beats: Array = []
+	if n == 1:
+		beats.append(["Hi! I'm Sprocket!" if total == 0 else "Let's build rockets!", "engineer", SPROCKET_COLOR])
+	if unlock_from >= 0:
+		for k in G.new_unlocks(unlock_from, total):
+			beats.append([String(k.line), "engineer", SPROCKET_COLOR, "party"])
+	if rocket_daily:
+		beats.append(["TODAY'S ROCKET!", "toyrocket", G.TRIM_COLORS[G.GOLD], "party"])
+	for i in beats.size():
+		var b: Array = beats[i]
+		get_tree().create_timer(0.8 + 3.8 * i).timeout.connect(func() -> void:
+			if not is_inside_tree():
+				return
+			story(b[0], b[1], b[2])
+			if b.size() > 3:
+				sprocket_mood(b[3]))
+
+
+func sprocket_mood(mood: String, broadcast: bool = true) -> void:
+	match mood:
+		"party":
+			sprocket.party()
+			sound("allset", -6.0, 1.4)
+		"proud":
+			sprocket.proud()
+		"oops":
+			sprocket.oops()
+	if broadcast and net.mode == "host":
+		net.event("sprocket", [mood])
+
+
+## Host: a rocket reached its planet: it comes home as a model on Rocket Row (saved), Sprocket points.
+func _museum_add() -> void:
+	var list: Array = save.data.museum
+	list.append({"look": rocket_look.duplicate(), "planet": P.planet(rocket_n), "date": Seeded.today(), "daily": rocket_daily, "n": rocket_n})
+	while list.size() > G.MUSEUM_KEEP:
+		list.pop_front()
+	save.mark_dirty()
+	var packed := _museum_packed()
+	museum.set_entries(packed)
+	net.event("museum", [packed])
+	sprocket_mood("proud")
+	var count := int(save.data.launched)
+	if MUSEUM_CHEERS.has(count):
+		story(MUSEUM_CHEERS[count], "toyrocket", G.TRIM_COLORS[int(rocket_look[G.L_TRIM])])
 
 
 ## Host: the pilot touched or moved something on the desk.
@@ -996,6 +1128,7 @@ func _burp(why: String) -> void:
 ## Simple mode: a wrong press is just funny - a honk, a puff of smoke at that control, a wobble. No penalty.
 func _oops(key: String) -> void:
 	mistakes += 1
+	rocket_burps += 1
 	print("Oops (simple): %s" % key)
 	if oops_t <= 0.0:
 		oops_t = 0.5
@@ -1024,6 +1157,17 @@ func _start_launch() -> void:
 	if streak >= 2 and not SIMPLE_MODE:  # simple: no countdown to add to
 		bonus_next = minf(5.0 * streak, 20.0)
 	print("Rocket %d launched! (%d total, %.0f s to spare, %d stars, streak %d)" % [rocket_n, launched, time_left, last_stars, streak])
+	save.data.launched = int(save.data.launched) + 1
+	if rocket_daily:
+		save.data.daily = Seeded.today()
+	save.mark_dirty()
+	var types: Array = []
+	for m in modules:
+		types.append(m.type)
+	Telemetry.run(G.GAME_ID, {"end": "launch", "mode": "simple" if SIMPLE_MODE else "full", "n": rocket_n, "seed": rocket_seed,
+		"daily": rocket_daily, "types": types, "level": G.level(rocket_n, SIMPLE_MODE), "secs": snappedf(work_t, 0.1),
+		"oops": rocket_burps, "crew": crew_count(), "total": int(save.data.launched), "look": rocket_look,
+		"museum": (save.data.museum as Array).size() + 1})
 	_show_center("3", 0.9)
 	sound("count", 0.0, 1.0)
 
@@ -1061,6 +1205,7 @@ func _launch_beats(prev: float, now: float) -> void:
 			get_tree().create_timer(0.15 * k).timeout.connect(sound.bind("star", -4.0, 1.0 + 0.15 * k))
 		star_burst(Vector3(0, 2.6, -2.5), 8 + 6 * last_stars)
 		net.event("stars", [Vector3(0, 2.6, -2.5), 8 + 6 * last_stars])
+		_museum_add()
 
 
 ## Host: crew jobs (fuel can, bolts, paint pots, the cat).
@@ -1313,6 +1458,7 @@ func _host_update(delta: float) -> void:
 			if phase_t <= 0.0:
 				phase = "work"
 		"work", "ready":
+			work_t += delta
 			if SIMPLE_MODE:
 				return  # no countdown, no jobs, no surprises: just the desk and the blueprints
 			if net.mode == "host" and not net.connected:
@@ -1369,6 +1515,10 @@ func _on_game_over() -> void:
 	time_left = 0.0
 	sound("nap", 0.0)
 	print("Game over: %d rockets launched, %d burps, %d stars" % [launched, mistakes, stars])
+	if net.mode != "client":
+		Telemetry.run(G.GAME_ID, {"end": "nap", "mode": "full", "rockets": launched, "reached": rocket_n, "oops": mistakes,
+			"stars": stars, "secs": int(session_t), "crew": crew_count(), "seed": session_seed, "total": int(save.data.launched)})
+		quit_logged = true
 	var best_line := "Best: %d rockets" % best
 	if launched > best:
 		best_line = "NEW BEST!  (before: %d)" % best
@@ -1554,6 +1704,14 @@ func _process(delta: float) -> void:
 		if not players[0].vr and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and not get_tree().paused:
 			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	rocket.update_visual(rocket_n, phase, launch_t, delta)
+	museum.update_museum(delta)
+	sprocket.update_sprocket(phase, launch_t, delta)
+	session_t += delta
+	if net.mode == "host" and net.connected:  # the TV's Rocket Row (also catches a missed event)
+		museum_send_t -= delta
+		if museum_send_t <= 0.0:
+			museum_send_t = 5.0
+			net.event("museum", [museum.entries])
 	space.update_space(rocket_n, phase, launch_t, delta)
 	manual.update_boards(modules, rocket_n)
 	jobs.update_visual(modules, delta)
@@ -1944,6 +2102,13 @@ func _ensure_view(p) -> void:
 	vp.add_child(cam)
 	cam.current = true
 	p.attach_camera(cam)
+	var story_layer := CanvasLayer.new()  # Sprocket's story cards (core/story_card.gd) for this view
+	vp.add_child(story_layer)
+	var story_root := Control.new()
+	story_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	story_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	story_layer.add_child(story_root)
+	p.set_meta("story", story_root)
 	if p.index > 0:
 		var hud_layer := CanvasLayer.new()
 		vp.add_child(hud_layer)
@@ -2290,6 +2455,7 @@ func on_player_activity_changed(p) -> void:
 # --- Networked co-op (see docs/GAME_DEV_GUIDE.md) ----------------------------
 
 func on_client_joined() -> void:
+	museum_send_t = 0.0
 	if SIMPLE_MODE:
 		_show_center("HELLO!", 1.5)  # (no "they joined" line: each seat's join says WHO, core/who.gd)
 
@@ -2368,7 +2534,7 @@ func make_snapshot() -> Array:
 	# Modules are deflated: their repeated dictionary keys squash well, keeping snapshots under the MTU.
 	var raw := var_to_bytes(modules)
 	return [phase, rocket_n, launched, time_left, raw.compress(FileAccess.COMPRESSION_DEFLATE), raw.size(), ps, launch_t,
-		mistakes, panel.top, stars, streak, last_stars]
+		mistakes, panel.top, stars, streak, last_stars, rocket_look, museum.entries.size()]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -2405,6 +2571,8 @@ func apply_snapshot(s: Array) -> void:
 	stars = s[10]
 	streak = s[11]
 	last_stars = s[12]
+	if s.size() > 13 and s[13] is Array:
+		rocket_look = s[13]
 	if game_over != (phase == "over"):
 		game_over = phase == "over"
 		game_over_time = 0.0
@@ -2432,6 +2600,12 @@ func apply_event(kind: String, args: Array) -> void:
 			star_burst(args[0], args[1])
 		"logged":
 			space.add_log(args[0], args[1], args[2], args[3])
+		"museum":
+			museum.set_entries(args[0])
+		"story":
+			story(args[0], args[1], args[2], false)
+		"sprocket":
+			sprocket_mood(args[0], false)
 		"prop":
 			if props != null:
 				props.play(args[0])

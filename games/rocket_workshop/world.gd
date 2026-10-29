@@ -197,7 +197,7 @@ static func _bunting(main: Node3D) -> void:
 
 static func _trees(main: Node3D) -> void:
 	var spots: Array[Vector3] = [Vector3(-12.5, 0, -11), Vector3(-12, 0, -16), Vector3(8, 0, -14), Vector3(12, 0, -10),
-		Vector3(-15, 0, -8), Vector3(15, 0, -17), Vector3(3, 0, -20), Vector3(-6, 0, -21)]
+		Vector3(-15, 0, -8), Vector3(15, 0, -17), Vector3(3.5, 0, -26), Vector3(-6.5, 0, -25.5)]  # (behind Rocket Row)
 	var leaves := MultiMesh.new()
 	leaves.transform_format = MultiMesh.TRANSFORM_3D
 	leaves.mesh = main.sphere_mesh(1.0)
