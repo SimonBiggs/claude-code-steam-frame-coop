@@ -12,12 +12,17 @@ extends Node
 ## TV machine mirrors it all; everyone stays on the path.
 ## Local:     godot --headless --path . --fixed-fps 60 --quit-after 30000 res://tests/crystal_saga_bot.tscn
 ## Networked: DUO_PORT=83xx DUO_HOST=1 BOT_VR=1 ... & DUO_PORT=83xx DUO_JOIN=127.0.0.1 ... (real time)
-## CS_ZONE=n starts in zone n (0..4).
+## CS_ZONE=n starts in zone n (0..4); CS_JOURNEYS=n plays a later (harder) journey. Each run starts from a fresh
+## test save (BOT_KEEP_SAVE=1 keeps it: skills, shards and Willowbrook's places carry on).
+## Saga checks: the road came from the plan (sagagen.gd) and the TV machine built the same one; the party levelled up
+## at the glowing stones (TV bots shoot one, the VR bot touches one); shards were found; Lumi's story cards showed
+## on every machine; one RUN telemetry line per journey.
 
 const BotKit := preload("res://tests/bot_kit.gd")
 const BotEnd := preload("res://tests/bot_end.gd")
 const VrRig := preload("res://core/vr_rig.gd")
 const World := preload("res://games/crystal_saga/world.gd")
+const Save := preload("res://core/save.gd")
 
 const POKE_KINDS: Array[int] = [World.WELL, World.CHICKEN, World.FLOWER, World.SIGN, World.CHEST, World.CRYSTAL,
 	World.MUSHROOM, World.HOUSE, World.TREE, World.VILLAGER, World.FRIEND]
@@ -37,12 +42,18 @@ var swing_side := 1.0
 var poke_list: Array[int] = []
 var poked_zone := -1
 var outside := 0
+var saw_choose := 0
+var saw_offer_client := false
+var plan_ok := true
+var first_road := 0  ## the first journey's road (a hash), once the party is in the forest
 
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	kit = BotKit.new()
 	add_child(kit)
+	if not OS.has_environment("BOT_KEEP_SAVE") and not OS.has_environment("DUO_JOIN"):
+		Save.erase("crystal_saga")
 	main = load("res://games/crystal_saga/main.tscn").instantiate()
 	add_child(main)
 	kit.main = main
@@ -71,6 +82,15 @@ func _watch() -> String:
 		return ""
 	max_mons = maxi(max_mons, main.monsters.count())
 	saw_restored = saw_restored or bool(main.net.state_get("restored", false))
+	if _phase() == "choose":
+		saw_choose += 1
+		if main.world.offer.size() == 2 and main.world.choice_ids.size() == 2 and (main.world.props[main.world.choice_ids[0]]["node"] as Node3D).visible:
+			saw_offer_client = true
+	if first_road == 0 and _zone() >= 1:
+		first_road = var_to_str(main.world.plan.get("props", [])).hash()
+	var pl: Array = main.net.state_get("plan", [])
+	if not pl.is_empty() and int(main.world.plan.get("seed", -1)) != int(pl[0]) and _phase() != "results":
+		plan_ok = false
 	for h in main.heroes.values():
 		var p: Vector3 = h.position
 		if absf(p.x) > World.HALF_W + 0.01 or p.z > World.HALF_L or p.z < World.wall_z(World.ZONES - 1) - 0.01:
@@ -157,6 +177,10 @@ func _tv_bot(slot: int, delta: float) -> void:
 		"crystal":
 			if main.vr_rig == null:
 				target = w.prop_center(w.big_id)
+		"choose":
+			if main.vr_rig == null and w.offer.size() == 2:
+				target = w.prop_center(w.choice_ids[slot % 2])
+				reach = 3.0
 	if target == Vector3.INF:
 		kit.slot_stick(main.party, slot, "left", Vector2.ZERO)
 		return
@@ -171,14 +195,33 @@ func _tv_bot(slot: int, delta: float) -> void:
 			shoot_cd[slot] = 0.5
 			kit.slot_press(main.party, slot, "accept")
 		return
-	kit.slot_stick(main.party, slot, "left", Vector2(to.x, to.z).normalized())
+	var steer := _around_rocks(pos, to)
+	kit.slot_stick(main.party, slot, "left", Vector2(steer.x, steer.z).normalized())
+
+
+## Walk round the rocks in the way: slide sideways past any blocker just ahead.
+func _around_rocks(pos: Vector3, to: Vector3) -> Vector3:
+	var dir := Vector3(to.x, 0.0, to.z).normalized()
+	for b in main.world.blockers:
+		var c: Vector2 = b[0]
+		var r: float = b[1]
+		var rel := Vector3(c.x - pos.x, 0.0, c.y - pos.z)
+		var ahead := rel.dot(dir)
+		if ahead <= 0.0 or ahead > r + 1.4 or ahead > to.length():
+			continue
+		var side := rel - dir * ahead
+		if side.length() < r + 0.45:
+			var away := -side.normalized() if side.length() > 0.01 else Vector3(-dir.z, 0.0, dir.x)
+			return (dir * 0.4 + away).normalized()
+	return dir
 
 
 ## Push the VR left stick towards a WORLD direction (relative to where the head looks).
 func _walk(rig: Node, dir: Vector3) -> void:
 	var f: Vector3 = rig.head_forward()
 	var r := Vector3(-f.z, 0.0, f.x)
-	var d := Vector3(dir.x, 0.0, dir.z).normalized()
+	var head: Vector3 = rig.head_position()
+	var d := _around_rocks(Vector3(head.x, 0.0, head.z), Vector3(dir.x, 0.0, dir.z))
 	kit.vr_stick(rig, Vector2(d.dot(r), d.dot(f)))
 
 
@@ -222,6 +265,13 @@ func _vr_bot(delta: float) -> void:
 				_raise(rig, VrRig.LEFT, up_l, rest_l, delta)
 				if bool(main.net.state_get("thunder", false)) and fmod(kit.t, 5.0) < 0.6:
 					kit.vr_reach(rig, VrRig.RIGHT, up_r, 8.0, delta)
+		"choose":
+			if w.offer.size() == 2:
+				var sc: Vector3 = w.prop_center(w.choice_ids[0])
+				var to6 := Vector3(sc.x - feet.x, 0.0, sc.z + 0.7 - feet.z)
+				if to6.length() > 0.3:
+					_walk(rig, to6)
+				kit.vr_reach(rig, VrRig.LEFT, sc, 3.0, delta)
 		"orb":
 			if not w.is_used(w.orb_id):
 				var oc: Vector3 = w.prop_center(w.orb_id)
@@ -292,9 +342,10 @@ func _report() -> String:
 	var vr := ""
 	if main.hands != null:
 		vr = " swings %d fires %d thunders %d knocks %d" % [main.hands.swings, main.hands.fires, main.hands.thunders, main.log_knocks]
-	return "BOT %s: zone %d phase %s open %d monsters %d heroes %d hits %s pokes %s dizzy %d stomps %d%s" % [
+	return "BOT %s: zone %d phase %s open %d monsters %d heroes %d hits %s pokes %s dizzy %d stomps %d shards %d skills %s%s" % [
 		main.net.mode, _zone(), _phase(), int(main.net.state_get("open", 0)), main.monsters.count(),
-		main.heroes.size(), str(main.log_hits), str(main.log_pokes), main.log_dizzy, main.log_stomps, vr]
+		main.heroes.size(), str(main.log_hits), str(main.log_pokes), main.log_dizzy, main.log_stomps,
+		int(main.net.state_get("shards", 0)), str(main.net.state_get("skills", {})), vr]
 
 
 func _checks() -> void:
@@ -303,7 +354,12 @@ func _checks() -> void:
 	kit.assert_eq(outside, 0, "%s: heroes stayed on the path" % mode)
 	if mode != "host":
 		kit.assert_eq(kit.seated(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
+	kit.assert_true(plan_ok, "%s: the world was built from the journey's plan" % mode)
+	if mode != "local":
+		print("BOT AGREE road=%d" % first_road)  # every machine built the same (first) road
+	kit.assert_true(main.stories_shown > 0, "%s: Lumi's story cards showed (%d)" % [mode, main.stories_shown])
 	if mode == "client":
+		kit.assert_true(saw_choose == 0 or saw_offer_client, "client showed the level-up stones")
 		kit.assert_true(max_mons >= 2, "client mirrors the monsters (%d)" % max_mons)
 		kit.assert_true(int(main.net.state_get("open", 0)) >= 2 or saw_results, "client saw barriers open")
 		return
@@ -311,6 +367,10 @@ func _checks() -> void:
 	for z in range(first, World.ZONES):
 		kit.assert_true(main.log_zones.has(z), "%s: zone %d was entered" % [mode, z])
 	kit.assert_true(saw_restored, "%s: the Crystal of Light was restored" % mode)
+	if first <= 1:
+		kit.assert_true(saw_choose > 0 and not (main.save.data.skills as Dictionary).is_empty(), "%s: the party levelled up (%s)" % [mode, str(main.save.data.skills)])
+	kit.assert_true(int(main.save.data.shards) > 0, "%s: crystal shards were found (%d)" % [mode, int(main.save.data.shards)])
+	kit.assert_true(main.runs_logged > 0, "%s: a RUN telemetry line was written" % mode)
 	kit.assert_true(saw_results, "%s: the results showed" % mode)
 	kit.assert_true(main.log_stomps > 0 or first > 3, "%s: the Stone Giant stomped (%d)" % [mode, main.log_stomps])
 	if main.vr_rig != null:

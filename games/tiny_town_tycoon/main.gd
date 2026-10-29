@@ -29,6 +29,14 @@ extends Node3D
 ## has done it twice (cue_did / cue_learned), and a seat's cues reset when its player leaves. A glowing
 ## arrow bobs over the practice spot (where to build) and, for the VR mayor, over the tray block to grab
 ## (the practice block, then each new block until it's grabbed); the ghost hand still shows the moves.
+## ISLANDS (islandgen.gd): every town is a new seeded place (hills, a river with bridges, ponds, woods,
+## golden fields, springs, breezy hilltops) on the family's own HOME island (a seed kept in the save; an old
+## meadow town keeps its land and gets districts and resources added). The TOWNSFOLK WISH for things with
+## picture bubbles (wishes.gd, wish_view.gd): granted wishes lift the MIST off the island's outer districts one
+## by one, each with a LANDMARK blueprint (clock tower, big wheel, lighthouse). BENNY the beaver tells it all
+## with picture cards. After the practice the tray has a BOAT: drop it to sail to TODAY'S ISLAND (the same
+## island everywhere all day, its town kept for the day) and back home. Telemetry: a RUN line per day of town
+## time, when the boat sails and on quit.
 ## A spare controller sees a pulsing A + plus + person; a lost controller is a pulsing bolt and a soft
 ## boop (a happy ding when it's back), a full party / someone leaving just a soft pop. Pause: PAUSED.
 
@@ -62,6 +70,12 @@ const HudScript := preload("res://games/tiny_town_tycoon/hud.gd")
 const PropsScript := preload("res://games/tiny_town_tycoon/props.gd")
 const GhostHandScript := preload("res://games/tiny_town_tycoon/ghost_hand.gd")
 const CueScript := preload("res://games/tiny_town_tycoon/cue.gd")
+const IslandGen := preload("res://games/tiny_town_tycoon/islandgen.gd")
+const Wishes := preload("res://games/tiny_town_tycoon/wishes.gd")
+const WishViewScript := preload("res://games/tiny_town_tycoon/wish_view.gd")
+const Seeded := preload("res://core/seeded.gd")
+const StoryCard := preload("res://core/story_card.gd")
+const Telemetry := preload("res://core/telemetry.gd")
 
 const GAME_ID := "tiny_town_tycoon"
 const DAY_LEN := 420.0  ## seconds for a whole day
@@ -142,6 +156,13 @@ var tray_arrow_kind := ""  ## bots: the block the tray arrow points at
 var _arrow_warm := 4  ## frames the arrows show at load (their pipelines get made then, not mid-game)
 var _held_was := ""
 var pause_menu: Node
+var wishes: Wishes  ## host / local: the townsfolk's wishes
+var wish_view: Node3D  ## every machine: wish bubbles and the mist
+var place_key := ""  ## host: "home" or "today" (SIMPLE_MODE towns)
+var _sail_t := 0.0
+var _wish_pub: Array = []
+var _run_t := 0.0  ## seconds of play in this town (telemetry)
+var _vr_story: Node3D
 
 
 func _ready() -> void:
@@ -168,7 +189,7 @@ func _ready() -> void:
 				sound("pop", -10.0, 0.7))
 	save = Save.new()
 	save.game_id = GAME_ID
-	save.defaults = {"stars": {}, "towns": {}, "last": 0}
+	save.defaults = {"stars": {}, "towns": {}, "last": 0, "home_seed": 0, "today_date": "", "met_benny": false}
 	add_child(save)
 	sfx = SfxScript.new()
 	add_child(sfx)
@@ -235,6 +256,12 @@ func _setup(mode: String) -> void:
 	view.name = "TownView"
 	add_child(view)
 	view.call("setup", self, town, Defs.island(0), vr)
+	wish_view = WishViewScript.new()
+	wish_view.name = "WishView"
+	add_child(wish_view)
+	wish_view.call("setup", self, town)
+	if mode != "client":
+		wishes = Wishes.new()
 	events = EventsScript.new()
 	events.name = "Events"
 	events.set("main", self)
@@ -300,7 +327,7 @@ func _setup(mode: String) -> void:
 		net.state_set("shared", false)
 		var last := clampi(int(save.data.get("last", 0)), 0, Defs.ISLANDS.size() - 1)
 		if Defs.SIMPLE_MODE:
-			load_island(0)  # no island select: straight into the meadow town
+			load_town("home")  # no island select: straight into the family's home island
 			_set_phase("play")
 		else:
 			load_island(last)
@@ -341,6 +368,202 @@ func playing() -> bool:
 
 
 # --- Islands, saves and goals (host / local) ---------------------------------------------------
+
+## SIMPLE_MODE: load (or start) the HOME town or TODAY'S ISLAND. The town we're leaving is saved first.
+func load_town(where: String) -> void:
+	if place_key != "" and place_key != where:
+		save_town()
+		_telemetry("sail")
+	elif place_key == where and town.buildings.size() > 0:
+		return
+	place_key = where
+	var towns: Dictionary = save.data.get("towns", {})
+	if where == "today" and String(save.data.get("today_date", "")) != Seeded.today():
+		towns.erase("today")  # yesterday's island sails away: today's is a new one
+		save.data["today_date"] = Seeded.today()
+	var key := _town_key(where)
+	var fresh := not towns.has(key)
+	var wished := 0
+	if not fresh:
+		var d: Dictionary = towns[key]
+		town.deserialize(d.get("town", {}))
+		if town.seed_value == 0:
+			_add_features()
+		sim.setup(town, false)
+		sim.coins = int(d.get("coins", 100))
+		sim.tier = int(d.get("tier", 0))
+		var c: Dictionary = d.get("counters", {})
+		for k in c:
+			sim.counters[k] = c[k]
+		hour = float(d.get("hour", 8.5))
+		wished = int(d.get("wishes", 0))
+	else:
+		town.apply_island(IslandGen.generate(_seed_for(where)))
+		town.starter_town()
+		_practice_site = -1
+		if where == "home":
+			_starter_blueprint()
+		sim.setup(town, false)
+		sim.coins = 100
+		sim.tier = 0
+		for k in sim.counters:
+			sim.counters[k] = 0
+		hour = 8.5
+	island = town.island
+	goals_done.clear()
+	sim.pop = 0
+	for bid in town.buildings:
+		sim.pop += int(town.buildings[bid].get("res", 0))
+	sim.refresh_unlocks(false)
+	if where == "home":
+		_start_practice()
+	else:
+		practice = 2
+		practice_road.clear()
+	jobs.setup(town, sim)
+	jobs.practice_site = _practice_site
+	events.call("finish", sim, jobs)
+	fleet.call("reset_positions")
+	fleet.call("sync_ai", sim.tier)
+	wishes.setup(town, wished, town.seed_value)
+	town.open_mask |= Wishes.open_for(wished)
+	_run_t = 0.0
+	save.mark_dirty()
+	net.state_set("place", where)
+	net.state_set("boat", bool(save.data.get("practiced", false)))
+	_show_island(island)
+	_publish_town(true)
+	_publish_stats()
+	_publish_wishes()
+	save_town()
+	print("Tiny Town Tycoon: %s town, island seed %d (%s), %d buildings, %d wishes granted, districts %d" % [where, town.seed_value,
+		"new" if fresh else "saved", town.buildings.size(), wished, town.open_mask & 15])
+	if where == "today":
+		_story("today")
+	elif _sail_t > 0.0:
+		_story("home")
+	elif not bool(save.data.get("met_benny", false)):
+		save.data["met_benny"] = true
+		_story("hello")
+	else:
+		_story("back")
+
+
+## The save key of a SIMPLE_MODE town: an old meadow town (from before seeded islands) stays the home town.
+func _town_key(where: String) -> String:
+	if where == "today":
+		return "today"
+	return "meadow" if (save.data.get("towns", {}) as Dictionary).has("meadow") else "home"
+
+
+func _seed_for(where: String) -> int:
+	if OS.has_environment("TT_SEED"):
+		return int(OS.get_environment("TT_SEED")) + (1 if where == "today" else 0)
+	if where == "today":
+		return Wishes.today_seed()
+	if int(save.data.get("home_seed", 0)) <= 0:
+		save.data["home_seed"] = 1 + Seeded.fresh_seed()
+	return int(save.data["home_seed"])
+
+
+## An old town (made before seeded islands): districts, landmarks and resources around what's built.
+func _add_features() -> void:
+	var oi := {"seed": 11 + int(town.island), "ter": town.ter, "trees": town.trees.duplicate()}
+	IslandGen.features(oi, town.owner_id, town.lay)
+	town.res = oi.res
+	town.dist = oi.dist
+	town.open_mask = int(oi.open)
+	town.lm = oi.lm
+	town.trees = oi.trees
+	town.seed_value = int(oi.seed)
+	town.dist_version += 1
+	town.tree_version += 1
+	town.version += 1
+
+
+## Benny's picture card on every screen (wishes.gd LINES).
+func _story(key: String) -> void:
+	_fx("story", [key])
+
+
+## Host: a RUN line (core/telemetry.gd) for this town.
+func _telemetry(end: String) -> void:
+	if sim == null or wishes == null or place_key == "":
+		return
+	var built := 0
+	for id in town.buildings:
+		built += 1 if int(town.buildings[id]["stage"]) >= 1 else 0
+	var dists := 0
+	for k in range(1, 4):
+		dists += (town.open_mask >> k) & 1
+	Telemetry.run(GAME_ID, {"end": end, "place": place_key, "seed": town.seed_value, "biome": town.island,
+		"buildings": town.buildings.size() - 1, "built": built, "pop": sim.pop, "unl": sim.unl, "wishes": wishes.done,
+		"wishes_open": wishes.list.size(), "districts": dists, "mins": snappedf(_run_t / 60.0, 0.1),
+		"players": party.active_slots().size(), "vr": vr_rig != null, "loads": int(sim.counters.get("loads", 0))})
+	_run_t = 0.0
+
+
+## Host: the wishes in the store (only when they change).
+func _publish_wishes() -> void:
+	if wishes == null:
+		return
+	var p := wishes.packed()
+	if p != _wish_pub:
+		_wish_pub = p
+		net.state_set("wish", p)
+
+
+## Host: wishes once a second (after the practice): new ones, and the mist lifting when the town is full.
+func _wish_tick() -> void:
+	if practice < 2:
+		return
+	var nw := wishes.tick(1.0, Defs.simple_tray(sim.unl, false))
+	if not nw.is_empty():
+		_fx("wish_new", [int(nw["id"]), int(nw["x"]), int(nw["z"]), int(nw["home"])])
+	if wishes.dry >= 2:
+		wishes.dry = 0
+		var bit := Wishes.next_open(town.open_mask)
+		if bit != 0:
+			_open_district(int(log(bit) / log(2) + 0.5))
+	_publish_wishes()
+
+
+## Host: a building went down: does it grant wishes? (and do they open a district?)
+func _grant_wishes(id: int) -> void:
+	if wishes == null or not town.buildings.has(id):
+		return
+	for w in wishes.granted_by(town.buildings[id]):
+		_fx("wish_done", [int(w["id"]), int(w["x"]), int(w["z"]), int(w["home"]), wishes.done])
+	var want := Wishes.open_for(wishes.done)
+	for k in range(1, Wishes.OPEN_AT.size()):
+		if (want >> k) & 1 == 1 and (town.open_mask >> k) & 1 == 0:
+			_open_district(k)
+	_publish_wishes()
+
+
+## Host: the mist lifts off district k and its landmark's blueprint appears.
+func _open_district(k: int) -> void:
+	town.open_mask |= 1 << k
+	town.version += 1
+	var l: Array = town.lm[k] if k < town.lm.size() else []
+	var lid := 0
+	if not l.is_empty() and town.can_place(String(l[0]), int(l[1]), int(l[2])) == "":
+		lid = town.add_building(String(l[0]), int(l[1]), int(l[2]), town.auto_rot(String(l[0]), int(l[1]), int(l[2])), 0)
+	net.state_set("open", town.open_mask)
+	_fx("mist", [k, lid])
+	_publish_town(false)
+	save_town()
+
+
+## Host: the boat was dropped: sail to TODAY'S ISLAND (or home).
+func _sail() -> void:
+	if _sail_t > 0.0:
+		return
+	var to := "today" if place_key == "home" else "home"
+	_fx("sail", [to])
+	_sail_t = 4.0
+	load_town(to)
+
 
 ## Load (or start) an island's town. The previous town is saved first.
 func load_island(i: int) -> void:
@@ -467,6 +690,7 @@ func _practice_step(done_kind: String) -> void:
 		practice = 2
 		save.data["practiced"] = true
 		save.mark_dirty()
+		net.state_set("boat", true)
 		_fx("practice", [2])
 
 
@@ -475,9 +699,11 @@ func save_town() -> void:
 	if island < 0 or sim == null:
 		return
 	var id := String(Defs.island(island)["id"])
+	if Defs.SIMPLE_MODE and place_key != "":
+		id = _town_key(place_key)
 	var towns: Dictionary = save.data.get("towns", {})
 	towns[id] = {"town": town.serialize(), "coins": sim.coins, "tier": sim.tier, "counters": sim.counters.duplicate(),
-		"goals": goals_done.duplicate(), "hour": hour}
+		"goals": goals_done.duplicate(), "hour": hour, "wishes": wishes.done if wishes != null else 0}
 	save.data["towns"] = towns
 	save.mark_dirty()
 
@@ -606,6 +832,8 @@ func on_request(slot: int, action: String, args: Array) -> void:
 
 ## Why `kind` can't go at x, z right now ("" = it can). Used by the mayors' ghosts too.
 func place_problem(kind: String, x: int, z: int) -> String:
+	if kind == "boat":
+		return "" if bool(net.state_get("boat", false)) else "Not yet"
 	if sim != null:
 		if not sim.unlocked(kind):
 			return "Unlocks at %s" % Defs.TIERS[int(Defs.def(kind).get("tier", 0))]
@@ -622,6 +850,11 @@ func place_problem(kind: String, x: int, z: int) -> String:
 
 ## Host: the mayor placed a building (a blueprint: the crane builds it).
 func place(slot: int, kind: String, x: int, z: int, rot: int) -> bool:
+	if kind == "boat":
+		if place_problem(kind, x, z) == "" and slot == 0:
+			_sail()
+			return true
+		return false
 	if Defs.is_tool_kind(kind) or kind == "hall" or not Defs.B.has(kind):
 		return false
 	var why := place_problem(kind, x, z)
@@ -636,6 +869,7 @@ func place(slot: int, kind: String, x: int, z: int, rot: int) -> bool:
 		_practice_step(kind)
 		cue_did(0, "build")
 	_fx("placed", [id, slot])
+	_grant_wishes(id)
 	_publish_town(false)
 	_publish_stats()
 	return true
@@ -701,6 +935,9 @@ func _publish_town(full: bool) -> void:
 		return
 	if full:
 		net.state_set("island", island)
+		net.state_set("res", town.res.duplicate())
+		net.state_set("dist", town.dist.duplicate())
+		net.state_set("open", town.open_mask)
 		net.state_set("ter", town.ter.duplicate())
 		net.state_set("free", sim.free_build)
 		_pub_lay = -1
@@ -761,6 +998,14 @@ func _on_state_changed(key: String, value: Variant) -> void:
 		elif key == "island":
 			town.island = int(value)
 			_ter_dirty = true
+		elif key == "res" and value is PackedByteArray:
+			town.res = (value as PackedByteArray).duplicate()
+			_ter_dirty = true
+		elif key == "dist" and value is PackedByteArray:
+			town.dist = (value as PackedByteArray).duplicate()
+			town.dist_version += 1
+		elif key == "open":
+			town.open_mask = int(value)
 		elif key == "lay" and value is PackedByteArray:
 			town.lay = (value as PackedByteArray).duplicate()
 			town.lay_version += 1
@@ -794,7 +1039,7 @@ func _on_state_changed(key: String, value: Variant) -> void:
 		"shared":
 			if split != null and playing():
 				split.set_shared(bool(value))
-		"coins", "pop", "happy", "tier", "goals", "free", "unl":
+		"coins", "pop", "happy", "tier", "goals", "free", "unl", "boat":
 			hud.call("refresh")
 			if mayor != null:
 				mayor.call("refresh_board")
@@ -1080,7 +1325,13 @@ func _process(delta: float) -> void:
 		_ter_dirty = false
 		_show_island(town.island)
 	# day and night (every machine runs the clock; the host's is the true one)
+	var was_hour := hour
 	hour = fposmod(hour + delta * 24.0 / DAY_LEN * fast * (1.0 if is_play else 0.0), 24.0)
+	if hour < was_hour and net.mode != "client":
+		_telemetry("day")  # one RUN line per day of town time
+	_sail_t = maxf(0.0, _sail_t - delta)
+	if is_play:
+		_run_t += delta
 	_sky_t -= delta
 	if _sky_t <= 0.0:
 		_sky_t = 0.1
@@ -1146,6 +1397,8 @@ func _sim_tick() -> void:
 	if t4 - t0 > 8000:
 		print("[perf] sim %d / jobs.generate %d / jobs.assign %d / fleet.sync_ai %d ms" % [(t1 - t0) / 1000, (t2 - t1) / 1000, (t3 - t2) / 1000, (t4 - t3) / 1000])
 	view.call("set_walkers", sim.pop / 2 + 2 if sim.pop > 0 else 0)
+	if Defs.SIMPLE_MODE:
+		_wish_tick()
 	_publish_town(false)
 	_publish_stats()
 	_publish_jobs()
@@ -1255,6 +1508,10 @@ func show_fx(kind: String, args: Array) -> void:
 					sfx.play_at("clap", c3, -8.0, 1.2)
 				if mayor != null:
 					mayor.call("built", id)
+				if ["landmark", "ferris", "lighthouse"].has(String(b3["kind"])):
+					view.call("burst", c3 + Vector3(0, 0.08, 0), Color(0.6, 0.85, 1.0), 30, 1.6)
+					sound("party_horn", -4.0)
+					_show_story("landmark")
 		"sale":
 			var b4 := town.buildings.get(int(args[0]), {}) as Dictionary
 			if not b4.is_empty() and not Defs.SIMPLE_MODE:
@@ -1272,6 +1529,28 @@ func show_fx(kind: String, args: Array) -> void:
 				view.call("dust", town.center_of(b6), 1)
 				view.call("burst", town.center_of(b6) + Vector3(0, 0.05, 0), Color(1.0, 0.85, 0.3), 16, 1.0)
 				sfx.play_at("power_up", town.center_of(b6), -6.0)
+		"story":
+			_show_story(String(args[0]))
+		"wish_new":
+			var at := _wish_pos(int(args[1]), int(args[2]), int(args[3]))
+			sfx.play_at("pop", at, -4.0, 1.4)
+			view.call("burst", at, Color(1.0, 1.0, 1.0), 10, 0.6)
+		"wish_done":
+			var at2 := _wish_pos(int(args[1]), int(args[2]), int(args[3]))
+			sfx.play_at("correct", at2, -2.0)
+			sfx.play_at("clap", at2, -6.0, 1.1)
+			view.call("burst", at2, Color(1.0, 0.45, 0.65), 26, 1.3)
+			view.call("burst", at2, Color(1.0, 0.9, 0.4), 12, 0.9)
+			for slot in party.local_slots():
+				party.rumble(slot, 0.25, 0.0, 0.1)
+			_show_story("wish")
+		"mist":
+			wish_view.call("open_district", int(args[0]))
+			sound("reveal", -2.0)
+			_show_story("all_open" if town.open_mask & 14 == 14 else "mist")
+		"sail":
+			sound("whoosh", -2.0, 0.8)
+			sound("party_horn", -10.0, 1.2)
 		"pickup", "dropoff":
 			view.call("mark_dirty")
 			var vid := int(args[0])
@@ -1353,6 +1632,27 @@ func show_fx(kind: String, args: Array) -> void:
 			if vr_rig != null:
 				HudKit.vr_toast(self, vr_rig.camera, "%s! %s" % [title, line])
 			sfx.play("bell" if ek != "fire" else "alarm", -4.0)
+
+
+## Where a wish bubble floats (over its house, or over its resource cell).
+func _wish_pos(x: int, z: int, home: int) -> Vector3:
+	var b: Dictionary = town.buildings.get(home, {}) if home > 0 else {}
+	var base := town.center_of(b) if not b.is_empty() else Defs.cell_center(x, z)
+	return base + Vector3(0, WishViewScript.BUBBLE_UP, 0)
+
+
+## Every machine: one of Benny's picture cards (TV views and the VR mayor).
+func _show_story(key: String) -> void:
+	var l: Array = Wishes.LINES.get(key, [])
+	if l.is_empty():
+		return
+	var pic := Wishes.WHO_PIC if String(l[1]) == "pic" else String(l[1])
+	var beat := {"who": Wishes.WHO, "line": String(l[0]), "pic": pic, "color": Wishes.WHO_COLOR, "duration": 4.0}
+	StoryCard.show(hud.call("all_roots"), beat)
+	if vr_rig != null:
+		if is_instance_valid(_vr_story):
+			_vr_story.queue_free()
+		_vr_story = StoryCard.show_vr(self, vr_rig.camera, beat)
 
 
 func sound(sound_name: String, volume_db: float = 0.0, pitch: float = 1.0) -> void:
@@ -1438,6 +1738,7 @@ func on_client_joined() -> void:
 
 func _exit_tree() -> void:
 	if sim != null and island >= 0:
+		_telemetry("quit")
 		save_town()
 		save.save_now()
 	XRServer.world_scale = 1.0

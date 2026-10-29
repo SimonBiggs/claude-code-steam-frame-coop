@@ -60,10 +60,7 @@ func setup(p_main: Node, p_town: Town, p_cam: Camera3D) -> void:
 func _tray() -> Array[String]:
 	if not Defs.SIMPLE_MODE:
 		return Defs.TRAY
-	var out: Array[String] = []
-	for i in clampi(int(main.net.state_get("unl", 2)), 2, Defs.SIMPLE_TRAY.size()):
-		out.append(Defs.SIMPLE_TRAY[i])
-	return out
+	return Defs.simple_tray(int(main.net.state_get("unl", 2)), bool(main.net.state_get("boat", false)))
 
 
 func kind() -> String:

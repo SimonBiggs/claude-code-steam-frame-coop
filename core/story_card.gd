@@ -20,8 +20,13 @@ extends RefCounted
 ## and sheep (wool = color); Starship Crew's captain (Captain Whiskers: a ginger cat in a bubble helmet), planet
 ## (in color, with a ring), station (the space station wheel) and rocket; Balloon Pop's seller (Poppy: a smiling
 ## face in a party hat with a bunch of balloons) and her fair rides icecream, carousel, ferris (the big wheel) and
-## tent (the big top); Bee Garden's queenbee (Queen Bea: a round bee in a gold crown), hive (a striped skep with
-## bees), honeyjar (a jar of honey with a red lid), daisy and lily (the sun lily); anything else is a core/ui_kit.gd icon kind ("star", "heart", "crown"...).
+## tent (the big top); Tiny Town Tycoon's beaver (Benny the builder beaver in a yellow hard hat), island (a little
+## green island with a palm in the sea) and boat (a sailing boat on the waves, sail in color); Crystal Saga's lumi
+## (Lumi: a little glowing crystal fairy), shard (a crystal shard), the skills bigfire, snowflake (ice), twin (two
+## sparks), longsword, spin (a sword in a whirl), mighty (a big golden sword), and Willowbrook's windmill, fountain
+## and rainbow; Bee Garden's queenbee (Queen Bea: a round bee in a gold crown), hive (a striped skep with bees),
+## honeyjar (a jar of honey with a red lid), daisy and lily (the sun lily); anything else is a core/ui_kit.gd icon
+## kind ("star", "heart", "crown"...).
 ## Keep lines short and kind: kids read the screen.
 
 const UiKit := preload("res://core/ui_kit.gd")
@@ -32,7 +37,9 @@ const PICTURES: Array[String] = ["bird", "envelope", "cloud", "storm", "house", 
 	"kart", "partyhat", "cowboy", "wizard",
 	"farmer", "mole", "bunny", "lettuce", "carrot", "pumpkin", "sunflower", "strawberry", "corn", "melon", "apple",
 	"toucan", "fish", "otter", "puppy", "coach", "balloon", "shepherd", "sheep",
+	"beaver", "island", "boat",
 	"captain", "planet", "station", "rocket", "seller", "icecream", "carousel", "ferris", "tent",
+	"lumi", "shard", "bigfire", "snowflake", "twin", "longsword", "spin", "mighty", "windmill", "fountain", "rainbow",
 	"queenbee", "hive", "honeyjar", "daisy", "lily"]
 
 
@@ -539,6 +546,47 @@ class Picture extends Control:
 					for i in 5:
 						var a2 := t * 3.0 + i * TAU / 5.0
 						_circle(0.5 + cos(a2) * 0.36, 0.42 + sin(a2) * 0.36 + bob, 0.02, Color(1.0, 0.95, 0.5))
+			"beaver":  # Benny (Tiny Town Tycoon): a brown beaver in a yellow hard hat, big front teeth
+				var fur := Color(0.62, 0.4, 0.24)
+				_poly([[0.3, 0.72 + bob], [0.7, 0.72 + bob], [0.8, 0.98], [0.2, 0.98]], fur.darkened(0.1))
+				_poly([[0.66, 0.9], [0.95, 0.8], [0.98, 0.95], [0.7, 0.99]], Color(0.4, 0.27, 0.18))
+				_circle(0.3, 0.32 + bob, 0.07, fur.darkened(0.15))
+				_circle(0.7, 0.32 + bob, 0.07, fur.darkened(0.15))
+				_circle(0.5, 0.5 + bob, 0.25, fur)
+				_circle(0.5, 0.62 + bob, 0.13, Color(0.85, 0.68, 0.5))
+				_eye(0.41, 0.46 + bob, 0.055)
+				_eye(0.59, 0.46 + bob, 0.055)
+				_circle(0.5, 0.56 + bob, 0.045, Color(0.2, 0.12, 0.1))
+				_poly([[0.45, 0.66 + bob], [0.55, 0.66 + bob], [0.55, 0.75 + bob], [0.45, 0.75 + bob]], white)
+				draw_line(_p(0.5, 0.66 + bob), _p(0.5, 0.75 + bob), Color(0.7, 0.7, 0.7), 1.5)
+				# the hard hat
+				_poly([[0.26, 0.32 + bob], [0.74, 0.32 + bob], [0.68, 0.16 + bob], [0.5, 0.11 + bob], [0.32, 0.16 + bob]], Color(1.0, 0.82, 0.15))
+				_poly([[0.2, 0.33 + bob], [0.8, 0.33 + bob], [0.8, 0.37 + bob], [0.2, 0.37 + bob]], Color(0.95, 0.7, 0.1))
+				_poly([[0.47, 0.12 + bob], [0.53, 0.12 + bob], [0.53, 0.32 + bob], [0.47, 0.32 + bob]], Color(1.0, 0.9, 0.45))
+			"island":
+				_poly([[0.0, 0.7], [1.0, 0.7], [1.0, 1.0], [0.0, 1.0]], Color(0.3, 0.62, 0.9))
+				for k in 4:
+					var wx := k * 0.27 + fmod(t * 0.08, 0.27)
+					draw_arc(_p(wx, 0.8), 0.06 * size.x, PI, TAU, 8, Color(0.8, 0.92, 1.0), 2.0)
+				_poly([[0.12, 0.72], [0.3, 0.6], [0.7, 0.58], [0.9, 0.72]], Color(0.98, 0.88, 0.6))
+				_poly([[0.22, 0.64], [0.38, 0.5], [0.62, 0.49], [0.8, 0.64]], Color(0.45, 0.78, 0.35))
+				draw_line(_p(0.56, 0.52), _p(0.6, 0.24 + bob), Color(0.55, 0.38, 0.22), 0.04 * size.x)
+				for a in [-2.6, -1.9, -1.2, -0.5]:
+					var tip := Vector2(0.6 + cos(a) * 0.2, 0.24 + bob + sin(a) * 0.1 + 0.08)
+					_poly([[0.6, 0.22 + bob], [tip.x, tip.y], [0.6 + cos(a) * 0.1, 0.27 + bob]], Color(0.3, 0.7, 0.3))
+				_circle(0.82, 0.18, 0.08, Color(1.0, 0.85, 0.3))
+			"boat":
+				var rock := sin(t * 2.0) * 0.02
+				_poly([[0.0, 0.76], [1.0, 0.76], [1.0, 1.0], [0.0, 1.0]], Color(0.3, 0.62, 0.9))
+				_poly([[0.15, 0.62 + rock], [0.85, 0.62 - rock], [0.72, 0.8], [0.28, 0.8]], Color(0.85, 0.3, 0.25))
+				_poly([[0.15, 0.62 + rock], [0.85, 0.62 - rock], [0.84, 0.66 - rock], [0.16, 0.66 + rock]], white)
+				draw_line(_p(0.5, 0.62), _p(0.5, 0.14 + bob), Color(0.5, 0.35, 0.2), 0.03 * size.x)
+				_poly([[0.53, 0.18 + bob], [0.53, 0.56], [0.82, 0.56]], color)
+				_poly([[0.47, 0.24 + bob], [0.47, 0.56], [0.24, 0.56]], white)
+				_poly([[0.5, 0.14 + bob], [0.64, 0.17 + bob], [0.5, 0.2 + bob]], Color(1.0, 0.85, 0.3))
+				for k in 3:
+					var wx2 := k * 0.4 + fmod(t * 0.1, 0.4)
+					draw_arc(_p(wx2, 0.86), 0.07 * size.x, PI, TAU, 8, Color(0.8, 0.92, 1.0), 2.0)
 			"captain":  # Captain Whiskers (Starship Crew): a ginger space cat in a glass bubble helmet
 				var fur := Color(1.0, 0.62, 0.25)
 				_poly([[0.25, 0.72 + bob], [0.75, 0.72 + bob], [0.82, 0.98], [0.18, 0.98]], Color(0.92, 0.94, 1.0))
@@ -585,6 +633,90 @@ class Picture extends Control:
 				_poly([[0.38, 0.6 + bob], [0.24, 0.8 + bob], [0.38, 0.78 + bob]], Color(0.95, 0.3, 0.35))
 				_poly([[0.62, 0.6 + bob], [0.76, 0.8 + bob], [0.62, 0.78 + bob]], Color(0.95, 0.3, 0.35))
 				_circle(0.5, 0.45 + bob, 0.07, Color(0.5, 0.85, 1.0))
+			"lumi":  # Lumi (Crystal Saga): a little crystal fairy, glowing, with wings that flutter
+				var flap := 0.06 * sin(t * 12.0)
+				_poly([[0.42, 0.5 + bob], [0.12, 0.28 + bob - flap], [0.18, 0.62 + bob]], Color(0.8, 0.95, 1.0, 0.8))
+				_poly([[0.58, 0.5 + bob], [0.88, 0.28 + bob - flap], [0.82, 0.62 + bob]], Color(0.8, 0.95, 1.0, 0.8))
+				_circle(0.5, 0.52 + bob, 0.3, Color(0.55, 0.85, 1.0, 0.25))
+				_poly([[0.5, 0.56 + bob], [0.64, 0.74 + bob], [0.5, 0.94 + bob], [0.36, 0.74 + bob]], Color(0.6, 0.85, 1.0))
+				_circle(0.5, 0.44 + bob, 0.16, Color(0.95, 0.98, 1.0))
+				_poly([[0.42, 0.3 + bob], [0.5, 0.12 + bob], [0.58, 0.3 + bob]], Color(0.55, 0.85, 1.0))
+				_eye(0.44, 0.44 + bob, 0.045)
+				_eye(0.56, 0.44 + bob, 0.045)
+				draw_arc(_p(0.5, 0.5 + bob), 0.05 * size.x, 0.3, PI - 0.3, 8, Color(0.3, 0.4, 0.6), 0.02 * size.x)
+				_circle(0.5, 0.12 + bob, 0.03 + 0.01 * sin(t * 6.0), Color(1.0, 1.0, 0.7))
+			"shard":  # a crystal shard (Crystal Saga), sparkling
+				_poly([[0.5, 0.08 + bob], [0.7, 0.4 + bob], [0.6, 0.9 + bob], [0.4, 0.9 + bob], [0.3, 0.4 + bob]], Color(0.55, 0.85, 1.0))
+				_poly([[0.5, 0.08 + bob], [0.56, 0.42 + bob], [0.5, 0.9 + bob], [0.3, 0.4 + bob]], Color(0.8, 0.95, 1.0))
+				var tw := 0.5 + 0.5 * sin(t * 5.0)
+				_circle(0.72, 0.22, 0.03 * tw + 0.01, white)
+				_circle(0.26, 0.66, 0.025 * (1.0 - tw) + 0.01, white)
+			"bigfire":  # BIG FIRE: a fireball with a flame on top
+				var fl := 0.03 * sin(t * 14.0)
+				_poly([[0.3, 0.55 + bob], [0.42, 0.1 + bob + fl], [0.5, 0.3 + bob], [0.6, 0.05 + bob - fl], [0.72, 0.55 + bob]], Color(1.0, 0.75, 0.2))
+				_circle(0.5, 0.62 + bob, 0.28, Color(1.0, 0.45, 0.12))
+				_circle(0.5, 0.64 + bob, 0.16, Color(1.0, 0.85, 0.35))
+			"snowflake":  # ICE
+				for k in 3:
+					var a := k * PI / 3.0 + t * 0.4
+					var d := Vector2(cos(a), sin(a)) * 0.38
+					draw_line(_p(0.5 - d.x, 0.5 - d.y), _p(0.5 + d.x, 0.5 + d.y), Color(0.75, 0.95, 1.0), 0.06 * size.x)
+					for sgn in [-1.0, 1.0]:
+						var tip: Vector2 = Vector2(0.5, 0.5) + d * 0.7 * float(sgn)
+						var n: Vector2 = Vector2(-d.y, d.x) * 0.3
+						draw_line(_p(tip.x, tip.y), _p(tip.x + n.x + d.x * 0.25 * sgn, tip.y + n.y + d.y * 0.25 * sgn), Color(0.75, 0.95, 1.0), 0.04 * size.x)
+						draw_line(_p(tip.x, tip.y), _p(tip.x - n.x + d.x * 0.25 * sgn, tip.y - n.y + d.y * 0.25 * sgn), Color(0.75, 0.95, 1.0), 0.04 * size.x)
+				_circle(0.5, 0.5, 0.07, white)
+			"twin":  # TWIN SPARK: two sparks side by side
+				for k in 2:
+					var cx := 0.32 + k * 0.36
+					var cy := 0.5 + (0.08 if k == 0 else -0.08) + bob
+					var col := Color(0.85, 0.6, 1.0) if k == 0 else Color(0.6, 0.85, 1.0)
+					var pts := []
+					for i in 8:
+						var a := i * TAU / 8.0 + t * 2.0
+						var rr := 0.2 if i % 2 == 0 else 0.08
+						pts.append([cx + cos(a) * rr, cy + sin(a) * rr])
+					_poly(pts, col)
+			"longsword", "spin", "mighty":  # sword tricks: a long sword, a sword in a whirl, a big golden sword
+				var blade := Color(0.85, 0.92, 1.0) if kind != "mighty" else Color(1.0, 0.85, 0.3)
+				var top := 0.06 if kind == "longsword" else 0.2
+				var w := 0.05 if kind != "mighty" else 0.08
+				if kind == "spin":
+					draw_arc(_p(0.5, 0.55), 0.36 * size.x, t * 4.0, t * 4.0 + PI * 1.5, 20, Color(0.5, 1.0, 0.8), 0.05 * size.x)
+				_poly([[0.5 - w, 0.68], [0.5 - w, top + 0.06], [0.5, top], [0.5 + w, top + 0.06], [0.5 + w, 0.68]], blade)
+				_poly([[0.32, 0.68], [0.68, 0.68], [0.68, 0.74], [0.32, 0.74]], Color(1.0, 0.8, 0.3))
+				_poly([[0.46, 0.74], [0.54, 0.74], [0.54, 0.9], [0.46, 0.9]], Color(0.4, 0.28, 0.55))
+				_circle(0.5, 0.92, 0.04, Color(0.5, 0.85, 1.0))
+				if kind == "mighty":
+					for k in 3:
+						var a := t * 2.0 + k * TAU / 3.0
+						_circle(0.5 + cos(a) * 0.3, 0.4 + sin(a) * 0.2, 0.035, Color(1.0, 1.0, 0.7))
+			"windmill":  # Willowbrook's windmill, sails turning
+				_poly([[0.38, 0.4], [0.62, 0.4], [0.68, 0.95], [0.32, 0.95]], Color(0.96, 0.92, 0.82))
+				_poly([[0.34, 0.42], [0.5, 0.24], [0.66, 0.42]], Color(0.8, 0.35, 0.28))
+				_poly([[0.45, 0.78], [0.55, 0.78], [0.55, 0.95], [0.45, 0.95]], Color(0.5, 0.32, 0.2))
+				for k in 4:
+					var a := t * 1.5 + k * PI * 0.5
+					var d := Vector2(cos(a), sin(a))
+					var n := Vector2(-d.y, d.x) * 0.06
+					var c0 := Vector2(0.5, 0.42)
+					_poly([[c0.x + n.x * 0.3, c0.y + n.y * 0.3], [c0.x + d.x * 0.4 + n.x, c0.y + d.y * 0.4 + n.y], [c0.x + d.x * 0.4 - n.x, c0.y + d.y * 0.4 - n.y]], Color(0.95, 0.9, 0.8))
+				_circle(0.5, 0.42, 0.04, Color(0.75, 0.3, 0.25))
+			"fountain":  # a sparkly fountain
+				_poly([[0.12, 0.72], [0.88, 0.72], [0.8, 0.92], [0.2, 0.92]], Color(0.82, 0.82, 0.88))
+				_poly([[0.17, 0.72], [0.83, 0.72], [0.8, 0.77], [0.2, 0.77]], Color(0.4, 0.7, 1.0))
+				_poly([[0.46, 0.4], [0.54, 0.4], [0.56, 0.72], [0.44, 0.72]], Color(0.85, 0.85, 0.9))
+				for k in 5:
+					var ph := fmod(t * 0.8 + k * 0.2, 1.0)
+					var dx := (k - 2) * 0.09 * ph
+					_circle(0.5 + dx * 2.0, 0.36 - sin(ph * PI) * 0.22 + ph * 0.3, 0.035, Color(0.6, 0.85, 1.0))
+			"rainbow":
+				var cols: Array = [Color(1.0, 0.35, 0.35), Color(1.0, 0.65, 0.25), Color(1.0, 0.95, 0.35), Color(0.4, 0.9, 0.4), Color(0.4, 0.65, 1.0), Color(0.7, 0.45, 1.0)]
+				for k in 6:
+					draw_arc(_p(0.5, 0.8), (0.42 - k * 0.05) * size.x, PI, TAU, 24, cols[k], 0.05 * size.x)
+				for cl in [[0.14, 0.8, 0.09], [0.24, 0.84, 0.08], [0.76, 0.84, 0.08], [0.86, 0.8, 0.09]]:
+					_circle(cl[0], cl[1], cl[2], white)
 			"shepherd":  # Bo (Sheep Round-Up): a round face under a bonnet (color) with a bow, curls and a crook
 				draw_arc(_p(0.84, 0.22 + bob), 0.08 * size.x, PI, TAU, 10, Color(0.55, 0.36, 0.2), 0.035 * size.x)
 				draw_line(_p(0.92, 0.22 + bob), _p(0.92, 0.95), Color(0.55, 0.36, 0.2), 0.035 * size.x)
