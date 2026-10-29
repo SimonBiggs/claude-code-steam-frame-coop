@@ -13,7 +13,7 @@ extends RefCounted
 ## snowman, tophat, beanie, gift (a present), and the Kitchen Rush guest faces granny, kid, pirate, robot,
 ## alien, knight; Kart Race's kart (a little race kart in `color`), partyhat, cowboy (hat), wizard (hat);
 ## Whack-a-Mole's farmer (Fig), mole (fur = color), bunny and crops lettuce, carrot, pumpkin, sunflower,
-## strawberry, corn, melon, apple; anything else is a core/ui_kit.gd icon kind ("star", "heart", "crown"...).
+## strawberry, corn, melon, apple; Party Board's toucan (Mango); anything else is a core/ui_kit.gd icon kind ("star", "heart", "crown"...).
 ## Keep lines short and kind: kids read the screen.
 
 const UiKit := preload("res://core/ui_kit.gd")
@@ -22,7 +22,8 @@ const HudKit := preload("res://core/hud_kit.gd")
 const PICTURES: Array[String] = ["bird", "envelope", "cloud", "storm", "house", "sprite", "sun", "wave", "tree", "castle", "kaiju",
 	"penguin", "snowman", "tophat", "beanie", "gift", "granny", "kid", "pirate", "robot", "alien", "knight",
 	"kart", "partyhat", "cowboy", "wizard",
-	"farmer", "mole", "bunny", "lettuce", "carrot", "pumpkin", "sunflower", "strawberry", "corn", "melon", "apple"]
+	"farmer", "mole", "bunny", "lettuce", "carrot", "pumpkin", "sunflower", "strawberry", "corn", "melon", "apple",
+	"toucan"]
 
 
 ## Show a story card on one view root or an Array of them. Returns the first card made (or null).
@@ -342,6 +343,18 @@ class Picture extends Control:
 					_poly([[0.46, 0.66 + bob], [0.54, 0.66 + bob], [0.54, 0.71 + bob], [0.46, 0.71 + bob]], white)
 			"lettuce", "carrot", "pumpkin", "sunflower", "strawberry", "corn", "melon", "apple":
 				_veg(kind, bob)
+			"toucan":  # Mango (Party Board): a black toucan with a huge orange beak and a party hat
+				_circle(0.42, 0.6 + bob, 0.27, Color(0.12, 0.12, 0.16))
+				_circle(0.42, 0.68 + bob, 0.15, Color(1.0, 0.95, 0.8))
+				_poly([[0.52, 0.42 + bob], [0.98, 0.5 + bob], [0.9, 0.6 + bob], [0.55, 0.6 + bob]], Color(1.0, 0.6, 0.15))
+				_poly([[0.52, 0.42 + bob], [0.98, 0.5 + bob], [0.75, 0.47 + bob]], Color(1.0, 0.85, 0.25))
+				_circle(0.97, 0.53 + bob, 0.03, Color(0.15, 0.1, 0.1))
+				_circle(0.46, 0.42 + bob, 0.08, Color(0.45, 0.8, 1.0))
+				_eye(0.47, 0.42 + bob, 0.045)
+				_poly([[0.26, 0.32 + bob], [0.46, 0.32 + bob], [0.34, 0.06 + bob]], color)
+				_circle(0.34, 0.06 + bob, 0.04, white)
+				var flap := sin(t * 6.0) * 0.05
+				_poly([[0.22, 0.58 + bob], [0.08, 0.72 + bob - flap], [0.3, 0.78 + bob]], Color(0.2, 0.2, 0.26))
 			"castle":
 				_poly([[0.2, 0.45], [0.8, 0.45], [0.8, 0.85], [0.2, 0.85]], Color(0.85, 0.88, 1.0))
 				for x in [0.2, 0.44, 0.68]:
