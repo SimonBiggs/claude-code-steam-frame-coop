@@ -194,9 +194,15 @@ if (args[0] === "--serve") {
   globalThis.loadModule = async (name) => {
     const path = MODULES[name];
     if (!path || !(await Bun.file(path).exists())) return `${name}: no module`;
+    // Import the new copy BEFORE stopping the old one: a save that doesn't compile keeps the running copy
+    // (2026-10-29: a broken dev.ts save left dev = {error} and every agent's dev.* calls failed).
+    let m;
+    try { m = await import(`${path}?t=${Date.now()}`); } catch (e) {
+      send("⚠ brepl", `${name} failed to load, KEPT the running copy: ${e?.stack ?? e}`);
+      return `${name} failed (kept the running copy): ${e}`;
+    }
     try { globalThis[name]?.stop?.(); } catch (e) { send("⚠ brepl", `${name}.stop failed: ${e}`); }
     try {
-      const m = await import(`${path}?t=${Date.now()}`);
       globalThis[name] = m;
       await m.start?.(modCtx);
       return `reloaded ${name}`;
@@ -205,6 +211,17 @@ if (args[0] === "--serve") {
       globalThis[name] = { error: String(e) };
       return `${name} failed: ${e}`;
     }
+  };
+  // Safe module edit: write a temp copy next to it, build-check it, and only then rename it over the module (the
+  // watcher reloads it). Throws with the build errors and leaves the module untouched when it doesn't compile.
+  globalThis.writeModule = async (path, text) => {
+    const tmp = `${path.replace(/\.ts$/, "")}.check-${process.pid}-${Date.now()}.ts`;
+    await Bun.write(tmp, text);
+    const p = Bun.spawn([process.execPath, "build", "--no-bundle", tmp], { stdout: "ignore", stderr: "pipe" });
+    const err = await new Response(p.stderr).text();
+    if ((await p.exited) !== 0) { await (await import("node:fs/promises")).rm(tmp, { force: true }); throw new Error(`${path} not written, it doesn't compile:\n${err}`); }
+    await (await import("node:fs/promises")).rename(tmp, path);
+    return `wrote ${path} (build-checked)`;
   };
   globalThis.reload = async (...names) => (await Promise.all((names.length ? names : Object.keys(MODULES)).map((n) => globalThis.loadModule(n)))).join(", ");
   for (const n of Object.keys(MODULES)) await globalThis.loadModule(n);

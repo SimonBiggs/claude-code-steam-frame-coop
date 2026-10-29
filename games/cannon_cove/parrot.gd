@@ -21,6 +21,7 @@ var wings: Array[Node3D] = []
 var eyes: Array[MeshInstance3D] = []
 var bubble: Label3D
 var poke_t := 0.0
+var crown: Node3D  # a little gold crown once the crew has beaten the Kraken (saved; main.gd set_crown)
 
 
 func _ready() -> void:
@@ -83,6 +84,29 @@ func say(text: String) -> void:
 	body.scale = Vector3(1.25, 0.8, 1.25)  # squash
 	if main:
 		main._sfx().play("squawk", -6.0, randf_range(0.9, 1.25))
+
+
+## Polly's little gold crown (the crew beat the Kraken once: it stays, every voyage after).
+func set_crown(on: bool) -> void:
+	if on == (crown != null):
+		return
+	if not on:
+		crown.queue_free()
+		crown = null
+		return
+	crown = Node3D.new()
+	crown.position = Vector3(0, 0.1, 0)
+	head.add_child(crown)
+	var gold := World.mat(Color(1.0, 0.8, 0.2), 0.8, 0.35)
+	World.cyl(crown, 0.07, 0.06, 0.05, Vector3(0, 0.0, 0), gold, 8)
+	for i in 5:
+		var a := TAU * i / 5.0
+		var spike := World.cyl(crown, 0.0, 0.018, 0.05, Vector3(cos(a) * 0.06, 0.045, sin(a) * 0.06), gold, 4)
+		spike.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	World.sphere(crown, 0.015, Vector3(0, 0.0, -0.068), World.mat(Color(0.9, 0.2, 0.3), 0.6), 4)
+	for c in crown.get_children():
+		if c is GeometryInstance3D:
+			c.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
 
 ## Poked by the VR gunner's hand: SQUAWK, a flap and a startled little hop (simple mode).
