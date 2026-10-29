@@ -35,7 +35,8 @@ static func within_deadline(s: float, joining := OS.has_environment("DUO_JOIN"))
 	return clampf(s, 5.0, maxf(5.0, limit))
 
 
-## Every bot quits through here (never get_tree().quit(): tests/bot_end_test.gd checks). Stops every sound, gives the
+## Every bot quits through here (never get_tree().quit(): tests/bot_end_test.gd checks; runs ending at --quit-after
+## come here too, via the QuitAfter service, core/quit_after.gd). Stops every sound, gives the
 ## audio thread a moment to drop the stopped playbacks, then quits. Quitting while a sound plays leaked its
 ## AudioStreamWAV + playback ("ObjectDB instances were leaked at exit"): the AudioServer frees a stopped playback only
 ## on its next mix, which never comes after quit() (stopping in _exit_tree is too late, 2026-10-29).
@@ -43,8 +44,21 @@ static func quit_quietly(tree: SceneTree, code := 0) -> void:
 	if tree.has_meta("bot_quitting"):
 		return
 	tree.set_meta("bot_quitting", true)
+	tree.paused = true  # the game stops starting new sounds (one started in the last frames leaked too)
+	_stop_sounds(tree)
+	# In REAL time: under --fixed-fps a 0.2 s game timer passes in a few real ms, before the audio thread mixes once
+	# (local --quit-after runs still leaked, 2026-10-29). Block briefly so it mixes, then let the main thread's
+	# AudioServer update free the dropped playbacks.
+	for i in 2:  # twice: a sound started on the frame after the first stop leaked too
+		await tree.process_frame
+		_stop_sounds(tree)
+		OS.delay_msec(60)
+	await tree.process_frame
+	await tree.process_frame
+	tree.quit(code)
+
+
+static func _stop_sounds(tree: SceneTree) -> void:
 	for type in ["AudioStreamPlayer", "AudioStreamPlayer2D", "AudioStreamPlayer3D"]:
 		for n in tree.root.find_children("*", type, true, false):
 			n.stop()
-	await tree.create_timer(0.2, true, false, true).timeout
-	tree.quit(code)

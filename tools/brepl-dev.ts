@@ -187,6 +187,10 @@ export const history = async (query: string, n = 10) => (await sh(`claude-histor
 
 /** Everything that needs tidying: unmerged finished branches, stale worktrees, uncommitted work, staging drift,
  *  tool copies out of sync, broken services. Returns {clean, issues: [{kind, what, fix}]}. */
+/** Worktrees that live for good (merged branch or not): wt-merge is the deploy steward's permanent merge worktree
+ *  (branch merge-arcade, fast-forwarded to main after every landing), so it must never be flagged as stale. */
+const PERMANENT_WORKTREES = new Set([join(GP, "wt-merge")]);
+
 export async function debt() {
   const issues: { kind: string; what: string; fix: string }[] = [];
   // Known bug patterns ("never just one ant"): flag every instance in the staging copy, not just the one we saw.
@@ -233,8 +237,16 @@ export async function debt() {
     for (const w of (await sh("git worktree list --porcelain", dir)).out.split("\n\n").slice(1)) {
       const path = w.match(/^worktree (.*)$/m)?.[1], br = w.match(/^branch refs\/heads\/(.*)$/m)?.[1];
       if (!path || !br) continue;
+      if (PERMANENT_WORKTREES.has(path)) continue;  // kept on purpose (the steward's merge worktree), never stale
       const merged = (await sh(`git merge-base --is-ancestor ${br} ${main} && echo y`, dir)).out === "y";
-      if (merged) issues.push({ kind: "stale-worktree", what: `${r}: worktree ${path} (branch ${br} already merged)`, fix: `git worktree remove --force ${path} && git branch -D ${br}` });
+      // A worktree an agent just made from main has no commits yet, so its branch also "is merged": it is only stale
+      // when nobody works in it (no uncommitted files) and its branch hasn't moved for 12 h (2026-10-29: fresh
+      // wt-deep-* worktrees were flagged for removal minutes after their agents started).
+      // (A branch with commits of its own that main merged IS stale at once: land() removes those.)
+      const busy = merged && ((await sh("git status --porcelain | head -1", path)).out !== ""
+        || ((await sh(`git rev-list --first-parent ${main} | grep -qx "$(git rev-parse ${br})" && echo y`, dir)).out === "y"
+          && Date.now() / 1000 - +(await sh(`git log -g -1 --format=%ct ${br}`, dir)).out < 12 * 3600));
+      if (merged && !busy) issues.push({ kind: "stale-worktree", what: `${r}: worktree ${path} (branch ${br} already merged)`, fix: `git worktree remove --force ${path} && git branch -D ${br}` });
     }
   }
   const d = await stage.diff();
@@ -265,8 +277,51 @@ export async function debt() {
   return { clean: issues.length === 0, issues };
 }
 
+
+// --- Landing a finished game branch (the deploy steward's loop) ----------------------------------------------------
+
+const rport = () => 20000 + Math.floor(Math.random() * 10000);
+
+/** Land a finished branch: merge it into the permanent merge worktree (~/GodotProjects/wt-merge, branch merge-arcade),
+ *  check live == staging, copy into staging, run its gen tests + bot_end_test + core_math, the Deck bot
+ *  (DECK_BOT_ONLY=botId), the arcade bot, botId networked (180 s) and otherBots; then duo-deploy + duo-deploy-deck,
+ *  merge merge-arcade into live main, fast-forward wt-merge, remove the branch's worktree (~/GodotProjects/wt-<branch>)
+ *  and branch. Stops (nothing deployed) with {stop, ...} on a conflict, live/staging drift, a branch that touched
+ *  core/story_card.gd (pictures belong in games/<game>/story_pictures.gd) or any failing test. */
+export async function land(branch: string, genTests: string[], botId: string, otherBots: string[], msg: string) {
+  const m = await sh(`cd ${GP}/wt-${branch} && git status --short | grep -v '^??' | head -3; cd ${GP}/wt-merge && git merge --no-edit ${branch} 2>&1 | tail -1; git diff --name-only --diff-filter=U`);
+  if (/CONFLICT|fatal/.test(m.out)) return { stop: "merge", out: m.out };
+  const sc = (await sh(`git diff --stat main...${branch} -- core/story_card.gd`, LIVE)).out;
+  if (sc) return { stop: "story_card", out: `${sc}\nmove its pictures to games/<game>/story_pictures.gd (in wt-merge, commit), then land again` };
+  const drift = await sh(`for d in ${DEPLOYED.join(" ")}; do diff -rq --exclude='*.uid' --exclude='*.import' duo-arena/$d .duo-arena-stage/$d; done`, GP);
+  if (drift.out.trim()) return { stop: "live!=stage", out: drift.out };
+  await sh(`for d in ${DEPLOYED.join(" ")} tools; do rsync -a --delete --exclude '*.import' --exclude '__pycache__' wt-merge/$d/ .duo-arena-stage/$d/; done; cp wt-merge/arcade.tscn .duo-arena-stage/`, GP);
+  const out: Record<string, string> = {};
+  let ok = true;
+  for (const t of [...genTests, "bot_end_test", "core_math_test"].filter(Boolean)) {
+    out[t] = (await sh(`DUO_PORT=${rport()} timeout 600 godot-test --headless --path . -s res://tests/${t}.gd 2>&1 | grep -v OpenXR | grep -E "PASS|FAIL|SCRIPT ERROR" | tail -3; echo exit=\${PIPESTATUS[0]}`, STAGE)).out;
+    ok &&= /exit=0/.test(out[t]) && !/FAIL|SCRIPT ERROR/.test(out[t]);
+  }
+  out.deck = (await sh(`DECK_BOT_ONLY=${botId} DUO_PORT=${rport()} timeout 300 godot-test --headless --path . --fixed-fps 60 --quit-after 6000 res://tests/deck_bot.tscn 2>&1 | grep -E "BOT RESULT|SCRIPT ERROR" | tail -3`, STAGE)).out;
+  ok &&= /BOT RESULT: PASS/.test(out.deck) && !/SCRIPT ERROR/.test(out.deck);
+  const res: string[] = [];
+  for (const [id, o] of [["arcade", {}], [botId, { net: true, joiners: 1, seconds: 180 }], ...otherBots.map(x => [x, {}])] as [string, any][]) {
+    process.env.DUO_PORT = String(rport());
+    try {
+      const r = await bots.run(id, o);
+      ok &&= r.pass;
+      res.push(`${id}: ` + r.runs.map((x: any) => `${x.mode}:${x.pass ? "ok" : "FAIL"} ${x.result} ${(x.failed || []).join(";")} ${(x.errors || []).join(";")}`).join(" | "));
+    } finally { delete process.env.DUO_PORT; }
+  }
+  if (!ok) return { stop: "tests", out, res };
+  const body = `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UPzLapMn8qMpWGwygUaPCg`;
+  const d = await sh(`duo-deploy ${JSON.stringify(msg)} 2>&1 | grep -v offline | tail -4; duo-deploy-deck 2>&1 | grep -v offline | tail -4; cd ${LIVE} && git merge -q --no-edit merge-arcade -m ${JSON.stringify(`Merge branch 'merge-arcade' (${branch}: uids, tests)\n\n${body}`)} && cd ../wt-merge && git merge -q --ff-only main && cd ${LIVE} && git worktree remove --force ../wt-${branch} && git branch -d ${branch}; git log --oneline -2 | cut -c1-60`);
+  return { deployed: true, out, res, deploy: d.out };
+}
+
 export function help() {
   return `dev — Claude's dev loop (brepl). Image paths returned/shown come back as pictures via the brepl MCP tool.
+  dev.land(branch, genTests, botId, otherBots, msg)  merge a finished branch via wt-merge, test in staging, deploy TV+Decks, merge live main
   dev.debt()                         tech-debt scan: {clean, issues:[{kind, what, fix}]} (fix them straight away)
   dev.bots.list() / .run(id, {net, joiners}) / .all({only, net, concurrency})   headless bot tests in staging (net: host + joiners, tools/multibot.ts)
   dev.stage.diff() / .pull() / .deploy(msg)                            staging <-> live game
