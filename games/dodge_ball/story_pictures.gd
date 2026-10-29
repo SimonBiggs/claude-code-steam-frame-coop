@@ -5,7 +5,7 @@ extends RefCounted
 ## t = the picture's clock, bob = its gentle bob, color = the card's colour.
 ## The park's other things use other games' pictures (daisy, sunflower, sapling, balloon, bunny).
 
-const NAMES: Array[String] = ["tumtum", "squishball", "goldball", "cushion", "toadstool", "duckling"]
+const NAMES: Array[String] = ["tumtum", "squishball", "goldball", "cushion", "toadstool"]  # "duckling" is Bubble Bath's (picture names are shared across games)
 
 const SKIN := Color(1.0, 0.82, 0.68)
 const JUMPER := Color(1.0, 0.6, 0.25)
@@ -70,14 +70,3 @@ static func draw(pic, kind: String, t: float, bob: float, color: Color) -> void:
 				pic._circle(s[0], s[1] + bob, s[2], Color.WHITE)
 			pic._eye(0.46, 0.68 + bob, 0.03)
 			pic._eye(0.54, 0.68 + bob, 0.03)
-		"duckling":  # a little yellow duckling waddling
-			var wad := sin(t * 6.0) * 0.02
-			var y := Color(1.0, 0.88, 0.3)
-			pic._circle(0.48 + wad, 0.66 + bob, 0.22, y)  # body
-			pic._poly([[0.28 + wad, 0.6 + bob], [0.18 + wad, 0.5 + bob], [0.3 + wad, 0.68 + bob]], y)  # tail
-			pic._circle(0.62 + wad, 0.38 + bob, 0.14, y)  # head
-			pic._eye(0.66 + wad, 0.35 + bob, 0.035)
-			pic._poly([[0.74 + wad, 0.38 + bob], [0.86 + wad, 0.41 + bob], [0.74 + wad, 0.44 + bob]], Color(1.0, 0.55, 0.15))  # beak
-			pic._poly([[0.4 + wad, 0.62 + bob], [0.56 + wad, 0.6 + bob], [0.5 + wad, 0.72 + bob]], y.darkened(0.12))  # wing
-			pic._poly([[0.42, 0.87 + bob], [0.5, 0.87 + bob], [0.46, 0.92 + bob]], Color(1.0, 0.55, 0.15))  # feet
-			pic._poly([[0.52, 0.87 + bob], [0.6, 0.87 + bob], [0.56, 0.92 + bob]], Color(1.0, 0.55, 0.15))
