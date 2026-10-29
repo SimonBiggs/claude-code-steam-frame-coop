@@ -17,6 +17,7 @@ const W := preload("res://games/bee_garden/world.gd")
 const Bee := preload("res://games/bee_garden/bee.gd")
 const Helpers := preload("res://games/bee_garden/helpers.gd")
 const Seeded := preload("res://core/seeded.gd")
+const JarShelf := preload("res://games/bee_garden/jarshelf.gd")
 const StoryCard := preload("res://core/story_card.gd")
 
 var fails := 0
@@ -132,6 +133,9 @@ func _init() -> void:
 	_expect(is_equal_approx(Gen.BEE_SPEED, Bee.SPEED * 0.55) and Gen.BEE_LOAD == Bee.MAX_POLLEN and is_equal_approx(Gen.HELPER_SPEED, Helpers.SPEED), "bee facts match bee.gd / helpers.gd")
 	_expect(Gen.SPOTS == W.SPOTS and absf(Gen.X_MAX) < W.BED_X - 0.5 and -Gen.Z_MIN < W.BED_Z, "the bed fits world.gd")
 	_expect(Story.DECOR_MAX == W.DECOR.size(), "decor count matches world.gd")
+	var shelf_box: Array = Gen.OBSTACLES[1]
+	_expect(absf((shelf_box[0] as Vector3).x - JarShelf.POS.x) < 0.01 and absf((shelf_box[0] as Vector3).z - JarShelf.POS.z) < 0.01
+		and absf((shelf_box[1] as Vector3).x - (JarShelf.WIDTH * 0.5 + 0.08)) < 0.05, "the jar shelf stands where the bees' flight check thinks it is")
 	# Every picture Queen Bea shows exists (story_card.gd).
 	var pics: Array = ["queenbee", "hive", "honeyjar", "cloud", "sun"]
 	pics.append_array(Story.KIND_PICS)

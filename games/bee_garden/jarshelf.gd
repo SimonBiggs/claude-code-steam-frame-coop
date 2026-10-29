@@ -32,7 +32,7 @@ func _ready() -> void:
 		W.vbox(st, Vector3(0, y - 0.03, 0.0), Vector3(WIDTH + 0.08, 0.06, 0.5), wood)
 	W.vbox(st, Vector3(0, 4.42, 0.0), Vector3(WIDTH + 0.2, 0.06, 0.56), wood.darkened(0.1))
 	var mi := MeshInstance3D.new()
-	mi.mesh = W.vmesh(st)
+	mi.mesh = _srgb(W.vmesh(st))
 	add_child(mi)
 	jar_mesh = MeshInstance3D.new()
 	jar_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -58,7 +58,7 @@ func set_jars(n: int) -> void:
 		W.vcyl(st, p + Vector3(0, 0.14, 0), 0.105, 0.105, 0.05, Color(1.0, 0.9, 0.35) if gold else Color(0.9, 0.28, 0.28), 10)
 		W.vbox(st, p + Vector3(0, 0.0, 0.096), Vector3(0.1, 0.08, 0.005), Color(1.0, 0.97, 0.85))
 	if total > 0:
-		jar_mesh.mesh = W.vmesh(st, 0.15)
+		jar_mesh.mesh = _srgb(W.vmesh(st, 0.15))
 	else:
 		jar_mesh.mesh = null
 
@@ -93,7 +93,7 @@ func _build_queen() -> void:
 		W.vcyl(st, Vector3(cos(a) * 0.085, 0.32, -0.28 + sin(a) * 0.085), 0.0, 0.03, 0.08, gold, 5)
 	W.vsphere(st, Vector3(0, 0.25, -0.385), Vector3(0.025, 0.025, 0.012), Color(1.0, 0.35, 0.5), 6, 3)
 	var body := MeshInstance3D.new()
-	body.mesh = W.vmesh(st)
+	body.mesh = _srgb(W.vmesh(st))
 	queen.add_child(body)
 	for sx in [-1.0, 1.0]:
 		var wing := Node3D.new()
@@ -117,3 +117,9 @@ func _process(delta: float) -> void:
 	queen.rotation.y = -PI * 0.5 + (1.0 - spin) * TAU * (1.0 if spin > 0.0 else 0.0)
 	for w in wings:
 		w.rotation.z = float(w.get_meta("side")) * (0.2 + sin(t * (60.0 if spin > 0.0 else 9.0)) * 0.35)
+
+
+## Colours here are picked as sRGB (like the rest of the garden's materials).
+static func _srgb(m: ArrayMesh) -> ArrayMesh:
+	(m.surface_get_material(0) as StandardMaterial3D).vertex_color_is_srgb = true
+	return m

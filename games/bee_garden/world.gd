@@ -274,7 +274,7 @@ static func _build_hive(main: Node3D) -> void:
 	tag.modulate = Color(1.0, 0.85, 0.3)
 	tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	tag.layers = TV_LAYER
-	tag.position = Vector3(0, 1.6, 0)
+	tag.position = Vector3(0, 2.1, 0)  # (above Queen Bea on the roof, jarshelf.gd)
 	hive.add_child(tag)
 
 

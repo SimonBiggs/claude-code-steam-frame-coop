@@ -50,7 +50,7 @@ func show_garden(g: Dictionary) -> void:
 					var a3 := k * TAU / 4.0 + 0.4
 					W.vsphere(st, p + Vector3(cos(a3) * 0.06, 0.26, sin(a3) * 0.06), Vector3(0.018, 0.01, 0.018), Color.WHITE, 5, 2)
 	mesh_i = MeshInstance3D.new()
-	mesh_i.mesh = W.vmesh(st)
+	mesh_i.mesh = _srgb(W.vmesh(st))
 	mesh_i.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(mesh_i)
 	water = null
@@ -61,9 +61,15 @@ func show_garden(g: Dictionary) -> void:
 			W.vcyl(wst, (pd[0] as Vector3) + Vector3(float(pd[1]) * 0.35, 0.026, float(pd[1]) * 0.2), 0.12, 0.12, 0.01, Color(0.35, 0.72, 0.3), 10)
 			W.vsphere(wst, (pd[0] as Vector3) + Vector3(float(pd[1]) * 0.35, 0.05, float(pd[1]) * 0.2), Vector3(0.04, 0.03, 0.04), Color(1.0, 0.75, 0.85), 6, 3)
 		water = MeshInstance3D.new()
-		water.mesh = W.vmesh(wst)
+		water.mesh = _srgb(W.vmesh(wst))
 		var m := water.mesh.surface_get_material(0) as StandardMaterial3D
 		m.roughness = 0.15
 		m.metallic_specular = 0.9
 		water.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(water)
+
+
+## Colours here are picked as sRGB (like the rest of the garden's materials).
+static func _srgb(m: ArrayMesh) -> ArrayMesh:
+	(m.surface_get_material(0) as StandardMaterial3D).vertex_color_is_srgb = true
+	return m
