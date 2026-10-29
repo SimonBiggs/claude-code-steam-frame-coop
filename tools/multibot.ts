@@ -8,7 +8,7 @@
 //   tools/multibot.ts res://tests/arcade_lobby_bot.tscn               # host + 3 joiners
 //   tools/multibot.ts -n 5 --seconds 150 res://tests/balloon_pop_bot.tscn
 //   tools/multibot.ts -n 3 --env BOT_PLAYERS=2 --host-env DUO_FLAT_HOST=1 res://tests/engine_template_bot.tscn
-//   options: -n/--joiners N (1..6, default 3)  --seconds S (per-process timeout, default 120)  --project DIR (default:
+//   options: -n/--joiners N (1..6, default 3)  --seconds S (per-process timeout, default 180: bots end by themselves, tests/bot_end.gd)  --project DIR (default:
 //   this repo)  --env K=V (every machine)  --host-env K=V  --join-env K=V  --stagger MS (between starts, default 1500)
 //   --json (machine-readable result on the last line)  --copies (each machine runs its OWN copy of the project, in
 //   /tmp/multibot-<port>/p<k>, like real machines: a bot may change files in it to simulate a deploy reaching that
@@ -41,7 +41,7 @@ const FAIL = /BOT ASSERT FAILED: (.*)|^Bot:? .*\bFAIL\b:? ?(.*)|BOT RESULT: FAIL
 export function verdict(out: string, code: number) {
   return {
     pass: code === 0 && !/SCRIPT ERROR(?!: BOT)/.test(out) && !out.match(FAIL) && (!/BOT RESULT:/.test(out) || /BOT RESULT: PASS/.test(out)),
-    result: out.match(/BOT RESULT: .*/)?.[0] ?? (code === 0 ? "ran to the end" : code === 124 ? "timed out" : `exit ${code} (crashed?)`),
+    result: out.match(/BOT RESULT: .*/)?.[0] ?? (code === 0 ? "ran to the end" : code === 124 ? "timed out: the bot never ended by itself (arm tests/bot_end.gd in its _ready, or bot_kit finish()) or needs more --seconds" : `exit ${code} (crashed?)`),
     failed: [...out.matchAll(FAIL)].map(m => (m[1] ?? m[2] ?? m[3] ?? m[0]).trim()),
     errors: [...new Set([...out.matchAll(/SCRIPT ERROR: (?!BOT )(.*)\n\s*at: (.*)/g)].map(m => `${m[1]} @ ${m[2]}`))].slice(0, 8),
   };
@@ -118,7 +118,7 @@ export async function runGroup(o: GroupOpts): Promise<GroupResult> {
       env.BOT_OWN_COPY = "1";
     }
     runs.push(new Promise(res => {
-      const p = spawn("timeout", [String(o.seconds ?? 120), "godot-test", "--headless", "--path", path, scene], { env });
+      const p = spawn("timeout", [String(o.seconds ?? 180), "godot-test", "--headless", "--path", path, scene], { env });
       let out = "";
       p.stdout.on("data", d => { out += d; });
       p.stderr.on("data", d => { out += d; });
