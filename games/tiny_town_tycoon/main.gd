@@ -1460,7 +1460,9 @@ func _on_reward(vid: int, stat: String, amount: int) -> void:
 
 func _fx(kind: String, args: Array) -> void:
 	show_fx(kind, args)
-	if net.mode == "host":
+	if kind == "story":
+		net.event("story", args)  # its own kind: sticky, so a machine that joins later gets the current card (core/net.gd)
+	elif net.mode == "host":
 		net.event("fx", [kind, args])
 
 
@@ -1726,6 +1728,8 @@ func apply_snapshot(s: Array) -> void:
 func apply_event(kind: String, args: Array) -> void:
 	if kind == "fx" and args.size() >= 2:
 		show_fx(String(args[0]), args[1])
+	elif kind == "story":
+		show_fx(kind, args)
 
 
 func on_remote_state(slot: int, pos: Vector3, yaw: float, _pitch: float) -> void:

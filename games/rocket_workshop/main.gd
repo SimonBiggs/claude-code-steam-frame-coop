@@ -211,7 +211,6 @@ var rocket_look: Array = [0, 0, 0, 0, 0, 0]  # rocketgen look (the TV gets it in
 var unlock_from := -1  # all-time launches when the last rocket started (new parts show on the next one)
 var work_t := 0.0  # seconds spent on this rocket
 var session_t := 0.0
-var museum_send_t := 0.0
 var quit_logged := false
 var host_museum := 0  # TV: how many models the host's Rocket Row has (snapshots)
 
@@ -257,6 +256,7 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
+	net.sticky_event("museum")  # a machine that joins later gets the latest Rocket Row (core/net.gd)
 	seats = ClassicSeats.new(self, {
 		"no_keys": PlayerScript.NO_KEYS,
 		"free_actions": ["restart", "pause"],
@@ -292,6 +292,7 @@ func _setup_game(mode: String) -> void:
 	_restore_party()
 	if mode != "client":
 		museum.set_entries(_museum_packed())
+		net.event("museum", [museum.entries])  # sticky: every machine that joins gets Rocket Row
 		save.data.sessions = int(save.data.sessions) + 1
 		save.mark_dirty()
 		print("Rocket Row: %d rockets, %d launched in all, parts %s, today's rocket %s, session seed %d" % [
@@ -1711,11 +1712,6 @@ func _process(delta: float) -> void:
 	museum.update_museum(delta)
 	sprocket.update_sprocket(phase, launch_t, delta)
 	session_t += delta
-	if net.mode == "host" and net.connected:  # the TV's Rocket Row (also catches a missed event)
-		museum_send_t -= delta
-		if museum_send_t <= 0.0:
-			museum_send_t = 5.0
-			net.event("museum", [museum.entries])
 	space.update_space(rocket_n, phase, launch_t, delta)
 	manual.update_boards(modules, rocket_n)
 	jobs.update_visual(modules, delta)
@@ -2459,7 +2455,6 @@ func on_player_activity_changed(p) -> void:
 # --- Networked co-op (see docs/GAME_DEV_GUIDE.md) ----------------------------
 
 func on_client_joined() -> void:
-	museum_send_t = 0.0
 	if SIMPLE_MODE:
 		_show_center("HELLO!", 1.5)  # (no "they joined" line: each seat's join says WHO, core/who.gd)
 

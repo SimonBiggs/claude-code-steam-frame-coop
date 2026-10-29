@@ -20,6 +20,10 @@ extends Node
 ## - request(slot, action, args): "a player wants to do X". Runs main.on_request() right away on the
 ##   host / in local play, or sends it to the host from the TV machine. Same code everywhere.
 ## - just_unpaused(): true briefly after the game was unpaused (or started), to ignore held buttons.
+## - STICKY EVENTS: event() kinds that describe what is showing now (the story card, a village / collection a
+##   machine draws). The host keeps each one's latest args and replays them to a machine that joins later (to it
+##   only), so games need no re-send timers. "story" is sticky in every game; a game adds its own with
+##   net.sticky_event("village") in _ready. A client remembers them too: sticky_last(kind).
 ## - System messages (sys_send / add_sys_handler) used by core/party.gd; games normally don't need them.
 ## - Most callbacks on `main` are optional now (has_method checks); see the table in the docs.
 ##
@@ -76,6 +80,8 @@ var _state_dirty := {}  # host: keys changed since the last flush
 var _state_t := 0.0
 var _sys_handlers := {}  # kind -> Array of Callables
 var _was_paused := false
+var _sticky := {"story": null}  # sticky event kind -> its latest args (null = not sent yet); see sticky_event()
+var _joined_msec := 0  # client: when it joined (the "Net: got <sticky kind>" log line tests check)
 var _since_unpause := 0.0  # game seconds since the last unpause (or start)
 
 
@@ -298,6 +304,7 @@ func _on_peer_connected(id: int) -> void:
 	print("Net: machine %d joined (%d now)" % [id, machines.size()])
 	_state_dirty.clear()
 	_state_full.rpc_id(id, _state)  # a late joiner gets the whole store
+	_replay_sticky(id)  # ... and the current story card etc. (before on_client_joined: anything newer arrives after)
 	if main != null and main.has_method("on_client_joined"):
 		main.on_client_joined()
 	client_connected.emit()
@@ -325,6 +332,7 @@ func _on_connected() -> void:
 	Engine.remove_meta("following_now")
 	join_deadline = 0
 	Engine.set_meta("duo_joined", true)
+	_joined_msec = Time.get_ticks_msec()
 	print("Net: joined the host as a %s (%s)" % [machine_kind, machine_name])
 	_sys_up.rpc_id(1, "_hello", [machine_kind, machine_name])
 	join_finished.emit(true)
@@ -360,8 +368,34 @@ func _on_server_gone() -> void:
 
 ## Host: broadcast a one-off event (sound, burst, banner, ...) to the client.
 func event(kind: String, args: Array) -> void:
+	if mode != "client" and _sticky.has(kind):
+		_sticky[kind] = args.duplicate(true)  # even before anyone joined: the first machine catches up too
 	if mode == "host" and connected:
 		_event.rpc(kind, args)
+
+
+## Any machine (call it in _ready on every machine): make an event kind STICKY. The host remembers its latest
+## event() args and replays them to each machine that joins later, so a state-like one-off (a village, a
+## collection, the current card) needs no re-send timer. "story" is always sticky.
+func sticky_event(kind: String) -> void:
+	if not _sticky.has(kind):
+		_sticky[kind] = null
+
+
+## Any machine: the latest args of a sticky event kind (null: none yet). Clients remember what they received.
+func sticky_last(kind: String) -> Variant:
+	return _sticky.get(kind)
+
+
+## Host: a joined machine catches up on every sticky event sent so far (the plain _event RPC: works with any version).
+func _replay_sticky(peer: int) -> void:
+	var sent: Array[String] = []
+	for k in _sticky:
+		if _sticky[k] != null:
+			_event.rpc_id(peer, k, _sticky[k])
+			sent.append(str(k))
+	if not sent.is_empty():
+		print("Net: machine %d caught up on %s" % [peer, ", ".join(sent)])
 
 
 ## Client: report a local player's position and view every physics tick.
@@ -654,6 +688,10 @@ func _snapshot(s: Array) -> void:
 
 @rpc("authority", "call_remote", "reliable")
 func _event(kind: String, args: Array) -> void:
+	if mode == "client" and _sticky.has(kind):
+		if _sticky[kind] == null:  # tools/multibot.ts --late checks this line on a machine that joined late
+			print("Net: got %s %d ms after joining" % [kind, Time.get_ticks_msec() - _joined_msec])
+		_sticky[kind] = args
 	if main != null and main.has_method("apply_event"):
 		main.apply_event(kind, args)
 

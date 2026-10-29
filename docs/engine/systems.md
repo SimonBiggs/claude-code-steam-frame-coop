@@ -11,7 +11,7 @@ Shared building blocks for new games. Each is a plain script (no `class_name`):
 | `core/split_view.gd` | The TV picture: per-player views in a grid, or one shared view; VR bubble |
 | `core/camera_rig.gd` | TV cameras: third-person follow, group framing, cinematic shots, shake |
 | `core/vr_rig.gd` | The VR player: rig, gloves, height fit, locomotion, guarded trigger, mirror, avatar |
-| `core/net.gd` | Networking (existing API) + state store, `request()`, shared pause, `just_unpaused()` |
+| `core/net.gd` | Networking (existing API) + state store, `request()`, shared pause, `just_unpaused()`, sticky events (`sticky_event()`: replayed to late joiners) |
 | `core/save.gd` | Persistent saves per game (versioned, atomic), test saves kept apart |
 | `tests/bot_kit.gd` | Bot test helpers: ignore real pads, virtual pads, fake VR driver, asserts |
 

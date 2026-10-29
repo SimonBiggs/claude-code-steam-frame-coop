@@ -68,6 +68,20 @@ func _initialize() -> void:
 				fails.append("%s: %s (set_meta with null erases the meta)" % [path, m.get_string()])
 			for m in null_default.search_all(src):
 				fails.append("%s: %s (a null default is no default: errors when missing)" % [path, m.get_string()])
+	# A machine that joins late catches up on story cards and other state-like events through core/net.gd sticky
+	# events (net.sticky_event(kind): the host replays the latest one to the newcomer only). Re-send timers and
+	# broadcasts from on_client_joined resent them to EVERY machine instead (Snowball Blitz, Dragon Rider, Bubble
+	# Bath, Cannon Cove, Rocket Workshop, 2026-10-29).
+	var resend_var := RegEx.create_from_string("(?m)^var \\w*re_?send\\w*")
+	var joined_fn := RegEx.create_from_string("(?m)^func on_client_joined\\(\\)[^\\n]*\\n((?:[\\t ][^\\n]*\\n|\\n)*)")
+	for dir in ["res://arcade", "res://games"]:
+		for path in _gd_files(dir):
+			var src := FileAccess.get_file_as_string(path)
+			for m in resend_var.search_all(src):
+				fails.append("%s: %s (a re-send timer: use net.sticky_event(kind), core/net.gd)" % [path, m.get_string()])
+			var j := joined_fn.search(src)
+			if j != null and "net.event(" in j.get_string(1):
+				fails.append("%s: on_client_joined broadcasts net.event (use net.sticky_event(kind) or net.event_to(peer))" % path)
 	print("CORE MATH: %s" % ("PASS" if fails.is_empty() else "FAIL " + "; ".join(fails)))
 	quit(1 if not fails.is_empty() else 0)
 

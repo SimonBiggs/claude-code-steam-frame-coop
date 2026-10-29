@@ -186,7 +186,6 @@ var village: Node3D
 var village_list: Array = []  # [[built play-day, golden, waves beaten, want], ...]
 var village_days := 0
 var village_count := -1
-var village_resend := 0.0
 var story_queue: Array = []  # [line, pic, color]
 var story_t := 0.0
 
@@ -209,6 +208,7 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
+	net.sticky_event("village")  # a machine that joins later gets the latest one (core/net.gd)
 	seats = ClassicSeats.new(self, {
 		"no_keys": -2,  # player.gd key_set -2: controller only
 		"free_actions": ["restart", "pause"],
@@ -1383,10 +1383,6 @@ func _process(delta: float) -> void:
 	director().tick(delta)
 	_update_story(delta)
 	siege_t += delta
-	if net.mode == "host" and net.connected and not siege.is_empty():
-		village_resend -= delta
-		if village_resend <= 0.0:
-			_send_village()  # a machine that missed it (or joined mid-game) catches up
 	if props:
 		props.tick(delta)
 	if ghost_cam:
@@ -2028,9 +2024,6 @@ func on_player_activity_changed(p) -> void:
 # --- Networked co-op (see docs/GAME_DEV_GUIDE.md) ----------------------------
 
 func on_client_joined() -> void:
-	if SIMPLE_MODE and not siege.is_empty():
-		_send_village()
-		net.event("story", [_want_line(), SiegeGen.WANTS[int(siege.want)], SiegeGen.WANT_COLORS[int(siege.want)]])
 	if not seats.first_machine():
 		return  # another machine: its players join when they ask ("join")
 	if SIMPLE_MODE:
@@ -2406,9 +2399,9 @@ func _start_siege() -> void:
 	if daily:
 		_story_for_all("TODAY'S BLIZZARD!", "igloo", Color(1.0, 0.85, 0.3))
 	_story_for_all("Hi! I'm Bobo!", "polarbear", SiegeGen.WANT_COLORS[want])
-	_story_for_all(_want_line(), SiegeGen.WANTS[want], SiegeGen.WANT_COLORS[want])
 	if new_day and not (save.data.village as Array).is_empty():
 		_story_for_all("Our igloos grew!", "igloo", Color(0.6, 0.85, 1.0))
+	_story_for_all(_want_line(), SiegeGen.WANTS[want], SiegeGen.WANT_COLORS[want])  # last: the card a late joiner sees (sticky "story")
 
 
 func _want_line() -> String:
@@ -2445,8 +2438,7 @@ func _build_igloo() -> void:
 
 
 func _send_village() -> void:
-	village_resend = 8.0
-	if net and net.mode == "host" and save != null:
+	if net and net.mode != "client" and save != null:
 		net.event("village", [(save.data.village as Array).duplicate(true), int(save.data.days)])
 
 

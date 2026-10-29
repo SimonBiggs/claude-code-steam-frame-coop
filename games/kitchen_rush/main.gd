@@ -241,6 +241,8 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
+	net.sticky_event("gifts")  # a machine that joins later gets the shelf and this round's party (core/net.gd)
+	net.sticky_event("round")
 	seats = ClassicSeats.new(self, {
 		"free_actions": ["restart", "pause"],
 		"is_local": func(p) -> bool: return not p.remote and not p.ghost,
@@ -275,6 +277,7 @@ func _setup_game(mode: String) -> void:
 	print("Kitchen Rush: %s mode" % mode)
 	if SIMPLE_MODE and mode != "client":
 		_show_gifts(save.data["gifts"], false)
+		net.event("gifts", [save.data["gifts"], false])  # sticky: a machine that joins gets Gran's shelf
 	if SIMPLE_MODE:
 		banner("KITCHEN RUSH!", 2.5, mode != "client")
 	elif mode == "host":
@@ -2509,10 +2512,6 @@ func on_raccoon_scared(runner_index: int) -> void:
 # --- Networking ----------------------------------------------------------------
 
 func on_client_joined() -> void:
-	if SIMPLE_MODE:
-		net.event("gifts", [save.data["gifts"], false])
-		if not round_info.is_empty():
-			net.event("round", [round_info])
 	if not seats.first_machine():
 		return  # another machine: its runners join when they ask ("join")
 	if SIMPLE_MODE:
