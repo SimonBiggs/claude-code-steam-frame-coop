@@ -6,12 +6,16 @@ extends Node
 ## Flat host: add DUO_FLAT_HOST=1 to the host (no VR: one bot pad plays slot 0 on the host).
 
 const BotKit := preload("res://tests/bot_kit.gd")
+const Story := preload("res://games/whack_a_mole/story.gd")
 
 var kit: BotKit
 var main: Node
 var want := 2
 var saw_results := false
 var saw_practice := false
+var saw_pick := false  # Fig's bed filled and the team bonked a seed packet (story.gd)
+var saw_kinds := {}
+var saw_moles := 0  # most moles in a generated round seen
 var bonk_cd := {}
 var swing_phase := 0  # fake VR: 0 = raise above a mole, 1 = swing down
 var swing_hole := -1
@@ -23,6 +27,8 @@ func _ready() -> void:
 	add_child(kit)
 	main = load("res://games/whack_a_mole/main.tscn").instantiate()
 	main.set("round_time", 14.0)
+	main.set("fresh_save", true)  # a brand-new garden every run
+	main.set("need_scale", 0.15)  # tiny beds: round 1 fills one, round 2 starts with the seed pick
 	add_child(main)
 	kit.main = main
 	want = BotKit.bot_players(2, 6)
@@ -88,8 +94,16 @@ func _press(action: String) -> void:
 func _physics_process(delta: float) -> void:
 	if main == null or not main.ready_to_play:
 		return
-	if String(main.net.state_get("phase", "")) == "practice":
+	var ph := String(main.net.state_get("phase", ""))
+	if ph == "practice":
 		saw_practice = true
+	if ph == "pick":
+		saw_pick = true
+	if not main.round_def.is_empty():
+		saw_moles = maxi(saw_moles, (main.round_def.spawns as Array).size())
+	for i in main.holes.size():
+		if main.m_state[i] == 1:
+			saw_kinds[int(main.m_kind[i])] = true
 	for slot in main.party.local_slots():
 		_steer(slot, delta)
 	if main.vr_rig != null:
@@ -99,7 +113,7 @@ func _physics_process(delta: float) -> void:
 func _up_holes() -> Array[int]:
 	var out: Array[int] = []
 	for i in main.holes.size():
-		if main.m_state[i] == 1 and main.m_h[i] > 0.5:
+		if main.m_state[i] == 1 and main.m_h[i] > 0.5 and main.m_kind[i] != 4:  # never bonk a bunny (story.gd)
 			out.append(i)
 	return out
 
@@ -176,10 +190,10 @@ func _drive_vr(delta: float) -> void:
 
 
 func _report() -> String:
-	return "BOT %s: players %s, phase %s, moles up %d, score %d, whacked %d (VR %d), best %d" % [main.net.mode,
+	return "BOT %s: players %s, phase %s, moles up %d, score %d, whacked %d (VR %d), best %d, garden %s, kinds %s" % [main.net.mode,
 		str(main.party.active_slots()), String(main.net.state_get("phase", "")), _up_holes().size(),
 		int(main.net.state_get("score", 0)), int(main.net.state_get("whacked", 0)), main.vr_whacks,
-		int(main.net.state_get("best", 0))]
+		int(main.net.state_get("best", 0)), str(main.net.state_get("garden", {})), str(saw_kinds.keys())]
 
 
 func _checks() -> void:
@@ -198,3 +212,12 @@ func _checks() -> void:
 		kit.assert_true(main.vr_whacks > 0, "the fake VR player whacked moles with the mallet")
 	if mode != "client":
 		kit.assert_true(saw_practice, "the round started with a practice mole")
+		kit.assert_true(saw_pick, "%s: Fig's bed filled and the next round began with the seed pick" % mode)
+		kit.assert_true(Story.beds_grown(main.save.data.beds) >= 1, "%s: a bed grew in Fig's garden (%s)" % [mode, str(main.save.data.beds)])
+		kit.assert_true(String(main.save.data.cur) not in [Story.FIRST_CROP, ""] or Story.beds_grown(main.save.data.beds) >= 2,
+			"%s: a new crop was planted (%s, %s)" % [mode, String(main.save.data.cur), str(main.save.data.beds)])
+		kit.assert_true(saw_moles > 5, "%s: the rounds came from roundgen.gd (%d moles)" % [mode, saw_moles])
+	var gs: Dictionary = main.net.state_get("garden", {})
+	kit.assert_true(gs.has("beds") and int(gs.get("need", 0)) > 0, "%s: the garden state reached this machine (%s)" % [mode, str(gs)])
+	kit.assert_true(main.garden != null and main.garden.state.has("beds"), "%s: the garden is drawn" % mode)
+	kit.assert_true((main.net.state_get("goal", []) as Array).size() == 3 or String(main.net.state_get("phase", "")) != "play", "%s: the star goal is known" % mode)

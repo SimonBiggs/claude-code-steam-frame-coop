@@ -3,6 +3,11 @@ extends Node3D
 ## VR player: a giant soft mallet in the right hand (the left glove can slap moles too).
 ## TV players: tiny hammer-kids running ON the table, A = BONK. One shared score, 2-minute rounds,
 ## moles get faster, a golden mole is worth 5. Built on the engine template (games/engine_template).
+## STORY (story.gd): FARMER FIG's garden. Every point grows veg in the bed round the table that Fig is
+## growing (garden.gd); a full bed stays (saved) and the team picks the next crop by bonking one of two
+## seed packets. Each crop brings its visitor moles (speedy, helmet, bunny - don't bonk!, the KING).
+## Rounds are seeded (roundgen.gd: wave shapes, rising with the garden), with 1-3 STARS to earn; the
+## first round each day is TODAY'S PATCH (the same on every machine). One RUN line per round.
 
 const NetScript := preload("res://core/net.gd")
 const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
@@ -23,6 +28,12 @@ const Creatures := preload("res://core/creatures.gd")
 const SkyKit := preload("res://core/sky_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")
 const Props := preload("res://games/whack_a_mole/props.gd")
+const RoundGen := preload("res://games/whack_a_mole/roundgen.gd")
+const Story := preload("res://games/whack_a_mole/story.gd")
+const Garden := preload("res://games/whack_a_mole/garden.gd")
+const Seeded := preload("res://core/seeded.gd")
+const Telemetry := preload("res://core/telemetry.gd")
+const StoryCard := preload("res://core/story_card.gd")
 
 const GAME_ID := "whack_a_mole"
 const KID_SPEED := 2.2
@@ -36,8 +47,12 @@ const HIDDEN := 0
 const UP := 1
 const BONKED := 2
 const LEAVING := 3
+const SEED_HOLES: Array[int] = [5, 6]  ## the two seed packets in the pick phase (middle row)
+const PICK_WAIT := 15.0  ## nobody picks: the first packet is planted
 
 var round_time := 120.0  ## seconds per round (bots shorten it before adding the game)
+var fresh_save := false  ## bots: start a brand-new garden
+var need_scale := 1.0  ## bots: smaller beds so a short round fills one
 
 # --- The networking contract ---
 var net: Node
@@ -60,15 +75,16 @@ var sky: SkyKit.SkyRig
 var holes := PackedVector3Array()
 var moles: Array[Node3D] = []  # one per hole (every machine)
 var mole_bodies: Array[MeshInstance3D] = []
-var mole_mesh: ArrayMesh
-var gold_mesh: ArrayMesh
+var kind_meshes := {}  # roundgen kind -> mesh (seed packets: "seed:<crop>")
 # Mole simulation (host / local); the TV machine fills m_h / m_flags from snapshots.
 var m_state := PackedInt32Array()
-var m_gold := PackedByteArray()
+var m_kind := PackedByteArray()  # roundgen.gd kind
+var m_hits := PackedByteArray()  # bonks still needed (helmet 2, king 5)
 var m_h := PackedFloat32Array()  # 0 hidden .. 1 fully up
 var m_t := PackedFloat32Array()
 var vis_h := PackedFloat32Array()  # every machine: smoothed height for drawing
 var shown_state := PackedInt32Array()  # every machine: last drawn state (for pop-up sounds)
+var shown_kind := PackedByteArray()  # every machine: last drawn kind (helmet off: the mesh changes)
 var practice_ring: MeshInstance3D
 var table: MeshInstance3D
 var board_label: Label3D
@@ -99,6 +115,22 @@ var practice_t := 0.0
 var results_t := 0.0
 var total_whacked := 0
 var vr_whacks := 0
+# Story and seeded rounds (host owns the save; every machine draws the garden from net state "garden").
+var garden: Garden
+var round_def := {}  # roundgen.gd round being played
+var round_desc := {}  # {k: story/daily, crop, seed}
+var spawn_i := 0
+var elapsed := 0.0
+var pick_t := 0.0
+var daily_due := false
+var last_crop := ""
+var run := {}  # this round's numbers for the RUN line
+var stars_mi: Array[MeshInstance3D] = []
+var star_on: StandardMaterial3D
+var star_off: StandardMaterial3D
+var star_icons := {}  # hud slot -> [3 icons]
+var crop_pics := {}  # hud slot -> [picture holder, bar]
+var vr_story: Node3D
 
 
 func _ready() -> void:
@@ -117,8 +149,13 @@ func _ready() -> void:
 	party.player_left.connect(_on_player_left)
 	save = Save.new()
 	save.game_id = GAME_ID
-	save.defaults = {"best": 0}
+	save.defaults = Story.save_defaults()
 	add_child(save)
+	if fresh_save:
+		save.data = Story.save_defaults().duplicate(true)
+	if int(save.data.world) < 0:
+		save.data.world = Seeded.fresh_seed()  # this family's own garden rounds
+		save.mark_dirty()
 	sfx = SfxScript.new()
 	add_child(sfx)
 	sfx.warm([], true)
@@ -169,6 +206,11 @@ func _setup(mode: String) -> void:
 	awards.set_player(0, "GIANT" if vr_rig != null or mode == "client" else party.name_of(0))
 	if mode != "client":
 		net.state_set("best", int(save.data["best"]))
+		var dd: Dictionary = save.data.daily
+		daily_due = not dd.has(Seeded.today()) and not OS.has_environment("BOT_NO_DAILY")
+		_publish_garden()
+		print("Fig's garden: %d beds grown, growing %s (%d veg), daily %s (world %d)" % [Story.beds_grown(save.data.beds),
+			String(save.data.cur), int(save.data.fill), daily_due, int(save.data.world)])
 		_start_round(true)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	ready_to_play = true
@@ -191,25 +233,28 @@ func _build_world(vr: bool) -> void:
 	ground.position.y = -0.1
 	add_child(ground)
 	add_child(MeshKit.scatter_random(MeshKit.prop("tree"), 16, Vector3.ZERO, 18.0, 8.0, 0.8, 1.3, PackedColorArray(), 3))
-	add_child(MeshKit.scatter_random(MeshKit.prop("flower"), 40, Vector3.ZERO, 7.0, 3.0, 0.7, 1.1,
+	add_child(MeshKit.scatter_random(MeshKit.prop("flower"), 40, Vector3.ZERO, 8.5, 5.2, 0.7, 1.1,
 		PackedColorArray([Color(1.0, 0.5, 0.6), Color(1.0, 0.9, 0.4), Color(0.7, 0.6, 1.0)]), 5))
 	table = MeshKit.instance(Props.table_mesh())
 	add_child(table)
+	garden = Garden.new()
+	garden.sfx = sfx
+	add_child(garden)
 	holes = Props.holes()
-	mole_mesh = Props.mole_mesh(false)
-	gold_mesh = Props.mole_mesh(true)
 	var n := holes.size()
 	m_state.resize(n)
-	m_gold.resize(n)
+	m_kind.resize(n)
+	m_hits.resize(n)
 	m_h.resize(n)
 	m_t.resize(n)
 	vis_h.resize(n)
 	shown_state.resize(n)
+	shown_kind.resize(n)
 	for i in n:
 		var root := Node3D.new()
 		root.position = holes[i] + Vector3(0.0, MOLE_DOWN, 0.0)
 		add_child(root)
-		var body := MeshKit.instance(mole_mesh, false)
+		var body := MeshKit.instance(_kind_mesh(i, RoundGen.NORMAL), false)
 		root.add_child(body)
 		root.visible = false
 		moles.append(root)
@@ -240,6 +285,20 @@ func _build_world(vr: bool) -> void:
 	board_label.no_depth_test = false
 	board_label.position = Vector3(0.0, 2.35, -Props.HALF.y - 1.23)
 	add_child(board_label)
+	# Three goal stars on top of the board: they light up as the team passes each star's score.
+	var sb := MeshKit.builder()
+	sb.star(5, 0.16, 0.07, 0.05, Transform3D.IDENTITY, Color.WHITE)
+	var star_mesh := sb.build()
+	star_on = MeshKit.material(Color(1.0, 0.85, 0.2), 1.2)
+	star_off = MeshKit.material(Color(0.35, 0.35, 0.45))
+	for k in 3:
+		var st := MeshInstance3D.new()
+		st.mesh = star_mesh
+		st.material_override = star_off
+		st.position = Vector3(-0.42 + 0.42 * k, 3.12, -Props.HALF.y - 1.25)
+		st.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(st)
+		stars_mi.append(st)
 	_refresh_hud()
 
 
@@ -248,16 +307,34 @@ func _build_world(vr: bool) -> void:
 func _make_hud(slot: int, parent: Control) -> void:
 	var ui := UiKit.ui_root(parent)
 	huds[slot] = ui
+	# Every view: the team score with the round's three goal stars, and Fig's crop with its bed filling.
+	var card := UiKit.panel("card")
+	ui.add_child(card)
+	card.position = Vector2(24.0, 20.0)
+	var col := UiKit.vbox()
+	card.add_child(col)
+	var row := UiKit.hbox()
+	col.add_child(row)
+	var l := UiKit.label("0", "number")
+	l.custom_minimum_size.x = 70.0
+	row.add_child(l)
+	score_labels[slot] = l
+	var icons: Array = []
+	for k in 3:  # the round's goal stars (dim until earned)
+		var ic := UiKit.icon("star", Color(0.4, 0.4, 0.5), 34.0)
+		row.add_child(ic)
+		icons.append(ic)
+	star_icons[slot] = icons
+	var row2 := UiKit.hbox()  # the crop Fig is growing and how full its bed is
+	col.add_child(row2)
+	var holder := CenterContainer.new()
+	holder.custom_minimum_size = Vector2(44.0, 44.0)
+	row2.add_child(holder)
+	var bar := UiKit.bar("xp", 150.0, 18.0, Color(0.5, 0.85, 0.35))
+	bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row2.add_child(bar)
+	crop_pics[slot] = [holder, bar, ""]
 	if slot < 0:
-		var card := UiKit.panel("card")
-		ui.add_child(card)
-		card.position = Vector2(24.0, 20.0)
-		var row := UiKit.hbox()
-		card.add_child(row)
-		row.add_child(UiKit.icon("star", "gold", 40.0))
-		var l := UiKit.label("0", "number")
-		row.add_child(l)
-		score_labels[slot] = l
 		timers[slot] = HudKit.timer(ui, {"seconds": float(net.state_get("time", round_time))})
 		join_prompt = UiKit.panel("pill")
 		join_prompt.add_child(UiKit.prompts([["A", "Join"]]))
@@ -290,6 +367,39 @@ func _refresh_hud() -> void:
 	if board_label != null:
 		var t := int(net.state_get("time", int(round_time)))
 		board_label.text = "SCORE %d\n%s" % [score, HudKit.clock_text(float(t))]
+	if net == null:
+		return
+	var g: Array = net.state_get("goal", [])
+	var got := RoundGen.stars(score, g) if g.size() == 3 else 0
+	for k in stars_mi.size():
+		stars_mi[k].material_override = star_on if k < got else star_off
+	for slot in star_icons:
+		var icons: Array = star_icons[slot]
+		for k in icons.size():
+			var ic: Control = icons[k]
+			if is_instance_valid(ic):
+				var want := Color(1.0, 0.85, 0.2) if k < got else Color(0.4, 0.4, 0.5)
+				if ic.get("color") != want:
+					ic.set("color", want)
+					ic.queue_redraw()
+					if k < got:
+						UiKit.pop_in(ic)
+	var gs: Dictionary = net.state_get("garden", {})
+	var cur := String(gs.get("cur", ""))
+	for slot in crop_pics:
+		var cp: Array = crop_pics[slot]
+		var holder: Control = cp[0]
+		if not is_instance_valid(holder):
+			continue
+		if String(cp[2]) != cur:
+			cp[2] = cur
+			for c in holder.get_children():
+				c.queue_free()
+			if cur != "":
+				holder.add_child(StoryCard.picture(String(Story.crop(cur).pic), 40.0))
+		var bar: UiKit.Bar = cp[1]
+		bar.visible = cur != ""
+		bar.set_value(float(gs.get("fill", 0)), maxf(1.0, float(gs.get("need", 1))))
 
 
 func _all_huds() -> Array:
@@ -351,6 +461,8 @@ func _on_player_left(slot: int) -> void:
 		huds.erase(slot)
 	score_labels.erase(slot)
 	timers.erase(slot)
+	star_icons.erase(slot)
+	crop_pics.erase(slot)
 	hints.remove_view(slot)
 	_refresh_group()
 	_refresh_hud()
@@ -384,7 +496,7 @@ func _move_local_players(delta: float) -> void:
 	if send:
 		send_t = 1.0 / 30.0
 	var phase := String(net.state_get("phase", "play"))
-	var playing := phase == "play" or phase == "practice"
+	var playing := phase == "play" or phase == "practice" or phase == "pick"
 	for slot in party.local_slots():
 		if not avatars.has(slot):
 			continue
@@ -510,7 +622,14 @@ func on_pause_changed(paused: bool, by_slot: int) -> void:
 
 func _on_state_changed(key: String, value: Variant) -> void:
 	match key:
-		"score", "best":
+		"score", "best", "goal":
+			_refresh_hud()
+		"offers":  # the seed packets show the crops on offer (redraw them if they popped first)
+			for h in SEED_HOLES:
+				shown_kind[h] = 255
+		"garden":
+			if garden != null and value is Dictionary:
+				garden.apply(value)
 			_refresh_hud()
 		"time":
 			_refresh_hud()
@@ -538,37 +657,191 @@ func _on_state_changed(key: String, value: Variant) -> void:
 
 # --- Rounds -------------------------------------------------------------------------------
 
+## Host: a new round. The first of a session starts with the practice mole; when Fig's bed is full the
+## team picks the next crop (seed packets) before the moles come.
 func _start_round(practice: bool) -> void:
 	for i in holes.size():
 		m_state[i] = HIDDEN
 		m_h[i] = 0.0
-		m_gold[i] = 0
+		m_kind[i] = 0
 	awards.reset()
 	time_left = round_time
 	spawn_t = 1.5
 	practice_t = 0.0
+	round_def = {}
 	net.state_set("score", 0)
+	net.state_set("goal", [])
 	net.state_set("time", int(ceil(time_left)))
 	net.state_set("round", int(net.state_get("round", 0)) + 1)
 	net.state_set("level", 0)
 	if practice:
-		_pop_mole(PRACTICE_HOLE, false, 9999.0)
+		_pop_mole(PRACTICE_HOLE, RoundGen.NORMAL, 9999.0)
 		net.state_set("phase", "practice")
 	else:
-		net.state_set("phase", "play")
+		_after_practice()
+
+
+## Host: the practice is over (or there was none): pick seeds if the bed is full, else play.
+func _after_practice() -> void:
+	if String(save.data.cur) == "":
+		_start_pick()
+	else:
+		_start_play()
+
+
+## Host: two seed packets pop up; bonk one to plant it (nobody does: the first one after PICK_WAIT).
+func _start_pick() -> void:
+	var offers := Story.offers(int(save.data.world), save.data.beds, last_crop)
+	if offers.size() < 2:
+		_plant(String(offers[0]) if not offers.is_empty() else Story.FIRST_CROP)
+		_start_play()
+		return
+	net.state_set("offers", offers)
+	pick_t = 0.0
+	for k in SEED_HOLES.size():
+		var h: int = SEED_HOLES[k]
+		if m_state[h] != HIDDEN:  # the practice mole may still be there
+			m_state[h] = HIDDEN
+			m_h[h] = 0.0
+		_pop_mole(h, RoundGen.SEED, 9999.0)
+	net.state_set("phase", "pick")
+	_story(_fig(Story.PICK_LINE, "gift"))
+
+
+## Host: a seed packet was bonked (k = 0 / 1): plant it, the other one goes down, the moles come.
+func _pick(k: int) -> void:
+	var offers: Array = net.state_get("offers", [])
+	if String(net.state_get("phase", "")) != "pick" or offers.is_empty():
+		return
+	var id := String(offers[clampi(k, 0, offers.size() - 1)])
+	for h in SEED_HOLES:
+		if m_state[h] == UP:
+			m_state[h] = LEAVING
+	_plant(id)
+	_start_play()
+
+
+func _plant(id: String) -> void:
+	save.data.cur = id
+	save.data.fill = mini(int(save.data.get("carry", 0)), _need() / 2)
+	save.data.carry = 0
+	save.mark_dirty()
+	_publish_garden()
+	net.event("planted", [id])
+	planted(id)
+
+
+## Every machine: a crop was just planted (seeds sparkle over its bed).
+func planted(id: String) -> void:
+	if garden != null:
+		garden.cheer(Story.crop_index(id))
+	sound("power_up", -4.0)
+
+
+func _need() -> int:
+	return maxi(3, int(Story.bed_need(Story.beds_grown(save.data.beds)) * need_scale))
+
+
+## Host: tell every machine what the garden looks like.
+func _publish_garden() -> void:
+	var gs := {"beds": (save.data.beds as Dictionary).duplicate(), "cur": String(save.data.cur),
+		"fill": int(save.data.fill), "need": _need()}
+	net.state_set("garden", gs)
+	if garden != null and net.mode != "client":
+		garden.apply(gs)  # (state_set may not echo to the host itself)
+
+
+## Host: points the team bonked go into Fig's bed; a full bed stays for good and the next round picks seeds.
+func _grow(pts: int) -> void:
+	if pts <= 0:
+		return
+	if String(save.data.cur) == "":
+		save.data.carry = int(save.data.get("carry", 0)) + pts  # bed full this round: a head start for the next
+		return
+	save.data.fill = int(save.data.fill) + pts
+	if int(save.data.fill) >= _need():
+		var id := String(save.data.cur)
+		var beds: Dictionary = save.data.beds
+		beds[id] = int(beds.get(id, 0)) + 1
+		last_crop = id
+		save.data.cur = ""
+		save.data.fill = 0
+		run["bed_done"] = id
+		var c := Story.crop(id)
+		_story(_fig(String(c.done), String(c.pic), c.color))
+	save.mark_dirty()
+	_publish_garden()
 
 
 func _end_round() -> void:
 	var score := int(net.state_get("score", 0))
-	var data := awards.results({"title": "%d POINTS!" % score, "subtitle": "Great bonking, team!",
-		"style": "victory", "stats": [["BEST", str(int(net.state_get("best", 0)))]],
-		"score_format": "%d", "max_awards": 3, "continue": "Again!"})
+	var g: Array = round_def.get("goal", [1, 2, 3])
+	var st := RoundGen.stars(score, g)
+	var daily := String(round_desc.get("k", "")) == "daily"
+	var key := "TODAY" if daily else String(round_desc.get("crop", ""))
+	var best_st: Dictionary = save.data.stars
+	if not daily:
+		best_st[key] = maxi(int(best_st.get(key, 0)), st)
+	else:
+		var dd: Dictionary = save.data.daily
+		dd[Seeded.today()] = maxi(int(dd.get(Seeded.today(), 0)), score)
+		while dd.size() > 30:
+			var keys := dd.keys()
+			keys.sort()
+			dd.erase(keys[0])
+	save.data.rounds = int(save.data.rounds) + 1
+	save.mark_dirty()
+	var stats: Array = [["STARS", "%d / 3" % st], ["BEST", str(int(net.state_get("best", 0)))]]
+	var data := awards.results({"title": "%d POINTS!" % score, "subtitle": ["Keep bonking!", "One star!", "Two stars!", "THREE STARS!"][st],
+		"style": "victory", "stats": stats, "score_format": "%d", "max_awards": 3, "continue": "Again!"})
 	net.state_set("results", data)
 	net.state_set("phase", "results")
 	results_t = 0.0
 	for i in holes.size():
 		if m_state[i] == UP:
 			m_state[i] = LEAVING
+	_telemetry("round", score, st)
+	if not run.has("bed_done"):
+		_story(_fig(Story.CHEERS[int(save.data.rounds) % Story.CHEERS.size()] if st > 0 else "Nearly! Again!", "farmer"))
+
+
+func _exit_tree() -> void:
+	if ready_to_play and net != null and net.mode != "client" and String(net.state_get("phase", "")) == "play":
+		var score := int(net.state_get("score", 0))
+		_telemetry("quit", score, RoundGen.stars(score, round_def.get("goal", [])))
+
+
+## One RUN line per round (or quit mid-round): how the family really plays (balance).
+func _telemetry(end: String, score: int, st: int) -> void:
+	if round_def.is_empty() or net.mode == "client":
+		return
+	var info := run.duplicate()
+	info.merge({"end": end, "mode": net.mode, "flat_host": flat_host, "vr": vr_rig != null,
+		"players": party.player_count() + (1 if vr_rig != null else 0), "kind": String(round_desc.get("k", "")),
+		"crop": String(round_desc.get("crop", "")), "seed": int(round_desc.get("seed", 0)), "level": int(round_def.get("level", 0)),
+		"time": int(round_def.get("time", 0)), "played_s": int(elapsed), "score": score, "max": int(round_def.get("max", 0)),
+		"goal": round_def.get("goal", []), "stars": st, "moles": (round_def.spawns as Array).size(),
+		"beds": Story.beds_grown(save.data.beds), "fill": int(save.data.fill), "need": _need()}, true)
+	Telemetry.run(GAME_ID, info)
+
+
+## A story beat: Fig (or a crop / mole picture) and a few words, on every machine.
+func _story(beat: Dictionary) -> void:
+	if net.mode != "client":
+		net.event("story", [beat.get("who", ""), beat.get("line", ""), beat.get("pic", ""), (beat.get("color", Story.FIG_COLOR) as Color).to_html()])
+	show_story(beat)
+
+
+func show_story(beat: Dictionary) -> void:
+	StoryCard.show(_all_huds(), beat)
+	if vr_rig != null:
+		if vr_story != null and is_instance_valid(vr_story):
+			vr_story.queue_free()
+		vr_story = StoryCard.show_vr(self, vr_rig.camera, beat)
+
+
+func _fig(line: String, pic: String = "farmer", color: Color = Story.FIG_COLOR) -> Dictionary:
+	return {"who": "FIG", "line": line, "pic": pic, "color": color, "duration": 3.5}
 
 
 func _show_results(data: Dictionary) -> void:
@@ -636,52 +909,105 @@ func _simulate(delta: float) -> void:
 	if phase == "practice":
 		practice_t += delta
 		if practice_t > 15.0:
-			_start_play()
+			_after_practice()
 		return
-	time_left -= delta
+	if phase == "pick":
+		pick_t += delta
+		if pick_t > PICK_WAIT:
+			_pick(0)
+		return
+	if round_def.is_empty():
+		return
+	elapsed += delta
+	time_left = float(round_def.time) - elapsed
 	if int(ceil(time_left)) != int(net.state_get("time", 0)):
 		net.state_set("time", maxi(0, int(ceil(time_left))))
 	if time_left <= 0.0:
 		_end_round()
 		return
-	var p := clampf(1.0 - time_left / round_time, 0.0, 1.0)
+	var p := clampf(elapsed / float(round_def.time), 0.0, 1.0)
 	var level := int(p * 3.0)
 	if level > int(net.state_get("level", 0)):
 		net.state_set("level", level)
 		net.state_set("faster", int(net.state_get("faster", 0)) + 1)  # a counter, so every round shows it
-	spawn_t -= delta
-	if spawn_t <= 0.0:
-		spawn_t = lerpf(1.1, 0.45, p) * randf_range(0.8, 1.2)
-		var up := 0
+	var spawns: Array = round_def.spawns
+	while spawn_i < spawns.size() and float(spawns[spawn_i][0]) <= elapsed:
+		_spawn(spawns[spawn_i])
+		spawn_i += 1
+
+
+## Host: the generated round's next mole [t, hole, kind, stay]. Its hole is free (roundgen.gd checks
+## that); if a helmet or the king held a hole longer, another free hole takes it.
+func _spawn(s: Array) -> void:
+	var h := int(s[1])
+	if m_state[h] != HIDDEN or m_t[h] > 0.0:
+		var free: Array[int] = []
 		for i in holes.size():
-			if m_state[i] == UP:
-				up += 1
-		if up < int(lerpf(2.0, 5.0, p) + 0.5):
-			var free: Array[int] = []
-			for i in holes.size():
-				if m_state[i] == HIDDEN and m_t[i] <= 0.0:
-					free.append(i)
-			if not free.is_empty():
-				var any_gold := false
-				for i in holes.size():
-					any_gold = any_gold or (m_gold[i] == 1 and m_state[i] != HIDDEN)
-				var gold := not any_gold and p > 0.05 and randf() < 0.08
-				var stay := lerpf(2.0, 0.9, p) * (0.8 if gold else 1.0)
-				_pop_mole(free[randi() % free.size()], gold, stay)
+			if m_state[i] == HIDDEN and m_t[i] <= 0.0:
+				free.append(i)
+		if free.is_empty():
+			run["skipped"] = int(run.get("skipped", 0)) + 1
+			return
+		h = free[randi() % free.size()]
+	var kind := int(s[2])
+	_pop_mole(h, kind, float(s[3]))
+	if kind != RoundGen.NORMAL and kind != RoundGen.KING:
+		_meet(kind)
+	elif kind == RoundGen.KING:
+		_meet(kind)
+		net.state_set("faster", int(net.state_get("faster", 0)) + 1)
 
 
+## Host: the first time the family meets a kind of mole, Fig points at it (saved).
+func _meet(kind: int) -> void:
+	var met: Dictionary = save.data.met
+	if met.has(str(kind)) or not Story.KIND_LINES.has(kind):
+		return
+	met[str(kind)] = true
+	save.mark_dirty()
+	_story({"who": "FIG", "line": String(Story.KIND_LINES[kind]), "pic": "bunny" if kind == RoundGen.BUNNY else ("crown" if kind == RoundGen.KING else "mole"),
+		"color": Props.KIND_CARD[kind], "duration": 3.0})
+
+
+## Host: the moles come: this round's moles are made from a seed (TODAY'S PATCH first each day).
 func _start_play() -> void:
-	time_left = round_time
-	spawn_t = 1.2
-	if m_state[PRACTICE_HOLE] == UP:
+	if m_state[PRACTICE_HOLE] == UP and m_kind[PRACTICE_HOLE] == RoundGen.NORMAL:
 		m_t[PRACTICE_HOLE] = minf(m_t[PRACTICE_HOLE], 2.0)  # nobody bonked it: it goes down like any mole
+	var players := maxi(1, party.player_count() + (1 if vr_rig != null else 0))
+	var sp: Dictionary
+	if daily_due:
+		daily_due = false
+		sp = Story.daily_spec(players, round_time)
+		round_desc = {"k": "daily", "crop": String(save.data.cur), "seed": Story.daily_seed()}
+		_banner("TODAY!", "", 2.0)
+	else:
+		var met := {}
+		for k in save.data.met:
+			met[int(k)] = true
+		var cur := String(save.data.cur)
+		sp = Story.spec(cur, Story.beds_grown(save.data.beds), met, players, round_time)
+		round_desc = {"k": "story", "crop": cur, "seed": Seeded.derive(int(save.data.world), "r%d" % int(save.data.rounds))}
+	var t0 := Time.get_ticks_usec()
+	round_def = RoundGen.generate(int(round_desc.seed), sp)
+	run = {"gen_ms": snappedf((Time.get_ticks_usec() - t0) / 1000.0, 0.01), "bunny_bonked": 0, "bunny_saved": 0, "king": 0,
+		"missed": 0, "bonked": 0, "vr_bonked": 0}
+	elapsed = 0.0
+	spawn_i = 0
+	time_left = float(round_def.time)
+	net.state_set("goal", round_def.goal)
 	net.state_set("time", int(ceil(time_left)))
 	net.state_set("phase", "play")
+	var c := Story.crop(String(round_desc.crop))
+	if round_desc.k == "story" and int(save.data.fill) == 0:
+		_story(_fig(String(c.intro), String(c.pic), c.color))
+	print("Whack-a-Mole round: %s %s seed %d, %d moles, goal %s (%.1f ms)" % [round_desc.k, round_desc.crop, int(round_desc.seed),
+		(round_def.spawns as Array).size(), str(round_def.goal), float(run.gen_ms)])
 
 
-func _pop_mole(i: int, gold: bool, stay: float) -> void:
+func _pop_mole(i: int, kind: int, stay: float) -> void:
 	m_state[i] = UP
-	m_gold[i] = 1 if gold else 0
+	m_kind[i] = kind
+	m_hits[i] = RoundGen.HITS[kind]
 	m_t[i] = stay
 
 
@@ -696,6 +1022,7 @@ func _update_moles(delta: float) -> void:
 				m_t[i] -= delta
 				if m_t[i] <= 0.0:
 					m_state[i] = LEAVING
+					_left_alone(i)
 			BONKED:
 				m_t[i] -= delta
 				if m_t[i] < 0.0:
@@ -708,6 +1035,51 @@ func _update_moles(delta: float) -> void:
 				if m_h[i] <= 0.0:
 					m_state[i] = HIDDEN
 					m_t[i] = 0.4
+
+
+## Host: a mole went home un-bonked. A bunny left alone says thank you with a carrot (+2).
+func _left_alone(i: int) -> void:
+	if String(net.state_get("phase", "")) != "play" or run.is_empty():
+		return
+	if m_kind[i] == RoundGen.BUNNY:
+		run["bunny_saved"] = int(run.bunny_saved) + 1
+		save.data.bunnies = int(save.data.bunnies) + 1
+		_add_points(-1, RoundGen.POINTS[RoundGen.BUNNY])
+		bunny_fx(i, true)
+		net.event("bunny", [i, true])
+	elif m_kind[i] != RoundGen.SEED:
+		run["missed"] = int(run.missed) + 1
+
+
+## Host: points for the team (by = who, -1 = a bunny's gift): the score, the best, Fig's bed.
+func _add_points(by: int, pts: int) -> void:
+	if by >= 0:
+		awards.add(by, "score", float(pts))
+	var score := int(net.state_get("score", 0)) + pts
+	net.state_set("score", score)
+	if score > int(save.data["best"]):
+		save.data["best"] = score
+		save.mark_dirty()
+		net.state_set("best", score)
+	_grow(pts)
+
+
+## Every machine: a bunny went home happy (left alone: a carrot and +2) or got bonked (a giggle, 0).
+func bunny_fx(i: int, happy: bool) -> void:
+	var pos := holes[i] + Vector3(0.0, 0.35, 0.0)
+	if happy:
+		HudKit.score(self, pos, RoundGen.POINTS[RoundGen.BUNNY], {"color": Color(1.0, 0.55, 0.15), "size": 1.3})
+		sfx.play_at("sparkle", pos, -2.0, 1.3)
+		var carrot := MeshKit.instance(Garden.plant_mesh("CARROTS"), false)
+		carrot.position = holes[i]
+		add_child(carrot)
+		var tw := create_tween()
+		tw.tween_property(carrot, "position", holes[i] + Vector3(0.0, 0.5, 0.0), 0.4).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		tw.tween_property(carrot, "scale", Vector3.ZERO, 0.4).set_delay(0.5)
+		tw.tween_callback(carrot.queue_free)
+	else:
+		sfx.play_at("boing", pos, -2.0, 1.8)  # a giggly boing, no points
+		mole_bodies[i].scale = Vector3(0.8, 1.3, 0.8)
 
 
 ## Host: is a mole up near this table point? Returns the hole or -1.
@@ -776,7 +1148,7 @@ func _mole_hit_by(p: Vector3, r: float) -> int:
 		if m_state[i] != UP or m_h[i] < 0.3:
 			continue
 		var base := holes[i]
-		var top := base.y + 0.46 * m_h[i]
+		var top := base.y + 0.46 * m_h[i] * (1.5 if m_kind[i] == RoundGen.KING else 1.0)
 		var dxz := Vector2(base.x - p.x, base.z - p.z).length()
 		if dxz < r + 0.12 and p.y < top + r and p.y > base.y - 0.1:
 			return i
@@ -793,31 +1165,88 @@ func _squash_mallet() -> void:
 
 ## Host: a mole got bonked by `by` (0 = the VR giant, or a TV slot).
 func _whack(i: int, by: int) -> void:
-	var pts := 5 if m_gold[i] == 1 else 1
-	var was_practice := String(net.state_get("phase", "")) == "practice"
-	m_state[i] = BONKED
-	m_t[i] = 0.35
+	var phase := String(net.state_get("phase", ""))
+	var kind := int(m_kind[i])
+	if kind == RoundGen.SEED:
+		if phase == "pick":
+			m_state[i] = BONKED
+			m_t[i] = 0.5
+			whack_fx(i, by, 0)
+			net.event("whack", [i, by, 0])
+			_pick(SEED_HOLES.find(i))
+		return
+	if kind == RoundGen.BUNNY:  # oops, a friend: it giggles and hops home (no points)
+		m_state[i] = LEAVING
+		m_t[i] = 0.0
+		run["bunny_bonked"] = int(run.get("bunny_bonked", 0)) + 1
+		bunny_fx(i, false)
+		net.event("bunny", [i, false])
+		return
+	var was_practice := phase == "practice"
 	total_whacked += 1
+	run["bonked"] = int(run.get("bonked", 0)) + 1
 	if by == 0 and vr_rig != null:
 		vr_whacks += 1
+		run["vr_bonked"] = int(run.get("vr_bonked", 0)) + 1
 	net.state_set("whacked", total_whacked)
-	awards.add(by, "score", float(pts))
+	var pts: int = RoundGen.POINTS[kind]
+	if m_hits[i] > 1:  # a helmet clonks off / the king wobbles: still up, bonk again
+		m_hits[i] -= 1
+		m_t[i] = maxf(m_t[i], 0.9)
+		pts = 0
+		if kind == RoundGen.HELMET:
+			m_kind[i] = RoundGen.BARE
+		else:
+			pts = 1  # every bonk on the king counts
+		clonk_fx(i, by, kind)
+		net.event("clonk", [i, by, kind])
+		if pts > 0 and not was_practice:
+			_add_points(by, pts)
+		return
+	if kind == RoundGen.KING:
+		pts = RoundGen.POINTS[RoundGen.KING] - (RoundGen.HITS[RoundGen.KING] - 1)
+		run["king"] = 1
+		save.data.kings = int(save.data.kings) + 1
+	m_state[i] = BONKED
+	m_t[i] = 0.35
 	if not was_practice:
-		var score := int(net.state_get("score", 0)) + pts
-		net.state_set("score", score)
-		if score > int(save.data["best"]):
-			save.data["best"] = score
-			save.mark_dirty()
-			net.state_set("best", score)
+		_add_points(by, pts)
+	else:
+		awards.add(by, "score", float(pts))
 	whack_fx(i, by, pts)
 	net.event("whack", [i, by, pts])
 	if was_practice:
-		_start_play()
+		_after_practice()
+
+
+## Every machine: a helmet popped off (it flies off, clonk!) or the king took a bonk (he wobbles).
+func clonk_fx(i: int, by: int, kind: int) -> void:
+	var body := mole_bodies[i]
+	body.scale = Vector3(1.3, 0.7, 1.3)
+	var pos := holes[i] + Vector3(0.0, 0.45, 0.0)
+	sfx.play_at("hit" if kind == RoundGen.HELMET else "boing", pos, 0.0, 0.8 if kind == RoundGen.KING else 1.4)
+	if kind == RoundGen.HELMET:
+		var hm := MeshInstance3D.new()
+		var b := MeshKit.builder()
+		b.dome(0.155, Transform3D.IDENTITY, Color(0.95, 0.25, 0.25), 12)
+		hm.mesh = b.build()
+		hm.position = pos
+		add_child(hm)
+		var side := Vector3(randf_range(-1.0, 1.0), 0.0, randf_range(-0.4, 0.4)).normalized() * 0.6
+		var tw := create_tween().set_parallel()
+		tw.tween_property(hm, "position", pos + side + Vector3(0.0, 0.5, 0.0), 0.35).set_ease(Tween.EASE_OUT)
+		tw.tween_property(hm, "rotation", Vector3(2.0, 0.0, 3.0), 0.6)
+		tw.chain().tween_property(hm, "position", pos + side * 1.5 + Vector3(0.0, -0.6, 0.0), 0.35).set_ease(Tween.EASE_IN)
+		tw.chain().tween_callback(hm.queue_free)
+	else:
+		HudKit.score(self, pos + Vector3.UP * 0.3, 1, {"color": party.color_of(by) if by >= 0 else "gold", "size": 1.0})
+	if by >= 0 and avatars.has(by):
+		Creatures.anim(avatars[by]).play("cheer", 0.4)
 
 
 ## Every machine: the juicy bit. Squash, burst, "+1", sound, kids cheer.
 func whack_fx(i: int, by: int, pts: int) -> void:
-	var gold := pts > 1
+	var gold := pts >= 5  # golden moles and the king: the big kaching
 	var body := mole_bodies[i]
 	body.scale = Vector3(1.5, 0.45, 1.5)
 	var tw := create_tween()
@@ -846,7 +1275,8 @@ func whack_fx(i: int, by: int, pts: int) -> void:
 	p.position = pos
 	p.emitting = true
 	get_tree().create_timer(1.0).timeout.connect(p.queue_free)
-	HudKit.score(self, pos + Vector3.UP * 0.25, pts, {"color": "gold" if gold else party.color_of(by), "size": 1.6 if gold else 1.1})
+	if pts > 0:
+		HudKit.score(self, pos + Vector3.UP * 0.25, pts, {"color": "gold" if gold else party.color_of(by), "size": 1.6 if gold else 1.1})
 	if gold:
 		sfx.play_at("kaching", pos, 2.0)
 		sfx.play_at("sparkle", pos, 0.0)
@@ -889,13 +1319,20 @@ func _draw_moles(delta: float) -> void:
 		vis_h[i] = lerpf(vis_h[i], target, minf(1.0, delta * 25.0))
 		var st := m_state[i]
 		var root := moles[i]
-		if st != shown_state[i]:
+		var kind := int(m_kind[i])
+		if st != shown_state[i] or (st == UP and kind != shown_kind[i]):
 			if st == UP:
-				var gold := m_gold[i] == 1
-				mole_bodies[i].mesh = gold_mesh if gold else mole_mesh
-				mole_bodies[i].scale = Vector3(0.8, 1.25, 0.8)
-				sfx.play_at("sparkle" if gold else "pop", holes[i], -8.0 if not gold else 0.0, randf_range(1.2, 1.5))
+				var gold := kind == RoundGen.GOLD or kind == RoundGen.KING
+				mole_bodies[i].mesh = _kind_mesh(i, kind)
+				var big := 1.5 if kind == RoundGen.KING else (1.7 if kind == RoundGen.SEED else 1.0)
+				root.scale = Vector3.ONE * big
+				if st != shown_state[i]:
+					mole_bodies[i].scale = Vector3(0.8, 1.25, 0.8)
+					sfx.play_at("sparkle" if gold else "pop", holes[i], -8.0 if not gold else 0.0, randf_range(1.2, 1.5))
+					if kind == RoundGen.KING:
+						sfx.play_at("fanfare", holes[i], -4.0)
 			shown_state[i] = st
+			shown_kind[i] = kind
 		root.visible = vis_h[i] > 0.01
 		if not root.visible:
 			continue
@@ -909,6 +1346,21 @@ func _draw_moles(delta: float) -> void:
 			root.rotation = Vector3(0.0, t * 9.0, 0.0)  # dizzy spin
 		else:
 			root.rotation = Vector3.ZERO
+
+
+## The mesh for a mole of this kind in hole i (seed packets: the crop offered in that hole). Cached.
+func _kind_mesh(i: int, kind: int) -> Mesh:
+	var key: Variant = kind
+	if kind == RoundGen.SEED:
+		var offers: Array = net.state_get("offers", []) if net != null else []
+		var k := SEED_HOLES.find(i)
+		var id := String(offers[k]) if k >= 0 and k < offers.size() else Story.FIRST_CROP
+		key = "seed:" + id
+		if not kind_meshes.has(key):
+			kind_meshes[key] = Props.seed_mesh(Story.crop(id).color, Garden.icon_mesh(id))
+	elif not kind_meshes.has(key):
+		kind_meshes[key] = Props.kind_mesh(kind)
+	return kind_meshes[key]
 
 
 static func _ease_back(x: float) -> float:
@@ -929,7 +1381,7 @@ func make_snapshot() -> Array:
 	var flags := PackedByteArray()
 	flags.resize(holes.size())
 	for i in holes.size():
-		flags[i] = m_state[i] | (m_gold[i] << 2)
+		flags[i] = m_state[i] | (m_kind[i] << 2)  # state 2 bits, kind 3 bits
 	var pose := vr_rig.pack_pose() if vr_rig != null else PackedFloat32Array()
 	# Every player avatar (slot, position, yaw): each machine sees the other machines' players.
 	var av_slots := PackedByteArray()
@@ -965,7 +1417,7 @@ func apply_snapshot(s: Array) -> void:
 	for i in mini(h.size(), holes.size()):
 		m_h[i] = h[i]
 		m_state[i] = flags[i] & 3
-		m_gold[i] = (flags[i] >> 2) & 1
+		m_kind[i] = (flags[i] >> 2) & 7
 
 
 func apply_event(kind: String, args: Array) -> void:
@@ -978,6 +1430,15 @@ func apply_event(kind: String, args: Array) -> void:
 			thump(args[0], float(args[1]))
 		"hop":
 			hop(int(args[0]))
+		"clonk":
+			clonk_fx(int(args[0]), int(args[1]), int(args[2]))
+		"bunny":
+			bunny_fx(int(args[0]), bool(args[1]))
+		"planted":
+			planted(String(args[0]))
+		"story":
+			show_story({"who": String(args[0]), "line": String(args[1]), "pic": String(args[2]),
+				"color": Color.html(String(args[3])), "duration": 3.5})
 		"swing":
 			var ss := int(args[0])
 			if avatars.has(ss) and not party.is_local(ss):
