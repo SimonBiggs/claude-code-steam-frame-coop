@@ -102,7 +102,7 @@ func _run_simple() -> void:
 	seq.wait(flow.SIMPLE_AGAIN_T)
 	seq.add(func() -> void:
 		if String(net.state_get("phase", "")) == "results":
-			flow.begin())
+			flow.after_party())
 
 
 ## Players with the most `stat` (ties all get it); nobody when everyone has 0.

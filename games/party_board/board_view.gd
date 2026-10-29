@@ -32,6 +32,8 @@ void fragment() {
 """
 
 var data: BD
+var spaces_mi: MeshInstance3D
+var _types_key := ""
 var vr_table := false
 var star_node: Node3D
 var star_space := -1
@@ -57,12 +59,21 @@ func build(p_data: BD, vr: bool) -> void:
 	data = p_data
 	vr_table = vr
 	add_child(MeshKit.instance(ResCache.get_or_make("pb_island_v3", _island_mesh)))
-	var spaces := MeshKit.instance(ResCache.get_or_make("pb_spaces_simple_v1" if data.simple else "pb_spaces_v3", _spaces_mesh), false)
-	add_child(spaces)
+	spaces_mi = MeshKit.instance(ResCache.get_or_make("pb_spaces_simple_v1" if data.simple else "pb_spaces_v3", _spaces_mesh), false)
+	add_child(spaces_mi)
 	_build_water(vr)
 	_build_props()
 	_build_landmarks()
 	_build_star()
+
+
+## The spaces changed colour (a seeded party, partygen.gd): rebuild their one mesh (once per party).
+func apply_types() -> void:
+	var key := var_to_str(data.types())
+	if key == _types_key or spaces_mi == null:
+		return
+	_types_key = key
+	spaces_mi.mesh = _spaces_mesh()
 
 
 # --- Terrain --------------------------------------------------------------------------------------

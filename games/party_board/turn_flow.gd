@@ -19,6 +19,10 @@ const Rules := preload("res://games/party_board/rules.gd")
 const BD := preload("res://games/party_board/board_data.gd")
 const Awards := preload("res://core/awards.gd")
 const Hints := preload("res://core/hints.gd")
+const PartyGen := preload("res://games/party_board/partygen.gd")
+const Festival := preload("res://games/party_board/festival.gd")
+const Seeded := preload("res://core/seeded.gd")
+const Telemetry := preload("res://core/telemetry.gd")
 
 const CPU_NAMES := ["BOBO", "PIP", "MIMI", "TUTU", "ZAZA", "LULU", "KIKI"]
 const MIN_SEATS := 4
@@ -55,6 +59,14 @@ var bot_land: Array = []  ## bots: space types to pretend the next landings are 
 var bonus_moving := false  ## SIMPLE: the bonus hops of a blue space (no second landing)
 var practiced: Array = []  ## SIMPLE: pids that did their practice roll (bots)
 var results_age := 0.0  ## SIMPLE: game seconds since the winner moment started
+## SIMPLE story (festival.gd / partygen.gd): this party's seeded plan, how far the STAR has flown along its
+## route, whether the winner has picked Mango's next festival piece, and this party's numbers (RUN line).
+var plan := {}
+var route_i := 0
+var festival_done := false
+var party_t0 := 0
+var run := {}
+const PICK_WAIT := 12.0  ## the winner's festival pick: nobody picks -> the first piece
 
 
 func _ready() -> void:
@@ -66,6 +78,11 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	results_age += delta
+
+
+func _exit_tree() -> void:
+	if game_on and main != null and main.simple:
+		_telemetry("quit", [])
 
 
 func _w(seconds: float) -> float:
@@ -94,6 +111,8 @@ func begin() -> void:
 	_roster()
 	net.state_set("star", -1)
 	net.state_set("phase", "title")
+	festival_done = false
+	main.publish_festival()
 	if main.simple:
 		main.fx("banner", ["PARTY BOARD!", "", "victory", SIMPLE_TITLE_T])
 		seq.wait(_w(SIMPLE_TITLE_T))
@@ -256,7 +275,7 @@ func on_request(slot: int, action: String, args: Array) -> void:
 			if String(net.state_get("phase", "")) == "results":
 				if main.simple and results_age < 3.0:
 					return
-				begin()
+				after_party()
 		_:
 			main.runner.on_request(slot, action, args)
 
@@ -292,12 +311,13 @@ func start_game() -> void:
 	net.state_set("order", order.duplicate())
 	net.state_set("final", false)
 	_publish()
-	var spots: Array = main.data.star_spots().filter(func(s: int) -> bool: return main.data.distance(0, s) >= (4 if main.simple else 6) \
-		and (not main.simple or main.data.distance(0, s) <= 8))
-	net.state_set("star", int(spots[rng.randi() % spots.size()]))
 	if main.simple:
+		_make_plan()
+		net.state_set("star", int(plan.route[0]))
 		_simple_opening()
 		return
+	var spots: Array = main.data.star_spots().filter(func(s: int) -> bool: return main.data.distance(0, s) >= 6)
+	net.state_set("star", int(spots[rng.randi() % spots.size()]))
 	net.state_set("phase", "intro")
 	net.state_set("music", "party")
 	net.state_set("step", "overview")
@@ -331,7 +351,9 @@ func _simple_opening() -> void:
 	net.state_set("music", "party")
 	net.state_set("step", "overview")
 	main.fx("sfx", ["party_horn"])
-	main.fx("banner", ["LET'S PARTY!", "", "victory", 2.0])
+	main.fx("banner", ["TODAY!" if bool(plan.get("daily", false)) else "LET'S PARTY!", "", "victory", 2.0])
+	var th: Dictionary = PartyGen.THEMES[int(plan.get("theme", 0))]
+	main.fx("story", ["MANGO", String(th.line), "toucan", main.MANGO_COLOR.to_html()])
 	seq.wait(_w(2.0))
 	seq.add(func() -> void:
 		main.net.state_set("step", "star_intro")
@@ -461,6 +483,11 @@ func _pick_minigames() -> Array:
 		return []
 	if main.mg_force != "" and ids.has(main.mg_force):
 		return [main.mg_force]
+	if main.simple and not main.mg_all and not plan.is_empty() and round_n >= 1 and round_n <= (plan.minigames as Array).size():
+		var g := String(plan.minigames[round_n - 1])
+		if ids.has(g):
+			mg_played.append(g)
+			return [g]
 	if main.mg_all:
 		if mg_cycle.is_empty() and mg_played.is_empty():
 			mg_cycle = ids.duplicate()
@@ -485,7 +512,7 @@ func _pick_minigames() -> Array:
 # --- Menus (one player chooses) -------------------------------------------------------------------
 
 ## Ask `pid` to choose; CPU players answer with cpu_pick (an id) after a short think.
-func _ask(pid: int, title: String, items: Array, cpu_pick: String, kind: String = "") -> void:
+func _ask(pid: int, title: String, items: Array, cpu_pick: String, kind: String = "", timeout: float = 45.0) -> void:
 	menu_seq += 1
 	menu_pid = pid
 	menu_answer = ""
@@ -497,7 +524,7 @@ func _ask(pid: int, title: String, items: Array, cpu_pick: String, kind: String 
 		seq.add(func() -> void:
 			if menu_seq == s and menu_answer == "":
 				menu_answer = cpu_pick)
-	seq.until(func() -> bool: return menu_answer != "", 45.0, func() -> void: menu_answer = cpu_pick)
+	seq.until(func() -> bool: return menu_answer != "", timeout, func() -> void: menu_answer = cpu_pick)
 	seq.add(func() -> void: main.net.state_set("menu", {}))
 
 
@@ -797,10 +824,19 @@ func _star_grab(pid: int) -> void:
 
 func _move_star() -> void:
 	var cur := int(main.net.state_get("star", -1))
+	if main.simple and not plan.is_empty():
+		route_i += 1
+		var nx := int((plan.route as Array)[route_i % (plan.route as Array).size()])
+		if nx != cur:
+			_fly_star(nx)
+			return
 	var spots: Array = main.data.star_spots().filter(func(s: int) -> bool: return s != cur and main.data.distance(cur, s) >= 5 and main.data.distance(s, cur) >= 5)
 	if spots.is_empty():
 		spots = main.data.star_spots().filter(func(s: int) -> bool: return s != cur)
-	var to := int(spots[rng.randi() % spots.size()])
+	_fly_star(int(spots[rng.randi() % spots.size()]))
+
+
+func _fly_star(to: int) -> void:
 	main.net.state_set("star", to)
 	main.net.state_set("step", "star_move")
 	main.fx("sfx", ["whoosh"])
@@ -891,6 +927,7 @@ func _land(pid: int) -> void:
 ## SIMPLE: blue (and START) = hop SIMPLE_BONUS_HOPS further (picking up the STAR on the way), red =
 ## slide back SIMPLE_BACK spaces. Shown by the space's colour, a sound and the token, no text.
 func _land_simple(pid: int, sp: int, type: String) -> void:
+	run[type] = int(run.get(type, 0)) + 1
 	if type == "red":
 		main.fx("space_fx", [sp, Color(1.0, 0.35, 0.35)])
 		main.fx("sfx", ["boing", -3.0, 0.8])
@@ -1154,4 +1191,99 @@ func finish_game(winners: Array) -> void:
 	var played: Dictionary = sd["mg_played"]
 	for id in mg_played:
 		played[String(id)] = int(played.get(String(id), 0)) + 1
+	if main.simple and not winners.is_empty():
+		var fl: Array = sd["flags"]  # the winner plants a flag in their colour by START (festival.gd)
+		for w in winners:
+			fl.append(main.color_of(int(w)).to_html(false))
+		while fl.size() > Festival.FLAGS:
+			fl.pop_front()
+		if bool(plan.get("daily", false)):
+			var dd: Dictionary = sd["daily"]
+			dd[Seeded.today()] = String(pl[int(winners[0])]["name"])
+			while dd.size() > 30:
+				var ks := dd.keys()
+				ks.sort()
+				dd.erase(ks[0])
+		main.publish_festival()
 	main.save.mark_dirty()
+	_telemetry("party", winners)
+
+
+## One RUN line per party (or quit mid-party): how the family really plays (balance).
+func _telemetry(end: String, winners: Array) -> void:
+	if not main.simple or plan.is_empty():
+		return
+	var humans := 0
+	var stars: Array = []
+	var human_won := false
+	for k in pl:
+		var r: Dictionary = pl[k]
+		stars.append(int(r["stars"]))
+		if not bool(r["cpu"]):
+			humans += 1
+			human_won = human_won or winners.has(int(k))
+	var info := run.duplicate()
+	info.merge({"end": end, "mode": main.net.mode, "vr": main.vr_rig != null, "humans": humans, "seats": pl.size(),
+		"rounds": rounds, "round": round_n, "seed": int(plan.seed), "level": int(plan.level), "daily": bool(plan.get("daily", false)),
+		"theme": String(PartyGen.THEMES[int(plan.theme)].id), "reds_on_board": int(plan.reds), "stars": stars,
+		"winners": winners.size(), "human_won": human_won, "secs": int((Time.get_ticks_msec() - party_t0) / 1000),
+		"festival": (main.save.data["festival"] as Array).size()}, true)
+	Telemetry.run("party_board", info)
+
+
+## SIMPLE: this party's board from a seed (partygen.gd): TODAY'S PARTY first each day (the same on every
+## machine), then the family's own parties, a bit trickier the more parties they've had.
+func _make_plan() -> void:
+	var sd: Dictionary = main.save.data
+	var daily := not (sd["daily"] as Dictionary).has(Seeded.today()) and not OS.has_environment("BOT_NO_DAILY")
+	var seed_value := Seeded.daily_seed("party_board") if daily else Seeded.derive(int(sd["world"]), "party%d" % int(sd["parties"]))
+	var desc := {"seed": seed_value, "level": 4 if daily else int(sd["parties"]), "rounds": rounds, "daily": daily}
+	var t0 := Time.get_ticks_usec()
+	plan = main.apply_plan(desc)
+	plan["daily"] = daily
+	route_i = 0
+	party_t0 = Time.get_ticks_msec()
+	run = {"gen_ms": snappedf((Time.get_ticks_usec() - t0) / 1000.0, 0.01)}
+	main.net.state_set("plan", desc)
+	var th: Dictionary = PartyGen.THEMES[int(plan.theme)]
+	main.net.state_set("sky", String(th.sky))
+	print("Party Board party: %s seed %d level %d, %d reds, %s (%.1f ms)" % ["daily" if daily else "story", seed_value,
+		int(plan.level), int(plan.reds), String(th.id), float(run.gen_ms)])
+
+
+## SIMPLE: after the winner moment: the winner picks Mango's next festival piece, then a new party.
+func after_party() -> void:
+	if festival_done or not main.simple:
+		begin()
+		return
+	festival_done = true
+	var offers := Festival.offers(main.save.data["festival"])
+	var winners: Array = main.net.state_get("winners", [])
+	if offers.is_empty() or winners.is_empty():
+		begin()
+		return
+	seq.clear()
+	var who := int(winners[0])
+	for w in winners:  # a human winner picks when there is one
+		if not _cpu(int(w)):
+			who = int(w)
+			break
+	main.net.state_set("phase", "festival")
+	main.net.state_set("cur", who)
+	main.fx("story", ["MANGO", "WHICH ONE?" if offers.size() > 1 else "NEW!", "toucan", main.MANGO_COLOR.to_html()])
+	var items: Array = []
+	for id in offers:
+		var d := Festival.deco(String(id))
+		items.append({"id": String(id), "text": String(d.word), "icon": String(d.icon), "icon_color": main.MANGO_COLOR})
+	_ask(who, "BUILD!", items, String(offers[rng.randi() % offers.size()]), "festival", PICK_WAIT)
+	seq.add(func() -> void:
+		var id := menu_answer if offers.has(menu_answer) else String(offers[0])
+		var fest: Array = main.save.data["festival"]
+		if not fest.has(id):
+			fest.append(id)
+		main.save.mark_dirty()
+		main.publish_festival()
+		main.fx("sfx", ["fanfare", -2.0])
+		main.fx("story", ["MANGO", String(Festival.deco(id).line), "toucan", main.MANGO_COLOR.to_html()]))
+	seq.wait(_w(3.5))
+	seq.add(begin)

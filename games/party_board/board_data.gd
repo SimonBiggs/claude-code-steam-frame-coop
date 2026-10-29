@@ -115,6 +115,22 @@ func make_simple() -> void:
 		sp["star_ok"] = String(sp["type"]) == "blue" and not sp["junction"]
 
 
+## A seeded party's space types (partygen.gd: blue / red / start per space); star spots follow.
+func set_types(types: Array) -> void:
+	for i in mini(types.size(), spaces.size()):
+		var sp: Dictionary = spaces[i]
+		sp["type"] = String(types[i])
+		sp["star_ok"] = String(sp["type"]) == "blue" and not sp["junction"]
+
+
+## The space types as an Array (what the board looks like now).
+func types() -> Array:
+	var out: Array = []
+	for s in spaces:
+		out.append(String(s["type"]))
+	return out
+
+
 # --- Queries --------------------------------------------------------------------------------------
 
 func count() -> int:
