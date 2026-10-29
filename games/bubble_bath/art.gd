@@ -180,3 +180,99 @@ static func bubble_mesh() -> SphereMesh:
 	m.emission_energy_multiplier = 0.25
 	s.material = m
 	return s
+
+
+## A golden rubber duck (worth three), origin at the waterline, facing +Z.
+static func golden_duck() -> ArrayMesh:
+	var cached := ResCache.fetch("bb_gold_duck_v1") as ArrayMesh
+	if cached != null:
+		return cached
+	var b := MeshKit.Builder.new()
+	var gold := Color(1.0, 0.75, 0.1)
+	b.ellipsoid(Vector3(0.15, 0.11, 0.19), MeshKit.at(Vector3(0.0, 0.05, -0.02)), gold, 12, true)
+	b.ellipsoid(Vector3(0.05, 0.06, 0.06), MeshKit.at(Vector3(0.0, 0.13, -0.18), Vector3.ONE, Vector3(0.6, 0.0, 0.0)), gold, 8, true)
+	b.sphere(0.1, MeshKit.at(Vector3(0.0, 0.2, 0.08)), gold, 12, true)
+	b.ellipsoid(Vector3(0.06, 0.025, 0.07), MeshKit.at(Vector3(0.0, 0.18, 0.2)), Color(1.0, 0.45, 0.1))
+	for sx in [-1.0, 1.0]:
+		b.sphere(0.022, MeshKit.at(Vector3(sx * 0.05, 0.24, 0.16)), Color(0.05, 0.05, 0.1))
+	b.star(5, 0.07, 0.03, 0.02, MeshKit.at(Vector3(0.0, 0.36, 0.08)), Color(1.0, 0.95, 0.5), true)
+	var m := b.build()
+	ResCache.put("bb_gold_duck_v1", m)
+	return m
+
+
+## A sponge island (radius r), origin at the waterline: a squishy yellow sponge with a green scrubby top.
+static func sponge(r: float) -> ArrayMesh:
+	var b := MeshKit.Builder.new()
+	b.cylinder(r, r * 1.05, 0.22, MeshKit.at(Vector3(0.0, 0.0, 0.0)), Color(0.98, 0.86, 0.32), 14)
+	b.cylinder(r * 0.98, r, 0.07, MeshKit.at(Vector3(0.0, 0.14, 0.0)), Color(0.3, 0.75, 0.4), 14)
+	for k in 7:
+		var a := k * TAU / 7.0 + 0.4
+		b.sphere(0.035, MeshKit.at(Vector3(cos(a) * r * 1.0, 0.0, sin(a) * r * 1.0), Vector3(1.0, 1.0, 0.5)), Color(0.82, 0.68, 0.2), 6)
+	return b.build()
+
+
+## Mama Duck: a big rubber duck with a pink bow (crowned: a gold crown instead), origin at her seat, facing +Z.
+static func mama_duck(crowned: bool) -> ArrayMesh:
+	var b := MeshKit.Builder.new()
+	var yellow := Color(1.0, 0.86, 0.15)
+	b.ellipsoid(Vector3(0.15, 0.11, 0.19), MeshKit.at(Vector3(0.0, 0.05, -0.02)), yellow)
+	b.ellipsoid(Vector3(0.05, 0.06, 0.06), MeshKit.at(Vector3(0.0, 0.13, -0.18), Vector3.ONE, Vector3(0.6, 0.0, 0.0)), yellow)
+	b.sphere(0.1, MeshKit.at(Vector3(0.0, 0.2, 0.08)), yellow)
+	b.ellipsoid(Vector3(0.06, 0.025, 0.07), MeshKit.at(Vector3(0.0, 0.18, 0.2)), Color(1.0, 0.5, 0.1))
+	for sx in [-1.0, 1.0]:
+		b.sphere(0.022, MeshKit.at(Vector3(sx * 0.05, 0.24, 0.16)), Color(0.05, 0.05, 0.1))
+		b.ellipsoid(Vector3(0.03, 0.06, 0.1), MeshKit.at(Vector3(sx * 0.13, 0.07, -0.02)), Color(1.0, 0.75, 0.1))
+	if crowned:
+		var gold := Color(1.0, 0.8, 0.2)
+		b.cylinder(0.06, 0.055, 0.04, MeshKit.at(Vector3(0.0, 0.31, 0.07)), gold, 10, true)
+		for k in 5:
+			var a := k * TAU / 5.0
+			b.cone(0.017, 0.05, MeshKit.at(Vector3(cos(a) * 0.05, 0.35, 0.07 + sin(a) * 0.05)), gold, 4, true)
+	else:
+		var pink := Color(1.0, 0.55, 0.75)
+		for sx in [-1.0, 1.0]:
+			b.ellipsoid(Vector3(0.045, 0.03, 0.02), MeshKit.at(Vector3(sx * 0.045, 0.3, 0.05)), pink)
+		b.sphere(0.02, MeshKit.at(Vector3(0.0, 0.3, 0.05)), pink.darkened(0.2))
+	return b.build()
+
+
+## One bath toy on the rim, origin at its base: boat, beachball, starfish, whale, soapbar or fish. golden: TODAY'S BATH (gold star on top).
+static func toy(kind: String, golden: bool) -> ArrayMesh:
+	var key := "bb_toy_%s_%s" % [kind, golden]
+	var cached := ResCache.fetch(key) as ArrayMesh
+	if cached != null:
+		return cached
+	var b := MeshKit.Builder.new()
+	match kind:
+		"boat":
+			b.rounded_box(Vector3(0.12, 0.06, 0.22), 0.03, MeshKit.at(Vector3(0.0, 0.03, 0.0)), Color(0.95, 0.3, 0.25))
+			b.cylinder(0.008, 0.008, 0.2, MeshKit.at(Vector3(0.0, 0.15, 0.0)), Color(0.6, 0.45, 0.3))
+			b.wedge(Vector3(0.01, 0.14, 0.12), MeshKit.at(Vector3(0.0, 0.15, -0.06)), Color(0.98, 0.98, 1.0))
+		"beachball":
+			var cols := [Color(0.95, 0.25, 0.25), Color(0.98, 0.98, 1.0), Color(0.35, 0.65, 1.0), Color(1.0, 0.86, 0.15)]
+			b.sphere(0.1, MeshKit.at(Vector3(0.0, 0.1, 0.0)), Color(0.98, 0.98, 1.0), 12)
+			for k in 4:
+				b.ellipsoid(Vector3(0.035, 0.1, 0.1), MeshKit.at(Vector3(0.0, 0.1, 0.0), Vector3(1.03, 1.01, 1.01), Vector3(0.0, k * PI / 4.0, 0.0)), cols[k], 10)
+		"starfish":
+			b.star(5, 0.11, 0.045, 0.04, MeshKit.at(Vector3(0.0, 0.12, 0.0), Vector3.ONE, Vector3(PI * 0.5, 0.0, 0.0)), Color(1.0, 0.55, 0.25))
+		"whale":
+			b.ellipsoid(Vector3(0.09, 0.07, 0.14), MeshKit.at(Vector3(0.0, 0.07, 0.0)), Color(0.35, 0.65, 1.0))
+			b.wedge(Vector3(0.12, 0.02, 0.06), MeshKit.at(Vector3(0.0, 0.1, -0.15)), Color(0.35, 0.65, 1.0))
+			b.cylinder(0.012, 0.02, 0.08, MeshKit.at(Vector3(0.0, 0.17, 0.04)), Color(0.6, 0.85, 1.0))
+			for sx in [-1.0, 1.0]:
+				b.sphere(0.015, MeshKit.at(Vector3(sx * 0.07, 0.09, 0.09)), Color(0.05, 0.05, 0.1))
+		"soapbar":
+			b.rounded_box(Vector3(0.18, 0.06, 0.11), 0.025, MeshKit.at(Vector3(0.0, 0.03, 0.0)), Color(1.0, 0.6, 0.8))
+			for k in 3:
+				b.sphere(0.025 + k * 0.01, MeshKit.at(Vector3(-0.04 + k * 0.04, 0.1 + k * 0.03, 0.0)), Color(0.9, 0.95, 1.0), 8)
+		_:  # fish
+			b.ellipsoid(Vector3(0.05, 0.07, 0.12), MeshKit.at(Vector3(0.0, 0.08, 0.0)), Color(1.0, 0.55, 0.15))
+			b.wedge(Vector3(0.02, 0.1, 0.06), MeshKit.at(Vector3(0.0, 0.08, -0.14)), Color(1.0, 0.75, 0.2))
+			for sx in [-1.0, 1.0]:
+				b.sphere(0.014, MeshKit.at(Vector3(sx * 0.04, 0.1, 0.07)), Color(0.05, 0.05, 0.1))
+	if golden:
+		b.star(5, 0.05, 0.022, 0.015, MeshKit.at(Vector3(0.0, 0.3, 0.0)), Color(1.0, 0.85, 0.25), true)
+	var m := b.build()
+	ResCache.put(key, m)
+	return m

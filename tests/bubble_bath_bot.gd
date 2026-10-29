@@ -7,6 +7,7 @@ extends Node
 ## Flat host: add DUO_FLAT_HOST=1 to the host (no VR: one bot pad plays slot 0 on the host).
 
 const BotKit := preload("res://tests/bot_kit.gd")
+const BathGen := preload("res://games/bubble_bath/bathgen.gd")
 
 var kit: BotKit
 var main: Node
@@ -116,13 +117,22 @@ func _steer(slot: int) -> void:
 	if not main.boats.has(slot):
 		return
 	var b: Node3D = main.boats[slot]
-	var target: Vector3 = main.DRAIN
+	var target: Vector3 = main.drain
 	var train_n: int = (main.trains.get(slot, []) as Array).size() if main.net.mode != "client" else 0
 	var duck := _nearest_duck(b.position, true)
 	if duck != null and train_n < 2 and (main.net.mode != "client" or fmod(kit.t + slot, 8.0) < 5.0):
 		target = duck.position
 	var d := target - b.position
 	d.y = 0.0
+	# Sail round the sponge islands: push sideways off any island just ahead.
+	for o in main.islands:
+		var to := Vector3(o.x, 0.0, o.y) - Vector3(b.position.x, 0.0, b.position.z)
+		var ahead := to.dot(d.normalized()) if d.length() > 0.01 else -1.0
+		if ahead > 0.0 and ahead < d.length() + 0.2 and to.length() < float(o.z) + 1.0:
+			var side := d.normalized().cross(Vector3.UP)
+			var lat := to.dot(side)
+			if absf(lat) < float(o.z) + 0.45:
+				d = d.normalized() - side * signf(lat if lat != 0.0 else 1.0) * 1.5
 	var v := Vector2.ZERO
 	if d.length() > 0.05 and main.split != null:
 		d = d.normalized()
@@ -168,7 +178,7 @@ func _drive_vr(delta: float) -> void:
 				vr_phase = "seek"
 				vr_t = 0.0
 		"throw":
-			var aim: Vector3 = main.DRAIN + Vector3.UP * 1.2
+			var aim: Vector3 = main.drain + Vector3.UP * 1.2
 			kit.vr_reach(rig, 1, aim, 5.0, delta)
 			if vr_t > 0.25:
 				kit.vr_trigger(rig, 0.0)
@@ -200,9 +210,9 @@ func _nearest_duck(from: Vector3, floating_only: bool) -> Node3D:
 
 
 func _report() -> String:
-	return "BOT %s: players %s, ducks %d, score %d, total %d, vr throws %d, longest train %d" % [main.net.mode,
-		str(main.party.active_slots()), main.ducks.size(), int(main.net.state_get("score", 0)),
-		int(main.net.state_get("total", 0)), vr_throws, max_train]
+	return "BOT %s: players %s, ducks %d, score %d/%d, total %d, vr throws %d, longest train %d, islands %d" % [main.net.mode,
+		str(main.party.active_slots()), main.ducks.size(), int(main.net.state_get("score", 0)), int(main.net.state_get("goal", 0)),
+		int(main.net.state_get("total", 0)), vr_throws, max_train, main.islands.size()]
 
 
 func _checks() -> void:
@@ -218,6 +228,14 @@ func _checks() -> void:
 	kit.assert_true(int(main.net.state_get("total", 0)) > 0, "%s: ducks went down the plug" % mode)
 	kit.assert_true(int(main.net.state_get("round", 0)) >= 2, "%s: round 1 ended with results and round 2 started" % mode)
 	kit.assert_true(main.ducks.size() > 0, "%s: ducks float in the tub" % mode)
+	kit.assert_true(not main.plan.is_empty() and int(main.plan.n) >= 2, "%s: the seeded bath is built (round %d)" % [mode, int(main.plan.get("n", 0))])
+	kit.assert_eq(main.islands.size(), main.island_root.get_child_count(), "%s: the sponge islands are in the tub" % mode)
+	kit.assert_true(main.mama != null and main.mama.get_child_count() > 0, "%s: Mama Duck sits on the rim" % mode)
+	kit.assert_true(BathGen.check(main.plan).is_empty(), "%s: this round's bath is fair (%s)" % [mode, str(BathGen.check(main.plan))])
+	kit.assert_true(int(main.net.state_get("goal", 0)) > 0, "%s: Mama Duck set a duck goal" % mode)
+	if mode != "client":
+		kit.assert_true(int(main.save.data.days) >= 1 and int(main.save.data.rounds) >= 2, "rounds and play-days are saved")
+		kit.assert_true(int(main.save.data.goals) > 0 and main.family_root.get_child_count() > 0, "the team reached a goal and a toy sits on the rim (%d goals)" % int(main.save.data.goals))
 	if mode != "client":
 		kit.assert_true(max_train > 0 or main.net.mode == "host", "boats towed ducks")
 	if main.vr_rig != null:
