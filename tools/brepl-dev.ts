@@ -232,6 +232,10 @@ export async function debt() {
     for (const b of (await sh(`git branch --format='%(refname:short)' --no-merged ${main}`, dir)).out.split("\n").filter(Boolean)) {
       const n = (await sh(`git rev-list --count ${main}..${b}`, dir)).out;
       const age = (await sh(`git log -1 --format=%cr ${b}`, dir)).out;
+      // Work in progress, not debt: an agent's branch checked out in a worktree that moved in the last 12 h (its
+      // agent hands it to the steward when done; 2026-10-29: every running deep-* agent was listed as debt).
+      const wt = (await sh(`git worktree list --porcelain | grep -B2 "^branch refs/heads/${b}$" | sed -n 's/^worktree //p'`, dir)).out;
+      if (wt && Date.now() / 1000 - +(await sh(`git log -1 --format=%ct ${b}`, dir)).out < 12 * 3600) continue;
       issues.push({ kind: "unmerged", what: `${r}: branch ${b} is ${n} commits ahead (${age})`, fix: "merge if finished, else leave parked" });
     }
     for (const w of (await sh("git worktree list --porcelain", dir)).out.split("\n\n").slice(1)) {
@@ -314,8 +318,11 @@ export async function land(branch: string, genTests: string[], botId: string, ot
     } finally { delete process.env.DUO_PORT; }
   }
   if (!ok) return { stop: "tests", out, res };
-  const body = `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UPzLapMn8qMpWGwygUaPCg`;
-  const d = await sh(`duo-deploy ${JSON.stringify(msg)} 2>&1 | grep -v offline | tail -4; duo-deploy-deck 2>&1 | grep -v offline | tail -4; cd ${LIVE} && git merge -q --no-edit merge-arcade -m ${JSON.stringify(`Merge branch 'merge-arcade' (${branch}: uids, tests)\n\n${body}`)} && cd ../wt-merge && git merge -q --ff-only main && cd ${LIVE} && git worktree remove --force ../wt-${branch} && git branch -d ${branch}; git log --oneline -2 | cut -c1-60`);
+  // The message goes through a file: JSON.stringify'd "\n" stays a literal backslash-n inside bash quotes
+  // (2026-10-29: a merge subject read "...tests)\n\nCo-Authored-By...").
+  const msgFile = join(GP, "wt-merge/.git-land-msg");
+  await writeFile(msgFile, `Merge branch 'merge-arcade' (${branch}: uids, tests)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UPzLapMn8qMpWGwygUaPCg\n`);
+  const d = await sh(`duo-deploy ${JSON.stringify(msg)} 2>&1 | grep -v offline | tail -4; duo-deploy-deck 2>&1 | grep -v offline | tail -4; cd ${LIVE} && git merge -q --no-edit merge-arcade -F ${msgFile} && rm -f ${msgFile} && cd ../wt-merge && git merge -q --ff-only main && cd ${LIVE} && git worktree remove --force ../wt-${branch} && git branch -d ${branch}; git log --oneline -2 | cut -c1-60`);
   return { deployed: true, out, res, deploy: d.out };
 }
 
