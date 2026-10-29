@@ -63,12 +63,12 @@ const FIXED: Array = [
 ]
 
 ## Hiding places: size (width along the wall, depth), height, where the ghost peeks out (height), whether
-## it stands against a wall, solid (players bump into it).
+## it stands against a wall, solid (players bump into it), top (the ghost peeks over the rim, not out of the front).
 const KINDS := {
 	"wardrobe": {"w": 1.3, "d": 0.65, "h": 2.2, "peek": 1.3, "wall": true, "solid": true},
-	"trunk": {"w": 1.1, "d": 0.65, "h": 0.65, "peek": 0.8, "wall": false, "solid": true},
-	"vase": {"w": 0.6, "d": 0.6, "h": 1.1, "peek": 1.3, "wall": false, "solid": true},
-	"basket": {"w": 0.8, "d": 0.8, "h": 0.7, "peek": 0.9, "wall": false, "solid": true},
+	"trunk": {"w": 1.1, "d": 0.65, "h": 0.65, "peek": 0.8, "wall": false, "solid": true, "top": true},
+	"vase": {"w": 0.6, "d": 0.6, "h": 1.1, "peek": 1.3, "wall": false, "solid": true, "top": true},
+	"basket": {"w": 0.8, "d": 0.8, "h": 0.7, "peek": 0.9, "wall": false, "solid": true, "top": true},
 	"curtain": {"w": 1.7, "d": 0.3, "h": 3.0, "peek": 1.4, "wall": true, "solid": false},
 	# Always there (world.gd): the grandfather clock, the piano and the fireplace.
 	"clock": {"w": 0.7, "d": 0.45, "h": 2.5, "peek": 1.6, "wall": true, "solid": true, "fixed": true},
@@ -225,6 +225,21 @@ static func _peek_point(s: Dictionary) -> Vector3:
 	var p: Vector3 = Vector3(s.pos) + fwd * out
 	p.y = float(k.peek)
 	return p
+
+
+## Where a ghost hides inside hiding place `s` (the middle of it, a little above the floor).
+static func hide_point(s: Dictionary) -> Vector3:
+	var k: Dictionary = KINDS[s.kind]
+	return Vector3(s.pos) + Vector3.UP * clampf(float(k.h) * 0.55, 0.4, 1.3)
+
+
+## Where a hiding ghost's eyes peek out: over the rim (top) or at the front, at peek height.
+static func eyes_point(s: Dictionary) -> Vector3:
+	var k: Dictionary = KINDS[s.kind]
+	if bool(k.get("top", false)):
+		return Vector3(s.pos) + Vector3.UP * (float(k.h) + 0.08)
+	var fwd := Vector3(sin(float(s.yaw)), 0.0, cos(float(s.yaw)))
+	return Vector3(s.pos) + fwd * (float(k.d) * 0.5 + 0.04) + Vector3.UP * minf(float(k.peek), float(k.h) - 0.2)
 
 
 ## A random hiding place of `kind` in `room` (empty if this try didn't work out).

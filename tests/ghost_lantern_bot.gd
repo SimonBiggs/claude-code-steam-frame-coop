@@ -240,7 +240,7 @@ func _simple_checks(delta: float) -> void:
 					print("BOT: props touched %s" % main.props.touched)
 	if not main.practice and t > 40.0 and not has_meta("float"):
 		for g in get_tree().get_nodes_in_group("ghosts"):
-			if g.kind != "golden" and g.kind != "king":
+			if g.kind != "golden" and g.kind != "king" and g.hide_spot < 0:
 				set_meta("float", g)
 				g.life_t = 999.0
 				print("BOT: ghost %d should giggle and float away" % g.net_id)
@@ -253,8 +253,10 @@ func _simple_checks(delta: float) -> void:
 		if is_instance_valid(fg) and fg.leaving:
 			set_meta("float_seen", true)
 			print("BOT: ghost %d is giggling off through the ceiling" % fg.net_id)
+	_watch_house()
 	if t > 55.0 and not has_meta("report"):
 		set_meta("report", true)
+		_check_house()
 		var practiced: bool = OS.has_environment("BOT_NIGHT") or (saw_sleepy and main.vr_woken >= main.VR_PRACTICE)
 		var ok: bool = practiced and not main.practice and main.night >= 1 and has_meta("float_seen") \
 			and main.caught > 0 and not main.game_over and main.props.touched.size() >= 5
@@ -265,6 +267,82 @@ func _simple_checks(delta: float) -> void:
 		print("BOT: SIMPLE %s practice_done=%s woken=%d saw_sleepy=%s saw_glowy=%s hand=%s tv_caught=%s night=%d caught=%d props=%s" % [
 			"OK" if ok else "FAIL", not main.practice, main.vr_woken, saw_sleepy, saw_glowy, saw_hand, main.tv_caught.keys(),
 			main.night, main.caught, main.props.touched])
+
+
+## Granny Boo's house: hiding ghosts seen hiding (eyes showing, body hidden) and coming out.
+var seen_hiding := {}
+var seen_out := {}
+
+
+func _watch_house() -> void:
+	for g in get_tree().get_nodes_in_group("ghosts"):
+		if g.hide_spot < 0:
+			continue
+		if g.hiding:
+			if g.peeker != null and g.peeker.visible and not g.body.visible:
+				seen_hiding[g.kind] = true
+		elif seen_hiding.has(g.kind) or main.net.mode == "client":
+			seen_out[g.kind] = true
+
+
+## The house is built, fair (housegen.gd check), matches the world (every collision box of the mansion,
+## the jar shelf and the hiding places sits inside housegen.gd's rectangles, so the validator's map is
+## the real one), hiding ghosts hid and came out, caught ghosts went into jars, Granny Boo told the story.
+func _check_house() -> void:
+	var HouseGen = main.HouseGen
+	var errs: Array = []
+	if main.house.is_empty() or main.house_node.count() != (main.house.spots as Array).size():
+		errs.append("no house built (key %s)" % str(main.house_key))
+	else:
+		for w in HouseGen.check(main.house):
+			errs.append("house check: " + str(w))
+		for body in _bodies(main):
+			var a: AABB = body[1]
+			var r := [a.position.x, a.position.z, a.end.x, a.end.z]
+			if a.size.x > 30.0 or a.size.z > 15.0 or a.size.y < 0.3 or a.position.y < -0.15 and a.size.y < 0.25:
+				continue  # floor, ceiling, outside walls
+			if absf(r[0]) > HouseGen.HALF_X - 0.01 or absf(r[2]) > HouseGen.HALF_X - 0.01 or absf(r[1]) > HouseGen.HALF_Z - 0.01 or absf(r[3]) > HouseGen.HALF_Z - 0.01:
+				if a.size.x < 0.5 or a.size.z < 0.5:
+					continue  # the outside walls
+			var inside := false
+			for f in HouseGen.FIXED:
+				if bool(f[5]) and r[0] >= f[0] - 0.06 and r[1] >= f[1] - 0.06 and r[2] <= f[2] + 0.06 and r[3] <= f[3] + 0.06:
+					inside = true
+			for sp in main.house.spots:
+				var rc: Array = HouseGen.rect_of(sp)
+				if bool(HouseGen.KINDS[sp.kind].solid) and r[0] >= rc[0] - 0.06 and r[1] >= rc[1] - 0.06 and r[2] <= rc[2] + 0.06 and r[3] <= rc[3] + 0.06:
+					inside = true
+			if not inside:
+				errs.append("a collision box at %s is missing from housegen.gd FIXED" % str(a))
+	if main.night >= 1 and main.net.mode != "client" and seen_out.is_empty():
+		errs.append("no hiding ghost was seen hiding and coming out (%s)" % str(seen_hiding))
+	if main.net.mode != "client":
+		if int(main.save.data.kept) <= 0 or main.museum.jar_ghosts.is_empty():
+			errs.append("no ghost was kept in a jar (kept %d)" % int(main.save.data.kept))
+		if main.story_count <= 0:
+			errs.append("Granny Boo told no story")
+	elif main.house_key.size() != 5:
+		errs.append("the client has no house")
+	for e in errs:
+		print("SCRIPT ERROR: BOT house: " + str(e))
+	print("BOT: HOUSE %s bodies=%d seed=%s spots=%d hid=%s out=%s kept=%d cosy=%d stories=%d" % ["OK" if errs.is_empty() else "FAIL", _bodies(main).size(),
+		str(main.house_key[0]) if main.house_key.size() > 0 else "-", main.house_node.count(), seen_hiding.keys(), seen_out.keys(),
+		int(main.save.data.kept), main.museum.level, main.story_count])
+
+
+## Every solid box in the scene: [body, world AABB of its box shape].
+func _bodies(n: Node) -> Array:
+	var out: Array = []
+	for c in n.get_children():
+		if c is StaticBody3D:
+			for cs in c.get_children():
+				if cs is CollisionShape3D and cs.shape is BoxShape3D:
+					var sz: Vector3 = (cs.shape as BoxShape3D).size
+					var xf: Transform3D = (cs as Node3D).global_transform
+					out.append([c, xf * AABB(-sz / 2.0, sz)])
+		if not (c is Node3D and c.get("puppet") != null):  # skip ghosts and players
+			out.append_array(_bodies(c))
+	return out
 
 
 func _kinds() -> Dictionary:

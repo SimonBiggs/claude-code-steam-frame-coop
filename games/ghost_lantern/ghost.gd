@@ -20,6 +20,8 @@ const KINDS := {
 	"plain": {"color": Color(0.6, 1.0, 0.75), "radius": 0.45, "speed": 1.6, "tough": 0.8, "points": 100},
 	"sleepy": {"color": Color(0.75, 0.88, 1.0), "radius": 0.45, "speed": 0.0, "tough": 0.6, "points": 0},
 	"glowy": {"color": Color(0.6, 1.0, 0.75), "radius": 0.45, "speed": 0.0, "tough": 0.5, "points": 0},
+	# Houses (housegen.gd): SNOOZE sleeps in a hiding place in a nightcap until it's found.
+	"snoozy": {"color": Color(0.62, 0.78, 1.0), "radius": 0.44, "speed": 1.4, "tough": 0.7, "points": 100},
 }
 const PRACTICE := ["sleepy", "glowy"]
 const LIFE := 50.0  # simple mode: an uncaught ghost giggles and floats away through the ceiling after this
@@ -77,6 +79,19 @@ var trail: CPUParticles3D
 var crown: Node3D
 var leaving := false  # simple mode: giggling off through the ceiling
 var home_y := 1.4
+# Hiding (simple mode, housegen.gd): snoozy ghosts sleep in a hiding place until the lantern finds them
+# (or a player bumps it, or they wake by themselves); peekaboo (spooker) ghosts hide, pop out and hide again.
+var hide_spot := -1  # the house's hiding place this ghost is in (or heading back to)
+var hiding := false
+var hide_t := 0.0
+var hide_limit := 30.0
+var lit_t := 0.0
+var out_t := 0.0  # peekaboo: seconds out before it goes back to hide
+var going_home := -1  # peekaboo: the hiding place it is floating back to
+var zip_t := 0.0  # zip (sprite): seconds since its last rest
+var found_by := ""  # how it came out: lantern / bump / self
+var peeker: Node3D  # what shows of a hiding ghost (always visible): eyes, bubbles or a hat tip
+var bubbles: Array[MeshInstance3D] = []
 
 func setup(k: String, n: int, m) -> void:
 	kind = k
@@ -240,6 +255,8 @@ func _blob(r: float, squash: float) -> SphereMesh:
 ## Hats, masks and trails that tell the kinds apart.
 func _build_extras() -> void:
 	var r := radius
+	if kind in ["snoozy", "spooker"]:
+		_build_peeker()
 	if kind == "shy":
 		for mi in meshes:
 			mi.set_instance_shader_parameter("shy", 1.0)
@@ -262,6 +279,10 @@ func _build_extras() -> void:
 			brim.height = r * 0.06
 			brim.radial_segments = 14
 			_ghost_part(brim, Vector3(0, r * 0.78, 0.0), Color(0.32, 0.12, 0.48))
+		"snoozy":
+			var cap := _ghost_part(_cone(r * 0.62, r * 1.5), Vector3(r * 0.25, r * 1.2, 0.0), Color(0.35, 0.45, 1.0))
+			cap.rotation.z = -0.7
+			_ghost_part(_blob(r * 0.16, 1.0), Vector3(r * 0.95, r * 1.55, 0.0), Color(1.0, 1.0, 1.0))  # pompom
 		"sprite":
 			for sx in [-1.0, 1.0]:
 				var bow := _ghost_part(_blob(r * 0.3, 0.6), Vector3(sx * r * 0.3, r * 1.0, 0.0), Color(1.0, 0.35, 0.6))
@@ -354,6 +375,133 @@ func _build_extras() -> void:
 			add_child(tag)
 
 
+## What shows of a hiding ghost, always (not only in the lantern light): two glowing eyes peeking out,
+## sleepy bubbles for a snoozy ghost, the tip of a witch hat for peekaboo. Faces -z like the body.
+func _build_peeker() -> void:
+	peeker = Node3D.new()
+	peeker.visible = false
+	add_child(peeker)
+	var glow := StandardMaterial3D.new()
+	glow.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	glow.albedo_color = color.lightened(0.5)
+	var dark := StandardMaterial3D.new()
+	dark.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	dark.albedo_color = Color(0.08, 0.05, 0.15)
+	for sx in [-0.09, 0.09]:
+		var e := MeshInstance3D.new()
+		var em := SphereMesh.new()
+		em.radius = 0.06
+		em.height = 0.1
+		em.radial_segments = 10
+		em.rings = 5
+		e.mesh = em
+		e.material_override = glow
+		e.position = Vector3(sx, 0.0, 0.0)
+		e.name = "Eye"
+		peeker.add_child(e)
+		var pu := MeshInstance3D.new()
+		var pm := SphereMesh.new()
+		pm.radius = 0.028
+		pm.height = 0.05
+		pu.mesh = pm
+		pu.material_override = dark
+		pu.position = Vector3(0.0, -0.005, -0.045)
+		e.add_child(pu)
+	if kind == "snoozy":
+		var bub := StandardMaterial3D.new()
+		bub.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		bub.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		bub.albedo_color = Color(0.75, 0.88, 1.0, 0.75)
+		for i in 3:
+			var b := MeshInstance3D.new()
+			var bm := SphereMesh.new()
+			bm.radius = 0.07
+			bm.height = 0.14
+			bm.radial_segments = 10
+			bm.rings = 5
+			b.mesh = bm
+			b.material_override = bub
+			peeker.add_child(b)
+			bubbles.append(b)
+	elif kind == "spooker":
+		var hat := StandardMaterial3D.new()
+		hat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		hat.albedo_color = Color(0.55, 0.3, 0.8)
+		var tip := MeshInstance3D.new()
+		tip.mesh = _cone(0.12, 0.32)
+		tip.material_override = hat
+		tip.position = Vector3(0.0, 0.26, 0.05)
+		tip.name = "HatTip"
+		peeker.add_child(tip)
+
+
+## Host: start hiding in the house's hiding place `spot` (a snoozy ghost for up to WAKE_MAX seconds).
+func start_hiding(spot: int, limit: float) -> void:
+	hide_spot = spot
+	hiding = true
+	hide_t = 0.0
+	lit_t = 0.0
+	hide_limit = limit
+	going_home = -1
+	capture = 0.0
+	vel = Vector3.ZERO
+	if main.house_node != null:
+		global_position = main.house_node.hide_point(spot)
+
+
+## Host: a hiding ghost has been found (or got bored): out it comes, into the room.
+func _come_out(how: String) -> void:
+	hiding = false
+	found_by = how
+	lit_t = 0.0
+	life_t = 0.0
+	var hn = main.house_node
+	var peek: Vector3 = hn.peek_point(hide_spot) if hn != null else global_position
+	var fwd := Vector3(sin(hn.yaw(hide_spot)), 0.0, cos(hn.yaw(hide_spot))) if hn != null else Vector3.FORWARD
+	global_position = Vector3(peek.x, clampf(peek.y, 0.9, 1.6), peek.z)
+	wander_point = global_position + fwd * 1.6
+	wander_point.y = 1.5
+	flee_t = 0.0
+	if kind == "snoozy":
+		stun_t = 2.5  # wakes up dizzy: easy to vacuum
+		stun_cd = 3.0
+	else:
+		out_t = randf_range(7.0, 10.0)
+	main.ghost_came_out(self, how)
+
+
+## Host, simple mode: hiding and peekaboo. Returns true while hidden (no moving, no life timer).
+func _hide_tick(delta: float) -> bool:
+	if not hiding:
+		if kind == "spooker" and hide_spot >= 0 and not leaving:
+			# Peekaboo: out for a while, then float back into a free hiding place.
+			if going_home < 0:
+				out_t -= delta
+				if out_t <= 0.0 and stun_t <= 0.0 and capture < 0.05 and reveal < 0.5:
+					going_home = main.free_hideout(self)
+					if going_home < 0:
+						out_t = 3.0
+			elif main.house_node != null and global_position.distance_to(main.house_node.hide_point(going_home)) < 0.6:
+				start_hiding(going_home, randf_range(6.0, 12.0))
+				main.house_node.shake(hide_spot, 0.5)
+				main.sound("giggle", -9.0, 1.3)
+		return hiding
+	hide_t += delta
+	if main.house_node != null:
+		global_position = global_position.lerp(main.house_node.hide_point(hide_spot), 1.0 - exp(-6.0 * delta))
+	if reveal > 0.5:
+		lit_t += delta
+	else:
+		lit_t = maxf(0.0, lit_t - delta * 0.5)
+	if lit_t > 0.35:
+		_come_out("lantern")
+	elif main.player_near(main.house_node.peek_point(hide_spot) if main.house_node != null else global_position, 1.4):
+		_come_out("bump")
+	elif hide_t > hide_limit:
+		_come_out("self")
+	return hiding
+
+
 func _sphere(r: float, pos: Vector3, squash: float) -> MeshInstance3D:
 	var mi := MeshInstance3D.new()
 	var sm := SphereMesh.new()
@@ -432,6 +580,8 @@ func _physics_process(delta: float) -> void:
 			spd = 0.0
 		elif leaving:
 			spd = 0.3
+		elif kind == "sprite":
+			spd = speed * 1.7  # zip!
 	elif main.director().event_name == "party" and carrying < 0 and kind != "king":
 		# Ghost party in the ballroom: everyone dances in a ring (dizzy: easy to catch).
 		var a := t * 0.8 + float(net_id) * 1.3
@@ -634,6 +784,15 @@ func is_stunned() -> bool:
 func _simple_extras(delta: float) -> bool:
 	if kind in PRACTICE:
 		return false
+	if hide_spot >= 0 and _hide_tick(delta):
+		return true
+	if kind == "sprite" and not leaving:
+		# Zip: zooms about for a few seconds, then stops for a dizzy rest (the moment to catch it).
+		zip_t += delta
+		if zip_t > 3.4 and stun_t <= 0.0 and capture < 0.05:
+			zip_t = 0.0
+			stun_t = 2.4
+			stun_cd = 0.0
 	if kind != "golden":
 		life_t += delta
 	if not leaving and life_t > LIFE * (1.8 if kind == "king" else 1.0) and stun_t <= 0.0 and capture < 0.05:
@@ -659,6 +818,9 @@ func _simple_move() -> Vector3:
 		return Vector3(0.0, home_y, 0.0)
 	if leaving:
 		return Vector3(0.0, 7.0, 0.0)
+	if going_home >= 0 and main.house_node != null:
+		var hp: Vector3 = main.house_node.hide_point(going_home)
+		return Vector3(hp.x - global_position.x, hp.y, hp.z - global_position.z)
 	var flat := Vector3(wander_point.x - global_position.x, 0.0, wander_point.z - global_position.z)
 	if flat.length() < 0.8 or flee_t > -0.1 and flee_t < 0.0:
 		_pick_wander()
@@ -702,6 +864,7 @@ func _process(delta: float) -> void:
 		global_position = global_position.lerp(net_target, 1.0 - exp(-12.0 * delta))
 		body.rotation.y = lerp_angle(body.rotation.y, net_rot, 1.0 - exp(-10.0 * delta))
 		stun_t -= delta
+	_update_peeker()
 	body.position.y = sin(t * 2.3) * 0.05
 	skirt.rotation.z = sin(t * 3.1) * 0.12
 	skirt.rotation.x = sin(t * 2.7) * 0.1
@@ -749,7 +912,33 @@ func _process(delta: float) -> void:
 		mi.set_instance_shader_parameter("flash", flash)
 
 
-## Client: [id, kind, pos, rot_y, reveal, capture, stunned, scared, photos carried]
+## Both machines: a hiding ghost shows only its peeker (eyes at the hiding place, bubbles or a hat tip).
+func _update_peeker() -> void:
+	body.visible = not hiding
+	if peeker == null:
+		return
+	peeker.visible = hiding
+	if not hiding or main.house_node == null or hide_spot < 0 or hide_spot >= main.house_node.count():
+		return
+	peeker.global_position = main.house_node.eyes_point(hide_spot)
+	peeker.global_rotation = Vector3(0.0, main.house_node.yaw(hide_spot) + PI, 0.0)
+	var sleepy := kind == "snoozy"
+	var open := 0.15 if sleepy else (1.0 if fmod(t, 3.0) > 0.15 else 0.15)
+	var look := sin(t * 1.3) * 0.04 if not sleepy else 0.0
+	for c in peeker.get_children():
+		if c.name.begins_with("Eye"):
+			c.scale.y = open
+			c.position.x = signf(c.position.x) * 0.09 + look
+	for i in bubbles.size():
+		var ph := fmod(t * 0.45 + float(i) / 3.0, 1.0)
+		bubbles[i].position = Vector3(0.12 + sin(ph * 6.0) * 0.05, 0.08 + ph * 0.7, -0.05)
+		bubbles[i].scale = Vector3.ONE * (0.4 + ph * 1.1) * (1.0 - smoothstep(0.8, 1.0, ph))
+	var tip := peeker.get_node_or_null("HatTip") as Node3D
+	if tip != null:
+		tip.rotation.z = sin(t * 2.5) * 0.25
+
+
+## Client: [id, kind, pos, rot_y, reveal, capture, stunned, scared, photos carried, hiding, hide spot]
 func apply_net(item: Array) -> void:
 	net_target = item[2]
 	net_rot = item[3]
@@ -761,6 +950,9 @@ func apply_net(item: Array) -> void:
 			carried.append(-1)
 		while carried.size() > n:
 			carried.pop_back()
+	if item.size() > 10:
+		hiding = bool(item[9])
+		hide_spot = int(item[10])
 	var stunned: bool = item[6]
 	stun_t = 0.5 if stunned else 0.0
 	if not net_started:
@@ -770,6 +962,9 @@ func apply_net(item: Array) -> void:
 
 func net_state() -> Array:
 	var st := [net_id, kind, global_position, body.rotation.y, reveal, capture, stun_t > 0.0, scared_t > 0.0]
-	if not carried.is_empty():
+	if not carried.is_empty() or hide_spot >= 0:
 		st.append(carried.size())  # only the Ghost King carries several photos
+	if hide_spot >= 0:
+		st.append(hiding)
+		st.append(hide_spot)
 	return st

@@ -216,6 +216,7 @@ static func build(main: Node3D) -> Dictionary:
 	floor_mi.name = "Floor"
 	box(root, Vector3(HALF_X * 2.0 + 1.0, 0.2, HALF_Z * 2.0 + 1.0), Vector3(0, WALL_H + 0.1, 0), mat(Color(0.09, 0.05, 0.11)), false)
 	var wall := shader_mat(WALL_SHADER)
+	out["wall"] = wall  # house.gd tints the wallpaper per house
 	box(root, Vector3(HALF_X * 2.0 + 0.6, WALL_H, 0.3), Vector3(0, WALL_H / 2.0, -HALF_Z - 0.15), wall)
 	box(root, Vector3(HALF_X * 2.0 + 0.6, WALL_H, 0.3), Vector3(0, WALL_H / 2.0, HALF_Z + 0.15), wall)
 	box(root, Vector3(0.3, WALL_H, HALF_Z * 2.0), Vector3(-HALF_X - 0.15, WALL_H / 2.0, 0), wall)
