@@ -64,6 +64,11 @@ var cues := {}  # simple mode: picture cues seen / learned
 const HEADLINES := "^(3|2|1|LIFT OFF!|PAUSED|PLAYER \\d+!|HELLO!|Connecting to the pilot…)$"
 var headline_re := RegEx.create_from_string(HEADLINES)
 var plug_phase := 0
+var jumped := false
+var museum_start := -1
+var daily_due := false
+var story_seen := {}
+const G := preload("res://games/rocket_workshop/rocketgen.gd")
 
 
 ## Records a check; a FAIL sticks (and prints once), an OK prints the first time.
@@ -571,16 +576,21 @@ func _simple_checks(delta: float) -> void:
 	if main.net.mode == "client":
 		if main.props.played.size() >= 7:
 			_check("tv_sees_toys", true, str(main.props.played))
+		if main.launched >= 2 and main.phase == "work":
+			_check("tv_rocket_look", main.rocket_look.size() == 6 and main.rocket.shown_look.ends_with(str(main.rocket_look)), str(main.rocket_look))
+			if main.museum.entries.size() == main.host_museum:
+				_check("tv_rocket_row_mirrors_host", main.host_museum > 0, "%d models" % main.host_museum)
 		if main.launched >= 5 and quit_t < 0.0:
 			quit_t = 1.0
 	else:
+		_story_checks()
 		if not seen_rockets.has(main.rocket_n) and (main.phase == "work"):
 			seen_rockets[main.rocket_n] = true
 			var types: Array = []
 			for m in main.modules:
 				types.append(m.type)
 			var n: int = main.rocket_n
-			var ok: bool = types.size() <= 2 and (n > P.SIMPLE_ORDER.size() or types[0] == P.SIMPLE_ORDER[n - 1])
+			var ok: bool = types.size() <= (3 if P.simple_level(n) >= 3 else 2) and (n > P.SIMPLE_ORDER.size() or types[0] == P.SIMPLE_ORDER[n - 1])
 			for a in main.panel.area_holders:
 				var want: bool = a == "lever" or types.has(a)
 				if main.panel.area_holders[a].visible != want:
@@ -604,7 +614,11 @@ func _simple_checks(delta: float) -> void:
 				_check("solo_blueprint_hidden_with_crew", not solo)
 			else:
 				_check("solo_blueprint_for_lone_pilot", solo)
-		if main.launched >= 5 and quit_t < 0.0:
+		if main.launched >= 5 and not jumped and main.phase == "launch" and main.net.mode == "local":
+			jumped = true  # skip ahead to the bigger rockets (levels 2 and 3) once the teaching rockets are checked
+			main.rocket_n = 9
+			print("Bot: skipping ahead to rocket 10")
+		if main.launched >= (7 if main.net.mode == "local" else 5) and quit_t < 0.0:
 			quit_t = 6.0 if main.net.mode == "host" else 0.5  # the host waits for the TV bot to finish
 	if quit_t > 0.0:
 		quit_t -= delta
@@ -615,6 +629,34 @@ func _simple_checks(delta: float) -> void:
 					failed.append(k)
 			print("Bot: simple checks %d passed, %d failed %s" % [checks.size() - failed.size(), failed.size(), str(failed)])
 			get_tree().quit()
+
+
+## Host / local: Sprocket, Rocket Row, parts and TODAY'S ROCKET (rocketgen.gd, museum.gd, sprocket.gd).
+func _story_checks() -> void:
+	if museum_start < 0:
+		museum_start = (main.save.data.museum as Array).size()
+		daily_due = String(main.save.data.daily) != preload("res://core/seeded.gd").today()
+	if main.phase != "work" or story_seen.has(main.rocket_n):
+		return
+	story_seen[main.rocket_n] = true
+	var n: int = main.rocket_n
+	var lk: Array = main.rocket_look
+	_check("rocket_look_%d" % n, lk.size() == 6 and main.rocket.shown_look == "%d/%s" % [n, str(lk)], str(lk))
+	var want := mini(museum_start + main.launched, G.MUSEUM_KEEP)
+	_check("rocket_row_grows", (main.save.data.museum as Array).size() == want and main.museum.entries.size() == want,
+		"%d saved, %d shown, want %d" % [(main.save.data.museum as Array).size(), main.museum.entries.size(), want])
+	if main.launched > 0:
+		_check("rocket_row_models", main.museum.models.size() >= mini(want, G.museum_size()) and main.museum.plinths.visible_instance_count == mini(want, G.museum_size()))
+	if n == G.DAILY_N and daily_due:
+		_check("todays_rocket", main.rocket_daily and int(lk[G.L_GOLD]) == 1 and int(lk[G.L_TRIM]) == G.GOLD, str(lk))
+	elif n != G.DAILY_N:
+		_check("gold_only_today", not main.rocket_daily and int(lk[G.L_GOLD]) == 0, str(lk))
+	var lv := G.level(n, true)
+	_check("rocket_size_level%d" % lv, absf(main.rocket.size_now - main.rocket.LEVEL_SCALE[lv]) < 0.001, "size %.2f" % main.rocket.size_now)
+	for why in G.check({"name": main.rocket_name, "modules": main.modules, "time": 999.0, "look": lk, "level": lv,
+			"daily": main.rocket_daily}, {"n": n, "crew": main.crew_count(), "simple": true, "launched": int(main.unlock_from)}):
+		_check("rocket_%d_valid" % n, false, why)
+	_check("sprocket_here", main.sprocket.is_inside_tree() and main.sprocket.visible)
 
 
 # --- Visual teaching checks (simple mode) -----------------------------------------

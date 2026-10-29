@@ -24,7 +24,8 @@ extends RefCounted
 ## green island with a palm in the sea) and boat (a sailing boat on the waves, sail in color); Crystal Saga's lumi
 ## (Lumi: a little glowing crystal fairy), shard (a crystal shard), the skills bigfire, snowflake (ice), twin (two
 ## sparks), longsword, spin (a sword in a whirl), mighty (a big golden sword), and Willowbrook's windmill, fountain
-## and rainbow; anything else is a core/ui_kit.gd icon kind ("star", "heart", "crown"...).
+## and rainbow; Rocket Workshop's engineer (Sprocket: a teal robot in an orange hard hat with a spanner) and
+## toyrocket (the rocket with its nose and fins in color); anything else is a core/ui_kit.gd icon kind ("star", "heart", "crown"...).
 ## Keep lines short and kind: kids read the screen.
 
 const UiKit := preload("res://core/ui_kit.gd")
@@ -37,7 +38,8 @@ const PICTURES: Array[String] = ["bird", "envelope", "cloud", "storm", "house", 
 	"toucan", "fish", "otter", "puppy", "coach", "balloon", "shepherd", "sheep",
 	"beaver", "island", "boat",
 	"captain", "planet", "station", "rocket", "seller", "icecream", "carousel", "ferris", "tent",
-	"lumi", "shard", "bigfire", "snowflake", "twin", "longsword", "spin", "mighty", "windmill", "fountain", "rainbow"]
+	"lumi", "shard", "bigfire", "snowflake", "twin", "longsword", "spin", "mighty", "windmill", "fountain", "rainbow",
+	"engineer", "toyrocket"]
 
 
 ## Show a story card on one view root or an Array of them. Returns the first card made (or null).
@@ -566,13 +568,32 @@ class Picture extends Control:
 				for k in 8:
 					var a2 := spin + k * TAU / 8.0
 					_circle(0.5 + cos(a2) * 0.36, 0.5 + sin(a2) * 0.36, 0.03, [Color(1, 0.5, 0.6), Color(0.5, 0.9, 1), Color(1, 0.9, 0.4)][k % 3])
-			"rocket":
+			"engineer":  # Sprocket (Rocket Workshop): a teal robot with a screen face, orange hard hat and a spanner
+				var teal := Color(0.3, 0.8, 0.85)
+				_poly([[0.3, 0.78 + bob], [0.7, 0.78 + bob], [0.72, 0.98], [0.28, 0.98]], teal.darkened(0.15))
+				_poly([[0.2, 0.32 + bob], [0.8, 0.32 + bob], [0.8, 0.78 + bob], [0.2, 0.78 + bob]], teal)
+				_poly([[0.27, 0.4 + bob], [0.73, 0.4 + bob], [0.73, 0.71 + bob], [0.27, 0.71 + bob]], Color(0.08, 0.12, 0.18))
+				var blink := 0.2 if fmod(t, 3.0) < 0.12 else 1.0
+				for ex in [0.4, 0.6]:
+					draw_set_transform(_p(ex, 0.52 + bob), 0.0, Vector2(1.0, blink))
+					draw_circle(Vector2.ZERO, 0.055 * size.x, Color(0.5, 1.0, 0.95))
+					draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+				draw_arc(_p(0.5, 0.6 + bob), 0.08 * size.x, 0.4, PI - 0.4, 10, Color(0.5, 1.0, 0.95), 0.02 * size.x)
+				_poly([[0.22, 0.33 + bob], [0.78, 0.33 + bob], [0.7, 0.16 + bob], [0.3, 0.16 + bob]], Color(1.0, 0.6, 0.15))
+				_poly([[0.12, 0.35 + bob], [0.88, 0.35 + bob], [0.88, 0.3 + bob], [0.12, 0.3 + bob]], Color(0.95, 0.5, 0.1))
+				draw_line(_p(0.62, 0.17 + bob), _p(0.68, 0.04 + bob), Color(0.6, 0.6, 0.65), 0.02 * size.x)
+				_circle(0.68, 0.04 + bob, 0.035, Color(1.0, 0.3, 0.3) if fmod(t, 1.0) < 0.5 else Color(0.6, 0.15, 0.15))
+				var sw := sin(t * 4.0) * 0.04
+				draw_line(_p(0.86, 0.86 + sw), _p(0.92, 0.6 + sw), Color(0.75, 0.75, 0.8), 0.05 * size.x)
+				draw_arc(_p(0.92, 0.57 + sw), 0.05 * size.x, PI * 0.9, PI * 2.1, 10, Color(0.75, 0.75, 0.8), 0.035 * size.x)
+			"rocket", "toyrocket":  # toyrocket: the nose and fins in color
+				var trim := color if kind == "toyrocket" else Color(0.95, 0.3, 0.35)
 				var flame := 0.04 * sin(t * 20.0)
 				_poly([[0.42, 0.78 + bob], [0.58, 0.78 + bob], [0.5, 0.95 + bob + flame]], Color(1.0, 0.6, 0.2))
 				_poly([[0.38, 0.3 + bob], [0.62, 0.3 + bob], [0.62, 0.78 + bob], [0.38, 0.78 + bob]], Color(0.95, 0.96, 1.0))
-				_poly([[0.38, 0.3 + bob], [0.62, 0.3 + bob], [0.5, 0.08 + bob]], Color(0.95, 0.3, 0.35))
-				_poly([[0.38, 0.6 + bob], [0.24, 0.8 + bob], [0.38, 0.78 + bob]], Color(0.95, 0.3, 0.35))
-				_poly([[0.62, 0.6 + bob], [0.76, 0.8 + bob], [0.62, 0.78 + bob]], Color(0.95, 0.3, 0.35))
+				_poly([[0.38, 0.3 + bob], [0.62, 0.3 + bob], [0.5, 0.08 + bob]], trim)
+				_poly([[0.38, 0.6 + bob], [0.24, 0.8 + bob], [0.38, 0.78 + bob]], trim)
+				_poly([[0.62, 0.6 + bob], [0.76, 0.8 + bob], [0.62, 0.78 + bob]], trim)
 				_circle(0.5, 0.45 + bob, 0.07, Color(0.5, 0.85, 1.0))
 			"lumi":  # Lumi (Crystal Saga): a little crystal fairy, glowing, with wings that flutter
 				var flap := 0.06 * sin(t * 12.0)

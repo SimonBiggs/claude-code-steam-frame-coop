@@ -5,12 +5,11 @@ extends Node3D
 ## then it arcs off towards the destination planet in the sky (space.gd). A finished PAINT job
 ## repaints its trim, and steam puffs from the pad while the crew work.
 
-const BODY_COLORS: Array[Color] = [Color(0.95, 0.95, 0.98), Color(1.0, 0.85, 0.4), Color(0.6, 0.85, 1.0),
-	Color(1.0, 0.7, 0.8), Color(0.75, 0.95, 0.6), Color(0.85, 0.75, 1.0)]
-const TRIM_COLORS: Array[Color] = [Color(0.95, 0.25, 0.25), Color(0.25, 0.5, 1.0), Color(1.0, 0.5, 0.15),
-	Color(0.55, 0.3, 0.9), Color(0.2, 0.7, 0.45), Color(1.0, 0.75, 0.1)]
 const LIFTOFF := 3.0
 const P := preload("res://games/rocket_workshop/puzzles.gd")
+const G := preload("res://games/rocket_workshop/rocketgen.gd")
+const Museum := preload("res://games/rocket_workshop/museum.gd")
+const LEVEL_SCALE: Array[float] = [1.0, 1.0, 1.12, 1.24]  # by level: a bigger puzzle is a bigger rocket
 
 var main
 var parts: Node3D
@@ -26,17 +25,20 @@ var wobble_t := 0.0
 var nose_mat: StandardMaterial3D
 var steam: CPUParticles3D
 var painted := -1
+var variant: MeshInstance3D  # the parts that change with the look (nose, fins, extras), one mesh
+var nose_light: MeshInstance3D
+var shown_look := ""
+var size_now := 1.0
 
 
 func _ready() -> void:
 	position = main.PAD_POS + Vector3(0, 0.3, 0)
 	parts = Node3D.new()
 	add_child(parts)
-	body_mat = main.make_material(BODY_COLORS[0], 0.0)
+	body_mat = main.make_material(G.BODY_COLORS[0], 0.0)
 	body_mat.roughness = 0.4
-	trim_mat = main.make_material(TRIM_COLORS[0], 0.1)
+	trim_mat = main.make_material(G.TRIM_COLORS[0], 0.1)
 	_part(main.cyl_mesh(0.62, 0.62, 3.0, 20), body_mat, Vector3(0, 2.0, 0))
-	_part(main.cyl_mesh(0.0, 0.62, 1.4, 20), trim_mat, Vector3(0, 4.2, 0))
 	_part(main.cyl_mesh(0.64, 0.64, 0.3, 20), trim_mat, Vector3(0, 1.2, 0))
 	_part(main.cyl_mesh(0.35, 0.5, 0.45, 14), main.make_material(Color(0.35, 0.35, 0.4), 0.0), Vector3(0, 0.3, 0))
 	# Round window facing the workshop.
@@ -53,13 +55,12 @@ func _ready() -> void:
 	rim.rotation.x = PI / 2.0
 	rim.position = Vector3(0, 2.7, 0.6)
 	parts.add_child(rim)
-	for i in 3:
-		var a := TAU * i / 3.0 + PI / 3.0
-		var fin := _part(main.box_mesh(Vector3(0.1, 1.1, 0.75)), trim_mat, Vector3(sin(a) * 0.75, 0.75, cos(a) * 0.75))
-		fin.rotation.y = a
+	variant = MeshInstance3D.new()
+	variant.material_override = main.vertex_mat()
+	parts.add_child(variant)
 	# A blinking nose light and a shiny exhaust bell.
 	nose_mat = main.make_material(Color(1.0, 0.3, 0.3), 2.0)
-	_part(main.sphere_mesh(0.09), nose_mat, Vector3(0, 4.92, 0))
+	nose_light = _part(main.sphere_mesh(0.09), nose_mat, Vector3(0, 4.92, 0))
 	var bell_mat: StandardMaterial3D = main.make_material(Color(0.75, 0.75, 0.8), 0.0)
 	bell_mat.metallic = 0.8
 	bell_mat.roughness = 0.25
@@ -148,21 +149,32 @@ func _particles(amount: int, lifetime: float, color: Color, size: float) -> CPUP
 func update_visual(n: int, phase: String, launch_t: float, delta: float) -> void:
 	if not is_inside_tree():
 		return
-	if n != shown_n and phase != "launch":
+	var look: Array = main.rocket_look
+	var look_key := "%d/%s" % [n, str(look)]
+	if look_key != shown_look and phase != "launch" and look.size() == 6:
+		var fresh := n != shown_n
 		shown_n = n
-		var k := maxi(n - 1, 0)
-		body_mat.albedo_color = BODY_COLORS[k % BODY_COLORS.size()]
-		trim_mat.albedo_color = TRIM_COLORS[k % TRIM_COLORS.size()]
+		shown_look = look_key
+		body_mat.albedo_color = G.BODY_COLORS[clampi(int(look[G.L_BODY]), 0, G.BODY_COLORS.size() - 1)]
+		trim_mat.albedo_color = G.TRIM_COLORS[clampi(int(look[G.L_TRIM]), 0, G.TRIM_COLORS.size() - 1)]
 		trim_mat.emission = trim_mat.albedo_color
-		trim_mat.albedo_color = TRIM_COLORS[k % TRIM_COLORS.size()]
+		trim_mat.emission_energy_multiplier = 0.6 if int(look[G.L_GOLD]) == 1 else 0.1
+		variant.mesh = main.merged_mesh("look:" + str(look), Museum.look_parts(main, look, false))
+		nose_light.position.y = Museum.nose_tip(look)
+		size_now = LEVEL_SCALE[clampi(G.level(n, main.simple), 0, LEVEL_SCALE.size() - 1)]
 		painted = -1
-		pop = 0.0
-		if n > 0:
-			main.puff(position + Vector3.UP * 2.0, Color(1, 1, 1), 18, 0.25)
+		if fresh:
+			pop = 0.0
+			if n > 0:
+				main.puff(position + Vector3.UP * 2.0, Color(1, 1, 1), 18, 0.25)
 	# A finished paint job turns the trim the colour the pilot asked for.
 	var paint: Dictionary = main.module("paint")
 	if phase != "launch" and not paint.is_empty() and paint.done and painted != int(paint.answer):
 		painted = int(paint.answer)
+		if main.rocket_look.size() == 6:  # the fins and nose take the new paint too
+			var lk: Array = (main.rocket_look as Array).duplicate()
+			lk[G.L_TRIM] = [0, 1, G.GOLD, 4][clampi(painted, 0, 3)]
+			variant.mesh = main.merged_mesh("look:" + str(lk), Museum.look_parts(main, lk, false))
 		main.puff(position + Vector3.UP * 2.5, P.COLORS[painted], 24, 0.2)
 	if painted >= 0:
 		trim_mat.albedo_color = trim_mat.albedo_color.lerp(P.COLORS[painted], 1.0 - exp(-4.0 * delta))
@@ -171,7 +183,7 @@ func update_visual(n: int, phase: String, launch_t: float, delta: float) -> void
 	steam.emitting = phase == "work" or phase == "ready" or (phase == "launch" and launch_t < 2.5)
 	pop = minf(1.0, pop + delta * 1.6)
 	var s := 1.0 + sin(pop * PI * 1.5) * (1.0 - pop) * 0.4 if pop < 1.0 else 1.0
-	parts.scale = Vector3.ONE * clampf(pop * 3.0, 0.001, 1.0) * s
+	parts.scale = Vector3.ONE * clampf(pop * 3.0, 0.001, 1.0) * s * size_now
 	var fly := Vector3.ZERO
 	var heading := Vector3.UP
 	var shake := 0.0
@@ -227,6 +239,8 @@ func _heading(launch_t: float) -> Vector3:
 ## Oops! A wrong answer makes the rocket wobble and burp a green cloud.
 func burp() -> void:
 	wobble = 1.0
+	if main.sprocket != null:
+		main.sprocket.oops()  # (every machine: the TV's burp comes by event)
 	main.puff(position + Vector3(0, 0.4, 0.8), Color(0.55, 0.9, 0.35), 22, 0.22)
 	main.puff(position + Vector3(0, 5.0, 0.3), Color(0.55, 0.9, 0.35), 10, 0.18)
 
