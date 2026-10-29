@@ -16,8 +16,10 @@ extends RefCounted
 ## strawberry, corn, melon, apple; Party Board's toucan (Mango);
 ## Fishing Lake's fish (body = color) and otter (Ollie, who keeps the fish book); Hide and Seek's puppy (Pip:
 ## fur = color, floppy ears, a wagging tongue); Obstacle Rush's coach (Coach Jelly: an orange jelly bean in a blue
-## cap with a whistle) and balloon (in color); Starship Crew's captain (Captain Whiskers: a ginger cat in a
-## bubble helmet), planet (in color, with a ring), station (the space station wheel) and rocket; anything else is a core/ui_kit.gd icon kind ("star", "heart", "crown"...).
+## cap with a whistle) and balloon (in color); Sheep Round-Up's shepherd (Bo: a bonnet in color, curls, a crook)
+## and sheep (wool = color); Starship Crew's captain (Captain Whiskers: a ginger cat in a bubble helmet), planet
+## (in color, with a ring), station (the space station wheel) and rocket; anything else is a core/ui_kit.gd icon
+## kind ("star", "heart", "crown"...).
 ## Keep lines short and kind: kids read the screen.
 
 const UiKit := preload("res://core/ui_kit.gd")
@@ -27,7 +29,7 @@ const PICTURES: Array[String] = ["bird", "envelope", "cloud", "storm", "house", 
 	"penguin", "snowman", "tophat", "beanie", "gift", "granny", "kid", "pirate", "robot", "alien", "knight",
 	"kart", "partyhat", "cowboy", "wizard",
 	"farmer", "mole", "bunny", "lettuce", "carrot", "pumpkin", "sunflower", "strawberry", "corn", "melon", "apple",
-	"toucan", "fish", "otter", "puppy", "coach", "balloon",
+	"toucan", "fish", "otter", "puppy", "coach", "balloon", "shepherd", "sheep",
 	"captain", "planet", "station", "rocket"]
 
 
@@ -472,6 +474,35 @@ class Picture extends Control:
 				_poly([[0.38, 0.6 + bob], [0.24, 0.8 + bob], [0.38, 0.78 + bob]], Color(0.95, 0.3, 0.35))
 				_poly([[0.62, 0.6 + bob], [0.76, 0.8 + bob], [0.62, 0.78 + bob]], Color(0.95, 0.3, 0.35))
 				_circle(0.5, 0.45 + bob, 0.07, Color(0.5, 0.85, 1.0))
+			"shepherd":  # Bo (Sheep Round-Up): a round face under a bonnet (color) with a bow, curls and a crook
+				draw_arc(_p(0.84, 0.22 + bob), 0.08 * size.x, PI, TAU, 10, Color(0.55, 0.36, 0.2), 0.035 * size.x)
+				draw_line(_p(0.92, 0.22 + bob), _p(0.92, 0.95), Color(0.55, 0.36, 0.2), 0.035 * size.x)
+				for cx in [0.26, 0.74, 0.3, 0.7]:
+					_circle(cx, 0.68 + bob if cx < 0.28 or cx > 0.72 else 0.76 + bob, 0.07, Color(0.95, 0.75, 0.35))
+				_circle(0.5, 0.6 + bob, 0.25, Color(0.98, 0.8, 0.64))
+				var bon := []
+				for i in 13:
+					var a := PI + PI * float(i) / 12.0
+					bon.append([0.5 + cos(a) * 0.34, 0.52 + bob + sin(a) * 0.34])
+				_poly(bon, color)
+				_poly([[0.16, 0.52 + bob], [0.84, 0.52 + bob], [0.8, 0.46 + bob], [0.2, 0.46 + bob]], color.lightened(0.3))
+				_poly([[0.22, 0.6 + bob], [0.12, 0.7 + bob], [0.18, 0.74 + bob]], color.lightened(0.15))
+				_eye(0.41, 0.6 + bob, 0.05)
+				_eye(0.59, 0.6 + bob, 0.05)
+				draw_arc(_p(0.5, 0.68 + bob), 0.08 * size.x, 0.3, PI - 0.3, 10, Color(0.4, 0.15, 0.12), 0.022 * size.x)
+				_circle(0.34, 0.7 + bob, 0.04, Color(1.0, 0.5, 0.55, 0.7))
+				_circle(0.66, 0.7 + bob, 0.04, Color(1.0, 0.5, 0.55, 0.7))
+			"sheep":  # a fluffy sheep (wool = color) with a dark face, hopping
+				var hop := absf(sin(t * 4.0)) * 0.03
+				for leg in [0.32, 0.44, 0.58, 0.7]:
+					draw_line(_p(leg, 0.7 - hop), _p(leg, 0.9 - hop), Color(0.2, 0.18, 0.2), 0.05 * size.x)
+				for b in [[0.36, 0.5, 0.15], [0.52, 0.45, 0.17], [0.66, 0.52, 0.15], [0.45, 0.62, 0.15], [0.62, 0.64, 0.14], [0.3, 0.62, 0.12]]:
+					_circle(b[0], b[1] - hop, b[2], color)
+				var face := Color(0.22, 0.2, 0.24) if color.get_luminance() > 0.4 else Color(0.08, 0.08, 0.1)
+				_circle(0.22, 0.48 - hop, 0.12, face)
+				_poly([[0.12, 0.4 - hop], [0.02, 0.44 - hop], [0.12, 0.47 - hop]], face)
+				_eye(0.19, 0.45 - hop, 0.04)
+				_circle(0.25, 0.37 - hop, 0.06, color)
 			"castle":
 				_poly([[0.2, 0.45], [0.8, 0.45], [0.8, 0.85], [0.2, 0.85]], Color(0.85, 0.88, 1.0))
 				for x in [0.2, 0.44, 0.68]:
