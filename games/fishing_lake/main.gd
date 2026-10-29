@@ -218,6 +218,7 @@ var lake_key: Array = []
 var wish_done := false
 var golden_done := false
 var day_logged := false
+var vr_story: Node3D
 var day_play_t := 0.0  # seconds fished today (game time, for the RUN line)
 
 
@@ -1335,8 +1336,10 @@ func story(beat: Dictionary, broadcast: bool = true) -> void:
 		if p.get("hud") != null and is_instance_valid(p.hud) and p.has_meta("view") and (p.get_meta("view") as Control).visible:
 			huds.append(p.hud)
 	StoryCard.show(huds, beat)
-	if players.size() > 0 and players[0].vr and players[0].xr_camera != null:
-		StoryCard.show_vr(self, players[0].xr_camera, beat)
+	if players.size() > 0 and players[0].vr_like() and players[0].xr_camera != null and players[0].is_local():
+		if vr_story != null and is_instance_valid(vr_story):
+			vr_story.queue_free()  # a newer card replaces the one showing (as on the TV)
+		vr_story = StoryCard.show_vr(self, players[0].xr_camera, beat)
 
 
 func _end_day() -> void:
@@ -1410,7 +1413,7 @@ func _log_day(end: String) -> void:
 	Telemetry.run(GAME_ID, {"end": end, "day": day, "seed": int(lake_desc.seed), "daily": bool(lake_desc.daily),
 		"level": int(lake_desc.level), "weather": str(lake_desc.weather), "spots": spots, "fish": fish_caught(),
 		"kinds": kinds, "new": new_today.size(), "wish": _wish_name(), "wish_caught": wish_done,
-		"legend": legend_state, "golden": not bool(lake_desc.golden) or golden_done, "book": _journal_found(),
+		"legend": legend_state, "golden": bool(lake_desc.golden), "book": _journal_found(),
 		"days": int(save.data.days), "boats": active_boats().size(), "vr": players.size() > 0 and bool(players[0].vr),
 		"mode": str(net.mode), "practice": practice, "secs": int(day_play_t),
 		"round": int(round_time), "snaps": int(stat_get(0, "snap"))})

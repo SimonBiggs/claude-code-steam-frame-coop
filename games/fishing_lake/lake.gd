@@ -1236,7 +1236,7 @@ func build_book(kinds: Array) -> void:
 		f.set_meta("dark", dark)
 		f.material_override = dark
 		var len: float = FishScript.TYPES[k]["len"]
-		f.scale = Vector3.ONE * (0.46 / maxf(len, 0.3)) * (0.75 if k == FishScript.LEGEND else 1.0)
+		f.scale = Vector3.ONE * (0.4 / maxf(len, 0.3)) * (0.75 if k == FishScript.LEGEND else 1.0)
 		f.rotation.y = PI * 0.5
 		f.position = Vector3(x, y, 0.06)
 		f.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

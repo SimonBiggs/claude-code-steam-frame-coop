@@ -182,6 +182,8 @@ func _watch() -> void:
 	if not main.lake_key.is_empty():
 		seen["lake"] = true
 		seen["lake_spots_%d" % main.lake.spots_root.get_child_count()] = true
+		if lakes.is_empty():
+			print("BOT AGREE first_lake=%s" % str(main.lake_key))
 		lakes[str(main.lake_key)] = true
 	if main.lake.wish_root != null and main.lake.wish_root.visible:
 		seen["wish_marker"] = true
