@@ -148,10 +148,11 @@ func _furniture(n: Node3D, kind: String) -> void:
 			var velvet := World.mat(Color(0.6, 0.15, 0.3))
 			var rod := World.cyl(n, 0.03, 0.03, w + 0.4, Vector3(0, h - 0.05, 0), brass, 6)
 			rod.rotation.z = PI / 2.0
-			for sx in [-1.0, 1.0]:
-				for f in 3:
-					var fold := World.cyl(n, 0.09, 0.11, h - 0.1, Vector3(sx * (w / 2.0 - 0.1 - f * 0.17), (h - 0.1) / 2.0, 0.02 * f), velvet, 8)
-					fold.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			# Drawn shut: soft folds right across the window, a gap of moonlight in the middle at the top.
+			for f in 8:
+				var fx := -w / 2.0 + 0.1 + f * (w - 0.2) / 7.0
+				var fold := World.cyl(n, 0.1, 0.12, h - 0.1, Vector3(fx, (h - 0.1) / 2.0, 0.025 * float(f % 2)), velvet, 8)
+				fold.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			# The bottom bulges where a ghost could be standing behind.
-			World.ball(n, 0.3, Vector3(0, 0.6, -0.02), velvet, 1.8)
+			World.ball(n, 0.32, Vector3(0, 0.75, 0.1), World.mat(Color(0.66, 0.18, 0.34)), 2.0)
 			World.cyl(n, 0.06, 0.06, 0.3, Vector3(-w / 2.0 + 0.25, 1.1, 0.1), World.mat(Color(1.0, 0.8, 0.3), 0.6), 6)  # a tie-back

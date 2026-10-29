@@ -208,6 +208,10 @@ func _simple_checks(delta: float) -> void:
 	if main.game_over:
 		print("BOT: FAIL simple mode reached game over")
 	if mode == "client":
+		_watch_house()
+		if t > 45.0 and not has_meta("report"):
+			set_meta("report", true)
+			_check_house()
 		if t > 30.0 and not has_meta("client_report"):
 			set_meta("client_report", true)
 			print("BOT: client simple: practice=%s saw_glowy=%s tv_caught=%s night=%d caught=%d" % [main.practice, saw_glowy, main.tv_caught.keys(), main.night, main.caught])
@@ -321,10 +325,17 @@ func _check_house() -> void:
 			errs.append("no ghost was kept in a jar (kept %d)" % int(main.save.data.kept))
 		if main.story_count <= 0:
 			errs.append("Granny Boo told no story")
-	elif main.house_key.size() != 5:
-		errs.append("the client has no house")
+	else:
+		if main.house_key.size() != 5:
+			errs.append("the client has no house")
+		if seen_hiding.is_empty():
+			errs.append("the client never saw a ghost hiding")
+		if main.museum.jar_ghosts.is_empty():
+			errs.append("the client's jar shelf is empty (host kept %s)" % str(main.house_key))
 	for e in errs:
 		print("SCRIPT ERROR: BOT house: " + str(e))
+	if main.house_key.size() == 5:
+		print("BOT AGREE house=%d/%d" % [int(main.house_key[0]), int(main.house_key[1])])
 	print("BOT: HOUSE %s bodies=%d seed=%s spots=%d hid=%s out=%s kept=%d cosy=%d stories=%d" % ["OK" if errs.is_empty() else "FAIL", _bodies(main).size(),
 		str(main.house_key[0]) if main.house_key.size() > 0 else "-", main.house_node.count(), seen_hiding.keys(), seen_out.keys(),
 		int(main.save.data.kept), main.museum.level, main.story_count])

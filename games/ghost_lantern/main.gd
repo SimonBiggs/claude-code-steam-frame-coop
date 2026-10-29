@@ -96,7 +96,7 @@ const BEST_FILE := "user://ghost_lantern_best.cfg"
 const PHOTO_SPOTS := [
 	[Vector3(-18.0, 2.0, 7.82), PI], [Vector3(-14.0, 2.0, 7.82), PI], [Vector3(-10.0, 2.1, 7.82), PI],
 	[Vector3(-7.18, 2.0, 5.0), -PI / 2.0],
-	[Vector3(0.0, 2.3, -7.82), 0.0], [Vector3(-4.2, 2.0, 7.82), PI], [Vector3(4.2, 2.0, 7.82), PI],
+	[Vector3(0.0, 3.0, -7.82), 0.0], [Vector3(-4.2, 2.0, 7.82), PI], [Vector3(4.2, 2.0, 7.82), PI],
 	[Vector3(10.0, 2.0, 7.82), PI], [Vector3(14.0, 2.2, 7.82), PI], [Vector3(18.0, 2.0, 7.82), PI],
 	[Vector3(20.82, 2.0, -3.0), -PI / 2.0], [Vector3(20.82, 2.0, 3.0), -PI / 2.0],
 ]

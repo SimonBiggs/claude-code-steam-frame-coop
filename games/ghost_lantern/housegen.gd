@@ -306,7 +306,8 @@ static func spot_problem(s: Dictionary, spots: Array) -> String:
 	if rc[0] < -HALF_X or rc[2] > HALF_X or rc[1] < -HALF_Z or rc[3] > HALF_Z:
 		return "%s goes through the outside wall" % s.kind
 	for f in FIXED:
-		if _overlap(rc, f, 0.15):
+		var wall := float(f[2]) - float(f[0]) < 0.35 or float(f[3]) - float(f[1]) < 0.35
+		if _overlap(rc, f, 0.15 if wall else 0.55):  # room to see it (not tucked behind a table)
 			return "%s stands on furniture at %s" % [s.kind, str(Vector2(float(f[0]), float(f[1])))]
 	for o in spots:
 		if o == s:
@@ -314,6 +315,10 @@ static func spot_problem(s: Dictionary, spots: Array) -> String:
 		var orc := rect_of(o)
 		if _overlap(rc, orc, 0.9):
 			return "%s is squashed against a %s" % [s.kind, o.kind]
+	if s.kind != "curtain" and float(KINDS[s.kind].h) > 1.2 and float(s.pos.z) < -HALF_Z + 1.0:
+		for wx in WINDOWS:
+			if absf(float(s.pos.x) - wx) < float(KINDS[s.kind].w) * 0.5 + 0.75:
+				return "%s stands in front of a window" % s.kind
 	var pk: Vector3 = s.peek
 	if absf(pk.x) > HALF_X - 0.2 or absf(pk.z) > HALF_Z - 0.2:
 		return "%s peeks out of the house" % s.kind

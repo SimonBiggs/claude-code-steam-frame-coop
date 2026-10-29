@@ -123,7 +123,7 @@ func _build_shelf() -> void:
 	body.position = Vector3(SHELF_X, 1.2, -7.68)
 	add_child(body)
 	# A little brass lamp on top so the shelf is never quite dark.
-	World.ball(self, 0.09, Vector3(SHELF_X, 2.48, SHELF_Z), World.mat(Color(1.0, 0.8, 0.45), 4.0))
+	World.ball(self, 0.09, Vector3(SHELF_X + 1.7, 2.48, SHELF_Z), World.mat(Color(1.0, 0.8, 0.45), 4.0))
 
 
 func _build_jars() -> void:

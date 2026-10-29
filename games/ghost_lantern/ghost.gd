@@ -387,11 +387,11 @@ func _build_peeker() -> void:
 	var dark := StandardMaterial3D.new()
 	dark.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	dark.albedo_color = Color(0.08, 0.05, 0.15)
-	for sx in [-0.09, 0.09]:
+	for sx in [-0.1, 0.1]:
 		var e := MeshInstance3D.new()
 		var em := SphereMesh.new()
-		em.radius = 0.06
-		em.height = 0.1
+		em.radius = 0.075
+		em.height = 0.13
 		em.radial_segments = 10
 		em.rings = 5
 		e.mesh = em
@@ -487,6 +487,8 @@ func _hide_tick(delta: float) -> bool:
 				main.sound("giggle", -9.0, 1.3)
 		return hiding
 	hide_t += delta
+	if hide_t > 10.0 and fmod(hide_t, 3.0) < delta and main.house_node != null:
+		main.burst(main.house_node.eyes_point(hide_spot), color.lightened(0.4), 6, 0.04)  # a little sparkle: over here!
 	if main.house_node != null:
 		global_position = global_position.lerp(main.house_node.hide_point(hide_spot), 1.0 - exp(-6.0 * delta))
 	if reveal > 0.5:
@@ -923,12 +925,12 @@ func _update_peeker() -> void:
 	peeker.global_position = main.house_node.eyes_point(hide_spot)
 	peeker.global_rotation = Vector3(0.0, main.house_node.yaw(hide_spot) + PI, 0.0)
 	var sleepy := kind == "snoozy"
-	var open := 0.15 if sleepy else (1.0 if fmod(t, 3.0) > 0.15 else 0.15)
+	var open := 0.3 if sleepy else (1.0 if fmod(t, 3.0) > 0.15 else 0.15)
 	var look := sin(t * 1.3) * 0.04 if not sleepy else 0.0
 	for c in peeker.get_children():
 		if c.name.begins_with("Eye"):
 			c.scale.y = open
-			c.position.x = signf(c.position.x) * 0.09 + look
+			c.position.x = signf(c.position.x) * 0.1 + look
 	for i in bubbles.size():
 		var ph := fmod(t * 0.45 + float(i) / 3.0, 1.0)
 		bubbles[i].position = Vector3(0.12 + sin(ph * 6.0) * 0.05, 0.08 + ph * 0.7, -0.05)
