@@ -1309,7 +1309,7 @@ func _start_bath() -> void:
 	if bath_daily:
 		save.data.daily = today  # (one TODAY'S BATH a day)
 	save.mark_dirty()
-	bath_round = 0
+	bath_round = int(OS.get_environment("BB_ROUND")) - 1 if OS.has_environment("BB_ROUND") else 0  # tests: start at a later round
 	print("Bubble Bath: bath seed %d%s | %d toys, day %d" % [bath_seed, " (TODAY'S BATH)" if bath_daily else "",
 		(save.data.toys as Array).size(), int(save.data.days)])
 	_build_family(save.data.toys, int(save.data.days), int(save.data.goals) >= BathGen.CROWN_TOYS)
