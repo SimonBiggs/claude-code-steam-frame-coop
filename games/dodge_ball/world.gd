@@ -21,6 +21,9 @@ var props: Array = []  # [{node, point, radius, wob, cool}]
 var belly_wob := 0.0
 var _t := 0.0
 var _main: Node
+var cushions: Array = []  # [{node, x, z, r, squish}] this round's puffy cushions (courtgen.gd)
+var star: Node3D  # the gold star on TumTum's belly (GOLD STAR: belly hits count 2)
+var _cushion_key := ""
 
 
 func build(main: Node, vr: bool) -> void:
@@ -138,6 +141,13 @@ func _build_giant() -> void:
 	tb.torus(0.31, 0.025, MeshKit.at(Vector3(0.0, 0.0, 0.0), Vector3.ONE, rot), Color(1.0, 0.9, 0.3), 24, 6, true)
 	target.add_child(MeshKit.instance(tb.build()))
 	giant_body.add_child(target)
+	star = Node3D.new()
+	star.name = "GoldStar"
+	var sb := MeshKit.Builder.new()
+	sb.star(5, 0.36, 0.17, 0.05, MeshKit.at(Vector3(0.0, 0.0, 0.05)), Color(1.0, 0.85, 0.25), true)
+	star.add_child(MeshKit.instance(sb.build(), false))
+	star.visible = false
+	target.add_child(star)
 	giant_head = Node3D.new()
 	var hb := MeshKit.Builder.new()
 	hb.sphere(0.3, MeshKit.at(Vector3.ZERO), Color(1.0, 0.82, 0.68), 16)
@@ -181,6 +191,16 @@ func update_giant(head: Vector3, yaw: float, hands: Array[Vector3], delta: float
 	target.scale = Vector3(s, s, 1.0)
 	var bs := 1.0 + 0.08 * belly_wob * sin(_t * 18.0)
 	giant_body.scale = Vector3(bs, 2.0 - bs, bs)
+	if star.visible:
+		star.rotation.z = sin(_t * 2.0) * 0.3
+	for c: Dictionary in cushions:
+		var sq := float(c["squish"])
+		if sq > 0.0 or (c["node"] as Node3D).scale.y < 0.999:
+			c["squish"] = move_toward(sq, 0.0, delta * 2.5)
+			var n: Node3D = c["node"]
+			if n.scale.y > 0.98 or sq > 0.0:
+				var s := 0.18 * sq * sin(sq * 14.0)
+				n.scale = Vector3(1.0 + s, 1.0 - s, 1.0 + s)
 	for p: Dictionary in props:
 		p["wob"] = move_toward(float(p["wob"]), 0.0, delta * 1.2)
 		p["cool"] = float(p["cool"]) - delta
@@ -191,6 +211,59 @@ func update_giant(head: Vector3, yaw: float, hands: Array[Vector3], delta: float
 
 func wobble_belly() -> void:
 	belly_wob = 1.0
+
+
+## GOLD STAR on or off (every machine).
+func set_star(on: bool) -> void:
+	if star != null:
+		star.visible = on
+		if on:
+			star.scale = Vector3.ONE * 0.2
+			star.create_tween().tween_property(star, "scale", Vector3.ONE, 0.5).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
+
+
+## This round's puffy cushions ([[x, z, r], ...] from courtgen.gd) in the round's colour (every machine).
+func set_cushions(list: Array, color: Color) -> void:
+	var key := var_to_str([list, color])
+	if key == _cushion_key:
+		return
+	_cushion_key = key
+	for c in cushions:
+		(c["node"] as Node).queue_free()
+	cushions.clear()
+	for i in list.size():
+		var c: Array = list[i]
+		var r := float(c[2])
+		var n := Node3D.new()
+		n.name = "Cushion%d" % i
+		n.position = Vector3(float(c[0]), 0.0, float(c[1]))
+		var b := MeshKit.Builder.new()
+		var col := color.lerp(Color.WHITE, 0.08 * float(i % 3))
+		b.ellipsoid(Vector3(r, 0.5, r), MeshKit.at(Vector3(0.0, 0.32, 0.0)), col, 16)
+		for k in 5:  # puffs round the top
+			var a := TAU * float(k) / 5.0 + 0.3 * float(i)
+			b.sphere(r * 0.42, MeshKit.at(Vector3(cos(a) * r * 0.55, 0.62, sin(a) * r * 0.55)), col.lightened(0.12), 10)
+		b.sphere(r * 0.4, MeshKit.at(Vector3(0.0, 0.72, 0.0)), col.lightened(0.2), 10)
+		# A sleepy smiling face on both sides (the runners see one, the giant the other).
+		for side in [1.0, -1.0]:
+			var z := r * 0.93 * float(side)
+			for ex in [-0.13, 0.13]:
+				b.ellipsoid(Vector3(0.05, 0.025, 0.02), MeshKit.at(Vector3(float(ex), 0.42, z)), Color(0.25, 0.15, 0.2), 8)
+			b.ellipsoid(Vector3(0.09, 0.035, 0.02), MeshKit.at(Vector3(0.0, 0.3, z)), Color(0.75, 0.25, 0.35), 8)
+			for ex in [-0.24, 0.24]:
+				b.sphere(0.045, MeshKit.at(Vector3(float(ex), 0.33, z * 0.97)), Color(1.0, 0.6, 0.65), 8)
+		n.add_child(MeshKit.instance(b.build()))
+		add_child(n)
+		n.scale = Vector3(1.0, 0.01, 1.0)
+		n.create_tween().tween_property(n, "scale", Vector3.ONE, 0.6).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
+		cushions.append({"node": n, "x": float(c[0]), "z": float(c[1]), "r": r, "squish": 0.0})
+
+
+## A ball bounced at p: squish the cushion it hit (every machine).
+func squish_near(p: Vector3) -> void:
+	for c: Dictionary in cushions:
+		if Vector2(p.x - float(c["x"]), p.z - float(c["z"])).length() < float(c["r"]) + 0.45 and p.y < 1.3:
+			c["squish"] = 1.0
 
 
 ## Host with a VR giant: hands touching the tray or a flower make it wobble and boing.

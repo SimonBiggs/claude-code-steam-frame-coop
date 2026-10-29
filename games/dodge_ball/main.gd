@@ -6,6 +6,13 @@ extends Node3D
 ## and an automatic next round.
 ## Modes: VR giant + TV runners (host / TV machine), VR alone (two CPU runners fill in), and no VR
 ## (a CPU giant on the stage). The host simulates the balls; TV runners move locally.
+## STORY: the giant is TUMTUM, who loves a soft ball game in his park. Every round is a seeded park
+## (courtgen.gd: a name, puffy cushions to hide behind, the CPU giant's pace, GOLD STAR belly times),
+## the first round of the day is TODAY'S PARK (gold, the same on every machine), and every finished
+## round plants something in TumTum's park (park.gd) that grows a little each play-day (saved on the
+## host). FAIR AND GENTLE: the CPU giant shares its throws out evenly, and a runner hit twice in a
+## short while gets a longer bubble (courtgen.gd, proven by tests/dodge_ball_gen_test.gd).
+## Telemetry: one RUN line per round and on quit.
 
 const NetScript := preload("res://core/net.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
@@ -23,6 +30,12 @@ const Creatures := preload("res://core/creatures.gd")
 const SkyKit := preload("res://core/sky_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")
 const World := preload("res://games/dodge_ball/world.gd")
+const CourtGen := preload("res://games/dodge_ball/courtgen.gd")
+const ParkScript := preload("res://games/dodge_ball/park.gd")
+const Save := preload("res://core/save.gd")
+const Telemetry := preload("res://core/telemetry.gd")
+const StoryCard := preload("res://core/story_card.gd")
+const Seeded := preload("res://core/seeded.gd")
 
 const STAGE_H := 0.9  # the giant's stage height
 const STAGE_FRONT := -4.6  # z of the stage's front edge (the stage is behind it, towards -Z)
@@ -38,7 +51,6 @@ const BALLS := 6
 const GRAV := 9.0
 const SPEED := 4.8
 const OUT_TIME := 3.0
-const SAFE_TIME := 1.5  # blinking after popping back: can't be hit
 const GIANT := 100  # holder / thrower code for the giant (runners use their slot numbers)
 const CPU_IDS: Array[int] = [10, 11]
 const LOOKS: Array[String] = ["knight", "mage", "archer", "bard", "pirate", "chef", "astronaut"]
@@ -82,6 +94,24 @@ var vr_banner: Node3D
 var results_ui: Control
 var vr_results: Node
 var vr_board: Label3D  # host VR: the big scoreboard far across the court
+
+# Story, seeded rounds and the park (courtgen.gd, park.gd)
+var rd := {}  # this round (CourtGen.build): every machine rebuilds it from the "court" code
+var save: Save  # host / local only
+var park: Node3D
+var session_seed := 0
+var story_queue: Array = []
+var story_t := 0.0
+var story_shown: Array[String] = []  # pictures shown (bots check)
+var aimed := {}  # host: runner id -> throws the CPU giant made at them this round (fair shares)
+var throw_k := 0
+var hit_log := {}  # host: runner id -> times they were hit this round (the gentle bubble)
+var safe_len := {}  # host: runner id -> how long they'll blink when they pop back
+var round_live := false  # host: a round is being played (for the RUN line)
+var round_t := 0.0
+var round_stats := {}  # host: this round's numbers for the RUN line
+var star_on := false
+var rounds_played := 0
 
 var balls: Array = []  # of Ball
 var out := {}  # runner id -> seconds left (host); client: id -> true
@@ -182,7 +212,25 @@ func _setup(mode: String) -> void:
 	party.allow_slot0 = (mode == "local" and vr_rig == null) or flat_host
 	if vr_rig != null:
 		awards.set_player(0, "GIANT")
+	park = ParkScript.new()
+	park.name = "Park"
+	add_child(park)
+	if mode == "client":  # the host's round, park and star may have arrived before this machine was set up
+		if net.state_has("court"):
+			_apply_court(int(net.state_get("court", 0)))
+		park.call("set_items", net.state_get("park", []), int(net.state_get("days", 0)))
+		star_on = bool(net.state_get("star", false))
+		world.set_star(star_on)
 	if mode != "client":
+		session_seed = Seeded.fresh_seed()
+		save = Save.new()
+		save.game_id = CourtGen.GAME_ID
+		# park: [[kind, play-day it came, golden], ...] (oldest first); days: play-days; daily: the date
+		# TODAY'S PARK was played; rounds: rounds finished in all.
+		save.defaults = {"park": [], "park_total": 0, "rounds": 0, "days": 0, "last_day": "", "daily": "",
+			"sessions": 0, "belly_total": 0, "best_runners": 0}
+		add_child(save)
+		_start_park()
 		for i in BALLS:
 			_to_tray(balls[i], i)
 		_start_round()
@@ -333,11 +381,17 @@ func _ensure_avatar(id: int) -> Node3D:
 	var a := Creatures.humanoid({"class": LOOKS[id % LOOKS.size()], "outfit": col, "seed": id})
 	a.name = "Runner%d" % id
 	add_child(a)
-	a.position = Vector3(-3.0 + 1.5 * float(id % 5), 0.0, 3.0)
+	var sp := spawn_spot(id)
+	a.position = Vector3(sp.x, 0.0, sp.y)
 	HudKit.nameplate(a, party.name_of(id) if id < 10 else "CPU", id if id < 10 else "dim", Creatures.height_of(a) + 0.35, 0.18)
 	avatars[id] = a
 	last_pos[id] = a.position
 	return a
+
+
+## Where runner `id` first appears (x, z): courtgen.gd keeps cushions off these spots.
+static func spawn_spot(id: int) -> Vector2:
+	return Vector2(-3.0 + 1.5 * float(id % 5), 3.0)
 
 
 func _refresh_group() -> void:
@@ -372,7 +426,7 @@ func _move_local_players(delta: float) -> void:
 
 
 func _clamp_court(p: Vector3) -> Vector3:
-	return Vector3(clampf(p.x, -COURT_X, COURT_X), 0.0, clampf(p.z, COURT_Z.x, COURT_Z.y))
+	return CourtGen.push_out(rd, Vector3(clampf(p.x, -COURT_X, COURT_X), 0.0, clampf(p.z, COURT_Z.x, COURT_Z.y)))
 
 
 func _animate_avatars(delta: float) -> void:
@@ -460,8 +514,19 @@ func _on_state_changed(key: String, value: Variant) -> void:
 				if is_instance_valid(t):
 					t.set_time(float(value))
 			_refresh_hud()
+		"court":
+			if net.mode == "client" and world != null:
+				_apply_court(int(value))
+		"park", "days":
+			if park != null:
+				park.call("set_items", net.state_get("park", []), int(net.state_get("days", 0)))
+		"star":
+			star_on = bool(value)
+			if world != null:
+				world.set_star(star_on)
 		"round":
-			HudKit.banner(_all_huds(), "DODGE!", "Throw at the belly!", {"duration": 2.5})
+			HudKit.banner(_all_huds(), "DODGE!", str(rd.get("name", "")), {"duration": 2.5,
+				"color": rd.get("color", Color(1.0, 0.6, 0.3))})
 			if vr_rig != null:
 				HudKit.vr_banner(self, vr_rig.camera, "THROW!", "Grab: TRIGGER", {"duration": 2.5, "sound": ""})
 			sfx.play("whistle", -4.0)
@@ -479,24 +544,57 @@ func _start_round() -> void:
 	time_left = round_time
 	out.clear()
 	safe.clear()
+	safe_len.clear()
+	hit_log.clear()
+	aimed.clear()
+	throw_k = 0
 	for i in balls.size():
 		var b: Ball = balls[i]
 		b.holder = -1
 		_to_tray(b, i)
+	var round_no := int(net.state_get("round", 0)) + 1
+	var code := CourtGen.code_at(session_seed, round_no, daily_due())
+	_apply_court(code)
+	net.state_set("court", code)
+	net.state_set("star", false)
 	net.state_set("tv_score", 0)
 	net.state_set("giant_score", 0)
 	net.state_set("time", int(ceil(time_left)))
 	net.state_set("phase", "play")
-	net.state_set("round", int(net.state_get("round", 0)) + 1)
+	net.state_set("round", round_no)
+	round_live = true
+	round_t = 0.0
+	round_stats = {"belly": 0, "stars": 0, "hits": 0, "bubbles": 0, "cpu_throws": 0, "most_out": 0.0, "out_t": {}}
+	if bool(rd.daily):
+		_story("TODAY'S PARK!", "goldball", CourtGen.GOLD)
+	_story("%s!" % str(rd.name), "cushion", rd.color)
+	print("Soft Dodgeball round %d: %s (level %d, seed %d%s), %d cushions, pace %.2f, flight %.2f, %d gold stars" % [
+		round_no, rd.name, rd.level, rd.seed, ", TODAY'S PARK" if rd.daily else "", (rd.cushions as Array).size(),
+		float(rd.pace), float(rd.flight), (rd.stars as Array).size()])
 	if vr_rig != null:
 		vr_rig.recenter()
+
+
+## Every machine: build this round's park from its code (cushions, colours).
+func _apply_court(code: int) -> void:
+	rd = CourtGen.build(code)
+	world.set_cushions(rd.cushions, rd.color)
+	for id in avatars:  # nobody starts inside a new cushion
+		var a: Node3D = avatars[id]
+		a.position = _clamp_court(a.position)
 
 
 func _end_round() -> void:
 	var tv := int(net.state_get("tv_score", 0))
 	var gs := int(net.state_get("giant_score", 0))
-	var title := "RUNNERS WIN!" if tv > gs else ("GIANT WINS!" if gs > tv else "A DRAW!")
-	var data := awards.results({"title": title, "subtitle": "Runners %d  -  Giant %d" % [tv, gs], "style": "victory",
+	var title := "RUNNERS WIN!" if tv > gs else ("TUMTUM WINS!" if gs > tv else "A DRAW!")
+	_run_line("round")
+	_grow_park()
+	if tv > gs:
+		_story("You got me!", "tumtum", Color(1.0, 0.6, 0.3))
+	elif gs > tv:
+		_story("Boing! Again!", "tumtum", Color(1.0, 0.6, 0.3))
+	var data := awards.results({"title": title, "subtitle": "Runners %d  -  TumTum %d" % [tv, gs], "style": "victory",
 		"score_format": "%d PTS"})
 	net.state_set("results", data)
 	net.state_set("phase", "results")
@@ -550,6 +648,7 @@ func _process(delta: float) -> void:
 	if not ready_to_play:
 		return
 	clock += delta
+	_update_story(delta)
 	if split != null:
 		_move_local_players(delta)
 	_follow_remote(delta)
@@ -585,9 +684,12 @@ func _host_tick(delta: float) -> void:
 	_update_cpu_runners(delta, playing)
 	for id in out.keys():
 		out[id] = float(out[id]) - delta
+		if playing:
+			var ot: Dictionary = round_stats.get("out_t", {})
+			ot[id] = float(ot.get(id, 0.0)) + delta
 		if float(out[id]) <= 0.0:
 			out.erase(id)
-			safe[id] = SAFE_TIME
+			safe[id] = float(safe_len.get(id, rd.get("safe", 1.5)))
 			if avatars.has(id):
 				pop_back(id)
 	for id in safe.keys():
@@ -602,6 +704,13 @@ func _host_tick(delta: float) -> void:
 	_runner_pickups()
 	_runner_hits()
 	time_left -= delta
+	round_t += delta
+	var star := CourtGen.star_on(rd, 1.0 - time_left / maxf(round_time, 1.0))
+	if star != star_on:
+		net.state_set("star", star)
+		if star:
+			_story("Gold star!", "star", CourtGen.GOLD)
+			sound("fanfare", -8.0, 1.3)
 	if int(ceil(time_left)) != int(net.state_get("time", 0)):
 		net.state_set("time", maxi(0, int(ceil(time_left))))
 		if time_left <= 5.5 and time_left > 0.5:
@@ -726,6 +835,33 @@ func _ball_physics(b: Ball, i: int, delta: float) -> void:
 	if b.node.position.z >= STAGE_FRONT and p.z < STAGE_FRONT and p.y < STAGE_H + BALL_R * 0.5:
 		p.z = STAGE_FRONT
 		b.vel.z = absf(b.vel.z) * 0.5
+	# Puffy cushions: a ball bounces off softly (a runner behind one is safe from it).
+	for c in rd.get("cushions", []):
+		var cc := Vector2(c[0], c[1])
+		var v2 := Vector2(p.x, p.z) - cc
+		var need := float(c[2]) + BALL_R
+		if p.y < CourtGen.CUSHION_H + BALL_R and v2.length() < need:
+			var fast := b.vel.length() > 1.5
+			var n2 := v2.normalized() if v2.length() > 0.001 else Vector2(0.0, 1.0)
+			var top := p.y > CourtGen.CUSHION_H * 0.75 and b.vel.y < 0.0
+			if top:  # landed on top: a soft bounce up
+				p.y = CourtGen.CUSHION_H + BALL_R
+				b.vel.y = absf(b.vel.y) * 0.5 + 1.0
+				b.vel.x = b.vel.x * 0.5 + n2.x * 1.2
+				b.vel.z = b.vel.z * 0.5 + n2.y * 1.2
+			else:
+				p.x = cc.x + n2.x * need
+				p.z = cc.y + n2.y * need
+				var vn := Vector2(b.vel.x, b.vel.z)
+				if vn.dot(n2) < 0.0:
+					vn = vn.bounce(n2) * 0.45
+				b.vel.x = vn.x
+				b.vel.z = vn.y
+			if b.danger and b.thrower == GIANT:
+				round_stats["blocked"] = int(round_stats.get("blocked", 0)) + 1
+			b.danger = false
+			if fast:
+				_boing(i, p, 0.4)  # (every machine squishes the cushion it hit)
 	b.node.position = p
 	# The giant's belly and body
 	if b.thrower != GIANT and b.thrower >= 0 and b.danger and not results_showing():
@@ -755,6 +891,7 @@ func _boing(i: int, p: Vector3, strength: float) -> void:
 	var b: Ball = balls[i]
 	b.squish = strength
 	sfx.play_at("boing", p, -10.0 + 8.0 * strength, randf_range(0.9, 1.2))
+	world.squish_near(p)
 	net.event("boing", [i, p, strength])
 
 
@@ -766,24 +903,28 @@ func _belly_hit(b: Ball, i: int) -> void:
 	b.vel = n * 3.0 + Vector3(randf_range(-1.0, 1.0), 3.5, 0.0)
 	b.node.position = target_point() + n * 0.45
 	balls[i] = b
-	net.state_set("tv_score", int(net.state_get("tv_score", 0)) + 1)
+	var pts := 2 if star_on else 1  # GOLD STAR: TumTum's belly shines, a hit counts double
+	net.state_set("tv_score", int(net.state_get("tv_score", 0)) + pts)
+	round_stats["belly"] = int(round_stats.get("belly", 0)) + 1
+	if star_on:
+		round_stats["stars"] = int(round_stats.get("stars", 0)) + 1
 	if who < 10:
-		awards.add(who, "score")
+		awards.add(who, "score", pts)
 	if vr_rig != null:
 		vr_rig.pulse(VrRig.LEFT, 0.8, 0.2)
 		vr_rig.pulse(VrRig.RIGHT, 0.8, 0.2)
-	belly_fx(target_point(), who)
+	belly_fx(target_point(), who, pts)
 
 
 ## The belly target was hit (every machine).
-func belly_fx(p: Vector3, who: int) -> void:
+func belly_fx(p: Vector3, who: int, pts: int = 1) -> void:
 	world.wobble_belly()
 	burst(p, Color(1.0, 0.85, 0.3), 24, 0.1)
 	sfx.play_at("ding", p, 0.0, 1.0)
 	sfx.play_at("cheer", p, -6.0)
 	var col: Color = party.color_of(who) if who >= 0 and who < 10 else Color(1.0, 0.85, 0.3)
-	HudKit.score(self, p + Vector3.UP * 0.5, 1, {"color": col, "size": 2.0})
-	net.event("belly", [p, who])
+	HudKit.score(self, p + Vector3.UP * 0.5, pts, {"color": col, "size": 2.0 + 0.6 * float(pts - 1)})
+	net.event("belly", [p, who, pts])
 
 
 # --- The giant -------------------------------------------------------------------------------
@@ -815,8 +956,8 @@ func _move_giant(delta: float, playing: bool) -> void:
 	match int(cpu_g["phase"]):
 		0:  # waiting
 			if playing and float(cpu_g["t"]) <= 0.0:
-				var aim := _pick_runner()
 				var tb := _nearest_tray_ball(g_hands[1])
+				var aim := _pick_runner() if tb >= 0 else -1
 				if aim >= 0 and tb >= 0:
 					cpu_g["ball"] = tb
 					cpu_g["aim"] = aim
@@ -845,25 +986,32 @@ func _move_giant(delta: float, playing: bool) -> void:
 				if float(cpu_g["t"]) <= 0.0:
 					var aim: int = int(cpu_g["aim"])
 					var to := Vector3(randf_range(-3.0, 3.0), 0.5, randf_range(0.0, 4.0))
+					var flight := float(rd.get("flight", 1.0))
 					if avatars.has(aim):
-						var lead: Vector3 = vels.get(aim, Vector3.ZERO) * 0.7
-						to = (avatars[aim] as Node3D).position + lead + Vector3(randf_range(-0.4, 0.4), 0.6, randf_range(-0.4, 0.4))
-					_release(b, _lob(b.node.position, to, 1.0))
+						var lead: Vector3 = vels.get(aim, Vector3.ZERO) * 0.7 * flight
+						var wob := Vector2.from_angle(randf() * TAU) * randf() * float(rd.get("wobble", 0.4))
+						to = (avatars[aim] as Node3D).position + lead + Vector3(wob.x, 0.6, wob.y)
+					_release(b, _lob(b.node.position, to, flight))
+					round_stats["cpu_throws"] = int(round_stats.get("cpu_throws", 0)) + 1
 					cpu_g["phase"] = 0
 					cpu_g["ball"] = -1
-					cpu_g["t"] = randf_range(0.9, 1.8)
+					cpu_g["t"] = CourtGen.wait_time(rd, randf()) if not rd.is_empty() else randf_range(0.9, 1.8)
 	g_hands[1] = g_hands[1].move_toward(hand_goal, 4.0 * delta) if g_hands[1] != Vector3.ZERO else hand_goal
 	g_hands[0] = g_hands[0].lerp(rest_l, 1.0 - exp(-5.0 * delta)) if g_hands[0] != Vector3.ZERO else rest_l
 
 
+## FAIR: whoever has had the fewest throws this round (courtgen.gd pick_target), never one who is out or blinking.
 func _pick_runner() -> int:
 	var ids: Array = []
 	for id in avatars:
 		if not out.has(id) and not safe.has(id):
-			ids.append(id)
-	if ids.is_empty():
+			ids.append(int(id))
+	if ids.is_empty() or rd.is_empty():
 		return -1
-	return int(ids[randi() % ids.size()])
+	var aim := CourtGen.pick_target(rd, aimed, ids, throw_k)
+	throw_k += 1
+	aimed[aim] = int(aimed.get(aim, 0)) + 1
+	return aim
 
 
 func _nearest_tray_ball(from: Vector3) -> int:
@@ -1053,6 +1201,14 @@ func _hit_runner(id: int, b: Ball) -> void:
 	b.squish = 0.8
 	_drop_held(id)
 	out[id] = OUT_TIME
+	# GENTLE: hit again soon after the last time = a longer bubble when they pop back.
+	var hits: Array = hit_log.get(id, [])
+	safe_len[id] = CourtGen.safe_time(rd, hits, round_t) if not rd.is_empty() else 1.5
+	if not hits.is_empty() and safe_len[id] > float(rd.get("safe", 1.5)) + 0.1:
+		round_stats["bubbles"] = int(round_stats.get("bubbles", 0)) + 1
+	hits.append(round_t)
+	hit_log[id] = hits
+	round_stats["hits"] = int(round_stats.get("hits", 0)) + 1
 	net.state_set("giant_score", int(net.state_get("giant_score", 0)) + 1)
 	if vr_rig != null:
 		awards.add(0, "hits")
@@ -1206,6 +1362,123 @@ func sound_at(sound_name: String, p: Vector3, volume_db: float = 0.0, pitch: flo
 	net.event("snd3", [sound_name, p, volume_db, pitch])
 
 
+# --- Story, TumTum's park and telemetry (courtgen.gd, park.gd) -----------------------------------
+
+## Host / local: TODAY'S PARK is still to play today.
+func daily_due() -> bool:
+	return save != null and String(save.data.daily) != Seeded.today()
+
+
+## Host / local: a new play-day grows the park; send it to every machine; TumTum says hello.
+func _start_park() -> void:
+	var grew := false
+	if String(save.data.last_day) != Seeded.today():
+		var days := int(save.data.days)
+		save.data.days = days + 1
+		save.data.last_day = Seeded.today()
+		for e in save.data.park:
+			if CourtGen.park_stage(int(e[1]), days + 1) > CourtGen.park_stage(int(e[1]), days):
+				grew = true
+	save.data.sessions = int(save.data.sessions) + 1
+	save.mark_dirty()
+	_send_park()
+	var items: Array = save.data.park
+	_story("Hello! I'm TumTum!" if int(save.data.rounds) == 0 else "Let's play!", "tumtum", Color(1.0, 0.6, 0.3))
+	if grew and not items.is_empty():
+		_story("The park grew!", CourtGen.PARK_KINDS[int((items[-1] as Array)[0]) % CourtGen.PARK_KINDS.size()], Color(0.5, 0.9, 0.5))
+	print("Soft Dodgeball park: %d things (%d in all), %d rounds played, day %d, today's park %s, session seed %d" % [items.size(),
+		int(save.data.park_total), int(save.data.rounds), int(save.data.days), "due" if daily_due() else "done", session_seed])
+
+
+func _send_park() -> void:
+	net.state_set("days", int(save.data.days))
+	net.state_set("park", (save.data.park as Array).duplicate(true))
+
+
+## Host / local: a finished round plants something new in the park (golden from TODAY'S PARK).
+func _grow_park() -> void:
+	if save == null or rd.is_empty():
+		return
+	var total := int(save.data.park_total)
+	var kind := CourtGen.park_kind(int(rd.code), total)
+	var items: Array = save.data.park
+	items.append([kind, int(save.data.days), bool(rd.daily)])
+	while items.size() > CourtGen.PARK_SLOTS:
+		items.pop_front()
+	save.data.park_total = total + 1
+	save.data.rounds = int(save.data.rounds) + 1
+	save.data.belly_total = int(save.data.belly_total) + int(round_stats.get("belly", 0))
+	save.data.best_runners = maxi(int(save.data.best_runners), int(net.state_get("tv_score", 0)))
+	if bool(rd.daily):
+		save.data.daily = Seeded.today()
+	save.save_now()
+	_send_park()
+	park.call("cheer")
+	rounds_played += 1
+	var pic: String = CourtGen.PARK_KINDS[kind]
+	_story("A gold one!" if bool(rd.daily) else "Something new!", pic, CourtGen.GOLD if bool(rd.daily) else Color(0.6, 0.9, 0.6))
+	if (total + 1) % 10 == 0:
+		_story("%d in the park!" % (total + 1), "tree", Color(0.5, 0.9, 0.5))
+
+
+## Host / local: one RUN line per round (end = "round") or when the game closes mid-round (end = "quit").
+func _run_line(end: String) -> void:
+	if not round_live or net == null or net.mode == "client" or rd.is_empty():
+		return
+	round_live = false
+	var most_out := 0.0
+	var ot: Dictionary = round_stats.get("out_t", {})
+	for id in ot:
+		most_out = maxf(most_out, float(ot[id]) / maxf(round_t, 1.0))
+	var humans := 0
+	for id in avatars:
+		if not cpu.has(id):
+			humans += 1
+	Telemetry.run(CourtGen.GAME_ID, {"end": end, "round": int(net.state_get("round", 0)), "name": rd.name, "code": rd.code,
+		"seed": rd.seed, "level": rd.level, "daily": rd.daily, "secs": snappedf(round_t, 0.1), "length": round_time,
+		"runners_score": int(net.state_get("tv_score", 0)), "giant_score": int(net.state_get("giant_score", 0)),
+		"belly": int(round_stats.get("belly", 0)), "star_hits": int(round_stats.get("stars", 0)),
+		"hits": int(round_stats.get("hits", 0)), "bubbles": int(round_stats.get("bubbles", 0)),
+		"blocked": int(round_stats.get("blocked", 0)), "cpu_throws": int(round_stats.get("cpu_throws", 0)),
+		"most_out": snappedf(most_out, 0.01), "cushions": (rd.cushions as Array).size(), "pace": rd.pace,
+		"runners": humans, "cpu_runners": cpu.size(), "vr": vr_rig != null, "cpu_giant": g_cpu, "mode": str(net.mode),
+		"park": (save.data.park as Array).size() if save != null else 0,
+		"park_total": int(save.data.park_total) if save != null else 0,
+		"rounds": int(save.data.rounds) if save != null else 0, "days": int(save.data.days) if save != null else 0,
+		"session_rounds": rounds_played})
+
+
+func _exit_tree() -> void:
+	_run_line("quit")
+
+
+## TumTum says something (host / local: every machine sees it; beats wait their turn).
+func _story(line: String, pic: String, color: Color, broadcast: bool = true) -> void:
+	if broadcast and net != null and net.mode == "host":
+		net.event("story", [line, pic, color])
+	story_queue.append([line, pic, color])
+
+
+func _update_story(delta: float) -> void:
+	story_t -= delta
+	if story_t > 0.0 or story_queue.is_empty():
+		return
+	var b: Array = story_queue.pop_front()
+	story_t = 2.6
+	story_shown.append(str(b[1]))
+	var opts := {"who": "TUMTUM", "line": b[0], "pic": b[1], "color": b[2], "duration": 2.5}
+	if split != null:
+		var views: Array = []  # each local player's view; the shared view when nobody plays here yet
+		for k in huds:
+			if int(k) >= 0 and is_instance_valid(huds[k]):
+				views.append(huds[k])
+		if views.is_empty() and huds.has(-1) and is_instance_valid(huds[-1]):
+			views.append(huds[-1])
+		StoryCard.show(views, opts)
+	if vr_rig != null:
+		StoryCard.show_vr(self, vr_rig.camera, opts)
+
+
 # --- Networking ------------------------------------------------------------------------------
 
 func make_snapshot() -> Array:
@@ -1310,8 +1583,11 @@ func apply_event(kind: String, args: Array) -> void:
 			if i < balls.size():
 				(balls[i] as Ball).squish = float(args[2])
 			sfx.play_at("boing", args[1], -10.0 + 8.0 * float(args[2]), randf_range(0.9, 1.2))
+			world.squish_near(args[1])
+		"story":
+			_story(str(args[0]), str(args[1]), args[2], false)
 		"belly":
-			belly_fx(args[0], int(args[1]))
+			belly_fx(args[0], int(args[1]), int(args[2]) if args.size() > 2 else 1)
 		"puff":
 			puff(args[0], args[1])
 		"back":
