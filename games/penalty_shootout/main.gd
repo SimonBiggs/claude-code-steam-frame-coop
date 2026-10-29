@@ -61,6 +61,7 @@ const SP_TRIES := 3  # striker practice: kicks each, at most
 const PRACTICE_TARGETS: Array[Vector2] = [Vector2(0.0, 1.1), Vector2(-2.2, 0.8), Vector2(2.2, 1.6),
 	Vector2(-1.3, 1.8), Vector2(1.4, 0.7)]
 const FIRE_ROUND := 2  # simple mode: the fireball unlocks from this round (0-based)
+const CPU_ROUNDS := 8  # simple mode, solo VR: kicks from the computer striker
 
 const MAX_PLAYERS := 7  # VR keeper + 6 strikers
 const MAX_LOCAL_VIEWS := 6
@@ -1067,7 +1068,7 @@ func _begin_match() -> void:
 			if p.index > 0:
 				p.fire_left = 0
 		if cpu:
-			rounds_total = 8
+			rounds_total = CPU_ROUNDS
 		intro_dur = 2.5
 		_show_center("KICK OFF!", intro_dur, true, "KICK OFF!")
 	elif intro_dur > INTRO_TIME:
