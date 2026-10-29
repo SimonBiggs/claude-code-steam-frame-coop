@@ -250,7 +250,7 @@ export async function debt() {
       const busy = merged && ((await sh("git status --porcelain | head -1", path)).out !== ""
         || ((await sh(`git rev-list --first-parent ${main} | grep -qx "$(git rev-parse ${br})" && echo y`, dir)).out === "y"
           && Date.now() / 1000 - +(await sh(`git log -g -1 --format=%ct ${br}`, dir)).out < 12 * 3600));
-      if (merged && !busy) issues.push({ kind: "stale-worktree", what: `${r}: worktree ${path} (branch ${br} already merged)`, fix: `git worktree remove --force ${path} && git branch -D ${br}` });
+      if (merged && !busy) issues.push({ kind: "stale-worktree", what: `${r}: worktree ${path} (branch ${br} already merged)`, fix: `dev.removeWorktree(${JSON.stringify(path)}, ${JSON.stringify(br)}) (quits its Godots first)` });
     }
   }
   // brepl modules on disk must compile: the loader keeps a running copy when a save doesn't, so a broken file
@@ -287,6 +287,20 @@ export async function debt() {
   return { clean: issues.length === 0, issues };
 }
 
+
+/** Quit every Godot running from inside `dir` (its cwd or --path): a worktree removed under a running Godot leaves
+ *  it logging "Couldn't open directory at path res://" (2026-10-29). TERM, then KILL after 3 s. Returns the pids. */
+export async function quitGodotsIn(dir: string) {
+  return (await sh(`godot-quit-in ${JSON.stringify(dir)}`)).out.split("\n").filter(Boolean);  // ~/.local/bin/godot-quit-in (tools/)
+}
+
+/** Remove a worktree (and its branch, if given) only after quitting the Godots running from it. Use this, never a
+ *  bare `git worktree remove`. */
+export async function removeWorktree(path: string, branch?: string) {
+  const quit = await quitGodotsIn(path);
+  const r = await sh(`git worktree remove --force ${JSON.stringify(path)}${branch ? ` && git branch -D ${branch}` : ""}`, LIVE);
+  return { quit, out: r.out, code: r.code };
+}
 
 // --- Landing a finished game branch (the deploy steward's loop) ----------------------------------------------------
 
@@ -331,8 +345,10 @@ export async function land(branch: string, genTests: string[], botId: string, ot
   // (2026-10-29: a merge subject read "...tests)\n\nCo-Authored-By...").
   const msgFile = join(GP, "wt-merge/.git-land-msg");
   await writeFile(msgFile, `Merge branch 'merge-arcade' (${branch}: uids, tests)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UPzLapMn8qMpWGwygUaPCg\n`);
-  const d = await sh(`duo-deploy ${JSON.stringify(msg)} 2>&1 | grep -v offline | tail -4; duo-deploy-deck 2>&1 | grep -v offline | tail -4; cd ${LIVE} && git merge -q --no-edit merge-arcade -F ${msgFile} && rm -f ${msgFile} && cd ../wt-merge && git merge -q --ff-only main && cd ${LIVE} && git worktree remove --force ../wt-${branch} && git branch -d ${branch}; git log --oneline -2 | cut -c1-60`);
-  return { deployed: true, out, res, deploy: d.out };
+  const d = await sh(`duo-deploy ${JSON.stringify(msg)} 2>&1 | grep -v offline | tail -4; duo-deploy-deck 2>&1 | grep -v offline | tail -4; cd ${LIVE} && git merge -q --no-edit merge-arcade -F ${msgFile} && rm -f ${msgFile} && cd ../wt-merge && git merge -q --ff-only main && echo MERGED; cd ${LIVE} && git log --oneline -2 | cut -c1-60`);
+  // The branch's worktree goes only after its Godots quit (an agent's offscreen run may still be up).
+  const rm = /MERGED/.test(d.out) ? await removeWorktree(join(GP, `wt-${branch}`), branch) : { quit: [], out: "not removed: the merge into main didn't finish" };
+  return { deployed: true, out, res, deploy: d.out, removed: rm };
 }
 
 export function help() {
