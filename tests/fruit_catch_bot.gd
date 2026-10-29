@@ -15,6 +15,8 @@ var want := 2
 var saw_results := false
 var vr_t := 0.0
 var vr_caught := 0
+var saw_dish := false  # Nutmeg's dish moved on (a dish was finished)
+var orchard_start := -1
 
 
 func _ready() -> void:
@@ -55,7 +57,16 @@ func _ready() -> void:
 			_checks()
 			kit.finish())
 	kit.every(2.0, _report)
+	kit.every(0.25, _watch_story)
 	kit.every(0.5, _continue_results)
+
+
+func _watch_story() -> String:
+	if int(main.net.state_get("dish", 0)) > 0:
+		saw_dish = true
+	if orchard_start < 0 and main.net.state_get("orchard", null) is Array:
+		orchard_start = (main.net.state_get("orchard", []) as Array).size()
+	return ""
 
 
 func _continue_results() -> String:
@@ -172,9 +183,10 @@ func _drive_vr(delta: float) -> void:
 
 
 func _report() -> String:
-	return "BOT %s: players %s, fruit %d, score %d, caught %d, shakes %d, dunks %d" % [main.net.mode,
+	return "BOT %s: players %s, fruit %d, score %d, caught %d, shakes %d, dunks %d, dish %d, got %s, need %s, trees %d" % [main.net.mode,
 		str(main.party.active_slots()), main.fruits.size(), int(main.net.state_get("score", 0)),
-		int(main.net.state_get("caught", 0)), main.shakes, main.dunks]
+		int(main.net.state_get("caught", 0)), main.shakes, main.dunks, int(main.net.state_get("dish", 0)),
+		str(main.net.state_get("got", [])), str(main.current_need()), (main.net.state_get("orchard", []) as Array).size()]
 
 
 func _checks() -> void:
@@ -188,6 +200,13 @@ func _checks() -> void:
 	if main.flat_host:
 		kit.assert_true(main.party.is_local(0) and main.avatars.has(0) and main.cams.has(0), "flat host: slot 0 plays here with a camera")
 	kit.assert_true(int(main.net.state_get("caught", 0)) > 0, "%s: fruit was caught" % mode)
+	kit.assert_true(not (main.harvest as Dictionary).is_empty() and (main.harvest.dishes as Array).size() == 5, "%s: the round is a seeded harvest with Nutmeg's dishes" % mode)
+	kit.assert_true(main.sign_recipe != null and main.nutmeg != null and main.orchard != null, "%s: the sign's recipe, Nutmeg and the orchard are built" % mode)
+	if main.split != null:
+		kit.assert_true(not main.recipe_rows.is_empty(), "%s: the HUD shows the recipe" % mode)
+	if mode != "client" and want > 0:
+		kit.assert_true(saw_dish, "%s: the players finished one of Nutmeg's dishes" % mode)
+		kit.assert_true((main.net.state_get("orchard", []) as Array).size() > orchard_start or orchard_start >= 36, "%s: a tree was planted in the orchard" % mode)
 	kit.assert_true(int(main.net.state_get("round", 0)) >= 2, "%s: round 1 ended and round 2 started" % mode)
 	if main.vr_rig != null:
 		kit.assert_true(main.shakes > 0, "the VR player shook fruit off a branch")

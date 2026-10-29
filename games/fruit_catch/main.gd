@@ -4,6 +4,13 @@ extends Node3D
 ## throws (or dunks) it into the big bowl. Rotten apples splat (a TV player who catches one gets dizzy).
 ## One team score, 2-minute rounds, a results card, then the next round starts by itself.
 ## Built on the engine template (games/engine_template): party seats, split view, VR rig, state store.
+## Story: NUTMEG the squirrel (by the bowl) cooks for the forest friends. Each round is a seeded HARVEST
+## (harvestgen.gd): the tree drops fruit on a schedule and Nutmeg asks for dishes in turn (a recipe of
+## fruit: picture + count on every HUD and on the sign for VR). Finished dishes plant a tree in the
+## ORCHARD round the park (saved; trees grow a stage each day the family plays). TODAY'S HARVEST: the
+## first round each day is the same gold harvest on every machine (golden tree). Telemetry: one RUN line
+## per round and on quit. Networked: the host sends [seed, level, daily, secs] ("harvest"), the dish
+## number, the fruit got so far and the orchard as state; every machine rebuilds the rest.
 
 const NetScript := preload("res://core/net.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
@@ -23,6 +30,12 @@ const Creatures := preload("res://core/creatures.gd")
 const SkyKit := preload("res://core/sky_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")
 const Art := preload("res://games/fruit_catch/art.gd")
+const G := preload("res://games/fruit_catch/harvestgen.gd")
+const Seeded := preload("res://core/seeded.gd")
+const Telemetry := preload("res://core/telemetry.gd")
+const StoryCard := preload("res://core/story_card.gd")
+const NUTMEG_POS := Vector3(2.35, 0.0, 2.1)  ## Nutmeg's stump, right of the bowl
+const ORCHARD_CHEERS := {1: "Our first tree!", 5: "Five trees!", 10: "Ten trees!", 20: "A big orchard!", 36: "A whole forest!"}
 
 const GAME_ID := "fruit_catch"
 const ARENA := 8.5
@@ -107,6 +120,26 @@ var touch_t := 0.0  # cooldown for trunk / bowl touches
 var grabbed_once := false
 var clock := 0.0
 var frenzy := false
+# --- Harvest (story + procedural rounds) ---
+var session_seed := 0
+var session_round := 0  # host: rounds played this session (sets the level)
+var harvest := {}  # every machine: this round's harvest (rebuilt from the "harvest" state)
+var drop_i := 0  # host: next scheduled drop
+var round_clock := 0.0  # host: seconds into the round
+var shake_rng := RandomNumberGenerator.new()
+var dishes_done := 0  # host: dishes finished this round
+var rotten_caught := 0  # host: this round (telemetry)
+var caught_round := 0  # host: this round (telemetry)
+var round_live := false  # host: a round is being played (for the quit RUN line)
+var shakes_round := 0  # host: fruit shaken down this round (telemetry)
+var recipe_rows := {}  # slot -> HBoxContainer on the HUD
+var sign_recipe: Node3D  # the recipe on the sign's lower board (VR + TV)
+var orchard: Node3D
+var orchard_count := -1
+var nutmeg: Node3D
+var nutmeg_hop := 0.0
+var story_queue: Array = []  # beats waiting to show: [line, pic, color]
+var story_t := 0.0
 
 
 func _ready() -> void:
@@ -125,7 +158,9 @@ func _ready() -> void:
 	party.player_left.connect(_on_player_left)
 	save = Save.new()
 	save.game_id = GAME_ID
-	save.defaults = {"best": 0}
+	# orchard: [[fruit kind, play-day planted, golden, dishes], ...]; days: days played; daily: the date
+	# TODAY'S HARVEST was done.
+	save.defaults = {"best": 0, "orchard": [], "trees": 0, "dishes": 0, "days": 0, "last_day": "", "daily": "", "sessions": 0}
 	add_child(save)
 	sfx = SfxScript.new()
 	add_child(sfx)
@@ -174,6 +209,7 @@ func _setup(mode: String) -> void:
 	awards.set_player(0, "GIANT" if vr_rig != null or mode == "client" else party.name_of(0))
 	if mode != "client":
 		net.state_set("best", int(save.data["best"]))
+		_begin_session()
 		_start_round()
 	if vr_rig != null:
 		hints.hint("vr_shake", "Grab a branch and SHAKE!", {"to": "vr"})
@@ -196,7 +232,7 @@ func _build_world(vr: bool) -> void:
 	ground.material_override = MeshKit.material(Color(0.45, 0.75, 0.35))
 	ground.position.y = -0.1
 	add_child(ground)
-	add_child(MeshKit.scatter_random(MeshKit.prop("tree"), 18, Vector3.ZERO, ARENA + 12.0, ARENA + 3.0, 0.8, 1.3, PackedColorArray(), 3))
+	add_child(MeshKit.scatter_random(MeshKit.prop("tree"), 18, Vector3.ZERO, ARENA + 14.0, ARENA + 5.0, 0.8, 1.3, PackedColorArray(), 3))
 	add_child(MeshKit.scatter_random(MeshKit.prop("bush"), 16, Vector3.ZERO, ARENA + 2.5, ARENA + 0.8, 0.8, 1.2, PackedColorArray(), 4))
 	add_child(MeshKit.scatter_random(MeshKit.prop("flower"), 40, Vector3.ZERO, ARENA - 0.5, 4.5, 0.7, 1.1,
 		PackedColorArray([Color(1.0, 0.5, 0.6), Color(1.0, 0.9, 0.4), Color(0.7, 0.6, 1.0)]), 5))
@@ -231,6 +267,23 @@ func _build_world(vr: bool) -> void:
 	sign_label = UiKit.label3d("0", 0.32, "gold", true)
 	sign_label.position = Vector3(0.0, 2.1, 0.08)
 	post.add_child(sign_label)
+	sign_recipe = Node3D.new()  # the dish's fruit and counts on the lower board
+	sign_recipe.position = Vector3(0.0, Art.SIGN_LOW_Y, 0.08)
+	post.add_child(sign_recipe)
+	nutmeg = Node3D.new()
+	nutmeg.name = "Nutmeg"
+	nutmeg.position = NUTMEG_POS
+	var nd := VR_START - NUTMEG_POS
+	nutmeg.basis = Basis(Vector3.UP, atan2(nd.x, nd.z))
+	add_child(nutmeg)
+	nutmeg.add_child(MeshKit.instance(Art.stump()))
+	var sq := MeshKit.instance(Art.squirrel())
+	sq.name = "Body"
+	sq.position.y = Art.STUMP_TOP
+	nutmeg.add_child(sq)
+	orchard = Node3D.new()
+	orchard.name = "Orchard"
+	add_child(orchard)
 
 
 ## Point branch k at its (displaced) tip.
@@ -257,6 +310,9 @@ func _push_out(p: Vector3, r: float) -> Vector3:
 	var bd := flat - Vector2(BOWL_POS.x, BOWL_POS.z)
 	if bd.length() < BOWL_R + r:
 		flat = Vector2(BOWL_POS.x, BOWL_POS.z) + bd.normalized() * (BOWL_R + r)
+	var nd := flat - Vector2(NUTMEG_POS.x, NUTMEG_POS.z)  # Nutmeg's stump
+	if nd.length() < Art.STUMP_R + r:
+		flat = Vector2(NUTMEG_POS.x, NUTMEG_POS.z) + nd.normalized() * (Art.STUMP_R + r)
 	return Vector3(flat.x, p.y, flat.y)
 
 
@@ -277,6 +333,18 @@ func _make_hud(slot: int, parent: Control) -> void:
 	row.add_child(l)
 	score_labels[slot] = l
 	timers[slot] = HudKit.timer(ui, {"seconds": float(net.state_get("time", round_time))})
+	var rc := UiKit.panel("card")  # Nutmeg's recipe: the dish, then each fruit's picture and count
+	rc.name = "Recipe"
+	ui.add_child(rc)
+	UiKit.pin(rc, Control.PRESET_BOTTOM_LEFT)
+	rc.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	rc.offset_left = 24.0
+	rc.offset_bottom = -20.0
+	rc.offset_top = -20.0
+	var rr := UiKit.hbox()
+	rc.add_child(rr)
+	recipe_rows[slot] = rr
+	_refresh_recipe_row(slot)
 	if slot < 0:
 		join_prompt = UiKit.panel("pill")
 		join_prompt.add_child(UiKit.prompts([["A", "Join"]]))
@@ -300,6 +368,13 @@ func _refresh_hud() -> void:
 	if sign_label != null:
 		var t := int(net.state_get("time", 0))
 		sign_label.text = "%d\n%d:%02d" % [score, t / 60, t % 60]
+
+
+## Every machine: every HUD's recipe row and the sign.
+func _refresh_recipes() -> void:
+	for slot in recipe_rows:
+		_refresh_recipe_row(slot)
+	_refresh_sign_recipe()
 
 
 func _all_huds() -> Array:
@@ -355,6 +430,7 @@ func _on_player_left(slot: int) -> void:
 			h.queue_free()
 		huds.erase(slot)
 	score_labels.erase(slot)
+	recipe_rows.erase(slot)
 	timers.erase(slot)
 	hints.remove_view(slot)
 	_refresh_group()
@@ -522,7 +598,44 @@ func _on_state_changed(key: String, value: Variant) -> void:
 				if is_instance_valid(t):
 					t.set_time(float(value))
 		"round":
-			_banner("FRUIT CATCH!", "Catch the fruit!")
+			if harvest.get("daily", false):
+				_banner("TODAY'S HARVEST!", "", "victory")
+		"harvest":
+			var hv: Array = value
+			if net.mode == "client" or harvest.is_empty() or int(harvest.seed) != int(hv[0]) or int(harvest.level) != int(hv[1]):
+				harvest = G.harvest(int(hv[0]), int(hv[1]), bool(hv[2]), float(hv[3]))
+			_refresh_recipes()
+			if bool(hv[2]):
+				_story("TODAY'S HARVEST!", "fruitbowl", Color(1.0, 0.8, 0.2))
+			_story("Let's make %s!" % _dish_name(0), G.DISH_PICS[int((harvest.dishes as Array)[0][0])], _dish_color(int((harvest.dishes as Array)[0][0])))
+			if (harvest.wind as Vector2).length() > 0.3:
+				_story("Breezy day!", "cloud", Color(0.6, 0.85, 1.0))
+		"dish":
+			_refresh_recipes()
+			var d := int(value)
+			var dishes: Array = harvest.get("dishes", [])
+			if d > 0 and d <= dishes.size():
+				var prev := int((dishes[d - 1] as Array)[0])
+				_story("Yum! %s!" % G.DISH_NAMES[prev], G.DISH_PICS[prev], _dish_color(prev))
+				if d < dishes.size():
+					var nx := int((dishes[d] as Array)[0])
+					_story(("Bonus! " if d >= 3 else "Now ") + "%s!" % G.DISH_NAMES[nx], G.DISH_PICS[nx], _dish_color(nx))
+				else:
+					_story("What a feast!", "fruitbowl", Color(1.0, 0.8, 0.3))
+		"got":
+			_refresh_recipes()
+		"orchard":
+			var list: Array = value if value is Array else []
+			var grown := orchard_count >= 0 and list.size() > orchard_count
+			_build_orchard(list)
+			if grown:
+				var n := list.size()
+				_story(ORCHARD_CHEERS.get(n, "A new tree!"), "sapling", Art.FRUIT_COLORS[int((list[n - 1] as Array)[0])])
+		"days":
+			_build_orchard(net.state_get("orchard", []))
+		"grew":
+			if bool(value):
+				_story("Our trees grew!", "sapling", Color(1.0, 0.6, 0.7))
 		"frenzy":
 			if bool(value):
 				_banner("FRUIT STORM!", "", "warning")
@@ -537,28 +650,91 @@ func _on_state_changed(key: String, value: Variant) -> void:
 
 # --- Rounds -------------------------------------------------------------------------------
 
+## Host: a new session. Count the play-day (trees grow a stage each day), pick the session seed, show the orchard.
+func _begin_session() -> void:
+	session_seed = int(OS.get_environment("FC_SEED")) if OS.has_environment("FC_SEED") else Seeded.fresh_seed()
+	shake_rng = Seeded.rng(session_seed, "shake")
+	var grew := false
+	if String(save.data.last_day) != Seeded.today():
+		save.data.days = int(save.data.days) + 1
+		save.data.last_day = Seeded.today()
+		for e in save.data.orchard:
+			if G.tree_stage(int(e[1]), int(save.data.days)) > G.tree_stage(int(e[1]), int(save.data.days) - 1):
+				grew = true
+	save.data.sessions = int(save.data.sessions) + 1
+	save.mark_dirty()
+	net.state_set("days", int(save.data.days))
+	net.state_set("orchard", (save.data.orchard as Array).duplicate(true))
+	net.state_set("grew", grew)
+	print("Fruit Catch orchard: %d trees (%d planted in all), day %d, today's harvest %s, session seed %d" % [
+		(save.data.orchard as Array).size(), int(save.data.trees), int(save.data.days),
+		"done" if String(save.data.daily) == Seeded.today() else "due", session_seed])
+
+
 func _start_round() -> void:
 	for id in fruits.keys():
 		_free_fruit(int(id))
 	awards.reset()
 	time_left = round_time
 	frenzy = false
+	session_round += 1
+	var daily := String(save.data.daily) != Seeded.today()
+	var lv := G.DAILY_LEVEL if daily else G.level(session_round, int(save.data.trees))
+	var seed_value := G.daily_seed() if daily else G.round_seed(session_seed, session_round)
+	harvest = G.harvest(seed_value, lv, daily, round_time)
+	drop_i = 0
+	round_clock = 0.0
+	dishes_done = 0
+	rotten_caught = 0
+	caught_round = 0
+	shakes_round = 0
+	round_live = true
+	print("Fruit Catch harvest: level %d, seed %d%s, dishes %s, %d drops, wind %.2f" % [lv, seed_value,
+		" (TODAY'S HARVEST)" if daily else "", str(harvest.dishes), (harvest.drops as Array).size(), (harvest.wind as Vector2).length()])
 	net.state_set("frenzy", false)
 	net.state_set("score", 0)
 	net.state_set("bowl", 0)
+	net.state_set("got", [0, 0, 0, 0])
+	net.state_set("dish", 0)
+	net.state_set("harvest", [seed_value, lv, daily, round_time])
 	net.state_set("time", int(ceil(time_left)))
 	net.state_set("phase", "play")
 	net.state_set("round", int(net.state_get("round", 0)) + 1)
 	music.play_mood("party")
-	drop_t = 1.5
+
+
+## Host: one RUN line per round (end = "round") or when the game closes mid-round (end = "quit").
+func _run_line(end: String) -> void:
+	if harvest.is_empty():
+		return
+	round_live = false
+	Telemetry.run(GAME_ID, {"end": end, "round": session_round, "level": int(harvest.level), "seed": int(harvest.seed),
+		"daily": bool(harvest.daily), "secs": snappedf(round_time - maxf(time_left, 0.0), 0.1), "dishes": dishes_done,
+		"dish_list": (harvest.dishes as Array).map(func(d: Array) -> int: return int(d[0])), "got": net.state_get("got", []),
+		"score": int(net.state_get("score", 0)), "caught": caught_round, "rotten": rotten_caught, "dunks": int(net.state_get("bowl", 0)),
+		"shakes": shakes_round, "players": party.active_slots().size(), "vr": vr_rig != null, "mode": String(net.mode),
+		"wind": snappedf((harvest.wind as Vector2).length(), 0.01), "trees": int(save.data.trees),
+		"orchard": (save.data.orchard as Array).size(), "days": int(save.data.days), "best": int(save.data.best)})
+
+
+func _exit_tree() -> void:
+	if round_live and net != null and net.mode != "client":
+		_run_line("quit")
+		save.save_now()
 
 
 func _end_round() -> void:
 	for id in fruits.keys():
 		_free_fruit(int(id))
 	var score := int(net.state_get("score", 0))
-	var data := awards.results({"title": "YUM! %d FRUIT!" % score, "subtitle": "Great catching, team!",
-		"style": "victory", "stats": [["BEST", str(int(net.state_get("best", 0)))]], "score_format": "%d FRUIT"})
+	var planted := _plant_tree()
+	_run_line("round")
+	var title := "YUM! %d FRUIT!" % score
+	if dishes_done > 0:
+		title = "%d DISH%s!" % [dishes_done, "" if dishes_done == 1 else "ES"]
+	var data := awards.results({"title": title, "subtitle": "A new tree!" if planted else "Great catching, team!",
+		"style": "victory", "stats": [["FRUIT", str(score)], ["BEST", str(int(net.state_get("best", 0)))],
+		["TREES", str((save.data.orchard as Array).size())]], "score_format": "%d FRUIT"})
 	net.state_set("results", data)
 	net.state_set("phase", "results")
 	results_t = 0.0
@@ -607,6 +783,8 @@ func _process(delta: float) -> void:
 	_follow_remote(delta)
 	_animate_avatars(delta)
 	_animate_fruit_visuals(delta)
+	_animate_nutmeg(delta)
+	_update_story(delta)
 	if net.mode == "client":
 		for k in BRANCHES:
 			_pose_branch(k)
@@ -625,22 +803,19 @@ func _process(delta: float) -> void:
 	if time_left <= 0.0:
 		_end_round()
 		return
-	if not frenzy and time_left < 20.0:
+	round_clock += delta
+	if not frenzy and round_clock >= float(harvest.storm_at):
 		frenzy = true
 		net.state_set("frenzy", true)
 	combo_t -= delta
 	if combo_t <= 0.0:
 		combo = 0
 	touch_t -= delta
-	drop_t -= delta
-	if drop_t <= 0.0:
-		var gap := 1.7 if vr_rig != null else 0.85
-		if frenzy:
-			gap *= 0.5
-		drop_t = gap * randf_range(0.8, 1.2)
-		var k := randi() % BRANCHES
-		branch_vel[k] += Vector3(randf_range(-1.0, 1.0), 2.5, randf_range(-1.0, 1.0))  # the branch shakes first
-		_drop_fruit(k)
+	var drops: Array = harvest.drops
+	while drop_i < drops.size() and float(drops[drop_i][0]) <= round_clock:  # the harvest's schedule
+		if not (vr_rig != null and G.vr_skips(drop_i)):  # a giant shakes down the rest
+			_drop_scheduled(drops[drop_i])
+		drop_i += 1
 	if vr_rig != null:
 		_vr_hands(delta)
 	_simulate_fruit(delta)
@@ -668,6 +843,7 @@ func _update_branches(delta: float) -> void:
 				vr_rig.pulse(h, 0.35, 0.05)
 				if not results_showing():
 					shakes += 1
+					shakes_round += 1
 					_drop_fruit(k)
 		else:
 			branch_vel[k] += (-branch_off[k] * 45.0 - branch_vel[k] * 3.5) * delta
@@ -698,6 +874,10 @@ func _vr_hands(delta: float) -> void:
 			elif Vector2(p.x - BOWL_POS.x, p.z - BOWL_POS.z).length() < BOWL_R + 0.1 and p.y < BOWL_TOP + 0.15:
 				touch_t = 0.6
 				fx("bowl", BOWL_POS, Color.WHITE, 0)
+			elif p.distance_to(NUTMEG_POS + Vector3.UP * (Art.STUMP_TOP + 0.3)) < 0.4:
+				touch_t = 0.8
+				vr_rig.pulse(h, 0.3, 0.05)
+				fx("nutmeg", NUTMEG_POS + Vector3.UP * Art.STUMP_TOP, Color.WHITE, 0)
 		for slot in avatars:
 			var cd: float = boop_t.get(slot, 0.0)
 			if cd > 0.0:
@@ -723,8 +903,21 @@ func _drop_fruit(k: int) -> void:
 	if fruits.size() >= MAX_FRUIT:
 		return
 	var a := PI * 0.5 + k * TAU / BRANCHES + randf_range(-0.7, 0.7)
-	var pos := Vector3(cos(a), 0.0, sin(a)) * randf_range(1.2, 4.6) + Vector3.UP * DROP_HEIGHT
-	var kind := Art.ROTTEN if randf() < 0.18 else randi() % 4
+	var pos := Vector3(cos(a), 0.0, sin(a)) * randf_range(1.3, 4.6) + Vector3.UP * DROP_HEIGHT
+	var kind := G.shake_kind(shake_rng, need_left(), float(harvest.get("rotten", 0.15)))
+	_spawn_drop(k, kind, pos)
+
+
+## Host: the next fruit in the harvest's schedule ([t, branch, kind, x, z]); its branch shakes first.
+func _drop_scheduled(d: Array) -> void:
+	var k := int(d[1])
+	branch_vel[k] += Vector3(randf_range(-1.0, 1.0), 2.5, randf_range(-1.0, 1.0))
+	_spawn_drop(k, int(d[2]), Vector3(float(d[3]), DROP_HEIGHT, float(d[4])))
+
+
+func _spawn_drop(k: int, kind: int, pos: Vector3) -> void:
+	if fruits.size() >= MAX_FRUIT:
+		return
 	next_fruit += 1
 	var f := _make_fruit(next_fruit, kind, pos)
 	f.state = HANG
@@ -784,7 +977,8 @@ func _simulate_fruit(delta: float) -> void:
 				var v: Vector3 = f.vel
 				v.y = maxf(v.y - FALL_G * delta, -5.0)
 				f.vel = v
-				n.position += v * delta
+				var w: Vector2 = harvest.get("wind", Vector2.ZERO)
+				n.position += (v + Vector3(w.x, 0.0, w.y)) * delta  # the breeze (harvestgen.gd plans for it)
 				if _in_bowl(n.position):  # fell straight in: it bounces off the fruit pile
 					fx("land", n.position, Art.FRUIT_COLORS[int(f.kind)], int(f.kind))
 					_free_fruit(int(id))
@@ -839,9 +1033,11 @@ func _try_catch(id: int, f: Dictionary) -> bool:
 		var top := basket_top(int(slot))
 		if Vector2(p.x - top.x, p.z - top.z).length() < 0.6 and p.y < top.y + 0.35 and p.y > top.y - 0.35:
 			if rotten:
+				rotten_caught += 1
 				fx("splat", top, Art.FRUIT_COLORS[Art.ROTTEN], int(slot))
 			else:
 				_add_score(1, int(slot), top, Art.FRUIT_COLORS[int(f.kind)])
+				_count_fruit(int(f.kind), top)
 			_free_fruit(id)
 			return true
 	if vr_rig != null and (int(f.state) == FALL or float(f.t) < 0.0):
@@ -871,12 +1067,14 @@ func _score_bowl(id: int, p: Vector3) -> void:
 	_free_fruit(id)
 	net.state_set("bowl", int(net.state_get("bowl", 0)) + 1)
 	_add_score(2, 0, Vector3(BOWL_POS.x, BOWL_TOP + 0.2, BOWL_POS.z), Art.FRUIT_COLORS[int(f.kind)])
+	_count_fruit(int(f.kind), Vector3(BOWL_POS.x, BOWL_TOP + 0.2, BOWL_POS.z))
 
 
 func _add_score(amount: int, by: int, pos: Vector3, color: Color) -> void:
 	combo += 1
 	combo_t = 1.5
 	total_caught += 1
+	caught_round += 1
 	net.state_set("caught", total_caught)
 	awards.add(by, "score", amount)
 	var score := int(net.state_get("score", 0)) + amount
@@ -904,6 +1102,185 @@ func _set_pile(count: int) -> void:
 	while bowl_pile.size() > want:
 		var m: MeshInstance3D = bowl_pile.pop_back()
 		m.queue_free()
+
+
+# --- Nutmeg's dishes and the orchard ---------------------------------------------------------
+
+## The current dish's recipe ([apples, oranges, pears, plums]; empty past the last dish). Every machine.
+func current_need() -> Array:
+	var dishes: Array = harvest.get("dishes", [])
+	var d := int(net.state_get("dish", 0))
+	return (dishes[d] as Array)[1] if d < dishes.size() else [0, 0, 0, 0]
+
+
+## How many more of each fruit the dish needs.
+func need_left() -> Array:
+	var need := current_need()
+	var got: Array = net.state_get("got", [0, 0, 0, 0])
+	var out := []
+	for k in G.GOOD:
+		out.append(maxi(0, int(need[k]) - int(got[k] if k < got.size() else 0)))
+	return out
+
+
+## Host: a good fruit was caught or dunked: does Nutmeg's dish need it?
+func _count_fruit(kind: int, pos: Vector3) -> void:
+	if kind < 0 or kind >= G.GOOD or int(need_left()[kind]) <= 0:
+		return
+	var got: Array = (net.state_get("got", [0, 0, 0, 0]) as Array).duplicate()
+	got[kind] = int(got[kind]) + 1
+	net.state_set("got", got)
+	fx("need", pos, Art.FRUIT_COLORS[kind], kind)
+	for k in G.GOOD:
+		if int(need_left()[k]) > 0:
+			return
+	_dish_done()
+
+
+## Host: the dish is ready! A bonus, Nutmeg hops, and she asks for the next one.
+func _dish_done() -> void:
+	dishes_done += 1
+	save.data.dishes = int(save.data.dishes) + 1
+	save.mark_dirty()
+	var bonus := 5
+	var score := int(net.state_get("score", 0)) + bonus
+	net.state_set("score", score)
+	if score > int(save.data["best"]):
+		save.data["best"] = score
+		net.state_set("best", score)
+	fx("dish", NUTMEG_POS + Vector3.UP * 1.2, Color(1.0, 0.85, 0.3), dishes_done)
+	net.state_set("got", [0, 0, 0, 0])
+	net.state_set("dish", int(net.state_get("dish", 0)) + 1)
+	print("Fruit Catch dish %d done at %.1f s" % [dishes_done, round_clock])
+
+
+## Host: the round's tree joins the orchard (one finished dish is enough). Returns true when planted.
+func _plant_tree() -> bool:
+	if dishes_done <= 0 or harvest.is_empty():
+		return false
+	var first: Array = (harvest.dishes as Array)[0]
+	var kind := int(G.DISH_MAIN[int(first[0])])
+	if kind < 0:
+		kind = 0
+	var list: Array = save.data.orchard
+	list.append([kind, int(save.data.days), bool(harvest.daily), dishes_done])
+	while list.size() > G.ORCHARD_KEEP:
+		list.pop_front()
+	save.data.trees = int(save.data.trees) + 1
+	if harvest.daily:
+		save.data.daily = Seeded.today()
+	save.save_now()
+	net.state_set("orchard", list.duplicate(true))
+	return true
+
+
+## Every machine: the orchard round the park (trees grow a stage each play-day).
+func _build_orchard(list: Array) -> void:
+	if orchard == null:
+		return
+	for c in orchard.get_children():
+		c.queue_free()
+	var days := int(net.state_get("days", 1))
+	for i in mini(list.size(), G.ORCHARD_SLOTS):
+		var e: Array = list[i]
+		var t := MeshKit.instance(Art.orchard_tree(int(e[0]), G.tree_stage(int(e[1]), days), bool(e[2])))
+		t.position = G.orchard_slot(i)
+		t.rotation.y = i * 2.1
+		orchard.add_child(t)
+		if orchard_count >= 0 and i >= orchard_count:
+			_bounce(t, 1.8)  # a new tree pops up
+	orchard_count = list.size()
+
+
+## Every machine: the dish's fruit pictures and counts on one HUD.
+func _refresh_recipe_row(slot: int) -> void:
+	var row: HBoxContainer = recipe_rows.get(slot)
+	if row == null or not is_instance_valid(row):
+		return
+	for c in row.get_children():
+		c.queue_free()
+	var dishes: Array = harvest.get("dishes", [])
+	var d := int(net.state_get("dish", 0))
+	var card := row.get_parent() as Control
+	card.visible = d < dishes.size()
+	if not card.visible:
+		return
+	var dish := int((dishes[d] as Array)[0])
+	row.add_child(StoryCard.picture(G.DISH_PICS[dish], 56.0, _dish_color(dish)))
+	var need := current_need()
+	var got: Array = net.state_get("got", [0, 0, 0, 0])
+	for k in G.GOOD:
+		if int(need[k]) <= 0:
+			continue
+		row.add_child(StoryCard.picture(G.KIND_PICS[k], 44.0, Art.FRUIT_COLORS[k]))
+		var done := int(got[k]) >= int(need[k])
+		row.add_child(UiKit.label("%d/%d" % [mini(int(got[k]), int(need[k])), int(need[k])], "number", "gold" if done else null))
+
+
+## Every machine: the recipe on the sign's lower board (big and world-locked: the VR player reads it too).
+func _refresh_sign_recipe() -> void:
+	if sign_recipe == null:
+		return
+	for c in sign_recipe.get_children():
+		c.queue_free()
+	var need := current_need()
+	var got: Array = net.state_get("got", [0, 0, 0, 0])
+	var kinds: Array = []
+	for k in G.GOOD:
+		if int(need[k]) > 0:
+			kinds.append(k)
+	var w := 1.2 / maxf(1.0, kinds.size())
+	for i in kinds.size():
+		var k: int = kinds[i]
+		var x := -0.6 + w * (i + 0.5)
+		var fm := MeshKit.instance(Art.fruit(k), false)
+		fm.position = Vector3(x - 0.13, 0.0, 0.05)
+		fm.scale = Vector3.ONE * 0.9
+		sign_recipe.add_child(fm)
+		var done := int(got[k]) >= int(need[k])
+		var l := UiKit.label3d("%d/%d" % [mini(int(got[k]), int(need[k])), int(need[k])], 0.17, "gold" if done else "text", true)
+		l.position = Vector3(x + 0.12, 0.0, 0.03)
+		sign_recipe.add_child(l)
+
+
+func _dish_color(dish: int) -> Color:
+	var k := int(G.DISH_MAIN[dish])
+	return Art.FRUIT_COLORS[k] if k >= 0 else Color(1.0, 0.8, 0.3)
+
+
+func _dish_name(d: int) -> String:
+	var dishes: Array = harvest.get("dishes", [])
+	return G.DISH_NAMES[int((dishes[d] as Array)[0])] if d < dishes.size() else ""
+
+
+## Every machine: Nutmeg says something (beats wait their turn so none is missed).
+func _story(line: String, pic: String, color: Color) -> void:
+	story_queue.append([line, pic, color])
+
+
+func _update_story(delta: float) -> void:
+	story_t -= delta
+	if story_t > 0.0 or story_queue.is_empty():
+		return
+	var b: Array = story_queue.pop_front()
+	story_t = 2.6
+	var opts := {"who": "NUTMEG", "line": b[0], "pic": b[1], "color": b[2], "duration": 2.5}
+	StoryCard.show(_all_huds(), opts)
+	if vr_rig != null:
+		StoryCard.show_vr(self, vr_rig.camera, opts)
+
+
+## Every machine: Nutmeg bobs on her stump, hops when a dish is ready and looks at whoever's nearest.
+func _animate_nutmeg(delta: float) -> void:
+	if nutmeg == null:
+		return
+	var body := nutmeg.get_node_or_null("Body") as Node3D
+	if body == null:
+		return
+	nutmeg_hop = maxf(0.0, nutmeg_hop - delta)
+	var hop := absf(sin(nutmeg_hop * 9.0)) * 0.35 * minf(1.0, nutmeg_hop)
+	body.position.y = Art.STUMP_TOP + hop + absf(sin(clock * 2.2)) * 0.02
+	body.rotation.z = sin(clock * 1.3) * 0.06
 
 
 # --- Effects (host / local play them and send them; the TV machine plays the same) ---------
@@ -945,6 +1322,19 @@ func fx(kind: String, pos: Vector3, color: Color, n: int = -1, m: int = 0) -> vo
 		"bowl":
 			_wobble(bowl, 0.1)
 			sfx.play_at("boing", pos, -4.0, 0.6)
+		"need":  # a fruit for Nutmeg's dish: a sparkle and a rising chime
+			_burst(pos + Vector3.UP * 0.2, Color(1.0, 0.9, 0.4), 8, 2.0)
+			sfx.play_at("pickup", pos, -6.0, 1.3 + n * 0.1)
+		"dish":  # a dish is ready: Nutmeg hops, confetti
+			nutmeg_hop = 1.2
+			_burst(pos, Color(1.0, 0.85, 0.3), 26, 4.0)
+			_burst(pos, Color(1.0, 0.5, 0.6), 14, 3.0)
+			HudKit.score(self, pos + Vector3.UP * 0.3, 5, {"color": "gold", "size": 2.0})
+			sfx.play_at("kaching", pos, 0.0, 1.2)
+			sound("fanfare", -8.0)
+		"nutmeg":  # the giant patted Nutmeg
+			nutmeg_hop = 0.6
+			sfx.play_at("boing", pos, -4.0, 1.8)
 		"boop":
 			sfx.play_at("boing", pos, -2.0, 1.5)
 			if avatars.has(n):
