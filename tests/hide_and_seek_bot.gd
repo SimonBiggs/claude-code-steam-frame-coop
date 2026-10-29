@@ -23,6 +23,8 @@ extends Node
 ## player ("retired"); prints "BOT: CUES OK" once this machine's role has shown and retired its cues
 ## (local: torch + disguise + squeak; host: torch (just shown with one TV hider); client: disguise +
 ## squeak), else "BOT: CUES FAIL". BOT_MAP=0/1/2 starts on that map.
+## BOT RESULT: once this machine has its verdicts (connectivity on the host/local, map rotation, Pip, cues) it
+## prints "BOT RESULT: PASS/FAIL (n checks)"; local runs then quit, networked ones end via tests/bot_end.gd.
 ## "BOT: ERROR instruction text" if a headline (TV centre / a view's big word / the top line / VR) is
 ## anything but a short word, or the old key-help line is back. BOT_VR=1 (local): P1 is a fake VR seeker
 ## (XR nodes without a headset) whose hands aim the torch and touch hiders, so the 3D VR cues run.
@@ -140,6 +142,7 @@ func _physics_process(delta: float) -> void:
 		if maps_seen.size() >= 3:
 			print("BOT: MAP ROTATION OK (%s)" % ", ".join(maps_seen.keys()))
 	var mode: String = main.net.mode
+	_result(mode)
 	if main.pip_finder >= 0 and not has_meta("pip_ok") and (mode != "host" or main.toys > 0):
 		set_meta("pip_ok", true)
 		print("BOT: PIP OK (found by P%d, %d toys at his kennel, on %s)" % [main.pip_finder + 1, main.toys, main.map_title()])
@@ -291,6 +294,28 @@ func _hiders(delta: float) -> void:
 			p.toggle_disguise()  # pops out now and then (and back in once there), like a fidgety kid
 		if main.phase == "seek":
 			p.bot_alt = p.taunt_cd <= 0.0 and fmod(t + p.index * 0.7, 1.5) < 0.2  # squeak whenever it's ready
+
+
+## One BOT RESULT line per machine once every verdict is in.
+func _result(mode: String) -> void:
+	var late: bool = main.round_no >= 6  # verdicts still missing by now count as failures
+	if has_meta("result") or (not late and (not cue_verdict or maps_seen.size() < 3 or not has_meta("pip_ok") or (mode != "client" and not conn_done))):
+		return
+	if main.phase != "over" and mode == "local":
+		return
+	set_meta("result", true)
+	var fails: Array[String] = []
+	if not conn_ok:
+		fails.append("connectivity")
+	if not has_meta("cues_ok"):
+		fails.append("cues")
+	if maps_seen.size() < 3:
+		fails.append("map rotation")
+	if not has_meta("pip_ok"):
+		fails.append("pip")
+	print("BOT RESULT: %s (4 checks)%s" % ["PASS" if fails.is_empty() else "FAIL", "" if fails.is_empty() else " failed: " + ", ".join(fails)])
+	if mode == "local":
+		get_tree().quit()
 
 
 ## The free local hider with the lowest index looks for Pip.
@@ -592,6 +617,7 @@ func _cue_verdict() -> void:
 	var deadline := 56.0 if mode == "local" else (36.0 if mode == "host" else 31.0)
 	if missing.is_empty():
 		cue_verdict = true
+		set_meta("cues_ok", true)
 		print("BOT: CUES OK (%s): %s" % [mode, ", ".join(need)])
 	elif t >= deadline:
 		cue_verdict = true
