@@ -52,7 +52,11 @@ static func quit_quietly(tree: SceneTree, code := 0) -> void:
 	for i in 2:  # twice: a sound started on the frame after the first stop leaked too
 		await tree.process_frame
 		_stop_sounds(tree)
-		OS.delay_msec(60)
+		OS.delay_msec(100)
+	# Caches kept on Engine metadata (synthesized sounds, materials: rhythm_band, block_builders, fishing_lake, ...)
+	# live for the whole process and were reported as leaks at exit: drop them, the process is ending anyway.
+	for m in Engine.get_meta_list():
+		Engine.remove_meta(m)
 	await tree.process_frame
 	await tree.process_frame
 	tree.quit(code)

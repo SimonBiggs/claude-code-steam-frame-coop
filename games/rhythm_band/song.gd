@@ -1,7 +1,7 @@
 extends RefCounted
-## One procedural song: tempo, chords, style, the backing loop (bass, chord stabs, kick and shaker,
+## One procedural song (songgen.gd makes the description from a seed): tempo, chords, style, the backing loop (bass, chord stabs, kick and shaker,
 ## shaped by the style) and the note charts for the guitars (3 lanes) and the drums (4 pads).
-## The same (index, bars) gives the same song on both machines (seeded RNG, no randf()).
+## The same (code, bars) gives the same song on every machine (seeded RNG, no randf()).
 ## The players ARE the melody and the drums: hitting a guitar note plays its pitch (chord tones, so
 ## the left lane is low and the right lane is high), hitting a drum plays that drum.
 ## Every note has a LEVEL: 0 = EASY (on the beat, well spaced), 1 = NORMAL, 2 = ROCK (extra notes).
@@ -17,18 +17,13 @@ const LOOP_BARS := 8
 const MIN_GAP := 0.26  # seconds between NORMAL guitar notes (kid friendly)
 const EASY_GAP := 0.9  # EASY: about every other beat
 const ROCK_GAP := 0.17
-const SONGS := [
-	# name, bpm, key (MIDI), chord progression [root offset, minor?] (2 bars each), style
-	{"name": "Sunny Skip", "bpm": 92.0, "key": 60, "prog": [[0, false], [7, false], [9, true], [5, false]], "style": "pop"},
-	{"name": "Dino Stomp", "bpm": 84.0, "key": 52, "prog": [[0, true], [8, false], [5, true], [7, false]], "style": "stomp"},
-	{"name": "Jungle Drums", "bpm": 104.0, "key": 62, "prog": [[0, false], [5, false], [7, false], [5, false]], "style": "bongo"},
-	{"name": "Rocket Pop", "bpm": 112.0, "key": 55, "prog": [[9, true], [5, false], [0, false], [7, false]], "style": "rock"},
-	{"name": "Bubble Disco", "bpm": 120.0, "key": 57, "prog": [[0, true], [5, true], [10, false], [3, false]], "style": "disco"},
-	{"name": "Thunder Jam", "bpm": 132.0, "key": 57, "prog": [[0, true], [8, false], [3, false], [10, false]], "style": "rock"},
-]
 const LEVEL_NAMES: Array[String] = ["EASY", "NORMAL", "ROCK"]
 
-var idx := 0
+var code := 0  # songgen.gd song code (seed, level, daily)
+var seed_v := 0
+var level := 1
+var daily := false
+var busy := 0  # 0..2: how busy the charts are
 var title := ""
 var style := "pop"
 var bpm := 100.0
@@ -53,48 +48,22 @@ var two_lanes := false  # set before setup()
 var loop_bytes := PackedByteArray()  # filled by synth_loop() (runs on a worker thread)
 
 
-static func song_count() -> int:
-	return SONGS.size()
-
-
-static func song_name(i: int) -> String:
-	var d: Dictionary = SONGS[posmod(i, SONGS.size())]
-	return str(d["name"])
-
-
-static func song_bpm(i: int) -> float:
-	var d: Dictionary = SONGS[posmod(i, SONGS.size())]
-	return float(d["bpm"])
-
-
-## A tour: one slow, one middle and one fast song (random each time, slow -> fast).
-static func make_setlist(rng_seed: int) -> Array[int]:
-	var rng := RandomNumberGenerator.new()
-	rng.seed = rng_seed
-	var order: Array[int] = []
-	for i in SONGS.size():
-		order.append(i)
-	order.sort_custom(func(a: int, b: int) -> bool: return song_bpm(a) < song_bpm(b))
-	var third := order.size() / 3
-	var out: Array[int] = []
-	for k in 3:
-		out.append(order[k * third + rng.randi_range(0, third - 1)])
-	return out
-
-
-func setup(index: int, note_bars: int) -> void:
-	idx = index
-	var base: Dictionary = SONGS[index % SONGS.size()]
-	var lap := index / SONGS.size()
-	title = str(base["name"]) + ("" if lap == 0 else " (ENCORE)")
-	style = str(base.get("style", "pop"))
-	bpm = float(base["bpm"]) + 12.0 * lap
+## Set the song up from a songgen.gd description (SongGen.song / from_code): seed, level, bpm, key,
+## chords, style, busy. The charts come from the seed, so every machine makes the same notes.
+func setup_desc(d: Dictionary, note_bars: int) -> void:
+	code = int(d.get("code", 0))
+	seed_v = int(d.get("seed", 0))
+	level = int(d.get("level", 1))
+	daily = bool(d.get("daily", false))
+	busy = int(d.get("busy", 0))
+	title = str(d.get("name", "Song"))
+	style = str(d.get("style", "pop"))
+	bpm = float(d.get("bpm", 100.0))
 	spb = 60.0 / bpm
-	key = int(base["key"])
+	key = int(d.get("key", 60))
 	roots.clear()
 	minor.clear()
-	var prog: Array = base["prog"]
-	for c in prog:
+	for c in d.get("prog", [[0, false], [5, false], [7, false], [5, false]]):
 		var ca: Array = c
 		var r: int = int(ca[0])
 		if r > 6:
@@ -108,7 +77,7 @@ func setup(index: int, note_bars: int) -> void:
 
 
 func loop_key() -> String:
-	return "rb2_%d" % idx
+	return "rb3_%d_%d" % [seed_v, level]
 
 
 func chord_of_bar(bar: int) -> int:
@@ -148,9 +117,9 @@ func guitar_count(level: int) -> int:
 
 func _make_charts() -> void:
 	var rng := RandomNumberGenerator.new()
-	rng.seed = 1000 + idx * 7919
-	# Busyness from the tempo (slow songs simple, fast songs busy), plus one per encore lap.
-	var diff := (0 if bpm < 100.0 else (1 if bpm < 118.0 else 2)) + idx / SONGS.size()
+	rng.seed = hash("%d:%d:chart" % [seed_v, level])
+	# Busyness from the song's level (songgen.gd: warm-ups simple, later songs busy).
+	var diff := busy
 	# Guitar: one catchy 2-bar motif per section (16 eighth-note steps), repeated over the chords.
 	# notes: [time, lane, pitch, level, star]
 	var notes: Array = []
@@ -362,7 +331,7 @@ func synth_loop() -> void:
 				_noise(buf, t0, 0.02, 0.025, s)
 			_:
 				if b16 % 2 == 0:
-					var oct2 := 12 if (b16 % 8 == 6 and idx >= 1) else 0
+					var oct2 := 12 if (b16 % 8 == 6 and level >= 2) else 0
 					_tone(buf, t0, step * 1.7, freq(key - 24 + r + oct2), 0.3, true, 7.0)
 				if b16 % 4 == 2:
 					for iv in [0, third, 7]:
