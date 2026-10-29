@@ -19,7 +19,8 @@ var flee_dir := Vector3.UP
 var net_target := Vector3.ZERO
 var net_fleeing := false
 var radius := 0.2
-var slot := 0          # wasp raids: each wasp hovers at its own spot round the hive
+var slot := 0
+var leave_after := 0.0  # simple mode: an aphid gets bored and flies off after this many seconds of nibbling          # wasp raids: each wasp hovers at its own spot round the hive
 var wings: Array[MeshInstance3D] = []
 var body: Node3D
 
@@ -89,6 +90,8 @@ func _process(delta: float) -> void:
 					state = "come"
 					return
 				global_position = _goal() + Vector3(0, sin(t * 9.0) * 0.015, 0)
+				if leave_after > 0.0 and t > leave_after:
+					shoo(global_position + Vector3.DOWN)
 			else:
 				global_position = _goal() + Vector3(sin(t * 2.0) * 0.12, sin(t * 3.0) * 0.05, cos(t * 1.7) * 0.12)
 				steal_t -= delta

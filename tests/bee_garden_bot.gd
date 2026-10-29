@@ -37,6 +37,7 @@ var joined := 1
 var fake_pad := 13
 var pad_phase := 0
 var reported := false
+var agreed := false
 # gardener state machine
 var g_state := "idle"
 var g_spot := -1
@@ -57,7 +58,7 @@ var max_pests := 0
 var max_kinds := 0
 var simple_reported := false
 var cues := {}  # simple mode: picture cues seen / learned
-const HEADLINES := "^(BEE GARDEN|BUZZ BUZZ!|BUZZ! P\\d|HOORAY!|PAUSED|Connecting to the gardener…)$"
+const HEADLINES := "^(BEE GARDEN|BUZZ BUZZ!|BUZZ! P\\d|HOORAY!|PAUSED|TODAY'S GARDEN|Connecting to the gardener…)$"
 var headline_re := RegEx.create_from_string(HEADLINES)
 var plug_phase := 0
 # fake VR gardener: waypoints [grab-point position, trigger 0/1, pitch, hold seconds]
@@ -73,7 +74,11 @@ var vr_tasks_done := 0
 func _ready() -> void:
 	preload("res://tests/bot_end.gd").arm(self)  # end by itself in networked runs
 	main = load("res://games/bee_garden/main.tscn").instantiate()
+	main.fresh_save = not OS.has_environment("BEE_KEEP_SAVE")  # a brand-new family garden (BEE_KEEP_SAVE=1: keep the last one)
 	add_child(main)
+	if OS.has_environment("BEE_VETERAN"):  # a family that has played a lot: aphids from round 3, all seeds
+		main.save.data.rounds = 12
+		main.save.data.jars = 25
 
 
 func _physics_process(delta: float) -> void:
@@ -97,9 +102,35 @@ func _physics_process(delta: float) -> void:
 		print("Bot: starting event %s" % test_events[test_event_i])
 		main._start_event(test_events[test_event_i])
 		test_event_i += 1
+	# Veteran runs: the bees fill jars long before the plan's aphid / golden flower times, so start them now.
+	if OS.has_environment("BEE_VETERAN") and main.net.mode != "client" and main.day >= 3 and main.phase == "day" and not events_seen.has("forced"):
+		events_seen["forced"] = true
+		main._spawn_aphid()
+		if main.event == "":
+			main._start_event("golden")
+	var aphids := get_tree().get_nodes_in_group("pests").filter(func(p): return p.kind == "aphid").size()
+	if aphids > 0 and not events_seen.has("aphid"):
+		events_seen["aphid"] = true
+		print("Bot: sees an aphid (mode=%s)" % main.net.mode)
+	if events_seen.has("aphid") and aphids == 0 and not events_seen.has("aphid_gone"):
+		events_seen["aphid_gone"] = true
+		print("Bot: the aphid left (mode=%s)" % main.net.mode)
 	if main.event != "" and not events_seen.has(main.event):
 		events_seen[main.event] = true
 		print("Bot: sees event %s (mode=%s)" % [main.event, main.net.mode])
+	# Every machine builds the host's seeded garden bed (multibot checks they agree).
+	if not agreed and t > 12.0 and (main.net.mode != "client" or main.synced) and main.garden_seed >= 0:
+		agreed = true
+		print("BOT AGREE garden=%d" % main.garden_seed)
+		print("BOT AGREE bed=%d" % hash(var_to_str(W.layout)))
+		print("Bot: garden %d plan %s, %d features, shelf %d jars, Queen Bea's favourite %d, weather %s" % [main.garden_seed,
+			main.garden.get("plan", "?"), (main.garden.get("features", []) as Array).size(), main.shelf_jars, main.fav_kind, main.weather])
+		if (W.layout as Array).size() != W.SPOTS:
+			print("Bot: FAIL the bed has %d spots" % (W.layout as Array).size())
+		for i in main.plant_nodes.size():
+			if main.plant_nodes[i].position.distance_to(W.spot_pos(i)) > 0.01:
+				print("Bot: FAIL plant %d isn't on its spot" % i)
+				break
 	if main.days_done >= 1 and not reported:
 		reported = true
 		print("Bot: LEVEL COMPLETE at t=%.1f (mode=%s, day %d done, honey %d)" % [t, main.net.mode, main.days_done, main.total_honey])
@@ -462,7 +493,7 @@ func _simple_checks() -> void:
 	if main.props != null and (absf(main.props.chime_ang) > 0.05 or absf(main.props.gnome_ang) > 0.05):
 		events_seen["props_moving"] = true  # on the TV: the snapshots carry the props
 	max_kinds = maxi(max_kinds, int(main.seed_kinds))
-	if main.event != "" and main.event != "rain" and not events_seen.has("bad_" + main.event):
+	if main.event != "" and main.event != "rain" and main.event != "golden" and not events_seen.has("bad_" + main.event):
 		events_seen["bad_" + main.event] = true
 		print("Bot: SIMPLE FAIL: event %s should be off" % main.event)
 	if main.game_over and not events_seen.has("bad_over"):

@@ -25,7 +25,9 @@ extends RefCounted
 ## (Lumi: a little glowing crystal fairy), shard (a crystal shard), the skills bigfire, snowflake (ice), twin (two
 ## sparks), longsword, spin (a sword in a whirl), mighty (a big golden sword), and Willowbrook's windmill, fountain
 ## and rainbow; Rocket Workshop's engineer (Sprocket: a teal robot in an orange hard hat with a spanner) and
-## toyrocket (the rocket with its nose and fins in color); anything else is a core/ui_kit.gd icon kind ("star", "heart", "crown"...).
+## toyrocket (the rocket with its nose and fins in color); Bee Garden's queenbee (Queen Bea: a round bee in a gold
+## crown), hive (a striped skep with bees), honeyjar (a jar of honey with a red lid), daisy and lily (the sun lily);
+## anything else is a core/ui_kit.gd icon kind ("star", "heart", "crown"...).
 ## Keep lines short and kind: kids read the screen.
 
 const UiKit := preload("res://core/ui_kit.gd")
@@ -39,7 +41,8 @@ const PICTURES: Array[String] = ["bird", "envelope", "cloud", "storm", "house", 
 	"beaver", "island", "boat",
 	"captain", "planet", "station", "rocket", "seller", "icecream", "carousel", "ferris", "tent",
 	"lumi", "shard", "bigfire", "snowflake", "twin", "longsword", "spin", "mighty", "windmill", "fountain", "rainbow",
-	"engineer", "toyrocket"]
+	"engineer", "toyrocket",
+	"queenbee", "hive", "honeyjar", "daisy", "lily"]
 
 
 ## Show a story card on one view root or an Array of them. Returns the first card made (or null).
@@ -489,6 +492,62 @@ class Picture extends Control:
 				_poly([[0.42, 0.9], [0.58, 0.9], [0.5, 0.62]], Color(0.2, 0.15, 0.2))
 				draw_line(_p(0.5, 0.12 + bob * 0.5), _p(0.5, 0.0 + bob * 0.5), white, 2.0)
 				_poly([[0.5, 0.0 + bob * 0.5], [0.66, 0.04 + bob * 0.5], [0.5, 0.08 + bob * 0.5]], Color(1.0, 0.85, 0.3))
+			"queenbee":  # Queen Bea (Bee Garden): a round fuzzy bee in a little gold crown, wings buzzing
+				var flap := absf(sin(t * 18.0)) * 0.06
+				_circle(0.27, 0.36 + bob - flap, 0.15, Color(0.9, 0.97, 1.0, 0.8))
+				_circle(0.73, 0.36 + bob - flap, 0.15, Color(0.9, 0.97, 1.0, 0.8))
+				_circle(0.5, 0.6 + bob, 0.3, Color(1.0, 0.8, 0.15))
+				for y in [0.6, 0.76]:
+					_poly([[0.23, y - 0.035 + bob], [0.77, y - 0.035 + bob], [0.74, y + 0.035 + bob], [0.26, y + 0.035 + bob]], Color(0.2, 0.14, 0.08))
+				_eye(0.41, 0.48 + bob, 0.06)
+				_eye(0.59, 0.48 + bob, 0.06)
+				draw_arc(_p(0.5, 0.52 + bob), 0.07 * size.x, 0.3, PI - 0.3, 10, Color(0.45, 0.2, 0.1), 2.5)
+				_circle(0.33, 0.55 + bob, 0.035, Color(1.0, 0.55, 0.5, 0.7))
+				_circle(0.67, 0.55 + bob, 0.035, Color(1.0, 0.55, 0.5, 0.7))
+				for sx in [-1.0, 1.0]:
+					draw_line(_p(0.5 + sx * 0.08, 0.33 + bob), _p(0.5 + sx * 0.18, 0.2 + bob), Color(0.2, 0.14, 0.08), 2.0)
+					_circle(0.5 + sx * 0.18, 0.2 + bob, 0.025, Color(0.2, 0.14, 0.08))
+				var gold := Color(1.0, 0.85, 0.2)
+				_poly([[0.36, 0.33 + bob], [0.64, 0.33 + bob], [0.66, 0.16 + bob], [0.58, 0.24 + bob], [0.5, 0.12 + bob], [0.42, 0.24 + bob], [0.34, 0.16 + bob]], gold)
+				_circle(0.5, 0.27 + bob, 0.025, Color(1.0, 0.35, 0.45))
+			"hive":  # a striped straw skep with a door and two bees
+				for k in 5:
+					var w := 0.36 - absf(k - 1.5) * 0.04 - (0.08 if k == 0 else 0.0)
+					_poly([[0.5 - w, 0.28 + k * 0.12], [0.5 + w, 0.28 + k * 0.12], [0.5 + w, 0.4 + k * 0.12], [0.5 - w, 0.4 + k * 0.12]],
+						Color(1.0, 0.78, 0.3) if k % 2 == 0 else Color(0.9, 0.62, 0.2))
+				_circle(0.5, 0.26, 0.16, Color(1.0, 0.78, 0.3))
+				_circle(0.5, 0.78, 0.08, Color(0.25, 0.15, 0.08))
+				for k in 2:
+					var a := t * 2.0 + k * PI
+					var bx := 0.5 + cos(a) * 0.38
+					var by := 0.3 + sin(a) * 0.12
+					_circle(bx, by, 0.05, Color(1.0, 0.85, 0.15))
+					_circle(bx, by - 0.04, 0.03, Color(0.9, 0.97, 1.0, 0.8))
+			"honeyjar":  # a jar of golden honey with a red lid and a honeycomb label
+				_poly([[0.26, 0.3 + bob], [0.74, 0.3 + bob], [0.78, 0.9 + bob], [0.22, 0.9 + bob]], Color(1.0, 0.68, 0.1))
+				_poly([[0.3, 0.34 + bob], [0.38, 0.34 + bob], [0.36, 0.84 + bob], [0.28, 0.84 + bob]], Color(1.0, 0.85, 0.45, 0.8))
+				_poly([[0.22, 0.18 + bob], [0.78, 0.18 + bob], [0.78, 0.3 + bob], [0.22, 0.3 + bob]], Color(0.9, 0.25, 0.25))
+				var hx := []
+				for i in 6:
+					var a := i * TAU / 6.0
+					hx.append([0.52 + cos(a) * 0.11, 0.6 + bob + sin(a) * 0.11])
+				_poly(hx, Color(1.0, 0.95, 0.75))
+				_circle(0.52, 0.6 + bob, 0.04, Color(1.0, 0.68, 0.1))
+			"daisy", "lily":
+				var leaf2 := Color(0.35, 0.75, 0.3)
+				draw_line(_p(0.5, 0.5), _p(0.5, 0.98), leaf2, 0.05 * size.x)
+				_poly([[0.5, 0.8], [0.72, 0.68], [0.52, 0.86]], leaf2)
+				var n := 12 if kind == "daisy" else 6
+				var pc := Color(1.0, 0.55, 0.75) if kind == "daisy" else Color(1.0, 0.95, 0.55)
+				for i in n:
+					var a := i * TAU / n + t * 0.3
+					var rr := 0.22 if kind == "daisy" else 0.24
+					_circle(0.5 + cos(a) * rr, 0.42 + sin(a) * rr + bob, 0.075 if kind == "daisy" else 0.11, pc)
+				_circle(0.5, 0.42 + bob, 0.12, Color(1.0, 0.85, 0.25) if kind == "daisy" else Color(1.0, 0.6, 0.1))
+				if kind == "lily":
+					for i in 5:
+						var a2 := t * 3.0 + i * TAU / 5.0
+						_circle(0.5 + cos(a2) * 0.36, 0.42 + sin(a2) * 0.36 + bob, 0.02, Color(1.0, 0.95, 0.5))
 			"beaver":  # Benny (Tiny Town Tycoon): a brown beaver in a yellow hard hat, big front teeth
 				var fur := Color(0.62, 0.4, 0.24)
 				_poly([[0.3, 0.72 + bob], [0.7, 0.72 + bob], [0.8, 0.98], [0.2, 0.98]], fur.darkened(0.1))
