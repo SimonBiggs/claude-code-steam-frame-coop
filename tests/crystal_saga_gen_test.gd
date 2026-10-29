@@ -110,10 +110,8 @@ func _init() -> void:
 	_expect(not SagaGen.check(b8).is_empty(), "a crystal inside a rock is caught")
 	# Pictures: every story card picture has a drawing (all games); every picture the saga uses exists.
 	var StoryCard := load("res://core/story_card.gd")
-	var src := FileAccess.get_file_as_string("res://core/story_card.gd")
-	for pic in StoryCard.PICTURES:
-		var re := RegEx.create_from_string("\\n\\t+(\"[a-z]+\", )*\"%s\"(, \"[a-z]+\")*:" % pic)
-		_expect(re.search(src) != null, "story card picture %s has a drawing" % pic)
+	for e in StoryCard.check():  # (tests/story_pictures_test.gd checks the pictures in depth)
+		_expect(false, e)
 	var icons := ["star", "crown", "music", "trophy", "flag", "heart", "sun"]
 	var used: Array = ["lumi", "shard", "sun", "star"]
 	for id in Saga.SKILLS:
@@ -121,7 +119,7 @@ func _init() -> void:
 	for pl in Saga.PLACES:
 		used.append(String(pl.pic))
 	for pic2 in used:
-		_expect(StoryCard.PICTURES.has(pic2) or icons.has(pic2), "picture %s exists" % pic2)
+		_expect(StoryCard.has_picture(pic2) or icons.has(pic2), "picture %s exists" % pic2)
 	_expect(Saga.PLACES.size() == World.PLACE_AT.size(), "every Willowbrook place has a spot (%d places, %d spots)" % [Saga.PLACES.size(), World.PLACE_AT.size()])
 	# Story.
 	for w4 in Saga.self_check():
