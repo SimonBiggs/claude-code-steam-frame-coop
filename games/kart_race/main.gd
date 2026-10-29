@@ -23,6 +23,13 @@ extends Node3D
 ## arrow = go, swaying left/right arrows = steer, a big red arrow = wrong way, turn this way) that fade
 ## after the kid has done the move twice; the VR wheel gets two shared Cannon Cove ghost hands that turn
 ## it and squeeze the trigger, and a glowing arrow over the wheel when going the wrong way.
+##
+## THE GRAND TOUR (story.gd, trackgen.gd): every track is generated from a seed (the host sends a few numbers,
+## each machine builds the same track). The session starts on TODAY'S TRACK (the same all day, with a see-
+## through GHOST of the day's best run); then BOLT the robot's tour: six places x three new tracks, each place's
+## CHAMP races in CPU slot 0 wearing the hat you win by finishing the place; won hats are worn by the drivers
+## (saved). Split lanes round flower-bed islands have a shorter shortcut lane with a boost arrow. Picture story
+## cards (TV + VR), a row of place pictures on the results, and one RUN telemetry line per race.
 
 const VrText := preload("res://core/vr_text.gd")
 const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
@@ -566,7 +573,7 @@ func hat_model(h: int) -> Node3D:
 			add.call(cyl_mesh(0.19, 0.19, 0.04, 14), Color(0.95, 0.3, 0.3), Vector3(0, 0.2, 0))
 		3:  # wizard hat
 			add.call(cyl_mesh(0.32, 0.32, 0.03, 18), col.darkened(0.2), Vector3(0, 0.18, 0))
-			add.call(cyl_mesh(0.0, 0.2, 0.55, 14), col, Vector3(0, 0.46, 0))
+			add.call(cyl_mesh(0.0, 0.17, 0.4, 14), col, Vector3(0, 0.39, 0))
 			add.call(sphere_mesh(0.05), Color(1.0, 0.92, 0.35), Vector3(0.0, 0.42, -0.14), 1.5)
 		4:  # woolly hat
 			add.call(sphere_mesh(0.255), col, Vector3(0, 0.05, 0))
