@@ -27,7 +27,10 @@ void fragment() {
 }
 """
 
+const RouteGen := preload("res://games/dragon_rider/routegen.gd")
+
 var main
+var route := {}  # routegen.gd's data for this level
 var seed_value := 0
 var level := 1
 var mission := "rings"
@@ -52,17 +55,15 @@ var mill_blades: Array = []
 
 
 func ring_count(lv: int) -> int:
-	if main.SIMPLE_MODE:
-		return [4, 5, 6][lv - 1] if lv <= 3 else mini(5 + lv / 2, 9)
-	return mini(6 + (lv - 1) * 2, 14)
+	return RouteGen.ring_count(lv, main.SIMPLE_MODE)
 
 
+## Build the level from routegen.gd's data (the same seed gives the same route on every machine).
 func build(seed_v: int, origin: Vector3, yaw: float, lv: int, mis: String = "rings") -> void:
 	seed_value = seed_v
 	level = lv
 	mission = mis
-	var rng := RandomNumberGenerator.new()
-	rng.seed = seed_v
+	route = RouteGen.route(seed_v, origin, yaw, lv, mis, main.SIMPLE_MODE)
 	ring_next_mat = main.color_mat(Color(1.0, 0.85, 0.3), 2.2)
 	ring_later_mat = main.color_mat(Color(0.55, 0.85, 1.0), 0.7)
 	ring_done_mat = main.color_mat(Color(0.5, 1.0, 0.6), 0.5)
@@ -70,114 +71,34 @@ func build(seed_v: int, origin: Vector3, yaw: float, lv: int, mis: String = "rin
 	var rock: StandardMaterial3D = main.color_mat(Color(0.55, 0.42, 0.5), 0.0)
 	var grass: StandardMaterial3D = main.color_mat(Color(0.5, 0.78, 0.4), 0.0)
 	var string_mat: StandardMaterial3D = main.color_mat(Color(0.95, 0.95, 0.95), 0.0)
-	var simple: bool = main.SIMPLE_MODE
-	var easy := simple and lv <= 2  # stage 1-2: big rings in an easy, gentle line; balloons close by
-	var has_stars: bool = not simple or main.simple_has("stars", lv)
-	var count := ring_count(lv)
-	if mission == "rescue":
-		count = maxi(5, count - 2)
-	elif mission == "boss":
-		count = 6
-	var heading := yaw
-	var pos := origin
-	var prev := origin
-	var star_pts: Array = []
-	var arc_leg := count / 2 if count > 3 and has_stars else -1
-	var critter_legs: Array = []
-	if mission == "rescue":
-		var nc := mini(3 + lv / 3, count - 1)
-		for k in nc:
-			critter_legs.append(1 + int(float(k) * (count - 1) / nc))
-	var golden_leg := 1 + rng.randi() % maxi(1, count - 2)
-	for k in count:
-		var dist := FIRST if k == 0 else SPACING
-		var wiggle := 0.55 * minf(1.0, 0.5 + lv * 0.15)
-		var dy := 12.0
-		if easy:
-			dist = 60.0 if k == 0 else 62.0
-			wiggle = 0.12 if lv == 1 else 0.25
-			dy = 3.0 if lv == 1 else 6.0
-		elif simple:
-			wiggle = minf(wiggle, 0.4)
-			dy = 8.0
-		if k > 0:
-			heading += rng.randf_range(-1.0, 1.0) * wiggle
-		var y := clampf(pos.y + rng.randf_range(-dy, dy), 22.0, 85.0)
-		pos = pos + Basis(Vector3.UP, heading) * Vector3.FORWARD * dist
-		pos.y = y
-		var normal := (pos - prev).normalized()
-		var final := k == count - 1
-		if mission != "boss":
-			var r0 := RING_R
-			if simple:
-				r0 = 9.5 if lv == 1 else (8.5 if lv == 2 else 7.5)
-			var radius := r0 * (1.3 if final else 1.0)
-			var ring := MeshInstance3D.new()
-			var tm := TorusMesh.new()
-			tm.inner_radius = radius - 0.45
-			tm.outer_radius = radius + 0.45
-			tm.rings = 28
-			tm.ring_segments = 8
-			ring.mesh = tm
-			ring.material_override = ring_later_mat
-			ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-			add_child(ring)
-			ring.global_position = pos
-			ring.basis = main.basis_y_to(normal)
-			rings.append({"pos": pos, "normal": normal, "radius": radius, "node": ring, "final": final})
-		# Stars along the way from the previous ring to this one (one leg: a rainbow arc of stars).
-		var side := normal.cross(Vector3.UP).normalized()
-		if not has_stars:
-			pass
-		elif k == arc_leg:
-			var arc_h := 9.0 + rng.randf() * 3.0
-			var pts: Array = []
-			for j in 7:
-				var f := 0.15 + j * 0.7 / 6.0
-				var sp := prev.lerp(pos, f) + Vector3.UP * sin(f * PI) * arc_h
-				star_pts.append(sp)
-				pts.append(sp)
-			_rainbow(pts)
-		else:
-			for j in 2:
-				var f := 0.35 + j * 0.3
-				var sp := prev.lerp(pos, f) + side * rng.randf_range(-3.0, 3.0) + Vector3.UP * rng.randf_range(-2.0, 2.0)
-				if k == 0:
-					sp = origin.lerp(pos, 0.55 + j * 0.2)
-				star_pts.append(sp)
-		# Balloons off to the sides for the gunners (and once per level a golden one).
-		var nb := 2 if lv < 3 else 3
-		if easy:
-			nb = 3
-		for j in nb:
-			var s := -1.0 if rng.randf() < 0.5 else 1.0
-			var bp := prev.lerp(pos, rng.randf_range(0.2, 0.9)) + side * s * rng.randf_range(9.0, 22.0) \
-				+ Vector3.UP * rng.randf_range(-5.0, 9.0)
-			if easy:
-				bp = prev.lerp(pos, 0.2 + 0.25 * j + rng.randf_range(0.0, 0.1)) + side * s * rng.randf_range(5.0, 9.0) \
-					+ Vector3.UP * rng.randf_range(-1.0, 4.0)
-			var c: Color = BALLOON_COLORS[rng.randi() % BALLOON_COLORS.size()]
-			_balloon(2000 + balloons.size(), bp, c, false, string_mat)
-		if k == golden_leg and (not simple or main.simple_has("golden", lv)):
-			var gs := -1.0 if rng.randf() < 0.5 else 1.0
-			_balloon(3000, prev.lerp(pos, 0.5) + side * gs * rng.randf_range(10.0, 15.0) + Vector3.UP * rng.randf_range(2.0, 7.0),
-				Color(1.0, 0.82, 0.25), true, string_mat)
-		if critter_legs.has(k):
-			var cs := -1.0 if rng.randf() < 0.5 else 1.0
-			_critter(prev.lerp(pos, rng.randf_range(0.4, 0.6)) + side * cs * rng.randf_range(7.0, 11.0) + Vector3.UP * rng.randf_range(-2.0, 3.0))
-		# A sky island beside the route, and a big one far off as scenery.
-		var isl_side := -1.0 if rng.randf() < 0.5 else 1.0
-		_island(prev.lerp(pos, 0.5) + side * isl_side * rng.randf_range(32.0, 55.0) + Vector3.UP * rng.randf_range(-22.0, -6.0),
-			rng.randf_range(6.0, 12.0), rng, rock, grass, 1 + rng.randi() % 2, true)
-		var far_pos := prev.lerp(pos, 0.5) - side * isl_side * rng.randf_range(110.0, 190.0) + Vector3.UP * rng.randf_range(-40.0, 10.0)
-		var far_r := rng.randf_range(18.0, 34.0)
-		if k % 2 == 0:
-			_island(far_pos, far_r, rng, rock, grass, 0, false)
-		prev = pos
-	# The finish: a big island just past the last ring (or the end of the boss route).
-	var end_n := (pos - origin).normalized() if rings.is_empty() else (rings[rings.size() - 1].normal as Vector3)
-	_island(pos + end_n * 70.0 + Vector3.UP * -30.0, 22.0, rng, rock, grass, 3, false)
-	_build_stars(star_pts)
+	for rd in route.rings:
+		var radius: float = rd.radius
+		var ring := MeshInstance3D.new()
+		var tm := TorusMesh.new()
+		tm.inner_radius = radius - 0.45
+		tm.outer_radius = radius + 0.45
+		tm.rings = 28
+		tm.ring_segments = 8
+		ring.mesh = tm
+		ring.material_override = ring_later_mat
+		ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(ring)
+		ring.global_position = rd.pos
+		ring.basis = main.basis_y_to(rd.normal)
+		rings.append({"pos": rd.pos, "normal": rd.normal, "radius": radius, "node": ring, "final": rd.final})
+	if not (route.arc as Array).is_empty():
+		_rainbow(route.arc)
+	for b in route.balloons:
+		_balloon(2000 + balloons.size(), b[0], BALLOON_COLORS[int(b[1]) % BALLOON_COLORS.size()], false, string_mat)
+	if route.golden != null:
+		_balloon(3000, route.golden, Color(1.0, 0.82, 0.25), true, string_mat)
+	for c in route.critters:
+		_critter(c)
+	for isl in route.islands:
+		var rng := RandomNumberGenerator.new()
+		rng.seed = int(isl[4])
+		_island(isl[0], isl[1], rng, rock, grass, int(isl[2]), bool(isl[3]))
+	_build_stars(route.stars)
 	_build_multimeshes()
 	# Draw distance: the Frame's GPU only draws what is near enough to matter.
 	_cull(self)

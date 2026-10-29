@@ -70,6 +70,21 @@ const PauseMenuScript := preload("res://core/pause_menu.gd")
 const VrText := preload("res://core/vr_text.gd")
 
 const SIMPLE_MODE := true
+## STORY + DEPTH: SUNNY the dragon flies the family through the sky. Every stage's sky ROUTE comes from a seed
+## (routegen.gd: rings, stars, balloons, bunnies and islands as data, checked by a validator), all stages of a flight
+## from one flight seed. Every stage finished hangs a CHARM on the gunners' deck rail (bell = rings, bunny = rescue,
+## ribbon = race, crown = the Storm King; saved), and a flower garland along the rail grows a blossom each
+## play-day. TODAY'S FLIGHT: the first flight each day is the same on every machine and its charms are golden.
+## Picture cards (story_pictures.gd) tell it. Telemetry: one RUN line per stage and on quit. Networked: the host
+## sends the charms + garland and the cards as events; routes come from the level seed in the snapshot.
+const RouteGen := preload("res://games/dragon_rider/routegen.gd")
+const Seeded := preload("res://core/seeded.gd")
+const Save := preload("res://core/save.gd")
+const Telemetry := preload("res://core/telemetry.gd")
+const StoryCard := preload("res://core/story_card.gd")
+const GAME_ID := "dragon_rider"
+const CHARM_COLORS := {"bell": Color(1.0, 0.8, 0.2), "bunny": Color(1.0, 0.75, 0.85), "ribbon": Color(0.35, 0.6, 1.0), "crown": Color(1.0, 0.85, 0.25)}
+const CHARM_CHEERS := {1: "Our first charm!", 5: "Five charms!", 10: "Ten charms!", 22: "A rail full of charms!"}
 const MAX_PLAYERS := 7  # rider + 6 gunners
 const MAX_LOCAL_VIEWS := 6
 ## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
@@ -205,6 +220,18 @@ var cage_hint := {}            # critter index -> true once the "pop the cage" h
 var level_balloons := 0
 # Simple mode
 var props: Node3D
+# --- Sunny's charms + the seeded flight (host / local own them; TV machines get the charms + cards) ---
+var save: Node
+var flight_seed := 0
+var flight_daily := false
+var stage_t := 0.0
+var charm_list: Array = []  # [[kind, play-day, golden], ...]
+var charm_days := 0
+var charm_root: Node3D
+var charm_count := -1
+var charm_resend := 0.0
+var story_queue: Array = []
+var story_t := 0.0
 var ghost_hands: Node3D
 var practice_step := -1        # 0..2: practice ring (left, right, up); 3: done; -1: not practising
 var practice_t := 0.0
@@ -279,6 +306,8 @@ func _ready() -> void:
 
 func _exit_tree() -> void:
 	XRServer.world_scale = 1.0  # global: never leak a scale into the next game
+	if save != null and net != null and net.mode != "client" and level > 0:
+		_log_stage("quit")
 
 
 func _setup_game(mode: String) -> void:
@@ -293,6 +322,8 @@ func _setup_game(mode: String) -> void:
 	ready_to_play = true
 	_ensure_join_listener()
 	_restore_party()
+	if mode != "client":
+		_start_flight()
 	if SIMPLE_MODE:
 		if mode != "client":
 			show_center("DRAGON RIDER!", 3.0)
@@ -535,7 +566,8 @@ static func sky_for(n: int) -> String:
 func _start_level(n: int) -> void:
 	level = n
 	mission = mission_for(n)
-	level_seed = randi() % 1000000
+	level_seed = RouteGen.stage_seed(flight_seed, n) if flight_seed > 0 else randi() % 1000000
+	stage_t = 0.0
 	course_origin = dragon.global_position
 	course_yaw = dragon.yaw
 	_build_course()
@@ -1497,6 +1529,8 @@ func _simple_level_complete() -> void:
 	for k in cols.size():
 		burst(dragon.global_position + fwd * Vector3(randf_range(-12.0, 12.0), randf_range(4.0, 10.0), randf_range(-28.0, -14.0)), cols[k], 24, 0.28)
 	print("Level %d (%s) complete: rings %d/%d, balloons %d" % [level, mission, level_rings, course.rings.size(), level_balloons])
+	_add_charm()
+	_log_stage("done")
 	show_center("HOORAY!", SIMPLE_DONE_TIME - 1.0)
 
 
@@ -1704,6 +1738,12 @@ func _process(delta: float) -> void:
 		music.volume_db = -17.0
 	if music.has_method("play_track"):
 		music.play_track(maxi(level - 1, 0))
+	_update_story(delta)
+	stage_t += delta
+	if net.mode == "host" and net.connected and save != null:
+		charm_resend -= delta
+		if charm_resend <= 0.0:
+			_send_charms()  # a machine that missed them (or joined later) catches up
 	if mirror_vp:
 		mirror_t -= delta
 		if mirror_t <= 0.0:
@@ -2263,6 +2303,7 @@ func _check_join(delta: float) -> void:
 # --- Networked co-op (see docs/GAME_DEV_GUIDE.md) ----------------------------
 
 func on_client_joined() -> void:
+	_send_charms()
 	if not seats.first_machine():
 		return  # each machine's gunners climb aboard when they ask ("join")
 	if SIMPLE_MODE:
@@ -2508,6 +2549,10 @@ func apply_event(kind: String, args: Array) -> void:
 			_set_pause_banner(args[0], "The dragon rider paused the game")
 		"prop":
 			_prop_react(args[0], args[1], args[2])
+		"charms":
+			_build_charms(args[0], int(args[1]))
+		"story":
+			_story(args[0], args[1], args[2])
 		"visitor":
 			if props != null:
 				props.spawn_visitor(args[0], args[1], args[2])
@@ -2592,3 +2637,170 @@ func _update_vignette(delta: float) -> void:
 		var v := lerpf(cur, target, 1.0 - exp(-4.0 * delta))
 		vignette_mat.set_shader_parameter("strength", v)
 		vignette.visible = v > 0.02
+
+
+# --- Sunny's charms and the seeded flight ----------------------------------------------------------
+
+## Host / local: a new flight. Count the play-day (the garland grows a blossom), pick the flight seed (TODAY'S
+## FLIGHT first each day), hang the charms and say hello.
+func _start_flight() -> void:
+	if save == null:
+		save = Save.new()
+		save.game_id = GAME_ID
+		# charms: [[kind, play-day, golden], ...]; days: days played; daily: the date TODAY'S FLIGHT was flown.
+		save.defaults = {"charms": [], "total": 0, "days": 0, "last_day": "", "daily": "", "flights": 0, "best_stage": 0}
+		add_child(save)
+	var today := Seeded.today()
+	var new_day := String(save.data.last_day) != today
+	if new_day:
+		save.data.days = int(save.data.days) + 1
+		save.data.last_day = today
+	save.data.flights = int(save.data.flights) + 1
+	flight_daily = String(save.data.daily) != today
+	flight_seed = RouteGen.daily_seed() if flight_daily else Seeded.fresh_seed()
+	if OS.has_environment("DR_SEED"):
+		flight_seed = int(OS.get_environment("DR_SEED"))
+	if flight_daily:
+		save.data.daily = today  # (one TODAY'S FLIGHT a day, however far it goes)
+	save.mark_dirty()
+	print("Dragon Rider flight: seed %d%s | %d charms, day %d" % [flight_seed, " (TODAY'S FLIGHT)" if flight_daily else "",
+		(save.data.charms as Array).size(), int(save.data.days)])
+	_build_charms(save.data.charms, int(save.data.days))
+	_send_charms()
+	if flight_daily:
+		_story_for_all("TODAY'S FLIGHT!", "dragon", Color(1.0, 0.85, 0.3))
+	_story_for_all("Hi! I'm Sunny!", "dragon", Color(0.95, 0.45, 0.3))
+	if new_day and int(save.data.days) > 1:
+		_story_for_all("My garland grew!", "flowerchain", Color(1.0, 0.6, 0.75))
+
+
+## Host / local: the stage's charm joins the rail (the oldest makes room when it's full).
+func _add_charm() -> void:
+	if save == null:
+		return
+	var kind: String = RouteGen.CHARMS.get(mission, "bell")
+	var list: Array = save.data.charms
+	list.append([kind, int(save.data.days), flight_daily])
+	while list.size() > RouteGen.CHARM_KEEP:
+		list.pop_front()
+	save.data.total = int(save.data.total) + 1
+	save.data.best_stage = maxi(int(save.data.best_stage), level)
+	save.mark_dirty()
+	_build_charms(list, int(save.data.days))
+	_send_charms()
+	var n := int(save.data.total)
+	_story_for_all(CHARM_CHEERS.get(n, "A new charm!"), kind, Color(1.0, 0.85, 0.3) if flight_daily else CHARM_COLORS.get(kind, Color.WHITE))
+
+
+func _send_charms() -> void:
+	charm_resend = 8.0
+	if net and net.mode == "host" and save != null:
+		net.event("charms", [(save.data.charms as Array).duplicate(true), int(save.data.days)])
+
+
+## One RUN line per stage (and on quit).
+func _log_stage(end: String) -> void:
+	Telemetry.run(GAME_ID, {"end": end, "stage": level, "mission": mission, "seed": level_seed, "flight": flight_seed,
+		"daily": flight_daily, "secs": snappedf(stage_t, 0.1), "rings": level_rings, "of": course.rings.size() if course != null else 0,
+		"balloons": level_balloons, "gunners": gunner_count(), "vr": not players.is_empty() and players[0].vr, "net": net.mode,
+		"charms": (save.data.charms as Array).size() if save else 0, "days": int(save.data.days) if save else 0})
+
+
+## Every machine: the charms hanging under the deck rail and the flower garland along it (a blossom a play-day).
+func _build_charms(list: Array, days: int) -> void:
+	if dragon == null:
+		return
+	if charm_root == null:
+		charm_root = Node3D.new()
+		charm_root.name = "Charms"
+		dragon.add_child(charm_root)
+	if charm_count == list.size() and charm_days == days and charm_list == list:
+		return
+	var grown := charm_count >= 0 and list.size() > charm_count
+	charm_list = list.duplicate(true)
+	charm_days = days
+	for c in charm_root.get_children():
+		charm_root.remove_child(c)
+		c.queue_free()
+	for i in mini(list.size(), RouteGen.CHARM_SLOTS):
+		var e: Array = list[i]
+		var ch := _charm(String(e[0]), bool(e[2]))
+		ch.position = RouteGen.charm_slot(i)
+		ch.scale = Vector3.ONE * 1.8  # big enough to spot from the deck and the saddle
+		charm_root.add_child(ch)
+		if grown and i == list.size() - 1:
+			ch.scale = Vector3.ONE * 0.05
+			ch.create_tween().tween_property(ch, "scale", Vector3.ONE * 1.8, 0.8).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	# The garland: blossoms along the top of both rails, front first.
+	var blossoms := RouteGen.garland(days)
+	var petal_cols: Array[Color] = [Color(1.0, 0.6, 0.75), Color(1.0, 1.0, 1.0), Color(1.0, 0.85, 0.35)]
+	for i in blossoms:
+		var side := -1.0 if i % 2 == 0 else 1.0
+		var b := MeshInstance3D.new()
+		b.mesh = sphere_mesh(0.09)
+		b.material_override = color_mat(petal_cols[(i / 2) % petal_cols.size()], 0.4)
+		b.scale = Vector3(1.0, 0.6, 1.0)
+		b.position = Vector3(1.12 * side, 0.37, 0.9 + (i / 2) * 0.45)
+		charm_root.add_child(b)
+	charm_count = list.size()
+
+
+## One charm hanging from the rail: a bell, a little bunny, a ribbon or a crown (golden on TODAY'S FLIGHT).
+func _charm(kind: String, golden: bool) -> Node3D:
+	var root := Node3D.new()
+	var col: Color = Color(1.0, 0.85, 0.25) if golden else CHARM_COLORS.get(kind, Color.WHITE)
+	var m := color_mat(col, 1.2 if golden else 0.3)
+	var string := MeshInstance3D.new()
+	string.mesh = box_mesh(Vector3(0.012, 0.16, 0.012))
+	string.material_override = color_mat(Color(0.9, 0.9, 0.9), 0.0)
+	string.position = Vector3(0, 0.1, 0)
+	root.add_child(string)
+	var body := MeshInstance3D.new()
+	match kind:
+		"bell":
+			body.mesh = cyl_mesh(0.03, 0.08, 0.11, 10)
+		"bunny":
+			body.mesh = sphere_mesh(0.065)
+			for s in [-1.0, 1.0]:
+				var ear := MeshInstance3D.new()
+				ear.mesh = box_mesh(Vector3(0.022, 0.08, 0.012))
+				ear.material_override = m
+				ear.position = Vector3(0.025 * s, 0.08, 0)
+				root.add_child(ear)
+		"ribbon":
+			body.mesh = cyl_mesh(0.07, 0.07, 0.02, 12)
+			body.rotation_degrees = Vector3(90, 0, 0)
+		_:
+			body.mesh = cyl_mesh(0.07, 0.06, 0.07, 8)
+	body.material_override = m
+	root.add_child(body)
+	return root
+
+
+## Host / local: a story card on every machine.
+func _story_for_all(line: String, pic: String, color: Color) -> void:
+	_story(line, pic, color)
+	if net and net.mode == "host":
+		net.event("story", [line, pic, color])
+
+
+func _story(line: String, pic: String, color: Color) -> void:
+	if story_queue.size() < 4:
+		story_queue.append([line, pic, color])
+
+
+func _update_story(delta: float) -> void:
+	story_t -= delta
+	if story_t > 0.0 or story_queue.is_empty() or players.is_empty():
+		return
+	var b: Array = story_queue.pop_front()
+	story_t = 2.6
+	var opts := {"who": "SUNNY", "line": b[0], "pic": b[1], "color": b[2], "duration": 2.4}
+	var huds: Array = []
+	for p in players:
+		if p.hud != null and is_instance_valid(p.hud) and p.hud is Control and p.hud.is_visible_in_tree():
+			huds.append(p.hud)
+	if not huds.is_empty():
+		StoryCard.show(huds, opts)
+	if players[0].vr and players[0].xr_camera != null:
+		StoryCard.show_vr(self, players[0].xr_camera, opts)
