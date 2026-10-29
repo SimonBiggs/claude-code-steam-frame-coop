@@ -4,6 +4,7 @@ extends Node3D
 ## in the pen. One merged mesh (1 draw call) so a big flock stays cheap.
 
 const Creatures := preload("res://core/creatures.gd")
+const FieldGen := preload("res://games/sheep_round_up/fieldgen.gd")
 
 const WALK := 0
 const HELD := 1
@@ -17,6 +18,7 @@ var wander_t := 0.0
 var last_by := -1  # slot that last pushed / threw it (credit when it gets home)
 var touch_cd := 0.0
 var net_target := Vector3.ZERO  # TV machine: where the host says it is
+var breed := 0  # FieldGen.BREEDS index (set before adding, or with set_breed)
 
 var body: Node3D
 var _prev := Vector3.ZERO
@@ -26,12 +28,27 @@ var _happy_t := 0.0
 
 
 func _ready() -> void:
-	body = Creatures.monster("sheep", {"lod": "far", "scale": 0.8, "seed": randi()})
-	add_child(body)
+	_make_body()
 	_prev = position
 	net_target = position
 	_phase = randf() * TAU
 	_happy_t = randf_range(1.0, 4.0)
+
+
+func _make_body() -> void:
+	if body != null:
+		body.queue_free()
+	var b: Dictionary = FieldGen.BREEDS[clampi(breed, 0, FieldGen.BREEDS.size() - 1)]
+	body = Creatures.monster("sheep", {"lod": "far", "scale": float(b.scale), "seed": randi(), "color": b.wool, "color2": b.face})
+	add_child(body)
+
+
+## A different breed (a TV machine learns it from the field after the sheep was made).
+func set_breed(b: int) -> void:
+	if b != breed or body == null:
+		breed = b
+		if is_inside_tree():
+			_make_body()
 
 
 ## A bounce: squash then stretch (touched, landed, penned).

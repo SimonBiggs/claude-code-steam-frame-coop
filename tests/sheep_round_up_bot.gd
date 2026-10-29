@@ -8,6 +8,7 @@ extends Node
 
 const BotKit := preload("res://tests/bot_kit.gd")
 const SheepScript := preload("res://games/sheep_round_up/sheep.gd")
+const FieldGen := preload("res://games/sheep_round_up/fieldgen.gd")
 
 var kit: BotKit
 var main: Node
@@ -26,6 +27,7 @@ func _ready() -> void:
 	main = load("res://games/sheep_round_up/main.tscn").instantiate()
 	main.set("round_time", 22.0)
 	main.set("results_wait", 4.0)
+	main.set("fresh_save", true)  # a brand-new farm every run (SRU_LEVEL=n plays a later field)
 	add_child(main)
 	kit.main = main
 	want = BotKit.bot_players(2, 6)
@@ -97,12 +99,17 @@ func _physics_process(delta: float) -> void:
 		_drive_vr(delta)
 
 
-## A gate's outside point nearest to p (sheep go in through the middle of a side).
+## The open gate's outside point nearest to p (sheep go in through the middle of a side).
 func _gate_for(p: Vector3) -> Vector3:
-	var pen: float = main.PEN
-	if absf(p.x) > absf(p.z):
-		return Vector3(signf(p.x) * (pen + 0.3), 0.0, 0.0)
-	return Vector3(0.0, 0.0, signf(p.z) * (pen + 0.3))
+	var best := Vector3.ZERO
+	var bd := INF
+	for side in 4:
+		if FieldGen.gate_open(int(main.field.get("gates", 15)), side):
+			var g := FieldGen.gate_point(side, 0.3)
+			if g.distance_to(p) < bd:
+				bd = g.distance_to(p)
+				best = g
+	return best
 
 
 ## Run to the spot behind the nearest loose sheep (away from its gate), then push it in.
@@ -220,6 +227,7 @@ func _check_pen_credit() -> void:
 	var herder: int = slots[0]
 	var camper: int = slots[slots.size() - 1]
 	var s: Node3D = main.sheep[0]
+	main.field = {}  # a plain field: every gate open, nothing in the way
 	s.set("penned", false)
 	s.set("state", 0)
 	s.set("last_by", -1)

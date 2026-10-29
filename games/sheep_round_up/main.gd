@@ -3,7 +3,13 @@ extends Node3D
 ## TV players are sheepdogs: run near sheep to push them (A = WOOF, scares them further).
 ## The VR player is the giant farmer: grab a sheep with the right trigger and drop it in the pen;
 ## any low hand shoos sheep away, touching sheep / dogs / the fence makes them bounce.
-## Each round won adds a few more sheep. Results show by themselves, then the next round starts.
+## STORY: a storm scattered Farmer Bo's sheep over the hills. Each round is a FIELD made from a seed
+## (fieldgen.gd: shut gates, low hedges, bushes, a stream with bridges, new breeds as fields get harder);
+## every sheep that reaches the pen goes home to Bo's HOME FIELD north of the play field, which fills up
+## and grows a barn, haystacks, a windmill... (farm.gd, saved). Every sheep home = the next field.
+## The first round each day (once a field is cleared) is TODAY'S FIELD, the same on every machine.
+## Networked: the host sends the field's seed + spec ("field" state); every machine rebuilds it.
+## Results show by themselves, then the next round starts. One RUN telemetry line per round / quit.
 ## Built on the shared engine (see games/engine_template/): party seats, split view, camera rigs,
 ## VR rig, state store + snapshots, hud_kit / hints / awards / creatures / mesh_kit / sky_kit.
 
@@ -25,18 +31,21 @@ const Creatures := preload("res://core/creatures.gd")
 const SkyKit := preload("res://core/sky_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")
 const SheepScript := preload("res://games/sheep_round_up/sheep.gd")
+const FieldGen := preload("res://games/sheep_round_up/fieldgen.gd")
+const FieldView := preload("res://games/sheep_round_up/field_view.gd")
+const Farm := preload("res://games/sheep_round_up/farm.gd")
+const Seeded := preload("res://core/seeded.gd")
+const Telemetry := preload("res://core/telemetry.gd")
+const StoryCard := preload("res://core/story_card.gd")
 
 const GAME_ID := "sheep_round_up"
-const ARENA := 8.0  # field radius
-const PEN := 1.6  # pen half size (square at the centre)
-const GAP := 0.75  # half width of the four gates
+const ARENA := FieldGen.ARENA  # field radius
+const PEN := FieldGen.PEN  # pen half size (square at the centre)
+const GAP := FieldGen.GAP  # half width of the gates
 const DOG_SPEED := 4.8
 const FLEE_SPEED := 3.0
 const SCARE_R := 2.4
 const BARK_R := 4.5
-const FIRST_SHEEP := 5
-const MORE_SHEEP := 3
-const MAX_SHEEP := 20
 const INTRO := {
 	"title": "SHEEP ROUND-UP",
 	"goal": "Get the sheep in the pen!",
@@ -46,6 +55,8 @@ const INTRO := {
 
 var round_time := 120.0  ## seconds per round (bots shorten it)
 var results_wait := 9.0  ## seconds the results stay up before the next round starts by itself
+var fresh_save := false  ## bots: start a brand-new farm
+var start_level := -1  ## tests (env SRU_LEVEL): play this field level
 
 # --- Networking contract / engine members ---
 var net: Node
@@ -91,6 +102,15 @@ var results_t := 0.0
 var fence_cd := 0.0
 var dog_touch_cd := 0.0
 var clock := 0.0
+var field := {}  # every machine: the field being played (fieldgen.gd)
+var field_key := ""  # the seed + spec it was made from (rebuild only when it changes)
+var field_node: Node3D
+var farm_node: Node3D
+var round_desc := {}  # host: {k: "story" / "daily", seed, spec}
+var daily_due := false
+var run := {}  # host: this round's numbers for telemetry
+var elapsed := 0.0
+var vr_story: Node3D
 
 
 func _ready() -> void:
@@ -109,8 +129,17 @@ func _ready() -> void:
 	party.player_left.connect(_on_player_left)
 	save = Save.new()
 	save.game_id = GAME_ID
-	save.defaults = {"best": 0}
+	save.defaults = Farm.save_defaults()
 	add_child(save)
+	if fresh_save:
+		save.data = Farm.save_defaults().duplicate(true)
+	if int(save.data.world) < 0:
+		save.data.world = Seeded.fresh_seed()  # this family's own fields
+		save.mark_dirty()
+	if OS.has_environment("SRU_LEVEL"):
+		start_level = int(OS.get_environment("SRU_LEVEL"))
+	if start_level >= 0:
+		save.data.level = start_level
 	sfx = SfxScript.new()
 	add_child(sfx)
 	sfx.add_recipe("baa", {"len": 0.6, "peak": 0.55, "jit": 0.08, "layers": [
@@ -168,7 +197,12 @@ func _setup(mode: String) -> void:
 	awards.set_player(0, "FARMER" if vr_rig != null or mode == "client" else party.name_of(0))
 	if mode != "client":
 		net.state_set("best", int(save.data["best"]))
-		net.state_set("flock", FIRST_SHEEP)
+		var dd: Dictionary = save.data.daily
+		daily_due = (int(save.data.level) >= 1 and not dd.has(Seeded.today()) and not OS.has_environment("BOT_NO_DAILY")) \
+			or OS.has_environment("SRU_DAILY")
+		_publish_farm()
+		print("Bo's farm: %d sheep at home, field %d next, daily %s (world %d)" % [int(save.data.home), int(save.data.level) + 1,
+			daily_due, int(save.data.world)])
 		_start_round()
 	hints.intro(INTRO, {"duration": 7.0})
 	if vr_rig != null:
@@ -192,36 +226,13 @@ func _build_world(vr: bool) -> void:
 	ground.material_override = MeshKit.material(Color(0.46, 0.78, 0.34))
 	ground.position.y = -0.1
 	add_child(ground)
-	add_child(MeshKit.scatter_random(MeshKit.prop("tree"), 20, Vector3.ZERO, ARENA + 12.0, ARENA + 2.5, 0.9, 1.4, PackedColorArray(), 3))
-	add_child(MeshKit.scatter_random(MeshKit.prop("bush"), 18, Vector3.ZERO, ARENA + 2.2, ARENA + 0.6, 0.8, 1.2, PackedColorArray(), 4))
-	add_child(MeshKit.scatter_random(MeshKit.prop("flower"), 50, Vector3.ZERO, ARENA - 0.3, PEN + 1.0, 0.7, 1.1,
-		PackedColorArray([Color(1.0, 0.5, 0.6), Color(1.0, 0.9, 0.4), Color(0.75, 0.6, 1.0), Color(1.0, 1.0, 1.0)]), 5))
-	# The pen: straw floor, a wooden fence with a gate in each side, glowing arrows into the gates.
-	var b := MeshKit.Builder.new()
-	b.box(Vector3(PEN * 2.0, 0.03, PEN * 2.0), MeshKit.at(Vector3(0.0, 0.015, 0.0)), Color(0.95, 0.8, 0.42))
-	var wood := Color(0.62, 0.4, 0.22)
-	for side in 4:
-		var rot := Basis(Vector3.UP, side * PI * 0.5)
-		for seg in [-1.0, 1.0]:
-			var s: float = seg
-			var a := rot * Vector3(s * GAP, 0.0, PEN)
-			var c := rot * Vector3(s * PEN, 0.0, PEN)
-			for h in [0.22, 0.45]:
-				var y: float = h
-				b.tube(a + Vector3.UP * y, c + Vector3.UP * y, 0.04, 0.04, wood)
-			b.box(Vector3(0.12, 0.62, 0.12), MeshKit.at(a + Vector3.UP * 0.31), wood.darkened(0.15))
-			b.box(Vector3(0.12, 0.62, 0.12), MeshKit.at(c + Vector3.UP * 0.31), wood.darkened(0.15))
-		for k in 3:
-			b.sphere(0.06 + k * 0.015, MeshKit.at(rot * Vector3(0.0, 0.08, PEN + 1.3 - k * 0.4)), Color(1.0, 0.85, 0.2), 8, true)
-	# Sign post on the north fence.
-	b.box(Vector3(0.12, 1.5, 0.12), MeshKit.at(Vector3(0.0, 0.75, -PEN - 0.3)), wood.darkened(0.2))
-	b.rounded_box(Vector3(1.3, 0.6, 0.08), 0.06, MeshKit.at(Vector3(0.0, 1.6, -PEN - 0.3)), Color(0.75, 0.52, 0.3))
-	fence = MeshKit.instance(b.build())
-	add_child(fence)
+	# The edge: a knee-high stone wall. No bushes or trees near it any more: a follow camera sits up to
+	# ~4.7 m behind its dog, and a bush there once hid half of Nathanael's view (2026-10).
+	add_child(FieldView.build_edge())
 	sign_label = UiKit.label3d("0 / 0", 0.42, "text", true)
 	sign_label.outline_size = 26
-	sign_label.position = Vector3(0.0, 1.6, -PEN - 0.24)  # reads from +Z: towards the farmer's start
-	fence.add_child(sign_label)
+	sign_label.position = Vector3(0.0, FieldView.SIGN_Y, -PEN - 0.24)  # reads from +Z: towards the farmer's start
+	_build_pen(15)
 	if vr:
 		ring = MeshInstance3D.new()
 		var tm := TorusMesh.new()
@@ -237,6 +248,69 @@ func _build_world(vr: bool) -> void:
 		ring.visible = false
 		add_child(ring)
 	sfx.play_loop("birds", -16.0)
+
+
+## The pen for this field's open gates (the sign moves along with it).
+func _build_pen(gates: int) -> void:
+	if fence != null:
+		fence.remove_child(sign_label)
+		fence.queue_free()
+	fence = FieldView.build_pen(gates)
+	add_child(fence)
+	fence.add_child(sign_label)
+
+
+## Every machine: build the field the host picked (its seed + spec in the "field" state).
+func _apply_field(desc: Dictionary) -> void:
+	var key := var_to_str([desc.get("seed", 0), desc.get("spec", {})])
+	if key == field_key:
+		return
+	field_key = key
+	var t0 := Time.get_ticks_usec()
+	field = FieldGen.generate(int(desc.get("seed", 0)), desc.get("spec", {}))
+	var gen_ms := (Time.get_ticks_usec() - t0) / 1000.0
+	if field_node != null:
+		field_node.queue_free()
+	field_node = FieldView.build_field(field)
+	add_child(field_node)
+	_build_pen(int(field.gates))
+	# Our own dogs start the new field on clear ground (other machines move theirs).
+	var spots: Array = field.dogs
+	for slot in dogs:
+		if party.is_local(slot) or (net.mode != "client" and not net_target.has(slot)):
+			var sp: Array = spots[int(slot) % spots.size()]
+			(dogs[slot] as Node3D).position = Vector3(sp[0], 0.0, sp[1])
+			last_pos[slot] = (dogs[slot] as Node3D).position
+	if net.mode == "client" and sheep.size() == (field.sheep as Array).size():
+		for i in sheep.size():
+			(sheep[i] as Node).call("set_breed", int(field.sheep[i][2]))
+	print("Sheep Round-Up field: %s level %d seed %d, %d sheep, gates %d, %d hedges, %d bushes, stream %s (%.1f ms, try %d)" % [
+		field.name, int(field.level), int(field.seed), (field.sheep as Array).size(), int(field.gates), (field.hedges as Array).size(),
+		(field.bushes as Array).size(), not (field.stream as Dictionary).is_empty(), gen_ms, int(field.attempt)])
+	if net.mode != "client":
+		run["gen_ms"] = snappedf(gen_ms, 0.01)
+
+
+## Host: tell every machine how the home farm looks (sheep at home by breed, the field number).
+func _publish_farm() -> void:
+	var counts := {}
+	var br: Dictionary = save.data.breeds
+	for b in FieldGen.BREEDS.size():
+		var n := int(br.get(String(FieldGen.BREEDS[b].id), 0))
+		if n > 0:
+			counts[b] = n
+	net.state_set("farm", {"home": int(save.data.home), "breeds": counts, "level": int(save.data.level)})
+
+
+## Every machine: rebuild Bo's home farm from the "farm" state.
+func _apply_farm(fd: Dictionary) -> void:
+	if farm_node != null:
+		farm_node.queue_free()
+	var fn := FieldView.FarmNode.new()
+	fn.name = "Farm"
+	add_child(fn)
+	fn.setup(int(fd.get("home", 0)), fd.get("breeds", {}))
+	farm_node = fn
 
 
 # --- HUD ----------------------------------------------------------------------------------
@@ -379,9 +453,10 @@ func _move_local_players(delta: float) -> void:
 			f = f.normalized()
 			var r := Vector3(-f.z, 0.0, f.x)
 			var dir := r * mv.x - f * mv.y
-			var p := d.position + dir * DOG_SPEED * delta
+			var wet := FieldGen.water_at(field, d.position.x, d.position.z)  # dogs paddle across the stream
+			var p := d.position + dir * DOG_SPEED * (FieldGen.DOG_SLOW if wet else 1.0) * delta
 			p.y = 0.0
-			d.position = p.limit_length(ARENA)
+			d.position = FieldGen.move_dog(field, p.limit_length(ARENA))
 			Creatures.anim(d).face(dir)
 		if net.mode == "client" and send:
 			net.send_state(d.position, d.rotation.y, 0.0, slot)
@@ -439,6 +514,7 @@ func on_request(slot: int, action: String, _args: Array) -> void:
 			if float(bark_cd.get(slot, 0.0)) <= 0.0 and dogs.has(slot):
 				bark_cd[slot] = 0.7
 				bark_t[slot] = 0.5
+				run["barks"] = int(run.get("barks", 0)) + 1
 				bark_fx(slot)
 		"next_round":
 			if results_showing():
@@ -498,11 +574,18 @@ func _on_state_changed(key: String, value: Variant) -> void:
 					t.set_time(float(value))
 			_refresh_hud()
 		"round":
-			var sub := "%d sheep!" % int(net.state_get("total", 0))
-			HudKit.banner(_all_huds(), "ROUND %d" % int(value), sub, {"duration": 2.2})
+			var fd: Dictionary = net.state_get("field", {})
+			var daily := bool((fd.get("spec", {}) as Dictionary).get("daily", false))
+			var title := "TODAY'S FIELD" if daily else "FIELD %d" % (int((fd.get("spec", {}) as Dictionary).get("level", 0)) + 1)
+			var sub := String(field.get("name", "")) if not field.is_empty() else "%d sheep!" % int(net.state_get("total", 0))
+			HudKit.banner(_all_huds(), title, sub, {"duration": 2.4})
 			if vr_rig != null:
-				HudKit.vr_banner(self, vr_rig.camera, "ROUND %d" % int(value), sub, {"duration": 2.2, "sound": ""})
+				HudKit.vr_banner(self, vr_rig.camera, title, sub, {"duration": 2.4, "sound": ""})
 			sound("whistle", -4.0)
+		"field":
+			_apply_field(value)
+		"farm":
+			_apply_farm(value)
 		"phase":
 			if String(value) == "results":
 				_show_results(net.state_get("results", {}))
@@ -512,48 +595,162 @@ func _on_state_changed(key: String, value: Variant) -> void:
 
 # --- Rounds -------------------------------------------------------------------------------
 
+## Host: the next field: TODAY'S FIELD first each day, otherwise the farm's next field (a fresh layout
+## of the same level after a time's-up). Every machine builds it from the seed + spec.
 func _start_round() -> void:
 	_clear_sheep()
 	held = -1
 	awards.reset()
-	var n := int(net.state_get("flock", FIRST_SHEEP))
-	for i in n:
-		var p: Vector3
-		if i < 2:
-			# the first two start close to a gate: an easy first catch for everyone
-			var side := Basis(Vector3.UP, (i * 2 + 1) * PI * 0.5)
-			p = side * Vector3(randf_range(-0.4, 0.4), 0.0, PEN + 1.4)
-		else:
-			var a := randf() * TAU
-			p = Vector3(cos(a), 0.0, sin(a)) * randf_range(PEN + 2.0, ARENA - 1.0)
-		_make_sheep(p)
-	time_left = round_time
-	net.state_set("total", n)
+	var players := maxi(1, party.player_count() + (1 if vr_rig != null else 0))
+	if daily_due:
+		daily_due = false
+		round_desc = {"k": "daily", "seed": FieldGen.daily_seed(), "spec": FieldGen.daily_spec(players, round_time)}
+	else:
+		round_desc = Farm.next_field(save.data, players, round_time)
+	run = {"barks": 0, "grabs": 0, "throws": 0, "splash": 0}
+	net.state_set("field", {"seed": int(round_desc.seed), "spec": round_desc.spec})
+	_apply_field(net.state_get("field", {}))
+	for sp in field.sheep:
+		var sh := _make_sheep(Vector3(sp[0], 0.0, sp[1]), int(sp[2]))
+		sh.set("wander_t", randf_range(0.0, 1.5))
+	time_left = float(field.time)
+	elapsed = 0.0
+	net.state_set("total", sheep.size())
 	net.state_set("home", 0)
 	net.state_set("time", int(ceil(time_left)))
 	net.state_set("phase", "play")
 	net.state_set("round", int(net.state_get("round", 0)) + 1)
 	_refresh_group()
+	_round_story()
+
+
+## Host: Bo's words as a field starts (the first time ever, a new kind of field, today's field).
+func _round_story() -> void:
+	var lines: Array = []
+	if not bool(save.data.met_bo):
+		save.data.met_bo = true
+		save.mark_dirty()
+		lines.append(_bo("A storm! My sheep ran off!"))
+		lines.append(_bo("Bring them home, dogs!", "sheep", FieldGen.BREEDS[0].wool))
+	if String(round_desc.k) == "daily":
+		lines.append(_bo("Today's field! Go go go!"))
+	var lv := int(field.level)
+	var tips: Array = save.data.tips
+	for k in Farm.TIPS:
+		if lv >= int(k) and not tips.has(int(k)) and String(round_desc.k) == "story":
+			tips.append(int(k))
+			save.mark_dirty()
+			lines.append(_bo(String(Farm.TIPS[k][0]), String(Farm.TIPS[k][1]), Color(0.4, 0.75, 0.35)))
+	_story_queue(lines, 3.0)
+
+
+## Host: show story beats one after another (`first` seconds from now, then 3.6 s apart).
+func _story_queue(beats: Array, first: float = 0.0) -> void:
+	for i in beats.size():
+		var beat: Dictionary = beats[i]
+		var wait := first + i * 3.6
+		if wait <= 0.0:
+			_story(beat)
+		else:
+			get_tree().create_timer(wait).timeout.connect(func() -> void:
+				if is_inside_tree():
+					_story(beat))
+
+
+## A story beat: Bo (or a sheep / farm picture) and a few words, on every machine.
+func _story(beat: Dictionary) -> void:
+	if net.mode != "client":
+		net.event("story", [beat.get("who", ""), beat.get("line", ""), beat.get("pic", ""), (beat.get("color", Farm.BO_COLOR) as Color).to_html()])
+	show_story(beat)
+
+
+func show_story(beat: Dictionary) -> void:
+	StoryCard.show(_all_huds(), beat)
+	if vr_rig != null:
+		if vr_story != null and is_instance_valid(vr_story):
+			vr_story.queue_free()
+		vr_story = StoryCard.show_vr(self, vr_rig.camera, beat)
+
+
+func _bo(line: String, pic: String = "shepherd", color: Color = Farm.BO_COLOR) -> Dictionary:
+	return {"who": "BO", "line": line, "pic": pic, "color": color, "duration": 3.4}
 
 
 func _end_round(all_home: bool) -> void:
 	var home := int(net.state_get("home", 0))
 	var total := int(net.state_get("total", 0))
 	var rnd := int(net.state_get("round", 1))
+	var daily := String(round_desc.get("k", "")) == "daily"
+	var lv := int(field.get("level", 0))
+	var st := Farm.stars(all_home, time_left, float(field.get("time", round_time)))
+	# Every sheep in the pen goes home to Bo's farm for good.
+	var before := int(save.data.home)
+	var br: Dictionary = save.data.breeds
+	var beats: Array = []
+	for o in sheep:
+		if bool((o as Node).get("penned")):
+			var b := int((o as Node).get("breed"))
+			var id := String(FieldGen.BREEDS[b].id)
+			br[id] = int(br.get(id, 0)) + 1
+	save.data.home = before + home
+	save.data.rounds = int(save.data.rounds) + 1
+	if all_home and not daily:
+		save.data.level = lv + 1
+		var bs: Dictionary = save.data.stars
+		bs[str(lv)] = maxi(int(bs.get(str(lv), 0)), st)
+	if daily:
+		var dd: Dictionary = save.data.daily
+		dd[Seeded.today()] = maxi(int(dd.get(Seeded.today(), -1)), int(ceil(time_left)) if all_home else -home)
+		while dd.size() > 30:
+			var keys := dd.keys()
+			keys.sort()
+			dd.erase(keys[0])
+	if int(save.data.level) > int(save.data["best"]):
+		save.data["best"] = int(save.data.level)
+		net.state_set("best", int(save.data.level))
+	save.mark_dirty()
 	if all_home:
-		net.state_set("flock", mini(total + MORE_SHEEP, MAX_SHEEP))
-		if rnd > int(save.data["best"]):
-			save.data["best"] = rnd
-			save.mark_dirty()
-			net.state_set("best", rnd)
+		beats.append(_bo(Farm.CHEERS[int(save.data.rounds) % Farm.CHEERS.size()]))
+	elif home > 0:
+		beats.append(_bo("%d sheep safe! Again!" % home))
+	else:
+		beats.append(_bo("Nearly! Try again!"))
+	for m in Farm.new_milestones(before, int(save.data.home)):
+		beats.append(_bo(String(m[3]), String(m[2]), Color(0.95, 0.35, 0.3)))
+	_publish_farm()
+	var stats: Array = [["FIELD", "TODAY" if daily else str(lv + 1)], ["STARS", "%d / 3" % st], ["AT HOME", str(int(save.data.home))]]
 	var data := awards.results({"title": "ALL HOME!" if all_home else "TIME'S UP!",
 		"subtitle": "%d of %d sheep home" % [home, total], "style": "victory",
-		"stats": [["ROUND", str(rnd)], ["BEST", str(int(net.state_get("best", 0)))]], "score_format": "%d SHEEP"})
+		"stats": stats, "score_format": "%d SHEEP", "max_awards": 3})
 	net.state_set("results", data)
 	net.state_set("phase", "results")
 	results_t = 0.0
 	if all_home:
 		celebrate()
+	_telemetry("all_home" if all_home else "time", home, total, st)
+	_story_queue(beats, 1.2)
+	print("Sheep Round-Up round %d: %d/%d home, %d stars, %d at the farm, next field %d" % [rnd, home, total, st,
+		int(save.data.home), int(save.data.level) + 1])
+
+
+func _exit_tree() -> void:
+	if ready_to_play and net != null and net.mode != "client" and String(net.state_get("phase", "")) == "play" and not field.is_empty():
+		_telemetry("quit", int(net.state_get("home", 0)), int(net.state_get("total", 0)), 0)
+
+
+## One RUN line per round (or quit mid-round): how the family really herds (balance).
+func _telemetry(end: String, home: int, total: int, st: int) -> void:
+	if net.mode == "client" or field.is_empty():
+		return
+	var info := run.duplicate()
+	info.merge({"end": end, "mode": net.mode, "flat_host": flat_host, "vr": vr_rig != null,
+		"players": party.player_count() + (1 if vr_rig != null else 0), "kind": String(round_desc.get("k", "")),
+		"seed": int(field.seed), "level": int(field.level), "name": String(field.name), "sheep": total, "home": home,
+		"time": int(field.time), "played_s": int(elapsed), "left_s": int(maxf(0.0, time_left)), "stars": st,
+		"gates": int(field.gates), "hedges": (field.hedges as Array).size(), "bushes": (field.bushes as Array).size(),
+		"stream": not (field.stream as Dictionary).is_empty(), "try": int(field.attempt),
+		"farm": int(save.data.home), "next_level": int(save.data.level)}, true)
+	Telemetry.run(GAME_ID, info)
 
 
 ## Every machine: confetti over the pen when the whole flock is home.
@@ -561,6 +758,8 @@ func celebrate() -> void:
 	for k in 3:
 		burst(Vector3(randf_range(-1.0, 1.0), 1.2 + k * 0.4, randf_range(-1.0, 1.0)), Color.from_hsv(randf(), 0.7, 1.0), 26)
 	sfx.play("party_horn")
+	if farm_node != null and is_instance_valid(farm_node):
+		farm_node.call("cheer")
 	net.event("celebrate", [])
 
 
@@ -597,9 +796,10 @@ func results_showing() -> bool:
 
 # --- Sheep ---------------------------------------------------------------------------------
 
-func _make_sheep(pos: Vector3) -> Node3D:
+func _make_sheep(pos: Vector3, breed: int = 0) -> Node3D:
 	var s: Node3D = SheepScript.new()
 	s.position = pos
+	s.set("breed", breed)
 	add_child(s)
 	sheep.append(s)
 	return s
@@ -612,23 +812,7 @@ func _clear_sheep() -> void:
 
 
 static func in_pen(p: Vector3, margin: float = 0.0) -> bool:
-	return absf(p.x) < PEN - margin and absf(p.z) < PEN - margin
-
-
-## A walking sheep outside the pen may only get in through a gate.
-static func fence_block(from: Vector3, to: Vector3) -> Vector3:
-	if not in_pen(to) or in_pen(from):
-		return to
-	var r := to
-	if absf(from.x) >= PEN and absf(from.z) < PEN:
-		if absf(to.z) > GAP:
-			r.x = signf(from.x) * PEN
-	elif absf(from.z) >= PEN and absf(from.x) < PEN:
-		if absf(to.x) > GAP:
-			r.z = signf(from.z) * PEN
-	else:
-		r = from
-	return r
+	return FieldGen.in_pen(p, margin)
 
 
 func _sim_sheep(delta: float) -> void:
@@ -651,6 +835,8 @@ func _sim_sheep(delta: float) -> void:
 		var vel: Vector3 = s.get("vel")
 		var want := Vector3.ZERO
 		var scared := false
+		var bd: Dictionary = FieldGen.BREEDS[int(s.get("breed"))]
+		var spd := float(bd.speed)
 		if not penned:
 			var push := Vector3.ZERO
 			var herder := -1  # the dog pushing hardest towards the pen gets the credit
@@ -658,12 +844,12 @@ func _sim_sheep(delta: float) -> void:
 			var to_pen := -Vector3(s.position.x, 0.0, s.position.z).normalized()
 			for slot in dogs:
 				var dp: Vector3 = (dogs[slot] as Node3D).position
-				var r := BARK_R if float(bark_t.get(slot, 0.0)) > 0.0 else SCARE_R
+				var r := (BARK_R if float(bark_t.get(slot, 0.0)) > 0.0 else SCARE_R) * float(bd.scare)
 				var away := s.position - dp
 				away.y = 0.0
 				var dd := away.length()
 				if dd < r and dd > 0.001:
-					var f := away / dd * (1.0 - dd / r) * (2.0 if r > SCARE_R else 1.0)
+					var f := away / dd * (1.0 - dd / r) * (2.0 if float(bark_t.get(slot, 0.0)) > 0.0 else 1.0)
 					push += f
 					# A dog waiting in the pen scares sheep away from it: never its point (kids, 2026-10-24)
 					var toward := f.dot(to_pen)
@@ -681,15 +867,18 @@ func _sim_sheep(delta: float) -> void:
 					s.set("last_by", 0)
 			if push.length() > 0.05:
 				scared = true
-				want = push.normalized() * FLEE_SPEED * clampf(push.length() * 1.6, 0.5, 1.4)
+				want = push.normalized() * FLEE_SPEED * spd * clampf(push.length() * 1.6, 0.5, 1.4)
 		if not scared:
 			var wt: float = float(s.get("wander_t")) - delta
 			if wt <= 0.0:
-				wt = randf_range(1.5, 4.0)
+				var wander := float(bd.wander)
+				wt = randf_range(1.5, 4.0) / (1.0 + wander)
 				var a := randf() * TAU
-				s.set("wander_dir", Vector3(cos(a), 0.0, sin(a)) * (0.5 if randf() < 0.6 else 0.0))
+				s.set("wander_dir", Vector3(cos(a), 0.0, sin(a)) * (wander if randf() < 0.45 + wander * 0.3 else 0.0))
 			s.set("wander_t", wt)
 			want = s.get("wander_dir")
+			if int(s.get("breed")) == FieldGen.LAMB and not penned:
+				want += _to_mum(s) * 0.6  # lambs stay close to a grown-up sheep
 		# keep apart from the others
 		for j in sheep.size():
 			if j == i:
@@ -708,7 +897,8 @@ func _sim_sheep(delta: float) -> void:
 			to.x = clampf(to.x, -m, m)
 			to.z = clampf(to.z, -m, m)
 		else:
-			to = fence_block(s.position, to)
+			to = FieldGen.fence_block(s.position, to, int(field.get("gates", 15)))
+			to = FieldGen.move_sheep(field, s.position, to)
 			if to.length() > ARENA - 0.3:
 				to = to.limit_length(ARENA - 0.3)
 				vel = -vel * 0.3
@@ -717,6 +907,25 @@ func _sim_sheep(delta: float) -> void:
 		if not penned and in_pen(to, 0.3):
 			_pen_sheep(i)
 	_vr_hands()
+
+
+## A lamb's pull towards the nearest grown-up sheep outside the pen (zero when one is close or none).
+func _to_mum(s: Node3D) -> Vector3:
+	var best: Node3D = null
+	var bd := 3.5
+	for o in sheep:
+		var m: Node3D = o
+		if m == s or int(m.get("breed")) == FieldGen.LAMB or bool(m.get("penned")):
+			continue
+		var d := m.position.distance_to(s.position)
+		if d < bd:
+			bd = d
+			best = m
+	if best == null or bd < 0.9:
+		return Vector3.ZERO
+	var v := best.position - s.position
+	v.y = 0.0
+	return v.normalized()
 
 
 func _fly(s: Node3D, delta: float) -> void:
@@ -746,7 +955,14 @@ func _fly(s: Node3D, delta: float) -> void:
 				if not bool(s.get("penned")):
 					_pen_sheep(i)
 				return
-			sheep_fx(p, "baa")
+			var dry := FieldGen.move_sheep(field, p, p)  # out of a hedge / bush / the stream
+			if FieldGen.water_at(field, p.x, p.z):
+				sheep_fx(p, "splash")
+				run["splash"] = int(run.get("splash", 0)) + 1
+			else:
+				sheep_fx(p, "baa")
+			p.x = dry.x
+			p.z = dry.z
 	s.position = p
 	s.set("vel", vel)
 
@@ -758,8 +974,13 @@ func _pen_sheep(i: int) -> void:
 	if results_showing():
 		sheep_fx(s.position, "baa")
 		return
+	var b := int(s.get("breed"))
 	if by >= 0:
-		awards.add(by, "score")
+		awards.add(by, "score", float(FieldGen.BREEDS[b].pts))
+	var id := String(FieldGen.BREEDS[b].id)
+	if b != FieldGen.WHITE and not (save.data.breeds as Dictionary).has(id) and not run.has("new_" + id):
+		run["new_" + id] = true  # the first one ever: Bo meets a new breed
+		_story(_bo(String(FieldGen.BREEDS[b].line), "sheep", FieldGen.BREEDS[b].wool))
 	var home := 0
 	for o in sheep:
 		if bool((o as Node).get("penned")):
@@ -782,11 +1003,17 @@ func sheep_fx(pos: Vector3, kind: String, by: int = -1) -> void:
 			sfx.play_at("boing", pos, -4.0, randf_range(0.9, 1.2))
 			if s != null:
 				s.call("boing", 1.0)
+		"splash":
+			sfx.play_at("splash", pos, -2.0, randf_range(0.9, 1.2))
+			burst(pos + Vector3.UP * 0.2, Color(0.55, 0.8, 1.0), 16)
+			if s != null:
+				s.call("boing", 1.0)
 		"home":
 			sfx.play_at("baa", pos, 2.0, 1.3)
 			sfx.play("ding", -2.0, 1.0 + 0.05 * float(net.state_get("home", 0)))
 			burst(pos + Vector3.UP * 0.4, Color(1.0, 0.9, 0.3), 18)
-			HudKit.score(self, pos + Vector3.UP * 0.7, 1, {"color": party.color_of(by) if by >= 0 else "gold", "size": 1.4})
+			var pts := 1 if s == null else int(FieldGen.BREEDS[int(s.get("breed"))].pts)
+			HudKit.score(self, pos + Vector3.UP * 0.7, pts, {"color": party.color_of(by) if by >= 0 else "gold", "size": 1.4 + 0.1 * pts})
 			if s != null:
 				s.call("boing", 1.0)
 			if by >= 0 and dogs.has(by):
@@ -835,6 +1062,7 @@ func _vr_hands() -> void:
 			(ring.material_override as StandardMaterial3D).albedo_color = Color(0.4, 1.0, 0.4) if can else Color(1.0, 0.9, 0.2)
 	if held < 0 and can and playing and vr_rig.trigger_pressed():
 		held = near
+		run["grabs"] = int(run.get("grabs", 0)) + 1
 		var s: Node3D = sheep[near]
 		s.set("state", SheepScript.HELD)
 		s.set("last_by", 0)
@@ -844,6 +1072,7 @@ func _vr_hands() -> void:
 	elif held >= 0 and (not vr_rig.trigger_down() or not playing):
 		var s: Node3D = sheep[held]
 		held = -1
+		run["throws"] = int(run.get("throws", 0)) + 1
 		s.set("state", SheepScript.FLY)
 		s.set("vel", vr_rig.hand_velocity(VrRig.RIGHT).limit_length(8.0) * 0.9)
 		vr_rig.pulse(VrRig.RIGHT, 0.3, 0.05)
@@ -936,6 +1165,7 @@ func _process(delta: float) -> void:
 			_start_round()
 		return
 	time_left -= delta
+	elapsed += delta
 	if int(ceil(time_left)) != int(net.state_get("time", 0)):
 		net.state_set("time", maxi(0, int(ceil(time_left))))
 	if time_left <= 0.0:
@@ -995,8 +1225,9 @@ func apply_snapshot(s: Array) -> void:
 	var flags: PackedByteArray = s[2]
 	if pos.size() != sheep.size():
 		_clear_sheep()
-		for p in pos:
-			_make_sheep(p)
+		var fs: Array = field.get("sheep", [])
+		for i in pos.size():
+			_make_sheep(pos[i], int(fs[i][2]) if fs.size() == pos.size() else 0)
 		_refresh_group()
 	for i in pos.size():
 		var n: Node3D = sheep[i]
@@ -1015,3 +1246,5 @@ func apply_event(kind: String, args: Array) -> void:
 			wobble_fence()
 		"celebrate":
 			celebrate()
+		"story":
+			show_story({"who": String(args[0]), "line": String(args[1]), "pic": String(args[2]), "color": Color.html(String(args[3])), "duration": 3.4})
