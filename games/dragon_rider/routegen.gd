@@ -260,7 +260,7 @@ static func charm_slot(i: int) -> Vector3:
 		return Vector3.INF
 	var side := -1.0 if i % 2 == 0 else 1.0
 	var k := i / 2  # 0..10 from the front of the deck
-	return Vector3(1.2 * side, 0.12, 1.15 + k * 0.38)  # just outside the rail posts
+	return Vector3(1.2 * side, 0.0, 1.15 + k * 0.38)  # just outside the rail posts
 
 
 ## Blossoms on the garland: one per play-day.
