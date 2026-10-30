@@ -2608,7 +2608,7 @@ func _update_story(delta: float) -> void:
 	if giant != null and giant.vr and giant.xr_camera != null:
 		if vr_story != null and is_instance_valid(vr_story):
 			vr_story.queue_free()
-		vr_story = StoryCard.show_vr(self, giant.xr_camera, opts.merged({"world_scale": W.S}))
+		vr_story = StoryCard.show_vr(self, giant.xr_camera, opts)  # (scales with the diorama by itself)
 	table_story.cheer()  # Sparky bounces as he talks
 	print("Story: %s (%s)" % [b[0], b[1]])
 

@@ -1998,7 +1998,7 @@ func _update_vr_text(delta: float) -> void:
 	if help_label.modulate.a > 0.0 and tour_pos >= 1:
 		help_label.modulate.a = maxf(0.0, help_label.modulate.a - delta * 0.5)
 	vr_msg_t -= delta
-	if players.is_empty() or not players[0].vr:
+	if players.is_empty() or not (players[0].vr or players[0].fake_vr) or players[0].xr_camera == null:
 		return
 	var cam: XRCamera3D = players[0].xr_camera
 	if vr_center == null:
@@ -2130,5 +2130,5 @@ func _update_story(delta: float) -> void:
 			huds.append(p.hud)
 	StoryCard.show(huds, opts)
 	var d = players[0]
-	if d.vr and d.xr_camera != null:
+	if (d.vr or d.fake_vr) and d.xr_camera != null:  # (fake_vr: the bots' fake head, VrRig.fake_head)
 		StoryCard.show_vr(self, d.xr_camera, opts)
