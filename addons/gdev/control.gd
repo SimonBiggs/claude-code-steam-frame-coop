@@ -64,8 +64,9 @@ func _process(_delta: float) -> void:
 		var now := Time.get_ticks_msec()
 		if now >= rec_next and rec_tasks.size() < 8:
 			rec_next = maxi(rec_next + int(rec_every * 1000.0), now - int(rec_every * 1000.0))  # steady rate, no drift
-			var img := get_viewport().get_texture().get_image()
-			rec_tasks.append(WorkerThreadPool.add_task(_save_frame.bind(img, "%s/%08d.jpg" % [rec_dir, now - rec_t0])))
+			var img := _grab(get_viewport())
+			if img != null:
+				rec_tasks.append(WorkerThreadPool.add_task(_save_frame.bind(img, "%s/%08d.jpg" % [rec_dir, now - rec_t0])))
 			rec_frames += 1
 			_record_vr(now)
 
@@ -92,10 +93,11 @@ func _record_vr(now: int) -> void:
 		add_child(vr_vp)
 		vr_cam.current = true
 		DirAccess.make_dir_recursive_absolute(rec_dir + "/vr")
+		return  # nothing drawn in it yet: grab from the next frame
 	vr_cam.global_transform = head.global_transform
 	vr_cam.near = head.near
 	vr_cam.cull_mask = head.cull_mask
-	var img := vr_vp.get_texture().get_image()
+	var img := _grab(vr_vp)
 	if img:
 		rec_tasks.append(WorkerThreadPool.add_task(_save_frame.bind(img, "%s/vr/%08d.jpg" % [rec_dir, now - rec_t0])))
 
@@ -114,6 +116,8 @@ func _pull_audio() -> void:
 
 
 func _save_frame(img: Image, path: String) -> void:
+	if img == null or img.is_empty():
+		return
 	if rec_width > 0 and rec_width < img.get_width():
 		img.resize(rec_width, int(img.get_height() * float(rec_width) / img.get_width()), Image.INTERPOLATE_BILINEAR)
 	img.save_jpg(path, 0.85)
@@ -245,7 +249,9 @@ func _run(r: Dictionary) -> Dictionary:
 			return {"ok": true}
 		"shot":
 			await RenderingServer.frame_post_draw
-			var img := get_viewport().get_texture().get_image()
+			var img := _grab(get_viewport())
+			if img == null:
+				return {"error": "nothing drawn yet"}
 			var w := int(r.get("width", 0))
 			if w > 0 and w < img.get_width():
 				img.resize(w, int(img.get_height() * float(w) / img.get_width()), Image.INTERPOLATE_LANCZOS)
@@ -570,9 +576,23 @@ func _camshot(r: Dictionary) -> Dictionary:
 	cam.current = true
 	for i in 3:
 		await RenderingServer.frame_post_draw
-	var img := vp.get_texture().get_image()
+	var img := _grab(vp)
 	vp.queue_free()
+	if img == null:
+		return {"error": "nothing drawn yet"}
 	var path := str(r.get("path", ProjectSettings.globalize_path("res://.dev/camshot.png")))
 	var err := img.save_png(path)
 	return {"path": path} if err == OK else {"error": "save failed: %d" % err}
 
+
+## The viewport's picture, or null when nothing is drawn yet or it is gone (offscreen runs, 2026-10-30: a grab before
+## the first draw logged "tex is null at texture_get_data" and _save_frame then called get_width on null).
+## Always grab through this, never get_image() straight off get_texture() (dev.debt flags that).
+static func _grab(vp: Viewport) -> Image:
+	if vp == null or not is_instance_valid(vp) or not vp.is_inside_tree():
+		return null
+	var tex := vp.get_texture()
+	if tex == null or not tex.get_rid().is_valid() or tex.get_width() <= 0 or tex.get_height() <= 0:
+		return null
+	var img := tex.get_image()
+	return img if img != null and not img.is_empty() else null
