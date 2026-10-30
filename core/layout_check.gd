@@ -165,7 +165,8 @@ static func _add(c: Control, text: String, out: Array[Dictionary]) -> void:
 	var big := false
 	if c is Label:
 		var fs := float((c as Label).label_settings.font_size if (c as Label).label_settings != null else c.get_theme_font_size("font_size"))
-		big = fs * c.get_global_transform_with_canvas().get_scale().y >= BIG_FRAC * vp.get_visible_rect().size.y
+		var vs := vp.get_visible_rect().size
+		big = fs * c.get_global_transform_with_canvas().get_scale().y >= BIG_FRAC * minf(vs.y, vs.x * 9.0 / 16.0)  # (a 16:9 height: headless windows can be square)
 	out.append({"node": c, "text": text.substr(0, 28).replace("\n", " "), "rect": r, "view": vp.get_visible_rect(), "vp": vp.get_instance_id(), "big": big, "band": band})
 
 
