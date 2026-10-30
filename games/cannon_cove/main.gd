@@ -207,7 +207,6 @@ var treasure_days := 0
 var treasure_crowned := false
 var treasure_root: Node3D
 var treasure_count := -1
-var treasure_resend := 0.0
 var story_queue: Array = []
 var story_t := 0.0
 
@@ -226,6 +225,7 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
+	net.sticky_event("treasures")  # a machine that joins later gets the latest one (core/net.gd)
 	seats = ClassicSeats.new(self, {
 		"free_actions": ["restart", "pause"],
 		"is_local": _is_local_flat,
@@ -1278,10 +1278,6 @@ func _process(delta: float) -> void:
 	_update_hud()
 	_update_guides()
 	_update_story(delta)
-	if net.mode == "host" and net.connected and save != null:
-		treasure_resend -= delta
-		if treasure_resend <= 0.0:
-			_send_treasures()  # a machine that missed them (or joined later) catches up
 	if props:
 		props.tick(delta)
 	if players.size() < MAX_PLAYERS:
@@ -2839,7 +2835,6 @@ func _unhandled_input(event: InputEvent) -> void:
 # --- Networked co-op -----------------------------------------------------------------
 
 func on_client_joined() -> void:
-	_send_treasures()
 	if not seats.first_machine():
 		return  # another machine: its deckhands come aboard when they ask ("join")
 	if SIMPLE_MODE:
@@ -3370,8 +3365,7 @@ func _add_treasure(kind: String) -> void:
 
 
 func _send_treasures() -> void:
-	treasure_resend = 8.0
-	if net and net.mode == "host" and save != null:
+	if net and net.mode != "client" and save != null:
 		net.event("treasures", [(save.data.treasures as Array).duplicate(true), int(save.data.days), int(save.data.kraken_wins) > 0])
 
 
