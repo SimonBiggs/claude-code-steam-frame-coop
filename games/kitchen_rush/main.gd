@@ -2,6 +2,7 @@ extends Node3D
 const VrText := preload("res://core/vr_text.gd")
 const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
 const UiKit := preload("res://core/ui_kit.gd")
+const HudKit := preload("res://core/hud_kit.gd")
 ## Kitchen Rush: co-op cooking chaos.
 ## Player 1 is the CHEF at the counter (VR hands, or button controls in split screen): chop and stack.
 ## Players 2-7 are RUNNERS (TV, first person, split screen): fetch ingredients to the pass, carry finished plates
@@ -408,23 +409,7 @@ func burst(pos: Vector3, color: Color, amount: int = 16, size: float = 0.08) -> 
 func popup(pos: Vector3, text: String, color: Color) -> void:
 	if SIMPLE_MODE:
 		return  # no floating words: bursts and sounds do the talking
-	var l := Label3D.new()
-	l.text = text
-	l.modulate = color
-	l.outline_modulate = Color(0, 0, 0, 0.9)
-	l.font_size = 64
-	l.outline_size = 22
-	l.pixel_size = 0.004
-	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	l.no_depth_test = false
-	l.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(l)
-	l.global_position = pos
-	var t := l.create_tween().set_parallel()
-	t.tween_property(l, "global_position", pos + Vector3.UP * 0.6, 1.2).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
-	t.tween_property(l, "modulate:a", 0.0, 0.6).set_delay(0.8)
-	t.tween_property(l, "outline_modulate:a", 0.0, 0.6).set_delay(0.8)
-	t.chain().tween_callback(l.queue_free)
+	HudKit.popup(self, pos, text, {"color": color, "outline": Color(0, 0, 0, 0.9), "size": 0.79, "lift": 0.6, "time": 1.4})
 	if net:
 		net.event("popup", [pos, text, color])
 
@@ -2725,7 +2710,7 @@ func _build_hud() -> void:
 	info_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
 	info_label.offset_top = 14
 	info_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	center_label = _make_label(56)
+	center_label = HudKit.split_center(_make_label(56))  # a copy in each split view, never across the line
 	center_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.5))
 	layer.add_child(center_label)
 	center_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)

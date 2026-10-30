@@ -42,6 +42,7 @@ const AnglerScript := preload("res://games/fishing_lake/angler.gd")
 const MusicScript := preload("res://games/fishing_lake/calm_music.gd")
 const JoinListenerScript := preload("res://games/fishing_lake/join_listener.gd")
 const UiKit := preload("res://core/ui_kit.gd")
+const HudKit := preload("res://core/hud_kit.gd")
 const CoveGhostHand := preload("res://games/cannon_cove/ghost_hand.gd")  # shared see-through hand
 const LakeGen := preload("res://games/fishing_lake/lakegen.gd")
 const Book := preload("res://games/fishing_lake/book.gd")
@@ -504,23 +505,7 @@ func face_label(l: Label3D) -> void:
 
 
 func popup(pos: Vector3, text: String, color: Color, broadcast: bool = true, size: float = 1.0) -> void:
-	var l := Label3D.new()
-	l.text = text
-	l.font_size = 64
-	l.pixel_size = 0.006 * size
-	l.outline_size = 16
-	l.modulate = color
-	l.no_depth_test = false
-	l.render_priority = 5
-	add_child(l)
-	l.global_position = pos
-	face_label(l)
-	var tw := l.create_tween()
-	tw.set_parallel()
-	tw.tween_property(l, "global_position", pos + Vector3(0, 0.8, 0), 1.8)
-	tw.tween_property(l, "modulate:a", 0.0, 1.0).set_delay(0.9)
-	tw.tween_property(l, "outline_modulate:a", 0.0, 1.0).set_delay(0.9)
-	tw.chain().tween_callback(l.queue_free)
+	HudKit.popup(self, pos, text, {"color": color, "outline": Color(0, 0, 0, 0.9), "size": 1.19 * size, "lift": 0.8, "time": 1.9, "render_priority": 5})
 	if broadcast and net != null:
 		net.event("popup", [pos, text, color, size])
 
@@ -2888,7 +2873,7 @@ func _build_hud() -> void:
 	var layer := CanvasLayer.new()
 	layer.layer = 5
 	add_child(layer)
-	center_label = _make_label(42)
+	center_label = HudKit.split_center(_make_label(42))  # a copy in each split view, never across the line
 	layer.add_child(center_label)
 	UiKit.pin(center_label, Control.PRESET_FULL_RECT, false)
 	center_label.offset_left = 60

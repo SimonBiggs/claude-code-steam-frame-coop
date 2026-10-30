@@ -50,6 +50,7 @@ extends Node3D
 const VrText := preload("res://core/vr_text.gd")
 const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
 const UiKit := preload("res://core/ui_kit.gd")
+const HudKit := preload("res://core/hud_kit.gd")
 const SfxScript := preload("res://core/sfx.gd")
 const NetScript := preload("res://core/net.gd")
 const ClassicSeats := preload("res://core/classic_seats.gd")
@@ -381,31 +382,7 @@ func burst(pos: Vector3, color: Color, amount: int = 24, broadcast: bool = true)
 
 
 func popup(pos: Vector3, text: String, color: Color, size: float = 1.0) -> void:
-	var l := Label3D.new()
-	l.text = text
-	l.font_size = 48
-	l.pixel_size = 0.0012 * size
-	l.outline_size = 14
-	l.modulate = color
-	l.render_priority = 5
-	if players.size() > 0 and players[0].vr:
-		l.billboard = BaseMaterial3D.BILLBOARD_DISABLED
-	else:
-		l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	add_child(l)
-	l.global_position = pos
-	if players.size() > 0 and players[0].vr:
-		var cam: Node3D = players[0].xr_camera
-		var face := pos - cam.global_position
-		face.y = 0.0
-		if face.length() > 0.01:
-			l.global_basis = Basis(Vector3.UP, atan2(-face.x, -face.z))
-	var tw := l.create_tween()
-	tw.set_parallel()
-	tw.tween_property(l, "global_position", pos + Vector3(0, 0.12, 0), 0.8)
-	tw.tween_property(l, "modulate:a", 0.0, 0.6).set_delay(0.3)
-	tw.tween_property(l, "outline_modulate:a", 0.0, 0.6).set_delay(0.3)
-	tw.chain().tween_callback(l.queue_free)
+	HudKit.popup(self, pos, text, {"color": color, "size": 0.178 * size, "lift": 0.12, "time": 0.9, "outline": Color(0, 0, 0, 0.9)})
 
 
 # --- Players and views -----------------------------------------------------------------
@@ -1921,7 +1898,7 @@ func _build_hud() -> void:
 	var layer := CanvasLayer.new()
 	layer.layer = 5
 	add_child(layer)
-	center_label = _make_label(44)
+	center_label = HudKit.split_center(_make_label(44))  # a copy in each split view, never across the line
 	layer.add_child(center_label)
 	UiKit.pin(center_label, Control.PRESET_FULL_RECT, false)
 	center_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

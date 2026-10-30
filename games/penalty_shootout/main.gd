@@ -64,6 +64,7 @@ const JoinListenerScript := preload("res://games/penalty_shootout/join_listener.
 const SimpleFxScript := preload("res://games/penalty_shootout/simple_fx.gd")
 const PropsScript := preload("res://games/penalty_shootout/props.gd")
 const UiKit := preload("res://core/ui_kit.gd")
+const HudKit := preload("res://core/hud_kit.gd")
 const GhostHandScript := preload("res://games/cannon_cove/ghost_hand.gd")
 const MatchGen := preload("res://games/penalty_shootout/matchgen.gd")
 const LeoCornerScript := preload("res://games/penalty_shootout/leo_corner.gd")
@@ -428,29 +429,15 @@ func burst(pos: Vector3, color: Color, amount: int = 20, broadcast: bool = true)
 func popup(pos: Vector3, text: String, color: Color, broadcast: bool = true) -> void:
 	if SIMPLE_MODE:
 		return  # one headline is enough (the centre text)
-	var l := Label3D.new()
-	l.text = text
-	l.font_size = 72
-	l.pixel_size = 0.006
-	l.outline_size = 18
-	l.modulate = color
-	l.render_priority = 5
+	var o := {"color": color, "size": 1.33, "lift": 0.8, "time": 1.6}
 	if keeper_in_vr():
-		l.billboard = BaseMaterial3D.BILLBOARD_DISABLED  # VR: world-locked, facing the keeper
-		l.rotation.y = PI
-		l.pixel_size = 0.004 * keeper.ws()
 		pos = Vector3(clampf(pos.x, -3.0, 3.0), maxf(pos.y, 1.2) + 0.6, maxf(pos.z, 4.0))  # never close to the eyes
-	else:
-		l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-		l.no_depth_test = false
-	add_child(l)
-	l.global_position = pos
-	var tw := l.create_tween()
-	tw.set_parallel()
-	tw.tween_property(l, "global_position", pos + Vector3(0, 0.8, 0), 1.4)
-	tw.tween_property(l, "modulate:a", 0.0, 1.0).set_delay(0.6)
-	tw.tween_property(l, "outline_modulate:a", 0.0, 1.0).set_delay(0.6)
-	tw.chain().tween_callback(l.queue_free)
+		o["size"] = 0.889 * keeper.ws()
+		o["camera"] = null  # VR: world-locked, facing the keeper
+		o["billboard"] = BaseMaterial3D.BILLBOARD_DISABLED
+	var l := HudKit.popup(self, pos, text, o)
+	if keeper_in_vr():
+		l.rotation.y = PI
 	if broadcast and net != null:
 		net.event("popup", [pos, text, color])
 
@@ -2260,7 +2247,7 @@ func _build_hud() -> void:
 	var layer := CanvasLayer.new()
 	layer.layer = 5
 	add_child(layer)
-	center_label = _make_label(42)
+	center_label = HudKit.split_center(_make_label(42))  # a copy in each split view, never across the line
 	layer.add_child(center_label)
 	UiKit.pin(center_label, Control.PRESET_FULL_RECT, false)
 	center_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

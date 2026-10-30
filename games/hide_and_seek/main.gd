@@ -45,6 +45,7 @@ const MusicScript := preload("res://core/music.gd")
 const JoinInputScript := preload("res://games/hide_and_seek/join_input.gd")
 const CueScript := preload("res://games/hide_and_seek/cue.gd")
 const UiKit := preload("res://core/ui_kit.gd")
+const HudKit := preload("res://core/hud_kit.gd")
 
 ## P1 (seeker) + up to six TV hiders P2..P7.
 const MAX_PLAYERS := 7
@@ -480,27 +481,7 @@ func burst(pos: Vector3, color: Color, amount: int = 16, size: float = 0.08) -> 
 
 
 func popup(pos: Vector3, text: String, color: Color, through_walls: bool = true) -> void:
-	var l := Label3D.new()
-	l.text = text
-	l.modulate = color
-	l.outline_modulate = Color(0, 0, 0, 0.9)
-	l.font_size = 64
-	l.outline_size = 16
-	l.pixel_size = 0.005
-	l.no_depth_test = through_walls
-	add_child(l)
-	l.global_position = pos
-	if not players.is_empty() and players[0].vr and players[0].xr_camera != null:
-		# VR: world-locked, facing the seeker (never billboarded); the TV shows its own copy.
-		var to: Vector3 = pos - players[0].xr_camera.global_position
-		l.global_basis = Basis(Vector3.UP, atan2(-to.x, -to.z))
-	else:
-		l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	var t := l.create_tween().set_parallel()
-	t.tween_property(l, "global_position", pos + Vector3.UP * 0.8, 1.2).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
-	t.tween_property(l, "modulate:a", 0.0, 0.8).set_delay(0.6)
-	t.tween_property(l, "outline_modulate:a", 0.0, 0.8).set_delay(0.6)
-	t.chain().tween_callback(l.queue_free)
+	HudKit.popup(self, pos, text, {"color": color, "outline": Color(0, 0, 0, 0.9), "size": 0.99, "lift": 0.8, "time": 1.4, "through_walls": through_walls})  # VR: faces the seeker
 	if net:
 		net.event("popup", [pos, text, color, through_walls])
 
@@ -1310,26 +1291,7 @@ func _achoo(pos: Vector3, index: int) -> void:
 	sp.global_position = pos
 	sp.play()
 	sp.finished.connect(sp.queue_free)
-	var l := Label3D.new()
-	l.text = "ACHOO!"
-	l.font_size = 64
-	l.pixel_size = 0.006
-	l.outline_size = 16
-	l.modulate = Color(0.75, 1.0, 0.75)
-	l.outline_modulate = Color(0, 0, 0, 0.9)
-	l.no_depth_test = false
-	add_child(l)
-	l.global_position = pos + Vector3.UP * 0.5
-	if not players.is_empty() and players[0].vr and players[0].xr_camera != null:
-		var to: Vector3 = l.global_position - players[0].xr_camera.global_position
-		l.global_basis = Basis(Vector3.UP, atan2(-to.x, -to.z))
-	else:
-		l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	var t := l.create_tween()
-	t.tween_property(l, "scale", Vector3.ONE * 1.4, 0.3).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	t.tween_interval(1.2)
-	t.tween_property(l, "modulate:a", 0.0, 0.5)
-	t.tween_callback(l.queue_free)
+	HudKit.popup(self, pos + Vector3.UP * 0.5, "ACHOO!", {"color": Color(0.75, 1.0, 0.75), "outline": Color(0, 0, 0, 0.9), "size": 1.66, "lift": 0.15, "time": 2.0})
 	var p := CPUParticles3D.new()
 	p.one_shot = true
 	p.amount = 10
@@ -2034,7 +1996,7 @@ func _build_hud() -> void:
 	info_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
 	info_label.offset_top = 12
 	info_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	center_label = _make_label(46)
+	center_label = HudKit.split_center(_make_label(46))  # a copy in each split view, never across the line
 	center_label.add_theme_color_override("font_color", Color(1.0, 0.95, 0.75))
 	layer.add_child(center_label)
 	center_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)

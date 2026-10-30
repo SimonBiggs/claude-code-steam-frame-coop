@@ -47,6 +47,7 @@ const TREASURE_CHEERS := {1: "Our first treasure!", 5: "Five treasures!", 10: "T
 const TREASURE_LINES := {"doubloon": "A gold coin!", "pearl": "A shiny pearl!", "anchor": "An anchor!", "starfish": "A starfish!", "crown": "The Kraken's crown!"}
 const FLAG_COLORS: Array[Color] = [Color(0.95, 0.2, 0.15), Color(1.0, 0.85, 0.2), Color(0.2, 0.45, 1.0), Color(0.2, 0.8, 0.3), Color(0.97, 0.95, 0.88)]
 const UiKit := preload("res://core/ui_kit.gd")
+const HudKit := preload("res://core/hud_kit.gd")
 
 ## Simple mode picture cues on the TV views (no words): [pad buttons, icons, icon colour]. The buttons
 ## follow the player's own controls (see _cue_buttons).
@@ -502,22 +503,7 @@ func sound(sound_name: String, volume_db: float = 0.0, pitch: float = 1.0) -> vo
 
 
 func popup(pos: Vector3, text: String, color: Color) -> void:
-	var l := Label3D.new()
-	l.text = text
-	l.modulate = color
-	l.outline_modulate = Color(0, 0, 0, 0.9)
-	l.font_size = 72
-	l.outline_size = 26
-	l.pixel_size = 0.008
-	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	l.no_depth_test = false
-	add_child(l)
-	l.global_position = pos
-	var t := l.create_tween().set_parallel()
-	t.tween_property(l, "global_position", pos + Vector3.UP * 1.8, 1.2).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
-	t.tween_property(l, "modulate:a", 0.0, 0.8).set_delay(0.6)
-	t.tween_property(l, "outline_modulate:a", 0.0, 0.8).set_delay(0.6)
-	t.chain().tween_callback(l.queue_free)
+	HudKit.popup(self, pos, text, {"color": color, "outline": Color(0, 0, 0, 0.9), "size": 1.78, "lift": 1.8, "time": 1.4})
 	if net:
 		net.event("popup", [pos, text, color])
 
@@ -3131,7 +3117,7 @@ func _build_hud() -> void:
 	info_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
 	info_label.offset_top = 14
 	info_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	center_label = _make_label(58)
+	center_label = HudKit.split_center(_make_label(58))  # a copy in each split view, never across the line
 	layer.add_child(center_label)
 	center_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	center_label.offset_bottom = -120

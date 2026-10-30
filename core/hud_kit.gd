@@ -21,6 +21,9 @@ const UiKit := preload("res://core/ui_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")
 const VrText := preload("res://core/vr_text.gd")
 const Me := preload("res://core/hud_kit.gd")
+const LayoutCheck := preload("res://core/layout_check.gd")
+## Every centre label made split-screen aware by split_center (tests/deck_bot.gd shows a word in each).
+const SPLIT_WORD_GROUP := "hud_center_word"
 
 ## Banner styles: [accent colour, title colour, sound].
 const BANNER_STYLES := {
@@ -79,6 +82,22 @@ static func banner(root: Variant, title: String, subtitle: String = "", opts: Di
 	if snd != "":
 		UiKit.sound(snd)
 	return b
+
+
+## THE shared big centre word for split screens ("HOORAY!", "HERE I COME!", "WAVE 1!"): a game keeps its one
+## full-screen centre Label and sets text / colour / fades it as before; while two or more split-screen views are on
+## screen the label itself is hidden and a copy sits centred in EACH view (fitted to the view), so a word never sits
+## across the line between two players' views (core/layout_check.gd flags that: "divider"). One view: unchanged.
+##   center_label = HudKit.split_center(_make_label(46))
+static func split_center(label: Label) -> Label:
+	if label == null:
+		return null
+	if label.get_node_or_null("SplitWord") == null:
+		var w := SplitWord.new()
+		w.name = "SplitWord"
+		label.add_child(w)
+	label.add_to_group(SPLIT_WORD_GROUP)
+	return label
 
 
 # --- Toasts ----------------------------------------------------------------------------------------
@@ -205,31 +224,46 @@ static func _pin(c: Control, preset: int, x: float = 0.0, y: float = 0.0) -> voi
 
 # --- World popups ----------------------------------------------------------------------------------
 
-## Floating 3D text at `pos` that pops, rises and fades. opts: style (see POPUP_STYLES), color, size
-## (multiplier; 1 = ~0.3 m tall), rise (m, default 0.9), time (s), camera (face this camera once;
-## default: the VR camera when this viewport renders VR, otherwise billboard), layers.
+## Floating 3D text at `pos` that pops, rises and fades: THE shared pop-up word ("+15", "STAR!", "TORNADO BURST!").
+## It never gets bigger than max_frac of the height (max_wide of the width) of any view that sees it, and stays inside
+## the view it's nearest to, so a word born right next to a camera doesn't fill or run off the screen (FloatText).
+## opts: style (see POPUP_STYLES), color, outline (Color), size (multiplier; 1 = ~0.32 m tall), rise (m, default 0.9),
+## lift (exact rise in m, not scaled by size), time (s), camera (face this camera once; default: the VR camera when this viewport renders VR, otherwise billboard),
+## billboard (a BaseMaterial3D.BILLBOARD_* mode when not facing a camera), through_walls (no depth test),
+## parent (attach here; then `pos` is in the parent's local space and the word rides along), layers,
+## render_priority, max_frac (0.1), max_wide (0.6).
 static func popup(world: Node, pos: Vector3, text: String, opts: Dictionary = {}) -> Label3D:
 	var style := String(opts.get("style", "info"))
 	var st: Array = POPUP_STYLES.get(style, POPUP_STYLES["info"])
 	var col := UiKit.color_of(opts.get("color", st[0]), st[0])
 	var size := float(opts.get("size", 1.0)) * float(st[1])
-	var l := Label3D.new()
+	var l := FloatText.new()
 	l.text = text
 	l.font = UiKit.font(true)
 	l.font_size = 72
-	l.pixel_size = 0.0045 * size
+	l.base_pixel = 0.0045 * size
+	l.pixel_size = l.base_pixel
 	l.outline_size = 22
 	l.modulate = col
-	var oc: Color = st[2]
+	var oc: Color = opts.get("outline", st[2])
 	l.outline_modulate = Color(oc.r, oc.g, oc.b, 0.95)
-	l.no_depth_test = false
-	l.render_priority = UiKit.VR_PRIO_TEXT
-	l.outline_render_priority = UiKit.VR_PRIO_TEXT - 1
+	l.no_depth_test = bool(opts.get("through_walls", false))
+	l.render_priority = int(opts.get("render_priority", UiKit.VR_PRIO_TEXT))
+	l.outline_render_priority = l.render_priority - 1
 	l.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	l.layers = int(opts.get("layers", 1))
-	world.add_child(l)
+	l.max_frac = float(opts.get("max_frac", l.max_frac))
+	l.max_wide = float(opts.get("max_wide", l.max_wide))
+	l.crit = style == "crit"
+	var parent: Node = opts.get("parent", null)
+	l.local = parent != null and parent is Node3D
+	(parent if l.local else world).add_child(l)
 	var jitter := Vector3(randf_range(-0.15, 0.15), 0.0, randf_range(-0.15, 0.15)) * size
-	l.global_position = pos + jitter
+	if l.local:
+		l.position = pos + jitter
+	else:
+		l.global_position = pos + jitter
+	l.base_pos = l.position if l.local else l.global_position
 	var face_cam: Node3D = opts.get("camera", UiKit.xr_camera(world))
 	if face_cam != null and is_instance_valid(face_cam):
 		var to := l.global_position - face_cam.global_position
@@ -237,22 +271,10 @@ static func popup(world: Node, pos: Vector3, text: String, opts: Dictionary = {}
 		if to.length() > 0.01:
 			l.global_basis = Basis(Vector3.UP, atan2(-to.x, -to.z))
 	else:
-		l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	var rise := float(opts.get("rise", 0.9)) * maxf(0.7, size * 0.8)
-	var life := float(opts.get("time", 1.1 if style != "crit" else 1.4))
-	l.scale = Vector3.ONE * 0.3
-	var t := l.create_tween().set_parallel()
-	t.tween_property(l, "scale", Vector3.ONE * (1.25 if style == "crit" else 1.0), 0.16).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	t.tween_property(l, "global_position", l.global_position + Vector3.UP * rise, life).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-	if style == "crit":
-		t.tween_property(l, "scale", Vector3.ONE, 0.2).set_delay(0.16)
-		var wob := l.create_tween()
-		for k in 4:
-			wob.tween_property(l, "rotation:z", 0.12 * (1.0 if k % 2 == 0 else -1.0), 0.05)
-		wob.tween_property(l, "rotation:z", 0.0, 0.05)
-	t.tween_property(l, "modulate:a", 0.0, life * 0.4).set_delay(life * 0.6)
-	t.tween_property(l, "outline_modulate:a", 0.0, life * 0.4).set_delay(life * 0.6)
-	t.chain().tween_callback(l.queue_free)
+		l.billboard = int(opts.get("billboard", BaseMaterial3D.BILLBOARD_ENABLED)) as BaseMaterial3D.BillboardMode
+	l.rise = float(opts["lift"]) if opts.has("lift") else float(opts.get("rise", 0.9)) * maxf(0.7, size * 0.8)
+	l.life = float(opts.get("time", 1.1 if style != "crit" else 1.4))
+	l.start()
 	return l
 
 
@@ -558,7 +580,267 @@ static func vr_countdown(world: Node, cam: Node3D, from: int = 3, opts: Dictiona
 	return c
 
 
-# --- Classes ---------------------------------------------------------------------------------------
+# --- Classes ---
+
+class SplitWord extends Node:
+	## Lives under a full-screen centre Label (HudKit.split_center). With 2+ split views on screen it hides the
+	## label's own text (self_modulate) and shows one copy per view at the same relative place, font fitted to the
+	## view. Copies are the label's children, so the game's fades (modulate) and hiding still apply to them.
+	const LayoutCheck := preload("res://core/layout_check.gd")
+	const COLORS := ["font_color", "font_outline_color", "font_shadow_color"]
+	const CONSTS := ["outline_size", "shadow_offset_x", "shadow_offset_y", "shadow_outline_size", "line_spacing"]
+	var copies: Array[Label] = []
+	var views: Array[Rect2] = []
+	var _scan := 0.0
+	var _key := ""
+	var _own_alpha := 1.0
+	var _split := false
+
+	func _ready() -> void:
+		process_mode = Node.PROCESS_MODE_ALWAYS
+
+	func _process(delta: float) -> void:
+		var l := get_parent() as Label
+		if l == null:
+			return
+		_scan -= delta
+		if _scan <= 0.0:
+			_scan = 0.25
+			views = LayoutCheck.view_rects(l.get_viewport()) if l.is_inside_tree() else ([] as Array[Rect2])
+		var split := views.size() >= 2
+		if split != _split:
+			_split = split
+			if split:
+				_own_alpha = l.self_modulate.a
+				l.self_modulate.a = 0.0
+			else:
+				l.self_modulate.a = _own_alpha
+				_key = ""
+		if not split:
+			for c in copies:
+				c.visible = false
+			return
+		l.self_modulate.a = 0.0
+		var showing := l.text.strip_edges() != "" and l.modulate.a > 0.005 and l.is_visible_in_tree()
+		if not showing:
+			for c in copies:
+				c.visible = false
+			_key = ""
+			return
+		var key := "%s|%s|%s|%s|%d" % [l.text, str(views), str(l.get_global_rect()), str(l.get_theme_color("font_color")), Engine.get_process_frames() / 15]
+		if key == _key:
+			return
+		_key = key
+		while copies.size() < views.size():
+			var c := Label.new()
+			c.name = "ViewCopy%d" % copies.size()
+			c.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			l.add_child(c)
+			copies.append(c)
+		var screen := l.get_viewport().get_visible_rect().size
+		var lr := l.get_global_rect()
+		var fs0 := l.label_settings.font_size if l.label_settings != null else l.get_theme_font_size("font_size")
+		var font := l.label_settings.font if l.label_settings != null and l.label_settings.font != null else l.get_theme_font("font")
+		for i in copies.size():
+			var c := copies[i]
+			if i >= views.size():
+				c.visible = false
+				continue
+			var v := views[i]
+			c.visible = true
+			c.text = l.text
+			c.uppercase = l.uppercase
+			c.horizontal_alignment = l.horizontal_alignment
+			c.vertical_alignment = l.vertical_alignment
+			c.autowrap_mode = l.autowrap_mode if l.autowrap_mode != TextServer.AUTOWRAP_OFF else TextServer.AUTOWRAP_WORD_SMART
+			for n in COLORS:
+				if l.has_theme_color_override(n):
+					c.add_theme_color_override(n, l.get_theme_color(n))
+			for n in CONSTS:
+				if l.has_theme_constant_override(n):
+					c.add_theme_constant_override(n, l.get_theme_constant(n))
+			if l.has_theme_font_override("font"):
+				c.add_theme_font_override("font", l.get_theme_font("font"))
+			if l.has_theme_stylebox_override("normal"):
+				c.add_theme_stylebox_override("normal", l.get_theme_stylebox("normal"))  # a backdrop band goes along
+			var rect := Rect2(v.position + lr.position / screen * v.size, lr.size / screen * v.size)
+			# Smaller views get a smaller word (2x2: ~60 %), and the longest word always fits 92 % of the view.
+			var fs := float(fs0) * minf(1.0, maxf(v.size.y / screen.y, v.size.x / screen.x) * 1.2)
+			if font != null:
+				var widest := 0.0
+				for word in l.text.replace("\n", " ").split(" ", false):
+					widest = maxf(widest, font.get_string_size(word.to_upper() if l.uppercase else word, HORIZONTAL_ALIGNMENT_LEFT, -1, int(fs)).x)
+				var room := rect.size.x * 0.92
+				if widest > room and widest > 0.0:
+					fs *= room / widest
+			if l.label_settings != null:
+				var ls := l.label_settings.duplicate() as LabelSettings
+				ls.font_size = maxi(10, int(fs))
+				ls.outline_size = int(l.label_settings.outline_size * minf(1.0, fs / maxf(1.0, fs0)))
+				c.label_settings = ls
+			else:
+				c.add_theme_font_size_override("font_size", maxi(10, int(fs)))
+			# Same centre as the label had (scaled into the view), at least as tall as the wrapped text, never past
+			# the view's edges (a long message near the bottom moves up instead of being cut).
+			c.size = Vector2(rect.size.x, 0.0)
+			var h := maxf(rect.size.y, c.get_combined_minimum_size().y)
+			if h > v.size.y * 0.96 and fs > 10.0:
+				var k := v.size.y * 0.96 / h
+				if l.label_settings != null:
+					c.label_settings.font_size = maxi(10, int(fs * k))
+				else:
+					c.add_theme_font_size_override("font_size", maxi(10, int(fs * k)))
+				c.size = Vector2(rect.size.x, 0.0)
+				h = minf(v.size.y, maxf(rect.size.y * k, c.get_combined_minimum_size().y))
+			c.size = Vector2(rect.size.x, h)
+			var pos := Vector2(rect.position.x, rect.get_center().y - h * 0.5)
+			pos.y = clampf(pos.y, v.position.y + 4.0, maxf(v.position.y + 4.0, v.end.y - h - 4.0))
+			c.global_position = pos
+
+
+class FloatText extends Label3D:
+	## HudKit.popup's word: pops in, rises, fades, and keeps a readable size in every view (see HudKit.popup).
+	const LayoutCheck := preload("res://core/layout_check.gd")
+	var base_pos := Vector3.ZERO  ## start (local to the parent when `local`, else global)
+	var local := false
+	var rise := 0.9
+	var life := 1.1
+	var crit := false
+	var base_pixel := 0.0045
+	## Never taller than this share of a view's height, nor wider than max_wide of its width.
+	var max_frac := 0.1
+	var max_wide := 0.6
+	var t := 0.0
+	var _a := 1.0
+	var _oa := 0.95
+	var _px := Vector2.ONE  ## text size in font pixels
+
+	func start() -> void:
+		_a = modulate.a
+		_oa = outline_modulate.a
+		var f: Font = font if font != null else ThemeDB.fallback_font
+		_px = f.get_multiline_string_size(text, HORIZONTAL_ALIGNMENT_CENTER, -1, font_size) + Vector2.ONE * outline_size
+		_step(0.0)
+
+	func _process(delta: float) -> void:
+		t += delta
+		if t >= life:
+			queue_free()
+			return
+		_step(t)
+
+	func _step(at: float) -> void:
+		var k := clampf(at / maxf(0.01, life), 0.0, 1.0)
+		var up := 1.0 - pow(1.0 - k, 3.0)
+		var p := base_pos + Vector3.UP * rise * up
+		var pop_k := clampf(at / 0.16, 0.0, 1.0)
+		var top := 1.25 if crit else 1.0
+		var sc := lerpf(0.3, top, _back_out(pop_k))
+		if crit and at > 0.16:
+			sc = lerpf(1.25, 1.0, clampf((at - 0.16) / 0.2, 0.0, 1.0))
+		scale = Vector3.ONE * sc
+		if crit:
+			rotation.z = 0.12 * sin(at * 31.4) if at < 0.25 else 0.0
+		var fade := 1.0 - clampf((at - life * 0.6) / (life * 0.4), 0.0, 1.0)
+		modulate.a = _a * fade
+		outline_modulate.a = _oa * fade
+		var gp := (get_parent() as Node3D).global_transform * p if local and get_parent() is Node3D else p
+		var fit := _fit(gp, top)
+		pixel_size = base_pixel * fit[0]
+		gp += fit[1]
+		if local and get_parent() is Node3D:
+			position = (get_parent() as Node3D).global_transform.affine_inverse() * gp
+		else:
+			global_position = gp
+
+	static func _back_out(x: float) -> float:
+		var c1 := 1.70158
+		return 1.0 + (c1 + 1.0) * pow(x - 1.0, 3.0) + c1 * pow(x - 1.0, 2.0)
+
+	## [size factor <= 1, world shift] so the word fits every view that sees it and stays inside the nearest one (and
+	## in front of its near plane: a word born closer than that was simply cut away).
+	func _fit(gp: Vector3, top: float) -> Array:
+		var h := _px.y * base_pixel * top
+		var w := _px.x * base_pixel * top
+		var cams := FloatText.cameras(self)
+		var best: Camera3D = null
+		var best_depth := INF
+		for cam in cams:
+			if (cam.cull_mask & layers) == 0:
+				continue
+			var ext := _extent(cam, gp)
+			if ext.x <= 0.0:
+				continue
+			var depth := (gp - cam.global_position).dot(-cam.global_basis.z)
+			var ndc := _ndc(cam, gp, ext)
+			if depth < best_depth and absf(ndc.x) <= 2.5 and absf(ndc.y) <= 2.5:  # in (or just off the edge of) this view
+				best_depth = depth
+				best = cam
+		var shift := Vector3.ZERO
+		if best != null and best.projection != Camera3D.PROJECTION_ORTHOGONAL and best_depth < best.near * 2.0:
+			shift = -best.global_basis.z * (best.near * 2.0 - best_depth)
+		var p := gp + shift
+		var k := 1.0
+		for cam in cams:
+			if (cam.cull_mask & layers) == 0:
+				continue
+			var ext := _extent(cam, p)
+			if ext.x > 0.0:
+				k = minf(k, minf(max_frac * ext.y / h, max_wide * ext.x / w))
+		if best != null:
+			var ext := _extent(best, p)
+			if ext.x > 0.0:
+				var ndc := _ndc(best, p, ext)
+				var hw := (w * k * 0.5) / (ext.x * 0.5) + 0.04
+				var hh := (h * k * 0.5) / (ext.y * 0.5) + 0.04
+				var nx := clampf(ndc.x, -1.0 + hw, 1.0 - hw) if hw < 1.0 else 0.0
+				var ny := clampf(ndc.y, -1.0 + hh, 1.0 - hh) if hh < 1.0 else 0.0
+				shift += best.global_basis.x * (nx - ndc.x) * ext.x * 0.5 + best.global_basis.y * (ny - ndc.y) * ext.y * 0.5
+		return [k, shift]
+
+	## The view's size (width, height) in metres at gp's depth; x <= 0 when behind the camera.
+	static func _extent(cam: Camera3D, gp: Vector3) -> Vector2:
+		var depth := (gp - cam.global_position).dot(-cam.global_basis.z)
+		var vs := cam.get_viewport().get_visible_rect().size
+		var aspect := vs.x / maxf(1.0, vs.y)
+		if cam.projection == Camera3D.PROJECTION_ORTHOGONAL:
+			return Vector2(cam.size * aspect, cam.size)
+		if depth < 0.05:
+			return Vector2(-1.0, -1.0)
+		var fov := 100.0 if cam is XRCamera3D else cam.fov
+		var vh := 2.0 * depth * tan(deg_to_rad(fov) * 0.5)
+		return Vector2(vh * aspect, vh)
+
+	static func _ndc(cam: Camera3D, gp: Vector3, ext: Vector2) -> Vector2:
+		var to := gp - cam.global_position
+		return Vector2(to.dot(cam.global_basis.x) / (ext.x * 0.5), to.dot(cam.global_basis.y) / (ext.y * 0.5))
+
+	static var _cams: Array[Camera3D] = []
+	static var _cams_frame := -100
+
+	## The cameras drawing the screen now: each split view's camera, else (or in VR) the window's own camera.
+	static func cameras(n: Node) -> Array[Camera3D]:
+		var f := Engine.get_process_frames()
+		if f - _cams_frame < 20 and _cams.all(func(c: Camera3D) -> bool: return is_instance_valid(c)):
+			return _cams
+		_cams_frame = f
+		_cams = []
+		var root := n.get_tree().root
+		var conts := LayoutCheck.view_containers(root)
+		var covered := 0.0
+		for c in conts:
+			covered += c.get_global_rect().get_area()
+			var sv: SubViewport = null
+			for ch in c.get_children():
+				if ch is SubViewport:
+					sv = ch
+			if sv != null and sv.get_camera_3d() != null:
+				_cams.append(sv.get_camera_3d())
+		var rc := root.get_camera_3d()
+		if rc != null and (root.use_xr or covered < root.get_visible_rect().get_area() * 0.85):
+			_cams.append(rc)
+		return _cams
+
 
 class BannerFx extends Control:
 	## The banner: a horizontal band that wipes open, a big title that pops in, a subtitle that fades in.
@@ -579,6 +861,7 @@ class BannerFx extends Control:
 
 	func _ready() -> void:
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		set_meta("layout_band", true)  # its own dark band: fine across a split line (core/layout_check.gd BAND_META)
 		set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		_s = UiKit.scale_of(self)
 		_title = UiKit.label(title, "banner", title_color, HORIZONTAL_ALIGNMENT_CENTER)

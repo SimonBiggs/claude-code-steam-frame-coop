@@ -43,6 +43,7 @@ const KartScript := preload("res://games/kart_race/kart.gd")
 const CockpitScript := preload("res://games/kart_race/cockpit.gd")
 const JoinListenerScript := preload("res://games/kart_race/join_listener.gd")
 const UiKit := preload("res://core/ui_kit.gd")
+const HudKit := preload("res://core/hud_kit.gd")
 const TrackGen := preload("res://games/kart_race/trackgen.gd")
 const Story := preload("res://games/kart_race/story.gd")
 const Seeded := preload("res://core/seeded.gd")
@@ -3092,7 +3093,7 @@ func _build_hud() -> void:
 	var layer := CanvasLayer.new()
 	layer.layer = 5
 	add_child(layer)
-	center_label = _make_label(42)
+	center_label = HudKit.split_center(_make_label(42))  # a copy in each split view, never across the line
 	layer.add_child(center_label)
 	UiKit.pin(center_label, Control.PRESET_FULL_RECT, false)
 	center_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

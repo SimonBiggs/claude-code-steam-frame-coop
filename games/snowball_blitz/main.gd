@@ -40,6 +40,7 @@ const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV p
 ## and sends the village and the story cards as events (every machine builds the igloos itself).
 const SIMPLE_MODE := true
 const UiKit := preload("res://core/ui_kit.gd")
+const HudKit := preload("res://core/hud_kit.gd")
 const SiegeGen := preload("res://games/snowball_blitz/siegegen.gd")
 const Seeded := preload("res://core/seeded.gd")
 const Save := preload("res://core/save.gd")
@@ -406,23 +407,7 @@ func sound(sound_name: String, volume_db: float = 0.0, pitch: float = 1.0) -> vo
 func popup(pos: Vector3, text: String, color: Color) -> void:
 	if SIMPLE_MODE:
 		return  # no floating numbers or words: the splats and sounds say it
-	var l := Label3D.new()
-	l.text = text
-	l.modulate = color
-	l.outline_modulate = Color(0, 0, 0, 0.85)
-	l.font_size = 64
-	l.outline_size = 16
-	l.pixel_size = 0.007
-	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	l.no_depth_test = false
-	l.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(l)
-	l.global_position = pos
-	var t := l.create_tween().set_parallel()
-	t.tween_property(l, "global_position", pos + Vector3.UP * 1.4, 1.0).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
-	t.tween_property(l, "modulate:a", 0.0, 0.9).set_delay(0.45)
-	t.tween_property(l, "outline_modulate:a", 0.0, 0.9).set_delay(0.45)
-	t.chain().tween_callback(l.queue_free)
+	HudKit.popup(self, pos, text, {"color": color, "outline": Color(0, 0, 0, 0.85), "size": 1.38, "lift": 1.4, "time": 1.35})
 	if net:
 		net.event("popup", [pos, text, color])
 
@@ -2250,7 +2235,7 @@ func _build_hud() -> void:
 	info_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
 	info_label.offset_top = 18
 	info_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	center_label = _make_label(58)
+	center_label = HudKit.split_center(_make_label(58))  # a copy in each split view, never across the line
 	layer.add_child(center_label)
 	center_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	center_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

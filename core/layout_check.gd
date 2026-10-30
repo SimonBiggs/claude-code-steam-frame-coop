@@ -11,12 +11,47 @@ extends RefCounted
 ## - clipped by a clip_contents ancestor (ScrollContainer lists): only the part inside it counts, nothing if hidden;
 ## - two texts overlap when they share > 30 % of the smaller one, in the same viewport, and neither contains the
 ##   other (a label inside a panel inside another label's box is the same widget);
-## - a node (or an ancestor) with meta "layout_check_ignore" is skipped (on purpose: a giant faded title behind play).
+## - a node (or an ancestor) with meta "layout_check_ignore" is skipped (on purpose: a giant faded title behind play);
+## - a BIG word (a headline: font >= 3.6 % of the screen height) drawn over two split-screen views at once crosses the
+##   line between them ("divider: ..."): use HudKit.split_center(label) so each view gets its own copy. Text on its own
+##   panel or band (a results card, HudKit.banner's band: meta "layout_band") may sit over the line on purpose.
 
 const IGNORE_META := "layout_check_ignore"
 ## Opaque things drawn over the HUD (story cards' panels): text underneath them counts as hidden.
 const COVER_GROUP := "layout_cover"
 const MIN_ALPHA := 0.35
+## Text on its own band/panel across the views (HudKit.banner): allowed over the split line.
+const BAND_META := "layout_band"
+## A headline: font size at least this share of the screen height.
+const BIG_FRAC := 0.036
+## A split view: a visible SubViewportContainer at least this share of the screen in both directions.
+const VIEW_MIN_FRAC := 0.2
+
+
+## The split-screen views drawn in viewport `vp` (visible SubViewportContainers of a real size, outermost only), in
+## vp's coordinates. One shared answer for HudKit.split_center (a headline per view), HudKit.popup (which cameras
+## see a pop-up) and the divider check.
+static func view_containers(vp: Viewport) -> Array[SubViewportContainer]:
+	var out: Array[SubViewportContainer] = []
+	if vp == null:
+		return out
+	var area := vp.get_visible_rect().size
+	for n in vp.find_children("*", "SubViewportContainer", true, false):
+		var c := n as SubViewportContainer
+		if c.get_viewport() != vp or not c.is_visible_in_tree():
+			continue
+		var r := c.get_global_rect()
+		if r.size.x < area.x * VIEW_MIN_FRAC or r.size.y < area.y * VIEW_MIN_FRAC:
+			continue
+		out.append(c)
+	return out
+
+
+static func view_rects(vp: Viewport) -> Array[Rect2]:
+	var out: Array[Rect2] = []
+	for c in view_containers(vp):
+		out.append(c.get_global_rect())
+	return out
 
 
 ## Problems as short strings: "cut: \"SCORE 12\" ..." / "overlap: \"POPPY\" / \"0:42\"". Empty = fine.
@@ -42,6 +77,23 @@ static func problems(root: Node, max_items: int = 8) -> Array[String]:
 			var inter: Rect2 = (b.rect as Rect2).intersection(cr)
 			if inter.get_area() > 0.15 * (b.rect as Rect2).get_area():
 				out.append("covered: \"%s\" under %s at %s" % [b.text, cc.name, _r(inter)])
+	# Headlines over the line between split views.
+	var views_of := {}
+	for b in boxes:
+		if not b.big or b.band:
+			continue
+		if not views_of.has(b.vp):
+			views_of[b.vp] = view_rects((b.node as Node).get_viewport())
+		var vs: Array = views_of[b.vp]
+		if vs.size() < 2:
+			continue
+		var hit := 0
+		for v in vs:
+			var inter: Rect2 = (b.rect as Rect2).intersection(v)
+			if inter.size.x >= 8.0 and inter.size.y >= 8.0:
+				hit += 1
+		if hit >= 2:
+			out.append("divider: \"%s\" crosses the line between split views at %s (HudKit.split_center)" % [b.text, _r(b.rect)])
 	for i in boxes.size():
 		for j in range(i + 1, boxes.size()):
 			var a: Dictionary = boxes[i]
@@ -84,10 +136,13 @@ static func _add(c: Control, text: String, out: Array[Dictionary]) -> void:
 	var alpha := 1.0
 	var clip := Rect2()
 	var clipped := false
+	var band := false
 	var p: Node = c
 	while p != null:
 		if p.has_meta(IGNORE_META):
 			return
+		if p.has_meta(BAND_META) or (p != c and (p is PanelContainer or p is Panel)):
+			band = true
 		if p is CanvasItem:
 			alpha *= (p as CanvasItem).modulate.a * (p as CanvasItem).self_modulate.a if p == c else (p as CanvasItem).modulate.a
 		if p != c and p is Control and (p as Control).clip_contents:
@@ -107,7 +162,12 @@ static func _add(c: Control, text: String, out: Array[Dictionary]) -> void:
 	var vp := c.get_viewport()
 	if not _shown(vp):
 		return
-	out.append({"node": c, "text": text.substr(0, 28).replace("\n", " "), "rect": r, "view": vp.get_visible_rect(), "vp": vp.get_instance_id()})
+	var big := false
+	if c is Label:
+		var fs := float((c as Label).label_settings.font_size if (c as Label).label_settings != null else c.get_theme_font_size("font_size"))
+		var vs := vp.get_visible_rect().size
+		big = fs * c.get_global_transform_with_canvas().get_scale().y >= BIG_FRAC * minf(vs.y, vs.x * 9.0 / 16.0)  # (a 16:9 height: headless windows can be square)
+	out.append({"node": c, "text": text.substr(0, 28).replace("\n", " "), "rect": r, "view": vp.get_visible_rect(), "vp": vp.get_instance_id(), "big": big, "band": band})
 
 
 ## Is this viewport on screen? (Games prebuild hidden split views: a 2x2 SubViewport, or one in a hidden container.)

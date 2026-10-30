@@ -5,6 +5,7 @@ extends Node
 ## machine mirrors pack()/unpack() and gets one-off events ("hint", "lightning").
 
 const VrText := preload("res://core/vr_text.gd")
+const HudKit := preload("res://core/hud_kit.gd")
 
 const EVENTS := {
 	"storm": ["THUNDERSTORM!", "Lightning shows EVERY ghost for a moment - vacuum fast when it flashes!", 18.0],
@@ -469,7 +470,7 @@ func _ensure_ui() -> void:
 	hint_label.offset_top = -190
 	hint_label.offset_bottom = -60
 	hint_label.modulate.a = 0.0
-	timer_label = main._make_label(40)
+	timer_label = HudKit.split_center(main._make_label(40))  # one in each split view, never across the line
 	timer_label.add_theme_color_override("font_color", Color(1.0, 0.5, 0.45))
 	timer_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	layer.add_child(timer_label)

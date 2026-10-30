@@ -49,6 +49,7 @@ extends Node3D
 const WorldScript := preload("res://games/dragon_rider/world.gd")
 const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
 const UiKit := preload("res://core/ui_kit.gd")
+const HudKit := preload("res://core/hud_kit.gd")
 const DragonScript := preload("res://games/dragon_rider/dragon.gd")
 const CourseScript := preload("res://games/dragon_rider/course.gd")
 const RiderScript := preload("res://games/dragon_rider/rider.gd")
@@ -490,27 +491,7 @@ func sound(sound_name: String, volume_db: float = 0.0, pitch: float = 1.0) -> vo
 func popup(local: Vector3, text: String, color: Color, broadcast: bool = true) -> void:
 	if SIMPLE_MODE:
 		return  # no floating score text: bursts and sounds say it
-	var l := Label3D.new()
-	l.text = text
-	l.modulate = color
-	l.outline_modulate = Color(0.1, 0.03, 0.1, 0.9)
-	l.font_size = 64
-	l.outline_size = 20
-	l.pixel_size = 0.012
-	l.no_depth_test = false
-	l.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	dragon.add_child(l)
-	l.position = local
-	if not players.is_empty() and players[0].vr:
-		var to: Vector3 = l.global_position - players[0].xr_camera.global_position
-		l.global_basis = Basis(Vector3.UP, atan2(-to.x, -to.z))  # upright, facing the rider
-	else:
-		l.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
-	var t := l.create_tween().set_parallel()
-	t.tween_property(l, "position", local + Vector3.UP * 1.5, 1.4).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
-	t.tween_property(l, "modulate:a", 0.0, 0.8).set_delay(0.9)
-	t.tween_property(l, "outline_modulate:a", 0.0, 0.8).set_delay(0.9)
-	t.chain().tween_callback(l.queue_free)
+	HudKit.popup(self, local, text, {"color": color, "outline": Color(0.1, 0.03, 0.1, 0.9), "size": 2.37, "lift": 1.5, "time": 1.7, "parent": dragon, "billboard": BaseMaterial3D.BILLBOARD_FIXED_Y})  # rides along with the dragon; VR: faces the rider
 	if broadcast:
 		net.event("popup", [local, text, color])
 
