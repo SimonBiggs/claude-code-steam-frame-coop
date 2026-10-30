@@ -1,6 +1,7 @@
 extends Node
 ## A TV player (players[1..6]): watches the easel in their own split-screen view and guesses what the
-## artist is drawing by picking one of FOUR answers (their own shuffled set: one right, three decoys).
+## artist is drawing by picking one of FOUR PICTURE answers (one right, three decoys; the same four for everyone,
+## each in their own order: paintgen.gd). The picture is big, its name a small caption (for kids who can't read).
 ## D-pad / left stick (arrows, WASD on the TV machine) moves the highlight, A (Enter / Space) picks.
 ## A wrong pick locks you out for a moment and crosses that answer out; the host decides and scores.
 ## TEAM PAINT rounds: the TV players PAINT the word together (left stick / D-pad moves your brush ring,
@@ -9,6 +10,9 @@ extends Node
 ## On the host, the TV machine's guessers are "remote": their picks arrive as "guess" actions and their
 ## team-paint brush as player state (pos = brush, yaw = 1 while painting).
 
+const StoryCard := preload("res://core/story_card.gd")
+const PaintGen := preload("res://games/paint_and_guess/paintgen.gd")
+const PIC_COLOR := Color(1.0, 0.62, 0.3)
 const CHEERS: Array[String] = ["YAY!", "WOW!", "HA HA!"]
 const BRUSH_SPEED := 0.65
 
@@ -78,8 +82,11 @@ var timer_fill: ColorRect
 var opt_root: Control
 var opt_panels: Array[PanelContainer] = []
 var opt_labels: Array[Label] = []
+var opt_pics: Array[Control] = []
+var opt_x: Array[Label] = []
 var big_panel: PanelContainer
 var big_label: Label
+var big_pic: Control
 var styles := {}
 
 
@@ -455,12 +462,27 @@ func build_hud(root: Control) -> void:
 		pc.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		pc.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		grid.add_child(pc)
+		var hb := HBoxContainer.new()
+		hb.alignment = BoxContainer.ALIGNMENT_CENTER
+		hb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		hb.add_theme_constant_override("separation", 6)
+		pc.add_child(hb)
+		var pic := StoryCard.picture("sun", 48.0, PIC_COLOR)
+		hb.add_child(pic)
+		var x := _label(40)
+		x.text = "✗"
+		x.modulate = Color(1.0, 0.3, 0.3)
+		x.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+		x.visible = false
+		pic.add_child(x)
 		var l := _label(34)
 		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		pc.add_child(l)
+		hb.add_child(l)
 		opt_panels.append(pc)
 		opt_labels.append(l)
+		opt_pics.append(pic)
+		opt_x.append(x)
 	# One big panel for TEAM PAINT and the VOTE (same place as the answers).
 	big_panel = PanelContainer.new()
 	big_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -469,11 +491,19 @@ func build_hud(root: Control) -> void:
 	big_panel.anchor_right = 0.97
 	big_panel.anchor_top = 0.72
 	big_panel.anchor_bottom = 0.97
+	var bh := HBoxContainer.new()
+	bh.alignment = BoxContainer.ALIGNMENT_CENTER
+	bh.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bh.add_theme_constant_override("separation", 10)
+	big_panel.add_child(bh)
+	big_pic = StoryCard.picture("sun", 64.0, PIC_COLOR)
+	bh.add_child(big_pic)
 	big_label = _label(34)
 	big_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	big_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	big_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	big_panel.add_child(big_label)
+	big_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bh.add_child(big_label)
 	big_panel.visible = false
 
 
@@ -502,7 +532,7 @@ func _update_hud() -> void:
 	time_label.modulate = Color(1.0, 0.4, 0.35) if (st == "draw" and main.time_left <= 10.0) else Color(1, 1, 1)
 	banner_label.text = main.banner_text() if active else ""
 	if st == "draw" and team:
-		hint_label.text = "PAINT:  %s" % str(main.team_word).to_upper() if main.team_word != "" else "PAINT IT TOGETHER!"
+		hint_label.text = "PAINT:  %s" % main.cap(main.team_word) if main.team_word != "" else "PAINT IT TOGETHER!"
 		hint_label.modulate = Color(1.0, 0.9, 0.5)
 	elif st == "vote":
 		hint_label.text = "VOTE FOR THE BEST PICTURE!"
@@ -542,12 +572,21 @@ func _update_hud() -> void:
 	if not show_opts:
 		return
 	var answer: String = main.reveal_word
+	# Pictures as big as the answer boxes allow (two rows of two).
+	var px := maxf(24.0, (opt_root.size.y - 8.0) * 0.5 - 12.0 * s)
 	for i in 4:
 		var l := opt_labels[i]
-		l.add_theme_font_size_override("font_size", int(34 * s))
+		l.add_theme_font_size_override("font_size", int(clampf(px * 0.3, 14.0, 26.0 * s)))
 		var w: String = opts[i]
-		l.text = w.to_upper()
+		l.text = PaintGen.caption(w).to_upper()
+		var pic := opt_pics[i]
+		if pic.get("kind") != null and str(pic.get("kind")) != w:
+			pic.set("kind", w)
+		pic.custom_minimum_size = Vector2(px, px)
 		var crossed := (wrong_mask >> i) & 1 == 1
+		opt_x[i].visible = crossed
+		opt_x[i].add_theme_font_size_override("font_size", int(px * 0.9))
+		pic.modulate = Color(1, 1, 1, 0.45) if crossed or (got and st == "draw" and w != answer) else Color(1, 1, 1)
 		var key := "idle"
 		var bg := Color(0.12, 0.14, 0.26, 0.88)
 		var border := Color(0.3, 0.35, 0.55)
@@ -560,7 +599,7 @@ func _update_hud() -> void:
 			key = "crossed"
 			bg = Color(0.3, 0.08, 0.08, 0.8)
 			border = Color(0.6, 0.2, 0.2)
-			l.text = "✗ " + w.to_upper()
+			l.text = PaintGen.caption(w).to_upper()
 		elif got:
 			key = "done"
 			bg = Color(0.1, 0.12, 0.18, 0.6)
@@ -575,16 +614,22 @@ func _update_hud() -> void:
 
 func _update_big_panel(st: String) -> void:
 	var bg := Color(0.12, 0.14, 0.26, 0.88)
+	var px := maxf(32.0, big_panel.size.y - 24.0 * ui_scale)
+	big_pic.custom_minimum_size = Vector2(px, px)
+	var pic_id: String = main.team_word if st != "vote" else main.vote_word(vote_cursor)
+	big_pic.visible = pic_id != ""
+	if pic_id != "" and big_pic.get("kind") != null and str(big_pic.get("kind")) != pic_id:
+		big_pic.set("kind", pic_id)
 	if st == "vote":
 		var n: int = main.vote_count()
 		var t := "Pick your favourite:  <  #%d  >" % (vote_cursor + 1)
 		if n > 0:
-			t += "   (%s)" % str(main.vote_word(vote_cursor)).to_upper()
+			t += "   (%s)" % main.cap(main.vote_word(vote_cursor))
 		t += "\nPress A to vote!" if vote < 0 else ("\nYou voted for #%d - A again to change" % (vote + 1))
 		big_label.text = t
 		bg = Color(0.25, 0.18, 0.05, 0.9)
 	else:
-		big_label.text = "TEAM PAINT!  Paint  %s  together!\nLeft stick / D-pad moves your ring · HOLD A (or RT) to paint\nThe VR player guesses with the balloons" % \
-			str(main.team_word).to_upper()
+		# Picture first (big, on the left): just the name and the two controls.
+		big_label.text = "%s\nPaint it together!\nStick: move  ·  HOLD A: paint" % main.cap(main.team_word)
 		bg = Color(color.r * 0.3, color.g * 0.3, color.b * 0.3, 0.9)
 	big_panel.add_theme_stylebox_override("panel", _style("big_%s_%d" % [st, index], bg, color.lerp(Color(1, 1, 1), 0.3)))
