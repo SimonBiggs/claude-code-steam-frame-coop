@@ -119,7 +119,7 @@ func _ready() -> void:
 	party.player_joined.connect(_on_player_joined)
 	save = Save.new()
 	save.game_id = GAME_ID
-	save.defaults = {"treasures": 0}
+	save.defaults = {"treasures": 0, "daily": ""}  # daily: the date TODAY'S DUNGEON was last played (deep.gd finish)
 	add_child(save)
 	sfx = SfxScript.new()
 	add_child(sfx)

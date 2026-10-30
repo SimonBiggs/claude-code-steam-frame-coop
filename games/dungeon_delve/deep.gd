@@ -689,6 +689,9 @@ func finish(won: bool) -> void:
 	var key := daily_key() if daily else mode
 	var new_best := FloorGen.global_floor(zone, floor_i) > int((progress()["best"] as Dictionary).get(key, 0))
 	_record_depth()
+	if daily:
+		main.save.data["daily"] = Time.get_date_string_from_system()  # TODAY'S DUNGEON played (Seeded.today(); the Trophy Hall reads it)
+		main.save.mark_dirty()
 	if won:
 		var pd := progress()
 		var wins: Dictionary = pd["wins"]

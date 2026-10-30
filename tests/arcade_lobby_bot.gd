@@ -32,6 +32,10 @@ const QUIET_AFTER := 1.0  # from here on nothing may change hands any more
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_make_plan()
+	# Family Trophy Hall: each machine has grown Wren's town a different amount (its own test save); every machine
+	# must end up showing the family's furthest (the host merges everyone's and sends it round).
+	Engine.set_meta("save_test_mode", true)
+	preload("res://core/save.gd").store("tower_stack", {"built": 10 + me, "town": [], "daily": ""})
 	# The arcade becomes the current scene, so starting a game replaces IT and this bot (a sibling under the root)
 	# keeps watching.
 	arcade = load("res://arcade.tscn").instantiate()
@@ -151,6 +155,16 @@ func _check_settled() -> void:
 	print("LOBBY BOT: machine %d settled on %s (%d); rebuilds %d, sent %d, received %d (presses: %d, mine %d)" % [
 		me, arcade_games()[expected_index].name, expected_index, s.show_category, s.sync_out, s.sync_in, total, mine])
 	print("BOT AGREE selection=%d" % expected_index)
+	var rows: Dictionary = arcade.hall_rows()
+	var grown := int((rows.get("tower_stack", {}) as Dictionary).get("grown", -1))
+	if not arcade.hall_ready or grown != 10 + count - 1:
+		_fail("the Trophy Hall shows Wren's town grown %d (want the family's furthest, %d; ready %s)" % [grown, 10 + count - 1, arcade.hall_ready])
+	var keys := rows.keys()
+	keys.sort()
+	var agree := []
+	for k in keys:
+		agree.append([k, int(rows[k].grown), bool(rows[k].daily)])
+	print("BOT AGREE hall=%d" % hash(str(agree)))
 	# The focused card must be the selection (the TV shows what the machine thinks is chosen).
 	var f: Control = get_viewport().gui_get_focus_owner()
 	if not arcade.cards.has(expected_index) or f != arcade.cards[expected_index]:

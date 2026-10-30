@@ -157,7 +157,7 @@ func _ready() -> void:
 	save.game_id = Data.GAME_ID
 	save.version = Data.SAVE_VERSION
 	save.defaults = {"parts": 0, "cleared": [], "stars": [], "owned": [], "paint": "classic", "paints": ["classic"], "turn": "smooth",
-		"friends": [], "best_round": 0, "rounds": 0}
+		"friends": [], "best_round": 0, "rounds": 0, "daily": ""}
 	add_child(save)
 	sfx = SfxScript.new()
 	add_child(sfx)
@@ -439,6 +439,8 @@ func _make_friends(i: int) -> void:
 		friends.pop_front()
 	save.data["best_round"] = maxi(int(save.data["best_round"]), i + 1)
 	save.data["rounds"] = int(save.data["rounds"]) + 1
+	if bool(m.get("daily", false)):
+		save.data["daily"] = Seeded.today()  # TODAY'S KAIJU went home (the Trophy Hall's daily tick)
 	save.mark_dirty()
 	_publish_friends()
 	var who := String(m.get("name", "")) if bool(m.get("gen", false)) else String(Data.KAIJU.get(String(bosses[0]) if not bosses.is_empty() else "lizard", Data.KAIJU["lizard"])["name"])

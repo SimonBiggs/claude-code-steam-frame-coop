@@ -119,6 +119,30 @@ class Runner extends Node:
 			check(f != null and arcade.grid.is_ancestor_of(f), "tab %s has a highlighted card" % name)
 			if want > arcade._games_in(biggest).size():
 				biggest = k
+		# The Family Trophy Hall (arcade/hall.gd): the first tab, one tile per story game with its friend, growth and
+		# golden star, all inside the tile; it loads a few games a frame, so it's ready within a moment.
+		for i in 120:
+			if arcade.hall_ready:
+				break
+			await frames(1)
+		check(arcade.hall_ready, "the Trophy Hall finished loading")
+		var ht: int = arcade._hall_tab()
+		check(ht == 0, "the Trophy Hall is the first tab (%d)" % ht)
+		if ht >= 0:
+			arcade._show_category(ht, true)
+			await frames(3)
+			var bad := []
+			for i in arcade.cards:
+				var card: Button = arcade.cards[i]
+				var hall: Control = card.get_node_or_null("Hall")
+				if hall == null or hall.find_child("Grown", true, false) == null or (hall.find_child("StarDone", true, false) == null and hall.find_child("StarToDo", true, false) == null):
+					bad.append(str(arcade.GAMES[i].id) + " (missing parts)")
+					continue
+				var cr := card.get_global_rect().grow(1.0)
+				for part in hall.get_children():
+					if not cr.encloses((part as Control).get_global_rect()):
+						bad.append("%s (%s sticks out)" % [arcade.GAMES[i].id, part.name])
+			check(bad.is_empty() and arcade.cards.size() >= 30, "every hall tile has its friend, growth and star inside it (%d tiles; %s)" % [arcade.cards.size(), str(bad)])
 		# LB / RB move between tabs.
 		arcade._show_category(0, true)
 		await frames(2)
