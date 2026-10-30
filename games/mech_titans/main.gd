@@ -458,7 +458,7 @@ func _make_friends(i: int) -> void:
 	if opened == "" and (friends_today == 1 or bool(m.get("daily", false))):
 		var golden := bool(m.get("daily", false))
 		get_tree().create_timer(3.8).timeout.connect(func() -> void:
-			story({"who": "MOMO", "line": "A golden friend!" if golden else "Yay! A new friend!", "pic": "momo",
+			story({"who": "MOMO", "line": "GOLDEN FRIEND!" if golden else "YAY!", "pic": "momo",
 				"color": "ffd25a" if golden else MOMO_COLOR, "duration": 3.0}))
 
 
@@ -1363,9 +1363,9 @@ func _start_play() -> void:
 		var r := int(net.state_get("mission", 0))
 		var rm := mission_info(r)
 		var later := 0.0
-		if not momo_hello:  # Momo says hello once a session, before the first lost kaiju's card
+		if not momo_hello:  # Momo says hello once a session, before the first lost kaiju's card (SIMPLE: two capital words)
 			momo_hello = true
-			story({"who": "HI! I'M MOMO!", "line": "Help my friends home!", "pic": "momo", "color": MOMO_COLOR, "duration": 3.5})
+			story({"who": "HI! MOMO!", "line": "HELP!", "pic": "momo", "color": MOMO_COLOR, "duration": 3.5})
 			later = 3.6
 		if bool(rm.get("gen", false)) and later > 0.0:
 			get_tree().create_timer(later).timeout.connect(func() -> void:
