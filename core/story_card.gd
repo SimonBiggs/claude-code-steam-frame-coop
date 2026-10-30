@@ -169,8 +169,8 @@ class Card extends Control:
 		var w := minf(panel.get_combined_minimum_size().x, room)
 		panel.size = Vector2(w, panel.get_combined_minimum_size().y)
 		if _results_showing():
-			# The results screen's big title sits where the card goes: the card waits in the bottom-left corner.
-			panel.position = Vector2(20.0 * _s, size.y - panel.size.y - 20.0 * _s)
+			# The results screen's big title sits where the card goes: the card waits in the bottom-right corner.
+			panel.position = Vector2(size.x - w - 20.0 * _s, size.y - panel.size.y - 20.0 * _s)
 			return
 		var y := float(opts.get("y", 0.13)) * size.y
 		# A HudKit banner ("RIDE!", "WAVE 2") on the same view: the card sits just above its band (or below it

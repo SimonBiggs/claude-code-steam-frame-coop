@@ -239,6 +239,7 @@ func _build_world(vr: bool) -> void:
 	crown.name = "Tree"
 	add_child(crown)
 	crown.add_child(MeshKit.instance(Art.tree(), not vr))
+	CameraRig.occluder(crown, TRUNK_R, 4.2)  # the follow cameras stop in front of the trunk (it filled the view)
 	for k in BRANCHES:
 		var a := PI * 0.5 + k * TAU / BRANCHES
 		var tip := Vector3(cos(a) * TIP_RADIUS, TIP_HEIGHT, sin(a) * TIP_RADIUS)

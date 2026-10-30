@@ -39,12 +39,12 @@ func _ready() -> void:
 	var barrel_m := World.mat(Color(0.62, 0.4, 0.2))
 	for c in main.cannons:
 		# Cannon-local layout: -Z out to sea, +Z inboard (the gunner stands at +1.45), +X the ammo-rack side.
-		# (0.45 m further out to sea than the gunner's shoulder: right beside the TV / Deck cameras Polly filled a
+		# (further out and to the side than the gunner's shoulder: right beside the TV / Deck cameras Polly filled a
 		# third of the gunner's view; here she's at the edge of it and still one step from a VR hand)
-		var post_pos := _at(c, 0.68, 0.0, 0.8)
+		var post_pos := _at(c, 0.82, 0.0, 0.85)
 		var post := World.cyl(self, 0.045, 0.05, 1.45, post_pos + Vector3.UP * 0.725, wood, 8)
 		_plain(post)
-		var arm_dir: Vector3 = (_at(c, 0.68, 0.0, 0.6) - post_pos)
+		var arm_dir: Vector3 = (_at(c, 0.82, 0.0, 0.65) - post_pos)
 		var arm := World.box(self, Vector3(0.05, 0.05, 0.26), post_pos + Vector3.UP * 1.43 + arm_dir * 0.5, wood)
 		arm.rotation.y = atan2(arm_dir.x, arm_dir.z)
 		_plain(arm)
