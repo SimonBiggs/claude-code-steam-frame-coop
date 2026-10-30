@@ -127,7 +127,32 @@ class Runner extends Node:
 			await frames(1)
 		check(arcade.hall_ready, "the Trophy Hall finished loading")
 		var ht: int = arcade._hall_tab()
-		check(ht == 0, "the Trophy Hall is the first tab (%d)" % ht)
+		var nt: int = arcade._tab_of("new")
+		check(ht == (1 if nt == 0 else 0), "the Trophy Hall is the first tab after What's New (hall %d, new %d)" % [ht, nt])
+		# What's New (arcade/whats_new.gd): the first tab, one tile per game with news: its friend, a NEW! badge on
+		# what nobody opened yet, pictures and one line, all inside the tile; nothing cut off or overlapping.
+		check(nt == 0, "What's New is the first tab (%d)" % nt)
+		if nt >= 0:
+			arcade._show_category(nt, true)
+			await frames(3)
+			var nbad := []
+			for i in arcade.cards:
+				var card: Button = arcade.cards[i]
+				var news: Control = card.get_node_or_null("News")
+				if news == null or news.find_child("Friend", true, false) == null or news.find_child("Line", true, false) == null:
+					nbad.append(str(arcade.GAMES[i].id) + " (missing parts)")
+					continue
+				var cr := card.get_global_rect().grow(1.0)
+				for part in news.find_children("*", "Control", true, false):
+					if part.name in ["NewBadge", "Friend", "Pictures", "Line", "Shot"] and not cr.encloses((part as Control).get_global_rect()):
+						nbad.append("%s (%s sticks out)" % [arcade.GAMES[i].id, part.name])
+			check(nbad.is_empty() and arcade.cards.size() >= 1, "every news tile has its friend and line inside it (%d tiles; %s)" % [arcade.cards.size(), str(nbad)])
+		# Every tab: no text cut off by the screen or drawn over other text (core/layout_check.gd).
+		for k in tabs.size():
+			arcade._show_category(k, true)
+			await frames(3)
+			var probs: Array = preload("res://core/layout_check.gd").problems(vp)
+			check(probs.is_empty(), "tab %s: text fits and doesn't overlap (%s)" % [arcade.CATEGORIES[tabs[k]].name, str(probs.slice(0, 3))])
 		if ht >= 0:
 			arcade._show_category(ht, true)
 			await frames(3)
