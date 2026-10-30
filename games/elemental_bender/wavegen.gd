@@ -342,12 +342,17 @@ static func lantern_slot(i: int) -> Vector3:
 	return Vector3(cos(a), 0.0, sin(a)) * LANTERN_R
 
 
-## Where fruit i hangs on the tree (relative to TREE_AT; the tree's top at stage `stage`).
+## Where fruit i hangs on the tree (relative to TREE_AT): on the outside of the crown at stage `stage`.
 static func fruit_slot(i: int, stage: int) -> Vector3:
-	var h := tree_height(stage)
 	var a := i * 2.399  # (the golden angle: fruit spread round the crown)
-	var rr := 0.55 + 0.35 * float(i % 3) / 2.0
-	return Vector3(cos(a) * rr * crown_r(stage), h - crown_r(stage) * (0.35 + 0.2 * float(i % 2)), sin(a) * rr * crown_r(stage))
+	var el := -0.35 + 0.8 * float((i * 5) % 7) / 6.0
+	var d := Vector3(cos(a) * cos(el), sin(el), sin(a) * cos(el))
+	return Vector3(0.0, tree_height(stage), 0.0) + d * crown_r(stage) * 1.03
+
+
+## How many fruit fit on the tree at `stage` (the newest ones show).
+static func fruit_cap(stage: int) -> int:
+	return [0, 3, 6, 9, 12, 12][clampi(stage, 0, 5)]
 
 
 static func tree_height(stage: int) -> float:

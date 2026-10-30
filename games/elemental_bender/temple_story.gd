@@ -20,7 +20,7 @@ const DARK := Color(0.15, 0.08, 0.06)
 const GOLD := Color(1.0, 0.8, 0.25)
 const SHADOW := Color(0.35, 0.12, 0.5)
 const STONE := Color(0.72, 0.7, 0.66)
-const KIKO_AT := Vector3(0.0, World.DAIS_TOP, 0.0)
+const KIKO_AT := Vector3(-2.0, World.DAIS_TOP, 1.0)  # beside the VR master (who stands at z 2.6 facing -z), not in his way
 
 var main
 var kiko: Node3D
@@ -190,10 +190,10 @@ func set_keepsakes(waves: int, fruit: Array, days: int, crowned: bool) -> void:
 	keep_root.add_child(mi)
 	if stage >= 1 and not fruit.is_empty():
 		var fb := MeshKit.builder()
-		var shown := fruit.slice(maxi(0, fruit.size() - WaveGen.FRUIT_MAX))
+		var shown := fruit.slice(maxi(0, fruit.size() - WaveGen.fruit_cap(stage)))
 		for i in shown.size():
 			var fp := WaveGen.fruit_slot(i, stage)
-			fb.sphere(0.16 + stage * 0.02, MeshKit.at(at + fp), E.COLORS[clampi(int(shown[i]), 0, 3)], 8, true)
+			fb.sphere(0.2 + stage * 0.04, MeshKit.at(at + fp), E.COLORS[clampi(int(shown[i]), 0, 3)], 8, true)
 		var fm := MeshKit.instance(fb.build(), false)
 		fm.name = "Fruit"
 		keep_root.add_child(fm)

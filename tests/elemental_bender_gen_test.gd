@@ -129,11 +129,15 @@ func _init() -> void:
 			_expect((pr.p as Vector3).distance_to(p) > float(pr.r) + 0.3, "lantern %d isn't in a tree or rock" % i)
 	_expect(G.lantern_slot(G.LANTERNS_MAX) == Vector3.INF, "no lantern slots past the end")
 	_expect(G.lanterns(400) == G.LANTERNS_MAX and G.lanterns(3) == 3, "one lantern per play-day, up to the most")
+	_expect(G.fruit_cap(G.TREE_STAGES.size() - 1) == G.FRUIT_MAX, "the great tree holds every fruit kept")
 	_expect(G.tree_stage(0) == 0 and G.tree_stage(1000) == G.TREE_STAGES.size() - 1, "the tree grows from a seed to the great tree")
 	for st in range(1, G.TREE_STAGES.size()):
-		for i in G.FRUIT_MAX:
+		for i in G.fruit_cap(st):
 			var f := G.fruit_slot(i, st)
-			_expect(f.y > 0.2 and Vector2(f.x, f.z).length() <= G.crown_r(st) * 1.0 + 0.01, "fruit %d hangs in the crown (stage %d)" % [i, st])
+			var out := f.distance_to(Vector3(0.0, G.tree_height(st), 0.0))
+			_expect(f.y > 0.2 and out > G.crown_r(st) * 0.98 and out < G.crown_r(st) * 1.1, "fruit %d hangs on the outside of the crown (stage %d)" % [i, st])
+			for j in i:
+				_expect(f.distance_to(G.fruit_slot(j, st)) > 0.25, "fruits %d and %d don't overlap (stage %d)" % [i, j, st])
 	# Pictures.
 	for pic in ["kiko", "portal", "general", "spirittree", "lightfruit", "lantern", "crown"]:
 		_expect(StoryCard.has_picture(pic), "the %s picture exists" % pic)
