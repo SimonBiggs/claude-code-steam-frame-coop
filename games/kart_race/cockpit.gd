@@ -435,6 +435,8 @@ func place(delta: float) -> void:
 	panel_hint.text = texts[2]
 	panel_hint.visible = str(texts[2]) != ""
 	if fake:
+		if xr_camera != null:  # the bots' fake head sits at the driver's eyes
+			xr_camera.transform = Transform3D(Basis(), EYE)  # (a child of the kart)
 		return
 	if xr_origin.world_scale != 1.0:
 		xr_origin.world_scale = 1.0

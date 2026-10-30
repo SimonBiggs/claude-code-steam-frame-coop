@@ -2258,8 +2258,8 @@ func _update_story(delta: float) -> void:
 		var o2 := opts.duplicate()
 		o2["y"] = 0.84 if state == "intro" or state == "wait" else 0.3  # (the big message is mid-view in the intro; answers fill the bottom later)
 		StoryCard.show(high, o2)
-	if players.size() > 0 and players[0].vr and players[0].xr_camera != null:
-		StoryCard.show_vr(self, players[0].xr_camera, opts)
+	if players.size() > 0 and (players[0].vr or players[0].fake_vr) and players[0].xr_camera != null:
+		StoryCard.show_vr(self, players[0].xr_camera, opts)  # (fake_vr: the bots' VR view checks it)
 	room.cat_cheer()
 
 
@@ -2536,7 +2536,7 @@ func _update_vr_text(delta: float) -> void:
 	help_label.visible = state != "draw" and view_n <= 1  # keep the bottom row's answers clear; split views have their own lines
 	if help_label.modulate.a > 0.0 and round_n >= 2:
 		help_label.modulate.a = maxf(0.0, help_label.modulate.a - delta * 0.5)
-	if players.is_empty() or not players[0].vr:
+	if players.is_empty() or not (players[0].vr or players[0].fake_vr) or players[0].xr_camera == null:
 		return
 	var cam: XRCamera3D = players[0].xr_camera
 	if vr_center == null:

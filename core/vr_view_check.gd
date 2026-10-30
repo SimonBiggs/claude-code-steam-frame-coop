@@ -15,7 +15,8 @@ extends RefCounted
 ## - no text glued to the face: a visible Label3D under the XR camera turns with the head.
 ## A node (or ancestor) with meta "vr_check_ignore" is skipped.
 
-const MIN_D := 0.8
+## (UiKit.vr_spot brings a panel to 0.55 m only when a wall is right in front of the face)
+const MIN_D := 0.5
 ## VrText.COMFORT puts cards 1.6 x 1.6 = 2.56 m away on purpose (players found ~1.7 m text cross-eyed), and the lazy
 ## follow lets a card drift to 1.45 x that before it glides back (the player walked away from it).
 const MAX_D := 3.8

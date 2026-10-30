@@ -887,6 +887,18 @@ func debug_fake_vr():
 	cockpit.main = self
 	add_child(cockpit)
 	cockpit.setup(players[0], null, null, null, null)
+	# A fake headset camera (never current) at the driver's eyes: VR cards, VR text and the bots' VR view (vrShot)
+	# work as with a headset. The driver's own body is on the TV-only avatar layer, so it doesn't fill that view.
+	var cam := XRCamera3D.new()
+	cam.name = "FakeHead"
+	cam.near = 0.03
+	cam.far = 600.0
+	players[0].add_child(cam)  # rides in the kart, like a headset's rig
+	cam.current = false
+	cam.cull_mask = 0xFFFFF & ~preload("res://core/vr_rig.gd").AVATAR_LAYER
+	for v in players[0].driver.find_children("*", "VisualInstance3D", true, false):
+		(v as VisualInstance3D).layers = preload("res://core/vr_rig.gd").AVATAR_LAYER
+	cockpit.xr_camera = cam
 	print("Fake VR cockpit on P1")
 	return cockpit
 
@@ -1846,7 +1858,7 @@ func show_story(beat: Dictionary) -> void:
 			huds.append(p.hud)
 	if not huds.is_empty():
 		StoryCard.show(huds, opts)
-	if cockpit != null and not cockpit.fake and cockpit.xr_camera != null:
+	if cockpit != null and cockpit.xr_camera != null:  # (fake cockpits have a fake head too: the VR bots see it)
 		StoryCard.show_vr(self, cockpit.xr_camera, opts)
 	print("Story card: %s - %s" % [String(beat.get("who", "")), String(beat.get("line", ""))])
 
@@ -3265,7 +3277,7 @@ func _update_minimap(p) -> void:
 func _update_vr_text(_dt: float) -> void:
 	if help_label.modulate.a > 0.0 and round_n >= 2:
 		help_label.modulate.a = maxf(0.0, help_label.modulate.a - get_process_delta_time() * 0.5)
-	if cockpit == null or cockpit.fake:
+	if cockpit == null or cockpit.xr_camera == null:
 		return
 	var cam: XRCamera3D = cockpit.xr_camera
 	if vr_center == null:
@@ -3278,7 +3290,7 @@ func _update_vr_text(_dt: float) -> void:
 		vr_center.outline_render_priority = 9
 		vr_center.width = 1200.0
 		vr_center.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		cockpit.xr_origin.add_child(vr_center)  # rides along with the kart
+		(cockpit.xr_origin if cockpit.xr_origin != null else cockpit.seat).add_child(vr_center)  # rides along with the kart
 	vr_center.text = vr_results if state == "results" and vr_results != "" and not get_tree().paused else preload("res://core/vr_text.gd").short(center_label.text)
 	vr_center.modulate.a = center_label.modulate.a
 	vr_center.outline_modulate = Color(0, 0, 0, center_label.modulate.a)

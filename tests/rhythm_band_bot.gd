@@ -138,6 +138,8 @@ func _process(delta: float) -> void:
 		fake_vr = OS.has_environment("BOT_FAKE_VR") or OS.has_environment("BOT_VR") or mode == "host"
 		if fake_vr and not main.players[0].ghost and not main.players[0].vr:
 			main.players[0].fake_vr = true
+			if OS.has_environment("BOT_VR") and main.players[0].camera != null:
+				main.players[0].xr_camera = preload("res://core/vr_rig.gd").fake_head(main.players[0].camera)
 			print("BOT: driving the drummer's hands (fake VR)")
 	if mode == "local" and joined and t > join_time + 0.3 and not has_meta("start_checked"):
 		set_meta("start_checked", true)

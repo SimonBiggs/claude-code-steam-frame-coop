@@ -120,6 +120,24 @@ var _body_shape: SphereShape3D
 
 
 ## True when an OpenXR headset is running on this machine.
+## Bots (BOT_VR) in games whose fake VR player has no headset camera (it plays through a flat camera): a
+## never-current XRCamera3D riding on `flat_cam`, so VR cards, VR text and the bots' VR view (gdev vrShot,
+## core/vr_view_check.gd) work as with a headset. Returns the one already there on a second call.
+static func fake_head(flat_cam: Camera3D) -> XRCamera3D:
+	if flat_cam == null:
+		return null
+	var have := flat_cam.get_node_or_null("FakeHead") as XRCamera3D
+	if have != null:
+		return have
+	var cam := XRCamera3D.new()
+	cam.name = "FakeHead"
+	cam.near = 0.02
+	cam.cull_mask = flat_cam.cull_mask
+	flat_cam.add_child(cam)
+	cam.current = false
+	return cam
+
+
 static func headset_available() -> bool:
 	var xr := XRServer.find_interface("OpenXR")
 	return xr != null and xr.is_initialized()

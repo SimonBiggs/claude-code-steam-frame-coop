@@ -30,7 +30,7 @@ func _process(delta: float) -> void:
 	if not vr and OS.has_environment("BOT_VR"):
 		# Fake VR (bots): the TV camera is current, but the headset's rules must hold so bots and VR shots see
 		# what a real headset player sees (and the TV the same labels as with a real headset).
-		var heads := get_tree().root.find_children("*", "XRCamera3D", true, false) if Engine.get_process_frames() % 30 == 0 or fake_head == null or not is_instance_valid(fake_head) else [fake_head]
+		var heads: Array = get_tree().root.find_children("*", "XRCamera3D", true, false) if Engine.get_process_frames() % 30 == 0 or fake_head == null or not is_instance_valid(fake_head) else [fake_head]
 		fake_head = heads[0] if not heads.is_empty() else null
 		if fake_head != null and fake_head.is_inside_tree():
 			cam = fake_head

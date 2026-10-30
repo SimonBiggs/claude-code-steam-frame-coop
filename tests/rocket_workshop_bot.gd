@@ -250,6 +250,8 @@ func _pilot(delta: float) -> void:
 			steps.pop_front()
 			step_t = 0.0
 	op.bot_hand = {"pos": hand, "grip": grip, "vr": OS.has_environment("BOT_VR")}
+	if OS.has_environment("BOT_VR") and op.xr_camera == null and op.camera != null:
+		op.xr_camera = preload("res://core/vr_rig.gd").fake_head(op.camera)  # the bots' VR view
 
 
 func _at(key: String, lift: float = 0.0) -> Vector3:

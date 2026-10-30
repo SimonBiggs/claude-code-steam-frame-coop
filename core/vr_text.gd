@@ -12,6 +12,14 @@ const COMFORT := 1.6
 static func follow(l: Label3D, cam: Node3D, world: Node, height: float, dist: float = 1.8) -> void:
 	if l == null or cam == null or not is_instance_valid(l):
 		return
+	if l.is_inside_tree() and cam.is_inside_tree():
+		_ui().vr_ride(l, cam)  # moves with the player's rig (vehicles, teleports)
+	_follow(l, cam, world, height, dist)
+	if is_instance_valid(l) and l.is_inside_tree() and cam.is_inside_tree():
+		_ui().vr_ride_done(l, cam)
+
+
+static func _follow(l: Label3D, cam: Node3D, world: Node, height: float, dist: float) -> void:
 	preload("res://core/vr_layer.gd").mark_once(l)  # VR-only text: never on the TV cameras
 	dist *= COMFORT
 	height *= COMFORT
@@ -33,7 +41,6 @@ static func follow(l: Label3D, cam: Node3D, world: Node, height: float, dist: fl
 	var k := float(spot.k)
 	target = spot.pos
 	dist *= k
-	_ui().vr_ride(l, cam)  # moves with the player's rig (vehicles, teleports)
 	if not l.has_meta("vr_placed"):
 		l.set_meta("vr_placed", true)
 		_ui().vr_set_near(l, k)

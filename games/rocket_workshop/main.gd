@@ -347,7 +347,7 @@ func story(line: String, pic: String = "engineer", color: Color = SPROCKET_COLOR
 		if p.has_meta("story") and is_instance_valid(p.get_meta("story")):
 			roots.append(p.get_meta("story"))
 	StoryCard.show(roots, opts)
-	if not players.is_empty() and players[0].vr and players[0].xr_camera != null:
+	if not players.is_empty() and players[0].xr_camera != null:  # (VR, or the bots' fake head: VrRig.fake_head)
 		StoryCard.show_vr(self, players[0].xr_camera, opts)
 	if broadcast and net != null and net.mode == "host":
 		net.event("story", [line, pic, color])
@@ -2695,7 +2695,7 @@ func _update_hud() -> void:
 ## VR can't show 2D overlays: mirror the centre banner on a world-space panel that lazily follows
 ## the pilot's view (core/vr_text.gd: never stuck to the headset, never billboarded).
 func _update_vr_center() -> void:
-	if players.is_empty() or not players[0].vr:
+	if players.is_empty() or players[0].xr_camera == null:
 		return
 	if vr_center == null:
 		vr_center = Label3D.new()
