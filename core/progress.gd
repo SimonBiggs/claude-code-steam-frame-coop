@@ -8,6 +8,9 @@ extends RefCounted
 ##     const COLOR := Color(...)
 ##     static func progress_summary(data: Dictionary, today: String) -> Dictionary  # {"grown": int, "daily": bool, "played"?: bool}
 ##     static func sample(today: String) -> Dictionary   # a save as the game writes it (grown > 0, daily done)
+## "daily" means today's daily round was DONE (finished / completed), never just started: a game that stamps today's
+## date when the daily STARTS (so the next round isn't the daily) keeps that and saves a separate "daily_done" when
+## it finishes (check() catches a start stamp read as done: start_marks / started_problems).
 ## found by itself (one scan of res://games, cached), like core/story_pictures.gd. tests/progress_test.gd fails when a
 ## game with a daily seed (a deepened game) has no progress.gd, or its summary misreads its own sample save.
 ##   var rows := Progress.summaries()            # {game id: {"grown", "daily", "played"}}
