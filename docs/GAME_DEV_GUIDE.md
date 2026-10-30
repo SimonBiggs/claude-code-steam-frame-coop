@@ -196,6 +196,7 @@ one running the same bot scene:
 tools/multibot.ts res://tests/arcade_lobby_bot.tscn                  # host + 3 joiners in one arcade lobby
 tools/multibot.ts -n 3 --seconds 150 res://tests/balloon_pop_bot.tscn
 tools/multibot.ts -n 3 --host-env DUO_FLAT_HOST=1 res://tests/engine_template_bot.tscn
+tools/multibot.ts -n 2 --late 25 --expect-late story,village res://tests/snowball_blitz_bot.tscn  # a late joiner catches up
 #   --env K=V (all machines)  --join-env K=V  --stagger MS  --json  --project DIR
 ```
 

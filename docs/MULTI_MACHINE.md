@@ -38,6 +38,11 @@ and gets `"multi": true` in `arcade/arcade.gd` GAMES (so the lobby may flat-host
 - Signals: `machine_joined(peer, kind)`, `machine_left(peer)` (plus the old client_connected/disconnected).
 - `net.event_to(peer, kind, args)`, `net.event_except(peer, kind, args)`: one-off events for one machine /
   all but one (re-syncs for a newcomer, relaying a sound the sender already played).
+- STICKY EVENTS (2026-10-29): `net.sticky_event("village")` in _ready (every machine) makes an event kind
+  state-like: the host keeps its latest `event()` args and replays them to each machine that joins later (to it
+  only). `"story"` (the story card) is sticky in every game. Never write a re-send timer or broadcast a re-send
+  from `on_client_joined`; register the kind instead. Test: `tools/multibot.ts -n 2 --late 25
+  --expect-late story,village res://tests/<game>_bot.tscn` (the last joiner comes 25 s late and must catch up).
 - `net.connected` still means "at least one machine is connected" (host) / "joined" (client).
 - `net.has_vr` (host): false on a flat host.
 - WHO (2026-10-24): each machine sends its name with the hello (`core/machine.gd` `display_name()`: "TV", "VR",
