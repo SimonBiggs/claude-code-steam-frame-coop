@@ -88,6 +88,9 @@ const GAMES := [
 ]
 ## Tabs on the TV (LB/RB) and in VR (stick left/right). Empty categories are hidden.
 const CATEGORIES := [
+	# The Family Trophy Hall (arcade/hall.gd): every story game's friend, how far the family grew it, today's golden
+	# stars. First, so it's what a fresh arcade shows. A filter like 1 PLAYER: games with a games/<game>/progress.gd.
+	{"id": "hall", "name": "HALL", "color": Color(1.0, 0.82, 0.3)},
 	{"id": "action", "name": "ACTION", "color": Color(1.0, 0.45, 0.35)},
 	{"id": "adventure", "name": "ADVENTURE", "color": Color(0.65, 0.5, 1.0)},
 	{"id": "party", "name": "PARTY", "color": Color(1.0, 0.8, 0.3)},
@@ -113,6 +116,8 @@ const VrText := preload("res://core/vr_text.gd")
 const SafeApply := preload("res://core/safe_apply.gd")
 const Machine := preload("res://core/machine.gd")
 const Who := preload("res://core/who.gd")
+const Hall := preload("res://arcade/hall.gd")
+const Progress := preload("res://core/progress.gd")
 const DEFAULT_PORT := 7777
 const JOIN_TIMEOUT_MS := 5000
 
@@ -151,8 +156,17 @@ var lobby_id := randi()  # flat hosts that start together: the higher id gives w
 var _finding := 0.0  # seconds left looking for a lobby before hosting one
 ## Counters for tests (tests/arcade_lobby_bot.gd): menu rebuilds, selections sent / received. A storm of either is the
 ## sign of machines echoing each other's choices.
-var stats := {"show_category": 0, "sync_out": 0, "sync_in": 0, "relay": 0}
+var stats := {"show_category": 0, "sync_out": 0, "sync_in": 0, "relay": 0, "hall": 0}
 var _sel_seq := 0  # how many choices this machine has sent (see _sync_selection)
+## Family Trophy Hall data (core/progress.gd rows): this machine's saves (read once, when first needed) and what the
+## lobby says the rest of the family has (one family: each game as far as anyone grew it).
+var hall_mine := {}
+var hall_net := {}
+var hall_ready := false  # every game's progress.gd loaded (a few a frame: startup stays fast) and the saves read
+var hall_ms := 0.0  # how long reading the saves took
+var _hall_auto := -1  # a fresh arcade's first highlighted hall game (re-picked once the hall knows today's stars)
+var hall_wall: Sprite3D  # VR picture wall
+var _hall_wall_t := 0.0
 
 
 func _ready() -> void:
@@ -243,6 +257,7 @@ func _on_lobby_peer_joined(id: int) -> void:
 	machines[id] = {"kind": "tv", "ip": ip}
 	_lobby_status()
 	_sync_selection.rpc_id(id, selected, 1, 0)  # the newcomer shows what everyone has chosen
+	_hall_data.rpc_id(id, Progress.pack(hall_rows()))  # and the family's Trophy Hall
 
 
 func _on_lobby_peer_left(id: int) -> void:
@@ -338,6 +353,8 @@ func _join_lobby(address: String) -> void:
 func _on_lobby_connected() -> void:
 	join_deadline = 0
 	_hello.rpc_id(1, my_kind, Machine.display_name(my_kind))
+	if hall_ready:  # (else it's sent once loaded)
+		_hall_data.rpc_id(1, Progress.pack(hall_mine))  # this machine's progress joins the family's
 	_set_status("Connected: pick a game!")
 	if OS.has_environment("ARCADE_AUTOPICK"):  # headless tests
 		_start_everywhere(int(OS.get_environment("ARCADE_AUTOPICK")))
@@ -496,6 +513,7 @@ func _process(_delta: float) -> void:
 		set_meta("pad_ui", true)
 		preload("res://core/ui_kit.gd").ensure_pad_ui_actions()
 	_lobby_net(_delta)
+	_hall_load_step()
 	_ensure_shared_nodes()
 	if pending_start >= 0 and not starting:
 		if mode != "host":
@@ -527,6 +545,11 @@ func _process(_delta: float) -> void:
 			set_meta("retry_at", Time.get_ticks_msec() + 4000)
 			port = (int(OS.get_environment("DUO_PORT")) if OS.has_environment("DUO_PORT") else DEFAULT_PORT) + 1
 			_join_lobby(OS.get_environment("DUO_JOIN"))
+	if hall_wall != null and is_instance_valid(hall_wall):
+		_hall_wall_t -= _delta
+		if _hall_wall_t <= 0.0:  # a few redraws a second: the glowing stars pulse, at almost no cost
+			_hall_wall_t = 0.2
+			(hall_wall.get_node("HallView") as SubViewport).render_target_update_mode = SubViewport.UPDATE_ONCE
 	if vr_list:
 		_vr_input()
 		VrText.follow(vr_list, vr_cam, self, 0.25, 2.4)  # always findable; raised so a seated player's list stays above the floor
@@ -605,12 +628,30 @@ func _build_tv_menu() -> void:
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART  # two lines on a narrow screen instead of running off the sides
 	box.add_child(hint)
+	# A fresh arcade opens on the Family Trophy Hall, today's first golden star highlighted (back from a game, or
+	# rebuilt: the tab and game as before).
+	if not get_tree().root.has_meta("arcade_menu_state") and not has_meta("hall_first"):
+		set_meta("hall_first", true)
+		var ht := _hall_tab()
+		if ht >= 0 and not _games_in(ht).is_empty():
+			cat = ht
+			selected = _games_in(ht)[0]
+			_hall_auto = selected
 	# Keep the tab on screen when it shows the selected game (rebuilt after a deploy or a resize, or back from a game);
 	# a game can be in two tabs (1 PLAYER and its own), so don't jump to its own tab.
 	if cat < 0 or cat >= tabs().size() or not _games_in(cat).has(selected):
 		cat = maxi(0, tabs().find(_cat_index_of(selected)))
 	_show_category(cat, false)
 	set_meta("built_for", get_viewport().get_visible_rect().size)
+
+
+## The Family Trophy Hall's tab (index into tabs()), -1 if none.
+func _hall_tab() -> int:
+	var t := tabs()
+	for k in t.size():
+		if str(CATEGORIES[t[k]].id) == "hall":
+			return k
+	return -1
 
 
 ## Categories that have at least one game, as indices into CATEGORIES.
@@ -627,6 +668,8 @@ func tabs() -> Array[int]:
 func _in_category(g: Dictionary, cat_id: String) -> bool:
 	if cat_id == "solo":
 		return int(SOLO.get(str(g.get("id", "")), 0)) > 0
+	if cat_id == "hall":
+		return Progress.has(str(g.get("id", "")))
 	return str(g.get("cat", "action")) == cat_id
 
 
@@ -645,6 +688,8 @@ func _games_in(tab: int) -> Array[int]:
 		return out
 	var c: int = t[clampi(tab, 0, t.size() - 1)]
 	var id := str(CATEGORIES[c].id)
+	if id == "hall":  # today's unfinished golden stars first
+		return Hall.order(GAMES, hall_rows())
 	for i in GAMES.size():
 		if _in_category(GAMES[i], id):
 			out.append(i)
@@ -667,6 +712,9 @@ func _show_category(tab: int, focus_first: bool) -> void:
 		child.queue_free()
 	for k in t.size():
 		var cd: Dictionary = CATEGORIES[t[k]]
+		if str(cd.id) == "hall":
+			tab_bar.add_child(Hall.tab(hall_rows(), k == cat, cd.color))
+			continue
 		var tab_label := Label.new()
 		tab_label.text = "  %s  " % cd.name
 		tab_label.add_theme_font_size_override("font_size", 26 if k == cat else 22)
@@ -685,8 +733,9 @@ func _show_category(tab: int, focus_first: bool) -> void:
 	cards.clear()
 	var colour: Color = CATEGORIES[t[cat]].color
 	var games := _games_in(cat)
+	var hall := str(CATEGORIES[t[cat]].id) == "hall"
 	for i in games:
-		var b := _make_card(i, colour)
+		var b := _make_hall_card(i, colour) if hall else _make_card(i, colour)
 		grid.add_child(b)
 		cards[i] = b
 	var target: int = selected if cards.has(selected) and not focus_first else (games[0] if not games.is_empty() else 0)
@@ -711,8 +760,8 @@ func _thumb(id: String) -> Texture2D:
 	return tex
 
 
-func _make_card(i: int, colour: Color) -> Button:
-	var g: Dictionary = GAMES[i]
+## A game card's button (the look of every card, and pressing / highlighting it).
+func _card_button(i: int, colour: Color) -> Button:
 	var b := Button.new()
 	b.custom_minimum_size = Vector2(600, 136)  # five rows plus the help line fit on a 1080p TV
 	b.focus_mode = Control.FOCUS_ALL
@@ -731,6 +780,101 @@ func _make_card(i: int, colour: Color) -> Button:
 	b.add_theme_stylebox_override("hover", focus)
 	b.add_theme_stylebox_override("pressed", focus)
 	b.add_theme_stylebox_override("focus", focus)
+	b.pressed.connect(_start_everywhere.bind(i))
+	b.focus_entered.connect(_on_card_focus.bind(i))
+	return b
+
+
+## A Family Trophy Hall tile (arcade/hall.gd): the game's screenshot, its story friend, how far the family grew it,
+## today's golden star. Pressing it plays the game, like any card.
+func _make_hall_card(i: int, colour: Color) -> Button:
+	var id := str(GAMES[i].id)
+	var b := _card_button(i, colour)
+	b.name = "Hall_" + id
+	Hall.fill_tile(b, id, hall_rows().get(id, {}), _thumb(id))
+	return b
+
+
+## Hall data: this machine's saves merged with the family's from the lobby.
+func hall_rows() -> Dictionary:
+	return Progress.merge(hall_mine, hall_net) if not hall_net.is_empty() else hall_mine
+
+
+## Each frame until ready: load a few games' progress.gd (~0.5 ms each), then read the saves and show the hall.
+func _hall_load_step() -> void:
+	if hall_ready or not Progress.load_some(3.0):
+		return
+	hall_ready = true
+	var t0 := Time.get_ticks_usec()
+	hall_mine = Progress.summaries()
+	hall_ms = (Time.get_ticks_usec() - t0) / 1000.0
+	print("Arcade: Family Trophy Hall: %d games (found in %.1f ms, loaded over a few frames in %.1f ms, saves read in %.1f ms)" % [hall_mine.size(), Progress.scan_ms, Progress.load_ms, hall_ms])
+	if mode == "host" and not machines.is_empty():
+		_hall_data.rpc(Progress.pack(hall_rows()))
+	elif mode == "client" and _lobby_connected():
+		_hall_data.rpc_id(1, Progress.pack(hall_mine))
+	var pick := -1
+	if _hall_auto >= 0 and selected == _hall_auto and cat == _hall_tab() and mode != "client":  # (a joiner follows the host)
+		var first := _games_in(cat)
+		if not first.is_empty() and first[0] != selected:
+			pick = first[0]  # today's first unfinished golden star
+	_hall_auto = -1
+	_hall_changed()
+	if pick >= 0 and grid != null and cards.has(pick):
+		(cards[pick] as Button).grab_focus()  # (a choice like any other: the lobby hears it)
+
+
+## Lobby: family progress. A joiner sends the host its own; the host merges everyone's and sends the whole family
+## to every machine (so a Deck shows what was grown on the TV, and the TV what David grew on his Deck).
+@rpc("any_peer", "call_remote", "reliable")
+func _hall_data(packed: Array) -> void:
+	var rows := Progress.unpack(packed)
+	var before := hall_rows()
+	if mode == "host":
+		hall_net = Progress.merge(hall_net, rows)
+	elif multiplayer.get_remote_sender_id() == 1:
+		hall_net = rows
+	else:
+		return
+	if hall_rows() == before:
+		return  # nothing new: no redraw, no traffic
+	if mode == "host" and not machines.is_empty():
+		_hall_data.rpc(Progress.pack(hall_rows()))
+	_hall_changed()
+
+
+## The hall's numbers changed: redraw the tab (and the tiles, if the hall is on screen) and the VR wall.
+func _hall_changed() -> void:
+	if grid != null and is_instance_valid(grid) and not (quit_panel and is_instance_valid(quit_panel)):
+		var t := tabs()
+		var on_hall := not t.is_empty() and str(CATEGORIES[t[clampi(cat, 0, t.size() - 1)]].id) == "hall"
+		_applying_remote = true  # (re-focusing the same game is not a new choice)
+		if on_hall:
+			_show_category(cat, false)
+			stats.show_category -= 1  # (counted as a hall redraw: tests/arcade_lobby_bot.gd counts choices' rebuilds)
+		else:
+			_show_tabs_only()
+		_applying_remote = false
+		stats.hall += 1
+	_refresh_hall_wall()
+
+
+func _show_tabs_only() -> void:
+	for child in tab_bar.get_children():
+		if child.name == "HallTab":
+			var at := child.get_index()
+			var t := tabs()
+			var fresh := Hall.tab(hall_rows(), t[cat] == t[at] if at < t.size() else false, CATEGORIES[t[at]].color)
+			tab_bar.add_child(fresh)
+			tab_bar.move_child(fresh, at)
+			tab_bar.remove_child(child)
+			child.queue_free()
+			return
+
+
+func _make_card(i: int, colour: Color) -> Button:
+	var g: Dictionary = GAMES[i]
+	var b := _card_button(i, colour)
 	# A screenshot of the game on the left (kids pick by picture), name and blurb beside it.
 	var row := HBoxContainer.new()
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -773,8 +917,6 @@ func _make_card(i: int, colour: Color) -> Button:
 	blurb.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	blurb.add_theme_color_override("font_color", Color(0.85, 0.87, 0.95))
 	v.add_child(blurb)
-	b.pressed.connect(_start_everywhere.bind(i))
-	b.focus_entered.connect(_on_card_focus.bind(i))
 	return b
 
 
@@ -967,6 +1109,11 @@ func _build_vr_view() -> void:
 	vr_list.modulate = Color(0.85, 0.97, 1.0)
 	add_child(vr_list)
 	vr_list.position = Vector3(0, 1.5, -2.2)
+	# The Family Trophy Hall as a picture wall to the left of the list, turned to face the player.
+	hall_wall = Hall.vr_panel()
+	add_child(hall_wall)
+	hall_wall.position = Vector3(-2.6, 1.45, -1.2)
+	hall_wall.rotation.y = deg_to_rad(52.0)
 	_refresh_vr()
 
 
@@ -1003,6 +1150,12 @@ func _refresh_vr() -> void:
 		row += 1
 	set_meta("vr_rows", rows)
 	vr_list.text = "\n".join(lines)
+	_refresh_hall_wall()
+
+
+func _refresh_hall_wall() -> void:
+	if hall_ready and hall_wall != null and is_instance_valid(hall_wall):
+		Hall.vr_update(hall_wall, GAMES, hall_rows(), selected)
 
 
 func _vr_input() -> void:
