@@ -16,6 +16,8 @@ static func _scan() -> void:
 	if _scanned:
 		return
 	_scanned = true
+	if not DirAccess.dir_exists_absolute("res://games"):
+		return
 	for g in DirAccess.get_directories_at("res://games"):
 		var path := "res://games/%s/story_pictures.gd" % g
 		if not ResourceLoader.exists(path):

@@ -117,7 +117,7 @@ static func path_for(id: String) -> String:
 ## Folders of runs that are gone are swept when a test run first saves; tests/bot_end.gd quit_quietly removes its own.
 static func test_dir() -> String:
 	var d := TEST_DIR + "run_%d/" % OS.get_process_id()
-	if not Engine.has_meta("save_test_swept"):
+	if not Engine.has_meta("save_test_swept") and DirAccess.dir_exists_absolute(TEST_DIR):  # (listing a missing folder logs an error)
 		Engine.set_meta("save_test_swept", true)
 		for sub in DirAccess.get_directories_at(TEST_DIR):
 			if sub.begins_with("run_") and not DirAccess.dir_exists_absolute("/proc/" + sub.trim_prefix("run_")):
@@ -126,6 +126,8 @@ static func test_dir() -> String:
 
 
 static func remove_tree(path: String) -> void:
+	if not DirAccess.dir_exists_absolute(path):
+		return
 	for f in DirAccess.get_files_at(path):
 		DirAccess.remove_absolute(path.path_join(f))
 	for sub in DirAccess.get_directories_at(path):
