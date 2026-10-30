@@ -1,4 +1,5 @@
 extends Node
+const FrameGrab := preload("res://core/frame_grab.gd")
 # Throwaway test: both players stand still, aim at the nearest enemy and hold fire.
 var main
 var t := 0.0
@@ -39,5 +40,7 @@ func _physics_process(delta):
 		print("t=%.0f wave=%d score=%d hp=%.0f/%.0f down=%s/%s enemies=%d pickups=%d" % [t, main.wave, main.score, main.players[0].hp, main.players[1].hp, main.players[0].is_down, main.players[1].is_down, get_tree().get_nodes_in_group("enemies").size(), pickups.size()])
 func _process(_d):
 	if OS.has_environment("SHOT") and t > 14.0 and t < 14.05:
-		get_viewport().get_texture().get_image().save_png(OS.get_environment("SHOT"))
+		var shot := FrameGrab.image(get_viewport())
+		if shot != null:
+			shot.save_png(OS.get_environment("SHOT"))
 		preload("res://tests/bot_end.gd").quit_quietly(get_tree())
