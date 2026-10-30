@@ -645,7 +645,9 @@ func _simple_timeline() -> void:
 				kit.assert_eq(int(main.town.seed_value), Wishes.today_seed(), "today's island is today's seed")
 			# A joining machine's bot keeps building, and its first places can land on the new island in the 2.5 s
 			# before this look (host failed "(3)" about 1 run in 3, 2026-10-30): allow one more per joined machine.
-			var most := 2 + (multiplayer.get_peers().size() if main.net.mode == "host" else 0)
+			# The same race in one-machine runs (VR bots, 2026-10-30: "(3, at most 2)" about 1 run in 3): the local
+			# builders keep going too, so one more there.
+			var most := 2 + (multiplayer.get_peers().size() if main.net.mode == "host" else 1 if main.net.mode == "local" else 0)
 			kit.assert_true(main.town.buildings.size() <= most, "today's island is a new little town (%d, at most %d)" % [main.town.buildings.size(), most])
 			var runs := Telemetry.read("tiny_town_tycoon").filter(func(r: Dictionary) -> bool: return String(r.get("end", "")) == "sail")
 			kit.assert_true(not runs.is_empty(), "a RUN line when the boat sailed"))

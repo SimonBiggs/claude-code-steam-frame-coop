@@ -141,11 +141,16 @@ func attach_fake_vr() -> void:
 	origin = Node3D.new()
 	origin.name = "FakeOrigin"
 	main.add_child(origin)
-	head = Node3D.new()
+	# a fake headset camera (never current): VR cards, VR text and the bots' VR view (vrShot) work as with a headset
+	var cam := XRCamera3D.new()
+	cam.near = 0.02
+	head = cam
 	origin.add_child(head)
+	cam.current = false
+	xr_camera = cam
 	head.position = Vector3(0.3, 1.35, 2.2)  # a short kid standing off to the side: the fit fixes it
 	hand = Node3D.new()
-	main.add_child(hand)
+	origin.add_child(hand)  # (part of the fake rig, like a controller: at the origin, so main's space)
 	_build_brush(hand)
 
 

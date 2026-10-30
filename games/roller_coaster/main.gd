@@ -1537,10 +1537,4 @@ func _update_story(delta: float) -> void:
 	if not hs.is_empty():
 		StoryCard.show(hs, opts)
 	if vr_rig != null and vr_rig.camera != null:
-		var card := StoryCard.show_vr(self, vr_rig.camera, opts)
-		if card != null:
-			var ws := float(vr_rig.world_scale)  # the giant: keep the card at a comfy real distance and size
-			card.scale = Vector3.ONE * ws
-			card.distance *= ws
-			card.height = -0.22 * ws
-			UiKit.vr_place(card, vr_rig.camera, card.distance, card.height)
+		StoryCard.show_vr(self, vr_rig.camera, opts)  # (the giant: UiKit.vr_place scales it with XRServer.world_scale)

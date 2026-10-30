@@ -1287,7 +1287,7 @@ func on_pause_changed(paused: bool, by_slot: int) -> void:
 		why = ""  # just PAUSED (no sentence)
 	if vr_rig != null:
 		if paused:
-			vr_banner = HudKit.vr_card(self, vr_rig.camera, "PAUSED", why, {"width": 1.1})
+			vr_banner = HudKit.vr_paused(self, vr_rig.camera, why, {"width": 1.1})
 			vr_banner.process_mode = Node.PROCESS_MODE_ALWAYS
 		elif vr_banner != null and is_instance_valid(vr_banner):
 			vr_banner.call("hide_card")

@@ -95,14 +95,8 @@ static func show_vr(world: Node, cam: Node3D, opts: Dictionary) -> Node3D:
 	var pic := String(opts.get("pic", ""))
 	if pic != "":
 		card.add_child(StoryCardPics.vr_medallion(pic, UiKit.color_of(opts.get("color", "accent"), UiKit.ACCENT), card))
-	# A diorama game (XROrigin3D.world_scale > 1, e.g. Giant's Table 20, Block Builders 8): the card scales with the
-	# world, so it's as big and as far away as anywhere else. Pass opts.world_scale = XRServer.world_scale.
-	var ws := float(opts.get("world_scale", 1.0))
-	if ws > 0.0 and not is_equal_approx(ws, 1.0):
-		card.distance *= ws
-		card.height *= ws
-		card.scale = Vector3.ONE * ws
-		UiKit.vr_place(card, cam, card.distance, card.height)
+	# A diorama game (XROrigin3D.world_scale > 1, e.g. Giant's Table 20, Block Builders 8): UiKit.vr_place scales the
+	# card with XRServer.world_scale itself (opts.world_scale is no longer needed and ignored).
 	return card
 
 

@@ -16,6 +16,7 @@ extends RefCounted
 const Me := preload("res://core/ui_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")
 const VrText := preload("res://core/vr_text.gd")
+const VrViewCheck := preload("res://core/vr_view_check.gd")
 const VrLayer := preload("res://core/vr_layer.gd")
 const SfxScript := preload("res://core/sfx.gd")
 
@@ -860,21 +861,154 @@ static func wrap_text(text: String, width_px: float, size: int, bold: bool = fal
 	return "\n".join(out)
 
 
+## Which way (flat, unit length) VR UI goes in front of the eyes. Looking straight down at the floor (a seeker
+## counting, a builder over a table) the top of the view is "forward": before, the panel stopped following and was
+## left behind a wall.
+static func vr_flat_forward(cam: Node3D) -> Vector3:
+	var b := cam.global_basis
+	var fwd := -b.z
+	fwd.y = 0.0
+	if fwd.length() < 0.2:
+		fwd = b.y * (1.0 if -b.z.y < 0.0 else -1.0)
+		fwd.y = 0.0
+	return fwd.normalized() if fwd.length() > 0.001 else Vector3.FORWARD
+
+
 ## Put a world-space node in front of a camera at `dist` metres (horizontal forward), `height` metres
 ## above eye level, facing the eyes (its +Z towards the camera). Uses vr_text's comfort factor.
 static func vr_place(n: Node3D, cam: Node3D, dist: float = 1.6, height: float = -0.1) -> void:
 	if n == null or cam == null or not n.is_inside_tree():
 		return
-	var fwd := -cam.global_basis.z
-	fwd.y = 0.0
-	if fwd.length() < 0.01:
-		fwd = Vector3.FORWARD
-	fwd = fwd.normalized()
-	var pos := cam.global_position + fwd * dist * VrText.COMFORT + Vector3(0.0, height * VrText.COMFORT, 0.0)
-	_face(n, pos, cam)
+	var fwd := vr_flat_forward(cam)
+	var ws := vr_fit_world(n)
+	var pos := cam.global_position + (fwd * dist + Vector3(0.0, height, 0.0)) * VrText.COMFORT * ws
+	var spot := vr_spot(cam, pos, n, true)
+	vr_set_near(n, float(spot.k))
+	_face(n, spot.pos, cam)
 	VrLayer.mark_once(n)  # placed in front of the VR player = VR-only UI
 	n.set_meta("vr_placed", true)
 	n.set_meta("vr_moving", false)
+
+
+## A diorama game (XROrigin3D.world_scale > 1: Giant's Table, Block Builders, Bee Garden) makes the player big, so
+## VR UI must be placed world_scale times further and drawn world_scale times bigger to look the same as anywhere
+## else (core/vr_view_check.gd measures in real metres). Scales `n` once per change of scale; returns the scale.
+static func vr_fit_world(n: Node3D) -> float:
+	var ws := maxf(XRServer.world_scale, 0.001)
+	var was := float(n.get_meta("vr_ws", 1.0))
+	if not is_equal_approx(was, ws):
+		n.scale *= ws / was
+		n.set_meta("vr_ws", ws)
+	return ws
+
+
+## VR UI must never hide behind something: how far (0..1] towards `target` a panel can go from the eyes before
+## something solid is in the way (core/vr_view_check.gd first_hit: walls, doors, tables, signs, trees, props from
+## saved growth; not people or balls passing by), leaving a hand's width in front of it, but never nearer than
+## VR_NEAR m. `n` (the panel itself) is never in its own way; with it the answer is kept for 24 frames (a scan of the
+## meshes is too dear for every frame) unless `fresh`.
+const VR_NEAR := 0.9
+## Nearer still, but only when nothing else works (the seeker counting with their nose to a door).
+const VR_CLOSEST := 0.55
+
+static func vr_clear(cam: Node3D, target: Vector3, n: Node = null, fresh := false, near := VR_NEAR) -> float:
+	if not cam is Camera3D or not cam.is_inside_tree():
+		return 1.0
+	var now := Engine.get_process_frames()  # (frames, not ms: headless bots run many frames a millisecond)
+	if n != null and not fresh and now < int(n.get_meta("vr_clear_next", 0)):
+		return float(n.get_meta("vr_clear_k", 1.0))
+	var head := cam.global_position
+	var length := head.distance_to(target)
+	var k := 1.0
+	if length > 0.01:
+		var ws := maxf(XRServer.world_scale, 0.001)
+		# the middle and the four corners of the panel (a sign hiding only its top half hides the words)
+		var aims: Array[Vector3] = [target]
+		if n is Node3D:
+			var sz := VrViewCheck.panel_size(n as Node3D) * 0.45
+			var right := (target - head).cross(Vector3.UP).normalized()
+			for c in [Vector2(-1, -1), Vector2(1, -1), Vector2(-1, 1), Vector2(1, 1)]:
+				aims.append(target + right * sz.x * c.x + Vector3.UP * sz.y * c.y)
+		for aim in aims:
+			var l := head.distance_to(aim)
+			var hit: Dictionary = VrViewCheck.first_hit(cam as Camera3D, head.lerp(aim, 1.06), n)
+			if hit.node != null:
+				var free := float(hit.f) * l * 1.06 - 0.12 * ws
+				k = minf(k, clampf(free / l, minf(1.0, near * ws / length), 1.0))
+	if n != null:
+		n.set_meta("vr_clear_next", now + 24)
+		n.set_meta("vr_clear_k", k)
+	return k
+
+
+## Where VR UI aimed at `target` should go: nearer than `target` when something is in the way (vr_clear), and if
+## even VR_NEAR is blocked (a pillar or a table right in front of the face), lifted over it. {pos, k}: k = how much
+## nearer than `target` it is (draw it k times the size: vr_set_near).
+static func vr_spot(cam: Node3D, target: Vector3, n: Node = null, fresh := false) -> Dictionary:
+	var head := cam.global_position
+	var now := Engine.get_process_frames()
+	if n != null and not fresh and n.has_meta("vr_spot") and now < int((n.get_meta("vr_spot") as Array)[0]):
+		var c: Array = n.get_meta("vr_spot")  # [until, k, lift]: worked out at most every 24 frames
+		return {"pos": head.lerp(target + Vector3.UP * float(c[2]), float(c[1])), "k": float(c[1])}
+	var ws := maxf(XRServer.world_scale, 0.001)
+	var length := head.distance_to(target)
+	var k := vr_clear(cam, target, n, true)
+	var lift := 0.0
+	if length > 0.01 and k * length < VR_NEAR * ws * 1.05:
+		# even VR_NEAR is blocked (a pillar or a table right in front): lifted over it, else just in front of it
+		var lifted := false
+		for l in [0.35, 0.7, 1.05]:
+			var up := float(l) * VrText.COMFORT * ws
+			var k2 := vr_clear(cam, target + Vector3.UP * up, null, true)
+			if k2 > 0.95:
+				k = k2
+				lift = up
+				lifted = true
+				break
+		if not lifted:
+			k = minf(k, vr_clear(cam, target, null, true, VR_CLOSEST))
+	if n != null:
+		n.set_meta("vr_spot", [now + 24, k, lift])
+	return {"pos": head.lerp(target + Vector3.UP * lift, k), "k": k}
+
+
+## Scale `n` to `k` of its size (vr_clear brought it k times nearer, so it looks the same size).
+static func vr_set_near(n: Node3D, k: float) -> void:
+	var was := float(n.get_meta("vr_k", 1.0))
+	if not is_equal_approx(was, k):
+		n.scale *= k / was
+		n.set_meta("vr_k", k)
+
+
+## VR UI rides along with the VR player's rig: when the XROrigin3D moves (a dragon, a kart, a coaster car, a mech, a
+## blink teleport) the panel moves with it, so it stays where the player last saw it instead of being left behind
+## or flown into (Dragon Rider's story card ended 0.2 m from the face). vr_ride before following, vr_ride_done after
+## (vr_follow and VrText.follow do both). A panel that moved by itself since (its parent is the dragon) is left be.
+static func vr_ride(n: Node3D, cam: Node3D) -> void:
+	var o := _rig_of(cam)
+	if o == null or not n.has_meta("vr_rig_xf") or not n.has_meta("vr_rig_n"):
+		return
+	var was: Transform3D = n.get_meta("vr_rig_xf")
+	var now := o.global_transform
+	if now.is_equal_approx(was) or not n.global_transform.is_equal_approx(n.get_meta("vr_rig_n")):
+		return
+	n.global_transform = (now * was.affine_inverse()) * n.global_transform
+
+
+static func vr_ride_done(n: Node3D, cam: Node3D) -> void:
+	var o := _rig_of(cam)
+	if o != null:
+		n.set_meta("vr_rig_xf", o.global_transform)
+		n.set_meta("vr_rig_n", n.global_transform)
+
+
+static func _rig_of(cam: Node3D) -> Node3D:
+	var o := cam.get_parent()
+	while o != null and not o is XROrigin3D:
+		o = o.get_parent()
+	if o == null:
+		o = cam.get_parent()
+	return o as Node3D
 
 
 ## Lazy follow for world-space UI (same rules as core/vr_text.gd): stays put while the player looks
@@ -882,21 +1016,37 @@ static func vr_place(n: Node3D, cam: Node3D, dist: float = 1.6, height: float = 
 static func vr_follow(n: Node3D, cam: Node3D, dist: float = 1.6, height: float = -0.1, delta: float = 0.016) -> void:
 	if n == null or cam == null or not n.is_inside_tree() or not cam.is_inside_tree():
 		return
+	vr_ride(n, cam)
+	_vr_follow(n, cam, dist, height, delta)
+	vr_ride_done(n, cam)
+
+
+static func _vr_follow(n: Node3D, cam: Node3D, dist: float, height: float, delta: float) -> void:
 	if not n.has_meta("vr_placed"):
 		vr_place(n, cam, dist, height)
 		return
-	var fwd := -cam.global_basis.z
-	fwd.y = 0.0
-	if fwd.length() < 0.01:
-		return
-	fwd = fwd.normalized()
-	var d := dist * VrText.COMFORT
-	var target := cam.global_position + fwd * d + Vector3(0.0, height * VrText.COMFORT, 0.0)
+	var fwd := vr_flat_forward(cam)
+	var ws := vr_fit_world(n)
+	var d := dist * VrText.COMFORT * ws
+	var target := cam.global_position + fwd * d + Vector3(0.0, height * VrText.COMFORT * ws, 0.0)
+	# a wall / door / table in the way: the card comes in front of it, smaller by the same factor (looks the same)
+	var spot := vr_spot(cam, target, n)
+	var k := float(spot.k)
+	target = spot.pos
+	d *= k
 	var to := n.global_position - cam.global_position
 	to.y = 0.0
-	if to.length() < 0.01 or fwd.angle_to(to.normalized()) > deg_to_rad(35.0) or to.length() > d * 1.45 or to.length() < d * 0.55:
+	if to.length() < 0.01 or fwd.angle_to(to.normalized()) > deg_to_rad(35.0) or to.length() > d * 1.45 or to.length() < d * 0.55 \
+			or absf(k - float(n.get_meta("vr_k", 1.0))) > 0.12:
 		n.set_meta("vr_moving", true)
 	if n.get_meta("vr_moving", false):
+		vr_set_near(n, k)
+		# Behind the player or far off (they turned right round, or a blink teleport moved them): a glide would fly
+		# the card through their head (core/vr_view_check.gd saw it 5 m behind, facing away): put it in front at once.
+		if to.dot(fwd) < 0.0 or n.global_position.distance_to(target) > d * 1.6:
+			_face(n, target, cam)
+			n.set_meta("vr_moving", false)
+			return
 		_face(n, n.global_position.lerp(target, 1.0 - exp(-4.0 * delta)), cam)
 		if n.global_position.distance_to(target) < 0.05 * d:
 			n.set_meta("vr_moving", false)

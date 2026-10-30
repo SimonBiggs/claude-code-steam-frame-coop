@@ -336,7 +336,7 @@ func _all_huds() -> Array:
 func _banner(title: String, sub: String = "", dur: float = 1.8) -> void:
 	HudKit.banner(_all_huds(), title, sub, {"duration": dur})
 	if vr_rig != null:
-		HudKit.vr_banner(self, vr_rig.camera, title, sub, {"duration": dur, "sound": "", "distance": 2.5})
+		HudKit.vr_banner(self, vr_rig.camera, title, sub, {"duration": dur, "sound": "", "distance": 2.0})  # 3.2 m: just behind the story card
 
 
 # --- Players ------------------------------------------------------------------------------
@@ -488,7 +488,7 @@ func on_request(_slot: int, action: String, _args: Array) -> void:
 func on_pause_changed(paused: bool, by_slot: int) -> void:
 	if vr_rig != null:
 		if paused:
-			vr_banner = HudKit.vr_card(self, vr_rig.camera, "PAUSED", "", {"width": 1.1, "distance": 2.2})
+			vr_banner = HudKit.vr_paused(self, vr_rig.camera, "", {"width": 1.1, "distance": 2.2})
 			vr_banner.process_mode = Node.PROCESS_MODE_ALWAYS
 		elif vr_banner != null and is_instance_valid(vr_banner):
 			vr_banner.call("hide_card")
