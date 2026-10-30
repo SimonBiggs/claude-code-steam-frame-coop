@@ -161,5 +161,12 @@ func _run() -> void:
 			fails.append("pop-up \"%s\" stays small next to a camera (%.0f%% of the view high, %.0f%% wide)" % [lab.text, 100.0 * th / vh, 100.0 * tw / vw])
 		if absf(lab.global_position.x) + tw * 0.5 > vw * 0.5 + 0.01:
 			fails.append("pop-up \"%s\" stays inside the view (x %.2f, half width %.2f, view half %.2f)" % [lab.text, lab.global_position.x, tw * 0.5, vw * 0.5])
+	# A word born closer than the camera's near plane moves out in front of it (it was cut away).
+	cam0.near = 1.0
+	var close := HudKit.popup(world, Vector3(0.0, 0.0, -0.5), "WOW!")
+	for i in 4:
+		await process_frame
+	if -close.global_position.z < cam0.near * 1.5:
+		fails.append("a pop-up inside the near plane moves in front of it (depth %.2f, near %.2f)" % [-close.global_position.z, cam0.near])
 	print("LAYOUT CHECK: PASS" if fails.is_empty() else "LAYOUT CHECK: FAIL\n  " + "\n  ".join(fails))
 	quit(0 if fails.is_empty() else 1)

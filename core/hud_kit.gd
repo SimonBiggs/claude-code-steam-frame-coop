@@ -757,35 +757,45 @@ class FloatText extends Label3D:
 		var c1 := 1.70158
 		return 1.0 + (c1 + 1.0) * pow(x - 1.0, 3.0) + c1 * pow(x - 1.0, 2.0)
 
-	## [size factor <= 1, world shift] so the word fits every view that sees it and stays inside the nearest one.
+	## [size factor <= 1, world shift] so the word fits every view that sees it and stays inside the nearest one (and
+	## in front of its near plane: a word born closer than that was simply cut away).
 	func _fit(gp: Vector3, top: float) -> Array:
-		var k := 1.0
-		var best_depth := INF
-		var best: Camera3D = null
 		var h := _px.y * base_pixel * top
 		var w := _px.x * base_pixel * top
-		for cam in FloatText.cameras(self):
+		var cams := FloatText.cameras(self)
+		var best: Camera3D = null
+		var best_depth := INF
+		for cam in cams:
 			if (cam.cull_mask & layers) == 0:
 				continue
 			var ext := _extent(cam, gp)
 			if ext.x <= 0.0:
 				continue
-			k = minf(k, minf(max_frac * ext.y / h, max_wide * ext.x / w))
 			var depth := (gp - cam.global_position).dot(-cam.global_basis.z)
-			if depth < best_depth:
-				var ndc := _ndc(cam, gp, ext)
-				if absf(ndc.x) <= 1.3 and absf(ndc.y) <= 1.3:  # in (or just off the edge of) this view
-					best_depth = depth
-					best = cam
+			var ndc := _ndc(cam, gp, ext)
+			if depth < best_depth and absf(ndc.x) <= 2.5 and absf(ndc.y) <= 2.5:  # in (or just off the edge of) this view
+				best_depth = depth
+				best = cam
 		var shift := Vector3.ZERO
+		if best != null and best.projection != Camera3D.PROJECTION_ORTHOGONAL and best_depth < best.near * 2.0:
+			shift = -best.global_basis.z * (best.near * 2.0 - best_depth)
+		var p := gp + shift
+		var k := 1.0
+		for cam in cams:
+			if (cam.cull_mask & layers) == 0:
+				continue
+			var ext := _extent(cam, p)
+			if ext.x > 0.0:
+				k = minf(k, minf(max_frac * ext.y / h, max_wide * ext.x / w))
 		if best != null:
-			var ext := _extent(best, gp)
-			var ndc := _ndc(best, gp, ext)
-			var hw := (w * k * 0.5) / (ext.x * 0.5) + 0.04
-			var hh := (h * k * 0.5) / (ext.y * 0.5) + 0.04
-			var nx := clampf(ndc.x, -1.0 + hw, 1.0 - hw) if hw < 1.0 else 0.0
-			var ny := clampf(ndc.y, -1.0 + hh, 1.0 - hh) if hh < 1.0 else 0.0
-			shift = best.global_basis.x * (nx - ndc.x) * ext.x * 0.5 + best.global_basis.y * (ny - ndc.y) * ext.y * 0.5
+			var ext := _extent(best, p)
+			if ext.x > 0.0:
+				var ndc := _ndc(best, p, ext)
+				var hw := (w * k * 0.5) / (ext.x * 0.5) + 0.04
+				var hh := (h * k * 0.5) / (ext.y * 0.5) + 0.04
+				var nx := clampf(ndc.x, -1.0 + hw, 1.0 - hw) if hw < 1.0 else 0.0
+				var ny := clampf(ndc.y, -1.0 + hh, 1.0 - hh) if hh < 1.0 else 0.0
+				shift += best.global_basis.x * (nx - ndc.x) * ext.x * 0.5 + best.global_basis.y * (ny - ndc.y) * ext.y * 0.5
 		return [k, shift]
 
 	## The view's size (width, height) in metres at gp's depth; x <= 0 when behind the camera.
