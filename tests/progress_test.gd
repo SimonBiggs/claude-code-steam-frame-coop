@@ -39,6 +39,15 @@ func _initialize() -> void:
 	_expect(step_ms < 8.0, "one load_some(3 ms) step took %.1f ms" % step_ms)
 	for e in Progress.check(ids):
 		_expect(false, e)
+	# A changed save layout without a working migration is caught (core/save.gd use_layout / Progress.layout_problems).
+	var lay := GDScript.new()
+	lay.source_code = "extends RefCounted\nconst SAVE_VERSION := 2\nstatic func migrate_save(data: Dictionary, from_version: int) -> Dictionary:\n\treturn data\n" \
+		+ "static func migration_samples() -> Array:\n\treturn [[1, {\"bits\": 4}, {\"bits\": 8}]]\n"
+	lay.reload()
+	_expect(not Progress.layout_problems("dungeon_delve", lay).is_empty(), "the check fails for a save layout whose migration doesn't do what its samples say")
+	lay.source_code = lay.source_code.replace("\treturn data\n", "\tif from_version < 2: data.bits = 8\n\treturn data\n")
+	lay.reload()
+	_expect(Progress.layout_problems("dungeon_delve", lay).is_empty(), "a working migration passes (got %s)" % str(Progress.layout_problems("dungeon_delve", lay)))
 	# The check can fail: a game with a daily seed but no progress.gd.
 	_expect(not Progress.check(["tower_stack"], ["tower_stack"]).is_empty(), "the check fails for a deepened game without progress.gd")
 	# ...and catches a game whose golden star lights up when the daily round only STARTS.
