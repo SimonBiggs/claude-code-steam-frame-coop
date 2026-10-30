@@ -15,7 +15,9 @@
 //   machine; env BOT_OWN_COPY=1 tells the bot it may)  --late S (the LAST joiner starts S seconds after the others: a
 //   machine joining a game already running; it gets BOT_LATE=S and a deadline S shorter, so it still leaves before
 //   the host)  --expect-late KIND,KIND (default with --late: story) the late joiner must catch up on these sticky
-//   events (core/net.gd sticky_event: "Net: got <kind> <ms> ms after joining" within 4 s), or it FAILs
+//   events (core/net.gd sticky_event: "Net: got <kind> <ms> ms after joining" within 4 s), or it FAILs. Needs a bot
+//   whose host stays long enough (bubble_bath_bot's host finishes at 38 s, before a late joiner's checks: use
+//   snowball_blitz / dragon_rider / rocket_workshop bots)
 //
 // What each machine gets (env): DUO_PORT (shared), DUO_HOST=1 (machine 0) or DUO_JOIN=127.0.0.1 (the rest),
 // BOT_MACHINE=k (0 = host), BOT_MACHINES=N+1, BOT_GROUP_T0=<unix ms> (a shared clock: every machine has been started
