@@ -231,7 +231,7 @@ static func _pin(c: Control, preset: int, x: float = 0.0, y: float = 0.0) -> voi
 ## lift (exact rise in m, not scaled by size), time (s), camera (face this camera once; default: the VR camera when this viewport renders VR, otherwise billboard),
 ## billboard (a BaseMaterial3D.BILLBOARD_* mode when not facing a camera), through_walls (no depth test),
 ## parent (attach here; then `pos` is in the parent's local space and the word rides along), layers,
-## render_priority, max_frac (0.12), max_wide (0.8).
+## render_priority, max_frac (0.1), max_wide (0.6).
 static func popup(world: Node, pos: Vector3, text: String, opts: Dictionary = {}) -> Label3D:
 	var style := String(opts.get("style", "info"))
 	var st: Array = POPUP_STYLES.get(style, POPUP_STYLES["info"])
@@ -708,8 +708,8 @@ class FloatText extends Label3D:
 	var crit := false
 	var base_pixel := 0.0045
 	## Never taller than this share of a view's height, nor wider than max_wide of its width.
-	var max_frac := 0.12
-	var max_wide := 0.8
+	var max_frac := 0.1
+	var max_wide := 0.6
 	var t := 0.0
 	var _a := 1.0
 	var _oa := 0.95
