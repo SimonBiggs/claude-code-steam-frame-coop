@@ -33,10 +33,10 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
-	{"id": "delve-queen", "date": "2026-10-30", "game": "dungeon_delve", "pic": "shard", "line": "Beat the Crystal Queen!", "try": {"DD_MODE": "brave"}},
-	{"id": "delve-heroes", "date": "2026-10-30", "game": "dungeon_delve", "pic": "wizard", "line": "Knight, archer or wizard!", "try": {"DD_MODE": "brave"}},
-	{"id": "delve-relics", "date": "2026-10-30", "game": "dungeon_delve", "pic": "hoard", "line": "Find magic relics!", "try": {"DD_MODE": "brave"}},
-	{"id": "delve-cinder", "date": "2026-10-30", "game": "dungeon_delve", "pic": "cinder", "line": "Today's dungeon with Cinder", "try": {"DD_MODE": "daily"}},
+	{"id": "delve-queen", "date": "2026-10-30", "game": "dungeon_delve", "pic": "shard", "line": "Beat the Crystal Queen!", "try": {"DD_TRY": "brave"}},
+	{"id": "delve-heroes", "date": "2026-10-30", "game": "dungeon_delve", "pic": "wizard", "line": "Knight, archer or wizard!", "try": {"DD_TRY": "brave"}},
+	{"id": "delve-relics", "date": "2026-10-30", "game": "dungeon_delve", "pic": "hoard", "line": "Find magic relics!", "try": {"DD_TRY": "brave"}},
+	{"id": "delve-cinder", "date": "2026-10-30", "game": "dungeon_delve", "pic": "cinder", "line": "Today's dungeon with Cinder", "try": {"DD_TRY": "daily"}},
 	{"id": "bender-kiko", "date": "2026-10-30", "game": "elemental_bender", "pic": "spirittree", "line": "Grow Kiko's Spirit Tree!"},
 	{"id": "paint-smudge", "date": "2026-10-30", "game": "paint_and_guess", "pic": "goldframe", "line": "Fill Smudge's gallery!"},
 	{"id": "giants-sparky", "date": "2026-10-30", "game": "giants_table", "pic": "sparky", "line": "Meet Sparky the flame!"},
