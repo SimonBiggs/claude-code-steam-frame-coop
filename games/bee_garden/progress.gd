@@ -9,11 +9,12 @@ const COLOR := Color(1.0, 0.78, 0.2)
 
 
 ## data: the raw save (no defaults filled in: always .get with a default). today: Seeded.today().
-## grown: every honey jar ever put on the shelf; daily: TODAY'S GARDEN planted today (main.gd _new_garden).
+## grown: every honey jar ever put on the shelf; daily: a round of TODAY'S GARDEN finished today (main.gd
+## _round_complete_simple sets daily_done; "daily" only means it was planted, so the next garden isn't the daily).
 static func progress_summary(data: Dictionary, today: String) -> Dictionary:
-	return {"grown": maxi(0, int(data.get("jars", 0))), "daily": String(data.get("daily", "")) == today}
+	return {"grown": maxi(0, int(data.get("jars", 0))), "daily": String(data.get("daily_done", "")) == today}
 
 
 ## A save as the game writes it after a few days (tests/progress_test.gd: it must read as grown > 0, daily done).
 static func sample(today: String) -> Dictionary:
-	return {"world": 123456, "jars": 17, "rounds": 6, "gardens": 3, "decor": 4, "daily": today, "best_round": 3}
+	return {"world": 123456, "jars": 17, "rounds": 6, "gardens": 3, "decor": 4, "daily": today, "daily_done": today, "best_round": 3}

@@ -1,6 +1,7 @@
 extends SceneTree
 ## FAMILY TROPHY HALL: every deepened game (one with a daily seed) has games/<game>/progress.gd, its pictures exist,
-## its summary reads an empty save as nothing grown and its own sample save as grown with today's golden star; the
+## its summary reads an empty save as nothing grown and its own sample save as grown with today's golden star, and a
+## save where today's daily round only STARTED as no golden star (daily means done; Progress.start_marks); the
 ## lobby's pack / unpack / merge keep one family's numbers; reading every save is fast (the lobby must start quickly);
 ## the hall tiles and the VR wall build without errors.
 ##   godot-test --headless --path . -s res://tests/progress_test.gd     Prints PROGRESS: PASS / FAIL.
@@ -40,6 +41,24 @@ func _initialize() -> void:
 		_expect(false, e)
 	# The check can fail: a game with a daily seed but no progress.gd.
 	_expect(not Progress.check(["tower_stack"], ["tower_stack"]).is_empty(), "the check fails for a deepened game without progress.gd")
+	# ...and catches a game whose golden star lights up when the daily round only STARTS.
+	var src := "func _start_round() -> void:\n\tvar d := String(save.data.daily) != today\n\tif d:\n\t\tsave.data.daily = today\n" \
+		+ "func _new_fan() -> void:\n\tsave.data.fans = 1\n\tsave.data.daily = Seeded.today()\n" \
+		+ "func _new_garden() -> void:\n\tvar gs := Story.garden_seed(save.data)\n\tsave.data[\"today_date\"] = Seeded.today()  # sailed\n"
+	var marks := Progress.start_marks(src)
+	_expect(marks.has("daily") and marks.has("today_date") and marks.size() == 2,
+		"start_marks finds the keys a round-starting function stamps today (got %s)" % str(marks))
+	var fake := GDScript.new()
+	fake.source_code = "extends RefCounted\nstatic func progress_summary(data: Dictionary, today: String) -> Dictionary:\n" \
+		+ "\treturn {\"grown\": 1, \"daily\": String(data.get(\"daily\", \"\")) == today}\n" \
+		+ "static func sample(today: String) -> Dictionary:\n\treturn {\"daily\": today}\n"
+	fake.reload()
+	_expect(not Progress.started_problems("fake", fake, {"daily": "main.gd _start_round()"}).is_empty(),
+		"the check fails for a game that marks the daily done just by starting it")
+	fake.source_code = fake.source_code.replace("data.get(\"daily\"", "data.get(\"daily_done\"")
+	fake.reload()
+	_expect(Progress.started_problems("fake", fake, {"daily": "main.gd _start_round()"}).is_empty(),
+		"a game reporting a separate daily_done passes")
 	for id in Progress.ids():
 		_expect(ids.has(id), "games/%s/progress.gd belongs to a game the arcade shows" % id)
 	_expect(Progress.ids().size() >= 30, "%d games are in the hall (want >= 30)" % Progress.ids().size())

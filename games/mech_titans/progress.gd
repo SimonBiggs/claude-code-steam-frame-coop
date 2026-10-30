@@ -3,7 +3,7 @@ extends RefCounted
 ## reads the game's save through core/save.gd (the game's scene is never loaded). See core/progress.gd.
 
 const SAVE_ID := "mech_titans"  # the game's core/save.gd game_id
-const WHO := "kaiju"  # the kaiju the Titans help home (they become friends)
+const WHO := "momo"  # Momo, the Titans' first kaiju friend: every kaiju they help home joins her (story_pictures.gd)
 const GROWS := "heart"  # the kaiju friends on the hills
 const COLOR := Color(1.0, 0.42, 0.25)
 

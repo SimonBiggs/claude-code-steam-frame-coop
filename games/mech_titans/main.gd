@@ -136,6 +136,9 @@ var parade: Node3D  ## SIMPLE_MODE: the kaiju friends made so far, waving from t
 var parade_key := ""
 var test_start_round := 0  ## bots (SIMPLE_MODE): start at this round (3+ = the made rounds)
 var story_count := 0  ## story pictures shown on this machine (bots)
+var momo_hello := false  ## host: Momo said hello this session
+var friends_today := 0  ## host: kaiju sent home as friends this session (Momo cheers the first)
+const MOMO_COLOR := "74d99a"  ## Momo, the Titans' first kaiju friend (story_pictures.gd momo)
 
 
 func _ready() -> void:
@@ -449,6 +452,14 @@ func _make_friends(i: int) -> void:
 	if opened != "":
 		get_tree().create_timer(3.8).timeout.connect(func() -> void:
 			story({"who": "NEW PLACE!", "line": String(Data.PLACES[opened]["name"]), "pic": "castle", "color": "7ad7ff", "duration": 3.5, "sound": "fanfare"}))
+	friends_today += 1
+	# Momo cheers the session's first friend and the golden one (a new place is bigger news: its card goes instead;
+	# the next round starts after CHEER_TIME, so there's room for one more card).
+	if opened == "" and (friends_today == 1 or bool(m.get("daily", false))):
+		var golden := bool(m.get("daily", false))
+		get_tree().create_timer(3.8).timeout.connect(func() -> void:
+			story({"who": "MOMO", "line": "GOLDEN FRIEND!" if golden else "YAY!", "pic": "momo",
+				"color": "ffd25a" if golden else MOMO_COLOR, "duration": 3.0}))
 
 
 ## Host: one line per round for tuning from real play (core/telemetry.gd).
@@ -1351,7 +1362,18 @@ func _start_play() -> void:
 		net.event("unlocks", [])
 		var r := int(net.state_get("mission", 0))
 		var rm := mission_info(r)
-		if bool(rm.get("gen", false)):
+		var later := 0.0
+		if not momo_hello:  # Momo says hello once a session, before the first lost kaiju's card (SIMPLE: two capital words)
+			momo_hello = true
+			story({"who": "HI! MOMO!", "line": "HELP!", "pic": "momo", "color": MOMO_COLOR, "duration": 3.5})
+			later = 3.6
+		if bool(rm.get("gen", false)) and later > 0.0:
+			get_tree().create_timer(later).timeout.connect(func() -> void:
+				if String(net.state_get("phase", "")) == "play":
+					story({"who": "TODAY'S KAIJU" if bool(rm.get("daily", false)) else String(rm.get("name", "")),
+						"line": String(rm.get("name", "")) if bool(rm.get("daily", false)) else "HELP!",
+						"pic": "kaiju", "color": _kaiju_color(rm), "duration": 3.2}))
+		elif bool(rm.get("gen", false)):
 			# A made round: the lost kaiju's picture (TODAY'S KAIJU for the daily golden one).
 			story({"who": "TODAY'S KAIJU" if bool(rm.get("daily", false)) else String(rm.get("name", "")),
 				"line": String(rm.get("name", "")) if bool(rm.get("daily", false)) else "HELP!",

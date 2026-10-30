@@ -2529,7 +2529,7 @@ func _start_raid() -> void:
 	save = Save.new()
 	save.game_id = RaidGen.GAME_ID
 	# gifts: [[kind, play-day, today's raid], ...]; days: play-days; daily: the date TODAY'S RAID ran; nights: saved.
-	save.defaults = {"days": 0, "last_day": "", "daily": "", "games": 0, "nights": 0, "gifts": [], "best_wave": 0, "goblins": 0}
+	save.defaults = {"days": 0, "last_day": "", "daily": "", "daily_done": "", "games": 0, "nights": 0, "gifts": [], "best_wave": 0, "goblins": 0}
 	add_child(save)
 	var today := Seeded.today()
 	var new_day := String(save.data.last_day) != today
@@ -2633,6 +2633,9 @@ func _update_story(delta: float) -> void:
 func _log_run(end: String) -> void:
 	if net == null or net.mode == "client" or wave <= 0 or run_logged:
 		return
+	if end != "quit" and raid_daily and save != null:
+		save.data["daily_done"] = Seeded.today()  # TODAY'S RAID played to a wave's end (the Trophy Hall's golden star)
+		save.mark_dirty()
 	run_logged = end != "wave"
 	var beaten := 0
 	for key in kills:

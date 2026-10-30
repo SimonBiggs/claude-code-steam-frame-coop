@@ -698,6 +698,8 @@ func finish(won: bool) -> void:
 		wins[mode] = int(wins.get(mode, 0)) + 1
 		main.save.mark_dirty()
 	net.state_set("d_phase", "won" if won else "over")
+	main.story({"who": "CINDER", "line": "You did it! WOW!" if won else "Let's try again!", "pic": "cinder",
+		"color": "ffd25a" if won else main.CINDER_COLOR, "duration": 3.5})
 	var g := FloorGen.global_floor(zone, floor_i)
 	var beat := won or bool(runrec.get("won", false))
 	main.end_results("VICTORY!" if beat else "THE END", "victory" if beat else "defeat",

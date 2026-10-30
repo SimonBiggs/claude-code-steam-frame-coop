@@ -3,7 +3,7 @@ extends RefCounted
 ## reads the game's save through core/save.gd (the game's scene is never loaded). See core/progress.gd.
 
 const SAVE_ID := "dungeon_delve"  # the game's core/save.gd game_id
-const WHO := "knight"  # the story friend (a story picture, Kitchen Rush's knight): the brave heroes
+const WHO := "cinder"  # the story friend: Cinder, the baby dragon who shares the dungeon's treasure (story_pictures.gd)
 const GROWS := "trophy"  # what the family grows (a story picture or a UiKit icon): treasures found
 const COLOR := Color(0.95, 0.8, 0.65)
 

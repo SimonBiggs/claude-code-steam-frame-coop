@@ -3,7 +3,7 @@ extends RefCounted
 ## reads the game's save through core/save.gd (the game's scene is never loaded). See core/progress.gd.
 
 const SAVE_ID := "kart_race"  # the game's core/save.gd game_id
-const WHO := "robot"  # Bolt, the friendly robot who builds the tracks
+const WHO := "boltbot"  # Bolt, the friendly robot who builds the tracks (story_pictures.gd)
 const GROWS := "partyhat"  # the hats won on the Grand Tour
 const COLOR := Color(0.55, 0.75, 1.0)
 

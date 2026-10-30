@@ -189,7 +189,7 @@ func _ready() -> void:
 				sound("pop", -10.0, 0.7))
 	save = Save.new()
 	save.game_id = GAME_ID
-	save.defaults = {"stars": {}, "towns": {}, "last": 0, "home_seed": 0, "today_date": "", "met_benny": false}
+	save.defaults = {"stars": {}, "towns": {}, "last": 0, "home_seed": 0, "today_date": "", "daily_done": "", "met_benny": false}
 	add_child(save)
 	sfx = SfxScript.new()
 	add_child(sfx)
@@ -534,6 +534,9 @@ func _grant_wishes(id: int) -> void:
 		return
 	for w in wishes.granted_by(town.buildings[id]):
 		_fx("wish_done", [int(w["id"]), int(w["x"]), int(w["z"]), int(w["home"]), wishes.done])
+		if place_key == "today" and String(save.data.get("daily_done", "")) != Seeded.today():
+			save.data["daily_done"] = Seeded.today()  # a wish granted on TODAY'S ISLAND (the Trophy Hall's golden star)
+			save.mark_dirty()
 	var want := Wishes.open_for(wishes.done)
 	for k in range(1, Wishes.OPEN_AT.size()):
 		if (want >> k) & 1 == 1 and (town.open_mask >> k) & 1 == 0:

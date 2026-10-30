@@ -188,6 +188,8 @@ var ghost_rec_t := 0.0
 var ghost_path: Array = []  # the ghost to race (today's best), [Vector3 ...] 5 a second
 var ghost_node: Node3D
 var story_count := 0  # story cards shown (bot)
+var bolt_hello := false  # host: Bolt said hello this session (the first TODAY'S TRACK card)
+const BOLT_COLOR := "8cb4ff"  # Bolt, the friendly robot who builds the tracks (his picture: story_pictures.gd boltbot)
 var tour_strips: Array = []  # results: a row of place pictures on each TV view
 
 var center_label: Label
@@ -1858,8 +1860,13 @@ func _race_story_start() -> void:
 		if has_ghost:
 			_set_ghost(dd["ghost"])
 			net.event("ghost", [dd["ghost"]])
-		story({"who": "TODAY'S TRACK", "line": "Race your ghost!" if has_ghost else "A new track today!", "pic": "sun",
-			"color": "ffd25a", "duration": 4.0})
+		if not bolt_hello:  # Bolt says hello once a session: he built TODAY'S TRACK
+			bolt_hello = true
+			story({"who": "HI! I'M BOLT!", "line": "Race your ghost!" if has_ghost else "I built a new track!", "pic": "boltbot",
+				"color": BOLT_COLOR, "duration": 4.0})
+		else:
+			story({"who": "TODAY'S TRACK", "line": "Race your ghost!" if has_ghost else "A new track today!", "pic": "boltbot",
+				"color": "ffd25a", "duration": 4.0})
 		return
 	var w := Story.where(int(track_desc[2]))
 	var pl := Story.place(int(w[0]))
@@ -1916,6 +1923,9 @@ func _story_after_race(order: Array) -> void:
 				"color": (pl.color as Color).to_html(false), "duration": 3.0})
 			if int(w[0]) == Story.PLACES.size() - 1:
 				d["tours"] = int(d["tours"]) + 1
+				beats.append({"who": "BOLT", "line": "The whole tour! WOW!", "pic": "boltbot", "color": BOLT_COLOR, "duration": 3.5})
+			else:
+				beats.append({"who": "BOLT", "line": "I'll build the next one!", "pic": "boltbot", "color": BOLT_COLOR, "duration": 3.0})
 	save.mark_dirty()
 	_race_telemetry("finish", order)
 	net.event("race_hats", [hats_won])

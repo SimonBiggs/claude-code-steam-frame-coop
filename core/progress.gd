@@ -8,6 +8,9 @@ extends RefCounted
 ##     const COLOR := Color(...)
 ##     static func progress_summary(data: Dictionary, today: String) -> Dictionary  # {"grown": int, "daily": bool, "played"?: bool}
 ##     static func sample(today: String) -> Dictionary   # a save as the game writes it (grown > 0, daily done)
+## "daily" means today's daily round was DONE (finished / completed), never just started: a game that stamps today's
+## date when the daily STARTS (so the next round isn't the daily) keeps that and saves a separate "daily_done" when
+## it finishes (check() catches a start stamp read as done: start_marks / started_problems).
 ## found by itself (one scan of res://games, cached), like core/story_pictures.gd. tests/progress_test.gd fails when a
 ## game with a daily seed (a deepened game) has no progress.gd, or its summary misreads its own sample save.
 ##   var rows := Progress.summaries()            # {game id: {"grown", "daily", "played"}}
@@ -162,6 +165,13 @@ static func check(game_ids: Array, pretend_missing: Array = []) -> Array[String]
 						deep = true
 						break
 		var s = null if pretend_missing.has(id) else script_of(String(id))
+		var marks := {}  # save key -> where starting a round writes today's date into it
+		if s != null and DirAccess.dir_exists_absolute(dir):
+			for f in DirAccess.get_files_at(dir):
+				if f.ends_with(".gd") and f != "progress.gd":
+					var found := start_marks(FileAccess.get_file_as_string(dir + f))
+					for k in found:
+						marks[k] = "%s %s()" % [f, found[k]]
 		if s == null:
 			if deep:
 				out.append("%s has a daily challenge but no games/%s/progress.gd (the arcade's Family Trophy Hall can't show it)" % [id, id])
@@ -184,4 +194,50 @@ static func check(game_ids: Array, pretend_missing: Array = []) -> Array[String]
 		var old: Dictionary = summary_of(String(id), s.sample("2000-01-01"), today)
 		if bool(old.get("daily", true)):
 			out.append("games/%s/progress.gd: a daily done on another day must not count as done today" % id)
+		out.append_array(started_problems(String(id), s, marks))
+	return out
+
+
+## Daily stars mean DONE: a save where only starting today's round happened (each `marks` key, from start_marks(),
+## stamped today on an empty save and on an old sample) must not read as today's daily done. `s`: a progress.gd script.
+static func started_problems(id: String, s, marks: Dictionary) -> Array[String]:
+	var out: Array[String] = []
+	var today := Seeded.today()
+	for k in marks:
+		for base in [{}, s.sample("2000-01-01")]:
+			var started: Dictionary = (base as Dictionary).duplicate(true)
+			started[k] = today
+			var r: Variant = s.progress_summary(started, today)
+			if r is Dictionary and bool((r as Dictionary).get("daily", false)):
+				out.append(("games/%s/progress.gd reads \"%s\" as today's daily done, but %s writes it when a round STARTS:"
+					+ " keep it (it stops the next round being the daily) and report a separate daily_done set when the"
+					+ " daily round finishes") % [id, k, marks[k]])
+				break
+	return out
+
+
+## Save keys that a round-STARTING function (_start_*, _new_*, _open_*, load_*, _begin_*, _setup*, _ready) stamps with
+## today's date after looking at them itself ("first round today? then it's the daily" — or it hands the whole save to
+## a helper that decides), {key: function name}. Those keys say "started today", never "done today" (check()).
+static func start_marks(src: String) -> Dictionary:
+	var out := {}
+	var head := RegEx.create_from_string("^(?:static\\s+)?func\\s+(\\w+)")
+	var start_name := RegEx.create_from_string("^_?(start|new|open|load|begin|setup|ready)")
+	var stamp := RegEx.create_from_string("(?m)save\\.data(?:\\.(\\w+)|\\[\\s*\"(\\w+)\"\\s*\\])\\s*=\\s*(?:today|Seeded\\.today\\(\\)|Time\\.get_date_string_from_system\\(\\))\\s*(?:#|$)")
+	var fname := ""
+	var body: PackedStringArray = []
+	for line in (src + "\nfunc _end_of_source():").split("\n"):
+		var h := head.search(line)
+		if h != null:
+			if fname != "" and start_name.search(fname) != null:
+				var text := "\n".join(body)
+				for st in stamp.search_all(text):
+					var k := st.get_string(1) if st.get_string(1) != "" else st.get_string(2)
+					var reads := RegEx.create_from_string("data(?:\\.%s\\b|\\[\\s*\"%s\"\\s*\\]|\\.get\\(\"%s\")(?!\\s*=[^=])" % [k, k, k])
+					if reads.search(text) != null or text.contains("(save.data)"):
+						out[k] = fname
+			fname = h.get_string(1)
+			body = []
+		elif fname != "":
+			body.append(line)
 	return out

@@ -193,7 +193,7 @@ func _ready() -> void:
 	save.game_id = GAME_ID
 	# gallery: [[thing, play-day, golden, packed strokes], ...] (newest last); paintings: ever painted; days: play-days;
 	# daily: the date TODAY'S GALLERY ran.
-	save.defaults = {"gallery": [], "paintings": 0, "games": 0, "days": 0, "last_day": "", "daily": "", "masterpieces": 0}
+	save.defaults = {"gallery": [], "paintings": 0, "games": 0, "days": 0, "last_day": "", "daily": "", "daily_done": "", "masterpieces": 0}
 	add_child(save)
 	_build_world()
 	_build_hud()
@@ -2260,6 +2260,9 @@ func _update_story(delta: float) -> void:
 func _log_game(end: String) -> void:
 	if net == null or net.mode == "client" or plan.is_empty():
 		return
+	if end != "quit" and bool(plan.daily) and save != null:
+		save.data["daily_done"] = Seeded.today()  # TODAY'S GALLERY played to the end (the Trophy Hall's golden star)
+		save.mark_dirty()
 	Telemetry.run(GAME_ID, {"end": end, "code": plan_code, "seed": int(plan.seed), "daily": bool(plan.daily), "themes": int(plan.themes),
 		"game": game_no, "round": round_n, "rounds": round_stats.duplicate(true), "guessers": active_guessers().size(),
 		"vr": players[0].vr, "net": net.mode, "secs": snappedf(game_secs, 0.1), "everyone": everyone_rounds,

@@ -1339,7 +1339,7 @@ func _open_park() -> void:
 		save = Save.new()
 		save.game_id = GAME_ID
 		# decor: rides in the park; tickets: plans finished; days: play-days; daily: the date of TODAY'S COASTER.
-		save.defaults = {"decor": 0, "tickets": 0, "days": 0, "last_day": "", "daily": "", "rides": 0, "plans": 0, "coasters": 0}
+		save.defaults = {"decor": 0, "tickets": 0, "days": 0, "last_day": "", "daily": "", "daily_done": "", "rides": 0, "plans": 0, "coasters": 0}
 		add_child(save)
 	var today := Seeded.today()
 	new_day = String(save.data.last_day) != today
@@ -1449,6 +1449,8 @@ func _ride_rewards(more_decor: bool) -> void:
 	if ride_plan_done:
 		save.data.tickets = int(save.data.tickets) + 1
 		save.data.plans = int(save.data.plans) + 1
+		if plan_daily:
+			save.data["daily_done"] = Seeded.today()  # TODAY'S COASTER plan finished (the Trophy Hall's golden star)
 		net.state_set("tickets", int(save.data.tickets))
 		park.set_growth(int(save.data.tickets), int(save.data.days), true)
 		park.bear_wave()

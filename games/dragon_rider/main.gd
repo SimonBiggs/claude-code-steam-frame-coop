@@ -1530,6 +1530,9 @@ func _simple_level_complete() -> void:
 		burst(dragon.global_position + fwd * Vector3(randf_range(-12.0, 12.0), randf_range(4.0, 10.0), randf_range(-28.0, -14.0)), cols[k], 24, 0.28)
 	print("Level %d (%s) complete: rings %d/%d, balloons %d" % [level, mission, level_rings, course.rings.size(), level_balloons])
 	_add_charm()
+	if flight_daily and save != null:
+		save.data["daily_done"] = Seeded.today()  # a stage of TODAY'S FLIGHT finished (the Trophy Hall's golden star)
+		save.mark_dirty()
 	_log_stage("done")
 	show_center("HOORAY!", SIMPLE_DONE_TIME - 1.0)
 
@@ -2643,7 +2646,7 @@ func _start_flight() -> void:
 		save = Save.new()
 		save.game_id = GAME_ID
 		# charms: [[kind, play-day, golden], ...]; days: days played; daily: the date TODAY'S FLIGHT was flown.
-		save.defaults = {"charms": [], "total": 0, "days": 0, "last_day": "", "daily": "", "flights": 0, "best_stage": 0}
+		save.defaults = {"charms": [], "total": 0, "days": 0, "last_day": "", "daily": "", "daily_done": "", "flights": 0, "best_stage": 0}
 		add_child(save)
 	var today := Seeded.today()
 	var new_day := String(save.data.last_day) != today

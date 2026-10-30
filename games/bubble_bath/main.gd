@@ -176,7 +176,7 @@ func _ready() -> void:
 	save = Save.new()
 	save.game_id = GAME_ID
 	# toys: [[kind, play-day, golden], ...]; days: days played; daily: the date TODAY'S BATH ran; goals: goals ever reached.
-	save.defaults = {"best": 0, "toys": [], "goals": 0, "days": 0, "last_day": "", "daily": "", "baths": 0, "rounds": 0, "ducks": 0, "golden": 0}
+	save.defaults = {"best": 0, "toys": [], "goals": 0, "days": 0, "last_day": "", "daily": "", "daily_done": "", "baths": 0, "rounds": 0, "ducks": 0, "golden": 0}
 	add_child(save)
 	sfx = SfxScript.new()
 	add_child(sfx)
@@ -647,6 +647,9 @@ func _end_round() -> void:
 		save.data["best"] = score
 		save.mark_dirty()
 		net.state_set("best", score)
+	if bath_daily:
+		save.data["daily_done"] = Seeded.today()  # a TODAY'S BATH round finished (the Trophy Hall's golden star)
+		save.mark_dirty()
 	_log_round("time")
 	var toys := (save.data.toys as Array).size()
 	var data := awards.results({"title": "SPLASHTASTIC!", "subtitle": "%d ducks down the plug!" % score,
