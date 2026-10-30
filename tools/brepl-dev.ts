@@ -313,7 +313,7 @@ export async function removeWorktree(path: string, branch?: string) {
 /** Install every TOOL_COPIES file (and tools/ file named like a ~/.local/bin command) that changed in live since
  *  `since`: brepl modules through writeModule (build-checked), the rest copied (keeping the mode). */
 export async function installTools(since: string) {
-  const changed = (await sh(`git diff --name-only ${since} HEAD -- tools`, LIVE)).out.split("\n").filter(Boolean);
+  const changed = (await sh(`git diff --name-only ${since} HEAD -- tools addons/gdev`  /* every TOOL_COPIES source, not just tools/ (the gdev addon's gdev_main.gd is one) */, LIVE)).out.split("\n").filter(Boolean);
   const done: string[] = [];
   for (const rel of changed) {
     let dest = Object.entries(TOOL_COPIES).find(([, r]) => r === rel)?.[0];
