@@ -1837,6 +1837,8 @@ func show_story(beat: Dictionary) -> void:
 	story_count += 1
 	var opts := beat.duplicate()
 	opts["color"] = Color.html(String(beat.get("color", "ffd25a")))
+	if state == "wait" or state == "countdown":
+		opts["y"] = 0.6  # before GO the top of the view is the start gantry and its lights: the card goes under them
 	var huds: Array = []
 	for p in players:
 		if p.active and p.is_local() and p.hud != null and is_instance_valid(p.hud) and p.hud.is_visible_in_tree():

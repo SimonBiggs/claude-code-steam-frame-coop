@@ -168,8 +168,18 @@ class Card extends Control:
 			_line.custom_minimum_size.x = maxf(160.0 * _s, _line.custom_minimum_size.x - (panel.get_combined_minimum_size().x - room))
 		var w := minf(panel.get_combined_minimum_size().x, room)
 		panel.size = Vector2(w, panel.get_combined_minimum_size().y)
+		if _results_showing():
+			# The results screen's big title sits where the card goes: the card waits in the bottom-left corner.
+			panel.position = Vector2(20.0 * _s, size.y - panel.size.y - 20.0 * _s)
+			return
 		var y := float(opts.get("y", 0.13)) * size.y
 		panel.position = Vector2((size.x - w) * 0.5, y)
+
+	func _results_showing() -> bool:
+		for n in get_tree().get_nodes_in_group("results_screen"):  # core/awards.gd ResultsScreen
+			if n is CanvasItem and (n as CanvasItem).is_visible_in_tree() and (n as Node).get_viewport() == get_viewport():
+				return true
+		return false
 
 	func leave() -> void:
 		if leaving:
@@ -181,6 +191,7 @@ class Card extends Control:
 
 	func _process(delta: float) -> void:
 		t += delta
+		_place()  # (a results screen can open while the card shows)
 		if not leaving and t > float(opts.get("duration", 4.0)):
 			leave()
 

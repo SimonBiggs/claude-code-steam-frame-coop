@@ -673,7 +673,8 @@ func flat_hit(pad: int) -> void:
 
 func _flat_update(delta: float) -> void:
 	if camera != null:
-		var from := rig.to_global(Vector3(0.0, 0.6, 0.6))
+		# (high over the drummer's own head: from 0.6 m up the head hid the middle of the kit on a Deck / TV)
+		var from := rig.to_global(Vector3(0.0, 1.0, 0.5))
 		camera.global_transform = UiKit.aim_from(from, rig.to_global(Vector3(0.0, -0.4, -1.6)), Vector3.UP)
 	var head := rig.global_position
 	av_head.global_position = head
