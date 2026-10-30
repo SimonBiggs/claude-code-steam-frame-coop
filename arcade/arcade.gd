@@ -88,6 +88,9 @@ const GAMES := [
 ]
 ## Tabs on the TV (LB/RB) and in VR (stick left/right). Empty categories are hidden.
 const CATEGORIES := [
+	# What's New (arcade/whats_new.gd): a picture board of what changed in the games lately, a sparkly NEW! on what
+	# nobody in the family has opened yet. First, so a fresh arcade with news opens on it (else on the HALL).
+	{"id": "new", "name": "NEW!", "color": Color(1.0, 0.95, 0.55)},
 	# The Family Trophy Hall (arcade/hall.gd): every story game's friend, how far the family grew it, today's golden
 	# stars. First, so it's what a fresh arcade shows. A filter like 1 PLAYER: games with a games/<game>/progress.gd.
 	{"id": "hall", "name": "HALL", "color": Color(1.0, 0.82, 0.3)},
@@ -118,6 +121,7 @@ const Machine := preload("res://core/machine.gd")
 const Who := preload("res://core/who.gd")
 const Hall := preload("res://arcade/hall.gd")
 const Progress := preload("res://core/progress.gd")
+const WhatsNew := preload("res://arcade/whats_new.gd")
 const DEFAULT_PORT := 7777
 const JOIN_TIMEOUT_MS := 5000
 
@@ -167,6 +171,12 @@ var hall_ms := 0.0  # how long reading the saves took
 var _hall_auto := -1  # a fresh arcade's first highlighted hall game (re-picked once the hall knows today's stars)
 var hall_wall: Sprite3D  # VR picture wall
 var _hall_wall_t := 0.0
+## What's New (arcade/whats_new.gd): entry ids anyone in the family opened (this machine's save + the lobby's), the
+## VR wall, and the "try this" a tile asked for (env for the game it starts: {"game": id, "env": {...}}).
+var _news_seen := {}
+var _news_loaded := false
+var news_wall: Sprite3D
+var _news_try := {}
 
 
 func _ready() -> void:
@@ -225,6 +235,10 @@ func _restore_env() -> void:
 		else:
 			OS.set_environment(k, v)
 	OS.unset_environment("DUO_FLAT_HOST")
+	var tried: Array = get_tree().root.get_meta("news_try_env", []) if get_tree().root.has_meta("news_try_env") else []
+	for k in tried:  # a What's New "try this" is for the one game it started
+		OS.unset_environment(String(k))
+	get_tree().root.remove_meta("news_try_env")
 
 
 func _host_lobby(with_vr: bool) -> void:
@@ -258,6 +272,7 @@ func _on_lobby_peer_joined(id: int) -> void:
 	_lobby_status()
 	_sync_selection.rpc_id(id, selected, 1, 0)  # the newcomer shows what everyone has chosen
 	_hall_data.rpc_id(id, Progress.pack(hall_rows()))  # and the family's Trophy Hall
+	_news_seen_rpc.rpc_id(id, WhatsNew.pack(news_seen()))  # and which news the family has opened
 
 
 func _on_lobby_peer_left(id: int) -> void:
@@ -355,6 +370,7 @@ func _on_lobby_connected() -> void:
 	_hello.rpc_id(1, my_kind, Machine.display_name(my_kind))
 	if hall_ready:  # (else it's sent once loaded)
 		_hall_data.rpc_id(1, Progress.pack(hall_mine))  # this machine's progress joins the family's
+	_news_seen_rpc.rpc_id(1, WhatsNew.pack(news_seen()))
 	_set_status("Connected: pick a game!")
 	if OS.has_environment("ARCADE_AUTOPICK"):  # headless tests
 		_start_everywhere(int(OS.get_environment("ARCADE_AUTOPICK")))
@@ -495,6 +511,7 @@ func _launch(index: int) -> void:
 	starting = true
 	var game: Dictionary = GAMES[clampi(index, 0, GAMES.size() - 1)]
 	print("Arcade: starting %s" % game.name)
+	_apply_news_try(str(game.id))
 	# The host keeps the lobby open briefly so the "start" message reaches the TV before it closes;
 	# the TV waits a little longer so the host's game is listening by the time it joins.
 	var delay := 0.4 if mode == "host" else (0.9 if mode == "client" else 0.1)
@@ -550,9 +567,11 @@ func _process(_delta: float) -> void:
 		if _hall_wall_t <= 0.0:  # a few redraws a second: the glowing stars pulse, at almost no cost
 			_hall_wall_t = 0.2
 			(hall_wall.get_node("HallView") as SubViewport).render_target_update_mode = SubViewport.UPDATE_ONCE
+			if news_wall != null and is_instance_valid(news_wall):
+				(news_wall.get_node("NewsView") as SubViewport).render_target_update_mode = SubViewport.UPDATE_ONCE
 	if vr_list:
 		_vr_input()
-		VrText.follow(vr_list, vr_cam, self, 0.25, 2.4)  # always findable; raised so a seated player's list stays above the floor
+		VrText.follow(vr_list, vr_cam, self, 0.25, 2.2)  # always findable; raised so a seated player's list stays above the floor (2.4 sat 3.86 m away: past core/vr_view_check.gd MAX_D)
 		if not has_meta("vr_floor"):
 			set_meta("vr_floor", true)
 			_build_vr_floor()
@@ -633,7 +652,11 @@ func _build_tv_menu() -> void:
 	if not get_tree().root.has_meta("arcade_menu_state") and not has_meta("hall_first"):
 		set_meta("hall_first", true)
 		var ht := _hall_tab()
-		if ht >= 0 and not _games_in(ht).is_empty():
+		var nt := _tab_of("new")
+		if nt >= 0 and WhatsNew.unseen(news_seen()) > 0 and not _games_in(nt).is_empty():
+			cat = nt  # something new nobody has opened yet: the What's New board first
+			selected = _games_in(nt)[0]
+		elif ht >= 0 and not _games_in(ht).is_empty():
 			cat = ht
 			selected = _games_in(ht)[0]
 			_hall_auto = selected
@@ -647,9 +670,14 @@ func _build_tv_menu() -> void:
 
 ## The Family Trophy Hall's tab (index into tabs()), -1 if none.
 func _hall_tab() -> int:
+	return _tab_of("hall")
+
+
+## A category's tab (index into tabs()), -1 if it has none.
+func _tab_of(cat_id: String) -> int:
 	var t := tabs()
 	for k in t.size():
-		if str(CATEGORIES[t[k]].id) == "hall":
+		if str(CATEGORIES[t[k]].id) == cat_id:
 			return k
 	return -1
 
@@ -670,6 +698,8 @@ func _in_category(g: Dictionary, cat_id: String) -> bool:
 		return int(SOLO.get(str(g.get("id", "")), 0)) > 0
 	if cat_id == "hall":
 		return Progress.has(str(g.get("id", "")))
+	if cat_id == "new":
+		return WhatsNew.has(str(g.get("id", ""))) and Progress.has(str(g.get("id", "")))
 	return str(g.get("cat", "action")) == cat_id
 
 
@@ -690,6 +720,8 @@ func _games_in(tab: int) -> Array[int]:
 	var id := str(CATEGORIES[c].id)
 	if id == "hall":  # today's unfinished golden stars first
 		return Hall.order(GAMES, hall_rows())
+	if id == "new":  # what nobody has opened yet first
+		return WhatsNew.order(GAMES, news_seen())
 	for i in GAMES.size():
 		if _in_category(GAMES[i], id):
 			out.append(i)
@@ -715,6 +747,9 @@ func _show_category(tab: int, focus_first: bool) -> void:
 		if str(cd.id) == "hall":
 			tab_bar.add_child(Hall.tab(hall_rows(), k == cat, cd.color))
 			continue
+		if str(cd.id) == "new":
+			tab_bar.add_child(WhatsNew.tab(news_seen(), k == cat, cd.color))
+			continue
 		var tab_label := Label.new()
 		tab_label.text = "  %s  " % cd.name
 		tab_label.add_theme_font_size_override("font_size", 26 if k == cat else 22)
@@ -734,8 +769,9 @@ func _show_category(tab: int, focus_first: bool) -> void:
 	var colour: Color = CATEGORIES[t[cat]].color
 	var games := _games_in(cat)
 	var hall := str(CATEGORIES[t[cat]].id) == "hall"
+	var news := str(CATEGORIES[t[cat]].id) == "new"
 	for i in games:
-		var b := _make_hall_card(i, colour) if hall else _make_card(i, colour)
+		var b := _make_news_card(i, colour) if news else (_make_hall_card(i, colour) if hall else _make_card(i, colour))
 		grid.add_child(b)
 		cards[i] = b
 	var target: int = selected if cards.has(selected) and not focus_first else (games[0] if not games.is_empty() else 0)
@@ -761,7 +797,7 @@ func _thumb(id: String) -> Texture2D:
 
 
 ## A game card's button (the look of every card, and pressing / highlighting it).
-func _card_button(i: int, colour: Color) -> Button:
+func _card_button(i: int, colour: Color, on_press: Callable = Callable()) -> Button:
 	var b := Button.new()
 	b.custom_minimum_size = Vector2(600, 136)  # five rows plus the help line fit on a 1080p TV
 	b.focus_mode = Control.FOCUS_ALL
@@ -780,7 +816,7 @@ func _card_button(i: int, colour: Color) -> Button:
 	b.add_theme_stylebox_override("hover", focus)
 	b.add_theme_stylebox_override("pressed", focus)
 	b.add_theme_stylebox_override("focus", focus)
-	b.pressed.connect(_start_everywhere.bind(i))
+	b.pressed.connect(on_press if on_press.is_valid() else _start_everywhere.bind(i))
 	b.focus_entered.connect(_on_card_focus.bind(i))
 	return b
 
@@ -793,6 +829,89 @@ func _make_hall_card(i: int, colour: Color) -> Button:
 	b.name = "Hall_" + id
 	Hall.fill_tile(b, id, hall_rows().get(id, {}), _thumb(id))
 	return b
+
+
+## A What's New tile (arcade/whats_new.gd): the game's friend with a sparkly NEW!, pictures of what's new, one short
+## line, its screenshot. Pressing it opens the news (seen by the family now) and plays the game.
+func _make_news_card(i: int, colour: Color) -> Button:
+	var id := str(GAMES[i].id)
+	var b := _card_button(i, colour, _open_news.bind(i))
+	b.name = "News_" + id
+	WhatsNew.fill_tile(b, id, news_seen(), _thumb(id))
+	return b
+
+
+## The ids anyone in the family has opened (this machine's save, read once, plus what the lobby said).
+func news_seen() -> Dictionary:
+	if not _news_loaded:
+		_news_loaded = true
+		_news_seen = WhatsNew.load_seen()
+	return _news_seen
+
+
+## A What's New tile pressed (TV / Deck): everyone's board loses that sparkle, the game starts with its "try this".
+func _open_news(i: int) -> void:
+	var id := str(GAMES[i].id)
+	var env := WhatsNew.try_of(id, news_seen())
+	_news_try = {"game": id, "env": env}
+	var ids := WhatsNew.ids_of(id)
+	if WhatsNew.merge(news_seen(), ids):
+		WhatsNew.store_seen(news_seen())
+	if mode == "host" and not machines.is_empty():
+		_news_seen_rpc.rpc(ids, id, env)
+	elif mode == "client" and _lobby_connected():
+		_news_seen_rpc.rpc_id(1, ids, id, env)  # (sent before the start request: the host hears it first)
+	_start_everywhere(i)
+
+
+## Lobby: news the family has opened. A joiner tells the host; the host keeps everyone's and passes it on. try_game /
+## try_env: a tile was just pressed, so its game starts with that "try this" on whichever machine hosts it.
+@rpc("any_peer", "call_remote", "reliable")
+func _news_seen_rpc(ids: Array, try_game: String = "", try_env: Dictionary = {}) -> void:
+	if mode != "host" and multiplayer.get_remote_sender_id() != 1:
+		return
+	var grew := WhatsNew.merge(news_seen(), ids)
+	if try_game != "":
+		_news_try = {"game": try_game, "env": try_env}
+	if grew:
+		WhatsNew.store_seen(news_seen())
+	if mode == "host" and not machines.is_empty() and (grew or try_game != ""):
+		_news_seen_rpc.rpc(WhatsNew.pack(news_seen()) if grew else ids, try_game, try_env)
+	if grew and not starting:
+		_news_changed()
+
+
+## The game starting is the one a news tile asked for: set its "try this" env, if this machine hosts it (the game's
+## own host starts the new thing; joiners mirror it). _restore_env clears it back in the arcade.
+func _apply_news_try(game_id: String) -> void:
+	var t := _news_try
+	_news_try = {}
+	if str(t.get("game", "")) != game_id:
+		return
+	var join := OS.get_environment("DUO_JOIN")
+	if join != "" and join != "auto":
+		return
+	var env: Dictionary = t.get("env", {})
+	for k in env:
+		OS.set_environment(String(k), str(env[k]))
+	get_tree().root.set_meta("news_try_env", env.keys())
+	if not env.is_empty():
+		print("Arcade: What's New: %s starts with %s" % [game_id, str(env)])
+
+
+## Which news is seen changed: redraw the tab (and the tiles, if the board is on screen) and the VR wall.
+func _news_changed() -> void:
+	if grid != null and is_instance_valid(grid) and not (quit_panel and is_instance_valid(quit_panel)):
+		var t := tabs()
+		var on_news := not t.is_empty() and str(CATEGORIES[t[clampi(cat, 0, t.size() - 1)]].id) == "new"
+		_applying_remote = true
+		if on_news:
+			_show_category(cat, false)
+			stats.show_category -= 1  # (a redraw, not a choice: tests/arcade_lobby_bot.gd counts choices' rebuilds)
+		else:
+			_show_tabs_only()
+		_applying_remote = false
+	_refresh_news_wall()
 
 
 ## Hall data: this machine's saves merged with the family's from the lobby.
@@ -861,15 +980,16 @@ func _hall_changed() -> void:
 
 func _show_tabs_only() -> void:
 	for child in tab_bar.get_children():
-		if child.name == "HallTab":
+		if child.name == "HallTab" or child.name == "NewsTab":
 			var at := child.get_index()
 			var t := tabs()
-			var fresh := Hall.tab(hall_rows(), t[cat] == t[at] if at < t.size() else false, CATEGORIES[t[at]].color)
+			var on := t[cat] == t[at] if at < t.size() else false
+			var fresh := Hall.tab(hall_rows(), on, CATEGORIES[t[at]].color) if child.name == "HallTab" \
+				else WhatsNew.tab(news_seen(), on, CATEGORIES[t[at]].color)
 			tab_bar.add_child(fresh)
 			tab_bar.move_child(fresh, at)
 			tab_bar.remove_child(child)
 			child.queue_free()
-			return
 
 
 func _make_card(i: int, colour: Color) -> Button:
@@ -1114,6 +1234,13 @@ func _build_vr_view() -> void:
 	add_child(hall_wall)
 	hall_wall.position = Vector3(-2.6, 1.45, -1.2)
 	hall_wall.rotation.y = deg_to_rad(52.0)
+	hall_wall.set_meta("vr_placed", true)  # core/vr_view_check.gd checks it (distance, facing, nothing in front)
+	# What's New as a picture wall to the right, the mirror of the hall.
+	news_wall = WhatsNew.vr_panel()
+	add_child(news_wall)
+	news_wall.position = Vector3(2.6, 1.45, -1.2)
+	news_wall.rotation.y = deg_to_rad(-52.0)
+	news_wall.set_meta("vr_placed", true)
 	_refresh_vr()
 
 
@@ -1151,6 +1278,12 @@ func _refresh_vr() -> void:
 	set_meta("vr_rows", rows)
 	vr_list.text = "\n".join(lines)
 	_refresh_hall_wall()
+	_refresh_news_wall()
+
+
+func _refresh_news_wall() -> void:
+	if news_wall != null and is_instance_valid(news_wall):
+		WhatsNew.vr_update(news_wall, GAMES, news_seen(), selected)
 
 
 func _refresh_hall_wall() -> void:
