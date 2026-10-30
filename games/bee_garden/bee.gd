@@ -331,10 +331,33 @@ func _update_camera(delta: float) -> void:
 	var k := 1.0 - exp(-8.0 * delta)
 	var cp := camera.global_position.lerp(target, k) if delta < 0.5 else target
 	cp.y = maxf(cp.y, W.floor_y(cp.x, cp.z) + 0.15)
-	camera.global_position = cp
 	var look := global_position + Vector3.UP * 0.2
+	cp = _unblocked(look, cp)
+	camera.global_position = cp
 	if camera.global_position.distance_to(look) > 0.05:
 		UiKit.look(camera, look, Vector3.UP)
+
+
+## The camera never sits behind a flower head (tall sunflowers, saved and grown from day to day, filled a bee's
+## whole view): when one is between the bee and the camera, the camera comes in to just in front of it.
+func _unblocked(look: Vector3, cp: Vector3) -> Vector3:
+	var seg := cp - look
+	var len := seg.length()
+	if len < 0.01 or main == null or main.get("plant_nodes") == null:
+		return cp
+	var dir := seg / len
+	var best := len
+	for pn in main.plant_nodes:
+		if not is_instance_valid(pn) or pn.head == null or not pn.head.is_visible_in_tree():
+			continue
+		var hp: Vector3 = pn.head.global_position
+		var r := 0.3 * maxf(pn.head.scale.x, pn.head.scale.y)
+		var along := (hp - look).dot(dir)
+		if along < 0.25 or along > best + r:
+			continue
+		if (look + dir * along).distance_to(hp) < r + 0.12:
+			best = maxf(0.35, along - r - 0.15)
+	return look + dir * best if best < len else cp
 
 
 func _update_hud() -> void:

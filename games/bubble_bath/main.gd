@@ -277,6 +277,7 @@ func _build_world(vr: bool) -> void:
 	board = UiKit.label3d("", 0.42, "gold", true)
 	board.outline_size = 26
 	board.position = Vector3(0.0, 2.6, -HZ - 1.2)
+	board.layers = UiKit.VR_LAYER  # the VR player's: on the TV it sat right under the timer pill and the story card
 	add_child(board)
 	island_root = Node3D.new()
 	island_root.name = "Islands"
