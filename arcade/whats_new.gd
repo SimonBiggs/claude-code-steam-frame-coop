@@ -47,7 +47,7 @@ const ENTRIES := [
 	{"id": "bath-mamaduck", "date": "2026-10-29", "game": "bubble_bath", "pic": "duckling", "line": "Find Mama Duck's ducklings"},
 	{"id": "coaster-buttons", "date": "2026-10-29", "game": "roller_coaster", "pic": "ticket", "line": "Golden tickets!"},
 	{"id": "band-doodle", "date": "2026-10-29", "game": "rhythm_band", "pic": "fanclub", "line": "Grow Doodle's fan club!"},
-	{"id": "golf-gus", "date": "2026-10-29", "game": "mini_golf_party", "pic": "gopher", "line": "New holes every day!"},
+	{"id": "golf-gus", "date": "2026-10-29", "game": "mini_golf_party", "pic": "golfflag", "line": "New holes every day!"},
 	{"id": "cove-polly", "date": "2026-10-29", "game": "cannon_cove", "pic": "treasuremap", "line": "Sail with Polly!"},
 	{"id": "dig-peg", "date": "2026-10-29", "game": "treasure_dig", "pic": "crown", "line": "Dig up Peg's relics!"},
 	{"id": "bee-bea", "date": "2026-10-29", "game": "bee_garden", "pic": "honeyjar", "line": "Fill Queen Bea's jars!"},
@@ -335,6 +335,7 @@ static func friend(id: String, px: float, fresh: bool, s: float = 1.0) -> Contro
 	disc.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	disc.add_theme_stylebox_override("panel", UiKit.stylebox(col.darkened(0.55), 1.0, px, (GOLD if fresh else col.lightened(0.2)), maxf(2.0, px * (0.05 if fresh else 0.03)), 0.0, Vector2(px * 0.06, px * 0.06)))
 	disc.size = Vector2(px, px)
+	disc.clip_contents = true  # (a tall friend like Gus the gopher stays on the disc)
 	box.add_child(disc)
 	disc.add_child(still(String(sc.WHO), px * 0.82, col.lightened(0.15)))
 	if fresh:

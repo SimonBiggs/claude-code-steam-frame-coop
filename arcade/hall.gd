@@ -58,6 +58,7 @@ static func friend(id: String, px: float, animate: bool) -> Control:
 	disc.add_theme_stylebox_override("panel", UiKit.stylebox(col.darkened(0.55), 1.0, px, col.lightened(0.2), maxf(2.0, px * 0.04), 0.0, Vector2(px * 0.06, px * 0.06)))
 	disc.custom_minimum_size = Vector2(px, px)
 	disc.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	disc.clip_contents = true  # (a tall friend like Gus the gopher stays on the disc)
 	var pic := StoryCard.picture(String(s.WHO), px * 0.82, col.lightened(0.15)) if animate else still(String(s.WHO), px * 0.82, col.lightened(0.15))
 	pic.name = "Friend"
 	disc.add_child(pic)

@@ -741,6 +741,7 @@ func _show_category(tab: int, focus_first: bool) -> void:
 	stats.show_category += 1
 	cat = wrapi(tab, 0, t.size())
 	for child in tab_bar.get_children():
+		tab_bar.remove_child(child)  # (out at once: a tab refresh later this frame counts tabs by their place)
 		child.queue_free()
 	for k in t.size():
 		var cd: Dictionary = CATEGORIES[t[k]]
@@ -980,16 +981,19 @@ func _hall_changed() -> void:
 
 func _show_tabs_only() -> void:
 	for child in tab_bar.get_children():
-		if child.name == "HallTab" or child.name == "NewsTab":
-			var at := child.get_index()
-			var t := tabs()
-			var on := t[cat] == t[at] if at < t.size() else false
-			var fresh := Hall.tab(hall_rows(), on, CATEGORIES[t[at]].color) if child.name == "HallTab" \
-				else WhatsNew.tab(news_seen(), on, CATEGORIES[t[at]].color)
-			tab_bar.add_child(fresh)
-			tab_bar.move_child(fresh, at)
-			tab_bar.remove_child(child)
-			child.queue_free()
+		if child.is_queued_for_deletion() or not (child.name == "HallTab" or child.name == "NewsTab"):
+			continue  # (a tab bar rebuilt this frame still holds its old tabs until the frame ends)
+		var at := child.get_index()
+		var t := tabs()
+		if at < 0 or at >= t.size() or cat >= t.size():
+			continue
+		var on := t[cat] == t[at]
+		var fresh := Hall.tab(hall_rows(), on, CATEGORIES[t[at]].color) if child.name == "HallTab" \
+			else WhatsNew.tab(news_seen(), on, CATEGORIES[t[at]].color)
+		tab_bar.add_child(fresh)
+		tab_bar.move_child(fresh, at)
+		tab_bar.remove_child(child)
+		child.queue_free()
 
 
 func _make_card(i: int, colour: Color) -> Button:
