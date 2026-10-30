@@ -4,7 +4,7 @@ extends RefCounted
 ## pic._p(x, y) / pic._circle(x, y, r, c) / pic._poly(pts, c) / pic._eye(x, y, r) / pic.draw_*(...), size = pic.size,
 ## t = the picture's clock, bob = its gentle bob, color = the card's colour.
 
-const NAMES: Array[String] = ["cinder"]
+const NAMES: Array[String] = ["cinder", "hoard"]
 
 
 static func draw(pic, kind: String, t: float, bob: float, color: Color) -> void:
@@ -34,3 +34,16 @@ static func draw(pic, kind: String, t: float, bob: float, color: Color) -> void:
 				pic.draw_arc(pic._p(0.86 + f * 0.08, 0.36 - f * 0.28), (0.03 + f * 0.04) * size.x, 0.0, TAU, 16,
 					Color(0.85, 0.85, 0.9, 0.8 * (1.0 - f)), 0.014 * size.x)
 			pic._circle(0.2, 0.9, 0.04 + 0.01 * sin(t * 4.0), color.lightened(0.3))
+		"hoard":  # Cinder's hoard: a glittering heap of gold coins with gems, growing as the family plays
+			var gold := Color(1.0, 0.8, 0.28)
+			pic._poly([[0.1, 0.86], [0.5, 0.42 + bob * 0.3], [0.9, 0.86]], gold.darkened(0.2))
+			for k in 9:
+				var x := 0.22 + 0.07 * k
+				var y := 0.8 - 0.22 * (1.0 - absf(x - 0.5) / 0.32) + bob * 0.3
+				pic._circle(x, y, 0.06, gold)
+				pic._circle(x - 0.015, y - 0.015, 0.025, gold.lightened(0.4))
+			pic._poly([[0.42, 0.5 + bob], [0.48, 0.42 + bob], [0.54, 0.5 + bob], [0.48, 0.58 + bob]], Color(0.4, 0.95, 1.0))
+			pic._poly([[0.62, 0.62 + bob], [0.67, 0.56 + bob], [0.72, 0.62 + bob], [0.67, 0.68 + bob]], Color(1.0, 0.4, 0.6))
+			for k2 in 3:  # sparkles
+				var f := fmod(t * 0.8 + k2 * 0.33, 1.0)
+				pic._circle(0.3 + 0.2 * k2, 0.35 - 0.1 * f, 0.02 * (1.0 - f), Color(1.0, 1.0, 0.8, 1.0 - f))

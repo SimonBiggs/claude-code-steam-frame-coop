@@ -549,7 +549,7 @@ func _add_hoard(n: int) -> void:
 func _unlocked(text: String) -> void:
 	net.event("d_banner", [text, "level"])
 	main.show_headline(text, 3.0)
-	main.story({"who": "CINDER", "line": "My hoard grew! " + text.capitalize(), "pic": "cinder", "color": main.CINDER_COLOR, "duration": 3.0})
+	main.story({"who": "CINDER", "line": "My hoard grew! " + text.capitalize(), "pic": "hoard", "color": main.CINDER_COLOR, "duration": 3.0})
 	if runrec.has("unlocks"):
 		(runrec["unlocks"] as Array).append(text)
 
@@ -662,7 +662,7 @@ func _new_stats(slot: int) -> Dictionary:
 	var cid := class_of(slot)
 	var ci: Dictionary = Classes.info(cid)
 	var knight := _is_knight(slot)
-	var hearts := maxi(2, int(d["hearts"]) + int(pk["heart"]) + (1 if knight else int(ci["hearts"])))
+	var hearts := maxi(3, int(d["hearts"]) + int(pk["heart"]) + (1 if knight else int(ci["hearts"])))  # (a HEROIC wizard still gets 3)
 	return {"hp": hearts, "max": hearts, "pot": int(d["potions"]) + int(pk["potion"]) + (0 if knight else int(ci["pots"])),
 		"bomb": int(pk["bombs"]) + (0 if knight else int(ci["bombs"])), "abil": "" if knight else String(ci["abil"]),
 		"dmg": 2 if knight else 1, "charm": 0, "down": false, "cls": cid, "relics": [], "bubble": false, "rise": 0.0, "ph_used": false}
@@ -2645,13 +2645,13 @@ func _animate_pickups(delta: float) -> void:
 			if Relics.is_relic_kind(k):
 				var rl := Label3D.new()
 				rl.text = String(Relics.info(Relics.id_of_kind(k))["name"])
-				rl.font_size = 40
-				rl.pixel_size = 0.004
+				rl.font_size = 56
+				rl.pixel_size = 0.005
 				rl.outline_size = 14
 				rl.modulate = (Relics.info(Relics.id_of_kind(k))["color"] as Color).lightened(0.3)
 				rl.outline_modulate = Color(0, 0, 0, 0.95)
 				rl.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
-				rl.position = Vector3(0.0, 0.62, 0.0)
+				rl.position = Vector3(0.0, 0.72, 0.0)
 				mi.add_child(rl)
 		var n: Node3D = pick_nodes[id]
 		var p: Vector3 = pk["p"]

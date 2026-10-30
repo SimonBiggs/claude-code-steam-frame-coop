@@ -403,6 +403,19 @@ func _fight(slot: int, h: Node3D, id: int, st: Dictionary, delta: float) -> void
 			if order % 2 == 1:
 				side = -side  # friends split up: one each side, so someone gets behind
 			goal = p + side * (reach + 0.6) - fwd * 0.5
+	var cls := String(st.get("cls", "knight"))
+	if cls in ["archer", "wizard"] and not Foes.is_boss(kind) or cls in ["archer", "wizard"] and Foes.is_boss(kind) and int(m["st"]) != Foes.WIND:
+		# Shooters keep a little way off and fire (A) when facing the monster.
+		var d0 := Vector2(p.x - pos.x, p.z - pos.z).length()
+		var to0 := Vector3(p.x - pos.x, 0.0, p.z - pos.z).normalized()
+		if d0 < 2.4:
+			_stick(slot, Vector2(-to0.x, -to0.z))
+			_press(slot, "accept", "a", 0.45)
+			return
+		if d0 < 6.5 and (not shielded or cls == "wizard"):
+			_stick(slot, Vector2(to0.x, to0.z) * 0.15)
+			_press(slot, "accept", "a", 0.45)  # (A soft-aims at the nearest monster)
+			return
 	if abil == "bow" and not shielded:
 		var d := Vector2(p.x - pos.x, p.z - pos.z).length()
 		if d < 7.0 and d > 2.0:
