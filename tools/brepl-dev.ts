@@ -351,8 +351,9 @@ export async function land(branch: string, genTests: string[], botId: string, ot
   let ok = true;
   // story_pictures_test always: it pins core/story_card.gd SHARED_PICTURES (a game's pictures belong in its own
   // games/<game>/story_pictures.gd) and catches one name drawn by two games. progress_test always: a deepened game
-  // without games/<game>/progress.gd would be missing from the arcade's Family Trophy Hall.
-  for (const t of [...new Set([...genTests, "story_pictures_test", "progress_test", "layout_check_test", "vr_view_check_test", "bot_end_test", "core_math_test"])].filter(Boolean)) {
+  // without games/<game>/progress.gd would be missing from the arcade's Family Trophy Hall. whats_new_test always: a
+  // game with a fresh feature commit needs an entry on the lobby's What's New board (arcade/whats_new.gd).
+  for (const t of [...new Set([...genTests, "story_pictures_test", "progress_test", "whats_new_test", "layout_check_test", "vr_view_check_test", "bot_end_test", "core_math_test"])].filter(Boolean)) {
     // A test with a scene (extends Node, e.g. engine_ui_test) runs as that scene; a SceneTree script runs with -s.
     const scene = await stat(join(STAGE, `tests/${t}.tscn`)).then(() => true, () => false);
     const how = scene ? `--fixed-fps 60 res://tests/${t}.tscn`  /* ends itself (exit code = failures); timeout 600 caps it */ : `-s res://tests/${t}.gd`;
