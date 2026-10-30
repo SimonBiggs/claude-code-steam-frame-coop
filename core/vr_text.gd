@@ -30,11 +30,7 @@ static func _follow(l: Label3D, cam: Node3D, world: Node, height: float, dist: f
 	if l.get_parent() == cam:
 		l.reparent(world)  # panels used to be glued to the headset
 	l.billboard = BaseMaterial3D.BILLBOARD_DISABLED  # turning your head must not turn the text
-	var fwd := -cam.global_basis.z
-	fwd.y = 0.0
-	if fwd.length() < 0.01:
-		return
-	fwd = fwd.normalized()
+	var fwd: Vector3 = _ui().vr_flat_forward(cam)
 	var target := cam.global_position + fwd * dist + Vector3(0.0, height, 0.0)
 	# never behind a wall: in front of it, smaller by the same factor (UiKit.vr_clear)
 	var spot: Dictionary = _ui().vr_spot(cam, target, l, not l.has_meta("vr_placed"))

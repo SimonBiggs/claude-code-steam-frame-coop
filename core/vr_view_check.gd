@@ -72,7 +72,7 @@ static func problems(root: Node) -> Array[String]:
 			out.append("%s: text only %.2f deg high (min %.1f)" % [name, small, MIN_TEXT_DEG])
 		var hit := blocker(cam, c, p)
 		if hit != "":
-			out.append("%s: hidden behind %s" % [name, hit])
+			out.append("%s: hidden behind %s, it is %.1f m away%s" % [name, hit, d, " " + str(c.get_meta("vr_spot")) if OS.has_environment("VR_VIEW_DEBUG") and c.has_meta("vr_spot") else ""])
 	# Two panels in the same spot are drawn over each other (a banner over the last one, a card over a sign).
 	for i in shown.size():
 		for j in range(i + 1, shown.size()):
@@ -225,6 +225,8 @@ static func _ignored(n: Node) -> bool:
 
 ## The middle of what's drawn (its children's boxes), else its position.
 static func _centre(n: Node3D) -> Vector3:
+	if n is Label3D:
+		return n.global_position  # (its own box isn't built in headless runs; the text is centred on it)
 	var box := AABB()
 	var have := false
 	for c in [n] + n.find_children("*", "VisualInstance3D", true, false):

@@ -861,16 +861,25 @@ static func wrap_text(text: String, width_px: float, size: int, bold: bool = fal
 	return "\n".join(out)
 
 
+## Which way (flat, unit length) VR UI goes in front of the eyes. Looking straight down at the floor (a seeker
+## counting, a builder over a table) the top of the view is "forward": before, the panel stopped following and was
+## left behind a wall.
+static func vr_flat_forward(cam: Node3D) -> Vector3:
+	var b := cam.global_basis
+	var fwd := -b.z
+	fwd.y = 0.0
+	if fwd.length() < 0.2:
+		fwd = b.y * (1.0 if -b.z.y < 0.0 else -1.0)
+		fwd.y = 0.0
+	return fwd.normalized() if fwd.length() > 0.001 else Vector3.FORWARD
+
+
 ## Put a world-space node in front of a camera at `dist` metres (horizontal forward), `height` metres
 ## above eye level, facing the eyes (its +Z towards the camera). Uses vr_text's comfort factor.
 static func vr_place(n: Node3D, cam: Node3D, dist: float = 1.6, height: float = -0.1) -> void:
 	if n == null or cam == null or not n.is_inside_tree():
 		return
-	var fwd := -cam.global_basis.z
-	fwd.y = 0.0
-	if fwd.length() < 0.01:
-		fwd = Vector3.FORWARD
-	fwd = fwd.normalized()
+	var fwd := vr_flat_forward(cam)
 	var ws := vr_fit_world(n)
 	var pos := cam.global_position + (fwd * dist + Vector3(0.0, height, 0.0)) * VrText.COMFORT * ws
 	var spot := vr_spot(cam, pos, n, true)
@@ -896,7 +905,7 @@ static func vr_fit_world(n: Node3D) -> float:
 ## VR UI must never hide behind something: how far (0..1] towards `target` a panel can go from the eyes before
 ## something solid is in the way (core/vr_view_check.gd first_hit: walls, doors, tables, signs, trees, props from
 ## saved growth; not people or balls passing by), leaving a hand's width in front of it, but never nearer than
-## VR_NEAR m. `n` (the panel itself) is never in its own way; with it the answer is kept for 0.4 s (a scan of the
+## VR_NEAR m. `n` (the panel itself) is never in its own way; with it the answer is kept for 24 frames (a scan of the
 ## meshes is too dear for every frame) unless `fresh`.
 const VR_NEAR := 0.9
 ## Nearer still, but only when nothing else works (the seeker counting with their nose to a door).
@@ -905,7 +914,7 @@ const VR_CLOSEST := 0.55
 static func vr_clear(cam: Node3D, target: Vector3, n: Node = null, fresh := false, near := VR_NEAR) -> float:
 	if not cam is Camera3D or not cam.is_inside_tree():
 		return 1.0
-	var now := Time.get_ticks_msec()
+	var now := Engine.get_process_frames()  # (frames, not ms: headless bots run many frames a millisecond)
 	if n != null and not fresh and now < int(n.get_meta("vr_clear_next", 0)):
 		return float(n.get_meta("vr_clear_k", 1.0))
 	var head := cam.global_position
@@ -927,7 +936,7 @@ static func vr_clear(cam: Node3D, target: Vector3, n: Node = null, fresh := fals
 				var free := float(hit.f) * l * 1.06 - 0.12 * ws
 				k = minf(k, clampf(free / l, minf(1.0, near * ws / length), 1.0))
 	if n != null:
-		n.set_meta("vr_clear_next", now + 400)
+		n.set_meta("vr_clear_next", now + 24)
 		n.set_meta("vr_clear_k", k)
 	return k
 
@@ -937,9 +946,9 @@ static func vr_clear(cam: Node3D, target: Vector3, n: Node = null, fresh := fals
 ## nearer than `target` it is (draw it k times the size: vr_set_near).
 static func vr_spot(cam: Node3D, target: Vector3, n: Node = null, fresh := false) -> Dictionary:
 	var head := cam.global_position
-	var now := Time.get_ticks_msec()
+	var now := Engine.get_process_frames()
 	if n != null and not fresh and n.has_meta("vr_spot") and now < int((n.get_meta("vr_spot") as Array)[0]):
-		var c: Array = n.get_meta("vr_spot")  # [until, k, lift]: worked out at most every 0.4 s
+		var c: Array = n.get_meta("vr_spot")  # [until, k, lift]: worked out at most every 24 frames
 		return {"pos": head.lerp(target + Vector3.UP * float(c[2]), float(c[1])), "k": float(c[1])}
 	var ws := maxf(XRServer.world_scale, 0.001)
 	var length := head.distance_to(target)
@@ -959,7 +968,7 @@ static func vr_spot(cam: Node3D, target: Vector3, n: Node = null, fresh := false
 		if not lifted:
 			k = minf(k, vr_clear(cam, target, null, true, VR_CLOSEST))
 	if n != null:
-		n.set_meta("vr_spot", [now + 400, k, lift])
+		n.set_meta("vr_spot", [now + 24, k, lift])
 	return {"pos": head.lerp(target + Vector3.UP * lift, k), "k": k}
 
 
@@ -1016,11 +1025,7 @@ static func _vr_follow(n: Node3D, cam: Node3D, dist: float, height: float, delta
 	if not n.has_meta("vr_placed"):
 		vr_place(n, cam, dist, height)
 		return
-	var fwd := -cam.global_basis.z
-	fwd.y = 0.0
-	if fwd.length() < 0.01:
-		return
-	fwd = fwd.normalized()
+	var fwd := vr_flat_forward(cam)
 	var ws := vr_fit_world(n)
 	var d := dist * VrText.COMFORT * ws
 	var target := cam.global_position + fwd * d + Vector3(0.0, height * VrText.COMFORT * ws, 0.0)
