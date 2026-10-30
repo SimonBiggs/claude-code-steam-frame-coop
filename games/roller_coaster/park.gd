@@ -9,6 +9,9 @@ extends Node3D
 const MeshKit := preload("res://core/mesh_kit.gd")
 const Creatures := preload("res://core/creatures.gd")
 const Track := preload("res://games/roller_coaster/track.gd")
+## The station roof's own render layer: the TV / Deck ride cameras (main.gd _update_cameras) leave it out while the
+## train rides, or its stripes filled the whole view as the train left the station.
+const ROOF_LAYER := 1 << 10
 
 const TREE_SPOTS: Array[Vector3] = [Vector3(-10.1, 0, 4.5), Vector3(-10.8, 0, -3.2), Vector3(-8.3, 0, -8.0), Vector3(-3.2, 0, -10.9),
 	Vector3(3.5, 0, -10.7), Vector3(9.3, 0, -4.8), Vector3(10.5, 0, 1.6), Vector3(9.1, 0, 6.9), Vector3(-8.5, 0, 8.3)]
@@ -95,12 +98,17 @@ func _build_station() -> void:
 	for x in [-1.0, 1.0]:
 		for z in [-0.6, 1.8]:
 			b.cylinder(0.08, 0.08, 2.6, Transform3D(Basis(), Vector3(mid.x + x * (Track.STATION_LEN * 0.5), 1.3, mid.z + z)), Color.WHITE, 6)
-	b.box(Vector3(Track.STATION_LEN + 1.0, 0.18, 3.0), Transform3D(Basis(), Vector3(mid.x, 2.65, mid.z + 0.6)), Color(0.95, 0.35, 0.4))
+	var rb := MeshKit.builder()
+	rb.box(Vector3(Track.STATION_LEN + 1.0, 0.18, 3.0), Transform3D(Basis(), Vector3(mid.x, 2.65, mid.z + 0.6)), Color(0.95, 0.35, 0.4))
 	for k in 6:
-		b.box(Vector3(0.5, 0.2, 3.05), Transform3D(Basis(), Vector3(mid.x - 2.5 + k, 2.8, mid.z + 0.6)), Color.WHITE if k % 2 == 0 else Color(0.95, 0.35, 0.4))
+		rb.box(Vector3(0.5, 0.2, 3.05), Transform3D(Basis(), Vector3(mid.x - 2.5 + k, 2.8, mid.z + 0.6)), Color.WHITE if k % 2 == 0 else Color(0.95, 0.35, 0.4))
 	var mi := MeshKit.instance(b.build(), false)
 	mi.name = "Station"
 	add_child(mi)
+	var roof := MeshKit.instance(rb.build(), false)
+	roof.name = "StationRoof"
+	roof.layers = ROOF_LAYER
+	add_child(roof)
 	# The station bell on its own post (touch it: DING).
 	var post := MeshKit.builder()
 	post.cylinder(0.06, 0.06, 2.2, Transform3D(Basis(), Vector3(0, 1.1, 0)), Color(0.5, 0.35, 0.2), 6)
