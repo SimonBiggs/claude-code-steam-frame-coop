@@ -361,7 +361,10 @@ export async function land(branch: string, genTests: string[], botId: string, ot
     ok &&= /exit=0/.test(out[t]) && !/FAIL|SCRIPT ERROR|no PASS line/.test(out[t]);
   }
   out.deck = (await sh(`DECK_BOT_ONLY=${botId} DUO_PORT=${rport()} timeout 300 godot-test --headless --path . --fixed-fps 60 --quit-after 6000 res://tests/deck_bot.tscn 2>&1 | grep -E "BOT RESULT|SCRIPT ERROR" | tail -3`, STAGE)).out;
-  ok &&= /BOT RESULT: PASS/.test(out.deck) && !/SCRIPT ERROR/.test(out.deck);
+  // (0 checks = DECK_BOT_ONLY matched no game: fine for a non-game botId like arcade_lobby, a FAIL for a game.)
+  const isGame = await stat(join(STAGE, "games", botId)).then(() => true, () => false);
+  if (isGame && /\(0 checks\)/.test(out.deck)) out.deck += " (no Deck checks ran for this game)";
+  ok &&= /BOT RESULT: PASS/.test(out.deck) && !/SCRIPT ERROR|no Deck checks/.test(out.deck);
   const res: string[] = [];
   for (const [id, o] of [["arcade", {}], [botId, { net: true, joiners: 1, seconds: 180 }], ...otherBots.map(x => [x, {}])] as [string, any][]) {
     process.env.DUO_PORT = String(rport());
