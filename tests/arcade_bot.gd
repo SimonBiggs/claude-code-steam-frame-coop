@@ -273,7 +273,16 @@ class Runner extends Node:
 				want_scene = str(arcade.GAMES[i].scene)
 		check(want_scene != "", "a card is highlighted before pressing A")
 		await tap(JOY_BUTTON_A)
-		await frames(40)
+		# Wait for the game in seconds, not frames: a lobby host waits 0.4 s (game time) so the "start" reaches the TV, and
+		# networked bots run without --fixed-fps, where 40 frames were over long before that (2026-10-30: a false
+		# "A launches ... now running: nothing" as host).
+		var t_end := Time.get_ticks_msec() + 3000
+		while Time.get_ticks_msec() < t_end:
+			await frames(1)
+			var c := get_tree().current_scene
+			if c != null and c.scene_file_path == want_scene:
+				break
+		await frames(2)
 		var cur := get_tree().current_scene
 		check(cur != null and cur.scene_file_path == want_scene,
 			"A launches the highlighted game %s (now running: %s)" % [want_scene, cur.scene_file_path if cur else "nothing"])

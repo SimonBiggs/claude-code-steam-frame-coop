@@ -10,6 +10,7 @@ extends Node
 ## Split in PARTS scenes (deck_bot, deck2_bot .. deck4_bot: every 4th game) so each fits dev.bots' 3600 frames.
 ## DECK_BOT_ONLY=id,id runs just those games (in any part). Run: dev.bots.all({only: ["deck", "deck2", "deck3", "deck4"]}), or
 ##   godot-test --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/deck_bot.tscn
+## fixed-fps only: one machine, always run with --fixed-fps (its frame waits are game time; dev.debt bot-frame-wait).
 const FrameGrab := preload("res://core/frame_grab.gd")
 
 const BotKit := preload("res://tests/bot_kit.gd")
