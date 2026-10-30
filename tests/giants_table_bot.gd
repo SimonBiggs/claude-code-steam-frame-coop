@@ -454,6 +454,8 @@ func _exit_tree() -> void:
 		print("SCRIPT ERROR: GT BOT: waves came but no goblin ladders stood on the table (mode %s)" % main.net.mode)
 	if main != null and main.wave >= 1 and not seen.has("sparky's face"):
 		print("SCRIPT ERROR: GT BOT: Sparky's face never showed in the fire (mode %s)" % main.net.mode)
+	if main != null and main.wave >= 1:
+		print("BOT AGREE raid=%d gifts=%d" % [main.raid_seed, main.keep_gifts.size()])  # (tools/multibot.ts: every machine the same)
 	if main != null:
 		print("FINAL mode=%s wave=%d score=%d embers=%d built=%d smacks=%d kills=%s seen=%s" % [main.net.mode, main.wave, main.score, main.embers, main.built, smacks, main.kills, seen.keys()])
 		if main.simple:
