@@ -100,7 +100,8 @@ func build(fl: Dictionary) -> void:
 	light = OmniLight3D.new()
 	light.omni_range = 13.0
 	light.light_energy = 1.7
-	light.light_color = Color(1.0, 0.85, 0.65) if zone != 2 else Color(1.0, 0.7, 0.5)
+	var lights := {"forge": Color(1.0, 0.7, 0.5), "crystal": Color(0.7, 0.85, 1.0)}
+	light.light_color = lights.get(String(zd["id"]), Color(1.0, 0.85, 0.65))
 	light.shadow_enabled = false
 	light.position = FloorGen.room_center(f, 0) + Vector3(0.0, 4.2, 0.0)
 	add_child(light)
@@ -114,6 +115,7 @@ func _build_room(b: MeshKit.Builder, pit: MeshKit.Builder, i: int, zd: Dictionar
 	var fc: Array = zd["floor"]
 	var wall: Color = zd["wall"]
 	var glow: Color = zd["glow"]
+	var biome := String(zd["id"])
 	var h := FloorGen.HALF
 	var tile := FloorGen.TILE
 	# Checker floor.
@@ -128,7 +130,7 @@ func _build_room(b: MeshKit.Builder, pit: MeshKit.Builder, i: int, zd: Dictionar
 			elif role == "shop":
 				col = col.lerp(Color(0.6, 0.45, 0.3), 0.5)
 			if crumbly.has(tp.snappedf(0.01)):
-				pit.box(Vector3(tile, 0.1, tile), MeshKit.at(tp + Vector3(0.0, -1.2, 0.0)), Color(0.05, 0.04, 0.06) if zone != 2 else Color(1.0, 0.4, 0.1), zone == 2)
+				pit.box(Vector3(tile, 0.1, tile), MeshKit.at(tp + Vector3(0.0, -1.2, 0.0)), Color(0.05, 0.04, 0.06) if biome != "forge" else Color(1.0, 0.4, 0.1), biome == "forge")
 				continue
 			b.box(Vector3(tile - 0.03, 0.1, tile - 0.03), MeshKit.at(tp + Vector3(0.0, -0.05, 0.0)), col)
 	# Walls with door gaps (each room draws its own half of a shared wall).
@@ -183,12 +185,15 @@ func _build_room(b: MeshKit.Builder, pit: MeshKit.Builder, i: int, zd: Dictionar
 		var dp := c + Vector3(v2.x, 0.0, v2.y) * (h - 0.35) + (Vector3(t, 0.0, 0.0) if side % 2 == 0 else Vector3(0.0, 0.0, t))
 		if ds.has(side) and absf(t) < FloorGen.DOOR + 0.6:
 			continue
-		match zone:
-			0:
+		match biome:
+			"caves":
 				b.sphere(rng.randf_range(0.2, 0.35), MeshKit.at(dp, Vector3(1.0, 0.55, 1.0)), Color(0.35, 0.65, 0.35), 8)
 				if rng.randf() < 0.5:
 					b.prism(5, 0.09, rng.randf_range(0.35, 0.6), MeshKit.at(dp + Vector3(0.15, 0.2, 0.1), Vector3.ONE, Vector3(0.2, 0, 0.3)), Color(0.4, 1.0, 0.8), true)
-			1:
+			"crystal":
+				for k2 in rng.randi_range(2, 4):
+					b.prism(6, rng.randf_range(0.07, 0.13), rng.randf_range(0.35, 0.8), MeshKit.at(dp + Vector3(rng.randf_range(-0.2, 0.2), 0.15, rng.randf_range(-0.2, 0.2)), Vector3.ONE, Vector3(rng.randf_range(-0.4, 0.4), 0, rng.randf_range(-0.4, 0.4))), glow.lerp(Color(0.8, 0.6, 1.0), rng.randf() * 0.6), true)
+			"crypt":
 				b.cylinder(0.04, 0.04, 0.4, MeshKit.at(dp + Vector3(0.0, 0.04, 0.0), Vector3.ONE, Vector3(0, rng.randf() * TAU, PI * 0.5)), Color(0.92, 0.9, 0.82), 6)
 				b.sphere(0.07, MeshKit.at(dp + Vector3(0.18, 0.06, 0.0)), Color(0.92, 0.9, 0.82), 6)
 				if rng.randf() < 0.5:
@@ -198,6 +203,18 @@ func _build_room(b: MeshKit.Builder, pit: MeshKit.Builder, i: int, zd: Dictionar
 				b.box(Vector3(rng.randf_range(0.6, 1.4), 0.02, 0.08), MeshKit.at(dp + Vector3(0.0, 0.01, 0.0) - Vector3(v2.x, 0.0, v2.y) * 0.8, Vector3.ONE, Vector3(0, rng.randf() * PI, 0)), Color(1.0, 0.45, 0.1), true)
 				if rng.randf() < 0.4:
 					b.box(Vector3(0.5, 0.3, 0.3), MeshKit.at(dp + Vector3(0.0, 0.15, 0.0)), Color(0.25, 0.25, 0.3))
+	# The biome's hazards (deep._features_step sets them off; they glow on the floor first).
+	for fe in (r.get("features", []) as Array):
+		var fd: Dictionary = fe
+		var fp := FloorGen.to_world(f, i, fd["p"])
+		if String(fd["kind"]) == "vents":
+			b.cylinder(0.85, 0.9, 0.06, MeshKit.at(fp + Vector3(0.0, 0.03, 0.0)), Color(0.18, 0.15, 0.16), 14)
+			for k3 in 4:
+				b.box(Vector3(1.3, 0.02, 0.1), MeshKit.at(fp + Vector3(0.0, 0.065, -0.36 + k3 * 0.24)), Color(1.0, 0.45, 0.12), true)
+		else:
+			for k4 in 5:
+				var a4 := TAU * k4 / 5.0
+				b.prism(6, 0.11 + 0.04 * (k4 % 2), 0.55 + 0.3 * (k4 % 3), MeshKit.at(fp + Vector3(cos(a4) * 0.22, 0.25, sin(a4) * 0.22), Vector3.ONE, Vector3(cos(a4) * 0.35, 0, sin(a4) * 0.35)), Color(0.55, 0.95, 1.0).lerp(Color(0.85, 0.6, 1.0), 0.3 * (k4 % 2)), true)
 	# Stairs down: a dark square with steps, ringed with light.
 	if r.has("stairs"):
 		var sp := FloorGen.to_world(f, i, r["stairs"])

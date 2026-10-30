@@ -9,6 +9,7 @@ extends RefCounted
 
 const MeshKit := preload("res://core/mesh_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")
+const Relics := preload("res://games/dungeon_delve/relics.gd")
 
 enum { COIN, COIN5, POTION, HEART, KEY, BOMBS, DASH, BASH, BOW, MAXHEART, SWORD, CHARM }
 const ABILITIES: Array[int] = [DASH, BASH, BOW]
@@ -73,6 +74,8 @@ static func shop_stock(rng: RandomNumberGenerator, zone: int, heroic: bool) -> A
 
 ## The look of a pickup (cached, one draw call; glowing bits make them easy to spot).
 static func mesh(kind: int) -> ArrayMesh:
+	if Relics.is_relic_kind(kind):
+		return Relics.mesh(Relics.id_of_kind(kind))
 	return ResCache.get_or_make("dd_loot_%d_v1" % kind, func() -> Resource: return _build(kind)) as ArrayMesh
 
 

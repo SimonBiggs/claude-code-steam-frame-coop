@@ -7,6 +7,8 @@ extends Control
 const UiKit := preload("res://core/ui_kit.gd")
 const FloorGen := preload("res://games/dungeon_delve/floorgen.gd")
 const Loot := preload("res://games/dungeon_delve/loot.gd")
+const Relics := preload("res://games/dungeon_delve/relics.gd")
+const Classes := preload("res://games/dungeon_delve/classes.gd")
 
 var party: Node
 var zone_label: Label
@@ -137,6 +139,9 @@ func _rebuild_cards(st: Dictionary, deep: Node) -> void:
 		v.add_child(top)
 		if knight:
 			top.add_child(UiKit.icon("sword", col, px))
+		elif Classes.valid(String(sd.get("cls", ""))):
+			var ci: Dictionary = Classes.info(String(sd["cls"]))
+			top.add_child(UiKit.icon(String(ci["icon"]), ci["color"], px))
 		var down := bool(sd.get("down", false))
 		var hp := int(sd.get("hp", 0))
 		var mx := int(sd.get("max", 0))
@@ -161,6 +166,10 @@ func _rebuild_cards(st: Dictionary, deep: Node) -> void:
 				low.add_child(UiKit.label("+%d" % (int(sd["dmg"]) - (2 if knight else 1)), "tiny"))
 			if int(sd.get("charm", 0)) > 0:
 				low.add_child(UiKit.icon("star", "gold", px * 0.85))
+			for rid in (sd.get("relics", []) as Array):
+				var ri: Dictionary = Relics.info(String(rid))
+				if not ri.is_empty():
+					low.add_child(UiKit.icon(String(ri["icon"]), ri["color"], px * (0.7 if many else 0.8)))
 		# Something new to do? Show the prompt pill again.
 		if party.is_local(int(s)):
 			var can := "%s/%d/%d" % [String(sd.get("abil", "")), mini(1, int(sd.get("bomb", 0))), mini(1, int(sd.get("pot", 0)))]
@@ -180,7 +189,8 @@ func update(delta: float, deep: Node) -> void:
 		var sd: Dictionary = st[s]
 		if bool(sd.get("down", false)):
 			continue
-		pairs = [["A", "Hit"]]
+		var shot := String(Classes.info(String(sd.get("cls", "knight")))["shot"])
+		pairs = [["A", "Shoot" if shot == "arrow" else ("Magic" if shot == "bolt" else "Hit")]]
 		var ab := String(sd.get("abil", ""))
 		if ab != "":
 			pairs.append(["X", String(Loot.NAMES[Loot.ABILITY_NAMES[ab]])])

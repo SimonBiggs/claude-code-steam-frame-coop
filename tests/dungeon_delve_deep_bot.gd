@@ -14,6 +14,7 @@ const FloorGen := preload("res://games/dungeon_delve/floorgen.gd")
 const Foes := preload("res://games/dungeon_delve/foes.gd")
 const Tele := preload("res://games/dungeon_delve/tele.gd")
 const Loot := preload("res://games/dungeon_delve/loot.gd")
+const Relics := preload("res://games/dungeon_delve/relics.gd")
 const VrRig := preload("res://core/vr_rig.gd")
 
 var kit: Node
@@ -25,6 +26,7 @@ var swing_side := 1.0
 var _wp_cache := {}
 var stall := {}
 var ignore := {}
+var relic_start := {}  ## "floor/slot" -> relics held on arriving at a camp
 
 
 func deep() -> Node:
@@ -401,6 +403,19 @@ func _fight(slot: int, h: Node3D, id: int, st: Dictionary, delta: float) -> void
 			if order % 2 == 1:
 				side = -side  # friends split up: one each side, so someone gets behind
 			goal = p + side * (reach + 0.6) - fwd * 0.5
+	var cls := String(st.get("cls", "knight"))
+	if cls in ["archer", "wizard"] and not Foes.is_boss(kind) or cls in ["archer", "wizard"] and Foes.is_boss(kind) and int(m["st"]) != Foes.WIND:
+		# Shooters keep a little way off and fire (A) when facing the monster.
+		var d0 := Vector2(p.x - pos.x, p.z - pos.z).length()
+		var to0 := Vector3(p.x - pos.x, 0.0, p.z - pos.z).normalized()
+		if d0 < 2.4:
+			_stick(slot, Vector2(-to0.x, -to0.z))
+			_press(slot, "accept", "a", 0.45)
+			return
+		if d0 < 6.5 and (not shielded or cls == "wizard"):
+			_stick(slot, Vector2(to0.x, to0.z) * 0.15)
+			_press(slot, "accept", "a", 0.45)  # (A soft-aims at the nearest monster)
+			return
 	if abil == "bow" and not shielded:
 		var d := Vector2(p.x - pos.x, p.z - pos.z).length()
 		if d < 7.0 and d > 2.0:
@@ -433,8 +448,24 @@ func _goal(slot: int, pos: Vector3, room: int, index: int) -> Dictionary:
 	var f: Dictionary = dp.f
 	var walk: int = dp.view.pass_bits
 	var reach_rooms := _reachable(room, walk)
-	# Shop.
+	# Shop (first the relic altar: each bot takes a different stone).
 	if String(f["kind"]) == "shop":
+		var mine: Array = _stats(slot).get("relics", [])
+		var ak := "%s/%d" % [dp.built_key, slot]
+		if not relic_start.has(ak):
+			relic_start[ak] = mine.size()
+		if mine.size() == int(relic_start[ak]):
+			var picks0: Dictionary = dp.pickups if main.net.mode != "client" else dp._mirror_picks
+			var ids: Array = picks0.keys()
+			ids.sort()
+			var cands: Array = []
+			for id0 in ids:
+				var k0 := int((picks0[id0] as Dictionary)["kind"])
+				if Relics.is_relic_kind(k0) and Relics.usable(Relics.id_of_kind(k0), {"knight": dp._is_knight(slot), "relics": mine}):
+					cands.append(Vector3((picks0[id0] as Dictionary)["p"]))
+			if not cands.is_empty():
+				var rp: Vector3 = cands[index % cands.size()]
+				return {"p": Vector3(rp.x, 0.0, rp.z), "near": 0.25}
 		var shop: Array = main.net.state_get("d_shop", [])
 		var gold := int(main.net.state_get("d_gold", 0))
 		for i in shop.size():

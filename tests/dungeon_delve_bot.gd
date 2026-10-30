@@ -416,6 +416,12 @@ func _deep_checks(mode: String) -> void:
 		kit.assert_true(int((pd["bosses"] as Dictionary).get(dp.mode, 0)) & 1 != 0, "%s: the boss win was saved (perk + hat unlocked)" % mode)
 		kit.assert_true(dp.unlocked_hats().has("wizard") and int(dp.perks()["potion"]) == 1, "%s: the Slime King unlocks the wizard hat and a starting potion" % mode)
 		kit.assert_true(int(t["bought"]) >= 1 or main.heroes.is_empty(), "%s: something was bought in a shop (%d)" % [mode, int(t["bought"])])
+		# The relic altar after floor 2: every TV hero took a relic, and it's in their stats; the hoard grew.
+		for s0 in dp.stats:
+			if not dp._is_knight(int(s0)):
+				kit.assert_true(((dp.stats[s0] as Dictionary).get("relics", []) as Array).size() >= 1, "%s: hero %d took a relic at the altar (%s)" % [mode, int(s0), str(dp.stats[s0])])
+		kit.assert_true(dp.hoard() > 0 and int(main.net.state_get("d_hoard", 0)) == dp.hoard(), "%s: coins went into Cinder's hoard (%d)" % [mode, dp.hoard()])
+		kit.assert_true((dp.runrec.get("offers", []) as Array).size() >= 1, "%s: an altar offered relics (%s)" % [mode, str(dp.runrec.get("offers", []))])
 	if int(t["downs"]) > 0:
 		kit.assert_true(int(t["revives"]) > 0 or int(t["wipes"]) > 0, "%s: knocked-out heroes got back up (%d downs, %d revives)" % [mode, int(t["downs"]), int(t["revives"])])
 	if main.vr_rig != null:
