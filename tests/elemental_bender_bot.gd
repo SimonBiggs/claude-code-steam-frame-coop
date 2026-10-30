@@ -339,6 +339,19 @@ func _checks() -> void:
 	if mode != "host":
 		kit.assert_eq(kit.seated(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
 		kit.assert_true(main.log_tv_shots > 0, "%s: TV benders bent" % mode)
+	# Story + depth: Kiko's cards, the portals, the Spirit Tree (every machine), RUN lines (host / local).
+	kit.assert_true(main.log_story >= 1, "%s: Kiko told the story on picture cards (%d)" % [mode, main.log_story])
+	kit.assert_true(main.log_gates >= 1 and main.temple_story.gate_key != "", "%s: shadow portals shown (%d)" % [mode, main.log_gates])
+	kit.assert_true(main.temple_story.keep_key != "", "%s: the Spirit Tree and lanterns are built" % mode)
+	if mode != "client":
+		kit.assert_true(main.temple_seed > 0 or OS.has_environment("EB_SEED"), "%s: a temple seed was picked (%d)" % [mode, main.temple_seed])
+		for r in main.raiders.values():
+			if is_instance_valid(r) and not r.boss:
+				kit.assert_true(main.wave_plan.palette.has(r.element), "%s: raiders have the wave's elements" % mode)
+				break
+		if max_wave >= 2:
+			kit.assert_true(main.log_runs >= 1, "%s: a RUN line per cleared wave (%d)" % [mode, main.log_runs])
+			kit.assert_true(int(main.save.data.waves) >= 1, "%s: the Spirit Tree grew (saved waves %d)" % [mode, int(main.save.data.waves)])
 	if mode == "client":
 		kit.assert_true(client_saw_raiders > 0, "client: raider ghosts mirrored from the host")
 		kit.assert_true(max_wave >= 1, "client: waves reached the TV machine (%d)" % max_wave)

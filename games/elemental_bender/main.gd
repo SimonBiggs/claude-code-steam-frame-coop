@@ -19,7 +19,17 @@ extends Node3D
 ## Network: host-authoritative raiders, damage, health, score, spirit; TV benders move on the TV
 ## machine and ask the host for every attack (request "fire"/"special"/...); shots and effects are
 ## sent as small events and drawn as visual ghosts; raiders as ghost copies from 30 Hz snapshots.
-## EB_FAST=1: short practice, small waves (tests).
+## STORY + DEPTH (wavegen.gd, temple_story.gd, story_pictures.gd): KIKO, the little temple fox, sits in the middle
+## of the temple and tells the story on picture cards. Every wave's raiders step out of SHADOW PORTALS on the island
+## (seeded: they open in the breather before the wave, the first in front of the temple), and the waves teach the
+## elements one at a time (wave 1 and 2: one element each, Kiko shows what beats it; then two, three, all four).
+## tests/elemental_bender_gen_test.gd proves every wave fair for small kids. Every wave cleared grows the SPIRIT TREE
+## beside the temple (saved over days), every Shadow General beaten hangs a glowing fruit on it, a stone LANTERN
+## joins the temple ring every play-day, and Kiko wears a crown after WaveGen.CROWN_GENERALS Generals.
+## TODAY'S RAIDERS: the first game each day uses the day's seed on every machine. Telemetry: one RUN line per wave
+## cleared, at game over and on quit. Networked: sticky events "gates" [temple seed, wave] and "temple" [waves,
+## fruit, days, crown] (machines that join late get them too); every machine rebuilds the portals and the tree.
+## EB_FAST=1: short practice, small waves (tests). EB_SEED=n: play temple seed n.
 
 const NetScript := preload("res://core/net.gd")
 const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
@@ -47,12 +57,20 @@ const Bender := preload("res://games/elemental_bender/bender.gd")
 const Raider := preload("res://games/elemental_bender/raider.gd")
 const Projectile := preload("res://games/elemental_bender/projectile.gd")
 const VrBender := preload("res://games/elemental_bender/vr_bender.gd")
+const WaveGen := preload("res://games/elemental_bender/wavegen.gd")
+const TempleStory := preload("res://games/elemental_bender/temple_story.gd")
+const Pics := preload("res://games/elemental_bender/story_pictures.gd")
+const Seeded := preload("res://core/seeded.gd")
+const Telemetry := preload("res://core/telemetry.gd")
+const StoryCard := preload("res://core/story_card.gd")
 
 const GAME_ID := "elemental_bender"
 const MAX_ALIVE := 14
 ## Practice dummies in order: each one needs the next element (AIR, WATER, EARTH, FIRE).
 const PRACTICE: Array[int] = [E.EARTH, E.FIRE, E.WATER, E.AIR]
 const DUMMY_AT := Vector3(0.0, 0.0, -10.0)
+const KIKO := "KIKO"
+const KIKO_COLOR := Color(1.0, 0.6, 0.25)
 const INTRO := {
 	"title": "ELEMENTAL BENDER",
 	"goal": "Defend the temple! FIRE beats AIR, AIR beats EARTH, EARTH beats WATER, WATER beats FIRE.",
@@ -117,6 +135,22 @@ var _targets_cache: Array = [[], []]
 var _vr_floor := World.DAIS_TOP
 var _last_note := {}
 
+# Story + depth (host / local decide; every machine shows)
+var temple_story: TempleStory
+var temple_seed := 0
+var temple_daily := false
+var wave_plan := {}
+var spawn_i := 0
+var story_queue: Array = []
+var story_t := 0.0
+var vr_story: Node3D
+var run_logged := false
+var game_t := 0.0
+var wave_t := 0.0
+var wave_downs := 0
+var generals := 0  # Shadow Generals beaten this game
+var seen_elements := {}  # elements Kiko has introduced this game
+
 # Bots / design checks
 var log_practice := 0
 var log_waves := 0
@@ -130,6 +164,9 @@ var log_tv_shots := 0
 var log_vr_shots := 0
 var log_hits_by := {}
 var log_downs := 0
+var log_story := 0
+var log_gates := 0
+var log_runs := 0
 
 
 ## The practice dummy (visual on every machine; the host decides when it pops).
@@ -167,8 +204,13 @@ func _ready() -> void:
 	party.player_joined.connect(_on_player_joined)
 	save = Save.new()
 	save.game_id = GAME_ID
-	save.defaults = {"best_wave": 0, "best_score": 0}
+	# days: play-days (lanterns), last_day, daily: the date TODAY'S RAIDERS ran, waves: waves cleared over all days
+	# (the Spirit Tree), fruit: the element of every General beaten (oldest first), generals: how many.
+	save.defaults = {"best_wave": 0, "best_score": 0, "days": 0, "last_day": "", "daily": "", "games": 0, "waves": 0,
+		"fruit": [], "generals": 0, "best_today": [], "raiders": 0}
 	add_child(save)
+	net.sticky_event("gates")  # a machine that joins later gets the coming wave's portals (core/net.gd)
+	net.sticky_event("temple")  # ... and the Spirit Tree, lanterns and Kiko's crown
 	sfx = SfxScript.new()
 	add_child(sfx)
 	sfx.warm([], true)
@@ -206,6 +248,10 @@ func _setup(mode: String) -> void:
 		trail_interval = 0.05
 	add_child(fx)
 	sky = SkyKit.apply(self, "sunset", vr and VrRig.headset_available())
+	temple_story = TempleStory.new()
+	temple_story.name = "TempleStory"
+	temple_story.main = self
+	add_child(temple_story)
 	if vr:
 		vr_rig = VrRig.new()
 		vr_rig.move_speed = 2.2
@@ -242,6 +288,7 @@ func _setup(mode: String) -> void:
 	if mode != "client":
 		net.state_set("vr", vr_rig != null)
 		net.state_set("best", int(save.data["best_wave"]))
+		_start_temple(true)
 		_start_practice()
 	hints.intro(INTRO, {"duration": 10.0})
 	if vr_rig != null:
@@ -296,8 +343,10 @@ func _start_breather(after_wave: bool) -> void:
 		announce("WAVE %d CLEARED!" % wave, "+%d" % bonus, "victory")
 		for f in fighters(true):
 			_heal(f, 25.0)
+		_wave_cleared()
 	else:
 		announce("GET READY!", "Here they come...", "info")
+	_send_gates(wave + 1)  # the next wave's portals open now, so everyone sees where the raiders will come from
 
 
 func _start_wave() -> void:
@@ -306,17 +355,26 @@ func _start_wave() -> void:
 	_set_phase("fight")
 	net.state_set("wave", wave)
 	var n := maxi(1, fighters(true).size())
-	to_spawn = (2 + int(wave / 2.0) + (n - 1)) if fast else (3 + wave * 2 + (n - 1) * 2)
-	spawn_t = 0.0
-	if wave % 5 == 0:
-		to_spawn = (2 if fast else wave) + n - 1
-		_spawn_raider(true)
+	wave_plan = WaveGen.plan(temple_seed, wave, n, fast)
+	_send_gates(wave)
+	var spawns: Array = wave_plan.spawns
+	spawn_i = 0
+	to_spawn = spawns.size()
+	spawn_t = float(spawns[0][3]) if not spawns.is_empty() else 0.0
+	wave_t = 0.0
+	wave_downs = 0
+	if bool(wave_plan.boss):
+		to_spawn -= 1
+		spawn_i = 1
+		_spawn_raider(spawns[0], true)
+		spawn_t = float(spawns[1][3]) if spawns.size() > 1 else 0.0
 		log_boss = true
 		net.state_set("boss", true)
 		announce("WAVE %d" % wave, "The Shadow General approaches!", "boss")
 	else:
 		net.state_set("boss", false)
 		announce("WAVE %d" % wave, "", "default")
+	_wave_story()
 	sound_all("wave", Vector3.ZERO, 0.0, 1.0)
 	if vr_rig != null and wave == 1:
 		hints.hint("vr_slam", "Both hands UP, then SLAM down!", {"to": "vr"})
@@ -335,6 +393,8 @@ func _game_over() -> void:
 	raiders.clear()
 	_targets_frame = -1
 	announce("THE TEMPLE HAS FALLEN", "Wave %d" % wave, "defeat")
+	_story_for_all("Oh no! Let's try again!", "kiko", Color(0.65, 0.65, 0.8))
+	_log_run("over")
 	if wave > int(save.data["best_wave"]):
 		save.data["best_wave"] = wave
 		save.mark_dirty()
@@ -342,10 +402,16 @@ func _game_over() -> void:
 	if score > int(save.data["best_score"]):
 		save.data["best_score"] = score
 		save.mark_dirty()
+	if temple_daily:
+		var bt: Array = save.data.best_today
+		if bt.size() < 2 or String(bt[0]) != Seeded.today() or int(bt[1]) < wave:
+			save.data.best_today = [Seeded.today(), wave]
+			save.mark_dirty()
 
 
 func _show_results_now() -> void:
-	var data := awards.results({"title": "WAVE %d" % wave, "subtitle": "%d raiders defeated" % kills, "style": "defeat",
+	var data := awards.results({"title": "WAVE %d" % wave, "style": "defeat",
+		"subtitle": ("TODAY'S RAIDERS: %d defeated" if temple_daily else "%d raiders defeated") % kills,
 		"stats": [["WAVE", str(wave)], ["RAIDERS", str(kills)], ["BEST WAVE", str(int(save.data["best_wave"]))]],
 		"score_format": "%d PTS"})
 	net.state_set("results", data)
@@ -373,11 +439,14 @@ func _restart() -> void:
 	net.state_set("score", 0)
 	net.state_set("wave", 0)
 	net.state_set("spirit_ready", false)
+	_start_temple(false)
 	_start_breather(false)
 
 
 func _host_step(delta: float) -> void:
 	phase_t += delta
+	game_t += delta
+	wave_t += delta
 	for s in benders:
 		var b: Bender = benders[s]
 		b.auth_step(delta)
@@ -392,10 +461,12 @@ func _host_step(delta: float) -> void:
 		"fight":
 			if to_spawn > 0:
 				spawn_t -= delta
-				if spawn_t <= 0.0 and raiders.size() < MAX_ALIVE:
-					spawn_t = 0.4 if fast else 0.6
+				var spawns: Array = wave_plan.get("spawns", [])
+				if spawn_t <= 0.0 and raiders.size() < MAX_ALIVE and spawn_i < spawns.size():
+					_spawn_raider(spawns[spawn_i], false)
+					spawn_i += 1
 					to_spawn -= 1
-					_spawn_raider(false)
+					spawn_t = float(spawns[spawn_i][3]) if spawn_i < spawns.size() else 0.0
 			elif raiders.is_empty():
 				_start_breather(true)
 			if not everyone.is_empty() and alive.is_empty():
@@ -501,29 +572,27 @@ func pop_fx(pos: Vector3, c: Color, good: bool) -> void:
 
 # --- Raiders (host / local) --------------------------------------------------------------------
 
-func _spawn_raider(is_boss: bool) -> void:
-	var n := maxi(1, fighters(true).size())
-	var scale_hp := (1.0 + 0.15 * (n - 1)) * (0.5 if fast else 1.0)
+## Host / local: one raider of the wave plan ([element, portal, ranged, gap, jitter x, jitter z]) steps out.
+func _spawn_raider(item: Array, is_boss: bool) -> void:
+	var n := int(wave_plan.get("players", maxi(1, fighters(true).size())))
 	var r := Raider.new()
 	r.game = self
 	next_id += 1
 	r.id = next_id
-	r.element = randi() % 4
+	r.element = int(item[0])
 	r.boss = is_boss
-	r.ranged = is_boss or randf() < minf(0.25 + wave * 0.04, 0.6)
-	r.max_hp = (22.0 + wave * 5.0) * scale_hp
-	r.speed = 3.2 + minf(wave * 0.15, 2.0)
-	r.damage = 8.0 + wave * 0.8
+	r.ranged = is_boss or bool(item[2])
+	r.max_hp = WaveGen.raider_hp(wave, n, is_boss) * (0.5 if fast else 1.0)
+	r.speed = WaveGen.raider_speed(wave, is_boss)
+	r.damage = (18.0 + wave) if is_boss else (8.0 + wave * 0.8)
 	if is_boss:
-		r.max_hp = (300.0 + wave * 50.0) * scale_hp
-		r.speed = 2.6
-		r.damage = 18.0 + wave
+		r.swap_order = wave_plan.get("boss_order", [])
+		if not r.swap_order.is_empty():
+			r.element = int(r.swap_order[0])
 	r.hp = r.max_hp
-	var base: Vector3 = world.spawn_points.pick_random()
-	if randf() < 0.5:
-		var a := randf() * TAU
-		base = Vector3(cos(a), 0, sin(a)) * (World.ISLAND_R - 3.0)
-	r.position = base + Vector3(randf_range(-2, 2), 0.5, randf_range(-2, 2))
+	var gl: Array = wave_plan.get("gates", [])
+	var base: Vector3 = gl[clampi(int(item[1]), 0, gl.size() - 1)] if not gl.is_empty() else world.spawn_points.pick_random()
+	r.position = base + Vector3(float(item[4]), 0.5, float(item[5]))
 	add_child(r)
 	raiders[r.id] = r
 	spawn_fx(r.position, is_boss)
@@ -658,6 +727,9 @@ func on_raider_died(r: Raider, ring_out: bool) -> void:
 	net.event("poof", [pos, ring_out, r.boss, pts])
 	if r.boss:
 		announce("THE GENERAL IS DEFEATED!", "", "victory")
+		_general_beaten(r.element)
+	elif save != null and net.mode != "client":
+		save.data.raiders = int(save.data.raiders) + 1
 
 
 func poof_fx(pos: Vector3, ring_out: bool, boss: bool, pts: int) -> void:
@@ -710,6 +782,7 @@ func hurt_fighter(f: Node3D, dmg: float, push: Vector3) -> void:
 		sfx.play("hurt", -6.0, 1.0)
 	if not was_dead and bool(f.get("dead")):
 		log_downs += 1
+		wave_downs += 1
 		_note(slot, "Down! Back in 6...")
 		sound_all("down", f.global_position, -2.0, 1.0)
 
@@ -1065,6 +1138,8 @@ func _process(delta: float) -> void:
 	else:
 		_send_states(delta)
 	world.animate(delta)
+	temple_story.update_kiko(delta, _kiko_looks_at())
+	_update_story(delta)
 	# A pause undone from elsewhere (bots, the arcade) must not leave the PAUSED card up.
 	if tv_banner != null and tv_banner.visible and not get_tree().paused:
 		tv_banner.visible = false
@@ -1520,6 +1595,12 @@ func apply_event(kind: String, args: Array) -> void:
 			_note(int(args[0]), String(args[1]))
 		"sfx":
 			sfx.play_at(String(args[0]), args[1], float(args[2]), float(args[3]))
+		"story":
+			_story(String(args[0]), String(args[1]), args[2])
+		"gates":
+			_show_gates(int(args[0]), int(args[1]))
+		"temple":
+			_show_temple(args)
 
 
 func on_client_joined() -> void:
@@ -1533,3 +1614,189 @@ func on_client_left() -> void:
 ## Host: one machine went away (core/party.gd frees its seats; _sync_benders drops their benders).
 func on_machine_left(peer: int) -> void:
 	print("Elemental Bender: machine %d left" % peer)
+
+
+func _exit_tree() -> void:
+	_log_run("quit")
+
+
+# --- Kiko's story, the seeded waves and the Spirit Tree --------------------------------------------
+
+## Host / local, once per game (first: at the start, else PLAY AGAIN): count the play-day (a new lantern), pick the
+## temple seed (TODAY'S RAIDERS first each day), grow the tree to its saved size and say hello.
+func _start_temple(first: bool) -> void:
+	var today := Seeded.today()
+	var new_day := String(save.data.last_day) != today
+	if new_day:
+		save.data.days = int(save.data.days) + 1
+		save.data.last_day = today
+	save.data.games = int(save.data.games) + 1
+	temple_daily = String(save.data.daily) != today
+	temple_seed = WaveGen.daily_seed() if temple_daily else Seeded.fresh_seed()
+	if OS.has_environment("EB_SEED"):
+		temple_seed = int(OS.get_environment("EB_SEED"))
+	if temple_daily:
+		save.data.daily = today  # (one TODAY'S RAIDERS a day)
+	save.mark_dirty()
+	run_logged = false
+	game_t = 0.0
+	generals = 0
+	seen_elements = {}
+	_send_temple()
+	print("Elemental Bender: temple seed %d%s | tree %d waves, %d fruit, day %d" % [temple_seed,
+		" (TODAY'S RAIDERS)" if temple_daily else "", int(save.data.waves), (save.data.fruit as Array).size(), int(save.data.days)])
+	if first:
+		story_t = 3.0  # after the title
+		if not Engine.has_meta("eb_said_hi"):
+			Engine.set_meta("eb_said_hi", true)  # (once per session)
+			_story_for_all("Hi! I'm Kiko! Save my temple!", "kiko", KIKO_COLOR)
+		if new_day and int(save.data.days) > 1:
+			_story_for_all("A new lantern!", "lantern", Color(1.0, 0.8, 0.35))
+	if temple_daily:
+		_story_for_all("TODAY'S RAIDERS!", "portal", Color(0.75, 0.5, 1.0))
+
+
+## Host / local: the portals of wave n open on every machine (sticky: late machines get them too).
+func _send_gates(n: int) -> void:
+	_show_gates(temple_seed, n)
+	if net.mode == "host":
+		net.event("gates", [temple_seed, n])
+
+
+func _show_gates(seed_value: int, n: int) -> void:
+	log_gates += 1
+	temple_story.set_gates(WaveGen.gates(seed_value, n) if n > 0 else [])
+
+
+## Host / local: the Spirit Tree, lanterns and Kiko's crown on every machine (sticky).
+func _send_temple() -> void:
+	var d := [int(save.data.waves), (save.data.fruit as Array).duplicate(), int(save.data.days),
+		int(save.data.generals) >= WaveGen.CROWN_GENERALS]
+	_show_temple(d)
+	if net.mode == "host":
+		net.event("temple", d)
+
+
+func _show_temple(d: Array) -> void:
+	if d.size() >= 4:
+		temple_story.set_keepsakes(int(d[0]), d[1], int(d[2]), bool(d[3]))
+
+
+## A glowing burst where the tree grew or a fruit appeared (every machine, from temple_story.gd).
+func tree_burst(pos: Vector3) -> void:
+	fx.burst(pos, Color(1.0, 0.85, 0.4), 26, 4.0, 0.3, 0.8)
+	sfx.play_at("sparkle", pos, -2.0, 1.0)
+
+
+## Host / local: a wave is cleared: the Spirit Tree grows (saved), a RUN line.
+func _wave_cleared() -> void:
+	var before := WaveGen.tree_stage(int(save.data.waves))
+	save.data.waves = int(save.data.waves) + 1
+	save.mark_dirty()
+	var after := WaveGen.tree_stage(int(save.data.waves))
+	_send_temple()
+	if after > before:
+		_story_for_all("The Spirit Tree grew!", "spirittree", Color(1.0, 0.7, 0.85))
+	elif wave <= 2:
+		_story_for_all("You did it!", "kiko", Color(1.0, 0.85, 0.3))
+	_log_run("wave")
+
+
+## Host / local: a Shadow General is beaten: a glowing fruit on the Spirit Tree (saved), Kiko's crown at last.
+func _general_beaten(e: int) -> void:
+	generals += 1
+	var k := int(save.data.generals) + 1
+	save.data.generals = k
+	var fruit: Array = save.data.fruit
+	fruit.append(e)
+	while fruit.size() > WaveGen.FRUIT_MAX:
+		fruit.pop_front()
+	save.data.fruit = fruit
+	save.mark_dirty()
+	_send_temple()
+	_story_for_all("A glowing fruit!", "lightfruit", E.COLORS[e])
+	if k == WaveGen.CROWN_GENERALS:
+		_story_for_all("A crown for me!", "crown", Color(1.0, 0.85, 0.25))
+
+
+## Host / local: Kiko's card for the wave that starts: the element that beats this wave's raiders while there is
+## only one, a new element the first time it comes, the General.
+func _wave_story() -> void:
+	var pal: Array = wave_plan.get("palette", [])
+	if bool(wave_plan.get("boss", false)):
+		_story_for_all("The Shadow General!", "general", Color(0.75, 0.5, 1.0))
+	elif pal.size() == 1:
+		var e := int(pal[0])
+		var need := E.beater(e)
+		_story_for_all("%s raiders! Use %s!" % [E.NAMES[e], E.NAMES[need]], Pics.ELEMENT_PICS[need], E.COLORS[need])
+	else:
+		for e in pal:
+			if not seen_elements.has(int(e)):
+				var need2 := E.beater(int(e))
+				_story_for_all("%s raiders! Use %s!" % [E.NAMES[int(e)], E.NAMES[need2]], Pics.ELEMENT_PICS[need2], E.COLORS[need2])
+				break
+	for e in pal:
+		seen_elements[int(e)] = true
+
+
+## Where Kiko looks: the VR master's head, else the nearest bender, else the front.
+func _kiko_looks_at() -> Vector3:
+	if vr_rig != null:
+		return vr_rig.head_position()
+	var best := Vector3(0.0, 0.0, -10.0)
+	var bd := INF
+	for s in benders:
+		var b: Bender = benders[s]
+		var d := b.global_position.length_squared()
+		if d < bd:
+			bd = d
+			best = b.global_position
+	return best
+
+
+## Host / local: a story card on every machine.
+func _story_for_all(line: String, pic: String, color: Color) -> void:
+	_story(line, pic, color)
+	if net != null and net.mode == "host":
+		net.event("story", [line, pic, color])
+
+
+func _story(line: String, pic: String, color: Color) -> void:
+	if story_queue.size() < 5:
+		story_queue.append([line, pic, color])
+
+
+## One card at a time, on every view this machine shows (and in front of the VR master).
+func _update_story(delta: float) -> void:
+	story_t -= delta
+	if story_t > 0.0 or story_queue.is_empty():
+		return
+	var b: Array = story_queue.pop_front()
+	story_t = 3.0
+	log_story += 1
+	var opts := {"who": KIKO, "line": b[0], "pic": b[1], "color": b[2], "duration": 2.8}
+	var roots := _all_huds()
+	if not roots.is_empty():
+		StoryCard.show(roots, opts)
+	if vr_rig != null:
+		if vr_story != null and is_instance_valid(vr_story):
+			vr_story.queue_free()
+		vr_story = StoryCard.show_vr(self, vr_rig.camera, opts)
+	temple_story.cheer()  # Kiko bounces as she talks
+	print("Story: %s (%s)" % [b[0], b[1]])
+
+
+## One RUN line per wave cleared ("wave"), at game over ("over") and on quit (core/telemetry.gd).
+func _log_run(end: String) -> void:
+	if net == null or net.mode == "client" or wave <= 0 or run_logged or save == null:
+		return
+	run_logged = end != "wave"
+	log_runs += 1
+	Telemetry.run(GAME_ID, {"end": end, "wave": wave, "seed": temple_seed, "daily": temple_daily,
+		"secs": snappedf(game_t, 0.1), "wave_secs": snappedf(wave_t, 0.1), "score": score, "kills": kills,
+		"players": fighters(false).size(), "downs": wave_downs, "downs_game": log_downs, "vr": vr_rig != null,
+		"flat": net.mode == "host" and vr_rig == null, "net": net.mode, "fast": fast,
+		"portals": (wave_plan.get("gates", []) as Array).size(), "elements": wave_plan.get("palette", []),
+		"generals": generals, "tree": WaveGen.tree_stage(int(save.data.waves)), "waves_total": int(save.data.waves),
+		"fruit": (save.data.fruit as Array).size(), "days": int(save.data.days), "counters": log_counters,
+		"spirits": log_spirits, "ring_outs": log_ring_outs})

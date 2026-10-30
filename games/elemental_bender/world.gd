@@ -15,6 +15,7 @@ const ISLAND_R := 36.0
 const DAIS_TOP := 1.0
 const PILLAR_R := 4.6
 
+static var _layout := {}
 var spawn_points: Array[Vector3] = []
 ## Where each pillar's orb glows (the VR player sees them high above).
 var pillar_orbs: Array[Vector3] = []
@@ -57,34 +58,30 @@ func build(vr: bool) -> void:
 		b.sphere(0.4, MeshKit.at(p + Vector3(0, h + 0.6, 0)), E.COLORS[i], 10, true)
 		var step_dir := Vector3(cos(a + 0.5), 0, sin(a + 0.5))
 		spawn_points.append(p + step_dir * 9.0)
-	# Trees and rocks scattered around (same seed as the source game).
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 7
-	var placed := 0
-	while placed < 34:
-		var a := rng.randf() * TAU
-		var r := rng.randf_range(11.0, ISLAND_R - 2.0)
-		var p := Vector3(cos(a) * r, 0, sin(a) * r)
-		var clear := true
-		for i in 4:
-			var q := Vector3(cos(i * TAU / 4.0), 0, sin(i * TAU / 4.0)) * 19.0
-			if p.distance_to(q) < 6.0:
-				clear = false
-		if not clear:
-			continue
-		placed += 1
-		if rng.randf() < 0.7:
-			_tree(b, p, rng)
+	# Trees and rocks scattered around, and the distant mountains with snowy caps (layout(): same seed as the
+	# source game; the wave generator keeps the raiders' portals clear of them).
+	var lay := layout()
+	for pr in lay.props:
+		var p: Vector3 = pr.p
+		if pr.kind == "tree":
+			var h: float = pr.h
+			b.cylinder(0.18, 0.28, h, MeshKit.at(p + Vector3(0, h / 2.0, 0)), Color(0.4, 0.27, 0.15), 6)
+			_col_cyl(0.28, h, p + Vector3(0, h / 2.0, 0))
+			if pr.cones:
+				for j in 3:
+					var cone_h := 2.2 - j * 0.5
+					b.cylinder(0.0, 1.6 - j * 0.4, cone_h, MeshKit.at(p + Vector3(0, h - 0.4 + j * 0.9, 0)), Color(0.15, 0.42, 0.2), 8)
+			else:
+				b.sphere(1.6, MeshKit.at(p + Vector3(0, h + 0.6, 0)), pr.color, 10)
 		else:
-			var size := rng.randf_range(0.8, 1.8)
-			var rot := Vector3(rng.randf(), rng.randf() * 3.0, rng.randf())
+			var size: float = pr.size
+			var rot: Vector3 = pr.rot
 			b.box(Vector3.ONE * size, MeshKit.at(p + Vector3(0, 0.3, 0), Vector3(1, 0.7, 1), rot), Color(0.5, 0.5, 0.52))
 			_col_box(Vector3(size, size * 0.7, size), p + Vector3(0, 0.3, 0), Vector3(0, rot.y, 0))
-	# Distant mountains with snowy caps.
-	for i in 14:
-		var a := i * TAU / 14.0 + rng.randf() * 0.3
-		var d := rng.randf_range(140.0, 200.0)
-		var h := rng.randf_range(40.0, 90.0)
+	for m in lay.mountains:
+		var a: float = m[0]
+		var d: float = m[1]
+		var h: float = m[2]
 		b.cylinder(0.0, h * 0.8, h, MeshKit.at(Vector3(cos(a) * d, h / 2.0 - 2.0, sin(a) * d)), Color(0.45, 0.5, 0.6), 7)
 		b.cylinder(0.0, h * 0.2, h * 0.25, MeshKit.at(Vector3(cos(a) * d, h - 2.0 - h * 0.125 + 0.5, sin(a) * d)), Color(0.95, 0.95, 1.0), 7)
 	var mesh: ArrayMesh = ResCache.get_or_make("eb_world_v1", b.build)
@@ -121,19 +118,6 @@ func build(vr: bool) -> void:
 		orb.position = pillar_orbs[i]
 		add_child(orb)
 		orb_nodes.append(orb)
-
-
-func _tree(b: MeshKit.Builder, p: Vector3, rng: RandomNumberGenerator) -> void:
-	var h := rng.randf_range(2.5, 4.0)
-	b.cylinder(0.18, 0.28, h, MeshKit.at(p + Vector3(0, h / 2.0, 0)), Color(0.4, 0.27, 0.15), 6)
-	_col_cyl(0.28, h, p + Vector3(0, h / 2.0, 0))
-	if rng.randf() < 0.5:
-		for j in 3:
-			var cone_h := 2.2 - j * 0.5
-			b.cylinder(0.0, 1.6 - j * 0.4, cone_h, MeshKit.at(p + Vector3(0, h - 0.4 + j * 0.9, 0)), Color(0.15, 0.42, 0.2), 8)
-	else:
-		var pink := Color(1.0, 0.65, 0.78) if rng.randf() < 0.5 else Color(0.25, 0.55, 0.25)
-		b.sphere(1.6, MeshKit.at(p + Vector3(0, h + 0.6, 0)), pink, 10)
 
 
 func _body(shape: Shape3D, pos: Vector3, rot: Vector3 = Vector3.ZERO) -> void:
@@ -185,3 +169,71 @@ func animate(delta: float) -> void:
 		var o := orb_nodes[i]
 		o.position = pillar_orbs[i] + Vector3(0, sin(_t * 1.6 + i) * 0.12, 0)
 		o.scale = Vector3.ONE * (1.0 + 0.06 * sin(_t * 3.0 + i * 1.3))
+
+
+## The island's trees and rocks and the far mountains (fixed seed 7, as in the source game; cached):
+## {props: [{kind: "tree", p, h, cones, color} | {kind: "rock", p, size, rot}], mountains: [[angle, dist, height]]}.
+static func layout() -> Dictionary:
+	if not _layout.is_empty():
+		return _layout
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	var props: Array = []
+	while props.size() < 34:
+		var a := rng.randf() * TAU
+		var r := rng.randf_range(11.0, ISLAND_R - 2.0)
+		var p := Vector3(cos(a) * r, 0, sin(a) * r)
+		var clear := true
+		for q in platforms():
+			if p.distance_to(q) < 6.0:
+				clear = false
+		if not clear:
+			continue
+		if rng.randf() < 0.7:
+			var h := rng.randf_range(2.5, 4.0)
+			var cones := rng.randf() < 0.5
+			var col := Color(0.25, 0.55, 0.25)
+			if not cones:
+				col = Color(1.0, 0.65, 0.78) if rng.randf() < 0.5 else Color(0.25, 0.55, 0.25)
+			props.append({"kind": "tree", "p": p, "h": h, "cones": cones, "color": col, "r": 0.28})
+		else:
+			var size := rng.randf_range(0.8, 1.8)
+			var rot := Vector3(rng.randf(), rng.randf() * 3.0, rng.randf())
+			props.append({"kind": "rock", "p": p, "size": size, "rot": rot, "r": size * 0.75})
+	var mountains: Array = []
+	for i in 14:
+		var a := i * TAU / 14.0 + rng.randf() * 0.3
+		var d := rng.randf_range(140.0, 200.0)
+		var h := rng.randf_range(40.0, 90.0)
+		mountains.append([a, d, h])
+	_layout = {"props": props, "mountains": mountains}
+	return _layout
+
+
+## The four training platforms' centres (5 x 5 m boxes, the stepping stone 4 m further in).
+static func platforms() -> Array[Vector3]:
+	var out: Array[Vector3] = []
+	for i in 4:
+		out.append(Vector3(cos(i * TAU / 4.0), 0, sin(i * TAU / 4.0)) * 19.0)
+	return out
+
+
+## Why a spot on the grass is not free for something `clear` metres round (empty = free): the temple dais,
+## a training platform or its stepping stone, a tree or rock, the beach.
+static func blocked(p: Vector3, clear: float) -> String:
+	var flat := Vector2(p.x, p.z)
+	if flat.length() < 8.5 + clear:
+		return "on the temple steps"
+	if flat.length() > ISLAND_R - 2.0 - clear:
+		return "too near the sea"
+	for q in platforms():
+		if Vector2(q.x, q.z).distance_to(flat) < 3.6 + clear:
+			return "on a training platform"
+		var st := q * (15.0 / 19.0)
+		if Vector2(st.x, st.z).distance_to(flat) < 1.5 + clear:
+			return "on a stepping stone"
+	for pr in layout().props:
+		var q: Vector3 = pr.p
+		if Vector2(q.x, q.z).distance_to(flat) < float(pr.r) + clear:
+			return "on a %s" % pr.kind
+	return ""
