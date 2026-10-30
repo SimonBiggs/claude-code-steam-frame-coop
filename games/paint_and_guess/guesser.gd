@@ -629,7 +629,7 @@ func _update_big_panel(st: String) -> void:
 		big_label.text = t
 		bg = Color(0.25, 0.18, 0.05, 0.9)
 	else:
-		big_label.text = "TEAM PAINT!  Paint  %s  together!\nLeft stick / D-pad moves your ring · HOLD A (or RT) to paint\nThe VR player guesses with the balloons" % \
-			main.cap(main.team_word)
+		# Picture first (big, on the left): just the name and the two controls.
+		big_label.text = "%s\nPaint it together!\nStick: move  ·  HOLD A: paint" % main.cap(main.team_word)
 		bg = Color(color.r * 0.3, color.g * 0.3, color.b * 0.3, 0.9)
 	big_panel.add_theme_stylebox_override("panel", _style("big_%s_%d" % [st, index], bg, color.lerp(Color(1, 1, 1), 0.3)))

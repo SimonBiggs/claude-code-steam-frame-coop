@@ -1063,7 +1063,7 @@ func show_balloons(words: Array, on: bool, popped_mask: int) -> void:
 				balloon_ids[i] = id
 				if balloon_pics[i] != null and is_instance_valid(balloon_pics[i]):
 					(balloon_pics[i] as Node).queue_free()
-				var sp := picture_sprite(id, 0.15, 1)
+				var sp := picture_sprite(id, 0.125, 1)
 				sp.position = Vector3(0, 0.005, 0.085)
 				b.add_child(sp)
 				balloon_pics[i] = sp

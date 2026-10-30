@@ -2123,8 +2123,16 @@ func _new_plan() -> void:
 	var today := Seeded.today()
 	var daily_due := str(save.data.daily) != today
 	var tn := PaintGen.themes_unlocked(int(save.data.paintings))
+	var last: Array = []
+	for rd in plan.get("rounds", []):
+		last.append(rd.target)
 	plan_code = PaintGen.code_at(session_seed, 1 if daily_due else game_no, daily_due, tn)
 	plan = PaintGen.build(plan_code)
+	# A new game never asks for something the last one did (the next session game instead).
+	while not daily_due and _shares_thing(plan, last) and game_no < 10000:
+		game_no += 1
+		plan_code = PaintGen.code_at(session_seed, game_no, false, tn)
+		plan = PaintGen.build(plan_code)
 	round_stats.clear()
 	game_secs = 0.0
 	if bool(plan.daily):
@@ -2134,6 +2142,13 @@ func _new_plan() -> void:
 	else:
 		_story_for_all("Paint for my gallery!", "smudge", Color(1.0, 0.7, 0.4))
 	print("Game %d: %s (code %d, %d themes)" % [game_no, plan.name, plan_code, tn])
+
+
+func _shares_thing(d: Dictionary, things: Array) -> bool:
+	for rd in d.rounds:
+		if things.has(rd.target):
+			return true
+	return false
 
 
 ## Host / local: a finished painting goes into Smudge's gallery for good (packed small), newest last.
