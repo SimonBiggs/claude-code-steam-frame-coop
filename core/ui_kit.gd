@@ -16,6 +16,7 @@ extends RefCounted
 const Me := preload("res://core/ui_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")
 const VrText := preload("res://core/vr_text.gd")
+const VrViewCheck := preload("res://core/vr_view_check.gd")
 const VrLayer := preload("res://core/vr_layer.gd")
 const SfxScript := preload("res://core/sfx.gd")
 
@@ -870,11 +871,94 @@ static func vr_place(n: Node3D, cam: Node3D, dist: float = 1.6, height: float = 
 	if fwd.length() < 0.01:
 		fwd = Vector3.FORWARD
 	fwd = fwd.normalized()
-	var pos := cam.global_position + fwd * dist * VrText.COMFORT + Vector3(0.0, height * VrText.COMFORT, 0.0)
-	_face(n, pos, cam)
+	var ws := vr_fit_world(n)
+	var pos := cam.global_position + (fwd * dist + Vector3(0.0, height, 0.0)) * VrText.COMFORT * ws
+	var spot := vr_spot(cam, pos, n, true)
+	vr_set_near(n, float(spot.k))
+	_face(n, spot.pos, cam)
 	VrLayer.mark_once(n)  # placed in front of the VR player = VR-only UI
 	n.set_meta("vr_placed", true)
 	n.set_meta("vr_moving", false)
+
+
+## A diorama game (XROrigin3D.world_scale > 1: Giant's Table, Block Builders, Bee Garden) makes the player big, so
+## VR UI must be placed world_scale times further and drawn world_scale times bigger to look the same as anywhere
+## else (core/vr_view_check.gd measures in real metres). Scales `n` once per change of scale; returns the scale.
+static func vr_fit_world(n: Node3D) -> float:
+	var ws := maxf(XRServer.world_scale, 0.001)
+	var was := float(n.get_meta("vr_ws", 1.0))
+	if not is_equal_approx(was, ws):
+		n.scale *= ws / was
+		n.set_meta("vr_ws", ws)
+	return ws
+
+
+## VR UI must never hide behind something: how far (0..1] towards `target` a panel can go from the eyes before
+## something solid is in the way (core/vr_view_check.gd first_hit: walls, doors, tables, signs, trees, props from
+## saved growth; not people or balls passing by), leaving a hand's width in front of it, but never nearer than
+## VR_NEAR m. `n` (the panel itself) is never in its own way; with it the answer is kept for 0.4 s (a scan of the
+## meshes is too dear for every frame) unless `fresh`.
+const VR_NEAR := 0.9
+
+static func vr_clear(cam: Node3D, target: Vector3, n: Node = null, fresh := false) -> float:
+	if not cam is Camera3D or not cam.is_inside_tree():
+		return 1.0
+	var now := Time.get_ticks_msec()
+	if n != null and not fresh and now < int(n.get_meta("vr_clear_next", 0)):
+		return float(n.get_meta("vr_clear_k", 1.0))
+	var head := cam.global_position
+	var length := head.distance_to(target)
+	var k := 1.0
+	if length > 0.01:
+		var ws := maxf(XRServer.world_scale, 0.001)
+		var hit: Dictionary = VrViewCheck.first_hit(cam as Camera3D, head.lerp(target, 1.06), n)
+		if hit.node != null:
+			var free := float(hit.f) * length * 1.06 - 0.12 * ws
+			k = clampf(free / length, minf(1.0, VR_NEAR * ws / length), 1.0)
+	if n != null:
+		n.set_meta("vr_clear_next", now + 400)
+		n.set_meta("vr_clear_k", k)
+	return k
+
+
+## Where VR UI aimed at `target` should go: nearer than `target` when something is in the way (vr_clear), and if
+## even VR_NEAR is blocked (a pillar or a table right in front of the face), lifted over it. {pos, k}: k = how much
+## nearer than `target` it is (draw it k times the size: vr_set_near).
+static func vr_spot(cam: Node3D, target: Vector3, n: Node = null, fresh := false) -> Dictionary:
+	var head := cam.global_position
+	var k := vr_clear(cam, target, n, fresh)
+	var length := head.distance_to(target)
+	if length < 0.01 or k * length > VR_NEAR * maxf(XRServer.world_scale, 0.001) * 1.05:
+		return {"pos": head.lerp(target, k), "k": k}
+	if n != null and not fresh and n.has_meta("vr_spot_lift"):
+		var lifted: Vector3 = target + Vector3.UP * float(n.get_meta("vr_spot_lift"))
+		return {"pos": head.lerp(lifted, float(n.get_meta("vr_spot_k"))), "k": float(n.get_meta("vr_spot_k"))}
+	var best := {"pos": head.lerp(target, k), "k": k}
+	var lift_best := 0.0
+	for lift in [0.35, 0.7, 1.05]:
+		var up := float(lift) * VrText.COMFORT * maxf(XRServer.world_scale, 0.001)
+		var t2 := target + Vector3.UP * up
+		var k2 := vr_clear(cam, t2, null)
+		if k2 > float(best.k) + 0.05:
+			best = {"pos": head.lerp(t2, k2), "k": k2}
+			lift_best = up
+			if k2 > 0.95:
+				break
+	if n != null:
+		if lift_best > 0.0:
+			n.set_meta("vr_spot_lift", lift_best)
+			n.set_meta("vr_spot_k", best.k)
+		elif n.has_meta("vr_spot_lift"):
+			n.remove_meta("vr_spot_lift")
+	return best
+
+
+## Scale `n` to `k` of its size (vr_clear brought it k times nearer, so it looks the same size).
+static func vr_set_near(n: Node3D, k: float) -> void:
+	var was := float(n.get_meta("vr_k", 1.0))
+	if not is_equal_approx(was, k):
+		n.scale *= k / was
+		n.set_meta("vr_k", k)
 
 
 ## Lazy follow for world-space UI (same rules as core/vr_text.gd): stays put while the player looks
@@ -890,13 +974,27 @@ static func vr_follow(n: Node3D, cam: Node3D, dist: float = 1.6, height: float =
 	if fwd.length() < 0.01:
 		return
 	fwd = fwd.normalized()
-	var d := dist * VrText.COMFORT
-	var target := cam.global_position + fwd * d + Vector3(0.0, height * VrText.COMFORT, 0.0)
+	var ws := vr_fit_world(n)
+	var d := dist * VrText.COMFORT * ws
+	var target := cam.global_position + fwd * d + Vector3(0.0, height * VrText.COMFORT * ws, 0.0)
+	# a wall / door / table in the way: the card comes in front of it, smaller by the same factor (looks the same)
+	var spot := vr_spot(cam, target, n)
+	var k := float(spot.k)
+	target = spot.pos
+	d *= k
 	var to := n.global_position - cam.global_position
 	to.y = 0.0
-	if to.length() < 0.01 or fwd.angle_to(to.normalized()) > deg_to_rad(35.0) or to.length() > d * 1.45 or to.length() < d * 0.55:
+	if to.length() < 0.01 or fwd.angle_to(to.normalized()) > deg_to_rad(35.0) or to.length() > d * 1.45 or to.length() < d * 0.55 \
+			or absf(k - float(n.get_meta("vr_k", 1.0))) > 0.12:
 		n.set_meta("vr_moving", true)
 	if n.get_meta("vr_moving", false):
+		vr_set_near(n, k)
+		# Behind the player or far off (they turned right round, or a blink teleport moved them): a glide would fly
+		# the card through their head (core/vr_view_check.gd saw it 5 m behind, facing away): put it in front at once.
+		if to.dot(fwd) < 0.0 or n.global_position.distance_to(target) > d * 1.6:
+			_face(n, target, cam)
+			n.set_meta("vr_moving", false)
+			return
 		_face(n, n.global_position.lerp(target, 1.0 - exp(-4.0 * delta)), cam)
 		if n.global_position.distance_to(target) < 0.05 * d:
 			n.set_meta("vr_moving", false)

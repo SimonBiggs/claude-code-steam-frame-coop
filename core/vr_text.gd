@@ -28,16 +28,28 @@ static func follow(l: Label3D, cam: Node3D, world: Node, height: float, dist: fl
 		return
 	fwd = fwd.normalized()
 	var target := cam.global_position + fwd * dist + Vector3(0.0, height, 0.0)
+	# never behind a wall: in front of it, smaller by the same factor (UiKit.vr_clear)
+	var spot: Dictionary = _ui().vr_spot(cam, target, l, not l.has_meta("vr_placed"))
+	var k := float(spot.k)
+	target = spot.pos
+	dist *= k
 	if not l.has_meta("vr_placed"):
 		l.set_meta("vr_placed", true)
+		_ui().vr_set_near(l, k)
 		_place(l, cam, target)
 		return
 	var to := l.global_position - cam.global_position
 	to.y = 0.0
-	if fwd.angle_to(to.normalized()) > deg_to_rad(35.0) or to.length() > dist * 1.45 or to.length() < dist * 0.55:
+	if fwd.angle_to(to.normalized()) > deg_to_rad(35.0) or to.length() > dist * 1.45 or to.length() < dist * 0.55 \
+			or absf(k - float(l.get_meta("vr_k", 1.0))) > 0.12:
 		l.set_meta("vr_moving", true)
 	if l.get_meta("vr_moving", false):
+		_ui().vr_set_near(l, k)
 		var dt := cam.get_process_delta_time()
+		if to.dot(fwd) < 0.0 or l.global_position.distance_to(target) > dist * 1.6:
+			_place(l, cam, target)  # behind / far off (turned round, teleported): never glide through the head
+			l.set_meta("vr_moving", false)
+			return
 		_place(l, cam, l.global_position.lerp(target, 1.0 - exp(-4.0 * dt)))
 		if l.global_position.distance_to(target) < 0.05 * dist:
 			l.set_meta("vr_moving", false)
@@ -92,3 +104,8 @@ static func short(text: String) -> String:
 	if trigger != "":
 		keep.append(trigger)
 	return "\n".join(keep)
+
+
+## core/ui_kit.gd (loaded when used: it preloads this file, so a preload back would be a cycle).
+static func _ui() -> GDScript:
+	return load("res://core/ui_kit.gd")

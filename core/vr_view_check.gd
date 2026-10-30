@@ -7,17 +7,18 @@ extends RefCounted
 ## that is really drawn (visible, not faded out), measured in real metres (XRServer.world_scale divided out):
 ## - distance from the head between MIN_D and MAX_D (closer hurts to focus or hits the near plane; further is tiny);
 ## - it faces the head (Label3D reads from +Z; text seen from behind is mirrored);
-## - its text is at least MIN_TEXT_DEG high in the eye (story-card body text is ~1.2 deg);
+## - its text is at least MIN_TEXT_DEG high in the eye (story-card body text is ~1.2 deg at its usual 2.56 m);
 ## - nothing solid between the eyes and its centre (a physics ray, then the real triangles of every mesh on the way:
 ##   a tree, a wall, a garden prop from saved growth); meshes around the head (rooms, sky domes) don't count;
 ## - no text glued to the face: a visible Label3D under the XR camera turns with the head.
 ## A node (or ancestor) with meta "vr_check_ignore" is skipped.
 
 const MIN_D := 0.8
-## VrText.COMFORT puts cards 1.6 x 1.6 = 2.56 m away on purpose (players found ~1.7 m text cross-eyed); a little room.
-const MAX_D := 3.3
+## VrText.COMFORT puts cards 1.6 x 1.6 = 2.56 m away on purpose (players found ~1.7 m text cross-eyed), and the lazy
+## follow lets a card drift to 1.45 x that before it glides back (the player walked away from it).
+const MAX_D := 3.8
 const FACE_DOT := 0.6
-const MIN_TEXT_DEG := 0.9
+const MIN_TEXT_DEG := 0.8
 const IGNORE_META := "vr_check_ignore"
 ## Meshes with more triangles than this count by their box only (cheap, may over-report: rare in VR games).
 const MAX_FACES := 20000
@@ -73,33 +74,56 @@ static func problems(root: Node) -> Array[String]:
 ## What hides `card` (centre `p`) from the head, or "": a physics body on the ray, else a mesh whose triangles cross it.
 static func blocker(cam: Camera3D, card: Node3D, p: Vector3) -> String:
 	var head := cam.global_position
-	var seg := p - head
-	if seg.length() < 0.05:
+	if head.distance_to(p) < 0.05:
 		return ""
 	# stop a little short of the card: its own panel (and a backdrop it stands on) don't count
-	var to := head + seg * 0.96
+	var hit := first_hit(cam, head.lerp(p, 0.96), card)
+	return _name(hit.node) if hit.node != null else ""
+
+
+## The nearest solid thing between the eyes and `to`: {node, f} with f the fraction (0..1) of the way, or
+## {node: null, f: 1.0}. Solid = a StaticBody3D (walls, doors, tables) or a drawn mesh's real triangles (signs,
+## props from saved growth, trees); not moving things (players walking past, balls), not `skip`, VR UI or the VR
+## player's own rig, not meshes around the head (rooms, sky domes). UiKit.vr_clear uses it to bring VR UI in front.
+static func first_hit(cam: Camera3D, to: Vector3, skip: Node = null) -> Dictionary:
+	var best := {"node": null, "f": 1.0}
+	var head := cam.global_position
+	var length := head.distance_to(to)
+	if length < 0.01 or not cam.is_inside_tree():
+		return best
 	var space := cam.get_world_3d().direct_space_state
 	if space != null:
 		var q := PhysicsRayQueryParameters3D.create(head, to)
 		q.collide_with_areas = false
-		var r := space.intersect_ray(q)
-		if not r.is_empty() and r.collider is Node and not _skip_blocker(r.collider as Node, card, cam):
-			return _name(r.collider as Node)
+		var ex: Array[RID] = []
+		for i in 6:  # skipped bodies (the player's own body, held things) are left out and the ray tried again
+			q.exclude = ex
+			var r := space.intersect_ray(q)
+			if r.is_empty() or not r.collider is CollisionObject3D:
+				break
+			if r.collider is StaticBody3D and not _skip_blocker(r.collider as Node, skip, cam):
+				best = {"node": r.collider, "f": head.distance_to(r.position) / length}
+				break
+			ex.append((r.collider as CollisionObject3D).get_rid())
 	for n in cam.get_viewport().find_children("*", "MeshInstance3D", true, false):
 		var m := n as MeshInstance3D
 		if m.mesh == null or not m.is_visible_in_tree() or m.transparency > 0.5 or (m.layers & cam.cull_mask) == 0:
 			continue
-		if m.layers == VR_LAYER or m.get_world_3d() != cam.get_world_3d() or _skip_blocker(m, card, cam):
+		if m.layers == VR_LAYER or m.get_world_3d() != cam.get_world_3d():
 			continue
 		var box := m.global_transform * m.get_aabb()
 		if box.grow(0.05).has_point(head) or box.intersects_segment(head, to) == null:
 			continue
-		if _mesh_hit(m, head, to):
-			return _name(m)
-	return ""
+		if _skip_blocker(m, skip, cam) or _moving(m):
+			continue
+		var f := _mesh_hit(m, head, to)
+		if f < float(best.f):
+			best = {"node": m, "f": f}
+	return best
 
 
-static func _mesh_hit(m: MeshInstance3D, a: Vector3, b: Vector3) -> bool:
+## The nearest crossing of segment a->b with m's triangles as a fraction of the way (1.0 = none).
+static func _mesh_hit(m: MeshInstance3D, a: Vector3, b: Vector3) -> float:
 	var inv := m.global_transform.affine_inverse()
 	var la := inv * a
 	var lb := inv * b
@@ -111,16 +135,24 @@ static func _mesh_hit(m: MeshInstance3D, a: Vector3, b: Vector3) -> bool:
 		faces = m.mesh.get_faces()
 		m.mesh.set_meta(key, faces)
 	if faces.size() / 3 > MAX_FACES:
-		return true
+		var box := m.get_aabb()
+		var at = box.intersects_segment(la, lb)
+		return (la.distance_to(at) / maxf(la.distance_to(lb), 0.0001)) if at != null else 1.0
+	var best := 1.0
+	var span := maxf(la.distance_to(lb), 0.0001)
 	for i in range(0, faces.size() - 2, 3):
-		if Geometry3D.segment_intersects_triangle(la, lb, faces[i], faces[i + 1], faces[i + 2]) != null:
-			return true
-	return false
+		var at = Geometry3D.segment_intersects_triangle(la, lb, faces[i], faces[i + 1], faces[i + 2])
+		if at != null:
+			best = minf(best, la.distance_to(at) / span)
+	return best
 
 
-## Not a blocker: the card itself, the VR player's own rig (hands, held things), other VR UI, gdev tools.
-static func _skip_blocker(n: Node, card: Node3D, cam: Camera3D) -> bool:
+## Not a blocker: the card itself, the VR player's own rig and body (hands, held things: anything the camera is
+## inside), other VR UI, gdev tools.
+static func _skip_blocker(n: Node, card: Node, cam: Camera3D) -> bool:
 	var origin := cam.get_parent()
+	if n.is_ancestor_of(cam):
+		return true
 	var x := n
 	while x != null:
 		if x == card or x == origin or x.has_meta("vr_placed") or x.has_meta(IGNORE_META) or str(x.name) == "GDev":
@@ -192,3 +224,13 @@ static func _name(n: Node) -> String:
 				break
 	var p := n.get_parent()
 	return ("%s/%s" % [p.name, s]) if p != null else s
+
+
+## Part of something that moves about (a player, a creature, a ball): walks past, doesn't count as in the way.
+static func _moving(n: Node) -> bool:
+	var x := n.get_parent()
+	while x != null:
+		if x is CharacterBody3D or x is RigidBody3D:
+			return true
+		x = x.get_parent()
+	return false

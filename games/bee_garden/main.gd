@@ -966,14 +966,7 @@ func show_story(beat: Dictionary) -> void:
 		if vr_story != null and is_instance_valid(vr_story):
 			vr_story.queue_free()
 		vr_story = StoryCard.show_vr(self, gardener.xr_camera, b)
-		if vr_story != null:
-			# The garden is a diorama (XR world scale W.S): the card scales with it, VR eyes only.
-			vr_story.distance *= W.S
-			vr_story.height *= W.S
-			vr_story.scale = Vector3.ONE * W.S
-			for c in vr_story.get_children():
-				(c as VisualInstance3D).layers = VR_LAYER
-			UiKit.vr_place(vr_story, gardener.xr_camera, vr_story.distance, vr_story.height)
+		# (the garden is a diorama, XR world scale W.S: UiKit.vr_place scales the card with it)
 	print("Story: %s: %s (%s)" % [b.get("who", ""), b.get("line", ""), b.get("pic", "")])
 
 
