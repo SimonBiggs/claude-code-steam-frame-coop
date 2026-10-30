@@ -247,6 +247,7 @@ func _make_fade() -> void:
 	fade.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	fade.visible = false
 	vr_rig.camera.add_child(fade)
+	preload("res://core/vr_layer.gd").mark(fade)  # on the headset: never on the TV cameras
 
 
 ## VR comfort: a quick blink to black and back around a teleport / new hole.

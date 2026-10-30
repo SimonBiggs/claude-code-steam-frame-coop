@@ -195,7 +195,7 @@ class StoryCardPics:
 		s.render_priority = UiKit.VR_PRIO_TEXT
 		s.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var w: float = card.get("width") if card.get("width") != null else 1.0
-		s.layers = card.get("vis_layers") if card.get("vis_layers") != null else 1
+		s.layers = card.get("vis_layers") if card.get("vis_layers") != null else UiKit.VR_LAYER
 		s.position = Vector3(-w * 0.5 - 0.04, 0.0, 0.012)
 		return s
 

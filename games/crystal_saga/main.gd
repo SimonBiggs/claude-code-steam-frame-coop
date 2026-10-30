@@ -1441,6 +1441,7 @@ func _build_blink() -> void:
 	mi.material_override = blink_mat
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	vr_rig.camera.add_child(mi)
+	preload("res://core/vr_layer.gd").mark(mi)  # on the headset: never on the TV cameras
 
 
 func blink(then: Callable) -> void:

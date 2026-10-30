@@ -4,6 +4,7 @@ extends SceneTree
 ##  - Every classic game (players array + on_p2_action) that says multi_machine goes through ClassicSeats
 ##    (host_action, handle_event, machine_left, all_left) and carries no copy of the seat code (the copies
 ##    drifted apart before: 🐜 one shared home), and has "multi": true in the arcade (and the reverse).
+##  - Every arcade game opts in to many machines (Coaster Crew took only one joining machine until 2026-10-29).
 ##  - ClassicSeats itself: join arbitration between two machines, owner checks, per-machine leave.
 const ClassicSeats := preload("res://core/classic_seats.gd")
 const COPY_FUNCS := "func (_grant_seat|remote_owner_ok|_free_seats_of|_free_seat|_sync_seats|_on_seat_moved|_move_input|_owners|_foreign|_mine|_deck_solo)\\("
@@ -77,6 +78,8 @@ func _check_games(fails: Array[String]) -> void:
 		var in_arcade := arcade.contains("\"id\": \"%s\", \"multi\": true" % id)
 		if multi != in_arcade and arcade.contains("\"id\": \"%s\"" % id):
 			fails.append("%s: multi_machine=%s but arcade multi=%s" % [id, multi, in_arcade])
+		if not multi and arcade.contains("\"id\": \"%s\"" % id):
+			fails.append("%s: takes only ONE joining machine (old contract): opt in with var multi_machine := true + a flat host (docs/MULTI_MACHINE.md)" % id)
 		var classic := main.contains("func on_p2_action") and not main.contains("core/party.gd")
 		if not classic:
 			continue

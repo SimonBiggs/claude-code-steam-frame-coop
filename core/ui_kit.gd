@@ -16,6 +16,7 @@ extends RefCounted
 const Me := preload("res://core/ui_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")
 const VrText := preload("res://core/vr_text.gd")
+const VrLayer := preload("res://core/vr_layer.gd")
 const SfxScript := preload("res://core/sfx.gd")
 
 const VERSION := "v3"  # bump when the theme changes (cached themes survive hot reloads)
@@ -711,6 +712,8 @@ static func sound(name: String, volume_db: float = 0.0, pitch: float = 1.0) -> v
 const VR_PRIO_PANEL := -4
 const VR_PRIO_HILITE := -3
 const VR_PRIO_TEXT := 23
+## Render layer for world-space UI only the VR player sees (TV / Deck cameras never draw it; core/vr_layer.gd).
+const VR_LAYER := VrLayer.LAYER
 
 
 ## A rounded-rectangle panel mesh in the XY plane (front = +Z), w x h metres, with a 1-2 cm border
@@ -869,6 +872,7 @@ static func vr_place(n: Node3D, cam: Node3D, dist: float = 1.6, height: float = 
 	fwd = fwd.normalized()
 	var pos := cam.global_position + fwd * dist * VrText.COMFORT + Vector3(0.0, height * VrText.COMFORT, 0.0)
 	_face(n, pos, cam)
+	VrLayer.mark_once(n)  # placed in front of the VR player = VR-only UI
 	n.set_meta("vr_placed", true)
 	n.set_meta("vr_moving", false)
 

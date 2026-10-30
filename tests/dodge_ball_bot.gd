@@ -9,6 +9,8 @@ extends Node
 ## Flat host: add DUO_FLAT_HOST=1 to the host (no VR: one bot pad plays slot 0 on the host).
 
 const BotKit := preload("res://tests/bot_kit.gd")
+const Telemetry := preload("res://core/telemetry.gd")
+const Seeded := preload("res://core/seeded.gd")
 
 var kit: BotKit
 var main: Node
@@ -22,6 +24,8 @@ var saw_results := false
 var round_at_results := 0
 var max_tv := 0
 var max_giant := 0
+var inside_cushion := false
+var start_unix := 0.0
 
 
 func _ready() -> void:
@@ -60,6 +64,8 @@ func _ready() -> void:
 			kit.finish())
 	kit.every(2.0, _report)
 	kit.every(0.5, _watch_results)
+	kit.every(0.25, _watch_cushions)
+	start_unix = Time.get_unix_time_from_system() - 1.0
 
 
 func _watch_results() -> String:
@@ -235,3 +241,47 @@ func _checks() -> void:
 		kit.assert_true(vr_grabs > 0 and vr_throws > 0, "fake VR giant grabbed and threw balls")
 	elif mode != "client":
 		kit.assert_true(main.g_cpu, "no VR: the computer is the giant")
+	_story_checks(mode)
+
+
+## The seeded park round, TumTum's story cards, the park that grows, fair throws and the RUN lines.
+func _story_checks(mode: String) -> void:
+	var rd: Dictionary = main.rd
+	kit.assert_true(not rd.is_empty(), "%s: this round's park is built" % mode)
+	kit.assert_eq(int(rd.get("code", -1)), int(main.net.state_get("court", -2)), "%s: the round matches the host's code" % mode)
+	kit.assert_eq(main.world.cushions.size(), (rd.get("cushions", []) as Array).size(), "%s: every cushion is drawn" % mode)
+	kit.assert_true(not inside_cushion, "%s: no runner ever stood inside a cushion" % mode)
+	kit.assert_true(not main.story_shown.is_empty(), "%s: TumTum's story cards showed (%s)" % [mode, str(main.story_shown)])
+	var items: Array = main.net.state_get("park", [])
+	kit.assert_eq(main.park.things.size(), mini(items.size(), 23), "%s: the park shows every thing in it" % mode)
+	kit.info("%s: park %d things, story pictures %s, round %s (level %d%s)" % [mode, items.size(), str(main.story_shown),
+		str(rd.get("name", "")), int(rd.get("level", 0)), ", TODAY'S PARK" if bool(rd.get("daily", false)) else ""])
+	if mode == "client":
+		return
+	kit.assert_true(main.story_shown.has("tumtum"), "%s: TumTum said hello" % mode)
+	kit.assert_true(int(main.save.data.rounds) >= 1 and items.size() >= 1, "%s: a finished round planted something in the park" % mode)
+	kit.assert_true(String(main.save.data.daily) == Seeded.today(), "%s: TODAY'S PARK was played today" % mode)
+	var runs := Telemetry.read("dodge_ball")
+	var rounds := 0
+	for r in runs:
+		if str(r.get("end", "")) == "round" and float(r.get("t", 0.0)) >= start_unix:
+			rounds += 1
+	kit.assert_true(rounds >= 1, "%s: a RUN line per round (%d)" % [mode, rounds])
+	if main.g_cpu and main.aimed.size() >= 2:
+		var lo := 1 << 30
+		var hi := 0
+		for id in main.aimed:
+			lo = mini(lo, int(main.aimed[id]))
+			hi = maxi(hi, int(main.aimed[id]))
+		kit.assert_true(hi - lo <= maxi(2, ceili(float(hi) * 0.25)), "%s: TumTum shares his throws out fairly %s" % [mode, str(main.aimed)])
+
+
+func _watch_cushions() -> String:
+	var rd: Dictionary = main.rd
+	for id in main.avatars:
+		var a: Node3D = main.avatars[id]
+		for c in rd.get("cushions", []):
+			if Vector2(a.position.x - float(c[0]), a.position.z - float(c[1])).length() < float(c[2]) + 0.2:
+				inside_cushion = true
+				return "runner %d is inside a cushion at %s" % [int(id), str(a.position)]
+	return ""

@@ -46,7 +46,7 @@ const GAMES := [
 		"blurb": "A Mario-Party-style board game on a diorama island: roll, hop, shop and duel for STARS, with a minigame after every round"},
 	{"id": "mech_titans", "multi": true, "cat": "action", "name": "MECH TITANS", "scene": "res://games/mech_titans/main.tscn",
 		"blurb": "Giant robot vs cute kaiju: VR pilot punches and beams from the cockpit, TV jets, trucks, drones and tanks support"},
-	{"id": "roller_coaster", "cat": "cosy", "name": "COASTER CREW", "scene": "res://games/roller_coaster/main.tscn",
+	{"id": "roller_coaster", "multi": true, "cat": "cosy", "name": "COASTER CREW", "scene": "res://games/roller_coaster/main.tscn",
 		"blurb": "VR builds a roller coaster with their hands on a tabletop park; TV players ride it, hands up!"},
 	{"id": "mini_golf_party", "multi": true, "cat": "sports", "name": "MINI GOLF PARTY", "scene": "res://games/mini_golf_party/main.tscn",
 		"blurb": "Life-size mini golf in a sunny garden: swing a real putter in VR or aim and hold A on the TV, and everyone putts at once!"},

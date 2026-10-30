@@ -508,7 +508,7 @@ static func vr_card(world: Node, cam: Node3D, title: String, body: String = "", 
 	c.duration = float(opts.get("duration", 0.0))
 	c.distance = float(opts.get("distance", 1.6))
 	c.height = float(opts.get("height", 0.05))
-	c.vis_layers = int(opts.get("layers", 1))
+	c.vis_layers = int(opts.get("layers", UiKit.VR_LAYER))
 	c.follow = bool(opts.get("follow", true))
 	c.title_size = float(opts.get("title_size", 0.085))
 	c.body_size = float(opts.get("body_size", 0.05))
@@ -553,7 +553,7 @@ static func vr_countdown(world: Node, cam: Node3D, from: int = 3, opts: Dictiona
 	c.go_text = String(opts.get("go", "GO!"))
 	c.tick_sound = String(opts.get("sound", "tick"))
 	c.go_sound = String(opts.get("go_sound", "go"))
-	c.vis_layers = int(opts.get("layers", 1))
+	c.vis_layers = int(opts.get("layers", UiKit.VR_LAYER))
 	world.add_child(c)
 	return c
 
@@ -1131,7 +1131,7 @@ class VrCard extends Node3D:
 	var duration := 0.0
 	var distance := 1.6
 	var height := 0.05
-	var vis_layers := 1
+	var vis_layers := UiKit.VR_LAYER  # VR-only (core/vr_layer.gd)
 	var follow := true
 	var title_size := 0.085
 	var body_size := 0.05
@@ -1212,7 +1212,7 @@ class VrCountdown extends Node3D:
 	var go_text := "GO!"
 	var tick_sound := "tick"
 	var go_sound := "go"
-	var vis_layers := 1
+	var vis_layers := UiKit.VR_LAYER
 	var t := 0.0
 	var current := -1
 	var label: Label3D

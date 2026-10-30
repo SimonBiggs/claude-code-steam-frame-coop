@@ -23,8 +23,8 @@ const MECH_START := Vector3(0.0, 0.0, 46.0)
 # --- Visual layers ------------------------------------------------------------------------------
 ## Layer 2: the Titan's head / canopy shell. The pilot sits inside it: the VR camera skips it.
 const LAYER_EXTERIOR := 1 << 1
-## Layer 3: the pilot's holo displays, aim dot and hand laser (VR camera + VR mirror only).
-const LAYER_VR_ONLY := 1 << 2
+## The pilot's holo displays, aim dot and hand laser (VR camera + VR mirror only): the engine-wide VR layer.
+const LAYER_VR_ONLY := preload("res://core/vr_layer.gd").LAYER
 ## Layer 4: TV-only world markers (billboarded "HELP!" signs, name tags): the VR camera skips them.
 const LAYER_TV_ONLY := 1 << 3
 

@@ -817,6 +817,7 @@ func _wrist_arcade_button(hl: XRController3D) -> Label3D:
 		b.process_mode = Node.PROCESS_MODE_ALWAYS
 		b.visible = false
 		hl.add_child(b)
+		preload("res://core/vr_layer.gd").mark(b)  # on the VR glove: never on the TV cameras
 	var cam := get_viewport().get_camera_3d()
 	if cam != null:
 		_face_camera(b, cam)
@@ -835,6 +836,7 @@ func _wrist_button(hl: XRController3D) -> Label3D:
 		btn.billboard = BaseMaterial3D.BILLBOARD_DISABLED
 		btn.process_mode = Node.PROCESS_MODE_ALWAYS
 		hl.add_child(btn)
+		preload("res://core/vr_layer.gd").mark(btn)  # on the VR glove: never on the TV cameras
 		btn.position = Vector3(0.0, 0.07, 0.1)
 	btn.no_depth_test = false  # (re)applied so buttons made before this fix also let the hand pass in front
 	# No billboard in VR: each eye would see it turned differently (cross-eyed, Abigail/Simon).

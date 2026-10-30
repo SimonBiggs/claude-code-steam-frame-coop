@@ -94,7 +94,7 @@ const PRACTICE_SPOT := 10      # simple mode: the glowing ring where the first s
 const PRACTICE_FLOWER := 5     # simple mode: the bees' glowing first flower
 
 const MAX_BEES := 6          # TV players 2..7 (player indices 1..6)
-const VR_LAYER := 1024       # the gardener's floating banner: drawn in VR only
+const VR_LAYER := preload("res://core/vr_layer.gd").LAYER  # the gardener's floating banner: drawn in VR only (engine-wide VR layer)
 const INTRO_TIME := 6.0
 const DUSK_TIME := 6.0
 const DAY_LEN := 170.0
