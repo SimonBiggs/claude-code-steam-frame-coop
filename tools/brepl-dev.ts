@@ -280,6 +280,9 @@ export async function debt() {
   const d = await stage.diff();
   if (d.liveNewer.length || d.onlyLive.length) issues.push({ kind: "stage-behind", what: `live has newer files than staging: ${[...d.liveNewer, ...d.onlyLive].slice(0, 5).join(", ")}`, fix: "dev.stage.pull()" });
   if (d.stageNewer.length || d.onlyStage.length) issues.push({ kind: "undeployed", what: `staging has changes not deployed: ${[...d.stageNewer, ...d.onlyStage].slice(0, 5).join(", ")}`, fix: "test, then dev.stage.deploy(msg)" });
+  // tools/ is not in stage.diff (not game code) but dev.land rsyncs it from wt-merge: a direct commit to live leaves staging's copy behind.
+  const toolDrift = (await sh(`diff -rq --exclude=__pycache__ ${LIVE}/tools ${STAGE}/tools | wc -l`)).out;
+  if (+toolDrift > 0) issues.push({ kind: "stage-tools", what: `${toolDrift} tools/ files differ between live and staging`, fix: "rsync -a --delete --exclude __pycache__ ~/GodotProjects/duo-arena/tools/ ~/GodotProjects/.duo-arena-stage/tools/" });
   // Plus every tools/ file named like an installed command (~/.local/bin) and every tools/systemd unit, so a new
   // tool never drifts just because nobody added it to TOOL_COPIES.
   const copies: Record<string, string> = { ...TOOL_COPIES };
