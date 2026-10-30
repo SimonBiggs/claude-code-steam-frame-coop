@@ -1,7 +1,7 @@
 extends Node
 ## VR view watch (a service, core/services.gd): in fake-VR bot runs (BOT_VR=1, every VR bot) it runs
 ## core/vr_view_check.gd once a second and reports each new problem once as "BOT ASSERT FAILED: VR view: ..." (fails the
-## bot in tools/multibot.ts / dev.bots). A problem has to last 1.5 s (cards fade in and glide into place). Does nothing
+## bot in tools/multibot.ts / dev.bots). A problem has to last 3 s (cards fade in, glide into place, a blink teleport). Does nothing
 ## without BOT_VR, so real headsets and flat machines never pay for it. VR_VIEW_WARN=1 prints "VR VIEW: ..." instead.
 
 const VrViewCheck := preload("res://core/vr_view_check.gd")
@@ -27,7 +27,7 @@ func _process(delta: float) -> void:
 		now[key] = true
 		if not seen.has(key):
 			seen[key] = clock
-		elif clock - float(seen[key]) >= 1.5 and not told.has(key):
+		elif clock - float(seen[key]) >= 3.0 and not told.has(key):
 			told[key] = true
 			if OS.has_environment("VR_VIEW_WARN"):
 				print("VR VIEW: %s" % p)

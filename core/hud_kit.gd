@@ -557,6 +557,17 @@ static func vr_banner(world: Node, cam: Node3D, title: String, subtitle: String 
 	return c
 
 
+## VR "PAUSED" card: replaces one still showing (pausing again before resuming piled them up: Party Board had
+## hundreds drawn over each other). Hide it with hide_card() when play carries on.
+static func vr_paused(world: Node, cam: Node3D, why: String = "", opts: Dictionary = {}) -> VrCard:
+	_vr_replace(world, "vr_paused")
+	var o := {"width": 1.1}
+	o.merge(opts, true)
+	var c := vr_card(world, cam, "PAUSED", why, o)
+	world.set_meta("vr_paused", c)
+	return c
+
+
 ## VR toast: a small card low in the view for a few seconds.
 static func vr_toast(world: Node, cam: Node3D, text: String, opts: Dictionary = {}) -> VrCard:
 	var o := opts.duplicate()
@@ -1497,7 +1508,13 @@ class VrCard extends Node3D:
 		if cam == null or not is_instance_valid(cam) or not is_inside_tree():
 			return
 		const Check := preload("res://core/vr_view_check.gd")
-		var others := Check.shown_panels(get_tree().root).filter(func(o: Node3D) -> bool: return o != self and not is_ancestor_of(o))
+		# (cards made in the same frame are still fading in: count every placed, visible panel that isn't leaving)
+		var others: Array[Node3D] = []
+		for o in get_tree().root.find_children("*", "Node3D", true, false):
+			if o != self and o.has_meta("vr_placed") and (o as Node3D).is_visible_in_tree() and not is_ancestor_of(o) \
+					and not (o is VrCard and (o as VrCard)._hiding) \
+					and not (o is Label3D and ((o as Label3D).text.strip_edges() == "" or (o as Label3D).modulate.a < 0.1)):
+				others.append(o as Node3D)
 		for i in 4:
 			var hit := false
 			for o in others:

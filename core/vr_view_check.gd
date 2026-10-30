@@ -110,7 +110,12 @@ static func blocker(cam: Camera3D, card: Node3D, p: Vector3) -> String:
 		return ""
 	# stop a little short of the card: its own panel (and a backdrop it stands on) don't count
 	var hit := first_hit(cam, head.lerp(p, 0.96), card)
-	return _name(hit.node) if hit.node != null else ""
+	if hit.node == null:
+		return ""
+	# a wall the player has their nose against (nearer than UiKit.VR_CLOSEST): nothing can go in front of it
+	if float(hit.f) * head.distance_to(p) * 0.96 < 0.6 * maxf(XRServer.world_scale, 0.001):
+		return ""
+	return "%s (%.1f m away)" % [_name(hit.node), float(hit.f) * head.distance_to(p) * 0.96 / maxf(XRServer.world_scale, 0.001)]
 
 
 ## The nearest solid thing between the eyes and `to`: {node, f} with f the fraction (0..1) of the way, or
@@ -204,7 +209,7 @@ static func _drawn(n: Node3D) -> bool:
 			break
 	if n is GeometryInstance3D and (n as GeometryInstance3D).transparency < 0.65:
 		any = true
-	if n is Label3D and (n as Label3D).text.strip_edges() == "":
+	if n is Label3D and ((n as Label3D).text.strip_edges() == "" or (n as Label3D).modulate.a < 0.1):
 		return false
 	return any
 
