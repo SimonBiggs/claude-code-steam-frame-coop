@@ -911,10 +911,19 @@ static func vr_clear(cam: Node3D, target: Vector3, n: Node = null, fresh := fals
 	var k := 1.0
 	if length > 0.01:
 		var ws := maxf(XRServer.world_scale, 0.001)
-		var hit: Dictionary = VrViewCheck.first_hit(cam as Camera3D, head.lerp(target, 1.06), n)
-		if hit.node != null:
-			var free := float(hit.f) * length * 1.06 - 0.12 * ws
-			k = clampf(free / length, minf(1.0, VR_NEAR * ws / length), 1.0)
+		# the middle and the four corners of the panel (a sign hiding only its top half hides the words)
+		var aims: Array[Vector3] = [target]
+		if n is Node3D:
+			var sz := VrViewCheck.panel_size(n as Node3D) * 0.45
+			var right := (target - head).cross(Vector3.UP).normalized()
+			for c in [Vector2(-1, -1), Vector2(1, -1), Vector2(-1, 1), Vector2(1, 1)]:
+				aims.append(target + right * sz.x * c.x + Vector3.UP * sz.y * c.y)
+		for aim in aims:
+			var l := head.distance_to(aim)
+			var hit: Dictionary = VrViewCheck.first_hit(cam as Camera3D, head.lerp(aim, 1.06), n)
+			if hit.node != null:
+				var free := float(hit.f) * l * 1.06 - 0.12 * ws
+				k = minf(k, clampf(free / l, minf(1.0, VR_NEAR * ws / length), 1.0))
 	if n != null:
 		n.set_meta("vr_clear_next", now + 400)
 		n.set_meta("vr_clear_k", k)
@@ -961,6 +970,26 @@ static func vr_set_near(n: Node3D, k: float) -> void:
 		n.set_meta("vr_k", k)
 
 
+## VR UI rides along with the VR player's rig: when the XROrigin3D moves (a dragon, a kart, a coaster car, a mech, a
+## blink teleport) the panel moves with it, so it stays where the player last saw it instead of being left behind
+## or flown into (Dragon Rider's story card ended 0.2 m from the face). Call every frame before following.
+static func vr_ride(n: Node3D, cam: Node3D) -> void:
+	var o := cam.get_parent()
+	while o != null and not o is XROrigin3D:
+		o = o.get_parent()
+	if o == null:
+		o = cam.get_parent()
+	if not o is Node3D:
+		return
+	var now := (o as Node3D).global_transform
+	if n.has_meta("vr_rig_xf"):
+		var was: Transform3D = n.get_meta("vr_rig_xf")
+		if not now.is_equal_approx(was):
+			var move := now * was.affine_inverse()
+			n.global_transform = move * n.global_transform
+	n.set_meta("vr_rig_xf", now)
+
+
 ## Lazy follow for world-space UI (same rules as core/vr_text.gd): stays put while the player looks
 ## around, glides back in front when they turn more than 35 degrees away or walk off. Call every frame.
 static func vr_follow(n: Node3D, cam: Node3D, dist: float = 1.6, height: float = -0.1, delta: float = 0.016) -> void:
@@ -968,7 +997,9 @@ static func vr_follow(n: Node3D, cam: Node3D, dist: float = 1.6, height: float =
 		return
 	if not n.has_meta("vr_placed"):
 		vr_place(n, cam, dist, height)
+		vr_ride(n, cam)
 		return
+	vr_ride(n, cam)
 	var fwd := -cam.global_basis.z
 	fwd.y = 0.0
 	if fwd.length() < 0.01:

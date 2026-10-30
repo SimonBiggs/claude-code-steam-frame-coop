@@ -33,6 +33,7 @@ static func follow(l: Label3D, cam: Node3D, world: Node, height: float, dist: fl
 	var k := float(spot.k)
 	target = spot.pos
 	dist *= k
+	_ui().vr_ride(l, cam)  # moves with the player's rig (vehicles, teleports)
 	if not l.has_meta("vr_placed"):
 		l.set_meta("vr_placed", true)
 		_ui().vr_set_near(l, k)

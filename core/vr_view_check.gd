@@ -11,6 +11,7 @@ extends RefCounted
 ## - nothing solid between the eyes and its centre (a physics ray, then the real triangles of every mesh on the way:
 ##   a tree, a wall, a garden prop from saved growth); meshes around the head (rooms, sky domes) don't count;
 ## - no two panels in the same spot (drawn over each other);
+## - no world words (name tags, pop-ups) right in front of the eyes;
 ## - no text glued to the face: a visible Label3D under the XR camera turns with the head.
 ## A node (or ancestor) with meta "vr_check_ignore" is skipped.
 
@@ -25,6 +26,8 @@ const IGNORE_META := "vr_check_ignore"
 const MAX_FACES := 20000
 ## Two panels whose middles are closer than this (seen from the eyes) are drawn over each other.
 const OVERLAP_DEG := 5.0
+## World words nearer than this (metres) in front of the eyes are "in the face".
+const FACE_D := 0.45
 const VR_LAYER := preload("res://core/vr_layer.gd").LAYER
 
 
@@ -78,6 +81,20 @@ static func problems(root: Node) -> Array[String]:
 				continue
 			if overlap(head, a, b):
 				out.append("%s: drawn over %s" % [_name(a), _name(b)])
+	# Words right in front of the eyes (a TV player's name tag walking through the VR player): giant letters.
+	var origin := cam.get_parent()
+	for n in root.find_children("*", "Label3D", true, false):
+		var l := n as Label3D
+		if l.has_meta("vr_placed") or not l.is_visible_in_tree() or l.text.strip_edges() == "" or l.transparency > 0.65:
+			continue
+		var dist := l.global_position.distance_to(head)
+		if dist >= FACE_D * ws or dist < l.visibility_range_begin or (origin != null and origin.is_ancestor_of(l)) or _ignored(l):
+			continue
+		if (l.layers & cam.cull_mask) == 0 or cam.is_ancestor_of(l):
+			continue
+		var to := (l.global_position - head).normalized()
+		if to.dot(-cam.global_basis.z) > 0.5:
+			out.append("%s: text in the face (%.2f m from the eyes)" % [_name(l), dist / ws])
 	for n in cam.find_children("*", "Label3D", true, false):
 		var l := n as Label3D
 		if l.is_visible_in_tree() and l.text.strip_edges() != "" and l.transparency < 0.65 and not _ignored(l):
@@ -278,3 +295,17 @@ static func _see_through(m: MeshInstance3D) -> bool:
 		var sh := (mat as ShaderMaterial).shader
 		return sh != null and (sh.code.contains("ALPHA") or sh.code.contains("blend_add"))
 	return false
+
+
+## A panel's drawn width and height (metres, as it is scaled now), from its own and its children's boxes.
+static func panel_size(n: Node3D) -> Vector2:
+	var inv := n.global_transform.affine_inverse()
+	var box := AABB()
+	var have := false
+	for c in [n] + n.find_children("*", "VisualInstance3D", true, false):
+		if c is VisualInstance3D:
+			var b: AABB = (inv * (c as VisualInstance3D).global_transform) * (c as VisualInstance3D).get_aabb()
+			box = b if not have else box.merge(b)
+			have = true
+	var sc := n.global_basis.get_scale()
+	return Vector2(box.size.x * sc.x, box.size.y * sc.y) if have else Vector2.ZERO
