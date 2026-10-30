@@ -302,6 +302,24 @@ export async function removeWorktree(path: string, branch?: string) {
   return { quit, out: r.out, code: r.code };
 }
 
+/** Install every TOOL_COPIES file (and tools/ file named like a ~/.local/bin command) that changed in live since
+ *  `since`: brepl modules through writeModule (build-checked), the rest copied (keeping the mode). */
+export async function installTools(since: string) {
+  const changed = (await sh(`git diff --name-only ${since} HEAD -- tools`, LIVE)).out.split("\n").filter(Boolean);
+  const done: string[] = [];
+  for (const rel of changed) {
+    let dest = Object.entries(TOOL_COPIES).find(([, r]) => r === rel)?.[0];
+    if (!dest && rel.split("/").length === 2 && (await stat(join(BIN, rel.slice(6))).catch(() => null))) dest = join(BIN, rel.slice(6));
+    if (!dest) continue;
+    const src = join(LIVE, rel);
+    if (/\/\.local\/share\/brepl\/[^/]+\.ts$|\/gdev\/godot\.ts$/.test(dest)) {
+      try { await (globalThis as any).writeModule(dest, await readFile(src, "utf8")); } catch (e) { done.push(`${rel}: NOT installed (${String(e).slice(0, 200)})`); continue; }
+    } else await sh(`cp --preserve=mode ${JSON.stringify(src)} ${JSON.stringify(dest)}`);
+    done.push(`${rel} -> ${dest.replace(HOME, "~")}`);
+  }
+  return done;
+}
+
 // --- Landing a finished game branch (the deploy steward's loop) ----------------------------------------------------
 
 const rport = () => 20000 + Math.floor(Math.random() * 10000);
@@ -358,7 +376,10 @@ export async function land(branch: string, genTests: string[], botId: string, ot
   const d = await sh(`duo-deploy ${JSON.stringify(msg)} 2>&1 | grep -v offline | tail -4; duo-deploy-deck 2>&1 | grep -v offline | tail -4; cd ${LIVE} && git merge -q --no-edit merge-arcade -F ${msgFile} && rm -f ${msgFile} && cd ../wt-merge && git merge -q --ff-only main && echo MERGED; cd ${LIVE} && git log --oneline -2 | cut -c1-60`);
   // The branch's worktree goes only after its Godots quit (an agent's offscreen run may still be up).
   const rm = /MERGED/.test(d.out) ? await removeWorktree(join(GP, `wt-${branch}`), branch) : { quit: [], out: "not removed: the merge into main didn't finish" };
-  return { deployed: true, out, res, deploy: d.out, removed: rm };
+  // Tools the branch changed in the repo (tools/multibot.ts, tools/brepl-dev.ts, ...) get installed where they run,
+  // so the repo copy and the installed one never drift (2026-10-30: late-join's multibot.ts --late sat uninstalled).
+  const installed = /MERGED/.test(d.out) ? await installTools(`${(await sh("git rev-parse HEAD^1", LIVE)).out}`) : [];
+  return { deployed: true, out, res, deploy: d.out, removed: rm, installed };
 }
 
 export function help() {
