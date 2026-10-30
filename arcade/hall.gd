@@ -104,7 +104,7 @@ static func growth(id: String, grown: int, px: float, font: int, max_pics: int =
 	for k in maxi(1, mini(grown, max_pics)):
 		var p := still(String(s.GROWS), px, col)
 		if grown <= 0:
-			p.modulate = Color(1, 1, 1, 0.25)  # nothing grown yet: a faint promise
+			p.modulate = Color(1, 1, 1, 0.5)  # nothing grown yet: a faint promise (0.25 vanished on the dark tile)
 		row.add_child(p)
 	var num := Label.new()
 	num.name = "Grown"

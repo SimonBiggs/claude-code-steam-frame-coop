@@ -65,7 +65,7 @@ static func show(root: Variant, opts: Dictionary) -> Control:
 		return null
 	for old in parent.get_children():
 		if old is Card:
-			(old as Card).leave()
+			(old as Card).leave(0.08)  # out of the way at once: two cards on top of each other read as neither
 	var c := Card.new()
 	c.opts = opts
 	parent.add_child(c)
@@ -193,12 +193,12 @@ class Card extends Control:
 				return true
 		return false
 
-	func leave() -> void:
+	func leave(time: float = 0.3) -> void:
 		if leaving:
 			return
 		leaving = true
 		var tw := create_tween()
-		tw.tween_property(self, "modulate:a", 0.0, 0.3)
+		tw.tween_property(self, "modulate:a", 0.0, time)
 		tw.tween_callback(queue_free)
 
 	func _process(delta: float) -> void:
