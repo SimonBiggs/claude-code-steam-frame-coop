@@ -488,6 +488,7 @@ func _build_avatar(i: int) -> void:
 	arm.add_child(am)
 	var tag := Label3D.new()
 	tag.text = "P%d" % (i + 1)
+	tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED  # faces every camera (seen from behind it read mirrored)
 	tag.font_size = 64
 	tag.pixel_size = 0.0035
 	tag.outline_size = 16
