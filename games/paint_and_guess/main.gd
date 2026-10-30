@@ -182,6 +182,8 @@ var masterpiece := ""
 var winner_idx := -1
 
 var center_label: Label
+var view_n := 0  # split views on screen (_layout_views)
+var last_card_state := ""
 var help_label: Label
 var center_tween: Tween
 var vr_center: Label3D
@@ -627,6 +629,7 @@ func _layout_views() -> void:
 		if c.visible:
 			shown.append(p)
 	var n := shown.size()
+	view_n = n
 	var area := views_root.size
 	if area.x < 2.0 or area.y < 2.0:
 		area = get_viewport().get_visible_rect().size
@@ -1078,6 +1081,7 @@ func _process(delta: float) -> void:
 		_layout_views()
 	_frame_views()
 	_place_center()
+	_lift_low_cards()
 	_update_easel_text()
 	_update_vr_text(delta)
 	_update_story(delta)
@@ -2248,11 +2252,11 @@ func _update_story(delta: float) -> void:
 			(high if p.index > 0 else low).append(p.hud)
 	if not low.is_empty():
 		var o := opts.duplicate()
-		o["y"] = 0.9
+		o["y"] = 0.2 if state == "over" else 0.84  # (at the end the big message is down there and the sign is gone)
 		StoryCard.show(low, o)
 	if not high.is_empty():
 		var o2 := opts.duplicate()
-		o2["y"] = 0.3
+		o2["y"] = 0.84 if state == "intro" or state == "wait" else 0.3  # (the big message is mid-view in the intro; answers fill the bottom later)
 		StoryCard.show(high, o2)
 	if players.size() > 0 and players[0].vr and players[0].xr_camera != null:
 		StoryCard.show_vr(self, players[0].xr_camera, opts)
@@ -2304,6 +2308,22 @@ func _build_hud() -> void:
 	help_label.offset_bottom = -6
 	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	help_label.text = "Guess: D-pad / stick (arrows) + A (Enter)  ·  cheer: X / Y / B  ·  more players: press A on another controller  ·  Start / Esc menu"
+
+
+## A guesser's low story card (intro) steps away when their answers come up at the bottom.
+func _lift_low_cards() -> void:
+	if state == last_card_state:
+		return
+	last_card_state = state
+	if state != "draw" and state != "reveal" and state != "vote":
+		return
+	for i in range(1, players.size()):
+		var h = players[i].hud
+		if h == null or not is_instance_valid(h):
+			continue
+		for c in (h as Node).get_children():
+			if c is StoryCard.Card and float((c as StoryCard.Card).opts.get("y", 0.0)) > 0.5:
+				(c as StoryCard.Card).leave()
 
 
 ## Where the big message sits: across the middle (y 0.42 of the screen), or low under the easel at the end (the
@@ -2513,7 +2533,7 @@ func _artist_tip(vr_like: bool) -> String:
 ## The VR player's floating text: a status line (word, time) and short messages above it, far enough
 ## to focus on comfortably and above the easel so nothing nearer overlaps it. VR-only layer.
 func _update_vr_text(delta: float) -> void:
-	help_label.visible = state != "draw"  # keep the bottom row's answers clear
+	help_label.visible = state != "draw" and view_n <= 1  # keep the bottom row's answers clear; split views have their own lines
 	if help_label.modulate.a > 0.0 and round_n >= 2:
 		help_label.modulate.a = maxf(0.0, help_label.modulate.a - delta * 0.5)
 	if players.is_empty() or not players[0].vr:
