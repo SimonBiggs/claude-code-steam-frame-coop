@@ -5,6 +5,10 @@
 args=(--dev-bind / / --tmpfs /dev/input --die-with-parent)
 for h in /dev/hidraw*; do [ -e "$h" ] && args+=(--ro-bind /dev/null "$h"); done
 export SDL_JOYSTICK_HIDAPI=0  # SDL HIDAPI pads off too (same as the offscreen runner)
+# Every godot-test run is a test: saves and RUN telemetry go to user://test_saves + telemetry_test.jsonl
+# (core/save.gd test_mode). Deck bot runs once wrote 6 fake "deck" rounds into the family's real
+# telemetry.jsonl (2026-10-29), which would have skewed balance reports.
+export SAVE_TEST=1
 # Never the real game's port: a test on 7777 joins the family's live games as a phantom "TV" machine, takes a
 # player slot and its LAN beacon pulls real Decks into the test (2026-10-24: kids couldn't all join). Runs that
 # pair a host and a joiner already pass the same DUO_PORT to both.
