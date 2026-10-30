@@ -217,6 +217,16 @@ export async function debt() {
   const grabs = (await sh(`grep -rnE "get_texture\\(\\)\\.get_image\\(\\)" --include=*.gd core games arcade tests addons tools 2>/dev/null | grep -v -e '^[^:]*:[0-9]*:\\s*#'`, LIVE)  /* the repo: staging has no addons/ sync */).out;
   for (const l of grabs.split("\n").filter(Boolean))
     issues.push({ kind: "unguarded-get_image", what: l.slice(0, 160), fix: "use FrameGrab.image(vp) (core/frame_grab.gd): null when nothing is drawn yet or the viewport is gone" });
+  // Frame-count waits after an input in bots: networked bots run WITHOUT --fixed-fps (frames fly by far faster than
+  // game time), so "press A, await frames(40), check the game started" raced the lobby host's 0.4 s start delay
+  // (2026-10-30 arcade_bot). Wait in seconds (create_timer / a ticks_msec loop). Bots that only ever run with
+  // --fixed-fps say "## fixed-fps only" in their header.
+  for (const f of (await sh(`ls tests/*_bot.gd 2>/dev/null`, LIVE)).out.split("\n").filter(Boolean)) {
+    const txt = await readFile(join(LIVE, f), "utf8").catch(() => "");
+    if (/## fixed-fps only/.test(txt)) continue;
+    for (const m of txt.matchAll(/(?:tap|press)\([^\n]*\)\n\s*await (?:kit\.)?frames\((\d+)\)/g))
+      if (Number(m[1]) >= 20) issues.push({ kind: "bot-frame-wait", what: `${f}: ${m[0].replace(/\s+/g, " ").slice(0, 120)}`, fix: "wait in seconds after an input (create_timer / Time.get_ticks_msec loop until the thing happens): networked bots have no --fixed-fps" });
+  }
   // Screenshots: spectacle only works in Desktop Mode (it SIGABRTs in Gaming Mode / without a Wayland display), so
   // every tool takes its one shot through tv-shot, which picks gamescopectl or spectacle. Flag any direct call.
   const spec = (await sh(`grep -rnIE "[\\"']spectacle[\\"']|(^|[;&|(]|\\s)spectacle\\s+-" ${BIN} ${HOME}/.local/share/brepl ${HOME}/.local/share/gdev ${LIVE}/tools 2>/dev/null | grep -v -e '/tv-shot:' -e '^[^:]*:[0-9]*:\\s*#'`)).out;
@@ -387,9 +397,7 @@ export async function land(branch: string, genTests: string[], botId: string, ot
   if (isGame && /\(0 checks\)/.test(out.deck)) out.deck += " (no Deck checks ran for this game)";
   ok &&= /BOT RESULT: PASS/.test(out.deck) && !/SCRIPT ERROR|no Deck checks/.test(out.deck);
   const res: string[] = [];
-  // arcade_bot is one machine's menu; as a lobby HOST it can't launch alone (fails "A launches", 2026-10-30), so the
-  // arcade's networked run is arcade_lobby_bot.
-  for (const [id, o] of [["arcade", {}], [botId === "arcade" ? "arcade_lobby" : botId, { net: true, joiners: 1, seconds: 180 }], ...otherBots.map(x => [x, {}])] as [string, any][]) {
+  for (const [id, o] of [["arcade", {}], [botId, { net: true, joiners: 1, seconds: 180 }], ...otherBots.map(x => [x, {}])] as [string, any][]) {
     process.env.DUO_PORT = String(rport());
     try {
       const r = await bots.run(id, o);
