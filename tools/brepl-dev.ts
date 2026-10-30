@@ -214,7 +214,7 @@ export async function debt() {
   // Viewport grabs: get_image() straight off get_texture() returns null / empty before the first draw or after the
   // viewport is gone (2026-10-30 offscreen runs: "tex is null at texture_get_data", then get_width on null in
   // _save_frame). Grab through FrameGrab.image(vp) (core/frame_grab.gd) or the gdev addon's _grab(vp).
-  const grabs = (await sh(`grep -rnE "get_texture\\(\\)\\.get_image\\(\\)" --include=*.gd core games arcade tests addons tools 2>/dev/null | grep -v -e '^[^:]*:[0-9]*:\\s*#'`, STAGE)).out;
+  const grabs = (await sh(`grep -rnE "get_texture\\(\\)\\.get_image\\(\\)" --include=*.gd core games arcade tests addons tools 2>/dev/null | grep -v -e '^[^:]*:[0-9]*:\\s*#'`, LIVE)  /* the repo: staging has no addons/ sync */).out;
   for (const l of grabs.split("\n").filter(Boolean))
     issues.push({ kind: "unguarded-get_image", what: l.slice(0, 160), fix: "use FrameGrab.image(vp) (core/frame_grab.gd): null when nothing is drawn yet or the viewport is gone" });
   // Screenshots: spectacle only works in Desktop Mode (it SIGABRTs in Gaming Mode / without a Wayland display), so
