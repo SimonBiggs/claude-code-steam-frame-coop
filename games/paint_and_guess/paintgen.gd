@@ -186,26 +186,45 @@ static func build(code: int) -> Dictionary:
 		weights.remove_at(k)
 	var used: Array = []
 	var rounds: Array = []
-	var base_slot := Seeded.rng(s, "slots").randi() % 4
 	for ri in ROUNDS:
 		var th: int = order[ri % order.size()]
-		var rr := Seeded.rng(s, "round%d" % ri)
-		var target := _pick_target(rr, th, ri, used)
-		used.append(target)
-		var four := _pick_set(rr, th, ri, target)
-		var opts: Array = []
-		for seat in MAX_PLAYERS:
-			# The right answer's place: moves one along every round and differs between neighbouring seats.
-			var slot := (base_slot + ri + seat * 3) % 4
-			var others: Array = Seeded.shuffled(Seeded.rng(s, "seat%d/%d" % [ri, seat]), four.slice(1))
-			var o: Array = []
-			for k in 4:
-				o.append(target if k == slot else others.pop_back())
-			opts.append(o)
-		var type: String = ROUND_PLAN[ri]
-		rounds.append({"type": type, "theme": th, "target": target, "opts": opts, "time": float(ROUND_TIMES[type])})
+		var rd := _make_round(s, ri, th, Seeded.rng(s, "round%d" % ri), used)
+		used.append(rd["target"])
+		rounds.append(rd)
 	d["rounds"] = rounds
 	return d
+
+
+## One round: the thing to paint from theme `th` (never one in `used`) and every seat's four answers.
+static func _make_round(s: int, ri: int, th: int, rr: RandomNumberGenerator, used: Array) -> Dictionary:
+	var target := _pick_target(rr, th, ri, used)
+	var four := _pick_set(rr, th, ri, target)
+	var base_slot := Seeded.rng(s, "slots").randi() % 4
+	var opts: Array = []
+	for seat in MAX_PLAYERS:
+		# The right answer's place: moves one along every round and differs between neighbouring seats.
+		var slot := (base_slot + ri + seat * 3) % 4
+		var others: Array = Seeded.shuffled(Seeded.rng(s, "seat%d/%d/%s" % [ri, seat, target]), four.slice(1))
+		var o: Array = []
+		for k in 4:
+			o.append(target if k == slot else others.pop_back())
+		opts.append(o)
+	var type: String = ROUND_PLAN[ri]
+	return {"type": type, "theme": th, "target": target, "opts": opts, "time": float(ROUND_TIMES[type])}
+
+
+## Round `ri` of a game; reroll > 0 = the artist asked for a NEW ONE (the reroll-th time): another thing from the
+## same theme (none of `used`, none of the game's other rounds), built by the same fair rules.
+static func round_of(d: Dictionary, ri: int, used: Array = [], reroll: int = 0) -> Dictionary:
+	var rounds: Array = d["rounds"]
+	var rd: Dictionary = rounds[clampi(ri, 0, rounds.size() - 1)]
+	if reroll <= 0:
+		return rd.duplicate(true)
+	var avoid: Array = used.duplicate()
+	for o in rounds:
+		avoid.append(o["target"])
+	var s := int(d["seed"])
+	return _make_round(s, ri, int(rd["theme"]), Seeded.rng(s, "reroll%d/%d" % [ri, reroll]), avoid)
 
 
 static func _pick_target(r: RandomNumberGenerator, th: int, ri: int, used: Array) -> String:

@@ -6,11 +6,15 @@ extends Node3D
 ## in GDScript; the rest is packed arrays uploaded natively), so several painters at once (TEAM PAINT)
 ## stay cheap: every painter's stroke in progress has its own small mesh, finished ones are baked into
 ## chunk meshes (a handful of draw calls for the whole picture).
-## Also owns the paint pots (incl. RAINBOW and SPARKLE), the CLEAR / UNDO / NEW WORD bubbles, the
+## Also owns the paint pots (incl. RAINBOW and SPARKLE), the CLEAR / UNDO / NEW ONE bubbles, the
 ## brush cursor, the TV painters' cursor rings, the answer balloons (TEAM PAINT: the VR player guesses),
 ## the vote grid, a timer bar, the header labels and the audience critters (one per TV player).
 
 const MeshKit := preload("res://games/paint_and_guess/mesh_kit.gd")
+const StoryCard := preload("res://core/story_card.gd")
+const PaintGen := preload("res://games/paint_and_guess/paintgen.gd")
+const PROMPT_SIZE := 0.3  # the artist's picture of what to paint (m)
+const PIC_COLOR := Color(1.0, 0.62, 0.3)  # the colour the picture cards are drawn in (answers, balloons, prompt)
 
 const W := 1.3
 const H := 0.9
@@ -89,6 +93,10 @@ var word_card: MeshInstance3D  # secret: the glowing card behind the word (artis
 var guide_arrow: MeshInstance3D  # secret: bounces under the word card, pointing up at it
 var guide_brush: Node3D  # secret: a ghost brush that sweeps across the empty canvas ("paint here!")
 var guide_t := 0.0
+var prompt_pic: Sprite3D  # secret: the picture of what to paint, on the word card
+var prompt_id := ""
+var balloon_pics: Array = [null, null, null, null]
+var balloon_ids: Array[String] = ["", "", "", ""]
 const WORD_Y := H * 0.5 + 0.34  # the word card's centre above the canvas centre: clear of the critters
 
 
@@ -130,7 +138,7 @@ func _ready() -> void:
 	_build_pots()
 	clear_bubble = _bubble("CLEAR", Color(0.4, 0.8, 1.0), Vector3(W * 0.5 + 0.15, H * 0.3, 0.08))
 	undo_bubble = _bubble("UNDO", Color(0.6, 1.0, 0.5), Vector3(W * 0.5 + 0.15, H * 0.02, 0.08))
-	skip_bubble = _bubble("NEW\nWORD", Color(1.0, 0.75, 0.3), Vector3(W * 0.5 + 0.15, -H * 0.26, 0.08))
+	skip_bubble = _bubble("NEW\nONE", Color(1.0, 0.75, 0.3), Vector3(W * 0.5 + 0.15, -H * 0.26, 0.08))
 	stroke_root = Node3D.new()
 	board_root.add_child(stroke_root)
 	cursor = MeshInstance3D.new()
@@ -147,7 +155,7 @@ func _ready() -> void:
 	cursor.material_override = cursor_mat
 	board_root.add_child(cursor)
 	cursor.visible = false
-	word_label = _label(64, Color(1.0, 0.95, 0.6), Vector3(0, WORD_Y, 0.012))
+	word_label = _label(64, Color(1.0, 0.95, 0.6), Vector3(0.12, WORD_Y, 0.012))
 	word_label.layers = SECRET_LAYER
 	hint_label = _label(40, Color(0.7, 0.95, 1.0), Vector3(0, WORD_Y, 0.012))
 	_build_guides()
@@ -223,6 +231,31 @@ func set_guides(word_on: bool, arrow_on: bool, brush_on: bool) -> void:
 	word_card.visible = word_on
 	guide_arrow.visible = arrow_on
 	guide_brush.visible = brush_on
+
+
+## The picture of what to paint (artist only), on the left of the word card. "" hides it.
+func set_prompt(id: String) -> void:
+	if id == prompt_id:
+		return
+	prompt_id = id
+	if prompt_pic != null and is_instance_valid(prompt_pic):
+		prompt_pic.queue_free()
+	prompt_pic = null
+	if id == "":
+		return
+	prompt_pic = picture_sprite(id, PROMPT_SIZE, SECRET_LAYER)
+	prompt_pic.position = Vector3(-W * 0.5 + 0.14, WORD_Y, 0.02)
+	board_root.add_child(prompt_pic)
+
+
+## A story picture (core/story_card.gd) on a round disc, `size` metres across, on these visual layers.
+func picture_sprite(kind: String, size: float, layers_mask: int) -> Sprite3D:
+	var sp: Sprite3D = StoryCard.StoryCardPics.vr_medallion(kind, PIC_COLOR, self)
+	sp.pixel_size = size / 256.0
+	sp.layers = layers_mask
+	sp.render_priority = 4
+	sp.position = Vector3.ZERO
+	return sp
 
 
 func _animate_guides(delta: float) -> void:
@@ -557,6 +590,29 @@ func build_picture() -> ArrayMesh:
 	var v := PackedVector3Array()
 	var c := PackedColorArray()
 	for s in strokes:
+		v.append_array(s["v"])
+		c.append_array(s["c"])
+	if v.size() < 3:
+		return null
+	return _arrays_mesh(v, c)
+
+
+## A saved painting (export_strokes format) as one mesh, without touching the easel (the family gallery).
+func picture_from(data: Array) -> ArrayMesh:
+	var v := PackedVector3Array()
+	var c := PackedColorArray()
+	var k := 0
+	for e in data:
+		var a: Array = e
+		var pts: PackedVector2Array = a[3]
+		if pts.is_empty():
+			continue
+		k += 1
+		var s := {"id": int(a[0]), "col": int(a[1]), "w": float(a[2]), "pts": pts, "z": 0.003 + float(k % 300) * 0.00002,
+			"v": PackedVector3Array(), "c": PackedColorArray(), "acc": 0.0, "live": false}
+		for i in pts.size():
+			_geo_point(s, i)
+		_geo_cap(s)
 		v.append_array(s["v"])
 		c.append_array(s["c"])
 	if v.size() < 3:
@@ -972,10 +1028,10 @@ func _build_balloons() -> void:
 		mi.material_override = MeshKit.vertex_material(main.mats)
 		b.add_child(mi)
 		var l := Label3D.new()
-		l.font_size = 40
-		l.outline_size = 14
+		l.font_size = 28
+		l.outline_size = 10
 		l.pixel_size = 0.00207
-		l.position = Vector3(0, 0, 0.09)
+		l.position = Vector3(0, -0.12, 0.09)
 		l.render_priority = 3
 		l.outline_render_priority = 2
 		b.add_child(l)
@@ -1000,8 +1056,17 @@ func show_balloons(words: Array, on: bool, popped_mask: int) -> void:
 		var pop := (popped_mask >> i) & 1 == 1
 		b.visible = on and i < words.size() and not pop
 		if i < words.size():
+			var id := str(words[i])
 			var l := b.get_child(1) as Label3D
-			l.text = str(words[i]).to_upper()
+			l.text = PaintGen.caption(id).to_upper()
+			if id != balloon_ids[i] and on:
+				balloon_ids[i] = id
+				if balloon_pics[i] != null and is_instance_valid(balloon_pics[i]):
+					(balloon_pics[i] as Node).queue_free()
+				var sp := picture_sprite(id, 0.15, 1)
+				sp.position = Vector3(0, 0.005, 0.085)
+				b.add_child(sp)
+				balloon_pics[i] = sp
 		balloon_popped[i] = pop
 
 
@@ -1015,7 +1080,9 @@ func _animate_balloons() -> void:
 
 # --- The vote: every picture of the game on the board, pick your favourite -------------------
 
-func show_vote(pics: Array) -> void:
+## pics: [[mesh, caption, golden?], ...]. numbered = the vote (a number per picture); else Smudge's gallery
+## (golden ones in a gold frame).
+func show_vote(pics: Array, numbered: bool = true) -> void:
 	hide_vote()
 	vote_root = Node3D.new()
 	board_root.add_child(vote_root)
@@ -1040,14 +1107,28 @@ func show_vote(pics: Array) -> void:
 			mi.scale = Vector3(sc, sc, 0.3)
 			mi.position = Vector3(center.x, center.y, 0.004)
 			vote_root.add_child(mi)
-		var l := Label3D.new()
-		l.text = "%d" % (k + 1)
-		l.font_size = 48
-		l.outline_size = 14
-		l.pixel_size = 0.00216
-		l.modulate = Color(1.0, 0.9, 0.5)
-		l.position = Vector3(center.x - cw * 0.42, center.y + ch * 0.3, 0.02)
-		vote_root.add_child(l)
+		if numbered:
+			var l := Label3D.new()
+			l.text = "%d" % (k + 1)
+			l.font_size = 48
+			l.outline_size = 14
+			l.pixel_size = 0.00216
+			l.modulate = Color(1.0, 0.9, 0.5)
+			l.position = Vector3(center.x - cw * 0.42, center.y + ch * 0.3, 0.02)
+			vote_root.add_child(l)
+		elif entry.size() > 2 and bool(entry[2]):
+			var fw := W * sc + 0.03
+			var fh := H * sc + 0.03
+			var gold := Color(1.0, 0.8, 0.25)
+			var fr := MeshInstance3D.new()
+			fr.mesh = MeshKit.merge([
+				[MeshKit.box(Vector3(fw, 0.016, 0.006)), MeshKit.at(Vector3(0, fh * 0.5, 0)), gold],
+				[MeshKit.box(Vector3(fw, 0.016, 0.006)), MeshKit.at(Vector3(0, -fh * 0.5, 0)), gold],
+				[MeshKit.box(Vector3(0.016, fh, 0.006)), MeshKit.at(Vector3(fw * 0.5, 0, 0)), gold],
+				[MeshKit.box(Vector3(0.016, fh, 0.006)), MeshKit.at(Vector3(-fw * 0.5, 0, 0)), gold]])
+			fr.material_override = MeshKit.vertex_material(main.mats, true)
+			fr.position = Vector3(center.x, center.y, 0.006)
+			vote_root.add_child(fr)
 		var wl := Label3D.new()
 		wl.text = str(entry[1]).to_upper()
 		wl.font_size = 30

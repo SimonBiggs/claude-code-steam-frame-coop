@@ -6,8 +6,12 @@ extends Node3D
 ## Moving bits: twinkling string lights (one MultiMesh + shader), a sleeping cat that breathes and
 ## swishes its tail (and jumps up when everyone guesses right), drifting dust motes, and the gallery:
 ## every finished drawing flies from the easel into a frame; the vote's winner gets a gold frame.
+## The cat is SMUDGE (red beret): her FAMILY GALLERY - the family's saved paintings from every day
+## (main.gd save.gallery) - hangs on the side walls (paintgen.gd family_slot), all in two draw calls.
 
 const MeshKit := preload("res://games/paint_and_guess/mesh_kit.gd")
+const PaintGen := preload("res://games/paint_and_guess/paintgen.gd")
+const FAMILY_SCALE := 0.44
 
 const BACK_Z := -3.2
 const SIDE_X := 4.2
@@ -40,6 +44,8 @@ var lights_mm: MultiMeshInstance3D
 var light_mat: ShaderMaterial
 var pictures := {}  # slot -> {mi, label}
 var gold_root: Node3D
+var family_root: Node3D
+var family_key := ""
 
 
 func build() -> void:
@@ -273,6 +279,9 @@ func _build_cat() -> void:
 	]
 	for k in 3:
 		parts.append([MeshKit.box(Vector3(0.025, 0.11, 0.18)), MeshKit.at(Vector3(-0.08 + k * 0.07, 0.16, 0.0), Vector3.ONE, Vector3(0, 0, 0.1)), stripe])
+	# Smudge's red beret (story_pictures.gd "smudge").
+	parts.append([MeshKit.sphere(0.085, 12), MeshKit.at(Vector3(0.19, 0.215, 0.04), Vector3(1.15, 0.32, 1.15), Vector3(0, 0, 0.2)), Color(0.85, 0.2, 0.35)])
+	parts.append([MeshKit.cyl(0.006, 0.01, 0.025, 6), MeshKit.at(Vector3(0.18, 0.25, 0.04)), Color(0.6, 0.12, 0.25)])
 	cat_body = MeshInstance3D.new()
 	cat_body.mesh = MeshKit.merge(parts)
 	cat_body.material_override = MeshKit.vertex_material(main.mats)
@@ -352,7 +361,7 @@ func hang(slot: int, mesh: ArrayMesh, word: String, team: bool, from_xf: Transfo
 	tw.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
 	tw.tween_property(mi, "global_transform", dest, 1.3)
 	var l := Label3D.new()
-	l.text = word.to_upper() + ("\nby the TV team" if team else "")
+	l.text = PaintGen.caption(word).to_upper() + ("\nby the TV team" if team else "")
 	l.font_size = 36
 	l.outline_size = 10
 	l.pixel_size = 0.0013
@@ -416,3 +425,72 @@ func set_gold(slots: Array) -> void:
 		var tw := mi.create_tween().set_loops(4)
 		tw.tween_property(mi, "scale", Vector3(1.06, 1.06, 1.0), 0.25)
 		tw.tween_property(mi, "scale", Vector3.ONE, 0.25)
+
+
+## Smudge's family gallery: pics = [[ArrayMesh or null, golden, thing], ...] oldest first, at most GALLERY_MAX.
+## Frames (wood, or gold for TODAY'S GALLERY and MASTERPIECES) and all the paintings are merged into one mesh each.
+func set_family(pics: Array, paint_mat: Material) -> void:
+	var key := ""
+	for e in pics:
+		key += "%s%d%s," % [str(e[2]), int(bool(e[1])), str(e[0].get_rid().get_id()) if e[0] != null else "-"]
+	if key == family_key:
+		return
+	family_key = key
+	if family_root != null and is_instance_valid(family_root):
+		family_root.queue_free()
+	family_root = Node3D.new()
+	family_root.name = "FamilyGallery"
+	add_child(family_root)
+	var frames: Array = []
+	var v := PackedVector3Array()
+	var c := PackedColorArray()
+	var fw := canvas_w() * FAMILY_SCALE
+	var fh := canvas_h() * FAMILY_SCALE
+	var start := maxi(0, pics.size() - PaintGen.GALLERY_MAX)
+	for i in range(start, pics.size()):
+		var e: Array = pics[i]
+		var at := PaintGen.family_slot(i - start)
+		var side := -1.0 if at.x < 0.0 else 1.0
+		var basis := Basis(Vector3.UP, side * -PI * 0.5)  # faces into the room
+		var xf := Transform3D(basis, at)
+		var gold := bool(e[1])
+		var fc := Color(1.0, 0.8, 0.25) if gold else Color(0.62, 0.42, 0.25)
+		frames.append([MeshKit.box(Vector3(fw + 0.08, fh + 0.08, 0.03)), xf * MeshKit.at(Vector3(0, 0, -0.02)), fc])
+		frames.append([MeshKit.box(Vector3(fw + 0.01, fh + 0.01, 0.01)), xf * MeshKit.at(Vector3(0, 0, -0.002)), Color(0.07, 0.08, 0.15)])
+		if gold:
+			frames.append([MeshKit.sphere(0.03, 8), xf * MeshKit.at(Vector3(0, fh * 0.5 + 0.06, 0.0)), Color(1.0, 0.95, 0.6)])
+		var mesh: ArrayMesh = e[0]
+		if mesh == null or mesh.get_surface_count() == 0:
+			continue
+		var arr := mesh.surface_get_arrays(0)
+		var pv: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+		var pxf := xf * Transform3D(Basis().scaled(Vector3(FAMILY_SCALE, FAMILY_SCALE, 0.2)), Vector3(0, 0, 0.004))
+		for q in pv:
+			v.append(pxf * q)
+		c.append_array(arr[Mesh.ARRAY_COLOR])
+	if not frames.is_empty():
+		var fm := MeshInstance3D.new()
+		fm.mesh = MeshKit.merge(frames)
+		fm.material_override = MeshKit.vertex_material(main.mats)
+		fm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		family_root.add_child(fm)
+	if v.size() >= 3:
+		var arrays: Array = []
+		arrays.resize(Mesh.ARRAY_MAX)
+		arrays[Mesh.ARRAY_VERTEX] = v
+		arrays[Mesh.ARRAY_COLOR] = c
+		var m := ArrayMesh.new()
+		m.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+		var pm := MeshInstance3D.new()
+		pm.mesh = m
+		pm.material_override = paint_mat
+		pm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		family_root.add_child(pm)
+
+
+func canvas_w() -> float:
+	return main.canvas.W if main != null and main.canvas != null else 1.3
+
+
+func canvas_h() -> float:
+	return main.canvas.H if main != null and main.canvas != null else 0.9

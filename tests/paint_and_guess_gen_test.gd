@@ -54,6 +54,22 @@ func _init() -> void:
 	_expect(tiers[3] > tiers[0], "the speed round is trickier than round 1")
 	_expect(themes_seen.size() == G.THEMES.size(), "every theme comes up (%d)" % themes_seen.size())
 	_expect(targets_seen.size() >= 40, "lots of different things to paint (%d)" % targets_seen.size())
+	# NEW ONE (the artist skips, up to twice a round): still a fair round, never one already asked.
+	for k in seeds / 2:
+		var dy := k % 4 == 0
+		var d := G.build(G.code_of(k * 977 + 5, G.BASE_THEMES if dy else G.BASE_THEMES + k % 3, dy))
+		var used: Array = []
+		for ri in G.ROUNDS:
+			used.append(str(d.rounds[ri].target))
+			for rr in [1, 2]:
+				var nd := d.duplicate(true)
+				var r2 := G.round_of(d, ri, used, rr)
+				_expect(not used.has(str(r2.target)), "a NEW ONE is something new (seed %d round %d)" % [k, ri + 1])
+				used.append(str(r2.target))
+				nd.rounds[ri] = r2
+				for why in G.check(nd):
+					_expect(false, "NEW ONE seed %d round %d reroll %d: %s" % [k, ri + 1, rr, why])
+		_expect(var_to_str(G.round_of(d, 1, [], 0)) == var_to_str(d.rounds[1]), "round_of without a reroll is the planned round")
 	# Base games only use the starting themes; unlocked themes come up.
 	for k in 30:
 		var d := G.build(G.code_of(k * 17 + 3, G.BASE_THEMES, false))
