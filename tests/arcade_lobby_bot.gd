@@ -36,6 +36,10 @@ func _ready() -> void:
 	# must end up showing the family's furthest (the host merges everyone's and sends it round).
 	Engine.set_meta("save_test_mode", true)
 	preload("res://core/save.gd").store("tower_stack", {"built": 10 + me, "town": [], "daily": ""})
+	# What's New: each machine has opened a different piece of news; every machine must end up with all of them seen
+	# (one family: what David opened on his Deck isn't NEW on the TV).
+	var news: Array = preload("res://arcade/whats_new.gd").ENTRIES
+	preload("res://core/save.gd").store("arcade_whats_new", {"seen": [String(news[me % news.size()].id)]})
 	# The arcade becomes the current scene, so starting a game replaces IT and this bot (a sibling under the root)
 	# keeps watching.
 	arcade = load("res://arcade.tscn").instantiate()
@@ -165,6 +169,11 @@ func _check_settled() -> void:
 	for k in keys:
 		agree.append([k, int(rows[k].grown), bool(rows[k].daily)])
 	print("BOT AGREE hall=%d" % hash(str(agree)))
+	var seen: Array = (arcade.news_seen() as Dictionary).keys()
+	seen.sort()
+	if seen.size() != mini(count, preload("res://arcade/whats_new.gd").ENTRIES.size()):
+		_fail("What's New: %d news seen %s (want each machine's one: %d)" % [seen.size(), str(seen), count])
+	print("BOT AGREE news=%d" % hash(str(seen)))
 	# The focused card must be the selection (the TV shows what the machine thinks is chosen).
 	var f: Control = get_viewport().gui_get_focus_owner()
 	if not arcade.cards.has(expected_index) or f != arcade.cards[expected_index]:
