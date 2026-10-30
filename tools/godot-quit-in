@@ -1,0 +1,23 @@
+#!/bin/bash
+# godot-quit-in DIR: quit every Godot running from inside DIR (its cwd or --path), TERM then KILL after 3 s; prints
+# their pids. Run it before removing a worktree: a worktree removed under a running Godot leaves it logging
+# "Couldn't open directory at path res://" (2026-10-29). Used by brepl dev.removeWorktree / dev.land and merge-game.
+d=$(realpath -m "${1:?usage: godot-quit-in DIR}")
+pids=()
+for p in $(pgrep -x godot); do
+  c=$(readlink "/proc/$p/cwd" 2>/dev/null) || continue
+  c=${c% (deleted)}
+  pp=$(tr '\0' '\n' < "/proc/$p/cmdline" 2>/dev/null | grep -A1 -x -- '--path' | tail -n +2 | head -1)
+  [ -n "$pp" ] && pp=$(cd "$c" 2>/dev/null && realpath -m "$pp" || realpath -m "$pp")
+  if [[ "$c" == "$d" || "$c" == "$d/"* || ( -n "$pp" && ( "$pp" == "$d" || "$pp" == "$d/"* ) ) ]]; then pids+=("$p"); fi
+done
+[ ${#pids[@]} -eq 0 ] && exit 0
+printf '%s\n' "${pids[@]}"
+kill "${pids[@]}" 2>/dev/null
+for _ in $(seq 30); do
+  alive=0; for p in "${pids[@]}"; do kill -0 "$p" 2>/dev/null && alive=1; done
+  [ $alive = 0 ] && exit 0
+  sleep 0.1
+done
+kill -9 "${pids[@]}" 2>/dev/null
+exit 0

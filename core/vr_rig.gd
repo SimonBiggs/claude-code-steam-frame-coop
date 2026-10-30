@@ -625,6 +625,7 @@ static func build_mirror(parent: Node, follow: Node3D, capture: bool = true, siz
 	cam.fov = 90.0
 	cam.near = 0.02
 	cam.cull_mask = 0xFFFFF & ~AVATAR_LAYER
+	cam.add_to_group(preload("res://core/vr_layer.gd").GROUP_VIEW)  # shows the VR view: VR-only UI too
 	vp.add_child(cam)
 	cam.current = true
 	var tick := MirrorTicker.new()

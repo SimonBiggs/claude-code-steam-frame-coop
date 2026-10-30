@@ -56,7 +56,7 @@ const SKIP_WINDOW := 15.0
 const FLUSH_INTERVAL := 0.05
 const TEAM_BRUSH_W := 0.024
 const HINT_LAYER := 4  # visual layer bit for things only the guessers see (the hint over the easel)
-const VR_LAYER := 8  # visual layer bit for the VR player's floating text (never on the TV)
+const VR_LAYER := preload("res://core/vr_layer.gd").LAYER  # the VR player's floating text (never on the TV; engine-wide VR layer)
 const PLAYER_COLORS: Array[Color] = [Color(1.0, 0.85, 0.55), Color(1.0, 0.35, 0.35), Color(0.3, 0.65, 1.0),
 	Color(0.4, 0.9, 0.4), Color(1.0, 0.8, 0.15), Color(0.8, 0.45, 1.0), Color(1.0, 0.55, 0.2)]
 const SOUNDS := {

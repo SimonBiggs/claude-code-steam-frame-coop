@@ -12,6 +12,7 @@ const COMFORT := 1.6
 static func follow(l: Label3D, cam: Node3D, world: Node, height: float, dist: float = 1.8) -> void:
 	if l == null or cam == null or not is_instance_valid(l):
 		return
+	preload("res://core/vr_layer.gd").mark_once(l)  # VR-only text: never on the TV cameras
 	dist *= COMFORT
 	height *= COMFORT
 	# Scale the panel's own pixel_size once (games may reset it each frame: treat that as a new base).

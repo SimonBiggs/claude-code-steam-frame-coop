@@ -10,6 +10,7 @@ const PARTS := {
 	"ui": "res://tests/engine_ui/ui_test.gd",
 	"world": "res://tests/engine_ui/world_test.gd",
 	"audio": "res://tests/engine_ui/audio_test.gd",
+	"vr_layer": "res://tests/engine_ui/vr_layer_test.gd",
 }
 
 

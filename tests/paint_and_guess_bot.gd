@@ -414,7 +414,7 @@ func _scan_guesser_texts(delta: float) -> void:
 	var wl: Label3D = main.canvas.word_label
 	if main.net.mode != "client" and main.state == "draw" and wl.is_visible_in_tree() and wl.layers == 2:
 		card_seen = wl.text
-	var mask: int = 0xFFFFF & ~2 & ~8  # what a TV guesser camera draws (no SECRET_LAYER, no VR_LAYER)
+	var mask: int = 0xFFFFF & ~2 & ~int(main.VR_LAYER)  # what a TV guesser camera draws (no SECRET_LAYER, no VR_LAYER)
 	var stack: Array = [main]
 	while not stack.is_empty():
 		var n: Node = stack.pop_back()

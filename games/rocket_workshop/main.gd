@@ -75,8 +75,8 @@ const SIMPLE_MODE := true
 
 const MANUAL_LAYER := 512  # blueprint content: drawn for the TV crew only
 const PANEL_LAYER := 1024  # desk controls: drawn for the pilot only
-const TAG_LAYER_0 := 4096  # crew name tags: P(i+1)'s tag is on TAG_LAYER_0 << i (never in its own view)
-const TAG_LAYERS := 0xFF000  # every name tag layer (the pilot doesn't draw them)
+const TAG_LAYER_0 := 2048  # crew name tags: P(i+1)'s tag is on TAG_LAYER_0 << i (never in its own view)
+const TAG_LAYERS := 0x3F800  # every name tag layer, bits 11..17 (the pilot doesn't draw them; 18-19 are engine-wide)
 const PAD_POS := Vector3(0, 0, -11.0)
 const HATCH_POS := Vector3(0, 0, -8.0)
 const LAUNCH_TIME := 11.5
