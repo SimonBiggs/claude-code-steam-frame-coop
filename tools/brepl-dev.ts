@@ -46,18 +46,19 @@ export const bots = {
   },
   /** Run one bot test. net: also run it as ONE shared game: a host + `joiners` (default 1, up to 6) joining machines,
    *  each its own process (tools/multibot.ts). Returns pass/fail, failed checks, errors, per machine. */
-  async run(id: string, o: { net?: boolean; joiners?: number; seconds?: number } = {}) {
+  async run(id: string, o: { net?: boolean; joiners?: number; seconds?: number; project?: string } = {}) {
     const t0 = Date.now();
+    const proj = o.project ?? STAGE;  // staging by default; a worktree path tests a branch before it lands
     const scene = `res://tests/${id}_bot.tscn`;
     const one = async (env: Record<string, string>, extra = "") => {
-      const r = await $`nice -n 19 timeout ${o.seconds ?? 150} godot-test --headless --path ${STAGE} ${{ raw: extra }} ${scene}`.env({ ...process.env, ...env }).nothrow().quiet();
+      const r = await $`nice -n 19 timeout ${o.seconds ?? 150} godot-test --headless --path ${proj} ${{ raw: extra }} ${scene}`.env({ ...process.env, ...env }).nothrow().quiet();
       return { out: r.stdout.toString() + r.stderr.toString(), code: r.exitCode };
     };
     // Pass (docs/GAME_DEV_GUIDE.md "Testing"): multibot.verdict, the one shared rule.
     const parse = ({ out, code }: { out: string; code: number }, mode: string) => ({ mode, ...verdict(out, code) });
     const runs: any[] = [parse(await one({}, "--fixed-fps 60 --quit-after 3600"), "local")];
     if (o.net) {
-      const g = await runGroup({ scene, project: STAGE, joiners: o.joiners ?? 1, seconds: o.seconds ?? 180, quiet: true });
+      const g = await runGroup({ scene, project: proj, joiners: o.joiners ?? 1, seconds: o.seconds ?? 180, quiet: true });
       runs.push(...g.machines.map(m => ({ mode: m.machine, ...m })));
       for (const [k, a] of Object.entries(g.agree)) if (!a.ok) runs.push({ mode: `agree ${k}`, pass: false, result: a.values.join(" / "), failed: [], errors: [] });
     }
