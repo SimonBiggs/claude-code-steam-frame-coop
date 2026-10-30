@@ -27,6 +27,9 @@ var dead := false
 var frozen := false
 var flash_t := 0.0
 var last_hit_slot := -1
+## The General's seeded element order (wavegen.gd boss_order; [] = random swaps).
+var swap_order: Array = []
+var _swap_i := 0
 
 var _knock := Vector3.ZERO
 var _slow_t := 0.0
@@ -146,7 +149,12 @@ func _physics_process(delta: float) -> void:
 		_swap_t -= delta
 		if _swap_t <= 0.0:
 			_swap_t = 5.0
-			_set_element((element + 1 + randi() % 3) % 4)
+			_swap_i += 1
+			if not swap_order.is_empty():
+				var nx := int(swap_order[_swap_i % swap_order.size()])
+				_set_element(nx if nx != element else (element + 1) % 4)  # (wrapping round the list)
+			else:
+				_set_element((element + 1 + randi() % 3) % 4)
 			game.call("on_boss_swap", self)
 	_retarget_t -= delta
 	if _retarget_t <= 0.0 or _target == null or not is_instance_valid(_target) or bool(_target.get("dead")):
