@@ -211,6 +211,12 @@ export async function debt() {
       issues.push({ kind: pt.kind, what: f, fix: pt.fix });
     }
   }
+  // Viewport grabs: get_image() straight off get_texture() returns null / empty before the first draw or after the
+  // viewport is gone (2026-10-30 offscreen runs: "tex is null at texture_get_data", then get_width on null in
+  // _save_frame). Grab through FrameGrab.image(vp) (core/frame_grab.gd) or the gdev addon's _grab(vp).
+  const grabs = (await sh(`grep -rnE "get_texture\\(\\)\\.get_image\\(\\)" --include=*.gd core games arcade tests addons tools 2>/dev/null | grep -v -e '^[^:]*:[0-9]*:\\s*#'`, STAGE)).out;
+  for (const l of grabs.split("\n").filter(Boolean))
+    issues.push({ kind: "unguarded-get_image", what: l.slice(0, 160), fix: "use FrameGrab.image(vp) (core/frame_grab.gd): null when nothing is drawn yet or the viewport is gone" });
   // Screenshots: spectacle only works in Desktop Mode (it SIGABRTs in Gaming Mode / without a Wayland display), so
   // every tool takes its one shot through tv-shot, which picks gamescopectl or spectacle. Flag any direct call.
   const spec = (await sh(`grep -rnIE "[\\"']spectacle[\\"']|(^|[;&|(]|\\s)spectacle\\s+-" ${BIN} ${HOME}/.local/share/brepl ${HOME}/.local/share/gdev ${LIVE}/tools 2>/dev/null | grep -v -e '/tv-shot:' -e '^[^:]*:[0-9]*:\\s*#'`)).out;
@@ -307,13 +313,27 @@ export async function removeWorktree(path: string, branch?: string) {
 /** Install every TOOL_COPIES file (and tools/ file named like a ~/.local/bin command) that changed in live since
  *  `since`: brepl modules through writeModule (build-checked), the rest copied (keeping the mode). */
 export async function installTools(since: string) {
-  const changed = (await sh(`git diff --name-only ${since} HEAD -- tools`, LIVE)).out.split("\n").filter(Boolean);
+  const changed = (await sh(`git diff --name-only ${since} HEAD -- tools addons/gdev`  /* every TOOL_COPIES source, not just tools/ (the gdev addon's gdev_main.gd is one) */, LIVE)).out.split("\n").filter(Boolean);
   const done: string[] = [];
   for (const rel of changed) {
     let dest = Object.entries(TOOL_COPIES).find(([, r]) => r === rel)?.[0];
     if (!dest && rel.split("/").length === 2 && (await stat(join(BIN, rel.slice(6))).catch(() => null))) dest = join(BIN, rel.slice(6));
     if (!dest) continue;
-    const src = join(LIVE, rel);
+    let src = join(LIVE, rel);
+    // The installed copy may carry live edits the repo never got (2026-10-30: a landing reinstalled tools/brepl-dev.ts
+    // from a branch and wiped two dev.ts fixes made after that branch started). Never overwrite them: 3-way merge
+    // (the old repo copy is the base); on a conflict leave the installed file alone and say so.
+    const cur = await readFile(dest, "utf8").catch(() => null);
+    const base = (await sh(`git show ${since}:${rel}`, LIVE)).out;
+    const neu = await readFile(src, "utf8");
+    if (cur !== null && cur !== neu && cur.trimEnd() !== base.trimEnd()) {
+      const tmp = `/tmp/install-${process.pid}-${rel.replace(/\//g, "_")}`;
+      await writeFile(tmp + ".cur", cur); await writeFile(tmp + ".base", base + "\n"); await writeFile(tmp + ".new", neu);
+      const m = await sh(`git merge-file -p ${tmp}.cur ${tmp}.base ${tmp}.new > ${tmp}.out`);
+      if (m.code !== 0) { done.push(`${rel}: NOT installed: the installed copy has edits the repo lacks and they conflict (merge by hand, then commit the copy)`); continue; }
+      src = tmp + ".out";
+      done.push(`${rel}: merged with live edits the repo lacked (commit ${rel} from the installed copy)`);
+    }
     if (/\/\.local\/share\/brepl\/[^/]+\.ts$|\/gdev\/godot\.ts$/.test(dest)) {
       try { await (globalThis as any).writeModule(dest, await readFile(src, "utf8")); } catch (e) { done.push(`${rel}: NOT installed (${String(e).slice(0, 200)})`); continue; }
     } else await sh(`cp --preserve=mode ${JSON.stringify(src)} ${JSON.stringify(dest)}`);
@@ -367,7 +387,9 @@ export async function land(branch: string, genTests: string[], botId: string, ot
   if (isGame && /\(0 checks\)/.test(out.deck)) out.deck += " (no Deck checks ran for this game)";
   ok &&= /BOT RESULT: PASS/.test(out.deck) && !/SCRIPT ERROR|no Deck checks/.test(out.deck);
   const res: string[] = [];
-  for (const [id, o] of [["arcade", {}], [botId, { net: true, joiners: 1, seconds: 180 }], ...otherBots.map(x => [x, {}])] as [string, any][]) {
+  // arcade_bot is one machine's menu; as a lobby HOST it can't launch alone (fails "A launches", 2026-10-30), so the
+  // arcade's networked run is arcade_lobby_bot.
+  for (const [id, o] of [["arcade", {}], [botId === "arcade" ? "arcade_lobby" : botId, { net: true, joiners: 1, seconds: 180 }], ...otherBots.map(x => [x, {}])] as [string, any][]) {
     process.env.DUO_PORT = String(rport());
     try {
       const r = await bots.run(id, o);
