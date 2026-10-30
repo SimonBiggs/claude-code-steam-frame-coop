@@ -43,6 +43,8 @@ const GhostHand := preload("res://games/dungeon_delve/ghost_hand.gd")
 const Deep := preload("res://games/dungeon_delve/deep.gd")
 
 const GAME_ID := "dungeon_delve"
+const StoryCard := preload("res://core/story_card.gd")
+const CINDER_COLOR := "ff9a40"  ## Cinder, the baby dragon who keeps the dungeon's treasure (story_pictures.gd cinder)
 const NAMES: Array[String] = ["DUNGEON DELVE", "SLIMES!", "BATS!", "SLIME KING!", "TREASURE!"]
 const MOODS: Array[String] = ["town", "overworld", "overworld", "party", "town"]
 const GATES := Dungeon.ROOMS - 1
@@ -84,6 +86,7 @@ var log_pokes := {}  ## bots: prop kind -> pokes
 var log_rooms := {}  ## bots: rooms entered
 var log_dizzy := 0
 var log_throws := 0
+var story_count := 0  ## story cards shown on this machine (bots)
 
 # TV
 var hud: Control
@@ -234,6 +237,9 @@ func _start_show() -> void:
 			blink(func() -> void: vr_rig.place(at + Vector3(0.0, 0.0, -0.3) if first > 0 else Vector3(0.0, 0.0, 2.9), 0.0))
 		elif first > 0:
 			vr_rig.place(at + Vector3(0.0, 0.0, -0.3), 0.0)
+	if not has_meta("shown"):  # Cinder says hello once a session, after the DUNGEON DELVE banner
+		get_tree().create_timer(2.2).timeout.connect(func() -> void:
+			story({"who": "HI! I'M CINDER!", "line": "Find my treasure!", "pic": "cinder", "color": CINDER_COLOR, "duration": 3.5}))
 	set_meta("shown", true)
 	for s in heroes:
 		_warp_hero(int(s), at)
@@ -311,9 +317,28 @@ func _open_treasure(id: int) -> void:
 	phase_t = 0.0
 	save.data["treasures"] = int(save.data["treasures"]) + 1
 	save.mark_dirty()
+	story({"who": "CINDER", "line": "For you! Yay!", "pic": "cinder", "color": "ffd25a", "duration": 3.5})
 	for s in heroes:
 		net.event("cheer", [int(s)])
 		(heroes[s] as Hero).anim.play("cheer", 2.0)
+
+
+## Host: a picture card on every machine (a word or two and one short line: no how-to text).
+func story(beat: Dictionary) -> void:
+	show_story(beat)
+	if net.mode == "host":
+		net.event("story", [beat])
+
+
+func show_story(beat: Dictionary) -> void:
+	story_count += 1
+	var opts := beat.duplicate()
+	opts["color"] = Color.html(String(beat.get("color", "ffd25a")))
+	if hud != null and is_instance_valid(hud):
+		StoryCard.show([hud], opts)
+	if vr_rig != null and vr_rig.camera != null:
+		StoryCard.show_vr(self, vr_rig.camera, opts)
+	print("Story card: %s - %s" % [String(beat.get("who", "")), String(beat.get("line", ""))])
 
 
 func _results() -> void:
@@ -1122,6 +1147,8 @@ func apply_event(kind: String, args: Array) -> void:
 		deep.apply_event(kind, args)
 		return
 	match kind:
+		"story":
+			show_story(args[0])
 		"sfx":
 			sfx.play_at(String(args[0]), args[1], float(args[2]), float(args[3]))
 		"confetti":
