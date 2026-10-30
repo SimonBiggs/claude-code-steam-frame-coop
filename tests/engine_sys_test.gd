@@ -399,6 +399,7 @@ func _local_timeline() -> void:
 	kit.at(19.0, "camera rig: settled", func() -> void:
 		kit.assert_true(crig.trauma == 0.0 and crig.camera.global_position.distance_to(Vector3(10.0, 5.0, 10.0)) < 0.01, "shake decays back to the shot"))
 	kit.at(19.1, "save: round trip", _test_save)
+	kit.at(19.2, "telemetry: copies from the host", _test_telemetry_copy)
 	kit.at(19.6, "save: autosave", func() -> void:
 		kit.assert_true(saved_count == 1, "the Save node autosaved after mark_dirty()")
 		var d := Save.load_data("engine_test_node", {})
@@ -536,6 +537,18 @@ func _camera_follow() -> void:
 
 func _cam_dist() -> float:
 	return crig.camera.global_position.distance_to(target.global_position + Vector3.UP * crig.pivot_height)
+
+
+func _test_telemetry_copy() -> void:
+	var Telemetry := load("res://core/telemetry.gd")
+	kit.assert_true(Telemetry.path().ends_with("telemetry_test.jsonl"), "tests write the test telemetry file")
+	var seed := 900000 + randi() % 99999
+	Telemetry.copy(JSON.stringify({"game": "engine_test_copy", "seed": seed, "t": 1}))
+	Telemetry.copy("not json")
+	var mine: Array = Telemetry.read("engine_test_copy").filter(func(r: Dictionary) -> bool: return int(r.get("seed", 0)) == seed)
+	var all: Array = Telemetry.read("engine_test_copy", "", true).filter(func(r: Dictionary) -> bool: return int(r.get("seed", 0)) == seed)
+	kit.assert_eq(mine.size(), 0, "read() leaves out copies of the host's lines")
+	kit.assert_true(all.size() == 1 and bool(all[0].get("copy")) and all[0].has("copy_on"), "a copy is stored marked as a copy")
 
 
 func _test_save() -> void:
