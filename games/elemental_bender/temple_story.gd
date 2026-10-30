@@ -100,7 +100,7 @@ func update_kiko(delta: float, at: Vector3) -> void:
 	cheer_t = maxf(0.0, cheer_t - delta)
 	var hop := absf(sin(cheer_t * 9.0)) * 0.3 * cheer_t
 	kiko.position = KIKO_AT + Vector3.UP * hop
-	kiko.scale = Vector3(1.0, 1.0 + sin(t * 2.4) * 0.02, 1.0) * 1.6
+	kiko.scale = Vector3(1.0, 1.0 + sin(t * 2.4) * 0.02, 1.0) * 1.4
 	var flat := Vector3(at.x, 0.0, at.z) - Vector3(KIKO_AT.x, 0.0, KIKO_AT.z)
 	if flat.length() > 0.2:
 		var want := atan2(-flat.x, -flat.z)
