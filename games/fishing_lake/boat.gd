@@ -193,6 +193,7 @@ func _ready() -> void:
 	add_child(wake)
 	tag = Label3D.new()
 	tag.text = "P%d" % (index + 1)
+	tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED  # faces every camera (seen from behind it read mirrored)
 	tag.font_size = 72
 	tag.pixel_size = 0.008
 	tag.outline_size = 18

@@ -244,6 +244,17 @@ class Runner extends Node:
 	## deck_solo() on a Deck alone, and no game re-adds its own Deck keyboard rule (it lives in core/party.gd).
 	func _source_checks() -> void:
 		for d in DirAccess.get_directories_at("res://games"):
+			# A "P1".."P6" name tag that doesn't billboard reads mirrored to every camera behind it.
+			for f in DirAccess.get_files_at("res://games/%s" % d):
+				if not f.ends_with(".gd"):
+					continue
+				var lines := FileAccess.get_file_as_string("res://games/%s/%s" % [d, f]).split("\n")
+				for i in lines.size():
+					if not lines[i].contains("Label3D.new()"):
+						continue
+					var block := "\n".join(lines.slice(i, i + 15))
+					if block.contains('.text = "P%d"') and not block.contains("billboard"):
+						kit.assert_true(false, "games/%s/%s:%d makes a P-number name tag without billboard: it reads mirrored from behind" % [d, f, i + 1])
 			var path := "res://games/%s/main.gd" % d
 			if not FileAccess.file_exists(path):
 				continue
