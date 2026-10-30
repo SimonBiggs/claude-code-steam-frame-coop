@@ -643,7 +643,10 @@ func _simple_timeline() -> void:
 			home_n = ((main.save.data.towns[main._town_key("home")] as Dictionary)["town"]["b"] as Array).size()
 			if not OS.has_environment("TT_SEED"):
 				kit.assert_eq(int(main.town.seed_value), Wishes.today_seed(), "today's island is today's seed")
-			kit.assert_true(main.town.buildings.size() <= 2, "today's island is a new little town (%d)" % main.town.buildings.size())
+			# A joining machine's bot keeps building, and its first places can land on the new island in the 2.5 s
+			# before this look (host failed "(3)" about 1 run in 3, 2026-10-30): allow one more per joined machine.
+			var most := 2 + (multiplayer.get_peers().size() if main.net.mode == "host" else 0)
+			kit.assert_true(main.town.buildings.size() <= most, "today's island is a new little town (%d, at most %d)" % [main.town.buildings.size(), most])
 			var runs := Telemetry.read("tiny_town_tycoon").filter(func(r: Dictionary) -> bool: return String(r.get("end", "")) == "sail")
 			kit.assert_true(not runs.is_empty(), "a RUN line when the boat sailed"))
 		kit.at(46.0, "the boat sails home", func() -> void: main.net.request(0, "place", ["boat", 11, 11, 0]))
