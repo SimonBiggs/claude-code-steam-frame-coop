@@ -62,7 +62,7 @@ const HAT_RACK := Vector3(3.7, 0.0, 2.6)
 const HAT_UNLOCKS: Array = [["none", ""], ["party", "run"], ["viking", "floor3"], ["wizard", "boss0"], ["crown", "boss1"], ["halo", "boss3"]]
 ## The hero statues (bonk one to be that hero) along the right wall, and Cinder's hoard by the left wall.
 const CLASS_SPOTS := {"knight": Vector3(3.75, 0.0, -1.3), "archer": Vector3(3.75, 0.0, -0.1), "wizard": Vector3(3.75, 0.0, 1.1)}
-const HOARD_SPOT := Vector3(-3.75, 0.0, 0.7)
+const HOARD_SPOT := Vector3(-3.2, 0.0, 1.05)
 const ALTAR_SPOTS: Array[Vector2] = [Vector2(2.3, 4.2), Vector2(3.6, 3.3), Vector2(4.3, 1.9)]  ## relic stones at the camp
 const BOSS_HOARD := 40  ## a boss adds this (x biome) to Cinder's hoard
 const SHOP_SPOTS: Array[Vector2] = [Vector2(-3.0, 0.2), Vector2(-1.0, 0.2), Vector2(1.0, 0.2), Vector2(3.0, 0.2)]
@@ -270,7 +270,7 @@ func _build_class_statues() -> void:
 			look[k] = ci["look"][k]
 		var statue := Creatures.humanoid(look)
 		statue.position.y = 0.22
-		statue.scale = Vector3.ONE * 0.8
+		statue.scale = Vector3.ONE * 1.0
 		root.add_child(statue)
 		var l := Label3D.new()
 		l.text = String(ci["name"])
@@ -280,7 +280,7 @@ func _build_class_statues() -> void:
 		l.modulate = (ci["color"] as Color).lightened(0.2)
 		l.outline_modulate = Color(0, 0, 0, 0.95)
 		l.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
-		l.position = CLASS_SPOTS[id] + Vector3(0.0, 1.55, 0.0)
+		l.position = CLASS_SPOTS[id] + Vector3(0.0, 1.75, 0.0)
 		lobby.add_child(l)
 		var sub := Label3D.new()
 		sub.font_size = 36
@@ -288,7 +288,7 @@ func _build_class_statues() -> void:
 		sub.outline_size = 14
 		sub.outline_modulate = Color(0, 0, 0, 0.95)
 		sub.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
-		sub.position = CLASS_SPOTS[id] + Vector3(0.0, 1.3, 0.0)
+		sub.position = CLASS_SPOTS[id] + Vector3(0.0, 1.5, 0.0)
 		lobby.add_child(sub)
 		class_nodes[id] = {"statue": statue, "label": l, "sub": sub}
 
@@ -731,6 +731,15 @@ func start_run(m: String) -> void:
 			st0["max"] = mini(8, int(st0["max"]) + g0 / 3)
 			st0["hp"] = st0["max"]
 			st0["pot"] = int(st0["pot"]) + 1 + g0 / 4
+			# ... and the relics a run would have picked by then (one per altar).
+			var party_l: Array = [{"knight": _is_knight(int(s)), "relics": st0["relics"]}]
+			for k0 in (g0 + 2) / 2:
+				var o: Array = Relics.offer(seed_v, k0 / 2, 1 + 2 * (k0 % 2), Relics.unlocked(hoard()), party_l)
+				if not o.is_empty():
+					(st0["relics"] as Array).append(String(o[0]))
+					if String(o[0]) == "glass":
+						st0["max"] = maxi(2, int(st0["max"]) - 2)
+						st0["hp"] = st0["max"]
 		_gold = 20 * g0
 	checkpoint = {}
 	var pd := progress()

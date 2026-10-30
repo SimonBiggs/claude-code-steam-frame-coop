@@ -40,7 +40,7 @@ const ZONES: Array[Dictionary] = [
 		"foes": {F_SHIELD: 3.0, F_SPITTER: 2.0, F_SWARM: 2.0, F_HEALER: 2.0, F_SLIME: 1.0, F_BOMBER: 1.0},
 		"floor": [Color(0.36, 0.34, 0.44), Color(0.44, 0.42, 0.52)], "wall": Color(0.42, 0.4, 0.52), "glow": Color(0.6, 0.75, 1.0)},
 	{"id": "crystal", "name": "CRYSTAL CAVES", "short": "CRYSTAL", "boss": B_CRYSTAL, "traps": ["spikes", "collapse"], "feature": "shards",
-		"foes": {F_SPITTER: 3.0, F_CHARGER: 2.0, F_SWARM: 2.0, F_SHIELD: 1.5, F_HEALER: 1.0, F_SLIME: 1.0},
+		"foes": {F_SPITTER: 2.0, F_CHARGER: 2.0, F_SWARM: 1.5, F_SHIELD: 2.0, F_HEALER: 1.0, F_SLIME: 1.5},
 		"floor": [Color(0.24, 0.3, 0.42), Color(0.3, 0.38, 0.52)], "wall": Color(0.3, 0.36, 0.5), "glow": Color(0.5, 0.95, 1.0)},
 	{"id": "forge", "name": "LAVA FORGE", "short": "FORGE", "boss": B_FORGE, "traps": ["boulder", "collapse", "spikes"], "feature": "vents",
 		"foes": {F_SHIELD: 2.0, F_CHARGER: 2.0, F_BOMBER: 2.0, F_SPITTER: 2.0, F_SWARM: 2.0, F_HEALER: 1.0, F_SLIME: 1.0},
@@ -867,7 +867,7 @@ static func scaling(base_hp: float, base_spd: float, heroic: bool, zone: int, fl
 	if heroic:
 		e = clampf((g - 1.0) / 8.0, 0.0, 1.0) + clampf((g - 10.0) / 8.0, 0.0, 1.5)
 	else:
-		e = clampf((g - 6.0) / 10.0, 0.0, 1.0) + clampf((g - 16.0) / 12.0, 0.0, 1.0)
+		e = clampf((g - 6.0) / 12.0, 0.0, 1.0) + clampf((g - 18.0) / 12.0, 0.0, 1.0)
 	return {"hp": base_hp * (1.0 + 0.1 * g) * (1.0 + 0.06 * past) * (1.3 if mod == "STONE" else 1.0) * (1.0 + 0.25 * (n - 1)),
 		"boss_hp": base_hp * (1.0 + 0.45 * (n - 1)) * (1.0 + 0.12 * minf(float(zone), 8.0)),
 		"dmg": int(floor(e)), "dmg_p": e - floor(e),

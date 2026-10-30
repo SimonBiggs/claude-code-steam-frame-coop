@@ -488,6 +488,8 @@ func step(delta: float, targets: Array, active_room: int) -> void:
 
 func _dmg(base: int, m: Dictionary) -> int:
 	var elite_bonus := 1 if bool(m["elite"]) and base > 0 and int(m["kind"]) not in [FloorGen.F_SLIME, FloorGen.F_SWARM] else 0
+	if int(m["kind"]) in [FloorGen.F_SLIME, FloorGen.F_SWARM]:
+		return base + int(cfg["dmg"]) + elite_bonus  # the little ones never hit extra hard
 	return base + int(cfg["dmg"]) + elite_bonus + int(m.get("hard", 0))
 
 
