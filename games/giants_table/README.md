@@ -20,6 +20,26 @@ You lose when the campfire has no embers left and none can be won back, or when 
 down for 20 seconds. The end screen lists the HEROES OF THE VILLAGE with a fun award each (GOBLIN BOWLER,
 SQUISHER, SKY CATCHER, KNIGHT TAXI, HUMAN UMBRELLA; GOBLIN BASHER, EMBER HERO, LIFESAVER, KING BREAKER).
 
+**Sparky's story, goblin ladders and keepsakes** (`raidgen.gd`, `table_story.gd`, `story_pictures.gd`):
+- **SPARKY**, the campfire's little flame, has a face in the fire (it looks at the Giant, shrinks as embers go,
+  bounces when the village cheers) and tells the story on picture cards ("Hi Giant! I'm Sparky!", "Goblins! Up the
+  ladder!", "Two ladders!", "You saved the village!"), on every TV view and in front of the VR Giant.
+- **Seeded raids:** every wave's goblins climb wooden **ladders** (with a red flag) on the table edge. The next
+  wave's ladders appear in the break before it, so everyone sees where the goblins will come from: one ladder on the
+  Giant's side for waves 1-2, two from wave 3, two or three from wave 6. What comes up which ladder, and how fast, is
+  planned from the raid seed for the party (alone, or 1-6 knights), and the next goblin comes at once when the table
+  is empty. `tests/giants_table_gen_test.gd` proves over many seeds and every party that every wave is fair: ladders
+  apart, never in the river or on a boulder, a path to the fire that takes long enough; a slow small kid (4 s per
+  goblin as the Giant, 6 s as a knight) loses no ember in waves 1-2, at most one a wave in the night, and the fire
+  never drops below 6.
+- **A night:** clear wave 6 (the Goblin King's) and the village is saved: the villagers leave a **gift** on the far
+  rim (pie, cake, teddy, scarf, party flags, flowers; saved, the last 12 stay), a gold sparkle on TODAY'S RAID. A
+  **lantern** joins the rim each play-day (up to 16), and after 5 saved nights Sparky wears a **crown**.
+- **TODAY'S RAID:** the first game each day uses the day's seed, the same on every machine (`GT_SEED=n` fixes it).
+- **Telemetry:** one `RUN:` line per wave, at game over and on quit (seed, daily, lost embers, knights, VR...).
+- Networked: the snapshot's last entry is `[raid seed, daily, ladder wave, gifts, play-days, crown]`; TV machines
+  build the ladders and gifts themselves.
+
 **Simple mode (`SIMPLE_MODE := true` in main.gd, the default).** The family found the games too
 complicated and too wordy, so the game is now just: grab the goblins walking to the campfire and throw
 them; the knights bonk them. Everything below that needs explaining is switched off behind that flag
@@ -101,6 +121,7 @@ code for anything the giant can throw.
 ## Tests
 
 ```sh
+godot-test --headless --path . -s res://tests/giants_table_gen_test.gd   # the raid validator (SEEDS=500 for more)
 godot --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/giants_table_bot.tscn
 DUO_PORT=7781 DUO_HOST=1 timeout 75 godot --headless --path . res://tests/giants_table_bot.tscn &
 DUO_PORT=7781 DUO_JOIN=127.0.0.1 timeout 68 godot --headless --path . res://tests/giants_table_bot.tscn

@@ -6,7 +6,8 @@ extends RefCounted
 ##   const StoryCard := preload("res://core/story_card.gd")
 ##   StoryCard.show(huds_array, {"who": "PIP", "line": "The wind took my letters!", "pic": "bird",
 ##       "color": Color(1, 0.7, 0.3), "duration": 4.0})
-##   StoryCard.show_vr(self, vr_rig.camera, same_opts)   # opts.vr_height: card height vs the eyes (-0.22)
+##   StoryCard.show_vr(self, vr_rig.camera, same_opts)   # opts.vr_height: card height vs the eyes (-0.22),
+##       opts.world_scale: XRServer.world_scale for diorama games (the card scales with the world)
 ##   StoryCard.picture("envelope", 96.0, color)   # just the picture Control (results screens, maps)
 ## Pictures (drawn in code, no textures). Shared ones here: bird, envelope, cloud, storm, house, sprite (a wind
 ## sprite), sun, wave, tree, castle, kaiju (a friendly monster face in `color`), penguin (Tumble, with a scarf),
@@ -74,6 +75,14 @@ static func show_vr(world: Node, cam: Node3D, opts: Dictionary) -> Node3D:
 	var pic := String(opts.get("pic", ""))
 	if pic != "":
 		card.add_child(StoryCardPics.vr_medallion(pic, UiKit.color_of(opts.get("color", "accent"), UiKit.ACCENT), card))
+	# A diorama game (XROrigin3D.world_scale > 1, e.g. Giant's Table 20, Block Builders 8): the card scales with the
+	# world, so it's as big and as far away as anywhere else. Pass opts.world_scale = XRServer.world_scale.
+	var ws := float(opts.get("world_scale", 1.0))
+	if ws > 0.0 and not is_equal_approx(ws, 1.0):
+		card.distance *= ws
+		card.height *= ws
+		card.scale = Vector3.ONE * ws
+		UiKit.vr_place(card, cam, card.distance, card.height)
 	return card
 
 
