@@ -229,7 +229,6 @@ var charm_list: Array = []  # [[kind, play-day, golden], ...]
 var charm_days := 0
 var charm_root: Node3D
 var charm_count := -1
-var charm_resend := 0.0
 var story_queue: Array = []
 var story_t := 0.0
 var ghost_hands: Node3D
@@ -285,6 +284,7 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
+	net.sticky_event("charms")  # a machine that joins later gets the latest one (core/net.gd)
 	seats = ClassicSeats.new(self, {
 		"no_keys": GunnerScript.NO_KEYS,
 		"free_actions": ["restart", "next", "pause"],
@@ -1740,10 +1740,6 @@ func _process(delta: float) -> void:
 		music.play_track(maxi(level - 1, 0))
 	_update_story(delta)
 	stage_t += delta
-	if net.mode == "host" and net.connected and save != null:
-		charm_resend -= delta
-		if charm_resend <= 0.0:
-			_send_charms()  # a machine that missed them (or joined later) catches up
 	if mirror_vp:
 		mirror_t -= delta
 		if mirror_t <= 0.0:
@@ -2303,7 +2299,6 @@ func _check_join(delta: float) -> void:
 # --- Networked co-op (see docs/GAME_DEV_GUIDE.md) ----------------------------
 
 func on_client_joined() -> void:
-	_send_charms()
 	if not seats.first_machine():
 		return  # each machine's gunners climb aboard when they ask ("join")
 	if SIMPLE_MODE:
@@ -2693,8 +2688,7 @@ func _add_charm() -> void:
 
 
 func _send_charms() -> void:
-	charm_resend = 8.0
-	if net and net.mode == "host" and save != null:
+	if net and net.mode != "client" and save != null:
 		net.event("charms", [(save.data.charms as Array).duplicate(true), int(save.data.days)])
 
 

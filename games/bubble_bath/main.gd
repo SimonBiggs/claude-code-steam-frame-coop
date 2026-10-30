@@ -154,7 +154,6 @@ var golden_caught := 0
 var mama: Node3D
 var family_root: Node3D
 var family_key := ""
-var family_resend := 0.0
 var story_queue: Array = []
 var story_t := 0.0
 
@@ -167,6 +166,7 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
+	net.sticky_event("family")  # a machine that joins later gets the latest one (core/net.gd)
 	net.state_changed.connect(_on_state_changed)
 	party = Party.new()
 	party.name = "Party"
@@ -706,10 +706,6 @@ func _process(delta: float) -> void:
 	_update_bubbles(delta)
 	_update_story(delta)
 	_animate_family()
-	if net.mode == "host" and net.connected and save != null:
-		family_resend -= delta
-		if family_resend <= 0.0:
-			_send_family()  # a machine that missed it (or joined later) catches up
 	if net.mode == "client":
 		_animate_client_ducks(delta)
 		return
@@ -1438,13 +1434,8 @@ func cheer() -> void:
 
 
 func _send_family() -> void:
-	family_resend = 8.0
 	if net != null and net.mode == "host" and save != null:
 		net.event("family", [(save.data.toys as Array).duplicate(true), int(save.data.days), int(save.data.goals) >= BathGen.CROWN_TOYS])
-
-
-func on_client_joined() -> void:
-	_send_family()
 
 
 ## Every machine: Mama Duck (crowned with ten toys), a duckling per play-day beside her and the toys on the side rim.
