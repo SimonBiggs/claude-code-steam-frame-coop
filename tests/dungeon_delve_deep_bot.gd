@@ -14,6 +14,7 @@ const FloorGen := preload("res://games/dungeon_delve/floorgen.gd")
 const Foes := preload("res://games/dungeon_delve/foes.gd")
 const Tele := preload("res://games/dungeon_delve/tele.gd")
 const Loot := preload("res://games/dungeon_delve/loot.gd")
+const Relics := preload("res://games/dungeon_delve/relics.gd")
 const VrRig := preload("res://core/vr_rig.gd")
 
 var kit: Node
@@ -25,6 +26,7 @@ var swing_side := 1.0
 var _wp_cache := {}
 var stall := {}
 var ignore := {}
+var relic_start := {}  ## "floor/slot" -> relics held on arriving at a camp
 
 
 func deep() -> Node:
@@ -433,8 +435,24 @@ func _goal(slot: int, pos: Vector3, room: int, index: int) -> Dictionary:
 	var f: Dictionary = dp.f
 	var walk: int = dp.view.pass_bits
 	var reach_rooms := _reachable(room, walk)
-	# Shop.
+	# Shop (first the relic altar: each bot takes a different stone).
 	if String(f["kind"]) == "shop":
+		var mine: Array = _stats(slot).get("relics", [])
+		var ak := "%s/%d" % [dp.built_key, slot]
+		if not relic_start.has(ak):
+			relic_start[ak] = mine.size()
+		if mine.size() == int(relic_start[ak]):
+			var picks0: Dictionary = dp.pickups if main.net.mode != "client" else dp._mirror_picks
+			var ids: Array = picks0.keys()
+			ids.sort()
+			var cands: Array = []
+			for id0 in ids:
+				var k0 := int((picks0[id0] as Dictionary)["kind"])
+				if Relics.is_relic_kind(k0) and Relics.usable(Relics.id_of_kind(k0), {"knight": dp._is_knight(slot), "relics": mine}):
+					cands.append(Vector3((picks0[id0] as Dictionary)["p"]))
+			if not cands.is_empty():
+				var rp: Vector3 = cands[index % cands.size()]
+				return {"p": Vector3(rp.x, 0.0, rp.z), "near": 0.25}
 		var shop: Array = main.net.state_get("d_shop", [])
 		var gold := int(main.net.state_get("d_gold", 0))
 		for i in shop.size():

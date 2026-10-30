@@ -19,27 +19,38 @@ const TILE := 2.0 * HALF / 7.0  ## floor tiles: 7 x 7 per room (spikes and crumb
 const GRID := 5
 const ORIGIN := Vector3(80.0, 0.0, 0.0)  ## far away from the GENTLE dungeon
 const FLOORS_PER_ZONE := 4
-const ZONE_COUNT := 3
+const ZONE_COUNT := 4  ## biomes: Slime Caves, Bone Crypt, Crystal Caves, Lava Forge (then the endless depths)
 
 enum { OPEN, LOCKED, SECRET, PUZZLE, BOSS }
 const DIRS: Array[Vector2i] = [Vector2i(0, -1), Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, 0)]  ## N E S W
 
 ## Foe kinds (games/dungeon_delve/foes.gd uses the same numbers).
 enum { F_SLIME, F_SPITTER, F_SHIELD, F_SWARM, F_HEALER, F_MIMIC, F_CHARGER, F_BOMBER,
-	B_SLIME, B_BONE, B_FORGE }
+	B_SLIME, B_BONE, B_FORGE, B_CRYSTAL }
 const FOE_COST := {F_SLIME: 1.0, F_SPITTER: 2.0, F_SHIELD: 2.5, F_SWARM: 2.0, F_HEALER: 2.0, F_CHARGER: 3.0, F_BOMBER: 2.0}
 
+## The biomes, top to bottom. "id" picks looks (foes.gd, floor_view.gd); "feature" is the biome's own
+## hazard in its fight rooms: CRYSTAL CAVES grow crystal clusters that burst a lane of shards, the LAVA
+## FORGE has lava vents that glow, then blast fire up (both always glow on the floor first).
 const ZONES: Array[Dictionary] = [
-	{"name": "SLIME CAVES", "short": "CAVES", "boss": B_SLIME, "traps": ["spikes", "collapse"],
+	{"id": "caves", "name": "SLIME CAVES", "short": "CAVES", "boss": B_SLIME, "traps": ["spikes", "collapse"], "feature": "",
 		"foes": {F_SLIME: 5.0, F_SPITTER: 2.0, F_SWARM: 2.0, F_HEALER: 1.0, F_CHARGER: 1.0},
 		"floor": [Color(0.3, 0.42, 0.36), Color(0.36, 0.5, 0.42)], "wall": Color(0.33, 0.45, 0.42), "glow": Color(0.45, 1.0, 0.6)},
-	{"name": "BONE CRYPT", "short": "CRYPT", "boss": B_BONE, "traps": ["spikes", "boulder"],
+	{"id": "crypt", "name": "BONE CRYPT", "short": "CRYPT", "boss": B_BONE, "traps": ["spikes", "boulder"], "feature": "",
 		"foes": {F_SHIELD: 3.0, F_SPITTER: 2.0, F_SWARM: 2.0, F_HEALER: 2.0, F_SLIME: 1.0, F_BOMBER: 1.0},
 		"floor": [Color(0.36, 0.34, 0.44), Color(0.44, 0.42, 0.52)], "wall": Color(0.42, 0.4, 0.52), "glow": Color(0.6, 0.75, 1.0)},
-	{"name": "LAVA FORGE", "short": "FORGE", "boss": B_FORGE, "traps": ["boulder", "collapse", "spikes"],
+	{"id": "crystal", "name": "CRYSTAL CAVES", "short": "CRYSTAL", "boss": B_CRYSTAL, "traps": ["spikes", "collapse"], "feature": "shards",
+		"foes": {F_SPITTER: 3.0, F_CHARGER: 2.0, F_SWARM: 2.0, F_SHIELD: 1.5, F_HEALER: 1.0, F_SLIME: 1.0},
+		"floor": [Color(0.24, 0.3, 0.42), Color(0.3, 0.38, 0.52)], "wall": Color(0.3, 0.36, 0.5), "glow": Color(0.5, 0.95, 1.0)},
+	{"id": "forge", "name": "LAVA FORGE", "short": "FORGE", "boss": B_FORGE, "traps": ["boulder", "collapse", "spikes"], "feature": "vents",
 		"foes": {F_SHIELD: 2.0, F_CHARGER: 2.0, F_BOMBER: 2.0, F_SPITTER: 2.0, F_SWARM: 2.0, F_HEALER: 1.0, F_SLIME: 1.0},
 		"floor": [Color(0.3, 0.24, 0.24), Color(0.38, 0.3, 0.28)], "wall": Color(0.36, 0.28, 0.27), "glow": Color(1.0, 0.5, 0.2)},
 ]
+## Biome hazards: seconds of glowing warning before they go off (tests check every one is readable), the
+## cycle, and how big they are.
+const FEATURE := {"shards": {"warn": 1.4, "period": 5.5, "len": 6.0, "width": 1.1},
+	"vents": {"warn": 1.3, "period": 4.6, "radius": 1.05}}
+const MIN_WARN := 0.9  ## nothing that hurts may glow for less than this (tests: features, boss tells)
 
 ## Pillar layouts (local rects: [cx, cz, half_x, half_z]).
 const LAYOUTS: Array = [
@@ -51,7 +62,7 @@ const LAYOUTS: Array = [
 ]
 
 
-## ENDLESS: after the third boss the zones go round again (deeper = tougher) and every floor gets a
+## ENDLESS: after the last biome's boss the zones go round again (deeper = tougher) and every floor gets a
 ## twist: SWIFT (monsters faster), SWARM (more of them), ELITES (lots of gold-ringed ones), STONE
 ## (tougher hides). "" for the first three zones.
 const MODS: Array[String] = ["SWIFT", "SWARM", "ELITES", "STONE"]
@@ -63,8 +74,8 @@ static func modifier(seed_value: int, zone: int, floor_i: int) -> String:
 	return MODS[absi(hash([seed_value, zone, floor_i, "mod"])) % MODS.size()]
 
 
-## A zone's look and monsters (the endless depths go round the three zones again). Always use this,
-## never ZONES[zone] directly (zone 3+ is past the end of the list).
+## A zone's look and monsters (the endless depths go round the biomes again). Always use this,
+## never ZONES[zone] directly (zone 4+ is past the end of the list).
 static func zone_data(zone: int) -> Dictionary:
 	return ZONES[posmod(zone, ZONES.size())]
 
@@ -94,7 +105,7 @@ static func generate(seed_value: int, zone: int, floor_i: int, heroic: bool, kin
 		return f
 	var boss_floor := is_boss_floor(floor_i)
 	var g := global_floor(zone, floor_i)
-	var n := 5 + floor_i + (1 if zone > 0 else 0) + (1 if heroic else 0)
+	var n := 5 + (g + 1) / 3 + (1 if heroic else 0)  # more rooms the deeper you go (never fewer than the floor before)
 	if boss_floor:
 		n = 5 + zone
 	n = mini(n, 10)
@@ -472,6 +483,35 @@ static func _fill_room(f: Dictionary, i: int, rng: RandomNumberGenerator, zd: Di
 			var tk2: String = kinds[rng.randi_range(0, kinds.size() - 1)]
 			if tk2 != tk:
 				_make_trap(f, i, tk2, rng, taken)
+	# The biome's own hazard (crystal shards, lava vents) in rooms you fight in; never the start, boss or camp.
+	r["features"] = []
+	var feat := String(zd.get("feature", ""))
+	if feat != "" and role in ["fight", "trap", "exit"]:
+		var count := 1 + (1 if g >= 13 else 0) + (1 if role == "exit" and g >= 14 else 0)
+		for k in count:
+			var phase := rng.randf_range(0.0, float(FEATURE[feat]["period"]))
+			if feat == "vents":
+				var vp := Vector2.INF
+				for t in 6:
+					var cand := free_spot(f, i, rng, taken, 0.9, 3.8)
+					if not r.has("stairs") or (r["stairs"] as Vector2).distance_to(cand) >= 2.0:
+						vp = cand
+						break
+				if vp != Vector2.INF:
+					taken.append(vp + Vector2(0.01, 0.0))  # (a second marker: the key keeps further off)
+					(r["features"] as Array).append({"kind": feat, "p": vp, "dir": 0, "phase": phase})
+			else:
+				var walls: Array = []
+				for d in 4:
+					if not (r["doors"] as Dictionary).has(d):
+						walls.append(d)
+				if walls.is_empty():
+					continue
+				var wd: int = walls[rng.randi_range(0, walls.size() - 1)]
+				var along := rng.randf_range(-3.0, 3.0)
+				var dv := Vector2(DIRS[wd])
+				var cp := dv * (HALF - 0.35) + Vector2(-dv.y, dv.x) * along
+				(r["features"] as Array).append({"kind": feat, "p": cp, "dir": (wd + 2) % 4, "phase": phase})
 	# Chests (some are mimics) and pots.
 	var chest_p := 0.0
 	match role:
@@ -499,6 +539,14 @@ static func _fill_room(f: Dictionary, i: int, rng: RandomNumberGenerator, zd: Di
 			(r["pots"] as Array).append(corner)
 	if r["key"]:
 		r["key_at"] = free_spot(f, i, rng, taken, 0.8, 2.5)
+		for t2 in 8:  # never on a lava vent
+			var clear := true
+			for fe in r["features"]:
+				if String((fe as Dictionary)["kind"]) == "vents" and ((fe as Dictionary)["p"] as Vector2).distance_to(r["key_at"]) < 1.6:
+					clear = false
+			if clear:
+				break
+			r["key_at"] = free_spot(f, i, rng, taken, 0.8, 3.5)
 
 
 static func _weighted(table: Dictionary, rng: RandomNumberGenerator) -> int:
@@ -803,3 +851,57 @@ static func room_door_bits(f: Dictionary, ri: int) -> int:
 	for d in (((f["rooms"] as Array)[ri] as Dictionary)["doors"] as Dictionary).values():
 		bits |= 1 << int(d)
 	return bits
+
+
+# --- Difficulty and fairness (deep.gd uses these; tests/dungeon_delve_floors_test.gd proves them) ---------
+
+## How tough monsters are on a floor. base_hp / base_spd: the difficulty's (deep.gd DIFF), players: how many.
+## Everything climbs a little every floor, never in a jump: health and speed grow evenly, and harder hits
+## come in gradually (dmg + a chance dmg_p that a monster hits one heart harder). Past the last biome's boss
+## (the endless depths) health keeps climbing a bit faster; STONE / SWIFT twists add on top.
+static func scaling(base_hp: float, base_spd: float, heroic: bool, zone: int, floor_i: int, players: int, mod: String = "") -> Dictionary:
+	var g := float(global_floor(zone, floor_i))
+	var past := maxf(0.0, g - float(ZONE_COUNT * FLOORS_PER_ZONE - 1))
+	var n := maxi(1, players)
+	var e := 0.0
+	if heroic:
+		e = clampf((g - 1.0) / 8.0, 0.0, 1.0) + clampf((g - 10.0) / 8.0, 0.0, 1.5)
+	else:
+		e = clampf((g - 6.0) / 10.0, 0.0, 1.0) + clampf((g - 16.0) / 12.0, 0.0, 1.0)
+	return {"hp": base_hp * (1.0 + 0.1 * g) * (1.0 + 0.06 * past) * (1.3 if mod == "STONE" else 1.0) * (1.0 + 0.25 * (n - 1)),
+		"boss_hp": base_hp * (1.0 + 0.45 * (n - 1)) * (1.0 + 0.12 * minf(float(zone), 8.0)),
+		"dmg": int(floor(e)), "dmg_p": e - floor(e),
+		"spd": base_spd * (1.0 + 0.03 * minf(g, 16.0)) * (1.2 if mod == "SWIFT" else 1.0)}
+
+
+## One number for "how hard is a monster here" (health x speed x hits), for the smooth-climb check.
+static func strength(s: Dictionary) -> float:
+	return float(s["hp"]) * float(s["spd"]) * (1.0 + 0.35 * (float(s["dmg"]) + float(s["dmg_p"])))
+
+
+## "" if the boss room of floor f is fair, else what's wrong: an open arena (no pillars, traps or biome
+## hazards), one boss of the biome, the boss starting well away from the door you come in by, the boss
+## door the only way in, and reachable (solve).
+static func boss_room_problem(f: Dictionary) -> String:
+	var bi := int(f["boss"])
+	if bi < 0:
+		return "no boss room"
+	var r: Dictionary = (f["rooms"] as Array)[bi]
+	if int(r["layout"]) != 0:
+		return "pillars in the boss room"
+	if not (r["traps"] as Array).is_empty() or not (r.get("features", []) as Array).is_empty():
+		return "traps in the boss room"
+	var fl: Array = r["foes"]
+	if fl.size() != 1 or int((fl[0] as Array)[0]) != int(zone_data(int(f["zone"]))["boss"]):
+		return "the boss room should hold just the biome's boss"
+	var ds: Dictionary = r["doors"]
+	if ds.size() != 1:
+		return "the boss room has %d doors" % ds.size()
+	for d in ds:
+		if int(((f["doors"] as Array)[int(ds[d])] as Dictionary)["type"]) != BOSS:
+			return "the way into the boss room isn't the boss door"
+		if door_local(int(d)).distance_to((fl[0] as Array)[1]) < 3.0:
+			return "the boss starts right by the door"
+	if not solve(f).has(bi):
+		return "the boss room can't be reached"
+	return ""

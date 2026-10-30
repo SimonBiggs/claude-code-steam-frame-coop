@@ -18,6 +18,10 @@ extends Node3D
 ##    shield is up: hit him from behind. Bone rain.
 ##  - FORGE GOLEM: stomps (a ring), fire breath (a lane), charges (into a wall: dizzy, hit him!), lava
 ##    pools, magma ORBS.
+##  - CRYSTAL QUEEN (a big crystal spider): prism BEAMS (glowing lanes fan out from her), a shard RING,
+##    crystals bursting under your feet, crystal ORBS; from phase 2 she grows crystal spitters.
+## Every boss attack winds up for TELLS[boss][attack] seconds (a bit less each phase: PHASE_FAST), and
+## the floor glows where it will hit: tests/dungeon_delve_floors_test.gd checks every tell stays readable.
 ## main/deep calls: deep.hurt(key, dmg, from, blockable), deep.hazard(...), deep.sound_at(...),
 ## deep.foe_died(id, m), deep.boss_phase(id, phase).
 
@@ -28,19 +32,33 @@ const HudKit := preload("res://core/hud_kit.gd")
 const Tele := preload("res://games/dungeon_delve/tele.gd")
 
 enum { IDLE, MOVE, WIND, ACT, STUN, SLEEP, RECOVER, FLY }
-const BOSSES: Array[int] = [FloorGen.B_SLIME, FloorGen.B_BONE, FloorGen.B_FORGE]
-const BOSS_NAMES := {FloorGen.B_SLIME: "SLIME KING", FloorGen.B_BONE: "BONE LORD", FloorGen.B_FORGE: "FORGE GOLEM"}
+const BOSSES: Array[int] = [FloorGen.B_SLIME, FloorGen.B_BONE, FloorGen.B_CRYSTAL, FloorGen.B_FORGE]
+const BOSS_NAMES := {FloorGen.B_SLIME: "SLIME KING", FloorGen.B_BONE: "BONE LORD", FloorGen.B_FORGE: "FORGE GOLEM",
+	FloorGen.B_CRYSTAL: "CRYSTAL QUEEN"}
+## Boss wind-ups (seconds at phase 1) per attack; each phase after the first divides them by (1 + PHASE_FAST).
+const TELLS := {
+	FloorGen.B_SLIME: {"jump": 1.0, "spit": 0.95, "orb": 1.1, "rain": 0.95},
+	FloorGen.B_BONE: {"sweep": 1.05, "orbs": 0.95, "summon": 1.2, "rain": 1.0},
+	FloorGen.B_FORGE: {"stomp": 0.95, "breath": 1.05, "charge": 1.2, "lava": 0.95, "orb": 0.95},
+	FloorGen.B_CRYSTAL: {"beams": 1.15, "ring": 1.0, "burst": 1.0, "orb": 1.0, "grow": 1.2},
+}
+const PHASE_FAST := 0.25
+## Shot kinds in the snapshot (append only: every machine must agree). bolt = a wizard's magic, fire = the
+## DRAGON EGG relic's baby dragon.
+const SHOT_KINDS: Array[String] = ["ball", "orb", "bomb", "arrow", "bolt", "fire"]
+const MIN_TELL := 0.6  ## no boss attack winds up quicker than this, even at phase 3 (tests)
 const BASE_HP := {FloorGen.F_SLIME: 2.0, FloorGen.F_SPITTER: 2.0, FloorGen.F_SHIELD: 4.0, FloorGen.F_SWARM: 1.0,
 	FloorGen.F_HEALER: 3.0, FloorGen.F_MIMIC: 6.0, FloorGen.F_CHARGER: 4.0, FloorGen.F_BOMBER: 3.0,
-	FloorGen.B_SLIME: 55.0, FloorGen.B_BONE: 80.0, FloorGen.B_FORGE: 100.0}  # boss fights last about a minute or two
+	FloorGen.B_SLIME: 55.0, FloorGen.B_BONE: 80.0, FloorGen.B_CRYSTAL: 95.0, FloorGen.B_FORGE: 110.0}  # boss fights last about a minute or two
 const GOLD := {FloorGen.F_SLIME: 1, FloorGen.F_SPITTER: 2, FloorGen.F_SHIELD: 3, FloorGen.F_SWARM: 1,
 	FloorGen.F_HEALER: 3, FloorGen.F_MIMIC: 15, FloorGen.F_CHARGER: 4, FloorGen.F_BOMBER: 3,
-	FloorGen.B_SLIME: 40, FloorGen.B_BONE: 60, FloorGen.B_FORGE: 80}
+	FloorGen.B_SLIME: 40, FloorGen.B_BONE: 60, FloorGen.B_CRYSTAL: 70, FloorGen.B_FORGE: 80}
 
 var deep: Node  ## host: the rules (deep.gd); null on mirrors
 var f: Dictionary = {}
 var zone := 0
-var cfg := {"hp": 1.0, "dmg": 0, "spd": 1.0, "boss_hp": 1.0}  ## host scaling (deep.gd sets it per room)
+var biome := "caves"  ## FloorGen ZONES id: picks the monsters' looks
+var cfg := {"hp": 1.0, "dmg": 0, "dmg_p": 0.0, "spd": 1.0, "boss_hp": 1.0}  ## host scaling (deep.gd sets it per room)
 var mons := {}  ## id -> Dictionary
 var shots := {}  ## id -> {"kind", "p", "v", "t", "owner": foe id or -2 (reflected by players), "r"}
 var next_id := 1
@@ -58,6 +76,7 @@ func set_floor(fl: Dictionary) -> void:
 	clear()
 	f = fl
 	zone = int(f["zone"]) % FloorGen.ZONES.size()
+	biome = String(FloorGen.zone_data(zone)["id"])
 	room_rects.clear()
 	for r in f["rooms"]:
 		var c := FloorGen.cell_center((r as Dictionary)["cell"])
@@ -106,47 +125,62 @@ func spawn(kind: int, p: Vector3, room: int, elite: bool = false) -> int:
 		m["st"] = SLEEP
 	m["t"] = randf_range(0.4, 1.4)
 	m["cd"] = randf_range(1.0, 2.5)
+	m["hard"] = 1 if not is_boss(kind) and randf() < float(cfg.get("dmg_p", 0.0)) else 0  # deeper: more monsters hit harder
 	return id
 
 
+## A boss attack's wind-up at this phase (TELLS, PHASE_FAST).
+static func tell(kind: int, attack: String, phase: int) -> float:
+	return float((TELLS[kind] as Dictionary).get(attack, 1.0)) / (1.0 + PHASE_FAST * float(maxi(0, phase - 1)))
+
+
 func _look(kind: int, id: int) -> Node3D:
-	var z := zone
+	var bi := biome
 	match kind:
 		FloorGen.F_SLIME:
-			var cols: Array[Color] = [Color(0.45, 0.9, 0.45), Color(0.7, 0.5, 1.0), Color(1.0, 0.55, 0.25)]
-			return Creatures.monster("slime", {"color": cols[z]})
+			var cols := {"caves": Color(0.45, 0.9, 0.45), "crypt": Color(0.7, 0.5, 1.0), "crystal": Color(0.45, 0.85, 1.0), "forge": Color(1.0, 0.55, 0.25)}
+			return Creatures.monster("slime", {"color": cols.get(bi, Color(0.45, 0.9, 0.45))})
 		FloorGen.F_SPITTER:
-			if z == 0:
-				return Creatures.monster("frog", {"color": Color(0.55, 0.85, 0.35), "seed": id})
-			if z == 1:
-				return Creatures.monster("skeleton", {"weapon": "bow", "seed": id, "eye_color": Color(1.0, 0.6, 0.3)})
+			match bi:
+				"caves":
+					return Creatures.monster("frog", {"color": Color(0.55, 0.85, 0.35), "seed": id})
+				"crypt":
+					return Creatures.monster("skeleton", {"weapon": "bow", "seed": id, "eye_color": Color(1.0, 0.6, 0.3)})
+				"crystal":
+					return Creatures.monster("spider", {"color": Color(0.5, 0.8, 1.0), "seed": id})
 			return Creatures.monster("dragon", {"color": Color(1.0, 0.45, 0.25), "scale": 0.45, "seed": id})
 		FloorGen.F_SHIELD:
 			var n: Node3D
-			if z == 0:
-				n = Creatures.monster("crab", {"color": Color(1.0, 0.5, 0.4), "seed": id})
-			elif z == 1:
-				n = Creatures.monster("skeleton", {"weapon": "sword", "offhand": "none", "seed": id})
-			else:
-				n = Creatures.monster("robot", {"color": Color(0.6, 0.6, 0.7), "seed": id})
+			match bi:
+				"caves":
+					n = Creatures.monster("crab", {"color": Color(1.0, 0.5, 0.4), "seed": id})
+				"crypt":
+					n = Creatures.monster("skeleton", {"weapon": "sword", "offhand": "none", "seed": id})
+				"crystal":
+					n = Creatures.monster("golem", {"color": Color(0.55, 0.75, 0.95), "scale": 0.7, "seed": id})
+				_:
+					n = Creatures.monster("robot", {"color": Color(0.6, 0.6, 0.7), "seed": id})
 			n.add_child(_shield_node())
 			return n
 		FloorGen.F_SWARM:
-			if z == 2:
+			if bi == "forge":
 				return Creatures.monster("bee", {"color": Color(1.0, 0.6, 0.2), "seed": id})
-			return Creatures.monster("bat", {"color": Color(0.55, 0.4, 0.75) if z == 0 else Color(0.4, 0.4, 0.55), "seed": id})
+			var bc := {"caves": Color(0.55, 0.4, 0.75), "crystal": Color(0.4, 0.75, 0.9)}
+			return Creatures.monster("bat", {"color": bc.get(bi, Color(0.4, 0.4, 0.55)), "seed": id})
 		FloorGen.F_HEALER:
-			if z == 0:
+			if bi == "caves":
 				return Creatures.monster("mushroom", {"color": Color(0.4, 0.9, 0.6), "seed": id})
-			return Creatures.monster("ghost", {"color": Color(0.7, 1.0, 0.8) if z == 1 else Color(1.0, 0.85, 0.5), "seed": id})
+			var hc := {"crypt": Color(0.7, 1.0, 0.8), "crystal": Color(1.0, 0.7, 0.95)}
+			return Creatures.monster("ghost", {"color": hc.get(bi, Color(1.0, 0.85, 0.5)), "seed": id})
 		FloorGen.F_MIMIC:
 			return Creatures.monster("mimic", {"seed": id})
 		FloorGen.F_CHARGER:
-			if z == 2:
+			if bi == "forge":
 				return Creatures.monster("golem", {"color": Color(0.55, 0.4, 0.35), "seed": id})
-			return Creatures.monster("wolf", {"color": Color(0.55, 0.55, 0.6) if z == 0 else Color(0.45, 0.45, 0.6), "seed": id})
+			var wc := {"caves": Color(0.55, 0.55, 0.6), "crystal": Color(0.75, 0.9, 1.0)}
+			return Creatures.monster("wolf", {"color": wc.get(bi, Color(0.45, 0.45, 0.6)), "seed": id})
 		FloorGen.F_BOMBER:
-			return Creatures.monster("goblin", {"weapon": "none", "seed": id, "color": Color(0.5, 0.78, 0.35) if z != 2 else Color(0.85, 0.5, 0.35)})
+			return Creatures.monster("goblin", {"weapon": "none", "seed": id, "color": Color(0.5, 0.78, 0.35) if bi != "forge" else Color(0.85, 0.5, 0.35)})
 		FloorGen.B_SLIME:
 			return Creatures.monster("slime", {"color": Color(0.5, 0.85, 1.0), "boss": true, "scale": 1.5})
 		FloorGen.B_BONE:
@@ -155,6 +189,14 @@ func _look(kind: int, id: int) -> Node3D:
 			return b
 		FloorGen.B_FORGE:
 			return Creatures.monster("golem", {"boss": true, "color": Color(0.45, 0.32, 0.3), "eye_color": Color(1.0, 0.5, 0.1)})
+		FloorGen.B_CRYSTAL:
+			var q := Creatures.monster("spider", {"boss": true, "color": Color(0.45, 0.8, 1.0), "scale": 2.0, "eye_color": Color(1.0, 0.4, 0.9)})
+			var cb := MeshKit.Builder.new()
+			for k in 5:
+				var a := TAU * k / 5.0
+				cb.prism(6, 0.12, 0.55 + 0.15 * (k % 2), MeshKit.at(Vector3(cos(a) * 0.35, 1.0, sin(a) * 0.35), Vector3.ONE, Vector3(sin(a) * 0.4, 0, -cos(a) * 0.4)), Color(0.6, 0.95, 1.0), true)
+			q.add_child(MeshKit.instance(cb.build(), false))
+			return q
 	return Creatures.monster("slime", {})
 
 
@@ -438,12 +480,15 @@ func step(delta: float, targets: Array, active_room: int) -> void:
 				_boss_bone(id, m, delta, targets, spd)
 			FloorGen.B_FORGE:
 				_boss_forge(id, m, delta, targets, spd)
+			FloorGen.B_CRYSTAL:
+				_boss_crystal(id, m, delta, targets, spd)
+	_step_burns(delta)
 	_step_shots(delta, targets)
 
 
 func _dmg(base: int, m: Dictionary) -> int:
 	var elite_bonus := 1 if bool(m["elite"]) and base > 0 and int(m["kind"]) not in [FloorGen.F_SLIME, FloorGen.F_SWARM] else 0
-	return base + int(cfg["dmg"]) + elite_bonus
+	return base + int(cfg["dmg"]) + elite_bonus + int(m.get("hard", 0))
 
 
 ## cone: only targets in front (dot with facing above this; -1 = all round).
@@ -527,7 +572,7 @@ func _spitter(id: int, m: Dictionary, delta: float, targets: Array, spd: float) 
 			var from := p + Vector3(0.0, 0.6, 0.0)
 			var aim := (tp + Vector3(0.0, 0.7, 0.0) - from).normalized()
 			shoot("ball", from, aim * (4.3 + zone * 0.5) * spd, id)
-			deep.sound_at("spit" if zone != 1 else "bow", p, -2.0, 1.1)
+			deep.sound_at("spit" if biome != "crypt" else "bow", p, -2.0, 1.1)
 			m["st"] = IDLE
 			m["cd"] = randf_range(2.8, 3.8) / spd
 		return
@@ -782,7 +827,7 @@ func _boss_slime(id: int, m: Dictionary, delta: float, targets: Array, spd: floa
 	var p: Vector3 = m["p"]
 	var room: int = m["room"]
 	var ph: int = m["phase"]
-	var fast := 1.0 + 0.3 * (ph - 1)
+	var fast := 1.0 + PHASE_FAST * (ph - 1)
 	var st: int = m["st"]
 	match st:
 		FLY:
@@ -834,7 +879,7 @@ func _boss_slime(id: int, m: Dictionary, delta: float, targets: Array, spd: floa
 					pats.append("orb")
 				m["next"] = pats[int(m["pat"]) % pats.size()]
 				m["pat"] = int(m["pat"]) + 1 + randi() % 2
-				_wind(m, (0.9 if String(m["next"]) == "orb" else 0.7) / fast)
+				_wind(m, tell(FloorGen.B_SLIME, String(m["next"]), ph))
 				deep.sound_at("boing", p, 0.0, 0.5)
 
 
@@ -885,7 +930,7 @@ func _boss_bone(id: int, m: Dictionary, delta: float, targets: Array, spd: float
 	var p: Vector3 = m["p"]
 	var room: int = m["room"]
 	var ph: int = m["phase"]
-	var fast := 1.0 + 0.28 * (ph - 1)
+	var fast := 1.0 + PHASE_FAST * (ph - 1)
 	var st: int = m["st"]
 	match st:
 		WIND:
@@ -924,8 +969,7 @@ func _boss_bone(id: int, m: Dictionary, delta: float, targets: Array, spd: float
 					pats = ["sweep", "rain", "orbs", "sweep", "summon", "rain"]
 				m["next"] = pats[int(m["pat"]) % pats.size()]
 				m["pat"] = int(m["pat"]) + 1
-				var w := {"sweep": 1.0, "orbs": 0.9, "summon": 1.2, "rain": 1.0}
-				_wind(m, float(w[String(m["next"])]) / fast)
+				_wind(m, tell(FloorGen.B_BONE, String(m["next"]), ph))
 				deep.sound_at("dice", p, 0.0, 0.5)
 				if String(m["next"]) == "sweep":
 					var tg3 := _nearest(p, targets, room)
@@ -974,7 +1018,7 @@ func _boss_forge(id: int, m: Dictionary, delta: float, targets: Array, spd: floa
 	var p: Vector3 = m["p"]
 	var room: int = m["room"]
 	var ph: int = m["phase"]
-	var fast := 1.0 + 0.28 * (ph - 1)
+	var fast := 1.0 + PHASE_FAST * (ph - 1)
 	var st: int = m["st"]
 	match st:
 		WIND:
@@ -1016,8 +1060,7 @@ func _boss_forge(id: int, m: Dictionary, delta: float, targets: Array, spd: floa
 					pats = ["breath", "orb", "stomp", "lava", "charge", "orb"]
 				m["next"] = pats[int(m["pat"]) % pats.size()]
 				m["pat"] = int(m["pat"]) + 1
-				var w := {"stomp": 0.9, "breath": 1.0, "charge": 1.2, "lava": 0.9, "orb": 0.9}
-				_wind(m, float(w[String(m["next"])]) / fast)
+				_wind(m, tell(FloorGen.B_FORGE, String(m["next"]), ph))
 				var tg2 := _boss_target(p, targets, room)
 				var tp2: Vector3 = p + Vector3(0, 0, 1) if tg2.is_empty() else Vector3(tg2["p"])
 				var dir2 := Vector3(tp2.x - p.x, 0.0, tp2.z - p.z).normalized()
@@ -1071,6 +1114,119 @@ func _boss_forge_attack(id: int, m: Dictionary, targets: Array, ph: int) -> void
 			deep.sound_at("magic", p, 0.0, 0.5)
 			m["st"] = RECOVER
 			m["t"] = 0.8
+
+
+func _boss_crystal(id: int, m: Dictionary, delta: float, targets: Array, spd: float) -> void:
+	var p: Vector3 = m["p"]
+	var room: int = m["room"]
+	var ph: int = m["phase"]
+	var fast := 1.0 + PHASE_FAST * (ph - 1)
+	match int(m["st"]):
+		WIND:
+			if float(m["t"]) <= 0.0:
+				_boss_crystal_attack(id, m, targets, ph)
+		ACT, RECOVER, STUN:
+			if float(m["t"]) <= 0.0:
+				m["st"] = MOVE
+				m["t"] = randf_range(1.1, 1.9) / fast
+		_:
+			# Skitter round the room, keeping a little way off, then pick an attack.
+			var tg := _nearest(p, targets, room)
+			if not tg.is_empty():
+				var tp: Vector3 = tg["p"]
+				_face(m, tp, 2.2, delta)
+				var to := Vector3(tp.x - p.x, 0.0, tp.z - p.z)
+				var side := Vector3(-to.z, 0.0, to.x).normalized() * (1.0 if int(m["pat"]) % 2 == 0 else -1.0)
+				var want := side * 0.8 + (to.normalized() if to.length() > 4.0 else -to.normalized() * 0.4)
+				if want.length() > 0.01:
+					_walk(m, want.normalized() * 1.6 * spd * delta, 1.0)
+			if float(m["t"]) <= 0.0:
+				var pats: Array = ["beams", "burst", "ring", "orb"]
+				if ph >= 2:
+					pats = ["beams", "grow", "burst", "ring", "orb"]
+				if ph >= 3:
+					pats = ["beams", "burst", "orb", "ring", "grow", "beams"]
+				var nx := String(pats[int(m["pat"]) % pats.size()])
+				if nx == "grow" and count_in(room) > 3:
+					nx = "burst"
+				m["next"] = nx
+				m["pat"] = int(m["pat"]) + 1
+				_wind(m, tell(FloorGen.B_CRYSTAL, nx, ph))
+				var tg2 := _boss_target(p, targets, room)
+				var tp2: Vector3 = p + Vector3(0, 0, 1) if tg2.is_empty() else Vector3(tg2["p"])
+				var dir := Vector3(tp2.x - p.x, 0.0, tp2.z - p.z)
+				dir = dir.normalized() if dir.length() > 0.1 else Vector3(0, 0, 1)
+				m["dir"] = dir
+				m["aim"] = tp2
+				m["aim_knight"] = not tg2.is_empty() and bool(tg2["knight"])
+				m["yaw"] = atan2(dir.x, dir.z)
+				var w := float(m["t"])
+				deep.sound_at("sparkle", p, 0.0, 0.6)
+				match nx:
+					"beams":
+						# Glowing lanes fan out from her: stand between them.
+						var n := 3 if ph < 3 else 5
+						for k in n:
+							var a := (k - (n - 1) * 0.5) * (0.62 if n == 3 else 0.5)
+							deep.hazard("line", p, dir.rotated(Vector3.UP, a), Vector2(9.0, 1.0), w, 0.35, _dmg(2, m), false)
+					"ring":
+						deep.hazard("ring", p, Vector3.ZERO, Vector2(3.6, 0.0), w, 0.35, _dmg(2, m), false)
+					"burst":
+						# Crystals burst under everyone in the room (and a few spots more).
+						for t in targets:
+							var tp3: Vector3 = (t as Dictionary)["p"]
+							if FloorGen.room_at(f, tp3) == room:
+								deep.hazard("circle", Vector3(tp3.x, 0.0, tp3.z), Vector3.ZERO, Vector2(1.1, 0.0), w + 0.3, 0.3, _dmg(1, m), false)
+						for k2 in 1 + ph:
+							var c := FloorGen.room_center(f, room) + Vector3(randf_range(-4.2, 4.2), 0.0, randf_range(-4.2, 4.2))
+							deep.hazard("circle", c, Vector3.ZERO, Vector2(1.1, 0.0), w + 0.3 + k2 * 0.15, 0.3, _dmg(1, m), false)
+
+
+func _boss_crystal_attack(id: int, m: Dictionary, targets: Array, ph: int) -> void:
+	var p: Vector3 = m["p"]
+	var room: int = m["room"]
+	m["anim"].play("attack", 0.5)
+	match String(m.get("next", "beams")):
+		"orb":
+			var from := p + Vector3(0.0, 1.6, 0.0)
+			var head: Vector3 = deep.knight_head() if bool(m.get("aim_knight", false)) else Vector3(m["aim"]) + Vector3(0.0, 0.7, 0.0)
+			var aim := (head - from).normalized()
+			shoot("orb", from, aim * 3.8, id)
+			if ph >= 3:
+				for a in [-0.45, 0.45]:
+					shoot("ball", from, aim.rotated(Vector3.UP, a) * 5.0, id)
+			deep.sound_at("magic", p, 0.0, 1.2)
+			m["st"] = RECOVER
+			m["t"] = 0.8
+		"grow":
+			for k in 2:
+				var sp := FloorGen.room_clamp(f, room, p + Vector3(randf_range(-3.0, 3.0), 0.0, randf_range(-3.0, 3.0)), 0.8)
+				spawn(FloorGen.F_SPITTER, sp, room)
+				deep.poof(sp + Vector3(0, 0.5, 0), Color(0.6, 0.95, 1.0), 20)
+			deep.sound_at("magic", p, 0.0, 0.8)
+			m["st"] = RECOVER
+			m["t"] = 1.0
+		_:
+			deep.sound_at("crash", p, -2.0, 1.4)
+			deep.shake(0.4)
+			m["st"] = RECOVER
+			m["t"] = 0.9
+
+
+## Host: monsters set alight (the FIRE SWORD relic) lose a little health every second for a while.
+func _step_burns(delta: float) -> void:
+	for id in mons.keys():
+		if not mons.has(id):
+			continue
+		var m: Dictionary = mons[id]
+		if float(m.get("burn", 0.0)) <= 0.0:
+			continue
+		m["burn"] = float(m["burn"]) - delta
+		m["burn_t"] = float(m.get("burn_t", 0.0)) + delta
+		if float(m["burn_t"]) >= 1.0:
+			m["burn_t"] = 0.0
+			if deep != null:
+				deep.burn_tick(int(id))
 
 
 # --- Projectiles ---------------------------------------------------------------------------------
@@ -1142,9 +1298,16 @@ func _step_shots(delta: float, targets: Array) -> void:
 			for mid in mons.keys():
 				if mons.has(mid) and center_of(mid).distance_to(np2) < radius_of(mid) + r:
 					var dmg := 2.0 if String(s["kind"]) != "orb" else maxf(3.0, float(mons[mid]["max"]) * 0.08)
-					if String(s["kind"]) == "arrow":
-						dmg = float(s.get("dmg", 1.0))
-					deep.shot_hits_foe(int(mid), dmg, p, String(s["kind"]))
+					if s.has("dmg"):
+						dmg = float(s["dmg"])
+					var by := int(s.get("by", -2))
+					deep.shot_hits_foe(int(mid), dmg, p, String(s["kind"]), by)
+					if String(s["kind"]) == "bolt":
+						# Magic pops: everything close by gets hit too.
+						for mid2 in mons.keys():
+							if mid2 != mid and mons.has(mid2) and center_of(mid2).distance_to(np2) < 1.4 + radius_of(mid2):
+								deep.shot_hits_foe(int(mid2), dmg, np2, "bolt", by)
+						deep.poof(np2, Color(0.8, 0.6, 1.0), 16)
 					gone = true
 					break
 		elif not gone:
@@ -1222,19 +1385,25 @@ func _shot_mesh(kind: String) -> ArrayMesh:
 		var b := MeshKit.Builder.new()
 		match kind:
 			"orb":
-				var cols: Array[Color] = [Color(0.4, 0.8, 1.0), Color(0.7, 0.5, 1.0), Color(1.0, 0.5, 0.15)]
-				b.sphere(0.4, Transform3D.IDENTITY, cols[zone], 12, true)
+				var cols := {"caves": Color(0.4, 0.8, 1.0), "crypt": Color(0.7, 0.5, 1.0), "crystal": Color(0.85, 0.5, 1.0), "forge": Color(1.0, 0.5, 0.15)}
+				b.sphere(0.4, Transform3D.IDENTITY, cols.get(biome, Color(0.4, 0.8, 1.0)), 12, true)
 				b.torus(0.48, 0.04, MeshKit.at(Vector3.ZERO, Vector3.ONE, Vector3(PI * 0.5, 0, 0)), Color(1.0, 1.0, 1.0), 16, 4, true)
 			"bomb":
 				b.sphere(0.2, Transform3D.IDENTITY, Color(0.15, 0.15, 0.2), 10)
 				b.cylinder(0.03, 0.03, 0.12, MeshKit.at(Vector3(0, 0.22, 0)), Color(0.6, 0.45, 0.3), 6)
 				b.sphere(0.05, MeshKit.at(Vector3(0, 0.3, 0)), Color(1.0, 0.7, 0.2), 6, true)
+			"bolt":
+				b.sphere(0.17, Transform3D.IDENTITY, Color(0.8, 0.55, 1.0), 10, true)
+				b.torus(0.24, 0.03, MeshKit.at(Vector3.ZERO, Vector3.ONE, Vector3(PI * 0.5, 0, 0)), Color(1.0, 0.9, 1.0), 12, 4, true)
+			"fire":
+				b.sphere(0.13, Transform3D.IDENTITY, Color(1.0, 0.55, 0.15), 8, true)
+				b.sphere(0.08, MeshKit.at(Vector3(0, 0.05, 0)), Color(1.0, 0.9, 0.4), 6, true)
 			"arrow":
 				b.cylinder(0.025, 0.025, 0.6, MeshKit.at(Vector3.ZERO, Vector3.ONE, Vector3(PI * 0.5, 0, 0)), Color(0.75, 0.55, 0.3), 6)
 				b.cone(0.06, 0.14, MeshKit.at(Vector3(0, 0, 0.36), Vector3.ONE, Vector3(PI * 0.5, 0, 0)), Color(0.85, 0.9, 1.0), 6, true)
 			_:
-				var cols2: Array[Color] = [Color(0.5, 1.0, 0.4), Color(1.0, 0.85, 0.5), Color(1.0, 0.55, 0.2)]
-				b.sphere(0.22, Transform3D.IDENTITY, cols2[zone], 10, true)
+				var cols2 := {"caves": Color(0.5, 1.0, 0.4), "crypt": Color(1.0, 0.85, 0.5), "crystal": Color(0.55, 0.95, 1.0), "forge": Color(1.0, 0.55, 0.2)}
+				b.sphere(0.22, Transform3D.IDENTITY, cols2.get(biome, Color(0.5, 1.0, 0.4)), 10, true)
 		_shot_meshes[kind] = b.build()
 	return _shot_meshes[kind]
 
@@ -1303,7 +1472,7 @@ func unpack(a: PackedFloat32Array) -> void:
 
 func pack_shots() -> PackedFloat32Array:
 	var out := PackedFloat32Array()
-	var kinds := ["ball", "orb", "bomb", "arrow"]
+	var kinds := SHOT_KINDS
 	for sid in shots:
 		var s: Dictionary = shots[sid]
 		var p: Vector3 = s["p"]
@@ -1312,7 +1481,7 @@ func pack_shots() -> PackedFloat32Array:
 
 
 func unpack_shots(a: PackedFloat32Array) -> void:
-	var kinds := ["ball", "orb", "bomb", "arrow"]
+	var kinds := SHOT_KINDS
 	var seen := {}
 	var i := 0
 	while i + 4 < a.size():
@@ -1320,7 +1489,7 @@ func unpack_shots(a: PackedFloat32Array) -> void:
 		seen[sid] = true
 		var p := Vector3(a[i + 2], a[i + 3], a[i + 4])
 		if not shots.has(sid):
-			shots[sid] = {"kind": kinds[clampi(int(a[i + 1]), 0, 3)], "p": p}
+			shots[sid] = {"kind": kinds[clampi(int(a[i + 1]), 0, kinds.size() - 1)], "p": p}
 		else:
 			shots[sid]["p"] = p
 		i += 5

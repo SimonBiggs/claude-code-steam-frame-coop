@@ -38,6 +38,8 @@ var look := {}  ## hat / weapon / offhand overrides (deep)
 var revive_ring: Node3D
 var revive_pips: Array[MeshInstance3D] = []
 var _col := Color.WHITE
+var speed_mul := 1.0  ## deep: the hero class / SPEEDY BOOTS relic
+var bubble: Node3D  ## deep: the BUBBLE SHIELD relic (pops on the next hit)
 
 
 func setup(s: int, col: Color) -> void:
@@ -141,7 +143,7 @@ func step(delta: float, dir: Vector3, clamp: Callable) -> void:
 	bonk_cd = maxf(0.0, bonk_cd - delta)
 	if dizzy_t > 0.0 or down:
 		dir = Vector3.ZERO
-	var to := position + dir * SPEED * delta
+	var to := position + dir * SPEED * speed_mul * delta
 	if push_t > 0.0:
 		push_t -= delta
 		to += push_v * delta
@@ -198,3 +200,21 @@ func animate(delta: float) -> void:
 		hurt_t = maxf(0.0, hurt_t - delta)
 		body.visible = hurt_t <= 0.0 or fmod(hurt_t, 0.16) > 0.06
 	ring.scale = Vector3.ONE * (1.0 + (0.15 * sin(Time.get_ticks_msec() * 0.01) if safe_t > 0.0 else 0.0))
+
+
+## Deep: a glowing bubble round the hero while the BUBBLE SHIELD is up.
+func set_bubble(on: bool) -> void:
+	if on == (bubble != null):
+		return
+	if not on:
+		bubble.queue_free()
+		bubble = null
+		return
+	var b := MeshKit.Builder.new()
+	var col := Color(0.55, 0.8, 1.0)
+	b.torus(0.62, 0.025, Transform3D.IDENTITY, col, 24, 4, true)
+	b.torus(0.62, 0.025, MeshKit.at(Vector3.ZERO, Vector3.ONE, Vector3(PI * 0.5, 0, 0)), col, 24, 4, true)
+	b.torus(0.62, 0.025, MeshKit.at(Vector3.ZERO, Vector3.ONE, Vector3(PI * 0.5, PI * 0.5, 0)), col, 24, 4, true)
+	bubble = MeshKit.instance(b.build(), false)
+	bubble.position.y = 0.6
+	add_child(bubble)

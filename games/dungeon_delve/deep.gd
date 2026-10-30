@@ -1,8 +1,12 @@
 extends Node3D
 ## DUNGEON DELVE: BRAVE and HEROIC, the deep dungeon (the GENTLE run is main.gd + dungeon.gd).
 ## Picked in the practice room by standing on the orange BRAVE or red HEROIC pad (it fills up; faster
-## the more of you stand on it). Then: 3 zones (Slime Caves, Bone Crypt, Lava Forge) x 4 seeded floors
-## (floorgen.gd), the 4th ending in the zone's boss; a shop camp between floors.
+## the more of you stand on it). Then: 4 biomes (Slime Caves, Bone Crypt, Crystal Caves, Lava Forge) x 4
+## seeded floors (floorgen.gd), the 4th ending in the biome's boss; a shop camp between floors, and a
+## RELIC ALTAR at the camp after the 2nd floor and after each boss (relics.gd: pick ONE of 2-3).
+##  - HEROES (classes.gd): bonk a statue in the practice room to be a KNIGHT, ARCHER or WIZARD.
+##  - CINDER'S HOARD: every coin you pick up goes into Cinder's hoard for good (bosses add a pile); a big
+##    enough hoard unlocks new heroes and new relics (the gold pile in the practice room shows it).
 ##  - Hearts: heroes have 4 (HEROIC 3), the knight one more (heart containers: up to 8). At zero you're knocked out; a friend
 ##    standing next to you fills your ring and you pop back up (2 hearts). Everyone out = back to the
 ##    first floor of the zone (the checkpoint) with what you had then; HEROIC has no checkpoints: the
@@ -40,10 +44,12 @@ const HudKit := preload("res://core/hud_kit.gd")
 const UiKit := preload("res://core/ui_kit.gd")
 const Creatures := preload("res://core/creatures.gd")
 const Telemetry := preload("res://core/telemetry.gd")
+const Relics := preload("res://games/dungeon_delve/relics.gd")
+const Classes := preload("res://games/dungeon_delve/classes.gd")
 
 const DIFF := {
-	"brave": {"hp": 1.1, "spd": 1.05, "dmg": 0, "checkpoints": true, "potions": 1, "auto_revive": true, "hearts": 4},
-	"heroic": {"hp": 1.55, "spd": 1.2, "dmg": 0, "checkpoints": false, "potions": 0, "auto_revive": false, "hearts": 3},
+	"brave": {"hp": 1.25, "spd": 1.08, "dmg": 0, "checkpoints": true, "potions": 1, "auto_revive": true, "hearts": 4},
+	"heroic": {"hp": 1.7, "spd": 1.22, "dmg": 0, "checkpoints": false, "potions": 0, "auto_revive": false, "hearts": 3},
 }
 const REVIVE_TIME := 3.5  ## seconds a friend must stand by you (a hit on the helper starts it again)
 const REVIVE_R := 1.5
@@ -53,7 +59,12 @@ const ATTACK_REACH := 1.05
 const PADS := {"brave": Vector3(-2.2, 0.0, -2.5), "heroic": Vector3(2.2, 0.0, -2.5), "daily": Vector3(-3.5, 0.0, 2.7)}
 const PAD_COLORS := {"brave": Color(1.0, 0.6, 0.2), "heroic": Color(1.0, 0.3, 0.35), "daily": Color(0.35, 0.8, 1.0)}
 const HAT_RACK := Vector3(3.7, 0.0, 2.6)
-const HAT_UNLOCKS: Array = [["none", ""], ["party", "run"], ["viking", "floor3"], ["wizard", "boss0"], ["crown", "boss1"], ["halo", "boss2"]]
+const HAT_UNLOCKS: Array = [["none", ""], ["party", "run"], ["viking", "floor3"], ["wizard", "boss0"], ["crown", "boss1"], ["halo", "boss3"]]
+## The hero statues (bonk one to be that hero) along the right wall, and Cinder's hoard by the left wall.
+const CLASS_SPOTS := {"knight": Vector3(3.75, 0.0, -1.3), "archer": Vector3(3.75, 0.0, -0.1), "wizard": Vector3(3.75, 0.0, 1.1)}
+const HOARD_SPOT := Vector3(-3.75, 0.0, 0.7)
+const ALTAR_SPOTS: Array[Vector2] = [Vector2(2.3, 4.2), Vector2(3.6, 3.3), Vector2(4.3, 1.9)]  ## relic stones at the camp
+const BOSS_HOARD := 40  ## a boss adds this (x biome) to Cinder's hoard
 const SHOP_SPOTS: Array[Vector2] = [Vector2(-3.0, 0.2), Vector2(-1.0, 0.2), Vector2(1.0, 0.2), Vector2(3.0, 0.2)]
 
 var main: Node
@@ -117,6 +128,10 @@ var src := ""  ## what is hurting someone right now (tests: tally["by"])
 var runrec := {}  ## this run, for core/telemetry.gd (written at the end or on quit)
 var relic_group := 0
 var relic_taken := {}  ## group -> {slot: true}: boss treasures, one each
+var altar_group := 0  ## the relic altar's group at this camp (0: none)
+var pet_cd := {}  ## slot -> seconds to the baby dragon's next fireball (DRAGON EGG)
+var fang := {}  ## slot -> monsters bopped (VAMPIRE FANG: every 4th heals)
+var cls_cd := {}
 
 # Every machine.
 var pick_nodes := {}
@@ -127,6 +142,13 @@ var knight_hearts: Node3D
 var _hearts_shown := ""
 var _t := 0.0
 var _last_phase := ""
+var class_nodes := {}  ## class id -> {"statue", "label", "sub"}
+var hoard_node: Node3D
+var hoard_label: Label3D
+var hoard_sub: Label3D
+var _hoard_shown := -1
+var pets := {}  ## slot -> baby dragon node (DRAGON EGG)
+var bubbles := {}  ## slot -> bubble node (BUBBLE SHIELD)
 
 
 func setup(m: Node) -> void:
@@ -226,10 +248,100 @@ func _build_lobby() -> void:
 	var rack := MeshKit.instance(hb.build(), false)
 	rack.position = HAT_RACK
 	lobby.add_child(rack)
+	_build_class_statues()
+	_build_hoard()
+
+
+## The three hero statues on little plinths (bonk one to be that hero; locked ones show what's needed).
+func _build_class_statues() -> void:
+	class_nodes.clear()
+	for id in Classes.ORDER:
+		var ci: Dictionary = Classes.info(id)
+		var root := Node3D.new()
+		root.position = CLASS_SPOTS[id]
+		root.rotation.y = -PI * 0.5  # facing into the room
+		lobby.add_child(root)
+		var pb := MeshKit.Builder.new()
+		pb.cylinder(0.36, 0.42, 0.22, MeshKit.at(Vector3(0, 0.11, 0)), Color(0.45, 0.42, 0.5), 12)
+		pb.torus(0.4, 0.035, MeshKit.at(Vector3(0, 0.23, 0)), ci["color"], 16, 4, true)
+		root.add_child(MeshKit.instance(pb.build(), false))
+		var look := {"class": "knight" if id == "knight" else ("archer" if id == "archer" else "mage"), "seed": 5, "outfit": (ci["color"] as Color).darkened(0.2)}
+		for k in ci["look"]:
+			look[k] = ci["look"][k]
+		var statue := Creatures.humanoid(look)
+		statue.position.y = 0.22
+		statue.scale = Vector3.ONE * 0.8
+		root.add_child(statue)
+		var l := Label3D.new()
+		l.text = String(ci["name"])
+		l.font_size = 48
+		l.pixel_size = 0.005
+		l.outline_size = 16
+		l.modulate = (ci["color"] as Color).lightened(0.2)
+		l.outline_modulate = Color(0, 0, 0, 0.95)
+		l.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
+		l.position = CLASS_SPOTS[id] + Vector3(0.0, 1.55, 0.0)
+		lobby.add_child(l)
+		var sub := Label3D.new()
+		sub.font_size = 36
+		sub.pixel_size = 0.005
+		sub.outline_size = 14
+		sub.outline_modulate = Color(0, 0, 0, 0.95)
+		sub.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
+		sub.position = CLASS_SPOTS[id] + Vector3(0.0, 1.3, 0.0)
+		lobby.add_child(sub)
+		class_nodes[id] = {"statue": statue, "label": l, "sub": sub}
+
+
+## Cinder's hoard: a pile of gold that grows with the family's hoard, with the next unlock above it.
+func _build_hoard() -> void:
+	hoard_node = Node3D.new()
+	hoard_node.position = HOARD_SPOT
+	lobby.add_child(hoard_node)
+	hoard_label = Label3D.new()
+	hoard_label.font_size = 48
+	hoard_label.pixel_size = 0.005
+	hoard_label.outline_size = 16
+	hoard_label.modulate = UiKit.GOLD
+	hoard_label.outline_modulate = Color(0, 0, 0, 0.95)
+	hoard_label.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
+	hoard_label.position = HOARD_SPOT + Vector3(0.0, 1.45, 0.0)
+	lobby.add_child(hoard_label)
+	hoard_sub = Label3D.new()
+	hoard_sub.font_size = 34
+	hoard_sub.pixel_size = 0.005
+	hoard_sub.outline_size = 14
+	hoard_sub.outline_modulate = Color(0, 0, 0, 0.95)
+	hoard_sub.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
+	hoard_sub.position = HOARD_SPOT + Vector3(0.0, 1.2, 0.0)
+	lobby.add_child(hoard_sub)
+	_hoard_shown = -1
+
+
+func _hoard_pile(h: int) -> void:
+	for c in hoard_node.get_children():
+		c.queue_free()
+	var b := MeshKit.Builder.new()
+	var gold := Color(1.0, 0.8, 0.28)
+	var n := clampi(4 + int(sqrt(float(h)) * 0.9), 4, 40)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	var r := 0.25 + minf(0.45, float(h) / 2500.0)
+	b.cone(r + 0.1, 0.18 + r * 0.6, MeshKit.at(Vector3(0, 0.0, 0)), gold.darkened(0.15), 14)
+	for k in n:
+		var a := rng.randf() * TAU
+		var d := rng.randf() * r
+		var y := (0.18 + r * 0.6) * (1.0 - d / (r + 0.1)) * 0.9
+		b.cylinder(0.07, 0.07, 0.025, MeshKit.at(Vector3(cos(a) * d, y, sin(a) * d), Vector3.ONE, Vector3(rng.randf_range(-0.6, 0.6), 0, rng.randf_range(-0.6, 0.6))), gold, 10, true)
+	if h >= 300:
+		b.box(Vector3(0.12, 0.12, 0.12), MeshKit.at(Vector3(0.1, 0.25 + r * 0.5, 0.05), Vector3.ONE, Vector3(0.6, 0.6, 0)), Color(0.4, 0.95, 1.0), true)
+	if h >= 900:
+		b.add_mesh(Creatures.hat_mesh("crown", Color(1.0, 0.8, 0.3), Color(1.0, 0.3, 0.4)), MeshKit.at(Vector3(-0.08, 0.2 + r * 0.6, 0.0)))
+	hoard_node.add_child(MeshKit.instance(b.build(), false))
 
 
 func _animate_lobby(delta: float) -> void:
-	if pad_rings.size() != PADS.size() or pad_labels.size() != PADS.size():
+	if pad_rings.size() != PADS.size() or pad_labels.size() != PADS.size() or class_nodes.size() != Classes.ORDER.size() or hoard_node == null:
 		# Pads added by a hot reload (the TV runs the game while it's updated): build them again now.
 		lobby.queue_free()
 		pad_rings.clear()
@@ -237,6 +349,41 @@ func _animate_lobby(delta: float) -> void:
 		_build_lobby()
 	var show_pads: bool = not active and String(net.state_get("phase", "")) in ["practice", "cleared"] and int(net.state_get("room", 0)) == 0
 	lobby.visible = show_pads or (not active and int(net.state_get("room", 0)) == 0)
+	var h := int(net.state_get("d_hoard", 0))
+	if h != _hoard_shown and hoard_node != null:
+		_hoard_shown = h
+		_hoard_pile(h)
+		hoard_label.text = "HOARD %d" % h
+		var nx: Dictionary = Relics.next_unlock(h)
+		var nh := 1 << 30
+		var what := ""
+		if not nx.is_empty():
+			nh = int(nx["hoard"])
+			what = String(nx["name"])
+		for id in Classes.ORDER:
+			var ch := int(Classes.info(id)["hoard"])
+			if ch > h and ch < nh:
+				nh = ch
+				what = String(Classes.info(id)["name"])
+		hoard_sub.text = "%s AT %d" % [what, nh] if what != "" else "ALL UNLOCKED!"
+		hoard_sub.modulate = UiKit.TEXT_DIM if what != "" else UiKit.GOLD
+		for id2 in class_nodes:
+			var cn: Dictionary = class_nodes[id2]
+			var need := int(Classes.info(id2)["hoard"])
+			(cn["sub"] as Label3D).text = "" if h >= need else "LOCKED %d" % need
+			(cn["sub"] as Label3D).modulate = UiKit.TEXT_DIM
+			(cn["statue"] as Node3D).visible = h >= need
+	for id3 in class_nodes:
+		var cn2: Dictionary = class_nodes[id3]
+		(cn2["label"] as Label3D).visible = show_pads
+		(cn2["sub"] as Label3D).visible = show_pads
+		var st3: Node3D = cn2["statue"]
+		st3.rotation.y = lerp_angle(st3.rotation.y, 0.0, 1.0 - exp(-6.0 * delta))
+	if hoard_label != null:
+		hoard_label.visible = show_pads
+		hoard_sub.visible = show_pads
+	if not active:
+		_sync_lobby_looks()
 	var fills: Array = net.state_get("d_pads", [0.0, 0.0])
 	var i := 0
 	for mname in PADS:
@@ -269,6 +416,17 @@ func lobby_step(delta: float) -> void:
 		var pb: Dictionary = progress()["best"]
 		net.state_set("d_best", pb.duplicate())
 		net.state_set("d_heroic_ok", heroic_unlocked())
+	if main.save != null and int(net.state_get("d_hoard", -1)) != hoard():
+		net.state_set("d_hoard", hoard())
+	if main.save != null and not net.state_has("d_cls"):
+		var cl := {}
+		var saved: Dictionary = progress()["cls"]
+		for k in saved:
+			if Classes.unlocked(hoard()).has(String(saved[k])):
+				cl[int(k)] = String(saved[k])
+		net.state_set("d_cls", cl)
+	for k2 in cls_cd.keys():
+		cls_cd[k2] = float(cls_cd[k2]) - delta
 	var players := _players(true)
 	var total := maxi(1, players.size())
 	var fills: Array = []
@@ -320,6 +478,82 @@ func try_hat(slot: int, at: Vector3) -> bool:
 	return true
 
 
+## Host: a hero bonked near a hero statue: become that hero (if Cinder's hoard has unlocked it).
+func try_class(slot: int, at: Vector3) -> bool:
+	if active or _is_knight(slot):
+		return false
+	for id in CLASS_SPOTS:
+		var c: Vector3 = CLASS_SPOTS[id]
+		if Vector2(at.x - c.x, at.z - c.z).length() > 1.3:
+			continue
+		if float(cls_cd.get(slot, 0.0)) > 0.0:
+			return true
+		cls_cd[slot] = 0.5
+		var top := c + Vector3(0, 1.2, 0)
+		if not Classes.unlocked(hoard()).has(id):
+			main.sound_at("ui_error", top, -2.0)
+			net_popup(top + Vector3(0, 0.4, 0), "LOCKED", "bad")
+			return true
+		var cl: Dictionary = (net.state_get("d_cls", {}) as Dictionary).duplicate()
+		cl[slot] = id
+		net.state_set("d_cls", cl)
+		(progress()["cls"] as Dictionary)[str(slot)] = id
+		main.save.mark_dirty()
+		main.sound_at("level_up", top, -2.0)
+		main.confetti(top, Classes.info(id)["color"], 24)
+		net.event("confetti", [top, Classes.info(id)["color"], 24])
+		net_popup(top + Vector3(0, 0.5, 0), String(Classes.info(id)["name"]), "heal")
+		if class_nodes.has(id):
+			((class_nodes[id] as Dictionary)["statue"] as Node3D).rotation.y = 0.6  # a little wiggle
+		return true
+	return false
+
+
+## A hero's class (the VR knight is always the knight).
+func class_of(slot: int) -> String:
+	if _is_knight(slot):
+		return "knight"
+	var id := String((net.state_get("d_cls", {}) as Dictionary).get(slot, "knight"))
+	if OS.has_environment("DD_CLASS"):
+		var l: PackedStringArray = OS.get_environment("DD_CLASS").split(",")
+		id = l[slot % l.size()]
+	return id if Classes.valid(id) else "knight"
+
+
+## Cinder's hoard: every coin the family ever picked up in the deep dungeon (plus boss piles).
+func hoard() -> int:
+	if OS.has_environment("DD_HOARD"):
+		return int(OS.get_environment("DD_HOARD"))
+	return int(progress().get("hoard", 0))
+
+
+## Host: n more gold in the hoard; anything newly unlocked gets a cheer.
+func _add_hoard(n: int) -> void:
+	if n <= 0 or main.save == null:
+		return
+	var before := hoard()
+	var pd := progress()
+	pd["hoard"] = int(pd.get("hoard", 0)) + n
+	main.save.mark_dirty()
+	var after_h := hoard()
+	net.state_set("d_hoard", after_h)
+	for id in Classes.ORDER:
+		var need := int(Classes.info(id)["hoard"])
+		if before < need and after_h >= need:
+			_unlocked("NEW HERO: %s!" % String(Classes.info(id)["name"]))
+	for r in Relics.LIST:
+		if before < int(r["hoard"]) and after_h >= int(r["hoard"]):
+			_unlocked("NEW RELIC: %s!" % String(r["name"]))
+
+
+func _unlocked(text: String) -> void:
+	net.event("d_banner", [text, "level"])
+	main.show_headline(text, 3.0)
+	main.story({"who": "CINDER", "line": "My hoard grew! " + text.capitalize(), "pic": "cinder", "color": main.CINDER_COLOR, "duration": 3.0})
+	if runrec.has("unlocks"):
+		(runrec["unlocks"] as Array).append(text)
+
+
 # --- Persistence ---------------------------------------------------------------------------------
 
 ## The saved deep progress (inside main.save.data).
@@ -333,6 +567,10 @@ func progress() -> Dictionary:
 			pd[k] = {"brave": 0, "heroic": 0}
 	if not pd.has("hat") or typeof(pd["hat"]) != TYPE_DICTIONARY:
 		pd["hat"] = {}
+	if not pd.has("cls") or typeof(pd["cls"]) != TYPE_DICTIONARY:
+		pd["cls"] = {}
+	if not pd.has("hoard") or typeof(pd["hoard"]) not in [TYPE_INT, TYPE_FLOAT]:
+		pd["hoard"] = 0
 	if not pd.has("runs"):
 		pd["runs"] = 0
 	return pd
@@ -421,9 +659,17 @@ func _players(alive_only: bool = false) -> Array:
 func _new_stats(slot: int) -> Dictionary:
 	var d := diff()
 	var pk := perks()
-	var hearts := int(d["hearts"]) + int(pk["heart"]) + (1 if _is_knight(slot) else 0)
-	return {"hp": hearts, "max": hearts, "pot": int(d["potions"]) + int(pk["potion"]), "bomb": int(pk["bombs"]),
-		"abil": "", "dmg": 2 if _is_knight(slot) else 1, "charm": 0, "down": false}
+	var cid := class_of(slot)
+	var ci: Dictionary = Classes.info(cid)
+	var knight := _is_knight(slot)
+	var hearts := maxi(2, int(d["hearts"]) + int(pk["heart"]) + (1 if knight else int(ci["hearts"])))
+	return {"hp": hearts, "max": hearts, "pot": int(d["potions"]) + int(pk["potion"]) + (0 if knight else int(ci["pots"])),
+		"bomb": int(pk["bombs"]) + (0 if knight else int(ci["bombs"])), "abil": "" if knight else String(ci["abil"]),
+		"dmg": 2 if knight else 1, "charm": 0, "down": false, "cls": cid, "relics": [], "bubble": false, "rise": 0.0, "ph_used": false}
+
+
+func has_relic(slot: int, id: String) -> bool:
+	return ((stats.get(slot, {}) as Dictionary).get("relics", []) as Array).has(id)
 
 
 ## Alone on BRAVE (a Deck kid on their own): a lucky charm on every floor (that's all: Simon found it too easy).
@@ -502,7 +748,11 @@ func start_run(m: String) -> void:
 	runrec = {"mode": mode, "daily": daily, "seed": seed_v, "players": kinds, "solo": kinds.size() == 1,
 		"floor_times": [], "kos": [], "gold_in": 0, "gold_out": 0, "items": [], "relics": [], "bosses": [],
 		"clock": 0.0, "floor_t0": 0.0, "boss_t0": 0.0, "boss_phase": 1, "done": false,
-		"start_floor": FloorGen.global_floor(zone, floor_i)}
+		"start_floor": FloorGen.global_floor(zone, floor_i), "classes": [], "hoard0": hoard(), "unlocks": [], "offers": []}
+	for pl2 in _players():
+		(runrec["classes"] as Array).append(class_of(int((pl2 as Dictionary)["slot"])))
+	fang.clear()
+	pet_cd.clear()
 	net.state_set("phase", "deep")
 	main.monsters.clear()
 	load_floor(zone, floor_i, "floor")
@@ -557,6 +807,9 @@ func load_floor(z: int, fl: int, k: String) -> void:
 				st["hp"] = 1
 			st["hp"] = mini(int(st["max"]), int(st["hp"]) + 1)
 		stats_dirty = true
+		altar_group = 0
+		if Relics.altar_after(fl):
+			_build_altar(z, fl)
 	else:
 		if fl == 0 and bool(diff()["checkpoints"]) and z < FloorGen.ZONE_COUNT:  # no checkpoints in the endless depths
 			checkpoint = {"zone": z, "stats": stats.duplicate(true), "gold": _gold}
@@ -570,6 +823,8 @@ func load_floor(z: int, fl: int, k: String) -> void:
 		if _solo_brave():
 			for s in stats:
 				(stats[s] as Dictionary)["charm"] = 1
+		for s2 in stats:
+			(stats[s2] as Dictionary)["ph_used"] = false  # the phoenix feather works again on every floor
 		(tally["zones"] as Dictionary)[z] = true
 		_record_depth()
 	net.state_set("d_floor", [seed_v, z, fl, k, mode == "heroic"])
@@ -595,22 +850,7 @@ func load_floor(z: int, fl: int, k: String) -> void:
 
 func _cfg() -> Dictionary:
 	var d := diff()
-	var n := maxi(1, _players().size())
-	var g := FloorGen.global_floor(zone, floor_i)
-	# Difficulty climbs every floor: health, speed, and from the Lava Forge (HEROIC: the Crypt) harder hits.
-	# Endless depths (after the third boss): every lap round the zones is tougher, plus the floor's twist.
-	var tier := maxi(0, zone - FloorGen.ZONE_COUNT + 1)
-	var mod := String(f.get("mod", ""))
-	if tier > 0:
-		g = mini(g, 13)  # the per-floor climb levels off; tiers take over
-		return {"hp": float(d["hp"]) * (1.0 + 0.11 * g) * (1.0 + 0.25 * tier) * (1.3 if mod == "STONE" else 1.0) * (1.0 + 0.25 * (n - 1)),
-			"boss_hp": float(d["hp"]) * (1.0 + 0.45 * (n - 1)) * (1.0 + 0.15 * zone),
-			"dmg": (1 if mode == "heroic" else 0) + tier / 2,
-			"spd": float(d["spd"]) * (1.0 + 0.04 * g) * (1.0 + 0.04 * tier) * (1.2 if mod == "SWIFT" else 1.0)}
-	return {"hp": float(d["hp"]) * (1.0 + 0.11 * g) * (1.0 + 0.25 * (n - 1)),
-		"boss_hp": float(d["hp"]) * (1.0 + 0.45 * (n - 1)) * (1.0 + 0.15 * zone),
-		"dmg": (1 if mode == "heroic" and zone >= 1 else 0),
-		"spd": float(d["spd"]) * (1.0 + 0.04 * g)}
+	return FloorGen.scaling(float(d["hp"]), float(d["spd"]), mode == "heroic", zone, floor_i, maxi(1, _players().size()), String(f.get("mod", "")))
 
 
 func _sync_doors() -> void:
@@ -674,6 +914,11 @@ func _telemetry(end: String) -> void:
 		r[k2] = tally.get(k2, 0)
 	r["dmg_by"] = (tally["by"] as Dictionary).duplicate()
 	r["gold_left"] = _gold
+	r["hoard"] = hoard()
+	var held: Array = []
+	for s2 in stats:
+		held.append([String((stats[s2] as Dictionary).get("cls", "")), ((stats[s2] as Dictionary).get("relics", []) as Array).duplicate()])
+	r["held"] = held
 	Telemetry.run("dungeon_delve", r)
 
 
@@ -705,7 +950,7 @@ func finish(won: bool) -> void:
 	main.end_results("VICTORY!" if beat else "THE END", "victory" if beat else "defeat",
 		"DEPTH %d" % (FloorGen.global_floor(zone, floor_i) + 1) + ("  -  ALL BOSSES BEATEN!" if beat else ""),
 		[["DEEPEST", "%d-%d%s" % [zone + 1, floor_i + 1, "  NEW BEST!" if new_best else ""]], ["MONSTERS", str(int(tally["kills"]))],
-		["BOSSES", str(int(tally["bosses"]))], ["SECRETS", str(int(tally["secrets"]))], ["HELPED UP", str(int(tally["revives"]))],
+		["BOSSES", str(int(tally["bosses"]))], ["HOARD", "%d  +%d" % [hoard(), maxi(0, hoard() - int(runrec.get("hoard0", hoard())))]], ["HELPED UP", str(int(tally["revives"]))],
 		["TIME", HudKit.clock_text(float(runrec.get("clock", 0.0)))]])
 	print("Dungeon Delve: run over, %s, depth %d" % ["won" if won else "lost", g])
 
@@ -735,6 +980,9 @@ func stop() -> void:
 	if hud != null:
 		hud.visible = false
 	main.dungeon.visible = true
+	for s2 in main.heroes:
+		(main.heroes[s2] as Hero).speed_mul = 1.0
+		(main.heroes[s2] as Hero).set_bubble(false)
 
 
 func _floor_banner(z: int, fl: int, k: String) -> void:
@@ -757,7 +1005,7 @@ func _floor_banner(z: int, fl: int, k: String) -> void:
 		main.show_headline("%s %d" % [String(zd["short"]), fl + 1], 3.0)
 		if hud != null:
 			HudKit.banner([main.hud], String(zd["name"]), "%s%d-%d" % [sub + "  " if sub != "" else "", z + 1, fl + 1], {"duration": 2.0})
-		music_mood("dungeon" if z != 2 else "tension")
+		music_mood("dungeon" if String(zd["id"]) != "forge" else "tension")
 
 
 func music_mood(m: String) -> void:
@@ -818,6 +1066,17 @@ func _build_shop_props() -> void:
 	fn.position = c + Vector3(-3.2, 0.0, 2.8)
 	add_child(fn)
 	shop_nodes.append(fn)
+	if Relics.altar_after(int(f.get("floor", 0))):
+		# The relic altar: three glowing stones in the corner (relics sit on them; deep._build_altar).
+		var ab := MeshKit.Builder.new()
+		for sp in ALTAR_SPOTS:
+			var q := FloorGen.to_world(f, 0, sp) - c
+			ab.cylinder(0.42, 0.5, 0.18, MeshKit.at(q + Vector3(0, 0.09, 0)), Color(0.42, 0.4, 0.5), 12)
+			ab.torus(0.46, 0.03, MeshKit.at(q + Vector3(0, 0.19, 0)), Color(0.75, 0.6, 1.0), 16, 4, true)
+		var altar := MeshKit.instance(ab.build(), false)
+		altar.position = c
+		add_child(altar)
+		shop_nodes.append(altar)
 
 
 ## The shop's pedestals follow the stock in the store (prices, sold out).
@@ -908,6 +1167,8 @@ func host_step(delta: float) -> void:
 	_wake_rooms(active_rooms)
 	_hazards_step(delta)
 	_traps_step(delta, alive)
+	_features_step(delta, alive)
+	_pets_step(delta, alive)
 	_switches_step(delta, alive)
 	_doors_step(alive)
 	_pickups_step(delta, alive)
@@ -936,6 +1197,10 @@ func _wake_rooms(active_rooms: Dictionary) -> void:
 
 
 func _lock(r: int, at: Vector3) -> void:
+	for s in stats:
+		if has_relic(int(s), "bubble") and not bool((stats[s] as Dictionary)["bubble"]):
+			(stats[s] as Dictionary)["bubble"] = true  # a fresh bubble for every fight
+			stats_dirty = true
 	lock_room = r
 	straggle_t = 2.2
 	entry = at if at != Vector3.INF else FloorGen.room_center(f, r)
@@ -1057,8 +1322,12 @@ func _room_clear(r: int, fought: bool) -> void:
 				_revive(int(s))
 	if randf() < 0.15:
 		_spawn_pick(Loot.HEART, c + Vector3(0.0, 0.5, 0.0), true)
+	for s2 in stats:
+		if has_relic(int(s2), "boom") and int((stats[s2] as Dictionary)["bomb"]) < 9:
+			(stats[s2] as Dictionary)["bomb"] = int((stats[s2] as Dictionary)["bomb"]) + 1
+			stats_dirty = true
 	if String(((f["rooms"] as Array)[r] as Dictionary)["role"]) != "boss":
-		music_mood("dungeon" if zone != 2 else "tension")
+		music_mood("dungeon" if String(FloorGen.zone_data(zone)["id"]) != "forge" else "tension")
 
 
 # --- Hits ----------------------------------------------------------------------------------------
@@ -1070,6 +1339,9 @@ func hit_foe(id: int, dmg: float, from: Vector3, slot: int, pierce: bool = false
 	var m: Dictionary = foes.mons[id]
 	var c := foes.center_of(id)
 	var res := foes.hit(id, dmg, from, pierce)
+	if slot >= 0 and res == "hit" and has_relic(slot, "fire") and foes.mons.has(id):
+		foes.mons[id]["burn"] = 3.2
+		foes.mons[id]["burn_by"] = slot
 	match res:
 		"kill":
 			_foe_died(id, m, slot)
@@ -1087,6 +1359,14 @@ func hit_foe(id: int, dmg: float, from: Vector3, slot: int, pierce: bool = false
 
 
 func _foe_died(id: int, m: Dictionary, slot: int) -> void:
+	if slot >= 0 and has_relic(slot, "fang") and stats.has(slot):
+		fang[slot] = int(fang.get(slot, 0)) + 1
+		var stf: Dictionary = stats[slot]
+		if int(fang[slot]) % 4 == 0 and int(stf["hp"]) < int(stf["max"]) and not bool(stf["down"]):
+			stf["hp"] = int(stf["hp"]) + 1
+			stats_dirty = true
+			heal_fx(_feet_of(slot) + Vector3(0, 0.8, 0))
+			net_popup(_feet_of(slot) + Vector3(0, 1.5, 0), "+1", "heal")
 	var kind: int = m["kind"]
 	var p: Vector3 = m["p"]
 	var c := foes.center_of(id)
@@ -1094,8 +1374,7 @@ func _foe_died(id: int, m: Dictionary, slot: int) -> void:
 	foes.remove(id)
 	tally["kills"] = int(tally["kills"]) + 1
 	main.awards.add(maxi(slot, 0), "bops")
-	var cols: Array[Color] = [Color(0.6, 1.0, 0.6), Color(0.8, 0.7, 1.0), Color(1.0, 0.7, 0.4)]
-	poof(c, cols[zone % cols.size()], 90 if boss else 32)
+	poof(c, (FloorGen.zone_data(zone)["glow"] as Color).lightened(0.2), 90 if boss else 32)
 	shake(0.9 if boss else 0.12)  # (TV / Deck camera only: the VR view never shakes)
 	main.sound_at("pop", c, 0.0, randf_range(0.85, 1.1))
 	main.sound_at("sparkle", c, -6.0)
@@ -1117,6 +1396,7 @@ func _boss_down(kind: int, at: Vector3) -> void:
 		(runrec["bosses"] as Array).append({"name": String(Foes.BOSS_NAMES[kind]), "secs": snappedf(float(runrec.get("clock", 0.0)) - float(runrec["boss_t0"]), 0.1)})
 	tally["bosses"] = int(tally["bosses"]) + 1
 	net.state_set("d_boss", [])
+	_add_hoard(BOSS_HOARD * (1 + mini(zone, FloorGen.ZONE_COUNT)))
 	for k in 4:
 		var q := at + Vector3(randf_range(-2, 2), 1.0 + k * 0.5, randf_range(-2, 2))
 		main.confetti(q, Color(1.0, 0.85, 0.2), 60)
@@ -1178,8 +1458,8 @@ func _boss_down(kind: int, at: Vector3) -> void:
 	net.state_set("d_portal", portal)
 
 
-func shot_hits_foe(mid: int, dmg: float, from: Vector3, k: String) -> void:
-	var res := hit_foe(mid, dmg, from, -2, k == "orb")
+func shot_hits_foe(mid: int, dmg: float, from: Vector3, k: String, by: int = -2) -> void:
+	var res := hit_foe(mid, dmg, from, by, k in ["orb", "bolt"])
 	if k == "orb" and res in ["hit", "kill"] and foes.mons.has(mid):
 		var m: Dictionary = foes.mons[mid]
 		m["st"] = Foes.STUN
@@ -1200,7 +1480,7 @@ func boss_phase(id: int, ph: int) -> void:
 	var c := foes.center_of(id)
 	main.sound_at("alarm", c, -2.0)
 	shake(0.5)
-	var words := ["", "", "HE'S ANGRY!", "WATCH OUT!"]
+	var words := ["", "", "ANGRY!" if foes.mons.has(id) and int(foes.mons[id]["kind"]) == FloorGen.B_CRYSTAL else "HE'S ANGRY!", "WATCH OUT!"]
 	net.event("d_banner", [words[clampi(ph, 0, 3)], "boss"])
 	main.show_headline(words[clampi(ph, 0, 3)], 2.5)
 	if foes.mons.has(id) and int(foes.mons[id]["kind"]) == FloorGen.B_BONE and ph == 2:
@@ -1331,6 +1611,14 @@ func hurt(key: int, dmg: int, from: Vector3, blockable: bool) -> String:
 		net_popup(knight_head() + (from - knight_head()).normalized() * 0.6, "BLOCK!", "heal")
 		main.vr_rig.pulse(VrRig.RIGHT, 0.9, 0.12)
 		return "block"
+	if bool(st.get("bubble", false)):
+		st["bubble"] = false
+		stats_dirty = true
+		iframes[key] = 0.8
+		net_popup(at + Vector3(0, 1.4, 0), "POP!", "heal")
+		main.sound_at("pop", at, 0.0, 1.4)
+		poof(at + Vector3(0, 0.8, 0), Color(0.6, 0.85, 1.0), 20)
+		return "block"
 	# Getting hit while helping a friend up starts their ring again.
 	for ds in revive.keys():
 		if Vector2(_feet_of(int(ds)).x - at.x, _feet_of(int(ds)).z - at.z).length() < REVIVE_R and float(revive[ds]) > 0.0:
@@ -1342,6 +1630,14 @@ func hurt(key: int, dmg: int, from: Vector3, blockable: bool) -> String:
 	stats_dirty = true
 	net.event("d_hurt", [key, dmg])
 	_on_hurt(key, dmg)
+	if has_relic(key, "thorns"):
+		var spiked := false
+		for mid in foes.mons.keys():
+			if foes.mons.has(mid) and Vector2(foes.mons[mid]["p"].x - at.x, foes.mons[mid]["p"].z - at.z).length() < 2.3:
+				hit_foe(int(mid), 3.0, at, -2, true)
+				spiked = true
+		if spiked:
+			poof(at + Vector3(0, 0.5, 0), Color(0.45, 0.9, 0.4), 24)
 	var push := Vector3(at.x - from.x, 0.0, at.z - from.z)
 	if push.length() > 0.01 and not knight:
 		_knock(key, push.normalized() * 5.0, 0.15)
@@ -1358,6 +1654,9 @@ func hurt(key: int, dmg: int, from: Vector3, blockable: bool) -> String:
 			if not runrec.is_empty():
 				(runrec["kos"] as Array).append({"slot": key, "by": src, "floor": FloorGen.global_floor(zone, floor_i)})
 			revive[key] = 0.0
+			if has_relic(key, "phoenix") and not bool(st.get("ph_used", false)):
+				st["ph_used"] = true
+				st["rise"] = 2.0  # up again by yourself in a moment
 			tally["downs"] = int(tally["downs"]) + 1
 			main.sound_at("faint", at, -2.0)
 			if knight:
@@ -1410,6 +1709,7 @@ func _knight_guard(from: Vector3) -> bool:
 func _revive(slot: int) -> void:
 	var st: Dictionary = stats[slot]
 	st["down"] = false
+	st["rise"] = 0.0
 	st["hp"] = maxi(2, int(ceil(float(st["max"]) * 0.4)))
 	iframes[slot] = 2.0
 	revive.erase(slot)
@@ -1429,6 +1729,13 @@ func _revive_step(delta: float, alive: Array) -> void:
 		if not bool(st["down"]):
 			continue
 		var at := _feet_of(int(s))
+		if float(st.get("rise", 0.0)) > 0.0:
+			st["rise"] = float(st["rise"]) - delta
+			if float(st["rise"]) <= 0.0:
+				_revive(int(s))
+				net_popup(at + Vector3(0, 1.6, 0), "PHOENIX!", "crit")
+				poof(at + Vector3(0, 0.8, 0), Color(1.0, 0.6, 0.2), 40)
+				continue
 		var helpers := 0
 		for pl in alive:
 			var p: Vector3 = (pl as Dictionary)["p"]
@@ -1774,9 +2081,12 @@ func _pickups_step(delta: float, alive: Array) -> void:
 				for hnd in 2:
 					if main.vr_rig.hand_point(hnd).distance_to(p) < 0.4:
 						d = 0.0
-			if (k == Loot.COIN or k == Loot.COIN5) and d < 2.2 and d > 0.5:
+			var pull := 2.2
+			if has_relic(s, "magnet"):
+				pull = 9.0 if k in [Loot.COIN, Loot.COIN5, Loot.HEART] and FloorGen.room_at(f, fp) == FloorGen.room_at(f, p) else 2.2
+			if (k == Loot.COIN or k == Loot.COIN5 or (k == Loot.HEART and pull > 2.5)) and d < pull and d > 0.5:
 				var to := Vector3(fp.x - p.x, 0.0, fp.z - p.z).normalized()
-				pk["p"] = p + to * 5.0 * delta
+				pk["p"] = p + to * (5.0 if pull < 2.5 else 9.0) * delta
 			var nope: Dictionary = pk.get("nope", {})
 			if nope.has(s):
 				if d > 1.5:
@@ -1789,9 +2099,9 @@ func _pickups_step(delta: float, alive: Array) -> void:
 				if rg > 0:
 					(relic_taken[rg] as Dictionary)[s] = true
 					if runrec.has("relics"):
-						(runrec["relics"] as Array).append(String(Loot.NAMES[k]))
+						(runrec["relics"] as Array).append(Relics.id_of_kind(k) if Relics.is_relic_kind(k) else String(Loot.NAMES[k]))
 					tally["relics"] = int(tally.get("relics", 0)) + 1
-					if (relic_taken[rg] as Dictionary).size() < _players().size():
+					if (relic_taken[rg] as Dictionary).size() < _players().size() and not _all_chose(rg):
 						break  # the others still get to choose
 					for id2 in pickups.keys():
 						if int((pickups[id2] as Dictionary).get("relic", 0)) == rg:
@@ -1813,6 +2123,7 @@ func _collect(slot: int, k: int, p: Vector3) -> bool:
 			var n := 1 if k == Loot.COIN else 5
 			_gold += n
 			runrec["gold_in"] = int(runrec.get("gold_in", 0)) + n
+			_add_hoard(n)
 			_sync_money()
 			main.awards.add(slot, "gold", n)
 			main.sound_at("coin", p, -6.0, randf_range(1.0, 1.2))
@@ -1879,6 +2190,30 @@ func _collect(slot: int, k: int, p: Vector3) -> bool:
 		Loot.CHARM:
 			st["charm"] = 1
 			text = "LUCKY!"
+		_:
+			if not Relics.is_relic_kind(k):
+				return false
+			var rid := Relics.id_of_kind(k)
+			if not Relics.usable(rid, {"knight": knight, "relics": st.get("relics", [])}):
+				return false
+			if not st.has("relics"):
+				st["relics"] = []
+			(st["relics"] as Array).append(rid)
+			match rid:
+				"glass":
+					st["max"] = maxi(2, int(st["max"]) - 2)
+					st["hp"] = mini(int(st["hp"]), int(st["max"]))
+				"boom":
+					st["bomb"] = maxi(int(st["bomb"]), 3)
+				"bubble":
+					st["bubble"] = true
+			main.sound_at("level_up", p, 0.0)
+			poof(p + Vector3(0, 0.5, 0), Relics.info(rid)["color"], 30)
+			text = String(Relics.info(rid)["name"])
+			stats_dirty = true
+			tally["pickups"] = int(tally["pickups"]) + 1
+			net_popup(p + Vector3(0, 0.9, 0), text, "crit")
+			return true
 	tally["pickups"] = int(tally["pickups"]) + 1
 	stats_dirty = true
 	if k not in [Loot.COIN, Loot.COIN5] and runrec.has("items"):
@@ -1972,7 +2307,8 @@ func _buy(slot: int, i: int) -> bool:
 func on_request(slot: int, action: String, args: Array) -> void:
 	if not active:
 		if action == "atk" and args.size() >= 2:
-			try_hat(slot, args[0])
+			if not try_class(slot, args[0]):
+				try_hat(slot, args[0])
 		return
 	if String(net.state_get("d_phase", "play")) != "play" or not _alive(slot):
 		return
@@ -1980,22 +2316,22 @@ func on_request(slot: int, action: String, args: Array) -> void:
 	match action:
 		"atk":
 			if args.size() >= 2:
-				_attack(slot, args[0], float(args[1]), float(st["dmg"]), ATTACK_REACH, false)
+				var shot := String(Classes.info(String(st.get("cls", "knight")))["shot"]) if not _is_knight(slot) else ""
+				if shot != "":
+					_class_shot(slot, args[0], float(args[1]), shot)
+					_attack(slot, args[0], float(args[1]), 0.0, ATTACK_REACH, false, true)
+				else:
+					_attack(slot, args[0], float(args[1]), _hit_dmg(slot, float(st["dmg"])), ATTACK_REACH, false)
 		"bash":
 			if args.size() >= 2 and String(st["abil"]) == "bash":
-				_attack(slot, args[0], float(args[1]), float(st["dmg"]) + 1.0, 1.7, true)
+				_attack(slot, args[0], float(args[1]), _hit_dmg(slot, float(st["dmg"]) + 1.0), 1.7, true)
 				iframes[slot] = maxf(float(iframes.get(slot, 0.0)), 0.3)
 		"dash":
 			if String(st["abil"]) == "dash":
 				iframes[slot] = maxf(float(iframes.get(slot, 0.0)), 0.4)
 		"bow":
 			if args.size() >= 2 and String(st["abil"]) == "bow":
-				var pos: Vector3 = args[0]
-				var yaw := float(args[1])
-				var fwd := Vector3(sin(yaw), 0.0, cos(yaw))
-				var sid := foes.shoot("arrow", pos + Vector3(0, 0.6, 0) + fwd * 0.4, fwd * 13.0, -2)
-				foes.shots[sid]["dmg"] = float(st["dmg"])
-				main.sound_at("bow", pos, -4.0)
+				_class_shot(slot, args[0], float(args[1]), "arrow")
 		"bomb":
 			if args.size() >= 2 and int(st["bomb"]) > 0:
 				st["bomb"] = int(st["bomb"]) - 1
@@ -2008,8 +2344,9 @@ func on_request(slot: int, action: String, args: Array) -> void:
 				if r >= 0:
 					land = FloorGen.room_clamp(f, r, land, 0.3)
 				foes.lob("bomb", pos2 + Vector3(0, 0.9, 0), land, 0.5, -2)
-				_add_hazard({"shape": "circle", "pos": land, "dir": Vector3.ZERO, "size": Vector2(1.8, 0.0), "warn": 1.3,
-					"stay": 0.3, "pdmg": 0, "fdmg": 4.0 + float(st["dmg"]) - 1.0, "tick": 0.0, "breaks": true, "by": slot})
+				var boom := has_relic(slot, "boom")
+				_add_hazard({"shape": "circle", "pos": land, "dir": Vector3.ZERO, "size": Vector2(2.6 if boom else 1.8, 0.0), "warn": 1.3,
+					"stay": 0.3, "pdmg": 0, "fdmg": 4.0 + float(st["dmg"]) - 1.0 + (2.0 if boom else 0.0), "tick": 0.0, "breaks": true, "by": slot})
 				main.sound_at("whoosh", pos2, -4.0, 1.2)
 		"potion":
 			if int(st["pot"]) > 0 and int(st["hp"]) < int(st["max"]):
@@ -2025,8 +2362,31 @@ func on_request(slot: int, action: String, args: Array) -> void:
 
 
 ## Host: a swing / bonk in front of a hero (yaw = facing). bash = shield bash (shoves, ignores shields).
-func _attack(slot: int, pos: Vector3, yaw: float, dmg: float, reach: float, bash: bool) -> void:
+## A hero's hit with relics: GLASS SWORD doubles it.
+func _hit_dmg(slot: int, dmg: float) -> float:
+	return dmg * (2.0 if has_relic(slot, "glass") else 1.0)
+
+
+## Host: an archer's arrow / a wizard's magic spark / the bow ability (TRIPLE SHOT: three in a fan).
+func _class_shot(slot: int, pos: Vector3, yaw: float, k: String) -> void:
+	var st: Dictionary = stats[slot]
+	var n := 3 if has_relic(slot, "triple") else 1
+	var spd := float(Classes.SHOT_SPEED.get(k, 13.0))
+	for i in n:
+		var a := yaw + (i - (n - 1) * 0.5) * 0.24
+		var fwd := Vector3(sin(a), 0.0, cos(a))
+		var sid := foes.shoot(k, pos + Vector3(0, 0.6, 0) + fwd * 0.4, fwd * spd, -2)
+		foes.shots[sid]["dmg"] = _hit_dmg(slot, float(st["dmg"]))
+		foes.shots[sid]["by"] = slot
+	main.sound_at("bow" if k == "arrow" else "magic", pos, -4.0, 1.0 if k == "arrow" else 1.4)
+
+
+func _attack(slot: int, pos: Vector3, yaw: float, dmg: float, reach: float, bash: bool, props_only: bool = false) -> void:
 	net.event("bonk", [slot])
+	var spin := has_relic(slot, "spin") and not bash and not props_only
+	if spin:
+		reach += 0.3
+		poof(pos + Vector3(0, 0.5, 0), Color(0.95, 0.95, 1.0), 10)
 	if main.heroes.has(slot) and not party.is_local(slot):
 		(main.heroes[slot] as Hero).bonk_anim()
 	var fwd := Vector3(sin(yaw), 0.0, cos(yaw))
@@ -2039,6 +2399,8 @@ func _attack(slot: int, pos: Vector3, yaw: float, dmg: float, reach: float, bash
 				if _buy(slot, i):
 					return
 	for id in foes.mons.keys():
+		if props_only:
+			break
 		if not foes.mons.has(id):
 			continue
 		var c := foes.center_of(id)
@@ -2046,7 +2408,7 @@ func _attack(slot: int, pos: Vector3, yaw: float, dmg: float, reach: float, bash
 		var d := to.length()
 		if c.y > 1.8 or d > reach + foes.radius_of(id):
 			continue
-		if d > 0.4 and fwd.dot(to / d) < 0.25:
+		if d > 0.4 and fwd.dot(to / d) < 0.25 and not spin:
 			continue
 		var res := hit_foe(int(id), dmg, pos, slot, bash)
 		if res != "":
@@ -2057,6 +2419,8 @@ func _attack(slot: int, pos: Vector3, yaw: float, dmg: float, reach: float, bash
 				foes.mons[id]["t"] = 1.0
 	# Swat goo balls and orbs back.
 	for sid in foes.shots.keys():
+		if props_only:
+			break
 		if not foes.shots.has(sid):
 			continue
 		var sp2: Vector3 = foes.shots[sid]["p"]
@@ -2086,7 +2450,7 @@ func _attack(slot: int, pos: Vector3, yaw: float, dmg: float, reach: float, bash
 				hit = true
 	if _hit_secret(at + fwd * 0.3):
 		hit = true
-	if not hit:
+	if not hit and not props_only:
 		main.sound_at("swish", at, -10.0, randf_range(1.1, 1.3))
 
 
@@ -2126,7 +2490,7 @@ func _knight_step(delta: float) -> void:
 			var c := foes.center_of(id)
 			if main.hands.seg_dist(c, base, tip) < foes.radius_of(id) + 0.1:
 				sword_cd[id] = 0.35
-				var res := hit_foe(int(id), float(_st(0).get("dmg", 2)), head, 0)
+				var res := hit_foe(int(id), _hit_dmg(0, float(_st(0).get("dmg", 2))), head, 0)
 				if res != "":
 					main.hands.swings += 1
 					rig.pulse(VrRig.RIGHT, 0.8 if res != "block" else 0.3, 0.08)
@@ -2207,6 +2571,7 @@ func process(delta: float) -> void:
 		if h.down:
 			h.set_revive(float(revive_vals.get(int(s), 0.0)))
 	_knight_hearts()
+	_animate_pets(delta)
 	for n in shop_nodes:
 		var item: Node = n.get_node_or_null("Item")
 		if item != null:
@@ -2268,9 +2633,21 @@ func _animate_pickups(delta: float) -> void:
 			tw.tween_property(mi, "scale", Vector3.ONE, 0.12)
 			pick_nodes[id] = mi
 			pick_kinds[id] = k
+			if Relics.is_relic_kind(k):
+				var rl := Label3D.new()
+				rl.text = String(Relics.info(Relics.id_of_kind(k))["name"])
+				rl.font_size = 40
+				rl.pixel_size = 0.004
+				rl.outline_size = 14
+				rl.modulate = (Relics.info(Relics.id_of_kind(k))["color"] as Color).lightened(0.3)
+				rl.outline_modulate = Color(0, 0, 0, 0.95)
+				rl.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
+				rl.position = Vector3(0.0, 0.62, 0.0)
+				mi.add_child(rl)
 		var n: Node3D = pick_nodes[id]
 		var p: Vector3 = pk["p"]
-		n.position = n.position.lerp(p + Vector3(0, 0.08 * sin(_t * 3.0 + int(id)), 0), 1.0 - exp(-20.0 * delta))
+		var lift := 0.3 if Relics.is_relic_kind(k) else 0.0  # relics float over their altar stones
+		n.position = n.position.lerp(p + Vector3(0, lift + 0.08 * sin(_t * 3.0 + int(id)), 0), 1.0 - exp(-20.0 * delta))
 		n.rotation.y += delta * 2.0
 	for id in pick_nodes.keys():
 		if not src.has(id):
@@ -2290,14 +2667,21 @@ func _sync_hero_looks() -> void:
 		var h: Hero = main.heroes[s]
 		var sd: Dictionary = st.get(int(s), {})
 		var want := {"hat": String(hats.get(int(s), "")) if String(hats.get(int(s), "none")) != "none" else ""}
+		var cid := String(sd.get("cls", ""))
+		if Classes.valid(cid):
+			want["class"] = "knight" if cid == "knight" else ("archer" if cid == "archer" else "mage")
+			for k in Classes.info(cid)["look"]:
+				want[k] = Classes.info(cid)["look"][k]
 		var abil := String(sd.get("abil", ""))
 		if abil == "bow":
 			want["weapon"] = "bow"
 		elif abil == "bash":
 			want["offhand"] = "round_shield"
-		elif abil == "dash":
+		elif abil == "dash" and cid != "archer":
 			want["weapon"] = "dagger"
 		h.set_look(want)
+		h.speed_mul = float(Classes.info(cid)["speed"]) * (1.25 if (sd.get("relics", []) as Array).has("boots") else 1.0) if Classes.valid(cid) else 1.0
+		h.set_bubble(bool(sd.get("bubble", false)))
 		h.set_down(bool(sd.get("down", false)))
 
 
@@ -2378,13 +2762,18 @@ func owned_input(delta: float, h: Hero, slot: int) -> void:
 	var yaw := h.rotation.y
 	var fwd := Vector3(sin(yaw), 0.0, cos(yaw))
 	if (party.just_pressed(slot, "accept") or party.just_pressed(slot, "rt")) and float(cd.get("a", 0.0)) <= 0.0:
-		cd["a"] = 0.4
+		var cid := String(sd.get("cls", "knight"))
+		cd["a"] = float(Classes.SHOT_CD.get(String(Classes.info(cid)["shot"]), 0.4))
 		# Soft aim: turn to the nearest monster in reach (kids rarely line up exactly).
 		var best := 2.0
 		for id in foes.mons:
 			var m: Dictionary = foes.mons[id]
 			var mp: Vector3 = (m["node"] as Node3D).position
 			var d := Vector2(mp.x - h.position.x, mp.z - h.position.z).length()
+			if Classes.valid(String(sd.get("cls", ""))) and String(Classes.info(String(sd["cls"]))["shot"]) != "":
+				d *= 0.33  # shooters aim at monsters further off (same room)
+				if FloorGen.room_at(f, mp) != FloorGen.room_at(f, h.position):
+					continue
 			if d < best and int(m["st"]) != Foes.SLEEP:
 				best = d
 				yaw = atan2(mp.x - h.position.x, mp.z - h.position.z)
@@ -2541,3 +2930,167 @@ func apply_event(k: String, args: Array) -> void:
 			main.show_headline(String(args[0]), 2.5)
 		"d_floor":
 			_floor_banner(int(args[0]), int(args[1]), String(args[2]))
+
+
+# --- Relics, biome hazards, pets ----------------------------------------------------------------------
+
+## Host: the relic altar at this camp: 2-3 relics on stones (Relics.offer), everyone takes ONE.
+func _build_altar(z: int, fl: int) -> void:
+	var party_l: Array = []
+	for s in stats:
+		party_l.append({"knight": _is_knight(int(s)), "relics": (stats[s] as Dictionary).get("relics", [])})
+	var o := Relics.offer(seed_v, z, fl, Relics.unlocked(hoard()), party_l)
+	if runrec.has("offers"):
+		(runrec["offers"] as Array).append(o)
+	if o.is_empty():
+		return
+	relic_group += 1
+	relic_taken[relic_group] = {}
+	altar_group = relic_group
+	for i in mini(o.size(), ALTAR_SPOTS.size()):
+		_spawn_pick(Relics.kind_of(String(o[i])), FloorGen.to_world(f, 0, ALTAR_SPOTS[i]) + Vector3(0.0, 0.3, 0.0), false)
+		(pickups[next_pick - 1] as Dictionary)["relic"] = relic_group
+	net.event("d_banner", ["PICK A RELIC!", "level"])
+
+
+## Everyone who could still take something from treasure group rg has taken one.
+func _all_chose(rg: int) -> bool:
+	var taken: Dictionary = relic_taken.get(rg, {})
+	for pl in _players():
+		var s: int = (pl as Dictionary)["slot"]
+		if taken.has(s) or not stats.has(s):
+			continue
+		for id in pickups:
+			var pk: Dictionary = pickups[id]
+			if int(pk.get("relic", 0)) != rg:
+				continue
+			var k := int(pk["kind"])
+			if not Relics.is_relic_kind(k) or Relics.usable(Relics.id_of_kind(k), {"knight": _is_knight(s), "relics": (stats[s] as Dictionary).get("relics", [])}):
+				return false
+	return true
+
+
+## Host: the biome's own hazards (crystal shard lanes, lava vents) go off in rooms with players in them.
+## Each glows first (FloorGen.FEATURE warn) on every screen and in VR.
+func _features_step(delta: float, alive: Array) -> void:
+	var rooms: Array = f["rooms"]
+	var here := {}
+	for pl in alive:
+		var r := FloorGen.room_at(f, (pl as Dictionary)["p"])
+		if r >= 0:
+			here[r] = true
+	for r2 in here:
+		for fe in ((rooms[int(r2)] as Dictionary).get("features", []) as Array):
+			var fd: Dictionary = fe
+			var fk := String(fd["kind"])
+			var fc: Dictionary = FloorGen.FEATURE[fk]
+			var period := float(fc["period"])
+			var warn := float(fc["warn"])
+			var t1 := fmod(trap_clock + float(fd["phase"]), period)
+			var fire_at := period - warn
+			if t1 - delta < fire_at and t1 >= fire_at:
+				var w := FloorGen.to_world(f, int(r2), fd["p"])
+				var dmg := 1 + int(foes.cfg.get("dmg", 0))
+				if fk == "vents":
+					hazard("circle", w, Vector3.ZERO, Vector2(float(fc["radius"]), 0.0), warn, 0.7, dmg, false)
+					main.sound_at("fire", w, -8.0, 0.7)
+				else:
+					var dv := Vector2(FloorGen.DIRS[int(fd["dir"])])
+					hazard("line", w, Vector3(dv.x, 0.0, dv.y), Vector2(float(fc["len"]), float(fc["width"])), warn, 0.45, dmg, false)
+					main.sound_at("sparkle", w, -6.0, 0.6)
+
+
+## Host: DRAGON EGG: the baby dragon spits a fireball at the nearest awake monster in your room.
+func _pets_step(delta: float, alive: Array) -> void:
+	for pl in alive:
+		var s: int = (pl as Dictionary)["slot"]
+		if not has_relic(s, "egg"):
+			continue
+		pet_cd[s] = float(pet_cd.get(s, 1.0)) - delta
+		if float(pet_cd[s]) > 0.0:
+			continue
+		var p: Vector3 = (pl as Dictionary)["p"]
+		var r := FloorGen.room_at(f, p)
+		var best := -1
+		var bd := 8.0
+		for id in foes.mons:
+			var m: Dictionary = foes.mons[id]
+			if int(m["room"]) != r or int(m["st"]) == Foes.SLEEP:
+				continue
+			var d := Vector2(Vector3(m["p"]).x - p.x, Vector3(m["p"]).z - p.z).length()
+			if d < bd:
+				bd = d
+				best = int(id)
+		if best < 0:
+			pet_cd[s] = 0.3
+			continue
+		pet_cd[s] = 1.6
+		var from := p + Vector3(0.0, 1.4, 0.0)
+		var sid := foes.shoot("fire", from, (foes.center_of(best) - from).normalized() * 9.0, -2)
+		foes.shots[sid]["dmg"] = 1.0 + float(FloorGen.global_floor(zone, floor_i)) / 8.0
+		foes.shots[sid]["by"] = s
+		main.sound_at("fire", from, -10.0, 1.6)
+
+
+## Host: one second of FIRE SWORD burning.
+func burn_tick(id: int) -> void:
+	if not foes.mons.has(id):
+		return
+	var c := foes.center_of(id)
+	poof(c, Color(1.0, 0.55, 0.2), 6)
+	hit_foe(id, 1.0, c, -2, true)
+
+
+## Every machine: the baby dragons fly round their heroes (and by the VR knight's shoulder).
+func _animate_pets(delta: float) -> void:
+	var st: Dictionary = net.state_get("d_stats", {})
+	var want := {}
+	for s in st:
+		if ((st[s] as Dictionary).get("relics", []) as Array).has("egg"):
+			want[int(s)] = true
+	for s2 in pets.keys():
+		if not want.has(s2):
+			(pets[s2] as Node3D).queue_free()
+			pets.erase(s2)
+	for s3 in want:
+		var at := Vector3.INF
+		if main.heroes.has(s3):
+			at = (main.heroes[s3] as Node3D).position + Vector3(0.0, 1.3, 0.0)
+		elif s3 == 0 and main.vr_rig != null:
+			at = knight_head() + main.vr_rig.head_forward().cross(Vector3.UP) * -0.6 + Vector3(0.0, -0.25, 0.0)
+		if at == Vector3.INF:
+			continue
+		if not pets.has(s3):
+			var d := Creatures.monster("dragon", {"color": Color(1.0, 0.6, 0.3), "scale": 0.28, "seed": 3})
+			add_child(d)
+			d.position = at
+			pets[s3] = d
+		var n: Node3D = pets[s3]
+		var a := _t * 1.6 + float(s3)
+		var goal := at + (Vector3(cos(a) * 0.55, 0.12 * sin(_t * 4.0), sin(a) * 0.55) if main.heroes.has(s3) else Vector3.ZERO)
+		var mv := goal - n.position
+		n.position = n.position.lerp(goal, 1.0 - exp(-6.0 * delta)) if mv.length() < 4.0 else goal
+		if mv.length() > 0.01:
+			n.rotation.y = lerp_angle(n.rotation.y, atan2(mv.x, mv.z), 1.0 - exp(-8.0 * delta))
+
+
+## Not in a run: heroes who picked a hero statue look like that hero (and wear their hat).
+func _sync_lobby_looks() -> void:
+	var cl: Dictionary = net.state_get("d_cls", {})
+	if cl.is_empty():
+		return
+	var hats: Dictionary = net.state_get("d_hats", {})
+	for s in main.heroes:
+		if not cl.has(int(s)):
+			continue
+		var cid := String(cl[int(s)])
+		if not Classes.valid(cid):
+			continue
+		var h: Hero = main.heroes[s]
+		var want := {"hat": String(hats.get(int(s), "")) if String(hats.get(int(s), "none")) != "none" else "",
+			"class": "knight" if cid == "knight" else ("archer" if cid == "archer" else "mage")}
+		for k in Classes.info(cid)["look"]:
+			want[k] = Classes.info(cid)["look"][k]
+		h.set_look(want)
+		h.speed_mul = 1.0
+		h.set_bubble(false)
