@@ -547,7 +547,9 @@ static func vr_banner(world: Node, cam: Node3D, title: String, subtitle: String 
 	o["color"] = opts.get("color", st[0])
 	o["duration"] = float(opts.get("duration", 2.6))
 	o["title_size"] = 0.12
+	_vr_replace(world, "vr_banner")
 	var c := vr_card(world, cam, title, subtitle, o)
+	world.set_meta("vr_banner", c)
 	c.title_color = st[1]
 	var snd := String(opts.get("sound", st[2]))
 	if snd != "":
@@ -562,7 +564,21 @@ static func vr_toast(world: Node, cam: Node3D, text: String, opts: Dictionary = 
 	o["duration"] = float(opts.get("duration", 3.0))
 	o["height"] = float(opts.get("height", -0.32))
 	o["title_size"] = 0.055
-	return vr_card(world, cam, text, String(opts.get("sub", "")), o)
+	_vr_replace(world, "vr_toast")
+	var c := vr_card(world, cam, text, String(opts.get("sub", "")), o)
+	world.set_meta("vr_toast", c)
+	return c
+
+
+## A new VR banner (toast) takes the place of the one still showing: two at once were drawn over each other in the
+## headset ("LAST ROUND!" over the next one, Party Board; core/vr_view_check.gd "drawn over").
+static func _vr_replace(world: Node, key: String) -> void:
+	if world == null or not world.has_meta(key):
+		return
+	var old = world.get_meta(key)
+	world.remove_meta(key)
+	if is_instance_valid(old) and old is VrCard and not (old as VrCard).is_queued_for_deletion():
+		(old as VrCard).hide_card()
 
 
 ## VR countdown: numbers on a card in front of the VR player. Returns a Countdown-like node with the
@@ -1425,6 +1441,7 @@ class VrCard extends Node3D:
 	var follow := true
 	var title_size := 0.085
 	var body_size := 0.05
+	var panel_h := 0.0
 	var t := 0.0
 	var panel: MeshInstance3D
 	var title_l: Label3D
@@ -1471,6 +1488,26 @@ class VrCard extends Node3D:
 		panel.mesh = UiKit.panel_mesh(Vector2(width, h), UiKit.BG, Color(accent.r, accent.g, accent.b, 0.7))
 		title_l.position = Vector3(0, h * 0.5 - pad - th * 0.5, 0.004)
 		body_l.position = Vector3(0, -h * 0.5 + pad + bh * 0.5, 0.004)
+		panel_h = h
+		_step_aside()
+
+	## Another panel already in this spot (a banner with a story card, a game's VR label): step up over it, so the
+	## two aren't drawn over each other (core/vr_view_check.gd "drawn over").
+	func _step_aside() -> void:
+		if cam == null or not is_instance_valid(cam) or not is_inside_tree():
+			return
+		const Check := preload("res://core/vr_view_check.gd")
+		var others := Check.shown_panels(get_tree().root).filter(func(o: Node3D) -> bool: return o != self and not is_ancestor_of(o))
+		for i in 4:
+			var hit := false
+			for o in others:
+				if Check.overlap(cam.global_position, self, o):
+					hit = true
+					break
+			if not hit:
+				return
+			height += (panel_h + 0.06) / UiKit.VrText.COMFORT
+			UiKit.vr_place(self, cam, distance, height)
 
 	## Fade out (and free unless free_after is false).
 	func hide_card(free_after: bool = true) -> void:

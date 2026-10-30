@@ -10,6 +10,7 @@ extends RefCounted
 ## - its text is at least MIN_TEXT_DEG high in the eye (story-card body text is ~1.2 deg at its usual 2.56 m);
 ## - nothing solid between the eyes and its centre (a physics ray, then the real triangles of every mesh on the way:
 ##   a tree, a wall, a garden prop from saved growth); meshes around the head (rooms, sky domes) don't count;
+## - no two panels in the same spot (drawn over each other);
 ## - no text glued to the face: a visible Label3D under the XR camera turns with the head.
 ## A node (or ancestor) with meta "vr_check_ignore" is skipped.
 
@@ -22,6 +23,8 @@ const MIN_TEXT_DEG := 0.8
 const IGNORE_META := "vr_check_ignore"
 ## Meshes with more triangles than this count by their box only (cheap, may over-report: rare in VR games).
 const MAX_FACES := 20000
+## Two panels whose middles are closer than this (seen from the eyes) are drawn over each other.
+const OVERLAP_DEG := 5.0
 const VR_LAYER := preload("res://core/vr_layer.gd").LAYER
 
 
@@ -46,10 +49,12 @@ static func problems(root: Node) -> Array[String]:
 		return out
 	var ws := maxf(XRServer.world_scale, 0.001)
 	var head := cam.global_position
+	var shown: Array[Node3D] = []
 	for n in root.find_children("*", "Node3D", true, false):
 		var c := n as Node3D
 		if not c.has_meta("vr_placed") or not _drawn(c) or _ignored(c):
 			continue
+		shown.append(c)
 		var name := _name(c)
 		var p := _centre(c)
 		var d := head.distance_to(p) / ws
@@ -64,6 +69,15 @@ static func problems(root: Node) -> Array[String]:
 		var hit := blocker(cam, c, p)
 		if hit != "":
 			out.append("%s: hidden behind %s" % [name, hit])
+	# Two panels in the same spot are drawn over each other (a banner over the last one, a card over a sign).
+	for i in shown.size():
+		for j in range(i + 1, shown.size()):
+			var a := shown[i]
+			var b := shown[j]
+			if a.is_ancestor_of(b) or b.is_ancestor_of(a):
+				continue
+			if overlap(head, a, b):
+				out.append("%s: drawn over %s" % [_name(a), _name(b)])
 	for n in cam.find_children("*", "Label3D", true, false):
 		var l := n as Label3D
 		if l.is_visible_in_tree() and l.text.strip_edges() != "" and l.transparency < 0.65 and not _ignored(l):
@@ -114,7 +128,7 @@ static func first_hit(cam: Camera3D, to: Vector3, skip: Node = null) -> Dictiona
 		var box := m.global_transform * m.get_aabb()
 		if box.grow(0.05).has_point(head) or box.intersects_segment(head, to) == null:
 			continue
-		if _skip_blocker(m, skip, cam) or _moving(m):
+		if _skip_blocker(m, skip, cam) or _moving(m) or _see_through(m):
 			continue
 		var f := _mesh_hit(m, head, to)
 		if f < float(best.f):
@@ -233,4 +247,34 @@ static func _moving(n: Node) -> bool:
 		if x is CharacterBody3D or x is RigidBody3D:
 			return true
 		x = x.get_parent()
+	return false
+
+
+## Are panels a and b drawn over each other, seen from `head`? (HudKit's VrCard steps out of the way with it.)
+static func overlap(head: Vector3, a: Node3D, b: Node3D) -> bool:
+	var pa := _centre(a) - head
+	var pb := _centre(b) - head
+	return rad_to_deg(pa.angle_to(pb)) < OVERLAP_DEG and absf(pa.length() - pb.length()) < 0.6 * maxf(XRServer.world_scale, 0.001)
+
+
+## Panels in front of the VR player that are drawn right now (meta "vr_placed").
+static func shown_panels(root: Node) -> Array[Node3D]:
+	var out: Array[Node3D] = []
+	for n in root.find_children("*", "Node3D", true, false):
+		if n.has_meta("vr_placed") and _drawn(n as Node3D) and not _ignored(n):
+			out.append(n as Node3D)
+	return out
+
+
+## A see-through mesh (a ghost building preview, glass, a light beam) doesn't hide what's behind it.
+static func _see_through(m: MeshInstance3D) -> bool:
+	var mat: Material = m.material_override
+	if mat == null and m.mesh.get_surface_count() > 0:
+		mat = m.get_active_material(0)
+	if mat is BaseMaterial3D:
+		var b := mat as BaseMaterial3D
+		return b.transparency != BaseMaterial3D.TRANSPARENCY_DISABLED and b.albedo_color.a < 0.9
+	if mat is ShaderMaterial:
+		var sh := (mat as ShaderMaterial).shader
+		return sh != null and (sh.code.contains("ALPHA") or sh.code.contains("blend_add"))
 	return false
