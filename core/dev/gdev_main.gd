@@ -344,7 +344,9 @@ func _capture(path: String, width: int, is_frame: bool, group: String = "gdev_ca
 				return
 			capture_busy = false
 	# Fallback: synchronous readback (can cause a small hitch).
-	var img := vp.get_texture().get_image()
+	var img := _grab(vp)
+	if img == null:
+		return
 	tasks.append(WorkerThreadPool.add_task(_encode_image.bind(img, path, width, is_frame)))
 
 
@@ -387,7 +389,7 @@ func _update_stream(delta: float) -> void:
 					_stream_encode(img))))
 			if err == OK:
 				return
-	var img := vp.get_texture().get_image()  # fallback (can hitch)
+	var img := _grab(vp)  # fallback (can hitch)
 	if img == null:
 		stream_busy = false
 		return
@@ -455,3 +457,16 @@ func _frame_saved(path: String) -> void:
 	frames.append(path)
 	while frames.size() > MAX_FRAMES:
 		DirAccess.remove_absolute(frames.pop_front())
+
+
+## The viewport's picture, or null when nothing is drawn yet or it is gone (offscreen runs, 2026-10-30: a grab before
+## the first draw logged "tex is null at texture_get_data" and _save_frame then called get_width on null).
+## Always grab through this, never get_image() straight off get_texture() (dev.debt flags that).
+static func _grab(vp: Viewport) -> Image:
+	if vp == null or not is_instance_valid(vp) or not vp.is_inside_tree():
+		return null
+	var tex := vp.get_texture()
+	if tex == null or not tex.get_rid().is_valid() or tex.get_width() <= 0 or tex.get_height() <= 0:
+		return null
+	var img := tex.get_image()
+	return img if img != null and not img.is_empty() else null

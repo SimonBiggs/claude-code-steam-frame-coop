@@ -16,6 +16,7 @@ extends Node
 ## Local:     godot --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/elemental_bender_bot.tscn
 ##            (EB_FAST=1 for short waves: wave 6 inside a minute)
 ## Networked: DUO_PORT=80xx DUO_HOST=1 BOT_VR=1 ... & DUO_PORT=80xx DUO_JOIN=127.0.0.1 ... (real time)
+const FrameGrab := preload("res://core/frame_grab.gd")
 
 const BotKit := preload("res://tests/bot_kit.gd")
 const VrRig := preload("res://core/vr_rig.gd")
@@ -299,9 +300,13 @@ func _vr_bot(delta: float) -> void:
 
 func _shot(tag: String) -> void:
 	var dir := OS.get_environment("EB_SHOT")
-	get_viewport().get_texture().get_image().save_png("%s/tv_%s.png" % [dir, tag])
+	var tv := FrameGrab.image(get_viewport())
+	if tv != null:
+		tv.save_png("%s/tv_%s.png" % [dir, tag])
 	if main.vr_rig != null and main.vr_rig.mirror != null:
-		main.vr_rig.mirror.get_texture().get_image().save_png("%s/vr_%s.png" % [dir, tag])
+		var vr := FrameGrab.image(main.vr_rig.mirror)
+		if vr != null:
+			vr.save_png("%s/vr_%s.png" % [dir, tag])
 	if OS.has_environment("EB_DUMP"):
 		_dump(main, "")
 

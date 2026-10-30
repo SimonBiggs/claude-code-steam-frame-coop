@@ -10,6 +10,7 @@ extends Node
 ## Split in PARTS scenes (deck_bot, deck2_bot .. deck4_bot: every 4th game) so each fits dev.bots' 3600 frames.
 ## DECK_BOT_ONLY=id,id runs just those games (in any part). Run: dev.bots.all({only: ["deck", "deck2", "deck3", "deck4"]}), or
 ##   godot-test --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/deck_bot.tscn
+const FrameGrab := preload("res://core/frame_grab.gd")
 
 const BotKit := preload("res://tests/bot_kit.gd")
 const LayoutCheck := preload("res://core/layout_check.gd")
@@ -104,8 +105,8 @@ class Runner extends Node:
 				kit.assert_true(has_cam, "%s: view %s has a camera (no camera = a plain grey view)" % [id, svc.name])
 				if not drawn or not has_cam:
 					continue
-				var img := v.get_texture().get_image()
-				if img == null or img.is_empty():
+				var img := FrameGrab.image(v)
+				if img == null:
 					continue
 				var greyish := 0
 				var n := 0
