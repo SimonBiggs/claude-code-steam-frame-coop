@@ -36,6 +36,18 @@ extends Node3D
 ##    once that player has done it twice (cue_did / cue_learned). The FIREBALL button next to the power
 ##    bar is the player's own Y / F / ' with a flame. No view shows its own striker's name tag.
 ## Everything cut is only switched off: SIMPLE_MODE = false brings the full cup game back.
+##
+## LEO THE LION's story (simple mode; games/penalty_shootout/matchgen.gd + leo_corner.gd, story_pictures.gd): Leo, the
+## mascot by the left post, loves stars. Every match is generated from a seed (the cup seed + the match number): how
+## fast each kick may go, where LEO'S STAR shines in the goal on each kick (none for the first kicks of the first
+## match, then more), the computer striker's kicks for a VR keeper alone and the practice rings, all proven fair and
+## winnable for small kids by tests/penalty_shootout_gen_test.gd. A kick aimed at the star that doesn't miss (a goal
+## through it, or the keeper saving it) sends the star flying to Leo's sockets; reach the stars he asks for and he puts
+## a PRIZE in his corner (saved over days); a LION CUB joins his fan club each play-day; ten prizes and he wears a
+## crown. TODAY'S MATCH: the first cup each day uses the day's seed on every machine and its prizes wear a gold star.
+## Picture cards (core/story_card.gd) tell it on every view and in VR. Telemetry: one RUN line per match and on quit.
+## Networked: the snapshot carries [cup seed, match, daily, star, stars got, stars wanted]; clients rebuild the plan;
+## Leo's family goes as "leo_family", cards as "story", flying stars as "leo_star" events.
 
 const VrText := preload("res://core/vr_text.gd")
 const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
@@ -53,6 +65,18 @@ const SimpleFxScript := preload("res://games/penalty_shootout/simple_fx.gd")
 const PropsScript := preload("res://games/penalty_shootout/props.gd")
 const UiKit := preload("res://core/ui_kit.gd")
 const GhostHandScript := preload("res://games/cannon_cove/ghost_hand.gd")
+const MatchGen := preload("res://games/penalty_shootout/matchgen.gd")
+const LeoCornerScript := preload("res://games/penalty_shootout/leo_corner.gd")
+const Save := preload("res://core/save.gd")
+const Seeded := preload("res://core/seeded.gd")
+const Telemetry := preload("res://core/telemetry.gd")
+const StoryCard := preload("res://core/story_card.gd")
+const GAME_ID := "penalty_shootout"
+const LEO := "LEO"
+const LEO_COLOR := Color(1.0, 0.72, 0.25)
+const STAR_COLOR := Color(1.0, 0.85, 0.25)
+const PRIZE_LINES := {"scarf": "A big scarf!", "balloon": "Balloons!", "drum": "A big drum!", "bunting": "Flags!",
+	"foamhand": "A foam hand!", "trophy": "A shiny cup!"}
 
 const SIMPLE_MODE := true
 const KP_STEPS := 5  # keeper practice: glove spots to clear (a save, or two misses, moves on)
@@ -61,6 +85,7 @@ const SP_TRIES := 3  # striker practice: kicks each, at most
 const PRACTICE_TARGETS: Array[Vector2] = [Vector2(0.0, 1.1), Vector2(-2.2, 0.8), Vector2(2.2, 1.6),
 	Vector2(-1.3, 1.8), Vector2(1.4, 0.7)]
 const FIRE_ROUND := 2  # simple mode: the fireball unlocks from this round (0-based)
+const CPU_ROUNDS := 8  # simple mode, solo VR: kicks from the computer striker
 
 const MAX_PLAYERS := 7  # VR keeper + 6 strikers
 const MAX_LOCAL_VIEWS := 6
@@ -193,6 +218,22 @@ var simple_fx: Node3D
 var props: Node3D
 var ghost_hand: Node3D  # simple mode, VR keeper practice: the shared see-through hand
 var gh_t := 0.0
+# Leo's story (simple mode).
+var save: Save
+var leo: Node3D  # leo_corner.gd
+var cup_seed := 0
+var cup_daily := false
+var cup_n := 0  # the match the plan is for
+var mplan := {}
+var star_now := Vector2.INF  # Leo's star in the goal this kick (Vector2.INF: none)
+var leo_stars := 0
+var leo_goal := 0
+var leo_goal_hit := false
+var star_kicks := 0
+var stars_said := false
+var match_secs := 0.0
+var story_queue: Array = []
+var story_t := 0.0
 
 
 func _ready() -> void:
@@ -215,6 +256,17 @@ func _ready() -> void:
 		simple_fx.main = self
 		add_child(simple_fx)
 		simple_fx.build()
+		leo = LeoCornerScript.new()
+		leo.name = "LeoCorner"
+		leo.main = self
+		add_child(leo)
+		leo.build()
+	save = Save.new()
+	save.game_id = GAME_ID
+	# prizes: [[kind, play-day, golden], ...]; days: days played; daily: the date TODAY'S MATCH ran; goals: star goals reached.
+	save.defaults = {"prizes": [], "goals": 0, "days": 0, "last_day": "", "daily": "", "cups": 0, "matches": 0, "stars": 0,
+		"best_stars": 0}
+	add_child(save)
 	_build_hud()
 	var menu := PauseMenuScript.new()
 	menu.main = self
@@ -258,6 +310,8 @@ func _setup_game(mode: String) -> void:
 		props.main = self
 		add_child(props)
 		props.build()
+	if SIMPLE_MODE and mode != "client":
+		_start_cup()
 	if mode == "host":
 		state = "wait"
 		if SIMPLE_MODE:
@@ -276,6 +330,8 @@ func _setup_game(mode: String) -> void:
 
 func _exit_tree() -> void:
 	XRServer.world_scale = 1.0  # global: never leave our keeper scale behind
+	if ready_to_play and SIMPLE_MODE and practice == "" and state != "over" and turn_count > 0:
+		_log_match("quit")
 
 
 # --- Helpers -------------------------------------------------------------------------------
@@ -916,7 +972,8 @@ func _start_striker_practice() -> void:
 	sp_hits = 0
 	sp_kicks.clear()
 	sp_hit_by.clear()
-	ptarget = Vector3(PRACTICE_TARGETS[0].x, PRACTICE_TARGETS[0].y, 0.06)
+	var r0: Vector2 = _ring(0)
+	ptarget = Vector3(r0.x, r0.y, 0.06)
 	shooter = -1
 	turn_count = 0
 	round_i = 0
@@ -991,7 +1048,7 @@ func _practice_result(res: String) -> void:
 		net.event("fx", ["target"])
 		excite = 1.0
 		result_len = 1.6
-		var nt: Vector2 = PRACTICE_TARGETS[sp_hits % PRACTICE_TARGETS.size()]
+		var nt: Vector2 = _ring(sp_hits)
 		get_tree().create_timer(1.0).timeout.connect(func() -> void: ptarget = Vector3(nt.x, nt.y, 0.06))
 	else:
 		last_result = "MISS"
@@ -1002,6 +1059,13 @@ func _practice_result(res: String) -> void:
 
 ## Solo VR: the computer striker picks a spot (near the keeper at first, wider later) and kicks.
 func _cpu_shoot() -> void:
+	var k := turn_count - 1
+	if SIMPLE_MODE and not mplan.is_empty() and k >= 0 and k < (mplan.cpu as Array).size():
+		var c: Vector3 = mplan.cpu[k]
+		var ca := Vector2(c.x, c.y) if bool(mplan.cpu_star[k]) else Vector2(clampf(keeper.head_pos.x + c.x, -3.2, 3.2), c.y)
+		players[shooter].aim = ca
+		_on_shoot(shooter, ca, c.z, 0.0)
+		return
 	var spread := clampf(0.7 + 0.25 * turn_count, 0.7, 3.2)
 	var a := Vector2(clampf(keeper.head_pos.x + randf_range(-spread, spread), -3.2, 3.2),
 		randf_range(0.4, minf(2.1, 0.9 + 0.12 * turn_count)))
@@ -1019,7 +1083,10 @@ func _max_speed() -> float:
 	if SIMPLE_MODE:
 		# Slow, straight kicks first; a little faster every kick.
 		var k := clampf(float(turn_count - 1) / 14.0, 0.0, 1.0)
-		return lerpf(8.0, 15.0, k) * (1.0 - 0.02 * (maxi(1, active_strikers().size()) - 1))
+		var top := lerpf(8.0, 15.0, k)
+		if not mplan.is_empty() and practice == "":
+			top = MatchGen.speed_at(mplan, turn_count - 1)  # the match plan's speed for this kick
+		return top * (1.0 - 0.02 * (maxi(1, active_strikers().size()) - 1))
 	var progress := clampf(float(round_i) / maxf(1.0, float(rounds_total - 1)), 0.0, 1.0)
 	if cup_stage == "final":
 		progress = 1.0
@@ -1067,7 +1134,8 @@ func _begin_match() -> void:
 			if p.index > 0:
 				p.fire_left = 0
 		if cpu:
-			rounds_total = 8
+			rounds_total = CPU_ROUNDS
+		_plan_match()
 		intro_dur = 2.5
 		_show_center("KICK OFF!", intro_dur, true, "KICK OFF!")
 	elif intro_dur > INTRO_TIME:
@@ -1138,6 +1206,14 @@ func _start_turn() -> void:
 	state_t = 0.0
 	if practice == "":
 		turn_count += 1
+	star_now = Vector2.INF
+	if SIMPLE_MODE and practice == "" and not mplan.is_empty():
+		star_now = MatchGen.star_at(mplan, turn_count - 1)
+		if star_now != Vector2.INF:
+			star_kicks += 1
+			if not stars_said:
+				stars_said = true
+				_story_for_all("Stars for Leo!", "star", STAR_COLOR)
 	cur_max_speed = _max_speed()
 	ball.place(spot)
 	var p = players[shooter]
@@ -1351,6 +1427,7 @@ func _on_save(kind: String) -> void:
 		_practice_result("save")
 		return
 	var worth := 2 if keeper.power == "double" else 1
+	_check_star()
 	saves += worth
 	save_streak += 1
 	best_save_streak = maxi(best_save_streak, save_streak)
@@ -1396,6 +1473,7 @@ func _on_goal() -> void:
 		return
 	goals_total += 1
 	save_streak = 0
+	_check_star()
 	var p = players[shooter] if shooter > 0 and shooter < players.size() else null
 	if p != null:
 		p.goals += 1
@@ -1493,6 +1571,7 @@ func _match_over() -> void:
 	elif goals_total * 2 < shots_total:
 		verdict = "THE KEEPER WINS!"
 	if SIMPLE_MODE:
+		_leo_match_over()
 		verdict = "KEEPER WINS!" if kept > goals_total else ("STRIKERS WIN!" if goals_total > kept else "WHAT A MATCH!")
 		_show_center(verdict, 6.0, true, verdict)
 		sound("fanfare", -2.0, 1.0, true)
@@ -1694,6 +1773,11 @@ func _process(delta: float) -> void:
 	_update_vr_text(delta)
 	if SIMPLE_MODE:
 		_update_ghost_hand(delta)
+		_update_story(delta)
+		if leo != null:
+			leo.set_tally(leo_stars, leo_goal)
+		if practice == "" and state != "over" and state != "wait":
+			match_secs += delta
 	_record(delta)
 	_update_replay(delta)
 	_update_trophy()
@@ -1909,6 +1993,7 @@ func _update_aim_visuals() -> void:
 # --- Networked co-op (see docs/GAME_DEV_GUIDE.md) --------------------------------------------
 
 func on_client_joined() -> void:
+	_send_family()
 	if net.peer_count() > 1:
 		return  # another machine: its strikers step up when they join (no restart for everyone)
 	if SIMPLE_MODE:
@@ -2009,7 +2094,8 @@ func make_snapshot() -> Array:
 		cur_max_speed, shots_total, last_result, cup_stage, finalists, [final_goals.get(finalists[0], 0) if finalists.size() == 2 else 0,
 		final_goals.get(finalists[1], 0) if finalists.size() == 2 else 0], champion, keeper.power, keeper.bubble, keeper.bubble_pos,
 		ball.fire, last_kmh, sudden, last_shot,
-		[practice, pspot, ptarget, fire_on, props.net_state() if props != null else [], cpu]]
+		[practice, pspot, ptarget, fire_on, props.net_state() if props != null else [], cpu],
+		[cup_seed, cup_n, cup_daily, star_now, leo_stars, leo_goal]]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -2084,6 +2170,16 @@ func apply_snapshot(s: Array) -> void:
 		if props != null:
 			props.apply_net(sm[4])
 		cpu = sm[5]
+	if s.size() > 27:
+		var lm: Array = s[27]
+		cup_daily = bool(lm[2])
+		if int(lm[0]) != cup_seed or int(lm[1]) != cup_n:
+			cup_seed = int(lm[0])
+			cup_n = int(lm[1])
+			mplan = MatchGen.plan(cup_seed, cup_n) if cup_n > 0 else {}
+		star_now = lm[3]
+		leo_stars = int(lm[4])
+		leo_goal = int(lm[5])
 
 
 func apply_event(kind: String, args: Array) -> void:
@@ -2131,6 +2227,19 @@ func apply_event(kind: String, args: Array) -> void:
 		"trophy":
 			champion = int(args[0])
 			_trophy_fx()
+		"story":
+			_story(str(args[0]), str(args[1]), args[2])
+		"leo_family":
+			if leo != null:
+				leo.set_family(args[0], int(args[1]), bool(args[2]))
+		"leo_star":
+			if leo != null:
+				leo.fly_star(args[0], int(args[1]), int(args[2]))
+			world.mascot_cheer("save")
+		"leo_cheer":
+			if leo != null:
+				leo.cheer()
+			world.mascot_cheer("cup")
 		"remote_pause":
 			get_tree().paused = args[0]
 			_set_pause_banner(args[0], "The keeper paused the game")
@@ -2486,3 +2595,169 @@ func _update_ghost_hand(delta: float) -> void:
 	for fg in ghost_hand.fingers:
 		(fg as Node3D).rotation.x = -grip * 1.3
 	ghost_hand.thumb.rotation.x = -grip * 0.7
+
+
+# --- Leo the Lion: the seeded cup, Leo's stars, his prizes and fan club ------------------------------
+
+## Host / local: a new cup (once per game). Count the play-day (a new lion cub), pick the cup seed (TODAY'S MATCH
+## first each day), put the cubs and prizes beside Leo and say hello.
+func _start_cup() -> void:
+	var today := Seeded.today()
+	var new_day := String(save.data.last_day) != today
+	if new_day:
+		save.data.days = int(save.data.days) + 1
+		save.data.last_day = today
+	save.data.cups = int(save.data.cups) + 1
+	cup_daily = String(save.data.daily) != today
+	cup_seed = MatchGen.daily_seed() if cup_daily else Seeded.fresh_seed()
+	if OS.has_environment("PS_SEED"):
+		cup_seed = int(OS.get_environment("PS_SEED"))
+	if cup_daily:
+		save.data.daily = today  # (one TODAY'S MATCH a day)
+	save.mark_dirty()
+	print("Penalty Shootout: cup seed %d%s | %d prizes, day %d" % [cup_seed, " (TODAY'S MATCH)" if cup_daily else "",
+		(save.data.prizes as Array).size(), int(save.data.days)])
+	_send_family()
+	story_t = 2.8  # after the title
+	_story_for_all("Hi! I'm Leo!", "lion", LEO_COLOR)
+	if cup_daily:
+		_story_for_all("TODAY'S MATCH!", "football", Color(1.0, 0.85, 0.3))
+	if new_day and int(save.data.days) > 1:
+		_story_for_all("A new fan!", "lioncub", LEO_COLOR)
+
+
+## Host / local: this match's plan (speeds, Leo's stars, the computer's kicks) and the stars Leo asks for.
+func _plan_match() -> void:
+	cup_n = matches
+	mplan = MatchGen.plan(cup_seed, cup_n)
+	var turns := CPU_ROUNDS if cpu else rounds_total * maxi(1, active_strikers().size())
+	leo_goal = MatchGen.star_goal(mplan, turns)
+	leo_stars = 0
+	leo_goal_hit = false
+	star_kicks = 0
+	match_secs = 0.0
+	star_now = Vector2.INF
+	print("Match plan: cup %d match %d, %d kicks, Leo wants %d stars (%d star kicks)" % [cup_seed, cup_n, turns, leo_goal,
+		MatchGen.star_turns(mplan, turns)])
+	_story_for_all("%d stars, please!" % leo_goal, "lion", LEO_COLOR)
+
+
+## Practice ring i (from the next match's plan; the old fixed rings before a cup seed exists).
+func _ring(i: int) -> Vector2:
+	if cup_seed == 0 and mplan.is_empty():
+		return PRACTICE_TARGETS[i % PRACTICE_TARGETS.size()]
+	var rings: Array = MatchGen.plan(cup_seed, matches + 1).rings
+	return rings[i % rings.size()]
+
+
+## Host / local: a goal or a save on a star kick aimed at the star sends it to Leo.
+func _check_star() -> void:
+	if not SIMPLE_MODE or practice != "" or star_now == Vector2.INF:
+		return
+	var aim: Vector2 = pending.get("aim", Vector2(0, -9))
+	if aim.distance_to(star_now) > MatchGen.STAR_R:
+		return
+	var from := Vector3(star_now.x, star_now.y, 0.08)
+	star_now = Vector2.INF
+	leo_stars += 1
+	save.data.stars = int(save.data.stars) + 1
+	save.mark_dirty()
+	if leo != null:
+		leo.fly_star(from, leo_stars - 1, leo_goal)
+	net.event("leo_star", [from, leo_stars - 1, leo_goal])
+	world.mascot_cheer("save")
+	sound("power", -4.0, 1.3, true)
+	print("Leo's star! %d of %d" % [leo_stars, leo_goal])
+	if leo_stars >= leo_goal and not leo_goal_hit:
+		_leo_goal_reached()
+
+
+## Every machine: a star reached Leo's sockets.
+func on_star_landed() -> void:
+	sound("join", -6.0, 1.4)
+
+
+## Host / local: Leo got all the stars he asked for: a prize for his corner (once a match).
+func _leo_goal_reached() -> void:
+	leo_goal_hit = true
+	var kind := MatchGen.prize_for(int(save.data.goals))
+	save.data.goals = int(save.data.goals) + 1
+	var list: Array = save.data.prizes
+	list.append([kind, int(save.data.days), cup_daily])
+	while list.size() > MatchGen.PRIZE_KEEP:
+		list.pop_front()
+	save.mark_dirty()
+	_send_family()
+	if leo != null:
+		leo.cheer()
+	net.event("leo_cheer", [])
+	world.mascot_cheer("cup")
+	sound("fanfare", -4.0, 1.1, true)
+	_story_for_all("Roar! Thank you!", "lion", LEO_COLOR)
+	_story_for_all(PRIZE_LINES.get(kind, "A prize!"), kind, Color(1.0, 0.85, 0.3) if cup_daily else LEO_COLOR)
+	if int(save.data.goals) == MatchGen.CROWN_PRIZES:
+		_story_for_all("A crown for me!", "crown", Color(1.0, 0.85, 0.25))
+	print("Leo's prize: %s (%d prizes)" % [kind, int(save.data.goals)])
+
+
+## Host / local: the match is over: save, a RUN line, and Leo's word if the stars didn't all come.
+func _leo_match_over() -> void:
+	save.data.matches = int(save.data.matches) + 1
+	save.data.best_stars = maxi(int(save.data.best_stars), leo_stars)
+	save.mark_dirty()
+	if not leo_goal_hit and not mplan.is_empty():
+		_story_for_all("Next time!", "lion", LEO_COLOR)
+	_log_match("full")
+
+
+func _send_family() -> void:
+	if save == null or not SIMPLE_MODE:
+		return
+	var crowned := int(save.data.goals) >= MatchGen.CROWN_PRIZES
+	if leo != null:
+		leo.set_family(save.data.prizes, int(save.data.days), crowned)
+	if net != null and net.mode == "host":
+		net.event("leo_family", [(save.data.prizes as Array).duplicate(true), int(save.data.days), crowned])
+
+
+## Host / local: a story card on every machine.
+func _story_for_all(line: String, pic: String, color: Color) -> void:
+	_story(line, pic, color)
+	if net != null and net.mode == "host":
+		net.event("story", [line, pic, color])
+
+
+func _story(line: String, pic: String, color: Color) -> void:
+	if story_queue.size() < 5:
+		story_queue.append([line, pic, color])
+
+
+## Every machine: show the next card when nothing is flying at the keeper.
+func _update_story(delta: float) -> void:
+	story_t -= delta
+	if story_t > 0.0 or story_queue.is_empty() or state == "runup" or state == "flight":
+		return
+	var b: Array = story_queue.pop_front()
+	story_t = 2.6
+	var opts := {"who": LEO, "line": b[0], "pic": b[1], "color": b[2], "duration": 2.4}
+	var views: Array = []
+	for p in players:
+		if p.hud != null and is_instance_valid(p.hud) and (p.hud as Control).is_visible_in_tree():
+			views.append(p.hud)
+	if not views.is_empty():
+		StoryCard.show(views, opts)
+	if keeper_in_vr() and players[0].xr_camera != null:
+		StoryCard.show_vr(self, players[0].xr_camera, opts)
+	world.mascot_cheer("save")
+
+
+## One RUN line per match ("full") and on quit.
+func _log_match(end: String) -> void:
+	if net == null or net.mode == "client" or mplan.is_empty():
+		return
+	Telemetry.run(GAME_ID, {"end": end, "match": cup_n, "seed": cup_seed, "daily": cup_daily, "secs": snappedf(match_secs, 0.1),
+		"saves": saves, "goals": goals_total, "shots": shots_total, "kicks": turn_count, "rounds": rounds_total,
+		"strikers": active_strikers().size(), "cpu": cpu, "stars": leo_stars, "star_goal": leo_goal, "goal_hit": leo_goal_hit,
+		"star_kicks": star_kicks, "top_speed": snappedf(cur_max_speed, 0.1), "vr": keeper_in_vr(), "net": net.mode,
+		"fire": fire_on, "prizes": (save.data.prizes as Array).size(), "goals_ever": int(save.data.goals),
+		"days": int(save.data.days)})
