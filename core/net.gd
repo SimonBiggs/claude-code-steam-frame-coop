@@ -44,7 +44,9 @@ signal machine_joined(peer: int, kind: String)
 signal machine_left(peer: int)
 
 const Machine := preload("res://core/machine.gd")
+const Telemetry := preload("res://core/telemetry.gd")  # "_run": copies of the host's RUN lines
 const DEFAULT_PORT := 7777
+const GROUP := "duo_net"  ## every Net node (core/telemetry.gd finds the host's to share RUN lines)
 var PORT: int = int(OS.get_environment("DUO_PORT")) if OS.has_environment("DUO_PORT") else DEFAULT_PORT  # override for parallel tests
 const SNAP_INTERVAL := 1.0 / 30.0
 const JOIN_TIMEOUT := 5.0
@@ -87,6 +89,7 @@ var _since_unpause := 0.0  # game seconds since the last unpause (or start)
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS  # keep the connection alive while the game is paused
+	add_to_group(GROUP)
 	preload("res://core/ui_kit.gd").ensure_pad_ui_actions()  # every focus-driven menu works with a pad
 	_since_unpause = 0.0  # starting counts as "just unpaused" (held buttons from the arcade)
 	_was_paused = get_tree().paused
@@ -636,6 +639,10 @@ func _sys_down(kind: String, args: Array) -> void:
 		if main != null and main.has_method("on_pause_changed"):
 			main.on_pause_changed(paused, int(args[1]))
 			get_tree().call_group("pause_menu", "hide_game_banner")  # this machine's open menu already says PAUSED
+		return
+	if kind == "_run":
+		if args.size() > 0:
+			Telemetry.copy(str(args[0]))  # the host's RUN line, so this machine's log has it too
 		return
 	_sys_dispatch(kind, args)
 
