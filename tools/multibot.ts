@@ -29,11 +29,11 @@
 // line, and a "BOT RESULT:" line (if any) says PASS.
 // Group check: a bot may print "BOT AGREE <key>=<value>" lines; every machine must print each key, with the SAME
 // value as every other machine (e.g. the arcade selection all machines settled on, the game they all started).
-// Logs: /tmp/multibot-<port>/m<k>.log (kept). Exit code 0 when every machine and every AGREE key passes.
+// Logs: /tmp/multibot-<port>/m<k>.log (kept for 2 days: each run prunes older ones; 291 had piled up by 2026-10-30). Exit code 0 when every machine and every AGREE key passes.
 import { spawn } from "node:child_process";
 import { createSocket } from "node:dgram";
 import { createServer } from "node:net";
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
 export type MachineResult = { machine: string; pass: boolean; code: number; result: string; failed: string[]; errors: string[];
@@ -102,6 +102,16 @@ export function lateCheck(out: string, kinds: string[]): string[] {
   return bad;
 }
 
+/** Remove /tmp/multibot-* run folders older than 2 days (logs + --copies project copies), so they never pile up. */
+async function pruneOldRuns(maxAgeMs = 2 * 86400_000) {
+  for (const f of await readdir("/tmp").catch(() => [] as string[])) {
+    if (!/^multibot-\d+$/.test(f)) continue;
+    const p = join("/tmp", f);
+    const st = await stat(p).catch(() => null);
+    if (st && Date.now() - st.mtimeMs > maxAgeMs) await rm(p, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 export async function runGroup(o: GroupOpts): Promise<GroupResult> {
   const joiners = Math.max(1, Math.min(6, o.joiners ?? 3));
   const project = resolve(o.project ?? join(dirname(import.meta.path), ".."));
@@ -113,6 +123,7 @@ export async function runGroup(o: GroupOpts): Promise<GroupResult> {
   const port = await freePort();
   const dir = `/tmp/multibot-${port}`;
   await mkdir(dir, { recursive: true });
+  await pruneOldRuns();
   const t0 = Date.now() + joiners * stagger + 5000;
   const late = Math.max(0, o.late ?? 0);
   const seconds = o.seconds ?? 180;

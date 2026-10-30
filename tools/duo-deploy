@@ -39,7 +39,7 @@ if ssh -o ConnectTimeout=4 -o BatchMode=yes -i $K steamos@frame true 2>/dev/null
   rsync -az -e "ssh -i $K" --exclude .godot --exclude .dev "$B/game/" steamos@frame:devkit-game/DuoArena/game/
 else
   echo "Steam Frame offline: duo-catch-up deploys it when it's back" >&2
-  mkdir -p ~/.cache/duo-deploy-pending; touch ~/.cache/duo-deploy-pending/frame
+  mkdir -p ~/.cache/duo-deploy-pending; [ -e ~/.cache/duo-deploy-pending/frame ] || touch ~/.cache/duo-deploy-pending/frame  # keeps the FIRST missed time (dev.debt device-behind)
 fi
 # Simon's Steam Deck plays too (another TV-style player, or on its own): ~/DuoArena via duo-deploy-deck.
 duo-deploy-deck >/dev/null || true

@@ -293,12 +293,36 @@ export async function debt() {
     if (a && b && !a.equals(b))
       issues.push({ kind: "tool-copy", what: `${rel} differs from ${src.replace(HOME, "~")}`, fix: `cp ${src} ${repo} and commit` });
   }
-  for (const s of ["voice-bridge", "claude-watchdog.timer"]) {
+  // Services and timers that keep things healthy (duo-catch-up delivers deploys to devices that were off).
+  for (const s of ["voice-bridge", "claude-watchdog.timer", "duo-catch-up.timer", "test-throttle", "claude-history-index.timer"]) {
     const st = (await sh(`systemctl --user is-active ${s}`)).out;
     if (st !== "active") issues.push({ kind: "service", what: `${s} is ${st}`, fix: `systemctl --user status ${s}` });
   }
   const oom = (await sh("journalctl --since today 2>/dev/null | grep -i earlyoom | grep -i -c -E 'sending SIG(TERM|KILL) to'")).out;
   if (+oom > 0) issues.push({ kind: "oom", what: `earlyoom killed ${oom} processes today`, fix: "journalctl | grep earlyoom" });
+  // Devices that missed deploys for days (marker mtime = the FIRST missed deploy; duo-catch-up retries every 2 min,
+  // so an old marker means the device has been off or unreachable that long: it needs a person to switch it on).
+  const now = Date.now(), DAY = 86400_000;
+  for (const dir of [join(HOME, ".cache/duo-deploy-pending"), join(HOME, ".cache/duo-pending-cmds")])
+    for (const f of await readdir(dir).catch(() => [] as string[])) {
+      const st = await stat(join(dir, f)).catch(() => null);
+      if (!st || now - st.mtimeMs < 3 * DAY) continue;
+      issues.push({ kind: "device-behind", what: `${dir.endsWith("cmds") ? "one-off job" : "deploy"} ${f} waiting ${Math.floor((now - st.mtimeMs) / DAY)} days (device offline)`,
+        fix: "switch the device on with Developer Mode (duo-catch-up delivers it within 2 min); delete the marker if the device is gone" });
+    }
+  // Test leftovers in /tmp (multibot prunes its own runs after 2 days; this catches anything else that piles up).
+  const tmpOld = (await sh("find /tmp -maxdepth 1 \\( -name 'multibot-*' -o -name 'leak-*.log' -o -name 'godot-test-*' \\) -mmin +4320 | wc -l")).out;
+  if (+tmpOld > 0) issues.push({ kind: "tmp-pileup", what: `${tmpOld} test leftovers older than 3 days in /tmp`, fix: "find /tmp -maxdepth 1 \\( -name 'multibot-*' -o -name 'leak-*.log' \\) -mmin +4320 -exec rm -rf {} +" });
+  // Minecraft test server (~/MinecraftMods/bds-test) left running: it should be stopped after each test (./cmd.sh stop).
+  const bds = (await sh("ps -o etimes= -p $(pgrep -x bedrock_server | head -1) 2>/dev/null")).out.trim();
+  if (+bds > 3600) issues.push({ kind: "bds-running", what: `Minecraft test server running for ${Math.round(+bds / 60)} min`, fix: "cd ~/MinecraftMods/bds-test && ./cmd.sh stop" });
+  // Memory notes: every file needs a line in MEMORY.md (the index is all a new session sees).
+  const MEM = join(HOME, ".claude/projects/-home-deck/memory");
+  const idx = await readFile(join(MEM, "MEMORY.md"), "utf8").catch(() => "");
+  for (const f of await readdir(MEM).catch(() => [] as string[]))
+    if (f.endsWith(".md") && f !== "MEMORY.md" && !idx.includes(`(${f})`)) issues.push({ kind: "memory-index", what: `memory/${f} has no line in MEMORY.md`, fix: "add a one-line entry to MEMORY.md" });
+  for (const m of idx.matchAll(/\]\(([\w.-]+\.md)\)/g))
+    if (!(await stat(join(MEM, m[1])).catch(() => null))) issues.push({ kind: "memory-index", what: `MEMORY.md points to missing ${m[1]}`, fix: "fix or drop the line" });
   const leftovers = (await sh("pgrep -f '^gamescope --[b]ackend headless' | wc -l")).out;
   const ours = ((globalThis as any).godot?.list ? (globalThis as any).godot : await import(`${HOME}/.local/share/gdev/godot.ts`)).list().length;  // the preloaded one (reload() makes a new module)
   if (+leftovers > ours) issues.push({ kind: "orphan", what: `${+leftovers - ours} offscreen game(s) not owned by this brepl`, fix: "pkill -f '[b]ackend headless'" });

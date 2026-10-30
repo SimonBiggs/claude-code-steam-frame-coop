@@ -7,8 +7,8 @@ rsync -a --delete --exclude .dev --exclude .claude ~/GodotProjects/duo-arena-fra
 decks=("$@"); [ ${#decks[@]} -eq 0 ] && mapfile -t decks < <(grep -v '^\s*#' ~/.config/duo-arena/decks 2>/dev/null | grep .)
 rc=0
 for d in "${decks[@]}"; do
-  if ! ssh -o ConnectTimeout=4 -o BatchMode=yes "$d" true 2>/dev/null; then echo "$d offline: duo-catch-up deploys it when it's back" >&2; mkdir -p ~/.cache/duo-deploy-pending; touch ~/.cache/duo-deploy-pending/"$d"; rc=1; continue; fi
-  mkdir -p ~/.cache/duo-deploy-pending; touch ~/.cache/duo-deploy-pending/"$d"  # cleared only by a full success
+  if ! ssh -o ConnectTimeout=4 -o BatchMode=yes "$d" true 2>/dev/null; then echo "$d offline: duo-catch-up deploys it when it's back" >&2; mkdir -p ~/.cache/duo-deploy-pending; [ -e ~/.cache/duo-deploy-pending/"$d" ] || touch ~/.cache/duo-deploy-pending/"$d"; rc=1; continue; fi
+  mkdir -p ~/.cache/duo-deploy-pending; [ -e ~/.cache/duo-deploy-pending/"$d" ] || touch ~/.cache/duo-deploy-pending/"$d"  # cleared only by a full success
   # A full disk would leave a half-updated copy (some files new, some old): need room for a whole new copy first.
   need=$(( $(du -sk "$B" | cut -f1) + 102400 )); free=$(ssh -o BatchMode=yes "$d" 'df -Pk ~ | awk "NR==2{print \$4}"' 2>/dev/null)
   if [ -n "$free" ] && [ "$free" -lt "$need" ]; then echo "⚠ $d: disk full ($((free / 1024)) MB free, needs $((need / 1024)) MB): not updated, duo-catch-up retries" >&2; rc=1; continue; fi

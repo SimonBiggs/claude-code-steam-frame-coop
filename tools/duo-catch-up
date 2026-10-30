@@ -1,7 +1,8 @@
 #!/bin/bash
 # duo-catch-up: devices that were offline during a duo-deploy get it as soon as they're back online.
 # duo-deploy / duo-deploy-deck leave a marker in ~/.cache/duo-deploy-pending/<frame|deck alias>; a successful deploy
-# removes it. Run every 2 minutes by duo-catch-up.timer.
+# removes it. A marker keeps the time of the FIRST deploy that device missed (dev.debt flags ones older than 3 days).
+# Run every 2 minutes by duo-catch-up.timer.
 for m in ~/.cache/duo-deploy-pending/*; do
   [ -e "$m" ] || continue
   d=$(basename "$m")
