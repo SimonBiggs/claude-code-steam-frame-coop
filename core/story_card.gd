@@ -126,6 +126,8 @@ class Card extends Control:
 		_s = UiKit.scale_of(self)
 		var col: Color = UiKit.color_of(opts.get("color", "accent"), UiKit.ACCENT)
 		panel = UiKit.panel("dialogue")
+		panel.name = "StoryCardPanel"
+		panel.add_to_group("layout_cover")  # core/layout_check.gd: HUD text under a story card is hidden text
 		panel.add_theme_stylebox_override("panel", UiKit.stylebox(UiKit.BG_DEEP, _s, 24.0, Color(col.r, col.g, col.b, 0.7), 3.0, 18.0, Vector2(22, 16)))
 		add_child(panel)
 		var row := UiKit.hbox(18, _s)

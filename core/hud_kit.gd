@@ -617,6 +617,13 @@ class BannerFx extends Control:
 		var pop := 1.0 + (1.0 - title_k) * 0.35 - sin(title_k * PI) * 0.06
 		_title.scale = Vector2.ONE * pop
 		_sub.modulate.a = sub_k * fade
+		# Never wider than the view (a narrow split-screen view or a Deck: "WAVE 1 CLEARED!" ran off both edges;
+		# the measure in _ready can't know the label's real font, nor the view's size before it's laid out).
+		var room := size.x * 0.94
+		var tmin := _title.get_minimum_size().x
+		if size.x > 10.0 and tmin > room:
+			var cur := _title.get_theme_font_size("font_size")
+			_title.add_theme_font_size_override("font_size", maxi(12, int(cur * room * 0.98 / tmin)))
 		var ts := _title.get_combined_minimum_size()
 		var ss := _sub.get_combined_minimum_size() if subtitle != "" else Vector2.ZERO
 		var cy := size.y * y_ratio

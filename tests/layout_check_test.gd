@@ -71,5 +71,20 @@ func _run() -> void:
 	p = LayoutCheck.problems(root)
 	if not p.is_empty():
 		fails.append("a centred word doesn't overlap a label at the far left, got %s" % [p])
+	# A label under a story card's panel (group layout_cover) is hidden; the card's own text isn't.
+	var cover := PanelContainer.new()
+	cover.add_to_group(LayoutCheck.COVER_GROUP)
+	ui.add_child(cover)
+	cover.position = Vector2(0, 590)
+	cover.size = Vector2(300, 80)
+	var own := Label.new()
+	own.text = "CARD LINE"
+	cover.add_child(own)
+	await process_frame
+	p = LayoutCheck.problems(root)
+	if not p.any(func(s: String) -> bool: return s.begins_with("covered") and s.contains("LEFT")):
+		fails.append("a label under a story card is caught, got %s" % [p])
+	if p.any(func(s: String) -> bool: return s.contains("CARD LINE")):
+		fails.append("the card's own line is not 'covered', got %s" % [p])
 	print("LAYOUT CHECK: PASS" if fails.is_empty() else "LAYOUT CHECK: FAIL\n  " + "\n  ".join(fails))
 	quit(0 if fails.is_empty() else 1)

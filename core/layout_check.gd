@@ -14,6 +14,8 @@ extends RefCounted
 ## - a node (or an ancestor) with meta "layout_check_ignore" is skipped (on purpose: a giant faded title behind play).
 
 const IGNORE_META := "layout_check_ignore"
+## Opaque things drawn over the HUD (story cards' panels): text underneath them counts as hidden.
+const COVER_GROUP := "layout_cover"
 const MIN_ALPHA := 0.35
 
 
@@ -26,6 +28,20 @@ static func problems(root: Node, max_items: int = 8) -> Array[String]:
 		var r: Rect2 = b.rect
 		if r.position.x < vr.position.x - 4 or r.position.y < vr.position.y - 4 or r.end.x > vr.end.x + 4 or r.end.y > vr.end.y + 4:
 			out.append("cut: \"%s\" at %s in %s" % [b.text, _r(r), _r(vr)])
+	# Text hidden under a cover (a story card's panel: group COVER_GROUP) that isn't the cover's own text.
+	var covers: Array = root.get_tree().get_nodes_in_group(COVER_GROUP) if root.is_inside_tree() else []
+	for cv in covers:
+		var cc := cv as Control
+		if cc == null or not cc.is_visible_in_tree() or not _shown(cc.get_viewport()) or _alpha(cc) < MIN_ALPHA:
+			continue
+		var cr := _screen_rect(cc, Rect2(Vector2.ZERO, cc.size))
+		for b in boxes:
+			var n: Node = b.node
+			if b.vp != cc.get_viewport().get_instance_id() or cc.is_ancestor_of(n):
+				continue
+			var inter: Rect2 = (b.rect as Rect2).intersection(cr)
+			if inter.get_area() > 0.15 * (b.rect as Rect2).get_area():
+				out.append("covered: \"%s\" under %s at %s" % [b.text, cc.name, _r(inter)])
 	for i in boxes.size():
 		for j in range(i + 1, boxes.size()):
 			var a: Dictionary = boxes[i]
@@ -146,6 +162,16 @@ static func _screen_rect(c: Control, local: Rect2) -> Rect2:
 	var a := xf * local.position
 	var b := xf * local.end
 	return Rect2(Vector2(minf(a.x, b.x), minf(a.y, b.y)), (b - a).abs())
+
+
+static func _alpha(c: CanvasItem) -> float:
+	var a := 1.0
+	var p: Node = c
+	while p != null and not p is Viewport:
+		if p is CanvasItem:
+			a *= (p as CanvasItem).modulate.a
+		p = p.get_parent()
+	return a
 
 
 static func _r(r: Rect2) -> String:
