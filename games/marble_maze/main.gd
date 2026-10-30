@@ -52,6 +52,7 @@ const PropsScript := preload("res://games/marble_maze/props.gd")
 const GhostHandScript := preload("res://games/marble_maze/ghost_hand.gd")
 const CueScript := preload("res://games/marble_maze/cue.gd")
 const UiKit := preload("res://core/ui_kit.gd")
+const HudKit := preload("res://core/hud_kit.gd")
 const Story := preload("res://games/marble_maze/story.gd")
 const LevelsData := preload("res://games/marble_maze/levels.gd")
 const TownScript := preload("res://games/marble_maze/town.gd")
@@ -352,26 +353,7 @@ func burst(pos: Vector3, color: Color, amount: int = 14, broadcast: bool = true)
 
 
 func popup(pos: Vector3, text: String, color: Color, broadcast: bool = true) -> void:
-	var l := Label3D.new()
-	l.text = text
-	l.font_size = 48
-	l.pixel_size = 0.0009
-	l.outline_size = 14
-	l.modulate = color
-	l.no_depth_test = false
-	l.render_priority = 5
-	if players.size() > 0 and players[0].vr:
-		l.billboard = BaseMaterial3D.BILLBOARD_DISABLED  # VR text faces the player but never follows the head
-	else:
-		l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	add_child(l)
-	l.global_position = pos
-	var tw := l.create_tween()
-	tw.set_parallel()
-	tw.tween_property(l, "global_position", pos + Vector3(0, 0.12, 0), 1.2)
-	tw.tween_property(l, "modulate:a", 0.0, 1.2).set_delay(0.4)
-	tw.tween_property(l, "outline_modulate:a", 0.0, 1.2).set_delay(0.4)
-	tw.chain().tween_callback(l.queue_free)
+	HudKit.popup(self, pos, text, {"color": color, "outline": Color(0, 0, 0, 0.9), "size": 0.133, "lift": 0.12, "time": 1.6})
 	if broadcast and net != null:
 		net.event("popup", [pos, text, color])
 
@@ -2554,7 +2536,7 @@ func _build_hud() -> void:
 	var layer := CanvasLayer.new()
 	layer.layer = 5
 	add_child(layer)
-	center_label = _make_label(46)
+	center_label = HudKit.split_center(_make_label(46))  # a copy in each split view, never across the line
 	layer.add_child(center_label)
 	UiKit.pin(center_label, Control.PRESET_FULL_RECT, false)
 	center_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

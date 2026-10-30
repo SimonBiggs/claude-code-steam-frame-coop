@@ -13,6 +13,7 @@ extends Node
 
 const BotKit := preload("res://tests/bot_kit.gd")
 const LayoutCheck := preload("res://core/layout_check.gd")
+const HudKit := preload("res://core/hud_kit.gd")
 const StoryCard := preload("res://core/story_card.gd")
 const PAD1 := 41  # the Deck's built-in controls
 const PAD2 := 42  # a friend's pad
@@ -214,9 +215,27 @@ class Runner extends Node:
 	## Headless this is TV size; rendered by brepl godot.launch at 1280x800 it's the Deck's own screen.
 	func _layout(id: String) -> void:
 		var card := StoryCard.replay(3.0)
+		# The game's big centre word showing ("HOORAY!"): with two views on screen it must not sit across the line
+		# between them (core/hud_kit.gd split_center; core/layout_check.gd "divider").
+		var words: Array = get_tree().get_nodes_in_group(HudKit.SPLIT_WORD_GROUP)
+		var own = game.get("center_label")
+		if own is Label and not words.has(own):
+			words.append(own)
+		var saved := []
+		for w in words:
+			var l := w as Label
+			if l == null or not is_instance_valid(l):
+				continue
+			saved.append([l, l.text, l.modulate.a])
+			l.text = "HOORAY!"
+			l.modulate.a = 1.0
 		await frames(30)
 		var probs := LayoutCheck.problems(get_tree().root)
 		kit.assert_true(probs.is_empty(), "%s: no text cut off or drawn over other text%s (core/layout_check.gd): %s" % [id, " (story card showing)" if card != null else "", "; ".join(probs)])
+		for sv in saved:
+			if is_instance_valid(sv[0]):
+				(sv[0] as Label).text = sv[1]
+				(sv[0] as Label).modulate.a = sv[2]
 		if card != null and is_instance_valid(card):
 			card.leave()
 		await frames(20)
@@ -231,6 +250,14 @@ class Runner extends Node:
 			var src := FileAccess.get_file_as_string(path)
 			if src.contains("func _layout_views") and not src.contains("deck_solo("):
 				kit.assert_true(false, "%s lays out split views but never calls seats.deck_solo() (core/classic_seats.gd): a Deck would show two players" % path)
+			if src.contains("var center_label") and not src.contains("HudKit.split_center("):
+				kit.assert_true(false, "%s has a full-screen centre word but never calls HudKit.split_center(): it sits across the split line" % path)
+			var pop := src.find("\nfunc popup(")
+			if pop >= 0:
+				var body := src.substr(pop + 1)
+				var nxt := body.find("\nfunc ", 1)
+				if (body if nxt < 0 else body.substr(0, nxt)).contains("Label3D.new()"):
+					kit.assert_true(false, "%s makes its own pop-up Label3D: use HudKit.popup (it keeps the word a readable size and inside the view)" % path)
 			for line in src.split("\n"):
 				if line.contains("allow_keyboard") and line.contains("deck") and not line.strip_edges().begins_with("#"):
 					kit.assert_true(false, "%s sets its own Deck keyboard rule (core/party.gd does it): %s" % [path, line.strip_edges()])

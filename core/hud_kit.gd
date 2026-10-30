@@ -228,7 +228,7 @@ static func _pin(c: Control, preset: int, x: float = 0.0, y: float = 0.0) -> voi
 ## It never gets bigger than max_frac of the height (max_wide of the width) of any view that sees it, and stays inside
 ## the view it's nearest to, so a word born right next to a camera doesn't fill or run off the screen (FloatText).
 ## opts: style (see POPUP_STYLES), color, outline (Color), size (multiplier; 1 = ~0.32 m tall), rise (m, default 0.9),
-## time (s), camera (face this camera once; default: the VR camera when this viewport renders VR, otherwise billboard),
+## lift (exact rise in m, not scaled by size), time (s), camera (face this camera once; default: the VR camera when this viewport renders VR, otherwise billboard),
 ## billboard (a BaseMaterial3D.BILLBOARD_* mode when not facing a camera), through_walls (no depth test),
 ## parent (attach here; then `pos` is in the parent's local space and the word rides along), layers,
 ## render_priority, max_frac (0.12), max_wide (0.8).
@@ -272,7 +272,7 @@ static func popup(world: Node, pos: Vector3, text: String, opts: Dictionary = {}
 			l.global_basis = Basis(Vector3.UP, atan2(-to.x, -to.z))
 	else:
 		l.billboard = int(opts.get("billboard", BaseMaterial3D.BILLBOARD_ENABLED)) as BaseMaterial3D.BillboardMode
-	l.rise = float(opts.get("rise", 0.9)) * maxf(0.7, size * 0.8)
+	l.rise = float(opts["lift"]) if opts.has("lift") else float(opts.get("rise", 0.9)) * maxf(0.7, size * 0.8)
 	l.life = float(opts.get("time", 1.1 if style != "crit" else 1.4))
 	l.start()
 	return l

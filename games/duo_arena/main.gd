@@ -2,6 +2,7 @@ extends Node3D
 const VrText := preload("res://core/vr_text.gd")
 const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
 const UiKit := preload("res://core/ui_kit.gd")
+const HudKit := preload("res://core/hud_kit.gd")
 ## Game controller: builds the arena, runs waves, camera and HUD.
 
 const PlayerScript := preload("res://games/duo_arena/player.gd")
@@ -367,23 +368,7 @@ func explosion(pos: Vector3, color: Color, radius: float) -> void:
 
 ## Floating 3D text that rises and fades (score numbers); shown on both machines.
 func popup(pos: Vector3, text: String, color: Color) -> void:
-	var l := Label3D.new()
-	l.text = text
-	l.modulate = color
-	l.outline_modulate = Color(0, 0, 0, 0.8)
-	l.font_size = 64
-	l.outline_size = 12
-	l.pixel_size = 0.006
-	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	l.no_depth_test = false
-	l.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(l)
-	l.global_position = pos
-	var t := l.create_tween().set_parallel()
-	t.tween_property(l, "global_position", pos + Vector3.UP * 1.4, 0.9).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
-	t.tween_property(l, "modulate:a", 0.0, 0.9).set_delay(0.35)
-	t.tween_property(l, "outline_modulate:a", 0.0, 0.9).set_delay(0.35)
-	t.chain().tween_callback(l.queue_free)
+	HudKit.popup(self, pos, text, {"color": color, "outline": Color(0, 0, 0, 0.8), "size": 1.19, "lift": 1.4, "time": 1.25})
 	if net:
 		net.event("popup", [pos, text, color])
 
@@ -2009,7 +1994,7 @@ func _build_hud() -> void:
 	info_label.offset_top = 18
 	info_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 
-	center_label = _make_label(60)
+	center_label = HudKit.split_center(_make_label(60))  # a copy in each split view, never across the line
 	layer.add_child(center_label)
 	UiKit.pin(center_label, Control.PRESET_FULL_RECT, false)
 	center_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

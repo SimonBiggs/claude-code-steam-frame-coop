@@ -80,6 +80,7 @@ const PropsScript := preload("res://games/bee_garden/props.gd")
 const HelpersScript := preload("res://games/bee_garden/helpers.gd")
 const CueScript := preload("res://games/bee_garden/cue.gd")
 const UiKit := preload("res://core/ui_kit.gd")
+const HudKit := preload("res://core/hud_kit.gd")
 const GardenGen := preload("res://games/bee_garden/gardengen.gd")
 const Story := preload("res://games/bee_garden/story.gd")
 const BedViewScript := preload("res://games/bee_garden/bedview.gd")
@@ -905,28 +906,7 @@ func sound(sound_name: String, volume_db: float = 0.0, pitch: float = 1.0) -> vo
 func popup(pos: Vector3, text: String, color: Color, broadcast: bool = true) -> void:
 	if SIMPLE_MODE:
 		return  # simple mode: no floating text; the world shows what happened (bursts, sounds)
-	var l := Label3D.new()
-	l.text = text
-	l.modulate = color
-	l.outline_modulate = Color(0.1, 0.06, 0.0, 0.9)
-	l.font_size = 56
-	l.outline_size = 16
-	l.pixel_size = 0.006
-	l.no_depth_test = false
-	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	l.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(l)
-	l.global_position = pos
-	if gardener != null and gardener.vr:
-		var to: Vector3 = pos - gardener.xr_camera.global_position
-		l.global_basis = Basis(Vector3.UP, atan2(-to.x, -to.z))
-	else:
-		l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	var t := l.create_tween().set_parallel()
-	t.tween_property(l, "global_position", pos + Vector3.UP * 0.7, 1.4).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
-	t.tween_property(l, "modulate:a", 0.0, 0.8).set_delay(0.9)
-	t.tween_property(l, "outline_modulate:a", 0.0, 0.8).set_delay(0.9)
-	t.chain().tween_callback(l.queue_free)
+	HudKit.popup(self, pos, text, {"color": color, "outline": Color(0.1, 0.06, 0.0, 0.9), "size": 1.04, "lift": 0.7, "time": 1.7})
 	if broadcast and net:
 		net.event("popup", [pos, text, color])
 
@@ -2655,7 +2635,7 @@ func _build_hud() -> void:
 	info_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
 	info_label.offset_top = 14
 	info_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	center_label = _make_label(52)
+	center_label = HudKit.split_center(_make_label(52))  # a copy in each split view, never across the line
 	layer.add_child(center_label)
 	center_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	center_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

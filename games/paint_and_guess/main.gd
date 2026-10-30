@@ -34,6 +34,7 @@ extends Node3D
 const VrText := preload("res://core/vr_text.gd")
 const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
 const UiKit := preload("res://core/ui_kit.gd")
+const HudKit := preload("res://core/hud_kit.gd")
 const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
 const NetScript := preload("res://core/net.gd")
@@ -389,22 +390,7 @@ func puff(pos: Vector3, col: Color, amount: int = 16) -> void:
 
 
 func popup(pos: Vector3, text: String, color: Color, broadcast: bool = true, rise: float = 0.12) -> void:
-	var l := Label3D.new()
-	l.text = text
-	l.font_size = 64
-	l.pixel_size = 0.0016
-	l.outline_size = 18
-	l.modulate = color
-	l.render_priority = 5
-	l.billboard = BaseMaterial3D.BILLBOARD_DISABLED  # faces the room (the artist and the TV cameras)
-	add_child(l)
-	l.global_position = pos
-	var tw := l.create_tween()
-	tw.set_parallel()
-	tw.tween_property(l, "global_position", pos + Vector3(0, rise, 0), 1.6)
-	tw.tween_property(l, "modulate:a", 0.0, 1.0).set_delay(0.8)
-	tw.tween_property(l, "outline_modulate:a", 0.0, 1.0).set_delay(0.8)
-	tw.chain().tween_callback(l.queue_free)
+	HudKit.popup(self, pos, text, {"color": color, "outline": Color(0, 0, 0, 0.9), "size": 0.316, "lift": rise, "time": 1.8, "camera": null, "billboard": BaseMaterial3D.BILLBOARD_DISABLED})  # faces the room (the artist and the TV cameras)
 	if broadcast and net != null:
 		net.event("popup", [pos, text, color])
 
@@ -2285,7 +2271,7 @@ func _build_hud() -> void:
 	var layer := CanvasLayer.new()
 	layer.layer = 5
 	add_child(layer)
-	center_label = _make_label(44)
+	center_label = HudKit.split_center(_make_label(44))  # a copy in each split view, never across the line
 	layer.add_child(center_label)
 	UiKit.pin(center_label, Control.PRESET_FULL_RECT, false)
 	center_label.offset_bottom = -200

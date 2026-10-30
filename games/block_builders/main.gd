@@ -56,6 +56,7 @@ const PropsScript := preload("res://games/block_builders/props.gd")
 const GhostHandScript := preload("res://games/block_builders/ghost_hand.gd")
 const CueScript := preload("res://games/block_builders/cue.gd")
 const UiKit := preload("res://core/ui_kit.gd")
+const HudKit := preload("res://core/hud_kit.gd")
 const Story := preload("res://games/block_builders/story.gd")
 const FlockScript := preload("res://games/block_builders/flock.gd")
 const Save := preload("res://core/save.gd")
@@ -919,24 +920,7 @@ func confetti(pos: Vector3, amount: int = 90, power: float = 1.0) -> void:
 
 ## Floating text for the TV players (billboarded, so it's hidden from the VR camera).
 func popup(pos: Vector3, text: String, color: Color) -> void:
-	var l := Label3D.new()
-	l.text = text
-	l.modulate = color
-	l.outline_modulate = Color(0, 0, 0, 0.9)
-	l.font_size = 64
-	l.outline_size = 16
-	l.pixel_size = 0.008
-	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	l.no_depth_test = false
-	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	l.layers = Art.TV_LAYER
-	add_child(l)
-	l.global_position = pos
-	var t := l.create_tween().set_parallel()
-	t.tween_property(l, "global_position", pos + Vector3.UP * 1.2, 1.2).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
-	t.tween_property(l, "modulate:a", 0.0, 0.8).set_delay(0.7)
-	t.tween_property(l, "outline_modulate:a", 0.0, 0.8).set_delay(0.7)
-	t.chain().tween_callback(l.queue_free)
+	HudKit.popup(self, pos, text, {"color": color, "outline": Color(0, 0, 0, 0.9), "size": 1.58, "lift": 1.2, "time": 1.5, "layers": Art.TV_LAYER})
 	if net:
 		net.event("popup", [pos, text, color])
 
@@ -2308,7 +2292,7 @@ func _build_hud() -> void:
 	info_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
 	info_label.offset_top = 12
 	info_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	center_label = _make_label(52)
+	center_label = HudKit.split_center(_make_label(52))  # a copy in each split view, never across the line
 	center_label.add_theme_color_override("font_color", Color(1.0, 1.0, 0.9))
 	layer.add_child(center_label)
 	center_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)

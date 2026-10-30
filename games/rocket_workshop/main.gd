@@ -62,6 +62,7 @@ const PropsScript := preload("res://games/rocket_workshop/props.gd")
 const GhostHandScript := preload("res://games/rocket_workshop/ghost_hand.gd")
 const CueScript := preload("res://games/rocket_workshop/cue.gd")
 const UiKit := preload("res://core/ui_kit.gd")
+const HudKit := preload("res://core/hud_kit.gd")
 const G := preload("res://games/rocket_workshop/rocketgen.gd")
 const MuseumScript := preload("res://games/rocket_workshop/museum.gd")
 const SprocketScript := preload("res://games/rocket_workshop/sprocket.gd")
@@ -667,28 +668,7 @@ func sound(sound_name: String, volume_db: float = 0.0, pitch: float = 1.0) -> vo
 
 ## Floating 3D text that rises and fades; shown on both machines (upright, not billboarded).
 func popup(pos: Vector3, text: String, color: Color, broadcast: bool = true) -> void:
-	var l := Label3D.new()
-	l.text = text
-	l.modulate = color
-	l.outline_modulate = Color(0, 0, 0, 0.85)
-	l.font_size = 64
-	l.outline_size = 18
-	l.pixel_size = 0.008
-	l.no_depth_test = false
-	l.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(l)
-	l.global_position = pos
-	if not players.is_empty() and players[0].vr:
-		# Face the pilot (fixed, world-locked text); the crew only see it from behind sometimes.
-		var to: Vector3 = pos - players[0].xr_camera.global_position
-		l.global_basis = Basis(Vector3.UP, atan2(-to.x, -to.z))
-	else:
-		l.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
-	var t := l.create_tween().set_parallel()
-	t.tween_property(l, "global_position", pos + Vector3.UP * 1.2, 1.4).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
-	t.tween_property(l, "modulate:a", 0.0, 0.9).set_delay(0.9)
-	t.tween_property(l, "outline_modulate:a", 0.0, 0.9).set_delay(0.9)
-	t.chain().tween_callback(l.queue_free)
+	HudKit.popup(self, pos, text, {"color": color, "outline": Color(0, 0, 0, 0.85), "size": 1.58, "lift": 1.2, "time": 1.8, "billboard": BaseMaterial3D.BILLBOARD_FIXED_Y})
 	if broadcast:
 		net.event("popup", [pos, text, color])
 
@@ -2637,7 +2617,7 @@ func _build_hud() -> void:
 	list_label = _make_label(24)
 	layer.add_child(list_label)
 	list_label.position = Vector2(24, 70)
-	center_label = _make_label(54)
+	center_label = HudKit.split_center(_make_label(54))  # a copy in each split view, never across the line
 	layer.add_child(center_label)
 	UiKit.pin(center_label, Control.PRESET_FULL_RECT, false)
 	center_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
