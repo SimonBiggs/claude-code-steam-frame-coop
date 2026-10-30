@@ -4,7 +4,7 @@ extends Node3D
 ## by touching the easel with the brush tip, or from further away by pointing at it (a laser shows
 ## where the paint lands). A: next colour (or touch a paint pot on the tray - the last two are RAINBOW
 ## and SPARKLE). Touch the CLEAR bubble to wipe the canvas, UNDO to take back the last stroke and
-## NEW WORD (early in a round) for an easier word.
+## NEW ONE (early in a round) for an easier thing to paint.
 ## TEAM PAINT rounds swap roles: the TV players paint and the artist guesses by touching (or pointing
 ## at + trigger) one of four answer balloons. In the final VOTE, touch / point at your favourite picture.
 ## Left stick: walk around · right stick left/right: turn · right stick up/down: easel height.

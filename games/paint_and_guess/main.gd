@@ -13,8 +13,19 @@ extends Node3D
 ## Every finished picture flies onto the gallery wall; at the end everyone VOTES for the best one (gold
 ## frame, MASTERPIECE), then the final scores and fun awards.
 ##
+## SMUDGE'S STORY (paintgen.gd, story_pictures.gd): Smudge, the studio cat in a red beret, keeps a gallery of the
+## family's paintings. Everything to paint is a PICTURE (the artist sees a picture of it, the guessers pick one of
+## four PICTURE answers, the VR player's balloons carry pictures), so kids who can't read yet can play. Every game
+## is generated from a seed and proven fair (tests/paint_and_guess_gen_test.gd): easy things first, trickier ones
+## later, the same four answers for everyone. TODAY'S GALLERY: the first game each day uses the day's seed on every
+## machine and its paintings get golden frames. Every finished painting is SAVED (save.gallery, packed small) and
+## hangs on the studio's side walls over the days (and shows on the easel at the end); every UNLOCK_EVERY paintings
+## a new theme unlocks; the vote's MASTERPIECE turns gold. Picture cards (core/story_card.gd) tell it on every view
+## and in VR. Telemetry: one RUN line per game and on quit. Networked: "round" carries thing ids (picture names),
+## "family" the packed gallery, "story" the cards.
+##
 ## Files: canvas.gd (easel, strokes, pots, bubbles, critters, balloons, vote grid), room.gd (the studio,
-## gallery, cat, lights), artist.gd (players[0]), guesser.gd (players 1-6), words.gd (themed packs),
+## gallery, cat, lights), artist.gd (players[0]), guesser.gd (players 1-6), paintgen.gd (seeded picture games),
 ## mesh_kit.gd (merged one-draw-call meshes), join_listener.gd. Modes and networking follow
 ## docs/GAME_DEV_GUIDE.md: the host simulates; strokes travel as small incremental events ("sb" begin,
 ## "pts" batches, "se" end, "undo", "clr"), never in snapshots. TEAM PAINT brushes travel as player
@@ -32,9 +43,15 @@ const CanvasScript := preload("res://games/paint_and_guess/canvas.gd")
 const RoomScript := preload("res://games/paint_and_guess/room.gd")
 const ArtistScript := preload("res://games/paint_and_guess/artist.gd")
 const GuesserScript := preload("res://games/paint_and_guess/guesser.gd")
-const WordsScript := preload("res://games/paint_and_guess/words.gd")
+const PaintGen := preload("res://games/paint_and_guess/paintgen.gd")
+const StoryCard := preload("res://core/story_card.gd")
+const Save := preload("res://core/save.gd")
+const Telemetry := preload("res://core/telemetry.gd")
+const Seeded := preload("res://core/seeded.gd")
 const JoinListenerScript := preload("res://games/paint_and_guess/join_listener.gd")
 
+const GAME_ID := "paint_and_guess"
+const SMUDGE := "SMUDGE"
 const MAX_PLAYERS := 7  # artist + 6 guessers
 const MAX_LOCAL_VIEWS := 6
 ## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
@@ -109,7 +126,20 @@ var round_n := 0
 var round_id := 0
 var round_type := "paint"  # paint, team, speed, final
 var theme := ""
-var theme_order: Array[int] = []
+# Smudge's studio (host): the game plan, the save, the story cards.
+var save: Node
+var plan := {}
+var plan_code := -1
+var session_seed := 0
+var game_no := 0
+var round_stats: Array = []  # telemetry: one entry per finished round
+var game_secs := 0.0
+var hung_entries := {}  # gallery slot -> its entry in save.gallery (the MASTERPIECE turns gold)
+var family: Array = []  # every machine: [[thing, day, golden, packed strokes], ...] (host: save.gallery)
+var family_days := 0
+var story_queue: Array = []
+var family_on_easel := false
+var story_t := 0.0
 var time_left := 60.0
 var word := ""  # host only (the client learns it at the reveal, or at the start of a TEAM PAINT round)
 var team_word := ""  # TEAM PAINT: the word the TV players paint (sent to the TV machine)
@@ -158,6 +188,13 @@ var vr_msg_t := 0.0
 
 func _ready() -> void:
 	randomize()
+	session_seed = Seeded.fresh_seed()
+	save = Save.new()
+	save.game_id = GAME_ID
+	# gallery: [[thing, play-day, golden, packed strokes], ...] (newest last); paintings: ever painted; days: play-days;
+	# daily: the date TODAY'S GALLERY ran.
+	save.defaults = {"gallery": [], "paintings": 0, "games": 0, "days": 0, "last_day": "", "daily": "", "masterpieces": 0}
+	add_child(save)
 	_build_world()
 	_build_hud()
 	var menu := PauseMenuScript.new()
@@ -167,6 +204,7 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
+	net.sticky_event("family")  # Smudge's gallery: a machine that joins later gets the latest one (core/net.gd)
 	seats = ClassicSeats.new(self, {
 		"no_keys": 99,
 		"free_actions": ["continue", "pause", "need_round", "need_sync"],
@@ -196,6 +234,9 @@ func _setup_game(mode: String) -> void:
 		seats.deck_solo(0)
 	ready_to_play = true
 	_ensure_join_listener()
+	if mode != "client":
+		_new_day()
+		_show_family()
 	if mode == "client":
 		players[1].set_meta("want_join", true)  # ask the host for a guesser seat (it may hand out another one)
 	_restore_party()
@@ -211,6 +252,8 @@ func _setup_game(mode: String) -> void:
 
 func _exit_tree() -> void:
 	XRServer.world_scale = 1.0  # global: never leave another game's scale behind
+	if ready_to_play and round_n > 0 and state != "over" and state != "wait":
+		_log_game("quit")
 
 
 func is_host_side() -> bool:
@@ -939,18 +982,18 @@ func artist_skip() -> void:
 	if not is_host_side() or state != "draw" or round_type == "team":
 		return
 	if skips_left <= 0 or state_t > SKIP_WINDOW:
-		_show_center("No new words now - keep drawing!", 1.5, false, "No new words now - keep drawing!")
+		_show_center("Keep painting!", 1.5, false, "Keep painting!")
 		sound("nope", -6.0)
 		return
 	skips_left -= 1
 	_clear_canvas(false)
-	_pick_word()
+	_pick_word(2 - skips_left)
 	time_left = round_time()
 	state_t = 0.0
 	_send_round()
 	sound("newword", 0.0, 1.0, true)
-	_show_center("NEW WORD!", 1.2)
-	print("Artist asked for a new word: %s" % word)
+	_show_center("NEW ONE!", 1.2)
+	print("Artist asked for a new one: %s" % word)
 
 
 ## Host: a TV painter's brush turns into strokes (TEAM PAINT), like the artist's.
@@ -1043,6 +1086,9 @@ func _process(delta: float) -> void:
 	_frame_views()
 	_update_easel_text()
 	_update_vr_text(delta)
+	_update_story(delta)
+	if state == "draw":
+		game_secs += delta
 	var a = players[0]
 	if is_host_side():
 		canvas.set_cursor(a.cursor, a.cursor_on and state != "over", canvas.ui_color(a.color_idx) if artist_mode() == "paint" else Color(1, 1, 1), a.drawing())
@@ -1071,7 +1117,7 @@ func _process(delta: float) -> void:
 				state_t = 0.0
 				players[0].trig_block = players[0].trig_block or round_type == "team"
 				_show_center("GO!  Guess what they're painting!" if round_type != "team" else "TEAM - PAINT!", 1.5, true,
-					"GO!  Paint the word above the easel!" if round_type != "team" else "GUESS - touch a balloon!")
+					"GO!  Paint the picture above the easel!" if round_type != "team" else "GUESS - touch a balloon!")
 				sound("go", 0.0, 1.0, true)
 				print("Round %d (%s, %s): draw! (%d guessers)" % [round_n, round_type, theme, active_guessers().size()])
 		"draw":
@@ -1178,12 +1224,11 @@ func _start_game() -> void:
 	masterpiece = ""
 	winner_idx = -1
 	hung_count = 0
-	theme_order.clear()
-	for i in WordsScript.pack_count():
-		theme_order.append(i)
-	theme_order.shuffle()
+	hung_entries.clear()
+	_new_plan()
 	room.clear_gallery()
 	canvas.hide_vote()
+	family_on_easel = false
 	canvas.set_crown(-1)
 	net.event("gallery_clear", [])
 	_next_round()
@@ -1199,7 +1244,7 @@ func _next_round() -> void:
 		return
 	round_n += 1
 	round_type = ROUND_PLAN[(round_n - 1) % ROUND_PLAN.size()]
-	theme = WordsScript.pack_name(theme_order[(round_n - 1) % theme_order.size()])
+	theme = PaintGen.theme_name(int(PaintGen.round_of(plan, round_n - 1).theme))
 	_clear_canvas(false)
 	_pick_word()
 	skips_left = 2
@@ -1215,7 +1260,7 @@ func _next_round() -> void:
 	_set_mood("final" if round_type == "final" else ("speed" if round_type == "speed" else "normal"))
 	match round_type:
 		"team":
-			_show_center("TEAM PAINT!\nRoles swap: TV players, PAINT the word together!\nLeft stick / D-pad moves your brush ring · HOLD A to paint.\n" \
+			_show_center("TEAM PAINT!\nRoles swap: TV players, PAINT the picture together!\nLeft stick / D-pad moves your brush ring · HOLD A to paint.\n" \
 				+ "The VR player guesses with the balloons.\n\nTHEME: %s" % theme, TEAM_INTRO_TIME, true,
 				"TEAM PAINT!  You GUESS this time\nTheme: %s" % theme)
 			sound("team", -2.0, 1.0, true)
@@ -1228,7 +1273,7 @@ func _next_round() -> void:
 		_:
 			if round_n == 1:
 				_show_center("PAINT AND GUESS!\nGuess what they're painting!\nD-pad picks an answer  ·  A guesses\n\n" \
-					+ "ROUND 1 of %d  ·  THEME: %s" % [ROUNDS, theme], FIRST_INTRO_TIME, true, "Paint the word above the easel!")
+					+ "ROUND 1 of %d  ·  THEME: %s" % [ROUNDS, theme], FIRST_INTRO_TIME, true, "Paint the picture above the easel!")
 			else:
 				_show_center("ROUND %d of %d\nTHEME: %s\nGet ready to guess!" % [round_n, ROUNDS, theme], INTRO_TIME, true,
 					"ROUND %d of %d\nTheme: %s" % [round_n, ROUNDS, theme])
@@ -1241,16 +1286,11 @@ func _set_mood(mood: String) -> void:
 	net.event("mood", [mood])
 
 
-## Choose a fresh word from this round's theme, everyone's answers (one right + three decoys, more of
-## them from the same theme as the game goes on) and the order the hint letters appear in.
-func _pick_word() -> void:
-	var pack: Array = WordsScript.pack_words(theme_order[(round_n - 1) % theme_order.size()] if not theme_order.is_empty() else 0)
-	var all: Array = WordsScript.all_words()
-	var tries := 0
-	word = str(pack[randi() % pack.size()])
-	while used_words.has(word) and tries < 60:
-		word = str(pack[randi() % pack.size()])
-		tries += 1
+## This round's thing to paint and everyone's four picture answers, from the game plan (paintgen.gd: fair and
+## proven by tests/paint_and_guess_gen_test.gd). reroll > 0: the artist asked for a NEW ONE.
+func _pick_word(reroll: int = 0) -> void:
+	var rd: Dictionary = PaintGen.round_of(plan, round_n - 1, used_words, reroll)
+	word = str(rd.target)
 	used_words.append(word)
 	team_word = word if round_type == "team" else ""
 	round_id += 1
@@ -1260,29 +1300,8 @@ func _pick_word() -> void:
 	last_tick = -1
 	hints_shown = 0
 	hint_order.clear()
-	for i in word.length():
-		if word[i] != " " and word[i] != "-":
-			hint_order.append(i)
-	hint_order.shuffle()
 	_update_hint()
-	# Every decoy comes from this round's theme (shown to everyone), so knowing the theme never rules
-	# answers out: only the painting tells them apart.
-	var same_theme := 3
-	opts = []
-	for i in MAX_PLAYERS:
-		var o: Array = [word]
-		var guard := 0
-		while o.size() < 1 + same_theme and guard < 40:
-			guard += 1
-			var w: String = str(pack[randi() % pack.size()])
-			if not o.has(w):
-				o.append(w)
-		while o.size() < 4:
-			var w2: String = str(all[randi() % all.size()])
-			if not o.has(w2):
-				o.append(w2)
-		o.shuffle()
-		opts.append(o)
+	opts = (rd.opts as Array).duplicate(true)
 	opts_round = round_id
 	for i in range(1, players.size()):
 		players[i].reset_round()
@@ -1510,7 +1529,11 @@ func _reveal(all_got: bool) -> void:
 		everyone_rounds += 1
 		room.cat_cheer()
 		net.event("cat", [])
-	_show_center("It was %s!\n%s" % [_article(word).to_upper(), line], REVEAL_TIME, true, "It was %s!\n%s" % [_article(word).to_upper(), line])
+	_show_center(line, REVEAL_TIME, true, line)
+	# The picture of what it was, for everyone (and the words for the readers).
+	_story_for_all("It was %s!" % _article(PaintGen.caption(word)), word, Color(0.55, 0.9, 1.0) if correct_count > 0 else Color(1.0, 0.75, 0.4))
+	round_stats.append({"thing": word, "type": round_type, "theme": theme, "got": correct_count, "of": active_guessers().size(),
+		"secs": snappedf(round_time() - time_left, 0.1), "skips": 2 - skips_left, "points": canvas.point_count})
 	sound("fanfare" if correct_count > 0 else "reveal", -2.0, 1.0, true)
 	if correct_count > 0:
 		confetti(canvas.canvas_to_world(Vector2(0.0, 0.0), 0.1), 60)
@@ -1531,6 +1554,11 @@ func _lift_all() -> void:
 		g.tv_down = false
 
 
+## A thing's caption in capitals ("POLAR BEAR").
+func cap(id: String) -> String:
+	return PaintGen.caption(id).to_upper()
+
+
 func _article(w: String) -> String:
 	var v := "aeiou"
 	return ("an " if v.contains(w[0]) else "a ") + w
@@ -1547,6 +1575,7 @@ func _hang_current() -> void:
 	_hang(slot, reveal_word, team)
 	net.event("hang", [slot, reveal_word, team])
 	sound("whoosh", -6.0, 1.0, true)
+	_keep_painting(slot, reveal_word)
 
 
 func _hang(slot: int, w: String, team: bool) -> void:
@@ -1590,7 +1619,7 @@ func _show_vote_grid() -> void:
 		var mesh: ArrayMesh = null
 		if room.pictures.has(slot):
 			mesh = room.pictures[slot]["mesh"]
-		pics.append([mesh, vote_words[k]])
+		pics.append([mesh, cap(vote_words[k])])
 	canvas.show_vote(pics)
 
 
@@ -1655,7 +1684,7 @@ func _finish_vote() -> void:
 		for k in counts.size():
 			if counts[k] == best:
 				win.append(vote_slots[k])
-				names.append(vote_words[k].to_upper())
+				names.append(cap(vote_words[k]))
 	# Every vote is worth points for whoever painted that picture.
 	for v in votes.values():
 		var k2: int = v
@@ -1671,6 +1700,7 @@ func _finish_vote() -> void:
 	masterpiece = " & ".join(names)
 	vote_done_t = 4.5
 	room.set_gold(win)
+	_gild(win)
 	canvas.hide_vote()
 	net.event("vote_result", [win])
 	if win.is_empty():
@@ -1711,6 +1741,14 @@ func _game_over() -> void:
 	confetti(canvas.canvas_to_world(Vector2(-0.4, 0.2), 0.1), 60)
 	confetti(canvas.canvas_to_world(Vector2(0.4, 0.2), 0.1), 60)
 	print("Game over: %s | awards: %s" % [board.replace("\n", " | "), awards.replace("\n", " | ")])
+	save.data.games = int(save.data.games) + 1
+	save.mark_dirty()
+	_log_game("full")
+	_show_family_easel()
+	net.event("family_easel", [])
+	var n := (save.data.gallery as Array).size()
+	if n > 0:
+		_story_for_all("%d in my gallery!" % n if n > 1 else "My first painting!", "smudge", Color(1.0, 0.7, 0.4))
 
 
 ## Fun end-of-game awards from everybody's stats (a few lines, kid-friendly).
@@ -1781,6 +1819,8 @@ func on_client_joined() -> void:
 ## Host: a machine joined: send it the canvas and this round (only to it).
 func on_machine_joined(peer: int, _kind: String) -> void:
 	_send_sync(peer)
+	if state == "over" and family_on_easel:
+		net.event_to(peer, "family_easel", [])
 	if state != "wait" and state != "over":
 		_send_round(peer)
 
@@ -2030,6 +2070,7 @@ func apply_event(kind: String, args: Array) -> void:
 			room.clear_gallery()
 			canvas.set_crown(-1)
 			canvas.hide_vote()
+			family_on_easel = false
 		"vote_show":
 			vote_slots.clear()
 			vote_words.clear()
@@ -2052,9 +2093,178 @@ func apply_event(kind: String, args: Array) -> void:
 			set_meta("awards", str(args[1]))
 		"mood":
 			room.set_mood(str(args[0]))
+		"story":
+			_story(str(args[0]), str(args[1]), args[2])
+		"family":
+			_apply_family(args[0], int(args[1]))
+		"family_easel":
+			_show_family_easel()
 		"remote_pause":
 			get_tree().paused = args[0]
 			_set_pause_banner(args[0], "The VR artist paused the game")
+
+
+# --- Smudge's studio: the game plan, the family gallery, story cards, telemetry --------------------------
+
+## Host / local: a new play-day counts once (the family gallery's paintings remember which day they came).
+func _new_day() -> void:
+	var today := Seeded.today()
+	if str(save.data.last_day) != today:
+		save.data.last_day = today
+		save.data.days = int(save.data.days) + 1
+		save.mark_dirty()
+
+
+## Host / local: this game's plan. TODAY'S GALLERY first each day (the same on every machine), then games from
+## the session seed with the themes the family has unlocked.
+func _new_plan() -> void:
+	game_no += 1
+	_new_day()
+	var today := Seeded.today()
+	var daily_due := str(save.data.daily) != today
+	var tn := PaintGen.themes_unlocked(int(save.data.paintings))
+	var last: Array = []
+	for rd in plan.get("rounds", []):
+		last.append(rd.target)
+	plan_code = PaintGen.code_at(session_seed, 1 if daily_due else game_no, daily_due, tn)
+	plan = PaintGen.build(plan_code)
+	# A new game never asks for something the last one did (the next session game instead).
+	while not daily_due and _shares_thing(plan, last) and game_no < 10000:
+		game_no += 1
+		plan_code = PaintGen.code_at(session_seed, game_no, false, tn)
+		plan = PaintGen.build(plan_code)
+	round_stats.clear()
+	game_secs = 0.0
+	if bool(plan.daily):
+		save.data.daily = today
+		save.mark_dirty()
+		_story_for_all("TODAY'S GALLERY! Golden frames today!", "goldframe", PaintGen.GOLD)
+	else:
+		_story_for_all("Paint for my gallery!", "smudge", Color(1.0, 0.7, 0.4))
+	print("Game %d: %s (code %d, %d themes)" % [game_no, plan.name, plan_code, tn])
+
+
+func _shares_thing(d: Dictionary, things: Array) -> bool:
+	for rd in d.rounds:
+		if things.has(rd.target):
+			return true
+	return false
+
+
+## Host / local: a finished painting goes into Smudge's gallery for good (packed small), newest last.
+func _keep_painting(slot: int, thing: String) -> void:
+	if not is_host_side() or plan.is_empty():
+		return
+	var packed := PaintGen.pack_strokes(canvas.export_strokes(), canvas.W, canvas.H)
+	if packed.is_empty():
+		return
+	var before := PaintGen.themes_unlocked(int(save.data.paintings))
+	var entry: Array = [thing, int(save.data.days), bool(plan.daily), packed]
+	var g: Array = save.data.gallery
+	g.append(entry)
+	while g.size() > PaintGen.GALLERY_MAX:
+		g.pop_front()
+	hung_entries[slot] = entry
+	save.data.paintings = int(save.data.paintings) + 1
+	save.mark_dirty()
+	_show_family()
+	var after := PaintGen.themes_unlocked(int(save.data.paintings))
+	if after > before:
+		_story_for_all("New pictures: %s!" % PaintGen.theme_name(after - 1), PaintGen.theme_pic(after - 1), Color(0.7, 1.0, 0.6))
+	print("Smudge's gallery: kept the %s (%d paintings, %d bytes)" % [thing, int(save.data.paintings), PaintGen.packed_size(packed)])
+
+
+## Host / local: the vote's winners get golden frames in the family gallery too.
+func _gild(slots: Array) -> void:
+	if not is_host_side():
+		return
+	var any := false
+	for sv in slots:
+		if hung_entries.has(int(sv)):
+			(hung_entries[int(sv)] as Array)[2] = true
+			any = true
+	if any:
+		save.data.masterpieces = int(save.data.masterpieces) + 1
+		save.mark_dirty()
+		_show_family()
+
+
+## Host / local: draw the family gallery here and send it to every machine.
+func _show_family() -> void:
+	_apply_family((save.data.gallery as Array).duplicate(true), int(save.data.days))
+	if net != null and net.mode == "host":
+		net.event("family", [family, family_days])
+
+
+## Every machine: the family's paintings on the studio's side walls (room.gd).
+func _apply_family(list: Array, days: int) -> void:
+	family = list
+	family_days = days
+	var pics: Array = []
+	for e in list:
+		if not (e is Array) or (e as Array).size() < 4:
+			continue
+		var mesh: ArrayMesh = canvas.picture_from(PaintGen.unpack_strokes(e[3], canvas.W, canvas.H))
+		pics.append([mesh, bool(e[2]), str(e[0])])
+	room.set_family(pics, canvas.paint_material())
+
+
+## Every machine, at the end of a game: the newest family paintings on the easel, golden ones marked.
+func _show_family_easel() -> void:
+	var pics: Array = []
+	var n := family.size()
+	for i in range(maxi(0, n - 6), n):
+		var e: Array = family[i]
+		var mesh: ArrayMesh = canvas.picture_from(PaintGen.unpack_strokes(e[3], canvas.W, canvas.H))
+		pics.append([mesh, cap(str(e[0])), bool(e[2])])
+	canvas.hide_vote()
+	if pics.is_empty():
+		family_on_easel = false
+		return
+	canvas.show_vote(pics, false)
+	family_on_easel = true
+
+
+## Host / local: a story card on every machine.
+func _story_for_all(line: String, pic: String, color: Color) -> void:
+	_story(line, pic, color)
+	if net != null and net.mode == "host":
+		net.event("story", [line, pic, color])
+
+
+func _story(line: String, pic: String, color: Color) -> void:
+	if story_queue.size() < 4:
+		story_queue.append([line, pic, color])
+
+
+## Every machine: the next card, one at a time.
+func _update_story(delta: float) -> void:
+	story_t -= delta
+	if story_t > 0.0 or story_queue.is_empty():
+		return
+	var b: Array = story_queue.pop_front()
+	story_t = 3.0
+	var opts := {"who": SMUDGE, "line": b[0], "pic": b[1], "color": b[2], "duration": 2.8, "y": 0.2}
+	var views: Array = []
+	for p in players:
+		if p.hud != null and is_instance_valid(p.hud) and (p.hud as Control).is_visible_in_tree():
+			views.append(p.hud)
+	if not views.is_empty():
+		StoryCard.show(views, opts)
+	if players.size() > 0 and players[0].vr and players[0].xr_camera != null:
+		StoryCard.show_vr(self, players[0].xr_camera, opts)
+	room.cat_cheer()
+
+
+## One RUN line per game ("full") and on quit.
+func _log_game(end: String) -> void:
+	if net == null or net.mode == "client" or plan.is_empty():
+		return
+	Telemetry.run(GAME_ID, {"end": end, "code": plan_code, "seed": int(plan.seed), "daily": bool(plan.daily), "themes": int(plan.themes),
+		"game": game_no, "round": round_n, "rounds": round_stats.duplicate(true), "guessers": active_guessers().size(),
+		"vr": players[0].vr, "net": net.mode, "secs": snappedf(game_secs, 0.1), "everyone": everyone_rounds,
+		"artist": players[0].score, "masterpiece": masterpiece, "gallery": (save.data.gallery as Array).size(),
+		"paintings": int(save.data.paintings), "days": int(save.data.days), "games": int(save.data.games)})
 
 
 # --- HUD -----------------------------------------------------------------------------
@@ -2133,10 +2343,10 @@ func hud_text(p) -> String:
 				t += "\nVOTE: click your favourite picture"
 			_:
 				if state == "draw" or state == "intro":
-					t += "\nDRAW:  %s" % word.to_upper()
+					t += "\nPAINT:  %s" % cap(word)
 					if state == "draw":
 						t += "   ·   %d s" % int(ceilf(time_left))
-		# No key-help lines: they covered the word sign, and the easel has CLEAR / UNDO / NEW WORD buttons.
+		# No key-help lines: they covered the word sign, and the easel has CLEAR / UNDO / NEW ONE buttons.
 		return t
 	var line := "P%d   %d pts" % [p.index + 1, p.score]
 	if active_guessers().size() > 1:
@@ -2152,9 +2362,9 @@ func brush_text() -> String:
 		"draw":
 			if round_type == "team":
 				return "GUESS!\n%d s" % int(ceilf(time_left))
-			return "%s\n%d s" % [word.to_upper(), int(ceilf(time_left))]
+			return "%s\n%d s" % [cap(word), int(ceilf(time_left))]
 		"intro":
-			return "get ready…" if round_type == "team" else "%s\nget ready…" % word.to_upper()
+			return "get ready…" if round_type == "team" else "%s\nget ready…" % cap(word)
 		"wait":
 			return "practice!"
 		"vote":
@@ -2169,9 +2379,10 @@ func _update_easel_text() -> void:
 	var team := round_type == "team"
 	# The word card above the easel: artist only (SECRET_LAYER), world-locked, in VR too.
 	var show_word := (state == "draw" or state == "intro") and is_host_side() and not team and word != ""
-	canvas.word_label.text = word.to_upper() if show_word else ""
-	canvas.word_label.font_size = clampi(int(1.25 / (0.6 * canvas.word_label.pixel_size * maxf(1.0, word.length()))), 36, 64)
+	canvas.word_label.text = cap(word) if show_word else ""
+	canvas.word_label.font_size = clampi(int(0.95 / (0.6 * canvas.word_label.pixel_size * maxf(1.0, cap(word).length()))), 30, 60)
 	canvas.word_label.visible = show_word
+	canvas.set_prompt(word if show_word else "")
 	canvas.hint_label.layers = HINT_LAYER
 	canvas.hint_label.text = ""  # the TV's own top line says it (the easel top is at the edge of their view)
 	# Show, don't tell: an arrow bounces up at the word until they start painting, and a ghost brush
@@ -2199,13 +2410,14 @@ func _update_easel_text() -> void:
 				# Everyone sees this (the artist's goal line is on the artist-only tip label).
 				info = "ROUND %d of %d\nTheme: %s" % [round_n, ROUNDS, theme]
 		"reveal":
-			info = "It was %s!" % _article(reveal_word).to_upper() if reveal_word != "" else ""
+			info = "It was %s!" % _article(PaintGen.caption(reveal_word)).to_upper() if reveal_word != "" else ""
 		"vote":
 			if vote_done_t >= 0.0:
 				info = "MASTERPIECE!\n%s" % masterpiece if masterpiece != "" else "Every picture is a winner!"
 		"over":
-			canvas.info_label.font_size = 26  # the labels are 1.8x bigger now: keep the scores on the board
-			info = "THE END!\n" + _scoreboard().replace("   ", "  ·  ") + "\n\n" + str(get_meta("awards", ""))
+			# The scores are on everyone's screen; the easel shows Smudge's gallery (the family's newest paintings).
+			canvas.info_label.font_size = 30
+			info = "" if family_on_easel else "THE END!\n" + _scoreboard().replace("   ", "  ·  ")
 	canvas.info_label.text = info
 	canvas.score_label.visible = round_n > 0
 	var sb := "%s\n" % (round_title() if state != "over" and state != "vote" else "SCORES")
@@ -2241,14 +2453,14 @@ func _update_easel_text() -> void:
 func _artist_tip(vr_like: bool) -> String:
 	var a = players[0]
 	if state == "intro" and round_type != "team":
-		return "Paint the word above the easel!"
+		return "Paint the picture above the easel!"
 	match artist_mode():
 		"paint":
 			if state != "draw":
 				return ""
 			if a.painted_points == 0:
 				if state_t < 4.0:
-					return "Paint the word above the easel!"
+					return "Paint the picture above the easel!"
 				return "Hold the RIGHT TRIGGER to paint!" if vr_like else "Hold Space / left mouse / A to paint!"
 			if state_t > 25.0 and correct_count == 0 and fmod(state_t, 8.0) < 5.0:
 				return "Tip: draw it BIG!"

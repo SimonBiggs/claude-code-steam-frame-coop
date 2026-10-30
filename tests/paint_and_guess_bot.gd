@@ -16,7 +16,8 @@ extends Node
 ## pause or join the test), and if anything else pauses the game the bot resumes it.
 ## Secret-word check (family play-test: "how do you all know what it is?"): during every painting round
 ## the bot collects every text a guesser could see (Label3Ds on the layers a TV camera draws, the TV
-## HUD lines and banner) and at the reveal checks none contains the word ("BOT LEAK" = failure).
+## HUD lines and banner) and at the reveal checks none contains the word ("BOT LEAK" = failure); the artist's
+## picture of it must be up (artist-only layer) and no 3D picture a TV camera draws may show it.
 
 const FAKE_PAD := 40
 
@@ -44,7 +45,9 @@ var seen_texts := {}  # every text a guesser could see during this round's intro
 var scan_t := 0.0
 var leaks := 0
 var word_checks := 0
-var card_seen := ""  # the artist-only word card above the easel, as seen during this round
+var card_seen := ""
+var pic_seen := ""  # the artist-only picture above the easel, as seen during this round
+var seen_pics := {}  # every 3D picture a guesser could see during the draw (secret-picture check)  # the artist-only word card above the easel, as seen during this round
 
 
 class RealPadFilter extends Node:
@@ -368,6 +371,8 @@ func _track(mode: String) -> void:
 			print("BOT %s: ROUND %d (%s, %s) COMPLETE - '%s' guessed by %d/%d, canvas %d strokes / %d points, gallery %d" % [mode,
 				main.round_n, main.round_type, main.theme, main.reveal_word, got, main.active_guessers().size(),
 				main.canvas.strokes.size(), main.canvas.point_count, main.room.pictures.size()])
+			if main.net.mode != "local":  # every machine agrees what it was (tools/multibot.ts)
+				print("BOT AGREE game%d_round%d=%s" % [games_done, main.round_n, main.reveal_word])
 			# Jump ahead so a short run sees every kind of round, the vote and the final scores:
 			# default: 1 -> TEAM PAINT (3) -> vote; 4+ players: 1 -> SPEED (4) -> GOLDEN FINAL (5) -> vote;
 			# host / fake VR: 1 -> TEAM PAINT (3) -> GOLDEN FINAL (5) -> vote.
@@ -379,6 +384,8 @@ func _track(mode: String) -> void:
 		elif st == "vote":
 			print("BOT %s: VOTE with %d pictures %s" % [mode, main.vote_count(), str(main.vote_words)])
 		elif st == "over":
+			if main.net.mode != "local":  # ... and on Smudge's family gallery
+				print("BOT AGREE family_game%d=%d" % [games_done, main.family.size()])
 			games_done += 1
 			print("BOT %s: GAME OVER seen (%s) awards: %s; gallery %d, rounds seen %s" % [mode, main._scoreboard(),
 				str(main.get_meta("awards", "")).replace("\n", " | "), main.room.pictures.size(), str(seen_types.keys())])
@@ -414,6 +421,9 @@ func _scan_guesser_texts(delta: float) -> void:
 	var wl: Label3D = main.canvas.word_label
 	if main.net.mode != "client" and main.state == "draw" and wl.is_visible_in_tree() and wl.layers == 2:
 		card_seen = wl.text
+		var pp: Sprite3D = main.canvas.prompt_pic
+		if pp != null and is_instance_valid(pp) and pp.is_visible_in_tree() and pp.layers == 2:
+			pic_seen = _pic_kind(pp)
 	var mask: int = 0xFFFFF & ~2 & ~int(main.VR_LAYER)  # what a TV guesser camera draws (no SECRET_LAYER, no VR_LAYER)
 	var stack: Array = [main]
 	while not stack.is_empty():
@@ -422,6 +432,9 @@ func _scan_guesser_texts(delta: float) -> void:
 		var l3 := n as Label3D
 		if l3 != null and l3.is_visible_in_tree() and (l3.layers & mask) != 0 and l3.text != "":
 			seen_texts[l3.text] = "Label3D " + str(main.get_path_to(l3))
+		var sp := n as Sprite3D
+		if sp != null and sp.is_visible_in_tree() and (sp.layers & mask) != 0 and main.state == "draw":
+			seen_pics[_pic_kind(sp)] = "Sprite3D " + str(main.get_path_to(sp))
 	var hud: Array = [main.center_label]
 	for i in range(1, main.players.size()):
 		var g = main.players[i]
@@ -433,8 +446,18 @@ func _scan_guesser_texts(delta: float) -> void:
 			seen_texts[lb.text] = "Label " + str(lb.name)
 
 
+## The picture a story-card medallion sprite shows (core/story_card.gd vr_medallion: Sprite3D > SubViewport > disc > Picture).
+func _pic_kind(sp: Sprite3D) -> String:
+	var vp := sp.get_child(0) if sp.get_child_count() > 0 else null
+	if vp == null or vp.get_child_count() == 0 or vp.get_child(0).get_child_count() == 0:
+		return ""
+	var k = vp.get_child(0).get_child(0).get("kind")
+	return str(k) if k != null else ""
+
+
 func _check_leaks(mode: String) -> void:
-	var w: String = str(main.reveal_word).to_upper()
+	var thing: String = str(main.reveal_word)
+	var w: String = main.cap(thing) if thing != "" else ""
 	if w == "" or main.round_type == "team":
 		seen_texts.clear()
 		return
@@ -445,7 +468,15 @@ func _check_leaks(mode: String) -> void:
 		print("BOT %s: artist word card above the easel: '%s' (%s)" % [mode, card_seen, "ok" if card_seen == w else "MISSING"])
 		if card_seen != w:
 			print("BOT LEAK-CHECK FAIL %s: the artist's word card did not show '%s'" % [mode, w])
+		print("BOT %s: artist picture above the easel: '%s' (%s)" % [mode, pic_seen, "ok" if pic_seen == thing else "MISSING"])
+		if pic_seen != thing:
+			print("BOT LEAK-CHECK FAIL %s: the artist's picture did not show '%s'" % [mode, thing])
 	card_seen = ""
+	pic_seen = ""
+	if seen_pics.has(thing):
+		bad += 1
+		print("BOT LEAK %s: a guesser could see the secret picture '%s' in %s" % [mode, thing, seen_pics[thing]])
+	seen_pics.clear()
 	var blanks := RegEx.new()
 	blanks.compile("_ [A-Z_]")  # the old letter hints ("_ A _ _")
 	for txt in seen_texts:
