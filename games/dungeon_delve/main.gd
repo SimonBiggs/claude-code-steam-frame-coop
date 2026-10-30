@@ -122,6 +122,7 @@ func _ready() -> void:
 	party.player_joined.connect(_on_player_joined)
 	save = Save.new()
 	save.game_id = GAME_ID
+	save.use_layout(preload("res://games/dungeon_delve/progress.gd"))  # SAVE_VERSION + migrate_save (boss bits moved in v2)
 	save.defaults = {"treasures": 0, "daily": ""}  # daily: the date TODAY'S DUNGEON was last played (deep.gd finish)
 	add_child(save)
 	sfx = SfxScript.new()

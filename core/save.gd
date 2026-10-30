@@ -12,6 +12,13 @@ extends Node
 ##   save.data["gold"] += 5; save.mark_dirty()
 ## Or one-shot: var d := Save.load_data("dungeon", {"gold": 0})  /  Save.store("dungeon", d)
 ## Migrations: set save.migrate = func(data: Dictionary, from_version: int) -> Dictionary.
+## THE STANDARD WAY when a game's save layout changes (so the arcade's Trophy Hall, which reads saves through
+## core/progress.gd without loading the game, migrates the same way): in games/<game>/progress.gd add
+##   const SAVE_VERSION := 2
+##   static func migrate_save(data: Dictionary, from_version: int) -> Dictionary   # old layout -> new, step by step
+##   static func migration_samples() -> Array   # [[from_version, old save, {key path "a/b": wanted value}], ...]
+## and in the game: save.use_layout(preload("res://games/<game>/progress.gd")) before add_child(save).
+## Progress.check (tests/progress_test.gd) runs every sample through it and fails a game that skips any part.
 
 ## Emitted after a successful write.
 signal saved
@@ -43,6 +50,22 @@ var _dirty_t := 0.0
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	reload()
+
+
+## Take version and migrate from a layout script (a game's progress.gd: SAVE_VERSION, static migrate_save).
+func use_layout(layout: Script) -> void:
+	var c := layout.get_script_constant_map()
+	if c.has("SAVE_VERSION"):
+		version = int(c["SAVE_VERSION"])
+	if layout.has_method("migrate_save"):
+		migrate = layout.migrate_save
+
+
+## Load a game's data the way the game itself does (its progress.gd's SAVE_VERSION / migrate_save, if any).
+static func load_layout(id: String, layout: Script, default_data: Dictionary = {}) -> Dictionary:
+	var c := layout.get_script_constant_map()
+	var v := int(c.get("SAVE_VERSION", 1))
+	return load_data(id, default_data, v, layout.migrate_save if layout.has_method("migrate_save") else Callable())
 
 
 ## Read the file again (discarding unsaved changes).

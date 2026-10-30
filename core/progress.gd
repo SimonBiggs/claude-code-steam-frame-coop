@@ -97,6 +97,42 @@ static func summary_of(id: String, data: Dictionary, today: String = "") -> Dict
 	return {"grown": maxi(0, int(d.get("grown", 0))), "daily": daily, "played": bool(d.get("played", false)) or daily}
 
 
+## A game whose save layout changed (SAVE_VERSION > 1 in its progress.gd) migrates old saves in migrate_save, proves
+## it with migration_samples (each stored at its old version, loaded back through core/save.gd), and its game loads
+## the save with save.use_layout(...) so the game and the Trophy Hall read the same thing (core/save.gd).
+static func layout_problems(id: String, s: Script) -> Array:
+	var out: Array = []
+	var c := s.get_script_constant_map()
+	if int(c.get("SAVE_VERSION", 1)) <= 1:
+		return out
+	if not s.has_method("migrate_save") or not s.has_method("migration_samples"):
+		return ["games/%s/progress.gd has SAVE_VERSION %d but no static migrate_save / migration_samples (core/save.gd)" % [id, int(c["SAVE_VERSION"])]]
+	var uses := false
+	var dir := "res://games/%s/" % id
+	for f in DirAccess.get_files_at(dir):
+		if f.ends_with(".gd") and f != "progress.gd" and FileAccess.get_file_as_string(dir + f).contains("use_layout("):
+			uses = true
+	if not uses:
+		out.append("games/%s never calls save.use_layout(progress.gd): the game would skip its own migration" % id)
+	var samples: Array = s.migration_samples()
+	if samples.is_empty():
+		out.append("games/%s/progress.gd migration_samples() is empty" % id)
+	var test_id := "layout_test_" + id
+	for sam in samples:
+		Save.store(test_id, (sam[1] as Dictionary).duplicate(true), int(sam[0]))
+		for round in 2:  # once from the old file, once more after storing at the new version (no double migration)
+			var got := Save.load_layout(test_id, s)
+			for path in (sam[2] as Dictionary):
+				var v: Variant = got
+				for part in String(path).split("/"):
+					v = (v as Dictionary).get(part) if v is Dictionary else null
+				if v != (sam[2] as Dictionary)[path]:
+					out.append("games/%s migration from v%d: %s is %s, want %s%s" % [id, int(sam[0]), path, str(v), str((sam[2] as Dictionary)[path]), " (after re-saving)" if round == 1 else ""])
+			Save.store(test_id, got, int(c["SAVE_VERSION"]))
+	Save.erase(test_id)
+	return out
+
+
 ## Every opted-in game's summary from this machine's saves (only the games in `only`, when given).
 static func summaries(only: Array = []) -> Dictionary:
 	var today := Seeded.today()
@@ -104,7 +140,7 @@ static func summaries(only: Array = []) -> Dictionary:
 	for id in ids():
 		if not only.is_empty() and not only.has(id):
 			continue
-		out[id] = summary_of(id, Save.load_data(String(script_of(id).SAVE_ID)), today)
+		out[id] = summary_of(id, Save.load_layout(String(script_of(id).SAVE_ID), script_of(id)), today)
 	return out
 
 
@@ -185,6 +221,7 @@ static func check(game_ids: Array, pretend_missing: Array = []) -> Array[String]
 			out.append("games/%s/progress.gd WHO %s is not a story picture" % [id, s.WHO])
 		if not StoryCard.has_picture(String(s.GROWS)) and not FileAccess.get_file_as_string("res://core/ui_kit.gd").contains("\t\t\t\"%s\":" % s.GROWS):
 			out.append("games/%s/progress.gd GROWS %s is neither a story picture nor a UiKit icon" % [id, s.GROWS])
+		out.append_array(layout_problems(String(id), s))
 		var empty := summary_of(String(id), {}, today)
 		if int(empty.get("grown", -1)) != 0 or bool(empty.get("daily", true)):
 			out.append("games/%s/progress.gd: an empty save must read as grown 0, daily not done (got %s)" % [id, str(empty)])
