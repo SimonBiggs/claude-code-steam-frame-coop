@@ -584,6 +584,8 @@ func managed_files() -> Array[String]:
 
 func _walk(rel: String, out: Array[String]) -> void:
 	var abs := "res://" + rel
+	if not DirAccess.dir_exists_absolute(abs):
+		return
 	for d in DirAccess.get_directories_at(abs):
 		if not d.begins_with("."):
 			_walk(rel + "/" + d, out)
