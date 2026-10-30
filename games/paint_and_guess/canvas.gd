@@ -162,9 +162,10 @@ func _ready() -> void:
 	info_label = _label(40, Color(1, 1, 1), Vector3(0, 0, 0.012))
 	info_label.width = (W - 0.1) / info_label.pixel_size
 	info_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	tip_label = _label(30, Color(1.0, 0.95, 0.7), Vector3(0, -H * 0.5 + 0.07, 0.014))
+	tip_label = _label(30, Color(1.0, 0.95, 0.7), Vector3(0, -H * 0.5 + 0.04, 0.014))
 	tip_label.width = (W - 0.1) / tip_label.pixel_size
 	tip_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	tip_label.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM  # a second line grows up the board, never off its bottom
 	score_label = _label(34, Color(1.0, 0.9, 0.75), Vector3(-W * 0.5 - 0.3, H * 0.05, 0.0))
 	score_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	score_label.vertical_alignment = VERTICAL_ALIGNMENT_TOP
@@ -308,6 +309,9 @@ func _bubble(text: String, col: Color, pos: Vector3) -> MeshInstance3D:
 	l.pixel_size = 0.00198
 	l.position = Vector3(0, 0, 0.075)
 	b.add_child(l)
+	# The artist's tools: only the artist's views (and VR) show them (they sat cut off at the edge of guessers' views).
+	b.layers = SECRET_LAYER
+	l.layers = SECRET_LAYER
 	return b
 
 

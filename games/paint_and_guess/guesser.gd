@@ -472,9 +472,13 @@ func build_hud(root: Control) -> void:
 		var x := _label(40)
 		x.text = "✗"
 		x.modulate = Color(1.0, 0.3, 0.3)
-		x.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+		x.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		x.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		x.visible = false
 		pic.add_child(x)
+		x.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)  # centred ON the picture (it hung off its corner)
+		x.grow_horizontal = Control.GROW_DIRECTION_BOTH
+		x.grow_vertical = Control.GROW_DIRECTION_BOTH
 		var l := _label(34)
 		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -515,7 +519,7 @@ func _update_hud() -> void:
 	banner_label.add_theme_font_size_override("font_size", int(24 * s))
 	# Below the score / round lines in the top-left corner (they overlapped the title in a half-width view).
 	hint_label.offset_top = 90.0 * s
-	banner_label.offset_top = 140.0 * s
+	banner_label.offset_top = 140.0 * s if hint_label.text != "" else 96.0 * s  # moves up when the hint line is empty
 	time_label.add_theme_font_size_override("font_size", int(34 * s))
 	status_label.add_theme_font_size_override("font_size", int(30 * s))
 	big_label.add_theme_font_size_override("font_size", int(32 * s))
@@ -585,7 +589,7 @@ func _update_hud() -> void:
 		pic.custom_minimum_size = Vector2(px, px)
 		var crossed := (wrong_mask >> i) & 1 == 1
 		opt_x[i].visible = crossed
-		opt_x[i].add_theme_font_size_override("font_size", int(px * 0.9))
+		opt_x[i].add_theme_font_size_override("font_size", int(px * 0.8))
 		pic.modulate = Color(1, 1, 1, 0.45) if crossed or (got and st == "draw" and w != answer) else Color(1, 1, 1)
 		var key := "idle"
 		var bg := Color(0.12, 0.14, 0.26, 0.88)

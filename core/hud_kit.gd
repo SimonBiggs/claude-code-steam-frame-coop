@@ -661,6 +661,8 @@ class SplitWord extends Node:
 					c.add_theme_constant_override(n, l.get_theme_constant(n))
 			if l.has_theme_font_override("font"):
 				c.add_theme_font_override("font", l.get_theme_font("font"))
+			if l.has_theme_stylebox_override("normal"):
+				c.add_theme_stylebox_override("normal", l.get_theme_stylebox("normal"))  # a backdrop band goes along
 			var rect := Rect2(v.position + lr.position / screen * v.size, lr.size / screen * v.size)
 			# Smaller views get a smaller word (2x2: ~60 %), and the longest word always fits 92 % of the view.
 			var fs := float(fs0) * minf(1.0, maxf(v.size.y / screen.y, v.size.x / screen.x) * 1.2)
@@ -678,8 +680,22 @@ class SplitWord extends Node:
 				c.label_settings = ls
 			else:
 				c.add_theme_font_size_override("font_size", maxi(10, int(fs)))
-			c.size = rect.size
-			c.global_position = rect.position
+			# Same centre as the label had (scaled into the view), at least as tall as the wrapped text, never past
+			# the view's edges (a long message near the bottom moves up instead of being cut).
+			c.size = Vector2(rect.size.x, 0.0)
+			var h := maxf(rect.size.y, c.get_combined_minimum_size().y)
+			if h > v.size.y * 0.96 and fs > 10.0:
+				var k := v.size.y * 0.96 / h
+				if l.label_settings != null:
+					c.label_settings.font_size = maxi(10, int(fs * k))
+				else:
+					c.add_theme_font_size_override("font_size", maxi(10, int(fs * k)))
+				c.size = Vector2(rect.size.x, 0.0)
+				h = minf(v.size.y, maxf(rect.size.y * k, c.get_combined_minimum_size().y))
+			c.size = Vector2(rect.size.x, h)
+			var pos := Vector2(rect.position.x, rect.get_center().y - h * 0.5)
+			pos.y = clampf(pos.y, v.position.y + 4.0, maxf(v.position.y + 4.0, v.end.y - h - 4.0))
+			c.global_position = pos
 
 
 class FloatText extends Label3D:

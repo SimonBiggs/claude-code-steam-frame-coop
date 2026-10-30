@@ -74,6 +74,9 @@ const SKIP_WINDOW := 15.0
 const FLUSH_INTERVAL := 0.05
 const TEAM_BRUSH_W := 0.024
 const HINT_LAYER := 4  # visual layer bit for things only the guessers see (the hint over the easel)
+## The scoreboard written left of the easel: only views wide enough to show it whole (a Deck's half-width view cut it
+## off at the edge; those views get the scores in their top line instead) and VR.
+const BOARD_SCORE_LAYER := 1 << 9
 const VR_LAYER := preload("res://core/vr_layer.gd").LAYER  # the VR player's floating text (never on the TV; engine-wide VR layer)
 const PLAYER_COLORS: Array[Color] = [Color(1.0, 0.85, 0.55), Color(1.0, 0.35, 0.35), Color(0.3, 0.65, 1.0),
 	Color(0.4, 0.9, 0.4), Color(1.0, 0.8, 0.15), Color(0.8, 0.45, 1.0), Color(1.0, 0.55, 0.2)]
@@ -580,7 +583,7 @@ func _ensure_view(p) -> void:
 ## Point a view's camera square-on at the easel. Guessers keep the bottom third for their answers.
 func _frame_camera(cam: Camera3D, aspect: float, guesser: bool) -> void:
 	var hn: float = canvas.H + 0.55
-	var wn: float = canvas.W + 0.5
+	var wn: float = canvas.W + (0.5 if guesser else 0.8)  # the artist's CLEAR / UNDO / NEW ONE bubbles stand right of the board
 	var center: Vector3 = canvas.canvas_to_world(Vector2(0.0, 0.08), 0.0)
 	var hh := 0.0
 	var cam_y := center.y
@@ -604,7 +607,11 @@ func _frame_views() -> void:
 		if not c.visible:
 			continue
 		var sz := c.size
-		_frame_camera(p.camera, sz.x / maxf(sz.y, 1.0), p.index > 0)
+		var aspect := sz.x / maxf(sz.y, 1.0)
+		_frame_camera(p.camera, aspect, p.index > 0)
+		var narrow := aspect < 1.2
+		p.set_meta("narrow", narrow)
+		p.camera.cull_mask = (p.camera.cull_mask & ~BOARD_SCORE_LAYER) if narrow else (p.camera.cull_mask | BOARD_SCORE_LAYER)
 
 
 ## TV grid: 1 full, 2 side by side, 3-4 as 2x2, 5-6 as 3x2; smaller views render at lower resolution.
@@ -1070,6 +1077,7 @@ func _process(delta: float) -> void:
 	if views_root != null and is_instance_valid(views_root) and views_root.size != last_view_area:
 		_layout_views()
 	_frame_views()
+	_place_center()
 	_update_easel_text()
 	_update_vr_text(delta)
 	_update_story(delta)
@@ -1721,7 +1729,7 @@ func _game_over() -> void:
 	canvas.set_crown(winner_idx - 1 if winner_idx > 0 else -1)
 	net.event("over", [winner_idx, awards])
 	set_meta("awards", awards)
-	_show_center("%s\n%s\n\n%s\n\nA / Enter (VR: trigger) to play again" % [top, board, awards], 0.0, true, top)
+	_show_center("%s\n%s\n%s\nA / Enter (VR: trigger): play again" % [top, board, awards], 0.0, true, top)
 	sound("fanfare", 0.0, 1.0, true)
 	_set_mood("party")
 	confetti(canvas.canvas_to_world(Vector2(-0.4, 0.2), 0.1), 60)
@@ -2231,12 +2239,21 @@ func _update_story(delta: float) -> void:
 	var b: Array = story_queue.pop_front()
 	story_t = 3.0
 	var opts := {"who": SMUDGE, "line": b[0], "pic": b[1], "color": b[2], "duration": 2.8, "y": 0.2}
-	var views: Array = []
+	# Smudge's card: under the easel in the artist's view (it covered the word sign there); in guessers' views just
+	# below their top lines (their answers fill the bottom).
+	var low := []
+	var high := []
 	for p in players:
 		if p.hud != null and is_instance_valid(p.hud) and (p.hud as Control).is_visible_in_tree():
-			views.append(p.hud)
-	if not views.is_empty():
-		StoryCard.show(views, opts)
+			(high if p.index > 0 else low).append(p.hud)
+	if not low.is_empty():
+		var o := opts.duplicate()
+		o["y"] = 0.9
+		StoryCard.show(low, o)
+	if not high.is_empty():
+		var o2 := opts.duplicate()
+		o2["y"] = 0.3
+		StoryCard.show(high, o2)
 	if players.size() > 0 and players[0].vr and players[0].xr_camera != null:
 		StoryCard.show_vr(self, players[0].xr_camera, opts)
 	room.cat_cheer()
@@ -2271,13 +2288,15 @@ func _build_hud() -> void:
 	var layer := CanvasLayer.new()
 	layer.layer = 5
 	add_child(layer)
-	center_label = HudKit.split_center(_make_label(44))  # a copy in each split view, never across the line
+	# The big message: a dark band across the middle of each view (HudKit.split_center gives every split view its
+	# own copy), so it never mixes with the writing on the easel; at the end it sits low, under Smudge's gallery.
+	center_label = HudKit.split_center(_make_label(40))  # a copy in each split view, never across the line
 	layer.add_child(center_label)
-	UiKit.pin(center_label, Control.PRESET_FULL_RECT, false)
-	center_label.offset_bottom = -200
 	center_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	center_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	center_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	center_label.add_theme_stylebox_override("normal", UiKit.stylebox(Color(0.05, 0.05, 0.1, 0.82), 1.0, 18.0, Color(1, 1, 1, 0.1), 2.0, 0.0, Vector2(18, 10)))
+	_place_center()
 	help_label = _make_label(20)
 	layer.add_child(help_label)
 	UiKit.pin(help_label, Control.PRESET_BOTTOM_WIDE, false)
@@ -2287,12 +2306,32 @@ func _build_hud() -> void:
 	help_label.text = "Guess: D-pad / stick (arrows) + A (Enter)  ·  cheer: X / Y / B  ·  more players: press A on another controller  ·  Start / Esc menu"
 
 
+## Where the big message sits: across the middle (y 0.42 of the screen), or low under the easel at the end (the
+## gallery is on the easel then). Empty = hidden (its dark band would show on its own).
+func _place_center() -> void:
+	if center_label == null:
+		return
+	var cy := 0.9 if state == "over" else 0.42  # low: kept inside the view by HudKit.split_center / the bottom edge
+	center_label.anchor_left = 0.06
+	center_label.anchor_right = 0.94
+	center_label.anchor_top = cy
+	center_label.anchor_bottom = cy
+	center_label.offset_left = 0.0
+	center_label.offset_right = 0.0
+	center_label.offset_top = 0.0
+	center_label.offset_bottom = 0.0
+	center_label.grow_vertical = Control.GROW_DIRECTION_BOTH
+	center_label.add_theme_font_size_override("font_size", 30 if state == "over" else 40)
+	center_label.visible = center_label.text.strip_edges() != ""
+
+
 ## TV banner text; vr: the short version for the VR player ("\u0001" = the first two lines).
 func _show_center(text: String, duration: float, broadcast: bool = true, vr: String = "\u0001") -> void:
 	if net and broadcast:
 		net.event("center", [text, duration, vr])
 	center_label.text = text
 	center_label.modulate.a = 1.0
+	_place_center()
 	if center_tween:
 		center_tween.kill()
 	if duration > 0.0:
@@ -2325,6 +2364,9 @@ func hud_text(p) -> String:
 		return "Syncing with the VR artist…"
 	if p.index == 0:
 		var t := "YOU'RE THE ARTIST!   score %d" % p.score
+		if bool(p.get_meta("narrow", false)) and round_n > 0:  # the easel's scoreboard doesn't fit this view
+			for g in active_guessers():
+				t += "  ·  P%d %d" % [g.index + 1, g.score]
 		match artist_mode():
 			"guess":
 				t += "\nTEAM PAINT: guess what they paint - click a balloon!"
@@ -2409,6 +2451,9 @@ func _update_easel_text() -> void:
 			info = "" if family_on_easel else "THE END!\n" + _scoreboard().replace("   ", "  ·  ")
 	canvas.info_label.text = info
 	canvas.score_label.visible = round_n > 0
+	canvas.score_label.layers = BOARD_SCORE_LAYER
+	# Tips sit at the bottom of the board, growing upward; with the balloons out (TEAM PAINT) above the balloons.
+	canvas.tip_label.position.y = -canvas.H * 0.5 + (0.3 if artist_mode() == "guess" else 0.04)
 	var sb := "%s\n" % (round_title() if state != "over" and state != "vote" else "SCORES")
 	if state == "draw":
 		sb += "%d s\n" % int(ceilf(time_left))
@@ -2456,7 +2501,8 @@ func _artist_tip(vr_like: bool) -> String:
 		"guess":
 			if vr_lock > 0.0:
 				return "Pop! Not that one - wait a moment…"
-			return "Touch the balloon with the right answer!" if vr_like else "Click the balloon with the right answer!"
+			# Flat screens: the top line already says it (on the board it sat on the balloons' names).
+			return "Touch the balloon with the right answer!" if vr_like else ""
 		"vote":
 			if artist_vote_k < 0:
 				return "Touch your favourite picture (or point + trigger)" if vr_like else "Click your favourite picture"
