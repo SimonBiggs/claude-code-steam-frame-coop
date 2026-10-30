@@ -144,6 +144,8 @@ func _stroll_goal(home: int) -> Vector3:
 ## Villagers jump for joy (a wave was cleared, the village grew).
 func cheer() -> void:
 	cheer_t = 4.0
+	if main != null and main.get("table_story") != null:
+		main.table_story.cheer()  # Sparky bounces in the fire too
 
 
 func _process(delta: float) -> void:
