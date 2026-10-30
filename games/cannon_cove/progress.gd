@@ -9,14 +9,15 @@ const COLOR := Color(0.95, 0.2, 0.15)
 
 
 ## data: the raw save (no defaults filled in: always .get with a default). today: Seeded.today().
-## grown: every treasure ever won (total; the shelf keeps the newest 13); daily: TODAY'S VOYAGE sailed today.
+## grown: every treasure ever won (total; the shelf keeps the newest 13); daily: a TODAY'S VOYAGE finished today (daily_done; "daily" only
+## says it started, so the next round isn't the daily).
 static func progress_summary(data: Dictionary, today: String) -> Dictionary:
 	var treasures: Variant = data.get("treasures", [])
 	return {"grown": maxi(int(data.get("total", 0)), (treasures as Array).size() if treasures is Array else 0),
-		"daily": String(data.get("daily", "")) == today, "played": String(data.get("last_day", "")) == today}
+		"daily": String(data.get("daily_done", "")) == today, "played": String(data.get("last_day", "")) == today}
 
 
 ## A save as the game writes it after a few days (tests/progress_test.gd: it must read as grown > 0, daily done).
 static func sample(today: String) -> Dictionary:
 	return {"treasures": [["doubloon", 1, true], ["pearl", 2, false], ["anchor", 3, true]], "total": 3, "days": 3,
-		"last_day": today, "daily": today, "voyages": 5, "best_wave": 4, "kraken_wins": 0}
+		"last_day": today, "daily": today, "daily_done": today, "voyages": 5, "best_wave": 4, "kraken_wins": 0}

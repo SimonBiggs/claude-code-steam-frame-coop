@@ -1884,6 +1884,8 @@ func _round_complete_simple() -> void:
 	save.data.rounds = int(save.data.rounds) + 1
 	save.data.best_round = maxi(int(save.data.best_round), day)
 	save.data.decor = maxi(int(save.data.decor), decor_count)
+	if today_garden:
+		save.data["daily_done"] = Seeded.today()  # TODAY'S GARDEN finished a round (the Trophy Hall's golden star)
 	save.mark_dirty()
 	shelf_jars = int(save.data.jars)
 	jarshelf.set_jars(shelf_jars)

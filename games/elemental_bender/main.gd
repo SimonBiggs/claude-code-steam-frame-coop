@@ -206,7 +206,7 @@ func _ready() -> void:
 	save.game_id = GAME_ID
 	# days: play-days (lanterns), last_day, daily: the date TODAY'S RAIDERS ran, waves: waves cleared over all days
 	# (the Spirit Tree), fruit: the element of every General beaten (oldest first), generals: how many.
-	save.defaults = {"best_wave": 0, "best_score": 0, "days": 0, "last_day": "", "daily": "", "games": 0, "waves": 0,
+	save.defaults = {"best_wave": 0, "best_score": 0, "days": 0, "last_day": "", "daily": "", "daily_done": "", "games": 0, "waves": 0,
 		"fruit": [], "generals": 0, "best_today": [], "raiders": 0}
 	add_child(save)
 	net.sticky_event("gates")  # a machine that joins later gets the coming wave's portals (core/net.gd)
@@ -1790,6 +1790,9 @@ func _update_story(delta: float) -> void:
 func _log_run(end: String) -> void:
 	if net == null or net.mode == "client" or wave <= 0 or run_logged or save == null:
 		return
+	if end != "quit" and temple_daily:
+		save.data["daily_done"] = Seeded.today()  # TODAY'S RAIDERS played to a wave's end (the Trophy Hall's golden star)
+		save.mark_dirty()
 	run_logged = end != "wave"
 	log_runs += 1
 	Telemetry.run(GAME_ID, {"end": end, "wave": wave, "seed": temple_seed, "daily": temple_daily,

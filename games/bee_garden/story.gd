@@ -34,7 +34,7 @@ const LINES := {
 
 
 static func save_defaults() -> Dictionary:
-	return {"world": -1, "jars": 0, "rounds": 0, "gardens": 0, "decor": DECOR_START, "daily": "", "best_round": 0}
+	return {"world": -1, "jars": 0, "rounds": 0, "gardens": 0, "decor": DECOR_START, "daily": "", "daily_done": "", "best_round": 0}
 
 
 ## How many seed kinds the tray offers with `jars` on the shelf.

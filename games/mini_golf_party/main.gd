@@ -136,7 +136,7 @@ func _ready() -> void:
 	save.game_id = GAME_ID
 	# days: play-days; last_day: the last one; daily: the date TODAY'S COURSE was played; stars_total: every gold
 	# star ever (the garden's flowers); level: the course level reached (more play-days, bendier holes).
-	save.defaults = {"best_stars": 0, "days": 0, "last_day": "", "daily": "", "courses": 0, "stars_total": 0,
+	save.defaults = {"best_stars": 0, "days": 0, "last_day": "", "daily": "", "daily_done": "", "courses": 0, "stars_total": 0,
 		"holes_in_one": 0, "level": 1}
 	add_child(save)
 	sfx = SfxScript.new()
@@ -664,6 +664,8 @@ func _end_course() -> void:
 	if stars > int(save.data["best_stars"]):
 		save.data["best_stars"] = stars
 	save.data["courses"] = int(save.data["courses"]) + 1
+	if course_daily:
+		save.data["daily_done"] = Seeded.today()  # TODAY'S COURSE finished (the Trophy Hall's golden star)
 	save.mark_dirty()
 	_send_garden()
 	_log_course("done", stars)

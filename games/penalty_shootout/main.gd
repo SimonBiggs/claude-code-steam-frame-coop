@@ -264,7 +264,7 @@ func _ready() -> void:
 	save = Save.new()
 	save.game_id = GAME_ID
 	# prizes: [[kind, play-day, golden], ...]; days: days played; daily: the date TODAY'S MATCH ran; goals: star goals reached.
-	save.defaults = {"prizes": [], "goals": 0, "days": 0, "last_day": "", "daily": "", "cups": 0, "matches": 0, "stars": 0,
+	save.defaults = {"prizes": [], "goals": 0, "days": 0, "last_day": "", "daily": "", "daily_done": "", "cups": 0, "matches": 0, "stars": 0,
 		"best_stars": 0}
 	add_child(save)
 	_build_hud()
@@ -2755,6 +2755,9 @@ func _update_story(delta: float) -> void:
 func _log_match(end: String) -> void:
 	if net == null or net.mode == "client" or mplan.is_empty():
 		return
+	if end != "quit" and cup_daily and save != null:
+		save.data["daily_done"] = Seeded.today()  # TODAY'S MATCH played to the end (the Trophy Hall's golden star)
+		save.mark_dirty()
 	Telemetry.run(GAME_ID, {"end": end, "match": cup_n, "seed": cup_seed, "daily": cup_daily, "secs": snappedf(match_secs, 0.1),
 		"saves": saves, "goals": goals_total, "shots": shots_total, "kicks": turn_count, "rounds": rounds_total,
 		"strikers": active_strikers().size(), "cpu": cpu, "stars": leo_stars, "star_goal": leo_goal, "goal_hit": leo_goal_hit,

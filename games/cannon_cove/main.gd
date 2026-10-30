@@ -3320,7 +3320,7 @@ func _start_voyage() -> void:
 		save = Save.new()
 		save.game_id = GAME_ID
 		# treasures: [[kind, play-day, golden], ...]; days: days played; daily: the date TODAY'S VOYAGE sailed.
-		save.defaults = {"treasures": [], "total": 0, "days": 0, "last_day": "", "daily": "", "voyages": 0, "best_wave": 0, "kraken_wins": 0}
+		save.defaults = {"treasures": [], "total": 0, "days": 0, "last_day": "", "daily": "", "daily_done": "", "voyages": 0, "best_wave": 0, "kraken_wins": 0}
 		add_child(save)
 	var today := Seeded.today()
 	var new_day := String(save.data.last_day) != today
@@ -3373,6 +3373,9 @@ func _send_treasures() -> void:
 func _log_wave(end: String) -> void:
 	if net == null or net.mode == "client":
 		return
+	if end != "quit" and voyage_daily and save != null:
+		save.data["daily_done"] = Seeded.today()  # a wave of TODAY'S VOYAGE played to its end (the Trophy Hall's golden star)
+		save.mark_dirty()
 	Telemetry.run(GAME_ID, {"end": end, "wave": wave, "phase": phase, "seed": voyage_seed, "daily": voyage_daily,
 		"secs": snappedf(wave_t, 0.1), "plan": wave_plan_kinds, "water": snappedf(water, 0.1), "gold": gold,
 		"deckhands": deckhands().size(), "vr": not players.is_empty() and players[0].vr, "net": net.mode,
