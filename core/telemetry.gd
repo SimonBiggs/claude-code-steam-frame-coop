@@ -7,7 +7,10 @@ extends RefCounted
 ## appends the same JSON to user://telemetry.jsonl. Added automatically: game, t (unix time), date,
 ## machine (core/machine.gd kind), host (OS host name). Tests and bots write user://telemetry_test.jsonl
 ## instead (core/save.gd test mode), so they never mix with the family's runs.
-## Telemetry.read(game_id = "") -> Array of Dictionaries from this machine's file (newest last).
+## Telemetry.read(game_id = "") -> Array of Dictionaries from this machine's file (newest last; copies left out).
+## Networked rounds: the host also sends each line to every client machine (net sys "_run"), which logs and
+## stores it with "copy": true and "copy_on": <its machine kind>. So a round hosted on a Deck still lands in the
+## TV's log (agents can't read the Decks). Readers drop copies when the host's own line is there (same t/seed/game).
 ## Summaries across machines: tools/dd-balance (collects RUN lines from the TV log and every Deck).
 
 const Save := preload("res://core/save.gd")
@@ -32,7 +35,30 @@ static func run(game_id: String, data: Dictionary) -> Dictionary:
 	var line := JSON.stringify(d)
 	print("RUN: " + line)
 	_append(path(), line)
+	_share(line)
 	return d
+
+
+## Host: send the line to the client machines too (best effort; nothing when playing alone).
+static func _share(line: String) -> void:
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree == null:
+		return
+	for n in tree.get_nodes_in_group("duo_net"):  # core/net.gd GROUP
+		if is_instance_valid(n) and str(n.get("mode")) == "host" and bool(n.get("connected")) and n.has_method("sys_send"):
+			n.sys_send("_run", [line])
+			return
+
+
+## Client: a copy of the host's RUN line (core/net.gd "_run"). Logged and stored here, marked as a copy.
+static func copy(line: String) -> void:
+	var j := JSON.new()
+	if j.parse(line) != OK or not (j.data is Dictionary) or not (j.data as Dictionary).has("game") or not line.ends_with("}"):
+		return
+	# Keep the host's text as it is (numbers stay ints) and add the two copy keys.
+	var out := line.substr(0, line.length() - 1) + ',"copy":true,"copy_on":%s}' % JSON.stringify(Machine.kind())
+	print("RUN: " + out)
+	_append(path(), out)
 
 
 static func _append(p: String, line: String) -> void:
@@ -53,13 +79,14 @@ static func _append(p: String, line: String) -> void:
 	f.close()
 
 
-static func read(game_id: String = "", p: String = "") -> Array:
+static func read(game_id: String = "", p: String = "", copies: bool = false) -> Array:
 	var out: Array = []
 	var fp := p if p != "" else path()
 	if not FileAccess.file_exists(fp):
 		return out
 	for l in FileAccess.get_file_as_string(fp).split("\n", false):
 		var v: Variant = JSON.parse_string(l)
-		if v is Dictionary and (game_id == "" or String((v as Dictionary).get("game", "")) == game_id):
+		if v is Dictionary and (game_id == "" or String((v as Dictionary).get("game", "")) == game_id) \
+				and (copies or not bool((v as Dictionary).get("copy", false))):
 			out.append(v)
 	return out
