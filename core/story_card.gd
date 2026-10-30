@@ -173,6 +173,18 @@ class Card extends Control:
 			panel.position = Vector2(20.0 * _s, size.y - panel.size.y - 20.0 * _s)
 			return
 		var y := float(opts.get("y", 0.13)) * size.y
+		# A HudKit banner ("RIDE!", "WAVE 2") on the same view: the card sits just above its band (or below it
+		# when there's no room above), never half over it (half-height split views: Roller Coaster, 2026-10-30).
+		var h := panel.size.y
+		var gap := 8.0 * _s
+		for b in get_parent().get_children():
+			if b == self or not (b is Control) or not b.has_meta("band") or not (b as Control).visible:
+				continue
+			var band: Vector3 = b.get_meta("band")  # (centre y, half height, open 0..1)
+			var top := band.x - band.y - gap
+			var bottom := band.x + band.y + gap
+			if y < bottom and y + h > top:
+				y = top - h if top - h >= gap else bottom
 		panel.position = Vector2((size.x - w) * 0.5, y)
 
 	func _results_showing() -> bool:
