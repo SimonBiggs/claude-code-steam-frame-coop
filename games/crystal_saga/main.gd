@@ -209,6 +209,7 @@ func _setup(mode: String) -> void:
 		split.bind_party(party)
 		split.set_shared(true)
 		split.shared_camera().fov = 55.0
+		split.shared_camera().cull_mask &= ~World.ARCH_LAYER  # (the cave arches filled this high camera's view)
 		_make_hud(split.shared_hud())
 		if mode == "client":
 			avatar = VrRig.Avatar.new()

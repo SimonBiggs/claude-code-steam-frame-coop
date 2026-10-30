@@ -1516,12 +1516,12 @@ func _reveal(all_got: bool) -> void:
 	_lift_all()
 	var line := ""
 	if round_type == "team":
-		line = "The VR player guessed it - TEAM BONUS!" if correct_count > 0 else "TIME'S UP!"
+		line = "TEAM BONUS!\nThe VR player guessed it" if correct_count > 0 else "TIME'S UP!"
 	else:
 		line = "EVERYONE GOT IT!" if all_got else ("TIME'S UP!" if correct_count == 0 else "%d got it!" % correct_count)
 		var first: Array = get_meta("first", [])
 		if correct_count > 0 and first.size() == 2:
-			line += "   P%d was first (%d s)!" % [int(first[0]) + 1, maxi(1, int(ceilf(float(first[1]))))]
+			line += "\nP%d was first (%d s)!" % [int(first[0]) + 1, maxi(1, int(ceilf(float(first[1]))))]
 		for g in active_guessers():
 			if not g.got:
 				g.streak = 0

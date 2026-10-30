@@ -428,6 +428,7 @@ class HintPill extends Control:
 	var t := 0.0
 	var _card: PanelContainer
 	var _line: Control
+	var _label: Label
 	var _s := 1.0
 
 	func _ready() -> void:
@@ -456,6 +457,7 @@ class HintPill extends Control:
 			l.autowrap_mode = TextServer.AUTOWRAP_OFF
 		l.custom_minimum_size.x = minf(tw * 1.1 + 8.0 * _s, max_w)
 		h.add_child(l)
+		_label = l
 		_line = ColorRect.new()
 		(_line as ColorRect).color = Color(accent.r, accent.g, accent.b, 0.8)
 		_line.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -465,7 +467,12 @@ class HintPill extends Control:
 	func _process(delta: float) -> void:
 		t += delta
 		var cs := _card.get_combined_minimum_size()
-		var w := minf(cs.x, size.x * 0.94)
+		var room := size.x * 0.94
+		if cs.x > room + 1.0 and size.x > 10.0 and _label.autowrap_mode != TextServer.AUTOWRAP_OFF:
+			# A narrow view (side-by-side split screen): the line wraps instead of running off both edges.
+			_label.custom_minimum_size.x = maxf(80.0 * _s, _label.custom_minimum_size.x - (cs.x - room))
+			cs = _card.get_combined_minimum_size()
+		var w := minf(cs.x, room)
 		_card.size = Vector2(w, cs.y)
 		var rise := 1.0 - pow(1.0 - clampf(t / 0.3, 0.0, 1.0), 3.0)
 		var y := size.y * 0.74 - cs.y * 0.5 + (1.0 - rise) * 30.0 * _s

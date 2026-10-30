@@ -1110,7 +1110,9 @@ func _update_cameras(delta: float) -> void:
 			continue
 		var car := _car_of(slot)
 		var target: Transform3D
-		if phase == "ride" and car >= 0 and car < train.cars.size():
+		var riding: bool = phase == "ride" and car >= 0 and car < train.cars.size()
+		cam.cull_mask = (cam.cull_mask & ~ParkScript.ROOF_LAYER) if riding else (cam.cull_mask | ParkScript.ROOF_LAYER)
+		if riding:
 			var cx: Transform3D = (train.cars[car] as Node3D).global_transform
 			var pos := cx.origin + cx.basis.z * 3.4 + cx.basis.y * 1.5
 			target = Transform3D(UiKit.aim(cx.origin - cx.basis.z * 3.0 + cx.basis.y * 0.6 - pos, cx.basis.y.lerp(Vector3.UP, 0.4).normalized()), pos)

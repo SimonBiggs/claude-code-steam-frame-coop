@@ -12,6 +12,8 @@ extends Node
 ##   godot-test --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/deck_bot.tscn
 
 const BotKit := preload("res://tests/bot_kit.gd")
+const LayoutCheck := preload("res://core/layout_check.gd")
+const StoryCard := preload("res://core/story_card.gd")
 const PAD1 := 41  # the Deck's built-in controls
 const PAD2 := 42  # a friend's pad
 const PARTS := 4
@@ -187,6 +189,7 @@ class Runner extends Node:
 		var p2 := local_players()
 		kit.assert_true(p2 == 2 or views() == 2, "%s: a second pad pressing A drops in a second player (%d players, %d views)" % [id, p2, views()])
 		await _views_render(id)
+		await _layout(id)
 		kit.info("%s: deck alone %d view(s) / %d player(s); with a friend %d view(s) / %d player(s)" % [id, v1, p1, views(), p2])
 		# Start's pause menu: it alone says PAUSED (a game's own PAUSED card used to show through its buttons).
 		var menus := get_tree().get_nodes_in_group("pause_menu")
@@ -205,6 +208,18 @@ class Runner extends Node:
 		plug(PAD2, false)
 		plug(PAD1, false)
 		await frames(5)
+
+	## Text nobody can read: cut off by the screen edge or drawn over other text (core/layout_check.gd), with this
+	## game's last story card showing again (StoryCard.replay) so a card over the score or the timer shows up too.
+	## Headless this is TV size; rendered by brepl godot.launch at 1280x800 it's the Deck's own screen.
+	func _layout(id: String) -> void:
+		var card := StoryCard.replay(3.0)
+		await frames(30)
+		var probs := LayoutCheck.problems(get_tree().root)
+		kit.assert_true(probs.is_empty(), "%s: no text cut off or drawn over other text%s (core/layout_check.gd): %s" % [id, " (story card showing)" if card != null else "", "; ".join(probs)])
+		if card != null and is_instance_valid(card):
+			card.leave()
+		await frames(20)
 
 	## Pattern guard (one ant -> the whole nest): every split-screen (classic) game goes through core/classic_seats.gd's
 	## deck_solo() on a Deck alone, and no game re-adds its own Deck keyboard rule (it lives in core/party.gd).

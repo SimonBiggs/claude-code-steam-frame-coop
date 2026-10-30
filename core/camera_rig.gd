@@ -37,7 +37,10 @@ var follow_smoothing := 12.0
 ## Radians per second to swing behind a moving target (its -Z is "forward"); 0 = off.
 var auto_behind := 0.0
 var avoid_walls := true
-var collision_mask := 1
+## Physics layer 15: "camera only" shapes (occluder()): follow cameras stop in front of them, nothing else
+## collides with them (players walk on as before).
+const OCCLUDER_LAYER := 1 << 14
+var collision_mask := 1 | OCCLUDER_LAYER
 var wall_margin := 0.25
 ## Follow mode keeps the camera at least this far above the target's feet, so looking up never puts it
 ## under a floor the wall check can't see (e.g. a ground that is only a mesh, no collision). -INF = off
@@ -225,6 +228,26 @@ func _physics_process(_delta: float) -> void:
 	q.exclude = ex
 	var r := camera.get_world_3d().direct_space_state.cast_motion(q)
 	_clear = INF if r.size() < 1 or r[0] >= 1.0 else maxf(distance * r[0], min_distance)
+
+
+## A camera-only cylinder (a big tree trunk, a tower, a grown prop that has no collision of its own): a follow
+## camera comes in front of it instead of showing the player a wall of bark (Fruit Catch's tree, 2026-10-30).
+## Only cameras see it (OCCLUDER_LAYER); returns the StaticBody3D, already added to `parent` at `pos` (its base).
+static func occluder(parent: Node3D, radius: float, height: float, pos: Vector3 = Vector3.ZERO) -> StaticBody3D:
+	var sb := StaticBody3D.new()
+	sb.name = "CameraOccluder"
+	sb.collision_layer = OCCLUDER_LAYER
+	sb.collision_mask = 0
+	var cs := CollisionShape3D.new()
+	var cyl := CylinderShape3D.new()
+	cyl.radius = radius
+	cyl.height = height
+	cs.shape = cyl
+	cs.position = Vector3(0.0, height * 0.5, 0.0)
+	sb.add_child(cs)
+	sb.position = pos
+	parent.add_child(sb)
+	return sb
 
 
 func _orbit_dir() -> Vector3:

@@ -277,6 +277,7 @@ class ResultsScreen extends Control:
 	## End-of-round results: title band, standings that slide in with counting scores, award cards
 	## popping in one by one, team stats, and a "Continue" prompt once everyone has had a look.
 	signal continued()
+	const GROUP := "results_screen"
 	const UiKit := preload("res://core/ui_kit.gd")
 	const UiInput := preload("res://core/ui_input.gd")
 	const HudKit := preload("res://core/hud_kit.gd")
@@ -298,6 +299,7 @@ class ResultsScreen extends Control:
 	func _ready() -> void:
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
 		set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		add_to_group(GROUP)  # core/story_card.gd: a story card during the results moves out of the title's way
 		_s = UiKit.scale_of(self)
 		reader = UiInput.for_party(party, slot) if party != null else UiInput.new(device, keys)
 		reader.latch()

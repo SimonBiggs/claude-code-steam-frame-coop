@@ -16,6 +16,9 @@ const MeshKit := preload("res://core/mesh_kit.gd")
 const Creatures := preload("res://core/creatures.gd")
 
 const ZONES := 5
+## The cave's arches: the VR hero walks under them, but the TV camera high above and behind the party looked
+## straight into one (a dark wall filling the whole TV / Deck screen in the cave): main.gd hides them from it.
+const ARCH_LAYER := 1 << 9
 const ZL := 16.0  ## zone length along Z
 const HALF_L := 8.0
 const HALF_W := 5.0  ## the path's half width (walkable)
@@ -161,9 +164,14 @@ func _scenery() -> void:
 			var z2 := c2.z + HALF_L - 1.4 - i * 2.7
 			b.rounded_box(Vector3(2.6, 5.5 + (i % 2) * 1.2, 3.2), 0.6, MeshKit.at(Vector3(sx * 6.9, 2.6, z2), Vector3.ONE, Vector3(0.0, 0.2 * (i % 3), 0.0)), Color(0.36, 0.33, 0.46))
 			_crystal_bits(b, Vector3(sx * 5.75, 3.2 + (i % 2) * 0.7, z2 + 0.6), (plan.get("gem", Color(0.5, 0.85, 1.0)) as Color) if i % 2 == 0 else Color(0.85, 0.55, 1.0), 0.7)
+	var ab := MeshKit.Builder.new()
 	for i in 3:
 		var za := c2.z + 5.0 - i * 5.0
-		b.torus(6.6, 0.9, MeshKit.at(Vector3(0.0, 0.0, za), Vector3(1.0, 1.0, 1.0), Vector3(PI * 0.5, 0.0, 0.0)), Color(0.33, 0.3, 0.42), 20, 6)
+		ab.torus(6.6, 0.9, MeshKit.at(Vector3(0.0, 0.0, za), Vector3(1.0, 1.0, 1.0), Vector3(PI * 0.5, 0.0, 0.0)), Color(0.33, 0.3, 0.42), 20, 6)
+	var arches := MeshKit.instance(ab.build(), false)
+	arches.name = "CaveArches"
+	arches.layers = ARCH_LAYER
+	add_child(arches)
 	# Glade: a ring of standing stones.
 	var c3 := center(3)
 	for i in 10:

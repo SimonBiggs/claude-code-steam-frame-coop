@@ -43,25 +43,45 @@ static func check() -> Array[String]:
 	return Registry.check(SHARED_PICTURES, "res://core/story_card.gd")
 
 
+## The last card shown (its roots and opts), so tests can show it again on demand (replay()).
+static var _last_roots: Array = []
+static var _last_opts: Dictionary = {}
+
+
 ## Show a story card on one view root or an Array of them. Returns the first card made (or null).
 static func show(root: Variant, opts: Dictionary) -> Control:
+	_last_roots = [root]
+	_last_opts = opts.duplicate()
 	if root is Array:
 		var first: Control = null
 		for r in root:
 			var c := show(r, opts)
 			if first == null:
 				first = c
+		_last_roots = (root as Array).duplicate()  # (each inner call above recorded just its own root)
 		return first
 	var parent := root as Control
 	if parent == null or not is_instance_valid(parent):
 		return null
 	for old in parent.get_children():
 		if old is Card:
-			(old as Card).leave()
+			(old as Card).leave(0.08)  # out of the way at once: two cards on top of each other read as neither
 	var c := Card.new()
 	c.opts = opts
 	parent.add_child(c)
 	return c
+
+
+## Show the last story card again where the game showed it (tests/deck_bot.gd checks it covers no HUD text).
+## Returns the first card, or null when this game hasn't shown one (or its views are gone).
+static func replay(duration: float = 3.0) -> Control:
+	var roots := _last_roots.filter(func(r: Variant) -> bool: return is_instance_valid(r) and r is Control and (r as Control).is_inside_tree())
+	if roots.is_empty():
+		return null
+	var o := _last_opts.duplicate()
+	o["duration"] = duration
+	o["sound"] = ""
+	return show(roots, o)
 
 
 ## The VR card (a HudKit VrCard): title = who, body = the line, and the same picture as the TV card on a round
@@ -97,6 +117,7 @@ class Card extends Control:
 	var panel: PanelContainer
 	var t := 0.0
 	var leaving := false
+	var _line: Label
 	var _s := 1.0
 
 	func _ready() -> void:
@@ -105,6 +126,8 @@ class Card extends Control:
 		_s = UiKit.scale_of(self)
 		var col: Color = UiKit.color_of(opts.get("color", "accent"), UiKit.ACCENT)
 		panel = UiKit.panel("dialogue")
+		panel.name = "StoryCardPanel"
+		panel.add_to_group("layout_cover")  # core/layout_check.gd: HUD text under a story card is hidden text
 		panel.add_theme_stylebox_override("panel", UiKit.stylebox(UiKit.BG_DEEP, _s, 24.0, Color(col.r, col.g, col.b, 0.7), 3.0, 18.0, Vector2(22, 16)))
 		add_child(panel)
 		var row := UiKit.hbox(18, _s)
@@ -125,6 +148,7 @@ class Card extends Control:
 		line.add_theme_font_size_override("font_size", UiKit.font_size("body", _s) + int(4 * _s))
 		line.custom_minimum_size.x = 520.0 * _s
 		v.add_child(line)
+		_line = line
 		resized.connect(_place)
 		panel.resized.connect(_place)
 		_place.call_deferred()
@@ -138,21 +162,48 @@ class Card extends Control:
 	func _place() -> void:
 		if panel == null:
 			return
-		var w := minf(panel.get_combined_minimum_size().x, size.x - 40.0 * _s)
+		var room := size.x - 40.0 * _s
+		if panel.get_combined_minimum_size().x > room + 1.0 and size.x > 10.0 and _line != null:
+			# A narrow view (side-by-side split screen, 3-4 players): the line wraps instead of running off the edges.
+			_line.custom_minimum_size.x = maxf(160.0 * _s, _line.custom_minimum_size.x - (panel.get_combined_minimum_size().x - room))
+		var w := minf(panel.get_combined_minimum_size().x, room)
 		panel.size = Vector2(w, panel.get_combined_minimum_size().y)
+		if _results_showing():
+			# The results screen's big title sits where the card goes: the card waits in the bottom-right corner.
+			panel.position = Vector2(size.x - w - 20.0 * _s, size.y - panel.size.y - 20.0 * _s)
+			return
 		var y := float(opts.get("y", 0.13)) * size.y
+		# A HudKit banner ("RIDE!", "WAVE 2") on the same view: the card sits just above its band (or below it
+		# when there's no room above), never half over it (half-height split views: Roller Coaster, 2026-10-30).
+		var h := panel.size.y
+		var gap := 8.0 * _s
+		for b in get_parent().get_children():
+			if b == self or not (b is Control) or not b.has_meta("band") or not (b as Control).visible:
+				continue
+			var band: Vector3 = b.get_meta("band")  # (centre y, half height, open 0..1)
+			var top := band.x - band.y - gap
+			var bottom := band.x + band.y + gap
+			if y < bottom and y + h > top:
+				y = top - h if top - h >= gap else bottom
 		panel.position = Vector2((size.x - w) * 0.5, y)
 
-	func leave() -> void:
+	func _results_showing() -> bool:
+		for n in get_tree().get_nodes_in_group("results_screen"):  # core/awards.gd ResultsScreen
+			if n is CanvasItem and (n as CanvasItem).is_visible_in_tree() and (n as Node).get_viewport() == get_viewport():
+				return true
+		return false
+
+	func leave(time: float = 0.3) -> void:
 		if leaving:
 			return
 		leaving = true
 		var tw := create_tween()
-		tw.tween_property(self, "modulate:a", 0.0, 0.3)
+		tw.tween_property(self, "modulate:a", 0.0, time)
 		tw.tween_callback(queue_free)
 
 	func _process(delta: float) -> void:
 		t += delta
+		_place()  # (a results screen can open while the card shows)
 		if not leaving and t > float(opts.get("duration", 4.0)):
 			leave()
 
