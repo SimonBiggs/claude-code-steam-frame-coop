@@ -4,7 +4,7 @@
 import { $ } from "bun";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { runGroup, verdict } from "./multibot.ts";  // installed next to this file (TOOL_COPIES)
+import { runGroup, verdict, engineErrors } from "./multibot.ts";  // installed next to this file (TOOL_COPIES)
 
 const HOME = process.env.HOME!;
 const GP = join(HOME, "GodotProjects");
@@ -418,7 +418,8 @@ export async function land(branch: string, genTests: string[], botId: string, ot
     if (scene && !/PASS/.test(out[t])) out[t] += " (no PASS line)";
     ok &&= /exit=0/.test(out[t]) && !/FAIL|SCRIPT ERROR|no PASS line/.test(out[t]);
   }
-  out.deck = (await sh(`DECK_BOT_ONLY=${botId} DUO_PORT=${rport()} timeout 300 godot-test --headless --path . --fixed-fps 60 --quit-after 6000 res://tests/deck_bot.tscn 2>&1 | grep -E "BOT RESULT|SCRIPT ERROR" | tail -3`, STAGE)).out;
+  const deckOut = (await sh(`DECK_BOT_ONLY=${botId} DUO_PORT=${rport()} timeout 300 godot-test --headless --path . --fixed-fps 60 --quit-after 6000 res://tests/deck_bot.tscn 2>&1`, STAGE)).out;
+  out.deck = deckOut.split("\n").filter(l => /BOT RESULT|SCRIPT ERROR/.test(l)).slice(-3).join("\n") + engineErrors(deckOut).slice(0, 3).map(e => `\nSCRIPT ERROR (engine): ${e}`).join("");
   // (0 checks = DECK_BOT_ONLY matched no game: fine for a non-game botId like arcade_lobby, a FAIL for a game.)
   const isGame = await stat(join(STAGE, "games", botId)).then(() => true, () => false);
   if (isGame && /\(0 checks\)/.test(out.deck)) out.deck += " (no Deck checks ran for this game)";
