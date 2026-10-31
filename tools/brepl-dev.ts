@@ -4,7 +4,9 @@
 import { $ } from "bun";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { runGroup, verdict, engineErrors } from "./multibot.ts";  // installed next to this file (TOOL_COPIES)
+// Fresh copy on every dev (re)load: brepl cache-busts only top-level modules, so a static import kept the OLD
+// multibot after it changed (2026-10-31: "Export named 'engineErrors' not found").
+const { runGroup, verdict, engineErrors } = await import(`./multibot.ts?t=${Date.now()}`);  // installed next to this file (TOOL_COPIES)
 
 const HOME = process.env.HOME!;
 const GP = join(HOME, "GodotProjects");
