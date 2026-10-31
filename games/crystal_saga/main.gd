@@ -736,6 +736,7 @@ func _pick_region(region: int, by: int) -> void:
 	var np := Saga.plan_for(journey, int(save.data.world), _hard())
 	if int(np.biome) != int(plan.biome) or int(np.tier) != int(plan.tier) or bool(np.hard) != bool(plan.hard):
 		plan = np
+		shots.clear()  # (shots in flight aimed at the old world's props)
 		net.state_set("plan", _plan_state())
 		if vr_rig != null:
 			blink(func() -> void:
@@ -2021,10 +2022,13 @@ func _map_card(on: bool) -> void:
 	var h := 230.0
 	box.custom_minimum_size = Vector2(w, h)
 	card.add_child(box)
-	UiKit.pin(card, Control.PRESET_CENTER_TOP)
-	card.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	card.offset_top = 96.0
-	card.offset_bottom = 96.0
+	UiKit.pin(card, Control.PRESET_BOTTOM_RIGHT)  # (the top is Lumi's story card and the banner)
+	card.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	card.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	card.offset_left = -24.0
+	card.offset_right = -24.0
+	card.offset_top = -24.0
+	card.offset_bottom = -24.0
 	var spot := func(i: int) -> Vector2:
 		if i < 0:
 			return Vector2(w * 0.5, h - 18.0)

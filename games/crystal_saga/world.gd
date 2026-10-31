@@ -178,7 +178,11 @@ func _scenery() -> void:
 	b.box(Vector3(14.0, 0.8, 0.3), MeshKit.at(Vector3(0.0, 0.4, HALF_L + 0.2)), Color(0.66, 0.48, 0.3))
 	for sx in [-1.0, 1.0]:
 		b.cylinder(0.25, 0.3, 3.6, MeshKit.at(Vector3(sx * 5.4, 1.8, wall_z(0))), Color(0.6, 0.42, 0.25), 8)
-	b.box(Vector3(11.4, 0.4, 0.5), MeshKit.at(Vector3(0.0, 3.5, wall_z(0))), Color(0.6, 0.42, 0.25))
+	var gate_beam := MeshKit.Builder.new()  # (on ARCH_LAYER: it filled the TV / Deck camera as the party walked under it)
+	gate_beam.box(Vector3(11.4, 0.4, 0.5), MeshKit.at(Vector3(0.0, 3.5, wall_z(0))), Color(0.6, 0.42, 0.25))
+	var gb := MeshKit.instance(gate_beam.build(), false)
+	gb.layers = ARCH_LAYER
+	add_child(gb)
 	# Back houses (not touchable, they fill the village).
 	for hp in [Vector3(-11.0, 0.0, 1.0), Vector3(11.0, 0.0, -1.0), Vector3(-10.0, 0.0, 7.0), Vector3(10.5, 0.0, 6.0)]:
 		_house(b, hp, Color(0.95, 0.88, 0.72), Color(0.75, 0.3, 0.25), signf(-hp.x))
