@@ -402,7 +402,7 @@ func _rebuild_board(theme: String) -> void:
 		if t.space >= 0:
 			t.place(data.pos(clampi(t.space, 0, data.count() - 1)))
 	_spread_tokens()
-	board.visible = String(net.state_get("phase", "")) != "minigame"
+	_on_phase(String(net.state_get("phase", "")))
 
 
 ## The board event's lasting changes (turn_flow "board_mod"): RAINBOW (reds turn blue), the TREASURE chest.
@@ -666,6 +666,9 @@ func _sync_all() -> void:
 
 func _on_phase(phase: String) -> void:
 	board.visible = phase != "minigame"
+	for n: Node3D in [festival, props]:  # (the trophy wall and the touchable houses stood in the minigame arena)
+		if n != null:
+			n.visible = phase != "minigame"
 	for pid in tokens:
 		(tokens[pid] as Node3D).visible = phase != "minigame"
 

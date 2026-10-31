@@ -166,9 +166,15 @@ func _watch() -> String:
 					kit.slot_press(main.party, seats[0], "accept")
 				else:
 					main.net.request(0, "again", [])
-				kit.at(kit.t + 3.0, "the winner picks Mango's next festival piece?", func() -> void:
-					kit.assert_true(seen.has("phase:festival") and seen.has("menu:festival"), "A on the winner moment: the winner picks what Mango builds"))
-				kit.at(kit.t + 9.0, "back at the start?", func() -> void:
+				# (new trophies are shown first: up to three picture cards, then the festival pick)
+				kit.at(kit.t + 3.0, "a new trophy or the festival pick?", func() -> void:
+					kit.assert_true(seen.has("phase:festival") or seen.has("phase:trophy"), "A on the winner moment: Mango's trophy wall or festival pick comes"))
+				kit.at(kit.t + 10.0, "the winner picks Mango's next festival piece?", func() -> void:
+					kit.assert_true(seen.has("phase:festival") and seen.has("menu:festival"), "A on the winner moment: the winner picks what Mango builds")
+					if seen.has("phase:trophy"):
+						kit.assert_true(not (main.festival.trophies as Array).is_empty(), "a won trophy stands on Mango's wall %s" % str(main.festival.trophies))
+						kit.info("trophies: %s" % str(main.festival.trophies)))
+				kit.at(kit.t + 17.0, "back at the start?", func() -> void:
 					kit.assert_true(seen.has("phase:title"), "after the festival pick a new party starts")
 					var built: Array = main.save.data["festival"]
 					kit.assert_true(built.size() == 1, "a festival piece was built and saved (%s)" % str(built))

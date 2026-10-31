@@ -9,13 +9,13 @@ extends "res://games/party_board/minigames/mg_base.gd"
 const META := {
 	"name": "STAR STACK",
 	"goal": "Press A to drop the block on your tower. The tallest tower wins!",
-	"format": "ffa", "time": 25.0, "music": "party", "cam": [12.0, 14.0],
+	"format": "ffa", "time": 25.0, "music": "party", "cam": [9.5, 12.5],
 	"tv": [["A", "Drop the block"]],
 	"vr": [["GLOVE", "Tap the swinging block"]],
 	"vr_line": "TAP the block to drop it on your tower!",
 	"cue": "pop",
 }
-const GAP := 1.9  ## between towers
+const GAP := 2.1  ## between towers
 const BLOCK := Vector3(1.0, 0.42, 1.0)
 const SWING := 1.15  ## how far the block swings either side
 const TOL := 0.55  ## how far off the top a block may land and still stack
@@ -70,7 +70,7 @@ func build() -> void:
 
 func tower_pos(i: int) -> Vector3:
 	var n := builders.size()
-	return Vector3((float(i) - (n - 1) * 0.5) * GAP, 0.0, -0.6 if (giant and i == 0) else 0.0)
+	return Vector3((float(i) - (n - 1) * 0.5) * GAP, 0.0, 0.5)
 
 
 func _block(p: int, glow: bool) -> Node3D:
@@ -86,7 +86,7 @@ func _block(p: int, glow: bool) -> Node3D:
 func start_pos(i: int, n: int) -> Vector3:
 	var k := i + (1 if giant else 0)
 	var m := n + (1 if giant else 0)
-	return Vector3((float(k) - (m - 1) * 0.5) * GAP, 0.0, 1.2)
+	return Vector3((float(k) - (m - 1) * 0.5) * GAP, 0.0, -1.5)  # in front of their tower, seen from the TV
 
 
 func on_begin() -> void:
