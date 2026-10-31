@@ -28,6 +28,7 @@ const Data := preload("res://games/mech_titans/data.gd")
 const Kaiju := preload("res://games/mech_titans/kaiju.gd")
 const VrRig := preload("res://core/vr_rig.gd")
 const Telemetry := preload("res://core/telemetry.gd")
+const Sanctuary := preload("res://games/mech_titans/sanctuary.gd")
 
 var kit: BotKit
 var main: Node
@@ -65,6 +66,11 @@ var unplug_dev := -1
 var unplug_slot := -1
 var made_round := -1  ## MT_ROUND: the made round the bot starts at (0-based)
 var saw_variant := false  ## a lost kaiju wore the made round's size
+var saw_pick := false  ## DEEP: pods landed after a made round (every machine builds them)
+var pick_pods := 0
+var pick_seen_t := 0.0
+var saw_crown := false  ## DEEP: a boss kaiju wore its crown
+var boss_fight_t := 0.0  ## DEEP: seconds a crowned boss was up and fighting
 
 
 func _ready() -> void:
@@ -306,6 +312,34 @@ func _story_checks() -> void:
 		kit.assert_true(bool(ri.get("gen", false)), "%s: round %d is a made round (%s)" % [mode, made_round + 1, String(ri.get("name", ""))])
 		kit.assert_true(saw_variant, "%s: the lost kaiju wore its made look" % mode)
 		kit.assert_true(saw_play and saw_kaiju, "%s: the made round was played" % mode)
+		_deep_checks(ri)
+
+
+## DEEP (titans-deep): pods after the made round, the upgrade taken, the sanctuary, a boss's crown and big
+## move, district hazards (MEGA lands them quickly).
+func _deep_checks(ri: Dictionary) -> void:
+	var mode: String = main.net.mode
+	print("BOT DEEP effects: buddy_zaps=%d domes=%d stomps=%d jumps=%d rockets=%d boss_fight=%.0fs" % [main.deep.buddy_zaps, main.deep.domes_popped,
+		main.deep.stomp_stuns, main.deep.jumps, main.deep.rockets, boss_fight_t])
+	if mode != "client" and main.upg_list().has("buddy") and saw_kaiju:
+		kit.assert_true(main.deep.buddy_zaps > 0, "%s: the buddy drone zapped a kaiju" % mode)
+	print("BOT DEEP: mode=%s diff=%s frame=%s upg=%s pick_pods=%d hearts=%d hazards=%d/%d sig_tells=%d rockets=%d boss=%s" % [mode,
+		String(main.net.state_get("mode", "")), String(main.net.state_get("frame", "")), str(main.upg_list()), pick_pods,
+		int(main.net.state_get("sanct_h", 0)), main.deep.hazards_landed, main.deep.hazards_hit, main.combat.sig_tells, main.deep.rockets,
+		String(ri.get("bigboss", ""))])
+	if saw_results:
+		kit.assert_true(saw_pick and pick_pods >= 2, "%s: upgrade pods landed after the made round (%d)" % [mode, pick_pods])
+		kit.assert_true(not main.upg_list().is_empty(), "%s: the Titan took an upgrade from a pod" % mode)
+		kit.assert_true(int(main.net.state_get("sanct_h", 0)) > 0, "%s: the Kaiju Sanctuary got a heart" % mode)
+		if mode != "client":
+			kit.assert_true(main.picks_taken > 0, "%s: a pod was taken" % mode)
+			kit.assert_true(Sanctuary.hearts(main.save.data) > 0, "%s: the sanctuary hearts are saved" % mode)
+	if String(ri.get("bigboss", "")) != "":
+		kit.assert_true(saw_crown, "%s: the boss kaiju wore its crown" % mode)
+		if mode != "client" and boss_fight_t > 25.0:
+			kit.assert_true(main.combat.sig_tells > 0, "%s: the boss warned its big move (fought %.0f s)" % [mode, boss_fight_t])
+	if mode != "client" and String(main.net.state_get("mode", "")) == "mega" and float(main.missions.time) > 15.0:
+		kit.assert_true(main.deep.hazards_landed > 0, "%s: the district's hazards landed" % mode)
 
 
 func _cue_checks() -> void:
@@ -367,6 +401,14 @@ func _flow() -> String:
 			saw_results = true
 		if phase == "play":
 			saw_play = true
+		if phase == "pick":
+			saw_pick = true
+			pick_pods = maxi(pick_pods, main.picks.pods.size())
+			pick_seen_t += 0.4
+			if main.net.mode != "client" and pick_seen_t > 1.5 and not main.picks.pods.is_empty() and not main.picks.taken:
+				# the Titan walks into the first pod (the real touch path, host / local)
+				var pp: Vector3 = main.picks.pods[0].global_position
+				main.mech.position = Vector3(pp.x, 0.0, pp.z)
 		return ""
 	if phase == "play":
 		if not saw_play and main.net.mode != "client":
@@ -399,6 +441,10 @@ func _physics_process(delta: float) -> void:
 	for id in main.combat.kaiju:
 		var k: Kaiju = main.combat.kaiju[id]
 		saw_kaiju = true
+		if not k.is_mini and k.get_node_or_null("BossCrown") != null:
+			saw_crown = true
+			if k.is_active() and k.state != "enter":
+				boss_fight_t += delta
 		if made_round >= 0 and not k.is_mini:
 			var v: Dictionary = main.round_variant()
 			if absf(k.height - float(Data.KAIJU[k.kind]["height"]) * float(v.get("size", 1.0))) < 0.01 and not v.is_empty():

@@ -11,6 +11,7 @@ const Data := preload("res://games/mech_titans/data.gd")
 const Kaiju := preload("res://games/mech_titans/kaiju.gd")
 const KaijuAI := preload("res://games/mech_titans/kaiju_ai.gd")
 const Bosses := preload("res://games/mech_titans/bosses.gd")
+const BigBoss := preload("res://games/mech_titans/bigboss.gd")
 const Mech := preload("res://games/mech_titans/mech.gd")
 const City := preload("res://games/mech_titans/city.gd")
 const Fx := preload("res://games/mech_titans/fx.gd")
@@ -47,6 +48,7 @@ var _foam_acc := {}  ## building -> seconds of foam
 var _beam_sound := false
 var _slowmo := 0.0
 var _tele_warned := 0.0
+var sig_tells := 0  ## host: boss kaiju big moves warned this session (bots)
 
 
 func setup(p_main: Node, p_city: City, p_mech: Mech, p_fx: Fx) -> void:
@@ -95,6 +97,12 @@ func spawn(k: String, from: Vector3, goal: Vector3, split_gen: int = 0, blocking
 		n.hp = n.hp_max
 		n.set_meta("slow", float(info.get("slow", 1.0)))
 		n.set_meta("calm", float(info.get("calm", 1.0)))
+		n.set_meta("tell", float(info.get("tell", 1.0)))  # the difficulty's wind-up stretch (roundgen.gd curve)
+		var bb := String(info.get("bigboss", ""))
+		if bb != "" and String(BigBoss.LIST[bb]["base"]) == k and split_gen == 0:
+			n.set_meta("sig", String(BigBoss.LIST[bb]["sig"]))  # a boss kaiju's big readable move
+			n.set_meta("boss_tell", float(info.get("boss_tell", 1.0)))
+			n.set_meta("bigboss", bb)
 	var to := goal - from
 	n.yaw = atan2(to.x, to.z)
 	n.rotation.y = n.yaw
@@ -414,6 +422,8 @@ func _punch(hand: int, strength: float, out: Dictionary) -> void:
 	if best != null and bd <= PUNCH_REACH:
 		_punch_kaiju(best, hand, strength, tool, probe, dir)
 		return
+	if main.deep != null and main.deep.rocket_fist(hand, dir, strength):
+		return  # ROCKET FISTS: the punch flew on to the kaiju ahead
 	# Missed the kaiju: buildings and props in reach wobble, trees and cars get bonked.
 	var bi := city.nearest_building(probe, 3.0)
 	if bi >= 0 and Data.SIMPLE_MODE:
@@ -435,7 +445,7 @@ func _punch(hand: int, strength: float, out: Dictionary) -> void:
 
 func _punch_kaiju(k: Kaiju, hand: int, strength: float, tool: String, probe: Vector3, dir: Vector3) -> void:
 	var wi := k.weak_near(probe, 3.5)
-	var mult := 1.0 + (1.0 if tool == "drill" else 0.0)
+	var mult := (1.0 + (1.0 if tool == "drill" else 0.0)) * float(main.punch_mult())
 	if wi >= 0:
 		mult *= 1.5
 	var dmg := PUNCH_DAMAGE * (0.5 + strength) * mult
@@ -808,9 +818,18 @@ func pick_target(k: Kaiju) -> Dictionary:
 
 ## The wind-up warning: a glowing danger shape on the ground for everyone.
 func telegraph(k: Kaiju, id: String) -> void:
-	var w: float = KaijuAI.ATTACKS[id][1]
+	var w: float = KaijuAI.windup_of(k, id)
 	var c := Color(1.0, 0.3, 0.2)
 	var shape := _attack_shape(k, id)
+	var bb := BigBoss.of_sig(id)
+	if not bb.is_empty():
+		# A boss kaiju's big move: its own colour on the ground, a glow ring round it, a crown of sparks, a drumroll.
+		c = bb["color"]
+		sig_tells += 1
+		emit_fx("ring", [k.global_position + Vector3.UP * 0.5, k.radius * 1.6, c, w])
+		emit_fx("burst", ["sparks", k.center() + Vector3.UP * k.height * 0.6, 3.0, c])
+		emit_fx("sfx", ["drumroll", k.center(), 2.0, 1.0])
+		k.hit_fx(c, Vector3.UP)
 	match String(shape["kind"]):
 		"circle":
 			emit_fx("marker", [shape["pos"], shape["r"], c, w])
@@ -867,6 +886,13 @@ func _attack_shape(k: Kaiju, id: String) -> Dictionary:
 			out = {"kind": "multi", "list": list, "r": 5.0}
 		"drain":
 			out = {"kind": "line", "a": p, "b": tp, "w": 3.0}
+		"king_stomp", "storm_ring":
+			out = {"kind": "circle", "pos": p, "r": float(BigBoss.of_sig(id)["r"])}
+		"mega_flop":
+			out = {"kind": "circle", "pos": tp, "r": float(BigBoss.of_sig(id)["r"])}
+		"frost_gust":
+			var fb := BigBoss.of_sig(id)
+			out = {"kind": "line", "a": p + d * k.radius * 0.5, "b": p + d * float(fb["len"]), "w": float(fb["r"]) * 2.0}
 	k.set_meta("shape_" + id, out)  # do_attack() lands exactly where this telegraph showed
 	return out
 
@@ -897,7 +923,7 @@ func do_attack(k: Kaiju, id: String) -> void:
 	var dmg: float = {"fire_breath": 14.0, "tail_swipe": 10.0, "stomp": 9.0, "lava_bombs": 8.0, "belly_flop": 14.0,
 		"goo_spit": 6.0, "pinch": 12.0, "bubble_blast": 8.0, "zap_bolt": 12.0, "electric_ring": 10.0, "drain": 4.0,
 		"wing_gust": 6.0, "sleepy_dust": 3.0, "swoop": 10.0, "ground_pound": 14.0, "rock_throw": 12.0, "eye_laser": 16.0,
-		"mega_roar": 5.0, "nibble": 2.0, "swat": 4.0}.get(id, 0.0)
+		"mega_roar": 5.0, "nibble": 2.0, "swat": 4.0}.get(id, float(BigBoss.of_sig(id).get("dmg", 0.0)))
 	var col := Color(1.0, 0.5, 0.2)
 	var center := k.center()
 	match id:
@@ -916,6 +942,10 @@ func do_attack(k: Kaiju, id: String) -> void:
 		"swoop":
 			var tp2: Vector3 = shape["b"]
 			k.position = Vector3(tp2.x, k.position.y, tp2.z)
+		"mega_flop":
+			var tpf: Vector3 = shape["pos"]
+			k.position = Vector3(tpf.x, k.position.y, tpf.z)
+			emit_fx("burst", ["goo", tpf + Vector3.UP, 7.0])
 		"rock_throw":
 			add_boulder(center + Vector3.UP * k.height * 0.4, ((shape["pos"] as Vector3) - center) * 0.9 + Vector3(0, 14.0, 0))
 			return  # the boulder itself does the damage where it lands
@@ -931,6 +961,19 @@ func do_attack(k: Kaiju, id: String) -> void:
 		"lava_bombs":
 			for p in shape["list"]:
 				emit_fx("burst", ["fire", (p as Vector3) + Vector3.UP, 2.5])
+		"king_stomp", "storm_ring", "mega_flop":
+			var bcol: Color = BigBoss.of_sig(id)["color"]
+			emit_fx("ring", [shape["pos"], float(shape["r"]), bcol])
+			for q in 6:
+				var qa := q * TAU / 6.0
+				var qp: Vector3 = (shape["pos"] as Vector3) + Vector3(cos(qa), 0, sin(qa)) * float(shape["r"]) * 0.6
+				emit_fx("burst", ["zap" if id == "storm_ring" else "dust", qp + Vector3.UP, 3.5, bcol])
+			emit_fx("shake", [0.5])
+		"frost_gust":
+			var fa: Vector3 = shape["a"]
+			var fbb: Vector3 = shape["b"]
+			for q in 5:
+				emit_fx("burst", ["foam", fa.lerp(fbb, (q + 0.5) / 5.0) + Vector3.UP * 2.0, 3.5])
 		_:
 			if shape.has("pos"):
 				emit_fx("ring", [shape["pos"], float(shape["r"]), col])
@@ -949,6 +992,11 @@ func do_attack(k: Kaiju, id: String) -> void:
 			"wing_gust":
 				var push := k.attack_dir * 8.0
 				mech.position = city.push_out(mech.position + push, Mech.RADIUS)
+			"frost_gust", "storm_ring":
+				mech.slowed = maxf(mech.slowed, float(BigBoss.of_sig(id)["slow"]))
+			"king_stomp", "mega_flop":
+				var away := Vector3(mech.position.x - k.position.x, 0, mech.position.z - k.position.z).normalized() * 5.0
+				mech.position = city.push_out(mech.position + away, Mech.RADIUS)
 		hurt_mech(dmg * (1.0 if not k.is_mini else 0.5), k)
 	# Buildings in the area.
 	var fire := id == "fire_breath" or id == "lava_bombs" or id == "eye_laser"
@@ -978,6 +1026,8 @@ func do_attack(k: Kaiju, id: String) -> void:
 func hurt_mech(amount: float, from: Node3D) -> void:
 	if mech.rebooting > 0.0:
 		return
+	if main.deep != null and main.deep.absorb_hit():
+		return  # SHIELD DOME popped instead
 	var blocking := mech.blocking
 	var taken := mech.take_damage(amount * float(main.armour_taken_mult()))
 	main.cockpit_rattle(0.35 if blocking else 0.8)

@@ -53,6 +53,10 @@ var turn_vel := 0.0
 var dash_t := 0.0
 var dash_dir := Vector3.ZERO
 var dash_dist := 20.0
+var speed_mult := 1.0  ## frames (frames.gd) and TURBO LEGS (upgrades.gd): main.gd _apply_deep()
+var reboot_time := 3.0  ## SIMPLE_MODE sit-down seconds (REPAIR BOTS halve it)
+var hop := 0.0  ## JUMP JETS: how high the Titan is off the ground during a dash (a gentle 3 m arc)
+var jump_jets := false
 var dash_cd := 0.0
 var slowed := 0.0
 var energy_idle := 0.0
@@ -462,7 +466,7 @@ func simulate(delta: float, intent: Dictionary) -> void:
 		want.y = 0.0
 		if want.length() > 1.0:
 			want = want.normalized()
-	var max_speed := WALK_SPEED * (0.5 if slowed > 0.0 else 1.0) * (0.35 if blocking else 1.0)
+	var max_speed := WALK_SPEED * speed_mult * (0.5 if slowed > 0.0 else 1.0) * (0.35 if blocking else 1.0)
 	var target_v := want * max_speed
 	velocity = velocity.lerp(target_v, 1.0 - exp(-ACCEL * delta / maxf(max_speed, 0.1) * 2.0))
 	# Turning: smooth (eased rate) or snap.
@@ -499,7 +503,8 @@ func simulate(delta: float, intent: Dictionary) -> void:
 		p = city.push_out(p, RADIUS)
 	if block_filter.is_valid():
 		p = block_filter.call(p, RADIUS)
-	p.y = 0.0
+	hop = sin(PI * (1.0 - dash_t / DASH_TIME)) * 3.0 if jump_jets and dash_t > 0.0 else 0.0
+	p.y = hop
 	position = p
 	rotation = Vector3(0, yaw, 0)
 	# Arms.
@@ -540,7 +545,7 @@ func take_damage(amount: float) -> float:
 	if blocking:
 		shield_t = 1.0
 	if armour <= 0.0:
-		rebooting = 3.0 if Data.SIMPLE_MODE else 6.0  # SIMPLE_MODE: a quick sit-down, then it pops back up
+		rebooting = reboot_time if Data.SIMPLE_MODE else 6.0  # SIMPLE_MODE: a quick sit-down, then it pops back up
 		beam_on = false
 		foam_on = false
 	return dmg
