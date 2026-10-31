@@ -268,6 +268,52 @@ func color_of(pid: int) -> Color:
 	return main.color_of(pid)
 
 
+## GENTLE CATCH-UP (SIMPLE_MODE: the youngest can win): 0..1, how far this player is behind the leader right
+## now (0 = level or ahead). Walkers behind run faster and reach further (catch_reach); CPUs out in front dawdle.
+func catch_up(pid: int) -> float:
+	if practice or not main.simple:
+		return 0.0
+	var lead := 0.0
+	for p in pids:
+		lead = maxf(lead, float(score.get(p, 0.0)))
+	return clampf((lead - float(score.get(pid, 0.0))) / maxf(3.0, lead * 0.4), 0.0, 1.0)
+
+
+## The walker furthest behind (ties: any of them), or -1: games put some of their coins / balloons / moles near
+## them (SIMPLE_MODE catch-up).
+func lagging_walker() -> int:
+	var ws := walkers()
+	if ws.is_empty():
+		return -1
+	var lo := INF
+	var pool: Array[int] = []
+	for p in ws:
+		var s := float(score.get(p, 0.0))
+		if s < lo:
+			lo = s
+			pool = [p]
+		elif s == lo:
+			pool.append(p)
+	return pool[rng.randi() % pool.size()]
+
+
+## A pickup / pop / bop radius grown for whoever is behind (up to +60%).
+func catch_reach(pid: int, r: float) -> float:
+	return r * (1.0 + 0.6 * catch_up(pid))
+
+
+## True for a CPU leading by a clear margin (it dawdles so the others can catch up).
+func cpu_ahead(pid: int) -> bool:
+	if practice or not main.simple or not is_cpu(pid):
+		return false
+	var mine := float(score.get(pid, 0.0))
+	var second := 0.0
+	for p in pids:
+		if p != pid:
+			second = maxf(second, float(score.get(p, 0.0)))
+	return mine - second >= maxf(2.0, mine * 0.25)
+
+
 func add_score(pid: int, n: float = 1.0) -> void:
 	if practice:
 		return
@@ -333,6 +379,7 @@ func walk(pid: int, delta: float, speed: float = -1.0, limit_r: float = -1.0) ->
 		var sp := walk_speed if speed < 0.0 else speed
 		if is_cpu(pid) and main.flow != null and main.flow.is_kid():
 			sp *= CPU_KID_SPEED
+		sp *= (1.0 + 0.5 * catch_up(pid)) * (0.7 if cpu_ahead(pid) else 1.0)
 		p += mv.limit_length(1.0) * sp * delta
 		Creatures.anim(avatars[pid]).face(mv)
 	var r := arena_r if limit_r < 0.0 else limit_r

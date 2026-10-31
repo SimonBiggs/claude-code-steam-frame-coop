@@ -92,7 +92,13 @@ func on_begin() -> void:
 func _spawn() -> void:
 	var a := rng.randf() * TAU
 	var r := rng.randf_range(0.8, arena_r - 0.8)
-	add_item(1 if rng.randf() < 0.15 else 0, Vector3(cos(a) * r, 0, sin(a) * r))
+	var at := Vector3(cos(a) * r, 0, sin(a) * r)
+	var lag := lagging_walker()
+	if main.simple and lag >= 0 and not practice and rng.randf() < 0.5:  # SIMPLE: half sparkle near whoever is behind
+		var q: Vector3 = pos.get(lag, Vector3.ZERO) + Vector3(rng.randf_range(-1.5, 1.5), 0, rng.randf_range(-1.5, 1.5))
+		var fl := Vector2(q.x, q.z).limit_length(arena_r - 0.8)
+		at = Vector3(fl.x, 0, fl.y)
+	add_item(1 if rng.randf() < 0.15 else 0, at)
 
 
 func play_tick(delta: float) -> void:
@@ -148,7 +154,7 @@ func _move_shark(delta: float) -> void:
 		if hs.size() >= 2:
 			target = Vector3(hs[1].x, 0, hs[1].z)
 	else:
-		speed = 3.6
+		speed = 2.6 if main.simple else 3.6
 		_ai_t -= delta
 		if _ai_t <= 0.0:
 			_ai_t = 0.8
@@ -175,7 +181,7 @@ func _grab(p: int) -> void:
 	var wp: Vector3 = pos[p]
 	for id in items.keys():
 		var ip: Vector3 = (items[id] as Node3D).position
-		if Vector2(ip.x - wp.x, ip.z - wp.z).length() < 1.2:
+		if Vector2(ip.x - wp.x, ip.z - wp.z).length() < catch_reach(p, 1.5):
 			var worth := 3 if int(item_kind[id]) == 1 else 1
 			add_score(p, worth)
 			fx("treasure", [p, ip, worth])

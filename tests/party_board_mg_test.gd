@@ -10,7 +10,8 @@ extends SceneTree
 ##   - 2 and 6 players: each player must still get a fair amount to do with 6 (more coins / moles / balloons);
 ##   - a VR GIANT (a gloved hand reaching for the game's bot_vr_goal, bobbing up and down) with 3 CPUs: the giant
 ##     must be able to score, and the islanders must be able to beat it.
-## Also: every simple minigame is one motion or one button (its META), at most 25 seconds, and has a picture cue.
+## Also: every simple minigame is one motion or one button (its META) and has a picture cue (mg_runner.gd plays them
+## free-for-all and cuts them to SIMPLE_MAX_TIME seconds; so does this test).
 ## Prints "SCRIPT ERROR: ..." for each failure, then "BOT RESULT: PASS/FAIL".
 
 const MgRunner := preload("res://games/party_board/mg_runner.gd")
@@ -39,13 +40,17 @@ class FakeGiant:
 	extends Node3D
 	var mg: Node3D
 	var t := 0.0
-	func hand_pos(h: int) -> Vector3:
-		if mg == null:
-			return Vector3.ZERO
+	var hand := Vector3(0, 2.0, 3.0)  ## arena units; moves towards the goal like a real arm (not instantly)
+	func step(dt: float) -> void:
+		t += dt
 		var g: Vector3 = mg.call("bot_vr_goal")
 		if g == Vector3.INF:
 			g = Vector3(0, 2.0, 2.0)
-		return mg.position + g + Vector3(0.3 * h, 0.7 * sin(t * 7.0 + h), 0)
+		hand = hand.move_toward(g, 5.0 * dt)
+	func hand_pos(h: int) -> Vector3:
+		if mg == null:
+			return Vector3.ZERO
+		return mg.position + hand + Vector3(0.3 * h, 0.7 * sin(t * 7.0 + h), 0)
 
 
 class FakeMain:
@@ -91,10 +96,23 @@ var _press_at := -1.0
 var _bite_seen := false
 
 
-func _init() -> void:
+var _ran := false
+
+
+func _process(_delta: float) -> bool:
+	if not _ran:
+		_ran = true
+		_run()
+	return false
+
+
+func _initialize() -> void:
 	main = FakeMain.new()
 	root.add_child(main)
-	var seeds := int(OS.get_environment("SEEDS")) if OS.has_environment("SEEDS") else 10
+
+
+func _run() -> void:
+	var seeds := int(OS.get_environment("SEEDS")) if OS.has_environment("SEEDS") else 16
 	var t0 := Time.get_ticks_msec()
 	for id in MgRunner.SIMPLE_GAMES:
 		var sc: GDScript = load(MgRunner.MG_DIR + String(id) + ".gd")
@@ -168,8 +186,6 @@ func _check_meta(id: String, meta: Dictionary) -> void:
 			stick += 1
 	_expect(buttons + stick >= 1 and buttons + stick <= 2 and buttons <= 1, "%s: one motion and at most one button %s" % [id, str(tv)])
 	_expect(["catch", "mash", "pop"].has(String(meta.get("cue", ""))), "%s: has a picture cue (%s)" % [id, String(meta.get("cue", ""))])
-	_expect(String(meta.get("format", "ffa")) == "ffa", "%s: free for all" % id)
-	_expect(float(meta.get("time", 99.0)) <= MgRunner.SIMPLE_MAX_TIME, "%s: short (%.0f s)" % [id, float(meta.get("time", 99.0))])
 
 
 ## Play one round: n walkers (pids 0..n-1; with a giant pid 0 is the giant and walkers are 1..n-1), the child in
@@ -202,7 +218,7 @@ func _play(sc: GDScript, id: String, n: int, child: int, seed_value: int, limit:
 	while t < limit:
 		t += DT
 		if fg != null:
-			fg.t = t
+			fg.step(DT)
 		if child >= 0:
 			main.inputs[child] = _child_input(mg, id, child)
 		mg.tick(DT)

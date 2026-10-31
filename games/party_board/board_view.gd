@@ -27,8 +27,10 @@ void fragment() {
 	float w = sin(lp.x * 1.6 + TIME * 1.2) * sin(lp.z * 1.25 - TIME * 0.9);
 	float w2 = sin(lp.x * 0.7 - lp.z * 0.9 + TIME * 0.7);
 	c += vec3(0.07) * smoothstep(0.55, 1.0, w) + vec3(0.03) * w2;
-	c += vec3(0.9, 0.9, 1.0) * sparkle * step(0.985, fract(sin(dot(floor(lp.xz * 3.0), vec2(12.9898, 78.233))) * 43758.5453))
-		* (0.5 + 0.5 * sin(TIME * 3.0 + lp.x));
+	vec2 cell = floor(lp.xz * 0.8);
+	float star = step(0.93, fract(sin(dot(cell, vec2(12.9898, 78.233))) * 43758.5453));
+	float dot_ = 1.0 - smoothstep(0.02, 0.07, length(fract(lp.xz * 0.8) - 0.5));
+	c += vec3(0.9, 0.9, 1.0) * sparkle * star * dot_ * (0.6 + 0.4 * sin(TIME * 3.0 + cell.x));
 	ALBEDO = c;
 	ROUGHNESS = 0.18;
 	SPECULAR = 0.55;
@@ -39,7 +41,7 @@ void fragment() {
 const WATER := {"island": [Color(0.08, 0.36, 0.72), Color(0.24, 0.78, 0.86), 0.0],
 	"sweet": [Color(0.85, 0.42, 0.62), Color(1.0, 0.74, 0.86), 0.0],
 	"pirate": [Color(0.04, 0.38, 0.55), Color(0.2, 0.82, 0.78), 0.0],
-	"haunted": [Color(0.12, 0.1, 0.26), Color(0.3, 0.42, 0.42), 0.4],
+	"haunted": [Color(0.12, 0.1, 0.26), Color(0.3, 0.42, 0.42), 0.0],
 	"space": [Color(0.04, 0.04, 0.16), Color(0.22, 0.18, 0.5), 1.0]}
 const GLOW := {"island": Color(1.0, 0.45, 0.1), "sweet": Color(1.0, 0.55, 0.8), "pirate": Color(1.0, 0.8, 0.25),
 	"haunted": Color(0.45, 1.0, 0.5), "space": Color(0.35, 0.85, 1.0)}

@@ -23,6 +23,8 @@ var holes: Array[Vector3] = []
 var _up := {}  # item id -> [hole index, seconds left]
 var _spawn_t := 0.0
 var _hole_busy := {}  # hole index -> item id
+var _giant_cd := 0.0
+const GIANT_CD := 1.1
 
 
 func build() -> void:
@@ -88,6 +90,11 @@ func play_tick(delta: float) -> void:
 				free.append(i)
 		if not free.is_empty():
 			var hi: int = free[rng.randi() % free.size()]
+			var lag := lagging_walker()
+			if main.simple and lag >= 0 and rng.randf() < 0.5:  # SIMPLE: half pop up near whoever is behind
+				var lp: Vector3 = pos.get(lag, Vector3.ZERO)
+				free.sort_custom(func(a: int, b: int) -> bool: return holes[a].distance_to(lp) < holes[b].distance_to(lp))
+				hi = free[0]
 			var id := add_item(1 if rng.randf() < 0.12 else 0, holes[hi] + Vector3(0, DOWN_Y, 0))
 			_up[id] = [hi, UP_T]
 			_hole_busy[hi] = id
@@ -106,16 +113,18 @@ func play_tick(delta: float) -> void:
 			continue
 		var hp: Vector3 = holes[int(u[0])]
 		var who := -1
-		var best := BOP_R
+		var best := 1.0  # the nearest, measured in each walker's own reach (whoever is behind reaches further)
 		for p in walkers():
-			var d := Vector2((pos[p] as Vector3).x - hp.x, (pos[p] as Vector3).z - hp.z).length()
+			var d := Vector2((pos[p] as Vector3).x - hp.x, (pos[p] as Vector3).z - hp.z).length() / catch_reach(p, BOP_R)
 			if d < best and float(stun.get(p, 0.0)) <= 0.0:
 				best = d
 				who = p
-		if who < 0 and giant:
+		_giant_cd -= delta
+		if who < 0 and giant and _giant_cd <= 0.0:  # (the giant's arm waits a moment between bops)
 			for h in hs.size():
 				if hs[h].distance_to(hp + Vector3(0, 0.4, 0)) < HAND_R:
 					who = 0
+					_giant_cd = GIANT_CD
 					buzz(h, 0.6, 0.06)
 					break
 		if who >= 0:

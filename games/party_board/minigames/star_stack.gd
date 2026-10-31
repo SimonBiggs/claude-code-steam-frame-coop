@@ -23,6 +23,8 @@ const BASE_SPEED := 2.0  ## radians per second of swing
 const SPEED_UP := 0.08  ## more per block in the tower
 const DROP_T := 0.3
 const MAX_H := 16
+const GIANT_SWING := 1.35  ## the giant (a grown-up) gets a quicker block and a longer wait between drops
+const GIANT_WAIT := 1.1
 
 var builders: Array[int] = []  ## everyone stacking (the giant first when there is one)
 var towers := {}  ## pid -> Array of x offsets (one per stacked block)
@@ -112,7 +114,8 @@ func play_tick(delta: float) -> void:
 	var hs := giant_hands()
 	for p in builders:
 		var h := (towers[p] as Array).size()
-		phase[p] = float(phase[p]) + delta * (BASE_SPEED + SPEED_UP * h)
+		# (the block swings slower for whoever is behind: SIMPLE catch-up)
+		phase[p] = float(phase[p]) + delta * (BASE_SPEED + SPEED_UP * h) * (1.0 - 0.35 * catch_up(p)) * (GIANT_SWING if p == 0 and giant else 1.0)
 		_cool[p] = float(_cool.get(p, 0.0)) - delta
 		if dropping.has(p):
 			var d: Array = dropping[p]
@@ -125,7 +128,7 @@ func play_tick(delta: float) -> void:
 		if p == 0 and giant:
 			var sw := (_swing_nodes[p] as Node3D)
 			for k in hs.size():
-				if hs[k].distance_to(to_local(sw.global_position)) < HAND_R * 0.8:
+				if hs[k].distance_to(to_local(sw.global_position)) < HAND_R * 0.45:  # hold a glove over the tower: the block swings into it
 					pressed = true
 			if main.vr_rig != null and main.vr_rig.trigger_pressed():
 				pressed = true
@@ -135,14 +138,14 @@ func play_tick(delta: float) -> void:
 			pressed = bool(input_of(p)["pressed"])
 		if pressed and float(_cool[p]) <= 0.0 and h < MAX_H:
 			dropping[p] = [DROP_T, swing_x(p)]
-			_cool[p] = DROP_T + 0.25
+			_cool[p] = DROP_T + (GIANT_WAIT if p == 0 and giant else 0.25)
 			phase[p] = 0.0 if rng.randf() < 0.5 else PI  # the next block starts from the middle
 	_place()
 
 
 func _land(p: int, x: float) -> void:
 	var t: Array = towers[p]
-	if absf(x - top_off(p)) <= TOL:
+	if absf(x - top_off(p)) <= catch_reach(p, TOL):
 		t.append(snappedf(clampf(x, -SWING, SWING), 0.01))
 		add_score(p, 1)
 		fx("stack", [p, t.size()])
@@ -159,7 +162,7 @@ func _cpu_drop(p: int, delta: float) -> bool:
 	if w > 0.0:
 		return false
 	var kid: bool = main.flow != null and main.flow.is_kid()
-	if absf(swing_x(p) - top_off(p)) < (0.45 if kid else 0.25) and rng.randf() < (0.18 if kid else 0.35):
+	if absf(swing_x(p) - top_off(p)) < (0.75 if kid else 0.25) and rng.randf() < (0.07 if kid else 0.35):
 		_cpu_wait[p] = rng.randf_range(0.2, 0.7) if kid else 0.15
 		return true
 	return false
@@ -255,8 +258,8 @@ func cpu_press(pid: int) -> bool:
 
 
 func bot_vr_goal() -> Vector3:
-	if giant and _swing_nodes.has(0):
-		return to_local((_swing_nodes[0] as Node3D).global_position)
+	if giant and _swing_nodes.has(0):  # over the middle of the giant's tower: the block swings into the glove
+		return tower_pos(0) + Vector3(top_off(0), top_y(0) + 1.4, 0)
 	return Vector3(0, 3.0, 1.0)
 
 

@@ -48,13 +48,21 @@ func play_tick(delta: float) -> void:
 			_jump[p] = 0.45
 			fx("jump", [p])
 			_try_pop(p)
+		elif main.simple:
+			_try_pop(p, 0.75)  # SIMPLE: running into a low balloon pops it too (A jumps for the ones further off)
 	separate()
 	_spawn_t -= delta
 	if _spawn_t <= 0.0:
-		_spawn_t = rng.randf_range(0.45, 0.8) * (0.8 if walkers().size() > 4 else 1.0)
+		_spawn_t = rng.randf_range(0.45, 0.8) * 4.0 / clampf(walkers().size(), 2.0, 6.0)  # balloons for everyone
 		var a := rng.randf() * TAU
 		var r := rng.randf_range(0.5, arena_r - 0.6)
-		add_item(5 if rng.randf() < 0.1 else rng.randi() % 5, Vector3(cos(a) * r, 0.6, sin(a) * r))
+		var at := Vector3(cos(a) * r, 0.6, sin(a) * r)
+		var lag := lagging_walker()
+		if main.simple and lag >= 0 and rng.randf() < 0.65:  # SIMPLE: most float up near whoever is behind
+			var q: Vector3 = pos.get(lag, Vector3.ZERO) + Vector3(rng.randf_range(-1.2, 1.2), 0, rng.randf_range(-1.2, 1.2))
+			var fl := Vector2(q.x, q.z).limit_length(arena_r - 0.6)
+			at = Vector3(fl.x, 0.6, fl.y)
+		add_item(5 if rng.randf() < 0.1 else rng.randi() % 5, at)
 	var hs := giant_hands()
 	for id in items.keys():
 		var n: Node3D = items[id]
@@ -65,18 +73,18 @@ func play_tick(delta: float) -> void:
 		if p.y > TOP:
 			remove_item(int(id))
 			continue
-		if giant and p.y > LOW - 0.4:
+		if giant and p.y > (1.0 if main.simple else LOW - 0.4):
 			for h in hs.size():
-				if hs[h].distance_to(p) < HAND_R + 0.35:
+				if hs[h].distance_to(p) < HAND_R + (0.8 if main.simple else 0.35):
 					_pop(int(id), 0)
 					buzz(h, 0.5, 0.05)
 					break
 
 
-func _try_pop(pid: int) -> void:
+func _try_pop(pid: int, reach: float = 1.4) -> void:
 	var me: Vector3 = pos[pid]
 	var best := -1
-	var bd := 1.4
+	var bd := catch_reach(pid, reach)
 	for id in items:
 		var p: Vector3 = (items[id] as Node3D).position
 		if p.y > LOW:
@@ -148,19 +156,20 @@ func cpu_move(pid: int) -> Vector3:
 
 func cpu_press(pid: int) -> bool:
 	var me := where(pid)
+	var kid: bool = main.flow != null and main.flow.is_kid()
 	for id in items:
 		var p: Vector3 = (items[id] as Node3D).position
 		if p.y < LOW and Vector2(p.x - me.x, p.z - me.z).length() < 1.1:
-			return rng.randf() < 0.25
+			return rng.randf() < (0.1 if kid else 0.25)
 	return false
 
 
-func bot_vr_goal() -> Vector3:
+func bot_vr_goal() -> Vector3:  # the lowest balloon that got away (it's in reach longest)
 	var best := Vector3(0, 5, 2)
-	var by := -INF
+	var by := INF
 	for id in items:
 		var p: Vector3 = (items[id] as Node3D).position
-		if p.y > LOW and p.y > by:
+		if p.y > 1.2 and p.y < by:
 			by = p.y
 			best = p
 	return best
