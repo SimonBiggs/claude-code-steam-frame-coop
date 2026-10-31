@@ -510,7 +510,9 @@ func _checks_simple(mode: String) -> void:
 	var reds := 0
 	for i in main.data.count():
 		reds += 1 if main.data.type_of(i) == "red" else 0
-	kit.assert_true(reds >= 3, "%s: the seeded red spaces are on this machine's board (%d)" % [mode, reds])
+	var rainbow := bool((main.net.state_get("board_mod", {}) if main.net.state_get("board_mod", {}) is Dictionary else {}).get("rainbow", false))
+	kit.assert_true(reds >= 3 or (rainbow and reds == 0), "%s: the seeded red spaces are on this machine's board (%d%s)" % [
+		mode, reds, ", PARTY ISLAND's RAINBOW turned them blue" if rainbow else ""])
 	var stars := 0
 	for p in _final_roster:
 		stars += int((p as Dictionary)["stars"])

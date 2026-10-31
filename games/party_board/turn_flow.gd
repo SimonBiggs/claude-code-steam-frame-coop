@@ -740,7 +740,11 @@ func _start_move(pid: int) -> void:
 	var total := 0
 	for v in dice_values:
 		total += int(v)
-	if dice_n == 2 and dice_values.size() == 2 and int(dice_values[0]) == int(dice_values[1]):
+	if main.simple and dice_n == 2 and dice_values.size() == 2 and int(dice_values[0]) == int(dice_values[1]):
+		total += 2  # SIMPLE doubles: two extra hops and a fanfare (no words)
+		main.fx("sfx", ["fanfare", -4.0])
+		main.fx("anim", [pid, "victory", 1.0])
+	elif dice_n == 2 and dice_values.size() == 2 and int(dice_values[0]) == int(dice_values[1]):
 		total += 5
 		main.fx("banner", ["DOUBLES!", "+5 bonus steps... no wait, +5 coins!", "level", 1.8])
 		_coins(pid, 5)
