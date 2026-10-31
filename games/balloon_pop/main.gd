@@ -37,6 +37,7 @@ const Telemetry := preload("res://core/telemetry.gd")
 const StoryCard := preload("res://core/story_card.gd")
 const Balloon := preload("res://games/balloon_pop/balloon.gd")
 const WaveGen := preload("res://games/balloon_pop/wavegen.gd")
+const BgGen := preload("res://core/bg_gen.gd")
 const Story := preload("res://games/balloon_pop/story.gd")
 const Fair := preload("res://games/balloon_pop/fair.gd")
 
@@ -564,6 +565,7 @@ func _start_round(practice: bool) -> void:
 	net.state_set("daily", false)
 	net.state_set("time", int(ceil(time_left)))
 	net.state_set("round", int(net.state_get("round", 0)) + 1)
+	_prefetch_play()  # practice / the ride pick give it time (nothing new if made on the results screen)
 	if String(save.data.cur) == "":
 		_start_pick()
 	elif practice:
@@ -671,26 +673,19 @@ func _grow(pts: int) -> void:
 
 ## Host: the waves come: this round's balloons are made from a seed (TODAY'S SKY first each day).
 func _start_play() -> void:
-	var players := maxi(1, party.player_count() + (1 if vr_rig != null else 0))
-	var sp: Dictionary
+	var plan := _play_plan(String(save.data.cur))
+	var sp: Dictionary = plan[0]
+	round_desc = plan[1]
 	if daily_due:
 		daily_due = false
-		sp = Story.daily_spec(players, round_time)
-		round_desc = {"k": "daily", "ride": String(save.data.cur), "seed": Story.daily_seed()}
 		net.state_set("sky", String(sp.sky))
 		net.state_set("daily", true)
 	else:
-		var met := {}
-		for k in save.data.met:
-			met[int(k)] = true
-		var cur := String(save.data.cur)
-		sp = Story.spec(cur, Story.rides_built(save.data.rides), met, players, round_time)
-		round_desc = {"k": "story", "ride": cur, "seed": Seeded.derive(int(save.data.world), "r%d" % int(save.data.rounds))}
 		net.state_set("sky", "day")
 	if sky != null and net.mode != "client":
 		sky.set_preset(String(net.state_get("sky", "day")), 2.0)
 	var t0 := Time.get_ticks_usec()
-	round_def = WaveGen.generate(int(round_desc.seed), sp)
+	round_def = BgGen.take(_gen_key(plan), _gen_job(plan))  # usually made already (_prefetch_play)
 	run = {"gen_ms": snappedf((Time.get_ticks_usec() - t0) / 1000.0, 0.01), "popped": 0, "vr_popped": 0, "grumpy": 0,
 		"escaped": 0, "skipped": 0, "sets": 0, "sets_done": 0, "giants": 0, "ice": 0}
 	elapsed = 0.0
@@ -709,6 +704,44 @@ func _start_play() -> void:
 		_story(_poppy(String(r.intro), String(r.pic), r.color))
 	print("Balloon Pop round: %s %s seed %d, %d balloons, %d sets, goal %s (%.1f ms)" % [round_desc.k, round_desc.ride,
 		int(round_desc.seed), (round_def.spawns as Array).size(), (round_def.sets as Array).size(), str(round_def.goal), float(run.gen_ms)])
+
+
+## Host: the next waves' [spec, round_desc] when ride `cur` is being built (no side effects).
+func _play_plan(cur: String) -> Array:
+	var players := maxi(1, party.player_count() + (1 if vr_rig != null else 0))
+	if daily_due:
+		return [Story.daily_spec(players, round_time), {"k": "daily", "ride": cur, "seed": Story.daily_seed()}]
+	var met := {}
+	for k in save.data.met:
+		met[int(k)] = true
+	return [Story.spec(cur, Story.rides_built(save.data.rides), met, players, round_time),
+		{"k": "story", "ride": cur, "seed": Seeded.derive(int(save.data.world), "r%d" % int(save.data.rounds))}]
+
+
+## A busy round takes up to ~0.2 s to make on a Deck (wavegen.gd), so the host makes the next one on a
+## worker thread (core/bg_gen.gd) as soon as it knows it: on the results screen, in practice and while the
+## ride balloons wait (both rides on offer). Only the host makes rounds (clients see snapshots).
+func _prefetch_play() -> void:
+	if net.mode == "client":
+		return
+	var curs: Array = [String(save.data.cur)]
+	if String(save.data.cur) == "":
+		curs = Story.offers(int(save.data.world), save.data.rides, last_ride)
+		if curs.is_empty():
+			curs = [Story.FIRST_RIDE]
+	for cur in curs:
+		var plan := _play_plan(String(cur))
+		BgGen.prefetch(_gen_key(plan), _gen_job(plan))
+
+
+static func _gen_key(plan: Array) -> String:
+	return "balloon_pop:" + var_to_str([int(plan[1].seed), plan[0]])
+
+
+static func _gen_job(plan: Array) -> Callable:
+	var seed_v := int(plan[1].seed)
+	var sp: Dictionary = (plan[0] as Dictionary).duplicate(true)
+	return func() -> Variant: return WaveGen.generate(seed_v, sp)
 
 
 func _end_round() -> void:
@@ -745,9 +778,11 @@ func _end_round() -> void:
 	if not run.has("ride_done"):
 		_story(_poppy(Story.CHEERS[int(save.data.rounds) % Story.CHEERS.size()] if st > 0 else "Nearly! Again!"))
 	round_def = {}
+	_prefetch_play()  # the next round, while the results show
 
 
 func _exit_tree() -> void:
+	BgGen.wait_all()  # no round job outlives the game
 	if ready_to_play and net != null and net.mode != "client" and String(net.state_get("phase", "")) == "play" and not round_def.is_empty():
 		var score := int(net.state_get("score", 0))
 		_telemetry("quit", score, WaveGen.stars(score, round_def.get("goal", [])))

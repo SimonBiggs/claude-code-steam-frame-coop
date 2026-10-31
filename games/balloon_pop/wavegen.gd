@@ -13,7 +13,7 @@ extends RefCounted
 ## (SPEED, jump reach TV_TOP), with a reaction time on top (a giant needs time for 3 hits too); grumpy
 ## balloons never float so close to a good one that you can't pop it without the grumpy; balloons never
 ## overlap; never too many reachable at once; never a long empty gap; only the spec's kinds; a fair star
-## goal. Pure data, no nodes; a round is a few hundred tiny steps (well under a millisecond).
+## goal. Pure data, no nodes (thread-safe): main.gd makes the next round on a worker thread (core/bg_gen.gd).
 
 const Seeded := preload("res://core/seeded.gd")
 
@@ -73,6 +73,7 @@ static func generate(seed_value: int, spec: Dictionary) -> Dictionary:
 	var gold_p := float(spec.get("gold", 0.08))
 	var grumpy_p := float(spec.get("grumpy", 0.0))
 	var spawns: Array = []
+	var ends: Array = []  # ends[i] = the latest any of spawns[0..i] is still up (lets _fits stop early)
 	var sets: Array = []
 	var waves: Array = []
 	var open: Array = []
@@ -119,12 +120,12 @@ static func generate(seed_value: int, spec: Dictionary) -> Dictionary:
 			if not giants.is_empty() and at >= float(giants[0]) and set_id < 0:
 				giants.pop_front()
 				kind = GIANT
-			last_at = _fill_gap(last_at, at, base_rise, spawns, rng, krng)
+			last_at = _fill_gap(last_at, at, base_rise, spawns, ends, rng, krng)
 			var col := int(step[3]) if int(step[3]) >= 0 else krng.randi() % COLORS
-			var s := _place(kind, at, Vector2(float(step[1]), float(step[2])), base_rise, col, set_id, spawns, rng)
+			var s := _place(kind, at, Vector2(float(step[1]), float(step[2])), base_rise, col, set_id, spawns, rng, ends)
 			if s.is_empty():
 				continue
-			spawns.append(s)
+			_push(spawns, ends, s)
 			last_at = at
 			made += 1
 			wave_end = maxf(wave_end, at)
@@ -156,7 +157,7 @@ static func generate(seed_value: int, spec: Dictionary) -> Dictionary:
 
 ## Keep the sky busy: if nothing would be let go for too long (a wave's balloons didn't fit), let a
 ## plain balloon go near the middle in between. Returns the time of the last balloon let go.
-static func _fill_gap(last_at: float, at: float, base_rise: float, spawns: Array, rng: RandomNumberGenerator,
+static func _fill_gap(last_at: float, at: float, base_rise: float, spawns: Array, ends: Array, rng: RandomNumberGenerator,
 		krng: RandomNumberGenerator) -> float:
 	while last_at > 0.0 and at - last_at > MAX_GAP - 0.4:
 		var placed := -1.0
@@ -164,9 +165,9 @@ static func _fill_gap(last_at: float, at: float, base_rise: float, spawns: Array
 		while placed < 0.0 and ft < last_at + MAX_GAP - 0.1:
 			for attempt in 10:
 				var q := Vector2(rng.randf_range(-4.0, 4.0), rng.randf_range(-4.0, 3.0))
-				var s := _place(NORMAL, ft, q, base_rise, krng.randi() % COLORS, -1, spawns, rng)
+				var s := _place(NORMAL, ft, q, base_rise, krng.randi() % COLORS, -1, spawns, rng, ends)
 				if not s.is_empty():
-					spawns.append(s)
+					_push(spawns, ends, s)
 					placed = ft
 					break
 			ft = snappedf(ft + 0.3, 0.01)
@@ -226,7 +227,7 @@ static func up_time(s: Array) -> float:
 ## Place one balloon fairly (nudging it towards the middle if it can't rise slowly enough from there and
 ## away from grumpies), or [] if it can't fit.
 static func _place(kind: int, at: float, want: Vector2, base_rise: float, col: int, set_id: int, spawns: Array,
-		rng: RandomNumberGenerator) -> Array:
+		rng: RandomNumberGenerator, ends: Array = []) -> Array:
 	var y0 := GIANT_Y if kind == GIANT else SPAWN_Y
 	var pos := want.limit_length(ARENA - 0.6)
 	for attempt in 6:
@@ -234,7 +235,7 @@ static func _place(kind: int, at: float, want: Vector2, base_rise: float, col: i
 		var rise := minf(base_rise * RISE_MULT[kind], mr)
 		if rise >= MIN_RISE:
 			var s := [at, kind, snappedf(pos.x, 0.01), snappedf(pos.y, 0.01), y0, snappedf(rise, 0.001), col, set_id]
-			if _fits(s, spawns, true):
+			if _fits(s, spawns, true, ends):
 				return s
 		if set_id >= 0 and attempt >= 1:
 			return []  # a shape keeps its shape (or isn't a set)
@@ -244,11 +245,16 @@ static func _place(kind: int, at: float, want: Vector2, base_rise: float, col: i
 
 ## True when `s` overlaps no balloon up at the same time, keeps grumpies clear of good balloons, and the
 ## reachable count stays under CAP. gen = true adds a little slack on top of check()'s numbers.
-static func _fits(s: Array, spawns: Array, gen: bool) -> bool:
+## ends (optional, see _push): ends[i] = the latest any of spawns[0..i] is up, so the scan stops as soon as
+## every earlier balloon is gone before `s` appears (same answer, a round made ~10x faster).
+static func _fits(s: Array, spawns: Array, gen: bool, ends: Array = []) -> bool:
 	var at := float(s[0])
 	var end := at + up_time(s)
 	var n := 1
+	var early := ends.size() == spawns.size()
 	for i in range(spawns.size() - 1, -1, -1):
+		if early and float(ends[i]) <= at:
+			break
 		var o: Array = spawns[i]
 		var o_at := float(o[0])
 		if o_at + up_time(o) <= at or o_at >= end:
@@ -262,6 +268,12 @@ static func _fits(s: Array, spawns: Array, gen: bool) -> bool:
 		if closest(s, o) < near:
 			return false
 	return n <= CAP
+
+
+static func _push(spawns: Array, ends: Array, s: Array) -> void:
+	var e := float(s[0]) + up_time(s)
+	ends.append(maxf(e, float(ends[-1])) if not ends.is_empty() else e)
+	spawns.append(s)
 
 
 ## The closest two planned balloons come while both are up (x and z stay put; y rises at its own rate).
