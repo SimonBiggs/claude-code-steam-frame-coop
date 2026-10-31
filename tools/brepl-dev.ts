@@ -285,6 +285,9 @@ export async function debt() {
   // tools/ is not in stage.diff (not game code) but dev.land rsyncs it from wt-merge: a direct commit to live leaves staging's copy behind.
   const toolDrift = (await sh(`diff -rq --exclude=__pycache__ ${LIVE}/tools ${STAGE}/tools | wc -l`)).out;
   if (+toolDrift > 0) issues.push({ kind: "stage-tools", what: `${toolDrift} tools/ files differ between live and staging`, fix: "rsync -a --delete --exclude __pycache__ ~/GodotProjects/duo-arena/tools/ ~/GodotProjects/.duo-arena-stage/tools/" });
+  // Staging must run like the TV: addons/boot (services) and project.godot (autoloads) match live (2026-10-31: no Boot in staging).
+  const bootDrift = (await sh(`diff -rq --exclude=*.uid --exclude=*.import ${LIVE}/addons/boot ${STAGE}/addons/boot 2>&1 | wc -l; diff <(sed 's|^config/name=.*||' ${LIVE}/project.godot) <(sed 's|^config/name=.*||' ${STAGE}/project.godot) | wc -l`)).out.split("\n").map(Number);
+  if (bootDrift.some(n => n > 0)) issues.push({ kind: "stage-boot", what: "staging's addons/boot or project.godot differs from live (bots there run without the TV's services)", fix: "rsync -a ~/GodotProjects/duo-arena/addons/boot/ ~/GodotProjects/.duo-arena-stage/addons/boot/; sed 's|^config/name=\"Duo Arena\"$|config/name=\"Duo Arena Stage\"|' ~/GodotProjects/duo-arena/project.godot > ~/GodotProjects/.duo-arena-stage/project.godot" });
   // Plus every tools/ file named like an installed command (~/.local/bin) and every tools/systemd unit, so a new
   // tool never drifts just because nobody added it to TOOL_COPIES.
   const copies: Record<string, string> = { ...TOOL_COPIES };
@@ -395,10 +398,12 @@ export async function land(branch: string, genTests: string[], botId: string, ot
   // A landing that stopped leaves its merge in wt-merge (and its files in staging) for a retry. Landing a DIFFERENT
   // branch next must not carry it along (2026-10-31: a tools-only landing nearly deployed saga-deep, whose tests had
   // failed): start again from main, staging included.
+  // Staging = the repo as the TV runs it: addons/boot (services: QuitAfter, VrViewWatch, SafeApply...) and project.godot
+  // (its Boot autoload) too, not just the deployed dirs (2026-10-31: staging had no Boot, so no bot ran with services).
   const stale = (await sh("git log --merges --first-parent --format=%s main..merge-arcade", join(GP, "wt-merge"))).out.split("\n").filter(Boolean);
   if (stale.some(s => !s.includes(`'${branch}'`))) {
     await sh("git merge --abort 2>/dev/null; git reset -q --hard main", join(GP, "wt-merge"));
-    await sh(`for d in ${DEPLOYED.join(" ")} tools; do rsync -a --delete --exclude '*.import' --exclude '__pycache__' wt-merge/$d/ .duo-arena-stage/$d/; done; cp wt-merge/arcade.tscn .duo-arena-stage/`, GP);
+    await sh(`for d in ${DEPLOYED.join(" ")} tools addons/boot; do rsync -a --delete --exclude '*.import' --exclude '__pycache__' wt-merge/$d/ .duo-arena-stage/$d/; done; cp wt-merge/arcade.tscn .duo-arena-stage/; sed 's|^config/name="Duo Arena"$|config/name="Duo Arena Stage"|' wt-merge/project.godot > .duo-arena-stage/project.godot`, GP);
   }
   const m = await sh(`cd ${GP}/wt-${branch} && git status --short | grep -v '^??' | head -3; cd ${GP}/wt-merge && git merge --no-edit ${branch} 2>&1 | tail -1; git diff --name-only --diff-filter=U`);
   // (tail -1 of a conflicted merge is "Automatic merge failed...", not CONFLICT: party-deep's whats_new conflict
@@ -416,7 +421,7 @@ export async function land(branch: string, genTests: string[], botId: string, ot
     retry = differing.length > 0 && differing.every(f => ours.has(f) || [...ours].some(o => o.startsWith(f + "/")));
   }
   if (drift.out.trim() && !retry) return { stop: "live!=stage", out: drift.out };
-  await sh(`for d in ${DEPLOYED.join(" ")} tools; do rsync -a --delete --exclude '*.import' --exclude '__pycache__' wt-merge/$d/ .duo-arena-stage/$d/; done; cp wt-merge/arcade.tscn .duo-arena-stage/`, GP);
+  await sh(`for d in ${DEPLOYED.join(" ")} tools addons/boot; do rsync -a --delete --exclude '*.import' --exclude '__pycache__' wt-merge/$d/ .duo-arena-stage/$d/; done; cp wt-merge/arcade.tscn .duo-arena-stage/; sed 's|^config/name="Duo Arena"$|config/name="Duo Arena Stage"|' wt-merge/project.godot > .duo-arena-stage/project.godot`, GP);
   const out: Record<string, string> = {};
   let ok = true;
   // story_pictures_test always: it pins core/story_card.gd SHARED_PICTURES (a game's pictures belong in its own
