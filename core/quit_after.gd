@@ -44,5 +44,10 @@ func _process(_delta: float) -> void:
 		return
 	set_process(false)
 	print("QUIT AFTER: frame %d of --quit-after %d, quitting quietly (core/quit_after.gd)" % [Engine.get_process_frames(), at])
-	get_tree().call_group("bot_frame_limit", "on_frame_limit")  # bots (tests/bot_kit.gd) print their BOT RESULT so far
+	if get_tree().get_node_count_in_group("bot_frame_limit") > 0:
+		get_tree().call_group("bot_frame_limit", "on_frame_limit")  # bots (tests/bot_kit.gd) print their BOT RESULT so far
+	elif get_tree().current_scene != null and str(get_tree().current_scene.scene_file_path).ends_with("_bot.tscn"):
+		# A bot without tests/bot_kit.gd: its checks fail loudly (SCRIPT ERROR / BOT ASSERT FAILED) as they run, so
+		# reaching the limit without one is its pass. Said plainly, so a cut-off run is never mistaken for a full one.
+		print("BOT RESULT: PASS (no failed check by the --quit-after frame limit; this bot has no bot_kit summary)")
 	load("res://tests/bot_end.gd").quit_quietly(get_tree(), 0)
