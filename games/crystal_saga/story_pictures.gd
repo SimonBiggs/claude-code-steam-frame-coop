@@ -4,7 +4,8 @@ extends RefCounted
 ## pic._p(x, y) / pic._circle(x, y, r, c) / pic._poly(pts, c) / pic._eye(x, y, r) / pic.draw_*(...), size = pic.size,
 ## t = the picture's clock, bob = its gentle bob, color = the card's colour.
 
-const NAMES: Array[String] = ["lumi", "shard", "bigfire", "snowflake", "twin", "longsword", "spin", "mighty", "windmill", "fountain", "rainbow"]
+const NAMES: Array[String] = ["lumi", "shard", "bigfire", "snowflake", "twin", "longsword", "spin", "mighty", "windmill", "fountain", "rainbow",
+	"archer", "healer", "bard", "starrain", "bubble", "guardian"]
 
 
 static func draw(pic, kind: String, t: float, bob: float, _color: Color) -> void:
@@ -95,3 +96,61 @@ static func draw(pic, kind: String, t: float, bob: float, _color: Color) -> void
 				pic.draw_arc(pic._p(0.5, 0.8), (0.42 - k * 0.05) * size.x, PI, TAU, 24, cols[k], 0.05 * size.x)
 			for cl in [[0.14, 0.8, 0.09], [0.24, 0.84, 0.08], [0.76, 0.84, 0.08], [0.86, 0.8, 0.09]]:
 				pic._circle(cl[0], cl[1], cl[2], white)
+		"archer", "healer", "bard":  # the party's heroes (classes.gd): a little face with a hat and what they hold
+			var hat := Color(0.35, 0.65, 0.35) if kind == "archer" else (Color(0.97, 0.97, 0.95) if kind == "healer" else Color(0.95, 0.45, 0.32))
+			pic._poly([[0.3, 0.95], [0.34, 0.62 + bob], [0.66, 0.62 + bob], [0.7, 0.95]], hat)
+			pic._circle(0.5, 0.46 + bob, 0.18, Color(1.0, 0.86, 0.74))
+			pic._eye(0.44, 0.47 + bob, 0.035)
+			pic._eye(0.56, 0.47 + bob, 0.035)
+			pic.draw_arc(pic._p(0.5, 0.52 + bob), 0.05 * size.x, 0.3, PI - 0.3, 8, Color(0.5, 0.25, 0.25), 0.02 * size.x)
+			match kind:
+				"archer":
+					pic._poly([[0.3, 0.36 + bob], [0.5, 0.2 + bob], [0.7, 0.36 + bob]], hat)
+					pic._poly([[0.62, 0.24 + bob], [0.82, 0.08 + bob], [0.66, 0.3 + bob]], Color(1.0, 0.3, 0.3))
+					pic.draw_arc(pic._p(0.84, 0.6), 0.22 * size.x, -PI * 0.5, PI * 0.5, 14, Color(0.6, 0.42, 0.26), 0.035 * size.x)
+					pic.draw_line(pic._p(0.84, 0.38), pic._p(0.84, 0.82), Color(0.95, 0.95, 0.9), 0.012 * size.x)
+				"healer":
+					pic._poly([[0.28, 0.42 + bob], [0.5, 0.18 + bob], [0.72, 0.42 + bob], [0.66, 0.34 + bob], [0.34, 0.34 + bob]], hat)
+					pic._poly([[0.47, 0.72], [0.53, 0.72], [0.53, 0.86], [0.47, 0.86]], Color(0.92, 0.32, 0.38))
+					pic._poly([[0.43, 0.76], [0.57, 0.76], [0.57, 0.82], [0.43, 0.82]], Color(0.92, 0.32, 0.38))
+					var gl := 0.5 + 0.5 * sin(t * 4.0)
+					pic._circle(0.84, 0.3, 0.07 + 0.02 * gl, Color(1.0, 0.6, 0.7, 0.8))
+					pic.draw_line(pic._p(0.84, 0.36), pic._p(0.8, 0.9), Color(0.6, 0.42, 0.26), 0.03 * size.x)
+				_:
+					pic._circle(0.5, 0.3 + bob, 0.14, hat)
+					pic._circle(0.62, 0.24 + bob, 0.04, Color(1.0, 0.85, 0.4))
+					pic._circle(0.82, 0.74, 0.11, Color(0.75, 0.5, 0.28))
+					pic.draw_line(pic._p(0.78, 0.64), pic._p(0.66, 0.32), Color(0.55, 0.35, 0.2), 0.03 * size.x)
+					var nt := fmod(t * 0.8, 1.0)
+					pic._circle(0.18, 0.4 - nt * 0.25, 0.04, Color(1.0, 0.85, 0.35, 1.0 - nt))
+					pic.draw_line(pic._p(0.22, 0.4 - nt * 0.25), pic._p(0.22, 0.26 - nt * 0.25), Color(1.0, 0.85, 0.35, 1.0 - nt), 0.015 * size.x)
+		"starrain":  # STAR RAIN: stars falling from a little cloud
+			for k in 3:
+				var ph := fmod(t * 0.9 + k * 0.33, 1.0)
+				var cx := 0.28 + k * 0.22
+				var cy := 0.36 + ph * 0.55
+				var pts := []
+				for i in 10:
+					var a := i * TAU / 10.0 - PI * 0.5
+					var rr := 0.09 if i % 2 == 0 else 0.04
+					pts.append([cx + cos(a) * rr, cy + sin(a) * rr])
+				pic._poly(pts, Color(1.0, 0.92, 0.4, 1.0 - ph * 0.5))
+			for cl in [[0.34, 0.2, 0.12], [0.5, 0.16, 0.15], [0.66, 0.2, 0.12]]:
+				pic._circle(cl[0], cl[1] + bob, cl[2], Color(0.85, 0.85, 0.95))
+		"bubble":  # BUBBLE: a shiny bubble round a little hero
+			pic._circle(0.5, 0.52 + bob, 0.36, Color(0.6, 0.85, 1.0, 0.35))
+			pic.draw_arc(pic._p(0.5, 0.52 + bob), 0.36 * size.x, 0.0, TAU, 32, Color(0.75, 0.92, 1.0), 0.025 * size.x)
+			pic.draw_arc(pic._p(0.5, 0.52 + bob), 0.26 * size.x, PI * 1.1, PI * 1.45, 8, white, 0.03 * size.x)
+			pic._circle(0.5, 0.48 + bob, 0.1, Color(1.0, 0.86, 0.74))
+			pic._poly([[0.4, 0.72 + bob], [0.44, 0.58 + bob], [0.56, 0.58 + bob], [0.6, 0.72 + bob]], Color(0.5, 0.7, 1.0))
+		"guardian":  # a crystal guardian: a big stone giant with a glowing crystal on his chest, in grumpy mist
+			pic._circle(0.5, 0.55, 0.42, Color(0.35, 0.15, 0.5, 0.35))
+			pic._poly([[0.28, 0.92], [0.24, 0.45 + bob], [0.76, 0.45 + bob], [0.72, 0.92]], Color(0.55, 0.5, 0.62))
+			pic._poly([[0.36, 0.45 + bob], [0.38, 0.2 + bob], [0.62, 0.2 + bob], [0.64, 0.45 + bob]], Color(0.62, 0.58, 0.7))
+			pic._poly([[0.16, 0.5 + bob], [0.24, 0.45 + bob], [0.26, 0.75 + bob], [0.14, 0.72 + bob]], Color(0.5, 0.45, 0.58))
+			pic._poly([[0.84, 0.5 + bob], [0.76, 0.45 + bob], [0.74, 0.75 + bob], [0.86, 0.72 + bob]], Color(0.5, 0.45, 0.58))
+			var gw := 0.5 + 0.5 * sin(t * 3.0)
+			pic._circle(0.44, 0.31 + bob, 0.035, Color(1.0, 0.85 * gw + 0.15, 0.4))
+			pic._circle(0.56, 0.31 + bob, 0.035, Color(1.0, 0.85 * gw + 0.15, 0.4))
+			pic._poly([[0.5, 0.5 + bob], [0.58, 0.62 + bob], [0.5, 0.76 + bob], [0.42, 0.62 + bob]], Color(0.55, 0.85, 1.0))
+			pic._poly([[0.5, 0.5 + bob], [0.53, 0.62 + bob], [0.5, 0.76 + bob], [0.46, 0.62 + bob]], Color(0.85, 0.97, 1.0))

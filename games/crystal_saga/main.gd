@@ -52,13 +52,16 @@ const SagaGen := preload("res://games/crystal_saga/sagagen.gd")
 const Saga := preload("res://games/crystal_saga/saga.gd")
 const StoryCard := preload("res://core/story_card.gd")
 const Telemetry := preload("res://core/telemetry.gd")
+const Realm := preload("res://games/crystal_saga/realm.gd")
+const Classes := preload("res://games/crystal_saga/classes.gd")
+const Layout := preload("res://games/crystal_saga/progress.gd")
 
 const GAME_ID := "crystal_saga"
 const MOODS: Array[String] = ["town", "overworld", "dungeon", "boss", "cosy"]
 const SKIES: Array[String] = ["dawn", "day", "dungeon", "sunset", "sunset"]
-const SHOT_RANGE := {"magic": 11.0, "arrow": 13.0, "slash": 3.2}
 const SHOT_COLOR := {"magic": Color(0.75, 0.5, 1.0), "arrow": Color(1.0, 0.9, 0.5), "slash": Color(0.6, 0.9, 1.0),
-	"fire": Color(1.0, 0.5, 0.15)}
+	"fire": Color(1.0, 0.5, 0.15), "heal": Color(1.0, 0.6, 0.75), "note": Color(1.0, 0.8, 0.35), "star": Color(1.0, 0.95, 0.5)}
+const MAP_WAIT := 25.0  ## seconds before Lumi picks the first map stone
 
 # --- The networking contract ---
 var net: Node
@@ -116,6 +119,15 @@ var runs_logged := 0
 var tel_open := false  ## a journey is under way (a RUN line is owed)
 var tel_base: Array = [0, 0, 0, 0]  ## hits, dizzy, knocks, stomps when this journey started
 var vr_story: Node3D
+# saga-deep
+var realm := {}  ## the family's map (realm.gd; every machine, from net state "realm")
+var star_hits := 0  ## host: party hits towards the next STAR RAIN
+var log_tells := {}  ## host: guardian attacks started (bots, telemetry)
+var log_classes := {}  ## host: hero statue picks
+var log_regions: Array = []  ## host: regions picked on the map stones
+var quest_log := 0  ## host: quest things found this session
+var map_card: Control  ## TV: the realm map shown while the stones are up
+var quest_card: Control  ## TV: the picture quest log (top right)
 var shard_label: Label
 var skill_row: HBoxContainer
 
@@ -151,6 +163,7 @@ func _ready() -> void:
 	save = Save.new()
 	save.game_id = GAME_ID
 	save.defaults = Saga.save_defaults()
+	save.use_layout(Layout)
 	add_child(save)
 	sfx = SfxScript.new()
 	add_child(sfx)
@@ -237,21 +250,58 @@ func _setup(mode: String) -> void:
 
 # --- The journey (host / local) ------------------------------------------------------------------
 
-## Host: which road this journey takes (the family's own seeded roads, or TODAY'S QUEST first each day).
+## Host: which road this journey takes: the region on the first map stone (the next new one), or TODAY'S QUEST
+## first each day. CS_REGION=n forces a realm slot, CS_HARD=1 brave mode, CS_JOURNEYS=n pretends n regions beaten.
 func _choose_journey() -> void:
 	journeys_done = int(save.data.restored)
 	if OS.has_environment("CS_JOURNEYS"):
 		journeys_done += int(OS.get_environment("CS_JOURNEYS"))
+	realm = Realm.generate(int(save.data.world))
+	var cleared := _cleared()
 	var daily_due := journeys_done > 0 and not (save.data.daily as Dictionary).has(Seeded.today()) and not OS.has_environment("BOT_NO_DAILY")
-	journey = Saga.journey(journeys_done, int(save.data.world), daily_due)
-	plan = SagaGen.generate(int(journey.seed), int(journey.tier))
+	var want := int(Realm.choices(realm, cleared)[0])
+	journey = Saga.journey(journeys_done, int(save.data.world), daily_due, "", want, cleared, _hard())
+	if OS.has_environment("CS_REGION"):
+		journey.region = clampi(int(OS.get_environment("CS_REGION")), 0, Realm.SIZE - 1)
+		journey.tier = Realm.tier_of(realm, int(journey.region), cleared, _hard())
+	plan = Saga.plan_for(journey, int(save.data.world), _hard())
+
+
+## Host: realm slots beaten (the save's, plus CS_JOURNEYS pretend ones for tests).
+func _cleared() -> Array:
+	var out: Array = (save.data.cleared as Array).duplicate()
+	if OS.has_environment("CS_JOURNEYS") and not realm.is_empty():
+		for i in Realm.clear_order(realm, int(OS.get_environment("CS_JOURNEYS"))):
+			if not out.has(i):
+				out.append(i)
+	return out
+
+
+func _hard() -> bool:
+	return bool(save.data.hard) or OS.has_environment("CS_HARD")
 
 
 ## Client: the host's road.
 func _plan_from_state() -> void:
-	var pl: Array = net.state_get("plan", [0, 0, false])
-	journey = {"seed": int(pl[0]), "tier": int(pl[1]), "daily": bool(pl[2])}
-	plan = SagaGen.generate(int(journey.seed), int(journey.tier))
+	var pl: Array = net.state_get("plan", [0, 0, false, 1, "", false, 0])
+	journey = {"seed": int(pl[0]), "tier": int(pl[1]), "daily": bool(pl[2]), "region": int(pl[6]) if pl.size() > 6 else 0}
+	plan = SagaGen.generate(int(pl[0]), int(pl[1]), int(pl[3]) if pl.size() > 3 else 1, String(pl[4]) if pl.size() > 4 else "",
+		bool(pl[5]) if pl.size() > 5 else false)
+
+
+## Host: the plan as the net store carries it (every machine rebuilds it with sagagen.gd generate()).
+func _plan_state() -> Array:
+	return [int(journey.seed), int(journey.tier), bool(journey.daily), int(plan.biome), String(plan.names[1]), bool(plan.hard),
+		int(journey.get("region", 0))]
+
+
+## Every machine: the family's realm from the net store ([world seed, cleared slots]).
+func _realm_state() -> void:
+	var rs: Array = net.state_get("realm", [])
+	if rs.size() >= 2 and (realm.is_empty() or int(realm.seed) != int(rs[0])):
+		realm = Realm.generate(int(rs[0]))
+	if world != null and not realm.is_empty() and rs.size() >= 2:
+		world.set_realm(realm, rs[1], Realm.open_slots(realm, rs[1]))
 
 
 ## Every machine: (re)build the world for `plan`; Willowbrook keeps the places already brought back.
@@ -262,11 +312,15 @@ func _make_world() -> void:
 	world = World.new()
 	world.name = "World"
 	add_child(world)
+	monsters.skins = plan.get("skins", ["slime", "mushroom", "bat"])
 	world.build(plan, int(net.state_get("village", Saga.places_for(int(save.data.shards)) if net.mode != "client" else 0)))
-	var gl: Array = World.SAGA_GIANTS[int(plan.giant)]
-	monsters.giant_look = [gl[1], gl[2]]
+	monsters.giant_look = plan.giant_look
 	monsters.speed = float(plan.speed)
 	monsters.stomp_gap = plan.stomp
+	monsters.guardian = plan.guardian
+	_realm_state()
+	world.set_heroes_unlocked(Classes.unlocked(int(net.state_get("village", 0))))
+	world.set_brave(bool(net.state_get("hard", false)), bool(net.state_get("brave_ok", false)))
 	if beam != null:
 		beam.position = world.prop_center(world.big_id) + Vector3(0.0, 40.5, 0.0)
 
@@ -274,11 +328,36 @@ func _make_world() -> void:
 ## Client (and after a rebuild): make the world match the replicated state.
 func _apply_world_state() -> void:
 	world.set_open(int(net.state_get("open", 0)))
-	world.set_used(int(net.state_get("used", 0)))
+	world.set_used(int(net.state_get("used", 0)), int(net.state_get("used2", 0)))
 	world.set_village(int(net.state_get("village", 0)), false)
 	world.restored = 1.0 if bool(net.state_get("restored", false)) else 0.0
+	_show_offer()
+	world.set_quest_count(int(net.state_get("quest", 0)))
+	world.set_heroes_unlocked(Classes.unlocked(int(net.state_get("village", 0))))
+	world.set_brave(bool(net.state_get("hard", false)), bool(net.state_get("brave_ok", false)))
+	_realm_state()
+
+
+## Every machine: the stones from the net store "offer" ([zone, ids...]: skills, or realm slots in the village).
+func _show_offer() -> void:
 	var off: Array = net.state_get("offer", [])
-	world.set_offer(int(off[0]) if not off.is_empty() else 0, off.slice(1))
+	var z := int(off[0]) if not off.is_empty() else 0
+	var ids := off.slice(1)
+	var bios: Array = []
+	if z == 0 and not realm.is_empty():
+		for slot in ids:
+			bios.append(int(realm.regions[clampi(int(slot), 0, Realm.SIZE - 1)].biome))
+	world.set_offer(z, ids, bios)
+
+
+## Host: mark a prop used (props 0..61 in "used", the rest in "used2").
+func _use(id: int) -> void:
+	if id < 0:
+		return
+	if id < World.USED_SPLIT:
+		net.state_set("used", int(net.state_get("used", 0)) | (1 << id))
+	else:
+		net.state_set("used2", int(net.state_get("used2", 0)) | (1 << (id - World.USED_SPLIT)))
 
 
 func _team() -> int:
@@ -290,8 +369,15 @@ func _start_journey() -> void:
 		_choose_journey()
 	if world == null or int(world.plan.get("seed", -1)) != int(plan.seed) or int(world.plan.get("tier", -1)) != int(plan.tier):
 		_make_world()
-	net.state_set("plan", [int(journey.seed), int(journey.tier), bool(journey.daily)])
+	net.state_set("plan", _plan_state())
+	net.state_set("realm", [int(save.data.world), _cleared()])
+	_realm_state()
 	net.state_set("offer", [])
+	net.state_set("quest", 0)
+	net.state_set("used2", 0)
+	net.state_set("hard", _hard())
+	net.state_set("brave_ok", int(save.data.restored) >= 1 or _hard())
+	world.set_brave(_hard(), bool(net.state_get("brave_ok", false)))
 	world.set_offer(0, [])
 	levelups = 0
 	journey_t = 0.0
@@ -306,6 +392,8 @@ func _start_journey() -> void:
 	net.state_set("shards", int(save.data.shards))
 	net.state_set("village", Saga.places_for(int(save.data.shards)))
 	world.set_village(Saga.places_for(int(save.data.shards)), false)
+	world.set_heroes_unlocked(Classes.unlocked(Saga.places_for(int(save.data.shards))))
+	_send_classes()
 	_apply_skills()
 	_journey_story()
 	save.data.journeys = int(save.data.journeys) + 1
@@ -318,14 +406,20 @@ func _start_journey() -> void:
 	for s in heroes:
 		awards.set_player(int(s), party.name_of(int(s)))
 	monsters.clear()
+	monsters.clear_tells()
 	shots.clear()
+	star_hits = 0
 	if hands != null:
 		hands.reset()
 	var first := 0
 	if OS.has_environment("CS_ZONE") and not has_meta("started"):
 		first = clampi(int(OS.get_environment("CS_ZONE")), 0, World.ZONES - 1)
+	if first > 0 and not has_meta("started"):
+		log_regions.append(int(journey.get("region", 0)))
 	set_meta("started", true)
 	var used := 0
+	if OS.has_environment("CS_TRY") and OS.get_environment("CS_TRY") == "guardian" and not has_meta("started"):
+		first = 3  # What's New: straight to the region's crystal guardian
 	if first > 0:
 		used |= (1 << world.dummy_id) | (1 << world.target_id) | (1 << world.stone_id)
 	if first > 2:
@@ -372,6 +466,16 @@ func _journey_story() -> void:
 		_say(_lumi(Saga.LINES.village, String(Saga.PLACES[village - 1].pic)))
 		sound_at("sparkle", world.place_center(village - 1), 0.0)
 		save.data.seen_places = village
+	# What Willowbrook's growth unlocked: new heroes on the statues, new magic for the stones.
+	var seen_u := int(save.data.seen_unlocks)
+	for u in Saga.unlocks_between(seen_u, village):
+		if String(u[1]) == "hero":
+			var inf := Classes.info(String(u[2]))
+			_say({"who": String(inf.name), "line": Saga.LINES.new_hero, "pic": String(inf.pic), "color": inf.color, "duration": 3.5})
+		else:
+			var sk: Dictionary = Saga.SKILLS[String(u[2])]
+			_say({"who": String(sk.name), "line": Saga.LINES.new_magic, "pic": String(sk.pic), "color": sk.color, "duration": 3.5})
+	save.data.seen_unlocks = Saga.unlock_count(village)
 
 
 func _enter_zone(z: int) -> void:
@@ -387,10 +491,23 @@ func _enter_zone(z: int) -> void:
 		1, 2:
 			_spawn_wave(z, 0)
 			net.state_set("phase", "fight")
+			if z == 1:
+				var q: Dictionary = plan.quest
+				_react(world.giver_id)
+				_say({"who": String(q.giver), "line": Saga.LINES.help_me, "pic": String(q.giver_pic), "color": Saga.LUMI_COLOR, "duration": 3.0}, true)
+				_quest_card(false)
 		3:
 			monsters.giant_hits = SagaGen.giant_hits(plan, _team())
-			monsters.spawn(Monsters.GIANT, World.center(z) + Vector3(0.0, 0.0, -3.5))
+			var gid := monsters.spawn(Monsters.GIANT, World.center(z) + Vector3(0.0, 0.0, -3.5))
+			if _quest_done():  # the quest giver's gift: the guardian's mist starts a quarter smaller
+				monsters.mons[gid]["hits"] = float(monsters.giant_hits) * 0.25
+				monsters.mons[gid]["sz"] = 0.75
 			net.state_set("phase", "boss")
+			var q: Dictionary = plan.quest
+			_say({"who": String(plan.names[3]), "line": Saga.LINES.guardian, "pic": "guardian",
+				"color": plan.giant_look[1], "duration": 3.5}, true)
+			if _quest_done():
+				_say({"who": String(q.giver), "line": Saga.LINES.go, "pic": String(q.giver_pic), "color": Saga.LUMI_COLOR, "duration": 3.0})
 		_:
 			net.state_set("phase", "crystal")
 
@@ -425,7 +542,7 @@ func _spawn_wave(z: int, w: int) -> void:
 func _region_done(zone: int) -> void:
 	_gain_shard(World.center(zone) + Vector3(0.0, 1.6, -3.0), -1)
 	if zone in Saga.LEVELUP_ZONES:
-		var ids := Saga.offer(int(journey.seed), levelups, save.data.skills)
+		var ids := Saga.offer(int(journey.seed), levelups, save.data.skills, Saga.places_for(int(save.data.shards)))
 		if not ids.is_empty():
 			levelups += 1
 			net.state_set("offer", [zone] + ids)
@@ -456,7 +573,10 @@ func _learn(id: String, slot: int) -> void:
 		var line: String = Saga.LINES.stronger if was > 0 else (Saga.LINES.new_spell if info.type == "spell" else Saga.LINES.new_trick)
 		_say({"who": String(info.name), "line": line, "pic": String(info.pic), "color": info.color, "duration": 3.5}, true)
 		show_headline(String(info.name), 2.5)
-		var cid := world.choice_ids[0] if world.skill_on(world.choice_ids[0]) == id else world.choice_ids[1]
+		var cid := world.choice_ids[0]
+		for c0 in world.choice_ids:
+			if world.skill_on(c0) == id:
+				cid = c0
 		var c := world.prop_center(cid)
 		for k in 3:
 			sparkle_all(c + Vector3(0.0, k * 0.5, 0.0), info.color, 40)
@@ -478,6 +598,14 @@ func _lvl(id: String) -> int:
 func _apply_skills() -> void:
 	if hands != null:
 		hands.set_blade(VrHands.BLADE * (1.0 + 0.2 * _lvl("long")))
+	for s in heroes:
+		_hero_gear(heroes[s] as Hero)
+
+
+## A TV hero's class and the party's HEALING / BUBBLE: shorter dizzy spells, longer safety after.
+func _hero_gear(h: Hero) -> void:
+	h.dizzy_mult = float(Classes.info(h.cls).dizzy) * (1.0 - 0.2 * _lvl("heal"))
+	h.safe_bonus = 0.8 * _lvl("bubble")
 
 
 ## Host: a crystal shard (a place cleared, a chest opened): it flies up and sparkles; it's kept for good.
@@ -511,7 +639,7 @@ func _zone_cleared() -> void:
 func _restore() -> void:
 	net.state_set("phase", "restore")
 	net.state_set("restored", true)
-	net.state_set("used", int(net.state_get("used", 0)) | (1 << world.big_id))
+	_use(world.big_id)
 	phase_t = 0.0
 	var p := world.prop_center(world.big_id)
 	sound_at("power_up", p, 0.0)
@@ -520,7 +648,21 @@ func _restore() -> void:
 	save.data["restored"] = int(save.data["restored"]) + 1
 	if bool(journey.daily):
 		(save.data.daily as Dictionary)[Seeded.today()] = true
+	var slot := int(journey.get("region", 0))
+	var was_open := Realm.open_slots(realm, _cleared())
+	var newly := not (save.data.cleared as Array).has(slot)
+	if newly:
+		(save.data.cleared as Array).append(slot)
 	save.mark_dirty()
+	net.state_set("realm", [int(save.data.world), _cleared()])
+	var bio := Realm.biome(realm, slot)
+	_say({"who": String(realm.regions[slot].name), "line": Saga.LINES.crystal_home, "pic": String(bio.pic), "color": bio.glow, "duration": 3.5})
+	for o in Realm.open_slots(realm, _cleared()):
+		if not was_open.has(o):
+			var b2 := Realm.biome(realm, int(o))
+			_say({"who": String(realm.regions[int(o)].name), "line": Saga.LINES.new_road, "pic": String(b2.pic), "color": b2.glow, "duration": 3.0})
+	if newly and (save.data.cleared as Array).size() == Realm.SIZE:
+		_say(_lumi(Saga.LINES.realm_done, "rainbow"))
 	var r := Seeded.rng(int(journey.seed), "end")
 	_say(_lumi(Saga.pick(r, "restored"), "sun"), true)
 	var was := int(net.state_get("village", 0))
@@ -554,6 +696,154 @@ func _results() -> void:
 	net.state_set("results", data)
 	net.state_set("phase", "results")
 	phase_t = 0.0
+
+
+# --- The realm map, heroes, quests, brave mode (host) -----------------------------------------------
+
+## Host: practice is done: the MAP stones by the gate show where the party can go (when there is a choice and it
+## isn't TODAY'S QUEST), else off to the journey's region.
+func _after_practice() -> void:
+	var opts := Realm.choices(realm, _cleared())
+	if bool(journey.daily) or opts.size() < 2 or OS.has_environment("CS_REGION") or OS.has_environment("CS_NO_MAP"):
+		_pick_region(int(journey.get("region", 0)), -1)
+		return
+	net.state_set("offer", [0] + opts)
+	_show_offer()
+	net.state_set("phase", "map")
+	phase_t = 0.0
+	for cid in world.choice_ids:
+		if (world.props[cid]["node"] as Node3D).visible:
+			sparkle_all(world.prop_center(cid), Color(1.0, 0.9, 0.5), 30)
+	sound_at("power_up", World.center(0) + Vector3(0.0, 1.0, -6.6), -4.0, 0.9)
+	_say(_lumi(Saga.LINES.map, "star"), true)
+
+
+## Host: the party picked a region (a map stone; slot -1: Lumi's pick). A different road: the world is rebuilt
+## for it (behind a blink for the VR hero), then the village gate opens.
+func _pick_region(region: int, by: int) -> void:
+	if not String(net.state_get("phase", "")) in ["practice", "map"]:
+		return
+	net.state_set("offer", [])
+	world.set_offer(0, [])
+	var cleared := _cleared()
+	if not bool(journey.daily):
+		journey.region = region
+		journey.tier = Realm.tier_of(realm, region, cleared, _hard())
+	log_regions.append(int(journey.region))
+	var np := Saga.plan_for(journey, int(save.data.world), _hard())
+	if int(np.biome) != int(plan.biome) or int(np.tier) != int(plan.tier) or bool(np.hard) != bool(plan.hard):
+		plan = np
+		net.state_set("plan", _plan_state())
+		if vr_rig != null:
+			blink(func() -> void:
+				_make_world()
+				_apply_world_state())
+		else:
+			_make_world()
+			_apply_world_state()
+	var bio := Realm.biome(realm, int(journey.region))
+	_say({"who": String(plan.names[1]), "line": Saga.pick(Seeded.rng(int(journey.seed), "start"), "start"), "pic": String(bio.pic),
+		"color": bio.glow, "duration": 3.0}, true)
+	if by >= 0:
+		awards.add(by, "picks")
+	print("Crystal Saga: off to %s (realm slot %d, tier %d%s)" % [plan.names[1], int(journey.region), int(journey.tier), " BRAVE" if _hard() else ""])
+	_zone_cleared()
+
+
+## Every machine: the hero a seat plays (net store "classes": {seat: hero}).
+func _class_of(slot: int) -> String:
+	var cl: Dictionary = net.state_get("classes", {})
+	return String(cl.get(str(slot), Classes.default_for(slot)))
+
+
+## Host: every seat's hero (saved picks, if unlocked) to every machine.
+func _send_classes() -> void:
+	var places := Saga.places_for(int(save.data.shards))
+	var out := {}
+	for s in range(0, 7):
+		out[str(s)] = Classes.of(save.data.classes, s, places)
+	net.state_set("classes", out)
+
+
+## Host: a hero bonked a statue: that seat becomes that hero (kept). Locked ones just go "tock".
+func _statue(id: int, slot: int) -> void:
+	var cls := String(world.props[id]["class"])
+	var c := world.prop_center(id)
+	var places := int(net.state_get("village", 0))
+	if not Classes.unlocked(places).has(cls):
+		sound_at("tock", c, -2.0, 0.8)
+		sparkle_all(c, Color(0.6, 0.6, 0.65), 10)
+		return
+	if not heroes.has(slot) or (slot == 0 and vr_rig != null):
+		sound_at("sparkle", c, -6.0)
+		return
+	(save.data.classes as Dictionary)[str(slot)] = cls
+	save.mark_dirty()
+	log_classes[slot] = cls
+	_send_classes()
+	var inf := Classes.info(cls)
+	sparkle_all((heroes[slot] as Hero).position + Vector3(0.0, 0.7, 0.0), inf.color, 40)
+	sparkle_all(c, inf.color, 24)
+	sound_at("power_up", c, -4.0, 1.3)
+	_say({"who": String(inf.name), "line": party.name_of(slot), "pic": String(inf.pic), "color": inf.color, "duration": 2.5}, true)
+
+
+## Host: the BRAVE flag: gentle <-> brave (kept; the next road is a tier harder, tells a little quicker).
+func _toggle_brave(slot: int) -> void:
+	if not bool(net.state_get("brave_ok", false)):
+		return
+	save.data.hard = not bool(save.data.hard)
+	save.mark_dirty()
+	net.state_set("hard", _hard())
+	world.set_brave(_hard(), true)
+	var c := world.prop_center(world.banner_id)
+	sparkle_all(c, Color(1.0, 0.4, 0.2) if _hard() else Color(0.6, 1.0, 0.6), 36)
+	sound_at("fanfare" if _hard() else "sparkle", c, -4.0)
+	_say(_lumi(Saga.LINES.brave if _hard() else Saga.LINES.gentle, "fire" if _hard() else "heart"), true)
+	if slot >= 0:
+		awards.add(slot, "flags")
+
+
+func _quest_done() -> bool:
+	return int(net.state_get("quest", 0)) >= int((plan.get("quest", {}) as Dictionary).get("need", 3))
+
+
+## Host: a quest thing found (poked, touched or sparked): the giver's dots fill; the last one: thank you, a shard,
+## and the guardian will start weaker.
+func _quest_found(id: int, slot: int) -> void:
+	if _quest_done():
+		_use(id)  # a spare one: still a sparkle
+		sparkle_all(world.prop_center(id), Color(1.0, 0.9, 0.5), 20)
+		return
+	_use(id)
+	quest_log += 1
+	var c := world.prop_center(id)
+	var n := int(net.state_get("quest", 0)) + 1
+	net.state_set("quest", n)
+	world.set_quest_count(n)
+	sparkle_all(c + Vector3(0.0, 0.3, 0.0), Color(1.0, 0.9, 0.5), 30)
+	sound_at("ding", c, -2.0, 1.0 + 0.15 * n)
+	sound_at("sparkle", c, -6.0)
+	if slot >= 0:
+		awards.add(slot, "finds")
+	if _quest_done():
+		var q: Dictionary = plan.quest
+		_react(world.giver_id)
+		_say({"who": String(q.giver), "line": Saga.LINES.quest_done, "pic": String(q.giver_pic), "color": Saga.LUMI_COLOR, "duration": 3.5}, true)
+		_gain_shard(world.prop_center(world.giver_id) + Vector3(0.0, 1.2, 0.0), slot)
+		sound_at("fanfare", c, -4.0)
+		show_headline("THANK YOU!", 2.5)
+	else:
+		_quest_card(false)
+
+
+## Host: the quest as a picture card (the giver, what to find, how many found).
+func _quest_card(now: bool) -> void:
+	var q: Dictionary = plan.get("quest", {})
+	if q.is_empty():
+		return
+	var line := "%d / %d" % [int(net.state_get("quest", 0)), int(q.need)]
+	_say({"who": String(q.giver), "line": line, "pic": String(q.item_pic), "color": Saga.LUMI_COLOR, "duration": 2.5}, now)
 
 
 # --- Host rules ----------------------------------------------------------------------------------
@@ -598,6 +888,35 @@ func _host_step(delta: float) -> void:
 			sound_at("boing", (heroes[key] as Hero).position, -2.0, 0.8)
 	for w in monsters.windups:
 		sound_at("buff", w, 0.0, 0.6)
+	for tl in monsters.new_tells:
+		log_tells[String(tl[0])] = int(log_tells.get(String(tl[0]), 0)) + 1
+		net.event("tell", tl)
+		var tp: Vector3 = (tl[1] as Array)[0] if not (tl[1] as Array).is_empty() else World.center(3)
+		match String(tl[0]):
+			"rain":
+				sound_at("magic", tp, -2.0, 0.6)
+			"roll":
+				sound_at("buff", tp, 0.0, 0.45)
+			"call":
+				sound_at("bell", tp, -4.0, 0.7)
+	if not monsters.windups.is_empty():
+		log_tells["stomp"] = int(log_tells.get("stomp", 0))
+	for ld in monsters.landed:
+		var pts: Array = ld[1]
+		match String(ld[0]):
+			"rain":
+				for q in pts:
+					sparkle_all((q as Vector3) + Vector3(0.0, 0.3, 0.0), Color(0.5, 0.85, 1.0), 18)
+				sound_at("crash", pts[0], -4.0, 1.4)
+			"roll":
+				sound_at("whoosh", pts[1], 0.0, 0.5)
+				sound_at("land", pts[1], 0.0, 0.6)
+				shake = maxf(shake, 0.5)
+				net.event("shake", [0.5])
+			"call":
+				for q2 in pts:
+					sparkle_all((q2 as Vector3) + Vector3(0.0, 0.4, 0.0), Color(0.5, 1.0, 0.5), 20)
+				sound_at("pop", pts[0], -2.0, 0.8)
 	for st in monsters.stomps:
 		log_stomps += 1
 		stomp_fx(st)
@@ -612,7 +931,11 @@ func _host_step(delta: float) -> void:
 				net.state_set("step", 1)
 				show_headline("HAND UP!", 8.0)
 			if hero_ok and party_ok and (vr_rig != null or not heroes.is_empty()) and phase_t > 1.0:
-				_zone_cleared()
+				_after_practice()
+		"map":
+			if phase_t > MAP_WAIT:
+				var off0: Array = net.state_get("offer", [])
+				_pick_region(int(off0[1]) if off0.size() > 1 else int(journey.get("region", 0)), -1)
 		"fight":
 			if monsters.count() == 0 and phase_t > 0.5 and wave < (plan.waves[zone] as Array).size() - 1:
 				wave += 1
@@ -734,6 +1057,10 @@ func hit_monster(id: int, slot: int, at: Vector3, src: String = "") -> bool:
 	if res == "":
 		return false
 	log_hits[slot] = int(log_hits.get(slot, 0)) + 1
+	if src == "note":
+		_note_freeze(at)
+	if not src in ["splash", "spin", "star", ""]:
+		_star_rain_tick(slot)
 	if res == "poof":
 		awards.add(slot, "poofs")
 		if kind == Monsters.GIANT:
@@ -747,6 +1074,54 @@ func hit_monster(id: int, slot: int, at: Vector3, src: String = "") -> bool:
 		sound_at("boing", at, -6.0, 0.6)
 		sparkle_all(at, Color(0.7, 0.4, 1.0), 14)
 	return true
+
+
+## BARD: a note makes the monsters round where it lands stop to listen (never the guardian).
+func _note_freeze(at: Vector3) -> void:
+	for other in monsters.mons.keys():
+		var c: Vector3 = monsters.center_of(other)
+		if c.distance_to(at) < Classes.NOTE_R and int(monsters.mons[other]["kind"]) != Monsters.GIANT:
+			monsters.freeze(int(other), Classes.NOTE_FREEZE)
+			sparkle_all(c + Vector3(0.0, 0.3, 0.0), SHOT_COLOR["note"], 10)
+	sound_at("ding", at, -8.0, 1.6)
+
+
+## HEALER: her spark wakes dizzy friends near her (and the VR hero feels a warm buzz).
+func _heal_wave(pos: Vector3, slot: int) -> void:
+	var woke := 0
+	for s in heroes:
+		var h: Hero = heroes[s]
+		if int(s) != slot and h.dizzy_t > 0.0 and h.position.distance_to(pos) < Classes.HEAL_R:
+			h.wake()
+			net.event("wake", [int(s)])
+			sparkle_all(h.position + Vector3(0.0, 0.8, 0.0), SHOT_COLOR["heal"], 18)
+			woke += 1
+	if woke > 0:
+		sound_at("power_up", pos, -8.0, 1.6)
+		awards.add(slot, "heals")
+
+
+## STAR RAIN: every few hits by the party, stars fall on the nearest monsters.
+func _star_rain_tick(slot: int) -> void:
+	var lv := _lvl("star")
+	if lv <= 0:
+		return
+	star_hits += 1
+	if star_hits < 7 - lv:
+		return
+	star_hits = 0
+	var near: Array = []
+	for id in monsters.mons:
+		near.append(int(id))
+	for i in mini(lv + 1, near.size()):
+		var mid: int = near[i]
+		if not monsters.mons.has(mid):
+			continue
+		var c: Vector3 = monsters.center_of(mid)
+		bolt_fx(c + Vector3(0.0, 5.0, 0.0), c, "star", 0.35)
+		net.event("bolt", [c + Vector3(0.0, 5.0, 0.0), c, "star", 0.35])
+		shots.append({"t": 0.35, "mon": mid, "prop": -1, "slot": slot, "at": c, "kind": "star"})
+	sound_at("sparkle", World.center(int(net.state_get("zone", 0))), -2.0, 1.4)
 
 
 ## (MIGHTY: each hit on the giant counts 1.5 / 2 / 2.5.)
@@ -810,7 +1185,12 @@ func _twin_bolts(from: Vector3, pos: Vector3, reach: float, count: int, skip: in
 
 
 func _giant_friendly(at: Vector3) -> void:
-	net.state_set("used", int(net.state_get("used", 0)) | (1 << world.friend_id))
+	_use(world.friend_id)
+	for mid in monsters.mons.keys():  # the helpers he called pop into sparkles too
+		if bool(monsters.mons[mid]["minion"]):
+			sparkle_all(monsters.center_of(mid), Color(0.6, 1.0, 0.7), 20)
+			monsters.remove(int(mid))
+	monsters.clear_tells()
 	for k in 3:
 		sparkle_all(at + Vector3(0.0, k * 0.8, 0.0), Color(0.8, 0.5, 1.0), 50)
 	sparkle_all(world.prop_center(world.friend_id), Color(1.0, 0.9, 0.5), 40)
@@ -836,10 +1216,15 @@ func prop_poke(id: int, slot: int) -> bool:
 			on_request(slot, "again", [])
 			return true
 		return false
-	if poke_cd.has(id) or (world.is_used(id) and kind in [World.CHEST, World.DUMMY, World.STONE, World.TARGET]):
+	if poke_cd.has(id) or (world.is_used(id) and kind in [World.CHEST, World.DUMMY, World.STONE, World.TARGET, World.QUEST]):
 		return false
 	if kind == World.FRIEND and not world.is_used(id):
 		return false
+	if kind == World.CHOICE and world.region_on(id) >= 0:
+		if phase != "map":
+			return false
+		_pick_region(world.region_on(id), slot)
+		return true
 	if kind == World.CHOICE:
 		var skill := world.skill_on(id)
 		if phase != "choose" or skill == "":
@@ -883,7 +1268,7 @@ func prop_poke(id: int, slot: int) -> bool:
 			sparkle_all(c, Color(0.6, 0.9, 1.0), 12)
 			awards.add(slot, "chimes")
 		World.CHEST:
-			net.state_set("used", int(net.state_get("used", 0)) | (1 << id))
+			_use(id)
 			sparkle_all(c + Vector3(0.0, 0.3, 0.0), Color(1.0, 0.85, 0.2), 44)
 			sound_at("chest", c, -2.0)
 			sound_at("coin", c, -4.0)
@@ -893,6 +1278,23 @@ func prop_poke(id: int, slot: int) -> bool:
 			poke_cd[id] = 2.0
 			sound_at("bell", c, -8.0, 1.4)
 			sound_at("sparkle", c + Vector3(0.0, 1.0, 0.0), -10.0)
+		World.QUEST:
+			_quest_found(id, slot)
+		World.GIVER:
+			poke_cd[id] = 3.0
+			sound_at("bell", c, -6.0, 1.2)
+			_quest_card(true)
+		World.STATUE:
+			poke_cd[id] = 0.8
+			_statue(id, slot)
+		World.BANNER:
+			poke_cd[id] = 1.2
+			_toggle_brave(slot)
+		World.MAP:
+			poke_cd[id] = 2.0
+			sound_at("sparkle", c, -4.0, 0.9)
+			sparkle_all(c + Vector3(0.0, 0.3, 0.0), Color(1.0, 0.9, 0.5), 30)
+			_say(_lumi(Saga.LINES.map, "star"), true)
 		World.FRIEND:
 			poke_cd[id] = 1.5
 			sound_at("boing", c, -2.0, 0.5)
@@ -912,7 +1314,7 @@ func prop_poke(id: int, slot: int) -> bool:
 			if world.is_used(id):
 				sound_at("ding", c, -4.0, 2.0)
 			else:
-				net.state_set("used", int(net.state_get("used", 0)) | (1 << id))
+				_use(id)
 				net.state_set("thunder", true)
 				sparkle_all(c, Color(1.0, 0.95, 0.4), 60)
 				sound_at("power_up", c, 0.0)
@@ -926,7 +1328,7 @@ func prop_poke(id: int, slot: int) -> bool:
 
 
 func _practice_done(id: int, c: Vector3) -> void:
-	net.state_set("used", int(net.state_get("used", 0)) | (1 << id))
+	_use(id)
 	sparkle_all(c, Color(1.0, 0.85, 0.3), 36)
 	sound_at("ding", c, -2.0, 1.2)
 	sound_at("sparkle", c, -4.0)
@@ -942,7 +1344,7 @@ func _react(id: int) -> void:
 func _knock_vr() -> void:
 	if knock_cd > 0.0:
 		return
-	knock_cd = 2.5
+	knock_cd = 2.5 + 0.6 * _lvl("bubble")
 	log_knocks += 1
 	var hp := vr_rig.head_position()
 	var fwd := vr_rig.head_forward()
@@ -1075,9 +1477,12 @@ func _shoot(slot: int, pos: Vector3, yaw: float) -> void:
 		(heroes[slot] as Hero).bonk_anim()
 	awards.add(slot, "hits")
 	var fwd := Vector3(sin(yaw), 0.0, cos(yaw))
-	var kind := Hero.shot_of(slot)
+	var hero_cls := (heroes[slot] as Hero).cls if heroes.has(slot) else Classes.default_for(slot)
+	var kind := String(Classes.info(hero_cls).shot)
 	var from := pos + Vector3(0.0, 0.8, 0.0) + fwd * 0.4
-	var reach := float(SHOT_RANGE[kind]) * (1.0 + 0.2 * _lvl("long"))
+	var reach := float(Classes.info(hero_cls).reach) * (1.0 + 0.2 * _lvl("long"))
+	if kind == "heal":
+		_heal_wave(pos, slot)
 	if _lvl("spin") > 0 and spin_cd <= 0.0:  # SPIN: a whirl hits everything right round the hero
 		var near := false
 		for id in monsters.mons:
@@ -1087,8 +1492,11 @@ func _shoot(slot: int, pos: Vector3, yaw: float) -> void:
 			spin_cd = 0.6 if _team() > 1 else 0.4
 			_spin_at(pos, 1.0 + 0.5 * _lvl("spin"), slot)
 	var targets: Array = [world.stone_id, world.orb_id, world.big_id]
-	if String(net.state_get("phase", "")) == "choose":
+	if String(net.state_get("phase", "")) in ["choose", "map"]:
 		targets.append_array(world.choice_ids)
+	for qid in world.quest_ids:  # a spark lights a lantern, rings a bell, finds a lost lamb from afar
+		if not world.is_used(qid):
+			targets.append(qid)
 	var aim := _aim(pos, fwd, reach, 0.55, targets)
 	if int(aim[0]) < 0 and int(aim[2]) < 0:
 		# Nothing to shoot: poke what's right in front (a chest, a chicken, the well...).
@@ -1107,7 +1515,7 @@ func _shoot(slot: int, pos: Vector3, yaw: float) -> void:
 				best = id
 		if best >= 0 and prop_poke(best, slot):
 			return
-	sound_at("bow" if kind == "arrow" else ("magic" if kind == "magic" else "sword"), from, -6.0, randf_range(1.0, 1.2))
+	sound_at("bow" if kind == "arrow" else ("sword" if kind == "slash" else "magic"), from, -6.0, randf_range(1.0, 1.2))
 	_launch(from, aim[1], kind, slot, int(aim[0]), int(aim[2]))
 	if int(aim[0]) >= 0:
 		_twin_bolts(from, pos, reach, _lvl("twin"), int(aim[0]), kind, slot)
@@ -1166,7 +1574,8 @@ func _sync_heroes() -> void:
 			var h := Hero.new()
 			h.owned = party.is_local(s)
 			add_child(h)
-			h.setup(s, party.color_of(s))
+			h.setup(s, party.color_of(s), _class_of(s))
+			_hero_gear(h)
 			var sp: Vector3 = net.state_get("spawn", World.entrance(0))
 			h.position = sp + _spawn_offset(s)
 			heroes[s] = h
@@ -1246,7 +1655,11 @@ func _tv_camera(delta: float) -> void:
 
 func _apply_zone_look(zone: int) -> void:
 	if sky != null:
-		sky.set_preset("day" if bool(net.state_get("restored", false)) else SKIES[zone], 3.0)
+		var want: String = SKIES[zone]
+		var sk: Array = plan.get("sky", [])
+		if zone in [1, 2] and sk.size() == 2:
+			want = String(sk[zone - 1])
+		sky.set_preset("day" if bool(net.state_get("restored", false)) else want, 3.0)
 
 
 # --- Effects (every machine) ---------------------------------------------------------------------
@@ -1510,6 +1923,14 @@ func _make_hud(parent: Control) -> void:
 	row2.add_child(shard_label)
 	skill_row = UiKit.hbox(4)
 	row2.add_child(skill_row)
+	# The picture quest log: who asked, what to find, a dot for each (no words: the little ones follow it too).
+	quest_card = UiKit.panel("card")
+	hud.add_child(quest_card)
+	UiKit.pin(quest_card, Control.PRESET_TOP_RIGHT)
+	quest_card.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	quest_card.offset_left = -24.0
+	quest_card.offset_right = -24.0
+	quest_card.offset_top = 20.0
 	pill = UiKit.panel("pill")
 	hud.add_child(pill)
 	UiKit.pin(pill, Control.PRESET_CENTER_BOTTOM)
@@ -1532,6 +1953,7 @@ func _refresh_hud() -> void:
 	gem_row.add_child(UiKit.icon("star", "gold" if bool(net.state_get("restored", false)) else "dim", 34.0))
 	# Crystal shards found (they mend Willowbrook) and the party's skills (a picture each, a dot per level).
 	shard_label.text = str(int(net.state_get("shards", 0)))
+	_refresh_quest_card()
 	for c2 in skill_row.get_children():
 		c2.queue_free()
 	var skills: Dictionary = net.state_get("skills", {})
@@ -1547,6 +1969,95 @@ func _refresh_hud() -> void:
 			dots.add_child(UiKit.icon("dot", "gold", 9.0))
 		box.add_child(dots)
 		skill_row.add_child(box)
+	if bool(net.state_get("hard", false)):
+		skill_row.add_child(UiKit.icon("fire", Color(1.0, 0.5, 0.2), 34.0))
+
+
+## TV: the quest log card (top right) while the party is in the region (zones 1..3).
+func _refresh_quest_card() -> void:
+	if quest_card == null:
+		return
+	for c in quest_card.get_children():
+		c.queue_free()
+	var q: Dictionary = plan.get("quest", {})
+	var z := int(net.state_get("zone", 0))
+	var ph := String(net.state_get("phase", ""))
+	quest_card.visible = not q.is_empty() and z in [1, 2, 3] and ph != "results"
+	if not quest_card.visible:
+		return
+	var row := UiKit.hbox(6)
+	quest_card.add_child(row)
+	row.add_child(StoryCard.picture(String(q.giver_pic), 40.0, Saga.LUMI_COLOR))
+	row.add_child(StoryCard.picture(String(q.item_pic), 40.0, Color(1.0, 0.85, 0.4)))
+	var found := int(net.state_get("quest", 0))
+	var need := int(q.need)
+	if found >= need:
+		row.add_child(UiKit.icon("check", "gold", 30.0))
+	else:
+		var dots := UiKit.hbox(3)
+		dots.alignment = BoxContainer.ALIGNMENT_CENTER
+		for k in need:
+			dots.add_child(UiKit.icon("dot", "gold" if k < found else "dim", 14.0))
+		row.add_child(dots)
+
+
+## TV: the realm map while the map stones are up: every region's picture where it sits, roads between them,
+## a star on beaten ones, dim ones not reached yet (no words).
+func _map_card(on: bool) -> void:
+	if map_card != null and is_instance_valid(map_card):
+		map_card.queue_free()
+	map_card = null
+	if not on or hud == null or realm.is_empty():
+		return
+	var rs: Array = net.state_get("realm", [0, []])
+	var cleared: Array = rs[1] if rs.size() > 1 else []
+	var open := Realm.open_slots(realm, cleared)
+	var card := UiKit.panel("card")
+	hud.add_child(card)
+	var box := Control.new()
+	var w := 300.0
+	var h := 230.0
+	box.custom_minimum_size = Vector2(w, h)
+	card.add_child(box)
+	UiKit.pin(card, Control.PRESET_CENTER_TOP)
+	card.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	card.offset_top = 96.0
+	card.offset_bottom = 96.0
+	var spot := func(i: int) -> Vector2:
+		if i < 0:
+			return Vector2(w * 0.5, h - 18.0)
+		return Vector2(w * 0.5 + float(realm.regions[i].x) * w * 0.4, h - 18.0 - int(realm.regions[i].depth) * (h - 40.0) / 4.0)
+	for i in Realm.SIZE:
+		var links: Array = (realm.regions[i].links as Array).duplicate()
+		if int(realm.regions[i].depth) == 1:
+			links.append(-1)
+		for j in links:
+			if int(j) < i:
+				var ln := Line2D.new()
+				ln.width = 4.0
+				ln.default_color = Color(0.95, 0.85, 0.55, 0.8)
+				ln.points = PackedVector2Array([spot.call(i), spot.call(int(j))])
+				box.add_child(ln)
+	var home := StoryCard.picture("house", 34.0, Color(1.0, 0.85, 0.5))
+	box.add_child(home)
+	home.position = spot.call(-1) - Vector2(17.0, 17.0)
+	var off: Array = net.state_get("offer", [])
+	for i2 in Realm.SIZE:
+		var bio := Realm.biome(realm, i2)
+		var pic := StoryCard.picture(String(bio.pic), 38.0, bio.glow)
+		box.add_child(pic)
+		pic.position = spot.call(i2) - Vector2(19.0, 19.0)
+		if not open.has(i2):
+			pic.modulate = Color(0.35, 0.35, 0.4, 0.8)
+		if cleared.has(i2):
+			var st := UiKit.icon("star", "gold", 18.0)
+			box.add_child(st)
+			st.position = spot.call(i2) + Vector2(8.0, -24.0)
+		if off.slice(1).has(i2):
+			var ring := UiKit.icon("arrow_down", "gold", 18.0)
+			box.add_child(ring)
+			ring.position = spot.call(i2) + Vector2(-9.0, -40.0)
+	map_card = card
 
 
 func _update_pill() -> void:
@@ -1577,23 +2088,44 @@ func _on_state_changed(key: String, value: Variant) -> void:
 		"plan":
 			if net.mode == "client" and value is Array:
 				var pl: Array = value
-				if int(pl[0]) != int(plan.get("seed", -1)) or int(pl[1]) != int(plan.get("tier", -1)):
+				var bio := int(pl[3]) if pl.size() > 3 else 1
+				if int(pl[0]) != int(plan.get("seed", -1)) or int(pl[1]) != int(plan.get("tier", -1)) or bio != int(plan.get("biome", -1)) \
+						or (pl.size() > 5 and bool(pl[5]) != bool(plan.get("hard", false))):
 					_plan_from_state()
 					_make_world()
 					_apply_world_state()
 				journey.daily = bool(pl[2])
+				journey.region = int(pl[6]) if pl.size() > 6 else 0
+			_refresh_hud()
+		"realm":
+			_realm_state()
+		"classes":
+			for hs in heroes:
+				(heroes[hs] as Hero).set_class(_class_of(int(hs)))
+				_hero_gear(heroes[hs] as Hero)
+		"quest":
+			world.set_quest_count(int(value))
+			_refresh_hud()
+		"used2":
+			world.set_used(int(net.state_get("used", 0)), int(value))
+		"hard", "brave_ok":
+			world.set_brave(bool(net.state_get("hard", false)), bool(net.state_get("brave_ok", false)))
+			_refresh_hud()
 		"village":
 			world.set_village(int(value), String(net.state_get("phase", "")) in ["restore", "yay", "results"])
+			world.set_heroes_unlocked(Classes.unlocked(int(value)))
 		"offer":
-			var off: Array = value if value is Array else []
-			world.set_offer(int(off[0]) if not off.is_empty() else 0, off.slice(1))
+			_show_offer()
 		"skills", "shards":
 			_refresh_hud()
+			if key == "skills":
+				for hs2 in heroes:
+					_hero_gear(heroes[hs2] as Hero)
 		"open":
 			world.set_open(int(value))
 			_refresh_hud()
 		"used":
-			world.set_used(int(value))
+			world.set_used(int(value), int(net.state_get("used2", 0)))
 		"zone":
 			_apply_zone_look(int(value))
 		"restored":
@@ -1609,6 +2141,7 @@ func _on_state_changed(key: String, value: Variant) -> void:
 		"phase":
 			var ph := String(value)
 			_refresh_hud()
+			_map_card(ph == "map")
 			if ph == "results":
 				_show_results(net.state_get("results", {}))
 			else:
@@ -1634,6 +2167,10 @@ func _on_state_changed(key: String, value: Variant) -> void:
 					show_headline("PICK ONE!", 6.0)
 					if split != null:
 						HudKit.banner([hud], "LEVEL UP!", "", {"duration": 2.0})
+				"map":
+					show_headline("WHERE TO?", 6.0)
+					if split != null:
+						HudKit.banner([hud], "WHERE TO?", "", {"duration": 2.0})
 				"cleared":
 					show_headline("ONWARD!", 2.5)
 				"restore":
@@ -1737,7 +2274,11 @@ func _telemetry(end: String) -> void:
 		"daily": bool(journey.get("daily", false)), "secs": snappedf(journey_t, 0.1), "zone": int(net.state_get("zone", 0)),
 		"team": _team(), "vr": vr_rig != null, "mode": String(net.mode), "hits": poofs - int(tel_base[0]), "dizzy": log_dizzy - int(tel_base[1]),
 		"knocks": log_knocks - int(tel_base[2]), "stomps": log_stomps - int(tel_base[3]), "shards": journey_shards, "shards_total": int(save.data.shards), "village": int(net.state_get("village", 0)),
-		"picks": picks, "level": Saga.party_level(save.data.skills), "names": plan.get("names", [])})
+		"picks": picks, "level": Saga.party_level(save.data.skills), "names": plan.get("names", []),
+		"region": int(journey.get("region", 0)), "biome": String(Realm.BIOMES[int(plan.get("biome", 1))].id), "hard": _hard(),
+		"quest": int(net.state_get("quest", 0)), "quest_need": int((plan.get("quest", {}) as Dictionary).get("need", 0)),
+		"tells": log_tells.duplicate(), "attacks": (plan.get("guardian", {}) as Dictionary).get("attacks", []),
+		"classes": net.state_get("classes", {}), "cleared": (save.data.cleared as Array).size()})
 	runs_logged += 1
 
 
@@ -1818,5 +2359,11 @@ func apply_event(kind: String, args: Array) -> void:
 			var h4: Hero = heroes.get(int(args[0]))
 			if h4 != null:
 				h4.anim.play("cheer", 2.0)
+		"tell":
+			monsters.show_tell(String(args[0]), args[1], float(args[2]))
+		"wake":
+			var h5: Hero = heroes.get(int(args[0]))
+			if h5 != null:
+				h5.wake()
 		"story":
 			show_story({"who": String(args[0]), "line": String(args[1]), "pic": String(args[2]), "color": Color.html(String(args[3])), "duration": 3.5})

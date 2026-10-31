@@ -1,5 +1,6 @@
 extends Node3D
-## CRYSTAL SAGA: a TV hero, the VR hero's party (one per TV player). A chibi mage or archer in the player's colour
+## CRYSTAL SAGA: a TV hero, the VR hero's party (one per TV player). A chibi hero (classes.gd: knight, mage, archer,
+## healer, bard: picked at the statues in Willowbrook) in the player's colour
 ## with a coloured ring under the feet. Left stick walks, A shoots a magic spark or an arrow
 ## (or pokes the thing in front). Slot 0 (local play without a headset) is a little knight.
 ## When a monster bumps them they get dizzy for a moment (fall over, stars spin round their head) and
@@ -7,17 +8,19 @@ extends Node3D
 ## The machine whose pad drives the hero moves it (instant, client-side); the others mirror it.
 
 const Creatures := preload("res://core/creatures.gd")
+const Classes := preload("res://games/crystal_saga/classes.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 
 const SPEED := 3.6
 const RADIUS := 0.32
 const DIZZY_TIME := 2.0
-const LOOKS: Array[String] = ["knight", "mage", "archer", "mage", "archer", "mage", "archer"]
-const WEAPONS: Array[String] = ["sword", "wand", "bow", "staff", "bow", "rod", "bow"]
-const SHOTS: Array[String] = ["slash", "magic", "arrow", "magic", "arrow", "magic", "arrow"]
 
 var slot := 0
+var cls := ""  ## classes.gd hero id (knight, mage, archer, healer, bard)
+var dizzy_mult := 1.0  ## main.gd: the class and HEALING make dizzy spells shorter
+var safe_bonus := 0.0  ## main.gd: BUBBLE keeps a hero safe longer after popping up
 var owned := false
+var _col := Color.WHITE
 var body: Node3D
 var anim: Variant
 var ring: MeshInstance3D
@@ -31,12 +34,10 @@ var _target_yaw := 0.0
 var _has_target := false
 
 
-func setup(s: int, col: Color) -> void:
+func setup(s: int, col: Color, hero_class: String = "") -> void:
 	slot = s
-	body = Creatures.humanoid({"class": LOOKS[s % LOOKS.size()], "outfit": col, "seed": 11 + s * 7,
-		"weapon": WEAPONS[s % WEAPONS.size()]})
-	add_child(body)
-	anim = Creatures.anim(body)
+	_col = col
+	set_class(hero_class if Classes.valid(hero_class) else Classes.default_for(s))
 	var b := MeshKit.Builder.new()
 	b.torus(0.45, 0.05, Transform3D.IDENTITY, col, 20, 4, true)
 	ring = MeshKit.instance(b.build(), false)
@@ -53,12 +54,31 @@ func setup(s: int, col: Color) -> void:
 	add_child(stars)
 
 
+## Become another hero (a new body in the seat's colour; the ring, stars and position stay).
+func set_class(id: String) -> void:
+	if id == cls and body != null:
+		return
+	cls = id
+	if body != null:
+		body.queue_free()
+	var inf := Classes.info(id)
+	body = Creatures.humanoid({"class": String(inf.look), "outfit": _col, "seed": 11 + slot * 7, "weapon": String(inf.weapon)})
+	add_child(body)
+	anim = Creatures.anim(body)
+	if dizzy_t > 0.0:
+		anim.faint()
+
+
+func shot() -> String:
+	return String(Classes.info(cls).shot)
+
+
 ## Owner: walk (dir is world-space, length 0..1), kept inside the dungeon by clamp (from, to) -> to.
 func step(delta: float, dir: Vector3, clamp: Callable) -> void:
 	bonk_cd = maxf(0.0, bonk_cd - delta)
 	if dizzy_t > 0.0:
 		dir = Vector3.ZERO
-	var to := position + dir * SPEED * delta
+	var to := position + dir * SPEED * float(Classes.info(cls).speed) * delta
 	to = clamp.call(position, to)
 	moving = (to - position).length() / maxf(delta, 0.0001)
 	position = to
@@ -82,17 +102,19 @@ func set_remote(p: Vector3, yaw: float, down: bool) -> void:
 func get_dizzy() -> void:
 	if dizzy_t > 0.0:
 		return
-	dizzy_t = DIZZY_TIME
+	dizzy_t = DIZZY_TIME * dizzy_mult
 	anim.faint()
 	stars.visible = true
 
 
-static func shot_of(s: int) -> String:
-	return SHOTS[s % SHOTS.size()]
+## Wake up at once (a healer's spark): a moment of safety after.
+func wake() -> void:
+	if dizzy_t > 0.0:
+		dizzy_t = 0.01
 
 
 func bonk_anim() -> void:
-	anim.play("cast" if SHOTS[slot % SHOTS.size()] == "magic" else "attack", 0.35)
+	anim.play("cast" if shot() in ["magic", "heal", "note"] else "attack", 0.35)
 
 
 func animate(delta: float) -> void:
@@ -108,7 +130,7 @@ func animate(delta: float) -> void:
 		stars.rotation.y += delta * 6.0
 		if dizzy_t <= 0.0:
 			dizzy_t = 0.0
-			safe_t = 2.0
+			safe_t = 2.0 + safe_bonus
 			stars.visible = false
 			anim.revive()
 	anim.walk(moving if dizzy_t <= 0.0 else 0.0)
