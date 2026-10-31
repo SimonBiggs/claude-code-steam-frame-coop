@@ -454,6 +454,9 @@ static func tab(seen: Dictionary, on: bool, colour: Color, big: float = 1.0) -> 
 
 const VR_TILE := Vector2(300, 176)
 const VR_COLS := 5
+## At most this many rows on the VR wall (the newest / unseen first): five rows reached 1.68 m, past the head
+## (2026-10-31, 21 games with news). The rest stay on the TV / Deck board.
+const VR_MAX_ROWS := 4
 
 
 ## The VR picture wall (a Sprite3D showing a SubViewport). vr_update(wall, games, seen, selected) redraws it.
@@ -480,6 +483,7 @@ static func vr_update(wall: Sprite3D, games: Array, seen: Dictionary, selected: 
 		vp.remove_child(c)
 		c.queue_free()
 	var list := order(games, seen)
+	list = list.slice(0, VR_COLS * VR_MAX_ROWS)
 	var n_rows := maxi(1, ceili(float(list.size()) / VR_COLS))
 	var pad := 18.0
 	var head := 84.0
