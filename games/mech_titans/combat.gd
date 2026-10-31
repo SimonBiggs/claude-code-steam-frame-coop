@@ -48,6 +48,7 @@ var _foam_acc := {}  ## building -> seconds of foam
 var _beam_sound := false
 var _slowmo := 0.0
 var _tele_warned := 0.0
+var sig_tells := 0  ## host: boss kaiju big moves warned this session (bots)
 
 
 func setup(p_main: Node, p_city: City, p_mech: Mech, p_fx: Fx) -> void:
@@ -824,6 +825,7 @@ func telegraph(k: Kaiju, id: String) -> void:
 	if not bb.is_empty():
 		# A boss kaiju's big move: its own colour on the ground, a glow ring round it, a crown of sparks, a drumroll.
 		c = bb["color"]
+		sig_tells += 1
 		emit_fx("ring", [k.global_position + Vector3.UP * 0.5, k.radius * 1.6, c, w])
 		emit_fx("burst", ["sparks", k.center() + Vector3.UP * k.height * 0.6, 3.0, c])
 		emit_fx("sfx", ["drumroll", k.center(), 2.0, 1.0])
