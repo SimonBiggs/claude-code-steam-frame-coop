@@ -68,7 +68,11 @@ export const bots = {
   },
   /** Run many (default all) bot tests, `concurrency` at a time. Returns {pass, fail: [...details], table}. */
   async all(o: { only?: string[]; net?: boolean; concurrency?: number } = {}) {
-    const ids = o.only ?? (await bots.list());
+    // Bots that change game files refuse plain runs ("run it with tools/multibot.ts --copies" / tools/hot-everything-test):
+    // they have their own runners, so a sweep skips them instead of reporting two FAILs every time.
+    const own = new Set<string>();
+    if (!o.only) for (const id of await bots.list()) if ((await Bun.file(join(STAGE, "tests", id + "_bot.gd")).text().catch(() => "")).includes("this bot changes game files")) own.add(id);
+    const ids = (o.only ?? (await bots.list())).filter(id => !own.has(id));
     const results: any[] = [];
     let next = 0;
     await Promise.all(Array.from({ length: o.concurrency ?? 3 }, async () => {
@@ -78,6 +82,7 @@ export const bots = {
     return {
       pass: results.filter(r => r.pass).map(r => r.id),
       fail: results.filter(r => !r.pass),
+      ownRunner: [...own],
       table: results.map(r => `${r.pass ? "ok  " : "FAIL"} ${r.id.padEnd(20)} ${r.secs}s`).join("\n"),
     };
   },
