@@ -54,6 +54,7 @@ const Cups := preload("res://games/kart_race/cups.gd")
 const Items := preload("res://games/kart_race/items.gd")
 const PitScript := preload("res://games/kart_race/pit.gd")
 const Shelf := preload("res://games/kart_race/shelf.gd")
+const BgGen := preload("res://core/bg_gen.gd")
 
 ## Simple mode picture cues on the TV views (no words): [pad button, icons, icon colour].
 ## The "go" button follows the player's controls (A on a pad, W / up on a keyboard), see _cue_button.
@@ -317,6 +318,7 @@ func _setup_game(mode: String) -> void:
 
 func _exit_tree() -> void:
 	XRServer.world_scale = 1.0
+	BgGen.wait_all()  # no track job outlives the game
 	if net != null and net.mode != "client" and state == "race" and not race_logged and race_t > 5.0:
 		_race_telemetry("quit", [])
 
@@ -935,8 +937,14 @@ func debug_fake_vr():
 	players[0].add_child(cam)  # rides in the kart, like a headset's rig
 	cam.current = false
 	cam.cull_mask = 0xFFFFF & ~preload("res://core/vr_rig.gd").AVATAR_LAYER
-	for v in players[0].driver.find_children("*", "VisualInstance3D", true, false):
-		(v as VisualInstance3D).layers = preload("res://core/vr_rig.gd").AVATAR_LAYER
+	# Like a real headset (kart.set_first_person hides them there), the head doesn't see the TV kart's own
+	# driver, steering wheel or name tag: they go on the TV-only avatar layer.
+	for part in [players[0].driver, players[0].wheel_vis, players[0].tag]:
+		var vis: Array = (part as Node).find_children("*", "VisualInstance3D", true, false)
+		if part is VisualInstance3D:
+			vis.append(part)
+		for v in vis:
+			(v as VisualInstance3D).layers = preload("res://core/vr_rig.gd").AVATAR_LAYER
 	cockpit.xr_camera = cam
 	print("Fake VR cockpit on P1")
 	return cockpit
@@ -1733,6 +1741,9 @@ func _results() -> void:
 	order.sort_custom(func(a, b) -> bool: return a.place < b.place)
 	if SIMPLE_MODE:
 		_simple_results(order)
+		var nxt := _series_next()
+		if not nxt.is_empty():
+			_prefetch_tracks([nxt])
 		return
 	if cup_pts.size() != karts.size():
 		cup_pts.resize(karts.size())
@@ -1866,13 +1877,33 @@ func _load_story() -> void:
 		str(Story.place(int(Story.where(int(d["story_i"]))[0])).name), hats_won, int(d["golds"])])
 
 
+## Generated tracks take up to ~1 s on a Deck (trackgen.gd retries until check() passes), so the next ones are made
+## on a worker thread while the results / pit stop show (core/bg_gen.gd); the host tells clients which, so they
+## have them ready too. _build_desc() then takes the finished track at once.
+func _prefetch_tracks(descs: Array) -> void:
+	for d in descs:
+		if d is Array and not (d as Array).is_empty():
+			BgGen.prefetch(_gen_key(d), _gen_job(d))
+	if net.mode != "client":
+		net.event("prefetch", [descs])
+
+
+static func _gen_key(desc: Array) -> String:
+	return "kart:" + var_to_str(desc)
+
+
+static func _gen_job(desc: Array) -> Callable:
+	var d := desc.duplicate()
+	return func() -> Variant: return Story.track_for(d)
+
+
 ## Build the generated track track_desc describes (every machine makes the same one from the numbers).
 func _build_desc() -> void:
 	if track.key == Story.key_for(track_desc) and track.built != null:
 		_apply_looks()
 		return
 	var t0 := Time.get_ticks_msec()
-	var r: Array = Story.track_for(track_desc)
+	var r: Array = BgGen.take(_gen_key(track_desc), _gen_job(track_desc))  # usually prefetched (_prefetch_tracks)
 	var info: Dictionary = r[0]
 	track.build_info(info, String(r[1]))
 	track_i = track.track_i
@@ -2307,6 +2338,10 @@ func _start_pit() -> void:
 		slot += 1
 	pit_rows = _pit_rows()
 	pit.start(pit_rows)
+	var likely: Array = [Story.story_desc(_world(), int(save.data["story_i"]))] if save != null else []
+	for c in Cups.CUPS.size():
+		likely.append(Cups.desc(_world(), c, 0, speed_mode))
+	_prefetch_tracks(likely)
 	pits_done += 1
 	story({"who": "PIT STOP!", "line": "Drive through a picture!", "pic": "spanner", "color": BOLT_COLOR, "duration": 3.5})
 	print("Pit stop %d: %d people pick karts, speed and a cup at the picture gates" % [pits_done, slot])
@@ -3681,6 +3716,8 @@ func apply_event(kind: String, args: Array) -> void:
 			_show_tour_strips()
 		"pit_flash":
 			pit.flash(int(args[0]), int(args[1]))
+		"prefetch":
+			_prefetch_tracks(args[0])
 		"lapghost":
 			lap_ghost = args[0]
 		"pop":

@@ -58,7 +58,10 @@ var drift_fill: ColorRect
 var minimap: Control
 var pad_lost_t := -1.0
 var net_started := false
-var cockpit  # cockpit.gd when this kart is driven from VR (or fake VR in tests)
+var cockpit:  # cockpit.gd when this kart is driven from VR (or fake VR in tests)
+	set(v):
+		cockpit = v
+		_apply_kart()  # the VR rider's kart keeps scale 1 even when its class was picked before the cockpit existed
 var hand_l: XRController3D  # for core/net.gd's wrist menu
 var hand_r: XRController3D
 
