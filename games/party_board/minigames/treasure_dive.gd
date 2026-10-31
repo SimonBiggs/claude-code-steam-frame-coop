@@ -13,6 +13,7 @@ const META := {
 	"tv": [["L-STICK", "Swim"], ["A", "Dive (grab treasure, hide from the shark)"]],
 	"vr": [["GLOVE", "Steer the shark fin"]],
 	"vr_line": "Steer the shark with your glove: bump the swimmers!",
+	"cue": "pop",
 }
 const BoardView := preload("res://games/party_board/board_view.gd")
 const DIVE_T := 0.9
@@ -130,7 +131,7 @@ func play_tick(delta: float) -> void:
 		if Vector2(wp.x - shark.x, wp.z - shark.z).length() < BUMP_R:
 			_bump_cd[p] = 2.5
 			stun[p] = 1.2
-			if float(score.get(p, 0.0)) > 0.0:
+			if float(score.get(p, 0.0)) > 0.0 and not main.simple:  # SIMPLE: just dizzy, nobody loses a gem
 				score[p] = float(score[p]) - 1.0
 			if giant:
 				add_score(0, 1)
@@ -183,7 +184,7 @@ func _grab(p: int) -> void:
 
 
 func team_winner() -> int:
-	if not giant:
+	if not giant or teams.is_empty():  # SIMPLE_MODE plays it free-for-all: the scores decide
 		return -2
 	var isl := 0.0
 	for p in walkers():

@@ -23,8 +23,11 @@ const Creatures := preload("res://core/creatures.gd")
 
 ## Every minigame, in the order PB_ALL_MINIGAMES plays them.
 const GAMES := ["coin_catch", "hot_potato", "memory_tiles", "falling_platforms", "kart_dash", "balloon_pop",
-	"sheep_herding", "treasure_dive"]
-const SIMPLE_GAMES := ["coin_catch", "kart_dash", "balloon_pop"]
+	"sheep_herding", "treasure_dive", "mole_bop", "paint_splash", "fish_pond", "star_stack"]
+const PartyGen := preload("res://games/party_board/partygen.gd")
+## SIMPLE_MODE's minigames: one motion or one button each, free-for-all, fair for 1-6 players and the VR giant
+## (tests/party_board_mg_test.gd plays each with a slow, wobbly "small child" and proves they can win).
+const SIMPLE_GAMES := PartyGen.SIMPLE_GAMES
 const SIMPLE_DEMO_T := 3.0
 const SIMPLE_MAX_TIME := 25.0
 const MG_DIR := "res://games/party_board/minigames/"

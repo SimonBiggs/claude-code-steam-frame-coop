@@ -10,6 +10,7 @@ const META := {
 	"tv": [["L-STICK", "Run to a balloon"], ["A", "Jump and POP it"]],
 	"vr": [["GLOVES", "Swat balloons up high"]],
 	"vr_line": "SWAT the balloons that float up high!",
+	"cue": "pop",
 }
 const LOW := 2.6
 const TOP := 9.5

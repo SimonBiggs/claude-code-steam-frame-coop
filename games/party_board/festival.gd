@@ -10,6 +10,7 @@ extends Node3D
 
 const MeshKit := preload("res://core/mesh_kit.gd")
 const BD := preload("res://games/party_board/board_data.gd")
+const Boards := preload("res://games/party_board/boards.gd")
 
 const FLAGS := 12
 const MANGO_COLOR := Color(1.0, 0.6, 0.15)
@@ -33,8 +34,10 @@ const BALLOON_COLS: Array[Color] = [Color(1.0, 0.35, 0.4), Color(1.0, 0.85, 0.3)
 var main: Node
 var built: Array = []
 var flags: Array = []  # colour html strings, oldest first
+var trophies: Array = []  # won trophy ids (boards.gd TROPHIES), shown on Mango's TROPHY WALL
 var deco_mi: MeshInstance3D
 var flag_mi: MeshInstance3D
+var wall_mi: MeshInstance3D
 var _t := 0.0
 var _boom_t := 0.0
 
@@ -64,12 +67,25 @@ func _ready() -> void:
 	flag_mi = MeshInstance3D.new()
 	flag_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(flag_mi)
+	wall_mi = MeshInstance3D.new()
+	wall_mi.name = "TrophyWall"
+	wall_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(wall_mi)
+	wall_mi.mesh = _wall_mesh([])
 
 
-## The festival from the host: {built: [ids], flags: [colour html]}. A new piece pops in with confetti.
+## The festival from the host: {built: [ids], flags: [colour html], trophies: [ids]}. A new piece pops in.
 func apply(s: Dictionary) -> void:
 	var nb: Array = s.get("built", [])
 	var nf: Array = s.get("flags", [])
+	var nt: Array = s.get("trophies", [])
+	if var_to_str(nt) != var_to_str(trophies):
+		var won := nt.size() > trophies.size() and _t > 1.0
+		trophies = nt.duplicate()
+		wall_mi.mesh = _wall_mesh(trophies)
+		if won:
+			wall_mi.scale = Vector3(1.0, 0.6, 1.0)
+			create_tween().tween_property(wall_mi, "scale", Vector3.ONE, 0.6).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
 	var grew := nb.size() > built.size() and _t > 1.0  # (not when a save loads)
 	if var_to_str(nb) != var_to_str(built):
 		built = nb.duplicate()
@@ -82,6 +98,11 @@ func apply(s: Dictionary) -> void:
 		flag_mi.mesh = _flag_mesh(flags) if not flags.is_empty() else null
 
 
+## The board was rebuilt (a new party's layout): the pieces that stand by START move with it.
+func refresh() -> void:
+	deco_mi.mesh = _deco_mesh(built) if not built.is_empty() else null
+
+
 ## Where a piece stands (board units, on the ground).
 static func spot(id: String) -> Vector3:
 	var s: Array = SPOTS.get(id, [0.0, 12.0])
@@ -89,6 +110,49 @@ static func spot(id: String) -> Vector3:
 	var x := sin(a) * float(s[1])
 	var z := cos(a) * float(s[1])
 	return Vector3(x, maxf(BD.height(x, z), 0.1), z)
+
+
+## Mango's TROPHY WALL: on the east beach, facing the island (board units, on the ground).
+const WALL_ANGLE := 72.0
+const WALL_R := 12.7
+
+
+static func wall_spot() -> Vector3:
+	var a := deg_to_rad(WALL_ANGLE)
+	return _ground(sin(a) * WALL_R, cos(a) * WALL_R)
+
+
+## The wall: three wooden shelves with a slot for every trophy (boards.gd TROPHIES); a won trophy is a gold
+## cup with its colour on the band and a glowing gem, the others a little grey stand waiting.
+func _wall_mesh(won: Array) -> ArrayMesh:
+	var b := MeshKit.builder()
+	var p := wall_spot()
+	var inward := Vector3(-p.x, 0, -p.z).normalized()
+	var basis := Basis(Vector3.UP, atan2(inward.x, inward.z))
+	var wood := Color(0.62, 0.42, 0.27)
+	var at := func(v: Vector3) -> Transform3D: return Transform3D(basis, p + basis * v)
+	b.box(Vector3(3.4, 3.0, 0.2), at.call(Vector3(0, 1.6, -0.25)), wood.darkened(0.2))
+	for row in 3:
+		b.box(Vector3(3.5, 0.1, 0.6), at.call(Vector3(0, 0.35 + row * 1.0, 0.0)), wood)
+	for sx in [-1.75, 1.75]:
+		b.box(Vector3(0.14, 3.2, 0.62), at.call(Vector3(sx, 1.6, 0.0)), wood.darkened(0.1))
+	b.cone(0.55, 0.5, at.call(Vector3(0, 3.35, -0.2)), MANGO_COLOR, 10)  # a party-hat top
+	var n := Boards.TROPHIES.size()
+	for i in n:
+		var tr: Dictionary = Boards.TROPHIES[i]
+		var col := i % 4
+		var row := 2 - i / 4
+		var q := Vector3(-1.2 + col * 0.8, 0.4 + row * 1.0, 0.05)
+		if won.has(tr.id):
+			var gold := Color(1.0, 0.82, 0.25)
+			b.cylinder(0.16, 0.2, 0.1, at.call(q + Vector3(0, 0.05, 0)), Color(0.3, 0.25, 0.3), 10)
+			b.cylinder(0.05, 0.08, 0.22, at.call(q + Vector3(0, 0.2, 0)), gold, 8, true)
+			b.dome(0.22, Transform3D(basis.scaled(Vector3(1, -1.1, 1)), p + basis * (q + Vector3(0, 0.56, 0))), gold, 12, true)
+			b.torus(0.2, 0.04, at.call(q + Vector3(0, 0.48, 0)), tr.color, 12, 4, true)
+			b.sphere(0.07, at.call(q + Vector3(0, 0.38, 0.17)), tr.color, 8, true)
+		else:
+			b.cylinder(0.12, 0.15, 0.08, at.call(q + Vector3(0, 0.04, 0)), Color(0.55, 0.55, 0.58), 8)
+	return b.build()
 
 
 static func _ground(x: float, z: float) -> Vector3:

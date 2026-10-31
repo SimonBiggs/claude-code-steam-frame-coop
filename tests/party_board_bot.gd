@@ -21,6 +21,8 @@ extends Node
 ## "BOT: ERROR how-to text" for any instruction text in the game's HUD, banners or VR text.
 
 const BotKit := preload("res://tests/bot_kit.gd")
+const Boards := preload("res://games/party_board/boards.gd")
+const PartyGen := preload("res://games/party_board/partygen.gd")
 
 var kit: BotKit
 var main: Node
@@ -87,8 +89,8 @@ func _join() -> void:
 
 func _start() -> void:
 	if main.simple:  # the party starts by itself
-		if main.flow != null:
-			main.flow.bot_land = ["blue", "red", "blue", "red"]
+		if main.flow != null:  # a present, the board's special space, then the usual (turn_flow: "special" = this board's)
+			main.flow.bot_land = ["gift", "special", "blue", "red", "special", "blue", "red"]
 		return
 	if String(main.net.state_get("phase", "")) != "title":
 		return
@@ -271,6 +273,10 @@ func _drive_tv(slot: int) -> void:
 				if _may_press(slot, 0.8):
 					var items: Array = tm.items
 					var pick := 0
+					if String((main.net.state_get("menu", {}) as Dictionary).get("kind", "")) == "items":
+						tm.confirm(items.size() - 1)  # use the item (ROLL is first)
+						seen["bot:used_item"] = true
+						return
 					while pick < items.size() and bool((items[pick] as Dictionary).get("disabled", false)):
 						pick += 1
 					if pick == 0:
@@ -488,13 +494,14 @@ func _checks_simple(mode: String) -> void:
 	var menus: PackedStringArray = []
 	var mgs: PackedStringArray = []
 	for k in seen:
-		if String(k).begins_with("menu:") and String(k) != "menu:" and String(k) != "menu:festival":
+		if String(k).begins_with("menu:") and not String(k) in ["menu:", "menu:festival", "menu:gift", "menu:items"]:
 			menus.append(String(k))
 		if String(k).begins_with("mg:"):
 			mgs.append(String(k).substr(3))
 	kit.assert_true(menus.is_empty(), "%s: no menus pop up %s" % [mode, str(menus)])
-	for s in ["step:event", "step:duel", "step:item"]:
+	for s in ["step:event", "step:duel"]:
 		kit.assert_true(not seen.has(s), "%s: no %s" % [mode, s])
+	_board_checks(mode)
 	for id in mgs:
 		kit.assert_true(main.runner.SIMPLE_GAMES.has(id), "%s: %s is one of the simple minigames" % [mode, id])
 	kit.info("minigames played: %s" % ", ".join(mgs))
@@ -581,6 +588,31 @@ func _simple_timeline() -> void:
 	kit.at(49.5, "the late player's cues were forgotten?", func() -> void:
 		for sl in main.cue_done:
 			kit.assert_true(int(sl) == 0 or main.party.is_active(int(sl)), "SIMPLE: a seat's cues reset when its player leaves (P%d)" % (int(sl) + 1)))
+
+
+## DEEPER PARTIES: this machine rebuilt the host's seeded board (layout, board dress-up, specials), presents and
+## special spaces happened (the host forces a landing on each), items were held, the trophy wall is up.
+func _board_checks(mode: String) -> void:
+	var plan: Dictionary = main.net.state_get("plan", {})
+	var bid := String(plan.get("board", ""))
+	kit.assert_true(Boards.ids().has(bid), "%s: the party visits a board (%s)" % [mode, bid])
+	kit.assert_eq(main.board.theme, bid, "%s: this machine dressed the island as %s" % [mode, bid])
+	var lay := PartyGen.layout(int(plan.get("seed", 0)))
+	kit.assert_eq(main.data.layout, lay, "%s: this machine built the seeded layout" % mode)
+	kit.assert_true(PartyGen.check_board(main.data).is_empty(), "%s: the board is connected %s" % [mode, str(PartyGen.check_board(main.data))])
+	var special := String(Boards.board(bid).special)
+	var sp := 0
+	var gifts := 0
+	for i in main.data.count():
+		sp += 1 if main.data.type_of(i) == special else 0
+		gifts += 1 if main.data.type_of(i) == "gift" else 0
+	kit.assert_true(sp >= 2 and gifts >= 2, "%s: %d %s spaces and %d presents on the board" % [mode, sp, special, gifts])
+	kit.assert_true(main.festival.wall_mi != null and main.festival.wall_mi.mesh != null, "%s: Mango's trophy wall stands" % mode)
+	kit.info("%s: board %s, %d spaces" % [mode, bid, main.data.count()])
+	if mode != "client":
+		for s in ["step:gift", "step:special"]:
+			kit.assert_true(seen.has(s), "%s: saw %s" % [mode, s])
+		kit.assert_true(int(main.flow.run.get("gifts", 0)) > 0, "%s: a present was opened" % mode)
 
 
 ## The pause banner (TV and VR) says PAUSED and nothing else.
@@ -703,7 +735,9 @@ func _cue_checks(mode: String) -> void:
 	if main.tv_ui != null and tv_seats:
 		kit.assert_true(cues.has("cue_roll"), "%s: SIMPLE: a TV player saw A + an arrow + a die (roll)" % mode)
 		kit.assert_true(cues.has("cue_learned_roll"), "%s: SIMPLE: the roll cue went after two rolls" % mode)
-		var games := {"coin_catch": "catch", "kart_dash": "mash", "balloon_pop": "pop"}
+		var games := {}
+		for id in main.runner.SIMPLE_GAMES:
+			games[id] = String(main.runner.meta(String(id)).get("cue", ""))
 		var learned := 0
 		for id in games:
 			if seen.has("mg:" + String(id)):

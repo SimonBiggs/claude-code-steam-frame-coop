@@ -11,6 +11,7 @@ const META := {
 	"tv": [["L-STICK", "Run under the coins"]],
 	"vr": [["GLOVE", "Shake the tree"], ["GLOVES", "Catch falling coins"]],
 	"vr_line": "Shake the tree, catch the coins!",
+	"cue": "catch",
 }
 const CANOPY := Vector3(0, 6.0, 0)
 const CANOPY_R := 3.4

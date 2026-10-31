@@ -24,6 +24,7 @@ const UiKit := preload("res://core/ui_kit.gd")
 const HudKit := preload("res://core/hud_kit.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 const Rules := preload("res://games/party_board/rules.gd")
+const Boards := preload("res://games/party_board/boards.gd")
 const Party := preload("res://core/party.gd")
 const CueScript := preload("res://games/party_board/cue.gd")
 
@@ -196,14 +197,19 @@ func _refresh_cards() -> void:
 		rk.text = HudKit.ordinal(int(ranks.get(pid, 1)))
 		rk.add_theme_color_override("font_color", HudKit.rank_color(int(ranks.get(pid, 1))))
 		if main.simple:
-			for nm in ["Cpu", "Coins", "CoinIcon", "Rank", "Items"]:
+			for nm in ["Cpu", "Coins", "CoinIcon", "Rank"]:
 				(card.find_child(nm, true, false) as Control).visible = false
 		var items := card.find_child("Items", true, false) as HBoxContainer
-		for c in items.get_children():
-			c.queue_free()
-		for it in pd.get("items", []):
-			var info: Dictionary = Rules.ITEMS.get(String(it), {})
-			items.add_child(UiKit.icon(String(info.get("icon", "bag")), info.get("color", Color.WHITE), 24.0 * s))
+		var sig := var_to_str(pd.get("items", []))
+		if String(items.get_meta("sig", "")) != sig:  # (rebuilt only when the items change)
+			items.set_meta("sig", sig)
+			for c in items.get_children():
+				c.queue_free()
+			for it in pd.get("items", []):
+				var info: Dictionary = Boards.item(String(it)) if main.simple else Rules.ITEMS.get(String(it), {})
+				items.add_child(UiKit.icon(String(info.get("icon", "bag")), info.get("color", Color.WHITE), (30.0 if main.simple else 24.0) * s))
+			if main.simple and not items.get_children().is_empty():
+				UiKit.pop_in(items.get_child(0) as Control)
 		var on := pid == cur and String(main.net.state_get("phase", "")) == "board"
 		card.modulate = Color(1, 1, 1, 1) if on or cur < 0 else Color(0.82, 0.82, 0.86, 0.92)
 		var lift: Control = card.get_meta("lift")
@@ -603,10 +609,16 @@ func cue_key(slot: int) -> String:
 	var mph := String(main.net.state_get("mg_phase", ""))
 	if mg == null or not is_instance_valid(mg) or not (mph == "howto" or mph == "play") or not (mg.pids as Array).has(slot):
 		return ""
-	var k := String({"coin_catch": "catch", "kart_dash": "mash", "balloon_pop": "pop"}.get(String(mg.cfg.get("id", "")), ""))
+	var k := _mg_cue(mg)
 	if k == "" or main.cue_learned(slot, k):
 		return ""
 	return k
+
+
+## A minigame's picture cue (its META "cue"): catch (STICK + a runner: move to score), mash (A + a kart: press
+## fast), pop (A + an arrow + a balloon: press at the right moment).
+func _mg_cue(mg: Node) -> String:
+	return String((main.runner.meta(String(mg.cfg.get("id", ""))) as Dictionary).get("cue", ""))
 
 
 ## What each local TV player has just done (it counts towards their cue going away).
@@ -633,11 +645,12 @@ func _note_done() -> void:
 		if not main.is_local_tv(int(slot)) or not (mg.pids as Array).has(int(slot)):
 			continue
 		var sc := int(mg.score.get(slot, 0.0))
-		if id == "coin_catch" or id == "balloon_pop":
+		var ck := _mg_cue(mg)
+		if ck == "catch" or ck == "pop":
 			if _mg_score.has(slot) and sc > int(_mg_score[slot]) and mph == "play":
-				main.cue_did(int(slot), "catch" if id == "coin_catch" else "pop")  # caught a coin / popped a balloon
+				main.cue_did(int(slot), ck)  # scored (caught a coin, popped a balloon, bopped a mole...)
 			_mg_score[slot] = sc
-		elif id == "kart_dash" and (mph == "play" or mph == "howto") and not main.get_tree().paused \
+		elif ck == "mash" and (mph == "play" or mph == "howto") and not main.get_tree().paused \
 				and main.party.just_pressed(int(slot), "accept"):
 			_mash[slot] = int(_mash.get(slot, 0)) + 1
 			if int(_mash[slot]) % 5 == 0:

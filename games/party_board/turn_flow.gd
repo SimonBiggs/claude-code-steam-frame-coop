@@ -10,8 +10,15 @@ extends Node
 ## SIMPLE_MODE (main.simple): the title only lasts a moment (no setup menu), a PRACTICE roll for every
 ## human (the VR ghost hand / the glowing A on the dice block show how), then SIMPLE_ROUNDS short rounds:
 ## roll, hop (paths pick themselves: towards the STAR), and you pick the STAR up just by passing or
-## landing on it. Blue spaces: a bonus hop forward; red: slide back. No coins, items, shop, events,
-## duels, final turns or catch-up. A minigame after every round: the winner gets a STAR.
+## landing on it. Blue spaces: a bonus hop forward; red: slide back. No coins, shop, events, duels or final
+## turns. A minigame after every round: the winner gets a STAR.
+## DEEPER PARTIES (boards.gd, partygen.gd): every party is a seeded board on one of five BOARDS (unlocked as the
+## family plays; TODAY'S PARTY can visit any). PRESENT spaces give an item (a two-picture pick; hold one): 2 DICE,
+## SWAP (with whoever is nearest the STAR) or WARP (to just before the STAR), used at the start of a turn (ROLL or
+## the item). Each board's SPECIAL space (volcano / candy / cannon / ghost / warp pads) and its EVENT once per party.
+## Gentle catch-up: whoever has the fewest stars gets a present each round (if they hold nothing) and slides back
+## only one on red; CPUs dawdle in minigames; CPU turns are quicker. TROPHIES for Mango's wall (saved) put new
+## hats on the tokens.
 
 const Seq := preload("res://games/party_board/sequencer.gd")
 const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
@@ -23,6 +30,7 @@ const PartyGen := preload("res://games/party_board/partygen.gd")
 const Festival := preload("res://games/party_board/festival.gd")
 const Seeded := preload("res://core/seeded.gd")
 const Telemetry := preload("res://core/telemetry.gd")
+const Boards := preload("res://games/party_board/boards.gd")
 
 const CPU_NAMES := ["BOBO", "PIP", "MIMI", "TUTU", "ZAZA", "LULU", "KIKI"]
 const MIN_SEATS := 4
@@ -67,6 +75,15 @@ var festival_done := false
 var party_t0 := 0
 var run := {}
 const PICK_WAIT := 12.0  ## the winner's festival pick: nobody picks -> the first piece
+## DEEPER PARTIES (boards.gd): items, specials, the board event, catch-up and trophies.
+const ITEM_WAIT := 9.0  ## the item / present picture choice: nobody picks -> roll / the first present
+const CPU_TURN := 0.6  ## CPU turns go quicker (kids get bored waiting)
+var candy_used := false  ## SWEET SHOP: a CANDY space rolls again once per turn
+var rocket_round := -1  ## SPACE STATION's ROCKET: everyone rolls two dice this round
+var mod := {}  ## the board event's lasting changes, published as "board_mod": {rainbow: bool, chest: space id}
+var behind_final: Array = []  ## pids with the fewest stars when the last round started (COMEBACK trophy)
+var new_trophies: Array = []  ## won this party: shown after the winner moment
+var catchup_given := 0  ## presents given to whoever was behind (telemetry)
 
 
 func _ready() -> void:
@@ -101,7 +118,8 @@ func begin() -> void:
 	net.state_set("vr", main.vr_rig != null)
 	net.state_set("saved", {"parties": int(main.save.data["parties"]), "giant_wins": int(main.save.data["giant_wins"]),
 		"best_stars": int(main.save.data["best_stars"])})
-	for k in ["menu", "dice", "branch", "duel", "mg", "mg_phase", "mg_result", "ceremony", "results", "final", "steps_left", "winners"]:
+	for k in ["menu", "dice", "branch", "duel", "mg", "mg_phase", "mg_result", "ceremony", "results", "final", "steps_left", "winners",
+			"board_mod"]:
 		net.state_set(k, null)
 	net.state_set("cur", -1)
 	net.state_set("step", "")
@@ -301,6 +319,11 @@ func start_game() -> void:
 	mg_played.clear()
 	mg_cycle.clear()
 	takeover.clear()
+	mod = {}
+	rocket_round = -1
+	behind_final = []
+	new_trophies = []
+	catchup_given = 0
 	game_on = true
 	round_n = 0
 	turn_i = 0
@@ -352,8 +375,9 @@ func _simple_opening() -> void:
 	net.state_set("step", "overview")
 	main.fx("sfx", ["party_horn"])
 	main.fx("banner", ["TODAY!" if bool(plan.get("daily", false)) else "LET'S PARTY!", "", "victory", 2.0])
-	var th: Dictionary = PartyGen.THEMES[int(plan.get("theme", 0))]
-	main.fx("story", ["MANGO", String(th.line), "toucan", main.MANGO_COLOR.to_html()])
+	var bd: Dictionary = Boards.board(String(plan.get("board", "island")))
+	main.fx("story", ["MANGO", "NEW BOARD!" if bool(plan.get("fresh", false)) else String(bd.name), String(bd.pic),
+		(bd.color as Color).to_html()])
 	seq.wait(_w(2.0))
 	seq.add(func() -> void:
 		main.net.state_set("step", "star_intro")
@@ -391,9 +415,15 @@ func _start_round() -> void:
 	net.state_set("music", "tension" if bool(net.state_get("final", false)) else "party")
 	if main.simple:
 		if round_n == rounds and rounds > 1:
-			net.state_set("sky", "sunset")
+			if String(net.state_get("sky", "day")) == "day":
+				net.state_set("sky", "sunset")
 			main.fx("banner", ["LAST ROUND!", "", "boss", 1.8])
+			behind_final = _behind()
 			seq.wait(_w(1.6))
+		if round_n >= 2:
+			seq.add(_catch_up_simple)
+		if round_n == int(plan.get("event_round", 0)):
+			seq.add(_board_event)
 		seq.add(_next_turn)
 		return
 	main.fx("banner", ["ROUND %d" % round_n, "of %d" % rounds, "default", 1.8])
@@ -440,14 +470,19 @@ func _next_turn() -> void:
 func _turn(pid: int) -> void:
 	var net: Node = main.net
 	shop_used = false
-	dice_n = 1
+	candy_used = false
+	dice_n = 2 if main.simple and rocket_round == round_n else 1
 	net.state_set("cur", pid)
 	net.state_set("step", "start")
 	net.state_set("steps_left", 0)
 	main.fx("sfx", ["bell", -6.0])
-	seq.wait(_w(1.1))
-	if not main.simple and not (pl[pid]["items"] as Array).is_empty():
-		seq.add(func() -> void: _item_phase(pid))
+	seq.wait(_w(CPU_TURN if main.simple and _cpu(pid) else 1.1))
+	if not (pl[pid]["items"] as Array).is_empty():
+		seq.add(func() -> void:
+			if main.simple:
+				_item_phase_simple(pid)
+			else:
+				_item_phase(pid))
 	seq.add(func() -> void: _roll(pid))
 	seq.add(func() -> void: _end_turn(pid))
 
@@ -750,6 +785,8 @@ func _hop_to(pid: int, to: int) -> void:
 	net.state_set("steps_left", left)
 	seq.wait(_w(0.36))
 	var star := int(net.state_get("star", -1))
+	if main.simple and to == int(mod.get("chest", -1)):
+		seq.add(func() -> void: _chest_grab(pid))
 	if to == star and main.simple:
 		seq.add(func() -> void: _star_grab(pid))
 	elif to == star:
@@ -899,6 +936,8 @@ func _land(pid: int) -> void:
 	var type: String = main.data.type_of(sp)
 	if not bot_land.is_empty():
 		type = String(bot_land.pop_front())
+		if type == "special":  # bots: this board's special space
+			type = String(Boards.board(String(plan.get("board", "island"))).special)
 	var mult := 2 if bool(net.state_get("final", false)) else 1
 	net.state_set("step", "land")
 	if main.simple:
@@ -928,12 +967,23 @@ func _land(pid: int) -> void:
 ## slide back SIMPLE_BACK spaces. Shown by the space's colour, a sound and the token, no text.
 func _land_simple(pid: int, sp: int, type: String) -> void:
 	run[type] = int(run.get(type, 0)) + 1
+	if type == "gift":
+		main.fx("space_fx", [sp, Boards.GIFT_COLORS[0]])
+		seq.add(func() -> void: _gift(pid))
+		seq.wait(_w(0.4))
+		return
+	if Boards.SPECIALS.has(type):
+		main.fx("space_fx", [sp, Boards.SPECIALS[type].tile])
+		seq.add(func() -> void: _special(pid, sp, type))
+		seq.wait(_w(0.4))
+		return
 	if type == "red":
 		main.fx("space_fx", [sp, Color(1.0, 0.35, 0.35)])
 		main.fx("sfx", ["boing", -3.0, 0.8])
 		main.fx("anim", [pid, "hurt", 0.6])
 		seq.wait(_w(0.6))
-		for i in SIMPLE_BACK:
+		# gentle catch-up: whoever has the fewest stars only slides back one
+		for i in (1 if _behind().has(pid) else SIMPLE_BACK):
 			seq.add(func() -> void:
 				var back: Array = main.data.prev_of(int(pl[pid]["space"]))
 				if not back.is_empty():
@@ -950,6 +1000,279 @@ func _land_simple(pid: int, sp: int, type: String) -> void:
 			main.net.state_set("step", "move")
 			seq.add(func() -> void: _hop(pid)))
 	seq.wait(_w(0.6))
+
+
+# --- DEEPER PARTIES: presents, items, special spaces, the board event, catch-up ------------------------
+
+## Players with the fewest stars, when they are behind someone ([] when everyone is level).
+func _behind() -> Array:
+	var lo := 1 << 30
+	var hi := -1
+	for k in pl:
+		lo = mini(lo, int(pl[k]["stars"]))
+		hi = maxi(hi, int(pl[k]["stars"]))
+	if hi <= lo:
+		return []
+	var out: Array = []
+	for k in pl:
+		if int(pl[k]["stars"]) == lo:
+			out.append(int(k))
+	return out
+
+
+## The one player things are kindest to (fewest stars; a human first, then whoever is furthest from the STAR).
+func _last_place() -> int:
+	var star := int(main.net.state_get("star", 0))
+	var best := -1
+	var key := 1 << 30
+	for k in pl:
+		var pid := int(k)
+		var kk: int = int(pl[pid]["stars"]) * 100000 + (10000 if _cpu(pid) else 0) + (1000 - mini(999, main.data.distance(int(pl[pid]["space"]), star)))
+		if best < 0 or kk < key:
+			best = pid
+			key = kk
+	return best
+
+
+func _random_item() -> String:
+	var ids := Boards.item_ids()
+	return ids[rng.randi() % ids.size()]
+
+
+## Hold one item (a new one replaces the old): the token cheers and the item pops up over it.
+func _give_item(pid: int, id: String) -> void:
+	if not pl.has(pid) or Boards.item(id).is_empty():
+		return
+	pl[pid]["items"] = [id]
+	_publish()
+	main.fx("item_fx", [pid, id])
+	main.fx("anim", [pid, "cheer", 0.8])
+	main.fx("sfx", ["pickup", -3.0])
+
+
+## A PRESENT space: pick one of two items (two pictures with one word each).
+func _gift(pid: int) -> void:
+	main.net.state_set("step", "gift")
+	main.fx("sfx", ["chest", -2.0])
+	var ids: Array = Seeded.shuffled(rng, Boards.item_ids()).slice(0, 2)
+	var items: Array = []
+	for id in ids:
+		var it := Boards.item(String(id))
+		items.append({"id": String(id), "text": String(it.word), "icon": String(it.icon), "icon_color": it.color})
+	_ask(pid, "PRESENT!", items, _cpu_gift(pid, ids), "gift", ITEM_WAIT)
+	seq.add(func() -> void:
+		var id := menu_answer if ids.has(menu_answer) else String(ids[0])
+		_give_item(pid, id)
+		run["gifts"] = int(run.get("gifts", 0)) + 1)
+	seq.wait(_w(0.8))
+
+
+func _cpu_gift(pid: int, ids: Array) -> String:
+	var d: int = main.data.distance(int(pl[pid]["space"]), int(main.net.state_get("star", 0)))
+	for want in (["warp", "double", "swap"] if d > 8 else ["double", "swap", "warp"]):
+		if ids.has(want):
+			return want
+	return String(ids[0])
+
+
+## Holding an item at the start of the turn: ROLL or use it (two pictures).
+func _item_phase_simple(pid: int) -> void:
+	var id := String((pl[pid]["items"] as Array)[0])
+	var it := Boards.item(id)
+	var list: Array = [{"id": "roll", "text": "ROLL", "icon": "play", "icon_color": Color(1, 1, 1)},
+		{"id": id, "text": String(it.word), "icon": String(it.icon), "icon_color": it.color}]
+	_ask(pid, String(it.word), list, _cpu_item_simple(pid, id), "items", ITEM_WAIT)
+	seq.add(func() -> void: _use_item_simple(pid, menu_answer))
+
+
+func _cpu_item_simple(pid: int, id: String) -> String:
+	var star := int(main.net.state_get("star", 0))
+	var d: int = main.data.distance(int(pl[pid]["space"]), star)
+	match id:
+		"warp":
+			return "warp" if d > 6 else "roll"
+		"double":
+			return "double" if d > 3 and rocket_round != round_n else "roll"
+		"swap":
+			var t := _closest_to_star(pid)
+			if t >= 0 and main.data.distance(int(pl[t]["space"]), star) + 4 <= d:
+				return "swap"
+	return "roll"
+
+
+func _use_item_simple(pid: int, id: String) -> void:
+	if id == "roll" or not (pl[pid]["items"] as Array).has(id):
+		return
+	(pl[pid]["items"] as Array).erase(id)
+	_publish()
+	run["items_used"] = int(run.get("items_used", 0)) + 1
+	if not _cpu(pid):
+		var used: Array = main.save.data["items_used"]
+		if not used.has(id):
+			used.append(id)
+			main.save.mark_dirty()
+	main.net.state_set("step", "item")
+	main.fx("item_fx", [pid, id])
+	main.fx("sfx", ["power_up", -3.0])
+	seq.wait(_w(0.8))
+	match id:
+		"double":
+			dice_n = 2
+		"swap":
+			seq.add(func() -> void:
+				var t := _closest_to_star(pid)
+				if t >= 0:
+					_swap_simple(pid, t))
+			seq.wait(_w(1.4))
+		"warp":
+			seq.add(func() -> void:
+				_move_to(pid, _warp_spot(pid))
+				main.fx("sfx", ["warp"]))
+			seq.wait(_w(1.4))
+
+
+## SWAP / the ghost: two tokens fly to each other's spaces (no words: a sound and a little spin).
+func _swap_simple(a: int, b: int) -> void:
+	var sa := int(pl[a]["space"])
+	pl[a]["space"] = int(pl[b]["space"])
+	pl[b]["space"] = sa
+	_publish()
+	main.fx("sfx", ["teleport"])
+	main.fx("anim", [a, "cheer", 0.8])
+	main.fx("anim", [b, "hurt", 0.6])
+
+
+## WARP: a space two or three hops before the STAR (as close as can be, never on it).
+func _warp_spot(pid: int) -> int:
+	var star := int(main.net.state_get("star", 0))
+	var best := int(pl[pid]["space"])
+	var bd := 999
+	for i in main.data.count():
+		var d: int = main.data.distance(i, star)
+		if i != star and d >= 2 and d <= 3 and d < bd and not main.data.is_junction(i):
+			bd = d
+			best = i
+	return best
+
+
+## The board's SPECIAL space (boards.gd): VOLCANO (the STAR lands just ahead), CANDY (roll again), CANNON
+## (fly ahead), GHOST (swap with whoever is nearest the STAR, or a present if that's you), WARP (to the next pad).
+func _special(pid: int, sp: int, type: String) -> void:
+	var net: Node = main.net
+	net.state_set("step", "special")
+	main.fx("special_fx", [type, sp, pid])
+	run["specials"] = int(run.get("specials", 0)) + 1
+	seq.wait(_w(0.7))
+	var star := int(net.state_get("star", -1))
+	match type:
+		"volcano":
+			seq.add(func() -> void:
+				var spots: Array = PartyGen.ahead_spots(main.data, sp, Boards.VOLCANO_STAR).filter(func(s: int) -> bool:
+					return s != star and s != int(mod.get("chest", -1)))
+				if not spots.is_empty():
+					_fly_star(int(spots[rng.randi() % spots.size()])))
+		"candy":
+			if not candy_used:
+				candy_used = true
+				dice_n = 1
+				seq.add(func() -> void: _roll(pid))
+		"cannon":
+			seq.add(func() -> void:
+				var at := sp
+				var passed_star := false
+				for k in Boards.CANNON_HOPS:
+					at = int(main.data.next_of(at)[0])
+					passed_star = passed_star or at == star
+				_move_to(pid, at)
+				main.fx("sfx", ["explosion", -6.0])
+				if passed_star:
+					seq.wait(_w(1.1))
+					seq.add(func() -> void: _star_grab(pid)))
+			seq.wait(_w(1.2))
+		"ghost":
+			seq.add(func() -> void:
+				var t := _closest_to_star(pid)
+				var me: int = main.data.distance(int(pl[pid]["space"]), star)
+				if t >= 0 and main.data.distance(int(pl[t]["space"]), star) < me:
+					_swap_simple(pid, t)
+				else:
+					_give_item(pid, _random_item()))
+			seq.wait(_w(1.2))
+		"warp":
+			seq.add(func() -> void:
+				var to := PartyGen.warp_target(plan.get("warps", []), sp)
+				_move_to(pid, to)
+				main.fx("sfx", ["warp"])
+				if to == star:
+					seq.wait(_w(1.0))
+					seq.add(func() -> void: _star_grab(pid)))
+			seq.wait(_w(1.2))
+
+
+## PIRATE COVE's TREASURE: passing the chest gives a STAR (then it's gone).
+func _chest_grab(pid: int) -> void:
+	mod.erase("chest")
+	main.net.state_set("board_mod", mod.duplicate())
+	pl[pid]["stars"] = int(pl[pid]["stars"]) + 1
+	_publish()
+	run["chest"] = true
+	main.fx("star_fx", [pid, 1])
+	main.fx("sfx", ["chest"])
+	main.fx("banner", ["TREASURE!", "", "victory", 1.6])
+	seq.wait(_w(1.8))
+
+
+## The board's EVENT (once per party, at the start of plan.event_round), told by Mango's picture card.
+func _board_event() -> void:
+	var bd: Dictionary = Boards.board(String(plan.get("board", "island")))
+	main.net.state_set("step", "event_board")
+	main.fx("story", ["MANGO", String(bd.event_word), String(bd.event_pic), (bd.color as Color).to_html()])
+	main.fx("sfx", ["fanfare", -4.0])
+	run["event"] = String(bd.event)
+	seq.wait(_w(1.4))
+	seq.add(func() -> void: _do_board_event(String(bd.event)))
+	seq.wait(_w(1.6))
+
+
+func _do_board_event(ev: String) -> void:
+		var star := int(main.net.state_get("star", 0))
+		var last := _last_place()
+		match ev:
+			"rainbow":
+				mod["rainbow"] = true
+				main.net.state_set("board_mod", mod.duplicate())
+				main.fx("sfx", ["sparkle"])
+			"candy_rain":
+				for k in pl:
+					if (pl[k]["items"] as Array).is_empty():
+						_give_item(int(k), _random_item())
+			"treasure", "boo":
+				var spots: Array = PartyGen.ahead_spots(main.data, int(pl[last]["space"]) if last >= 0 else 0, Boards.EVENT_STAR)
+				spots = spots.filter(func(s: int) -> bool: return s != star)
+				if spots.is_empty():
+					return
+				var s: int = spots[rng.randi() % spots.size()]
+				if ev == "treasure":
+					mod["chest"] = s
+					main.net.state_set("board_mod", mod.duplicate())
+					main.fx("sfx", ["reveal"])
+				else:
+					_fly_star(s)
+			"rocket":
+				rocket_round = round_n
+				main.fx("sfx", ["power_up"])
+
+
+## Gentle catch-up (each round from the second): whoever has the fewest stars and holds nothing gets a present.
+func _catch_up_simple() -> void:
+	var got := false
+	for pid in _behind():
+		if (pl[pid]["items"] as Array).is_empty():
+			_give_item(int(pid), _random_item())
+			catchup_given += 1
+			got = true
+	if got:
+		seq.wait(_w(1.0))
 
 
 func _coins(pid: int, n: int) -> void:
@@ -1149,11 +1472,18 @@ func give_minigame_stars(rows: Array) -> void:
 		if pl.has(pid) and bool(rd.get("win", false)):
 			pl[pid]["stars"] = int(pl[pid]["stars"]) + 1
 			pl[pid]["mg_wins"] = int(pl[pid]["mg_wins"]) + 1
+			var g := String((main.net.state_get("mg", {}) as Dictionary).get("id", ""))
+			var won: Array = main.save.data["mg_won"]
+			if not _cpu(pid) and g != "" and not won.has(g):
+				won.append(g)  # ALL GAMES trophy: the family has won every minigame
+				main.save.mark_dirty()
+			run["mg_human_wins"] = int(run.get("mg_human_wins", 0)) + (0 if _cpu(pid) else 1)
 	_publish()
 
 
+## Kid mode (and always in SIMPLE_MODE): CPU players hesitate more in minigames, so little ones can win.
 func is_kid() -> bool:
-	return kid
+	return kid or main.simple
 
 
 # --- The end ------------------------------------------------------------------------------------------
@@ -1204,9 +1534,48 @@ func finish_game(winners: Array) -> void:
 				var ks := dd.keys()
 				ks.sort()
 				dd.erase(ks[0])
+		_award_trophies(winners)
 		main.publish_festival()
 	main.save.mark_dirty()
 	_telemetry("party", winners)
+
+
+## Trophies for Mango's wall (boards.gd TROPHIES), won by the family (a human or the VR giant winning, a human
+## doing the thing). New ones are shown after the winner moment and put hats on the tokens next party.
+func _award_trophies(winners: Array) -> void:
+	var sd: Dictionary = main.save.data
+	var got: Dictionary = sd["trophies"]
+	var human_win := false
+	var giant_win := false
+	for w in winners:
+		human_win = human_win or not _cpu(int(w))
+		giant_win = giant_win or (int(w) == 0 and main.vr_rig != null)
+	var want: Array = []
+	if human_win:
+		want.append("win_" + String(plan.get("board", "island")))
+		for w in winners:
+			if behind_final.has(int(w)) and not _cpu(int(w)):
+				want.append("underdog")
+	for k in pl:
+		if not _cpu(int(k)) and int(pl[k]["stars"]) >= 5:
+			want.append("star5")
+	if giant_win:
+		want.append("giant")
+	if (sd["daily"] as Dictionary).size() >= 3:
+		want.append("daily3")
+	var used: Array = sd["items_used"]
+	if Boards.item_ids().all(func(i: String) -> bool: return used.has(i)):
+		want.append("items")
+	var won_mg: Array = sd["mg_won"]
+	if PartyGen.SIMPLE_GAMES.all(func(g: String) -> bool: return won_mg.has(g)):
+		want.append("mg_all")
+	if (sd["festival"] as Array).size() >= Festival.DECOS.size():
+		want.append("festival")
+	for id in want:
+		if not got.has(id) and not Boards.trophy(String(id)).is_empty():
+			got[id] = Seeded.today()
+			new_trophies.append(String(id))
+	run["trophies_new"] = new_trophies.size()
 
 
 ## One RUN line per party (or quit mid-party): how the family really plays (balance).
@@ -1225,7 +1594,8 @@ func _telemetry(end: String, winners: Array) -> void:
 	var info := run.duplicate()
 	info.merge({"end": end, "mode": main.net.mode, "vr": main.vr_rig != null, "humans": humans, "seats": pl.size(),
 		"rounds": rounds, "round": round_n, "seed": int(plan.seed), "level": int(plan.level), "daily": bool(plan.get("daily", false)),
-		"theme": String(PartyGen.THEMES[int(plan.theme)].id), "reds_on_board": int(plan.reds), "stars": stars,
+		"board": String(plan.get("board", "")), "spaces": main.data.count(), "catchup": catchup_given,
+		"trophies": (main.save.data["trophies"] as Dictionary).size(), "reds_on_board": int(plan.reds), "stars": stars,
 		"winners": winners.size(), "human_won": human_won, "secs": int((Time.get_ticks_msec() - party_t0) / 1000),
 		"festival": (main.save.data["festival"] as Array).size()}, true)
 	Telemetry.run("party_board", info)
@@ -1237,18 +1607,49 @@ func _make_plan() -> void:
 	var sd: Dictionary = main.save.data
 	var daily := not (sd["daily"] as Dictionary).has(Seeded.today()) and not OS.has_environment("BOT_NO_DAILY")
 	var seed_value := Seeded.daily_seed("party_board") if daily else Seeded.derive(int(sd["world"]), "party%d" % int(sd["parties"]))
-	var desc := {"seed": seed_value, "level": 4 if daily else int(sd["parties"]), "rounds": rounds, "daily": daily}
+	var bid := _pick_board(daily, seed_value)
+	var fresh := not (sd["boards_played"] as Dictionary).has(bid)
+	var hats := Boards.seat_hats(Boards.hats(sd["trophies"]), seed_value)
+	var desc := {"seed": seed_value, "level": 4 if daily else int(sd["parties"]), "rounds": rounds, "daily": daily, "board": bid,
+		"hats": hats}
 	var t0 := Time.get_ticks_usec()
 	plan = main.apply_plan(desc)
 	plan["daily"] = daily
+	plan["fresh"] = fresh
 	route_i = 0
 	party_t0 = Time.get_ticks_msec()
 	run = {"gen_ms": snappedf((Time.get_ticks_usec() - t0) / 1000.0, 0.01)}
 	main.net.state_set("plan", desc)
-	var th: Dictionary = PartyGen.THEMES[int(plan.theme)]
-	main.net.state_set("sky", String(th.sky))
-	print("Party Board party: %s seed %d level %d, %d reds, %s (%.1f ms)" % ["daily" if daily else "story", seed_value,
-		int(plan.level), int(plan.reds), String(th.id), float(run.gen_ms)])
+	var bp: Dictionary = sd["boards_played"]
+	bp[bid] = int(bp.get(bid, 0)) + 1
+	if daily and not (sd["boards_seen"] as Array).has(bid):
+		(sd["boards_seen"] as Array).append(bid)  # TODAY'S PARTY unlocks the board it visits
+	sd["last_board"] = bid
+	main.save.mark_dirty()
+	var bd: Dictionary = Boards.board(bid)
+	main.net.state_set("sky", String(bd.sky))
+	print("Party Board party: %s seed %d level %d on %s, %d spaces, %d reds, event in round %d (%.1f ms)" % [
+		"daily" if daily else "story", seed_value, int(plan.level), bid, main.data.count(), int(plan.reds),
+		int(plan.event_round), float(run.gen_ms)])
+
+
+## Which board this party visits: TODAY'S PARTY any board (the same everywhere today); otherwise a board the
+## family just unlocked first, then the unlocked ones in a seeded mix (never the same twice running).
+## PB_BOARD=<id> (What's New "try", bots) forces one.
+func _pick_board(daily: bool, seed_value: int) -> String:
+	var sd: Dictionary = main.save.data
+	if OS.has_environment("PB_BOARD") and Boards.ids().has(OS.get_environment("PB_BOARD")):
+		return OS.get_environment("PB_BOARD")
+	if daily:
+		return Boards.ids()[Seeded.rng(seed_value, "daily_board").randi() % Boards.BOARDS.size()]
+	var unl := Boards.unlocked(int(sd["parties"]), sd["boards_seen"])
+	for b in unl:
+		if not (sd["boards_played"] as Dictionary).has(b):
+			return b
+	var pool: Array = unl.filter(func(b: String) -> bool: return b != String(sd["last_board"]))
+	if pool.is_empty():
+		pool = unl
+	return String(pool[Seeded.rng(seed_value, "story_board").randi() % pool.size()])
 
 
 ## SIMPLE: after the winner moment: the winner picks Mango's next festival piece, then a new party.
@@ -1259,10 +1660,24 @@ func after_party() -> void:
 	festival_done = true
 	var offers := Festival.offers(main.save.data["festival"])
 	var winners: Array = main.net.state_get("winners", [])
-	if offers.is_empty() or winners.is_empty():
-		begin()
-		return
 	seq.clear()
+	# New trophies first: Mango shows each one (the wall grows on the island; the camera looks at it).
+	if not new_trophies.is_empty():
+		main.net.state_set("phase", "trophy")
+		for id in new_trophies.slice(0, 3):
+			var tr := Boards.trophy(String(id))
+			seq.add(func() -> void:
+				main.fx("story", ["MANGO", String(tr.line), String(tr.pic), (tr.color as Color).to_html()])
+				main.fx("sfx", ["achievement", -2.0]))
+			seq.wait(_w(2.6))
+		new_trophies.clear()
+	if offers.is_empty() or winners.is_empty():
+		seq.add(begin)
+		return
+	seq.add(func() -> void: _festival_pick(offers, winners))
+
+
+func _festival_pick(offers: Array, winners: Array) -> void:
 	var who := int(winners[0])
 	for w in winners:  # a human winner picks when there is one
 		if not _cpu(int(w)):

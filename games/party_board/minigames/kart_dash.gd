@@ -10,6 +10,7 @@ const META := {
 	"tv": [["A", "MASH to speed up!"]],
 	"vr": [["GLOVE", "Pump up and down"], ["TRIGGER", "Or mash it"]],
 	"vr_line": "PUMP your glove up and down to race!",
+	"cue": "mash",
 }
 const START_X := 7.5
 const FINISH_X := -7.5

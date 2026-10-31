@@ -41,6 +41,9 @@ var _last := {}  ## pid -> Vector3 (walk animation)
 var _cpu_goal := {}  ## pid -> Vector3
 var _cpu_t := {}  ## pid -> float
 var stun := {}  ## pid -> seconds left: can't move (host)
+var _dt := 0.0  ## this tick's step (CPU thinking counts game time, so fast-forwarded tests think the same)
+## Kid-gentle CPUs (turn_flow.is_kid(), always in SIMPLE_MODE): they walk this much slower than a player.
+const CPU_KID_SPEED := 0.8
 ## Synced props (coins, balloons, sheep...): id -> Node3D, id -> kind. The host adds / moves / removes
 ## them; snapshots carry them to the TV machine (items_snap / items_apply, done by the base).
 var items := {}
@@ -272,7 +275,7 @@ func add_score(pid: int, n: float = 1.0) -> void:
 
 
 func _make_avatar(pid: int) -> void:
-	var look: Array = TokenScript.LOOKS[pid % TokenScript.LOOKS.size()]
+	var look: Array = main.look_of(pid) if main.has_method("look_of") else TokenScript.LOOKS[pid % TokenScript.LOOKS.size()]
 	var a := Creatures.humanoid({"class": String(look[0]), "hat": String(look[1]), "hair": look[2], "outfit": color_of(pid),
 		"seed": 11 + pid * 7, "scale": AVATAR_SCALE})
 	a.name = "Walker%d" % pid
@@ -306,7 +309,7 @@ func input_of(pid: int) -> Dictionary:
 
 ## CPU walkers re-think a few times a second (with a little hesitation, so kids can win).
 func cpu_goal(pid: int) -> Vector3:
-	var t := float(_cpu_t.get(pid, 0.0)) - get_process_delta_time()
+	var t := float(_cpu_t.get(pid, 0.0)) - _dt
 	if t <= 0.0 or not _cpu_goal.has(pid):
 		t = rng.randf_range(0.25, 0.7) * (1.4 if main.flow != null and main.flow.is_kid() else 1.0)
 		_cpu_goal[pid] = cpu_move(pid)
@@ -327,7 +330,10 @@ func walk(pid: int, delta: float, speed: float = -1.0, limit_r: float = -1.0) ->
 	var mv: Vector3 = inp["move"]
 	var p: Vector3 = pos[pid]
 	if mv.length() > 0.05:
-		p += mv.limit_length(1.0) * (walk_speed if speed < 0.0 else speed) * delta
+		var sp := walk_speed if speed < 0.0 else speed
+		if is_cpu(pid) and main.flow != null and main.flow.is_kid():
+			sp *= CPU_KID_SPEED
+		p += mv.limit_length(1.0) * sp * delta
 		Creatures.anim(avatars[pid]).face(mv)
 	var r := arena_r if limit_r < 0.0 else limit_r
 	var flat := Vector2(p.x, p.z).limit_length(r)
@@ -441,6 +447,7 @@ func begin_play() -> void:
 
 ## Host: one frame.
 func tick(delta: float) -> void:
+	_dt = delta
 	if not practice:
 		play_t += delta
 	play_tick(delta)
