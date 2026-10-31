@@ -53,6 +53,7 @@ const GhostHandScript := preload("res://games/marble_maze/ghost_hand.gd")
 const CueScript := preload("res://games/marble_maze/cue.gd")
 const UiKit := preload("res://core/ui_kit.gd")
 const HudKit := preload("res://core/hud_kit.gd")
+const BgGen := preload("res://core/bg_gen.gd")
 const Story := preload("res://games/marble_maze/story.gd")
 const LevelsData := preload("res://games/marble_maze/levels.gd")
 const TownScript := preload("res://games/marble_maze/town.gd")
@@ -265,6 +266,7 @@ func _setup_game(mode: String) -> void:
 
 
 func _exit_tree() -> void:
+	BgGen.wait_all()  # no maze job outlives the game
 	XRServer.world_scale = 1.0  # global: never leave another game's scale behind
 	if simple and run_mazes > 0 and net != null and net.mode != "client" and save != null:
 		Telemetry.run("marble_maze", {"end": "quit", "mazes": run_mazes, "shinies": run_shinies,
@@ -1400,6 +1402,7 @@ func _start_level(n: int) -> void:
 		_show_center(title + "\n" + board.level_tip(n), INTRO_TIME)
 	sound("clear", -4.0, 1.0, true)
 	net.event("level", [n, level_desc])
+	_prefetch_next()  # made while this one is played
 	if simple:
 		_send_town()
 		_story_intro()
@@ -1645,6 +1648,7 @@ func _level_clear() -> void:
 func _game_over() -> void:
 	state = "over"
 	state_t = 0.0
+	_prefetch_next()  # the fresh session's first maze, while GAME OVER shows
 	var line := "Best: %d" % best
 	if score > best:
 		line = "NEW BEST SCORE!  (previous %d)" % best
@@ -1710,34 +1714,45 @@ func _begin_session() -> void:
 	if not simple or save == null:
 		return
 	var d: Dictionary = save.data
-	var skip := bool(d.lessons_done) or OS.has_environment("BOT_STORY") or OS.has_environment("BOT_STORY_I")
-	var daily_due := not (d.daily as Dictionary).has(Seeded.today()) and not OS.has_environment("BOT_NO_DAILY")
-	session = {"lessons": not skip, "daily": daily_due, "base": int(d.story_i)}
-	if OS.has_environment("BOT_STORY_I"):
-		session.base = int(OS.get_environment("BOT_STORY_I"))
+	session = _session_plan()
 	run_mazes = 0
 	run_shinies = 0
 	_send_town(true)
 	print("Marble Town: lessons %s, daily %s, story maze %d, %d places lit, %d shinies (world %d)" % [
 		session.lessons, session.daily, session.base, int(d.places), (d.jar as Array).size(), int(d.world)])
+	if net == null or net.mode != "client":
+		prefetch_desc(desc_for(1))  # the first maze, while the players gather
+
+
+## What a session started now would play (no side effects).
+func _session_plan() -> Dictionary:
+	var d: Dictionary = save.data
+	var skip := bool(d.lessons_done) or OS.has_environment("BOT_STORY") or OS.has_environment("BOT_STORY_I")
+	var daily_due := not (d.daily as Dictionary).has(Seeded.today()) and not OS.has_environment("BOT_NO_DAILY")
+	var plan := {"lessons": not skip, "daily": daily_due, "base": int(d.story_i)}
+	if OS.has_environment("BOT_STORY_I"):
+		plan.base = int(OS.get_environment("BOT_STORY_I"))
+	return plan
 
 
 ## Host / local: what level n of this session is ({} outside simple mode: the old level list).
-func desc_for(n: int) -> Dictionary:
+## plan: a session plan (_session_plan()) other than the current one.
+func desc_for(n: int, plan: Dictionary = {}) -> Dictionary:
 	if not simple:
 		return {}
+	var sess: Dictionary = plan if not plan.is_empty() else session
 	var k := n
-	if bool(session.get("lessons", true)):
+	if bool(sess.get("lessons", true)):
 		var count: int = LevelsData.SIMPLE_LEVELS.size()
 		if k <= count:
 			return {"k": "lesson", "i": k}
 		k -= count
-	if bool(session.get("daily", false)):
+	if bool(sess.get("daily", false)):
 		if k == 1:
 			return {"k": "daily", "d": Seeded.today()}
 		k -= 1
 	var world: int = int(save.data.world) if save != null else 0
-	return {"k": "story", "i": int(session.get("base", 0)) + k - 1, "w": world}
+	return {"k": "story", "i": int(sess.get("base", 0)) + k - 1, "w": world}
 
 
 ## Every machine: the level dictionary for a description (the generator is deterministic, so the TV
@@ -1749,21 +1764,51 @@ func def_from_desc(desc: Dictionary) -> Dictionary:
 	if def_cache.has(key):
 		return def_cache[key]
 	var def: Dictionary
-	match str(desc.get("k", "")):
-		"lesson":
-			var count: int = LevelsData.SIMPLE_LEVELS.size()
-			def = (LevelsData.SIMPLE_LEVELS[clampi(int(desc.get("i", 1)) - 1, 0, count - 1)] as Dictionary).duplicate(true)
-		"daily":
-			def = Story.daily(str(desc.get("d", "")))
-			def["shiny_color"] = Story.GOLDEN[1]
-		_:
-			var i := int(desc.get("i", 0))
-			def = Story.maze(int(desc.get("w", 0)), i)
-			def["shiny_color"] = Story.shiny_of(i)[1]
+	if str(desc.get("k", "")) == "lesson":
+		var count: int = LevelsData.SIMPLE_LEVELS.size()
+		def = (LevelsData.SIMPLE_LEVELS[clampi(int(desc.get("i", 1)) - 1, 0, count - 1)] as Dictionary).duplicate(true)
+	else:
+		var t0 := Time.get_ticks_usec()
+		def = BgGen.take(key, _gen_job(desc))  # usually made already, off the main thread (prefetch_desc)
+		print("Maze %s ready in %.1f ms (%s)" % [str(def.get("name", "")), (Time.get_ticks_usec() - t0) / 1000.0, net.mode if net != null else "-"])
 	if def_cache.size() > 8:
 		def_cache.clear()
 	def_cache[key] = def
 	return def
+
+
+## A story maze takes up to ~0.2 s to make here (more on a Deck: mazegen.gd retries until check() passes), so
+## the next one is made on a worker thread (core/bg_gen.gd) while this one is played; the host tells the TV
+## machine which, so it has it ready too. def_from_desc() then takes the finished maze at once.
+func prefetch_desc(desc: Dictionary) -> void:
+	if desc.is_empty() or str(desc.get("k", "")) == "lesson":
+		return
+	var key := var_to_str(desc)
+	if not def_cache.has(key):
+		BgGen.prefetch(key, _gen_job(desc))
+	if net != null and net.mode != "client":
+		net.event("prefetch", [desc])
+
+
+## Host / local: the next level's maze (or a fresh session's first one after GAME OVER: _restart).
+func _prefetch_next() -> void:
+	if not simple or (net != null and net.mode == "client"):
+		return
+	prefetch_desc(desc_for(1, _session_plan()) if state == "over" else desc_for(level + 1))
+
+
+static func _gen_job(desc: Dictionary) -> Callable:
+	var d := desc.duplicate()
+	return func() -> Variant:
+		var def: Dictionary
+		if str(d.get("k", "")) == "daily":
+			def = Story.daily(str(d.get("d", "")))
+			def["shiny_color"] = Story.GOLDEN[1]
+		else:
+			var i := int(d.get("i", 0))
+			def = Story.maze(int(d.get("w", 0)), i)
+			def["shiny_color"] = Story.shiny_of(i)[1]
+		return def
 
 
 func _falls_now() -> int:
@@ -2507,6 +2552,9 @@ func apply_event(kind: String, args: Array) -> void:
 					p.reset_to_start()
 			state = "intro"
 			state_t = 0.0
+		"prefetch":
+			if args.size() > 0 and args[0] is Dictionary:
+				prefetch_desc(args[0])
 		"story":
 			show_story(args[0])
 		"town":

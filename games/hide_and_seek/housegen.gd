@@ -64,12 +64,15 @@ const ROOM_KIT := {
 const DECOY_KIT := {"hall": [0, 1, 2], "living": [0, 1, 3], "kitchen": [1, 2], "bedroom": [3, 0, 2], "playroom": [4, 3, 2],
 	"bathroom": [1, 2], "bunkroom": [3, 4, 2], "study": [0, 1, 2], "garden": [1, 4, 2]}
 
-static var _cache := {}
+static var _cache := {}  # (behind _cache_lock: main.gd makes the next house on a worker thread, core/bg_gen.gd)
+static var _cache_lock := Mutex.new()
 
 
 ## Tests: forget remembered houses (so "same seed -> same house" is really rebuilt).
 static func clear_cache() -> void:
+	_cache_lock.lock()
 	_cache.clear()
+	_cache_lock.unlock()
 
 
 ## The furniture catalog. Local frame: u along the wall (x), v into the room (z), y up. Wall pieces sit
@@ -193,19 +196,28 @@ static func _v(x: float, z: float) -> Vector3:
 ## spec: {level, theme, daily}. Returns the house (see the keys at the end of _try), or the last try with
 ## ok = false if no try passed (the gen test makes sure that never happens).
 static func generate(seed_value: int, spec: Dictionary = {}) -> Dictionary:
-	var key := "%d|%d|%d|%s" % [seed_value, int(spec.get("level", 0)), int(spec.get("theme", 0)), str(bool(spec.get("daily", false)))]
-	if _cache.has(key):
-		return _cache[key]
+	var key := cache_key(seed_value, spec)
+	_cache_lock.lock()
+	var hit: Dictionary = _cache.get(key, {})
+	_cache_lock.unlock()
+	if not hit.is_empty():
+		return hit
 	var g := {}
 	for attempt in ATTEMPTS:
 		g = _try(seed_value, spec, attempt)
 		if check(g).is_empty():
 			g["ok"] = true
 			break
+	_cache_lock.lock()
 	if _cache.size() > 6:
 		_cache.clear()
 	_cache[key] = g
+	_cache_lock.unlock()
 	return g
+
+
+static func cache_key(seed_value: int, spec: Dictionary) -> String:
+	return "%d|%d|%d|%s" % [seed_value, int(spec.get("level", 0)), int(spec.get("theme", 0)), str(bool(spec.get("daily", false)))]
 
 
 static func _try(seed_value: int, spec: Dictionary, attempt: int) -> Dictionary:

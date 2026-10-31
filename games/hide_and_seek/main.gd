@@ -30,6 +30,8 @@ const ShipScript := preload("res://games/hide_and_seek/map_ship.gd")
 ## each new game launch, uses the next one. Every map script has data() and build(root).
 ## data(spec) / build(root, spec): spec is {seed, ...} (the house: Story.house_spec / Story.daily).
 const MAPS := [HouseScript, CastleScript, ShipScript]
+const HouseGen := preload("res://games/hide_and_seek/housegen.gd")
+const BgGen := preload("res://core/bg_gen.gd")
 const Story := preload("res://games/hide_and_seek/story.gd")
 const PipScript := preload("res://games/hide_and_seek/pip.gd")
 const Seeded := preload("res://core/seeded.gd")
@@ -340,6 +342,24 @@ func _daily_due() -> bool:
 	return not (save.data.daily as Dictionary).has(Seeded.today()) and not OS.has_environment("BOT_NO_DAILY")
 
 
+## A big house takes up to ~0.1 s to make on a Deck (housegen.gd retries until check() passes), so the next
+## one is made on a worker thread (core/bg_gen.gd) while the results show; HouseGen remembers it (its cache is
+## behind a Mutex) and map_house.gd's build() finds it at once. The host tells the TV machine to do the same.
+func _prefetch_house(spec: Dictionary) -> void:
+	BgGen.prefetch(_house_key(spec), _house_job(spec))
+	if net.mode != "client":
+		net.event("prefetch", [_spec_array(spec)])
+
+
+static func _house_key(spec: Dictionary) -> String:
+	return "hide_and_seek:" + HouseGen.cache_key(int(spec.get("seed", 1)), spec)
+
+
+static func _house_job(spec: Dictionary) -> Callable:
+	var sp := spec.duplicate()
+	return func() -> Variant: return HouseGen.generate(int(sp.get("seed", 1)), sp)
+
+
 func _spec_array(spec: Dictionary) -> Array:
 	return [int(spec.get("seed", 0)), int(spec.get("level", 0)), int(spec.get("theme", 0)), bool(spec.get("daily", false))]
 
@@ -365,6 +385,11 @@ func _build_map(i: int, spec: Dictionary = {}) -> void:
 	add_child(world_root)
 	move_child(world_root, 0)
 	map_spec = spec.duplicate()
+	var gen_ms := 0.0
+	if i == 0:
+		var tg := Time.get_ticks_usec()
+		BgGen.take(_house_key(map_spec), _house_job(map_spec))  # usually made already (_prefetch_house): build() finds it remembered
+		gen_ms = (Time.get_ticks_usec() - tg) / 1000.0
 	var built: Dictionary = MAPS[i].build(world_root, map_spec)
 	map_idx = i
 	map = MAPS[i].data(map_spec)
@@ -381,7 +406,7 @@ func _build_map(i: int, spec: Dictionary = {}) -> void:
 	pip_on = false
 	var ms := (Time.get_ticks_usec() - t0) / 1000.0
 	last_gen_ms = snappedf(ms, 0.1)
-	print("Map: %s (%s, %.0f ms)" % [map_title(), _spec_array(map_spec), ms])
+	print("Map: %s (%s, %.0f ms, house plan %.1f ms)" % [map_title(), _spec_array(map_spec), ms, gen_ms])
 
 
 ## Pip's toys in front of his kennel (the house's garden), rebuilt when one comes home.
@@ -1508,6 +1533,8 @@ func _end_round(seeker_won: bool) -> void:
 	_show_center(results_text, 0.0)
 	_save_best()
 	_round_done(seeker_won)
+	if net.mode != "client" and posmod(map_idx + 1, MAPS.size()) == 0:
+		_prefetch_house(_spec_for(0))  # the next round is in the house: make it while the results show
 	print("Round %d over: %s, scores %s, totals %s" % [round_no, "seeker wins" if seeker_won else "hiders win", round_scores, totals])
 
 
@@ -1631,6 +1658,7 @@ func _remember_party() -> void:
 
 
 func _exit_tree() -> void:
+	BgGen.wait_all()  # no house job outlives the game
 	XRServer.world_scale = 1.0  # global: never leak a changed scale into other games
 	if (phase == "count" or phase == "seek") and not run.is_empty():
 		_telemetry("quit", false)  # left mid-round
@@ -1764,6 +1792,9 @@ func apply_event(kind: String, args: Array) -> void:
 	if not ready_to_play:
 		return
 	match kind:
+		"prefetch":
+			if args.size() > 0 and args[0] is Array and (args[0] as Array).size() >= 4:
+				_prefetch_house(_spec_from(args[0]))
 		"sound":
 			local_sound(args[0], args[1], args[2])
 		"burst":
