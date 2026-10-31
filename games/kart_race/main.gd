@@ -272,6 +272,8 @@ func _setup_game(mode: String) -> void:
 	_load_garage()
 	_apply_looks()
 	_build_views(mode)
+	if OS.has_environment("BOT_VR") and mode != "client":
+		debug_fake_vr()  # fake VR for any offscreen run (dev.sweep vr, VrViewWatch), not only the kart bot
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_assign_joypads()
 	if seats.deck_alone():

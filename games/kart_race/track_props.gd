@@ -84,6 +84,7 @@ static func _hazards(t) -> void:
 		mi.mesh = st.commit()
 		var m := StandardMaterial3D.new()
 		m.vertex_color_use_as_albedo = true
+		m.vertex_color_is_srgb = true
 		m.cull_mode = BaseMaterial3D.CULL_DISABLED
 		match patch_look:
 			"ice":
@@ -134,6 +135,7 @@ static func _hazards(t) -> void:
 	bmi.mesh = bs.commit()
 	var bm := StandardMaterial3D.new()
 	bm.vertex_color_use_as_albedo = true
+	bm.vertex_color_is_srgb = true
 	bm.roughness = 0.35 if bump_look == "gumdrop" else 0.85
 	if bump_look == "meteor" or t.is_night():
 		bm.emission_enabled = true
