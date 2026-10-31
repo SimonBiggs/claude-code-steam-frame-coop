@@ -1590,6 +1590,7 @@ func _deep_start() -> void:
 		if Upgrades.index_of(id) >= 0 and not u.has(id):
 			u.append(id)
 	net.state_set("upg", u)
+	net.state_set("dome", u.has("dome"))
 	if OS.has_environment("MT_PICK_WAIT"):
 		pick_wait = maxf(1.0, float(OS.get_environment("MT_PICK_WAIT")))
 	var start := test_start_round

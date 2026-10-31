@@ -319,6 +319,10 @@ func _story_checks() -> void:
 ## move, district hazards (MEGA lands them quickly).
 func _deep_checks(ri: Dictionary) -> void:
 	var mode: String = main.net.mode
+	print("BOT DEEP effects: buddy_zaps=%d domes=%d stomps=%d jumps=%d rockets=%d boss_fight=%.0fs" % [main.deep.buddy_zaps, main.deep.domes_popped,
+		main.deep.stomp_stuns, main.deep.jumps, main.deep.rockets, boss_fight_t])
+	if mode != "client" and main.upg_list().has("buddy") and saw_kaiju:
+		kit.assert_true(main.deep.buddy_zaps > 0, "%s: the buddy drone zapped a kaiju" % mode)
 	print("BOT DEEP: mode=%s diff=%s frame=%s upg=%s pick_pods=%d hearts=%d hazards=%d/%d sig_tells=%d rockets=%d boss=%s" % [mode,
 		String(main.net.state_get("mode", "")), String(main.net.state_get("frame", "")), str(main.upg_list()), pick_pods,
 		int(main.net.state_get("sanct_h", 0)), main.deep.hazards_landed, main.deep.hazards_hit, main.combat.sig_tells, main.deep.rockets,
