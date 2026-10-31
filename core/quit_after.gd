@@ -44,4 +44,5 @@ func _process(_delta: float) -> void:
 		return
 	set_process(false)
 	print("QUIT AFTER: frame %d of --quit-after %d, quitting quietly (core/quit_after.gd)" % [Engine.get_process_frames(), at])
+	get_tree().call_group("bot_frame_limit", "on_frame_limit")  # bots (tests/bot_kit.gd) print their BOT RESULT so far
 	load("res://tests/bot_end.gd").quit_quietly(get_tree(), 0)

@@ -395,13 +395,16 @@ export async function land(branch: string, genTests: string[], botId: string, ot
   // A landing that stopped leaves its merge in wt-merge (and its files in staging) for a retry. Landing a DIFFERENT
   // branch next must not carry it along (2026-10-31: a tools-only landing nearly deployed saga-deep, whose tests had
   // failed): start again from main, staging included.
-  const stale = (await sh("git log --merges --format=%s main..merge-arcade", join(GP, "wt-merge"))).out.split("\n").filter(Boolean);
+  const stale = (await sh("git log --merges --first-parent --format=%s main..merge-arcade", join(GP, "wt-merge"))).out.split("\n").filter(Boolean);
   if (stale.some(s => !s.includes(`'${branch}'`))) {
     await sh("git merge --abort 2>/dev/null; git reset -q --hard main", join(GP, "wt-merge"));
     await sh(`for d in ${DEPLOYED.join(" ")} tools; do rsync -a --delete --exclude '*.import' --exclude '__pycache__' wt-merge/$d/ .duo-arena-stage/$d/; done; cp wt-merge/arcade.tscn .duo-arena-stage/`, GP);
   }
   const m = await sh(`cd ${GP}/wt-${branch} && git status --short | grep -v '^??' | head -3; cd ${GP}/wt-merge && git merge --no-edit ${branch} 2>&1 | tail -1; git diff --name-only --diff-filter=U`);
-  if (/CONFLICT|fatal/.test(m.out)) return { stop: "merge", out: m.out };
+  // (tail -1 of a conflicted merge is "Automatic merge failed...", not CONFLICT: party-deep's whats_new conflict
+  // once went on to the tests with its markers in, 2026-10-31. The unmerged-files list after it is the sure sign.)
+  if (/CONFLICT|fatal|Automatic merge failed|error:/.test(m.out) || (await sh("git diff --name-only --diff-filter=U", join(GP, "wt-merge"))).out.trim())
+    return { stop: "merge", out: m.out + "\n(resolve in ~/GodotProjects/wt-merge and commit, or git merge --abort there)" };
   const drift = await sh(`for d in ${DEPLOYED.join(" ")}; do diff -rq --exclude='*.uid' --exclude='*.import' duo-arena/$d .duo-arena-stage/$d; done`, GP);
   // A retry after a stopped landing (a flaky bot, a fix committed in wt-merge): live is clean and every file where
   // staging differs from live is one merge-arcade changes (so it came from the earlier copy), not someone's edit.
@@ -449,13 +452,13 @@ export async function land(branch: string, genTests: string[], botId: string, ot
   // msg = one subject line: duo-deploy adds the trailers (a multi-line msg once landed as one subject with literal \n).
   const msgFile = join(GP, "wt-merge/.git-land-msg");
   await writeFile(msgFile, `Merge branch 'merge-arcade' (${branch}: uids, tests)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UPzLapMn8qMpWGwygUaPCg\n`);
-  const d = await sh(`duo-deploy ${JSON.stringify(String(msg).split("\n")[0].trim())} 2>&1 | grep -v offline | tail -4; duo-deploy-deck 2>&1 | grep -v offline | tail -4; cd ${LIVE} && git merge -q --no-edit merge-arcade -F ${msgFile} && rm -f ${msgFile} && cd ../wt-merge && git merge -q --ff-only main && echo MERGED; cd ${LIVE} && git log --oneline -2 | cut -c1-60`);
+  const d = await sh(`duo-deploy ${JSON.stringify(String(msg).split("\n")[0].trim())} 2>&1 | grep -v offline | tail -4; [ \${PIPESTATUS[0]} -eq 0 ] || { echo "DEPLOY REFUSED by duo-deploy: live main not merged"; exit 1; }; duo-deploy-deck 2>&1 | grep -v offline | tail -4; cd ${LIVE} && git merge -q --no-edit merge-arcade -F ${msgFile} && rm -f ${msgFile} && cd ../wt-merge && git merge -q --ff-only main && echo MERGED; cd ${LIVE} && git log --oneline -2 | cut -c1-60`);
   // The branch's worktree goes only after its Godots quit (an agent's offscreen run may still be up).
   const rm = /MERGED/.test(d.out) ? await removeWorktree(join(GP, `wt-${branch}`), branch) : { quit: [], out: "not removed: the merge into main didn't finish" };
   // Tools the branch changed in the repo (tools/multibot.ts, tools/brepl-dev.ts, ...) get installed where they run,
   // so the repo copy and the installed one never drift (2026-10-30: late-join's multibot.ts --late sat uninstalled).
   const installed = /MERGED/.test(d.out) ? await installTools(`${(await sh("git rev-parse HEAD^1", LIVE)).out}`) : [];
-  return { deployed: true, out, res, deploy: d.out, removed: rm, installed };
+  return { deployed: /MERGED/.test(d.out), ...(/DEPLOY REFUSED/.test(d.out) ? { stop: "deploy" } : {}), out, res, deploy: d.out, removed: rm, installed };
 }
 
 export function help() {

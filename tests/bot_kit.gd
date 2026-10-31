@@ -38,6 +38,7 @@ var allow_pause := false
 var resume_after := 1.0
 var checks := 0
 var failures := 0
+var _finished := false
 ## Print every passing check too.
 var verbose := true
 
@@ -49,6 +50,7 @@ var _filter: Node
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	add_to_group("bot_frame_limit")  # core/quit_after.gd: a run cut off at --quit-after still says PASS / FAIL
 	process_priority = -200  # timeline steps run before the game's frame
 	Engine.set_meta(PARTY_IGNORE_META, true)
 	Engine.set_meta(SAVE_TEST_META, true)
@@ -231,9 +233,12 @@ func assert_near(a: float, b: float, tolerance: float, msg: String) -> bool:
 
 
 ## Print the summary and quit (exit code 1 if anything failed).
-func finish(quit: bool = true) -> void:
+func finish(quit: bool = true, note := "") -> void:
+	if _finished:
+		return
+	_finished = true
 	if failures == 0:
-		info("BOT RESULT: PASS (%d checks)" % checks)
+		info("BOT RESULT: PASS (%d checks%s)" % [checks, note])
 	else:
 		printerr("SCRIPT ERROR: BOT RESULT: FAIL (%d of %d checks failed)" % [failures, checks])
 	if quit:
@@ -426,3 +431,9 @@ func vr_stick(rig: Node, left: Vector2, right: Vector2 = Vector2.ZERO) -> void:
 func vr_head_height(rig: Node, h: float) -> void:
 	var cam: Node3D = rig.camera
 	cam.position.y = h * float(rig.world_scale)
+
+
+## core/quit_after.gd calls this just before --quit-after ends a local run: report the checks so far, so a long bot
+## cut off by dev.bots' frame limit still prints a BOT RESULT (2026-10-31: party_board needs ~9000 frames).
+func on_frame_limit() -> void:
+	finish(false, ", stopped at the --quit-after frame limit")
