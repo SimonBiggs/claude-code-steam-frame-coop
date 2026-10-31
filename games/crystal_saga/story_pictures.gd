@@ -5,7 +5,7 @@ extends RefCounted
 ## t = the picture's clock, bob = its gentle bob, color = the card's colour.
 
 const NAMES: Array[String] = ["lumi", "shard", "bigfire", "snowflake", "twin", "longsword", "spin", "mighty", "windmill", "fountain", "rainbow",
-	"archer", "healer", "bard", "starrain", "bubble", "guardian"]
+	"archer", "healer", "bard", "starrain", "bubbleshield", "guardian"]
 
 
 static func draw(pic, kind: String, t: float, bob: float, _color: Color) -> void:
@@ -137,7 +137,7 @@ static func draw(pic, kind: String, t: float, bob: float, _color: Color) -> void
 				pic._poly(pts, Color(1.0, 0.92, 0.4, 1.0 - ph * 0.5))
 			for cl in [[0.34, 0.2, 0.12], [0.5, 0.16, 0.15], [0.66, 0.2, 0.12]]:
 				pic._circle(cl[0], cl[1] + bob, cl[2], Color(0.85, 0.85, 0.95))
-		"bubble":  # BUBBLE: a shiny bubble round a little hero
+		"bubbleshield":  # BUBBLE: a shiny bubble round a little hero
 			pic._circle(0.5, 0.52 + bob, 0.36, Color(0.6, 0.85, 1.0, 0.35))
 			pic.draw_arc(pic._p(0.5, 0.52 + bob), 0.36 * size.x, 0.0, TAU, 32, Color(0.75, 0.92, 1.0), 0.025 * size.x)
 			pic.draw_arc(pic._p(0.5, 0.52 + bob), 0.26 * size.x, PI * 1.1, PI * 1.45, 8, white, 0.03 * size.x)

@@ -32,7 +32,7 @@ const SKILLS := {
 	"long": {"type": "trick", "pic": "longsword", "name": "LONG SWORD!", "color": Color(0.75, 0.9, 1.0), "places": 0},
 	"spin": {"type": "trick", "pic": "spin", "name": "SPIN!", "color": Color(0.5, 1.0, 0.8), "places": 0},
 	"mighty": {"type": "trick", "pic": "mighty", "name": "MIGHTY!", "color": Color(1.0, 0.8, 0.3), "places": 0},
-	"bubble": {"type": "trick", "pic": "bubble", "name": "BUBBLE!", "color": Color(0.6, 0.85, 1.0), "places": 3},
+	"bubble": {"type": "trick", "pic": "bubbleshield", "name": "BUBBLE!", "color": Color(0.6, 0.85, 1.0), "places": 3},
 }
 const SPELLS: Array[String] = ["splash", "ice", "twin", "heal", "star"]
 const TRICKS: Array[String] = ["long", "spin", "mighty", "bubble"]
