@@ -33,6 +33,9 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "saga-guardians", "date": "2026-10-31", "game": "crystal_saga", "pic": "guardian", "line": "Beat crystal guardians!", "try": {"CS_TRY": "guardian"}},
+	{"id": "saga-realm", "date": "2026-10-31", "game": "crystal_saga", "pic": "lumi", "line": "Pick a road on Lumi's map!"},
+	{"id": "saga-heroes", "date": "2026-10-31", "game": "crystal_saga", "pic": "healer", "line": "Be a healer or a bard!"},
 	{"id": "mech-bosses", "date": "2026-10-31", "game": "mech_titans", "pic": "crownkaiju", "line": "Boss kaiju with crowns!", "try": {"MT_TRY": "boss"}},
 	{"id": "mech-pods", "date": "2026-10-31", "game": "mech_titans", "pic": "titanpod", "line": "Pick Titan power-ups!", "try": {"MT_TRY": "pods"}},
 	{"id": "mech-sanctuary", "date": "2026-10-31", "game": "mech_titans", "pic": "sanctuary", "line": "Grow the Kaiju Sanctuary!"},

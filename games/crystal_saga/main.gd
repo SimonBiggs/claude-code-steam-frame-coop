@@ -118,6 +118,7 @@ var stories_shown := 0
 var runs_logged := 0
 var tel_open := false  ## a journey is under way (a RUN line is owed)
 var tel_base: Array = [0, 0, 0, 0]  ## hits, dizzy, knocks, stomps when this journey started
+var tel_tells := {}  ## log_tells when this journey started
 var vr_story: Node3D
 # saga-deep
 var realm := {}  ## the family's map (realm.gd; every machine, from net state "realm")
@@ -156,6 +157,7 @@ func _ready() -> void:
 	net.main = self
 	add_child(net)
 	net.state_changed.connect(_on_state_changed)
+	net.sticky_event("story")  # a machine that joins later gets Lumi's latest card (core/net.gd)
 	party = Party.new()
 	party.name = "Party"
 	add_child(party)
@@ -386,7 +388,8 @@ func _start_journey() -> void:
 	var hits0 := 0
 	for k in log_hits:
 		hits0 += int(log_hits[k])
-	tel_base = [hits0, log_dizzy, log_knocks, log_stomps]  # (the log_ counters run for the whole session: bots)
+	tel_base = [hits0, log_dizzy, log_knocks, log_stomps]
+	tel_tells = log_tells.duplicate()  # (the log_ counters run for the whole session: bots)
 	tel_open = true
 	net.state_set("skills", (save.data.skills as Dictionary).duplicate())
 	net.state_set("shards", int(save.data.shards))
@@ -414,12 +417,12 @@ func _start_journey() -> void:
 	var first := 0
 	if OS.has_environment("CS_ZONE") and not has_meta("started"):
 		first = clampi(int(OS.get_environment("CS_ZONE")), 0, World.ZONES - 1)
+	if OS.has_environment("CS_TRY") and OS.get_environment("CS_TRY") == "guardian" and not has_meta("started"):
+		first = 3  # What's New: straight to the region's crystal guardian
 	if first > 0 and not has_meta("started"):
 		log_regions.append(int(journey.get("region", 0)))
 	set_meta("started", true)
 	var used := 0
-	if OS.has_environment("CS_TRY") and OS.get_environment("CS_TRY") == "guardian" and not has_meta("started"):
-		first = 3  # What's New: straight to the region's crystal guardian
 	if first > 0:
 		used |= (1 << world.dummy_id) | (1 << world.target_id) | (1 << world.stone_id)
 	if first > 2:
@@ -899,8 +902,6 @@ func _host_step(delta: float) -> void:
 				sound_at("buff", tp, 0.0, 0.45)
 			"call":
 				sound_at("bell", tp, -4.0, 0.7)
-	if not monsters.windups.is_empty():
-		log_tells["stomp"] = int(log_tells.get("stomp", 0))
 	for ld in monsters.landed:
 		var pts: Array = ld[1]
 		match String(ld[0]):
@@ -919,6 +920,7 @@ func _host_step(delta: float) -> void:
 				sound_at("pop", pts[0], -2.0, 0.8)
 	for st in monsters.stomps:
 		log_stomps += 1
+		log_tells["stomp"] = int(log_tells.get("stomp", 0)) + 1
 		stomp_fx(st)
 		net.event("stomp", [st])
 		sound_at("crash", st, -2.0, 0.6)
@@ -2277,9 +2279,18 @@ func _telemetry(end: String) -> void:
 		"picks": picks, "level": Saga.party_level(save.data.skills), "names": plan.get("names", []),
 		"region": int(journey.get("region", 0)), "biome": String(Realm.BIOMES[int(plan.get("biome", 1))].id), "hard": _hard(),
 		"quest": int(net.state_get("quest", 0)), "quest_need": int((plan.get("quest", {}) as Dictionary).get("need", 0)),
-		"tells": log_tells.duplicate(), "attacks": (plan.get("guardian", {}) as Dictionary).get("attacks", []),
+		"tells": _tells_this_journey(), "attacks": (plan.get("guardian", {}) as Dictionary).get("attacks", []),
 		"classes": net.state_get("classes", {}), "cleared": (save.data.cleared as Array).size()})
 	runs_logged += 1
+
+
+func _tells_this_journey() -> Dictionary:
+	var out := {}
+	for k in log_tells:
+		var n := int(log_tells[k]) - int(tel_tells.get(k, 0))
+		if n > 0:
+			out[k] = n
+	return out
 
 
 func _exit_tree() -> void:

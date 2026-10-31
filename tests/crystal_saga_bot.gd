@@ -299,7 +299,11 @@ func _vr_bot(delta: float) -> void:
 	match phase:
 		"practice":
 			if vr_t > 3.5 and not w.is_used(w.dummy_id):
-				_swing(rig, w.prop_center(w.dummy_id), delta)
+				var dc: Vector3 = w.prop_center(w.dummy_id)
+				var to7 := Vector3(dc.x - feet.x, 0.0, dc.z + 0.9 - feet.z)
+				if to7.length() > 0.4:  # (after a blink back to the village the hero may stand anywhere: walk up first)
+					_walk(rig, to7)
+				_swing(rig, dc, delta)
 			elif w.is_used(w.dummy_id) and not w.is_used(w.target_id):
 				kit.vr_reach(rig, VrRig.RIGHT, rest_r, 3.0, delta)
 				kit.vr_look_at(rig, w.prop_center(w.target_id))
@@ -422,6 +426,8 @@ func _checks() -> void:
 			kit.assert_true(not saw_tells.is_empty(), "client drew the guardian's tells (%s)" % str(saw_tells))
 		return
 	var first := int(OS.get_environment("CS_ZONE")) if OS.has_environment("CS_ZONE") else 0
+	if OS.get_environment("CS_TRY") == "guardian":
+		first = 3
 	for z in range(first, World.ZONES):
 		kit.assert_true(main.log_zones.has(z), "%s: zone %d was entered" % [mode, z])
 	kit.assert_true(saw_restored, "%s: the Crystal of Light was restored" % mode)
@@ -452,7 +458,7 @@ func _checks() -> void:
 		if first <= 2:
 			kit.assert_true(main.hands.thunders > 0, "the hero cast thunder (%d)" % main.hands.thunders)
 		kit.assert_true(main.log_pokes.size() >= 6, "props reacted (%s)" % str(main.log_pokes))
-	if mode == "local":
+	if mode == "local" and not OS.has_environment("CS_TRY"):  # (CS_TRY: the VR hero may beat the guardian alone)
 		var tv := 0
 		for s in main.log_hits:
 			if int(s) > 0 or main.vr_rig == null:

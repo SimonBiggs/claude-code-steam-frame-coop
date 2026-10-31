@@ -67,7 +67,7 @@ const BIOMES: Array[Dictionary] = [
 	{"id": "ember", "ground": Color(0.45, 0.3, 0.27), "name": ["EMBER HILLS", "LAVA PEAK", "SMOKY RIDGE"], "deep": ["LAVA TUNNEL", "FIRE CAVE"],
 		"giant": "EMBER", "pic": "fireball", "sky": ["sunset", "dungeon"], "path": [Color(0.5, 0.36, 0.32), Color(0.36, 0.26, 0.28)],
 		"leaf": Color(1.0, 0.8, 0.6), "gem": Color(1.0, 0.55, 0.35), "skins": ["slime", "goblin", "dragon"],
-		"quest": ["BABY DRAGON", "dragon", "healer", "bell", "bell"], "sig": "stomp",
+		"quest": ["BABY DRAGON", "dragon", "healer", "bell", "bell"], "sig": "roll",
 		"body": Color(0.7, 0.42, 0.32), "glow": Color(1.0, 0.55, 0.35)},
 ]
 const QUEST_NEED := 3  ## things to find (one more is hidden as a spare in gentle mode)
