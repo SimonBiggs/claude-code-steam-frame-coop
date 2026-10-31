@@ -91,8 +91,8 @@ func setup(p_id: int, k: String, p_split_gen: int = 0, variant: Dictionary = {})
 	if variant.has("color"):
 		opts["color"] = variant["color"]
 		opts["color2"] = variant.get("color2", variant["color"])
-	if bool(info.get("boss", false)) or bool(variant.get("crown", false)):
-		opts["boss"] = true  # a boss kaiju (bigboss.gd) wears its crown
+	if bool(info.get("boss", false)):
+		opts["boss"] = true  # (not for a crowned boss kaiju: Creatures' boss scale would double-scale its weak spots; it gets BossCrown below)
 	model = Creatures.monster(String(info["monster"]), opts)
 	add_child(model)
 	anim = Creatures.anim(model)
@@ -156,15 +156,15 @@ func setup(p_id: int, k: String, p_split_gen: int = 0, variant: Dictionary = {})
 		add_child(au)
 		var cb := MeshKit.Builder.new()
 		var gold := Color(1.0, 0.82, 0.25)
-		cb.cylinder(0.5, 0.45, 0.3, Transform3D.IDENTITY, gold, 14, true)
+		cb.cylinder(0.5, 0.45, 0.3, Transform3D.IDENTITY, gold, 14, false, false)
 		for ck in 5:
 			var ca := TAU * ck / 5.0
-			cb.cone(0.13, 0.45, MeshKit.at(Vector3(cos(ca) * 0.45, 0.35, sin(ca) * 0.45)), gold, 6, true)
+			cb.cone(0.13, 0.45, MeshKit.at(Vector3(cos(ca) * 0.45, 0.35, sin(ca) * 0.45)), gold, 6)
 			cb.sphere(0.08, MeshKit.at(Vector3(cos(ca) * 0.45, 0.62, sin(ca) * 0.45)), Color(1.0, 0.35, 0.45), 6, true)
 		var crown := MeshKit.instance(cb.build(), false)
 		crown.name = "BossCrown"
-		crown.scale = Vector3.ONE * maxf(1.0, height * 0.12)
-		crown.position = Vector3(0.0, height * 1.08, 0.0)
+		crown.scale = Vector3.ONE * maxf(1.5, height * 0.2)
+		crown.position = Vector3(0.0, height * 0.96, 0.0)
 		add_child(crown)
 	# Ground shadow marker for flyers (helps everyone judge where it is).
 	if fly_alt > 0.0:
@@ -191,8 +191,11 @@ func _add_weak(wname: String, frac: Vector3, rfrac: float, whp: float) -> void:
 	holder.name = "Weak%d" % weak.size()
 	var body := model.get_node_or_null("Model") as Node3D
 	(body if body != null else model).add_child(holder)  # model space: scaled with the body, bobs with it
-	holder.position = frac * base_height
-	var r := rfrac * base_height
+	# base_height is measured outside the inner "Model" node: undo its own scale (Creatures' boss option scales it,
+	# which drew GIGA GRUMBLE's / crowned kaiju's weak spots as huge glowing blobs floating over their heads)
+	var inner := body.scale.x if body != null and body.scale.x > 0.001 else 1.0
+	holder.position = frac * base_height / inner
+	var r := rfrac * base_height / inner
 	var mi := MeshInstance3D.new()
 	var sm := SphereMesh.new()
 	sm.radius = r

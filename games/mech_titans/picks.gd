@@ -21,7 +21,7 @@ const TOUCH_TITAN := 7.0  ## m from the pod's middle to the Titan's middle
 const TOUCH_FIST := 4.5
 const TOUCH_VEH := 6.5
 const POD_H := 7.0  ## the light column's height (the picture spins just above: about the pilot's eye height)
-const SPREAD := 11.0  ## m between pods
+const SPREAD := 14.0  ## m between pods
 const AHEAD := 20.0  ## m in front of the Titan
 const MODE_COLORS := {"gentle": Color(0.45, 1.0, 0.55), "brave": Color(1.0, 0.65, 0.25), "mega": Color(1.0, 0.3, 0.35)}
 
@@ -172,9 +172,9 @@ func _make_pod(kind: String, id: String, is_default: bool) -> Node3D:
 	pod.add_child(icon)
 	var label := Label3D.new()
 	label.name = "Name"
-	label.text = pod_name(kind, id)
+	label.text = pod_name(kind, id).replace(" ", "\n")  # two short lines: the pods stand side by side
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	label.pixel_size = 0.03
+	label.pixel_size = 0.022
 	label.font_size = 64
 	label.outline_size = 14
 	label.modulate = col.lightened(0.35)
