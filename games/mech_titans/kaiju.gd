@@ -91,8 +91,8 @@ func setup(p_id: int, k: String, p_split_gen: int = 0, variant: Dictionary = {})
 	if variant.has("color"):
 		opts["color"] = variant["color"]
 		opts["color2"] = variant.get("color2", variant["color"])
-	if bool(info.get("boss", false)):
-		opts["boss"] = true
+	if bool(info.get("boss", false)) or bool(variant.get("crown", false)):
+		opts["boss"] = true  # a boss kaiju (bigboss.gd) wears its crown
 	model = Creatures.monster(String(info["monster"]), opts)
 	add_child(model)
 	anim = Creatures.anim(model)
@@ -134,6 +134,38 @@ func setup(p_id: int, k: String, p_split_gen: int = 0, variant: Dictionary = {})
 		sp.mesh = bm
 		sp.position = Vector3(0.0, height * 0.5, 0.0)
 		add_child(sp)
+	if bool(variant.get("crown", false)) and split_gen == 0:
+		# A boss kaiju: a slow swirl of sparks in its colour, a golden crown floating over its head.
+		var au := CPUParticles3D.new()
+		au.amount = 28
+		au.lifetime = 2.0
+		au.emission_shape = CPUParticles3D.EMISSION_SHAPE_RING
+		au.emission_ring_axis = Vector3.UP
+		au.emission_ring_radius = height * 0.5
+		au.emission_ring_inner_radius = height * 0.4
+		au.emission_ring_height = 0.5
+		au.gravity = Vector3(0.0, 2.0, 0.0)
+		var am := SphereMesh.new()
+		am.radius = 0.18
+		am.height = 0.36
+		am.radial_segments = 6
+		am.rings = 3
+		am.material = MeshKit.material(variant.get("color", Color(1.0, 0.8, 0.3)), 2.5)
+		au.mesh = am
+		au.position = Vector3(0.0, height * 0.1, 0.0)
+		add_child(au)
+		var cb := MeshKit.Builder.new()
+		var gold := Color(1.0, 0.82, 0.25)
+		cb.cylinder(0.5, 0.45, 0.3, Transform3D.IDENTITY, gold, 14, true)
+		for ck in 5:
+			var ca := TAU * ck / 5.0
+			cb.cone(0.13, 0.45, MeshKit.at(Vector3(cos(ca) * 0.45, 0.35, sin(ca) * 0.45)), gold, 6, true)
+			cb.sphere(0.08, MeshKit.at(Vector3(cos(ca) * 0.45, 0.62, sin(ca) * 0.45)), Color(1.0, 0.35, 0.45), 6, true)
+		var crown := MeshKit.instance(cb.build(), false)
+		crown.name = "BossCrown"
+		crown.scale = Vector3.ONE * maxf(1.0, height * 0.12)
+		crown.position = Vector3(0.0, height * 1.08, 0.0)
+		add_child(crown)
 	# Ground shadow marker for flyers (helps everyone judge where it is).
 	if fly_alt > 0.0:
 		_ground_marker = MeshInstance3D.new()

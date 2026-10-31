@@ -28,6 +28,13 @@ extends Node3D
 ## a pulsing A + plus + person on the shared view. Each cue goes once its player has done it twice and
 ## comes back for the next player in that seat. Lost controller / full party / someone leaving: soft
 ## sounds (and a pulsing bolt). Pause: just PAUSED.
+## DEEP (titans-deep): made rounds are DISTRICTS with their own hazards (districts.gd), every fifth one a BOSS
+## KAIJU with a crown and a big readable move (bigboss.gd); between made rounds glowing PODS land in front of
+## the Titan (picks.gd): walk into one to take an UPGRADE for the session (upgrades.gd); at the start the family
+## picks a FRAME (frames.gd) and, before the first made round, GENTLE / BRAVE / MEGA (roundgen.gd MODES), once
+## those are open. Every kaiju sent home moves into the saved KAIJU SANCTUARY (sanctuary.gd): hearts that grow
+## homes on the hills and unlock frames, upgrades and BRAVE. deep.gd runs hazards and upgrade effects.
+## Net store: "mode", "frame", "upg" (upgrades taken), "pick" (the pods), "dome", "sanct_h" (sanctuary hearts).
 
 const NetScript := preload("res://core/net.gd")
 const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
@@ -64,6 +71,13 @@ const Creatures := preload("res://core/creatures.gd")
 const Seeded := preload("res://core/seeded.gd")
 const StoryCard := preload("res://core/story_card.gd")
 const Telemetry := preload("res://core/telemetry.gd")
+const Frames := preload("res://games/mech_titans/frames.gd")
+const Upgrades := preload("res://games/mech_titans/upgrades.gd")
+const Sanctuary := preload("res://games/mech_titans/sanctuary.gd")
+const BigBoss := preload("res://games/mech_titans/bigboss.gd")
+const Districts := preload("res://games/mech_titans/districts.gd")
+const Picks := preload("res://games/mech_titans/picks.gd")
+const Deep := preload("res://games/mech_titans/deep.gd")
 ## Where the kaiju friends stand and cheer (just outside the east and west edges), up to this many.
 const PARADE_MAX := 8
 const PARADE_X := 68.0
@@ -139,6 +153,14 @@ var story_count := 0  ## story pictures shown on this machine (bots)
 var momo_hello := false  ## host: Momo said hello this session
 var friends_today := 0  ## host: kaiju sent home as friends this session (Momo cheers the first)
 const MOMO_COLOR := "74d99a"  ## Momo, the Titans' first kaiju friend (story_pictures.gd momo)
+var deep: Deep  ## hazards, upgrade effects, sanctuary homes (every machine)
+var picks: Picks  ## the pods (every machine)
+var pick_queue: Array[String] = []  ## host: pods still to land before the next round ("mode", "upgrade")
+var pick_t := 0.0  ## host: seconds the pods have stood
+var pick_done_t := -1.0  ## host: a pod was taken; carry on when this runs out
+var pick_wait := Picks.WAIT
+var picks_taken := 0  ## host (bots)
+var mode_picked := false  ## host: GENTLE / BRAVE / MEGA chosen this session
 
 
 func _ready() -> void:
@@ -160,7 +182,9 @@ func _ready() -> void:
 	save.game_id = Data.GAME_ID
 	save.version = Data.SAVE_VERSION
 	save.defaults = {"parts": 0, "cleared": [], "stars": [], "owned": [], "paint": "classic", "paints": ["classic"], "turn": "smooth",
-		"friends": [], "best_round": 0, "rounds": 0, "daily": ""}
+		"friends": [], "best_round": 0, "rounds": 0, "daily": "", "sanct": {"hearts": 0, "bosses": {}}, "frame": "titan",
+		"mode": "gentle", "mega_ok": false, "best": {}}
+	save.use_layout(preload("res://games/mech_titans/progress.gd"))  # SAVE_VERSION 2: the Kaiju Sanctuary (migrate_save)
 	add_child(save)
 	sfx = SfxScript.new()
 	add_child(sfx)
@@ -211,6 +235,13 @@ func _setup(mode: String) -> void:
 	support.name = "Support"
 	support.main = self
 	world_root.add_child(support)
+	deep = Deep.new()
+	deep.setup(self)
+	world_root.add_child(deep)
+	picks = Picks.new()
+	picks.name = "Pods"
+	picks.main = self
+	world_root.add_child(picks)
 	if mode != "client":
 		missions = Missions.new()
 		missions.name = "Missions"
@@ -301,7 +332,7 @@ func _setup(mode: String) -> void:
 	if mode != "client" and SIMPLE_MODE:
 		net.state_set("run_seed", Seeded.fresh_seed())  # this session's made rounds (roundgen.gd)
 		_publish_friends()
-		_launch(test_start_round)  # straight into round 1 (no hangar)
+		_deep_start()
 
 
 func _mask_mirror(vp: SubViewport, mask: int) -> void:
@@ -329,7 +360,7 @@ func mission_info(i: int) -> Dictionary:
 	var ri: Variant = net.state_get("round_info", {})
 	if ri is Dictionary and int((ri as Dictionary).get("index", -1)) == i:
 		return ri
-	return RoundGen.make(i, int(net.state_get("run_seed", 0)), _friend_count())
+	return RoundGen.make(i, int(net.state_get("run_seed", 0)), _friend_count(), String(net.state_get("mode", "gentle")))
 
 
 ## This round's lost-kaiju look ({} for the lessons and the full game).
@@ -348,8 +379,10 @@ func _friend_count() -> int:
 ## Host: the friends made so far (the last few, for the hills) for every machine.
 func _publish_friends() -> void:
 	var f: Array = save.data.get("friends", [])
-	net.state_set("friends_list", f.slice(maxi(0, f.size() - PARADE_MAX)))
+	var h := Sanctuary.hearts(save.data)
+	net.state_set("friends_list", f.slice(maxi(0, f.size() - Sanctuary.parade_size(h))))
 	net.state_set("friends_n", f.size())
+	net.state_set("sanct_h", h)
 
 
 ## Every machine: the kaiju friends waving from the north hills.
@@ -370,12 +403,15 @@ func _build_parade(list: Array) -> void:
 		if e.size() > 1 and String(e[1]) != "":
 			opts["color"] = Color.html(String(e[1]))
 			opts["color2"] = Color.html(String(e[2])) if e.size() > 2 else opts["color"]
+		var crowned := e.size() > 3 and String(e[3]) != ""  # a boss kaiju keeps its crown in the sanctuary
+		if crowned:
+			opts["boss"] = true
 		var m := Creatures.monster(String(info["monster"]), opts)
 		var h := maxf(0.2, Creatures.height_of(m))
-		m.scale = Vector3.ONE * (6.0 / h)
+		m.scale = Vector3.ONE * ((8.0 if crowned else 6.0) / h)
 		# Along the east and west edges of the city, facing in (the Titan and the planes see them).
 		var side := -1.0 if i % 2 == 0 else 1.0
-		m.position = Vector3(side * PARADE_X, 0.0, 24.0 - 15.0 * float(i / 2))
+		m.position = Vector3(side * PARADE_X, 0.0, 24.0 - 11.0 * float(i / 2))
 		m.rotation.y = -side * PI * 0.5  # creatures face +Z: turn them towards the middle
 		parade.add_child(m)
 		var a: Variant = Creatures.anim(m)
@@ -433,11 +469,31 @@ func _make_friends(i: int) -> void:
 	var before := friends.size()
 	var steps: Array = m.get("steps", [])
 	var bosses: Array = (steps[0] as Dictionary).get("boss", []) if not steps.is_empty() else []
+	var bb := String(m.get("bigboss", ""))
 	for b in bosses:
 		var e: Array = [String(b), "", ""]
 		if v.has("color"):
 			e = [String(b), (v["color"] as Color).to_html(false), (v.get("color2", v["color"]) as Color).to_html(false)]
+		if bb != "":
+			e.append(bb)  # crowned in the sanctuary
 		friends.append(e)
+	# The Kaiju Sanctuary: hearts (a boss counts BOSS_HEARTS), what they unlock, the best made round per difficulty.
+	var sanct: Dictionary = save.data["sanct"]
+	var h_before := int(sanct.get("hearts", 0))
+	var h_after := h_before + Sanctuary.hearts_for(m)
+	sanct["hearts"] = h_after
+	var rmode := String(m.get("mode", "gentle"))
+	if bb != "":
+		var bc: Dictionary = sanct.get("bosses", {})
+		bc[bb] = int(bc.get(bb, 0)) + 1
+		sanct["bosses"] = bc
+		if rmode != "gentle" and not bool(save.data.get("mega_ok", false)):
+			save.data["mega_ok"] = true
+			pending_unlocks.append({"kind": "mode", "id": "mega", "name": "MEGA"})
+	if bool(m.get("gen", false)):
+		var best: Dictionary = save.data["best"]
+		best[rmode] = maxi(int(best.get(rmode, 0)), int(m.get("lap", 0)) + 1)
+	pending_unlocks.append_array(Sanctuary.unlocks_between(h_before, h_after))
 	while friends.size() > 60:
 		friends.pop_front()
 	save.data["best_round"] = maxi(int(save.data["best_round"]), i + 1)
@@ -449,6 +505,7 @@ func _make_friends(i: int) -> void:
 	var who := String(m.get("name", "")) if bool(m.get("gen", false)) else String(Data.KAIJU.get(String(bosses[0]) if not bosses.is_empty() else "lizard", Data.KAIJU["lizard"])["name"])
 	story({"who": "NEW FRIEND!", "line": who, "pic": "kaiju", "color": _kaiju_color(m), "duration": 3.5, "sound": "achievement"})
 	var opened := RoundGen.place_opened(before, friends.size())
+	_unlock_cards(4.0 if opened == "" else 7.8)
 	if opened != "":
 		get_tree().create_timer(3.8).timeout.connect(func() -> void:
 			story({"who": "NEW PLACE!", "line": String(Data.PLACES[opened]["name"]), "pic": "castle", "color": "7ad7ff", "duration": 3.5, "sound": "fanfare"}))
@@ -462,6 +519,32 @@ func _make_friends(i: int) -> void:
 				"color": "ffd25a" if golden else MOMO_COLOR, "duration": 3.0}))
 
 
+var pending_unlocks: Array = []  ## host: sanctuary unlocks still to show as story cards
+
+
+## Host: the sanctuary's new unlocks, one story card each (3.8 s apart), starting `delay` s from now.
+func _unlock_cards(delay: float) -> void:
+	var list := pending_unlocks.duplicate()
+	pending_unlocks.clear()
+	for k in list.size():
+		var u: Dictionary = list[k]
+		var card := {}
+		match String(u["kind"]):
+			"frame":
+				var paint: Dictionary = Data.PAINTS[String(Frames.info(String(u["id"]))["paint"])]
+				card = {"who": "NEW TITAN!", "line": String(u["name"]), "pic": "titanframe", "color": (paint["main"] as Color).to_html(false)}
+			"upgrade":
+				card = {"who": "NEW POWER!", "line": String(u["name"]), "pic": "titanpod", "color": (Upgrades.info(String(u["id"]))["color"] as Color).to_html(false)}
+			"mode":
+				card = {"who": "NEW!", "line": String(u["name"]), "pic": "crownkaiju" if String(u["id"]) == "mega" else "star",
+					"color": (Picks.MODE_COLORS[String(u["id"])] as Color).to_html(false)}
+			_:
+				card = {"who": "SANCTUARY", "line": "GROWS!", "pic": "sanctuary", "color": MOMO_COLOR}
+		card["duration"] = 3.4
+		card["sound"] = "fanfare"
+		get_tree().create_timer(delay + 3.8 * k).timeout.connect(func() -> void: story(card))
+
+
 ## Host: one line per round for tuning from real play (core/telemetry.gd).
 func _round_telemetry(i: int, how: String) -> void:
 	var m := mission_info(i)
@@ -470,7 +553,9 @@ func _round_telemetry(i: int, how: String) -> void:
 		"name": String(m.get("name", "")), "place": String(m.get("place", "")), "sky": String(m.get("sky", "")),
 		"kaiju": (steps[0] as Dictionary).get("boss", []) if not steps.is_empty() else [], "hp": float(m.get("hp", 1.0)),
 		"seconds": int(missions.time), "reboots": missions.reboots, "tv_players": party.player_count(), "vr": vr_rig != null,
-		"friends": _friend_count(), "end": how})
+		"friends": _friend_count(), "end": how, "mode": String(m.get("mode", "gentle")), "boss": String(m.get("bigboss", "")),
+		"frame": String(net.state_get("frame", "titan")), "upg": upg_list(), "hazards": deep.hazards_landed, "hazard_hits": deep.hazards_hit,
+		"hearts": Sanctuary.hearts(save.data)})
 
 
 # --- World ------------------------------------------------------------------------------------------
@@ -478,7 +563,7 @@ func _round_telemetry(i: int, how: String) -> void:
 ## Host: show mission i's city on every machine (a new "map_gen" always rebuilds it fresh).
 func _set_map(i: int) -> void:
 	if SIMPLE_MODE and net.mode != "client":
-		net.state_set("round_info", RoundGen.make(i, int(net.state_get("run_seed", 0)), _friend_count()))
+		net.state_set("round_info", RoundGen.make(i, int(net.state_get("run_seed", 0)), _friend_count(), String(net.state_get("mode", "gentle"))))
 	net.state_set("map", i)
 	net.state_set("map_gen", int(net.state_get("map_gen", 0)) + 1)
 
@@ -545,7 +630,42 @@ func has_upgrade(id: String) -> bool:
 
 
 func beam_mult() -> float:
+	if SIMPLE_MODE:
+		return float(frame_info()["beam"]) * (Upgrades.BEAM_MULT if has_upg("beam") else 1.0)
 	return 1.8 if has_upgrade("beam3") else (1.4 if has_upgrade("beam2") else 1.0)
+
+
+## The session's upgrades (upgrades.gd ids, every machine).
+func upg_list() -> Array:
+	var u: Variant = net.state_get("upg", []) if net != null else []
+	return u if u is Array else []
+
+
+func has_upg(id: String) -> bool:
+	return upg_list().has(id)
+
+
+## The Titan's frame this session (frames.gd).
+func frame_info() -> Dictionary:
+	return Frames.info(String(net.state_get("frame", "titan")) if net != null else "titan")
+
+
+## Punch damage multiplier: frame x SUPER PUNCH.
+func punch_mult() -> float:
+	if not SIMPLE_MODE:
+		return 1.0
+	return float(frame_info()["punch"]) * (Upgrades.PUNCH_MULT if has_upg("power") else 1.0)
+
+
+## Host: the Titan's walk / dash / sit-down from its frame, upgrades and the district (moon: longer dashes).
+func _apply_deep() -> void:
+	if not SIMPLE_MODE or mech == null:
+		return
+	var f := frame_info()
+	mech.speed_mult = float(f["speed"]) * (Upgrades.LEGS_MULT if has_upg("legs") else 1.0)
+	var place := String(mission_info(int(net.state_get("mission", 0))).get("place", "downtown"))
+	mech.dash_dist = 20.0 * float(f["dash"]) * float(Districts.info(place)["dash"]) * (1.2 if has_upg("jets") else 1.0)
+	mech.reboot_time = 1.5 if has_upg("repair") else 3.0
 
 
 func energy_mult() -> float:
@@ -553,6 +673,9 @@ func energy_mult() -> float:
 
 
 func armour_taken_mult() -> float:
+	if SIMPLE_MODE:
+		# the difficulty (roundgen.gd curve dmg: gentle hits are soft) and the frame's armour
+		return float(mission_info(int(net.state_get("mission", 0))).get("dmg", 0.6)) / float(frame_info()["armour"])
 	return 1.0
 
 
@@ -853,6 +976,8 @@ func tv_shake(amount: float) -> void:
 func _on_stomp(pos: Vector3, strength: float) -> void:
 	if city != null:
 		city.squash_at(pos, 3.5)
+	if deep != null and net.mode != "client":
+		deep.on_stomp(pos)
 	sfx.play_at("land", pos, -2.0 + strength * 4.0, 0.42 + randf() * 0.05)
 	if vr_rig != null:
 		mech.cockpit.rattle(0.12 * strength)
@@ -1358,6 +1483,8 @@ func _start_play() -> void:
 	missions.active = true
 	sfx.play("go", 0.0)
 	if SIMPLE_MODE:
+		_apply_deep()
+		deep.round_start()
 		_refresh_all_vehicle_huds()
 		net.event("unlocks", [])
 		var r := int(net.state_get("mission", 0))
@@ -1370,14 +1497,10 @@ func _start_play() -> void:
 		if bool(rm.get("gen", false)) and later > 0.0:
 			get_tree().create_timer(later).timeout.connect(func() -> void:
 				if String(net.state_get("phase", "")) == "play":
-					story({"who": "TODAY'S KAIJU" if bool(rm.get("daily", false)) else String(rm.get("name", "")),
-						"line": String(rm.get("name", "")) if bool(rm.get("daily", false)) else "HELP!",
-						"pic": "kaiju", "color": _kaiju_color(rm), "duration": 3.2}))
+					story(_round_card(rm)))
 		elif bool(rm.get("gen", false)):
 			# A made round: the lost kaiju's picture (TODAY'S KAIJU for the daily golden one).
-			story({"who": "TODAY'S KAIJU" if bool(rm.get("daily", false)) else String(rm.get("name", "")),
-				"line": String(rm.get("name", "")) if bool(rm.get("daily", false)) else "HELP!",
-				"pic": "kaiju", "color": _kaiju_color(rm), "duration": 3.2})
+			story(_round_card(rm))
 		var kinds := vehicle_kinds()
 		if r > 0 and kinds.size() > Data.simple_vehicles(r - 1).size():
 			# A new vehicle this round: its name + Y on the TV.
@@ -1390,6 +1513,17 @@ func _start_play() -> void:
 			net.event("announce", ["MISSION START!", "Go, Titans!", "level"])
 	if vr_rig != null:
 		vr_rig.guard_trigger()
+
+
+## The made round's story card: the lost kaiju (TODAY'S KAIJU for the golden one), or a BOSS KAIJU with its crown.
+func _round_card(rm: Dictionary) -> Dictionary:
+	var bb := String(rm.get("bigboss", ""))
+	if bb != "":
+		return {"who": "BIG BOSS!", "line": String(rm.get("name", "")), "pic": "crownkaiju",
+			"color": (BigBoss.LIST[bb]["color"] as Color).to_html(false), "duration": 3.4, "sound": "drumroll"}
+	return {"who": "TODAY'S KAIJU" if bool(rm.get("daily", false)) else String(rm.get("name", "")),
+		"line": String(rm.get("name", "")) if bool(rm.get("daily", false)) else "HELP!",
+		"pic": "kaiju", "color": _kaiju_color(rm), "duration": 3.2}
 
 
 ## Host: missions.gd finished the mission.
@@ -1429,6 +1563,169 @@ func _next_round() -> void:
 	net.state_set("rings", {})
 	_set_map(next)
 	_launch(next)
+
+
+# --- Deep flow: frame / difficulty / upgrade pods (host) -------------------------------------------------------
+
+## Host, session start: FRAME pods when the family has two or more frames, then round 1 (or the bot's round).
+func _deep_start() -> void:
+	var h := Sanctuary.hearts(save.data)
+	var fr := String(save.data.get("frame", "titan"))
+	if not Frames.unlocked(h).has(fr):
+		fr = "titan"
+	var try := OS.get_environment("MT_TRY")
+	var md := OS.get_environment("MT_MODE")
+	if md == "" and try == "mega":
+		md = "mega" if bool(save.data.get("mega_ok", false)) else ""
+	if md != "" and RoundGen.valid_mode(md):
+		net.state_set("mode", md)
+		mode_picked = true
+	else:
+		net.state_set("mode", "gentle")
+	if OS.has_environment("MT_FRAME") and Frames.valid(OS.get_environment("MT_FRAME")):
+		fr = OS.get_environment("MT_FRAME")
+	net.state_set("frame", fr)
+	var u: Array = []
+	for id in OS.get_environment("MT_UPG").split(",", false):
+		if Upgrades.index_of(id) >= 0 and not u.has(id):
+			u.append(id)
+	net.state_set("upg", u)
+	if OS.has_environment("MT_PICK_WAIT"):
+		pick_wait = maxf(1.0, float(OS.get_environment("MT_PICK_WAIT")))
+	var start := test_start_round
+	if try == "boss":
+		start = RoundGen.LESSONS + RoundGen.BOSS_EVERY - 1  # What's New: straight to the first boss kaiju
+	elif try == "pods":
+		start = RoundGen.LESSONS
+		pick_queue.append("upgrade")
+	if start == 0 and not OS.has_environment("MT_NO_PICKS") and Frames.unlocked(h).size() >= 2:
+		pick_queue.push_front("frame")
+	if pick_queue.is_empty():
+		_launch(start)
+	else:
+		set_meta("pick_then", start)
+		_continue_picks()
+
+
+## Host: the round's cheer is over: pods before the next round (difficulty once, then an upgrade), or go on.
+func _after_cheer() -> void:
+	var next := int(net.state_get("mission", 0)) + 1
+	pick_queue.clear()
+	if next >= RoundGen.LESSONS and not OS.has_environment("MT_NO_PICKS"):
+		if not mode_picked and next == RoundGen.LESSONS and Sanctuary.hearts(save.data) >= Sanctuary.BRAVE_HEARTS:
+			pick_queue.append("mode")
+		if not _upgrade_offer(next).is_empty():
+			pick_queue.append("upgrade")
+	if pick_queue.is_empty():
+		_next_round()
+		return
+	set_meta("pick_then", -1)
+	_continue_picks()
+
+
+func _upgrade_offer(next: int) -> Array:
+	return Upgrades.offer(int(net.state_get("run_seed", 0)), next, Upgrades.unlocked(Sanctuary.hearts(save.data)), upg_list())
+
+
+## Host: land the next pods in the queue, or start the round.
+func _continue_picks() -> void:
+	if pick_queue.is_empty():
+		net.state_set("pick", {})
+		var then := int(get_meta("pick_then", -1))
+		if then >= 0:
+			set_meta("pick_then", -1)
+			_launch(then)
+		else:
+			_next_round()
+		return
+	var kind: String = pick_queue.pop_front()
+	var ids: Array = []
+	var def := 0
+	match kind:
+		"frame":
+			ids = Frames.unlocked(Sanctuary.hearts(save.data))
+			if ids.size() > 3:
+				# three pods: the frame you had, then the newest ones
+				var cur := String(net.state_get("frame", "titan"))
+				var rest: Array = ids.filter(func(x: Variant) -> bool: return String(x) != cur)
+				ids = [cur] + rest.slice(rest.size() - 2)
+			def = maxi(0, ids.find(String(net.state_get("frame", "titan"))))
+		"mode":
+			ids = ["gentle", "brave"]
+			if bool(save.data.get("mega_ok", false)):
+				ids.append("mega")
+			def = 0
+		_:
+			var next := int(net.state_get("mission", 0)) + 1 if int(get_meta("pick_then", -1)) < 0 else int(get_meta("pick_then", 0))
+			ids = _upgrade_offer(next)
+			def = ids.size() / 2
+	if ids.size() < 2 and kind != "upgrade" or ids.is_empty():
+		_continue_picks()
+		return
+	pick_t = 0.0
+	pick_done_t = -1.0
+	var n := int(net.state_get("pick_n", 0)) + 1
+	net.state_set("pick_n", n)
+	combat.clear()
+	mech.velocity = Vector3.ZERO
+	net.state_set("pick", {"n": n, "kind": kind, "ids": ids, "def": def, "wait": pick_wait,
+		"at": Picks.places(mech.global_position, mech.forward(), ids.size(), city)})
+	net.state_set("phase", "pick")
+
+
+## Host, phase "pick": someone walked / flew into a pod, or time's up (the default pod).
+func _pick_tick(delta: float) -> void:
+	if pick_done_t >= 0.0:
+		pick_done_t -= delta
+		if pick_done_t < 0.0:
+			_continue_picks()
+		return
+	pick_t += delta
+	var hit := picks.touched(mech, support.vehicles)
+	if not hit.is_empty():
+		_take_pick(int(hit[0]), int(hit[1]))
+	elif pick_t > pick_wait:
+		_take_pick(int((net.state_get("pick", {}) as Dictionary).get("def", 0)), -1)
+
+
+func _take_pick(i: int, by: int) -> void:
+	var p: Dictionary = net.state_get("pick", {})
+	var ids: Array = p.get("ids", [])
+	if i < 0 or i >= ids.size():
+		return
+	var id := String(ids[i])
+	var kind := String(p.get("kind", "upgrade"))
+	picks.taken = true
+	picks_taken += 1
+	var at: Vector3 = (p.get("at", []) as Array)[i]
+	var col := Picks.pod_color(kind, id)
+	combat.emit_fx("burst", ["stars", at + Vector3.UP * 6.0, 5.0])
+	combat.emit_fx("ring", [at + Vector3.UP * 0.5, 9.0, col])
+	combat.emit_fx("sfx", ["power_up", at, 6.0, 0.8])
+	var pic := "titanpod"
+	match kind:
+		"frame":
+			net.state_set("frame", id)
+			save.data["frame"] = id
+			pic = "titanframe"
+			_publish_save()
+		"mode":
+			net.state_set("mode", id)
+			save.data["mode"] = id
+			mode_picked = true
+			pic = "crownkaiju" if id == "mega" else ("star" if id == "brave" else "heart")
+		_:
+			var u := upg_list().duplicate()
+			if not u.has(id):
+				u.append(id)
+			net.state_set("upg", u)
+			if id == "dome":
+				net.state_set("dome", true)
+	save.mark_dirty()
+	_apply_deep()
+	story({"who": Picks.pod_name(kind, id), "line": "YAY!" if by >= 0 else "GO!", "pic": pic, "color": col.to_html(false),
+		"duration": 2.6, "sound": "achievement"})
+	pick_done_t = 1.6
 
 
 func _refresh_all_vehicle_huds() -> void:
@@ -1481,8 +1778,16 @@ func _on_state_changed(key: String, value: Variant) -> void:
 			_refresh_group()
 		"save":
 			var d: Dictionary = value
-			mech.set_paint(String(d.get("paint", "classic")))
+			if SIMPLE_MODE:
+				mech.set_paint(String(frame_info()["paint"]))  # the frame's paint (frames.gd)
+			else:
+				mech.set_paint(String(d.get("paint", "classic")))
 			_refresh_menus()
+		"frame":
+			mech.set_paint(String(Frames.info(String(value))["paint"]))
+		"pick":
+			if picks != null:
+				picks.sync(value)
 		"sel":
 			_refresh_menus()
 		"score", "cdmg", "landmark", "rescued", "rescue_total", "objective":
@@ -1526,6 +1831,10 @@ func _on_phase(phase: String) -> void:
 				dlg.stop()
 		"results":
 			_show_results(net.state_get("results", {}))
+		"pick":
+			_hide_results()
+			music.play_mood("overworld")
+			sfx.play("reveal", -2.0)
 
 
 func _boss_intro(list: Array) -> void:
@@ -1677,7 +1986,7 @@ func _process(delta: float) -> void:
 	else:
 		var out := pilot.update(delta, mech, combat)
 		var intent: Dictionary = out["intent"]
-		if phase != "play":
+		if phase != "play" and phase != "pick":  # pods: walk the Titan into one
 			intent.erase("move")
 			intent.erase("move_world")
 			intent.erase("turn")
@@ -1707,14 +2016,20 @@ func _process(delta: float) -> void:
 		elif phase == "results":
 			results_t += delta
 			if SIMPLE_MODE and results_t > CHEER_TIME:
-				_next_round()
+				_after_cheer()
 			elif results_t > 40.0:
 				_back_to_hangar()
+		elif phase == "pick":
+			_pick_tick(delta)
 		elif phase == "hangar" and auto_launch >= 0 and not dlg.is_playing():
 			var al := auto_launch
 			auto_launch = -1
 			_launch(al)
-	support.drive_local(delta, phase == "play" or phase == "hangar")
+	support.drive_local(delta, phase == "play" or phase == "hangar" or phase == "pick")
+	if deep != null:
+		if net.mode != "client":
+			deep.host_tick(delta, phase)
+		deep.visual_tick(delta)
 	support.visual_tick(delta)
 	_tick_hud(delta)
 	if teach != null:
