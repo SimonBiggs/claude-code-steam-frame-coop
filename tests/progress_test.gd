@@ -33,10 +33,22 @@ func _initialize() -> void:
 	_expect(Progress.scan_ms < 5.0, "finding the games' progress.gd took %.1f ms (want < 5: the lobby does it at startup)" % Progress.scan_ms)
 	_expect(Progress.load_ms == 0.0, "finding them loads no script")
 	# The lobby loads them a few a frame: one step stays near its budget.
-	var t_step := Time.get_ticks_usec()
-	Progress.load_some(3.0)
-	var step_ms := (Time.get_ticks_usec() - t_step) / 1000.0
-	_expect(step_ms < 8.0, "one load_some(3 ms) step took %.1f ms" % step_ms)
+	# Every step, not just the first: one heavy progress.gd (preloading its game's data) used to hitch the lobby.
+	var worst := 0.0
+	var steps := 0
+	var t_all := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t_all < 10000:
+		var t_step := Time.get_ticks_usec()
+		var all_done := Progress.load_some(3.0)
+		worst = maxf(worst, (Time.get_ticks_usec() - t_step) / 1000.0)
+		steps += 1
+		if all_done:
+			break
+		OS.delay_msec(4)  # (a frame passes in the lobby)
+	print("PROGRESS: loaded in %d steps, the slowest %.1f ms" % [steps, worst])
+	_expect(worst < 8.0, "a load_some(3 ms) step took %.1f ms (load progress.gd scripts off the main thread)" % worst)
+	for id in Progress.ids():
+		_expect(Progress.is_loaded(id), "%s's progress.gd never finished loading" % id)
 	for e in Progress.check(ids):
 		_expect(false, e)
 	# A changed save layout without a working migration is caught (core/save.gd use_layout / Progress.layout_problems).
