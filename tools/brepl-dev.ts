@@ -435,9 +435,10 @@ export async function land(branch: string, genTests: string[], botId: string, ot
   if (!ok) return { stop: "tests", out, res };
   // The message goes through a file: JSON.stringify'd "\n" stays a literal backslash-n inside bash quotes
   // (2026-10-29: a merge subject read "...tests)\n\nCo-Authored-By...").
+  // msg = one subject line: duo-deploy adds the trailers (a multi-line msg once landed as one subject with literal \n).
   const msgFile = join(GP, "wt-merge/.git-land-msg");
   await writeFile(msgFile, `Merge branch 'merge-arcade' (${branch}: uids, tests)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UPzLapMn8qMpWGwygUaPCg\n`);
-  const d = await sh(`duo-deploy ${JSON.stringify(msg)} 2>&1 | grep -v offline | tail -4; duo-deploy-deck 2>&1 | grep -v offline | tail -4; cd ${LIVE} && git merge -q --no-edit merge-arcade -F ${msgFile} && rm -f ${msgFile} && cd ../wt-merge && git merge -q --ff-only main && echo MERGED; cd ${LIVE} && git log --oneline -2 | cut -c1-60`);
+  const d = await sh(`duo-deploy ${JSON.stringify(String(msg).split("\n")[0].trim())} 2>&1 | grep -v offline | tail -4; duo-deploy-deck 2>&1 | grep -v offline | tail -4; cd ${LIVE} && git merge -q --no-edit merge-arcade -F ${msgFile} && rm -f ${msgFile} && cd ../wt-merge && git merge -q --ff-only main && echo MERGED; cd ${LIVE} && git log --oneline -2 | cut -c1-60`);
   // The branch's worktree goes only after its Godots quit (an agent's offscreen run may still be up).
   const rm = /MERGED/.test(d.out) ? await removeWorktree(join(GP, `wt-${branch}`), branch) : { quit: [], out: "not removed: the merge into main didn't finish" };
   // Tools the branch changed in the repo (tools/multibot.ts, tools/brepl-dev.ts, ...) get installed where they run,

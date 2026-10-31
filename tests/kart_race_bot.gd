@@ -20,6 +20,7 @@ extends Node
 ## short FINISH! / LAP n headlines. BOT_VR=1 is the same as BOT_FAKE_VR=1.
 
 const FAKE_PAD := 40
+const Cups := preload("res://games/kart_race/cups.gd")
 
 var main
 var t := 0.0
@@ -55,6 +56,16 @@ var splits_seen := 0
 var shortcut_uses := 0
 var logged_races := 0
 var ending := false
+# Bolt's cups (cups.gd / pit.gd / items.gd / shelf.gd): the pit stop, cup races, hazards, kart classes, the shelf.
+var pit_seen := false
+var pit_picks := 0
+var cup_races := 0
+var hazards_seen := 0
+var classes_seen := {}
+var lap_ghost_seen := false
+var shelf_seen := false
+var gates_seen := 0
+var cup_keys := {}
 
 
 func _ready() -> void:
@@ -121,6 +132,7 @@ func _process(delta: float) -> void:
 			items_seen[k.item] = true
 	if main.SIMPLE_MODE:
 		_simple_checks()
+		_deep_checks()
 	var res: bool = main.state == "results"
 	_tour_checks(res and not was_results)
 	if res and not was_results:
@@ -186,8 +198,23 @@ func _end_run(mode: String) -> void:
 		fails.append("no generated track built")
 	if main.story_count < 1:
 		fails.append("no story card shown")
+	if mode != "client" and races >= 2:
+		if not pit_seen or pit_picks < 1:
+			fails.append("a pit stop with picks at the gates (seen %s, picks %d)" % [pit_seen, pit_picks])
+		if cup_races < 1 and not OS.has_environment("KART_PICK"):
+			fails.append("a cup race after the pit stop")
+		if cup_races >= 1 and hazards_seen < 1:
+			fails.append("hazards on the cup tracks")
+		if OS.has_environment("KART_ITEM") and main.items_given.size() < 5:
+			fails.append("the power-ups given (%s)" % str(main.items_given.keys()))
+		if races >= 3 and OS.has_environment("KART_PIT") and Cups.medals(main.shelf) < 1 and main.speed_mode == "gentle":
+			fails.append("a gentle cup finished puts a cup on Bolt's shelf")
+	if pit_seen and gates_seen < 1:
+		fails.append("the pit stop's gates drawn on the TV")
+	if not shelf_seen:
+		fails.append("Bolt's trophy shelf by the start")
 	if mode != "client":
-		if not kinds_seen.has("daily") or not kinds_seen.has("story"):
+		if not kinds_seen.has("daily") and not OS.has_environment("KART_PIT") or not kinds_seen.has("story"):
 			fails.append("today's track and a story track both raced (%s)" % str(kinds_seen.keys()))
 		if logged_races < races:
 			fails.append("a RUN line for every race (%d of %d)" % [logged_races, races])
@@ -198,8 +225,31 @@ func _end_run(mode: String) -> void:
 	print("BOT TOUR: mode=%s races=%d tracks=%d (generated %d) kinds=%s splits=%d shortcut_trips=%d story_cards=%d hats=%d runs=%d" % [
 		mode, races, tracks_seen.size(), gen, ",".join(PackedStringArray(kinds_seen.keys())), splits_seen, shortcut_uses,
 		main.story_count, main.hats_won, logged_races])
+	print("BOT DEEP: mode=%s pit=%s picks=%d gates=%d cup_races=%d hazards=%d classes=%s speed=%s items=%s shelf=%s medals=%d lap_ghost=%s" % [
+		mode, pit_seen, pit_picks, gates_seen, cup_races, hazards_seen, ",".join(PackedStringArray(classes_seen.keys())), main.speed_mode,
+		",".join(PackedStringArray(main.items_given.keys())), shelf_seen, Cups.medals(main.shelf), lap_ghost_seen])
 	print("BOT RESULT: %s" % ("PASS" if fails.is_empty() else "FAIL"))
 	preload("res://tests/bot_end.gd").quit_quietly(get_tree(), 0 if fails.is_empty() else 1)
+
+
+## Bolt's cups: the pit stop's gates and picks, cup tracks with hazards, kart classes, the shelf, the lap ghost.
+func _deep_checks() -> void:
+	if main.state == "pit":
+		pit_seen = true
+		gates_seen = maxi(gates_seen, main.pit.get_child_count())
+		if main.net.mode != "client":
+			pit_picks = maxi(pit_picks, main.pit.picks.size())
+	if main.Story.is_cup(main.track_desc) and main.state == "race" and not cup_keys.has(str(main.track.key)):
+		cup_keys[str(main.track.key)] = true
+		cup_races += 1
+		hazards_seen += main.track.hazards.size()
+	for k in main.karts:
+		if k.active:
+			classes_seen[k.kart_class] = true
+	if main.shelf_node != null and is_instance_valid(main.shelf_node) and main.shelf_node.is_inside_tree():
+		shelf_seen = true
+	if main.ghost_node != null and main.ghost_node.visible and main.ghost_path.is_empty():
+		lap_ghost_seen = true
 
 
 func _join_players(mode: String) -> void:
