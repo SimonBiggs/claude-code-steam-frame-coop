@@ -110,7 +110,7 @@ static func draw(pic, kind: String, t: float, bob: float, _color: Color) -> void
 					pic.draw_arc(pic._p(0.84, 0.6), 0.22 * size.x, -PI * 0.5, PI * 0.5, 14, Color(0.6, 0.42, 0.26), 0.035 * size.x)
 					pic.draw_line(pic._p(0.84, 0.38), pic._p(0.84, 0.82), Color(0.95, 0.95, 0.9), 0.012 * size.x)
 				"healer":
-					pic._poly([[0.28, 0.42 + bob], [0.5, 0.18 + bob], [0.72, 0.42 + bob], [0.66, 0.34 + bob], [0.34, 0.34 + bob]], hat)
+					pic._poly([[0.3, 0.4 + bob], [0.5, 0.18 + bob], [0.7, 0.4 + bob]], hat)
 					pic._poly([[0.47, 0.72], [0.53, 0.72], [0.53, 0.86], [0.47, 0.86]], Color(0.92, 0.32, 0.38))
 					pic._poly([[0.43, 0.76], [0.57, 0.76], [0.57, 0.82], [0.43, 0.82]], Color(0.92, 0.32, 0.38))
 					var gl := 0.5 + 0.5 * sin(t * 4.0)

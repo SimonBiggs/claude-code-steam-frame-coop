@@ -17,6 +17,10 @@ extends Node
 ## Saga checks: the road came from the plan (sagagen.gd) and the TV machine built the same one; the party levelled up
 ## at the glowing stones (TV bots shoot one, the VR bot touches one); shards were found; Lumi's story cards showed
 ## on every machine; one RUN telemetry line per journey.
+## saga-deep checks: TV bots bonk a hero statue first (each seat becomes a hero), shoot a MAP stone when the stones
+## are up (CS_JOURNEYS=3 BOT_NO_DAILY=1: several regions open; the VR bot touches the second stone, so the world
+## is rebuilt for another region on every machine), find the region's quest things (shoot / touch them), and fight
+## the crystal guardian; with CS_TRY=guardian (or a deep CS_REGION) the guardian's tells (rain / roll / call) show.
 
 const BotKit := preload("res://tests/bot_kit.gd")
 const BotEnd := preload("res://tests/bot_end.gd")
@@ -25,7 +29,7 @@ const World := preload("res://games/crystal_saga/world.gd")
 const Save := preload("res://core/save.gd")
 
 const POKE_KINDS: Array[int] = [World.WELL, World.CHICKEN, World.FLOWER, World.SIGN, World.CHEST, World.CRYSTAL,
-	World.MUSHROOM, World.HOUSE, World.TREE, World.VILLAGER, World.FRIEND]
+	World.MUSHROOM, World.HOUSE, World.TREE, World.VILLAGER, World.FRIEND, World.QUEST, World.GIVER]
 
 var kit: BotKit
 var main: Node
@@ -46,6 +50,13 @@ var saw_choose := 0
 var saw_offer_client := false
 var plan_ok := true
 var first_road := 0  ## the first journey's road (a hash), once the party is in the forest
+var statue_done := {}  ## slot -> true once it bonked its hero statue
+var saw_map := 0
+var saw_map_client := false
+var saw_tells := {}  ## tell kinds seen drawn on this machine
+var quest_max := 0
+var region_changes := 0
+var last_biome := -1
 
 
 func _ready() -> void:
@@ -84,8 +95,19 @@ func _watch() -> String:
 	saw_restored = saw_restored or bool(main.net.state_get("restored", false))
 	if _phase() == "choose":
 		saw_choose += 1
-		if main.world.offer.size() == 2 and main.world.choice_ids.size() == 2 and (main.world.props[main.world.choice_ids[0]]["node"] as Node3D).visible:
+		if main.world.offer.size() >= 2 and main.world.choice_ids.size() == 3 and (main.world.props[main.world.choice_ids[0]]["node"] as Node3D).visible:
 			saw_offer_client = true
+	if _phase() == "map":
+		saw_map += 1
+		if main.world.offer_kind == "region" and (main.world.props[main.world.choice_ids[0]]["node"] as Node3D).visible:
+			saw_map_client = true
+	for t in main.monsters._tell_nodes:
+		saw_tells[String(t[3])] = true
+	quest_max = maxi(quest_max, int(main.net.state_get("quest", 0)))
+	var bio := int(main.plan.get("biome", -1))
+	if last_biome >= 0 and bio != last_biome:
+		region_changes += 1
+	last_biome = bio
 	if first_road == 0 and _zone() >= 1:
 		first_road = var_to_str(main.world.plan.get("props", [])).hash()
 	var pl: Array = main.net.state_get("plan", [])
@@ -161,8 +183,21 @@ func _tv_bot(slot: int, delta: float) -> void:
 	var reach := 2.5 if slot == 0 else 4.0
 	match _phase():
 		"practice":
-			if not w.is_used(w.stone_id):
+			if slot > 0 and not statue_done.has(slot) and w.statue_ids.size() == 5:
+				# Become a hero first: bonk a statue (seat 1 a healer when unlocked, else mage / archer / knight ...).
+				var sid: int = w.statue_ids[(slot + 1) % 3 if slot < 4 else slot % 5]
+				if not (w.props[sid]["hero"] as Node3D).visible:
+					sid = w.statue_ids[slot % 3]
+				target = w.prop_center(sid)
+				reach = 1.15
+				if main.heroes[slot].cls == String(w.props[sid]["class"]) or kit.t > 45.0:
+					statue_done[slot] = true
+			elif not w.is_used(w.stone_id):
 				target = w.prop_center(w.stone_id)
+		"map":
+			if main.vr_rig == null and w.offer.size() >= 2 and w.offer_kind == "region":
+				target = w.prop_center(w.choice_ids[slot % w.offer.size()])
+				reach = 3.5
 		"fight", "boss":
 			target = _nearest_monster(pos)
 			if _phase() == "boss":
@@ -171,15 +206,18 @@ func _tv_bot(slot: int, delta: float) -> void:
 			if not w.is_used(w.orb_id) and main.vr_rig == null:
 				target = w.prop_center(w.orb_id)
 		"cleared":
-			if int(main.net.state_get("open", 0)) > _zone() and (main.vr_rig == null or (poked_zone == _zone() and poke_list.is_empty())):
+			var qt := _quest_target(pos)
+			if qt != Vector3.INF and _zone() in [1, 2]:
+				target = qt
+			elif int(main.net.state_get("open", 0)) > _zone() and (main.vr_rig == null or (poked_zone == _zone() and poke_list.is_empty())):
 				target = World.center(_zone() + 1) + Vector3(-2.0 + slot * 0.6, 0.0, 4.0)
 				reach = 0.3
 		"crystal":
 			if main.vr_rig == null:
 				target = w.prop_center(w.big_id)
 		"choose":
-			if main.vr_rig == null and w.offer.size() == 2:
-				target = w.prop_center(w.choice_ids[slot % 2])
+			if main.vr_rig == null and w.offer.size() >= 2:
+				target = w.prop_center(w.choice_ids[slot % w.offer.size()])
 				reach = 3.0
 	if target == Vector3.INF:
 		kit.slot_stick(main.party, slot, "left", Vector2.ZERO)
@@ -197,6 +235,21 @@ func _tv_bot(slot: int, delta: float) -> void:
 		return
 	var steer := _around_rocks(pos, to)
 	kit.slot_stick(main.party, slot, "left", Vector2(steer.x, steer.z).normalized())
+
+
+## The nearest quest thing still to find in this zone (INF: none, or the quest is done).
+func _quest_target(from: Vector3) -> Vector3:
+	var w = main.world
+	if int(main.net.state_get("quest", 0)) >= int((main.plan.get("quest", {}) as Dictionary).get("need", 3)):
+		return Vector3.INF
+	var best := Vector3.INF
+	for qid in w.quest_ids:
+		if w.is_used(qid) or int(w.props[qid]["zone"]) != _zone():
+			continue
+		var c: Vector3 = w.prop_center(qid)
+		if best == Vector3.INF or from.distance_to(c) < from.distance_to(best):
+			best = c
+	return best
 
 
 ## Walk round the rocks in the way: slide sideways past any blocker just ahead.
@@ -265,9 +318,9 @@ func _vr_bot(delta: float) -> void:
 				_raise(rig, VrRig.LEFT, up_l, rest_l, delta)
 				if bool(main.net.state_get("thunder", false)) and fmod(kit.t, 5.0) < 0.6:
 					kit.vr_reach(rig, VrRig.RIGHT, up_r, 8.0, delta)
-		"choose":
-			if w.offer.size() == 2:
-				var sc: Vector3 = w.prop_center(w.choice_ids[0])
+		"choose", "map":
+			if w.offer.size() >= 2:
+				var sc: Vector3 = w.prop_center(w.choice_ids[1 if phase == "map" else 0])
 				var to6 := Vector3(sc.x - feet.x, 0.0, sc.z + 0.7 - feet.z)
 				if to6.length() > 0.3:
 					_walk(rig, to6)
@@ -342,10 +395,11 @@ func _report() -> String:
 	var vr := ""
 	if main.hands != null:
 		vr = " swings %d fires %d thunders %d knocks %d" % [main.hands.swings, main.hands.fires, main.hands.thunders, main.log_knocks]
-	return "BOT %s: zone %d phase %s open %d monsters %d heroes %d hits %s pokes %s dizzy %d stomps %d shards %d skills %s%s" % [
+	return "BOT %s: zone %d phase %s open %d monsters %d heroes %d hits %s pokes %s dizzy %d stomps %d shards %d skills %s quest %d region %s tells %s classes %s%s" % [
 		main.net.mode, _zone(), _phase(), int(main.net.state_get("open", 0)), main.monsters.count(),
 		main.heroes.size(), str(main.log_hits), str(main.log_pokes), main.log_dizzy, main.log_stomps,
-		int(main.net.state_get("shards", 0)), str(main.net.state_get("skills", {})), vr]
+		int(main.net.state_get("shards", 0)), str(main.net.state_get("skills", {})), int(main.net.state_get("quest", 0)),
+		main.plan.get("names", ["", "?"])[1], str(main.log_tells if main.net.mode != "client" else saw_tells), str(main.log_classes), vr]
 
 
 func _checks() -> void:
@@ -357,11 +411,15 @@ func _checks() -> void:
 	kit.assert_true(plan_ok, "%s: the world was built from the journey's plan" % mode)
 	if mode != "local":
 		print("BOT AGREE road=%d" % first_road)  # every machine built the same (first) road
+		print("BOT AGREE biome=%d" % int(main.plan.get("biome", -1)))  # ... and ended in the same region
 	kit.assert_true(main.stories_shown > 0, "%s: Lumi's story cards showed (%d)" % [mode, main.stories_shown])
 	if mode == "client":
 		kit.assert_true(saw_choose == 0 or saw_offer_client, "client showed the level-up stones")
 		kit.assert_true(max_mons >= 2, "client mirrors the monsters (%d)" % max_mons)
 		kit.assert_true(int(main.net.state_get("open", 0)) >= 2 or saw_results, "client saw barriers open")
+		kit.assert_true(saw_map == 0 or saw_map_client, "client showed the map stones")
+		if main.log_regions.is_empty() and OS.has_environment("CS_TRY"):
+			kit.assert_true(not saw_tells.is_empty(), "client drew the guardian's tells (%s)" % str(saw_tells))
 		return
 	var first := int(OS.get_environment("CS_ZONE")) if OS.has_environment("CS_ZONE") else 0
 	for z in range(first, World.ZONES):
@@ -372,7 +430,20 @@ func _checks() -> void:
 	kit.assert_true(int(main.save.data.shards) > 0, "%s: crystal shards were found (%d)" % [mode, int(main.save.data.shards)])
 	kit.assert_true(main.runs_logged > 0, "%s: a RUN telemetry line was written" % mode)
 	kit.assert_true(saw_results, "%s: the results showed" % mode)
-	kit.assert_true(main.log_stomps > 0 or first > 3, "%s: the Stone Giant stomped (%d)" % [mode, main.log_stomps])
+	var atk: Array = (main.plan.get("guardian", {}) as Dictionary).get("attacks", [])
+	kit.assert_true(main.log_stomps > 0 or first > 3 or not atk.has("stomp") or not main.log_tells.is_empty(), "%s: the guardian stomped (%d) %s" % [mode, main.log_stomps, str(main.log_tells)])
+	if OS.has_environment("CS_TRY") or OS.has_environment("CS_REGION"):
+		var fancy := 0
+		for k in main.log_tells:
+			fancy += 1 if String(k) != "stomp" else 0
+		kit.assert_true(fancy > 0 or atk == ["stomp"], "%s: the crystal guardian showed its tells (%s, attacks %s)" % [mode, str(main.log_tells), str(atk)])
+		kit.assert_true(not saw_tells.is_empty() or atk == ["stomp"], "%s: the tells were drawn (%s)" % [mode, str(saw_tells)])
+	if first <= 1:
+		kit.assert_true(quest_max > 0, "%s: quest things were found (%d)" % [mode, quest_max])
+	if first == 0 and not main.heroes.is_empty() and not (main.heroes.size() == 1 and main.heroes.has(0)):
+		kit.assert_true(not main.log_classes.is_empty(), "%s: TV heroes picked heroes at the statues (%s)" % [mode, str(main.log_classes)])
+	if saw_map > 0:
+		kit.assert_true(not main.log_regions.is_empty(), "%s: a region was picked on the map (%s)" % [mode, str(main.log_regions)])
 	if main.vr_rig != null:
 		if first == 0:
 			kit.assert_true(main.ghost.shown.has("swing") and main.ghost.shown.has("fire"), "the ghost hand showed swing and fire (%s)" % str(main.ghost.shown))
