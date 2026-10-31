@@ -7,10 +7,11 @@ extends "res://games/party_board/minigames/mg_base.gd"
 const META := {
 	"name": "COIN CATCH",
 	"goal": "Coins fall from the money tree: grab as many as you can! Gold coins are worth 3.",
-	"format": "ffa", "time": 40.0, "music": "party", "cam": [15.0, 13.0],
+	"format": "ffa", "time": 25.0, "music": "party", "cam": [15.0, 13.0],
 	"tv": [["L-STICK", "Run under the coins"]],
 	"vr": [["GLOVE", "Shake the tree"], ["GLOVES", "Catch falling coins"]],
 	"vr_line": "Shake the tree, catch the coins!",
+	"cue": "catch",
 }
 const CANOPY := Vector3(0, 6.0, 0)
 const CANOPY_R := 3.4
@@ -64,7 +65,8 @@ func play_tick(delta: float) -> void:
 	# The tree drops coins by itself (more often without a giant to shake it).
 	_auto_t -= delta
 	if _auto_t <= 0.0:
-		_auto_t = 0.5 if giant else 0.3
+		# about the same coins per player for 1-6 players (tests/party_board_mg_test.gd)
+		_auto_t = (0.5 if giant else 0.3) * 4.0 / clampf(walkers().size(), 2.0, 6.0)
 		_drop(1)
 	_giant_shake(delta)
 	_fall(delta)
@@ -73,6 +75,10 @@ func play_tick(delta: float) -> void:
 func _drop(n: int) -> void:
 	for i in n:
 		var a := rng.randf() * TAU
+		var lag := lagging_walker()
+		if main.simple and lag >= 0 and rng.randf() < 0.4:  # SIMPLE: some coins fly towards whoever is behind
+			var lp: Vector3 = pos.get(lag, Vector3.ZERO)
+			a = atan2(lp.z, lp.x) + rng.randf_range(-0.4, 0.4)
 		var r := rng.randf_range(0.5, CANOPY_R)
 		var p := CANOPY + Vector3(cos(a) * r, rng.randf_range(-1.0, 0.5), sin(a) * r)
 		var kind := 1 if rng.randf() < 0.12 else 0
@@ -142,7 +148,7 @@ func _fall(delta: float) -> void:
 				continue
 		for w in walkers():
 			var wp: Vector3 = pos[w]
-			if p.y < 2.2 and Vector2(wp.x - p.x, wp.z - p.z).length() < 0.95:
+			if p.y < 2.2 and Vector2(wp.x - p.x, wp.z - p.z).length() < catch_reach(w, 0.95):
 				_collect(int(id), w, worth)
 				break
 

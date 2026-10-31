@@ -84,7 +84,7 @@ func _on_menu(m: Dictionary) -> void:
 	var title := String(m.get("title", ""))
 	if main.is_local_vr(pid):
 		vr_menu = VrMenu.open(main, main.vr_ui_opts(_vr_menu_h(items), {"title": title, "items": items, "rig": main.vr_rig,
-			"player": 0, "width": VR_MENU_W}))
+			"player": 0, "width": VR_MENU_W, "footer": not main.simple}))
 		_enlarge(vr_menu)
 		vr_menu.chosen.connect(func(id: String, _it: Dictionary) -> void: main.net.request(0, "menu", [seq, id]))
 		main.vr_rig.guard_trigger()

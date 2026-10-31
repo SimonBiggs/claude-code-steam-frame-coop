@@ -35,11 +35,12 @@ var _dur := 0.0
 var _home := Vector3.ZERO  # current rest position (without offset)
 
 
-func setup(p_pid: int, p_color: Color) -> void:
+func setup(p_pid: int, p_color: Color, main_look: Array = []) -> void:
 	pid = p_pid
 	color = p_color
 	name = "Token%d" % pid
-	var look: Array = LOOKS[pid % LOOKS.size()]
+	var look: Array = main_look if not main_look.is_empty() else LOOKS[pid % LOOKS.size()]
+	_look_key = var_to_str(look)
 	body = Creatures.humanoid({"class": String(look[0]), "hat": String(look[1]), "hair": look[2], "outfit": color,
 		"seed": 11 + pid * 7, "scale": TOKEN_SCALE})
 	add_child(body)
@@ -74,6 +75,73 @@ func fly_to(at: Vector3, dur: float = 1.3) -> void:
 
 func busy() -> bool:
 	return _kind != "" or not _queue.is_empty()
+
+
+## A new look (main.look_of: this party's won hat): the body is rebuilt; its name tag moves across.
+var _look_key := ""
+
+
+func set_look(look: Array) -> void:
+	var key := var_to_str(look)
+	if key == _look_key or body == null:
+		return
+	_look_key = key
+	var old := body
+	body = Creatures.humanoid({"class": String(look[0]), "hat": String(look[1]), "hair": look[2], "outfit": color,
+		"seed": 11 + pid * 7, "scale": TOKEN_SCALE})
+	add_child(body)
+	for c in old.get_children():
+		if c is Label3D:
+			c.reparent(body, false)
+	remove_child(old)
+	old.queue_free()
+	if crown != null:
+		crown.position.y = Creatures.height_of(body) + 0.15
+
+
+## The item this token holds (boards.gd ITEMS id, "" = none): a little picture bobbing over its head.
+var item_node: Node3D
+var item_id := ""
+var _item_y := 2.0
+
+
+func set_item(id: String) -> void:
+	if id == item_id:
+		return
+	item_id = id
+	if item_node != null:
+		item_node.queue_free()
+		item_node = null
+	if id == "":
+		return
+	item_node = item_mesh(id)
+	item_node.scale = Vector3.ONE * 0.6
+	_item_y = Creatures.height_of(body) + 0.75
+	item_node.position.y = _item_y
+	add_child(item_node)
+
+
+## A picture of an item (board units, ~1 unit tall): 2 DICE, SWAP arrows or a WARP swirl.
+static func item_mesh(id: String) -> Node3D:
+	var b := MeshKit.Builder.new()
+	match id:
+		"double":
+			for k in 2:
+				var c := Vector3(-0.32 + k * 0.64, 0.0, 0.0)
+				b.rounded_box(Vector3(0.5, 0.5, 0.5), 0.08, MeshKit.at(c, Vector3.ONE, Vector3(0.3, 0.5 - k, 0.2)), Color(1, 1, 1))
+				b.sphere(0.07, MeshKit.at(c + Basis.from_euler(Vector3(0.3, 0.5 - k, 0.2)) * Vector3(0, 0, 0.26)), Color(0.9, 0.2, 0.25), 6)
+		"swap":
+			b.box(Vector3(0.8, 0.12, 0.12), MeshKit.at(Vector3(0, 0.18, 0)), Color(0.5, 0.75, 1.0), true)
+			b.wedge(Vector3(0.3, 0.3, 0.12), MeshKit.at(Vector3(0.5, 0.18, 0), Vector3.ONE, Vector3(0, 0, -PI * 0.5)), Color(0.5, 0.75, 1.0), true)
+			b.box(Vector3(0.8, 0.12, 0.12), MeshKit.at(Vector3(0, -0.18, 0)), Color(1.0, 0.6, 0.3), true)
+			b.wedge(Vector3(0.3, 0.3, 0.12), MeshKit.at(Vector3(-0.5, -0.18, 0), Vector3.ONE, Vector3(0, 0, PI * 0.5)), Color(1.0, 0.6, 0.3), true)
+		"warp":
+			b.torus(0.4, 0.08, MeshKit.at(Vector3.ZERO, Vector3.ONE, Vector3(PI * 0.5, 0, 0)), Color(0.75, 0.5, 1.0), 16, 5, true)
+			b.torus(0.24, 0.07, MeshKit.at(Vector3.ZERO, Vector3.ONE, Vector3(PI * 0.5, 0, 0)), Color(0.45, 0.9, 1.0), 14, 5, true)
+			b.sphere(0.1, MeshKit.at(Vector3.ZERO), Color(1, 1, 1), 6, true)
+		_:
+			b.sphere(0.3, MeshKit.at(Vector3.ZERO), Color(1, 1, 1), 8)
+	return MeshKit.instance(b.build(), false)
 
 
 func set_crown(on: bool) -> void:
@@ -128,3 +196,6 @@ func _process(delta: float) -> void:
 	else:
 		var want := _home + offset
 		position = position.lerp(want, 1.0 - exp(-10.0 * delta))
+	if item_node != null:
+		item_node.rotation.y += delta * 1.5
+		item_node.position.y = _item_y + 0.12 * sin(Time.get_ticks_msec() / 300.0)

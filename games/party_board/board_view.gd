@@ -10,12 +10,14 @@ const BD := preload("res://games/party_board/board_data.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")
 const UiKit := preload("res://core/ui_kit.gd")
+const Boards := preload("res://games/party_board/boards.gd")
 
 const WATER_SHADER := """
 shader_type spatial;
 render_mode specular_schlick_ggx, cull_disabled;
 uniform vec3 deep : source_color = vec3(0.08, 0.36, 0.72);
 uniform vec3 shallow : source_color = vec3(0.24, 0.78, 0.86);
+uniform float sparkle = 0.0;
 uniform float island_r = 13.5;
 varying vec3 lp;
 void vertex() { lp = VERTEX; }
@@ -25,13 +27,28 @@ void fragment() {
 	float w = sin(lp.x * 1.6 + TIME * 1.2) * sin(lp.z * 1.25 - TIME * 0.9);
 	float w2 = sin(lp.x * 0.7 - lp.z * 0.9 + TIME * 0.7);
 	c += vec3(0.07) * smoothstep(0.55, 1.0, w) + vec3(0.03) * w2;
+	vec2 cell = floor(lp.xz * 0.8);
+	float star = step(0.93, fract(sin(dot(cell, vec2(12.9898, 78.233))) * 43758.5453));
+	float dot_ = 1.0 - smoothstep(0.02, 0.07, length(fract(lp.xz * 0.8) - 0.5));
+	c += vec3(0.9, 0.9, 1.0) * sparkle * star * dot_ * (0.6 + 0.4 * sin(TIME * 3.0 + cell.x));
 	ALBEDO = c;
 	ROUGHNESS = 0.18;
 	SPECULAR = 0.55;
 }
 """
 
+## Each board's water (deep, shallow, sparkle), lava / glow colour and the landmark tints.
+const WATER := {"island": [Color(0.08, 0.36, 0.72), Color(0.24, 0.78, 0.86), 0.0],
+	"sweet": [Color(0.85, 0.42, 0.62), Color(1.0, 0.74, 0.86), 0.0],
+	"pirate": [Color(0.04, 0.38, 0.55), Color(0.2, 0.82, 0.78), 0.0],
+	"haunted": [Color(0.12, 0.1, 0.26), Color(0.3, 0.42, 0.42), 0.0],
+	"space": [Color(0.04, 0.04, 0.16), Color(0.22, 0.18, 0.5), 1.0]}
+const GLOW := {"island": Color(1.0, 0.45, 0.1), "sweet": Color(1.0, 0.55, 0.8), "pirate": Color(1.0, 0.8, 0.25),
+	"haunted": Color(0.45, 1.0, 0.5), "space": Color(0.35, 0.85, 1.0)}
+
 var data: BD
+var theme := "island"  ## boards.gd id: how the island is dressed
+var chest_node: Node3D  ## PIRATE COVE's TREASURE event: a chest on a space
 var spaces_mi: MeshInstance3D
 var _types_key := ""
 var vr_table := false
@@ -55,11 +72,13 @@ var sails_boost := 0.0  ## seconds of fast windmill sails left
 
 ## Build everything. vr: the island sits in a water dish on the VR player's table (no ocean to
 ## the horizon).
-func build(p_data: BD, vr: bool) -> void:
+func build(p_data: BD, vr: bool, p_theme: String = "island") -> void:
 	data = p_data
 	vr_table = vr
-	add_child(MeshKit.instance(ResCache.get_or_make("pb_island_v3", _island_mesh)))
-	spaces_mi = MeshKit.instance(ResCache.get_or_make("pb_spaces_simple_v1" if data.simple else "pb_spaces_v3", _spaces_mesh), false)
+	theme = p_theme if WATER.has(p_theme) else "island"
+	add_child(MeshKit.instance(ResCache.get_or_make("pb_island_v4_" + theme, _island_mesh)))
+	spaces_mi = MeshKit.instance(_spaces_mesh(), false)  # (every party has its own layout: never cached)
+	_types_key = var_to_str(data.types())
 	add_child(spaces_mi)
 	_build_water(vr)
 	_build_props()
@@ -115,7 +134,7 @@ func _island_mesh() -> Resource:
 
 func _tri(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3) -> void:
 	for p: Vector3 in [a, b, c]:
-		st.set_color(BD.ground_color(p.x, p.z, p.y))
+		st.set_color(BD.ground_color(p.x, p.z, p.y, theme))
 		st.add_vertex(p)
 
 
@@ -128,7 +147,11 @@ func _spaces_mesh() -> Resource:
 	for s in data.spaces:
 		var p: Vector3 = s["pos"]
 		var type := String(s["type"])
-		var cols: Array = BD.TYPE_COLORS[type]
+		var cols: Array = BD.TYPE_COLORS.get(type, [Color(0.25, 0.55, 1.0), Color(1, 1, 1)])
+		if type == "gift":
+			cols = Boards.GIFT_COLORS
+		elif Boards.SPECIALS.has(type):
+			cols = [Boards.SPECIALS[type].tile, Boards.SPECIALS[type].emb]
 		var tile: Color = cols[0]
 		var emb: Color = cols[1]
 		b.cylinder(0.84, 0.9, 0.24, MeshKit.at(p + Vector3(0, 0.06, 0)), tile.darkened(0.35), 20)
@@ -149,6 +172,33 @@ func _spaces_mesh() -> Resource:
 			"duel":
 				b.box(Vector3(0.7, 0.05, 0.13), MeshKit.at(top, Vector3.ONE, Vector3(0, PI * 0.25, 0)), emb)
 				b.box(Vector3(0.7, 0.05, 0.13), MeshKit.at(top, Vector3.ONE, Vector3(0, -PI * 0.25, 0)), emb)
+			"gift":  # a little present: a box with a ribbon cross and a bow
+				b.box(Vector3(0.42, 0.26, 0.42), MeshKit.at(top + Vector3(0, 0.13, 0)), Color(1.0, 0.45, 0.55))
+				b.box(Vector3(0.46, 0.27, 0.1), MeshKit.at(top + Vector3(0, 0.135, 0)), emb)
+				b.box(Vector3(0.1, 0.27, 0.46), MeshKit.at(top + Vector3(0, 0.135, 0)), emb)
+				b.sphere(0.09, MeshKit.at(top + Vector3(-0.07, 0.3, 0)), emb, 6)
+				b.sphere(0.09, MeshKit.at(top + Vector3(0.07, 0.3, 0)), emb, 6)
+			"volcano":  # a little volcano cone with a glowing top
+				b.cone(0.4, 0.42, MeshKit.at(top + Vector3(0, 0.0, 0)), Color(0.45, 0.35, 0.3), 10)
+				b.sphere(0.13, MeshKit.at(top + Vector3(0, 0.38, 0)), emb, 8, true)
+			"candy":  # a swirly sweet
+				b.cylinder(0.3, 0.3, 0.08, MeshKit.at(top + Vector3(0, 0.04, 0)), Color(1, 1, 1), 16)
+				b.torus(0.2, 0.05, MeshKit.at(top + Vector3(0, 0.09, 0)), Color(1.0, 0.35, 0.6), 14, 5)
+				b.sphere(0.08, MeshKit.at(top + Vector3(0, 0.1, 0)), Color(1.0, 0.35, 0.6), 6)
+			"cannon":  # a little cannon pointing along the path
+				var nxc: Vector3 = data.pos(int((s["next"] as Array)[0]))
+				var yc := atan2(nxc.x - p.x, nxc.z - p.z)
+				b.cylinder(0.11, 0.15, 0.55, MeshKit.at(top + Vector3(0, 0.2, 0), Vector3.ONE, Vector3(1.1, yc, 0)), Color(0.18, 0.18, 0.2), 10)
+				b.sphere(0.12, MeshKit.at(top + Vector3(0, 0.1, 0)), emb, 8)
+			"ghost":  # a little round ghost
+				b.sphere(0.2, MeshKit.at(top + Vector3(0, 0.3, 0)), Color(0.97, 0.97, 1.0), 10)
+				b.cylinder(0.2, 0.22, 0.25, MeshKit.at(top + Vector3(0, 0.14, 0)), Color(0.97, 0.97, 1.0), 10)
+				b.sphere(0.035, MeshKit.at(top + Vector3(-0.07, 0.34, 0.17)), Color(0.15, 0.15, 0.25), 5)
+				b.sphere(0.035, MeshKit.at(top + Vector3(0.07, 0.34, 0.17)), Color(0.15, 0.15, 0.25), 5)
+			"warp":  # a glowing swirl
+				b.torus(0.36, 0.05, MeshKit.at(top), emb, 18, 5, true)
+				b.torus(0.22, 0.05, MeshKit.at(top + Vector3(0, 0.02, 0)), Color(0.75, 0.5, 1.0), 14, 5, true)
+				b.sphere(0.08, MeshKit.at(top + Vector3(0, 0.04, 0)), emb, 6, true)
 			"start":
 				var nx: Vector3 = data.pos(int((s["next"] as Array)[0]))
 				var dir := Vector3(nx.x - p.x, 0, nx.z - p.z).normalized()
@@ -212,6 +262,10 @@ func _build_water(vr: bool) -> void:
 		var plane := PlaneMesh.new()
 		plane.size = Vector2(900, 900)
 		water.mesh = plane
+	var wc: Array = WATER[theme]
+	mat.set_shader_parameter("deep", wc[0])
+	mat.set_shader_parameter("shallow", wc[1])
+	mat.set_shader_parameter("sparkle", float(wc[2]))
 	water.material_override = mat
 	water.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(water)
@@ -223,7 +277,7 @@ func _build_props() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 7
 	var spots := {"palm": [], "tree": [], "pine": [], "bush": [], "rock": [], "flower": [], "lolly": [], "cane": [],
-		"gumdrop": [], "parasol": [], "mushroom": []}
+		"gumdrop": [], "parasol": [], "mushroom": [], "pumpkin": [], "deadtree": [], "barrel": [], "crystal": [], "dish": []}
 	for k in 900:
 		var p := Vector2(rng.randf_range(-13.5, 13.5), rng.randf_range(-13.5, 13.5))
 		var h := BD.height(p.x, p.y)
@@ -233,6 +287,14 @@ func _build_props() -> void:
 		var on_cone := p.distance_to(BD.VOLCANO) < BD.VOLCANO_R * 0.9
 		var kind := ""
 		var r := rng.randf()
+		if theme != "island":
+			kind = _theme_prop(zone, on_cone, p.length() > 10.6, r)
+			if kind == "":
+				continue
+			var tl: Array = spots[kind]
+			if tl.size() <= 60:
+				tl.append(Vector3(p.x, h - 0.02, p.y))
+			continue
 		match zone:
 			"beach":
 				var coast := p.length() > 10.6
@@ -260,12 +322,18 @@ func _build_props() -> void:
 		"mushroom": [MeshKit.prop("mushroom"), 1.4], "lolly": [ResCache.get_or_make("pb_lolly_v1", _lolly_mesh), 1.0],
 		"cane": [ResCache.get_or_make("pb_cane_v1", _cane_mesh), 1.0], "gumdrop": [ResCache.get_or_make("pb_gumdrop_v1", _gumdrop_mesh), 1.0],
 		"parasol": [ResCache.get_or_make("pb_parasol_v1", _parasol_mesh), 1.0],
+		"pumpkin": [ResCache.get_or_make("pb_pumpkin_v1", _pumpkin_mesh), 1.0],
+		"deadtree": [ResCache.get_or_make("pb_deadtree_v1", _deadtree_mesh), 1.0],
+		"barrel": [ResCache.get_or_make("pb_barrel_v1", _barrel_mesh), 1.0],
+		"crystal": [ResCache.get_or_make("pb_crystal_v1", _crystal_mesh), 1.0],
+		"dish": [ResCache.get_or_make("pb_dish_v1", _dish_mesh), 1.0],
 	}
 	var tints := {
 		"lolly": PackedColorArray([Color(1, 0.6, 0.8), Color(0.6, 0.85, 1.0), Color(1.0, 0.9, 0.5), Color(0.7, 1.0, 0.7)]),
 		"gumdrop": PackedColorArray([Color(1, 0.4, 0.5), Color(0.5, 0.8, 1.0), Color(1.0, 0.85, 0.3), Color(0.6, 1.0, 0.5), Color(0.8, 0.55, 1.0)]),
 		"parasol": PackedColorArray([Color(1, 0.4, 0.4), Color(0.4, 0.7, 1.0), Color(1.0, 0.85, 0.3)]),
 		"flower": PackedColorArray([Color(1, 0.6, 0.7), Color(1.0, 0.95, 0.5), Color(0.75, 0.65, 1.0), Color(1, 1, 1)]),
+		"crystal": PackedColorArray([Color(0.5, 0.9, 1.0), Color(0.8, 0.6, 1.0), Color(0.6, 1.0, 0.8)]),
 	}
 	for kind in spots:
 		var list: Array = spots[kind]
@@ -284,6 +352,72 @@ func _build_props() -> void:
 		mmi.name = "Props_" + String(kind)
 		add_child(mmi)
 		prop_sets.append({"kind": String(kind), "mm": mmi.multimesh, "xfs": xfs})
+
+
+## A dressed-up board's prop for a spot ("" = nothing): sweets everywhere on the SWEET SHOP, palms, barrels and
+## rocks round PIRATE COVE, pumpkins, bare trees and mushrooms at the HAUNTED HOUSE, crystals, dishes and rocks
+## on the SPACE STATION.
+func _theme_prop(zone: String, on_cone: bool, coast: bool, r: float) -> String:
+	if on_cone:
+		return String({"sweet": "gumdrop", "pirate": "rock", "haunted": "pumpkin", "space": "crystal"}.get(theme, "rock")) if r < 0.35 else ""
+	match theme:
+		"sweet":
+			return "lolly" if r < 0.3 else ("cane" if r < 0.55 else ("gumdrop" if r < 0.8 else ("mushroom" if r < 0.9 else "flower")))
+		"pirate":
+			if coast:
+				return "palm" if r < 0.5 else ("barrel" if r < 0.7 else "rock")
+			return "palm" if r < 0.35 else ("bush" if r < 0.6 else ("rock" if r < 0.75 else ("barrel" if r < 0.85 else "flower")))
+		"haunted":
+			return "deadtree" if r < 0.3 else ("pumpkin" if r < 0.55 else ("mushroom" if r < 0.75 else ("rock" if r < 0.9 else "bush")))
+		"space":
+			return "crystal" if r < 0.3 else ("rock" if r < 0.6 else ("dish" if r < 0.72 else ""))
+	return ""
+
+
+func _pumpkin_mesh() -> Resource:
+	var b := MeshKit.Builder.new()
+	for k in 5:
+		var a := k * TAU / 5.0
+		b.ellipsoid(Vector3(0.24, 0.3, 0.24), MeshKit.at(Vector3(cos(a) * 0.15, 0.28, sin(a) * 0.15)), Color(1.0, 0.55, 0.12), 10)
+	b.cylinder(0.04, 0.05, 0.16, MeshKit.at(Vector3(0, 0.6, 0)), Color(0.35, 0.55, 0.2), 6)
+	b.sphere(0.06, MeshKit.at(Vector3(-0.1, 0.36, 0.33)), Color(1.0, 0.9, 0.4), 5, true)  # a smiley glow
+	b.sphere(0.06, MeshKit.at(Vector3(0.1, 0.36, 0.33)), Color(1.0, 0.9, 0.4), 5, true)
+	b.box(Vector3(0.2, 0.05, 0.04), MeshKit.at(Vector3(0, 0.22, 0.36)), Color(1.0, 0.9, 0.4), true)
+	return b.build()
+
+
+func _deadtree_mesh() -> Resource:
+	var b := MeshKit.Builder.new()
+	var bark := Color(0.32, 0.26, 0.3)
+	b.capsule_between(Vector3.ZERO, Vector3(0.05, 1.6, 0), 0.12, bark, 6)
+	b.capsule_between(Vector3(0.05, 1.0, 0), Vector3(0.55, 1.55, 0.1), 0.06, bark, 5)
+	b.capsule_between(Vector3(0.05, 1.25, 0), Vector3(-0.45, 1.8, -0.1), 0.05, bark, 5)
+	b.capsule_between(Vector3(0.05, 1.6, 0), Vector3(0.2, 2.05, 0.2), 0.04, bark, 5)
+	return b.build()
+
+
+func _barrel_mesh() -> Resource:
+	var b := MeshKit.Builder.new()
+	b.cylinder(0.26, 0.26, 0.6, MeshKit.at(Vector3(0, 0.3, 0)), Color(0.6, 0.4, 0.24), 10)
+	b.torus(0.27, 0.03, MeshKit.at(Vector3(0, 0.12, 0)), Color(0.3, 0.3, 0.32), 10, 4)
+	b.torus(0.27, 0.03, MeshKit.at(Vector3(0, 0.48, 0)), Color(0.3, 0.3, 0.32), 10, 4)
+	return b.build()
+
+
+func _crystal_mesh() -> Resource:
+	var b := MeshKit.Builder.new()
+	b.cone(0.18, 0.9, MeshKit.at(Vector3(0, 0.45, 0)), Color(1, 1, 1), 5, true)
+	b.cone(0.12, 0.6, MeshKit.at(Vector3(0.2, 0.3, 0.05), Vector3.ONE, Vector3(0, 0, -0.4)), Color(1, 1, 1), 5, true)
+	b.cone(0.1, 0.5, MeshKit.at(Vector3(-0.18, 0.25, -0.05), Vector3.ONE, Vector3(0, 0, 0.45)), Color(1, 1, 1), 5, true)
+	return b.build()
+
+
+func _dish_mesh() -> Resource:
+	var b := MeshKit.Builder.new()
+	b.cylinder(0.05, 0.07, 0.9, MeshKit.at(Vector3(0, 0.45, 0)), Color(0.75, 0.78, 0.82), 6)
+	b.dome(0.45, MeshKit.at(Vector3(0, 1.0, 0), Vector3(1, 0.4, 1), Vector3(-0.6, 0, 0)), Color(0.92, 0.94, 0.98), 12)
+	b.sphere(0.07, MeshKit.at(Vector3(0, 1.25, 0.15)), Color(1.0, 0.35, 0.35), 6, true)
+	return b.build()
 
 
 ## True if p is clear of every space (space_r) and path (path_r).
@@ -351,12 +485,14 @@ func _build_landmarks() -> void:
 	var b := MeshKit.Builder.new()
 	var vh := BD.height(BD.VOLCANO.x, BD.VOLCANO.y)
 	var vc := Vector3(BD.VOLCANO.x, vh + 0.1, BD.VOLCANO.y)
-	b.cylinder(0.95, 0.95, 0.12, MeshKit.at(vc), Color(1.0, 0.45, 0.1), 16, true)
-	b.sphere(0.35, MeshKit.at(vc + Vector3(0.3, 0.1, 0.2)), Color(1.0, 0.75, 0.2), 8, true)
-	for k in 7:  # a lava stream down the north side
+	var glow: Color = GLOW[theme]
+	b.cylinder(0.95, 0.95, 0.12, MeshKit.at(vc), glow, 16, true)
+	b.sphere(0.35, MeshKit.at(vc + Vector3(0.3, 0.1, 0.2)), glow.lightened(0.3), 8, true)
+	for k in 7:  # a lava stream down the north side (frosting, gold, green or blue glow on the other boards)
 		var t := float(k) / 7.0
 		var q := Vector2(BD.VOLCANO.x + 0.2 * sin(t * 5.0), BD.VOLCANO.y - 0.9 - t * 3.0)
-		b.ellipsoid(Vector3(0.28, 0.08, 0.42), MeshKit.at(Vector3(q.x, BD.height(q.x, q.y) + 0.04, q.y)), Color(1.0, 0.4 + 0.2 * t, 0.1), 8, true)
+		b.ellipsoid(Vector3(0.28, 0.08, 0.42), MeshKit.at(Vector3(q.x, BD.height(q.x, q.y) + 0.04, q.y)), glow.lerp(glow.lightened(0.4), t), 8, true)
+	_theme_landmarks(b, vc)
 	# Shops: a stall beside every shop space, facing the space.
 	for s in data.spaces:
 		if String(s["type"]) != "shop":
@@ -393,14 +529,17 @@ func _build_landmarks() -> void:
 	# Windmill in the meadow.
 	var wm := Vector2(-6.2, -5.8)
 	var wy := BD.height(wm.x, wm.y)
-	b.cylinder(0.55, 0.85, 2.6, MeshKit.at(Vector3(wm.x, wy + 1.3, wm.y)), Color(0.96, 0.92, 0.85), 10)
-	b.cone(0.75, 0.9, MeshKit.at(Vector3(wm.x, wy + 3.05, wm.y)), Color(0.85, 0.35, 0.3), 10)
+	var tint := {"sweet": [Color(1.0, 0.85, 0.92), Color(1.0, 0.45, 0.7)], "pirate": [Color(0.8, 0.65, 0.45), Color(0.6, 0.3, 0.2)],
+		"haunted": [Color(0.55, 0.5, 0.6), Color(0.35, 0.25, 0.45)], "space": [Color(0.85, 0.88, 0.95), Color(0.35, 0.6, 1.0)]}
+	var tw: Array = tint.get(theme, [Color(0.96, 0.92, 0.85), Color(0.85, 0.35, 0.3)])
+	b.cylinder(0.55, 0.85, 2.6, MeshKit.at(Vector3(wm.x, wy + 1.3, wm.y)), tw[0], 10)
+	b.cone(0.75, 0.9, MeshKit.at(Vector3(wm.x, wy + 3.05, wm.y)), tw[1], 10)
 	b.box(Vector3(0.35, 0.55, 0.1), MeshKit.at(Vector3(wm.x, wy + 0.3, wm.y + 0.78)), Color(0.5, 0.32, 0.2))
 	# Lighthouse on the south-west beach.
 	var lh := Vector2(-9.6, 8.9)
 	var ly := maxf(BD.height(lh.x, lh.y), 0.2)
 	for k in 5:
-		b.cylinder(0.48 - k * 0.05, 0.52 - k * 0.05, 0.6, MeshKit.at(Vector3(lh.x, ly + 0.3 + k * 0.6, lh.y)), Color(0.95, 0.3, 0.3) if k % 2 == 0 else Color(1, 1, 1), 12)
+		b.cylinder(0.48 - k * 0.05, 0.52 - k * 0.05, 0.6, MeshKit.at(Vector3(lh.x, ly + 0.3 + k * 0.6, lh.y)), (Color(0.95, 0.3, 0.3) if theme == "island" else tw[1]) if k % 2 == 0 else Color(1, 1, 1), 12)
 	b.cylinder(0.3, 0.3, 0.4, MeshKit.at(Vector3(lh.x, ly + 3.2, lh.y)), Color(1.0, 0.95, 0.6), 10, true)
 	b.cone(0.42, 0.45, MeshKit.at(Vector3(lh.x, ly + 3.62, lh.y)), Color(0.3, 0.3, 0.4), 10)
 	add_child(MeshKit.instance(b.build(), not vr_table))
@@ -424,6 +563,74 @@ func _build_landmarks() -> void:
 	_build_smoke(vc)
 
 
+## The board's own landmarks: a giant cherry on the SWEET SHOP's cupcake hill, a pirate ship off PIRATE COVE,
+## the HAUNTED HOUSE on its hill, a dome, antenna and rocket on the SPACE STATION (Party Island has the volcano).
+func _theme_landmarks(b: MeshKit.Builder, top: Vector3) -> void:
+	match theme:
+		"sweet":
+			b.sphere(1.0, MeshKit.at(top + Vector3(0, 0.7, 0)), Color(0.9, 0.12, 0.2), 14)
+			b.capsule_between(top + Vector3(0, 1.6, 0), top + Vector3(0.5, 2.6, 0.2), 0.08, Color(0.35, 0.55, 0.2), 5)
+			var sprinkles: Array[Color] = [Color(0.4, 0.8, 1.0), Color(1.0, 0.9, 0.3), Color(0.5, 0.9, 0.5), Color(1, 1, 1)]
+			for k in 10:
+				var a := k * TAU / 10.0
+				var q := top + Vector3(cos(a) * 1.3, 0.1, sin(a) * 1.3)
+				b.capsule_between(q, q + Vector3(0.2, 0.05, 0.1), 0.07, sprinkles[k % 4], 4)
+		"pirate":
+			var sp := Vector3(9.5, 0.0, -11.0)
+			var yaw := Basis(Vector3.UP, 0.7)
+			b.box(Vector3(1.6, 0.9, 4.2), Transform3D(yaw, sp + Vector3(0, 0.3, 0)), Color(0.5, 0.32, 0.2))
+			b.box(Vector3(1.7, 0.12, 4.3), Transform3D(yaw, sp + Vector3(0, 0.8, 0)), Color(0.95, 0.75, 0.3))
+			for z in [-1.0, 0.8]:
+				b.cylinder(0.08, 0.08, 4.0, Transform3D(yaw, sp + yaw * Vector3(0, 2.8, float(z))), Color(0.4, 0.27, 0.18), 6)
+				b.box(Vector3(2.0, 1.5, 0.06), Transform3D(yaw, sp + yaw * Vector3(0, 3.0, float(z) + 0.1)), Color(0.97, 0.95, 0.88))
+			b.box(Vector3(0.7, 0.45, 0.04), Transform3D(yaw, sp + yaw * Vector3(0.36, 4.6, -1.0)), Color(0.15, 0.15, 0.2))
+			var xs := Vector3(-3.0, BD.height(-3.0, -1.6) + 0.06, -1.6)  # an X marks the spot
+			b.box(Vector3(1.2, 0.04, 0.22), MeshKit.at(xs, Vector3.ONE, Vector3(0, PI * 0.25, 0)), Color(0.85, 0.2, 0.2))
+			b.box(Vector3(1.2, 0.04, 0.22), MeshKit.at(xs, Vector3.ONE, Vector3(0, -PI * 0.25, 0)), Color(0.85, 0.2, 0.2))
+		"haunted":
+			var hp := top + Vector3(0, -0.1, 0)
+			b.box(Vector3(1.8, 1.5, 1.5), MeshKit.at(hp + Vector3(0, 0.75, 0)), Color(0.42, 0.32, 0.55))
+			b.wedge(Vector3(2.1, 1.0, 1.7), MeshKit.at(hp + Vector3(0, 2.0, 0)), Color(0.28, 0.2, 0.38))
+			b.box(Vector3(0.6, 1.4, 0.6), MeshKit.at(hp + Vector3(0.6, 2.0, 0.3)), Color(0.38, 0.28, 0.5))
+			b.cone(0.5, 0.8, MeshKit.at(hp + Vector3(0.6, 3.1, 0.3)), Color(0.28, 0.2, 0.38), 8)
+			for wx in [-0.45, 0.45]:
+				b.box(Vector3(0.35, 0.35, 0.05), MeshKit.at(hp + Vector3(float(wx), 0.95, 0.76)), Color(1.0, 0.85, 0.35), true)
+			b.box(Vector3(0.4, 0.7, 0.05), MeshKit.at(hp + Vector3(0, 0.35, 0.76)), Color(0.2, 0.14, 0.25))
+		"space":
+			b.dome(1.4, MeshKit.at(top + Vector3(0, -0.05, 0)), Color(0.75, 0.85, 1.0), 16, true)
+			b.cylinder(0.06, 0.08, 2.8, MeshKit.at(top + Vector3(0, 2.4, 0)), Color(0.7, 0.72, 0.78), 6)
+			b.sphere(0.16, MeshKit.at(top + Vector3(0, 3.85, 0)), Color(1.0, 0.35, 0.35), 8, true)
+			var a := deg_to_rad(125.0)
+			var rp := Vector3(sin(a) * 13.3, 0.0, cos(a) * 13.3)
+			rp.y = maxf(BD.height(rp.x, rp.z), 0.1)
+			b.cylinder(0.45, 0.5, 3.0, MeshKit.at(rp + Vector3(0, 1.9, 0)), Color(0.95, 0.95, 0.98), 12)
+			b.cone(0.45, 1.0, MeshKit.at(rp + Vector3(0, 3.9, 0)), Color(0.95, 0.3, 0.35), 12)
+			b.sphere(0.2, MeshKit.at(rp + Vector3(0, 2.6, 0.42)), Color(0.4, 0.8, 1.0), 8, true)
+			for k in 3:
+				var fa := k * TAU / 3.0
+				b.wedge(Vector3(0.08, 0.9, 0.6), MeshKit.at(rp + Vector3(cos(fa) * 0.5, 0.75, sin(fa) * 0.5), Vector3.ONE,
+					Vector3(0, -fa + PI * 0.5, 0)), Color(0.95, 0.3, 0.35))
+
+
+## PIRATE COVE's TREASURE event: a chest sits on a space (-1 = gone).
+func set_chest(id: int) -> void:
+	if id < 0:
+		if chest_node != null:
+			chest_node.queue_free()
+		chest_node = null
+		return
+	if chest_node == null:
+		var b := MeshKit.Builder.new()
+		b.box(Vector3(0.9, 0.5, 0.6), MeshKit.at(Vector3(0, 0.25, 0)), Color(0.6, 0.38, 0.2))
+		b.cylinder(0.3, 0.3, 0.9, MeshKit.at(Vector3(0, 0.5, 0), Vector3.ONE, Vector3(0, 0, PI * 0.5)), Color(0.55, 0.34, 0.18), 10)
+		b.box(Vector3(0.95, 0.08, 0.1), MeshKit.at(Vector3(0, 0.5, 0.3)), Color(1.0, 0.82, 0.25), true)
+		b.box(Vector3(0.14, 0.18, 0.06), MeshKit.at(Vector3(0, 0.42, 0.32)), Color(1.0, 0.82, 0.25), true)
+		chest_node = MeshKit.instance(b.build(), false)
+		chest_node.name = "Chest"
+		add_child(chest_node)
+	chest_node.position = data.pos(id) + Vector3(0.0, 0.3, 0.0)
+
+
 func _build_smoke(at: Vector3) -> void:
 	var p := CPUParticles3D.new()
 	p.name = "Smoke"
@@ -432,7 +639,7 @@ func _build_smoke(at: Vector3) -> void:
 	sm.height = 0.8
 	sm.radial_segments = 8
 	sm.rings = 4
-	sm.material = MeshKit.material(Color(0.85, 0.85, 0.88, 0.7))
+	sm.material = MeshKit.material(Color(0.85, 0.85, 0.88, 0.7).lerp(GLOW[theme], 0.0 if theme == "island" else 0.25))
 	p.mesh = sm
 	p.amount = 9
 	p.lifetime = 3.5
@@ -595,6 +802,8 @@ func _process(delta: float) -> void:
 	star_boost = maxf(0.0, star_boost - delta)
 	if sails != null:
 		sails.rotation.z += delta * (0.8 + sails_boost * 6.0)
+	if chest_node != null:
+		chest_node.rotation.y += delta * 1.2
 	if star_node != null and star_node.visible:
 		var spin := star_node.get_node("Spin") as Node3D
 		spin.rotation.y += delta * (1.6 + star_boost * 10.0)

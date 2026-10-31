@@ -33,6 +33,10 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "party-boards", "date": "2026-10-31", "game": "party_board", "pic": "hauntedhouse", "line": "Five party boards to visit!", "try": {"PB_BOARD": "haunted"}},
+	{"id": "party-minigames", "date": "2026-10-31", "game": "party_board", "pic": "toucan", "line": "Moles, fish, paint, towers!", "try": {"PB_MINIGAME": "fish_pond"}},
+	{"id": "party-presents", "date": "2026-10-31", "game": "party_board", "pic": "gift", "line": "Presents: 2 dice, swap, warp", "try": {"PB_BOARD": "sweet"}},
+	{"id": "party-trophies", "date": "2026-10-31", "game": "party_board", "pic": "trophywall", "line": "Fill Mango's trophy wall!"},
 	{"id": "saga-guardians", "date": "2026-10-31", "game": "crystal_saga", "pic": "guardian", "line": "Beat crystal guardians!", "try": {"CS_TRY": "guardian"}},
 	{"id": "saga-realm", "date": "2026-10-31", "game": "crystal_saga", "pic": "lumi", "line": "Pick a road on Lumi's map!"},
 	{"id": "saga-heroes", "date": "2026-10-31", "game": "crystal_saga", "pic": "healer", "line": "Be a healer or a bard!"},

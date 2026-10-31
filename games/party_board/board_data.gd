@@ -55,34 +55,86 @@ const TYPE_NAMES := {"blue": "BLUE SPACE", "red": "RED SPACE", "event": "EVENT S
 ## spaces[i] = {id, pos (Vector3, on the ground), type, next (Array of ids), zone, star_ok, junction}
 var spaces: Array = []
 var simple := false  ## SIMPLE_MODE board: only blue (good), red (bad) and START (make_simple())
+## SEEDED LAYOUTS (partygen.gd layout()): {ring: spaces round the coast, wob: [amplitude, phase] of the coast
+## road's wiggle (and its middle radius, 10.15 when left out), trail: [from ring id, to ring id, [Vector2 points]] or [], pier: the same or []}. The classic
+## island (LAYOUT_CLASSIC) is what BD.new() builds. A seeded layout keeps the island's shape (volcano, lagoon,
+## river) but changes how many spaces the coast road has, how it wiggles, which shortcuts exist and how long.
+var layout: Dictionary = {}
+var ring := RING
+var trail_from := -1  ## ring id where the volcano trail starts (-1 = no trail)
+var trail_to := -1
+var trail0 := -1  ## first trail space id
+var trail_n := 0
+var pier_from := -1
+var pier_to := -1
+var pier0 := -1
+var pier_n := 0
 
 
 func _init() -> void:
-	_build()
+	build_layout(classic_layout())
 
 
-func _build() -> void:
+static func classic_layout() -> Dictionary:
+	return {"ring": RING, "wob": [0.45, 0.7], "trail": [TRAIL_FROM, TRAIL_TO, TRAIL_POINTS.duplicate()],
+		"pier": [LAGOON_FROM, LAGOON_TO, LAGOON_POINTS.duplicate()]}
+
+
+## A coast-road spot for ring space i of n (with the layout's wiggle).
+static func ring_point(i: int, n: int, wob: Array) -> Vector2:
+	var th := float(i) / float(n) * TAU
+	var r := (float(wob[2]) if wob.size() > 2 else 10.15) + float(wob[0]) * sin(2.0 * th + float(wob[1]))
+	return Vector2(sin(th) * r * 1.03, cos(th) * r)
+
+
+## Build the spaces from a layout (see `layout`). Space types: the classic ones on the classic layout,
+## otherwise blue (partygen.gd colours them in).
+func build_layout(lay: Dictionary) -> void:
+	layout = lay
 	spaces.clear()
-	for i in RING:
-		var th := float(i) / float(RING) * TAU
-		var r := 10.15 + 0.45 * sin(2.0 * th + 0.7)
-		_add(Vector2(sin(th) * r * 1.03, cos(th) * r), String(RING_TYPES[i]))
-	for i in TRAIL_POINTS.size():
-		_add(TRAIL_POINTS[i], String(TRAIL_TYPES[i]))
-	for i in LAGOON_POINTS.size():
-		_add(LAGOON_POINTS[i], String(LAGOON_TYPES[i]))
-	for i in RING:
-		_link(i, (i + 1) % RING)
-	var t0 := RING
-	var l0 := RING + TRAIL_POINTS.size()
-	_link(TRAIL_FROM, t0)
-	for i in TRAIL_POINTS.size() - 1:
-		_link(t0 + i, t0 + i + 1)
-	_link(t0 + TRAIL_POINTS.size() - 1, TRAIL_TO)
-	_link(LAGOON_FROM, l0)
-	for i in LAGOON_POINTS.size() - 1:
-		_link(l0 + i, l0 + i + 1)
-	_link(l0 + LAGOON_POINTS.size() - 1, LAGOON_TO)
+	ring = int(lay.get("ring", RING))
+	var wob: Array = lay.get("wob", [0.45, 0.7])
+	var classic := ring == RING and var_to_str(lay) == var_to_str(classic_layout())
+	for i in ring:
+		_add(ring_point(i, ring, wob), String(RING_TYPES[i]) if classic else ("start" if i == 0 else "blue"))
+	trail_from = -1
+	trail_to = -1
+	trail0 = -1
+	trail_n = 0
+	pier_from = -1
+	pier_to = -1
+	pier0 = -1
+	pier_n = 0
+	var tr: Array = lay.get("trail", [])
+	if tr.size() == 3 and not (tr[2] as Array).is_empty():
+		trail_from = int(tr[0])
+		trail_to = int(tr[1])
+		trail0 = spaces.size()
+		var pts: Array = tr[2]
+		trail_n = pts.size()
+		for i in pts.size():
+			_add(pts[i], String(TRAIL_TYPES[i % TRAIL_TYPES.size()]) if classic else "blue")
+	var pr: Array = lay.get("pier", [])
+	if pr.size() == 3 and not (pr[2] as Array).is_empty():
+		pier_from = int(pr[0])
+		pier_to = int(pr[1])
+		pier0 = spaces.size()
+		var pts2: Array = pr[2]
+		pier_n = pts2.size()
+		for i in pts2.size():
+			_add(pts2[i], String(LAGOON_TYPES[i % LAGOON_TYPES.size()]) if classic else "blue")
+	for i in ring:
+		_link(i, (i + 1) % ring)
+	if trail_n > 0:
+		_link(trail_from, trail0)
+		for i in trail_n - 1:
+			_link(trail0 + i, trail0 + i + 1)
+		_link(trail0 + trail_n - 1, trail_to)
+	if pier_n > 0:
+		_link(pier_from, pier0)
+		for i in pier_n - 1:
+			_link(pier0 + i, pier0 + i + 1)
+		_link(pier0 + pier_n - 1, pier_to)
 	for s in spaces:
 		var sp: Dictionary = s
 		var nx: Array = sp["next"]
@@ -193,9 +245,9 @@ func distance(from: int, to: int) -> int:
 
 ## Friendly name of a path choice at a junction (for menus and arrows).
 func branch_name(from: int, to: int) -> String:
-	if from == TRAIL_FROM and to == RING:
+	if from == trail_from and to == trail0:
 		return "VOLCANO TRAIL"
-	if from == LAGOON_FROM and to == RING + TRAIL_POINTS.size():
+	if from == pier_from and to == pier0:
 		return "LAGOON PIER"
 	return "COAST ROAD"
 
@@ -256,33 +308,59 @@ static func zone_at(p: Vector2) -> String:
 	return "meadow"
 
 
-## Ground colour for the island mesh.
-static func ground_color(x: float, z: float, h: float) -> Color:
+## Ground colour for the island mesh, dressed for a board (boards.gd ids: island, sweet, pirate, haunted, space).
+static func ground_color(x: float, z: float, h: float, theme: String = "island") -> Color:
 	var p := Vector2(x, z)
 	var d := p.length()
 	var zone := zone_at(p)
 	var c := Color(0.45, 0.78, 0.36)
+	var vk := clampf(h / VOLCANO_H, 0.0, 1.0)
 	match zone:
 		"candy":
 			var s := 0.5 + 0.5 * sin(x * 1.3 + z * 0.9)
 			c = Color(1.0, 0.7, 0.85).lerp(Color(0.72, 0.95, 0.85), s * 0.6)
 		"volcano":
-			c = Color(0.5, 0.42, 0.38).lerp(Color(0.36, 0.3, 0.3), clampf(h / VOLCANO_H, 0.0, 1.0))
+			c = Color(0.5, 0.42, 0.38).lerp(Color(0.36, 0.3, 0.3), vk)
 		"meadow":
 			c = Color(0.42, 0.76, 0.32).lerp(Color(0.55, 0.82, 0.35), 0.5 + 0.5 * sin(x * 0.8))
 		"beach":
 			c = Color(0.5, 0.8, 0.38)
 		"lagoon":
 			c = Color(0.55, 0.82, 0.42)
+	var sand_c := Color(0.98, 0.88, 0.62)
+	var wave := 0.5 + 0.5 * sin(x * 0.9 + z * 0.7)
+	match theme:
+		"sweet":  # mint and strawberry icing, a chocolate mountain with a pink frosting top, biscuit beaches
+			c = Color(0.75, 0.95, 0.85).lerp(Color(1.0, 0.75, 0.88), 0.5 + 0.5 * sin(x * 0.8 + z * 1.1))
+			if zone == "volcano":
+				c = Color(0.48, 0.3, 0.2).lerp(Color(1.0, 0.65, 0.82), smoothstep(0.35, 0.6, vk))
+			sand_c = Color(0.93, 0.76, 0.5)
+		"pirate":  # deep jungle, grey skull rock, golden sand
+			c = Color(0.22, 0.58, 0.28).lerp(Color(0.35, 0.68, 0.3), wave)
+			if zone == "volcano":
+				c = Color(0.55, 0.55, 0.56).lerp(Color(0.38, 0.38, 0.42), vk)
+			sand_c = Color(1.0, 0.86, 0.5)
+		"haunted":  # dusky moss, a purple hill, misty grey sand (spooky but friendly)
+			c = Color(0.32, 0.42, 0.33).lerp(Color(0.4, 0.36, 0.48), wave * 0.6)
+			if zone == "volcano":
+				c = Color(0.38, 0.32, 0.45).lerp(Color(0.26, 0.22, 0.32), vk)
+			sand_c = Color(0.7, 0.66, 0.62)
+		"space":  # moon dust with craters, a metal dome hill, pale grey shores
+			var crater := 0.5 + 0.5 * sin(x * 2.1) * sin(z * 1.9)
+			c = Color(0.62, 0.62, 0.7).lerp(Color(0.5, 0.48, 0.62), crater)
+			if zone == "volcano":
+				c = Color(0.7, 0.72, 0.78).lerp(Color(0.55, 0.58, 0.66), vk)
+			sand_c = Color(0.8, 0.8, 0.86)
 	var coast := ISLAND_R + 0.5 * sin(atan2(z, x) * 5.0) + 0.3 * sin(atan2(z, x) * 3.0 + 1.0)
 	var sand := clampf((d - (coast - 2.6)) / 1.2, 0.0, 1.0)
 	if zone == "beach":
 		sand = clampf((d - (coast - 4.2)) / 1.5, 0.0, 1.0)
 	if h < 0.25:
 		sand = maxf(sand, 1.0 - clampf(h / 0.25, 0.0, 1.0))
-	c = c.lerp(Color(0.98, 0.88, 0.62), sand)
+	c = c.lerp(sand_c, sand)
 	if h < -0.05:
-		c = c.lerp(Color(0.86, 0.78, 0.55), 0.5)
+		c = c.lerp(sand_c.darkened(0.15), 0.5)
 	if zone == "volcano" and Vector2(x, z).distance_to(VOLCANO) < 1.4:
-		c = Color(0.3, 0.22, 0.2)
+		c = {"sweet": Color(1.0, 0.95, 0.97), "pirate": Color(0.3, 0.3, 0.33), "haunted": Color(0.22, 0.18, 0.28),
+			"space": Color(0.45, 0.48, 0.55)}.get(theme, Color(0.3, 0.22, 0.2))
 	return c

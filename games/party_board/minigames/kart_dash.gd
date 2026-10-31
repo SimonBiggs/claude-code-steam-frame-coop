@@ -10,6 +10,7 @@ const META := {
 	"tv": [["A", "MASH to speed up!"]],
 	"vr": [["GLOVE", "Pump up and down"], ["TRIGGER", "Or mash it"]],
 	"vr_line": "PUMP your glove up and down to race!",
+	"cue": "mash",
 }
 const START_X := 7.5
 const FINISH_X := -7.5
@@ -110,7 +111,7 @@ func play_tick(delta: float) -> void:
 			_cpu_next[p] = float(_cpu_next.get(p, 0.0)) - delta
 			if float(_cpu_next[p]) <= 0.0:
 				var kid: bool = main.flow != null and main.flow.is_kid()
-				_cpu_next[p] = 1.0 / rng.randf_range(3.6 if kid else 4.2, 5.4 if kid else 6.2)
+				_cpu_next[p] = 1.0 / rng.randf_range(3.0 if kid else 4.2, 4.6 if kid else 6.2)  # kid CPUs mash like little thumbs
 				_press(p)
 		elif bool(input_of(p)["pressed"]):
 			_press(p)
@@ -124,7 +125,7 @@ func play_tick(delta: float) -> void:
 			continue
 		# rate settles near presses/s / 2.5: 6 presses/s ~ top speed.
 		var v := VMAX * clampf(float(rate[p]) / 2.4, 0.0, 1.0)
-		v *= 1.0 + clampf((lead - float(prog[p])) * 2.0, 0.0, 0.25)  # tailwind for the karts behind
+		v *= 1.0 + clampf((lead - float(prog[p])) * 2.0, 0.0, 0.45 if main.simple else 0.25)  # tailwind for the karts behind
 		prog[p] = minf(1.0, float(prog[p]) + v * delta / (START_X - FINISH_X))
 		if float(prog[p]) >= 1.0:
 			order.append(p)

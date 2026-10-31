@@ -41,6 +41,9 @@ var _last := {}  ## pid -> Vector3 (walk animation)
 var _cpu_goal := {}  ## pid -> Vector3
 var _cpu_t := {}  ## pid -> float
 var stun := {}  ## pid -> seconds left: can't move (host)
+var _dt := 0.0  ## this tick's step (CPU thinking counts game time, so fast-forwarded tests think the same)
+## Kid-gentle CPUs (turn_flow.is_kid(), always in SIMPLE_MODE): they walk this much slower than a player.
+const CPU_KID_SPEED := 0.8
 ## Synced props (coins, balloons, sheep...): id -> Node3D, id -> kind. The host adds / moves / removes
 ## them; snapshots carry them to the TV machine (items_snap / items_apply, done by the base).
 var items := {}
@@ -265,6 +268,52 @@ func color_of(pid: int) -> Color:
 	return main.color_of(pid)
 
 
+## GENTLE CATCH-UP (SIMPLE_MODE: the youngest can win): 0..1, how far this player is behind the leader right
+## now (0 = level or ahead). Walkers behind run faster and reach further (catch_reach); CPUs out in front dawdle.
+func catch_up(pid: int) -> float:
+	if practice or not main.simple:
+		return 0.0
+	var lead := 0.0
+	for p in pids:
+		lead = maxf(lead, float(score.get(p, 0.0)))
+	return clampf((lead - float(score.get(pid, 0.0))) / maxf(3.0, lead * 0.4), 0.0, 1.0)
+
+
+## The walker furthest behind (ties: any of them), or -1: games put some of their coins / balloons / moles near
+## them (SIMPLE_MODE catch-up).
+func lagging_walker() -> int:
+	var ws := walkers()
+	if ws.is_empty():
+		return -1
+	var lo := INF
+	var pool: Array[int] = []
+	for p in ws:
+		var s := float(score.get(p, 0.0))
+		if s < lo:
+			lo = s
+			pool = [p]
+		elif s == lo:
+			pool.append(p)
+	return pool[rng.randi() % pool.size()]
+
+
+## A pickup / pop / bop radius grown for whoever is behind (up to +60%).
+func catch_reach(pid: int, r: float) -> float:
+	return r * (1.0 + 0.6 * catch_up(pid))
+
+
+## True for a CPU leading by a clear margin (it dawdles so the others can catch up).
+func cpu_ahead(pid: int) -> bool:
+	if practice or not main.simple or not is_cpu(pid):
+		return false
+	var mine := float(score.get(pid, 0.0))
+	var second := 0.0
+	for p in pids:
+		if p != pid:
+			second = maxf(second, float(score.get(p, 0.0)))
+	return mine - second >= maxf(2.0, mine * 0.25)
+
+
 func add_score(pid: int, n: float = 1.0) -> void:
 	if practice:
 		return
@@ -272,7 +321,7 @@ func add_score(pid: int, n: float = 1.0) -> void:
 
 
 func _make_avatar(pid: int) -> void:
-	var look: Array = TokenScript.LOOKS[pid % TokenScript.LOOKS.size()]
+	var look: Array = main.look_of(pid) if main.has_method("look_of") else TokenScript.LOOKS[pid % TokenScript.LOOKS.size()]
 	var a := Creatures.humanoid({"class": String(look[0]), "hat": String(look[1]), "hair": look[2], "outfit": color_of(pid),
 		"seed": 11 + pid * 7, "scale": AVATAR_SCALE})
 	a.name = "Walker%d" % pid
@@ -306,7 +355,7 @@ func input_of(pid: int) -> Dictionary:
 
 ## CPU walkers re-think a few times a second (with a little hesitation, so kids can win).
 func cpu_goal(pid: int) -> Vector3:
-	var t := float(_cpu_t.get(pid, 0.0)) - get_process_delta_time()
+	var t := float(_cpu_t.get(pid, 0.0)) - _dt
 	if t <= 0.0 or not _cpu_goal.has(pid):
 		t = rng.randf_range(0.25, 0.7) * (1.4 if main.flow != null and main.flow.is_kid() else 1.0)
 		_cpu_goal[pid] = cpu_move(pid)
@@ -327,7 +376,11 @@ func walk(pid: int, delta: float, speed: float = -1.0, limit_r: float = -1.0) ->
 	var mv: Vector3 = inp["move"]
 	var p: Vector3 = pos[pid]
 	if mv.length() > 0.05:
-		p += mv.limit_length(1.0) * (walk_speed if speed < 0.0 else speed) * delta
+		var sp := walk_speed if speed < 0.0 else speed
+		if is_cpu(pid) and main.flow != null and main.flow.is_kid():
+			sp *= CPU_KID_SPEED
+		sp *= (1.0 + 0.5 * catch_up(pid)) * (0.7 if cpu_ahead(pid) else 1.0)
+		p += mv.limit_length(1.0) * sp * delta
 		Creatures.anim(avatars[pid]).face(mv)
 	var r := arena_r if limit_r < 0.0 else limit_r
 	var flat := Vector2(p.x, p.z).limit_length(r)
@@ -441,6 +494,7 @@ func begin_play() -> void:
 
 ## Host: one frame.
 func tick(delta: float) -> void:
+	_dt = delta
 	if not practice:
 		play_t += delta
 	play_tick(delta)

@@ -38,6 +38,7 @@ var distance := 1.25              ## metres (times vr_text COMFORT 1.6 = 2.0 m)
 var height := -0.12               ## metres relative to eye level (times COMFORT)
 var follow := true                ## lazy-follow the view
 var touch := true                 ## touching an option chooses it
+var footer := true                ## the "POINT + TRIGGER or STICK + A" line (opts "footer": false hides it)
 var allow_cancel := false         ## adds a BACK row (and B button) when true
 var close_on_choose := true
 var free_on_close := true
@@ -101,6 +102,7 @@ func setup(opts: Dictionary) -> Me:
 		bind_rig(opts["rig"])
 	follow = bool(opts.get("follow", follow))
 	touch = bool(opts.get("touch", touch))
+	footer = bool(opts.get("footer", footer))
 	if bool(opts.get("reach", false)):
 		distance = 0.42
 		height = -0.22
@@ -412,6 +414,7 @@ func _rebuild() -> void:
 	_desc.visible = desc_h > 0.0
 	_footer.position = Vector3(0, -_panel_size.y * 0.5 + pad + 0.012, 0.004)
 	_footer.text = "POINT + TRIGGER   or   STICK + A" if not touch or distance > 0.6 else "TOUCH  or  POINT + TRIGGER"
+	_footer.visible = footer  # (picture-first games turn the how-to line off)
 	_arrows[0].position = Vector3(width * 0.5 - pad * 0.6, body_top - 0.02, 0.003)
 	_arrows[1].position = Vector3(width * 0.5 - pad * 0.6, body_top - body_h + 0.02, 0.003)
 	_apply_layers()
