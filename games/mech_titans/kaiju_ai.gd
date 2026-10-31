@@ -13,6 +13,7 @@ extends RefCounted
 
 const Data := preload("res://games/mech_titans/data.gd")
 const Bosses := preload("res://games/mech_titans/bosses.gd")
+const BigBoss := preload("res://games/mech_titans/bigboss.gd")
 
 ## attack id -> [range m, windup s, recover s, cooldown s]
 const ATTACKS := {
@@ -25,6 +26,26 @@ const ATTACKS := {
 	"summon": [99.0, 1.5, 0.8, 22.0], "mega_roar": [99.0, 1.4, 1.0, 16.0], "nibble": [3.0, 0.6, 0.6, 1.6],
 	"swat": [16.0, 0.8, 0.6, 3.0],
 }
+
+
+## [range, windup, recover, cooldown] of any attack (a boss kaiju's signature move too: bigboss.gd).
+static func atk(id: String) -> Array:
+	if ATTACKS.has(id):
+		return ATTACKS[id]
+	return BigBoss.SIG_ATTACKS.get(id, [0.0, 1.0, 0.8, 5.0])
+
+
+static func known(id: String) -> bool:
+	return ATTACKS.has(id) or BigBoss.SIG_ATTACKS.has(id)
+
+
+## Seconds this kaiju warns before attack `id` lands: the round's difficulty stretches (gentle) or shortens
+## (MEGA) ordinary wind-ups; a boss's signature move uses the boss tell (never under BigBoss.MIN_TELL).
+static func windup_of(k: Node3D, id: String) -> float:
+	var w := float(atk(id)[1])
+	if BigBoss.SIG_ATTACKS.has(id):
+		return maxf(BigBoss.MIN_TELL, w * float(k.get_meta("boss_tell", 1.0)))
+	return maxf(0.45, w * float(k.get_meta("tell", 1.0)))
 
 
 static func think(k: Node3D, delta: float, g: Node) -> void:
@@ -48,7 +69,7 @@ static func think(k: Node3D, delta: float, g: Node) -> void:
 			if k.state_t > 0.35:
 				k.set_state("recover")
 		"recover":
-			var rec: Array = ATTACKS.get(k.attack, [0, 0, 0.8, 0])
+			var rec: Array = atk(k.attack)
 			if k.state_t > float(rec[2]):
 				k.set_state("roam")
 		"stunned":
@@ -170,6 +191,10 @@ static func _choose_attack(k: Node3D, dist: float, tgt: Dictionary, g: Node) -> 
 	var list: Array = k.info.get("attacks", ["nibble"]) if not k.is_mini else ["nibble"]
 	if k.is_mini and k.fly_alt > 0.0:
 		list = ["nibble"]
+	var sig := String(k.get_meta("sig", ""))
+	if sig != "" and not k.is_mini:
+		list = list.duplicate()
+		list.append(sig)
 	var what: String = tgt.get("what", "building")
 	if what == "air":
 		# A jet / drone is pestering it: swat at it if close, else use a ranged attack.
@@ -178,15 +203,17 @@ static func _choose_attack(k: Node3D, dist: float, tgt: Dictionary, g: Node) -> 
 	var options: Array[String] = []
 	for a in list:
 		var id: String = a
-		if not ATTACKS.has(id) or float(k.cooldowns.get(id, 0.0)) > 0.0:
+		if not known(id) or float(k.cooldowns.get(id, 0.0)) > 0.0:
 			continue
 		if not Bosses.attack_allowed(k, id, g):
 			continue
-		var rng: float = ATTACKS[id][0]
+		var rng: float = atk(id)[0]
 		if dist <= rng:
 			options.append(id)
 	if options.is_empty():
 		return ""
+	if sig != "" and options.has(sig) and randf() < 0.6:
+		return sig  # a boss loves its big move (that's its readable tell)
 	# Prefer close-range attacks when close; a little randomness keeps it lively.
 	return options[randi() % options.size()]
 
@@ -199,17 +226,17 @@ static func _begin(k: Node3D, id: String, tgt: Dictionary, g: Node) -> void:
 	to.y = 0.0
 	k.attack_dir = to.normalized() if to.length() > 0.1 else Vector3(sin(k.yaw), 0, cos(k.yaw))
 	var calm := float(k.get_meta("calm", 1.0))
-	k.cooldowns[id] = float(ATTACKS[id][3]) * calm
+	k.cooldowns[id] = float(atk(id)[3]) * calm
 	if calm > 1.0:
 		k.cooldowns["_calm"] = 2.5 * calm
 	k.set_state("windup")
 	g.call("telegraph", k, id)
 	if k.anim != null:
-		k.anim.call("play", "cast", float(ATTACKS[id][1]))
+		k.anim.call("play", "cast", windup_of(k, id))
 
 
 static func _windup(k: Node3D, delta: float, g: Node) -> void:
-	var w: float = ATTACKS.get(k.attack, [0, 1.0])[1]
+	var w: float = windup_of(k, k.attack)
 	k.face_dir(k.attack_dir, delta, 5.0)
 	_walk_anim(k, 0.0)
 	# Committed at the telegraph: the danger marker shows exactly where it lands (dodgeable).

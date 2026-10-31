@@ -33,6 +33,9 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "mech-bosses", "date": "2026-10-31", "game": "mech_titans", "pic": "crownkaiju", "line": "Boss kaiju with crowns!", "try": {"MT_TRY": "boss"}},
+	{"id": "mech-pods", "date": "2026-10-31", "game": "mech_titans", "pic": "titanpod", "line": "Pick Titan power-ups!", "try": {"MT_TRY": "pods"}},
+	{"id": "mech-sanctuary", "date": "2026-10-31", "game": "mech_titans", "pic": "sanctuary", "line": "Grow the Kaiju Sanctuary!"},
 	{"id": "delve-queen", "date": "2026-10-30", "game": "dungeon_delve", "pic": "shard", "line": "Beat the Crystal Queen!", "try": {"DD_TRY": "brave"}},
 	{"id": "delve-heroes", "date": "2026-10-30", "game": "dungeon_delve", "pic": "wizard", "line": "Knight, archer or wizard!", "try": {"DD_TRY": "brave"}},
 	{"id": "delve-relics", "date": "2026-10-30", "game": "dungeon_delve", "pic": "hoard", "line": "Find magic relics!", "try": {"DD_TRY": "brave"}},
