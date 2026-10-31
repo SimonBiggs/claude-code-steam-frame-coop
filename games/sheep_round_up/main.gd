@@ -32,6 +32,7 @@ const SkyKit := preload("res://core/sky_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")
 const SheepScript := preload("res://games/sheep_round_up/sheep.gd")
 const FieldGen := preload("res://games/sheep_round_up/fieldgen.gd")
+const BgGen := preload("res://core/bg_gen.gd")
 const FieldView := preload("res://games/sheep_round_up/field_view.gd")
 const Farm := preload("res://games/sheep_round_up/farm.gd")
 const Seeded := preload("res://core/seeded.gd")
@@ -267,7 +268,7 @@ func _apply_field(desc: Dictionary) -> void:
 		return
 	field_key = key
 	var t0 := Time.get_ticks_usec()
-	field = FieldGen.generate(int(desc.get("seed", 0)), desc.get("spec", {}))
+	field = BgGen.take(_gen_key(desc), _gen_job(desc))  # usually made already, off the main thread (_prefetch_field)
 	var gen_ms := (Time.get_ticks_usec() - t0) / 1000.0
 	if field_node != null:
 		field_node.queue_free()
@@ -601,12 +602,8 @@ func _start_round() -> void:
 	_clear_sheep()
 	held = -1
 	awards.reset()
-	var players := maxi(1, party.player_count() + (1 if vr_rig != null else 0))
-	if daily_due:
-		daily_due = false
-		round_desc = {"k": "daily", "seed": FieldGen.daily_seed(), "spec": FieldGen.daily_spec(players, round_time)}
-	else:
-		round_desc = Farm.next_field(save.data, players, round_time)
+	round_desc = _next_desc()
+	daily_due = false
 	run = {"barks": 0, "grabs": 0, "throws": 0, "splash": 0}
 	net.state_set("field", {"seed": int(round_desc.seed), "spec": round_desc.spec})
 	_apply_field(net.state_get("field", {}))
@@ -625,6 +622,35 @@ func _start_round() -> void:
 
 
 ## Host: Bo's words as a field starts (the first time ever, a new kind of field, today's field).
+## Host: the field the next round brings ({k, seed, spec}; no side effects).
+func _next_desc() -> Dictionary:
+	var players := maxi(1, party.player_count() + (1 if vr_rig != null else 0))
+	if daily_due:
+		return {"k": "daily", "seed": FieldGen.daily_seed(), "spec": FieldGen.daily_spec(players, round_time)}
+	return Farm.next_field(save.data, players, round_time)
+
+
+## A big field takes up to ~0.1 s to make on a Deck (fieldgen.gd retries until check() passes), so the next
+## one is made on a worker thread (core/bg_gen.gd) while the results show; the host tells every machine which,
+## so they have it ready too. _apply_field() then takes the finished field at once.
+func _prefetch_field(desc: Dictionary) -> void:
+	if desc.is_empty():
+		return
+	BgGen.prefetch(_gen_key(desc), _gen_job(desc))
+	if net.mode != "client":
+		net.event("prefetch", [desc])
+
+
+static func _gen_key(desc: Dictionary) -> String:
+	return "sheep:" + var_to_str([int(desc.get("seed", 0)), desc.get("spec", {})])
+
+
+static func _gen_job(desc: Dictionary) -> Callable:
+	var seed_v := int(desc.get("seed", 0))
+	var sp: Dictionary = (desc.get("spec", {}) as Dictionary).duplicate(true)
+	return func() -> Variant: return FieldGen.generate(seed_v, sp)
+
+
 func _round_story() -> void:
 	var lines: Array = []
 	if not bool(save.data.met_bo):
@@ -729,11 +755,14 @@ func _end_round(all_home: bool) -> void:
 		celebrate()
 	_telemetry("all_home" if all_home else "time", home, total, st)
 	_story_queue(beats, 1.2)
+	var nxt := _next_desc()
+	_prefetch_field({"seed": int(nxt.seed), "spec": nxt.spec})  # the next field, while the results show
 	print("Sheep Round-Up round %d: %d/%d home, %d stars, %d at the farm, next field %d" % [rnd, home, total, st,
 		int(save.data.home), int(save.data.level) + 1])
 
 
 func _exit_tree() -> void:
+	BgGen.wait_all()  # no field job outlives the game
 	if ready_to_play and net != null and net.mode != "client" and String(net.state_get("phase", "")) == "play" and not field.is_empty():
 		_telemetry("quit", int(net.state_get("home", 0)), int(net.state_get("total", 0)), 0)
 
@@ -1238,6 +1267,9 @@ func apply_snapshot(s: Array) -> void:
 
 func apply_event(kind: String, args: Array) -> void:
 	match kind:
+		"prefetch":
+			if args.size() > 0 and args[0] is Dictionary:
+				_prefetch_field(args[0])
 		"sheep":
 			sheep_fx(args[0], String(args[1]), int(args[2]))
 		"bark":
