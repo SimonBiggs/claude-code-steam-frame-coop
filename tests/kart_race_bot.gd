@@ -207,7 +207,7 @@ func _end_run(mode: String) -> void:
 			fails.append("hazards on the cup tracks")
 		if OS.has_environment("KART_ITEM") and main.items_given.size() < 5:
 			fails.append("the power-ups given (%s)" % str(main.items_given.keys()))
-		if races >= 4 and OS.has_environment("KART_PIT") and Cups.medals(main.shelf) < 1 and main.speed_mode == "gentle":
+		if races >= 3 and OS.has_environment("KART_PIT") and Cups.medals(main.shelf) < 1 and main.speed_mode == "gentle":
 			fails.append("a gentle cup finished puts a cup on Bolt's shelf")
 	if pit_seen and gates_seen < 1:
 		fails.append("the pit stop's gates drawn on the TV")
