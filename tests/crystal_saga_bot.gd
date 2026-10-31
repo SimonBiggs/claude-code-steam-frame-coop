@@ -50,6 +50,7 @@ var saw_choose := 0
 var saw_offer_client := false
 var plan_ok := true
 var first_road := 0  ## the first journey's road (a hash), once the party is in the forest
+var first_biome := -1  ## ... and its region's biome (a machine may leave before the host's next journey starts)
 var statue_done := {}  ## slot -> true once it bonked its hero statue
 var saw_map := 0
 var saw_map_client := false
@@ -110,6 +111,7 @@ func _watch() -> String:
 	last_biome = bio
 	if first_road == 0 and _zone() >= 1:
 		first_road = var_to_str(main.world.plan.get("props", [])).hash()
+		first_biome = int(main.world.plan.get("biome", -1))
 	var pl: Array = main.net.state_get("plan", [])
 	if not pl.is_empty() and int(main.world.plan.get("seed", -1)) != int(pl[0]) and _phase() != "results":
 		plan_ok = false
@@ -415,7 +417,7 @@ func _checks() -> void:
 	kit.assert_true(plan_ok, "%s: the world was built from the journey's plan" % mode)
 	if mode != "local":
 		print("BOT AGREE road=%d" % first_road)  # every machine built the same (first) road
-		print("BOT AGREE biome=%d" % int(main.plan.get("biome", -1)))  # ... and ended in the same region
+		print("BOT AGREE biome=%d" % first_biome)  # ... in the same region
 	kit.assert_true(main.stories_shown > 0, "%s: Lumi's story cards showed (%d)" % [mode, main.stories_shown])
 	if mode == "client":
 		kit.assert_true(saw_choose == 0 or saw_offer_client, "client showed the level-up stones")
