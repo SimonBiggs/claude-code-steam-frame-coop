@@ -10,6 +10,7 @@ extends RefCounted
 ## Lines are a few words (kids read them; simple mode, picture first). Pure data + small pure functions.
 
 const TrackGen := preload("res://games/kart_race/trackgen.gd")
+const Cups := preload("res://games/kart_race/cups.gd")
 const Seeded := preload("res://core/seeded.gd")
 
 const GAME_ID := "kart_race"
@@ -45,7 +46,8 @@ static func place(i: int) -> Dictionary:
 ## The save's default data (core/save.gd fills missing keys from this).
 static func save_defaults() -> Dictionary:
 	return {"world": -1, "story_i": 0, "hats": 0, "champs": 0, "golds": 0, "races": 0, "tours": 0,
-		"daily": {"date": "", "time": 0.0, "ghost": [], "laps": 0, "frac": 1.0}}
+		"daily": {"date": "", "time": 0.0, "ghost": [], "laps": 0, "frac": 1.0},
+		"shelf": {}, "garage": {}, "laps": {}, "mode": "gentle", "cups": 0}
 
 
 ## Story race i -> [place (0..5), race within it (0..2), tour (0 = the story, 1+ bonus tours)].
@@ -101,8 +103,20 @@ static func is_daily(desc: Array) -> bool:
 	return desc.size() > 0 and int(desc[0]) == 1
 
 
+## A cup race (cups.gd desc: [2, seed, cup, race, speed]).
+static func is_cup(desc: Array) -> bool:
+	return desc.size() > 4 and int(desc[0]) == 2
+
+
+## A Grand Tour race.
+static func is_tour(desc: Array) -> bool:
+	return desc.size() > 2 and int(desc[0]) == 0
+
+
 ## The spec for a description.
 static func desc_spec(desc: Array) -> Dictionary:
+	if is_cup(desc):
+		return Cups.spec(int(desc[2]), int(desc[3]), String(desc[4]))
 	if is_daily(desc):
 		return daily_spec(String(desc[4]) if desc.size() > 4 else "")
 	return spec(int(desc[2]))
@@ -110,6 +124,8 @@ static func desc_spec(desc: Array) -> Dictionary:
 
 ## The place a description races in.
 static func desc_place(desc: Array) -> int:
+	if is_cup(desc):
+		return -1
 	if is_daily(desc):
 		return int(daily_spec(String(desc[4]) if desc.size() > 4 else "").get("place", 0))
 	return int(where(int(desc[2]))[0])
