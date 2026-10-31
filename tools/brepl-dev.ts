@@ -392,6 +392,14 @@ const rport = () => 20000 + Math.floor(Math.random() * 10000);
  *  and branch. Stops (nothing deployed) with {stop, ...} on a conflict, live/staging drift, or any failing test
  *  (story_pictures_test always runs: pictures belong in games/<game>/story_pictures.gd). */
 export async function land(branch: string, genTests: string[], botId: string, otherBots: string[], msg: string) {
+  // A landing that stopped leaves its merge in wt-merge (and its files in staging) for a retry. Landing a DIFFERENT
+  // branch next must not carry it along (2026-10-31: a tools-only landing nearly deployed saga-deep, whose tests had
+  // failed): start again from main, staging included.
+  const stale = (await sh("git log --merges --format=%s main..merge-arcade", join(GP, "wt-merge"))).out.split("\n").filter(Boolean);
+  if (stale.some(s => !s.includes(`'${branch}'`))) {
+    await sh("git merge --abort 2>/dev/null; git reset -q --hard main", join(GP, "wt-merge"));
+    await sh(`for d in ${DEPLOYED.join(" ")} tools; do rsync -a --delete --exclude '*.import' --exclude '__pycache__' wt-merge/$d/ .duo-arena-stage/$d/; done; cp wt-merge/arcade.tscn .duo-arena-stage/`, GP);
+  }
   const m = await sh(`cd ${GP}/wt-${branch} && git status --short | grep -v '^??' | head -3; cd ${GP}/wt-merge && git merge --no-edit ${branch} 2>&1 | tail -1; git diff --name-only --diff-filter=U`);
   if (/CONFLICT|fatal/.test(m.out)) return { stop: "merge", out: m.out };
   const drift = await sh(`for d in ${DEPLOYED.join(" ")}; do diff -rq --exclude='*.uid' --exclude='*.import' duo-arena/$d .duo-arena-stage/$d; done`, GP);
