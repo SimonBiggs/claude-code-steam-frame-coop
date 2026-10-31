@@ -837,3 +837,8 @@ export async function soloCheck(o: { only?: string[]; seconds?: number } = {}) {
   await Bun.write(join(HOME, ".cache/sweep/solo.json"), JSON.stringify(out, null, 1));
   return out.map(r => `${r.waiting.length || !r.moving || r.error ? "??" : "ok"} ${r.id}${r.waiting.length ? ": " + r.waiting.join(" | ") : ""}`).join("\n");
 }
+
+// fs as a brepl global (agents' snippets and the briefs use fs.promises.*): it used to exist only because an early
+// session set it by hand, so a brepl restart lost it (2026-10-31).
+import * as nodeFs from "node:fs";
+export function start() { (globalThis as any).fs ??= nodeFs; }
