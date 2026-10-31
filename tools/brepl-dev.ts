@@ -4,7 +4,9 @@
 import { $ } from "bun";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { runGroup, verdict } from "./multibot.ts";  // installed next to this file (TOOL_COPIES)
+// Fresh copy on every dev (re)load: brepl cache-busts only top-level modules, so a static import kept the OLD
+// multibot after it changed (2026-10-31: "Export named 'engineErrors' not found").
+const { runGroup, verdict, engineErrors } = await import(`./multibot.ts?t=${Date.now()}`);  // installed next to this file (TOOL_COPIES)
 
 const HOME = process.env.HOME!;
 const GP = join(HOME, "GodotProjects");
@@ -390,6 +392,14 @@ const rport = () => 20000 + Math.floor(Math.random() * 10000);
  *  and branch. Stops (nothing deployed) with {stop, ...} on a conflict, live/staging drift, or any failing test
  *  (story_pictures_test always runs: pictures belong in games/<game>/story_pictures.gd). */
 export async function land(branch: string, genTests: string[], botId: string, otherBots: string[], msg: string) {
+  // A landing that stopped leaves its merge in wt-merge (and its files in staging) for a retry. Landing a DIFFERENT
+  // branch next must not carry it along (2026-10-31: a tools-only landing nearly deployed saga-deep, whose tests had
+  // failed): start again from main, staging included.
+  const stale = (await sh("git log --merges --format=%s main..merge-arcade", join(GP, "wt-merge"))).out.split("\n").filter(Boolean);
+  if (stale.some(s => !s.includes(`'${branch}'`))) {
+    await sh("git merge --abort 2>/dev/null; git reset -q --hard main", join(GP, "wt-merge"));
+    await sh(`for d in ${DEPLOYED.join(" ")} tools; do rsync -a --delete --exclude '*.import' --exclude '__pycache__' wt-merge/$d/ .duo-arena-stage/$d/; done; cp wt-merge/arcade.tscn .duo-arena-stage/`, GP);
+  }
   const m = await sh(`cd ${GP}/wt-${branch} && git status --short | grep -v '^??' | head -3; cd ${GP}/wt-merge && git merge --no-edit ${branch} 2>&1 | tail -1; git diff --name-only --diff-filter=U`);
   if (/CONFLICT|fatal/.test(m.out)) return { stop: "merge", out: m.out };
   const drift = await sh(`for d in ${DEPLOYED.join(" ")}; do diff -rq --exclude='*.uid' --exclude='*.import' duo-arena/$d .duo-arena-stage/$d; done`, GP);
@@ -418,7 +428,8 @@ export async function land(branch: string, genTests: string[], botId: string, ot
     if (scene && !/PASS/.test(out[t])) out[t] += " (no PASS line)";
     ok &&= /exit=0/.test(out[t]) && !/FAIL|SCRIPT ERROR|no PASS line/.test(out[t]);
   }
-  out.deck = (await sh(`DECK_BOT_ONLY=${botId} DUO_PORT=${rport()} timeout 300 godot-test --headless --path . --fixed-fps 60 --quit-after 6000 res://tests/deck_bot.tscn 2>&1 | grep -E "BOT RESULT|SCRIPT ERROR" | tail -3`, STAGE)).out;
+  const deckOut = (await sh(`DECK_BOT_ONLY=${botId} DUO_PORT=${rport()} timeout 300 godot-test --headless --path . --fixed-fps 60 --quit-after 6000 res://tests/deck_bot.tscn 2>&1`, STAGE)).out;
+  out.deck = deckOut.split("\n").filter(l => /BOT RESULT|SCRIPT ERROR/.test(l)).slice(-3).join("\n") + engineErrors(deckOut).slice(0, 3).map(e => `\nSCRIPT ERROR (engine): ${e}`).join("");
   // (0 checks = DECK_BOT_ONLY matched no game: fine for a non-game botId like arcade_lobby, a FAIL for a game.)
   const isGame = await stat(join(STAGE, "games", botId)).then(() => true, () => false);
   if (isGame && /\(0 checks\)/.test(out.deck)) out.deck += " (no Deck checks ran for this game)";

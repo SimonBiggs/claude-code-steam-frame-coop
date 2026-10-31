@@ -50,6 +50,11 @@ const Seeded := preload("res://core/seeded.gd")
 const StoryCard := preload("res://core/story_card.gd")
 const Telemetry := preload("res://core/telemetry.gd")
 const SaveScript := preload("res://core/save.gd")
+const Cups := preload("res://games/kart_race/cups.gd")
+const Items := preload("res://games/kart_race/items.gd")
+const PitScript := preload("res://games/kart_race/pit.gd")
+const Shelf := preload("res://games/kart_race/shelf.gd")
+const BgGen := preload("res://core/bg_gen.gd")
 
 ## Simple mode picture cues on the TV views (no words): [pad button, icons, icon colour].
 ## The "go" button follows the player's controls (A on a pad, W / up on a keyboard), see _cue_button.
@@ -122,6 +127,11 @@ const SOUNDS := {
 	"cheer": [1.3, 700.0, 500.0, 0.22, "sine", 0.95],
 	"trophy": [1.4, 523.0, 2093.0, 0.4, "tri", 0.0],
 	"wobble": [0.5, 600.0, 300.0, 0.3, "sine", 0.0],
+	"squelch": [0.35, 220.0, 120.0, 0.3, "sine", 0.5],
+	"tinkle": [0.4, 1600.0, 2400.0, 0.18, "tri", 0.1],
+	"boing": [0.5, 300.0, 900.0, 0.3, "sine", 0.0],
+	"bonk": [0.18, 160.0, 90.0, 0.4, "square", 0.4],
+	"pick": [0.3, 700.0, 1400.0, 0.3, "tri", 0.0],
 }
 
 var players: Array = []
@@ -192,6 +202,23 @@ var story_count := 0  # story cards shown (bot)
 var bolt_hello := false  # host: Bolt said hello this session (the first TODAY'S TRACK card)
 const BOLT_COLOR := "8cb4ff"  # Bolt, the friendly robot who builds the tracks (his picture: story_pictures.gd boltbot)
 var tour_strips: Array = []  # results: a row of place pictures on each TV view
+# Bolt's cups (cups.gd), the pit stop (pit.gd), items (items.gd), Bolt's trophy shelf (shelf.gd), the best-lap ghost.
+const TRIAL_LAPS := 3
+var speed_mode := "gentle"  # cups.gd MODES: gentle / zoom / trial (synced in the snapshot)
+var base_laps := SIMPLE_LAPS  # laps of a normal race (bots shorten it); a time trial has one more
+var series := {}  # host: what is being raced {"kind": "daily" / "tour" / "cup", "cup": i, "pts": {kart index: points}}
+var pit: PitScript  # pit.gd: the picture gates
+var pit_rows: Array = []  # what the gates show (synced)
+var shelf: Dictionary = {}  # Bolt's trophy shelf: "candy:gentle" -> medal 1..3 (synced)
+var shelf_node: Node3D
+var shelf_key := ""
+var lap_ghost: Array = []  # the best lap on this track (5 a second), raced when there's no day ghost
+var lap_ghost_t0 := -1.0  # race time the leading person started their lap (the lap ghost starts with them)
+var lap_rec := {}  # host: kart index -> {"t0", "n", "path"} for the lap being driven
+var lap_tick := 0.0
+var last_medal := 0
+var pits_done := 0
+var item_cycle := 0
 
 var center_label: Label
 var help_label: Label
@@ -230,16 +257,24 @@ func _ready() -> void:
 
 
 func _setup_game(mode: String) -> void:
+	pit = PitScript.new()
+	pit.name = "Pit"
+	pit.main = self
+	add_child(pit)
 	if mode != "client":
 		_load_story()
 	if SIMPLE_MODE and mode != "client":
 		track_desc = Story.daily_desc()  # every session starts on TODAY'S TRACK (the practice too)
+		series = {"kind": "daily"}
 		_build_desc()
 	else:
 		track.build(0)
 	_build_players(mode)
+	_load_garage()
 	_apply_looks()
 	_build_views(mode)
+	if OS.has_environment("BOT_VR") and mode != "client":
+		debug_fake_vr()  # fake VR for any offscreen run (dev.sweep vr, VrViewWatch), not only the kart bot
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_assign_joypads()
 	if seats.deck_alone():
@@ -250,12 +285,14 @@ func _setup_game(mode: String) -> void:
 		players[1].set_meta("want_join", true)  # ask the host for a kart (it may hand out another one)
 	_restore_party()
 	if SIMPLE_MODE:
-		laps = SIMPLE_LAPS
+		laps = base_laps
 	if mode == "host":
 		state = "wait"
 		var p: Array = track.grid_point(0)
 		players[0].place_at(p[0], p[1], p[3])
-		if SIMPLE_MODE:
+		if SIMPLE_MODE and OS.has_environment("KART_PIT"):  # WHAT'S NEW "try" / tests: straight to the picture gates
+			_start_pit()
+		elif SIMPLE_MODE:
 			_start_practice()
 		else:
 			_show_center("KART RACE\nWaiting for the TV players… (warm up: drive around!)", 0.0)
@@ -271,13 +308,17 @@ func _setup_game(mode: String) -> void:
 				var g: Array = track.grid_point(slot)
 				k.place_at(g[0], g[1], g[3])
 				slot += 1
-		_start_practice()
+		if OS.has_environment("KART_PIT"):
+			_start_pit()
+		else:
+			_start_practice()
 	else:
 		_start_race(0)
 
 
 func _exit_tree() -> void:
 	XRServer.world_scale = 1.0
+	BgGen.wait_all()  # no track job outlives the game
 	if net != null and net.mode != "client" and state == "race" and not race_logged and race_t > 5.0:
 		_race_telemetry("quit", [])
 
@@ -896,8 +937,14 @@ func debug_fake_vr():
 	players[0].add_child(cam)  # rides in the kart, like a headset's rig
 	cam.current = false
 	cam.cull_mask = 0xFFFFF & ~preload("res://core/vr_rig.gd").AVATAR_LAYER
-	for v in players[0].driver.find_children("*", "VisualInstance3D", true, false):
-		(v as VisualInstance3D).layers = preload("res://core/vr_rig.gd").AVATAR_LAYER
+	# Like a real headset (kart.set_first_person hides them there), the head doesn't see the TV kart's own
+	# driver, steering wheel or name tag: they go on the TV-only avatar layer.
+	for part in [players[0].driver, players[0].wheel_vis, players[0].tag]:
+		var vis: Array = (part as Node).find_children("*", "VisualInstance3D", true, false)
+		if part is VisualInstance3D:
+			vis.append(part)
+		for v in vis:
+			(v as VisualInstance3D).layers = preload("res://core/vr_rig.gd").AVATAR_LAYER
 	cockpit.xr_camera = cam
 	print("Fake VR cockpit on P1")
 	return cockpit
@@ -906,6 +953,7 @@ func debug_fake_vr():
 ## Test hook: shorter races (laps, and optionally finish part-way round the last lap).
 func debug_fast(n_laps: int, frac: float = 1.0) -> void:
 	laps = n_laps
+	base_laps = n_laps
 	intro_override = 3.0
 	finish_frac = clampf(frac, 0.1, 1.0)
 
@@ -1356,7 +1404,11 @@ func _process(delta: float) -> void:
 	track.update(dt, net.mode != "client")
 	_follow_weather()
 	_update_trophies(dt)
+	_record_laps(dt)
 	_update_ghost(dt)
+	_update_shelf()
+	if net.mode == "client":
+		pit.show_rows(pit_rows)
 	_update_bananas_visual()
 	track.boxes_on = boxes_live()
 	_update_gate(dt)
@@ -1408,6 +1460,13 @@ func _host_update(dt: float, cont_edge: bool) -> void:
 						_rocket(k)
 		"race":
 			race_t += dt
+		"pit":
+			var humans: Array = []
+			for p in players:
+				if p.active:
+					humans.append(p)
+			if pit.update(dt, humans):
+				_pit_done()
 		"results":
 			if (state_t > 2.0 and cont_edge) or state_t > (SIMPLE_NEXT if SIMPLE_MODE else 45.0 if cup_race >= 2 else 30.0):
 				_next_race()
@@ -1486,9 +1545,12 @@ func _on_continue() -> void:
 
 ## The next race of the Grand Prix (after the third race, a new cup on new tracks).
 func _next_race() -> void:
-	if SIMPLE_MODE:  # no cups: the next track of the Grand Tour
-		if save != null:
-			track_desc = Story.story_desc(int(save.data["world"]), int(save.data["story_i"]))
+	if SIMPLE_MODE:  # the next race of the cup / tour place, or the PIT STOP to pick the next one
+		var nxt := _series_next()
+		if nxt.is_empty():
+			_start_pit()
+			return
+		track_desc = nxt
 		_start_race(track_i + 1)
 		return
 	if cup_race >= 2:
@@ -1560,9 +1622,17 @@ func _start_race(ti: int) -> void:
 	_race_story_start()
 	# CPU buddies fill the grid (fewer as more people play).
 	var humans := human_count()
-	var want_cpu := clampi(GRID_FILL - humans, 0, MAX_CPU)
+	var want_cpu := clampi(GRID_FILL - humans, 0, MAX_CPU) if bool(mode_info().cpus) else 0
 	for j in cpus.size():
 		cpus[j].set_active(j < want_cpu)
+		cpus[j].cpu_skill = float(mode_info().cpu_skill) * (1.0 - 0.02 * j)
+		cpus[j].set_kart("medium", "")  # CPUs always drive the middle kart (fair)
+	if SIMPLE_MODE:
+		laps = base_laps + (1 if speed_mode == "trial" else 0)
+	pit.stop()
+	pit_rows = []
+	lap_rec.clear()
+	lap_ghost_t0 = -1.0
 	# Humans at the front of the grid, the CPUs behind.
 	var slot := 0
 	for k in players + cpus:
@@ -1671,6 +1741,9 @@ func _results() -> void:
 	order.sort_custom(func(a, b) -> bool: return a.place < b.place)
 	if SIMPLE_MODE:
 		_simple_results(order)
+		var nxt := _series_next()
+		if not nxt.is_empty():
+			_prefetch_tracks([nxt])
 		return
 	if cup_pts.size() != karts.size():
 		cup_pts.resize(karts.size())
@@ -1771,12 +1844,13 @@ func rubber(k) -> float:
 			last_h = minf(last_h, o.total)
 	if lead == -INF:
 		return 1.0
-	var f := 1.0 + clampf((lead - k.total) / 70.0, 0.0, 1.0) * 0.22
+	var md := mode_info()
+	var f := 1.0 + clampf((lead - k.total) / 70.0, 0.0, 1.0) * float(md.catch)
 	if k.cpu:
 		f *= k.cpu_skill
-		if best_h > -INF and k.total > best_h + 12.0:
+		if bool(md.cpu_ease) and best_h > -INF and k.total > best_h + 12.0:
 			f *= 0.85
-	elif best_h - last_h > 50.0 and k.total >= best_h - 1.0:
+	elif bool(md.cpu_ease) and best_h - last_h > 50.0 and k.total >= best_h - 1.0:
 		f *= 0.95
 	return f
 
@@ -1803,13 +1877,33 @@ func _load_story() -> void:
 		str(Story.place(int(Story.where(int(d["story_i"]))[0])).name), hats_won, int(d["golds"])])
 
 
+## Generated tracks take up to ~1 s on a Deck (trackgen.gd retries until check() passes), so the next ones are made
+## on a worker thread while the results / pit stop show (core/bg_gen.gd); the host tells clients which, so they
+## have them ready too. _build_desc() then takes the finished track at once.
+func _prefetch_tracks(descs: Array) -> void:
+	for d in descs:
+		if d is Array and not (d as Array).is_empty():
+			BgGen.prefetch(_gen_key(d), _gen_job(d))
+	if net.mode != "client":
+		net.event("prefetch", [descs])
+
+
+static func _gen_key(desc: Array) -> String:
+	return "kart:" + var_to_str(desc)
+
+
+static func _gen_job(desc: Array) -> Callable:
+	var d := desc.duplicate()
+	return func() -> Variant: return Story.track_for(d)
+
+
 ## Build the generated track track_desc describes (every machine makes the same one from the numbers).
 func _build_desc() -> void:
 	if track.key == Story.key_for(track_desc) and track.built != null:
 		_apply_looks()
 		return
 	var t0 := Time.get_ticks_msec()
-	var r: Array = Story.track_for(track_desc)
+	var r: Array = BgGen.take(_gen_key(track_desc), _gen_job(track_desc))  # usually prefetched (_prefetch_tracks)
 	var info: Dictionary = r[0]
 	track.build_info(info, String(r[1]))
 	track_i = track.track_i
@@ -1826,9 +1920,15 @@ func _apply_looks() -> void:
 		return
 	var pl_i := Story.desc_place(track_desc) if not track_desc.is_empty() and not Story.is_daily(track_desc) else -1
 	var champ := String(Story.place(pl_i).champ) if pl_i >= 0 else ""
+	var cupn := int(track_desc[2]) if Story.is_cup(track_desc) else -1
+	if cupn >= 0:
+		champ = String(Cups.cup(cupn).champ)
 	for j in cpus.size():
 		var c = cpus[j]
-		if j == 0 and pl_i >= 0:
+		if j == 0 and cupn >= 0:
+			c.set_look(champ, Cups.cup(cupn).champ_color)
+			c.set_hat(-1)
+		elif j == 0 and pl_i >= 0:
 			c.set_look(champ, Story.place(pl_i).champ_color)
 			c.set_hat(pl_i)
 		else:
@@ -1868,6 +1968,20 @@ func _race_story_start() -> void:
 	if track_desc.is_empty():
 		return
 	_set_ghost([])
+	_race_story_cards()
+	_start_lap_ghost()
+
+
+func _race_story_cards() -> void:
+	if Story.is_cup(track_desc):
+		var cp := Cups.cup(int(track_desc[2]))
+		var r := int(track_desc[3])
+		if r == 0:
+			story({"who": String(cp.name), "line": String(cp.intro), "pic": String(cp.pic), "color": (cp.color as Color).to_html(false), "duration": 4.0})
+		elif r == Cups.RACES - 1 and cpus[0].active:
+			story({"who": String(cp.champ), "line": "The last race! Go!", "pic": String(cp.pic), "color": (cp.champ_color as Color).to_html(false),
+				"duration": 3.5})
+		return
 	if Story.is_daily(track_desc):
 		var dd: Dictionary = save.data["daily"] if save != null else {}
 		var has_ghost := String(dd.get("date", "")) == Seeded.today() and int(dd.get("laps", 0)) == laps \
@@ -1894,7 +2008,7 @@ func _race_story_start() -> void:
 
 
 ## Host / local after each race: story progress (hats, champs), today's best and ghost, telemetry, cards.
-func _story_after_race(order: Array) -> void:
+func _story_after_race(order: Array, cup_beats: Array = []) -> void:
 	if save == null or track_desc.is_empty():
 		return
 	var d: Dictionary = save.data
@@ -1914,6 +2028,8 @@ func _story_after_race(order: Array) -> void:
 		if best != null and best.finished and (not same or best.finish_time < float(dd.get("time", 0.0))):
 			d["daily"] = {"date": today, "time": best.finish_time, "ghost": ghost_rec.duplicate(), "laps": laps, "frac": finish_frac}
 			beats.append({"who": "BEST TODAY!", "line": "Your ghost will race you!", "pic": "trophy", "color": "ffd25a", "duration": 3.5})
+	elif Story.is_cup(track_desc):
+		beats.append_array(cup_beats)
 	else:
 		var i := int(track_desc[2])
 		var w := Story.where(i)
@@ -1985,7 +2101,19 @@ func _race_telemetry(how: String, order: Array) -> void:
 			cpu_n += 1
 	var daily := Story.is_daily(track_desc)
 	var w := Story.where(int(track_desc[2])) if not daily else [Story.desc_place(track_desc), -1, -1]
-	Telemetry.run(Story.GAME_ID, {"race": round_n, "daily": daily, "story_i": int(track_desc[2]), "place": int(w[0]),
+	var classes: Array[String] = []
+	var hz := 0
+	for k in players:
+		if k.active:
+			classes.append(String(k.kart_class))
+			hz += k.st_hazards
+	var cup := Story.is_cup(track_desc)
+	if cup:
+		w = [-1, int(track_desc[3]), -1]
+	Telemetry.run(Story.GAME_ID, {"race": round_n, "daily": daily, "kind": "cup" if cup else ("daily" if daily else "tour"),
+		"cup": String(Cups.cup(int(track_desc[2])).id) if cup else "", "speed": speed_mode, "karts": ",".join(classes), "hazards": hz,
+		"hz_n": track.hazards.size(), "medal": last_medal if cup and int(track_desc[3]) == Cups.RACES - 1 else -1,
+		"items_kinds": ",".join(PackedStringArray(items_given.keys())), "story_i": int(track_desc[2]) if not cup else -1, "place": int(w[0]),
 		"step": int(w[1]), "tour": int(w[2]), "seed": int(track_desc[1]), "len": int(track.length), "laps": laps, "frac": finish_frac,
 		"ramps": track.ramps.size(), "splits": track.splits.size(), "humans": humans, "cpus": cpu_n, "best_place": best_place,
 		"first_t": snappedf(first_t, 0.1), "last_t": snappedf(last_t, 0.1), "race_t": snappedf(race_t, 0.1), "walls": walls,
@@ -2029,22 +2157,28 @@ func _update_ghost(dt: float) -> void:
 					who = p
 			if who != null and ghost_rec.size() < 3000:
 				ghost_rec.append(who.position)
+	var path := ghost_path
+	var f := (race_t if state == "race" else 0.0) * 5.0
+	if path.is_empty() and not lap_ghost.is_empty() and state == "race" and lap_ghost_t0 >= 0.0:
+		path = lap_ghost  # the best lap on this track, starting with the leading person's lap
+		f = (race_t - lap_ghost_t0) * 5.0
+	if not path.is_empty() and ghost_node == null:
+		_set_ghost(ghost_path)
 	if ghost_node == null:
 		return
-	var show := not ghost_path.is_empty() and (state == "race" or state == "countdown")
+	var show := not path.is_empty() and (state == "race" or (state == "countdown" and path == ghost_path))
 	ghost_node.visible = show
 	if not show:
 		return
-	var f := (race_t if state == "race" else 0.0) * 5.0
-	var i := clampi(int(f), 0, ghost_path.size() - 1)
-	var j := mini(i + 1, ghost_path.size() - 1)
-	var a: Vector3 = ghost_path[i]
-	var b: Vector3 = ghost_path[j]
+	var i := clampi(int(f), 0, path.size() - 1)
+	var j := mini(i + 1, path.size() - 1)
+	var a: Vector3 = path[i]
+	var b: Vector3 = path[j]
 	ghost_node.position = a.lerp(b, clampf(f - i, 0.0, 1.0))
 	var dir := b - a
 	if Vector2(dir.x, dir.z).length() > 0.05:
 		ghost_node.rotation.y = lerp_angle(ghost_node.rotation.y, atan2(-dir.x, -dir.z), 1.0 - exp(-10.0 * dt))
-	if i >= ghost_path.size() - 1:
+	if i >= path.size() - 1:
 		ghost_node.visible = false
 
 
@@ -2053,6 +2187,9 @@ func _update_ghost(dt: float) -> void:
 func _show_tour_strips() -> void:
 	_clear_tour_strips()
 	if track_desc.is_empty() or Story.is_daily(track_desc):
+		return
+	if Story.is_cup(track_desc):
+		_show_cup_strips()
 		return
 	var w := Story.where(int(track_desc[2]))
 	var cur := int(w[0])
@@ -2094,6 +2231,46 @@ func _show_tour_strips() -> void:
 		tour_strips.append(row)
 
 
+## Results in a cup: the four cups' pictures (a medal-coloured cup under the ones won at this speed), this one big
+## with a dot for each of its three races. Pictures only.
+func _show_cup_strips() -> void:
+	var cur := int(track_desc[2])
+	var r := int(track_desc[3])
+	for p in players:
+		if not (p.active and p.is_local() and p.hud != null and is_instance_valid(p.hud)):
+			continue
+		var row := HBoxContainer.new()
+		row.name = "TourStrip"
+		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.alignment = BoxContainer.ALIGNMENT_CENTER
+		var sc := clampf(p.hud.size.y / 540.0, 0.5, 1.4)
+		row.add_theme_constant_override("separation", int(18 * sc))
+		for i in Cups.CUPS.size():
+			var cp := Cups.cup(i)
+			var col := VBoxContainer.new()
+			col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			col.alignment = BoxContainer.ALIGNMENT_CENTER
+			var md := int(shelf.get(Cups.shelf_key(i, speed_mode), 0))
+			var pic := StoryCard.picture(String(cp.pic), (84.0 if i == cur else 60.0) * sc, cp.color)
+			pic.modulate = Color(1, 1, 1) if md > 0 or i == cur else Color(0.35, 0.35, 0.4, 0.8)
+			col.add_child(pic)
+			if i == cur:
+				var dots := HBoxContainer.new()
+				dots.alignment = BoxContainer.ALIGNMENT_CENTER
+				dots.mouse_filter = Control.MOUSE_FILTER_IGNORE
+				for k in Cups.RACES:
+					dots.add_child(UiKit.icon("dot", Color(1.0, 0.85, 0.3) if k <= r else Color(1, 1, 1, 0.3), 20.0 * sc))
+				col.add_child(dots)
+			elif md > 0:
+				col.add_child(UiKit.icon("trophy", Cups.MEDAL_COLORS[md], 30.0 * sc))
+			row.add_child(col)
+		p.hud.add_child(row)
+		row.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
+		row.position.y -= 24.0 * sc
+		row.grow_horizontal = Control.GROW_DIRECTION_BOTH
+		tour_strips.append(row)
+
+
 func _clear_tour_strips() -> void:
 	for r in tour_strips:
 		if is_instance_valid(r):
@@ -2101,11 +2278,367 @@ func _clear_tour_strips() -> void:
 	tour_strips.clear()
 
 
+# --- Bolt's cups, the pit stop, the garage, Bolt's trophy shelf and the best-lap ghost ------------------
+
+func mode_info() -> Dictionary:
+	return Cups.mode(speed_mode)
+
+
+func _world() -> int:
+	return int(save.data["world"]) if save != null else 0
+
+
+## Host: what comes after the race just run ([] = the pit stop): the next race of the cup / tour place.
+func _series_next() -> Array:
+	if save == null or track_desc.is_empty() or Story.is_daily(track_desc):
+		return []
+	if Story.is_cup(track_desc):
+		var r := int(track_desc[3])
+		return Cups.desc(_world(), int(track_desc[2]), r + 1, speed_mode) if r < Cups.RACES - 1 else []
+	var w := Story.where(int(track_desc[2]))
+	if int(w[1]) >= Story.RACES_PER_PLACE - 1:
+		return []
+	return Story.story_desc(_world(), int(save.data["story_i"]))
+
+
+## The gates' rows (pit.gd): karts (+ the spanner once a part is unlocked), speeds, then the tour and the cups.
+func _pit_rows() -> Array:
+	var karts_row: Array = [["light", "kartsmall", Color(0.45, 0.85, 1.0)], ["medium", "kart", Color(1.0, 0.75, 0.3)],
+		["heavy", "kartbig", Color(1.0, 0.45, 0.35)]]
+	if not Cups.parts_unlocked(shelf).is_empty():
+		karts_row.append(["part", "spanner", Color(0.75, 0.6, 1.0)])
+	var speeds: Array = [["gentle", "snail", Color(0.55, 0.9, 0.5)], ["zoom", "rocket", Color(1.0, 0.4, 0.3)], ["trial", "clock", Color(0.5, 0.75, 1.0)]]
+	var cups_row: Array = [["tour", "boltbot", Color(0.55, 0.75, 1.0)]]
+	for c in Cups.CUPS.size():
+		cups_row.append([str(c), String(Cups.cup(c).pic), Cups.cup(c).color])
+	return [{"kind": "kart", "lanes": karts_row}, {"kind": "speed", "lanes": speeds}, {"kind": "cup", "lanes": cups_row}]
+
+
+## Host: the PIT STOP on the track just raced: everyone back on the grid, the CPUs step aside, drive through gates.
+func _start_pit() -> void:
+	state = "pit"
+	state_t = 0.0
+	race_t = 0.0
+	_clear_trophies()
+	_clear_tour_strips()
+	_set_ghost([])
+	set_lights(0)
+	_show_center("", 0.0)
+	for c in cpus:
+		c.set_active(false)
+	var slot := 0
+	for k in players:
+		if not k.active:
+			continue
+		k.reset_race()
+		k.grid_slot = slot
+		var g: Array = track.grid_point(slot)
+		_teleport(k, g[0], g[1], g[3])
+		k.hold_still = false
+		slot += 1
+	pit_rows = _pit_rows()
+	pit.start(pit_rows)
+	var likely: Array = [Story.story_desc(_world(), int(save.data["story_i"]))] if save != null else []
+	for c in Cups.CUPS.size():
+		likely.append(Cups.desc(_world(), c, 0, speed_mode))
+	_prefetch_tracks(likely)
+	pits_done += 1
+	story({"who": "PIT STOP!", "line": "Drive through a picture!", "pic": "spanner", "color": BOLT_COLOR, "duration": 3.5})
+	print("Pit stop %d: %d people pick karts, speed and a cup at the picture gates" % [pits_done, slot])
+
+
+## Host: someone drove through a gate.
+func pit_pick(k, kind: String, id: String, ri: int, lane: int) -> void:
+	pit.flash(ri, lane)
+	net.event("pit_flash", [ri, lane])
+	kart_sound(k, "pick", -3.0, 1.0 + 0.1 * ri)
+	burst(k.position + Vector3(0, 1.6, 0), (pit_rows[ri].lanes[lane][2] as Color), 14)
+	if kind == "kart":
+		var cls: String = k.kart_class
+		var part: String = k.part
+		if id == "part":
+			part = Cups.next_part(part, shelf)
+		else:
+			cls = id
+		k.set_kart(cls, part)
+		_save_garage(k)
+	print("Pit: %s picks %s %s" % [k.kart_name, kind, id])
+
+
+## Host: the pit stop is over: the votes decide the speed and the cup (nobody voted: same speed, the next cup).
+func _pit_done() -> void:
+	var m := pit.winner("speed")
+	var c := pit.winner("cup")
+	if OS.has_environment("KART_PICK"):  # tests: "speed:cup" (e.g. "gentle:2", "zoom:tour") wins whatever the gates said
+		var f := OS.get_environment("KART_PICK").split(":")
+		m = f[0]
+		c = f[1] if f.size() > 1 else c
+	if m != "":
+		speed_mode = m
+	if c == "":
+		var after := int(series.get("cup", -1))
+		c = str(Cups.next_cup(shelf, speed_mode if speed_mode != "trial" else "gentle", after))
+	if save != null:
+		save.data["mode"] = speed_mode
+		save.mark_dirty()
+	if c == "tour":
+		series = {"kind": "tour"}
+		track_desc = Story.story_desc(_world(), int(save.data["story_i"]) if save != null else 0)
+	else:
+		series = {"kind": "cup", "cup": int(c), "pts": {}}
+		track_desc = Cups.desc(_world(), int(c), 0, speed_mode)
+	print("Pit stop done: %s at %s speed" % ["the tour" if c == "tour" else String(Cups.cup(int(c)).name), speed_mode])
+	_start_race(track_i + 1)
+
+
+# --- The garage: each seat's kart and part, saved ---
+
+func _load_garage() -> void:
+	if save == null:
+		return
+	var g: Dictionary = save.data.get("garage", {})
+	for p in players:
+		var e: Variant = g.get(str(p.index), {})
+		if e is Dictionary:
+			p.set_kart(String((e as Dictionary).get("cls", "medium")), String((e as Dictionary).get("part", "")))
+	shelf = (save.data.get("shelf", {}) as Dictionary).duplicate()
+	speed_mode = String(save.data.get("mode", "gentle"))
+	if not Cups.MODES.has(speed_mode):
+		speed_mode = "gentle"
+	if OS.has_environment("KART_MODE"):
+		speed_mode = OS.get_environment("KART_MODE")
+
+
+func _save_garage(k) -> void:
+	if save == null:
+		return
+	var g: Dictionary = save.data.get("garage", {})
+	g[str(k.index)] = {"cls": k.kart_class, "part": k.part}
+	save.data["garage"] = g
+	save.mark_dirty()
+
+
+## A cosmetic kart part (cups.gd PARTS), built in the kart body's space (-Z forward, +Z back, y up).
+func part_model(part: String, col: Color) -> Node3D:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	match part:
+		"spoiler":
+			add_box(st, Vector3(0, 1.05, 1.0), Vector3(1.5, 0.08, 0.35), col.darkened(0.3))
+			for x in [-0.45, 0.45]:
+				add_box(st, Vector3(x, 0.82, 0.95), Vector3(0.08, 0.4, 0.12), Color(0.25, 0.25, 0.3))
+		"flag":
+			add_cyl(st, Vector3(-0.6, 1.3, 0.85), 0.03, 1.6, Color(0.85, 0.85, 0.9))
+			for i in 6:
+				var c := Color(0.1, 0.1, 0.12) if (i % 2 == int(i / 3.0) % 2) else Color(1, 1, 1)
+				add_box(st, Vector3(-0.6 - 0.12 - (i % 3) * 0.2, 1.95 - int(i / 3.0) * 0.2, 0.85), Vector3(0.2, 0.2, 0.02), c)
+		"duck":
+			add_ellipsoid(st, Vector3(0, 0.7, -1.05), Vector3(0.22, 0.17, 0.26), Color(1.0, 0.88, 0.2), 8, 5)
+			add_ellipsoid(st, Vector3(0, 0.92, -1.18), Vector3(0.14, 0.14, 0.14), Color(1.0, 0.88, 0.2), 8, 5)
+			add_ellipsoid(st, Vector3(0, 0.9, -1.33), Vector3(0.07, 0.04, 0.08), Color(1.0, 0.55, 0.15), 6, 3)
+		"crown":
+			add_cyl(st, Vector3(0, 0.72, -0.95), 0.2, 0.14, Color(1.0, 0.82, 0.2))
+			for i in 5:
+				var a := TAU * i / 5.0
+				add_ellipsoid(st, Vector3(cos(a) * 0.18, 0.86, -0.95 + sin(a) * 0.18), Vector3(0.05, 0.1, 0.05), Color(1.0, 0.82, 0.2), 5, 3)
+		"flames":
+			for side in [-1.0, 1.0]:
+				for i in 3:
+					var z := -0.5 + i * 0.35
+					add_box(st, Vector3(0.82 * side, 0.45, z), Vector3(0.03, 0.16, 0.42 - i * 0.1), [Color(1.0, 0.3, 0.15), Color(1.0, 0.6, 0.15), Color(1.0, 0.9, 0.3)][i])
+		"balloon":
+			add_cyl(st, Vector3(0.5, 1.4, 0.9), 0.01, 1.4, Color(0.9, 0.9, 0.9))
+			add_ellipsoid(st, Vector3(0.5, 2.35, 0.9), Vector3(0.32, 0.38, 0.32), col.lightened(0.2), 10, 6)
+	var mi := MeshInstance3D.new()
+	mi.name = "Part_" + part
+	mi.mesh = _commit(st)
+	var m := StandardMaterial3D.new()
+	m.vertex_color_use_as_albedo = true
+	m.vertex_color_is_srgb = true
+	m.roughness = 0.4
+	mi.material_override = m
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return mi
+
+
+# --- Hazards (track.gd / kart.gd call these on the machine that drives the kart) ---
+
+func on_hazard(k, kind: String) -> void:
+	if k.cpu:
+		return
+	match kind:
+		"slow":
+			sound("squelch", -4.0, randf_range(0.9, 1.1))
+			rumble(k, 0.3, 0.2)
+		"ice":
+			sound("tinkle", -6.0, randf_range(0.9, 1.2))
+		"float":
+			sound("boing", -3.0, 1.0)
+			burst(k.position + Vector3(0, 0.3, 0), Color(0.8, 0.5, 1.0), 10, false)
+		"bump":
+			sound("bonk", -3.0, randf_range(0.9, 1.15))
+			rumble(k, 0.5, 0.15)
+		"smash":
+			sound("pop", -2.0, 0.8)
+			burst(k.position + k.forward() * 1.5 + Vector3(0, 0.8, 0), Color(1.0, 0.9, 0.4), 16, false)
+		"tough":
+			sound("shield", -8.0, 1.4)
+	if net.mode == "client" and k.is_local() and kind != "tough" and kind != "smash":
+		net.send_action("stat", ["hazard"], k.index)
+
+
+# --- Cups: points over three races, a medal for Bolt's shelf ---
+
+## Host, after each race of a cup: points; after the third, the cup's trophies (by points) and the medal.
+## Returns the karts in cup order after the third race ([] otherwise).
+func _cup_after_race(order: Array) -> Array:
+	if not Story.is_cup(track_desc):
+		return []
+	var pts: Dictionary = series.get("pts", {})
+	for k in order:
+		pts[k.index] = int(pts.get(k.index, 0)) + (Cups.points(k.place) if k.finished or k.cpu else 1)
+	series["pts"] = pts
+	if int(track_desc[3]) < Cups.RACES - 1:
+		return []
+	var standing: Array = order.duplicate()
+	standing.sort_custom(func(a, b) -> bool:
+		var pa := int(pts.get(a.index, 0))
+		var pb := int(pts.get(b.index, 0))
+		return pa > pb or (pa == pb and a.place < b.place))
+	return standing
+
+
+## Host: the cup is won: the best person's cup place gives the medal; the shelf keeps the best one, and every new
+## medal unlocks the next kart part. Returns the story beats.
+func _cup_medal(standing: Array) -> Array:
+	var beats: Array = []
+	var c := int(track_desc[2])
+	var cp := Cups.cup(c)
+	var best_place := 99
+	for i in standing.size():
+		if not standing[i].cpu:
+			best_place = i + 1
+			break
+	var md := Cups.medal_for(best_place, speed_mode)
+	last_medal = md
+	if md <= 0:
+		beats.append({"who": String(cp.name), "line": "Try again!", "pic": String(cp.pic), "color": (cp.color as Color).to_html(false), "duration": 3.0})
+		return beats
+	var key := Cups.shelf_key(c, speed_mode)
+	var parts_before := Cups.parts_unlocked(shelf).size()
+	var had := int(shelf.get(key, 0))
+	beats.append({"who": "%s CUP!" % Cups.MEDALS[md], "line": String(cp.done), "pic": "trophy", "color": Cups.MEDAL_COLORS[md].to_html(false),
+		"duration": 3.5})
+	if md > had:
+		shelf[key] = md
+		if save != null:
+			save.data["shelf"] = shelf.duplicate()
+			save.mark_dirty()
+		beats.append({"who": "BOLT", "line": "On my shelf it goes!", "pic": "shelf", "color": BOLT_COLOR, "duration": 3.0})
+		var un := Cups.parts_unlocked(shelf)
+		if un.size() > parts_before:
+			var part: String = un[-1]
+			beats.append({"who": "NEW PART!", "line": "Drive through the spanner!", "pic": String(Cups.PART_PICS[part]), "color": "c39bff",
+				"duration": 3.5})
+	if save != null:
+		save.data["cups"] = int(save.data.get("cups", 0)) + 1
+		save.mark_dirty()
+	return beats
+
+
+# --- Bolt's trophy shelf: by the start line on every track ---
+
+func _update_shelf() -> void:
+	var key := "%d/%s" % [track.build_n, var_to_str(shelf)]
+	if key == shelf_key and shelf_node != null:
+		Shelf.wave(shelf_node)
+		return
+	shelf_key = key
+	if shelf_node != null:
+		shelf_node.queue_free()
+	shelf_node = Shelf.build(self, shelf)
+	add_child(shelf_node)
+	var p: Array = track.point_at(9.0, -(track.wall_at(9.0) + 2.8))
+	shelf_node.position = p[0]
+	shelf_node.rotation.y = float(p[1]) + PI * 0.5  # faces the road
+
+
+# --- The best-lap ghost (every track, saved per track) ---
+
+## Host: record each person's lap from the line; a lap faster than the saved best becomes the new ghost.
+func _record_laps(dt: float) -> void:
+	if net.mode == "client" or state != "race" or track_desc.is_empty():
+		return
+	lap_tick -= dt
+	var sample := lap_tick <= 0.0
+	if sample:
+		lap_tick += 0.2
+	var L: float = track.length
+	for k in players:
+		if not k.active or k.finished or k.total < 0.0:
+			continue
+		var n := int(floorf(k.total / L))
+		var rec: Dictionary = lap_rec.get(k.index, {})
+		if rec.is_empty() or n != int(rec.n):
+			if not rec.is_empty() and n == int(rec.n) + 1:
+				_lap_done(k, race_t - float(rec.t0), rec.path)
+			rec = {"t0": race_t, "n": n, "path": []}
+			lap_rec[k.index] = rec
+		if sample and (rec.path as Array).size() < 900:
+			(rec.path as Array).append(k.position)
+	# The lap ghost runs with the leading person's lap.
+	var lead = null
+	for k in players:
+		if k.active and not k.finished and lap_rec.has(k.index) and (lead == null or k.total > lead.total):
+			lead = k
+	var t0 := float(lap_rec[lead.index].t0) if lead != null else -1.0
+	if t0 != lap_ghost_t0:
+		lap_ghost_t0 = t0
+
+
+func _lap_done(k, t: float, path: Array) -> void:
+	if save == null or path.size() < 10:
+		return
+	var laps_d: Dictionary = save.data.get("laps", {})
+	var best: Variant = laps_d.get(track.key, {})
+	var bt := float((best as Dictionary).get("t", 0.0)) if best is Dictionary else 0.0
+	print("%s lap: %.1f s (best %.1f)" % [k.kart_name, t, bt])
+	if bt > 0.0 and t >= bt:
+		return
+	laps_d[track.key] = {"t": snappedf(t, 0.01), "g": path.duplicate(), "d": Seeded.today()}
+	# Keep the 30 newest tracks' best laps.
+	while laps_d.size() > 30:
+		var oldest := ""
+		for key in laps_d:
+			if oldest == "" or String((laps_d[key] as Dictionary).get("d", "")) < String((laps_d[oldest] as Dictionary).get("d", "")):
+				oldest = key
+		laps_d.erase(oldest)
+	save.data["laps"] = laps_d
+	save.mark_dirty()
+	if ghost_path.is_empty():  # the new best lap is the ghost from the next lap on (a time trial races its own last best)
+		lap_ghost = path.duplicate()
+		net.event("lapghost", [lap_ghost])
+	if bt > 0.0:
+		story({"who": "BEST LAP!", "line": "%.1f seconds!" % t, "pic": "clock", "color": "8cd2ff", "duration": 2.5})
+
+
+## Host at the countdown: this track's best lap (if any) as the ghost to race (unless today's run ghost is on).
+func _start_lap_ghost() -> void:
+	lap_ghost = []
+	if save == null or not ghost_path.is_empty():
+		net.event("lapghost", [[]])
+		return
+	var best: Variant = (save.data.get("laps", {}) as Dictionary).get(track.key, {})
+	if best is Dictionary:
+		lap_ghost = ((best as Dictionary).get("g", []) as Array).duplicate()
+	net.event("lapghost", [lap_ghost])
+
+
 # --- Simple mode: practice rings, instant ? boxes, the finish party -------------------------
 
 ## Race 1 is just driving; the ? boxes come out from race 2.
 func boxes_live() -> bool:
-	return not SIMPLE_MODE or round_n >= 2
+	return not SIMPLE_MODE or (round_n >= 2 and bool(mode_info().boxes) and state != "pit")
 
 
 func _start_practice() -> void:
@@ -2202,34 +2735,107 @@ func _update_gate(dt: float) -> void:
 	arrow.rotation.y = ms * 0.002
 
 
-## A ? box in simple mode: an instant ZOOM (from race 3 sometimes a rainbow STAR). No buttons.
+## A ? box in simple mode: an instant power-up, no buttons (items.gd: fair by place, catch-up at the back). Race 2
+## only zooms and bubbles; from race 3 the whole set.
 func _simple_box(k) -> void:
-	if round_n >= 3 and randf() < 0.25:
-		k.star_t = STAR_TIME
-		if k.remote:
-			net.event("star", [k.index, STAR_TIME])
-		kart_sound(k, "star", -2.0)
-		burst(k.position + Vector3(0, 1.0, 0), Color(1.0, 0.9, 0.3), 18)
-		items_given["star"] = true
-	else:
-		if k.remote:
-			net.event("boost", [k.index, MUSHROOM_TIME])
-		else:
-			k.boost(MUSHROOM_TIME)
-		on_boost(k, "")
-		items_given["zoom"] = true
+	var it := Items.pick(Items.weights(Items.behind_of(k.place, racer_count()), not k.cpu, speed_mode), randf())
+	if round_n < 3 and it != "zoom" and it != "bubble":
+		it = "zoom"
+	if OS.has_environment("KART_ITEM"):  # tests: one item every time ("cycle": each in turn)
+		it = OS.get_environment("KART_ITEM")
+		if it == "cycle":
+			it = Items.ORDER[item_cycle % Items.ORDER.size()]
+			item_cycle += 1
+	_apply_item(k, it)
+
+
+func _apply_item(k, it: String) -> void:
+	match it:
+		"star":
+			k.star_t = STAR_TIME
+			if k.remote:
+				net.event("star", [k.index, STAR_TIME])
+			kart_sound(k, "star", -2.0)
+			burst(k.position + Vector3(0, 1.0, 0), Color(1.0, 0.9, 0.3), 18)
+		"triple":
+			k.triple_left = 3
+			k.triple_t = 0.0
+			if k.remote:
+				net.event("triple", [k.index])
+		"bubble":
+			k.shield_t = SHIELD_TIME
+			if k.remote:
+				net.event("shield", [k.index, SHIELD_TIME])
+			kart_sound(k, "shield", -2.0)
+		"banana":
+			var p: Vector3 = k.position - k.forward() * 2.6
+			p.y = k.position.y
+			bananas.append([p, 0.0, k.index])
+			kart_sound(k, "drop", -2.0)
+		"honk":
+			_honk(k)
+		"rocket":
+			k.rocket_t = Items.ROCKET_TIME
+			if k.remote:
+				net.event("rocket", [k.index])
+			kart_sound(k, "rocket", -2.0)
+			burst(k.position + Vector3(0, 0.6, 0) - k.forward() * 1.4, Color(1.0, 0.6, 0.2), 16)
+		_:
+			it = "zoom"
+			if k.remote:
+				net.event("boost", [k.index, MUSHROOM_TIME])
+			else:
+				k.boost(MUSHROOM_TIME)
+			on_boost(k, "")
+	items_given[it] = true
+	_item_pop(k, it)
 	k.st_items += 1
 	k.set_meta("uses", int(k.get_meta("uses", 0)) + 1)
+
+
+## A picture of the power-up pops up on that driver's view for a moment (no words).
+func _item_pop(k, it: String) -> void:
+	if k.cpu:
+		return
+	if k.remote:
+		net.event("pop", [k.index, it])
+		return
+	k.set_meta("pop", it)
+	k.set_meta("pop_t", 1.8)
+
+
+## Every machine: the power-up picture on each local view (top middle, under the lap / place).
+func _update_item_pop(p, dt: float) -> void:
+	var pop = p.hud.get_node_or_null("ItemPop") if p.hud != null else null
+	var t: float = p.get_meta("pop_t", 0.0)
+	if t > 0.0:
+		p.set_meta("pop_t", t - dt)
+	var want := String(p.get_meta("pop", "")) if t > 0.0 else ""
+	if pop != null and String(pop.get_meta("kind", "")) != want:
+		pop.queue_free()
+		pop = null
+	if want == "" or pop != null:
+		return
+	var sc := clampf(p.hud.size.y / 540.0, 0.5, 1.4)
+	pop = StoryCard.picture(String(Items.PICS.get(want, "star")), 96.0 * sc, Items.COLORS.get(want, Color(1, 0.8, 0.3)))
+	pop.name = "ItemPop"
+	pop.set_meta("kind", want)
+	p.hud.add_child(pop)
+	pop.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	pop.position.y += 70.0 * sc
 
 
 ## The finish party: trophies float over the top three, confetti, one headline.
 func _simple_results(order: Array) -> void:
 	trophy_karts.clear()
-	for j in mini(3, order.size()):
-		trophy_karts.append(karts.find(order[j]))
+	var standing := _cup_after_race(order)  # the cup's last race: the trophies go to the top three on points
+	var cup_beats := _cup_medal(standing) if not standing.is_empty() else []
+	var podium: Array = standing if not standing.is_empty() else order
+	for j in mini(3, podium.size()):
+		trophy_karts.append(karts.find(podium[j]))
 	_show_trophies(trophy_karts)
 	net.event("trophies", [trophy_karts])
-	var w = order[0] if not order.is_empty() else null
+	var w = podium[0] if not podium.is_empty() else null
 	results_text = "%s WINS!" % w.kart_name if w != null else ""
 	var me = players[0]
 	vr_results = "FINISH! %s" % ordinal(me.place) if me.active else results_text
@@ -2245,7 +2851,12 @@ func _simple_results(order: Array) -> void:
 	for k in order:
 		row.append("%s %s" % [ordinal(k.place), k.kart_name])
 	print("Results: " + " | ".join(row))
-	_story_after_race(order)
+	if not standing.is_empty():
+		var cr: Array[String] = []
+		for k in standing:
+			cr.append("%s %d" % [k.kart_name, int((series.get("pts", {}) as Dictionary).get(k.index, 0))])
+		print("Cup results (%s, %s): %s; medal %s" % [Cups.cup(int(track_desc[2])).name, speed_mode, " | ".join(cr), Cups.MEDALS[last_medal]])
+	_story_after_race(order, cup_beats)
 	_show_tour_strips()
 
 
@@ -2282,6 +2893,7 @@ func _update_simple_hud(p, dt: float) -> void:
 		h = "FINISH!"
 	p.hint_label.text = h
 	_update_cue(p, p.hint_label)
+	_update_item_pop(p, dt)
 
 
 # --- Simple mode picture cues (no words) ----------------------------------------------------
@@ -2407,6 +3019,8 @@ func _update_cue(p, l: Label) -> void:
 # --- Items, bananas, bumps ------------------------------------------------------------------
 
 func notify(k, text: String) -> void:
+	if SIMPLE_MODE and text != "FINISH!" and not (text.begins_with("LAP ") and text.length() <= 6):
+		return  # simple mode: only the short headlines (pictures say the rest)
 	if k.remote:
 		net.event("notify", [k.index, text])
 		return
@@ -2875,6 +3489,8 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 						p.st_air += 1
 					"turbo":
 						p.st_turbo += 1
+					"hazard":
+						p.st_hazards += 1
 		"pause":
 			var paused: bool = args[0]
 			_set_pause_banner(paused, Who.paused_by(net.machine_name_of(net.sender_peer())))
@@ -2908,8 +3524,12 @@ func make_snapshot() -> Array:
 	var head := Transform3D(Basis(), CockpitScript.EYE)
 	if cockpit != null:
 		head = cockpit.head_local()
+	var looks: Array = []
+	for k in karts:
+		looks.append([k.kart_class, k.part])
 	return [state, track_i, state_t, race_t, kd, bn, track.box_state(), head, round_n, laps, finish_frac,
-		cup_i, cup_race, PackedInt32Array(cup_pts), practice_gate, track_desc, hats_won]
+		cup_i, cup_race, PackedInt32Array(cup_pts), practice_gate, track_desc, hats_won,
+		speed_mode, looks, pit_rows, shelf, lap_ghost_t0]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -2986,6 +3606,15 @@ func apply_snapshot(s: Array) -> void:
 	for i in cp.size():
 		cup_pts[i] = cp[i]
 	practice_gate = int(s[14]) if s.size() > 14 else -1
+	if s.size() > 21:  # Bolt's cups: the speed, every kart's class and part, the pit stop's gates, the shelf
+		speed_mode = String(s[17])
+		var looks: Array = s[18]
+		for i in mini(looks.size(), karts.size()):
+			var lk: Array = looks[i]
+			karts[i].set_kart(String(lk[0]), String(lk[1]))
+		pit_rows = s[19]
+		shelf = s[20]
+		lap_ghost_t0 = float(s[21])
 
 
 ## The track changed under the karts this machine drives: find them on the new one (keeps their distance).
@@ -3085,6 +3714,30 @@ func apply_event(kind: String, args: Array) -> void:
 			hats_won = int(args[0])
 			_apply_looks()
 			_show_tour_strips()
+		"pit_flash":
+			pit.flash(int(args[0]), int(args[1]))
+		"prefetch":
+			_prefetch_tracks(args[0])
+		"lapghost":
+			lap_ghost = args[0]
+		"pop":
+			var k = kart_by_index(int(args[0]))
+			if k != null and k.is_local():
+				k.set_meta("pop", String(args[1]))
+				k.set_meta("pop_t", 1.8)
+		"triple":
+			var k = kart_by_index(int(args[0]))
+			if k != null and k.is_local():
+				k.triple_left = 3
+				k.triple_t = 0.0
+		"shield":
+			var k = kart_by_index(int(args[0]))
+			if k != null and k.is_local():
+				k.shield_t = float(args[1])
+		"rocket":
+			var k = kart_by_index(int(args[0]))
+			if k != null and k.is_local():
+				k.rocket_t = Items.ROCKET_TIME
 		"remote_pause":
 			get_tree().paused = args[0]
 			_set_pause_banner(args[0], "The VR player paused the game")

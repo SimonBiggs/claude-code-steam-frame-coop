@@ -12,6 +12,8 @@ extends Node3D
 ## VR comfort: the VR kart's speed changes are rate-limited (no jolts from bananas, walls or boosts),
 ## wall nudges turn it gently, bumps push it softly and ramps toss it less.
 const UiKit := preload("res://core/ui_kit.gd")
+const Cups := preload("res://games/kart_race/cups.gd")
+const KART_TOP := 30.0  # never faster than this (trackgen.gd proves every jump lands up to this speed)
 
 const MAX_SPEED := 14.0
 const ACCEL := 9.0
@@ -56,7 +58,10 @@ var drift_fill: ColorRect
 var minimap: Control
 var pad_lost_t := -1.0
 var net_started := false
-var cockpit  # cockpit.gd when this kart is driven from VR (or fake VR in tests)
+var cockpit:  # cockpit.gd when this kart is driven from VR (or fake VR in tests)
+	set(v):
+		cockpit = v
+		_apply_kart()  # the VR rider's kart keeps scale 1 even when its class was picked before the cockpit existed
 var hand_l: XRController3D  # for core/net.gd's wrist menu
 var hand_r: XRController3D
 
@@ -96,6 +101,17 @@ var reverse_t := 0.0
 var item_hold_t := 0.0
 var cpu_lane := 0.0
 var cpu_skill := 0.92
+var kart_class := "medium"  # cups.gd KARTS: light / medium / heavy
+var part := ""  # cups.gd PARTS: the cosmetic part fitted ("" none)
+var rocket_t := 0.0  # the ROCKET item: a long boost that steers itself (not in VR)
+var floating := false  # in the air off a moon pad (gentle gravity)
+var patch := ""  # the road patch under the kart ("slow" / "ice" / "float" / "")
+var bumper_cd := 0.0
+var triple_left := 0  # TRIPLE: zooms still to come
+var triple_t := 0.0
+var lap_start_t := 0.0  # race time this lap began (best-lap ghost)
+var lap_n := 0
+var part_node: Node3D
 var hold_still := false  # on the grid before GO
 var start_hold_t := 0.0
 var drift_t := 0.0
@@ -113,6 +129,7 @@ var st_items := 0
 var st_walls := 0
 var st_hits := 0
 var st_bumps := 0
+var st_hazards := 0  # hazards hit (puddles, ice, bumpers)
 var worst_place := 1
 
 # Input this frame.
@@ -256,6 +273,31 @@ func _ready() -> void:
 	tag.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
 	add_child(tag)
 	visible = active
+	_apply_kart()
+
+
+## Kart class (light / medium / heavy: size and handling, cups.gd KARTS) and a cosmetic part (cups.gd PARTS).
+func set_kart(cls: String, p: String) -> void:
+	cls = cls if Cups.KARTS.has(cls) else "medium"
+	p = p if Cups.PARTS.has(p) else ""
+	if cls == kart_class and p == part:
+		return
+	kart_class = cls
+	part = p
+	_apply_kart()
+
+
+func _apply_kart() -> void:
+	if body == null:
+		return
+	var sc := float(Cups.kart(kart_class).scale)
+	body.scale = Vector3.ONE * (sc if cockpit == null else 1.0)  # (the VR rider's seat stays put)
+	if part_node != null:
+		part_node.queue_free()
+		part_node = null
+	if part != "":
+		part_node = main.part_model(part, color)
+		body.add_child(part_node)
 
 
 ## A new name and colour (the story's champ of each place drives a CPU kart).
@@ -271,6 +313,7 @@ func set_look(nm: String, col: Color) -> void:
 	helmet_mi.mesh = main.helmet_mesh(col)
 	tag.text = nm
 	tag.modulate = col.lightened(0.35)
+	_apply_kart()
 
 
 ## Put on hat h (story.gd HATS, -1 = none) on top of the helmet.
@@ -375,7 +418,14 @@ func reset_race() -> void:
 	st_walls = 0
 	st_hits = 0
 	st_bumps = 0
+	st_hazards = 0
 	worst_place = 1
+	rocket_t = 0.0
+	floating = false
+	patch = ""
+	triple_left = 0
+	lap_start_t = 0.0
+	lap_n = 0
 
 
 func _locate() -> void:
@@ -417,7 +467,7 @@ func read_input(delta: float) -> void:
 	drift_btn = false
 	var item_now := false
 	var boost_now := false
-	if cpu or bot or finished:
+	if cpu or bot or finished or (rocket_t > 0.0 and cockpit == null):  # (a rocket ride steers itself)
 		_auto_drive(delta)
 		return
 	if cockpit != null:
@@ -514,7 +564,8 @@ func auto_inputs(delta: float) -> void:
 	cpu_lane = sin(main.race_t * 0.25 + index * 1.7) * 2.2
 	# Split lanes: pick one (every other kart takes the shortcut lane with the boost arrow).
 	var lane_side: float = main.track.shortcut_side(s + ahead) * (1.0 if index % 2 == 0 else -1.0)
-	var p: Array = main.track.point_at(s + ahead, main.track.lane_lat(s + ahead, lane_side, cpu_lane))
+	# Round the bumpers (always) and the puddles (ZOOM CPUs): track.gd cpu_lat, proven clear by trackgen.gd.
+	var p: Array = main.track.point_at(s + ahead, main.track.cpu_lat(s + ahead, lane_side, cpu_lane, cpu and bool(main.mode_info().cpu_dodge)))
 	var tp: Vector3 = p[0]
 	var to := tp - position
 	var want := atan2(-to.x, -to.z)
@@ -584,6 +635,17 @@ func sim(delta: float) -> void:
 	boost_t = maxf(0.0, boost_t - delta)
 	star_t = maxf(0.0, star_t - delta)
 	wobble_t = maxf(0.0, wobble_t - delta)
+	bumper_cd -= delta
+	if rocket_t > 0.0:
+		rocket_t = maxf(0.0, rocket_t - delta)
+		boost_t = maxf(boost_t, 0.15)
+	if triple_left > 0:
+		triple_t -= delta
+		if triple_t <= 0.0:
+			triple_left -= 1
+			triple_t = 1.3
+			boost(1.6)
+			main.on_boost(self, "")
 	if slip_t > 0.0:
 		slip_t = maxf(0.0, slip_t - delta)
 	if main.state == "race" and not finished and not main.SIMPLE_MODE:  # simple mode: no boost meter
@@ -594,13 +656,26 @@ func sim(delta: float) -> void:
 		charge = 0.0
 		boost(1.6)
 		main.on_boost(self, "BOOST!")
-	var top: float = MAX_SPEED * float(main.rubber(self))
+	var kc: Dictionary = Cups.kart(kart_class)
+	var md: Dictionary = main.mode_info()
+	var top: float = MAX_SPEED * float(main.rubber(self)) * float(kc.top) * float(md.speed)
 	if boost_t > 0.0:
 		top *= 1.0 + BOOST_GAIN
 	if star_t > 0.0:
 		top *= 1.2
 	if wobble_t > 0.0:
 		top *= 0.72
+	# Road patches (cups): sticky puddles slow you; stars and bubbles don't mind.
+	var was_patch := patch
+	patch = main.track.patch_at(s, lat) if on_ground else ""
+	var tough := star_t > 0.0 or shield_t > 0.0
+	if patch != was_patch and (patch == "slow" or patch == "ice"):
+		st_hazards += 1
+		main.on_hazard(self, patch if not tough else "tough")
+	if patch == "slow" and not tough:
+		top *= Cups.SLOW_TOP
+	top = minf(top, KART_TOP)
+	var acc := ACCEL * float(kc.accel) * float(md.accel)
 	var thr := throttle
 	if slip_t > 0.0:
 		thr = 0.0
@@ -608,7 +683,7 @@ func sim(delta: float) -> void:
 	_drift(delta)
 	var brk := brake if drift_t <= 0.0 else 0.0
 	if thr > 0.05 and speed < top:
-		speed = minf(top, speed + ACCEL * thr * (1.0 - 0.45 * maxf(0.0, speed) / top) * delta + (BRAKE * delta if speed < 0.0 else 0.0))
+		speed = minf(top, speed + acc * thr * (1.0 - 0.45 * maxf(0.0, speed) / top) * delta + (BRAKE * delta if speed < 0.0 else 0.0))
 	elif speed > top:
 		speed = move_toward(speed, top, 8.0 * delta)
 	if brk > 0.05:
@@ -616,14 +691,16 @@ func sim(delta: float) -> void:
 			speed = maxf(0.0, speed - BRAKE * brk * delta)
 		elif thr < 0.05:
 			speed = maxf(-REVERSE_MAX, speed - 7.0 * brk * delta)
-	if thr < 0.05 and brk < 0.05:
+	if thr < 0.05 and brk < 0.05 and patch != "ice":
 		speed = move_toward(speed, 0.0, COAST * delta)
 	if (boost_t > 0.0 or star_t > 0.0) and slip_t <= 0.0:
 		speed = maxf(speed, top * 0.92)
 	# Smooth, gentle turning (also comfy in VR); a drift tightens the turn.
 	steer_s = move_toward(steer_s, steer, 5.0 * delta)
 	var grip := clampf(absf(speed) / 5.0, 0.0, 1.0)
-	var rate := TURN * steer_s * grip * (1.0 - 0.25 * clampf(absf(speed) / MAX_SPEED, 0.0, 1.0))
+	var rate := TURN * float(kc.turn) * steer_s * grip * (1.0 - 0.25 * clampf(absf(speed) / MAX_SPEED, 0.0, 1.0))
+	if patch == "ice" and not tough:
+		rate *= Cups.ICE_GRIP  # slippy: hardly any grip (trackgen.gd keeps ice off the sharp bends)
 	if drift_t > 0.0 and not auto_drift():
 		rate = TURN * grip * (float(drift_dir) * 0.55 + steer_s * 0.6)  # always curving into the drift
 	if speed < 0.0:
@@ -661,6 +738,7 @@ func sim(delta: float) -> void:
 		position += rt * (edge - absf(lat)) * sd
 		_hit_side(rt, -sd, fwd, delta)
 		lat = edge * sd
+	_bumpers(fwd)
 	short_cd -= delta
 	if isl > 1.0 and short_cd <= 0.0 and signf(lat) == float(main.track.shortcut_side(s)):
 		short_cd = 6.0
@@ -673,6 +751,14 @@ func sim(delta: float) -> void:
 			on_ground = false
 			air_t = 0.0
 			vy = maxf(vy, (5.0 + speed * 0.12) * (0.65 if cockpit != null else 1.0))  # a softer hop for the VR rider
+		elif patch == "float" and speed > 3.0 and not tough:
+			# A moon pad: a floaty hop (gentle gravity until you land). trackgen.gd proves every hop lands on the road.
+			on_ground = false
+			floating = true
+			air_t = 0.0
+			vy = Cups.FLOAT_HOP * (0.7 if cockpit != null else 1.0)
+			st_hazards += 1
+			main.on_hazard(self, "float")
 		elif g < predicted - 0.35:
 			on_ground = false
 			air_t = 0.0
@@ -681,11 +767,12 @@ func sim(delta: float) -> void:
 			position.y = g
 	if not on_ground:
 		air_t += delta
-		vy -= GRAVITY * delta
+		vy -= GRAVITY * (Cups.FLOAT_GRAVITY if floating else 1.0) * delta
 		position.y += vy * delta
 		if position.y <= g:
 			position.y = g
 			on_ground = true
+			floating = false
 			vy = 0.0
 			if air_t > 0.4:
 				st_air += 1
@@ -706,6 +793,40 @@ func sim(delta: float) -> void:
 	_update_visual(delta)
 	if main.net.mode == "client":
 		main.net.send_state(position, yaw, speed + 1000.0 * float(net_code()), index)
+
+
+## Round bumpers on the road (cups): bounce off like a soft wall. A star smashes straight through; a bubble keeps
+## your speed.
+func _bumpers(fwd: Vector3) -> void:
+	for b in main.track.bumpers:
+		var ba: Array = b
+		var ds := fposmod(s - float(ba[2]) + 50.0, main.track.length) - 50.0
+		if absf(ds) > 4.0:
+			continue
+		var c: Vector3 = ba[0]
+		var d := Vector3(position.x - c.x, 0.0, position.z - c.z)
+		var need := float(ba[1]) + R * 0.8
+		var dist := d.length()
+		if dist >= need or not on_ground and position.y > c.y + float(ba[1]) * 1.6:
+			continue
+		var nrm := d / dist if dist > 0.01 else -fwd
+		if star_t > 0.0:
+			if bumper_cd <= 0.0:
+				bumper_cd = 0.6
+				main.on_hazard(self, "smash")
+			continue
+		position += nrm * (need - dist)
+		var into := -fwd.dot(nrm) * signf(speed if absf(speed) > 0.01 else 1.0)
+		if into > 0.0 and shield_t <= 0.0:
+			var loss := absf(speed) * 0.45 * into
+			if cockpit != null:
+				loss = minf(loss, VR_DECEL * 0.1)
+			speed -= signf(speed) * loss
+		push_v += nrm * (5.0 if cockpit == null else 2.0) * float(Cups.kart(kart_class).push)
+		if bumper_cd <= 0.0:
+			bumper_cd = 0.6
+			st_hazards += 1
+			main.on_hazard(self, "bump")
 
 
 ## Boost / drift / star flags packed into the number the TV sends alongside the speed.

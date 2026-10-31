@@ -11,8 +11,13 @@ extends SceneTree
 const TrackGen := preload("res://games/kart_race/trackgen.gd")
 const Story := preload("res://games/kart_race/story.gd")
 const Seeded := preload("res://core/seeded.gd")
+const Cups := preload("res://games/kart_race/cups.gd")
+const Items := preload("res://games/kart_race/items.gd")
+const StoryCard := preload("res://core/story_card.gd")
 
 var fails := 0
+## core/ui_kit.gd icon kinds the cups / items use as pictures (StoryCard.picture draws them too).
+const UI_ICONS: Array[String] = ["star", "flag", "fire", "clock", "crown", "trophy", "shield"]
 
 
 func _init() -> void:
@@ -51,6 +56,52 @@ func _init() -> void:
 					tr.prepare(info)
 					lens.append(tr.length)
 					tr.free()
+	# Bolt's cups: every cup race at every speed, over many worlds - hazards placed, alone, a clear lane, CPU lines
+	# clear of bumpers, corners makeable at speed, ? boxes reachable (TrackGen.check does all of it).
+	var hz_seen := {}
+	for c in Cups.CUPS.size():
+		for race in Cups.RACES:
+			for m in ["gentle", "zoom"]:
+				var sp := Cups.spec(c, race, m)
+				var cr := Seeded.validate(func(s: int) -> Dictionary: return TrackGen.generate(s, sp),
+					func(info: Dictionary) -> Array:
+						var why := TrackGen.check(info)
+						if info.has("fallback"):
+							why.append("fell back to a hand-made track")
+						var hz: Array = info.get("hazards", [])
+						var want := int(sp.patches) + int(sp.bumpers)
+						if hz.size() < want:
+							why.append("%d of %d hazards" % [hz.size(), want])
+						if String(info.get("hz", "")) != String(Cups.cup(c).hz):
+							why.append("wrong hazard kind")
+						if (info.get("splits", []) as Array).size() < int(sp.splits):
+							why.append("missing split lanes")
+						for h in hz:
+							hz_seen["%s/%s" % [info.get("hz", ""), h[2]]] = true
+						return why,
+					maxi(4, seeds / 2), 701 + c * 37 + race * 5 + (1 if m == "zoom" else 0), [3, 77], "KART CUP %s race %d %s" % [Cups.cup(c).id, race, m])
+				total += int(cr.checked)
+				fails += (cr.failures as Array).size()
+				var ts := Time.get_ticks_msec()
+				var info := TrackGen.generate(9000 + c * 13 + race, sp)
+				slowest = maxi(slowest, Time.get_ticks_msec() - ts)
+				attempts[int(info.get("attempt", -1))] = int(attempts.get(int(info.get("attempt", -1)), 0)) + 1
+	for c in Cups.CUPS:
+		for kind in ["patch", "bump"]:
+			_expect(hz_seen.has("%s/%s" % [c.hz, kind]), "%s cup has %s hazards" % [c.id, kind])
+	# Cups, karts, parts, speeds and the item set are fair (cups.gd / items.gd check()).
+	var pic_ok := func(n: String) -> bool: return StoryCard.has_picture(n) or UI_ICONS.has(n)
+	for w in Cups.check(pic_ok):
+		_fail("CUPS: " + w)
+	for w in Items.check(pic_ok):
+		_fail("ITEMS: " + w)
+	_expect(Cups.desc(5, 1, 2, "zoom") == Cups.desc(5, 1, 2, "zoom") and Cups.desc(5, 1, 2, "zoom") != Cups.desc(6, 1, 2, "zoom"), "cup descriptions per world")
+	_expect(Story.key_for(Cups.desc(5, 2, 1, "gentle")) == Story.track_for(Cups.desc(5, 2, 1, "gentle"))[1], "cup key_for matches track_for")
+	_expect(Story.key_for(Cups.desc(5, 2, 1, "gentle")) != Story.key_for(Cups.desc(5, 2, 1, "zoom")), "zoom cup tracks have more hazards")
+	_expect(Cups.medal_for(1, "zoom") == 3 and Cups.medal_for(4, "zoom") == 0 and Cups.medal_for(6, "gentle") == 1 and Cups.medal_for(1, "trial") == 0, "medal_for()")
+	_expect(Cups.parts_unlocked({}).is_empty() and Cups.parts_unlocked({"candy:gentle": 1, "ice:zoom": 0, "x": 3}).size() == 2, "parts_unlocked()")
+	_expect(Cups.next_part("", {"candy:gentle": 1}) == "spoiler" and Cups.next_part("spoiler", {"candy:gentle": 1}) == "", "next_part()")
+	_expect(Cups.next_cup({"candy:gentle": 2}, "gentle") == 1 and Cups.next_cup({"candy:gentle": 2}, "zoom") == 0, "next_cup()")
 	# Today's track: fair for 60 days, the same all day, different on different days.
 	var day_seeds := {}
 	for d in 60:

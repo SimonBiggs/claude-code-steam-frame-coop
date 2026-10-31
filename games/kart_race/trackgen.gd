@@ -19,6 +19,7 @@ extends RefCounted
 
 const Seeded := preload("res://core/seeded.gd")
 const Track := preload("res://games/kart_race/track.gd")
+const Cups := preload("res://games/kart_race/cups.gd")
 
 const CENTER := Vector2(20.0, -35.0)  # middle of the ground and sky dome (track.gd)
 const MAX_R := 125.0  # the road stays inside this (the far hills start about 150 m out)
@@ -31,6 +32,12 @@ const KART_TOP := 30.0  # fastest a kart can go (top speed x catch-up x mushroom
 const MAX_SLOPE := 0.11
 const MAX_BEND_SLOPE := 0.045  # slope change per sample (crests that would launch a kart)
 const ATTEMPTS := 60
+const CLEAR_LANE := 4.5  # metres of road a hazard always leaves free (a kart is 1.8 m wide)
+## The fastest a kart cruises without a boost (ZOOM x heavy kart x the gentle catch-up, whichever is more) and how
+## sharply it turns there (kart.gd: TURN x class turn x the speed easing): every bend must be makeable at it.
+const CRUISE := 14.0 * 1.18 * 1.04 * 1.11
+const CRUISE_TURN := 1.9 * 0.92 * 0.75
+const CPU_LANES: Array[float] = [-2.2, 0.0, 2.2]  # kart.gd auto_inputs: the CPUs weave between these
 
 static var last_fail := ""  # why the last attempt gave up early (tests print it)
 
@@ -41,6 +48,8 @@ const WORDS := [
 	[["DINO", "CACTUS", "SANDY", "SUNSET", "CANYON", "FOSSIL"], ["DESERT", "DUNES", "TRAIL", "LOOP", "MESA", "RUN"]],
 	[["MOONLIGHT", "STARRY", "FIREFLY", "LANTERN", "GLOWING", "SLEEPY"], ["BAY", "COVE", "LOOP", "LAGOON", "PIER", "SHORE"]],
 	[["SNOWY", "FROSTY", "IGLOO", "PENGUIN", "ICICLE", "MITTEN"], ["PEAKS", "PASS", "LOOP", "SLOPES", "RIDGE", "VALLEY"]],
+	[["MONKEY", "PARROT", "BANANA", "VINE", "JUNGLE", "TIGER"], ["TRAIL", "FALLS", "LOOP", "RIVER", "GROVE", "TEMPLE"]],
+	[["COMET", "ROCKET", "MOON", "STARRY", "PLANET", "COSMIC"], ["RING", "ORBIT", "LOOP", "CRATER", "DOCK", "SWIRL"]],
 ]
 const RAINBOW_WALLS: Array[Color] = [Color(1.0, 0.3, 0.35), Color(1.0, 0.65, 0.2), Color(1.0, 0.95, 0.3), Color(0.35, 0.95, 0.45),
 	Color(0.35, 0.65, 1.0), Color(0.75, 0.45, 1.0)]
@@ -71,7 +80,7 @@ static func generate(seed_value: int, spec: Dictionary) -> Dictionary:
 static func _attempt(r: RandomNumberGenerator, seed_value: int, spec: Dictionary) -> Dictionary:
 	var pal := posmod(int(spec.get("palette", 0)), Track.TRACKS.size())
 	var base_info: Dictionary = Track.TRACKS[pal]
-	var size := clampf(float(spec.get("size", 0.5)), 0.0, 1.0)
+	var size := clampf(float(spec.get("size", 0.5)), 0.0, 1.4)  # (cups go past 1: their hazards need the room)
 	var twist := clampf(float(spec.get("twist", 0.5)), 0.0, 1.0)
 	var hills := float(spec.get("hills", 3.0))
 	# 1. A wobbly ellipse of control points (angles always go round: a simple loop) with its bottom cut flat:
@@ -214,6 +223,12 @@ static func _attempt(r: RandomNumberGenerator, seed_value: int, spec: Dictionary
 			(info["ramps"] as Array).append([sa / L, snappedf(ln, 0.1), snappedf(r.randf_range(0.95, 1.25), 0.01), snappedf(lat, 0.01), hw])
 			used.append([sa - 15.0, sa + ln + 32.0])
 			break
+	# Hazards (cups): puddles / ice / moon pads on the road and round bumpers, each on its own with a clear lane.
+	var hz := String(spec.get("hz", ""))
+	if hz != "":
+		info["hz"] = hz
+		info["hazards"] = []
+		_place_hazards(r, t, rad, info, spec, used, lo, hi)
 	# Boost arrows.
 	for i in int(spec.get("pads", 2)):
 		for tries in 30:
@@ -229,8 +244,8 @@ static func _attempt(r: RandomNumberGenerator, seed_value: int, spec: Dictionary
 	# Rows of ? boxes, spread round the lap.
 	var rows := int(spec.get("rows", 3))
 	for i in rows:
-		for tries in 30:
-			var f := (float(i) + r.randf_range(0.2, 0.8)) / rows
+		for tries in 60:
+			var f := (float(i) + r.randf_range(0.2, 0.8)) / rows if tries < 30 else r.randf()  # spread out, else anywhere
 			var sa := lerpf(24.0, hi + 6.0, f)
 			if _overlaps(used, sa - 8.0, sa + 8.0, L):
 				continue
@@ -238,15 +253,56 @@ static func _attempt(r: RandomNumberGenerator, seed_value: int, spec: Dictionary
 			used.append([sa - 8.0, sa + 8.0])
 			break
 	t.free()
+	if hz != "" and (info["hazards"] as Array).size() < int(spec.get("patches", 0)) + int(spec.get("bumpers", 0)):
+		last_fail = "no room for the hazards"
+		return {}
 	if (info["items"] as Array).size() < mini(rows, 2) or (info["ramps"] as Array).size() < mini(int(spec.get("ramps", 1)), 1):
 		last_fail = "no room for boxes / ramps"
 		return {}
 	if (info["splits"] as Array).size() < int(spec.get("splits", 0)):
 		last_fail = "no bend for the split lanes"
 		return {}
-	for k in ["ramps", "pads", "items", "splits"]:
-		(info[k] as Array).sort()
+	for k in ["ramps", "pads", "items", "splits", "hazards"]:
+		if info.has(k):
+			(info[k] as Array).sort()
 	return info
+
+
+## Hazards: [s fraction, lat, kind ("patch" / "bump"), half width or radius, length]. Each sits alone (nothing else
+## within its span), leaves a clear lane of CLEAR_LANE metres, and the ice / moon pads only go on straight-ish road.
+static func _place_hazards(r: RandomNumberGenerator, t: Track, rad: PackedFloat32Array, info: Dictionary, spec: Dictionary,
+		used: Array, lo: float, hi: float) -> void:
+	var L := t.length
+	var effect := String(Cups.HAZARDS[String(info["hz"])]["patch"])
+	var wall := Track.WIDTH * 0.5 + Track.CURB
+	for i in int(spec.get("patches", 0)):
+		for tries in 40:
+			var ln := r.randf_range(6.0, 8.5)
+			var sa := r.randf_range(lo, hi - ln)
+			var tail := 12.0 if effect == "float" else 8.0
+			if _overlaps(used, sa - 8.0, sa + ln + tail, L):
+				continue
+			var need := 45.0 if effect == "ice" else (34.0 if effect == "float" else 26.0)
+			if _min_radius(t, rad, sa - 2.0, sa + ln + (12.0 if effect == "float" else 2.0)) < need:
+				continue
+			var hw := r.randf_range(1.6, 2.2)
+			var lat_max := 1.5 if effect == "float" else wall - 0.5 - hw  # moon hops: near the middle (they fly a way)
+			var lat := r.randf_range(hw - 1.5, lat_max) * (1.0 if r.randf() < 0.5 else -1.0)
+			(info["hazards"] as Array).append([sa / L, snappedf(lat, 0.01), "patch", snappedf(hw, 0.01), snappedf(ln, 0.1)])
+			used.append([sa - 8.0, sa + ln + tail])
+			break
+	for i in int(spec.get("bumpers", 0)):
+		for tries in 40:
+			var sa := r.randf_range(lo, hi)
+			if _overlaps(used, sa - 7.0, sa + 7.0, L):
+				continue
+			if _min_radius(t, rad, sa - 6.0, sa + 6.0) < 24.0:
+				continue
+			var br := r.randf_range(0.9, 1.2)
+			var lat := r.randf_range(-3.6, 3.6)
+			(info["hazards"] as Array).append([sa / L, snappedf(lat, 0.01), "bump", snappedf(br, 0.01), 0.0])
+			used.append([sa - 7.0, sa + 7.0])
+			break
 
 
 ## Shift the palette a little so every track of a place looks its own.
@@ -443,6 +499,9 @@ static func _check_track(t: Track, why: Array) -> void:
 					break
 			if not why.is_empty() and str(why[-1]).begins_with("jump"):
 				break
+	_check_hazards(t, rad, why)
+	_check_speed_and_items(t, rad, why)
+	_check_cpu_lanes(t, why)
 	# No prop spot inside the walls (a hidden wall): the same spot finder the scenery uses.
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 5
@@ -451,6 +510,159 @@ static func _check_track(t: Track, why: Array) -> void:
 		if absf(float(lr[2])) < t.wall_at(float(lr[1])) + 0.3:
 			why.append("a prop spot on the road")
 			break
+
+
+## Hazards: on the road, alone (away from the start, practice rings, ramps and their landings, boost arrows, ? boxes,
+## split lanes and each other), a clear lane of CLEAR_LANE metres always left, ice only where the bend can be made
+## with hardly any grip, and every floaty moon pad hop lands back on the road at any speed.
+static func _check_hazards(t: Track, rad: PackedFloat32Array, why: Array) -> void:
+	if t.hazards.is_empty():
+		return
+	var L := t.length
+	if not Cups.HAZARDS.has(t.hz_style):
+		why.append("hazards of unknown kind %s" % t.hz_style)
+		return
+	var effect := String(Cups.HAZARDS[t.hz_style]["patch"])
+	for hi in t.hazards.size():
+		var h: Array = t.hazards[hi]
+		var s0: float = h[0]
+		var lat: float = h[1]
+		var bump := String(h[2]) == "bump"
+		var size: float = h[3]
+		var span: float = 0.0 if bump else float(h[4])
+		var a := s0 - (size if bump else 0.0)
+		var b := s0 + (size if bump else span)
+		var tag := "%s at s=%.0f" % ["bumper" if bump else effect, s0]
+		if not _clear(a, b, L, 6.0):
+			why.append("%s in the start / practice stretch" % tag)
+		var wall := t.wall_at(s0)
+		if absf(lat) + size > wall - 0.3:
+			why.append("%s off the road" % tag)
+		var clear := maxf(wall - (lat + size), (lat - size) + wall)
+		if clear < CLEAR_LANE:
+			why.append("%s leaves only %.1f m of road" % [tag, clear])
+		for sp in t.splits:
+			var sa: Array = sp
+			if fposmod(a - float(sa[0]) + 8.0, L) < float(sa[1]) + 8.0 + (b - a):
+				why.append("%s in the split lanes" % tag)
+		for r in t.ramps:
+			var ra: Array = r
+			if fposmod(a - float(ra[0]) + 8.0, L) < float(ra[1]) + 30.0 + 8.0 + (b - a):
+				why.append("%s on a ramp or its landing" % tag)
+		for p in t.pads:
+			var pa: Array = p
+			if fposmod(a - float(pa[0]) + 4.0, L) < float(pa[1]) + 4.0 + (b - a):
+				why.append("%s on a boost arrow" % tag)
+		for f in t.info.get("items", []):
+			var bs := float(f) * L
+			if fposmod(a - bs + 5.0, L) < 10.0 + (b - a):
+				why.append("%s by the ? boxes" % tag)
+		for hj in range(hi + 1, t.hazards.size()):
+			var o: Array = t.hazards[hj]
+			var gap := absf(float(o[0]) - s0)
+			if minf(gap, L - gap) < 12.0 + (span if float(o[0]) > s0 else float(o[4])):
+				why.append("%s too close to another hazard" % tag)
+		if not bump and effect == "ice":
+			# On ice a kart turns ICE_GRIP as sharply: the bend there must still be makeable at cruising speed.
+			var need := CRUISE / (CRUISE_TURN * Cups.ICE_GRIP) - Track.WIDTH * 0.5
+			if _min_radius(t, rad, s0 - 2.0, s0 + span + 2.0) < need:
+				why.append("%s on a bend too sharp for no grip" % tag)
+		if not bump and effect == "float":
+			for v in [6.0, 10.0, 14.0, 18.0, 22.0, KART_TOP]:
+				for lf in [-1.0, 0.0, 1.0]:
+					var res := _flight(t, s0 + span * 0.5, lat + size * float(lf) * 0.9, float(v), 0.0, Cups.FLOAT_HOP, Cups.FLOAT_GRAVITY, 2.6)
+					if res != "":
+						why.append("moon hop at s=%.0f, %.0f m/s: %s" % [s0, v, res])
+						break
+				if not why.is_empty() and str(why[-1]).begins_with("moon hop"):
+					break
+
+
+## Corners at speed (every bend makeable at the fastest cruising speed, using some of the road's width) and
+## reachable ? boxes (on the ground where karts drive: not under a jump's flight, not on or right by a hazard,
+## and at least two in every row where the CPUs weave).
+static func _check_speed_and_items(t: Track, rad: PackedFloat32Array, why: Array) -> void:
+	var r_turn := CRUISE / CRUISE_TURN
+	for i in t.n:
+		if rad[i] + Track.WIDTH * 0.3 < r_turn:
+			why.append("bend at s=%.0f can't be made at speed (radius %.1f m, needs %.1f)" % [t.cum[i], rad[i], r_turn - Track.WIDTH * 0.3])
+			break
+	var L := t.length
+	# Where jumps fly: from the lip to the farthest landing (any speed), across the ramp's width.
+	var flights: Array = []
+	for r in t.ramps:
+		var ra: Array = r
+		var lip := float(ra[0]) + float(ra[1])
+		flights.append([lip, lip + _jump_reach(t, lip, float(ra[3]), float(ra[2])), float(ra[3]), float(ra[4]) + 1.0])
+	var rows := {}
+	for b in t.boxes.size():
+		var res: Array = t.locate(t.boxes[b], -1)
+		var bs: float = res[1]
+		var bl: float = res[2]
+		var ok := true
+		for f in flights:
+			var fa: Array = f
+			if fposmod(bs - float(fa[0]), L) <= float(fa[1]) - float(fa[0]) and absf(bl - float(fa[2])) < float(fa[3]):
+				why.append("? box under a jump at s=%.0f" % bs)
+				ok = false
+		for h in t.hazards:
+			var ha: Array = h
+			var ds := fposmod(bs - float(ha[0]) + 6.0, L) - 6.0
+			var inside := ds > -2.5 and ds < float(ha[4]) + 2.5 if String(ha[2]) == "patch" else absf(ds) < float(ha[3]) + 2.5
+			if inside and absf(bl - float(ha[1])) < float(ha[3]) + 1.5:
+				why.append("? box on a hazard at s=%.0f" % bs)
+				ok = false
+		var row := b / 4  # track.gd: four boxes per row
+		if ok and absf(bl) <= CPU_LANES[-1] + 1.9:
+			rows[row] = int(rows.get(row, 0)) + 1
+		elif not rows.has(row):
+			rows[row] = 0
+	for row in rows:
+		if int(rows[row]) < 2:
+			why.append("? box row %d has under two boxes the karts can reach" % int(row))
+
+
+## How far past the lip the longest jump off a ramp flies (metres along the track).
+static func _jump_reach(t: Track, lip: float, lat0: float, rh: float) -> float:
+	var pa: Array = t.point_at(lip, lat0)
+	var p0: Vector3 = pa[0]
+	var yaw: float = pa[1]
+	var fwd := Vector3(-sin(yaw), 0.0, -cos(yaw))
+	var vy := 5.0 + KART_TOP * 0.12
+	var air := 2.0 * vy / 24.0 + 0.2
+	var land := p0 + fwd * KART_TOP * air
+	var r: Array = t.locate(land, int(pa[2]))
+	return fposmod(float(r[1]) - lip, t.length) + 2.0
+
+
+## CPU fairness on the road: wherever the CPUs weave (both split lanes, every weave offset, looking ahead as far as
+## kart.gd does), their line stays on the road, off the island and clear of every bumper (they always steer round).
+static func _check_cpu_lanes(t: Track, why: Array) -> void:
+	var L := t.length
+	var s := 0.0
+	while s < L:
+		for side in [-1.0, 1.0]:
+			for want in [-2.2, -1.1, 0.0, 1.1, 2.2]:
+				for ahead in [9.0, 14.0, 19.0]:
+					var lat := t.cpu_lat(s + float(ahead), float(side), float(want), true)
+					var sa := s + float(ahead)
+					if absf(lat) > t.wall_at(sa) - 0.95 and t.split_near(sa, 14.0).is_empty():  # (split lanes: aiming into the lane before it widens)
+						why.append("CPU line off the road at s=%.0f" % sa)
+						return
+					var isl := t.island_at(sa)
+					if isl > 0.0 and absf(lat) < isl + 0.95:
+						why.append("CPU line into the island at s=%.0f" % sa)
+						return
+					# At the kart's own spot, its line (aimed `ahead` up the road) clears the bumpers.
+					for bm in t.bumpers:
+						var ba: Array = bm
+						var ds := fposmod(s - float(ba[2]) + L * 0.5, L) - L * 0.5
+						if absf(ds) < float(ba[1]) + 0.9:
+							var lat2 := t.cpu_lat(s + float(ahead), float(side), float(want), false)
+							if absf(lat2 - float(ba[3])) < float(ba[1]) + 1.0:
+								why.append("CPU line into a bumper at s=%.0f (aim %.0f m on, lat %.1f, bumper %.1f)" % [s, ahead, lat2, float(ba[3])])
+								return
+		s += 1.0
 
 
 ## Driving distance along a lane at sideways offset lat from a to b.
@@ -476,19 +688,20 @@ static func _near(s: float, a: float, b: float, L: float) -> bool:
 
 
 ## Fly a kart off a ramp lip in a straight line (what kart.gd does, steering aside). "" = a fair landing.
-static func _flight(t: Track, lip: float, lat0: float, v: float, rh: float) -> String:
+## A moon pad hop is the same with hop = FLOAT_HOP, a gentler gravity and a longer allowed time in the air.
+static func _flight(t: Track, lip: float, lat0: float, v: float, rh: float, hop: float = -1.0, grav: float = 1.0, max_air: float = 1.3) -> String:
 	var pa: Array = t.point_at(lip, lat0)
 	var pos: Vector3 = pa[0]
 	var yaw: float = pa[1]
 	var fwd := Vector3(-sin(yaw), 0.0, -cos(yaw))
-	var vy := 5.0 + v * 0.12
+	var vy := 5.0 + v * 0.12 if hop < 0.0 else hop
 	var hint := int(pa[2])
 	var dt := 1.0 / 60.0
 	var air := 0.0
-	while air < 2.0:
+	while air < max_air + 0.7:
 		air += dt
 		pos += fwd * v * dt
-		vy -= 24.0 * dt
+		vy -= 24.0 * grav * dt
 		pos.y += vy * dt
 		var r: Array = t.locate(pos, hint)
 		hint = int(r[0])

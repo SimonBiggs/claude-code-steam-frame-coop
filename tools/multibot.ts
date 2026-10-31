@@ -43,12 +43,19 @@ export type GroupResult = { pass: boolean; port: number; scene: string; machines
 
 // The one shared pass rule for a bot's output (brepl dev.bots.run imports it too).
 const FAIL = /BOT ASSERT FAILED: (.*)|^Bot:? .*\bFAIL\b:? ?(.*)|BOT RESULT: FAIL(.*)/gm;
+/** Engine errors our own scripts caused (the GDScript backtrace starts in res://, not an addon), e.g. reading
+ *  global_transform of a node outside the tree: they print "ERROR:" not "SCRIPT ERROR" but are bugs all the same. */
+const ENGINE_ERR = /^ERROR: ([^\n]*)\n\s+at: [^\n]*\n\s+GDScript backtrace[^\n]*\n\s+\[0\] ([^\n]*\(res:\/\/(?!addons\/)[^\n]*\))/gm;
+export function engineErrors(out: string): string[] {
+  return [...new Set([...out.matchAll(ENGINE_ERR)].map(m => `${m[1].trim()} @ ${m[2].trim()}`))];
+}
 export function verdict(out: string, code: number) {
+  const engine = engineErrors(out);
   return {
-    pass: code === 0 && !/SCRIPT ERROR(?!: BOT)/.test(out) && !out.match(FAIL) && (!/BOT RESULT:/.test(out) || /BOT RESULT: PASS/.test(out)),
+    pass: code === 0 && !/SCRIPT ERROR(?!: BOT)/.test(out) && !engine.length && !out.match(FAIL) && (!/BOT RESULT:/.test(out) || /BOT RESULT: PASS/.test(out)),
     result: out.match(/BOT RESULT: .*/)?.[0] ?? (code === 0 ? "ran to the end" : code === 124 ? "timed out: the bot never ended by itself (arm tests/bot_end.gd in its _ready, or bot_kit finish()) or needs more --seconds" : `exit ${code} (crashed?)`),
     failed: [...out.matchAll(FAIL)].map(m => (m[1] ?? m[2] ?? m[3] ?? m[0]).trim()),
-    errors: [...new Set([...out.matchAll(/SCRIPT ERROR: (?!BOT )(.*)\n\s*at: (.*)/g)].map(m => `${m[1]} @ ${m[2]}`))].slice(0, 8),
+    errors: [...new Set([...out.matchAll(/SCRIPT ERROR: (?!BOT )(.*)\n\s*at: (.*)/g)].map(m => `${m[1]} @ ${m[2]}`)), ...engine.map(e => `ERROR: ${e}`)].slice(0, 8),
   };
 }
 

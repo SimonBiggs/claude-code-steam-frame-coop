@@ -23,6 +23,7 @@ const Seeded := preload("res://core/seeded.gd")
 static var _paths: Dictionary = {}  # game id -> its progress.gd path (found at once: a file check per game)
 static var _scripts: Dictionary = {}  # game id -> its loaded script (loaded when first needed, or a few per frame)
 static var _scanned := false
+static var _requested: Dictionary = {}  # game id -> true: its script is loading on a ResourceLoader thread
 ## How long finding every progress.gd took, and loading (compiling) them so far, in ms. Loading is ~0.5 ms a game on
 ## the Steam Machine, so the lobby never loads them all in one frame: load_some() a few per frame (tests/progress_test.gd).
 static var scan_ms := 0.0
@@ -54,7 +55,12 @@ static func script_of(id: String):
 	_scan()
 	if not _scripts.has(id) and _paths.has(id):
 		var t0 := Time.get_ticks_usec()
-		_scripts[id] = load(String(_paths[id]))
+		var path := String(_paths[id])
+		if _requested.has(id):  # already loading on a thread (load_some): take it (waits if it isn't finished)
+			_scripts[id] = ResourceLoader.load_threaded_get(path)
+			_requested.erase(id)
+		else:
+			_scripts[id] = load(path)
 		load_ms += (Time.get_ticks_usec() - t0) / 1000.0
 	return _scripts.get(id)
 
@@ -64,17 +70,32 @@ static func is_loaded(id: String) -> bool:
 	return _scripts.has(id)
 
 
-## Load scripts until `budget_ms` is used up (at least one). True once every game's script is loaded.
+## Load the games' scripts without hitching the lobby: they compile on ResourceLoader threads (one progress.gd that
+## preloads its game's big data scripts took 16-46 ms to load on the Steam Machine, 2026-10-31), and each call only
+## picks up the finished ones, stopping after `budget_ms`. True once every game's script is loaded.
 static func load_some(budget_ms: float = 4.0) -> bool:
 	_scan()
 	var t0 := Time.get_ticks_usec()
+	var done := true
 	for id in _paths:
 		if _scripts.has(id):
 			continue
 		if (Time.get_ticks_usec() - t0) / 1000.0 >= budget_ms:
 			return false
-		script_of(String(id))
-	return true
+		var path := String(_paths[id])
+		if not _requested.has(id):
+			if ResourceLoader.load_threaded_request(path) == OK:
+				_requested[id] = true
+				done = false
+			else:
+				script_of(String(id))  # (can't thread it: load it here)
+			continue
+		var st := ResourceLoader.load_threaded_get_status(path)
+		if st == ResourceLoader.THREAD_LOAD_IN_PROGRESS:
+			done = false
+		else:
+			script_of(String(id))  # finished (or failed: null, as load() would give)
+	return done
 
 
 ## Every game id with a progress.gd.

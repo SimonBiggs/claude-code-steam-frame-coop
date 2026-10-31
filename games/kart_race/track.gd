@@ -8,6 +8,9 @@ extends Node3D
 ## snowy pines, snowmen and falling snow), plus cheering grandstands, bunting and balloons, and
 ## start lights on the gantry. Repeated props are MultiMeshes; the crowd bobs in a vertex shader.
 
+const Cups := preload("res://games/kart_race/cups.gd")
+const Props := preload("res://games/kart_race/track_props.gd")
+
 const WIDTH := 11.0  # road width
 const CURB := 0.8  # coloured curb outside the road, then the wall
 const WALL_H := 0.8
@@ -57,6 +60,22 @@ const TRACKS := [
 		"ramps": [[0.4, 8.0, 1.1, 0.0, 3.0], [0.54, 7.0, 1.0, -2.0, 2.5]],
 		"pads": [[0.08, 0.0], [0.64, 2.4], [0.9, -2.4]],
 		"items": [0.18, 0.47, 0.72]},
+	{"name": "JUNGLE TRAIL", "theme": "jungle", "sky": Color(0.75, 0.92, 0.8), "sky_top": Color(0.3, 0.6, 0.75),
+		"grass": Color(0.22, 0.58, 0.25), "road": Color(0.42, 0.33, 0.26), "wall_a": Color(0.95, 0.75, 0.2), "wall_b": Color(0.3, 0.75, 0.3),
+		"earth": Color(0.45, 0.32, 0.2), "trees": [Color(0.12, 0.5, 0.2), Color(0.2, 0.62, 0.22), Color(0.3, 0.7, 0.25)],
+		"pts": [[0, 0, 0], [40, 0, 0], [75, -8, 0.5], [92, -35, 1.5], [85, -65, 2.5], [60, -80, 3], [30, -75, 2.5],
+			[10, -58, 1.5], [-15, -50, 1], [-40, -62, 1.5], [-62, -55, 1], [-70, -30, 0.5], [-55, -8, 0], [-28, 2, 0]],
+		"ramps": [[0.42, 8.0, 1.1, 0.0, 3.0]],
+		"pads": [[0.1, 0.0], [0.6, -2.6], [0.83, 2.6]],
+		"items": [0.2, 0.5, 0.74]},
+	{"name": "MOON RING", "theme": "space", "night": true, "sky": Color(0.12, 0.08, 0.28), "sky_top": Color(0.01, 0.01, 0.06),
+		"grass": Color(0.42, 0.4, 0.5), "road": Color(0.18, 0.16, 0.3), "wall_a": Color(0.45, 1.0, 0.85), "wall_b": Color(0.85, 0.45, 1.0),
+		"earth": Color(0.32, 0.3, 0.4), "trees": [Color(0.45, 1.0, 0.85), Color(0.85, 0.45, 1.0), Color(1.0, 0.85, 0.4)],
+		"pts": [[0, 0, 0], [50, 0, 0], [85, 15, 1], [110, 0, 2], [110, -35, 2], [85, -50, 1], [55, -40, 0],
+			[30, -55, 1], [5, -75, 2], [-30, -70, 2], [-55, -45, 1], [-50, -15, 0], [-25, -3, 0]],
+		"ramps": [[0.27, 8.0, 1.1, 0.0, 3.0]],
+		"pads": [[0.13, 0.0], [0.45, -2.6], [0.9, 0.0]],
+		"items": [0.2, 0.55, 0.8]},
 ]
 
 const SKY_SHADER := """
@@ -132,6 +151,10 @@ var n := 0
 var length := 0.0
 var ramps: Array = []  # [s0, len, height, lat, half width]
 var pads: Array = []  # [s0, len, lat, half width]
+var hazards: Array = []  # cups (trackgen.gd): [s0, lat, "patch" / "bump", half width / radius, length]
+var bumpers: Array = []  # the round ones: [centre, radius, s, lat]
+var hz_style := ""  # cups.gd HAZARDS key ("candy", "jungle", "ice", "space") or ""
+var hz_effect := ""  # what a patch does here ("slow", "ice", "float")
 var splits: Array = []  # split lanes: [s0, len, extra half width, island half width, shortcut side] (trackgen.gd)
 var key := ""  # what is built (main compares it: "classic:2", "gen:...")
 var build_n := 0  # counts builds (views redraw the minimap / gate when it changes)
@@ -228,6 +251,56 @@ func lane_lat(s: float, side: float, want: float) -> float:
 	var isl := float(sp[3])
 	var hw := WIDTH * 0.5 + float(sp[2])
 	return signf(side if side != 0.0 else 1.0) * (isl + hw) * 0.5
+
+
+## What the road patch at (s, lat) does: "slow", "ice", "float" or "".
+func patch_at(s: float, lat: float) -> String:
+	for h in hazards:
+		var ha: Array = h
+		if String(ha[2]) != "patch":
+			continue
+		if fposmod(s - float(ha[0]), length) <= float(ha[4]) and absf(lat - float(ha[1])) <= float(ha[3]):
+			return hz_effect
+	return ""
+
+
+## Where the CPUs drive at s: their lane (split lanes, weave) moved round the bumpers ahead (and the puddles too
+## when `dodge`). The dodge holds from 12 m before a hazard to 24 m past it, so a kart aiming that far up the road
+## is still round it when it gets there (and just past). trackgen.gd proves this line is clear of every bumper.
+func cpu_lat(s: float, side: float, want: float, dodge: bool) -> float:
+	var lat := lane_lat(s, side, want)
+	var near: Array = []
+	for h in hazards:
+		var ha: Array = h
+		var bump := String(ha[2]) == "bump"
+		if not bump and not dodge:
+			continue
+		var ds := fposmod(s - float(ha[0]) + 12.0, length) - 12.0
+		if ds >= -12.0 and ds <= (0.0 if bump else float(ha[4])) + 24.0:
+			near.append([float(ha[1]), float(ha[3]) + (1.8 if bump else 1.2)])
+	if near.is_empty():
+		return lat
+	# The nearest line to the lane that is clear of every hazard about (and on the road, off any island).
+	var cands: Array[float] = [lat]
+	for h in near:
+		cands.append(float(h[0]) - float(h[1]) - 0.2)
+		cands.append(float(h[0]) + float(h[1]) + 0.2)
+	var lim := wall_at(s) - 1.2
+	var isl := island_at(s)
+	var best := lat
+	var bd := INF
+	for c in cands:
+		if absf(c) > lim or (isl > 0.0 and absf(c) < isl + 1.2):
+			continue
+		var ok := true
+		for h in near:
+			if absf(c - float(h[0])) < float(h[1]):
+				ok = false
+				break
+		if ok and absf(c - lat) < bd:
+			bd = absf(c - lat)
+			best = c
+	return best
 
 
 # --- Queries -------------------------------------------------------------------------
@@ -373,6 +446,7 @@ func build_info(d: Dictionary, k: String) -> void:
 	_build_theme()
 	if not splits.is_empty():
 		_build_islands()
+	Props.build(self)
 	print("Track %s: %s, %.0f m, %d samples" % [key, info["name"], length, n])
 
 
@@ -439,6 +513,17 @@ func _features() -> void:
 	for sp in info.get("splits", []):
 		var sa: Array = sp
 		splits.append([float(sa[0]) * length, float(sa[1]), float(sa[2]), float(sa[3]), float(sa[4]) if sa.size() > 4 else 1.0])
+	hazards.clear()
+	bumpers.clear()
+	hz_style = String(info.get("hz", ""))
+	hz_effect = String(Cups.HAZARDS[hz_style]["patch"]) if Cups.HAZARDS.has(hz_style) else ""
+	for h in info.get("hazards", []):
+		var ha: Array = h
+		var s0 := float(ha[0]) * length
+		hazards.append([s0, float(ha[1]), String(ha[2]), float(ha[3]), float(ha[4])])
+		if String(ha[2]) == "bump":
+			var bp: Array = point_at(s0, float(ha[1]))
+			bumpers.append([bp[0], float(ha[3]), s0, float(ha[1])])
 	boxes.clear()
 	box_t.clear()
 	for f in info["items"]:
@@ -858,7 +943,7 @@ func _build_scenery() -> void:
 	var cols: Array = info["trees"]
 	var spots: Array[Vector3] = []
 	var tries := 0
-	var want := 70 if theme != "desert" else 0
+	var want := 70 if theme != "desert" and theme != "space" else 0
 	while spots.size() < want and tries < 800:
 		tries += 1
 		var p := Vector3(rng.randf_range(-140, 170), 0, rng.randf_range(-160, 70))
