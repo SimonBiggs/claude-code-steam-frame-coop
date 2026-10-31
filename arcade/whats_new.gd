@@ -33,6 +33,9 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "kart-cups", "date": "2026-10-31", "game": "kart_race", "pic": "lollipop", "line": "Win cups for Bolt's shelf!", "try": {"KART_PIT": "1"}},
+	{"id": "kart-garage", "date": "2026-10-31", "game": "kart_race", "pic": "kartbig", "line": "Pick a light or heavy kart!", "try": {"KART_PIT": "1"}},
+	{"id": "kart-zoom", "date": "2026-10-31", "game": "kart_race", "pic": "rocket", "line": "ZOOM speed for big kids!", "try": {"KART_PIT": "1"}},
 	{"id": "delve-queen", "date": "2026-10-30", "game": "dungeon_delve", "pic": "shard", "line": "Beat the Crystal Queen!", "try": {"DD_TRY": "brave"}},
 	{"id": "delve-heroes", "date": "2026-10-30", "game": "dungeon_delve", "pic": "wizard", "line": "Knight, archer or wizard!", "try": {"DD_TRY": "brave"}},
 	{"id": "delve-relics", "date": "2026-10-30", "game": "dungeon_delve", "pic": "hoard", "line": "Find magic relics!", "try": {"DD_TRY": "brave"}},

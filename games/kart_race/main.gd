@@ -217,6 +217,7 @@ var lap_rec := {}  # host: kart index -> {"t0", "n", "path"} for the lap being d
 var lap_tick := 0.0
 var last_medal := 0
 var pits_done := 0
+var item_cycle := 0
 
 var center_label: Label
 var help_label: Label
@@ -286,7 +287,9 @@ func _setup_game(mode: String) -> void:
 		state = "wait"
 		var p: Array = track.grid_point(0)
 		players[0].place_at(p[0], p[1], p[3])
-		if SIMPLE_MODE:
+		if SIMPLE_MODE and OS.has_environment("KART_PIT"):  # WHAT'S NEW "try" / tests: straight to the picture gates
+			_start_pit()
+		elif SIMPLE_MODE:
 			_start_practice()
 		else:
 			_show_center("KART RACE\nWaiting for the TV players… (warm up: drive around!)", 0.0)
@@ -302,7 +305,10 @@ func _setup_game(mode: String) -> void:
 				var g: Array = track.grid_point(slot)
 				k.place_at(g[0], g[1], g[3])
 				slot += 1
-		_start_practice()
+		if OS.has_environment("KART_PIT"):
+			_start_pit()
+		else:
+			_start_practice()
 	else:
 		_start_race(0)
 
@@ -2325,9 +2331,13 @@ func pit_pick(k, kind: String, id: String, ri: int, lane: int) -> void:
 ## Host: the pit stop is over: the votes decide the speed and the cup (nobody voted: same speed, the next cup).
 func _pit_done() -> void:
 	var m := pit.winner("speed")
+	var c := pit.winner("cup")
+	if OS.has_environment("KART_PICK"):  # tests: "speed:cup" (e.g. "gentle:2", "zoom:tour") wins whatever the gates said
+		var f := OS.get_environment("KART_PICK").split(":")
+		m = f[0]
+		c = f[1] if f.size() > 1 else c
 	if m != "":
 		speed_mode = m
-	var c := pit.winner("cup")
 	if c == "":
 		var after := int(series.get("cup", -1))
 		c = str(Cups.next_cup(shelf, speed_mode if speed_mode != "trial" else "gentle", after))
@@ -2568,6 +2578,9 @@ func _lap_done(k, t: float, path: Array) -> void:
 		laps_d.erase(oldest)
 	save.data["laps"] = laps_d
 	save.mark_dirty()
+	if ghost_path.is_empty():  # the new best lap is the ghost from the next lap on (a time trial races its own last best)
+		lap_ghost = path.duplicate()
+		net.event("lapghost", [lap_ghost])
 	if bt > 0.0:
 		story({"who": "BEST LAP!", "line": "%.1f seconds!" % t, "pic": "clock", "color": "8cd2ff", "duration": 2.5})
 
@@ -2631,10 +2644,7 @@ func _practice_update(dt: float) -> void:
 	if practice_gate >= PRACTICE_GATES.size() or practice_t > PRACTICE_MAX:
 		print("Practice done (%.0f s): line up for the race" % practice_t)
 		practice_gate = -1
-		if OS.has_environment("KART_PIT"):  # WHAT'S NEW "try" / tests: straight to the pit stop's picture gates
-			_start_pit()
-		else:
-			_start_race(0)
+		_start_race(0)
 
 
 ## Every machine: the glowing ring (and a bouncing arrow over it) for the practice.
@@ -2694,8 +2704,11 @@ func _simple_box(k) -> void:
 	var it := Items.pick(Items.weights(Items.behind_of(k.place, racer_count()), not k.cpu, speed_mode), randf())
 	if round_n < 3 and it != "zoom" and it != "bubble":
 		it = "zoom"
-	if OS.has_environment("KART_ITEM"):  # tests: one item every time
+	if OS.has_environment("KART_ITEM"):  # tests: one item every time ("cycle": each in turn)
 		it = OS.get_environment("KART_ITEM")
+		if it == "cycle":
+			it = Items.ORDER[item_cycle % Items.ORDER.size()]
+			item_cycle += 1
 	_apply_item(k, it)
 
 
