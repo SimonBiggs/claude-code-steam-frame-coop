@@ -803,7 +803,20 @@ static func _shard_mesh() -> ArrayMesh:
 
 func prop_center(id: int) -> Vector3:
 	var p: Dictionary = props[id]
-	return (p["node"] as Node3D).global_position + (p["c"] as Vector3)
+	var n: Node3D = p["node"]
+	if not n.is_inside_tree():  # (a world being replaced: its local spot, never an engine error)
+		return n.position + (p["c"] as Vector3)
+	return n.global_position + (p["c"] as Vector3)
+
+
+## main.gd: this world is being replaced (a new journey or region). Its props list is emptied in the same step, so
+## any loop still walking it (VR hands, villagers, shots) finds nothing instead of nodes outside the tree.
+func retire() -> void:
+	props.clear()
+	choice_ids.clear()
+	quest_ids.clear()
+	statue_ids.clear()
+	blockers.clear()
 
 
 ## Used bits: props 0..61 in "used", 62.. in "used2" (main.gd _use()).

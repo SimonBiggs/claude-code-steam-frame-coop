@@ -309,6 +309,7 @@ func _realm_state() -> void:
 ## Every machine: (re)build the world for `plan`; Willowbrook keeps the places already brought back.
 func _make_world() -> void:
 	if world != null:
+		world.retire()
 		remove_child(world)
 		world.queue_free()
 	world = World.new()
