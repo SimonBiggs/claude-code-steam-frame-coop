@@ -33,6 +33,9 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "kart-cups", "date": "2026-10-31", "game": "kart_race", "pic": "lollipop", "line": "Win cups for Bolt's shelf!", "try": {"KART_PIT": "1"}},
+	{"id": "kart-garage", "date": "2026-10-31", "game": "kart_race", "pic": "kartbig", "line": "Pick a light or heavy kart!", "try": {"KART_PIT": "1"}},
+	{"id": "kart-zoom", "date": "2026-10-31", "game": "kart_race", "pic": "rocket", "line": "ZOOM speed for big kids!", "try": {"KART_PIT": "1"}},
 	{"id": "mech-bosses", "date": "2026-10-31", "game": "mech_titans", "pic": "crownkaiju", "line": "Boss kaiju with crowns!", "try": {"MT_TRY": "boss"}},
 	{"id": "mech-pods", "date": "2026-10-31", "game": "mech_titans", "pic": "titanpod", "line": "Pick Titan power-ups!", "try": {"MT_TRY": "pods"}},
 	{"id": "mech-sanctuary", "date": "2026-10-31", "game": "mech_titans", "pic": "sanctuary", "line": "Grow the Kaiju Sanctuary!"},
