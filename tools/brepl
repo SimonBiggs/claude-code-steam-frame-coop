@@ -154,6 +154,13 @@ if (args[0] === "--serve") {
     if (current && current.status !== "running") current = null;  // cleared here, not when it ends, so the report above can name it
   }, 500).unref?.();
   const run = async (code) => {
+    // Heredoc: a first line "//@write PATH" (or "//@append PATH") writes the REST of the call to PATH verbatim, with
+    // no JS quoting at all, so GDScript with backticks, ${...} and backslashes goes through untouched (agents used to
+    // fall back to Edit/Write because template strings broke on them). brepl modules still go through writeModule.
+    const hd = code.match(/^\/\/@(write|append)[ \t]+(\S+)[ \t]*\r?\n([\s\S]*)$/);
+    if (hd) {
+      try { return await globalThis.writeText(hd[2], hd[3], hd[1] === "append") + "\n"; } catch (e) { return `Error: ${e?.stack ?? e}\n`; }
+    }
     const waitS = /^\s*\/\/\s*bg\b/.test(code) ? 0 : FG_SECONDS;
     let fn;
     try {
@@ -214,6 +221,17 @@ if (args[0] === "--serve") {
   };
   // Safe module edit: write a temp copy next to it, build-check it, and only then rename it over the module (the
   // watcher reloads it). Throws with the build errors and leaves the module untouched when it doesn't compile.
+  // writeText(path, text, append?): write a text file (~ expanded, folders made); brepl modules go via writeModule.
+  globalThis.writeText = async (path, text, append = false) => {
+    const { homedir } = await import("node:os");
+    const { dirname } = await import("node:path");
+    const fsp = await import("node:fs/promises");
+    path = String(path).replace(/^~(?=\/)/, homedir());
+    if (!append && Object.values(MODULES).includes(path)) return await globalThis.writeModule(path, text);
+    await fsp.mkdir(dirname(path), { recursive: true });
+    await (append ? fsp.appendFile : fsp.writeFile)(path, text);
+    return `${append ? "appended" : "wrote"} ${path} (${Buffer.byteLength(text)} bytes)`;
+  };
   globalThis.writeModule = async (path, text) => {
     const tmp = `${path.replace(/\.ts$/, "")}.check-${process.pid}-${Date.now()}.ts`;
     await Bun.write(tmp, text);

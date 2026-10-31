@@ -53,7 +53,7 @@ export function verdict(out: string, code: number) {
   const engine = engineErrors(out);
   return {
     pass: code === 0 && !/SCRIPT ERROR(?!: BOT)/.test(out) && !engine.length && !out.match(FAIL) && (!/BOT RESULT:/.test(out) || /BOT RESULT: PASS/.test(out)),
-    result: out.match(/BOT RESULT: .*/)?.[0] ?? (code === 0 ? "ran to the end" : code === 124 ? "timed out: the bot never ended by itself (arm tests/bot_end.gd in its _ready, or bot_kit finish()) or needs more --seconds" : `exit ${code} (crashed?)`),
+    result: out.match(/BOT RESULT: .*/)?.[0] ?? (code === 0 ? "ran to the end with NO BOT RESULT (cut off at the frame limit: tests/bot_kit.gd reports at --quit-after; others need a short mode)" : code === 124 ? "timed out: the bot never ended by itself (arm tests/bot_end.gd in its _ready, or bot_kit finish()) or needs more --seconds" : `exit ${code} (crashed?)`),
     failed: [...out.matchAll(FAIL)].map(m => (m[1] ?? m[2] ?? m[3] ?? m[0]).trim()),
     errors: [...new Set([...out.matchAll(/SCRIPT ERROR: (?!BOT )(.*)\n\s*at: (.*)/g)].map(m => `${m[1]} @ ${m[2]}`)), ...engine.map(e => `ERROR: ${e}`)].slice(0, 8),
   };

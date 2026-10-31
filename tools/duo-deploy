@@ -18,6 +18,10 @@ if bad=$(grep -rnE 'get_meta\([^()]*,[[:space:]]*null[[:space:]]*\)' "$ST/core" 
 fi
 # Live must not be ahead of staging (e.g. an agent branch merged straight into live): the rsync below
 # would silently roll that work back. Sync it into staging first (rsync live -> stage) and redeploy.
+if bad=$(grep -rnE '^(<<<<<<<|>>>>>>>) ' "$ST/core" "$ST/games" "$ST/arcade" "$ST/tests" "$ST/arcade.tscn"); then  # a merge conflict left in (2026-10-31)
+  echo "NOT deploying: merge conflict markers:" >&2
+  echo "$bad" >&2; exit 1
+fi
 ahead=$(cd "$LIVE" && for d in core games arcade tests; do find "$d" -type f ! -name "*.uid"; done |
   while read -r f; do [ -f "$ST/$f" ] && ! cmp -s "$LIVE/$f" "$ST/$f" && [ "$LIVE/$f" -nt "$ST/$f" ] && echo "$f"; done || true)
 # (|| true: the loop's status is its last test's, and under set -e a false one silently ended every deploy)
