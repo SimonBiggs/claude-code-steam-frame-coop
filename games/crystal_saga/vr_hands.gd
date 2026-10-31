@@ -126,6 +126,8 @@ func update(delta: float, thunder_on: bool) -> void:
 	var blade_now := {}
 	var touch_now: Array[Dictionary] = [{}, {}]
 	for id in w.props.size():
+		if main.world != w:
+			return  # a poke started a new journey or picked a new region: that world is gone (rebuilt)
 		var p: Dictionary = w.props[id]
 		var kind: int = p["kind"]
 		if absi(int(p["zone"]) - my_zone) > 1 or kind in World.SPELL_ONLY or not (p["node"] as Node3D).visible:

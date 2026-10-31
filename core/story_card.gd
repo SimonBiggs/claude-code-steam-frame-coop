@@ -264,10 +264,17 @@ class Picture extends Control:
 	func _circle(x: float, y: float, r: float, c: Color) -> void:
 		draw_circle(_p(x, y), r * size.x, c)
 
+	## Pictures whose polygons can't be drawn (self-crossing or flat: Godot prints "triangulation failed" and draws
+	## nothing): kind -> true. tests/story_pictures_test.gd fails on any.
+	static var bad_polys := {}
+
 	func _poly(pts: Array, c: Color) -> void:
 		var arr := PackedVector2Array()
 		for q in pts:
 			arr.append(_p(q[0], q[1]))
+		if Geometry2D.triangulate_polygon(arr).is_empty():
+			bad_polys[kind] = true
+			return
 		draw_colored_polygon(arr, c)
 
 	func _eye(x: float, y: float, r: float) -> void:
