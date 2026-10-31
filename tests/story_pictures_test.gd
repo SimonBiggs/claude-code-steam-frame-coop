@@ -3,6 +3,7 @@ extends SceneTree
 ## stays frozen (a game's new picture goes in games/<game>/story_pictures.gd, found by core/story_pictures.gd, so
 ## two games never edit the same line), every picture draws without a script error, and a VR story card shows its
 ## picture (StoryCard.show_vr: the "StoryPicture" medallion) - VR players never lose the picture the TV shows.
+## Every polygon of every picture can be drawn (no self-crossing shapes: Godot draws nothing for them).
 ##   godot-test --headless --path . -s res://tests/story_pictures_test.gd     Prints STORY PICTURES: PASS / FAIL.
 
 const StoryCard := preload("res://core/story_card.gd")
@@ -49,8 +50,11 @@ func _initialize() -> void:
 
 func _process(_delta: float) -> bool:
 	frames += 1
-	if frames < 4:
+	if frames < 40:  # (pictures move: draw them over a while, at many clock values)
+		for pic in box.get_children():
+			pic.set("t", frames * 0.37)
 		return false
+	_expect(StoryCard.Picture.bad_polys.is_empty(), "pictures with polygons that can't be drawn (they cross themselves): %s" % str(StoryCard.Picture.bad_polys.keys()))
 	_expect(vr_cards.size() == 4, "VR cards made")
 	for pc in vr_cards:
 		var card: Node = pc[1]

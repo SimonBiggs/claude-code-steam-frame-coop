@@ -17,6 +17,7 @@ extends RefCounted
 
 const Seeded := preload("res://core/seeded.gd")
 const World := preload("res://games/crystal_saga/world.gd")
+const Realm := preload("res://games/crystal_saga/realm.gd")
 const Monsters := preload("res://games/crystal_saga/monsters.gd")
 
 const TIERS := 6
@@ -40,28 +41,91 @@ const GIANT_AT := Vector2(0.0, -3.5)
 const FRIEND_AT := Vector2(3.6, -5.2)
 
 
-## The plan for one journey (pure data: arrays, numbers, colours, strings).
-static func generate(seed_value: int, tier: int) -> Dictionary:
+## The plan for one journey (pure data: arrays, numbers, colours, strings) through a region of the realm:
+## biome (realm.gd BIOMES index) dresses it and picks its quest and guardian; region: its name; hard: BRAVE mode
+## (one spare quest thing fewer, quicker tells; the tier already counts brave).
+static func generate(seed_value: int, tier: int, biome: int = 1, region: String = "", hard: bool = false) -> Dictionary:
 	tier = clampi(tier, 0, TIERS - 1)
+	biome = clampi(biome, 0, Realm.BIOMES.size() - 1)
+	var b: Dictionary = Realm.BIOMES[biome]
 	var nr := Seeded.rng(seed_value, "names")
-	var g := nr.randi() % World.SAGA_GIANTS.size()
-	var names: Array = ["WILLOWBROOK", FORESTS[nr.randi() % FORESTS.size()], CAVES[nr.randi() % CAVES.size()],
-		"%s GIANT!" % World.SAGA_GIANTS[g][0], "THE CRYSTAL!"]
-	var lr := Seeded.rng(seed_value, "look")
+	var deep: Array = b.deep
+	var reg := region if region != "" else String((b.name as Array)[nr.randi() % (b.name as Array).size()])
+	var names: Array = ["WILLOWBROOK", reg, String(deep[nr.randi() % deep.size()]), "%s GIANT!" % String(b.giant), "THE CRYSTAL!"]
 	var props: Array = []
-	_edge_props(Seeded.rng(seed_value, "forest"), 1, props)
-	_edge_props(Seeded.rng(seed_value, "cave"), 2, props)
-	_edge_props(Seeded.rng(seed_value, "glade"), 3, props)
+	var q: Array = b.quest
+	var need: int = Realm.QUEST_NEED
+	var items := need + (0 if hard else 1)
+	var qr := Seeded.rng(seed_value, "quest")
+	var giver_side := -1.0 if qr.randf() < 0.5 else 1.0
+	var giver := Vector2(giver_side * 2.5, World.center(1).z + 4.3)
+	props.append([World.GIVER, giver.x, giver.y, 0.5])
+	var in1 := (items + 1) / 2
+	_edge_props(Seeded.rng(seed_value, "forest"), 1, props, in1, giver)
+	_edge_props(Seeded.rng(seed_value, "cave"), 2, props, items - in1, giver)
+	_edge_props(Seeded.rng(seed_value, "glade"), 3, props, 0, giver)
 	_rocks(Seeded.rng(seed_value, "rocks"), tier, props)
 	var waves: Array = [[], _forest_waves(Seeded.rng(seed_value, "w1"), tier, props), _cave_waves(Seeded.rng(seed_value, "w2"), tier, props), [], []]
-	return {"seed": seed_value, "tier": tier, "names": names, "leaf": LEAVES[lr.randi() % LEAVES.size()],
-		"gem": GEMS[lr.randi() % GEMS.size()], "giant": g, "props": props, "waves": waves,
-		"giant_hits": [14 + 2 * tier, 2, 16, 28 + 2 * tier], "speed": 1.0 + 0.07 * tier,
-		"stomp": [4.5 - 0.3 * tier, 6.5 - 0.4 * tier]}
+	var gd := guardian(Seeded.rng(seed_value, "guardian"), String(b.sig), tier, hard)
+	return {"seed": seed_value, "tier": tier, "biome": biome, "hard": hard, "names": names, "leaf": b.leaf,
+		"gem": b.gem, "path": b.path, "ground": b.ground, "sky": b.sky, "skins": b.skins, "giant": 0, "giant_look": [b.body, b.glow],
+		"props": props, "waves": waves,
+		"quest": {"giver": String(q[0]), "giver_pic": String(q[1]), "giver_look": String(q[2]), "item": String(q[3]),
+			"item_pic": String(q[4]), "need": need},
+		"guardian": gd, "giant_hits": [14 + 2 * tier, 2, 16, 28 + 2 * tier], "speed": 1.0 + 0.07 * tier,
+		"stomp": gd.gap}
+
+
+## The crystal guardian's attacks for a tier: the region's signature first, STOMP from tier 1, one more from tier
+## 4. Each has a tell (warn seconds: a glowing ring / circles / lane / sparkle rings on the ground first).
+static func guardian(r: RandomNumberGenerator, sig: String, tier: int, hard: bool) -> Dictionary:
+	var attacks: Array = [sig]
+	if tier >= 1 and not attacks.has("stomp"):
+		attacks.append("stomp")
+	if tier >= 4:
+		var more: Array = []
+		for a in ATTACKS:
+			if not attacks.has(a):
+				more.append(a)
+		attacks.append(String(Seeded.pick(r, more)))
+	var k := (1.0 - 0.04 * tier) * (0.9 if hard else 1.0)
+	var warn := {}
+	for a2 in ATTACKS:
+		warn[a2] = snappedf(maxf(float(WARN_BASE[a2]) * k, min_warn(a2)), 0.01)
+	return {"attacks": attacks, "warn": warn, "gap": [snappedf(5.0 - 0.3 * tier, 0.01), snappedf(7.0 - 0.4 * tier, 0.01)],
+		"rain_n": 2 + tier / 2, "rain_r": RAIN_R, "roll_len": ROLL_LEN, "roll_w": ROLL_W,
+		"roll_rest": snappedf(2.2 - 0.15 * tier, 0.01), "call_n": 1 + tier / 3, "call_cap": 2 + tier / 2}
+
+
+const ATTACKS: Array[String] = ["stomp", "rain", "roll", "call"]
+const WARN_BASE := {"stomp": 1.3, "rain": 1.7, "roll": 1.6, "call": 1.2}
+const STOMP_R := 3.4  ## = monsters.gd STOMP_R
+const GIANT_R := 1.1  ## the guardian's body (monsters.gd radius_of)
+const RAIN_R := 0.9
+const ROLL_LEN := 7.0
+const ROLL_W := 1.5
+const REACT := 0.35  ## seconds a child needs to notice a tell before moving
+const HERO_SPEED := 3.6  ## hero.gd SPEED (TV / Deck heroes)
+const VR_SPEED := 2.0  ## main.gd vr_rig.move_speed
+
+
+## The shortest fair tell for an attack: time to notice it and step out of it (TV heroes; the VR hero for the
+## small ones: a stomp only gives the VR hero a harmless sparkly "boing").
+static func min_warn(a: String) -> float:
+	match a:
+		"stomp":
+			return REACT + (STOMP_R - GIANT_R) / HERO_SPEED
+		"rain":
+			return REACT + RAIN_R / VR_SPEED
+		"roll":
+			return REACT + ROLL_W * 0.5 / VR_SPEED
+	return 0.8
 
 
 ## The tree trunks and touchable things along both edges of a zone: [kind, x, z, r] (world coordinates).
-static func _edge_props(r: RandomNumberGenerator, zone: int, props: Array) -> void:
+## quest: quest things to hide in this zone (first in the bag: they always get a slot); giver: the quest giver's
+## spot (kept clear).
+static func _edge_props(r: RandomNumberGenerator, zone: int, props: Array, quest: int = 0, giver: Vector2 = Vector2(99, 99)) -> void:
 	var c := World.center(zone).z
 	var bag: Array = []
 	match zone:
@@ -83,13 +147,15 @@ static func _edge_props(r: RandomNumberGenerator, zone: int, props: Array) -> vo
 			if r.randf() < 0.5:
 				bag.append(World.MUSHROOM)
 	bag = Seeded.shuffled(r, bag)
+	for i in quest:
+		bag.push_front(World.QUEST)
 	# Slots down both sides, staggered, away from the entrance's spawn row and the far corners.
 	var slots: Array = []
 	for side in [-1.0, 1.0]:
 		var z := c + 5.2 - r.randf() * 0.8
 		while z > c - 6.6:
 			var x: float = side * r.randf_range(4.2, 4.6)
-			if not (zone == 3 and side > 0.0 and z < c - 2.8):  # the giant's friend waves from there
+			if not (zone == 3 and side > 0.0 and z < c - 2.8) and Vector2(x, z).distance_to(giver) > 2.0:  # (the giant's friend waves there)
 				slots.append([x, z])
 			z -= r.randf_range(1.7, 2.6)
 	slots = Seeded.shuffled(r, slots)
@@ -102,6 +168,8 @@ static func _edge_props(r: RandomNumberGenerator, zone: int, props: Array) -> vo
 			var side2 := -1.0 if (i + r.randi() % 2) % 2 == 0 else 1.0
 			props.append([World.TREE, side2 * 5.6, snappedf(c + 5.0 - (12.0 * (i + r.randf() * 0.6)) / trees, 0.01), _radius(World.TREE)])
 	var sx := -1.0 if r.randf() < 0.5 else 1.0
+	if zone == 1 and giver.x < 50.0:
+		sx = -signf(giver.x)  # the signpost on the other side from the quest giver
 	if zone < 3:
 		props.append([World.SIGN, sx * 2.6, c + 6.2, _radius(World.SIGN)])
 
@@ -111,6 +179,7 @@ static func _radius(kind: int) -> float:
 		World.TREE: return 0.8
 		World.MUSHROOM: return 0.7
 		World.CHEST, World.CHOICE: return 0.55
+		World.QUEST: return 0.45
 		World.CRYSTAL: return 0.6
 	return 0.5
 
@@ -138,11 +207,15 @@ static func _rocks(r: RandomNumberGenerator, tier: int, props: Array) -> void:
 
 static func _rock_ok(p: Vector2, rad: float, zone: int, props: Array) -> bool:
 	var c := World.center(zone).z
-	var keep: Array = [[CHOICE_AT[0] + Vector2(0.0, c), 1.4], [CHOICE_AT[1] + Vector2(0.0, c), 1.4]]
+	var keep: Array = []
+	for ch in CHOICE_AT:
+		keep.append([ch + Vector2(0.0, c), 1.4])
 	if zone == 2:
 		keep.append([ORB_AT + Vector2(0.0, c), 2.0])
 	if zone == 3:
 		keep.append([GIANT_AT + Vector2(0.0, c), 2.6])
+	if zone == 1:
+		keep.append([Vector2(0.0, World.entrance(1).z), 1.6])
 	for k in keep:
 		if p.distance_to(k[0]) < float(k[1]) + rad:
 			return false
@@ -234,12 +307,106 @@ static func blockers(plan: Dictionary, zone: int) -> Array:
 	for q in plan.props:
 		if int(q[0]) == World.ROCK and World.zone_of(Vector3(float(q[1]), 0.0, float(q[2]))) == zone:
 			out.append([Vector2(float(q[1]), float(q[2])), float(q[3])])
+		elif int(q[0]) == World.GIVER and World.zone_of(Vector3(float(q[1]), 0.0, float(q[2]))) == zone:
+			out.append([Vector2(float(q[1]), float(q[2])), GIVER_BLOCK])
 	if zone == 2:
 		out.append([ORB_AT + Vector2(0.0, World.center(2).z), 0.45])
 	return out
 
 
 # --- The validator ------------------------------------------------------------------------------------
+
+const GIVER_BLOCK := 0.35  ## the quest giver blocks the path like a villager (world.gd)
+const MAX_PROPS := 44  ## plan props (with the village's and the fixed ones, ids stay under 124: two used-bit ints)
+
+
+## The region's quest can be done: the giver stands at the gate of the region (zone 1), enough quest things are
+## hidden in the region (zones 1 and 2, before the guardian) and (by _check_zone) each is in reach and none is
+## inside a rock; the quest's pictures exist.
+static func check_quest(plan: Dictionary) -> Array:
+	var why: Array = []
+	var q: Dictionary = plan.get("quest", {})
+	if q.is_empty():
+		return ["no quest"]
+	var givers := 0
+	var items := 0
+	for p in plan.props:
+		var at := Vector3(float(p[1]), 0.0, float(p[2]))
+		if int(p[0]) == World.GIVER:
+			givers += 1
+			if World.zone_of(at) != 1:
+				why.append("the quest giver isn't at the region's gate")
+			if at.distance_to(World.entrance(1)) < 1.2:
+				why.append("the quest giver stands on the entrance")
+		elif int(p[0]) == World.QUEST:
+			items += 1
+			if not World.zone_of(at) in [1, 2]:
+				why.append("a quest thing is past the guardian's gate (zone %d)" % World.zone_of(at))
+	if givers != 1:
+		why.append("%d quest givers" % givers)
+	if items < int(q.need) or int(q.need) < 1:
+		why.append("only %d quest things hidden (%d needed)" % [items, int(q.need)])
+	if not bool(plan.get("hard", false)) and items < int(q.need) + 1:
+		why.append("gentle mode has no spare quest thing (%d for %d)" % [items, int(q.need)])
+	for k in ["giver", "item"]:
+		if String(q.get(k, "")) == "":
+			why.append("the quest has no %s" % k)
+	return why
+
+
+## The crystal guardian is fair: every attack's tell lasts long enough to notice and step out of it, there is a
+## pause after each attack to hit back, the rain leaves most of the glade safe, the helpers it calls stay few,
+## and its toughness suits every team (check()).
+static func check_guardian(plan: Dictionary) -> Array:
+	var why: Array = []
+	var g: Dictionary = plan.get("guardian", {})
+	if g.is_empty():
+		return ["no guardian"]
+	var attacks: Array = g.attacks
+	if attacks.is_empty() or attacks.size() > 3:
+		why.append("the guardian has %d attacks" % attacks.size())
+	var longest := 0.0
+	for a in attacks:
+		if not ATTACKS.has(String(a)):
+			why.append("unknown attack %s" % a)
+			continue
+		var w := float(g.warn[a])
+		longest = maxf(longest, w)
+		if w + 0.001 < min_warn(String(a)):
+			why.append("the %s tell is too quick (%.2f s, needs %.2f)" % [a, w, min_warn(String(a))])
+		if w > 3.0:
+			why.append("the %s tell is too slow to read as one (%.2f s)" % [a, w])
+	var gap: Array = g.gap
+	if float(gap[0]) < longest + 1.5:
+		why.append("no time to hit back between attacks (gap %.2f, tell %.2f)" % [float(gap[0]), longest])
+	var arena := World.HALF_W * 2.0 * World.HALF_L * 2.0
+	if attacks.has("rain"):
+		var area := float(g.rain_n) * PI * pow(float(g.rain_r), 2.0)
+		if area > arena * 0.15 or int(g.rain_n) > MAX_TEAM:
+			why.append("the crystal rain covers too much (%.1f m2)" % area)
+	if attacks.has("roll"):
+		if float(g.roll_rest) < 1.0:
+			why.append("the guardian doesn't rest after rolling (%.2f s)" % float(g.roll_rest))
+		if float(g.roll_w) > World.HALF_W:
+			why.append("the roll lane is too wide")
+	if attacks.has("call"):
+		if int(g.call_cap) > 4 or int(g.call_n) > int(g.call_cap) or int(g.call_n) < 1:
+			why.append("the guardian calls too many helpers (%d, at most %d)" % [int(g.call_n), int(g.call_cap)])
+	if int(plan.tier) == 0 and attacks.size() != 1:
+		why.append("the first guardian has more than one attack")
+	return why
+
+
+## One number for how hard a journey is for a team of n (the validator checks it climbs smoothly by tier).
+static func difficulty(plan: Dictionary, n: int) -> float:
+	var mons := 0.0
+	for z in [1, 2]:
+		for w in plan.waves[z]:
+			mons += wave_count(w, n)
+	var g: Dictionary = plan.guardian
+	var boss := giant_hits(plan, n) * (1.0 + 0.15 * ((g.attacks as Array).size() - 1)) * 6.5 / float(g.gap[0])
+	return (mons + boss * 0.5) * float(plan.speed)
+
 
 ## Everything wrong with a plan (empty = fine).
 static func check(plan: Dictionary) -> Array:
@@ -248,8 +415,10 @@ static func check(plan: Dictionary) -> Array:
 		if String(plan.names[i]).length() > 14 or String(plan.names[i]) == "":
 			why.append("name %s is too long" % plan.names[i])
 	var props: Array = plan.props
-	if props.size() > 34:
+	if props.size() > MAX_PROPS:
 		why.append("too many props (%d): used bits run out" % props.size())
+	why.append_array(check_quest(plan))
+	why.append_array(check_guardian(plan))
 	for zone in [1, 2, 3]:
 		why.append_array(_check_zone(plan, zone))
 	var chests := 0
@@ -293,6 +462,9 @@ static func check(plan: Dictionary) -> Array:
 			why.append("the giant needs %d hits from %d heroes" % [h, n2])
 	if float(plan.stomp[0]) < 2.5 or float(plan.stomp[1]) <= float(plan.stomp[0]):
 		why.append("the giant stomps too often %s" % str(plan.stomp))
+	for nm in plan.names:
+		if String(nm) == "":
+			why.append("a place has no name")
 	if float(plan.speed) > 1.5:
 		why.append("monsters too quick (%.2f)" % float(plan.speed))
 	return why
@@ -363,7 +535,7 @@ static func _check_zone(plan: Dictionary, zone: int) -> Array:
 		things.append([World.KIND_NAMES[kind], ctr, float(q2[3])])
 		if absf(at.x) > World.HALF_W + 1.0 or at.y > c + World.HALF_L or at.y < c - World.HALF_L:
 			why.append("zone %d: a %s is off the map" % [zone, World.KIND_NAMES[kind]])
-		if kind != World.ROCK:
+		if kind != World.ROCK and kind != World.GIVER:
 			for b2 in bl:
 				if at.distance_to(b2[0]) < float(b2[1]) + float(q2[3]) - 0.1:
 					why.append("zone %d: a %s is inside a rock" % [zone, World.KIND_NAMES[kind]])
