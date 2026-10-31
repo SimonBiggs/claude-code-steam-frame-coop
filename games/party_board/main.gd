@@ -27,7 +27,12 @@ extends Node3D
 ## spinning dice block. Spaces are only blue (good: hop 2 more), red (bad: slide back 2) and START; the
 ## STAR is picked up just by passing or landing on it (then it flies off somewhere new). Paths pick
 ## themselves (towards the STAR). No coins, shop, items, events, duels, kid-mode menu or bonus stars.
-## Minigames: only the simplest three (coin catch, kart dash, balloon pop), free-for-all, taught by a 3 s
+## DEEPER PARTIES (boards.gd / partygen.gd / turn_flow.gd): every party is a fresh seeded board (layout, board
+## dress-up: PARTY ISLAND, SWEET SHOP, PIRATE COVE, HAUNTED HOUSE, SPACE STATION), with presents (items), the
+## board's special spaces and one board event; Mango's trophy wall (festival.gd) and won hats on the tokens;
+## eight simple minigames (mg_runner.gd SIMPLE_GAMES; tests/party_board_mg_test.gd proves them fair). PB_BOARD=<id>
+## forces a board.
+## Minigames: only the simple ones (one motion or one button), free-for-all, taught by a 3 s
 ## glowing demo (ghost hand / glowing ring + A) while everyone can already try; the winner gets a STAR.
 ## The end: one winner moment, then a new party. Everything on the island in the giant's reach reacts
 ## to touch (props.gd): trees and flowers wobble, the STAR spins, the windmill whirls, the volcano
@@ -79,6 +84,7 @@ const GhostHand := preload("res://games/party_board/ghost_hand.gd")
 const CueScript := preload("res://games/party_board/cue.gd")
 const PartyGen := preload("res://games/party_board/partygen.gd")
 const Festival := preload("res://games/party_board/festival.gd")
+const Boards := preload("res://games/party_board/boards.gd")
 const Seeded := preload("res://core/seeded.gd")
 const StoryCard := preload("res://core/story_card.gd")
 const MANGO_COLOR := Color(1.0, 0.6, 0.15)  ## Mango the toucan (festival.gd), the party host in the story cards
@@ -196,7 +202,11 @@ func _ready() -> void:
 	save.game_id = GAME_ID
 	save.version = 1
 	save.defaults = {"parties": 0, "giant_wins": 0, "best_stars": 0, "most_coins": 0, "wins": {}, "mg_played": {},
-		"world": -1, "festival": [], "flags": [], "daily": {}}
+		"world": -1, "festival": [], "flags": [], "daily": {},
+		# deeper parties (boards.gd): boards played / visited by TODAY'S PARTY, the trophy wall, presents used,
+		# minigames the family has won
+		"boards_played": {}, "boards_seen": [], "last_board": "", "trophies": {}, "items_used": [], "mg_won": []}
+	save.use_layout(preload("res://games/party_board/progress.gd"))
 	add_child(save)
 	if fresh_save:
 		save.data = save.defaults.duplicate(true)
@@ -345,15 +355,72 @@ func _build_vr_room() -> void:
 ## Every machine: lay out the seeded party desc {seed, level, rounds} (partygen.gd) on the board.
 ## Returns the generated party.
 func apply_plan(desc: Dictionary) -> Dictionary:
-	var p := PartyGen.generate(data, int(desc.get("seed", 0)), desc)
+	var p := PartyGen.generate(data, int(desc.get("seed", 0)), desc)  # (rebuilds data with the party's layout)
 	data.set_types(p.types)
+	plan_hats = desc.get("hats", [])
+	_rebuild_board(String(p.board))
 	board.apply_types()
 	return p
 
 
-## Host: tell every machine what Mango's festival looks like (saved pieces and winners' flags).
+var plan_hats: Array = []  ## this party's hats per seat (boards.gd seat_hats; "" = the token's own look)
+
+
+## The look of seat `pid` (token.gd LOOKS: class, hat, hair) with this party's won hat on.
+func look_of(pid: int) -> Array:
+	var look: Array = (TokenScript.LOOKS[pid % TokenScript.LOOKS.size()] as Array).duplicate()
+	if pid < plan_hats.size() and String(plan_hats[pid]) != "":
+		look[1] = String(plan_hats[pid])
+	return look
+
+
+## A new party's board: dressed for its board (theme) on its own layout. The old island, its touchable props
+## and the festival's START pieces are rebuilt; tokens and the STAR land on the new spaces.
+func _rebuild_board(theme: String) -> void:
+	var old := board
+	board = BoardView.new()
+	board.name = "Board"
+	stage.add_child(board)
+	board.build(data, vr_rig != null, theme)
+	if old != null:
+		old.name = "OldBoard"
+		old.queue_free()
+	if props != null:
+		props.queue_free()
+		props = PropsScript.new()
+		props.main = self
+		props.name = "Props"
+		stage.add_child(props)
+	if festival != null:
+		festival.refresh()
+	board.set_star(int(net.state_get("star", -1)), false)
+	var mods: Variant = net.state_get("board_mod", {})
+	_apply_mod(mods if mods is Dictionary else {})
+	for pid in tokens:
+		var t: TokenScript = tokens[pid]
+		t.set_look(look_of(int(pid)))
+		if t.space >= 0:
+			t.place(data.pos(clampi(t.space, 0, data.count() - 1)))
+	_spread_tokens()
+	_on_phase(String(net.state_get("phase", "")))
+
+
+## The board event's lasting changes (turn_flow "board_mod"): RAINBOW (reds turn blue), the TREASURE chest.
+func _apply_mod(m: Dictionary) -> void:
+	if bool(m.get("rainbow", false)):
+		var ts := data.types()
+		for i in ts.size():
+			if ts[i] == "red":
+				ts[i] = "blue"
+		data.set_types(ts)
+		board.apply_types()
+	board.set_chest(int(m.get("chest", -1)))
+
+
+## Host: tell every machine what Mango's festival looks like (saved pieces, winners' flags, the trophy wall).
 func publish_festival() -> void:
-	var st := {"built": (save.data["festival"] as Array).duplicate(), "flags": (save.data["flags"] as Array).duplicate()}
+	var st := {"built": (save.data["festival"] as Array).duplicate(), "flags": (save.data["flags"] as Array).duplicate(),
+		"trophies": (save.data["trophies"] as Dictionary).keys()}
 	net.state_set("festival", st)
 	if festival != null:
 		festival.apply(st)
@@ -474,7 +541,7 @@ func token(pid: int) -> TokenScript:
 	if tokens.has(pid) and is_instance_valid(tokens[pid]):
 		return tokens[pid]
 	var t: TokenScript = TokenScript.new()
-	t.setup(pid, color_of(pid))
+	t.setup(pid, color_of(pid), look_of(pid))
 	stage.add_child(t)
 	t.hopped.connect(func(_tk: Node3D) -> void: sfx.play("jump", -10.0, 1.3))
 	tokens[pid] = t
@@ -494,6 +561,8 @@ func _sync_tokens() -> void:
 		var plate: Label3D = (t.get_meta("plate") if t.has_meta("plate") else null)
 		if plate != null and is_instance_valid(plate) and plate.text != name_of(pid):
 			plate.text = name_of(pid)  # a CPU seat taken over: the name over the token follows the card
+		var held: Array = pd.get("items", [])
+		t.set_item(String(held[0]) if simple and not held.is_empty() else "")
 		var sp := int(pd.get("space", 0))
 		if t.space == sp:
 			continue
@@ -566,6 +635,8 @@ func _on_state_changed(key: String, value: Variant) -> void:
 		"plan":  # the TV machines rebuild the host's seeded party board (partygen.gd)
 			if flow == null and value is Dictionary and not (value as Dictionary).is_empty():
 				apply_plan(value)
+		"board_mod":
+			_apply_mod(value if value is Dictionary else {})
 		"festival":
 			if festival != null and value is Dictionary:
 				festival.apply(value)
@@ -582,18 +653,22 @@ func _on_state_changed(key: String, value: Variant) -> void:
 func _sync_all() -> void:
 	_synced = false
 	var all: Dictionary = net.state_all()
-	for k in ["players", "star", "phase", "sky", "music"]:
+	# the party's board first (its layout decides where the tokens and the STAR stand)
+	for k in ["plan", "board_mod", "players", "star", "phase", "sky", "music"]:
 		if all.has(k):
 			_on_state_changed(k, all[k])
 	for k in all:
 		var key := String(k)
-		if not key in ["players", "star", "phase", "sky", "music"]:
+		if not key in ["plan", "board_mod", "players", "star", "phase", "sky", "music"]:
 			_on_state_changed(key, all[k])
 	_synced = true
 
 
 func _on_phase(phase: String) -> void:
 	board.visible = phase != "minigame"
+	for n: Node3D in [festival, props]:  # (the trophy wall and the touchable houses stood in the minigame arena)
+		if n != null:
+			n.visible = phase != "minigame"
 	for pid in tokens:
 		(tokens[pid] as Node3D).visible = phase != "minigame"
 
@@ -631,6 +706,10 @@ func _update_camera(delta: float) -> void:
 			cam_focus(t.position + Vector3(0, 1.0, 0), d, 3.0)
 		elif String(net.state_get("step", "")) == "overview" or cur < 0:
 			cam_look(Vector3(0, 24, -27), Vector3(0, 0, 1.5), 1.5)
+	elif phase == "trophy":  # Mango's trophy wall grows: look at it from the island
+		var w := Festival.wall_spot()
+		var inward := Vector3(-w.x, 0, -w.z).normalized()
+		cam_look(w + inward * 9.0 + Vector3(0, 5.0, 0), w + Vector3(0, 1.6, 0), 2.0)
 	var k := 1.0 - exp(-_cam_speed * delta)
 	_cam_from = _cam_from.lerp(_cam_want_from, k)
 	_cam_at = _cam_at.lerp(_cam_want_at, k)
@@ -765,11 +844,57 @@ func _do_fx(kind: String, args: Array) -> void:
 		"prop":
 			if props != null:
 				props.react(String(args[0]), int(args[1]))
+		"item_fx":  # [pid, item id]: the item pops up over the token
+			_item_fx(int(args[0]), String(args[1]))
+		"special_fx":  # [special type, space, pid]: the special space does its thing
+			_special_fx(String(args[0]), int(args[1]), int(args[2]))
 		"arrows":
 			if args.is_empty():
 				board.hide_arrows()
 			else:
 				board.show_arrows(int(args[0]), args[1], 0)
+
+
+## An item pops up big over a token, spins and shrinks into its little held picture.
+func _item_fx(pid: int, id: String) -> void:
+	if not tokens.has(pid):
+		return
+	var t: TokenScript = tokens[pid]
+	var n := TokenScript.item_mesh(id)
+	stage.add_child(n)
+	n.position = t.position + Vector3(0, 3.0, 0)
+	n.scale = Vector3.ONE * 0.2
+	var tw := n.create_tween()
+	tw.tween_property(n, "scale", Vector3.ONE * 1.5, 0.35).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.parallel().tween_property(n, "rotation:y", TAU, 1.2)
+	tw.tween_property(n, "scale", Vector3.ONE * 0.1, 0.4).set_delay(0.5)
+	tw.tween_callback(n.queue_free)
+	_burst(n.position, Boards.item(id).get("color", Color.WHITE), 16)
+
+
+## A special space does its thing (boards.gd SPECIALS): a burst in its colour and its own sound; the volcano
+## puffs, the cannon booms and shakes the camera.
+func _special_fx(type: String, sp: int, pid: int) -> void:
+	var at := data.pos(sp) + Vector3(0, 0.8, 0)
+	var info: Dictionary = Boards.SPECIALS.get(type, {})
+	_burst(at, info.get("tile", Color.WHITE), 24)
+	match type:
+		"volcano":
+			sfx.play("explosion", -8.0, 1.4)
+			if props != null:
+				props.react("volcano", 0)
+		"candy":
+			sfx.play("sparkle", -2.0)
+			if tokens.has(pid):
+				(tokens[pid] as TokenScript).anim().play("cheer", 0.8)
+		"cannon":
+			sfx.play("explosion", -2.0)
+			if cam != null:
+				cam.shake(0.25)
+		"ghost":
+			sfx.play("magic", -2.0, 0.8)
+		"warp":
+			sfx.play("teleport", -2.0)
 
 
 ## Coins popping out of (or into) a token, with a sound.
@@ -950,8 +1075,10 @@ func _build_arrows() -> void:
 		add_child(touch_arrow)
 
 
-## Where the VR giant should reach in this minigame (arena units), or INF.
+## Where the VR giant should reach in this minigame (arena units), or INF (minigames say with touch_goal()).
 func _touch_goal(mg: Node) -> Vector3:
+	if mg.has_method("touch_goal"):
+		return mg.touch_goal()
 	match String(mg.cfg.get("id", "")):
 		"coin_catch":
 			return (mg.get_script().get_script_constant_map().get("CANOPY", Vector3(0, 4, 0)) as Vector3) + Vector3(0, 0.6, 1.5)

@@ -33,6 +33,10 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "party-boards", "date": "2026-10-31", "game": "party_board", "pic": "hauntedhouse", "line": "Five party boards to visit!", "try": {"PB_BOARD": "haunted"}},
+	{"id": "party-minigames", "date": "2026-10-31", "game": "party_board", "pic": "toucan", "line": "Moles, fish, paint, towers!", "try": {"PB_MINIGAME": "fish_pond"}},
+	{"id": "party-presents", "date": "2026-10-31", "game": "party_board", "pic": "gift", "line": "Presents: 2 dice, swap, warp", "try": {"PB_BOARD": "sweet"}},
+	{"id": "party-trophies", "date": "2026-10-31", "game": "party_board", "pic": "trophywall", "line": "Fill Mango's trophy wall!"},
 	{"id": "saga-guardians", "date": "2026-10-31", "game": "crystal_saga", "pic": "guardian", "line": "Beat crystal guardians!", "try": {"CS_TRY": "guardian"}},
 	{"id": "saga-realm", "date": "2026-10-31", "game": "crystal_saga", "pic": "lumi", "line": "Pick a road on Lumi's map!"},
 	{"id": "saga-heroes", "date": "2026-10-31", "game": "crystal_saga", "pic": "healer", "line": "Be a healer or a bard!"},
@@ -450,6 +454,9 @@ static func tab(seen: Dictionary, on: bool, colour: Color, big: float = 1.0) -> 
 
 const VR_TILE := Vector2(300, 176)
 const VR_COLS := 5
+## At most this many rows on the VR wall (the newest / unseen first): five rows reached 1.68 m, past the head
+## (2026-10-31, 21 games with news). The rest stay on the TV / Deck board.
+const VR_MAX_ROWS := 4
 
 
 ## The VR picture wall (a Sprite3D showing a SubViewport). vr_update(wall, games, seen, selected) redraws it.
@@ -476,6 +483,7 @@ static func vr_update(wall: Sprite3D, games: Array, seen: Dictionary, selected: 
 		vp.remove_child(c)
 		c.queue_free()
 	var list := order(games, seen)
+	list = list.slice(0, VR_COLS * VR_MAX_ROWS)
 	var n_rows := maxi(1, ceili(float(list.size()) / VR_COLS))
 	var pad := 18.0
 	var head := 84.0

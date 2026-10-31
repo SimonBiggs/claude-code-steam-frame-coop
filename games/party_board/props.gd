@@ -23,7 +23,8 @@ const LIGHTHOUSE := Vector3(-9.6, 0.0, 8.9)
 const CLOUD_SPOTS: Array[Vector3] = [Vector3(-6.0, 7.5, 5.0), Vector3(5.5, 8.0, 3.0), Vector3(0.5, 7.2, -2.5),
 	Vector3(8.5, 7.6, -6.5)]
 const MM_SOUNDS := {"palm": "swish", "tree": "swish", "pine": "swish", "bush": "boing", "rock": "block",
-	"flower": "pop", "mushroom": "boing", "lolly": "pop", "cane": "ding", "gumdrop": "boing", "parasol": "swish"}
+	"flower": "pop", "mushroom": "boing", "lolly": "pop", "cane": "ding", "gumdrop": "boing", "parasol": "swish",
+	"pumpkin": "boing", "deadtree": "swish", "barrel": "block", "crystal": "ding", "dish": "beep"}
 
 var main: Node
 var board: Node3D
