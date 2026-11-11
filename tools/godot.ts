@@ -119,7 +119,11 @@ export async function launch(o: LaunchOpts | string): Promise<Game> {
     "gamescope", "--backend", "headless", "-W", String(w), "-H", String(h), "-w", String(w), "-h", String(h), "--",
     "bwrap", "--dev-bind", "/", "/", "--bind", hostTmp, "/tmp", "--die-with-parent", "godot", "--path", proj, "--audio-driver", "Dummy", "--xr-mode", "off", "--resolution", `${w}x${h}`, ...(opts.scene ? [opts.scene] : [])];
   await mkdir(join(dir, "run"), { recursive: true, mode: 0o700 });
-  const env = { ...process.env, ...(opts.vr ? { BOT_VR: "1" } : {}), SDL_JOYSTICK_HIDAPI: "0", XDG_RUNTIME_DIR: join(dir, "run"), GDEV_CONTROL_PORT: String(port), XDG_DATA_HOME: join(dir, "data"), DUO_PORT: String(opts.duoPort ?? port + 1000), ...opts.env };
+  const env = { ...process.env, ...(opts.vr ? { BOT_VR: "1" } : {}), SDL_JOYSTICK_HIDAPI: "0", XDG_RUNTIME_DIR: join(dir, "run"), GDEV_CONTROL_PORT: String(port), XDG_DATA_HOME: join(dir, "data"), DUO_PORT: String(opts.duoPort ?? port + 1000),
+    // An offscreen run is a test: saves + RUN lines go to test files (core/save.gd test_mode) and nothing is pushed to
+    // the Steam Machine's telemetry receiver (2026-11-11: an offscreen Deck-size Elemental Bender run landed in the
+    // family's real telemetry as a "deck" round). opts.env can still override both.
+    SAVE_TEST: "1", DUO_TELEMETRY_PUSH: "0", ...opts.env };
   for (const k of ["DUO_HOST", "DUO_JOIN"]) if (!opts.env?.[k]) delete env[k];  // local unless asked
   for (const k of ["DISPLAY", "WAYLAND_DISPLAY", "GAMESCOPE_WAYLAND_DISPLAY"]) delete env[k];  // never the TV's display
   const log = Bun.file(logPath).writer();

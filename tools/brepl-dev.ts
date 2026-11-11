@@ -249,6 +249,9 @@ const PERMANENT_WORKTREES = new Set([join(GP, "wt-merge")]);
 
 export async function debt() {
   const issues: { kind: string; what: string; fix: string }[] = [];
+  // The shared-globals guard (see installGlobalsGuard) must be live: without it agents' generic globals clash again.
+  try { (globalThis as any).__breplLint?.("(async () => (WT = 1\n))"); issues.push({ kind: "brepl-guard", what: "brepl's shared-globals guard is not refusing generic globals (WT = ...)", fix: "reload dev.ts (loadModule('dev')) and check installGlobalsGuard()" }); } catch {}
+  if (!(globalThis as any).__evalGuard) issues.push({ kind: "brepl-guard", what: "brepl's shared-globals guard is not installed", fix: "loadModule('dev')" });
   // Known bug patterns ("never just one ant"): flag every instance in the staging copy, not just the one we saw.
   const PATTERNS: { kind: string; files: string; bad: string; unless?: string; fix: string }[] = [
     { kind: "pad-A", files: "grab_focus", bad: "grab_focus", unless: "JOY_BUTTON_A|ui_input.gd|UiInput", fix: "should now work by design (UiKit.ensure_pad_ui_actions at startup); check the menu reaches it" },
@@ -364,6 +367,12 @@ export async function debt() {
     const runs = await playRuns();
     const newest = runs.reduce((m, r) => Math.max(m, Number(r.recv) || 0, Number(r.t) || 0), 0);
     const days = Math.floor((Date.now() / 1000 - newest) / 86400);
+    // A test run leaking into the family's real lines (2026-11-11: an offscreen Deck-size run on the Steam Machine
+    // arrived as a "deck" round from steammachine; godot.ts now sets SAVE_TEST + DUO_TELEMETRY_PUSH=0). The Steam
+    // Machine only really plays as the TV (or a flat host / with a Frame), never as a Deck.
+    const leaks = runs.filter((r: any) => r.device === "steammachine" && r.machine && !["tv", "frame", "host"].includes(String(r.machine)));
+    if (leaks.length) issues.push({ kind: "telemetry-test-leak", what: `${leaks.length} RUN line(s) from steammachine claim machine "${leaks[0].machine}" (${leaks.map((r: any) => r.game).slice(0, 3).join(", ")}): a test run pushed into the family's real telemetry`,
+      fix: "find the runner that started Godot without SAVE_TEST/DUO_TELEMETRY_PUSH=0 (godot-test and godot.ts set them), fix it, then delete those lines from ~/.cache/duo-arena/telemetry/steammachine.jsonl" });
     // Check-ins (every arcade start says hello even with nothing to send) tell "nobody played" from "can't reach us".
     const checkins: string[] = [];
     for (const f of await readdir(TELEMETRY_STORE).catch(() => [] as string[])) {
@@ -991,4 +1000,64 @@ export async function soloCheck(o: { only?: string[]; seconds?: number } = {}) {
 // fs as a brepl global (agents' snippets and the briefs use fs.promises.*): it used to exist only because an early
 // session set it by hand, so a brepl restart lost it (2026-10-31).
 import * as nodeFs from "node:fs";
-export function start() { (globalThis as any).fs ??= nodeFs; }
+// SHARED-GLOBALS GUARD (2026-11-11): brepl is ONE process for every agent, so globals are shared. One agent's bare
+// `WT = ...` overwrote another agent's WT mid-run and that agent's tests ran in the wrong worktree. The core compiles
+// each call with an indirect (0, eval)(...), so wrapping globalThis.eval lets brepl refuse a call that sets a GENERIC
+// global (1-3 letters like g/W/SP/WT, or WORKTREE/PROJ/ROOT/DIR/BRANCH/STAGE/LIVE/PORT) before any of it runs.
+// Use a local const inside the call, or a global prefixed with your branch (fishing_WT, fishing_g).
+// "//@shared-ok" anywhere in a call skips the check (for a deliberate, shared name).
+const GENERIC_GLOBAL = /^(?:[A-Za-z_$][\w$]{0,2}|WORKTREE|PROJ|PROJECT|ROOT|DIR|BRANCH|STAGE|LIVE|PORT)$/;
+export function genericGlobals(code: string): string[] {
+  if (code.includes("//@shared-ok")) return [];
+  code = stripLiterals(code);
+  const declared = new Set([...code.matchAll(/\b(?:const|let|var|function)\s+([A-Za-z_$][\w$]*)/g)].map(m => m[1]));
+  for (const m of code.matchAll(/\b(?:const|let|var)\s*[{[]([^}\]]*)[}\]]/g))
+    for (const p of m[1].split(/[,:\s=]+/)) if (p) declared.add(p.replace(/^\.\.\./, ""));
+  // parameters: (a, b) => / async (r) => / x => / function f(a, b = 2)
+  for (const m of code.matchAll(/\(([^()]*)\)\s*=>|\bfunction\b[^(]*\(([^()]*)\)|\b([A-Za-z_$][\w$]*)\s*=>/g))
+    for (const p of (m[1] ?? m[2] ?? m[3] ?? "").split(/[,{}\[\]\s=]+/)) if (p) declared.add(p);
+  const hit = new Set<string>();
+  for (const m of code.matchAll(/globalThis\.([A-Za-z_$][\w$]*)\s*(?:\?\?|\|\||&&)?=(?![=>])/g)) if (GENERIC_GLOBAL.test(m[1])) hit.add(m[1]);
+  for (const m of code.matchAll(/(?:^|\n|;|\{|\(|,)[ \t]*([A-Za-z_$][\w$]*)[ \t]*(?:\?\?|\|\||&&)?=(?![=>])/g))
+    if (GENERIC_GLOBAL.test(m[1]) && !declared.has(m[1])) hit.add(m[1]);
+  return [...hit];
+}
+// Strings, template literals, regex-free comments -> blanks, so text like "WT = 1" inside a string or a shell command
+// (`DUO_PORT=1 godot-test ...`) never counts as an assignment.
+function stripLiterals(s: string): string {
+  let out = "", i = 0;
+  while (i < s.length) {
+    const c = s[i];
+    if (c === "/" && s[i + 1] === "/") { while (i < s.length && s[i] !== "\n") i++; continue; }
+    if (c === "/" && s[i + 1] === "*") { const e = s.indexOf("*/", i + 2); i = e < 0 ? s.length : e + 2; out += " "; continue; }
+    if (c === "'" || c === '"' || c === "`") {
+      let depth = 0; i++;
+      while (i < s.length) {
+        if (s[i] === "\\") { i += 2; continue; }
+        if (c === "`" && s[i] === "$" && s[i + 1] === "{") { depth++; i += 2; continue; }
+        if (c === "`" && depth && s[i] === "}") { depth--; i++; continue; }
+        if (s[i] === c && !depth) { i++; break; }
+        if (c !== "`" && s[i] === "\n") break;
+        i++;
+      }
+      out += '""'; continue;
+    }
+    out += c; i++;
+  }
+  return out;
+}
+function installGlobalsGuard() {
+  const g: any = globalThis;
+  g.__breplLint = (src: string) => {
+    if (typeof src !== "string" || !src.startsWith("(async () =>")) return;
+    const names = genericGlobals(src);
+    if (names.length) throw new Error(`refused: this call sets the shared global${names.length > 1 ? "s" : ""} ${names.join(", ")}. brepl is ONE process for every agent, so another agent's call can overwrite a generic global (2026-11-11: a WT was overwritten and tests ran in the wrong worktree). Use a local const inside the call, or prefix the global with your branch (e.g. fishing_${names[0]}). Nothing ran.`);
+  };
+  if (!g.__evalGuard) {
+    const orig = g.eval;
+    const guarded = function (src: any) { g.__breplLint?.(src); return orig(src); };
+    g.eval = guarded;
+    g.__evalGuard = true;
+  }
+}
+export function start() { (globalThis as any).fs ??= nodeFs; installGlobalsGuard(); }

@@ -21,7 +21,7 @@ const TOOL = {
   description: [
     "Run JavaScript/TypeScript in Claude's persistent async Bun REPL (state survives between calls: bare `x = 1` and globalThis persist; top-level await; the last expression is returned).",
     "Images come back as pictures: call show(path, ...) or return an image path (or array of paths).",
-    "Preloaded: godot (offscreen Godot runs: g = await godot.launch('duo-arena'); g.uiText(), g.joy('a'), g.action('ui_accept'), g.eval(gdscript), g.shot(), g.at(t), g.span(from, to, fps) -> frame/movement/motion sheets with sound + inputs, g.video(), g.quit())",
+    "Preloaded: godot (offscreen Godot runs: const g = await godot.launch('duo-arena') (one process for every agent: generic globals like g/WT/SP are refused; use const or a branch prefix, fishing_g); g.uiText(), g.joy('a'), g.action('ui_accept'), g.eval(gdscript), g.shot(), g.at(t), g.span(from, to, fps) -> frame/movement/motion sheets with sound + inputs, g.video(), g.quit())",
     "Calls return within 3 s: anything longer becomes a background job whose result goes to the channel (collect with brepl_poll; a Monitor on ~/.cache/brepl/channel.jsonl signals new entries). bg(name, async ({log, show}) => ...) backgrounds explicitly; send(source, text, images) and pipe(source, stream) write to the channel.",
     "And dev (dev.help() lists the dev-loop helpers: bots, debt scan, stage/deploy, live game, screen, voice, pace, backlog, history).",
   ].join(" "),
