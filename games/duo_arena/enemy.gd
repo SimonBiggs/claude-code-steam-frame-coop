@@ -5,6 +5,7 @@ extends CharacterBody3D
 ## and armoured ankylos (ankylo): bullets bounce off the shell until the VR sword (or dashes) crack it.
 
 const EnemyShotScript := preload("res://games/duo_arena/enemy_shot.gd")
+const Bosses := preload("res://games/duo_arena/bosses.gd")
 const KINDS := {
 	"grunt": {"hp": 3.0, "speed": 3.6, "radius": 0.55, "color": Color(0.95, 0.25, 0.3), "dps": 30.0, "points": 100, "drop": 0.06},
 	"runner": {"hp": 1.0, "speed": 6.8, "radius": 0.4, "color": Color(1.0, 0.55, 0.1), "dps": 20.0, "points": 150, "drop": 0.05},
@@ -507,7 +508,7 @@ func _dino_behaviour(delta: float, dist: float) -> void:
 		speed_scale = 3.0 if kind == "rex" else 2.8
 		if charge_t <= 0.0:
 			speed_scale = 1.0
-	elif dist < reach and charge_cd <= 0.0 and slam_t > 1.0:
+	elif dist < reach and charge_cd <= 0.0 and slam_t > (4.0 if kind == "rex" else 1.0):  # (rex: never charge into a stomp tell)
 		charge_t = 1.5 if kind == "rex" else 1.3
 		charge_cd = 4.0 if kind == "rex" else 5.0
 		main.sound("roar", -2.0, 0.8 if kind == "rex" else 1.2)
@@ -605,76 +606,79 @@ func _ptero_behaviour(delta: float, to_dir: Vector3, dist: float) -> Vector3:
 	return dir
 
 
-## Boss: every few seconds, telegraph (glow + red ring) then slam the ground around it.
+## Boss: every few seconds, TELL (a growing glow, the boss stands still, a pulsing red ring stays on the floor where
+## it will land, on every machine) then SLAM the ground round it. Numbers per mode: bosses.gd numbers().
 func _boss_behaviour(delta: float) -> void:
 	age += delta
-	var slam_r := 5.5 if kind == "omega" else 4.5
+	var angry := hp < max_hp * 0.5 or age > 45.0
+	if angry and not has_meta("enraged"):
+		set_meta("enraged", true)
+		main._show_center("THE BOSS IS ANGRY!", 1.5)
+	var n := Bosses.numbers(kind, main.game_mode, angry)
 	if age > 30.0 and mat.albedo_color != Color.WHITE:
 		body_albedo = color.darkened(0.45).lerp(Color(1.0, 0.1, 0.1), clampf((age - 30.0) / 30.0, 0.0, 0.8))
+	var tell := float(n.tell)
 	var before := slam_t
 	slam_t -= delta
-	if before > 1.0 and slam_t <= 1.0:
-		main._ring(global_position, slam_r, Color(1.0, 0.1, 0.1))
-		main.net.event("ring", [global_position, slam_r, Color(1.0, 0.1, 0.1)])
+	if before > tell and slam_t <= tell:
+		main.boss_warn(global_position, float(n.radius), Color(1.0, 0.1, 0.1), slam_t)
 		main.sound("spit", 0.0, 0.5)
-	if slam_t <= 1.0:
-		mat.emission_energy_multiplier = 0.5 + (1.0 - slam_t) * 6.0  # charging glow
-		speed_scale = 0.2
+	if slam_t <= tell:
+		mat.emission_energy_multiplier = 0.5 + (1.0 - slam_t / tell) * 6.0  # charging glow
+		speed_scale = 0.0  # stands still while it tells: the ring stays true
 	if slam_t > 0.0:
 		return
-	slam_t = maxf(2.5, 6.0 - maxf(0.0, age - 20.0) / 10.0)  # enrage: faster slams the longer it lives
+	slam_t = float(n.every)
 	slam_count += 1
-	if slam_t <= 2.6 and not has_meta("enraged"):
-		set_meta("enraged", true)
-		main._show_center("THE BOSS IS ENRAGED!", 1.5)
-	print("Boss slam %d" % slam_count)
+	print("Boss slam %d (%s, tell %.1f s)" % [slam_count, main.game_mode, tell])
 	speed_scale = 1.0
 	mat.emission_energy_multiplier = 0.35
 	for p in main.players:
-		if not p.is_down and p.global_position.distance_to(global_position) < slam_r:
-			p.take_damage(18.0, global_position)
-	main.shockwave(global_position, slam_r, 0.0, 0.0, color)
+		if not p.is_down and p.global_position.distance_to(global_position) < float(n.radius):
+			p.take_damage(float(n.damage), global_position)
+	main.shockwave(global_position, float(n.radius), 0.0, 0.0, color)
 	main.add_shake(global_position, 0.5)
 	main.sound("big_kill", 0.0, 0.7)
-	if slam_count % 2 == 0:
-		main.split_enemy.call_deferred(global_position, 2, "raptor" if kind == "omega" else "runner")
+	if slam_count % 2 == 0 and int(n.helpers) > 0:
+		main.split_enemy.call_deferred(global_position, int(n.helpers), String(n.helper))
 
 
 ## King Rex: charges like a dino, and every few seconds rears up and STOMPS (dodge the red ring).
-## Every other stomp a pair of raptors hatches. Below 40% health he gets angry and stomps faster.
+## Every other stomp raptors hatch (not in gentle). Below half health he gets angry and stomps faster.
 func _rex_behaviour(delta: float) -> void:
 	age += delta
-	var angry := hp < max_hp * 0.4
+	var angry := hp < max_hp * 0.5
 	if angry and not has_meta("angry"):
 		set_meta("angry", true)
 		main._show_center("KING REX IS ANGRY!", 1.5)
 		main.sound("roar", 2.0, 0.6)
+	var n := Bosses.numbers(kind, main.game_mode, angry)
+	var tell := float(n.tell)
 	var before := slam_t
 	slam_t -= delta
-	if before > 1.0 and slam_t <= 1.0:
-		main._ring(global_position, 5.5, Color(1.0, 0.1, 0.1))
-		main.net.event("ring", [global_position, 5.5, Color(1.0, 0.1, 0.1)])
+	if before > tell and slam_t <= tell:
+		main.boss_warn(global_position, float(n.radius), Color(1.0, 0.1, 0.1), slam_t)
 		main.sound("roar", 0.0, 0.7)
 		charge_t = 0.0
-	if slam_t <= 1.0:
-		mat.emission_energy_multiplier = 0.5 + (1.0 - slam_t) * 5.0
-		speed_scale = 0.15
-		mesh.rotation.x = (1.0 - slam_t) * 0.35  # rear up
+	if slam_t <= tell:
+		mat.emission_energy_multiplier = 0.5 + (1.0 - slam_t / tell) * 5.0
+		speed_scale = 0.0
+		mesh.rotation.x = (1.0 - slam_t / tell) * 0.35  # rear up
 	if slam_t > 0.0:
 		return
-	slam_t = 4.5 if angry else 7.0
+	slam_t = float(n.every)
 	slam_count += 1
 	speed_scale = 1.0
 	mesh.rotation.x = 0.0
 	mat.emission_energy_multiplier = 0.3
 	for p in main.players:
-		if not p.is_down and p.global_position.distance_to(global_position) < 5.5:
-			p.take_damage(16.0, global_position)
-	main.shockwave(global_position, 5.5, 0.0, 0.0, color)
+		if not p.is_down and p.global_position.distance_to(global_position) < float(n.radius):
+			p.take_damage(float(n.damage), global_position)
+	main.shockwave(global_position, float(n.radius), 0.0, 0.0, color)
 	main.add_shake(global_position, 0.7)
 	main.sound("big_kill", 0.0, 0.5)
-	if slam_count % 2 == 0:
-		main.split_enemy.call_deferred(global_position, 2, "raptor")
+	if slam_count % 2 == 0 and int(n.helpers) > 0:
+		main.split_enemy.call_deferred(global_position, int(n.helpers), String(n.helper))
 
 
 func _ranged_behaviour(delta: float, target, dist: float) -> void:

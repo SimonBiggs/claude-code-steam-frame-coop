@@ -135,15 +135,13 @@ static func build(main: Node3D, radius: float) -> void:
 	wall_inst.position.y = 1.5
 	main.add_child(wall_inst)
 
-	var pillar_colors := [Color(1.0, 0.3, 0.6), Color(0.3, 1.0, 0.6), Color(1.0, 0.6, 0.2), Color(0.6, 0.4, 1.0)]
-	var spots := [Vector3(-7, 0, -6), Vector3(7, 0, -6), Vector3(-7, 0, 6), Vector3(7, 0, 6)]
-	for i in spots.size():
-		_add_pillar(main, spots[i], pillar_colors[i])
+	# Cover pillars are seeded per zone (zone.gd add_pillar).
 
 	_add_skyline(main, radius)
 
 
-static func _add_pillar(main: Node3D, pos: Vector3, accent: Color) -> void:
+## A cover pillar (zone.gd builds the seeded ones under `parent`).
+static func add_pillar(main: Node3D, pos: Vector3, accent: Color, parent: Node3D = null) -> void:
 	var body := StaticBody3D.new()
 	body.collision_layer = 1
 	body.collision_mask = 0
@@ -179,7 +177,7 @@ static func _add_pillar(main: Node3D, pos: Vector3, accent: Color) -> void:
 	light.position.y = 3.4
 	body.add_child(light)
 	body.position = pos
-	main.add_child(body)
+	(parent if parent != null else main).add_child(body)
 
 
 ## Distant neon towers, drawn as two MultiMeshes (towers + glowing stripes) instead of ~140 nodes.
