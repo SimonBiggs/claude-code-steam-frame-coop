@@ -416,6 +416,7 @@ func _deep_checks(mode: String) -> void:
 		kit.assert_true(int((pd["bosses"] as Dictionary).get(dp.mode, 0)) & 1 != 0, "%s: the boss win was saved (perk + hat unlocked)" % mode)
 		kit.assert_true(dp.unlocked_hats().has("wizard") and int(dp.perks()["potion"]) == 1, "%s: the Slime King unlocks the wizard hat and a starting potion" % mode)
 		kit.assert_true(int(t["bought"]) >= 1 or main.heroes.is_empty(), "%s: something was bought in a shop (%d)" % [mode, int(t["bought"])])
+		kit.assert_true(int(t.get("wishes", 0)) >= 1 and int(pd.get("wishes", 0)) >= 1, "%s: Cinder's wish came true at least once and was saved (%d kept, %s)" % [mode, int(t.get("wishes", 0)), str(dp.runrec.get("wishes", []))])
 		# The relic altar after floor 2: every TV hero took a relic, and it's in their stats; the hoard grew.
 		for s0 in dp.stats:
 			if not dp._is_knight(int(s0)):

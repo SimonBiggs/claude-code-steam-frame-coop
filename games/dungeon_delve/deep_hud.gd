@@ -9,11 +9,16 @@ const FloorGen := preload("res://games/dungeon_delve/floorgen.gd")
 const Loot := preload("res://games/dungeon_delve/loot.gd")
 const Relics := preload("res://games/dungeon_delve/relics.gd")
 const Classes := preload("res://games/dungeon_delve/classes.gd")
+const Wishes := preload("res://games/dungeon_delve/wishes.gd")
 
 var party: Node
 var zone_label: Label
 var gold_label: Label
 var key_label: Label
+var wish_box: HBoxContainer  ## Cinder's wish: its picture, how far along, a tick when kept
+var wish_icon: Control
+var wish_label: Label
+var wish_mark: Control
 var top_card: PanelContainer
 var boss_box: VBoxContainer
 var boss_name: Label
@@ -49,6 +54,17 @@ func setup(root: Control, p_party: Node) -> void:
 	row.add_child(UiKit.icon("key", "gold", 28.0))
 	key_label = UiKit.label("0", "small", "gold")
 	row.add_child(key_label)
+	wish_box = UiKit.hbox(6)
+	row.add_child(wish_box)
+	wish_box.add_child(UiKit.spacer(8.0))
+	wish_box.add_child(UiKit.icon("star", "gold", 22.0))
+	wish_icon = UiKit.icon("eye", "magic", 28.0)
+	wish_box.add_child(wish_icon)
+	wish_label = UiKit.label("", "small", "text")
+	wish_box.add_child(wish_label)
+	wish_mark = UiKit.icon("check", "good", 26.0)
+	wish_box.add_child(wish_mark)
+	wish_box.visible = false
 	map = MiniMap.new()
 	add_child(map)
 	boss_box = UiKit.vbox(4)
@@ -94,6 +110,26 @@ func set_floor(f: Dictionary) -> void:
 	pill_key = ""
 
 
+## Cinder's wish ([id, n, done, state] from deep.gd): picture + "2/3"; a tick when kept, a cross when lost.
+func _show_wish(a: Array) -> void:
+	wish_box.visible = a.size() >= 4 and Wishes.KINDS.has(String(a[0]))
+	if not wish_box.visible:
+		return
+	var k: Dictionary = Wishes.KINDS[String(a[0])]
+	wish_icon.set("kind", String(k["icon"]))
+	wish_icon.set("color", UiKit.color_of(k["color"]))
+	var n := int(a[1])
+	wish_label.text = "%d/%d" % [int(a[2]), n] if n > 1 else ""
+	wish_label.visible = n > 1
+	var st := String(a[3])
+	wish_mark.visible = st != "on"
+	wish_mark.set("kind", "check" if st == "kept" else "cross")
+	wish_mark.set("color", UiKit.color_of("good" if st == "kept" else "bad"))
+	wish_box.modulate.a = 0.5 if st == "lost" else 1.0
+	if st == "kept":
+		UiKit.pulse(wish_box, 1.25, 0.25)
+
+
 func on_state(key: String, value: Variant, deep: Node) -> void:
 	match key:
 		"d_gold":
@@ -101,6 +137,8 @@ func on_state(key: String, value: Variant, deep: Node) -> void:
 			UiKit.pulse(gold_label, 1.15, 0.15)
 		"d_keys":
 			key_label.text = str(int(value))
+		"d_wish":
+			_show_wish(value if value is Array else [])
 		"d_boss":
 			var a: Array = value if value is Array else []
 			boss_box.visible = a.size() >= 2

@@ -7,6 +7,9 @@ extends Node3D
 ##  - HEROES (classes.gd): bonk a statue in the practice room to be a KNIGHT, ARCHER or WIZARD.
 ##  - CINDER'S HOARD: every coin you pick up goes into Cinder's hoard for good (bosses add a pile); a big
 ##    enough hoard unlocks new heroes and new relics (the gold pile in the practice room shows it).
+##  - CINDER'S WISH (wishes.gd): every floor she wishes for one thing, a picture next to the floor name (find
+##    the hidden room, open 3 chests, open the switch door, bop 12 monsters, nobody knocked out - always on a
+##    boss floor). Kept: a heart back for everyone and a gold pile for her hoard; saved as deep.wishes.
 ##  - Hearts: heroes have 4 (HEROIC 3), the knight one more (heart containers: up to 8). At zero you're knocked out; a friend
 ##    standing next to you fills your ring and you pop back up (2 hearts). Everyone out = back to the
 ##    first floor of the zone (the checkpoint) with what you had then; HEROIC has no checkpoints: the
@@ -46,6 +49,7 @@ const Creatures := preload("res://core/creatures.gd")
 const Telemetry := preload("res://core/telemetry.gd")
 const Relics := preload("res://games/dungeon_delve/relics.gd")
 const Classes := preload("res://games/dungeon_delve/classes.gd")
+const Wishes := preload("res://games/dungeon_delve/wishes.gd")
 
 const DIFF := {
 	"brave": {"hp": 1.25, "spd": 1.08, "dmg": 0, "checkpoints": true, "potions": 1, "auto_revive": true, "hearts": 4},
@@ -65,6 +69,7 @@ const CLASS_SPOTS := {"knight": Vector3(3.75, 0.0, -1.3), "archer": Vector3(3.75
 const HOARD_SPOT := Vector3(-3.2, 0.0, 1.05)
 const ALTAR_SPOTS: Array[Vector2] = [Vector2(2.3, 4.2), Vector2(3.6, 3.3), Vector2(4.3, 1.9)]  ## relic stones at the camp
 const BOSS_HOARD := 40  ## a boss adds this (x biome) to Cinder's hoard
+const WISH_HOARD := 15  ## a kept wish adds this (x biome) to Cinder's hoard
 const SHOP_SPOTS: Array[Vector2] = [Vector2(-3.0, 0.2), Vector2(-1.0, 0.2), Vector2(1.0, 0.2), Vector2(3.0, 0.2)]
 
 var main: Node
@@ -123,9 +128,12 @@ var _gold := 0
 var _keys := 0
 var tally := {"kills": 0, "floors": [], "bosses": 0, "wipes": 0, "revives": 0, "keys": 0, "doors": 0, "secrets": 0,
 	"puzzles": 0, "bought": 0, "potions": 0, "hurts": 0, "blocks": 0, "reflects": 0, "rooms": 0, "downs": 0,
-	"pickups": 0, "checkpoints": 0, "zones": {}, "bombs": 0, "abilities": 0, "traps": 0, "chests": 0, "by": {}}
+	"pickups": 0, "checkpoints": 0, "zones": {}, "bombs": 0, "abilities": 0, "traps": 0, "chests": 0, "by": {}, "wishes": 0}
 var src := ""  ## what is hurting someone right now (tests: tally["by"])
 var runrec := {}  ## this run, for core/telemetry.gd (written at the end or on quit)
+var wish := {}  ## Host: this floor's CINDER'S WISH (wishes.gd): {"id", "n"}, {} in the shop camp
+var wish_base := 0  ## the tally count when the floor started
+var wish_state := ""  ## "on", "kept" or "lost"
 var relic_group := 0
 var relic_taken := {}  ## group -> {slot: true}: boss treasures, one each
 var altar_group := 0  ## the relic altar's group at this camp (0: none)
@@ -573,6 +581,8 @@ func progress() -> Dictionary:
 		pd["hoard"] = 0
 	if not pd.has("runs"):
 		pd["runs"] = 0
+	if not pd.has("wishes"):
+		pd["wishes"] = 0  ## Cinder's wishes kept, ever (wishes.gd)
 	return pd
 
 
@@ -757,11 +767,13 @@ func start_run(m: String) -> void:
 	runrec = {"mode": mode, "daily": daily, "seed": seed_v, "players": kinds, "solo": kinds.size() == 1,
 		"floor_times": [], "kos": [], "gold_in": 0, "gold_out": 0, "items": [], "relics": [], "bosses": [],
 		"clock": 0.0, "floor_t0": 0.0, "boss_t0": 0.0, "boss_phase": 1, "done": false,
-		"start_floor": FloorGen.global_floor(zone, floor_i), "classes": [], "hoard0": hoard(), "unlocks": [], "offers": []}
+		"start_floor": FloorGen.global_floor(zone, floor_i), "classes": [], "hoard0": hoard(), "unlocks": [], "offers": [], "wishes": []}
 	for pl2 in _players():
 		(runrec["classes"] as Array).append(class_of(int((pl2 as Dictionary)["slot"])))
 	fang.clear()
 	pet_cd.clear()
+	wish = {}
+	wish_state = ""
 	net.state_set("phase", "deep")
 	main.monsters.clear()
 	load_floor(zone, floor_i, "floor")
@@ -769,10 +781,12 @@ func start_run(m: String) -> void:
 
 
 func load_floor(z: int, fl: int, k: String) -> void:
+	_wish_floor_done()
 	zone = z
 	floor_i = fl
 	kind = k
 	f = FloorGen.generate(seed_v, z, fl, mode == "heroic", k)
+	_wish_start()
 	foes.clear()
 	tele.clear()
 	_build_floor(f)
@@ -1184,9 +1198,82 @@ func host_step(delta: float) -> void:
 	_revive_step(delta, alive)
 	_stairs_step(delta, alive)
 	_knight_step(delta)
+	_wish_step()
 	if not _players().is_empty() and alive.is_empty():
 		_wipe()
 	_flush()
+
+
+# --- Cinder's wish (wishes.gd) ----------------------------------------------------------------------
+
+## Host: a new floor, a new wish.
+func _wish_start() -> void:
+	wish = Wishes.pick(f)
+	wish_state = "on" if not wish.is_empty() else ""
+	wish_base = int(tally.get(String((Wishes.KINDS[wish["id"]] as Dictionary)["tally"]), 0)) if not wish.is_empty() else 0
+	_sync_wish()
+
+
+func _wish_progress() -> int:
+	if wish.is_empty():
+		return 0
+	return int(tally.get(String((Wishes.KINDS[wish["id"]] as Dictionary)["tally"]), 0)) - wish_base
+
+
+func _sync_wish() -> void:
+	if wish.is_empty():
+		net.state_set("d_wish", [])
+		return
+	var shown := 0 if String(wish["id"]) == "safe" else mini(_wish_progress(), int(wish["n"]))
+	net.state_set("d_wish", [String(wish["id"]), int(wish["n"]), shown, wish_state])
+
+
+## Host, every step: kept the moment it's done; the heart wish is lost at the first knockout.
+func _wish_step() -> void:
+	if wish_state != "on":
+		return
+	var p := _wish_progress()
+	if String(wish["id"]) == "safe":
+		if p > 0:
+			_wish_end(false)
+		return
+	var shown: Array = net.state_get("d_wish", [])
+	if shown.size() >= 3 and int(shown[2]) != mini(p, int(wish["n"])):
+		_sync_wish()
+	if p >= int(wish["n"]):
+		_wish_end(true)
+
+
+## Host: leaving a floor (stairs, wipe, checkpoint): the heart wish is kept if nobody got knocked out.
+func _wish_floor_done() -> void:
+	if wish_state != "on" or wish.is_empty():
+		return
+	_wish_end(String(wish["id"]) == "safe" and _wish_progress() == 0 and active and String(net.state_get("d_phase", "play")) == "play")
+
+
+func _wish_end(kept: bool) -> void:
+	wish_state = "kept" if kept else "lost"
+	if runrec.has("wishes"):
+		(runrec["wishes"] as Array).append([String(wish["id"]), 1 if kept else 0])
+	_sync_wish()
+	if not kept:
+		return
+	tally["wishes"] = int(tally["wishes"]) + 1
+	var pd := progress()
+	pd["wishes"] = int(pd.get("wishes", 0)) + 1
+	main.save.mark_dirty()
+	for s in stats:
+		var st: Dictionary = stats[s]
+		if not bool(st["down"]):
+			st["hp"] = mini(int(st["max"]), int(st["hp"]) + 1)
+	stats_dirty = true
+	_add_hoard(WISH_HOARD * (mini(zone, 7) + 1))
+	net.event("d_banner", ["WISH!", "level"])
+	main.story({"who": "CINDER", "line": "My wish came true!", "pic": "cinder", "color": "ffd25a", "duration": 2.5})
+	var at := _feet_of(int(_players()[0]["slot"])) if not _players().is_empty() else Vector3.ZERO
+	main.sound_at("power_up", at, -2.0)
+	main.confetti(at + Vector3(0, 1.0, 0), Color(1.0, 0.85, 0.3), 40)
+	net.event("confetti", [at + Vector3(0, 1.0, 0), Color(1.0, 0.85, 0.3), 40])
 
 
 func _flush() -> void:
