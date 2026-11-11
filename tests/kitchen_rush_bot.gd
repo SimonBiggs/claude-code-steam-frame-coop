@@ -909,7 +909,10 @@ func _checks() -> Array:
 			out.append(["a story card arrived", main.story_count > 0])
 		return out
 	out.append(["customers were served", main.served_total >= 1])
-	out.append(["got past the first round", max_shift >= 2 or OS.has_environment("KR_START_SHIFT")])
+	# Round 1 is over once its break starts (in_break in shift 1): the gift pick and the 2.5 s break after it can
+	# push shift 2 a second past a 60 s run (2026-11-11: BOT_VR failed 2 of 2 at t=60 with shift 1 done at t=53).
+	var past_first: bool = max_shift >= 2 or (main.shift >= 1 and main.in_break)
+	out.append(["got past the first round", past_first or OS.has_environment("KR_START_SHIFT")])
 	if main.simple:
 		out.append(["story cards shown", main.story_count > 0])
 		out.append(["a party round was made", not main.round_info.is_empty()])
