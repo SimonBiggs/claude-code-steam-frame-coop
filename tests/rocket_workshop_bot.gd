@@ -597,6 +597,20 @@ func _deep_final() -> void:
 		_check("no_meteors_alone", main.hazards.seen == 0, "%d told" % main.hazards.seen)
 
 
+## Screenshots (brepl offscreen runs): a camera in P2's view looking down at a spot from up high and to the front,
+## freed after secs (never touches the view's own camera).
+func debug_cam(at: Vector3, secs: float = 4.0) -> bool:
+	var p2 = main.players[1]
+	if p2.camera == null:
+		return false
+	var cam := Camera3D.new()
+	p2.camera.get_parent().add_child(cam)
+	cam.global_transform = preload("res://core/ui_kit.gd").aim_from(at + Vector3(0.0, 7.0, 6.0), at)
+	cam.current = true
+	get_tree().create_timer(secs).timeout.connect(cam.queue_free)
+	return true
+
+
 ## The first active crew member this machine walks (it takes the odd gift picks).
 func _first_crew():
 	for q in main.players:

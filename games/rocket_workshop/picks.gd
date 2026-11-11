@@ -68,8 +68,8 @@ func show_row(new_stage: String, entries: Array, at: Array) -> void:
 	if new_stage == "" or entries.is_empty() or at.size() < entries.size():
 		orbs.clear()
 		return
-	orbs.show_orbs(new_stage, entries, at[0], Deep.ROW_GAP, 0.0, {"at": at, "scale": Deep.ORB_SCALE, "pop": true, "font": 48,
-		"label_y": 1.15, "label_px": 0.0016, "two_lines": true, "touch": 0.0, "bob": 0.02})
+	orbs.show_orbs(new_stage, entries, at[0], Deep.ROW_GAP, 0.0, {"at": at, "scale": Deep.ORB_SCALE, "pop": true, "font": 56,
+		"label_y": 0.9, "label_px": 0.004, "two_lines": true, "touch": 0.0, "bob": 0.02})
 
 
 ## Orb i's middle in the world (bots go there), INF if none.
