@@ -9,7 +9,8 @@ const COLOR := Color(0.94, 0.72, 0.9)
 
 
 ## data: the raw save (no defaults filled in: always .get with a default). today: Seeded.today().
-## grown: every party served (one gift each; the shelf keeps the newest 500); daily: TODAY'S PARTY done today.
+## grown: every party served (one gift each; the shelf keeps the newest 500; the café also grows decorations from
+## it, nights.gd CAFE_STEPS); daily: TODAY'S PARTY done today (stamped when it FINISHES).
 static func progress_summary(data: Dictionary, today: String) -> Dictionary:
 	var gifts: Variant = data.get("gifts", [])
 	return {"grown": maxi(int(data.get("rounds", 0)), (gifts as Array).size() if gifts is Array else 0),
@@ -19,4 +20,5 @@ static func progress_summary(data: Dictionary, today: String) -> Dictionary:
 ## A save as the game writes it after a few days (tests/progress_test.gd: it must read as grown > 0, daily done).
 static func sample(today: String) -> Dictionary:
 	return {"gifts": [["teapot", false, "granny"], ["balloon", true, "kid"], ["teapot", true, "granny"]],
-		"visits": {"granny": 2, "kid": 1}, "rounds": 3, "best_round": 3, "served": 24, "daily": today}
+		"visits": {"granny": 2, "kid": 1}, "rounds": 3, "best_round": 3, "served": 24, "daily": today, "mode": "gentle",
+		"themes": {"pancake": 2, "pizza": 1}, "modes": {"gentle": 2, "brave": 1}}

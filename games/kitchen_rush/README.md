@@ -61,6 +61,33 @@ at the counter; the **TV runners fetch** ingredients to the pass and **carry pla
 - **Telemetry:** one `RUN: {json}` line per round (party, daily, who picked, menu, served, grumpy, seconds,
   star served, cookies left, runners, vr, solo, gifts, seed, end).
 
+### Second pass: theme nights, modes, chef gifts, kitchen events, a growing café (`nights.gd`)
+
+- **Theme nights** (seeded by the day, every machine the same): PIZZA NIGHT, PANCAKE DAY or PICNIC DAY. Gran's
+  picture card says it after the mode pick; a picture board left of the back door and bunting in the theme's colours
+  dress the café (`decor.gd`). The theme's dish joins the menus from round 3 and the party menus lean towards the
+  theme's dishes. PANCAKE DAY brings a new dish, **PANCAKES** = dough + berries from the new **berry bush** in the
+  garden. `KR_THEME=pancake` forces a theme (What's New "try").
+- **Mode** (shared pick orbs, `picks.gd` on `core/pick_orbs.gd`): GENTLE / BRAVE / HARD float over the counter
+  after the practice toastie. A runner walks up to the pass under one, the VR chef touches one, the button chef
+  grabs at the counter under one; nobody in 14 s: the middle one (the family's last mode). Gentle: more patience,
+  a slower pace, fewer waiting, one kitchen event a round; Hard: less patience, a quicker pace, three events.
+- **Gran's chef gifts** before rounds 2, 4, 6 and 8 on the same orbs (three not taken yet; they last the visit):
+  QUICK KNIFE (one chop less), BIG POT (soup on the window ledge: guests wait 25% longer), HELPER MOUSE (scurries a
+  missing ingredient to the pass every 14 s), SKATES (runners 20% faster and never slow down in spills).
+  `KR_PERKS=knife,pot` starts with gifts (tests).
+- **Kitchen events** from round 2 (`events.gd`): OVEN SMOKE (a cloud in front of the stove) and SPILLS (a puddle and
+  a tipped bucket on the runners' busy floor). Each is told 3 s early by warning rings on the floor
+  (`core/warn_rings.gd`) and a picture card (SMOKE! / SPLASH!); then for 9 s runners inside move at half speed.
+  Never on a crate, the pass, the window or the back door.
+- **The café grows** with every party served (saved `rounds`): fairy lights (2), a fish tank (4), a piano (7),
+  lanterns (10), a cake stand (14), a fountain outside the window (18), a gold star over the back door (24), a
+  chandelier (32), each told on a THE CAFE GROWS! card. `KR_CAFE=8` shows them all (screenshots).
+- **Fair:** `tests/kitchen_rush_rounds_test.gd` also makes every round in all three modes for every theme and checks
+  GENTLE <= BRAVE <= HARD in every pressure number, events spaced, late enough to be warned, clear of every place a
+  runner must stand, the kitchen model (which counts each event as a delay) serving every order in time, gift offers
+  and the café steps. Save keys added: `mode`, `themes`, `modes` (defaults merge: no layout change).
+
 The rest of this file describes the full game (`SIMPLE_MODE := false`).
 
 **A day in the kitchen:** BREAKFAST, LUNCH and DINNER shifts. Each shift is rated with up to three big
