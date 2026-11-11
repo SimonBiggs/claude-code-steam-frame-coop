@@ -33,6 +33,10 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "bender-islands", "date": "2026-11-11", "game": "elemental_bender", "pic": "iceshelf", "line": "Travel to new islands!", "try": {"EB_ARENA": "ice"}},
+	{"id": "bender-bosses", "date": "2026-11-11", "game": "elemental_bender", "pic": "lavadrake", "line": "A boss on every island!", "try": {"EB_ARENA": "volcano"}},
+	{"id": "bender-gifts", "date": "2026-11-11", "game": "elemental_bender", "pic": "giftstone", "line": "Pick a gift every wave!"},
+	{"id": "bender-masters", "date": "2026-11-11", "game": "elemental_bender", "pic": "fireball", "line": "Choose your element master!"},
 	{"id": "delve-wishes", "date": "2026-11-11", "game": "dungeon_delve", "pic": "hoard", "line": "Grant Cinder's wishes!", "try": {"DD_TRY": "brave"}},
 	{"id": "delve-tougher", "date": "2026-11-11", "game": "dungeon_delve", "pic": "cinder", "line": "Brave is tougher now!", "try": {"DD_TRY": "brave"}},
 	{"id": "party-boards", "date": "2026-10-31", "game": "party_board", "pic": "hauntedhouse", "line": "Five party boards to visit!", "try": {"PB_BOARD": "haunted"}},

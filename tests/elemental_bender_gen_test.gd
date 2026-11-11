@@ -16,8 +16,12 @@ const Main := preload("res://games/elemental_bender/main.gd")
 const Pics := preload("res://games/elemental_bender/story_pictures.gd")
 const Seeded := preload("res://core/seeded.gd")
 const StoryCard := preload("res://core/story_card.gd")
+const Arenas := preload("res://games/elemental_bender/arenas.gd")
+const Bosses := preload("res://games/elemental_bender/bosses.gd")
+const Boons := preload("res://games/elemental_bender/boons.gd")
 
 var fails := 0
+const E_FIRE := 3
 
 
 func _init() -> void:
@@ -29,15 +33,33 @@ func _init() -> void:
 			for players in range(1, G.MAX_PLAYERS + 1):
 				for n in range(1, G.MAX_WAVE + 1):
 					all.append(G.plan(s, n, players))
+			# The other islands (only ever from wave 6 on): a few party sizes.
+			for a in Arenas.ids():
+				if a == "temple":
+					continue
+				all.append({"island": a, "seed": Arenas.layout_seed(s, a)})
+				for players in [1, 3, G.MAX_PLAYERS]:
+					for n in range(Arenas.SEGMENT + 1, G.MAX_WAVE + 1):
+						all.append(G.plan(s, n, players, false, a))
+			# The altar's gifts at every unlock level.
+			for lv in [[0, 0], [6, 0], [12, 1], [40, 4]]:
+				var open := Boons.unlocked_boons(lv[0], lv[1])
+				for n in range(1, G.MAX_WAVE + 1):
+					all.append({"offer": Boons.offer(s, n, open), "open": open})
 			return all,
 		func(all: Array) -> Array:
 			var why: Array = []
 			for p in all:
-				why.append_array(G.check(p))
+				if p.has("island"):
+					why.append_array(Arenas.check(String(p.island), int(p.seed)))
+				elif p.has("offer"):
+					why.append_array(Boons.check_offer(p.offer, p.open))
+				else:
+					why.append_array(G.check(p))
 			return why,
 		seeds, 1, [0, 999999, G.daily_seed("2026-10-30")], "TEMPLE")
 	fails += (res.failures as Array).size()
-	var plans := seeds * G.MAX_PLAYERS * G.MAX_WAVE
+	var plans := seeds * (G.MAX_PLAYERS * G.MAX_WAVE + 3 * 3 * (G.MAX_WAVE - Arenas.SEGMENT))
 	var per_ms := float(Time.get_ticks_usec() - t0) / 1000.0 / maxf(1.0, plans)
 	var longest := 0.0
 	var busiest := 0
@@ -144,6 +166,58 @@ func _init() -> void:
 	for pic in Pics.ELEMENT_PICS:
 		_expect(StoryCard.has_picture(pic), "element picture %s exists" % pic)
 	_expect(StoryCard.check().is_empty(), "story pictures are fine (%s)" % str(StoryCard.check()))
+	# Islands, bosses, gifts and masters.
+	_expect(Arenas.check("temple", Arenas.CLASSIC_SEED).is_empty(), "TEMPLE ISLAND is fair (%s)" % str(Arenas.check("temple", Arenas.CLASSIC_SEED)))
+	_expect(var_to_str(Arenas.layout("temple", Arenas.CLASSIC_SEED).props) == var_to_str(W.layout().props), "TEMPLE ISLAND keeps its classic trees and rocks")
+	_expect(Arenas.layout("temple", Arenas.CLASSIC_SEED).props.size() == 33, "the classic island has its 33 trees and rocks (one moved off the altar)")
+	_expect(Arenas.arena_for(5, 0, Arenas.ids()) == "temple", "every run starts at home on TEMPLE ISLAND")
+	_expect(Arenas.arena_for(5, 1, ["temple"]) == "temple", "with no island unlocked the run stays home")
+	_expect(Arenas.arena_for(5, 1, ["temple", "ice"]) == "ice", "the first unlocked island comes after the first boss")
+	var visits := {}
+	for s in 30:
+		for k in range(1, 4):
+			visits[Arenas.arena_for(s, k, Arenas.ids())] = true
+	_expect(visits.size() == 3 and not visits.has("temple"), "with every island open the run visits the other three (%s)" % str(visits.keys()))
+	_expect(Arenas.arena_for(5, 4, Arenas.ids()) == "temple", "the round trip comes home again")
+	_expect(Arenas.arena_for(5, 1, ["temple", "ice"], "ice") == "temple", "never the same island twice in a row")
+	_expect(Arenas.unlocked(0, 0) == ["temple"], "a new family has only TEMPLE ISLAND")
+	_expect(Arenas.unlocked(1, 0).has("ice") and Arenas.unlocked(3, 0).size() == 4, "Generals beaten open the islands")
+	_expect(Arenas.unlocked(0, 40).size() == 4, "a big Spirit Tree opens every island too")
+	for a in Arenas.ids():
+		var info := Arenas.info(a)
+		_expect(StoryCard.has_picture(String(info.pic)), "%s has a picture" % a)
+		_expect(String(info.name).length() <= 14, "%s's name is short" % a)
+		_expect(Bosses.LIST.has(String(info.boss)), "%s has a boss" % a)
+		_expect(info.hazard == "" or Arenas.HAZARDS.has(String(info.hazard)), "%s's hazard exists" % a)
+		_expect(a == "temple" or Arenas.layout(a, 11) != Arenas.layout(a, 12), "%s changes with the temple seed" % a)
+	for k in Bosses.KINDS:
+		_expect(Bosses.check(k).is_empty(), "the %s is kid-fair (%s)" % [k, str(Bosses.check(k))])
+		_expect(StoryCard.has_picture(String(Bosses.info(k).pic)), "the %s has a picture" % k)
+	var ice := Arenas.layout("ice", 4242).duplicate(true)
+	_expect(Arenas.check("ice", 4242).is_empty(), "ice 4242 is fair (%s)" % str(Arenas.check("ice", 4242)))
+	_expect(not Arenas._vent_problems({"p": Vector3(0, 0, -9.0), "r": 2.2, "period": 8.0}, [], ice).is_empty(), "a vent on the temple steps is caught")
+	_expect(not Arenas._vent_problems({"p": Vector3(0, 0, -14.0), "r": 2.2, "period": 8.0}, [], ice).is_empty(), "a vent on the altar is caught")
+	_expect(not Arenas._vent_problems({"p": Vector3(14, 0, 0), "r": 2.2, "period": 3.0}, [], ice).is_empty(), "a vent bursting too often is caught")
+	var walled := {"id": "walltest", "seed": 1, "props": [], "mountains": [], "vents": []}
+	for i in 80:
+		var a := i * TAU / 80.0
+		walled.props.append({"kind": "rock", "p": Vector3(cos(a) * 25.0, 0, sin(a) * 25.0), "r": 1.6})
+	_expect(not Arenas.reachable(Vector3(5, 0, -29.0), walled), "a portal walled off by rocks is caught (unreachable)")
+	_expect(Arenas.reachable(Vector3(5, 0, -13.0), walled), "inside the wall is still reachable")
+	var bad_boss := G.plan(9, 10, 1, false, "ice")
+	bad_boss.boss_order = [E_FIRE]
+	_expect(not G.check(bad_boss).is_empty(), "a Frost Giant of the wrong element is caught")
+	_expect(not Boons.check_offer(["big", "big", "power"], Boons.unlocked_boons(0, 0)).is_empty(), "the same gift twice is caught")
+	_expect(not Boons.check_offer(["big", "power", "leaf"], Boons.unlocked_boons(0, 0)).is_empty(), "a locked gift on the altar is caught")
+	_expect(Boons.unlocked_masters(0, 0).size() == 2, "a new family starts with two masters")
+	_expect(Boons.unlocked_masters(5, 0).size() == 4 and Boons.unlocked_masters(5, 3).size() == 5, "masters unlock as the tree grows and Generals fall")
+	_expect(Boons.unlocked_boons(0, 0).size() >= 6 and Boons.unlocked_boons(999, 9).size() == Boons.BOONS.size(), "gifts unlock up to all of them")
+	for m in Boons.MASTERS:
+		_expect(String(m.name).length() <= 8, "master %s's name is short" % m.id)
+	var big := Boons.mods({"m": "fire", "b": ["big", "power", "power", "power", "power", "power", "power"]})
+	_expect(float(big.dmg) <= 3.0, "stacked gifts are capped")
+	_expect(Boons.shape_shots(Boons.mods({"b": ["triple"]}), [{"damage": 10.0, "vel": Vector3.FORWARD}]).size() == 3, "TRIPLE SHOT fires three")
+	_expect(float(Boons.mods({"m": "earth", "b": ["shield", "shield", "shield", "shield"]}).taken) >= 0.35, "rock skin never makes anyone unhurtable")
 	# The constants match the game's.
 	_expect(G.MAX_ALIVE == Main.MAX_ALIVE, "MAX_ALIVE matches main.gd")
 	_expect(G.GAME_ID == Main.GAME_ID, "the game id matches main.gd")

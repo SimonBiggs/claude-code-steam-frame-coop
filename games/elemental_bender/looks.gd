@@ -51,6 +51,57 @@ static func raider(e: int, boss: bool) -> ArrayMesh:
 		return b.build())
 
 
+## The island bosses (bosses.gd; drawn at raider size: the Raider scales a boss up 2x). The General is raider().
+static func boss(kind: String) -> ArrayMesh:
+	return ResCache.get_or_make("eb_boss_%s_v1" % kind, func() -> Resource:
+		var b := MeshKit.Builder.new()
+		match kind:
+			"giant":  # FROST GIANT: a big pale-blue body, ice shoulders, white beard, glowing blue eyes
+				var c := Color(0.62, 0.8, 0.95)
+				b.capsule(0.5, 1.4, MeshKit.at(Vector3(0, 0.95, 0)), c, 10)
+				b.sphere(0.32, MeshKit.at(Vector3(0, 1.75, -0.05)), c.lightened(0.15), 10)
+				b.ellipsoid(Vector3(0.22, 0.2, 0.12), MeshKit.at(Vector3(0, 1.58, -0.26)), Color(0.97, 0.98, 1.0), 8)
+				for x in [-0.12, 0.12]:
+					b.sphere(0.05, MeshKit.at(Vector3(float(x), 1.8, -0.3)), Color(0.3, 0.75, 1.0), 6, true)
+				for x in [-0.62, 0.62]:
+					var xf := float(x)
+					b.cone(0.18, 0.5, MeshKit.at(Vector3(xf, 1.55, 0)), Color(0.8, 0.95, 1.0), 6, true)
+					b.capsule(0.17, 0.9, MeshKit.at(Vector3(xf, 0.95, -0.1), Vector3.ONE, Vector3(0.3, 0, 0)), c.darkened(0.1), 8)
+					b.sphere(0.24, MeshKit.at(Vector3(xf, 0.55, -0.25)), c.lightened(0.1), 8)  # fists
+				for k in 4:
+					var a := k * TAU / 4.0 + 0.4
+					b.cone(0.05, 0.22, MeshKit.at(Vector3(cos(a) * 0.2, 2.08, sin(a) * 0.2)), Color(0.8, 0.95, 1.0), 4, true)
+			"drake":  # LAVA DRAKE: a low orange dragon with a long neck, horns, a tail and glowing belly
+				var c := Color(0.9, 0.35, 0.1)
+				b.ellipsoid(Vector3(0.45, 0.4, 0.75), MeshKit.at(Vector3(0, 0.75, 0.15)), c, 10)
+				b.ellipsoid(Vector3(0.3, 0.18, 0.5), MeshKit.at(Vector3(0, 0.55, 0.1)), Color(1.0, 0.75, 0.25), 8, true)
+				b.capsule(0.16, 0.8, MeshKit.at(Vector3(0, 1.2, -0.5), Vector3.ONE, Vector3(-0.7, 0, 0)), c, 8)
+				b.ellipsoid(Vector3(0.22, 0.2, 0.36), MeshKit.at(Vector3(0, 1.55, -0.85)), c, 10)
+				for x in [-0.1, 0.1]:
+					b.sphere(0.05, MeshKit.at(Vector3(float(x), 1.65, -1.05)), Color(1.0, 0.95, 0.4), 6, true)
+					b.cone(0.05, 0.25, MeshKit.at(Vector3(float(x) * 1.2, 1.8, -0.75), Vector3.ONE, Vector3(0.5, 0, 0)), Color(0.3, 0.12, 0.08), 5)
+				b.capsule(0.12, 1.0, MeshKit.at(Vector3(0, 0.55, 1.0), Vector3.ONE, Vector3(1.2, 0, 0)), c.darkened(0.15), 8)
+				for x in [-0.35, 0.35]:
+					for z in [-0.25, 0.5]:
+						b.capsule(0.11, 0.55, MeshKit.at(Vector3(float(x), 0.28, float(z))), c.darkened(0.2), 6)
+				for k in 4:
+					b.cone(0.07, 0.22, MeshKit.at(Vector3(0, 1.12, -0.2 + k * 0.25)), Color(1.0, 0.6, 0.15), 4, true)
+			_:  # STORM HAWK: a white hawk with big wings, a yellow beak and blue wing tips
+				var c := Color(0.92, 0.95, 1.0)
+				b.ellipsoid(Vector3(0.35, 0.45, 0.4), MeshKit.at(Vector3(0, 1.1, 0)), c, 10)
+				b.sphere(0.26, MeshKit.at(Vector3(0, 1.65, -0.15)), c, 10)
+				b.cone(0.09, 0.25, MeshKit.at(Vector3(0, 1.6, -0.45), Vector3.ONE, Vector3(-PI * 0.5, 0, 0)), Color(1.0, 0.8, 0.2), 6)
+				for x in [-0.1, 0.1]:
+					b.sphere(0.045, MeshKit.at(Vector3(float(x), 1.72, -0.35)), Color(0.15, 0.2, 0.4), 6)
+				for sx in [-1.0, 1.0]:
+					b.box(Vector3(1.3, 0.08, 0.55), MeshKit.at(Vector3(sx * 0.95, 1.25, 0.05), Vector3.ONE, Vector3(0, 0, sx * 0.25)), c.darkened(0.05))
+					b.box(Vector3(0.45, 0.07, 0.45), MeshKit.at(Vector3(sx * 1.75, 1.45, 0.08), Vector3.ONE, Vector3(0, 0, sx * 0.25)), Color(0.4, 0.75, 1.0), true)
+				b.box(Vector3(0.4, 0.06, 0.5), MeshKit.at(Vector3(0, 0.85, 0.5), Vector3.ONE, Vector3(0.5, 0, 0)), c.darkened(0.1))
+				for x in [-0.12, 0.12]:
+					b.capsule(0.05, 0.5, MeshKit.at(Vector3(float(x), 0.45, 0)), Color(1.0, 0.8, 0.2), 6)
+		return b.build())
+
+
 static func orb(radius: float, segs: int = 10) -> SphereMesh:
 	return ResCache.get_or_make("eb_orb_%.2f_%d" % [radius, segs], func() -> Resource:
 		var s := SphereMesh.new()

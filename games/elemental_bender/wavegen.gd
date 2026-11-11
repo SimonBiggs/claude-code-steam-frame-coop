@@ -22,6 +22,8 @@ extends RefCounted
 
 const Seeded := preload("res://core/seeded.gd")
 const World := preload("res://games/elemental_bender/world.gd")
+const Arenas := preload("res://games/elemental_bender/arenas.gd")
+const Bosses := preload("res://games/elemental_bender/bosses.gd")
 
 const GAME_ID := "elemental_bender"
 const FRONT := 1.5 * PI  # (cos a, 0, sin a) = -z: where the temple faces (the practice dummy, the VR master's view)
@@ -109,9 +111,10 @@ static func kid_cap(n: int, players: int) -> int:
 	return mini(MAX_ALIVE, base + (maxi(1, players) - 1) * 2 + int(n / 5))
 
 
-## The portals of wave n (the first one in front for waves 1-2). Every machine builds these.
-static func gates(temple_seed: int, n: int) -> Array:
+## The portals of wave n on island `arena` (the first one in front for waves 1-2). Every machine builds these.
+static func gates(temple_seed: int, n: int, arena: String = "temple") -> Array:
 	n = maxi(1, n)
+	var lay := Arenas.layout(arena, Arenas.layout_seed(temple_seed, arena))
 	var rng := Seeded.rng(wave_seed(temple_seed, n), "gates")
 	var want := gate_count(n, rng)
 	var out: Array = []
@@ -126,17 +129,18 @@ static func gates(temple_seed: int, n: int) -> Array:
 		var r := rng.randf_range(GATE_R.x, GATE_R.y)
 		var p := Vector3(cos(a) * r, 0.0, sin(a) * r)
 		p = Vector3(snappedf(p.x, 0.01), 0.0, snappedf(p.z, 0.01))
-		if _gate_ok(p, out).is_empty():
+		if _gate_ok(p, out, lay).is_empty():
 			out.append(p)
 	return out
 
 
 ## The whole wave plan for a party of `players` fighters. `fast`: the short test waves (EB_FAST).
-static func plan(temple_seed: int, n: int, players: int = 1, fast: bool = false) -> Dictionary:
+static func plan(temple_seed: int, n: int, players: int = 1, fast: bool = false, arena: String = "temple") -> Dictionary:
 	n = maxi(1, n)
 	players = clampi(players, 1, MAX_PLAYERS)
 	var boss := is_boss(n)
-	var p := {"n": n, "players": players, "boss": boss, "gates": gates(temple_seed, n)}
+	var p := {"n": n, "players": players, "boss": boss, "gates": gates(temple_seed, n, arena), "arena": arena,
+		"aseed": Arenas.layout_seed(temple_seed, arena), "boss_kind": String(Arenas.info(arena).boss) if boss else ""}
 	var rng := Seeded.rng(wave_seed(temple_seed, n), "raiders%d" % players)
 	# The elements: a fixed teaching order per temple (the first two waves bring two different ones).
 	var order := Seeded.shuffled(Seeded.rng(temple_seed, "elements"), [0, 1, 2, 3])
@@ -151,7 +155,8 @@ static func plan(temple_seed: int, n: int, players: int = 1, fast: bool = false)
 	for i in 11:
 		var e: int = (int(bo[-1]) + 1 + rng.randi() % 3) % 4
 		bo.append(e)
-	p.boss_order = bo if boss else []
+	var fixed := int(Bosses.info(String(p.boss_kind)).element) if boss else -1
+	p.boss_order = ([fixed] if fixed >= 0 else bo) if boss else []
 	var count := raider_count(n, players)
 	if fast:
 		count = ((2 if boss else 2 + int(n / 2.0)) + players - 1)
@@ -187,14 +192,19 @@ static func check(p: Dictionary) -> Array[String]:
 	var why: Array[String] = []
 	var n := int(p.n)
 	var gl: Array = p.gates
+	var arena := String(p.get("arena", "temple"))
+	var lay := Arenas.layout(arena, int(p.get("aseed", Arenas.CLASSIC_SEED)))
 	var want_min := 1 if n <= 2 else 2
 	var want_max := 1 if n <= 2 else (2 if n <= 5 else 3)
 	if gl.size() < want_min or gl.size() > want_max:
 		why.append("wave %d has %d portals (wants %d-%d)" % [n, gl.size(), want_min, want_max])
 	for i in gl.size():
 		var g: Vector3 = gl[i]
-		for w in _gate_ok(g, gl.slice(0, i)):
+		for w in _gate_ok(g, gl.slice(0, i), lay):
 			why.append("wave %d: %s" % [n, w])
+		if not Arenas.reachable(g, lay):
+			why.append("wave %d (%s): raiders from the portal at (%.0f, %.0f) can't walk to the temple" % [n, arena, g.x, g.z])
+
 		if i == 0 and n <= 2 and absf(angle_difference(atan2(g.z, g.x), FRONT)) > FRONT_SIDE + 0.001:
 			why.append("wave %d: the portal at (%.0f, %.0f) is not in front of the temple" % [n, g.x, g.z])
 		var walk := (Vector2(g.x, g.z).length() - JITTER - TEMPLE_R) / raider_speed(n, false)
@@ -230,7 +240,13 @@ static func check(p: Dictionary) -> Array[String]:
 		why.append("wave %d mixes elements" % n)
 	if bool(p.boss) != is_boss(n):
 		why.append("wave %d: the General comes at the wrong time" % n)
-	if bool(p.boss):
+	if bool(p.boss) and String(p.get("boss_kind", "general")) != "general":
+		var want_e := int(Bosses.info(String(p.boss_kind)).element)
+		if (p.boss_order as Array) != [want_e]:
+			why.append("wave %d: the %s isn't its own element" % [n, p.boss_kind])
+		for w in Bosses.check(String(p.boss_kind)):
+			why.append("wave %d: %s" % [n, w])
+	elif bool(p.boss):
 		var bo: Array = p.boss_order
 		if bo.size() < 2:
 			why.append("wave %d: the General has no element order" % n)
@@ -303,14 +319,17 @@ static func _kid_fails(p: Dictionary) -> Array[String]:
 	return why
 
 
-static func _gate_ok(g: Vector3, others: Array) -> Array[String]:
+static func _gate_ok(g: Vector3, others: Array, lay: Dictionary = {}) -> Array[String]:
 	var why: Array[String] = []
 	var r := Vector2(g.x, g.z).length()
 	if r < GATE_R.x - 0.02 or r > GATE_R.y + 0.02:
 		why.append("a portal %.1f m from the temple" % r)
-	var b := World.blocked(g, GATE_CLEAR)
+	var b := Arenas.blocked(g, GATE_CLEAR, lay)
 	if b != "":
 		why.append("a portal at (%.0f, %.0f) is %s" % [g.x, g.z, b])
+	for v in lay.get("vents", []):
+		if (v.p as Vector3).distance_to(g) < float(v.r) + GATE_CLEAR + JITTER:
+			why.append("a portal at (%.0f, %.0f) is on a hazard vent" % [g.x, g.z])
 	var a := atan2(g.z, g.x)
 	for o in others:
 		var q: Vector3 = o
