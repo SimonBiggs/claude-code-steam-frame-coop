@@ -20,6 +20,9 @@ extends Node
 # cue_chop, cue_grab, cue_move, cue_plug), the ones learned (cue_learned_*), the glowing arrows (fetch_arrow,
 # pass_arrow, plate_arrow, serve_arrow, chef_arrow), the ghost hand and that no view draws its own name tag,
 # checks the pause banner is just PAUSED, and prints "BOT: ERROR instruction text" if a headline (TV or VR)
+# Second pass (nights.gd): a runner walks under a pick orb (mode after the practice, Gran's gifts before rounds 2, 4,
+# 6, 8), the fake VR chef touches one with a hand when no runner does; kitchen events (smoke / spills) must be told by
+# warning rings before they start; the theme dressing and the café decor are built; chef gifts work (KR_PERKS=...).
 # is anything but a short title word, or a tip spot (a view's hint line, job panel, carry / order lists,
 # the help panel, the VR hint, the wrist, the top line) shows any words.
 const L := preload("res://games/kitchen_rush/layout.gd")
@@ -251,6 +254,15 @@ func _note_features() -> void:
 		"star guest": _star_guest(),
 		"gift shelf": not main.gifts_shown.is_empty(),
 		"golden gift": main.gifts_shown.any(func(g) -> bool: return bool(g[1])),
+		"mode picked": main.picks != null and main.picks.history.any(func(h) -> bool: return h[0] == "mode"),
+		"mode picked by a player": main.picks != null and main.picks.history.any(func(h) -> bool: return h[0] == "mode" and int(h[2]) >= 0),
+		"gift picked": not main.perks.is_empty(),
+		"pick orbs": main.picks != null and main.picks.showing(),
+		"event warned": main.kevents != null and main.kevents.rings.count() > 0,
+		"event on": main.kevents != null and not main.kevents.active_kinds().is_empty(),
+		"theme dressing": main.decor != null and main.decor.theme != "",
+		"helper mouse trip": main.mouse_trips > 0,
+		"theme dish": main.unlocked_recipes().has(main.Nights.theme_dish(main.theme)),
 		"party dish": main.unlocked_recipes().has("MELT") or main.unlocked_recipes().has("WRAP") or main.unlocked_recipes().has("SANDWICH"),
 	}
 	for k in checks:
@@ -280,6 +292,20 @@ func _note_features() -> void:
 		if not RegEx.create_from_string("^[A-Z][A-Z' !]{1,15}$").search(str(b.get("who", ""))) or str(b.get("line", "")).length() > 28:
 			bot_errors += 1
 			print("BOT: ERROR story card text too long: %s / %s" % [b.get("who", ""), b.get("line", "")])
+	if main.kevents != null:
+		for z in main.kevents.zones:
+			if float(z.t) > 0.0 and not z.has("bot_warned"):
+				z["bot_warned"] = main.kevents.rings.count() > 0
+				z["bot_t0"] = t
+			elif float(z.t) <= 0.0 and not z.has("bot_on"):
+				z["bot_on"] = true
+				var told: bool = bool(z.get("bot_warned", false)) and t - float(z.get("bot_t0", t)) >= main.Nights.WARN_SECS - 0.3
+				print("BOT: event %s started, warned %.1f s before: %s" % [z.kind, t - float(z.get("bot_t0", t)), told])
+				if not told:
+					bot_errors += 1
+					print("BOT: ERROR kitchen event %s started without its warning" % z.kind)
+				else:
+					set_meta("events_told", int(get_meta("events_told", 0)) + 1)
 	for ty in types:
 		if not seen.has("type:" + ty):
 			seen["type:" + ty] = true
@@ -390,6 +416,14 @@ func _chef_vr(delta: float) -> void:
 	var rest_l := head + Vector3(-0.3, -0.55, -0.35)
 	vr_t += delta
 	if vr_state == "idle" and _play_props(delta):
+		return
+	if main.picks != null and main.picks.showing() and main.picks.orbs.orbs.size() > 0 and vr_t > 2.0:
+		var orb: Node3D = main.picks.orbs.orbs[mini(1 + main.shift % 2, main.picks.orbs.orbs.size() - 1)]
+		var at: Vector3 = orb.icon.global_position if orb.icon != null else orb.global_position
+		hr.global_position = hr.global_position.move_toward(at, delta * 1.2)
+		if not has_meta("vr_orb_said") and hr.global_position.distance_to(at) < 0.1:
+			set_meta("vr_orb_said", true)
+			print("BOT VR: touched a pick orb")
 		return
 	var inv := _invites()
 	if vr_state == "idle" and not inv.is_empty() and main.invite_t < main.INVITE_WAIT - 4.0 and main.invite_t > 1.0 and chef.held[1] == null:
@@ -649,7 +683,10 @@ func _runner(p, delta: float) -> void:
 			if it.is_plate() and it.recipe != "" and it.holder == -1 and need.has(it.recipe):
 				plate = it
 		var inv := _invites()
-		if not inv.is_empty() and p.index == 1:
+		if main.picks != null and main.picks.showing() and p.index == 1 and main.picks.orbs.orbs.size() > 0:
+			var orb: Node3D = main.picks.orbs.orbs[(main.shift + 2) % main.picks.orbs.orbs.size()]
+			goal = Vector3(orb.global_position.x, 0.0, -0.8)  # walk under one (picks.gd)
+		elif not inv.is_empty() and p.index == 1:
 			goal = Vector3(inv[0].global_position.x, 0.0, -0.8)
 		elif main.fire_on and main.ext_holder == -1 and p.index == want_players:
 			goal = L.EXT_POS + Vector3(0, 0, 1.0)
@@ -861,6 +898,13 @@ func _checks() -> Array:
 		out.append(["story cards shown", main.story_count > 0])
 		out.append(["a party round was made", not main.round_info.is_empty()])
 		out.append(["a gift went on the shelf", not main.gifts_shown.is_empty()])
+		out.append(["theme night dressing", main.decor != null and main.decor.theme == main.theme])
+		if not OS.has_environment("KR_START_SHIFT"):
+			out.append(["the team mode was picked", seen.has("mode picked")])
+		if max_shift >= 2 and not OS.has_environment("KR_START_SHIFT"):
+			out.append(["a chef gift was picked", seen.has("gift picked")])
+		if max_shift >= 3:
+			out.append(["kitchen events told by warning rings", int(get_meta("events_told", 0)) > 0])
 	return out
 
 

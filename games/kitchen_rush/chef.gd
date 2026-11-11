@@ -546,6 +546,8 @@ func move_cursor(dir: Vector2i) -> void:
 ## Grab what's under the cursor, or put down what we're holding there.
 func do_grab() -> void:
 	var sp := L.spot_pos(cursor)
+	if main.picks_grab(sp):  # a pick orb floats over the counter: grabbing picks the one above
+		return
 	if held[0] == null:
 		var it = main.chef_pick_target(sp, 0.2)
 		if it != null:

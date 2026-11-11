@@ -33,6 +33,11 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "kr-pancakes", "date": "2026-11-11", "game": "kitchen_rush", "pic": "pancakes", "line": "Pancake day! Pizza night!", "try": {"KR_THEME": "pancake"}},
+	{"id": "kr-gifts", "date": "2026-11-11", "game": "kitchen_rush", "pic": "helpermouse", "line": "Pick Gran's chef gifts!"},
+	{"id": "kr-events", "date": "2026-11-11", "game": "kitchen_rush", "pic": "spill", "line": "Smoke and spills warn first"},
+	{"id": "kr-gentle", "date": "2026-11-11", "game": "kitchen_rush", "pic": "granny", "line": "Gentle, brave or hard"},
+	{"id": "kr-cafe", "date": "2026-11-11", "game": "kitchen_rush", "pic": "fishtank", "line": "Gran's café grows!"},
 	{"id": "gl-wings", "date": "2026-11-11", "game": "ghost_lantern", "pic": "attic", "line": "Attic, cellar, greenhouse!"},
 	{"id": "gl-boing", "date": "2026-11-11", "game": "ghost_lantern", "pic": "boing", "line": "Boing hops! Watch the rings", "try": {"GL_TRY": "boing"}},
 	{"id": "gl-puff", "date": "2026-11-11", "game": "ghost_lantern", "pic": "puff", "line": "Puff pops into pufflings!", "try": {"GL_TRY": "puff"}},

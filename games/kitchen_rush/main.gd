@@ -64,6 +64,11 @@ const Save := preload("res://core/save.gd")
 const Seeded := preload("res://core/seeded.gd")
 const StoryCard := preload("res://core/story_card.gd")
 const Telemetry := preload("res://core/telemetry.gd")
+const Nights := preload("res://games/kitchen_rush/nights.gd")
+const PicksScript := preload("res://games/kitchen_rush/picks.gd")
+const EventsScript := preload("res://games/kitchen_rush/events.gd")
+const DecorScript := preload("res://games/kitchen_rush/decor.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
 const SIMPLE_MODE := true
 ## Simple mode: one dish to start with, then one new dish per round.
 const SIMPLE_UNLOCKS := [["TOASTIE"], ["SALAD"], ["BURGER"], ["PIZZA"]]
@@ -186,6 +191,17 @@ var offers: Array = []
 var invite_t := 0.0
 var invite_wait := -1.0  # seconds until the invitations float in (after the thank-you cards; -1 = none coming)
 var fresh_done: Array = []  # taught dishes already put first this session
+# Second pass (nights.gd): theme night, team mode, chef gifts, kitchen events, the growing café.
+var picks: Node  # picks.gd: the shared pick orbs (mode, gifts)
+var kevents: Node3D  # events.gd: smoke / spills told by warning rings
+var decor: Node3D  # decor.gd: café growth, theme dressing, pot + mouse
+var theme := ""
+var team_mode := "brave"
+var perks: Array = []  # chef gifts taken this visit
+var gift_wait := -1.0  # seconds until the gift orbs float in (-1 = none coming)
+var invites_after_gift := false
+var mouse_t := 0.0
+var mouse_trips := 0
 var cookies := 0
 var star_served := false
 var round_t := 0.0
@@ -228,10 +244,25 @@ func _ready() -> void:
 		save = Save.new()
 		save.game_id = Parties.GAME_ID
 		save.version = SAVE_VERSION
-		save.defaults = {"gifts": [], "visits": {}, "rounds": 0, "best_round": 0, "served": 0, "daily": ""}
+		save.defaults = {"gifts": [], "visits": {}, "rounds": 0, "best_round": 0, "served": 0, "daily": "", "mode": "brave",
+			"themes": {}, "modes": {}}
 		add_child(save)
 		run_seed = int(OS.get_environment("KR_SEED")) if OS.has_environment("KR_SEED") else Seeded.fresh_seed()
 		shelf = Cafe.build_shelf(self)
+		ItemScript.quick_chop = false
+		theme = OS.get_environment("KR_THEME") if Nights.THEMES.has(OS.get_environment("KR_THEME")) else Nights.theme_for()
+		team_mode = Nights.mode_of(String(save.data["mode"]))
+		decor = DecorScript.new()
+		decor.main = self
+		add_child(decor)
+		decor.show_theme(theme)
+		decor.show_cafe(_cafe_level(), false)
+		kevents = EventsScript.new()
+		kevents.main = self
+		add_child(kevents)
+		picks = PicksScript.new()
+		picks.main = self
+		add_child(picks)
 	raccoon = RaccoonScript.new()
 	raccoon.main = self
 	add_child(raccoon)
@@ -244,6 +275,8 @@ func _ready() -> void:
 	add_child(net)
 	net.sticky_event("gifts")  # a machine that joins later gets the shelf and this round's party (core/net.gd)
 	net.sticky_event("round")
+	for k in ["orbs", "perks", "cafe"]:  # second pass: a machine joining mid-pick sees the orbs, the gifts, the café
+		net.sticky_event(k)
 	seats = ClassicSeats.new(self, {
 		"free_actions": ["restart", "pause"],
 		"is_local": func(p) -> bool: return not p.remote and not p.ghost,
@@ -279,6 +312,9 @@ func _setup_game(mode: String) -> void:
 	if SIMPLE_MODE and mode != "client":
 		_show_gifts(save.data["gifts"], false)
 		net.event("gifts", [save.data["gifts"], false])  # sticky: a machine that joins gets Gran's shelf
+		net.event("cafe", [_cafe_level(), theme, false])
+		if OS.has_environment("KR_PERKS"):  # tests: start the visit with chef gifts
+			_apply_perks(Array(OS.get_environment("KR_PERKS").split(",", false)))
 	if SIMPLE_MODE:
 		banner("KITCHEN RUSH!", 2.5, mode != "client")
 	elif mode == "host":
@@ -1557,6 +1593,8 @@ func _spawn_customer() -> void:
 		banner("A VIP FOOD CRITIC is here!\nServe the %s fast for a big tip!" % c.recipe, 2.5)
 		sound("ding", -2.0, 1.3)
 	c.max_patience = _patience() * float(CustomerScript.TYPES[c.ctype][0]) * (Parties.STAR_PATIENCE if c.star else 1.0)
+	if perks.has("pot"):
+		c.max_patience *= Nights.POT_PATIENCE  # BIG POT: a bowl of soup while they wait
 	c.patience = c.max_patience
 	c.position = Vector3(10.5, 0.0, L.CUSTOMER_Z[c.slot] + (2.5 if c.slot >= 2 else -2.5))
 	add_child(c)
@@ -2688,6 +2726,24 @@ func apply_event(kind: String, args: Array) -> void:
 			round_info = args[0]
 		"gifts":
 			_show_gifts(args[0], args[1])
+		"orbs":
+			if picks != null:
+				picks.show_row(String(args[0]), args[1])
+		"take":
+			if picks != null:
+				picks.take_fx(int(args[0]), int(args[1]))
+		"perks":
+			_apply_perks(args[0])
+		"cafe":
+			if decor != null:
+				decor.show_theme(String(args[1]))
+				decor.show_cafe(int(args[0]), bool(args[2]))
+		"kev":
+			if kevents != null:
+				kevents.announce(String(args[0]), float(args[1]), float(args[2]), float(args[3]))
+		"mouse":
+			if decor != null:
+				decor.mouse_hop(args[0])
 
 
 # --- HUD -------------------------------------------------------------------------
@@ -2945,6 +3001,14 @@ func _simple_update(delta: float) -> void:
 		_practice_update(delta)
 		return
 	if in_break:
+		if picks != null and picks.active():
+			picks.tick(delta)
+			return
+		if gift_wait >= 0.0:
+			gift_wait -= delta
+			if gift_wait < 0.0:
+				_offer_gifts()
+			return
 		if invite_wait >= 0.0:
 			invite_wait -= delta
 			if invite_wait < 0.0:
@@ -2961,6 +3025,10 @@ func _simple_update(delta: float) -> void:
 		return
 	round_t += delta
 	spawn_t -= delta
+	if kevents != null:
+		for e in kevents.tick(round_t):
+			_kitchen_event(e)
+	_mouse_update(delta)
 	var waiting := _waiting_customers()
 	if waiting.is_empty():
 		spawn_t = minf(spawn_t, 1.5)
@@ -2997,6 +3065,7 @@ func _practice_update(delta: float) -> void:
 	if served_total >= 1:
 		practice = false
 		break_t = 3.0
+		_offer_modes()
 		banner("HOORAY!", 2.0)
 		show_stars(3)
 		net.event("stars", [3])
@@ -3250,8 +3319,8 @@ func _has_round() -> bool:
 ## Saved progress the party maker needs: {"gifts": n, "visits": {party: n}}.
 func _progress() -> Dictionary:
 	if save == null:
-		return {"gifts": 0, "visits": {}}
-	return {"gifts": (save.data["gifts"] as Array).size(), "visits": save.data["visits"]}
+		return {"gifts": 0, "visits": {}, "theme": theme, "mode": team_mode}
+	return {"gifts": (save.data["gifts"] as Array).size(), "visits": save.data["visits"], "theme": theme, "mode": team_mode}
 
 
 func _solo_kitchen() -> bool:
@@ -3272,6 +3341,11 @@ func _start_party() -> void:
 				break
 	round_info = Parties.make(shift, run_seed, _progress(), chosen_party, fresh)
 	round_info["picked"] = picked_by if shift >= Parties.CHOICE_FROM and not bool(round_info["daily"]) else ""
+	round_info["perks"] = perks.duplicate()
+	if kevents != null:
+		kevents.clear()
+		kevents.reset(round_info["events"])
+	mouse_t = 0.0
 	chosen_party = ""
 	picked_by = ""
 	round_spawned = 0
@@ -3309,6 +3383,11 @@ func _party_done(how: String) -> void:
 	save.data["rounds"] = int(save.data["rounds"]) + 1
 	save.data["best_round"] = maxi(int(save.data["best_round"]), shift)
 	save.data["served"] = int(save.data["served"]) + served_total - round_served0
+	var level0 := Nights.cafe_level(int(save.data["rounds"]) - 1)
+	var themes: Dictionary = save.data["themes"]
+	themes[theme] = int(themes.get(theme, 0)) + 1
+	var modes: Dictionary = save.data["modes"]
+	modes[team_mode] = int(modes.get(team_mode, 0)) + 1
 	save.mark_dirty()
 	_round_telemetry(how)
 	last_party = party
@@ -3322,12 +3401,25 @@ func _party_done(how: String) -> void:
 	if String(news["guests"]) != "":
 		var g := String(news["guests"])
 		beats.append({"who": "NEW GUESTS!", "line": String(Parties.PARTIES[g]["word"]), "pic": g, "color": Cafe.PARTY_COLORS[g].to_html(false), "duration": 3.5, "sound": "fanfare"})
+	if _cafe_level() > level0:  # the café grows (decor.gd): it pops in with the card
+		var step := Nights.cafe_step(_cafe_level())
+		beats.append({"who": "THE CAFE GROWS!", "line": String(Nights.CAFE_WORDS[step]), "pic": step, "color": "ffb46e", "duration": 3.5,
+			"sound": "achievement", "cafe": _cafe_level()})
 	for i in beats.size():
 		var b: Dictionary = beats[i]
-		get_tree().create_timer(2.6 + 3.8 * i, false).timeout.connect(func() -> void: story(b))
-	# The next round waits for the cards; then the invitations float in (from round 3).
+		get_tree().create_timer(2.6 + 3.8 * i, false).timeout.connect(func() -> void:
+			story(b)
+			if b.has("cafe"):
+				decor.show_cafe(int(b["cafe"]), true)
+				net.event("cafe", [int(b["cafe"]), theme, true]))
+	# The next round waits for the cards; then Gran's gift orbs (before rounds 2, 4, 6, 8), then the invitations
+	# float in (from round 3).
 	var cards_end := 2.6 + 3.8 * beats.size()
-	if Parties.offers(shift + 1, run_seed, _progress(), last_party).is_empty():
+	var inv := not Parties.offers(shift + 1, run_seed, _progress(), last_party).is_empty()
+	if not Nights.gift_offer(shift + 1, run_seed, perks).is_empty():
+		gift_wait = cards_end - 1.2
+		invites_after_gift = inv
+	elif not inv:
 		break_t = maxf(break_t, cards_end)
 	else:
 		invite_wait = cards_end - 1.2
@@ -3432,9 +3524,142 @@ func _round_telemetry(how: String) -> void:
 		"picked": String(round_info.get("picked", "")), "menu": round_info["menu"], "count": shift_target(),
 		"served": served_total - round_served0, "grumpy": angry - round_angry0, "seconds": int(round_t), "star": int(round_info["star"]) >= 0,
 		"star_served": star_served, "cookies_left": cookies, "runners": active_runners(), "vr": not players.is_empty() and players[0].vr,
-		"solo": _solo_kitchen(), "gifts": (save.data["gifts"] as Array).size(), "seed": run_seed, "end": how})
+		"solo": _solo_kitchen(), "gifts": (save.data["gifts"] as Array).size(), "seed": run_seed, "end": how,
+		"mode": team_mode, "theme": theme, "events": (round_info.get("events", []) as Array).size(),
+		"events_told": kevents.fired if kevents != null else 0, "perks": perks, "mouse": mouse_trips, "cafe": _cafe_level(),
+		"picks": picks.history if picks != null else []})
+
+
+## Second pass -------------------------------------------------------------------------------------------------
+
+func _cafe_level() -> int:
+	if OS.has_environment("KR_CAFE"):  # tests / screenshots: show this many café steps
+		return clampi(int(OS.get_environment("KR_CAFE")), 0, Nights.CAFE_STEPS.size())
+	return Nights.cafe_level(int(save.data["rounds"])) if save != null else 0
+
+
+## Host: GENTLE / BRAVE / HARD on the pick orbs after the practice toastie (the family's last mode in the middle).
+func _offer_modes() -> void:
+	if picks == null:
+		return
+	var ids: Array = PickOrbs.mode_ids(team_mode)
+	var entries: Array = []
+	for id in ids:
+		var md := PickOrbs.mode(id)
+		entries.append({"id": id, "name": String(md.name), "pic": String(md.pic), "color": md.color})
+	picks.begin("mode", entries, ids, _on_pick)
+
+
+## Host: Gran's chef gifts on the pick orbs (three not taken yet).
+func _offer_gifts() -> void:
+	var go := Nights.gift_offer(shift + 1, run_seed, perks)
+	if go.is_empty() or picks == null:
+		_after_gift()
+		return
+	var entries: Array = []
+	for g in go:
+		var gd: Dictionary = Nights.GIFTS[g]
+		entries.append({"id": g, "name": String(gd.name), "pic": String(gd.pic), "color": gd.color})
+	picks.begin("gift", entries, go, _on_pick)
+	sound("wave", -6.0, 1.3)
+
+
+func _after_gift() -> void:
+	if invites_after_gift:
+		invites_after_gift = false
+		invite_wait = 2.5
+	else:
+		break_t = 3.0
+
+
+## Host: the team picked (slot -1: nobody, the middle one came).
+func _on_pick(stage: String, opt: Variant, slot: int) -> void:
+	var by := "auto" if slot < 0 else ("chef" if slot == 0 else "runner")
+	if stage == "mode":
+		team_mode = Nights.mode_of(String(opt))
+		save.data["mode"] = team_mode
+		save.mark_dirty()
+		var md := PickOrbs.mode(team_mode)
+		story({"who": String(md.name), "line": String(PickOrbs.MODE_LINES.get(team_mode, "")), "pic": String(md.pic),
+			"color": (md.color as Color).to_html(false), "duration": 3.0})
+		var th: Dictionary = Nights.THEMES[theme]
+		get_tree().create_timer(3.4, false).timeout.connect(func() -> void:
+			story({"who": String(th.word), "line": String(th.line), "pic": String(th.pic), "color": (th.colors[0] as Color).to_html(false), "duration": 3.5}))
+		break_t = 7.2
+		print("Mode: %s (picked by %s), theme %s" % [team_mode, by, theme])
+	elif stage == "gift":
+		var g := String(opt)
+		if not perks.has(g):
+			var list: Array = perks.duplicate()
+			list.append(g)
+			_apply_perks(list)
+			net.event("perks", [list])
+		var gd: Dictionary = Nights.GIFTS[g]
+		story({"who": String(gd.name), "line": "A gift from Gran!", "pic": String(gd.pic), "color": (gd.color as Color).to_html(false),
+			"duration": 3.0, "sound": "achievement"})
+		print("Chef gift: %s (picked by %s) -> %s" % [g, by, perks])
+		_after_gift()
+
+
+## Every machine: this visit's chef gifts.
+func _apply_perks(list: Array) -> void:
+	perks = list.duplicate()
+	ItemScript.quick_chop = perks.has("knife")
+	if decor != null:
+		decor.show_perks(perks)
+
+
+## Host: a kitchen event starts its warning (rings now, smoke / spill after Nights.WARN_SECS).
+func _kitchen_event(e: Array) -> void:
+	var kind := String(e[1])
+	kevents.announce(kind, float(e[2]), float(e[3]), float(e[4]))
+	net.event("kev", [kind, float(e[2]), float(e[3]), float(e[4])])
+	story({"who": "SMOKE!" if kind == "smoke" else "SPLASH!", "line": "Oven smoke!" if kind == "smoke" else "Slippy floor!",
+		"pic": "ovensmoke" if kind == "smoke" else "spill", "color": Nights.EVENT_COLORS[kind].to_html(false), "duration": 2.6})
+	print("Kitchen event: %s at (%.1f, %.1f) r %.1f, round %.0f s" % [kind, float(e[2]), float(e[3]), float(e[4]), round_t])
+
+
+## How fast a runner may move here (SKATES, smoke and spills).
+func runner_speed(p) -> float:
+	var sk := perks.has("skates")
+	var k := Nights.SKATES_SPEED if sk else 1.0
+	if kevents != null:
+		k *= kevents.slow_at(p.global_position, sk)
+	return k
+
+
+## Host: the HELPER MOUSE brings a missing ingredient to the pass now and then (the solo helpers already do).
+func _mouse_update(delta: float) -> void:
+	if not perks.has("mouse") or _solo_kitchen():
+		return
+	mouse_t += delta
+	if mouse_t < Nights.MOUSE_EVERY:
+		return
+	var missing := _missing_ingredients(_open_orders())
+	var slot := free_pass_slot(Vector3.ZERO)
+	if missing.is_empty() or slot < 0:
+		mouse_t = Nights.MOUSE_EVERY - 2.0
+		return
+	mouse_t = 0.0
+	mouse_trips += 1
+	var at: Vector3 = L.PASS_SLOTS[slot]
+	decor.mouse_hop(at)
+	net.event("mouse", [at])
+	var kind: String = missing[0]
+	get_tree().create_timer(0.5, false).timeout.connect(func() -> void:
+		if free_pass_slot(at) >= 0 and item_at(at, 0.12) == null:
+			spawn_item(kind, at, -1)
+			burst(at + Vector3.UP * 0.08, Color(0.85, 0.8, 0.95), 10, 0.04)
+			sound("pickup", -8.0, 1.5))
+	print("Helper mouse: %s to pass slot %d" % [kind, slot])
+
+
+## The button chef grabbed at a counter spot: an orb over it? (picks.gd)
+func picks_grab(spot: Vector3) -> bool:
+	return picks != null and picks.active() and picks.chef_grab_at(spot)
 
 
 func _exit_tree() -> void:
+	ItemScript.quick_chop = false
 	if SIMPLE_MODE and net != null and net.mode != "client" and _has_round() and not in_break and not round_info.has("done"):
 		_round_telemetry("quit")

@@ -19,6 +19,7 @@ extends RefCounted
 ## checks many seeds and progress states.
 
 const Seeded := preload("res://core/seeded.gd")
+const Nights := preload("res://games/kitchen_rush/nights.gd")
 const L := preload("res://games/kitchen_rush/layout.gd")
 
 const GAME_ID := "kitchen_rush"
@@ -31,6 +32,7 @@ const DISHES := {
 	"WRAP": ["dough", "lettuce", "cucumber"],
 	"SANDWICH": ["bun", "lettuce", "cucumber"],
 	"MELT": ["patty", "cheese", "tomato"],
+	"PANCAKES": ["dough", "berry"],  # PANCAKE DAY's dish (nights.gd)
 }
 const LESSONS: Array = ["TOASTIE", "SALAD", "BURGER", "PIZZA"]  ## one new one per round (rounds 1-4)
 const CHOPS := {"lettuce": 3, "tomato": 3, "cucumber": 3, "cheese": 2}
@@ -79,11 +81,17 @@ static func parties_open(progress: Dictionary) -> Array:
 
 
 ## Dishes the kitchen knows in round r (1-based): the lessons so far, plus (from MENU_FROM) the dishes
-## taught by parties that visited twice ({"visits": {type: n}}).
+## taught by parties that visited twice ({"visits": {type: n}}), plus (from Nights.THEME_FROM) tonight's theme dish
+## (progress.theme).
 static func known_dishes(r: int, progress: Dictionary) -> Array:
 	var out: Array = LESSONS.slice(0, clampi(r, 1, LESSONS.size()))
 	if r >= MENU_FROM:
-		out.append_array(taught(progress))
+		for d in taught(progress):
+			if not out.has(d):
+				out.append(d)
+	var td := Nights.theme_dish(String(progress.get("theme", "")))
+	if r >= Nights.THEME_FROM and td != "" and not out.has(td):
+		out.append(td)
 	return out
 
 
@@ -150,6 +158,8 @@ static func make(r: int, run_seed: int, progress: Dictionary, party: String = ""
 		party = default_party(r, run_seed, progress)
 	var rng := Seeded.rng(Seeded.daily_seed(GAME_ID) if daily else run_seed, "round%d/%s" % [0 if daily else r, party])
 	var info: Dictionary = PARTIES[party]
+	var theme := String(progress.get("theme", ""))
+	var mode := Nights.mode_of(String(progress.get("mode", "brave")))
 	var known := known_dishes(r, progress)
 	var new_dish := lesson_dish(r)
 	if new_dish == "" and fresh != "" and known.has(fresh):
@@ -166,7 +176,7 @@ static func make(r: int, run_seed: int, progress: Dictionary, party: String = ""
 		while menu.size() < size and not pool.is_empty():
 			var w: Array = []
 			for d in pool:
-				w.append(float(info["likes"].get(d, 0.5)))
+				w.append(float(info["likes"].get(d, 0.5)) * Nights.boost(theme, d))
 			var pick: String = pool[Seeded.weighted(rng, w)]
 			menu.append(pick)
 			pool.erase(pick)
@@ -181,7 +191,7 @@ static func make(r: int, run_seed: int, progress: Dictionary, party: String = ""
 		orders.append(new_dish)
 	var mw: Array = []
 	for d in menu:
-		mw.append(float(info["likes"].get(d, 0.5)) + (1.0 if d == new_dish else 0.0))
+		mw.append(float(info["likes"].get(d, 0.5)) * Nights.boost(theme, d) + (1.0 if d == new_dish else 0.0))
 	while orders.size() < count + SPARE:
 		var w2: Array = mw.duplicate()
 		var n := orders.size()
@@ -201,17 +211,49 @@ static func make(r: int, run_seed: int, progress: Dictionary, party: String = ""
 	var m := {"round": r, "party": party, "daily": daily, "menu": menu, "orders": orders, "count": count, "star": star,
 		"patience": patience, "interval": interval, "max_wait": max_wait, "raccoon": raccoon,
 		"gift": String(info["gift"]), "word": "TODAY'S PARTY" if daily else String(info["word"]),
-		"line": String(info["line"]), "fresh": new_dish}
-	# Fair pace: ease it until the simple kitchen model serves every order in time.
+		"line": String(info["line"]), "fresh": new_dish, "theme": theme, "mode": "brave", "events": []}
+	# Brave first: its events (the first two of hard's list), then ease the pace until the simple kitchen model
+	# serves every order in time.
+	var length := 1.5 + float(count) * float(interval) * 0.85 + 20.0
+	var hard_events := Nights.make_events(r, run_seed if not daily else Seeded.daily_seed(GAME_ID), "hard", length)
+	m.events = hard_events.slice(0, int(Nights.MODES.brave.events))
+	_ease(m, {})
+	if mode == "brave":
+		return m
+	var brave := m.duplicate(true)
+	var md: Dictionary = Nights.MODES[mode]
+	m.mode = mode
+	m.events = hard_events.slice(0, int(md.events))
+	m.max_wait = clampi(int(m.max_wait) + int(md.max_wait), 1, 4)
+	if mode == "gentle":  # easier in every number (the model only gets easier, so it stays fair)
+		m.patience = float(m.patience) * float(md.patience)
+		m.interval = float(m.interval) * float(md.interval)
+	else:  # hard: tighter, then eased back towards brave (never past it) until fair
+		m.patience = maxf(float(m.patience) * float(md.patience), PATIENCE_MIN * float(md.patience))
+		m.interval = maxf(float(m.interval) * float(md.interval), INTERVAL_MIN * float(md.interval))
+		_ease(m, brave)
+	return m
+
+
+## Ease a round's pace until the kitchen model is fair. cap: a round never to ease past ({} = the limits).
+static func _ease(m: Dictionary, cap: Dictionary) -> void:
+	var pmax := float(cap.get("patience", PATIENCE_MAX))
+	var imax := float(cap.get("interval", INTERVAL_MAX))
 	var tries := 0
-	while not simulate(m).is_empty() and tries < 40:
+	while not simulate(m).is_empty() and tries < 60:
 		tries += 1
-		if int(m.max_wait) > 1 and tries % 2 == 1:
+		if int(m.max_wait) > int(cap.get("max_wait", 1)) and tries % 2 == 1:
 			m.max_wait = int(m.max_wait) - 1
 		else:
-			m.interval = minf(float(m.interval) * 1.12, INTERVAL_MAX)
-			m.patience = minf(float(m.patience) * 1.05, PATIENCE_MAX)
-	return m
+			m.interval = minf(float(m.interval) * 1.12, imax)
+			m.patience = minf(float(m.patience) * 1.05, pmax)
+	if not cap.is_empty() and not simulate(m).is_empty():  # still not fair: take brave's own (fair) numbers
+		m.patience = pmax
+		m.interval = imax
+		m.max_wait = int(cap.max_wait)
+		var ev: Array = m.events
+		while ev.size() > (cap.events as Array).size() and not simulate(m).is_empty():
+			ev.pop_back()  # still too much with brave's pace: fewer surprises (never fewer than brave)
 
 
 ## Seconds for one dish in the kitchen model, as [busy, latency]: `busy` = how long the slowest helper
@@ -242,6 +284,7 @@ static func simulate(m: Dictionary) -> Array:
 	var served: Array = []
 	var free_at := 0.0
 	var next_arrival := 1.5
+	var events: Array = m.get("events", [])
 	for j in mini(count, orders.size()):
 		var a := next_arrival
 		var mw := int(m.max_wait)
@@ -250,8 +293,12 @@ static func simulate(m: Dictionary) -> Array:
 		arrive.append(a)
 		var t: Array = dish_time(String(orders[j]))
 		var start := maxf(free_at, a)
-		free_at = start + float(t[0])
-		var done := start + float(t[1])
+		var slow := 0.0
+		for e in events:  # smoke / a spill during this dish slows the runners a little
+			if float(e[0]) < start + float(t[1]) and float(e[0]) + Nights.EVENT_SECS > start:
+				slow += Nights.EVENT_DELAY
+		free_at = start + float(t[0]) + slow
+		var done := start + float(t[1]) + slow
 		served.append(done)
 		var pm := float(PATIENCE_MULT.get(String(m.party), 1.0)) * (STAR_PATIENCE if j == int(m.star) else 1.0)
 		if done - a > float(m.patience) * pm:
@@ -308,10 +355,14 @@ static func check(m: Dictionary, progress: Dictionary) -> Array:
 		out.append("star guest %d out of range" % star)
 	if bool(m.daily) and star == -1:
 		out.append("today's party has no star guest")
-	if float(m.patience) < PATIENCE_MIN - 0.01 or float(m.patience) > PATIENCE_MAX + 0.01:
+	var md: Dictionary = Nights.MODES.get(String(m.get("mode", "brave")), Nights.MODES.brave)
+	var pk := float(md.patience)
+	var ik := float(md.interval)
+	if float(m.patience) < PATIENCE_MIN * minf(pk, 1.0) - 0.01 or float(m.patience) > PATIENCE_MAX * maxf(pk, 1.0) + 0.01:
 		out.append("patience %.1f" % float(m.patience))
-	if float(m.interval) < INTERVAL_MIN * 0.95 - 0.01 or float(m.interval) > INTERVAL_MAX + 0.01:
+	if float(m.interval) < INTERVAL_MIN * 0.95 * minf(ik, 1.0) - 0.01 or float(m.interval) > INTERVAL_MAX * maxf(ik, 1.0) + 0.01:
 		out.append("interval %.1f" % float(m.interval))
+	out.append_array(Nights.check_events(m))
 	if int(m.max_wait) < 1 or int(m.max_wait) > 4:
 		out.append("max_wait %d" % int(m.max_wait))
 	if String(m.get("gift", "")) != String(PARTIES[party]["gift"]):

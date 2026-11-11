@@ -12,13 +12,16 @@ const INFO := {
 	"tomato": ["TOMATO", Color(0.96, 0.2, 0.16), 3],
 	"cucumber": ["CUCUMBER", Color(0.18, 0.62, 0.26), 3],
 	"cheese": ["CHEESE", Color(1.0, 0.84, 0.2), 2],
+	"berry": ["BERRIES", Color(0.55, 0.2, 0.75), 0],  # PANCAKE DAY (nights.gd)
 	"plate": ["PLATE", Color(0.97, 0.97, 1.0), 0],
 	"invite": ["PARTY", Color(1.0, 0.8, 0.3), 0],  # an invitation (chops = which party, parties.gd PARTY_ORDER)
 }
 
 # Snapshots send small ints instead of strings (keeps a 30 Hz snapshot under the network MTU).
-const KINDS := ["bun", "patty", "dough", "lettuce", "tomato", "cucumber", "cheese", "plate", "invite"]
-const RECIPE_NAMES := ["SALAD", "TOASTIE", "BURGER", "PIZZA", "WRAP", "SANDWICH", "MELT"]
+const KINDS := ["bun", "patty", "dough", "lettuce", "tomato", "cucumber", "cheese", "plate", "invite", "berry"]
+const RECIPE_NAMES := ["SALAD", "TOASTIE", "BURGER", "PIZZA", "WRAP", "SANDWICH", "MELT", "PANCAKES"]
+## QUICK KNIFE (a chef gift, nights.gd): every chopped thing needs one chop less (set on every machine).
+static var quick_chop := false
 const Cafe := preload("res://games/kitchen_rush/cafe.gd")
 const Parties := preload("res://games/kitchen_rush/parties.gd")
 const INVITE_LIFT := 0.3  # invitations float this high over the pass
@@ -51,7 +54,8 @@ static func color_of(k: String) -> Color:
 
 
 static func chops_needed(k: String) -> int:
-	return INFO[k][2] if INFO.has(k) else 0
+	var n: int = INFO[k][2] if INFO.has(k) else 0
+	return maxi(1, n - 1) if quick_chop and n > 0 else n
 
 
 func _ready() -> void:
@@ -228,6 +232,12 @@ func _raw_mesh() -> Node3D:
 			var b := BoxMesh.new()
 			b.size = Vector3(0.13, 0.06, 0.09)
 			root.add_child(_mi(b, col, Vector3(0, 0.03, 0)))
+		"berry":  # a little punnet of blueberries and raspberries
+			root.add_child(_mi(_cyl(0.075, 0.04), Color(0.95, 0.9, 0.75), Vector3(0, 0.02, 0)))
+			for i in 7:
+				var a := TAU * i / 7.0
+				var rr := 0.0 if i == 0 else 0.045
+				root.add_child(_mi(_sphere(0.026, 0.05), col if i % 2 == 0 else Color(0.9, 0.2, 0.35), Vector3(cos(a) * rr, 0.055, sin(a) * rr)))
 	return root
 
 
@@ -278,6 +288,12 @@ func _build_plate() -> void:
 				h = 0.012
 			"lettuce", "tomato", "cucumber":
 				h = 0.016
+			"berry":  # berries scattered on top (the pancake stack is the dough)
+				for i in 5:
+					var a := TAU * i / 5.0
+					visual.add_child(_mi(_sphere(0.022, 0.044), col if i % 2 == 0 else Color(0.9, 0.2, 0.35), Vector3(cos(a) * 0.05, y + 0.02, sin(a) * 0.05)))
+				y += 0.03
+				continue
 		visual.add_child(_mi(_cyl(r, h), col, Vector3(0, y + h * 0.5, 0)))
 		y += h
 	if contents.size() > 0 and contents[contents.size() - 1] == "bun" and contents.has("patty"):
