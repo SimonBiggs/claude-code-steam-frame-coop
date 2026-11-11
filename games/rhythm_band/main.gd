@@ -68,6 +68,12 @@ const Seeded := preload("res://core/seeded.gd")
 const Save := preload("res://core/save.gd")
 const Telemetry := preload("res://core/telemetry.gd")
 const StoryCard := preload("res://core/story_card.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
+const Deep := preload("res://games/rhythm_band/deep.gd")
+const PicksScript := preload("res://games/rhythm_band/picks.gd")
+const HazardsScript := preload("res://games/rhythm_band/hazards.gd")
+const SeasonScript := preload("res://games/rhythm_band/season.gd")
+const FestivalScript := preload("res://games/rhythm_band/festival.gd")
 
 const MAX_PLAYERS := 7  # VR drummer + 6 guitarists
 const MAX_LOCAL_VIEWS := 6
@@ -186,6 +192,24 @@ var story_t := 0.0
 var song_live := false  # host: a song is being played (a RUN line is due)
 var songs_played := 0  # this session
 var story_shown: Array[String] = []  # pictures of the story cards shown (bots check them)
+# Second pass (deep.gd): modes, Doodle's gifts on pick orbs, warned fast / slow parts and spotlight solos, seasons,
+# Doodle's festival.
+var picks: Node  # picks.gd
+var hazards: Node3D  # hazards.gd
+var season_node: Node3D  # season.gd
+var festival: Node3D  # festival.gd
+var mode := "brave"
+var mode_picked := false
+var gift := ""  # this song's gift ("" none)
+var gift_for := -1  # the show position the gift was picked for
+var season := ""
+var hz_list: Array = []  # this song's warned changes (deep.gd changes; a solo's who is a player index)
+var pick_next := -1  # host: the song that starts after the pick
+var solo_key := ""  # host: the solo being judged
+var solo_hits := 0
+var solo_total := 0
+var solos_done: Array = []  # [who, hits, total] (bots, telemetry)
+var rate_shown := 1.0
 
 
 func _ready() -> void:
@@ -209,13 +233,25 @@ func _ready() -> void:
 	save.game_id = SongGen.GAME_ID
 	# fans: [[kind, play-day joined, golden], ...] (oldest first); songs: songs finished in all; days: days
 	# played; daily: the date TODAY'S SONG was played.
-	save.defaults = {"best": 0, "fans": [], "fans_total": 0, "songs": 0, "days": 0, "last_day": "", "daily": "", "sessions": 0}
+	save.defaults = {"best": 0, "fans": [], "fans_total": 0, "songs": 0, "days": 0, "last_day": "", "daily": "", "sessions": 0,
+		"mode": "", "last_gift": "", "solos": 0}
 	add_child(save)
 	fan_club = FanClubScript.new()
 	fan_club.name = "FanClub"
 	fan_club.main = self
 	add_child(fan_club)
 	fan_club.build()
+	festival = FestivalScript.new()
+	festival.name = "Festival"
+	festival.main = self
+	add_child(festival)
+	season_node = SeasonScript.new()
+	season_node.name = "Season"
+	season_node.main = self
+	add_child(season_node)
+	hazards = HazardsScript.new()
+	hazards.main = self
+	add_child(hazards)
 	_build_hud()
 	var menu := PauseMenuScript.new()
 	menu.main = self
@@ -225,6 +261,10 @@ func _ready() -> void:
 	net.main = self
 	add_child(net)
 	net.state_changed.connect(_on_state_changed)
+	net.sticky_event("orbs")  # a machine joining mid-pick sees the orbs (picks.gd)
+	picks = PicksScript.new()
+	picks.main = self
+	add_child(picks)
 	seats = ClassicSeats.new(self, {
 		"no_keys": GuitaristScript.NO_KEYS,
 		"free_actions": ["continue", "pause"],
@@ -961,7 +1001,7 @@ func _check_practice() -> void:
 	var waited := state_t - prac_first_done if prac_first_done >= 0.0 else 0.0
 	if (all_done and waited > 1.5) or (any_done and waited > PRACTICE_WAIT) or state_t > PRACTICE_MAX:
 		print("Practice done (drums %d/%d) after %.1f s" % [prac_d, PRACTICE_PADS.size(), state_t])
-		_start_song(0)
+		_begin_song(0)
 
 
 ## The drummer hit the glowing practice drum: sparks, a rising chime, the next ball sets off.
@@ -1033,6 +1073,7 @@ func _start_song(pos: int) -> void:
 		_show_center(head + "\n" + ["Nice and easy!", "A bit faster…", "FULL SPEED - rock out!"][mini(pos, 2)], INTRO_TIME, true,
 			"SONG %d: %s" % [pos + 1, song.title])
 	sound("go", -6.0, 0.8, true)
+	_plan_changes(pos)
 	song_live = true
 	if song.daily:
 		_story("TODAY'S SONG!", "goldrecord", Color(1.0, 0.8, 0.2))
@@ -1069,8 +1110,10 @@ func multiplier() -> int:
 	return 1 + mini(3, combo / 15)
 
 
-func window(level: int) -> Vector2:
-	return WINDOWS[clampi(level, 0, 2)]
+## The timing window (song seconds) for a level: the mode's and the gift's share, times the clock's speed (a fast part
+## keeps the same window in real seconds).
+func window(level: int, drummer: bool = false) -> Vector2:
+	return WINDOWS[clampi(level, 0, 2)] * Deep.win_share(mode, gift, drummer) * rate_now()
 
 
 func drum_travel_beats() -> float:
@@ -1113,10 +1156,14 @@ func _band_result(q: int, star: bool = false, src: int = -1, tn: float = -1.0) -
 		if src >= 0 and tn >= 0.0 and not SIMPLE_MODE:
 			_sync_check(src, tn)
 		_combo_fx()
+		if gift == "confetti" and combo % Deep.CONFETTI_EVERY == 0:
+			_confetti()
 	else:
 		band_misses += 1
 		combo = combo / 2  # kind: a miss halves the combo instead of wiping it
-		crowd = maxf(0.0, crowd - 0.03 / sqrt(float(n)))
+		if gift != "confetti":  # CONFETTI: the crowd never gets sad
+			crowd = maxf(0.0, crowd - 0.03 / sqrt(float(n)))
+	_solo_note(q, src)
 
 
 ## Two or more players hitting the same beat: IN SYNC bonus (the drummer and the guitars together!).
@@ -1254,6 +1301,11 @@ func drum_hit(pad: int, speed: float) -> void:
 	var vol := lerpf(-8.0, 0.0, clampf((speed - 0.4) / 2.0, 0.0, 1.0))
 	inst.drum(pad, vol)
 	players[0].flash_pad(pad)
+	if state == "pick":
+		if not players[0].vr and not players[0].fake_vr:
+			picks.press(0, pad)  # the flat drummer's X / A / B (a VR drummer reaches into the orbs instead)
+		net.event("drum", [pad, -1, -1, vol])
+		return
 	if state == "menu":
 		_menu_drum(pad)
 		net.event("drum", [pad, -1, -1, vol])
@@ -1266,7 +1318,7 @@ func drum_hit(pad: int, speed: float) -> void:
 	var id := -1
 	var q := -1
 	if state == "play" and song != null:
-		var win := window(drum_level)
+		var win := window(drum_level, true)
 		var bdt := 99.0
 		var i := maxi(0, d_next - 4)
 		var n: int = song.d_t.size()
@@ -1492,7 +1544,8 @@ func _process(delta: float) -> void:
 	state_t += delta
 	prac_t += delta
 	if state == "play":
-		song_t += delta
+		song_t += delta * rate_now()
+	_apply_rate()
 	_sync_audio(delta)
 	_beat_fx()
 	var beat_pos: float = song_t / float(song.spb) if song != null and state == "play" else state_t * 1.6
@@ -1500,6 +1553,8 @@ func _process(delta: float) -> void:
 	fan_club.update(delta, beat_pos, crowd if state == "play" else 0.35, song != null and song.daily)
 	_update_story(delta)
 	_update_vr_text(delta)
+	hazards.update(delta)
+	festival.update(delta, crowd if state == "play" else 0.0)
 	if net.mode == "client":
 		_client_update(delta, cont_edge)
 		return
@@ -1512,6 +1567,8 @@ func _process(delta: float) -> void:
 			vr_start_was = vs
 		"practice":
 			_check_practice()
+		"pick":
+			picks.tick(delta)
 		"menu":
 			var gs := active_guitarists()
 			var all_ready := not gs.is_empty()
@@ -1536,6 +1593,7 @@ func _process(delta: float) -> void:
 				cheer_cd = 8.0
 				inst.cheer(-10.0)
 				net.event("cheer", [-10.0])
+			_judge_solo()
 			if song_t > song.length + 0.4:
 				_song_done()
 		"results":
@@ -1550,7 +1608,7 @@ func _process(delta: float) -> void:
 
 func _check_drum_misses() -> void:
 	var n: int = song.d_t.size()
-	var win := window(drum_level)
+	var win := window(drum_level, true)
 	while d_next < n and float(song.d_t[d_next]) < song_t - win.y - 0.02:
 		if d_judged[d_next] == 0:
 			_drum_result(d_next, 2)
@@ -1607,7 +1665,7 @@ func _on_continue(_auto: bool) -> void:
 		if tour_pos + 1 >= SONGS_PER_TOUR and not SIMPLE_MODE:
 			_tour_done()
 		else:
-			_start_song(tour_pos + 1)
+			_begin_song(tour_pos + 1)
 	elif state == "tour" and state_t > 1.0:
 		_enter_menu()
 
@@ -1696,6 +1754,9 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 				p.menu_ready = bool(args[0])
 		"star":
 			_activate_star(index)
+		"pick":
+			if args.size() >= 1 and state == "pick":
+				picks.press(index, int(args[0]))
 		"prac":
 			if args.size() >= 1:
 				p.prac_step = clampi(int(args[0]), 0, PRACTICE_LANES.size())
@@ -1753,7 +1814,8 @@ func make_snapshot() -> Array:
 	return [state, song_serial, song_idx, song_bars, song_t, crowd, combo, score, best, state_t, ps,
 		d.rig_transform(), d.kit_s, d.head_transform(), d.tip(0), d.tip(1), last_stars, tour_stars,
 		tour_pos, setlist, drum_level, star_meter, star_until, prac_d,
-		d.props.net_state() if d.props != null else [-1]]
+		d.props.net_state() if d.props != null else [-1],
+		[mode, gift, season, Deep.pack(hz_list)]]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -1825,6 +1887,16 @@ func apply_snapshot(s: Array) -> void:
 			prac_t = 0.0
 		if d.props != null:
 			d.props.apply_net(s[24])
+	if s.size() >= 26:
+		var dm: Array = s[25]
+		mode = String(dm[0])
+		if String(dm[1]) != gift:
+			gift = String(dm[1])
+			_apply_gift_look()
+		if String(dm[2]) != season and String(dm[2]) != "":
+			season = String(dm[2])
+			season_node.set_season(season)
+		hz_list = Deep.unpack(dm[3])
 
 
 func apply_event(kind: String, args: Array) -> void:
@@ -1875,6 +1947,14 @@ func apply_event(kind: String, args: Array) -> void:
 			pass
 		"story":
 			_story(str(args[0]), str(args[1]), args[2], false)
+		"orbs":
+			picks.show_row(String(args[0]), args[1])
+		"take":
+			picks.take_fx(int(args[0]), int(args[1]))
+		"confetti":
+			_confetti_fx()
+		"solo":
+			_solo_fx(int(args[0]), bool(args[1]))
 		"prop":
 			if players[0].props != null:
 				players[0].props.react(int(args[0]))
@@ -2038,6 +2118,15 @@ func _start_fan_club() -> void:
 	save.data.sessions = int(save.data.sessions) + 1
 	save.mark_dirty()
 	_send_fans()
+	season = Seeded.season(Seeded.today())
+	if OS.has_environment("RB_SEASON") and Deep.SEASONS.has(OS.get_environment("RB_SEASON")):
+		season = OS.get_environment("RB_SEASON")
+	season_node.set_season(season)
+	if String(save.data.mode) != "":
+		mode = Deep.mode_of(String(save.data.mode))
+	var fest := Deep.festival(int(save.data.songs))
+	festival.set_pieces(fest)
+	net.state_set("fest", fest)
 	var fans: Array = save.data.fans
 	if int(save.data.songs) == 0:
 		_story("Let's make a band!", "frog", Color(1.0, 0.4, 0.6))
@@ -2045,6 +2134,7 @@ func _start_fan_club() -> void:
 		_story("Let's play!", "frog", Color(1.0, 0.4, 0.6))
 	if grew and not fans.is_empty():
 		_story("Our fans grew!", SongGen.FAN_KINDS[int((fans[-1] as Array)[0]) % SongGen.FAN_KINDS.size()], Color(0.5, 0.85, 1.0))
+	_story(String(Deep.season_data(season).line), String(Deep.season_data(season).pic), Deep.season_data(season).drift)
 	if daily_due():
 		_story("A gold song today!", "goldrecord", Color(1.0, 0.8, 0.2))
 	print("Rhythm Band fan club: %d fans (%d in all), %d songs played, day %d, today's song %s, session seed %d" % [fans.size(),
@@ -2063,11 +2153,21 @@ func _new_fan() -> void:
 	var total := int(save.data.fans_total)
 	var kind := SongGen.fan_kind(song.code, total)
 	var list: Array = save.data.fans
-	list.append([kind, int(save.data.days), bool(song.daily)])
+	var fest_was := Deep.festival(int(save.data.songs))
+	var n_new := 2 if gift == "goldmic" else 1  # GOLD MIC: two fans
+	for j in n_new:
+		list.append([SongGen.fan_kind(song.code, total + j) if j > 0 else kind, int(save.data.days), bool(song.daily)])
 	while list.size() > SongGen.FAN_KEEP:
 		list.pop_front()
-	save.data.fans_total = total + 1
+	save.data.fans_total = total + n_new
+	total += n_new - 1
 	save.data.songs = int(save.data.songs) + 1
+	var fest_now := Deep.festival(int(save.data.songs))
+	if fest_now > fest_was:
+		festival.set_pieces(fest_now, true)
+		net.state_set("fest", fest_now)
+		var fid: String = Deep.FESTIVAL[fest_now - 1]
+		_story("The festival grows!", String(Deep.FEST_PICS.get(fid, "tent")), Color(1.0, 0.6, 0.3))
 	if song.daily:
 		save.data.daily = Seeded.today()
 	save.save_now()
@@ -2087,6 +2187,8 @@ func _new_fan() -> void:
 func _on_state_changed(key: String, _value: Variant) -> void:
 	if key == "fans" or key == "days":
 		fan_club.set_fans(net.state_get("fans", []), int(net.state_get("days", 0)))
+	if key == "fest":
+		festival.set_pieces(int(net.state_get("fest", 0)), true)
 
 
 ## Host / local: one RUN line per song (end = "song") or when the game closes mid-song (end = "quit").
@@ -2105,7 +2207,9 @@ func _run_line(end: String) -> void:
 		"secs": snappedf(maxf(song_t, 0.0), 0.1), "length": snappedf(song.length, 0.1), "hits": band_hits, "misses": band_misses,
 		"best_combo": best_combo, "drum_hits": int(d.hits), "drum_misses": int(d.misses), "drum_level": drum_level,
 		"guitar_hits": gh, "guitar_misses": gm, "guitarists": active_guitarists().size(), "vr": bool(d.vr),
-		"mode": str(net.mode), "fans": (save.data.fans as Array).size(), "fans_total": int(save.data.fans_total),
+		"mode": str(net.mode), "pick_mode": mode, "gift": gift, "season": season, "changes": hz_list.size(),
+		"kinds": hz_list.map(func(e: Dictionary) -> String: return String(e.kind)), "solos": solos_done.duplicate(),
+		"festival": Deep.festival(int(save.data.songs)), "picks": picks.history.size(), "fans": (save.data.fans as Array).size(), "fans_total": int(save.data.fans_total),
 		"songs": int(save.data.songs), "days": int(save.data.days), "session_songs": songs_played})
 
 
@@ -2132,3 +2236,200 @@ func _update_story(delta: float) -> void:
 	var d = players[0]
 	if (d.vr or d.fake_vr) and d.xr_camera != null:  # (fake_vr: the bots' fake head, VrRig.fake_head)
 		StoryCard.show_vr(self, d.xr_camera, opts)
+
+
+# --- Second pass (deep.gd): picks, changes, solos, gifts --------------------------------------------------------
+
+## The song clock's speed now (fast / slow parts, the SLOW SONG gift): every machine works it out from hz_list.
+func rate_now() -> float:
+	if state != "play" or song == null:
+		return 1.0
+	return Deep.rate_at(hz_list, float(song.spb), song_t, gift)
+
+
+## The backing music follows the clock's speed (it goes up when it speeds up: part of the tell).
+func _apply_rate() -> void:
+	var r := rate_now()
+	if absf(r - rate_shown) > 0.001:
+		rate_shown = r
+		backing.pitch_scale = r
+
+
+func warn_secs() -> float:
+	return float(Deep.mode_data(mode).warn)
+
+
+## A picture card straight away (a change's tell: never waits behind other cards). Every machine, local.
+func story_now(line: String, pic: String, color: Color) -> void:
+	story_queue.push_front([line, pic, color])
+	story_t = minf(story_t, 0.0)
+
+
+## The player who has the spotlight solo (the drummer when the soloist has left).
+func soloist(e: Dictionary) -> int:
+	var who := int(e.get("who", 0))
+	if who <= 0 or who >= players.size() or not players[who].active:
+		return 0
+	return who
+
+
+## Nobody but the drummer to pick.
+func pick_solo() -> bool:
+	return active_guitarists().is_empty()
+
+
+## Host / local: the next song, after the mode pick (once a session) or Doodle's gift pick (songs 2 on).
+func _begin_song(pos: int) -> void:
+	if net.mode == "client":
+		return
+	if not mode_picked:
+		_start_pick("mode", pos)
+	elif pos >= 1 and gift_for != pos:
+		_start_pick("gift", pos)
+	else:
+		_start_song(pos)
+
+
+func _start_pick(stage_id: String, pos: int) -> void:
+	state = "pick"
+	state_t = 0.0
+	pick_next = pos
+	gift = ""
+	_apply_gift_look()
+	hz_list = []
+	song_t = -START_LEAD
+	var entries: Array = []
+	var opts: Array = []
+	if stage_id == "mode":
+		opts = PickOrbs.mode_ids(Deep.mode_of(String(save.data.mode)) if String(save.data.mode) != "" else "brave")
+		for id in opts:
+			var md := PickOrbs.mode(String(id))
+			entries.append({"id": id, "name": md.name, "pic": md.pic, "color": md.color})
+		_story("Easy or tricky?", "frog", Color(1.0, 0.4, 0.6))
+	else:
+		opts = Deep.gift_choices(Deep.festival(int(save.data.songs)), String(save.data.last_gift), Seeded.derive(session_seed, "gift%d" % pos))
+		for id in opts:
+			var gd := Deep.gift(String(id))
+			entries.append({"id": id, "name": gd.name, "pic": gd.pic, "color": gd.color})
+		_story("A gift for you!", "gift", Color(1.0, 0.4, 0.6))
+	_show_center("", 0.1, true, "")  # (the last headline never sits over the orbs)
+	picks.begin(stage_id, entries, opts, _on_picked)
+	sound("ready", -6.0, 1.2, true)
+
+
+## Host / local: the band picked (or the middle one was taken for them).
+func _on_picked(stage_id: String, opt: Variant, _slot: int) -> void:
+	if stage_id == "mode":
+		mode_picked = true
+		mode = Deep.mode_of(String(opt))
+		save.data.mode = mode
+		_story(String(PickOrbs.MODE_LINES.get(mode, "Let's go!")), String(PickOrbs.mode(mode).pic), PickOrbs.mode_color(mode))
+	else:
+		gift = String(opt)
+		gift_for = pick_next
+		save.data.last_gift = gift
+		_apply_gift_look()
+	save.mark_dirty()
+	print("Picked %s: %s" % [stage_id, str(opt)])
+	_begin_song(pick_next)
+
+
+## Every machine: what the gift changes that you can see (BIG DRUM: the drums grow).
+func _apply_gift_look() -> void:
+	if players.size() > 0 and players[0] != null:
+		players[0].pad_scale = Deep.BIGDRUM_SIZE if gift == "bigdrum" else 1.0
+
+
+## Host / local, when a song starts: its warned changes (the same list on every machine through the snapshot).
+func _plan_changes(pos: int) -> void:
+	if pos == 0 and OS.has_environment("RB_GIFT") and not Deep.gift(OS.get_environment("RB_GIFT")).is_empty():
+		gift = OS.get_environment("RB_GIFT")  # (What's New "try": the first song with that gift)
+		gift_for = 0
+		_apply_gift_look()
+	if pos > 0 and gift_for != pos:
+		gift = ""
+		_apply_gift_look()
+	var band: Array = [0]
+	for g in active_guitarists():
+		band.append(int(g.index))
+	var spec := {"mode": mode, "season": season, "gift": gift, "bars": song.bars, "band": band}
+	if OS.has_environment("RB_CHANGES_NOW"):  # bots / What's New: changes from song 1, from the second bar
+		spec["from"] = 0
+		spec["first"] = 1
+	var list := Deep.changes(int(song.code), pos, spec)
+	for e in list:
+		if String(e.kind) == "solo":
+			e.who = int(band[clampi(int(e.who), 0, band.size() - 1)])
+	hz_list = list
+	solo_key = ""
+	solo_hits = 0
+	solo_total = 0
+	if gift != "":
+		var gd := Deep.gift(gift)
+		_story(String(gd.line), String(gd.pic), gd.color)
+	print("Changes: song %d (%s, %s, gift '%s'): %s" % [pos + 1, mode, season, gift, str(Deep.pack(hz_list))])
+
+
+## Host: a judged note during the spotlight solo counts for the soloist.
+func _solo_note(q: int, src: int) -> void:
+	if hz_list.is_empty() or song == null or state != "play":
+		return
+	var found := Deep.change_at(hz_list, float(song.spb), song_t, 0.0)
+	if found.is_empty() or String(found[0].kind) != "solo" or String(found[1]) != "on" or src != soloist(found[0]):
+		return
+	solo_total += 1
+	if q < 2:
+		solo_hits += 1
+		crowd = minf(1.0, crowd + 0.02)  # the soloist's hits count double for the crowd
+
+
+## Host: once the solo is over, the band cheers the soloist (a GREAT SOLO when it went well).
+func _judge_solo() -> void:
+	for e in hz_list:
+		if String(e.kind) != "solo":
+			continue
+		var key := "%d|%d" % [song_serial, int(e.bar)]
+		var end := float(int(e.bar) + int(e.bars)) * 4.0 * float(song.spb)
+		if solo_key == key or song_t < end + 0.3:
+			continue
+		solo_key = key
+		var who := soloist(e)
+		var good := solo_total > 0 and float(solo_hits) / float(solo_total) >= Deep.SOLO_GOOD
+		solos_done.append([who, solo_hits, solo_total])
+		if good:
+			save.data.solos = int(save.data.solos) + 1
+			save.mark_dirty()
+		_solo_fx(who, good)
+		net.event("solo", [who, good])
+		_story("Great solo!" if good else "Nice solo!", "spotlight", PLAYER_COLORS[clampi(who, 0, PLAYER_COLORS.size() - 1)])
+		print("Solo: %s hit %d of %d (%s)" % ["the drummer" if who == 0 else "P%d" % (who + 1), solo_hits, solo_total, "great" if good else "nice"])
+		solo_hits = 0
+		solo_total = 0
+
+
+## Every machine: sparks over the soloist (fireworks for a great solo).
+func _solo_fx(who: int, good: bool) -> void:
+	burst(hazards.solo_spot(who) + Vector3(0.0, 1.6, 0.0), Deep.SOLO_COLOR, 30 if good else 16, false)
+	if good:
+		stage.fireworks(2)
+		inst.cheer(-4.0)
+
+
+## Host / local: CONFETTI gift - a burst on every few combo.
+func _confetti() -> void:
+	_confetti_fx()
+	net.event("confetti", [])
+
+
+func _confetti_fx() -> void:
+	var cols: Array[Color] = [Color(1.0, 0.35, 0.4), Color(0.35, 0.75, 1.0), Color(1.0, 0.85, 0.25), Color(0.45, 0.95, 0.45)]
+	for k in 3:
+		burst(Vector3(-2.0 + k * 2.0, 3.2, -1.6), cols[(k + combo) % cols.size()], 14, false)
+
+
+## Any machine: a guitarist pressed X / A / B while the orbs are up.
+func pick_press(p, lane: int) -> void:
+	if net.mode == "client":
+		net.send_action("pick", [lane], p.index)
+	else:
+		picks.press(p.index, lane)

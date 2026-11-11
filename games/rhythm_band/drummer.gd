@@ -148,6 +148,7 @@ var gh_t := 0.0
 var gh_idle := 0.0
 var grabs := 0  # maracas picked up so far (the ghost hand stops after two)
 var held_was := false
+var pad_scale := 1.0  # BIG DRUM gift (deep.gd): the drums grow and reach further
 
 var fitted := false
 var fit_t := 0.8
@@ -483,7 +484,7 @@ func _process(delta: float) -> void:
 		flash[i] = maxf(0.0, flash[i] - delta * 4.0)
 		top_mats[i].emission_energy_multiplier = 0.4 + flash[i] * 3.5 + (0.6 if star_on else 0.0)
 		top_mats[i].emission = GOLD if star_on and i == 3 and main.star_ready() else (PAD_COLORS[i].lerp(GOLD, 0.6) if star_on else PAD_COLORS[i])
-		pads[i].scale = Vector3.ONE * (1.0 + flash[i] * 0.12)
+		pads[i].scale = Vector3.ONE * pad_scale * (1.0 + flash[i] * 0.12)
 	_update_notes()
 	if main.SIMPLE_MODE:
 		_update_cue_arrow()
@@ -610,12 +611,12 @@ func _swing_check(delta: float) -> void:
 		var bd := 9.0
 		for p in 4:
 			var d := tip.distance_to(pads[p].global_position)
-			if d > REARM_R:
+			if d > REARM_R * pad_scale:
 				inside[h * 4 + p] = 0
 			if d < bd:
 				bd = d
 				bestp = p
-		if bestp >= 0 and bd < HIT_R and inside[h * 4 + bestp] == 0:
+		if bestp >= 0 and bd < HIT_R * pad_scale and inside[h * 4 + bestp] == 0:
 			inside[h * 4 + bestp] = 1
 			if tip_speed[h] > MIN_SPEED:
 				swings += 1

@@ -5,7 +5,7 @@ extends RefCounted
 ## t = the picture's clock, bob = its gentle bob, color = the card's colour.
 ## The animal fans use other games' pictures (bunny, puppy, penguin, polarbear, toucan, sheep).
 
-const NAMES: Array[String] = ["frog", "goldrecord", "fanclub", "musicnote", "dino", "bongos", "guitar", "discoball"]
+const NAMES: Array[String] = ["frog", "goldrecord", "fanclub", "musicnote", "dino", "bongos", "guitar", "discoball", "shaker", "goldmic", "confetti", "spotlight", "speedup"]
 
 const FROG := Color(0.35, 0.8, 0.3)
 const GOLD := Color(1.0, 0.8, 0.2)
@@ -97,6 +97,51 @@ static func draw(pic, kind: String, t: float, bob: float, color: Color) -> void:
 			for k in 4:  # sparkles
 				var a2 := t * 2.0 + k * 1.57
 				pic._circle(0.5 + cos(a2) * 0.42, 0.52 + sin(a2) * 0.4, 0.02 + 0.015 * absf(sin(t * 6.0 + k)), Color(1, 1, 0.8))
+		"shaker":  # two maracas shaking
+			for k in 2:
+				var sh := sin(t * 9.0 + k * PI) * 0.05
+				var x := 0.36 + k * 0.28
+				var c: Color = [color, Color(1.0, 0.75, 0.25)][k]
+				pic._poly([[x - 0.025 + sh * 0.3, 0.55 + bob], [x + 0.025 + sh * 0.3, 0.55 + bob], [x + 0.03, 0.88 + bob], [x - 0.03, 0.88 + bob]], WOOD)
+				pic._circle(x + sh, 0.4 + bob, 0.15, c)
+				pic._circle(x + sh - 0.05, 0.35 + bob, 0.035, c.lightened(0.5))
+				for j in 3:  # little shake lines
+					var a := -0.6 + j * 0.6 + k * PI
+					pic._circle(x + sh + cos(a) * 0.21, 0.4 + bob + sin(a) * 0.21, 0.015 + 0.01 * absf(sin(t * 9.0)), Color(1, 1, 1, 0.8))
+		"goldmic":  # a shiny golden microphone with sparkles
+			pic._poly([[0.47, 0.5 + bob], [0.53, 0.5 + bob], [0.55, 0.9 + bob], [0.45, 0.9 + bob]], Color(0.3, 0.3, 0.35))  # handle
+			pic._circle(0.5, 0.34 + bob, 0.17, GOLD)
+			pic._circle(0.5, 0.34 + bob, 0.12, GOLD.lightened(0.25))
+			for k in 3:  # the grille
+				pic._poly([[0.38, 0.28 + k * 0.06 + bob], [0.62, 0.28 + k * 0.06 + bob], [0.62, 0.295 + k * 0.06 + bob], [0.38, 0.295 + k * 0.06 + bob]], GOLD.darkened(0.25))
+			pic._poly([[0.42, 0.5 + bob], [0.58, 0.5 + bob], [0.56, 0.56 + bob], [0.44, 0.56 + bob]], GOLD.darkened(0.15))
+			for k in 4:
+				var a := t * 2.0 + k * 1.57
+				pic._circle(0.5 + cos(a) * 0.32, 0.36 + bob + sin(a) * 0.28, 0.02 + 0.015 * absf(sin(t * 5.0 + k)), Color(1, 1, 0.8))
+		"confetti":  # a party popper bursting confetti
+			pic._poly([[0.18, 0.88 + bob], [0.3, 0.6 + bob], [0.46, 0.76 + bob]], color)
+			pic._poly([[0.18, 0.88 + bob], [0.24, 0.74 + bob], [0.32, 0.82 + bob]], color.darkened(0.3))
+			for k in 12:
+				var f := fmod(t * 0.5 + k * 0.083, 1.0)
+				var a := -1.2 + (k % 6) * 0.22
+				var r := 0.12 + f * 0.5
+				var c: Color = [Color(1.0, 0.35, 0.4), Color(0.35, 0.75, 1.0), Color(1.0, 0.85, 0.25), Color(0.45, 0.95, 0.45)][k % 4]
+				pic._circle(0.38 + cos(a) * r, 0.68 + bob + sin(a) * r, 0.03 * (1.0 - f * 0.4), c)
+		"spotlight":  # a spotlight beam on a little singer
+			pic._poly([[0.42, 0.04], [0.58, 0.04], [0.85, 0.92], [0.15, 0.92]], Color(1.0, 0.95, 0.6, 0.45))
+			pic._circle(0.5, 0.06, 0.07, Color(0.3, 0.3, 0.35))
+			pic._circle(0.5, 0.92, 0.3, Color(1.0, 0.95, 0.6, 0.35))
+			var hop := absf(sin(t * 4.0)) * 0.03
+			pic._circle(0.5, 0.74 + bob - hop, 0.1, color)  # body
+			pic._circle(0.5, 0.56 + bob - hop, 0.08, Color(1.0, 0.85, 0.7))  # head
+			pic._eye(0.47, 0.55 + bob - hop, 0.02)
+			pic._eye(0.53, 0.55 + bob - hop, 0.02)
+			_note(pic, 0.74, 0.5 + bob - fmod(t * 0.3, 0.2), 0.04, GOLD)
+		"speedup":  # a music note zooming along with speed lines
+			var z := fmod(t * 0.6, 1.0) * 0.06
+			for k in 3:
+				pic._poly([[0.08 + z, 0.5 + k * 0.1 + bob], [0.38 + z, 0.5 + k * 0.1 + bob], [0.38 + z, 0.53 + k * 0.1 + bob], [0.08 + z, 0.53 + k * 0.1 + bob]], color.lightened(0.3))
+			_note(pic, 0.6 + z, 0.72 + bob, 0.13, color)
 
 
 ## A music note (head + stem) at (x, y) with head radius r.
