@@ -17,6 +17,7 @@ var saw_finale := false
 var saw_pick := false  # Poppy's ride was finished and the next round began with the ride pick (story.gd)
 var saw_play := false
 var jumps := 0
+var late := false  # this machine joined a game already running (BOT_LATE)
 var saw_orbs := false  # the pick orbs showed on this machine (skies.gd modes / Poppy's gifts)
 var saw_gust_rings := false  # a wind gust's warn rings showed on this machine
 var gusts_planned := 0  # host: gusts in the rounds played
@@ -42,7 +43,18 @@ func _ready() -> void:
 	var client := OS.has_environment("DUO_JOIN")
 	var host := OS.has_environment("DUO_HOST")
 	var t0 := 3.0 if client else 1.0
+	# A machine joining a game already running (tools/multibot.ts --late: BOT_LATE s after the others) lands mid-round,
+	# mid-pick or on the results: it only joins, plays and checks what reached it (the pause, jump and drop-in steps
+	# belong to the machines there from the start).
+	late = client and OS.has_environment("BOT_LATE")
 	kit.at(t0, "%d TV players press A on their pads" % want, _join)
+	if late:
+		kit.at(maxf(12.0, 40.0 - float(OS.get_environment("BOT_LATE"))), "finish (joined late)", func() -> void:
+			_checks()
+			kit.finish())
+		kit.every(2.0, _report)
+		kit.every(0.25, _watch_results)
+		return
 	if not host and BotKit.lead_machine():
 		kit.at(t0 + 6.0, "P2 presses Start: pause menu", func() -> void:
 			kit.allow_pause = true
@@ -234,9 +246,10 @@ func _checks() -> void:
 		kit.assert_true(main.popped_by_tv > 0, "TV players popped balloons")
 	if main.vr_rig != null:
 		kit.assert_true(main.popped_by_vr > 0, "the fake VR player popped balloons")
-	kit.assert_true(saw_play, "%s: a generated round played" % mode)
+	kit.assert_true(saw_play or (late and int(main.net.state_get("round", 0)) >= 2), "%s: a generated round played" % mode)
 	kit.assert_true((main.net.state_get("fair", {}) as Dictionary).has("rides"), "%s: the fair state reached this machine" % mode)
-	kit.assert_true(saw_orbs, "%s: the pick orbs showed here" % mode)
+	if not late:  # (a late joiner may arrive after the picks)
+		kit.assert_true(saw_orbs, "%s: the pick orbs showed here" % mode)
 	kit.assert_true(not main.theme.is_empty() and String(main.net.state_get("theme", "")) == String(main.theme.id), "%s: today's sky theme reached this machine (%s)" % [mode, str(main.theme.get("id", ""))])
 	kit.assert_true(main.net.state_get("parade", null) != null, "%s: Poppy's parade reached this machine" % mode)
 	if mode != "client":
