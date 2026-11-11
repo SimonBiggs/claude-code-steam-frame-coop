@@ -56,10 +56,12 @@ static func plan(course_seed: int, level: int) -> Array:
 
 ## Hole i of a course: the first try that passes check() and that sim() sinks (the classic hole of that gimmick if
 ## none does; the test proves the classic ones too). A few ms on the host; TV machines rebuild with hole_try().
-static func hole(course_seed: int, i: int, level: int) -> Dictionary:
+## also_proven(d) -> bool: an extra proof the hole must pass (deep.gd sinkable(): this mode's and gift's ball physics);
+## the try is sent to the TV machines, so they rebuild the same hole without it.
+static func hole(course_seed: int, i: int, level: int, also_proven: Callable = Callable()) -> Dictionary:
 	for t in TRIES:
 		var d := hole_try(course_seed, i, level, t)
-		if check(d).is_empty() and proven(d):
+		if check(d).is_empty() and proven(d) and (not also_proven.is_valid() or bool(also_proven.call(d))):
 			return d
 	return hole_try(course_seed, i, level, -1)
 
@@ -388,9 +390,11 @@ static func putt_speed(c: Course, from: Vector2, to: Vector2) -> float:
 
 ## Proof the hole can be sunk: an aiming putter (aim at course.aim_point, putt_speed) with the game's own
 ## ball physics and windmill. {"sunk": bool, "putts": n}.
-static func sim(d: Dictionary, max_putts: int = MAX_PUTTS) -> Dictionary:
+## knobs: course.gd apply() (deep.gd: a mode, a gift, a surprise that stays on the whole time).
+static func sim(d: Dictionary, max_putts: int = MAX_PUTTS, knobs: Dictionary = {}) -> Dictionary:
 	var c := Course.new()
 	c.setup(d)
+	c.apply(knobs)
 	var b := Ball.new()
 	b.course = c
 	b.place(d["tee"])
