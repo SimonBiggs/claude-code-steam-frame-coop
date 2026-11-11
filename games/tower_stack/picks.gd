@@ -13,11 +13,12 @@ const PickOrbs := preload("res://core/pick_orbs.gd")
 
 const WAIT := {"mode": 12.0, "build": 10.0}
 const AFTER := 1.0  # seconds the taken orb shows its dot before the orbs go
-const ROW := Vector3(0.0, 0.0, 0.2)
-const GAP := 2.8
-const Y := 1.5
-const AVATAR_Y := 1.0  # a TV player touches with this point over their feet
-const AVATAR_R := 0.45
+## The row floats at the giant's chest height a little past the stage (the giant's eyes are ~3.7 m up at z 1.7), and
+## a TV player touches an orb by standing under it (flat distance), so it can be up there for both.
+const ROW := Vector3(0.0, 0.0, -0.6)
+const GAP := 2.4
+const Y := 2.4
+const AVATAR_R := 0.25  # + PickOrbs.HIT_R: how close (flat) a TV player's feet must be under an orb
 const HAND_R := 0.2
 
 var main: Node
@@ -76,7 +77,7 @@ func tick(delta: float) -> void:
 	t -= delta
 	for slot in main.avatars:
 		var a: Node3D = main.avatars[slot]
-		var i := orbs.nearest_hit(a.position + Vector3.UP * AVATAR_Y, AVATAR_R)
+		var i := orbs.nearest_hit(Vector3(a.position.x, ROW.y + Y, a.position.z), AVATAR_R)
 		if i >= 0:
 			take(i, int(slot))
 			return

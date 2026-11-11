@@ -1157,6 +1157,9 @@ func _process(delta: float) -> void:
 		vr_avatar.head.scale = Vector3.ONE * WS
 		for g in vr_avatar.hands:
 			(g as Node3D).scale = Vector3.ONE * WS
+	var orbs_up: bool = not picks.orbs.orbs.is_empty()  # the hoop and its sign step aside for the pick orbs
+	ring.visible = not orbs_up
+	ring_label.visible = not orbs_up
 	if sock.visible:  # the wind sock flaps hard while a weather event is coming or blowing
 		sock.rotation.z = sin(clock * 22.0) * 0.18 if weather.shake_t > 0.0 else 0.0
 	if net.mode == "client":
