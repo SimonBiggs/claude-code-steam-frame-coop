@@ -8,6 +8,7 @@ extends SceneTree
 ##   - MODE look: "gentle"/"brave"/"hard"/"heroic"/"mega": Color(...) or "name": "GENTLE"/... -> PickOrbs.mode()
 ## A diegetic thing that only looks similar (a hazard vent, a shop sign) is allowed by a line in its file:
 ##   ## shared-picks-ok: <func name> (why)
+## Every game script must also compile (load() + can_instantiate()).
 ## Also smoke-tests both helpers (every option, every shape and style) so the games can lean on them.
 ##   godot-test --headless --path . -s res://tests/shared_picks_test.gd     Prints SHARED PICKS: PASS / FAIL.
 
@@ -96,6 +97,9 @@ func _initialize() -> void:
 		n += 1
 		for e in scan(path, FileAccess.get_file_as_string(path)):
 			_expect(false, e)
+		# Every game script compiles (a gen test that never loads a broken altar.gd still said PASS, 2026-11-11).
+		var scr := load(path) as Script
+		_expect(scr != null and scr.can_instantiate(), "%s does not compile" % path)
 	_expect(n > 50, "found the games (%d files)" % n)
 	# 3. Modes: one list, the old ids map onto it.
 	_expect(PickOrbs.mode_name("mega") == "HARD" and PickOrbs.mode_name("heroic") == "HARD", "mega / heroic show as HARD")
