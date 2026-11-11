@@ -54,7 +54,7 @@ func _games() -> Array[String]:
 	for k in 4:
 		var plan := [BalloonStory.spec(String(BalloonStory.RIDES[k * 2].id), 15, met, 6, 120.0), {"k": "story", "ride": "", "seed": 70 + k}]
 		jobs.append([BalloonMain._gen_key(plan), BalloonMain._gen_job(plan),
-			func() -> Variant: return BalloonWaves.generate(70 + k, plan[0])])
+			func() -> Variant: return BalloonMain.make_round(70 + k, plan[0])])
 	for i in [40, 61, 82]:
 		var desc := {"k": "story", "i": i, "w": 4242}
 		jobs.append(["mm" + var_to_str(desc), MarbleMain._gen_job(desc),

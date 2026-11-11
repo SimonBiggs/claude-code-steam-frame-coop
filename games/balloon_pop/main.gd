@@ -911,10 +911,15 @@ static func _gen_key(plan: Array) -> String:
 static func _gen_job(plan: Array) -> Callable:
 	var seed_v := int(plan[1].seed)
 	var sp: Dictionary = (plan[0] as Dictionary).duplicate(true)
-	return func() -> Variant:
-		var rd := WaveGen.generate(seed_v, sp)
-		rd["gusts"] = Skies.gusts(rd, String(sp.get("mode", "brave")))  # the round's wind gusts, off the main thread too
-		return rd
+	return func() -> Variant: return make_round(seed_v, sp)
+
+
+## A round from its seed and spec only (pure: the same on a worker thread, tests/bg_gen_test.gd): the waves
+## (wavegen.gd) and their wind gusts in the spec's mode (skies.gd).
+static func make_round(seed_v: int, sp: Dictionary) -> Dictionary:
+	var rd := WaveGen.generate(seed_v, sp)
+	rd["gusts"] = Skies.gusts(rd, String(sp.get("mode", "brave")))
+	return rd
 
 
 func _end_round() -> void:
