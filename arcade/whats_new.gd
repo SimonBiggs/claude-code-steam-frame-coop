@@ -33,6 +33,11 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "wm-gifts", "date": "2026-11-11", "game": "whack_a_mole", "pic": "bighammer", "line": "Pick Fig's hammer gifts!"},
+	{"id": "wm-tricks", "date": "2026-11-11", "game": "whack_a_mole", "pic": "stampede", "line": "Mole stampede! Look out!"},
+	{"id": "wm-holiday", "date": "2026-11-11", "game": "whack_a_mole", "pic": "moleden", "line": "Moles go on holiday!"},
+	{"id": "wm-seasons", "date": "2026-11-11", "game": "whack_a_mole", "pic": "snowman", "line": "A snowy mole garden", "try": {"WM_SEASON": "winter"}},
+	{"id": "wm-gentle", "date": "2026-11-11", "game": "whack_a_mole", "pic": "mole", "line": "Gentle, brave or hard"},
 	{"id": "bp-gifts", "date": "2026-11-11", "game": "balloon_pop", "pic": "dart", "line": "Pick Poppy's gifts!"},
 	{"id": "bp-gusts", "date": "2026-11-11", "game": "balloon_pop", "pic": "airswirl", "line": "Wind! Rings show the way"},
 	{"id": "bp-skies", "date": "2026-11-11", "game": "balloon_pop", "pic": "nightsky", "line": "Night, snow, sunset skies", "try": {"BP_SKY": "night"}},

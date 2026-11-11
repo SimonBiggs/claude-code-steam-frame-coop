@@ -12,7 +12,10 @@ const SPACING := Vector2(0.78, 0.72)
 const HOLE_R := 0.17
 const TOP := Color(0.38, 0.8, 0.36)  ## the table's grassy top (moles pop out of it, the TV kids run on it)
 const HOLE := Color(0.06, 0.04, 0.03)
-const LAWN := Color(0.47, 0.75, 0.38)  ## the garden round the table
+const LAWN := Color(0.47, 0.75, 0.38)  ## the garden round the table (spring; LAWNS for every season)
+## The lawn in each season (deep.gd SEASONS; Seeded.season): fresh spring green, sunny summer, olive autumn, frosty winter grass (white snow patches on it; white kids still stand out).
+const LAWNS := {"spring": LAWN, "summer": Color(0.58, 0.74, 0.3), "autumn": Color(0.62, 0.6, 0.3), "winter": Color(0.66, 0.78, 0.7)}
+const DECK_CHAIR := Color(0.95, 0.4, 0.35)  ## the holiday moles' striped deckchairs (with white)
 ## The TV kids' character per slot (main.gd; outfit = the player colour).
 const LOOKS: Array[String] = ["farmer", "chef", "pirate", "knight", "astronaut", "bard", "viking"]
 
@@ -100,17 +103,6 @@ static func kind_mesh(kind: int) -> ArrayMesh:
 	return mole_mesh(false)
 
 
-## A seed packet on a stick for the pick phase: a white packet in the crop's colour with the crop's own
-## plant on top (garden.gd plant_mesh), so kids see what they'd grow.
-static func seed_mesh(color: Color, plant: Mesh) -> ArrayMesh:
-	var b := MeshKit.builder()
-	b.cylinder(0.02, 0.02, 0.2, MeshKit.at(Vector3(0.0, 0.1, 0.0)), Color(0.75, 0.55, 0.35), 6)
-	b.rounded_box(Vector3(0.26, 0.3, 0.05), 0.02, MeshKit.at(Vector3(0.0, 0.33, 0.0)), Color(1.0, 0.97, 0.9))
-	b.rounded_box(Vector3(0.22, 0.2, 0.055), 0.02, MeshKit.at(Vector3(0.0, 0.31, 0.0)), color)
-	b.add_mesh(plant, MeshKit.at(Vector3(0.0, 0.48, 0.0), Vector3.ONE * 0.75))
-	return b.build()
-
-
 ## A silly mole, origin at its base, facing +Z (towards the VR player). About 0.42 m tall.
 static func mole_mesh(gold: bool) -> ArrayMesh:
 	var b := _mole(Color(1.0, 0.78, 0.15) if gold else Color(0.55, 0.36, 0.24), Color(1.0, 0.95, 0.6) if gold else Color(0.9, 0.74, 0.55), gold)
@@ -161,3 +153,83 @@ static func mallet() -> Array:
 	var hm := MeshKit.instance(b.build(), false)
 	head.add_child(hm)
 	return [root, head]
+
+
+## The season's dress round the garden (between the holiday deckchairs and the trees; the front, where the VR player
+## stands, stays open): spring tulips, summer sunflowers, autumn leaf piles and pumpkins, winter snow and snowmen.
+## One merged mesh, the same on every machine.
+static func season_deco(season: String) -> ArrayMesh:
+	var b := MeshKit.builder()
+	var r := RandomNumberGenerator.new()
+	r.seed = hash(season) + 77
+	var spots: Array[Vector3] = []
+	for k in 200:
+		if spots.size() >= 44:
+			break
+		var a := deg_to_rad(r.randf_range(-150.0, 150.0))
+		var rad := r.randf_range(7.9, 11.5)
+		var p := Vector3(sin(a) * rad, 0.0, -cos(a) * rad)
+		var ok := true
+		for q in spots:
+			ok = ok and q.distance_to(p) > 0.8
+		if ok:
+			spots.append(p)
+	for i in spots.size():
+		var p := spots[i]
+		var s := r.randf_range(0.8, 1.2)
+		match season:
+			"spring":  # tulips in little clumps
+				var cols: Array[Color] = [Color(1.0, 0.45, 0.6), Color(1.0, 0.95, 0.4), Color(0.75, 0.5, 1.0), Color(1.0, 1.0, 1.0)]
+				for k in 3:
+					var q := p + Vector3(r.randf_range(-0.25, 0.25), 0.0, r.randf_range(-0.25, 0.25))
+					b.cylinder(0.012, 0.015, 0.3 * s, MeshKit.at(q + Vector3(0.0, 0.15 * s, 0.0)), Color(0.3, 0.65, 0.25), 5)
+					b.ellipsoid(Vector3(0.05, 0.07, 0.05) * s, MeshKit.at(q + Vector3(0.0, 0.32 * s, 0.0)), cols[(i + k) % cols.size()], 7)
+			"summer":  # tall sunflowers
+				b.cylinder(0.025, 0.03, 1.2 * s, MeshKit.at(p + Vector3(0.0, 0.6 * s, 0.0)), Color(0.35, 0.6, 0.2), 6)
+				var head := MeshKit.at(p + Vector3(0.0, 1.22 * s, 0.03), Vector3.ONE * s, Vector3(PI * 0.5 - 0.3, atan2(-p.x, -p.z), 0.0))
+				b.cylinder(0.2, 0.2, 0.03, head, Color(1.0, 0.82, 0.15), 12)
+				b.cylinder(0.1, 0.1, 0.05, head, Color(0.45, 0.28, 0.12), 10)
+			"autumn":  # leaf piles and the odd pumpkin
+				if i % 4 == 0:
+					b.ellipsoid(Vector3(0.24, 0.18, 0.24) * s, MeshKit.at(p + Vector3(0.0, 0.16 * s, 0.0)), Color(0.95, 0.5, 0.1), 10)
+					b.cylinder(0.02, 0.03, 0.1, MeshKit.at(p + Vector3(0.0, 0.36 * s, 0.0)), Color(0.35, 0.5, 0.2), 5)
+				else:
+					var cols2: Array[Color] = [Color(0.9, 0.35, 0.1), Color(0.8, 0.2, 0.15), Color(0.95, 0.65, 0.15), Color(0.6, 0.35, 0.15)]
+					b.ellipsoid(Vector3(0.45, 0.12, 0.38) * s, MeshKit.at(p + Vector3(0.0, 0.05, 0.0)), cols2[i % cols2.size()], 9)
+			"winter":  # snow patches and a few snowmen
+				if i % 7 == 0:
+					b.sphere(0.32, MeshKit.at(p + Vector3(0.0, 0.3, 0.0)), Color(0.97, 0.98, 1.0), 12)
+					b.sphere(0.22, MeshKit.at(p + Vector3(0.0, 0.75, 0.0)), Color(0.97, 0.98, 1.0), 12)
+					b.sphere(0.15, MeshKit.at(p + Vector3(0.0, 1.08, 0.0)), Color(0.97, 0.98, 1.0), 10)
+					var face := Basis(Vector3.UP, atan2(-p.x, -p.z))
+					b.cone(0.03, 0.16, Transform3D(face * Basis(Vector3.RIGHT, PI * 0.5), p + Vector3(0.0, 1.08, 0.0) + face * Vector3(0.0, 0.0, 0.2)), Color(1.0, 0.5, 0.1), 6)
+					b.cylinder(0.12, 0.12, 0.16, MeshKit.at(p + Vector3(0.0, 1.27, 0.0)), Color(0.15, 0.15, 0.2), 10)
+				else:
+					b.ellipsoid(Vector3(0.6, 0.06, 0.45) * s, MeshKit.at(p + Vector3(0.0, 0.01, 0.0)), Color(0.98, 0.99, 1.0), 10)
+	return b.build()
+
+
+## FIG'S HOLIDAY GARDEN (deep.gd): `n` tired moles lounging in striped deckchairs with sun hats, at deep.gd
+## holiday_spot(i), each in its deep.gd holiday_look(i). One merged mesh (rebuilt only when a mole arrives).
+static func holiday_mesh(spots: Array, looks: Array) -> ArrayMesh:
+	var b := MeshKit.builder()
+	var moles := {}
+	for i in spots.size():
+		var xf: Transform3D = spots[i]
+		var look := int(looks[i])
+		if not moles.has(look):
+			moles[look] = kind_mesh(look)
+		var stripe := DECK_CHAIR if i % 3 != 1 else Color(0.3, 0.6, 1.0)
+		b.box(Vector3(0.42, 0.04, 0.34), xf * MeshKit.at(Vector3(0.0, 0.16, 0.05)), stripe)  # the seat
+		b.box(Vector3(0.42, 0.04, 0.44), xf * MeshKit.at(Vector3(0.0, 0.32, -0.16), Vector3.ONE, Vector3(1.0, 0.0, 0.0)), stripe)  # the back
+		b.box(Vector3(0.44, 0.045, 0.1), xf * MeshKit.at(Vector3(0.0, 0.25, -0.05), Vector3.ONE, Vector3(1.0, 0.0, 0.0)), Color(1.0, 0.97, 0.92))
+		for sx in [-0.2, 0.2]:
+			var x: float = sx
+			b.box(Vector3(0.03, 0.18, 0.03), xf * MeshKit.at(Vector3(x, 0.08, 0.18)), Color(0.75, 0.55, 0.35))
+			b.box(Vector3(0.03, 0.34, 0.03), xf * MeshKit.at(Vector3(x, 0.14, -0.2), Vector3.ONE, Vector3(0.5, 0.0, 0.0)), Color(0.75, 0.55, 0.35))
+		var sc := 0.85 if look != 5 else 1.0
+		b.add_mesh(moles[look], xf * MeshKit.at(Vector3(0.0, 0.17, 0.0), Vector3.ONE * sc, Vector3(-0.35, 0.0, 0.0)))
+		if look != 5 and look != 2:  # a sun hat (the king keeps his crown, a helmet mole his helmet)
+			b.cylinder(0.17, 0.17, 0.015, xf * MeshKit.at(Vector3(0.0, 0.53, -0.08), Vector3.ONE, Vector3(-0.35, 0.0, 0.0)), Color(0.98, 0.85, 0.45), 12)
+			b.cylinder(0.08, 0.09, 0.07, xf * MeshKit.at(Vector3(0.0, 0.57, -0.1), Vector3.ONE, Vector3(-0.35, 0.0, 0.0)), Color(0.98, 0.85, 0.45), 10)
+	return b.build()

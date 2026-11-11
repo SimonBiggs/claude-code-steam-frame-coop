@@ -10,6 +10,8 @@ const Story := preload("res://games/whack_a_mole/story.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 const Creatures := preload("res://core/creatures.gd")
 const ResCache := preload("res://core/res_cache.gd")
+const Deep := preload("res://games/whack_a_mole/deep.gd")
+const Props := preload("res://games/whack_a_mole/props.gd")
 
 const RADIUS := 4.1
 const PLANTS := 8  ## per bed: 2 rows of 4
@@ -25,6 +27,8 @@ var cheer_t := -1.0
 var cheer_bed := -1
 var t := 0.0
 var sfx: Node
+var holiday_node: MeshInstance3D  # FIG'S HOLIDAY GARDEN: tired moles in deckchairs (deep.gd)
+var holiday_n := -1
 
 
 func _ready() -> void:
@@ -116,6 +120,30 @@ func _place_fig(cur: String) -> void:
 	var xf := spot(i)
 	fig.position = xf * Vector3(BED.x * 0.5 + 0.35, 0.0, 0.0)
 	fig.rotation.y = atan2(-fig.position.x, -fig.position.z)  # faces the table
+
+
+## Every machine: n moles on holiday in the deckchairs round the garden (only ever grows; a newcomer pops in).
+func set_holiday(n: int) -> void:
+	n = clampi(n, 0, Deep.MAX_HOLIDAY)
+	if n == holiday_n:
+		return
+	var grew := holiday_n >= 0 and n > holiday_n
+	holiday_n = n
+	if holiday_node != null and is_instance_valid(holiday_node):
+		holiday_node.queue_free()
+	holiday_node = null
+	if n == 0:
+		return
+	var spots: Array = []
+	var looks: Array = []
+	for i in n:
+		spots.append(Deep.holiday_spot(i))
+		looks.append(Deep.holiday_look(i))
+	holiday_node = MeshKit.instance(Props.holiday_mesh(spots, looks), false)
+	holiday_node.name = "Holiday"
+	add_child(holiday_node)
+	if grew and sfx != null:
+		sfx.play_at("sparkle", Deep.holiday_spot(n - 1).origin, -2.0, 1.2)
 
 
 ## A bed just filled: it bounces, Fig cheers.

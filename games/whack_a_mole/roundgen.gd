@@ -40,7 +40,8 @@ static func hole_of(c: int, r: int) -> int:
 	return r * COLS + c
 
 
-## spec: {time (s), level (0..), players (1..), kinds {kind: weight}, gold (chance), king (bool), name}
+## spec: {time (s), level (0..), players (1..), kinds {kind: weight}, gold (chance), king (bool), name,
+## stay_x / gap_x (deep.gd modes and gifts: moles stay up longer, waves further apart; default 1)}
 ## Returns {seed, time, level, spawns: [[t, hole, kind, stay], ...] by time, waves: [[t, shape], ...],
 ## max (all points), goal [1 star, 2 stars, 3 stars], kinds [kinds used], cap (most moles up at once)}.
 static func generate(seed_value: int, spec: Dictionary) -> Dictionary:
@@ -53,6 +54,8 @@ static func generate(seed_value: int, spec: Dictionary) -> Dictionary:
 	var cap := 5 + (1 if players >= 4 else 0)
 	var kinds: Dictionary = spec.get("kinds", {})
 	var gold_p := float(spec.get("gold", 0.06))
+	var stay_x := clampf(float(spec.get("stay_x", 1.0)), 0.8, 2.0)
+	var gap_x := clampf(float(spec.get("gap_x", 1.0)), 0.7, 2.0)
 	var free_at := PackedFloat32Array()
 	free_at.resize(HOLES)
 	var up_until: Array = []  # [end time] of every spawn so far (for the cap)
@@ -90,8 +93,8 @@ static func generate(seed_value: int, spec: Dictionary) -> Dictionary:
 		if shape == "rush":
 			rushes += 1
 		waves.append([snappedf(t, 0.01), shape])
-		var gap := lerpf(1.1, 0.45, p) * lerpf(1.0, 0.75, d)
-		var stay := maxf(0.7, lerpf(2.0, 0.9, p) * lerpf(1.0, 0.8, d))
+		var gap := lerpf(1.1, 0.45, p) * lerpf(1.0, 0.75, d) * gap_x
+		var stay := maxf(0.7, lerpf(2.0, 0.9, p) * lerpf(1.0, 0.8, d)) * stay_x
 		var plan := _wave(shape, rng, gap)  # [[dt, hole or -1 (any free)], ...]
 		var wave_end := t
 		for step in plan:

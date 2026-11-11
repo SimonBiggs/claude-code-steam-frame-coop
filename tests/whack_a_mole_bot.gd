@@ -4,9 +4,14 @@ extends Node
 ## Local:      godot --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/whack_a_mole_bot.tscn
 ## Networked:  DUO_PORT=81xx DUO_HOST=1 ... & DUO_PORT=81xx DUO_JOIN=127.0.0.1 ... (same scene, real time)
 ## Flat host: add DUO_FLAT_HOST=1 to the host (no VR: one bot pad plays slot 0 on the host).
+## Solo VR: BOT_SOLO=1 BOT_VR=1 (the giant alone, no TV kids).
+## Second pass (deep.gd): TV bots run into a pick orb (mode, crop, hammer gift), the giant alone bonks one; one clumsy
+## kid runs into a told stampede; checks the mode, the gift, warned tricks on every machine, the season's dress and the
+## holiday garden.
 
 const BotKit := preload("res://tests/bot_kit.gd")
 const Story := preload("res://games/whack_a_mole/story.gd")
+const Deep := preload("res://games/whack_a_mole/deep.gd")
 
 var kit: BotKit
 var main: Node
@@ -19,6 +24,10 @@ var saw_moles := 0  # most moles in a generated round seen
 var bonk_cd := {}
 var swing_phase := 0  # fake VR: 0 = raise above a mole, 1 = swing down
 var swing_hole := -1
+var orbs_seen := {}  # stage -> true (every machine)
+var tricks_max := 0
+var was_down := false  # a local hammer-kid sat bumped (every machine)
+var vr_took := false
 
 
 func _ready() -> void:
@@ -28,10 +37,13 @@ func _ready() -> void:
 	main = load("res://games/whack_a_mole/main.tscn").instantiate()
 	main.set("round_time", 14.0)
 	main.set("fresh_save", true)  # a brand-new garden every run
-	main.set("need_scale", 0.15)  # tiny beds: round 1 fills one, round 2 starts with the seed pick
+	main.set("need_scale", 0.15)  # tiny beds: round 1 fills one, round 2 starts with the crop pick
+	main.set("pick_wait_scale", 0.35)  # short waits on the pick orbs
+	main.set("trick_scale", 6.0)  # a few warned tricks even in a short round
+	main.set("holiday_every", 3)  # moles go on holiday quickly
 	add_child(main)
 	kit.main = main
-	want = BotKit.bot_players(2, 6)
+	want = 0 if OS.has_environment("BOT_SOLO") else BotKit.bot_players(2, 6)
 	var client := OS.has_environment("DUO_JOIN")
 	var host := OS.has_environment("DUO_HOST")
 	var t0 := 3.0 if client else 1.0
@@ -49,10 +61,16 @@ func _ready() -> void:
 	kit.drop_in_out(main.party, t0 + 9.0, 3.0, func(slot: int) -> bool:
 		return main.avatars.has(slot) and main.huds.has(slot) and main.cams.has(slot))
 	if host:
-		kit.at(24.0, "host checks (the TV machine is still connected)", _checks)
-		kit.at(34.0, "finish", kit.finish)
+		var end := float(OS.get_environment("BOT_HOST_END")) if OS.has_environment("BOT_HOST_END") else 46.0  # late-join tests
+		kit.at(end - 10.0, "host checks (the TV machine is still connected)", _checks)
+		kit.at(end, "finish", kit.finish)
 	else:
-		kit.at(25.0 if client else 34.0, "finish", func() -> void:
+		# Clients leave a little before the host (BOT_HOST_END given to every machine: tools/multibot.ts --env); a machine
+		# that joined late (BOT_LATE) counts its clock from its own start.
+		var fin := 37.0 if client else 44.0
+		if client and OS.has_environment("BOT_HOST_END"):
+			fin = float(OS.get_environment("BOT_HOST_END")) - 5.0 - float(OS.get_environment("BOT_LATE") if OS.has_environment("BOT_LATE") else "0")
+		kit.at(fin, "finish", func() -> void:
 			_checks()
 			kit.finish())
 	kit.every(2.0, _report)
@@ -99,8 +117,12 @@ func _physics_process(delta: float) -> void:
 	var ph := String(main.net.state_get("phase", ""))
 	if ph == "practice":
 		saw_practice = true
-	if ph == "pick":
-		saw_pick = true
+	if main.picks != null and main.picks.showing():
+		orbs_seen[main.picks.orbs.stage] = true
+	saw_pick = saw_pick or orbs_seen.has("crop")
+	tricks_max = maxi(tricks_max, main.tricks.seen)
+	for sl in main.stunned:
+		was_down = was_down or float(main.stunned[sl]) > 0.0
 	if not main.round_def.is_empty():
 		saw_moles = maxi(saw_moles, (main.round_def.spawns as Array).size())
 	for i in main.holes.size():
@@ -140,27 +162,62 @@ func _steer(slot: int, delta: float) -> void:
 	var i := _nearest_up(a.position)
 	var v := Vector2.ZERO
 	bonk_cd[slot] = float(bonk_cd.get(slot, 0.0)) - delta
+	var goal := Vector3.INF
+	if String(main.net.state_get("phase", "")) == "orbs":
+		goal = main.picks.orb_position(slot % 3) if main.picks.showing() else Vector3.INF  # run into a pick orb
+		if goal == Vector3.INF:
+			goal = main.picks.orb_position(0) if main.picks.showing() else a.position
+		i = -1
+	elif slot == main.party.local_slots()[0] and _herd_spot() != Vector3.INF:
+		goal = _herd_spot()  # the clumsy kid: runs into a told stampede (tests the bump on every machine)
+		i = -1
+	if goal != Vector3.INF:
+		var dg: Vector3 = goal - a.position
+		dg.y = 0.0
+		if dg.length() > 0.05:
+			v = _stick_to(slot, dg.normalized())
 	if i >= 0:
 		var d: Vector3 = main.holes[i] - a.position
 		d.y = 0.0
 		if d.length() > 0.25:
-			d = d.normalized()
-			var cam: Camera3D = main.split.active_camera(slot)
-			var f := -cam.global_basis.z
-			f.y = 0.0
-			f = f.normalized()
-			var r := Vector3(-f.z, 0.0, f.x)
-			v = Vector2(d.dot(r), -d.dot(f))
+			v = _stick_to(slot, d.normalized())
 		if d.length() < 0.35 and float(bonk_cd[slot]) <= 0.0:
 			bonk_cd[slot] = 0.3
 			kit.slot_press(main.party, slot, "accept")
 	kit.slot_stick(main.party, slot, "left", v)
 
 
+## The stick that walks this kid's way along `d` (seen from its camera).
+func _stick_to(slot: int, d: Vector3) -> Vector2:
+	var cam: Camera3D = main.split.active_camera(slot)
+	var f := -cam.global_basis.z
+	f.y = 0.0
+	f = f.normalized()
+	var r := Vector3(-f.z, 0.0, f.x)
+	return Vector2(d.dot(r), -d.dot(f))
+
+
+## The middle of a stampede band being told now, or INF.
+func _herd_spot() -> Vector3:
+	for e in main.tricks.tells_now():
+		if String(e.kind) == "stampede":
+			var b := Deep.band(int(e.data))
+			return Vector3(0.3, main.holes[0].y, (b[0] as Vector3).z)
+	return Vector3.INF
+
+
 ## Fake VR: walk near a mole, raise the mallet above it, swing it down.
 func _drive_vr(delta: float) -> void:
 	var rig = main.vr_rig
 	rig.camera.position.y = 1.6
+	if String(main.net.state_get("phase", "")) == "orbs":  # the giant alone: bonk the right-hand pick orb with the mallet
+		var o: Vector3 = main.picks.orb_position(2) if main.picks.showing() else Vector3.INF
+		kit.vr_stick(rig, Vector2.ZERO)
+		if o != Vector3.INF and main.party.player_count() == 0:
+			var off: Vector3 = main.mallet_head.global_position - rig.hand_r.global_position
+			kit.vr_reach(rig, 1, o - off, 2.0, delta)
+			vr_took = vr_took or main.picks.chosen_by == 0
+		return
 	if swing_hole < 0 or main.m_state[swing_hole] != 1:
 		var head: Vector3 = rig.head_position()
 		swing_hole = _nearest_up(head)
@@ -198,8 +255,33 @@ func _report() -> String:
 		int(main.net.state_get("best", 0)), str(main.net.state_get("garden", {})), str(saw_kinds.keys())]
 
 
+func _vr_took_any() -> bool:
+	for h in main.picks.history:
+		if int(h[2]) == 0:
+			return true
+	return false
+
+
 func _checks() -> void:
 	var mode: String = main.net.mode
+	# Second pass (deep.gd) on every machine.
+	kit.assert_true(orbs_seen.has("mode") or mode == "client", "%s: the mode was picked on the pick orbs (%s)" % [mode, str(orbs_seen.keys())])
+	kit.assert_true(orbs_seen.has("gift") or mode == "client", "%s: Fig's hammer gifts were offered on the pick orbs" % mode)
+	kit.assert_true(String(main.net.state_get("mode", "")) in ["gentle", "brave", "hard"], "%s: a mode reached this machine (%s)" % [mode, str(main.net.state_get("mode", ""))])
+	kit.assert_true(tricks_max > 0, "%s: warned tricks were told by rings here (%d)" % [mode, tricks_max])
+	kit.assert_true(main.shown_season == main.season and not main.season_nodes.is_empty(), "%s: the garden wears its %s dress" % [mode, main.season])
+	kit.assert_true(main.garden.holiday_n > 0, "%s: moles went on holiday in Fig's garden (%d)" % [mode, main.garden.holiday_n])
+	if mode == "client":
+		kit.info("client: a local hammer-kid sat bumped: %s; gift %s" % [was_down, main.gift])
+	else:
+		kit.info("tricks fired %s, stats %s, picks %s" % [str(main.tricks.fired), str(main.stats), str(main.picks.history)])
+		kit.assert_true(not main.tricks.fired.is_empty(), "host: tricks happened")
+		kit.assert_true(String(main.save.data.mode) == main.mode, "host: the mode was saved")
+		kit.assert_true(int(main.save.data.moles_total) > 0, "host: bonked moles were counted for the holiday garden")
+		if int(main.tricks.fired.get("stampede", 0)) > 0 and kit.tv_players() > 0 and int(main.stats.herd) > 0:
+			kit.assert_true(int(main.stats.bumped) > 0, "host: the clumsy kid in a stampede was bumped")
+		if main.vr_rig != null and want == 0:
+			kit.assert_true(vr_took or _vr_took_any(), "solo giant: the mallet took a pick orb")
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
 	if mode == "client":
 		kit.assert_eq(main.party.local_slots().size(), want, "client: all %d local players are seated" % want)
@@ -214,7 +296,7 @@ func _checks() -> void:
 		kit.assert_true(main.vr_whacks > 0, "the fake VR player whacked moles with the mallet")
 	if mode != "client":
 		kit.assert_true(saw_practice, "the round started with a practice mole")
-		kit.assert_true(saw_pick, "%s: Fig's bed filled and the next round began with the seed pick" % mode)
+		kit.assert_true(saw_pick, "%s: Fig's bed filled and the next round began with the crop pick orbs" % mode)
 		kit.assert_true(Story.beds_grown(main.save.data.beds) >= 1, "%s: a bed grew in Fig's garden (%s)" % [mode, str(main.save.data.beds)])
 		kit.assert_true(String(main.save.data.cur) not in [Story.FIRST_CROP, ""] or Story.beds_grown(main.save.data.beds) >= 2,
 			"%s: a new crop was planted (%s, %s)" % [mode, String(main.save.data.cur), str(main.save.data.beds)])

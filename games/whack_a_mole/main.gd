@@ -8,6 +8,10 @@ extends Node3D
 ## seed packets. Each crop brings its visitor moles (speedy, helmet, bunny - don't bonk!, the KING).
 ## Rounds are seeded (roundgen.gd: wave shapes, rising with the garden), with 1-3 STARS to earn; the
 ## first round each day is TODAY'S PATCH (the same on every machine). One RUN line per round.
+## SECOND PASS (deep.gd): GENTLE / BRAVE / HARD once a session, the next crop and FIG'S HAMMER GIFTS before every
+## round, all on the shared pick orbs (picks.gd); golden moles and mole STAMPEDES told by warning rings first
+## (tricks.gd); the garden dresses for the season; every HOLIDAY_EVERY moles bonked one goes on holiday to the
+## deckchairs round Fig's garden for good (saved).
 
 const NetScript := preload("res://core/net.gd")
 const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
@@ -34,6 +38,11 @@ const Garden := preload("res://games/whack_a_mole/garden.gd")
 const Seeded := preload("res://core/seeded.gd")
 const Telemetry := preload("res://core/telemetry.gd")
 const StoryCard := preload("res://core/story_card.gd")
+const Deep := preload("res://games/whack_a_mole/deep.gd")
+const Picks := preload("res://games/whack_a_mole/picks.gd")
+const Tricks := preload("res://games/whack_a_mole/tricks.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
+const WarnRingsScript := preload("res://core/warn_rings.gd")
 
 const GAME_ID := "whack_a_mole"
 const KID_SPEED := 2.2
@@ -47,12 +56,13 @@ const HIDDEN := 0
 const UP := 1
 const BONKED := 2
 const LEAVING := 3
-const SEED_HOLES: Array[int] = [5, 6]  ## the two seed packets in the pick phase (middle row)
-const PICK_WAIT := 15.0  ## nobody picks: the first packet is planted
 
 var round_time := 120.0  ## seconds per round (bots shorten it before adding the game)
 var fresh_save := false  ## bots: start a brand-new garden
 var need_scale := 1.0  ## bots: smaller beds so a short round fills one
+var trick_scale := 1.0  ## bots: more warned tricks in a short round
+var pick_wait_scale := 1.0  ## bots: shorter waits on the pick orbs
+var holiday_every := Deep.HOLIDAY_EVERY  ## bots: moles go on holiday sooner
 
 # --- The networking contract ---
 var net: Node
@@ -121,7 +131,6 @@ var round_def := {}  # roundgen.gd round being played
 var round_desc := {}  # {k: story/daily, crop, seed}
 var spawn_i := 0
 var elapsed := 0.0
-var pick_t := 0.0
 var daily_due := false
 var last_crop := ""
 var run := {}  # this round's numbers for the RUN line
@@ -131,6 +140,21 @@ var star_off: StandardMaterial3D
 var star_icons := {}  # hud slot -> [3 icons]
 var crop_pics := {}  # hud slot -> [picture holder, bar]
 var vr_story: Node3D
+# Second pass (deep.gd): the session's mode, this round's gift, the season, warned tricks, the holiday garden.
+var picks: Picks
+var tricks: Tricks
+var mode := ""  # "" until the team picks (once a session; every machine from net state "mode")
+var gift := ""  # this round's hammer gift (net state "gift")
+var season := ""
+var reserved := PackedFloat32Array()  # host: round seconds until which a hole is kept for a told trick
+var stunned := {}  # slot -> seconds a bumped hammer-kid still sits (every machine, for its own kids)
+var ground: MeshInstance3D
+var season_nodes: Array[Node] = []
+var shown_season := ""
+var boinging := false
+var mallet_base := 1.0  # the mallet head's size (BIG HAMMER: bigger)
+var gift_pics := {}  # hud slot -> [picture holder, gift shown]
+var stats := {"tricks": 0, "gold_tricks": 0, "herd": 0, "bumped": 0, "boing": 0, "carrots": 0, "holiday_new": 0}  # bots
 
 
 func _ready() -> void:
@@ -142,6 +166,10 @@ func _ready() -> void:
 	net.main = self
 	add_child(net)
 	net.state_changed.connect(_on_state_changed)
+	net.sticky_event("orbs")  # a machine joining mid-pick sees the pick orbs
+	season = OS.get_environment("WM_SEASON") if OS.has_environment("WM_SEASON") else Seeded.season()
+	if not Deep.SEASONS.has(season):
+		season = "spring"
 	party = Party.new()
 	party.name = "Party"
 	add_child(party)
@@ -206,6 +234,9 @@ func _setup(mode: String) -> void:
 	awards.set_player(0, "GIANT" if vr_rig != null or mode == "client" else party.name_of(0))
 	if mode != "client":
 		net.state_set("best", int(save.data["best"]))
+		net.state_set("season", season)
+		net.state_set("holiday", _holiday())
+		garden.set_holiday(_holiday())
 		var dd: Dictionary = save.data.daily
 		daily_due = not dd.has(Seeded.today()) and not OS.has_environment("BOT_NO_DAILY")
 		_publish_garden()
@@ -221,25 +252,29 @@ func _setup(mode: String) -> void:
 # --- World --------------------------------------------------------------------------------
 
 func _build_world(vr: bool) -> void:
-	sky = SkyKit.apply(self, "day", vr)
-	var ground := MeshInstance3D.new()
+	sky = SkyKit.apply(self, String(Deep.season_data(season).sky), vr)
+	ground = MeshInstance3D.new()
 	var disc := CylinderMesh.new()
 	disc.top_radius = 22.0
 	disc.bottom_radius = 22.0
 	disc.height = 0.2
 	disc.radial_segments = 32
 	ground.mesh = disc
-	ground.material_override = MeshKit.material(Props.LAWN)
 	ground.position.y = -0.1
 	add_child(ground)
-	add_child(MeshKit.scatter_random(MeshKit.prop("tree"), 16, Vector3.ZERO, 18.0, 8.0, 0.8, 1.3, PackedColorArray(), 3))
-	add_child(MeshKit.scatter_random(MeshKit.prop("flower"), 40, Vector3.ZERO, 8.5, 5.2, 0.7, 1.1,
-		PackedColorArray([Color(1.0, 0.5, 0.6), Color(1.0, 0.9, 0.4), Color(0.7, 0.6, 1.0)]), 5))
+	apply_season(season)
 	table = MeshKit.instance(Props.table_mesh())
 	add_child(table)
 	garden = Garden.new()
 	garden.sfx = sfx
 	add_child(garden)
+	picks = Picks.new()
+	picks.main = self
+	picks.wait_scale = pick_wait_scale
+	add_child(picks)
+	tricks = Tricks.new()
+	tricks.main = self
+	add_child(tricks)
 	holes = Props.holes()
 	var n := holes.size()
 	m_state.resize(n)
@@ -247,6 +282,7 @@ func _build_world(vr: bool) -> void:
 	m_hits.resize(n)
 	m_h.resize(n)
 	m_t.resize(n)
+	reserved.resize(n)
 	vis_h.resize(n)
 	shown_state.resize(n)
 	shown_kind.resize(n)
@@ -334,6 +370,10 @@ func _make_hud(slot: int, parent: Control) -> void:
 	bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row2.add_child(bar)
 	crop_pics[slot] = [holder, bar, ""]
+	var gh := CenterContainer.new()  # this round's hammer gift (deep.gd)
+	gh.custom_minimum_size = Vector2(44.0, 44.0)
+	row2.add_child(gh)
+	gift_pics[slot] = [gh, ""]
 	if slot < 0:
 		timers[slot] = HudKit.timer(ui, {"seconds": float(net.state_get("time", round_time))})
 		join_prompt = UiKit.panel("pill")
@@ -400,6 +440,17 @@ func _refresh_hud() -> void:
 		var bar: UiKit.Bar = cp[1]
 		bar.visible = cur != ""
 		bar.set_value(float(gs.get("fill", 0)), maxf(1.0, float(gs.get("need", 1))))
+	for slot in gift_pics:
+		var gp: Array = gift_pics[slot]
+		var gh: Control = gp[0]
+		if is_instance_valid(gh) and String(gp[1]) != gift:
+			gp[1] = gift
+			for c in gh.get_children():
+				c.queue_free()
+			if gift != "":
+				var pic := StoryCard.picture(String(Deep.gift(gift).pic), 40.0)
+				gh.add_child(pic)
+				UiKit.pop_in(pic)
 
 
 func _all_huds() -> Array:
@@ -463,6 +514,8 @@ func _on_player_left(slot: int) -> void:
 	timers.erase(slot)
 	star_icons.erase(slot)
 	crop_pics.erase(slot)
+	gift_pics.erase(slot)
+	stunned.erase(slot)
 	hints.remove_view(slot)
 	_refresh_group()
 	_refresh_hud()
@@ -496,12 +549,15 @@ func _move_local_players(delta: float) -> void:
 	if send:
 		send_t = 1.0 / 30.0
 	var phase := String(net.state_get("phase", "play"))
-	var playing := phase == "play" or phase == "practice" or phase == "pick"
+	var playing := phase == "play" or phase == "practice" or phase == "orbs"
 	for slot in party.local_slots():
 		if not avatars.has(slot):
 			continue
 		var a: Node3D = avatars[slot]
-		var mv := party.stick(slot, "move") if playing else Vector2.ZERO
+		var down := float(stunned.get(slot, 0.0)) > 0.0  # bumped by a stampede: sits a moment (deep.gd stun)
+		if down:
+			stunned[slot] = float(stunned[slot]) - delta
+		var mv := party.stick(slot, "move") if playing and not down else Vector2.ZERO
 		if mv != Vector2.ZERO:
 			var cam := split.active_camera(slot)
 			var f := -cam.global_basis.z
@@ -515,7 +571,7 @@ func _move_local_players(delta: float) -> void:
 			p.y = Props.TABLE_Y
 			a.position = p
 			Creatures.anim(a).face(dir)
-		if playing and (party.just_pressed(slot, "accept") or party.just_pressed(slot, "x") or party.just_pressed(slot, "rt")):
+		if playing and not down and (party.just_pressed(slot, "accept") or party.just_pressed(slot, "x") or party.just_pressed(slot, "rt")):
 			Creatures.anim(a).play("attack", 0.35)
 			sfx.play_at("swish", a.position, -6.0, randf_range(1.1, 1.3))
 			net.request(slot, "bonk", [a.position])
@@ -580,7 +636,7 @@ func on_request(slot: int, action: String, args: Array) -> void:
 					Creatures.anim(a).play("attack", 0.35)
 				net.event("swing", [slot])  # every machine sees the swing (its own machine already played it)
 				var at: Vector3 = args[0] if not args.is_empty() and args[0] is Vector3 else a.position
-				var hole := _mole_near(at, BONK_REACH)
+				var hole := _mole_near(at, BONK_REACH * (Deep.BIG_REACH if gift == "big" else 1.0))  # BIG HAMMER reaches further
 				if hole >= 0:
 					_whack(hole, slot)
 				else:
@@ -624,9 +680,21 @@ func _on_state_changed(key: String, value: Variant) -> void:
 	match key:
 		"score", "best", "goal":
 			_refresh_hud()
-		"offers":  # the seed packets show the crops on offer (redraw them if they popped first)
-			for h in SEED_HOLES:
-				shown_kind[h] = 255
+		"gift":
+			gift = String(value)
+			_apply_gift_look()
+			_refresh_hud()
+		"mode":
+			mode = String(value)
+		"season":
+			if String(value) != "" and String(value) != season:
+				season = String(value)
+				apply_season(season)
+				if sky != null:
+					sky.set_preset(String(Deep.season_data(season).sky), 2.0)
+		"holiday":
+			if garden != null:
+				garden.set_holiday(int(value))
 		"garden":
 			if garden != null and value is Dictionary:
 				garden.apply(value)
@@ -681,44 +749,73 @@ func _start_round(practice: bool) -> void:
 		_after_practice()
 
 
-## Host: the practice is over (or there was none): pick seeds if the bed is full, else play.
+## Host: the practice is over (or there was none): the picks, then the moles.
 func _after_practice() -> void:
+	if m_state[PRACTICE_HOLE] == UP and m_kind[PRACTICE_HOLE] == RoundGen.NORMAL:
+		m_state[PRACTICE_HOLE] = LEAVING  # nobody bonked it: it goes home while the team picks
+	gift = ""
+	net.state_set("gift", "")
+	_apply_gift_look()
+	_next_pick()
+
+
+## Host: the picks before a round, one after another on the pick orbs (picks.gd): the mode once a session, the next
+## crop when Fig's bed is full, then a hammer gift. Then the moles come.
+func _next_pick() -> void:
+	net.state_set("phase", "orbs")
+	if mode == "":
+		var ids := PickOrbs.mode_ids(Deep.mode_of(String(save.data.get("mode", "brave"))))
+		var entries: Array = []
+		for id in ids:
+			var md := PickOrbs.mode(String(id))
+			entries.append({"id": id, "name": PickOrbs.mode_name(String(id)), "pic": String(md.pic), "color": PickOrbs.mode_color(String(id))})
+		_story(_fig("Easy or hard?", "farmer"))
+		picks.begin("mode", entries, ids, _on_picked)
+		return
 	if String(save.data.cur) == "":
-		_start_pick()
-	else:
-		_start_play()
-
-
-## Host: two seed packets pop up; bonk one to plant it (nobody does: the first one after PICK_WAIT).
-func _start_pick() -> void:
-	var offers := Story.offers(int(save.data.world), save.data.beds, last_crop)
-	if offers.size() < 2:
-		_plant(String(offers[0]) if not offers.is_empty() else Story.FIRST_CROP)
-		_start_play()
+		var offers := Story.offers(int(save.data.world), save.data.beds, last_crop)
+		if offers.size() < 2:
+			_plant(String(offers[0]) if not offers.is_empty() else Story.FIRST_CROP)
+		else:
+			var entries2: Array = []
+			for id in offers:
+				var c := Story.crop(String(id))
+				entries2.append({"id": id, "name": String(id), "pic": String(c.pic), "color": c.color})
+			_story(_fig(Story.PICK_LINE, "gift"))
+			picks.begin("crop", entries2, offers, _on_picked)
+			return
+	if gift == "":
+		var ch := Deep.gift_choices(_holiday(), String(save.data.get("gift", "")), Seeded.derive(int(save.data.world), "gift%d" % int(save.data.rounds)))
+		var entries3: Array = []
+		for id in ch:
+			var gd := Deep.gift(String(id))
+			entries3.append({"id": id, "name": String(gd.name), "pic": String(gd.pic), "color": gd.color})
+		_story(_fig("Pick a hammer gift!", "bighammer"))
+		picks.begin("gift", entries3, ch, _on_picked)
 		return
-	net.state_set("offers", offers)
-	pick_t = 0.0
-	for k in SEED_HOLES.size():
-		var h: int = SEED_HOLES[k]
-		if m_state[h] != HIDDEN:  # the practice mole may still be there
-			m_state[h] = HIDDEN
-			m_h[h] = 0.0
-		_pop_mole(h, RoundGen.SEED, 9999.0)
-	net.state_set("phase", "pick")
-	_story(_fig(Story.PICK_LINE, "gift"))
-
-
-## Host: a seed packet was bonked (k = 0 / 1): plant it, the other one goes down, the moles come.
-func _pick(k: int) -> void:
-	var offers: Array = net.state_get("offers", [])
-	if String(net.state_get("phase", "")) != "pick" or offers.is_empty():
-		return
-	var id := String(offers[clampi(k, 0, offers.size() - 1)])
-	for h in SEED_HOLES:
-		if m_state[h] == UP:
-			m_state[h] = LEAVING
-	_plant(id)
 	_start_play()
+
+
+## Host: an orb was taken (slot -1: nobody, the middle one).
+func _on_picked(stage: String, opt: Variant, _slot: int) -> void:
+	match stage:
+		"mode":
+			mode = Deep.mode_of(String(opt))
+			save.data.mode = mode
+			save.mark_dirty()
+			net.state_set("mode", mode)
+			_story(_fig(String(PickOrbs.MODE_LINES.get(mode, "Let's bonk!")), String(PickOrbs.mode(mode).pic)))
+		"crop":
+			_plant(String(opt))
+		"gift":
+			gift = String(opt)
+			save.data.gift = gift
+			save.mark_dirty()
+			net.state_set("gift", gift)
+			_apply_gift_look()
+			_refresh_hud()
+			_story(_fig(String(Deep.gift(gift).line), String(Deep.gift(gift).pic), Deep.gift(gift).color))
+	_next_pick()
 
 
 func _plant(id: String) -> void:
@@ -800,6 +897,9 @@ func _end_round() -> void:
 	for i in holes.size():
 		if m_state[i] == UP:
 			m_state[i] = LEAVING
+	tricks.reset([])
+	tricks.clear()
+	net.event("tricks_clear", [])
 	_telemetry("round", score, st)
 	if not run.has("bed_done"):
 		_story(_fig(Story.CHEERS[int(save.data.rounds) % Story.CHEERS.size()] if st > 0 else "Nearly! Again!", "farmer"))
@@ -821,7 +921,8 @@ func _telemetry(end: String, score: int, st: int) -> void:
 		"crop": String(round_desc.get("crop", "")), "seed": int(round_desc.get("seed", 0)), "level": int(round_def.get("level", 0)),
 		"time": int(round_def.get("time", 0)), "played_s": int(elapsed), "score": score, "max": int(round_def.get("max", 0)),
 		"goal": round_def.get("goal", []), "stars": st, "moles": (round_def.spawns as Array).size(),
-		"beds": Story.beds_grown(save.data.beds), "fill": int(save.data.fill), "need": _need()}, true)
+		"beds": Story.beds_grown(save.data.beds), "fill": int(save.data.fill), "need": _need(), "holiday": _holiday(),
+		"tricks_fired": tricks.fired.duplicate(), "bumped": int(run.get("bumped", 0))}, true)
 	Telemetry.run(GAME_ID, info)
 
 
@@ -911,14 +1012,14 @@ func _simulate(delta: float) -> void:
 		if practice_t > 15.0:
 			_after_practice()
 		return
-	if phase == "pick":
-		pick_t += delta
-		if pick_t > PICK_WAIT:
-			_pick(0)
+	if phase == "orbs":
+		picks.tick(delta)
 		return
 	if round_def.is_empty():
 		return
 	elapsed += delta
+	for e in tricks.tick(elapsed, float(Deep.mode_data(mode).warn)):
+		_announce(e)
 	time_left = float(round_def.time) - elapsed
 	if int(ceil(time_left)) != int(net.state_get("time", 0)):
 		net.state_set("time", maxi(0, int(ceil(time_left))))
@@ -940,10 +1041,10 @@ func _simulate(delta: float) -> void:
 ## that); if a helmet or the king held a hole longer, another free hole takes it.
 func _spawn(s: Array) -> void:
 	var h := int(s[1])
-	if m_state[h] != HIDDEN or m_t[h] > 0.0:
+	if m_state[h] != HIDDEN or m_t[h] > 0.0 or reserved[h] > elapsed:
 		var free: Array[int] = []
 		for i in holes.size():
-			if m_state[i] == HIDDEN and m_t[i] <= 0.0:
+			if m_state[i] == HIDDEN and m_t[i] <= 0.0 and reserved[i] <= elapsed:
 				free.append(i)
 		if free.is_empty():
 			run["skipped"] = int(run.get("skipped", 0)) + 1
@@ -971,8 +1072,6 @@ func _meet(kind: int) -> void:
 
 ## Host: the moles come: this round's moles are made from a seed (TODAY'S PATCH first each day).
 func _start_play() -> void:
-	if m_state[PRACTICE_HOLE] == UP and m_kind[PRACTICE_HOLE] == RoundGen.NORMAL:
-		m_t[PRACTICE_HOLE] = minf(m_t[PRACTICE_HOLE], 2.0)  # nobody bonked it: it goes down like any mole
 	var players := maxi(1, party.player_count() + (1 if vr_rig != null else 0))
 	var sp: Dictionary
 	if daily_due:
@@ -987,10 +1086,16 @@ func _start_play() -> void:
 		var cur := String(save.data.cur)
 		sp = Story.spec(cur, Story.beds_grown(save.data.beds), met, players, round_time)
 		round_desc = {"k": "story", "crop": cur, "seed": Seeded.derive(int(save.data.world), "r%d" % int(save.data.rounds))}
+	sp = Deep.round_spec(sp, mode, gift)  # the mode and the hammer gift (deep.gd)
 	var t0 := Time.get_ticks_usec()
 	round_def = RoundGen.generate(int(round_desc.seed), sp)
+	var tl := Deep.tricks(Seeded.derive(int(round_desc.seed), "tricks%d" % int(net.state_get("round", 0))), {"mode": mode,
+		"time": float(round_def.time), "season": season, "extra_gold": 1 if gift == "gold" else 0, "scale": trick_scale}, round_def)
+	tricks.reset(tl)
+	reserved.fill(0.0)
 	run = {"gen_ms": snappedf((Time.get_ticks_usec() - t0) / 1000.0, 0.01), "bunny_bonked": 0, "bunny_saved": 0, "king": 0,
-		"missed": 0, "bonked": 0, "vr_bonked": 0}
+		"missed": 0, "bonked": 0, "vr_bonked": 0, "game_mode": mode, "gift": gift, "season": season, "tricks": tl.size(),
+		"carrot_x": int(sp.get("carrot_x", 1))}
 	elapsed = 0.0
 	spawn_i = 0
 	time_left = float(round_def.time)
@@ -1000,8 +1105,8 @@ func _start_play() -> void:
 	var c := Story.crop(String(round_desc.crop))
 	if round_desc.k == "story" and int(save.data.fill) == 0:
 		_story(_fig(String(c.intro), String(c.pic), c.color))
-	print("Whack-a-Mole round: %s %s seed %d, %d moles, goal %s (%.1f ms)" % [round_desc.k, round_desc.crop, int(round_desc.seed),
-		(round_def.spawns as Array).size(), str(round_def.goal), float(run.gen_ms)])
+	print("Whack-a-Mole round: %s %s seed %d, %d moles, goal %s (%.1f ms), %s, gift %s, %s, %d tricks" % [round_desc.k, round_desc.crop,
+		int(round_desc.seed), (round_def.spawns as Array).size(), str(round_def.goal), float(run.gen_ms), mode, gift, season, tl.size()])
 
 
 func _pop_mole(i: int, kind: int, stay: float) -> void:
@@ -1044,9 +1149,12 @@ func _left_alone(i: int) -> void:
 	if m_kind[i] == RoundGen.BUNNY:
 		run["bunny_saved"] = int(run.bunny_saved) + 1
 		save.data.bunnies = int(save.data.bunnies) + 1
-		_add_points(-1, RoundGen.POINTS[RoundGen.BUNNY])
-		bunny_fx(i, true)
-		net.event("bunny", [i, true])
+		var carrots := RoundGen.POINTS[RoundGen.BUNNY] * int(run.get("carrot_x", 1))  # CARROT BAG: double
+		if int(run.get("carrot_x", 1)) > 1:
+			stats.carrots += 1
+		_add_points(-1, carrots)
+		bunny_fx(i, true, carrots)
+		net.event("bunny", [i, true, carrots])
 	elif m_kind[i] != RoundGen.SEED:
 		run["missed"] = int(run.missed) + 1
 
@@ -1065,10 +1173,10 @@ func _add_points(by: int, pts: int) -> void:
 
 
 ## Every machine: a bunny went home happy (left alone: a carrot and +2) or got bonked (a giggle, 0).
-func bunny_fx(i: int, happy: bool) -> void:
+func bunny_fx(i: int, happy: bool, carrots: int = 2) -> void:
 	var pos := holes[i] + Vector3(0.0, 0.35, 0.0)
 	if happy:
-		HudKit.score(self, pos, RoundGen.POINTS[RoundGen.BUNNY], {"color": Color(1.0, 0.55, 0.15), "size": 1.3})
+		HudKit.score(self, pos, carrots, {"color": Color(1.0, 0.55, 0.15), "size": 1.3})
 		sfx.play_at("sparkle", pos, -2.0, 1.3)
 		var carrot := MeshKit.instance(Garden.plant_mesh("CARROTS"), false)
 		carrot.position = holes[i]
@@ -1108,7 +1216,7 @@ func _vr_mallet(delta: float) -> void:
 		return
 	var hit := -1
 	if speed > 0.6:
-		hit = _mole_hit_by(hp, Props.HEAD_R + 0.12)
+		hit = _mole_hit_by(hp, Props.HEAD_R * mallet_base + 0.12)
 		if hit >= 0:
 			_whack(hit, 0)
 			vr_rig.pulse(VrRig.RIGHT, 0.8, 0.09)
@@ -1158,9 +1266,9 @@ func _mole_hit_by(p: Vector3, r: float) -> int:
 func _squash_mallet() -> void:
 	if mallet_head == null:
 		return
-	mallet_head.scale = Vector3(1.25, 0.7, 1.25)
+	mallet_head.scale = Vector3(1.25, 0.7, 1.25) * mallet_base
 	var tw := create_tween()
-	tw.tween_property(mallet_head, "scale", Vector3.ONE, 0.25).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
+	tw.tween_property(mallet_head, "scale", Vector3.ONE * mallet_base, 0.25).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
 
 
 ## Host: a mole got bonked by `by` (0 = the VR giant, or a TV slot).
@@ -1168,12 +1276,6 @@ func _whack(i: int, by: int) -> void:
 	var phase := String(net.state_get("phase", ""))
 	var kind := int(m_kind[i])
 	if kind == RoundGen.SEED:
-		if phase == "pick":
-			m_state[i] = BONKED
-			m_t[i] = 0.5
-			whack_fx(i, by, 0)
-			net.event("whack", [i, by, 0])
-			_pick(SEED_HOLES.find(i))
 		return
 	if kind == RoundGen.BUNNY:  # oops, a friend: it giggles and hops home (no points)
 		m_state[i] = LEAVING
@@ -1217,6 +1319,17 @@ func _whack(i: int, by: int) -> void:
 	net.event("whack", [i, by, pts])
 	if was_practice:
 		_after_practice()
+	else:
+		_moles_on_holiday(1)
+		if gift == "boing" and phase == "play" and not boinging:  # BOING HAMMER: the mole right next to it is bonked too
+			for j in holes.size():
+				if j != i and m_state[j] == UP and m_h[j] >= 0.3 and int(m_kind[j]) in [RoundGen.NORMAL, RoundGen.GOLD, RoundGen.SPEEDY, RoundGen.BARE] \
+						and Vector2(holes[j].x - holes[i].x, holes[j].z - holes[i].z).length() < Deep.BOING_R:
+					stats.boing += 1
+					boinging = true
+					_whack(j, by)
+					boinging = false
+					break  # (one neighbour: a chain would empty the table)
 
 
 ## Every machine: a helmet popped off (it flies off, clonk!) or the king took a bonk (he wobbles).
@@ -1324,7 +1437,7 @@ func _draw_moles(delta: float) -> void:
 			if st == UP:
 				var gold := kind == RoundGen.GOLD or kind == RoundGen.KING
 				mole_bodies[i].mesh = _kind_mesh(i, kind)
-				var big := 1.5 if kind == RoundGen.KING else (1.7 if kind == RoundGen.SEED else 1.0)
+				var big := 1.5 if kind == RoundGen.KING else 1.0
 				root.scale = Vector3.ONE * big
 				if st != shown_state[i]:
 					mole_bodies[i].scale = Vector3(0.8, 1.25, 0.8)
@@ -1350,17 +1463,14 @@ func _draw_moles(delta: float) -> void:
 
 ## The mesh for a mole of this kind in hole i (seed packets: the crop offered in that hole). Cached.
 func _kind_mesh(i: int, kind: int) -> Mesh:
-	var key: Variant = kind
-	if kind == RoundGen.SEED:
-		var offers: Array = net.state_get("offers", []) if net != null else []
-		var k := SEED_HOLES.find(i)
-		var id := String(offers[k]) if k >= 0 and k < offers.size() else Story.FIRST_CROP
-		key = "seed:" + id
-		if not kind_meshes.has(key):
-			kind_meshes[key] = Props.seed_mesh(Story.crop(id).color, Garden.icon_mesh(id))
-	elif not kind_meshes.has(key):
-		kind_meshes[key] = Props.kind_mesh(kind)
-	return kind_meshes[key]
+	return kind_mesh_of(kind)
+
+
+## The (cached) mesh of a mole kind (tricks.gd's scampering stampede moles too).
+func kind_mesh_of(kind: int) -> Mesh:
+	if not kind_meshes.has(kind):
+		kind_meshes[kind] = Props.kind_mesh(kind)
+	return kind_meshes[kind]
 
 
 static func _ease_back(x: float) -> float:
@@ -1433,13 +1543,172 @@ func apply_event(kind: String, args: Array) -> void:
 		"clonk":
 			clonk_fx(int(args[0]), int(args[1]), int(args[2]))
 		"bunny":
-			bunny_fx(int(args[0]), bool(args[1]))
+			bunny_fx(int(args[0]), bool(args[1]), int(args[2]) if args.size() > 2 else 2)
 		"planted":
 			planted(String(args[0]))
 		"story":
 			show_story({"who": String(args[0]), "line": String(args[1]), "pic": String(args[2]),
 				"color": Color.html(String(args[3])), "duration": 3.5})
+		"orbs":
+			if picks != null:
+				picks.show_row(String(args[0]), args[1] if args.size() > 1 and args[1] is Array else [])
+		"take":
+			if picks != null:
+				picks.take_fx(int(args[0]), int(args[1]))
+		"trick":
+			trick_fx(String(args[0]), int(args[1]), float(args[2]), String(args[3]))
+		"tricks_clear":
+			if tricks != null:
+				tricks.clear()
+		"stun":
+			stun(int(args[0]), float(args[1]))
 		"swing":
 			var ss := int(args[0])
 			if avatars.has(ss) and not party.is_local(ss):
 				Creatures.anim(avatars[ss]).play("attack", 0.35)
+
+
+# --- Second pass: tricks, gifts, seasons, the holiday garden (deep.gd) --------------------------------------
+
+## Host: a trick's warning starts now: keep its holes free, every machine draws its tell (tricks.gd).
+func _announce(e: Array) -> void:
+	var md := Deep.mode_data(mode)
+	var warn := float(md.warn)
+	var t := float(e[0])
+	stats.tricks += 1
+	match String(e[1]):
+		"gold":
+			reserved[int(e[2])] = t + float(md.gold_stay)
+		"stampede":
+			for h in Deep.herd_holes(int(e[2]), mode):
+				reserved[int(h)] = t + float(md.herd_stay)
+	net.event("trick", [String(e[1]), int(e[2]), warn, mode])
+	trick_fx(String(e[1]), int(e[2]), warn, mode)
+
+
+## Every machine: a trick is told (rings on the table; a stampede shouts first).
+func trick_fx(kind: String, data: int, warn: float, trick_mode: String) -> void:
+	if tricks == null:
+		return
+	tricks.announce(kind, data, warn, trick_mode)
+	if kind == "stampede":
+		_banner("STAMPEDE!", "", 1.4)
+
+
+## Host: a trick happened (tricks.gd, when its warning ran out): its moles pop up; a stampede bumps the kids in its row.
+func on_trick(kind: String, data: int) -> void:
+	if String(net.state_get("phase", "")) != "play":
+		return
+	var md := Deep.mode_data(mode)
+	match kind:
+		"gold":
+			stats.gold_tricks += 1
+			_force_pop(data, RoundGen.GOLD, float(md.gold_stay))
+			_meet(RoundGen.GOLD)
+		"stampede":
+			stats.herd += 1
+			for h in Deep.herd_holes(data, mode):
+				_force_pop(int(h), RoundGen.NORMAL, float(md.herd_stay))
+			var b := Deep.band(data)
+			for slot in avatars:
+				var a: Node3D = avatars[slot]
+				if WarnRingsScript.inside("line", b[0], b[1], b[2], a.position, 0.05):
+					run["bumped"] = int(run.get("bumped", 0)) + 1
+					stats.bumped += 1
+					net.event("stun", [int(slot), float(md.stun)])
+					stun(int(slot), float(md.stun))
+
+
+## Host: a trick's mole pops up in hole i (whatever was there goes; never the KING).
+func _force_pop(i: int, kind: int, stay: float) -> void:
+	if m_state[i] == UP and m_kind[i] == RoundGen.KING:
+		return
+	_pop_mole(i, kind, stay)
+	shown_state[i] = HIDDEN  # (draw the pop again: a new mole)
+
+
+## Every machine: a hammer-kid bumped by a stampede hops (and sits `secs` on their own machine; GENTLE: 0).
+func stun(slot: int, secs: float) -> void:
+	if not avatars.has(slot):
+		return
+	var a: Node3D = avatars[slot]
+	Creatures.anim(a).play("jump", 0.6)
+	sfx.play_at("boing", a.position, -2.0, randf_range(0.7, 0.9))
+	if party.is_local(slot) and secs > 0.0:
+		stunned[slot] = secs
+
+
+## Every machine: the gift shows on the VR mallet (BIG HAMMER: a bigger head).
+func _apply_gift_look() -> void:
+	mallet_base = Deep.BIG_REACH if gift == "big" else 1.0
+	if mallet_head != null:
+		mallet_head.scale = Vector3.ONE * mallet_base
+
+
+## Every machine: the garden dresses for the season (deep.gd SEASONS): the lawn, trees, flowers and the season's deco.
+func apply_season(s: String) -> void:
+	if s == shown_season or ground == null:
+		return
+	shown_season = s
+	for n in season_nodes:
+		if is_instance_valid(n):
+			n.queue_free()
+	season_nodes.clear()
+	ground.material_override = MeshKit.material(Props.LAWNS.get(s, Props.LAWN))
+	season_nodes.append(MeshKit.scatter_random(MeshKit.prop("pine" if s == "winter" else "tree"), 16, Vector3.ZERO, 18.0, 12.0, 0.8, 1.3, PackedColorArray(), 3))
+	var flower_cols := {"spring": [Color(1.0, 0.5, 0.6), Color(1.0, 0.9, 0.4), Color(0.7, 0.6, 1.0)],
+		"summer": [Color(1.0, 0.85, 0.2), Color(1.0, 0.55, 0.2), Color(1.0, 1.0, 1.0)],
+		"autumn": [Color(0.95, 0.5, 0.15), Color(0.8, 0.25, 0.15), Color(0.95, 0.75, 0.3)]}
+	if flower_cols.has(s):
+		season_nodes.append(MeshKit.scatter_random(MeshKit.prop("flower"), 40, Vector3.ZERO, 8.5, 5.2, 0.7, 1.1, PackedColorArray(flower_cols[s]), 5))
+	var deco := MeshKit.instance(Props.season_deco(s), false)
+	deco.name = "Season_" + s
+	season_nodes.append(deco)
+	for n in season_nodes:
+		add_child(n)
+
+
+## Moles on holiday now (deep.gd; bots send them sooner).
+func _holiday() -> int:
+	return mini(Deep.MAX_HOLIDAY, int(save.data.get("moles_total", 0)) / maxi(1, holiday_every))
+
+
+## Host: n more moles bonked for good: every holiday_every of them, one goes on holiday (saved, it stays).
+func _moles_on_holiday(n: int) -> void:
+	var before := _holiday()
+	save.data.moles_total = int(save.data.get("moles_total", 0)) + n
+	save.mark_dirty()
+	var now := _holiday()
+	if now != before:
+		stats.holiday_new += 1
+		net.state_set("holiday", now)
+		if garden != null:
+			garden.set_holiday(now)
+		if now == 1 or now % 5 == 0:
+			_story(_fig("Holiday time, mole!", "moleden"))
+
+
+## A burst of bits at a spot (tricks.gd, picks.gd).
+func burst_at(pos: Vector3, col: Color, amount: int = 18) -> void:
+	var p := CPUParticles3D.new()
+	p.one_shot = true
+	p.amount = amount
+	p.lifetime = 0.6
+	p.explosiveness = 1.0
+	p.direction = Vector3.UP
+	p.spread = 70.0
+	p.gravity = Vector3(0.0, -6.0, 0.0)
+	p.initial_velocity_min = 1.2
+	p.initial_velocity_max = 2.6
+	p.mesh = ResCache.get_or_make("wam_bit_%s" % col.to_html(false), func() -> Resource:
+		var bm := SphereMesh.new()
+		bm.radius = 0.035
+		bm.height = 0.07
+		bm.radial_segments = 6
+		bm.rings = 3
+		bm.material = MeshKit.material(col, 1.5)
+		return bm)
+	add_child(p)
+	p.position = pos + Vector3.UP * 0.1
+	p.emitting = true
+	get_tree().create_timer(1.0).timeout.connect(p.queue_free)
