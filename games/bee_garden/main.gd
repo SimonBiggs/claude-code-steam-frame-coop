@@ -324,6 +324,8 @@ func _ready() -> void:
 	rings = WarnRings.new()
 	add_child(rings)
 	game_mode = GardenGen.mode_of(String(save.data.get("mode", "gentle")))
+	if OS.has_environment("BEE_MODE"):  # What's New "try": start in this mode (it floats in the middle of the pick)
+		game_mode = GardenGen.mode_of(OS.get_environment("BEE_MODE"))
 	_build_hud()
 	var menu := PauseMenuScript.new()
 	menu.main = self
@@ -1846,6 +1848,12 @@ func _start_round_simple(n: int) -> void:
 	spec["mode"] = game_mode
 	spec["gifts"] = gifts.duplicate()
 	plan = GardenGen.day_plan(garden, n, spec)
+	if n == 1 and OS.get_environment("BEE_TRY") == "storm":  # What's New "try": a wasp and a storm cloud straight away
+		var tr := RandomNumberGenerator.new()
+		tr.seed = garden_seed
+		var stp: Array = GardenGen._storm_place(garden, tr)
+		plan.wasps = [12.0]
+		plan.storms = [[8.0] + stp] if not stp.is_empty() else []
 	plan_wasp = 0
 	plan_wasp_warned = 0
 	plan_storm = 0
