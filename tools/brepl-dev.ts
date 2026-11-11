@@ -269,6 +269,13 @@ export async function debt() {
       issues.push({ kind: pt.kind, what: f, fix: pt.fix });
     }
   }
+  // Shared picks (2026-11-11, two ants): games built their own pick orbs / pods / altars, warning rings / telegraphs
+  // and mode colours (BRAVE was orange in two games, blue in two). tests/shared_picks_test.gd scans every game.
+  if (await stat(join(STAGE, "tests/shared_picks_test.gd")).then(() => true, () => false)) {
+    const sp = (await sh(`DUO_PORT=${20000 + Math.floor(Math.random() * 9999)} timeout 120 godot-test --headless --path . -s res://tests/shared_picks_test.gd 2>&1 | grep "SHARED PICKS: FAIL res://"`, STAGE)).out;
+    for (const l of sp.split("\n").filter(Boolean))
+      issues.push({ kind: "own-picks-or-warnings", what: l.replace("SHARED PICKS: FAIL ", "").slice(0, 200), fix: "use core/pick_orbs.gd (show_orbs opts keep the look) / core/warn_rings.gd (warn / shape + style) / PickOrbs.mode(); a truly different thing gets '## shared-picks-ok: <func> (why)'" });
+  }
   // Viewport grabs: get_image() straight off get_texture() returns null / empty before the first draw or after the
   // viewport is gone (2026-10-30 offscreen runs: "tex is null at texture_get_data", then get_width on null in
   // _save_frame). Grab through FrameGrab.image(vp) (core/frame_grab.gd) or the gdev addon's _grab(vp).
@@ -562,7 +569,10 @@ export async function land(branch: string, genTests: string[], botId: string, ot
   // games/<game>/story_pictures.gd) and catches one name drawn by two games. progress_test always: a deepened game
   // without games/<game>/progress.gd would be missing from the arcade's Family Trophy Hall. whats_new_test always: a
   // game with a fresh feature commit needs an entry on the lobby's What's New board (arcade/whats_new.gd).
-  for (const t of [...new Set([...genTests, "story_pictures_test", "progress_test", "whats_new_test", "layout_check_test", "vr_view_check_test", "bot_end_test", "core_math_test"])].filter(Boolean)) {
+  // shared_picks_test always (once it exists): a game must build picks with core/pick_orbs.gd, attack tells with
+  // core/warn_rings.gd and show modes as PickOrbs.mode() (one GENTLE / BRAVE / HARD look everywhere).
+  const sharedPicks = await stat(join(STAGE, "tests/shared_picks_test.gd")).then(() => ["shared_picks_test"], () => [] as string[]);
+  for (const t of [...new Set([...genTests, "story_pictures_test", "progress_test", "whats_new_test", "layout_check_test", "vr_view_check_test", "bot_end_test", "core_math_test", ...sharedPicks])].filter(Boolean)) {
     // A test with a scene (extends Node, e.g. engine_ui_test) runs as that scene; a SceneTree script runs with -s.
     const scene = await stat(join(STAGE, `tests/${t}.tscn`)).then(() => true, () => false);
     const how = scene ? `--fixed-fps 60 res://tests/${t}.tscn`  /* ends itself (exit code = failures); timeout 600 caps it */ : `-s res://tests/${t}.gd`;
