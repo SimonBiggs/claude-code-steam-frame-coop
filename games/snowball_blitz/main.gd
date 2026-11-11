@@ -59,6 +59,7 @@ const PickOrbs := preload("res://core/pick_orbs.gd")
 const WarnRings := preload("res://core/warn_rings.gd")
 const Gifts := preload("res://games/snowball_blitz/gifts.gd")
 const Bosses := preload("res://games/snowball_blitz/bosses.gd")
+const Looks := preload("res://games/snowball_blitz/looks.gd")
 const ORB_ROW := Vector3(0.0, 0.0, -4.4)  # the pick orbs float in a row here (in front of the VR player, inside the fort)
 const ORB_GAP := 2.4
 const ORB_Y := 2.0  # (above the walls and the props round the VR player, seen from every start spot)
@@ -113,8 +114,7 @@ const SEG_HEIGHT := 1.25
 const GRAVITY := 12.0
 const BOSS_EVERY := 4
 const MAX_TV_PLAYERS := 6  # TV players are indices 1..6 when networked (0..5 in local split screen)
-const PLAYER_COLORS: Array[Color] = [Color(0.95, 0.35, 0.3), Color(0.3, 0.7, 1.0), Color(0.5, 0.85, 0.35),
-	Color(1.0, 0.82, 0.25), Color(0.75, 0.45, 1.0), Color(1.0, 0.55, 0.15), Color(0.3, 0.95, 0.85)]
+const PLAYER_COLORS: Array[Color] = Looks.PLAYER_COLORS  # (looks.gd: palette.gd reads it)
 const SCARF_COLORS: Array[Color] = [Color(0.9, 0.2, 0.25), Color(0.2, 0.55, 0.95), Color(0.95, 0.75, 0.2), Color(0.3, 0.75, 0.4), Color(0.75, 0.35, 0.85)]
 const BUBBLE_SHADER := """
 shader_type canvas_item;
@@ -313,12 +313,12 @@ func mat(mat_name: String) -> StandardMaterial3D:
 	var m: StandardMaterial3D
 	match mat_name:
 		"snow":
-			m = make_material(Color(0.95, 0.97, 1.0), 0.0)
+			m = make_material(Looks.SNOW_BODY, 0.0)
 			m.roughness = 0.9
 			m.rim_enabled = true
 			m.rim = 0.5
 		"fort":
-			m = make_material(Color(0.88, 0.93, 1.0), 0.0)
+			m = make_material(Looks.FORT, 0.0)
 			m.roughness = 0.95
 		"coal":
 			m = make_material(Color(0.06, 0.06, 0.08), 0.0)
@@ -339,9 +339,9 @@ func mat(mat_name: String) -> StandardMaterial3D:
 		"sled":
 			m = make_material(Color(0.85, 0.2, 0.2), 0.0)
 		"snowball":
-			m = make_material(Color(1.0, 1.0, 1.0), 0.35)
+			m = make_material(Looks.SNOWBALL, 0.35)
 		"enemy_ball":
-			m = make_material(Color(0.6, 0.85, 1.0), 1.4)
+			m = make_material(Looks.ENEMY_BALL, 1.4)
 		"ice":
 			m = make_material(Color(0.6, 0.85, 1.0, 0.45), 0.6)
 			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA

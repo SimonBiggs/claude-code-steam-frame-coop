@@ -3,6 +3,9 @@ extends Node3D
 ## kind "mega": a glowing MEGA SNOWBALL instead (your next throw is a giant one). Simple mode: a fat
 ## glowing arrow bobs over it (go and get it: no words).
 
+const Contrast := preload("res://core/contrast.gd")
+const Looks := preload("res://games/snowball_blitz/looks.gd")
+
 var main
 var kind := "cocoa"
 var ghost := false
@@ -82,7 +85,8 @@ func _ready() -> void:
 
 func _build_mega() -> void:
 	life = 30.0
-	var ball := _part(main.sphere_mesh(0.32), main.make_material(Color(0.8, 0.92, 1.0), 1.8), Vector3(0, 0.3, 0))
+	var ball := _part(main.sphere_mesh(0.32), main.make_material(Looks.MEGA_BALL, 1.8), Vector3(0, 0.3, 0))
+	Contrast.outline(ball, Looks.OUTLINE)
 	ball.name = "Ball"
 	var ring := TorusMesh.new()
 	ring.inner_radius = 0.45
@@ -91,7 +95,7 @@ func _build_mega() -> void:
 	ring.ring_segments = 4
 	var r := MeshInstance3D.new()
 	r.mesh = ring
-	r.material_override = main.make_material(Color(0.5, 0.8, 1.0), 3.0)
+	r.material_override = main.make_material(Looks.MEGA_RING, 3.0)
 	r.position.y = 0.03
 	r.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(r)

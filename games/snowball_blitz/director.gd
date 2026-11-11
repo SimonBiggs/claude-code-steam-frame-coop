@@ -6,6 +6,7 @@ extends Node
 ## Simple mode (main.simple): only the sky (dusk -> aurora night -> sunrise) and the odd MEGA SNOWBALL
 ## from wave 6 on; no weather, upgrades, streaks, hints or awards.
 const UiKit := preload("res://core/ui_kit.gd")
+const Looks := preload("res://games/snowball_blitz/looks.gd")
 
 const VrText := preload("res://core/vr_text.gd")
 
@@ -368,17 +369,9 @@ func _update_world(delta: float) -> void:
 	var sun: DirectionalLight3D = (main.get_meta("sun") if main.has_meta("sun") else null)
 	var sunny := event_name == "sunshine"
 	if sky != null:
-		var top := Color(0.12, 0.12, 0.32)
-		var hor := Color(0.95, 0.55, 0.45)
-		if night >= 0.0:
-			top = top.lerp(Color(0.02, 0.03, 0.1), night)
-			hor = hor.lerp(Color(0.18, 0.16, 0.38), night)
-		else:
-			top = top.lerp(Color(0.35, 0.55, 0.9), -night)
-			hor = hor.lerp(Color(1.0, 0.82, 0.62), -night)
-		if sunny:
-			top = top.lerp(Color(0.4, 0.6, 0.95), 0.7)
-			hor = hor.lerp(Color(1.0, 0.9, 0.7), 0.7)
+		var sk := Looks.sky(night, sunny)
+		var top: Color = sk[0]
+		var hor: Color = sk[1]
 		sky.sky_top_color = sky.sky_top_color.lerp(top, 1.0 - exp(-2.0 * delta))
 		sky.sky_horizon_color = sky.sky_horizon_color.lerp(hor, 1.0 - exp(-2.0 * delta))
 	if sun != null:

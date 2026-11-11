@@ -2,6 +2,8 @@ extends MeshInstance3D
 ## A flying snowball (ballistic). Team "p" = thrown by the players, "e" = thrown by snowmen.
 ## On the host it decides hits; visual_only copies (client, or the client's own throws) just splat.
 const UiKit := preload("res://core/ui_kit.gd")
+const Contrast := preload("res://core/contrast.gd")
+const Looks := preload("res://games/snowball_blitz/looks.gd")
 
 var main
 var vel := Vector3.ZERO
@@ -34,6 +36,7 @@ func _ready() -> void:
 	sm.rings = 5
 	mesh = sm
 	material_override = main.mat("snowball" if team == "p" else "enemy_ball")
+	Contrast.outline(self, Looks.OUTLINE)  # white / icy balls vanished on the snow
 	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	spin = Vector3(randf_range(-9, 9), randf_range(-9, 9), randf_range(-9, 9))
 
