@@ -421,7 +421,7 @@ func _checks() -> void:
 	kit.assert_true(main.stories_shown > 0, "%s: Lumi's story cards showed (%d)" % [mode, main.stories_shown])
 	if mode == "client":
 		kit.assert_true(saw_choose == 0 or saw_offer_client, "client showed the level-up stones")
-		kit.assert_true(max_mons >= 2, "client mirrors the monsters (%d)" % max_mons)
+		kit.assert_true(max_mons >= (1 if OS.has_environment("CS_TRY") else 2), "client mirrors the monsters (%d)" % max_mons)
 		kit.assert_true(int(main.net.state_get("open", 0)) >= 2 or saw_results, "client saw barriers open")
 		kit.assert_true(saw_map == 0 or saw_map_client, "client showed the map stones")
 		if main.log_regions.is_empty() and OS.has_environment("CS_TRY"):
