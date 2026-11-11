@@ -1139,7 +1139,7 @@ func _process(delta: float) -> void:
 				net.send_action("restart", [])
 		return
 	if net.mode == "host" and not net.connected and not solo_round and phase != "wait":
-		phase = "wait"  # the TV left mid-round: back to the lobby (alone, the solo Pip hunt starts from there)
+		phase = "wait"  # no TV machine any more mid-round: back to the lobby (alone, the solo Pip hunt starts from there)
 		_show_center("HIDE AND SEEK", 0.0)
 	match phase:
 		"wait":
