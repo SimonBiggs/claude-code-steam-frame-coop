@@ -33,6 +33,11 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "sru-fox", "date": "2026-11-11", "game": "sheep_round_up", "pic": "fox", "line": "A fox! Rings warn you first", "try": {"SRU_LEVEL": "3", "SRU_EVENT_AT": "6"}},
+	{"id": "sru-tricks", "date": "2026-11-11", "game": "sheep_round_up", "pic": "zoomies", "line": "Pick a dog trick!"},
+	{"id": "sru-seasons", "date": "2026-11-11", "game": "sheep_round_up", "pic": "snowflake", "line": "Snow, rain, wind and sun!", "try": {"SRU_SEASON": "winter"}},
+	{"id": "sru-gentle", "date": "2026-11-11", "game": "sheep_round_up", "pic": "shepherd", "line": "Gentle, brave or hard"},
+	{"id": "sru-farm", "date": "2026-11-11", "game": "sheep_round_up", "pic": "rainbow", "line": "Bo's farm grows more!"},
 	{"id": "bee-gifts", "date": "2026-11-11", "game": "bee_garden", "pic": "bumblebee", "line": "Pick Queen Bea's gifts!"},
 	{"id": "bee-storms", "date": "2026-11-11", "game": "bee_garden", "pic": "storm", "line": "Wasps and storms warn first", "try": {"BEE_TRY": "storm"}},
 	{"id": "bee-hive", "date": "2026-11-11", "game": "bee_garden", "pic": "hive", "line": "The hive grows honey boxes!"},

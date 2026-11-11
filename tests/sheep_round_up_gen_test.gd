@@ -12,6 +12,7 @@ extends SceneTree
 const FieldGen := preload("res://games/sheep_round_up/fieldgen.gd")
 const Farm := preload("res://games/sheep_round_up/farm.gd")
 const Seeded := preload("res://core/seeded.gd")
+const Seasons := preload("res://games/sheep_round_up/seasons.gd")
 
 var fails := 0
 
@@ -145,8 +146,63 @@ func _init() -> void:
 	for c2 in Farm.CHEERS:
 		_expect(c2.length() <= 26, "cheer '%s' is short" % c2)
 	print("sheep gen: %d fields checked, %d failures" % [total, fails])
+	_seasons()
 	print("BOT RESULT: %s" % ("PASS" if fails == 0 else "FAIL"))
 	quit(0 if fails == 0 else 1)
+
+
+## Second pass (seasons.gd): every mode's events are warned, spaced, clear of the pen and the open gates, never in
+## the last seconds, each adds its clock bonus; GENTLE <= BRAVE <= HARD for every field; weather follows the season;
+## trick offers are new tricks; the farm keeps growing.
+func _seasons() -> void:
+	var t0 := Time.get_ticks_usec()
+	var seen := {}
+	var n := 0
+	for lv in [0, 1, 2, 3, 5, 8, 11]:
+		var sp := FieldGen.spec(lv, 3, 120.0)
+		for s in 25:
+			var f := FieldGen.generate(1000 + s * 7 + lv, sp)
+			var prev: Array = []
+			for m in Seasons.MODE_ORDER:
+				var time := Seasons.clock(float(f.time), m)
+				var ev := Seasons.make_events(f, int(f.seed), m, time)
+				for w in Seasons.check_events(f, ev, m, time):
+					_fail("L%d seed %d %s: %s" % [lv, int(f.seed), m, w])
+				for e in ev:
+					seen["event:" + String(e[1])] = true
+				var pr := Seasons.pressure(f, m, float(f.time))
+				if not prev.is_empty():
+					for i in pr.size():
+						if float(pr[i]) + 0.0001 < float(prev[i]):
+							_fail("L%d seed %d: %s easier than the mode before it (%s < %s)" % [lv, int(f.seed), m, pr, prev])
+				prev = pr
+				if ev != Seasons.make_events(f, int(f.seed), m, time):
+					_fail("events not the same for the same seed")
+				n += 1
+			for se in Seasons.SEASONS:
+				var wk := Seasons.weather_for(int(f.seed), se)
+				seen["weather:" + wk] = true
+				_expect((Seasons.WEATHER_W[se] as Dictionary).has(wk), "weather %s in %s" % [wk, se])
+	for k in Seasons.EVENT_KINDS:
+		_expect(seen.has("event:" + String(k)), "event %s never happened" % k)
+	for k in Seasons.WEATHER_ORDER:
+		_expect(seen.has("weather:" + String(k)), "weather %s never came" % k)
+	_expect(Seasons.WARN_SECS >= 2.5 and Seasons.EVENT_FIRST >= Seasons.WARN_SECS + 5.0, "events need a longer warning")
+	_expect(Seasons.season_of_month(1) == "winter" and Seasons.season_of_month(4) == "spring" and Seasons.season_of_month(7) == "summer" and Seasons.season_of_month(11) == "autumn", "seasons follow the calendar")
+	for fn in 10:
+		var learned: Array = Seasons.TRICK_ORDER.slice(0, fn % 4)
+		var off := Seasons.trick_offer(fn, 77, learned)
+		if Seasons.TRICK_BEFORE.has(fn):
+			_expect(off.size() == mini(3, 4 - learned.size()), "field %d: %d tricks offered" % [fn, off.size()])
+			for k in off:
+				_expect(not learned.has(k) and off.count(k) == 1 and Seasons.TRICKS.has(k), "trick %s offered twice or learned" % k)
+		else:
+			_expect(off.is_empty(), "tricks offered before field %d" % fn)
+	var last := 0
+	for m in Farm.MILESTONES:
+		_expect(int(m[0]) > last, "farm milestones keep growing")
+		last = int(m[0])
+	print("SHEEP SEASONS: %d field modes checked (%.0f ms)" % [n, (Time.get_ticks_usec() - t0) / 1000.0])
 
 
 func _expect(ok: bool, what: String) -> void:

@@ -5,6 +5,9 @@ extends Node
 ## Local:      godot --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/sheep_round_up_bot.tscn
 ## Networked:  DUO_PORT=81xx DUO_HOST=1 ... & DUO_PORT=81xx DUO_JOIN=127.0.0.1 ... (same scene, real time)
 ## Flat host: add DUO_FLAT_HOST=1 to the host (no VR: one bot pad plays slot 0 on the host).
+## Second pass (seasons.gd): the dogs run under a pick orb (GENTLE / BRAVE / HARD before the first field, a dog trick
+## before the second), the fake farmer touches one when no dog is around. SRU_LEVEL=3 SRU_EVENT_AT=3: the field's
+## events (a fox / thunder) come 3 s in; each must be told by warning rings at least WARN_SECS before it happens.
 
 const BotKit := preload("res://tests/bot_kit.gd")
 const SheepScript := preload("res://games/sheep_round_up/sheep.gd")
@@ -18,6 +21,11 @@ var grabs := 0
 var vr_drop_t := 0.0
 var bark_t := 0.0
 var max_home := 0
+var bt := 0.0
+var warned_at := -1.0
+var event_on := false
+var events_told := 0
+var events_untold := 0
 
 
 func _ready() -> void:
@@ -89,6 +97,8 @@ func _press(action: String) -> void:
 func _physics_process(delta: float) -> void:
 	if main == null or not main.ready_to_play or get_tree().paused:
 		return  # (no playing blind while the pause menu is open: an A there now picks its highlighted button)
+	bt += delta
+	_watch_events()
 	bark_t -= delta
 	var bark := bark_t <= 0.0
 	if bark:
@@ -119,6 +129,21 @@ func _steer(slot: int, bark: bool) -> void:
 	var d: Node3D = main.dogs[slot]
 	var s := _nearest_sheep(d.position, slot)
 	var v := Vector2.ZERO
+	if main.picks.showing():  # run under a pick orb (picks.gd)
+		var orbs: Array = main.picks.orbs.orbs
+		var orb: Node3D = orbs[(int(slot) + 2) % orbs.size()]
+		var to2 := orb.global_position - d.position
+		to2.y = 0.0
+		if to2.length() > 0.1:
+			var cam2: Camera3D = main.split.active_camera(slot)
+			var f2 := -cam2.global_basis.z
+			f2.y = 0.0
+			f2 = f2.normalized()
+			var r2 := Vector3(-f2.z, 0.0, f2.x)
+			to2 = to2.normalized()
+			v = Vector2(to2.dot(r2), -to2.dot(f2))
+		kit.slot_stick(main.party, slot, "left", v)
+		return
 	if s != null:
 		var gate := _gate_for(s.position)
 		var away := s.position - gate
@@ -147,6 +172,13 @@ func _drive_vr(delta: float) -> void:
 	var rig = main.vr_rig
 	rig.camera.position.y = 1.6
 	var head: Vector3 = rig.head_position()
+	if main.picks.showing() and int(main.held) < 0:  # touch a pick orb with the left glove (picks.gd)
+		kit.vr_stick(rig, Vector2.ZERO)
+		var orb: Node3D = main.picks.orbs.orbs[0]
+		if kit.vr_reach(rig, 0, orb.icon.global_position if orb.icon != null else orb.global_position, 2.0, delta) and not has_meta("vr_orb"):
+			set_meta("vr_orb", true)
+			print("BOT VR: touched a pick orb")
+		return
 	if int(main.held) >= 0:
 		kit.vr_stick(rig, Vector2.ZERO)
 		var over := Vector3(0.0, 1.0, 0.0)
@@ -201,9 +233,33 @@ func _report() -> String:
 		int(main.net.state_get("total", 0)), int(main.net.state_get("time", 0)), str(main.net.state_get("phase", "")), grabs]
 
 
+## Every machine: an event's warning rings must show WARN_SECS before the fox comes / the thunder strikes.
+func _watch_events() -> void:
+	if main.sev == null:
+		return
+	if main.sev.rings.count() > 0 and warned_at < 0.0:
+		warned_at = bt
+	var on: bool = main.sev.fox_on or main.sev.flash_t > 0.0
+	if on and not event_on:
+		var ok: bool = warned_at >= 0.0 and bt - warned_at >= main.Seasons.WARN_SECS - 0.4
+		print("BOT: event happened, warned %.1f s before: %s" % [bt - warned_at if warned_at >= 0.0 else -1.0, ok])
+		if ok:
+			events_told += 1
+		else:
+			events_untold += 1
+		warned_at = -1.0
+	event_on = on
+
+
 func _checks() -> void:
 	var mode: String = main.net.mode
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
+	kit.assert_true(events_untold == 0, "%s: every fox / thunder was told by warning rings first" % mode)
+	if OS.has_environment("SRU_EVENT_AT"):
+		kit.assert_true(events_told > 0, "%s: a warned event happened" % mode)
+	if mode != "client":
+		kit.assert_true(main.picks.history.any(func(h) -> bool: return h[0] == "mode"), "%s: the team mode was picked on the orbs" % mode)
+		kit.assert_true(main.weather != null and main.weather.season != "", "%s: the season and weather dress the field" % mode)
 	if mode == "client":
 		kit.assert_eq(main.party.local_slots().size(), want, "client: all %d local players are seated" % want)
 	else:
