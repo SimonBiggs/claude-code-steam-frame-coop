@@ -1,8 +1,9 @@
 extends RefCounted
-## What must be seen in Hide and Seek: the critters (ink-outlined, player.gd) and the golden stars on every floor of
+## What must be seen in Hide and Seek: the golden stars on every floor of
 ## the house (each room's floor and its pattern's own colours, every theme's garden), the castle and the spaceship
 ## (core/contrast.gd; tests/contrast_test.gd). Not counted: the spaceship's thin glowing guide line and its striped
-## cargo-bay edge (always half black and yellow), and Pip's toys by the kennel (a trophy shelf, not play).
+## cargo-bay edge (always half black and yellow), Pip's toys by the kennel (a trophy shelf, not play), and the
+## hiding critters themselves: blending into a floor of your own colour is the game (no outline on purpose).
 
 const Contrast := preload("res://core/contrast.gd")
 const Story := preload("res://games/hide_and_seek/story.gd")
@@ -15,11 +16,7 @@ const _PATTERN_ONLY := 4  # map_house LOOK pattern 4 (puzzle mats) never shows t
 
 
 static func key_colors() -> Dictionary:
-	var out := {}
-	for i in Story.PLAYER_COLORS.size():
-		out["critter %d" % (i + 1)] = {"color": Story.PLAYER_COLORS[i], "rim": Story.CRITTER_OUTLINE}
-	out["star"] = Story.STAR_COLOR
-	return out
+	return {"star": Story.STAR_COLOR}
 
 
 static func backgrounds() -> Dictionary:

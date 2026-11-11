@@ -21,9 +21,6 @@ const TOYS: Array = [["BALL", Color(1.0, 0.3, 0.3)], ["BONE", Color(0.98, 0.95, 
 const MAX_TOYS_SHOWN := 24
 ## The star hunt's golden stars (main.gd).
 const STAR_COLOR := Color(1.0, 0.85, 0.2)
-## The players' critters (main.gd); each wears the ink outline (player.gd): a yellow critter vanished on the
-## yellow sand and a blue one on the bathroom tiles.
-const CRITTER_OUTLINE := preload("res://core/contrast.gd").OUTLINE
 const PLAYER_COLORS: Array[Color] = [Color(1.0, 0.85, 0.45), Color(0.5, 0.85, 1.0), Color(1.0, 0.55, 0.75),
 	Color(0.55, 0.95, 0.55), Color(1.0, 0.65, 0.35), Color(0.75, 0.6, 1.0), Color(0.4, 0.95, 0.9)]
 ## House looks: id, name, toys needed, story picture, wall tint (mixed in), garden ground, sky, one line.
