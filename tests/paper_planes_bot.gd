@@ -6,7 +6,8 @@ extends Node
 ## Networked:  DUO_PORT=81xx DUO_HOST=1 ... & DUO_PORT=81xx DUO_JOIN=127.0.0.1 ... (same scene, real time)
 ## Flat host: add DUO_FLAT_HOST=1 to the host (no VR: one bot pad plays slot 0 on the host).
 ## BOT_CHAPTER=N flies story chapter N (3 = grumpy clouds, 4 = Gust's golden hoop) instead of the save's.
-## Each round the bots pick a breeze by flying through a gate, fly the seeded flight, see the results.
+## Each round the bots pick on the pick orbs (the mode once, then Pip's fold) by flying into one (VR: throwing a plane
+## at one), fly the seeded flight (warned gusts and geese come early for bots), see the results.
 
 const BotKit := preload("res://tests/bot_kit.gd")
 const VrRig := preload("res://core/vr_rig.gd")
@@ -24,7 +25,8 @@ var max_hoops := 0  # scored hoops respawn after 1.2 s, so the count dips right 
 var max_clouds := 0
 var saw_gold := false
 var saw_story := false
-var saw_gates := false
+var saw_orbs := false
+var max_tells := 0
 var max_form := -1
 
 
@@ -33,9 +35,11 @@ func _ready() -> void:
 	kit = BotKit.new()
 	add_child(kit)
 	main = load("res://games/paper_planes/main.tscn").instantiate()
-	main.set("round_time", 28.0)
+	main.set("round_time", 24.0)
 	main.set("results_wait", 6.0)
-	main.set("pick_time", 6.0)
+	main.set("pick_time", 7.0)
+	main.set("hazard_first", 4.0)  # the warned gusts and geese come early in a bot's short flight
+	main.set("hazard_scale", 2.0)
 	if OS.has_environment("BOT_CHAPTER"):
 		main.set("force_chapter", int(OS.get_environment("BOT_CHAPTER")))
 	add_child(main)
@@ -107,9 +111,10 @@ func _physics_process(delta: float) -> void:
 	var sky: Variant = main.net.state_get("sky", {})
 	if sky is Dictionary:
 		max_form = maxi(max_form, int((sky as Dictionary).get("form", -1)))
-	for id in main.hoops:
-		if main.hoops[id].kind == 4:
-			saw_gates = true
+	if main.picks != null and main.picks.showing():
+		saw_orbs = true
+	if main.hazards != null:
+		max_tells = maxi(max_tells, main.hazards.seen)
 	for slot in main.party.local_slots():
 		_steer(slot)
 	if main.vr_rig != null:
@@ -122,6 +127,13 @@ func _steer(slot: int) -> void:
 		return
 	var f = main.flyers[slot]
 	var p: Vector3 = f.node.position
+	if main.picks != null and main.picks.showing():
+		var o := _orb_for(p)
+		if o != Vector3.INF:
+			var d0 := o - p
+			kit.slot_stick(main.party, slot, "left", Vector2(-clampf(wrapf(atan2(-d0.x, -d0.z) - float(f.yaw), -PI, PI) * 2.5, -1.0, 1.0),
+				-clampf(atan2(d0.y, Vector2(d0.x, d0.z).length()) / 0.65, -1.0, 1.0)))
+		return
 	var best: Node3D = null
 	var bd := INF
 	for id in main.hoops:
@@ -203,7 +215,19 @@ func _left_hand_test(rig: Node, delta: float) -> void:
 				vt = 0.0
 
 
+## The pick orb nearest a point (INF: none showing).
+func _orb_for(from: Vector3) -> Vector3:
+	var best := Vector3.INF
+	for i in main.picks.orbs.orbs.size():
+		var c: Vector3 = main.picks.orb_position(i)
+		if c != Vector3.INF and (best == Vector3.INF or from.distance_to(c) < from.distance_to(best)):
+			best = c
+	return best
+
+
 func _nearest_hoop(from: Vector3) -> Vector3:
+	if main.picks != null and main.picks.showing():
+		return _orb_for(from)
 	var best := Vector3.INF
 	var bd := INF
 	for id in main.hoops:
@@ -218,9 +242,9 @@ func _nearest_hoop(from: Vector3) -> Vector3:
 
 
 func _report() -> String:
-	return "BOT %s: %s, players %s, hoops %d, clouds %d, darts %d, score %d, combo %d, round %d, scored_by %s, throws %d" % [main.net.mode,
+	return "BOT %s: %s, players %s, hoops %d, clouds %d, darts %d, score %d, combo %d, round %d, scored_by %s, throws %d, tells %d, picks %s" % [main.net.mode,
 		String(main.net.state_get("phase", "")), str(main.party.active_slots()), main.hoops.size(), main.clouds.size(), main.darts.size(),
-		int(main.net.state_get("score", 0)), int(main.net.state_get("combo", 0)), int(main.net.state_get("round", 0)), str(main.scored_by), main.throws]
+		int(main.net.state_get("score", 0)), int(main.net.state_get("combo", 0)), int(main.net.state_get("round", 0)), str(main.scored_by), main.throws, main.hazards.seen, str(main.picks.history)]
 
 
 func _checks() -> void:
@@ -250,7 +274,17 @@ func _checks() -> void:
 	else:
 		kit.assert_true(main.flyers.size() == main.party.player_count(), "client: every player (every machine's) has a plane")
 	# The story flight structure.
-	kit.assert_true(saw_gates, "%s: pick-a-breeze gates appeared" % mode)
+	kit.assert_true(saw_orbs, "%s: the pick orbs appeared" % mode)
+	kit.assert_true(max_tells > 0, "%s: a gust or geese was told in the sky (%d)" % [mode, max_tells])
+	if mode != "client":
+		var took := 0
+		for h in main.picks.history:
+			if int(h[2]) >= 0:
+				took += 1
+		kit.assert_true(main.picks.history.size() >= 2, "%s: the mode and a fold were picked (%s)" % [mode, str(main.picks.history)])
+		kit.assert_true(took > 0, "%s: a player took a pick orb themselves (%s)" % [mode, str(main.picks.history)])
+		var dp: Dictionary = main.net.state_get("deep", {})
+		kit.assert_true(dp.has("mode") and dp.has("season") and dp.has("hangar"), "%s: mode, season and hangar are shared (%s)" % [mode, str(dp)])
 	kit.assert_true(saw_story, "%s: a story card was shown" % mode)
 	kit.assert_true(max_form >= 1, "%s: the flight moved on to a second formation (%d)" % [mode, max_form])
 	var village: Variant = main.net.state_get("village", [])
@@ -263,7 +297,7 @@ func _checks() -> void:
 	if ch >= 4:
 		kit.assert_true(saw_gold, "%s: Gust's golden hoop flew (chapter %d)" % [mode, ch])
 	if mode != "client":
-		kit.assert_true(main.flights_done >= 1 and main.gate_picked != "", "%s: a breeze was picked (%s) and a flight finished" % [mode, main.gate_picked])
+		kit.assert_true(main.flights_done >= 1 and main.gate_picked != "", "%s: a fold was picked (%s) and a flight finished" % [mode, main.gate_picked])
 		var runs: Array = Telemetry.read("paper_planes")
 		kit.assert_true(not runs.is_empty() and (runs[-1] as Dictionary).has("stars"), "%s: the flight wrote a telemetry line" % mode)
 		if not runs.is_empty():

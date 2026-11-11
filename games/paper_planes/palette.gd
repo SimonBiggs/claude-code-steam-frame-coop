@@ -5,6 +5,7 @@ const Contrast := preload("res://core/contrast.gd")
 const Party := preload("res://core/party.gd")
 const Meshes := preload("res://games/paper_planes/meshes.gd")
 const Story := preload("res://games/paper_planes/story.gd")
+const Deep := preload("res://games/paper_planes/deep.gd")
 
 
 ## Hoops and planes, each with the ink outline main.gd gives them (meshes.gd OUTLINE).
@@ -15,9 +16,13 @@ static func key_colors() -> Dictionary:
 		"gold hoop": Meshes.GOLD_COLOR})
 	for i in Party.COLORS.size():
 		cols["plane %d" % (i + 1)] = Meshes.plane_tint(Party.COLORS[i])
+	cols["goose"] = Deep.GOOSE_BODY  # (hazards.gd: outlined geese)
 	var out := {}
 	for k in cols:
 		out[k] = {"color": cols[k], "rim": Meshes.OUTLINE}
+	# The second pass's sky events (deep.gd): their warn rings stand up against the same skies.
+	out["gust warning"] = Deep.GUST_COLOR
+	out["geese warning"] = Deep.GEESE_COLOR
 	return out
 
 
