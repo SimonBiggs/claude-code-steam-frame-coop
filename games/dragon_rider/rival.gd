@@ -79,6 +79,7 @@ func _ready() -> void:
 	var bm := StandardMaterial3D.new()
 	bm.albedo_color = Color(0.7, 0.95, 1.0, 0.35)
 	bm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	bm.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 	bm.emission_enabled = true
 	bm.emission = Color(0.5, 0.85, 1.0)
 	bm.emission_energy_multiplier = 0.7
