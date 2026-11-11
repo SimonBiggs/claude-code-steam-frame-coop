@@ -4,7 +4,7 @@ extends RefCounted
 
 const SAVE_ID := "paper_planes"  # the game's core/save.gd game_id
 const WHO := "bird"  # Pip the post bird
-const GROWS := "envelope"  # the letters delivered (stamps)
+const GROWS := "hangar"  # the letters delivered (stamps): Pip's hangar grows a piece every 3 (deep.gd)
 const COLOR := Color(1.0, 0.7, 0.28)
 
 
@@ -18,10 +18,11 @@ static func progress_summary(data: Dictionary, today: String) -> Dictionary:
 		for k in stars:
 			n += int(stars[k])
 	var daily: Variant = data.get("daily", {})
-	return {"grown": n, "daily": (daily as Dictionary).has("daily:" + today) if daily is Dictionary else false}
+	var done := String(data.get("daily_done", "")) == today or ((daily as Dictionary).has("daily:" + today) if daily is Dictionary else false)
+	return {"grown": n, "daily": done}
 
 
 ## A save as the game writes it after a few days (tests/progress_test.gd: it must read as grown > 0, daily done).
 static func sample(today: String) -> Dictionary:
 	return {"best": 14, "chapter": 1, "flight": 1, "stars": {"0-0": 3, "0-1": 2, "0-2": 3, "1-0": 1}, "misses": 0, "laps": 0,
-		"daily": {"daily:" + today: 9}, "flights": 7, "extra_stamps": 0}
+		"daily": {"daily:" + today: 9}, "flights": 7, "extra_stamps": 0, "mode": "gentle", "fold": "glider", "daily_done": today}

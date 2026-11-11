@@ -36,6 +36,11 @@ const Telemetry := preload("res://core/telemetry.gd")
 const Meshes := preload("res://games/paper_planes/meshes.gd")
 const SkyGen := preload("res://games/paper_planes/skygen.gd")
 const Story := preload("res://games/paper_planes/story.gd")
+const Deep := preload("res://games/paper_planes/deep.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
+const PicksScript := preload("res://games/paper_planes/picks.gd")
+const HazardsScript := preload("res://games/paper_planes/hazards.gd")
+const HangarScript := preload("res://games/paper_planes/hangar.gd")
 
 const GAME_ID := "paper_planes"
 const SAVE_VERSION := 2
@@ -183,7 +188,20 @@ var village_shown: Array = []
 var story_queue: Array = []  # host: [seconds left, beat]
 var tele := {}  # host: what happened this flight (core/telemetry.gd)
 var flights_done := 0  # host: flights finished this session (bots)
-var gate_picked := ""  # host: the last breeze / DAILY picked (bots)
+var gate_picked := ""  # host: the last fold / DAILY picked (bots)
+# --- Second pass (deep.gd): modes, Pip's folds on the pick orbs, warned gusts and geese, seasons, Pip's hangar ---
+var picks: Node  # picks.gd (host / local run the picks; every machine shows the orbs)
+var hazards: Node3D  # hazards.gd (every machine draws the tells)
+var hangar: Node3D  # hangar.gd
+var drift: CPUParticles3D  # the season's blossom / seeds / leaves / snow
+var play_mode := "brave"  # host: GENTLE / BRAVE / HARD (picked once a session)
+var mode_picked := false  # host: the mode pick happened this session
+var flight_t := 0.0  # host: seconds into the flight (the events' clock)
+var goose_bumps := 0  # host: planes bumped by geese this session (bots)
+var gust_pushes := 0  # every machine: frames a local plane was blown (bots)
+var hazard_first := -1.0  # bots: the first tell this early (-1: deep.gd FIRST_T)
+var hazard_scale := 1.0  # bots: more events
+var _told_kinds := {}  # host: kinds of tell Pip has explained this session
 
 
 func _ready() -> void:
@@ -195,6 +213,7 @@ func _ready() -> void:
 	net.main = self
 	add_child(net)
 	net.state_changed.connect(_on_state_changed)
+	net.sticky_event("orbs")  # a machine joining mid-pick sees the orbs (picks.gd)
 	party = Party.new()
 	party.name = "Party"
 	add_child(party)
@@ -237,6 +256,16 @@ func _setup(mode: String) -> void:
 		vr_rig.place(VR_FEET, 0.0)
 		hints.set_vr_rig(vr_rig, self)
 	_build_world()
+	picks = PicksScript.new()
+	picks.main = self
+	add_child(picks)
+	hazards = HazardsScript.new()
+	hazards.main = self
+	add_child(hazards)
+	hangar = HangarScript.new()
+	hangar.main = self
+	add_child(hangar)
+	_build_drift(_season())
 	if vr_rig != null or mode == "client":
 		stack_node = Node3D.new()
 		stack_node.name = "PaperStack"
@@ -262,8 +291,10 @@ func _setup(mode: String) -> void:
 		awards.set_player(0, "THROWER")
 		hints.hint("vr_grab", "Grab a plane. Throw it!", {"to": "vr", "icon": "play"})
 	if mode != "client":
+		play_mode = Deep.mode_of(String(save.data.get("mode", "brave")))
 		net.state_set("best", int(save.data["best"]))
 		_publish_progress()
+		_send_deep()
 		_start_pick()
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	ready_to_play = true
@@ -413,6 +444,15 @@ func _breeze() -> String:
 	return String(_flight().get("breeze", ""))
 
 
+## This flight's fold ("" = none: picking, TODAY'S SKY) and its speed share.
+func _fold() -> String:
+	return String(_flight().get("fold", ""))
+
+
+func _fold_speed() -> float:
+	return float(Deep.fold(_fold()).get("speed", 1.0))
+
+
 func _refresh_hud() -> void:
 	var score := int(net.state_get("score", 0))
 	var fl := _flight()
@@ -451,7 +491,7 @@ func _refresh_hud() -> void:
 func _flight_title(fl: Dictionary) -> String:
 	match String(fl.get("mode", "")):
 		"pick":
-			return "PICK A BREEZE!"
+			return "EASY OR HARD?" if String(fl.get("stage", "")) == "mode" else "PICK A FOLD!"
 		"daily":
 			return "DAILY SKY"
 		"bonus":
@@ -459,6 +499,17 @@ func _flight_title(fl: Dictionary) -> String:
 		"story":
 			return "%s  %d/%d" % [Story.chapter(int(fl.get("chapter", 0))).name, int(fl.get("flight", 0)) + 1, Story.FLIGHTS_PER_CHAPTER]
 	return ""
+
+
+## While picking, the sky scoreboard's number and clock step aside and its title floats higher: the pick orbs' names
+## sit in front of it (deep.gd row_spots) and the score is 0 then anyway.
+func _place_sign(phase: String) -> void:
+	if sign_score == null:
+		return
+	var picking := phase == "pick"
+	sign_score.visible = not picking
+	sign_time.visible = not picking
+	sign_chapter.position = SIGN_POS + Vector3(0.0, 4.2 if picking else 1.9, 0.0)
 
 
 func _all_huds() -> Array:
@@ -531,7 +582,7 @@ func _unlocks() -> Array:
 ## The plane, pilot and trail of a flyer, dressed in what the stars unlocked (rebuilt when that changes).
 func _apply_look(f: Flyer) -> void:
 	var un := _unlocks()
-	var key := ",".join(PackedStringArray(un.map(func(x: Variant) -> String: return str(x))))
+	var key := ",".join(PackedStringArray(un.map(func(x: Variant) -> String: return str(x)))) + "|" + _fold()
 	if f.look == key and f.body.get_child_count() > 0:
 		return
 	f.look = key
@@ -543,6 +594,7 @@ func _apply_look(f: Flyer) -> void:
 	var mi := MeshInstance3D.new()
 	mi.mesh = Meshes.plane()
 	mi.material_override = Meshes.plane_material(Meshes.GOLD_COLOR if un.has("gold") else Meshes.plane_tint(col))
+	mi.scale = Deep.fold(_fold()).get("shape", Vector3.ONE)  # Pip's fold: a wide glider, a long dart ...
 	Contrast.outline(mi, Meshes.OUTLINE)
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	f.body.add_child(mi)
@@ -633,12 +685,20 @@ func _fly_local(delta: float) -> void:
 		f.pitch = lerpf(f.pitch, want_pitch, 1.0 - exp(-3.0 * delta))
 		f.roll = lerpf(f.roll, clampf(yaw_rate * 0.45, -0.8, 0.8), 1.0 - exp(-5.0 * delta))
 		f.prev = p
-		p += _forward(f.yaw, f.pitch) * FLY_SPEED * delta
+		p += _forward(f.yaw, f.pitch) * FLY_SPEED * _fold_speed() * delta
+		var blow := _gust_push(p)  # a gust going off blows the plane sideways (told first: hazards.gd)
+		if blow != Vector3.ZERO:
+			p += blow * delta
+			gust_pushes += 1
 		f.node.position = p
 		f.node.basis = Basis.from_euler(Vector3(f.pitch, f.yaw, 0.0))
 		if net.mode == "client":
 			if send:
 				net.send_state(p, f.yaw, f.pitch, slot)
+		elif phase == "pick":
+			var o: int = picks.hit_at(p)
+			if o >= 0:
+				picks.take(o, slot)
 		elif _passable():
 			var id := _check_pass(f.prev, p, 0.3)
 			if id >= 0:
@@ -701,6 +761,11 @@ func on_remote_state(slot: int, pos: Vector3, yaw: float, pitch: float) -> void:
 	if not f.has_target:
 		f.has_target = true
 		f.node.position = pos
+	if String(net.state_get("phase", "")) == "pick":
+		var o: int = picks.hit_at(pos)
+		if o >= 0:
+			picks.take(o, slot)
+		return
 	if _passable():
 		var id := _check_pass(from, pos, 0.3)
 		if id >= 0:
@@ -738,7 +803,7 @@ func _make_hoop(id: int, kind: int, ci: int, pos: Vector3) -> Hoop:
 	h.node.name = "Hoop%d" % id
 	add_child(h.node)
 	h.node.position = pos
-	if _breeze() == "big" and kind != SkyGen.GATE:
+	if _breeze() == "big":
 		h.node.scale = Vector3.ONE * BIG_SCALE
 	h.mesh = Contrast.outline(MeshKit.instance(Meshes.hoop(kind, ci), false), Meshes.OUTLINE)
 	h.mesh.scale = Vector3.ONE * 0.01
@@ -757,10 +822,10 @@ func _make_hoop(id: int, kind: int, ci: int, pos: Vector3) -> Hoop:
 			bm.material = MeshKit.material(Color(1.0, 0.95, 0.6), 2.0)
 			return bm)
 		h.node.add_child(sp)
-	if kind == SkyGen.CHAIN or kind == SkyGen.GATE:
-		h.label = UiKit.label3d("", 0.75 if kind == SkyGen.CHAIN else 0.45, Meshes.CHAIN_COLOR.lightened(0.4) if kind == SkyGen.CHAIN else "text", true)
+	if kind == SkyGen.CHAIN:
+		h.label = UiKit.label3d("", 0.75, Meshes.CHAIN_COLOR.lightened(0.4), true)
 		h.label.outline_size = 22
-		h.label.position = Vector3(0.0, Meshes.radius(kind) + (0.6 if kind == SkyGen.CHAIN else 0.75), 0.0)
+		h.label.position = Vector3(0.0, Meshes.radius(kind) + 0.6, 0.0)
 		h.label.double_sided = true
 		if vr_rig == null:
 			h.label.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
@@ -771,22 +836,10 @@ func _make_hoop(id: int, kind: int, ci: int, pos: Vector3) -> Hoop:
 	return h
 
 
-## The words on a hoop: a chain hoop's number, a gate's breeze (or DAILY SKY with today's best).
+## The words on a hoop: a chain hoop's number.
 func _label_hoop(h: Hoop) -> void:
-	if h.label == null:
-		return
-	if h.kind == SkyGen.CHAIN:
+	if h.label != null and h.kind == SkyGen.CHAIN:
 		h.label.text = str(h.ci)
-		return
-	var gates: Variant = net.state_get("gates", [])
-	var id := String(gates[h.ci]) if gates is Array and h.ci < (gates as Array).size() else ""
-	if id == Story.DAILY_GATE:
-		var best := int(net.state_get("daily_best", 0))
-		h.label.text = "DAILY SKY" + ("\nBEST %d" % best if best > 0 else "")
-		h.label.modulate = Color(0.45, 0.85, 1.0)
-	elif Story.BREEZES.has(id):
-		h.label.text = String(Story.BREEZES[id][0])
-		h.label.modulate = Story.BREEZES[id][2]
 
 
 func _spawn_spec(spec: Dictionary) -> Hoop:
@@ -824,8 +877,6 @@ func _animate_hoops(delta: float) -> void:
 		var grow := clampf(h.age / 0.5, 0.0, 1.0)
 		var s := (1.0 + sin(grow * PI) * 0.25) * grow if grow < 1.0 else 1.0
 		s *= 1.0 + sin(clock * 20.0) * 0.14 * h.wob
-		if h.kind == SkyGen.GATE:
-			s *= 1.0 + sin(clock * 3.0 + h.ci) * 0.04
 		h.mesh.scale = Vector3.ONE * maxf(s, 0.01)
 		if h.kind == SkyGen.RAINBOW or h.kind == SkyGen.GOLD:
 			h.mesh.rotation.z += delta * 1.2
@@ -843,10 +894,11 @@ func _animate_hoops(delta: float) -> void:
 func _check_pass(from: Vector3, to: Vector3, margin: float) -> int:
 	if from.is_equal_approx(to):
 		return -1
-	var picking := String(net.state_get("phase", "")) == "pick"
+	if String(net.state_get("phase", "")) == "pick":
+		return -1  # (picks are pick orbs: picks.gd)
 	for id in hoops:
 		var h: Hoop = hoops[id]
-		if h.age < 0.4 or (picking != (h.kind == SkyGen.GATE)):
+		if h.age < 0.4:
 			continue
 		var inv := h.node.global_transform.affine_inverse()
 		var a := inv * from
@@ -884,15 +936,27 @@ func _assist_target(pos: Vector3, dir: Vector3, max_dist: float, max_angle: floa
 	return best
 
 
+## The middle of the pick orb a VR paper plane is flying at (within 0.35 rad), or null.
+func _orb_assist(pos: Vector3, dir: Vector3) -> Variant:
+	var best: Variant = null
+	var best_a := 0.35
+	for i in picks.orbs.orbs.size():
+		var c: Vector3 = picks.orb_position(i)
+		if c == Vector3.INF:
+			continue
+		var a := dir.angle_to(c - pos)
+		if a < best_a:
+			best_a = a
+			best = c
+	return best
+
+
 static func _mult(c: int) -> int:
 	return 3 if c >= 10 else (2 if c >= 4 else 1)
 
 
 func _score_hoop(id: int, by: int, pos: Vector3) -> void:
 	var h: Hoop = hoops[id]
-	if h.kind == SkyGen.GATE:
-		_pick_gate(h, by)
-		return
 	hoops.erase(id)
 	var at := h.node.position
 	h.node.queue_free()
@@ -964,6 +1028,8 @@ func hoop_fx(at: Vector3, kind: int, ci: int, by: int, pts: int, extra: String =
 		var tw := sign_score.create_tween()
 		sign_score.scale = Vector3.ONE * 1.3
 		tw.tween_property(sign_score, "scale", Vector3.ONE, 0.35).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	if _fold() == "stunt" and flyers.has(by) and (flyers[by] as Flyer).loop_t < 0.0:
+		(flyers[by] as Flyer).loop_t = 0.0  # STUNT fold: a barrel roll through every hoop
 	if by >= 0 and party.is_local(by):
 		party.rumble(by, 0.4, 0.7, 0.25)
 	if by == 0 and vr_rig != null:
@@ -1101,6 +1167,110 @@ func _cloud_bump(slot: int, ci: int) -> void:
 	net.event("cloud", [slot, ci])
 
 
+# --- Gusts and geese (deep.gd events, hazards.gd tells) ---------------------------------------------
+
+## Host: Pip says what a tell is the first time each kind shows up this session.
+func _first_tell(kind: String) -> void:
+	if _told_kinds.has(kind):
+		return
+	_told_kinds[kind] = true
+	if kind == "gust":
+		_story({"who": "PIP", "line": "Whoosh! A gust is coming!", "pic": "airswirl", "color": Deep.GUST_COLOR.to_html(false), "duration": 2.5})
+	else:
+		_story({"who": "PIP", "line": "Honk! Geese! Fly up or down!", "pic": "goose", "color": Deep.GEESE_COLOR.to_html(false), "duration": 2.5})
+
+
+## The live gust push on a plane at p (m/s), every machine for its own planes.
+func _gust_push(p: Vector3) -> Vector3:
+	var push := Vector3.ZERO
+	if hazards == null:
+		return push
+	var md := Deep.mode_data(String((net.state_get("deep", {}) as Dictionary).get("mode", "brave")))
+	for e in hazards.live_now():
+		if String(e.kind) == "gust" and Deep.caught(e, p):
+			push += (e.dir as Vector3) * float(md.push)
+	return push
+
+
+## Host: planes (every machine's, where the host last heard they are) in a goose band while the geese fly.
+func _goose_hits() -> void:
+	var live: Array = hazards.live_now()
+	if live.is_empty():
+		return
+	for e in live:
+		if String(e.kind) != "geese":
+			continue
+		for slot in flyers:
+			var f: Flyer = flyers[slot]
+			if f.cloud_cd <= 0.0 and Deep.caught(e, f.node.position):
+				_goose_bump(int(slot))
+		for id in darts:
+			var d: Dart = darts[id]
+			if d.state == 1 and Deep.caught(e, d.node.position):
+				d.state = 2
+				d.t = 0.0
+				d.vel = Vector3.ZERO
+				sfx.play_at("boing", d.node.position, -4.0, 0.6)
+
+
+func _goose_bump(slot: int) -> void:
+	var f: Flyer = flyers[slot]
+	f.cloud_cd = 2.0
+	goose_bumps += 1
+	tele["goose_bumps"] = int(tele.get("goose_bumps", 0)) + 1
+	var lose := int(Deep.mode_data(play_mode).bump) > 0
+	if lose and combo > 0:
+		combo = 0
+		net.state_set("combo", 0)
+	goose_fx(slot, lose)
+	net.event("goose", [slot, lose])
+
+
+func goose_fx(slot: int, lost: bool) -> void:
+	if not flyers.has(slot):
+		return
+	var f: Flyer = flyers[slot]
+	f.loop_t = 0.0
+	HudKit.popup(self, f.node.position + Vector3.UP * 0.9, "HONK!", {"style": "miss", "size": 2.0})
+	sfx.play_at("boing", f.node.position, 0.0, 0.6)
+	if party.is_local(slot):
+		party.rumble(slot, 0.6, 0.4, 0.25)
+		if lost and split != null and huds.has(slot):
+			HudKit.toast(huds[slot], "Honk! Combo lost", {"icon": "cross", "duration": 1.6, "where": "top"})
+
+
+## Every machine: the season's blossom / seeds / leaves / snow drifting down over the valley.
+func _build_drift(season: String) -> void:
+	if drift != null and is_instance_valid(drift):
+		drift.queue_free()
+	var sd := Deep.season_data(season)
+	drift = CPUParticles3D.new()
+	drift.name = "SeasonDrift"
+	drift.set_meta("season", season)
+	drift.amount = 50 if vr_rig != null else 70
+	drift.lifetime = 9.0
+	drift.preprocess = 9.0
+	drift.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+	drift.emission_box_extents = Vector3(18.0, 0.5, 16.0)
+	drift.direction = Vector3(0.3, -1.0, 0.0)
+	drift.spread = 25.0
+	drift.gravity = Vector3(0.0, -0.4, 0.0)
+	drift.initial_velocity_min = 0.6
+	drift.initial_velocity_max = 1.2
+	drift.angular_velocity_min = -90.0
+	drift.angular_velocity_max = 90.0
+	drift.local_coords = false
+	var col: Color = sd.drift
+	drift.mesh = ResCache.get_or_make("pp_drift_%s" % col.to_html(false), func() -> Resource:
+		var bm := BoxMesh.new()
+		bm.size = Vector3(0.09, 0.09, 0.015)
+		bm.material = MeshKit.material(col, 0.3)
+		return bm)
+	drift.position = Vector3(0.0, 12.0, -6.0)
+	add_child(drift)
+	drift.emitting = true
+
+
 func cloud_fx(slot: int, ci: int) -> void:
 	if flyers.has(slot):
 		var f: Flyer = flyers[slot]
@@ -1126,11 +1296,14 @@ func _make_dart(id: int, ci: int) -> Dart:
 	d.node = Node3D.new()
 	d.node.name = "Dart%d" % id
 	add_child(d.node)
-	d.body = MeshInstance3D.new()
-	(d.body as MeshInstance3D).mesh = Meshes.plane()
+	d.body = Node3D.new()  # (scaled as it pops in and fades; the paper inside wears the flight's fold shape)
+	var mi := MeshInstance3D.new()
+	mi.mesh = Meshes.plane()
 	var tint: Color = Meshes.GOLD_COLOR if _unlocks().has("gold") else Meshes.HOOP_COLORS[ci % Meshes.HOOP_COLORS.size()].lerp(Color.WHITE, 0.45)
-	(d.body as MeshInstance3D).material_override = Meshes.plane_material(tint)
-	(d.body as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.material_override = Meshes.plane_material(tint)
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.scale = Deep.fold(_fold()).get("shape", Vector3.ONE)
+	d.body.add_child(mi)
 	d.body.scale = Vector3.ONE * DART_SCALE
 	d.node.add_child(d.body)
 	darts[id] = d
@@ -1241,9 +1414,12 @@ func _fly_darts(delta: float) -> void:
 			d.t += delta
 			var v := d.vel
 			var hs := Vector2(v.x, v.z).length()
-			v.y += (-4.3 + minf(hs * 0.4, 3.6)) * delta
+			v.y += (-4.3 + minf(hs * 0.4, 3.6)) * float(Deep.fold(_fold()).get("fall", 1.0)) * delta
+			v += _gust_push(d.node.position) * 2.0 * delta  # (a light paper plane: the gust turns it)
 			v -= v * 0.07 * delta
 			var aim: Variant = _assist_target(d.node.position, v, 18.0 if magnet else 14.0, 0.8 if magnet else 0.55)
+			if picks.showing():  # picking: a thrown plane curves a little towards the orb it was thrown at
+				aim = _orb_assist(d.node.position, v)
 			if aim != null:
 				var want := ((aim as Vector3) - d.node.position).normalized()
 				var dir := v.normalized()
@@ -1255,6 +1431,13 @@ func _fly_darts(delta: float) -> void:
 			var p := d.prev + v * delta
 			_orient_dart(d, v.normalized(), sin(d.t * 9.0) * 0.25)
 			d.node.position = p
+			if String(net.state_get("phase", "")) == "pick":
+				var o: int = picks.hit_at(p, 0.2)
+				if o >= 0:
+					picks.take(o, 0)
+					d.state = 2
+					d.t = 1.5
+					continue
 			if passable:
 				var hid := _check_pass(d.prev, p, 0.15)
 				if hid >= 0:
@@ -1392,20 +1575,21 @@ func _start_pick() -> void:
 	combo = 0
 	net.state_set("combo", 0)
 	time_left = pick_time
-	var choices := Story.gate_choices(Seeded.rng(Seeded.fresh_seed(), "gates"))
-	net.state_set("gates", choices)
+	hazards.reset([])
+	hazards.clear()
+	net.event("hazard_clear", [])
 	var nx := _next_story()
-	net.state_set("flight", {"mode": "pick", "chapter": nx[0], "flight": nx[1]})
+	net.state_set("flight", {"mode": "pick", "chapter": nx[0], "flight": nx[1], "stage": "mode" if not mode_picked else "fold"})
 	net.state_set("sky", {"seed": 0, "chapter": 0, "lucky": false, "form": -1})
-	var gp := SkyGen.gate_positions()
-	for i in gp.size():
-		var h := _spawn_spec({"pos": gp[i], "kind": SkyGen.GATE, "ci": i, "amp": 0.12, "phase": i * 2.0, "yaw": SkyGen.yaw_to_vr(gp[i])})
-		h.age = 0.0
+	_next_pick()
 	net.state_set("score", 0)
 	net.state_set("time", int(ceil(time_left)))
 	net.state_set("phase", "pick")
 	# What Pip says before this flight.
 	var chap: int = nx[0]
+	if not mode_picked:  # the session's first pick: today's season sky
+		var sd := Deep.season_data(_season())
+		_story({"who": "PIP", "line": String(sd.line), "pic": String(sd.pic), "color": (sd.drift as Color).to_html(false), "duration": 3.0}, 4.2)
 	if chap < Story.MIXED and int(nx[1]) == 0 and int(save.data["misses"]) == 0:
 		_story(_chapter_beat(chap, "intro"), 0.6)
 	elif int(save.data["misses"]) > 0:
@@ -1416,21 +1600,78 @@ func _start_pick() -> void:
 		vr_rig.guard_trigger()
 
 
-## Host: a gate was flown (or thrown) through: that breeze (or the DAILY SKY) it is.
-func _pick_gate(h: Hoop, by: int) -> void:
-	var gates: Array = net.state_get("gates", [])
-	var choice := String(gates[h.ci]) if h.ci < gates.size() else String(gates[0])
-	burst(h.node.position, [Color.WHITE, Meshes.GOLD_COLOR], 40, 1.0)
-	net.event("gate", [h.node.position, by])
-	sfx.play("magic", -2.0)
-	_start_flight(choice, "gate" if by >= 0 else "timeout")
+## Host: the next pick on the orbs: GENTLE / BRAVE / HARD once a session, then Pip's folds (+ TODAY'S SKY).
+func _next_pick() -> void:
+	time_left = pick_time
+	if not mode_picked:
+		var ids := PickOrbs.mode_ids(play_mode)
+		var entries: Array = []
+		for id in ids:
+			entries.append({"id": id, "name": PickOrbs.mode_name(String(id)), "pic": String(PickOrbs.mode(String(id)).pic),
+				"color": PickOrbs.mode_color(String(id))})
+		picks.begin("mode", entries, ids, _on_picked)
+		return
+	var ch := Deep.fold_choices(Deep.hangar(_stamps()), String(save.data.get("fold", "")), Seeded.fresh_seed())
+	var entries2: Array = []
+	for id in ch:
+		var fd := Deep.fold(String(id))
+		entries2.append({"id": id, "name": String(fd.name), "pic": String(fd.pic), "color": fd.color})
+	ch.append(Deep.DAILY)  # TODAY'S SKY: an orb at the end of the row (the middle one, the default, stays a fold)
+	entries2.append(Deep.DAILY_ENTRY.duplicate())
+	picks.begin("fold", entries2, ch, _on_picked)
+
+
+## Host / local: an orb was taken (slot -1: nobody, the middle one).
+func _on_picked(stage: String, opt: Variant, slot: int) -> void:
+	if stage == "mode":
+		play_mode = Deep.mode_of(String(opt))
+		if OS.has_environment("PP_MODE"):  # tests: this mode
+			play_mode = Deep.mode_of(OS.get_environment("PP_MODE"))
+		mode_picked = true
+		save.data["mode"] = play_mode
+		save.mark_dirty()
+		_send_deep()
+		_story({"who": "PIP", "line": String(PickOrbs.MODE_LINES.get(play_mode, "Let's fly!")), "pic": String(PickOrbs.mode(play_mode).pic),
+			"color": PickOrbs.mode_color(play_mode).to_html(false), "duration": 2.5})
+		var fl := _flight()
+		fl["stage"] = "fold"
+		net.state_set("flight", fl)
+		_next_pick()
+		return
+	var choice := String(opt)
+	if OS.has_environment("PP_FOLD") and choice != Deep.DAILY:  # tests: this fold
+		choice = OS.get_environment("PP_FOLD")
+	if choice != Deep.DAILY:
+		save.data["fold"] = choice
+		save.mark_dirty()
+		_story({"who": "PIP", "line": String(Deep.fold(choice).get("line", "Let's fly!")), "pic": String(Deep.fold(choice).get("pic", "bird")),
+			"color": (Deep.fold(choice).get("color", Color.WHITE) as Color).to_html(false), "duration": 2.5})
+	_start_flight(choice, "orb" if slot >= 0 else "timeout")
+
+
+## Stamps: every star ever won (the hangar grows from them).
+func _stamps() -> int:
+	return Story.stamps(save.data["stars"]) + int(save.data.get("extra_stamps", 0))
+
+
+## Today's season (PP_SEASON for tests).
+func _season() -> String:
+	var s := OS.get_environment("PP_SEASON") if OS.has_environment("PP_SEASON") else Seeded.season()
+	return s if Deep.SEASONS.has(s) else "spring"
+
+
+## Host: the mode, fold, season and hangar for every machine.
+func _send_deep() -> void:
+	var fl := _flight()
+	net.state_set("deep", {"mode": play_mode, "fold": String(fl.get("fold", "")), "season": _season(), "hangar": Deep.hangar(_stamps())})
 
 
 func _start_flight(choice: String, how: String) -> void:
 	_clear_sky()
 	gate_picked = choice
-	var daily := choice == Story.DAILY_GATE
-	var breeze := "" if daily else choice
+	var daily := choice == Deep.DAILY
+	var fold_id := "" if daily else choice
+	var breeze := Deep.breeze_of(fold_id)
 	var nx := _next_story()
 	var chap: int = Story.MIXED if daily else int(nx[0])
 	if force_chapter >= 0 and not daily:
@@ -1443,11 +1684,23 @@ func _start_flight(choice: String, how: String) -> void:
 	var misses := 0 if daily else int(save.data["misses"])
 	var laps := int(save.data["laps"]) if mode == "bonus" else 0
 	var goals := Story.goals(players, chap, misses, laps, secs)
+	var gk := float(Deep.mode_data(play_mode).goals)
+	for i in goals.size():
+		goals[i] = maxi(1 + i, int(round(float(goals[i]) * gk)))
 	net.state_set("flight", {"mode": mode, "chapter": chap, "flight": int(nx[1]), "breeze": breeze, "goals": goals,
-		"seed": seed_v, "lucky": lucky, "players": players})
+		"seed": seed_v, "lucky": lucky, "players": players, "fold": fold_id})
+	_send_deep()
+	var season := _season()
+	var spec := {"mode": play_mode, "season": season, "secs": secs, "scale": hazard_scale}
+	if hazard_first >= 0.0:
+		spec["first"] = hazard_first
+	var evs := Deep.events(Seeded.derive(seed_v, "events"), spec)
+	hazards.reset(evs)
+	flight_t = 0.0
 	tele = {"mode": mode, "chapter": chap, "flight": int(nx[1]), "seed": seed_v, "breeze": breeze, "pick": how,
 		"players": players, "vr": vr_rig != null, "tv_players": party.player_count(), "goals": goals,
-		"misses_before": misses, "seconds": secs, "kinds": {}, "t0": clock}
+		"misses_before": misses, "seconds": secs, "kinds": {}, "t0": clock, "play_mode": play_mode, "fold": fold_id,
+		"season": season, "events": evs.size(), "goose_bumps": 0, "hangar": Deep.hangar(_stamps())}
 	time_left = secs
 	combo = 0
 	last_pass_t = -100.0
@@ -1524,6 +1777,7 @@ func _end_round(how: String = "time") -> void:
 		save.data["extra_stamps"] = int(save.data.get("extra_stamps", 0)) + stars
 		adv = Story.advance(Story.MIXED, fnum, int(save.data["laps"]), int(save.data["misses"]), stars)
 	elif mode == "daily":
+		save.data["daily_done"] = Seeded.today()
 		var daily: Dictionary = save.data["daily"]
 		var dk := Seeded.daily_key()
 		daily[dk] = maxi(int(daily.get(dk, 0)), score)
@@ -1541,6 +1795,15 @@ func _end_round(how: String = "time") -> void:
 	var after := Story.stamps(stars_d) + int(save.data.get("extra_stamps", 0))
 	var news := Story.newly_unlocked(before, after)
 	_publish_progress()
+	_send_deep()
+	hazards.reset([])
+	hazards.clear()
+	net.event("hazard_clear", [])
+	var grew := Deep.hangar(after) > Deep.hangar(before)
+	var new_folds: Array = []
+	for id in Deep.unlocked(Deep.hangar(after)):
+		if not Deep.unlocked(Deep.hangar(before)).has(id):
+			new_folds.append(id)
 	# Telemetry: one line per flight.
 	var t := tele.duplicate(true)
 	t["score"] = score
@@ -1550,6 +1813,7 @@ func _end_round(how: String = "time") -> void:
 	t.erase("t0")
 	t["formations"] = form_i + 1
 	t["chapter_done"] = bool(adv.get("chapter_done", false))
+	t["hangar_after"] = Deep.hangar(after)
 	Telemetry.run(GAME_ID, t)
 	tele = {}
 	# The results screen.
@@ -1581,6 +1845,11 @@ func _end_round(how: String = "time") -> void:
 		_story(_pip_beat(Story.PIP_RETRY[int(save.data["misses"]) % Story.PIP_RETRY.size()]), 1.5)
 	for i in news.size():
 		_story({"who": "NEW!", "line": "You unlocked %s!" % String(news[i]).to_lower(), "pic": "star", "color": "ffd24d", "duration": 3.5}, 6.5 + i * 4.0)
+	if grew:
+		_story({"who": "PIP", "line": "My hangar grew! Look!", "pic": "hangar", "color": "f28c4d", "duration": 3.5}, 3.0)
+	for id in new_folds:
+		var fd := Deep.fold(String(id))
+		_story({"who": "NEW FOLD!", "line": "%s!" % String(fd.name), "pic": String(fd.pic), "color": (fd.color as Color).to_html(false), "duration": 3.5}, 5.0)
 
 
 func _show_results(data: Dictionary) -> void:
@@ -1653,8 +1922,18 @@ func on_pause_changed(paused: bool, by_slot: int) -> void:
 
 func _on_state_changed(key: String, value: Variant) -> void:
 	match key:
+		"deep":
+			if value is Dictionary:
+				var dp: Dictionary = value
+				if hangar != null:
+					hangar.show_pieces(int(dp.get("hangar", 0)))
+				if drift == null or String(drift.get_meta("season", "")) != String(dp.get("season", "")):
+					_build_drift(String(dp.get("season", "spring")))
 		"score", "best", "combo", "flight":
 			_refresh_hud()
+			if key == "flight":
+				for slot in flyers:
+					_apply_look(flyers[slot])  # the flight's fold shape
 			if key == "flight" and value is Dictionary:
 				var chap := int((value as Dictionary).get("chapter", 0))
 				var ch := Story.chapter(chap)
@@ -1676,15 +1955,12 @@ func _on_state_changed(key: String, value: Variant) -> void:
 			var title := _flight_title(fl)
 			var sub := "Fly through the hoops!"
 			var breeze := String(fl.get("breeze", ""))
-			if Story.BREEZES.has(breeze):
-				sub = "Breeze: %s!" % String(Story.BREEZES[breeze][0])
-			HudKit.banner(_all_huds(), title, sub, {"duration": 2.5})
+			if not Deep.fold(String(fl.get("fold", ""))).is_empty():
+				sub = "%s fold!" % String(Deep.fold(String(fl.get("fold", ""))).name)
+			HudKit.banner(_all_huds(), title, sub, {"duration": 2.0, "y": 0.2})  # (high and short: the planes fly mid-screen)
 			if vr_rig != null:
 				HudKit.vr_banner(self, vr_rig.camera, title, "Throw through the hoops!" if breeze == "" else sub, {"duration": 2.5, "sound": ""})
 			sfx.play("go", -4.0)
-		"gates", "daily_best":
-			for id in hoops:
-				_label_hoop(hoops[id])
 		"sky":
 			if value is Dictionary:
 				_build_clouds(value)
@@ -1695,15 +1971,17 @@ func _on_state_changed(key: String, value: Variant) -> void:
 			for slot in flyers:
 				_apply_look(flyers[slot])
 		"phase":
+			_place_sign(String(value))
 			match String(value):
 				"results":
 					_show_results(net.state_get("results", {}))
 				"pick":
 					_hide_results()
 					music.play_mood("party")
-					HudKit.banner(_all_huds(), "PICK A BREEZE!", "Fly through a gate", {"duration": 2.6, "style": "info"})
+					var pt := _flight_title(_flight())
+					HudKit.banner(_all_huds(), pt, "Fly into a ball", {"duration": 2.0, "style": "info", "y": 0.2})
 					if vr_rig != null:
-						HudKit.vr_banner(self, vr_rig.camera, "PICK A BREEZE!", "Throw a plane through a gate", {"duration": 2.6, "sound": ""})
+						HudKit.vr_banner(self, vr_rig.camera, pt, "Throw a plane at a ball", {"duration": 2.0, "sound": ""})
 				_:
 					_hide_results()
 					music.play_mood("party")
@@ -1738,13 +2016,21 @@ func _process(delta: float) -> void:
 			_start_pick()
 		return
 	time_left -= delta
+	if phase == "pick":
+		time_left = picks.left(pick_time)
 	if int(ceil(time_left)) != int(net.state_get("time", 0)):
 		net.state_set("time", maxi(0, int(ceil(time_left))))
 	if phase == "pick":
-		if time_left <= 0.0:
-			var gates: Array = net.state_get("gates", [])
-			_start_flight(String(gates[0]) if not gates.is_empty() else "big", "timeout")
+		picks.tick(delta, pick_time)  # (nobody took one: the middle one; then the flight starts in _on_picked)
 		return
+	flight_t += delta
+	for e in hazards.due(flight_t):
+		var warn := float(Deep.mode_data(play_mode).warn)
+		var stay := Deep.stay_of(e, play_mode)
+		hazards.announce(e, warn, stay)
+		net.event("hazard", [Deep.pack(e), warn, stay])
+		_first_tell(String(e.kind))
+	_goose_hits()
 	_cloud_hits()
 	if combo > 0 and clock - last_pass_t > COMBO_TIME * (1.6 if _breeze() == "streak" else 1.0):
 		combo = 0
@@ -1891,12 +2177,20 @@ func apply_event(kind: String, args: Array) -> void:
 				(hoops[id] as Hoop).node.queue_free()
 				hoops.erase(id)
 			hoop_fx(args[1], int(args[3]), int(args[4]), int(args[2]), int(args[5]), String(args[6]) if args.size() > 6 else "")
-		"gate":
-			burst(args[0], [Color.WHITE, Meshes.GOLD_COLOR], 40, 1.0)
-			sfx.play("magic", -2.0)
 		"story":
 			if args.size() > 0 and args[0] is Dictionary:
 				show_story(args[0])
+		"orbs":
+			if args.size() >= 3:
+				picks.show_row(String(args[0]), args[1], args[2])
+		"take":
+			picks.take_fx(int(args[0]), int(args[1]))
+		"hazard":
+			hazards.announce(Deep.unpack(args[0]), float(args[1]), float(args[2]))
+		"hazard_clear":
+			hazards.clear()
+		"goose":
+			goose_fx(int(args[0]), bool(args[1]))
 		"cloud":
 			cloud_fx(int(args[0]), int(args[1]))
 		"whoosh":

@@ -33,6 +33,10 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "pp-folds", "date": "2026-11-11", "game": "paper_planes", "pic": "glider", "line": "Pick Pip's paper folds!"},
+	{"id": "pp-geese", "date": "2026-11-11", "game": "paper_planes", "pic": "goose", "line": "Geese and gusts! Look out!"},
+	{"id": "pp-hangar", "date": "2026-11-11", "game": "paper_planes", "pic": "hangar", "line": "Pip's hangar grows!"},
+	{"id": "pp-seasons", "date": "2026-11-11", "game": "paper_planes", "pic": "snowflake", "line": "Snowy skies", "try": {"PP_SEASON": "winter"}},
 	{"id": "cc-gifts", "date": "2026-11-11", "game": "cannon_cove", "pic": "bouncyball", "line": "Shoot Polly's cannon gifts!"},
 	{"id": "cc-arms", "date": "2026-11-11", "game": "cannon_cove", "pic": "krakenarm", "line": "Kraken arms! Step out!"},
 	{"id": "cc-harbour", "date": "2026-11-11", "game": "cannon_cove", "pic": "harbour", "line": "Polly's harbour grows!"},

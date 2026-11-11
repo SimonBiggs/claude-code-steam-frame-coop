@@ -59,7 +59,7 @@ static func chapter(c: int) -> Dictionary:
 ## The save's default data (core/save.gd fills missing keys from this, so old saves just gain them).
 static func save_defaults() -> Dictionary:
 	return {"best": 0, "chapter": 0, "flight": 0, "stars": {}, "misses": 0, "laps": 0, "daily": {},
-		"flights": 0, "extra_stamps": 0}
+		"flights": 0, "extra_stamps": 0, "mode": "brave", "fold": "", "daily_done": ""}
 
 
 ## Total stars ever earned (each flight counts its best).
