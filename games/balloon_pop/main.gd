@@ -426,8 +426,8 @@ func _all_huds() -> Array:
 
 func _banner(title: String, sub: String = "", dur: float = 1.8) -> void:
 	HudKit.banner(_all_huds(), title, sub, {"duration": dur})
-	if vr_rig != null:
-		HudKit.vr_banner(self, vr_rig.camera, title, sub, {"duration": dur, "sound": "", "distance": 2.0})  # 3.2 m: just behind the story card
+	if vr_rig != null and not (vr_story != null and is_instance_valid(vr_story) and vr_story.is_visible_in_tree()):
+		HudKit.vr_banner(self, vr_rig.camera, title, sub, {"duration": dur, "sound": "", "distance": 2.0})  # (never over Poppy's card)  # 3.2 m: just behind the story card
 
 
 # --- Players ------------------------------------------------------------------------------
@@ -687,6 +687,7 @@ func _before_play() -> void:
 		for id in ids:
 			var md := PickOrbs.mode(String(id))
 			entries.append({"id": id, "name": md.name, "pic": md.pic, "color": md.color})
+		_clear_sky()
 		net.state_set("phase", "orbs")
 		picks.begin("mode", entries, ids, _picked)
 		return
@@ -697,10 +698,17 @@ func _before_play() -> void:
 		for id in ids2:
 			var gd := Skies.gift(String(id))
 			entries2.append({"id": id, "name": gd.name, "pic": gd.pic, "color": gd.color})
+		_clear_sky()
 		net.state_set("phase", "orbs")
 		picks.begin("gift", entries2, ids2, _picked)
 		return
 	_start_play()
+
+
+## Host: practice balloons nobody popped float away, clear of the pick orbs.
+func _clear_sky() -> void:
+	for id in balloons:
+		(balloons[id] as Balloon).rise = maxf((balloons[id] as Balloon).rise, 2.0)
 
 
 ## Host: the team took an orb (or nobody did: the middle one).
@@ -854,10 +862,10 @@ func _start_play() -> void:
 		"parade": int(save.data.get("parade", 0))}, true)
 	net.state_set("goal", round_def.goal)
 	net.state_set("time", int(ceil(time_left)))
-	net.state_set("phase", "play")
 	var r := Story.ride(String(round_desc.ride))
 	if round_desc.k == "story" and int(save.data.fill) == 0:
-		_story(_poppy(String(r.intro), String(r.pic), r.color))
+		_story(_poppy(String(r.intro), String(r.pic), r.color))  # (before GO!: in VR the banner then waits for the card)
+	net.state_set("phase", "play")
 	print("Balloon Pop round: %s %s seed %d, %d balloons, %d sets, goal %s, %s, gift %s, %d gusts (%.1f ms)" % [round_desc.k, round_desc.ride,
 		int(round_desc.seed), (round_def.spawns as Array).size(), (round_def.sets as Array).size(), str(round_def.goal), _mode(), gift,
 		gl.size(), float(run.gen_ms)])

@@ -33,7 +33,8 @@ const MODES := {
 }
 const MIN_WARN := 2.0
 const MAX_DRIFT := 1.3  # metres a gust may blow a balloon
-const GUST_COLOR := Color(0.55, 0.85, 1.0)
+const GUST_COLOR := Color(0.2, 0.4, 1.0)  # a deep wind blue: shows on green, gold and snowy grass alike
+const GUST_ALPHA := 0.45  # the stripe's fill (core/warn_rings.gd flash)
 
 ## Poppy's gifts. unlock: balloons in Poppy's parade (save "parade") before it can be picked.
 const GIFTS: Array[Dictionary] = [
@@ -235,6 +236,11 @@ static func contrast_problems(balloon_colors: Array) -> Array:
 		backs.append(["%s horizon" % p, pr.horizon])
 	for s in GROUND:
 		backs.append(["%s grass" % s, GROUND[s]])
+	for gs in GROUND:  # the wind stripe (see-through) shows on every grass
+		var gc: Color = GROUND[gs]
+		var c2 := contrast(gc.lerp(GUST_COLOR, GUST_ALPHA), gc)
+		if c2 < MIN_CONTRAST:
+			why.append("the wind stripe is hard to see on the %s grass (%.3f)" % [gs, c2])
 	for bc in balloon_colors:
 		for bk in backs:
 			var c := contrast(bc[1], bk[1])

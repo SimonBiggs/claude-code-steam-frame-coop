@@ -49,8 +49,8 @@ func tick(elapsed: float, warn: float) -> Array:
 func announce(dx: float, dz: float, warn: float, secs: float, speed: float) -> void:
 	var dir := Vector3(dx, 0.0, dz).normalized()
 	var from := -dir * (WaveGen.ARENA - 0.5)
-	rings.shape("line", from, dir, Vector2((WaveGen.ARENA - 0.5) * 2.0, 3.2), Skies.GUST_COLOR, warn,
-		{"style": "flash", "y": 0.04, "stay": secs})
+	rings.shape("line", from, dir, Vector2((WaveGen.ARENA - 0.5) * 2.0, 2.4), Skies.GUST_COLOR, warn,
+		{"style": "flash", "y": 0.04, "stay": secs, "alpha": Skies.GUST_ALPHA})
 	zones.append({"dir": dir, "t": warn, "left": secs, "speed": speed})
 	main.sound("whoosh", -6.0, 0.6)
 

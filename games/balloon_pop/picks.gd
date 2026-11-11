@@ -14,11 +14,11 @@ const VrRig := preload("res://core/vr_rig.gd")
 const WAIT := {"mode": 14.0, "gift": 10.0}
 const AFTER := 1.0  # seconds the taken orb shows its dot before the orbs go
 ## The row: in front of the VR player's spot (wavegen.gd VR_HOME (0, 2)), between them and the middle.
-const ROW := Vector3(0.0, 0.0, 0.9)
-const GAP := 1.5
+const ROW := Vector3(0.0, 0.0, 0.75)  # 1.25 m ahead of the VR player: all three in view at once
+const GAP := 1.0
 const Y := 1.15
 const SCALE := 0.5  # glass ball radius 0.3 m: a balloon's size
-const TV_R := 0.7  # flat distance from an orb's middle a TV player must run to
+const TV_R := 0.45  # flat distance from an orb's middle a TV player must run to
 const HAND_R := 0.12
 
 var main: Node
