@@ -221,6 +221,14 @@ func _seeker(delta: float) -> void:
 				best = main.friends[k]
 				best_pos = fp
 				best_c = main.friends[k].center()
+	# Alone (no hiders): Pip is the one to find too.
+	if main.solo_round and main.pip_on:
+		var pd: float = main.pip_spot.distance_to(s.global_position)
+		if pd < best_d or best == null:
+			best_d = pd
+			best = main.pip
+			best_pos = main.pip_spot
+			best_c = main.pip.center()
 	if best == null:
 		return
 	# Sniff when someone's close (hiders in range sneeze: it's how a real seeker would use it).
@@ -630,13 +638,16 @@ func _cue_verdict() -> void:
 	var mode: String = main.net.mode
 	var need: Array[String] = []
 	set_meta("max_hiders", maxi(int(get_meta("max_hiders", 0)), main.hider_count()))
-	if mode == "host" and int(get_meta("max_hiders")) < 2:
+	var hiders_here: bool = int(get_meta("max_hiders")) > 0 or bot_players >= 2  # alone (BOT_PLAYERS=1 on a Deck): no hider cues
+	if mode == "local" and not hiders_here:
+		need.append_array(["cue_torch", "cue_again"])  # alone: the torch finds Pip and the friends (learning counts hider finds)
+	elif mode == "host" and int(get_meta("max_hiders")) < 2:
 		need.append("cue_torch")  # one TV hider: only one find fits in a networked run before the timeout
 	elif mode != "client":
 		need.append_array(["cue_torch", "learned_torch", "retired_torch"])
-	if mode != "host":
+	if mode != "host" and hiders_here:
 		need.append_array(["cue_disguise", "cue_squeak", "learned_squeak", "retired_squeak"])
-	if mode == "local":
+	if mode == "local" and hiders_here:
 		need.append_array(["learned_disguise", "retired_disguise", "cue_again"])
 	if bot_vr:
 		need = ["vr_torch_cue", "vr_sniff_cue", "cue_disguise", "cue_squeak"]

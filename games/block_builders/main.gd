@@ -67,6 +67,7 @@ const StoryCard := preload("res://core/story_card.gd")
 const SIMPLE_MODE := true
 const SIMPLE_INTRO_TIME := 2.5
 const SIMPLE_CLEAR_TIME := 5.0
+const BUDDY_STUCK := 4.0  # the buddy runner hops to its next spot after this long without getting closer
 
 const MAX_RUNNERS := 6  # TV players 2..7 (player indices 1..6)
 const TAG_LAYERS := 0x3F000  # SIMPLE_MODE: render layers 13..18 = runner 1..6's name tag
@@ -1612,7 +1613,11 @@ func _drive_buddy(r) -> void:
 	elif mode == "jump":
 		reached = reached and pos.y >= wp.y - 0.3
 		jump = int(level_time * 4.0) % 2 == 0
-	if r.on_ground and move != Vector3.ZERO:
+	elif mode == "leap":
+		reached = to.length() < 0.5
+		var ldir := Vector3(to.x, 0.0, to.y).normalized()
+		jump = r.on_ground and course.surface_below(pos.x + ldir.x * 0.45, pos.z + ldir.z * 0.45, pos.y + 0.1, 0.05) < pos.y - 0.5
+	if r.on_ground and move != Vector3.ZERO and mode != "leap":
 		var dir := move.normalized()
 		var ahead := pos + dir * 0.75
 		var top := -INF
@@ -1624,7 +1629,32 @@ func _drive_buddy(r) -> void:
 			jump = true
 	if reached and wi < path.size() - 1 and (wi > 0 or built):
 		r.set_meta("bot_wp", wi + 1)
+	_buddy_unstick(r, wi, wp, move, pos)
 	r.bot_input = {"move": move, "jump": jump}
+
+
+## The buddy is trying to walk (not waiting for a bridge) but hasn't got any closer to its next spot for a while
+## (a ledge it can't hop, a crate in the way): it hops there with a puff, so a lone builder is never left with a
+## buddy stuck for good (2026-11-11: stuck under a jump on TODAY's course with no blocks left to help).
+func _buddy_unstick(r, wi: int, wp: Vector3, move: Vector3, pos: Vector3) -> void:
+	var d := pos.distance_to(wp)
+	if move == Vector3.ZERO or r.respawn_t > 0.0 or int(r.get_meta("stuck_wp", -1)) != wi or d < float(r.get_meta("stuck_d", INF)) - 0.25:
+		r.set_meta("stuck_wp", wi)
+		r.set_meta("stuck_d", d)
+		r.set_meta("stuck_t", 0.0)
+		return
+	var st: float = float(r.get_meta("stuck_t", 0.0)) + get_physics_process_delta_time()
+	r.set_meta("stuck_t", st)
+	if st < BUDDY_STUCK:
+		return
+	r.set_meta("stuck_t", 0.0)
+	r.set_meta("stuck_d", INF)
+	burst(pos + Vector3.UP * 0.5, Color(1.0, 0.95, 0.6), 14, 0.08)
+	r.global_position = wp + Vector3.UP * 0.05
+	r.vy = 0.0
+	burst(wp + Vector3.UP * 0.5, Color(1.0, 0.95, 0.6), 14, 0.08)
+	sound("boing", -6.0, 1.3)
+	print("Buddy hopped over to waypoint %d (stuck)" % wi)
 
 
 # --- Stars, the gift balloon, high fives and build hints (host) -----------------------------
