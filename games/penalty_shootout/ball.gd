@@ -6,6 +6,9 @@ extends Node3D
 ## A FIREBALL (set_fire) burns orange with a long flaming trail; it is visual only (the speed comes
 ## from the kick).
 
+## The ball: white with black patches (always some in view).
+const WHITE := Color(1, 1, 1)
+const PATCH := Color(0.08, 0.08, 0.1)
 const R := 0.11
 const G := Vector3(0.0, -9.8, 0.0)
 const CURVE_ACC := 7.0  # sideways m/s^2 at full trigger
@@ -48,7 +51,7 @@ func _ready() -> void:
 	sm.rings = 8
 	mesh.mesh = sm
 	mat = StandardMaterial3D.new()
-	mat.albedo_color = Color(1, 1, 1)
+	mat.albedo_color = WHITE
 	mat.roughness = 0.45
 	mat.emission_enabled = true
 	mat.emission = Color(1.0, 0.85, 0.3)
@@ -64,7 +67,7 @@ func _ready() -> void:
 		pm.radial_segments = 8
 		pm.rings = 4
 		patch.mesh = pm
-		patch.material_override = main.make_material(Color(0.08, 0.08, 0.1), 0.0)
+		patch.material_override = main.make_material(PATCH, 0.0)
 		var d: Vector3 = [Vector3(1, 0.3, 0), Vector3(-0.6, 0.6, 0.6), Vector3(0, -0.8, -0.6), Vector3(-0.2, 0.1, -1)][i]
 		patch.position = d.normalized() * R * 0.78
 		patch.scale = Vector3(1, 1, 0.5)

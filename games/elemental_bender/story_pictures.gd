@@ -13,7 +13,7 @@ const ELEMENT_PICS: Array[String] = ["airswirl", "waterdrop", "earthrock", "fire
 const FUR := Color(0.95, 0.52, 0.18)
 const CREAM := Color(1.0, 0.94, 0.84)
 const SHADOW := Color(0.35, 0.12, 0.5)
-const ELEM: Array[Color] = [Color(0.9, 0.95, 1.0), Color(0.15, 0.5, 1.0), Color(0.35, 0.75, 0.2), Color(1.0, 0.4, 0.08)]
+const ELEM: Array[Color] = preload("res://games/elemental_bender/elem.gd").COLORS  # (one list: elem.gd)
 
 
 static func draw(pic, kind: String, t: float, bob: float, color: Color) -> void:

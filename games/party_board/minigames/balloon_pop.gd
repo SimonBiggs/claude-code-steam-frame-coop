@@ -22,7 +22,7 @@ var _jump := {}  # pid -> cooldown
 
 func build() -> void:
 	arena_r = 6.5
-	build_island(7.5, Color(0.5, 0.8, 0.4))
+	build_island(7.5, Floors.GRASS.balloon_pop)
 
 
 func make_item(kind: int) -> Node3D:

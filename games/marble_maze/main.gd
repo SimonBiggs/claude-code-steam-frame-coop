@@ -98,8 +98,7 @@ const JAR_SIZE := 20
 const COMBO_WINDOW := 3.0
 const TOW_RADIUS := 0.08
 const NONE := Vector2(99, 99)
-const PLAYER_COLORS: Array[Color] = [Color(1.0, 0.85, 0.55), Color(1.0, 0.3, 0.3), Color(0.25, 0.6, 1.0),
-	Color(0.35, 0.9, 0.35), Color(1.0, 0.8, 0.1), Color(0.8, 0.4, 1.0), Color(1.0, 0.55, 0.15)]
+const PLAYER_COLORS := Worlds.PLAYER_COLORS  # (worlds.gd: palette.gd reads it)
 const SOUNDS := {
 	"gem": [0.25, 880.0, 1760.0, 0.3, "sine", 0.0],
 	"bump": [0.14, 260.0, 720.0, 0.4, "square", 0.05],

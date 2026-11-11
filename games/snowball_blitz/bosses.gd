@@ -20,10 +20,10 @@ const MAX_GENTLE_HELPERS := 1
 const MAX_RING := 6.0  # the widest warning ring (m): a stomp never reaches past the fort's far side
 
 const LIST := {
-	"king": {"name": "SNOW KING", "pic": "snowking", "color": Color(0.55, 0.85, 1.0), "attacks": ["volley", "volley", "call"],
+	"king": {"name": "SNOW KING", "pic": "snowking", "color": Color(0.55, 0.85, 1.0), "ring": Color(0.2, 0.45, 1.0), "attacks": ["volley", "volley", "call"],
 		"tell": 1.5, "every": 5.5, "angry_every": 4.0, "damage": 12.0, "radius": 2.2, "stomp_r": 0.0,
 		"helpers": 2, "helper": "snowman"},
-	"yeti": {"name": "YETI", "pic": "yeti", "color": Color(0.75, 0.9, 1.0), "attacks": ["stomp", "throw", "stomp", "call"],
+	"yeti": {"name": "YETI", "pic": "yeti", "color": Color(0.75, 0.9, 1.0), "ring": Color(0.45, 0.35, 1.0), "attacks": ["stomp", "throw", "stomp", "call"],
 		"tell": 1.7, "every": 6.0, "angry_every": 4.5, "damage": 14.0, "radius": 2.0, "stomp_r": 4.5,
 		"helpers": 2, "helper": "bunny"},
 }
@@ -31,6 +31,13 @@ const LIST := {
 
 static func info(kind: String) -> Dictionary:
 	return LIST.get(kind, LIST["king"])
+
+
+## The warning ring a boss's attack lies on the snow: its own deep "ring" colour (its pale glow colour vanished on
+## the snow), a paler one for the call. palette.gd checks every one.
+static func tell_color(kind: String, attack: String) -> Color:
+	var c: Color = info(kind).ring
+	return c.lerp(Color.WHITE, 0.25) if attack == "call" else c
 
 
 ## The numbers of a boss's attack right now.

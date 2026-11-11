@@ -5,6 +5,7 @@ const UiKit := preload("res://core/ui_kit.gd")
 const HudKit := preload("res://core/hud_kit.gd")
 ## Game controller: builds the arena, runs waves, camera and HUD.
 
+const Looks := preload("res://games/duo_arena/looks.gd")
 const PlayerScript := preload("res://games/duo_arena/player.gd")
 const EnemyScript := preload("res://games/duo_arena/enemy.gd")
 const PickupScript := preload("res://games/duo_arena/pickup.gd")
@@ -107,8 +108,7 @@ void fragment() {
 	COLOR = vec4(mix(c.rgb, ring_color.rgb, ring), inside);
 }
 """
-const PLAYER_COLORS: Array[Color] = [Color(0.3, 0.7, 1.0), Color(1.0, 0.75, 0.25), Color(1.0, 0.45, 0.85),
-	Color(0.55, 1.0, 0.25), Color(0.95, 0.95, 1.0), Color(0.7, 0.45, 1.0), Color(0.25, 1.0, 0.85)]
+const PLAYER_COLORS: Array[Color] = Looks.PLAYER_COLORS  # (looks.gd: palette.gd reads it)
 ## Index 0 is the VR player (or keyboard P1 in local split screen); TV players are 1..6.
 const MAX_PLAYERS := 7
 const MAX_LOCAL_VIEWS := 6

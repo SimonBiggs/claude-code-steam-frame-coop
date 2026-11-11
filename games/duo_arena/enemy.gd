@@ -6,6 +6,7 @@ extends CharacterBody3D
 
 const EnemyShotScript := preload("res://games/duo_arena/enemy_shot.gd")
 const Bosses := preload("res://games/duo_arena/bosses.gd")
+const Looks := preload("res://games/duo_arena/looks.gd")
 const KINDS := {
 	"grunt": {"hp": 3.0, "speed": 3.6, "radius": 0.55, "color": Color(0.95, 0.25, 0.3), "dps": 30.0, "points": 100, "drop": 0.06},
 	"runner": {"hp": 1.0, "speed": 6.8, "radius": 0.4, "color": Color(1.0, 0.55, 0.1), "dps": 20.0, "points": 150, "drop": 0.05},
@@ -621,7 +622,7 @@ func _boss_behaviour(delta: float) -> void:
 	var before := slam_t
 	slam_t -= delta
 	if before > tell and slam_t <= tell:
-		main.boss_warn(global_position, float(n.radius), Color(1.0, 0.1, 0.1), slam_t)
+		main.boss_warn(global_position, float(n.radius), Looks.BOSS_WARN, slam_t)
 		main.sound("spit", 0.0, 0.5)
 	if slam_t <= tell:
 		mat.emission_energy_multiplier = 0.5 + (1.0 - slam_t / tell) * 6.0  # charging glow
@@ -657,7 +658,7 @@ func _rex_behaviour(delta: float) -> void:
 	var before := slam_t
 	slam_t -= delta
 	if before > tell and slam_t <= tell:
-		main.boss_warn(global_position, float(n.radius), Color(1.0, 0.1, 0.1), slam_t)
+		main.boss_warn(global_position, float(n.radius), Looks.BOSS_WARN, slam_t)
 		main.sound("roar", 0.0, 0.7)
 		charge_t = 0.0
 	if slam_t <= tell:

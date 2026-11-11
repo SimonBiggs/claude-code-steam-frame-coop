@@ -54,7 +54,7 @@ const SKATES_SPEED := 1.2
 const MOUSE_EVERY := 14.0
 
 const EVENT_KINDS: Array = ["smoke", "spill"]
-const EVENT_COLORS := {"smoke": Color(0.75, 0.75, 0.8), "spill": Color(0.35, 0.7, 1.0)}
+const EVENT_COLORS := {"smoke": Color(0.55, 0.55, 0.62), "spill": Color(0.35, 0.7, 1.0)}  # darker smoke: pale grey vanished on the teal tiles
 const EVENTS_FROM := 2
 const WARN_SECS := 3.0
 const EVENT_SECS := 9.0

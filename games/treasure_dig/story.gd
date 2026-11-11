@@ -75,3 +75,6 @@ static func next_relic(found: Array) -> int:
 static func daily(date: String = "") -> Array:
 	var sd := Seeded.daily_seed("treasure_dig", date)
 	return [sd, ISLANDS[Seeded.rng(sd, "kind").randi() % ISLANDS.size()].id]
+
+## (moved from main.gd so palette.gd can read it without loading main.gd)
+const LOOKS: Array[String] = ["pirate", "detective", "farmer", "villager", "athlete", "chef", "princess"]

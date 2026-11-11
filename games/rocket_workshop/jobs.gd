@@ -6,6 +6,7 @@ extends Node3D
 ## repairs (see main.gd). Paint pots and bolts are MultiMeshes (one draw call each).
 
 const P := preload("res://games/rocket_workshop/puzzles.gd")
+const Looks := preload("res://games/rocket_workshop/looks.gd")
 
 var main
 var canister: Node3D
@@ -41,7 +42,7 @@ func _ready() -> void:
 	add_child(canister)
 	var can := MeshInstance3D.new()
 	can.mesh = main.cyl_mesh(0.22, 0.22, 0.55, 14)
-	can.material_override = main.make_material(Color(0.95, 0.3, 0.25), 0.15)
+	can.material_override = main.make_material(Looks.CANISTER, 0.15)
 	can.position.y = 0.28
 	canister.add_child(can)
 	var band := MeshInstance3D.new()
@@ -161,7 +162,7 @@ func _build_bolts() -> void:
 	bolt_mm.instance_count = 6  # 3 heads + 3 shafts (scaled)
 	bolt_heads = MultiMeshInstance3D.new()
 	bolt_heads.multimesh = bolt_mm
-	var gold: StandardMaterial3D = main.make_material(Color(1.0, 0.8, 0.3), 0.6)
+	var gold: StandardMaterial3D = main.make_material(Looks.BOLT, 0.6)
 	gold.metallic = 0.7
 	gold.roughness = 0.3
 	bolt_heads.material_override = gold
@@ -206,7 +207,7 @@ func _build_paint() -> void:
 	lid_mm.mesh = main.sphere_mesh(0.19)
 	lid_mm.instance_count = 4
 	for i in 4:
-		pot_mm.set_instance_color(i, Color(0.85, 0.85, 0.9))
+		pot_mm.set_instance_color(i, Looks.PAINT_POT)
 		lid_mm.set_instance_color(i, P.COLORS[i])
 		pot_pos.append(P.PAINT_SPOTS[i] + Vector3(0, 0.45, 0))
 	var a := MultiMeshInstance3D.new()
@@ -254,7 +255,7 @@ func _place_pots(carry_color: int, carrier: int, k: float) -> void:
 ## A fluffy orange space cat with a waving tail, and its basket by the doorway. The cat's body and
 ## the basket are each baked into one vertex-coloured mesh (one draw call each).
 func _build_cat() -> void:
-	var fur := Color(1.0, 0.62, 0.25)
+	var fur := Looks.CAT_FUR
 	var cream := Color(1.0, 0.9, 0.75)
 	var parts: Array = [
 		[main.capsule_mesh(0.17, 0.62), Transform3D(Basis(Vector3.RIGHT, PI / 2.0), Vector3(0, 0.3, 0)), fur],

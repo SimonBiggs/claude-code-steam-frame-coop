@@ -75,7 +75,7 @@ const KAIJU := {
 		"weak": [["JELLY CORE", Vector3(0.0, 0.45, 0.2), 0.14, 0.0]],
 		"attacks": ["belly_flop", "goo_spit"], "home": "walk", "split": 2,
 		"tip": "It SPLITS when you hit it hard! Paint the glowing core."},
-	"crab": {"name": "PINCHY", "title": "THE ARMOURED CRAB", "monster": "crab", "color": Color(1.0, 0.38, 0.3),
+	"crab": {"name": "PINCHY", "title": "THE ARMOURED CRAB", "monster": "crab", "color": Color(0.92, 0.28, 0.26),
 		"color2": Color(1.0, 0.75, 0.55), "eye": Color(0.1, 0.1, 0.1), "height": 7.6, "hp": 560.0, "speed": 3.6, "fly": 0.0,
 		"weak": [["SHELL GEM", Vector3(-0.42, 0.98, -0.12), 0.13, 70.0], ["SHELL GEM", Vector3(0.42, 0.98, -0.12), 0.13, 70.0],
 			["SOFT BELLY", Vector3(0.0, 0.42, 0.42), 0.16, 0.0]],
@@ -103,10 +103,10 @@ const KAIJU := {
 ## Mini kaiju: small, quick, bonk-able. They nibble buildings until bonked home.
 const MINIS := {
 	"slimelet": {"name": "BABY SLIME", "monster": "slime", "color": Color(0.5, 0.9, 0.5), "height": 2.4, "hp": 18.0, "speed": 4.0, "fly": 0.0},
-	"crablet": {"name": "CRABLET", "monster": "crab", "color": Color(1.0, 0.55, 0.35), "height": 2.2, "hp": 26.0, "speed": 4.6, "fly": 0.0},
-	"batlet": {"name": "ZAP BAT", "monster": "bat", "color": Color(0.5, 0.45, 0.95), "height": 2.6, "hp": 16.0, "speed": 6.5, "fly": 9.0},
+	"crablet": {"name": "CRABLET", "monster": "crab", "color": Color(1.0, 0.45, 0.3), "height": 2.2, "hp": 26.0, "speed": 4.6, "fly": 0.0},
+	"batlet": {"name": "ZAP BAT", "monster": "bat", "color": Color(0.7, 0.3, 0.9), "height": 2.6, "hp": 16.0, "speed": 6.5, "fly": 9.0},
 	"froglet": {"name": "FIRE FROG", "monster": "frog", "color": Color(1.0, 0.5, 0.2), "height": 2.4, "hp": 20.0, "speed": 4.0, "fly": 0.0, "fire": true},
-	"mothlet": {"name": "MOTHLET", "monster": "bee", "color": Color(0.85, 0.8, 0.6), "height": 2.6, "hp": 16.0, "speed": 6.0, "fly": 10.0},
+	"mothlet": {"name": "MOTHLET", "monster": "bee", "color": Color(0.88, 0.81, 0.48), "height": 2.6, "hp": 16.0, "speed": 6.0, "fly": 10.0},
 	"jellylet": {"name": "JELLY BIT", "monster": "slime", "color": Color(0.95, 0.5, 0.85), "height": 2.6, "hp": 20.0, "speed": 3.6, "fly": 0.0},
 }
 

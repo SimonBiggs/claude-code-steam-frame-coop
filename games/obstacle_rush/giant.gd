@@ -21,8 +21,7 @@ const WALK_X := 17.0  ## the giant walks along the table this far each way (cour
 const BALL_R := 0.5
 const GRAB_R := 1.4
 const TOUCH_R := 0.9
-const BALL_COLORS: Array[Color] = [Color(1.0, 0.4, 0.45), Color(0.4, 0.7, 1.0), Color(1.0, 0.85, 0.3),
-	Color(0.5, 0.9, 0.5), Color(0.85, 0.55, 1.0)]
+const Course := preload("res://games/obstacle_rush/course.gd")  # (its BALL_COLORS / ball_color)
 
 var main: Node
 var rig: VrRig
@@ -82,6 +81,7 @@ func setup(m: Node, r: VrRig, is_host: bool) -> void:
 			b.add_child(cs)
 			var mi := MeshKit.instance(mesh)
 			mi.material_override = _ball_mat(i)
+			Course.RunnerLook.Contrast.outline(mi, Course.RunnerLook.OUTLINE)
 			b.add_child(mi)
 			add_child(b)
 			b.freeze = true
@@ -90,6 +90,7 @@ func setup(m: Node, r: VrRig, is_host: bool) -> void:
 		else:
 			var v := MeshKit.instance(mesh)
 			v.material_override = _ball_mat(i)
+			Course.RunnerLook.Contrast.outline(v, Course.RunnerLook.OUTLINE)
 			v.visible = false
 			add_child(v)
 			ball_vis.append(v)
@@ -112,7 +113,7 @@ func _ball_mesh() -> ArrayMesh:
 func _ball_mat(i: int) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.vertex_color_use_as_albedo = true
-	m.albedo_color = BALL_COLORS[i % BALL_COLORS.size()].lightened(0.15)
+	m.albedo_color = Course.ball_color(i)
 	m.roughness = 0.3
 	return m
 

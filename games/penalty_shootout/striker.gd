@@ -26,6 +26,8 @@ const AIM_X := 4.4
 const AIM_Y_MIN := 0.12
 const AIM_Y_MAX := 3.0
 const CHARGE_TIME := 1.1
+## White shorts under every jersey.
+const SHORTS := Color(0.95, 0.95, 0.95)
 const HAIR: Array[Color] = [Color(0.35, 0.2, 0.1), Color(0.95, 0.8, 0.35), Color(0.1, 0.08, 0.08), Color(0.85, 0.4, 0.15),
 	Color(0.5, 0.3, 0.2), Color(0.15, 0.12, 0.1)]
 
@@ -92,7 +94,7 @@ func _ready() -> void:
 	add_child(avatar)
 	var skin: Color = [Color(1.0, 0.8, 0.62), Color(0.85, 0.62, 0.45), Color(0.6, 0.4, 0.28)][index % 3]
 	var hair := HAIR[(index - 1) % HAIR.size()]
-	var shorts := Color(0.95, 0.95, 0.95)
+	var shorts := SHORTS
 	var vm: StandardMaterial3D = MeshKit.vertex_material(main.mats)
 	# Torso, shorts, number and head in one mesh (the striker faces -z, the goal).
 	var parts: Array = [

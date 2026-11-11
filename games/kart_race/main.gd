@@ -92,10 +92,9 @@ const SHIELD_TIME := 8.0
 const MUSHROOM_TIME := 1.8
 const STAR_TIME := 5.0
 const HONK_RANGE := 16.0
-const PLAYER_COLORS: Array[Color] = [Color(1.0, 0.75, 0.2), Color(1.0, 0.3, 0.3), Color(0.25, 0.6, 1.0),
-	Color(0.35, 0.9, 0.35), Color(0.85, 0.4, 1.0), Color(1.0, 0.55, 0.15), Color(0.3, 0.95, 0.9)]
+const PLAYER_COLORS: Array[Color] = Cups.PLAYER_COLORS  # (cups.gd: palette.gd reads them there)
 const CPU_NAMES: Array[String] = ["BUNNY", "DINO", "ROBO"]
-const CPU_COLORS: Array[Color] = [Color(1.0, 0.7, 0.85), Color(0.55, 0.8, 0.3), Color(0.7, 0.75, 0.85)]
+const CPU_COLORS: Array[Color] = Cups.CPU_COLORS
 const ITEM_NAMES := {"banana": "BANANA", "shield": "BUBBLE SHIELD", "mushroom": "SPEED MUSHROOM",
 	"triple": "TRIPLE MUSHROOM", "star": "RAINBOW STAR", "honk": "SILLY HONK"}
 const CUPS := [

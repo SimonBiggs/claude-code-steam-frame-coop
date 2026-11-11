@@ -7,6 +7,7 @@ extends Node3D
 ## On the client it's a ghost placed from snapshots.
 
 const World := preload("res://games/cannon_cove/world.gd")
+const Looks := preload("res://games/cannon_cove/looks.gd")
 
 const RISE_TIME := 2.5
 const GUARD_MAX := 32.0  # it opens its eyes anyway after this long (so a small crew can't get stuck)
@@ -48,7 +49,7 @@ func _ready() -> void:
 	add_to_group("krakens")
 	head = Node3D.new()
 	add_child(head)
-	skin = World.mat(Color(0.5, 0.2, 0.62), 0.0, 0.45)
+	skin = World.mat(Looks.KRAKEN_SKIN, 0.0, 0.45)
 	skin.emission_enabled = true
 	skin.emission = Color(1.0, 0.5, 0.6)
 	skin.emission_energy_multiplier = 0.0

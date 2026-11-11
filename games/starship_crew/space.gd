@@ -70,7 +70,7 @@ func _ready() -> void:
 	_ring_mat = StandardMaterial3D.new()
 	_ring_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_ring_mat.vertex_color_use_as_albedo = true
-	_ring_mat.albedo_color = Color(0.5, 1.0, 0.95)
+	_ring_mat.albedo_color = Art.RING_TINT
 
 
 ## A big planet far away, the mission's own (story.gd planet_look: [colour, ring colour, spot 0..3]).

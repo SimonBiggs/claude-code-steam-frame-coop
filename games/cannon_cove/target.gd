@@ -6,6 +6,7 @@ extends Node3D
 ## On the client it's a ghost placed from snapshots.
 
 const World := preload("res://games/cannon_cove/world.gd")
+const Looks := preload("res://games/cannon_cove/looks.gd")
 
 const RADIUS := {"practice": 2.4, "supply": 2.0, "chest": 2.0}
 const LIFE := {"practice": 9999.0, "supply": 28.0, "chest": 28.0}
@@ -28,7 +29,7 @@ func _ready() -> void:
 	bob = randf() * TAU
 	model = Node3D.new()
 	add_child(model)
-	var wood := World.mat(Color(0.6, 0.42, 0.22))
+	var wood := World.mat(Looks.RAFT)
 	World.cyl(model, 1.3, 1.4, 0.35, Vector3(0, 0.0, 0), wood, 14)  # the raft
 	match kind:
 		"practice":
@@ -36,7 +37,7 @@ func _ready() -> void:
 			var board := Node3D.new()
 			board.position = Vector3(0, 1.5, 0)
 			model.add_child(board)
-			var cols := [Color(0.95, 0.15, 0.12), Color(0.97, 0.97, 0.95), Color(0.95, 0.15, 0.12), Color(0.97, 0.97, 0.95)]
+			var cols := [Looks.BULLSEYE, Color(0.97, 0.97, 0.95), Looks.BULLSEYE, Color(0.97, 0.97, 0.95)]
 			for k in 4:
 				var r := 1.2 - k * 0.3
 				var disc := World.cyl(board, r, r, 0.08 + k * 0.03, Vector3.ZERO, World.mat(cols[k], 0.25), 16)
@@ -50,14 +51,14 @@ func _ready() -> void:
 			barrel.rotation.z = 0.15
 			for y in [0.4, 1.4]:
 				World.cyl(model, 0.78, 0.78, 0.1, Vector3(0, y, 0), World.mat(Color(0.2, 0.2, 0.22), 0.0, 0.4), 12)
-			ring_mat = World.mat(Color(0.4, 1.0, 0.5), 2.0)
+			ring_mat = World.mat(Looks.SUPPLY_RING, 2.0)
 			for k in 3:
 				World.sphere(model, 0.22, Vector3(-0.25 + k * 0.25, 1.75, 0), World.mat(Color(0.12, 0.12, 0.14), 0.0, 0.3), 8)
 			World.cyl(model, 0.82, 0.82, 0.08, Vector3(0, 0.9, 0), ring_mat, 12)
 		_:
 			var chest := World.box(model, Vector3(1.4, 0.8, 0.9), Vector3(0, 0.6, 0), World.mat(Color(0.5, 0.26, 0.1)))
 			chest.rotation.y = 0.3
-			World.box(model, Vector3(1.45, 0.12, 0.95), Vector3(0, 0.95, 0), World.mat(Color(1.0, 0.78, 0.2), 0.6, 0.3))
+			World.box(model, Vector3(1.45, 0.12, 0.95), Vector3(0, 0.95, 0), World.mat(Looks.CHEST_GOLD, 0.6, 0.3))
 			ring_mat = World.mat(Color(1.0, 0.85, 0.2), 3.0)
 			var coins := World.sphere(model, 0.55, Vector3(0, 1.05, 0), ring_mat, 10)
 			coins.scale = Vector3(1.0, 0.35, 0.65)

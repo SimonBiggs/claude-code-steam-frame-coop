@@ -77,7 +77,7 @@ const GRAB_R := 0.65
 const MAX_BLOCKS := 20
 const MAX_LOOSE := 5
 const CRANE_HOME := Vector3(2.6, 5.5, -0.5)
-const LOOKS: Array[String] = ["knight", "mage", "archer", "bard", "pirate", "chef", "astronaut"]
+const LOOKS := Looks.LOOKS  # (looks.gd: palette.gd reads it)
 const INTRO := {
 	"title": "TOWER STACK",
 	"goal": "Build the tallest tower together!",

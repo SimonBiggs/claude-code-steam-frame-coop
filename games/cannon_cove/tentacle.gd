@@ -3,6 +3,7 @@ extends Node3D
 ## (punching a leak) and does it again until it's shot away by a cannon or the deckhands' muskets.
 
 const World := preload("res://games/cannon_cove/world.gd")
+const Looks := preload("res://games/cannon_cove/looks.gd")
 
 const SEGMENTS := 8
 const RISE := 1.6
@@ -32,7 +33,7 @@ var warn: Label3D
 
 func _ready() -> void:
 	add_to_group("tentacles")
-	skin = World.mat(Color(0.55, 0.25, 0.75), 0.0, 0.5)
+	skin = World.mat(Looks.TENTACLE_SKIN, 0.0, 0.5)
 	skin.emission_enabled = true
 	skin.emission = Color(1.0, 0.6, 1.0)
 	skin.emission_energy_multiplier = 0.0

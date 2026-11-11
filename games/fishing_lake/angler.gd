@@ -41,6 +41,9 @@ var hud_label: Label
 var tip_label: Label
 var pad_lost_t := -1.0
 var color := Color(1.0, 0.85, 0.55)
+## The bobber on the water: red top, white bottom (palette.gd).
+const BOBBER_TOP := Color(1.0, 0.15, 0.1)
+const BOBBER_BOTTOM := Color(1.0, 1.0, 1.0)
 var yaw := 0.0
 
 var xr_origin: Node3D
@@ -313,12 +316,12 @@ func _build_tackle() -> void:
 	add_child(bobber)
 	var top := MeshInstance3D.new()
 	top.mesh = main.sphere_mesh(0.07)
-	top.material_override = main.make_material(Color(1.0, 0.15, 0.1), 0.5)
+	top.material_override = main.make_material(BOBBER_TOP, 0.5)
 	top.position = Vector3(0, 0.03, 0)
 	bobber.add_child(top)
 	var bottom := MeshInstance3D.new()
 	bottom.mesh = main.sphere_mesh(0.065)
-	bottom.material_override = main.make_material(Color(1.0, 1.0, 1.0), 0.2)
+	bottom.material_override = main.make_material(BOBBER_BOTTOM, 0.2)
 	bottom.position = Vector3(0, -0.035, 0)
 	bobber.add_child(bottom)
 	var stick := MeshInstance3D.new()

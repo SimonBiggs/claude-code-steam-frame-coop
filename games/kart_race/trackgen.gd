@@ -51,6 +51,7 @@ const WORDS := [
 	[["MONKEY", "PARROT", "BANANA", "VINE", "JUNGLE", "TIGER"], ["TRAIL", "FALLS", "LOOP", "RIVER", "GROVE", "TEMPLE"]],
 	[["COMET", "ROCKET", "MOON", "STARRY", "PLANET", "COSMIC"], ["RING", "ORBIT", "LOOP", "CRATER", "DOCK", "SWIRL"]],
 ]
+const RAINBOW_ROAD := Color(0.28, 0.22, 0.42)  # the rainbow road under its rainbow walls
 const RAINBOW_WALLS: Array[Color] = [Color(1.0, 0.3, 0.35), Color(1.0, 0.65, 0.2), Color(1.0, 0.95, 0.3), Color(0.35, 0.95, 0.45),
 	Color(0.35, 0.65, 1.0), Color(0.75, 0.45, 1.0)]
 
@@ -179,7 +180,7 @@ static func _attempt(r: RandomNumberGenerator, seed_value: int, spec: Dictionary
 		info["rainbow"] = true
 		info["wall_a"] = RAINBOW_WALLS[r.randi() % RAINBOW_WALLS.size()]
 		info["wall_b"] = Color(1, 1, 1)
-		info["road"] = Color(0.28, 0.22, 0.42)
+		info["road"] = RAINBOW_ROAD
 	_hue(info, r)
 	# 4. Features, placed by distance along the sampled track.
 	var t: Track = Track.new()

@@ -23,6 +23,8 @@ const MAX_POINTS := 9000
 const COLORS: Array[Color] = [Color(1, 1, 1), Color(1.0, 0.25, 0.25), Color(1.0, 0.6, 0.15), Color(1.0, 0.92, 0.2),
 	Color(0.3, 0.95, 0.35), Color(0.25, 0.85, 1.0), Color(0.6, 0.4, 1.0), Color(1.0, 0.45, 0.8),
 	Color(1.0, 0.5, 0.5), Color(1.0, 0.85, 0.35)]
+## The painting surface (dark, so every paint shows: palette.gd).
+const SURFACE := Color(0.07, 0.08, 0.15)
 const COLOR_NAMES: Array[String] = ["WHITE", "RED", "ORANGE", "YELLOW", "GREEN", "SKY BLUE", "PURPLE", "PINK",
 	"RAINBOW", "SPARKLE"]
 const RAINBOW := 8
@@ -133,7 +135,7 @@ func _ready() -> void:
 	var qm := QuadMesh.new()
 	qm.size = Vector2(W, H)
 	surf.mesh = qm
-	surf.material_override = main.flat_material(Color(0.07, 0.08, 0.15))
+	surf.material_override = main.flat_material(SURFACE)
 	board_root.add_child(surf)
 	_build_pots()
 	clear_bubble = _bubble("CLEAR", Color(0.4, 0.8, 1.0), Vector3(W * 0.5 + 0.15, H * 0.3, 0.08))

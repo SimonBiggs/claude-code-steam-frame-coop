@@ -6,6 +6,9 @@ extends RefCounted
 ## GARDEN (the same garden on every machine that day). Lines are short and kind (kids read them).
 ## Pure data + small pure functions (no nodes), so tests and every machine agree.
 
+## The builders' character per slot (main.gd; outfit = the player colour) and the supply boxes' colours.
+const LOOKS: Array[String] = ["farmer", "chef", "pirate", "bard", "villager", "princess", "viking"]
+const BOX_COLORS := [Color(0.75, 0.5, 0.25), Color(0.3, 0.3, 0.4), Color(0.85, 0.2, 0.3), Color(0.95, 0.75, 0.2)]
 const DAYS_PER_CHAPTER := 3
 const MIXED := 5  ## the chapter id of DAILY gardens and bonus days after the story (everything mixed)
 

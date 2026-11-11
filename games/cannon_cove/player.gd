@@ -9,6 +9,7 @@ extends Node3D
 const UiKit := preload("res://core/ui_kit.gd")
 
 const World := preload("res://games/cannon_cove/world.gd")
+const Looks := preload("res://games/cannon_cove/looks.gd")
 
 const SPEED := 5.5
 const EYE := 1.6
@@ -184,7 +185,7 @@ func _ready() -> void:
 		var body_musket := World.box(pivot, Vector3(0.07, 0.07, 1.0), Vector3(0.35, 1.0, -0.3), World.mat(Color(0.45, 0.28, 0.12)))
 		body_musket.rotation.x = 0.3
 		# Arms and legs that swing as they walk, a belt and a red neckerchief.
-		var trousers := World.mat(Color(0.25, 0.22, 0.3))
+		var trousers := World.mat(Looks.DECKHAND_TROUSERS)
 		for sx in [-1.0, 1.0]:
 			var leg := Node3D.new()
 			leg.position = Vector3(sx * 0.14, 0.42, 0)

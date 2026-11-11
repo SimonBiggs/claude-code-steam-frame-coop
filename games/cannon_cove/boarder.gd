@@ -3,6 +3,7 @@ extends Node3D
 ## holes in the deck until a deckhand's musket knocks him overboard (splash!).
 
 const World := preload("res://games/cannon_cove/world.gd")
+const Looks := preload("res://games/cannon_cove/looks.gd")
 
 const SPEED := 2.3
 const STEAL_EVERY := 2.6
@@ -38,7 +39,7 @@ func _ready() -> void:
 	add_to_group("boarders")
 	body = Node3D.new()
 	add_child(body)
-	shirt = World.mat(Color(0.9, 0.15, 0.15))
+	shirt = World.mat(Looks.BOARDER_SHIRT)
 	shirt.emission_enabled = true
 	shirt.emission = Color.WHITE
 	shirt.emission_energy_multiplier = 0.0

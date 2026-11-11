@@ -62,7 +62,10 @@ func set_class(id: String) -> void:
 	if body != null:
 		body.queue_free()
 	var inf := Classes.info(id)
-	body = Creatures.humanoid({"class": String(inf.look), "outfit": _col, "seed": 11 + slot * 7, "weapon": String(inf.weapon)})
+	var o := {"class": String(inf.look), "outfit": _col, "seed": 11 + slot * 7, "weapon": String(inf.weapon)}
+	if inf.has("pants"):
+		o["pants"] = inf.pants
+	body = Creatures.humanoid(o)
 	add_child(body)
 	anim = Creatures.anim(body)
 	if dizzy_t > 0.0:

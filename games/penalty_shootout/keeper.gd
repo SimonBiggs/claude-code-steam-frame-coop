@@ -29,6 +29,7 @@ const MeshKit := preload("res://games/penalty_shootout/mesh_kit.gd")
 const UiKit := preload("res://core/ui_kit.gd")
 const BIG_GLOVES := 1.6
 const POWER_NAMES := {"big": "BIG GLOVES", "slow": "SLOW-MO", "double": "DOUBLE SAVE"}
+const BUBBLE_ALPHA := 0.55  # power bubbles are see-through
 const POWER_COLORS := {"big": Color(0.3, 1.0, 0.5), "slow": Color(0.4, 0.75, 1.0), "double": Color(1.0, 0.8, 0.25)}
 
 var index := 0
@@ -251,7 +252,7 @@ func _update_bubble(delta: float) -> void:
 	bubble_node.global_position = bubble_pos + Vector3(0, 0.03 * sin(bubble_t * 3.0), 0) * w
 	bubble_node.scale = Vector3.ONE * w * (1.0 + 0.08 * sin(bubble_t * 6.0))
 	var c: Color = POWER_COLORS.get(bubble, Color.WHITE)
-	bubble_mat.albedo_color = Color(c.r, c.g, c.b, 0.55)
+	bubble_mat.albedo_color = Color(c.r, c.g, c.b, BUBBLE_ALPHA)
 	bubble_label.text = str(POWER_NAMES.get(bubble, ""))
 	bubble_label.modulate = c.lightened(0.3)
 	# Face the label towards the keeper (who looks down the pitch, +z).

@@ -121,7 +121,7 @@ const TRAY: Array[String] = ["road", "house", "farm", "shop", "windmill", "water
 const VEHICLES: Array[String] = ["truck", "bus", "fire", "crane", "police"]
 const V := {
 	"truck": {"name": "DELIVERY TRUCK", "job": "deliver", "desc": "Carry food, bread and wood to shops.", "color": Color(0.95, 0.55, 0.2)},
-	"bus": {"name": "BUS", "job": "bus", "desc": "Pick people up at their homes and take them out.", "color": Color(1.0, 0.82, 0.2)},
+	"bus": {"name": "BUS", "job": "bus", "desc": "Pick people up at their homes and take them out.", "color": Color(1.0, 0.76, 0.1)},
 	"fire": {"name": "FIRE ENGINE", "job": "fire", "desc": "Rush to fires and splash them out.", "color": Color(0.92, 0.2, 0.18)},
 	"crane": {"name": "CONSTRUCTION CRANE", "job": "build", "desc": "Bring bricks to new buildings so they get built.", "color": Color(1.0, 0.72, 0.1)},
 	"police": {"name": "POLICE CAR", "job": "help", "desc": "Help out: stray cows, parades and more.", "color": Color(0.25, 0.45, 0.95)},
@@ -133,7 +133,7 @@ const CORE_FLEET: Array[String] = ["truck", "crane", "bus", "fire"]
 ## Goal kinds: pop N, build kind N, train N (stations joined by rail), festival N, deliver N, happy N.
 const ISLANDS: Array[Dictionary] = [
 	{"id": "meadow", "name": "MEADOW ISLE", "blurb": "Green fields and sunny skies.", "seed": 11, "tree": "tree",
-		"grass": Color(0.47, 0.74, 0.33), "grass2": Color(0.42, 0.68, 0.3), "sand": Color(0.93, 0.85, 0.6),
+		"grass": Color(0.47, 0.74, 0.33), "grass2": Color(0.42, 0.68, 0.3), "sand": Color(0.95, 0.9, 0.7),
 		"rock": Color(0.6, 0.6, 0.62), "sea": Color(0.25, 0.62, 0.85), "shape": 9.3, "rocks": 1, "lakes": 1, "start_coins": 120,
 		"goals": [["pop", 20, "", "Reach 20 citizens"], ["build", 1, "bakery", "Open a bakery"], ["pop", 50, "", "Reach 50 citizens"]]},
 	{"id": "snowy", "name": "SNOWY HILLS", "blurb": "Cosy cabins and snowy peaks.", "seed": 23, "tree": "pine",
@@ -141,11 +141,11 @@ const ISLANDS: Array[Dictionary] = [
 		"rock": Color(0.55, 0.58, 0.66), "sea": Color(0.3, 0.52, 0.72), "shape": 9.6, "rocks": 3, "lakes": 1, "start_coins": 130, "snow": true,
 		"goals": [["build", 3, "windmill", "Build 3 windmills"], ["train", 1, "", "Build a train line"], ["pop", 60, "", "Reach 60 citizens"]]},
 	{"id": "tropic", "name": "TROPICAL BAY", "blurb": "Palm trees, sunshine and festivals.", "seed": 37, "tree": "palm",
-		"grass": Color(0.42, 0.78, 0.4), "grass2": Color(0.36, 0.72, 0.36), "sand": Color(0.98, 0.9, 0.62),
+		"grass": Color(0.42, 0.78, 0.4), "grass2": Color(0.36, 0.72, 0.36), "sand": Color(0.98, 0.92, 0.7),
 		"rock": Color(0.62, 0.55, 0.48), "sea": Color(0.15, 0.75, 0.82), "shape": 9.0, "rocks": 1, "lakes": 2, "start_coins": 140,
 		"goals": [["festival", 1, "", "Hold a festival"], ["build", 1, "landmark", "Build a landmark"], ["pop", 80, "", "Reach 80 citizens"]]},
 	{"id": "free", "name": "FREE BUILD", "blurb": "Every building unlocked, coins for days.", "seed": 5, "tree": "tree",
-		"grass": Color(0.5, 0.76, 0.36), "grass2": Color(0.45, 0.7, 0.33), "sand": Color(0.94, 0.86, 0.62),
+		"grass": Color(0.5, 0.76, 0.36), "grass2": Color(0.45, 0.7, 0.33), "sand": Color(0.95, 0.9, 0.7),
 		"rock": Color(0.6, 0.6, 0.62), "sea": Color(0.25, 0.62, 0.85), "shape": 10.2, "rocks": 1, "lakes": 0, "start_coins": 5000, "free": true,
 		"goals": []},
 ]

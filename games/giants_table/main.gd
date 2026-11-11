@@ -53,6 +53,7 @@ const CUES := {
 const CUE_BUTTON_KEYS := [{"sword": "SPACE", "bow": "F", "jump": "SHIFT"}, {"sword": "ENTER", "bow": "CTRL", "jump": "/"}]
 
 const W := preload("res://games/giants_table/world.gd")
+const Looks := preload("res://games/giants_table/looks.gd")
 const GiantScript := preload("res://games/giants_table/giant.gd")
 const KnightScript := preload("res://games/giants_table/knight.gd")
 const GoblinScript := preload("res://games/giants_table/goblin.gd")
@@ -106,8 +107,7 @@ const EXTRA_SOUNDS := {
 	"splash": [0.4, 1500.0, 300.0, 0.25, "sine", 0.9],
 	"chime": [0.45, 880.0, 1320.0, 0.32, "tri", 0.0],
 }
-const PLAYER_COLORS: Array[Color] = [Color(0.3, 0.6, 1.0), Color(1.0, 0.72, 0.2), Color(1.0, 0.45, 0.75),
-	Color(0.95, 0.3, 0.28), Color(0.68, 0.45, 1.0), Color(0.3, 0.92, 0.95), Color(0.96, 0.96, 0.92)]
+const PLAYER_COLORS: Array[Color] = Looks.PLAYER_COLORS  # (looks.gd: palette.gd reads it)
 
 var max_embers := MAX_EMBERS
 var simple := SIMPLE_MODE  # other scripts read main.simple

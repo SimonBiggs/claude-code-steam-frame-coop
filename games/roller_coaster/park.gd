@@ -74,11 +74,11 @@ func _ready() -> void:
 
 func _build_table() -> void:
 	var b := MeshKit.builder()
-	b.cylinder(Track.TABLE_R, Track.TABLE_R, 0.4, Transform3D(Basis(), Vector3(0, -0.2, 0)), Color(0.48, 0.76, 0.38), 40)
+	b.cylinder(Track.TABLE_R, Track.TABLE_R, 0.4, Transform3D(Basis(), Vector3(0, -0.2, 0)), Track.PARK_GRASS, 40)
 	b.cylinder(Track.TABLE_R + 0.35, Track.TABLE_R + 0.35, 0.5, Transform3D(Basis(), Vector3(0, -0.45, 0)), Color(0.62, 0.42, 0.25), 40)
 	# Paths and a little pond of colour so the park doesn't look empty before any building.
-	b.cylinder(1.8, 1.8, 0.03, Transform3D(Basis(), Vector3(-2.0, 0.01, -2.5)), Color(0.9, 0.82, 0.62), 18)
-	b.box(Vector3(10.0, 0.03, 1.2), Transform3D(Basis(), Vector3(-2.5, 0.01, 8.3)), Color(0.9, 0.82, 0.62))
+	b.cylinder(1.8, 1.8, 0.03, Transform3D(Basis(), Vector3(-2.0, 0.01, -2.5)), Track.PARK_PATH, 18)
+	b.box(Vector3(10.0, 0.03, 1.2), Transform3D(Basis(), Vector3(-2.5, 0.01, 8.3)), Track.PARK_PATH)
 	for k in 44:
 		var a := k * 2.4
 		var r := 2.0 + fmod(k * 1.7, 9.0)

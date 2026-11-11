@@ -283,6 +283,17 @@ static func environment_for(root: Node3D, bg: Color, ambient: Color, amb_energy:
 
 
 ## A floor plane with its own shader (one draw call) plus a solid slab to stand on.
+## A floor shader's code with each $NAME token replaced by colours[NAME] as a vec3 (the maps keep their floor colours
+## in a FLOORS const that palette.gd reads too).
+static func shader_with(code: String, colors: Dictionary) -> String:
+	var keys: Array = colors.keys()
+	keys.sort_custom(func(a, b) -> bool: return String(a).length() > String(b).length())  # $HAZARD_DARK before $HAZARD
+	for k in keys:
+		var c: Color = colors[k]
+		code = code.replace("$" + String(k), "vec3(%.4f, %.4f, %.4f)" % [c.r, c.g, c.b])
+	return code
+
+
 static func shader_floor(ctx: Dictionary, size: Vector2, center: Vector3, code: String) -> void:
 	var root: Node3D = ctx["main"]
 	var mi := MeshInstance3D.new()

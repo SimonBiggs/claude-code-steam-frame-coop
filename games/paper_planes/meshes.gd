@@ -2,6 +2,7 @@ extends RefCounted
 ## Paper Planes: the few meshes the game builds in code (paper plane, hoops, the paper stack).
 ## Cached through core/res_cache.gd so hot reloads and many planes share one mesh each.
 
+const Contrast := preload("res://core/contrast.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")
 
@@ -58,10 +59,18 @@ static func radius(kind: int) -> float:
 	return HOOP_R
 
 
+## Hoops and planes wear an ink outline (main.gd, core/contrast.gd outline): a blue hoop in a blue sky, a gold plane
+## over the seaside sand and a white plane on a bright horizon all vanished without it (palette.gd).
+const OUTLINE := Contrast.OUTLINE
 const CHAIN_COLOR := Color(0.2, 0.85, 0.85)
 const TINY_COLOR := Color(1.0, 0.45, 0.75)
 const GATE_COLOR := Color(1.0, 0.95, 0.85)
 const GOLD_COLOR := Color(1.0, 0.8, 0.2)
+
+
+## A player's plane colour (a touch paler than the player).
+static func plane_tint(player: Color) -> Color:
+	return player.lerp(Color.WHITE, 0.2)
 
 
 ## A hoop facing +Z (fly along Z through it). kind 0 = plain colour `ci`, 1 = rainbow (glows),

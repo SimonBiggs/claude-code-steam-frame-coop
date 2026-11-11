@@ -22,6 +22,10 @@ const PUFFER := 10
 const MOONFISH := 11
 const KOI := 12
 const LEGEND := 13
+## The floating label over a fish: Old Whiskers' own (always shown: the legend is a dark shadow on purpose), and
+## "this one is coming".
+const LEGEND_ICON := Color(0.75, 0.9, 1.0)
+const CALLED_ICON := Color(1.0, 0.9, 0.2)
 # len: body length (m), pts: points, pull: how hard it fights (0..1), kg: weight range,
 # speed: cruising m/s, notice: how far it spots a lure, spawn: weight in the spawn lottery,
 # when: 0 any time, 1 dry weather, 2 only in the rain, 3 only after dark, 4 special (never random),
@@ -382,7 +386,7 @@ func _update_icon() -> void:
 		icon.font_size = 96
 		icon.pixel_size = 0.012
 		icon.outline_size = 24
-		icon.modulate = Color(1.0, 0.9, 0.2)
+		icon.modulate = CALLED_ICON
 		icon.no_depth_test = false
 		icon.render_priority = 4
 		add_child(icon)
@@ -391,13 +395,13 @@ func _update_icon() -> void:
 		if show:
 			if main.SIMPLE_MODE:  # a bouncing "!" says "this one is coming"; no names to read
 				icon.text = "!"
-				icon.modulate = Color(0.75, 0.9, 1.0) if legend and called_t <= 0.0 else Color(1.0, 0.9, 0.2)
+				icon.modulate = LEGEND_ICON if legend and called_t <= 0.0 else CALLED_ICON
 			elif legend:
 				icon.text = "OLD WHISKERS" if called_t <= 0.0 else "!! OLD WHISKERS !!"
-				icon.modulate = Color(0.75, 0.9, 1.0) if called_t <= 0.0 else Color(1.0, 0.9, 0.2)
+				icon.modulate = LEGEND_ICON if called_t <= 0.0 else CALLED_ICON
 			else:
 				icon.text = "!! %s !!" % str(info()["name"]).to_upper() if kind >= TROUT else "!! FISH !!"
-				icon.modulate = Color(1.0, 0.9, 0.2)
+				icon.modulate = CALLED_ICON
 			icon.global_position = global_position + Vector3(0, (2.4 if legend else 1.6) + 0.15 * sin(wiggle * 2.0), 0)
 			main.face_label(icon)
 

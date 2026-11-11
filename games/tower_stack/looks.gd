@@ -7,7 +7,7 @@ const ResCache := preload("res://core/res_cache.gd")
 
 const BLOCK := 0.6
 const COLORS: Array[Color] = [Color(1.0, 0.35, 0.35), Color(1.0, 0.75, 0.2), Color(0.35, 0.85, 0.4),
-	Color(0.3, 0.65, 1.0), Color(0.75, 0.45, 1.0), Color(1.0, 0.5, 0.8)]
+	Color(0.15, 0.35, 0.95), Color(0.75, 0.45, 1.0), Color(1.0, 0.5, 0.8)]  # deep blue: sky blue vanished on the sky
 
 
 const STONE := Color(0.62, 0.63, 0.68)
@@ -17,8 +17,9 @@ const K_STONE := 3
 const K_BOUNCY := 4
 const K_STICKY := 5
 const K_BALLOON := 6
-## The special blocks always wear their own colour (kids learn them): bouncy pink, honey gold, balloon sky blue.
-const SPECIAL_COLORS := {4: Color(1.0, 0.4, 0.85), 5: Color(1.0, 0.72, 0.12), 6: Color(0.55, 0.85, 1.0)}
+## The special blocks always wear their own colour (kids learn them): bouncy pink, honey gold, balloon teal (it was
+## sky blue and vanished on the sky: palette.gd, tests/contrast_test.gd).
+const SPECIAL_COLORS := {4: Color(1.0, 0.4, 0.85), 5: Color(1.0, 0.72, 0.12), 6: Color(0.25, 0.85, 0.75)}
 const BALLOON_COLORS: Array[Color] = [Color(1.0, 0.3, 0.35), Color(1.0, 0.85, 0.25)]
 
 
@@ -213,3 +214,6 @@ static func claw_mesh() -> Mesh:
 			b.capsule_between(d * 0.25 + Vector3(0, 0.05, 0), d * 0.42 - Vector3(0, 0.3, 0), 0.05, Color(0.3, 0.3, 0.4), 8)
 		b.sphere(0.1, MeshKit.at(Vector3(0, 0.32, 0)), Color(1.0, 0.3, 0.3), 10, true)
 		return b.build())
+
+## (moved from main.gd so palette.gd can read it without loading main.gd)
+const LOOKS: Array[String] = ["knight", "mage", "archer", "bard", "pirate", "chef", "astronaut"]

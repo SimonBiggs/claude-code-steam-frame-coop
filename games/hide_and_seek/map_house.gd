@@ -28,6 +28,11 @@ const LOOK := {
 const DARK_DIM := 0.72  ## the DARK room (street.gd): walls, floor and furniture this much darker, no lamp
 const OUTSIDE := Color(0.86, 0.62, 0.5)  # brick-red outside walls
 
+## The floor patterns' own colours (FLOOR_SHADER tokens; palette.gd reads them): the checker's light squares, the
+## little tiles' grout and the playroom's four puzzle mats (lilac, not yellow: the yellow mat was the golden stars'
+## colour).
+const PATTERN := {"CHECK": Color(0.95, 0.93, 0.86), "GROUT": Color(0.92, 0.97, 1.0), "MAT1": Color(1.0, 0.6, 0.55),
+	"MAT2": Color(0.8, 0.7, 1.0), "MAT3": Color(0.55, 0.85, 0.6), "MAT4": Color(0.55, 0.75, 1.0)}
 const FLOOR_SHADER := """
 shader_type spatial;
 varying vec3 wpos;
@@ -44,7 +49,7 @@ void fragment() {
 		c = mix(base * 0.5, base * (0.9 + 0.2 * o), seam);
 	} else if (pat == 1) {
 		vec2 g = floor(wpos.xz / 0.5);
-		c = mix(vec3(0.95, 0.93, 0.86), base, mod(g.x + g.y, 2.0));
+		c = mix($CHECK, base, mod(g.x + g.y, 2.0));
 	} else if (pat == 2) {
 		vec2 f = fract(wpos.xz / 0.6);
 		float grout = smoothstep(0.0, 0.04, f.x) * smoothstep(0.0, 0.04, f.y);
@@ -54,11 +59,11 @@ void fragment() {
 	} else if (pat == 4) {
 		vec2 g = floor(wpos.xz / 0.8);
 		float k = mod(g.x * 3.0 + g.y * 5.0, 4.0);
-		c = k < 1.0 ? vec3(1.0, 0.6, 0.55) : (k < 2.0 ? vec3(1.0, 0.85, 0.45) : (k < 3.0 ? vec3(0.55, 0.85, 0.6) : vec3(0.55, 0.75, 1.0)));
+		c = k < 1.0 ? $MAT1 : (k < 2.0 ? $MAT2 : (k < 3.0 ? $MAT3 : $MAT4));
 	} else if (pat == 5) {
 		vec2 f = fract(wpos.xz / 0.3);
 		float grout = smoothstep(0.0, 0.06, f.x) * smoothstep(0.0, 0.06, f.y);
-		c = mix(base, vec3(0.92, 0.97, 1.0), grout);
+		c = mix(base, $GROUT, grout);
 	} else {
 		float stripe = step(0.5, fract(wpos.z / 1.4));
 		float n = fract(sin(dot(floor(wpos.xz * 6.0), vec2(12.9898, 78.233))) * 43758.5453);
@@ -270,7 +275,7 @@ static func _floors(root: Node3D, g: Dictionary, th: Dictionary) -> void:
 	mi.mesh = st.commit()
 	var m := ShaderMaterial.new()
 	m.shader = Shader.new()
-	m.shader.code = FLOOR_SHADER
+	m.shader.code = W.shader_with(FLOOR_SHADER, PATTERN)
 	mi.material_override = m
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	root.add_child(mi)

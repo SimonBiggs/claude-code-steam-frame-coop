@@ -18,6 +18,12 @@ const GREEN := Color(0.3, 0.86, 0.45)
 const GREEN2 := Color(0.26, 0.78, 0.4)
 const WOOD := Color(0.95, 0.62, 0.32)
 const WOOD2 := Color(1.0, 0.85, 0.45)
+const CUP := Color(0.05, 0.08, 0.05)  # the hole (with a white lip and flag)
+
+
+## A player's ball: their colour, a little lighter (ball.gd; palette.gd checks it on the greens).
+static func ball_tint(c: Color) -> Color:
+	return c.lightened(0.15)
 const HOLES := 5
 
 var def: Dictionary = {}
@@ -234,7 +240,7 @@ func _build_look() -> void:
 		b.torus(rr, 0.035, MeshKit.at(Vector3(c.x, 0.1, c.y)), Color(1.0, 0.95, 0.95), 16, 6)
 	# Tee mat and the cup (a dark hole with a white rim).
 	b.box(Vector3(0.9, 0.01, 0.34), MeshKit.at(Vector3(tee.x, 0.003, tee.y)), Color(0.2, 0.62, 0.32))
-	b.cylinder(CUP_R, CUP_R, 0.01, MeshKit.at(Vector3(cup.x, 0.003, cup.y)), Color(0.05, 0.08, 0.05), 16)
+	b.cylinder(CUP_R, CUP_R, 0.01, MeshKit.at(Vector3(cup.x, 0.003, cup.y)), CUP, 16)
 	b.torus(CUP_R + 0.01, 0.012, MeshKit.at(Vector3(cup.x, 0.004, cup.y)), Color.WHITE, 16, 4)
 	b.cylinder(0.012, 0.012, 1.0, MeshKit.at(Vector3(cup.x + CUP_R * 0.6, 0.5, cup.y)), Color.WHITE, 6)
 	if gimmick == "hill":

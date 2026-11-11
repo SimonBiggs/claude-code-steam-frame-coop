@@ -17,6 +17,11 @@ extends RefCounted
 
 const Seeded := preload("res://core/seeded.gd")
 
+## The karts' paint: players' and the CPU buddies' (BUNNY, DINO, ROBO). main.gd uses these; palette.gd checks them.
+const PLAYER_COLORS: Array[Color] = [Color(1.0, 0.75, 0.2), Color(1.0, 0.3, 0.3), Color(0.25, 0.6, 1.0),
+	Color(0.35, 0.9, 0.35), Color(0.85, 0.4, 1.0), Color(1.0, 0.55, 0.15), Color(0.3, 0.95, 0.9)]
+const CPU_COLORS: Array[Color] = [Color(1.0, 0.7, 0.85), Color(0.55, 0.8, 0.3), Color(0.7, 0.75, 0.85)]
+
 const RACES := 3
 const CUPS: Array[Dictionary] = [
 	{"id": "candy", "name": "CANDY CUP", "palette": 1, "pic": "lollipop", "color": Color(1.0, 0.5, 0.75), "hz": "candy", "hills": 4.0,

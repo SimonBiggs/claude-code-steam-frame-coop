@@ -2,16 +2,18 @@ extends RefCounted
 ## Builds the pirate world: sunset sky, animated sea, islands and our ship. Also the deck geometry
 ## helpers (walkable area, obstacles) shared by players, boarders and leaks.
 const UiKit := preload("res://core/ui_kit.gd")
+const Looks := preload("res://games/cannon_cove/looks.gd")
 
 const SEA_SHADER := """
 shader_type spatial;
 render_mode cull_disabled;
-uniform vec3 deep : source_color = vec3(0.02, 0.3, 0.52);
-uniform vec3 shallow : source_color = vec3(0.08, 0.72, 0.78);
+uniform vec3 deep : source_color;
+uniform vec3 shallow : source_color;
 uniform vec3 foam : source_color = vec3(0.95, 0.98, 1.0);
 uniform vec3 sunset : source_color = vec3(1.0, 0.55, 0.32);
 uniform float chop = 1.0;
 uniform float night = 0.0;
+uniform float night_dim = 0.45;
 varying float wave_h;
 varying vec3 wpos;
 
@@ -43,7 +45,7 @@ void fragment() {
 	col = mix(col, foam, clamp(crest * 0.55 + sparkle * 0.6, 0.0, 1.0));
 	float far = smoothstep(50.0, 140.0, length(wpos.xz));
 	col = mix(col, mix(deep, sunset, 0.35), far * 0.6);
-	col *= mix(1.0, 0.45, night);
+	col *= mix(1.0, night_dim, night);
 	col += vec3(0.6, 0.8, 1.0) * sparkle * night * 0.35;
 	ALBEDO = col;
 	ROUGHNESS = 0.12;
@@ -53,8 +55,8 @@ void fragment() {
 
 const DECK_SHADER := """
 shader_type spatial;
-uniform vec3 wood : source_color = vec3(0.78, 0.55, 0.3);
-uniform vec3 dark : source_color = vec3(0.55, 0.36, 0.18);
+uniform vec3 wood : source_color;
+uniform vec3 dark : source_color;
 void fragment() {
 	vec3 w = (INV_VIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	float plank = fract(w.x / 0.42);
@@ -299,6 +301,9 @@ static func build(main: Node3D) -> Dictionary:
 	var sea_mat := ShaderMaterial.new()
 	sea_mat.shader = Shader.new()
 	sea_mat.shader.code = SEA_SHADER
+	sea_mat.set_shader_parameter("deep", Looks.SEA_DEEP)
+	sea_mat.set_shader_parameter("shallow", Looks.SEA_SHALLOW)
+	sea_mat.set_shader_parameter("night_dim", Looks.SEA_NIGHT_DIM)
 	var waves := MeshInstance3D.new()
 	waves.mesh = plane
 	waves.material_override = sea_mat
@@ -465,6 +470,8 @@ static func _build_ship(main: Node3D, out: Dictionary) -> void:
 	var deck_mat := ShaderMaterial.new()
 	deck_mat.shader = Shader.new()
 	deck_mat.shader.code = DECK_SHADER
+	deck_mat.set_shader_parameter("wood", Looks.DECK_WOOD)
+	deck_mat.set_shader_parameter("dark", Looks.DECK_DARK)
 	var hw := HULL_HALF_W
 	# Hull: a long box plus a diamond-shaped bow, with a red stripe and gold trim.
 	box(ship, Vector3(hw * 2.0, 3.2, 20.6), Vector3(0, -1.65, -0.6), hull_mat)

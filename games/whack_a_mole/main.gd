@@ -39,7 +39,7 @@ const GAME_ID := "whack_a_mole"
 const KID_SPEED := 2.2
 const KID_SCALE := 0.33
 const BONK_REACH := 0.42
-const LOOKS: Array[String] = ["farmer", "chef", "pirate", "knight", "astronaut", "bard", "viking"]
+const LOOKS: Array[String] = Props.LOOKS
 const PRACTICE_HOLE := 9  # front row, just left of the middle: right in front of the VR player
 const MOLE_DOWN := -0.5  # mole y offset when hidden (inside the table)
 # Mole states
@@ -229,7 +229,7 @@ func _build_world(vr: bool) -> void:
 	disc.height = 0.2
 	disc.radial_segments = 32
 	ground.mesh = disc
-	ground.material_override = MeshKit.material(Color(0.47, 0.75, 0.38))
+	ground.material_override = MeshKit.material(Props.LAWN)
 	ground.position.y = -0.1
 	add_child(ground)
 	add_child(MeshKit.scatter_random(MeshKit.prop("tree"), 16, Vector3.ZERO, 18.0, 8.0, 0.8, 1.3, PackedColorArray(), 3))

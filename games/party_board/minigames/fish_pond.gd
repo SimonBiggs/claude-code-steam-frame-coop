@@ -34,7 +34,7 @@ var _clock := 0.0
 
 func build() -> void:
 	arena_r = SEAT_R
-	build_island(SEAT_R + 1.4, Color(0.46, 0.74, 0.36))
+	build_island(SEAT_R + 1.4, Floors.GRASS.fish_pond)
 	var b := MeshKit.Builder.new()
 	b.cylinder(POND_R + 0.35, POND_R + 0.45, 0.16, MeshKit.at(Vector3(0, 0.02, 0)), Color(0.62, 0.6, 0.56), 32)
 	b.cylinder(POND_R, POND_R, 0.06, MeshKit.at(Vector3(0, 0.1, 0)), Color(0.25, 0.55, 0.85), 32)

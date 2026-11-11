@@ -53,8 +53,7 @@ const HudKit := preload("res://core/hud_kit.gd")
 
 ## P1 (seeker) + up to six TV hiders P2..P7.
 const MAX_PLAYERS := 7
-const PLAYER_COLORS: Array[Color] = [Color(1.0, 0.85, 0.45), Color(0.5, 0.85, 1.0), Color(1.0, 0.55, 0.75),
-	Color(0.55, 0.95, 0.55), Color(1.0, 0.65, 0.35), Color(0.75, 0.6, 1.0), Color(0.4, 0.95, 0.9)]
+const PLAYER_COLORS: Array[Color] = Story.PLAYER_COLORS  # (story.gd: palette.gd reads it)
 const PAD_WAIT_TIME := 20.0
 const PARTY_META := "hide_and_seek_party"
 const MUSIC_TRACK := 0
@@ -2557,7 +2556,7 @@ func _update_stars() -> void:
 		star_mm.instance_count = STAR_COUNT
 		var mmi := MultiMeshInstance3D.new()
 		mmi.multimesh = star_mm
-		mmi.material_override = make_material(Color(1.0, 0.85, 0.2), 2.5)
+		mmi.material_override = make_material(Story.STAR_COLOR, 2.5)
 		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(mmi)
 	var t := Time.get_ticks_msec() * 0.001

@@ -53,7 +53,7 @@ func build() -> void:
 	add_child(MeshKit.instance(b.build(), false))
 	var sb := MeshKit.Builder.new()
 	sb.cylinder(STONE_R, STONE_R * 0.8, 0.7, MeshKit.at(Vector3(0, -0.3, 0)), Color(0.62, 0.58, 0.55), 14)
-	sb.cylinder(STONE_R * 0.92, STONE_R * 0.95, 0.12, MeshKit.at(Vector3(0, 0.03, 0)), Color(0.45, 0.75, 0.4), 14)
+	sb.cylinder(STONE_R * 0.92, STONE_R * 0.95, 0.12, MeshKit.at(Vector3(0, 0.03, 0)), Floors.PLATFORM_TOP, 14)
 	var mesh := sb.build()
 	stones.append(Vector3.ZERO)
 	for ring in [1, 2]:
@@ -62,7 +62,7 @@ func build() -> void:
 			var a := TAU * float(k) / float(n) + (0.0 if ring == 1 else 0.26)
 			stones.append(Vector3(cos(a), 0, sin(a)) * 2.35 * float(ring))
 	var rb := MeshKit.Builder.new()
-	rb.cylinder(STONE_R * 1.08, STONE_R * 1.08, 0.06, MeshKit.at(Vector3(0, 0.1, 0)), Color(1.0, 0.25, 0.1), 14)
+	rb.cylinder(STONE_R * 1.08, STONE_R * 1.08, 0.06, MeshKit.at(Vector3(0, 0.1, 0)), Floors.PLATFORM_WARN, 14)
 	var ring_mesh := rb.build()
 	for p in stones:
 		var mi := MeshKit.instance(mesh, false)

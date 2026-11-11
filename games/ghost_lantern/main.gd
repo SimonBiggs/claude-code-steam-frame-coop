@@ -35,6 +35,7 @@ const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV p
 ##    words (no pause / unplug / left / seats sentences: a soft sound instead).
 const SIMPLE_MODE := true
 const PropsScript := preload("res://games/ghost_lantern/props.gd")
+const Looks := preload("res://games/ghost_lantern/looks.gd")
 const GhostHandScript := preload("res://games/ghost_lantern/ghost_hand.gd")
 const VR_PRACTICE := 2  # sleepy practice ghosts the lantern-bearer wakes up
 
@@ -80,8 +81,7 @@ const EXTRA_SOUNDS := {
 
 ## P1 (lantern) + up to six TV ghost hunters P2..P7.
 const MAX_PLAYERS := 7
-const PLAYER_COLORS: Array[Color] = [Color(1.0, 0.82, 0.4), Color(0.45, 1.0, 0.7), Color(1.0, 0.55, 0.9),
-	Color(0.45, 0.8, 1.0), Color(1.0, 0.6, 0.3), Color(0.8, 1.0, 0.35), Color(0.75, 0.6, 1.0)]
+const PLAYER_COLORS: Array[Color] = Looks.PLAYER_COLORS  # (looks.gd: palette.gd reads it)
 const SPAWNS: Array[Vector3] = [Vector3(0, 0, 3.0), Vector3(-1.8, 0, 4.2), Vector3(1.8, 0, 4.2),
 	Vector3(-3.4, 0, 5.2), Vector3(3.4, 0, 5.2), Vector3(-1.2, 0, 6.0), Vector3(1.2, 0, 6.0)]
 const PAD_WAIT_TIME := 20.0  # a player whose controller unplugs waits this long before leaving

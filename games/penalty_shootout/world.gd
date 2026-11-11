@@ -90,6 +90,13 @@ void fragment() {
 }
 """
 
+## The keeper (P1) and the strikers (main.gd).
+const PLAYER_COLORS: Array[Color] = [Color(0.2, 1.0, 0.45), Color(1.0, 0.3, 0.3), Color(0.25, 0.6, 1.0),
+	Color(1.0, 0.85, 0.15), Color(0.85, 0.45, 1.0), Color(1.0, 0.55, 0.15), Color(0.3, 0.95, 0.95)]
+## The night pitch: its grass, the mown stripes, the night sky behind the goal.
+const PITCH := Color(0.16, 0.42, 0.16)
+const PITCH_STRIPE := Color(0.2, 0.5, 0.2)
+const NIGHT := Color(0.05, 0.07, 0.16)
 const SHIRTS: Array[Color] = [Color(0.9, 0.15, 0.15), Color(1, 1, 1), Color(0.15, 0.35, 0.95), Color(1.0, 0.85, 0.1),
 	Color(0.95, 0.5, 0.1), Color(0.2, 0.8, 0.3), Color(0.6, 0.3, 0.9), Color(0.1, 0.1, 0.15)]
 
@@ -115,7 +122,7 @@ func build(vr: bool) -> void:
 	var env := WorldEnvironment.new()
 	var e := Environment.new()
 	e.background_mode = Environment.BG_COLOR
-	e.background_color = Color(0.05, 0.07, 0.16)
+	e.background_color = NIGHT
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	e.ambient_light_color = Color(0.9, 0.95, 1.0)
 	e.ambient_light_energy = 0.75
@@ -150,9 +157,9 @@ func build(vr: bool) -> void:
 
 func _build_pitch(lit: Array) -> void:
 	# Base grass plus mown stripes across the pitch.
-	lit.append([MeshKit.box(Vector3(80, 0.02, 90)), MeshKit.at(Vector3(0, -0.011, 25)), Color(0.16, 0.42, 0.16)])
+	lit.append([MeshKit.box(Vector3(80, 0.02, 90)), MeshKit.at(Vector3(0, -0.011, 25)), PITCH])
 	for i in 8:
-		lit.append([MeshKit.box(Vector3(70, 0.002, 4.0)), MeshKit.at(Vector3(0, 0.0, -6.0 + i * 8.0 + 2.0)), Color(0.2, 0.5, 0.2)])
+		lit.append([MeshKit.box(Vector3(70, 0.002, 4.0)), MeshKit.at(Vector3(0, 0.0, -6.0 + i * 8.0 + 2.0)), PITCH_STRIPE])
 	var w := Color(0.95, 0.97, 0.95)
 	var lw := 0.12
 	var lines: Array = [

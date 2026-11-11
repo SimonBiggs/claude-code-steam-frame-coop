@@ -30,8 +30,20 @@ void fragment() {
 }
 """
 
+## The rooms' floors (two tones each: tiles / diamonds / planks) and the wings' floors (wings.gd): what the ghosts
+## and hunters are seen on (palette.gd, tests/contrast_test.gd). The floor shader gets them as uniforms.
+const FLOORS := {"ballroom": [Color(0.05, 0.03, 0.08), Color(0.33, 0.24, 0.42)],
+	"library": [Color(0.06, 0.16, 0.10), Color(0.10, 0.25, 0.15)], "hall": [Color(0.10, 0.06, 0.07), Color(0.22, 0.13, 0.13)]}
+const WING_FLOORS := {"attic": Color(0.5, 0.36, 0.24), "cellar": Color(0.34, 0.34, 0.38), "greenhouse": Color(0.55, 0.75, 0.6)}
+
 const FLOOR_SHADER := """
 shader_type spatial;
+uniform vec3 ball_a : source_color;
+uniform vec3 ball_b : source_color;
+uniform vec3 lib_a : source_color;
+uniform vec3 lib_b : source_color;
+uniform vec3 hall_a : source_color;
+uniform vec3 hall_b : source_color;
 varying vec3 wpos;
 void vertex() { wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; }
 void fragment() {
@@ -40,17 +52,17 @@ void fragment() {
 	if (wpos.x > 7.0) {
 		vec2 g = floor(wpos.xz / 1.2);
 		float k = mod(g.x + g.y, 2.0);
-		c = mix(vec3(0.05, 0.03, 0.08), vec3(0.33, 0.24, 0.42), k);
+		c = mix(ball_a, ball_b, k);
 		rough = 0.25;
 	} else if (wpos.x < -7.0) {
 		vec2 g = fract(wpos.xz * 0.8) - 0.5;
 		float diamond = 1.0 - smoothstep(0.3, 0.33, abs(g.x) + abs(g.y));
-		c = mix(vec3(0.06, 0.16, 0.10), vec3(0.10, 0.25, 0.15), diamond);
+		c = mix(lib_a, lib_b, diamond);
 	} else {
 		float plank = floor(wpos.z / 0.35);
 		float offs = fract(sin(plank * 12.9898) * 43758.5453);
 		float seam = smoothstep(0.0, 0.03, fract(wpos.z / 0.35)) * smoothstep(0.0, 0.01, fract(wpos.x / 2.4 + offs));
-		c = mix(vec3(0.10, 0.06, 0.07), vec3(0.22, 0.13, 0.13) * (0.85 + 0.3 * offs), seam);
+		c = mix(hall_a, hall_b * (0.85 + 0.3 * offs), seam);
 	}
 	ALBEDO = c;
 	ROUGHNESS = rough;
@@ -214,7 +226,11 @@ static func build(main: Node3D) -> Dictionary:
 	main.add_child(root)
 
 	# Floor, ceiling, walls.
-	var floor_mi := box(root, Vector3(HALF_X * 2.0 + 1.0, 0.2, HALF_Z * 2.0 + 1.0), Vector3(0, -0.1, 0), shader_mat(FLOOR_SHADER))
+	var floor_sm := shader_mat(FLOOR_SHADER)
+	for room in [["ballroom", "ball"], ["library", "lib"], ["hall", "hall"]]:
+		floor_sm.set_shader_parameter(room[1] + "_a", FLOORS[room[0]][0])
+		floor_sm.set_shader_parameter(room[1] + "_b", FLOORS[room[0]][1])
+	var floor_mi := box(root, Vector3(HALF_X * 2.0 + 1.0, 0.2, HALF_Z * 2.0 + 1.0), Vector3(0, -0.1, 0), floor_sm)
 	floor_mi.name = "Floor"
 	box(root, Vector3(HALF_X * 2.0 + 1.0, 0.2, HALF_Z * 2.0 + 1.0), Vector3(0, WALL_H + 0.1, 0), mat(Color(0.09, 0.05, 0.11)), false)
 	var wall := shader_mat(WALL_SHADER)

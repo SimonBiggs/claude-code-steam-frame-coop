@@ -6,6 +6,7 @@ extends Node3D
 ## in snapshots on the TV.
 const UiKit := preload("res://core/ui_kit.gd")
 
+const Contrast := preload("res://core/contrast.gd")
 const Art := preload("res://games/block_builders/art.gd")
 const Levels := preload("res://games/block_builders/levels.gd")
 const Themes := preload("res://games/block_builders/themes.gd")
@@ -593,6 +594,7 @@ func add_block(kind: String, cell: Vector3i, rot: int, pop: bool = true) -> void
 	n.rotation.y = -rot * PI * 0.5
 	var mi := MeshInstance3D.new()
 	mi.mesh = Art.block_mesh(kind)
+	Contrast.outline(mi, Art.BLOCK_OUTLINE)
 	n.add_child(mi)
 	if kind == "fan":
 		var blades := MeshInstance3D.new()

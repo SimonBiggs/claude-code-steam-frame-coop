@@ -39,7 +39,7 @@ var _cpu_wait := {}
 
 func build() -> void:
 	arena_r = 6.5
-	build_island(7.4, Color(0.52, 0.78, 0.42))
+	build_island(7.4, Floors.GRASS.star_stack)
 	builders.clear()
 	if giant:
 		builders.append(0)

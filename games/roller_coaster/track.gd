@@ -27,6 +27,9 @@ const RAIL_COL := Color(0.92, 0.22, 0.25)
 const TIE_COL := Color(0.38, 0.3, 0.26)
 const POST_COL := Color(0.95, 0.95, 0.92)
 const STATION_COL := Color(0.98, 0.78, 0.3)
+## The tabletop park's grass and its sandy paths (park.gd; palette.gd checks the train and track on them).
+const PARK_GRASS := Color(0.48, 0.76, 0.38)
+const PARK_PATH := Color(0.9, 0.82, 0.62)
 
 
 static func fwd(yaw: float) -> Vector3:

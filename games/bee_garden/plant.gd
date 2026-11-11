@@ -46,10 +46,10 @@ func _ready() -> void:
 	place()
 	var soil := W.cmat(Color(0.3, 0.2, 0.13))
 	mound = W.mesh_node(self, W.sphere(0.22, 10), soil, Vector3(0, 0.0, 0), Vector3(1.0, 0.3, 1.0))
-	var green := W.cmat(Color(0.3, 0.68, 0.28))
+	var green := W.cmat(W.PLANT_GREEN)
 	stem = W.mesh_node(self, W.cyl(0.035, 0.045, 1.0, 6), green, Vector3.ZERO)
 	for side in [-1.0, 1.0]:
-		var lf := W.mesh_node(self, W.sphere(0.14, 8), W.cmat(Color(0.35, 0.75, 0.3)), Vector3.ZERO, Vector3(1.4, 0.25, 0.6))
+		var lf := W.mesh_node(self, W.sphere(0.14, 8), W.cmat(W.LEAF_GREEN), Vector3.ZERO, Vector3(1.4, 0.25, 0.6))
 		lf.set_meta("side", side)
 		leaves.append(lf)
 	head = Node3D.new()

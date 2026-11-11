@@ -107,8 +107,7 @@ const FIRE_SPEED := 22.0
 const REPLAY_DELAY := 0.7
 const REPLAY_CAM := Vector3(6.6, 1.35, 5.2)
 const POWERS: Array[String] = ["big", "slow", "double"]
-const PLAYER_COLORS: Array[Color] = [Color(0.2, 1.0, 0.45), Color(1.0, 0.3, 0.3), Color(0.25, 0.6, 1.0),
-	Color(1.0, 0.85, 0.15), Color(0.85, 0.45, 1.0), Color(1.0, 0.55, 0.15), Color(0.3, 0.95, 0.95)]
+const PLAYER_COLORS: Array[Color] = WorldScript.PLAYER_COLORS  # (world.gd: palette.gd reads it)
 const SOUNDS := {
 	"kick": [0.14, 170.0, 55.0, 0.7, "sine", 0.35],
 	"save": [0.2, 150.0, 60.0, 0.7, "sine", 0.55],

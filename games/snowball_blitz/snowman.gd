@@ -7,6 +7,8 @@ extends Node3D
 ## flat throws from the front - lob over it, hit it from the side, or break it) and the YETI finale boss.
 
 const Bosses := preload("res://games/snowball_blitz/bosses.gd")
+const Contrast := preload("res://core/contrast.gd")
+const Looks := preload("res://games/snowball_blitz/looks.gd")
 const KINDS := {
 	"snowman": {"hp": 3.0, "speed": 1.8, "scale": 1.0, "wall_dps": 6.0, "throw_cd": 3.8, "ball_dmg": 8.0, "ball_r": 0.14, "points": 100, "cocoa": 0.08},
 	"sled": {"hp": 2.0, "speed": 5.0, "scale": 0.8, "crash": 24.0, "points": 150, "cocoa": 0.12},
@@ -19,7 +21,8 @@ const KINDS := {
 	"target": {"hp": 1.0, "speed": 0.0, "scale": 0.85, "points": 0, "cocoa": 0.0},
 	"yeti": {"hp": 110.0, "speed": 0.8, "scale": 2.2, "wall_dps": 20.0, "throw_cd": 4.2, "ball_dmg": 14.0, "ball_r": 0.42, "points": 6000, "cocoa": 1.0},
 }
-const BALLOON_COLORS: Array[Color] = [Color(1.0, 0.3, 0.35), Color(0.35, 0.7, 1.0), Color(1.0, 0.85, 0.25), Color(0.5, 1.0, 0.45)]
+## Deeper red, deep blue and lemon: the old red, sky blue and gold vanished on the dusk / morning skies (palette.gd).
+const BALLOON_COLORS: Array[Color] = [Color(0.95, 0.15, 0.3), Color(0.15, 0.3, 0.95), Color(0.95, 0.95, 0.2), Color(0.5, 1.0, 0.45)]
 const FLOAT_HEIGHT := 3.6
 ## Body spheres in unscaled units: [height of centre, radius]
 const SPHERES := [[0.45, 0.5], [1.12, 0.37], [1.62, 0.27]]
@@ -123,7 +126,7 @@ func _build() -> void:
 		return
 	var y0 := lift
 	for sp in SPHERES:
-		_part(main.sphere_mesh(sp[1]), main.mat("snow"), Vector3(0, y0 + sp[0], 0))
+		Contrast.outline(_part(main.sphere_mesh(sp[1]), main.mat("snow"), Vector3(0, y0 + sp[0], 0)), Looks.OUTLINE)  # white on snow
 	# Carrot nose (points along -Z, the way the snowman faces).
 	var carrot := CylinderMesh.new()
 	carrot.top_radius = 0.0
@@ -276,11 +279,11 @@ func _build_target_glow() -> void:
 
 ## The YETI: a big fluffy blue-white beast with horns, a dark face and huge eyes.
 func _build_yeti() -> void:
-	var fur := main.make_material(Color(0.82, 0.9, 1.0), 0.05) as StandardMaterial3D
+	var fur := main.make_material(Looks.YETI_FUR, 0.05) as StandardMaterial3D
 	fur.roughness = 1.0
 	var face := main.make_material(Color(0.25, 0.35, 0.6), 0.0) as StandardMaterial3D
-	_part(main.sphere_mesh(0.62), fur, Vector3(0, 0.62, 0))
-	_part(main.sphere_mesh(0.48), fur, Vector3(0, 1.35, 0))
+	Contrast.outline(_part(main.sphere_mesh(0.62), fur, Vector3(0, 0.62, 0)), Looks.OUTLINE)  # pale fur on snow
+	Contrast.outline(_part(main.sphere_mesh(0.48), fur, Vector3(0, 1.35, 0)), Looks.OUTLINE)
 	var f := _part(main.sphere_mesh(0.3), face, Vector3(0, 1.45, -0.28))
 	f.scale = Vector3(1.0, 0.9, 0.55)
 	for x in [-0.12, 0.12]:
@@ -526,7 +529,7 @@ func _boss_step(delta: float) -> bool:
 		return false
 	atk_tell = float(n.tell)
 	atk_t = float(n.every)
-	var col: Color = n.color
+	var col := Bosses.tell_color(kind, atk_kind)
 	match atk_kind:
 		"volley", "throw":
 			var p = main.nearest_player(global_position)
@@ -538,7 +541,7 @@ func _boss_step(delta: float) -> bool:
 			main.boss_tell(self, atk_at, float(n.stomp_r), col, atk_tell)
 		_:
 			atk_at = global_position
-			main.boss_tell(self, atk_at, 2.0, col.lerp(Color.WHITE, 0.4), atk_tell)
+			main.boss_tell(self, atk_at, 2.0, col, atk_tell)
 	var to := atk_at - global_position
 	if to.length() > 0.1:
 		rotation.y = atan2(-to.x, -to.z)

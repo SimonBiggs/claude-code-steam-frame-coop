@@ -5,17 +5,21 @@ extends RefCounted
 ## clouds, blinking gantry lights and a wind sock. Everything is procedural; repeated props are
 ## MultiMeshes (one draw call each) to keep the Steam Frame happy.
 
+const Looks := preload("res://games/rocket_workshop/looks.gd")
+
 const FLOOR_SHADER := """
 shader_type spatial;
-uniform vec3 wood_a : source_color = vec3(0.72, 0.5, 0.32);
-uniform vec3 wood_b : source_color = vec3(0.58, 0.38, 0.22);
+uniform vec3 wood_a : source_color;
+uniform vec3 wood_b : source_color;
+uniform float wood_mix = 0.7;
+uniform float seam_dark = 0.4;
 void fragment() {
 	vec3 w = (INV_VIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	float plank = floor(w.x * 1.6);
 	float row = floor(w.z * 0.35 + fract(plank * 0.37) * 3.0);
 	float n = fract(sin(plank * 12.9898 + row * 78.233) * 43758.5453);
 	float seam = step(0.95, fract(w.x * 1.6)) + step(0.985, fract(w.z * 0.35 + fract(plank * 0.37) * 3.0));
-	ALBEDO = mix(wood_a, wood_b, n * 0.7) * (1.0 - clamp(seam, 0.0, 1.0) * 0.4);
+	ALBEDO = mix(wood_a, wood_b, n * wood_mix) * (1.0 - clamp(seam, 0.0, 1.0) * seam_dark);
 	ROUGHNESS = 0.8;
 }
 """
@@ -61,12 +65,16 @@ static func build(main: Node3D, vr: bool) -> void:
 	var floor_mat := ShaderMaterial.new()
 	floor_mat.shader = Shader.new()
 	floor_mat.shader.code = FLOOR_SHADER
+	floor_mat.set_shader_parameter("wood_a", Looks.FLOOR_A)
+	floor_mat.set_shader_parameter("wood_b", Looks.FLOOR_B)
+	floor_mat.set_shader_parameter("wood_mix", Looks.FLOOR_MIX)
+	floor_mat.set_shader_parameter("seam_dark", Looks.SEAM_DARK)
 	_box(main, Vector3(22.4, 0.1, 14.4), Vector3(0, -0.05, 1.0), floor_mat)
 	var grass := MeshInstance3D.new()
 	var pm := PlaneMesh.new()
 	pm.size = Vector2(120, 120)
 	grass.mesh = pm
-	grass.material_override = main.make_material(Color(0.45, 0.72, 0.35), 0.0)
+	grass.material_override = main.make_material(Looks.GRASS, 0.0)
 	grass.position = Vector3(0, -0.02, 0)
 	main.add_child(grass)
 

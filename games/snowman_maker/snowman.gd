@@ -7,6 +7,16 @@ const MeshKit := preload("res://core/mesh_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")
 
 const SNOW := Color(0.97, 0.98, 1.0)
+const Contrast := preload("res://core/contrast.gd")
+## A frosty blue line round every snowball (Contrast.outline): white balls on the white garden snow.
+const BALL_OUTLINE := Color(0.4, 0.5, 0.7)
+const BALL_OUTLINE_WIDTH := 0.1  # in ball units (the ball mesh is a unit sphere scaled by its radius)
+## The garden's snow (main.gd ground).
+const GROUND_SNOW := Color(0.93, 0.96, 1.0)
+
+
+static func outline_ball(mi: GeometryInstance3D) -> GeometryInstance3D:
+	return Contrast.outline(mi, BALL_OUTLINE, BALL_OUTLINE_WIDTH)
 
 var radii: Array[float] = []
 var carrot := false
@@ -200,6 +210,7 @@ func _rebuild() -> void:
 		var mi := MeshInstance3D.new()
 		mi.mesh = ball_mesh()
 		mi.material_override = snow_material() if not style.has("rainbow") else tinted_snow(tint)
+		outline_ball(mi)
 		mi.scale = Vector3.ONE * radii[i]
 		mi.position.y = center_y(radii, i)
 		body.add_child(mi)

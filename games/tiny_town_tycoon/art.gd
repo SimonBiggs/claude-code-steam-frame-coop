@@ -637,6 +637,8 @@ static func shape_for(mask: int) -> Array:
 
 const ASPHALT := Color(0.36, 0.37, 0.41)
 const KERB := Color(0.82, 0.8, 0.75)
+## The crane's dark tracked chassis under its yellow cab (palette.gd counts it: it shows the crane on sand).
+const CRANE_BASE := Color(0.35, 0.35, 0.38)
 
 
 ## Flat quad strip helper: a convex outline (x, z points) as a thin slab at height y.
@@ -824,7 +826,7 @@ static func _make_vehicle(kind: String, accent: Color) -> ArrayMesh:
 			_wheels(b, [0.27, -0.27], 0.19)
 			_flag(b, Vector3(-0.14, 0.35, 0.25), accent)
 		"crane":
-			b.rounded_box(Vector3(0.38, 0.16, 0.8), 0.04, at(Vector3(0, 0.15, 0)), Color(0.35, 0.35, 0.38), 1)
+			b.rounded_box(Vector3(0.38, 0.16, 0.8), 0.04, at(Vector3(0, 0.15, 0)), CRANE_BASE, 1)
 			b.rounded_box(Vector3(0.3, 0.22, 0.2), 0.04, at(Vector3(0, 0.33, 0.26)), col, 1)
 			b.box(Vector3(0.25, 0.08, 0.02), at(Vector3(0, 0.36, 0.36)), glass)
 			b.box(Vector3(0.28, 0.12, 0.3), at(Vector3(0, 0.3, -0.12)), col)

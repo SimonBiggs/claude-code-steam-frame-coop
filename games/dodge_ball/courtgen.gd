@@ -50,9 +50,10 @@ const MAX_SPREAD_SHARE := 0.25
 
 const ADJ: Array[String] = ["SUNNY", "PUFFY", "BOUNCY", "HAPPY", "BREEZY", "GIGGLY", "SPARKLY", "COSY", "JOLLY", "WIGGLY"]
 const NOUN: Array[String] = ["PARK", "MEADOW", "GARDEN", "GREEN", "FIELD", "HILL", "DELL"]
+## Cushion colours: none sandy-yellow (they vanished on the sandy court): mint, teal and coral, a deep gold daily.
 const CUSHION_COLORS: Array[Color] = [Color(1.0, 0.62, 0.75), Color(0.6, 0.8, 1.0), Color(0.75, 0.65, 1.0),
-	Color(0.6, 0.92, 0.7), Color(1.0, 0.85, 0.5), Color(1.0, 0.7, 0.55)]
-const GOLD := Color(1.0, 0.82, 0.25)
+	Color(0.5, 0.88, 0.6), Color(0.45, 0.85, 0.85), Color(1.0, 0.6, 0.45)]
+const GOLD := Color(1.0, 0.65, 0.1)
 
 # The park that grows (park.gd).
 const PARK_KINDS: Array[String] = ["daisy", "sunflower", "sapling", "balloon", "bunny", "toadstool", "duckling"]

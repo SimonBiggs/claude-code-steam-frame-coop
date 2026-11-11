@@ -3,6 +3,12 @@ extends RefCounted
 ## Everything is deterministic (fixed layout + seeded RNG) so the host and the TV build the same world.
 ## World units: a knight is about 1 unit tall. The VR giant sees it at world_scale S (20 units = 1 m).
 
+## The table's ground (_ground_color): the wooden rim, the river bed, its sandy banks, the trodden earth round the
+## fire, the ring path and the two grass tones (lightened up to GRASS_LIFT on the hills). palette.gd reads them.
+const GROUND := {"wood": Color(0.55, 0.34, 0.18), "river": Color(0.35, 0.42, 0.45), "bank": Color(0.86, 0.76, 0.5),
+	"earth": Color(0.72, 0.58, 0.38), "path": Color(0.78, 0.66, 0.44), "grass": Color(0.42, 0.7, 0.3),
+	"grass 2": Color(0.55, 0.78, 0.32)}
+const GRASS_LIFT := 0.2
 const S := 20.0              # XR world scale: 20 units = 1 real metre
 const R := 14.0              # radius of the meadow
 const RIM := 0.7             # wooden table rim around the meadow
@@ -330,22 +336,22 @@ static func build(main: Node3D, vr: bool, skip_scenery: bool = false) -> void:
 
 static func _ground_color(x: float, z: float, r: float) -> Color:
 	if r > R:
-		return Color(0.55, 0.34, 0.18)  # wood
+		return GROUND.wood
 	var rd := river_dist(x, z)
 	if rd < RIVER_HALF + 0.2:
-		return Color(0.35, 0.42, 0.45)
+		return GROUND.river
 	if rd < RIVER_HALF + BANK + 0.25:
-		return Color(0.86, 0.76, 0.5)  # sandy bank
+		return GROUND.bank  # sandy bank
 	var n := sin(x * 1.7) * sin(z * 1.3) * 0.5 + sin(x * 0.53 + z * 0.71) * 0.5
-	var grass := Color(0.42, 0.7, 0.3).lerp(Color(0.55, 0.78, 0.32), n * 0.5 + 0.5)
+	var grass: Color = (GROUND.grass as Color).lerp(GROUND["grass 2"], n * 0.5 + 0.5)
 	if r < 2.6:
-		return Color(0.72, 0.58, 0.38).lerp(grass, smoothstep(1.8, 2.6, r))  # trodden earth around the fire
+		return (GROUND.earth as Color).lerp(grass, smoothstep(1.8, 2.6, r))  # trodden earth around the fire
 	# a dirt path from each cottage to the fire would be nice; keep a soft ring path instead
 	var ring := absf(r - 7.2)
 	if ring < 0.5:
-		grass = grass.lerp(Color(0.78, 0.66, 0.44), (0.5 - ring) * 1.2)
+		grass = grass.lerp(GROUND.path, (0.5 - ring) * 1.2)
 	var h := height(x, z, false)
-	return grass.lightened(clampf(h * 0.12, 0.0, 0.2))
+	return grass.lightened(clampf(h * 0.12, 0.0, GRASS_LIFT))
 
 
 static func _build_terrain(main: Node3D) -> void:

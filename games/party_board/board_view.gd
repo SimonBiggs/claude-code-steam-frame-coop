@@ -154,7 +154,7 @@ func _spaces_mesh() -> Resource:
 			cols = [Boards.SPECIALS[type].tile, Boards.SPECIALS[type].emb]
 		var tile: Color = cols[0]
 		var emb: Color = cols[1]
-		b.cylinder(0.84, 0.9, 0.24, MeshKit.at(p + Vector3(0, 0.06, 0)), tile.darkened(0.35), 20)
+		b.cylinder(0.84, 0.9, 0.24, MeshKit.at(p + Vector3(0, 0.06, 0)), BD.tile_base(tile), 20)
 		b.cylinder(0.74, 0.76, 0.08, MeshKit.at(p + Vector3(0, 0.2, 0)), tile, 20)
 		b.torus(0.76, 0.05, MeshKit.at(p + Vector3(0, 0.22, 0)), Color(1, 1, 1).lerp(tile, 0.3), 20, 6)
 		var top := p + Vector3(0, 0.25, 0)

@@ -13,6 +13,7 @@ extends Node3D
 ## The island lives under `beach` (scaled by S), so the giant can reach it from the sea. All game
 ## positions below are beach-local unless they say "global".
 
+const Contrast := preload("res://core/contrast.gd")
 const NetScript := preload("res://core/net.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
 const SfxScript := preload("res://core/sfx.gd")
@@ -51,7 +52,7 @@ const DIG_RADIUS := 1.25
 const SPARKLE_TIME := 9.0
 const CHEST_R := 1.9
 const CARRY_H := 1.5
-const LOOKS: Array[String] = ["pirate", "detective", "farmer", "villager", "athlete", "chef", "princess"]
+const LOOKS := Story.LOOKS  # (story.gd: palette.gd reads it)
 const HAND_BASE := 10  ## carrier code for the giant's hands (10 = left, 11 = right)
 const GROUND := -1
 const FLYING := -2
@@ -919,7 +920,7 @@ func _build_shelf(relics: Array) -> void:
 		var ped := MeshKit.instance(Props.pedestal(), false)
 		ped.position = p
 		shelf.add_child(ped)
-		var r := MeshKit.instance(Props.relic(int(relics[k])), false)
+		var r := Contrast.outline(MeshKit.instance(Props.relic(int(relics[k])), false), Props.RELIC_OUTLINE)
 		r.position = p + Vector3.UP * 0.55
 		r.scale = Vector3.ONE * 1.6
 		shelf.add_child(r)

@@ -33,14 +33,14 @@ var _shown_stage := -1
 
 func build() -> void:
 	arena_r = 5.4
-	build_island(6.6, Color(0.55, 0.7, 0.45))
+	build_island(6.6, Floors.GRASS.memory_tiles)
 	var bm := BoxMesh.new()
 	bm.size = Vector3(TILE, 0.4, TILE)
 	for i in 9:
 		var t := MeshInstance3D.new()
 		t.mesh = bm
 		t.position = tile_pos(i) + Vector3(0, 0.05, 0)
-		t.material_override = MeshKit.material(Color(0.95, 0.95, 0.92))
+		t.material_override = MeshKit.material(Floors.MEMORY_BLANK)
 		add_child(t)
 		tiles.append(t)
 	var sm := SphereMesh.new()
@@ -196,7 +196,7 @@ func _process(delta: float) -> void:
 	var show := stage_i == 1 or stage_i == 4
 	for i in 9:
 		var t := tiles[i]
-		var c: Color = COLORS[colors[i]] if show else Color(0.95, 0.95, 0.92)
+		var c: Color = COLORS[colors[i]] if show else Floors.MEMORY_BLANK
 		var y := 0.05
 		if stage_i == 4 and colors[i] != target:
 			y = -0.35

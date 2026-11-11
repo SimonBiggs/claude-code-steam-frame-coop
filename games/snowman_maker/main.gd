@@ -55,11 +55,11 @@ const HAT := 1
 const TREE_R := 0.5  # gardengen.gd TREE_R
 const HAT_PICS := ["", "tophat", "beanie", "crown"]
 const HAT_COLORS := [Color(1.0, 0.55, 0.15), Color(0.95, 0.25, 0.3), Color(0.9, 0.22, 0.28), Color(1.0, 0.8, 0.2)]
-const BOX_COLORS := [Color(0.75, 0.5, 0.25), Color(0.3, 0.3, 0.4), Color(0.85, 0.2, 0.3), Color(0.95, 0.75, 0.2)]
+const BOX_COLORS := Story.BOX_COLORS
 const GROUND := 0
 const HELD := 1
 const FLYING := 2
-const LOOKS: Array[String] = ["farmer", "chef", "pirate", "bard", "villager", "princess", "viking"]
+const LOOKS: Array[String] = Story.LOOKS
 const INTRO := {
 	"title": "SNOWMAN MAKER",
 	"goal": "Roll, stack, decorate!",
@@ -252,7 +252,7 @@ func _build_world(vr: bool) -> void:
 	disc.height = 0.2
 	disc.radial_segments = 32
 	ground.mesh = disc
-	ground.material_override = MeshKit.material(Color(0.93, 0.96, 1.0))
+	ground.material_override = MeshKit.material(Snowman.GROUND_SNOW)
 	ground.position.y = -0.1
 	add_child(ground)
 	# Glowing build circle.
@@ -1111,6 +1111,7 @@ func _make_ball(id: int, p: Vector3, r: float) -> Dictionary:
 	var m := MeshInstance3D.new()
 	m.mesh = Snowman.ball_mesh()
 	m.material_override = Snowman.snow_material()
+	Snowman.outline_ball(m)
 	n.add_child(m)
 	n.position = Vector3(p.x, r if p.y < r else p.y, p.z)
 	n.scale = Vector3.ONE * r

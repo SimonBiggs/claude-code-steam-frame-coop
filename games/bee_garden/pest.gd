@@ -6,6 +6,10 @@ extends Node3D
 ## The host simulates; the TV draws ghosts from snapshots.
 
 const W := preload("res://games/bee_garden/world.gd")
+## The wasp's yellow body and its dark stripe / head; the aphid's body.
+const WASP := Color(1.0, 0.8, 0.1)
+const WASP_DARK := Color(0.1, 0.08, 0.05)
+const APHID := Color(0.7, 1.0, 0.3)  # bright lime: the old leaf green vanished on the plant's leaves
 
 var main
 var kind := "aphid"
@@ -33,15 +37,15 @@ func _ready() -> void:
 	add_child(body)
 	if kind == "wasp":
 		radius = 0.22
-		W.mesh_node(body, W.sphere(0.13, 10), W.cmat(Color(1.0, 0.8, 0.1)), Vector3(0, 0, 0.08), Vector3(0.9, 0.9, 1.6))
-		var stripe := W.mesh_node(body, W.cyl(0.125, 0.125, 0.05, 10), W.cmat(Color(0.1, 0.08, 0.05)), Vector3(0, 0, 0.1))
+		W.mesh_node(body, W.sphere(0.13, 10), W.cmat(WASP), Vector3(0, 0, 0.08), Vector3(0.9, 0.9, 1.6))
+		var stripe := W.mesh_node(body, W.cyl(0.125, 0.125, 0.05, 10), W.cmat(WASP_DARK), Vector3(0, 0, 0.1))
 		stripe.rotation.x = PI / 2.0
 		W.mesh_node(body, W.sphere(0.08, 8), W.cmat(Color(0.15, 0.12, 0.08)), Vector3(0, 0.02, -0.14))
 		var sting := W.mesh_node(body, W.cyl(0.0, 0.03, 0.08, 6), W.cmat(Color(0.1, 0.08, 0.05)), Vector3(0, 0, 0.32))
 		sting.rotation.x = PI / 2.0
 	else:
 		radius = 0.18
-		W.mesh_node(body, W.sphere(0.1, 10), W.cmat(Color(0.5, 0.85, 0.25)), Vector3.ZERO, Vector3(0.9, 0.7, 1.2))
+		W.mesh_node(body, W.sphere(0.1, 10), W.cmat(APHID), Vector3.ZERO, Vector3(0.9, 0.7, 1.2))
 		W.mesh_node(body, W.sphere(0.055, 8), W.cmat(Color(0.35, 0.65, 0.2)), Vector3(0, 0.02, -0.12))
 		for s in [-1.0, 1.0]:
 			W.mesh_node(body, W.sphere(0.018, 6), W.cmat(Color(0.1, 0.1, 0.1)), Vector3(s * 0.03, 0.05, -0.16))

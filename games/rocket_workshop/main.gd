@@ -42,6 +42,7 @@ extends Node3D
 ##    and a full crew / someone leaving / a lost controller is just a soft sound (and the bolt).
 
 const P := preload("res://games/rocket_workshop/puzzles.gd")
+const Looks := preload("res://games/rocket_workshop/looks.gd")
 const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
 const WorldScript := preload("res://games/rocket_workshop/world.gd")
 const PanelScript := preload("res://games/rocket_workshop/panel.gd")
@@ -90,8 +91,7 @@ var multi_machine := true
 ## Which machine drives which seat (core/net.gd checks it too).
 var seats: ClassicSeats
 const PAD_LEAVE_TIME := 20.0
-const PLAYER_COLORS: Array[Color] = [Color(1.0, 0.55, 0.25), Color(0.3, 0.65, 1.0), Color(0.55, 0.85, 0.35),
-	Color(1.0, 0.4, 0.6), Color(0.75, 0.5, 1.0), Color(1.0, 0.85, 0.25), Color(0.3, 0.9, 0.85)]
+const PLAYER_COLORS: Array[Color] = Looks.PLAYER_COLORS  # (looks.gd: palette.gd reads it)
 const CREW_SPOTS: Array[Vector3] = [Vector3(-2.2, 0, 4.5), Vector3(2.2, 0, 4.5), Vector3(-4.4, 0, 5.6), Vector3(4.4, 0, 5.6),
 	Vector3(-6.4, 0, 4.0), Vector3(6.4, 0, 4.0)]
 const BOARD_PLACES := {"fuel": "left wall", "wires": "left wall", "gauge": "right wall", "switches": "right wall",

@@ -11,6 +11,14 @@ const Track := preload("res://games/roller_coaster/track.gd")
 
 const GAP := 1.75  # distance between car centres
 const BOT_LOOKS: Array[String] = ["villager", "farmer", "chef", "bard", "pirate", "athlete", "golfer"]
+## Cars nobody rides: a CPU rider's (yellow) and a guest's (green); a player's car is their Party colour.
+const BOT_CAR := Color(0.95, 0.85, 0.3)
+const GUEST_CAR := Color(0.6, 0.85, 0.5)
+## A car's seat well: the darker box filling most of its top, so a car shows on pale paths and on grass.
+static func seat_color(col: Color) -> Color:
+	return col.darkened(0.45)
+
+
 const LOOKS: Array[String] = ["knight", "astronaut", "pirate", "chef", "mage", "athlete", "bard"]
 
 var cars: Array[Node3D] = []
@@ -32,7 +40,7 @@ func set_cars(occ: Array) -> void:
 	hands_t.clear()
 	for i in occ.size():
 		var code := int(occ[i])
-		var col := Party.COLORS[code % Party.COLORS.size()] if code >= 0 else Color(0.95, 0.85, 0.3) if code == -1 else Color(0.6, 0.85, 0.5)
+		var col := Party.COLORS[code % Party.COLORS.size()] if code >= 0 else BOT_CAR if code == -1 else GUEST_CAR
 		var car := Node3D.new()
 		car.name = "Car%d" % i
 		add_child(car)
@@ -58,7 +66,7 @@ func set_cars(occ: Array) -> void:
 func _car_mesh(col: Color, front: bool) -> ArrayMesh:
 	var b := MeshKit.builder()
 	b.rounded_box(Vector3(1.05, 0.5, 1.45), 0.15, Transform3D(Basis(), Vector3(0, 0.15, 0)), col)
-	b.box(Vector3(0.9, 0.12, 0.6), Transform3D(Basis(), Vector3(0, 0.42, 0.05)), col.darkened(0.45))
+	b.box(Vector3(0.9, 0.12, 0.6), Transform3D(Basis(), Vector3(0, 0.42, 0.05)), seat_color(col))
 	b.box(Vector3(1.0, 0.35, 0.12), Transform3D(Basis(Vector3.RIGHT, -0.25), Vector3(0, 0.55, 0.55)), col.lightened(0.25))
 	b.box(Vector3(0.8, 0.06, 0.06), Transform3D(Basis(), Vector3(0, 0.62, -0.32)), Color(0.85, 0.85, 0.9))
 	if front:

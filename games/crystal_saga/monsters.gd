@@ -24,7 +24,10 @@ enum { SLIME, MUSHY, BAT, GIANT }
 const GIANT_SCALE := 2.3
 const STOMP_R := 3.4
 const WIND_TIME := 1.3
-const SLIME_COLORS: Array[Color] = [Color(0.45, 0.9, 0.45), Color(1.0, 0.55, 0.75), Color(0.45, 0.75, 1.0), Color(0.75, 0.55, 1.0)]
+const Realm := preload("res://games/crystal_saga/realm.gd")  # (monster colours live there: palette.gd reads them)
+const BAT_COLOR := Realm.BAT_COLOR
+const MUSHY_COLOR := Realm.MUSHY_COLOR
+const SLIME_COLORS: Array[Color] = Realm.SLIME_COLORS
 
 var mons := {}  ## id -> Dictionary
 var next_id := 1
@@ -68,10 +71,10 @@ func _make(id: int, kind: int, p: Vector3) -> Dictionary:
 	match kind:
 		BAT:
 			var fk := String(skins[2]) if skins.size() == 3 else "bat"
-			node = Creatures.monster(fk, {"color": Color(0.55, 0.4, 0.8), "seed": id} if fk == "bat" else {"seed": id})
+			node = Creatures.monster(fk, {"color": BAT_COLOR, "seed": id} if fk == "bat" else {"seed": id})
 		MUSHY:
 			var wk := String(skins[1]) if skins.size() == 3 else "mushroom"
-			node = Creatures.monster(wk, {"color": Color(0.95, 0.35, 0.4), "seed": id} if wk == "mushroom" else {"seed": id})
+			node = Creatures.monster(wk, {"color": MUSHY_COLOR, "seed": id} if wk == "mushroom" else {"seed": id})
 		GIANT:
 			var body_col: Color = giant_look[0] if giant_look.size() == 2 else Color(0.5, 0.45, 0.6)
 			var glow_col: Color = giant_look[1] if giant_look.size() == 2 else Color(0.8, 0.4, 1.0)
@@ -455,8 +458,7 @@ func show_tell(a: String, data: Array, secs: float) -> void:
 				rings.warn(spot2, 0.55, col, secs, 0.06)
 
 
-const TELL_COLORS := {"stomp": Color(1.0, 0.5, 0.9), "rain": Color(0.45, 0.8, 1.0), "roll": Color(1.0, 0.6, 0.2),
-	"call": Color(0.5, 1.0, 0.5)}
+const TELL_COLORS := Realm.TELL_COLORS
 
 
 func clear_tells() -> void:

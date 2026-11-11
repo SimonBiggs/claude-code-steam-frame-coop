@@ -2,6 +2,7 @@ extends RefCounted
 ## Builds the snowy village square at dusk: sky, warm lamps, pine trees, cottages, fairy lights
 ## and falling snow. Everything is procedural and batched (MultiMesh) to keep draw calls low.
 const UiKit := preload("res://core/ui_kit.gd")
+const Looks := preload("res://games/snowball_blitz/looks.gd")
 
 const BULB_SHADER := """
 shader_type spatial;
@@ -17,8 +18,9 @@ void fragment() {
 
 const SNOW_GROUND_SHADER := """
 shader_type spatial;
-uniform vec3 snow : source_color = vec3(0.86, 0.9, 1.0);
-uniform vec3 shade : source_color = vec3(0.62, 0.68, 0.86);
+uniform vec3 snow : source_color;
+uniform vec3 shade : source_color;
+uniform float min_mix = 0.55;
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float noise(vec2 p) {
 	vec2 i = floor(p);
@@ -29,7 +31,7 @@ float noise(vec2 p) {
 void fragment() {
 	vec3 world = (INV_VIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	float n = noise(world.xz * 0.35) * 0.6 + noise(world.xz * 1.7) * 0.4;
-	ALBEDO = mix(shade, snow, 0.55 + 0.45 * n);
+	ALBEDO = mix(shade, snow, min_mix + (1.0 - min_mix) * n);
 	ROUGHNESS = 0.85;
 	// Tiny sparkles in the snow.
 	float s = step(0.985, hash(floor(world.xz * 18.0)));
@@ -44,8 +46,9 @@ static func build(main: Node3D, radius: float, vr: bool) -> void:
 	var env := WorldEnvironment.new()
 	var e := Environment.new()
 	var sky_mat := ProceduralSkyMaterial.new()
-	sky_mat.sky_top_color = Color(0.12, 0.12, 0.32)
-	sky_mat.sky_horizon_color = Color(0.95, 0.55, 0.45)
+	var dusk := Looks.sky(0.0, false)
+	sky_mat.sky_top_color = dusk[0]
+	sky_mat.sky_horizon_color = dusk[1]
 	sky_mat.sky_curve = 0.12
 	sky_mat.ground_horizon_color = Color(0.55, 0.45, 0.6)
 	sky_mat.ground_bottom_color = Color(0.2, 0.2, 0.3)
@@ -96,6 +99,9 @@ static func build(main: Node3D, radius: float, vr: bool) -> void:
 	var gmat := ShaderMaterial.new()
 	gmat.shader = Shader.new()
 	gmat.shader.code = SNOW_GROUND_SHADER
+	gmat.set_shader_parameter("snow", Looks.SNOW)
+	gmat.set_shader_parameter("shade", Looks.SNOW_SHADE)
+	gmat.set_shader_parameter("min_mix", Looks.SNOW_MIN_MIX)
 	ground.material_override = gmat
 	main.add_child(ground)
 

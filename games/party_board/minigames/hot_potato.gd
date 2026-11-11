@@ -33,7 +33,7 @@ func build() -> void:
 	arena_r = 6.0
 	use_pawn = true
 	pawn_speed = 7.5
-	build_island(arena_r + 1.0, Color(0.62, 0.72, 0.36))
+	build_island(arena_r + 1.0, Floors.GRASS.hot_potato)
 	var b := MeshKit.Builder.new()
 	b.sphere(0.55, MeshKit.at(Vector3.ZERO), Color(0.12, 0.12, 0.16), 14)
 	b.cylinder(0.14, 0.18, 0.3, MeshKit.at(Vector3(0, 0.6, 0)), Color(0.4, 0.4, 0.45), 8)

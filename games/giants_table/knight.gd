@@ -8,6 +8,7 @@ extends Node3D
 const UiKit := preload("res://core/ui_kit.gd")
 
 const W := preload("res://games/giants_table/world.gd")
+const Looks := preload("res://games/giants_table/looks.gd")
 const BoltScript := preload("res://games/giants_table/bolt.gd")
 
 const SPEED := 4.6
@@ -90,7 +91,7 @@ func _ready() -> void:
 	body.material_override = body_mat
 	body.position.y = 0.35
 	pivot.add_child(body)
-	var steel := W.mat(Color(0.82, 0.84, 0.9), 0.0, 0.3)
+	var steel := W.mat(Looks.KNIGHT_HELM, 0.0, 0.3)
 	steel.metallic = 0.7
 	var head := MeshInstance3D.new()
 	head.mesh = W.sphere(0.17, 10)

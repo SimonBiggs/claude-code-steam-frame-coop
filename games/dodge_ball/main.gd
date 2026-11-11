@@ -53,9 +53,8 @@ const SPEED := 4.8
 const OUT_TIME := 3.0
 const GIANT := 100  # holder / thrower code for the giant (runners use their slot numbers)
 const CPU_IDS: Array[int] = [10, 11]
-const LOOKS: Array[String] = ["knight", "mage", "archer", "bard", "pirate", "chef", "astronaut"]
-const BALL_COLORS: Array[Color] = [Color(1.0, 0.35, 0.4), Color(1.0, 0.75, 0.2), Color(0.35, 0.85, 0.45),
-	Color(0.35, 0.65, 1.0), Color(0.85, 0.45, 1.0), Color(1.0, 0.55, 0.85)]
+const LOOKS: Array[String] = World.LOOKS
+const BALL_COLORS: Array[Color] = World.BALL_COLORS
 
 var round_time := 120.0  ## seconds per round (bots shorten it)
 var results_wait := 12.0  ## seconds the results stay up before the next round starts by itself
@@ -251,6 +250,7 @@ func _make_ball(i: int) -> void:
 	sm.rings = 8
 	b.mesh.mesh = sm
 	b.mesh.material_override = MeshKit.material(BALL_COLORS[i % BALL_COLORS.size()], 0.25)
+	World.Contrast.outline(b.mesh, World.BALL_OUTLINE)
 	b.node.add_child(b.mesh)
 	add_child(b.node)
 	b.blob = world.make_blob(BALL_R * 1.3)

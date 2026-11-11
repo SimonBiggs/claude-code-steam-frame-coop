@@ -275,17 +275,19 @@ const SIMPLE_LEVELS := [
 
 
 ## name -> [floor A, floor B, walls, decoration, room background]
+## Floors A / B: every marble (worlds.gd PLAYER_COLORS) must stand out on both (palette.gd, tests/contrast_test.gd;
+## the yellow marble vanished on the old beach / toys / farm creams).
 const THEMES := {
 	"garden": [Color(0.86, 0.96, 0.78), Color(0.78, 0.9, 0.68), Color(0.4, 0.72, 0.38), "flowers", Color(0.62, 0.84, 1.0)],
-	"beach": [Color(1.0, 0.93, 0.74), Color(0.97, 0.87, 0.64), Color(0.35, 0.7, 0.95), "shells", Color(0.55, 0.85, 1.0)],
+	"beach": [Color(1.0, 0.93, 0.74), Color(0.98, 0.91, 0.72), Color(0.35, 0.7, 0.95), "shells", Color(0.55, 0.85, 1.0)],
 	"castle": [Color(0.86, 0.85, 0.82), Color(0.78, 0.77, 0.74), Color(0.55, 0.55, 0.62), "flags", Color(0.7, 0.75, 0.95)],
 	"candy": [Color(1.0, 0.9, 0.96), Color(0.97, 0.82, 0.92), Color(1.0, 0.45, 0.7), "lollipops", Color(1.0, 0.8, 0.92)],
 	"ice": [Color(0.9, 0.97, 1.0), Color(0.82, 0.92, 0.99), Color(0.55, 0.75, 0.95), "snow", Color(0.75, 0.88, 1.0)],
-	"toys": [Color(0.98, 0.92, 0.78), Color(0.93, 0.85, 0.68), Color(1.0, 0.6, 0.2), "blocks", Color(0.8, 0.85, 1.0)],
+	"toys": [Color(0.98, 0.92, 0.78), Color(0.94, 0.88, 0.74), Color(1.0, 0.6, 0.2), "blocks", Color(0.8, 0.85, 1.0)],
 	"race": [Color(0.86, 0.86, 0.88), Color(0.72, 0.72, 0.76), Color(0.95, 0.25, 0.25), "cones", Color(0.65, 0.85, 1.0)],
 	"jungle": [Color(0.8, 0.92, 0.7), Color(0.7, 0.84, 0.6), Color(0.35, 0.55, 0.3), "leaves", Color(0.6, 0.85, 0.7)],
 	"space": [Color(0.42, 0.4, 0.62), Color(0.36, 0.34, 0.56), Color(0.6, 0.4, 1.0), "crystals", Color(0.12, 0.1, 0.25)],
-	"farm": [Color(0.92, 0.86, 0.68), Color(0.86, 0.78, 0.58), Color(0.7, 0.45, 0.28), "grass", Color(0.7, 0.88, 1.0)],
+	"farm": [Color(0.94, 0.89, 0.74), Color(0.8, 0.74, 0.6), Color(0.7, 0.45, 0.28), "grass", Color(0.7, 0.88, 1.0)],
 	"volcano": [Color(0.55, 0.45, 0.42), Color(0.48, 0.38, 0.36), Color(0.35, 0.2, 0.18), "lava", Color(0.45, 0.2, 0.15)],
 	"rainbow": [Color(0.98, 0.96, 1.0), Color(0.92, 0.9, 0.98), Color(1.0, 0.5, 0.3), "rainbow", Color(0.85, 0.8, 1.0)],
 }

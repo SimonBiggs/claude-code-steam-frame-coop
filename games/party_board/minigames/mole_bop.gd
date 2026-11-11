@@ -30,7 +30,7 @@ const GIANT_CD := 1.1
 func build() -> void:
 	arena_r = 5.6
 	walk_speed = 5.0
-	build_island(arena_r + 1.0, Color(0.48, 0.76, 0.36))
+	build_island(arena_r + 1.0, Floors.GRASS.mole_bop)
 	holes.clear()
 	holes.append(Vector3.ZERO)
 	for k in 8:

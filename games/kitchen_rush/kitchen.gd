@@ -4,11 +4,12 @@ extends RefCounted
 
 const L := preload("res://games/kitchen_rush/layout.gd")
 const ItemScript := preload("res://games/kitchen_rush/item.gd")
+const Looks := preload("res://games/kitchen_rush/looks.gd")
 
 const FLOOR_SHADER := """
 shader_type spatial;
-uniform vec3 a : source_color = vec3(0.99, 0.95, 0.86);
-uniform vec3 b : source_color = vec3(0.55, 0.86, 0.82);
+uniform vec3 a : source_color;
+uniform vec3 b : source_color;
 void fragment() {
 	vec3 w = (INV_VIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	vec2 g = floor(w.xz / 0.7);
@@ -42,6 +43,8 @@ static func build(main: Node3D) -> Dictionary:
 	var fm := ShaderMaterial.new()
 	fm.shader = Shader.new()
 	fm.shader.code = FLOOR_SHADER
+	fm.set_shader_parameter("a", Looks.FLOOR_A)
+	fm.set_shader_parameter("b", Looks.FLOOR_B)
 	fl.material_override = fm
 	var gm := ShaderMaterial.new()
 	gm.shader = Shader.new()
@@ -91,10 +94,10 @@ static func build(main: Node3D) -> Dictionary:
 	var cw := L.COUNTER_HALF.x * 2.0
 	var cd := L.COUNTER_HALF.y * 2.0
 	_box(main, Vector3(0, (top - 0.05) / 2, 0), Vector3(cw - 0.08, top - 0.05, cd - 0.08), Color(0.95, 0.6, 0.35))
-	_box(main, Vector3(0, top - 0.025, 0), Vector3(cw, 0.05, cd), Color(0.97, 0.97, 0.95))
+	_box(main, Vector3(0, top - 0.025, 0), Vector3(cw, 0.05, cd), Looks.COUNTER_TOP)
 	_collider(statics, Vector3(0, top / 2, 0), Vector3(cw, top, cd))
-	_box(main, Vector3(0, top + 0.003, -0.13), Vector3(cw - 0.2, 0.006, 0.2), Color(1.0, 0.75, 0.3))  # pass strip
-	_box(main, Vector3(0, top + 0.01, L.BOARD.z), Vector3(0.34, 0.02, 0.24), Color(0.85, 0.65, 0.4))  # chopping board
+	_box(main, Vector3(0, top + 0.003, -0.13), Vector3(cw - 0.2, 0.006, 0.2), Looks.PASS_STRIP)  # pass strip
+	_box(main, Vector3(0, top + 0.01, L.BOARD.z), Vector3(0.34, 0.02, 0.24), Looks.BOARD)  # chopping board
 	for p in L.PLATE_HOME:
 		var ring := _box(main, Vector3(p.x, top + 0.003, p.z), Vector3(0.3, 0.006, 0.3), Color(0.75, 0.88, 1.0))
 		ring.rotation.y = PI / 4.0

@@ -71,12 +71,14 @@ func _ready() -> void:
 	var mi := MeshInstance3D.new()
 	mi.mesh = RunnerLook.body_mesh(col, String(look.get("costume", "party_hat")), String(look.get("pattern", "plain")))
 	mi.material_override = _mat()
+	RunnerLook.Contrast.outline(mi, RunnerLook.OUTLINE)
 	body.add_child(mi)
 	for i in 2:
 		var s := -1.0 if i == 0 else 1.0
 		var arm := MeshInstance3D.new()
 		arm.mesh = RunnerLook.arm_mesh(col)
 		arm.material_override = mi.material_override
+		RunnerLook.Contrast.outline(arm, RunnerLook.OUTLINE)
 		arm.position = Vector3(s * (RunnerLook.RADIUS + 0.02), 0.62, 0.0)
 		arm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		body.add_child(arm)
@@ -84,6 +86,7 @@ func _ready() -> void:
 		var foot := MeshInstance3D.new()
 		foot.mesh = RunnerLook.foot_mesh(col)
 		foot.material_override = mi.material_override
+		RunnerLook.Contrast.outline(foot, RunnerLook.OUTLINE)
 		foot.position = Vector3(s * 0.15, 0.0, 0.0)
 		foot.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(foot)

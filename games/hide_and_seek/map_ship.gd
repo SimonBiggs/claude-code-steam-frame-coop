@@ -58,6 +58,12 @@ const DECOYS := [
 	[4, Vector3(8.4, 0, -1.5), 0.0],
 ]
 
+## The spaceship's floors (FLOOR_SHADER tokens; palette.gd reads them), room by room, plus the corridor's glowing
+## guide line and the cargo bay's hazard stripes.
+const FLOORS := {"DECK": Color(0.55, 0.58, 0.64), "CORRIDOR": Color(0.32, 0.35, 0.42), "GUIDE": Color(0.3, 0.9, 1.0),
+	"MESS": Color(0.78, 0.64, 0.5), "CARGO": Color(0.5, 0.52, 0.5), "HAZARD": Color(0.95, 0.8, 0.2),
+	"HAZARD_DARK": Color(0.15, 0.15, 0.15), "QUARTERS": Color(0.45, 0.55, 0.78), "ENGINE": Color(0.6, 0.5, 0.42),
+	"BRIDGE": Color(0.28, 0.32, 0.5), "HYDRO": Color(0.45, 0.62, 0.45)}
 const FLOOR_SHADER := """
 shader_type spatial;
 varying vec3 wpos;
@@ -66,20 +72,20 @@ void fragment() {
 	vec2 f = fract(wpos.xz);
 	float seam = smoothstep(0.0, 0.03, f.x) * smoothstep(0.0, 0.03, f.y);
 	float rivet = step(0.06, length(f - vec2(0.1)));
-	vec3 c = vec3(0.55, 0.58, 0.64);
+	vec3 c = $DECK;
 	vec3 glow = vec3(0.0);
 	if (wpos.z > -1.0 && wpos.z < 2.0) {                           // corridor: a glowing guide line
-		c = vec3(0.32, 0.35, 0.42);
-		if (abs(wpos.z - 0.5) < 0.06) { c = vec3(0.3, 0.9, 1.0); glow = c * 0.6; }
-	} else if (wpos.z >= 2.0 && abs(wpos.x) < 3.0) { c = vec3(0.78, 0.64, 0.5); }   // mess hall
+		c = $CORRIDOR;
+		if (abs(wpos.z - 0.5) < 0.06) { c = $GUIDE; glow = c * 0.6; }
+	} else if (wpos.z >= 2.0 && abs(wpos.x) < 3.0) { c = $MESS; }   // mess hall
 	else if (wpos.z >= 2.0 && wpos.x > 3.0) {                                       // cargo bay
-		c = vec3(0.5, 0.52, 0.5);
-		if (wpos.z > 6.5) { c = mod(floor((wpos.x + wpos.z) * 2.0), 2.0) < 1.0 ? vec3(0.95, 0.8, 0.2) : vec3(0.15, 0.15, 0.15); }
+		c = $CARGO;
+		if (wpos.z > 6.5) { c = mod(floor((wpos.x + wpos.z) * 2.0), 2.0) < 1.0 ? $HAZARD : $HAZARD_DARK; }
 	}
-	else if (wpos.z >= 2.0) { c = vec3(0.45, 0.55, 0.78); }                         // crew quarters
-	else if (wpos.x < -3.0) { c = vec3(0.6, 0.5, 0.42); }                           // engine room
-	else if (wpos.x < 3.0) { c = vec3(0.28, 0.32, 0.5); }                           // bridge
-	else { c = vec3(0.45, 0.62, 0.45); }                                            // hydroponics
+	else if (wpos.z >= 2.0) { c = $QUARTERS; }                         // crew quarters
+	else if (wpos.x < -3.0) { c = $ENGINE; }                           // engine room
+	else if (wpos.x < 3.0) { c = $BRIDGE; }                           // bridge
+	else { c = $HYDRO; }                                            // hydroponics
 	ALBEDO = c * mix(0.6, 1.0, seam) * mix(0.7, 1.0, rivet);
 	EMISSION = glow;
 	ROUGHNESS = 0.5;
@@ -100,7 +106,7 @@ static func data(_spec: Dictionary = {}) -> Dictionary:
 static func build(root: Node3D, spec: Dictionary = {}) -> Dictionary:
 	var ctx: Dictionary = W.new_ctx(root)
 	W.environment_for(root, Color(0.03, 0.03, 0.09), Color(0.85, 0.9, 1.0), 0.6, 0.3)
-	W.shader_floor(ctx, Vector2(18.0, 14.0), Vector3.ZERO, FLOOR_SHADER)
+	W.shader_floor(ctx, Vector2(18.0, 14.0), Vector3.ZERO, W.shader_with(FLOOR_SHADER, FLOORS))
 	_hull(ctx)
 	_crew(ctx)
 	_mess(ctx)

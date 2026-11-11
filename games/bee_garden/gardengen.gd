@@ -56,6 +56,9 @@ const WASP_STAY := {"gentle": 12.0, "brave": 16.0, "hard": 20.0}      # a wasp n
 const WASP_STEAL := 6.0      # it takes a drop of honey this often while it hangs round the hive
 const STORM_FROM := {"gentle": 7, "brave": 6, "hard": 5}              # storm clouds start this round
 const STORM_SECS := {"gentle": 7.0, "brave": 9.0, "hard": 11.0}       # flowers under the cloud close this long
+## The warning rings' colours: a wasp visit (at the hive) and a storm cloud (main.gd).
+const WASP_WARN := Color(1.0, 0.75, 0.1)
+const STORM_WARN := Color(0.55, 0.6, 0.95)
 const WARN_S := 3.5          # the warning ring shows this long before a wasp or a storm arrives
 const STORM_COVER := 4       # a storm cloud never covers more than this many spots (or the bees' first flower)
 ## Queen Bea's gifts (picked between rounds on the shared pick orbs; each once a visit): [id, name, picture, colour].
