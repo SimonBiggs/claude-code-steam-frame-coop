@@ -17,7 +17,7 @@ const GAME_ID := "duo_arena"
 const ARENA_RADIUS := 18.0
 const FINALE_WAVE := 15
 const LEG := 5  # waves per zone (a boss ends every leg)
-const MODES: Array[String] = ["gentle", "brave", "hard"]
+const MODES: Array[String] = preload("res://core/pick_orbs.gd").MODE_IDS
 ## Keep clear: the players' start spots and the pick orbs (main.gd PRACTICE_SPOTS / zone.gd ORB_ROW).
 const SAFE_SPOTS: Array[Vector3] = [Vector3.ZERO, Vector3(-2.5, 0, 4), Vector3(2.5, 0, 4), Vector3(7.5, 0, 4),
 	Vector3(-6, 0, 7.5), Vector3(-2, 0, 7.5), Vector3(2, 0, 7.5), Vector3(6, 0, 7.5),
