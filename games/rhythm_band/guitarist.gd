@@ -187,6 +187,9 @@ func _up_for(event: InputEvent) -> bool:
 ## A lane button: hit the nearest open note in that lane inside the timing window.
 func press(lane: int) -> void:
 	lane_flash[lane] = 1.0
+	if main.state == "pick":
+		main.pick_press(self, lane)  # the pick orbs: X / A / B take the picture over that button (picks.gd)
+		return
 	if main.state == "practice":
 		if prac_step < main.PRACTICE_LANES.size() and lane == main.PRACTICE_LANES[prac_step] and prac_t > 0.3:
 			prac_step += 1
