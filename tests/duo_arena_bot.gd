@@ -183,6 +183,7 @@ func _simple_steps() -> Array:
 				print("BOT VR: sword demo shown=%s, swaps=%d, wrist '%s'" % [p0.has_meta("sword_demo"),
 					int(p0.get_meta("swapped", 0)), p0.wrist_label.text])],
 		[30.0, func() -> void: main.debug_event("dive")],
+		[end_t - 1.0, func() -> void: _deep_checks()],
 		[end_t, func() -> void:
 			if not main.game_over:
 				print("BOT: forcing game over")
@@ -213,6 +214,10 @@ func _drive_vr(p, delta: float) -> void:
 	else:
 		var swing := sin(t * 7.0)
 		p.hand_l.position = cam.position + Vector3(swing * 0.6, -0.3, -0.5)
+	var orb = _orb_for(p)
+	if orb != null:
+		p.hand_r.global_basis = UiKit.aim((orb.global_position - p.hand_r.global_position).normalized(), Vector3.UP)
+		return
 	if best == null:
 		return
 	var c: Vector3 = best.center()
@@ -229,7 +234,22 @@ func _drive_vr(p, delta: float) -> void:
 		print("BOT VR: sword drawn")
 
 
+## The pick orb a bot player goes for (zone.gd orbs: each player a different one), or null.
+func _orb_for(p):
+	var orbs: Array = main.zone.orbs if main.zone != null else []
+	if orbs.is_empty():
+		return null
+	var o = orbs[(p.index + main.wave) % orbs.size()]
+	return o if is_instance_valid(o) and o.is_inside_tree() else null
+
+
 func _aim(p) -> void:
+	var orb = _orb_for(p)
+	if orb != null:
+		var od: Vector3 = orb.global_position - (p.global_position + Vector3.UP * 1.55)
+		p.yaw = atan2(-od.x, -od.z)
+		p.pitch = atan2(od.y, Vector2(od.x, od.z).length())
+		return
 	var best = null
 	var best_d := INF
 	for e in get_tree().get_nodes_in_group("enemies"):
@@ -269,7 +289,36 @@ func _report(mode: String) -> void:
 	for e in get_tree().get_nodes_in_group("enemies"):
 		kinds[e.kind] = int(kinds.get(e.kind, 0)) + 1
 	var d = main.director()
+	if main.zone != null:
+		print("BOT   zone=%s pillars=%d pads=%d orbs=%d stage=%s mode=%s heroes=%s perks=%s story=%d" % [main.zone.zone_id,
+			main.zone.lay.get("pillars", []).size(), main.zone.lay.get("pads", []).size(), main.zone.orbs.size(), main.pick_stage,
+			main.game_mode, main.heroes, main.perks, main.story_queue.size()])
 	print("BOT %s t=%.0f wave=%d score=%d enemies=%d slots=%d active=%s views=%d" % [mode, t, main.wave, main.score,
 		get_tree().get_nodes_in_group("enemies").size(), main.players.size(), ", ".join(act), views])
 	print("BOT   kinds=%s combo=%d best=%d event=%s mood=%s boss=%s %.2f left=%d fish=%s" % [kinds, d.combo, d.best_combo,
 		d.event_name, d.mood, d.boss_name, d.boss_frac, d.left, main.sky_fish.dive_progress() if main.sky_fish else -2.0])
+
+
+## The deep content (arenagen / zone / picks / story) works: a zone was built, everyone picked a hero, Nova told the
+## story. Fails print SCRIPT ERROR (the runner's verdict); the summary is the BOT RESULT line.
+func _deep_checks() -> void:
+	var fails: Array[String] = []
+	var z = main.zone
+	if z == null or z.zone_id == "":
+		fails.append("no zone was built")
+	elif (z.lay.get("pillars", []) as Array).size() < 2:
+		fails.append("zone %s has %d pillars" % [z.zone_id, (z.lay.get("pillars", []) as Array).size()])
+	if main.net.mode != "client":
+		if main.wave < 1:
+			fails.append("wave 1 never started (pick stage '%s')" % main.pick_stage)
+		var need: int = main.players.filter(func(p) -> bool: return p.active).size()
+		if main.heroes.size() < mini(need, 1):
+			fails.append("nobody got a hero (%s)" % [main.heroes])
+		if main.run_seed == 0 and not OS.has_environment("DA_SEED"):
+			fails.append("no run seed")
+	if main.story_shown < 1:
+		fails.append("no story card was shown")
+	for f in fails:
+		print("SCRIPT ERROR: duo_arena deep: %s" % f)
+	print("BOT RESULT: %s (deep: zone %s, mode %s, heroes %s, perks %s, wave %d)" % ["PASS" if fails.is_empty() else "FAIL",
+		z.zone_id if z != null else "-", main.game_mode, main.heroes, main.perks, main.wave])

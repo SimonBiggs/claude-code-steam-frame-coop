@@ -113,7 +113,7 @@ func tick(delta: float) -> void:
 	var mats: Array = main.get_meta("crowd_mats", [])
 	for m in mats:
 		(m as ShaderMaterial).set_shader_parameter("cheer", cheer_level)
-	var want: Vector3 = MOODS.get(mood, MOODS[""])
+	var want: Vector3 = MOODS.get(mood, MOODS[""]) if mood != "" else main.get_meta("zone_col", MOODS[""])  # resting colour: the zone's
 	mood_col = mood_col.lerp(want, 1.0 - exp(-3.0 * delta))
 	var floor_mat: ShaderMaterial = (main.get_meta("floor_mat") if main.has_meta("floor_mat") else null)
 	if floor_mat != null:

@@ -23,6 +23,22 @@ const TreeScript := preload("res://games/duo_arena/skill_map.gd")
 const TurretScript := preload("res://games/duo_arena/turret.gd")
 const JoinListenerScript := preload("res://games/duo_arena/join_listener.gd")
 const DirectorScript := preload("res://games/duo_arena/director.gd")
+const Gen := preload("res://games/duo_arena/arenagen.gd")
+const Bosses := preload("res://games/duo_arena/bosses.gd")
+const Picks := preload("res://games/duo_arena/picks.gd")
+const ZoneScript := preload("res://games/duo_arena/zone.gd")
+const ProgressScript := preload("res://games/duo_arena/progress.gd")
+const Save := preload("res://core/save.gd")
+const Seeded := preload("res://core/seeded.gd")
+const Telemetry := preload("res://core/telemetry.gd")
+const StoryCard := preload("res://core/story_card.gd")
+const GAME_ID := "duo_arena"
+## NOVA, the arena's little light-bot (story_pictures.gd nova): she tells the story on picture cards. The monsters took
+## Neon City's lights; every wave the family clears lights one again (zone.gd pylons, saved). Runs travel through seeded
+## ZONES with hazard pads (arenagen.gd), bosses TELL their attacks (bosses.gd), everyone picks a HERO before wave 1 and a
+## PERK after every wave (picks.gd orbs), the first game of a visit picks GENTLE / BRAVE / HARD, and the first game each
+## day is TODAY'S ARENA (the day's seed). Env: DA_MODE=gentle|brave|hard, DA_SEED=n, DA_ZONE=<zone id> (What's New try).
+const NOVA_COLOR := Color(0.35, 0.85, 1.0)
 
 ## SIMPLE MODE (the family: "simple games are the fun games", "words everywhere"): just shoot cute
 ## monsters together and revive each other. It turns off the skill map / XP / turrets, achievement
@@ -166,6 +182,27 @@ var practice_t := 0.0
 var practice_gap := 1.5
 var practice_target = null
 var solo := false  # simple mode: the VR player started without the TV (it can still join later)
+var save: Save
+var zone: Node3D
+var run_seed := 0
+var daily := false
+var game_mode := "brave"
+var route: Array = []
+var leg := -1
+var pick_stage := ""  # host / local: "mode", "hero", "perk" while orbs are up
+var pick_ids: Array = []
+var pick_t := 0.0
+var picked := {}  # slot -> orb index (this stage)
+var heroes := {}  # slot -> hero id
+var perks := {}  # slot -> [perk ids]
+var story_queue: Array = []
+var story_t := 0.0
+var vr_story: Node3D
+var run_logged := false
+var bosses_run: Array = []
+var pads_told := false
+var story_shown := 0  # story cards shown on this machine (bots check it)
+var wave_plan := {}
 var debut_kind := ""  # simple mode: the monster type that is new this wave (it comes first)
 
 
@@ -173,6 +210,10 @@ func _ready() -> void:
 	randomize()
 	WorldScript.build(self, ARENA_RADIUS)
 	_build_hud()
+	_init_save()
+	zone = ZoneScript.new()
+	zone.main = self
+	add_child(zone)
 	var menu := PauseMenuScript.new()
 	menu.main = self
 	add_child(menu)
@@ -180,6 +221,8 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
+	for k in ["zone", "keep", "orbs"]:
+		net.sticky_event(k)
 	seats = ClassicSeats.new(self, {
 		"max_seats": MAX_PLAYERS,
 		"no_keys": PlayerScript.NO_KEYS,
@@ -226,6 +269,8 @@ func _setup_game(mode: String) -> void:
 		_show_center("CONNECTED", 1.5)
 	else:
 		_show_center("GET READY", 2.0)
+	if mode != "client":
+		_start_run()
 
 
 func next_net_id() -> int:
@@ -964,6 +1009,12 @@ func debug_skip_to_wave(n: int) -> void:
 	wave = n - 1
 	in_break = true
 	break_timer = 0.5
+	while pick_stage != "":
+		_finish_pick()
+	for p in _pick_players():
+		if not heroes.has(p.index):
+			heroes[p.index] = String(save.data.hero)  # (no hero orbs when skipping: the family's last hero)
+			Picks.apply(p, "hero", heroes[p.index])
 
 
 ## Test hook: join a TV player without a controller (index -1: the next free seat).
@@ -1054,6 +1105,7 @@ func _process(delta: float) -> void:
 		sky_fish.main = self
 		add_child(sky_fish)
 	_check_say(delta)
+	_update_story(delta)
 	if ghost_cam:
 		ghost_cam.global_transform = players[0].net_head
 	if mirror_vp:
@@ -1083,6 +1135,11 @@ func _process(delta: float) -> void:
 		return
 
 	_update_tether(delta)
+	if pick_stage != "":
+		_pick_tick(delta)
+		if pick_stage != "":
+			return  # the orbs hold the game until everyone has picked (or the time runs out)
+	zone.host_step(delta, not in_break and wave > 0)
 	if net.mode == "host" and not net.connected and not solo:
 		if not SIMPLE_MODE or wave > 0:
 			if wave == 0:
@@ -1109,10 +1166,10 @@ func _process(delta: float) -> void:
 		spawn_timer -= delta
 		var alive := get_tree().get_nodes_in_group("enemies").size()
 		var extra := _extra_players()
-		if spawn_timer <= 0.0 and alive < 8 + wave + 3 * extra:
+		if spawn_timer <= 0.0 and alive < int(wave_plan.get("alive", 8 + wave + 3 * extra)):
 			_spawn_enemy(_pick_kind())
 			to_spawn -= 1
-			spawn_timer = maxf(0.25, 1.1 - wave * 0.07) / (1.0 + 0.15 * extra)
+			spawn_timer = float(wave_plan.get("gap", maxf(0.25, 1.1 - wave * 0.07) / (1.0 + 0.15 * extra)))
 	elif get_tree().get_nodes_in_group("enemies").is_empty():
 		_end_wave()
 
@@ -1159,6 +1216,7 @@ func _practice_done() -> void:
 	sound("cheer", -4.0, 1.2)
 	_show_center("GO!", 1.0)
 	break_timer = 1.5
+	_begin_run_picks()
 
 
 ## Simple mode: no TV yet after the practice, so the VR player starts alone (the TV seats wake up
@@ -1195,7 +1253,11 @@ func _start_wave() -> void:
 	in_break = false
 	wave_downs = 0
 	print("Wave %d started" % wave)
-	to_spawn = int((4 + wave * 3) * (1.0 + 0.3 * _extra_players()))
+	wave_plan = Gen.plan(wave, game_mode, active_player_count())
+	to_spawn = int(wave_plan.count) * (2 if bool(wave_plan.boss) else 1)  # (halved again below for bosses)
+	if (wave - 1) / Gen.LEG != leg:
+		_enter_leg((wave - 1) / Gen.LEG)
+	pads_told = false
 	spawn_timer = 0.5
 	sound("wave")
 	achievements().on_wave_started(wave)
@@ -1203,6 +1265,10 @@ func _start_wave() -> void:
 		create_tween().tween_property(help_label, "modulate:a", 0.0, 1.0)
 	var boss_kind := _boss_for_wave(wave)
 	director().on_wave_started(wave, boss_kind)
+	if boss_kind != "":
+		var bi := Bosses.info(boss_kind)
+		_story_for_all("The %s!" % String(bi.name).capitalize(), String(bi.pic), bi.color)
+		_story_for_all("Run out of the red ring!", String(bi.pic), Color(1.0, 0.3, 0.3))
 	debut_kind = ""
 	if SIMPLE_MODE:
 		for k in KIND_UNLOCK:
@@ -1245,7 +1311,8 @@ func _end_wave() -> void:
 	break_timer = 3.0
 	achievements().on_wave_cleared()
 	director().on_wave_cleared()
-	var upgrade_text := _grant_upgrade()
+	var upgrade_text := ""  # (perks are picked now: picks.gd orbs after the wave)
+	_save_wave_cleared()
 	for p in players:
 		if p.is_down:
 			p.revive(0.5)
@@ -1255,15 +1322,18 @@ func _end_wave() -> void:
 	if wave_downs == 0 and active_player_count() > 0:
 		score += 500
 		bonus = "\nNOBODY WENT DOWN: +500!"
+	if wave % Gen.LEG == 0:
+		_enter_leg(wave / Gen.LEG)  # after a boss: Nova warps the arena to the next zone
 	if wave == FINALE_WAVE and not won:
 		_victory()
 		return
+	_begin_pick("perk")
 	if SIMPLE_MODE:
 		_show_center("WAVE %d CLEAR!" % wave, 2.0)
 		director().cheer(0.5, 0.5)
 		sound("clear")
 		return
-	_show_center("WAVE %d CLEARED%s\n\nUPGRADE: %s" % [wave, bonus, upgrade_text], 2.6)
+	_show_center("WAVE %d CLEARED%s" % [wave, bonus], 2.6)
 	sound("clear")
 
 
@@ -1271,6 +1341,9 @@ func _end_wave() -> void:
 func _victory() -> void:
 	won = true
 	break_timer = 14.0
+	save.data.won = int(save.data.get("won", 0)) + 1
+	save.mark_dirty()
+	_story_for_all("The city shines! Thank you!", "neoncity", Color(1.0, 0.85, 0.3))
 	achievements().unlock("champion")
 	director().victory()
 	sound("victory")
@@ -1280,21 +1353,6 @@ func _victory() -> void:
 		_show_center("YOU WIN!", 8.0)
 		return
 	_show_center("VICTORY!\nYou beat the OMEGA OVERLORD!\nScore %d\n\n%s\n\nENDLESS MODE starts soon - how far can you go?" % [score, director().awards_text()], 13.0)
-
-
-func _grant_upgrade() -> String:
-	var u: Array = UPGRADES.pick_random()
-	if u[3] == "mul":
-		upg[u[2]] *= u[4]
-	else:
-		upg[u[2]] += u[4]
-	if u[2] == "max_hp":
-		for p in players:
-			if not p.is_down:
-				p.hp += u[4]
-	upg_names.append(u[0])
-	print("Upgrade: %s" % u[0])
-	return "%s\n%s" % [u[0], u[1]]
 
 
 func _pick_kind() -> String:
@@ -1366,6 +1424,11 @@ func spawn_enemy_at(kind: String, pos: Vector3, golden: bool = false):
 	e.golden = golden
 	var extra := _extra_players()
 	e.hp *= (1.0 + 0.25 * extra) if e.is_boss() else (1.0 + 0.08 * extra)  # everyone focuses the boss
+	if kind != "target":
+		var mn: Dictionary = Gen.MODE_NUM.get(game_mode, Gen.MODE_NUM.brave)
+		e.hp *= float(Gen.plan(wave, game_mode, 2).hp) / (1.0 + (maxi(wave, 1) - 1) * 0.12)  # the mode's toughness curve (enemy.gd grew it 12% a wave)
+		e.speed *= float(mn.speed)
+		e.dps *= float(mn.bite)
 	e.position = Vector3(pos.x, 0.0, pos.z)
 	add_child(e)
 	director().on_enemy_spawned(kind)
@@ -1469,6 +1532,8 @@ func _style_vr_text(l: Label3D) -> void:
 
 func on_enemy_killed(pos: Vector3, color: Color, points: int, drop_chance: float, radius: float, killer = null, enemy = null) -> void:
 	var gained: int = director().on_kill(killer, enemy, points)
+	if enemy != null and is_instance_valid(enemy) and enemy.is_boss():
+		on_boss_beaten(String(enemy.kind))
 	score += gained
 	achievements().on_kill(gained, radius)
 	# XP goes to whoever landed the last hit; beam/shockwave kills are shared.
@@ -1526,7 +1591,10 @@ func _on_game_over() -> void:
 	var best_line := "Best: wave %d  ·  score %d" % [best.wave, best.score]
 	if score > best.score:
 		best_line = "NEW BEST SCORE!  (previous %d)" % best.score
-		_save_best(wave, score)
+	_save_best(wave, score)
+	_log_run("over")
+	if net.mode != "client":
+		_story_for_all("Oh no! Let's try again!", "nova", Color(0.65, 0.65, 0.8))
 	if SIMPLE_MODE:
 		_show_center("GAME OVER\nWAVE %d\n\nA = PLAY AGAIN" % wave, 0.0)
 		return
@@ -1537,16 +1605,14 @@ func _on_game_over() -> void:
 
 
 func _load_best() -> Dictionary:
-	var cfg := ConfigFile.new()
-	cfg.load("user://best.cfg")
-	return {"wave": cfg.get_value("best", "wave", 0), "score": cfg.get_value("best", "score", 0)}
+	return {"wave": int(save.data.best_wave), "score": int(save.data.best_score)}
 
 
+## The family's records (core/save.gd; the old user://best.cfg was read in once by _init_save).
 func _save_best(best_wave: int, best_score: int) -> void:
-	var cfg := ConfigFile.new()
-	cfg.set_value("best", "wave", best_wave)
-	cfg.set_value("best", "score", best_score)
-	cfg.save("user://best.cfg")
+	save.data.best_wave = maxi(int(save.data.best_wave), best_wave)
+	save.data.best_score = maxi(int(save.data.best_score), best_score)
+	save.mark_dirty()
 
 
 func _restart_pressed() -> bool:
@@ -1936,6 +2002,8 @@ func _make_ghost(kind: String, item: Array) -> Node3D:
 func apply_event(kind: String, args: Array) -> void:
 	if seats.handle_event(kind, args):
 		return
+	if _apply_deep_event(kind, args):
+		return  # (before ready_to_play: sticky zone / keep / orbs can arrive while the client is still joining)
 	if not ready_to_play:
 		return
 	match kind:
@@ -2145,3 +2213,369 @@ func _update_hud() -> void:
 		for n in counts:
 			parts.append(n if counts[n] == 1 else "%s x%d" % [n, counts[n]])
 		info_label.text += "\n" + "  ·  ".join(parts)
+
+
+# --- Nova's story, zones, picks, saves and telemetry (arenagen.gd, zone.gd, picks.gd, bosses.gd) ------------
+
+## Every machine: the save (progress grows on every machine: clients take the host's totals from "keep").
+func _init_save() -> void:
+	save = Save.new()
+	save.game_id = GAME_ID
+	save.use_layout(ProgressScript)
+	# waves: waves cleared over all days (city lights), bosses: kind -> times beaten, daily: the date TODAY'S ARENA
+	# started, daily_done: the date it was played to its end, mode / hero: the family's last choices.
+	save.defaults = {"best_wave": 0, "best_score": 0, "days": 0, "last_day": "", "daily": "", "daily_done": "",
+		"games": 0, "waves": 0, "bosses": {}, "mode": "gentle", "hero": "blaster", "best_today": ["", 0], "won": 0}
+	add_child(save)
+	if int(save.data.best_score) == 0:  # the old best.cfg (before the save): keep the family's record
+		var cfg := ConfigFile.new()
+		if cfg.load("user://best.cfg") == OK:
+			save.data.best_wave = int(cfg.get_value("best", "wave", 0))
+			save.data.best_score = int(cfg.get_value("best", "score", 0))
+			save.mark_dirty()
+
+
+## Host / local: a new run: the day's counters, TODAY'S ARENA, the seed, the route of zones and Nova's hello.
+func _start_run() -> void:
+	var today := Seeded.today()
+	var new_day := String(save.data.last_day) != today
+	if new_day:
+		save.data.days = int(save.data.days) + 1
+		save.data.last_day = today
+	save.data.games = int(save.data.games) + 1
+	daily = String(save.data.daily) != today and not OS.has_environment("DA_SEED")
+	run_seed = int(OS.get_environment("DA_SEED")) if OS.has_environment("DA_SEED") else (Gen.daily_seed() if daily else Seeded.fresh_seed())
+	if daily:
+		save.data.daily = today
+	game_mode = OS.get_environment("DA_MODE") if Gen.MODES.has(OS.get_environment("DA_MODE")) else String(save.data.mode)
+	if not Gen.MODES.has(game_mode):
+		game_mode = "gentle"
+	route = Gen.route(run_seed, Gen.unlocked_zones(int(save.data.waves)))
+	var try_zone := OS.get_environment("DA_ZONE")
+	if try_zone != "" and Gen.zone_ids().has(try_zone):
+		route.erase(try_zone)
+		route.insert(0, try_zone)  # What's New "try": straight into that zone
+	save.mark_dirty()
+	_enter_leg(0, false)
+	_send_keep()
+	print("RUN start: seed %d%s, mode %s, route %s, waves ever %d, days %d" % [run_seed, " (TODAY'S ARENA)" if daily else "",
+		game_mode, route, int(save.data.waves), int(save.data.days)])
+	story_t = 2.5
+	if int(save.data.games) <= 1:
+		_story_for_all("Hi! I'm Nova!", "nova")
+		_story_for_all("Monsters took our lights!", "neoncity")
+	elif new_day and int(save.data.days) > 1:
+		_story_for_all("Hi again! Let's play!", "nova")
+	if daily:
+		_story_for_all("TODAY'S ARENA!", Gen.zone(String(route[0])).pic, Gen.zone(String(route[0])).line)
+
+
+## Host / local: build leg l's zone (and tell every machine).
+func _enter_leg(l: int, announce: bool = true) -> void:
+	leg = l
+	var zid := Gen.zone_for_wave(route, l * Gen.LEG + 1)
+	zone.setup(Gen.layout(Gen.leg_seed(run_seed, l), zid), game_mode)
+	if net.mode == "host":
+		net.event("zone", [run_seed, zid, l])
+	if announce:
+		var z := Gen.zone(zid)
+		_story_for_all("%s!" % String(z.name).capitalize(), String(z.pic), z.line)
+		sound("wave")
+		burst(Vector3(0, 1.0, 0), z.line, 40, 0.25)
+
+
+## Host: the city lights and trophies on every machine.
+func _send_keep() -> void:
+	var b: Dictionary = save.data.bosses if save.data.bosses is Dictionary else {}
+	zone.set_keepsakes(int(save.data.waves), b)
+	if net.mode == "host":
+		net.event("keep", [int(save.data.waves), b, String(save.data.daily_done)])
+
+
+## Host / local: a wave was cleared: the city gets a light, new zones / heroes / perks may open.
+func _save_wave_cleared() -> void:
+	var w0 := int(save.data.waves)
+	save.data.waves = w0 + 1
+	var w1 := w0 + 1
+	save.mark_dirty()
+	if Gen.unlocked_zones(w1).size() > Gen.unlocked_zones(w0).size():
+		var z := Gen.zone(String(Gen.unlocked_zones(w1)[-1]))
+		_story_for_all("New arena: %s!" % String(z.name).capitalize(), String(z.pic), z.line)
+	for stage in ["hero", "perk"]:
+		var a := Picks.unlocked(stage, w0)
+		var b := Picks.unlocked(stage, w1)
+		if b.size() > a.size():
+			var d := Picks.find(stage, String(b[-1]))
+			_story_for_all(("New hero: %s!" if stage == "hero" else "New power: %s!") % String(d.name).capitalize(), String(d.pic), d.color)
+	if Gen.lights(w1) > Gen.lights(w0):
+		_story_for_all("A city light is back!", "neoncity")
+	_send_keep()
+	_log_run("wave")
+
+
+## Host / local: a boss fell (trophy for the hall, a story card).
+func on_boss_beaten(kind: String) -> void:
+	if net.mode == "client":
+		return
+	var b: Dictionary = save.data.bosses if save.data.bosses is Dictionary else {}
+	b[kind] = int(b.get(kind, 0)) + 1
+	save.data.bosses = b
+	save.mark_dirty()
+	bosses_run.append(kind)
+	_story_for_all("We beat the %s!" % String(Bosses.info(kind).name).capitalize(), String(Bosses.info(kind).pic), Bosses.info(kind).color)
+	_send_keep()
+
+
+## Host / local: a boss is about to attack: a warning ring on every machine for `secs`.
+func boss_warn(pos: Vector3, radius: float, col: Color, secs: float) -> void:
+	zone.warn(pos, radius, col, secs)
+	if net.mode == "host":
+		net.event("warn", [pos, radius, col, secs])
+
+
+## Host / local: pad i is about to burst.
+func on_pad_tell(i: int, tell: float) -> void:
+	zone.tell(i, tell)
+	if net.mode == "host":
+		net.event("pad", [i, tell])
+	if not pads_told:
+		pads_told = true
+		_story_for_all("Watch the glowing rings!", String(Gen.zone(zone.zone_id).pic), zone.pad_color())
+
+
+## Host / local: pad i bursts: players and monsters on it are hurt and pushed.
+func on_pad_burst(i: int) -> void:
+	zone.burst_fx(i)
+	if net.mode == "host":
+		net.event("padburst", [i])
+	var d: Dictionary = zone.lay.pads[i]
+	var n := Gen.hazard_numbers(String(Gen.zone(zone.zone_id).hazard), game_mode)
+	var at: Vector3 = d.p
+	for p in players:
+		if p.active and not p.is_down and Vector2(p.global_position.x - at.x, p.global_position.z - at.z).length() < float(d.r) + 0.3:
+			p.take_damage(float(n.damage), at)
+	for e in get_tree().get_nodes_in_group("enemies"):
+		if e.kind == "target" or e.is_boss():
+			continue
+		var off := Vector3(e.global_position.x - at.x, 0.0, e.global_position.z - at.z)
+		if off.length() < float(d.r) + float(e.radius):
+			e.hit(2.0, off.normalized() if off.length() > 0.01 else Vector3.FORWARD, float(n.push) / 6.0, null)
+	sound("crack", -6.0, 1.3)
+
+
+# --- Picks (picks.gd): MODE (team, first game of a visit), HERO (each player, before wave 1), PERK (after each wave)
+
+func _pick_players() -> Array:
+	return players.filter(func(p) -> bool: return p.active and not (net.mode != "host" and p.ghost))
+
+
+## Host / local: the orbs before wave 1 (after the practice targets).
+func _begin_run_picks() -> void:
+	if not Engine.has_meta("da_mode_set") and not OS.has_environment("DA_MODE"):
+		_begin_pick("mode")
+	else:
+		_begin_pick("hero")
+
+
+func _begin_pick(stage: String) -> void:
+	var open := Picks.unlocked(stage, int(save.data.waves))
+	var middle := game_mode if stage == "mode" else (String(save.data.hero) if stage == "hero" else "")
+	var ids := Picks.offer(stage, run_seed, wave, open, middle)
+	if ids.size() < 2 and stage == "hero":
+		for p in _pick_players():
+			heroes[p.index] = String(ids[0]) if not ids.is_empty() else "blaster"
+		return
+	pick_ids = ids
+	pick_stage = stage
+	pick_t = float(Picks.WAIT[stage]) * (1.6 if game_mode == "gentle" and stage != "mode" else 1.0)
+	picked = {}
+	zone.show_orbs(stage, ids)
+	if net.mode == "host":
+		net.event("orbs", [stage, ids])
+	var mid := Picks.find(stage, Picks.default_pick(ids))
+	var line := {"mode": "Pick how brave!", "hero": "Pick your hero!", "perk": "Pick a power!"}
+	_story_for_all(String(line[stage]), String(mid.get("pic", "star")), mid.get("color", NOVA_COLOR), true)
+	sound("bubble", -2.0, 0.9)
+	print("PICK %s: %s (%.0f s)" % [stage, ids, pick_t])
+
+
+func _pick_tick(delta: float) -> void:
+	pick_t -= delta
+	for tch in zone.touches(players):
+		on_orb_hit(int(tch[0]), tch[1])
+	if pick_stage == "":
+		return
+	var all := true
+	for p in _pick_players():
+		if not picked.has(p.index):
+			all = false
+	if (pick_stage == "mode" and not picked.is_empty()) or all or pick_t <= 0.0:
+		_finish_pick()
+
+
+## Host / local: a player shot (or walked into) orb i.
+func on_orb_hit(i: int, p) -> void:
+	if pick_stage == "" or net.mode == "client" or i < 0 or i >= pick_ids.size() or not (p in players):
+		return
+	if picked.has(p.index) or (pick_stage == "mode" and not picked.is_empty()):
+		return
+	picked[p.index] = i
+	zone.take(i, p.index)
+	if net.mode == "host":
+		net.event("take", [i, p.index])
+	sound("pickup", 0.0, 1.0 + 0.1 * i)
+	var id := String(pick_ids[i])
+	match pick_stage:
+		"mode":
+			game_mode = id
+			zone.mode = id
+			save.data.mode = id
+			save.mark_dirty()
+		"hero":
+			heroes[p.index] = id
+			Picks.apply(p, "hero", id)
+			if p.index == 0 or not save.data.has("hero") or picked.size() == 1:
+				save.data.hero = id
+				save.mark_dirty()
+		"perk":
+			var mine: Array = perks.get(p.index, [])
+			mine.append(id)
+			perks[p.index] = mine
+			Picks.apply(p, "perk", id)
+	print("PICK %s: P%d took %s" % [pick_stage, p.index + 1, id])
+
+
+func _finish_pick() -> void:
+	var di := pick_ids.find(Picks.default_pick(pick_ids))
+	if pick_stage == "mode":
+		if picked.is_empty() and not players.is_empty():
+			on_orb_hit(di, players[0])
+	else:
+		for p in _pick_players():
+			if not picked.has(p.index):
+				on_orb_hit(di, p)
+	var stage := pick_stage
+	pick_stage = ""
+	zone.clear_orbs()
+	if net.mode == "host":
+		net.event("orbs", ["", []])
+	break_timer = 1.5 if stage != "perk" else 2.0
+	if stage == "mode":
+		Engine.set_meta("da_mode_set", true)
+		_story_for_all({"gentle": "Gentle! Nice and easy!", "brave": "Brave! Let's go!", "hard": "HARD! Wow!"}.get(game_mode, "Let's go!"),
+			String(Picks.find("mode", game_mode).get("pic", "star")), Picks.find("mode", game_mode).get("color", NOVA_COLOR))
+		_begin_pick("hero")
+
+
+# --- Story cards (Nova) -------------------------------------------------------------------------------------
+
+## Host / local: a story card on every machine.
+## urgent (the pick prompts): to the front of the queue, shown now.
+func _story_for_all(line: String, pic: String, color: Color = NOVA_COLOR, urgent: bool = false) -> void:
+	_story(line, pic, color, urgent)
+	if net != null and net.mode == "host":
+		net.event("story", [line, pic, color, urgent])
+
+
+func _story(line: String, pic: String, color: Color, urgent: bool = false) -> void:
+	if urgent:
+		story_queue = story_queue.filter(func(q: Array) -> bool: return not (q.size() > 3 and bool(q[3])))  # an older prompt is stale now
+		story_queue.push_front([line, pic, color, true])
+		story_t = minf(story_t, 0.2)
+	elif story_queue.size() < 5:
+		story_queue.append([line, pic, color])
+
+
+func _update_story(delta: float) -> void:
+	story_t -= delta
+	if story_t > 0.0 or story_queue.is_empty():
+		return
+	var b: Array = story_queue.pop_front()
+	story_t = 2.6 if story_queue.size() < 2 else 1.8  # a long queue moves faster (never falls behind the game)
+	var opts := {"who": "NOVA", "line": String(b[0]), "pic": String(b[1]), "color": b[2], "duration": story_t + 0.2,
+		"vr_height": -0.42}  # (VR: under the centre banner, never over it)
+	if views_root != null and is_instance_valid(views_root):
+		StoryCard.show(views_root, opts)
+	var p0 = players[0] if not players.is_empty() else null
+	if p0 != null and p0.vr and not p0.ghost and p0.xr_camera != null:
+		if vr_story != null and is_instance_valid(vr_story):
+			vr_story.queue_free()
+		vr_story = StoryCard.show_vr(self, p0.xr_camera, opts)
+	zone.cheer()
+	story_shown += 1
+	print("STORY: %s [%s]" % [b[0], b[1]])
+
+
+# --- Telemetry --------------------------------------------------------------------------------------------------
+
+## One RUN line per wave cleared ("wave"), at game over ("over") and on quit (core/telemetry.gd).
+func _log_run(end: String) -> void:
+	if net == null or net.mode == "client" or save == null:
+		return
+	if end != "wave":
+		if run_logged:
+			return
+		run_logged = true
+		if daily and wave > 0:
+			save.data.daily_done = Seeded.today()  # TODAY'S ARENA played to its end (the Trophy Hall's golden star)
+			var bt: Array = save.data.best_today if save.data.best_today is Array else ["", 0]
+			if bt.size() < 2 or String(bt[0]) != Seeded.today() or int(bt[1]) < wave:
+				save.data.best_today = [Seeded.today(), wave]
+			save.mark_dirty()
+			_send_keep()
+		if end == "quit":
+			save.save_now()
+	var hero_list: Array = []
+	for k in heroes:
+		hero_list.append(String(heroes[k]))
+	var perk_count := 0
+	for k in perks:
+		perk_count += (perks[k] as Array).size()
+	Telemetry.run(GAME_ID, {"end": end, "wave": wave, "score": score, "seed": run_seed, "daily": daily, "mode": game_mode,
+		"zone": zone.zone_id, "leg": leg, "players": active_player_count(), "downs": wave_downs, "heroes": hero_list,
+		"perks": perk_count, "bosses": bosses_run.duplicate(), "won": won, "waves_total": int(save.data.waves),
+		"machines": net.peer_count() if net.mode == "host" else 0})
+
+
+func _exit_tree() -> void:
+	if wave > 0 and not game_over:
+		_log_run("quit")
+
+
+## Client: the host's events for the new things (zone, keepsakes, orbs, pads, boss warnings, story).
+func _apply_deep_event(kind: String, args: Array) -> bool:
+	match kind:
+		"zone":
+			run_seed = int(args[0])
+			leg = int(args[2])
+			zone.setup(Gen.layout(Gen.leg_seed(run_seed, leg), String(args[1])), game_mode)
+		"keep":
+			zone.set_keepsakes(int(args[0]), args[1])
+			# The family's progress shows on every machine's Trophy Hall: keep the bigger totals.
+			if save != null:
+				save.data.waves = maxi(int(save.data.waves), int(args[0]))
+				var mine: Dictionary = save.data.bosses if save.data.bosses is Dictionary else {}
+				for k in (args[1] as Dictionary):
+					mine[k] = maxi(int(mine.get(k, 0)), int(args[1][k]))
+				save.data.bosses = mine
+				if String(args[2]) != "":
+					save.data.daily_done = String(args[2])
+				save.mark_dirty()
+		"orbs":
+			if (args[1] as Array).is_empty():
+				zone.clear_orbs()
+			else:
+				zone.show_orbs(String(args[0]), args[1])
+		"take":
+			zone.take(int(args[0]), int(args[1]))
+		"pad":
+			zone.tell(int(args[0]), float(args[1]))
+		"padburst":
+			zone.burst_fx(int(args[0]))
+		"warn":
+			zone.warn(args[0], float(args[1]), args[2], float(args[3]))
+		"story":
+			_story(String(args[0]), String(args[1]), args[2], args.size() > 3 and bool(args[3]))
+		_:
+			return false
+	return true
