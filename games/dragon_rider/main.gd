@@ -2726,7 +2726,7 @@ func _start_flight() -> void:
 		save.game_id = GAME_ID
 		# charms: [[kind, play-day, golden], ...]; days: days played; daily: the date TODAY'S FLIGHT was flown.
 		save.defaults = {"charms": [], "total": 0, "days": 0, "last_day": "", "daily": "", "daily_done": "", "flights": 0, "best_stage": 0,
-			"mode": "", "gift": "", "dodged": 0}
+			"mode": "", "gift": ""}
 		add_child(save)
 	var today := Seeded.today()
 	var new_day := String(save.data.last_day) != today
@@ -2938,6 +2938,8 @@ func _on_picked(stage: String, opt: Variant, _slot: int) -> void:
 			return
 		"gift":
 			gift = String(opt)
+			if OS.has_environment("DR_GIFT"):  # tests: this gift ("none": no gift)
+				gift = "" if OS.get_environment("DR_GIFT") == "none" else OS.get_environment("DR_GIFT")
 			if save != null:
 				save.data.gift = gift
 				save.mark_dirty()

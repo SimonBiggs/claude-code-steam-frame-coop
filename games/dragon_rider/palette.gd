@@ -5,6 +5,7 @@ extends RefCounted
 const Contrast := preload("res://core/contrast.gd")
 const Course := preload("res://games/dragon_rider/course.gd")
 const World := preload("res://games/dragon_rider/world.gd")
+const Deep := preload("res://games/dragon_rider/deep.gd")
 
 
 ## Each wears the ink outline (course.gd OUTLINE).
@@ -16,6 +17,9 @@ static func key_colors() -> Dictionary:
 	var out := {}
 	for k in cols:
 		out[k] = {"color": cols[k], "rim": Course.OUTLINE}
+	# The second pass's sky events (deep.gd): their warn rings stand up against the same skies and clouds.
+	out["storm warning"] = Deep.STORM_COLOR
+	out["crosswind warning"] = Deep.WIND_COLOR
 	return out
 
 

@@ -365,11 +365,11 @@ static func babies(stages_total: int) -> int:
 	return mini(MAX_BABIES, maxi(0, stages_total) / HATCH_EVERY)
 
 
-## Where baby dragon i flies (dragon-local): a wide V behind and beside Sunny, out of the gunners' deck.
+## Where baby dragon i flies (dragon-local): a wide V behind Sunny's wings, clear of the gunners' deck.
 static func baby_spot(i: int) -> Vector3:
 	var side := -1.0 if i % 2 == 0 else 1.0
 	var k := i / 2
-	return Vector3(side * (5.0 + k * 2.2), 0.6 + (k % 2) * 1.2, 1.5 + k * 2.6)
+	return Vector3(side * (6.5 + k * 2.0), -0.5 + (k % 2) * 1.4, 9.0 + k * 3.0)  # (behind the deck: never in a gunner's face)
 
 
 static func baby_color(i: int) -> Color:

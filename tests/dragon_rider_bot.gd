@@ -153,6 +153,11 @@ func _autopilot(delta: float) -> void:
 	elif main.phase != "pick":
 		pick_target = -1
 		last_pick_stage = ""
+	if main.phase == "fly" and int(main.deep_stats.storms) == 0:  # fly into the first storm cloud (the bump path runs)
+		for tl in main.hazards.tells_now():
+			var sp: Vector3 = tl.pos
+			if tl.kind == "storm" and (sp - main.dragon.core_position()).dot(Basis(Vector3.UP, main.dragon.yaw) * Vector3.FORWARD) > 0.0:
+				ring = {"pos": sp}
 	if ring.is_empty():
 		r.bot_input = Vector2.ZERO
 		r.bot_flap = false
@@ -474,7 +479,7 @@ func _check_story(mode: String) -> void:
 	_ok(probs.is_empty(), "this stage's sky events are fair %s" % str(probs))
 	_ok(main.flight_seed > 0, "a seeded flight (%d)" % main.flight_seed)
 	_ok(main.level_seed == main.RouteGen.stage_seed(main.flight_seed, main.level), "the stage seed comes from the flight seed")
-	_ok(main.level < 2 or main.charm_count >= 1, "a charm after stage 1 (stage %d, %d charms)" % [main.level, main.charm_count])
+	_ok(main.level < 2 or main.charm_count >= 1 or OS.has_environment("DR_START_LEVEL"), "a charm after stage 1 (stage %d, %d charms)" % [main.level, main.charm_count])
 	_ok(main.charm_root != null and main.charm_root.get_child_count() >= main.charm_count, "the rail shows the charms")
 
 

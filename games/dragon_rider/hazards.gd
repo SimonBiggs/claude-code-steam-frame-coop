@@ -123,7 +123,7 @@ func announce(e: Dictionary, warn: float) -> void:
 		"wind":
 			var sz: Vector2 = e.size
 			rings.shape("line", Vector3(-sz.x * 0.5, 0.0, 0.0), Vector3.RIGHT, sz, Deep.WIND_COLOR, warn,
-				{"style": "disc", "stay": Deep.STAY, "alpha": 0.3, "y": 0.0})
+				{"style": "disc", "stay": Deep.STAY, "alpha": 0.4, "y": 0.0})
 			for k in STREAKS:
 				var s := MeshInstance3D.new()
 				s.mesh = streak_mesh
