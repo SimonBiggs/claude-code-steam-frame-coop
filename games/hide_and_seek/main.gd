@@ -1005,7 +1005,10 @@ func active_count() -> int:
 ## Hiders taking part in this round (not counting late joiners).
 func hider_count() -> int:
 	var n := 0
+	var tv_gone: bool = net != null and net.mode == "host" and not net.connected  # (its TV seats aren't really there)
 	for p in players:
+		if tv_gone and p.remote:
+			continue
 		if p.active and p.role == "hider" and not p.late:
 			n += 1
 	return n
