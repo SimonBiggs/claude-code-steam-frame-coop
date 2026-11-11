@@ -62,7 +62,20 @@ const Save := preload("res://core/save.gd")
 const Telemetry := preload("res://core/telemetry.gd")
 const StoryCard := preload("res://core/story_card.gd")
 const MazeGen := preload("res://games/marble_maze/mazegen.gd")
+const Worlds := preload("res://games/marble_maze/worlds.gd")
+const PicksScript := preload("res://games/marble_maze/picks.gd")
+const EventsScript := preload("res://games/marble_maze/events.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
 const JAR_SAVE_MAX := 200
+const RACK_SAVE_MAX := 120
+## SECOND PASS (worlds.gd, picks.gd, events.gd): the PICK BOARD, an open room where the mode / gift orbs hover near
+## the giant's edge (marbles start at the far side and roll under one).
+const PICK_MAP: Array[String] = ["############", "#....S.....#", "#..........#", "#..........#", "#..........#",
+	"#..........#", "#..........#", "#..........#", "#..........#", "############"]
+const GIFT_LINES := {"heavy": "Heavy marbles! Thud!", "bouncy": "Bouncy marbles! Boing!", "magnet": "Magnet marbles!",
+	"sticky": "Sticky marbles!", "zoomy": "Zoomy marbles! Zoom!"}
+const WORLD_LINES := {"sunny": "What a sunny day!", "snow": "Snow day! Slippy ice!", "windy": "Whoosh! Windy day!",
+	"party": "Party day! Boing!", "night": "A starry night!", "bloom": "Flowers everywhere!"}
 
 const SIMPLE_MODE := true
 const SIMPLE_INTRO_TIME := 2.2
@@ -191,6 +204,15 @@ var maze_falls0 := 0
 var run_mazes := 0
 var run_shinies := 0
 var story_queue: Array = []  # host: [delay, beat] story cards still to show
+# SECOND PASS: modes, Bobo's gift marbles, today's world, told events (worlds.gd).
+var picks: PicksScript
+var events: EventsScript
+var gift := ""  # every machine: the gift marble the team rolls as (from level_desc "g"; "" = plain)
+var world_id := ""  # every machine: today's world (level_desc "wd")
+var world_fx: Node3D
+var pick_next := 1  # host: the level the pick board leads to
+var maze_events := 0  # host: events told in this maze (telemetry)
+var story_lag := 0.0  # host: seconds the next maze's intro cards wait (a pick card is showing)
 
 
 func _ready() -> void:
@@ -204,6 +226,7 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
+	net.sticky_event("orbs")  # a machine joining mid-pick sees the orbs too
 	seats = ClassicSeats.new(self, {
 		"no_keys": MarbleScript.NO_KEYS,
 		"free_actions": ["continue", "pause"],
@@ -254,7 +277,7 @@ func _setup_game(mode: String) -> void:
 		_begin_session()
 	if mode == "host" and simple:
 		_set_solo(true)  # no waiting about: tilt your own marble until the TV players join
-		_start_level(1)
+		_next_level(1)
 	elif mode == "host":
 		state = "wait"
 		_show_center("MARBLE MAZE\nWaiting for the TV players to join…", 0.0)
@@ -262,7 +285,7 @@ func _setup_game(mode: String) -> void:
 		state = "wait"
 		_show_center("HELLO!" if simple else "CONNECTED", 1.5, false)
 	else:
-		_start_level(1)
+		_next_level(1)
 
 
 func _exit_tree() -> void:
@@ -495,6 +518,13 @@ func _build_world() -> void:
 		town.name = "Town"
 		town.main = self
 		add_child(town)
+		events = EventsScript.new()
+		events.main = self
+		events.board = board
+		board.add_child(events)
+		picks = PicksScript.new()
+		picks.main = self
+		add_child(picks)
 
 
 ## The cosy play-room round the table, baked into ONE mesh: floorboards, walls with windows, a rug,
@@ -1136,10 +1166,10 @@ func _process(delta: float) -> void:
 	state_t += delta
 	board.t += delta
 	var target := Vector2.ZERO
-	if state == "play" or state == "practice":
+	if state == "play" or state == "practice" or state == "pick":
 		target = players[0].want_tilt
 	board.tilt = board.tilt.lerp(target, 1.0 - exp(-7.0 * delta))
-	board.basis = board.tilt_basis(board.tilt)
+	board.basis = board.tilt_basis(board.tilt + _quake_wobble())
 	match state:
 		"wait":
 			board.tilt = Vector2.ZERO
@@ -1160,9 +1190,13 @@ func _process(delta: float) -> void:
 				sound("go", 0.0, 1.0, true)
 		"practice":
 			_practice_checks()
+		"pick":
+			if picks != null:
+				picks.tick(delta)
 		"play":
 			if simple:
 				level_t += delta
+				_run_events()
 				_authority_checks()
 				return
 			time_left -= delta
@@ -1177,7 +1211,7 @@ func _process(delta: float) -> void:
 				_game_over()
 		"clear":
 			if state_t > (SIMPLE_CLEAR_TIME if simple else CLEAR_TIME) or (state_t > 1.5 and cont_edge):
-				_start_level(level + 1)
+				_next_level(level + 1)
 		"over":
 			if state_t > 1.5 and cont_edge:
 				_restart()
@@ -1309,7 +1343,7 @@ func _client_update(delta: float, cont_edge: bool) -> void:
 	board.t = lerpf(board.t, net_t, 1.0 - exp(-2.0 * delta))
 	net_t += delta
 	board.tilt = board.tilt.lerp(net_tilt, 1.0 - exp(-14.0 * delta))
-	board.basis = board.tilt_basis(board.tilt)
+	board.basis = board.tilt_basis(board.tilt + _quake_wobble())
 	if cont_edge and ((state == "clear" and state_t > 1.5) or (state == "over" and state_t > 1.5)):
 		net.send_action("continue", [])
 
@@ -1346,7 +1380,7 @@ func debug_continue() -> void:
 
 func _on_continue() -> void:
 	if state == "clear" and state_t > 1.0:
-		_start_level(level + 1)
+		_next_level(level + 1)
 	elif state == "over" and state_t > 1.0:
 		_restart()
 
@@ -1358,6 +1392,11 @@ func _start_level(n: int) -> void:
 		level_desc = desc_for(n)
 		def = def_from_desc(level_desc)
 	board.load_level(n, def)
+	_on_desc()
+	maze_events = 0
+	if events != null and net.mode != "client":
+		var kd := str(level_desc.get("k", ""))
+		events.reset(def.get("events", []) if kd == "story" or kd == "daily" else [])
 	maze_falls0 = _falls_now()
 	board.tilt = Vector2.ZERO
 	players[0].want_tilt = Vector2.ZERO
@@ -1409,9 +1448,213 @@ func _start_level(n: int) -> void:
 	print("Level %d started: %s (%d marbles, %.0f s)" % [n, board.level_name(n), count, time_left])
 
 
+# --- SECOND PASS: the pick board (modes, gifts), today's world, told events --------------------------
+
+## Host / local: the next level, or first the pick board when a pick is due before it.
+func _next_level(n: int) -> void:
+	var stage := _pick_due(n)
+	if stage == "":
+		_start_level(n)
+	else:
+		_begin_pick(n, stage)
+
+
+## Which pick comes before level n ("" none): the mode once a session (before the first story / daily maze), then
+## Bobo's gift marble before that maze, each place's first maze and today's maze.
+func _pick_due(n: int) -> String:
+	if not simple or picks == null or net.mode == "client" or save == null:
+		return ""
+	var d := desc_for(n)
+	var k := str(d.get("k", ""))
+	if k != "story" and k != "daily":
+		return ""
+	if not session.has("mode"):
+		return "mode"
+	if int(session.get("gift_n", -1)) == n:
+		return ""
+	if not session.has("gift") or k == "daily" or int(Story.where(int(d.get("i", 0)))[1]) == 0:
+		return "gift"
+	return ""
+
+
+## Host / local: the pick board for `stage` ("mode" / "gift"), leading to level n.
+func _begin_pick(n: int, stage: String) -> void:
+	pick_next = n
+	level = n
+	var nd := desc_for(n)
+	var th := "rainbow"
+	if str(nd.get("k", "")) == "story":
+		th = str(Story.place(int(Story.where(int(nd.get("i", 0)))[0])).theme)
+	level_desc = {"k": "pick", "s": stage, "th": th}
+	_restart_pick_board()
+	var entries: Array = []
+	var opts: Array = []
+	if stage == "mode":
+		for id in PickOrbs.mode_ids(_mode_now({})):
+			var md := PickOrbs.mode(str(id))
+			entries.append({"id": md.id, "name": md.name, "pic": md.pic, "color": md.color})
+			opts.append(str(id))
+		_story(_bobo("How brave today?"), 0.3)
+	else:
+		var seed_v := Seeded.derive(int(save.data.world), "gift%d_%s" % [int(nd.get("i", -1)), Seeded.today()])
+		for id in Worlds.gift_choices((save.data.rack as Array).size(), str(session.get("gift", "")), seed_v):
+			var m := Worlds.marble(str(id))
+			entries.append({"id": m.id, "name": m.name, "pic": m.pic, "color": m.color})
+			opts.append(str(id))
+		_story(_bobo("Pick a marble!"), 0.3)
+	picks.begin(stage, entries, opts, _on_pick_done)
+
+
+## Host / local: the pick board (again: a machine joined or left mid-pick), every marble at the start.
+func _restart_pick_board() -> void:
+	board.load_level(level, def_from_desc(level_desc))
+	_on_desc()
+	if events != null:
+		events.reset([])
+		events.clear()
+	board.tilt = Vector2.ZERO
+	players[0].want_tilt = Vector2.ZERO
+	players[0].grab_tilt = Vector2.ZERO
+	for p in players:
+		if p.index > 0:
+			p.reset_to_start()
+	state = "pick"
+	state_t = 0.0
+	_apply_theme()
+	net.event("level", [level, level_desc])
+	print("Pick board: %s before level %d" % [str(level_desc.get("s", "")), pick_next])
+
+
+## Host / local: a pick was made (slot -1: nobody chose, the middle one).
+func _on_pick_done(stage: String, opt: Variant, slot: int) -> void:
+	var who := "nobody" if slot < 0 else "P%d" % (slot + 1)
+	if stage == "mode":
+		session["mode"] = str(opt)
+		save.data.mode = str(opt)
+		save.mark_dirty()
+		var md := PickOrbs.mode(str(opt))
+		_story_now({"who": str(md.name), "line": str(PickOrbs.MODE_LINES.get(str(opt), "")), "pic": str(md.pic), "color": md.color,
+			"duration": 2.5})
+		prefetch_desc(desc_for(pick_next))  # the maze in this mode, made while the gift is picked
+	else:
+		session["gift"] = str(opt)
+		session["gift_n"] = pick_next
+		save.data.gift = str(opt)
+		var gifts: Dictionary = save.data.gifts
+		gifts[str(opt)] = int(gifts.get(str(opt), 0)) + 1
+		save.mark_dirty()
+		var m := Worlds.marble(str(opt))
+		_story_now({"who": "BOBO", "line": str(GIFT_LINES.get(str(opt), "")), "pic": str(m.pic), "color": m.color, "duration": 3.0})
+	print("Picked %s: %s (%s)" % [stage, str(opt), who])
+	_next_level(pick_next)
+
+
+## Every machine: a new level_desc (gift marble, today's world).
+func _on_desc() -> void:
+	var k := str(level_desc.get("k", ""))
+	if k == "pick":
+		return  # the pick board keeps the marbles as they are
+	gift = str(level_desc.get("g", "")) if k == "story" or k == "daily" else ""
+	var wd := str(level_desc.get("wd", ""))
+	if wd != world_id:
+		world_id = wd
+		_build_world_fx()
+
+
+## Host: tell this maze's events when their warning starts (play seconds).
+func _run_events() -> void:
+	if events == null or not simple:
+		return
+	var m := Worlds.mode_of(str(level_desc.get("m", "brave")))
+	for e in events.tick(level_t, float(m.warn)):
+		var strength := float(m.quake) if str(e[1]) == "quake" else 0.0
+		var secs := float(m.quake_secs) if str(e[1]) == "quake" else float(m.gate_secs)
+		var args := [str(e[1]), float(e[2]), float(e[3]), float(m.warn), secs, strength]
+		events.announce(args[0], args[1], args[2], args[3], args[4], args[5])
+		net.event("mev", args)
+		maze_events += 1
+		print("Event told: %s %s" % [str(e[1]), str(e.slice(2))])
+
+
+## Every machine: a little wobble of the board while a quake goes off (on top of the giant's tilt).
+func _quake_wobble() -> Vector2:
+	if events == null or events.shake <= 0.0:
+		return Vector2.ZERO
+	var tt := Time.get_ticks_msec() * 0.001
+	return Vector2(sin(tt * 37.0), cos(tt * 29.0)) * 0.06 * events.shake
+
+
+## A BOUNCY marble boinged out of a hole.
+func on_marble_bounce(p) -> void:
+	var wp: Vector3 = board.to_global(p.lp)
+	_bounce_fx(wp, p.color)
+	p.bump_squash()
+	if net.mode == "client":
+		_forward_fx("bounce", [wp, p.color], p)
+	else:
+		net.event("bounce", [wp, p.color])
+
+
+func _bounce_fx(wp: Vector3, col: Color) -> void:
+	sound("boing", 0.0, 1.4)
+	burst(wp, col, 12, false)
+	burst(wp, Color(1.0, 0.6, 0.9), 8, false)
+
+
+## Every machine: today's world round the table (snow, leaves, confetti, petals or stars; sunny: none). Opaque little
+## pieces (no see-through layers in front of VR cards), one CPUParticles3D.
+func _build_world_fx() -> void:
+	if world_fx != null and is_instance_valid(world_fx):
+		world_fx.queue_free()
+	world_fx = null
+	_apply_theme()
+	var w := Worlds.world(world_id)
+	var fx := str(w.get("fx", ""))
+	if fx == "" or world_id == "":
+		return
+	var pt := CPUParticles3D.new()
+	pt.name = "WorldFx"
+	pt.amount = 70 if fx != "stars" else 90
+	pt.lifetime = 9.0 if fx != "stars" else 4.0
+	pt.preprocess = pt.lifetime
+	pt.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+	pt.emission_box_extents = Vector3(2.6, 0.1, 2.2) if fx != "stars" else Vector3(4.0, 0.6, 0.2)
+	pt.position = Vector3(0.0, 2.6, 0.0) if fx != "stars" else Vector3(0.0, 2.4, -3.2)
+	pt.direction = Vector3(0, -1, 0)
+	pt.spread = 25.0
+	pt.gravity = Vector3(0.0, -0.25 if fx != "leaves" else -0.35, 0.0) if fx != "stars" else Vector3.ZERO
+	pt.initial_velocity_min = 0.05
+	pt.initial_velocity_max = 0.15 if fx != "stars" else 0.0
+	pt.angular_velocity_min = -90.0
+	pt.angular_velocity_max = 90.0
+	pt.local_coords = false
+	var mesh := BoxMesh.new()
+	mesh.size = Vector3(0.025, 0.025, 0.004) if fx != "snow" else Vector3(0.02, 0.02, 0.02)
+	pt.mesh = mesh
+	var cols := {"snow": [Color(1, 1, 1)], "leaves": [Color(1.0, 0.55, 0.15), Color(0.9, 0.3, 0.15), Color(1.0, 0.8, 0.2)],
+		"confetti": [Color(1.0, 0.3, 0.5), Color(0.3, 0.7, 1.0), Color(1.0, 0.85, 0.2), Color(0.4, 1.0, 0.5)],
+		"petals": [Color(1.0, 0.7, 0.85), Color(1.0, 1.0, 1.0)], "stars": [Color(1.0, 0.95, 0.6)]}
+	var g := Gradient.new()
+	var cl: Array = cols.get(fx, [Color.WHITE])
+	g.offsets = PackedFloat32Array([0.0])
+	g.colors = PackedColorArray([cl[0]])
+	for i in range(1, cl.size()):
+		g.add_point(float(i) / cl.size(), cl[i])
+	pt.color_initial_ramp = g
+	var mat := StandardMaterial3D.new()
+	mat.vertex_color_use_as_albedo = true
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED if fx == "stars" else BaseMaterial3D.SHADING_MODE_PER_PIXEL
+	mesh.material = mat
+	pt.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	world_fx = pt
+	add_child(pt)
+
+
 ## Each level's theme sets the mood: the sky colour outside and a hint of tint in the light.
 func _apply_theme() -> void:
 	var bg := board.theme_color(4)
+	if world_id != "" and world_id != "sunny":
+		bg = bg.lerp(Worlds.world(world_id).sky, 0.85)  # today's world: the sky past the windows (never the floor)
 	for c in get_children():
 		if c is WorldEnvironment:
 			var e: Environment = (c as WorldEnvironment).environment
@@ -1426,7 +1669,7 @@ func _restart() -> void:
 	stars = 0
 	jar = 0
 	stats.clear()
-	_start_level(1)
+	_next_level(1)
 
 
 ## Host / local: gems, team pads and gates, the golden gem, marbles reaching the goal (for marbles
@@ -1715,6 +1958,7 @@ func _begin_session() -> void:
 		return
 	var d: Dictionary = save.data
 	session = _session_plan()
+	session["world"] = str(Worlds.world_of(Seeded.today()).id)
 	run_mazes = 0
 	run_shinies = 0
 	_send_town(true)
@@ -1747,12 +1991,32 @@ func desc_for(n: int, plan: Dictionary = {}) -> Dictionary:
 		if k <= count:
 			return {"k": "lesson", "i": k}
 		k -= count
+	var extra := {"m": _mode_now(sess), "wd": str(sess.get("world", "sunny")), "g": str(sess.get("gift", ""))}
 	if bool(sess.get("daily", false)):
 		if k == 1:
-			return {"k": "daily", "d": Seeded.today()}
+			var dd := {"k": "daily", "d": Seeded.today()}
+			dd.merge(extra)
+			return dd
 		k -= 1
 	var world: int = int(save.data.world) if save != null else 0
-	return {"k": "story", "i": int(sess.get("base", 0)) + k - 1, "w": world}
+	var sd := {"k": "story", "i": int(sess.get("base", 0)) + k - 1, "w": world}
+	sd.merge(extra)
+	return sd
+
+
+## The session's mode (picked on the pick board), else the family's last one.
+func _mode_now(sess: Dictionary) -> String:
+	if sess.has("mode"):
+		return str(sess.mode)
+	return str(PickOrbs.mode(str(save.data.get("mode", "brave"))).get("id", "brave")) if save != null else "brave"
+
+
+## The cache / generator key of a description: the gift marble doesn't change the maze ("g" left out, so a maze
+## made ahead before the gift pick is still the one taken).
+static func gen_key(desc: Dictionary) -> String:
+	var d := desc.duplicate()
+	d.erase("g")
+	return var_to_str(d)
 
 
 ## Every machine: the level dictionary for a description (the generator is deterministic, so the TV
@@ -1760,11 +2024,14 @@ func desc_for(n: int, plan: Dictionary = {}) -> Dictionary:
 func def_from_desc(desc: Dictionary) -> Dictionary:
 	if desc.is_empty():
 		return {}
-	var key := var_to_str(desc)
+	var key := gen_key(desc)
 	if def_cache.has(key):
 		return def_cache[key]
 	var def: Dictionary
-	if str(desc.get("k", "")) == "lesson":
+	if str(desc.get("k", "")) == "pick":
+		def = {"name": "", "theme": str(desc.get("th", "rainbow")), "tip": "", "time": 0, "new": "", "map": PICK_MAP.duplicate(),
+			"pick": true}
+	elif str(desc.get("k", "")) == "lesson":
 		var count: int = LevelsData.SIMPLE_LEVELS.size()
 		def = (LevelsData.SIMPLE_LEVELS[clampi(int(desc.get("i", 1)) - 1, 0, count - 1)] as Dictionary).duplicate(true)
 	else:
@@ -1781,9 +2048,9 @@ func def_from_desc(desc: Dictionary) -> Dictionary:
 ## the next one is made on a worker thread (core/bg_gen.gd) while this one is played; the host tells the TV
 ## machine which, so it has it ready too. def_from_desc() then takes the finished maze at once.
 func prefetch_desc(desc: Dictionary) -> void:
-	if desc.is_empty() or str(desc.get("k", "")) == "lesson":
+	if desc.is_empty() or str(desc.get("k", "")) == "lesson" or str(desc.get("k", "")) == "pick":
 		return
-	var key := var_to_str(desc)
+	var key := gen_key(desc)
 	if not def_cache.has(key):
 		BgGen.prefetch(key, _gen_job(desc))
 	if net != null and net.mode != "client":
@@ -1801,13 +2068,17 @@ static func _gen_job(desc: Dictionary) -> Callable:
 	var d := desc.duplicate()
 	return func() -> Variant:
 		var def: Dictionary
+		var m := str(d.get("m", ""))
+		var wd := str(d.get("wd", ""))
 		if str(d.get("k", "")) == "daily":
-			def = Story.daily(str(d.get("d", "")))
+			def = Story.daily(str(d.get("d", "")), m, wd)
 			def["shiny_color"] = Story.GOLDEN[1]
 		else:
 			var i := int(d.get("i", 0))
-			def = Story.maze(int(d.get("w", 0)), i)
+			def = Story.maze(int(d.get("w", 0)), i, m, wd)
 			def["shiny_color"] = Story.shiny_of(i)[1]
+		if m != "":
+			def["events"] = Worlds.events(def, m)
 		return def
 
 
@@ -1865,6 +2136,22 @@ func _story_intro() -> void:
 	if net.mode == "client":
 		return
 	story_queue.clear()
+	_story_intro_beats()
+	# Today's world first (the session's first maze), and everything after a pick board's card.
+	var kd := str(level_desc.get("k", ""))
+	var shift := story_lag
+	story_lag = 0.0
+	if (kd == "story" or kd == "daily") and run_mazes == 0 and world_id != "" and world_id != "sunny":
+		shift += 3.5
+	for q in story_queue:
+		q[0] = float(q[0]) + shift
+	if shift >= 3.5:
+		var w := Worlds.world(world_id)
+		_story({"who": str(w.name), "line": str(WORLD_LINES.get(world_id, "")), "pic": str(w.pic), "color": w.color, "duration": 3.0},
+			shift - 3.2)
+
+
+func _story_intro_beats() -> void:
 	match str(level_desc.get("k", "")):
 		"lesson":
 			if int(level_desc.get("i", 0)) == 1:
@@ -1882,6 +2169,13 @@ func _story_intro() -> void:
 				_story(_place_beat(pl, "intro"), 4.2 if i == 0 else 0.5)
 			elif int(w[1]) == Story.MAZES_PER_PLACE - 1 and not first_today:
 				_story(_bobo("Last one here!"), 1.0)
+
+
+## Host: a card shown right now on every machine (the pick board's mode / gift cards).
+func _story_now(beat: Dictionary) -> void:
+	show_story(beat)
+	net.event("story", [beat])
+	story_lag = 3.0  # the maze's own cards wait for it
 
 
 ## Host: a marble rolled over the maze's shiny: into Bobo's jar it goes (saved).
@@ -1907,6 +2201,23 @@ func _shiny_found(p, at: Vector2) -> void:
 	print("P%d found the %s shiny marble" % [p.index + 1, sh[0]])
 
 
+## Host: a maze cleared with a gift marble puts one more of that kind on Bobo's marble run (saved; it grows), and a
+## new kind of gift marble unlocks at worlds.gd MARBLES unlock marbles.
+func _grow_rack(id: String) -> void:
+	var d: Dictionary = save.data
+	var rack_l: Array = d.rack
+	var before := Worlds.unlocked(rack_l.size())
+	rack_l.append(Worlds.marble_index(id))
+	if rack_l.size() > RACK_SAVE_MAX:
+		rack_l.remove_at(0)
+	var after := Worlds.unlocked(rack_l.size())
+	_send_town()
+	if after.size() > before.size():
+		var m := Worlds.marble(str(after[after.size() - 1]))
+		_story({"who": "NEW!", "line": "%s marbles!" % str(m.name).capitalize(), "pic": str(m.pic), "color": m.color, "duration": 3.5}, 1.5)
+	print("Marble run: %d marbles (%s)" % [rack_l.size(), id])
+
+
 ## Host: the town (places lit) and the jar for every machine.
 func _send_town(quiet: bool = false) -> void:
 	if save == null or town == null or net.mode == "client":
@@ -1917,7 +2228,11 @@ func _send_town(quiet: bool = false) -> void:
 		jar_l = jar_l.slice(jar_l.size() - TownScript.JAR_MAX)
 	town.set_lit(lit, quiet)
 	town.set_jar(jar_l, quiet)
-	net.event("town", [lit, jar_l, quiet])
+	var rack_l: Array = save.data.rack
+	if rack_l.size() > TownScript.RACK_MAX:
+		rack_l = rack_l.slice(rack_l.size() - TownScript.RACK_MAX)
+	town.set_rack(rack_l, quiet)
+	net.event("town", [lit, jar_l, quiet, rack_l])
 
 
 ## Host / local, a maze cleared: progress (saved), the place lighting up, and a RUN line.
@@ -1932,7 +2247,13 @@ func _progress() -> void:
 	run_mazes += 1
 	var info := {"kind": k, "i": int(level_desc.get("i", 0)), "name": board.level_name(level), "secs": snappedf(level_t, 0.1),
 		"falls": falls, "marbles": active_marbles().size(), "vr": bool(players[0].vr), "solo": solo, "mode": net.mode,
-		"shiny": board.gem_taken.has(true), "feat": MazeGen.features(board.cur)}
+		"shiny": board.gem_taken.has(true), "feat": MazeGen.features(board.cur), "pick_mode": str(level_desc.get("m", "")),
+		"gift": gift, "world": world_id, "events": maze_events, "picks": picks.history.duplicate() if picks != null else []}
+	if picks != null:
+		picks.history.clear()
+	d.events = int(d.events) + maze_events
+	if gift != "" and (k == "story" or k == "daily"):
+		_grow_rack(gift)
 	match k:
 		"lesson":
 			if int(level_desc.get("i", 0)) >= LevelsData.SIMPLE_LEVELS.size() and not bool(d.lessons_done):
@@ -2112,6 +2433,8 @@ func _in_view(cam: Camera3D, pos: Vector3) -> bool:
 
 ## Where the marbles are heading right now: the practice ring, or the goal (board-local).
 func _cue_target() -> Vector2:
+	if state == "pick":
+		return Vector2(PicksScript.ROW.x, PicksScript.ROW.z)  # the middle orb
 	if state == "practice" and not board.starts.is_empty():
 		return board.practice_spot()
 	return board.goal
@@ -2145,7 +2468,7 @@ func _cue_now(p) -> Array:
 		return ["", ""]
 	if p.pad_lost_t >= 0.0:
 		return ["plug", ""]
-	if state != "play" and state != "practice":
+	if state != "play" and state != "practice" and state != "pick":
 		return ["", ""]
 	if p.index == 0:
 		var td := _tilt_dir()
@@ -2336,7 +2659,7 @@ func _update_board_arrows() -> void:
 	# VR giant: grab here (the right handle), until they've grabbed it twice.
 	var tl = players[0] if not players.is_empty() else null
 	grab_arrow.visible = (tl != null and tl.vr and not tl.ghost and not tl.grabbing and not cue_learned(tl, "grab")
-		and (state == "play" or state == "practice") and not paused)
+		and (state == "play" or state == "practice" or state == "pick") and not paused)
 	if grab_arrow.visible:
 		grab_arrow.global_position = board.handle_world(1) + Vector3(0.0, 0.1 + 0.03 * ph, 0.0)
 		grab_arrow.global_rotation = Vector3(-PI / 2.0, board.t * 2.0, 0.0)
@@ -2352,6 +2675,9 @@ func on_client_joined() -> void:
 		_set_solo(false)
 		practiced = false  # the TV players get the practice ring too
 		sound("home", -2.0, 1.2, true)
+		if state == "pick":
+			_restart_pick_board()  # the pick carries on (the orbs are sticky); everyone rolls from the start
+			return
 		_start_level(level)
 		return
 	# (no "they joined" line: each seat's join says WHO, core/who.gd)
@@ -2370,6 +2696,9 @@ func on_client_left() -> void:
 	seats.all_left()
 	if simple:
 		_set_solo(true)  # carry on with the giant's own marble
+		if state == "pick":
+			_restart_pick_board()
+			return
 		_start_level(level)
 		return
 	state = "wait"
@@ -2466,6 +2795,7 @@ func apply_snapshot(s: Array) -> void:
 		level = lv
 		level_desc = desc
 		board.load_level(lv, def_from_desc(desc))
+		_on_desc()
 		_apply_theme()
 		for p in players:
 			if p.index > 0:
@@ -2547,11 +2877,25 @@ func apply_event(kind: String, args: Array) -> void:
 				level_desc = desc
 				board.load_level(lv, def_from_desc(desc))
 			_apply_theme()
+			_on_desc()
+			if events != null:
+				events.clear()
 			for p in players:
 				if p.index > 0:
 					p.reset_to_start()
-			state = "intro"
+			state = "pick" if str(desc.get("k", "")) == "pick" else "intro"
 			state_t = 0.0
+		"orbs":
+			if picks != null:
+				picks.show_row(str(args[0]), args[1] if args.size() > 1 else [])
+		"take":
+			if picks != null:
+				picks.take_fx(int(args[0]), int(args[1]))
+		"mev":
+			if events != null:
+				events.announce(str(args[0]), float(args[1]), float(args[2]), float(args[3]), float(args[4]), float(args[5]))
+		"bounce":
+			_bounce_fx(args[0], args[1])
 		"prefetch":
 			if args.size() > 0 and args[0] is Dictionary:
 				prefetch_desc(args[0])
@@ -2561,6 +2905,8 @@ func apply_event(kind: String, args: Array) -> void:
 			if town != null:
 				town.set_lit(int(args[0]), bool(args[2]) if args.size() > 2 else false)
 				town.set_jar(args[1])
+				if args.size() > 3:
+					town.set_rack(args[3], bool(args[2]))
 		"prop":
 			if props != null:
 				props.react(int(args[0]), false)

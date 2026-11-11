@@ -33,6 +33,11 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "mm-gifts", "date": "2026-11-11", "game": "marble_maze", "pic": "bouncymarble", "line": "Pick heavy, bouncy, magnet!"},
+	{"id": "mm-events", "date": "2026-11-11", "game": "marble_maze", "pic": "quake", "line": "Quakes and gates warn first"},
+	{"id": "mm-worlds", "date": "2026-11-11", "game": "marble_maze", "pic": "snowflake", "line": "Snow day! Party! Starry!", "try": {"MM_WORLD": "snow"}},
+	{"id": "mm-run", "date": "2026-11-11", "game": "marble_maze", "pic": "kaiju", "line": "Bobo's marble run grows!"},
+	{"id": "mm-gentle", "date": "2026-11-11", "game": "marble_maze", "pic": "magnetmarble", "line": "Gentle, brave or hard"},
 	{"id": "kr-pancakes", "date": "2026-11-11", "game": "kitchen_rush", "pic": "pancakes", "line": "Pancake day! Pizza night!", "try": {"KR_THEME": "pancake"}},
 	{"id": "kr-gifts", "date": "2026-11-11", "game": "kitchen_rush", "pic": "helpermouse", "line": "Pick Gran's chef gifts!"},
 	{"id": "kr-events", "date": "2026-11-11", "game": "kitchen_rush", "pic": "spill", "line": "Smoke and spills warn first"},

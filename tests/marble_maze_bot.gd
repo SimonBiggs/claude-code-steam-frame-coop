@@ -28,6 +28,12 @@ extends Node
 ## but a level name or a short word, or a tip spot (a view's HUD line, the controls line) shows words.
 ## P2 looks away from the goal now and then (turn cue); local mode unplugs P3's fake controller (bolt)
 ## and plugs it back in.
+## SECOND PASS (worlds.gd, picks.gd, events.gd): the bot plays the STORY by default (BOT_LESSONS=1: the seven lessons
+## first, as a fresh save does), so every run meets the PICK BOARD: P2 (the first marble here) rolls under the orb
+## of MM_BOT_MODE (default hard: the most events) and then a gift orb (MM_BOT_GIFT, else the first offered); a VR
+## giant touches it with the left hand instead (solo VR too). Told events: closing gates are walls in the bot's
+## paths while up. Prints "BOT DEEP: ..." (mode, gift, world, events told / seen, marble run) and fails a pick
+## board that never ends.
 
 const FAKE_PAD := 40
 
@@ -64,6 +70,8 @@ const HUD_WORDS := ["", "HOME!", "Syncing with the VR player…"]
 
 func _ready() -> void:
 	preload("res://tests/bot_end.gd").arm(self)  # end by itself in networked runs
+	if not OS.has_environment("BOT_LESSONS") and not OS.has_environment("BOT_LEVEL"):
+		OS.set_environment("BOT_STORY", "1")  # the story: pick board, gift marbles, told events
 	process_mode = Node.PROCESS_MODE_ALWAYS  # keeps running if the Start check opened the pause menu
 	main = load("res://games/marble_maze/main.tscn").instantiate()
 	add_child(main)
@@ -119,7 +127,7 @@ func _physics_process(delta: float) -> void:
 		print("BOT: fake controller %d drives P%d, paused=%s" % [FAKE_PAD, int(main.joy_owner.get(FAKE_PAD, -1)) + 1, get_tree().paused])
 	var board = main.board
 	# The map itself is in the key: a story maze can replace the first lesson with the same level number.
-	var key: int = hash([board.level_n, board.rows, board.gate_open[0], board.gate_open[1]])
+	var key: int = hash([board.level_n, board.rows, board.gate_open[0], board.gate_open[1], board.event_gate])
 	if key != dist_level and board.rows.size() > 0:
 		dist_level = key
 		dist = _bfs_from([board.cell_of(board.goal)])
@@ -150,6 +158,10 @@ func _physics_process(delta: float) -> void:
 			n += 1
 	if OS.has_environment("BOT_CHAOS"):
 		_chaos(delta)
+	if main.state == "pick":
+		want = _pick_drive(delta)
+		n = 1 if want != Vector2.ZERO else 0
+	_deep_notes()
 	var tl = main.players[0]
 	if tl.vr and mode != "client":
 		_vr_drive(tl, (want / n * 0.6) if n > 0 else Vector2.ZERO, delta)
@@ -274,6 +286,13 @@ func _simple_checks(delta: float) -> void:
 ## The left hand visits each toy in turn, then grabs and throws a spare marble.
 func _vr_drive(tl, want: Vector2, delta: float) -> void:
 	var board = main.board
+	if main.state == "pick" and main.state_t > 2.5 and main.picks.chosen < 0:
+		var o = _pick_orb()
+		if o != null:
+			tl.hand_l.global_position = o.global_position  # the giant touches the orb
+			if not has_meta("vr_pick_said"):
+				set_meta("vr_pick_said", true)
+				print("BOT: VR left hand touches the %s orb" % o.id)
 	var waiting: bool = main.state == "practice" and not saw_hands
 	if waiting or main.state != "play" and main.state != "practice":
 		if tl.grabbing:
@@ -312,6 +331,79 @@ func _vr_drive(tl, want: Vector2, delta: float) -> void:
 	tl.hand_l.global_position = target + side
 
 
+# --- Second pass ---------------------------------------------------------------------------
+
+## The orb the bot wants on the pick board (null: none showing).
+func _pick_orb():
+	var po = main.picks.orbs if main.picks != null else null
+	if po == null or po.orbs.is_empty():
+		return null
+	var want_id := ""
+	if po.stage == "mode":
+		want_id = OS.get_environment("MM_BOT_MODE") if OS.has_environment("MM_BOT_MODE") else "hard"
+	elif OS.has_environment("MM_BOT_GIFT"):
+		want_id = OS.get_environment("MM_BOT_GIFT")
+	for o in po.orbs:
+		if is_instance_valid(o) and o.id == want_id:
+			return o
+	return po.orbs[0] if is_instance_valid(po.orbs[0]) else null
+
+
+## Pick board: P2 (the first local marble) rolls under the orb; the others wait. Returns the tilt the marbles want.
+func _pick_drive(_delta: float) -> Vector2:
+	var o = _pick_orb()
+	var board = main.board
+	var want := Vector2.ZERO
+	var first := true
+	for p in main.players:
+		if p.index == 0 or not p.active:
+			continue
+		var d := Vector2.ZERO
+		if first and o != null:
+			var tgt3: Vector3 = board.to_local(o.global_position)
+			var to := Vector2(tgt3.x, tgt3.z) - Vector2(p.lp.x, p.lp.z)
+			var dv := to.normalized() * minf(0.2, to.length() * 3.0) if to.length() > 0.001 else Vector2.ZERO
+			d = ((dv - p.est_v) * 5.0).limit_length(1.0)
+			want = d
+		first = false
+		if p.is_local():
+			p.bot = true
+			p.bot_steer = d
+	if main.state_t > 25.0 and not has_meta("pick_stuck_%d" % main.level):
+		set_meta("pick_stuck_%d" % main.level, true)
+		print("BOT ASSERT FAILED: pick board before level %d still up after 25 s" % main.level)
+	return want
+
+
+## What the second pass showed on this machine (printed at the end).
+func _deep_notes() -> void:
+	var notes: Dictionary = get_meta("deep", {})
+	if main.picks != null and main.picks.showing():
+		var st: String = main.picks.orbs.stage
+		if not notes.has("orbs_" + st):
+			notes["orbs_" + st] = true
+			print("BOT: pick orbs up: %s %s" % [st, str(main.picks.orbs.entries.map(func(e): return e.id))])
+	if main.events != null:
+		for k in main.events.active_kinds():
+			if not notes.has("event_" + k):
+				notes["event_" + k] = true
+				print("BOT: event going off: %s (t=%.0f)" % [k, t])
+		if main.events.rings.count() > 0 and not notes.has("rings"):
+			notes["rings"] = true
+			print("BOT: warn rings showing (t=%.0f)" % t)
+	if main.gift != "" and not notes.has("gift_" + main.gift):
+		notes["gift_" + main.gift] = true
+		var band_ok := false
+		for p in main.players:
+			if p.index > 0 and p.active and p.gift_band != null and p.gift_band.visible:
+				band_ok = true
+		print("BOT: rolling as %s marbles (band shown %s)" % [main.gift, band_ok])
+	if main.world_id != "" and not notes.has("world"):
+		notes["world"] = main.world_id
+		print("BOT: today's world %s (fx %s)" % [main.world_id, main.world_fx != null])
+	set_meta("deep", notes)
+
+
 func mode_is_client() -> bool:
 	return main.net.mode == "client"
 
@@ -321,6 +413,8 @@ func _passable(k: String) -> bool:
 
 
 func _open_here(board, c: Vector2i) -> bool:
+	if c == board.event_gate:
+		return false
 	var k: String = board.ch(c.x, c.y)
 	if k == "D":
 		return board.gate_open[0]
@@ -634,6 +728,12 @@ func _exit_tree() -> void:
 		var ks: Array = cues.keys()
 		ks.sort()
 		print("BOT CUES: mode=%s %s" % [main.net.mode, ",".join(PackedStringArray(ks))])
+		var notes: Dictionary = get_meta("deep", {})
+		var ks2: Array = notes.keys()
+		ks2.sort()
+		print("BOT DEEP: mode=%s gift=%s world=%s seen=%s rack=%d events_told=%d" % [main.net.mode, main.gift, main.world_id,
+			",".join(PackedStringArray(ks2)), (main.save.data.rack as Array).size() if main.save != null else -1,
+			int(main.save.data.events) if main.save != null else -1])
 		if main.save != null:
 			var d: Dictionary = main.save.data
 			print("BOT STORY: mode=%s level=%d desc=%s story_i=%d places=%d jar=%d lessons_done=%s town_lit=%d" % [main.net.mode,
