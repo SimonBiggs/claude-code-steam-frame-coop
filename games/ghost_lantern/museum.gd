@@ -10,10 +10,12 @@ extends Node3D
 ## the shelf clear of hiding places).
 
 const World := preload("res://games/ghost_lantern/world.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 ## Ghosts kept for each cosy step.
-const STEPS: Array[int] = [4, 10, 18, 28, 40, 55, 75]
-const KIND_ORDER: Array[String] = ["plain", "snoozy", "sprite", "spooker", "golden", "king"]
+const STEPS: Array[int] = [4, 10, 18, 28, 40, 55, 75, 95, 120, 150]  # (second pass: a cat, a gramophone, a starry ceiling)
+const KIND_ORDER: Array[String] = ["plain", "snoozy", "sprite", "spooker", "golden", "king", "boing", "puff"]
+const WARM_STEPS := 7  # the house is fully warm after the first seven cosy steps
 const SHELF_X := 0.0
 const SHELF_Z := -7.65
 const SHELF_W := 4.6
@@ -32,6 +34,9 @@ var jar_ghosts: Array = []  # [Node3D, phase]
 var jar_root: Node3D
 var steps_built := {}
 var bobbers: Array = []  # [Node3D, base_y, phase] floating candles, paper lanterns
+var wings := {}  # wing id -> houses visited with it (save.data.wings): a souvenir on top of the jar shelf each
+var souvenirs: Node3D
+var notes: Array = []  # the gramophone's floating music notes
 
 
 ## How many cosy steps `k` kept ghosts have unlocked.
@@ -50,7 +55,7 @@ static func jars_shown(count: int) -> int:
 
 ## How warm the house's light is (0..1), for main.gd _update_mood.
 func warmth() -> float:
-	return float(level) / float(STEPS.size())
+	return minf(1.0, float(level) / float(WARM_STEPS))
 
 
 func _ready() -> void:
@@ -60,6 +65,46 @@ func _ready() -> void:
 	jar_root = Node3D.new()
 	add_child(jar_root)
 	apply(kept, jars, true)
+	apply_wings(true)
+
+
+## Granny Boo's souvenirs from the wings the family has visited, on top of the jar shelf: a rocking horse (attic),
+## a jam jar and a little barrel (cellar), a potted sunflower (greenhouse).
+func apply_wings(quiet: bool = false) -> void:
+	if souvenirs == null:
+		souvenirs = Node3D.new()
+		souvenirs.name = "Souvenirs"
+		add_child(souvenirs)
+	var y := 2.39
+	for id in ["attic", "cellar", "greenhouse"]:
+		if not wings.has(id) or souvenirs.has_node(id):
+			continue
+		var n := Node3D.new()
+		n.name = id
+		souvenirs.add_child(n)
+		match id:
+			"attic":
+				n.position = Vector3(SHELF_X - 1.6, y, SHELF_Z)
+				var wood := World.mat(Color(0.85, 0.55, 0.3))
+				World.box(n, Vector3(0.5, 0.04, 0.12), Vector3(0, 0.03, 0), World.mat(Color(0.55, 0.3, 0.18)), false)
+				World.ball(n, 0.12, Vector3(0, 0.22, 0), wood, 0.7)
+				World.ball(n, 0.07, Vector3(0.16, 0.34, 0), wood, 1.0)
+				World.cyl(n, 0.02, 0.02, 0.18, Vector3(0, 0.38, 0), World.mat(Color(1.0, 0.35, 0.35)), 6)
+			"cellar":
+				n.position = Vector3(SHELF_X - 0.3, y, SHELF_Z)
+				World.cyl(n, 0.11, 0.11, 0.24, Vector3(0, 0.12, 0), World.mat(Color(1.0, 0.35, 0.4), 1.2, 0.3), 12)
+				World.cyl(n, 0.115, 0.115, 0.04, Vector3(0, 0.26, 0), World.mat(Color(0.95, 0.9, 0.8)), 12)
+				World.cyl(n, 0.09, 0.09, 0.2, Vector3(0.28, 0.1, 0), World.mat(Color(0.5, 0.32, 0.18)), 12)
+			"greenhouse":
+				n.position = Vector3(SHELF_X + 1.0, y, SHELF_Z)
+				World.cyl(n, 0.1, 0.07, 0.14, Vector3(0, 0.07, 0), World.mat(Color(0.8, 0.45, 0.28)), 10)
+				World.cyl(n, 0.012, 0.012, 0.4, Vector3(0, 0.34, 0), World.mat(Color(0.3, 0.65, 0.3)), 5)
+				for k in 8:
+					var a := TAU * float(k) / 8.0
+					World.ball(n, 0.05, Vector3(cos(a) * 0.09, 0.56 + sin(a) * 0.09, 0.02), World.mat(Color(1.0, 0.82, 0.2), 0.8), 0.5)
+				World.ball(n, 0.06, Vector3(0, 0.56, 0.03), World.mat(Color(0.45, 0.28, 0.12)), 0.6)
+		if not quiet and main != null:
+			main.burst(n.global_position + Vector3.UP * 0.2, Color(1.0, 0.9, 0.6), 20, 0.05)
 
 
 ## Show `k` kept ghosts and the jar counts. `quiet`: no sparkles (loading, joining).
@@ -102,6 +147,11 @@ func _process(delta: float) -> void:
 	for b in bobbers:
 		var n2: Node3D = b[0]
 		n2.position.y = float(b[1]) + sin(t * 1.3 + float(b[2])) * 0.06
+	for nt in notes:  # the gramophone's notes float up and round again
+		var nn: Node3D = nt[0]
+		var ph := fmod(t * 0.35 + float(nt[1]), 1.0)
+		nn.position = Vector3(-2.3 + sin(ph * 7.0 + float(nt[1])) * 0.2, 1.2 + ph * 1.4, 6.7)
+		nn.scale = Vector3.ONE * (1.0 - smoothstep(0.75, 1.0, ph))
 
 
 func _build_shelf() -> void:
@@ -133,12 +183,14 @@ func _build_jars() -> void:
 	var glass := StandardMaterial3D.new()
 	glass.albedo_color = Color(0.75, 0.9, 1.0, 0.22)
 	glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	glass.render_priority = UiKit.VR_PRIO_UNDER_UI
 	glass.roughness = 0.1
 	glass.metallic_specular = 0.9
 	var lid := World.mat(Color(0.75, 0.55, 0.25), 0.3, 0.4)
 	var empty_glass := StandardMaterial3D.new()
 	empty_glass.albedo_color = Color(0.3, 0.3, 0.4, 0.35)
 	empty_glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	empty_glass.render_priority = UiKit.VR_PRIO_UNDER_UI
 	var cols := KIND_ORDER.size()
 	var step := (SHELF_W - 0.3) / float(cols)
 	for c in cols:
@@ -198,6 +250,13 @@ func _jar_ghost(g: Node3D, kind: String, color: Color) -> void:
 			World.ball(g, 0.02, Vector3(0.1, 0.08, 0.05), World.mat(Color(1.0, 1.0, 0.7), 5.0))
 		"king":  # crown
 			World.cyl(g, r * 0.7, r * 0.7, r * 0.6, Vector3(0, r * 1.1, 0), World.mat(Color(1.0, 0.82, 0.25), 1.5), 8)
+		"boing":  # a little spring
+			for k in 3:
+				World.cyl(g, r * 0.6, r * 0.6, 0.012, Vector3(0, -r * 1.7 - 0.03 * k, 0), World.mat(Color(0.8, 0.95, 1.0), 1.0), 10)
+		"puff":  # fluffy tufts
+			for k in 6:
+				var a := TAU * float(k) / 6.0
+				World.ball(g, 0.03, Vector3(cos(a) * r, r * 0.4, sin(a) * r), World.mat(Color(1.0, 1.0, 0.9), 2.0))
 
 
 func _kind_color(kind: String) -> Color:
@@ -260,7 +319,8 @@ func _build_granny() -> void:
 ## Where the sparkles go when step i lights up.
 func _step_spot(i: int) -> Vector3:
 	return [Vector3(0, 3.4, -7.5), Vector3(-14.0, 1.4, -2.0), Vector3(14.0, 3.3, 0.5), Vector3(0, 3.3, 0.5),
-		Vector3(0, 2.0, -7.6), Vector3(-14.0, 2.6, -2.0), Vector3(0, 3.5, 0)][clampi(i, 0, 6)]
+		Vector3(0, 2.0, -7.6), Vector3(-14.0, 2.6, -2.0), Vector3(0, 3.5, 0), Vector3(0.8, 0.7, 6.85), Vector3(-2.4, 1.2, 6.9),
+		Vector3(0, 3.9, 0)][clampi(i, 0, STEPS.size() - 1)]
 
 
 const BULB_SHADER := """
@@ -374,6 +434,30 @@ func _build_step(i: int) -> void:
 				bobbers.append([cn, 2.7, float(k2) * 1.3])
 				k2 += 1
 			_warm_light(root, Vector3(-14.0, 2.6, -1.0), 0.8, 6.0)
+		7:  # a sleepy cat curled up on the sofa, on its own cushion
+			var fur := World.mat(Color(1.0, 0.65, 0.3))
+			World.cyl(root, 0.32, 0.32, 0.06, Vector3(0.8, 0.48, 6.85), World.mat(Color(0.55, 0.3, 0.6)), 14)
+			World.ball(root, 0.2, Vector3(0.8, 0.6, 6.85), fur, 0.55)
+			World.ball(root, 0.1, Vector3(0.95, 0.67, 6.75), fur, 1.0)
+			for sx in [-0.04, 0.04]:
+				World.cyl(root, 0.0, 0.035, 0.07, Vector3(0.98 + sx, 0.77, 6.75), fur, 6)
+			World.cyl(root, 0.025, 0.025, 0.3, Vector3(0.62, 0.58, 6.95), fur, 6).rotation.z = 1.2
+		8:  # a gramophone on the left-hand side table, notes floating up
+			World.box(root, Vector3(0.4, 0.6, 0.4), Vector3(-2.4, 0.3, 6.9), World.mat(Color(0.35, 0.2, 0.14)), false)  # a little stool
+			World.box(root, Vector3(0.36, 0.18, 0.36), Vector3(-2.4, 0.69, 6.9), World.mat(Color(0.45, 0.26, 0.16)), false)
+			var horn := World.cyl(root, 0.24, 0.02, 0.5, Vector3(-2.3, 1.04, 6.8), World.mat(Color(1.0, 0.78, 0.35), 0.6, 0.3), 14)
+			horn.rotation.x = -0.6
+			for k in 4:
+				var nn := Node3D.new()
+				root.add_child(nn)
+				World.ball(nn, 0.05, Vector3.ZERO, World.mat(Color(1.0, 0.85, 0.4), 3.0), 0.8)
+				World.cyl(nn, 0.008, 0.008, 0.14, Vector3(0.045, 0.07, 0), World.mat(Color(1.0, 0.85, 0.4), 3.0), 4)
+				notes.append([nn, float(k) * 0.25])
+		9:  # a starry ceiling over the hall
+			var sr := RandomNumberGenerator.new()
+			sr.seed = 99
+			for k in 60:
+				_bulb(root, Vector3(sr.randf_range(-6.7, 6.7), 4.15, sr.randf_range(-7.7, 7.7)), [Color(1.0, 1.0, 0.85), Color(0.75, 0.85, 1.0), Color(1.0, 0.85, 0.6)][k % 3], 0.035)
 		6:  # rainbow fairy lights everywhere
 			var rb: Array = [Color(1.0, 0.35, 0.35), Color(1.0, 0.65, 0.25), Color(1.0, 0.95, 0.35), Color(0.4, 0.9, 0.4), Color(0.4, 0.65, 1.0), Color(0.7, 0.45, 1.0)]
 			_garland(root, Vector3(-20.8, 3.95, 7.8), Vector3(-7.3, 3.95, 7.8), rb, 22, 0.4)

@@ -21,8 +21,20 @@ extends RefCounted
 ## its own valid hiding place, everyone comes out by themselves in time, every ghost catchable alone
 ## (lantern slurp) and with vacuums, more hunters never means fewer ghosts, and night 1 stays gentle.
 ## Network: the host sends [seed, level, daily]; every machine rebuilds the same house.
+## SECOND PASS: WINGS - from the second house on, one side room (library or ballroom) is a seeded wing: the dusty
+## ATTIC (toy boxes, roof beams), the cosy CELLAR (barrels, jam jars) or the glass GREENHOUSE (big flower pots,
+## hanging plants). A wing's hiding places only stand in that wing, and each wing calls its own ghost a night early:
+##   boing   BOING (spring): hops about; a warning ring glows where it will land, and it lands dizzy (catch it!).
+##   puff    PUFF (dandelion): when the lantern makes it dizzy it pops into two little pufflings that float down
+##           into warning rings, dizzy too.
+## MODES (the arcade's one GENTLE / BRAVE / HARD list, core/pick_orbs.gd): gentle = the nights as they always were
+## (new ghosts come late); brave / hard bring a few more ghosts and the new kinds sooner, a little quicker.
+## night 1 is the same gentle night in every mode. night_load() weighs a night (seconds of catching per hunter);
+## check() proves every mode rises smoothly night by night (no cliffs, no big drops) and gentle <= brave <= hard.
 
 const Seeded := preload("res://core/seeded.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
+const MODE_IDS: Array[String] = PickOrbs.MODE_IDS  # gentle / brave / hard (the arcade's one list)
 
 const HALF_X := 21.0
 const HALF_Z := 8.0
@@ -75,8 +87,15 @@ const KINDS := {
 	"clock": {"w": 0.7, "d": 0.45, "h": 2.5, "peek": 1.6, "wall": true, "solid": true, "fixed": true},
 	"piano": {"w": 2.0, "d": 1.5, "h": 1.6, "peek": 1.2, "wall": true, "solid": true, "fixed": true},
 	"fireplace": {"w": 2.4, "d": 0.6, "h": 1.6, "peek": 0.7, "wall": true, "solid": true, "fixed": true},
+	# Wings (only in their own wing room): a toy box in the attic, a barrel in the cellar, a big flower pot in the greenhouse.
+	"toybox": {"w": 1.0, "d": 0.7, "h": 0.75, "peek": 0.9, "wall": false, "solid": true, "top": true, "wing": "attic"},
+	"barrel": {"w": 0.8, "d": 0.8, "h": 1.1, "peek": 1.2, "wall": false, "solid": true, "top": true, "wing": "cellar"},
+	"plantpot": {"w": 0.9, "d": 0.9, "h": 0.8, "peek": 1.0, "wall": false, "solid": true, "top": true, "wing": "greenhouse"},
 }
 const PLACED: Array[String] = ["wardrobe", "trunk", "vase", "basket", "curtain"]
+## Wings: [id, its hiding place, the ghost it calls a night early, the first house level it can turn up at].
+const WINGS: Array = [["attic", "toybox", "boing", 1], ["cellar", "barrel", "snoozy", 2], ["greenhouse", "plantpot", "puff", 3]]
+const WING_ROOMS: Array[String] = ["library", "ballroom"]
 const FIXED_SPOTS: Array = [
 	{"kind": "clock", "room": "hall", "pos": Vector3(-6.3, 0.0, -6.5), "yaw": 0.0},
 	{"kind": "piano", "room": "ballroom", "pos": Vector3(14.0, 0.0, -5.6), "yaw": 0.0},
@@ -86,11 +105,20 @@ const WINDOWS: Array[float] = [-17.0, -11.0, -3.5, 3.5, 11.0, 17.0]
 
 ## Ghost kinds and the numbers ghost.gd plays them with (seconds): how long a hiding ghost waits before
 ## it comes out by itself, how long a caught-alone (solo lantern) catch takes at most.
-const GHOSTS: Array[String] = ["plain", "snoozy", "sprite", "spooker", "golden", "king"]
+const GHOSTS: Array[String] = ["plain", "snoozy", "sprite", "spooker", "golden", "king", "boing", "puff"]
 const HIDERS: Array[String] = ["snoozy", "spooker"]
 const WAKE_MAX := 30.0  # a snoozy ghost nobody finds wakes up by itself
 const PEEK_MAX := 12.0  # a peekaboo ghost pops out at least this often
-const TOUGH := {"plain": 0.8, "snoozy": 0.7, "sprite": 0.7, "spooker": 1.4, "golden": 0.8, "king": 2.5}
+const TOUGH := {"plain": 0.8, "snoozy": 0.7, "sprite": 0.7, "spooker": 1.4, "golden": 0.8, "king": 2.5,
+	"boing": 0.8, "puff": 0.9, "puffling": 0.45}
+const PUFFLINGS := 2  # a popped puff becomes this many pufflings
+## Boing and the pufflings: how long the warning ring glows before they land (the hop), how long they stay dizzy.
+const HOP_TIME := 1.2
+const LAND_DIZZY := {"gentle": 2.6, "brave": 2.0, "hard": 1.6}
+## Modes: the night the new kinds first come, extra ghosts from night 2, how much quicker everyone floats.
+const MODE_NEW := {"gentle": {"boing": 6, "puff": 7}, "brave": {"boing": 5, "puff": 6}, "hard": {"boing": 4, "puff": 5}}
+const MODE_EXTRA := {"gentle": 0, "brave": 1, "hard": 2}
+const MODE_SPEED := {"gentle": 1.0, "brave": 1.12, "hard": 1.25}
 const VAC_RATE := 0.6  # main.gd CAPTURE_RATE (per second, one vacuum)
 const SOLO_RATE := 0.55  # ghost.gd: a dizzy ghost slurped into the lantern
 const LANTERN_SEE := 9.0  # the lantern (11 m) lights a hiding place from this far for sure
@@ -123,11 +151,15 @@ static func generate(seed_value: int, opts: Dictionary = {}) -> Dictionary:
 	var rooms := Seeded.shuffled(r, ROOM_ORDER)
 	var walk := walk_grid(spots)
 	var reach := flood(walk)
+	var wing := wing_for(seed_value, level, daily)
+	var wing_room := String(wing.get("room", ""))
 	while spots.size() - FIXED_SPOTS.size() < want and tries < 200:
 		tries += 1
 		var placed := spots.size() - FIXED_SPOTS.size()
 		var room: String = rooms[placed] if placed < 3 else Seeded.pick(r, ROOM_ORDER)
 		var kind: String = PLACED[Seeded.weighted(r, [3, 3, 2, 2, 2])]
+		if room == wing_room and (r.randf() < 0.7 or not spots.any(func(o: Dictionary) -> bool: return String(o.kind) == String(wing.kind))):
+			kind = String(wing.kind)  # the wing's own hiding place (always the first one in the wing)
 		var s := _candidate(r, kind, room)
 		if s.is_empty() or spot_problem(s, spots) != "":
 			continue
@@ -152,8 +184,19 @@ static func generate(seed_value: int, opts: Dictionary = {}) -> Dictionary:
 		"seed": seed_value, "level": level, "daily": daily,
 		"name": NAMES[Seeded.rng(seed_value, "name").randi() % NAMES.size()],
 		"tint": TINTS[Seeded.rng(seed_value, "tint").randi() % TINTS.size()],
-		"spots": spots, "rooms": room_cycle,
+		"spots": spots, "rooms": room_cycle, "wing": wing,
 	}
+
+
+## This house's wing ({} on the very first house): {id, room, kind, ghost}. The attic opens first (house 2), then
+## the cellar (house 3), then the greenhouse (house 4); TODAY'S HOUSE may have any of them.
+static func wing_for(seed_value: int, level: int, daily: bool) -> Dictionary:
+	if level < 1 and not daily:
+		return {}
+	var wr := Seeded.rng(seed_value, "wing")
+	var open: Array = WINGS.filter(func(w: Array) -> bool: return int(w[3]) <= maxi(level, 3 if daily else 0))
+	var w: Array = open[open.size() - 1] if level == int(open[open.size() - 1][3]) and not daily else open[wr.randi() % open.size()]
+	return {"id": String(w[0]), "kind": String(w[1]), "ghost": String(w[2]), "room": String(WING_ROOMS[wr.randi() % WING_ROOMS.size()])}
 
 
 ## Which room the hiding ghosts like best on `night` (1: the hall, near the start; then around the house).
@@ -165,7 +208,7 @@ static func room_for(house: Dictionary, night: int) -> String:
 ## The ghosts of one night for a crew (players, lantern-bearer included), in spawn order. Hiding ghosts
 ## carry the index of their hiding place ("hide"); the rest float in through the ceiling (hide -1).
 ## More hunters bring a few more plain ghosts (appended, so the rest of the night stays the same).
-static func night_plan(house: Dictionary, night: int, crew: int = 2) -> Array:
+static func night_plan(house: Dictionary, night: int, crew: int = 2, mode: String = "gentle") -> Array:
 	var n := maxi(1, night)
 	var counts := {}
 	match n:
@@ -175,8 +218,24 @@ static func night_plan(house: Dictionary, night: int, crew: int = 2) -> Array:
 		4: counts = {"plain": 3, "sprite": 1, "spooker": 1, "snoozy": 1, "golden": 1}
 		_:
 			var k := n - 5
-			counts = {"plain": mini(2 + k / 2, 4), "sprite": mini(1 + k / 3, 2), "spooker": mini(1 + k / 3, 2),
+			counts = {"plain": mini(3 + k / 2, 5), "sprite": mini(1 + k / 3, 2), "spooker": mini(1 + k / 3, 2),
 				"snoozy": mini(1 + k / 2, 3), "golden": 1 if n % 2 == 0 else 0}
+	var m := mode if MODE_EXTRA.has(mode) else "gentle"
+	var extra := mini(int(MODE_EXTRA[m]), (n - 2) / 2)  # brave / hard ease in: +1 from night 4, hard +2 from night 6
+	counts["plain"] = int(counts.get("plain", 0)) + extra
+	if int(MODE_EXTRA[m]) >= 2 and n >= 4:
+		counts["sprite"] = int(counts.get("sprite", 0)) + 1
+	# The new kinds: from their mode's night (a wing calls its own ghost one night early, never on night 1).
+	var wing: Dictionary = house.get("wing", {})
+	for nk in ["boing", "puff"]:
+		var first := int(MODE_NEW[m][nk])
+		if String(wing.get("ghost", "")) == nk:
+			first = maxi(3, first - 1)
+		if n >= first:
+			counts[nk] = int(counts.get(nk, 0)) + mini(1 + (n - first) / 4, 2)
+			counts["plain"] = maxi(1, int(counts.get("plain", 0)) - 1)  # it takes a plain ghost's place
+	if String(wing.get("ghost", "")) == "snoozy" and n >= 3:
+		counts["snoozy"] = int(counts.get("snoozy", 0)) + 1  # the cellar: one more sleepy ghost in a barrel
 	var r := Seeded.rng(int(house.seed), "night%d" % n)
 	var list: Array = []
 	for kind in GHOSTS:
@@ -203,9 +262,15 @@ static func night_plan(house: Dictionary, night: int, crew: int = 2) -> Array:
 		plan.append({"kind": kind, "hide": hide})
 	for i in crowd_extra(crew):
 		plan.append({"kind": "plain", "hide": -1})
-	if plan.size() > MAX_GHOSTS:
-		plan.resize(MAX_GHOSTS)
+	var cap := most_ghosts(crew)
+	if plan.size() > cap:
+		plan.resize(cap)
 	return plan
+
+
+## The most ghosts in one night for a crew: 12 for one or two hunters (one lantern), MAX_GHOSTS for more.
+static func most_ghosts(crew: int) -> int:
+	return 12 if crew <= 2 else MAX_GHOSTS
 
 
 ## Extra plain ghosts for a big crew (beyond the lantern-bearer and two vacuums: one per two hunters).
@@ -475,7 +540,42 @@ static func _clear_sight(a: Vector2, b: Vector2, own: Dictionary, spots: Array) 
 ## How long (seconds) catching a ghost of `kind` takes at most: alone (the lantern slurps a dizzy ghost)
 ## or with one vacuum.
 static func catch_time(kind: String, solo: bool) -> float:
+	if kind == "puff":  # it pops into pufflings: each is caught on its own
+		return float(TOUGH.puffling) / (SOLO_RATE if solo else VAC_RATE)
 	return float(TOUGH[kind]) / (SOLO_RATE if solo else VAC_RATE)
+
+
+## How much catching a night is (the difficulty curve): seconds of catching per hunter, plus a little for each
+## ghost to find (hiding ones more, quick ones more, the king a lot), quicker ghosts in brave / hard.
+const FIND := {"plain": 2.0, "snoozy": 4.0, "sprite": 3.5, "spooker": 4.5, "golden": 5.0, "boing": 3.5, "puff": 3.0}
+static func night_load(house: Dictionary, night: int, crew: int, mode: String = "gentle") -> float:
+	var total := 0.0
+	for g in night_plan(house, night, crew, mode):
+		var kind := String(g.kind)
+		var n_catch := PUFFLINGS if kind == "puff" else 1
+		total += catch_time(kind, crew <= 1) * n_catch + float(FIND.get(kind, 3.0)) + (1.0 if kind == "puff" else 0.0)
+	if king_night(night):
+		total += catch_time("king", crew <= 1) + 8.0
+	return total * float(MODE_SPEED.get(mode, 1.0)) / sqrt(float(maxi(1, crew)))
+
+
+## Why one mode's nights aren't a smooth climb for a crew (empty = fine): night 1 the same gentle night in every
+## mode, no night more than 1.6x the one before (+3 s), none below 0.75x of it (no big drop), and night 10 well
+## above night 1.
+static func curve_problems(house: Dictionary, mode: String, crew: int) -> Array:
+	var why: Array = []
+	var prev := night_load(house, 1, crew, mode)
+	var first := prev
+	for night in range(2, 11):
+		var cur := night_load(house, night, crew, mode)
+		if cur > prev * 1.6 + 3.0:
+			why.append("%s crew %d: night %d jumps from %.1f to %.1f" % [mode, crew, night, prev, cur])
+		if cur < prev * 0.75:
+			why.append("%s crew %d: night %d drops from %.1f to %.1f" % [mode, crew, night, prev, cur])
+		prev = cur
+	if prev < first * 2.0:
+		why.append("%s crew %d: night 10 (%.1f) isn't much harder than night 1 (%.1f)" % [mode, crew, prev, first])
+	return why
 
 
 ## Everything wrong with a house (empty = fair).
@@ -508,15 +608,39 @@ static func check(house: Dictionary) -> Array:
 			why.append(a)
 	if String(house.rooms[0]) != "hall" or (house.rooms as Array).size() != 3:
 		why.append("the first night isn't in the hall")
-	for night in range(1, 11):
-		var last := -1
-		for crew in range(1, 8):
-			var plan := night_plan(house, night, crew)
-			if plan.size() < last:
-				why.append("night %d: %d hunters get fewer ghosts than %d" % [night, crew, crew - 1])
-			last = plan.size()
-			for w in plan_problems(house, night, crew, plan):
-				why.append(w)
+	# The wing: its hiding places only in the wing room (at least one there), none in a house without a wing.
+	var wing: Dictionary = house.get("wing", {})
+	var wing_spots := 0
+	for s in spots:
+		var wk := String(KINDS.get(s.kind, {}).get("wing", ""))
+		if wk == "":
+			continue
+		if wing.is_empty() or wk != String(wing.id) or String(s.room) != String(wing.room):
+			why.append("a %s stands outside its wing (%s in the %s)" % [s.kind, wk, s.room])
+		else:
+			wing_spots += 1
+	if not wing.is_empty() and wing_spots == 0:
+		why.append("the %s wing has no %s to hide in" % [wing.id, wing.kind])
+	for mode in MODE_IDS:
+		for night in range(1, 11):
+			var last := -1
+			for crew in range(1, 8):
+				var plan := night_plan(house, night, crew, mode)
+				if plan.size() < last:
+					why.append("%s night %d: %d hunters get fewer ghosts than %d" % [mode, night, crew, crew - 1])
+				last = plan.size()
+				for w in plan_problems(house, night, crew, plan):
+					why.append("%s %s" % [mode, w])
+				if night == 1 and var_to_str(plan) != var_to_str(night_plan(house, 1, crew, "gentle")):
+					why.append("%s: night 1 isn't the gentle night" % mode)
+		for crew in [1, 2, 4, 7]:
+			why.append_array(curve_problems(house, mode, crew))
+	for night in range(2, 11):
+		var g := night_load(house, night, 3, "gentle")
+		var b := night_load(house, night, 3, "brave")
+		var h := night_load(house, night, 3, "hard")
+		if not (g <= b * 1.03 and b <= h * 1.03):  # (a few % either way: the ghost cap can trim a night)
+			why.append("night %d: gentle %.1f / brave %.1f / hard %.1f aren't in order" % [night, g, b, h])
 	return why
 
 

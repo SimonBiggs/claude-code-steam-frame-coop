@@ -4,7 +4,21 @@ extends RefCounted
 ## bubbles), zippy (a pink ghost with a bow, zooming), peekaboo (peeking out from behind a curtain in a witch hat),
 ## goldie (a golden ghost with sparkles), kingghost (in a crown) and jar (a little ghost in a jar, ghost = color).
 
-const NAMES: Array[String] = ["grannyboo", "snoozy", "zippy", "peekaboo", "goldie", "kingghost", "jar"]
+## Second pass: boing (a ghost on a spring over a glowing ring), puff (a dandelion-clock ghost), the wings attic (a
+## round moon window under roof beams), cellar (jam jars on a shelf by a barrel), greenhouse (a glass roof over a
+## flower pot), and the lantern gifts biglight (a wide beam), longlight (a long beam), dizzystars (a dizzy ghost with
+## stars) and supersuck (a vacuum nozzle slurping).
+const NAMES: Array[String] = ["grannyboo", "snoozy", "zippy", "peekaboo", "goldie", "kingghost", "jar",
+	"boing", "puff", "attic", "cellar", "greenhouse", "biglight", "longlight", "dizzystars", "supersuck"]
+
+
+## A little lantern at (x, y) with a beam of half-angle `spread` and length `length` shining right.
+static func _lantern(pic, x: float, y: float, spread: float, length: float, t: float) -> void:
+	var a := 0.85 + 0.15 * sin(t * 3.0)
+	pic._poly([[x + 0.06, y], [x + 0.06 + length, y - spread], [x + 0.06 + length, y + spread]], Color(1.0, 0.92, 0.5, 0.45 * a))
+	pic._poly([[x - 0.07, y - 0.09], [x + 0.07, y - 0.09], [x + 0.07, y + 0.09], [x - 0.07, y + 0.09]], Color(0.95, 0.72, 0.3))
+	pic._circle(x, y, 0.055, Color(1.0, 0.95, 0.6))
+	pic._poly([[x - 0.04, y - 0.09], [x + 0.04, y - 0.09], [x, y - 0.15]], Color(0.6, 0.4, 0.2))
 
 
 ## A round friendly ghost: head at (x, y), radius r, wavy skirt below.
@@ -79,6 +93,71 @@ static func draw(pic, kind: String, t: float, bob: float, color: Color) -> void:
 			_ghost(pic, t, 0.5, 0.52 + bob, 0.3, Color(0.75, 0.9, 1.0))
 			pic._poly([[0.3, 0.3 + bob], [0.7, 0.3 + bob], [0.74, 0.12 + bob], [0.62, 0.22 + bob], [0.5, 0.08 + bob], [0.38, 0.22 + bob], [0.26, 0.12 + bob]], Color(1.0, 0.8, 0.25))
 			pic._circle(0.5, 0.24 + bob, 0.03, Color(1.0, 0.25, 0.45))
+		"boing":
+			var hop := absf(sin(t * 2.5)) * 0.18
+			for k in 3:  # the warning ring where it lands
+				pic.draw_arc(pic._p(0.5, 0.88), (0.12 + 0.08 * k) * size.x, 0.0, TAU, 24, Color(0.5, 0.92, 1.0, 0.8 - 0.2 * k), 0.018 * size.x)
+			for k in 4:
+				pic.draw_arc(pic._p(0.5, 0.72 - hop - k * 0.04), 0.08 * size.x, 0.0, TAU, 12, Color(0.8, 0.95, 1.0), 0.015 * size.x)
+			_ghost(pic, t, 0.5, 0.38 - hop, 0.22, Color(0.5, 0.92, 1.0))
+			pic._circle(0.5, 0.17 - hop, 0.08, Color(1.0, 0.45, 0.4))
+			pic.draw_line(pic._p(0.36, 0.1 - hop), pic._p(0.64, 0.1 - hop), Color(1.0, 0.9, 0.3), 0.03 * size.x)
+		"puff":
+			for k in 10:
+				var a := TAU * float(k) / 10.0 + t * 0.4
+				pic.draw_line(pic._p(0.5, 0.45 + bob), pic._p(0.5 + cos(a) * 0.36, 0.45 + bob + sin(a) * 0.36), Color(1.0, 1.0, 0.9, 0.5), 0.01 * size.x)
+				pic._circle(0.5 + cos(a) * 0.36, 0.45 + bob + sin(a) * 0.36, 0.04, Color(1.0, 1.0, 0.92))
+			_ghost(pic, t, 0.5, 0.45 + bob, 0.22, Color(1.0, 1.0, 0.82))
+			for k in 2:  # pufflings drifting off
+				var ph := fmod(t * 0.3 + k * 0.5, 1.0)
+				pic._circle(0.2 + 0.6 * k + sin(ph * 6.0) * 0.03, 0.9 - ph * 0.2, 0.05, Color(1.0, 0.97, 0.75, 1.0 - ph))
+		"attic":
+			pic._poly([[0.05, 0.45], [0.5, 0.08], [0.95, 0.45]], Color(0.36, 0.24, 0.16))
+			pic._poly([[0.15, 0.45], [0.5, 0.18], [0.85, 0.45], [0.85, 0.95], [0.15, 0.95]], Color(0.5, 0.36, 0.24))
+			pic._circle(0.5, 0.42, 0.13, Color(0.75, 0.85, 1.0))
+			pic.draw_arc(pic._p(0.5, 0.42), 0.13 * size.x, 0.0, TAU, 20, Color(0.3, 0.2, 0.12), 0.025 * size.x)
+			pic._circle(0.27, 0.82, 0.08, Color(0.7, 0.45, 0.25))  # a teddy
+			pic._circle(0.22, 0.73, 0.035, Color(0.6, 0.38, 0.2))
+			pic._poly([[0.55, 0.75], [0.85, 0.75], [0.85, 0.95], [0.55, 0.95]], Color(0.35, 0.55, 0.9))  # a toy box
+		"cellar":
+			pic._poly([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], Color(0.28, 0.26, 0.3))
+			pic._poly([[0.08, 0.36], [0.92, 0.36], [0.92, 0.4], [0.08, 0.4]], Color(0.45, 0.28, 0.16))
+			for k in 4:
+				var jc: Color = [Color(1.0, 0.3, 0.35), Color(1.0, 0.65, 0.2), Color(0.6, 0.3, 0.8), Color(1.0, 0.85, 0.3)][k]
+				pic._poly([[0.14 + k * 0.2, 0.18], [0.26 + k * 0.2, 0.18], [0.26 + k * 0.2, 0.36], [0.14 + k * 0.2, 0.36]], jc)
+			pic._circle(0.5, 0.74, 0.2, Color(0.5, 0.32, 0.18))  # a barrel
+			pic.draw_line(pic._p(0.3, 0.66), pic._p(0.7, 0.66), Color(0.3, 0.3, 0.32), 0.025 * size.x)
+			pic.draw_line(pic._p(0.3, 0.82), pic._p(0.7, 0.82), Color(0.3, 0.3, 0.32), 0.025 * size.x)
+		"greenhouse":
+			pic._poly([[0.05, 0.4], [0.5, 0.08], [0.95, 0.4], [0.95, 0.95], [0.05, 0.95]], Color(0.7, 1.0, 0.8, 0.35))
+			for k in 4:
+				pic.draw_line(pic._p(0.05 + k * 0.3, 0.4), pic._p(0.05 + k * 0.3, 0.95), Color(0.95, 0.95, 0.95), 0.015 * size.x)
+			pic._poly([[0.36, 0.7], [0.64, 0.7], [0.6, 0.92], [0.4, 0.92]], Color(0.8, 0.45, 0.28))
+			for k in 5:
+				var a := -PI + PI * float(k) / 4.0
+				pic.draw_line(pic._p(0.5, 0.7), pic._p(0.5 + cos(a) * 0.22, 0.62 + sin(a) * 0.25), Color(0.3, 0.7, 0.3), 0.03 * size.x)
+			pic._circle(0.5, 0.4 + bob, 0.07, Color(1.0, 0.45, 0.6))
+		"biglight":
+			_lantern(pic, 0.18, 0.5, 0.36, 0.7, t)
+			_ghost(pic, t, 0.72, 0.28, 0.08, Color(0.6, 1.0, 0.75))
+			_ghost(pic, t, 0.74, 0.68, 0.08, Color(1.0, 0.62, 0.9))
+		"longlight":
+			_lantern(pic, 0.1, 0.5, 0.12, 0.82, t)
+			_ghost(pic, t, 0.86, 0.5, 0.08, Color(0.62, 0.78, 1.0))
+		"dizzystars":
+			_ghost(pic, t, 0.5, 0.55 + bob, 0.26, Color(0.6, 1.0, 0.75), true)
+			for k in 4:
+				var a := t * 2.5 + TAU * float(k) / 4.0
+				var sx := 0.5 + cos(a) * 0.3
+				var sy := 0.22 + sin(a) * 0.08
+				pic._poly([[sx, sy - 0.05], [sx + 0.015, sy - 0.01], [sx + 0.05, sy], [sx + 0.015, sy + 0.01], [sx, sy + 0.05], [sx - 0.015, sy + 0.01], [sx - 0.05, sy], [sx - 0.015, sy - 0.01]], Color(1.0, 0.9, 0.3))
+		"supersuck":
+			pic._poly([[0.05, 0.6], [0.45, 0.48], [0.45, 0.62], [0.05, 0.72]], Color(0.5, 0.55, 0.65))  # the nozzle
+			pic._poly([[0.45, 0.42], [0.55, 0.42], [0.55, 0.68], [0.45, 0.68]], Color(0.4, 1.0, 0.6))
+			for k in 3:
+				var ph := fmod(t * 0.8 + k / 3.0, 1.0)
+				pic.draw_arc(pic._p(0.55 + (1.0 - ph) * 0.3, 0.55), (0.05 + (1.0 - ph) * 0.12) * size.x, -1.2, 1.2, 10, Color(0.55, 1.0, 0.65, ph), 0.02 * size.x)
+			_ghost(pic, t, 0.8, 0.45 + bob * 0.5, 0.12, Color(0.6, 1.0, 0.75))
 		"jar":
 			pic._poly([[0.24, 0.24], [0.76, 0.24], [0.8, 0.9], [0.2, 0.9]], Color(0.75, 0.9, 1.0, 0.35))
 			_ghost(pic, t, 0.5, 0.52 + bob, 0.17, color)

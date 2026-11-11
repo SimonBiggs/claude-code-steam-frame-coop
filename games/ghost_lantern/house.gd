@@ -144,6 +144,34 @@ func _furniture(n: Node3D, kind: String) -> void:
 			var sock := World.box(n, Vector3(0.08, 0.3, 0.08), Vector3(0.36, h - 0.1, 0.12), World.mat(Color(1.0, 0.85, 0.3)), false)
 			sock.rotation.z = -0.6
 			_solid(n, Vector3(w, h, d), h / 2.0)
+		"toybox":  # the attic: a painted toy box, a teddy's ear and a ball peeking over the rim
+			World.box(n, Vector3(w, h, d), Vector3(0, h / 2.0, 0), World.mat(Color(0.35, 0.55, 0.9)), false)
+			World.box(n, Vector3(w + 0.04, 0.08, d + 0.04), Vector3(0, h, 0), World.mat(Color(1.0, 0.8, 0.3)), false)
+			for sx in [-0.28, 0.0, 0.28]:
+				World.ball(n, 0.07, Vector3(sx * w, h * 0.5, d / 2.0 + 0.01), World.mat([Color(1.0, 0.4, 0.4), Color(1.0, 0.9, 0.3), Color(0.5, 1.0, 0.5)][int(sx * 4.0 + 1.2) % 3], 0.4), 0.3)
+			World.ball(n, 0.13, Vector3(-0.22, h + 0.06, 0.0), World.mat(Color(0.7, 0.45, 0.25)), 1.0)  # teddy
+			World.ball(n, 0.05, Vector3(-0.32, h + 0.17, 0.0), World.mat(Color(0.6, 0.38, 0.2)), 1.0)
+			World.ball(n, 0.1, Vector3(0.25, h + 0.04, 0.08), World.mat(Color(1.0, 0.35, 0.4), 0.3), 1.0)  # a ball
+			_solid(n, Vector3(w, h, d), h / 2.0)
+		"barrel":  # the cellar: a big apple barrel with hoops
+			var oak := World.mat(Color(0.5, 0.32, 0.18))
+			World.cyl(n, 0.36, 0.36, h, Vector3(0, h / 2.0, 0), oak, 14)
+			World.cyl(n, 0.4, 0.4, h * 0.5, Vector3(0, h / 2.0, 0), oak, 14)
+			for y in [0.12, h - 0.12]:
+				World.cyl(n, 0.39, 0.39, 0.05, Vector3(0, y, 0), World.mat(Color(0.3, 0.3, 0.32), 0.0, 0.4), 14)
+			for ai in 4:
+				World.ball(n, 0.08, Vector3(-0.15 + 0.1 * ai, h + 0.04, 0.05 * (ai % 2)), World.mat(Color(0.9, 0.2, 0.2), 0.2), 1.0)
+			_solid(n, Vector3(w, h, d), h / 2.0)
+		"plantpot":  # the greenhouse: a big terracotta pot with a fern and flowers
+			World.cyl(n, 0.44, 0.32, h, Vector3(0, h / 2.0, 0), World.mat(Color(0.8, 0.45, 0.28)), 14)
+			World.cyl(n, 0.46, 0.46, 0.08, Vector3(0, h - 0.04, 0), World.mat(Color(0.7, 0.38, 0.22)), 14)
+			for li in 7:
+				var a := TAU * float(li) / 7.0
+				var leaf := World.box(n, Vector3(0.12, 0.7, 0.03), Vector3(cos(a) * 0.18, h + 0.3, sin(a) * 0.18), World.mat(Color(0.3, 0.7, 0.3)), false)
+				leaf.rotation = Vector3(sin(a) * 0.6, 0.0, -cos(a) * 0.6)
+			for fi in 3:
+				World.ball(n, 0.08, Vector3(-0.15 + 0.15 * fi, h + 0.55, 0.1), World.mat([Color(1.0, 0.45, 0.6), Color(1.0, 0.85, 0.3), Color(0.7, 0.55, 1.0)][fi], 0.6))
+			_solid(n, Vector3(w, h, d), h / 2.0)
 		"curtain":
 			var velvet := World.mat(Color(0.6, 0.15, 0.3))
 			var rod := World.cyl(n, 0.03, 0.03, w + 0.4, Vector3(0, h - 0.05, 0), brass, 6)
