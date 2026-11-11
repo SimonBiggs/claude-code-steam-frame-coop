@@ -3,6 +3,8 @@ extends Node3D
 ## On the client every ball is visual only (the host decides hits and sends the effects).
 
 const World := preload("res://games/cannon_cove/world.gd")
+const Contrast := preload("res://core/contrast.gd")
+const Looks := preload("res://games/cannon_cove/looks.gd")
 
 var main
 var vel := Vector3.ZERO
@@ -13,10 +15,12 @@ var age := 0.0
 
 
 func _ready() -> void:
-	var m := World.mat(Color(0.1, 0.1, 0.12) if not enemy else Color(0.25, 0.08, 0.08), 0.0, 0.3)
+	var m := World.mat(Looks.BALL if not enemy else Looks.ENEMY_BALL, 0.0, 0.3)
 	if mega:
-		m = World.mat(Color(1.0, 0.8, 0.2), 3.0, 0.2)
+		m = World.mat(Looks.MEGA_BALL, 3.0, 0.2)
 	var s := World.sphere(self, 0.24 if not mega else 0.4, Vector3.ZERO, m, 10)
+	if mega:
+		Contrast.outline(s, Looks.OUTLINE)
 	s.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	# A short smoke trail so the ball is easy to follow against the sea.
 	var trail := CPUParticles3D.new()
@@ -35,9 +39,9 @@ func _ready() -> void:
 	tm.height = 0.32
 	tm.radial_segments = 6
 	tm.rings = 3
-	var smoke := World.mat(Color(1.0, 0.9, 0.7, 0.55) if not enemy else Color(1.0, 0.5, 0.35, 0.6), 0.6)
+	var smoke := World.mat(Looks.SMOKE if not enemy else Looks.ENEMY_SMOKE, 0.6)
 	if mega:
-		smoke = World.mat(Color(1.0, 0.85, 0.3, 0.8), 3.0)
+		smoke = World.mat(Looks.MEGA_SMOKE, 3.0)
 		trail.amount = 16
 	smoke.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	smoke.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED

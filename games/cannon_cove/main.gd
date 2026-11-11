@@ -47,6 +47,7 @@ const TREASURE_CHEERS := {1: "Our first treasure!", 5: "Five treasures!", 10: "T
 const TREASURE_LINES := {"doubloon": "A gold coin!", "pearl": "A shiny pearl!", "anchor": "An anchor!", "starfish": "A starfish!", "crown": "The Kraken's crown!"}
 const FLAG_COLORS: Array[Color] = [Color(0.95, 0.2, 0.15), Color(1.0, 0.85, 0.2), Color(0.2, 0.45, 1.0), Color(0.2, 0.8, 0.3), Color(0.97, 0.95, 0.88)]
 const UiKit := preload("res://core/ui_kit.gd")
+const Looks := preload("res://games/cannon_cove/looks.gd")
 const HudKit := preload("res://core/hud_kit.gd")
 
 ## Simple mode picture cues on the TV views (no words): [pad buttons, icons, icon colour]. The buttons
@@ -86,8 +87,7 @@ const LEAK_RATE := 1.25  # % of the hold per second per leak (two deckhands)
 const MAX_PLAYERS := 7  # the gunner (index 0) plus up to six deckhands (indices 1..6)
 ## Any number of TV machines (TV, Steam Decks) may join, and a flat host (no VR) works (docs/MULTI_MACHINE.md).
 var multi_machine := true
-const PLAYER_COLORS: Array[Color] = [Color(0.25, 0.45, 0.95), Color(1.0, 0.75, 0.2), Color(1.0, 0.45, 0.8),
-	Color(0.35, 0.9, 0.4), Color(0.3, 0.9, 0.95), Color(1.0, 0.5, 0.15), Color(0.7, 0.45, 1.0)]
+const PLAYER_COLORS: Array[Color] = Looks.PLAYER_COLORS  # (looks.gd: palette.gd reads it)
 const KEYS2_DEVICE := -2  # pseudo device id for the second keyboard set (arrows + Enter/Shift) on the TV
 const CANNON_SPOTS := [
 	[Vector3(-3.55, 0.85, 1.0), Vector3.LEFT],

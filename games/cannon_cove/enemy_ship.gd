@@ -7,6 +7,7 @@ extends Node3D
 ## On the client it's a ghost, placed from snapshots.
 
 const World := preload("res://games/cannon_cove/world.gd")
+const Looks := preload("res://games/cannon_cove/looks.gd")
 
 const KINDS := {
 	# hp, speed, orbit radius, fire interval, gold, half-size (x, z), sail colour
@@ -86,7 +87,7 @@ func _ready() -> void:
 	var sail_color: Color = d[6]
 	model = Node3D.new()
 	add_child(model)
-	hull_mat = World.mat(Color(0.32, 0.2, 0.12) if kind != "treasure" else Color(0.45, 0.28, 0.12))
+	hull_mat = World.mat(Looks.HULL if kind != "treasure" else Looks.TREASURE_HULL)
 	hull_mat.emission_enabled = true
 	hull_mat.emission = Color(1, 1, 1)
 	hull_mat.emission_energy_multiplier = 0.0
