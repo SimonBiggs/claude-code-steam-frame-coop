@@ -630,6 +630,7 @@ func _simple_checks(delta: float) -> void:
 				if not checks[k]:
 					failed.append(k)
 			print("Bot: simple checks %d passed, %d failed %s" % [checks.size() - failed.size(), failed.size(), str(failed)])
+			print("BOT RESULT: %s (%d checks%s)" % ["PASS" if failed.is_empty() else "FAIL", checks.size(), "" if failed.is_empty() else ", failed: " + ", ".join(failed)])
 			preload("res://tests/bot_end.gd").quit_quietly(get_tree())
 
 
