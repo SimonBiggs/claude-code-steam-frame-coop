@@ -209,6 +209,9 @@ export async function debt() {
     { kind: "dir-list-unchecked", files: "get_(directories|files)_at\\(", bad: "get_(directories|files)_at\\(", unless: "dir_exists_absolute|make_dir_recursive_absolute", fix: "check DirAccess.dir_exists_absolute(path) (or make the folder) before get_directories_at / get_files_at: listing a missing folder logs \"Couldn't open directory\" (2026-10-30: user://test_saves/)" },
     { kind: "raw-look_at", files: "look(ing)?_at\\(", bad: "(^|\\n)[^#\\n]*(\\blooking_at\\(|[^A-Za-z0-9_]look_at\\()", unless: "static func aim\\(dir", fix: "use UiKit.aim(dir) / aim_from(from, at) / look(node, target) (core/ui_kit.gd): raw looking_at / look_at go NaN or error when the direction is vertical (tests/core_math_test.gd fails on any)" },
   ];
+  // Voice echo (2026-11-11): every TTS player must log to ~/.claude/said.log, or the room/Deck mics feed Claude's own words back.
+  for (const f of (await sh(`grep -lIE "say\\.py|piper |\\bespeak\\b" ~/.local/bin/* 2>/dev/null | grep -v '\\.bak' | xargs -r grep -L said.log`, LIVE)).out.split("\n").filter(Boolean))
+    issues.push({ kind: "tts-no-said-log", what: f, fix: "append 'ts<TAB>text' to ~/.claude/said.log at start and end of playback (saidecho.py drops echoes)" });
   for (const pt of PATTERNS) {
     const hits = (await sh(`grep -rlE ${JSON.stringify(pt.files)} --include=*.gd core games arcade`, STAGE)).out.split("\n").filter(Boolean);
     for (const f of hits) {

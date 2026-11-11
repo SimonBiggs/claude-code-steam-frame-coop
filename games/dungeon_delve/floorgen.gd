@@ -867,7 +867,9 @@ static func scaling(base_hp: float, base_spd: float, heroic: bool, zone: int, fl
 	if heroic:
 		e = clampf((g - 1.0) / 8.0, 0.0, 1.0) + clampf((g - 10.0) / 8.0, 0.0, 1.5)
 	else:
-		e = clampf((g - 6.0) / 12.0, 0.0, 1.0) + clampf((g - 18.0) / 12.0, 0.0, 1.0)
+		# BRAVE (2026-11-11, balance-2): hard hits start in the Bone Crypt and every hit is 2 hearts by the Lava Forge
+		# (bot parties used to reach the 4th biome with 0-2 knockouts: Simon found it too easy).
+		e = clampf((g - 3.0) / 9.0, 0.0, 1.0) + clampf((g - 14.0) / 10.0, 0.0, 1.0)
 	return {"hp": base_hp * (1.0 + 0.1 * g) * (1.0 + 0.06 * past) * (1.3 if mod == "STONE" else 1.0) * (1.0 + 0.25 * (n - 1)),
 		"boss_hp": base_hp * (1.0 + 0.45 * (n - 1)) * (1.0 + 0.12 * minf(float(zone), 8.0)),
 		"dmg": int(floor(e)), "dmg_p": e - floor(e),

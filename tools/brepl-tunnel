@@ -2,16 +2,25 @@
 # brepl-tunnel PEER: one SSH connection from this machine to PEER (an ssh alias, e.g. simon-deck) that carries both
 # REPL inboxes: here ~/.cache/brepl/peer-PEER.sock -> PEER's inbox, and on PEER ~/.cache/brepl/peer-$(hostname).sock
 # -> this machine's inbox. Send-only sockets (messages into the REPL channel), nothing listens on the network.
+# Run by brepl-tunnel@PEER.service (family-link enables one per Deck). Decks sleep for hours: while PEER is
+# unreachable this waits QUIETLY in-process (one log line per up/down change, a probe every <=60 s, so the link is
+# back within ~1 min of the Deck waking) instead of exiting and making systemd restart it every few seconds.
+# `family-link kick [PEER]` (SIGUSR1) makes a waiting tunnel probe right now (duo-catch-up/netwatch can call it).
 peer="$1"; me="$(cat /etc/hostname)"; c="$HOME/.cache/brepl"
-sshopts=(-o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=3)
+sshopts=(-o BatchMode=yes -o ConnectTimeout=8 -o ServerAliveInterval=15 -o ServerAliveCountMax=3)
 mkdir -p "$c"
+trap 'kill "$sp" 2>/dev/null' USR1
+delay=10; said=""
+# The probe also removes a stale REMOTE socket: after PEER reboots/crashes the old peer-$me.sock stays there and
+# sshd won't unlink it (needs StreamLocalBindUnlink in PEER's sshd_config), so -R would fail forever.
+until ssh "${sshopts[@]}" "$peer" "mkdir -p ~/.cache/brepl && rm -f ~/.cache/brepl/peer-$me.sock" 2>/dev/null; do
+  [ "$said" = down ] || { echo "$peer unreachable (asleep/offline?): waiting quietly, probing every <=60 s"; said=down; }
+  sleep "$delay" & sp=$!; wait "$sp"
+  delay=$(( delay * 2 > 60 ? 60 : delay * 2 ))
+done
+echo "$peer reachable: linking inboxes"
 # Stale local socket (left by a crash) would block -L; StreamLocalBindUnlink below also covers it.
 rm -f "$c/peer-$peer.sock"
-# Stale REMOTE socket: after PEER reboots/crashes, the old peer-$me.sock file stays on PEER and sshd won't unlink it
-# (that needs StreamLocalBindUnlink in PEER's sshd_config), so -R fails forever. Remove it first. If PEER is
-# unreachable this fails quietly and the main ssh below fails too; systemd retries.
-ssh "${sshopts[@]}" "$peer" "mkdir -p ~/.cache/brepl && rm -f ~/.cache/brepl/peer-$me.sock" \
-  || echo "brepl-tunnel: could not clear stale remote socket on $peer (unreachable?)" >&2
 exec ssh -N "${sshopts[@]}" -o ExitOnForwardFailure=yes \
   -o StreamLocalBindUnlink=yes \
   -L "$c/peer-$peer.sock:$c/peer-in.sock" \

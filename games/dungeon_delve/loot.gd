@@ -18,7 +18,7 @@ const NAMES := {COIN: "GOLD", COIN5: "GOLD", POTION: "POTION", HEART: "HEART", K
 const ICONS := {COIN: "coin", COIN5: "coin", POTION: "potion", HEART: "heart", KEY: "key", BOMBS: "fire",
 	DASH: "bolt", BASH: "shield", BOW: "arrow_right", MAXHEART: "heart", SWORD: "sword", CHARM: "star"}
 const ABILITY_NAMES := {"dash": DASH, "bash": BASH, "bow": BOW}
-const PRICES := {POTION: 12, HEART: 6, BOMBS: 12, DASH: 25, BASH: 25, BOW: 30, MAXHEART: 35, SWORD: 30, CHARM: 40, KEY: 20}
+const PRICES := {POTION: 12, HEART: 6, BOMBS: 12, DASH: 25, BASH: 25, BOW: 30, MAXHEART: 45, SWORD: 30, CHARM: 60, KEY: 20}
 
 
 static func ability_id(kind: int) -> String:
@@ -40,15 +40,15 @@ static func chest_loot(rng: RandomNumberGenerator, g: int, big: bool) -> Array:
 	var x := rng.randf()
 	if big:
 		out.append([CHARM, ABILITIES[rng.randi_range(0, 2)], POTION, BOMBS][rng.randi_range(0, 3)])
-	elif x < 0.3:
+	elif x < 0.16:
 		out.append(POTION)
-	elif x < 0.5:
+	elif x < 0.38:
 		out.append(BOMBS)
-	elif x < 0.62:
+	elif x < 0.52:
 		out.append(ABILITIES[rng.randi_range(0, 2)])
-	elif x < 0.8:
+	elif x < 0.66:
 		out.append(HEART)
-	for k in g / 4:
+	for k in g / 6:
 		out.append(COIN5)
 	return out
 
@@ -67,7 +67,7 @@ static func shop_stock(rng: RandomNumberGenerator, zone: int, heroic: bool) -> A
 			out.append([k, 0])
 	for o in out:
 		var a: Array = o
-		var price := float(PRICES[int(a[0])]) * 1.3 * (1.0 + 0.35 * zone) * (1.25 if heroic else 1.0)
+		var price := float(PRICES[int(a[0])]) * 1.5 * (1.0 + 0.5 * zone) * (1.25 if heroic else 1.0)  # balance-2: bots ended runs with 1200+ gold unspent
 		a[1] = int(round(price))
 	return out
 
