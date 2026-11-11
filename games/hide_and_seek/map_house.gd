@@ -9,6 +9,7 @@ extends RefCounted
 const W := preload("res://games/hide_and_seek/world.gd")
 const HouseGen := preload("res://games/hide_and_seek/housegen.gd")
 const Story := preload("res://games/hide_and_seek/story.gd")
+const Street := preload("res://games/hide_and_seek/street.gd")
 
 const TITLE := "THE HOUSE"
 ## Each room's wallpaper, floor colour and floor pattern (0 planks, 1 checker, 2 terracotta, 3 carpet,
@@ -24,6 +25,7 @@ const LOOK := {
 	"study": [Color(0.95, 0.88, 0.78), Color(0.55, 0.36, 0.22), 0],
 	"garden": [Color(0.85, 0.62, 0.5), Color(0.4, 0.7, 0.32), 6],
 }
+const DARK_DIM := 0.72  ## the DARK room (street.gd): walls, floor and furniture this much darker, no lamp
 const OUTSIDE := Color(0.86, 0.62, 0.5)  # brick-red outside walls
 
 const FLOOR_SHADER := """
@@ -91,7 +93,12 @@ static func build(root: Node3D, spec: Dictionary = {}) -> Dictionary:
 	var hx0: float = xs[0]
 	var hx1: float = xs[-1]
 	W.box(ctx, Vector3(hx1 - hx0 + 0.4, 0.1, HouseGen.HALF_Z * 2.0 + 0.4), Vector3((hx0 + hx1) / 2.0, HouseGen.WALL_H + 0.05, 0), Color(0.98, 0.96, 0.92))
+	var dark_rect := Rect2()
+	if int(g.get("dark_room", -1)) >= 0:
+		dark_rect = (g.rooms_info[int(g.dark_room)].rect as Rect2).grow(0.3)
 	for wd in g.windows:
+		if dark_rect.has_point(Vector2((wd[0] as Vector3).x, (wd[0] as Vector3).z)):
+			continue  # the dark room's curtains are shut
 		W.window_at(ctx, wd[0], wd[1], Color(1.0, 1.0, 0.97))
 	# The front door the seeker faces while counting, with a rug.
 	var fd: Vector3 = g.front_door
@@ -100,11 +107,15 @@ static func build(root: Node3D, spec: Dictionary = {}) -> Dictionary:
 	W.box(ctx, Vector3(1.6, 0.02, 1.0), Vector3(fd.x, 0.01, HouseGen.HALF_Z - 1.0), Color(0.85, 0.35, 0.3), false)
 	W.jail_at(ctx, g.jail, g.bell, Color(0.95, 0.75, 0.3), Color(1.0, 0.45, 0.45))
 	for pc in g.pieces:
+		if int(pc.get("room", -1)) == int(g.get("dark_room", -1)):
+			ctx["dim"] = DARK_DIM
 		_piece(ctx, pc, th)
+		ctx.erase("dim")
 	_garden(root, ctx, g, th)
 	var lamps: Array = []
-	for rm in g.rooms_info:
-		if rm.type != "garden":
+	for ri in (g.rooms_info as Array).size():
+		var rm: Dictionary = g.rooms_info[ri]
+		if rm.type != "garden" and ri != int(g.get("dark_room", -1)):  # the dark room's lamp is off
 			var c: Vector2 = (rm.rect as Rect2).get_center()
 			lamps.append(Vector3(c.x, 2.3, c.y))
 			W.cyl(ctx, 0.02, 0.02, 0.3, Vector3(c.x, HouseGen.WALL_H - 0.15, c.y), Color(0.4, 0.35, 0.3), false)
@@ -138,6 +149,56 @@ static func toys_node(spec: Dictionary, count: int) -> Node3D:
 		var y := 0.0 if i < 8 else 0.08 * ((i - 8) / 4 + 1)
 		var at := HouseGen.to_world(kn, Vector3(u, y, v))
 		_toy(ctx, i, at)
+	W._commit(ctx)
+	return root
+
+
+## PIP'S GARDEN PARTY in the garden (street.gd): a picnic blanket and the decorations the family has unlocked
+## with this many friends (bunting on a party pole, balloons, a cake, lanterns). No colliders: housegen.gd keeps
+## the party on clear lawn. main.gd seats the friends (friend.gd) on g.party[1..].
+static func party_node(spec: Dictionary, friends: int) -> Node3D:
+	var root := Node3D.new()
+	root.name = "GardenParty"
+	var g := house(spec)
+	var party: Array = g.get("party", [])
+	if party.is_empty() or friends <= 0:
+		return root
+	var ctx := {"tools": {}, "mats": {}, "main": root}
+	var c: Vector3 = party[0]
+	var have := Street.decor(friends)
+	W.box(ctx, Vector3(1.5, 0.02, 1.5), c + Vector3(0, 0.012, 0), Color(0.95, 0.35, 0.35), false)
+	for k in 3:
+		W.box(ctx, Vector3(1.5, 0.022, 0.16), c + Vector3(0, 0.013, -0.5 + k * 0.5), Color(1, 1, 1), false)
+	W.cyl(ctx, 0.12, 0.12, 0.02, c + Vector3(-0.3, 0.03, 0.3), Color(0.95, 0.95, 0.9), false)  # plates
+	W.cyl(ctx, 0.12, 0.12, 0.02, c + Vector3(0.35, 0.03, -0.3), Color(0.95, 0.95, 0.9), false)
+	W.ball(ctx, 0.05, c + Vector3(0.35, 0.07, -0.3), Color(1.0, 0.55, 0.2))
+	var cols := [Color(1.0, 0.4, 0.4), Color(1.0, 0.85, 0.3), Color(0.4, 0.7, 1.0), Color(0.5, 0.9, 0.5), Color(0.85, 0.5, 1.0)]
+	if have.has(1):  # bunting: a party pole with strings of flags down to the ring
+		W.cyl(ctx, 0.035, 0.035, 2.1, c + Vector3(0, 1.05, 0), Color(0.98, 0.97, 0.93), false)
+		W.ball(ctx, 0.08, c + Vector3(0, 2.15, 0), Color(1.0, 0.85, 0.3))
+		for k in 6:
+			var a := TAU * k / 6.0
+			var tip := c + Vector3(cos(a) * 1.25, 1.0, sin(a) * 1.25)
+			var top := c + Vector3(0, 2.05, 0)
+			for f in 5:
+				var p := top.lerp(tip, (f + 0.5) / 5.0)
+				W.box(ctx, Vector3(0.12, 0.12, 0.02), p - Vector3(0, 0.06, 0), cols[(k + f) % cols.size()], false, -a + PI / 2.0)
+	if have.has(2):  # balloons, tied to the pole top
+		for k in 4:
+			var a := TAU * k / 4.0 + 0.4
+			var bp := c + Vector3(cos(a) * 0.35, 2.55 + 0.12 * (k % 2), sin(a) * 0.35)
+			W.ball(ctx, 0.17, bp, cols[k % cols.size()], 1.15)
+			W.cyl(ctx, 0.006, 0.006, 0.45, bp - Vector3(cos(a) * 0.17, 0.38, sin(a) * 0.17), Color(1, 1, 1), false)
+	if have.has(3):  # the party cake
+		var ck := c + Vector3(-0.35, 0.0, -0.3)
+		W.cyl(ctx, 0.2, 0.2, 0.16, ck + Vector3(0, 0.1, 0), Color(1.0, 0.86, 0.9), false)
+		W.cyl(ctx, 0.205, 0.205, 0.03, ck + Vector3(0, 0.18, 0), Color(0.95, 0.4, 0.6), false)
+		W.cyl(ctx, 0.012, 0.012, 0.09, ck + Vector3(0, 0.24, 0), Color(1, 1, 1), false)
+		W.ball(ctx, 0.022, ck + Vector3(0, 0.3, 0), Color(1.0, 0.8, 0.2), 1.3, 2.0)
+	if have.has(4):  # lanterns on the flag strings
+		for k in 6:
+			var a := TAU * (k + 0.5) / 6.0
+			W.ball(ctx, 0.09, c + Vector3(cos(a) * 1.0, 1.25, sin(a) * 1.0), cols[k % cols.size()].lightened(0.3), 1.2, 1.5)
 	W._commit(ctx)
 	return root
 
@@ -188,6 +249,8 @@ static func _floors(root: Node3D, g: Dictionary, th: Dictionary) -> void:
 	for rm in g.rooms_info:
 		var look: Array = LOOK[rm.type]
 		var c: Color = th.ground if rm.type == "garden" else look[1]
+		if (g.rooms_info as Array).find(rm) == int(g.get("dark_room", -1)):
+			c = c.darkened(DARK_DIM)
 		var pat := 6 if rm.type == "garden" else int(look[2])
 		var rc: Rect2 = rm.rect
 		var y := 0.0 if rm.type == "garden" else 0.002
@@ -217,7 +280,8 @@ static func _walls(ctx: Dictionary, g: Dictionary, th: Dictionary) -> void:
 		var cols: Array = []
 		for si in w.sides:
 			var i := int(si)
-			cols.append(OUTSIDE if i < 0 or rooms[i].type == "garden" else _tint((LOOK[rooms[i].type] as Array)[0], th))
+			var wc: Color = OUTSIDE if i < 0 or rooms[i].type == "garden" else _tint((LOOK[rooms[i].type] as Array)[0], th)
+			cols.append(wc.darkened(DARK_DIM) if i >= 0 and i == int(g.get("dark_room", -1)) else wc)
 		var a := float(w.a) - t / 2.0
 		var cuts: Array = (w.doors as Array).duplicate()
 		cuts.sort()
