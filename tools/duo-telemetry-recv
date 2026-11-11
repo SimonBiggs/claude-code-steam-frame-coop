@@ -1,0 +1,132 @@
+#!/usr/bin/env bun
+// duo-telemetry-recv: the Steam Machine's end of the arcade's telemetry push (core/telemetry_push.gd).
+// Every arcade machine (TV, Decks, Frame) keeps an outbox of its unsent RUN lines and, whenever it can reach
+// this machine on the home network, sends them here. Nothing is pulled from devices (no ssh).
+//   UDP  :PORT  "DUO_TELEMETRY_HELLO <nonce>"  ->  "DUO_TELEMETRY_HERE <port> <nonce>"   (finding us, broadcast ok)
+//   HTTP :PORT  POST /runs {device, dropped, test, runs: [{id, line}]}  ->  {acked: [ids], new, dup}
+//               GET  /status  -> {device: {lines, last, dropped}}
+// Stored de-duplicated by (device, id) in DIR/<device>.jsonl, one {"id","device","recv","run"} per line, plus
+// DIR/<device>.meta.json {last_seen, lines, dropped (lines the device had to throw away while it couldn't reach us)}.
+// Home network only: requests from non-private addresses are refused. Test runs are refused unless --test
+// (a test receiver on its own port and folder: tools/telemetry-push-test).
+//   duo-telemetry-recv [--port 7870] [--dir ~/.cache/duo-arena/telemetry] [--test]
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { mkdir, readFile, appendFile, writeFile, readdir } from "node:fs/promises";
+import { createHash } from "node:crypto";
+
+const args = process.argv.slice(2);
+const arg = (k: string, d: string) => (args.includes(k) ? args[args.indexOf(k) + 1] : d);
+const PORT = Number(arg("--port", process.env.DUO_TELEMETRY_PORT || "7870"));
+const DIR = arg("--dir", join(homedir(), ".cache/duo-arena/telemetry"));
+const TEST = args.includes("--test");
+const MAX_BODY = 4 << 20;
+const MAX_LINE = 64 << 10;
+await mkdir(DIR, { recursive: true });
+
+const log = (s: string) => console.log(`${new Date().toISOString().slice(0, 19)} ${s}`);
+const idOf = (line: string) => createHash("md5").update(line).digest("hex").slice(0, 16);  // = core/telemetry_push.gd id_of
+const cleanDevice = (d: unknown) => String(d ?? "").toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 40);
+export function privateIp(ip: string): boolean {
+  ip = ip.replace(/^::ffff:/, "");
+  if (ip === "::1") return true;
+  if (/^fe80:/i.test(ip) || /^f[cd][0-9a-f]{2}:/i.test(ip)) return true;
+  const p = ip.split(".").map(Number);
+  if (p.length !== 4 || p.some(n => !(n >= 0 && n <= 255))) return false;
+  return p[0] === 10 || p[0] === 127 || (p[0] === 172 && p[1] >= 16 && p[1] <= 31) || (p[0] === 192 && p[1] === 168) || (p[0] === 169 && p[1] === 254);
+}
+
+// device -> Set of ids already stored (loaded once from the store).
+const seen = new Map<string, Set<string>>();
+const metas = new Map<string, any>();
+async function deviceState(dev: string) {
+  if (!seen.has(dev)) {
+    const ids = new Set<string>();
+    const txt = await readFile(join(DIR, `${dev}.jsonl`), "utf8").catch(() => "");
+    for (const l of txt.split("\n")) { const m = l.match(/^\{"id":"([0-9a-f]+)"/); if (m) ids.add(m[1]); }
+    seen.set(dev, ids);
+    metas.set(dev, JSON.parse(await readFile(join(DIR, `${dev}.meta.json`), "utf8").catch(() => "{}")));
+  }
+  return { ids: seen.get(dev)!, meta: metas.get(dev)! };
+}
+
+async function takeRuns(body: any) {
+  const dev = cleanDevice(body?.device);
+  if (!dev) return { status: 400, json: { error: "no device" } };
+  if (body?.test && !TEST) return { status: 403, json: { error: "test runs are not stored here" } };
+  if (!Array.isArray(body?.runs)) return { status: 400, json: { error: "no runs" } };
+  const { ids, meta } = await deviceState(dev);
+  const acked: string[] = [];
+  let fresh = 0, dup = 0, bad = 0;
+  const now = Math.floor(Date.now() / 1000);
+  let out = "";
+  for (const r of body.runs) {
+    const line = String(r?.line ?? "");
+    const id = String(r?.id ?? "");
+    let run: any = null;
+    try { run = JSON.parse(line); } catch {}
+    // A line that doesn't parse or whose id doesn't match stays unacked on the device (and is counted here).
+    if (!line || line.length > MAX_LINE || id !== idOf(line) || !run || typeof run !== "object" || !run.game) { bad++; continue; }
+    acked.push(id);
+    if (ids.has(id)) { dup++; continue; }
+    ids.add(id);
+    fresh++;
+    out += JSON.stringify({ id, device: dev, recv: now, run }) + "\n";
+  }
+  if (out) await appendFile(join(DIR, `${dev}.jsonl`), out);
+  const dropped = Math.max(0, Math.floor(Number(body.dropped) || 0));
+  meta.last_seen = now;
+  meta.lines = ids.size;
+  if (fresh) meta.last_new = now;
+  if (dropped) {
+    meta.dropped = (meta.dropped || 0) + dropped;
+    meta.drops = [...(meta.drops || []), { t: now, n: dropped }].slice(-50);
+    log(`${dev}: WARNING the device dropped ${dropped} unsent RUN lines (outbox full while it couldn't reach us; ${meta.dropped} in all)`);
+  }
+  await writeFile(join(DIR, `${dev}.meta.json`), JSON.stringify(meta));
+  if (fresh || dup || bad) log(`${dev}: ${fresh} new, ${dup} already here${bad ? `, ${bad} refused (bad line or id)` : ""}`);
+  return { status: 200, json: { acked, new: fresh, dup, bad } };
+}
+
+async function status() {
+  const out: Record<string, any> = {};
+  for (const f of await readdir(DIR).catch(() => [] as string[])) {
+    if (!f.endsWith(".jsonl")) continue;
+    const dev = f.slice(0, -6);
+    const { ids, meta } = await deviceState(dev);
+    out[dev] = { lines: ids.size, last_seen: meta.last_seen || 0, last_new: meta.last_new || 0, dropped: meta.dropped || 0 };
+  }
+  return out;
+}
+
+const server = Bun.serve({
+  port: PORT,
+  hostname: "0.0.0.0",
+  maxRequestBodySize: MAX_BODY,
+  async fetch(req, srv) {
+    const ip = srv.requestIP(req)?.address ?? "";
+    if (!privateIp(ip)) { log(`refused ${ip}: not on the home network`); return new Response("home network only", { status: 403 }); }
+    const url = new URL(req.url);
+    if (req.method === "GET" && url.pathname === "/status") return Response.json(await status());
+    if (req.method === "POST" && url.pathname === "/runs") {
+      let body: any;
+      try { body = JSON.parse(await req.text()); } catch { return Response.json({ error: "bad json" }, { status: 400 }); }
+      const r = await takeRuns(body);
+      return Response.json(r.json, { status: r.status });
+    }
+    return new Response("not here", { status: 404 });
+  },
+});
+
+await Bun.udpSocket({
+  hostname: "0.0.0.0",
+  port: PORT,
+  socket: {
+    data(sock, buf, port, addr) {
+      if (!privateIp(addr)) return;
+      const m = buf.toString().match(/^DUO_TELEMETRY_HELLO ?(\S*)/);
+      if (m) sock.send(`DUO_TELEMETRY_HERE ${PORT} ${m[1]}`, port, addr);
+    },
+  },
+});
+log(`duo-telemetry-recv: listening on ${server.port} (udp + http), storing in ${DIR}${TEST ? " (TEST receiver)" : ""}`);

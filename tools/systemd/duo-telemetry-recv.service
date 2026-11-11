@@ -1,0 +1,14 @@
+[Unit]
+Description=Arcade telemetry receiver: every machine's RUN lines, pushed over the home network (core/telemetry_push.gd)
+After=network-online.target
+
+[Service]
+ExecStart=%h/.local/bin/bun %h/.local/bin/duo-telemetry-recv
+Restart=always
+RestartSec=10
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin
+Nice=10
+MemoryHigh=200M
+
+[Install]
+WantedBy=default.target

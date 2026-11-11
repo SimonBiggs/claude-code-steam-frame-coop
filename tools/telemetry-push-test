@@ -1,0 +1,63 @@
+#!/usr/bin/env bun
+// telemetry-push-test: proves the arcade's telemetry push end to end on this machine, without touching the real
+// store: a TEST receiver (tools/duo-telemetry-recv --test) on a random port and folder, two arcade machines
+// (tests/telemetry_push_bot.tscn as "test-host" and "test-client", each with its own user:// data) that find it by
+// UDP hello and send their RUN lines over HTTP, one line resent. Passes when each device has exactly its 4 lines
+// stored, the resend was counted as a duplicate (not stored twice), and a normal receiver refuses test lines.
+//   tools/telemetry-push-test [PROJECT_DIR]
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, dirname } from "node:path";
+
+const proj = process.argv[2] || join(dirname(import.meta.dir));
+const recvBin = join(import.meta.dir, "duo-telemetry-recv");
+const tmp = await mkdtemp(join(tmpdir(), "godot-test-telepush-"));
+const port = 20000 + Math.floor(Math.random() * 9000);
+const port2 = port + 1;
+const fails: string[] = [];
+const fail = (s: string) => { fails.push(s); console.log("FAIL: " + s); };
+
+const recv = Bun.spawn(["bun", recvBin, "--port", String(port), "--dir", join(tmp, "store"), "--test"], { stdout: "pipe", stderr: "pipe" });
+const real = Bun.spawn(["bun", recvBin, "--port", String(port2), "--dir", join(tmp, "store-real")], { stdout: "pipe", stderr: "pipe" });
+const recvLog = new Response(recv.stdout).text();
+await Bun.sleep(800);
+try {
+  // A normal receiver refuses lines marked as test runs.
+  const r = await fetch(`http://127.0.0.1:${port2}/runs`, { method: "POST", body: JSON.stringify({ device: "x", test: true, runs: [] }) });
+  if (r.status !== 403) fail(`the real receiver took a test batch (HTTP ${r.status})`);
+  const machines = ["test-host", "test-client"].map((dev, i) => Bun.spawn(
+    ["godot-test", "--headless", "--path", proj, "res://tests/telemetry_push_bot.tscn"],
+    { env: { ...process.env, DUO_TELEMETRY_PUSH_TEST: "1", DUO_TELEMETRY_PORT: String(port), DUO_TELEMETRY_DEVICE: dev,
+        DUO_TELEMETRY_RETRY: "2", DUO_PORT: String(port + 10 + i), XDG_DATA_HOME: join(tmp, dev), DUO_SOLO: "1" },
+      stdout: "pipe", stderr: "pipe" }));
+  const outs = await Promise.all(machines.map(async m => {
+    const t = setTimeout(() => m.kill(), 120_000);
+    const o = (await new Response(m.stdout).text()) + (await new Response(m.stderr).text());
+    clearTimeout(t);
+    return o;
+  }));
+  for (const [i, o] of outs.entries()) {
+    const res = o.split("\n").filter(l => /BOT RESULT|TELEMETRY PUSH|SCRIPT ERROR/.test(l));
+    console.log(res.join("\n"));
+    if (!/BOT RESULT: PASS/.test(o)) fail(`machine ${i}: no BOT RESULT: PASS`);
+    if (/SCRIPT ERROR/.test(o)) fail(`machine ${i}: SCRIPT ERROR`);
+  }
+  const st: any = await (await fetch(`http://127.0.0.1:${port}/status`)).json();
+  for (const dev of ["test-host", "test-client"]) {
+    const lines = (await readFile(join(tmp, "store", `${dev}.jsonl`), "utf8").catch(() => "")).split("\n").filter(Boolean);
+    const ids = new Set(lines.map(l => JSON.parse(l).id));
+    if (lines.length !== 4 || ids.size !== 4) fail(`${dev}: stored ${lines.length} lines (${ids.size} ids), want 4`);
+    if (st[dev]?.lines !== 4) fail(`${dev}: /status says ${st[dev]?.lines}`);
+    if (lines.some(l => JSON.parse(l).run?.game !== "push_test")) fail(`${dev}: a stored line isn't a push_test RUN line`);
+  }
+  recv.kill(); real.kill();
+  const log = await recvLog;
+  for (const dev of ["test-host", "test-client"])
+    if (!new RegExp(`${dev}: 1 new, 1 already here`).test(log)) fail(`${dev}: the receiver didn't count the resend as a duplicate`);
+  console.log(log.trim());
+} finally {
+  recv.kill(); real.kill();
+  await rm(tmp, { recursive: true, force: true });
+}
+console.log(fails.length ? `FAIL telemetry-push-test: ${fails.length}` : "PASS telemetry-push-test");
+process.exit(fails.length ? 1 : 0);
