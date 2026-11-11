@@ -13,6 +13,10 @@ extends RefCounted
 ## - no two panels in the same spot (drawn over each other);
 ## - no world words (name tags, pop-ups) right in front of the eyes;
 ## - no text glued to the face: a visible Label3D under the XR camera turns with the head.
+## - not washed out: no see-through scenery (water, glass, mist) behind a panel draws after it. VR panels sit at
+##   UiKit.VR_PRIO_PANEL (-4, under their own text), so a blended surface at the default priority 0 behind a card
+##   is blended OVER it (Fishing Lake 2026-11-11: the lake's water made Ollie's cards a faint, far-looking ghost).
+##   Give such surfaces UiKit.VR_PRIO_UNDER_UI.
 ## A node (or ancestor) with meta "vr_check_ignore" is skipped.
 
 ## (UiKit.vr_spot brings a panel to 0.55 m only when a wall is right in front of the face)
@@ -30,6 +34,7 @@ const OVERLAP_DEG := 5.0
 ## World words nearer than this (metres) in front of the eyes are "in the face".
 const FACE_D := 0.45
 const VR_LAYER := preload("res://core/vr_layer.gd").LAYER
+const VR_PRIO_PANEL := -4  ## UiKit.VR_PRIO_PANEL (tests/core_math_test.gd checks they match)
 
 
 ## The VR player's camera (the current XRCamera3D, else the first one), or null when nobody is in VR.
@@ -70,6 +75,9 @@ static func problems(root: Node) -> Array[String]:
 		var small := _smallest_text_deg(c, head)
 		if small > 0.0 and small < MIN_TEXT_DEG:
 			out.append("%s: text only %.2f deg high (min %.1f)" % [name, small, MIN_TEXT_DEG])
+		var wash := washer(cam, c, p)
+		if wash != "":
+			out.append("%s: washed out by %s drawn over it (give it UiKit.VR_PRIO_UNDER_UI)" % [name, wash])
 		var hit := blocker(cam, c, p)
 		if hit != "":
 			out.append("%s: hidden behind %s, it is %.1f m away%s" % [name, hit, d, " " + str(c.get_meta("vr_spot")) if OS.has_environment("VR_VIEW_DEBUG") and c.has_meta("vr_spot") else ""])
@@ -101,6 +109,58 @@ static func problems(root: Node) -> Array[String]:
 		if l.is_visible_in_tree() and l.text.strip_edges() != "" and l.transparency < 0.65 and not _ignored(l):
 			out.append("%s: text glued to the face (a Label3D under the XR camera)" % _name(l))
 	return out
+
+
+## See-through scenery behind `card` (on the line from the head through its centre) that draws after the card
+## (blended, render_priority >= the card's panel), or "".
+static func washer(cam: Camera3D, card: Node3D, p: Vector3) -> String:
+	var head := cam.global_position
+	var dir := (p - head).normalized()
+	var prio := VR_PRIO_PANEL
+	for n in cam.get_tree().root.find_children("*", "GeometryInstance3D", true, false):
+		var g := n as GeometryInstance3D
+		if g is Label3D or g is GPUParticles3D or g is CPUParticles3D or not g.is_visible_in_tree() or g.transparency > 0.65:
+			continue
+		if (g.layers & cam.cull_mask) == 0 or card.is_ancestor_of(g) or g == card or _ignored(g) or _placed(g):
+			continue
+		var mat := _material(g)
+		if mat == null or mat.render_priority < prio or not _blended(mat):
+			continue
+		var box := g.global_transform * g.get_aabb()
+		if box.size.length() < 0.01 or box.has_point(head):
+			continue
+		if box.intersects_ray(p + dir * 0.02, dir) != null:
+			return "%s (see-through, priority %d)" % [_name(g), mat.render_priority]
+	return ""
+
+
+static func _placed(n: Node) -> bool:
+	var x := n
+	while x != null:
+		if x.has_meta("vr_placed"):
+			return true
+		x = x.get_parent()
+	return false
+
+
+static func _material(g: GeometryInstance3D) -> Material:
+	if g.material_override != null:
+		return g.material_override
+	if g is MeshInstance3D and (g as MeshInstance3D).mesh != null and (g as MeshInstance3D).mesh.get_surface_count() > 0:
+		return (g as MeshInstance3D).get_active_material(0)
+	return null
+
+
+## Alpha-blended (mixed over what's behind it; additive glows and alpha-scissor cut-outs don't wash a card out).
+static func _blended(mat: Material) -> bool:
+	if mat is BaseMaterial3D:
+		var b := mat as BaseMaterial3D
+		return b.blend_mode == BaseMaterial3D.BLEND_MODE_MIX and (b.transparency == BaseMaterial3D.TRANSPARENCY_ALPHA \
+			or b.transparency == BaseMaterial3D.TRANSPARENCY_ALPHA_DEPTH_PRE_PASS) and b.albedo_color.a < 0.99
+	if mat is ShaderMaterial:
+		var sh := (mat as ShaderMaterial).shader
+		return sh != null and sh.code.contains("ALPHA") and not sh.code.contains("blend_add") and not sh.code.contains("ALPHA_SCISSOR")
+	return false
 
 
 ## What hides `card` (centre `p`) from the head, or "": a physics body on the ray, else a mesh whose triangles cross it.

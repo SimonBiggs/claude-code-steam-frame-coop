@@ -22,6 +22,8 @@ const BOARD_R := Vector3(3.6, 0.0, JETTY_END_Z - 1.2)
 const POND_C := Vector3(-2.9, 0.0, 8.2)  # OLLIE'S POND: the family's log pen beside the jetty (book.gd POND)
 const POND_R := 1.5
 
+const UiKit := preload("res://core/ui_kit.gd")
+
 const WATER_SHADER := """
 shader_type spatial;
 render_mode blend_mix, depth_draw_opaque, cull_disabled, specular_schlick_ggx;
@@ -222,6 +224,7 @@ func _build_water() -> void:
 	water_mat = ShaderMaterial.new()
 	water_mat.shader = Shader.new()
 	water_mat.shader.code = WATER_SHADER
+	water_mat.render_priority = UiKit.VR_PRIO_UNDER_UI  # under VR cards, or the water is blended over them (core/vr_view_check.gd)
 	w.material_override = water_mat
 	w.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	w.position = LAKE_C

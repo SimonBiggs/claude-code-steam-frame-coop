@@ -142,6 +142,29 @@ func _run() -> void:
 	_check(not ", ".join(probs).contains("drawn over"), "a second card steps out of the first one's spot: %s" % [probs])
 	_clear_ui()
 
+	# 5b. see-through scenery (a lake's water) behind a card must draw under it, not be blended over it
+	var lake := MeshInstance3D.new()
+	var pm := PlaneMesh.new()
+	pm.size = Vector2(40, 40)
+	lake.mesh = pm
+	var wm := StandardMaterial3D.new()
+	wm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	wm.albedo_color = Color(0.2, 0.5, 0.7, 0.8)
+	lake.material_override = wm
+	world.add_child(lake)
+	lake.global_position = Vector3(0, 0.0, 0)
+	var low := HudKit.vr_card(world, cam, "OLLIE", "a line", {"width": 1.0, "height": -0.6})
+	await _frames(20)
+	probs = VrViewCheck.problems(root)
+	_check(", ".join(probs).contains("washed out"), "blended water behind a card (priority 0) is reported: %s" % [probs])
+	wm.render_priority = UiKit.VR_PRIO_UNDER_UI
+	await _frames(1)
+	probs = VrViewCheck.problems(root)
+	_check(not ", ".join(probs).contains("washed out"), "water at VR_PRIO_UNDER_UI is fine: %s" % [probs])
+	lake.free()
+	low = null
+	_clear_ui()
+
 	# 6. games use the shared PAUSED card (no hand-made ones left to pile up)
 	for dir in DirAccess.get_directories_at("res://games"):
 		var path := "res://games/%s/main.gd" % dir
