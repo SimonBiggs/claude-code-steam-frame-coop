@@ -11,6 +11,12 @@ extends Node3D
 ## the goal height). Reach the hoop and hold it: the tower gets its roof and joins THE TOWN behind the
 ## park (skyline.gd, saved, grows over days). TODAY'S TOWER: job 2 of the first round each day is gold.
 ## Telemetry: one RUN line per round and on quit.
+## SECOND PASS (new systems in their own files): SPECIAL BLOCKS (specials.gd: bouncy, sticky honey, balloon; opened
+## by WREN'S TOWN DISTRICTS, districts.gd, which grow over the days behind the town), the shared GENTLE / BRAVE / HARD
+## pick before the first job of a visit and WREN'S NEXT JOB pick between jobs (picks.gd on core/pick_orbs.gd), and
+## GUST / QUAKE weather events announced first with a warning ring (weather.gd on core/warn_rings.gd).
+## Try envs (arcade/whats_new.gd): TS_MODE=gentle|brave|hard (skips the mode pick), TS_TRY=blocks (every special
+## block open) | weather (jobs start three levels up, with weather events).
 ## Built on the shared engine (see games/engine_template/main.gd and docs/engine/).
 
 const NetScript := preload("res://core/net.gd")
@@ -39,6 +45,13 @@ const SkylineScript := preload("res://games/tower_stack/skyline.gd")
 const Seeded := preload("res://core/seeded.gd")
 const Telemetry := preload("res://core/telemetry.gd")
 const StoryCard := preload("res://core/story_card.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
+const Districts := preload("res://games/tower_stack/districts.gd")
+const SpecialsScript := preload("res://games/tower_stack/specials.gd")
+const WeatherScript := preload("res://games/tower_stack/weather.gd")
+const PicksScript := preload("res://games/tower_stack/picks.gd")
+const BUILD_PICS := {"lighthouse": "lighthouse", "castle": "castle", "clock": "clocktower", "windmill": "windmill", "nest": "birdnest"}
+const SPECIAL_LINES := {4: ["Bouncy block!", "bouncyblock"], 5: ["Sticky honey block!", "honeyblock"], 6: ["Balloon block!", "balloonblock"]}
 const WREN_COLOR := Color(0.62, 0.42, 0.25)
 const TOWN_CHEERS := {1: "Our town!", 5: "Five towers!", 10: "Ten towers!", 20: "A big town!", 30: "A city!"}
 const CHEER := 3.5  # seconds a finished tower stands with its roof before it flies to the town
@@ -177,6 +190,19 @@ var ground_mi: MeshInstance3D
 var path_mi: MeshInstance3D
 var topper: Node3D
 var built_labels := {}  # slot -> Label (towers built this round)
+# Second pass: modes, special blocks, districts, weather events, picks.
+var game_mode := "brave"  # gentle / brave / hard (the team's pick; saved)
+var daily_ok := true  # bots turn TODAY'S TOWER off so the builder pick shows up early
+var try_bonus := 0  # TS_TRY=weather: jobs start this many levels up
+var try_open := 0  # TS_TRY=blocks: every special block open
+var specials: Node  # specials.gd (host / local)
+var weather: Node3D  # weather.gd (every machine draws, the host runs it)
+var picks: Node  # picks.gd (every machine draws the orbs, the host decides)
+var districts: Node3D  # districts.gd (every machine)
+var ground_id := -1  # the block a local TV player last stood on
+var round_events := 0
+var round_specials := 0
+var round_builds: Array = []  # buildings the team chose this round
 
 
 func _ready() -> void:
@@ -195,7 +221,7 @@ func _ready() -> void:
 	party.player_left.connect(_on_player_left)
 	save = Save.new()
 	save.game_id = GAME_ID
-	save.defaults = {"best": 0.0, "built": 0, "town": [], "daily": "", "sessions": 0}
+	save.defaults = {"best": 0.0, "built": 0, "town": [], "daily": "", "sessions": 0, "mode": "brave"}
 	add_child(save)
 	sfx = SfxScript.new()
 	add_child(sfx)
@@ -234,7 +260,9 @@ func _log_round(end: String) -> void:
 		"jobs": round_jobs, "reached": job_n, "level": int(site.get("level", 0)), "rec": float(net.state_get("rec", 0.0)),
 		"best": float(save.data.best), "wobbles": round_wobbles, "delivered": total_delivered, "placed": total_placed,
 		"crew": party.player_count(), "vr": vr_rig != null, "secs": int(session_t), "seed": session_seed,
-		"built": int(save.data.built), "town": (save.data.town as Array).size()})
+		"built": int(save.data.built), "town": (save.data.town as Array).size(), "mode": game_mode,
+		"districts": Districts.reached(int(save.data.built)), "events": round_events, "specials": round_specials,
+		"glued": specials.glues_made if specials != null else 0, "chose": round_builds})
 	save.save_now()
 
 
@@ -255,6 +283,11 @@ func _setup(mode: String) -> void:
 		vr_glove_label.rotation = Vector3(-1.2, 0.0, 0.0)
 		vr_rig.hand_l.add_child(vr_glove_label)
 	session_seed = int(OS.get_environment("TS_SEED")) if OS.has_environment("TS_SEED") else Seeded.fresh_seed()
+	match OS.get_environment("TS_TRY"):
+		"blocks":
+			try_open = G.OPEN_ALL
+		"weather":
+			try_bonus = 3
 	_build_world()
 	if mode != "host" or flat_host:  # every machine with a screen of its own (a flat host too)
 		split = SplitView.new()
@@ -274,6 +307,11 @@ func _setup(mode: String) -> void:
 	if mode != "client":
 		net.state_set("best", float(save.data["best"]))
 		net.state_set("town", (save.data.town as Array).duplicate(true))
+		net.state_set("made", int(save.data.built))
+		game_mode = String(save.data.get("mode", "brave"))
+		if OS.has_environment("TS_MODE") and G.MODE_TUNE.has(OS.get_environment("TS_MODE")):
+			game_mode = OS.get_environment("TS_MODE")
+			Engine.set_meta("ts_mode_set", true)
 		save.data.sessions = int(save.data.sessions) + 1
 		save.mark_dirty()
 		print("Tower Stack town: %d towers (%d built in all), today's tower %s, session seed %d" % [
@@ -348,6 +386,17 @@ func _build_world() -> void:
 	add_child(sock)
 	town = SkylineScript.new()
 	add_child(town)
+	districts = Districts.new()
+	add_child(districts)
+	weather = WeatherScript.new()
+	weather.main = self
+	add_child(weather)
+	picks = PicksScript.new()
+	picks.main = self
+	add_child(picks)
+	if net.mode != "client":
+		specials = SpecialsScript.new()
+		add_child(specials)
 	wren = WrenScript.new()
 	add_child(wren)
 	var pad := MeshKit.instance(Looks.pad_mesh(PAD_R), false)
@@ -406,7 +455,8 @@ func _apply_site(s: Dictionary) -> void:
 		ghost_root.add_child(mi)
 		ghosts.append(mi)
 	_show_fill(int(net.state_get("fill", 0)))
-	var windy := float(s.wind) > 0.0
+	weather.reset(s)
+	var windy := float(s.wind) > 0.0 or not (s.get("events", []) as Array).is_empty()
 	sock.visible = windy
 	sock.rotation.y = -float(s.wind_dir)
 	var cols: Array = G.GROUND_COLORS.get(String(s.ground), G.GROUND_COLORS["meadow"])
@@ -623,11 +673,19 @@ func _move_local_players(delta: float) -> void:
 		vy -= GRAVITY * delta
 		p.y += vy * delta
 		if p.y <= g:
-			if vy < -6.0:
-				Creatures.anim(a).squash(0.25)
-				sfx.play_at("land", p, -6.0)
-			p.y = g
-			vy = 0.0
+			var spring := SpecialsScript.bounce_jump(int(bkind.get(ground_id, -1))) if vy < -2.0 else 0.0
+			if spring > 0.0:  # a bouncy block: boing, sky-high
+				p.y = g
+				vy = spring
+				Creatures.anim(a).play("jump")
+				sfx.play_at("boing", p, -2.0, 1.1 + randf() * 0.2)
+				_poke(ground_id, 0.6)
+			else:
+				if vy < -6.0:
+					Creatures.anim(a).squash(0.25)
+					sfx.play_at("land", p, -6.0)
+				p.y = g
+				vy = 0.0
 		vys[slot] = vy
 		a.position = p
 		if net.mode == "client" and send:
@@ -637,6 +695,7 @@ func _move_local_players(delta: float) -> void:
 ## Highest floor under a player: the grass, the stage, or a block top no higher than a step up.
 func _ground_at(p: Vector3) -> float:
 	var g := 0.0
+	ground_id = -1
 	if Vector2(p.x, p.z).length() < BASE_R + 0.1:
 		g = BASE_H
 	for id in blocks:
@@ -649,6 +708,7 @@ func _ground_at(p: Vector3) -> float:
 			var top := bp.y + e.y
 			if top <= p.y + STEP and top > g:
 				g = top
+				ground_id = int(id)
 	return g
 
 
@@ -782,6 +842,11 @@ func _on_state_changed(key: String, value: Variant) -> void:
 			_show_fill(int(value))
 		"town":
 			town.set_entries(value if value is Array else [])
+		"made":
+			districts.set_made(int(value))
+		"orbs":
+			if net.mode == "client" and value is Array and (value as Array).size() >= 2:
+				picks.show_row(String(value[0]), value[1] if value[1] is Array else [])
 		"time":
 			for slot in timers:
 				var t: HudKit.TimerPill = timers[slot]
@@ -821,6 +886,12 @@ func _start_round() -> void:
 	built_round = 0
 	round_jobs = []
 	round_wobbles = 0
+	round_events = 0
+	round_specials = 0
+	round_builds = []
+	picks.history = []
+	if specials != null:
+		specials.clear()
 	net.state_set("built", 0)
 	net.state_set("height", 0.0)
 	net.state_set("rec", 0.0)
@@ -831,17 +902,84 @@ func _start_round() -> void:
 	if vr_rig != null:
 		vr_rig.recenter()
 		vr_rig.guard_trigger()
+	if not Engine.has_meta("ts_mode_set"):
+		_begin_mode_pick()
+	else:
+		_first_job()
+
+
+func _first_job() -> void:
 	_next_job()
 	_spawn_block(PAD + Vector3(0.0, 6.0, 0.0))  # the first block bounces up for the giant (or the crane)
 
 
+## Host: GENTLE / BRAVE / HARD on the pick orbs before the first job of a visit (the family's last mode in the middle).
+func _begin_mode_pick() -> void:
+	var ids := PickOrbs.mode_ids(game_mode)
+	var entries: Array = []
+	for id in ids:
+		var d := PickOrbs.mode(String(id))
+		entries.append({"id": String(id), "name": String(d.get("name", id)), "pic": String(d.get("pic", "star")), "color": d.get("color", Color.WHITE)})
+	picks.begin("mode", entries, ids, _on_picked)
+	var mid: Dictionary = entries[entries.size() / 2]
+	story("Pick how brave!", String(mid.pic), mid.color)
+
+
+## Host: WREN'S NEXT JOB: three buildings of the next level on the orbs ([] when there's no choice to make).
+func _build_choices() -> Array:
+	var n := job_n + 1
+	if daily_ok and n == G.DAILY_N and String(save.data.daily) != Seeded.today():
+		return []  # TODAY'S TOWER is the same for everyone
+	var rn := int(net.state_get("round", 1))
+	var lv := G.level(n + try_bonus, int(save.data.built), game_mode)
+	var out := G.choices(session_seed, rn, n, lv, game_mode, _open_now())
+	return out if out.size() >= 2 else []
+
+
+func _begin_build_pick(choices: Array) -> void:
+	var entries: Array = []
+	var jobs: Array = []
+	for s in choices:
+		entries.append({"id": String(s.building), "name": String(s.name), "pic": String(BUILD_PICS.get(s.building, "tower")),
+			"color": Looks.COLORS[int(s.palette[0])]})
+		jobs.append(G.job_of(s))
+	picks.begin("build", entries, jobs, _on_picked)
+	story("What next?", "wren", WREN_COLOR)
+
+
+## Host: the team chose (or the middle orb was taken for them).
+func _on_picked(stage_name: String, opt: Variant) -> void:
+	match stage_name:
+		"mode":
+			game_mode = String(opt)
+			save.data.mode = game_mode
+			save.mark_dirty()
+			Engine.set_meta("ts_mode_set", true)
+			var m := PickOrbs.mode(game_mode)
+			story(String(PickOrbs.MODE_LINES.get(game_mode, "Let's go!")), String(m.get("pic", "star")), m.get("color", Color.WHITE))
+			_first_job()
+		"build":
+			var s := G.from_job(opt as Array)
+			round_builds.append(String(s.get("building", "")))
+			_next_job(s)
+
+
+## The special blocks open now: the districts Wren's town has grown (and TS_TRY=blocks).
+func _open_now() -> int:
+	return Districts.open_mask(int(save.data.built)) | try_open
+
+
 ## Host: Wren asks for the next building (job n of this round; job DAILY_N is TODAY'S TOWER once a day).
-func _next_job() -> void:
+func _next_job(chosen: Dictionary = {}) -> void:
 	job_n += 1
-	var daily := job_n == G.DAILY_N and String(save.data.daily) != Seeded.today()
+	var daily := daily_ok and job_n == G.DAILY_N and String(save.data.daily) != Seeded.today()
 	var built := int(save.data.built)
 	var seed_value := G.daily_seed() if daily else G.job_seed(session_seed, int(net.state_get("round", 1)), job_n)
-	var s := G.site(seed_value, G.DAILY_LEVEL if daily else G.level(job_n, built), daily)
+	var s := G.site(seed_value, G.DAILY_LEVEL if daily else G.level(job_n + try_bonus, built, game_mode), daily, game_mode,
+		G.OPEN_ALL if daily else _open_now())
+	if not chosen.is_empty() and not daily:
+		s = chosen
+		seed_value = int(s.seed)
 	set_i = 0
 	stable_t = 0.0
 	done_t = -1.0
@@ -849,8 +987,10 @@ func _next_job() -> void:
 	fill = 0
 	net.state_set("fill", 0)
 	net.state_set("job", G.job_of(s))  # every machine rebuilds it (_apply_site)
-	print("Tower Stack job %d: %s level %d, %d blocks to %.2f m, wind %.2f, sway %.3f, seed %d%s" % [job_n, s.building,
-		int(s.level), (s.plan as Array).size(), float(s.top), float(s.wind), float(s.sway), seed_value, " (TODAY'S TOWER)" if daily else ""])
+	round_specials += int(s.specials)
+	print("Tower Stack job %d: %s level %d %s, %d blocks (%d special) to %.2f m, wind %.2f, sway %.3f, events %s, seed %d%s" % [
+		job_n, s.building, int(s.level), game_mode, (s.plan as Array).size(), int(s.specials), float(s.top), float(s.wind),
+		float(s.sway), str(s.events), seed_value, " (TODAY'S TOWER)" if daily else ""])
 	var beats: Array = []
 	if job_n == 1 and int(net.state_get("round", 1)) == 1:
 		beats.append(["Hi! I'm Wren!" if built == 0 else "Let's build!", "wren", WREN_COLOR])
@@ -861,6 +1001,12 @@ func _next_job() -> void:
 		beats.append(["Windy!", "cloud", Color(0.6, 0.8, 1.0)])
 	if float(s.sway) > 0.0:
 		beats.append(["Wobbly jelly!", "wave", Color(0.4, 0.9, 1.0)])
+	var shown := {}
+	for b in s.plan:  # each special block in this job gets a picture card
+		var k := int(b[0])
+		if SPECIAL_LINES.has(k) and not shown.has(k):
+			shown[k] = true
+			beats.append([SPECIAL_LINES[k][0], SPECIAL_LINES[k][1], Looks.block_color(0, k)])
 	for i in beats.size():
 		var b: Array = beats[i]
 		get_tree().create_timer(0.3 + 2.6 * i).timeout.connect(func() -> void:
@@ -933,9 +1079,22 @@ func _tower_to_town() -> void:
 	peak = 0.0
 	tower_h = 0.0
 	var count := int(save.data.built)
-	if TOWN_CHEERS.has(count):
+	net.state_set("made", count)
+	var d := Districts.opened_at(count)
+	if not d.is_empty():  # a new district of Wren's town (and maybe a new special block)
+		story(String(d.name) + "!", String(d.pic), d.color)
+		var k := int(d.opens)
+		if k >= 0:
+			get_tree().create_timer(2.6).timeout.connect(func() -> void:
+				if is_inside_tree():
+					story("New: " + String(SPECIAL_LINES[k][0]).to_lower().capitalize(), String(SPECIAL_LINES[k][1]), Looks.block_color(0, k)))
+	elif TOWN_CHEERS.has(count):
 		story(TOWN_CHEERS[count], "house", Looks.COLORS[int(site.palette[0])])
-	_next_job()
+	var choices := _build_choices()
+	if choices.is_empty():
+		_next_job()
+	else:
+		_begin_build_pick(choices)
 
 
 func _end_round() -> void:
@@ -998,6 +1157,11 @@ func _process(delta: float) -> void:
 		vr_avatar.head.scale = Vector3.ONE * WS
 		for g in vr_avatar.hands:
 			(g as Node3D).scale = Vector3.ONE * WS
+	var orbs_up: bool = not picks.orbs.orbs.is_empty()  # the hoop and its sign step aside for the pick orbs
+	ring.visible = not orbs_up
+	ring_label.visible = not orbs_up
+	if sock.visible:  # the wind sock flaps hard while a weather event is coming or blowing
+		sock.rotation.z = sin(clock * 22.0) * 0.18 if weather.shake_t > 0.0 else 0.0
 	if net.mode == "client":
 		_follow_ghosts(delta)
 		return
@@ -1009,8 +1173,14 @@ func _process(delta: float) -> void:
 		elif results_t > 12.0:
 			_start_round()  # automatic play again
 		return
+	if picks.active():  # the round clock waits while the team chooses
+		picks.tick(delta)
+		return
 	time_left -= delta
 	job_t += delta
+	if done_t < 0.0 and not site.is_empty():
+		for kind in weather.tick(job_t):
+			weather_warn(kind)
 	if done_t >= 0.0:
 		done_t += delta
 		if done_t >= CHEER:
@@ -1043,9 +1213,10 @@ func _physics_process(delta: float) -> void:
 		poke_cd[id] = float(poke_cd[id]) - delta
 	if vr_rig != null:
 		_vr_hands()
-	elif not results_showing():
+	elif not results_showing() and not picks.active():
 		_run_crane(delta)
 	_update_hover(delta)
+	specials.tick(self)
 	_weather(delta)
 	_push_blocks()
 	_check_pad()
@@ -1065,11 +1236,7 @@ func _make_block_node(id: int, authority: bool, kind: int = 0, ci: int = 0) -> N
 		rb.linear_damp = 0.3
 		rb.angular_damp = 1.5
 		rb.freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
-		rb.physics_material_override = ResCache.get_or_make("tower_stack_block_pm_v1", func() -> Resource:
-			var pm := PhysicsMaterial.new()
-			pm.friction = 1.0
-			pm.bounce = 0.05
-			return pm)
+		SpecialsScript.setup(rb, kind, id)  # physics material per kind (bouncy, honey contacts)
 		var cs := CollisionShape3D.new()
 		cs.shape = ResCache.get_or_make("tower_stack_block_shape_v2_%d" % kind, func() -> Resource:
 			var box := BoxShape3D.new()
@@ -1122,6 +1289,8 @@ func _spawn_block(pos: Vector3, kind: int = -1) -> void:
 
 
 func _remove_block(id: int) -> void:
+	if specials != null:
+		specials.unglue(id)
 	var b: Node3D = blocks.get(id)
 	if b != null:
 		b.queue_free()
@@ -1233,7 +1402,7 @@ func _measure_tower() -> void:
 
 ## Host, 5 times a second: which plan spots hold a matching block, and is the tower at the hoop?
 func _measure_job() -> void:
-	if site.is_empty() or done_t >= 0.0:
+	if site.is_empty() or done_t >= 0.0 or picks.active():
 		return
 	var plan: Array = site.plan
 	var mask := 0
@@ -1275,19 +1444,22 @@ func _weather(_delta: float) -> void:
 	if site.is_empty():
 		return
 	var sway := float(site.sway)
-	if sway > 0.0 and stage is AnimatableBody3D:
+	var ev: Vector2 = weather.extra(job_t) if done_t < 0.0 and not results_showing() else Vector2.ZERO
+	if (sway > 0.0 or ev.y > 0.0) and stage is AnimatableBody3D:
 		var w := TAU / maxf(1.0, float(site.sway_period))
 		var a := clock * w * 0.3
 		tilt = Vector2(cos(a), sin(a)) * sway * sin(clock * w)
+		if ev.y > 0.0:  # a QUAKE: the stage shakes quickly along the wind line
+			tilt += Vector2(cos(float(site.wind_dir)), sin(float(site.wind_dir))) * ev.y * sin(clock * TAU * 1.6)
 		stage.rotation = Vector3(tilt.y, 0.0, -tilt.x)
 	elif tilt != Vector2.ZERO:
 		tilt = Vector2.ZERO
 		stage.rotation = Vector3.ZERO
 	var wind := float(site.wind)
-	if wind <= 0.0 or results_showing():
+	if (wind <= 0.0 and ev.x <= 0.0) or results_showing():
 		return
 	var gust := 0.7 + 0.3 * sin(clock * 1.1) * sin(clock * 0.37 + 1.0)
-	var f := _wind_vec() * wind * gust
+	var f := _wind_vec() * (wind * gust + ev.x)  # a GUST adds its push on top
 	for id in blocks:
 		if String(bstate.get(id, "")) != "free":
 			continue
@@ -1295,6 +1467,16 @@ func _weather(_delta: float) -> void:
 		if rb.freeze or not _in_tower_zone(rb.global_position) or rb.global_position.y < BASE_H + 0.25:
 			continue
 		rb.apply_central_force(f * rb.mass)
+
+
+## A weather event is coming (every machine): the warning ring round the stage, Wren's picture card, the sock jiggles.
+func weather_warn(kind: String) -> void:
+	weather.announce(kind)
+	sound("whoosh" if kind == "gust" else "crash", -6.0, 0.7)
+	if net.mode != "client":
+		round_events += 1
+		story("Big wind!" if kind == "gust" else "Quake!", "gust" if kind == "gust" else "quake", weather.COLORS.get(kind, Color.WHITE))
+		net.event("weather", [kind])
 
 
 ## The tower fell: boing, crash, shake (every machine).
@@ -1374,6 +1556,7 @@ func _check_pad() -> void:
 			return
 		hover[slot_i] = int(id)
 		bstate[id] = "hover"
+		specials.unglue(int(id))
 		rb.freeze = true
 		hover_t[id] = 0.0
 		hover_from[id] = p
@@ -1518,6 +1701,7 @@ func _grab(id: int) -> void:
 	var hi := hover.find(id)
 	if hi >= 0:
 		hover[hi] = -1
+	specials.unglue(id)
 	held_id = id
 	bstate[id] = "held"
 	rb.freeze = true
@@ -1606,6 +1790,7 @@ func _run_crane(delta: float) -> void:
 					if hi >= 0:  # (hover[-1] would clear the wrong spot)
 						hover[hi] = -1
 					bstate[crane_id] = "crane"
+					specials.unglue(crane_id)
 					_poke(crane_id, 0.4)
 					sfx.play_at("pop", target, -4.0)
 					var spot := _crane_spot(crane_id)
@@ -1777,3 +1962,7 @@ func apply_event(kind: String, args: Array) -> void:
 			built_fx(args[0], bool(args[1]))
 		"story":
 			story(String(args[0]), String(args[1]), args[2], false)
+		"weather":
+			weather_warn(String(args[0]))
+		"take":
+			picks.take_fx(int(args[0]), int(args[1]))
