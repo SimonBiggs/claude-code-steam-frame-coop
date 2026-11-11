@@ -449,7 +449,7 @@ func show_tell(a: String, data: Array, secs: float) -> void:
 		"roll":
 			var a0: Vector3 = data[0]
 			var a1: Vector3 = data[1]
-			rings.shape("line", a0, a1 - a0, Vector2(a0.distance_to(a1), float(guardian.get("roll_w", 1.5))), col, secs, {"style": "flash"})
+			rings.shape("line", a0, a1 - a0, Vector2(a0.distance_to(a1), float(guardian.get("roll_w", 1.5))), col, secs, {"style": "flash", "alpha": 0.6})
 		"call":
 			for spot2 in data:
 				rings.warn(spot2, 0.55, col, secs, 0.06)
