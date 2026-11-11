@@ -10,7 +10,7 @@ extends Node3D
 const G := preload("res://games/tower_stack/towergen.gd")
 const WarnRings := preload("res://core/warn_rings.gd")
 
-const COLORS := {"gust": Color(0.55, 0.85, 1.0), "quake": Color(1.0, 0.6, 0.25)}
+const COLORS := {"gust": Color(0.3, 0.55, 1.0), "quake": Color(1.0, 0.45, 0.2)}  # (show on snow and autumn grass too)
 const RING_R := 1.75  # just outside the stage (main.gd BASE_R 1.2)
 
 var main: Node

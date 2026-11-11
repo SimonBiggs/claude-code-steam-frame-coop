@@ -50,7 +50,11 @@ func _initialize() -> void:
 	var bad_games := 0
 	for g in games:
 		var id := String(g.id)
+		var tg := Time.get_ticks_usec()
 		var probs := Contrast.check_game(id)
+		var gms := (Time.get_ticks_usec() - tg) / 1000.0
+		if gms > 150.0:
+			_expect(false, "%s: checking its palette.gd took %.0f ms (want < 150: preload small data scripts, not main.gd or scenes)" % [id, gms])
 		pairs += Contrast.pair_count(id)
 		if not probs.is_empty():
 			bad_games += 1

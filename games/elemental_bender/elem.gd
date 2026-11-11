@@ -12,8 +12,10 @@ const WATER := 1
 const EARTH := 2
 const FIRE := 3
 const NAMES: Array[String] = ["AIR", "WATER", "EARTH", "FIRE"]
-const COLORS: Array[Color] = [Color(0.9, 0.95, 1.0), Color(0.15, 0.5, 1.0), Color(0.35, 0.75, 0.2), Color(1.0, 0.4, 0.08)]
-const ROBES: Array[Color] = [Color(0.95, 0.65, 0.2), Color(0.2, 0.35, 0.7), Color(0.25, 0.5, 0.2), Color(0.65, 0.12, 0.1)]
+## Each stands out on every arena ground (palette.gd, tests/contrast_test.gd): warm-white air (pale-blue air vanished
+## on the ice shelf), a brighter earth green and a deeper earth robe on the temple grass.
+const COLORS: Array[Color] = [Color(0.97, 0.97, 0.9), Color(0.15, 0.5, 1.0), Color(0.55, 0.9, 0.15), Color(1.0, 0.4, 0.08)]
+const ROBES: Array[Color] = [Color(0.95, 0.6, 0.15), Color(0.2, 0.35, 0.7), Color(0.2, 0.42, 0.15), Color(0.65, 0.12, 0.1)]
 ## BEATS[a] is the element that a deals double damage to.
 const BEATS: Array[int] = [EARTH, FIRE, WATER, AIR]
 const ROCK := Color(0.5, 0.38, 0.25)

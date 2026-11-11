@@ -17,7 +17,7 @@ const LIST: Array[Dictionary] = [
 	{"id": "meadow", "name": "MEADOW ROW", "pic": "house", "at": 0, "opens": -1, "color": Color(0.45, 0.85, 0.4)},
 	{"id": "bounce", "name": "BOUNCE STREET", "pic": "bouncyblock", "at": 3, "opens": G.K_BOUNCY, "color": Color(1.0, 0.4, 0.85)},
 	{"id": "honey", "name": "HONEY LANE", "pic": "honeyblock", "at": 7, "opens": G.K_STICKY, "color": Color(1.0, 0.72, 0.12)},
-	{"id": "balloon", "name": "BALLOON PARK", "pic": "balloonblock", "at": 12, "opens": G.K_BALLOON, "color": Color(0.55, 0.85, 1.0)},
+	{"id": "balloon", "name": "BALLOON PARK", "pic": "balloonblock", "at": 12, "opens": G.K_BALLOON, "color": Color(0.25, 0.85, 0.75)}  # == looks.gd SPECIAL_COLORS,
 	{"id": "harbor", "name": "HARBOR", "pic": "lighthouse", "at": 20, "opens": -1, "color": Color(0.3, 0.55, 0.95)},
 	{"id": "castle", "name": "CASTLE HILL", "pic": "castle", "at": 30, "opens": -1, "color": Color(0.75, 0.45, 1.0)},
 	{"id": "sky", "name": "SKY TOWN", "pic": "cloud", "at": 45, "opens": -1, "color": Color(0.95, 0.95, 1.0)},

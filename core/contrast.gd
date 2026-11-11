@@ -28,6 +28,11 @@ extends RefCounted
 ## balloon on snow 0.138). 0.12 sits between them (tests/contrast_test.gd keeps these as its own samples).
 
 const MIN := 0.12
+## The usual outline (outline()): a soft dark ink line round a key thing that must show on light AND dark grounds.
+const OUTLINE := Color(0.12, 0.1, 0.16)
+const OUTLINE_WIDTH := 0.02  # metres the outline shell grows out of the surface
+
+static var _outline_mats: Dictionary = {}
 
 const _GAMES_DIR := "res://games"
 
@@ -128,11 +133,59 @@ static func field(what: String, entries, key: String, id_key: String = "id") -> 
 	return out
 
 
+## Players drawn as core/creatures.gd humanoids: their outfit colour, with the class's trousers as the rim (a
+## humanoid always shows them below the outfit). looks: the game's LOOKS (class per slot, wrapping).
+static func humanoids(outfits: Array, looks: Array, what: String = "player") -> Dictionary:
+	var classes: Dictionary = load("res://core/creatures.gd").LOOKS
+	var out := {}
+	for i in outfits.size():
+		var cls := String(looks[i % looks.size()])
+		var look: Dictionary = classes.get(cls, {})
+		out["%s %d" % [what, i + 1]] = {"color": outfits[i], "rim": look.get("pants", outfits[i])}
+	return out
+
+
+## A core/sky_kit.gd preset's sky colours (top + horizon): what flying things are seen against.
+static func sky(preset: String) -> Dictionary:
+	var sk = load("res://core/sky_kit.gd")
+	var p: Dictionary = sk.PRESETS[sk.resolve(preset)]
+	return {"%s sky" % preset: p.top, "%s horizon" % preset: p.horizon}
+
+
 ## a + b (later names win).
 static func merge(a: Dictionary, b: Dictionary) -> Dictionary:
 	var out := a.duplicate()
 	out.merge(b, true)
 	return out
+
+
+# --- Fixes ------------------------------------------------------------------------------------------------
+
+## Give a key thing an ink outline: an unshaded back-face shell (StandardMaterial3D grow) drawn as the mesh's
+## material_overlay, so shared materials are left alone. Contrast.outline(mesh_instance) or (mi, Color.WHITE).
+## Declare it in palette.gd as {"color": C, "rim": Contrast.OUTLINE} (or the colour you passed) so the check counts
+## it. Smooth meshes (spheres, capsules, blobs) outline cleanly; hard-edged boxes show small gaps at the corners.
+## One shared shell material per colour + width. Returns mi.
+static func outline(mi: GeometryInstance3D, color: Color = OUTLINE, width: float = OUTLINE_WIDTH) -> GeometryInstance3D:
+	if mi == null:
+		return mi
+	mi.material_overlay = outline_material(color, width)
+	return mi
+
+
+static func outline_material(color: Color = OUTLINE, width: float = OUTLINE_WIDTH) -> StandardMaterial3D:
+	var key := "%s_%.3f" % [color.to_html(), width]
+	var o: StandardMaterial3D = _outline_mats.get(key)
+	if o == null:
+		o = StandardMaterial3D.new()
+		o.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		o.cull_mode = BaseMaterial3D.CULL_FRONT
+		o.albedo_color = color
+		o.grow = true
+		o.grow_amount = width
+		o.disable_receive_shadows = true
+		_outline_mats[key] = o
+	return o
 
 
 # --- Per-game declarations ---------------------------------------------------------------------------
@@ -161,6 +214,9 @@ static func check_game(id: String) -> Array[String]:
 	var path := palette_path(id)
 	if path == "":
 		out.append("%s: no colour declaration - add games/%s/palette.gd (key_colors() + backgrounds(); core/contrast.gd)" % [id, id])
+		return out
+	if FileAccess.get_file_as_string(path).contains("/main.gd\")"):
+		out.append("%s: games/%s/palette.gd loads main.gd (slow: 100-500 ms each); move the consts it needs into a small data script that main.gd uses too" % [id, id])
 		return out
 	var s = load(path)
 	if s == null or not (s is Script) or not s.can_instantiate():

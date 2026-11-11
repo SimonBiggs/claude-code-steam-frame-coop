@@ -13,6 +13,7 @@ extends Node3D
 ## golden hoop. Quick passes build a COMBO (x2, x3). Stars unlock trails, golden planes, crowns.
 ## Every flight writes one telemetry line (core/telemetry.gd) so goals can be tuned from real play.
 
+const Contrast := preload("res://core/contrast.gd")
 const NetScript := preload("res://core/net.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
 const SfxScript := preload("res://core/sfx.gd")
@@ -541,7 +542,8 @@ func _apply_look(f: Flyer) -> void:
 	var col := party.color_of(f.slot)
 	var mi := MeshInstance3D.new()
 	mi.mesh = Meshes.plane()
-	mi.material_override = Meshes.plane_material(Meshes.GOLD_COLOR if un.has("gold") else col.lerp(Color.WHITE, 0.2))
+	mi.material_override = Meshes.plane_material(Meshes.GOLD_COLOR if un.has("gold") else Meshes.plane_tint(col))
+	Contrast.outline(mi, Meshes.OUTLINE)
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	f.body.add_child(mi)
 	var popts := {"class": "pilot", "outfit": col, "seed": f.slot, "scale": 0.3, "lod": "far"}
@@ -738,7 +740,7 @@ func _make_hoop(id: int, kind: int, ci: int, pos: Vector3) -> Hoop:
 	h.node.position = pos
 	if _breeze() == "big" and kind != SkyGen.GATE:
 		h.node.scale = Vector3.ONE * BIG_SCALE
-	h.mesh = MeshKit.instance(Meshes.hoop(kind, ci), false)
+	h.mesh = Contrast.outline(MeshKit.instance(Meshes.hoop(kind, ci), false), Meshes.OUTLINE)
 	h.mesh.scale = Vector3.ONE * 0.01
 	h.node.add_child(h.mesh)
 	if kind == SkyGen.RAINBOW or kind == SkyGen.GOLD:

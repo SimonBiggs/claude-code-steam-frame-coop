@@ -3,14 +3,13 @@ extends RefCounted
 ## Worlds never recolour the floor, so the floors are every THEME's two checker colours.
 
 const Contrast := preload("res://core/contrast.gd")
-const Main := preload("res://games/marble_maze/main.gd")
 const Levels := preload("res://games/marble_maze/levels.gd")
 const Worlds := preload("res://games/marble_maze/worlds.gd")
 
 
 static func key_colors() -> Dictionary:
 	# The players' marbles (slot 0 is the giant, who tilts the board; its solo marble is P2's colour).
-	var out := Contrast.named("marble", Main.PLAYER_COLORS.slice(1))
+	var out := Contrast.named("marble", Worlds.PLAYER_COLORS.slice(1))
 	return Contrast.merge(out, Contrast.named("warning", Worlds.EVENT_COLORS))
 
 

@@ -1,6 +1,7 @@
 extends RefCounted
 ## Treasure Dig: the game's own meshes and little effects (all code-made, cached via ResCache).
 
+const Contrast := preload("res://core/contrast.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")
 const Story := preload("res://games/treasure_dig/story.gd")
@@ -16,6 +17,10 @@ const KIND_SCALE := 1.9
 
 ## A treasure (coin, gem or a silly old boot) as one MeshInstance3D, origin at its base.
 ## `variant` picks the gem colour (pass the item id so every machine shows the same gem).
+## Relics are gold, brass and pearl: they wear an ink outline so they show on every sand (palette.gd).
+const RELIC_OUTLINE := Contrast.OUTLINE
+
+
 static func item_mesh(kind: int, variant: int = -1) -> MeshInstance3D:
 	var mi: MeshInstance3D
 	match kind:
@@ -26,7 +31,7 @@ static func item_mesh(kind: int, variant: int = -1) -> MeshInstance3D:
 		KIND_MAP:
 			mi = MeshKit.instance(map_piece(), false)
 		KIND_RELIC:
-			mi = MeshKit.instance(relic(maxi(0, variant)), false)
+			mi = Contrast.outline(MeshKit.instance(relic(maxi(0, variant)), false), RELIC_OUTLINE)
 		_:
 			mi = MeshKit.instance(boot(), false)
 	mi.scale = Vector3.ONE * KIND_SCALE

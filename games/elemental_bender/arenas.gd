@@ -35,14 +35,14 @@ const LIST: Array[Dictionary] = [
 	{"id": "temple", "name": "TEMPLE ISLAND", "pic": "spirittree", "sky": "sunset", "ground": Color(0.36, 0.6, 0.28),
 		"shore": Color(0.9, 0.82, 0.6), "sea": Color(0.1, 0.4, 0.65), "sea_glow": 0.0, "stone": Color(0.75, 0.72, 0.65),
 		"hazard": "", "boss": "general", "generals": 0, "waves": 0},
-	{"id": "ice", "name": "ICE SHELF", "pic": "iceshelf", "sky": "snowy", "ground": Color(0.86, 0.92, 0.98),
+	{"id": "ice", "name": "ICE SHELF", "pic": "iceshelf", "sky": "snowy", "ground": Color(0.74, 0.84, 0.94),
 		"shore": Color(0.62, 0.8, 0.92), "sea": Color(0.06, 0.28, 0.42), "sea_glow": 0.0, "stone": Color(0.7, 0.8, 0.9),
 		"hazard": "frost", "boss": "giant", "generals": 1, "waves": 8},
 	{"id": "volcano", "name": "VOLCANO RIM", "pic": "volcano", "sky": "sunset", "ground": Color(0.3, 0.24, 0.23),
 		"shore": Color(0.14, 0.12, 0.12), "sea": Color(1.0, 0.38, 0.08), "sea_glow": 1.6, "stone": Color(0.42, 0.36, 0.34),
 		"hazard": "lava", "boss": "drake", "generals": 2, "waves": 16},
 	{"id": "sky", "name": "SKY RUINS", "pic": "skyruins", "sky": "day", "ground": Color(0.5, 0.72, 0.42),
-		"shore": Color(0.85, 0.83, 0.78), "sea": Color(0.95, 0.96, 1.0), "sea_glow": 0.15, "stone": Color(0.88, 0.85, 0.78),
+		"shore": Color(0.8, 0.78, 0.72), "sea": Color(0.95, 0.96, 1.0), "sea_glow": 0.15, "stone": Color(0.88, 0.85, 0.78),
 		"hazard": "wind", "boss": "hawk", "generals": 3, "waves": 26},
 ]
 ## Hazards: what a vent does when it bursts (fighters / raiders inside its radius).

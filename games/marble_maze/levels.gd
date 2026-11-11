@@ -275,7 +275,7 @@ const SIMPLE_LEVELS := [
 
 
 ## name -> [floor A, floor B, walls, decoration, room background]
-## Floors A / B: every marble (main.gd PLAYER_COLORS) must stand out on both (palette.gd, tests/contrast_test.gd;
+## Floors A / B: every marble (worlds.gd PLAYER_COLORS) must stand out on both (palette.gd, tests/contrast_test.gd;
 ## the yellow marble vanished on the old beach / toys / farm creams).
 const THEMES := {
 	"garden": [Color(0.86, 0.96, 0.78), Color(0.78, 0.9, 0.68), Color(0.4, 0.72, 0.38), "flowers", Color(0.62, 0.84, 1.0)],

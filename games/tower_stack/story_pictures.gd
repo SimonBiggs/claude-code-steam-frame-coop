@@ -40,7 +40,7 @@ static func draw(pic, kind: String, t: float, bob: float, color: Color) -> void:
 			pic._poly([[tx + 0.2, 0.02], [tx + 0.34, 0.05 + sin(t * 6.0) * 0.01], [tx + 0.2, 0.08]], Color(1.0, 0.85, 0.3))
 		"bouncyblock", "honeyblock", "balloonblock":  # the special blocks: a smiley jelly block with its own trick
 			var hop := absf(sin(t * 4.0)) * 0.12 if kind == "bouncyblock" else 0.0
-			var col := {"bouncyblock": Color(1.0, 0.4, 0.85), "honeyblock": Color(1.0, 0.72, 0.12), "balloonblock": Color(0.55, 0.85, 1.0)}[kind] as Color
+			var col := {"bouncyblock": Color(1.0, 0.4, 0.85), "honeyblock": Color(1.0, 0.72, 0.12), "balloonblock": Color(0.25, 0.85, 0.75)}[kind]  # == looks.gd SPECIAL_COLORS as Color
 			var y0 := 0.42 - hop + bob
 			if kind == "balloonblock":
 				y0 = 0.5 + bob

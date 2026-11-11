@@ -271,3 +271,7 @@ static func ordered() -> Array:
 		if not (float(g[k]) >= float(b[k]) and float(b[k]) >= float(h[k])):
 			why.append("%s not gentle >= brave >= hard" % k)
 	return why
+
+## (moved from main.gd so palette.gd can read it without loading main.gd)
+const PLAYER_COLORS: Array[Color] = [Color(1.0, 0.85, 0.55), Color(1.0, 0.3, 0.3), Color(0.25, 0.6, 1.0),
+	Color(0.35, 0.9, 0.35), Color(1.0, 0.8, 0.1), Color(0.8, 0.4, 1.0), Color(1.0, 0.55, 0.15)]
