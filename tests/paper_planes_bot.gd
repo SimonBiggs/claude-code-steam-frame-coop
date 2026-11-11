@@ -67,7 +67,10 @@ func _ready() -> void:
 		kit.at(54.0, "host checks (the TV machine is still connected)", _checks)
 		kit.at(62.0, "finish", kit.finish)
 	else:
-		kit.at(58.0 if client else 55.0, "finish", func() -> void:
+		# A machine joining a game already running (tools/multibot.ts --late) counts its clock from its own start:
+		# it finishes BOT_LATE s sooner, so it still checks while the host plays.
+		var late_s := float(OS.get_environment("BOT_LATE")) if client and OS.has_environment("BOT_LATE") else 0.0
+		kit.at(maxf(30.0, (58.0 if client else 55.0) - late_s), "finish", func() -> void:
 			_checks()
 			kit.finish())
 	kit.every(3.0, _report)
@@ -244,7 +247,7 @@ func _nearest_hoop(from: Vector3) -> Vector3:
 func _report() -> String:
 	return "BOT %s: %s, players %s, hoops %d, clouds %d, darts %d, score %d, combo %d, round %d, scored_by %s, throws %d, tells %d, picks %s" % [main.net.mode,
 		String(main.net.state_get("phase", "")), str(main.party.active_slots()), main.hoops.size(), main.clouds.size(), main.darts.size(),
-		int(main.net.state_get("score", 0)), int(main.net.state_get("combo", 0)), int(main.net.state_get("round", 0)), str(main.scored_by), main.throws, main.hazards.seen, str(main.picks.history)]
+		int(main.net.state_get("score", 0)), int(main.net.state_get("combo", 0)), int(main.net.state_get("round", 0)), str(main.scored_by), main.throws, main.hazards.seen if main.hazards != null else -1, str(main.picks.history) if main.picks != null else "-"]
 
 
 func _checks() -> void:
