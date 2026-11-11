@@ -17,7 +17,11 @@ const ROW := Vector3(0.0, 0.95, -0.2)
 const GAP := 0.72
 const Y := 0.8
 const SCALE := 0.3
-const RUNNER_R := 0.5  # + the orb's hit radius: how close (flat) a runner must stand
+## With a VR chef the row is smaller and lower (chest height, within reach, never filling the headset view).
+const VR_GAP := 0.45
+const VR_Y := 0.38
+const VR_SCALE := 0.2
+const RUNNER_R := 0.6  # + the orb's hit radius: how close (flat) a runner must stand
 const HAND_R := 0.12
 
 var main: Node
@@ -30,6 +34,7 @@ var chosen_by := -1
 var done_t := 0.0
 var on_done: Callable  # host: (stage, option, slot)
 var history: Array = []  # [stage, option, by] (telemetry)
+var compact := false  # every machine: the VR chef's smaller row
 
 
 func _ready() -> void:
@@ -56,18 +61,20 @@ func begin(new_stage: String, entries: Array, opts: Array, done: Callable) -> vo
 	chosen = -1
 	chosen_by = -1
 	done_t = 0.0
-	show_row(new_stage, entries)
-	main.net.event("orbs", [new_stage, entries])
+	var chef = main.players[0] if not main.players.is_empty() else null
+	show_row(new_stage, entries, chef != null and chef.vr)
+	main.net.event("orbs", [new_stage, entries, compact])
 	print("PICKS %s: %s" % [new_stage, opts])
 
 
 ## Every machine: the row of orbs ("" stage: none).
-func show_row(new_stage: String, entries: Array) -> void:
+func show_row(new_stage: String, entries: Array, small: bool = false) -> void:
+	compact = small
 	if new_stage == "" or entries.is_empty():
 		orbs.clear()
 		return
-	orbs.show_orbs(new_stage, entries, ROW, GAP, Y, {"scale": SCALE, "pop": true, "font": 56, "label_y": -1.0, "two_lines": true,
-		"touch": 0.0})
+	orbs.show_orbs(new_stage, entries, ROW, VR_GAP if small else GAP, VR_Y if small else Y, {"scale": VR_SCALE if small else SCALE,
+		"pop": true, "font": 56, "label_y": -1.0, "two_lines": true, "touch": 0.0})
 
 
 ## Host / local, every frame while the orbs are up.
@@ -85,7 +92,7 @@ func tick(delta: float) -> void:
 		if not p.active or p.ghost:
 			continue
 		var at: Vector3 = p.global_position
-		var o := orbs.nearest_hit(Vector3(at.x, ROW.y + Y, at.z), RUNNER_R)
+		var o := orbs.nearest_hit(Vector3(at.x, ROW.y + (VR_Y if compact else Y), at.z), RUNNER_R)
 		if o >= 0:
 			take(o, i)
 			return

@@ -2728,7 +2728,7 @@ func apply_event(kind: String, args: Array) -> void:
 			_show_gifts(args[0], args[1])
 		"orbs":
 			if picks != null:
-				picks.show_row(String(args[0]), args[1])
+				picks.show_row(String(args[0]), args[1], args.size() > 2 and bool(args[2]))
 		"take":
 			if picks != null:
 				picks.take_fx(int(args[0]), int(args[1]))
