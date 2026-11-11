@@ -55,6 +55,8 @@ const HudKit := preload("res://core/hud_kit.gd")
 const MAX_PLAYERS := 7
 const PLAYER_COLORS: Array[Color] = Story.PLAYER_COLORS  # (story.gd: palette.gd reads it)
 const PAD_WAIT_TIME := 20.0
+const SOLO_WAIT := 6.0  # alone this long in the lobby: start a round where the seeker finds Pip + the street friends
+const SOLO_SEEK := 90.0
 const PARTY_META := "hide_and_seek_party"
 const MUSIC_TRACK := 0
 const TAG_RANGE := 3.0
@@ -126,6 +128,8 @@ var mood_dirty := true
 
 # Round state (host decides; mirrored to the TV by snapshots).
 var phase := "wait"  # wait, intro, count, seek, over
+var solo_round := false  # nobody hiding this round: the lone seeker hunts Pip and the street friends
+var solo_wait := 0.0
 var phase_t := 0.0
 var round_no := 0
 var count_time := 20.0  # the bot shortens these
@@ -1001,7 +1005,10 @@ func active_count() -> int:
 ## Hiders taking part in this round (not counting late joiners).
 func hider_count() -> int:
 	var n := 0
+	var tv_gone: bool = net != null and net.mode == "host" and not net.connected  # (its TV seats aren't really there)
 	for p in players:
+		if tv_gone and p.remote:
+			continue
 		if p.active and p.role == "hider" and not p.late:
 			n += 1
 	return n
@@ -1131,14 +1138,16 @@ func _process(delta: float) -> void:
 				over_t = -1.0
 				net.send_action("restart", [])
 		return
-	if net.mode == "host" and not net.connected:
-		if phase != "wait":
-			phase = "wait"
-			_show_center("HIDE AND SEEK", 0.0)
-		return
+	if net.mode == "host" and not net.connected and not solo_round and phase != "wait":
+		phase = "wait"  # the TV left mid-round: back to the lobby (alone, the solo Pip hunt starts from there)
+		_show_center("HIDE AND SEEK", 0.0)
 	match phase:
 		"wait":
-			if hider_count() > 0:
+			# Playing alone (a Deck, or a VR host with no TV): after a few seconds with no hider the seeker
+			# hunts Pip and the street friends on their own, so one player can really play (2026-11-11).
+			solo_wait = solo_wait + delta if hider_count() == 0 and players[0].active else 0.0
+			if hider_count() > 0 or solo_wait >= SOLO_WAIT:
+				solo_wait = 0.0
 				_start_round()
 		"intro":
 			phase_t -= delta
@@ -1187,6 +1196,7 @@ func _start_round() -> void:
 		p.taunt_cd = 0.0
 		if p.active:
 			_place_player(p, spawn_pos(p.index), PI if p.index == 0 else 0.0)
+	solo_round = hider_count() == 0
 	jail_breaks = 1 + (1 if hider_count() >= 4 else 0)
 	star_idx.clear()
 	star_taken.clear()
@@ -1220,6 +1230,8 @@ func _begin_count() -> void:
 func _seek_time() -> float:
 	if seek_override > 0.0:
 		return seek_override
+	if hider_count() == 0:
+		return SOLO_SEEK  # alone: just Pip and the street friends to find
 	return clampf(130.0 + 10.0 * hider_count(), 140.0, 190.0)
 
 
@@ -1256,6 +1268,9 @@ func _update_seek(delta: float) -> void:
 		_end_round(true)
 	elif phase_t <= 0.0:
 		_end_round(false)
+	elif solo_round and hider_count() == 0:
+		if not pip_on and _friends_left() == 0:
+			_end_round(true)  # alone: Pip and every street friend found
 	elif hider_count() == 0:
 		phase = "wait"
 
@@ -1539,7 +1554,14 @@ func _end_round(seeker_won: bool) -> void:
 	phase = "over"
 	over_t = 0.0
 	var lines: Array[String] = []
-	if seeker_won:
+	if solo_round and hider_count() == 0:
+		# Alone: Pip and the street friends were the ones to find (their names follow below).
+		if seeker_won:
+			round_scores[0] += int(phase_t) * 2
+		lines.append("YOU FOUND THEM ALL!" if seeker_won else "TIME'S UP!")
+		lines.append("P1  +%d" % round_scores[0])
+		sound("clear", -2.0, 1.0 if seeker_won else 1.25)
+	elif seeker_won:
 		var bonus := int(phase_t) * 2
 		round_scores[0] += bonus
 		lines.append("THE SEEKER FOUND EVERYONE!")
@@ -2095,6 +2117,15 @@ func _friend_in_beam(s) -> int:
 	return -1
 
 
+## Street friends still hiding this round.
+func _friends_left() -> int:
+	var n := 0
+	for k in friends.size():
+		if int(friend_state[k][1]) < 0 and is_instance_valid(friends[k]):
+			n += 1
+	return n
+
+
 ## Host: player i found friend k: points, and the friend comes to Pip's garden party (saved for good).
 func find_friend(k: int, i: int) -> void:
 	if k >= friends.size() or int(friend_state[k][1]) >= 0 or phase != "seek":
@@ -2261,7 +2292,9 @@ func _story(beat: Dictionary) -> void:
 
 func _show_story(beat: Dictionary) -> void:
 	beat = beat.duplicate()
-	beat["y"] = beat.get("y", 0.36)  # under the big HIDE! / SEEK! word, above the picture cues
+	# Under the big HIDE! / SEEK! word, above the picture cues; while the results fill the middle, at the top instead
+	# (2026-11-11: Pip's "a toy for me" card sat on top of the results lines).
+	beat["y"] = beat.get("y", 0.09 if phase == "over" else 0.36)
 	var huds: Array = []
 	for p in players:
 		if p.hud != null and is_instance_valid(p.hud) and _has_local_view(p) and p.active:

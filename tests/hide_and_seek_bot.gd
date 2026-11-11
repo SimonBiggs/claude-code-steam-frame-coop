@@ -221,6 +221,14 @@ func _seeker(delta: float) -> void:
 				best = main.friends[k]
 				best_pos = fp
 				best_c = main.friends[k].center()
+	# Alone (no hiders): Pip is the one to find too.
+	if main.solo_round and main.pip_on:
+		var pd: float = main.pip_spot.distance_to(s.global_position)
+		if pd < best_d or best == null:
+			best_d = pd
+			best = main.pip
+			best_pos = main.pip_spot
+			best_c = main.pip.center()
 	if best == null:
 		return
 	# Sniff when someone's close (hiders in range sneeze: it's how a real seeker would use it).
@@ -312,6 +320,13 @@ func _hiders(delta: float) -> void:
 
 ## One BOT RESULT line per machine once every verdict is in.
 func _result(mode: String) -> void:
+	# A VR host alone (no TV machine, so no hiders): the solo Pip hunt rounds must start and end by themselves (this bot
+	# can't drive a VR seeker on the host, so nobody gets found: the hiders' and finder's verdicts don't apply).
+	if mode == "host" and not main.net.connected and int(get_meta("max_hiders", 0)) == 0 and main.hider_count() == 0:
+		if main.round_no >= 3 and not has_meta("result"):
+			set_meta("result", true)
+			print("BOT RESULT: %s (VR host alone: %d solo rounds ran)" % ["PASS" if main.solo_round else "FAIL", main.round_no])
+		return
 	var late: bool = main.round_no >= 6  # verdicts still missing by now count as failures
 	if has_meta("result") or (not late and (not cue_verdict or maps_seen.size() < 3 or not has_meta("pip_ok") or not has_meta("friend_ok") or (mode != "client" and not conn_done))):
 		return
@@ -554,7 +569,7 @@ func _note_cues() -> void:
 	if main.get("help_label") != null:
 		_text_error("key-help line", "help_label is back")
 	var ct: String = main.center_label.text
-	var results: bool = ct.begins_with("THE SEEKER FOUND EVERYONE!") or ct.begins_with("TIME'S UP!")  # (the TV may get it a frame before "over")
+	var results: bool = ct.begins_with("THE SEEKER FOUND EVERYONE!") or ct.begins_with("TIME'S UP!") or ct.begins_with("YOU FOUND THEM ALL!")  # (the TV may get it a frame before "over")
 	if main.phase != "over" and not results and main.center_label.modulate.a > 0.05 and headline_re.search(ct) == null:
 		_text_error("TV headline", main.center_label.text)
 	if main.phase == "over" and (main.center_label.text.contains("A / Enter") or main.center_label.text.contains("press")):
@@ -563,7 +578,7 @@ func _note_cues() -> void:
 		_text_error("top line", main.info_label.text)
 	if main.vr_center != null and main.vr_center.modulate.a > 0.05 and main.phase != "over":
 		var vt: String = main.vr_center.text
-		var vres: bool = vt.begins_with("THE SEEKER FOUND EVERYONE!") or vt.begins_with("TIME'S UP!")  # (a frame behind)
+		var vres: bool = vt.begins_with("THE SEEKER FOUND EVERYONE!") or vt.begins_with("TIME'S UP!") or vt.begins_with("YOU FOUND THEM ALL!")  # (a frame behind)
 		if not vres and headline_re.search(vt) == null and big_re.search(vt) == null:
 			_text_error("VR headline", vt)
 	if main.vr_status != null and main.vr_status.visible and main.vr_status.text.contains("\n"):
@@ -630,13 +645,18 @@ func _cue_verdict() -> void:
 	var mode: String = main.net.mode
 	var need: Array[String] = []
 	set_meta("max_hiders", maxi(int(get_meta("max_hiders", 0)), main.hider_count()))
-	if mode == "host" and int(get_meta("max_hiders")) < 2:
+	var hiders_here: bool = int(get_meta("max_hiders")) > 0 or bot_players >= 2  # alone (BOT_PLAYERS=1 on a Deck): no hider cues
+	if mode == "host" and not main.net.connected and int(get_meta("max_hiders")) == 0:
+		pass  # a VR host alone: its seeker isn't driven on the host (no torch use to teach); _result checks the solo rounds
+	elif mode == "local" and not hiders_here:
+		need.append_array(["cue_torch", "cue_again"])  # alone: the torch finds Pip and the friends (learning counts hider finds)
+	elif mode == "host" and int(get_meta("max_hiders")) < 2:
 		need.append("cue_torch")  # one TV hider: only one find fits in a networked run before the timeout
 	elif mode != "client":
 		need.append_array(["cue_torch", "learned_torch", "retired_torch"])
-	if mode != "host":
+	if mode != "host" and hiders_here:
 		need.append_array(["cue_disguise", "cue_squeak", "learned_squeak", "retired_squeak"])
-	if mode == "local":
+	if mode == "local" and hiders_here:
 		need.append_array(["learned_disguise", "retired_disguise", "cue_again"])
 	if bot_vr:
 		need = ["vr_torch_cue", "vr_sniff_cue", "cue_disguise", "cue_squeak"]

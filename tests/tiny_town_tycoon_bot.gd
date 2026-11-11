@@ -81,7 +81,7 @@ func _ready() -> void:
 	if not host and BotKit.lead_machine():
 		kit.at(t0 + 7.0, "P2 presses Y: one shared view", func() -> void: _press_driver("y"))
 		kit.at(t0 + 8.0, "shared?", func() -> void:
-			if main.split != null:
+			if main.split != null and want >= 2:  # one player alone has one view: nothing to share
 				kit.assert_true(main.split.is_shared(), "Y switched to the shared view"))
 		kit.at(t0 + 10.0, "P2 presses Y again: split screen", func() -> void: _press_driver("y"))
 		kit.at(t0 + 11.0, "split?", func() -> void:

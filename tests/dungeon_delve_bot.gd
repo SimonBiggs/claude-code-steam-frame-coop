@@ -31,6 +31,8 @@ var main: Node
 var want := 2
 var saw_results := false
 var results_t := -1.0
+var results_shown_t := -1.0  # when the results screen showing now came up
+var again_t := -100.0
 var again_sent := false
 var max_mons := 0
 var bonk_cd := {}
@@ -131,10 +133,16 @@ func _watch() -> String:
 		saw_results = true
 		results_t = kit.t
 		kit.assert_true(main.split == null or main.results_ui != null, "the results screen shows on the TV")
-	if saw_results and main.results_showing() and kit.t - results_t > 6.0 and main.vr_rig == null and not again_sent:
+	if main.results_showing() and results_shown_t < 0.0:
+		results_shown_t = kit.t
+	elif not main.results_showing():
+		results_shown_t = -1.0
+	# Every results screen (not just the first): press again, so the bot keeps playing to its end (lone check).
+	if saw_results and main.results_showing() and kit.t - results_shown_t > 6.0 and main.vr_rig == null and kit.t - again_t > 8.0:
 		var slots: Array[int] = main.party.local_slots()
 		if not slots.is_empty() and main.net.mode == "local":
 			again_sent = true
+			again_t = kit.t
 			kit.slot_press(main.party, slots[0], "accept")
 	return ""
 
