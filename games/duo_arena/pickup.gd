@@ -1,6 +1,8 @@
 extends Area3D
 ## Pickups dropped by enemies: health, spread shot, rapid fire, shield bubble and the mega bomb.
 
+const Looks := preload("res://games/duo_arena/looks.gd")
+
 var kind := "health"
 var main
 var life := 12.0
@@ -25,12 +27,12 @@ func _ready() -> void:
 	mesh = MeshInstance3D.new()
 	match kind:
 		"health":
-			color = Color(0.3, 1.0, 0.45)
+			color = Looks.PICKUP_COLORS.health
 			var b := BoxMesh.new()
 			b.size = Vector3(0.5, 0.5, 0.5)
 			mesh.mesh = b
 		"rapid":
-			color = Color(1.0, 0.6, 0.15)
+			color = Looks.PICKUP_COLORS.rapid
 			var c := CylinderMesh.new()
 			c.top_radius = 0.0
 			c.bottom_radius = 0.28
@@ -38,7 +40,7 @@ func _ready() -> void:
 			c.radial_segments = 6
 			mesh.mesh = c
 		"bubble":
-			color = Color(0.45, 0.65, 1.0)
+			color = Looks.PICKUP_COLORS.bubble
 			var sp := SphereMesh.new()
 			sp.radius = 0.32
 			sp.height = 0.64
@@ -46,7 +48,7 @@ func _ready() -> void:
 			sp.rings = 7
 			mesh.mesh = sp
 		"bomb":
-			color = Color(1.0, 0.25, 0.35)
+			color = Looks.PICKUP_COLORS.bomb
 			var bs := SphereMesh.new()
 			bs.radius = 0.3
 			bs.height = 0.6
@@ -64,7 +66,7 @@ func _ready() -> void:
 			fuse.rotation.x = PI / 2.0
 			mesh.add_child(fuse)
 		_:
-			color = Color(0.3, 0.9, 1.0)
+			color = Looks.PICKUP_COLORS.spread
 			var p := PrismMesh.new()
 			p.size = Vector3(0.6, 0.6, 0.3)
 			mesh.mesh = p
