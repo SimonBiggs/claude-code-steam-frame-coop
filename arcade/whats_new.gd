@@ -33,6 +33,11 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "bee-gifts", "date": "2026-11-11", "game": "bee_garden", "pic": "bumblebee", "line": "Pick Queen Bea's gifts!"},
+	{"id": "bee-storms", "date": "2026-11-11", "game": "bee_garden", "pic": "storm", "line": "Wasps and storms warn first", "try": {"BEE_TRY": "storm"}},
+	{"id": "bee-hive", "date": "2026-11-11", "game": "bee_garden", "pic": "hive", "line": "The hive grows honey boxes!"},
+	{"id": "bee-seasons", "date": "2026-11-11", "game": "bee_garden", "pic": "wildflowers", "line": "Seasons bring new weather"},
+	{"id": "bee-gentle", "date": "2026-11-11", "game": "bee_garden", "pic": "queenbee", "line": "Gentle mode for little ones", "try": {"BEE_MODE": "gentle"}},
 	{"id": "gl-wings", "date": "2026-11-11", "game": "ghost_lantern", "pic": "attic", "line": "Attic, cellar, greenhouse!"},
 	{"id": "gl-boing", "date": "2026-11-11", "game": "ghost_lantern", "pic": "boing", "line": "Boing hops! Watch the rings", "try": {"GL_TRY": "boing"}},
 	{"id": "gl-puff", "date": "2026-11-11", "game": "ghost_lantern", "pic": "puff", "line": "Puff pops into pufflings!", "try": {"GL_TRY": "puff"}},

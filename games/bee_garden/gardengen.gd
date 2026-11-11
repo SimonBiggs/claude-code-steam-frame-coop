@@ -14,6 +14,7 @@ extends RefCounted
 ## of three) even if the gardener plants nothing, and by the two helper bees when the gardener plays alone.
 
 const Seeded := preload("res://core/seeded.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
 
 const SPOTS := 12
 const X_MAX := 3.35          # spots stay this far from the bed's middle (soil half-width 4.0)
@@ -28,6 +29,7 @@ const FEATURE_KINDS: Array[String] = ["pond", "stone", "rock", "toadstool"]
 const FEATURE_H := {"pond": 0.02, "stone": 0.05, "rock": 0.3, "toadstool": 0.32}
 ## Bee and flower facts (kept in step with bee.gd, helpers.gd, main.gd and world.gd; the test checks).
 const HIVE_ENTRY := Vector3(-5.0, 0.32, -0.5)
+const BED_HALF := Vector2(3.6, 1.5)   # storm clouds stay over the soil (world.gd BED_X / BED_Z, less a margin)
 const KIND_H: Array[float] = [0.75, 1.15, 0.9]     # world.gd KINDS h (flower head = h + 0.06)
 const KIND_HONEY: Array[int] = [1, 2, 3]
 const BEE_SPEED := 3.1 * 0.55   # a child flying a bee wanders: a bit over half the real top speed
@@ -41,6 +43,32 @@ const OBSTACLES := [
 	[Vector3(-5.5, 0.6, -0.5), Vector3(0.45, 0.6, 0.45)],
 ]
 const WEATHERS: Array[String] = ["sun", "showers", "hot", "drizzle"]
+## SECOND PASS: seasons (each round the next one), GENTLE / BRAVE / HARD (the arcade's one list, core/pick_orbs.gd;
+## picked after round 1, which is the same calm practice round in every mode), wasp visits and storm clouds told
+## by warning rings (core/warn_rings.gd) and Queen Bea's gifts between rounds (gifts only ever help).
+const SEASONS: Array[String] = ["spring", "summer", "autumn", "harvest"]   # world.gd SEASONS (lawn / leaves)
+## Weather odds by season [sun, showers, hot, drizzle] (hot and drizzle only from round 3).
+const SEASON_WEATHER := {"spring": [3, 4, 0, 2], "summer": [3, 1, 4, 0], "autumn": [3, 2, 1, 2], "harvest": [4, 2, 1, 1]}
+const MODE_IDS: Array[String] = PickOrbs.MODE_IDS
+const MODE_GOAL := {"gentle": 1.0, "brave": 1.15, "hard": 1.3}       # honey goal x (from round 2)
+const WASP_FROM := {"gentle": 6, "brave": 5, "hard": 4}               # wasp visits start this round
+const WASP_STAY := {"gentle": 12.0, "brave": 16.0, "hard": 20.0}      # a wasp nobody shoos leaves after this
+const WASP_STEAL := 6.0      # it takes a drop of honey this often while it hangs round the hive
+const STORM_FROM := {"gentle": 7, "brave": 6, "hard": 5}              # storm clouds start this round
+const STORM_SECS := {"gentle": 7.0, "brave": 9.0, "hard": 11.0}       # flowers under the cloud close this long
+const WARN_S := 3.5          # the warning ring shows this long before a wasp or a storm arrives
+const STORM_COVER := 4       # a storm cloud never covers more than this many spots (or the bees' first flower)
+## Queen Bea's gifts (picked between rounds on the shared pick orbs; each once a visit): [id, name, picture, colour].
+const GIFTS: Array = [
+	["bumble", "BUMBLE BEES", "bumblebee", Color(1.0, 0.75, 0.3)],    # bees carry 4 pollen, not 3
+	["zoom", "ZOOM WINGS", "zoomwings", Color(0.55, 0.85, 1.0)],      # bees fly a bit faster
+	["sweet", "SWEET FLOWERS", "sweetflower", Color(1.0, 0.55, 0.8)], # pollen regrows faster
+	["wild", "WILDFLOWERS", "wildflowers", Color(0.6, 1.0, 0.5)],     # three empty spots bloom at once
+]
+const GIFT_LOAD := 4
+const GIFT_SPEED := 1.15
+const GIFT_REGROW := 3.0
+const MAX_GOAL := 72          # 8 jars of 9 (a big crew's later rounds; main.gd jar_count splits it into jars)
 const MAX_FILL_S := 150.0     # the goal fills within this with the expected flowers
 const MAX_BARE_S := 330.0     # ... and within this even if the gardener never plants (no fail, just slow)
 
@@ -84,7 +112,7 @@ static func generate(seed_value: int, spec: Dictionary = {}) -> Dictionary:
 	for i in others:
 		if _dist2(spots[i], HIVE_ENTRY) < _dist2(spots[halo], HIVE_ENTRY):
 			halo = i
-	var n_bloom := 2 + (1 if level >= 3 else 0) + (1 if level >= 10 else 0)
+	var n_bloom := 3 + (1 if level >= 6 else 0)  # (three from the start: a practice round on two flowers dragged)
 	var blooms: Array = [[halo, 0]]
 	var pool: Array = Seeded.shuffled(r, others)
 	for i in pool:
@@ -104,9 +132,15 @@ static func day_plan(g: Dictionary, round_n: int, spec: Dictionary = {}) -> Dict
 	var kinds := clampi(int(spec.get("kinds", g.get("kinds", 1))), 1, 3)
 	var level := int(spec.get("level", g.get("level", 0)))
 	var bees := clampi(int(spec.get("bees", 1)), 0, 6)
+	var mode := mode_of(String(spec.get("mode", "gentle")))
+	var season := season_of(round_n)
 	var weather := "sun"
 	if round_n >= 2:
-		weather = WEATHERS[Seeded.weighted(r, [3, 3, 2 if round_n >= 3 else 0, 1 if round_n >= 3 else 0])]
+		var wt: Array = (SEASON_WEATHER[season] as Array).duplicate()
+		if round_n < 3:
+			wt[2] = 0
+			wt[3] = 0
+		weather = WEATHERS[Seeded.weighted(r, wt)]
 	var rains: Array = []
 	match weather:
 		"showers":
@@ -127,19 +161,155 @@ static func day_plan(g: Dictionary, round_n: int, spec: Dictionary = {}) -> Dict
 	if round_n >= 4 and r.randf() < 0.5:
 		golden = snappedf(r.randf_range(25.0, 70.0), 0.5)
 	# The honey goal: grows round by round, a little more with more bees (they share the flowers).
-	var base := mini(14 + 6 * (round_n - 1), 36)
-	var target := int(round(base * (1.0 + 0.25 * maxf(0.0, bees - 1))))
-	target = mini(target, 48)
+	var base := mini(14 + 5 * (round_n - 1), 36) + maxi(0, round_n - 6)  # (after round 6 a little more each round)
+	# (a mode's extra honey eases in over rounds 2..4, so no round is a cliff)
+	var mode_x := 1.0 + (float(MODE_GOAL[mode]) - 1.0) * clampf((round_n - 1) / 3.0, 0.0, 1.0)
+	# (more bees, more honey; the practice round less so: a big crew shares its three first flowers)
+	# (the practice round: a crew shares the garden's first 2..4 flowers, so a bigger crew asks for little more)
+	var crew_ease := 0.2 * maxi(0, (g.blooms as Array).size() - 2) if round_n <= 1 else (0.7 if round_n == 2 else 1.0)
+	var bee_x := 1.0 + 0.25 * maxf(0.0, bees - 1) * crew_ease
+	var target := int(round(base * bee_x * mode_x))
+	target = mini(target, MAX_GOAL)
 	# The flowers we can count on: today's blooms grow by about two a round (the gardener plants).
 	var expect := mini(SPOTS - 1, (g.blooms as Array).size() + 2 * (round_n - 1))
+	# Second pass (own random streams, so the plans above stay as they were): wasp visits and storm clouds.
+	var wr := Seeded.rng(Seeded.derive(int(g.seed), round_n), "wasps")
+	var wasps: Array = []
+	if round_n >= int(WASP_FROM[mode]):
+		var since := round_n - int(WASP_FROM[mode])
+		var n_w := 1 + (1 if since >= 2 and mode != "gentle" else 0) + (1 if since >= 5 and mode == "hard" else 0)
+		var at_w := wr.randf_range(30.0, 45.0)
+		for k in n_w:
+			wasps.append(snappedf(at_w, 0.5))
+			at_w += wr.randf_range(32.0, 42.0)
+	var sr := Seeded.rng(Seeded.derive(int(g.seed), round_n), "storms")
+	var storms: Array = []
+	if round_n >= int(STORM_FROM[mode]):
+		var n_s := 1 + (1 if mode == "hard" and round_n >= 6 else 0)
+		var at_s := sr.randf_range(24.0, 40.0)
+		for k in n_s:
+			var st := _storm_place(g, sr)
+			if not st.is_empty():
+				storms.append([snappedf(at_s, 0.5), st[0], st[1], st[2]])
+			at_s += sr.randf_range(40.0, 55.0)
 	return {"round": round_n, "weather": weather, "rains": rains, "fav": fav, "aphids": aphids, "golden": golden,
-		"target": target, "bees": bees, "expect": expect, "kinds": kinds}
+		"target": target, "bees": bees, "expect": expect, "kinds": kinds, "mode": mode, "season": season,
+		"wasps": wasps, "storms": storms, "gifts": (spec.get("gifts", []) as Array).duplicate()}
+
+
+static func mode_of(id: String) -> String:
+	var m := PickOrbs.mode(id)
+	return String(m.id) if not m.is_empty() and MODE_IDS.has(String(m.id)) else "gentle"
+
+
+## The season of round n (spring, summer, autumn, harvest moon, then round again): main.gd colours the lawn.
+static func season_of(round_n: int) -> String:
+	return SEASONS[(maxi(round_n, 1) - 1) % SEASONS.size()]
+
+
+## A storm cloud's place [x, z, radius]: over a few spots, never the bees' first flower ([] if none fits).
+static func _storm_place(g: Dictionary, r: RandomNumberGenerator) -> Array:
+	for attempt in 12:
+		var i := r.randi() % SPOTS
+		if i == int(g.halo):
+			continue
+		var s: Array = g.spots[i]
+		var rad := snappedf(r.randf_range(1.0, 1.4), 0.05)
+		var x := clampf(float(s[0]) + r.randf_range(-0.4, 0.4), -BED_HALF.x + rad * 0.5, BED_HALF.x - rad * 0.5)
+		var z := clampf(float(s[1]) + r.randf_range(-0.3, 0.3), -BED_HALF.y + 0.3, BED_HALF.y - 0.3)
+		var st := [snappedf(x, 0.01), snappedf(z, 0.01), rad]
+		if storm_problem(g, st) == "":
+			return st
+	return []
+
+
+## Spots under a storm cloud [x, z, radius].
+static func storm_spots(g: Dictionary, st: Array) -> Array:
+	var out: Array = []
+	for i in (g.spots as Array).size():
+		var s: Array = g.spots[i]
+		if Vector2(float(s[0]) - float(st[0]), float(s[1]) - float(st[1])).length() < float(st[2]):
+			out.append(i)
+	return out
+
+
+static func storm_problem(g: Dictionary, st: Array) -> String:
+	var under := storm_spots(g, st)
+	if under.size() > STORM_COVER:
+		return "a storm covers %d spots" % under.size()
+	if under.has(int(g.halo)):
+		return "a storm covers the bees' first flower"
+	if absf(float(st[0])) > BED_HALF.x or absf(float(st[1])) > BED_HALF.y:
+		return "a storm off the bed"
+	return ""
+
+
+## Bees' boosts from Queen Bea's gifts (fill_time and main.gd read the same numbers).
+static func boosts(gifts: Array) -> Dictionary:
+	return {"load": GIFT_LOAD if gifts.has("bumble") else BEE_LOAD, "speed": GIFT_SPEED if gifts.has("zoom") else 1.0,
+		"regrow": GIFT_REGROW if gifts.has("sweet") else POLLEN_REGROW, "wild": 3 if gifts.has("wild") else 0}
+
+
+## How hard round d is (seconds of honey making for its crew): the time to fill the goal plus the drops the wasps
+## take, plus the flower time the storm clouds close. check_modes() proves it climbs smoothly and modes stay in order.
+static func round_load(g: Dictionary, d: Dictionary) -> float:
+	var steals := 0
+	for w in d.wasps:
+		steals += int(float(WASP_STAY[String(d.mode)]) / WASP_STEAL)
+	var b := boosts(d.get("gifts", []))
+	var t := fill_time(g, mini(SPOTS - 1, int(d.expect) + int(b.wild)), 0, int(d.target) + steals, int(d.bees), -1, 900.0, b)
+	for st in d.storms:
+		t += float(STORM_SECS[String(d.mode)]) * float(storm_spots(g, [st[1], st[2], st[3]]).size()) / maxf(1.0, float(d.expect))
+	return t
+
+
+## Why the modes aren't a smooth, ordered climb in garden g ([] when they are): round 1 the same calm round in every
+## mode; each mode's rounds rise without cliffs (no round over 1.6x the last + 10 s: the flight sim is a little lumpy)
+## or big drops (below 0.75x: a grown garden may make a round a little quicker); round 8 clearly harder than round 1
+## (1.15x for up to 3 bees; a big crew is held by
+## the flowers, not the goal: it must ask for more honey and not get quicker); and gentle <= brave <= hard every round.
+static func check_modes(g: Dictionary, crews: Array = [0, 1, 3, 6], rounds: int = 9) -> Array:
+	var why: Array = []
+	for bees in crews:
+		var loads := {}
+		for m in MODE_IDS:
+			var ls: Array = []
+			var goals: Array = []
+			for rn in range(1, rounds + 1):
+				var d := day_plan(g, rn, {"bees": bees, "mode": m})
+				ls.append(round_load(g, d))
+				goals.append(int(d.target))
+				if rn == 1 and var_to_str(_no_mode(d.duplicate(true))) != var_to_str(_no_mode(day_plan(g, 1, {"bees": bees, "mode": "gentle"}))):
+					why.append("%s: round 1 isn't the calm practice round" % m)
+			loads[m] = ls
+			for k in range(1, ls.size()):
+				if float(ls[k]) > float(ls[k - 1]) * 1.6 + 10.0:
+					why.append("%s %d bees: round %d jumps from %.0f to %.0f s" % [m, bees, k + 1, ls[k - 1], ls[k]])
+				if float(ls[k]) < float(ls[k - 1]) * 0.75:
+					why.append("%s %d bees: round %d drops from %.0f to %.0f s" % [m, bees, k + 1, ls[k - 1], ls[k]])
+			var r8 := mini(7, ls.size() - 1)
+			if bees <= 3 and float(ls[r8]) < float(ls[0]) * 1.15:
+				why.append("%s %d bees: round 8 (%.0f s) isn't harder than round 1 (%.0f s)" % [m, bees, ls[r8], ls[0]])
+			if bees > 3 and (float(ls[r8]) < float(ls[0]) * 0.85 or int(goals[r8]) <= int(goals[0])):
+				why.append("%s %d bees: round 8 (%d honey, %.0f s) is easier than round 1 (%d honey, %.0f s)" % [m, bees, goals[r8], ls[r8], goals[0], ls[0]])
+		for k in rounds:
+			var gl := float(loads.gentle[k])
+			var br := float(loads.brave[k])
+			var hd := float(loads.hard[k])
+			if not (gl <= br * 1.02 + 0.5 and br <= hd * 1.02 + 0.5):
+				why.append("%d bees round %d: gentle %.0f / brave %.0f / hard %.0f out of order" % [bees, k + 1, gl, br, hd])
+	return why
+
+
+static func _no_mode(d: Dictionary) -> Dictionary:
+	d.erase("mode")
+	return d
 
 
 ## Seconds to fill `target` honey with `n_flowers` blooming flowers (the first n of the bed, all of
 ## kind `kind`; the bees' halo flower first) - a small flight simulation (bees: real speed x 0.55, loads
 ## of three, pollen regrows; helpers: two at their own speed, loads of two). INF when it never fills.
-static func fill_time(g: Dictionary, n_flowers: int, kind: int, target: int, bees: int, fav: int = -1, limit: float = 600.0) -> float:
+static func fill_time(g: Dictionary, n_flowers: int, kind: int, target: int, bees: int, fav: int = -1, limit: float = 600.0, boost: Dictionary = {}) -> float:
 	var heads: Array = []
 	var order: Array = [int(g.halo)]
 	for b in g.blooms:
@@ -162,8 +332,9 @@ static func fill_time(g: Dictionary, n_flowers: int, kind: int, target: int, bee
 		return INF
 	var helpers := bees <= 0
 	var n := 2 if helpers else bees
-	var speed := HELPER_SPEED if helpers else BEE_SPEED
-	var cap := 2 if helpers else BEE_LOAD
+	var speed := HELPER_SPEED if helpers else BEE_SPEED * float(boost.get("speed", 1.0))
+	var cap := 2 if helpers else int(boost.get("load", BEE_LOAD))
+	var regrow := float(boost.get("regrow", POLLEN_REGROW))
 	var ready_at: Array = []
 	ready_at.resize(heads.size())
 	ready_at.fill(0.0)
@@ -200,6 +371,10 @@ static func fill_time(g: Dictionary, n_flowers: int, kind: int, target: int, bee
 					for i in heads.size():
 						var arrive: float = t + (pos[b] as Vector3).distance_to(heads[i]) / speed
 						var tt := arrive if helpers else maxf(arrive, float(ready_at[i]))
+						if not helpers:
+							tt -= 1.5 * float(KIND_HONEY[int(kinds_of[i])] - 1)  # richer flowers are worth a little detour
+						if not helpers and int(load[b]) == cap - 1:
+							tt += (heads[i] as Vector3).distance_to(HIVE_ENTRY) / speed * 0.6  # the last pollen: one near home
 						for o in n:
 							if o != b and int(goal[o]) == i:
 								tt += 2.0  # someone's already on their way
@@ -229,7 +404,7 @@ static func fill_time(g: Dictionary, n_flowers: int, kind: int, target: int, bee
 				load[b] = int(load[b]) + 1
 				val[b] = int(val[b]) + KIND_HONEY[int(kinds_of[gi])]
 				got_fav[b] = bool(got_fav[b]) or int(kinds_of[gi]) == fav
-				ready_at[gi] = t + POLLEN_REGROW
+				ready_at[gi] = t + regrow
 				goal[b] = -1
 				wait[b] = 1.2 if helpers else 0.35
 				# A bee that has picked up some pollen and finds nothing ready nearby goes home with it.
@@ -318,7 +493,7 @@ static func check(g: Dictionary) -> Array:
 static func check_day(g: Dictionary, d: Dictionary) -> Array:
 	var why: Array = []
 	var target := int(d.target)
-	if target < 10 or target > 48:
+	if target < 10 or target > MAX_GOAL:
 		why.append("honey goal %d" % target)
 	if not WEATHERS.has(String(d.weather)):
 		why.append("weather %s" % d.weather)
@@ -336,19 +511,58 @@ static func check_day(g: Dictionary, d: Dictionary) -> Array:
 		last = float(a)
 	if (d.aphids as Array).size() > 2:
 		why.append("%d aphids" % (d.aphids as Array).size())
+	# Wasp visits and storm clouds: never in the practice round, spaced out, told early enough, from their mode's round.
+	var mode := String(d.get("mode", "gentle"))
+	if not MODE_IDS.has(mode):
+		why.append("mode %s" % mode)
+		mode = "gentle"
+	if String(d.get("season", "")) != season_of(int(d.round)):
+		why.append("season %s in round %d" % [d.get("season", ""), int(d.round)])
+	var wasps: Array = d.get("wasps", [])
+	if not wasps.is_empty() and int(d.round) < int(WASP_FROM[mode]):
+		why.append("a wasp in round %d of %s" % [int(d.round), mode])
+	last = -100.0
+	for a in wasps:
+		if float(a) < WARN_S + 20.0 or float(a) - last < float(WASP_STAY[mode]) + 10.0:
+			why.append("a wasp at %.0f s" % float(a))
+		last = float(a)
+	if wasps.size() > 3:
+		why.append("%d wasps" % wasps.size())
+	var storms: Array = d.get("storms", [])
+	if not storms.is_empty() and int(d.round) < int(STORM_FROM[mode]):
+		why.append("a storm in round %d of %s" % [int(d.round), mode])
+	last = -100.0
+	for st in storms:
+		if float(st[0]) < WARN_S + 15.0 or float(st[0]) - last < float(STORM_SECS[mode]) + 20.0:
+			why.append("a storm at %.0f s" % float(st[0]))
+		last = float(st[0])
+		var sp := storm_problem(g, [st[1], st[2], st[3]])
+		if sp != "":
+			why.append(sp)
 	if int(d.fav) < 0 or int(d.fav) >= int(d.kinds):
 		why.append("Queen Bea's favourite isn't growable")
 	# Fair goal: the bees fill it in good time with the flowers we expect, and eventually with only the
 	# flowers that bloomed at the start (the gardener never has to do anything); helpers alone too.
 	var bees := int(d.bees)
-	var t_exp := fill_time(g, int(d.expect), 0, target, bees, int(d.fav))
-	if t_exp > MAX_FILL_S:
+	var steals := wasps.size() * int(float(WASP_STAY[mode]) / WASP_STEAL)
+	var t_exp := fill_time(g, int(d.expect), 0, target + steals, bees, int(d.fav))
+	var slack := float(MODE_GOAL[mode])  # brave / hard ask for more honey: they may take that much longer
+	if t_exp > MAX_FILL_S * slack:
 		why.append("round %d: %d honey takes %.0f s with %d bees and %d flowers" % [int(d.round), target, t_exp, bees, int(d.expect)])
-	var t_bare := fill_time(g, (g.blooms as Array).size(), 0, target, bees, -1, MAX_BARE_S + 10.0)
-	if t_bare > MAX_BARE_S:
+	var t_bare := fill_time(g, (g.blooms as Array).size(), 0, target + steals, bees, -1, MAX_BARE_S * 1.3 + 10.0)
+	if t_bare > MAX_BARE_S * slack:
 		why.append("round %d: %d honey with only the first %d flowers takes %.0f s (%d bees)" % [int(d.round), target, (g.blooms as Array).size(), t_bare, bees])
 	if t_exp < 10.0:
 		why.append("round %d: done in %.0f s (too quick)" % [int(d.round), t_exp])
+	# Every gift at once still leaves a real round (gifts help, they never make it trivial; the first gift comes after
+	# round 2).
+	var all_gifts: Array = []
+	for gf in GIFTS:
+		all_gifts.append(gf[0])
+	var bb := boosts(all_gifts)
+	var t_gift := fill_time(g, mini(SPOTS - 1, int(d.expect) + int(bb.wild)), 0, target, bees, int(d.fav), 600.0, bb)
+	if int(d.round) >= 3 and t_gift < 10.0:
+		why.append("round %d: done in %.0f s with every gift (too quick)" % [int(d.round), t_gift])
 	return why
 
 

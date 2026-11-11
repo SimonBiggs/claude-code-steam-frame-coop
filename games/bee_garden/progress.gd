@@ -4,7 +4,8 @@ extends RefCounted
 
 const SAVE_ID := "bee_garden"  # the game's core/save.gd game_id (Story.GAME_ID)
 const WHO := "queenbee"  # the story friend (a story picture): Queen Bea
-const GROWS := "honeyjar"  # what the family grows (a story picture or a UiKit icon): jars on Queen Bea's shelf
+const GROWS := "honeyjar"  # what the family grows (a story picture or a UiKit icon): jars on Queen Bea's shelf (the hive grows
+## a honey box at 8 / 20 / 40 / 70 of them, story.gd HIVE_BOXES)
 const COLOR := Color(1.0, 0.78, 0.2)
 
 
@@ -17,4 +18,5 @@ static func progress_summary(data: Dictionary, today: String) -> Dictionary:
 
 ## A save as the game writes it after a few days (tests/progress_test.gd: it must read as grown > 0, daily done).
 static func sample(today: String) -> Dictionary:
-	return {"world": 123456, "jars": 17, "rounds": 6, "gardens": 3, "decor": 4, "daily": today, "daily_done": today, "best_round": 3}
+	return {"world": 123456, "jars": 17, "rounds": 6, "gardens": 3, "decor": 4, "daily": today, "daily_done": today, "best_round": 3,
+		"mode": "brave", "seen_wasp": true, "seen_storm": true}

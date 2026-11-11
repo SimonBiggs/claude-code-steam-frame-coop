@@ -4,7 +4,7 @@ extends RefCounted
 ## pic._p(x, y) / pic._circle(x, y, r, c) / pic._poly(pts, c) / pic._eye(x, y, r) / pic.draw_*(...), size = pic.size,
 ## t = the picture's clock, bob = its gentle bob, color = the card's colour.
 
-const NAMES: Array[String] = ["queenbee", "hive", "honeyjar", "daisy", "lily"]
+const NAMES: Array[String] = ["queenbee", "hive", "honeyjar", "daisy", "lily", "wasp", "bumblebee", "zoomwings", "sweetflower", "wildflowers"]
 
 
 static func draw(pic, kind: String, t: float, bob: float, _color: Color) -> void:
@@ -66,3 +66,52 @@ static func draw(pic, kind: String, t: float, bob: float, _color: Color) -> void
 				for i in 5:
 					var a2 := t * 3.0 + i * TAU / 5.0
 					pic._circle(0.5 + cos(a2) * 0.36, 0.42 + sin(a2) * 0.36 + bob, 0.02, Color(1.0, 0.95, 0.5))
+		"wasp":  # a grumpy-but-silly wasp: thin yellow body with black stripes, big eyes, little frown
+			var flap2 := absf(sin(t * 22.0)) * 0.05
+			pic._circle(0.38, 0.34 + bob - flap2, 0.12, Color(0.9, 0.97, 1.0, 0.75))
+			pic._circle(0.62, 0.34 + bob - flap2, 0.12, Color(0.9, 0.97, 1.0, 0.75))
+			pic._poly([[0.2, 0.55 + bob], [0.5, 0.42 + bob], [0.82, 0.55 + bob], [0.5, 0.68 + bob]], Color(1.0, 0.85, 0.1))
+			for x in [0.4, 0.52, 0.64]:
+				pic._poly([[x, 0.46 + bob], [x + 0.05, 0.47 + bob], [x + 0.05, 0.64 + bob], [x, 0.65 + bob]], Color(0.12, 0.1, 0.06))
+			pic._poly([[0.82, 0.55 + bob], [0.94, 0.56 + bob], [0.82, 0.59 + bob]], Color(0.12, 0.1, 0.06))
+			pic._circle(0.24, 0.52 + bob, 0.11, Color(1.0, 0.85, 0.1))
+			pic._eye(0.2, 0.49 + bob, 0.045)
+			pic.draw_line(pic._p(0.15, 0.43 + bob), pic._p(0.25, 0.45 + bob), Color(0.12, 0.1, 0.06), 2.5)
+		"bumblebee":  # a big fluffy bumble bee carrying a fat pollen basket on each leg
+			pic._circle(0.3, 0.32 + bob, 0.13, Color(0.9, 0.97, 1.0, 0.8))
+			pic._circle(0.7, 0.32 + bob, 0.13, Color(0.9, 0.97, 1.0, 0.8))
+			pic._circle(0.5, 0.56 + bob, 0.3, Color(0.2, 0.15, 0.1))
+			pic._poly([[0.22, 0.5 + bob], [0.78, 0.5 + bob], [0.78, 0.62 + bob], [0.22, 0.62 + bob]], Color(1.0, 0.8, 0.15))
+			pic._eye(0.42, 0.44 + bob, 0.055)
+			pic._eye(0.58, 0.44 + bob, 0.055)
+			pic._circle(0.26, 0.82 + bob, 0.09, Color(1.0, 0.65, 0.1))
+			pic._circle(0.74, 0.82 + bob, 0.09, Color(1.0, 0.65, 0.1))
+		"zoomwings":  # a pair of shiny wings with speed lines behind them
+			for k in 3:
+				var y := 0.38 + k * 0.12 + bob
+				pic.draw_line(pic._p(0.06, y), pic._p(0.3, y), Color(0.55, 0.85, 1.0, 0.8), 3.0)
+			var wf := sin(t * 10.0) * 0.04
+			pic._poly([[0.4, 0.55 + bob], [0.62, 0.18 + bob + wf], [0.86, 0.26 + bob + wf], [0.7, 0.5 + bob]], Color(0.85, 0.95, 1.0, 0.9))
+			pic._poly([[0.4, 0.58 + bob], [0.7, 0.62 + bob - wf], [0.84, 0.8 + bob - wf], [0.56, 0.74 + bob]], Color(0.75, 0.9, 1.0, 0.9))
+			pic._circle(0.4, 0.57 + bob, 0.06, Color(1.0, 0.8, 0.15))
+		"sweetflower":  # a pink flower dripping golden nectar, with sparkles
+			pic._circle(0.5, 0.42 + bob, 0.3, Color(1.0, 0.55, 0.8, 0.25))
+			for i in 8:
+				var a3 := i * TAU / 8.0 + t * 0.4
+				pic._circle(0.5 + cos(a3) * 0.2, 0.42 + sin(a3) * 0.2 + bob, 0.1, Color(1.0, 0.55, 0.8))
+			pic._circle(0.5, 0.42 + bob, 0.11, Color(1.0, 0.8, 0.2))
+			var drip := fmod(t * 0.6, 1.0)
+			pic._circle(0.5, 0.6 + drip * 0.3 + bob, 0.04, Color(1.0, 0.7, 0.1, 1.0 - drip))
+			for i in 3:
+				var a4 := t * 2.0 + i * TAU / 3.0
+				pic._circle(0.5 + cos(a4) * 0.38, 0.42 + sin(a4) * 0.3 + bob, 0.02, Color(1.0, 0.95, 0.6))
+		"wildflowers":  # three different flowers popping up together
+			var cols3: Array = [Color(1.0, 0.45, 0.45), Color(0.6, 0.6, 1.0), Color(1.0, 0.9, 0.3)]
+			for f in 3:
+				var fx := 0.22 + f * 0.28
+				var fy := 0.45 + (0.08 if f == 1 else 0.0) - absf(sin(t * 2.0 + f)) * 0.04 + bob
+				pic.draw_line(pic._p(fx, fy), pic._p(fx, 0.96), Color(0.35, 0.75, 0.3), 0.03 * size.x)
+				for i in 5:
+					var a5 := i * TAU / 5.0
+					pic._circle(fx + cos(a5) * 0.08, fy + sin(a5) * 0.08, 0.055, cols3[f])
+				pic._circle(fx, fy, 0.045, Color(1.0, 0.95, 0.7))

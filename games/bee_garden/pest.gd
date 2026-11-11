@@ -20,7 +20,8 @@ var net_target := Vector3.ZERO
 var net_fleeing := false
 var radius := 0.2
 var slot := 0
-var leave_after := 0.0  # simple mode: an aphid gets bored and flies off after this many seconds of nibbling          # wasp raids: each wasp hovers at its own spot round the hive
+var leave_after := 0.0  # simple mode: an aphid (or a visiting wasp) gets bored and flies off after this many seconds
+var steal_every := 5.0  # a wasp at the hive takes a drop of honey this often (gardengen.gd WASP_STEAL)
 var wings: Array[MeshInstance3D] = []
 var body: Node3D
 
@@ -96,8 +97,10 @@ func _process(delta: float) -> void:
 				global_position = _goal() + Vector3(sin(t * 2.0) * 0.12, sin(t * 3.0) * 0.05, cos(t * 1.7) * 0.12)
 				steal_t -= delta
 				if steal_t <= 0.0:
-					steal_t = 5.0
+					steal_t = steal_every
 					main.wasp_steal(self)
+				if leave_after > 0.0 and t > leave_after:
+					shoo(global_position + Vector3.DOWN)
 		"flee":
 			global_position += flee_dir * 8.0 * delta
 			_face(flee_dir)

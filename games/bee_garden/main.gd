@@ -89,6 +89,9 @@ const Save := preload("res://core/save.gd")
 const Seeded := preload("res://core/seeded.gd")
 const Telemetry := preload("res://core/telemetry.gd")
 const StoryCard := preload("res://core/story_card.gd")
+const PicksScript := preload("res://games/bee_garden/picks.gd")
+const WarnRings := preload("res://core/warn_rings.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
 
 const SIMPLE_MODE := true
 const PRACTICE_SPOT := 10      # simple mode: the glowing ring where the first seed goes
@@ -232,6 +235,20 @@ var bedview: Node3D
 var jarshelf: Node3D
 var vr_story: Node3D
 var run_info := {}             # this round's telemetry
+# Second pass (picks.gd, gardengen.gd modes / wasps / storms / gifts, core/warn_rings.gd):
+var picks: Node                # the shared pick orbs between rounds (every machine draws, the host decides)
+var rings: WarnRings           # warning rings on every machine (the host sends "warn")
+var game_mode := "gentle"      # GENTLE / BRAVE / HARD (saved: the family's last one floats in the middle)
+var mode_picked := false
+var gifts: Array = []          # Queen Bea's gifts this visit (ids, gardengen.gd GIFTS)
+var plan_wasp := 0
+var plan_wasp_warned := 0
+var plan_storm := 0
+var plan_storm_warned := 0
+var storm_t := 0.0             # a storm cloud: flowers under it close (and drink) while this runs
+var storm_at := Vector3.ZERO
+var storm_r := 0.0
+var hazard_stats := {"wasps": 0, "wasps_bumped": 0, "storms": 0, "stolen": 0}
 var practice_g := "seed" if SIMPLE_MODE else "done"   # gardener practice: seed -> water -> done
 var glow_spot := PRACTICE_SPOT if SIMPLE_MODE else -1  # the glowing ring (plant / water here)
 var halo_spot := PRACTICE_FLOWER if SIMPLE_MODE else -1  # the bees' glowing flower
@@ -304,6 +321,11 @@ func _ready() -> void:
 	events_node = EventsScript.new()
 	events_node.main = self
 	add_child(events_node)
+	rings = WarnRings.new()
+	add_child(rings)
+	game_mode = GardenGen.mode_of(String(save.data.get("mode", "gentle")))
+	if OS.has_environment("BEE_MODE"):  # What's New "try": start in this mode (it floats in the middle of the pick)
+		game_mode = GardenGen.mode_of(OS.get_environment("BEE_MODE"))
 	_build_hud()
 	var menu := PauseMenuScript.new()
 	menu.main = self
@@ -312,6 +334,10 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
+	net.state_changed.connect(_on_state_changed)
+	picks = PicksScript.new()
+	picks.main = self
+	add_child(picks)
 	seats = ClassicSeats.new(self, {
 		"free_actions": ["restart", "pause"],
 		"is_local": func(p) -> bool: return not p.remote,
@@ -978,7 +1004,7 @@ func _telemetry(end: String) -> void:
 	info.merge({"end": end, "mode": net.mode, "vr": gardener != null and gardener.vr, "bees": active_bee_count(),
 		"bees_start": int(plan.get("bees", 0)), "honey": honey, "jars": jar_count(), "played_s": int(round_t),
 		"planted": int(gardener_day.get("planted", 0)), "stats": stats.duplicate(), "shelf": int(save.data.jars),
-		"rounds_ever": int(save.data.rounds), "decor": decor_count}, true)
+		"rounds_ever": int(save.data.rounds), "decor": decor_count, "hazards": hazard_stats.duplicate(), "gifts_now": gifts.duplicate()}, true)
 	Telemetry.run(Story.GAME_ID, info)
 	run_info = {}
 
@@ -1203,7 +1229,9 @@ func wasp_steal(_w) -> void:
 		return
 	honey -= 1
 	total_honey = maxi(0, total_honey - 1)
+	hazard_stats.stolen = int(hazard_stats.stolen) + 1
 	sound("steal", -6.0)
+	burst(W.HIVE_ENTRY + Vector3(0.2, 0.4, 0.0), Color(1.0, 0.7, 0.15), 8, 0.05)
 	popup(W.HIVE_ENTRY + Vector3(0.4, 0.8, 0.0), "-1 honey! Gardener, shoo the wasp!", Color(1.0, 0.6, 0.4))
 
 
@@ -1363,6 +1391,11 @@ func _sim(delta: float) -> void:
 	for p in get_tree().get_nodes_in_group("pests"):
 		if p.kind == "aphid" and p.state == "munch" and aphid_target_ok(p.target):
 			spots[p.target].bug = true
+	if storm_t > 0.0:  # a storm cloud: the flowers under it close up (and drink the rain)
+		for i in spots.size():
+			if W.spot_pos(i).distance_to(Vector3(storm_at.x, W.spot_pos(i).y, storm_at.z)) < storm_r:
+				spots[i].bug = true
+				spots[i].water = minf(1.0, float(spots[i].water) + 0.3 * delta)
 	for i in spots.size():
 		var s: Dictionary = spots[i]
 		var k: int = s.kind
@@ -1413,6 +1446,8 @@ func _host_bees(delta: float) -> void:
 			if (p.kind == "wasp" or SIMPLE_MODE) and not p.is_fleeing() and not p.is_queued_for_deletion() and pos.distance_to(p.global_position) < 0.5:
 				p.shoo(pos)
 				_bee_stat(b.index, "wasps", 1)
+				if p.kind == "wasp":
+					hazard_stats.wasps_bumped = int(hazard_stats.wasps_bumped) + 1
 				_wish_add("shoo")
 				sound("shoo", -4.0, 1.5)
 				burst(p.global_position, b.color, 10, 0.05)
@@ -1434,7 +1469,7 @@ func _host_bees(delta: float) -> void:
 				sound("pollinate", -4.0, 1.0)
 				popup(hp + Vector3.UP * 0.5, "Pollinated! A fruit is growing", Color(1.0, 0.9, 0.5))
 				print("P%d pollinated spot %d" % [b.index + 1, i])
-			if s.ready and b.pollen < BeeScript.MAX_POLLEN and b.gather_cd <= 0.0:
+			if s.ready and b.pollen < bee_load() and b.gather_cd <= 0.0:
 				var golden := i == golden_spot
 				b.pollen += 1
 				b.pollen_value += int(kd.honey) + (4 if golden else 0)
@@ -1443,7 +1478,7 @@ func _host_bees(delta: float) -> void:
 				if not b.trip_flowers.has(i):
 					b.trip_flowers.append(i)
 				b.gather_cd = 0.35
-				s.pollen_t = POLLEN_REGROW * (0.4 if golden else 1.0)
+				s.pollen_t = float(GardenGen.boosts(gifts).regrow) * (0.4 if golden else 1.0)
 				s.ready = false
 				stats.pollen += 1
 				_bee_stat(b.index, "flowers", 1)
@@ -1451,7 +1486,7 @@ func _host_bees(delta: float) -> void:
 				sound("golden" if golden else "pollen", -6.0, 0.9 + b.pollen * 0.15)
 				if golden:
 					popup(pos + Vector3.UP * 0.4, "GOLDEN POLLEN!", Color(1.0, 0.92, 0.4))
-				elif b.pollen >= BeeScript.MAX_POLLEN:
+				elif b.pollen >= bee_load():
 					popup(pos + Vector3.UP * 0.4, "FULL! To the hive!", b.color.lightened(0.3))
 			b.last_flower = i
 			break
@@ -1809,7 +1844,21 @@ func _start_round_simple(n: int) -> void:
 	rainbow_t = 0.0
 	golden_spot = -1
 	# Today's seeded plan (gardengen.gd): weather, Queen Bea's favourite, aphids, a golden flower, the goal.
-	plan = GardenGen.day_plan(garden, n, Story.spec(save.data, active_bee_count()))
+	var spec := Story.spec(save.data, active_bee_count())
+	spec["mode"] = game_mode
+	spec["gifts"] = gifts.duplicate()
+	plan = GardenGen.day_plan(garden, n, spec)
+	if n == 1 and OS.get_environment("BEE_TRY") == "storm":  # What's New "try": a wasp and a storm cloud straight away
+		var tr := RandomNumberGenerator.new()
+		tr.seed = garden_seed
+		var stp: Array = GardenGen._storm_place(garden, tr)
+		plan.wasps = [12.0]
+		plan.storms = [[8.0] + stp] if not stp.is_empty() else []
+	plan_wasp = 0
+	plan_wasp_warned = 0
+	plan_storm = 0
+	plan_storm_warned = 0
+	storm_t = 0.0
 	target = int(plan.target)
 	fav_kind = int(plan.fav)
 	weather = String(plan.weather)
@@ -1823,9 +1872,12 @@ func _start_round_simple(n: int) -> void:
 	seed_kinds = kinds
 	run_info = {"round": n, "garden": garden_seed, "plan": String(garden.get("plan", "")), "today": today_garden,
 		"weather": weather, "fav": fav_kind, "target": target, "aphids": (plan.aphids as Array).size(),
-		"golden": float(plan.golden) >= 0.0, "kinds": seed_kinds, "jars_before": int(save.data.jars)}
-	print("Round %d: fill %d jars = %d honey, %d seed kinds, %s, Queen Bea loves %s (garden %d %s)" % [n, jar_count(), target,
-		seed_kinds, weather, W.KINDS[fav_kind].name, garden_seed, garden.get("plan", "")])
+		"golden": float(plan.golden) >= 0.0, "kinds": seed_kinds, "jars_before": int(save.data.jars),
+		"game_mode": game_mode, "season": String(plan.season), "gifts": gifts.duplicate(), "wasps": (plan.wasps as Array).size(),
+		"storms": (plan.storms as Array).size(), "hive": Story.hive_level(int(save.data.jars))}
+	hazard_stats = {"wasps": 0, "wasps_bumped": 0, "storms": 0, "stolen": 0}
+	print("Round %d: fill %d jars = %d honey, %d seed kinds, %s %s, Queen Bea loves %s (garden %d %s), %s, wasps %s, storms %s, gifts %s" % [n, jar_count(), target,
+		seed_kinds, plan.season, weather, W.KINDS[fav_kind].name, garden_seed, garden.get("plan", ""), game_mode, str(plan.wasps), str(plan.storms), str(gifts)])
 	sound("bloom", 0.0, 0.8)
 	if n == 1:
 		if today_garden:
@@ -1867,13 +1919,17 @@ func _round_complete_simple() -> void:
 		net.event("cheer", [])
 	_telemetry("round")
 	var kinds_now := Story.kinds_for(shelf_jars)
-	if kinds_now > kinds_before:
+	var hive_grew := Story.hive_level(shelf_jars) > Story.hive_level(shelf_jars - jar_count())
+	if hive_grew:
+		_story({"who": Story.QUEEN, "line": Story.LINES.hive, "pic": "hive", "color": Story.QUEEN_COLOR})
+	elif kinds_now > kinds_before:
 		_story({"who": Story.QUEEN, "line": Story.LINES.seeds, "pic": Story.KIND_PICS[kinds_now - 1], "color": W.KINDS[kinds_now - 1].petal})
 	else:
 		_story({"who": Story.QUEEN, "line": Story.LINES.jars, "pic": "honeyjar", "color": Story.QUEEN_COLOR})
 	_show_center("HOORAY!", 3.0)
 	if gardener.vr:
 		gardener.buzz_right(0.6)
+	_begin_pick()
 
 
 func _host_update_simple(delta: float) -> void:
@@ -1893,9 +1949,12 @@ func _host_update_simple(delta: float) -> void:
 				# No text, no rules to learn: the world shows it.
 				rain_t = maxf(0.0, rain_t - delta)
 				rainbow_t = maxf(0.0, rainbow_t - delta)
+				storm_t = maxf(0.0, storm_t - delta)
 				_host_plan_simple(delta)
 				if honey >= target:
 					_round_complete_simple()
+			elif picks.active():
+				picks.tick(delta)  # the next round waits for the pick orbs
 			else:
 				phase_t -= delta
 				if phase_t <= 0.0:
@@ -1926,6 +1985,7 @@ func _host_plan_simple(delta: float) -> void:
 		event_t -= delta
 		if event_t <= 0.0:
 			_end_event(true)
+	_host_hazards()
 
 
 ## A gentle aphid visit (simple mode): it nibbles a flower until a bee bumps it or the gardener shoos it,
@@ -2487,7 +2547,7 @@ func make_snapshot() -> Array:
 	return [phase, day, day_t, honey, target, total_honey, days_done, sp, ps, pe, game_over, basket_count,
 		event, rain_t, rainbow_t, golden_spot, queen_kind, decor_count, wish, wish_progress, wish_done,
 		practice_g, glow_spot, halo_spot, seed_kinds, props.net_state() if props != null else PackedFloat32Array(),
-		garden_seed, shelf_jars, fav_kind, weather]
+		garden_seed, shelf_jars, fav_kind, weather, game_mode, gifts, snappedf(storm_t, 0.1), storm_at, storm_r]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -2547,6 +2607,12 @@ func apply_snapshot(s: Array) -> void:
 		jarshelf.set_jars(shelf_jars)
 		fav_kind = s[28]
 		weather = s[29]
+	if s.size() >= 35:
+		game_mode = String(s[30])
+		gifts = (s[31] as Array).duplicate()
+		storm_t = float(s[32])
+		storm_at = s[33]
+		storm_r = float(s[34])
 	for i in spots.size():
 		spots[i]["golden"] = i == golden_spot
 
@@ -2602,9 +2668,160 @@ func apply_event(kind: String, args: Array) -> void:
 			show_story({"who": args[0], "line": args[1], "pic": args[2], "color": Color.html(String(args[3]))})
 		"cheer":
 			jarshelf.cheer()
+		"take":
+			picks.take_fx(int(args[0]), int(args[1]))
+		"warn":
+			_draw_warn(args[0], float(args[1]), args[2], float(args[3]), String(args[4]))
 		"remote_pause":
 			get_tree().paused = args[0]
 			_set_pause_banner(args[0], "The gardener paused the game")
+
+
+# --- Second pass: modes, Queen Bea's gifts, wasp visits and storm clouds (picks.gd, core/warn_rings.gd) ---
+
+## How much pollen a bee carries (BUMBLE BEES gift: one more). bee.gd reads it too.
+func bee_load() -> int:
+	return int(GardenGen.boosts(gifts).load)
+
+
+## How fast bees fly (ZOOM WINGS gift). bee.gd multiplies its speed by this.
+func bee_speed() -> float:
+	return float(GardenGen.boosts(gifts).speed)
+
+
+## Host / local: after a full round, the team picks. After round 1: GENTLE / BRAVE / HARD (once a visit); after
+## later rounds: QUEEN BEA'S GIFT (while there are gifts left). Returns true when orbs went up.
+func _begin_pick() -> bool:
+	if net.mode == "client" or picks.active() or OS.has_environment("BEE_NO_PICKS"):
+		return false
+	if not mode_picked:
+		mode_picked = true
+		var ids := PickOrbs.mode_ids(game_mode)
+		picks.begin("mode", PicksScript.mode_entries(ids), ids, _on_picked)
+		return true
+	var ids2 := PicksScript.offer(gifts, garden_seed, day)
+	if ids2.is_empty():
+		return false
+	var entries: Array = []
+	for id in ids2:
+		entries.append(PicksScript.gift_entry(String(id)))
+	picks.begin("gift", entries, ids2, _on_picked)
+	_story({"who": Story.QUEEN, "line": Story.LINES.gift, "pic": "queenbee", "color": Story.QUEEN_COLOR, "duration": 4.0})
+	return true
+
+
+## Host / local: a pick was taken (by a bee or the gardener, or the middle one when nobody chose).
+func _on_picked(stage: String, opt: Variant) -> void:
+	match stage:
+		"mode":
+			game_mode = GardenGen.mode_of(String(opt))
+			save.data.mode = game_mode
+			save.mark_dirty()
+			var m := PickOrbs.mode(game_mode)
+			_story({"who": Story.QUEEN, "pic": String(m.get("pic", "heart")), "line": String(PickOrbs.MODE_LINES.get(game_mode, "Let's go!")),
+				"color": m.get("color", Color.WHITE), "duration": 3.0})
+		"gift":
+			var id := String(opt)
+			if not gifts.has(id):
+				gifts.append(id)
+			var e := PicksScript.gift_entry(id)
+			sound("royal", -4.0, 1.2)
+			burst(W.HIVE_ENTRY + Vector3.UP * 0.6, e.color, 24, 0.07)
+			if id == "wild":
+				_wildflowers()
+			_story({"who": Story.QUEEN, "pic": String(e.pic), "line": String(e.name) + "!", "color": e.color, "duration": 3.0})
+	print("Picked %s: %s (mode %s, gifts %s)" % [stage, str(opt), game_mode, str(gifts)])
+	phase_t = minf(phase_t, 2.0)
+
+
+## WILDFLOWERS: three empty spots bloom at once (daisies; the glowing practice ring stays free).
+func _wildflowers() -> void:
+	var n := 0
+	for i in spots.size():
+		if n >= int(GardenGen.boosts(["wild"]).wild):
+			break
+		var s: Dictionary = spots[i]
+		if int(s.kind) >= 0 or i == glow_spot:
+			continue
+		spots[i] = _empty_spot()
+		s = spots[i]
+		s.kind = 0
+		s.growth = 1.0
+		s.water = 1.0
+		s.bloom = true
+		burst(head_pos(i), W.KINDS[0].petal, 16, 0.06)
+		n += 1
+	sound("bloom", -2.0, 1.1)
+
+
+## Host: the round plan's wasp visits and storm clouds, each told by a warning ring WARN_S seconds before.
+func _host_hazards() -> void:
+	var wasps: Array = plan.get("wasps", [])
+	if plan_wasp_warned < wasps.size() and round_t >= float(wasps[plan_wasp_warned]) - GardenGen.WARN_S:
+		plan_wasp_warned += 1
+		warn(Vector3(W.HIVE_ENTRY.x + 0.3, 0.06, W.HIVE_ENTRY.z), 0.9, Color(1.0, 0.75, 0.1), GardenGen.WARN_S, "rings")
+		sound("buzz", -4.0, 0.8)
+	if plan_wasp < wasps.size() and round_t >= float(wasps[plan_wasp]):
+		plan_wasp += 1
+		_spawn_wasp()
+	var storms: Array = plan.get("storms", [])
+	if plan_storm_warned < storms.size() and round_t >= float(storms[plan_storm_warned][0]) - GardenGen.WARN_S:
+		var st: Array = storms[plan_storm_warned]
+		plan_storm_warned += 1
+		warn(Vector3(float(st[1]), 0.08, float(st[2])), float(st[3]), Color(0.55, 0.6, 0.95), GardenGen.WARN_S, "disc")
+		sound("rain", -10.0, 0.7)
+	if plan_storm < storms.size() and round_t >= float(storms[plan_storm][0]):
+		var st2: Array = storms[plan_storm]
+		plan_storm += 1
+		storm_at = Vector3(float(st2[1]), 0.0, float(st2[2]))
+		storm_r = float(st2[3])
+		storm_t = float(GardenGen.STORM_SECS[game_mode])
+		hazard_stats.storms = int(hazard_stats.storms) + 1
+		sound("rain", -2.0, 0.8)
+		print("A storm cloud over (%.1f, %.1f) r %.2f for %.0f s" % [storm_at.x, storm_at.z, storm_r, storm_t])
+		if not bool(save.data.get("seen_storm", false)):
+			save.data["seen_storm"] = true
+			save.mark_dirty()
+			_story({"who": Story.QUEEN, "line": Story.LINES.storm, "pic": "storm", "color": Color(0.55, 0.6, 0.95)})
+
+
+## Host: a wasp comes to nibble at the hive's honey: bees bump it away, the gardener shoos it, or it gets bored.
+func _spawn_wasp() -> void:
+	var p := PestScript.new()
+	p.kind = "wasp"
+	p.main = self
+	p.target = -1
+	p.slot = 0
+	p.leave_after = float(GardenGen.WASP_STAY[game_mode])
+	p.steal_every = GardenGen.WASP_STEAL
+	p.steal_t = GardenGen.WASP_STEAL
+	p.net_id = next_net_id()
+	p.position = Vector3(-9.0, 3.0, 2.0)
+	add_child(p)
+	hazard_stats.wasps = int(hazard_stats.wasps) + 1
+	sound("buzz", -2.0, 0.8)
+	print("A wasp visits the hive (%s, stays %.0f s)" % [game_mode, p.leave_after])
+	if not bool(save.data.get("seen_wasp", false)):
+		save.data["seen_wasp"] = true
+		save.mark_dirty()
+		_story({"who": Story.QUEEN, "line": Story.LINES.wasp, "pic": "wasp", "color": Color(1.0, 0.75, 0.1)})
+
+
+## Host: a warning ring on every machine.
+func warn(pos: Vector3, r: float, col: Color, secs: float, style: String) -> void:
+	_draw_warn(pos, r, col, secs, style)
+	if net != null and net.mode == "host":
+		net.event("warn", [pos, r, col, secs, style])
+
+
+func _draw_warn(pos: Vector3, r: float, col: Color, secs: float, style: String) -> void:
+	rings.warn(pos, r, col, secs, pos.y, {"style": style})
+
+
+## Every machine: sticky net state (the pick orbs, so a machine joining mid-pick sees them too).
+func _on_state_changed(key: String, value: Variant) -> void:
+	if key == "orbs" and net.mode == "client" and value is Array and (value as Array).size() == 3:
+		picks.show_row(String(value[0]), value[1] if value[1] is Array else [], float(value[2]))
 
 
 # --- HUD ---------------------------------------------------------------------
