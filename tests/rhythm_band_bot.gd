@@ -60,6 +60,7 @@ var prac_tapped := -1
 var checks := {}
 var quit_t := -1.0
 var cues := {}  # simple mode: picture cues seen / learned
+var verdict_done := false
 const HEADLINES := "^(RHYTHM BAND!|SONG \\d+!|\\d+|PLAY!|HOORAY!|PLAYER \\d+!|PLAYER \\d+ LEFT|PAUSED|CONNECTED|The band is full!|P\\d: controller disconnected|Connecting to the VR drummer…)$"
 var headline_re := RegEx.create_from_string(HEADLINES)
 
@@ -211,6 +212,7 @@ func _process(delta: float) -> void:
 		print("BOT %s: done" % mode)
 		print("BOT RESULT: %s (%d songs, %d checks%s)" % ["PASS" if check_fails == 0 else "FAIL", songs_done, checks_run,
 			"" if check_fails == 0 else ", %d failed: see the BOT CHECK lines" % check_fails])
+		verdict_done = true
 		preload("res://tests/bot_end.gd").quit_quietly(get_tree())
 		quit_t = 1e9
 	report_t -= delta
@@ -326,6 +328,13 @@ func _check_tip(who: String, text: String) -> void:
 func _exit_tree() -> void:
 	if main == null or not simple:
 		return
+	if not verdict_done:  # cut off (BOT_END / --quit-after) before song 3: a verdict on what it got to
+		var m: String = main.net.mode
+		var picked: int = main.picks.history.size()
+		var late := int(checks.get("told_late", 0))
+		var moved: bool = m == "client" or (picked >= 1 and int(main.songs_played) + (1 if main.state == "play" else 0) >= 1)
+		print("BOT RESULT: %s (stopped early: %d songs done, %d picks, %d changes told (%d late), %d checks failed)" % [
+			"PASS" if check_fails == 0 and late == 0 and moved else "FAIL", songs_done, picked, int(checks.get("changes", 0)), late, check_fails])
 	var ks: Array = cues.keys()
 	ks.sort()
 	print("BOT CUES: mode=%s %s" % [main.net.mode, ",".join(PackedStringArray(ks))])
