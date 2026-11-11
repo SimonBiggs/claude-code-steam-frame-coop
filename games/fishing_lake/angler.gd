@@ -82,6 +82,11 @@ var hooked = null
 var fight_dist := 0.0
 var fight_dir := Vector3.FORWARD
 var surge := false
+var is_down := false  # (core/pick_orbs.gd touches(): the angler is never down)
+var boss_i := 0  # OLD WHISKERS: which of his pulls (main.boss_pull) comes next
+var told := false  # his next pull has been told (a ring on the water)
+var pull_side := 0.0  # -1 / 1: the way he swims on this pull
+var side_amt := 0.0
 var phase_t := 0.0
 var sway := 0.0
 var wait_t := 0.0
@@ -854,6 +859,12 @@ func _hook() -> void:
 	fight_dir = fight_dir.normalized() if fight_dist > 0.01 else Vector3.FORWARD
 	surge = true
 	phase_t = 0.6
+	if hooked.kind == FishScript.LEGEND:  # he rests first, then every pull is told (tackle.gd boss_pulls)
+		surge = false
+		boss_i = 0
+		phase_t = float(main.boss_pull(0)[0])
+		told = false
+		side_amt = 0.0
 	sway = 0.0
 	tension = 0.35
 	over_t = 0.0
@@ -877,6 +888,19 @@ func _fight(delta: float) -> void:
 		if junk:
 			surge = false
 			phase_t = 99.0
+		elif legend:
+			surge = not surge
+			var bp: Array = main.boss_pull(boss_i)
+			if surge:
+				phase_t = float(bp[1])
+				pull_side = float(bp[2])
+				main.on_fish_surge(lure_pos, hooked)
+			else:
+				boss_i += 1
+				phase_t = float(main.boss_pull(boss_i)[0])
+				told = false
+				main.on_fish_tired(hooked)
+				haptic(0.4, 0.1)
 		else:
 			surge = not surge
 			if surge:
@@ -888,10 +912,21 @@ func _fight(delta: float) -> void:
 				haptic(0.4, 0.1)
 	var heavy := 0.55 if hooked.kind == FishScript.CHEST else (0.6 if legend else 1.0)
 	var reel_in := reel * REEL_SPEED * (0.35 if surge else 1.0) * heavy
+	if legend and not surge and not told and main.legend_stamina > 0.0 and phase_t <= main.boss_tell():
+		told = true  # TELL his next pull: a ring on the water where he's about to swim (every machine)
+		var nside := float(main.boss_pull(boss_i)[2])
+		var a0 := anchor()
+		main.on_boss_tell(a0 + Basis(Vector3.UP, nside * 0.45) * fight_dir * (fight_dist + 1.5), phase_t)
+		haptic(0.3, 0.15)
+	if legend:
+		pull *= main.boss_strength()
 	var out := pull * 1.5 if surge else 0.0
 	fight_dist = clampf(fight_dist + (out - reel_in) * delta, 0.0, MAX_LINE)
 	sway += delta * (2.4 if surge else 0.7)
 	var lateral := sin(sway) * 0.35 * pull
+	if legend:  # he swims the way his tell showed (and drifts back while he rests)
+		side_amt = move_toward(side_amt, pull_side if surge else 0.0, delta * 0.9)
+		lateral = side_amt * 0.45 + sin(sway) * 0.08
 	var tt := pull * (0.62 if surge else 0.12) + reel * (0.55 if surge else 0.18)
 	if fight_dist >= MAX_LINE - 0.1 and surge:
 		tt += 0.35

@@ -5,6 +5,10 @@ extends Node
 ## Local:      godot --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/tower_stack_bot.tscn
 ## Networked:  DUO_PORT=8137 DUO_HOST=1 ... & DUO_PORT=8137 DUO_JOIN=127.0.0.1 ... (same scene, real time)
 ## Flat host: add DUO_FLAT_HOST=1 to the host (no VR: one bot pad plays slot 0 on the host).
+## Second pass: every special block is open (try_open) and TODAY'S TOWER is off (daily_ok) so the builder pick
+## comes after the first tower. On the pick orbs the first TV player WALKS into one (the middle one for the mode,
+## the first one for the next building), the fake VR giant TOUCHES one; the bot checks the team's choice is the job
+## built next, and a weather warning reaches every machine (its ring on the TV too).
 
 const BotKit := preload("res://tests/bot_kit.gd")
 const VrRig := preload("res://core/vr_rig.gd")
@@ -18,6 +22,12 @@ var jump_t := 0.0
 var vr_phase := "find"
 var vr_wait := 0.0
 var ghosts_seen := 0
+var orbs_seen := 0  # most pick orbs seen at once (every machine)
+var rings_seen := 0  # most warning rings seen at once (every machine)
+var pick_want := ""  # host: the building the bot walked to
+var pick_ok := 0
+var pick_bad := 0
+var job_seen := -1
 
 
 func _ready() -> void:
@@ -25,7 +35,9 @@ func _ready() -> void:
 	kit = BotKit.new()
 	add_child(kit)
 	main = load("res://games/tower_stack/main.tscn").instantiate()
-	main.set("round_time", 45.0)
+	main.set("round_time", 42.0)
+	main.set("daily_ok", false)
+	main.set("try_open", 7)  # towergen OPEN_ALL: special blocks from job 2 on
 	add_child(main)
 	kit.main = main
 	want = BotKit.bot_players(2, 6)
@@ -52,6 +64,10 @@ func _ready() -> void:
 		kit.at(53.0 if client else 58.0, "finish", func() -> void:
 			_checks()
 			kit.finish())
+	if not OS.has_environment("DUO_JOIN"):
+		kit.at(14.0, "a quake warning (host / local sends it to every machine)", func() -> void:
+			main.weather_warn("quake")
+			kit.assert_true(main.weather.rings.count() > 0, "the warning ring shows round the stage"))
 	kit.every(2.0, _report)
 	kit.every(0.5, _continue_results)
 
@@ -87,13 +103,63 @@ func _physics_process(delta: float) -> void:
 		return
 	if main.net.mode == "client":
 		ghosts_seen = maxi(ghosts_seen, main.blocks.size())
+	orbs_seen = maxi(orbs_seen, main.picks.orbs.orbs.size())
+	rings_seen = maxi(rings_seen, main.weather.rings.count())
+	_watch_picks()
 	var slots: Array[int] = main.party.local_slots()
 	jump_t -= delta
+	if not main.picks.orbs.orbs.is_empty() and not slots.is_empty():
+		_walk_to_orb(slots[0])
+		slots = slots.slice(1)
 	for slot in slots:
 		var climber: bool = slot == slots[slots.size() - 1] and slots.size() >= 2 and kit.t > 12.0
 		_steer(slot, climber, delta)
 	if main.vr_rig != null:
 		_drive_vr(delta)
+
+
+## The orb this bot goes for: the middle one for the mode, the first one for the next building.
+func _orb_target() -> int:
+	var row: Array = main.picks.orbs.orbs
+	if row.is_empty():
+		return -1
+	return row.size() / 2 if main.picks.orbs.stage == "mode" else 0
+
+
+## Host / local: remember which building the bot is choosing; when the next job starts, it must be that one.
+func _watch_picks() -> void:
+	if main.net.mode == "client":
+		return
+	if main.picks.stage == "build" and main.picks.chosen >= 0 and pick_want == "":
+		var opt: Array = main.picks.options[main.picks.chosen]
+		pick_want = String(main.G.from_job(opt).building)
+	if pick_want != "" and main.job_n != job_seen and main.picks.stage == "":
+		if String(main.site.get("building", "")) == pick_want:
+			pick_ok += 1
+		else:
+			pick_bad += 1
+		pick_want = ""
+	job_seen = main.job_n
+
+
+func _walk_to_orb(slot: int) -> void:
+	if not main.avatars.has(slot):
+		return
+	var i := _orb_target()
+	var o: Node3D = main.picks.orbs.orbs[i]
+	var a: Node3D = main.avatars[slot]
+	var d := o.global_position - a.position
+	d.y = 0.0
+	var v := Vector2.ZERO
+	if d.length() > 0.15:
+		d = d.normalized()
+		var cam: Camera3D = main.split.active_camera(slot)
+		var f := -cam.global_basis.z
+		f.y = 0.0
+		f = f.normalized()
+		var r := Vector3(-f.z, 0.0, f.x)
+		v = Vector2(d.dot(r), -d.dot(f))
+	kit.slot_stick(main.party, slot, "left", v)
 
 
 func _steer(slot: int, climber: bool, _delta: float) -> void:
@@ -182,6 +248,12 @@ func _drive_vr(delta: float) -> void:
 		kit.vr_trigger(rig, 1.0 if int(kit.t * 2.0) % 2 == 0 else 0.0)  # the giant pulls the trigger: play again
 		vr_phase = "find"
 		return
+	if main.picks.stage != "" and main.picks.chosen < 0 and main.held_id < 0:  # the giant touches an orb
+		kit.vr_trigger(rig, 0.0)
+		var o: Node3D = main.picks.orbs.orbs[_orb_target()]
+		kit.vr_reach(rig, VrRig.LEFT, o.global_position, 4.0, delta)
+		vr_phase = "find"
+		return
 	match vr_phase:
 		"find":
 			kit.vr_trigger(rig, 0.0)
@@ -237,6 +309,9 @@ func _checks() -> void:
 	kit.assert_true(absf(main.ring.position.y - float(main.site.top)) < 0.01, "%s: the gold hoop marks the goal height" % mode)
 	kit.assert_true(main.wren != null and main.wren.is_inside_tree(), "%s: Wren the builder bird is here" % mode)
 	kit.assert_eq(main.town.entries.size(), mini((main.net.state_get("town", []) as Array).size(), main.G.town_size()), "%s: the town shows every saved tower" % mode)
+	kit.assert_eq(main.districts.get_child_count(), main.Districts.reached(int(main.net.state_get("made", 0))), "%s: the town shows its districts" % mode)
+	kit.assert_true(orbs_seen >= 3, "%s: the pick orbs showed (%d)" % [mode, orbs_seen])
+	kit.assert_true(rings_seen > 0, "%s: a weather warning ring showed" % mode)
 	for id in main.blocks:
 		kit.assert_true(main.bkind.has(id), "%s: block %d knows its kind" % [mode, int(id)])
 		break
@@ -256,6 +331,14 @@ func _checks() -> void:
 	kit.assert_true(int(main.save.data.built) >= main.total_built and (main.save.data.town as Array).size() >= 1, "%s: finished towers are saved" % mode)
 	if main.vr_rig != null:
 		kit.assert_true(main.total_placed > 0, "the fake VR giant placed blocks (%d)" % main.total_placed)
+	var hist: Array = main.picks.history
+	kit.info("%s picks: %s, mode %s, builds %s, specials %d, glued %d" % [mode, str(hist), main.game_mode, str(main.round_builds), main.round_specials, main.specials.glues_made])
+	kit.assert_true(not hist.is_empty() or int(main.net.state_get("round", 0)) >= 2, "%s: the team picked on the orbs" % mode)
+	var someone: bool = (mode == "local" and want > 0) or main.vr_rig != null or main.flat_host or mode == "host"
+	if someone and Engine.get_meta("ts_mode_set", false):
+		kit.assert_true(pick_bad == 0, "%s: the chosen building is the one built next (%d ok, %d wrong)" % [mode, pick_ok, pick_bad])
+	if main.total_built >= 1:
+		kit.assert_true(pick_ok >= 1 or main.picks.active(), "%s: after a tower the team chose the next building (%d)" % [mode, pick_ok])
 	if mode == "local" and want >= 2:
 		kit.info("highest a TV player climbed: %.2f m" % max_climb)
 		kit.assert_true(max_climb > main.BASE_H + 0.3, "a TV player climbed onto the tower")

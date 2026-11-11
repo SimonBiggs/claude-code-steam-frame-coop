@@ -11,20 +11,30 @@ const COLORS: Array[Color] = [Color(1.0, 0.35, 0.35), Color(1.0, 0.75, 0.2), Col
 
 
 const STONE := Color(0.62, 0.63, 0.68)
-const SIZES: Array[Vector3] = [Vector3(1, 1, 1), Vector3(2, 0.5, 1), Vector3(1, 0.5, 1), Vector3(1, 1, 1)]  # == towergen SIZE
+const SIZES: Array[Vector3] = [Vector3(1, 1, 1), Vector3(2, 0.5, 1), Vector3(1, 0.5, 1), Vector3(1, 1, 1),
+	Vector3(1, 1, 1), Vector3(1, 1, 1), Vector3(1, 1, 1)]  # == towergen SIZE
 const K_STONE := 3
+const K_BOUNCY := 4
+const K_STICKY := 5
+const K_BALLOON := 6
+## The special blocks always wear their own colour (kids learn them): bouncy pink, honey gold, balloon sky blue.
+const SPECIAL_COLORS := {4: Color(1.0, 0.4, 0.85), 5: Color(1.0, 0.72, 0.12), 6: Color(0.55, 0.85, 1.0)}
+const BALLOON_COLORS: Array[Color] = [Color(1.0, 0.3, 0.35), Color(1.0, 0.85, 0.25)]
 
 
 static func block_color(ci: int, kind: int = 0) -> Color:
+	if SPECIAL_COLORS.has(kind):
+		return SPECIAL_COLORS[kind]
 	return STONE if kind == K_STONE else COLORS[posmod(ci, COLORS.size())]
 
 
 ## A rounded jelly block (kind: cube, plank, slab, stone; see towergen.gd) with a happy face on its two
-## long sides. Stones are grey and a bit sleepy (they're heavy).
+## long sides. Stones are grey and a bit sleepy (they're heavy). Special blocks: BOUNCY wears two white springs
+## round its middle, STICKY honey drips down its sides, BALLOON has two balloons tied on (clear of a block on top).
 static func block_mesh(kind: int, ci: int) -> Mesh:
 	kind = clampi(kind, 0, SIZES.size() - 1)
 	ci = posmod(ci, COLORS.size())
-	return ResCache.get_or_make("tower_stack_block_%d_%d" % [kind, ci], func() -> Resource:
+	return ResCache.get_or_make("tower_stack_block_v2_%d_%d" % [kind, ci], func() -> Resource:
 		var b := MeshKit.Builder.new()
 		var c := block_color(ci, kind)
 		var size := SIZES[kind] * BLOCK
@@ -47,7 +57,29 @@ static func block_mesh(kind: int, ci: int) -> Mesh:
 			b.box(Vector3(0.16, 0.035, 0.03) * k, Transform3D(face, face * Vector3(0.0, fy - 0.1 * k, h + 0.005)), c.darkened(0.55))
 			b.sphere(0.04 * k, Transform3D(face, face * Vector3(-0.19 * k, fy - 0.05 * k, h)), c.lightened(0.35), 8)
 			b.sphere(0.04 * k, Transform3D(face, face * Vector3(0.19 * k, fy - 0.05 * k, h)), c.lightened(0.35), 8)
+		special_extras(b, kind, size)
 		return b.build())
+
+
+## The bits that make a special block look special (also on the town's models).
+static func special_extras(b, kind: int, size: Vector3) -> void:
+	match kind:
+		K_BOUNCY:
+			for y in [-0.17, 0.17]:
+				b.torus(size.x * 0.56, 0.028, MeshKit.at(Vector3(0, y * size.y / BLOCK, 0)), Color(1, 1, 1), 20, 4)
+		K_STICKY:
+			var honey := Color(1.0, 0.6, 0.05)
+			b.box(Vector3(size.x * 0.8, 0.03, size.z * 0.8), MeshKit.at(Vector3(0, size.y * 0.5 + 0.005, 0)), honey)
+			for d in [[0.2, 1.0, 0.09], [-0.12, 1.0, 0.13], [0.05, -1.0, 0.11], [-0.2, -1.0, 0.07], [1.0, 0.1, 0.1], [-1.0, -0.15, 0.12]]:
+				var x: float = d[0] * size.x * 0.5 if absf(d[0]) < 0.9 else d[0] * (size.x * 0.5 + 0.01)
+				var z: float = d[1] * (size.z * 0.5 + 0.01) if absf(d[0]) < 0.9 else d[1] * size.z * 0.5
+				var len: float = d[2]
+				b.ellipsoid(Vector3(0.04, len, 0.04), MeshKit.at(Vector3(x, size.y * 0.5 - len * 0.7, z)), honey)
+		K_BALLOON:
+			for side in [-1.0, 1.0]:
+				var x: float = side * (size.x * 0.5 + 0.12)
+				b.box(Vector3(0.012, 0.3, 0.012), MeshKit.at(Vector3(x * 0.85, size.y * 0.5 + 0.02, 0)), Color(0.95, 0.95, 0.95))
+				b.ellipsoid(Vector3(0.12, 0.14, 0.12), MeshKit.at(Vector3(x, size.y * 0.5 + 0.28, 0)), BALLOON_COLORS[0 if side < 0.0 else 1], 12)
 
 
 ## The roof a finished tower wears, by building (towergen BUILDINGS); its base sits at y = 0.
@@ -112,6 +144,10 @@ static func tower_model(plan: Array, palette: Array, building: String, gold: boo
 			var c := block_color(int(palette[i % palette.size()]), kind)
 			var xf := Transform3D(Basis(Vector3.UP, PI * 0.5 * int(p[4])), Vector3(float(p[1]), float(p[2]), float(p[3])))
 			b.rounded_box(size, 0.06, xf, c, 1)
+			if kind >= K_BOUNCY:
+				var sub := MeshKit.Builder.new()
+				special_extras(sub, kind, size)
+				b.add_mesh(sub.build(), xf)
 			var t := Vector3(float(p[1]), float(p[2]) + size.y * 0.5, float(p[3]))
 			if t.y >= top.y:
 				top = t
