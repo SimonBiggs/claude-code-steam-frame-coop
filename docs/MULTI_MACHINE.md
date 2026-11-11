@@ -150,6 +150,25 @@ safe point**, so a deploy never changes a game someone is playing:
 - Test: `tools/multibot.ts --copies -n 2 --seconds 120 res://tests/safe_apply_bot.tscn`. Each machine runs its
   own copy and fake deploys reach them one after another.
 
+## Play telemetry to the Steam Machine (core/telemetry_push.gd)
+
+Every machine (TV, Decks, Frame) sends its own RUN lines (core/telemetry.gd: one per round, game stats only, plus the
+machine's hostname) to the Steam Machine whenever it can reach it, so balance work sees how the family plays on the
+Decks without the TV. Agents never read Deck logs over ssh.
+
+- **Outbox** `user://telemetry_outbox.jsonl`: lines leave it only when the receiver acknowledges them (id = first 16 hex
+  of the line's MD5, so a resend is ignored). The first start also queues the machine's older `telemetry.jsonl`.
+  Tried on arcade start, ~4 s after each RUN line and every 10 minutes. Over 3 MB the OLDEST lines are dropped with a
+  `TELEMETRY PUSH: WARNING outbox full` log line and the count goes to the receiver with the next batch.
+- **Finding it**: UDP `DUO_TELEMETRY_HELLO` broadcast on port 7870 (plus last address and 127.0.0.1); the receiver
+  answers, then HTTP `POST /runs`. Private addresses only, both ends.
+- **Receiver**: `duo-telemetry-recv` (user service on the Steam Machine) stores `~/.cache/duo-arena/telemetry/<device>.jsonl`
+  + `<device>.meta.json` (last seen, drops); `GET /status` for a summary. Test runs never push (SAVE_TEST); the push
+  test (`tools/telemetry-push-test`, run by dev.land when this code changes) uses its own receiver, and the real one
+  refuses batches marked test.
+- **Reading**: brepl `dev.playstats({since, game})` / `dev.playRuns()`; `tools/dd-balance`. `dev.debt()` warns
+  (telemetry-gap) when no real RUN line has arrived for 7 days, and (telemetry-drops) when a device dropped lines.
+
 ## Updates over the home network (core/lan_update.gd)
 
 Game code travels inside the arcade: whoever hosts a lobby passes its version to the machines that join, so every

@@ -462,6 +462,11 @@ const rport = () => 20000 + Math.floor(Math.random() * 10000);
 /** Long guard bots (2026-11-11): the regular bots end before relics + crowded rooms meet, so a THORN ARMOR script
  *  error lived on main for days. dev.land runs these when a branch touches the game (or lands it as botId);
  *  dev.guard(game) runs them by hand. Each must end with BOT RESULT: PASS, no SCRIPT ERROR, no res:// engine ERROR. */
+/** Shared-code checks dev.land runs when the branch changes a matching path (run in staging). */
+export const PATH_CHECKS: { name: string; paths: RegExp; cmd: string; pass: string }[] = [
+  { name: "telemetry-push", paths: /core\/telemetry|tools\/duo-telemetry-recv|tools\/telemetry-push-test|core\/services\.gd/, cmd: "tools/telemetry-push-test .", pass: "PASS telemetry-push-test" },
+];
+
 export const LAND_GUARDS: Record<string, { name: string; scene: string; env: Record<string, string>; quitAfter: number; timeout: number }[]> = {
   dungeon_delve: [{ name: "deep-relics", scene: "res://tests/dungeon_delve_bot.tscn", quitAfter: 108000, timeout: 1500,
     env: { DD_MODE: "brave", DD_FLOOR: "8", BOT_GOAL: "guard", DD_RELICS: "all", BOT_PLAYERS: "4", DD_SEED: "111", BOT_END: "1700" } }],
@@ -546,6 +551,13 @@ export async function land(branch: string, genTests: string[], botId: string, ot
       ok &&= r.pass;
       res.push(`${id}: ` + r.runs.map((x: any) => `${x.mode}:${x.pass ? "ok" : "FAIL"} ${x.result} ${(x.failed || []).join(";")} ${(x.errors || []).join(";")}`).join(" | "));
     } finally { delete process.env.DUO_PORT; }
+  }
+  // Checks for shared code a landing touches (PATH_CHECKS): e.g. the telemetry push end to end.
+  for (const pc of PATH_CHECKS) {
+    if (!pc.paths.test((await sh("git diff --name-only main merge-arcade", join(GP, "wt-merge"))).out)) continue;
+    const r = await sh(`timeout 300 ${pc.cmd} 2>&1 | tail -3`, STAGE);
+    out[`check:${pc.name}`] = r.out;
+    ok &&= r.code === 0 && new RegExp(pc.pass).test(r.out);
   }
   // Long guard bots for games whose deep errors only show far into a run (LAND_GUARDS): run when the branch touches
   // the game or lands it as botId.
