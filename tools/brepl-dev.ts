@@ -549,6 +549,39 @@ export async function guard(game: string, project = STAGE) {
  *  script, whose expected "Parse Error" would read as a SCRIPT ERROR here. */
 export const REPO_GUARDS = ["gen_budget_test", "who_test", "who_net_test", "classic_seats_test", "menu_test", "party_stale_press_test", "bg_gen_test", "engine_sys_test", "engine_ui_test", "pause_banner_test", "contrast_test", "vr_wrist_menu_test"];
 
+/** Lone flat player (2026-11-11, cove-deep2: a lone Deck gunner ran out of cannonballs, a solo VR host stayed in
+ *  practice forever): ONE Deck player, no VR, nobody else (DUO_SOLO=1 DUO_MACHINE_KIND=deck BOT_PLAYERS=1), the
+ *  game's own bot for 120 s game time. Fails on a failed check, a SCRIPT / res:// engine error, no BOT RESULT, or a
+ *  FROZEN game: the bot's last 8 status lines (timestamps stripped) all the same, i.e. ~30 s with nothing changing
+ *  (stuck on a results screen, waiting forever for a second player, sandbox with an idle bot). A bot must keep
+ *  playing to its end, so a frozen tail is a game softlock or a bot that stopped acting: fix whichever it is.
+ *  rounds = RUN lines before the BOT RESULT (rounds that really finished). */
+export async function loneRun(id: string, project = STAGE) {
+  const o = (await sh(`DUO_SOLO=1 DUO_MACHINE_KIND=deck BOT_PLAYERS=1 DUO_PORT=${rport()} timeout 300 godot-test --headless --path . --fixed-fps 60 --quit-after 7200 res://tests/${id}_bot.tscn 2>&1`, project)).out;
+  const lines = o.split("\n");
+  const end = lines.findIndex(l => /BOT RESULT/.test(l));
+  const before = lines.slice(0, end < 0 ? lines.length : end);
+  const status = before.filter(l => /^(\[\s*[\d.]+s\]\s*)?(BOT\b|t=\d)/.test(l) && !/BOT (RESULT|ASSERT|CUES)|SCRIPT/.test(l))
+    .map(l => l.replace(/^\[\s*[\d.]+s\]\s*/, "").replace(/\bt=[\d.]+\s*/, "").trim());
+  const tail = status.slice(-8);
+  const frozen = tail.length >= 8 && tail.every(x => x === tail[0]);
+  const rounds = before.filter(l => l.startsWith("RUN: ")).length;
+  const errs = [...lines.filter(l => /SCRIPT ERROR/.test(l)), ...engineErrors(o)];
+  const result = lines.filter(l => /BOT RESULT/.test(l)).pop() ?? "no BOT RESULT";
+  const pass = /BOT RESULT: PASS/.test(result) && errs.length === 0 && !frozen && (rounds > 0 || status.length >= 3);
+  return { id, pass, rounds, frozen, summary: `${pass ? "ok" : "FAIL"} ${result.trim()} rounds=${rounds}${frozen ? " FROZEN: " + tail[0].slice(0, 100) : ""}${status.length < 3 && !rounds ? " (no status lines and no finished round: can't tell it plays)" : ""}${errs.slice(0, 3).map(e => "\n  " + e).join("")}` };
+}
+
+/** Sweep the lone-flat check over games (default every game with a bot), 2 at a time. */
+export async function lone(ids?: string[], project = STAGE) {
+  const all: string[] = ids ?? [];
+  if (!ids) for (const id of await bots.list()) if (await stat(join(project, "games", id)).then(() => true, () => false)) all.push(id);
+  const out: any[] = []; let next = 0;
+  await Promise.all([0, 1].map(async () => { while (next < all.length) out.push(await loneRun(all[next++], project)); }));
+  out.sort((a, b) => a.id.localeCompare(b.id));
+  return { fail: out.filter(r => !r.pass).map(r => `${r.id}: ${r.summary}`), table: out.map(r => `${r.id.padEnd(18)} ${r.summary.split("\n")[0]}`).join("\n") };
+}
+
 export async function land(branch: string, genTests: string[], botId: string, otherBots: string[], msg: string) {
   // A landing that stopped leaves its merge in wt-merge (and its files in staging) for a retry. Landing a DIFFERENT
   // branch next must not carry it along (2026-10-31: a tools-only landing nearly deployed saga-deep, whose tests had
@@ -616,6 +649,10 @@ export async function land(branch: string, genTests: string[], botId: string, ot
     const soErr = [...so.split("\n").filter(l => /SCRIPT ERROR/.test(l)), ...engineErrors(so)];
     out.solo_vr = (so.split("\n").filter(l => /BOT RESULT/.test(l)).pop() ?? "no BOT RESULT") + soErr.slice(0, 3).map(e => "\n" + e).join("");
     ok &&= /BOT RESULT: PASS/.test(out.solo_vr) && soErr.length === 0;
+    // Lone flat player: one Deck player, no VR, nobody else, must reach real play and keep going (loneRun above).
+    const lr = await loneRun(botId);
+    out.lone_flat = lr.summary;
+    ok &&= lr.pass;
   }
   const res: string[] = [];
   for (const [id, o] of [["arcade", {}], [botId, { net: true, joiners: 1, seconds: 180 }], ...otherBots.map(x => [x, {}])] as [string, any][]) {
@@ -664,6 +701,7 @@ export function help() {
   dev.land(branch, genTests, botId, otherBots, msg)  merge a finished branch via wt-merge, test in staging, deploy TV+Decks, merge live main
   dev.playstats({since?, game?})     how the family really played: RUN lines every machine pushed to the Steam Machine
   dev.playRuns({since?, game?})      those RUN lines as objects ({device, recv, ...run})
+  dev.lone(ids?) / dev.loneRun(id, project?)  lone flat player check (one Deck player, no VR, nobody else): rounds advance, never frozen (dev.land runs it)
   dev.guard(game)                    a game's long guard bots (LAND_GUARDS; dev.land runs them when a branch touches the game)
   dev.debt()                         tech-debt scan: {clean, issues:[{kind, what, fix}]} (fix them straight away)
   dev.bots.list() / .run(id, {net, joiners}) / .all({only, net, concurrency})   headless bot tests in staging (net: host + joiners, tools/multibot.ts)
