@@ -132,7 +132,7 @@ func _watch() -> String:
 		if not slots.is_empty():
 			kit.slot_press(main.party, slots[0], "accept")
 		if main.vr_rig != null:
-			kit.vr_trigger(main.vr_rig, 1.0 if Engine.get_process_frames() % 20 < 10 else 0.0)
+			kit.vr_click(main.vr_rig)  # the VR detective goes on too (alone in solo VR)
 	return ""
 
 
@@ -208,6 +208,9 @@ func _physics_process(delta: float) -> void:
 func _drive_vr(delta: float, index: int) -> void:
 	var rig = main.vr_rig
 	rig.camera.position.y = 1.6
+	# Sped up like the TV bots (walk_speed 7): alone (solo VR) a 2 m/s detective walking the whole manor took 45-50 s
+	# for case 1, too long for a second case inside the 60 s run (2026-11-11).
+	rig.move_speed = 4.0
 	var head: Vector3 = rig.head_position()
 	var feet := Vector3(head.x, rig.floor_height, head.z)
 	if vr_last != Vector3.INF and feet.distance_to(vr_last) < 3.0:
