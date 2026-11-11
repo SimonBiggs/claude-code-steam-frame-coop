@@ -53,8 +53,8 @@ func row_origin() -> Vector3:
 		var f := -cam.global_basis.z
 		f.y = 0.0
 		f = f.normalized() if f.length() > 0.01 else Vector3.FORWARD
-		var p: Vector3 = cam.global_position + f * 0.75
-		return Vector3(p.x, maxf(0.6, cam.global_position.y - 0.45) - Y, p.z)
+		var p: Vector3 = cam.global_position + f * 0.9
+		return Vector3(p.x, maxf(0.5, cam.global_position.y - 0.6) - Y, p.z)
 	return Vector3(0.0, 0.0, main.PEN + 1.6)
 
 
@@ -78,7 +78,7 @@ func show_row(new_stage: String, entries: Array, at: Vector3) -> void:
 		orbs.clear()
 		return
 	var vr: bool = main.vr_rig != null
-	orbs.show_orbs(new_stage, entries, at, GAP * (0.3 if vr else 1.0), Y, {"scale": 0.32 if vr else 0.8, "pop": true, "two_lines": true})
+	orbs.show_orbs(new_stage, entries, at, GAP * (0.3 if vr else 1.0), Y, {"scale": 0.2 if vr else 0.8, "pop": true, "two_lines": true})
 
 
 func tick(delta: float) -> void:
