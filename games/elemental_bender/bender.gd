@@ -200,6 +200,7 @@ func _physics_process(delta: float) -> void:
 		spd = 8.5
 	if in_spirit:
 		spd = 9.5
+	spd *= float(game.call("mods_of", slot).speed)  # SWIFT FEET (boons.gd)
 	var hv := Vector3(velocity.x, 0, velocity.z)
 	var fx: Node = game.get("fx")
 	if _dash_t > 0.0:
@@ -243,7 +244,7 @@ func _physics_process(delta: float) -> void:
 	if acting and _attack_held() and _cd <= 0.0:
 		_primary(in_spirit)
 	if acting and (party.call("just_pressed", slot, "lt") or party.call("just_pressed", slot, "y")):
-		var cost: float = E.SPECIAL_COST[element]
+		var cost: float = E.SPECIAL_COST[element] * float(game.call("mods_of", slot).chi_cost)
 		if chi >= cost or in_spirit:
 			if not in_spirit:
 				chi -= cost

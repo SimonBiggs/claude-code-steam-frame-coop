@@ -177,8 +177,8 @@ func _tv_bot(slot: int, delta: float) -> void:
 		cam.yaw = atan2(-dn.x, -dn.z)
 		cam.pitch = -0.25
 	# The element that beats it.
-	var te: int = int(target.get("element"))
-	var need: int = E.beater(te)
+	var te: int = int(target.get("element")) if target.get("element") != null else -1  # (altar stones have none)
+	var need: int = E.beater(te) if te >= 0 else b.element
 	if b.element != need and float(c["elem"]) <= 0.0:
 		c["elem"] = 0.4
 		var pads: Array[String] = ["up", "left", "down", "right"]
@@ -256,7 +256,7 @@ func _vr_bot(delta: float) -> void:
 				vr_jab_t = randf_range(3.0, 5.0)
 				_vr_go("jab_wind")
 			elif vr_t > 0.25 and target != null:
-				vr_need = E.beater(int(target.get("element")))
+				vr_need = E.beater(int(target.get("element"))) if target.get("element") != null else m.element
 				_vr_go("orb" if m.element != vr_need else "wind")
 		"orb":
 			kit.vr_reach(rig, VrRig.LEFT, rest_l, 3.0, delta)
@@ -353,7 +353,7 @@ func _checks() -> void:
 	if mode != "client":
 		kit.assert_true(main.temple_seed > 0 or OS.has_environment("EB_SEED"), "%s: a temple seed was picked (%d)" % [mode, main.temple_seed])
 		for r in main.raiders.values():
-			if is_instance_valid(r) and not r.boss:
+			if is_instance_valid(r) and not r.boss and not main.wave_plan.boss:  # (a powered-up boss's helpers are its own element)
 				kit.assert_true(main.wave_plan.palette.has(r.element), "%s: raiders have the wave's elements" % mode)
 				break
 		if max_wave >= 2:
@@ -379,7 +379,22 @@ func _checks() -> void:
 	if mode == "local" and main.fast and not OS.has_environment("BOT_END"):
 		kit.assert_true(max_wave >= 6 or saw_results, "local: reached wave 6 (max %d)" % max_wave)
 		kit.assert_true(main.log_boss or saw_results, "local: the Shadow General appeared")
-	if boss_alive_t > 6.0:
+	# Islands, the altar, bosses (host / local decide).
+	if mode != "client":
+		kit.assert_true(main.log_masters >= 1 or main.log_practice < 4, "%s: an element master was picked on the altar (%d)" % [mode, main.log_masters])
+		if max_wave >= 2:
+			kit.assert_true(main.log_picks >= 1, "%s: gifts were picked between waves (%d)" % [mode, main.log_picks])
+		if max_wave > main.Arenas.SEGMENT and int(main.save.data.generals) >= 1:
+			kit.assert_true(main.log_arenas.size() >= 2, "%s: the run travelled to another island %s" % [mode, str(main.log_arenas.keys())])
+		if OS.has_environment("EB_ARENA"):
+			kit.assert_true(main.log_arenas.has(OS.get_environment("EB_ARENA")), "%s: the run started on %s" % [mode, OS.get_environment("EB_ARENA")])
+			if main.log_boss:
+				kit.assert_true(main.log_tells >= 1, "%s: the island boss told its attacks (%d)" % [mode, main.log_tells])
+		if main.hazards.hazard != "" and max_wave >= 2:
+			kit.assert_true(main.log_vents >= 1, "%s: the island's hazard went off (%d)" % [mode, main.log_vents])
+	else:
+		kit.assert_true(main.log_arenas.size() >= 1 and main.world.arena_id == main.arena, "client: the island is built (%s)" % main.arena)
+	if boss_alive_t > 6.0 and main.log_bosses.has("general"):
 		kit.assert_true(main.log_boss_swaps > 0, "the General swapped elements (%d, alive %.1f s)" % [main.log_boss_swaps, boss_alive_t])
 	if main.vr_rig != null:
 		var m = main.master
@@ -388,6 +403,8 @@ func _checks() -> void:
 		kit.assert_true(m.jabs > 0, "VR: left jabs (%d)" % m.jabs)
 		kit.assert_true(m.slams > 0, "VR: slam specials (%d)" % m.slams)
 		kit.assert_true(int(main.log_hits_by.get(0, 0)) > 0, "VR: the master hit raiders (%d)" % int(main.log_hits_by.get(0, 0)))
+	print("BOT islands %s bosses %s masters %d picks %d %s tells %d vents %d phase2 %d" % [str(main.log_arenas.keys()), str(main.log_bosses),
+		main.log_masters, main.log_picks, str(main.run_picks), main.log_tells, main.log_vents, main.log_phase2])
 	print("BOT stats: practice %d waves %d boss %s swaps %d counters %d ring outs %d specials %s spirits %d downs %d hits %s" % [
 		main.log_practice, main.log_waves, str(main.log_boss), main.log_boss_swaps, main.log_counters, main.log_ring_outs,
 		str(main.log_specials), main.log_spirits, main.log_downs, str(main.log_hits_by)])
