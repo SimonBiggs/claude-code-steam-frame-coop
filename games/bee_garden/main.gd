@@ -2820,8 +2820,8 @@ func _draw_warn(pos: Vector3, r: float, col: Color, secs: float, style: String) 
 
 ## Every machine: sticky net state (the pick orbs, so a machine joining mid-pick sees them too).
 func _on_state_changed(key: String, value: Variant) -> void:
-	if key == "orbs" and net.mode == "client" and value is Array and (value as Array).size() == 2:
-		picks.show_row(String(value[0]), value[1] if value[1] is Array else [])
+	if key == "orbs" and net.mode == "client" and value is Array and (value as Array).size() == 3:
+		picks.show_row(String(value[0]), value[1] if value[1] is Array else [], float(value[2]))
 
 
 # --- HUD ---------------------------------------------------------------------

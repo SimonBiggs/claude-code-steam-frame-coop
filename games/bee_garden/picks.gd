@@ -17,8 +17,9 @@ const GardenGen := preload("res://games/bee_garden/gardengen.gd")
 const WAIT := {"mode": 14.0, "gift": 12.0}
 const AFTER := 1.0     # seconds the taken orb shows its dot before the orbs go
 const GAP := 2.3
-const Y := 2.6         # well above the flower heads (hands and bees working the flowers never touch one by chance) and,
-                       # in VR, above Queen Bea's story cards (never in front of them)
+const Y := 2.6         # well above the flower heads (hands and bees working the flowers never touch one by chance)
+const VR_LIFT := 0.15  # VR: the row at the gardener's eye height (+ this), above Queen Bea's story cards (they float
+                       # 0.22 m below the eyes, HudKit.vr_card), so an orb is never in front of a card
 const ROW := Vector3(0.0, 0.0, 0.9)   # the row's middle: over the front half of the bed, in the gardener's reach
 const SCALE := 0.6
 const BEE_R := 0.3     # a bee this close to an orb's picture takes it
@@ -37,6 +38,7 @@ var chosen_by := -1
 var done_t := 0.0
 var on_done: Callable  # host: (stage, option)
 var history: Array = []
+var row_y := Y
 var glove_on := -1
 var glove_t := 0.0
 
@@ -93,18 +95,22 @@ func begin(new_stage: String, entries: Array, opts: Array, done: Callable) -> vo
 	chosen_by = -1
 	done_t = 0.0
 	glove_on = -1
-	show_row(new_stage, entries)
+	row_y = Y
+	var gd = main.gardener
+	if gd != null and gd.vr and gd.xr_camera != null and gd.xr_camera.is_inside_tree():
+		row_y = clampf(gd.xr_camera.global_position.y + VR_LIFT, Y, 4.5)
+	show_row(new_stage, entries, row_y)
 	if main.net.mode == "host":
-		main.net.state_set("orbs", [new_stage, entries])
+		main.net.state_set("orbs", [new_stage, entries, row_y])
 	print("PICK %s up: %s" % [new_stage, str(opts)])
 
 
 ## Every machine: the row of orbs ("" stage: none).
-func show_row(new_stage: String, entries: Array) -> void:
+func show_row(new_stage: String, entries: Array, y: float = Y) -> void:
 	if new_stage == "" or entries.is_empty():
 		orbs.clear()
 		return
-	orbs.show_orbs(new_stage, entries, ROW, GAP, Y, {"scale": SCALE, "pop": true, "font": 72, "hit_r": HIT_R})
+	orbs.show_orbs(new_stage, entries, ROW, GAP, y, {"scale": SCALE, "pop": true, "font": 72, "hit_r": HIT_R})
 
 
 ## Where orb i's picture is (bots fly there); Vector3.INF if none.
@@ -190,6 +196,6 @@ func _finish() -> void:
 	options = []
 	orbs.clear()
 	if main.net.mode == "host":
-		main.net.state_set("orbs", ["", []])
+		main.net.state_set("orbs", ["", [], Y])
 	if on_done.is_valid():
 		on_done.call(st, opt)

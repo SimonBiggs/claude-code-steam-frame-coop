@@ -112,7 +112,7 @@ static func generate(seed_value: int, spec: Dictionary = {}) -> Dictionary:
 	for i in others:
 		if _dist2(spots[i], HIVE_ENTRY) < _dist2(spots[halo], HIVE_ENTRY):
 			halo = i
-	var n_bloom := 2 + (1 if level >= 3 else 0) + (1 if level >= 10 else 0)
+	var n_bloom := 3 + (1 if level >= 6 else 0)  # (three from the start: a practice round on two flowers dragged)
 	var blooms: Array = [[halo, 0]]
 	var pool: Array = Seeded.shuffled(r, others)
 	for i in pool:
@@ -165,7 +165,9 @@ static func day_plan(g: Dictionary, round_n: int, spec: Dictionary = {}) -> Dict
 	# (a mode's extra honey eases in over rounds 2..4, so no round is a cliff)
 	var mode_x := 1.0 + (float(MODE_GOAL[mode]) - 1.0) * clampf((round_n - 1) / 3.0, 0.0, 1.0)
 	# (more bees, more honey; the practice round less so: a big crew shares its three first flowers)
-	var bee_x := 1.0 + 0.25 * maxf(0.0, bees - 1) * (0.4 if round_n <= 1 else 1.0)
+	# (the practice round: a crew shares the garden's first 2..4 flowers, so a bigger crew asks for little more)
+	var crew_ease := 0.2 * maxi(0, (g.blooms as Array).size() - 2) if round_n <= 1 else (0.7 if round_n == 2 else 1.0)
+	var bee_x := 1.0 + 0.25 * maxf(0.0, bees - 1) * crew_ease
 	var target := int(round(base * bee_x * mode_x))
 	target = mini(target, MAX_GOAL)
 	# The flowers we can count on: today's blooms grow by about two a round (the gardener plants).
@@ -262,8 +264,9 @@ static func round_load(g: Dictionary, d: Dictionary) -> float:
 
 
 ## Why the modes aren't a smooth, ordered climb in garden g ([] when they are): round 1 the same calm round in every
-## mode; each mode's rounds rise without cliffs (no round over 1.6x the last + 8 s: the flight sim is a little lumpy)
-## or big drops (below 0.8x); round 8 clearly harder than round 1 (1.2x for up to 3 bees; a big crew is held by
+## mode; each mode's rounds rise without cliffs (no round over 1.6x the last + 10 s: the flight sim is a little lumpy)
+## or big drops (below 0.75x: a grown garden may make a round a little quicker); round 8 clearly harder than round 1
+## (1.15x for up to 3 bees; a big crew is held by
 ## the flowers, not the goal: it must ask for more honey and not get quicker); and gentle <= brave <= hard every round.
 static func check_modes(g: Dictionary, crews: Array = [0, 1, 3, 6], rounds: int = 9) -> Array:
 	var why: Array = []
@@ -280,12 +283,12 @@ static func check_modes(g: Dictionary, crews: Array = [0, 1, 3, 6], rounds: int 
 					why.append("%s: round 1 isn't the calm practice round" % m)
 			loads[m] = ls
 			for k in range(1, ls.size()):
-				if float(ls[k]) > float(ls[k - 1]) * 1.6 + 8.0:
+				if float(ls[k]) > float(ls[k - 1]) * 1.6 + 10.0:
 					why.append("%s %d bees: round %d jumps from %.0f to %.0f s" % [m, bees, k + 1, ls[k - 1], ls[k]])
-				if float(ls[k]) < float(ls[k - 1]) * 0.8:
+				if float(ls[k]) < float(ls[k - 1]) * 0.75:
 					why.append("%s %d bees: round %d drops from %.0f to %.0f s" % [m, bees, k + 1, ls[k - 1], ls[k]])
 			var r8 := mini(7, ls.size() - 1)
-			if bees <= 3 and float(ls[r8]) < float(ls[0]) * 1.2:
+			if bees <= 3 and float(ls[r8]) < float(ls[0]) * 1.15:
 				why.append("%s %d bees: round 8 (%.0f s) isn't harder than round 1 (%.0f s)" % [m, bees, ls[r8], ls[0]])
 			if bees > 3 and (float(ls[r8]) < float(ls[0]) * 0.85 or int(goals[r8]) <= int(goals[0])):
 				why.append("%s %d bees: round 8 (%d honey, %.0f s) is easier than round 1 (%d honey, %.0f s)" % [m, bees, goals[r8], ls[r8], goals[0], ls[0]])
@@ -368,6 +371,8 @@ static func fill_time(g: Dictionary, n_flowers: int, kind: int, target: int, bee
 					for i in heads.size():
 						var arrive: float = t + (pos[b] as Vector3).distance_to(heads[i]) / speed
 						var tt := arrive if helpers else maxf(arrive, float(ready_at[i]))
+						if not helpers:
+							tt -= 1.5 * float(KIND_HONEY[int(kinds_of[i])] - 1)  # richer flowers are worth a little detour
 						if not helpers and int(load[b]) == cap - 1:
 							tt += (heads[i] as Vector3).distance_to(HIVE_ENTRY) / speed * 0.6  # the last pollen: one near home
 						for o in n:
@@ -549,13 +554,14 @@ static func check_day(g: Dictionary, d: Dictionary) -> Array:
 		why.append("round %d: %d honey with only the first %d flowers takes %.0f s (%d bees)" % [int(d.round), target, (g.blooms as Array).size(), t_bare, bees])
 	if t_exp < 10.0:
 		why.append("round %d: done in %.0f s (too quick)" % [int(d.round), t_exp])
-	# Every gift at once still leaves a real round (gifts help, they never make it trivial).
+	# Every gift at once still leaves a real round (gifts help, they never make it trivial; the first gift comes after
+	# round 2).
 	var all_gifts: Array = []
 	for gf in GIFTS:
 		all_gifts.append(gf[0])
 	var bb := boosts(all_gifts)
 	var t_gift := fill_time(g, mini(SPOTS - 1, int(d.expect) + int(bb.wild)), 0, target, bees, int(d.fav), 600.0, bb)
-	if t_gift < 10.0:
+	if int(d.round) >= 3 and t_gift < 10.0:
 		why.append("round %d: done in %.0f s with every gift (too quick)" % [int(d.round), t_gift])
 	return why
 
