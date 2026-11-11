@@ -134,7 +134,8 @@ static func field(what: String, entries, key: String, id_key: String = "id") -> 
 
 
 ## Players drawn as core/creatures.gd humanoids: their outfit colour, with the class's trousers as the rim (a
-## humanoid always shows them below the outfit). looks: the game's LOOKS (class per slot, wrapping).
+## humanoid always shows them below the outfit). looks: the game's LOOKS (class per slot, wrapping). A game that
+## overrides a class's trousers builds its own {color, rim} pairs from its own data (see crystal_saga/palette.gd).
 static func humanoids(outfits: Array, looks: Array, what: String = "player") -> Dictionary:
 	var classes: Dictionary = load("res://core/creatures.gd").LOOKS
 	var out := {}
@@ -165,7 +166,8 @@ static func merge(a: Dictionary, b: Dictionary) -> Dictionary:
 ## material_overlay, so shared materials are left alone. Contrast.outline(mesh_instance) or (mi, Color.WHITE).
 ## Declare it in palette.gd as {"color": C, "rim": Contrast.OUTLINE} (or the colour you passed) so the check counts
 ## it. Smooth meshes (spheres, capsules, blobs) outline cleanly; hard-edged boxes show small gaps at the corners.
-## One shared shell material per colour + width. Returns mi.
+## width is in the MESH's own units (before the node's scale): a unit sphere scaled down to a 0.3 m snowball
+## needs a bigger width than 0.02 to show. One shared shell material per colour + width. Returns mi.
 static func outline(mi: GeometryInstance3D, color: Color = OUTLINE, width: float = OUTLINE_WIDTH) -> GeometryInstance3D:
 	if mi == null:
 		return mi
