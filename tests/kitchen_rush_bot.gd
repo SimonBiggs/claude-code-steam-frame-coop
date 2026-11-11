@@ -80,6 +80,8 @@ func _ready() -> void:
 	end_at = 100.0 if OS.has_environment("DUO_JOIN") else (110.0 if OS.has_environment("DUO_HOST") else 600.0)  # inside multibot's 120 s
 	if OS.has_environment("BOT_SECONDS"):
 		end_at = float(OS.get_environment("BOT_SECONDS"))
+	elif OS.has_environment("BOT_END"):  # the shared "end by yourself after N s" (tests/bot_end.gd), like every other bot
+		end_at = float(OS.get_environment("BOT_END"))
 
 
 func _physics_process(delta: float) -> void:

@@ -29,8 +29,10 @@ signal refitted(head_height: float)
 
 const LEFT := 0
 const RIGHT := 1
-## Must match core/net.gd's wrist MENU button (local to the left controller, times world scale).
-const WRIST_MENU_OFFSET := Vector3(-0.08, 0.03, 0.1)
+## core/net.gd's wrist MENU button (local to the left controller, times world scale); net.gd places it here.
+const WRIST_MENU_OFFSET := Vector3(-0.15, 0.02, 0.12)
+## Pointing at a wrist button counts only within arm's reach (metres times world scale).
+const MAX_POINT := 0.6
 const TRIGGER_ON := 0.6
 const TRIGGER_OFF := 0.35
 ## Render layer 20: the VR player's avatar on the TV machine. Mirror cameras leave it out.
@@ -445,10 +447,18 @@ func wrist_menu_position() -> Vector3:
 
 ## Is the right hand on (or pointing at) the wrist MENU button? Same test as core/net.gd.
 func on_wrist_menu() -> bool:
-	var to := wrist_menu_position() - hand_r.global_position
-	var fwd := -hand_r.global_basis.z
+	return points_at(hand_r, wrist_menu_position(), world_scale, 0.08, 0.07)
+
+
+## Is `hand` touching `point` (within touch_r) or pointing at it (its -Z ray passes within ray_r, no further
+## than MAX_POINT away)? Radii in metres, times world scale ws. core/net.gd's wrist MENU / ARCADE buttons use it.
+static func points_at(hand: Node3D, point: Vector3, ws: float, touch_r: float, ray_r: float) -> bool:
+	var to := point - hand.global_position
+	if to.length() < touch_r * ws:
+		return true
+	var fwd := -hand.global_basis.z
 	var along := to.dot(fwd)
-	return to.length() < 0.08 * world_scale or (along > 0.0 and (to - fwd * along).length() < 0.07 * world_scale)
+	return along > 0.0 and along < MAX_POINT * ws and (to - fwd * along).length() < ray_r * ws
 
 
 ## Is `point` in the safe zone around the wrist MENU (don't put grab targets there)?
