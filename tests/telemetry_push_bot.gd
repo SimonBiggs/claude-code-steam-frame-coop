@@ -3,7 +3,8 @@ extends Node
 ## has found the (test) receiver on DUO_TELEMETRY_PORT by its UDP hello and sent them, then queues the first line
 ## AGAIN (a resend after a lost reply) plus one new line and waits for those too. The runner checks the receiver
 ## kept exactly 4 lines for this device and counted 1 duplicate. Needs DUO_TELEMETRY_PUSH_TEST=1 (own outbox, the
-## real receiver refuses test lines). Ends itself: BOT RESULT.
+## real receiver refuses test lines). TELEMETRY_BOT_CHECKIN_ONLY=1: records nothing and only waits for the start-up
+## check-in. Ends itself: BOT RESULT.
 
 const Push := preload("res://core/telemetry_push.gd")
 const Telemetry := preload("res://core/telemetry.gd")
@@ -38,6 +39,13 @@ func _run() -> void:
 	if svc == null:
 		svc = Push.new()
 		get_tree().root.add_child(svc)
+	if OS.get_environment("TELEMETRY_BOT_CHECKIN_ONLY") == "1":
+		# A machine with nothing to send still checks in once per arcade start (core/telemetry_push.gd _checkin).
+		var until := Time.get_ticks_msec() + 30000
+		while bool(svc.get("_checkin")) and Time.get_ticks_msec() < until:
+			await get_tree().create_timer(0.25).timeout
+		_end(not bool(svc.get("_checkin")) and Push.pending().is_empty(), "checked in with nothing to send")
+		return
 	for i in 3:
 		Telemetry.run("push_test", {"n": i, "mode": "bot"})
 	var first := Push.pending()[0] if Push.pending().size() > 0 else ""

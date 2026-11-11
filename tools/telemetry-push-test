@@ -2,7 +2,7 @@
 // telemetry-push-test: proves the arcade's telemetry push end to end on this machine, without touching the real
 // store: a TEST receiver (tools/duo-telemetry-recv --test) on a random port and folder, two arcade machines
 // (tests/telemetry_push_bot.tscn as "test-host" and "test-client", each with its own user:// data) that find it by
-// UDP hello and send their RUN lines over HTTP, one line resent. Passes when each device has exactly its 4 lines
+// UDP hello and send their RUN lines over HTTP, one line resent, plus "test-checkin" that only checks in (no lines). Passes when each device has exactly its 4 lines
 // stored, the resend was counted as a duplicate (not stored twice), and a normal receiver refuses test lines.
 //   tools/telemetry-push-test [PROJECT_DIR]
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -25,10 +25,11 @@ try {
   // A normal receiver refuses lines marked as test runs.
   const r = await fetch(`http://127.0.0.1:${port2}/runs`, { method: "POST", body: JSON.stringify({ device: "x", test: true, runs: [] }) });
   if (r.status !== 403) fail(`the real receiver took a test batch (HTTP ${r.status})`);
-  const machines = ["test-host", "test-client"].map((dev, i) => Bun.spawn(
+  const machines = ["test-host", "test-client", "test-checkin"].map((dev, i) => Bun.spawn(
     ["godot-test", "--headless", "--path", proj, "res://tests/telemetry_push_bot.tscn"],
     { env: { ...process.env, DUO_TELEMETRY_PUSH_TEST: "1", DUO_TELEMETRY_PORT: String(port), DUO_TELEMETRY_DEVICE: dev,
-        DUO_TELEMETRY_RETRY: "2", DUO_PORT: String(port + 10 + i), XDG_DATA_HOME: join(tmp, dev), DUO_SOLO: "1" },
+        DUO_TELEMETRY_RETRY: "2", DUO_PORT: String(port + 10 + i), XDG_DATA_HOME: join(tmp, dev), DUO_SOLO: "1",
+        ...(dev === "test-checkin" ? { TELEMETRY_BOT_CHECKIN_ONLY: "1" } : {}) },
       stdout: "pipe", stderr: "pipe" }));
   const outs = await Promise.all(machines.map(async m => {
     const t = setTimeout(() => m.kill(), 120_000);
@@ -49,9 +50,13 @@ try {
     if (lines.length !== 4 || ids.size !== 4) fail(`${dev}: stored ${lines.length} lines (${ids.size} ids), want 4`);
     if (st[dev]?.lines !== 4) fail(`${dev}: /status says ${st[dev]?.lines}`);
     if (lines.some(l => JSON.parse(l).run?.game !== "push_test")) fail(`${dev}: a stored line isn't a push_test RUN line`);
+    if (!(st[dev]?.last_checkin > 0) || !st[dev]?.build) fail(`${dev}: no start-up check-in / build in /status (${JSON.stringify(st[dev])})`);
   }
+  // A machine that ran the arcade but finished no rounds still shows up (check-in, no lines).
+  if (!(st["test-checkin"]?.last_checkin > 0) || st["test-checkin"]?.lines !== 0) fail(`test-checkin: not listed as checked in with 0 lines (${JSON.stringify(st["test-checkin"])})`);
   recv.kill(); real.kill();
   const log = await recvLog;
+  if (!/test-checkin: checked in from /.test(log)) fail("the receiver didn't log test-checkin's check-in");
   for (const dev of ["test-host", "test-client"])
     if (!new RegExp(`${dev}: 1 new, 1 already here`).test(log)) fail(`${dev}: the receiver didn't count the resend as a duplicate`);
   console.log(log.trim());
