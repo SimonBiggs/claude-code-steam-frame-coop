@@ -10,6 +10,8 @@ const COLOR := Color(1.0, 0.6, 0.75)
 
 ## data: the raw save (no defaults filled in: always .get with a default). today: Seeded.today().
 ## grown: every ghost ever kept in a jar (the shelf); daily: TODAY'S HOUSE finished today (daily = {date: night}).
+## (Second pass: "mode" the family's last gentle / brave / hard, "wings" wing id -> houses visited with it; both new
+## keys with defaults, so the save layout is unchanged.)
 static func progress_summary(data: Dictionary, today: String) -> Dictionary:
 	var daily: Variant = data.get("daily", {})
 	return {"grown": int(data.get("kept", 0)),
@@ -18,5 +20,5 @@ static func progress_summary(data: Dictionary, today: String) -> Dictionary:
 
 ## A save as the game writes it after a few days (tests/progress_test.gd: it must read as grown > 0, daily done).
 static func sample(today: String) -> Dictionary:
-	return {"world": 123456, "houses": 5, "kept": 17, "jars": {"snoozy": 8, "zippy": 6, "peekaboo": 3},
-		"daily": {today: 3}, "best_night": 3, "nights": 6}
+	return {"world": 123456, "houses": 5, "kept": 17, "jars": {"snoozy": 8, "zippy": 6, "peekaboo": 3, "boing": 2, "puff": 1},
+		"daily": {today: 3}, "best_night": 3, "nights": 6, "mode": "brave", "wings": {"attic": 2, "cellar": 1}}
