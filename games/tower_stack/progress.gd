@@ -9,7 +9,8 @@ const COLOR := Color(0.55, 0.75, 1.0)
 
 
 ## data: the raw save (no defaults filled in: always .get with a default). today: Seeded.today().
-## grown: every building Wren's town has had (the town shows the newest ones); daily: TODAY'S TOWER built today.
+## grown: every building Wren's town has had (the town shows the newest ones, and its DISTRICTS - districts.gd - open
+## as it grows); daily: TODAY'S TOWER built today (the game stamps "daily" when the tower is BUILT, never at the start).
 static func progress_summary(data: Dictionary, today: String) -> Dictionary:
 	var town: Variant = data.get("town", [])
 	return {"grown": maxi(int(data.get("built", 0)), (town as Array).size() if town is Array else 0),
@@ -18,4 +19,5 @@ static func progress_summary(data: Dictionary, today: String) -> Dictionary:
 
 ## A save as the game writes it after a few days (tests/progress_test.gd: it must read as grown > 0, daily done).
 static func sample(today: String) -> Dictionary:
-	return {"best": 9.5, "built": 14, "town": [{"b": 0}, {"b": 1}, {"b": 2}], "daily": today, "sessions": 4}
+	return {"best": 9.5, "built": 14, "daily": today, "sessions": 4, "mode": "gentle",
+		"town": [[1234, 2, 0], [99, 3, 1, 1, 0], [5678, 4, 0, 2, 7]]}  # old 3-long entries and new [seed, level, daily, mode, open]
