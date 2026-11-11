@@ -19,6 +19,10 @@ const MILESTONES: Array = [
 	[70, "pond", "wave", "A duck pond! Quack!"],
 	[100, "oak", "tree", "A big oak tree!"],
 	[150, "bunting", "star", "Party flags! Hooray!"],
+	[200, "orchard", "apple", "Apple trees! Crunch!"],  # second pass: the farm keeps growing
+	[260, "sunflowers", "sunflower", "Sunflowers! So tall!"],
+	[330, "pumpkins", "pumpkin", "A pumpkin patch!"],
+	[420, "rainbow", "rainbow", "A rainbow arch! Wow!"],
 ]
 const CHEERS: Array[String] = ["All home! Hooray!", "Good dogs!", "Woof woof! Well done!", "What a team!", "Baa-rilliant!"]
 ## New things a field brings the first time (field level they start at -> Bo's tip).
@@ -29,7 +33,7 @@ const HOME_SHOWN := 18  ## sheep drawn in the home field (the sign shows the rea
 
 static func save_defaults() -> Dictionary:
 	return {"best": 0, "level": 0, "home": 0, "breeds": {}, "built": [], "rounds": 0, "world": -1,
-		"daily": {}, "stars": {}, "tips": [], "met_bo": false}
+		"daily": {}, "stars": {}, "tips": [], "met_bo": false, "mode": "brave", "seasons": {}, "foxes": 0}
 
 
 ## The field a farm is on next: its seed (this family's own fields) and spec.

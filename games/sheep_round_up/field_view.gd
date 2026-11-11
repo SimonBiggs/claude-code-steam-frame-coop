@@ -201,6 +201,31 @@ class FarmNode extends Node3D:
 				b.cone(0.13, 0.26, MeshKit.at(c + Vector3(x, y, HALF.y), Vector3.ONE, Vector3(PI, 0.0, 0.0)), cols[k % 4], 3)
 			for e in [-1.0, 1.0]:
 				b.box(Vector3(0.08, 1.5, 0.08), MeshKit.at(c + Vector3(e * HALF.x, 0.75, HALF.y)), WOOD)
+		if built.has("orchard"):
+			for k in 4:
+				var op := c + Vector3(-9.5 + (k % 2) * 1.8, 0.0, -4.0 + (k / 2) * 2.0)
+				b.add_mesh(MeshKit.prop("tree"), Transform3D(Basis().scaled(Vector3.ONE * 1.2), op))
+				for a in 3:
+					b.sphere(0.12, MeshKit.at(op + Vector3(cos(a * 2.1) * 0.55, 1.5 + 0.2 * a, sin(a * 2.1) * 0.55)), Color(0.9, 0.15, 0.15), 6)
+		if built.has("sunflowers"):
+			for k in 7:
+				var sp := c + Vector3(-HALF.x + 0.6 + k * 0.75, 0.0, HALF.y + 1.4)
+				b.cylinder(0.04, 0.04, 1.4, MeshKit.at(sp + Vector3.UP * 0.7), Color(0.3, 0.6, 0.25))
+				b.cylinder(0.24, 0.24, 0.06, MeshKit.at(sp + Vector3(0.0, 1.45, 0.05), Vector3.ONE, Vector3(PI * 0.5, 0.0, 0.0)), Color(1.0, 0.8, 0.15))
+				b.cylinder(0.11, 0.11, 0.08, MeshKit.at(sp + Vector3(0.0, 1.45, 0.08), Vector3.ONE, Vector3(PI * 0.5, 0.0, 0.0)), Color(0.45, 0.28, 0.12))
+		if built.has("pumpkins"):
+			for k in 5:
+				var pp := c + Vector3(5.6 + (k % 3) * 0.9, 0.0, 1.4 + (k / 3) * 0.9)
+				var pb := MeshKit.at(pp + Vector3.UP * 0.25, Vector3(1.0, 0.75, 1.0))
+				b.sphere(0.33, pb, Color(1.0, 0.55, 0.12), 8)
+				b.cylinder(0.04, 0.04, 0.15, MeshKit.at(pp + Vector3.UP * 0.55), Color(0.35, 0.5, 0.2))
+		if built.has("rainbow"):
+			var rc := [Color(1.0, 0.3, 0.3), Color(1.0, 0.65, 0.2), Color(1.0, 0.95, 0.3), Color(0.4, 0.85, 0.4), Color(0.35, 0.6, 1.0), Color(0.65, 0.4, 0.95)]
+			for band in rc.size():
+				var rad := 6.0 - band * 0.35
+				for k in 18:
+					var a2 := PI * k / 17.0
+					b.sphere(0.2, MeshKit.at(c + Vector3(cos(a2) * rad, sin(a2) * rad * 0.8, -HALF.y - 3.5)), rc[band], 5)
 		add_child(MeshKit.instance(b.build()))
 		# Bo at the paddock gate, looking at the field.
 		bo = Creatures.humanoid({"class": "farmer", "hat": "straw", "outfit": Farm.BO_COLOR, "hair": Color(0.95, 0.75, 0.35),

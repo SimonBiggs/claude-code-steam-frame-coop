@@ -33,6 +33,11 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "sru-fox", "date": "2026-11-11", "game": "sheep_round_up", "pic": "fox", "line": "A fox! Rings warn you first", "try": {"SRU_LEVEL": "3", "SRU_EVENT_AT": "6"}},
+	{"id": "sru-tricks", "date": "2026-11-11", "game": "sheep_round_up", "pic": "zoomies", "line": "Pick a dog trick!"},
+	{"id": "sru-seasons", "date": "2026-11-11", "game": "sheep_round_up", "pic": "snowflake", "line": "Snow, rain, wind and sun!", "try": {"SRU_SEASON": "winter"}},
+	{"id": "sru-gentle", "date": "2026-11-11", "game": "sheep_round_up", "pic": "shepherd", "line": "Gentle, brave or hard"},
+	{"id": "sru-farm", "date": "2026-11-11", "game": "sheep_round_up", "pic": "rainbow", "line": "Bo's farm grows more!"},
 	{"id": "kr-pancakes", "date": "2026-11-11", "game": "kitchen_rush", "pic": "pancakes", "line": "Pancake day! Pizza night!", "try": {"KR_THEME": "pancake"}},
 	{"id": "kr-gifts", "date": "2026-11-11", "game": "kitchen_rush", "pic": "helpermouse", "line": "Pick Gran's chef gifts!"},
 	{"id": "kr-events", "date": "2026-11-11", "game": "kitchen_rush", "pic": "spill", "line": "Smoke and spills warn first"},
