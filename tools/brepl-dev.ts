@@ -78,7 +78,9 @@ export const bots = {
     // Bots that change game files refuse plain runs ("run it with tools/multibot.ts --copies" / tools/hot-everything-test):
     // they have their own runners, so a sweep skips them instead of reporting two FAILs every time.
     const own = new Set<string>();
-    if (!o.only) for (const id of await bots.list()) if ((await Bun.file(join(STAGE, "tests", id + "_bot.gd")).text().catch(() => "")).includes("this bot changes game files")) own.add(id);
+    // (So do bots that are one half of a tools/ runner: "## Own runner: tools/<name>" in their header, e.g. lan_update
+    // and telemetry_push, which FAIL on purpose without their runner's receiver / update server, 2026-11-11.)
+    if (!o.only) for (const id of await bots.list()) if (/this bot changes game files|^## Own runner: /m.test(await Bun.file(join(STAGE, "tests", id + "_bot.gd")).text().catch(() => ""))) own.add(id);
     const ids = (o.only ?? (await bots.list())).filter(id => !own.has(id));
     const results: any[] = [];
     let next = 0;

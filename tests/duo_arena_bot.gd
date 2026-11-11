@@ -75,6 +75,8 @@ func _physics_process(delta: float) -> void:
 			continue
 		p.force_fire = p.index >= 2 or mode == "client"
 		_aim(p)
+	if mode == "client" and t >= end_t - 1.0:
+		_deep_checks()  # a TV machine's verdict too (the host's comes from its content script)
 	if mode != "client":
 		_content_script()
 		if OS.has_environment("BOT_GOD"):
@@ -302,6 +304,9 @@ func _report(mode: String) -> void:
 ## The deep content (arenagen / zone / picks / story) works: a zone was built, everyone picked a hero, Nova told the
 ## story. Fails print SCRIPT ERROR (the runner's verdict); the summary is the BOT RESULT line.
 func _deep_checks() -> void:
+	if has_meta("deep_checked"):
+		return
+	set_meta("deep_checked", true)
 	var fails: Array[String] = []
 	var z = main.zone
 	if z == null or z.zone_id == "":

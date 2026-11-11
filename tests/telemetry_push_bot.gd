@@ -5,6 +5,7 @@ extends Node
 ## kept exactly 4 lines for this device and counted 1 duplicate. Needs DUO_TELEMETRY_PUSH_TEST=1 (own outbox, the
 ## real receiver refuses test lines). TELEMETRY_BOT_CHECKIN_ONLY=1: records nothing and only waits for the start-up
 ## check-in. Ends itself: BOT RESULT.
+## Own runner: tools/telemetry-push-test (brepl dev.bots.all skips it; alone or under multibot it FAILs on purpose).
 
 const Push := preload("res://core/telemetry_push.gd")
 const Telemetry := preload("res://core/telemetry.gd")

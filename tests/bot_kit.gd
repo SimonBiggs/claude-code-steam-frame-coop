@@ -467,7 +467,8 @@ func vr_head_height(rig: Node, h: float) -> void:
 	cam.position.y = h * float(rig.world_scale)
 
 
-## core/quit_after.gd calls this just before --quit-after ends a local run: report the checks so far, so a long bot
-## cut off by dev.bots' frame limit still prints a BOT RESULT (2026-10-31: party_board needs ~9000 frames).
-func on_frame_limit() -> void:
-	finish(false, ", stopped at the --quit-after frame limit")
+## tests/bot_end.gd quit_quietly calls this when a bot that hasn't finished is ended for it (core/quit_after.gd's
+## --quit-after limit, bot_end.gd's networked end): report the checks so far, so every run prints a BOT RESULT
+## (2026-10-31: party_board needs ~9000 frames; 2026-11-11: networked runs ended without one).
+func on_frame_limit(note := ", stopped at the --quit-after frame limit") -> void:
+	finish(false, note)

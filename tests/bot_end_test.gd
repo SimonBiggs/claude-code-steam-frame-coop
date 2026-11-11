@@ -14,6 +14,7 @@ func _initialize() -> void:
 	var bad: Array[String] = []
 	var late: Array[String] = []
 	var flat: Array[String] = []
+	var counted: Array[String] = []
 	var n := 0
 	for f in DirAccess.get_files_at("res://tests"):
 		if not f.ends_with("_bot.gd") or f in HELPERS:
@@ -23,6 +24,12 @@ func _initialize() -> void:
 		# quit() alone is not enough (often only a BOT_COUNT-style side mode quits): it must come with a BOT RESULT line.
 		if not ("finish(" in src or "bot_end.gd" in src or ("quit(" in src and "BOT RESULT" in src)):
 			bad.append(f)
+		# ...and END WITH A VERDICT that counts checks, in local, host and joining runs (tools/multibot.ts FAILs a run
+		# without BOT RESULT: it tested nothing; penalty_shootout's networked runs did, 2026-11-11): bot_kit's
+		# finish(), its own BOT RESULT line (dragon_rider counts its checks), or tests/bot_end.gd check() (the shared
+		# tally prints the BOT RESULT; with 0 checks it says FAIL). The runners FAIL a run that printed none.
+		if not ("finish(" in src or "BotEnd.check(" in src or "BOT RESULT" in src):
+			counted.append(f)
 		# Quitting straight away while a sound plays leaks its AudioStreamWAV + playback at exit: bots quit through
 		# tests/bot_end.gd quit_quietly (2026-10-29).
 		if "get_tree().quit(" in src or "tree.quit(" in src:
@@ -61,6 +68,9 @@ func _initialize() -> void:
 				code += line + "\n"
 		if not ("PASS" in code or "finish(" in code):
 			flat.append(f + " (prints no PASS verdict: print \"<NAME>: PASS\" when it passed, FAIL when not)")
+	if not counted.is_empty():
+		flat.append("these bots count no checks (BotEnd.check() / bot_kit, so they end with a real BOT RESULT): " + ", ".join(counted))
+	_tally_lines(flat)
 	if not late.is_empty():
 		printerr("SCRIPT ERROR: BOT END: these bots end late in networked runs without bot_end.gd within_deadline (the runner kills them first): " + ", ".join(late))
 	if not flat.is_empty():
@@ -70,3 +80,18 @@ func _initialize() -> void:
 	elif not bad.is_empty():
 		printerr("SCRIPT ERROR: BOT END: these bots never end by themselves (arm tests/bot_end.gd in _ready): " + ", ".join(bad))
 	quit(1 if not (bad.is_empty() and late.is_empty() and flat.is_empty()) else 0)
+
+
+## tests/bot_end.gd's Tally counts every failure-line style the bots print (and tools/multibot.ts's FAIL rule matches
+## the same ones): keep them in step.
+func _tally_lines(flat: Array[String]) -> void:
+	var Tally = load("res://tests/bot_end.gd").Tally
+	for l in ["Bot: FAIL the bed has 3 spots", "BOT: HOUSE FAIL bodies=3", "BOT LEAK-CHECK FAIL host: x",
+			"SCRIPT ERROR: BOT DEEP: no pick", "SCRIPT ERROR: BOT: FAILED siege", "BOT ASSERT FAILED: x",
+			"BOT: ERROR instruction text on P2: press A", "Bot: SIMPLE FAIL: game over in simple mode"]:
+		if not Tally.is_fail_line(l):
+			flat.append("bot_end.gd Tally misses a failure line: " + l)
+	for l in ["Bot: OK siege", "BOT host t=3 results={} FAILS=0", "BOT RESULT: PASS (3 checks)", "BOT CUES: mode=host a,b",
+			"BOT: the game was paused by something else (a real controller?) - resuming"]:
+		if Tally.is_fail_line(l):
+			flat.append("bot_end.gd Tally counts a fine line as a failure: " + l)

@@ -21,6 +21,7 @@ extends Node
 ## P2 looks away now and then (to see the turn cue); local mode unplugs and replugs P2's (fake)
 ## controller to see the bolt.
 const UiKit := preload("res://core/ui_kit.gd")
+const BotEnd := preload("res://tests/bot_end.gd")  # check(): counted checks, so every run ends with a real BOT RESULT
 var main
 var t := 0.0
 var last_print := -100.0
@@ -272,6 +273,7 @@ func _simple_checks(delta: float) -> void:
 		print("BOT: SIMPLE %s practice_done=%s woken=%d saw_sleepy=%s saw_glowy=%s hand=%s tv_caught=%s night=%d caught=%d props=%s" % [
 			"OK" if ok else "FAIL", not main.practice, main.vr_woken, saw_sleepy, saw_glowy, saw_hand, main.tv_caught.keys(),
 			main.night, main.caught, main.props.touched])
+		BotEnd.check(ok, "simple mode (mode %s): practice done, a night, a ghost caught, props touched, no game over" % mode)
 
 
 ## Second pass: the pick orbs (mode before night 1, a lantern gift after a night: the VR hand or P2's feet take
@@ -298,8 +300,8 @@ func _second_pass(_delta: float) -> void:
 		if t > 44.0 and not has_meta("client_second"):
 			set_meta("client_second", true)
 			print("BOT: client second pass: orbs=%s rings=%s mode=%s gifts=%s wing=%s" % [saw_orbs.keys(), saw_rings, main.game_mode, main.upgrades, main.house.get("wing", {}).get("id", "-")])
-			if main.net.connected and saw_orbs.is_empty() and not OS.has_environment("GL_MODE"):
-				print("SCRIPT ERROR: BOT second: the client never saw the pick orbs")
+			if main.net.connected and not OS.has_environment("GL_MODE"):
+				BotEnd.check(not saw_orbs.is_empty(), "the client saw the pick orbs")
 		return
 	var p1 = main.players[0]
 	# Take an orb a second after it's up: the VR lantern-bearer with a hand, else P2 walks under one.
@@ -347,6 +349,7 @@ func _second_pass(_delta: float) -> void:
 		print("BOT: SECOND %s picks=%s mode=%s gifts=%s angle=%.0f range=%.1f rings=%s pufflings=%d boing_landed=%s wing=%s" % [
 			"OK" if errs.is_empty() else "FAIL", str(main.picks.history), main.game_mode, main.upgrades, main.lantern_angle(),
 			main.lantern_range(), saw_rings, pufflings_seen, saw_boing_land, main.house.get("wing", {}).get("id", "-")])
+		BotEnd.check(errs.is_empty(), "second pass (picks, gifts, new ghosts): %s" % str(errs))
 
 
 ## Granny Boo's house: hiding ghosts seen hiding (eyes showing, body hidden) and coming out.
@@ -410,6 +413,7 @@ func _check_house() -> void:
 			errs.append("the client's jar shelf is empty (host kept %s)" % str(main.house_key))
 	for e in errs:
 		print("SCRIPT ERROR: BOT house: " + str(e))
+	BotEnd.check(errs.is_empty(), "the haunted house (mode %s): %s" % [main.net.mode, str(errs)])
 	if main.house_key.size() == 5:
 		print("BOT AGREE house=%d/%d" % [int(main.house_key[0]), int(main.house_key[1])])
 	print("BOT: HOUSE %s bodies=%d seed=%s spots=%d hid=%s out=%s kept=%d cosy=%d stories=%d" % ["OK" if errs.is_empty() else "FAIL", _bodies(main).size(),
@@ -592,6 +596,9 @@ func _tip_error(who: String, text: String) -> void:
 
 
 func _exit_tree() -> void:
+	# The verdict (tests/bot_end.gd prints BOT RESULT from the counted checks, in local, host and joining runs).
+	if main != null and is_instance_valid(main):
+		BotEnd.check(has_meta("report"), "the run reached its 55 s report (mode %s, t=%.0f)" % [main.net.mode, t])
 	if main != null and is_instance_valid(main) and main.simple:
 		var ks: Array = cues.keys()
 		ks.sort()

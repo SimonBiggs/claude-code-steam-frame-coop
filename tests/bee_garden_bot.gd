@@ -28,6 +28,7 @@ const W := preload("res://games/bee_garden/world.gd")
 const PlantScript := preload("res://games/bee_garden/plant.gd")
 const G := preload("res://games/bee_garden/gardener.gd")
 const PR := preload("res://games/bee_garden/props.gd")
+const BotEnd := preload("res://tests/bot_end.gd")  # check(): counted checks, so every run ends with a real BOT RESULT
 
 var main
 var t := 0.0
@@ -130,12 +131,13 @@ func _physics_process(delta: float) -> void:
 		print("BOT AGREE bed=%d" % hash(var_to_str(W.layout)))
 		print("Bot: garden %d plan %s, %d features, shelf %d jars, Queen Bea's favourite %d, weather %s" % [main.garden_seed,
 			main.garden.get("plan", "?"), (main.garden.get("features", []) as Array).size(), main.shelf_jars, main.fav_kind, main.weather])
-		if (W.layout as Array).size() != W.SPOTS:
-			print("Bot: FAIL the bed has %d spots" % (W.layout as Array).size())
+		BotEnd.check((W.layout as Array).size() == W.SPOTS, "the bed has %d spots, not %d" % [(W.layout as Array).size(), W.SPOTS])
+		var off := -1
 		for i in main.plant_nodes.size():
 			if main.plant_nodes[i].position.distance_to(W.spot_pos(i)) > 0.01:
-				print("Bot: FAIL plant %d isn't on its spot" % i)
+				off = i
 				break
+		BotEnd.check(off < 0, "plant %d isn't on its spot" % off)
 	if main.days_done >= 1 and not reported:
 		reported = true
 		print("Bot: LEVEL COMPLETE at t=%.1f (mode=%s, day %d done, honey %d)" % [t, main.net.mode, main.days_done, main.total_honey])
@@ -209,7 +211,8 @@ func _deep_checks() -> void:
 			if not deep.has(k):
 				missing.append(k)
 		print("Bot: DEEP mode=%s game_mode=%s gifts=%s hive=%d seen=%s %s" % [main.net.mode, main.game_mode, str(main.gifts),
-			main.jarshelf.hive_level, str(deep.keys()), "ok" if missing.is_empty() else "FAIL missing " + str(missing)])
+			main.jarshelf.hive_level, str(deep.keys()), "ok" if missing.is_empty() else "missing " + str(missing)])
+		BotEnd.check(missing.is_empty(), "the deep game showed everything (mode %s): missing %s" % [main.net.mode, str(missing)])
 
 
 func _orbs_taken() -> bool:
@@ -563,6 +566,10 @@ func _tip_error(who: String, text: String) -> void:
 
 
 func _exit_tree() -> void:
+	# The verdict (tests/bot_end.gd prints BOT RESULT from the counted checks, in local, host and joining runs).
+	if main != null and is_instance_valid(main):
+		BotEnd.check(reported, "a garden day was completed (mode %s, t=%.0f)" % [main.net.mode, t])
+		BotEnd.check(not main.simple or not main.game_over, "no game over in simple mode")
 	if main != null and is_instance_valid(main) and main.simple:
 		var ks: Array = cues.keys()
 		ks.sort()

@@ -20,6 +20,7 @@ extends Node
 ## picture of it must be up (artist-only layer) and no 3D picture a TV camera draws may show it.
 
 const FAKE_PAD := 40
+const BotEnd := preload("res://tests/bot_end.gd")  # check(): counted checks, so every run ends with a real BOT RESULT
 
 var main
 var t := 0.0
@@ -68,6 +69,12 @@ func _ready() -> void:
 	filt.name = "RealPadFilter"
 	filt.process_mode = Node.PROCESS_MODE_ALWAYS
 	get_tree().root.add_child.call_deferred(filt)
+
+
+## The verdict (tests/bot_end.gd prints BOT RESULT from the counted checks, in local, host and joining runs).
+func _exit_tree() -> void:
+	if main != null and is_instance_valid(main):
+		BotEnd.check(rounds_done >= 1, "a drawing round was played (mode %s, t=%.0f)" % [main.net.mode, t])
 
 
 func _pad_press(device: int, button: JoyButton) -> void:
@@ -466,11 +473,9 @@ func _check_leaks(mode: String) -> void:
 	var bad := 0
 	if mode != "client":
 		print("BOT %s: artist word card above the easel: '%s' (%s)" % [mode, card_seen, "ok" if card_seen == w else "MISSING"])
-		if card_seen != w:
-			print("BOT LEAK-CHECK FAIL %s: the artist's word card did not show '%s'" % [mode, w])
+		BotEnd.check(card_seen == w, "%s: the artist's word card showed '%s' (saw '%s')" % [mode, w, card_seen])
 		print("BOT %s: artist picture above the easel: '%s' (%s)" % [mode, pic_seen, "ok" if pic_seen == thing else "MISSING"])
-		if pic_seen != thing:
-			print("BOT LEAK-CHECK FAIL %s: the artist's picture did not show '%s'" % [mode, thing])
+		BotEnd.check(pic_seen == thing, "%s: the artist's picture showed '%s' (saw '%s')" % [mode, thing, pic_seen])
 	card_seen = ""
 	pic_seen = ""
 	if seen_pics.has(thing):
@@ -488,6 +493,7 @@ func _check_leaks(mode: String) -> void:
 			print("BOT LEAK %s: a guesser could see the secret word '%s' in %s: %s" % [mode, w, seen_texts[txt], str(txt).replace("\n", " | ")])
 	leaks += bad
 	word_checks += 1
+	BotEnd.check(bad == 0, "%s: no guesser could see the secret word, picture or letter hints in round %d (%d leaks)" % [mode, main.round_n, bad])
 	print("BOT %s: secret-word check round %d: %d guesser-visible texts, %d leaks (total %d leaks in %d checks)" % [mode,
 		main.round_n, seen_texts.size(), bad, leaks, word_checks])
 	seen_texts.clear()

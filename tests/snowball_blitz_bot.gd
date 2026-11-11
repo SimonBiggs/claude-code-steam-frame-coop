@@ -28,6 +28,7 @@ var script_step := 0
 var vr_t := 0.0
 var vr_throws := 0
 var cues := {}  # simple mode: picture cues seen / learned
+const BotEnd := preload("res://tests/bot_end.gd")  # check(): counted checks, so every run ends with a real BOT RESULT
 const HEADLINES := "^(SNOWBALL BLITZ!|WAVE \\d+!|THE YETI!|SNOW KING!|HOORAY!|VICTORY!|OH NO!|PAUSED|HELLO TV!|PLAYER \\d+!|CONNECTED!|THE YETI IS DOWN!|THE SNOW KING MELTED!|Connecting to the VR player…)$"
 var headline_re := RegEx.create_from_string(HEADLINES)
 var turn_waits := 0  # simple mode: times a TV player looked away until the turn cue showed
@@ -463,6 +464,9 @@ func _tip_error(who: String, text: String) -> void:
 
 
 func _exit_tree() -> void:
+	# The verdict (tests/bot_end.gd prints BOT RESULT from the counted checks, in local, host and joining runs).
+	if main != null and is_instance_valid(main):
+		_bot_check(main.wave >= 1, "the snowball waves came (mode %s, wave %d, t=%.0f)" % [main.net.mode, main.wave, t])
 	if main == null or not is_instance_valid(main) or not main.simple:
 		return
 	var ks: Array = cues.keys()
@@ -565,4 +569,5 @@ func _check_siege() -> void:
 
 
 func _bot_check(ok: bool, what: String) -> void:
-	print(("Bot: OK " if ok else "SCRIPT ERROR: BOT: FAILED ") + what)
+	if BotEnd.check(ok, what):  # counted: tests/bot_end.gd prints the BOT RESULT
+		print("Bot: OK " + what)

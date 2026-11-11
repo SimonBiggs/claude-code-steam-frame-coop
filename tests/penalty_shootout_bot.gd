@@ -21,6 +21,7 @@ extends Node
 ## a short title / score word, or a tip spot (help line, view HUD lines) shows any words.
 
 const FAKE_PAD := 40
+const BotEnd := preload("res://tests/bot_end.gd")  # check(): counted checks, so every run ends with a real BOT RESULT
 
 var main
 var t := 0.0
@@ -535,27 +536,29 @@ func _tip_error(who: String, text: String) -> void:
 
 
 func _exit_tree() -> void:
-	if main == null or not main.simple:
+	if main == null:
+		return
+	# The verdict (tests/bot_end.gd prints BOT RESULT from the counted checks, in local, host and joining runs).
+	BotEnd.check(rounds_done >= 1, "a round of penalties was played (mode %s, t=%.0f, shots %d)" % [main.net.mode, t, shots_fired])
+	if not main.simple:
 		return
 	var ks: Array = cues.keys()
 	ks.sort()
 	print("BOT CUES: mode=%s %s" % [main.net.mode, ",".join(PackedStringArray(ks))])
 	print("BOT LEO: mode=%s matches=%d %s" % [main.net.mode, matches_done, str(leo)])
-	if matches_done >= 1 and not (leo.get("plan", false) and leo.get("star_shown", false) and leo.get("sockets", false)):
-		print("SCRIPT ERROR: BOT LEO: a whole match without Leo's plan, star or sockets (%s)" % str(leo))
-	if main.net.mode != "client" and leo.get("cubs", 0) < 1:
-		print("SCRIPT ERROR: BOT LEO: no lion cub beside Leo (%s)" % str(leo))
+	if matches_done >= 1:
+		BotEnd.check(leo.get("plan", false) and leo.get("star_shown", false) and leo.get("sockets", false), "a match showed Leo's plan, star and sockets (%s)" % str(leo))
+	if main.net.mode != "client":
+		BotEnd.check(leo.get("cubs", 0) >= 1, "a lion cub beside Leo (%s)" % str(leo))
 	print("BOT DEEP: mode=%s matches=%d %s" % [main.net.mode, matches_done, str(deep)])
-	if main.net.mode != "client" and matches_done >= 1 and not deep.has("pick_mode"):
-		print("SCRIPT ERROR: BOT DEEP: a match without the mode pick (%s)" % str(deep))
-	if main.net.mode != "client" and matches_done >= 2 and not deep.has("pick_gift"):
-		print("SCRIPT ERROR: BOT DEEP: a second match without Leo's gift pick (%s)" % str(deep))
-	if deep.has("hz_due") and not (deep.has("told_gust") or deep.has("told_mud")):
-		print("SCRIPT ERROR: BOT DEEP: a kick had weather nobody was told about (%s)" % str(deep))
-	if deep.has("untold"):
-		print("SCRIPT ERROR: BOT DEEP: a kick could go before its weather was told (%s)" % str(deep))
-	if String(deep.get("dressed", "")) == "" or String(deep.get("dressed", "")) != String(deep.get("season", "?")):
-		print("SCRIPT ERROR: BOT DEEP: the pitch isn't dressed for the season (%s)" % str(deep))
+	if main.net.mode != "client" and matches_done >= 1:
+		BotEnd.check(deep.has("pick_mode"), "a match had the mode pick (%s)" % str(deep))
+	if main.net.mode != "client" and matches_done >= 2:
+		BotEnd.check(deep.has("pick_gift"), "a second match had Leo's gift pick (%s)" % str(deep))
+	if deep.has("hz_due"):
+		BotEnd.check(deep.has("told_gust") or deep.has("told_mud"), "every kick's weather was told (%s)" % str(deep))
+	BotEnd.check(not deep.has("untold"), "no kick went before its weather was told (%s)" % str(deep))
+	BotEnd.check(String(deep.get("dressed", "")) != "" and String(deep.get("dressed", "")) == String(deep.get("season", "?")), "the pitch is dressed for the season (%s)" % str(deep))
 	for p in main.players:
 		if p.has_meta("cue_done"):
 			print("BOT CUES: P%d done=%s" % [p.index + 1, p.get_meta("cue_done")])

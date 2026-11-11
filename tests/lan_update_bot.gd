@@ -2,6 +2,7 @@ extends Node
 ## LAN update test driver (run by tools/lan-update-test as a joining machine's main scene): it stays alive at the
 ## root, opens the real arcade, and when the updater has downloaded + verified an update it starts a "game" at once.
 ## The update must NOT be applied during the game, only after returning to the arcade menu.
+## Own runner: tools/lan-update-test.py (brepl dev.bots.all skips it; alone or under multibot it FAILs on purpose).
 
 const ARCADE := "res://arcade.tscn"
 var t := 0.0

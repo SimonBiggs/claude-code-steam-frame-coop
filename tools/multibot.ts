@@ -47,9 +47,9 @@ export type GroupResult = { pass: boolean; port: number; scene: string; machines
 
 // The one shared pass rule for a bot's output (brepl dev.bots.run imports it too).
 // (Failure lines in every style the bots print, the same ones tests/bot_end.gd's Tally counts: "Bot: FAIL x",
-// "BOT: HOUSE FAIL", "BOT LEAK-CHECK FAIL", "SCRIPT ERROR: BOT DEEP: x". Before 2026-11-11 only "Bot..." with a lower
+// "BOT: HOUSE FAIL", "BOT LEAK-CHECK FAIL", "BOT: ERROR instruction text ...", "SCRIPT ERROR: BOT DEEP: x". Before 2026-11-11 only "Bot..." with a lower
 // case "ot" counted and every "SCRIPT ERROR: BOT ..." line was ignored, so those checks could never fail a run.)
-const FAIL = /BOT ASSERT FAILED: (.*)|BOT RESULT: FAIL(.*)|^SCRIPT ERROR: (BOT\b(?! RESULT| ASSERT).*)|^((?:Bot|BOT)\b.*?\bFAIL(?:ED)?\b.*)/gm;
+const FAIL = /BOT ASSERT FAILED: (.*)|BOT RESULT: FAIL(.*)|^SCRIPT ERROR: (BOT\b(?! RESULT| ASSERT).*)|^((?:Bot|BOT)\b.*?\b(?:FAIL(?:ED)?|ERROR)\b.*)/gm;
 export const NO_RESULT = "NO BOT RESULT: the run ended without a verdict, so it tested nothing (tests/bot_end.gd check() / bot_kit finish())";
 /** Engine errors our own scripts caused (the GDScript backtrace starts in res://, not an addon), e.g. reading
  *  global_transform of a node outside the tree: they print "ERROR:" not "SCRIPT ERROR" but are bugs all the same. */
