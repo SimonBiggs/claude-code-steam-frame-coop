@@ -417,8 +417,9 @@ func _final_checks(mode: String) -> void:
 	for p in main.players:
 		if p.index > 0 and p.active and p.is_local():
 			gs += " P%d %d/%d" % [p.index + 1, int(p.hits), int(p.hits) + int(p.misses)]
+	var prac_ok: bool = checks.has("practice_seen") or OS.has_environment("BOT_LATE")  # (a late joiner came after it)
 	_check("BOT CHECK %s: practice seen %s, songs %d, menus %d, star power %d -> %s" % [mode, checks.has("practice_seen"), songs_done,
-		menus_seen, stars_used, "PASS" if checks.has("practice_seen") and menus_seen == 0 and stars_used == 0 else "FAIL"])
+		menus_seen, stars_used, "PASS" if prac_ok and menus_seen == 0 and stars_used == 0 else "FAIL"])
 	# Story + fan club: every machine shows Doodle's cards and the host's fans (one per finished song).
 	var want_fans: int = (main.net.state_get("fans", []) as Array).size()
 	var shown: int = main.fan_club.fans.size()
@@ -692,8 +693,8 @@ func _watch_changes() -> void:
 			var start: float = float(tl.bar) * 4.0 * float(main.song.spb)
 			var early: float = start - float(main.song_t)
 			var ok: bool = tl.phase == "warn" and early >= main.warn_secs() * 0.85
-			if float(main.song_t) < 0.2:
-				ok = true  # (a TV machine that joined while it was already told)
+			if float(main.song_t) < 0.2 or (OS.has_environment("BOT_LATE") and songs_done == 0):
+				ok = true  # (a TV machine that joined while it was already told: a late joiner's first song)
 			var c: int = int(checks.get("changes", 0))
 			checks["changes"] = c + 1
 			if not ok:

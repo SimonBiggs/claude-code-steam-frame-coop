@@ -4,6 +4,7 @@ extends Node3D
 ##   FAST  an orange disc on the stage floor round the band and orange chase arrows round its edge: faster bars.
 ##   SLOW  a sky-blue disc round the band with slow-drifting dots: slower bars.
 ##   SOLO  a pale gold disc under the soloist, then a soft spotlight beam on them while the solo plays.
+## The stage's light beams take the tell's colour too (the TV views see them over the crowd).
 ## Nothing flashes: the discs glow steadily (core/warn_rings.gd "disc", held with `stay`); the arrows just turn. Each
 ## kind has its own colour (deep.gd FAST_COLOR / SLOW_COLOR / SOLO_COLOR). A picture card (speedup / snail /
 ## spotlight) comes up when the tell starts. tells_now() for bots.
@@ -67,10 +68,10 @@ func _show(e: Dictionary, ph: String) -> void:
 	if kind == "solo":
 		who = main.soloist(e)
 		rings.shape("circle", solo_spot(who), Vector3.FORWARD, Vector2(Deep.SOLO_R, 0.0), col, 0.3,
-			{"style": "disc", "stay": STAY, "alpha": 0.45, "y": 0.03, "hot": col})
+			{"style": "disc", "stay": STAY, "alpha": 0.45, "y": Stage.STAGE_Y + 0.03, "hot": col})
 	else:
 		rings.shape("circle", BAND_AT, Vector3.FORWARD, Vector2(Deep.BAND_R, 0.0), col, 0.3,
-			{"style": "disc", "stay": STAY, "alpha": 0.28, "y": 0.025, "hot": col})
+			{"style": "disc", "stay": STAY, "alpha": 0.28, "y": Stage.STAGE_Y + 0.025, "hot": col})
 		var am := _mat(col.lightened(0.25), 0.95)
 		for i in ARROWS:
 			var a := MeshInstance3D.new()
@@ -144,6 +145,11 @@ func _animate() -> void:
 	if now.is_empty():
 		return
 	var kind := String(now.kind)
+	# The stage's light beams glow the tell's colour all the way through (steady: the TV views see the beams even
+	# when the crowd hides the floor).
+	if main.stage != null:
+		main.stage.tint_col = color_of(kind)
+		main.stage.tint_k = 1.0
 	# Fast: arrows chase round the disc's edge (turning, never flashing); slow: dots drift slowly round it.
 	var spd := 0.9 if kind == "fast" else 0.25
 	for i in arrows.size():

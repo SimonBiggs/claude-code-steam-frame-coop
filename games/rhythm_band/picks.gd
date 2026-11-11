@@ -291,7 +291,7 @@ func _make_strip(p) -> Control:
 		nm.add_theme_constant_override("outline_size", 8)
 		v.add_child(nm)
 		var bt := Label.new()
-		bt.text = BUTTONS[k]
+		bt.text = _button_text(p, k)
 		bt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		bt.add_theme_font_size_override("font_size", 30)
 		bt.add_theme_color_override("font_color", Color(1, 1, 1))
@@ -302,6 +302,16 @@ func _make_strip(p) -> Control:
 	box.add_theme_constant_override("separation", 28)
 	p.hud.add_child(box)
 	return box
+
+
+## The button that takes picture k on this player's controls: a pad's X / A / B, the flat drummer's A S D keys,
+## a keyboard guitarist's arrow keys.
+func _button_text(p, k: int) -> String:
+	if int(p.joy) >= 0:
+		return BUTTONS[k]
+	if p.index == 0:
+		return ["A", "S", "D"][k]
+	return ["\u2190", "\u2193", "\u2192"][k]
 
 
 func _layout_strip(p, box: Control) -> void:
