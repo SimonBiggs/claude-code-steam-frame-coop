@@ -383,6 +383,8 @@ func _look_away(p, best) -> bool:
 
 ## Visual teaching: picture cues instead of words; any instruction text in a tip spot is an error.
 func _note_cues() -> void:
+	if main.pick_stage == "gift":
+		saw["gift_pick"] = true
 	if main.orbs.orbs.size() > 0:
 		saw["orbs"] = true
 	if main.rings.count() > 0:
@@ -552,7 +554,8 @@ func _check_siege() -> void:
 		return
 	_bot_check(main.game_mode in ["gentle", "brave", "hard"], "a mode (%s)" % main.game_mode)
 	_bot_check(Engine.has_meta("sb_mode_set") or OS.has_environment("SB_MODE"), "the MODE pick happened")
-	_bot_check(not main.gifts_taken.is_empty() or main.wave < 3, "Bobo's gifts were picked (%s)" % main.gifts_taken)
+	var no_gift_wave: bool = not saw.has("gift_pick") and (main.wave < 3 or OS.has_environment("BOT_WAVE"))  # (a skip to the finale: victory, no gifts)
+	_bot_check(not main.gifts_taken.is_empty() or no_gift_wave, "Bobo's gifts were picked (%s)" % main.gifts_taken)
 	var boss_wave: bool = OS.has_environment("BOT_WAVE") and int(OS.get_environment("BOT_WAVE")) in [7, 10]
 	_bot_check(saw.has("rings") or not boss_wave, "the boss told its attacks with rings")
 	_bot_check(not main.siege.is_empty(), "a seeded siege (seed %s)" % str(main.siege.get("seed", "-")))

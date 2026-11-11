@@ -27,7 +27,7 @@ const TEAM_WALLS_MAX := 4.0  # extra snow per second on every wall (the walls re
 const TEAM_ARMOR_MIN := 0.5
 ## igloos: Bobo's village size that unlocks it.
 const GIFTS: Array[Dictionary] = [
-	{"id": "big", "name": "BIG BALLS", "pic": "bigsnowball", "color": Color(0.75, 0.9, 1.0), "igloos": 0, "fx": [["ball", "mul", 1.2]]},
+	{"id": "big", "name": "BIG BALLS", "pic": "bigsnowball", "color": Color(0.35, 0.6, 1.0), "igloos": 0, "fx": [["ball", "mul", 1.2]]},
 	{"id": "quick", "name": "QUICK", "pic": "bolt", "color": Color(1.0, 0.85, 0.3), "igloos": 0, "fx": [["throw", "mul", 0.85]]},
 	{"id": "walls", "name": "WALLS", "pic": "snowwall", "color": Color(0.55, 0.8, 1.0), "igloos": 0, "fx": [["walls", "add", 1.0]]},
 	{"id": "hat", "name": "WARM HAT", "pic": "warmhat", "color": Color(1.0, 0.45, 0.45), "igloos": 2, "fx": [["armor", "mul", 0.85]]},

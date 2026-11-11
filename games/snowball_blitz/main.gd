@@ -61,7 +61,7 @@ const Gifts := preload("res://games/snowball_blitz/gifts.gd")
 const Bosses := preload("res://games/snowball_blitz/bosses.gd")
 const ORB_ROW := Vector3(0.0, 0.0, -4.4)  # the pick orbs float in a row here (in front of the VR player, inside the fort)
 const ORB_GAP := 2.4
-const ORB_Y := 1.35
+const ORB_Y := 2.0  # (above the walls and the props round the VR player, seen from every start spot)
 const GAME_ID := "snowball_blitz"
 const VILLAGE_CHEERS := {1: "Our first igloo!", 5: "Five igloos!", 10: "Ten igloos!", 24: "A whole village!"}
 const KIND_PICS := {"snowman": "snowman", "sled": "sledman", "bunny": "bunny", "giant": "snowman", "balloon": "balloon", "king": "snowking", "yeti": "yeti"}
@@ -2641,7 +2641,8 @@ func _update_story(delta: float) -> void:
 		return
 	var b: Array = story_queue.pop_front()
 	story_t = 2.6
-	var opts := {"who": "BOBO", "line": b[0], "pic": b[1], "color": b[2], "duration": 2.4}
+	var opts := {"who": "BOBO", "line": b[0], "pic": b[1], "color": b[2], "duration": 2.4,
+		"vr_height": -0.55}  # (VR: under the pick orbs and the boss, never over them)
 	var huds: Array = []
 	for p in players:
 		if p.hud != null and is_instance_valid(p.hud) and p.hud.is_visible_in_tree():
