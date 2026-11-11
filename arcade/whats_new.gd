@@ -33,6 +33,11 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "ts-blocks", "date": "2026-11-11", "game": "tower_stack", "pic": "honeyblock", "line": "Bouncy, sticky, balloon!", "try": {"TS_TRY": "blocks"}},
+	{"id": "ts-districts", "date": "2026-11-11", "game": "tower_stack", "pic": "wren", "line": "Wren's town grows streets!"},
+	{"id": "ts-pick", "date": "2026-11-11", "game": "tower_stack", "pic": "lighthouse", "line": "Pick what to build next!"},
+	{"id": "ts-weather", "date": "2026-11-11", "game": "tower_stack", "pic": "gust", "line": "Wind and quakes warn first", "try": {"TS_TRY": "weather"}},
+	{"id": "ts-gentle", "date": "2026-11-11", "game": "tower_stack", "pic": "wren", "line": "Gentle mode for little ones", "try": {"TS_MODE": "gentle"}},
 	{"id": "sb-gifts", "date": "2026-11-11", "game": "snowball_blitz", "pic": "gift", "line": "Pick Bobo's gifts!"},
 	{"id": "sb-gentle", "date": "2026-11-11", "game": "snowball_blitz", "pic": "polarbear", "line": "Gentle mode for little ones", "try": {"SB_MODE": "gentle"}},
 	{"id": "sb-bosses", "date": "2026-11-11", "game": "snowball_blitz", "pic": "yeti", "line": "Yeti and King warn first", "try": {"SB_WAVE": "7"}},

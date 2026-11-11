@@ -6,7 +6,8 @@ extends Node
 ## The orbs float in a row over the (empty) stage. A TV player WALKS into one, the VR giant TOUCHES one with a hand;
 ## the first touch decides for the team (a dot in their colour circles it). Nobody chooses in time? The middle orb
 ## (it glows brightest) is taken, so little ones are never stuck. The round clock waits while the orbs are up.
-## Host / local decide; the host sends "orbs" [stage, entries] and "take" [i, slot] events, every machine draws.
+## Host / local decide; the host keeps the "orbs" state [stage, entries] (sticky: a machine joining mid-pick sees the
+## orbs too) and sends "take" [i, slot] events; every machine draws.
 
 const PickOrbs := preload("res://core/pick_orbs.gd")
 
@@ -52,7 +53,7 @@ func begin(new_stage: String, entries: Array, opts: Array, done: Callable) -> vo
 	done_t = 0.0
 	show_row(new_stage, entries)
 	if main.net.mode == "host":
-		main.net.event("orbs", [new_stage, entries])
+		main.net.state_set("orbs", [new_stage, entries])
 
 
 ## Every machine: the row of orbs ("" stage: none).
@@ -118,6 +119,6 @@ func _finish() -> void:
 	options = []
 	orbs.clear()
 	if main.net.mode == "host":
-		main.net.event("orbs", ["", []])
+		main.net.state_set("orbs", ["", []])
 	if on_done.is_valid():
 		on_done.call(st, opt)

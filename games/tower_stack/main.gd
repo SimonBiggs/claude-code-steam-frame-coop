@@ -844,6 +844,9 @@ func _on_state_changed(key: String, value: Variant) -> void:
 			town.set_entries(value if value is Array else [])
 		"made":
 			districts.set_made(int(value))
+		"orbs":
+			if net.mode == "client" and value is Array and (value as Array).size() >= 2:
+				picks.show_row(String(value[0]), value[1] if value[1] is Array else [])
 		"time":
 			for slot in timers:
 				var t: HudKit.TimerPill = timers[slot]
@@ -1958,7 +1961,5 @@ func apply_event(kind: String, args: Array) -> void:
 			story(String(args[0]), String(args[1]), args[2], false)
 		"weather":
 			weather_warn(String(args[0]))
-		"orbs":
-			picks.show_row(String(args[0]), args[1] if args.size() > 1 and args[1] is Array else [])
 		"take":
 			picks.take_fx(int(args[0]), int(args[1]))
