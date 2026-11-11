@@ -33,11 +33,11 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
-	{"id": "duo-nova", "date": "2026-11-11", "game": "duo_arena", "pic": "nova", "line": "Light up Nova's city!"},
+	{"id": "duo-nova", "date": "2026-11-11", "game": "duo_arena", "pic": "neoncity", "line": "Light up Nova's city!"},
 	{"id": "duo-zones", "date": "2026-11-11", "game": "duo_arena", "pic": "junglezone", "line": "New arenas with hazards!", "try": {"DA_ZONE": "jungle"}},
 	{"id": "duo-heroes", "date": "2026-11-11", "game": "duo_arena", "pic": "boomhero", "line": "Pick a hero and powers!"},
 	{"id": "duo-bosses", "date": "2026-11-11", "game": "duo_arena", "pic": "orbking", "line": "Bosses warn before they hit"},
-	{"id": "duo-gentle", "date": "2026-11-11", "game": "duo_arena", "pic": "heart", "line": "Gentle mode for little ones", "try": {"DA_MODE": "gentle"}},
+	{"id": "duo-gentle", "date": "2026-11-11", "game": "duo_arena", "pic": "nova", "line": "Gentle mode for little ones", "try": {"DA_MODE": "gentle"}},
 	{"id": "hns-street", "date": "2026-11-11", "game": "hide_and_seek", "pic": "street", "line": "Find friends on Pip's street", "try": {"HNS_TRY": "street"}},
 	{"id": "hns-party", "date": "2026-11-11", "game": "hide_and_seek", "pic": "gardenparty", "line": "Grow Pip's garden party!"},
 	{"id": "hns-dark", "date": "2026-11-11", "game": "hide_and_seek", "pic": "darkroom", "line": "Dark rooms and sneaky pals!", "try": {"HNS_TRY": "dark"}},

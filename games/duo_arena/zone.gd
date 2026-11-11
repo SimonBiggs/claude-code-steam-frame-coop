@@ -405,7 +405,7 @@ func _process(delta: float) -> void:
 	_cheer = maxf(0.0, _cheer - delta * 1.5)
 	if nova != null:
 		var a := _t * 0.25
-		nova.position = Vector3(sin(a) * 2.0, 4.6 + 0.15 * sin(_t * 2.0) + 0.8 * sin(_cheer * PI), -1.0 + cos(a) * 1.0)
+		nova.position = Vector3(sin(a) * 2.5, 5.6 + 0.15 * sin(_t * 2.0) + 0.8 * sin(_cheer * PI), -1.0 + cos(a) * 1.0)
 		nova.rotation.y = 0.35 * sin(_t * 0.5) + _cheer * TAU
 	for i in pad_rings.size():
 		var r := pad_rings[i]

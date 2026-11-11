@@ -1009,6 +1009,12 @@ func debug_skip_to_wave(n: int) -> void:
 	wave = n - 1
 	in_break = true
 	break_timer = 0.5
+	while pick_stage != "":
+		_finish_pick()
+	for p in _pick_players():
+		if not heroes.has(p.index):
+			heroes[p.index] = String(save.data.hero)  # (no hero orbs when skipping: the family's last hero)
+			Picks.apply(p, "hero", heroes[p.index])
 
 
 ## Test hook: join a TV player without a controller (index -1: the next free seat).
@@ -1996,9 +2002,9 @@ func _make_ghost(kind: String, item: Array) -> Node3D:
 func apply_event(kind: String, args: Array) -> void:
 	if seats.handle_event(kind, args):
 		return
-	if not ready_to_play:
-		return
 	if _apply_deep_event(kind, args):
+		return  # (before ready_to_play: sticky zone / keep / orbs can arrive while the client is still joining)
+	if not ready_to_play:
 		return
 	match kind:
 		"sound":
@@ -2473,7 +2479,8 @@ func _story_for_all(line: String, pic: String, color: Color = NOVA_COLOR, urgent
 
 func _story(line: String, pic: String, color: Color, urgent: bool = false) -> void:
 	if urgent:
-		story_queue.push_front([line, pic, color])
+		story_queue = story_queue.filter(func(q: Array) -> bool: return not (q.size() > 3 and bool(q[3])))  # an older prompt is stale now
+		story_queue.push_front([line, pic, color, true])
 		story_t = minf(story_t, 0.2)
 	elif story_queue.size() < 5:
 		story_queue.append([line, pic, color])
@@ -2485,7 +2492,8 @@ func _update_story(delta: float) -> void:
 		return
 	var b: Array = story_queue.pop_front()
 	story_t = 2.6 if story_queue.size() < 2 else 1.8  # a long queue moves faster (never falls behind the game)
-	var opts := {"who": "NOVA", "line": String(b[0]), "pic": String(b[1]), "color": b[2], "duration": story_t + 0.2}
+	var opts := {"who": "NOVA", "line": String(b[0]), "pic": String(b[1]), "color": b[2], "duration": story_t + 0.2,
+		"vr_height": -0.42}  # (VR: under the centre banner, never over it)
 	if views_root != null and is_instance_valid(views_root):
 		StoryCard.show(views_root, opts)
 	var p0 = players[0] if not players.is_empty() else null
