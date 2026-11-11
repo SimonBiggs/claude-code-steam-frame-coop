@@ -40,6 +40,8 @@ var checks := 0
 var failures := 0
 var _finished := false
 var machines_seen := 0  # host: the most TV machines connected at once (0 = a host alone, e.g. solo VR on the Frame)
+var pads_seen := 0  # the most pad (TV / Deck / flat host) players seated at once, on any machine (see tv_players)
+var _vr_release: Array = []  # [time, rig]: vr_click lets go of A here
 ## Print every passing check too.
 var verbose := true
 
@@ -84,6 +86,14 @@ func _process(delta: float) -> void:
 	t += delta
 	if main != null and main.get("net") != null and str(main.net.mode) == "host":
 		machines_seen = maxi(machines_seen, int(main.net.peer_count()))
+	if main != null and main.get("party") != null:
+		pads_seen = maxi(pads_seen, int(main.party.player_count()))
+	for i in range(_vr_release.size() - 1, -1, -1):
+		var rel: Array = _vr_release[i]
+		if t >= float(rel[0]):
+			if is_instance_valid(rel[1]):
+				(rel[1] as Node).set("fake_a", false)
+			_vr_release.remove_at(i)
 	_unstick(delta)
 	# A settling pause check holds back every step due at or after it (a "resumed?" ran before its "paused?"
 	# while that one waited, and pressed Start the wrong way round, 2026-10-29).
@@ -210,6 +220,13 @@ func seated_want(want: int, host_p: int = 0) -> int:
 			seats = mini(int(main.party.max_slot), 6)
 		n = mini(want * joiners(), seats)
 	return n + host_p
+
+
+## Pad players (TV / Deck / a flat host's own) this game has had seated at once: 0 on solo VR (the Frame hosts with
+## DUO_HOST and nobody joins), so a check of what TV players did should be `if kit.tv_players() > 0:` instead of
+## failing with nobody there (2026-11-11: Balloon Pop, Paper Planes and Treasure Dig solo VR runs).
+func tv_players() -> int:
+	return pads_seen
 
 
 # --- Assertions -------------------------------------------------------------------------------
@@ -426,6 +443,15 @@ func vr_trigger(rig: Node, value: float) -> void:
 ## Hold or release the fake A button.
 func vr_a(rig: Node, down: bool) -> void:
 	rig.fake_a = down
+
+
+## Press the fake A and let go 0.2 s later: the VR player's confirm (results cards, story cards). Bots whose results
+## only a TV player's A continued left solo VR waiting for the game's slow fallback (2026-11-11).
+func vr_click(rig: Node) -> void:
+	if rig == null or not is_instance_valid(rig) or bool(rig.get("fake_a")):
+		return  # still held from the last click: wait for the release, or it never counts as a new press
+	rig.set("fake_a", true)
+	_vr_release.append([t + 0.2, rig])
 
 
 ## Push the fake thumbsticks (y UP = forward, like OpenXR).
