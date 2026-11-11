@@ -26,7 +26,7 @@ const Contrast := preload("res://core/contrast.gd")
 var fails := 0
 
 
-func _init() -> void:
+func _initialize() -> void:
 	var t0 := Time.get_ticks_msec()
 	var seeds := int(OS.get_environment("SEEDS")) if OS.has_environment("SEEDS") else 8
 	for w in Worlds.ordered():

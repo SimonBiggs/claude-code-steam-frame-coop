@@ -16,7 +16,7 @@ func check(ok: bool, what: String) -> void:
 		print("FAIL: " + what)
 
 
-func _init() -> void:
+func _initialize() -> void:
 	Engine.set_meta("save_test_mode", true)
 	OS.set_environment("DUO_TELEMETRY_PORT", "1")  # nothing listens there: no test line can reach a real receiver
 	# 1. A test run never queues anything (SAVE_TEST).

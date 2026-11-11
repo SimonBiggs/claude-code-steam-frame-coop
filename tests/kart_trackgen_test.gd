@@ -20,7 +20,7 @@ var fails := 0
 const UI_ICONS: Array[String] = ["star", "flag", "fire", "clock", "crown", "trophy", "shield"]
 
 
-func _init() -> void:
+func _initialize() -> void:
 	var seeds := int(OS.get_environment("SEEDS")) if OS.has_environment("SEEDS") else 12
 	var t0 := Time.get_ticks_msec()
 	var total := 0
