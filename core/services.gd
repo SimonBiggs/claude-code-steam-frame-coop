@@ -16,6 +16,7 @@ const SERVICES := [
 	{"name": "RuntimeSettings", "path": "res://core/runtime_settings.gd"},
 	{"name": "SafeApply", "path": "res://core/safe_apply.gd", "meta": "safe_apply"},
 	{"name": "LanUpdate", "path": "res://core/lan_update.gd", "meta": "lan_update", "needs": "res://addons/lan_update/root.pub.pem"},
+	{"name": "TelemetryPush", "path": "res://core/telemetry_push.gd"},
 	{"name": "VrTextGuard", "path": "res://core/vr_text_guard.gd", "meta": "vr_text_guard"},
 	{"name": "VrLayerGuard", "path": "res://core/vr_layer_guard.gd"},
 	{"name": "VrViewWatch", "path": "res://core/vr_view_watch.gd", "needs": "res://tests/bot_end.gd"},
