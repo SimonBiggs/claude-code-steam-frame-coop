@@ -629,11 +629,11 @@ func _check_story(mode: String) -> void:
 	_ok(modes <= 1, "the mode is picked once a session (%d)" % modes)
 	_ok(main.wave < 1 or gifts >= main.wave - (int(OS.get_environment("CC_START_WAVE")) - 1 if OS.has_environment("CC_START_WAVE") else 0),
 		"a gift before every wave (%d gifts, wave %d)" % [gifts, main.wave])
-	_ok(main.harbour_n == Deep.harbour(int(main.save.data.total)), "Polly's harbour matches the save (%d)" % main.harbour_n)
+	_ok(OS.has_environment("CC_HARBOUR") or main.harbour_n == Deep.harbour(int(main.save.data.total)), "Polly's harbour matches the save (%d)" % main.harbour_n)
 	_ok(main.harbour.shown == main.harbour_n, "every harbour piece stands (%d)" % main.harbour.shown)
 	var probs: Array = Deep.problems(main.hazards.list, main._deep_spec())
 	_ok(probs.is_empty(), "this wave's deck events are fair %s" % str(probs))
-	if main.deckhands().is_empty() and main.wave >= 1:
+	if main.nobody_aboard() and main.wave >= 1:
 		_ok(int(main.deep_stats.polly_loads) > 0, "nobody else aboard: Polly loads the cannon (%d)" % int(main.deep_stats.polly_loads))
 	_ok(main.voyage_seed > 0, "a seeded voyage (%d)" % main.voyage_seed)
 	_ok(main.save != null and int(main.save.data.days) >= 1, "the play-day was counted")

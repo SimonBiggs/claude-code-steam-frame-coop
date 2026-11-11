@@ -1283,6 +1283,12 @@ func deckhands() -> Array:
 	return players.filter(func(p): return not p.gunner and p.active)
 
 
+## Nobody aboard but the gunner: no deckhand seat, or only the TV's waiting seat on a host no TV machine joined (the
+## Frame alone). Polly then loads the cannon and patches holes, and no boarders come (deep.gd SOLO).
+func nobody_aboard() -> bool:
+	return deckhands().is_empty() or (net != null and net.mode == "host" and not net.connected)
+
+
 ## Deckhands beyond the classic two (0..4): used to scale the enemies to the size of the crew.
 func crew_extra() -> int:
 	return maxi(0, deckhands().size() - 2)
@@ -1525,7 +1531,7 @@ func leak_cap() -> int:
 func boarder_cap() -> int:
 	if not SIMPLE_MODE:
 		return 99
-	if wave < 4 or deckhands().is_empty():
+	if wave < 4 or nobody_aboard():
 		return 0  # (nobody aboard to splash them: no boarders)
 	return (1 if wave < BOSS_WAVE else 2) + crew_extra() / 3
 
@@ -1572,7 +1578,7 @@ func _start_wave() -> void:
 	var ev := Deep.events(Seeded.derive(VoyageGen.wave_seed(voyage_seed, wave), "events"), _deep_spec())
 	hazards.reset(ev)
 	if gift == "golden":  # GOLDEN BALL: a golden cannonball every wave (straight into the cannon when nobody's aboard)
-		if deckhands().is_empty() and not players.is_empty():
+		if nobody_aboard() and not players.is_empty():
 			cannons[clampi(int(players[0].station), 0, cannons.size() - 1)].golden += 1
 		else:
 			golden_balls += 1
@@ -1990,7 +1996,7 @@ func create_leak(pos: Vector3) -> void:
 	var leaks := get_tree().get_nodes_in_group("leaks")
 	if leak_cap() <= 0:
 		return  # simple mode, waves 1-2: the shots just rock the boat
-	if deckhands().is_empty():
+	if nobody_aboard():
 		return  # nobody aboard to patch it (the Frame alone, one Deck): the shot just rocks the boat
 	if leaks.size() >= leak_cap():
 		water = minf(100.0, water + (2.0 if SIMPLE_MODE else 4.0))
@@ -3447,6 +3453,8 @@ func _start_voyage() -> void:
 	if new_day and int(save.data.days) > 1:
 		_story_for_all("A new flag!", "bunting", Color(0.2, 0.45, 1.0))
 	harbour_n = Deep.harbour(int(save.data.total))
+	if OS.has_environment("CC_HARBOUR"):  # tests / screenshots: this many harbour pieces
+		harbour_n = clampi(int(OS.get_environment("CC_HARBOUR")), 0, Deep.HARBOUR.size())
 	var sd := Deep.season_data(season)
 	_story_for_all(String(sd.line), String(sd.pic), sd.drift)
 	if harbour_n > 0:
@@ -3494,7 +3502,7 @@ func _log_wave(end: String) -> void:
 		"secs": snappedf(wave_t, 0.1), "plan": wave_plan_kinds, "water": snappedf(water, 0.1), "gold": gold,
 		"deckhands": deckhands().size(), "vr": not players.is_empty() and players[0].vr, "net": net.mode,
 		"treasures": (save.data.treasures as Array).size() if save else 0, "days": int(save.data.days) if save else 0,
-		"game_mode": play_mode, "gift": gift, "season": season, "harbour": harbour_n, "solo": solo_sailing or deckhands().is_empty(),
+		"game_mode": play_mode, "gift": gift, "season": season, "harbour": harbour_n, "solo": solo_sailing or nobody_aboard(),
 		"deck_events": hazards.list.size() if hazards else 0, "caught": int(deep_stats.caught), "dropped": int(deep_stats.dropped),
 		"bounces": int(deep_stats.bounces), "netted": int(deep_stats.netted), "polly_loads": int(deep_stats.polly_loads)})
 
@@ -3697,6 +3705,7 @@ func on_hazard(e: Dictionary) -> void:
 	var md := Deep.mode_data(play_mode)
 	var p: Vector3 = e.pos
 	var caught := 0
+	var crew: Array = [] if nobody_aboard() else deckhands()
 	match String(e.kind):
 		"arm":
 			deep_stats.arms += 1
@@ -3704,7 +3713,7 @@ func on_hazard(e: Dictionary) -> void:
 			sound("big_kill", -3.0, 0.7)
 			_particles(p + Vector3.UP * 0.3, Color(0.6, 0.85, 1.0), 16, 0.12, 6.0, 14.0, 0.8, 60.0)
 			net.event("slam", [p])
-			for dh in deckhands():
+			for dh in crew:
 				if not Deep.caught(e, dh.global_position):
 					deep_stats.dodged += 1
 					continue
@@ -3725,7 +3734,7 @@ func on_hazard(e: Dictionary) -> void:
 		"squall":
 			deep_stats.squalls += 1
 			sound("thunder", -10.0, 1.3)
-			for dh in deckhands():
+			for dh in crew:
 				if not Deep.caught(e, dh.global_position):
 					deep_stats.dodged += 1
 					continue
@@ -3788,7 +3797,7 @@ func ball_bounce(b, pos: Vector3) -> bool:
 ## Host / local: nobody else aboard (the Frame alone, one Deck) - Polly brings cannonballs to the gunner's cannon and
 ## patches holes.
 func _polly_helps(delta: float) -> void:
-	if not deckhands().is_empty() or players.is_empty() or game_over:
+	if not nobody_aboard() or players.is_empty() or game_over:
 		polly_t = 0.0
 		return
 	var c = cannons[clampi(int(players[0].station), 0, cannons.size() - 1)]
