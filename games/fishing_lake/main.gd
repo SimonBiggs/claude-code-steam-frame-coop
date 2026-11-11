@@ -53,9 +53,9 @@ const StoryCard := preload("res://core/story_card.gd")
 const Tackle := preload("res://games/fishing_lake/tackle.gd")
 const PickOrbs := preload("res://core/pick_orbs.gd")
 const WarnRings := preload("res://core/warn_rings.gd")
-const ORB_ROW := Vector3(0.0, 0.0, Lake.JETTY_END_Z - 9.5)  # the pick orbs float over the water in front of the jetty
+const ORB_ROW := Vector3(0.0, 0.0, Lake.JETTY_END_Z - 8.0)  # the pick orbs float over the water in front of the jetty
 const ORB_GAP := 3.6
-const ORB_Y := 1.8
+const ORB_Y := 2.2
 const PICK_WAIT := {"mode": 15.0, "lure": 12.0}
 const GAME_ID := "fishing_lake"
 

@@ -1410,7 +1410,7 @@ func _build_pond() -> void:
 		lg.mesh = main.cyl_mesh(0.13, 0.13, 2.0 * PI * POND_R / float(n) + 0.12, 8)
 		lg.material_override = wood
 		lg.position = Vector3(cos(a) * POND_R, 0.06, sin(a) * POND_R)
-		lg.rotation = Vector3(0.0, -a, PI * 0.5)
+		lg.rotation = Vector3(0.0, -a - PI * 0.5, PI * 0.5)  # along the ring
 		pond_root.add_child(lg)
 	var inner := MeshInstance3D.new()  # a clear patch of water so the fish show
 	var disc := CylinderMesh.new()
@@ -1420,11 +1420,11 @@ func _build_pond() -> void:
 	disc.radial_segments = 24
 	inner.mesh = disc
 	var wm := StandardMaterial3D.new()
-	wm.albedo_color = Color(0.3, 0.7, 0.85, 0.35)
+	wm.albedo_color = Color(0.35, 0.75, 0.9, 0.45)
 	wm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	wm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	inner.material_override = wm
-	inner.position = Vector3(0, 0.03, 0)
+	inner.position = Vector3(0, 0.025, 0)  # the fish swim half through it (the lake's own water hides deeper fish)
 	inner.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	pond_root.add_child(inner)
 	# Decorations (hidden until the pond grows that far).
@@ -1514,7 +1514,7 @@ func update_pond(found: Array, shiny: Dictionary, level: int) -> void:
 			var f := pond_fish[i]
 			f.mesh = main.fish_mesh(kind)
 			f.material_override = main.make_material(Color(1.0, 0.82, 0.2), 1.6) if int(shiny.get(kind, 0)) > 0 else main.fish_material(kind)
-			f.scale = Vector3.ONE * (0.32 / maxf(float(FishScript.TYPES[kind]["len"]), 0.3)) * (0.7 if kind == FishScript.LEGEND else 1.0)
+			f.scale = Vector3.ONE * (0.5 / maxf(float(FishScript.TYPES[kind]["len"]), 0.3)) * (0.7 if kind == FishScript.LEGEND else 1.0)
 			f.visible = true
 		for i in range(found.size(), pond_fish.size()):
 			pond_fish[i].visible = false
@@ -1525,5 +1525,5 @@ func update_pond(found: Array, shiny: Dictionary, level: int) -> void:
 		var r := 0.35 + 0.75 * float(i % 4) / 3.0
 		var s := 1.0 if i % 2 == 0 else -1.0
 		var a := t * (0.5 + 0.06 * i) * s + i * 1.7
-		f.position = Vector3(cos(a) * r, -0.04 + 0.03 * sin(t * 1.5 + i), sin(a) * r)
+		f.position = Vector3(cos(a) * r, 0.03 + 0.015 * sin(t * 1.5 + i), sin(a) * r)
 		f.rotation.y = atan2(-sin(a) * s, cos(a) * s)  # fish face +Z: along the circle
