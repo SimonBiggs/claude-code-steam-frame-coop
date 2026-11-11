@@ -479,7 +479,7 @@ func _checks() -> void:
 		var gl: Label3D = main.hud.glove_label
 		if gl != null:
 			var box: AABB = gl.transform * gl.get_aabb()
-			var menu_btn := Vector3(-0.15, 0.02, 0.12)  # core/net.gd's wrist MENU, left-controller space
+			var menu_btn: Vector3 = preload("res://core/vr_rig.gd").WRIST_MENU_OFFSET  # core/net.gd's wrist MENU, left-controller space
 			var gap := (menu_btn.clamp(box.position, box.end) - menu_btn).length()
 			kit.assert_true(gap > 0.08, "the glove coins/stars stay clear of the wrist MENU button (%.2f m, text '%s')" % [gap, gl.text.replace("\n", " | ")])
 		kit.assert_true(main.ceremony.vr_results != null, "the results card shows in VR")
