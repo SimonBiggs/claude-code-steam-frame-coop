@@ -107,6 +107,59 @@ func _init() -> void:
 	d0.weather = "drizzle"
 	_expect(_has(Gen.check_day(g0, d0), "calm"), "a stormy practice round is caught")
 	_expect(FH.has("rock"), "feature heights listed")
+	# SECOND PASS: GENTLE / BRAVE / HARD over many gardens: every round fair in every mode (wasps, storms, gifts),
+	# round 1 the same calm round everywhere, each mode a smooth climb, and gentle <= brave <= hard.
+	var mt0 := Time.get_ticks_usec()
+	var mode_gardens := maxi(8, seeds / 4)
+	var wasp_n := {}
+	var storm_n := {}
+	for s in mode_gardens:
+		var g := Gen.generate(5000 + s * 53, {"kinds": 1 + s % 3, "level": [0, 6, 14][s % 3]})
+		for why in Gen.check_modes(g):
+			_fail("modes seed %d: %s" % [int(g.seed), why])
+		for m in Gen.MODE_IDS:
+			for rn in [2, 4, 6, 8, 10]:
+				for bees in [0, 1, 6]:
+					var d := Gen.day_plan(g, rn, {"bees": bees, "mode": m, "gifts": ["zoom"] if rn % 4 == 0 else []})
+					wasp_n[m] = int(wasp_n.get(m, 0)) + (d.wasps as Array).size()
+					storm_n[m] = int(storm_n.get(m, 0)) + (d.storms as Array).size()
+					for why in Gen.check_day(g, d):
+						_fail("%s seed %d round %d bees %d: %s" % [m, int(g.seed), rn, bees, why])
+	var per_modes := float(Time.get_ticks_usec() - mt0) / 1000.0 / mode_gardens
+	print("bee gen: %.1f ms per garden's mode check (3 modes x 4 crews x 9 rounds + 45 round checks)" % per_modes)
+	_expect(per_modes < 150.0, "a garden's modes check in under 150 ms here (%.1f)" % per_modes)
+	_expect(int(wasp_n.gentle) < int(wasp_n.brave) and int(wasp_n.brave) < int(wasp_n.hard), "more wasps in braver modes (%s)" % str(wasp_n))
+	_expect(int(storm_n.gentle) < int(storm_n.brave) and int(storm_n.brave) < int(storm_n.hard), "more storms in braver modes (%s)" % str(storm_n))
+	_expect(int(storm_n.gentle) > 0 and int(wasp_n.gentle) > 0, "gentle gardens get a wasp and a storm now and then (%s %s)" % [str(wasp_n), str(storm_n)])
+	var g1 := Gen.generate(77, {"kinds": 2, "level": 6})
+	for rn in range(1, 9):
+		_expect(String(Gen.day_plan(g1, rn, {}).season) == Gen.SEASONS[(rn - 1) % 4], "round %d's season" % rn)
+	_expect(Gen.SEASONS.size() == W.SEASONS.size(), "a season for each of world.gd's lawn colours")
+	_expect(var_to_str(Gen.day_plan(g1, 3, {"mode": "gentle"}).rains) == var_to_str(Gen.day_plan(g1, 3, {"mode": "hard"}).rains), "the weather doesn't depend on the mode")
+	_expect(int(Gen.day_plan(g1, 6, {"mode": "hard", "bees": 1}).target) > int(Gen.day_plan(g1, 6, {"mode": "gentle", "bees": 1}).target), "hard asks for more honey")
+	_expect(Gen.mode_of("heroic") == "hard" and Gen.mode_of("nonsense") == "gentle", "old mode ids map through PickOrbs.ALIASES")
+	# Gifts only help: each one makes a round no slower.
+	var dg := Gen.day_plan(g1, 5, {"bees": 1, "mode": "brave"})
+	var plain := Gen.round_load(g1, dg)
+	for gf in Gen.GIFTS:
+		var dd := dg.duplicate(true)
+		dd.gifts = [gf[0]]
+		_expect(Gen.round_load(g1, dd) <= plain + 0.01, "the %s gift helps (%.0f vs %.0f s)" % [gf[0], Gen.round_load(g1, dd), plain])
+		_expect(StoryCard.has_picture(String(gf[2])), "the %s gift's picture exists" % gf[0])
+		_expect(String(gf[1]).length() <= 14, "the %s gift's name is short" % gf[0])
+	# The validator catches unfair storms and wasps.
+	var bad_d := Gen.day_plan(g1, 8, {"mode": "hard", "bees": 1}).duplicate(true)
+	var hs: Array = g1.spots[int(g1.halo)]
+	bad_d.storms = [[60.0, hs[0], hs[1], 1.2]]
+	_expect(_has(Gen.check_day(g1, bad_d), "first flower"), "a storm over the bees' first flower is caught")
+	bad_d.storms = [[60.0, 0.0, 0.0, 3.5]]
+	_expect(_has(Gen.check_day(g1, bad_d), "covers"), "a storm over half the garden is caught")
+	bad_d.storms = []
+	bad_d.wasps = [5.0]
+	_expect(_has(Gen.check_day(g1, bad_d), "wasp at"), "a wasp with no warning time is caught")
+	bad_d = Gen.day_plan(g1, 2, {"mode": "gentle", "bees": 1}).duplicate(true)
+	bad_d.wasps = [40.0]
+	_expect(_has(Gen.check_day(g1, bad_d), "wasp in round"), "a wasp too early for gentle is caught")
 	# TODAY'S GARDEN: the same all day, different day to day; the next gardens come from the world seed.
 	var daily := {}
 	for dd in 30:
@@ -137,7 +190,7 @@ func _init() -> void:
 	_expect(absf((shelf_box[0] as Vector3).x - JarShelf.POS.x) < 0.01 and absf((shelf_box[0] as Vector3).z - JarShelf.POS.z) < 0.01
 		and absf((shelf_box[1] as Vector3).x - (JarShelf.WIDTH * 0.5 + 0.08)) < 0.05, "the jar shelf stands where the bees' flight check thinks it is")
 	# Every picture Queen Bea shows exists (story_card.gd).
-	var pics: Array = ["queenbee", "hive", "honeyjar", "cloud", "sun"]
+	var pics: Array = ["queenbee", "hive", "honeyjar", "cloud", "sun", "wasp", "storm"]
 	pics.append_array(Story.KIND_PICS)
 	for pic in pics:
 		_expect(StoryCard.has_picture(pic), "the %s picture exists" % pic)

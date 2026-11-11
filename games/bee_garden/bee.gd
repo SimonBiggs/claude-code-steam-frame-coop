@@ -250,7 +250,7 @@ func _move(delta: float) -> void:
 			main.cue_did(self, "down")
 		rise_was = wish.y > 0.5
 		sink_was = wish.y < -0.5
-	var spd := SPEED * (BOOST if boost_t > 0.0 else 1.0)
+	var spd: float = SPEED * (BOOST if boost_t > 0.0 else 1.0) * (main.bee_speed() if main != null else 1.0)  # (ZOOM WINGS gift)
 	var want := Vector3(wish.x * spd, wish.y * VSPEED * (BOOST if boost_t > 0.0 else 1.0), wish.z * spd)
 	vel = vel.lerp(want, 1.0 - exp(-5.0 * delta))
 	var np := global_position + vel * delta
@@ -371,12 +371,17 @@ func _update_hud() -> void:
 		_update_cue(get_process_delta_time())
 		return
 	elif hud_label:
-		hud_label.text = "P%d  BEE   POLLEN %d / %d   HONEY MADE %d" % [index + 1, pollen, MAX_POLLEN, honey_made]
+		hud_label.text = "P%d  BEE   POLLEN %d / %d   HONEY MADE %d" % [index + 1, pollen, _load(), honey_made]
 	if hint_label:
 		hint_label.text = _hint()
 
 
 ## What should this bee do right now? Events first, then the pollen loop.
+## Pollen a full load holds (main.gd bee_load: the BUMBLE BEES gift adds one).
+func _load() -> int:
+	return main.bee_load() if main != null else MAX_POLLEN
+
+
 func _hint() -> String:
 	if main.game_over or main.phase == "dusk":
 		return ""
@@ -389,14 +394,14 @@ func _hint() -> String:
 	if main.event == "queen":
 		if pollen > 0 and (pollen_kinds & (1 << int(main.queen_kind))) != 0:
 			return "You have %s pollen! Follow the arrow to the QUEEN!" % want
-		if pollen < MAX_POLLEN:
+		if pollen < _load():
 			return "The QUEEN wants %s pollen: find a %s flower!" % [want, want]
 	if main.event == "raid":
 		return "WASP RAID! Bump into the wasps to buzz them away from the hive!"
-	if main.event == "golden" and pollen < MAX_POLLEN:
+	if main.event == "golden" and pollen < _load():
 		return "Find the sparkly GOLDEN flower: golden pollen = lots of honey!"
 	var rb := "   (RAINBOW: double honey!)" if main.rainbow_t > 0.0 else ""
-	if pollen >= MAX_POLLEN:
+	if pollen >= _load():
 		return "Full of pollen! Follow the arrow to the HIVE" + rb
 	if pollen > 0:
 		return "Visit a DIFFERENT flower (fruit grows; a different KIND = bouquet bonus),\nor follow the arrow to the HIVE to make honey" + rb

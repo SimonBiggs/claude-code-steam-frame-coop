@@ -18,6 +18,9 @@ var queen: Node3D
 var wings: Array[Node3D] = []
 var t := 0.0
 var spin := 0.0
+var hive_level := -1
+var hive_lift := 0.0   # the hive's honey boxes lift the roof and Queen Bea this much
+var hive_boxes: Node3D
 
 
 func _ready() -> void:
@@ -61,6 +64,44 @@ func set_jars(n: int) -> void:
 		jar_mesh.mesh = _srgb(W.vmesh(st, 0.15))
 	else:
 		jar_mesh.mesh = null
+	_grow_hive(Story.hive_level(n))
+
+
+## The hive grows a honey box (a striped layer under the roof) at each Story.HIVE_BOXES jar count; the roof and
+## Queen Bea move up on top of them. Every machine builds it from the jar count.
+func _grow_hive(level: int) -> void:
+	if level == hive_level:
+		return
+	hive_level = level
+	var hive := get_parent().get_node_or_null("Hive") as Node3D if get_parent() != null else null
+	if hive == null:
+		return
+	if hive_boxes != null:
+		hive_boxes.queue_free()
+	hive_boxes = Node3D.new()
+	hive_boxes.name = "HoneyBoxes"
+	hive.add_child(hive_boxes)
+	var st := W._st()
+	for k in level:
+		var col: Color = Story.HIVE_BOXES[k][1]
+		var y := 0.84 + Story.HIVE_BOX_H * (k + 0.5)
+		W.vbox(st, Vector3(0, y, 0), Vector3(0.85, Story.HIVE_BOX_H - 0.02, 0.85), col)
+		W.vbox(st, Vector3(0, y + Story.HIVE_BOX_H * 0.5 - 0.02, 0), Vector3(0.88, 0.03, 0.88), col.darkened(0.25))
+		for sx in [-1.0, 1.0]:  # little handles, like a real beekeeper's box
+			W.vbox(st, Vector3(0, y, sx * 0.435), Vector3(0.2, 0.05, 0.03), col.darkened(0.4))
+	if level > 0:
+		var mi := MeshInstance3D.new()
+		mi.mesh = _srgb(W.vmesh(st))
+		hive_boxes.add_child(mi)
+	hive_lift = Story.HIVE_BOX_H * level
+	var roof := hive.get_node_or_null("Roof") as MeshInstance3D
+	if roof != null:
+		roof.position.y = 1.0 + hive_lift
+		if level >= Story.HIVE_BOXES.size():
+			roof.material_override = W.cmat(Color(1.0, 0.82, 0.2), 0.4)  # the golden roof
+	var tag := hive.get_node_or_null("HiveTag") as Node3D
+	if tag != null:
+		tag.position.y = 2.1 + hive_lift
 
 
 ## A round's jars went up on the shelf: Queen Bea spins with joy.
@@ -113,7 +154,7 @@ func _process(delta: float) -> void:
 	if queen == null:
 		return
 	spin = maxf(0.0, spin - delta * 0.6)
-	queen.position.y = W.HIVE_POS.y + 1.42 - POS.y + sin(t * 2.2) * 0.04 + sin(spin * PI) * 0.5
+	queen.position.y = W.HIVE_POS.y + 1.42 + hive_lift - POS.y + sin(t * 2.2) * 0.04 + sin(spin * PI) * 0.5
 	queen.rotation.y = -PI * 0.5 + (1.0 - spin) * TAU * (1.0 if spin > 0.0 else 0.0)
 	for w in wings:
 		w.rotation.z = float(w.get_meta("side")) * (0.2 + sin(t * (60.0 if spin > 0.0 else 9.0)) * 0.35)
