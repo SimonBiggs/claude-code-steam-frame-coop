@@ -36,7 +36,7 @@ func build(w: Dictionary) -> void:
 	add_child(root)
 	match String(w.id):
 		"attic":
-			World.box(root, Vector3(x1 - x0, 0.01, 15.8), Vector3(cx, 0.006, 0.0), World.mat(Color(0.5, 0.36, 0.24)), false)
+			World.box(root, Vector3(x1 - x0, 0.01, 15.8), Vector3(cx, 0.006, 0.0), World.mat(World.WING_FLOORS.attic), false)
 			for i in 6:  # floor planks
 				World.box(root, Vector3(x1 - x0, 0.012, 0.03), Vector3(cx, 0.008, -6.6 + i * 2.6), World.mat(Color(0.3, 0.2, 0.14)), false)
 			for i in 5:  # roof beams
@@ -58,7 +58,7 @@ func build(w: Dictionary) -> void:
 					web.rotation.z = PI / 4.0
 			_light(root, Vector3(cx, 3.2, 0.0), Color(1.0, 0.8, 0.55), 1.0, 9.0)
 		"cellar":
-			World.box(root, Vector3(x1 - x0, 0.01, 15.8), Vector3(cx, 0.006, 0.0), World.mat(Color(0.34, 0.34, 0.38)), false)
+			World.box(root, Vector3(x1 - x0, 0.01, 15.8), Vector3(cx, 0.006, 0.0), World.mat(World.WING_FLOORS.cellar), false)
 			for i in 9:  # flagstones
 				World.box(root, Vector3(0.03, 0.012, 15.8), Vector3(lerpf(x0 + 0.7, x1 - 0.7, float(i) / 8.0), 0.008, 0.0), World.mat(Color(0.22, 0.22, 0.26)), false)
 			var jam: Array = [Color(1.0, 0.3, 0.35), Color(1.0, 0.65, 0.2), Color(0.6, 0.3, 0.8), Color(1.0, 0.85, 0.3)]
@@ -80,7 +80,7 @@ func build(w: Dictionary) -> void:
 			pipe.rotation.z = PI / 2.0
 			_light(root, Vector3(cx, 3.0, 0.0), Color(1.0, 0.7, 0.4), 0.8, 8.0)
 		"greenhouse":
-			World.box(root, Vector3(x1 - x0, 0.01, 15.8), Vector3(cx, 0.006, 0.0), World.mat(Color(0.55, 0.75, 0.6)), false)
+			World.box(root, Vector3(x1 - x0, 0.01, 15.8), Vector3(cx, 0.006, 0.0), World.mat(World.WING_FLOORS.greenhouse), false)
 			for i in 9:  # tiles
 				World.box(root, Vector3(x1 - x0, 0.012, 0.03), Vector3(cx, 0.008, -7.0 + i * 1.75), World.mat(Color(0.85, 0.95, 0.85)), false)
 			var glass := StandardMaterial3D.new()
