@@ -18,7 +18,7 @@ const GAP := 1.0
 const Y := 1.3
 const AHEAD := 1.7  # metres in front of the VR lantern-bearer (a flat one: AHEAD_FLAT, so the row fits the view)
 const AHEAD_FLAT := 3.2
-const VR_LIFT := 0.3  # VR: the row at eye height, above Granny Boo's story cards
+const VR_LIFT := 0.5  # VR: the row at eye height, above Granny Boo's story cards
 const FEET_R := 0.55  # how close (flat) a walking player must come under an orb
 const HAND_R := 0.22
 ## Lantern gifts: [id, name, picture, colour]. main.gd reads the levels (upgrades[id], 0..MAX_LEVEL).
@@ -94,7 +94,8 @@ func begin(new_stage: String, entries: Array, opts: Array, done: Callable) -> vo
 
 ## A row across the lantern-bearer's view, AHEAD metres in front at chest height, kept inside the house.
 func _places(n: int) -> Array:
-	var head: Transform3D = main.players[0].net_head if main.players[0].vr else main.players[0].global_transform
+	var p0 = main.players[0]
+	var head: Transform3D = p0.xr_camera.global_transform if p0.vr and p0.xr_camera != null and p0.xr_camera.is_inside_tree() else p0.global_transform
 	var fwd := -head.basis.z
 	fwd.y = 0.0
 	fwd = fwd.normalized() if fwd.length() > 0.01 else Vector3.FORWARD
