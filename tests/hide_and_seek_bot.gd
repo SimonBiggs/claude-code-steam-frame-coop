@@ -562,7 +562,7 @@ func _note_cues() -> void:
 	if main.get("help_label") != null:
 		_text_error("key-help line", "help_label is back")
 	var ct: String = main.center_label.text
-	var results: bool = ct.begins_with("THE SEEKER FOUND EVERYONE!") or ct.begins_with("TIME'S UP!")  # (the TV may get it a frame before "over")
+	var results: bool = ct.begins_with("THE SEEKER FOUND EVERYONE!") or ct.begins_with("TIME'S UP!") or ct.begins_with("YOU FOUND THEM ALL!")  # (the TV may get it a frame before "over")
 	if main.phase != "over" and not results and main.center_label.modulate.a > 0.05 and headline_re.search(ct) == null:
 		_text_error("TV headline", main.center_label.text)
 	if main.phase == "over" and (main.center_label.text.contains("A / Enter") or main.center_label.text.contains("press")):
@@ -571,7 +571,7 @@ func _note_cues() -> void:
 		_text_error("top line", main.info_label.text)
 	if main.vr_center != null and main.vr_center.modulate.a > 0.05 and main.phase != "over":
 		var vt: String = main.vr_center.text
-		var vres: bool = vt.begins_with("THE SEEKER FOUND EVERYONE!") or vt.begins_with("TIME'S UP!")  # (a frame behind)
+		var vres: bool = vt.begins_with("THE SEEKER FOUND EVERYONE!") or vt.begins_with("TIME'S UP!") or vt.begins_with("YOU FOUND THEM ALL!")  # (a frame behind)
 		if not vres and headline_re.search(vt) == null and big_re.search(vt) == null:
 			_text_error("VR headline", vt)
 	if main.vr_status != null and main.vr_status.visible and main.vr_status.text.contains("\n"):

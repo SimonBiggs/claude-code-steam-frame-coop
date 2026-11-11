@@ -1551,7 +1551,14 @@ func _end_round(seeker_won: bool) -> void:
 	phase = "over"
 	over_t = 0.0
 	var lines: Array[String] = []
-	if seeker_won:
+	if solo_round and hider_count() == 0:
+		# Alone: Pip and the street friends were the ones to find (their names follow below).
+		if seeker_won:
+			round_scores[0] += int(phase_t) * 2
+		lines.append("YOU FOUND THEM ALL!" if seeker_won else "TIME'S UP!")
+		lines.append("P1  +%d" % round_scores[0])
+		sound("clear", -2.0, 1.0 if seeker_won else 1.25)
+	elif seeker_won:
 		var bonus := int(phase_t) * 2
 		round_scores[0] += bonus
 		lines.append("THE SEEKER FOUND EVERYONE!")
@@ -2282,7 +2289,9 @@ func _story(beat: Dictionary) -> void:
 
 func _show_story(beat: Dictionary) -> void:
 	beat = beat.duplicate()
-	beat["y"] = beat.get("y", 0.36)  # under the big HIDE! / SEEK! word, above the picture cues
+	# Under the big HIDE! / SEEK! word, above the picture cues; while the results fill the middle, at the top instead
+	# (2026-11-11: Pip's "a toy for me" card sat on top of the results lines).
+	beat["y"] = beat.get("y", 0.09 if phase == "over" else 0.36)
 	var huds: Array = []
 	for p in players:
 		if p.hud != null and is_instance_valid(p.hud) and _has_local_view(p) and p.active:
