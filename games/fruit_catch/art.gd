@@ -8,6 +8,9 @@ const ROTTEN := 4  ## fruit kind index of the rotten apple
 const FRUIT_COLORS: Array[Color] = [Color(0.95, 0.12, 0.12), Color(1.0, 0.55, 0.05), Color(0.75, 0.9, 0.15),
 	Color(0.62, 0.2, 0.85), Color(0.42, 0.3, 0.12)]
 const LEAF := Color(0.25, 0.75, 0.25)
+const GROUND := Color(0.45, 0.75, 0.35)  ## the orchard's grass
+## The catchers' character per slot (main.gd; outfit = the player colour).
+const LOOKS: Array[String] = ["farmer", "chef", "villager", "princess", "pirate", "athlete", "bard"]
 const STUMP_TOP := 0.45  ## Nutmeg sits on a stump this high
 const STUMP_R := 0.35
 const NUTMEG_SCALE := 1.7  ## Nutmeg is a big, easy-to-see squirrel

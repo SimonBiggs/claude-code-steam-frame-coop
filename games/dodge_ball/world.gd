@@ -6,6 +6,17 @@ extends Node3D
 const MeshKit := preload("res://core/mesh_kit.gd")
 const SkyKit := preload("res://core/sky_kit.gd")
 
+## The players' character per slot and the dodge balls (main.gd), and the ground they play on (palette.gd checks them).
+const LOOKS: Array[String] = ["knight", "mage", "archer", "bard", "pirate", "chef", "astronaut"]
+const BALL_COLORS: Array[Color] = [Color(1.0, 0.35, 0.4), Color(1.0, 0.75, 0.2), Color(0.35, 0.85, 0.45),
+	Color(0.35, 0.65, 1.0), Color(0.85, 0.45, 1.0), Color(1.0, 0.55, 0.85)]
+## Every ball has an ink outline (Contrast.outline): the gold ball on the sandy court, the blue one in the sky.
+const Contrast := preload("res://core/contrast.gd")
+const BALL_OUTLINE := Contrast.OUTLINE
+const LAWN := Color(0.45, 0.75, 0.38)
+const COURT := Color(0.98, 0.85, 0.6)
+const COURT_SPOT := Color(1.0, 0.7, 0.45)  # the centre spot
+
 const STAGE_HALF_W := 4.0
 const STAGE_H := 0.9
 const STAGE_FRONT := -4.6
@@ -64,14 +75,14 @@ func build(main: Node, vr: bool) -> void:
 
 func _ground_mesh() -> ArrayMesh:
 	var b := MeshKit.Builder.new()
-	b.cylinder(30.0, 30.0, 0.2, MeshKit.at(Vector3(0.0, -0.1, 0.0)), Color(0.45, 0.75, 0.38), 32)
+	b.cylinder(30.0, 30.0, 0.2, MeshKit.at(Vector3(0.0, -0.1, 0.0)), LAWN, 32)
 	# The court: a sandy rectangle with white lines and a little fence.
-	b.box(Vector3(14.0, 0.02, 11.6), MeshKit.at(Vector3(0.0, 0.01, 1.2)), Color(0.98, 0.85, 0.6))
+	b.box(Vector3(14.0, 0.02, 11.6), MeshKit.at(Vector3(0.0, 0.01, 1.2)), COURT)
 	b.box(Vector3(14.0, 0.03, 0.12), MeshKit.at(Vector3(0.0, 0.02, 7.0)), Color.WHITE)
 	b.box(Vector3(14.0, 0.03, 0.12), MeshKit.at(Vector3(0.0, 0.02, -4.55)), Color.WHITE)
 	b.box(Vector3(0.12, 0.03, 11.6), MeshKit.at(Vector3(-7.0, 0.02, 1.2)), Color.WHITE)
 	b.box(Vector3(0.12, 0.03, 11.6), MeshKit.at(Vector3(7.0, 0.02, 1.2)), Color.WHITE)
-	b.disc(1.2, MeshKit.at(Vector3(0.0, 0.025, 1.2)), Color(1.0, 0.7, 0.45), 24)
+	b.disc(1.2, MeshKit.at(Vector3(0.0, 0.025, 1.2)), COURT_SPOT, 24)
 	for i in 15:
 		var x := -7.0 + float(i)
 		b.cylinder(0.06, 0.06, 0.7, MeshKit.at(Vector3(x, 0.35, 7.6)), Color(1.0, 0.95, 0.85), 6)

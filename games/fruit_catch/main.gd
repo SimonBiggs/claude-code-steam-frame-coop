@@ -55,7 +55,7 @@ const BOWL_TOP := 0.8
 const BOWL_R := 0.75
 const VR_START := Vector3(0.0, 0.0, 3.05)
 const BASKET_UP := 0.08  ## basket top above the avatar's head
-const LOOKS: Array[String] = ["farmer", "chef", "villager", "princess", "pirate", "athlete", "bard"]
+const LOOKS: Array[String] = Art.LOOKS
 enum { HANG, FALL, HELD, THROWN }
 
 var round_time := 120.0  ## seconds per round (bots shorten it before adding the game)
@@ -228,7 +228,7 @@ func _build_world(vr: bool) -> void:
 	disc.height = 0.2
 	disc.radial_segments = 32
 	ground.mesh = disc
-	ground.material_override = MeshKit.material(Color(0.45, 0.75, 0.35))
+	ground.material_override = MeshKit.material(Art.GROUND)
 	ground.position.y = -0.1
 	add_child(ground)
 	add_child(MeshKit.scatter_random(MeshKit.prop("tree"), 18, Vector3.ZERO, ARENA + 14.0, ARENA + 5.0, 0.8, 1.3, PackedColorArray(), 3))

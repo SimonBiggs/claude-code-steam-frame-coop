@@ -4,13 +4,22 @@ extends RefCounted
 const MeshKit := preload("res://core/mesh_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")
 
+## What sails and bobs on the bath (palette.gd checks them on the water's deep and crest colours).
+const WATER_DEEP := Color(0.3, 0.78, 0.98)
+const WATER_CREST := Color(0.92, 0.98, 1.0)
+const DUCK_YELLOW := Color(1.0, 0.86, 0.15)
+const DUCK_GOLD := Color(1.0, 0.75, 0.1)
+const BOAT_DECK := Color(1.0, 1.0, 1.0)  # a boat's white deck and cabin over its player-coloured hull
+const SPONGE := Color(0.98, 0.86, 0.32)
+const SPONGE_TOP := Color(0.3, 0.75, 0.4)
+
 const WATER_SHADER := """
 shader_type spatial;
 render_mode cull_disabled;
 uniform vec4 rip[8];
 uniform float now;
-uniform vec3 deep : source_color = vec3(0.30, 0.78, 0.98);
-uniform vec3 crest : source_color = vec3(0.92, 0.98, 1.0);
+uniform vec3 deep : source_color;  // WATER_DEEP (water() sets it)
+uniform vec3 crest : source_color;  // WATER_CREST
 varying float h;
 void vertex() {
 	vec3 w = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
@@ -50,6 +59,8 @@ static func water(hx: float, hz: float) -> MeshInstance3D:
 	for i in 8:
 		rips.append(Vector4(0.0, 0.0, -100.0, 0.0))
 	mat.set_shader_parameter("rip", rips)
+	mat.set_shader_parameter("deep", WATER_DEEP)
+	mat.set_shader_parameter("crest", WATER_CREST)
 	mi.material_override = mat
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	return mi
@@ -135,7 +146,7 @@ static func duck() -> ArrayMesh:
 	if cached != null:
 		return cached
 	var b := MeshKit.Builder.new()
-	var yellow := Color(1.0, 0.86, 0.15)
+	var yellow := DUCK_YELLOW
 	b.ellipsoid(Vector3(0.15, 0.11, 0.19), MeshKit.at(Vector3(0.0, 0.05, -0.02)), yellow)
 	b.ellipsoid(Vector3(0.05, 0.06, 0.06), MeshKit.at(Vector3(0.0, 0.13, -0.18), Vector3.ONE, Vector3(0.6, 0.0, 0.0)), yellow)
 	b.sphere(0.1, MeshKit.at(Vector3(0.0, 0.2, 0.08)), yellow)
@@ -148,13 +159,19 @@ static func duck() -> ArrayMesh:
 	return m
 
 
+## A boat's dark stripe round its hull (so even a white player's boat shows on the white wave crests).
+static func boat_band(col: Color) -> Color:
+	return col.darkened(0.45)
+
+
 ## A little toy boat in the player's colour, origin at the waterline, facing +Z.
 static func boat(col: Color) -> ArrayMesh:
 	var b := MeshKit.Builder.new()
 	b.rounded_box(Vector3(0.42, 0.2, 0.7), 0.09, MeshKit.at(Vector3(0.0, 0.04, 0.0)), col)
 	b.wedge(Vector3(0.42, 0.2, 0.22), MeshKit.at(Vector3(0.0, 0.04, 0.42)), col)
-	b.box(Vector3(0.44, 0.04, 0.72), MeshKit.at(Vector3(0.0, 0.12, 0.0)), Color(1.0, 1.0, 1.0))
-	b.rounded_box(Vector3(0.28, 0.16, 0.26), 0.05, MeshKit.at(Vector3(0.0, 0.22, -0.12)), Color(1.0, 1.0, 1.0))
+	b.box(Vector3(0.44, 0.04, 0.72), MeshKit.at(Vector3(0.0, 0.12, 0.0)), BOAT_DECK)
+	b.box(Vector3(0.45, 0.045, 0.62), MeshKit.at(Vector3(0.0, 0.065, -0.02)), boat_band(col))  # the stripe round the hull
+	b.rounded_box(Vector3(0.28, 0.16, 0.26), 0.05, MeshKit.at(Vector3(0.0, 0.22, -0.12)), BOAT_DECK)
 	b.cylinder(0.05, 0.06, 0.2, MeshKit.at(Vector3(0.0, 0.38, -0.12)), col.lightened(0.3))
 	b.sphere(0.04, MeshKit.at(Vector3(-0.08, 0.24, 0.015)), Color(0.4, 0.8, 1.0))
 	b.sphere(0.04, MeshKit.at(Vector3(0.08, 0.24, 0.015)), Color(0.4, 0.8, 1.0))
@@ -188,7 +205,7 @@ static func golden_duck() -> ArrayMesh:
 	if cached != null:
 		return cached
 	var b := MeshKit.Builder.new()
-	var gold := Color(1.0, 0.75, 0.1)
+	var gold := DUCK_GOLD
 	b.ellipsoid(Vector3(0.15, 0.11, 0.19), MeshKit.at(Vector3(0.0, 0.05, -0.02)), gold, 12, true)
 	b.ellipsoid(Vector3(0.05, 0.06, 0.06), MeshKit.at(Vector3(0.0, 0.13, -0.18), Vector3.ONE, Vector3(0.6, 0.0, 0.0)), gold, 8, true)
 	b.sphere(0.1, MeshKit.at(Vector3(0.0, 0.2, 0.08)), gold, 12, true)
@@ -204,8 +221,8 @@ static func golden_duck() -> ArrayMesh:
 ## A sponge island (radius r), origin at the waterline: a squishy yellow sponge with a green scrubby top.
 static func sponge(r: float) -> ArrayMesh:
 	var b := MeshKit.Builder.new()
-	b.cylinder(r, r * 1.05, 0.22, MeshKit.at(Vector3(0.0, 0.0, 0.0)), Color(0.98, 0.86, 0.32), 14)
-	b.cylinder(r * 0.98, r, 0.07, MeshKit.at(Vector3(0.0, 0.14, 0.0)), Color(0.3, 0.75, 0.4), 14)
+	b.cylinder(r, r * 1.05, 0.22, MeshKit.at(Vector3(0.0, 0.0, 0.0)), SPONGE, 14)
+	b.cylinder(r * 0.98, r, 0.07, MeshKit.at(Vector3(0.0, 0.14, 0.0)), SPONGE_TOP, 14)
 	for k in 7:
 		var a := k * TAU / 7.0 + 0.4
 		b.sphere(0.035, MeshKit.at(Vector3(cos(a) * r * 1.0, 0.0, sin(a) * r * 1.0), Vector3(1.0, 1.0, 0.5)), Color(0.82, 0.68, 0.2), 6)
@@ -215,7 +232,7 @@ static func sponge(r: float) -> ArrayMesh:
 ## Mama Duck: a big rubber duck with a pink bow (crowned: a gold crown instead), origin at her seat, facing +Z.
 static func mama_duck(crowned: bool) -> ArrayMesh:
 	var b := MeshKit.Builder.new()
-	var yellow := Color(1.0, 0.86, 0.15)
+	var yellow := DUCK_YELLOW
 	b.ellipsoid(Vector3(0.15, 0.11, 0.19), MeshKit.at(Vector3(0.0, 0.05, -0.02)), yellow)
 	b.ellipsoid(Vector3(0.05, 0.06, 0.06), MeshKit.at(Vector3(0.0, 0.13, -0.18), Vector3.ONE, Vector3(0.6, 0.0, 0.0)), yellow)
 	b.sphere(0.1, MeshKit.at(Vector3(0.0, 0.2, 0.08)), yellow)

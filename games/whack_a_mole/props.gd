@@ -10,6 +10,11 @@ const COLS := 4
 const ROWS := 3
 const SPACING := Vector2(0.78, 0.72)
 const HOLE_R := 0.17
+const TOP := Color(0.38, 0.8, 0.36)  ## the table's grassy top (moles pop out of it, the TV kids run on it)
+const HOLE := Color(0.06, 0.04, 0.03)
+const LAWN := Color(0.47, 0.75, 0.38)  ## the garden round the table
+## The TV kids' character per slot (main.gd; outfit = the player colour).
+const LOOKS: Array[String] = ["farmer", "chef", "pirate", "knight", "astronaut", "bard", "viking"]
 
 
 ## Hole centres on the table top (row 0 is the far side, row ROWS-1 the VR player's side).
@@ -29,7 +34,7 @@ static func table_mesh() -> ArrayMesh:
 	b.rounded_box(Vector3(w + 0.16, TABLE_Y - 0.04, d + 0.16), 0.06, MeshKit.at(Vector3(0.0, (TABLE_Y - 0.04) * 0.5, 0.0)), Color(0.93, 0.3, 0.33))
 	# White polka band round the cabinet
 	b.box(Vector3(w + 0.18, 0.08, d + 0.18), MeshKit.at(Vector3(0.0, TABLE_Y * 0.45, 0.0)), Color(1.0, 0.95, 0.85))
-	b.box(Vector3(w, 0.06, d), MeshKit.at(Vector3(0.0, TABLE_Y - 0.03, 0.0)), Color(0.38, 0.8, 0.36))
+	b.box(Vector3(w, 0.06, d), MeshKit.at(Vector3(0.0, TABLE_Y - 0.03, 0.0)), TOP)
 	# Rim
 	for s in [-1.0, 1.0]:
 		var sf: float = s
@@ -37,7 +42,7 @@ static func table_mesh() -> ArrayMesh:
 		b.rounded_box(Vector3(0.12, 0.1, d + 0.2), 0.04, MeshKit.at(Vector3(sf * (HALF.x + 0.04), TABLE_Y, 0.0)), Color(1.0, 0.82, 0.25))
 	for p in holes():
 		b.torus(HOLE_R + 0.01, 0.035, MeshKit.at(p + Vector3(0.0, 0.005, 0.0)), Color(0.55, 0.38, 0.22), 16, 6)
-		b.cylinder(HOLE_R, HOLE_R, 0.012, MeshKit.at(p + Vector3(0.0, 0.004, 0.0)), Color(0.06, 0.04, 0.03), 16)
+		b.cylinder(HOLE_R, HOLE_R, 0.012, MeshKit.at(p + Vector3(0.0, 0.004, 0.0)), HOLE, 16)
 	return b.build()
 
 
