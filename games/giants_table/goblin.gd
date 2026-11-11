@@ -8,6 +8,8 @@ extends "res://games/giants_table/toss.gd"
 ##  "king"    - THE GOBLIN KING (boss): spiky royal armour the giant can't hold, so the knights must
 ##              break it first; then he's too big for the knights and the giant has to throw him off
 
+const Contrast := preload("res://core/contrast.gd")
+const Looks := preload("res://games/giants_table/looks.gd")
 const KINDS := {
 	"goblin": {"hp": 2.0, "speed": 2.2, "scale": 1.0, "color": Color(0.45, 0.78, 0.3), "points": 10},
 	"armored": {"hp": 6.0, "speed": 1.7, "scale": 1.1, "color": Color(0.5, 0.72, 0.35), "points": 25},
@@ -88,7 +90,7 @@ func _ready() -> void:
 	cap.radial_segments = 10
 	cap.rings = 3
 	body.mesh = cap
-	body.material_override = body_mat if kind != "armored" else W.mat(Color(0.62, 0.64, 0.7), 0.0, 0.3)
+	body.material_override = body_mat if kind != "armored" else W.mat(Looks.ARMOR, 0.0, 0.3)
 	body.position.y = 0.25
 	pivot.add_child(body)
 	var head := MeshInstance3D.new()
@@ -96,6 +98,8 @@ func _ready() -> void:
 	head.material_override = body_mat
 	head.position.y = 0.6
 	pivot.add_child(head)
+	Contrast.outline(body, Looks.GOBLIN_OUTLINE)  # green goblins vanished on the green meadow
+	Contrast.outline(head, Looks.GOBLIN_OUTLINE)
 	for side in [-1.0, 1.0]:
 		var ear := MeshInstance3D.new()
 		ear.mesh = W.cyl(0.0, 0.07, 0.3, 4)
