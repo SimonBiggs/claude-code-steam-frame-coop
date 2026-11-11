@@ -23,7 +23,7 @@ const SEASON_LOOK := {
 	"spring": {"ground": Color(0.5, 0.82, 0.38), "word": "SPRING"},
 	"summer": {"ground": Color(0.56, 0.8, 0.3), "word": "SUMMER"},
 	"autumn": {"ground": Color(0.66, 0.72, 0.32), "word": "AUTUMN"},
-	"winter": {"ground": Color(0.86, 0.9, 0.95), "word": "WINTER"},
+	"winter": {"ground": Color(0.6, 0.76, 0.7), "word": "WINTER"},  # frosty grass: white sheep must still stand out,
 }
 ## Weather chances per season.
 const WEATHER_W := {

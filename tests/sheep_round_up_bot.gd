@@ -131,7 +131,7 @@ func _steer(slot: int, bark: bool) -> void:
 	var v := Vector2.ZERO
 	if main.picks.showing():  # run under a pick orb (picks.gd)
 		var orbs: Array = main.picks.orbs.orbs
-		var orb: Node3D = orbs[(int(slot) + 2) % orbs.size()]
+		var orb: Node3D = orbs[orbs.size() - 1]  # the last one (HARD: the shortest clock keeps the bot's timeline)
 		var to2 := orb.global_position - d.position
 		to2.y = 0.0
 		if to2.length() > 0.1:
@@ -174,7 +174,7 @@ func _drive_vr(delta: float) -> void:
 	var head: Vector3 = rig.head_position()
 	if main.picks.showing() and int(main.held) < 0:  # touch a pick orb with the left glove (picks.gd)
 		kit.vr_stick(rig, Vector2.ZERO)
-		var orb: Node3D = main.picks.orbs.orbs[0]
+		var orb: Node3D = main.picks.orbs.orbs[main.picks.orbs.orbs.size() - 1]
 		if kit.vr_reach(rig, 0, orb.icon.global_position if orb.icon != null else orb.global_position, 2.0, delta) and not has_meta("vr_orb"):
 			set_meta("vr_orb", true)
 			print("BOT VR: touched a pick orb")
