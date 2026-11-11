@@ -347,6 +347,7 @@ func _setup_game(mode: String) -> void:
 		add_child(props)
 		props.build()
 	if SIMPLE_MODE and mode != "client":
+		net.event("orbs", ["", [], []])  # (the sticky "orbs" has a value from the start: a late joiner catches up at once)
 		_start_cup()
 	if mode == "host":
 		state = "wait"

@@ -137,15 +137,17 @@ func _keeper_pick(delta: float) -> int:
 					i = j
 		else:
 			i = orbs.nearest_hit(pos, Deep.HAND_R)
-		var before := int(inside.get(id, -1))
-		if t < OPEN or before == RESTING:  # in an orb as they open: never a pick until it leaves
+		if not inside.has(id):  # where it was when the orbs came up: resting in one is never a pick until it leaves
+			inside[id] = RESTING if i >= 0 else -1
+		var before := int(inside[id])
+		if before == RESTING:
 			inside[id] = RESTING if i >= 0 else -1
 			dwell[id] = 0.0
 			continue
 		if i != before:
 			dwell[id] = 0.0
 		inside[id] = i
-		if i >= 0:
+		if i >= 0 and t >= OPEN:
 			dwell[id] = float(dwell.get(id, 0.0)) + delta
 			if float(dwell[id]) >= (Deep.DWELL if id != "flat" else 0.15):
 				got = i
