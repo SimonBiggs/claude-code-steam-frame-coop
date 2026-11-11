@@ -157,6 +157,12 @@ func _init() -> void:
 		var p0 := Picks.spot_of(row, 0, 3)
 		var p1 := Picks.spot_of(row, 1, 3)
 		_expect(p0.distance_to(p1) > Picks.TV_R * 2.0, "a digger touches one orb at a time")
+	# With diggers: behind the chest where the TV cameras look (from +z), the first orb on their left.
+	var tv_row := pk.row_at(Vector3(0, 0, -9), Vector3(0, 0, 9))
+	for i in 3:
+		var p := Picks.spot_of(tv_row, i, 3)
+		_expect(p.z < -IslandGen.CHEST_CLEAR and Vector2(p.x, p.z).length() < IslandGen.R - 0.1, "TV pick orb %d on the far sand (%s)" % [i, str(p)])
+	_expect(Picks.spot_of(tv_row, 0, 3).x < Picks.spot_of(tv_row, 2, 3).x, "the first TV pick orb on the left")
 	pk.free()
 	_expect(Picks.Y * S + 0.8 > 0.9 and Picks.Y * S + 0.8 < 1.5, "pick orbs at a giant's hand height")
 	# The museum only grows.

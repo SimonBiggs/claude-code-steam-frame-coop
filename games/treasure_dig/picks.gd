@@ -3,8 +3,9 @@ extends Node
 ##   "mode"    GENTLE / BRAVE / HARD once a session (the family's last mode in the middle).
 ##   "island"  which island next (story.gd offers: three kinds, the least visited first) - was two signposts.
 ##   "gift"    CAPTAIN PEG'S TOOLS before every island: three of BIG SPADE, DETECTOR, PEG'S MAP, POLLY, LUCKY CHARM.
-## Three glass orbs float in a row on the sand between the chest and the giant (wherever the giant wades, the row
-## turns to face them, so a VR player alone can always reach every orb). A TV digger runs into one, the giant
+## Three glass orbs float in a row on the sand: behind the chest, where every TV camera looks (a giant playing with
+## diggers wades round to them), or, for a giant playing alone, between the chest and the giant wherever they wade
+## (the row turns to face them, so a VR player alone can always reach every orb). A TV digger runs into one, the giant
 ## touches one with a glove; the first one decides for the team (a dot in their colour circles it). Nobody in time?
 ## The middle orb (it glows brightest) is taken - a solo giant or a little one is never stuck. The host sends the
 ## sticky "orbs" event [stage, entries, row] (a machine joining mid-pick sees the orbs too) and "take" [i, slot].
@@ -14,7 +15,7 @@ const VrRig := preload("res://core/vr_rig.gd")
 
 const WAIT := {"mode": 14.0, "island": 12.0, "gift": 10.0}
 const AFTER := 1.0  # seconds the taken orb shows its dot before the orbs go
-const ROW_R := 5.6  # beach units from the chest towards the giant (the giant wades at ISLAND * S + 0.25 = 9 units): a lean away
+const ROW_R := 5.0  # beach units from the chest towards the giant (who wades at ISLAND * S + 0.25 = 9 units): an arm away
 const GAP := 2.2  # beach units between orbs (more than 2 x TV_R: a digger touches one at a time)
 const Y := 1.5  # beach units above the sand (chest height for a digger; ~1.2 m up for the giant)
 const SCALE := 1.0
@@ -49,12 +50,13 @@ func showing() -> bool:
 	return not orbs.orbs.is_empty()
 
 
-## Host: where the row goes: [middle (beach-local, on the sand), yaw] - towards the giant (or the TV side with no
-## giant), the first orb on the left as the giant and the TV camera see it.
-func row_at(toward: Vector3) -> Array:
+## Host: where the row goes: [middle (beach-local, on the sand), yaw] - towards `toward` (the giant playing alone,
+## or the far side for the TV cameras), the first orb on the left as `viewer` (the side they look from) sees it.
+func row_at(toward: Vector3, viewer: Vector3 = Vector3.INF) -> Array:
 	var d := Vector2(toward.x, toward.z)
 	d = d.normalized() if d.length() > 0.1 else Vector2(0.0, 1.0)
-	return [Vector3(d.x, 0.0, d.y) * ROW_R, atan2(d.x, d.y)]
+	var v := d if viewer == Vector3.INF else Vector2(viewer.x, viewer.z).normalized()
+	return [Vector3(d.x, 0.0, d.y) * ROW_R, atan2(v.x, v.y)]
 
 
 ## Beach-local spot of orb i of n in a row (the deep test checks them all on the sand).
@@ -112,7 +114,7 @@ func tick(delta: float) -> void:
 		if done_t >= AFTER:
 			_finish()
 		return
-	t -= delta
+	t -= minf(delta, 0.1)  # (a loading hitch never eats the wait: nobody gets to pick otherwise)
 	var s: float = main.S
 	for slot in main.avatars:
 		var a: Node3D = main.avatars[slot]

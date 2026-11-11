@@ -33,6 +33,11 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "td-tools", "date": "2026-11-11", "game": "treasure_dig", "pic": "bigspade", "line": "Pick Peg's digging tools!"},
+	{"id": "td-events", "date": "2026-11-11", "game": "treasure_dig", "pic": "tidewave", "line": "Tides! Coconuts! Look out!"},
+	{"id": "td-museum", "date": "2026-11-11", "game": "treasure_dig", "pic": "museum", "line": "Peg's museum grows!"},
+	{"id": "td-seasons", "date": "2026-11-11", "game": "treasure_dig", "pic": "daisy", "line": "Snowy and flowery islands", "try": {"TD_SEASON": "winter"}},
+	{"id": "td-gentle", "date": "2026-11-11", "game": "treasure_dig", "pic": "pirate", "line": "Gentle, brave or hard"},
 	{"id": "bp-gifts", "date": "2026-11-11", "game": "balloon_pop", "pic": "dart", "line": "Pick Poppy's gifts!"},
 	{"id": "bp-gusts", "date": "2026-11-11", "game": "balloon_pop", "pic": "airswirl", "line": "Wind! Rings show the way"},
 	{"id": "bp-skies", "date": "2026-11-11", "game": "balloon_pop", "pic": "nightsky", "line": "Night, snow, sunset skies", "try": {"BP_SKY": "night"}},

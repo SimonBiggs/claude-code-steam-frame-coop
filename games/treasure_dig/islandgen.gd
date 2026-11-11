@@ -16,6 +16,8 @@ const SPOT_GAP := 1.8
 const DECK := 40  ## treasures in a round's pile (more than any round digs)
 const SPOTS := 24  ## distinct burial spots (reused in turn: a spot is free again once dug)
 const HIDDEN := 6  ## main.gd buries this many at a time
+const GIANT_ANGLE := PI * 0.5  ## the giant starts in the sea at +z (main.gd vr_rig.place)
+const GIANT_CLEAR := 0.45  ## radians either side of it with no palm
 
 
 ## spec: {kind: island id, level: islands done, boots_add: the mode's extra boot share (deep.gd)}. Returns {seed, kind, level, palms: [Vector3],
@@ -29,6 +31,9 @@ static func generate(seed_value: int, spec: Dictionary) -> Dictionary:
 	var a0 := r.randf() * TAU
 	for k in n_palms:
 		var a := a0 + k * TAU / n_palms + r.randf_range(-0.2, 0.2)
+		var off := wrapf(a - GIANT_ANGLE, -PI, PI)
+		if absf(off) < GIANT_CLEAR:  # never a palm trunk in the giant's face where they start (+z)
+			a = GIANT_ANGLE + signf(off if off != 0.0 else 1.0) * GIANT_CLEAR
 		palms.append(Vector3(cos(a), 0.0, sin(a)) * r.randf_range(R + 0.15, ISLAND - 0.3))
 	var rocks: Array = []
 	for k in r.randi_range(2, 4):
@@ -123,6 +128,8 @@ static func check(g: Dictionary) -> Array:
 		why.append("too many boots (%d of %d)" % [boots, deck.size()])
 	for p in g.get("palms", []):
 		var d := Vector2((p as Vector3).x, (p as Vector3).z).length()
+		if absf(wrapf(atan2((p as Vector3).z, (p as Vector3).x) - GIANT_ANGLE, -PI, PI)) < GIANT_CLEAR - 0.01:
+			why.append("a palm in the giant's face")
 		if d < R or d > ISLAND:
 			why.append("a palm at %.2f (in the diggers' way or in the sea)" % d)
 	return why

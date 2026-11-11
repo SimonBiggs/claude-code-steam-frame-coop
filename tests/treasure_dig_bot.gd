@@ -72,7 +72,12 @@ func _ready() -> void:
 		kit.at(end - 9.0, "host checks (the TV machine is still connected)", _checks)
 		kit.at(end, "finish", kit.finish)
 	else:
-		kit.at(31.0 if client else 36.0, "finish", func() -> void:
+		# Clients leave a little before the host (BOT_HOST_END given to every machine: tools/multibot.ts --env); a machine
+		# that joined late (BOT_LATE) counts its clock from its own start.
+		var fin := 31.0 if client else 36.0
+		if client and OS.has_environment("BOT_HOST_END"):
+			fin = float(OS.get_environment("BOT_HOST_END")) - 4.0 - float(OS.get_environment("BOT_LATE") if OS.has_environment("BOT_LATE") else "0")
+		kit.at(fin, "finish", func() -> void:
 			_checks()
 			kit.finish())
 	kit.every(2.0, _report)

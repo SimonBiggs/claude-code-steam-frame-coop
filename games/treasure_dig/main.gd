@@ -665,8 +665,11 @@ func _start_round() -> void:
 ## Host: the picks before an island, one after another on the pick orbs (picks.gd): the mode once a session,
 ## which island (unless it's the first ever or TODAY'S ISLAND), then Peg's tool. Then the island starts.
 func _next_pick() -> void:
-	var toward := beach.to_local(vr_rig.head_position()) if vr_rig != null else Vector3(0.0, 0.0, 9.0)
-	var row := picks.row_at(toward)
+	# The row: on the far side of the chest, where every TV camera looks; a giant playing alone gets it in front of
+	# them, wherever they wade (picks.gd).
+	var alone := vr_rig != null and party.player_count() == 0
+	var toward := beach.to_local(vr_rig.head_position()) if alone else Vector3(0.0, 0.0, -9.0)
+	var row := picks.row_at(toward, Vector3.INF if alone else Vector3(0.0, 0.0, 9.0))  # (TV cameras look from +z)
 	net.state_set("phase", "orbs")
 	if mode == "":
 		var ids := PickOrbs.mode_ids(Deep.mode_of(String(save.data.get("mode", "brave"))))

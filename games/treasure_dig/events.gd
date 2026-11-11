@@ -64,7 +64,7 @@ func announce(kind: String, data: Variant, warn: float, look: String = "coconut"
 		"tide":
 			var band := Deep.tide_band(float(data))
 			var sz: Vector2 = band[2]
-			rings.shape("line", _g(band[0]), band[1], sz * s, Deep.TIDE_COLOR, warn, {"style": "flash", "y": y, "stay": Deep.STAY})
+			rings.shape("line", _g(band[0]), band[1], sz * s, Deep.TIDE_COLOR, warn, {"style": "flash", "y": y, "stay": Deep.STAY, "alpha": 0.82})  # (thinner fills read lilac over the bright sand)
 			main.sound("whoosh", -6.0, 0.6)
 		"drop":
 			for p in data:
