@@ -609,6 +609,14 @@ export async function land(branch: string, genTests: string[], botId: string, ot
   const isGame = await stat(join(STAGE, "games", botId)).then(() => true, () => false);
   if (isGame && /\(0 checks\)/.test(out.deck)) out.deck += " (no Deck checks ran for this game)";
   ok &&= /BOT RESULT: PASS/.test(out.deck) && !/SCRIPT ERROR|no Deck checks/.test(out.deck);
+  // Solo VR: the Frame hosting with no TV machine is a real way the family plays, and new bot checks kept assuming TV
+  // players there (2026-11-11: 8 games, then treasure-deep2's "map pieces were dug up"). Run the game's bot that way.
+  if (isGame && await stat(join(STAGE, `tests/${botId}_bot.tscn`)).then(() => true, () => false)) {
+    const so = (await sh(`DUO_HOST=1 BOT_VR=1 BOT_END=62 DUO_PORT=${rport()} timeout 200 godot-test --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/${botId}_bot.tscn 2>&1`, STAGE)).out;
+    const soErr = [...so.split("\n").filter(l => /SCRIPT ERROR/.test(l)), ...engineErrors(so)];
+    out.solo_vr = (so.split("\n").filter(l => /BOT RESULT/.test(l)).pop() ?? "no BOT RESULT") + soErr.slice(0, 3).map(e => "\n" + e).join("");
+    ok &&= /BOT RESULT: PASS/.test(out.solo_vr) && soErr.length === 0;
+  }
   const res: string[] = [];
   for (const [id, o] of [["arcade", {}], [botId, { net: true, joiners: 1, seconds: 180 }], ...otherBots.map(x => [x, {}])] as [string, any][]) {
     process.env.DUO_PORT = String(rport());
