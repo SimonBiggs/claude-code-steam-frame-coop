@@ -4,7 +4,7 @@ extends RefCounted
 ## giant leaves and flowers; SPACE: glowing crystals, light posts and big planets in the sky).
 ##   Props.build(track)    # called by track.gd build_info, adds everything under track.built
 
-const PATCH_COLORS := {"chocolate": Color(0.38, 0.2, 0.1), "mud": Color(0.3, 0.22, 0.12), "ice": Color(0.75, 0.92, 1.0), "moon": Color(0.7, 0.4, 1.0)}
+const PATCH_COLORS := {"chocolate": Color(0.38, 0.2, 0.1), "mud": Color(0.24, 0.17, 0.08), "ice": Color(0.75, 0.92, 1.0), "moon": Color(0.7, 0.4, 1.0)}
 const BUMP_COLORS := {"gumdrop": [Color(1.0, 0.35, 0.55), Color(0.4, 0.85, 1.0), Color(1.0, 0.85, 0.3), Color(0.55, 1.0, 0.5)],
 	"rock": [Color(0.5, 0.55, 0.45), Color(0.45, 0.5, 0.42)], "snowball": [Color(0.97, 0.98, 1.0)], "meteor": [Color(0.35, 0.3, 0.35)]}
 
