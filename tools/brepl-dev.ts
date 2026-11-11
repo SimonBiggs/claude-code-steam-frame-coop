@@ -547,7 +547,7 @@ export async function guard(game: string, project = STAGE) {
 /** Repo-wide guard tests every landing runs (2026-11-11: gen_budget_test failed on main unnoticed because no landing
  *  ran it; each of these took < 45 s on all of main then). lan_update_test stays out: it compiles a deliberately broken
  *  script, whose expected "Parse Error" would read as a SCRIPT ERROR here. */
-export const REPO_GUARDS = ["gen_budget_test", "who_test", "who_net_test", "classic_seats_test", "menu_test", "party_stale_press_test", "bg_gen_test", "engine_sys_test", "engine_ui_test", "pause_banner_test"];
+export const REPO_GUARDS = ["gen_budget_test", "who_test", "who_net_test", "classic_seats_test", "menu_test", "party_stale_press_test", "bg_gen_test", "engine_sys_test", "engine_ui_test", "pause_banner_test", "contrast_test", "vr_wrist_menu_test"];
 
 export async function land(branch: string, genTests: string[], botId: string, otherBots: string[], msg: string) {
   // A landing that stopped leaves its merge in wt-merge (and its files in staging) for a retry. Landing a DIFFERENT

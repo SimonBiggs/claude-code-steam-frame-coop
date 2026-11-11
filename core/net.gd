@@ -844,7 +844,10 @@ func _check_vr_menu() -> void:
 	if has_meta("leaving"):
 		down = false  # on the way to the arcade: a late trigger release must not pause again
 	if down and not menu_was_down:
-		print("Net: VR pause toggled")
+		# Say which path did it, so a pause nobody meant can be traced in a log.
+		var why := "tap RESUME" if tap_resume else ("pull on MENU" if on_btn and pull_start and not paused \
+			else ("touch MENU" if held_touch else "menu button"))
+		print("Net: VR pause toggled (%s)" % why)
 		if main.has_method("toggle_vr_pause"):
 			main.toggle_vr_pause()
 		else:
