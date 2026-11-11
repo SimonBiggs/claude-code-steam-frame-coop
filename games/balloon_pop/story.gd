@@ -42,8 +42,8 @@ const FIRST_RIDE := "BUNTING"
 const KIND_LINES := {WaveGen.GOLD: "Gold! Three points!", WaveGen.GRUMPY: "Grumpy! Don't pop!",
 	WaveGen.ROCKET: "Rocket! Quick!", WaveGen.ICE: "Ice! Everything slows!", WaveGen.TWINS: "Twins! Pop pop pop!",
 	WaveGen.GIANT: "GIANT! Hit it 3 times!"}
-const KIND_COLORS := {WaveGen.GOLD: Color(1.0, 0.82, 0.2), WaveGen.GRUMPY: Color(0.45, 0.47, 0.52),
-	WaveGen.ROCKET: Color(1.0, 0.45, 0.15), WaveGen.ICE: Color(0.7, 0.9, 1.0), WaveGen.TWINS: Color(1.0, 0.45, 0.8),
+const KIND_COLORS := {WaveGen.GOLD: Color(1.0, 0.85, 0.1), WaveGen.GRUMPY: Color(0.4, 0.42, 0.46),
+	WaveGen.ROCKET: Color(0.9, 0.1, 0.55), WaveGen.ICE: Color(0.35, 1.0, 0.9), WaveGen.TWINS: Color(1.0, 0.45, 0.8),
 	WaveGen.GIANT: Color(0.6, 0.35, 1.0)}
 const CHEERS: Array[String] = ["Pop pop hooray!", "What a team!", "My fair grows!", "Super popping!", "Wheee!"]
 const PICK_LINE := "Pop the next ride!"
@@ -69,9 +69,10 @@ static func ride_index(id: String) -> int:
 
 ## The save's default data (core/save.gd fills missing keys from this).
 ## rides: {ride id: times built}; cur: the ride being built ("" = pick next); fill: tickets in it.
+## mode: the family's last GENTLE / BRAVE / HARD; parade: balloons in Poppy's parade (skies.gd).
 static func save_defaults() -> Dictionary:
 	return {"best": 0, "world": -1, "rides": {}, "cur": FIRST_RIDE, "fill": 0, "rounds": 0, "stars": {},
-		"daily": {}, "met": {}, "sets": 0, "giants": 0, "carry": 0}
+		"daily": {}, "met": {}, "sets": 0, "giants": 0, "carry": 0, "mode": "brave", "parade": 0}
 
 
 static func rides_built(rides: Dictionary) -> int:

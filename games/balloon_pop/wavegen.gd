@@ -59,7 +59,7 @@ const SETS: Array[String] = ["line", "ring", "rainbow", "heart"]
 
 
 ## spec: {time (s), level (0..), players (1..), kinds {kind: chance}, gold (chance), grumpy (chance),
-## giants (how many, 0..2), rainbow (extra weight for rainbows), name}
+## giants (how many, 0..2), rainbow (extra weight for rainbows), name, busy / rise (skies.gd modes, default 1)}
 ## Returns {seed, time, level, spawns: [[t, kind, x, z, y0, rise, colour, set], ...] by time (set -1 =
 ## none), sets: [[first t, shape, count], ...], max (all points), goal [1, 2, 3 stars], kinds, cap, name}.
 static func generate(seed_value: int, spec: Dictionary) -> Dictionary:
@@ -72,6 +72,8 @@ static func generate(seed_value: int, spec: Dictionary) -> Dictionary:
 	var kinds: Dictionary = spec.get("kinds", {})
 	var gold_p := float(spec.get("gold", 0.08))
 	var grumpy_p := float(spec.get("grumpy", 0.0))
+	var busy := clampf(float(spec.get("busy", 1.0)), 0.5, 2.0)  # skies.gd modes: waves come faster
+	var rise_k := clampf(float(spec.get("rise", 1.0)), 0.5, 2.0)  # ... and rise faster (still capped by max_rise)
 	var spawns: Array = []
 	var ends: Array = []  # ends[i] = the latest any of spawns[0..i] is still up (lets _fits stop early)
 	var sets: Array = []
@@ -102,8 +104,8 @@ static func generate(seed_value: int, spec: Dictionary) -> Dictionary:
 				w.append(wt)
 			shape = open[Seeded.weighted(rng, w)]
 		last = shape
-		var gap := lerpf(0.95, 0.45, p) * lerpf(1.35, 0.7, d) * lerpf(1.0, 0.8, clampf((players - 1) / 4.0, 0.0, 1.0))
-		var base_rise := lerpf(0.34, 0.5, p) * lerpf(1.0, 1.25, d)
+		var gap := lerpf(0.95, 0.45, p) * lerpf(1.35, 0.7, d) * lerpf(1.0, 0.8, clampf((players - 1) / 4.0, 0.0, 1.0)) / busy
+		var base_rise := lerpf(0.34, 0.5, p) * lerpf(1.0, 1.25, d) * rise_k
 		var set_id := -1
 		if SETS.has(shape):
 			set_id = sets.size()
@@ -152,7 +154,7 @@ static func generate(seed_value: int, spec: Dictionary) -> Dictionary:
 	var used_list: Array = used.keys()
 	used_list.sort()
 	return {"seed": seed_value, "time": time, "level": level, "spawns": spawns, "sets": sets, "waves": waves, "max": mx,
-		"goal": goal(mx, players), "kinds": used_list, "cap": CAP, "name": str(spec.get("name", ""))}
+		"goal": goal(mx, players), "kinds": used_list, "cap": CAP, "name": str(spec.get("name", "")), "busy": busy}
 
 
 ## Keep the sky busy: if nothing would be let go for too long (a wave's balloons didn't fit), let a
@@ -370,7 +372,7 @@ static func check(rd: Dictionary, allowed: Array = []) -> Array:
 	var why: Array = []
 	var spawns: Array = rd.get("spawns", [])
 	var time := float(rd.get("time", 0.0))
-	if spawns.size() < int((time - 3.0) * 0.65):
+	if spawns.size() < int((time - 3.0) * 0.65 * minf(1.0, float(rd.get("busy", 1.0)))):
 		why.append("too few balloons (%d in %d s)" % [spawns.size(), int(time)])
 	var prev_t := 0.0
 	var last_t := 0.0
