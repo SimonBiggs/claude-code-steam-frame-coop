@@ -12,7 +12,7 @@ const E := preload("res://games/elemental_bender/elem.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")
 
-const GAP := 3.0
+const GAP := 3.5
 const TOUCH := 1.2
 
 var stones: Array = []
@@ -75,7 +75,7 @@ func show_pick(d: Dictionary) -> void:
 		var label := Label3D.new()
 		label.text = Boons.pick_name(kind, s.id).replace(" ", "\n")
 		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-		label.pixel_size = 0.012
+		label.pixel_size = 0.0105
 		label.font_size = 56
 		label.outline_size = 12
 		label.modulate = col.lightened(0.4)

@@ -21,7 +21,7 @@ const SEGMENT := 5  # waves per island (the 5th is its boss)
 const TREE_AT := Vector3(-12.5, 0.0, -5.0)  # == wavegen.gd (the Spirit Tree)
 ## The altar stones (picks between waves) stand in a row in front of the temple.
 const ALTAR_Z := -11.0
-const ALTAR_HALF := 7.5  # metres either side of the middle
+const ALTAR_HALF := 8.0  # metres either side of the middle
 ## Hazard vents.
 const VENT_R := Vector2(12.5, 18.0)  # between the temple steps and the portals
 const VENT_GAP := 7.0
@@ -38,7 +38,7 @@ const LIST: Array[Dictionary] = [
 	{"id": "ice", "name": "ICE SHELF", "pic": "iceshelf", "sky": "snowy", "ground": Color(0.86, 0.92, 0.98),
 		"shore": Color(0.62, 0.8, 0.92), "sea": Color(0.06, 0.28, 0.42), "sea_glow": 0.0, "stone": Color(0.7, 0.8, 0.9),
 		"hazard": "frost", "boss": "giant", "generals": 1, "waves": 8},
-	{"id": "volcano", "name": "VOLCANO RIM", "pic": "volcano", "sky": "stormy", "ground": Color(0.3, 0.24, 0.23),
+	{"id": "volcano", "name": "VOLCANO RIM", "pic": "volcano", "sky": "sunset", "ground": Color(0.3, 0.24, 0.23),
 		"shore": Color(0.14, 0.12, 0.12), "sea": Color(1.0, 0.38, 0.08), "sea_glow": 1.6, "stone": Color(0.42, 0.36, 0.34),
 		"hazard": "lava", "boss": "drake", "generals": 2, "waves": 16},
 	{"id": "sky", "name": "SKY RUINS", "pic": "skyruins", "sky": "day", "ground": Color(0.5, 0.72, 0.42),
