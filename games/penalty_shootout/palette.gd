@@ -7,6 +7,7 @@ const WorldScript := preload("res://games/penalty_shootout/world.gd")
 const Ball := preload("res://games/penalty_shootout/ball.gd")
 const Striker := preload("res://games/penalty_shootout/striker.gd")
 const Keeper := preload("res://games/penalty_shootout/keeper.gd")
+const Deep := preload("res://games/penalty_shootout/deep.gd")
 
 
 static func _ball() -> Dictionary:
@@ -22,6 +23,9 @@ static func key_colors() -> Dictionary:
 	for k in Keeper.POWER_COLORS:
 		var c: Color = Keeper.POWER_COLORS[k]
 		out["%s bubble" % k] = Color(c.r, c.g, c.b, Keeper.BUBBLE_ALPHA)
+	# Second pass: the weather tells on the grass (each kind its own colour).
+	out["gust tell"] = Deep.GUST_COLOR
+	out["mud tell"] = Deep.MUD_COLOR
 	return out
 
 
@@ -30,4 +34,11 @@ static func backgrounds() -> Dictionary:
 
 
 static func groups() -> Array:
-	return [{"keys": {"ball": _ball()}, "bgs": {"night sky": WorldScript.NIGHT}}]
+	var gifts := {}
+	for g in Deep.GIFTS:
+		gifts["%s orb" % g.id] = g.color
+	return [{"keys": {"ball": _ball()}, "bgs": {"night sky": WorldScript.NIGHT}},
+		# the ball waits on the mud patch round the spot (a muddy kick)
+		{"keys": {"ball": _ball()}, "bgs": {"mud": Deep.MUD_COLOR.darkened(0.25)}},
+		# Leo's gift orbs float in the goal mouth: over the grass (the keeper) and the night sky (the strikers)
+		{"keys": gifts, "bgs": {"pitch": WorldScript.PITCH, "night sky": WorldScript.NIGHT}}]

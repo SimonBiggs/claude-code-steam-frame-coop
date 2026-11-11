@@ -72,6 +72,12 @@ const Save := preload("res://core/save.gd")
 const Seeded := preload("res://core/seeded.gd")
 const Telemetry := preload("res://core/telemetry.gd")
 const StoryCard := preload("res://core/story_card.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
+const Deep := preload("res://games/penalty_shootout/deep.gd")
+const PicksScript := preload("res://games/penalty_shootout/picks.gd")
+const HazardsScript := preload("res://games/penalty_shootout/hazards.gd")
+const SeasonScript := preload("res://games/penalty_shootout/season.gd")
+const CornerScript := preload("res://games/penalty_shootout/corner.gd")
 const GAME_ID := "penalty_shootout"
 const LEO := "LEO"
 const LEO_COLOR := Color(1.0, 0.72, 0.25)
@@ -234,6 +240,21 @@ var stars_said := false
 var match_secs := 0.0
 var story_queue: Array = []
 var story_t := 0.0
+# Second pass (deep.gd): modes, Leo's gifts on pick orbs in the goal mouth, warned weather, seasons, the trophy corner.
+var picks: Node  # picks.gd
+var hazards: Node3D  # hazards.gd
+var season_node: Node3D  # season.gd
+var corner: Node3D  # corner.gd
+var mode := "brave"
+var mode_picked := false
+var gift := ""  # this match's gift ("" none)
+var gift_for := -1  # the match number the gift was picked for
+var season := ""
+var hz_list: Array = []  # this match's weather per kick (deep.gd hazards)
+var hz_now := {}  # this kick's weather ({} none)
+var hz_said := {}  # kinds told by a story card this session
+var pick_k := 0  # pick kicks taken (strikers take turns)
+var weather_kicks := {}  # kind -> kicks with it this match (telemetry)
 
 
 func _ready() -> void:
@@ -261,11 +282,22 @@ func _ready() -> void:
 		leo.main = self
 		add_child(leo)
 		leo.build()
+		corner = CornerScript.new()
+		corner.name = "TrophyCorner"
+		corner.main = self
+		add_child(corner)
+		season_node = SeasonScript.new()
+		season_node.name = "Season"
+		season_node.main = self
+		add_child(season_node)
+		hazards = HazardsScript.new()
+		hazards.main = self
+		add_child(hazards)
 	save = Save.new()
 	save.game_id = GAME_ID
 	# prizes: [[kind, play-day, golden], ...]; days: days played; daily: the date TODAY'S MATCH ran; goals: star goals reached.
 	save.defaults = {"prizes": [], "goals": 0, "days": 0, "last_day": "", "daily": "", "daily_done": "", "cups": 0, "matches": 0, "stars": 0,
-		"best_stars": 0}
+		"best_stars": 0, "mode": "", "last_gift": ""}
 	add_child(save)
 	_build_hud()
 	var menu := PauseMenuScript.new()
@@ -275,6 +307,10 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
+	net.sticky_event("orbs")  # a machine joining mid-pick sees the orbs (picks.gd)
+	picks = PicksScript.new()
+	picks.main = self
+	add_child(picks)
 	seats = ClassicSeats.new(self, {
 		"no_keys": StrikerScript.NO_KEYS,
 		"free_actions": ["continue", "pause"],
@@ -311,6 +347,7 @@ func _setup_game(mode: String) -> void:
 		add_child(props)
 		props.build()
 	if SIMPLE_MODE and mode != "client":
+		net.event("orbs", ["", [], []])  # (the sticky "orbs" has a value from the start: a late joiner catches up at once)
 		_start_cup()
 	if mode == "host":
 		state = "wait"
@@ -892,7 +929,12 @@ func is_turn_of(p) -> bool:
 
 
 func can_shoot() -> bool:
-	return state == "aim" and state_t >= READY_TIME
+	return state == "aim" and state_t >= shoot_wait()
+
+
+## Seconds into a turn before the kick may go: a kick with weather waits until it has been told long enough.
+func shoot_wait() -> float:
+	return maxf(READY_TIME, float(Deep.mode_data(mode).warn)) if not hz_now.is_empty() else READY_TIME
 
 
 func keeper_can_move() -> bool:
@@ -1021,6 +1063,10 @@ func _practice_result(res: String) -> void:
 	state = "result"
 	state_t = 0.0
 	result_len = 1.3
+	if practice == "pick":  # a kick at the pick orbs: the next striker has a go (picks.gd decides)
+		result_len = 0.9
+		last_result = ""
+		return
 	if practice == "keeper":
 		if res == "save":
 			kp_step += 1
@@ -1099,7 +1145,7 @@ func _max_speed() -> float:
 		var k := clampf(float(turn_count - 1) / 14.0, 0.0, 1.0)
 		var top := lerpf(8.0, 15.0, k)
 		if not mplan.is_empty() and practice == "":
-			top = MatchGen.speed_at(mplan, turn_count - 1)  # the match plan's speed for this kick
+			top = Deep.top_speed(MatchGen.speed_at(mplan, turn_count - 1), mode, gift, hz_now)  # the plan's speed, the mode, gift, mud
 		return top * (1.0 - 0.02 * (maxi(1, active_strikers().size()) - 1))
 	var progress := clampf(float(round_i) / maxf(1.0, float(rounds_total - 1)), 0.0, 1.0)
 	if cup_stage == "final":
@@ -1113,6 +1159,13 @@ func _result_time() -> float:
 
 
 func _begin_match() -> void:
+	if SIMPLE_MODE and _want_pick():
+		return
+	if gift_for != matches + 1:
+		gift = ""
+		if OS.has_environment("PS_GIFT") and matches == 0 and not Deep.gift(OS.get_environment("PS_GIFT")).is_empty():
+			gift = OS.get_environment("PS_GIFT")  # (What's New "try": the first match with that gift)
+			gift_for = matches + 1
 	saves = 0
 	goals_total = 0
 	shots_total = 0
@@ -1221,6 +1274,15 @@ func _start_turn() -> void:
 	if practice == "":
 		turn_count += 1
 	star_now = Vector2.INF
+	hz_now = {}
+	if SIMPLE_MODE and practice == "" and turn_count - 1 < hz_list.size():
+		hz_now = hz_list[turn_count - 1]
+		if not hz_now.is_empty():
+			weather_kicks[String(hz_now.kind)] = int(weather_kicks.get(String(hz_now.kind), 0)) + 1
+			if not hz_said.has(String(hz_now.kind)):
+				hz_said[String(hz_now.kind)] = true
+				_story_for_all("Windy!" if String(hz_now.kind) == "gust" else "Muddy!", "airswirl" if String(hz_now.kind) == "gust" else "mudpatch",
+					Deep.GUST_COLOR if String(hz_now.kind) == "gust" else Deep.MUD_COLOR)
 	if SIMPLE_MODE and practice == "" and not mplan.is_empty():
 		star_now = MatchGen.star_at(mplan, turn_count - 1)
 		if star_now != Vector2.INF:
@@ -1258,6 +1320,10 @@ func _start_turn() -> void:
 func _advance() -> void:
 	keeper.power = ""
 	keeper.bubble = ""
+	if practice == "pick":
+		pick_k += 1
+		_pick_turn()
+		return
 	if practice == "keeper":
 		if kp_step >= KP_STEPS or kp_balls >= KP_MAX:
 			_end_keeper_practice()
@@ -1416,6 +1482,14 @@ func _launch() -> void:
 			p.fire_left = maxi(0, int(p.fire_left) - 1)
 	if keeper.power == "slow":
 		speed *= 0.65
+	if practice == "pick":
+		speed = Deep.PICK_KICK  # a flat, quick kick: it flies through the orb it is aimed at (nobody saves a pick kick)
+	if SIMPLE_MODE and practice == "" and gift == "curve" and absf(target.x) > 0.3:
+		curve = signf(target.x) * Deep.CURVE  # CURVE BOOTS: a banana kick into the corner it was aimed at
+	if SIMPLE_MODE and practice == "" and String(hz_now.get("kind", "")) == "gust":
+		var to := Deep.blown(Vector2(target.x, target.y), hz_now)  # the gust blows it along (and it bends with the wind)
+		target.x = to.x
+		curve = clampf(curve + float(hz_now.sign) * Deep.GUST_CURVE, -1.0, 1.0)
 	last_shot = shot
 	keeper.bubble = ""  # an offer not taken expires with the kick (never in front of the incoming ball)
 	ball.place(spot)
@@ -1433,7 +1507,8 @@ func _launch() -> void:
 	if power > 0.85 and not SIMPLE_MODE:
 		wild_t = 6.0
 	print("Shot by P%d: %s power %.2f curve %.2f speed %.1f (%d km/h)%s -> (%.1f, %.1f)" % [shooter + 1, shot, power, curve, speed,
-		last_kmh, " SLOW-MO" if keeper.power == "slow" else "", target.x, target.y])
+		last_kmh, " SLOW-MO" if keeper.power == "slow" else "", target.x, target.y]
+		+ (" weather %s" % str(Deep.pack(hz_now)) if not hz_now.is_empty() else "") + (" gift %s" % gift if gift != "" else ""))
 
 
 func _on_save(kind: String) -> void:
@@ -1792,6 +1867,9 @@ func _process(delta: float) -> void:
 			leo.set_tally(leo_stars, leo_goal)
 		if practice == "" and state != "over" and state != "wait":
 			match_secs += delta
+	if hazards != null:
+		var show_hz := practice == "" and (state == "aim" or state == "runup" or state == "flight" or state == "result")
+		hazards.show_now(hz_now if show_hz else {}, "%d/%d/%d/%d" % [cup_n, round_i, shooter, shots_total if state == "aim" else shots_total - 1])
 	_record(delta)
 	_update_replay(delta)
 	_update_trophy()
@@ -1807,6 +1885,8 @@ func _process(delta: float) -> void:
 		return
 	_update_lost_pads(delta)
 	state_t += delta
+	if picks != null and picks.active():
+		picks.tick(delta)
 	match state:
 		"intro":
 			if state_t >= intro_dur or (state_t > 1.5 and cont_edge):
@@ -1823,7 +1903,7 @@ func _process(delta: float) -> void:
 			if p == null or not p.active:
 				_advance()
 			elif shooter == 1 and cpu_kicks():
-				if state_t >= 1.8:
+				if state_t >= maxf(1.8, shoot_wait() + 0.3):
 					_cpu_shoot()
 			elif state_t >= AIM_TIME and SIMPLE_MODE:
 				_on_shoot(shooter, p.aim, 0.55, 0.0)
@@ -1851,7 +1931,11 @@ func _physics_process(delta: float) -> void:
 	var spheres: Array = keeper.save_spheres(delta)
 	if state != "flight" and state != "result":
 		return
-	var res: String = ball.sim(delta, spheres if state == "flight" and practice != "striker" else [])
+	var res: String = ball.sim(delta, spheres if state == "flight" and practice != "striker" and practice != "pick" else [])
+	if practice == "pick" and state == "flight" and picks.can_take():
+		var oi: int = picks.ball_hit(ball.position)
+		if oi >= 0:
+			picks.take(oi, shooter)
 	if res == "":
 		return
 	if res == "post":
@@ -2109,7 +2193,8 @@ func make_snapshot() -> Array:
 		final_goals.get(finalists[1], 0) if finalists.size() == 2 else 0], champion, keeper.power, keeper.bubble, keeper.bubble_pos,
 		ball.fire, last_kmh, sudden, last_shot,
 		[practice, pspot, ptarget, fire_on, props.net_state() if props != null else [], cpu],
-		[cup_seed, cup_n, cup_daily, star_now, leo_stars, leo_goal]]
+		[cup_seed, cup_n, cup_daily, star_now, leo_stars, leo_goal],
+		[mode, gift, season, Deep.pack(hz_now)]]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -2194,6 +2279,14 @@ func apply_snapshot(s: Array) -> void:
 		star_now = lm[3]
 		leo_stars = int(lm[4])
 		leo_goal = int(lm[5])
+	if s.size() > 28:
+		var dm: Array = s[28]
+		mode = String(dm[0])
+		gift = String(dm[1])
+		season = String(dm[2])
+		if season_node != null and season != "":
+			season_node.set_season(season)
+		hz_now = Deep.unpack(dm[3])
 
 
 func apply_event(kind: String, args: Array) -> void:
@@ -2246,6 +2339,12 @@ func apply_event(kind: String, args: Array) -> void:
 		"leo_family":
 			if leo != null:
 				leo.set_family(args[0], int(args[1]), bool(args[2]))
+			if corner != null and args.size() > 3:
+				corner.set_pieces(int(args[3]), true)
+		"orbs":
+			picks.show_row(String(args[0]), args[1], args[2])
+		"take":
+			picks.take_fx(int(args[0]), int(args[1]))
 		"leo_star":
 			if leo != null:
 				leo.fly_star(args[0], int(args[1]), int(args[2]))
@@ -2632,8 +2731,16 @@ func _start_cup() -> void:
 	print("Penalty Shootout: cup seed %d%s | %d prizes, day %d" % [cup_seed, " (TODAY'S MATCH)" if cup_daily else "",
 		(save.data.prizes as Array).size(), int(save.data.days)])
 	_send_family()
+	season = Seeded.season(today)
+	if OS.has_environment("PS_SEASON"):
+		season = OS.get_environment("PS_SEASON")
+	if season_node != null:
+		season_node.set_season(season)
+	if save.data.mode != "":
+		mode = Deep.mode_of(String(save.data.mode))
 	story_t = 2.8  # after the title
 	_story_for_all("Hi! I'm Leo!", "lion", LEO_COLOR)
+	_story_for_all(String(Deep.season_data(season).line), String(Deep.season_data(season).pic), Deep.season_data(season).drift)
 	if cup_daily:
 		_story_for_all("TODAY'S MATCH!", "football", Color(1.0, 0.85, 0.3))
 	if new_day and int(save.data.days) > 1:
@@ -2654,6 +2761,105 @@ func _plan_match() -> void:
 	print("Match plan: cup %d match %d, %d kicks, Leo wants %d stars (%d star kicks)" % [cup_seed, cup_n, turns, leo_goal,
 		MatchGen.star_turns(mplan, turns)])
 	_story_for_all("%d stars, please!" % leo_goal, "lion", LEO_COLOR)
+	var hz_spec := {"mode": mode, "season": season}
+	if OS.has_environment("PS_WEATHER_NOW"):  # bots: weather from match 1, from the second kick
+		hz_spec["from"] = 1
+		hz_spec["first"] = 1
+	hz_list = Deep.hazards(cup_seed, cup_n, hz_spec)
+	weather_kicks = {}
+	if gift != "":
+		var gd := Deep.gift(gift)
+		_story_for_all(String(gd.line), String(gd.pic), gd.color)
+
+
+# --- Second pass: picks (deep.gd, picks.gd) ---------------------------------------------------------------------
+
+## Nobody but the keeper can pick (a lone keeper: the computer striker, or nobody kicking).
+func pick_solo() -> bool:
+	return cpu or active_strikers().is_empty()
+
+
+## Host / local, before a match: the mode pick once a session, Leo's gift pick before every match from the second.
+func _want_pick() -> bool:
+	if net.mode == "client" or picks == null or picks.active():
+		return false
+	if not mode_picked:
+		_start_pick("mode")
+		return true
+	if matches >= 1 and gift_for != matches + 1:
+		_start_pick("gift")
+		return true
+	return false
+
+
+func _start_pick(stage: String) -> void:
+	var entries: Array = []
+	var opts: Array = []
+	if stage == "mode":
+		opts = PickOrbs.mode_ids(Deep.mode_of(String(save.data.mode)) if String(save.data.mode) != "" else "brave")
+		for id in opts:
+			var md := PickOrbs.mode(String(id))
+			entries.append({"id": id, "name": md.name, "pic": md.pic, "color": md.color})
+		_story_for_all("Easy or tricky?", "lion", LEO_COLOR)
+	else:
+		opts = Deep.gift_choices(Deep.corner(int(save.data.goals)), String(save.data.last_gift), Seeded.derive(cup_seed, "gift%d" % matches))
+		for id in opts:
+			var gd := Deep.gift(String(id))
+			entries.append({"id": id, "name": gd.name, "pic": gd.pic, "color": gd.color})
+		_story_for_all("A gift for you!", "gift", LEO_COLOR)
+	practice = "pick"
+	pick_k = 0
+	fire_on = false  # (a pick kick is a plain kick: the FIREBALL comes back with the match)
+	hz_now = {}
+	star_now = Vector2.INF
+	keeper.power = ""
+	keeper.bubble = ""
+	world.show_trophy(Vector3.INF)
+	_show_center("", 0.1, true, "")  # (the last match's headline never sits over the orbs)
+	picks.begin(stage, entries, opts, _on_picked)
+	sound("whistle", -6.0, 1.3, true)
+	_pick_turn()
+
+
+## The next striker kicks at the orbs (strikers take turns); nobody to kick: the keeper reaches for one.
+func _pick_turn() -> void:
+	ball.place(spot)
+	state_t = 0.0
+	if not picks.active() or picks.chosen >= 0:
+		state = "pickwait"
+		shooter = -1
+		return
+	var who: Array = []
+	if not cpu:
+		for p in active_strikers():
+			who.append(p.index)
+	if who.is_empty():
+		state = "pickwait"
+		shooter = -1
+		return
+	shooter = who[pick_k % who.size()]
+	state = "aim"
+	var p = players[shooter]
+	if is_local(p):
+		p.prepare_turn()
+
+
+## Host / local: the team picked (or the middle one was taken for them).
+func _on_picked(stage: String, opt: Variant, _slot: int) -> void:
+	practice = ""
+	shooter = -1
+	if stage == "mode":
+		mode_picked = true
+		mode = Deep.mode_of(String(opt))
+		save.data.mode = mode
+		_story_for_all(String(PickOrbs.MODE_LINES.get(mode, "Let's go!")), String(PickOrbs.mode(mode).pic), PickOrbs.mode_color(mode))
+	else:
+		gift = String(opt)
+		gift_for = matches + 1
+		save.data.last_gift = gift
+	save.mark_dirty()
+	print("Picked %s: %s" % [stage, str(opt)])
+	_begin_match()
 
 
 ## Practice ring i (from the next match's plan; the old fixed rings before a cup seed exists).
@@ -2669,16 +2875,17 @@ func _check_star() -> void:
 	if not SIMPLE_MODE or practice != "" or star_now == Vector2.INF:
 		return
 	var aim: Vector2 = pending.get("aim", Vector2(0, -9))
-	if aim.distance_to(star_now) > MatchGen.STAR_R:
+	if aim.distance_to(star_now) > Deep.star_r(mode, gift):
 		return
 	var from := Vector3(star_now.x, star_now.y, 0.08)
 	star_now = Vector2.INF
-	leo_stars += 1
-	save.data.stars = int(save.data.stars) + 1
+	for j in (2 if gift == "golden" else 1):  # GOLDEN BALL: every star counts twice
+		leo_stars += 1
+		save.data.stars = int(save.data.stars) + 1
+		if leo != null:
+			leo.fly_star(from, leo_stars - 1, leo_goal)
+		net.event("leo_star", [from, leo_stars - 1, leo_goal])
 	save.mark_dirty()
-	if leo != null:
-		leo.fly_star(from, leo_stars - 1, leo_goal)
-	net.event("leo_star", [from, leo_stars - 1, leo_goal])
 	world.mascot_cheer("save")
 	sound("power", -4.0, 1.3, true)
 	print("Leo's star! %d of %d" % [leo_stars, leo_goal])
@@ -2728,10 +2935,13 @@ func _send_family() -> void:
 	if save == null or not SIMPLE_MODE:
 		return
 	var crowned := int(save.data.goals) >= MatchGen.CROWN_PRIZES
+	var pieces := Deep.corner(int(save.data.goals))
 	if leo != null:
 		leo.set_family(save.data.prizes, int(save.data.days), crowned)
+	if corner != null:
+		corner.set_pieces(pieces, true)
 	if net != null and net.mode == "host":
-		net.event("leo_family", [(save.data.prizes as Array).duplicate(true), int(save.data.days), crowned])
+		net.event("leo_family", [(save.data.prizes as Array).duplicate(true), int(save.data.days), crowned, pieces])
 
 
 ## Host / local: a story card on every machine.
@@ -2777,4 +2987,5 @@ func _log_match(end: String) -> void:
 		"strikers": active_strikers().size(), "cpu": cpu, "stars": leo_stars, "star_goal": leo_goal, "goal_hit": leo_goal_hit,
 		"star_kicks": star_kicks, "top_speed": snappedf(cur_max_speed, 0.1), "vr": keeper_in_vr(), "net": net.mode,
 		"fire": fire_on, "prizes": (save.data.prizes as Array).size(), "goals_ever": int(save.data.goals),
-		"days": int(save.data.days)})
+		"days": int(save.data.days), "mode": mode, "gift": gift, "season": season, "weather": weather_kicks.duplicate(),
+		"corner": Deep.corner(int(save.data.goals)), "picks": picks.history.size() if picks != null else 0})

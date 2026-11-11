@@ -9,7 +9,7 @@ const COLOR := Color(1.0, 0.72, 0.25)
 
 
 ## data: the raw save (no defaults filled in: always .get with a default). today: Seeded.today().
-## grown: every prize Leo has won for his fan club; daily: TODAY'S MATCH finished today (daily_done; "daily" only
+## grown: every prize Leo has won for his fan club (every CORNER_EVERY of them also grows his trophy corner, deep.gd); daily: TODAY'S MATCH finished today (daily_done; "daily" only
 ## says it started, so the next round isn't the daily).
 static func progress_summary(data: Dictionary, today: String) -> Dictionary:
 	var prizes: Variant = data.get("prizes", [])
@@ -20,4 +20,4 @@ static func progress_summary(data: Dictionary, today: String) -> Dictionary:
 ## A save as the game writes it after a few days (tests/progress_test.gd: it must read as grown > 0, daily done).
 static func sample(today: String) -> Dictionary:
 	return {"prizes": [["scarf", 1, true], ["balloon", 2, false], ["drum", 3, true]], "goals": 3, "days": 3,
-		"last_day": today, "daily": today, "daily_done": today, "cups": 5, "matches": 9, "stars": 12, "best_stars": 3}
+		"last_day": today, "daily": today, "daily_done": today, "cups": 5, "matches": 9, "stars": 12, "best_stars": 3, "mode": "brave", "last_gift": "big"}

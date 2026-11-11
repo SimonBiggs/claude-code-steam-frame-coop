@@ -207,7 +207,7 @@ func offer(kind: String) -> void:
 
 
 func glove_scale() -> float:
-	return BIG_GLOVES if power == "big" else 1.0
+	return BIG_GLOVES if power == "big" or (main != null and String(main.get("gift")) == "big") else 1.0  # (Leo's BIG GLOVES gift: the whole match)
 
 
 ## Where the bubble floats: chest height, a little to one side, an arm's length towards the pitch.

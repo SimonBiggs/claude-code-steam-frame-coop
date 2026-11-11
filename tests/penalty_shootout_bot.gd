@@ -54,6 +54,8 @@ var prop_key := ""
 var throw_key := ""
 var cues := {}  # simple mode: picture cues seen / learned
 var leo := {}  # simple mode: Leo's story seen (star in the goal, stars flown, sockets, cards, cubs / prizes)
+var deep := {}  # second pass seen: orbs, picks, weather tells, season, corner
+var pick_orb := 1
 const HEADLINES := "^(PENALTY SHOOTOUT|SAVED!|GOAL!|KICK OFF!|FIREBALL!|STRIKERS!|KEEPER WINS!|STRIKERS WIN!|WHAT A MATCH!|PLAYER \\d+!|PLAYER \\d+ LEFT|PAUSED|CONNECTED|FULL!|P\\d: controller disconnected|Connecting to the keeper…|Waiting for strikers…)$"
 var headline_re := RegEx.create_from_string(HEADLINES)
 const PROP_SPOTS: Array = [["post", Vector3(3.72, 1.2, 0.05)], ["net", Vector3(0.0, 1.2, -1.95)],
@@ -75,6 +77,8 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS  # keeps running if the Start check opened the pause menu
 	if OS.has_environment("BOT_VR") and not OS.has_environment("DUO_JOIN"):
 		OS.set_environment("PS_FAKE_VR", "1")
+	if not OS.has_environment("PS_WEATHER_NOW"):
+		OS.set_environment("PS_WEATHER_NOW", "1")  # weather from the first match (deep.gd bot spec: still fair)
 	main = load("res://games/penalty_shootout/main.tscn").instantiate()
 	add_child(main)
 	var filt := RealPadFilter.new()
@@ -133,6 +137,7 @@ func _physics_process(delta: float) -> void:
 	if main.simple:
 		_note_cues()
 		_note_leo()
+		_note_deep()
 	if get_tree().paused:
 		return
 	if has_meta("pad_join") and t > join_time + 0.5:
@@ -248,11 +253,16 @@ func _drive_striker(p) -> void:
 		plan_power = randf_range(0.45, 0.95)
 		plan_curve = randf_range(-1.0, 1.0) if randf() < 0.4 else 0.0
 		var r := randf()
+		pick_orb = randi() % 3
 		p.bot_shot = "fire" if (r < 0.3 and p.fire_left > 0) else ("chip" if r < 0.55 else "normal")
 		if main.simple:
 			p.bot_shot = "fire" if (r < 0.5 and main.fire_on and p.fire_left > 0) else "normal"
 			plan_curve = 0.0
-			if main.practice == "striker":
+			if main.practice == "pick":
+				var op: Vector3 = main.picks.orb_position(pick_orb)
+				plan_aim = Vector2(op.x, op.y) if op != Vector3.INF else Vector2(0.0, 1.25)  # kick through a pick orb
+				plan_power = randf_range(0.4, 0.7)
+			elif main.practice == "striker":
 				plan_aim = Vector2(main.ptarget.x, main.ptarget.y) + Vector2(randf_range(-0.5, 0.5), randf_range(-0.4, 0.4))
 				plan_power = randf_range(0.3, 0.7)
 			elif main.shots_total % 4 == 2:
@@ -295,6 +305,12 @@ func _predict(plane_z: float) -> Array:
 
 func _drive_flat_keeper(k) -> void:
 	k.bot = true
+	if main.simple and main.practice == "pick":
+		var x := _keeper_pick_x()
+		k.bot_move = 0.0 if x == INF or absf(x - float(k.kx)) < 0.15 else signf(x - float(k.kx))
+		if x == INF and absf(float(k.kx)) > 1.2:
+			k.bot_move = -signf(float(k.kx))  # wander back out of a side orb (a new pick)
+		return
 	var key := "%d/%d" % [main.round_i, main.shots_total]
 	if key != keep_key:
 		keep_key = key
@@ -327,6 +343,9 @@ func _drive_vr_keeper(k, delta: float) -> void:
 	var head: Vector3 = k.xr_camera.global_position
 	var hr: Node3D = k.hand_r
 	var hl: Node3D = k.hand_l
+	if main.simple and main.practice == "pick":
+		_vr_keeper_pick(k, hl, hr, delta)
+		return
 	if main.simple and main.props != null and _drive_props(k, hl, hr, delta):
 		return
 	if main.state == "aim" and k.bubble != "" and main.state_t > 0.6:
@@ -347,6 +366,31 @@ func _drive_vr_keeper(k, delta: float) -> void:
 		var reach := head + (p - head).limit_length(0.85 * float(k.ws()))
 		var hand: Node3D = hr if dx < 0.0 else hl
 		hand.global_position = hand.global_position.move_toward(reach, 7.0 * delta)
+
+
+## The keeper picks when nobody else can (a lone keeper) or the strikers have had a while: the orb's x, INF = not now.
+func _keeper_pick_x() -> float:
+	if not main.picks.active() or main.picks.chosen >= 0:
+		return INF
+	if not (main.pick_solo() or main.picks.t > 7.0):
+		return INF
+	var op: Vector3 = main.picks.orb_position(0 if main.picks.history.size() % 2 == 0 else 2)
+	return op.x if op != Vector3.INF else INF
+
+
+## VR keeper picking: hands down at the sides, then the left glove reaches INTO one side orb and stays there.
+func _vr_keeper_pick(k, hl: Node3D, hr: Node3D, delta: float) -> void:
+	var head: Vector3 = k.xr_camera.global_position
+	k.bot_stick = Vector2.ZERO
+	hr.global_position = hr.global_position.move_toward(head + Vector3(-0.25, -0.75, 0.1), 3.0 * delta)
+	var x := _keeper_pick_x()
+	if x == INF:
+		hl.global_position = hl.global_position.move_toward(head + Vector3(0.25, -0.75, 0.1), 3.0 * delta)
+		return
+	var op: Vector3 = main.picks.orb_position(0 if main.picks.history.size() % 2 == 0 else 2)
+	if absf(op.x - head.x) > 0.9:
+		k.bot_stick = Vector2(-signf(op.x - head.x), 0.0)  # step towards it (facing +z: right is -x)
+	hl.global_position = hl.global_position.move_toward(op, 2.0 * delta)
 
 
 ## Simple mode: touch one prop with the left glove at the start of each turn; every few results,
@@ -451,6 +495,32 @@ func _note_leo() -> void:
 				leo["card_vr"] = true
 
 
+## The second pass: pick orbs, picks, weather tells, the season, Leo's trophy corner.
+func _note_deep() -> void:
+	if main.picks != null and main.picks.showing():
+		deep["orbs"] = true
+		deep["orb_stage"] = main.picks.orbs.stage
+	if main.picks != null:
+		for h in main.picks.history:
+			deep["pick_" + String(h[0])] = true
+			deep["by_" + ("keeper" if int(h[2]) == 0 else ("nobody" if int(h[2]) < 0 else "striker"))] = true
+	if main.hazards != null:
+		for kind in main.hazards.seen:
+			deep["told_" + String(kind)] = true
+		if not main.hz_now.is_empty() and main.state == "aim" and main.can_shoot() and main.hazards.tells_now().is_empty():
+			deep["untold"] = true  # a kick that may go before its weather shows
+	if not main.hz_now.is_empty() and main.state == "aim":
+		deep["hz_due"] = true
+	deep["season"] = main.season
+	if main.season_node != null and main.season_node.season != "":
+		deep["dressed"] = main.season_node.season
+	deep["mode"] = main.mode
+	if main.gift != "":
+		deep["gift"] = main.gift
+	if main.corner != null:
+		deep["corner"] = main.corner.count
+
+
 func _check_headline(who: String, text: String) -> void:
 	var tx := text.strip_edges()
 	if tx == "" or headline_re.search(tx) != null:
@@ -475,6 +545,17 @@ func _exit_tree() -> void:
 		print("SCRIPT ERROR: BOT LEO: a whole match without Leo's plan, star or sockets (%s)" % str(leo))
 	if main.net.mode != "client" and leo.get("cubs", 0) < 1:
 		print("SCRIPT ERROR: BOT LEO: no lion cub beside Leo (%s)" % str(leo))
+	print("BOT DEEP: mode=%s matches=%d %s" % [main.net.mode, matches_done, str(deep)])
+	if main.net.mode != "client" and matches_done >= 1 and not deep.has("pick_mode"):
+		print("SCRIPT ERROR: BOT DEEP: a match without the mode pick (%s)" % str(deep))
+	if main.net.mode != "client" and matches_done >= 2 and not deep.has("pick_gift"):
+		print("SCRIPT ERROR: BOT DEEP: a second match without Leo's gift pick (%s)" % str(deep))
+	if deep.has("hz_due") and not (deep.has("told_gust") or deep.has("told_mud")):
+		print("SCRIPT ERROR: BOT DEEP: a kick had weather nobody was told about (%s)" % str(deep))
+	if deep.has("untold"):
+		print("SCRIPT ERROR: BOT DEEP: a kick could go before its weather was told (%s)" % str(deep))
+	if String(deep.get("dressed", "")) == "" or String(deep.get("dressed", "")) != String(deep.get("season", "?")):
+		print("SCRIPT ERROR: BOT DEEP: the pitch isn't dressed for the season (%s)" % str(deep))
 	for p in main.players:
 		if p.has_meta("cue_done"):
 			print("BOT CUES: P%d done=%s" % [p.index + 1, p.get_meta("cue_done")])
