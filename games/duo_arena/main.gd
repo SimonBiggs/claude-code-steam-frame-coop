@@ -26,6 +26,7 @@ const DirectorScript := preload("res://games/duo_arena/director.gd")
 const Gen := preload("res://games/duo_arena/arenagen.gd")
 const Bosses := preload("res://games/duo_arena/bosses.gd")
 const Picks := preload("res://games/duo_arena/picks.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
 const ZoneScript := preload("res://games/duo_arena/zone.gd")
 const ProgressScript := preload("res://games/duo_arena/progress.gd")
 const Save := preload("res://core/save.gd")
@@ -2462,7 +2463,7 @@ func _finish_pick() -> void:
 	break_timer = 1.5 if stage != "perk" else 2.0
 	if stage == "mode":
 		Engine.set_meta("da_mode_set", true)
-		_story_for_all({"gentle": "Gentle! Nice and easy!", "brave": "Brave! Let's go!", "hard": "HARD! Wow!"}.get(game_mode, "Let's go!"),
+		_story_for_all(String(PickOrbs.MODE_LINES.get(game_mode, "Let's go!")),
 			String(Picks.find("mode", game_mode).get("pic", "star")), Picks.find("mode", game_mode).get("color", NOVA_COLOR))
 		_begin_pick("hero")
 
