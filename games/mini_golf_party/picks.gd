@@ -74,7 +74,7 @@ func show_row(new_stage: String, entries: Array, at: Array) -> void:
 		orbs.clear()
 		return
 	orbs.show_orbs(new_stage, entries, at[0], 0.85, 0.0, {"at": at, "scale": Deep.ORB_SCALE, "pop": true, "font": 72,
-		"label_y": -0.95, "label_px": 0.0055, "two_lines": true, "bob": 0.03})  # (names under the orbs, over the pads)
+		"label_y": -1.55, "label_px": 0.005, "two_lines": true, "bob": 0.03})  # (names under the orbs, over the pads)
 
 
 ## Orb i's middle in the world (bots reach there), INF if none.

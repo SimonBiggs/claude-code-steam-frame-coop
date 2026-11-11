@@ -242,9 +242,10 @@ func _target(slot: int, bp: Vector2) -> Vector2:
 ## The fake VR golfer picks by hand when it's alone or nobody has picked for a while: it walks up beside the orb
 ## and the left glove reaches into it and stays (picks.gd: a glove has to move in and stay a moment).
 func _vr_hand_pick(rig, delta: float) -> bool:
+	rig.camera.rotation.x = 0.0
 	if main.net.mode == "client" or not main.picks.active() or main.picks.chosen >= 0:
 		return false
-	if not (main.pick_solo() or main.picks.t > 9.0):
+	if not ((main.pick_solo() and main.picks.t > 3.0) or main.picks.t > 9.0):
 		return false
 	var i: int = 0 if main.picks.history.size() % 2 == 0 else 2
 	var op: Vector3 = main.picks.orb_position(i)
@@ -253,6 +254,7 @@ func _vr_hand_pick(rig, delta: float) -> bool:
 	var feet := Vector3(op.x + 0.25, 0.0, op.z + 0.55)
 	if rig._place_feet.distance_to(feet) > 0.3:
 		rig.place(feet, 0.0)  # (a real golfer walks up with the left stick)
+	rig.camera.rotation.x = -0.75  # (and looks down at the orb they reach for)
 	if int(main.picks.inside.get("l", -1)) == main.picks.RESTING:
 		kit.vr_reach(rig, VrRig.LEFT, op + Vector3(-0.2, -0.35, 0.35), 1.5, delta)  # resting in one: take the hand out first
 	else:

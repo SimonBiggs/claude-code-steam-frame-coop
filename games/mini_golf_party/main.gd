@@ -236,7 +236,7 @@ func _setup(mode: String) -> void:
 		_start_course()
 	elif net.state_has("hdesc"):
 		_build_from_desc(net.state_get("hdesc"))
-	if vr_rig != null:
+	if vr_rig != null and not picks.active():  # (a pick on first: Gus's card says what to do, never a banner over the orbs)
 		intro_card = HudKit.vr_banner(self, vr_rig.camera, "PUTT IT IN!", "", {"duration": 3.0})
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	ready_to_play = true
