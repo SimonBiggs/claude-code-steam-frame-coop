@@ -25,6 +25,7 @@ var saw_vr_ride := false
 var saw_lift := false
 var guest_rode := false
 var poked := 0
+var idle_t := 0.0
 var checks: Array = []  # [time, Callable, msg]: asserts a moment after a hand let go
 
 
@@ -90,6 +91,14 @@ func _p1(action: String) -> void:
 
 ## Local pad play: after each ride, build something new (the same functions the hands use).
 func _pad_after_ride() -> String:
+	if main.phase == "build" and step >= 2:
+		# Keep playing to the end (the lone check: nothing may stand still for 30 s): ride again every few seconds.
+		idle_t += 0.5
+		if idle_t >= 5.0:
+			idle_t = 0.0
+			_p1("y")
+			return "rides again"
+		return ""
 	if main.phase != "build" or main.rides_done < 1 or step >= 2:
 		return ""
 	step += 1

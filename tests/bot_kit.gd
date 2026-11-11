@@ -86,7 +86,7 @@ func _process(delta: float) -> void:
 	t += delta
 	if main != null and main.get("net") != null and str(main.net.mode) == "host":
 		machines_seen = maxi(machines_seen, int(main.net.peer_count()))
-	if main != null and main.get("party") != null:
+	if main != null and main.get("party") is Object and main.party.has_method("player_count"):  # (hide_and_seek's party is its friends list)
 		pads_seen = maxi(pads_seen, int(main.party.player_count()))
 	for i in range(_vr_release.size() - 1, -1, -1):
 		var rel: Array = _vr_release[i]

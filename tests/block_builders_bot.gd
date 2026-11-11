@@ -104,7 +104,9 @@ func _physics_process(delta: float) -> void:
 		var rs: Array[String] = []
 		for r in main.runners():
 			if r.active:
-				rs.append("P%d%s %s" % [r.index + 1, " FLAG" if r.finished else "", r.global_position.snapped(Vector3.ONE * 0.1)])
+				rs.append("P%d%s %s%s" % [r.index + 1, " FLAG" if r.finished else "", r.global_position.snapped(Vector3.ONE * 0.1),
+				(" buddy wp %d/%d %s" % [int(r.get_meta("bot_wp", 0)), (main.level_data().bot_path as Array).size(),
+				str(main.level_data().bot_path[clampi(int(r.get_meta("bot_wp", 0)), 0, (main.level_data().bot_path as Array).size() - 1)])]) if r.buddy and not (main.level_data().bot_path as Array).is_empty() else ""])
 		print("t=%.0f mode=%s state=%s level=%d time=%.0f score=%d blocks=%d budget=%s views=%d runners=%d [%s]" % [
 			t, main.net.mode, main.state, main.level + 1, main.time_left, main.score, main.course.blocks.size(),
 			str(main.budget), main.view_count, main.active_runner_count(), ", ".join(rs)])

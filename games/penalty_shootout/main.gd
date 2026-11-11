@@ -781,6 +781,8 @@ func _request_join(p) -> void:
 
 
 func _activate(p) -> void:
+	if cpu and net.mode == "local" and p.index != 1:
+		_cpu_off()
 	p.set_active(true)
 	p.reset_match()
 	if state in ["aim", "runup", "flight", "result", "intro"] and not order.has(p.index):
@@ -944,11 +946,37 @@ func _end_keeper_practice() -> void:
 	keeper_practised = true
 	practice = ""
 	print("Practice: keeper done (%d balls)" % kp_balls)
-	if net.mode == "host" and not net.connected:
-		cpu = true
+	if (net.mode == "host" and not net.connected) or (net.mode == "local" and active_strikers().is_empty()):
+		_cpu_on()
 		_begin_match()
 	else:
 		_start_striker_practice()
+
+
+## Nobody to kick (a lone keeper on a Deck, or a VR host with no TV): P2 becomes the computer striker. On the
+## host P2 is already a TV seat ("remote"); locally the seat is switched on as a remote one, so it gets no split
+## screen view and nothing but _cpu_shoot drives it (2026-11-11: a lone Deck keeper waited forever).
+func _cpu_on() -> void:
+	cpu = true
+	if net.mode == "local" and not players[1].active:
+		players[1].remote = true
+		players[1].set_active(true)
+		players[1].reset_match()
+		on_player_activity_changed(players[1])
+		print("Computer striker steps up (nobody else to kick)")
+
+
+## Local: a real striker joined: the computer striker steps aside.
+func _cpu_off() -> void:
+	cpu = false
+	if net.mode == "local" and players[1].remote:
+		_deactivate(players[1])
+		players[1].remote = false
+		print("Computer striker steps aside")
+
+
+func cpu_kicks() -> bool:
+	return cpu and players[1].remote and not net.connected
 
 
 ## Striker practice: one glowing ring in the goal at a time; the keeper can't save yet.
@@ -1794,7 +1822,7 @@ func _process(delta: float) -> void:
 			var p = players[shooter] if shooter > 0 and shooter < players.size() else null
 			if p == null or not p.active:
 				_advance()
-			elif cpu and shooter == 1 and net.mode == "host" and not net.connected:
+			elif shooter == 1 and cpu_kicks():
 				if state_t >= 1.8:
 					_cpu_shoot()
 			elif state_t >= AIM_TIME and SIMPLE_MODE:

@@ -38,7 +38,10 @@ func _ready() -> void:
 	kit = BotKit.new()
 	add_child(kit)
 	main = load("res://games/tower_stack/main.tscn").instantiate()
-	main.set("round_time", 42.0)
+	# One flat player alone (no VR giant, nobody else) pushes blocks slowly: a longer round, still under the real 180 s,
+	# so the crane can finish a tower for them before the lone check's end (120 s).
+	var lone := BotKit.bot_players(2, 6) == 1 and not OS.has_environment("DUO_HOST") and not OS.has_environment("DUO_JOIN") and not OS.has_environment("BOT_VR")
+	main.set("round_time", 95.0 if lone else 42.0)
 	main.set("daily_ok", false)
 	main.set("try_open", 7)  # towergen OPEN_ALL: special blocks from job 2 on
 	add_child(main)
@@ -64,7 +67,7 @@ func _ready() -> void:
 		kit.at(56.0, "host checks", _checks)
 		kit.at(60.0, "finish", kit.finish)
 	else:
-		kit.at(53.0 if client else 58.0, "finish", func() -> void:
+		kit.at(53.0 if client else (110.0 if lone else 58.0), "finish", func() -> void:
 			_checks()
 			kit.finish())
 	if not OS.has_environment("DUO_JOIN"):

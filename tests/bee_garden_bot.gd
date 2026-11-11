@@ -251,6 +251,14 @@ func _party() -> void:
 
 # --- Bees ----------------------------------------------------------------------
 
+## The bee that flies into the pick orbs: P2 (the original test), or the only bee when one player is alone.
+func _picker() -> int:
+	for b in main.bees():
+		if b.active and b.index >= 1:
+			return 1
+	return 0
+
+
 func _drive_bee(b) -> void:
 	var inp := {"move": Vector3.ZERO, "zoom": false}
 	if not b.active:
@@ -267,7 +275,7 @@ func _drive_bee(b) -> void:
 	var have_goal := false
 	var last: int = b.get_meta("bot_last", -1)
 	# Picks between rounds: P2 flies into an orb (the mode's first, the gift's last).
-	if b.index == 1 and main.picks.orbs.showing() and not _orbs_taken() and not (main.gardener != null and main.gardener.fake_vr):
+	if b.index == _picker() and main.picks.orbs.showing() and not _orbs_taken() and not (main.gardener != null and main.gardener.fake_vr):
 		var want: int = 0 if String(main.picks.orbs.stage) == "mode" else main.picks.orbs.orbs.size() - 1
 		var op: Vector3 = main.picks.orb_pos(want)
 		if op != Vector3.INF:
@@ -348,6 +356,15 @@ func _drive_gardener(delta: float) -> void:
 		g.bot_grip = false
 		g_state = "idle"
 		return
+	# Picks with no bee to fly into an orb (a lone gardener on a Deck): the glove holds its grab over the orb.
+	if _picker() == 0 and main.net.mode != "client" and main.picks.orbs.showing() and not _orbs_taken():
+		var want: int = 0 if String(main.picks.orbs.stage) == "mode" else main.picks.orbs.orbs.size() - 1
+		var op: Vector3 = main.picks.orb_pos(want)
+		if op != Vector3.INF:
+			g.bot_target = op
+			g.bot_grip = _near(hp, op, 0.3) and h.held == ""
+			g_state = "idle"
+			return
 	match g_state:
 		"idle":
 			g.bot_grip = false

@@ -29,6 +29,8 @@ const FAKE_PAD := 40
 
 var main
 var t := 0.0
+var checks_run := 0
+var check_fails := 0
 var joined := false
 var join_time := 0.0
 var report_t := 0.0
@@ -196,6 +198,8 @@ func _process(delta: float) -> void:
 			main.debug_continue()
 	if quit_t > 0.0 and t > quit_t:
 		print("BOT %s: done" % mode)
+		print("BOT RESULT: %s (%d songs, %d checks%s)" % ["PASS" if check_fails == 0 else "FAIL", songs_done, checks_run,
+			"" if check_fails == 0 else ", %d failed: see the BOT CHECK lines" % check_fails])
 		preload("res://tests/bot_end.gd").quit_quietly(get_tree())
 		quit_t = 1e9
 	report_t -= delta
@@ -352,7 +356,7 @@ func _touch_props(d, delta: float) -> void:
 	if prop_t > 0.5:
 		props_done = true
 		var kinds: Dictionary = props.touched
-		print("BOT CHECK props: touched %s, shakes %d, held %d -> %s" % [str(kinds), int(props.shakes), int(props.held),
+		_check("BOT CHECK props: touched %s, shakes %d, held %d -> %s" % [str(kinds), int(props.shakes), int(props.held),
 			"PASS" if kinds.size() >= 6 and int(props.shakes) >= 3 and int(props.held) < 0 else "FAIL"])
 
 
@@ -375,8 +379,16 @@ func _check_song() -> void:
 	var ok: bool = lanes.size() == want_lanes and gold == 0 and int(main.drum_level) == (0 if pos < 2 else 1)
 	if pos == 0:
 		ok = ok and not lanes.has(1)
-	print("BOT CHECK song %d '%s' %d BPM: lanes %s, gold notes %d, drum level %d, guitar notes %d, drum notes %d -> %s" % [pos + 1,
+	_check("BOT CHECK song %d '%s' %d BPM: lanes %s, gold notes %d, drum level %d, guitar notes %d, drum notes %d -> %s" % [pos + 1,
 		str(g.title), int(g.bpm), str(lanes.keys()), gold, int(main.drum_level), g.g_t.size(), g.d_t.size(), "PASS" if ok else "FAIL"])
+
+
+## A BOT CHECK line (ends "-> PASS" / "-> FAIL"), counted for the BOT RESULT line.
+func _check(line: String) -> void:
+	checks_run += 1
+	if line.ends_with("FAIL"):
+		check_fails += 1
+	print(line)
 
 
 func _final_checks(mode: String) -> void:
@@ -385,7 +397,7 @@ func _final_checks(mode: String) -> void:
 	for p in main.players:
 		if p.index > 0 and p.active and p.is_local():
 			gs += " P%d %d/%d" % [p.index + 1, int(p.hits), int(p.hits) + int(p.misses)]
-	print("BOT CHECK %s: practice seen %s, songs %d, menus %d, star power %d -> %s" % [mode, checks.has("practice_seen"), songs_done,
+	_check("BOT CHECK %s: practice seen %s, songs %d, menus %d, star power %d -> %s" % [mode, checks.has("practice_seen"), songs_done,
 		menus_seen, stars_used, "PASS" if checks.has("practice_seen") and menus_seen == 0 and stars_used == 0 else "FAIL"])
 	# Story + fan club: every machine shows Doodle's cards and the host's fans (one per finished song).
 	var want_fans: int = (main.net.state_get("fans", []) as Array).size()
@@ -397,7 +409,7 @@ func _final_checks(mode: String) -> void:
 	var need := mini(songs_done - (1 if mode == "client" else 0), main.SongGen.FAN_KEEP)
 	var story_ok: bool = want_fans >= need and shown == mini(want_fans, main.SongGen.FAN_SLOTS) \
 		and main.story_shown.size() >= songs_done and pics_ok and main.fan_club.doodle != null
-	print("BOT CHECK story %s: fans shown %d of %d, story cards %s -> %s" % [mode, shown, want_fans, str(main.story_shown),
+	_check("BOT CHECK story %s: fans shown %d of %d, story cards %s -> %s" % [mode, shown, want_fans, str(main.story_shown),
 		"PASS" if story_ok else "FAIL"])
 	print("BOT %s: last song drums %d/%d%s" % [mode, int(d.hits), int(d.hits) + int(d.misses), gs])
 
