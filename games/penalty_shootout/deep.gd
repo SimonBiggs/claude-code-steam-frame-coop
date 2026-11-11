@@ -75,10 +75,11 @@ const CORNER_AT := Vector3(-10.5, 0.0, 0.5)  # the corner's middle (behind Leo's
 ## The pick row: three orbs in the goal mouth.
 const ROW_X: Array[float] = [-2.2, 0.0, 2.2]
 const ROW_Y := 1.25
-const ROW_Z := 1.0
-const ORB_SCALE := 0.75
+const ROW_Z := 1.3  # (an arm's reach out from the keeper: never in a VR keeper's face)
+const ORB_SCALE := 0.35
 const CATCH := 0.3  # a ball this near an orb's edge takes it
 const HAND_R := 0.12  # a glove this near an orb's edge is in it
+const PICK_KICK := 14.0  # m/s: a pick kick flies flat (a slow one would loop over the orbs)
 const DWELL := 0.25  # seconds a glove must stay in an orb (a hand sweeping past never picks)
 const FLAT_R := 0.55  # a flat keeper this near an orb's middle (across) is under it
 const ROW_WAIT := {"mode": 22.0, "gift": 18.0}  # nobody took one: the middle

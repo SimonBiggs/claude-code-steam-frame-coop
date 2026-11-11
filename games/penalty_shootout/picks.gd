@@ -71,7 +71,7 @@ func show_row(new_stage: String, entries: Array, at: Array) -> void:
 		orbs.clear()
 		return
 	orbs.show_orbs(new_stage, entries, at[0], 2.2, 0.0, {"at": at, "scale": Deep.ORB_SCALE, "pop": true, "font": 64,
-		"label_y": 1.05, "label_px": 0.0055, "two_lines": true, "bob": 0.05})  # (names over the orbs, under the crossbar)
+		"label_y": -1.25, "label_px": 0.006, "two_lines": true, "bob": 0.05})  # (names under the orbs: never at a VR keeper's eyes)
 
 
 ## Orb i's middle in the world (bots aim there), INF if none.

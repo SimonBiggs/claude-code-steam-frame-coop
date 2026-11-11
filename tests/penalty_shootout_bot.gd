@@ -509,6 +509,8 @@ func _note_deep() -> void:
 			deep["told_" + String(kind)] = true
 		if not main.hz_now.is_empty() and main.state == "aim" and main.can_shoot() and main.hazards.tells_now().is_empty():
 			deep["untold"] = true  # a kick that may go before its weather shows
+	if not main.hz_now.is_empty() and main.state == "aim":
+		deep["hz_due"] = true
 	deep["season"] = main.season
 	if main.season_node != null and main.season_node.season != "":
 		deep["dressed"] = main.season_node.season
@@ -548,8 +550,8 @@ func _exit_tree() -> void:
 		print("SCRIPT ERROR: BOT DEEP: a match without the mode pick (%s)" % str(deep))
 	if main.net.mode != "client" and matches_done >= 2 and not deep.has("pick_gift"):
 		print("SCRIPT ERROR: BOT DEEP: a second match without Leo's gift pick (%s)" % str(deep))
-	if matches_done >= 1 and not (deep.has("told_gust") or deep.has("told_mud")):
-		print("SCRIPT ERROR: BOT DEEP: a whole match without any warned weather (%s)" % str(deep))
+	if deep.has("hz_due") and not (deep.has("told_gust") or deep.has("told_mud")):
+		print("SCRIPT ERROR: BOT DEEP: a kick had weather nobody was told about (%s)" % str(deep))
 	if deep.has("untold"):
 		print("SCRIPT ERROR: BOT DEEP: a kick could go before its weather was told (%s)" % str(deep))
 	if String(deep.get("dressed", "")) == "" or String(deep.get("dressed", "")) != String(deep.get("season", "?")):

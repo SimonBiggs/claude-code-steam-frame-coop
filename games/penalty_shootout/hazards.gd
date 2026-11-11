@@ -48,14 +48,15 @@ func show_now(hz: Dictionary, kick_key: String) -> void:
 		"gust":
 			var from := Vector3(-Deep.GUST_W * 0.5, 0.0, Deep.GUST_Z)
 			rings.shape("line", from, Vector3.RIGHT, Vector2(Deep.GUST_W, Deep.GUST_LEN), Deep.GUST_COLOR, 0.3,
-				{"style": "disc", "stay": STAY, "alpha": 0.22, "y": 0.03})
-			var am := _mat(Deep.GUST_COLOR, 0.85)
+				{"style": "disc", "stay": STAY, "alpha": 0.32, "y": 0.03})
+			var am := _mat(Deep.GUST_COLOR.lightened(0.3), 0.95)
 			for i in 3:
 				var a := MeshInstance3D.new()
 				a.mesh = _arrow_mesh()
 				a.material_override = am
 				a.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 				a.position = Vector3((i - 1) * 2.6, 0.05, Deep.GUST_Z + (i - 1) * 1.6)
+				a.scale = Vector3(1.5, 1.0, 1.5)
 				a.rotation.y = 0.0 if int(hz.sign) > 0 else PI
 				add_child(a)
 				arrows.append(a)

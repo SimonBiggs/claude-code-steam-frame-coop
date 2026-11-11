@@ -24,6 +24,7 @@ const PickOrbs := preload("res://core/pick_orbs.gd")
 const StoryCard := preload("res://core/story_card.gd")
 const Seeded := preload("res://core/seeded.gd")
 const Keeper := preload("res://games/penalty_shootout/keeper.gd")
+const Ball := preload("res://games/penalty_shootout/ball.gd")
 
 var fails := 0
 
@@ -184,6 +185,15 @@ func _row() -> void:
 			_fail("pick row: orb %d isn't comfortably inside the goal mouth" % i)
 		if p.z < Keeper.KEEPER_Z + 0.3 or p.z > Keeper.KEEPER_Z + 1.0:
 			_fail("pick row: orb %d out of the keeper's reach from the goal line (z %.1f)" % [i, p.z])
+		# A pick kick aimed at the orb flies through it (ball.gd's real flight, sampled).
+		var from := Vector3(0.0, Ball.R, MatchGen.SPOT_Z)
+		var pl: Array = Ball.plan(from, Vector3(p.x, p.y, 0.0), Deep.PICK_KICK, 0.0)
+		var best := INF
+		for s in 400:
+			var q := Ball.point_at(from, pl[0], pl[1], s * 0.005)
+			best = minf(best, q.distance_to(p))
+		if best > catch * 0.7:
+			_fail("pick row: a kick aimed at orb %d passes %.2f m from it" % [i, best])
 		if absf(p.x) > 2.6:
 			_fail("pick row: orb %d too far for a keeper to step to" % i)
 		for j in i:

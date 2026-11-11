@@ -1482,6 +1482,8 @@ func _launch() -> void:
 			p.fire_left = maxi(0, int(p.fire_left) - 1)
 	if keeper.power == "slow":
 		speed *= 0.65
+	if practice == "pick":
+		speed = Deep.PICK_KICK  # a flat, quick kick: it flies through the orb it is aimed at (nobody saves a pick kick)
 	if SIMPLE_MODE and practice == "" and gift == "curve" and absf(target.x) > 0.3:
 		curve = signf(target.x) * Deep.CURVE  # CURVE BOOTS: a banana kick into the corner it was aimed at
 	if SIMPLE_MODE and practice == "" and String(hz_now.get("kind", "")) == "gust":
@@ -2813,6 +2815,7 @@ func _start_pick(stage: String) -> void:
 	keeper.power = ""
 	keeper.bubble = ""
 	world.show_trophy(Vector3.INF)
+	_show_center("", 0.1, true, "")  # (the last match's headline never sits over the orbs)
 	picks.begin(stage, entries, opts, _on_picked)
 	sound("whistle", -6.0, 1.3, true)
 	_pick_turn()
