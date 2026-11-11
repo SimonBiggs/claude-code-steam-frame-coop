@@ -220,7 +220,9 @@ static func compiles(path: String, text: String) -> bool:
 	if text.contains('preload("%s")' % path) or text.contains("load(\"%s\")" % path):
 		return true
 	var copy := GDScript.new()
-	copy.source_code = text
+	# The copy must not repeat the class_name: a second script claiming it fails with "Class X hides a global script
+	# class", so every class_name script was refused and never hot-reloaded (2026-11-04, Sprout Hop).
+	copy.source_code = RegEx.create_from_string("(?m)^class_name\\s+\\w+").sub(text, "", true)
 	return copy.reload() == OK
 
 

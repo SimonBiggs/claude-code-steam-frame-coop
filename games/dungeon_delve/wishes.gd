@@ -16,7 +16,7 @@ const KINDS := {
 	"secret": {"icon": "eye", "color": "magic", "tally": "secrets"},
 	"chests": {"icon": "bag", "color": "gold", "tally": "chests"},
 	"puzzle": {"icon": "lock", "color": "accent", "tally": "puzzles"},
-	"safe": {"icon": "heart", "color": "hp", "tally": "downs"},
+	"safe": {"icon": "heart", "color": Color(1.0, 0.35, 0.45), "tally": "downs"},
 	"bops": {"icon": "sword", "color": "text", "tally": "kills"},
 }
 const MAX_CHESTS := 3
