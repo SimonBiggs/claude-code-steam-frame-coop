@@ -310,7 +310,9 @@ func _second_pass(_delta: float) -> void:
 			if p1.vr:
 				p1.hand_l.global_position = o.global_position
 			else:
-				main.players[1].global_position = Vector3(o.global_position.x, 0.0, o.global_position.z)
+				# P2 walks under it; alone (one flat player on a Deck) P1 does.
+				var walker = main.players[1] if main.players.size() > 1 and main.players[1].active else p1
+				walker.global_position = Vector3(o.global_position.x, 0.0, o.global_position.z)
 	# After night 1 has run a while, end it so the lantern gift comes up (the bot can't wait a whole night).
 	if not gift_skip and main.night >= 1 and t > 34.0 and not main.in_break:
 		gift_skip = true

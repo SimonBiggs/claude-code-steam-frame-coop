@@ -1135,11 +1135,9 @@ func _process(delta: float) -> void:
 				over_t = -1.0
 				net.send_action("restart", [])
 		return
-	if net.mode == "host" and not net.connected and not solo_round:
-		if phase != "wait":
-			phase = "wait"
-			_show_center("HIDE AND SEEK", 0.0)
-		return
+	if net.mode == "host" and not net.connected and not solo_round and phase != "wait":
+		phase = "wait"  # the TV left mid-round: back to the lobby (alone, the solo Pip hunt starts from there)
+		_show_center("HIDE AND SEEK", 0.0)
 	match phase:
 		"wait":
 			# Playing alone (a Deck, or a VR host with no TV): after a few seconds with no hider the seeker
