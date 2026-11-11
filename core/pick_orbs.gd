@@ -25,6 +25,9 @@ extends Node3D
 
 const StoryCard := preload("res://core/story_card.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
+## Every orb is in this group while it shows: VR cards, banners and words move clear of it (UiKit.vr_dodge) and
+## core/vr_view_check.gd fails a VR bot whose panel covers one. A game never lifts its orbs out of a card's way.
+const KEEP_CLEAR := preload("res://core/vr_view_check.gd").KEEP_CLEAR
 
 const MODES: Array[Dictionary] = [
 	{"id": "gentle", "name": "GENTLE", "pic": "heart", "color": Color(0.45, 1.0, 0.55), "waves": 0, "fx": []},
@@ -132,6 +135,7 @@ func show_orbs(new_stage: String, list: Array, origin: Vector3, gap: float = 2.6
 		o2.hit_height = float(_o("hit_height", 1.7)) * sc
 		o2.collision_layer = collision_layer
 		o2.collision_mask = 0
+		o2.add_to_group(KEEP_CLEAR)
 		if String(_o("group", "")) != "":
 			o2.add_to_group(String(_o("group", "")))
 		if collision_layer != 0:

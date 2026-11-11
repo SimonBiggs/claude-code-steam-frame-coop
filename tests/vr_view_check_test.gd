@@ -4,6 +4,8 @@ extends SceneTree
 const VrViewCheck := preload("res://core/vr_view_check.gd")
 const HudKit := preload("res://core/hud_kit.gd")
 const UiKit := preload("res://core/ui_kit.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
+const StoryCard := preload("res://core/story_card.gd")
 
 var fails: Array[String] = []
 var world: Node3D
@@ -164,6 +166,55 @@ func _run() -> void:
 	lake.free()
 	low = null
 	_clear_ui()
+
+	# 5c. a card never covers a pick orb (core/pick_orbs.gd KEEP_CLEAR; UiKit.vr_dodge moves VR UI clear of them)
+	var orbs := PickOrbs.new()
+	world.add_child(orbs)
+	var ents: Array = []
+	for id in PickOrbs.MODE_IDS:
+		ents.append(PickOrbs.mode(id))
+	# a row just where a story card goes (0.35 m under the eyes, beyond the card)
+	orbs.show_orbs("mode", ents, Vector3(0, 0, -4.2), 1.6, cam.global_position.y - 0.4)
+	await _frames(3)
+	var over := UiKit.label3d("RIGHT OVER THE PICKS", 0.12)
+	world.add_child(over)
+	over.global_position = Vector3(0, cam.global_position.y - 0.35, -2.56)
+	over.set_meta("vr_placed", true)
+	await _frames(1)
+	probs = VrViewCheck.problems(root)
+	_check(", ".join(probs).contains("drawn over the pick"), "a panel over a pick orb is reported: %s" % [probs])
+	over.free()
+	await _frames(1)
+	var sc := StoryCard.show_vr(world, cam, {"who": "PIP", "line": "Pick one!", "pic": "bird", "duration": 30.0})
+	await _frames(40)
+	probs = VrViewCheck.problems(root)
+	_check(not ", ".join(probs).contains("drawn over the pick"), "a story card shown during a pick sits clear of the orbs: %s" % [probs])
+	_check(probs.is_empty(), "the moved story card is still fine to read: %s" % [probs])
+	_check(absf(sc.global_position.y - (cam.global_position.y - 0.35)) > 0.1, "the story card moved off its usual spot (y %.2f)" % sc.global_position.y)
+	orbs.clear()
+	await _frames(40)
+	# the card already up, then the picks come: it glides clear
+	var ok := false
+	orbs.show_orbs("mode", ents, Vector3(0, 0, -4.2), 1.6, cam.global_position.y - 0.4)
+	for i in 400:
+		await _frames(1)
+		if i > 3 and not ", ".join(VrViewCheck.problems(root)).contains("drawn over the pick"):
+			ok = true
+			break
+	_check(ok, "a card already up glides clear when the picks come: %s" % [VrViewCheck.problems(root)])
+	# picks at eye level, nowhere above: the card goes under them
+	orbs.show_orbs("mode", ents, Vector3(0, 0, -4.2), 1.6, cam.global_position.y)
+	await _frames(1)
+	sc = StoryCard.show_vr(world, cam, {"who": "PIP", "line": "Up high!", "pic": "bird", "duration": 30.0})
+	for i in 400:  # (the first card glides; headless frames are short)
+		await _frames(1)
+		probs = VrViewCheck.problems(root)
+		if i > 30 and probs.is_empty():
+			break
+	_check(probs.is_empty(), "picks at eye level, two cards up: both clear of the picks and of each other: %s" % [probs])
+	orbs.free()
+	_clear_ui()
+	await _frames(2)
 
 	# 6. games use the shared PAUSED card (no hand-made ones left to pile up)
 	for dir in DirAccess.get_directories_at("res://games"):
