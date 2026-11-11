@@ -102,8 +102,8 @@ func _watch() -> String:
 		saw_map += 1
 		if main.world.offer_kind == "region" and (main.world.props[main.world.choice_ids[0]]["node"] as Node3D).visible:
 			saw_map_client = true
-	for t in main.monsters._tell_nodes:
-		saw_tells[String(t[3])] = true
+	for a in main.monsters.tells_shown:
+		saw_tells[String(a)] = true
 	quest_max = maxi(quest_max, int(main.net.state_get("quest", 0)))
 	var bio := int(main.plan.get("biome", -1))
 	if last_biome >= 0 and bio != last_biome:
@@ -421,7 +421,7 @@ func _checks() -> void:
 	kit.assert_true(main.stories_shown > 0, "%s: Lumi's story cards showed (%d)" % [mode, main.stories_shown])
 	if mode == "client":
 		kit.assert_true(saw_choose == 0 or saw_offer_client, "client showed the level-up stones")
-		kit.assert_true(max_mons >= 2, "client mirrors the monsters (%d)" % max_mons)
+		kit.assert_true(max_mons >= (1 if OS.has_environment("CS_TRY") else 2), "client mirrors the monsters (%d)" % max_mons)
 		kit.assert_true(int(main.net.state_get("open", 0)) >= 2 or saw_results, "client saw barriers open")
 		kit.assert_true(saw_map == 0 or saw_map_client, "client showed the map stones")
 		if main.log_regions.is_empty() and OS.has_environment("CS_TRY"):

@@ -1,159 +1,61 @@
-extends Node3D
-## ELEMENTAL BENDER: Kiko's ALTAR, picture-first picks (boons.gd). A row of glowing stones in front of the temple,
-## each with a big spinning picture (an element orb for a master, a gift shape for a boon) and a short name.
-## Bend at a stone (any shot or punch that hits it) or walk onto it: that's your pick. Little coloured orbs circle a
-## stone for every player who took it. The middle stone glows brightest: it is taken for whoever hasn't picked when
-## the time runs out. Every machine builds the stones from the host's net state "pick" {n, kind, ids, wait};
-## the host decides who took what (main.gd _altar_pick) and shares it in "perks".
+extends "res://core/pick_orbs.gd"
+## ELEMENTAL BENDER: Kiko's ALTAR, picture-first picks (boons.gd) on the shared PICK ORBS (core/pick_orbs.gd). A row
+## of glowing stones in front of the temple (opts.body), each with a big spinning picture (opts.icon: an element orb
+## for a master, a gift shape for a boon) and a short name. Bend at a stone (any shot or punch near it: projectile.gd
+## reads the orb's hit_radius / hit_height) or walk onto it (at_point): that's your pick. Little coloured orbs circle a
+## stone for every player who took it (show_takers). The middle stone glows brightest: it is taken for whoever hasn't
+## picked when the time runs out. Every machine builds the stones from the host's net state "pick"
+## {n, kind, ids, wait, def}; the host decides who took what (main.gd _altar_pick) and shares it in "taken" / "perks".
 
 const Boons := preload("res://games/elemental_bender/boons.gd")
 const Arenas := preload("res://games/elemental_bender/arenas.gd")
 const E := preload("res://games/elemental_bender/elem.gd")
-const MeshKit := preload("res://core/mesh_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")
 
 const GAP := 3.5
-const TOUCH := 1.2
+const STONE_TOUCH := 1.2
 
-var stones: Array = []
 var info := {}
 var _key := ""
-var _t := 0.0
 
 
-## A pick stone: a target for shots (projectile.gd reads hit_radius / hit_height; main skips it when dead).
-class Stone extends Node3D:
-	var index := 0
-	var id := ""
-	var kind := ""
-	var hit_radius := 0.9
-	var hit_height := 1.7
-	var dead := false
-	var icon: Node3D
-	var takers: Node3D
-	var shown_takers := ""
-
-
-static func spot(i: int, n: int) -> Vector3:
-	return Vector3((i - (n - 1) * 0.5) * GAP, 0.0, Arenas.ALTAR_Z)
-
-
-func showing() -> bool:
-	return not stones.is_empty()
+func _init() -> void:
+	collision_layer = 0  # shots test distance (projectile.gd); fighters walk onto the stones
 
 
 ## Every machine: build (or clear, d = {}) the stones.
 func show_pick(d: Dictionary) -> void:
-	var key := str(d.get("n", 0)) + str(d.get("ids", []))
-	if d.is_empty():
-		key = ""
+	var key := "" if d.is_empty() else str(d.get("n", 0)) + str(d.get("ids", []))
 	if key == _key:
 		return
 	_key = key
 	clear()
-	info = d
 	if d.is_empty():
 		return
-	var ids: Array = d.get("ids", [])
 	var kind := String(d.get("kind", "boon"))
-	for i in ids.size():
-		var s := Stone.new()
-		s.index = i
-		s.id = String(ids[i])
-		s.kind = kind
-		s.name = "Stone_%s" % s.id
-		s.add_to_group("eb_enemy")
-		add_child(s)
-		s.position = spot(i, ids.size())
-		var col := Boons.pick_color(kind, s.id)
-		var mid := i == int(d.get("def", int(ids.size() / 2)))
-		s.add_child(MeshKit.instance(_base_mesh(col, mid), false))
-		s.icon = MeshKit.instance(icon_mesh(kind, s.id), false)
-		s.icon.position.y = 2.2
-		s.icon.scale = Vector3.ONE * 1.4
-		s.add_child(s.icon)
-		var label := Label3D.new()
-		label.text = Boons.pick_name(kind, s.id).replace(" ", "\n")
-		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-		label.pixel_size = 0.0105
-		label.font_size = 56
-		label.outline_size = 12
-		label.modulate = col.lightened(0.4)
-		label.outline_modulate = Color(0.05, 0.05, 0.1)
-		label.position.y = 3.4
-		s.add_child(label)
-		s.takers = Node3D.new()
-		s.takers.position.y = 2.2
-		s.add_child(s.takers)
-		s.scale = Vector3.ONE * 0.01
-		create_tween().tween_property(s, "scale", Vector3.ONE, 0.5).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT).set_delay(i * 0.12)
-		stones.append(s)
+	var list: Array = []
+	for id in d.get("ids", []):
+		list.append({"id": String(id), "name": Boons.pick_name(kind, String(id)), "color": Boons.pick_color(kind, String(id))})
+	show_orbs(kind, list, Vector3(0, 0, Arenas.ALTAR_Z), GAP, 0.0, {
+		"def": int(d.get("def", list.size() / 2)),
+		"body": func(e: Dictionary, mid: bool) -> Node3D: return MeshKit.instance(_base_mesh(e.color, mid), false),
+		"icon": func(e: Dictionary) -> Node3D: return MeshKit.instance(icon_mesh(kind, String(e.id)), false),
+		"spin": 1.3, "icon_y": 2.2, "icon_scale": 1.4, "bob": 0.12, "label_y": 3.4, "label_px": 0.0105, "font": 56,
+		"two_lines": true, "pop": true, "group": "eb_enemy", "touch": STONE_TOUCH, "max_y": 3.0,
+		"hit_r": 0.9, "hit_height": 1.7, "dot_y": 2.2, "dot_r": 1.0, "dot_size": 0.13, "punch": 1.3})
+	info = d
+	for o in orbs:
+		(o as Node3D).name = "Stone_%s" % (o as Orb).id
 
 
 func clear() -> void:
-	for s in stones:
-		if is_instance_valid(s):
-			(s as Node).queue_free()
-	stones.clear()
+	super.clear()
 	info = {}
-
-
-## Every machine: show who took which stone. taken: {slot: stone index}, colors: {slot: Color}.
-func show_takers(taken: Dictionary, colors: Dictionary) -> void:
-	for s in stones:
-		var st: Stone = s
-		var who: Array = []
-		for slot in taken:
-			if int(taken[slot]) == st.index:
-				who.append(int(slot))
-		who.sort()
-		var key := str(who)
-		if key == st.shown_takers:
-			continue
-		st.shown_takers = key
-		for c in st.takers.get_children():
-			c.queue_free()
-		for k in who.size():
-			var orb := MeshInstance3D.new()
-			orb.mesh = _orb_mesh()
-			orb.material_override = MeshKit.material(colors.get(who[k], Color.WHITE), 3.0)
-			var a := k * TAU / maxf(1.0, who.size())
-			orb.position = Vector3(cos(a), 0.0, sin(a)) * 1.0
-			st.takers.add_child(orb)
-		if not who.is_empty():
-			var pop := create_tween()
-			pop.tween_property(st.icon, "scale", Vector3.ONE * 1.8, 0.12)
-			pop.tween_property(st.icon, "scale", Vector3.ONE * 1.4, 0.2)
 
 
 ## Host: the stone a point stands on (-1 = none).
 func stone_at(p: Vector3) -> int:
-	for s in stones:
-		var st: Stone = s
-		if Vector2(p.x - st.global_position.x, p.z - st.global_position.z).length() < TOUCH and p.y < 3.0:
-			return st.index
-	return -1
-
-
-func _process(delta: float) -> void:
-	_t += delta
-	for s in stones:
-		var st: Stone = s
-		if not is_instance_valid(st):
-			continue
-		st.icon.rotation.y += delta * 1.3
-		st.icon.position.y = 2.2 + sin(_t * 2.0 + st.index) * 0.12
-		st.takers.rotation.y -= delta * 2.0
-
-
-static func _orb_mesh() -> SphereMesh:
-	return ResCache.get_or_make("eb_taker_orb_v1", func() -> Resource:
-		var m := SphereMesh.new()
-		m.radius = 0.13
-		m.height = 0.26
-		m.radial_segments = 8
-		m.rings = 4
-		return m) as SphereMesh
+	return at_point(p)
 
 
 static func _base_mesh(col: Color, mid: bool) -> ArrayMesh:

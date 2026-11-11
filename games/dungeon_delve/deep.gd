@@ -1,6 +1,6 @@
 extends Node3D
 ## DUNGEON DELVE: BRAVE and HEROIC, the deep dungeon (the GENTLE run is main.gd + dungeon.gd).
-## Picked in the practice room by standing on the orange BRAVE or red HEROIC pad (it fills up; faster
+## Picked in the practice room by standing on the blue BRAVE or red HARD (id "heroic") pad (it fills up; faster
 ## the more of you stand on it). Then: 4 biomes (Slime Caves, Bone Crypt, Crystal Caves, Lava Forge) x 4
 ## seeded floors (floorgen.gd), the 4th ending in the biome's boss; a shop camp between floors, and a
 ## RELIC ALTAR at the camp after the 2nd floor and after each boss (relics.gd: pick ONE of 2-3).
@@ -37,7 +37,8 @@ extends Node3D
 const FloorGen := preload("res://games/dungeon_delve/floorgen.gd")
 const FloorView := preload("res://games/dungeon_delve/floor_view.gd")
 const Foes := preload("res://games/dungeon_delve/foes.gd")
-const Tele := preload("res://games/dungeon_delve/tele.gd")
+const WarnRings := preload("res://core/warn_rings.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
 const Loot := preload("res://games/dungeon_delve/loot.gd")
 const Hero := preload("res://games/dungeon_delve/hero.gd")
 const DeepHud := preload("res://games/dungeon_delve/deep_hud.gd")
@@ -62,7 +63,9 @@ const IFRAMES := 1.2
 const STAIRS_R := 1.5
 const ATTACK_REACH := 1.05
 const PADS := {"brave": Vector3(-2.2, 0.0, -2.5), "heroic": Vector3(2.2, 0.0, -2.5), "daily": Vector3(-3.5, 0.0, 2.7)}
-const PAD_COLORS := {"brave": Color(1.0, 0.6, 0.2), "heroic": Color(1.0, 0.3, 0.35), "daily": Color(0.35, 0.8, 1.0)}
+const DAILY_COLOR := Color(1.0, 0.82, 0.3)  ## TODAY'S pad: gold (never blue: that's BRAVE)
+const TELL_COLOR := Color(1.0, 0.35, 0.2)
+const TELL_HOT := Color(1.0, 0.55, 0.15)
 const HAT_RACK := Vector3(3.7, 0.0, 2.6)
 const HAT_UNLOCKS: Array = [["none", ""], ["party", "run"], ["viking", "floor3"], ["wizard", "boss0"], ["crown", "boss1"], ["halo", "boss3"]]
 ## The hero statues (bonk one to be that hero) along the right wall, and Cinder's hoard by the left wall.
@@ -80,7 +83,7 @@ var active := false
 var f: Dictionary = {}
 var view: FloorView
 var foes: Foes
-var tele: Tele
+var tele: WarnRings  ## the floor tells (core/warn_rings.gd "flash": flashes faster and faster, then glows hot)
 var hud: DeepHud
 var lobby: Node3D
 var pad_rings := {}
@@ -171,7 +174,7 @@ func setup(m: Node) -> void:
 	foes = Foes.new()
 	foes.name = "Foes"
 	add_child(foes)
-	tele = Tele.new()
+	tele = WarnRings.new()
 	add_child(tele)
 	if net.mode != "client":
 		foes.deep = self
@@ -196,12 +199,21 @@ func diff() -> Dictionary:
 
 # --- The lobby pads (practice room of the gentle dungeon) -----------------------------------------
 
+## A pad's colour and word: the family's BRAVE blue / HARD red (core/pick_orbs.gd; "heroic" stays the id), DAILY gold.
+static func pad_color(mname: String) -> Color:
+	return DAILY_COLOR if mname == "daily" else PickOrbs.mode_color(mname)
+
+
+static func pad_name(mname: String) -> String:
+	return "DAILY" if mname == "daily" else PickOrbs.mode_name(mname)
+
+
 func _build_lobby() -> void:
 	lobby = Node3D.new()
 	lobby.name = "Lobby"
 	main.add_child(lobby)
 	for mname in PADS:
-		var col: Color = PAD_COLORS[mname]
+		var col := pad_color(mname)
 		var b := MeshKit.Builder.new()
 		b.cylinder(0.85, 0.9, 0.08, MeshKit.at(Vector3(0, 0.04, 0)), Color(0.3, 0.28, 0.34), 18)
 		b.cylinder(0.7, 0.7, 0.04, MeshKit.at(Vector3(0, 0.1, 0)), col, 18, true)
@@ -229,13 +241,14 @@ func _build_lobby() -> void:
 		lobby.add_child(ring)
 		pad_rings[mname] = ring
 		var l := Label3D.new()
-		l.text = String(mname).to_upper()
+		l.text = pad_name(mname)
 		l.font_size = 64
 		l.pixel_size = 0.006
 		l.outline_size = 22
 		l.modulate = col.lightened(0.3)
 		l.outline_modulate = Color(0, 0, 0, 0.95)
-		l.position = PADS[mname] + Vector3(0.0, 1.9, 0.0)
+		# (DAILY: higher, clear of its gold star, or the gold word and star run together from the Deck / TV camera)
+		l.position = PADS[mname] + Vector3(0.0, 2.8 if mname == "daily" else 1.9, 0.0)
 		lobby.add_child(l)
 		pad_labels[mname] = l
 		var best := Label3D.new()
@@ -414,8 +427,8 @@ func _animate_lobby(delta: float) -> void:
 			if bl != null:
 				bl.text = "beat the Slime King"
 			continue
-		(pad_labels[mname] as Label3D).text = String(mname).to_upper()
-		(pad_labels[mname] as Label3D).modulate = (PAD_COLORS[mname] as Color).lightened(0.3)
+		(pad_labels[mname] as Label3D).text = pad_name(mname)
+		(pad_labels[mname] as Label3D).modulate = pad_color(mname).lightened(0.3)
 		if bl != null:
 			bl.text = "BEST %d-%d" % [g / FloorGen.FLOORS_PER_ZONE + 1, g % FloorGen.FLOORS_PER_ZONE + 1] if g > 0 else ""
 
@@ -1635,8 +1648,13 @@ func net_popup(p: Vector3, text: String, style: String) -> void:
 
 
 func telegraph(shape: String, pos: Vector3, dir: Vector3, size: Vector2, warn: float) -> void:
-	tele.add(shape, pos, dir, size, warn, 0.0)
+	_tell(shape, pos, dir, size, warn, 0.0)
 	net.event("d_tele", [shape, pos, dir, size, warn, 0.0])
+
+
+## Every machine: draw a floor tell (orange, flashing faster, then hot for `stay` seconds while it goes off).
+func _tell(shape: String, pos: Vector3, dir: Vector3, size: Vector2, warn: float, stay: float) -> void:
+	tele.shape(shape, pos, dir, size, TELL_COLOR, warn, {"style": "flash", "stay": stay, "hot": TELL_HOT, "alpha": 0.45, "y": 0.03})
 
 
 ## Host: an area that goes off after `warn` seconds: hurts players inside (dmg), and monsters too when
@@ -1651,7 +1669,7 @@ func _add_hazard(h: Dictionary) -> void:
 	h["done"] = false
 	h["next_tick"] = float(h["warn"]) + float(h["tick"])
 	hazards.append(h)
-	tele.add(String(h["shape"]), h["pos"], h["dir"], h["size"], float(h["warn"]), maxf(0.2, float(h["stay"])))
+	_tell(String(h["shape"]), h["pos"], h["dir"], h["size"], float(h["warn"]), maxf(0.2, float(h["stay"])))
 	net.event("d_tele", [String(h["shape"]), h["pos"], h["dir"], h["size"], float(h["warn"]), maxf(0.2, float(h["stay"]))])
 
 
@@ -1679,7 +1697,7 @@ func _hazard_hurt_players(h: Dictionary) -> void:
 	src = "area_" + String(h["shape"])
 	for pl in _players(true):
 		var p: Vector3 = (pl as Dictionary)["p"]
-		if Tele.inside(String(h["shape"]), h["pos"], h["dir"], h["size"], p, 0.25):
+		if WarnRings.inside(String(h["shape"]), h["pos"], h["dir"], h["size"], p, 0.25):
 			hurt(int((pl as Dictionary)["slot"]), int(h["pdmg"]), h["pos"], String(h["shape"]) in ["sector", "line"])
 
 
@@ -1688,7 +1706,7 @@ func _hazard_go(h: Dictionary) -> void:
 	_hazard_hurt_players(h)
 	if float(h["fdmg"]) > 0.0:
 		for mid in foes.mons.keys():
-			if foes.mons.has(mid) and Tele.inside(String(h["shape"]), pos, h["dir"], h["size"], foes.mons[mid]["p"], 0.3):
+			if foes.mons.has(mid) and WarnRings.inside(String(h["shape"]), pos, h["dir"], h["size"], foes.mons[mid]["p"], 0.3):
 				hit_foe(int(mid), float(h["fdmg"]), pos, int(h.get("by", -2)), true)
 	if bool(h["breaks"]):
 		main.sound_at("explosion", pos, 0.0)
@@ -2679,7 +2697,6 @@ func process(delta: float) -> void:
 		_t += delta
 	view.animate(delta, _focus_room())
 	foes.animate(delta)
-	tele.animate(delta)
 	_animate_pickups(delta)
 	_sync_hero_looks()
 	for s in main.heroes:
@@ -3029,7 +3046,7 @@ func _apply_all() -> void:
 func apply_event(k: String, args: Array) -> void:
 	match k:
 		"d_tele":
-			tele.add(String(args[0]), args[1], args[2], args[3], float(args[4]), float(args[5]))
+			_tell(String(args[0]), args[1], args[2], args[3], float(args[4]), float(args[5]))
 		"d_popup":
 			HudKit.popup(self, args[0], String(args[1]), {"style": String(args[2])})
 		"d_hurt":

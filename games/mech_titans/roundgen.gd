@@ -7,7 +7,7 @@ extends RefCounted
 ## (more health, quicker, attacks a bit more often) but never too much. Round 4 of every session is
 ## TODAY'S kaiju (a golden one, the same on every machine all day).
 ## DEEP (titans-deep): three difficulties (MODES: GENTLE for little ones, the default; BRAVE opens with the
-## Kaiju Sanctuary; MEGA after a boss went home in BRAVE), each a smooth curve over the laps (curve()); every
+## Kaiju Sanctuary; HARD (id "mega") after a boss went home in BRAVE; names and colours: PickOrbs.mode()), each a smooth curve over the laps (curve()); every
 ## fifth made round is a BOSS KAIJU with a crown and a big readable move (bigboss.gd); every place is a
 ## district with its own hazard (districts.gd), timed by the curve.
 ## Same (round, seed, friends, mode) -> same round. tests/mech_titans_rounds_test.gd checks many seeds,
@@ -44,13 +44,13 @@ const CALM_MIN := 1.05  ## gentle
 ## lap haz_double); dmg: how hard hits land on the Titan; minis: helpers [from lap, chance, count0, count_max,
 ## interval0, interval_min]; boss_hp: extra on a boss kaiju.
 const MODES := {
-	"gentle": {"name": "GENTLE", "hp0": 0.5, "hp_step": 0.035, "hp_max": 0.95, "slow0": 0.8, "slow_step": 0.015, "slow_max": 1.0,
+	"gentle": {"hp0": 0.5, "hp_step": 0.035, "hp_max": 0.95, "slow0": 0.8, "slow_step": 0.015, "slow_max": 1.0,
 		"calm0": 1.6, "calm_step": 0.04, "calm_min": 1.05, "tell": 1.0, "boss_tell": 2.0, "haz0": 18.0, "haz_step": 0.3, "haz_min": 13.0,
 		"haz_from": 0, "haz_aim": false, "haz_double": 999, "haz_tell": 1.7, "dmg": 0.6, "minis": [2, 0.5, 2, 4, 40.0, 25.0], "boss_hp": 1.0},
-	"brave": {"name": "BRAVE", "hp0": 0.75, "hp_step": 0.045, "hp_max": 1.5, "slow0": 0.9, "slow_step": 0.02, "slow_max": 1.15,
+	"brave": {"hp0": 0.75, "hp_step": 0.045, "hp_max": 1.5, "slow0": 0.9, "slow_step": 0.02, "slow_max": 1.15,
 		"calm0": 1.3, "calm_step": 0.04, "calm_min": 0.9, "tell": 1.0, "boss_tell": 1.4, "haz0": 12.0, "haz_step": 0.3, "haz_min": 8.0,
 		"haz_from": 0, "haz_aim": true, "haz_double": 10, "haz_tell": 1.0, "dmg": 1.0, "minis": [1, 0.6, 2, 4, 34.0, 22.0], "boss_hp": 1.0},
-	"mega": {"name": "MEGA", "hp0": 1.0, "hp_step": 0.06, "hp_max": 2.2, "slow0": 1.0, "slow_step": 0.02, "slow_max": 1.3,
+	"mega": {"hp0": 1.0, "hp_step": 0.06, "hp_max": 2.2, "slow0": 1.0, "slow_step": 0.02, "slow_max": 1.3,
 		"calm0": 1.05, "calm_step": 0.03, "calm_min": 0.7, "tell": 0.9, "boss_tell": 1.0, "haz0": 9.0, "haz_step": 0.25, "haz_min": 6.0,
 		"haz_from": 0, "haz_aim": true, "haz_double": 4, "haz_tell": 1.0, "dmg": 1.25, "minis": [0, 1.0, 3, 4, 30.0, 20.0], "boss_hp": 1.15},
 }

@@ -51,6 +51,7 @@ const StoryCard := preload("res://core/story_card.gd")
 const Telemetry := preload("res://core/telemetry.gd")
 const SaveScript := preload("res://core/save.gd")
 const Cups := preload("res://games/kart_race/cups.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
 const Items := preload("res://games/kart_race/items.gd")
 const PitScript := preload("res://games/kart_race/pit.gd")
 const Shelf := preload("res://games/kart_race/shelf.gd")
@@ -204,6 +205,7 @@ const BOLT_COLOR := "8cb4ff"  # Bolt, the friendly robot who builds the tracks (
 var tour_strips: Array = []  # results: a row of place pictures on each TV view
 # Bolt's cups (cups.gd), the pit stop (pit.gd), items (items.gd), Bolt's trophy shelf (shelf.gd), the best-lap ghost.
 const TRIAL_LAPS := 3
+const TRIAL_COLOR := Color(0.78, 0.55, 1.0)  # the TIME TRIAL gate (purple)
 var speed_mode := "gentle"  # cups.gd MODES: gentle / zoom / trial (synced in the snapshot)
 var base_laps := SIMPLE_LAPS  # laps of a normal race (bots shorten it); a time trial has one more
 var series := {}  # host: what is being raced {"kind": "daily" / "tour" / "cup", "cup": i, "pts": {kart index: points}}
@@ -2307,7 +2309,9 @@ func _pit_rows() -> Array:
 		["heavy", "kartbig", Color(1.0, 0.45, 0.35)]]
 	if not Cups.parts_unlocked(shelf).is_empty():
 		karts_row.append(["part", "spanner", Color(0.75, 0.6, 1.0)])
-	var speeds: Array = [["gentle", "snail", Color(0.55, 0.9, 0.5)], ["zoom", "rocket", Color(1.0, 0.4, 0.3)], ["trial", "clock", Color(0.5, 0.75, 1.0)]]
+	# The family's GENTLE green / BRAVE blue (core/pick_orbs.gd: "zoom" is BRAVE); TIME TRIAL purple (never blue: that's BRAVE).
+	var speeds: Array = [["gentle", "snail", PickOrbs.mode_color("gentle")], ["zoom", "rocket", PickOrbs.mode_color("zoom")],
+		["trial", "clock", TRIAL_COLOR]]
 	var cups_row: Array = [["tour", "boltbot", Color(0.55, 0.75, 1.0)]]
 	for c in Cups.CUPS.size():
 		cups_row.append([str(c), String(Cups.cup(c).pic), Cups.cup(c).color])

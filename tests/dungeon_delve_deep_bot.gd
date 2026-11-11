@@ -12,7 +12,7 @@ extends Node
 
 const FloorGen := preload("res://games/dungeon_delve/floorgen.gd")
 const Foes := preload("res://games/dungeon_delve/foes.gd")
-const Tele := preload("res://games/dungeon_delve/tele.gd")
+const WarnRings := preload("res://core/warn_rings.gd")
 const Loot := preload("res://games/dungeon_delve/loot.gd")
 const Relics := preload("res://games/dungeon_delve/relics.gd")
 const VrRig := preload("res://core/vr_rig.gd")
@@ -305,14 +305,13 @@ func _face_press(slot: int, h: Node3D, at: Vector3) -> void:
 
 func _danger_escape(pos: Vector3) -> Vector3:
 	var dp := deep()
-	for it in dp.tele.items:
-		var d: Dictionary = it
-		if float(d["t"]) > float(d["warn"]):
+	for d in dp.tele.tells():
+		if float(d["t"]) > float(d["secs"]):
 			continue
-		if Tele.inside(String(d["shape"]), d["pos"], d["dir"], d["size"], pos, 0.5):
+		if WarnRings.inside(String(d["kind"]), d["pos"], d["dir"], d["size"], pos, 0.5):
 			var c: Vector3 = d["pos"]
 			var out := Vector3(pos.x - c.x, 0.0, pos.z - c.z)
-			if String(d["shape"]) == "line":
+			if String(d["kind"]) == "line":
 				var fwd: Vector3 = (d["dir"] as Vector3).normalized()
 				out = out - fwd * out.dot(fwd)
 				if out.length() < 0.1:

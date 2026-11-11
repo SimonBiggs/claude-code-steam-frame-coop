@@ -31,7 +31,7 @@ extends Node3D
 ## DEEP (titans-deep): made rounds are DISTRICTS with their own hazards (districts.gd), every fifth one a BOSS
 ## KAIJU with a crown and a big readable move (bigboss.gd); between made rounds glowing PODS land in front of
 ## the Titan (picks.gd): walk into one to take an UPGRADE for the session (upgrades.gd); at the start the family
-## picks a FRAME (frames.gd) and, before the first made round, GENTLE / BRAVE / MEGA (roundgen.gd MODES), once
+## picks a FRAME (frames.gd) and, before the first made round, GENTLE / BRAVE / HARD (ids gentle / brave / mega: PickOrbs.mode()), once
 ## those are open. Every kaiju sent home moves into the saved KAIJU SANCTUARY (sanctuary.gd): hearts that grow
 ## homes on the hills and unlock frames, upgrades and BRAVE. deep.gd runs hazards and upgrade effects.
 ## Net store: "mode", "frame", "upg" (upgrades taken), "pick" (the pods), "dome", "sanct_h" (sanctuary hearts).
@@ -77,6 +77,7 @@ const Sanctuary := preload("res://games/mech_titans/sanctuary.gd")
 const BigBoss := preload("res://games/mech_titans/bigboss.gd")
 const Districts := preload("res://games/mech_titans/districts.gd")
 const Picks := preload("res://games/mech_titans/picks.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
 const Deep := preload("res://games/mech_titans/deep.gd")
 ## Where the kaiju friends stand and cheer (just outside the east and west edges), up to this many.
 const PARADE_MAX := 8
@@ -489,7 +490,7 @@ func _make_friends(i: int) -> void:
 		sanct["bosses"] = bc
 		if rmode != "gentle" and not bool(save.data.get("mega_ok", false)):
 			save.data["mega_ok"] = true
-			pending_unlocks.append({"kind": "mode", "id": "mega", "name": "MEGA"})
+			pending_unlocks.append({"kind": "mode", "id": "mega", "name": PickOrbs.mode_name("mega")})
 	if bool(m.get("gen", false)):
 		var best: Dictionary = save.data["best"]
 		best[rmode] = maxi(int(best.get(rmode, 0)), int(m.get("lap", 0)) + 1)
@@ -537,7 +538,7 @@ func _unlock_cards(delay: float) -> void:
 				card = {"who": "NEW POWER!", "line": String(u["name"]), "pic": "titanpod", "color": (Upgrades.info(String(u["id"]))["color"] as Color).to_html(false)}
 			"mode":
 				card = {"who": "NEW!", "line": String(u["name"]), "pic": "crownkaiju" if String(u["id"]) == "mega" else "star",
-					"color": (Picks.MODE_COLORS[String(u["id"])] as Color).to_html(false)}
+					"color": PickOrbs.mode_color(String(u["id"])).to_html(false)}
 			_:
 				card = {"who": "SANCTUARY", "line": "GROWS!", "pic": "sanctuary", "color": MOMO_COLOR}
 		card["duration"] = 3.4
