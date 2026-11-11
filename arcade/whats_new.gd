@@ -33,6 +33,11 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "bp-gifts", "date": "2026-11-11", "game": "balloon_pop", "pic": "dart", "line": "Pick Poppy's gifts!"},
+	{"id": "bp-gusts", "date": "2026-11-11", "game": "balloon_pop", "pic": "airswirl", "line": "Wind! Rings show the way"},
+	{"id": "bp-skies", "date": "2026-11-11", "game": "balloon_pop", "pic": "nightsky", "line": "Night, snow, sunset skies", "try": {"BP_SKY": "night"}},
+	{"id": "bp-parade", "date": "2026-11-11", "game": "balloon_pop", "pic": "parade", "line": "Poppy's parade grows!"},
+	{"id": "bp-gentle", "date": "2026-11-11", "game": "balloon_pop", "pic": "seller", "line": "Gentle, brave or hard"},
 	{"id": "mm-gifts", "date": "2026-11-11", "game": "marble_maze", "pic": "bouncymarble", "line": "Pick heavy, bouncy, magnet!"},
 	{"id": "mm-events", "date": "2026-11-11", "game": "marble_maze", "pic": "quake", "line": "Quakes and gates warn first"},
 	{"id": "mm-worlds", "date": "2026-11-11", "game": "marble_maze", "pic": "snowflake", "line": "Snow day! Party! Starry!", "try": {"MM_WORLD": "snow"}},
