@@ -47,6 +47,7 @@ func _ready() -> void:
 		smoke = World.mat(Looks.MEGA_SMOKE, 3.0)
 		trail.amount = 16
 	smoke.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	smoke.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 	smoke.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	tm.material = smoke
 	trail.mesh = tm

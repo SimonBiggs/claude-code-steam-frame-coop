@@ -87,6 +87,7 @@ func _ready() -> void:
 	foam.mesh = tm
 	var fm := World.mat(Color(0.95, 0.98, 1.0, 0.6), 0.4)
 	fm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	fm.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 	foam.material_override = fm
 	foam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	foam.scale = Vector3(1.0, 0.15, 1.0)
@@ -108,6 +109,7 @@ func _ready() -> void:
 	bg.mesh = q
 	var bg_mat := World.mat(Color(0, 0, 0, 0.6))
 	bg_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	bg_mat.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 	bg_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	bg_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	bg_mat.billboard_keep_scale = true
@@ -121,7 +123,7 @@ func _ready() -> void:
 	fill_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	fill_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	fill_mat.billboard_keep_scale = true
-	fill_mat.render_priority = 1
+	fill_mat.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI + 1  # (over its see-through back, still under VR cards)
 	bar_fill.material_override = fill_mat
 	bar_root.add_child(bar_fill)
 	_update_pose(0.0)

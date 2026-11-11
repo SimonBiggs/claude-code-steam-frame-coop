@@ -14,7 +14,7 @@ extends Node
 ## the help panel or the Kraken's label shows any words.
 ## SECOND PASS (deep.gd): the host bot turns deck events on from wave 1 (twice as many) so a short run meets them; in
 ## the pick phase the gunner shoots a different orb each pick (left, right, middle...) unless a deckhand muskets one;
-## deckhands step out of told Kraken arms and squalls (player 2 stands in the first one, so the caught path runs);
+## deckhands step out of told Kraken arms and squalls (player 2 walks into the first of each, so the caught path runs);
 ## checks the mode is picked once, a gift before every wave, deck events are told (and every machine draws them),
 ## Polly's harbour matches the save, and nothing in the deep test's fairness rules is broken in play. With nobody
 ## else aboard (solo VR host, one Deck) it checks Polly loads the cannon.
@@ -41,7 +41,7 @@ var deep_set := false
 var picks_shot := 0
 var pick_target := -1
 var last_pick_stage := ""
-var stood_in := false  # player 2 stood in the first told deck event
+var stood_in := {}  # kind -> true: player 2 walked into the first told arm / squall
 var checks := 0
 var fails := 0
 
@@ -489,9 +489,9 @@ func _dodge(p, pos: Vector3) -> bool:
 		var e: Dictionary = tl.e
 		if float(tl.t) > float(tl.secs) + Deep.STAY:
 			continue
-		if p.index == 1 and (not stood_in or has_meta("standing")) and float(tl.t) < float(tl.secs) + 0.5:
-			if not stood_in:
-				stood_in = true
+		if p.index == 1 and (not stood_in.has(String(e.kind)) or has_meta("standing")) and float(tl.t) < float(tl.secs) + 0.5:
+			if not stood_in.has(String(e.kind)):
+				stood_in[String(e.kind)] = true
 				set_meta("standing", true)
 				print("Bot: P2 walks into the %s" % e.kind)
 			var goal: Vector3 = e.pos

@@ -406,6 +406,7 @@ static func _add_islands(main: Node3D, out: Dictionary) -> void:
 	lh.add_child(beam)
 	var beam_mat := mat(Color(1.0, 0.95, 0.7, 0.18), 1.5)
 	beam_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	beam_mat.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 	beam_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	beam_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	beam_mat.disable_fog = true
@@ -441,6 +442,7 @@ static func _add_sky_dressing(main: Node3D, out: Dictionary) -> void:
 	multi(main, sphere_mesh(1.0, 8), cloud_mat, cx)
 	var star_mat := mat(Color(1.0, 1.0, 0.9, 0.0), 3.0)
 	star_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	star_mat.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 	star_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	star_mat.disable_fog = true
 	var sx: Array = []
@@ -454,6 +456,7 @@ static func _add_sky_dressing(main: Node3D, out: Dictionary) -> void:
 	out["stars_mat"] = star_mat
 	var moon_mat := mat(Color(0.95, 0.95, 1.0, 0.0), 2.0)
 	moon_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	moon_mat.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 	moon_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	moon_mat.disable_fog = true
 	var moon := sphere(main, 16.0, Vector3(-150, 160, -330), moon_mat, 16)

@@ -12,7 +12,7 @@ const WarnRings := preload("res://core/warn_rings.gd")
 const Deep := preload("res://games/cannon_cove/deep.gd")
 const World := preload("res://games/cannon_cove/world.gd")
 
-const ARM_SEGS := 9
+const ARM_SEGS := 20
 const DROPS := 14
 
 var main
@@ -198,7 +198,7 @@ func _pose_arm(arm: Node3D, e: Dictionary, t: float, secs: float) -> void:
 		var b := over.lerp(tip, f)
 		var m := arm.get_child(k) as Node3D
 		m.global_position = a.lerp(b, f)
-		m.scale = Vector3.ONE * lerpf(0.42, 0.18, f)
+		m.scale = Vector3.ONE * lerpf(0.6, 0.22, f)  # (overlapping: one chunky arm, thinning to the tip)
 
 
 ## Bots / main / palette: the colour of a kind's tell.

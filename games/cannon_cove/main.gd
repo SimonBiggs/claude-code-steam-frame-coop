@@ -605,6 +605,7 @@ func explosion(pos: Vector3, color: Color, size: float) -> void:
 	ball.mesh = sm
 	var mat := World.mat(color, 5.0)
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	ball.material_override = mat
 	ball.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -630,6 +631,7 @@ func musket_fx(shooter: int, from: Vector3, to: Vector3) -> void:
 		tracer.mesh = bm
 		var mat := World.mat(Color(1.0, 0.9, 0.5), 3.0)
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		tracer.material_override = mat
 		tracer.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -694,6 +696,7 @@ func miss_arrow(from: Vector3, to: Vector3) -> void:
 	var m := World.mat(Color(1.0, 0.95, 0.45, 0.85), 3.0)
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 	# Built pointing +Z (a cone for the head, a fat shaft), then turned to face the target.
 	var shaft := World.cyl(arrow, 0.35, 0.35, 2.4, Vector3(0, 0, -0.6), m, 10)
 	shaft.rotation.x = PI / 2.0
