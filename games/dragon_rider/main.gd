@@ -304,6 +304,7 @@ func _ready() -> void:
 	bubble_mat = StandardMaterial3D.new()
 	bubble_mat.albedo_color = Color(0.75, 0.95, 1.0, 0.5)
 	bubble_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	bubble_mat.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 	bubble_mat.emission_enabled = true
 	bubble_mat.emission = Color(0.55, 0.85, 1.0)
 	bubble_mat.emission_energy_multiplier = 0.9

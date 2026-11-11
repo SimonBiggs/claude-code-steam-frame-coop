@@ -89,12 +89,13 @@ static func flat_mesh(kind: String) -> Mesh:
 ## A see-through glowing fill (shared per colour: few materials, few draw-call changes).
 static func fill_material(col: Color, alpha: float) -> StandardMaterial3D:
 	var c := Color(col.r, col.g, col.b, alpha)
-	return ResCache.get_or_make("warn_fill_%s_v1" % c.to_html(true), func() -> Resource:
+	return ResCache.get_or_make("warn_fill_%s_v2" % c.to_html(true), func() -> Resource:
 		var m := StandardMaterial3D.new()
 		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		m.cull_mode = BaseMaterial3D.CULL_DISABLED
 		m.albedo_color = c
+		m.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 		return m) as StandardMaterial3D
 
 

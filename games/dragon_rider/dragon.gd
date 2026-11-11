@@ -135,6 +135,7 @@ func _build() -> void:
 	var smat := StandardMaterial3D.new()
 	smat.albedo_color = Color(0.95, 0.92, 0.95, 0.6)
 	smat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	smat.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 	smat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	sm.material = smat
 	smoke.mesh = sm
@@ -288,6 +289,7 @@ func smoke_ring() -> void:
 	var m := StandardMaterial3D.new()
 	m.albedo_color = Color(0.95, 0.93, 0.97, 0.7)
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	r.material_override = m
 	r.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

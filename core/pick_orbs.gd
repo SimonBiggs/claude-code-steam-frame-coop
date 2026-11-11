@@ -190,6 +190,7 @@ func _glass_ball(col: Color, is_default: bool) -> MeshInstance3D:
 	var mat := MeshKit.material(col, 2.6 if is_default else 1.2).duplicate() as StandardMaterial3D
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.albedo_color.a = 0.55
+	mat.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 	ball.material_override = mat
 	ball.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	ball.scale = Vector3.ONE * float(_o("scale", 1.0))
