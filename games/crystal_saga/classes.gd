@@ -20,7 +20,8 @@ const INFO := {
 	"archer": {"name": "ARCHER", "look": "archer", "weapon": "bow", "shot": "arrow", "reach": 13.0, "places": 0,
 		"pic": "archer", "color": Color(0.55, 0.95, 0.55), "speed": 1.12, "dizzy": 1.0},
 	"healer": {"name": "HEALER", "look": "healer", "weapon": "rod", "shot": "heal", "reach": 10.0, "places": 2,
-		"pic": "healer", "color": Color(1.0, 0.6, 0.7), "speed": 1.0, "dizzy": 0.8},
+		"pic": "healer", "color": Color(1.0, 0.6, 0.7), "speed": 1.0, "dizzy": 0.8,
+		"pants": Color(0.45, 0.28, 0.34)},  # (the healer look's own pale trousers vanish on snow and marble)
 	"bard": {"name": "BARD", "look": "bard", "weapon": "lute", "shot": "note", "reach": 10.0, "places": 5,
 		"pic": "bard", "color": Color(1.0, 0.75, 0.35), "speed": 1.05, "dizzy": 1.0},
 }

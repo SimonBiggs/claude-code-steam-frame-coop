@@ -28,6 +28,7 @@ extends Node3D
 const FloorGen := preload("res://games/dungeon_delve/floorgen.gd")
 const Creatures := preload("res://core/creatures.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
+const FoeColors := preload("res://games/dungeon_delve/foe_colors.gd")
 const HudKit := preload("res://core/hud_kit.gd")
 
 enum { IDLE, MOVE, WIND, ACT, STUN, SLEEP, RECOVER, FLY }
@@ -137,59 +138,55 @@ func _look(kind: int, id: int) -> Node3D:
 	var bi := biome
 	match kind:
 		FloorGen.F_SLIME:
-			var cols := {"caves": Color(0.45, 0.9, 0.45), "crypt": Color(0.7, 0.5, 1.0), "crystal": Color(0.45, 0.85, 1.0), "forge": Color(1.0, 0.55, 0.25)}
-			return Creatures.monster("slime", {"color": cols.get(bi, Color(0.45, 0.9, 0.45))})
+			return Creatures.monster("slime", {"color": FoeColors.of("slime", bi)})
 		FloorGen.F_SPITTER:
 			match bi:
 				"caves":
-					return Creatures.monster("frog", {"color": Color(0.55, 0.85, 0.35), "seed": id})
+					return Creatures.monster("frog", {"color": FoeColors.of("spitter", bi), "seed": id})
 				"crypt":
 					return Creatures.monster("skeleton", {"weapon": "bow", "seed": id, "eye_color": Color(1.0, 0.6, 0.3)})
 				"crystal":
-					return Creatures.monster("spider", {"color": Color(0.5, 0.8, 1.0), "seed": id})
-			return Creatures.monster("dragon", {"color": Color(1.0, 0.45, 0.25), "scale": 0.45, "seed": id})
+					return Creatures.monster("spider", {"color": FoeColors.of("spitter", bi), "seed": id})
+			return Creatures.monster("dragon", {"color": FoeColors.of("spitter", "forge"), "scale": 0.45, "seed": id})
 		FloorGen.F_SHIELD:
 			var n: Node3D
 			match bi:
 				"caves":
-					n = Creatures.monster("crab", {"color": Color(1.0, 0.5, 0.4), "seed": id})
+					n = Creatures.monster("crab", {"color": FoeColors.of("shield", bi), "seed": id})
 				"crypt":
 					n = Creatures.monster("skeleton", {"weapon": "sword", "offhand": "none", "seed": id})
 				"crystal":
-					n = Creatures.monster("golem", {"color": Color(0.55, 0.75, 0.95), "scale": 0.7, "seed": id})
+					n = Creatures.monster("golem", {"color": FoeColors.of("shield", bi), "scale": 0.7, "seed": id})
 				_:
-					n = Creatures.monster("robot", {"color": Color(0.6, 0.6, 0.7), "seed": id})
+					n = Creatures.monster("robot", {"color": FoeColors.of("shield", "forge"), "seed": id})
 			n.add_child(_shield_node())
 			return n
 		FloorGen.F_SWARM:
 			if bi == "forge":
-				return Creatures.monster("bee", {"color": Color(1.0, 0.6, 0.2), "seed": id})
-			var bc := {"caves": Color(0.55, 0.4, 0.75), "crystal": Color(0.4, 0.75, 0.9)}
-			return Creatures.monster("bat", {"color": bc.get(bi, Color(0.4, 0.4, 0.55)), "seed": id})
+				return Creatures.monster("bee", {"color": FoeColors.of("swarm", bi), "seed": id})
+			return Creatures.monster("bat", {"color": FoeColors.of("swarm", bi), "seed": id})
 		FloorGen.F_HEALER:
 			if bi == "caves":
-				return Creatures.monster("mushroom", {"color": Color(0.4, 0.9, 0.6), "seed": id})
-			var hc := {"crypt": Color(0.7, 1.0, 0.8), "crystal": Color(1.0, 0.7, 0.95)}
-			return Creatures.monster("ghost", {"color": hc.get(bi, Color(1.0, 0.85, 0.5)), "seed": id})
+				return Creatures.monster("mushroom", {"color": FoeColors.of("healer", bi), "seed": id})
+			return Creatures.monster("ghost", {"color": FoeColors.of("healer", bi), "seed": id})
 		FloorGen.F_MIMIC:
 			return Creatures.monster("mimic", {"seed": id})
 		FloorGen.F_CHARGER:
 			if bi == "forge":
-				return Creatures.monster("golem", {"color": Color(0.55, 0.4, 0.35), "seed": id})
-			var wc := {"caves": Color(0.55, 0.55, 0.6), "crystal": Color(0.75, 0.9, 1.0)}
-			return Creatures.monster("wolf", {"color": wc.get(bi, Color(0.45, 0.45, 0.6)), "seed": id})
+				return Creatures.monster("golem", {"color": FoeColors.of("charger", bi), "seed": id})
+			return Creatures.monster("wolf", {"color": FoeColors.of("charger", bi), "seed": id})
 		FloorGen.F_BOMBER:
-			return Creatures.monster("goblin", {"weapon": "none", "seed": id, "color": Color(0.5, 0.78, 0.35) if bi != "forge" else Color(0.85, 0.5, 0.35)})
+			return Creatures.monster("goblin", {"weapon": "none", "seed": id, "color": FoeColors.of("bomber", bi)})
 		FloorGen.B_SLIME:
-			return Creatures.monster("slime", {"color": Color(0.5, 0.85, 1.0), "boss": true, "scale": 1.5})
+			return Creatures.monster("slime", {"color": FoeColors.of("boss", "caves"), "boss": true, "scale": 1.5})
 		FloorGen.B_BONE:
 			var b := Creatures.monster("skeleton", {"boss": true, "weapon": "sword", "offhand": "none", "scale": 1.5, "eye_color": Color(0.6, 0.4, 1.0)})
 			b.add_child(_shield_node(1.6))
 			return b
 		FloorGen.B_FORGE:
-			return Creatures.monster("golem", {"boss": true, "color": Color(0.45, 0.32, 0.3), "eye_color": Color(1.0, 0.5, 0.1)})
+			return Creatures.monster("golem", {"boss": true, "color": FoeColors.of("boss", "forge"), "eye_color": Color(1.0, 0.5, 0.1)})
 		FloorGen.B_CRYSTAL:
-			var q := Creatures.monster("spider", {"boss": true, "color": Color(0.45, 0.8, 1.0), "scale": 2.0, "eye_color": Color(1.0, 0.4, 0.9)})
+			var q := Creatures.monster("spider", {"boss": true, "color": FoeColors.of("boss", "crystal"), "scale": 2.0, "eye_color": Color(1.0, 0.4, 0.9)})
 			var cb := MeshKit.Builder.new()
 			for k in 5:
 				var a := TAU * k / 5.0

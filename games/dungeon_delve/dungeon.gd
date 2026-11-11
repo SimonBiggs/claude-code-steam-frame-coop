@@ -16,6 +16,10 @@ const Creatures := preload("res://core/creatures.gd")
 const ResCache := preload("res://core/res_cache.gd")
 
 const ROOMS := 5
+## The checker floor tiles (dark, light), and the treasure room's golden ones (palette.gd checks the heroes and
+## slimes on them).
+const FLOOR: Array[Color] = [Color(0.36, 0.33, 0.42), Color(0.46, 0.42, 0.52)]
+const GOLD_FLOOR: Array[Color] = [Color(0.55, 0.42, 0.25), Color(0.68, 0.53, 0.3)]
 const ROOM := 9.0  ## room size (square)
 const HALF := 4.5
 const DOOR := 1.1  ## half-width of a doorway
@@ -73,9 +77,9 @@ func build() -> void:
 		for ix in 6:
 			for iz in 6:
 				var dark := (ix + iz) % 2 == 0
-				var col := Color(0.36, 0.33, 0.42) if dark else Color(0.46, 0.42, 0.52)
+				var col: Color = FLOOR[0] if dark else FLOOR[1]
 				if r == ROOMS - 1:
-					col = Color(0.55, 0.42, 0.25) if dark else Color(0.68, 0.53, 0.3)
+					col = GOLD_FLOOR[0] if dark else GOLD_FLOOR[1]
 				b.box(Vector3(1.48, 0.1, 1.48), MeshKit.at(c + Vector3(-HALF + 0.75 + ix * 1.5, -0.05, -HALF + 0.75 + iz * 1.5)), col)
 		# Side walls.
 		for sx in [-1.0, 1.0]:

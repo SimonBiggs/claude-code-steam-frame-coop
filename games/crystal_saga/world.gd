@@ -24,13 +24,16 @@ const ARCH_LAYER := 1 << 9
 const ZL := 16.0  ## zone length along Z
 const HALF_L := 8.0
 const HALF_W := 5.0  ## the path's half width (walkable)
+const PATH_VILLAGE := Realm.PATH_VILLAGE  # (the path colours live in realm.gd: palette.gd reads them there)
+const PATHS_DEFAULT := Realm.PATHS_DEFAULT
+const PATH_GIANT := Realm.PATH_GIANT
+const PATH_SHRINE := Realm.PATH_SHRINE
+const MEADOW := Realm.MEADOW
 
 enum { WELL, CHICKEN, FLOWER, SIGN, CHEST, CRYSTAL, MUSHROOM, HOUSE, TREE, VILLAGER, DUMMY, TARGET, STONE, ORB, BIG, FRIEND, ROCK, CHOICE,
 	QUEST, GIVER, STATUE, BANNER, MAP }
 ## The glade's giants (sagagen.gd GIANTS: name, body, glow), here so the world needn't load the generator.
-const SAGA_GIANTS: Array = [["STONE", Color(0.5, 0.45, 0.6), Color(0.8, 0.4, 1.0)], ["MOSS", Color(0.4, 0.55, 0.38), Color(0.6, 1.0, 0.4)],
-	["SNOW", Color(0.8, 0.85, 0.95), Color(0.5, 0.8, 1.0)], ["SAND", Color(0.78, 0.66, 0.45), Color(1.0, 0.75, 0.3)],
-	["ROSE", Color(0.7, 0.45, 0.55), Color(1.0, 0.5, 0.75)], ["CLAY", Color(0.7, 0.42, 0.32), Color(1.0, 0.55, 0.35)]]
+const SAGA_GIANTS: Array = Realm.SAGA_GIANTS
 const KIND_NAMES: Array[String] = ["well", "chicken", "flower", "sign", "chest", "crystal", "mushroom", "house", "tree",
 	"villager", "dummy", "target", "stone", "orb", "crystal of light", "friend", "rock", "level-up stone", "quest thing",
 	"quest giver", "hero statue", "brave flag", "map table"]
@@ -149,13 +152,13 @@ func _scenery() -> void:
 	var b := MeshKit.Builder.new()
 	var end_z := wall_z(ZONES - 1)
 	# Ground: meadow everywhere, a sandy path, the cave floor, the shrine's marble.
-	b.box(Vector3(70.0, 0.2, 110.0), MeshKit.at(Vector3(0.0, -0.12, -32.0)), Color(0.42, 0.7, 0.32))
-	var paths: Array = plan.get("path", [Color(0.6, 0.5, 0.34), Color(0.38, 0.36, 0.48)])
+	b.box(Vector3(70.0, 0.2, 110.0), MeshKit.at(Vector3(0.0, -0.12, -32.0)), MEADOW)
+	var paths: Array = plan.get("path", PATHS_DEFAULT)
 	if plan.has("ground"):
 		b.box(Vector3(70.0, 0.2, ZL * 3.0 + 20.0), MeshKit.at(Vector3(0.0, -0.1, center(2).z - 4.0)), plan.ground)
 	for k in ZONES:
 		var c := center(k)
-		var path := [Color(0.82, 0.7, 0.48), paths[0], paths[1], Color(0.62, 0.62, 0.5), Color(0.9, 0.9, 0.95)][k] as Color
+		var path := [PATH_VILLAGE, paths[0], paths[1], PATH_GIANT, PATH_SHRINE][k] as Color
 		b.box(Vector3(HALF_W * 2.0 + 0.6, 0.06, ZL), MeshKit.at(c + Vector3(0.0, -0.02, 0.0)), path)
 	# Distant mountains all round (the big sky needs a horizon).
 	var rng := RandomNumberGenerator.new()

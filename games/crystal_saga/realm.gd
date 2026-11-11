@@ -45,7 +45,7 @@ const BIOMES: Array[Dictionary] = [
 		"quest": ["GNOME GIL", "gnome", "scientist", "gem", "shard"], "sig": "rain",
 		"body": Color(0.5, 0.45, 0.6), "glow": Color(0.8, 0.4, 1.0)},
 	{"id": "snow", "ground": Color(0.9, 0.93, 0.97), "name": ["FROSTY PEAK", "SNOWY HILLS", "ICICLE VALE"], "deep": ["ICE CAVE", "FROST TUNNEL"],
-		"giant": "SNOW", "pic": "snowflake", "sky": ["snowy", "dungeon"], "path": [Color(0.86, 0.9, 0.95), Color(0.6, 0.7, 0.85)],
+		"giant": "SNOW", "pic": "snowflake", "sky": ["snowy", "dungeon"], "path": [Color(0.86, 0.9, 0.95), Color(0.5, 0.56, 0.72)],
 		"leaf": Color(0.9, 0.95, 1.0), "gem": Color(0.6, 0.9, 1.0), "skins": ["slime", "penguin", "bird"],
 		"quest": ["POLAR POP", "polarbear", "farmer", "penguin", "penguin"], "sig": "roll",
 		"body": Color(0.8, 0.85, 0.95), "glow": Color(0.5, 0.8, 1.0)},
@@ -53,14 +53,14 @@ const BIOMES: Array[Dictionary] = [
 		"giant": "SAND", "pic": "sun", "sky": ["sunset", "indoor"], "path": [Color(0.92, 0.8, 0.52), Color(0.7, 0.58, 0.4)],
 		"leaf": Color(1.0, 0.9, 0.6), "gem": Color(1.0, 0.75, 0.45), "skins": ["slime", "crab", "bird"],
 		"quest": ["CAPTAIN", "captain", "pirate", "star", "starfish"], "sig": "roll",
-		"body": Color(0.78, 0.66, 0.45), "glow": Color(1.0, 0.75, 0.3)},
+		"body": Color(0.66, 0.52, 0.34), "glow": Color(1.0, 0.75, 0.3)},
 	{"id": "fen", "ground": Color(0.33, 0.45, 0.3), "name": ["FROGGY FEN", "MISTY MARSH", "LILY BOG"], "deep": ["MUD BURROW", "GLOOM CAVE"],
 		"giant": "BOG", "pic": "frog", "sky": ["spooky", "dungeon"], "path": [Color(0.45, 0.5, 0.35), Color(0.32, 0.36, 0.3)],
 		"leaf": Color(0.75, 0.95, 0.75), "gem": Color(0.6, 1.0, 0.7), "skins": ["frog", "mushroom", "ghost"],
 		"quest": ["MOSSY MAGE", "wizard", "mage", "frog", "frog"], "sig": "call",
 		"body": Color(0.35, 0.45, 0.35), "glow": Color(0.5, 1.0, 0.6)},
 	{"id": "cloud", "ground": Color(0.85, 0.9, 1.0), "name": ["CLOUD ISLE", "STAR HEIGHTS", "SKY GARDEN"], "deep": ["STORM CAVE", "WIND TUNNEL"],
-		"giant": "CLOUD", "pic": "cloud", "sky": ["day", "stormy"], "path": [Color(0.92, 0.94, 1.0), Color(0.68, 0.7, 0.85)],
+		"giant": "CLOUD", "pic": "cloud", "sky": ["day", "stormy"], "path": [Color(0.92, 0.94, 1.0), Color(0.56, 0.56, 0.72)],
 		"leaf": Color(1.0, 0.95, 1.0), "gem": Color(1.0, 0.95, 0.6), "skins": ["slime", "mushroom", "bird"],
 		"quest": ["SKY BIRD", "bird", "bard", "balloon", "balloon"], "sig": "rain",
 		"body": Color(0.85, 0.85, 0.95), "glow": Color(1.0, 0.95, 0.5)},
@@ -70,6 +70,24 @@ const BIOMES: Array[Dictionary] = [
 		"quest": ["BABY DRAGON", "dragon", "healer", "bell", "bell"], "sig": "roll",
 		"body": Color(0.7, 0.42, 0.32), "glow": Color(1.0, 0.55, 0.35)},
 ]
+
+## The path down the five zones: the village's sand, the journey's two (Realm BIOMES path, or these), the guardian's
+## stone and the shrine's marble; the meadow round it all (palette.gd checks the heroes and monsters on them).
+const PATH_VILLAGE := Color(0.82, 0.7, 0.48)
+const PATHS_DEFAULT: Array[Color] = [Color(0.6, 0.5, 0.34), Color(0.38, 0.36, 0.48)]
+const PATH_GIANT := Color(0.62, 0.62, 0.5)
+const PATH_SHRINE := Color(0.9, 0.9, 0.95)
+const MEADOW := Color(0.42, 0.7, 0.32)
+## The first saga's guardians (a journey without a region): [name, body, glow].
+const SAGA_GIANTS: Array = [["STONE", Color(0.5, 0.45, 0.6), Color(0.8, 0.4, 1.0)], ["MOSS", Color(0.4, 0.55, 0.38), Color(0.6, 1.0, 0.4)],
+	["SNOW", Color(0.8, 0.85, 0.95), Color(0.5, 0.8, 1.0)], ["SAND", Color(0.78, 0.66, 0.45), Color(1.0, 0.75, 0.3)],
+	["ROSE", Color(0.7, 0.45, 0.55), Color(1.0, 0.5, 0.75)], ["CLAY", Color(0.7, 0.42, 0.32), Color(1.0, 0.55, 0.35)]]
+## Monster colours (monsters.gd): the slimes, a "bat" flyer, a "mushroom" walker, and the guardian's warning rings.
+const BAT_COLOR := Color(0.55, 0.4, 0.8)  # a "bat" flyer skin
+const MUSHY_COLOR := Color(0.95, 0.35, 0.4)  # a "mushroom" walker skin
+const SLIME_COLORS: Array[Color] = [Color(0.45, 0.9, 0.45), Color(1.0, 0.55, 0.75), Color(0.45, 0.75, 1.0), Color(0.75, 0.55, 1.0)]
+const TELL_COLORS := {"stomp": Color(1.0, 0.5, 0.9), "rain": Color(0.45, 0.8, 1.0), "roll": Color(1.0, 0.5, 0.15),
+	"call": Color(0.5, 1.0, 0.5)}
 const QUEST_NEED := 3  ## things to find (one more is hidden as a spare in gentle mode)
 
 
