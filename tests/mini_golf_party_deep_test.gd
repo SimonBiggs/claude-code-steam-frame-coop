@@ -62,7 +62,15 @@ func _init() -> void:
 					var tag := "%s lv%d seed %d hole %d (%s, %s, %s)" % [mode, lv, cs, i + 1, d.gimmick, season, gift if gift != "" else "no gift"]
 					var t1 := Time.get_ticks_usec()
 					var list := Deep.hazards(d, spec)
-					worst_ms = maxf(worst_ms, (Time.get_ticks_usec() - t1) / 1000.0)
+					var ms := (Time.get_ticks_usec() - t1) / 1000.0
+					if ms > worst_ms:
+						# a slow one: time it twice more and keep the fastest (a busy machine, not the generator,
+						# made one take 42 ms during a landing; tests/gen_budget_test.gd does the same)
+						for again in 2:
+							var t2 := Time.get_ticks_usec()
+							Deep.hazards(d, spec)
+							ms = minf(ms, (Time.get_ticks_usec() - t2) / 1000.0)
+					worst_ms = maxf(worst_ms, ms)
 					holes += 1
 					for x in Deep.problems(d, list, spec):
 						_fail("%s: %s" % [tag, x])
