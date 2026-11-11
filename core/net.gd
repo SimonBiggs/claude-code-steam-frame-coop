@@ -44,6 +44,7 @@ signal machine_joined(peer: int, kind: String)
 signal machine_left(peer: int)
 
 const Machine := preload("res://core/machine.gd")
+const VrRig := preload("res://core/vr_rig.gd")  # the wrist MENU spot + pointing test, shared with the rig
 const Telemetry := preload("res://core/telemetry.gd")  # "_run": copies of the host's RUN lines
 const DEFAULT_PORT := 7777
 const GROUP := "duo_net"  ## every Net node (core/telemetry.gd finds the host's to share RUN lines)
@@ -748,7 +749,7 @@ func _classic_game() -> bool:
 
 ## VR pause: a MENU button on the left wrist (tap it with the right hand, or point and pull the
 ## trigger), or the left menu / Y button where SteamVR passes them through. Runs even while paused.
-## While paused, pulling the trigger anywhere else goes back to the arcade.
+## While paused, a NEW pull held 1.5 s anywhere goes back to the arcade (never the pull that paused).
 func _check_vr_menu() -> void:
 	if main == null:
 		return
@@ -768,15 +769,12 @@ func _check_vr_menu() -> void:
 	if hl.get_parent() is XROrigin3D:
 		ws = (hl.get_parent() as XROrigin3D).world_scale
 	if btn != null:
-		btn.position = Vector3(-0.15, 0.02, 0.12) * ws  # well out beside the wrist: games put their own displays on the glove (Party Board coins, Duo Arena HP)
+		btn.position = VrRig.WRIST_MENU_OFFSET * ws  # well out beside the wrist: games put their own displays on the glove (Party Board coins, Duo Arena HP)
 		btn.pixel_size = 0.0012 * ws
 	var on_btn := false
 	var trig := false
 	if hr != null and btn != null:
-		var to: Vector3 = btn.global_position - hr.global_position
-		var fwd: Vector3 = -hr.global_basis.z
-		var along := to.dot(fwd)
-		on_btn = to.length() < 0.08 * ws or (along > 0.0 and (to - fwd * along).length() < 0.07 * ws)
+		on_btn = VrRig.points_at(hr, btn.global_position, ws, 0.08, 0.07)
 		trig = (rig.trigger_value() if rig != null and hl == rig.get("hand_l") else hr.get_float("trigger")) > 0.7
 		btn.modulate = Color(1.0, 0.9, 0.3) if on_btn else Color(0.55, 0.95, 1.0)
 	var touching: bool = hr != null and btn != null and (btn.global_position - hr.global_position).length() < 0.08 * ws
@@ -787,6 +785,19 @@ func _check_vr_menu() -> void:
 		set_meta("touch_t", 0.0)
 	var held_touch: bool = float(get_meta("touch_t", 0.0)) > 0.35
 	var paused := get_tree().paused
+	# Every trigger job here counts only a pull by where and when it STARTED (a held trigger is play:
+	# shooting, popping, reeling). pull_start = this frame's fresh pull. pull_fresh = the pull still held
+	# started after the pause began; a pause that begins under a held pull (the pull that paused, or
+	# any other) makes it stale, so it can never count toward leaving (2026-11-11: a held trigger swept
+	# across the wrist paused, then the same hold went to the arcade).
+	var pull_start: bool = trig and not bool(get_meta("trig_was", false))
+	if paused and not bool(get_meta("vr_paused_was", false)):
+		set_meta("pull_fresh", false)
+		set_meta("leave_t", 0.0)
+	if pull_start:
+		set_meta("pull_fresh", paused)
+	set_meta("vr_paused_was", paused)
+	var fresh_pull: bool = trig and bool(get_meta("pull_fresh", false))
 	# While paused, an ARCADE button appears above RESUME: touch it, or point at it and pull the
 	# trigger, to go back to the arcade (Simon: "why can't I just press the menu's buttons?").
 	var abtn := _wrist_arcade_button(hl)
@@ -795,14 +806,13 @@ func _check_vr_menu() -> void:
 		abtn.position = btn.position + Vector3(0.0, 0.055, 0.0) * ws
 		abtn.pixel_size = btn.pixel_size
 		var to2: Vector3 = abtn.global_position - hr.global_position
-		var fwd2: Vector3 = -hr.global_basis.z
-		var along2 := to2.dot(fwd2)
-		var off2 := (to2 - fwd2 * along2).length()
-		var on_arc := to2.length() < 0.07 * ws or (along2 > 0.0 and off2 < 0.06 * ws)
+		var on_arc := VrRig.points_at(hr, abtn.global_position, ws, 0.07, 0.06)
 		if on_arc and on_btn:
 			# Pointing between the two: the one closer to the ray wins.
+			var fwd2: Vector3 = -hr.global_basis.z
 			var to1: Vector3 = btn.global_position - hr.global_position
 			var off1 := (to1 - fwd2 * to1.dot(fwd2)).length()
+			var off2 := (to2 - fwd2 * to2.dot(fwd2)).length()
 			if off1 < off2:
 				on_arc = false
 			else:
@@ -813,22 +823,24 @@ func _check_vr_menu() -> void:
 			set_meta("arc_touch_t", float(get_meta("arc_touch_t", 0.0)) + get_process_delta_time())
 		else:
 			set_meta("arc_touch_t", 0.0)
-		if (on_arc and trig and not bool(get_meta("trig_was", false))) or float(get_meta("arc_touch_t", 0.0)) > 0.3:
+		# A pull that starts on ARCADE (so after the pause began), or a touch held 0.3 s.
+		if (on_arc and pull_start) or float(get_meta("arc_touch_t", 0.0)) > 0.3:
 			print("Net: VR arcade button")
 			go_to_arcade()
 			return
-	# While paused, a trigger pull on the button resumes only when released quickly, so HOLDING the
-	# trigger (even while pointing near the wrist, e.g. with a fishing rod) always goes to the arcade.
+	# While paused, a pull that STARTS on the button resumes only when released quickly, so a new pull
+	# HELD while paused (even pointing near the wrist, e.g. with a fishing rod) goes to the arcade.
+	# The pull that paused (still held) never resumes the moment it is released.
 	var tap_resume := false
-	# Only a pull that STARTED while paused counts: the pull that paused (still held) must not resume
-	# the moment it is released.
-	if paused and on_btn and trig and (float(get_meta("btn_hold", 0.0)) > 0.0 or not bool(get_meta("trig_was", false))):
+	if paused and on_btn and trig and (float(get_meta("btn_hold", 0.0)) > 0.0 or pull_start):
 		set_meta("btn_hold", float(get_meta("btn_hold", 0.0)) + get_process_delta_time())
 	elif float(get_meta("btn_hold", 0.0)) > 0.0:
 		tap_resume = float(get_meta("btn_hold", 0.0)) < 0.5 and not trig
 		set_meta("btn_hold", 0.0)
+	# Pausing by pointing needs a FRESH pull that starts on the button: a held trigger sweeping
+	# across the wrist is play, not a menu press.
 	var down: bool = hl.is_button_pressed("menu_button") or hl.is_button_pressed("by_button") \
-		or held_touch or (on_btn and trig and not paused) or tap_resume
+		or held_touch or (on_btn and pull_start and not paused) or tap_resume
 	if has_meta("leaving"):
 		down = false  # on the way to the arcade: a late trigger release must not pause again
 	if down and not menu_was_down:
@@ -837,10 +849,12 @@ func _check_vr_menu() -> void:
 			main.toggle_vr_pause()
 		else:
 			toggle_pause(0)
-	# Leaving needs the trigger HELD for 1.5 s while paused, so a stray trigger pull doesn't quit.
-	if trig and paused:
+	# Leaving needs a NEW pull, started while paused, HELD for 1.5 s, so a stray pull doesn't quit and
+	# the pull that paused never does.
+	if fresh_pull and paused:
 		set_meta("leave_t", float(get_meta("leave_t", 0.0)) + get_process_delta_time())
 		if float(get_meta("leave_t", 0.0)) > 1.5:
+			print("Net: VR hold to leave")
 			go_to_arcade()
 	else:
 		set_meta("leave_t", 0.0)
