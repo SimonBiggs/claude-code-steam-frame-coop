@@ -4,6 +4,13 @@ extends RefCounted
 ## bed (8 x 3.6 units) is a 2 m x 0.9 m bed, and a bee (about 0.3 units) is a fat 7 cm bumblebee.
 ## The soil top is y = 0; the lawn is 0.8 m lower. Everything is deterministic (same on both machines).
 
+## The gardener (P1) and the bees (main.gd).
+const PLAYER_COLORS: Array[Color] = [Color(0.4, 0.75, 0.35), Color(1.0, 0.45, 0.6), Color(0.35, 0.65, 1.0),
+	Color(0.7, 0.45, 1.0), Color(1.0, 0.55, 0.2), Color(0.3, 0.9, 0.8), Color(0.95, 0.95, 0.95)]
+## The bed's soil, and a plant's stem and leaves (plant.gd).
+const SOIL := Color(0.36, 0.24, 0.16)
+const PLANT_GREEN := Color(0.3, 0.68, 0.28)
+const LEAF_GREEN := Color(0.35, 0.75, 0.3)
 const S := 4.0                     # XR world scale
 const BED_X := 4.0                 # soil half-width
 const BED_Z := 1.8                 # soil half-depth
@@ -240,7 +247,7 @@ static func build(main: Node3D, vr: bool) -> void:
 	rim.build(main, wood)
 	var soil := MeshInstance3D.new()
 	soil.mesh = box(Vector3(BED_X * 2.0, 0.1, BED_Z * 2.0))
-	soil.material_override = mat(Color(0.36, 0.24, 0.16))
+	soil.material_override = mat(SOIL)
 	soil.position.y = -0.05
 	main.add_child(soil)
 	# (The soil patches, pond, stones, rocks and toadstools come from the seeded garden: bedview.gd.)

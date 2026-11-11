@@ -115,8 +115,7 @@ const RAID_TIME := 26.0
 ## Daily wishes: [kind, base goal, text]. The goal grows a little each round.
 const WISHES := [["plant", 2, "Plant %d new seeds"], ["harvest", 3, "Pick %d ripe fruits"], ["pollinate", 6, "Pollinate %d flowers"],
 	["shoo", 3, "Shoo away %d pests"], ["combo", 2, "Make %d MIXED BOUQUET trips"], ["gold", 2, "Bring %d loads of golden pollen"]]
-const PLAYER_COLORS: Array[Color] = [Color(0.4, 0.75, 0.35), Color(1.0, 0.45, 0.6), Color(0.35, 0.65, 1.0),
-	Color(0.7, 0.45, 1.0), Color(1.0, 0.55, 0.2), Color(0.3, 0.9, 0.8), Color(0.95, 0.95, 0.95)]
+const PLAYER_COLORS: Array[Color] = W.PLAYER_COLORS  # (world.gd: palette.gd reads it)
 const SOUNDS := {
 	"pollen": [0.12, 900.0, 1500.0, 0.25, "sine", 0.0],
 	"honey": [0.45, 523.0, 1046.0, 0.35, "tri", 0.0],
@@ -2759,7 +2758,7 @@ func _host_hazards() -> void:
 	var wasps: Array = plan.get("wasps", [])
 	if plan_wasp_warned < wasps.size() and round_t >= float(wasps[plan_wasp_warned]) - GardenGen.WARN_S:
 		plan_wasp_warned += 1
-		warn(Vector3(W.HIVE_ENTRY.x + 0.3, 0.06, W.HIVE_ENTRY.z), 0.9, Color(1.0, 0.75, 0.1), GardenGen.WARN_S, "rings")
+		warn(Vector3(W.HIVE_ENTRY.x + 0.3, 0.06, W.HIVE_ENTRY.z), 0.9, GardenGen.WASP_WARN, GardenGen.WARN_S, "rings")
 		sound("buzz", -4.0, 0.8)
 	if plan_wasp < wasps.size() and round_t >= float(wasps[plan_wasp]):
 		plan_wasp += 1
@@ -2768,7 +2767,7 @@ func _host_hazards() -> void:
 	if plan_storm_warned < storms.size() and round_t >= float(storms[plan_storm_warned][0]) - GardenGen.WARN_S:
 		var st: Array = storms[plan_storm_warned]
 		plan_storm_warned += 1
-		warn(Vector3(float(st[1]), 0.08, float(st[2])), float(st[3]), Color(0.55, 0.6, 0.95), GardenGen.WARN_S, "disc")
+		warn(Vector3(float(st[1]), 0.08, float(st[2])), float(st[3]), GardenGen.STORM_WARN, GardenGen.WARN_S, "disc")
 		sound("rain", -10.0, 0.7)
 	if plan_storm < storms.size() and round_t >= float(storms[plan_storm][0]):
 		var st2: Array = storms[plan_storm]
