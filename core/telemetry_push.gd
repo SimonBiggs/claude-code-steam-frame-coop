@@ -6,13 +6,14 @@ extends Node
 ## - OUTBOX: Telemetry.run() appends each line to user://telemetry_outbox.jsonl; lines leave it only when the
 ##   receiver acknowledges them (by id = first 16 hex of the line's MD5, so a resend after a lost reply is ignored).
 ##   The first start after this landed also queues the machine's older telemetry.jsonl (the runs nobody saw).
-## - WHEN: on arcade start, a few seconds after each RUN line (after each round) and every RETRY_S seconds.
+## - WHEN: on arcade start (a CHECK-IN even with nothing to send, so the Steam Machine knows this machine ran the
+##   arcade, which build, and that the network path works), a few seconds after each RUN line (after each round) and every RETRY_S seconds.
 ## - FINDING the Steam Machine: UDP "DUO_TELEMETRY_HELLO" broadcast (and the address that answered last time, and
 ##   this machine itself) on PORT; the receiver answers with its HTTP port, then a POST /runs per batch.
 ## - NO SILENT LOSS: the outbox is capped at MAX_BYTES; past that the OLDEST lines go, with a log line every time,
 ##   and the count is sent with the next batch so the Steam Machine records the loss too. A log line also says when
 ##   the Steam Machine hasn't been reached for over a week.
-## - Only RUN lines (game stats) and this machine's name leave it, only to private addresses. Tests never push
+## - Only RUN lines (game stats), this machine's name and its build leave it, only to private addresses. Tests never push
 ##   (core/save.gd test mode) unless DUO_TELEMETRY_PUSH_TEST=1 (tools/telemetry-push-test: own outbox, own receiver
 ##   on DUO_TELEMETRY_PORT, marked "test" so the real receiver refuses it).
 ## Env: DUO_TELEMETRY_PUSH=0 (off), DUO_TELEMETRY_PORT, DUO_TELEMETRY_HOST (skip finding: send to this address),
@@ -40,6 +41,8 @@ var _hello_until := 0
 var _http: HTTPRequest
 var _sent_ids: Array = []
 var _said_unreachable := false
+var _checkin := true  # say hello once per arcade start even with nothing to send: the Steam Machine then knows this
+                      # machine ran the arcade and can reach it (no RUN lines may just mean no rounds finished)
 
 
 # --- Static: who pushes, the outbox ----------------------------------------------
@@ -64,6 +67,15 @@ static func meta_path() -> String:
 
 static func port() -> int:
 	return int(OS.get_environment("DUO_TELEMETRY_PORT")) if OS.has_environment("DUO_TELEMETRY_PORT") else PORT
+
+
+## The arcade build this machine runs (its signed LAN update version, "none" in a dev checkout), so the Steam
+## Machine sees which machines are behind.
+func build() -> String:
+	var lu := get_tree().root.get_node_or_null("LanUpdate") if is_inside_tree() else null
+	if lu != null and lu.has_method("my_ver"):
+		return str(lu.call("ver_text", lu.call("my_ver")))
+	return "?"
 
 
 ## This machine's name on the Steam Machine (its hostname: "samuel-deck", "steammachine").
@@ -239,7 +251,7 @@ func _process(_dt: float) -> void:
 	if _state == "idle":
 		if _now() >= _next_try:
 			_next_try = _now() + _retry_s()
-			if pending().size() > 0:
+			if pending().size() > 0 or _checkin:
 				_hello()
 	elif _state == "hello":
 		_poll_hello()
@@ -297,7 +309,7 @@ static func _private(ip: String) -> bool:
 
 func _send(ip: String, http_port: int) -> void:
 	var lines := pending()
-	if lines.is_empty():
+	if lines.is_empty() and not _checkin:
 		_state = "idle"
 		return
 	var runs: Array = []
@@ -307,7 +319,8 @@ func _send(ip: String, http_port: int) -> void:
 		runs.append({"id": id, "line": l})
 		_sent_ids.append(id)
 	var m := read_meta()
-	var body := JSON.stringify({"device": device(), "dropped": int(m.get("dropped_unreported", 0)), "test": push_test(), "runs": runs})
+	var body := JSON.stringify({"device": device(), "dropped": int(m.get("dropped_unreported", 0)), "test": push_test(),
+		"runs": runs, "checkin": _checkin, "build": build(), "waiting": lines.size()})
 	if _http == null:
 		_http = HTTPRequest.new()
 		_http.timeout = 10.0
@@ -330,6 +343,7 @@ func _on_done(result: int, code: int, _headers: PackedStringArray, data: PackedB
 		print(LOG + "sending failed (result %d, HTTP %d); %d RUN lines kept for later" % [result, code, pending().size()])
 		return
 	var d: Dictionary = v
+	_checkin = false
 	var removed := ack(d.get("acked", []))
 	var m := read_meta()
 	m["last_ok"] = int(Time.get_unix_time_from_system())
@@ -338,6 +352,9 @@ func _on_done(result: int, code: int, _headers: PackedStringArray, data: PackedB
 	m["sent"] = int(m.get("sent", 0)) + removed
 	write_meta(m)
 	var left := pending().size()
+	if removed == 0 and left == 0:
+		print(LOG + "checked in with the Steam Machine at %s (nothing to send)" % str(m["sink"]))
+		return
 	print(LOG + "sent %d RUN lines to the Steam Machine (%d new, %d already there), %d waiting"
 		% [removed, int(d.get("new", 0)), int(d.get("dup", 0)), left])
 	if left > 0 and removed > 0:
