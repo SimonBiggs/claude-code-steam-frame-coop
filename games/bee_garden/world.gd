@@ -263,6 +263,7 @@ static func _build_hive(main: Node3D) -> void:
 	mesh_node(hive, box(Vector3(0.85, 0.36, 0.85)), cream, Vector3(0, 0.66, 0))
 	var roof := mesh_node(hive, PrismMesh.new(), cmat(Color(0.85, 0.4, 0.3)), Vector3(0, 1.0, 0), Vector3(1.1, 0.35, 1.05))
 	roof.rotation.y = PI / 2.0
+	roof.name = "Roof"  # (jarshelf.gd lifts it as the hive grows honey boxes)
 	mesh_node(hive, box(Vector3(0.06, 0.1, 0.36)), cmat(Color(0.15, 0.1, 0.05)), Vector3(0.43, 0.14, 0))
 	mesh_node(hive, box(Vector3(0.25, 0.04, 0.42)), cmat(Color(0.55, 0.38, 0.24)), Vector3(0.52, 0.07, 0))
 	var tag := Label3D.new()

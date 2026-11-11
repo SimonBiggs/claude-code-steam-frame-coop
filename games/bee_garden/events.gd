@@ -7,7 +7,17 @@ extends Node3D
 ## Wasp raids reuse the normal wasps (pest.gd). No fighting: pests just get shooed away.
 
 const W := preload("res://games/bee_garden/world.gd")
+const GardenGenRef := preload("res://games/bee_garden/gardengen.gd")
 const QUEEN_HOME := Vector3(-3.4, 1.5, -2.5)
+const UiKit := preload("res://core/ui_kit.gd")
+## Seasonal drift over the garden (gardengen.gd SEASONS by round): blossom petals, summer seed fluff, autumn leaves,
+## harvest-moon fireflies.
+const DRIFT := {
+	"spring": [Color(1.0, 0.75, 0.85), 0.05, -0.25],
+	"summer": [Color(1.0, 1.0, 0.92), 0.035, -0.12],
+	"autumn": [Color(0.95, 0.55, 0.2), 0.06, -0.4],
+	"harvest": [Color(1.0, 0.9, 0.4), 0.03, 0.05],
+}
 
 var main
 var cloud: Node3D
@@ -17,6 +27,10 @@ var queen: Node3D
 var queen_wings: Array[MeshInstance3D] = []
 var queen_want: MeshInstance3D
 var sparkle: CPUParticles3D
+var storm: Node3D             # second pass: a little dark storm cloud over part of the bed (main.storm_t)
+var storm_rain: CPUParticles3D
+var drift: CPUParticles3D
+var drift_season := ""
 var t := 0.0
 
 
@@ -47,6 +61,7 @@ func _ready() -> void:
 	var dm := W.box(Vector3(0.025, 0.22, 0.025))
 	var dmat := W.mat(Color(0.6, 0.8, 1.0, 0.7), 0.6)
 	dmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	dmat.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 	dm.material = dmat
 	rain.mesh = dm
 	rain.emitting = false
@@ -77,12 +92,15 @@ func _ready() -> void:
 	rmat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	rmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	rmat.albedo_color = Color(1, 1, 1, 0.65)
+	rmat.render_priority = UiKit.VR_PRIO_UNDER_UI
 	rm.surface_set_material(0, rmat)
 	rainbow = W._mesh_of(rm)
 	rainbow.position = Vector3(0, -3.0, -14.0)
 	rainbow.visible = false
 	add_child(rainbow)
 	_build_queen()
+	_build_storm(dm)
+	_build_drift()
 	sparkle = CPUParticles3D.new()
 	sparkle.amount = 14
 	sparkle.lifetime = 1.0
@@ -99,6 +117,65 @@ func _ready() -> void:
 	sparkle.emitting = false
 	sparkle.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(sparkle)
+
+
+## A small dark storm cloud with its own rain (moved over main.storm_at while main.storm_t runs).
+func _build_storm(drop: Mesh) -> void:
+	storm = Node3D.new()
+	storm.name = "StormCloud"
+	add_child(storm)
+	var st := W._st()
+	for k in 6:
+		var a := TAU * k / 6.0
+		W.vsphere(st, Vector3(cos(a) * 0.8, 0.15 * sin(a * 2.0), sin(a) * 0.55), Vector3(0.7, 0.45, 0.6), Color(0.42, 0.44, 0.56), 10, 6)
+	W.vsphere(st, Vector3(0, 0.25, 0), Vector3(1.0, 0.6, 0.75), Color(0.5, 0.52, 0.64), 12, 6)
+	storm.add_child(W._mesh_of(W.vmesh(st)))
+	storm_rain = CPUParticles3D.new()
+	storm_rain.amount = 40
+	storm_rain.lifetime = 0.45
+	storm_rain.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+	storm_rain.emission_sphere_radius = 0.9
+	storm_rain.direction = Vector3.DOWN
+	storm_rain.spread = 4.0
+	storm_rain.initial_velocity_min = 6.0
+	storm_rain.initial_velocity_max = 7.0
+	storm_rain.mesh = drop
+	storm_rain.emitting = false
+	storm_rain.position = Vector3(0, -0.3, 0)
+	storm_rain.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	storm.add_child(storm_rain)
+	storm.visible = false
+	storm.scale = Vector3.ONE * 0.01
+
+
+## Seasonal drift: a few petals / leaves / fireflies floating down over the bed.
+func _build_drift() -> void:
+	drift = CPUParticles3D.new()
+	drift.name = "SeasonDrift"
+	drift.amount = 18
+	drift.lifetime = 7.0
+	drift.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+	drift.emission_box_extents = Vector3(5.0, 0.3, 2.5)
+	drift.position = Vector3(0, 3.2, 0)
+	drift.direction = Vector3(1, 0, 0)
+	drift.spread = 40.0
+	drift.initial_velocity_min = 0.2
+	drift.initial_velocity_max = 0.5
+	drift.angular_velocity_min = -90.0
+	drift.angular_velocity_max = 90.0
+	drift.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	drift.emitting = false
+	add_child(drift)
+
+
+func _set_season(season: String) -> void:
+	drift_season = season
+	var d: Array = DRIFT.get(season, DRIFT.spring)
+	var m: PrimitiveMesh = W.box(Vector3(float(d[1]) * 2.0, 0.008, float(d[1]) * 1.4)) if season != "harvest" else W.sphere(float(d[1]), 6)
+	m.material = W.cmat(d[0], 1.5 if season == "harvest" else 0.2)
+	drift.mesh = m
+	drift.gravity = Vector3(0.15, float(d[2]), 0.0)
+	drift.emitting = true
 
 
 ## The Queen: a big round bee with a golden crown, a purple sash and a pollen basket she wants filled.
@@ -168,6 +245,17 @@ func update_from(delta: float) -> void:
 		queen_want.visible = here
 		if not here and queen.position.distance_to(want_pos) < 1.0:
 			queen.visible = false
+	# The storm cloud (second pass): grows in over its spot, rains, then shrinks away.
+	var stormy: bool = main.storm_t > 0.0
+	storm.visible = stormy or storm.scale.x > 0.05
+	if storm.visible:
+		storm.position = Vector3(main.storm_at.x, 2.6 + sin(t * 0.8) * 0.08, main.storm_at.z)
+		var ss: float = main.storm_r / 1.2 if stormy else 0.01
+		storm.scale = storm.scale.lerp(Vector3.ONE * ss, 1.0 - exp(-3.0 * delta))
+	storm_rain.emitting = stormy
+	var season: String = GardenGenRef.season_of(maxi(main.day, 1))
+	if season != drift_season:
+		_set_season(season)
 	# Golden flower sparkles.
 	var gs: int = main.golden_spot
 	sparkle.emitting = gs >= 0

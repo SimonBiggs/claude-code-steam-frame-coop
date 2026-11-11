@@ -18,6 +18,10 @@ const KIND_PICS: Array[String] = ["daisy", "sunflower", "lily"]
 const SHELF_SLOTS := 32   # jars the shelf shows (4 shelves of 8); after that every jar is a gold one
 const DECOR_START := 2    # the gnome and the bird bath are there from the start (props.gd)
 const DECOR_MAX := 8      # world.gd DECOR
+## The HIVE GROWS with the shelf: a new honey box goes on at each of these jar counts (the roof and Queen Bea move up),
+## and the last one gives it a golden roof. [jars, box colour]
+const HIVE_BOXES := [[8, Color(1.0, 0.72, 0.3)], [20, Color(1.0, 0.7, 0.8)], [40, Color(0.65, 0.95, 0.75)], [70, Color(1.0, 0.85, 0.2)]]
+const HIVE_BOX_H := 0.3
 ## Short lines (kids read them; <= 26 letters).
 const LINES := {
 	"hello": "Hello, busy bees!",
@@ -30,11 +34,16 @@ const LINES := {
 	"golden": "A golden flower!",
 	"aphid": "Bump the aphid away!",
 	"hot": "Hot day! Water lots!",
+	"wasp": "Bump the wasp away!",
+	"storm": "A storm cloud! Fly round!",
+	"gift": "A gift for my bees!",
+	"hive": "My hive is growing!",
 }
 
 
 static func save_defaults() -> Dictionary:
-	return {"world": -1, "jars": 0, "rounds": 0, "gardens": 0, "decor": DECOR_START, "daily": "", "daily_done": "", "best_round": 0}
+	return {"world": -1, "jars": 0, "rounds": 0, "gardens": 0, "decor": DECOR_START, "daily": "", "daily_done": "", "best_round": 0,
+		"mode": "gentle"}
 
 
 ## How many seed kinds the tray offers with `jars` on the shelf.
@@ -44,6 +53,15 @@ static func kinds_for(jars: int) -> int:
 		if jars >= int(u[1]):
 			n += 1
 	return clampi(n, 1, 3)
+
+
+## How many honey boxes the hive has grown with `jars` on the shelf (0..HIVE_BOXES.size()).
+static func hive_level(jars: int) -> int:
+	var n := 0
+	for hb in HIVE_BOXES:
+		if jars >= int(hb[0]):
+			n += 1
+	return n
 
 
 ## The garden seed for a new session: TODAY'S GARDEN when it's the first garden today, else the
@@ -61,7 +79,8 @@ static func daily_seed(date: String = "") -> int:
 
 ## The generator spec for this family's save.
 static func spec(save: Dictionary, bees: int = 1) -> Dictionary:
-	return {"kinds": kinds_for(int(save.get("jars", 0))), "level": int(save.get("rounds", 0)), "bees": bees}
+	return {"kinds": kinds_for(int(save.get("jars", 0))), "level": int(save.get("rounds", 0)), "bees": bees,
+		"mode": String(save.get("mode", "gentle"))}
 
 
 ## Jars on the shelf drawn as [plain, gold]: the first SHELF_SLOTS are honey jars; past that, each

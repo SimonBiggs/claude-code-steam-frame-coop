@@ -69,6 +69,10 @@ var vr_hold := 0.0
 var vr_task := ""
 var vr_props_done := false
 var vr_tasks_done := 0
+# second pass: picks between rounds, wasp visits and storm clouds told by warning rings
+var deep := {}            # what was seen: rings, wasp, storm, mode_pick, gift_pick, bee_pick ...
+var deep_reported := false
+var hazards_forced := false
 
 
 func _ready() -> void:
@@ -94,6 +98,7 @@ func _physics_process(delta: float) -> void:
 	if simple:
 		_simple_checks()
 		_note_cues()
+		_deep_checks()
 	for b in main.bees():
 		if not b.remote:
 			_drive_bee(b)
@@ -158,6 +163,58 @@ func _physics_process(delta: float) -> void:
 			main.wish_done, main.queen_gifts])
 
 
+## SECOND PASS (picks.gd, gardengen.gd): after round 1 the GENTLE / BRAVE / HARD orbs go up and P2's bee flies into
+## the first one (BRAVE in the middle is the default, so a bee pick shows); after later rounds Queen Bea's gift orbs
+## and P2 takes the last one. The host forces a wasp visit and a storm cloud in round 2 (the bot fills rounds long
+## before the plan's times): every machine must see the warning rings, the wasp, the storm cloud's closed flowers;
+## the hive grows boxes as the shelf fills. Prints "Bot: DEEP ..." and FAILs what's missing.
+func _deep_checks() -> void:
+	if main.rings.count() > 0:
+		deep["rings"] = true
+	if main.storm_t > 0.0:
+		deep["storm"] = true
+	if main.picks.orbs.showing():
+		deep[String(main.picks.orbs.stage) + "_orbs"] = true
+	for p in get_tree().get_nodes_in_group("pests"):
+		if p.kind == "wasp":
+			deep["wasp"] = true
+	if main.gifts.size() > 0:
+		deep["gift"] = true
+	if main.net.mode != "client":
+		for h in main.picks.history:
+			deep["picked_" + String(h[0])] = true
+			if bool(h[2]):
+				deep["player_pick"] = true
+		# Round 2: a wasp visit and a storm cloud now (each told by its warning ring first).
+		if not hazards_forced and main.day == 2 and main.phase == "day" and main.round_t > 1.0:
+			hazards_forced = true
+			var GG := preload("res://games/bee_garden/gardengen.gd")
+			var r := RandomNumberGenerator.new()
+			r.seed = 7
+			var st: Array = GG._storm_place(main.garden, r)
+			main.plan.wasps = [main.round_t + 3.6]
+			main.plan.storms = [[main.round_t + 4.0] + st] if not st.is_empty() else []
+			print("Bot: forcing a wasp and a storm %s" % str(main.plan.storms))
+	if main.days_done >= 3 and not deep_reported and (main.net.mode != "client" or t > 30.0):
+		deep_reported = true
+		var need: Array[String] = ["rings", "wasp", "storm", "mode_orbs", "gift"]
+		if main.net.mode != "client":
+			need.append_array(["picked_mode", "picked_gift", "player_pick"])
+		var missing: Array[String] = []
+		for k in need:
+			if not deep.has(k):
+				missing.append(k)
+		print("Bot: DEEP mode=%s game_mode=%s gifts=%s hive=%d seen=%s %s" % [main.net.mode, main.game_mode, str(main.gifts),
+			main.jarshelf.hive_level, str(deep.keys()), "ok" if missing.is_empty() else "FAIL missing " + str(missing)])
+
+
+func _orbs_taken() -> bool:
+	for o in main.picks.orbs.orbs:
+		if is_instance_valid(o) and o.dots.get_child_count() > 0:
+			return true
+	return false
+
+
 ## BOT_PLAYERS: bring in extra TV bees one by one, and exercise unplug / replug.
 func _party() -> void:
 	if bot_players < 2 or main.net.mode == "host":
@@ -205,7 +262,19 @@ func _drive_bee(b) -> void:
 	var goal := Vector3.ZERO
 	var have_goal := false
 	var last: int = b.get_meta("bot_last", -1)
-	# Events: bump raid wasps, bring the Queen her pollen.
+	# Picks between rounds: P2 flies into an orb (the mode's first, the gift's last).
+	if b.index == 1 and main.picks.orbs.showing() and not _orbs_taken():
+		var want: int = 0 if String(main.picks.orbs.stage) == "mode" else main.picks.orbs.orbs.size() - 1
+		var op: Vector3 = main.picks.orb_pos(want)
+		if op != Vector3.INF:
+			goal = op
+			have_goal = true
+	# Events: bump raid wasps, bring the Queen her pollen; bump a visiting wasp away.
+	if not have_goal and main.event != "raid":
+		for p in get_tree().get_nodes_in_group("pests"):
+			if p.kind == "wasp" and not p.is_fleeing() and p.global_position.distance_to(W.HIVE_ENTRY) < 1.2 and b.index == 1:
+				goal = p.global_position
+				have_goal = true
 	if main.event == "raid":
 		for p in get_tree().get_nodes_in_group("pests"):
 			if p.kind == "wasp" and not p.is_fleeing():
