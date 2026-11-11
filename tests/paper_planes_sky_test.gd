@@ -35,7 +35,7 @@ func _init() -> void:
 				shapes[f.shape] = int(shapes.get(f.shape, 0)) + 1
 	_expect(shapes.size() == SkyGen.SHAPES.size(), "every formation shape appears (%s)" % str(shapes))
 	_story_checks()
-	print("SKY: %d flights checked, %d failures (%d ms)" % [total, fails, Time.get_ticks_msec() - t0])
+	print("SKY: %s - %d flights checked, %d failures (%d ms)" % ["PASS" if fails == 0 else "FAIL", total, fails, Time.get_ticks_msec() - t0])
 	quit(1 if fails > 0 else 0)
 
 

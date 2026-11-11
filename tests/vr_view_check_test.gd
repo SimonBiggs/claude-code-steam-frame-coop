@@ -143,6 +143,23 @@ func _run() -> void:
 	probs = VrViewCheck.problems(root)
 	_check(not ", ".join(probs).contains("drawn over"), "a second card steps out of the first one's spot: %s" % [probs])
 	_clear_ui()
+	# 5a. a nearer banner that shows up AFTER a story card (Ghost Lantern's NIGHT 2 at 1.7 m over Granny Boo's card at
+	# 2.56 m): drawn over it although the two sit at different depths, and the card steps out of its way
+	var story := HudKit.vr_card(world, cam, "GRANNY BOO", "a line", {"width": 1.0, "height": -0.22})
+	await _frames(20)
+	var night := Label3D.new()
+	night.font_size = 48
+	night.pixel_size = 0.0026
+	night.text = "NIGHT 2"
+	world.add_child(night)
+	UiKit.VrText.follow(night, cam, world, -0.1, 1.7)
+	_check(VrViewCheck.overlap(cam.global_position, night, story), "a near banner over a far card counts as drawn over")
+	for i in 30:
+		UiKit.VrText.follow(night, cam, world, -0.1, 1.7)
+		await _frames(1)
+	probs = VrViewCheck.problems(root)
+	_check(not ", ".join(probs).contains("drawn over"), "a card steps out of a banner that shows up after it: %s" % [probs])
+	_clear_ui()
 
 	# 5b. see-through scenery (a lake's water) behind a card must draw under it, not be blended over it
 	var lake := MeshInstance3D.new()

@@ -27,6 +27,7 @@ const StoryCard := preload("res://core/story_card.gd")
 const Seeded := preload("res://core/seeded.gd")
 const Cannon := preload("res://games/cannon_cove/cannon.gd")
 const EnemyShip := preload("res://games/cannon_cove/enemy_ship.gd")
+const TestTime := preload("res://tests/test_time.gd")
 
 var fails := 0
 
@@ -51,7 +52,7 @@ func _init() -> void:
 					var spec := {"mode": mode, "season": season, "wave": w}
 					var es := Seeded.derive(VoyageGen.wave_seed(vseed, w), "events")
 					var list := Deep.events(es, spec)
-					worst_ms = maxf(worst_ms, (Time.get_ticks_usec() - t1) / 1000.0)
+					worst_ms = TestTime.worst(worst_ms, (Time.get_ticks_usec() - t1) / 1000.0, func() -> Variant: return Deep.events(Seeded.derive(VoyageGen.wave_seed(vseed, w), "events"), spec))
 					checked += 1
 					var tag := "%s %s wave %d seed %d" % [mode, season, w, vseed]
 					for x in Deep.problems(list, spec):

@@ -49,10 +49,22 @@ func _initialize() -> void:
 		var m := late_re.search(src)
 		if m != null and float(m.get_string(1)) >= LATE and not "within_deadline(" in src:
 			late.append("%s (%s s)" % [f, m.get_string(1)])
+	# Every tests/*_test.gd prints an explicit verdict (a PASS line, or BOT RESULT through bot_kit finish()): dev.land
+	# reads the PASS line, and a test that only says "SKY: 400 flights checked, 0 failures" and exits 0 looked the same
+	# as one that never ran its checks (paper_planes_sky_test, 5 more, 2026-11-11).
+	for f in DirAccess.get_files_at("res://tests"):
+		if not f.ends_with("_test.gd"):
+			continue
+		var code := ""
+		for line in FileAccess.get_file_as_string("res://tests/" + f).split("\n"):
+			if not line.strip_edges().begins_with("#"):
+				code += line + "\n"
+		if not ("PASS" in code or "finish(" in code):
+			flat.append(f + " (prints no PASS verdict: print \"<NAME>: PASS\" when it passed, FAIL when not)")
 	if not late.is_empty():
 		printerr("SCRIPT ERROR: BOT END: these bots end late in networked runs without bot_end.gd within_deadline (the runner kills them first): " + ", ".join(late))
 	if not flat.is_empty():
-		printerr("SCRIPT ERROR: BOT END: these bots break networked play (a flat host: join one pad there when not main.net.has_vr; clients check kit.seated(); sticks): " + ", ".join(flat))
+		printerr("SCRIPT ERROR: BOT END: these bots / tests break networked play or give no verdict (a flat host: join one pad there when not main.net.has_vr; clients check kit.seated(); sticks): " + ", ".join(flat))
 	if bad.is_empty() and late.is_empty() and flat.is_empty():
 		print("BOT END: PASS (%d bots can end by themselves, inside the runner's limit)" % n)
 	elif not bad.is_empty():

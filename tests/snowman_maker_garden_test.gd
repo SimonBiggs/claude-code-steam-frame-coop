@@ -29,7 +29,7 @@ func _init() -> void:
 	var b := GardenGen.garden(6, 3)
 	_expect(var_to_str(a.trees) != var_to_str(b.trees), "different seeds give different trees")
 	_story_checks()
-	print("GARDEN: %d gardens checked, %d failures (%d ms)" % [total, fails, Time.get_ticks_msec() - t0])
+	print("GARDEN: %s - %d gardens checked, %d failures (%d ms)" % ["PASS" if fails == 0 else "FAIL", total, fails, Time.get_ticks_msec() - t0])
 	quit(1 if fails > 0 else 0)
 
 

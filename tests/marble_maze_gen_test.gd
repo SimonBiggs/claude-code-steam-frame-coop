@@ -105,6 +105,7 @@ func _init() -> void:
 	_show(Story.maze(4242, 0))
 	_show(Story.maze(4242, 14))
 	_show(Story.maze(4242, 18))
+	print("MAZE: %s" % ("PASS" if fails == 0 else "FAIL (%d)" % fails))
 	quit(1 if fails > 0 else 0)
 
 

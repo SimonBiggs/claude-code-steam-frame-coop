@@ -10,7 +10,7 @@ extends RefCounted
 ## - its text is at least MIN_TEXT_DEG high in the eye (story-card body text is ~1.2 deg at its usual 2.56 m);
 ## - nothing solid between the eyes and its centre (a physics ray, then the real triangles of every mesh on the way:
 ##   a tree, a wall, a garden prop from saved growth); meshes around the head (rooms, sky domes) don't count;
-## - no two panels in the same spot (drawn over each other);
+## - no two panels drawn over each other: their rectangles, seen from the eyes, overlap (overlap());
 ## - no world words (name tags, pop-ups) right in front of the eyes;
 ## - no text glued to the face: a visible Label3D under the XR camera turns with the head.
 ## - not washed out: no see-through scenery (water, glass, mist) behind a panel draws after it. VR panels sit at
@@ -32,8 +32,12 @@ const MIN_TEXT_DEG := 0.8
 const IGNORE_META := "vr_check_ignore"
 ## Meshes with more triangles than this count by their box only (cheap, may over-report: rare in VR games).
 const MAX_FACES := 20000
-## Two panels whose middles are closer than this (seen from the eyes) are drawn over each other.
+## Two panels whose drawn rectangles (seen from the eyes, at any depth: a near banner hides a far card just the same)
+## share more than this many square degrees are drawn over each other. Panels with no size yet (nothing drawn) fall
+## back to their middles being closer than OVERLAP_DEG. (Ghost Lantern 2026-11-11: NIGHT 2 at 1.7 m sat over Granny
+## Boo's card at 2.56 m; the old "middles within 5 deg AND within 0.6 m in depth" rule missed it.)
 const OVERLAP_DEG := 5.0
+const OVERLAP_MIN_DEG2 := 1.0
 ## World words nearer than this (metres) in front of the eyes are "in the face".
 const FACE_D := 0.45
 const VR_LAYER := preload("res://core/vr_layer.gd").LAYER
@@ -356,9 +360,38 @@ static func _moving(n: Node) -> bool:
 
 ## Are panels a and b drawn over each other, seen from `head`? (HudKit's VrCard steps out of the way with it.)
 static func overlap(head: Vector3, a: Node3D, b: Node3D) -> bool:
+	return overlap_deg2(head, a, b) > OVERLAP_MIN_DEG2
+
+
+## How much panels a and b cover each other seen from `head` (square degrees; 0 = clear). Depth doesn't matter.
+static func overlap_deg2(head: Vector3, a: Node3D, b: Node3D) -> float:
 	var pa := _centre(a) - head
 	var pb := _centre(b) - head
-	return rad_to_deg(pa.angle_to(pb)) < OVERLAP_DEG and absf(pa.length() - pb.length()) < 0.6 * maxf(XRServer.world_scale, 0.001)
+	var sa := panel_extent(a)
+	var sb := panel_extent(b)
+	if sa.length() < 0.01 or sb.length() < 0.01 or pa.length() < 0.01 or pb.length() < 0.01:
+		return 100.0 if rad_to_deg(pa.angle_to(pb)) < OVERLAP_DEG else 0.0
+	var f := pa.normalized()
+	var right := f.cross(Vector3.UP)
+	right = right.normalized() if right.length() > 0.01 else Vector3.RIGHT
+	var up := right.cross(f).normalized()
+	var ra := _ang_rect(pa, sa, f, right, up)
+	var rb := _ang_rect(pb, sb, f, right, up)
+	if pb.dot(f) <= 0.05:
+		return 0.0
+	var ox := minf(ra.end.x, rb.end.x) - maxf(ra.position.x, rb.position.x)
+	var oy := minf(ra.end.y, rb.end.y) - maxf(ra.position.y, rb.position.y)
+	return ox * oy if ox > 0.0 and oy > 0.0 else 0.0
+
+
+## A panel `size` metres big whose middle is at `v` from the eyes, as a rectangle of view angles (degrees) around `f`.
+static func _ang_rect(v: Vector3, size: Vector2, f: Vector3, right: Vector3, up: Vector3) -> Rect2:
+	var z := maxf(v.dot(f), 0.05)
+	var c := Vector2(rad_to_deg(atan2(v.dot(right), z)), rad_to_deg(atan2(v.dot(up), z)))
+	var d := v.length()
+	var h := Vector2(rad_to_deg(atan2(size.x * 0.5, d)), rad_to_deg(atan2(size.y * 0.5, d)))
+	return Rect2(c - h, h * 2.0)
+
 
 
 ## Panels in front of the VR player that are drawn right now (meta "vr_placed").

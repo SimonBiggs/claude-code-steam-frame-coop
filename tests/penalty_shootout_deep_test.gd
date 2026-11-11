@@ -25,6 +25,7 @@ const StoryCard := preload("res://core/story_card.gd")
 const Seeded := preload("res://core/seeded.gd")
 const Keeper := preload("res://games/penalty_shootout/keeper.gd")
 const Ball := preload("res://games/penalty_shootout/ball.gd")
+const TestTime := preload("res://tests/test_time.gd")
 
 var fails := 0
 
@@ -48,7 +49,7 @@ func _init() -> void:
 					var t1 := Time.get_ticks_usec()
 					var spec := {"mode": mode, "season": season}
 					var list := Deep.hazards(cup, n, spec)
-					worst_ms = maxf(worst_ms, (Time.get_ticks_usec() - t1) / 1000.0)
+					worst_ms = TestTime.worst(worst_ms, (Time.get_ticks_usec() - t1) / 1000.0, func() -> Variant: return Deep.hazards(cup, n, spec))
 					checked += 1
 					var tag := "%s %s cup %d match %d" % [mode, season, cup, n]
 					for x in Deep.problems(cup, n, list, spec):
