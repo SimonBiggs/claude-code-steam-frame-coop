@@ -5,11 +5,13 @@ extends Node3D
 ##   and raiders inside are hurt / pushed by the host, main.gd on_vent_burst). Only while a wave is fighting.
 ##   Host / local: host_step() runs the clocks and calls main.on_vent_tell(i) / main.on_vent_burst(i); main sends
 ##   the tell to the TV machines as the event "vent" [i, tell], and every machine plays tell(i) + the burst.
-## - WARN rings (bosses' tells): warn(pos, radius, colour, secs) a pulsing ring on the ground where it will hit.
+## - WARN rings (bosses' tells): warn(pos, radius, colour, secs) pulsing rings on the ground where it will hit (the
+##   shared core/warn_rings.gd, so a boss tell reads the same as in every other game).
 
 const Arenas := preload("res://games/elemental_bender/arenas.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")
+const WarnRings := preload("res://core/warn_rings.gd")
 
 var main: Node
 var hazard := ""
@@ -18,8 +20,13 @@ var clocks: Array[float] = []
 var told: Array[bool] = []
 var _rings: Array[MeshInstance3D] = []
 var _glow: Array[float] = []  # seconds of tell left (every machine)
-var _warns: Array = []  # [node, t, secs]
+var rings: WarnRings
 var _t := 0.0
+
+
+func _ready() -> void:
+	rings = WarnRings.new()
+	add_child(rings)
 
 
 func setup(lay: Dictionary, hazard_id: String) -> void:
@@ -56,14 +63,6 @@ static func _vent_mesh(kind: String) -> ArrayMesh:
 		return b.build()) as ArrayMesh
 
 
-static func _ring_mesh() -> ArrayMesh:
-	return ResCache.get_or_make("eb_warn_ring_v1", func() -> Resource:
-		var b := MeshKit.builder()
-		b.torus(1.0, 0.06, MeshKit.at(Vector3.ZERO), Color.WHITE, 32, 4)
-		b.torus(0.55, 0.04, MeshKit.at(Vector3.ZERO), Color.WHITE, 24, 4)
-		return b.build()) as ArrayMesh
-
-
 ## Host / local: run the vent clocks (`active` while a wave fights). gentle: a longer warning.
 func host_step(delta: float, active: bool, gentle: bool) -> void:
 	if not active:
@@ -92,14 +91,8 @@ func tell(i: int, secs: float) -> void:
 
 ## Every machine: the warning ring of a boss attack (or anything) at `pos`.
 func warn(pos: Vector3, radius: float, col: Color, secs: float) -> void:
-	var mi := MeshInstance3D.new()
-	mi.mesh = _ring_mesh()
-	mi.material_override = MeshKit.material(col, 2.5)
-	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	mi.position = Vector3(pos.x, maxf(pos.y, 0.0) + 0.06, pos.z)
-	mi.scale = Vector3(radius, 1.0, radius)
-	add_child(mi)
-	_warns.append([mi, 0.0, maxf(secs, 0.2), radius])
+	if rings != null:
+		rings.warn(pos, radius, col, secs, maxf(pos.y, 0.0) + 0.06)
 
 
 func _process(delta: float) -> void:
@@ -118,16 +111,3 @@ func _process(delta: float) -> void:
 		else:
 			var s := float(v.r) * (1.0 + 0.04 * sin(_t * 2.0 + i))
 			r.scale = Vector3(s, 1.0, s)
-	var keep: Array = []
-	for w in _warns:
-		var n: MeshInstance3D = w[0]
-		w[1] = float(w[1]) + delta
-		if float(w[1]) >= float(w[2]) or not is_instance_valid(n):
-			if is_instance_valid(n):
-				n.queue_free()
-			continue
-		var k := 0.85 + 0.15 * absf(sin(float(w[1]) * 10.0))
-		var grow := minf(1.0, float(w[1]) / 0.25)
-		n.scale = Vector3(float(w[3]) * k * grow, 1.0, float(w[3]) * k * grow)
-		keep.append(w)
-	_warns = keep
