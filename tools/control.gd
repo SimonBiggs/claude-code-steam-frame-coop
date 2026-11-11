@@ -20,7 +20,8 @@ extends Node
 ##                                 relative: true} to move by), look = point the head faces; trigger/grip 0..1,
 ##                                 a/b bools, sticks [x,y]. Sets the XR nodes and every fake_* field games read.
 ##                                 Returns the current head/hand positions. {} just reports.
-##   camshot {camera?, path, width?, height?}   PNG from a camera (default: the VR head, the first XRCamera3D):
+##   camshot {camera?, path, width?, height?, stereo?}   PNG from a camera (default: the VR head, the first XRCamera3D;
+##                                 stereo: both eyes side by side, like the headset mirror):
 ##                                 what the headset would show, rendered in its own viewport
 ##   quit
 ## The Bun client is ~/.local/share/gdev/godot.ts (brepl: godot.launch(...)).
@@ -561,27 +562,43 @@ func _camshot(r: Dictionary) -> Dictionary:
 		src = _xr_nodes().head
 	if src == null:
 		return {"error": "no camera (default is the VR head: launch with BOT_VR=1)"}
-	var vp := SubViewport.new()
-	vp.size = Vector2i(int(r.get("width", 1280)), int(r.get("height", 720)))
-	vp.world_3d = src.get_world_3d()
-	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	var cam := Camera3D.new()
-	cam.fov = 90.0 if src is XRCamera3D else src.fov  # roughly a headset's field of view
-	cam.near = src.near
-	cam.far = src.far
-	cam.cull_mask = src.cull_mask
-	vp.add_child(cam)
-	add_child(vp)
-	cam.global_transform = src.global_transform
-	cam.current = true
+	var w := int(r.get("width", 1280))
+	var h := int(r.get("height", 720))
+	# stereo: what a headset really shows: one view per eye, 64 mm apart, ~100 degrees each, side by side (like
+	# SteamVR's mirror). Mono (default): one 90 degree view from between the eyes.
+	var eyes: Array = [[0.0, w]] if not bool(r.get("stereo", false)) else [[-0.032, w / 2], [0.032, w / 2]]
+	var imgs: Array[Image] = []
+	var vps: Array[SubViewport] = []
+	for e in eyes:  # every eye in the same frames (a moving hand stays put between them)
+		var vp := SubViewport.new()
+		vp.size = Vector2i(int(e[1]), h)
+		vp.world_3d = src.get_world_3d()
+		vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+		var cam := Camera3D.new()
+		cam.fov = (100.0 if eyes.size() > 1 else 90.0) if src is XRCamera3D else src.fov
+		cam.near = src.near
+		cam.far = src.far
+		cam.cull_mask = src.cull_mask
+		vp.add_child(cam)
+		add_child(vp)
+		cam.global_transform = src.global_transform.translated_local(Vector3(float(e[0]), 0.0, 0.0))
+		cam.current = true
+		vps.append(vp)
 	for i in 3:
 		await RenderingServer.frame_post_draw
-	var img := _grab(vp)
-	vp.queue_free()
-	if img == null:
-		return {"error": "nothing drawn yet"}
+	for vp in vps:
+		var img := _grab(vp)
+		vp.queue_free()
+		if img == null:
+			return {"error": "nothing drawn yet"}
+		imgs.append(img)
+	var out := imgs[0]
+	if imgs.size() > 1:
+		out = Image.create(w, h, false, imgs[0].get_format())
+		out.blit_rect(imgs[0], Rect2i(Vector2i.ZERO, imgs[0].get_size()), Vector2i.ZERO)
+		out.blit_rect(imgs[1], Rect2i(Vector2i.ZERO, imgs[1].get_size()), Vector2i(w / 2, 0))
 	var path := str(r.get("path", ProjectSettings.globalize_path("res://.dev/camshot.png")))
-	var err := img.save_png(path)
+	var err := out.save_png(path)
 	return {"path": path} if err == OK else {"error": "save failed: %d" % err}
 
 
