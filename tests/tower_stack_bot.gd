@@ -28,6 +28,9 @@ var pick_want := ""  # host: the building the bot walked to
 var pick_ok := 0
 var pick_bad := 0
 var job_seen := -1
+var cheers_done := 0  # towers whose CHEER ended during play (the round did not run out first): each opens a build pick
+var cheer_was := -1.0
+var cheer_round := 0
 
 
 func _ready() -> void:
@@ -130,6 +133,11 @@ func _orb_target() -> int:
 func _watch_picks() -> void:
 	if main.net.mode == "client":
 		return
+	var rn := int(main.net.state_get("round", 0))
+	if cheer_was >= 0.0 and main.done_t < 0.0 and rn == cheer_round and not main.results_showing():
+		cheers_done += 1
+	cheer_was = main.done_t
+	cheer_round = rn
 	if main.picks.stage == "build" and main.picks.chosen >= 0 and pick_want == "":
 		var opt: Array = main.picks.options[main.picks.chosen]
 		pick_want = String(main.G.from_job(opt).building)
@@ -332,13 +340,17 @@ func _checks() -> void:
 	if main.vr_rig != null:
 		kit.assert_true(main.total_placed > 0, "the fake VR giant placed blocks (%d)" % main.total_placed)
 	var hist: Array = main.picks.history
-	kit.info("%s picks: %s, mode %s, builds %s, specials %d, glued %d" % [mode, str(hist), main.game_mode, str(main.round_builds), main.round_specials, main.specials.glues_made])
+	kit.info("%s picks: %s, mode %s, builds %s, specials %d, glued %d, cheers ended in play %d, picks kept %d" % [mode, str(hist), main.game_mode, str(main.round_builds), main.round_specials, main.specials.glues_made, cheers_done, pick_ok])
 	kit.assert_true(not hist.is_empty() or int(main.net.state_get("round", 0)) >= 2, "%s: the team picked on the orbs" % mode)
 	var someone: bool = (mode == "local" and want > 0) or main.vr_rig != null or main.flat_host or mode == "host"
 	if someone and Engine.get_meta("ts_mode_set", false):
 		kit.assert_true(pick_bad == 0, "%s: the chosen building is the one built next (%d ok, %d wrong)" % [mode, pick_ok, pick_bad])
-	if main.total_built >= 1:
-		kit.assert_true(pick_ok >= 1 or main.picks.active(), "%s: after a tower the team chose the next building (%d)" % [mode, pick_ok])
+	# A tower counts as built when its roof goes on, but the build pick opens only after its CHEER, and never when
+	# the round runs out during it (2026-11-11: a tower finished in round 1's last seconds failed this). So: every
+	# tower whose cheer ended during play must have led to a pick (done, or still being chosen / about to start).
+	var pick_pending: bool = main.picks.active() or pick_want != ""
+	if cheers_done >= 1:
+		kit.assert_true(pick_ok >= 1 or pick_pending, "%s: after a tower the team chose the next building (%d)" % [mode, pick_ok])
 	if mode == "local" and want >= 2:
 		kit.info("highest a TV player climbed: %.2f m" % max_climb)
 		kit.assert_true(max_climb > main.BASE_H + 0.3, "a TV player climbed onto the tower")
