@@ -166,6 +166,13 @@ Decks without the TV. Agents never read Deck logs over ssh.
   + `<device>.meta.json` (last seen, drops); `GET /status` for a summary. Test runs never push (SAVE_TEST); the push
   test (`tools/telemetry-push-test`, run by dev.land when this code changes) uses its own receiver, and the real one
   refuses batches marked test.
+- **Check-in**: every arcade start says hello once even with nothing to send (POST /runs with `checkin`, its build =
+  LAN update version, lines waiting), so `/status` and `dev.playstats` show which machines ran the arcade, on which build
+  and from which address, and `telemetry-gap` can tell "nobody finished a round" from "can't reach the Steam Machine".
+- **Proving the real network path**: `tools/telemetry-lan-test DECK` runs the Deck's installed arcade headless from a temp
+  copy (own user data, lowest priority, refuses while Godot runs there) against a TEST receiver here. 2026-11-11:
+  PASS from samuel-deck over the living-room Wi-Fi; both firewalls (firewalld zone public) allow 1024-65535 tcp+udp,
+  so 7870 is open. At that time no Deck had pushed because the arcade hadn't been started on one since 24 Oct.
 - **Reading**: brepl `dev.playstats({since, game})` / `dev.playRuns()`; `tools/dd-balance`. `dev.debt()` warns
   (telemetry-gap) when no real RUN line has arrived for 7 days, and (telemetry-drops) when a device dropped lines.
 

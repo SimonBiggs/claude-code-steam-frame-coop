@@ -1,0 +1,57 @@
+#!/usr/bin/env bun
+// telemetry-lan-test DECK: proves a real Deck's arcade code reaches the Steam Machine's telemetry receiver over the
+// home network (UDP broadcast hello + HTTP), not just over localhost like tools/telemetry-push-test.
+// - Starts a TEST receiver here (tools/duo-telemetry-recv --test) on a random port with its own temp folder, so the
+//   real store (~/.cache/duo-arena/telemetry) and the real receiver are never touched.
+// - On the Deck: copies its installed arcade (~/DuoArena/game) to a temp folder, runs tests/telemetry_push_bot.tscn
+//   HEADLESS (no window, no controllers) with DUO_TELEMETRY_PUSH_TEST=1, its own user data and device name
+//   "lan-test-<deck>", at lowest priority, then deletes the copy. Nothing listens on the Deck's own 127.0.0.1:PORT,
+//   so a PASS means the lines crossed the LAN.
+// - Refuses to run while the arcade (or any Godot) is running on the Deck: never disturb someone playing.
+//   tools/telemetry-lan-test samuel-deck
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const deck = process.argv[2];
+if (!deck) { console.log("usage: telemetry-lan-test DECK (an ssh alias, e.g. samuel-deck)"); process.exit(2); }
+const recvBin = join(import.meta.dir, "duo-telemetry-recv");
+const tmp = await mkdtemp(join(tmpdir(), "telemetry-lan-test-"));
+const port = 20000 + Math.floor(Math.random() * 9000);
+const dev = `lan-test-${deck.replace(/[^a-z0-9-]/gi, "").toLowerCase()}`;
+const fails: string[] = [];
+const fail = (s: string) => { fails.push(s); console.log("FAIL: " + s); };
+const ssh = async (cmd: string, ms = 30_000) => {
+  const p = Bun.spawn(["ssh", "-o", "ConnectTimeout=5", "-o", "BatchMode=yes", deck, cmd], { stdout: "pipe", stderr: "pipe" });
+  const t = setTimeout(() => p.kill(), ms);
+  const out = (await new Response(p.stdout).text()) + (await new Response(p.stderr).text());
+  clearTimeout(t);
+  return { code: await p.exited, out };
+};
+
+const busy = await ssh("pgrep -x godot >/dev/null && echo BUSY || echo FREE");
+if (busy.code !== 0) { console.log(`FAIL telemetry-lan-test: ${deck} not reachable over ssh (${busy.out.trim()})`); process.exit(1); }
+if (busy.out.includes("BUSY")) { console.log(`SKIP telemetry-lan-test: Godot is running on ${deck} (someone may be playing); not disturbing it`); process.exit(3); }
+
+const recv = Bun.spawn(["bun", recvBin, "--port", String(port), "--dir", join(tmp, "store"), "--test"], { stdout: "pipe", stderr: "pipe" });
+const recvLog = new Response(recv.stdout).text();
+await Bun.sleep(800);
+try {
+  const dir = `/tmp/duo-telemetry-lan-test-${port}`;
+  const env = `DUO_TELEMETRY_PUSH_TEST=1 DUO_TELEMETRY_PORT=${port} DUO_TELEMETRY_DEVICE=${dev} DUO_TELEMETRY_RETRY=2 ` +
+    `DUO_SOLO=1 DUO_PORT=${port + 7} XDG_DATA_HOME=${dir}/data SDL_JOYSTICK_HIDAPI=0`;
+  const r = await ssh(`set -e; rm -rf ${dir}; mkdir -p ${dir}/data; cp -a ~/DuoArena/game ${dir}/game; rm -rf ${dir}/game/.dev; ` +
+    `trap 'rm -rf ${dir}' EXIT; ${env} timeout 100 nice -n 19 ~/DuoArena/godot --headless --path ${dir}/game res://tests/telemetry_push_bot.tscn 2>&1 ` +
+    `| grep -E 'BOT RESULT|TELEMETRY PUSH|SCRIPT ERROR' || true`, 150_000);
+  console.log(r.out.trim());
+  if (!/BOT RESULT: PASS/.test(r.out)) fail(`${deck}: the push bot didn't pass`);
+  if (/SCRIPT ERROR/.test(r.out)) fail(`${deck}: SCRIPT ERROR`);
+  const lines = (await readFile(join(tmp, "store", `${dev}.jsonl`), "utf8").catch(() => "")).split("\n").filter(Boolean);
+  if (lines.length !== 4) fail(`${dev}: the test receiver stored ${lines.length} lines, want 4`);
+} finally {
+  recv.kill();
+  console.log((await recvLog).trim());
+  await rm(tmp, { recursive: true, force: true });
+}
+console.log(fails.length ? `FAIL telemetry-lan-test ${deck}: ${fails.length}` : `PASS telemetry-lan-test ${deck}: RUN lines crossed the home network (UDP hello + HTTP) into a test receiver`);
+process.exit(fails.length ? 1 : 0);

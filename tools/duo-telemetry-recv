@@ -4,7 +4,8 @@
 // this machine on the home network, sends them here. Nothing is pulled from devices (no ssh).
 //   UDP  :PORT  "DUO_TELEMETRY_HELLO <nonce>"  ->  "DUO_TELEMETRY_HERE <port> <nonce>"   (finding us, broadcast ok)
 //   HTTP :PORT  POST /runs {device, dropped, test, runs: [{id, line}]}  ->  {acked: [ids], new, dup}
-//               GET  /status  -> {device: {lines, last, dropped}}
+//               (+ checkin: true on an arcade start with nothing to send, build: its LAN update version, waiting)
+//               GET  /status  -> {device: {lines, last_seen, last_new, last_checkin, build, ip, dropped}}
 // Stored de-duplicated by (device, id) in DIR/<device>.jsonl, one {"id","device","recv","run"} per line, plus
 // DIR/<device>.meta.json {last_seen, lines, dropped (lines the device had to throw away while it couldn't reach us)}.
 // Home network only: requests from non-private addresses are refused. Test runs are refused unless --test
@@ -50,11 +51,12 @@ async function deviceState(dev: string) {
   return { ids: seen.get(dev)!, meta: metas.get(dev)! };
 }
 
-async function takeRuns(body: any) {
+async function takeRuns(body: any, ip = "") {
   const dev = cleanDevice(body?.device);
   if (!dev) return { status: 400, json: { error: "no device" } };
   if (body?.test && !TEST) return { status: 403, json: { error: "test runs are not stored here" } };
   if (!Array.isArray(body?.runs)) return { status: 400, json: { error: "no runs" } };
+  if (body.runs.length > 1000) return { status: 413, json: { error: "too many runs in one batch" } };
   const { ids, meta } = await deviceState(dev);
   const acked: string[] = [];
   let fresh = 0, dup = 0, bad = 0;
@@ -76,6 +78,11 @@ async function takeRuns(body: any) {
   if (out) await appendFile(join(DIR, `${dev}.jsonl`), out);
   const dropped = Math.max(0, Math.floor(Number(body.dropped) || 0));
   meta.last_seen = now;
+  // Check-ins (an arcade start with nothing to send) still show the machine ran the arcade and can reach us.
+  if (body.checkin) meta.last_checkin = now;
+  if (typeof body.build === "string") meta.build = body.build.slice(0, 80);
+  if (ip) meta.ip = ip.replace(/^::ffff:/, "");
+  if (Number.isFinite(Number(body.waiting))) meta.waiting = Number(body.waiting);
   meta.lines = ids.size;
   if (fresh) meta.last_new = now;
   if (dropped) {
@@ -84,17 +91,20 @@ async function takeRuns(body: any) {
     log(`${dev}: WARNING the device dropped ${dropped} unsent RUN lines (outbox full while it couldn't reach us; ${meta.dropped} in all)`);
   }
   await writeFile(join(DIR, `${dev}.meta.json`), JSON.stringify(meta));
-  if (fresh || dup || bad) log(`${dev}: ${fresh} new, ${dup} already here${bad ? `, ${bad} refused (bad line or id)` : ""}`);
+  if (fresh || dup || bad) log(`${dev}: ${fresh} new, ${dup} already here${bad ? `, ${bad} refused (bad line or id)` : ""} (from ${meta.ip ?? "?"})`);
+  else if (body.checkin) log(`${dev}: checked in from ${meta.ip ?? "?"} (build ${meta.build ?? "?"}, nothing to send)`);
   return { status: 200, json: { acked, new: fresh, dup, bad } };
 }
 
 async function status() {
   const out: Record<string, any> = {};
   for (const f of await readdir(DIR).catch(() => [] as string[])) {
-    if (!f.endsWith(".jsonl")) continue;
-    const dev = f.slice(0, -6);
+    // Every device that ever reached us: one with only check-ins has a .meta.json but no .jsonl yet.
+    const dev = f.endsWith(".jsonl") ? f.slice(0, -6) : f.endsWith(".meta.json") ? f.slice(0, -10) : "";
+    if (!dev || out[dev]) continue;
     const { ids, meta } = await deviceState(dev);
-    out[dev] = { lines: ids.size, last_seen: meta.last_seen || 0, last_new: meta.last_new || 0, dropped: meta.dropped || 0 };
+    out[dev] = { lines: ids.size, last_seen: meta.last_seen || 0, last_new: meta.last_new || 0, last_checkin: meta.last_checkin || 0,
+      build: meta.build || "", ip: meta.ip || "", dropped: meta.dropped || 0 };
   }
   return out;
 }
@@ -111,7 +121,7 @@ const server = Bun.serve({
     if (req.method === "POST" && url.pathname === "/runs") {
       let body: any;
       try { body = JSON.parse(await req.text()); } catch { return Response.json({ error: "bad json" }, { status: 400 }); }
-      const r = await takeRuns(body);
+      const r = await takeRuns(body, ip);
       return Response.json(r.json, { status: r.status });
     }
     return new Response("not here", { status: 404 });

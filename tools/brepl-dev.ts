@@ -222,7 +222,8 @@ export async function playstats(o: { since?: string; game?: string; recent?: num
   for (const f of await readdir(TELEMETRY_STORE).catch(() => [] as string[])) {
     if (!f.endsWith(".meta.json")) continue;
     const m = JSON.parse(await readFile(join(TELEMETRY_STORE, f), "utf8").catch(() => "{}"));
-    devices[f.slice(0, -10)] = { runs: 0, last_run: "", last_seen: m.last_seen ? new Date(m.last_seen * 1000).toISOString().slice(0, 16) : "never", dropped: m.dropped || 0 };
+    const iso = (t: number) => t ? new Date(t * 1000).toISOString().slice(0, 16) : "never";
+    devices[f.slice(0, -10)] = { runs: 0, last_run: "", last_seen: iso(m.last_seen), last_checkin: iso(m.last_checkin), build: m.build || "?", dropped: m.dropped || 0 };
   }
   const games: Record<string, any> = {};
   for (const r of runs) {
@@ -363,8 +364,23 @@ export async function debt() {
     const runs = await playRuns();
     const newest = runs.reduce((m, r) => Math.max(m, Number(r.recv) || 0, Number(r.t) || 0), 0);
     const days = Math.floor((Date.now() / 1000 - newest) / 86400);
-    if (days > 7) issues.push({ kind: "telemetry-gap", what: newest ? `no real RUN lines from any machine for ${days} days (newest ${new Date(newest * 1000).toISOString().slice(0, 10)})` : "no real RUN lines have ever reached ~/.cache/duo-arena/telemetry",
-      fix: "check duo-telemetry-recv (systemctl --user status duo-telemetry-recv; journalctl --user -u duo-telemetry-recv), that the Decks run the arcade build with core/telemetry_push.gd, and ask whether the family played at all" });
+    // Check-ins (every arcade start says hello even with nothing to send) tell "nobody played" from "can't reach us".
+    const checkins: string[] = [];
+    for (const f of await readdir(TELEMETRY_STORE).catch(() => [] as string[])) {
+      if (!f.endsWith(".meta.json") || f.startsWith("lan-test-")) continue;
+      const m = JSON.parse(await readFile(join(TELEMETRY_STORE, f), "utf8").catch(() => "{}"));
+      if (m.last_checkin && Date.now() / 1000 - m.last_checkin < 7 * 86400) checkins.push(`${f.slice(0, -10)} ${new Date(m.last_checkin * 1000).toISOString().slice(0, 10)}`);
+    }
+    // The Steam Machine's firewall must let the Decks in on 7870 (UDP hello + HTTP); firewalld's zone allowed
+    // 1024-65535 on 2026-11-11. A missing firewall-cmd (no firewalld) is fine.
+    for (const proto of ["udp", "tcp"]) {
+      const q = await sh(`command -v firewall-cmd >/dev/null || { echo yes; exit; }; firewall-cmd --query-port=7870/${proto} 2>&1`);
+      if (!/^yes/.test(String(q.out ?? "").trim())) issues.push({ kind: "telemetry-firewall", what: `the Steam Machine's firewall doesn't allow ${proto} 7870 (${String(q.out ?? "").trim().slice(0, 80)}): Decks can't push RUN lines`,
+        fix: `ask Simon to run: sudo firewall-cmd --permanent --add-port=7870/${proto} && sudo firewall-cmd --reload` });
+    }
+    const seen = checkins.length ? `; machines that started the arcade and reached the Steam Machine this week: ${checkins.join(", ")} (so they can send; no rounds finished)` : "; no machine has started the arcade and checked in this week either";
+    if (days > 7) issues.push({ kind: "telemetry-gap", what: (newest ? `no real RUN lines from any machine for ${days} days (newest ${new Date(newest * 1000).toISOString().slice(0, 10)})` : "no real RUN lines have ever reached ~/.cache/duo-arena/telemetry") + seen,
+      fix: "check duo-telemetry-recv (systemctl --user status duo-telemetry-recv; journalctl --user -u duo-telemetry-recv); prove a Deck's path with tools/telemetry-lan-test DECK (test receiver, refuses while Godot runs there); then ask whether the family played at all" });
     for (const f of await readdir(TELEMETRY_STORE).catch(() => [] as string[])) {
       if (!f.endsWith(".meta.json")) continue;
       const m = JSON.parse(await readFile(join(TELEMETRY_STORE, f), "utf8").catch(() => "{}"));
@@ -382,12 +398,17 @@ export async function debt() {
   // Devices that missed deploys for days (marker mtime = the FIRST missed deploy; duo-catch-up retries every 2 min,
   // so an old marker means the device has been off or unreachable that long: it needs a person to switch it on).
   const now = Date.now(), DAY = 86400_000;
+  // An ONLINE device's old marker isn't "device offline": the job itself keeps failing or waits on purpose (e.g. a
+  // Steam shortcut rename that only runs while Steam is closed). family-link knows which tunnels are up.
+  const linkUp = JSON.parse(await readFile(join(HOME, ".cache/family-link/link-state.json"), "utf8").catch(() => "{}"));
+  const aliasOf = (f: string) => Object.keys(linkUp).filter(a => f === a || f.startsWith(a + "-")).sort((a, b) => b.length - a.length)[0];
   for (const dir of [join(HOME, ".cache/duo-deploy-pending"), join(HOME, ".cache/duo-pending-cmds")])
     for (const f of await readdir(dir).catch(() => [] as string[])) {
       const st = await stat(join(dir, f)).catch(() => null);
       if (!st || now - st.mtimeMs < 3 * DAY) continue;
-      issues.push({ kind: "device-behind", what: `${dir.endsWith("cmds") ? "one-off job" : "deploy"} ${f} waiting ${Math.floor((now - st.mtimeMs) / DAY)} days (device offline)`,
-        fix: "switch the device on with Developer Mode (duo-catch-up delivers it within 2 min); delete the marker if the device is gone" });
+      const up = linkUp[aliasOf(f) ?? ""]?.up === true;
+      issues.push({ kind: "device-behind", what: `${dir.endsWith("cmds") ? "one-off job" : "deploy"} ${f} waiting ${Math.floor((now - st.mtimeMs) / DAY)} days (${up ? "device ONLINE: the job keeps failing or waits for its moment" : "device offline"})`,
+        fix: up ? `read the job/marker and run it by hand to see why it fails (one-off jobs may wait on purpose, e.g. for Steam to close); journalctl --user -u duo-catch-up` : "switch the device on with Developer Mode (duo-catch-up delivers it within 2 min); delete the marker if the device is gone" });
     }
   // Test leftovers in /tmp (multibot prunes its own runs after 2 days; this catches anything else that piles up).
   const tmpOld = (await sh("find /tmp -maxdepth 1 \\( -name 'multibot-*' -o -name 'leak-*.log' -o -name 'godot-test-*' \\) -mmin +4320 | wc -l")).out;
@@ -451,6 +472,18 @@ export async function installTools(since: string) {
       try { await (globalThis as any).writeModule(dest, await readFile(src, "utf8")); } catch (e) { done.push(`${rel}: NOT installed (${String(e).slice(0, 200)})`); continue; }
     } else await sh(`cp --preserve=mode ${JSON.stringify(src)} ${JSON.stringify(dest)}`);
     done.push(`${rel} -> ${dest.replace(HOME, "~")}`);
+    // A running user service still executes the OLD copy (2026-11-11: duo-telemetry-recv): restart every active
+    // service whose unit runs this file.
+    if (dest.startsWith(BIN)) {
+      const name = dest.slice(BIN.length + 1);
+      const units = (await sh(`grep -l -E "(%h|\\$HOME|${HOME})/\\.local/bin/${name}( |$)" ~/.config/systemd/user/*.service 2>/dev/null`)).out.split("\n").filter(Boolean);
+      for (const u of units) {
+        const unit = u.split("/").pop()!;
+        if ((await sh(`systemctl --user is-active ${unit}`)).out !== "active") continue;
+        const r = await sh(`systemctl --user restart ${unit} && systemctl --user is-active ${unit}`);
+        done.push(`restarted ${unit}: ${r.out}`);
+      }
+    }
   }
   return done;
 }
