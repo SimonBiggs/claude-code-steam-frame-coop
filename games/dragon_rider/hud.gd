@@ -176,7 +176,7 @@ func _has_keyboard() -> bool:
 
 
 func _playing() -> bool:
-	return not get_tree().paused and main.phase in ["practice", "intro", "fly"] \
+	return not get_tree().paused and main.phase in ["practice", "pick", "intro", "fly"] \
 		and (main.net.mode != "client" or main.phase != "wait")
 
 

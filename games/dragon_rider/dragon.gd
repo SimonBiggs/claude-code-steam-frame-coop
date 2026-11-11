@@ -29,6 +29,8 @@ var flap_cd := 0.0
 var velocity := Vector3.ZERO
 var lit: Array[bool] = [true, true, true, true]
 var cruise := BASE_SPEED   # simple mode: main sets a slower, gentler cruising speed per stage
+var flap_boost := 1.0      # ZOOM WINGS (deep.gd): a flap gives this much more speed
+var speed_cap := INF       # dizzy after a storm cloud (deep.gd): no faster than this
 var happy := 0.0           # simple mode: patted (squinty happy eyes, head lifts)
 
 var body: Node3D
@@ -133,6 +135,7 @@ func _build() -> void:
 	var smat := StandardMaterial3D.new()
 	smat.albedo_color = Color(0.95, 0.92, 0.95, 0.6)
 	smat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	smat.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 	smat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	sm.material = smat
 	smoke.mesh = sm
@@ -216,11 +219,12 @@ func fly(delta: float, inp: Vector2, flap: bool) -> void:
 	flap_cd -= delta
 	if flap and flap_cd <= 0.0:
 		flap_cd = 0.6
-		speed = minf(cruise + (MAX_SPEED - BASE_SPEED), speed + 2.4)
+		speed = minf(cruise + (MAX_SPEED - BASE_SPEED) * flap_boost, speed + 2.4 * flap_boost)
 		flap_power = 1.0
 		main.sound("flap", -6.0, randf_range(0.9, 1.1))
 		puff_smoke()
 	speed = move_toward(speed, cruise, delta * 1.4)
+	speed = minf(speed, speed_cap)
 	velocity = Basis(Vector3.UP, yaw) * Vector3.FORWARD * speed + Vector3.UP * vy
 	var p := position + velocity * delta
 	if p.y < MIN_Y:
@@ -285,6 +289,7 @@ func smoke_ring() -> void:
 	var m := StandardMaterial3D.new()
 	m.albedo_color = Color(0.95, 0.93, 0.97, 0.7)
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	r.material_override = m
 	r.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
