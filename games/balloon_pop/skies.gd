@@ -137,15 +137,7 @@ static func parade_gain(stars: int, daily: bool) -> int:
 # --- Sky themes ----------------------------------------------------------------------------------
 
 static func season_of(date: String) -> String:
-	var parts := date.split("-")
-	var month := int(parts[1]) if parts.size() >= 2 else 6
-	if month == 12 or month <= 2:
-		return "winter"
-	if month <= 5:
-		return "spring"
-	if month <= 8:
-		return "summer"
-	return "autumn"
+	return Seeded.season(date)  # (core/seeded.gd: one season table for every game)
 
 
 static func time_of(hour: int) -> String:

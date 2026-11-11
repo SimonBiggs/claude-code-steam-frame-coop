@@ -31,6 +31,20 @@ static func today() -> String:
 	return Time.get_date_string_from_system()
 
 
+## The season on a date ("YYYY-MM-DD", "" = today): winter (Dec-Feb), spring, summer, autumn. One place for every
+## game's seasonal look (Balloon Pop skies, Marble Maze worlds, Sheep Round-Up weather, Treasure Dig, Whack-a-Mole).
+static func season(date: String = "") -> String:
+	var parts := (date if date != "" else today()).split("-")
+	var month := int(parts[1]) if parts.size() >= 2 else 6
+	if month == 12 or month <= 2:
+		return "winter"
+	if month <= 5:
+		return "spring"
+	if month <= 8:
+		return "summer"
+	return "autumn"
+
+
 ## "daily:YYYY-MM-DD": a save key for best-of-the-day records.
 static func daily_key(date: String = "") -> String:
 	return "daily:" + (date if date != "" else today())
