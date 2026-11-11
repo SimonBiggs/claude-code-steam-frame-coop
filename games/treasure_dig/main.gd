@@ -6,9 +6,12 @@ extends Node3D
 ## treasure and throw it into the chest, splash the sea, wobble the palms and tickle the diggers.
 ## 2-minute rounds; then the chest opens and everyone sees the haul. Then it starts again by itself.
 ## STORY (story.gd): CAPTAIN PEG's lost treasures. Every round is a new island from a seed (islandgen.gd);
-## the team picks which kind from two signposts (dig at one / poke it). Three MAP PIECES are buried among
+## the team picks which kind on the pick orbs (run into one / touch it). Three MAP PIECES are buried among
 ## the coins; bank all three and a big red X appears: dig there for Peg's RELIC (+10), which then stays on
 ## a pedestal round the island for good (saved). TODAY'S ISLAND first each day. One RUN line per round.
+## SECOND PASS (deep.gd): GENTLE / BRAVE / HARD once a session, the island and CAPTAIN PEG'S TOOLS before every island,
+## all on the shared pick orbs (picks.gd); tides, falling coconuts and Polly's golden gems told by warning rings first
+## (events.gd); the island dresses for the season; every treasure banked goes into PEG'S MUSEUM for good (saved).
 ##
 ## The island lives under `beach` (scaled by S), so the giant can reach it from the sea. All game
 ## positions below are beach-local unless they say "global".
@@ -37,8 +40,12 @@ const IslandGen := preload("res://games/treasure_dig/islandgen.gd")
 const Seeded := preload("res://core/seeded.gd")
 const Telemetry := preload("res://core/telemetry.gd")
 const StoryCard := preload("res://core/story_card.gd")
-const PICK_WAIT := 12.0  ## nobody picks an island: the first signpost
-const SIGN_POS: Array[Vector3] = [Vector3(-2.8, 0.0, 3.4), Vector3(2.8, 0.0, 3.4)]
+const Deep := preload("res://games/treasure_dig/deep.gd")
+const Picks := preload("res://games/treasure_dig/picks.gd")
+const Events := preload("res://games/treasure_dig/events.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
+const WarnRingsScript := preload("res://core/warn_rings.gd")
+const MUSEUM_AT := Vector3(-12.5, 0.0, -5.0)  ## Peg's museum islet (beach units, left of the island as the giant sees it)
 
 const GAME_ID := "treasure_dig"
 const S := 0.25  ## beach scale: 1 beach unit = 25 cm for the giant
@@ -63,11 +70,23 @@ var fresh_save := false  ## bots: a brand-new collection
 var island := {}  # islandgen.gd island being played
 var deck_i := 0
 var maps_found := 0
-var pick_t := 0.0
 var daily_due := false
 var run := {}
 var decor: Node3D  # every machine: this island's sand, palms and rocks
-var signs: Array[Node3D] = []
+# Second pass (deep.gd): the session's mode, this island's tool, the season, warned events, the museum.
+var picks: Picks
+var events: Events
+var mode := ""  # host: "" until the team picks (once a session)
+var gift := ""  # this island's tool (net state "gift")
+var season := ""
+var pending := {}  # host: the next island's desc (once picked)
+var stunned := {}  # slot -> seconds a bonked digger still sits (every machine, for its own diggers)
+var round_t := 0.0  # host: seconds into this island
+var detect_t := 0.0
+var event_scale := 1.0  # bots: more events in short rounds
+var pick_wait_scale := 1.0  # bots: shorter waits on the pick orbs
+var museum_node: Node3D
+var deco_node: Node3D
 var x_node: Node3D
 var shelf: Node3D
 var map_icons := {}  # hud slot -> [3 icons]
@@ -128,7 +147,8 @@ var hand_was_wet: Array[bool] = [false, false]
 var touch_cd := {}  # String -> seconds
 var haul: Array[int] = [0, 0, 0, 0, 0]
 var found_total := 0  # bots / stats over all rounds
-var stats := {"sparkles": 0, "giant_digs": 0, "giant_banks": 0, "throws": 0, "tv_digs": 0}  # bots
+var stats := {"sparkles": 0, "giant_digs": 0, "giant_banks": 0, "throws": 0, "tv_digs": 0, "bonks": 0, "tide_coins": 0,
+	"gold": 0, "detector": 0}  # bots
 
 
 func _ready() -> void:
@@ -140,6 +160,8 @@ func _ready() -> void:
 	net.main = self
 	add_child(net)
 	net.state_changed.connect(_on_state_changed)
+	net.sticky_event("orbs")  # a machine joining mid-pick sees the pick orbs
+	season = OS.get_environment("TD_SEASON") if OS.has_environment("TD_SEASON") else Seeded.season()
 	party = Party.new()
 	party.name = "Party"
 	add_child(party)
@@ -207,6 +229,8 @@ func _setup(mode: String) -> void:
 		net.state_set("best", int(save.data["best"]))
 		daily_due = not (save.data.daily as Dictionary).has(Seeded.today()) and not OS.has_environment("BOT_NO_DAILY")
 		net.state_set("relics", (save.data.relics as Array).duplicate())
+		net.state_set("season", season)
+		net.state_set("museum", (save.data.museum as Dictionary).duplicate())
 		_start_round()
 	if vr_rig != null:
 		hints.hint("vr_scope", "Point and pull the trigger!", {"to": "vr", "icon": "star"})
@@ -260,12 +284,12 @@ func _build_world() -> void:
 	chest.add_child(chest_lid)
 	var lid := MeshKit.instance(Props.chest_lid(), false)
 	chest_lid.add_child(lid)
-	for k in 2:  # the island signposts (pick phase)
-		var sg := Node3D.new()
-		sg.position = SIGN_POS[k]
-		sg.visible = false
-		beach.add_child(sg)
-		signs.append(sg)
+	picks = Picks.new()
+	picks.main = self
+	add_child(picks)
+	events = Events.new()
+	events.main = self
+	add_child(events)
 	x_node = MeshKit.instance(Props.x_mark(), false)
 	x_node.visible = false
 	beach.add_child(x_node)
@@ -443,12 +467,15 @@ func _move_local_players(delta: float) -> void:
 	var send := send_t <= 0.0
 	if send:
 		send_t = 1.0 / 30.0
-	var playing := String(net.state_get("phase", "play")) in ["play", "pick"]
+	var playing := String(net.state_get("phase", "play")) in ["play", "orbs"]
 	for slot in party.local_slots():
 		if not avatars.has(slot):
 			continue
 		var a: Node3D = avatars[slot]
-		var mv := party.stick(slot, "move") if playing else Vector2.ZERO
+		var down := float(stunned.get(slot, 0.0)) > 0.0  # bonked: sits a moment (deep.gd stun)
+		if down:
+			stunned[slot] = float(stunned[slot]) - delta
+		var mv := party.stick(slot, "move") if playing and not down else Vector2.ZERO
 		if mv != Vector2.ZERO:
 			var cam := split.active_camera(slot)
 			var f := -cam.global_basis.z
@@ -466,7 +493,7 @@ func _move_local_players(delta: float) -> void:
 			a.position = p
 			Creatures.anim(a).face(dir)
 		dig_cd[slot] = maxf(0.0, float(dig_cd.get(slot, 0.0)) - delta)
-		if playing and party.just_pressed(slot, "accept") and float(dig_cd[slot]) <= 0.0:
+		if playing and not down and party.just_pressed(slot, "accept") and float(dig_cd[slot]) <= 0.0:
 			dig_cd[slot] = 0.4
 			var fwd := a.global_basis.z
 			fwd.y = 0.0
@@ -526,9 +553,10 @@ func _make_vr_avatar() -> void:
 func on_request(slot: int, action: String, args: Array) -> void:
 	match action:
 		"dig":
-			if String(net.state_get("phase", "")) in ["play", "pick"] and not args.is_empty():
+			if String(net.state_get("phase", "")) in ["play", "orbs"] and not args.is_empty():
 				var p: Vector3 = args[0]
-				_dig(Vector3(p.x, 0.0, p.z).limit_length(R + 0.5), slot, DIG_RADIUS, true)
+				var rad := DIG_RADIUS * (Deep.SPADE_X if gift == "spade" else 1.0)  # BIG SPADE digs wider
+				_dig(Vector3(p.x, 0.0, p.z).limit_length(R + 0.5), slot, rad, true)
 		"next_round":
 			if String(net.state_get("phase", "")) == "results" and results_t > 2.0:
 				_start_round()
@@ -567,6 +595,14 @@ func _on_state_changed(key: String, value: Variant) -> void:
 	match key:
 		"score", "best", "maps":
 			_refresh_hud()
+		"gift":
+			gift = String(value)
+		"museum":
+			_build_museum(value if value is Dictionary else {})
+		"season":
+			season = String(value)
+			if not island.is_empty():
+				apply_island(island)
 		"island":  # the TV machines build the host's seeded island
 			if net.mode == "client" and value is Dictionary and not (value as Dictionary).is_empty():
 				apply_island(IslandGen.generate(int(value.seed), value))
@@ -577,8 +613,6 @@ func _on_state_changed(key: String, value: Variant) -> void:
 				sky.set_preset(String(value), 3.0)
 		"relics":
 			_build_shelf(value if value is Array else [])
-		"offers":
-			_show_signs(value if value is Array else [])
 		"time":
 			for slot in timers:
 				var t: HudKit.TimerPill = timers[slot]
@@ -614,20 +648,82 @@ func _start_round() -> void:
 	net.state_set("x", false)
 	net.state_set("maps", 0)
 	net.state_set("round", int(net.state_get("round", 0)) + 1)
+	events.reset([])
+	events.clear()
+	gift = ""
+	net.state_set("gift", "")
+	pending = {}
 	if daily_due:
 		daily_due = false
 		var dl := Story.daily()
-		_begin_island({"seed": int(dl[0]), "kind": String(dl[1]), "level": 3, "daily": true})
+		pending = {"seed": int(dl[0]), "kind": String(dl[1]), "level": 3, "daily": true}
 	elif int(save.data.islands) == 0:
-		_begin_island({"seed": Seeded.derive(int(save.data.world), "isle0"), "kind": "sunny", "level": 0})
-	else:
-		net.state_set("offers", Story.offers(int(save.data.world), int(save.data.islands), save.data.visits))
-		pick_t = 0.0
-		net.state_set("phase", "pick")
+		pending = {"seed": Seeded.derive(int(save.data.world), "isle0"), "kind": "sunny", "level": 0}
+	_next_pick()
+
+
+## Host: the picks before an island, one after another on the pick orbs (picks.gd): the mode once a session,
+## which island (unless it's the first ever or TODAY'S ISLAND), then Peg's tool. Then the island starts.
+func _next_pick() -> void:
+	var toward := beach.to_local(vr_rig.head_position()) if vr_rig != null else Vector3(0.0, 0.0, 9.0)
+	var row := picks.row_at(toward)
+	net.state_set("phase", "orbs")
+	if mode == "":
+		var ids := PickOrbs.mode_ids(Deep.mode_of(String(save.data.get("mode", "brave"))))
+		var entries: Array = []
+		for id in ids:
+			var md := PickOrbs.mode(String(id))
+			entries.append({"id": id, "name": PickOrbs.mode_name(String(id)), "pic": String(md.pic), "color": PickOrbs.mode_color(String(id))})
+		_story("Easy or hard?", "pirate")
+		picks.begin("mode", entries, ids, row, _on_picked)
+		return
+	if pending.is_empty():
+		var offers := Story.offers(int(save.data.world), int(save.data.islands), save.data.visits)
+		var entries2: Array = []
+		for id in offers:
+			var isl := Story.island(Story.island_index(String(id)))
+			entries2.append({"id": id, "name": String(isl.name), "pic": String(isl.pic), "color": (isl.sand as Color).lerp(isl.rim, 0.3)})
 		_story("Which island?", "pirate")
+		picks.begin("island", entries2, offers, row, _on_picked)
+		return
+	if gift == "":
+		var cases := Deep.cases(save.data.museum)
+		var ch := Deep.gift_choices(cases, String(save.data.get("gift", "")), Seeded.derive(int(save.data.world), "gift%d" % int(save.data.islands)))
+		var entries3: Array = []
+		for id in ch:
+			var gd := Deep.gift(String(id))
+			entries3.append({"id": id, "name": String(gd.name), "pic": String(gd.pic), "color": gd.color})
+		_story("Pick a tool!", "bigspade")
+		picks.begin("gift", entries3, ch, row, _on_picked)
+		return
+	_begin_island(pending)
+
+
+## Host: an orb was taken (slot -1: nobody, the middle one).
+func _on_picked(stage: String, opt: Variant, _slot: int) -> void:
+	match stage:
+		"mode":
+			mode = Deep.mode_of(String(opt))
+			save.data.mode = mode
+			save.mark_dirty()
+			net.state_set("mode", mode)
+			_story(String(PickOrbs.MODE_LINES.get(mode, "Let's dig!")), String(PickOrbs.mode(mode).pic))
+		"island":
+			pending = {"seed": Seeded.derive(int(save.data.world), "isle%d" % int(save.data.islands)), "kind": String(opt),
+				"level": int(save.data.islands)}
+		"gift":
+			gift = String(opt)
+			save.data.gift = gift
+			save.mark_dirty()
+			net.state_set("gift", gift)
+			_story(String(Deep.gift(gift).line), String(Deep.gift(gift).pic))
+	_next_pick()
 
 
 func _end_round() -> void:
+	events.reset([])
+	events.clear()
+	fx("events_clear", [])
 	for id in items.keys():
 		var it: Dictionary = items[id]
 		if int(it["carrier"]) != GROUND:
@@ -743,11 +839,14 @@ func _process(delta: float) -> void:
 		if results_t > 16.0:
 			_start_round()
 		return
-	if String(net.state_get("phase", "")) == "pick":
-		pick_t += delta
-		if pick_t > PICK_WAIT:
-			_pick(0)
+	if String(net.state_get("phase", "")) == "orbs":
+		picks.tick(delta)
 		return
+	round_t += delta
+	for e in events.tick(round_t, float(Deep.mode_data(mode).warn)):
+		_announce(e)
+	if gift == "detector":
+		_tick_detector(delta)
 	time_left -= delta
 	if int(ceil(time_left)) != int(net.state_get("time", 0)):
 		net.state_set("time", maxi(0, int(ceil(time_left))))
@@ -767,7 +866,7 @@ func _tick_sparkles(delta: float) -> void:
 			sparkles.remove_at(i)
 	auto_sparkle_t -= delta
 	if auto_sparkle_t <= 0.0:
-		auto_sparkle_t = 16.0 if vr_rig != null else 5.0
+		auto_sparkle_t = 16.0 if vr_rig != null else float(Deep.mode_data(mode).auto)  # (deep.gd: GENTLE shows more)
 		if sparkles.size() < 2 and not hidden.is_empty():
 			var h: Array = hidden[randi() % hidden.size()]
 			_add_sparkle(h[0], -1)
@@ -806,7 +905,11 @@ func _bury() -> void:
 			pos = cand
 			break
 	deck_i += 1
+	if kind == Story.KIND_BOOT and gift == "lucky":
+		kind = Story.KIND_COIN  # LUCKY CHARM: no more silly boots
 	hidden.append([pos, kind])
+	if kind == Story.KIND_MAP and gift == "map":
+		_add_sparkle(pos, -1)  # PEG'S MAP: the map pieces show themselves
 
 
 func _hidden_near(pos: Vector3, radius: float) -> int:
@@ -852,52 +955,38 @@ func apply_island(g: Dictionary) -> void:
 		holder.add_child(MeshKit.instance(palm_mesh, false))
 		decor.add_child(holder)
 		palms.append(holder)  # (each its own node so it can wobble when touched)
+	# The season's dress (deep.gd SEASONS): flowers, sun hats, autumn leaves or snow.
+	var deco := String(Deep.season_data(season).deco)
+	deco_node = MeshKit.instance(Props.season_deco(deco, g.get("palms", [])), false)
+	deco_node.name = "Season_" + deco
+	decor.add_child(deco_node)
 
 
 ## Host: start the chosen island: from its seed, bury the first six, tell every machine.
 func _begin_island(desc: Dictionary) -> void:
 	var t0 := Time.get_ticks_usec()
+	desc = Deep.island_spec(desc, mode)
 	apply_island(IslandGen.generate(int(desc.seed), desc))
 	net.state_set("island", desc)
-	net.state_set("offers", [])
+	round_t = 0.0
+	detect_t = 0.0
+	var ev := Deep.events(Seeded.derive(int(desc.seed), "ev%d" % int(net.state_get("round", 0))), {"mode": mode,
+		"time": round_time, "season": season, "kind": String(desc.kind), "rocks": island.get("rocks", []),
+		"extra_gold": Deep.PARROT_GOLD if gift == "parrot" else 0, "scale": event_scale})
+	events.reset(ev)
 	deck_i = 0
 	maps_found = 0
 	hidden.clear()
 	for i in HIDDEN:
 		_bury()
-	run = {"gen_ms": snappedf((Time.get_ticks_usec() - t0) / 1000.0, 0.01), "daily": bool(desc.get("daily", false)), "t0": Time.get_ticks_msec()}
+	run = {"gen_ms": snappedf((Time.get_ticks_usec() - t0) / 1000.0, 0.01), "daily": bool(desc.get("daily", false)), "t0": Time.get_ticks_msec(),
+		"game_mode": mode, "gift": gift, "season": season, "events": ev.size()}
 	var isl: Dictionary = Story.island(Story.island_index(String(desc.kind)))
 	net.state_set("sky", String(isl.sky))
 	net.state_set("phase", "play")
 	_story("TODAY!" if bool(desc.get("daily", false)) else String(isl.line), String(isl.pic))
-	print("Treasure Dig island: %s seed %d level %d%s (%.1f ms)" % [String(desc.kind), int(desc.seed), int(desc.get("level", 0)),
-		" (today's)" if bool(desc.get("daily", false)) else "", float(run.gen_ms)])
-
-
-## Host: a signpost was dug at / poked (k = 0 / 1): that island it is.
-func _pick(k: int) -> void:
-	var offers: Array = net.state_get("offers", [])
-	if String(net.state_get("phase", "")) != "pick" or offers.is_empty():
-		return
-	var id := String(offers[clampi(k, 0, offers.size() - 1)])
-	fx("dig", [SIGN_POS[clampi(k, 0, 1)], -1, -1])
-	_begin_island({"seed": Seeded.derive(int(save.data.world), "isle%d" % int(save.data.islands)), "kind": id,
-		"level": int(save.data.islands)})
-
-
-## Every machine: the two signposts of the pick phase (each in its island's colours).
-func _show_signs(offers: Array) -> void:
-	for k in signs.size():
-		var sg: Node3D = signs[k]
-		for c in sg.get_children():
-			c.queue_free()
-		sg.visible = k < offers.size()
-		if k < offers.size():
-			var isl: Dictionary = Story.island(Story.island_index(String(offers[k])))
-			var accent := Color(0.3, 0.7, 0.3) if String(isl.id) in ["sunny", "jungle"] else (Color(0.85, 0.95, 1.0) if String(isl.id) == "ice" else Color(1.0, 0.4, 0.15))
-			sg.add_child(MeshKit.instance(Props.signpost(isl.sand, isl.rim, accent), false))
-			sg.scale = Vector3.ONE * 0.2
-			sg.create_tween().tween_property(sg, "scale", Vector3.ONE, 0.4).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	print("Treasure Dig island: %s seed %d level %d%s (%.1f ms), %s, tool %s, %s, %d events" % [String(desc.kind), int(desc.seed),
+		int(desc.get("level", 0)), " (today's)" if bool(desc.get("daily", false)) else "", float(run.gen_ms), mode, gift, season, ev.size()])
 
 
 ## Every machine: the big X over the relic (false = none).
@@ -948,7 +1037,9 @@ func _telemetry(end: String, score: int) -> void:
 		"kind": String(island.get("kind", "")), "seed": int(island.get("seed", 0)), "level": int(island.get("level", 0)),
 		"score": score, "coins": haul[0], "gems": haul[1], "boots": haul[2], "maps": maps_found,
 		"relic_found": haul[Story.KIND_RELIC] > 0, "dug": deck_i - HIDDEN, "secs": int((Time.get_ticks_msec() - int(run.get("t0", 0))) / 1000),
-		"relics": (save.data.relics as Array).size(), "islands": int(save.data.islands)}, true)
+		"relics": (save.data.relics as Array).size(), "islands": int(save.data.islands), "bonks": int(run.get("bonks", 0)),
+		"tide_coins": int(run.get("tide_coins", 0)), "gold": int(run.get("gold", 0)), "museum": Deep.museum_total(save.data.museum),
+		"cases": Deep.cases(save.data.museum)}, true)
 	Telemetry.run(GAME_ID, info)
 	run = {}
 
@@ -966,11 +1057,7 @@ func _exit_tree() -> void:
 
 ## Host: someone dug at `pos`. A TV digger carries what they find; the giant's poke makes it pop out.
 func _dig(pos: Vector3, by: int, radius: float, carry: bool, toward: Vector3 = Vector3.INF) -> void:
-	if String(net.state_get("phase", "")) == "pick":
-		for k in SIGN_POS.size():
-			if Vector2(pos.x - SIGN_POS[k].x, pos.z - SIGN_POS[k].z).length() < maxf(radius, 1.0) + 0.9:
-				_pick(k)
-				return
+	if String(net.state_get("phase", "")) == "orbs":  # (the pick orbs are up: just sand)
 		fx("dig", [pos, -1, by])
 		return
 	var i := _hidden_near(pos, radius)
@@ -1094,6 +1181,7 @@ func _bank(id: int, by: int) -> void:
 		awards.add(by, "score", v)
 	net.state_set("score", int(net.state_get("score", 0)) + v)
 	fx("bank", [pos, kind, by, id])
+	_to_museum(kind, bool(it.get("golden", false)))
 	if kind == Story.KIND_MAP:
 		maps_found += 1
 		net.state_set("maps", maps_found)
@@ -1113,6 +1201,114 @@ func _bank(id: int, by: int) -> void:
 		run["relic"] = rid
 		net.state_set("relics", rl.duplicate())
 		_story("My %s!" % String(Story.RELICS[rid][0]), "pirate")
+
+
+# --- Second pass: events, tools, the museum (deep.gd) ----------------------------------------------------
+
+## Host: an event's warning starts now: every machine draws its tell (events.gd).
+func _announce(e: Array) -> void:
+	var look := Deep.drop_kind(String(island.get("kind", "sunny")), season)
+	fx("event", [String(e[1]), e[2], float(Deep.mode_data(mode).warn), look])
+	match String(e[1]):
+		"tide":
+			_story("The tide!", "tidewave")
+		"drop":
+			hints.hint("drop_tv", "Look out!", {"to": "tv", "icon": "warning"})
+		"gold":
+			_story("Polly's gold!", "goldgem")
+
+
+## Host: an event happened (events.gd, when its warning ran out).
+func on_event_hit(kind: String, data: Variant) -> void:
+	if String(net.state_get("phase", "")) != "play":
+		return
+	match kind:
+		"tide":
+			var band := Deep.tide_band(float(data))
+			var sz: Vector2 = band[2]
+			for slot in avatars:
+				var a: Node3D = avatars[slot]
+				if WarnRingsScript.inside("line", band[0], band[1], sz, a.position, 0.2):
+					_bonk(int(slot), (band[1] as Vector3) * 1.5)
+			for c in Deep.tide_coins(float(data), mode, int(island.get("seed", 0)) + int(round_t * 10.0)):
+				_make_item(-1, Story.KIND_COIN, c)
+				run["tide_coins"] = int(run.get("tide_coins", 0)) + 1
+				stats["tide_coins"] += 1
+		"drop":
+			for p in data:
+				for slot in avatars:
+					var a: Node3D = avatars[slot]
+					if Vector2(a.position.x - (p as Vector3).x, a.position.z - (p as Vector3).z).length() < Deep.DROP_R + 0.2:
+						var away := Vector3(a.position.x - (p as Vector3).x, 0.0, a.position.z - (p as Vector3).z)
+						_bonk(int(slot), (away.normalized() if away.length() > 0.05 else Vector3.BACK) * 1.2)
+		"gold":
+			var id := _make_item(-1, Story.KIND_GEM, data)
+			items[id]["golden"] = true
+			run["gold"] = int(run.get("gold", 0)) + 1
+			stats["gold"] += 1
+
+
+## Host: a digger knocked over (GENTLE: only a little push; BRAVE / HARD: sits a moment and drops what they carry).
+func _bonk(slot: int, push: Vector3) -> void:
+	var md := Deep.mode_data(mode)
+	if bool(md.drop):
+		_drop_carried(slot)
+	run["bonks"] = int(run.get("bonks", 0)) + 1
+	stats["bonks"] += 1
+	fx("bonk", [slot, float(md.stun), push])
+
+
+## Host: the DETECTOR beeps - buried treasure near a digger (or under the giant's telescope) sparkles.
+func _tick_detector(delta: float) -> void:
+	detect_t -= delta
+	if detect_t > 0.0:
+		return
+	detect_t = Deep.DETECT_EVERY
+	for slot in avatars:
+		var i := _hidden_near((avatars[slot] as Node3D).position, Deep.DETECT_R)
+		if i >= 0:
+			_add_sparkle(hidden[i][0], -1)
+			stats["detector"] += 1
+			_sound_at("ui_notify", (avatars[slot] as Node3D).position, -6.0, 1.6)
+			return
+
+
+## Host: a banked treasure goes into Peg's museum for good (deep.gd MUSEUM_KINDS); a new case now and then.
+func _to_museum(kind: int, golden: bool) -> void:
+	var key: String = "golden" if golden else (["coins", "gems", "boots", "maps", ""][kind] if kind < 5 else "")
+	if key == "":
+		return
+	var m: Dictionary = save.data.museum
+	var before := Deep.cases(m)
+	m[key] = int(m.get(key, 0)) + 1
+	save.mark_dirty()
+	if Deep.cases(m) != before:
+		net.state_set("museum", m.duplicate())
+		_story("Museum: %d cases!" % Deep.cases(m), "museum")
+
+
+## Every machine: Peg's museum islet with its cases (one more every Deep.CASE_EVERY treasures).
+func _build_museum(m: Dictionary) -> void:
+	if museum_node != null and is_instance_valid(museum_node):
+		museum_node.queue_free()
+	var n := Deep.cases(m)
+	var kinds: Array = []
+	for i in n:
+		kinds.append(Deep.case_kind(i))
+	museum_node = MeshKit.instance(Props.museum(n, kinds), false)
+	museum_node.name = "Museum"
+	museum_node.position = MUSEUM_AT
+	museum_node.rotation.y = 0.6  # its cases turned towards the island and the giant
+	beach.add_child(museum_node)
+
+
+## A burst of bits at a beach-local spot (events.gd, picks.gd).
+func burst_at(local: Vector3, col: Color, amount: int = 20) -> void:
+	Props.burst(beach, local + Vector3.UP * 0.3, col, amount, 7.0, 0.2, 1.5)
+
+
+func sound(sound_name: String, db: float = 0.0, pitch: float = 1.0) -> void:
+	sfx.play(sound_name, db, pitch)
 
 
 # --- The giant (host / local with a VR rig) -----------------------------------------------------
@@ -1257,6 +1453,29 @@ func fx(kind: String, args: Array) -> void:
 
 func _play_fx(fx_kind: String, args: Array) -> void:
 	match fx_kind:
+		"orbs":  # the pick orbs (picks.gd; sticky: a machine joining mid-pick sees them)
+			if net.mode == "client":
+				picks.show_row(String(args[0]), args[1], args[2] if args.size() > 2 else [])
+		"take":
+			if net.mode == "client":
+				picks.take_fx(int(args[0]), int(args[1]))
+		"event":
+			events.announce(String(args[0]), args[1], float(args[2]), String(args[3]) if args.size() > 3 else "coconut")
+		"events_clear":
+			events.clear()
+		"bonk":  # a digger knocked over by a tide / bonked by a coconut: sits a moment (their own machine counts)
+			var slot := int(args[0])
+			if avatars.has(slot):
+				var a: Node3D = avatars[slot]
+				Creatures.anim(a).play("hurt", 0.45)
+				Creatures.anim(a).squash(0.35)
+				_sound_at("boing", a.position, -2.0, 0.7)
+				Props.burst(beach, a.position + Vector3.UP * 1.8, Color(1.0, 0.95, 0.5), 10, 3.0, 0.15, 2.0, 0.0)
+				if party.is_local(slot):
+					stunned[slot] = float(args[1])
+					var push: Vector3 = args[2]
+					a.position = (a.position + push).limit_length(R)
+					party.rumble(slot, 0.6, 0.3, 0.25)
 		"dig":
 			var pos: Vector3 = args[0]
 			var found := int(args[1])

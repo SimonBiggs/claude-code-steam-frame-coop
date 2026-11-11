@@ -80,9 +80,7 @@ const CLEAR := 0.8  ## a strike keeps this far (past its edge) from the pen and 
 
 ## The season on a date ("" = today).
 static func season_for(date: String = "") -> String:
-	var d := date if date != "" else Seeded.today()
-	var parts := d.split("-")
-	return season_of_month(int(parts[1]) if parts.size() >= 2 else 6)
+	return Seeded.season(date)  # (core/seeded.gd: one season table for every game)
 
 
 static func season_of_month(month: int) -> String:

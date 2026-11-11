@@ -19,6 +19,7 @@ const KIND_SCALE := 1.9
 ## `variant` picks the gem colour (pass the item id so every machine shows the same gem).
 ## Relics are gold, brass and pearl: they wear an ink outline so they show on every sand (palette.gd).
 const RELIC_OUTLINE := Contrast.OUTLINE
+const FALL_OUTLINE := 0.08  ## (beach units) the ink rim round a falling coconut / snowball (palette.gd)
 
 
 static func item_mesh(kind: int, variant: int = -1) -> MeshInstance3D:
@@ -236,3 +237,95 @@ static func pedestal() -> ArrayMesh:
 		b.cylinder(0.32, 0.38, 0.5, MeshKit.at(Vector3(0, 0.25, 0)), Color(0.82, 0.8, 0.76), 10)
 		b.cylinder(0.36, 0.36, 0.06, MeshKit.at(Vector3(0, 0.52, 0)), Color(0.9, 0.88, 0.84), 10)
 		return b.build()) as ArrayMesh
+
+
+## Something falling in a DROP (deep.gd DROPS): a coconut, a snowball or a glowing lava rock.
+static func falling(look: String) -> ArrayMesh:
+	return ResCache.get_or_make("td_fall_%s_v1" % look, func() -> ArrayMesh:
+		var b := MeshKit.Builder.new()
+		match look:
+			"snowball":
+				b.sphere(0.55, MeshKit.at(Vector3.ZERO), Color(0.92, 0.96, 1.0), 10)
+			"lava":
+				b.sphere(0.55, MeshKit.at(Vector3.ZERO, Vector3(1.0, 0.85, 1.1)), Color(0.35, 0.2, 0.18), 8)
+				for k in 4:
+					var a := k * TAU / 4.0
+					b.sphere(0.18, MeshKit.at(Vector3(cos(a), 0.2, sin(a)) * 0.45), Color(1.0, 0.45, 0.1), 6, true)
+			_:
+				b.sphere(0.55, MeshKit.at(Vector3.ZERO), Color(0.45, 0.28, 0.15), 10)
+				for k in 3:
+					var a := k * TAU / 3.0
+					b.sphere(0.08, MeshKit.at(Vector3(cos(a) * 0.2, 0.5, sin(a) * 0.2)), Color(0.2, 0.12, 0.06), 5)
+		return b.build()) as ArrayMesh
+
+
+## Polly's golden gem as it falls: a spinning gold star.
+static func gold_star() -> ArrayMesh:
+	return ResCache.get_or_make("td_goldstar_v1", func() -> ArrayMesh:
+		var b := MeshKit.Builder.new()
+		b.star(5, 0.7, 0.3, 0.2, MeshKit.at(Vector3.ZERO), Color(1.0, 0.82, 0.2), true)
+		return b.build()) as ArrayMesh
+
+
+## The island dressed for the season (deep.gd SEASONS deco): flowers on the sand, sun hats (umbrellas), autumn
+## leaves, snow mounds. Drawn round the edge of the sand, clear of the diggers' spots (beach units).
+static func season_deco(deco: String, palms: Array) -> ArrayMesh:
+	var b := MeshKit.Builder.new()
+	match deco:
+		"flowers":
+			var cols: Array[Color] = [Color(1.0, 0.45, 0.7), Color(1.0, 0.95, 0.4), Color(0.75, 0.55, 1.0), Color(1.0, 1.0, 1.0)]
+			for k in 18:
+				var a := k * TAU / 18.0 + 0.1
+				var p := Vector3(cos(a), 0.0, sin(a)) * (6.55 + 0.25 * sin(k * 2.3))
+				b.cylinder(0.04, 0.04, 0.4, MeshKit.at(p + Vector3.UP * 0.2), Color(0.3, 0.65, 0.3), 5)
+				b.sphere(0.2, MeshKit.at(p + Vector3.UP * 0.45), cols[k % cols.size()], 6)
+				b.sphere(0.08, MeshKit.at(p + Vector3.UP * 0.55), Color(1.0, 0.85, 0.2), 5)
+		"hats":
+			var cols2: Array[Color] = [Color(1.0, 0.3, 0.3), Color(0.3, 0.6, 1.0), Color(1.0, 0.8, 0.2)]
+			for k in 3:
+				var a := k * TAU / 3.0 + 0.8
+				var p := Vector3(cos(a), 0.0, sin(a)) * 6.6
+				b.cylinder(0.05, 0.05, 2.0, MeshKit.at(p + Vector3.UP * 1.0), Color(0.95, 0.95, 0.95), 6)
+				b.cone(1.1, 0.5, MeshKit.at(p + Vector3.UP * 2.1), cols2[k], 10)
+		"leaves":
+			for p in palms:
+				for k in 6:
+					var a := k * TAU / 6.0
+					var q := (p as Vector3) + Vector3(cos(a), 0.0, sin(a)) * (0.7 + 0.2 * (k % 2))
+					b.box(Vector3(0.35, 0.03, 0.22), MeshKit.at(q + Vector3.UP * 0.03, Vector3.ONE, Vector3(0, a, 0)),
+						[Color(0.95, 0.5, 0.15), Color(0.85, 0.3, 0.12), Color(0.95, 0.75, 0.2)][k % 3])
+		"snow":
+			for p in palms:
+				b.sphere(0.6, MeshKit.at((p as Vector3) + Vector3.UP * 0.05, Vector3(1.2, 0.35, 1.2)), Color(0.96, 0.98, 1.0), 8)
+			for k in 10:
+				var a := k * TAU / 10.0 + 0.45
+				b.sphere(0.45, MeshKit.at(Vector3(cos(a), 0.0, sin(a)) * 6.7, Vector3(1.3, 0.4, 1.0)), Color(0.96, 0.98, 1.0), 8)
+	return b.build()
+
+
+## CAPTAIN PEG'S MUSEUM on its own little islet: a hut with a red flag and a row of glass cases, one more for every
+## deep.gd CASE_EVERY treasures the family banks. Each case shows a pile of what it holds (coins, gems, maps, ...).
+static func museum(n_cases: int, kinds: Array) -> ArrayMesh:
+	var b := MeshKit.Builder.new()
+	b.cylinder(4.2, 4.8, 0.8, MeshKit.at(Vector3(0, -0.4, 0)), Color(0.95, 0.86, 0.62), 24)
+	# The hut: walls, a roof and a flag.
+	b.box(Vector3(2.6, 1.8, 1.8), MeshKit.at(Vector3(0, 0.9, -2.4)), Color(0.85, 0.65, 0.42))
+	b.cone(2.1, 1.2, MeshKit.at(Vector3(0, 2.4, -2.4), Vector3(1.0, 1.0, 0.8)), Color(0.75, 0.22, 0.2), 4)
+	b.box(Vector3(0.7, 1.1, 0.05), MeshKit.at(Vector3(0, 0.55, -1.48)), Color(0.4, 0.25, 0.15))
+	b.cylinder(0.04, 0.04, 1.4, MeshKit.at(Vector3(0, 3.5, -2.4)), Color(0.5, 0.35, 0.2), 6)
+	b.box(Vector3(0.6, 0.35, 0.04), MeshKit.at(Vector3(0.3, 4.0, -2.4)), Color(0.95, 0.25, 0.2))
+	# The cases: rows of six in front of the hut.
+	for i in n_cases:
+		var row := i / 6
+		var col := i % 6
+		var p := Vector3((col - 2.5) * 1.15, 0.0, -0.6 + row * 1.0)
+		if p.length() > 3.9:
+			continue
+		b.box(Vector3(0.8, 0.5, 0.6), MeshKit.at(p + Vector3.UP * 0.25), Color(0.55, 0.38, 0.25))
+		b.box(Vector3(0.7, 0.55, 0.5), MeshKit.at(p + Vector3.UP * 0.78), Color(0.75, 0.9, 1.0))
+		var kind := String(kinds[i % kinds.size()]) if not kinds.is_empty() else "coins"
+		var c: Color = {"coins": Color(1.0, 0.8, 0.2), "gems": Color(0.4, 0.85, 1.0), "maps": Color(0.96, 0.88, 0.66),
+			"golden": Color(1.0, 0.65, 0.1), "boots": Color(0.55, 0.35, 0.2)}.get(kind, Color(1.0, 0.8, 0.2))
+		b.sphere(0.2, MeshKit.at(p + Vector3.UP * 0.62, Vector3(1.2, 0.6, 1.0)), c, 6, kind == "golden" or kind == "gems")
+		b.sphere(0.12, MeshKit.at(p + Vector3(0.12, 0.72, 0.05)), c, 6, kind == "golden" or kind == "gems")
+	return b.build()

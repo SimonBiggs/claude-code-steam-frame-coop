@@ -18,7 +18,7 @@ const SPOTS := 24  ## distinct burial spots (reused in turn: a spot is free agai
 const HIDDEN := 6  ## main.gd buries this many at a time
 
 
-## spec: {kind: island id, level: islands done}. Returns {seed, kind, level, palms: [Vector3],
+## spec: {kind: island id, level: islands done, boots_add: the mode's extra boot share (deep.gd)}. Returns {seed, kind, level, palms: [Vector3],
 ## rocks: [[Vector3, radius]], spots: [Vector3], deck: [kinds], relic: Vector3, map_at: [deck indices]}.
 static func generate(seed_value: int, spec: Dictionary) -> Dictionary:
 	var r := Seeded.rng(seed_value, "island")
@@ -54,7 +54,7 @@ static func generate(seed_value: int, spec: Dictionary) -> Dictionary:
 	# The deck: the island's mix, more boots with every island, three map pieces (deeper on later islands).
 	var dr := Seeded.rng(seed_value, "deck")
 	var mix: Array = isl.mix
-	var boots := minf(0.35, float(mix[2]) + 0.015 * level)
+	var boots := clampf(float(mix[2]) + 0.015 * level + float(spec.get("boots_add", 0.0)), 0.05, 0.35)  # (deep.gd: the mode adds / takes boots)
 	var deck: Array = []  # exact counts, shuffled (no unlucky all-boots rounds)
 	var n_boot := roundi(boots * DECK)
 	var n_gem := roundi(float(mix[1]) / (float(mix[0]) + float(mix[1])) * (DECK - n_boot))
