@@ -33,6 +33,7 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "delve-tougher", "date": "2026-11-11", "game": "dungeon_delve", "pic": "cinder", "line": "Brave is tougher now!", "try": {"DD_TRY": "brave"}},
 	{"id": "party-boards", "date": "2026-10-31", "game": "party_board", "pic": "hauntedhouse", "line": "Five party boards to visit!", "try": {"PB_BOARD": "haunted"}},
 	{"id": "party-minigames", "date": "2026-10-31", "game": "party_board", "pic": "toucan", "line": "Moles, fish, paint, towers!", "try": {"PB_MINIGAME": "fish_pond"}},
 	{"id": "party-presents", "date": "2026-10-31", "game": "party_board", "pic": "gift", "line": "Presents: 2 dice, swap, warp", "try": {"PB_BOARD": "sweet"}},

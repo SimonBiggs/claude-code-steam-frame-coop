@@ -51,6 +51,7 @@ const DIFF := {
 	"brave": {"hp": 1.25, "spd": 1.08, "dmg": 0, "checkpoints": true, "potions": 1, "auto_revive": true, "hearts": 4},
 	"heroic": {"hp": 1.7, "spd": 1.22, "dmg": 0, "checkpoints": false, "potions": 0, "auto_revive": false, "hearts": 3},
 }
+const MAX_POTS := 3  ## potions a hero can carry (balance-2: was 5; bots drank ~50 a run)
 const REVIVE_TIME := 3.5  ## seconds a friend must stand by you (a hit on the helper starts it again)
 const REVIVE_R := 1.5
 const IFRAMES := 1.2
@@ -1392,9 +1393,9 @@ func _foe_died(id: int, m: Dictionary, slot: int) -> void:
 		var k := Loot.COIN5 if gold >= 5 else Loot.COIN
 		gold -= 5 if k == Loot.COIN5 else 1
 		_spawn_pick(k, Vector3(p.x, 0.5, p.z), true)
-	if bool(m["elite"]) and randf() < 0.4 or randf() < 0.03:
+	if bool(m["elite"]) and randf() < 0.1 or randf() < 0.015:  # balance-2: elites used to drop ~35 potions a run
 		_spawn_pick(Loot.POTION, Vector3(p.x, 0.5, p.z), true)
-	elif randf() < 0.04:
+	elif randf() < 0.03:
 		_spawn_pick(Loot.HEART, Vector3(p.x, 0.5, p.z), true)
 	if boss:
 		_boss_down(kind, Vector3(p.x, 0.0, p.z))
@@ -2014,7 +2015,7 @@ func _break_pot(pid: int) -> void:
 	net.event("confetti", [p + Vector3(0, 0.3, 0), Color(0.95, 0.55, 0.35), 24])
 	main.sound_at("crash", p, -10.0, 1.6)
 	var x := randf()
-	_spawn_pick(Loot.COIN if x < 0.6 else (Loot.COIN5 if x < 0.92 else Loot.HEART), p + Vector3(0, 0.4, 0), true)
+	_spawn_pick(Loot.COIN if x < 0.75 else (Loot.COIN5 if x < 0.95 else Loot.HEART), p + Vector3(0, 0.4, 0), true)
 
 
 func _open_chest(cid: int, slot: int) -> void:
@@ -2152,7 +2153,7 @@ func _collect(slot: int, k: int, p: Vector3) -> bool:
 				st["hp"] = mini(int(st["max"]), int(st["hp"]) + 3)
 				tally["potions"] = int(tally["potions"]) + 1
 			else:
-				if int(st["pot"]) >= 5:
+				if int(st["pot"]) >= MAX_POTS:
 					return false
 				st["pot"] = int(st["pot"]) + 1
 			main.sound_at("potion", p, -4.0)

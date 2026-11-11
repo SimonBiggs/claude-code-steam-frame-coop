@@ -23,4 +23,5 @@ mkdir -p ~/GodotProjects/duo-arena/.dev && printf '%s' "$*" > ~/GodotProjects/du
 	echo "say_audio_start $(date +%s.%N | cut -c1-13) | ${*:0:40}" >> $TL
 	[ -n "$FRAME_SAY_TV" ] && pw-play --volume 0.8 "$wav" 2>/dev/null
 	wait; rm -f "$wav"
+	printf '%s\t%s\n' "$(date +%s)" "$*" >> ~/.claude/said.log  # end line for saidecho
 ) >/dev/null 2>&1 &
