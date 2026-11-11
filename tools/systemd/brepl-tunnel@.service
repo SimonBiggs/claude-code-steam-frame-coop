@@ -1,11 +1,16 @@
 [Unit]
 Description=brepl peer link to %i over SSH (both REPL inboxes)
 After=brepl.service
+# Never give up: a Deck can be asleep for days. brepl-tunnel waits quietly in-process while %i is unreachable,
+# so restarts only happen when a live link drops (Deck went to sleep, wifi blip).
+StartLimitIntervalSec=0
 
 [Service]
 ExecStart=%h/.local/bin/brepl-tunnel %i
+ExecStopPost=/bin/rm -f %h/.cache/brepl/peer-%i.sock
 Restart=always
-RestartSec=20
+RestartSec=10
+Nice=10
 
 [Install]
 WantedBy=default.target

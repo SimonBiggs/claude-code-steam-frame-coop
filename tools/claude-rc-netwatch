@@ -8,6 +8,7 @@ while sleep 10; do
       echo "network back online - restarting claude-rc"
       sleep 5
       systemctl --user restart claude-rc.service
+      ~/.local/bin/family-link kick >/dev/null 2>&1  # waiting brepl-tunnel@<deck>s probe now
     fi
     was_online=1
   else

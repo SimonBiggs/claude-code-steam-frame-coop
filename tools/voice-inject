@@ -25,6 +25,12 @@ if sys.argv[1:] == ["--here"]:
     print("voice requests will go to pane", os.environ["TMUX_PANE"])
     sys.exit(0)
 
+# The Minecraft chat session (mc-claude, MinecraftKit) must never take the voice feed from the main session (2026-11-01:
+# a test chat session did, via the user-level "re-arm your monitors" instructions).
+if os.environ.get("MC_CHAT_SESSION"):
+    print("voice-inject: this is the Minecraft chat session (MC_CHAT_SESSION): the voice feed belongs to the main "
+          "session; not starting", flush=True)
+    sys.exit(1)
 # Only ONE Claude session may receive the voice feed (Simon, 2026-10-17): a second copy exits at once.
 import fcntl
 _lock = open(os.path.expanduser("~/.claude/voice-inject.lock"), "w")
