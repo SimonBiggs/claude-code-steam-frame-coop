@@ -33,6 +33,9 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "hns-street", "date": "2026-11-11", "game": "hide_and_seek", "pic": "street", "line": "Find friends on Pip's street", "try": {"HNS_TRY": "street"}},
+	{"id": "hns-party", "date": "2026-11-11", "game": "hide_and_seek", "pic": "gardenparty", "line": "Grow Pip's garden party!"},
+	{"id": "hns-dark", "date": "2026-11-11", "game": "hide_and_seek", "pic": "darkroom", "line": "Dark rooms and sneaky pals!", "try": {"HNS_TRY": "dark"}},
 	{"id": "bender-islands", "date": "2026-11-11", "game": "elemental_bender", "pic": "iceshelf", "line": "Travel to new islands!", "try": {"EB_ARENA": "ice"}},
 	{"id": "bender-bosses", "date": "2026-11-11", "game": "elemental_bender", "pic": "lavadrake", "line": "A boss on every island!", "try": {"EB_ARENA": "volcano"}},
 	{"id": "bender-gifts", "date": "2026-11-11", "game": "elemental_bender", "pic": "giftstone", "line": "Pick a gift every wave!"},

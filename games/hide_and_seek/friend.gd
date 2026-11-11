@@ -129,6 +129,53 @@ func _ear(at: Vector3, radii: Vector3, c: Color, inner: Color, tilt: float) -> v
 	ears.append(ear)
 
 
+static var _vc_mat: StandardMaterial3D
+
+
+## At the party: bake every sphere into ONE vertex-coloured mesh (one draw call per friend; 8 friends sit there).
+func merge() -> void:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var parts: Array = []
+	_collect(body, Transform3D(), parts)
+	for pt in parts:
+		var mi: MeshInstance3D = pt[0]
+		var xf: Transform3D = pt[1]
+		var col: Color = (mi.material_override as StandardMaterial3D).albedo_color
+		var arr: Array = mi.mesh.surface_get_arrays(0)
+		var v: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+		var n: PackedVector3Array = arr[Mesh.ARRAY_NORMAL]
+		var idx: PackedInt32Array = arr[Mesh.ARRAY_INDEX]
+		var nb := xf.basis.inverse().transposed()
+		st.set_color(col)
+		for i in idx:
+			st.set_normal((nb * n[i]).normalized())
+			st.add_vertex(xf * v[i])
+	for c in body.get_children():
+		c.queue_free()
+	ears.clear()
+	mats.clear()
+	eye_mats.clear()
+	if _vc_mat == null:
+		_vc_mat = StandardMaterial3D.new()
+		_vc_mat.vertex_color_use_as_albedo = true
+		_vc_mat.roughness = 0.8
+	var one := MeshInstance3D.new()
+	one.mesh = st.commit()
+	one.material_override = _vc_mat
+	one.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	body.add_child(one)
+
+
+func _collect(n: Node3D, xf: Transform3D, out: Array) -> void:
+	for c in n.get_children():
+		if c is Node3D:
+			var cx: Transform3D = xf * (c as Node3D).transform
+			if c is MeshInstance3D:
+				out.append([c, cx])
+			_collect(c, cx, out)
+
+
 ## In a dark room: a dim body and glowing eyes (only the torch shows the rest).
 func set_dark(on: bool) -> void:
 	dark = on

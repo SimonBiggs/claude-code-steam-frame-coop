@@ -31,6 +31,7 @@ extends Node
 const UiKit := preload("res://core/ui_kit.gd")
 const WorldScript := preload("res://games/hide_and_seek/world.gd")
 const Story := preload("res://games/hide_and_seek/story.gd")
+const Street := preload("res://games/hide_and_seek/street.gd")
 
 var main
 var t := 0.0
@@ -143,6 +144,7 @@ func _physics_process(delta: float) -> void:
 			print("BOT: MAP ROTATION OK (%s)" % ", ".join(maps_seen.keys()))
 	var mode: String = main.net.mode
 	_result(mode)
+	_friend_verdict(mode)
 	if main.pip_finder >= 0 and not has_meta("pip_ok") and (mode != "host" or main.toys > 0):
 		set_meta("pip_ok", true)
 		print("BOT: PIP OK (found by P%d, %d toys at his kennel, on %s)" % [main.pip_finder + 1, main.toys, main.map_title()])
@@ -207,6 +209,18 @@ func _seeker(delta: float) -> void:
 			if d < best_d:
 				best_d = d
 				best = h
+	# PIP'S STREET: neighbour friends hiding in the house are worth finding too (the bot goes for them first).
+	var best_pos: Vector3 = Vector3.ZERO if best == null else best.global_position
+	var best_c: Vector3 = Vector3.ZERO if best == null else best.center()
+	for k in main.friends.size():
+		if int(main.friend_state[k][1]) < 0 and is_instance_valid(main.friends[k]):
+			var fp: Vector3 = main.friends[k].global_position
+			var fd: float = fp.distance_to(s.global_position) - 8.0
+			if fd < best_d:
+				best_d = maxf(0.0, fd)
+				best = main.friends[k]
+				best_pos = fp
+				best_c = main.friends[k].center()
 	if best == null:
 		return
 	# Sniff when someone's close (hiders in range sneeze: it's how a real seeker would use it).
@@ -225,8 +239,8 @@ func _seeker(delta: float) -> void:
 		squeeze = 3.0  # squeeze through for a few seconds
 	set_meta("seek_squeeze", squeeze)
 	s.collision_mask = 1 if near_t < 1.5 and squeeze <= 0.0 else 0  # the bot can't path-find round walls: let it squeeze through
-	var there := _walk_to(s, best.global_position, 2.0 if near_t < 1.5 else 0.4, delta, 3.5)
-	_aim(s, best.center())
+	var there := _walk_to(s, best_pos, 2.0 if near_t < 1.5 else 0.4, delta, 3.5)
+	_aim(s, best_c)
 	click_t -= delta
 	if there and click_t <= 0.0:
 		click_t = 0.4
@@ -299,7 +313,7 @@ func _hiders(delta: float) -> void:
 ## One BOT RESULT line per machine once every verdict is in.
 func _result(mode: String) -> void:
 	var late: bool = main.round_no >= 6  # verdicts still missing by now count as failures
-	if has_meta("result") or (not late and (not cue_verdict or maps_seen.size() < 3 or not has_meta("pip_ok") or (mode != "client" and not conn_done))):
+	if has_meta("result") or (not late and (not cue_verdict or maps_seen.size() < 3 or not has_meta("pip_ok") or not has_meta("friend_ok") or (mode != "client" and not conn_done))):
 		return
 	if main.phase != "over" and mode == "local":
 		return
@@ -313,9 +327,28 @@ func _result(mode: String) -> void:
 		fails.append("map rotation")
 	if not has_meta("pip_ok"):
 		fails.append("pip")
-	print("BOT RESULT: %s (4 checks)%s" % ["PASS" if fails.is_empty() else "FAIL", "" if fails.is_empty() else " failed: " + ", ".join(fails)])
+	if not has_meta("friend_ok"):
+		fails.append("street friend")
+	print("BOT RESULT: %s (5 checks)%s" % ["PASS" if fails.is_empty() else "FAIL", "" if fails.is_empty() else " failed: " + ", ".join(fails)])
 	if mode == "local":
 		preload("res://tests/bot_end.gd").quit_quietly(get_tree())
+
+
+## PIP'S STREET: a friend found and at Pip's garden party (host / local: in the save too; TV: mirrored from the host).
+func _friend_verdict(mode: String) -> void:
+	if main.friends.size() > 0 and not has_meta("friends_seen"):
+		set_meta("friends_seen", true)
+		print("BOT: %d friend(s) hide in %s (twist %d, street %s)" % [main.friends.size(), main.map_title(), int(main.md().get("twist", 0)), str(main.map_spec.get("slot", "-"))])
+	for k in main.friends.size():
+		if int(main.friend_state[k][0]) == 1 and not has_meta("sneak_ok"):
+			set_meta("sneak_ok", true)
+			print("BOT: SNEAK OK (friend %d moved once)" % k)
+		if int(main.friend_state[k][1]) >= 0 and not has_meta("friend_ok") and main.party.has(main.friends[k].fid):
+			if mode != "client" and not (main.save.data.party as Array).has(main.friends[k].fid):
+				continue
+			set_meta("friend_ok", true)
+			print("BOT: FRIEND OK (P%d found %s; %d at the party, party view %s)" % [int(main.friend_state[k][1]) + 1, Street.friend(main.friends[k].fid).name,
+				main.party.size(), "built" if main.party_root != null and is_instance_valid(main.party_root) else "missing"])
 
 
 ## The free local hider with the lowest index looks for Pip.
@@ -658,6 +691,12 @@ func _fake_vr(delta: float) -> void:
 			if d < best_d:
 				best_d = d
 				best = h
+	for k in main.friends.size():  # PIP'S STREET friends too
+		if int(main.friend_state[k][1]) < 0 and is_instance_valid(main.friends[k]):
+			var fd: float = main.friends[k].global_position.distance_to(s.global_position) - 8.0
+			if fd < best_d:
+				best_d = fd
+				best = main.friends[k]
 	if best == null:
 		return
 	var o: XROrigin3D = s.xr_origin

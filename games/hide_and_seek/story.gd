@@ -33,7 +33,10 @@ const THEMES: Array[Dictionary] = [
 
 
 static func save_defaults() -> Dictionary:
-	return {"world": -1, "houses": 0, "toys": 0, "pips": 0, "daily": {}, "best_finds": 0}
+	## party: PIP'S STREET friends at the garden party (street.gd ids); friends_found: every find; streets: streets
+	## finished; daily_done: the date TODAY'S STREET was last finished.
+	return {"world": -1, "houses": 0, "toys": 0, "pips": 0, "daily": {}, "best_finds": 0, "party": [], "friends_found": 0, "streets": 0,
+		"daily_done": ""}
 
 
 static func theme(i: int) -> Dictionary:
