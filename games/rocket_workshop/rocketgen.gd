@@ -66,14 +66,46 @@ static func daily_seed(date: String = "") -> int:
 
 
 ## One rocket: puzzles (puzzles.gd, seeded) + its look. daily: TODAY'S ROCKET (gold, sneak-peek parts).
-static func rocket(seed_value: int, n: int, crew: int, simple: bool, launched_total: int, daily: bool = false) -> Dictionary:
+## opts (simple mode, deep.gd puzzle_opts): {extra: more desk puzzles (HARD), fewer: fewer (Sprocket's BOOSTERS)}.
+static func rocket(seed_value: int, n: int, crew: int, simple: bool, launched_total: int, daily: bool = false, opts: Dictionary = {}) -> Dictionary:
 	var pr := Seeded.rng(seed_value, "puzzles")
 	var r := P.make_simple_rocket(n, pr) if simple else P.make_rocket(n, crew, pr)
+	if simple and n > 1:
+		_resize(r, n, simple_want(n, opts), Seeded.rng(seed_value, "extra"))
 	r["look"] = look(Seeded.rng(seed_value, "look"), launched_total, daily)
 	r["level"] = level(n, simple)
 	r["seed"] = seed_value
 	r["daily"] = daily
 	return r
+
+
+## How many desk puzzles a simple rocket has (the new control first; opts: deep.gd puzzle_opts).
+static func simple_want(n: int, opts: Dictionary = {}) -> int:
+	if n <= 1:
+		return 1
+	var base := 3 if P.simple_level(n) >= 3 and n > P.SIMPLE_ORDER.size() else 2
+	return clampi(base + int(opts.get("extra", 0)) - int(opts.get("fewer", 0)), 1, mini(4, known_types(n).size()))
+
+
+## The desk controls the family has met by rocket n (simple mode: one new one a rocket).
+static func known_types(n: int) -> Array:
+	return P.SIMPLE_ORDER.slice(0, clampi(n, 1, P.SIMPLE_ORDER.size()))
+
+
+## Fewer puzzles drop from the end (the new control stays first); more are drawn from the controls already met.
+static func _resize(r: Dictionary, n: int, want: int, rr: RandomNumberGenerator) -> void:
+	var mods: Array = r.modules
+	while mods.size() > want:
+		mods.pop_back()
+	if mods.size() < want:
+		var have := {}
+		for m in mods:
+			have[String(m.type)] = true
+		for t in Seeded.shuffled(rr, known_types(n)):
+			if mods.size() >= want:
+				break
+			if not have.has(String(t)):
+				mods.append(P.make_simple(String(t), n, rr))
 
 
 ## The readable challenge step (1-3): the rocket on the pad grows taller with it.
@@ -185,7 +217,7 @@ static func check(rk: Dictionary, ctx: Dictionary) -> Array:
 		for why in check_module(m, simple, rname):
 			bad.append("%s: %s" % [t, why])
 	if simple:
-		var want := 1 if n == 1 else (3 if P.simple_level(n) >= 3 and n > P.SIMPLE_ORDER.size() else 2)
+		var want := simple_want(n, ctx.get("opts", {}))
 		if mods.size() != want:
 			bad.append("simple rocket %d has %d puzzles (want %d)" % [n, mods.size(), want])
 		if jobs > 0:

@@ -33,6 +33,10 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "rw-gifts", "date": "2026-11-11", "game": "rocket_workshop", "pic": "boosters", "line": "Sprocket's rocket gifts!", "try": {"RW_GIFT": "boosters"}},
+	{"id": "rw-meteors", "date": "2026-11-11", "game": "rocket_workshop", "pic": "meteor", "line": "Meteors! Step out!", "try": {"RW_METEORS": "2"}},
+	{"id": "rw-modes", "date": "2026-11-11", "game": "rocket_workshop", "pic": "engineer", "line": "Gentle, brave or hard!"},
+	{"id": "rw-seasons", "date": "2026-11-11", "game": "rocket_workshop", "pic": "acorn", "line": "Launch sites by season!"},
 	{"id": "cc-gifts", "date": "2026-11-11", "game": "cannon_cove", "pic": "bouncyball", "line": "Shoot Polly's cannon gifts!"},
 	{"id": "cc-arms", "date": "2026-11-11", "game": "cannon_cove", "pic": "krakenarm", "line": "Kraken arms! Step out!"},
 	{"id": "cc-harbour", "date": "2026-11-11", "game": "cannon_cove", "pic": "harbour", "line": "Polly's harbour grows!"},

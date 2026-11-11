@@ -71,6 +71,10 @@ const Save := preload("res://core/save.gd")
 const Seeded := preload("res://core/seeded.gd")
 const Telemetry := preload("res://core/telemetry.gd")
 const StoryCard := preload("res://core/story_card.gd")
+const Deep := preload("res://games/rocket_workshop/deep.gd")
+const PicksScript := preload("res://games/rocket_workshop/picks.gd")
+const HazardsScript := preload("res://games/rocket_workshop/hazards.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
 const SPROCKET_COLOR := Color(0.25, 0.75, 0.8)
 const MUSEUM_CHEERS := {1: "My museum!", 5: "Five rockets!", 10: "Ten rockets!", 20: "Twenty!", 30: "So many!", 40: "Rocket Row is full!"}
 const SIMPLE_MODE := true
@@ -92,8 +96,7 @@ var multi_machine := true
 var seats: ClassicSeats
 const PAD_LEAVE_TIME := 20.0
 const PLAYER_COLORS: Array[Color] = Looks.PLAYER_COLORS  # (looks.gd: palette.gd reads it)
-const CREW_SPOTS: Array[Vector3] = [Vector3(-2.2, 0, 4.5), Vector3(2.2, 0, 4.5), Vector3(-4.4, 0, 5.6), Vector3(4.4, 0, 5.6),
-	Vector3(-6.4, 0, 4.0), Vector3(6.4, 0, 4.0)]
+const CREW_SPOTS: Array[Vector3] = Deep.CREW_SPOTS  # (deep.gd: meteors never land there)
 const BOARD_PLACES := {"fuel": "left wall", "wires": "left wall", "gauge": "right wall", "switches": "right wall",
 	"symbols": "back wall, middle", "alien": "back wall corner", "crank": "back wall corner"}
 const NEW_LINES := {
@@ -214,6 +217,16 @@ var work_t := 0.0  # seconds spent on this rocket
 var session_t := 0.0
 var quit_logged := false
 var host_museum := 0  # TV: how many models the host's Rocket Row has (snapshots)
+## Second pass (deep.gd): the session's mode, this rocket's gift, the season, the picks and the meteors.
+var play_mode := "brave"  # GENTLE / BRAVE / HARD (every machine: snapshots)
+var mode_picked := false
+var gift_id := ""  # Sprocket's gift on this rocket ("" none; every machine: snapshots)
+var season := "spring"
+var picks: Node  # picks.gd (host / local run the picks; every machine shows the orbs)
+var hazards: Node3D  # hazards.gd (every machine draws the meteors)
+var pick_next := 0  # host: the rocket the picks are for
+var rocket_meteors := 0  # host: meteor tells on this rocket
+var meteor_hits := 0  # host: crew caught under a rock (this rocket)
 
 
 func _ready() -> void:
@@ -241,8 +254,19 @@ func _ready() -> void:
 	add_child(sprocket)
 	save = Save.new()
 	save.game_id = G.GAME_ID
-	save.defaults = {"launched": 0, "museum": [], "daily": "", "sessions": 0}
+	save.defaults = {"launched": 0, "museum": [], "daily": "", "sessions": 0, "mode": "brave", "gift": "", "gifts": {}}
 	add_child(save)
+	season = OS.get_environment("RW_SEASON") if OS.has_environment("RW_SEASON") else Seeded.season()
+	if not Deep.SEASONS.has(season):
+		season = "spring"
+	WorldScript.dress_season(self, season)
+	play_mode = Deep.mode_of(String(save.data.get("mode", "brave")))
+	picks = PicksScript.new()
+	picks.main = self
+	add_child(picks)
+	hazards = HazardsScript.new()
+	hazards.main = self
+	add_child(hazards)
 	session_seed = int(OS.get_environment("RW_SEED")) if OS.has_environment("RW_SEED") else Seeded.fresh_seed()
 	_build_hud()
 	if SIMPLE_MODE:
@@ -258,6 +282,7 @@ func _ready() -> void:
 	net.main = self
 	add_child(net)
 	net.sticky_event("museum")  # a machine that joins later gets the latest Rocket Row (core/net.gd)
+	net.sticky_event("orbs")  # a machine joining mid-pick sees the orbs (picks.gd)
 	seats = ClassicSeats.new(self, {
 		"no_keys": PlayerScript.NO_KEYS,
 		"free_actions": ["restart", "pause"],
@@ -324,7 +349,8 @@ func _log_quit() -> void:
 	if quit_logged or net == null or net.mode == "client" or rocket_n == 0:
 		return
 	quit_logged = true
-	Telemetry.run(G.GAME_ID, {"end": "quit", "mode": "simple" if SIMPLE_MODE else "full", "rockets": launched,
+	Telemetry.run(G.GAME_ID, {"end": "quit", "mode": "simple" if SIMPLE_MODE else "full", "play": play_mode, "season": season,
+		"picks": picks.history if picks != null else [], "rockets": launched,
 		"reached": rocket_n, "oops": mistakes, "secs": int(session_t), "crew": crew_count(), "seed": session_seed,
 		"total": int(save.data.launched), "museum": (save.data.museum as Array).size()})
 	save.save_now()
@@ -817,8 +843,9 @@ func _start_rocket(n: int) -> void:
 	var total := int(save.data.launched)
 	rocket_daily = n == G.DAILY_N and String(save.data.daily) != Seeded.today()
 	rocket_seed = G.daily_seed() if rocket_daily else G.rocket_seed(session_seed, n)
-	var r := G.rocket(rocket_seed, n, crew_count(), SIMPLE_MODE, total, rocket_daily)
-	rocket_look = r.look
+	var r := G.rocket(rocket_seed, n, crew_count(), SIMPLE_MODE, total, rocket_daily, Deep.puzzle_opts(play_mode, gift_id, n))
+	rocket_look = Deep.gift_look(r.look, gift_id)  # Sprocket's gift is on the rocket (and its model on Rocket Row)
+	_plan_meteors(n)
 	work_t = 0.0
 	_rocket_story(n, total)
 	unlock_from = total
@@ -874,6 +901,8 @@ func _rocket_story(n: int, total: int) -> void:
 	var beats: Array = []
 	if n == 1:
 		beats.append(["Hi! I'm Sprocket!" if total == 0 else "Let's build rockets!", "engineer", SPROCKET_COLOR])
+		var sd := Deep.season_data(season)
+		beats.append([String(sd.line), String(sd.pic), sd.drift])
 	if unlock_from >= 0:
 		for k in G.new_unlocks(unlock_from, total):
 			beats.append([String(k.line), "engineer", SPROCKET_COLOR, "party"])
@@ -916,6 +945,108 @@ func _museum_add() -> void:
 	var count := int(save.data.launched)
 	if MUSEUM_CHEERS.has(count):
 		story(MUSEUM_CHEERS[count], "toyrocket", G.TRIM_COLORS[int(rocket_look[G.L_TRIM])])
+
+
+# --- Second pass: modes, Sprocket's gifts, meteors (deep.gd, picks.gd, hazards.gd) ----------------------------
+
+## Host: the next rocket - after the practice rocket the team picks a mode (once a session), before every rocket
+## from rocket 3 Sprocket offers a gift; then it rolls out.
+func _next_rocket(n: int) -> void:
+	hazards.reset([])
+	hazards.clear()
+	net.event("meteor_clear", [])
+	pick_next = n
+	if not mode_picked and n >= 2:
+		phase = "pick"
+		var ids := PickOrbs.mode_ids(play_mode)
+		var entries: Array = []
+		for id in ids:
+			var md := PickOrbs.mode(String(id))
+			entries.append({"id": id, "name": md.name, "pic": md.pic, "color": md.color})
+		story("Easy or tricky?", "engineer")
+		picks.begin("mode", entries, ids, _on_picked)
+		return
+	if n >= 3:
+		phase = "pick"
+		var ch := Deep.gift_choices(int(save.data.launched), String(save.data.get("gift", "")), Seeded.derive(session_seed, "gift%d" % n))
+		var entries2: Array = []
+		for id in ch:
+			var g := Deep.gift(String(id))
+			entries2.append({"id": id, "name": g.name, "pic": g.pic, "color": g.color})
+		story("A gift for you!", "engineer")
+		sprocket_mood("party")
+		picks.begin("gift", entries2, ch, _on_picked)
+		return
+	gift_id = ""
+	_start_rocket(n)
+
+
+## Host: the team picked (slot: who; -1 nobody in time, the middle one).
+func _on_picked(st: String, opt: Variant, _slot: int) -> void:
+	if st == "mode":
+		mode_picked = true
+		play_mode = Deep.mode_of(String(opt))
+		if OS.has_environment("RW_MODE"):  # tests: this mode
+			play_mode = Deep.mode_of(OS.get_environment("RW_MODE"))
+		save.data.mode = play_mode
+		save.mark_dirty()
+		story(String(PickOrbs.MODE_LINES.get(play_mode, "Let's go!")), String(PickOrbs.mode(play_mode).pic), PickOrbs.mode_color(play_mode))
+		_next_rocket(pick_next)
+		return
+	gift_id = String(opt)
+	if OS.has_environment("RW_GIFT") and not Deep.gift(OS.get_environment("RW_GIFT")).is_empty():  # tests: this gift
+		gift_id = OS.get_environment("RW_GIFT")
+	save.data.gift = gift_id
+	var counts: Dictionary = save.data.get("gifts", {})
+	counts[gift_id] = int(counts.get(gift_id, 0)) + 1
+	save.data.gifts = counts
+	save.mark_dirty()
+	var g := Deep.gift(gift_id)
+	story(String(g.get("line", "Thanks!")), String(g.get("pic", "gift")), g.get("color", SPROCKET_COLOR))
+	_start_rocket(pick_next)
+
+
+## Host: this rocket's meteors (only with crew on the floor: a lone pilot's rockets stay calm).
+func _plan_meteors(n: int) -> void:
+	hazards.reset([])
+	hazards.clear()
+	rocket_meteors = 0
+	meteor_hits = 0
+	if net.mode == "client" or crew_count() == 0:
+		return
+	var spec := {"mode": play_mode, "season": season, "gift": gift_id, "n": n}
+	if OS.has_environment("RW_METEORS"):  # bots: more meteors, sooner (still fair: deep_test checks the bot spec)
+		spec["scale"] = float(OS.get_environment("RW_METEORS"))
+		spec["first"] = 3.0
+	hazards.reset(Deep.events(Seeded.derive(rocket_seed, "meteors"), spec))
+
+
+## Host: tell the meteors that are due (during the work).
+func _fire_meteors() -> void:
+	if crew_count() == 0:
+		return
+	for e in hazards.due(work_t):
+		var warn := Deep.warn_of({"mode": play_mode, "gift": gift_id})
+		var shield := gift_id == "shield"
+		hazards.announce(e, warn, shield)
+		net.event("meteor", [Deep.pack(e), warn, shield])
+		rocket_meteors += 1
+		if int(hazards.fired.get("meteor", 0)) + int(hazards.fired.get("shower", 0)) == 1:
+			story("Look out! Meteors!", "meteor", Deep.METEOR_COLOR)
+		print("Meteor: %s at %s (%.1f s told%s)" % [e.kind, str(e.spots), warn, ", shield" if shield else ""])
+
+
+## Every machine (hazards.gd): rocks landed. Host: count the crew caught (telemetry), Sprocket says oops.
+func on_meteor_landed(e: Dictionary) -> void:
+	if net.mode == "client":
+		return
+	var hit := 0
+	for p in players:
+		if p.index > 0 and p.active and Deep.caught(e, p.global_position):
+			hit += 1
+	meteor_hits += hit
+	if hit > 0:
+		sprocket_mood("oops")
 
 
 ## Host: the pilot touched or moved something on the desk.
@@ -1151,6 +1282,7 @@ func _start_launch() -> void:
 		types.append(m.type)
 	Telemetry.run(G.GAME_ID, {"end": "launch", "mode": "simple" if SIMPLE_MODE else "full", "n": rocket_n, "seed": rocket_seed,
 		"daily": rocket_daily, "types": types, "level": G.level(rocket_n, SIMPLE_MODE), "secs": snappedf(work_t, 0.1),
+		"play": play_mode, "gift": gift_id, "season": season, "meteors": rocket_meteors, "bumps": meteor_hits,
 		"oops": rocket_burps, "crew": crew_count(), "total": int(save.data.launched), "look": rocket_look,
 		"museum": (save.data.museum as Array).size() + 1})
 	_show_center("3", 0.9)
@@ -1444,6 +1576,7 @@ func _host_update(delta: float) -> void:
 				phase = "work"
 		"work", "ready":
 			work_t += delta
+			_fire_meteors()
 			if SIMPLE_MODE:
 				return  # no countdown, no jobs, no surprises: just the desk and the blueprints
 			if net.mode == "host" and not net.connected:
@@ -1463,7 +1596,9 @@ func _host_update(delta: float) -> void:
 			launch_t += delta
 			_launch_beats(prev, launch_t)
 			if launch_t >= LAUNCH_TIME:
-				_start_rocket(rocket_n + 1)
+				_next_rocket(rocket_n + 1)
+		"pick":
+			picks.tick(delta)
 		"over":
 			game_over_time += delta
 			var trig: bool = players[0].vr_trigger_held()
@@ -1688,6 +1823,7 @@ func _process(delta: float) -> void:
 		# The pilot's pointer needs a free mouse (the pause menu captures it on resume).
 		if not players[0].vr and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and not get_tree().paused:
 			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	rocket.visible = phase != "pick"  # the pad is empty while Sprocket offers a gift
 	rocket.update_visual(rocket_n, phase, launch_t, delta)
 	museum.update_museum(delta)
 	sprocket.update_sprocket(phase, launch_t, delta)
@@ -1715,15 +1851,21 @@ func _update_simple(delta: float) -> void:
 	var idle: float = panel.idle_t
 	var working := phase == "work"
 	var first := rocket_n == 1
+	var help := Deep.help_after(play_mode, gift_id, rocket_n)  # (mode + Sprocket's PARACHUTE: deep.gd)
 	if working and not modules.is_empty():
 		var m: Dictionary = modules[0]  # the new control is always first
+		if m.done:
+			for m2 in modules:  # then the next one still to do
+				if not m2.done:
+					m = m2
+					break
 		if not m.done:
 			if first and m.type == "fuel":
 				var c := int((m.answer as Array)[0])
 				glow = "fuel%d" % c
 				if idle > 1.2:
 					demo = panel.demo_path(m)
-			elif rocket_n <= P.SIMPLE_ORDER.size() and idle > 4.0:
+			elif idle > help:
 				demo = panel.demo_path(m)
 	elif phase == "ready" and idle > (1.2 if first else 6.0):
 		demo = panel.demo_path({"type": "lever"})
@@ -2513,7 +2655,7 @@ func make_snapshot() -> Array:
 	# Modules are deflated: their repeated dictionary keys squash well, keeping snapshots under the MTU.
 	var raw := var_to_bytes(modules)
 	return [phase, rocket_n, launched, time_left, raw.compress(FileAccess.COMPRESSION_DEFLATE), raw.size(), ps, launch_t,
-		mistakes, panel.top, stars, streak, last_stars, rocket_look, museum.entries.size()]
+		mistakes, panel.top, stars, streak, last_stars, rocket_look, museum.entries.size(), play_mode, gift_id]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -2553,6 +2695,9 @@ func apply_snapshot(s: Array) -> void:
 	if s.size() > 14 and s[13] is Array:
 		rocket_look = s[13]
 		host_museum = int(s[14])
+	if s.size() > 16:
+		play_mode = Deep.mode_of(String(s[15]))
+		gift_id = String(s[16])
 	if game_over != (phase == "over"):
 		game_over = phase == "over"
 		game_over_time = 0.0
@@ -2589,6 +2734,14 @@ func apply_event(kind: String, args: Array) -> void:
 		"prop":
 			if props != null:
 				props.play(args[0])
+		"orbs":
+			picks.show_row(String(args[0]), args[1], args[2])
+		"take":
+			picks.take_fx(int(args[0]), int(args[1]))
+		"meteor":
+			hazards.announce(Deep.unpack(args[0]), float(args[1]), bool(args[2]))
+		"meteor_clear":
+			hazards.clear()
 		"remote_pause":
 			get_tree().paused = args[0]
 			_set_pause_banner(args[0], "The pilot paused the game")

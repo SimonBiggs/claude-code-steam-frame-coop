@@ -75,6 +75,7 @@ static func build(main: Node3D, vr: bool) -> void:
 	pm.size = Vector2(120, 120)
 	grass.mesh = pm
 	grass.material_override = main.make_material(Looks.GRASS, 0.0)
+	grass.name = "YardGround"  # (dress_season: the season's ground)
 	grass.position = Vector3(0, -0.02, 0)
 	main.add_child(grass)
 
@@ -148,6 +149,7 @@ static func build(main: Node3D, vr: bool) -> void:
 	_clouds(main)
 	_gantry_lights(main)
 	var hill: StandardMaterial3D = main.make_material(Color(0.4, 0.66, 0.35), 0.0)
+	main.set_meta("hill_mat", hill)
 	for h in [Vector3(-30, -6, -45), Vector3(10, -9, -55), Vector3(40, -7, -35), Vector3(-45, -8, -15)]:
 		var mi := MeshInstance3D.new()
 		mi.mesh = main.sphere_mesh(1.0)
@@ -201,6 +203,43 @@ static func _bunting(main: Node3D) -> void:
 	mmi.material_override = m
 	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	main.add_child(mmi)
+
+
+## The season's launch site (deep.gd SEASONS): the yard's ground and the hills, and blossom / seeds / leaves / snow
+## drifting down over the workshop and the pad (every machine dresses its own; same date, same season).
+static func dress_season(main: Node3D, season: String) -> void:
+	const Deep := preload("res://games/rocket_workshop/deep.gd")
+	var sd := Deep.season_data(season)
+	var ground := main.get_node_or_null("YardGround") as MeshInstance3D
+	if ground != null:
+		(ground.material_override as StandardMaterial3D).albedo_color = sd.ground
+	if main.has_meta("hill_mat"):
+		(main.get_meta("hill_mat") as StandardMaterial3D).albedo_color = (sd.ground as Color).darkened(0.08)
+	var drift := CPUParticles3D.new()
+	drift.name = "SeasonDrift"
+	drift.amount = 48
+	drift.lifetime = 9.0
+	drift.preprocess = 9.0
+	drift.position = Vector3(0, 9.0, -4.0)
+	drift.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+	drift.emission_box_extents = Vector3(13.0, 0.5, 12.0)
+	drift.direction = Vector3(0.3, -1.0, 0.0)
+	drift.spread = 25.0
+	drift.gravity = Vector3(0.2, -0.6, 0.0)
+	drift.initial_velocity_min = 0.3
+	drift.initial_velocity_max = 0.8
+	drift.angular_velocity_min = -90.0
+	drift.angular_velocity_max = 90.0
+	var q := QuadMesh.new()
+	q.size = Vector2(0.09, 0.09) if season == "winter" else Vector2(0.12, 0.08)
+	var m := StandardMaterial3D.new()
+	m.albedo_color = sd.drift
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	q.material = m
+	drift.mesh = q
+	main.add_child(drift)
 
 
 static func _trees(main: Node3D) -> void:
