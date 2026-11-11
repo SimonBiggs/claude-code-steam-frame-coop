@@ -24,6 +24,7 @@ const Picks := preload("res://games/treasure_dig/picks.gd")
 const PickOrbs := preload("res://core/pick_orbs.gd")
 const StoryCard := preload("res://core/story_card.gd")
 const Seeded := preload("res://core/seeded.gd")
+const TestTime := preload("res://tests/test_time.gd")
 
 const S := 0.25  # main.gd S (beach scale)
 const GIANT_R := 7.0 * S + 0.25  # main.gd: the giant wades from ISLAND * S + 0.15 out to + 2.0 (metres)
@@ -63,7 +64,7 @@ func _init() -> void:
 								var spec := {"mode": mode, "time": time, "season": season, "kind": String(isl.id), "rocks": g.rocks, "extra_gold": gold}
 								var e0 := Time.get_ticks_usec()
 								var ev := Deep.events(seed_v, spec)
-								worst_ms = maxf(worst_ms, (Time.get_ticks_usec() - e0) / 1000.0)
+								worst_ms = TestTime.worst(worst_ms, (Time.get_ticks_usec() - e0) / 1000.0, func() -> Variant: return Deep.events(seed_v, spec))
 								for x in Deep.problems(ev, spec):
 									_fail("%s / %s %s %ds seed %d: events: %s" % [mode, isl.id, season, int(time), seed_v, x])
 								if var_to_str(ev) != var_to_str(Deep.events(seed_v, spec.duplicate(true))):

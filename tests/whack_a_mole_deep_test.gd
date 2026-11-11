@@ -26,6 +26,7 @@ const Garden := preload("res://games/whack_a_mole/garden.gd")
 const PickOrbs := preload("res://core/pick_orbs.gd")
 const StoryCard := preload("res://core/story_card.gd")
 const SkyKit := preload("res://core/sky_kit.gd")
+const TestTime := preload("res://tests/test_time.gd")
 
 const GIANT_AT := Vector3(0.0, 0.0, 1.7)  # main.gd: the VR player stands at Props.HALF.y + 0.5 in front of the table
 const GIANT_REACH := 1.25  # an arm (~0.6 m) + the mallet (Props.HEAD_OFFSET 0.62 m), measured across the floor
@@ -62,7 +63,7 @@ func _init() -> void:
 								var rd := RoundGen.generate(seed_v, sp)
 								var tspec := {"mode": mode, "time": time, "season": season, "extra_gold": 1 if gift == "gold" else 0}
 								var tl := Deep.tricks(seed_v, tspec, rd)
-								worst_ms = maxf(worst_ms, (Time.get_ticks_usec() - t1) / 1000.0)
+								worst_ms = TestTime.worst(worst_ms, (Time.get_ticks_usec() - t1) / 1000.0, func() -> Variant: return Deep.tricks(seed_v, tspec, RoundGen.generate(seed_v, sp)))
 								gen_us += Time.get_ticks_usec() - t1
 								checked += 1
 								var tag := "%s %s b%d p%d %ds %s %s seed %d" % [mode, c.id, beds, players, int(time), season, gift, seed_v]

@@ -23,6 +23,7 @@ const RouteGen := preload("res://games/dragon_rider/routegen.gd")
 const PickOrbs := preload("res://core/pick_orbs.gd")
 const StoryCard := preload("res://core/story_card.gd")
 const Seeded := preload("res://core/seeded.gd")
+const TestTime := preload("res://tests/test_time.gd")
 
 const MISSIONS: Array[String] = ["rings", "rescue", "race", "boss"]
 
@@ -55,7 +56,7 @@ func _init() -> void:
 						var list := Deep.events(Seeded.derive(seed_v, "events"), route, spec)
 						var us := Time.get_ticks_usec() - t1
 						total_us += us
-						worst_ms = maxf(worst_ms, us / 1000.0)
+						worst_ms = TestTime.worst(worst_ms, us / 1000.0, func() -> Variant: return Deep.events(Seeded.derive(seed_v, "events"), RouteGen.route(seed_v, origin, yaw, lv, mission, true), spec))
 						checked += 1
 						var tag := "%s %s stage %d %s seed %d" % [mode, season, lv, mission, seed_v]
 						for x in Deep.problems(list, route, spec):
