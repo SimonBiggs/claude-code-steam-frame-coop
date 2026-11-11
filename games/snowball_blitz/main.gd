@@ -2642,7 +2642,7 @@ func _update_story(delta: float) -> void:
 	var b: Array = story_queue.pop_front()
 	story_t = 2.6
 	var opts := {"who": "BOBO", "line": b[0], "pic": b[1], "color": b[2], "duration": 2.4,
-		"vr_height": -0.55}  # (VR: under the pick orbs and the boss, never over them)
+		"vr_height": -0.55}  # (VR: under the boss, never over it; clear of pick orbs by itself: UiKit.vr_dodge)
 	var huds: Array = []
 	for p in players:
 		if p.hud != null and is_instance_valid(p.hud) and p.hud.is_visible_in_tree():

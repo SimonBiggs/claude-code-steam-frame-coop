@@ -18,7 +18,6 @@ const GAP := 1.0
 const Y := 1.3
 const AHEAD := 1.7  # metres in front of the VR lantern-bearer (a flat one: AHEAD_FLAT, so the row fits the view)
 const AHEAD_FLAT := 3.2
-const VR_LIFT := 0.5  # VR: the row at eye height, above Granny Boo's story cards
 const FEET_R := 0.55  # how close (flat) a walking player must come under an orb
 const HAND_R := 0.22
 ## Lantern gifts: [id, name, picture, colour]. main.gd reads the levels (upgrades[id], 0..MAX_LEVEL).
@@ -112,7 +111,7 @@ func _places(n: int) -> Array:
 	var out: Array = []
 	for i in n:
 		var p := o + right * (float(i) - (n - 1) * 0.5) * GAP
-		out.append(Vector3(p.x, VR_LIFT if main.players[0].vr else 0.0, p.z))
+		out.append(Vector3(p.x, 0.0, p.z))  # (VR cards keep clear of the orbs themselves: UiKit.vr_dodge)
 	return out
 
 
