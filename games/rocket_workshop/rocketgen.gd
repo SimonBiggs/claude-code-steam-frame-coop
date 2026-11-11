@@ -250,7 +250,10 @@ static func check(rk: Dictionary, ctx: Dictionary) -> Array:
 			bad.append("gold trim is only for TODAY'S ROCKET %s" % str(lk))
 		if not daily:
 			var u := unlocked(int(ctx.get("launched", 0)))
+			var allow: Array = ctx.get("allow", [])  # [[look slot, value]]: a gift's part (deep.gd gift_look)
 			for pair in [["body", L_BODY], ["trim", L_TRIM], ["fins", L_FINS], ["nose", L_NOSE], ["extra", L_EXTRA]]:
+				if allow.has([pair[1], int(lk[pair[1]])]):
+					continue
 				if not (u[pair[0]] as Array).has(int(lk[pair[1]])):
 					bad.append("%s %d is not unlocked yet" % [pair[0], int(lk[pair[1]])])
 	return bad

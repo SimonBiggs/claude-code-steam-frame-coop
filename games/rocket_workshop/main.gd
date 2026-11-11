@@ -839,6 +839,16 @@ func crew_count() -> int:
 	return n
 
 
+## Crew really walking the floor now: a host's remote seats count only while a TV machine is connected (P2's seat
+## stays "active" on a lone VR host). Meteors and the gift picks' crew turn need someone here.
+func floor_crew() -> int:
+	var n := 0
+	for p in players:
+		if p.index > 0 and p.active and (not p.remote or (net != null and net.connected)):
+			n += 1
+	return n
+
+
 func _start_rocket(n: int) -> void:
 	var total := int(save.data.launched)
 	rocket_daily = n == G.DAILY_N and String(save.data.daily) != Seeded.today()
@@ -1012,7 +1022,7 @@ func _plan_meteors(n: int) -> void:
 	hazards.clear()
 	rocket_meteors = 0
 	meteor_hits = 0
-	if net.mode == "client" or crew_count() == 0:
+	if net.mode == "client" or floor_crew() == 0:
 		return
 	var spec := {"mode": play_mode, "season": season, "gift": gift_id, "n": n}
 	if OS.has_environment("RW_METEORS"):  # bots: more meteors, sooner (still fair: deep_test checks the bot spec)
@@ -1023,7 +1033,7 @@ func _plan_meteors(n: int) -> void:
 
 ## Host: tell the meteors that are due (during the work).
 func _fire_meteors() -> void:
-	if crew_count() == 0:
+	if floor_crew() == 0:
 		return
 	for e in hazards.due(work_t):
 		var warn := Deep.warn_of({"mode": play_mode, "gift": gift_id})
