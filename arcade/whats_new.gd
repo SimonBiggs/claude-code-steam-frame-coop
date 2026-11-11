@@ -33,6 +33,11 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "kr-pancakes", "date": "2026-11-11", "game": "kitchen_rush", "pic": "pancakes", "line": "Pancake day! Pizza night!", "try": {"KR_THEME": "pancake"}},
+	{"id": "kr-gifts", "date": "2026-11-11", "game": "kitchen_rush", "pic": "helpermouse", "line": "Pick Gran's chef gifts!"},
+	{"id": "kr-events", "date": "2026-11-11", "game": "kitchen_rush", "pic": "spill", "line": "Smoke and spills warn first"},
+	{"id": "kr-gentle", "date": "2026-11-11", "game": "kitchen_rush", "pic": "granny", "line": "Gentle, brave or hard"},
+	{"id": "kr-cafe", "date": "2026-11-11", "game": "kitchen_rush", "pic": "fishtank", "line": "Gran's café grows!"},
 	{"id": "bee-gifts", "date": "2026-11-11", "game": "bee_garden", "pic": "bumblebee", "line": "Pick Queen Bea's gifts!"},
 	{"id": "bee-storms", "date": "2026-11-11", "game": "bee_garden", "pic": "storm", "line": "Wasps and storms warn first", "try": {"BEE_TRY": "storm"}},
 	{"id": "bee-hive", "date": "2026-11-11", "game": "bee_garden", "pic": "hive", "line": "The hive grows honey boxes!"},

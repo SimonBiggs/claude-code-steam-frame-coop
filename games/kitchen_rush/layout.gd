@@ -36,6 +36,7 @@ const SOURCES := [
 	["lettuce", Vector3(-3.0, 0.0, -8.8)],
 	["tomato", Vector3(0.0, 0.0, -9.4)],
 	["cucumber", Vector3(3.0, 0.0, -8.8)],
+	["berry", Vector3(5.8, 0.0, -8.6)],  # the berry bush (PANCAKE DAY)
 ]
 
 const RUNNER_SPAWN := [Vector3(-2.0, 0.0, -2.2), Vector3(2.0, 0.0, -2.2)]

@@ -168,7 +168,7 @@ func _physics_process(delta: float) -> void:
 		return
 	_read_look(delta)
 	var move := _read_move() + bot_move
-	velocity = move.limit_length(1.0) * SPEED
+	velocity = move.limit_length(1.0) * SPEED * (main.runner_speed(self) if main.has_method("runner_speed") else 1.0)  # skates, smoke, spills
 	move_and_slide()
 	position.y = 0.0
 	bob_t += velocity.length() * delta * 1.8
