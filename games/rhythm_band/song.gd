@@ -192,6 +192,22 @@ func _make_charts() -> void:
 		g_pitch.append(int(na[2]))
 		g_lvl.append(int(na[3]))
 		g_star.append(int(na[4]))
+	# From song 2 every lane gets notes (a motif that never reached one lane left a 2-lane song 3, 2026-11-11): the
+	# middle note of the busiest lane moves to the empty one (deterministic: every machine builds the same).
+	if not two_lanes and g_lane.size() >= 3:
+		for want in 3:
+			if g_lane.has(want):
+				continue
+			var count := [0, 0, 0]
+			for l in g_lane:
+				count[l] += 1
+			var busy := count.find(count.max())
+			var idxs: Array[int] = []
+			for i in g_lane.size() - 1:  # (never the big final note)
+				if int(g_lane[i]) == busy:
+					idxs.append(i)
+			if not idxs.is_empty():
+				g_lane[idxs[idxs.size() / 2]] = want
 	# Drums (hi-hat 0, snare 1, tom 2, crash 3): beats that get busier through the song, in the song's
 	# style. EASY: the snare backbeat and a crash on each phrase. ROCK: extra hi-hats.
 	var drums: Array = []  # [beat, pad, level]
