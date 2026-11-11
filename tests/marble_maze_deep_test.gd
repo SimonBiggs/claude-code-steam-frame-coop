@@ -21,6 +21,7 @@ const Levels := preload("res://games/marble_maze/levels.gd")
 const Picks := preload("res://games/marble_maze/picks.gd")
 const Main := preload("res://games/marble_maze/main.gd")
 const PickOrbs := preload("res://core/pick_orbs.gd")
+const Contrast := preload("res://core/contrast.gd")
 
 var fails := 0
 
@@ -30,7 +31,7 @@ func _init() -> void:
 	var seeds := int(OS.get_environment("SEEDS")) if OS.has_environment("SEEDS") else 8
 	for w in Worlds.ordered():
 		_fail("modes: " + str(w))
-	for w in Worlds.contrast_problems(Levels.THEMES):
+	for w in Contrast.check_game("marble_maze"):  # marbles on every floor (games/marble_maze/palette.gd)
 		_fail("contrast: " + str(w))
 	# Mazes x modes x worlds.
 	var per_mode := {}

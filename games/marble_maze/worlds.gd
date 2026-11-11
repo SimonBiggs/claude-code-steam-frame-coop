@@ -10,7 +10,7 @@ extends RefCounted
 ##            (+1 ice room, snow falling), WINDY (+1 zoom-arrow run, leaves blowing), PARTY (+1 bumper, confetti),
 ##            STARRY NIGHT (a dark sky with stars; the board keeps its light) and FLOWER DAY (+1 loop, petals).
 ##            Worlds never recolour the board's floor: every marble colour must stand out on every floor
-##            (contrast_problems(); 2026-11: white sheep vanished on Sheep Round-Up's snow).
+##            (palette.gd + core/contrast.gd, tests/contrast_test.gd; 2026-11: white sheep vanished on snow).
 ##   EVENTS   told first by warn rings on the board (events.gd): TILT QUAKE (the board wobbles and pushes every
 ##            marble one way for a moment; a flashing stripe shows which way) and CLOSING GATE (a red disc pulses on
 ##            a narrow doorway along the way, then a gate pops up there for a few seconds and sinks again).
@@ -69,10 +69,6 @@ const WORLDS: Array[Dictionary] = [
 		"sky": Color(0.75, 0.92, 1.0), "fx": "petals", "weights": {"spring": 4.0, "summer": 2.0, "autumn": 0.0, "winter": 0.0}},
 ]
 const EVENT_COLORS := {"quake": Color(1.0, 0.6, 0.15), "gate": Color(1.0, 0.25, 0.3)}
-## The marble colours players roll as (main.gd PLAYER_COLORS 1..6; the giant's own solo marble is P2's).
-const MARBLE_COLORS: Array[Color] = [Color(1.0, 0.3, 0.3), Color(0.25, 0.6, 1.0), Color(0.35, 0.9, 0.35),
-	Color(1.0, 0.8, 0.1), Color(0.8, 0.4, 1.0), Color(1.0, 0.55, 0.15)]
-const MIN_CONTRAST := 0.3
 
 
 static func mode_of(id: String) -> Dictionary:
@@ -259,21 +255,6 @@ static func event_problems(def: Dictionary, list: Array, mode_id: String) -> Arr
 				why.append("a quake without a direction")
 		else:
 			why.append("unknown event %s" % str(e[1]))
-	return why
-
-
-## Every marble colour stands out on every theme's floor in every world (worlds never recolour the floor, so the
-## floors are THEMES' A / B colours): [] = fine.
-static func contrast_problems(themes: Dictionary) -> Array:
-	var why: Array = []
-	for th in themes:
-		var t: Array = themes[th]
-		for f in [t[0], t[1]]:
-			var fc: Color = f
-			for mc in MARBLE_COLORS:
-				var d := Vector3(fc.r - mc.r, fc.g - mc.g, fc.b - mc.b).length()
-				if d < MIN_CONTRAST:
-					why.append("marble %s hard to see on the %s floor" % [mc.to_html(false), th])
 	return why
 
 

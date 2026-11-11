@@ -62,6 +62,9 @@ const CALL_WANDER := 0.5
 
 const EVENT_KINDS: Array = ["fox", "thunder"]
 const EVENT_COLORS := {"fox": Color(1.0, 0.55, 0.2), "thunder": Color(0.75, 0.8, 1.0)}
+## A dog is its player's colour softened toward a sandy coat (main.gd _ensure_dog; palette.gd checks it).
+const DOG_COAT := Color(0.95, 0.85, 0.7)
+const DOG_COAT_MIX := 0.1  # (0.35 made the blue dog vanish on frosty grass, the green one on spring grass)
 const EVENTS_FROM := 1  ## field level from which events come (the very first field is calm)
 const WARN_SECS := 3.0
 const FOX_SECS := 9.0  ## a fox stays this long unless a dog sends it home
@@ -204,3 +207,7 @@ static func pressure(f: Dictionary, mode: String, base_time: float) -> Array:
 	var ev := make_events(f, int(f.get("seed", 0)), mode, clock(base_time, mode))
 	var time := clock(base_time, mode) + ev.size() * EVENT_BONUS
 	return [100.0 * float((f.get("sheep", []) as Array).size()) / time, float(ev.size())]
+
+
+static func dog_color(player: Color) -> Color:
+	return player.lerp(DOG_COAT, DOG_COAT_MIX)

@@ -448,7 +448,7 @@ func _ensure_dog(slot: int) -> Node3D:
 	if dogs.has(slot) and is_instance_valid(dogs[slot]):
 		return dogs[slot]
 	var col := party.color_of(slot)
-	var d := Creatures.monster("dog", {"color": col.lerp(Color(0.95, 0.85, 0.7), 0.35), "scale": 1.1, "seed": slot})
+	var d := Creatures.monster("dog", {"color": Seasons.dog_color(col), "scale": 1.1, "seed": slot})
 	d.name = "Dog%d" % slot
 	add_child(d)
 	var a := slot * 1.3

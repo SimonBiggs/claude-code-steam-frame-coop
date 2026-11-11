@@ -9,7 +9,8 @@ extends RefCounted
 ##   Contrast.score(fg, bg) -> float      0 = the same colour, ~0.1 = barely, 0.2+ = clear at a glance
 ##   Contrast.distinct(fg, bg) -> bool    score >= MIN
 ##   Contrast.problems(fgs, bgs, min) -> Array[String]   fgs / bgs: {name: Color}; a fg may be {"color": C, "rim": R}
-##                                        (an outline / glow / rim it really has): it is distinct when either is.
+##                                        (an outline / glow / rim, or a second part it always shows such as a
+##                                        dark face or dark trousers): it is distinct when either is.
 ##
 ## Every game declares what must be seen and where: games/<game>/palette.gd (found by itself, like
 ## story_pictures.gd) with
@@ -95,6 +96,42 @@ static func problems(fgs: Dictionary, bgs: Dictionary, min_score: float = MIN) -
 				out.append("%s #%s is hard to see on %s #%s (%.3f < %.2f; %s)" % [fn, fc.to_html(false), bn,
 					bg.to_html(false), s, min_score, "make it lighter or the background darker" if lg >= 0.0
 					else "make it darker or the background lighter"])
+	return out
+
+
+## {"<what> 1": c0, "<what> 2": c1, ...} from a list (or {"<what> <key>": c} from a dictionary of Colors), for
+## palette.gd files: Contrast.named("player", Party.COLORS).
+static func named(what: String, colors) -> Dictionary:
+	var out := {}
+	if colors is Dictionary:
+		for k in colors:
+			out["%s %s" % [what, k]] = colors[k]
+	else:
+		for i in colors.size():
+			out["%s %d" % [what, i + 1]] = colors[i]
+	return out
+
+
+## {"<what> <id>": entry[field]} from an Array of Dictionaries (or a Dictionary of Dictionaries), e.g. a game's
+## THEMES / BREEDS / TRACKS: Contrast.field("floor", Levels.THEMES_LIST, "floor", "id").
+static func field(what: String, entries, key: String, id_key: String = "id") -> Dictionary:
+	var out := {}
+	if entries is Dictionary:
+		for k in entries:
+			if entries[k] is Dictionary and entries[k].has(key):
+				out["%s %s" % [what, k]] = entries[k][key]
+	else:
+		for i in entries.size():
+			var e = entries[i]
+			if e is Dictionary and e.has(key):
+				out["%s %s" % [what, e.get(id_key, str(i + 1))]] = e[key]
+	return out
+
+
+## a + b (later names win).
+static func merge(a: Dictionary, b: Dictionary) -> Dictionary:
+	var out := a.duplicate()
+	out.merge(b, true)
 	return out
 
 
