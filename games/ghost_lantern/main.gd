@@ -58,6 +58,10 @@ const Save := preload("res://core/save.gd")
 const Seeded := preload("res://core/seeded.gd")
 const Telemetry := preload("res://core/telemetry.gd")
 const StoryCard := preload("res://core/story_card.gd")
+const WarnRings := preload("res://core/warn_rings.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
+const PicksScript := preload("res://games/ghost_lantern/picks.gd")
+const WingsScript := preload("res://games/ghost_lantern/wings.gd")
 const GAME_ID := "ghost_lantern"
 
 ## Survive night 6 to see the sunrise (then bonus nights). Nights 3 and 6 bring the GHOST KING.
@@ -226,6 +230,14 @@ var night_stats := {}  # this night: ghosts planned, caught, floated, found (lan
 var night_live := false  # a night is being played (for the quit RUN line)
 var night_time := 0.0  # seconds played tonight (game time)
 var story_count := 0  # story cards shown (the bot checks Granny Boo speaks)
+# Second pass: modes, lantern gifts on the pick orbs, warning rings for hops, wings.
+var game_mode := "gentle"  # gentle / brave / hard (PickOrbs.MODES), picked before night 1 (mirrored)
+var mode_picked := false  # host: this visit's mode is chosen
+var upgrades := {}  # lantern gifts this visit: id -> level (PicksScript.UPGRADES; mirrored)
+var gift_night := 0  # host: the last night a lantern gift was offered after
+var rings: WarnRings  # every machine draws the warning rings (host sends "warn")
+var picks: Node  # picks.gd (every machine draws the orbs, the host decides)
+var wing_node: Node3D  # wings.gd: this house's wing dressing
 
 
 func _ready() -> void:
@@ -236,7 +248,8 @@ func _ready() -> void:
 	world_refs = built
 	save = Save.new()
 	save.game_id = GAME_ID
-	save.defaults = {"world": -1, "houses": 0, "kept": 0, "jars": {}, "daily": {}, "best_night": 0, "nights": 0}
+	save.defaults = {"world": -1, "houses": 0, "kept": 0, "jars": {}, "daily": {}, "best_night": 0, "nights": 0,
+		"mode": "gentle", "wings": {}}
 	add_child(save)
 	if int(save.data.world) < 0:
 		save.data.world = Seeded.fresh_seed()  # this family's own houses
@@ -245,8 +258,14 @@ func _ready() -> void:
 	house_node.main = self
 	house_node.name = "House"
 	add_child(house_node)
+	rings = WarnRings.new()
+	add_child(rings)
+	wing_node = WingsScript.new()
+	wing_node.name = "Wing"
+	add_child(wing_node)
 	museum = MuseumScript.new()
 	museum.main = self
+	museum.wings = (save.data.wings as Dictionary).duplicate()
 	if SIMPLE_MODE:
 		museum.kept = int(save.data.kept)
 		museum.jars = (save.data.jars as Dictionary).duplicate()
@@ -264,6 +283,16 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
+	net.state_changed.connect(_on_state_changed)
+	picks = PicksScript.new()
+	picks.main = self
+	add_child(picks)
+	game_mode = String(PickOrbs.ALIASES.get(String(save.data.mode), String(save.data.mode)))
+	if not game_mode in PickOrbs.MODE_IDS:
+		game_mode = "gentle"
+	if OS.has_environment("GL_MODE") and String(OS.get_environment("GL_MODE")) in PickOrbs.MODE_IDS:
+		game_mode = OS.get_environment("GL_MODE")  # (What's New "try" / bots: no mode pick)
+		mode_picked = true
 	seats = ClassicSeats.new(self, {
 		"no_keys": 2,  # player.gd key_set 2: controller only
 		"free_actions": ["restart", "pause"],
@@ -1031,11 +1060,21 @@ func nearest_player(pos: Vector3):
 # --- Lantern -----------------------------------------------------------------
 
 func lantern_angle() -> float:
-	return FOCUS_ANGLE if players.size() > 0 and players[0].focus else LANTERN_ANGLE
+	return (FOCUS_ANGLE if players.size() > 0 and players[0].focus else LANTERN_ANGLE) + 5.0 * float(upgrades.get("wide", 0))
 
 
 func lantern_range() -> float:
-	return FOCUS_RANGE if players.size() > 0 and players[0].focus else LANTERN_RANGE
+	return (FOCUS_RANGE if players.size() > 0 and players[0].focus else LANTERN_RANGE) + 2.5 * float(upgrades.get("far", 0))
+
+
+## Lantern gifts: how much quicker ghosts get dizzy in the light (DIZZY STARS) and vacuums / the lantern slurp
+## (SUPER SUCK).
+func dizzy_mult() -> float:
+	return 1.0 - 0.25 * float(upgrades.get("dizzy", 0))
+
+
+func suck_mult() -> float:
+	return 1.0 + 0.3 * float(upgrades.get("vac", 0))
 
 
 func lantern_xform() -> Transform3D:
@@ -1136,7 +1175,7 @@ func _update_vacuums(delta: float) -> void:
 			continue
 		var g = vac_target(p)
 		if g != null:
-			g.suck(p.nozzle_pos(), delta * CAPTURE_RATE, p)
+			g.suck(p.nozzle_pos(), delta * CAPTURE_RATE * suck_mult(), p)
 
 
 func capture_ghost(g, by) -> void:
@@ -1149,8 +1188,8 @@ func capture_ghost(g, by) -> void:
 		tv_caught[by.index] = true
 		tv_catches[by.index] = int(tv_catches.get(by.index, 0)) + 1
 	g.drop_photo(by)
-	if SIMPLE_MODE and g.kind in HouseGen.GHOSTS and net.mode != "client":
-		_keep_ghost(g.kind)
+	if SIMPLE_MODE and (g.kind in HouseGen.GHOSTS or g.kind == "puffling") and net.mode != "client":
+		_keep_ghost("puff" if g.kind == "puffling" else g.kind)
 	if g.kind == "sleepy":
 		vr_woken += 1
 		vr_ghost_t = 1.0
@@ -1513,8 +1552,13 @@ func _process(delta: float) -> void:
 	if in_break:
 		if night == 0:
 			director().howto()
+		if SIMPLE_MODE and picks.active():
+			picks.tick(delta)  # the night waits for the pick orbs
+			return
 		break_timer -= delta
 		if break_timer <= 0.0:
+			if SIMPLE_MODE and _begin_pick():
+				return
 			_start_night()
 	elif not to_spawn.is_empty():
 		spawn_timer -= delta
@@ -1856,7 +1900,8 @@ func make_snapshot() -> Array:
 	var ph := []
 	for p in photos:
 		ph.append(p.state)
-	return [night, score, caught, saved, game_over, ps, gs, ph, in_break, director().pack(), practice, tv_caught.keys(), tv_catches, house_key]
+	return [night, score, caught, saved, game_over, ps, gs, ph, in_break, director().pack(), practice, tv_caught.keys(), tv_catches, house_key,
+		[game_mode, _upgrade_list()]]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -1889,6 +1934,11 @@ func apply_snapshot(s: Array) -> void:
 			tv_catches[k] = int(tc[k])
 	if s.size() > 13 and (s[13] as Array).size() == 5:
 		_apply_house(s[13])
+	if s.size() > 14 and (s[14] as Array).size() == 2:
+		game_mode = String(s[14][0])
+		var ul: Array = s[14][1]
+		for i in mini(ul.size(), PicksScript.UPGRADES.size()):
+			upgrades[String(PicksScript.UPGRADES[i][0])] = int(ul[i])
 
 
 func _sync_ghosts(list: Array) -> void:
@@ -1950,6 +2000,10 @@ func apply_event(kind: String, args: Array) -> void:
 		"shake":
 			if house_node != null:
 				house_node.shake(int(args[0]), float(args[1]))
+		"warn":
+			rings.warn(args[0], float(args[1]), args[2], float(args[3]), 0.06, {"style": "rings"})
+		"take":
+			picks.take_fx(int(args[0]), int(args[1]))
 
 
 ## Lightning flashes, party lights and the sunrise (both machines).
@@ -2152,7 +2206,7 @@ func _start_simple_night() -> void:
 		_new_house()
 	# Tonight's ghosts from the house (housegen.gd): hiding ones go straight into their hiding places,
 	# the rest drift in through the ceiling one by one.
-	var plan := HouseGen.night_plan(house, night, active_count())
+	var plan := HouseGen.night_plan(house, night, active_count(), game_mode)
 	var hidden := 0
 	for g in plan:
 		if int(g.hide) >= 0:
@@ -2160,6 +2214,9 @@ func _start_simple_night() -> void:
 			hidden += 1
 		else:
 			to_spawn.append(String(g.kind))
+	if night == 1 and OS.get_environment("GL_TRY") in ["boing", "puff"]:
+		to_spawn.push_front(OS.get_environment("GL_TRY"))  # What's New "try": meet the new ghost tonight (first out)
+		plan.append({"kind": OS.get_environment("GL_TRY"), "hide": -1})
 	to_spawn.reverse()  # pop_back() takes them in plan order
 	spawn_timer = 1.5
 	var king_night := HouseGen.king_night(night)
@@ -2167,12 +2224,19 @@ func _start_simple_night() -> void:
 	director().on_night_started(night, king_night)
 	sound("wave", -2.0, 0.7)
 	night_stats = {"ghosts": plan.size() + (1 if king_night else 0), "hidden": hidden, "caught": 0, "floated": 0,
-		"lantern": 0, "bump": 0, "self": 0, "crew": active_count()}
+		"lantern": 0, "bump": 0, "self": 0, "crew": active_count(), "pops": 0,
+		"boing": plan.filter(func(g2: Dictionary) -> bool: return String(g2.kind) == "boing").size(),
+		"puff": plan.filter(func(g2: Dictionary) -> bool: return String(g2.kind) == "puff").size()}
 	night_time = 0.0
 	night_live = true
-	print("Night %d started (%d ghosts, %d hiding%s) in %s" % [night, plan.size(), hidden, ", KING" if king_night else "", HouseGen.room_for(house, night)])
+	print("Night %d started (%d ghosts, %d hiding%s) in %s, %s, gifts %s" % [night, plan.size(), hidden, ", KING" if king_night else "", HouseGen.room_for(house, night), game_mode, str(upgrades)])
 	_show_center("NIGHT %d" % night, 2.0)
 	var st := HouseGen.night_story(night)
+	for nk in ["boing", "puff"]:  # a new kind tonight gets its own card (the first time this visit)
+		if plan.any(func(g2: Dictionary) -> bool: return String(g2.kind) == nk) and not has_meta("told_" + nk):
+			set_meta("told_" + nk, true)
+			st = ["boing", "Boing! Watch the rings!"] if nk == "boing" else ["puff", "Puff goes POP!"]
+			break
 	_story({"who": "GRANNY BOO", "pic": st[0], "line": st[1], "color": _story_color(String(st[0])), "duration": 4.5})
 
 
@@ -2210,6 +2274,111 @@ func ghost_floated_away(g) -> void:
 	_remove_ghost(g)
 
 
+# --- Second pass: modes, lantern gifts, hops and pops (picks.gd, core/warn_rings.gd) ------
+
+## Host / local: put up the next pick when a break ends (true: the night waits for it).
+## Before night 1: GENTLE / BRAVE / HARD (once a visit). After each night: GRANNY BOO'S LANTERN GIFT.
+func _begin_pick() -> bool:
+	if net.mode == "client" or picks.active():
+		return false
+	if night == 0 and not mode_picked:
+		var entries: Array = []
+		var ids := PickOrbs.mode_ids(game_mode)
+		for id in ids:
+			var d := PickOrbs.mode(String(id))
+			entries.append({"id": id, "name": String(d.name), "pic": String(d.pic), "color": d.color})
+		picks.begin("mode", entries, ids, _on_picked)
+		return true
+	if night >= 1 and gift_night < night and not OS.has_environment("GL_NO_GIFT"):
+		gift_night = night
+		var ids2 := PicksScript.offer(upgrades, int(house.get("seed", 0)), night)
+		if ids2.size() < 2:
+			return false  # every gift taken twice: nothing to choose
+		var entries2: Array = []
+		for id in ids2:
+			entries2.append(PicksScript.upgrade_entry(String(id)))
+		picks.begin("lantern", entries2, ids2, _on_picked)
+		_story({"who": "GRANNY BOO", "pic": "grannyboo", "line": "A gift for your lantern!", "color": Color(1.0, 0.85, 0.45), "duration": 4.0})
+		return true
+	return false
+
+
+## Host / local: a pick was taken (by a player, or the middle one when nobody chose).
+func _on_picked(stage: String, opt: Variant) -> void:
+	match stage:
+		"mode":
+			game_mode = String(opt)
+			mode_picked = true
+			save.data.mode = game_mode
+			save.mark_dirty()
+			var m := PickOrbs.mode(game_mode)
+			_story({"who": "GRANNY BOO", "pic": String(m.get("pic", "heart")), "line": String(PickOrbs.MODE_LINES.get(game_mode, "Let's go!")),
+				"color": m.get("color", Color.WHITE), "duration": 3.5})
+		"lantern":
+			var id := String(opt)
+			upgrades[id] = int(upgrades.get(id, 0)) + 1
+			var e := PicksScript.upgrade_entry(id)
+			sound("fanfare", -8.0, 1.3)
+			burst(lantern_xform().origin, e.color, 24, 0.07)
+			_story({"who": "GRANNY BOO", "pic": String(e.pic), "line": String(e.name) + "!", "color": e.color, "duration": 3.0})
+	break_timer = 1.5
+
+
+## The lantern gift levels as a plain list in PicksScript.UPGRADES order (small and stable over the network).
+func _upgrade_list() -> Array:
+	var out: Array = []
+	for u in PicksScript.UPGRADES:
+		out.append(int(upgrades.get(String(u[0]), 0)))
+	return out
+
+
+## Every machine: sticky net state (the pick orbs, so a machine joining mid-pick sees them too).
+func _on_state_changed(key: String, value: Variant) -> void:
+	if key == "orbs" and net.mode == "client" and value is Array and (value as Array).size() == 3:
+		picks.show_row(String(value[0]), value[1] if value[1] is Array else [], value[2] if value[2] is Array else [])
+
+
+## Host: a warning ring on the floor of every machine (where a hopping ghost or a puffling will land).
+func ghost_warn(pos: Vector3, r: float, col: Color, secs: float) -> void:
+	rings.warn(pos, r, col, secs, 0.06, {"style": "rings"})
+	net.event("warn", [pos, r, col, secs])
+
+
+## Host: where BOING hops next: 2.5 - 4.5 m on, towards someone (so a vacuum can be waiting), inside the house.
+func hop_spot(g) -> Vector3:
+	var anchors: Array = []
+	for p in players:
+		if p.active and not p.ghost and (not p.remote or net.connected or p.index == 0):
+			anchors.append(p.global_position)
+	var from: Vector3 = g.global_position
+	var to_p: Vector3 = anchors.pick_random() if not anchors.is_empty() else Vector3.ZERO
+	var dir := Vector3(to_p.x - from.x, 0.0, to_p.z - from.z)
+	dir = dir.normalized() if dir.length() > 0.5 else Vector3.FORWARD.rotated(Vector3.UP, randf() * TAU)
+	dir = dir.rotated(Vector3.UP, randf_range(-0.7, 0.7))
+	var spot := from + dir * randf_range(2.5, 4.5)
+	if Vector2(spot.x - to_p.x, spot.z - to_p.z).length() < 1.2:
+		spot += dir * 1.4  # never right on top of someone
+	return Vector3(clampf(spot.x, -19.5, 19.5), 1.2, clampf(spot.z, -6.8, 6.8))
+
+
+## Host: a dizzy PUFF pops: pufflings float down into warning rings around it (dizzy when they land).
+func puff_pop(g) -> void:
+	var at: Vector3 = g.global_position
+	sound("pop", -2.0, 0.9)
+	burst(at, Color(1.0, 1.0, 0.9), 26, 0.06)
+	net.event("burst", [at, Color(1.0, 1.0, 0.9), 26, 0.06])
+	var a0 := randf() * TAU
+	for i in HouseGen.PUFFLINGS:
+		var pl = _spawn_ghost("puffling")
+		pl.global_position = at
+		var off := Vector3.FORWARD.rotated(Vector3.UP, a0 + TAU * float(i) / float(HouseGen.PUFFLINGS)) * randf_range(1.8, 2.6)
+		pl.start_hop(Vector3(clampf(at.x + off.x, -19.5, 19.5), 1.0, clampf(at.z + off.z, -6.8, 6.8)))
+	night_stats["ghosts"] = int(night_stats.get("ghosts", 0)) + HouseGen.PUFFLINGS - 1
+	night_stats["pops"] = int(night_stats.get("pops", 0)) + 1
+	print("A puff popped into %d pufflings" % HouseGen.PUFFLINGS)
+	_remove_ghost(g)
+
+
 # --- Granny Boo's house (housegen.gd, house.gd, museum.gd) --------------------------
 
 ## Host / local: this visit's house. The first visit each day is TODAY'S HOUSE (the same everywhere),
@@ -2232,10 +2401,25 @@ func _new_house() -> void:
 	var h := house.duplicate()
 	print("House: %s seed %d level %d%s, hiding places %s" % [h.name, seed_value, level, " (TODAY'S HOUSE)" if today_due else "",
 		",".join(PackedStringArray((h.spots as Array).map(func(s2: Dictionary) -> String: return "%s@%s" % [s2.kind, s2.room])))])
+	var wing: Dictionary = house.get("wing", {})
+	var new_wing := false
+	if not wing.is_empty():
+		var ws: Dictionary = sd.wings
+		new_wing = not ws.has(String(wing.id))
+		ws[String(wing.id)] = int(ws.get(String(wing.id), 0)) + 1
+		if museum != null:
+			museum.wings = ws.duplicate()
+			museum.apply_wings()
+		print("Wing: the %s (%s)" % [wing.id, wing.room])
 	get_tree().create_timer(3.4).timeout.connect(func() -> void:
 		if is_inside_tree():
 			_story({"who": "GRANNY BOO", "pic": "grannyboo", "color": Color(1.0, 0.6, 0.75), "duration": 4.5,
 				"line": "Today's house!" if bool(house.get("daily", false)) else "Tidy my house, dears!"}))
+	if not wing.is_empty():
+		get_tree().create_timer(8.4).timeout.connect(func() -> void:
+			if is_inside_tree():
+				_story({"who": "GRANNY BOO", "pic": String(wing.id), "color": _story_color(String(wing.id)), "duration": 4.5,
+					"line": String(WingsScript.LINES.get(String(wing.id), "A new room!")) if new_wing else String(WingsScript.NAMES.get(String(wing.id), "")) + "!"}))
 
 
 ## Jar counts as a plain list in MuseumScript.KIND_ORDER (small and stable over the network).
@@ -2256,6 +2440,7 @@ func _apply_house(key: Array) -> void:
 	if not same_house:
 		house = HouseGen.generate(int(key[0]), {"level": int(key[1]), "daily": bool(key[2])})
 		house_node.build(house)
+		wing_node.build(house.get("wing", {}))
 	if museum != null and museum.is_inside_tree():
 		var j := {}
 		var arr: Array = key[4]
@@ -2345,7 +2530,9 @@ func _night_done(end: String) -> void:
 		"caught": int(night_stats.get("caught", 0)), "floated": int(night_stats.get("floated", 0)),
 		"found_lantern": int(night_stats.get("lantern", 0)), "found_bump": int(night_stats.get("bump", 0)),
 		"woke_alone": int(night_stats.get("self", 0)),
-		"secs": snappedf(night_time, 0.1),
+		"secs": snappedf(night_time, 0.1), "mode": game_mode, "wing": String(house.get("wing", {}).get("id", "")),
+		"gifts": _upgrade_list(), "boing": int(night_stats.get("boing", 0)), "puff": int(night_stats.get("puff", 0)),
+		"pops": int(night_stats.get("pops", 0)),
 		"kept": int(sd.kept), "cosy": MuseumScript.cosy_level(int(sd.kept))})
 
 
@@ -2356,6 +2543,11 @@ func _story_color(pic: String) -> Color:
 		"peekaboo", "spooker": return Color(0.78, 0.58, 1.0)
 		"goldie", "golden", "sun": return Color(1.0, 0.85, 0.3)
 		"kingghost", "king": return Color(0.75, 0.9, 1.0)
+		"boing": return Color(0.5, 0.92, 1.0)
+		"puff", "puffling": return Color(1.0, 1.0, 0.8)
+		"attic": return Color(0.95, 0.75, 0.5)
+		"cellar": return Color(0.85, 0.6, 0.4)
+		"greenhouse": return Color(0.55, 1.0, 0.6)
 		"grannyboo": return Color(1.0, 0.6, 0.75)
 	return Color(0.6, 1.0, 0.75)
 

@@ -207,6 +207,7 @@ func _simple_checks(delta: float) -> void:
 		saw_hand = true
 	if main.game_over:
 		print("BOT: FAIL simple mode reached game over")
+	_second_pass(delta)
 	if mode == "client":
 		_watch_house()
 		if t > 45.0 and not has_meta("report"):
@@ -271,6 +272,81 @@ func _simple_checks(delta: float) -> void:
 		print("BOT: SIMPLE %s practice_done=%s woken=%d saw_sleepy=%s saw_glowy=%s hand=%s tv_caught=%s night=%d caught=%d props=%s" % [
 			"OK" if ok else "FAIL", not main.practice, main.vr_woken, saw_sleepy, saw_glowy, saw_hand, main.tv_caught.keys(),
 			main.night, main.caught, main.props.touched])
+
+
+## Second pass: the pick orbs (mode before night 1, a lantern gift after a night: the VR hand or P2's feet take
+## one), warning rings for Boing's hops and the pufflings, the wing. Client: sees the orbs, rings and the mode.
+var saw_orbs := {}
+var saw_rings := false
+var saw_boing_land := false
+var pufflings_seen := 0
+var gift_skip := false
+var spawned_new := false
+
+
+func _second_pass(_delta: float) -> void:
+	var mode: String = main.net.mode
+	if not main.picks.orbs.orbs.is_empty():
+		saw_orbs[main.picks.orbs.stage] = true
+	if main.rings.count() > 0:
+		saw_rings = true
+	for g in get_tree().get_nodes_in_group("ghosts"):
+		if g.kind == "puffling":
+			pufflings_seen = maxi(pufflings_seen, get_tree().get_nodes_in_group("ghosts").filter(func(x) -> bool: return x.kind == "puffling").size())
+		if g.kind == "boing" and g.stun_t > 0.0 and g.hop_t < 0.0 and g.has_meta("hopped"):
+			saw_boing_land = true
+		if g.kind == "boing" and g.hop_t >= 0.0:
+			g.set_meta("hopped", true)
+	if mode == "client":
+		if t > 44.0 and not has_meta("client_second"):
+			set_meta("client_second", true)
+			print("BOT: client second pass: orbs=%s rings=%s mode=%s gifts=%s wing=%s" % [saw_orbs.keys(), saw_rings, main.game_mode, main.upgrades, main.house.get("wing", {}).get("id", "-")])
+			if main.net.connected and saw_orbs.is_empty() and not OS.has_environment("GL_MODE"):
+				print("SCRIPT ERROR: BOT second: the client never saw the pick orbs")
+		return
+	var p1 = main.players[0]
+	# Take an orb a second after it's up: the VR lantern-bearer with a hand, else P2 walks under one.
+	if main.picks.active() and main.picks.chosen < 0 and main.picks.t < float(main.picks.WAIT.get(main.picks.stage, 10.0)) - 1.2:
+		var row: Array = main.picks.orbs.orbs
+		if not row.is_empty():
+			var o: Node3D = row[row.size() - 1] if main.picks.stage == "mode" else row[0]
+			if p1.vr:
+				p1.hand_l.global_position = o.global_position
+			else:
+				main.players[1].global_position = Vector3(o.global_position.x, 0.0, o.global_position.z)
+	# After night 1 has run a while, end it so the lantern gift comes up (the bot can't wait a whole night).
+	if not gift_skip and main.night >= 1 and t > 34.0 and not main.in_break:
+		gift_skip = true
+		print("BOT: skip to night %d for the lantern gift" % (main.night + 1))
+		main.debug_skip_to_night(main.night + 1)
+	# The new ghosts: a Boing hops (rings), a Puff gets dizzy and pops into pufflings (rings).
+	if not spawned_new and main.night >= 2 and not main.in_break and t > 38.0:
+		spawned_new = true
+		var b = main._spawn_ghost("boing")
+		b.hop_wait = 0.3
+		var pf = main._spawn_ghost("puff")
+		pf.global_position = p1.global_position + Vector3(0, 1.4, -3.0)
+		pf.stun_t = 1.0
+		print("BOT: spawned a boing and a puff")
+	if t > 54.0 and not has_meta("second_report"):
+		set_meta("second_report", true)
+		var hist: Array = main.picks.history.map(func(h: Array) -> String: return String(h[0]))
+		var errs: Array = []
+		if not OS.has_environment("GL_MODE") and not OS.has_environment("BOT_NIGHT") and not hist.has("mode"):
+			errs.append("no mode pick (%s)" % str(hist))
+		if not hist.has("lantern"):
+			errs.append("no lantern gift pick (%s)" % str(hist))
+		if main.picks.history.any(func(h: Array) -> bool: return not bool(h[2])) and not OS.has_environment("BOT_NIGHT"):
+			errs.append("nobody took an orb (%s)" % str(main.picks.history))
+		if main.upgrades.is_empty():
+			errs.append("no lantern gift taken")
+		if spawned_new and (not saw_rings or pufflings_seen < 2 or not saw_boing_land):
+			errs.append("new ghosts: rings=%s pufflings=%d boing_landed=%s" % [saw_rings, pufflings_seen, saw_boing_land])
+		for e in errs:
+			print("SCRIPT ERROR: BOT second: " + str(e))
+		print("BOT: SECOND %s picks=%s mode=%s gifts=%s angle=%.0f range=%.1f rings=%s pufflings=%d boing_landed=%s wing=%s" % [
+			"OK" if errs.is_empty() else "FAIL", str(main.picks.history), main.game_mode, main.upgrades, main.lantern_angle(),
+			main.lantern_range(), saw_rings, pufflings_seen, saw_boing_land, main.house.get("wing", {}).get("id", "-")])
 
 
 ## Granny Boo's house: hiding ghosts seen hiding (eyes showing, body hidden) and coming out.

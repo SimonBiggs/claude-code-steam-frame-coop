@@ -33,6 +33,12 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "gl-wings", "date": "2026-11-11", "game": "ghost_lantern", "pic": "attic", "line": "Attic, cellar, greenhouse!"},
+	{"id": "gl-boing", "date": "2026-11-11", "game": "ghost_lantern", "pic": "boing", "line": "Boing hops! Watch the rings", "try": {"GL_TRY": "boing"}},
+	{"id": "gl-puff", "date": "2026-11-11", "game": "ghost_lantern", "pic": "puff", "line": "Puff pops into pufflings!", "try": {"GL_TRY": "puff"}},
+	{"id": "gl-gift", "date": "2026-11-11", "game": "ghost_lantern", "pic": "biglight", "line": "Pick a lantern gift!"},
+	{"id": "gl-gentle", "date": "2026-11-11", "game": "ghost_lantern", "pic": "grannyboo", "line": "Gentle, brave or hard", "try": {"GL_MODE": "gentle"}},
+	{"id": "gl-cosy", "date": "2026-11-11", "game": "ghost_lantern", "pic": "jar", "line": "A cat, music and stars!"},
 	{"id": "ts-blocks", "date": "2026-11-11", "game": "tower_stack", "pic": "honeyblock", "line": "Bouncy, sticky, balloon!", "try": {"TS_TRY": "blocks"}},
 	{"id": "ts-districts", "date": "2026-11-11", "game": "tower_stack", "pic": "wren", "line": "Wren's town grows streets!"},
 	{"id": "ts-pick", "date": "2026-11-11", "game": "tower_stack", "pic": "lighthouse", "line": "Pick what to build next!"},

@@ -22,7 +22,12 @@ const KINDS := {
 	"glowy": {"color": Color(0.6, 1.0, 0.75), "radius": 0.45, "speed": 0.0, "tough": 0.5, "points": 0},
 	# Houses (housegen.gd): SNOOZE sleeps in a hiding place in a nightcap until it's found.
 	"snoozy": {"color": Color(0.62, 0.78, 1.0), "radius": 0.44, "speed": 1.4, "tough": 0.7, "points": 100},
+	# Second pass: BOING hops (a warning ring shows where it lands, dizzy), PUFF pops into two little pufflings.
+	"boing": {"color": Color(0.5, 0.92, 1.0), "radius": 0.42, "speed": 1.2, "tough": 0.8, "points": 120},
+	"puff": {"color": Color(1.0, 1.0, 0.82), "radius": 0.55, "speed": 1.0, "tough": 0.9, "points": 120},
+	"puffling": {"color": Color(1.0, 0.97, 0.75), "radius": 0.3, "speed": 1.3, "tough": 0.45, "points": 60},
 }
+const HouseGen := preload("res://games/ghost_lantern/housegen.gd")
 const PRACTICE := ["sleepy", "glowy"]
 const LIFE := 50.0  # simple mode: an uncaught ghost giggles and floats away through the ceiling after this
 const STEALERS := ["thief", "shy"]
@@ -92,6 +97,11 @@ var zip_t := 0.0  # zip (sprite): seconds since its last rest
 var found_by := ""  # how it came out: lantern / bump / self
 var peeker: Node3D  # what shows of a hiding ghost (always visible): eyes, bubbles or a hat tip
 var bubbles: Array[MeshInstance3D] = []
+var hop_t := -1.0  # boing / puffling: seconds into a hop (-1: not hopping)
+var hop_from := Vector3.ZERO
+var hop_to := Vector3.ZERO
+var hop_wait := 2.0  # boing: seconds until the next hop
+var spring: Node3D  # boing: the spring under it (squashes on landing)
 
 func setup(k: String, n: int, m) -> void:
 	kind = k
@@ -105,8 +115,10 @@ func setup(k: String, n: int, m) -> void:
 	points = d.points
 	if m.simple:
 		# Night 1 ghosts drift slowly; they speed up a little each night.
-		speed = d.speed * (0.5 + 0.06 * mini(n - 1, 6))
+		speed = d.speed * (0.5 + 0.06 * mini(n - 1, 6)) * float(HouseGen.MODE_SPEED.get(m.game_mode, 1.0))
 		tough = d.tough * (0.5 if k == "king" else 1.0)
+		if k == "boing":
+			hop_wait = randf_range(1.0, 2.5)
 
 
 func _ready() -> void:
@@ -328,6 +340,29 @@ func _build_extras() -> void:
 			tm.material = gm
 			trail.mesh = tm
 			add_child(trail)
+		"boing":  # a springy coil under it and a little propeller beanie
+			spring = Node3D.new()
+			spring.position = Vector3(0, -r * 1.1, 0)
+			body.add_child(spring)
+			for i in 4:
+				var coil := TorusMesh.new()
+				coil.inner_radius = r * 0.32
+				coil.outer_radius = r * 0.42
+				coil.rings = 12
+				coil.ring_segments = 6
+				_ghost_part(coil, Vector3(0, -r * 0.22 * i, 0), Color(0.75, 0.95, 1.0), spring)
+			_ghost_part(_blob(r * 0.45, 0.55), Vector3(0, r * 0.82, 0), Color(1.0, 0.45, 0.4))
+			var blade := BoxMesh.new()
+			blade.size = Vector3(r * 1.2, r * 0.05, r * 0.16)
+			_ghost_part(blade, Vector3(0, r * 1.1, 0), Color(1.0, 0.9, 0.3))
+		"puff", "puffling":  # a fluffy dandelion clock: little seed tufts all round its head
+			var tufts := 10 if kind == "puff" else 5
+			for i in tufts:
+				var a := TAU * float(i) / float(tufts)
+				var up := 0.35 + 0.5 * float(i % 3) / 2.0
+				var tp := Vector3(cos(a) * r * 0.95, r * up, sin(a) * r * 0.95)
+				_ghost_part(_blob(r * 0.22, 1.0), tp, Color(1.0, 1.0, 0.92))
+			_ghost_part(_blob(r * 0.2, 1.0), Vector3(0, r * 1.05, 0), Color(1.0, 0.95, 0.6))
 		"king":
 			crown = Node3D.new()
 			crown.position = Vector3(0, r * 0.95, 0)
@@ -539,7 +574,7 @@ func _physics_process(delta: float) -> void:
 		return
 	if reveal > 0.5 and stun_t <= 0.0:
 		beam_t += delta * (2.0 if main.players[0].focus else 1.0)
-		if beam_t >= STUN_TIME * (2.2 if kind == "king" else 1.0) and stun_cd <= 0.0:
+		if beam_t >= STUN_TIME * (2.2 if kind == "king" else 1.0) * main.dizzy_mult() and stun_cd <= 0.0:
 			_stun()
 	elif reveal <= 0.5:
 		beam_t = maxf(0.0, beam_t - delta)
@@ -548,6 +583,9 @@ func _physics_process(delta: float) -> void:
 	else:
 		capture = maxf(0.0, capture - delta * 0.3)
 
+	if main.simple and (kind == "boing" or hop_t >= 0.0) and _hop(delta):
+		_check_touch()
+		return
 	var desired := Vector3.ZERO
 	var spd := speed
 	var target_y := 1.4
@@ -795,6 +833,9 @@ func _simple_extras(delta: float) -> bool:
 			zip_t = 0.0
 			stun_t = 2.4
 			stun_cd = 0.0
+	if kind == "puff" and stun_t > 0.0 and not leaving:
+		main.puff_pop(self)  # dizzy in the light: it pops into pufflings (main tells where they land)
+		return true
 	if kind != "golden":
 		life_t += delta
 	if not leaving and life_t > LIFE * (1.8 if kind == "king" else 1.0) and stun_t <= 0.0 and capture < 0.05:
@@ -807,7 +848,7 @@ func _simple_extras(delta: float) -> bool:
 	if stun_t > 0.0 and reveal > 0.5 and not main.has_vacuums():
 		sucked_t = 0.15
 		pull_from = main.lantern_xform().origin
-		capture += delta * 0.55 / tough
+		capture += delta * 0.55 * main.suck_mult() / tough
 		if capture >= 1.0:
 			main.capture_ghost(self, main.players[0])
 			return true
@@ -858,6 +899,45 @@ func _simple_touch() -> void:
 			return
 
 
+## Host: BOING hops (and a puffling floats down) into a warning ring main.gd drew where it lands; it lands dizzy.
+## True while it moves itself (in the air, or about to hop); false lets the normal float / dizzy / vacuum code run.
+func _hop(delta: float) -> bool:
+	if hop_t >= 0.0:  # in the air: a hop always finishes, in its ring
+		hop_t += delta
+		var k := clampf(hop_t / HouseGen.HOP_TIME, 0.0, 1.0)
+		position = hop_from.lerp(hop_to, k)
+		position.y = lerpf(hop_from.y, hop_to.y, k) + sin(k * PI) * (1.6 if kind == "boing" else 0.0)
+		body.rotation.x = sin(k * TAU) * 0.3
+		if k >= 1.0:
+			hop_t = -1.0
+			stun_t = float(HouseGen.LAND_DIZZY.get(main.game_mode, 2.0))  # landed: dizzy (catch it!)
+			stun_cd = 0.0
+			hop_wait = stun_t + randf_range(2.0, 3.2)
+			if spring != null:
+				spring.scale = Vector3(1.3, 0.4, 1.3)
+			main.sound("hit", -8.0, 1.5 if kind == "boing" else 1.9)
+			main.burst(global_position + Vector3.DOWN * 0.4, color, 8, 0.05)
+		return true
+	if kind != "boing" or leaving or hiding or sucked_t > 0.0 or stun_t > 0.0 or capture > 0.05:
+		return false
+	hop_wait -= delta
+	if hop_wait > 0.0:
+		return false
+	var spot: Vector3 = main.hop_spot(self)
+	start_hop(spot)
+	return true
+
+
+## Host: hop (or float down) to `to`, told by a warning ring for HouseGen.HOP_TIME seconds on every machine.
+func start_hop(to: Vector3) -> void:
+	hop_from = global_position
+	hop_to = to
+	hop_t = 0.0
+	main.ghost_warn(Vector3(to.x, 0.0, to.z), 0.75 if kind == "boing" else 0.55, color, HouseGen.HOP_TIME)
+	if kind == "boing":
+		main.sound("boing", -8.0, 1.2)
+
+
 # --- Visuals (both machines) -------------------------------------------------
 
 func _process(delta: float) -> void:
@@ -876,6 +956,8 @@ func _process(delta: float) -> void:
 		body.rotation.z = sin(t * 6.0) * 0.25
 	else:
 		body.rotation.z = lerpf(body.rotation.z, 0.0, 1.0 - exp(-5.0 * delta))
+	if spring != null:
+		spring.scale = spring.scale.lerp(Vector3.ONE * (1.0 + 0.08 * sin(t * 9.0)), 1.0 - exp(-6.0 * delta))
 	stars.visible = stun_t > 0.0
 	if stars.visible:
 		stars.rotation.y += delta * 4.0
