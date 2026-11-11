@@ -42,6 +42,8 @@ var picks_shot := 0
 var pick_target := -1
 var last_pick_stage := ""
 var stood_in := false  # player 2 stood in the first told deck event
+var checks := 0
+var fails := 0
 
 
 func _wanted_deckhands() -> int:
@@ -580,6 +582,8 @@ func _check_tip(who: String, text: String) -> void:
 
 func _exit_tree() -> void:
 	if main != null:
+		# Its own verdict, in local AND networked runs (multibot reads it; tests/bot_end.gd ends networked runs).
+		print("BOT RESULT: %s (%d checks%s)" % ["PASS" if fails == 0 else "FAIL", checks, "" if fails == 0 else ", %d failed" % fails])
 		if main.simple:
 			var ks: Array = cues.keys()
 			ks.sort()
@@ -643,4 +647,6 @@ func _check_story(mode: String) -> void:
 
 
 func _ok(ok: bool, what: String) -> void:
+	checks += 1
+	fails += 0 if ok else 1
 	print(("Bot: OK " if ok else "SCRIPT ERROR: BOT: FAILED ") + what)

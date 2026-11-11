@@ -89,8 +89,8 @@ const HARBOUR_CLEAR := 8.0  # metres between the harbour and the furthest pirate
 ## The pick row: three orbs on the sea off the gunner's cannon.
 const ROW_DIST := 19.0
 const ROW_ANGLE := 0.42  # radians between orbs (seen from the cannon)
-const ROW_UP := 1.3  # orb middle above the sea
-const ORB_SCALE := 2.6
+const ROW_UP := 2.6  # orb middle above the sea (its name floats over it)
+const ORB_SCALE := 3.0
 const CATCH := 0.6  # a cannonball this near an orb's edge takes it
 const ROW_WAIT := 20.0  # nobody shot one: the middle after this
 const SOLO_WAIT := 25.0  # nobody else aboard: practice ends after the hits and this long (TV players still drop in)
