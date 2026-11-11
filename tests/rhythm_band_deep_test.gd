@@ -29,7 +29,7 @@ const Stage := preload("res://games/rhythm_band/stage.gd")
 var fails := 0
 
 
-func _init() -> void:
+func _initialize() -> void:
 	var t0 := Time.get_ticks_msec()
 	var seeds := int(OS.get_environment("SEEDS")) if OS.has_environment("SEEDS") else 10
 	for w in Deep.ordered():
