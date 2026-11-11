@@ -320,6 +320,13 @@ func _hiders(delta: float) -> void:
 
 ## One BOT RESULT line per machine once every verdict is in.
 func _result(mode: String) -> void:
+	# A VR host alone (no TV machine, so no hiders): the solo Pip hunt rounds must start and end by themselves (this bot
+	# can't drive a VR seeker on the host, so nobody gets found: the hiders' and finder's verdicts don't apply).
+	if mode == "host" and not main.net.connected and int(get_meta("max_hiders", 0)) == 0 and main.hider_count() == 0:
+		if main.round_no >= 3 and not has_meta("result"):
+			set_meta("result", true)
+			print("BOT RESULT: %s (VR host alone: %d solo rounds ran)" % ["PASS" if main.solo_round else "FAIL", main.round_no])
+		return
 	var late: bool = main.round_no >= 6  # verdicts still missing by now count as failures
 	if has_meta("result") or (not late and (not cue_verdict or maps_seen.size() < 3 or not has_meta("pip_ok") or not has_meta("friend_ok") or (mode != "client" and not conn_done))):
 		return
@@ -639,7 +646,9 @@ func _cue_verdict() -> void:
 	var need: Array[String] = []
 	set_meta("max_hiders", maxi(int(get_meta("max_hiders", 0)), main.hider_count()))
 	var hiders_here: bool = int(get_meta("max_hiders")) > 0 or bot_players >= 2  # alone (BOT_PLAYERS=1 on a Deck): no hider cues
-	if mode == "local" and not hiders_here:
+	if mode == "host" and not main.net.connected and int(get_meta("max_hiders")) == 0:
+		pass  # a VR host alone: its seeker isn't driven on the host (no torch use to teach); _result checks the solo rounds
+	elif mode == "local" and not hiders_here:
 		need.append_array(["cue_torch", "cue_again"])  # alone: the torch finds Pip and the friends (learning counts hider finds)
 	elif mode == "host" and int(get_meta("max_hiders")) < 2:
 		need.append("cue_torch")  # one TV hider: only one find fits in a networked run before the timeout
