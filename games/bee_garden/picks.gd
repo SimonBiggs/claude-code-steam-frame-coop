@@ -18,8 +18,8 @@ const WAIT := {"mode": 14.0, "gift": 12.0}
 const AFTER := 1.0     # seconds the taken orb shows its dot before the orbs go
 const GAP := 2.3
 const Y := 2.6         # well above the flower heads (hands and bees working the flowers never touch one by chance)
-const VR_LIFT := 0.15  # VR: the row at the gardener's eye height (+ this), above Queen Bea's story cards (they float
-                       # 0.22 m below the eyes, HudKit.vr_card), so an orb is never in front of a card
+const VR_LIFT := 0.9   # VR: the row a little above the gardener's eyes (0.9 units = 0.22 m at world scale 4), clear
+                       # above Queen Bea's story cards and the HOORAY banner (they float below the eyes), never in front
 const ROW := Vector3(0.0, 0.0, 0.9)   # the row's middle: over the front half of the bed, in the gardener's reach
 const SCALE := 0.6
 const BEE_R := 0.3     # a bee this close to an orb's picture takes it
@@ -110,7 +110,10 @@ func show_row(new_stage: String, entries: Array, y: float = Y) -> void:
 	if new_stage == "" or entries.is_empty():
 		orbs.clear()
 		return
-	orbs.show_orbs(new_stage, entries, ROW, GAP, y, {"scale": SCALE, "pop": true, "font": 72, "hit_r": HIT_R})
+	var o := {"scale": SCALE, "pop": true, "font": 72, "hit_r": HIT_R}
+	if main.gardener != null and main.gardener.vr:
+		o["label_y"] = 0.9  # VR: names over the orbs (under them they sat on the HOORAY banner)
+	orbs.show_orbs(new_stage, entries, ROW, GAP, y, o)
 
 
 ## Where orb i's picture is (bots fly there); Vector3.INF if none.
