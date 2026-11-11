@@ -10,6 +10,11 @@ const VERSION := "v1"
 const HULL := Color(0.95, 0.96, 1.0)
 const TRIM := Color(1.0, 0.5, 0.25)
 const DARK := Color(0.22, 0.24, 0.32)
+## What the crew must spot out in space (palette.gd checks them on the space sky and the planets):
+const RING_TINT := Color(0.5, 1.0, 0.95)  # a ring to fly through glows this colour (space.gd)
+const ROCK_COLORS: Array[Color] = [Color(0.62, 0.52, 0.45), Color(0.55, 0.5, 0.62), Color(0.68, 0.58, 0.42)]
+const UFO_BODY := Color(0.75, 0.45, 1.0)
+const UFO_RIM := Color(1.0, 0.85, 0.3)  # the saucer's gold rim
 ## Where the crew's lasers come from (the wing-tip turrets).
 const TURRETS: Array[Vector3] = [Vector3(-3.6, 0.15, -1.2), Vector3(3.6, 0.15, -1.2)]
 
@@ -135,7 +140,7 @@ static func rock(variant: int) -> ArrayMesh:
 		var arrays := sphere.get_mesh_arrays()
 		var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
 		var idx: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
-		var base: Color = [Color(0.62, 0.52, 0.45), Color(0.55, 0.5, 0.62), Color(0.68, 0.58, 0.42)][variant % 3]
+		var base: Color = ROCK_COLORS[variant % ROCK_COLORS.size()]
 		for i in range(0, idx.size(), 3):
 			var tri: Array[Vector3] = []
 			for k in 3:
@@ -157,8 +162,8 @@ static func rock(variant: int) -> ArrayMesh:
 static func ufo() -> ArrayMesh:
 	return _cached("ufo", func() -> Resource:
 		var b := MeshKit.Builder.new()
-		b.ellipsoid(Vector3(1.6, 0.4, 1.6), MeshKit.at(Vector3.ZERO), Color(0.75, 0.45, 1.0), 18)
-		b.torus(1.5, 0.12, MeshKit.at(Vector3(0, -0.05, 0)), Color(1.0, 0.85, 0.3), 20, 5)
+		b.ellipsoid(Vector3(1.6, 0.4, 1.6), MeshKit.at(Vector3.ZERO), UFO_BODY, 18)
+		b.torus(1.5, 0.12, MeshKit.at(Vector3(0, -0.05, 0)), UFO_RIM, 20, 5)
 		b.dome(0.8, MeshKit.at(Vector3(0, 0.2, 0)), Color(0.55, 0.9, 1.0), 14)
 		b.sphere(0.32, MeshKit.at(Vector3(0, 0.55, 0.15)), Color(0.5, 1.0, 0.5), 12)
 		for sx in [-1.0, 1.0]:

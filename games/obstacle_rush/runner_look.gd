@@ -7,6 +7,7 @@ extends RefCounted
 
 const MeshKit := preload("res://core/mesh_kit.gd")
 const UiKit := preload("res://core/ui_kit.gd")
+const Contrast := preload("res://core/contrast.gd")
 const ResCache := preload("res://core/res_cache.gd")
 
 const VERSION := "v2"
@@ -22,6 +23,9 @@ const PATTERNS: Array[String] = ["plain", "stripes", "spots", "belly"]
 const CPU_NAMES: Array[String] = ["BLOBBY", "ZIPPY", "WOBBLES", "BEANO", "BOING", "SQUISHY", "NOODLE", "PUDDING"]
 const CPU_COLORS: Array[Color] = [Color(1.0, 0.55, 0.3), Color(0.55, 0.9, 0.45), Color(0.95, 0.4, 0.45),
 	Color(0.6, 0.5, 1.0), Color(1.0, 0.85, 0.35), Color(0.35, 0.85, 0.85), Color(1.0, 0.6, 0.8), Color(0.75, 0.75, 0.8)]
+## The soft ink line round every runner, beach ball and star (Contrast.outline): pastel beans on the pastel
+## candy floors (blue on blue, gold on yellow) still stand out.
+const OUTLINE := Contrast.OUTLINE
 const SKIN_DARK := Color(0.08, 0.07, 0.12)
 const EYE_WHITE := Color(0.98, 0.98, 1.0)
 const CHEEK := Color(1.0, 0.55, 0.6)

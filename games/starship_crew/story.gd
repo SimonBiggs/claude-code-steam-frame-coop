@@ -39,8 +39,8 @@ const PARTS: Array[Dictionary] = [
 
 const SYLLABLES: Array[String] = ["ZOO", "BLIP", "MOO", "WIB", "ZAP", "PIP", "NOO", "FIZ", "LOLO", "TOOT", "BOP", "YAY", "WOO", "GLOB", "MIM", "ZUZU"]
 const PLANET_COLS: Array[Color] = [Color(1.0, 0.6, 0.4), Color(0.5, 0.75, 1.0), Color(0.75, 0.5, 1.0), Color(1.0, 0.85, 0.35),
-	Color(1.0, 0.55, 0.75), Color(0.45, 0.95, 0.85), Color(0.95, 0.45, 0.4), Color(0.7, 0.9, 0.45)]
-const HOME_LOOK := [Color(0.5, 0.95, 0.6), Color(0.9, 1.0, 0.8), 3]
+	Color(1.0, 0.55, 0.75), Color(0.25, 0.65, 0.62), Color(0.95, 0.45, 0.4), Color(0.7, 0.9, 0.45)]
+const HOME_LOOK := [Color(0.42, 0.85, 0.5), Color(0.9, 1.0, 0.8), 3]
 const STAR_MAP_MAX := 60
 
 const LINES := {

@@ -19,6 +19,7 @@ extends Node3D
 const MeshKit := preload("res://core/mesh_kit.gd")
 const CourseGen := preload("res://games/obstacle_rush/coursegen.gd")
 const Story := preload("res://games/obstacle_rush/story.gd")
+const RunnerLook := preload("res://games/obstacle_rush/runner_look.gd")  # (OUTLINE)
 
 const COUNT := Story.COURSES  ## courses per show (the four flags)
 const SPIN_SPEED := 1.1
@@ -27,6 +28,14 @@ const DOOR_W := CourseGen.DOOR_W
 const TRIM := Color(0.98, 0.97, 0.94)
 const CANDY: Array[Color] = [Color(1.0, 0.6, 0.75), Color(0.55, 0.8, 1.0), Color(1.0, 0.85, 0.45), Color(0.6, 0.9, 0.62)]
 const STAR_COLOR := Color(1.0, 0.86, 0.25)
+## The giant's beach balls (giant.gd), rolled down the course at the runners.
+const BALL_COLORS: Array[Color] = [Color(1.0, 0.4, 0.45), Color(0.4, 0.7, 1.0), Color(1.0, 0.85, 0.3),
+	Color(0.5, 0.9, 0.5), Color(0.85, 0.55, 1.0)]
+
+
+static func ball_color(i: int) -> Color:
+	return BALL_COLORS[i % BALL_COLORS.size()].lightened(0.15)
+
 
 var desc := {}  ## the course description (coursegen.gd)
 var index := 0  ## lesson index (-1 for a seeded course)
@@ -337,7 +346,7 @@ func _star(p: Vector3) -> void:
 	var b := MeshKit.Builder.new()
 	b.star(5, 0.55, 0.25, 0.18, Transform3D.IDENTITY, STAR_COLOR, true)
 	b.sphere(0.12, MeshKit.at(Vector3(0, 0, 0.1)), Color(1.0, 0.98, 0.85), 8, true)
-	n.add_child(MeshKit.instance(b.build(), false))
+	n.add_child(RunnerLook.Contrast.outline(MeshKit.instance(b.build(), false), RunnerLook.OUTLINE))
 	stars.append(p)
 	star_nodes.append(n)
 

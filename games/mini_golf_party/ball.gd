@@ -46,7 +46,7 @@ func _ready() -> void:
 	visual = Node3D.new()
 	add_child(visual)
 	var b := MeshKit.Builder.new()
-	b.sphere(Course.BALL_R, MeshKit.at(Vector3.ZERO), color.lightened(0.15), 14)
+	b.sphere(Course.BALL_R, MeshKit.at(Vector3.ZERO), Course.ball_tint(color), 14)
 	b.torus(Course.BALL_R * 0.98, 0.012, MeshKit.at(Vector3.ZERO, Vector3.ONE, Vector3(0.0, 0.0, PI * 0.5)), Color.WHITE, 14, 4)
 	spin = MeshKit.instance(b.build())
 	visual.add_child(spin)
