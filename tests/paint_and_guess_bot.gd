@@ -74,7 +74,11 @@ func _ready() -> void:
 ## The verdict (tests/bot_end.gd prints BOT RESULT from the counted checks, in local, host and joining runs).
 func _exit_tree() -> void:
 	if main != null and is_instance_valid(main):
-		BotEnd.check(rounds_done >= 1, "a drawing round was played (mode %s, t=%.0f)" % [main.net.mode, t])
+		if main.net.mode == "host" and not main.net.connected:
+			# Solo VR host (the Frame alone): nobody to guess, so the game waits for a TV machine.
+			BotEnd.check(main.state == "wait", "a VR host alone waits for TV guessers (state %s)" % main.state)
+		else:
+			BotEnd.check(rounds_done >= 1, "a drawing round was played (mode %s, t=%.0f)" % [main.net.mode, t])
 
 
 func _pad_press(device: int, button: JoyButton) -> void:

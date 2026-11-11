@@ -190,14 +190,15 @@ func _deep_checks() -> void:
 			if bool(h[2]):
 				deep["player_pick"] = true
 		# Round 2: a wasp visit and a storm cloud now (each told by its warning ring first).
-		if not hazards_forced and main.day == 2 and main.phase == "day" and main.round_t > 1.0:
+		# (Early in the round: the bees can fill day 2's jars before a storm at +4 s, and it never came, 2026-11-11.)
+		if not hazards_forced and main.day == 2 and main.phase == "day" and main.round_t > 0.3:
 			hazards_forced = true
 			var GG := preload("res://games/bee_garden/gardengen.gd")
 			var r := RandomNumberGenerator.new()
 			r.seed = 7
 			var st: Array = GG._storm_place(main.garden, r)
-			main.plan.wasps = [main.round_t + 3.6]
-			main.plan.storms = [[main.round_t + 4.0] + st] if not st.is_empty() else []
+			main.plan.wasps = [main.round_t + 2.0]
+			main.plan.storms = [[main.round_t + 2.4] + st] if not st.is_empty() else []
 			print("Bot: forcing a wasp and a storm %s" % str(main.plan.storms))
 	if main.days_done >= 3 and not deep_reported and (main.net.mode != "client" or t > 30.0):
 		deep_reported = true

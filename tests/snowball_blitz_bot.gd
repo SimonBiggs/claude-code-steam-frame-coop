@@ -466,7 +466,11 @@ func _tip_error(who: String, text: String) -> void:
 func _exit_tree() -> void:
 	# The verdict (tests/bot_end.gd prints BOT RESULT from the counted checks, in local, host and joining runs).
 	if main != null and is_instance_valid(main):
-		_bot_check(main.wave >= 1, "the snowball waves came (mode %s, wave %d, t=%.0f)" % [main.net.mode, main.wave, t])
+		# (Not after the restart check: Enter after a game over starts a fresh game, and this bot, again at wave 0.)
+		if int(Engine.get_meta("sb_bot_restarts", 0)) == 0:
+			_bot_check(main.wave >= 1, "the snowball waves came (mode %s, wave %d, t=%.0f)" % [main.net.mode, main.wave, t])
+		else:
+			_bot_check(main.ready_to_play, "the game restarted after the game over")
 	if main == null or not is_instance_valid(main) or not main.simple:
 		return
 	var ks: Array = cues.keys()
