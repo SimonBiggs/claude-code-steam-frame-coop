@@ -83,6 +83,7 @@ var ignored_first := false  # P2 stays under the first meteor (the bump path)
 var landed_was := 0
 var walked_out := 0
 var lone_rockets := 0
+var crew_ever := false  # host / local: crew walked the floor during some rocket's work
 
 
 ## Records a check; a FAIL sticks (and prints once), an OK prints the first time.
@@ -189,7 +190,7 @@ func _party(delta: float) -> void:
 	if main.net.mode == "host":
 		return
 	var want := int(OS.get_environment("BOT_PLAYERS")) if OS.has_environment("BOT_PLAYERS") else (1 if main.net.mode == "local" else 2)
-	want = clampi(want, 1, main.players.size() - 1)
+	want = clampi(want, 0 if OS.get_environment("BOT_PLAYERS") == "0" else 1, main.players.size() - 1)  # 0: a lone pilot (a Deck alone)
 	join_t -= delta
 	if join_t > 0.0 or t < 2.0:
 		return
@@ -551,6 +552,8 @@ func _crew(p) -> void:
 ## Second pass checks while playing.
 func _deep_checks() -> void:
 	var hz = main.hazards
+	if main.phase == "work" and main.net.mode != "client" and main.floor_crew() > 0:
+		crew_ever = true
 	if main.net.mode == "client":
 		if not main.picks.orbs.orbs.is_empty():
 			_check("tv_sees_orbs", true, main.picks.orbs.stage)
@@ -588,8 +591,7 @@ func _deep_checks() -> void:
 func _deep_final() -> void:
 	if main.net.mode == "client":
 		return
-	var crew: bool = main.floor_crew() > 0
-	if crew:
+	if crew_ever:
 		_check("meteors_with_crew", main.hazards.seen > 0, "%d told" % main.hazards.seen)
 	else:
 		_check("no_meteors_alone", main.hazards.seen == 0, "%d told" % main.hazards.seen)
@@ -905,8 +907,8 @@ func _note_cues() -> void:
 
 ## Local mode: P3 joins on a fake controller (device 14), which is unplugged (bolt) and plugged back in.
 func _test_plug() -> void:
-	if main.net.mode != "local" or main.players.size() < 3:
-		return
+	if main.net.mode != "local" or main.players.size() < 3 or OS.get_environment("BOT_PLAYERS") == "0":
+		return  # (a lone pilot stays alone)
 	var p3 = main.players[2]
 	if plug_phase == 0 and main.launched >= 3 and main.phase == "work":
 		plug_phase = 1  # (after rocket 2's free wrong press: joining adds welcome time)
