@@ -68,8 +68,8 @@ func _init() -> void:
 	_expect(not IslandGen.check(bad3).is_empty(), "a missing map piece is caught")
 	# Story.
 	var o := Story.offers(7, 3, {})
-	_expect(o.size() == 2 and o[0] != o[1], "two different islands to pick (%s)" % str(o))
-	_expect(not Story.offers(7, 3, {"sunny": 5, "jungle": 5}).has("sunny"), "the least-visited islands come first")
+	_expect(o.size() == 3 and o[0] != o[1] and o[1] != o[2] and o[0] != o[2], "three different islands to pick (%s)" % str(o))
+	_expect(not Story.offers(7, 3, {"sunny": 5, "jungle": 5}, 2).has("sunny"), "the least-visited islands come first")
 	_expect(Story.next_relic([0, 1]) == 2, "relics come in order")
 	_expect(Story.save_defaults().relics.is_empty(), "a new collection is empty")
 	print("island gen: %d islands checked, %d failures" % [total, fails])

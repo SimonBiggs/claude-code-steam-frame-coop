@@ -396,7 +396,8 @@ func drop_in_out(party: Node, time: float, stay: float, seated: Callable) -> voi
 		var slot := int(st["slot"])
 		if slot < 0:
 			return
-		assert_true(not party.is_active(slot), "the late player left")
+		# (a machine joining just then may already sit a player of its own in the freed seat)
+		assert_true(not party.is_active(slot) or not party.is_local(slot), "the late player left")
 		assert_true(not bool(seated.call(slot)), "the late player's things were cleaned up"))
 
 

@@ -38,7 +38,8 @@ const MAP_PIECES := 3
 
 
 static func save_defaults() -> Dictionary:
-	return {"best": 0, "world": -1, "islands": 0, "relics": [], "daily": {}, "visits": {}}
+	return {"best": 0, "world": -1, "islands": 0, "relics": [], "daily": {}, "visits": {}, "mode": "brave", "gift": "",
+		"museum": {"coins": 0, "gems": 0, "boots": 0, "maps": 0, "golden": 0}}
 
 
 static func island(i: int) -> Dictionary:
@@ -52,15 +53,15 @@ static func island_index(id: String) -> int:
 	return 0
 
 
-## The two signposts before island n (n >= 1): two different kinds, the least visited first.
-static func offers(world: int, n: int, visits: Dictionary) -> Array:
+## The islands offered on the pick orbs before island n (n >= 1): `count` different kinds, the least visited first.
+static func offers(world: int, n: int, visits: Dictionary, count: int = 3) -> Array:
 	var r := Seeded.rng(world, "offers%d" % n)
 	var ids: Array = []
 	for isl in ISLANDS:
 		ids.append(isl.id)
 	ids = Seeded.shuffled(r, ids)
 	ids.sort_custom(func(a: String, b: String) -> bool: return int(visits.get(a, 0)) < int(visits.get(b, 0)))
-	return ids.slice(0, 2)
+	return ids.slice(0, count)
 
 
 ## The next relic to find (cycles once every relic is home).
