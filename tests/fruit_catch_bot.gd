@@ -78,6 +78,8 @@ func _continue_results() -> String:
 				"the results screen has the round's results")
 			kit.assert_true(main.vr_rig == null or main.vr_results != null, "the results card shows in VR")
 		_press("accept")
+		if main.vr_rig != null and kit.tv_players() == 0:
+			kit.vr_click(main.vr_rig)  # solo VR: the VR player's trigger / A on the results card goes on
 	return ""
 
 

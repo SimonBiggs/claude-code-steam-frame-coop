@@ -245,7 +245,8 @@ func _checks() -> void:
 		for s in main.scored_by:
 			if int(s) > 0 or main.vr_rig == null:
 				tv += int(main.scored_by[s])
-		kit.assert_true(tv > 0, "%s: TV planes flew through hoops (%d)" % [mode, tv])
+		if kit.tv_players() > 0:  # solo VR (a host alone) has no TV planes
+			kit.assert_true(tv > 0, "%s: TV planes flew through hoops (%d)" % [mode, tv])
 	else:
 		kit.assert_true(main.flyers.size() == main.party.player_count(), "client: every player (every machine's) has a plane")
 	# The story flight structure.

@@ -284,7 +284,7 @@ func _checks() -> void:
 	if mode == "client":
 		kit.assert_true(max_items_seen > 0, "client: treasure items mirrored from the host")
 		kit.assert_true(max_sparkles_seen > 0, "client: sparkles mirrored from the host")
-	elif want > 0:
+	elif kit.tv_players() > 0:  # solo VR (a host alone): the giant plays alone, like BOT_PLAYERS=0
 		kit.assert_true(int(main.stats["tv_digs"]) > 0, "TV players dug up treasure")
 	else:
 		kit.assert_true(int(main.net.state_get("score", 0)) > 0 or int(main.net.state_get("round", 0)) >= 2, "the giant alone filled the chest")
