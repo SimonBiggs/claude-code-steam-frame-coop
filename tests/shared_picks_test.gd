@@ -149,6 +149,9 @@ func _helpers() -> void:
 	_expect(WarnRings.inside("line", Vector3.ZERO, Vector3(1, 0, 0), Vector2(4, 1), Vector3(3, 0, 0.2)), "inside a line")
 	_expect(not WarnRings.inside("line", Vector3.ZERO, Vector3(1, 0, 0), Vector2(4, 1), Vector3(3, 0, 2)), "outside a line")
 	_expect(WarnRings.inside("sector", Vector3.ZERO, Vector3(0, 0, 1), Vector2(5, 0.5), Vector3(0.5, 0, 3)), "inside a sector")
+	var ts: Array[Dictionary] = rings.tells()
+	_expect(ts.size() == rings.count() and String(ts[0].kind) == "circle" and (ts[0].pos as Vector3).is_equal_approx(Vector3(1, 0, 1))
+		and float(ts[0].secs) == 0.5 and float(ts[0].t) == 0.0, "tells() lists each tell (kind, pos, dir, size, t, secs, stay)")
 
 
 func _process(_delta: float) -> bool:
