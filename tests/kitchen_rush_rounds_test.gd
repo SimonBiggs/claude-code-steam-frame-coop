@@ -34,7 +34,7 @@ func _progress(k: int) -> Dictionary:
 	return {"gifts": [0, 1, 2, 3, 4, 6, 9, 15, 40][k % 9], "visits": visits, "theme": Nights.THEME_ORDER[k % 3]}
 
 
-func _init() -> void:
+func _initialize() -> void:
 	var seeds := int(OS.get_environment("SEEDS")) if OS.has_environment("SEEDS") else 60
 	var t0 := Time.get_ticks_msec()
 	var seen := {}

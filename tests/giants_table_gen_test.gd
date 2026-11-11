@@ -22,7 +22,7 @@ const PARTIES := [[0, true], [0, false], [1, false], [2, false], [3, false], [4,
 var fails := 0
 
 
-func _init() -> void:
+func _initialize() -> void:
 	var seeds := int(OS.get_environment("SEEDS")) if OS.has_environment("SEEDS") else 60
 	W.field(false, false)  # (the flow fields are built once per game; don't time them)
 	W.field(true, false)

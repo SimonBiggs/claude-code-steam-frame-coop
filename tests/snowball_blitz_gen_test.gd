@@ -24,7 +24,7 @@ const PickOrbs := preload("res://core/pick_orbs.gd")
 var fails := 0
 
 
-func _init() -> void:
+func _initialize() -> void:
 	var seeds := int(OS.get_environment("SEEDS")) if OS.has_environment("SEEDS") else 120
 	var t0 := Time.get_ticks_usec()
 	var gens := 0
