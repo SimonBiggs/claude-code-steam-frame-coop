@@ -22,6 +22,8 @@ const Y := 0.3  # above the table top
 const SCALE := 0.3
 const TV_R := 0.27  # how near a hammer-kid's feet must come to an orb's middle (across the table)
 const HAND_R := 0.06  # the glove
+const OPEN := 0.8  # seconds after the orbs pop up before they can be taken (a resting mallet never picks by itself)
+const SWING := 0.6  # m/s: the mallet must be swung at an orb (like at a mole), a glove moved into one
 
 var main: Node
 var orbs: PickOrbs
@@ -100,7 +102,10 @@ func tick(delta: float) -> void:
 		if done_t >= AFTER:
 			_finish()
 		return
+	var open := float(WAIT.get(stage, 10.0)) * wait_scale - t >= OPEN
 	t -= minf(delta, 0.1)  # (a loading hitch never eats the wait)
+	if not open:
+		return
 	for slot in main.avatars:
 		var a: Node3D = main.avatars[slot]
 		var o := orbs.at_point(a.global_position, TV_R)
@@ -108,13 +113,15 @@ func tick(delta: float) -> void:
 			take(o, int(slot))
 			return
 	if main.vr_rig != null:
-		if main.mallet_head != null:
+		if main.mallet_head != null and main.mallet_vel.length() > SWING:
 			var om := orbs.nearest_hit(main.mallet_head.global_position, Props.HEAD_R * main.mallet_head.scale.x)
 			if om >= 0:
 				main.vr_rig.pulse(VrRig.RIGHT, 0.6, 0.08)
 				take(om, 0)
 				return
 		for h in [VrRig.LEFT, VrRig.RIGHT]:
+			if main.vr_rig.hand_speed(h) < SWING * 0.5:
+				continue
 			var o2 := orbs.nearest_hit(main.vr_rig.hand_point(h), HAND_R)
 			if o2 >= 0:
 				main.vr_rig.pulse(h, 0.5, 0.08)

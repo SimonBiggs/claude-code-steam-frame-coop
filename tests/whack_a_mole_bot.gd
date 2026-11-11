@@ -48,7 +48,7 @@ func _ready() -> void:
 	var host := OS.has_environment("DUO_HOST")
 	var t0 := 3.0 if client else 1.0
 	kit.at(t0, "%d TV players press A on their pads" % want, _join)
-	if not host and BotKit.lead_machine():
+	if not host and BotKit.lead_machine() and want > 0:  # (the giant alone has no pad to press Start with)
 		kit.at(t0 + 6.0, "P1 presses Start: pause menu", func() -> void:
 			kit.allow_pause = true
 			_press("start"))
@@ -58,8 +58,9 @@ func _ready() -> void:
 		kit.at(t0 + 7.2, "resumed?", func() -> void:
 			kit.assert_true(not get_tree().paused, "Start again resumes")
 			kit.allow_pause = false)
-	kit.drop_in_out(main.party, t0 + 9.0, 3.0, func(slot: int) -> bool:
-		return main.avatars.has(slot) and main.huds.has(slot) and main.cams.has(slot))
+	if want > 0:  # (solo VR stays solo)
+		kit.drop_in_out(main.party, t0 + 9.0, 3.0, func(slot: int) -> bool:
+			return main.avatars.has(slot) and main.huds.has(slot) and main.cams.has(slot))
 	if host:
 		var end := float(OS.get_environment("BOT_HOST_END")) if OS.has_environment("BOT_HOST_END") else 46.0  # late-join tests
 		kit.at(end - 10.0, "host checks (the TV machine is still connected)", _checks)
@@ -211,11 +212,12 @@ func _drive_vr(delta: float) -> void:
 	var rig = main.vr_rig
 	rig.camera.position.y = 1.6
 	if String(main.net.state_get("phase", "")) == "orbs":  # the giant alone: bonk the right-hand pick orb with the mallet
-		var o: Vector3 = main.picks.orb_position(2) if main.picks.showing() else Vector3.INF
+		var o: Vector3 = main.picks.orb_position(mini(2, main.picks.orbs.orbs.size() - 1)) if main.picks.showing() else Vector3.INF
 		kit.vr_stick(rig, Vector2.ZERO)
 		if o != Vector3.INF and main.party.player_count() == 0:
 			var off: Vector3 = main.mallet_head.global_position - rig.hand_r.global_position
-			kit.vr_reach(rig, 1, o - off, 2.0, delta)
+			if kit.vr_reach(rig, 1, o - off + (Vector3(0.0, 0.35, 0.0) if swing_phase == 0 else Vector3.ZERO), 2.5, delta):
+				swing_phase = 1 - swing_phase  # (a swing at the orb, like at a mole: a resting mallet never picks)
 			vr_took = vr_took or main.picks.chosen_by == 0
 		return
 	if swing_hole < 0 or main.m_state[swing_hole] != 1:
@@ -278,9 +280,9 @@ func _checks() -> void:
 		kit.assert_true(not main.tricks.fired.is_empty(), "host: tricks happened")
 		kit.assert_true(String(main.save.data.mode) == main.mode, "host: the mode was saved")
 		kit.assert_true(int(main.save.data.moles_total) > 0, "host: bonked moles were counted for the holiday garden")
-		if int(main.tricks.fired.get("stampede", 0)) > 0 and kit.tv_players() > 0 and int(main.stats.herd) > 0:
+		if int(main.tricks.fired.get("stampede", 0)) > 0 and not main.avatars.is_empty() and int(main.stats.herd) > 0:
 			kit.assert_true(int(main.stats.bumped) > 0, "host: the clumsy kid in a stampede was bumped")
-		if main.vr_rig != null and want == 0:
+		if main.vr_rig != null and main.party.player_count() == 0:
 			kit.assert_true(vr_took or _vr_took_any(), "solo giant: the mallet took a pick orb")
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
 	if mode == "client":

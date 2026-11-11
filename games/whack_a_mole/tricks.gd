@@ -62,7 +62,7 @@ func announce(kind: String, data: int, warn: float, mode: String) -> void:
 			main.sfx.play_at("sparkle", p, -4.0, 1.4)
 		"stampede":
 			var b := Deep.band(data)
-			rings.shape("line", b[0], b[1], b[2], Deep.HERD_COLOR, warn, {"style": "flash", "y": y, "stay": Deep.STAY, "alpha": 0.5})
+			rings.shape("line", b[0], b[1], b[2], Deep.HERD_COLOR, warn, {"style": "disc", "y": y, "stay": Deep.STAY, "alpha": 0.55})  # (steady: a flashing band read as nothing in its dark beats)
 			var runners := Node3D.new()
 			runners.visible = false
 			var mesh: Mesh = main.kind_mesh_of(RoundGen.NORMAL)

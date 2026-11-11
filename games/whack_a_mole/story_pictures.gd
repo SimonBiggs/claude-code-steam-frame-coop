@@ -75,7 +75,9 @@ static func _deep(pic, kind: String, t: float, bob: float) -> void:
 				pic._circle(0.3 + k * 0.08, 0.6 + y * 0.35, 0.025, Color(0.75, 0.8, 1.0, 1.0 - y))
 			for k in 3:
 				var z := Vector2(0.72 + k * 0.07, 0.3 - k * 0.09 + bob)
-				pic._poly([[z.x - 0.03, z.y - 0.03], [z.x + 0.03, z.y - 0.03], [z.x - 0.03, z.y + 0.03], [z.x + 0.03, z.y + 0.03]], Color(0.75, 0.8, 1.0))
+				var zc := Color(0.75, 0.8, 1.0)
+				pic.draw_polyline(PackedVector2Array([pic._p(z.x - 0.03, z.y - 0.03), pic._p(z.x + 0.03, z.y - 0.03),
+					pic._p(z.x - 0.03, z.y + 0.03), pic._p(z.x + 0.03, z.y + 0.03)]), zc, 0.015 * size.x)
 		"goldglove":  # a big golden glove with a sparkle
 			var g := Color(1.0, 0.8, 0.2)
 			pic._circle(0.5, 0.58 + bob, 0.24, g)

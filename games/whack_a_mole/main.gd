@@ -152,6 +152,7 @@ var ground: MeshInstance3D
 var season_nodes: Array[Node] = []
 var shown_season := ""
 var boinging := false
+var herd_told := false  # every machine: Fig has shouted about a stampede this session
 var mallet_base := 1.0  # the mallet head's size (BIG HAMMER: bigger)
 var gift_pics := {}  # hud slot -> [picture holder, gift shown]
 var stats := {"tricks": 0, "gold_tricks": 0, "herd": 0, "bumped": 0, "boing": 0, "carrots": 0, "holiday_new": 0}  # bots
@@ -1365,29 +1366,7 @@ func whack_fx(i: int, by: int, pts: int) -> void:
 	var tw := create_tween()
 	tw.tween_property(body, "scale", Vector3(1.1, 0.8, 1.1), 0.3).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
 	var pos := holes[i] + Vector3(0.0, 0.3, 0.0)
-	var p := CPUParticles3D.new()
-	p.one_shot = true
-	p.amount = 24 if gold else 14
-	p.lifetime = 0.6
-	p.explosiveness = 1.0
-	p.direction = Vector3.UP
-	p.spread = 70.0
-	p.gravity = Vector3(0.0, -6.0, 0.0)
-	p.initial_velocity_min = 1.5
-	p.initial_velocity_max = 3.0
-	var col := Color(1.0, 0.85, 0.2) if gold else party.color_of(by)
-	p.mesh = ResCache.get_or_make("wam_bit_%s" % col.to_html(false), func() -> Resource:
-		var bm := SphereMesh.new()
-		bm.radius = 0.035
-		bm.height = 0.07
-		bm.radial_segments = 6
-		bm.rings = 3
-		bm.material = MeshKit.material(col, 1.5)
-		return bm)
-	add_child(p)
-	p.position = pos
-	p.emitting = true
-	get_tree().create_timer(1.0).timeout.connect(p.queue_free)
+	burst_at(pos - Vector3.UP * 0.1, Color(1.0, 0.85, 0.2) if gold else party.color_of(by), 24 if gold else 14)
 	if pts > 0:
 		HudKit.score(self, pos + Vector3.UP * 0.25, pts, {"color": "gold" if gold else party.color_of(by), "size": 1.6 if gold else 1.1})
 	if gold:
@@ -1591,8 +1570,9 @@ func trick_fx(kind: String, data: int, warn: float, trick_mode: String) -> void:
 	if tricks == null:
 		return
 	tricks.announce(kind, data, warn, trick_mode)
-	if kind == "stampede":
-		_banner("STAMPEDE!", "", 1.4)
+	if kind == "stampede" and not herd_told:  # the first one each session: Fig shouts (a story card, clear of the table)
+		herd_told = true
+		show_story({"who": "FIG", "line": "Stampede! Look out!", "pic": "stampede", "color": Deep.HERD_COLOR, "duration": 2.5})
 
 
 ## Host: a trick happened (tricks.gd, when its warning ran out): its moles pop up; a stampede bumps the kids in its row.
@@ -1698,8 +1678,8 @@ func burst_at(pos: Vector3, col: Color, amount: int = 18) -> void:
 	p.direction = Vector3.UP
 	p.spread = 70.0
 	p.gravity = Vector3(0.0, -6.0, 0.0)
-	p.initial_velocity_min = 1.2
-	p.initial_velocity_max = 2.6
+	p.initial_velocity_min = 1.5
+	p.initial_velocity_max = 3.0
 	p.mesh = ResCache.get_or_make("wam_bit_%s" % col.to_html(false), func() -> Resource:
 		var bm := SphereMesh.new()
 		bm.radius = 0.035
