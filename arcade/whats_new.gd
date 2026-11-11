@@ -33,6 +33,11 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "fish-lures", "date": "2026-11-11", "game": "fishing_lake", "pic": "lure_gold", "line": "Pick a lure every day!"},
+	{"id": "fish-whiskers", "date": "2026-11-11", "game": "fishing_lake", "pic": "otter", "line": "Old Whiskers warns first", "try": {"FL_TRY": "whiskers"}},
+	{"id": "fish-shiny", "date": "2026-11-11", "game": "fishing_lake", "pic": "fish", "line": "Find shiny gold fish!"},
+	{"id": "fish-pond", "date": "2026-11-11", "game": "fishing_lake", "pic": "fish_pond", "line": "Ollie's pond grows!"},
+	{"id": "fish-gentle", "date": "2026-11-11", "game": "fishing_lake", "pic": "lure_worm", "line": "Gentle mode for little ones", "try": {"FL_MODE": "gentle"}},
 	{"id": "sb-gifts", "date": "2026-11-11", "game": "snowball_blitz", "pic": "gift", "line": "Pick Bobo's gifts!"},
 	{"id": "sb-gentle", "date": "2026-11-11", "game": "snowball_blitz", "pic": "polarbear", "line": "Gentle mode for little ones", "try": {"SB_MODE": "gentle"}},
 	{"id": "sb-bosses", "date": "2026-11-11", "game": "snowball_blitz", "pic": "yeti", "line": "Yeti and King warn first", "try": {"SB_WAVE": "7"}},

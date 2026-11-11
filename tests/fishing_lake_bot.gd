@@ -87,6 +87,7 @@ func _physics_process(delta: float) -> void:
 		set_meta("short_day", true)
 		var rt := float(OS.get_environment("BOT_ROUND")) if OS.has_environment("BOT_ROUND") else 30.0
 		main.round_time = rt
+		main.day_base = rt
 		main.time_left = minf(main.time_left, rt)
 		print("BOT: day length set to %.0f s" % rt)
 	if main.day > last_day:
@@ -178,6 +179,23 @@ func _watch() -> void:
 			seen["kind_%d" % f.kind] = true
 	if main.journal_text != "":
 		seen["journal"] = true
+	# Second deep pass: picks, the lure, Old Whiskers' tells, shiny fish, Ollie's pond.
+	if main.orbs != null and not main.orbs.orbs.is_empty():
+		seen["pick_" + str(main.orbs.stage)] = true
+	if main.lure_pick_done:
+		seen["lure_picked"] = true
+	if main.rings != null and main.rings.count() > 0:
+		seen["tell"] = true
+	if main.shiny_today > 0 or not main._shiny_dict().is_empty():
+		seen["shiny"] = true
+	var pf := 0
+	for f in main.lake.pond_fish:
+		if f.visible:
+			pf += 1
+	if pf > 0:
+		seen["pond_fish"] = true
+	if main.lake.pond_root != null and main.lake.pond_root.is_visible_in_tree():
+		seen["pond"] = true
 	# Seeded lakes, Ollie's wish and the fish book.
 	if not main.lake_key.is_empty():
 		seen["lake"] = true
@@ -246,6 +264,11 @@ func _flat(v: Vector3) -> Vector3:
 func _event_target(from: Vector3) -> Vector3:
 	if main.practice and main.practice_step == 0:
 		return main.practice_pos
+	if main.pick_stage != "" and not main.orbs.orbs.is_empty():  # cast at a pick orb (a different one each stage)
+		var oi: int = (hash(main.pick_stage) + main.day) % main.orbs.orbs.size()
+		var o = main.orbs.orbs[oi]
+		if is_instance_valid(o):
+			return o.global_position
 	for f in main.fish:
 		if f.kind == main.FishScript.LEGEND and f.free_to_bite():
 			return f.position + Vector3(0.6, 0, 0.6)
@@ -293,6 +316,8 @@ func _drive_angler(a) -> void:
 				a.bot_cast_dist = clampf(to.length(), 5.0, 18.0)
 		"waiting":
 			a.bot_reel = 0.35 if fmod(t, 6.0) < 0.3 else 0.0  # a little twitch now and then
+			if main.pick_stage != "" and a.wait_t > 0.5 and not a.nibbling:
+				a.bot_reel = 1.0  # orbs up: reel in and cast at one
 		"bite":
 			a.bot_reel = 1.0
 		"fight":
@@ -482,6 +507,7 @@ func _exit_tree() -> void:
 	var keys: Array = seen.keys()
 	keys.sort()
 	print("BOT SEEN: %s" % " ".join(PackedStringArray(keys)))
+	print("BOT TACKLE: mode=%s lure=%s shiny=%d pond=%d" % [main.game_mode, main.lure_id, main.shiny_today, main.lake.pond_fish.filter(func(f) -> bool: return f.visible).size()])
 	print("BOT LAKES: %s wish=%s book=%d days_saved=%s" % [" ".join(PackedStringArray(lakes.keys())), main._wish_name(), main._journal_found(),
 		str(main.save.data.days) if main.net.mode != "client" else "-"])
 	var fails: Array[String] = []
@@ -496,4 +522,12 @@ func _exit_tree() -> void:
 			fails.append("no fish at a spot")
 		if mode != "client" and days_done >= 2 and lakes.size() < 2:
 			fails.append("the same lake two days running")
+		if days_done >= 1 and not seen.has("pick_lure"):
+			fails.append("never saw the lure orbs")
+		if mode != "client" and days_done >= 1 and not seen.has("lure_picked"):
+			fails.append("no lure picked")
+		if mode != "client" and seen.has("legend_hooked") and not seen.has("tell"):
+			fails.append("Old Whiskers pulled without a tell")
+		if not seen.has("pond"):
+			fails.append("no Ollie's pond")
 	print("BOT RESULT: %s" % ("PASS" if fails.is_empty() else "FAIL " + "; ".join(fails)))
