@@ -971,9 +971,10 @@ func _follow_headset() -> void:
 			return
 		set_meta("follow_udp", bound)
 	# (a default + return: "get_meta 'follow_udp' missing" showed once in a VR sweep, 2026-11-11)
-	var udp := get_meta("follow_udp", null) as PacketPeerUDP
-	if udp == null:
+	var got: Variant = get_meta("follow_udp", false)
+	if not got is PacketPeerUDP:
 		return
+	var udp := got as PacketPeerUDP
 	while udp.get_available_packet_count() > 0:
 		var msg := udp.get_packet().get_string_from_utf8()
 		var sender := udp.get_packet_ip()
