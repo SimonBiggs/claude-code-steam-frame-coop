@@ -11,6 +11,7 @@ const MAX_REACH := 0.9
 const MIN_REACH := 0.08
 
 var color := Color(0.35, 0.6, 1.0)
+var max_reach := MAX_REACH  # (Gus's LONG PUTTER gift reaches further: deep.gd LONG_REACH)
 var head_pos := Vector3.ZERO
 var head_vel := Vector3.ZERO
 var flat_fwd := Vector3.FORWARD
@@ -43,7 +44,7 @@ func follow(hand: Node3D, floor_y: float, delta: float) -> void:
 	flat = flat.normalized() if flat.length() > 0.001 else Vector3.FORWARD
 	flat_fwd = flat
 	var dy := maxf(0.0, hp.y - floor_y)
-	var reach := clampf(dy * Vector2(dir.x, dir.z).length() / maxf(-dir.y, 0.2), MIN_REACH, MAX_REACH)
+	var reach := clampf(dy * Vector2(dir.x, dir.z).length() / maxf(-dir.y, 0.2), MIN_REACH, max_reach)
 	var head := Vector3(hp.x, floor_y + Course.BALL_R, hp.z) + flat * reach
 	if _prev != Vector3.INF and delta > 0.0:
 		head_vel = head_vel.lerp((head - _prev) / delta, 0.6)

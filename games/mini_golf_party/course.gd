@@ -19,6 +19,14 @@ const GREEN2 := Color(0.26, 0.78, 0.4)
 const WOOD := Color(0.95, 0.62, 0.32)
 const WOOD2 := Color(1.0, 0.85, 0.45)
 const CUP := Color(0.05, 0.08, 0.05)  # the hole (with a white lip and flag)
+const PAD := Color(0.25, 0.27, 0.42)  # the pick green's pads (deep.gd): deep slate, a white rim
+const PICK_GREEN := Color(0.2, 0.52, 0.32)  # the pick green's turf (darker: the pick orbs stand out over it)
+## Ball physics defaults (the first pass; deep.gd knobs() changes them for a mode or a gift, apply()).
+const WALL_BOUNCE := 0.7
+const BUMPER_BOUNCE := 1.15
+const CAPTURE_SPEED := 1.6
+const ASSIST_R := 0.3
+const ASSIST := 0.9
 
 
 ## A player's ball: their colour, a little lighter (ball.gd; palette.gd checks it on the greens).
@@ -54,15 +62,57 @@ const LOOP_GAP := 0.24
 const MILL_GAP := 0.15
 var flag: Node3D
 var flag_wave := 0.0
+## Second pass (deep.gd): the ball physics knobs, a gust blowing now ({} none: {p, dir, len, depth, acc}), moles up
+## now ([[centre, radius]]), and the pick green (no cup: pads instead).
+var wall_bounce := WALL_BOUNCE
+var bumper_bounce := BUMPER_BOUNCE
+var capture := CAPTURE_SPEED
+var assist_r := ASSIST_R
+var assist := ASSIST
+var cup_r := CUP_R
+var gust := {}
+var moles: Array = []
+var pick := false
 var _t := 0.0
 
 
-## Physics and look (every machine).
-func build(d: Dictionary) -> void:
+## Physics and look (every machine). k: deep.gd knobs() (the mode and the gift).
+func build(d: Dictionary, k: Dictionary = {}) -> void:
 	for c in get_children():
 		c.queue_free()
 	setup(d)
+	apply(k)
 	_build_look()
+
+
+## The ball physics knobs (deep.gd knobs() / on_knobs()); missing keys keep their value.
+func apply(k: Dictionary) -> void:
+	wall_bounce = float(k.get("wall_bounce", wall_bounce))
+	bumper_bounce = float(k.get("bumper_bounce", bumper_bounce))
+	capture = float(k.get("capture", capture))
+	assist_r = float(k.get("assist_r", assist_r))
+	assist = float(k.get("assist", assist))
+	cup_r = float(k.get("cup_r", cup_r))
+	if k.has("gust"):
+		gust = k.gust
+	if k.has("moles"):
+		moles = k.moles
+
+
+## A gust's push on a rolling ball at p (m/s^2; zero outside the band or with no gust).
+func push(p: Vector2) -> Vector2:
+	if gust.is_empty():
+		return Vector2.ZERO
+	var dir: Vector2 = gust.dir
+	var rel := p - (gust.p as Vector2)
+	if absf(rel.dot(dir)) > float(gust.len) * 0.5 or absf(rel.dot(Vector2(-dir.y, dir.x))) > float(gust.depth) * 0.5:
+		return Vector2.ZERO
+	return dir * float(gust.acc)
+
+
+## Has this hole a cup (the pick green has pads instead)?
+func has_cup() -> bool:
+	return not pick
 
 
 ## Physics only: walls, bumpers and the gimmick from a hole description (holegen.gd).
@@ -92,6 +142,15 @@ func setup(d: Dictionary) -> void:
 	loop_z = float(def.get("loop_z", 0.0))
 	loop_x = float(def.get("loop_x", 0.0))
 	mill_angle = 0.0
+	wall_bounce = WALL_BOUNCE
+	bumper_bounce = BUMPER_BOUNCE
+	capture = CAPTURE_SPEED
+	assist_r = ASSIST_R
+	assist = ASSIST
+	cup_r = CUP_R
+	gust = {}
+	moles = []
+	pick = bool(def.get("pick", false))
 	sails = null
 	flag = null
 	var l := -hw - 0.01
@@ -197,7 +256,7 @@ func bounds() -> Rect2:
 func tick(delta: float) -> void:
 	if gimmick == "windmill":
 		mill_boost = maxf(0.0, mill_boost - delta)
-		mill_angle = fmod(mill_angle + delta * mill_speed * (3.0 if mill_boost > 0.0 else 1.0), TAU)
+		mill_angle = fmod(mill_angle + delta * mill_speed * (3.0 if mill_boost > 0.0 or not gust.is_empty() else 1.0), TAU)  # (a gust spins it fast)
 
 
 func _process(delta: float) -> void:
@@ -221,7 +280,7 @@ func _build_look() -> void:
 		var z0: float = r[1]
 		var x1: float = r[2]
 		var z1: float = r[3]
-		b.box(Vector3(x1 - x0, 0.06, z1 - z0), MeshKit.at(Vector3((x0 + x1) * 0.5, -0.03, (z0 + z1) * 0.5)), GREEN)
+		b.box(Vector3(x1 - x0, 0.06, z1 - z0), MeshKit.at(Vector3((x0 + x1) * 0.5, -0.03, (z0 + z1) * 0.5)), PICK_GREEN if pick else GREEN)
 	# Rails: a box along each wall, just outside it.
 	var k := 0
 	for w in walls:
@@ -240,9 +299,16 @@ func _build_look() -> void:
 		b.torus(rr, 0.035, MeshKit.at(Vector3(c.x, 0.1, c.y)), Color(1.0, 0.95, 0.95), 16, 6)
 	# Tee mat and the cup (a dark hole with a white rim).
 	b.box(Vector3(0.9, 0.01, 0.34), MeshKit.at(Vector3(tee.x, 0.003, tee.y)), Color(0.2, 0.62, 0.32))
-	b.cylinder(CUP_R, CUP_R, 0.01, MeshKit.at(Vector3(cup.x, 0.003, cup.y)), CUP, 16)
-	b.torus(CUP_R + 0.01, 0.012, MeshKit.at(Vector3(cup.x, 0.004, cup.y)), Color.WHITE, 16, 4)
-	b.cylinder(0.012, 0.012, 1.0, MeshKit.at(Vector3(cup.x + CUP_R * 0.6, 0.5, cup.y)), Color.WHITE, 6)
+	if pick:  # the pick green: three pale pads with a white rim (an orb floats over each: picks.gd)
+		for pd in def.get("pads", []):
+			var pp: Vector2 = pd
+			b.cylinder(0.3, 0.3, 0.008, MeshKit.at(Vector3(pp.x, 0.002, pp.y)), PAD, 20)
+			b.torus(0.3, 0.014, MeshKit.at(Vector3(pp.x, 0.004, pp.y)), Color.WHITE, 20, 4)
+		add_child(MeshKit.instance(b.build()))
+		return
+	b.cylinder(cup_r, cup_r, 0.01, MeshKit.at(Vector3(cup.x, 0.003, cup.y)), CUP, 16)
+	b.torus(cup_r + 0.01, 0.012, MeshKit.at(Vector3(cup.x, 0.004, cup.y)), Color.WHITE, 16, 4)
+	b.cylinder(0.012, 0.012, 1.0, MeshKit.at(Vector3(cup.x + cup_r * 0.6, 0.5, cup.y)), Color.WHITE, 6)
 	if gimmick == "hill":
 		_hill(b)
 	elif gimmick == "windmill":
@@ -252,7 +318,7 @@ func _build_look() -> void:
 	add_child(MeshKit.instance(b.build()))
 	# The flag: its own little node so it can wave (and be flicked by the VR player).
 	flag = Node3D.new()
-	flag.position = Vector3(cup.x + CUP_R * 0.6, 0.98, cup.y)
+	flag.position = Vector3(cup.x + cup_r * 0.6, 0.98, cup.y)
 	var fb := MeshKit.Builder.new()
 	fb.box(Vector3(0.3, 0.2, 0.012), MeshKit.at(Vector3(0.15, -0.1, 0.0)), Color(1.0, 0.3, 0.3))
 	fb.star(5, 0.06, 0.028, 0.02, MeshKit.at(Vector3(0.15, -0.1, 0.0)), Color(1.0, 0.92, 0.3), true)
