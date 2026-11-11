@@ -41,7 +41,7 @@ func _init() -> void:
 	var kinds := {}
 	var shapes := {}
 	for s in 60:
-		var h := HouseGen.generate(1000 + s, {"level": 3})
+		var h := HouseGen.generate(1000 + s, {"level": 1 + s % 5})
 		var key := []
 		for sp in h.spots:
 			kinds[sp.kind] = true
@@ -86,9 +86,65 @@ func _init() -> void:
 			kept += 1
 	for k in HouseGen.GHOSTS:
 		_expect(int(jars.get(k, 0)) > 0, "a %s jar turns up within ten nights" % k)
-	_expect(Museum.cosy_level(kept) >= Museum.STEPS.size() - 2, "ten nights light most of the house up (%d of %d, %d kept)" % [Museum.cosy_level(kept), Museum.STEPS.size(), kept])
+	_expect(Museum.cosy_level(kept) >= 5, "ten nights light most of the house up (%d of %d, %d kept)" % [Museum.cosy_level(kept), Museum.STEPS.size(), kept])
 	_expect(Museum.cosy_level(0) == 0 and Museum.cosy_level(Museum.STEPS[0]) == 1, "the first cosy step comes after %d ghosts" % Museum.STEPS[0])
 	_expect(Museum.jars_shown(0) == 0 and Museum.jars_shown(1) == 1 and Museum.jars_shown(100) == 3, "jars on the shelf: 0, 1 .. 3")
+	# SECOND PASS: wings, modes, the new ghosts and a smooth climb.
+	_expect(HouseGen.generate(5, {"level": 0}).wing.is_empty(), "the very first house has no wing")
+	_expect(String(HouseGen.generate(5, {"level": 1}).wing.id) == "attic", "the attic opens on the second house")
+	_expect(String(HouseGen.generate(5, {"level": 2}).wing.id) == "cellar", "then the cellar")
+	_expect(String(HouseGen.generate(5, {"level": 3}).wing.id) == "greenhouse", "then the greenhouse")
+	var wings_seen := {}
+	var wing_rooms := {}
+	for s in 40:
+		var hw := HouseGen.generate(3000 + s, {"level": 4 + s % 3})
+		wings_seen[hw.wing.id] = true
+		wing_rooms[hw.wing.room] = true
+		var n_wing := (hw.spots as Array).filter(func(o: Dictionary) -> bool: return String(o.kind) == String(hw.wing.kind)).size()
+		_expect(n_wing >= 1, "house %d: the %s has a %s to hide in" % [3000 + s, hw.wing.id, hw.wing.kind])
+	_expect(wings_seen.size() == 3 and wing_rooms.size() == 2, "later houses get every wing in both side rooms (%s, %s)" % [wings_seen.keys(), wing_rooms.keys()])
+	var hm := HouseGen.generate(4242, {"level": 5})
+	for m in HouseGen.MODE_IDS:
+		_expect(var_to_str(HouseGen.night_plan(hm, 1, 2, m)) == var_to_str(HouseGen.night_plan(hm, 1, 2)), "%s: night 1 is the gentle night" % m)
+		var first_boing := 99
+		var first_puff := 99
+		for n in range(1, 11):
+			var kinds_n := HouseGen.night_plan(hm, n, 2, m).map(func(g: Dictionary) -> String: return String(g.kind))
+			if kinds_n.has("boing"):
+				first_boing = mini(first_boing, n)
+			if kinds_n.has("puff"):
+				first_puff = mini(first_puff, n)
+		_expect(first_boing <= 6 and first_puff <= 8, "%s: Boing (night %d) and Puff (night %d) come within a visit" % [m, first_boing, first_puff])
+		_expect(first_boing >= 3 and first_puff >= 3, "%s: the new ghosts never come on the first two nights" % m)
+	var earlier := 0
+	for s in 30:
+		var hb := HouseGen.generate(5000 + s, {"level": 4})
+		var plain_b := 99
+		var wing_b := 99
+		for n in range(1, 9):
+			var k_n := HouseGen.night_plan(hb, n, 2, "gentle").map(func(g: Dictionary) -> String: return String(g.kind))
+			if k_n.has(String(hb.wing.ghost)):
+				wing_b = mini(wing_b, n)
+		if String(hb.wing.ghost) != "snoozy" and wing_b < int(HouseGen.MODE_NEW.gentle[hb.wing.ghost]):
+			earlier += 1
+	_expect(earlier > 0, "a wing calls its own ghost a night early (%d houses)" % earlier)
+	for m in HouseGen.MODE_IDS:
+		for crew in [1, 3, 6]:
+			var loads := []
+			for n in range(1, 11):
+				loads.append(snappedf(HouseGen.night_load(hm, n, crew, m), 0.1))
+			print("curve %s crew %d: %s" % [m, crew, str(loads)])
+			_expect(HouseGen.curve_problems(hm, m, crew).is_empty(), "%s crew %d: a smooth climb %s" % [m, crew, str(HouseGen.curve_problems(hm, m, crew))])
+	_expect(HouseGen.night_load(hm, 6, 3, "hard") > HouseGen.night_load(hm, 6, 3, "gentle") * 1.15, "hard is clearly harder than gentle by night 6")
+	_expect(HouseGen.catch_time("puff", false) < 4.0 and HouseGen.catch_time("boing", true) < 6.0, "Boing and the pufflings are quick to catch")
+	_expect(HouseGen.LAND_DIZZY.gentle >= HouseGen.LAND_DIZZY.hard and HouseGen.HOP_TIME >= 1.0, "a hop is told for a second, gentle lands dizzy longest")
+	# The checker catches a wing hiding place outside its wing.
+	var badw := HouseGen.generate(4242, {"level": 5})
+	var other := "library" if String(badw.wing.room) == "ballroom" else "ballroom"
+	for o in badw.spots:
+		if String(o.kind) == String(badw.wing.kind):
+			o.room = other
+	_expect(HouseGen.check(badw).any(func(w: String) -> bool: return w.contains("outside its wing")), "a wing's hiding place outside the wing is caught")
 	# Hand checks: the checker catches broken houses.
 	var good := HouseGen.generate(77, {"level": 3})
 	_expect(HouseGen.check(good).is_empty(), "house 77 is fine")
