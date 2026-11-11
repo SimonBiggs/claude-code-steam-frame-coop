@@ -202,7 +202,7 @@ func _checks() -> void:
 		kit.assert_true(main.party.is_local(0) and main.avatars.has(0) and main.cams.has(0), "flat host: slot 0 plays here with a camera")
 	kit.assert_true(int(main.net.state_get("popped", 0)) > 0, "%s: balloons were popped" % mode)
 	kit.assert_true(int(main.net.state_get("round", 0)) >= 2, "%s: round 1 ended and round 2 started by itself" % mode)
-	if mode != "client":
+	if mode != "client" and kit.tv_players() > 0:  # solo VR (a host alone) has no TV players
 		kit.assert_true(main.popped_by_tv > 0, "TV players popped balloons")
 	if main.vr_rig != null:
 		kit.assert_true(main.popped_by_vr > 0, "the fake VR player popped balloons")
