@@ -499,6 +499,8 @@ func _touch(id: int, m: Dictionary, targets: Array, reach: float, dmg: int, once
 	var fwd := Vector2(sin(float(m["yaw"])), cos(float(m["yaw"])))
 	deep.src = "touch%d" % int(m["kind"])
 	for t in targets:
+		if not mons.has(id):
+			return  # THORN ARMOR on the hero it just hit popped it (a later target would read a gone monster)
 		var tp: Vector3 = (t as Dictionary)["p"]
 		var key: int = (t as Dictionary)["key"]
 		var to := Vector2(tp.x - p.x, tp.z - p.z)
