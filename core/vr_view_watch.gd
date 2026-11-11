@@ -1,7 +1,9 @@
 extends Node
 ## VR view watch (a service, core/services.gd): in fake-VR bot runs (BOT_VR=1, every VR bot) it runs
-## core/vr_view_check.gd once a second and reports each new problem once as "BOT ASSERT FAILED: VR view: ..." (fails the
-## bot in tools/multibot.ts / dev.bots). A problem has to last 3 s (cards fade in, glide into place, a blink teleport). Does nothing
+## core/vr_view_check.gd every 0.5 s and reports each new problem once as "BOT ASSERT FAILED: VR view: ..." (fails the
+## bot in tools/multibot.ts / dev.bots). A problem has to last 3 s (cards fade in, glide into place, a blink teleport);
+## panels drawn over each other only SHORT_S (a 2.5 s NIGHT banner over a story card is gone before 3 s, but the
+## player still couldn't read either: Ghost Lantern 2026-11-11). Does nothing
 ## without BOT_VR, so real headsets and flat machines never pay for it. VR_VIEW_WARN=1 prints "VR VIEW: ..." instead.
 
 const VrViewCheck := preload("res://core/vr_view_check.gd")
@@ -11,6 +13,8 @@ var seen := {}  # problem -> first seen (s)
 var told := {}
 var on := OS.has_environment("BOT_VR")
 var clock := 0.0
+const HOLD_S := 3.0
+const SHORT_S := 1.0
 
 
 func _process(delta: float) -> void:
@@ -27,7 +31,7 @@ func _process(delta: float) -> void:
 		now[key] = true
 		if not seen.has(key):
 			seen[key] = clock
-		elif clock - float(seen[key]) >= 3.0 and not told.has(key):
+		elif clock - float(seen[key]) >= hold(p) and not told.has(key):
 			told[key] = true
 			if OS.has_environment("VR_VIEW_WARN"):
 				print("VR VIEW: %s" % p)
@@ -36,6 +40,12 @@ func _process(delta: float) -> void:
 	for k in seen.keys():
 		if not now.has(k):
 			seen.erase(k)
+
+
+## How long a problem may last before it fails the bot.
+static func hold(p: String) -> float:
+	# (a card gliding clear of a pick orb that just popped up keeps the long hold: UiKit.vr_dodge moves it in time)
+	return SHORT_S if p.contains(": drawn over ") and not p.contains("drawn over the pick") else HOLD_S
 
 
 ## Numbers change frame to frame (distances): the problem's kind + node name is the key.

@@ -66,7 +66,7 @@ func _init() -> void:
 		var src2 := FileAccess.get_file_as_string(path2)
 		if RegEx.create_from_string("\\b(zone|z) [!=]= [0-9]").search(src2) != null:
 			_fail("%s picks looks by a zone number (use the biome id: FloorGen.zone_data(zone)[\"id\"])" % path2)
-	print("FLOORS: %d floors checked, %d failures (%d ms)" % [checks, fails, Time.get_ticks_msec() - t0])
+	print("FLOORS: %s - %d floors checked, %d failures (%d ms)" % ["PASS" if fails == 0 else "FAIL", checks, fails, Time.get_ticks_msec() - t0])
 	quit(1 if fails > 0 else 0)
 
 

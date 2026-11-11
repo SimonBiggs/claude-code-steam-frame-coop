@@ -23,6 +23,7 @@ func _ready() -> void:
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.albedo_color = Color(0.75, 1.0, 0.95, 0.5)
+	mat.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 	right = _part([VrRig.glove_mesh(false, Color.WHITE, Color.WHITE), VrHands.sword_mesh()])
 	left = _part([VrRig.glove_mesh(true, Color.WHITE, Color.WHITE), VrHands.flame_mesh()])
 	visible = false

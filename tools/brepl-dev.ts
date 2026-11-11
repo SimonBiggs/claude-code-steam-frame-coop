@@ -633,7 +633,9 @@ export async function land(branch: string, genTests: string[], botId: string, ot
     const scene = await stat(join(STAGE, `tests/${t}.tscn`)).then(() => true, () => false);
     const how = scene ? `--fixed-fps 60 res://tests/${t}.tscn`  /* ends itself (exit code = failures); timeout 600 caps it */ : `-s res://tests/${t}.gd`;
     out[t] = (await sh(`DUO_PORT=${rport()} timeout 600 godot-test --headless --path . ${how} 2>&1 | grep -v OpenXR | grep -E "PASS|FAIL|SCRIPT ERROR" | tail -3; echo exit=\${PIPESTATUS[0]}`, STAGE)).out;
-    if (scene && !/PASS/.test(out[t])) out[t] += " (no PASS line)";
+    // Every test prints an explicit verdict, -s scripts too (paper_planes_sky_test exited 0 with only a count line,
+    // 2026-11-11; tests/bot_end_test.gd fails a tests/*_test.gd with no PASS line in its code).
+    if (!/PASS/.test(out[t])) out[t] += " (no PASS line)";
     ok &&= /exit=0/.test(out[t]) && !/FAIL|SCRIPT ERROR|no PASS line/.test(out[t]);
   }
   const deckOut = (await sh(`DECK_BOT_ONLY=${botId} DUO_PORT=${rport()} timeout 300 godot-test --headless --path . --fixed-fps 60 --quit-after 6000 res://tests/deck_bot.tscn 2>&1`, STAGE)).out;

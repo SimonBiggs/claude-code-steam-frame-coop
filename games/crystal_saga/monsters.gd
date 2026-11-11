@@ -120,6 +120,7 @@ func _aura_mesh() -> MeshInstance3D:
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.albedo_color = Color(0.35, 0.1, 0.5, 0.35)
+	mat.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
 	var mi := MeshInstance3D.new()
