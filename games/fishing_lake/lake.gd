@@ -9,6 +9,13 @@ extends Node3D
 const FishScript := preload("res://games/fishing_lake/fish.gd")
 const OLLIE_FUR := Color(0.62, 0.42, 0.25)  # Ollie the otter's fur (book.gd OLLIE)
 
+## The lake bed, and how the water looks from above (WATER_SHADER): the water colour mixes WATER_SKY_MIX of the sky
+## into the deep colour and lets WATER_ALPHA of it cover what is under it (fish, the bed). palette.gd reads these.
+## A darker bed and a little clearer water (were 0.12, 0.22, 0.2 and 0.66): the catfish, eel and pike vanished on
+## the old bed.
+const BED := Color(0.03, 0.06, 0.06)
+const WATER_ALPHA := 0.6
+const WATER_SKY_MIX := 0.08
 const LAKE_C := Vector3(0.0, 0.0, -10.0)  # centre of the round lake (water level y = 0)
 const LAKE_R := 22.0
 const DECK := 0.7  # jetty deck / shore height
@@ -31,6 +38,8 @@ uniform vec3 deep_col = vec3(0.05, 0.3, 0.42);
 uniform vec3 sky_col = vec3(0.7, 0.85, 1.0);
 uniform vec3 glint_col = vec3(1.0, 1.0, 0.9);
 uniform float rain = 0.0;
+uniform float water_alpha = 0.66;
+uniform float sky_mix = 0.08;
 varying vec3 wpos;
 
 float wave(vec2 p, float t) {
@@ -52,7 +61,7 @@ void fragment() {
 	float facing = clamp(dot(NORMAL, VIEW), 0.0, 1.0);
 	float fres = pow(1.0 - facing, 3.0);
 	float ripple = sin(wpos.x * 3.1 + TIME * 1.3) * sin(wpos.z * 2.7 - TIME * 1.1);
-	vec3 col = mix(deep_col, sky_col, clamp(fres * 0.85 + 0.08, 0.0, 1.0));
+	vec3 col = mix(deep_col, sky_col, clamp(fres * 0.85 + sky_mix, 0.0, 1.0));
 	col += glint_col * smoothstep(0.9, 1.0, ripple) * 0.18;
 	if (rain > 0.01) {
 		// Raindrop rings: one per grid cell, each on its own timer.
@@ -66,7 +75,7 @@ void fragment() {
 	ALBEDO = col;
 	ROUGHNESS = 0.12;
 	SPECULAR = 0.6;
-	ALPHA = mix(0.66, 0.95, fres);
+	ALPHA = mix(water_alpha, 0.95, fres);
 }
 """
 
@@ -224,6 +233,8 @@ func _build_water() -> void:
 	water_mat = ShaderMaterial.new()
 	water_mat.shader = Shader.new()
 	water_mat.shader.code = WATER_SHADER
+	water_mat.set_shader_parameter("water_alpha", WATER_ALPHA)
+	water_mat.set_shader_parameter("sky_mix", WATER_SKY_MIX)
 	water_mat.render_priority = UiKit.VR_PRIO_UNDER_UI  # under VR cards, or the water is blended over them (core/vr_view_check.gd)
 	w.material_override = water_mat
 	w.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -238,7 +249,7 @@ func _build_water() -> void:
 	cm.radial_segments = 32
 	cm.rings = 1
 	bed.mesh = cm
-	bed.material_override = main.make_material(Color(0.12, 0.22, 0.2), 0.0)
+	bed.material_override = main.make_material(BED, 0.0)
 	bed.position = LAKE_C + Vector3(0, -2.1, 0)
 	add_child(bed)
 
@@ -1007,17 +1018,36 @@ func update(delta: float) -> void:
 		map_buoy.rotation.z = sin(t * 1.3) * 0.12
 
 
+## The sky and water colours at sky phase p (0 morning -> 1 sunset -> 1.45 starry night) and rain 0..1:
+## {top, hor, sun, deep} (set_daylight; palette.gd checks the fish and lures on every one).
+static func daylight(p: float, rain: float) -> Dictionary:
+	var dp := clampf(p, 0.0, 1.0)
+	var nt := smoothstep(1.0, 1.4, p)
+	var top := Color(0.3, 0.55, 0.95).lerp(Color(0.3, 0.25, 0.55), dp)
+	var hor := Color(0.78, 0.9, 1.0).lerp(Color(1.0, 0.55, 0.32), smoothstep(0.3, 1.0, dp))
+	var sun_c := Color(1.0, 0.97, 0.88).lerp(Color(1.0, 0.55, 0.25), smoothstep(0.4, 1.0, dp))
+	top = top.lerp(Color(0.03, 0.05, 0.15), nt)
+	hor = hor.lerp(Color(0.13, 0.11, 0.26), nt)
+	top = top.lerp(Color(0.42, 0.46, 0.52) * (1.0 - nt * 0.7), rain * 0.75)
+	hor = hor.lerp(Color(0.62, 0.66, 0.7) * (1.0 - nt * 0.7), rain * 0.7)
+	var deep := Color(0.05, 0.3, 0.42).lerp(Color(0.12, 0.12, 0.3), dp).lerp(Color(0.03, 0.06, 0.14), nt)
+	return {"top": top, "hor": hor, "sun": sun_c, "deep": deep}
+
+
+## The water's own colour seen from above at a daylight() (WATER_SHADER with no fresnel).
+static func water_color(d: Dictionary) -> Color:
+	var sky: Color = (d.hor as Color).lerp(d.top, 0.3)
+	return (d.deep as Color).lerp(sky, WATER_SKY_MIX)
+
+
 ## Sky phase p: 0 morning -> 1 sunset -> 1.45 starry night; rain 0..1 greys everything out.
 func set_daylight(p: float, rain: float, vr: bool) -> void:
 	var dp := clampf(p, 0.0, 1.0)
 	night = smoothstep(1.0, 1.4, p)
-	var top := Color(0.3, 0.55, 0.95).lerp(Color(0.3, 0.25, 0.55), dp)
-	var hor := Color(0.78, 0.9, 1.0).lerp(Color(1.0, 0.55, 0.32), smoothstep(0.3, 1.0, dp))
-	var sun_c := Color(1.0, 0.97, 0.88).lerp(Color(1.0, 0.55, 0.25), smoothstep(0.4, 1.0, dp))
-	top = top.lerp(Color(0.03, 0.05, 0.15), night)
-	hor = hor.lerp(Color(0.13, 0.11, 0.26), night)
-	top = top.lerp(Color(0.42, 0.46, 0.52) * (1.0 - night * 0.7), rain * 0.75)
-	hor = hor.lerp(Color(0.62, 0.66, 0.7) * (1.0 - night * 0.7), rain * 0.7)
+	var dl := daylight(p, rain)
+	var top: Color = dl.top
+	var hor: Color = dl.hor
+	var sun_c: Color = dl.sun
 	var elev := lerpf(deg_to_rad(55.0), deg_to_rad(5.0), dp)
 	var az := deg_to_rad(200.0)
 	var sun_dir := Vector3(sin(az) * cos(elev), sin(elev), cos(az) * cos(elev))
@@ -1028,7 +1058,7 @@ func set_daylight(p: float, rain: float, vr: bool) -> void:
 	sky_mat.set_shader_parameter("sun_vis", (1.0 - night) * (1.0 - rain * 0.9))
 	sky_mat.set_shader_parameter("stars", night * (1.0 - rain))
 	water_mat.set_shader_parameter("sky_col", Vector3(hor.r, hor.g, hor.b).lerp(Vector3(top.r, top.g, top.b), 0.3))
-	var deep := Color(0.05, 0.3, 0.42).lerp(Color(0.12, 0.12, 0.3), dp).lerp(Color(0.03, 0.06, 0.14), night)
+	var deep: Color = dl.deep
 	water_mat.set_shader_parameter("deep_col", Vector3(deep.r, deep.g, deep.b))
 	var glint := sun_c.lerp(Color(0.8, 0.85, 1.0), night)
 	water_mat.set_shader_parameter("glint_col", Vector3(glint.r, glint.g, glint.b))
