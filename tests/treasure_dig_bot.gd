@@ -344,7 +344,7 @@ func _checks() -> void:
 		kit.assert_true(saw_pick, "%s: round 2 began with the island pick orbs" % mode)
 		kit.assert_true(int(main.save.data.islands) >= 1, "%s: the islands done were saved" % mode)
 		kit.info("map pieces banked (most in a round): %d, X shown: %s, relics: %s" % [max_maps, saw_x, str(main.save.data.relics)])
-		if want > 0:
+		if kit.tv_players() > 0:  # (a giant alone - solo VR host, the Frame - digs fewer in a short bot round)
 			kit.assert_true(max_maps >= 1, "%s: map pieces were dug up and banked" % mode)
 	if mode == "client":
 		kit.assert_true(max_items_seen > 0, "client: treasure items mirrored from the host")
