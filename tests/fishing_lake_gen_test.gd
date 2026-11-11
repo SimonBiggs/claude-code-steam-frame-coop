@@ -10,6 +10,7 @@ extends SceneTree
 const LakeGen := preload("res://games/fishing_lake/lakegen.gd")
 const Book := preload("res://games/fishing_lake/book.gd")
 const Seeded := preload("res://core/seeded.gd")
+const Tackle := preload("res://games/fishing_lake/tackle.gd")
 
 var fails := 0
 
@@ -106,6 +107,40 @@ func _init() -> void:
 	bad4.weather = "sunny"
 	(bad4.mix as Dictionary)[LakeGen.MOONFISH] = 5
 	_expect(not LakeGen.check(bad4).is_empty(), "moonfish in the sunshine is caught")
+	# Tackle (second pass): modes rise in order with readable tells, Old Whiskers' pulls grow smoothly and no fight
+	# drags on, every offered lure helps something, the lures change, and the curve over days has no cliffs.
+	var t3 := Time.get_ticks_usec()
+	for s in seeds:
+		for w in Tackle.check_modes(s * 7 + 1):
+			_fail("modes seed %d: %s" % [s, w])
+	print("tackle: %d mode sets checked in %.1f ms (gentle %.0f s, brave %.0f s, hard %.0f s for Old Whiskers)" % [seeds,
+		float(Time.get_ticks_usec() - t3) / 1000.0, Tackle.fight_secs(1, "gentle"), Tackle.fight_secs(1, "brave"), Tackle.fight_secs(1, "hard")])
+	var offers := {}
+	for s in 40:
+		var l := LakeGen.generate(s, {"level": 3, "wish": LakeGen.EEL})
+		offers[str(Tackle.offer(l))] = true
+		_expect(Tackle.helps(String(Tackle.offer(l)[1]), LakeGen.EEL), "seed %d: the glow lure sits in the middle for an eel wish" % s)
+	_expect(offers.size() >= 3, "the lure offers change (%d kinds)" % offers.size())
+	var badm: Dictionary = LakeGen.generate(9, {"level": 0}).duplicate(true)
+	_expect(not Tackle.check_offer(badm, ["worm", "glow", "goldfly"]).is_empty(), "lures before their level are caught")
+	var badp := Tackle.boss_pulls(3, "brave")
+	badp[4] = [0.5, 2.0, 1.0]
+	_expect(not Tackle.check_pulls(badp, "brave").is_empty(), "an untold, jumpy pull is caught")
+	_expect(Tackle.shiny_ok(LakeGen.TROUT) and not Tackle.shiny_ok(LakeGen.LEGEND) and not Tackle.shiny_ok(LakeGen.GOLDEN), "shiny fish: not the legend or the golden fish")
+	_expect(Tackle.shiny_chance("goldfly") > Tackle.shiny_chance("worm"), "the gold fly finds more shiny fish")
+	var prev_kinds := 0.0
+	for level in 4:
+		var kinds := 0.0
+		for s in 40:
+			kinds += float(LakeGen.catchable(LakeGen.generate(1000 + s, {"level": level})).size()) / 40.0
+		_expect(kinds >= prev_kinds - 0.01 and (level == 0 or kinds - prev_kinds <= 3.0), "level %d: %.1f kinds of fish a day (was %.1f): a smooth rise" % [level, kinds, prev_kinds])
+		prev_kinds = kinds
+	var pl := 0
+	for d in 20:
+		var n := Book.pond_level(d)
+		_expect(n >= pl and n - pl <= 1, "Ollie's pond grows one thing at a time (day %d)" % d)
+		pl = n
+	_expect(Book.pond_level(0) == 1 and Book.pond_level(30) == Book.POND.size(), "the pond starts with logs and grows it all")
 	# Story.
 	_expect(Book.pick_wish({}, 0, 1) in [LakeGen.MINNOW, LakeGen.PERCH, LakeGen.BLUEGILL], "the first wish is an easy fish")
 	var wishes := {}
@@ -123,6 +158,7 @@ func _init() -> void:
 
 func _check_wish(l: Dictionary, w: int) -> Array:
 	var why := LakeGen.check(l)
+	why.append_array(Tackle.check_offer(l, Tackle.offer(l)))  # today's lures: fair, unlocked, the wish's in the middle
 	if w >= 0 and int(l.wish) != w:
 		why.append("the wish %d was not kept" % w)
 	return why

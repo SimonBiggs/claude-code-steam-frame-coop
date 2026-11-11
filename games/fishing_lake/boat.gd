@@ -35,6 +35,7 @@ var hud_label: Label
 var tip_label: Label
 var pad_lost_t := -1.0
 var level := 0
+var is_down := false  # (core/pick_orbs.gd touches(): boats are never down)
 var coins := 0
 var built_level := 0
 var wake: CPUParticles3D
@@ -432,6 +433,13 @@ func _collide() -> void:
 		else:
 			position.x = signf(position.x if position.x != 0.0 else 1.0) * hw
 			vel.x *= -0.3
+	# Ollie's pond (a log pen beside the jetty): row round it.
+	var pd := Vector2(position.x - Lake.POND_C.x, position.z - Lake.POND_C.z)
+	if pd.length() < Lake.POND_R + 0.9:
+		var out := pd.normalized() if pd.length() > 0.01 else Vector2(-1, 0)
+		position.x = Lake.POND_C.x + out.x * (Lake.POND_R + 0.9)
+		position.z = Lake.POND_C.z + out.y * (Lake.POND_R + 0.9)
+		vel *= 0.5
 	# The trophy and journal boards stand in the shallows.
 	for ob in [Lake.BOARD_L, Lake.BOARD_R]:
 		var bo: Vector3 = ob
