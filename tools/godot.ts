@@ -11,7 +11,7 @@
 //   await g.shot()                                       // PNG path (Read it), default ~/.cache/gdev-offscreen/<port>/shot.png
 //   await g.log(30); await g.quit()                      // godot.list(), godot.stopAll()
 //   g = await godot.launch({project, scene, vr: true})   // fake VR player (BOT_VR=1): g.vr({head, look, left, right,
-//     trigger, grip, a, b, stick_l, stick_r}), g.vrSwing("right", [0,.3,-.6]), g.vrTrigger(), g.vrShot() = headset view,
+//     trigger, grip, a, b, stick_l, stick_r}), g.vrSwing("right", [0,.3,-.6]), g.vrTrigger(), g.vrShot() = headset view (g.vrShot(path, {stereo: true}): both eyes side by side),
 //     g.span(a, b, fps, {vr: true}) / g.at(t, {vr: true}) = the recorded headset view
 //   Several MACHINES (one host + TV-machine clients, networked over one shared DUO_PORT on 127.0.0.1):
 //   grp = await godot.launchGroup({project, scene, clients: 2, vr, record})   // host DUO_HOST=1 (+BOT_VR=1 if vr), clients
@@ -187,7 +187,7 @@ export class Game {
     return this.vr();
   }
   /** What the headset would show: PNG from the VR head camera (or any Camera3D node path). */
-  async vrShot(path = join(this.dir, "vr.png"), o: { camera?: string; width?: number; height?: number } = {}) { return (await this.cmd("camshot", { path, ...o })).path as string; }
+  async vrShot(path = join(this.dir, "vr.png"), o: { camera?: string; width?: number; height?: number; stereo?: boolean } = {}) { return (await this.cmd("camshot", { path, ...o })).path as string; }
   // --- Recorder: frames in <dir>/rec/<ms>.jpg, inputs + marks in rec/events.txt and the overlay ---
   recDir = "";
   recStart = 0;  // Date.now() when recording started (frame names are ms after this)
