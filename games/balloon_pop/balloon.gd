@@ -20,16 +20,22 @@ const MINI := WaveGen.MINI
 const GIANT := WaveGen.GIANT
 const CHOICE := WaveGen.CHOICE
 const RADIUS := 0.3
-const COLORS: Array[Color] = [Color(1.0, 0.25, 0.3), Color(0.25, 0.6, 1.0), Color(0.3, 0.9, 0.4),
-	Color(1.0, 0.55, 0.15), Color(0.75, 0.4, 1.0), Color(1.0, 0.45, 0.8), Color(0.2, 0.9, 0.9)]
-const GOLD_COLOR := Color(1.0, 0.82, 0.2)
-const GRUMPY_COLOR := Color(0.45, 0.47, 0.52)
-const ROCKET_COLOR := Color(1.0, 0.45, 0.15)
-const ICE_COLOR := Color(0.72, 0.9, 1.0)
-const CHOICE_COLOR := Color(0.98, 0.98, 1.0)
+## Every colour stands out on every sky and grass (skies.gd contrast_problems(), tests/balloon_pop_deep_test.gd):
+## a deep blue (not sky blue), a lime green (not grass green), an aqua ice and a magenta rocket.
+const COLORS: Array[Color] = [Color(0.95, 0.08, 0.3), Color(0.15, 0.3, 0.95), Color(0.55, 1.0, 0.15),
+	Color(1.0, 0.36, 0.0), Color(0.75, 0.4, 1.0), Color(1.0, 0.45, 0.8), Color(0.1, 0.85, 0.85)]
+const COLOR_NAMES: Array[String] = ["red", "blue", "green", "orange", "purple", "pink", "cyan"]
+const GOLD_COLOR := Color(1.0, 0.85, 0.1)
+const GRUMPY_COLOR := Color(0.4, 0.42, 0.46)
+const ROCKET_COLOR := Color(0.9, 0.1, 0.55)
+const ICE_COLOR := Color(0.35, 1.0, 0.9)
+const CHOICE_COLOR := Color(1.0, 0.6, 0.95)
 ## Body size per kind (x = round, y = tall), relative to a plain balloon.
 const SHAPE := {ROCKET: Vector2(0.75, 1.35), TWINS: Vector2(0.62, 0.62), MINI: Vector2(0.65, 0.65), GIANT: Vector2(1.85, 1.85),
 	CHOICE: Vector2(1.35, 1.35)}
+
+## A starry-night sky (skies.gd theme glow): every balloon glows softly so it shows on the dark sky.
+static var night := false
 
 var kind := NORMAL
 var color := Color.WHITE
@@ -86,7 +92,7 @@ func setup(id: int, k: int, c: int = -1, ride_id: String = "") -> void:
 	body = Node3D.new()
 	add_child(body)
 	var shape: Vector2 = SHAPE.get(k, Vector2.ONE)
-	var glow := k == GOLD or k == ICE
+	var glow := k == GOLD or k == ICE or night
 	var bodies: Array[Vector3] = [Vector3.ZERO]
 	if k == TWINS:
 		bodies = [Vector3(-0.15, 0.02, 0.0), Vector3(0.15, 0.02, 0.0), Vector3(0.0, 0.26, 0.0)]

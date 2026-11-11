@@ -11,6 +11,10 @@ extends Node3D
 ## DEPTH: rounds come from a seed (wavegen.gd: rings, lines, rainbows, hearts, stacks; pop a whole set
 ## for a bonus), every balloon proven reachable by both the VR player and the TV players; three goal
 ## stars per round; TODAY'S SKY first each day (the same sky and balloons on every machine).
+## SECOND PASS (skies.gd): GENTLE / BRAVE / HARD picked on the shared pick orbs once a session, POPPY'S GIFTS
+## (dart, pump, slow, magnet, pop pop) picked before every round (picks.gd), WIND GUSTS told by warn rings first
+## (events.gd), the sky by the time of day and the grass by the season (every balloon colour stands out on each),
+## and POPPY'S BALLOON PARADE circling over the fair, growing over days (parade.gd).
 ## TELEMETRY: one RUN line per round (and on quit) via core/telemetry.gd.
 ## Built on the shared engine like games/engine_template (party, split view, camera rig, VR rig,
 ## state store, awards, hud kit). Host / local simulate; the TV machine mirrors snapshots.
@@ -40,6 +44,11 @@ const WaveGen := preload("res://games/balloon_pop/wavegen.gd")
 const BgGen := preload("res://core/bg_gen.gd")
 const Story := preload("res://games/balloon_pop/story.gd")
 const Fair := preload("res://games/balloon_pop/fair.gd")
+const Skies := preload("res://games/balloon_pop/skies.gd")
+const Picks := preload("res://games/balloon_pop/picks.gd")
+const Gusts := preload("res://games/balloon_pop/events.gd")
+const Parade := preload("res://games/balloon_pop/parade.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
 
 const GAME_ID := "balloon_pop"
 const ARENA := WaveGen.ARENA
@@ -61,6 +70,7 @@ var round_time := 120.0  ## seconds per round (bots shorten it before adding the
 var results_wait := 12.0  ## seconds of confetti + results before the next round starts by itself
 var fresh_save := false  ## bots: start a brand-new fair
 var need_scale := 1.0  ## bots: smaller rides so a short round finishes one
+var pick_wait_scale := 1.0  ## bots: shorter waits on the pick orbs
 
 # --- The networking contract ---
 var net: Node
@@ -90,6 +100,7 @@ var score_labels := {}  # slot -> Label
 var timers := {}  # slot -> HudKit.TimerPill
 var star_icons := {}  # hud slot -> [3 icons]
 var ride_pics := {}  # hud slot -> [picture holder, bar, ride shown]
+var gift_pics := {}  # hud slot -> [picture holder, gift shown]
 var join_prompt: Control
 var vr_avatar: VrRig.Avatar  # TV machine: the VR player
 var vr_label: Label3D  # host: score on the back of the left glove
@@ -121,6 +132,18 @@ var ice_t := 0.0
 var set_left := {}  # set id -> balloons not popped yet
 var set_broken := {}  # set id -> true: one floated away
 var set_seen := {}  # set id -> true: its first balloon is out
+# --- Second pass (skies.gd) ---
+var picks: Picks
+var gusts: Gusts
+var parade: Parade
+var ground_mat: StandardMaterial3D
+var flowers: Node3D
+var theme := {}  # skies.gd theme (every machine, from net state "theme")
+var team_mode := ""  # host: this session's GENTLE / BRAVE / HARD ("" = not picked yet)
+var gift := ""  # host: the gift for the coming / current round ("" = not picked yet)
+var last_gift := ""
+var gift_ready := false  # host: the gift for the next round was picked
+var popping_chain := false  # host: a POP POP gift pop is popping its neighbours
 
 
 func _ready() -> void:
@@ -132,6 +155,7 @@ func _ready() -> void:
 	net.main = self
 	add_child(net)
 	net.state_changed.connect(_on_state_changed)
+	net.sticky_event("orbs")  # a machine joining mid-pick sees the pick orbs
 	party = Party.new()
 	party.name = "Party"
 	add_child(party)
@@ -179,6 +203,22 @@ func _setup(mode: String) -> void:
 		vr_rig.hand_l.add_child(vr_label)
 		hints.set_vr_rig(vr_rig, self)
 	_build_world(vr_rig != null)
+	picks = Picks.new()
+	picks.main = self
+	picks.wait_scale = pick_wait_scale
+	add_child(picks)
+	gusts = Gusts.new()
+	gusts.main = self
+	add_child(gusts)
+	parade = Parade.new()
+	add_child(parade)
+	if mode != "client":
+		var hour := int(Time.get_datetime_dict_from_system().get("hour", 12))
+		var th := Skies.theme_of(hour, Seeded.today())
+		net.state_set("theme", String(th.id))
+		apply_theme(String(th.id))
+		net.state_set("parade", int(save.data.get("parade", 0)))
+		parade.set_count(int(save.data.get("parade", 0)))
 	if mode != "host" or flat_host:  # every machine with a screen of its own (a flat host too)
 		split = SplitView.new()
 		add_child(split)
@@ -222,18 +262,52 @@ func _build_world(vr: bool) -> void:
 	disc.height = 0.2
 	disc.radial_segments = 32
 	ground.mesh = disc
-	ground.material_override = MeshKit.material(Color(0.45, 0.78, 0.36))
+	ground_mat = MeshKit.material(Color(0.45, 0.78, 0.36)).duplicate()
+	ground.material_override = ground_mat
 	ground.position.y = -0.1
 	add_child(ground)
 	# A bright ring of fence-like bushes, trees outside (beyond Poppy's fair), flowers inside: one draw call per kind.
 	add_child(MeshKit.scatter_random(MeshKit.prop("tree"), 16, Vector3.ZERO, ARENA + 12.0, ARENA + 8.0, 0.8, 1.3, PackedColorArray(), 3))
 	add_child(MeshKit.scatter_random(MeshKit.prop("bush"), 18, Vector3.ZERO, ARENA + 2.5, ARENA + 0.8, 0.8, 1.2, PackedColorArray(), 4))
-	add_child(MeshKit.scatter_random(MeshKit.prop("flower"), 40, Vector3.ZERO, ARENA - 0.5, 1.0, 0.7, 1.1,
-		PackedColorArray([Color(1.0, 0.5, 0.6), Color(1.0, 0.9, 0.4), Color(0.7, 0.6, 1.0)]), 5))
+	_plant_flowers(PackedColorArray([Color(1.0, 0.5, 0.6), Color(1.0, 0.9, 0.4), Color(0.7, 0.6, 1.0)]))
 	fair = Fair.new()
 	fair.name = "Fair"
 	fair.sfx = sfx
 	add_child(fair)
+
+
+func _plant_flowers(cols: PackedColorArray) -> void:
+	if flowers != null and is_instance_valid(flowers):
+		flowers.queue_free()
+	flowers = MeshKit.scatter_random(MeshKit.prop("flower"), 40, Vector3.ZERO, ARENA - 0.5, 1.0, 0.7, 1.1, cols, 5)
+	add_child(flowers)
+
+
+## Every machine: today's sky theme (skies.gd: the time of day picks the sky, the season the grass and flowers; at
+## night the balloons glow).
+func apply_theme(id: String) -> void:
+	var th := Skies.theme_by_id(id)
+	if String(theme.get("id", "")) == String(th.id):
+		return
+	theme = th
+	Balloon.night = bool(th.glow)
+	if ground_mat != null:
+		ground_mat.albedo_color = th.ground
+	_plant_flowers(PackedColorArray(th.flowers))
+	if sky != null and String(net.state_get("phase", "")) != "play":
+		sky.set_preset(String(th.preset), 1.0)
+
+
+## The leaves a gust blows (events.gd): the season's.
+func leaf_color() -> Color:
+	var f: Array = theme.get("flowers", [Color(1.0, 0.6, 0.2)])
+	return f[0]
+
+
+func player_color(slot: int) -> Color:
+	if slot == 0 and (vr_rig != null or vr_avatar != null):
+		return Color(1.0, 0.85, 0.2)
+	return party.color_of(slot)
 
 
 # --- HUD ------------------------------------------------------------------------------------
@@ -270,6 +344,10 @@ func _make_hud(slot: int, parent: Control) -> void:
 	bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row2.add_child(bar)
 	ride_pics[slot] = [holder, bar, ""]
+	var gh := CenterContainer.new()  # Poppy's gift this round (skies.gd)
+	gh.custom_minimum_size = Vector2(44.0, 44.0)
+	row2.add_child(gh)
+	gift_pics[slot] = [gh, ""]
 	timers[slot] = HudKit.timer(ui, {"seconds": float(net.state_get("time", round_time))})
 	if slot < 0:
 		join_prompt = UiKit.panel("pill")
@@ -324,6 +402,18 @@ func _refresh_hud() -> void:
 		var bar: UiKit.Bar = rp[1]
 		bar.visible = cur != ""
 		bar.set_value(float(fs.get("fill", 0)), maxf(1.0, float(fs.get("need", 1))))
+	var gid := String(net.state_get("gift", ""))
+	for slot in gift_pics:
+		var gp: Array = gift_pics[slot]
+		var gh: Control = gp[0]
+		if not is_instance_valid(gh) or String(gp[1]) == gid:
+			continue
+		gp[1] = gid
+		for c in gh.get_children():
+			c.queue_free()
+		var gd := Skies.gift(gid)
+		if not gd.is_empty():
+			gh.add_child(StoryCard.picture(String(gd.pic), 40.0, gd.color))
 
 
 func _all_huds() -> Array:
@@ -525,6 +615,13 @@ func _on_state_changed(key: String, value: Variant) -> void:
 		"sky":
 			if sky != null and String(value) != "":
 				sky.set_preset(String(value), 2.0)
+		"theme":
+			apply_theme(String(value))
+		"parade":
+			if parade != null:
+				parade.set_count(int(value))
+		"gift":
+			_refresh_hud()
 		"ice":
 			if int(value) > 0:
 				_banner("BRRR!", "", 1.2)
@@ -565,6 +662,10 @@ func _start_round(practice: bool) -> void:
 	net.state_set("daily", false)
 	net.state_set("time", int(ceil(time_left)))
 	net.state_set("round", int(net.state_get("round", 0)) + 1)
+	net.state_set("gift", "")
+	gift_ready = false
+	if gusts != null:
+		gusts.clear()
 	_prefetch_play()  # practice / the ride pick give it time (nothing new if made on the results screen)
 	if String(save.data.cur) == "":
 		_start_pick()
@@ -572,7 +673,53 @@ func _start_round(practice: bool) -> void:
 		net.state_set("phase", "practice")
 		_practice_balloons()
 	else:
-		_start_play()
+		_before_play()
+
+
+## Host: the picks before the waves come, each on the pick orbs (picks.gd): GENTLE / BRAVE / HARD once a session,
+## then Poppy's gift for this round. Then the waves.
+func _before_play() -> void:
+	if team_mode == "":
+		var last := Skies.mode_id(String(save.data.get("mode", "brave")))
+		var ids := PickOrbs.mode_ids(last)
+		var entries: Array = []
+		for id in ids:
+			var md := PickOrbs.mode(String(id))
+			entries.append({"id": id, "name": md.name, "pic": md.pic, "color": md.color})
+		net.state_set("phase", "orbs")
+		picks.begin("mode", entries, ids, _picked)
+		return
+	if not gift_ready:
+		var parade_n := int(save.data.get("parade", 0))
+		var ids2 := Skies.gift_choices(parade_n, last_gift, Seeded.derive(int(save.data.world), "g%d" % int(save.data.rounds)))
+		var entries2: Array = []
+		for id in ids2:
+			var gd := Skies.gift(String(id))
+			entries2.append({"id": id, "name": gd.name, "pic": gd.pic, "color": gd.color})
+		net.state_set("phase", "orbs")
+		picks.begin("gift", entries2, ids2, _picked)
+		return
+	_start_play()
+
+
+## Host: the team took an orb (or nobody did: the middle one).
+func _picked(stage: String, opt: Variant, _by: int) -> void:
+	if stage == "mode":
+		team_mode = Skies.mode_id(String(opt))
+		save.data.mode = team_mode
+		save.mark_dirty()
+		_story({"who": "POPPY", "line": String(PickOrbs.MODE_LINES.get(team_mode, "Let's go!")), "pic": String(PickOrbs.mode(team_mode).pic),
+			"color": PickOrbs.mode_color(team_mode), "duration": 2.5})
+		_prefetch_play()  # the waves in this mode
+	elif stage == "gift":
+		gift = String(opt)
+		last_gift = gift
+		gift_ready = true
+		net.state_set("gift", gift)
+		var gd := Skies.gift(gift)
+		_story({"who": "POPPY", "line": String(gd.line), "pic": String(gd.pic), "color": gd.color, "duration": 2.5})
+	if String(net.state_get("phase", "")) == "orbs":
+		_before_play()
 
 
 ## Teach by doing: one low balloon right in front of every player at the start of a session.
@@ -591,7 +738,7 @@ func _start_pick() -> void:
 	var offers := Story.offers(int(save.data.world), save.data.rides, last_ride)
 	if offers.size() < 2:
 		_plant(String(offers[0]) if not offers.is_empty() else Story.FIRST_RIDE)
-		_start_play()
+		_before_play()
 		return
 	net.state_set("offers", offers)
 	phase_t = 0.0
@@ -614,7 +761,7 @@ func _pick(k: int) -> void:
 		if int(b.get("kind")) == WaveGen.CHOICE:
 			b.set("rise", 2.5)  # off it goes
 	_plant(id)
-	_start_play()
+	_before_play()
 
 
 func _plant(id: String) -> void:
@@ -681,9 +828,10 @@ func _start_play() -> void:
 		net.state_set("sky", String(sp.sky))
 		net.state_set("daily", true)
 	else:
-		net.state_set("sky", "day")
+		net.state_set("sky", String(theme.get("preset", "day")))
 	if sky != null and net.mode != "client":
 		sky.set_preset(String(net.state_get("sky", "day")), 2.0)
+	gift_ready = false  # the next round picks a new gift
 	var t0 := Time.get_ticks_usec()
 	round_def = BgGen.take(_gen_key(plan), _gen_job(plan))  # usually made already (_prefetch_play)
 	run = {"gen_ms": snappedf((Time.get_ticks_usec() - t0) / 1000.0, 0.01), "popped": 0, "vr_popped": 0, "grumpy": 0,
@@ -696,25 +844,35 @@ func _start_play() -> void:
 	for i in (round_def.sets as Array).size():
 		set_left[i] = int(round_def.sets[i][2])
 	time_left = float(round_def.time)
+	var gl := Skies.gusts(round_def, _mode())
+	gusts.reset(gl)
+	run.merge({"team_mode": _mode(), "gift": gift, "gusts": gl.size(), "theme": String(theme.get("id", "")),
+		"parade": int(save.data.get("parade", 0))}, true)
 	net.state_set("goal", round_def.goal)
 	net.state_set("time", int(ceil(time_left)))
 	net.state_set("phase", "play")
 	var r := Story.ride(String(round_desc.ride))
 	if round_desc.k == "story" and int(save.data.fill) == 0:
 		_story(_poppy(String(r.intro), String(r.pic), r.color))
-	print("Balloon Pop round: %s %s seed %d, %d balloons, %d sets, goal %s (%.1f ms)" % [round_desc.k, round_desc.ride,
-		int(round_desc.seed), (round_def.spawns as Array).size(), (round_def.sets as Array).size(), str(round_def.goal), float(run.gen_ms)])
+	print("Balloon Pop round: %s %s seed %d, %d balloons, %d sets, goal %s, %s, gift %s, %d gusts (%.1f ms)" % [round_desc.k, round_desc.ride,
+		int(round_desc.seed), (round_def.spawns as Array).size(), (round_def.sets as Array).size(), str(round_def.goal), _mode(), gift,
+		gl.size(), float(run.gen_ms)])
+
+
+## Host: this session's mode (before it's picked: the family's last one, so the prefetched round usually fits).
+func _mode() -> String:
+	return team_mode if team_mode != "" else Skies.mode_id(String(save.data.get("mode", "brave")))
 
 
 ## Host: the next waves' [spec, round_desc] when ride `cur` is being built (no side effects).
 func _play_plan(cur: String) -> Array:
 	var players := maxi(1, party.player_count() + (1 if vr_rig != null else 0))
 	if daily_due:
-		return [Story.daily_spec(players, round_time), {"k": "daily", "ride": cur, "seed": Story.daily_seed()}]
+		return [Skies.apply(Story.daily_spec(players, round_time), _mode()), {"k": "daily", "ride": cur, "seed": Story.daily_seed()}]
 	var met := {}
 	for k in save.data.met:
 		met[int(k)] = true
-	return [Story.spec(cur, Story.rides_built(save.data.rides), met, players, round_time),
+	return [Skies.apply(Story.spec(cur, Story.rides_built(save.data.rides), met, players, round_time), _mode()),
 		{"k": "story", "ride": cur, "seed": Seeded.derive(int(save.data.world), "r%d" % int(save.data.rounds))}]
 
 
@@ -764,6 +922,25 @@ func _end_round() -> void:
 			keys.sort()
 			dd.erase(keys[0])
 	save.data.rounds = int(save.data.rounds) + 1
+	var told := false  # a parade story beat (no cheer line over it)
+	var gain := Skies.parade_gain(st, daily)
+	if gain > 0:  # Poppy's parade grows (skies.gd)
+		var before := int(save.data.get("parade", 0))
+		save.data.parade = before + gain
+		net.state_set("parade", int(save.data.parade))
+		if parade != null and net.mode != "client":
+			parade.set_count(int(save.data.parade))
+		run["parade_gain"] = gain
+		var unlocked_now: Array = Skies.unlocked(int(save.data.parade)).filter(func(id: String) -> bool:
+			return not Skies.unlocked(before).has(id))
+		if not unlocked_now.is_empty():
+			var gd := Skies.gift(String(unlocked_now[0]))
+			_story({"who": "POPPY", "line": "New gift: %s!" % String(gd.name), "pic": String(gd.pic), "color": gd.color, "duration": 3.0})
+			told = true
+		elif int(save.data.parade) / Skies.PARADE_MILESTONE > before / Skies.PARADE_MILESTONE:
+			_story({"who": "POPPY", "line": "My parade grows!", "pic": "parade", "color": Story.POPPY_COLOR, "duration": 3.0})
+			told = true
+	gusts.clear()
 	save.mark_dirty()
 	var stats: Array = [["STARS", "%d / 3" % st], ["BEST", str(int(net.state_get("best", 0)))]]
 	if int(run.get("sets_done", 0)) > 0:
@@ -775,7 +952,7 @@ func _end_round() -> void:
 	results_t = 0.0
 	_telemetry("round", score, st)
 	finale()
-	if not run.has("ride_done"):
+	if not run.has("ride_done") and not told:
 		_story(_poppy(Story.CHEERS[int(save.data.rounds) % Story.CHEERS.size()] if st > 0 else "Nearly! Again!"))
 	round_def = {}
 	_prefetch_play()  # the next round, while the results show
@@ -799,7 +976,8 @@ func _telemetry(end: String, score: int, st: int) -> void:
 		"time": int(round_def.get("time", 0)), "played_s": int(elapsed), "score": score, "max": int(round_def.get("max", 0)),
 		"goal": round_def.get("goal", []), "stars": st, "balloons": (round_def.spawns as Array).size(),
 		"sky": String(net.state_get("sky", "day")), "rides": Story.rides_built(save.data.rides), "fill": int(save.data.fill),
-		"need": _need()}, true)
+		"need": _need(), "team_mode": _mode(), "gift": gift, "gusts_told": gusts.fired if gusts != null else 0,
+		"theme": String(theme.get("id", "")), "parade": int(save.data.get("parade", 0))}, true)
 	Telemetry.run(GAME_ID, info)
 
 
@@ -886,7 +1064,11 @@ func _process(delta: float) -> void:
 		phase_t += delta
 		_simulate(delta)
 		if phase_t > PRACTICE_WAIT or (phase_t > 1.0 and balloons.is_empty()):
-			_start_play()
+			_before_play()
+		return
+	if phase == "orbs":
+		picks.tick(delta)
+		_simulate(delta)
 		return
 	if phase == "pick":
 		phase_t += delta
@@ -906,6 +1088,12 @@ func _process(delta: float) -> void:
 	if time_left <= 0.0:
 		_end_round()
 		return
+	var warn := float(Skies.mode_of(_mode()).warn)
+	for g in gusts.tick(elapsed, warn):
+		var m := Skies.mode_of(_mode())
+		var args := [float(g[1]), float(g[2]), warn, float(m.gust_secs), float(m.gust)]
+		net.event("gust", args)
+		gusts.announce(args[0], args[1], args[2], args[3], args[4])
 	var spawns: Array = round_def.spawns
 	while spawn_i < spawns.size() and float(spawns[spawn_i][0]) <= elapsed:
 		_spawn_planned(spawns[spawn_i])
@@ -960,6 +1148,11 @@ func _simulate(delta: float) -> void:
 	if ice_t > 0.0:
 		ice_t -= delta
 	var slow := ICE_SLOW if ice_t > 0.0 else 1.0
+	var playing := String(net.state_get("phase", "")) == "play"
+	if playing and gift == "slow":
+		slow *= Skies.SLOW_RISE
+	var wind := gusts.gust_velocity() if gusts != null and playing else Vector3.ZERO
+	var magnets: Array = _magnet_points() if playing and gift == "magnet" else []
 	var t := Time.get_ticks_msec() * 0.001
 	for id in balloons.keys():
 		if not balloons.has(id):
@@ -973,6 +1166,16 @@ func _simulate(delta: float) -> void:
 			p.x += sin(t * 0.7 + b.phase) * 0.15 * delta
 		p += b.push * delta
 		b.push = b.push * exp(-2.5 * delta)
+		if b.kind != WaveGen.CHOICE:
+			p += wind * delta
+			if b.kind != WaveGen.GRUMPY:
+				for mp in magnets:  # MAGNET gift: good balloons near a player drift to them
+					var to := Vector2((mp as Vector3).x - p.x, (mp as Vector3).z - p.z)
+					if to.length() < Skies.MAGNET_R and to.length() > 0.3:
+						var step := to.normalized() * Skies.MAGNET_SPEED * delta
+						p.x += step.x
+						p.z += step.y
+						break
 		var flat := Vector2(p.x, p.z).limit_length(ARENA + 1.0)
 		p = Vector3(flat.x, maxf(0.3, p.y), flat.y)
 		b.position = p
@@ -989,10 +1192,22 @@ func _simulate(delta: float) -> void:
 			_hit(int(id), by)
 
 
+## Host: where the players are (MAGNET gift): the VR player's head, every TV player.
+func _magnet_points() -> Array:
+	var out: Array = []
+	if vr_rig != null:
+		out.append(vr_rig.head_position())
+	for slot in avatars:
+		out.append((avatars[slot] as Node3D).position)
+	return out
+
+
 ## Who touched the balloon hard enough to pop it (slot), or -1. A gentle VR touch boops it away instead.
 func _check_touch(id: int, b: Balloon) -> int:
 	var c := b.position
 	var r := Balloon.reach_of(b.kind, b.hp)
+	if gift == "dart" and b.kind != WaveGen.CHOICE and String(net.state_get("phase", "")) == "play":
+		r += Skies.DART_REACH  # DART gift: pop from further
 	if hit_cd.has(id):
 		return -1
 	if vr_rig != null:
@@ -1085,7 +1300,7 @@ func _pop(id: int, by: int) -> void:
 	net.state_set("score", score)
 	run["popped"] = int(run.get("popped", 0)) + 1
 	awards.add(by, "score", float(pts))
-	_grow(pts)
+	_grow(pts + (Skies.PUMP_EXTRA if gift == "pump" and pts > 0 else 0))  # PUMP gift: an extra ticket a pop
 	match kind:
 		WaveGen.GRUMPY:
 			run["grumpy"] = int(run.get("grumpy", 0)) + 1
@@ -1106,6 +1321,23 @@ func _pop(id: int, by: int) -> void:
 		if int(set_left[set_id]) <= 0 and not set_broken.has(set_id):
 			_set_done(pos)
 	pop_fx(pos, col, kind, by)
+	if gift == "poppop" and kind != WaveGen.GRUMPY and not popping_chain:
+		_pop_neighbours(pos, by)
+
+
+## POP POP gift: a pop pops the good balloons right next to it too (never grumpies or giants; no chains of chains).
+func _pop_neighbours(pos: Vector3, by: int) -> void:
+	popping_chain = true
+	for nid in balloons.keys():
+		if not balloons.has(nid):
+			continue
+		var nb: Balloon = balloons[nid]
+		if nb.kind in [WaveGen.GRUMPY, WaveGen.GIANT, WaveGen.CHOICE]:
+			continue
+		if nb.position.distance_to(pos) < Skies.POPPOP_R:
+			run["poppop"] = int(run.get("poppop", 0)) + 1
+			_pop(int(nid), by)
+	popping_chain = false
 
 
 ## Host: every balloon of a set was popped before one floated away: bonus!
@@ -1191,6 +1423,11 @@ func finale() -> void:
 	sound("cheer", 0.0)
 	if net.mode != "client":
 		net.event("finale", [])
+
+
+## Confetti (picks.gd too).
+func confetti(pos: Vector3, amount: int, life: float) -> void:
+	_confetti(pos, amount, life)
 
 
 func _confetti(pos: Vector3, amount: int, life: float) -> void:
@@ -1333,6 +1570,15 @@ func apply_event(kind: String, args: Array) -> void:
 			show_story({"who": args[0], "line": args[1], "pic": args[2], "color": Color.html(String(args[3])), "duration": 3.5})
 		"finale":
 			finale()
+		"orbs":
+			if picks != null:
+				picks.show_row(String(args[0]), args[1])
+		"take":
+			if picks != null:
+				picks.take_fx(int(args[0]), int(args[1]))
+		"gust":
+			if gusts != null:
+				gusts.announce(float(args[0]), float(args[1]), float(args[2]), float(args[3]), float(args[4]))
 
 
 ## TV machine: hide the popped balloon right away instead of waiting for the next snapshot.
