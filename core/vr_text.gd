@@ -39,6 +39,7 @@ static func _follow(l: Label3D, cam: Node3D, world: Node, height: float, dist: f
 	dist *= k
 	if not l.has_meta("vr_placed"):
 		l.set_meta("vr_placed", true)
+		l.set_meta("vr_dodge_on", float(spot.get("dodge", 0.0)))
 		_ui().vr_set_near(l, k)
 		_place(l, cam, target)
 		return
@@ -47,6 +48,7 @@ static func _follow(l: Label3D, cam: Node3D, world: Node, height: float, dist: f
 	if fwd.angle_to(to.normalized()) > deg_to_rad(35.0) or to.length() > dist * 1.45 or to.length() < dist * 0.55 \
 			or absf(k - float(l.get_meta("vr_k", 1.0))) > 0.12:
 		l.set_meta("vr_moving", true)
+	_ui().vr_dodge_moved(l, spot)
 	if l.get_meta("vr_moving", false):
 		_ui().vr_set_near(l, k)
 		var dt := cam.get_process_delta_time()

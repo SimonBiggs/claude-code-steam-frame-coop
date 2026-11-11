@@ -1500,6 +1500,8 @@ class VrCard extends Node3D:
 		title_l.position = Vector3(0, h * 0.5 - pad - th * 0.5, 0.004)
 		body_l.position = Vector3(0, -h * 0.5 + pad + bh * 0.5, 0.004)
 		panel_h = h
+		if t < 0.1 and cam != null and is_instance_valid(cam) and is_inside_tree():
+			UiKit.vr_place(self, cam, distance, height)  # now it has a size: placed clear of pick orbs (UiKit.vr_dodge)
 		_step_aside()
 
 	## Another panel already in this spot (a banner with a story card, a game's VR label): step up over it, so the
