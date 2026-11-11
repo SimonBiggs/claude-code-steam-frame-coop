@@ -31,7 +31,9 @@ var main: Node
 var want := 2
 var saw_results := false
 var results_t := -1.0
-var results_shown_t := -1.0  # when the results screen showing now came up
+var results_shown_t := -1.0
+var dummy_seen := false
+var dummy_practice_t := -1.0  # the practice room's time when the knight first hit the dummy  # when the results screen showing now came up
 var again_t := -100.0
 var again_sent := false
 var max_mons := 0
@@ -129,6 +131,10 @@ func _watch() -> String:
 		var p: Vector3 = h.position
 		if absf(p.x) > Dungeon.HALF or p.z > Dungeon.HALF or p.z < -(Dungeon.ROOMS - 1) * Dungeon.ROOM - Dungeon.HALF:
 			outside += 1
+	if main.vr_rig != null and main.dungeon != null and not dummy_seen and main.dungeon.is_used(main.dungeon.dummy_id):
+		dummy_seen = true
+		dummy_practice_t = main.phase_t if _phase() == "practice" else -1.0
+		print("BOT: the knight's dummy was hit (practice time %.1f s, ghost hand %s)" % [dummy_practice_t, "shown" if main.ghost.shown else "not shown yet"])
 	if main.results_showing() and not saw_results:
 		saw_results = true
 		results_t = kit.t
@@ -381,7 +387,10 @@ func _checks() -> void:
 	if not OS.has_environment("DD_ROOM"):
 		if main.vr_rig != null:
 			kit.assert_true(main.dungeon.is_used(main.dungeon.dummy_id) or main.log_rooms.size() > 1, "the knight did the practice")
-			kit.assert_true(main.ghost.shown, "the ghost hand showed the swing")
+			# The demo comes after 1 s of practice; a knight whose sword touched the dummy before that (the fake hands
+			# rest with the blade on it at 0.2 s) never needed it. A VR host alone has no "again" run to show it later.
+			kit.assert_true(main.ghost.shown or (dummy_practice_t >= 0.0 and dummy_practice_t <= 1.0),
+				"the ghost hand showed the swing (or the knight hit the dummy at %.1f s, before it was due)" % dummy_practice_t)
 	if main.vr_rig != null:
 		kit.assert_true(main.hands.swings > 0, "the knight bopped monsters (%d)" % main.hands.swings)
 		kit.assert_true(main.log_throws > 0, "the knight threw a pot (%d)" % main.log_throws)

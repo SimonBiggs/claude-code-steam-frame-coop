@@ -647,7 +647,8 @@ func _simple_timeline() -> void:
 			# before this look (host failed "(3)" about 1 run in 3, 2026-10-30): allow one more per joined machine.
 			# The same race in one-machine runs (VR bots, 2026-10-30: "(3, at most 2)" about 1 run in 3): the local
 			# builders keep going too, so one more there.
-			var most := 2 + (multiplayer.get_peers().size() if main.net.mode == "host" else 1 if main.net.mode == "local" else 0)
+			# A host's own mayor keeps building too (a VR host alone failed "(3, at most 2)" every run, 2026-11-11).
+			var most := 2 + (multiplayer.get_peers().size() + 1 if main.net.mode == "host" else 1 if main.net.mode == "local" else 0)
 			kit.assert_true(main.town.buildings.size() <= most, "today's island is a new little town (%d, at most %d)" % [main.town.buildings.size(), most])
 			var runs := Telemetry.read("tiny_town_tycoon").filter(func(r: Dictionary) -> bool: return String(r.get("end", "")) == "sail")
 			kit.assert_true(not runs.is_empty(), "a RUN line when the boat sailed"))
