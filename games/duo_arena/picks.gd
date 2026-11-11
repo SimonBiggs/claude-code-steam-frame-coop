@@ -14,7 +14,7 @@ const Seeded := preload("res://core/seeded.gd")
 
 const OFFER := 3
 ## core/ui_kit.gd icon kinds the orbs use as pictures (StoryCard draws any of them; the gen test checks they exist).
-const UI_ICONS: Array[String] = ["heart", "star", "fire", "bolt", "play", "shield", "clock", "gem"]
+const UI_ICONS: Array[String] = ["heart", "star", "bolt", "play", "shield", "clock", "gem"]  # ("fireball" is Elemental Bender's story picture)
 const WAIT := {"mode": 10.0, "hero": 12.0, "perk": 12.0}
 const MAX_NAME := 9
 ## Caps so stacked perks never break the game.
@@ -24,7 +24,7 @@ const CAPS := {"fire_rate": [0.35, 2.0], "damage": [0.5, 4.0], "speed": [0.8, 1.
 const MODES: Array[Dictionary] = [
 	{"id": "gentle", "name": "GENTLE", "pic": "heart", "color": Color(0.45, 1.0, 0.55), "waves": 0, "fx": []},
 	{"id": "brave", "name": "BRAVE", "pic": "star", "color": Color(0.35, 0.75, 1.0), "waves": 0, "fx": []},
-	{"id": "hard", "name": "HARD", "pic": "fire", "color": Color(1.0, 0.35, 0.25), "waves": 0, "fx": []},
+	{"id": "hard", "name": "HARD", "pic": "fireball", "color": Color(1.0, 0.35, 0.25), "waves": 0, "fx": []},
 ]
 const HEROES: Array[Dictionary] = [
 	{"id": "blaster", "name": "BLASTER", "pic": "blasterhero", "color": Color(0.35, 0.8, 1.0), "waves": 0, "fx": []},
@@ -39,7 +39,7 @@ const HEROES: Array[Dictionary] = [
 ]
 const PERKS: Array[Dictionary] = [
 	{"id": "rapid", "name": "RAPID", "pic": "bolt", "color": Color(1.0, 0.9, 0.3), "waves": 0, "fx": [["fire_rate", "mul", 0.85]]},
-	{"id": "heavy", "name": "HEAVY", "pic": "fire", "color": Color(1.0, 0.45, 0.2), "waves": 0, "fx": [["damage", "mul", 1.3]]},
+	{"id": "heavy", "name": "HEAVY", "pic": "fireball", "color": Color(1.0, 0.45, 0.2), "waves": 0, "fx": [["damage", "mul", 1.3]]},
 	{"id": "tough", "name": "TOUGH", "pic": "heart", "color": Color(1.0, 0.4, 0.55), "waves": 0, "fx": [["max_hp", "add", 25.0]]},
 	{"id": "swift", "name": "SWIFT", "pic": "play", "color": Color(0.4, 1.0, 0.9), "waves": 0, "fx": [["speed", "mul", 1.1]]},
 	{"id": "armor", "name": "ARMOR", "pic": "shield", "color": Color(0.7, 0.75, 0.9), "waves": 4, "fx": [["armor", "mul", 0.8]]},
