@@ -64,7 +64,7 @@ void fragment() {
 		float n = fract(sin(dot(floor(wpos.xz * 6.0), vec2(12.9898, 78.233))) * 43758.5453);
 		c = mix(base * 0.9, base * 1.06, stripe) * (0.93 + 0.1 * n);
 	}
-	ALBEDO = c;
+	ALBEDO = c * (1.0 - UV.x);  // UV.x: the DARK room's dimming (street.gd)
 	ROUGHNESS = 0.85;
 }
 """
@@ -115,6 +115,9 @@ static func build(root: Node3D, spec: Dictionary = {}) -> Dictionary:
 	var lamps: Array = []
 	for ri in (g.rooms_info as Array).size():
 		var rm: Dictionary = g.rooms_info[ri]
+		if ri == int(g.get("dark_room", -1)):  # the dark room: lamp off, a dark ceiling
+			var dc: Rect2 = rm.rect
+			W.box(ctx, Vector3(dc.size.x, 0.02, dc.size.y), Vector3(dc.get_center().x, HouseGen.WALL_H - 0.012, dc.get_center().y), Color(0.16, 0.14, 0.2), false)
 		if rm.type != "garden" and ri != int(g.get("dark_room", -1)):  # the dark room's lamp is off
 			var c: Vector2 = (rm.rect as Rect2).get_center()
 			lamps.append(Vector3(c.x, 2.3, c.y))
@@ -246,11 +249,12 @@ static func _tint(c: Color, th: Dictionary) -> Color:
 static func _floors(root: Node3D, g: Dictionary, th: Dictionary) -> void:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for rm in g.rooms_info:
+	for ri in (g.rooms_info as Array).size():
+		var rm: Dictionary = g.rooms_info[ri]
 		var look: Array = LOOK[rm.type]
 		var c: Color = th.ground if rm.type == "garden" else look[1]
-		if (g.rooms_info as Array).find(rm) == int(g.get("dark_room", -1)):
-			c = c.darkened(DARK_DIM)
+		var dim := DARK_DIM if ri == int(g.get("dark_room", -1)) else 0.0
+		st.set_uv(Vector2(dim, 0.0))
 		var pat := 6 if rm.type == "garden" else int(look[2])
 		var rc: Rect2 = rm.rect
 		var y := 0.0 if rm.type == "garden" else 0.002

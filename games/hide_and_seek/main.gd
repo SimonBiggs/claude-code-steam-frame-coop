@@ -2225,10 +2225,12 @@ func _round_story() -> void:
 	if not beat.is_empty():
 		beat["duration"] = 4.0
 		_story(beat)
+		if map_idx == 0:
+			_street_story(4.2)  # then who hides in this house
 
 
 ## PIP'S STREET at the start of a house round: a new street, who hides here (picture first), then the twists.
-func _street_story() -> void:
+func _street_story(at0: float = 0.0) -> void:
 	var beats: Array = []
 	var daily := bool(map_spec.get("daily", false))
 	var slot := int(map_spec.get("slot", 0))
@@ -2242,7 +2244,7 @@ func _street_story() -> void:
 		var fr := Street.friend(int(ids[k]))
 		beats.append({"who": String(fr.name), "line": "Find me!" if k == 0 else "And me!", "pic": String(fr.pic), "color": fr.fur})
 	beats.append_array(Street.twist_cards(int(md().get("twist", 0)) if not ids.is_empty() else 0))
-	var at := 0.0
+	var at := at0
 	for b in beats:
 		var beat: Dictionary = b.duplicate()
 		beat["duration"] = 3.0
