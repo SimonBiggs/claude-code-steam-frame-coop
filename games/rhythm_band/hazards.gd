@@ -4,7 +4,8 @@ extends Node3D
 ##   FAST  an orange disc on the stage floor round the band and orange chase arrows round its edge: faster bars.
 ##   SLOW  a sky-blue disc round the band with slow-drifting dots: slower bars.
 ##   SOLO  a pale gold disc under the soloist, then a soft spotlight beam on them while the solo plays.
-## The stage's light beams take the tell's colour too (the TV views see them over the crowd).
+## The stage's light beams take the tell's colour too, held steady with no beat pulse (the TV views see them over
+## the crowd).
 ## Nothing flashes: the discs glow steadily (core/warn_rings.gd "disc", held with `stay`); the arrows just turn. Each
 ## kind has its own colour (deep.gd FAST_COLOR / SLOW_COLOR / SOLO_COLOR). A picture card (speedup / snail /
 ## spotlight) comes up when the tell starts. tells_now() for bots.
@@ -106,7 +107,16 @@ func _phase_changed() -> void:
 	cm.cap_top = false
 	cm.cap_bottom = false
 	beam.mesh = cm
-	beam.material_override = _mat(Deep.SOLO_COLOR, 0.16)
+	var bm := _mat(Deep.SOLO_COLOR, 0.16)
+	beam.material_override = bm
+	# The soloist's own camera leaves the cone out (the drummer's camera sits right behind it: the cone filled the
+	# whole view with gold). The other views see it.
+	beam.layers = main.stage.tag_layer(maxi(who, 0)) if main.stage != null else 1
+	if who <= 0 and not main.players.is_empty():
+		var d = main.players[0]
+		for c in [d.get("camera"), d.get("xr_camera")]:
+			if c is Camera3D:
+				(c as Camera3D).cull_mask &= ~beam.layers
 	beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(beam)
 	beam.global_position = solo_spot(who) + Vector3(0.0, 2.25, 0.0)
@@ -142,6 +152,8 @@ func tells_now() -> Array:
 
 
 func _animate() -> void:
+	if main.stage != null:
+		main.stage.warn_hold = not now.is_empty()
 	if now.is_empty():
 		return
 	var kind := String(now.kind)
