@@ -13,7 +13,7 @@ const E := preload("res://games/elemental_bender/elem.gd")
 const ResCache := preload("res://core/res_cache.gd")
 
 const GAP := 3.5
-const TOUCH := 1.2
+const STONE_TOUCH := 1.2
 
 var info := {}
 var _key := ""
@@ -41,7 +41,7 @@ func show_pick(d: Dictionary) -> void:
 		"body": func(e: Dictionary, mid: bool) -> Node3D: return MeshKit.instance(_base_mesh(e.color, mid), false),
 		"icon": func(e: Dictionary) -> Node3D: return MeshKit.instance(icon_mesh(kind, String(e.id)), false),
 		"spin": 1.3, "icon_y": 2.2, "icon_scale": 1.4, "bob": 0.12, "label_y": 3.4, "label_px": 0.0105, "font": 56,
-		"two_lines": true, "pop": true, "group": "eb_enemy", "touch": TOUCH, "max_y": 3.0,
+		"two_lines": true, "pop": true, "group": "eb_enemy", "touch": STONE_TOUCH, "max_y": 3.0,
 		"hit_r": 0.9, "hit_height": 1.7, "dot_y": 2.2, "dot_r": 1.0, "dot_size": 0.13, "punch": 1.3})
 	info = d
 	for o in orbs:
