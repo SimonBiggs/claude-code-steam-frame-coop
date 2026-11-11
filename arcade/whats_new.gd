@@ -33,6 +33,11 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "mm-gifts", "date": "2026-11-11", "game": "marble_maze", "pic": "bouncymarble", "line": "Pick heavy, bouncy, magnet!"},
+	{"id": "mm-events", "date": "2026-11-11", "game": "marble_maze", "pic": "quake", "line": "Quakes and gates warn first"},
+	{"id": "mm-worlds", "date": "2026-11-11", "game": "marble_maze", "pic": "snowflake", "line": "Snow day! Party! Starry!", "try": {"MM_WORLD": "snow"}},
+	{"id": "mm-run", "date": "2026-11-11", "game": "marble_maze", "pic": "kaiju", "line": "Bobo's marble run grows!"},
+	{"id": "mm-gentle", "date": "2026-11-11", "game": "marble_maze", "pic": "magnetmarble", "line": "Gentle, brave or hard"},
 	{"id": "sru-fox", "date": "2026-11-11", "game": "sheep_round_up", "pic": "fox", "line": "A fox! Rings warn you first", "try": {"SRU_LEVEL": "3", "SRU_EVENT_AT": "6"}},
 	{"id": "sru-tricks", "date": "2026-11-11", "game": "sheep_round_up", "pic": "zoomies", "line": "Pick a dog trick!"},
 	{"id": "sru-seasons", "date": "2026-11-11", "game": "sheep_round_up", "pic": "snowflake", "line": "Snow, rain, wind and sun!", "try": {"SRU_SEASON": "winter"}},

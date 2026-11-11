@@ -7,6 +7,7 @@ extends Node3D
 ## hole), and once you're HOME you steer a GUIDE STAR: touch a friend's marble with it to tow them
 ## along. Every marble has a little face that looks where it's rolling (and blinks).
 const UiKit := preload("res://core/ui_kit.gd")
+const Worlds := preload("res://games/marble_maze/worlds.gd")
 
 const R := 0.028
 const STEER := 0.45  # own push (m/s^2); the board's tilt gives up to ~0.9
@@ -66,6 +67,9 @@ var boop_t := 0.0
 var towing := 0.0
 var tilt_only := false  # SIMPLE_MODE solo VR: the giant's own marble, rolled only by tilting the board
 var safe := Vector2.ZERO  # SIMPLE_MODE: the last safe floor cell centre (a fall pops you back here)
+var gift_band: MeshInstance3D  # second pass: a ring round the marble in Bobo's gift marble's colour (worlds.gd)
+var gift_shown := "-"
+var bounce_cool := 0.0  # BOUNCY: seconds until it can boing out of a hole again
 
 
 func _ready() -> void:
@@ -205,7 +209,7 @@ func _physics_process(delta: float) -> void:
 		return
 	if remote or ghost:
 		return
-	if main.state != "play" and main.state != "practice":
+	if main.state != "play" and main.state != "practice" and main.state != "pick":
 		if main.state == "intro" and not home:
 			_place(spawn if checkpoint < 0 else board.checkpoints[checkpoint])
 		return
@@ -241,17 +245,29 @@ func sim(delta: float) -> void:
 	if tilt_only:
 		steer = Vector2.ZERO
 	var here := Vector2(lp.x, lp.z)
-	var a: Vector2 = board.gravity_local() + steer * STEER * board.grip_at(here) + board.hole_pull(here) + board.boost_at(here)
+	var gift: String = main.gift
+	var sticky := gift == "sticky"
+	var grip: float = 1.0 if sticky else board.grip_at(here)
+	var a: Vector2 = board.gravity_local() + steer * STEER * float(Worlds.STEER_K.get(gift, 1.0)) * grip \
+		+ board.hole_pull(here) * float(Worlds.HOLE_K.get(gift, 1.0)) + board.boost_at(here)
+	a += board.quake * float(Worlds.QUAKE_K.get(gift, 1.0))
+	if gift == "magnet":
+		a += _magnet(here)
 	a += main.guide_pull(self, here)
 	v += a * delta
-	v *= exp(-board.damp_at(here) * delta)
-	v = v.limit_length(0.3 if board.is_mud(here) else MAX_SPEED)
+	var damp: float = board.damp_at(here)
+	if sticky:
+		damp = maxf(damp, board.DAMP)
+	v *= exp(-damp * delta)
+	v = v.limit_length(0.3 if board.is_mud(here) else MAX_SPEED * float(Worlds.SPEED_K.get(gift, 1.0)))
+	bounce_cool -= delta
+	var before := here
 	boop_t -= delta
 	var p := Vector2(lp.x, lp.z)
 	var impact := 0.0
 	for i in 2:
 		p += v * delta * 0.5
-		var res: Array = board.collide(p, v, R)
+		var res: Array = board.collide(p, v, R, float(Worlds.BUMP_K.get(gift, 1.0)))
 		p = res[0]
 		v = res[1]
 		impact = maxf(impact, float(res[2]))
@@ -270,6 +286,17 @@ func sim(delta: float) -> void:
 		var axis := Vector3(v.y, 0.0, -v.x).normalized()
 		ball.rotate(axis, dist / R)
 	position = lp
+	if not board.supported(p) and gift == "bouncy" and bounce_cool <= 0.0 and board.ch(board.cell_of(p).x, board.cell_of(p).y) == "O":
+		# BOUNCY: boing back out of the hole (once every BOUNCE_COOL seconds).
+		var hc: Vector2 = board.center(board.cell_of(p).x, board.cell_of(p).y)
+		var out := (before - hc).normalized() if before.distance_to(hc) > 0.001 else -v.normalized()
+		lp = Vector3(before.x, R + 0.01, before.y)
+		v = out * 0.45
+		vy = 0.5
+		bounce_cool = Worlds.BOUNCE_COOL
+		position = lp
+		main.on_marble_bounce(self)
+		return
 	if not board.supported(p):
 		falling = true
 		fall_t = 0.0
@@ -298,6 +325,46 @@ func sim(delta: float) -> void:
 	if board.in_goal(p):
 		home = true
 		main.on_marble_home(self)
+
+
+## MAGNET: a gentle pull towards the shiny (and the goal) when it's close.
+func _magnet(here: Vector2) -> Vector2:
+	var a := Vector2.ZERO
+	var reach: float = Worlds.MAGNET_CELLS * board.CELL
+	var targets: Array = []
+	for i in board.gems.size():
+		if i < board.gem_taken.size() and not board.gem_taken[i]:
+			targets.append(board.gems[i])
+	if board.has_goal():
+		targets.append(board.goal)
+	for t in targets:
+		var d: Vector2 = t - here
+		var l := d.length()
+		if l < reach and l > 0.005:
+			a += d / l * Worlds.MAGNET_ACC * (1.0 - l / reach)
+	return a
+
+
+## Every machine: the gift ring round the marble (none without a gift).
+func _update_gift_band() -> void:
+	var gift: String = main.gift
+	if gift == gift_shown:
+		return
+	gift_shown = gift
+	if gift_band == null:
+		gift_band = MeshInstance3D.new()
+		var tm := TorusMesh.new()
+		tm.inner_radius = R * 1.02
+		tm.outer_radius = R * 1.32
+		tm.rings = 16
+		tm.ring_segments = 6
+		gift_band.mesh = tm
+		gift_band.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(gift_band)
+	var m := Worlds.marble(gift)
+	gift_band.visible = not m.is_empty()
+	if not m.is_empty():
+		gift_band.material_override = main.make_material(m.color, 0.3)
 
 
 ## SIMPLE_MODE: plain floor with no hole, edge or teleporter next to it is a safe place to pop back to.
@@ -402,6 +469,7 @@ func _process(delta: float) -> void:
 	elif is_local():
 		est_v = v
 	if active:
+		_update_gift_band()
 		_animate_face(delta)
 		_update_guide_star(delta)
 	if camera != null and active:
