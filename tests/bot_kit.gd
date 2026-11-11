@@ -39,6 +39,7 @@ var resume_after := 1.0
 var checks := 0
 var failures := 0
 var _finished := false
+var machines_seen := 0  # host: the most TV machines connected at once (0 = a host alone, e.g. solo VR on the Frame)
 ## Print every passing check too.
 var verbose := true
 
@@ -81,6 +82,8 @@ class RealPadFilter extends Node:
 
 func _process(delta: float) -> void:
 	t += delta
+	if main != null and main.get("net") != null and str(main.net.mode) == "host":
+		machines_seen = maxi(machines_seen, int(main.net.peer_count()))
 	_unstick(delta)
 	# A settling pause check holds back every step due at or after it (a "resumed?" ran before its "paused?"
 	# while that one waited, and pressed Start the wrong way round, 2026-10-29).
@@ -196,6 +199,10 @@ func seated() -> int:
 ## joining machine brings its own bots, up to the free seats), plus `host_p` on the host itself. Bots used to
 ## assert `want` alone, which only held with ONE joining machine.
 func seated_want(want: int, host_p: int = 0) -> int:
+	# A host no machine ever joined (solo VR: DUO_HOST with no TV) seats only its own players (2026-11-11: Sheep
+	# Round-Up's host-alone VR run failed "all N TV players are seated" with nobody there to sit).
+	if main != null and main.get("net") != null and str(main.net.mode) == "host" and machines_seen == 0:
+		return host_p
 	var n := want
 	if main != null and main.get("net") != null and str(main.net.mode) == "host" and bool(main.get("multi_machine")):
 		var seats := 6
