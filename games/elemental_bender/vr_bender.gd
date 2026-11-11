@@ -330,7 +330,7 @@ func _special_gesture(head: Vector3, delta: float) -> void:
 
 
 func _try_special() -> void:
-	var cost: float = E.SPECIAL_COST[element]
+	var cost: float = E.SPECIAL_COST[element] * float(main.mods_of(slot).chi_cost)
 	if chi < cost and spirit_t <= 0.0:
 		main.sound_at("ui_error", rig.head_position() + rig.head_forward(), -4.0, 1.0)
 		rig.pulse(VrRig.RIGHT, 0.2, 0.2)

@@ -29,7 +29,16 @@ extends Node3D
 ## TODAY'S RAIDERS: the first game each day uses the day's seed on every machine. Telemetry: one RUN line per wave
 ## cleared, at game over and on quit. Networked: sticky events "gates" [temple seed, wave] and "temple" [waves,
 ## fruit, days, crown] (machines that join late get them too); every machine rebuilds the portals and the tree.
-## EB_FAST=1: short practice, small waves (tests). EB_SEED=n: play temple seed n.
+## ISLANDS, BOSSES, GIFTS, MASTERS (arenas.gd, bosses.gd, boons.gd, altar.gd, hazards.gd): every 5 waves the run
+## travels to the next island (TEMPLE ISLAND first, then the unlocked ones: ICE SHELF, VOLCANO RIM, SKY RUINS, each
+## with its own look, a hazard: geysers / lava vents / wind spouts, and its own boss: FROST GIANT, LAVA DRAKE, STORM
+## HAWK, who tell every attack with a glow and a ring on the ground and power up at half health). Before a run
+## everyone picks an ELEMENT MASTER on Kiko's altar (bend at a stone or walk onto it), and after every wave one of
+## three GIFTS (boons). Islands, masters and gifts unlock for good as the Spirit Tree grows and bosses fall.
+## Networked: sticky event "arena" [id, temple seed, segment]; net state "pick" (the altar), "taken", "perks"
+## {slot: {m, b}}; events "warn", "stomp", "vent", "plume"; raider flags carry the boss kind, tell and power-up.
+## EB_FAST=1: short practice, small waves (tests). EB_SEED=n: play temple seed n. EB_ARENA=ice|volcano|sky: the run
+## starts on that island (What's New "try"). EB_GENTLE=1: bosses and hazards always gentle.
 
 const NetScript := preload("res://core/net.gd")
 const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
@@ -63,6 +72,11 @@ const Pics := preload("res://games/elemental_bender/story_pictures.gd")
 const Seeded := preload("res://core/seeded.gd")
 const Telemetry := preload("res://core/telemetry.gd")
 const StoryCard := preload("res://core/story_card.gd")
+const Arenas := preload("res://games/elemental_bender/arenas.gd")
+const Bosses := preload("res://games/elemental_bender/bosses.gd")
+const Boons := preload("res://games/elemental_bender/boons.gd")
+const Altar := preload("res://games/elemental_bender/altar.gd")
+const Hazards := preload("res://games/elemental_bender/hazards.gd")
 
 const GAME_ID := "elemental_bender"
 const MAX_ALIVE := 14
@@ -151,6 +165,23 @@ var wave_downs := 0
 var generals := 0  # Shadow Generals beaten this game
 var seen_elements := {}  # elements Kiko has introduced this game
 
+# Islands, bosses, the altar (host / local decide; every machine shows)
+var arena := "temple"
+var arena_seg := -1
+var hazards: Hazards
+var altar: Altar
+var _vr_world := false
+var perks := {}  ## host: slot -> {"m": master id, "b": [boon ids]} (mirrored in net state "perks")
+var pick_taken := {}  ## host: slot -> stone index of the altar showing
+var pick_n := 0
+var pick_t := 0.0
+var boss_gentle := false
+var run_picks: Array = []
+var _mods_key := ""
+var _mods := {}
+var _shown_master := {}
+var _pick_hints := 0
+
 # Bots / design checks
 var log_practice := 0
 var log_waves := 0
@@ -167,6 +198,13 @@ var log_downs := 0
 var log_story := 0
 var log_gates := 0
 var log_runs := 0
+var log_picks := 0
+var log_masters := 0
+var log_arenas := {}
+var log_bosses := {}
+var log_tells := 0
+var log_vents := 0
+var log_phase2 := 0
 
 
 ## The practice dummy (visual on every machine; the host decides when it pops).
@@ -207,10 +245,11 @@ func _ready() -> void:
 	# days: play-days (lanterns), last_day, daily: the date TODAY'S RAIDERS ran, waves: waves cleared over all days
 	# (the Spirit Tree), fruit: the element of every General beaten (oldest first), generals: how many.
 	save.defaults = {"best_wave": 0, "best_score": 0, "days": 0, "last_day": "", "daily": "", "daily_done": "", "games": 0, "waves": 0,
-		"fruit": [], "generals": 0, "best_today": [], "raiders": 0}
+		"fruit": [], "generals": 0, "best_today": [], "raiders": 0, "bosses": {}, "islands": []}
 	add_child(save)
 	net.sticky_event("gates")  # a machine that joins later gets the coming wave's portals (core/net.gd)
 	net.sticky_event("temple")  # ... and the Spirit Tree, lanterns and Kiko's crown
+	net.sticky_event("arena")  # ... and the island the run is on
 	sfx = SfxScript.new()
 	add_child(sfx)
 	sfx.warm([], true)
@@ -240,7 +279,15 @@ func _setup(mode: String) -> void:
 	world = World.new()
 	world.name = "World"
 	add_child(world)
-	world.build(vr and VrRig.headset_available())
+	_vr_world = vr and VrRig.headset_available()
+	world.build(_vr_world)
+	hazards = Hazards.new()
+	hazards.name = "Hazards"
+	hazards.main = self
+	add_child(hazards)
+	altar = Altar.new()
+	altar.name = "Altar"
+	add_child(altar)
 	fx = Fx.new()
 	fx.name = "Fx"
 	if vr:
@@ -342,11 +389,21 @@ func _start_breather(after_wave: bool) -> void:
 		net.state_set("score", score)
 		announce("WAVE %d CLEARED!" % wave, "+%d" % bonus, "victory")
 		for f in fighters(true):
-			_heal(f, 25.0)
+			_heal(f, 25.0 + float(mods_of(int(f.get("slot"))).heal_wave))
 		_wave_cleared()
 	else:
 		announce("GET READY!", "Here they come...", "info")
+	var seg := Arenas.segment_of(wave + 1)
+	if seg != arena_seg:
+		_enter_arena(seg)
 	_send_gates(wave + 1)  # the next wave's portals open now, so everyone sees where the raiders will come from
+	if after_wave:
+		var open := Boons.unlocked_boons(int(save.data.waves), int(save.data.generals))
+		_open_pick("boon", Boons.offer(temple_seed, wave, open))
+	else:
+		var masters := Boons.unlocked_masters(int(save.data.waves), int(save.data.generals))
+		if masters.size() >= 2 and perks.is_empty():
+			_open_pick("master", masters)
 
 
 func _start_wave() -> void:
@@ -355,7 +412,9 @@ func _start_wave() -> void:
 	_set_phase("fight")
 	net.state_set("wave", wave)
 	var n := maxi(1, fighters(true).size())
-	wave_plan = WaveGen.plan(temple_seed, wave, n, fast)
+	_close_pick()
+	wave_plan = WaveGen.plan(temple_seed, wave, n, fast, arena)
+	boss_gentle = OS.has_environment("EB_GENTLE") or log_downs >= 2 * n or (n == 1 and log_downs >= 1)
 	_send_gates(wave)
 	var spawns: Array = wave_plan.spawns
 	spawn_i = 0
@@ -370,7 +429,9 @@ func _start_wave() -> void:
 		spawn_t = float(spawns[1][3]) if spawns.size() > 1 else 0.0
 		log_boss = true
 		net.state_set("boss", true)
-		announce("WAVE %d" % wave, "The Shadow General approaches!", "boss")
+		var bk := String(wave_plan.get("boss_kind", "general"))
+		log_bosses[bk] = int(log_bosses.get(bk, 0)) + 1
+		announce("WAVE %d" % wave, "The %s approaches!" % String(Bosses.info(bk).name).capitalize(), "boss")
 	else:
 		net.state_set("boss", false)
 		announce("WAVE %d" % wave, "", "default")
@@ -427,6 +488,7 @@ func _restart() -> void:
 		if c is Projectile:
 			c.queue_free()
 	_clear_dummy()
+	_close_pick()
 	wave = 0
 	score = 0
 	kills = 0
@@ -456,7 +518,8 @@ func _host_step(delta: float) -> void:
 		"practice":
 			_practice_step(delta)
 		"breather":
-			if phase_t > (1.5 if fast else 4.0) and not alive.is_empty():
+			_pick_step(delta)
+			if phase_t > (1.5 if fast else 4.0) and not alive.is_empty() and not altar.showing():
 				_start_wave()
 		"fight":
 			if to_spawn > 0:
@@ -471,6 +534,7 @@ func _host_step(delta: float) -> void:
 				_start_breather(true)
 			if not everyone.is_empty() and alive.is_empty():
 				_game_over()
+			hazards.host_step(delta, true, boss_gentle)
 		"over":
 			if phase_t > 3.0:
 				_show_results_now()
@@ -581,7 +645,10 @@ func _spawn_raider(item: Array, is_boss: bool) -> void:
 	r.id = next_id
 	r.element = int(item[0])
 	r.boss = is_boss
-	r.ranged = is_boss or bool(item[2])
+	r.ranged = (is_boss and String(wave_plan.get("boss_kind", "general")) == "general") or (bool(item[2]) and not is_boss)
+	if is_boss:
+		r.boss_kind = String(wave_plan.get("boss_kind", "general"))
+		r.gentle = boss_gentle
 	r.max_hp = WaveGen.raider_hp(wave, n, is_boss) * (0.5 if fast else 1.0)
 	r.speed = WaveGen.raider_speed(wave, is_boss)
 	r.damage = (18.0 + wave) if is_boss else (8.0 + wave * 0.8)
@@ -647,6 +714,10 @@ func targets_for(team: int) -> Array:
 				en.append(r)
 		if dummy != null and is_instance_valid(dummy) and not dummy.dead:
 			en.append(dummy)
+		if altar != null and phase() == "breather":
+			for st in altar.stones:
+				if is_instance_valid(st):
+					en.append(st)
 		_targets_cache = [en, fighters(true)]
 	return _targets_cache[clampi(team, 0, 1)]
 
@@ -678,7 +749,7 @@ func on_raider_hit(r: Raider, amount: float, mult: float, slot: int) -> void:
 	var pos := r.global_position + Vector3.UP * (r.hit_height * 2.2)
 	damage_fx(pos, amount, mult)
 	net.event("dmg", [pos, roundi(amount), mult])
-	add_spirit(1.5)
+	add_spirit(1.5 * (float(mods_of(slot).spirit_fill) if slot >= 0 else 1.0))
 	if slot >= 0:
 		awards.add(slot, "damage", amount)
 		log_hits_by[slot] = int(log_hits_by.get(slot, 0)) + 1
@@ -722,11 +793,17 @@ func on_raider_died(r: Raider, ring_out: bool) -> void:
 		awards.add(by, "score", pts)
 		if ring_out:
 			awards.add(by, "ringouts")
+		var leaf := float(mods_of(by).leaf)
+		if leaf > 0.0 and fighter_of(by) != null:
+			_heal(fighter_of(by), leaf)
 	var pos := r.global_position
 	poof_fx(pos, ring_out, r.boss, pts)
 	net.event("poof", [pos, ring_out, r.boss, pts])
 	if r.boss:
-		announce("THE GENERAL IS DEFEATED!", "", "victory")
+		announce("THE %s IS DEFEATED!" % String(Bosses.info(r.boss_kind).name), "", "victory")
+		var bs: Dictionary = save.data.bosses if save.data.bosses is Dictionary else {}
+		bs[r.boss_kind] = int(bs.get(r.boss_kind, 0)) + 1
+		save.data.bosses = bs
 		_general_beaten(r.element)
 	elif save != null and net.mode != "client":
 		save.data.raiders = int(save.data.raiders) + 1
@@ -768,6 +845,7 @@ func raider_melee(r: Raider, target: Node3D, dmg: float, push: Vector3) -> void:
 ## Host / local: hurt a fighter (a raider's punch or shot, or the sea).
 func hurt_fighter(f: Node3D, dmg: float, push: Vector3) -> void:
 	var was_dead := bool(f.get("dead"))
+	dmg *= float(mods_of(int(f.get("slot"))).taken)
 	var taken: float = f.call("take_hit", dmg, push)
 	if taken <= 0.0:
 		return
@@ -833,6 +911,7 @@ func team_spirit_full() -> bool:
 
 ## A bender attacked: the shots fly now on this machine; the host makes the real ones.
 func bender_fire(slot: int, shots: Array) -> void:
+	shots = Boons.shape_shots(mods_of(slot), shots)
 	if slot == 0 and master != null:
 		log_vr_shots += shots.size()
 	else:
@@ -867,6 +946,8 @@ func projectile_hit(pr: Projectile, target: Node3D, push: Vector3) -> void:
 	if pr.team == 0:
 		if target is Dummy:
 			_practice_hit(pr.element, pr.owner_slot)
+		elif target is Altar.Stone:
+			_altar_pick(pr.owner_slot, (target as Altar.Stone).index)
 		elif target is Raider:
 			(target as Raider).take_hit(pr.damage, pr.element, push, pr.effect, pr.owner_slot)
 	else:
@@ -889,7 +970,7 @@ func _do_special(slot: int, e: int, here: Vector3) -> void:
 	net.event("special", [slot, e, here])
 	match e:
 		E.AIR:
-			for r in _raiders_near(here, 9.0):
+			for r in _raiders_near(here, float(mods_of(slot).tornado)):
 				var away := r.global_position - here
 				away.y = 0.0
 				r.take_hit(12.0, E.AIR, away.normalized() * 26.0, "", slot)
@@ -897,6 +978,10 @@ func _do_special(slot: int, e: int, here: Vector3) -> void:
 			var f := fighter_of(slot)
 			if f != null:
 				_heal(f, 30.0)
+			if bool(mods_of(slot).team_heal):  # the WATER MASTER's Healing Tide heals everyone near
+				for o in fighters(true):
+					if o != f and (o as Node3D).global_position.distance_to(here) < 8.0:
+						_heal(o, 25.0)
 			for r in _raiders_near(here, 7.5):
 				r.take_hit(10.0, E.WATER, Vector3.ZERO, "freeze", slot)
 		E.EARTH:
@@ -963,7 +1048,7 @@ func _do_spirit(slot: int) -> void:
 	net.state_set("spirit_ready", false)
 	log_spirits += 1
 	awards.add(slot, "spirits")
-	f.set("spirit_t", E.SPIRIT_TIME)
+	f.set("spirit_t", E.SPIRIT_TIME + float(mods_of(slot).spirit_time))
 	_heal(f, 40.0)
 	var here := f.global_position
 	for r in _raiders_near(here, 12.0):
@@ -1131,6 +1216,7 @@ func _process(delta: float) -> void:
 	if master != null:
 		master.can_act = playing
 		master.step(delta)
+		vr_rig.move_speed = 2.2 * float(mods_of(0).speed)
 		_vr_floor = lerpf(_vr_floor, World.ground_y(vr_rig.head_position()), 1.0 - exp(-8.0 * delta))
 		vr_rig.floor_height = _vr_floor
 	if net.mode != "client":
@@ -1370,6 +1456,15 @@ func _on_state_changed(key: String, value: Variant) -> void:
 					_show_results(net.state_get("results", {}))
 			if String(value) != "results":
 				_hide_results()
+		"pick":
+			altar.show_pick(value if value is Dictionary else {})
+			if value is Dictionary and not (value as Dictionary).is_empty():
+				_pick_hint(String(value.get("kind", "boon")))
+		"taken":
+			altar.show_takers(value if value is Dictionary else {}, _slot_colors())
+		"perks":
+			_mods_key = ""
+			_apply_masters_here(value if value is Dictionary else {})
 		"spirit_ready":
 			if bool(value):
 				for s in huds:
@@ -1526,6 +1621,8 @@ func apply_snapshot(s: Array) -> void:
 			r.id = id
 			r.element = int(rd[i + 5])
 			r.boss = int(rd[i + 6]) & 1 != 0
+			if r.boss:
+				r.boss_kind = Raider.kind_from_flags(int(rd[i + 6]))
 			r.position = pos
 			add_child(r)
 			raiders[id] = r
@@ -1598,7 +1695,17 @@ func apply_event(kind: String, args: Array) -> void:
 		"story":
 			_story(String(args[0]), String(args[1]), args[2])
 		"gates":
-			_show_gates(int(args[0]), int(args[1]))
+			_show_gates(int(args[0]), int(args[1]), String(args[2]) if args.size() > 2 else "temple")
+		"arena":
+			_show_arena(String(args[0]), int(args[1]))
+		"warn":
+			hazards.warn(args[0], float(args[1]), args[2], float(args[3]))
+		"stomp":
+			stomp_fx(args[0], float(args[1]), args[2])
+		"vent":
+			hazards.tell(int(args[0]), float(args[1]))
+		"plume":
+			plume_fx(int(args[0]))
 		"temple":
 			_show_temple(args)
 
@@ -1642,7 +1749,12 @@ func _start_temple(first: bool) -> void:
 	game_t = 0.0
 	generals = 0
 	seen_elements = {}
+	perks = {}
+	run_picks = []
+	net.state_set("perks", {})
 	_send_temple()
+	arena_seg = -1
+	_enter_arena(0)
 	print("Elemental Bender: temple seed %d%s | tree %d waves, %d fruit, day %d" % [temple_seed,
 		" (TODAY'S RAIDERS)" if temple_daily else "", int(save.data.waves), (save.data.fruit as Array).size(), int(save.data.days)])
 	if first:
@@ -1658,14 +1770,14 @@ func _start_temple(first: bool) -> void:
 
 ## Host / local: the portals of wave n open on every machine (sticky: late machines get them too).
 func _send_gates(n: int) -> void:
-	_show_gates(temple_seed, n)
+	_show_gates(temple_seed, n, arena)
 	if net.mode == "host":
-		net.event("gates", [temple_seed, n])
+		net.event("gates", [temple_seed, n, arena])
 
 
-func _show_gates(seed_value: int, n: int) -> void:
+func _show_gates(seed_value: int, n: int, island: String = "temple") -> void:
 	log_gates += 1
-	temple_story.set_gates(WaveGen.gates(seed_value, n) if n > 0 else [])
+	temple_story.set_gates(WaveGen.gates(seed_value, n, island) if n > 0 else [])
 
 
 ## Host / local: the Spirit Tree, lanterns and Kiko's crown on every machine (sticky).
@@ -1691,6 +1803,7 @@ func tree_burst(pos: Vector3) -> void:
 ## Host / local: a wave is cleared: the Spirit Tree grows (saved), a RUN line.
 func _wave_cleared() -> void:
 	var before := WaveGen.tree_stage(int(save.data.waves))
+	var had := _unlocks()
 	save.data.waves = int(save.data.waves) + 1
 	save.mark_dirty()
 	var after := WaveGen.tree_stage(int(save.data.waves))
@@ -1699,11 +1812,13 @@ func _wave_cleared() -> void:
 		_story_for_all("The Spirit Tree grew!", "spirittree", Color(1.0, 0.7, 0.85))
 	elif wave <= 2:
 		_story_for_all("You did it!", "kiko", Color(1.0, 0.85, 0.3))
+	_unlock_stories(had)
 	_log_run("wave")
 
 
 ## Host / local: a Shadow General is beaten: a glowing fruit on the Spirit Tree (saved), Kiko's crown at last.
 func _general_beaten(e: int) -> void:
+	var had := _unlocks()
 	generals += 1
 	var k := int(save.data.generals) + 1
 	save.data.generals = k
@@ -1717,6 +1832,7 @@ func _general_beaten(e: int) -> void:
 	_story_for_all("A glowing fruit!", "lightfruit", E.COLORS[e])
 	if k == WaveGen.CROWN_GENERALS:
 		_story_for_all("A crown for me!", "crown", Color(1.0, 0.85, 0.25))
+	_unlock_stories(had)
 
 
 ## Host / local: Kiko's card for the wave that starts: the element that beats this wave's raiders while there is
@@ -1724,7 +1840,14 @@ func _general_beaten(e: int) -> void:
 func _wave_story() -> void:
 	var pal: Array = wave_plan.get("palette", [])
 	if bool(wave_plan.get("boss", false)):
-		_story_for_all("The Shadow General!", "general", Color(0.75, 0.5, 1.0))
+		var bk := String(wave_plan.get("boss_kind", "general"))
+		var bi := Bosses.info(bk)
+		if bk == "general":
+			_story_for_all("The Shadow General!", "general", Color(0.75, 0.5, 1.0))
+		else:
+			var need := E.beater(int(bi.element))
+			_story_for_all("The %s!" % String(bi.name).capitalize(), String(bi.pic), bi.color)
+			_story_for_all("Use %s!" % E.NAMES[need], Pics.ELEMENT_PICS[need], E.COLORS[need])
 	elif pal.size() == 1:
 		var e := int(pal[0])
 		var need := E.beater(e)
@@ -1802,4 +1925,317 @@ func _log_run(end: String) -> void:
 		"portals": (wave_plan.get("gates", []) as Array).size(), "elements": wave_plan.get("palette", []),
 		"generals": generals, "tree": WaveGen.tree_stage(int(save.data.waves)), "waves_total": int(save.data.waves),
 		"fruit": (save.data.fruit as Array).size(), "days": int(save.data.days), "counters": log_counters,
-		"spirits": log_spirits, "ring_outs": log_ring_outs})
+		"spirits": log_spirits, "ring_outs": log_ring_outs, "arena": arena, "boss": String(wave_plan.get("boss_kind", "")),
+		"gentle": boss_gentle, "masters": _masters_list(), "picks": run_picks.duplicate(), "islands": log_arenas.keys(),
+		"tells": log_tells, "vents": log_vents})
+
+
+# --- Islands, the altar (masters + gifts), bosses and hazards ------------------------------------
+
+## Any machine: a player's numbers from their master and gifts (boons.gd mods; from the net state "perks").
+func mods_of(slot: int) -> Dictionary:
+	var all: Dictionary = net.state_get("perks", {}) if net != null else {}
+	var key := str(all)
+	if key != _mods_key:
+		_mods_key = key
+		_mods = {}
+	if not _mods.has(slot):
+		_mods[slot] = Boons.mods(all.get(slot, {}))
+	return _mods[slot]
+
+
+## Host / local: travel to segment k's island (TEMPLE ISLAND first; arenas.gd arena_for) on every machine (sticky).
+func _enter_arena(seg: int) -> void:
+	arena_seg = seg
+	var open := Arenas.unlocked(int(save.data.generals), int(save.data.waves))
+	var id := Arenas.arena_for(temple_seed, seg, open)
+	var want := OS.get_environment("EB_ARENA")
+	if seg == 0 and Arenas.ids().has(want):
+		id = want
+	var islands: Array = save.data.islands if save.data.islands is Array else []
+	if not islands.has(id):
+		islands.append(id)
+		save.data.islands = islands
+		save.mark_dirty()
+	_show_arena(id, temple_seed)
+	if net.mode == "host":
+		net.event("arena", [id, temple_seed, seg])
+
+
+## Every machine: build island `id` (the props and vents come from the temple seed), its sky and hazard.
+func _show_arena(id: String, seed_value: int) -> void:
+	log_arenas[id] = true
+	var lay_seed := Arenas.layout_seed(seed_value, id)
+	var moved := id != arena
+	arena = id
+	if world != null and world.arena_id == id and int(world.lay.get("seed", -1)) == lay_seed:
+		return
+	var info := Arenas.info(id)
+	if world != null:
+		world.queue_free()
+	world = World.new()
+	world.name = "World_%s" % id
+	add_child(world)
+	world.build(_vr_world, id, seed_value)
+	if hazards != null:
+		hazards.queue_free()
+	hazards = Hazards.new()
+	hazards.name = "Hazards_%s" % id
+	hazards.main = self
+	add_child(hazards)
+	hazards.setup(world.lay, String(info.hazard))
+	if sky != null:
+		sky.set_preset(String(info.sky), 1.5)
+	if moved:
+		fx.ring(Vector3(0, World.DAIS_TOP, 0), Color(0.75, 0.5, 1.0), 14.0, 0.8)
+		sfx.play("warp", -4.0, 0.8)
+		_banner_local(String(info.name), "", "level")
+		_story("Off to the %s!" % String(info.name).capitalize(), String(info.pic), Color(0.75, 0.5, 1.0))
+		if String(info.hazard) != "":
+			var hz: Dictionary = Arenas.HAZARDS[String(info.hazard)]
+			_story("Watch the %s!" % String(hz.name).capitalize(), String(info.pic), hz.color)
+	print("Elemental Bender: island %s (seed %d)" % [id, lay_seed])
+
+
+## Host / local: open the altar (kind "master" or "boon") for everyone.
+func _open_pick(kind: String, ids: Array) -> void:
+	if ids.is_empty():
+		return
+	pick_n += 1
+	pick_t = 0.0
+	pick_taken = {}
+	var d := {"n": pick_n, "kind": kind, "ids": ids, "def": int(ids.size() / 2),
+		"wait": (Boons.WAIT_FAST if fast else (Boons.MASTER_WAIT if kind == "master" else Boons.WAIT))}
+	net.state_set("taken", {})
+	net.state_set("pick", d)
+
+
+func _close_pick() -> void:
+	if net.state_has("pick") and not (net.state_get("pick", {}) as Dictionary).is_empty():
+		net.state_set("pick", {})
+	altar.show_pick({})
+
+
+## Host / local, in the breather: walking onto a stone picks it; everyone done (or time up) closes the altar.
+func _pick_step(delta: float) -> void:
+	var d: Dictionary = net.state_get("pick", {})
+	if d.is_empty():
+		return
+	pick_t += delta
+	for f in fighters(true):
+		var i := altar.stone_at((f as Node3D).global_position)
+		if i >= 0:
+			_altar_pick(int(f.get("slot")), i)
+	var everyone := fighters(false)
+	var done := not everyone.is_empty()
+	for f in everyone:
+		if not pick_taken.has(int(f.get("slot"))):
+			done = false
+	if pick_t > float(d.get("wait", Boons.WAIT)):
+		for f in everyone:
+			_altar_pick(int(f.get("slot")), int(d.get("def", 0)))
+		done = true
+	if done and pick_t > 0.6:
+		_close_pick()
+
+
+## Host / local: `slot` takes stone `idx` of the altar showing (once per altar).
+func _altar_pick(slot: int, idx: int) -> void:
+	var d: Dictionary = net.state_get("pick", {})
+	var ids: Array = d.get("ids", [])
+	if slot < 0 or pick_taken.has(slot) or idx < 0 or idx >= ids.size() or fighter_of(slot) == null:
+		return
+	pick_taken[slot] = idx
+	var kind := String(d.get("kind", "boon"))
+	var id := String(ids[idx])
+	var p: Dictionary = (perks.get(slot, {}) as Dictionary).duplicate(true)
+	if kind == "master":
+		p["m"] = id
+		log_masters += 1
+	else:
+		var b: Array = p.get("b", [])
+		b.append(id)
+		p["b"] = b
+		run_picks.append(id)
+		log_picks += 1
+	if not p.has("b"):
+		p["b"] = []
+	perks[slot] = p
+	net.state_set("perks", perks)
+	net.state_set("taken", pick_taken)
+	var f := fighter_of(slot)
+	var col := Boons.pick_color(kind, id)
+	fx.burst((f as Node3D).global_position + Vector3.UP, col, 16, 3.0, 0.3, 0.6)
+	sound_all("power_up", (f as Node3D).global_position, -4.0, 1.2)
+	_note(slot, ("%s MASTER!" if kind == "master" else "%s!") % Boons.pick_name(kind, id))
+	print("Elemental Bender: slot %d picked %s %s" % [slot, kind, id])
+
+
+## Every machine: Kiko asks for a pick (a picture card) when the altar opens.
+func _pick_hint(kind: String) -> void:
+	_pick_hints += 1
+	if kind == "boon" and _pick_hints > 2:
+		return  # (the glowing stones speak for themselves after the first time)
+	if kind == "master":
+		_story("Pick your master!", "kiko", KIKO_COLOR)
+	else:
+		_story("Pick a gift!", "giftstone", Color(1.0, 0.85, 0.35))
+	if vr_rig != null:
+		_vr_headline("PICK ONE!", "Punch a stone", {"duration": 3.0, "color": Color(1.0, 0.85, 0.35), "sound": ""})
+
+
+func _slot_colors() -> Dictionary:
+	var out := {}
+	for s in range(0, 8):
+		out[s] = Color(1.0, 0.95, 0.7) if s == 0 and bool(net.state_get("vr", false)) else party.color_of(s)
+	return out
+
+
+## Every machine: a new master turns its player's own bender (or the VR master) to that element.
+func _apply_masters_here(all: Dictionary) -> void:
+	for slot in all:
+		var m := String((all[slot] as Dictionary).get("m", ""))
+		if m == "" or String(_shown_master.get(slot, "")) == m:
+			continue
+		_shown_master[slot] = m
+		var e := int(Boons.master(m).get("element", -1))
+		if e < 0:
+			continue
+		var b: Bender = benders.get(int(slot))
+		if b != null and b.owned:
+			b.call("_switch", e)
+		elif int(slot) == 0 and master != null:
+			master.call("_set_element", e)
+	if all.is_empty():
+		_shown_master = {}
+
+
+func _masters_list() -> Array:
+	var out: Array = []
+	for s in perks:
+		out.append(String((perks[s] as Dictionary).get("m", "")))
+	return out
+
+
+## What the family has unlocked (to tell Kiko's news when something new opens).
+func _unlocks() -> Dictionary:
+	var w := int(save.data.waves)
+	var g := int(save.data.generals)
+	return {"islands": Arenas.unlocked(g, w), "masters": Boons.unlocked_masters(w, g), "boons": Boons.unlocked_boons(w, g)}
+
+
+func _unlock_stories(had: Dictionary) -> void:
+	var now := _unlocks()
+	for id in now.islands:
+		if not (had.islands as Array).has(id):
+			var a := Arenas.info(String(id))
+			_story_for_all("A new island: %s!" % String(a.name).capitalize(), String(a.pic), Color(0.75, 0.5, 1.0))
+	for id in now.masters:
+		if not (had.masters as Array).has(id):
+			var e := int(Boons.master(String(id)).element)
+			_story_for_all("New: the %s master!" % String(Boons.master(String(id)).name).capitalize(),
+				Pics.ELEMENT_PICS[e] if e >= 0 else "lightfruit", E.COLORS[e] if e >= 0 else Color(1.0, 0.95, 0.7))
+	for id in now.boons:
+		if not (had.boons as Array).has(id):
+			_story_for_all("A new gift!", "giftstone", Boons.boon(String(id)).color)
+
+
+## Host / local (raider.gd): a boss tells its attack: a warning ring on every machine.
+func boss_warn(_r: Raider, pos: Vector3, radius: float, col: Color, secs: float) -> void:
+	log_tells += 1
+	hazards.warn(pos, radius, col, secs)
+	net.event("warn", [pos, radius, col, secs])
+	sound_all("magic", pos, -2.0, 0.6)
+
+
+## Host / local: the Frost Giant's stomp: everyone inside the ring is hurt and pushed out.
+func boss_stomp(r: Raider, pos: Vector3, radius: float, dmg: float) -> void:
+	for f in fighters(true):
+		var n: Node3D = f
+		var away := n.global_position - pos
+		away.y = 0.0
+		if away.length() < radius:
+			hurt_fighter(n, dmg, away.normalized() * 12.0 + Vector3.UP * 5.0)
+	var col: Color = Bosses.info(r.boss_kind).color
+	stomp_fx(pos, radius, col)
+	net.event("stomp", [pos, radius, col])
+
+
+func stomp_fx(pos: Vector3, radius: float, col: Color) -> void:
+	fx.ring(Vector3(pos.x, 0.1, pos.z), col, radius, 0.5)
+	fx.spikes(Vector3(pos.x, 0.0, pos.z), radius * 0.6)
+	sfx.play_at("crash", pos, 0.0, 0.5)
+	for s in cams:
+		var b: Node3D = benders.get(s)
+		if b != null and b.global_position.distance_to(pos) < radius * 2.0:
+			(cams[s] as CameraRig).shake(0.7)
+	vr_shake(0.6)
+
+
+## Host / local: a boss's dive hit a fighter.
+func boss_hit(_r: Raider, f: Node3D, dmg: float, push: Vector3) -> void:
+	hurt_fighter(f, dmg, push)
+
+
+## Host / local: a boss at half health powers up (and the giant and drake call two helpers, not in gentle).
+func on_boss_phase2(r: Raider) -> void:
+	log_phase2 += 1
+	var info := Bosses.info(r.boss_kind)
+	announce("POWERED UP!", String(info.name), "boss")
+	var nums := Bosses.numbers(r.boss_kind, r.gentle, true)
+	for k in int(nums.helpers):
+		if raiders.size() >= MAX_ALIVE:
+			break
+		var a := k * PI + 0.7
+		_spawn_raider([r.element, 0, false, 0.0, 0.0, 0.0], false)
+		var h: Raider = raiders.get(next_id)
+		if h != null:
+			h.position = r.global_position + Vector3(cos(a) * 3.0, 0.5, sin(a) * 3.0)
+
+
+## Host / local (hazards.gd): vent i starts glowing; then it bursts.
+func on_vent_tell(i: int, secs: float) -> void:
+	hazards.tell(i, secs)
+	net.event("vent", [i, secs])
+	if i < hazards.vents.size():
+		sound_all("magic", hazards.vents[i].p, -8.0, 0.5)
+
+
+func on_vent_burst(i: int) -> void:
+	if i >= hazards.vents.size():
+		return
+	log_vents += 1
+	var v: Dictionary = hazards.vents[i]
+	var hz: Dictionary = Arenas.HAZARDS.get(hazards.hazard, {})
+	if hz.is_empty():
+		return
+	var at: Vector3 = v.p
+	var soft := 0.5 if boss_gentle else 1.0
+	for f in fighters(true):
+		var n: Node3D = f
+		var away := n.global_position - at
+		away.y = 0.0
+		if away.length() < float(v.r):
+			var dir := away.normalized() if away.length() > 0.2 else Vector3.FORWARD
+			hurt_fighter(n, float(hz.dmg) * soft, dir * float(hz.push) + Vector3.UP * float(hz.lift))
+	for r in _raiders_near(at, float(v.r)):
+		var away2 := r.global_position - at
+		away2.y = 0.0
+		var dir2 := away2.normalized() if away2.length() > 0.2 else Vector3.FORWARD
+		r.take_hit(float(hz.raider_dmg), -1, dir2 * float(hz.push) * 1.5, String(hz.effect), -1)
+	plume_fx(i)
+	net.event("plume", [i])
+
+
+func plume_fx(i: int) -> void:
+	if hazards == null or i >= hazards.vents.size():
+		return
+	var v: Dictionary = hazards.vents[i]
+	var at: Vector3 = v.p
+	var col := hazards.color()
+	for k in 14:
+		var vel := Vector3(randf_range(-1.5, 1.5), randf_range(7.0, 11.0), randf_range(-1.5, 1.5))
+		fx.puff(at + Vector3.UP * 0.3, col, 0.5, 0.9, vel)
+	fx.ring(at + Vector3.UP * 0.1, col, float(v.r), 0.4)
+	var snd := {"frost": "ice", "lava": "explosion", "wind": "whoosh"}.get(hazards.hazard, "whoosh") as String
+	sfx.play_at(snd, at, -2.0, 0.8)
