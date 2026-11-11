@@ -193,6 +193,53 @@ export const history = async (query: string, n = 10) => (await sh(`claude-histor
 
 // --- Tech-debt scan (Simon's rule: fix debt the moment it's found) -----------------------------------
 
+// --- Real play from every machine (core/telemetry_push.gd -> tools/duo-telemetry-recv) --------------------------
+const TELEMETRY_STORE = join(HOME, ".cache/duo-arena/telemetry");
+
+/** Every machine's real RUN lines, as the Steam Machine received them: [{device, recv, ...run}] (test lines never
+ *  arrive; "push_test" is the receiver's own test game and is left out). */
+export async function playRuns(o: { since?: string; game?: string } = {}) {
+  const out: any[] = [];
+  for (const f of await readdir(TELEMETRY_STORE).catch(() => [] as string[])) {
+    if (!f.endsWith(".jsonl")) continue;
+    for (const l of (await readFile(join(TELEMETRY_STORE, f), "utf8").catch(() => "")).split("\n")) {
+      if (!l) continue;
+      try {
+        const e = JSON.parse(l), r = e.run || {};
+        if (r.game === "push_test" || (o.game && r.game !== o.game) || (o.since && String(r.date) < o.since)) continue;
+        out.push({ device: e.device, recv: e.recv, ...r });
+      } catch {}
+    }
+  }
+  return out.sort((a, b) => (a.t || 0) - (b.t || 0));
+}
+
+/** How the family really played (all machines): per device (runs, last run, lines the device had to drop), per game
+ *  (runs, devices, how rounds ended, minutes played) and the newest runs. dev.playstats({since: "2026-11-01", game}). */
+export async function playstats(o: { since?: string; game?: string; recent?: number } = {}) {
+  const runs = await playRuns(o);
+  const devices: Record<string, any> = {};
+  for (const f of await readdir(TELEMETRY_STORE).catch(() => [] as string[])) {
+    if (!f.endsWith(".meta.json")) continue;
+    const m = JSON.parse(await readFile(join(TELEMETRY_STORE, f), "utf8").catch(() => "{}"));
+    devices[f.slice(0, -10)] = { runs: 0, last_run: "", last_seen: m.last_seen ? new Date(m.last_seen * 1000).toISOString().slice(0, 16) : "never", dropped: m.dropped || 0 };
+  }
+  const games: Record<string, any> = {};
+  for (const r of runs) {
+    const dv = (devices[r.device] ??= { runs: 0, last_run: "", last_seen: "?", dropped: 0 });
+    dv.runs++; dv.last_run = String(r.date || "").slice(0, 16);
+    const g = (games[r.game] ??= { runs: 0, devices: {} as Record<string, number>, ends: {} as Record<string, number>, minutes: 0, last: "" });
+    g.runs++; g.devices[r.device] = (g.devices[r.device] || 0) + 1;
+    if (r.end) g.ends[r.end] = (g.ends[r.end] || 0) + 1;
+    g.minutes += (Number(r.secs ?? r.seconds ?? r.time ?? 0) || 0) / 60;
+    g.last = String(r.date || "").slice(0, 16);
+  }
+  for (const g of Object.values(games)) g.minutes = Math.round(g.minutes);
+  const byRuns = Object.fromEntries(Object.entries(games).sort((a: any, b: any) => b[1].runs - a[1].runs));
+  return { store: TELEMETRY_STORE, total: runs.length, devices, games: byRuns,
+    recent: runs.slice(-(o.recent ?? 10)).map(r => `${String(r.date).slice(0, 16)} ${r.device} ${r.game} ${r.mode ?? ""} ${r.end ?? ""}`) };
+}
+
 /** Everything that needs tidying: unmerged finished branches, stale worktrees, uncommitted work, staging drift,
  *  tool copies out of sync, broken services. Returns {clean, issues: [{kind, what, fix}]}. */
 /** Worktrees that live for good (merged branch or not): wt-merge is the deploy steward's permanent merge worktree
@@ -309,8 +356,24 @@ export async function debt() {
     if (a && b && !a.equals(b))
       issues.push({ kind: "tool-copy", what: `${rel} differs from ${src.replace(HOME, "~")}`, fix: `cp ${src} ${repo} and commit` });
   }
+  // Real-play telemetry (2026-11-11: no family RUN lines reached the Steam Machine for 2 weeks and nobody noticed):
+  // every machine pushes its RUN lines to duo-telemetry-recv; warn when nothing real has arrived for 7 days, or a
+  // device had to drop lines it couldn't send.
+  {
+    const runs = await playRuns();
+    const newest = runs.reduce((m, r) => Math.max(m, Number(r.recv) || 0, Number(r.t) || 0), 0);
+    const days = Math.floor((Date.now() / 1000 - newest) / 86400);
+    if (days > 7) issues.push({ kind: "telemetry-gap", what: newest ? `no real RUN lines from any machine for ${days} days (newest ${new Date(newest * 1000).toISOString().slice(0, 10)})` : "no real RUN lines have ever reached ~/.cache/duo-arena/telemetry",
+      fix: "check duo-telemetry-recv (systemctl --user status duo-telemetry-recv; journalctl --user -u duo-telemetry-recv), that the Decks run the arcade build with core/telemetry_push.gd, and ask whether the family played at all" });
+    for (const f of await readdir(TELEMETRY_STORE).catch(() => [] as string[])) {
+      if (!f.endsWith(".meta.json")) continue;
+      const m = JSON.parse(await readFile(join(TELEMETRY_STORE, f), "utf8").catch(() => "{}"));
+      const recent = (m.drops || []).filter((x: any) => Date.now() / 1000 - x.t < 7 * 86400).reduce((s: number, x: any) => s + x.n, 0);
+      if (recent) issues.push({ kind: "telemetry-drops", what: `${f.slice(0, -10)} dropped ${recent} unsent RUN lines this week (outbox full)`, fix: "the device couldn't reach the Steam Machine for a long time: check its Wi-Fi (family-link status)" });
+    }
+  }
   // Services and timers that keep things healthy (duo-catch-up delivers deploys to devices that were off).
-  for (const s of ["voice-bridge", "claude-watchdog.timer", "duo-catch-up.timer", "test-throttle", "claude-history-index.timer"]) {
+  for (const s of ["voice-bridge", "claude-watchdog.timer", "duo-catch-up.timer", "test-throttle", "claude-history-index.timer", "duo-telemetry-recv"]) {
     const st = (await sh(`systemctl --user is-active ${s}`)).out;
     if (st !== "active") issues.push({ kind: "service", what: `${s} is ${st}`, fix: `systemctl --user status ${s}` });
   }
@@ -477,6 +540,8 @@ export async function land(branch: string, genTests: string[], botId: string, ot
 export function help() {
   return `dev — Claude's dev loop (brepl). Image paths returned/shown come back as pictures via the brepl MCP tool.
   dev.land(branch, genTests, botId, otherBots, msg)  merge a finished branch via wt-merge, test in staging, deploy TV+Decks, merge live main
+  dev.playstats({since?, game?})     how the family really played: RUN lines every machine pushed to the Steam Machine
+  dev.playRuns({since?, game?})      those RUN lines as objects ({device, recv, ...run})
   dev.debt()                         tech-debt scan: {clean, issues:[{kind, what, fix}]} (fix them straight away)
   dev.bots.list() / .run(id, {net, joiners}) / .all({only, net, concurrency})   headless bot tests in staging (net: host + joiners, tools/multibot.ts)
   dev.stage.diff() / .pull() / .deploy(msg)                            staging <-> live game

@@ -11,10 +11,12 @@ extends RefCounted
 ## Networked rounds: the host also sends each line to every client machine (net sys "_run"), which logs and
 ## stores it with "copy": true and "copy_on": <its machine kind>. So a round hosted on a Deck still lands in the
 ## TV's log (agents can't read the Decks). Readers drop copies when the host's own line is there (same t/seed/game).
-## Summaries across machines: tools/dd-balance (collects RUN lines from the TV log and every Deck).
+## Every machine also pushes its own lines to the Steam Machine (core/telemetry_push.gd -> tools/duo-telemetry-recv ->
+## ~/.cache/duo-arena/telemetry/<device>.jsonl). Summaries across machines: dev.playstats(), tools/dd-balance.
 
 const Save := preload("res://core/save.gd")
 const Machine := preload("res://core/machine.gd")
+const Push := preload("res://core/telemetry_push.gd")
 const PATH := "user://telemetry.jsonl"
 const TEST_PATH := "user://telemetry_test.jsonl"
 const MAX_BYTES := 2000000  ## keep the file small: start again (keeping the newest half) past this
@@ -35,6 +37,7 @@ static func run(game_id: String, data: Dictionary) -> Dictionary:
 	var line := JSON.stringify(d)
 	print("RUN: " + line)
 	_append(path(), line)
+	Push.enqueue(line)  # off to the Steam Machine when it's reachable (core/telemetry_push.gd; not in tests)
 	_share(line)
 	return d
 

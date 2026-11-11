@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
 // dd-balance: how did the family's Dungeon Delve runs go? Collects "RUN: {json}" telemetry
-// (core/telemetry.gd) from the TV's game log + user:// file and from every Deck
-// (~/.config/duo-arena/decks: one ssh alias per line; ~/DuoArena/game/.dev/game.log* and the Deck's
-// user://telemetry.jsonl), then prints per mode: runs, median depth / length, how runs ended, where
-// people quit, what knocked heroes out, damage by source, boss kill times.
-//   tools/dd-balance            # TV + Decks
+// (core/telemetry.gd) from the TV's game log + user:// file and from the store every machine pushes its RUN lines to
+// (core/telemetry_push.gd -> tools/duo-telemetry-recv -> ~/.cache/duo-arena/telemetry/<device>.jsonl; Deck logs are
+// never read over ssh), then prints per mode: runs, median depth / length, how runs ended, where people quit, what
+// knocked heroes out, damage by source, boss kill times.
+//   tools/dd-balance            # TV + every machine's pushed lines
 //   tools/dd-balance --local    # just this machine
 //   tools/dd-balance --since 2026-10-25
 import { $ } from "bun";
@@ -22,8 +22,8 @@ async function grab(cmd: string, label: string) {
 const local = `grep -ah '^RUN: ' ${H}/GodotProjects/duo-arena/.dev/game.log* 2>/dev/null; cat "${H}/.local/share/godot/app_userdata/Duo Arena/telemetry.jsonl" 2>/dev/null`;
 await grab(local, "TV");
 if (!args.includes("--local")) {
-  const decks = (await Bun.file(`${H}/.config/duo-arena/decks`).text().catch(() => "")).split("\n").map(s => s.trim()).filter(Boolean);
-  await Promise.all(decks.map(d => grab(`timeout 15 ssh -o ConnectTimeout=5 -o BatchMode=yes ${d} 'grep -ah "^RUN: " ~/DuoArena/game/.dev/game.log* 2>/dev/null; cat ~/.local/share/godot/app_userdata/*/telemetry.jsonl 2>/dev/null'`, d)));
+  const dir = `${H}/.cache/duo-arena/telemetry`;
+  await grab(`cat ${dir}/*.jsonl 2>/dev/null | bun -e 'for (const l of (await Bun.stdin.text()).split("\\n")) if (l) { try { console.log(JSON.stringify(JSON.parse(l).run)); } catch {} }'`, "pushed");
 }
 const seen = new Set<string>();
 const runs: any[] = [];
