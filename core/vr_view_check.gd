@@ -134,11 +134,13 @@ static func washer(cam: Camera3D, card: Node3D, p: Vector3) -> String:
 	var head := cam.global_position
 	var dir := (p - head).normalized()
 	var prio := VR_PRIO_PANEL
+	var rig := cam.get_parent()  # the VR player's own hands and what they hold (a laser sight) aren't scenery
 	for n in cam.get_tree().root.find_children("*", "GeometryInstance3D", true, false):
 		var g := n as GeometryInstance3D
 		if g is Label3D or g is GPUParticles3D or g is CPUParticles3D or not g.is_visible_in_tree() or g.transparency > 0.65:
 			continue
-		if (g.layers & cam.cull_mask) == 0 or card.is_ancestor_of(g) or g == card or _ignored(g) or _placed(g):
+		if (g.layers & cam.cull_mask) == 0 or card.is_ancestor_of(g) or g == card or _ignored(g) or _placed(g) \
+				or (rig != null and rig.is_ancestor_of(g)):
 			continue
 		var mat := _material(g)
 		if mat == null or mat.render_priority < prio or not _blended(mat):

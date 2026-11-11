@@ -1057,6 +1057,7 @@ func _build_plants() -> void:
 func _build_jars() -> void:
 	var glass := W.mat(Color(0.85, 0.95, 1.0, 0.35), 0.0, 0.1)
 	glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	glass.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 	for i in W.MAX_JARS:
 		var j := Node3D.new()
 		add_child(j)
