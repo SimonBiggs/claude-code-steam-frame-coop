@@ -1,0 +1,158 @@
+extends RefCounted
+## ONE colour-contrast check for every game: can you SEE the thing you must play with on what it sits on?
+## (2026-11: white sheep vanished on Sheep Round-Up's snow, blue balloons on Balloon Pop's day sky, green balloons
+## on its grass; Marble Maze checked its marbles on its floors. Each made its own check: now there is this one.)
+##
+## Measure: Oklab (a perceptual colour space). score(fg, bg) = the Oklab distance = lightness difference plus the
+## chroma / hue difference (the a/b plane), so a pale-blue thing on a pale-blue sky scores low however "different"
+## the RGB numbers look. A see-through fg (alpha < 1, e.g. a warn stripe) is blended over bg first.
+##   Contrast.score(fg, bg) -> float      0 = the same colour, ~0.1 = barely, 0.2+ = clear at a glance
+##   Contrast.distinct(fg, bg) -> bool    score >= MIN
+##   Contrast.problems(fgs, bgs, min) -> Array[String]   fgs / bgs: {name: Color}; a fg may be {"color": C, "rim": R}
+##                                        (an outline / glow / rim it really has): it is distinct when either is.
+##
+## Every game declares what must be seen and where: games/<game>/palette.gd (found by itself, like
+## story_pictures.gd) with
+##   static func key_colors() -> Dictionary    # name -> Color (or {"color", "rim"}): players, balls, pickups, hazards
+##   static func backgrounds() -> Dictionary   # name -> Color: every floor / ground / sky / table it can produce
+##                                             # (all seasons, worlds, themes, times of day, modes)
+##   optional static func groups() -> Array    # [{"keys": {...}, "bgs": {...}}]: extra pairs for things only ever
+##                                             # seen on some backgrounds (e.g. a sky bird that never sits on grass)
+## READ them from the game's real consts / data (preload the game's scripts), never copy numbers, so they can't drift.
+## tests/contrast_test.gd runs every declaration and fails a game in arcade GAMES without one.
+##
+## MIN: the known bad cases score 0.044-0.087 (white sheep on snow 0.060, lamb on snow 0.079, the old blue balloon on
+## the day sky 0.087, the old green balloon on spring grass 0.083, the old ice balloon on snow 0.044); their fixes
+## score 0.138 and up (frosty grass under white sheep 0.195, the new green balloon on grass 0.169, the new ice
+## balloon on snow 0.138). 0.12 sits between them (tests/contrast_test.gd keeps these as its own samples).
+
+const MIN := 0.12
+
+const _GAMES_DIR := "res://games"
+
+
+## Oklab of an sRGB colour: x = lightness L (0..1), y = a (green-red), z = b (blue-yellow).
+static func oklab(c: Color) -> Vector3:
+	var l := c.srgb_to_linear()
+	var a := pow(maxf(0.0, 0.4122214708 * l.r + 0.5363325363 * l.g + 0.0514459929 * l.b), 1.0 / 3.0)
+	var m := pow(maxf(0.0, 0.2119034982 * l.r + 0.6806995451 * l.g + 0.1073969566 * l.b), 1.0 / 3.0)
+	var s := pow(maxf(0.0, 0.0883024619 * l.r + 0.2817188376 * l.g + 0.6299787005 * l.b), 1.0 / 3.0)
+	return Vector3(0.2104542553 * a + 0.7936177850 * m - 0.0040720468 * s,
+		1.9779984951 * a - 2.4285922050 * m + 0.4505937099 * s,
+		0.0259040371 * a + 0.7827717662 * m - 0.8086757660 * s)
+
+
+## What you see of fg over bg (a see-through fg is blended in by its alpha).
+static func over(fg: Color, bg: Color) -> Color:
+	if fg.a >= 1.0:
+		return Color(fg.r, fg.g, fg.b)
+	return Color(bg.r, bg.g, bg.b).lerp(Color(fg.r, fg.g, fg.b), clampf(fg.a, 0.0, 1.0))
+
+
+## How different fg looks on bg: Oklab distance (lightness + chroma/hue). 0 = the same.
+static func score(fg: Color, bg: Color) -> float:
+	return oklab(over(fg, bg)).distance_to(oklab(Color(bg.r, bg.g, bg.b)))
+
+
+## Lightness gap only (0..1): useful in messages ("make it darker").
+static func lightness_gap(fg: Color, bg: Color) -> float:
+	return oklab(over(fg, bg)).x - oklab(Color(bg.r, bg.g, bg.b)).x
+
+
+static func distinct(fg: Color, bg: Color, min_score: float = MIN) -> bool:
+	return score(fg, bg) >= min_score
+
+
+## The best score of a key (a Color, or {"color": C, "rim": R}) on bg.
+static func key_score(key, bg: Color) -> float:
+	if key is Color:
+		return score(key, bg)
+	if key is Dictionary and key.has("color"):
+		var s := score(key.color, bg)
+		if key.has("rim"):
+			s = maxf(s, score(key.rim, bg))
+		return s
+	return -1.0
+
+
+## Every key colour that isn't distinct from a background: [] = fine.
+static func problems(fgs: Dictionary, bgs: Dictionary, min_score: float = MIN) -> Array[String]:
+	var out: Array[String] = []
+	for fn in fgs:
+		var key = fgs[fn]
+		if not (key is Color or (key is Dictionary and key.get("color") is Color)):
+			out.append("%s is not a Color (or {color, rim})" % fn)
+			continue
+		for bn in bgs:
+			if not (bgs[bn] is Color):
+				out.append("background %s is not a Color" % bn)
+				continue
+			var bg: Color = bgs[bn]
+			var s := key_score(key, bg)
+			if s < min_score:
+				var fc: Color = key if key is Color else key.color
+				var lg := lightness_gap(fc, bg)
+				out.append("%s #%s is hard to see on %s #%s (%.3f < %.2f; %s)" % [fn, fc.to_html(false), bn,
+					bg.to_html(false), s, min_score, "make it lighter or the background darker" if lg >= 0.0
+					else "make it darker or the background lighter"])
+	return out
+
+
+# --- Per-game declarations ---------------------------------------------------------------------------
+
+## res://games/<id>/palette.gd, or "" when the game has none.
+static func palette_path(id: String) -> String:
+	var p := "%s/%s/palette.gd" % [_GAMES_DIR, id]
+	return p if ResourceLoader.exists(p) else ""
+
+
+## Every games/<id> with a palette.gd: id -> path.
+static func palettes() -> Dictionary:
+	var out := {}
+	if not DirAccess.dir_exists_absolute(_GAMES_DIR):
+		return out
+	for g in DirAccess.get_directories_at(_GAMES_DIR):
+		var p := palette_path(g)
+		if p != "":
+			out[g] = p
+	return out
+
+
+## One game's problems (each line starts with the game id): [] = everything it must show stands out.
+static func check_game(id: String) -> Array[String]:
+	var out: Array[String] = []
+	var path := palette_path(id)
+	if path == "":
+		out.append("%s: no colour declaration - add games/%s/palette.gd (key_colors() + backgrounds(); core/contrast.gd)" % [id, id])
+		return out
+	var s = load(path)
+	if s == null or not (s is Script) or not s.can_instantiate():
+		out.append("%s: games/%s/palette.gd doesn't compile" % [id, id])
+		return out
+	var keys = s.key_colors()
+	var bgs = s.backgrounds()
+	if not (keys is Dictionary) or keys.is_empty():
+		out.append("%s: palette.gd key_colors() is empty" % id)
+	if not (bgs is Dictionary) or bgs.is_empty():
+		out.append("%s: palette.gd backgrounds() is empty" % id)
+	if out.is_empty():
+		for p in problems(keys, bgs):
+			out.append("%s: %s" % [id, p])
+	if s.has_method("groups"):
+		for gr in s.groups():
+			for p in problems(gr.get("keys", {}), gr.get("bgs", {})):
+				out.append("%s: %s" % [id, p])
+	return out
+
+
+## Pairs counted (for the test's summary).
+static func pair_count(id: String) -> int:
+	var path := palette_path(id)
+	if path == "":
+		return 0
+	var s = load(path)
+	var n: int = s.key_colors().size() * s.backgrounds().size()
+	if s.has_method("groups"):
+		for gr in s.groups():
+			n += gr.get("keys", {}).size() * gr.get("bgs", {}).size()
+	return n
