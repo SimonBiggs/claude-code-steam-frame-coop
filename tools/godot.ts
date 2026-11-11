@@ -56,7 +56,7 @@ const running = new Map<number, Game>();
 async function install(proj: string) {
   const dst = join(proj, "addons/gdev");
   await mkdir(dst, { recursive: true });
-  for (const f of ["bridge.gd", "caption.gd", "control.gd"]) {
+  for (const f of ["bridge.gd", "caption.gd", "control.gd", "gdev_main.gd"]) {  // same set as `gdev start`: bridge.gd is only a loader, without gdev_main.gd there is no control server
     const src = join(GDEV, f);
     const [a, b] = await Promise.all([readFile(src).catch(() => null), readFile(join(dst, f)).catch(() => null)]);
     if (a && (!b || !a.equals(b))) await copyFile(src, join(dst, f));

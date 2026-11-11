@@ -25,6 +25,12 @@ if sys.argv[1:] == ["--here"]:
     print("voice requests will go to pane", os.environ["TMUX_PANE"])
     sys.exit(0)
 
+# The Minecraft chat session (mc-claude, MinecraftKit) must never take the voice feed from the main session (2026-11-01:
+# a test chat session did, via the user-level "re-arm your monitors" instructions).
+if os.environ.get("MC_CHAT_SESSION"):
+    print("voice-inject: this is the Minecraft chat session (MC_CHAT_SESSION): the voice feed belongs to the main "
+          "session; not starting", flush=True)
+    sys.exit(1)
 # Only ONE Claude session may receive the voice feed (Simon, 2026-10-17): a second copy exits at once.
 import fcntl
 _lock = open(os.path.expanduser("~/.claude/voice-inject.lock"), "w")
@@ -73,27 +79,8 @@ def _norm(t: str) -> str:
     return re.sub(r"[^a-z0-9 ]", "", t.lower()).strip()
 
 
-def echo_of_claude(text: str) -> bool:
-    """True if this transcript is the mic hearing Claude's own frame-say speech from the TV."""
-    try:
-        lines = open(SAID).read().splitlines()[-20:]
-    except FileNotFoundError:
-        return False
-    heard = _norm(text)
-    if len(heard) < 4:
-        return False
-    now = time.time()
-    for line in lines:
-        ts, _, said = line.partition("\t")
-        if not ts.isdigit() or now - int(ts) > 90:
-            continue
-        said = _norm(said)
-        if heard in said:
-            return True
-        m = difflib.SequenceMatcher(None, heard, said).find_longest_match(0, len(heard), 0, len(said))
-        if m.size >= 0.6 * len(heard):
-            return True
-    return False
+sys.path.insert(0, os.path.expanduser("~/.local/share/voice-bridge"))
+from saidecho import echo_of_claude  # shared with deck-voice-bridge (2026-11-11)
 
 
 WHO_DIR = os.path.join(os.path.dirname(LOG), "who")
