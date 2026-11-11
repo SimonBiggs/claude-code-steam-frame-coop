@@ -54,6 +54,10 @@ const DECOYS := [
 	[1, Vector3(3.7, 0, -3.6), 0.0], [0, Vector3(-0.6, 0, -6.5), 0.0],
 ]
 
+## The castle's floors (FLOOR_SHADER tokens; palette.gd reads them): courtyard grass, the flagstones of each wing and
+## the grout between them.
+const FLOORS := {"GRASS": Color(0.38, 0.66, 0.32), "STONE": Color(0.62, 0.6, 0.58), "SANDSTONE": Color(0.74, 0.6, 0.48),
+	"LILAC": Color(0.6, 0.57, 0.72), "WOOD": Color(0.66, 0.5, 0.38), "GROUT": Color(0.3, 0.29, 0.28)}
 const FLOOR_SHADER := """
 shader_type spatial;
 varying vec3 wpos;
@@ -62,7 +66,7 @@ void fragment() {
 	vec3 c;
 	if (abs(wpos.x) < 3.0 && abs(wpos.z) < 3.0) {      // courtyard: grass
 		float n = fract(sin(dot(floor(wpos.xz * 5.0), vec2(12.9898, 78.233))) * 43758.5453);
-		c = vec3(0.38, 0.66, 0.32) * (0.9 + 0.15 * n);
+		c = $GRASS * (0.9 + 0.15 * n);
 	} else {                                            // flagstones (brick bond)
 		vec2 q = wpos.xz / vec2(0.9, 0.6);
 		q.x += floor(q.y) * 0.5;
@@ -70,11 +74,11 @@ void fragment() {
 		vec2 f = fract(q);
 		float n = fract(sin(dot(g, vec2(12.9898, 78.233))) * 43758.5453);
 		float grout = smoothstep(0.0, 0.05, f.x) * smoothstep(0.0, 0.05, f.y);
-		vec3 stone = vec3(0.62, 0.6, 0.58);
-		if (wpos.z > 3.0 && abs(wpos.x) < 4.0) { stone = vec3(0.74, 0.6, 0.48); }       // great hall: sandstone
-		else if (wpos.z < -3.0 && wpos.x < 3.0) { stone = vec3(0.6, 0.57, 0.72); }      // throne room: lilac
-		else if (wpos.x > 3.0 && wpos.z > -3.0 && wpos.z < 3.0) { stone = vec3(0.66, 0.5, 0.38); }  // library: wood
-		c = mix(vec3(0.3, 0.29, 0.28), stone * (0.88 + 0.2 * n), grout);
+		vec3 stone = $STONE;
+		if (wpos.z > 3.0 && abs(wpos.x) < 4.0) { stone = $SANDSTONE; }       // great hall: sandstone
+		else if (wpos.z < -3.0 && wpos.x < 3.0) { stone = $LILAC; }      // throne room: lilac
+		else if (wpos.x > 3.0 && wpos.z > -3.0 && wpos.z < 3.0) { stone = $WOOD; }  // library: wood
+		c = mix($GROUT, stone * (0.88 + 0.2 * n), grout);
 	}
 	ALBEDO = c;
 	ROUGHNESS = 0.85;
@@ -90,7 +94,7 @@ static func data(_spec: Dictionary = {}) -> Dictionary:
 static func build(root: Node3D, spec: Dictionary = {}) -> Dictionary:
 	var ctx: Dictionary = W.new_ctx(root)
 	W.environment_for(root, Color(0.5, 0.68, 0.95), Color(1.0, 0.88, 0.75), 0.6, 0.6)
-	W.shader_floor(ctx, Vector2(18.0, 14.0), Vector3.ZERO, FLOOR_SHADER)
+	W.shader_floor(ctx, Vector2(18.0, 14.0), Vector3.ZERO, W.shader_with(FLOOR_SHADER, FLOORS))
 	_walls(ctx)
 	_armoury(ctx)
 	_great_hall(ctx)

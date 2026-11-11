@@ -10,6 +10,8 @@ extends CharacterBody3D
 ## hider who rings the jail bell lets them all out.
 ## The seeker can SNIFF (Q / LB, or in VR put your left hand on your nose): hiders close by sneeze.
 const UiKit := preload("res://core/ui_kit.gd")
+const Contrast := preload("res://core/contrast.gd")
+const Story := preload("res://games/hide_and_seek/story.gd")
 
 const HIDER_SPEED := 4.2
 const SEEKER_SPEED := 3.8
@@ -234,6 +236,7 @@ func _build_critter() -> void:
 	body.mesh = main.get_meta(key)
 	body.material_override = main.vertex_mat()
 	body.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	Contrast.outline(body, Story.CRITTER_OUTLINE)  # critters vanished on floors of their own colour (palette.gd)
 	critter.add_child(body)
 	eyes = MeshInstance3D.new()
 	eyes.mesh = main.get_meta("hs_critter_eyes")

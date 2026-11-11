@@ -19,12 +19,19 @@ const TOYS: Array = [["BALL", Color(1.0, 0.3, 0.3)], ["BONE", Color(0.98, 0.95, 
 	["CARROT", Color(1.0, 0.55, 0.15)], ["STAR", Color(1.0, 0.9, 0.3)], ["TEDDY", Color(0.72, 0.48, 0.3)],
 	["RING", Color(0.3, 0.85, 0.5)], ["BALL", Color(0.3, 0.75, 1.0)], ["BONE", Color(1.0, 0.8, 0.6)]]
 const MAX_TOYS_SHOWN := 24
+## The star hunt's golden stars (main.gd).
+const STAR_COLOR := Color(1.0, 0.85, 0.2)
+## The players' critters (main.gd); each wears the ink outline (player.gd): a yellow critter vanished on the
+## yellow sand and a blue one on the bathroom tiles.
+const CRITTER_OUTLINE := preload("res://core/contrast.gd").OUTLINE
+const PLAYER_COLORS: Array[Color] = [Color(1.0, 0.85, 0.45), Color(0.5, 0.85, 1.0), Color(1.0, 0.55, 0.75),
+	Color(0.55, 0.95, 0.55), Color(1.0, 0.65, 0.35), Color(0.75, 0.6, 1.0), Color(0.4, 0.95, 0.9)]
 ## House looks: id, name, toys needed, story picture, wall tint (mixed in), garden ground, sky, one line.
 const THEMES: Array[Dictionary] = [
 	{"id": "cosy", "name": "COSY HOUSE", "need": 0, "pic": "house", "tint": Color(1, 1, 1), "mix": 0.0,
 		"ground": Color(0.4, 0.7, 0.32), "sky": Color(0.45, 0.55, 0.8), "line": "A cosy house!"},
 	{"id": "seaside", "name": "SEASIDE HOUSE", "need": 3, "pic": "wave", "tint": Color(0.82, 0.94, 1.0), "mix": 0.4,
-		"ground": Color(0.95, 0.86, 0.6), "sky": Color(0.5, 0.75, 0.95), "line": "A seaside house!"},
+		"ground": Color(0.85, 0.74, 0.55), "sky": Color(0.5, 0.75, 0.95), "line": "A seaside house!"},
 	{"id": "snowy", "name": "SNOWY HOUSE", "need": 6, "pic": "snowman", "tint": Color(0.97, 0.98, 1.0), "mix": 0.45,
 		"ground": Color(0.92, 0.95, 1.0), "sky": Color(0.7, 0.78, 0.9), "line": "A snowy house!"},
 	{"id": "spooky", "name": "SPOOKY HOUSE", "need": 9, "pic": "pumpkin", "tint": Color(0.62, 0.5, 0.78), "mix": 0.45,
