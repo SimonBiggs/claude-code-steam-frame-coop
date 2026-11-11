@@ -13,12 +13,17 @@ const LakeGen := preload("res://games/fishing_lake/lakegen.gd")
 const FishScript := preload("res://games/fishing_lake/fish.gd")
 
 const OLLIE := Color(0.62, 0.42, 0.25)
+## OLLIE'S POND (lake.gd build_pond): a log pen beside the jetty where one fish of every page swims (shiny ones
+## glow gold); it grows a new thing as the family fishes more days: [days fished, what].
+const POND: Array = [[0, "logs"], [2, "lilies"], [4, "rock"], [7, "lantern"], [11, "fountain"]]
 const MILESTONES := {4: "A third of the book!", 6: "Half the book!", 9: "Nearly full!", 12: "The book is full!"}
 
 
 static func save_defaults() -> Dictionary:
 	# book: fish name -> [times caught, best kg]; days: days fished; daily: date -> fish caught.
-	return {"world": -1, "days": 0, "book": {}, "daily": {}, "wishes": 0, "last_wish": -1, "migrated": false}
+	# shiny: fish name -> shiny ones caught (a gold star on the page); mode: the family's last GENTLE/BRAVE/HARD.
+	return {"world": -1, "days": 0, "book": {}, "daily": {}, "wishes": 0, "last_wish": -1, "migrated": false, "shiny": {},
+		"mode": "brave"}
 
 
 ## The level (0..3) after `days` days fished: what can swim in the lake.
@@ -82,3 +87,12 @@ static func add(book: Dictionary, kind: int, kg: float) -> bool:
 
 static func fish_color(kind: int) -> Color:
 	return FishScript.TYPES[kind].col if kind >= 0 else OLLIE
+
+
+## How grown Ollie's pond is after `days` days fished (1 = just the logs).
+static func pond_level(days: int) -> int:
+	var n := 0
+	for p in POND:
+		if days >= int(p[0]):
+			n += 1
+	return n

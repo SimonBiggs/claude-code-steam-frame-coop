@@ -19,6 +19,8 @@ const LIGHTHOUSE := Vector3(16.0, 0.5, -34.0)
 const WINDMILL := Vector3(-26.0, 0.6, -36.0)
 const BOARD_L := Vector3(-3.6, 0.0, JETTY_END_Z - 1.2)
 const BOARD_R := Vector3(3.6, 0.0, JETTY_END_Z - 1.2)
+const POND_C := Vector3(-2.9, 0.0, 8.2)  # OLLIE'S POND: the family's log pen beside the jetty (book.gd POND)
+const POND_R := 1.5
 
 const WATER_SHADER := """
 shader_type spatial;
@@ -160,6 +162,7 @@ func build() -> void:
 	_build_board()
 	_build_journal_board()
 	_build_tank()
+	_build_pond()
 	_build_weather()
 	_build_ducks()
 	_build_markers()
@@ -1248,7 +1251,14 @@ func build_book(kinds: Array) -> void:
 		cl.position = Vector3(x + 0.2, y - 0.16, 0.1)
 		cl.text = ""
 		book_root.add_child(cl)
-		book_slots.append([k, f, frame, cl])
+		var star := MeshInstance3D.new()  # a shiny one caught: a gold gem on the page
+		star.mesh = main.sphere_mesh(0.07)
+		star.material_override = main.make_material(Color(1.0, 0.85, 0.25), 2.5)
+		star.position = Vector3(x - 0.22, y + 0.15, 0.1)
+		star.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		star.visible = false
+		book_root.add_child(star)
+		book_slots.append([k, f, frame, cl, star])
 	book_count = Label3D.new()
 	book_count.font_size = 90
 	book_count.pixel_size = 0.0032
@@ -1263,10 +1273,10 @@ func build_book(kinds: Array) -> void:
 var _book_key := ""
 
 
-func update_book(counts: Dictionary, wish: int) -> void:
+func update_book(counts: Dictionary, wish: int, shiny: Dictionary = {}) -> void:
 	if book_root == null:
 		return
-	var key := "%s/%d" % [str(counts), wish]
+	var key := "%s/%d/%s" % [str(counts), wish, str(shiny)]
 	if key == _book_key:
 		return
 	_book_key = key
@@ -1282,6 +1292,7 @@ func update_book(counts: Dictionary, wish: int) -> void:
 			f.material_override = f.get_meta("dark")
 		(s[3] as Label3D).text = ("x%d" % c) if c > 1 else ""
 		(s[2] as MeshInstance3D).visible = k == wish
+		(s[4] as MeshInstance3D).visible = int(shiny.get(k, 0)) > 0
 	book_wish = wish
 	book_count.text = "%d / %d" % [n, book_slots.size()]
 
@@ -1376,3 +1387,143 @@ func update_seeded(delta: float) -> void:
 		ollie.position.y = DECK - 0.05 + hop
 		ollie_head.rotation.y = sin(t * 0.7) * 0.4
 		ollie_head.rotation.z = sin(t * 1.1) * 0.08
+
+
+# --- OLLIE'S POND (book.gd POND) -------------------------------------------------------
+var pond_root: Node3D
+var pond_fish: Array[MeshInstance3D] = []
+var pond_decor := {}  # what -> node
+var _pond_key := ""
+
+
+## The log pen beside the jetty: logs now, the rest appears as the family fishes more days (update_pond).
+func _build_pond() -> void:
+	pond_root = Node3D.new()
+	pond_root.name = "OlliesPond"
+	add_child(pond_root)
+	pond_root.position = POND_C
+	var wood: StandardMaterial3D = main.make_material(Color(0.5, 0.34, 0.2), 0.0)
+	var n := 10
+	for i in n:
+		var a := TAU * float(i) / float(n)
+		var lg := MeshInstance3D.new()
+		lg.mesh = main.cyl_mesh(0.13, 0.13, 2.0 * PI * POND_R / float(n) + 0.12, 8)
+		lg.material_override = wood
+		lg.position = Vector3(cos(a) * POND_R, 0.06, sin(a) * POND_R)
+		lg.rotation = Vector3(0.0, -a, PI * 0.5)
+		pond_root.add_child(lg)
+	var inner := MeshInstance3D.new()  # a clear patch of water so the fish show
+	var disc := CylinderMesh.new()
+	disc.top_radius = POND_R - 0.1
+	disc.bottom_radius = POND_R - 0.1
+	disc.height = 0.02
+	disc.radial_segments = 24
+	inner.mesh = disc
+	var wm := StandardMaterial3D.new()
+	wm.albedo_color = Color(0.3, 0.7, 0.85, 0.35)
+	wm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	wm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	inner.material_override = wm
+	inner.position = Vector3(0, 0.03, 0)
+	inner.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	pond_root.add_child(inner)
+	# Decorations (hidden until the pond grows that far).
+	var lil := Node3D.new()
+	for i in 3:
+		var pad := MeshInstance3D.new()
+		pad.mesh = main.cyl_mesh(0.28 - 0.05 * i, 0.28 - 0.05 * i, 0.02, 12)
+		pad.material_override = main.make_material(Color(0.25, 0.65, 0.3), 0.1)
+		var a := 1.0 + 2.1 * i
+		pad.position = Vector3(cos(a) * 0.9, 0.05, sin(a) * 0.9)
+		lil.add_child(pad)
+		if i == 0:
+			var fl := MeshInstance3D.new()
+			fl.mesh = main.sphere_mesh(0.09)
+			fl.material_override = main.make_material(Color(1.0, 0.6, 0.8), 0.6)
+			fl.position = pad.position + Vector3(0, 0.08, 0)
+			lil.add_child(fl)
+	pond_decor["lilies"] = lil
+	var rock := Node3D.new()
+	var rk := MeshInstance3D.new()
+	rk.mesh = main.sphere_mesh(0.32)
+	rk.scale = Vector3(1.0, 0.6, 0.9)
+	rk.material_override = main.make_material(Color(0.55, 0.55, 0.58), 0.0)
+	rk.position = Vector3(-0.55, 0.05, -0.35)
+	rock.add_child(rk)
+	var pole := MeshInstance3D.new()
+	pole.mesh = main.cyl_mesh(0.02, 0.02, 0.7, 6)
+	pole.material_override = main.make_material(Color(0.4, 0.3, 0.2), 0.0)
+	pole.position = rk.position + Vector3(0, 0.5, 0)
+	rock.add_child(pole)
+	var flag := MeshInstance3D.new()
+	flag.mesh = main.box_mesh(Vector3(0.3, 0.18, 0.02))
+	flag.material_override = main.make_material(OLLIE_FUR.lightened(0.3), 0.3)
+	flag.position = pole.position + Vector3(0.16, 0.22, 0)
+	rock.add_child(flag)
+	pond_decor["rock"] = rock
+	var lan := Node3D.new()
+	var post := MeshInstance3D.new()
+	post.mesh = main.cyl_mesh(0.04, 0.05, 1.1, 6)
+	post.material_override = main.make_material(Color(0.35, 0.25, 0.18), 0.0)
+	post.position = Vector3(POND_R + 0.05, 0.55, 0.0)
+	lan.add_child(post)
+	var glow := MeshInstance3D.new()
+	glow.mesh = main.sphere_mesh(0.13)
+	glow.material_override = main.make_material(Color(1.0, 0.85, 0.45), 3.0)
+	glow.position = post.position + Vector3(0, 0.62, 0)
+	lan.add_child(glow)
+	pond_decor["lantern"] = lan
+	var fnt := CPUParticles3D.new()
+	fnt.amount = 24
+	fnt.lifetime = 0.9
+	fnt.direction = Vector3.UP
+	fnt.spread = 12.0
+	fnt.initial_velocity_min = 2.0
+	fnt.initial_velocity_max = 2.6
+	fnt.gravity = Vector3(0, -6.0, 0)
+	fnt.scale_amount_min = 0.5
+	fnt.scale_amount_max = 0.8
+	fnt.mesh = main.sphere_mesh(0.035)
+	fnt.material_override = main.make_material(Color(0.7, 0.9, 1.0), 0.8)
+	fnt.position = Vector3(0, 0.05, 0)
+	pond_decor["fountain"] = fnt
+	for k in pond_decor:
+		var nd: Node3D = pond_decor[k]
+		nd.visible = false
+		pond_root.add_child(nd)
+
+
+## found: fish kinds with a book page; shiny: kind -> shiny ones caught; level: Book.pond_level(days fished).
+func update_pond(found: Array, shiny: Dictionary, level: int) -> void:
+	if pond_root == null:
+		return
+	var key := "%s/%s/%d" % [str(found), str(shiny), level]
+	if key != _pond_key:
+		_pond_key = key
+		var names := ["logs", "lilies", "rock", "lantern", "fountain"]
+		for i in names.size():
+			if pond_decor.has(names[i]):
+				(pond_decor[names[i]] as Node3D).visible = i < level
+		for i in found.size():
+			if i >= pond_fish.size():
+				var m := MeshInstance3D.new()
+				m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+				pond_root.add_child(m)
+				pond_fish.append(m)
+			var kind: int = found[i]
+			var f := pond_fish[i]
+			f.mesh = main.fish_mesh(kind)
+			f.material_override = main.make_material(Color(1.0, 0.82, 0.2), 1.6) if int(shiny.get(kind, 0)) > 0 else main.fish_material(kind)
+			f.scale = Vector3.ONE * (0.32 / maxf(float(FishScript.TYPES[kind]["len"]), 0.3)) * (0.7 if kind == FishScript.LEGEND else 1.0)
+			f.visible = true
+		for i in range(found.size(), pond_fish.size()):
+			pond_fish[i].visible = false
+	for i in pond_fish.size():
+		var f := pond_fish[i]
+		if not f.visible:
+			continue
+		var r := 0.35 + 0.75 * float(i % 4) / 3.0
+		var s := 1.0 if i % 2 == 0 else -1.0
+		var a := t * (0.5 + 0.06 * i) * s + i * 1.7
+		f.position = Vector3(cos(a) * r, -0.04 + 0.03 * sin(t * 1.5 + i), sin(a) * r)
+		f.rotation.y = atan2(-sin(a) * s, cos(a) * s)  # fish face +Z: along the circle

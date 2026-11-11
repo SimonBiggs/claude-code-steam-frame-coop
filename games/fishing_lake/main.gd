@@ -50,6 +50,13 @@ const Seeded := preload("res://core/seeded.gd")
 const Save := preload("res://core/save.gd")
 const Telemetry := preload("res://core/telemetry.gd")
 const StoryCard := preload("res://core/story_card.gd")
+const Tackle := preload("res://games/fishing_lake/tackle.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
+const WarnRings := preload("res://core/warn_rings.gd")
+const ORB_ROW := Vector3(0.0, 0.0, Lake.JETTY_END_Z - 9.5)  # the pick orbs float over the water in front of the jetty
+const ORB_GAP := 3.6
+const ORB_Y := 1.8
+const PICK_WAIT := {"mode": 15.0, "lure": 12.0}
 const GAME_ID := "fishing_lake"
 
 ## Simple mode picture cues on the TV views (no words): [pad button, icons, icon colour].
@@ -221,6 +228,22 @@ var golden_done := false
 var day_logged := false
 var vr_story: Node3D
 var day_play_t := 0.0  # seconds fished today (game time, for the RUN line)
+# Second deep pass (tackle.gd): GENTLE / BRAVE / HARD, the day's lure, Old Whiskers' told pulls, shiny fish, Ollie's pond.
+var day_base := DAY_TIME  # the day's length before the mode (the bot shortens it)
+var game_mode := "brave"
+var lure_id := "worm"
+var orbs: PickOrbs  # the pick orbs (every machine draws them; host decides)
+var rings: WarnRings  # Old Whiskers' tells (every machine)
+var pick_stage := ""  # "", "mode", "lure": orbs are showing
+var pick_ids: Array = []
+var pick_t := 0.0
+var pick_due := ""  # a pick waiting to start (after the practice's cards)
+var pick_wait := 0.0
+var lure_pick_done := false
+var whiskers_pulls: Array = []  # this day's Old Whiskers pulls (tackle.gd boss_pulls)
+var journal_shiny := PackedInt32Array()
+var shiny_today := 0
+var tackle_days := 0  # days fished (clients: from the sticky "tackle" event, for Ollie's pond)
 
 
 func _ready() -> void:
@@ -248,6 +271,19 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
+	net.sticky_event("orbs")  # a machine that joins later gets the latest one (core/net.gd)
+	net.sticky_event("tackle")
+	orbs = PickOrbs.new()
+	orbs.collision_layer = 0  # (the bobber asks _orb_at: no physics bodies here)
+	add_child(orbs)
+	rings = WarnRings.new()
+	add_child(rings)
+	game_mode = String(save.data.get("mode", "brave"))
+	if OS.has_environment("FL_MODE") and Tackle.MODE_NUM.has(OS.get_environment("FL_MODE")):
+		game_mode = OS.get_environment("FL_MODE")
+		Engine.set_meta("fl_mode_set", true)
+	if not Tackle.MODE_NUM.has(game_mode):
+		game_mode = "brave"
 	seats = ClassicSeats.new(self, {
 		"no_keys": BoatScript.NO_KEYS,
 		"free_actions": ["continue", "pause"],
@@ -555,7 +591,7 @@ func in_frenzy(p: Vector3) -> bool:
 
 ## Fish nibble for less time in the rain and in a frenzy (quicker bites for impatient kids).
 func nibble_factor() -> float:
-	var f := 1.0
+	var f := float(Tackle.num(game_mode).bite) * float(Tackle.lure(lure_id).bite)
 	if raining():
 		f *= 0.7
 	if players.size() > 0 and in_frenzy(players[0].lure_pos):
@@ -653,7 +689,8 @@ func _pick_kind() -> int:
 ## Today's spawn weight of a fish kind (the lake's mix; Ollie's wish swims a little more often).
 func _spawn_weight(k: int) -> int:
 	var mix: Dictionary = lake_desc.get("mix", {})
-	return int(mix.get(k, FishScript.TYPES[k]["spawn"]))
+	var w := int(mix.get(k, FishScript.TYPES[k]["spawn"]))
+	return w * Tackle.BOOST if Tackle.helps(lure_id, k) else w  # today's lure brings its fish
 
 
 func _free_fish_slot():
@@ -1181,6 +1218,7 @@ func _start_day(n: int) -> void:
 	day = n
 	state = "play"
 	state_t = 0.0
+	round_time = day_base * float(Tackle.num(game_mode).day)
 	time_left = round_time
 	score = 0
 	goal_hit = false
@@ -1211,6 +1249,10 @@ func _start_day(n: int) -> void:
 	golden_done = not bool(lake_desc.golden)
 	day_play_t = 0.0
 	day_logged = false
+	shiny_today = 0
+	lure_pick_done = false
+	_end_pick_quietly()
+	whiskers_pulls = Tackle.boss_pulls(int(lake_desc.seed) + day, game_mode)
 	extend_t = 0.0
 	last_fish_said = false
 	awards_text = ""
@@ -1249,8 +1291,9 @@ func _start_day(n: int) -> void:
 		_show_center("DAY %d - %s\nTarget %d points\n%s" % [n, str(th["name"]), target, str(th["tip"])], 4.5)
 	sound("day", -2.0, 1.0, true)
 	_send_journal()
+	_send_tackle()
 	if not practice:
-		_wish_card(2.5)
+		_queue_pick(2.2)  # the mode (once a visit), then the day's lure; Ollie's wish after it
 	print("Day %d started (%s, target %d, %d boats, %.0f s) lake seed %d level %d %s spots %s wish %s%s" % [n, str(th["name"]), target,
 		active_boats().size(), round_time, int(lake_desc.seed), int(lake_desc.level), str(lake_desc.weather),
 		",".join(PackedStringArray((lake_desc.spots as Array).map(func(s: Dictionary) -> String: return str(s.hab)))),
@@ -1332,7 +1375,13 @@ func _end_day() -> void:
 	state_t = 0.0
 	if frenzy_t > 0.0:
 		frenzy_t = 0.0
+	var pond_was := Book.pond_level(int(save.data.days))
 	save.data.days = int(save.data.days) + 1
+	_send_tackle()
+	if Book.pond_level(int(save.data.days)) > pond_was:  # Ollie's pond grows something new
+		get_tree().create_timer(3.0).timeout.connect(func() -> void:
+			story({"who": "OLLIE", "line": "Our pond grows!", "pic": "fish_pond", "color": Book.OLLIE, "duration": 4.0}))
+		print("Ollie's pond grows: level %d" % Book.pond_level(int(save.data.days)))
 	if bool(lake_desc.get("daily", false)):
 		var dl: Dictionary = save.data.daily
 		dl[Seeded.today()] = maxi(int(dl.get(Seeded.today(), 0)), fish_caught())
@@ -1401,7 +1450,8 @@ func _log_day(end: String) -> void:
 		"legend": legend_state, "golden": bool(lake_desc.golden), "book": _journal_found(),
 		"days": int(save.data.days), "boats": active_boats().size(), "vr": players.size() > 0 and bool(players[0].vr),
 		"mode": str(net.mode), "practice": practice, "secs": int(day_play_t),
-		"round": int(round_time), "snaps": int(stat_get(0, "snap"))})
+		"round": int(round_time), "snaps": int(stat_get(0, "snap")), "game_mode": game_mode, "lure": lure_id,
+		"shiny": shiny_today, "pond": Book.pond_level(int(save.data.days)), "whiskers_pulls": players[0].boss_i if legend_state != 0 else 0})
 
 
 ## Everybody gets a fun award for the day (the best thing they did).
@@ -1474,6 +1524,7 @@ func _process(delta: float) -> void:
 	var ws = _wish_spot() if not wish_done and state == "play" and not practice else null
 	lake.set_wish(int(lake_desc.wish) if ws != null else -1, ws.pos if ws != null else Vector3.ZERO)
 	lake.update_tank(catches, delta)
+	lake.update_pond(_found_kinds(), _shiny_dict(), Book.pond_level(_days_fished()))
 	var bp: Vector3 = players[0].body_pos
 	lake.rain_near.position = Vector3(bp.x, 9.0, bp.z - 1.5)
 	_update_rain_sound()
@@ -1507,6 +1558,8 @@ func _host_update(delta: float, cont_edge: bool) -> void:
 			day_play_t += delta
 			if practice:
 				_practice_update(delta)  # the clock waits until the practice is done
+			elif pick_stage != "" or pick_due != "":
+				_pick_tick(delta)  # ... and while the orbs are up
 			else:
 				time_left -= delta
 				daylight = lerpf(float(lake_desc.p0), float(lake_desc.p1), day_frac())
@@ -1515,7 +1568,7 @@ func _host_update(delta: float, cont_edge: bool) -> void:
 					last_tick = secs
 					sound("tick", -4.0, 1.0 + (10 - secs) * 0.04, true)
 			_fish_ai(delta)
-			if not practice:
+			if not practice and pick_stage == "" and pick_due == "":
 				_events(delta)
 			fish_t -= delta
 			if fish_t <= 0.0:
@@ -1702,7 +1755,7 @@ func _spawn_legend() -> void:
 func legend_tire(amount: float, by: int) -> void:
 	if legend_stamina <= 0.0:
 		return
-	legend_stamina = maxf(0.0, legend_stamina - amount)
+	legend_stamina = maxf(0.0, legend_stamina - amount / float(Tackle.num(game_mode).stamina))
 	if by > 0:
 		stat(by, "whisker")
 	if legend_stamina <= 0.0:
@@ -1920,7 +1973,7 @@ func _end_practice() -> void:
 	time_left = round_time
 	_show_center("GO!", 1.5)
 	sound("day", -2.0, 1.2, true)
-	_wish_card(7.0)  # after the practice catch's own cards (a new page)
+	_queue_pick(4.5)  # after the practice catch's own cards (a new page); Ollie's wish after the picks
 	print("Practice done after %.0f s: the day's clock starts" % practice_t)
 
 
@@ -1945,6 +1998,10 @@ func on_lure_plop(pos: Vector3) -> void:
 	burst(pos, Color(0.8, 0.95, 1.0), 8)
 	if practice:
 		_practice_plop(pos)
+	if pick_stage != "":
+		var oi := _orb_at(pos)
+		if oi >= 0:
+			on_orb_pick(oi, players[0], "cast")
 	if SIMPLE_MODE:
 		return
 	if in_frenzy(pos):
@@ -2226,6 +2283,8 @@ func _simple_catch(f) -> void:
 	if FishScript.is_species(f.kind):
 		_journal_add(f.kind, kg)
 		_check_wish(f.kind)
+		if Tackle.shiny_ok(f.kind) and not practice and (randf() < Tackle.shiny_chance(lure_id) or OS.has_environment("FL_SHINY")):
+			_shiny_catch(f.kind, tip)
 	if practice:
 		_end_practice()
 	print("Caught %s (%.1f kg), %d fish today" % [str(d["name"]), kg, fish_caught()])
@@ -2330,11 +2389,15 @@ func _journal_load() -> void:
 	journal_counts.resize(FishScript.TYPES.size())
 	journal_best = PackedFloat32Array()
 	journal_best.resize(FishScript.TYPES.size())
+	journal_shiny = PackedInt32Array()
+	journal_shiny.resize(FishScript.TYPES.size())
 	var book: Dictionary = save.data.book
+	var sh: Dictionary = save.data.get("shiny", {})
 	for k in FishScript.TYPES.size():
 		var e: Array = book.get(str(FishScript.TYPES[k]["name"]), [0, 0.0])
 		journal_counts[k] = int(e[0])
 		journal_best[k] = float(e[1])
+		journal_shiny[k] = int(sh.get(str(FishScript.TYPES[k]["name"]), 0))
 
 
 ## Once: the old journal file (before the save) goes into the book.
@@ -2369,9 +2432,9 @@ func _journal_save() -> void:
 
 func _send_journal(peer: int = 0) -> void:
 	if net != null and peer > 0:
-		net.event_to(peer, "journal", [journal_counts, journal_best])
+		net.event_to(peer, "journal", [journal_counts, journal_best, journal_shiny])
 	elif net != null:
-		net.event("journal", [journal_counts, journal_best])
+		net.event("journal", [journal_counts, journal_best, journal_shiny])
 
 
 # --- Boat callbacks (host) --------------------------------------------------------------
@@ -2809,11 +2872,25 @@ func apply_event(kind: String, args: Array) -> void:
 			var had := _journal_found()
 			journal_counts = args[0]
 			journal_best = args[1]
+			if args.size() > 2:
+				journal_shiny = args[2]
 			journal_text = ""
 			if had > 0 and _journal_found() > had:
 				lake.ollie_cheer()
 		"story":
 			story(args[0], false)
+		"orbs":  # [stage, entries] ("" = gone)
+			orbs.clear()
+			if String(args[0]) != "":
+				orbs.show_orbs(String(args[0]), args[1], ORB_ROW, ORB_GAP, ORB_Y)
+		"take":
+			_take_fx(int(args[0]), int(args[1]))
+		"warn":
+			rings.warn(args[0], float(args[1]), args[2], float(args[3]))
+		"tackle":  # [mode, lure, days fished]
+			game_mode = String(args[0])
+			lure_id = String(args[1])
+			tackle_days = int(args[2])
 		"remote_pause":
 			get_tree().paused = args[0]
 			_set_pause_banner(args[0], "The VR player paused the game")
@@ -3166,7 +3243,7 @@ func _update_book() -> void:
 		if journal_counts[k] > 0:
 			counts[k] = journal_counts[k]
 	var w := int(lake_desc.get("wish", -1))
-	lake.update_book(counts, w if not wish_done else -1)
+	lake.update_book(counts, w if not wish_done else -1, _shiny_dict())
 
 
 func _update_journal_board() -> void:
@@ -3477,3 +3554,227 @@ func _vr_short(text: String) -> String:
 		keep.append(trigger)
 	return "\n".join(keep)
 
+
+
+# --- Second deep pass (tackle.gd): the picks, the day's lure, Old Whiskers' told pulls, shiny fish, Ollie's pond ---
+
+func _days_fished() -> int:
+	return tackle_days if net != null and net.mode == "client" else int(save.data.days)
+
+
+func _found_kinds() -> Array:
+	var out: Array = []
+	for k in LakeGen.species():
+		if k < journal_counts.size() and journal_counts[k] > 0:
+			out.append(k)
+	return out
+
+
+func _shiny_dict() -> Dictionary:
+	var out := {}
+	for k in mini(journal_shiny.size(), FishScript.TYPES.size()):
+		if journal_shiny[k] > 0:
+			out[k] = journal_shiny[k]
+	return out
+
+
+## Host: the mode, the lure and the days fished to every machine (sticky: a late machine catches up).
+func _send_tackle() -> void:
+	if net != null and net.mode == "host":
+		net.event("tackle", [game_mode, lure_id, int(save.data.days)])
+
+
+## Host: the picks start after `wait` seconds: GENTLE / BRAVE / HARD once a visit, then the day's lure.
+func _queue_pick(wait: float) -> void:
+	if net.mode == "client":
+		return
+	pick_due = "lure" if Engine.has_meta("fl_mode_set") else "mode"
+	pick_wait = wait
+
+
+func _end_pick_quietly() -> void:
+	pick_stage = ""
+	pick_due = ""
+	pick_ids = []
+	if orbs != null:
+		orbs.clear()
+	if net != null and net.mode == "host":
+		net.event("orbs", ["", []])
+
+
+func _pick_tick(delta: float) -> void:
+	if pick_due != "":
+		pick_wait -= delta
+		if pick_wait <= 0.0:
+			var st := pick_due
+			pick_due = ""
+			_begin_pick(st)
+		return
+	pick_t -= delta
+	for tch in orbs.touches(active_boats()):
+		on_orb_pick(int(tch[0]), tch[1], "row")
+	var a = players[0]
+	if pick_stage != "" and a.line_state == "flying":  # the bobber flies through an orb
+		var oi := orbs.nearest_hit(a.lure_pos, 0.4)
+		if oi >= 0:
+			on_orb_pick(oi, a, "cast")
+	if pick_stage != "" and pick_t <= 0.0:
+		_finish_pick(-1, "middle")
+
+
+## Host / local: the orbs over the water ("mode": GENTLE / BRAVE / HARD, "lure": today's three lures).
+func _begin_pick(stage: String) -> void:
+	if net.mode == "client" or state != "play":
+		return
+	var ids: Array = []
+	if stage == "mode":
+		ids = PickOrbs.mode_ids(game_mode)
+	else:
+		if OS.has_environment("FL_LURE"):
+			lure_id = Tackle.lure(OS.get_environment("FL_LURE")).id
+			_after_lure()
+			return
+		ids = Tackle.offer(lake_desc)
+	pick_ids = ids
+	pick_stage = stage
+	pick_t = float(PICK_WAIT[stage]) * (1.3 if game_mode == "gentle" else 1.0)
+	var entries: Array = []
+	for id in ids:
+		var d: Dictionary = PickOrbs.mode(String(id)) if stage == "mode" else Tackle.lure(String(id))
+		entries.append({"id": String(id), "name": String(d.get("name", id)), "pic": String(d.get("pic", "star")),
+			"color": d.get("color", Color.WHITE)})
+	orbs.show_orbs(stage, entries, ORB_ROW, ORB_GAP, ORB_Y)
+	if net.mode == "host":
+		net.event("orbs", [stage, entries])
+	var mid: Dictionary = entries[entries.size() / 2]
+	story({"who": "OLLIE", "line": "Pick how brave!" if stage == "mode" else "Pick a lure!", "pic": String(mid.pic),
+		"color": mid.color, "duration": 4.0})
+	sound("new", -4.0, 1.2, true)
+	print("PICK %s: %s (%.0f s)" % [stage, str(ids), pick_t])
+
+
+## The orb right above where the bobber landed (-1: none).
+func _orb_at(pos: Vector3) -> int:
+	var best := -1
+	var best_d := 2.3
+	for o in orbs.orbs:
+		if not is_instance_valid(o):
+			continue
+		var op: Vector3 = o.global_position if o.is_inside_tree() else o.position
+		var d := _flat_dist(op, pos)
+		if d < best_d:
+			best_d = d
+			best = o.index
+	return best
+
+
+## Host / local: somebody cast at (or rowed into) orb i: the whole team gets it.
+func on_orb_pick(i: int, p, how: String) -> void:
+	if pick_stage == "" or net.mode == "client" or i < 0 or i >= pick_ids.size() or p == null:
+		return
+	_finish_pick(i, how, int(p.index))
+
+
+func _finish_pick(i: int, how: String, slot: int = 0) -> void:
+	if pick_stage == "" or pick_ids.is_empty():
+		return
+	if i < 0:
+		i = pick_ids.size() / 2  # nobody chose: the glowing middle one (little ones are never stuck)
+	var stage := pick_stage
+	var id := String(pick_ids[i])
+	_take_fx(i, slot)
+	if net.mode == "host":
+		net.event("take", [i, slot])
+	sound("catch", -2.0, 1.0 + 0.1 * i, true)
+	print("PICK %s: P%d took %s (%s)" % [stage, slot + 1, id, how])
+	pick_stage = ""
+	pick_ids = []
+	get_tree().create_timer(0.6).timeout.connect(func() -> void:
+		if pick_stage == "":
+			orbs.clear()
+			if net.mode == "host":
+				net.event("orbs", ["", []]))
+	if stage == "mode":
+		game_mode = id
+		save.data.mode = id
+		save.mark_dirty()
+		Engine.set_meta("fl_mode_set", true)
+		round_time = day_base * float(Tackle.num(game_mode).day)
+		time_left = round_time
+		whiskers_pulls = Tackle.boss_pulls(int(lake_desc.seed) + day, game_mode)
+		var m := PickOrbs.mode(game_mode)
+		story({"who": "OLLIE", "line": String(PickOrbs.MODE_LINES.get(game_mode, "Let's go!")), "pic": String(m.get("pic", "star")),
+			"color": m.get("color", Color.WHITE), "duration": 2.5})
+		_send_tackle()
+		pick_due = "lure"
+		pick_wait = 2.6
+	else:
+		lure_id = id
+		_after_lure()
+
+
+## Host: the day's lure is on: its card, then Ollie's wish (the gold fly brings the golden fish sooner).
+func _after_lure() -> void:
+	lure_pick_done = true
+	var d := Tackle.lure(lure_id)
+	if lure_id == "goldfly" and bool(lake_desc.get("golden", false)):
+		lake_desc.golden_at = maxf(0.08, float(lake_desc.golden_at) - 0.15)
+	if OS.get_environment("FL_TRY") == "whiskers" and not Engine.has_meta("fl_try_done"):
+		Engine.set_meta("fl_try_done", true)  # What's New "try": Old Whiskers comes right away
+		legend_at = 0.0
+	story({"who": String(d.name), "line": "Let's fish!", "pic": String(d.pic), "color": d.color, "duration": 2.5})
+	_send_tackle()
+	_wish_card(2.8)
+	print("Lure: %s (mode %s, day %.0f s)" % [lure_id, game_mode, round_time])
+
+
+## Every machine: slot took orb i (a dot in their colour circles it, a puff of the orb's colour).
+func _take_fx(i: int, slot: int) -> void:
+	var at := orbs.take(i, PLAYER_COLORS[slot % PLAYER_COLORS.size()])
+	if at != Vector3.INF:
+		burst(at, orbs.color_of(i), 16, false)
+
+
+## OLD WHISKERS' pull i this day: [rest secs, pull secs, side] (tackle.gd boss_pulls).
+func boss_pull(i: int) -> Array:
+	if whiskers_pulls.is_empty():
+		whiskers_pulls = Tackle.boss_pulls(int(lake_desc.get("seed", 0)) + day, game_mode)
+	return whiskers_pulls[clampi(i, 0, whiskers_pulls.size() - 1)]
+
+
+func boss_tell() -> float:
+	return float(Tackle.num(game_mode).tell)
+
+
+func boss_strength() -> float:
+	return float(Tackle.num(game_mode).pull)
+
+
+## Host: Old Whiskers is about to pull: a ring on the water where he'll swim, on every machine.
+func on_boss_tell(pos: Vector3, secs: float) -> void:
+	var col := Color(1.0, 0.6, 0.2)
+	rings.warn(pos, 2.4, col, secs)
+	if net.mode == "host":
+		net.event("warn", [pos, 2.4, col, secs])
+	ripple(pos, 2.0)
+	sound("tick", -4.0, 0.6, true)
+	print("Whiskers tell: pull %d in %.1f s" % [players[0].boss_i, secs])
+
+
+## Host: a shiny fish! A gold gem on its book page and a gold fish in Ollie's pond.
+func _shiny_catch(kind: int, tip: Vector3) -> void:
+	shiny_today += 1
+	if journal_shiny.size() < FishScript.TYPES.size():
+		journal_shiny.resize(FishScript.TYPES.size())
+	journal_shiny[kind] += 1
+	var nm: String = FishScript.TYPES[kind]["name"]
+	var sh: Dictionary = save.data.get("shiny", {})
+	sh[nm] = int(sh.get(nm, 0)) + 1
+	save.data.shiny = sh
+	save.mark_dirty()
+	burst(tip + Vector3(0, 0.4, 0), Color(1.0, 0.85, 0.25), 30)
+	sound("golden", -2.0, 1.3, true)
+	get_tree().create_timer(1.2).timeout.connect(func() -> void:
+		story({"who": nm.to_upper(), "line": "A shiny one!", "pic": "fish", "color": Color(1.0, 0.82, 0.25), "duration": 3.0}))
+	_send_journal()
+	print("SHINY %s! (%d today)" % [nm, shiny_today])
