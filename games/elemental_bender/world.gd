@@ -105,6 +105,7 @@ func build(vr: bool, arena: String = "temple", temple_seed: int = 0) -> void:
 		sm.metallic = 0.0
 	elif not vr:
 		sm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		sm.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # under VR cards (core/vr_view_check.gd "washed out")
 	if float(info.sea_glow) <= 0.0:
 		sm.roughness = 0.08
 		sm.metallic = 0.3

@@ -713,6 +713,9 @@ static func sound(name: String, volume_db: float = 0.0, pitch: float = 1.0) -> v
 const VR_PRIO_PANEL := -4
 const VR_PRIO_HILITE := -3
 const VR_PRIO_TEXT := 23
+## See-through SCENERY (water, glass, mist, ghosts) that VR cards can float in front of: below the panels, or it is
+## blended over them and washes them out (core/vr_view_check.gd "washed out"; Fishing Lake's water, 2026-11-11).
+const VR_PRIO_UNDER_UI := -8
 ## Render layer for world-space UI only the VR player sees (TV / Deck cameras never draw it; core/vr_layer.gd).
 const VR_LAYER := VrLayer.LAYER
 
