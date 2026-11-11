@@ -17,7 +17,8 @@ const GardenGen := preload("res://games/bee_garden/gardengen.gd")
 const WAIT := {"mode": 14.0, "gift": 12.0}
 const AFTER := 1.0     # seconds the taken orb shows its dot before the orbs go
 const GAP := 2.3
-const Y := 1.9         # well above the flower heads (hands and bees working the flowers never touch one by chance)
+const Y := 2.6         # well above the flower heads (hands and bees working the flowers never touch one by chance) and,
+                       # in VR, above Queen Bea's story cards (never in front of them)
 const ROW := Vector3(0.0, 0.0, 0.9)   # the row's middle: over the front half of the bed, in the gardener's reach
 const SCALE := 0.6
 const BEE_R := 0.3     # a bee this close to an orb's picture takes it

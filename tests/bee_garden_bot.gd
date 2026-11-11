@@ -181,6 +181,8 @@ func _deep_checks() -> void:
 	if main.gifts.size() > 0:
 		deep["gift"] = true
 	if main.net.mode != "client":
+		if main.picks.chosen_by == 0:
+			deep["hand_pick"] = true
 		for h in main.picks.history:
 			deep["picked_" + String(h[0])] = true
 			if bool(h[2]):
@@ -200,6 +202,8 @@ func _deep_checks() -> void:
 		var need: Array[String] = ["rings", "wasp", "storm", "mode_orbs", "gift"]
 		if main.net.mode != "client":
 			need.append_array(["picked_mode", "picked_gift", "player_pick"])
+		if main.gardener != null and main.gardener.fake_vr:
+			need.append("hand_pick")
 		var missing: Array[String] = []
 		for k in need:
 			if not deep.has(k):
@@ -263,7 +267,7 @@ func _drive_bee(b) -> void:
 	var have_goal := false
 	var last: int = b.get_meta("bot_last", -1)
 	# Picks between rounds: P2 flies into an orb (the mode's first, the gift's last).
-	if b.index == 1 and main.picks.orbs.showing() and not _orbs_taken():
+	if b.index == 1 and main.picks.orbs.showing() and not _orbs_taken() and not (main.gardener != null and main.gardener.fake_vr):
 		var want: int = 0 if String(main.picks.orbs.stage) == "mode" else main.picks.orbs.orbs.size() - 1
 		var op: Vector3 = main.picks.orb_pos(want)
 		if op != Vector3.INF:
@@ -592,6 +596,15 @@ func _drive_vr(delta: float) -> void:
 	g.hand_l.global_position = Vector3(-1.5, 2.2, 3.5)  # the left hand stays out of the way
 	if vr_pos == Vector3.ZERO:
 		vr_pos = g.hands[1].pos
+	# Picks between rounds: the VR gardener's hand reaches out and touches an orb (the bees leave it to the hand).
+	if main.picks.orbs.showing() and not _orbs_taken():
+		var want: int = 0 if String(main.picks.orbs.stage) == "mode" else main.picks.orbs.orbs.size() - 1
+		var op: Vector3 = main.picks.orb_pos(want)
+		if op != Vector3.INF:
+			vr_pos = vr_pos.move_toward(op, 3.0 * delta)
+			var hb := Basis(Vector3.RIGHT, vr_pitch)
+			g.hand_r.global_transform = Transform3D(hb, vr_pos - hb * G.GRAB_OFFSET)
+			return
 	if vr_queue.is_empty():
 		_plan_vr()
 	if vr_queue.is_empty():
