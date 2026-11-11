@@ -102,8 +102,8 @@ func _watch() -> String:
 		saw_map += 1
 		if main.world.offer_kind == "region" and (main.world.props[main.world.choice_ids[0]]["node"] as Node3D).visible:
 			saw_map_client = true
-	for t in main.monsters._tell_nodes:
-		saw_tells[String(t[3])] = true
+	for a in main.monsters.tells_shown:
+		saw_tells[String(a)] = true
 	quest_max = maxi(quest_max, int(main.net.state_get("quest", 0)))
 	var bio := int(main.plan.get("biome", -1))
 	if last_biome >= 0 and bio != last_biome:

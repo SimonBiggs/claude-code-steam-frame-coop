@@ -76,6 +76,7 @@ const Arenas := preload("res://games/elemental_bender/arenas.gd")
 const Bosses := preload("res://games/elemental_bender/bosses.gd")
 const Boons := preload("res://games/elemental_bender/boons.gd")
 const Altar := preload("res://games/elemental_bender/altar.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
 const Hazards := preload("res://games/elemental_bender/hazards.gd")
 
 const GAME_ID := "elemental_bender"
@@ -715,7 +716,7 @@ func targets_for(team: int) -> Array:
 		if dummy != null and is_instance_valid(dummy) and not dummy.dead:
 			en.append(dummy)
 		if altar != null and phase() == "breather":
-			for st in altar.stones:
+			for st in altar.orbs:
 				if is_instance_valid(st):
 					en.append(st)
 		_targets_cache = [en, fighters(true)]
@@ -946,8 +947,8 @@ func projectile_hit(pr: Projectile, target: Node3D, push: Vector3) -> void:
 	if pr.team == 0:
 		if target is Dummy:
 			_practice_hit(pr.element, pr.owner_slot)
-		elif target is Altar.Stone:
-			_altar_pick(pr.owner_slot, (target as Altar.Stone).index)
+		elif target is PickOrbs.Orb:
+			_altar_pick(pr.owner_slot, (target as PickOrbs.Orb).index)
 		elif target is Raider:
 			(target as Raider).take_hit(pr.damage, pr.element, push, pr.effect, pr.owner_slot)
 	else:

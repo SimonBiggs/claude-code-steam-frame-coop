@@ -18,6 +18,7 @@ extends Node3D
 const Creatures := preload("res://core/creatures.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 const World := preload("res://games/crystal_saga/world.gd")
+const WarnRings := preload("res://core/warn_rings.gd")
 
 enum { SLIME, MUSHY, BAT, GIANT }
 const GIANT_SCALE := 2.3
@@ -37,10 +38,10 @@ var skins: Array = ["slime", "mushroom", "bat"]  ## Creatures kinds for SLIME, M
 var guardian: Dictionary = {}  ## plan.guardian (sagagen.gd): attacks, warn, gap ... (empty = stomps only)
 var new_tells: Array = []  ## host: tells that started this step: [attack, data (Array), warn]
 var landed: Array = []  ## host: [attack, data] attacks that landed this step (rain, roll: effects)
-var _tell_nodes: Array = []  ## every machine: [node, seconds left]
+var rings: WarnRings  ## every machine: the attack tells on the ground (core/warn_rings.gd)
+var tells_shown := {}  ## every machine: attack -> tells shown (bots read it)
 var _calls: Array = []  ## host: helpers to pop up after this step [Vector3]
 var _heights := {}
-var _ring_mat: StandardMaterial3D
 
 
 func clear() -> void:
@@ -126,6 +127,8 @@ func _aura_mesh() -> MeshInstance3D:
 	return mi
 
 
+## shared-picks-ok: _ring_mesh (the STOMP ring rides on the Stone Giant's body and grows with his wind-up from the
+## snapshot, so it follows him: a body indicator, not a ground tell)
 func _ring_mesh() -> MeshInstance3D:
 	var b := MeshKit.Builder.new()
 	b.torus(1.0, 0.06, Transform3D.IDENTITY, Color(1.0, 0.5, 0.9), 32, 4, true)
@@ -431,40 +434,25 @@ func _land(m: Dictionary, targets: Array, bumps: Array, id: int) -> void:
 	m["atk"] = ""
 
 
-## Every machine: draw a tell on the ground for `secs`: blue circles (rain), an orange lane (roll), green sparkle
-## rings (call). They grow brighter until the attack lands.
+## Every machine: draw a tell on the ground for `secs` (core/warn_rings.gd): blue circles (rain), an orange lane
+## (roll), small green rings (call). They blink faster until the attack lands.
 func show_tell(a: String, data: Array, secs: float) -> void:
-	var b := MeshKit.Builder.new()
+	if rings == null:
+		rings = WarnRings.new()
+		add_child(rings)
 	var col: Color = TELL_COLORS.get(a, Color.WHITE)
+	tells_shown[a] = int(tells_shown.get(a, 0)) + 1
 	match a:
 		"rain":
-			var r := float(guardian.get("rain_r", 0.9))
 			for spot in data:
-				var sp: Vector3 = spot
-				b.torus(r, 0.06, MeshKit.at(sp + Vector3(0.0, 0.06, 0.0)), col, 28, 4, true)
-				b.cylinder(r * 0.95, r * 0.95, 0.02, MeshKit.at(sp + Vector3(0.0, 0.04, 0.0)), Color(col.r, col.g, col.b) * 0.6, 20, true)
-				b.prism(6, 0.22, 0.8, MeshKit.at(sp + Vector3(0.0, 4.5, 0.0), Vector3.ONE, Vector3(PI, 0.0, 0.0)), col, true)
+				rings.warn(spot, float(guardian.get("rain_r", 0.9)), col, secs, 0.06, {"style": "disc"})
 		"roll":
 			var a0: Vector3 = data[0]
 			var a1: Vector3 = data[1]
-			var mid := (a0 + a1) * 0.5
-			var d := a1 - a0
-			var w := float(guardian.get("roll_w", 1.5))
-			var xf := Transform3D(Basis(Vector3.UP, atan2(d.x, d.z)), mid + Vector3(0.0, 0.05, 0.0))
-			b.box(Vector3(w, 0.02, d.length()), xf, Color(col.r, col.g, col.b) * 0.7, true)
-			var n := int(d.length() / 1.4)
-			for k in n:
-				var at := a0 + d * ((k + 0.7) / float(n + 0.5))
-				b.cone(w * 0.35, 0.5, Transform3D(Basis(Vector3.UP, atan2(d.x, d.z)) * Basis(Vector3.RIGHT, PI * 0.5), at + Vector3(0.0, 0.1, 0.0)), col, 3, true)
+			rings.shape("line", a0, a1 - a0, Vector2(a0.distance_to(a1), float(guardian.get("roll_w", 1.5))), col, secs, {"style": "flash"})
 		"call":
 			for spot2 in data:
-				var sp2: Vector3 = spot2
-				b.torus(0.55, 0.05, MeshKit.at(sp2 + Vector3(0.0, 0.06, 0.0)), col, 20, 4, true)
-				b.star(4, 0.2, 0.08, 0.04, MeshKit.at(sp2 + Vector3(0.0, 0.5, 0.0)), col, true)
-	var mi := MeshKit.instance(b.build(), false)
-	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(mi)
-	_tell_nodes.append([mi, secs, secs, a])
+				rings.warn(spot2, 0.55, col, secs, 0.06)
 
 
 const TELL_COLORS := {"stomp": Color(1.0, 0.5, 0.9), "rain": Color(0.45, 0.8, 1.0), "roll": Color(1.0, 0.6, 0.2),
@@ -472,9 +460,8 @@ const TELL_COLORS := {"stomp": Color(1.0, 0.5, 0.9), "rain": Color(0.45, 0.8, 1.
 
 
 func clear_tells() -> void:
-	for t in _tell_nodes:
-		(t[0] as Node3D).queue_free()
-	_tell_nodes.clear()
+	if rings != null:
+		rings.clear()
 
 
 func _bat(m: Dictionary, delta: float, targets: Array) -> void:
@@ -510,18 +497,6 @@ func _bat(m: Dictionary, delta: float, targets: Array) -> void:
 
 ## Every machine: draw.
 func animate(delta: float) -> void:
-	var keep: Array = []
-	for t in _tell_nodes:
-		var n0: Node3D = t[0]
-		t[1] = float(t[1]) - delta
-		if float(t[1]) <= 0.0:
-			n0.queue_free()
-			continue
-		var k0 := 1.0 - float(t[1]) / float(t[2])
-		n0.scale = Vector3(1.0, 1.0 + 0.6 * sin(k0 * TAU * 3.0) * 0.1, 1.0)
-		n0.visible = k0 < 0.6 or fmod(k0 * 12.0, 1.0) < 0.75  # blinks faster near the end
-		keep.append(t)
-	_tell_nodes = keep
 	for id in mons:
 		var m: Dictionary = mons[id]
 		var n: Node3D = m["node"]
