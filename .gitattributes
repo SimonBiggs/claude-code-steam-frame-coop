@@ -1,0 +1,3 @@
+# arcade/whats_new.gd: every game branch adds entries at the top of ENTRIES, so two branches landing from the same main
+# always conflicted there (party-deep, cove-deep2, rocket-deep2). Union keeps both sides' lines; whats_new_test checks the result.
+arcade/whats_new.gd merge=union
