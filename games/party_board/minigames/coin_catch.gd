@@ -30,7 +30,7 @@ var _bot_t := 0.0
 
 func build() -> void:
 	arena_r = 6.5
-	build_island(arena_r + 1.0, Color(0.5, 0.78, 0.38))
+	build_island(arena_r + 1.0, Floors.GRASS.coin_catch)
 	tree = Node3D.new()
 	var b := MeshKit.Builder.new()
 	b.cylinder(0.45, 0.75, 5.0, MeshKit.at(Vector3(0, 2.5, 0)), Color(0.5, 0.33, 0.2), 10)

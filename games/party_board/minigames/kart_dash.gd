@@ -30,12 +30,12 @@ var _bot_t := 0.0
 
 func build() -> void:
 	arena_r = 9.0
-	build_island(9.0, Color(0.5, 0.74, 0.38))
+	build_island(9.0, Floors.GRASS.kart_dash)
 	var b := MeshKit.Builder.new()
 	var n := pids.size()
 	for i in n:
 		var z := lane_z(i, n)
-		b.box(Vector3(START_X - FINISH_X + 2.0, 0.06, 1.15), MeshKit.at(Vector3((START_X + FINISH_X) * 0.5, 0.03, z)), Color(0.42, 0.42, 0.46) if i % 2 == 0 else Color(0.48, 0.48, 0.52))
+		b.box(Vector3(START_X - FINISH_X + 2.0, 0.06, 1.15), MeshKit.at(Vector3((START_X + FINISH_X) * 0.5, 0.03, z)), Floors.KART_ROAD[i % 2])
 	# Chequered finish line + start line + flags.
 	var w := float(n) * 1.25 + 0.4
 	for k in 10:

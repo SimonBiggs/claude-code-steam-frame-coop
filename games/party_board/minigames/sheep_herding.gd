@@ -28,7 +28,7 @@ var _respawn: Array[float] = []  # seconds until each penned sheep is replaced
 
 func build() -> void:
 	arena_r = 7.0
-	build_island(8.0, Color(0.52, 0.8, 0.4))
+	build_island(8.0, Floors.GRASS.sheep_herding)
 	var b := MeshKit.Builder.new()
 	for team in 2:
 		var sx := pen_x(team)

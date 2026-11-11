@@ -26,7 +26,7 @@ var _cpu_tile := {}  # pid -> tile index
 func build() -> void:
 	arena_r = N * STEP * 0.5 - 0.3
 	walk_speed = 5.0
-	build_island(arena_r + 1.6, Color(0.5, 0.75, 0.42))
+	build_island(arena_r + 1.6, Floors.GRASS.paint_splash)
 	paint = PackedByteArray()
 	paint.resize(N * N)
 	_shown = PackedByteArray()

@@ -49,6 +49,11 @@ const TYPE_COLORS := {
 	"duel": [Color(0.65, 0.4, 0.95), Color(1, 1, 1)],
 	"start": [Color(0.98, 0.98, 1.0), Color(0.25, 0.55, 1.0)],
 }
+## A space's plinth: wider than its tile and darker, so it rings every tile in a dark edge (board_view.gd).
+static func tile_base(tile: Color) -> Color:
+	return tile.darkened(0.35)
+
+
 const TYPE_NAMES := {"blue": "BLUE SPACE", "red": "RED SPACE", "event": "EVENT SPACE", "shop": "ITEM SHOP",
 	"duel": "DUEL SPACE", "start": "START"}
 

@@ -16,6 +16,7 @@ const UiKit := preload("res://core/ui_kit.gd")
 const HudKit := preload("res://core/hud_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")
 const TokenScript := preload("res://games/party_board/token.gd")
+const Floors := preload("res://games/party_board/minigames/floors.gd")
 
 const AVATAR_SCALE := 1.15
 const HAND_R := 1.1  ## how close (arena units) a glove must be to touch something
@@ -91,7 +92,7 @@ func _ready() -> void:
 
 ## Build the diorama (every machine). Walkers are added afterwards by the base.
 func build() -> void:
-	build_island(arena_r + 1.0, Color(0.45, 0.75, 0.38))
+	build_island(arena_r + 1.0, Floors.GRASS.mg_base)
 
 
 ## Start position of walker number `i` of `n`.
@@ -458,7 +459,7 @@ func popup_at(p: Vector3, text: String, color: Color) -> void:
 
 
 ## A thick round island with a sandy rim, sitting in a ring of water (one mesh).
-func build_island(r: float, grass: Color, sand: Color = Color(0.93, 0.84, 0.6)) -> void:
+func build_island(r: float, grass: Color, sand: Color = Floors.SAND) -> void:
 	var key := "pb_mg_island_%d_%s_%s" % [int(r * 10.0), grass.to_html(), sand.to_html()]
 	var mesh: Resource = ResCache.get_or_make(key, func() -> Resource:
 		var b := MeshKit.Builder.new()

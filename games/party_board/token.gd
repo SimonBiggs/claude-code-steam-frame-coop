@@ -6,11 +6,13 @@ extends Node3D
 const Creatures := preload("res://core/creatures.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 
-## Per player id: character class, hat, hair colour (outfit = the player colour).
+## Per player id: character class, hat, hair colour (outfit = the player colour). The class's trousers show under
+## the outfit, so each slot's class has trousers that stand apart from its colour (palette.gd): pink P3 is the mage
+## (dark purple trousers: not lost on the pink CANDY space), white P5 the farmer (blue trousers on the white START).
 const LOOKS := [
 	["pilot", "pilot_helmet", Color(0.3, 0.2, 0.14)], ["chef", "chef", Color(0.97, 0.82, 0.46)],
-	["princess", "tiara", Color(0.98, 0.58, 0.72)], ["farmer", "straw", Color(0.58, 0.37, 0.2)],
-	["astronaut", "none", Color(0.13, 0.11, 0.12)], ["mage", "wizard", Color(0.92, 0.92, 0.95)],
+	["mage", "wizard", Color(0.92, 0.92, 0.95)], ["astronaut", "none", Color(0.13, 0.11, 0.12)],
+	["farmer", "straw", Color(0.58, 0.37, 0.2)], ["princess", "tiara", Color(0.98, 0.58, 0.72)],
 	["pirate", "tricorn", Color(0.88, 0.42, 0.2)],
 ]
 const HOP_TIME := 0.3

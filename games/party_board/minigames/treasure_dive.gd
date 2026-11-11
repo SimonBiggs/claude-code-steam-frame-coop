@@ -41,7 +41,7 @@ func build() -> void:
 		m.set_shader_parameter("island_r", 4.0)
 		return m)
 	var b := MeshKit.Builder.new()
-	b.cylinder(arena_r + 2.4, arena_r + 2.8, 1.2, MeshKit.at(Vector3(0, -0.9, 0)), Color(0.93, 0.84, 0.6), 36)
+	b.cylinder(arena_r + 2.4, arena_r + 2.8, 1.2, MeshKit.at(Vector3(0, -0.9, 0)), Floors.SAND, 36)
 	b.cylinder(arena_r + 1.0, arena_r + 1.0, 0.6, MeshKit.at(Vector3(0, -2.2, 0)), Color(0.85, 0.78, 0.55), 36)
 	for k in 10:
 		var a := k * TAU / 10.0
