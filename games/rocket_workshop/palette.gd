@@ -6,21 +6,27 @@ const Contrast := preload("res://core/contrast.gd")
 const Looks := preload("res://games/rocket_workshop/looks.gd")
 const P := preload("res://games/rocket_workshop/puzzles.gd")
 const PanelScript := preload("res://games/rocket_workshop/panel.gd")
+const Deep := preload("res://games/rocket_workshop/deep.gd")
 
 
 ## The crew and their jobs (paint pots: a coloured lid on a pale pot).
 static func key_colors() -> Dictionary:
 	var out := Contrast.named("crew", Looks.PLAYER_COLORS.slice(1))
 	out.merge({"fuel canister": Looks.CANISTER, "bolt": Looks.BOLT, "space cat": Looks.CAT_FUR})
+	# Meteors (deep.gd, hazards.gd): the two warn rings and the outlined space rock.
+	out.merge({"meteor ring": Deep.METEOR_COLOR, "shower ring": Deep.SHOWER_COLOR, "space rock": {"color": Deep.ROCK, "rim": Contrast.OUTLINE}})
 	for i in P.COLORS.size():
 		out["%s paint pot" % P.COLOR_NAMES[i].to_lower()] = {"color": P.COLORS[i], "rim": Looks.PAINT_POT}
 	return out
 
 
-## The plank floor (both tones, the darkest mix, a seam) and the yard's grass.
+## The plank floor (both tones, the darkest mix, a seam) and the yard's ground in every season.
 static func backgrounds() -> Dictionary:
 	var dark := Looks.FLOOR_A.lerp(Looks.FLOOR_B, Looks.FLOOR_MIX)
-	return {"plank": Looks.FLOOR_A, "dark plank": dark, "seam": dark * (1.0 - Looks.SEAM_DARK), "yard grass": Looks.GRASS}
+	var out := {"plank": Looks.FLOOR_A, "dark plank": dark, "seam": dark * (1.0 - Looks.SEAM_DARK), "yard grass": Looks.GRASS}
+	for s in Deep.SEASONS:  # the launch site by season (world.gd dress_season)
+		out["%s yard" % s] = Deep.SEASONS[s].ground
+	return out
 
 
 static func groups() -> Array:

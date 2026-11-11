@@ -54,6 +54,9 @@ var walk := 0.0  # 0..1 how fast we're walking (for the animation)
 var last_pos := Vector3.ZERO
 var anim_t := 0.0
 var was_launch_cam := false
+var bump_v := Vector3.ZERO  # a meteor's bump (hazards.gd): slides out of the ring, slowing down
+var dizzy_t := 0.0  # seconds still dizzy (no walking; stars circle the head on every machine)
+var dizzy_stars: Node3D
 
 
 func body_layer() -> int:
@@ -148,6 +151,10 @@ func _physics_process(delta: float) -> void:
 		return
 	_read_look(delta)
 	var move := _read_move()
+	if dizzy_t > 0.0:  # bumped by a meteor: slide out, wobble, then walk again
+		move = Vector3.ZERO
+		position = main.clamp_walk(position + bump_v * delta)
+		bump_v = bump_v.move_toward(Vector3.ZERO, 6.0 * delta)
 	bob_t += move.length() * delta * 7.0
 	position = main.clamp_walk(position + move * SPEED * delta)
 	pivot.rotation.y = yaw
@@ -176,6 +183,14 @@ func _process(delta: float) -> void:
 	var wave := fixing and not carrying
 	if wave:
 		arm_r.rotation.x = -1.6 + sin(anim_t * 20.0) * 0.3
+	if dizzy_t > 0.0:
+		dizzy_t -= delta
+		if dizzy_stars != null:
+			dizzy_stars.visible = dizzy_t > 0.0
+			dizzy_stars.rotation.y += delta * 6.0
+			pivot.rotation.z = sin(anim_t * 9.0) * 0.12 * minf(dizzy_t, 1.0)
+		if dizzy_t <= 0.0:
+			pivot.rotation.z = 0.0
 	blink_t -= delta
 	if blink_t <= 0.0:
 		blink_t = randf_range(2.0, 5.0)
@@ -262,6 +277,32 @@ func _read_look(delta: float) -> void:
 		yaw -= (float(_key("right")) - float(_key("left"))) * KEY_TURN_SPEED * delta
 	elif key_set == 0:
 		yaw -= (float(_key("turn_r")) - float(_key("turn_l"))) * KEY_TURN_SPEED * delta
+
+
+## A meteor landed on this (local) crew member: slide out of the ring with push (m/s), dizzy for secs.
+func bump(push: Vector3, secs: float) -> void:
+	bump_v = Vector3(push.x, 0.0, push.z)
+	dizzy_t = maxf(dizzy_t, secs)
+	main.local_sound("boing", -4.0, 0.8)
+
+
+## Every machine: stars circle this crew member's head for secs.
+func dizzy_fx(secs: float) -> void:
+	dizzy_t = maxf(dizzy_t, secs)
+	if dizzy_stars == null:
+		dizzy_stars = Node3D.new()
+		dizzy_stars.name = "DizzyStars"
+		dizzy_stars.position = Vector3(0.0, EYE_HEIGHT + 0.35, 0.0)
+		add_child(dizzy_stars)
+		for k in 3:
+			var st := MeshInstance3D.new()
+			st.mesh = main.star_mesh()
+			st.material_override = main.color_mat(Color(1.0, 0.9, 0.3), 1.5)
+			st.scale = Vector3.ONE * 0.18
+			var a := TAU * k / 3.0
+			st.position = Vector3(cos(a) * 0.35, 0.0, sin(a) * 0.35)
+			dizzy_stars.add_child(st)
+	dizzy_stars.visible = true
 
 
 func _read_move() -> Vector3:

@@ -26,6 +26,13 @@ extends Node
 ## mode brings in P3 on a fake controller, unplugs it (bolt) and plugs it back in.
 ## BOT_VR=1: the pilot's fake hand is a VR touch hand (fingertip touches and grabs, like the headset's
 ## hands) instead of a screen pointer.
+## Second pass (deep.gd, picks.gd, hazards.gd): the pilot takes the mode pick (VR: after resting a hand in an orb as
+## they open, which must NOT pick; then a hand moving in; a pointer clicks) and the gift picks before even rockets (or
+## with no crew); a crew bot walks up to the desk's far side under an orb for the odd ones (the TV's crew in a
+## networked run). The bot asks for meteors sooner (RW_METEORS) and the pilot takes its time on rockets with crew so
+## they fall; P2 stands still under the first one (bumped, dizzy), every crew bot walks out of the rest. Checks:
+## picks_mode, resting_hand_never_picks (VR), gift_pick_pilot, gift_pick_crew, gift_on_rocket, meteors_with_crew /
+## no_meteors_alone, meteor_bumps_dizzy, crew_walk_out, tv_sees_orbs, tv_sees_meteors.
 
 const P := preload("res://games/rocket_workshop/puzzles.gd")
 const PLAN := [
@@ -69,6 +76,14 @@ var museum_start := -1
 var daily_due := false
 var story_seen := {}
 const G := preload("res://games/rocket_workshop/rocketgen.gd")
+const Deep := preload("res://games/rocket_workshop/deep.gd")
+var pick_t := 0.0
+var rest_checked := false
+var ignored_first := false  # P2 stays under the first meteor (the bump path)
+var landed_was := 0
+var walked_out := 0
+var lone_rockets := 0
+var crew_ever := false  # host / local: crew walked the floor during some rocket's work
 
 
 ## Records a check; a FAIL sticks (and prints once), an OK prints the first time.
@@ -87,6 +102,8 @@ func _ready() -> void:
 		up.physical_keycode = KEY_ENTER
 		up.pressed = false
 		Input.parse_input_event(up)
+	if not OS.has_environment("RW_METEORS"):
+		OS.set_environment("RW_METEORS", "2")  # meteors sooner and more often (deep_test proves this spec fair too)
 	main = load("res://games/rocket_workshop/main.tscn").instantiate()
 	add_child(main)
 
@@ -116,6 +133,7 @@ func _physics_process(delta: float) -> void:
 	if main.simple:
 		_look_away()
 		_note_cues()
+		_deep_checks()
 	_check_cam()
 	_check_over(delta)
 	if t >= next_report:
@@ -172,7 +190,7 @@ func _party(delta: float) -> void:
 	if main.net.mode == "host":
 		return
 	var want := int(OS.get_environment("BOT_PLAYERS")) if OS.has_environment("BOT_PLAYERS") else (1 if main.net.mode == "local" else 2)
-	want = clampi(want, 1, main.players.size() - 1)
+	want = clampi(want, 0 if OS.get_environment("BOT_PLAYERS") == "0" else 1, main.players.size() - 1)  # 0: a lone pilot (a Deck alone)
 	join_t -= delta
 	if join_t > 0.0 or t < 2.0:
 		return
@@ -233,6 +251,11 @@ func _events() -> void:
 
 func _pilot(delta: float) -> void:
 	var op = main.players[0]
+	if _pilot_picks(op, delta):
+		return
+	if main.phase == "work" and main.rocket_n >= Deep.FIRST_N and main.floor_crew() > 0 and main.work_t < 9.0 and steps.is_empty():
+		op.bot_hand = {"pos": hand, "grip": false, "vr": OS.has_environment("BOT_VR")}
+		return  # (crew on the floor: give the meteors time to fall)
 	if main.simple and steps.is_empty() and _simple_wait(delta):
 		op.bot_hand = {"pos": hand, "grip": false, "vr": OS.has_environment("BOT_VR")}
 		return
@@ -252,6 +275,44 @@ func _pilot(delta: float) -> void:
 	op.bot_hand = {"pos": hand, "grip": grip, "vr": OS.has_environment("BOT_VR")}
 	if OS.has_environment("BOT_VR") and op.xr_camera == null and op.camera != null:
 		op.xr_camera = preload("res://core/vr_rig.gd").fake_head(op.camera)  # the bots' VR view
+
+
+## Host / local: the pilot's picks. Returns true while picking (the hand is the pick's).
+func _pilot_picks(op, delta: float) -> bool:
+	if main.phase != "pick":
+		pick_t = 0.0
+		return false
+	var vr := OS.has_environment("BOT_VR")
+	var orbs = main.picks.orbs
+	var stage: String = main.picks.stage
+	var n: int = main.rocket_n + 1
+	var mine: bool = stage == "mode" or main.floor_crew() == 0 or n % 2 == 0
+	var rest := Vector3(0.0, main.panel.top + 0.7, 0.35)
+	if orbs.orbs.is_empty() or stage == "" or not mine or main.picks.chosen >= 0:
+		op.bot_hand = {"pos": rest, "grip": false, "vr": vr}
+		return true
+	pick_t += delta
+	var i: int = 0 if stage == "mode" else orbs.orbs.size() - 1
+	var at: Vector3 = main.picks.orb_position(i)
+	if at == Vector3.INF:
+		return true
+	var pos := at + Vector3(0.0, 0.45, 0.1)
+	var grip := false
+	if vr and stage == "mode" and not rest_checked:  # a hand resting in orb 1 as they open never picks
+		var mid: Vector3 = main.picks.orb_position(1)
+		if pick_t < 1.4 and mid != Vector3.INF:
+			op.bot_hand = {"pos": mid, "grip": false, "vr": true}
+			return true
+		rest_checked = true
+		_check("resting_hand_never_picks", main.picks.chosen < 0, "chosen %d" % main.picks.chosen)
+		pick_t = 0.0
+	if pick_t > 1.2 and pick_t < 1.6:
+		pos = at
+		grip = not vr  # a pointer clicks; a VR hand moves in
+	op.bot_hand = {"pos": pos, "grip": grip, "vr": vr}
+	if OS.has_environment("BOT_VR") and op.xr_camera == null and op.camera != null:
+		op.xr_camera = preload("res://core/vr_rig.gd").fake_head(op.camera)
+	return true
 
 
 func _at(key: String, lift: float = 0.0) -> Vector3:
@@ -411,7 +472,27 @@ func _crew(p) -> void:
 	elif working and not cat.is_empty() and not cat.done and int(cat.carrier) == p.index:
 		mine = 2
 	var role: int = (p.index - 1) % 3
-	if mine == 1 and int(paint.carry) != int(paint.answer):
+	var orbs = main.picks.orbs
+	if main.phase == "pick" and not orbs.orbs.is_empty() and orbs.stage == "gift" and (main.rocket_n + 1) % 2 == 1 \
+			and p == _first_crew():
+		var at: Vector3 = main.picks.orb_position(0)
+		if at != Vector3.INF:
+			target = Deep.crew_spot(at)
+			var pp: Vector3 = p.global_position
+			if pp.z > -1.2 or absf(pp.x - target.x) > 0.3:
+				target = Vector3(target.x, 0.0, -2.0)  # (round the desk first, then straight in)
+			else:
+				var to2 := target - pp
+				to2.y = 0.0
+				p.bot_move = to2.normalized() if to2.length() > 0.05 else Vector3.ZERO
+				p.yaw = atan2(-to2.x, -to2.z)
+				return
+	var dodge := _dodge(p)
+	if dodge != Vector3.INF:
+		target = dodge
+	elif target != Vector3.INF:
+		pass
+	elif mine == 1 and int(paint.carry) != int(paint.answer):
 		target = P.PAINT_SPOTS[int(paint.answer)]  # grabbed the wrong pot on the way past: swap it
 	elif mine == 0 or mine == 1:
 		target = main.HATCH_POS
@@ -466,6 +547,101 @@ func _crew(p) -> void:
 		p.yaw = atan2(-to.x, -to.z)
 	else:
 		p.bot_move = Vector3.ZERO
+
+
+## Second pass checks while playing.
+func _deep_checks() -> void:
+	var hz = main.hazards
+	if main.phase == "work" and main.net.mode != "client" and main.floor_crew() > 0:
+		crew_ever = true
+	if main.net.mode == "client":
+		if not main.picks.orbs.orbs.is_empty():
+			_check("tv_sees_orbs", true, main.picks.orbs.stage)
+		if hz.seen > 0:
+			_check("tv_sees_meteors", true, "%d" % hz.seen)
+	else:
+		for h in main.picks.history:
+			if h[0] == "mode" and int(h[2]) == 0:
+				_check("picks_mode", true, str(h))
+			elif h[0] == "gift" and int(h[2]) == 0:
+				_check("gift_pick_pilot", true, str(h))
+			elif h[0] == "gift" and int(h[2]) > 0:
+				_check("gift_pick_crew", true, str(h))
+		if main.phase == "work" and main.floor_crew() == 0 and main.rocket_n >= Deep.FIRST_N and not main.hazards.list.is_empty():
+			_check("no_meteors_alone", false, "%d planned" % main.hazards.list.size())
+	if hz.landed > landed_was:
+		landed_was = hz.landed
+		if hz.bumps > int(get_meta("bumps_was", 0)):
+			set_meta("bumps_was", hz.bumps)
+			var dizzy := false
+			for p in main.players:
+				if p.index > 0 and p.active and p.dizzy_t > 0.0:
+					dizzy = true
+			_check("meteor_bumps_dizzy", dizzy, "%d bumps" % hz.bumps)
+		if walked_out > 0:
+			var caught := false
+			for p in main.players:
+				if p.index > 1 and p.active and not p.remote and not p.ghost and p.dizzy_t > 0.0:
+					caught = true
+			if not caught:
+				_check("crew_walk_out", true, "%d walked out" % walked_out)
+
+
+## Before the result: meteors fell with crew, never on a lone pilot.
+func _deep_final() -> void:
+	if main.net.mode == "client":
+		return
+	if crew_ever:
+		_check("meteors_with_crew", main.hazards.seen > 0, "%d told" % main.hazards.seen)
+	else:
+		_check("no_meteors_alone", main.hazards.seen == 0, "%d told" % main.hazards.seen)
+
+
+## Screenshots (brepl offscreen runs): a camera in P2's view looking down at a spot from up high and to the front,
+## freed after secs (never touches the view's own camera).
+func debug_cam(at: Vector3, secs: float = 4.0) -> bool:
+	var p2 = main.players[1]
+	if p2.camera == null:
+		return false
+	var cam := Camera3D.new()
+	p2.camera.get_parent().add_child(cam)
+	cam.global_transform = preload("res://core/ui_kit.gd").aim_from(at + Vector3(0.0, 7.0, 6.0), at)
+	cam.current = true
+	get_tree().create_timer(secs).timeout.connect(cam.queue_free)
+	return true
+
+
+## The first active crew member this machine walks (it takes the odd gift picks).
+func _first_crew():
+	for q in main.players:
+		if q.index > 0 and q.active and not q.remote and not q.ghost:
+			return q
+	return null
+
+
+## Under a meteor's ring: where to walk out to (INF: not under one). P2 stays under the very first one (the bump).
+func _dodge(p) -> Vector3:
+	var pos: Vector3 = p.global_position
+	for tell in main.hazards.tells_now():
+		if not Deep.caught(tell.e, pos, 1.6 if p.has_meta("walking_out") else 0.9):
+			continue
+		if p.index == 1 and (not ignored_first or p.has_meta("ignoring")):
+			if not ignored_first:
+				ignored_first = true
+				p.set_meta("ignoring", tell.e)
+				print("Bot: P2 stays under the %s" % tell.kind)
+			if p.get_meta("ignoring") == tell.e:
+				p.bot_move = Vector3.ZERO
+				return pos
+		if not p.has_meta("walking_out"):
+			p.set_meta("walking_out", true)
+			walked_out += 1
+		return main.clamp_walk(pos + Deep.out_dir(tell.e, pos) * 3.5)
+	if p.has_meta("walking_out"):
+		p.remove_meta("walking_out")
+	if p.has_meta("ignoring") and main.hazards.tells_now().is_empty():
+		p.remove_meta("ignoring")
+	return Vector3.INF
 
 
 ## Simple way-finding: through the launch doorway, and round the pilot's booth.
@@ -625,6 +801,8 @@ func _simple_checks(delta: float) -> void:
 	if quit_t > 0.0:
 		quit_t -= delta
 		if quit_t <= 0.0:
+			_deep_final()
+			set_meta("result", true)
 			var failed: Array = []
 			for k in checks:
 				if not checks[k]:
@@ -656,8 +834,12 @@ func _story_checks() -> void:
 		_check("gold_only_today", not main.rocket_daily and int(lk[G.L_GOLD]) == 0, str(lk))
 	var lv := G.level(n, true)
 	_check("rocket_size_level%d" % lv, absf(main.rocket.size_now - main.rocket.LEVEL_SCALE[lv]) < 0.001, "size %.2f" % main.rocket.size_now)
+	var gift: Dictionary = Deep.gift(main.gift_id)
+	if not gift.is_empty() and (gift.part as Array).size() == 2:
+		_check("gift_on_rocket", int(lk[int(gift.part[0])]) == int(gift.part[1]), "%s %s" % [main.gift_id, str(lk)])
 	for why in G.check({"name": main.rocket_name, "modules": main.modules, "time": 999.0, "look": lk, "level": lv,
-			"daily": main.rocket_daily}, {"n": n, "crew": main.crew_count(), "simple": true, "launched": int(main.unlock_from)}):
+			"daily": main.rocket_daily}, {"n": n, "crew": main.crew_count(), "simple": true, "launched": int(main.unlock_from),
+			"opts": Deep.puzzle_opts(main.play_mode, main.gift_id, n), "allow": [gift.get("part", [])]}):
 		_check("rocket_%d_valid" % n, false, why)
 	_check("sprocket_here", main.sprocket.is_inside_tree() and main.sprocket.visible)
 
@@ -739,8 +921,8 @@ func _note_cues() -> void:
 
 ## Local mode: P3 joins on a fake controller (device 14), which is unplugged (bolt) and plugged back in.
 func _test_plug() -> void:
-	if main.net.mode != "local" or main.players.size() < 3:
-		return
+	if main.net.mode != "local" or main.players.size() < 3 or OS.get_environment("BOT_PLAYERS") == "0":
+		return  # (a lone pilot stays alone)
 	var p3 = main.players[2]
 	if plug_phase == 0 and main.launched >= 3 and main.phase == "work":
 		plug_phase = 1  # (after rocket 2's free wrong press: joining adds welcome time)
@@ -775,6 +957,13 @@ func _tip_error(who: String, text: String) -> void:
 
 
 func _exit_tree() -> void:
+	if not has_meta("result") and main != null and is_instance_valid(main) and main.simple:  # ended by BOT_END / a limit
+		_deep_final()
+		var failed: Array = []
+		for k in checks:
+			if not checks[k]:
+				failed.append(k)
+		print("BOT RESULT: %s (%d checks so far%s)" % ["PASS" if failed.is_empty() else "FAIL", checks.size(), "" if failed.is_empty() else ", failed: " + ", ".join(failed)])
 	if main != null and is_instance_valid(main) and main.simple:
 		var ks: Array = cues.keys()
 		ks.sort()
