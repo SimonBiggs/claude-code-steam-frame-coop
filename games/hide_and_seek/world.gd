@@ -44,6 +44,9 @@ static func _tool(ctx: Dictionary, key: String, material: Material) -> SurfaceTo
 ## Non-glowing parts all go into ONE vertex-coloured mesh (one draw call for the whole house's furniture);
 ## glowing parts are grouped per colour (they need their own emissive material).
 static func _add_mesh(ctx: Dictionary, mesh: Mesh, xf: Transform3D, color: Color, glow: float = 0.0) -> void:
+	if ctx.has("dim"):  # a dark room (map_house.gd): its furniture drawn dim
+		color = color.darkened(float(ctx.dim))
+		glow = 0.0
 	if glow <= 0.0:
 		var vc := _tool(ctx, "vc", _vertex_material())
 		var arr: Array = mesh.surface_get_arrays(0)

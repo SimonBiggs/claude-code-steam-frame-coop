@@ -34,6 +34,8 @@ const HouseGen := preload("res://games/hide_and_seek/housegen.gd")
 const BgGen := preload("res://core/bg_gen.gd")
 const Story := preload("res://games/hide_and_seek/story.gd")
 const PipScript := preload("res://games/hide_and_seek/pip.gd")
+const FriendScript := preload("res://games/hide_and_seek/friend.gd")
+const Street := preload("res://games/hide_and_seek/street.gd")
 const Seeded := preload("res://core/seeded.gd")
 const Save := preload("res://core/save.gd")
 const Telemetry := preload("res://core/telemetry.gd")
@@ -105,6 +107,15 @@ var pip_spot := Vector3.ZERO
 var pip_on := false  # Pip is hiding this round (not found yet)
 var pip_finder := -1
 var toys := 0  # Pip's toys at home (mirrored to the TV)
+## PIP'S STREET (street.gd): the house's neighbour friends hiding this round (friend.gd nodes, built with the house
+## from md().friends / friend_spots on every machine) and their state from the host: [at, by] each (at: 0 first
+## spot, 1 sneaked to the second; by: -1 still hiding, else the finder's index).
+var friends: Array = []
+var friend_state: Array = []
+var party: Array = []  # friend ids at Pip's garden party (the host's save; mirrored)
+var party_root: Node3D  # the party in the house's garden (decorations + seated friends)
+var friend_peep_t := 0.0
+var friend_spec := []  # what the friend nodes were built for
 var toys_node: Node3D
 var kennel := Vector3.ZERO  # in front of Pip's kennel (the house's garden), where his toys lie
 var kennel_n := Vector3.FORWARD  # out of the kennel
@@ -167,11 +178,12 @@ func _ready() -> void:
 		save.data.world = Seeded.fresh_seed()  # this family's own houses
 		save.mark_dirty()
 	toys = int(save.data.toys)
+	party = (save.data.party as Array).duplicate()
 	pip = PipScript.new()
 	pip.name = "Pip"
 	pip.visible = false
 	add_child(pip)
-	var first := _saved_next_map()
+	var first := 0 if OS.has_environment("HNS_TRY") else _saved_next_map()  # a What's New "try": straight to a house
 	_build_map(first, _spec_for(first))
 	_build_hud()
 	var menu := PauseMenuScript.new()
@@ -333,9 +345,18 @@ func star_spot(k: int) -> Vector3:
 func _spec_for(i: int) -> Dictionary:
 	if posmod(i, MAPS.size()) != 0:
 		return {"seed": Seeded.fresh_seed()}
+	if OS.has_environment("HNS_TRY"):  # What's New "try" / bots: HNS_TRY=dark|sneaky|twins|street jumps to a twist
+		var tw: int = {"dark": Street.DARK, "sneaky": Street.SNEAKY, "twins": Street.TWINS}.get(OS.get_environment("HNS_TRY"), 0)
+		var n := int(save.data.houses)
+		var sp := Street.dress(Story.house_spec(int(save.data.world), n, int(save.data.toys)), int(save.data.world), n, party)
+		if tw != 0:
+			sp.twist = tw
+			sp.friends = Street.pick_friends(int(save.data.world), n, party, Street.friends_needed(tw))
+		return sp
 	if _daily_due():
-		return Story.daily()
-	return Story.house_spec(int(save.data.world), int(save.data.houses), int(save.data.toys))
+		return Street.daily()
+	var n2 := int(save.data.houses)
+	return Street.dress(Story.house_spec(int(save.data.world), n2, int(save.data.toys)), int(save.data.world), n2, party)
 
 
 func _daily_due() -> bool:
@@ -360,12 +381,20 @@ static func _house_job(spec: Dictionary) -> Callable:
 	return func() -> Variant: return HouseGen.generate(int(sp.get("seed", 1)), sp)
 
 
+## The compact description the TV machines rebuild the house from: [seed, level, theme, daily, friends, twist, street, slot].
 func _spec_array(spec: Dictionary) -> Array:
-	return [int(spec.get("seed", 0)), int(spec.get("level", 0)), int(spec.get("theme", 0)), bool(spec.get("daily", false))]
+	return [int(spec.get("seed", 0)), int(spec.get("level", 0)), int(spec.get("theme", 0)), bool(spec.get("daily", false)),
+		(spec.get("friends", []) as Array).duplicate(), int(spec.get("twist", 0)), int(spec.get("street", 0)), int(spec.get("slot", 0))]
 
 
 func _spec_from(a: Array) -> Dictionary:
-	return {"seed": int(a[0]), "level": int(a[1]), "theme": int(a[2]), "daily": bool(a[3])}
+	var sp := {"seed": int(a[0]), "level": int(a[1]), "theme": int(a[2]), "daily": bool(a[3])}
+	if a.size() >= 8:
+		sp["friends"] = (a[4] as Array).duplicate()
+		sp["twist"] = int(a[5])
+		sp["street"] = int(a[6])
+		sp["slot"] = int(a[7])
+	return sp
 
 
 ## Throw away the old map's nodes and build map `i` from `spec` (both machines; the TV follows the
@@ -401,6 +430,9 @@ func _build_map(i: int, spec: Dictionary = {}) -> void:
 	mood_dirty = true
 	toys_node = null
 	_update_toys()
+	_make_friends()
+	party_root = null
+	_update_party_view()
 	if pip != null:
 		pip.visible = false
 	pip_on = false
@@ -1141,6 +1173,7 @@ func _start_round() -> void:
 	var next := map_idx + 1 if (round_no > 1 or map_idx < 0) else map_idx
 	_build_map(next, _spec_for(next))
 	_save_next_map(map_idx + 1)
+	_reset_friends()
 	_hide_pip()
 	for i in round_scores.size():
 		round_scores[i] = 0
@@ -1168,7 +1201,9 @@ func _start_round() -> void:
 	phase_t = intro_time if round_no == 1 else 5.0
 	print("Round %d (%s) on %s: %d hiders" % [round_no, round_type, map_title(), hider_count()])
 	run = {"round": round_no, "map": map_title(), "type": round_type, "hiders": hider_count(), "spec": _spec_array(map_spec),
-		"gen_ms": last_gen_ms, "spots": (md().hide_spots as Array).size(), "toys": toys, "t0": 0.0}
+		"gen_ms": last_gen_ms, "spots": (md().hide_spots as Array).size(), "toys": toys, "t0": 0.0,
+		"friends": (md().get("friends", []) as Array).duplicate(), "twist": int(md().get("twist", 0)), "friends_found": 0,
+		"street": int(map_spec.get("street", -1)), "slot": int(map_spec.get("slot", -1))}
 	_round_story()
 	sound("ready", -4.0, 1.0)
 	_show_center("", 0.0)  # no words: each view says HIDE! / SEEK! with a picture of the round
@@ -1213,6 +1248,7 @@ func _update_seek(delta: float) -> void:
 	_check_bell()
 	_check_stars()
 	_check_pip()
+	_check_friends(delta)
 	var n := ceili(phase_t)
 	if n <= 10 and n != last_tick and n > 0:
 		last_tick = n
@@ -1418,6 +1454,10 @@ func torch_click(s) -> void:
 	if _pip_in_beam(s):
 		find_pip(0)
 		return
+	var fk := _friend_in_beam(s)
+	if fk >= 0:
+		find_friend(fk, 0)
+		return
 	var di := _decoy_target(s)
 	if di >= 0:
 		var kind: int = decoys[di].kind
@@ -1529,6 +1569,9 @@ func _end_round(seeker_won: bool) -> void:
 		lines.append("TOP: P%d  %d" % [best + 1, totals[best]])
 	if pip_finder >= 0:
 		lines.append("PIP: P%d" % (pip_finder + 1))
+	for k in friends.size():
+		if int(friend_state[k][1]) >= 0 and is_instance_valid(friends[k]):
+			lines.append("%s: P%d" % [Street.friend(friends[k].fid).name, int(friend_state[k][1]) + 1])
 	results_text = "\n".join(lines)
 	_show_center(results_text, 0.0)
 	_save_best()
@@ -1741,7 +1784,7 @@ func make_snapshot() -> Array:
 	for p in players:
 		ps.append(p.net_state())
 	return [phase, phase_t, round_no, seek_len, ps, round_scores, totals, count_time, round_type, jail_breaks, star_idx, star_taken, snappedf(sniff_cd, 0.1), maxi(map_idx, 0),
-		_spec_array(map_spec), [pip_spot, pip_on, pip_finder], toys]
+		_spec_array(map_spec), [pip_spot, pip_on, pip_finder], toys, [friend_state, party]]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -1779,6 +1822,8 @@ func apply_snapshot(s: Array) -> void:
 		if int(s[16]) != toys:
 			toys = int(s[16])
 			_update_toys()
+		if s.size() >= 18:
+			_apply_friends(s[17][0], s[17][1])
 	elif s.size() >= 14 and int(s[13]) != map_idx:
 		_build_map(int(s[13]))
 	var ps: Array = s[4]
@@ -1815,6 +1860,10 @@ func apply_event(kind: String, args: Array) -> void:
 			pass
 		"pip":
 			_pip_fx(args[0], args[1])
+		"friend":
+			_friend_fx(args[0], args[1], args[2])
+		"sneak":
+			_sneak_fx(args[0])
 		"story":
 			_show_story(args[0])
 		"teleport":
@@ -1833,7 +1882,11 @@ func _hide_pip() -> void:
 	pip_finder = -1
 	var spots: Array = (md().hide_spots as Array).duplicate()
 	var start: Vector3 = spawn_pos(0)
-	spots = spots.filter(func(p: Vector3) -> bool: return p.distance_to(start) > 3.0)
+	var taken: Array = []  # the street friends' spots (where they are and where a sneaky one goes)
+	for fs in md().get("friend_spots", []):
+		taken.append(fs[0])
+		taken.append(fs[1])
+	spots = spots.filter(func(p: Vector3) -> bool: return p.distance_to(start) > 3.0 and not taken.has(p))
 	if spots.is_empty():
 		pip_on = false
 		pip.visible = false
@@ -1937,18 +1990,269 @@ func _pip_fx(i: int, n_toys: int) -> void:
 	_show_story(beat)
 
 
+# --- PIP'S STREET: neighbour friends hiding in the house, Pip's garden party (street.gd) -----------------
+
+const SNEAK_NEAR := 2.6  # a SNEAKY friend sneaks off when the seeker comes this close (or half way through)
+const FRIEND_PEEP := 22.0  # a hiding friend squeaks this often (a sound to follow; no sparkles: Abigail)
+
+
+## Both machines: friend nodes for the house just built (none on the castle and the ship).
+func _make_friends() -> void:
+	for f in friends:
+		if is_instance_valid(f):
+			f.queue_free()
+	friends.clear()
+	friend_state.clear()
+	var ids: Array = md().get("friends", []) if map_idx == 0 else []
+	var fs: Array = md().get("friend_spots", [])
+	for k in mini(ids.size(), fs.size()):
+		var f: Node3D = FriendScript.new().setup(int(ids[k]))
+		world_root.add_child(f)
+		friends.append(f)
+		friend_state.append([0, -1])
+		_place_friend(k)
+
+
+## Host, at the start of a round: every friend back on their first spot, hiding.
+func _reset_friends() -> void:
+	friend_peep_t = FRIEND_PEEP
+	for k in friends.size():
+		friend_state[k] = [0, -1]
+		_place_friend(k)
+	_update_party_view()
+
+
+func _place_friend(k: int) -> void:
+	var fs: Array = md().get("friend_spots", [])
+	if k >= friends.size() or k >= fs.size() or not is_instance_valid(friends[k]):
+		return
+	var at: int = friend_state[k][0]
+	var p: Vector3 = fs[k][at]
+	var to := spawn_pos(0) - p
+	var f: Node3D = friends[k]
+	f.hide_at(p, atan2(-to.x, -to.z))
+	f.set_meta("sneaked", at == 1)
+	f.set_meta("found", false)
+	f.set_dark(k == 0 and at == 0 and int(md().get("dark_room", -1)) >= 0)
+
+
+## Host: anyone touching a hiding friend finds them (like Pip); a SNEAKY friend moves once; friends peep now and then.
+func _check_friends(delta: float) -> void:
+	var fs: Array = md().get("friend_spots", [])
+	friend_peep_t -= delta
+	var peep := friend_peep_t <= 0.0
+	if peep:
+		friend_peep_t = FRIEND_PEEP
+	for k in friends.size():
+		if int(friend_state[k][1]) >= 0 or not is_instance_valid(friends[k]):
+			continue
+		var f: Node3D = friends[k]
+		var c: Vector3 = f.center()
+		var closest := INF
+		for p in players:
+			if not p.active or (p.role == "hider" and not p.is_hiding()):
+				continue
+			var d := Vector2(p.global_position.x - c.x, p.global_position.z - c.z).length()
+			closest = minf(closest, d)
+			if p.role == "hider":
+				if p.prop_kind < 0 and d < 0.75:
+					find_friend(k, p.index)
+					return
+			elif p.vr:
+				if p.hand_l.global_position.distance_to(c) < HAND_TOUCH or p.hand_r.global_position.distance_to(c) < HAND_TOUCH:
+					find_friend(k, p.index)
+					return
+			elif d < BODY_TOUCH:
+				find_friend(k, p.index)
+				return
+		f.excite = clampf(1.0 - (closest - 1.0) / 3.0, 0.0, 1.0)
+		if int(friend_state[k][0]) == 0 and k < fs.size() and (fs[k][0] as Vector3) != (fs[k][1] as Vector3):
+			var sd := Vector2(players[0].global_position.x - c.x, players[0].global_position.z - c.z).length()
+			if sd < SNEAK_NEAR or phase_t < seek_len * 0.5:
+				friend_state[k][0] = 1
+				_sneak_fx(k)
+				net.event("sneak", [k])
+				print("Round %d: friend %d sneaked off" % [round_no, k])
+				continue
+		if peep:
+			squeak_fx(c, 1.9)
+			net.event("squeak", [c, 1.9])
+
+
+## Is a hiding friend in the seeker's torch beam? (index or -1)
+func _friend_in_beam(s) -> int:
+	var xf := _seeker_aim(s)
+	for k in friends.size():
+		if int(friend_state[k][1]) >= 0 or not is_instance_valid(friends[k]):
+			continue
+		var c: Vector3 = friends[k].center()
+		var to := c - xf.origin
+		var d := to.length()
+		if d > TAG_RANGE + 0.3 or d < 0.01:
+			continue
+		var ang := rad_to_deg(acos(clampf((-xf.basis.z.normalized()).dot(to / d), -1.0, 1.0)) - atan(0.3 / d))
+		if ang <= TAG_ANGLE and ray(xf.origin, c).is_empty():
+			return k
+	return -1
+
+
+## Host: player i found friend k: points, and the friend comes to Pip's garden party (saved for good).
+func find_friend(k: int, i: int) -> void:
+	if k >= friends.size() or int(friend_state[k][1]) >= 0 or phase != "seek":
+		return
+	friend_state[k][1] = i
+	round_scores[i] += Street.FRIEND_POINTS
+	var id := int((md().friends as Array)[k])
+	var before := party.size()
+	if not party.has(id):
+		party.append(id)
+		save.data.party = party.duplicate()
+	save.data.friends_found = int(save.data.get("friends_found", 0)) + 1
+	save.mark_dirty()
+	run["friends_found"] = int(run.get("friends_found", 0)) + 1
+	print("Round %d: P%d found %s (%d at the party)" % [round_no, i + 1, Street.friend(id).name, party.size()])
+	_friend_fx(k, i, party)
+	net.event("friend", [k, i, party.duplicate()])
+	var dc := Street.new_decor(before, party.size())
+	if dc >= 0:
+		var dd: Dictionary = Street.DECOR[dc]
+		_story_later(3.8, {"who": "PIP'S PARTY", "line": String(dd.line), "pic": String(dd.pic), "color": Color(1.0, 0.6, 0.75), "duration": 3.5})
+
+
+## Both machines: the friend hops and pops, hearts, +points and a story card; then they sit at the party.
+func _friend_fx(k: int, i: int, new_party: Array) -> void:
+	if k >= friends.size() or not is_instance_valid(friends[k]):
+		return
+	var f: Node3D = friends[k]
+	friend_state[k][1] = i
+	party = new_party.duplicate()
+	if f.get_meta("found", false):
+		return
+	f.set_meta("found", true)
+	f.set_dark(false)
+	f.found()
+	var fr := Street.friend(f.fid)
+	var c: Vector3 = f.center()
+	var col: Color = PLAYER_COLORS[i % PLAYER_COLORS.size()]
+	burst(c + Vector3.UP * 0.3, Color(1.0, 0.45, 0.6), 18, 0.08)
+	burst(c, fr.fur, 10)
+	popup(c + Vector3.UP * 0.9, "%s! +%d" % [fr.name, Street.FRIEND_POINTS], col.lightened(0.3))
+	local_sound("pickup", -2.0, 1.35)
+	local_sound("squeak", -6.0, 1.9)
+	_show_story({"who": String(fr.name), "line": "To the party!", "pic": String(fr.pic), "color": fr.fur, "duration": 3.5})
+	get_tree().create_timer(1.6).timeout.connect(_update_party_view)
+
+
+## Both machines: a SNEAKY friend pops away in a puff and hides somewhere else.
+func _sneak_fx(k: int) -> void:
+	if k >= friends.size() or not is_instance_valid(friends[k]) or friends[k].get_meta("sneaked", false):
+		return
+	var c: Vector3 = friends[k].center()
+	burst(c, Color(0.9, 0.9, 0.95), 16, 0.1)
+	popup(c + Vector3.UP * 0.8, "WHOOSH!", Color(0.95, 0.8, 0.5))
+	local_sound("boing", -6.0, 1.7)
+	friend_state[k][0] = 1
+	_place_friend(k)
+
+
+## Client: the host's friend state and party (the events usually got here first; this catches up).
+func _apply_friends(state: Array, new_party: Array) -> void:
+	var changed := new_party != party
+	party = new_party.duplicate()
+	for k in mini(state.size(), friends.size()):
+		var st: Array = state[k]
+		if int(st[0]) == 1 and int(friend_state[k][0]) == 0:
+			_sneak_fx(k)
+		elif int(st[0]) == 0 and int(st[1]) < 0 and (int(friend_state[k][0]) != 0 or int(friend_state[k][1]) >= 0):
+			friend_state[k] = [0, -1]
+			_place_friend(k)  # a new round in the same house
+			changed = true
+		if int(st[1]) >= 0 and int(friend_state[k][1]) < 0:
+			_friend_fx(k, int(st[1]), new_party)
+	if changed:
+		_update_party_view()
+
+
+## Both machines: Pip's garden party in this house's garden: the decorations and every friend who came (not the
+## ones hiding in this house right now).
+func _update_party_view() -> void:
+	if map_idx != 0 or world_root == null or not is_instance_valid(world_root):
+		return
+	var hiding: Array = []
+	for k in friends.size():
+		if int(friend_state[k][1]) < 0 and is_instance_valid(friends[k]):
+			hiding.append(friends[k].fid)
+	var key := "%s|%s" % [str(party), str(hiding)]
+	if party_root != null and is_instance_valid(party_root) and String(party_root.get_meta("key", "")) == key:
+		return
+	if party_root != null and is_instance_valid(party_root):
+		party_root.queue_free()
+	party_root = HouseScript.party_node(map_spec, party.size())
+	party_root.set_meta("key", key)
+	var seats: Array = md().get("party", [])
+	if seats.size() > 1:
+		var centre: Vector3 = seats[0]
+		var j := 0
+		for id in party:
+			if hiding.has(id):
+				continue
+			var f: Node3D = FriendScript.new().setup(int(id))
+			f.party = true
+			f.merge()
+			party_root.add_child(f)
+			var at: Vector3 = seats[1 + j % (seats.size() - 1)]
+			var to := centre - at
+			f.hide_at(at, atan2(-to.x, -to.z))
+			j += 1
+	world_root.add_child(party_root)
+
+
+func _story_later(delay: float, beat: Dictionary) -> void:
+	var r := round_no
+	get_tree().create_timer(delay).timeout.connect(func() -> void:
+		if round_no == r and is_inside_tree():
+			_story(beat))
+
+
 ## Round-start story beats (host decides, every machine shows them).
 func _round_story() -> void:
 	var beat := {}
 	if int(save.data.pips) == 0 and round_no == 1:
 		beat = {"who": "PIP", "line": "I'm hiding too! Find me!", "pic": "puppy", "color": Story.PIP_COLOR}
 	elif map_idx == 0:
-		var th := Story.theme(int(map_spec.get("theme", 0)))
-		var who := "TODAY'S HOUSE" if bool(map_spec.get("daily", false)) else "HOUSE %d" % (int(map_spec.get("level", 0)) + 1)
-		beat = {"who": who, "line": String(th.line), "pic": String(th.pic), "color": Color(1.0, 0.8, 0.5)}
+		_street_story()
+		return
 	if not beat.is_empty():
 		beat["duration"] = 4.0
 		_story(beat)
+		if map_idx == 0:
+			_street_story(4.2)  # then who hides in this house
+
+
+## PIP'S STREET at the start of a house round: a new street, who hides here (picture first), then the twists.
+func _street_story(at0: float = 0.0) -> void:
+	var beats: Array = []
+	var daily := bool(map_spec.get("daily", false))
+	var slot := int(map_spec.get("slot", 0))
+	var th := Story.theme(int(map_spec.get("theme", 0)))
+	if daily:
+		beats.append({"who": "TODAY'S STREET", "line": String(th.line), "pic": "street", "color": Color(1.0, 0.85, 0.4)})
+	elif slot == 0:
+		beats.append({"who": "PIP'S STREET" if int(map_spec.get("street", 0)) == 0 else "A NEW STREET!", "line": String(th.line), "pic": "street", "color": Color(1.0, 0.8, 0.5)})
+	var ids: Array = md().get("friends", [])
+	for k in ids.size():
+		var fr := Street.friend(int(ids[k]))
+		beats.append({"who": String(fr.name), "line": "Find me!" if k == 0 else "And me!", "pic": String(fr.pic), "color": fr.fur})
+	beats.append_array(Street.twist_cards(int(md().get("twist", 0)) if not ids.is_empty() else 0))
+	var at := at0
+	for b in beats:
+		var beat: Dictionary = b.duplicate()
+		beat["duration"] = 3.0
+		if at == 0.0:
+			_story(beat)
+		else:
+			_story_later(at, beat)
+		at += 3.2
 
 
 func _story(beat: Dictionary) -> void:
@@ -1970,13 +2274,29 @@ func _show_story(beat: Dictionary) -> void:
 		vr_story = StoryCard.show_vr(self, players[0].xr_camera, beat)
 
 
+## Host, a house round over: friends still hiding wave goodbye (they come again on a later house); the last house of a
+## street finished brings a new street next time.
+func _street_done() -> void:
+	var at := 1.0
+	for k in friends.size():
+		if int(friend_state[k][1]) < 0 and is_instance_valid(friends[k]):
+			var fr := Street.friend(friends[k].fid)
+			_story_later(at, {"who": String(fr.name), "line": "Find me next time!", "pic": String(fr.pic), "color": fr.fur, "duration": 3.0})
+			at += 3.2
+	if not bool(map_spec.get("daily", false)) and int(map_spec.get("slot", 0)) == Street.STREET_LEN - 1 and map_spec.has("street"):
+		save.data.streets = int(save.data.get("streets", 0)) + 1
+		_story_later(at, {"who": "STREET DONE!", "line": "%d friends at the party!" % party.size(), "pic": "gardenparty", "color": Color(1.0, 0.6, 0.75), "duration": 4.0})
+
+
 ## Host: the round is over: count the house, today's house, and one telemetry line.
 func _round_done(seeker_won: bool) -> void:
 	if net.mode == "client":
 		return
 	var sd: Dictionary = save.data
 	if map_idx == 0:
+		_street_done()
 		if bool(map_spec.get("daily", false)):
+			sd.daily_done = Seeded.today()  # TODAY'S STREET finished (the Trophy Hall's golden star)
 			(sd.daily as Dictionary)[Seeded.today()] = finds
 			while (sd.daily as Dictionary).size() > 30:
 				(sd.daily as Dictionary).erase((sd.daily as Dictionary).keys()[0])
@@ -2001,6 +2321,8 @@ func _telemetry(end: String, seeker_won: bool) -> void:
 	info["sniffs"] = sniff_hits
 	info["toys"] = toys
 	info["houses"] = int(save.data.houses)
+	info["party"] = party.size()
+	info["friends_found"] = int(run.get("friends_found", 0))
 	info["vr"] = not players.is_empty() and players[0].vr
 	info["net"] = net.mode
 	Telemetry.run(Story.GAME_ID, info)
@@ -2058,6 +2380,20 @@ func _build_hud() -> void:
 	hl.custom_minimum_size.x = 36
 	hl.add_theme_color_override("font_color", Color(1.0, 0.92, 0.7))
 	info_row.add_child(hl)
+	# PIP'S STREET: a heart + how many neighbour friends still hide in this house (only in the house).
+	var fgap := Control.new()
+	fgap.name = "FriendGap"
+	fgap.custom_minimum_size = Vector2(18, 0)
+	info_row.add_child(fgap)
+	var fi := UiKit.icon("heart", Color(1.0, 0.5, 0.65), 34.0)
+	fi.name = "FriendIcon"
+	info_row.add_child(fi)
+	var fl := _make_label(30)
+	fl.name = "Friends"
+	fl.text = "0"
+	fl.custom_minimum_size.x = 36
+	fl.add_theme_color_override("font_color", Color(1.0, 0.75, 0.82))
+	info_row.add_child(fl)
 	for c in info_row.get_children():
 		(c as Control).size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var pill := PanelContainer.new()  # one dark pill, so the row reads as one badge over the split line
@@ -2288,6 +2624,17 @@ func _update_hud() -> void:
 		info_row.get_parent().visible = true
 		(info_row.get_node("Time") as Label).text = "%d:%02d" % [int(phase_t) / 60, int(phase_t) % 60]
 		(info_row.get_node("Hiding") as Label).text = str(hiders_left())
+		var left := 0
+		for k in friend_state.size():
+			left += 1 if int(friend_state[k][1]) < 0 else 0
+		var show := not friends.is_empty()
+		(info_row.get_node("Friends") as Label).text = str(left)
+		if (info_row.get_node("Friends") as Control).visible != show:
+			for nm in ["FriendGap", "FriendIcon", "Friends"]:
+				(info_row.get_node(nm) as Control).visible = show
+			var pill := info_row.get_parent() as Control
+			pill.size = pill.get_combined_minimum_size() + Vector2(60, 0)
+			pill.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP, Control.PRESET_MODE_KEEP_SIZE, 8)
 
 
 ## Visual teaching: player p has done `key` once more ("torch", "sniff", "disguise", "squeak", "bell",
