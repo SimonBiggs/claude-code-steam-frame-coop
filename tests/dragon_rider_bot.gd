@@ -46,6 +46,8 @@ var picks_flown := 0
 var pick_target := -1
 var last_pick_stage := ""
 var deep_set := false
+var checks := 0
+var fails := 0
 
 
 func _ready() -> void:
@@ -400,6 +402,8 @@ func _note(mode: String) -> void:
 func _exit_tree() -> void:
 	if main == null:
 		return
+	# Its own verdict, in local AND networked runs (multibot reads it; tests/bot_end.gd ends networked runs).
+	print("BOT RESULT: %s (%d checks%s)" % ["PASS" if fails == 0 else "FAIL", checks, "" if fails == 0 else ", %d failed" % fails])
 	var keys := seen.keys()
 	keys.sort()
 	print("FINAL mode=%s phase=%s level=%d levels_done=%d lanterns=%d balloons_gone=%d seen=%s" % [main.net.mode, main.phase,
@@ -484,4 +488,6 @@ func _check_story(mode: String) -> void:
 
 
 func _ok(ok: bool, what: String) -> void:
+	checks += 1
+	fails += 0 if ok else 1
 	print(("Bot: OK " if ok else "SCRIPT ERROR: BOT: FAILED ") + what)
