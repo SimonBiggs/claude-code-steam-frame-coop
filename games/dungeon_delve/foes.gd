@@ -29,7 +29,6 @@ const FloorGen := preload("res://games/dungeon_delve/floorgen.gd")
 const Creatures := preload("res://core/creatures.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 const HudKit := preload("res://core/hud_kit.gd")
-const Tele := preload("res://games/dungeon_delve/tele.gd")
 
 enum { IDLE, MOVE, WIND, ACT, STUN, SLEEP, RECOVER, FLY }
 const BOSSES: Array[int] = [FloorGen.B_SLIME, FloorGen.B_BONE, FloorGen.B_CRYSTAL, FloorGen.B_FORGE]

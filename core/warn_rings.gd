@@ -9,6 +9,7 @@ extends Node3D
 ##   rings.shape("line", from, dir, Vector2(length, width), colour, secs, {"style": "flash", "stay": 0.3})
 ##   WarnRings.inside(kind, pos, dir, size, point, pad) -> is the point in it (host hit tests, bots)
 ##   count() -> tells showing now      clear() -> all gone (a new room / round)
+##   tells() -> [{kind, pos, dir, size, t, secs, stay}] the tells showing now (bots read them to dodge)
 ## Shapes: "circle" (size.x = radius), "ring" (a shockwave band: it grows to size.x while it goes off), "line"
 ## (size.x = length from pos along dir, size.y = width), "sector" (size.x = radius, size.y = half angle, radians).
 ## Styles (a game keeps its own look through these, never its own ring code: tests/shared_picks_test.gd):
@@ -23,7 +24,7 @@ const ResCache := preload("res://core/res_cache.gd")
 const KINDS: Array[String] = ["circle", "ring", "line", "sector"]
 const STYLES: Array[String] = ["rings", "disc", "flash"]
 
-var _warns: Array[Dictionary] = []  # {node, t, secs, stay, style, kind, size, grow, hot, edge}
+var _warns: Array[Dictionary] = []  # {node, t, secs, stay, style, kind, pos, dir, size, grow, hot, edge}
 
 
 func _ready() -> void:
@@ -138,7 +139,7 @@ func shape(kind: String, pos: Vector3, dir: Vector3, size: Vector2, col: Color, 
 		mi.position = at
 	mi.rotation = Vector3(0.0, yaw, 0.0)
 	var w := {"node": mi, "t": 0.0, "secs": maxf(secs, 0.2), "stay": float(o.get("stay", 0.0)), "style": style,
-		"kind": kind, "size": size, "grow": float(o.get("grow", 0.3 if style == "rings" else 0.0)), "edge": edge,
+		"kind": kind, "pos": pos, "dir": dir, "size": size, "grow": float(o.get("grow", 0.3 if style == "rings" else 0.0)), "edge": edge,
 		"hot": fill_material(o.get("hot", col.lightened(0.3)), 0.75) if style != "rings" else null}
 	_warns.append(w)
 	_shape_scale(w, 1.0)
@@ -147,6 +148,14 @@ func shape(kind: String, pos: Vector3, dir: Vector3, size: Vector2, col: Color, 
 
 func count() -> int:
 	return _warns.size()
+
+
+## The tells showing now (copies: {kind, pos, dir, size, t, secs, stay}); t < secs = still warning, not gone off.
+func tells() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for w in _warns:
+		out.append({"kind": w.kind, "pos": w.pos, "dir": w.dir, "size": w.size, "t": w.t, "secs": w.secs, "stay": w.stay})
+	return out
 
 
 func clear() -> void:

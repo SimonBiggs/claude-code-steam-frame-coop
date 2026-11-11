@@ -3,7 +3,8 @@ extends Node3D
 ## the track they just raced and drive through three rows of picture GATES on the start straight (where the practice
 ## rings were), one lane per choice. No words, no menus: drive through the picture you want.
 ##   row 1 KART:  LIGHT / MEDIUM / HEAVY kart (+ a SPANNER lane once a part is unlocked: fits your next part)
-##   row 2 SPEED: GENTLE (snail) / ZOOM (rocket, 150cc) / TIME TRIAL (clock: no CPUs, race your best lap)
+##   row 2 SPEED: GENTLE green (snail) / BRAVE blue (id "zoom": rocket, 150cc) / TIME TRIAL purple (clock: no CPUs,
+##   race your best lap). Colours from core/pick_orbs.gd mode_color.
 ##   row 3 CUP:   BOLT'S TOUR / CANDY / JUNGLE / ICE / SPACE cup
 ## Row 1 is everyone's own pick (it changes your kart at once). Rows 2 and 3 are votes: the lane most people drove
 ## through wins (a tie goes to whoever was first). Nobody has to do anything: after PIT_TIME (or once every person
