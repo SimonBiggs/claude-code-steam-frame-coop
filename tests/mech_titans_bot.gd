@@ -794,7 +794,10 @@ func _simple_checks() -> void:
 	kit.assert_true(saw_practice, "%s: the practice targets showed up" % mode)
 	kit.assert_true(saw_results, "%s: round 1 ended with a cheer" % mode)
 	kit.assert_true(saw_round2, "%s: round 2 started by itself" % mode)
-	kit.assert_true(saw_vehicle and only_jets_round1, "%s: TV players only had jets in round 1" % mode)
+	# Alone on a Deck the one player pilots the Titan (slot 0, pilot.mode "pad"): no TV flyer has a vehicle to check.
+	var flyers: bool = saw_vehicle or (main.pilot != null and main.pilot.mode == "pad" and kit.seated() <= 1)
+	kit.assert_true(flyers and only_jets_round1, "%s: TV players only had jets in round 1 (vehicle seen %s, only jets %s, pilot %s, seated %d)" % [
+		mode, saw_vehicle, only_jets_round1, main.pilot.mode if main.pilot != null else "-", kit.seated()])
 	kit.assert_true(not saw_painted, "%s: no weak-spot painting" % mode)
 	if mode != "client":
 		kit.assert_true(main.has_meta("practiced"), "the PRACTICE finished")
