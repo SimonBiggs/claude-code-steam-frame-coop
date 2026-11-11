@@ -3,12 +3,15 @@ extends Node
 ## carry what they find to the chest. BOT_VR=1: a fake giant points the telescope and pulls the
 ## trigger, pokes sparkles with its left glove, grabs treasure with the right and drops / throws it
 ## into the chest. BOT_PLAYERS=n TV players (default 2).
+## Second pass (deep.gd): TV bots run into a pick orb (mode, island, Peg's tool), the giant alone touches one with
+## a glove; checks the mode, the tool, warned events on every machine, the season's dress and the museum.
 ## Local:     godot --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/treasure_dig_bot.tscn
 ## Networked: DUO_PORT=81xx DUO_HOST=1 ... & DUO_PORT=81xx DUO_JOIN=127.0.0.1 ... (same scene, real time)
 ## Flat host: add DUO_FLAT_HOST=1 to the host (no VR: one bot pad plays slot 0 on the host).
 const UiKit := preload("res://core/ui_kit.gd")
 
 const BotKit := preload("res://tests/bot_kit.gd")
+const Deep := preload("res://games/treasure_dig/deep.gd")
 
 var kit: BotKit
 var main: Node
@@ -29,6 +32,10 @@ var saw_pick := false  # round 2 starts with Peg's two island signposts
 var max_maps := 0
 var saw_x := false
 var kinds_seen := {}
+var orbs_seen := {}  # stage -> true (every machine)
+var events_max := 0
+var vr_took := false
+var was_down := false  # a local digger sat bonked (every machine)
 
 
 func _ready() -> void:
@@ -36,8 +43,10 @@ func _ready() -> void:
 	kit = BotKit.new()
 	add_child(kit)
 	main = load("res://games/treasure_dig/main.tscn").instantiate()
-	main.set("round_time", 18.0)
+	main.set("round_time", 12.0)
 	main.set("fresh_save", true)  # a brand-new collection every run (story.gd)
+	main.set("pick_wait_scale", 0.35)  # short waits on the pick orbs
+	main.set("event_scale", 5.0)  # a few warned events even in a short round
 	add_child(main)
 	kit.main = main
 	want = 0 if OS.has_environment("BOT_SOLO") else BotKit.bot_players(2, 6)  # BOT_SOLO=1 BOT_VR=1: the giant alone
@@ -63,7 +72,12 @@ func _ready() -> void:
 		kit.at(end - 9.0, "host checks (the TV machine is still connected)", _checks)
 		kit.at(end, "finish", kit.finish)
 	else:
-		kit.at(31.0 if client else 36.0, "finish", func() -> void:
+		# Clients leave a little before the host (BOT_HOST_END given to every machine: tools/multibot.ts --env); a machine
+		# that joined late (BOT_LATE) counts its clock from its own start.
+		var fin := 31.0 if client else 36.0
+		if client and OS.has_environment("BOT_HOST_END"):
+			fin = float(OS.get_environment("BOT_HOST_END")) - 4.0 - float(OS.get_environment("BOT_LATE") if OS.has_environment("BOT_LATE") else "0")
+		kit.at(fin, "finish", func() -> void:
 			_checks()
 			kit.finish())
 	kit.every(2.0, _report)
@@ -108,7 +122,12 @@ func _physics_process(delta: float) -> void:
 	if main == null or not main.ready_to_play:
 		return
 	max_items_seen = maxi(max_items_seen, main.items.size())
-	saw_pick = saw_pick or String(main.net.state_get("phase", "")) == "pick"
+	if main.picks != null and main.picks.showing():
+		orbs_seen[main.picks.orbs.stage] = true
+	saw_pick = saw_pick or orbs_seen.has("island")
+	events_max = maxi(events_max, main.events.seen)
+	for sl in main.stunned:
+		was_down = was_down or float(main.stunned[sl]) > 0.0
 	max_maps = maxi(max_maps, int(main.net.state_get("maps", 0)))
 	saw_x = saw_x or main.net.state_get("x", false) is Vector3
 	if main.island.has("kind"):
@@ -134,8 +153,14 @@ func _steer(slot: int, delta: float) -> void:
 	for id in main.items:
 		if int(main.items[id]["carrier"]) == slot:
 			carrying = true
-	if String(main.net.state_get("phase", "")) == "pick":
-		target = main.SIGN_POS[slot % 2]  # dig at a signpost: pick that island
+	if String(main.net.state_get("phase", "")) == "orbs":
+		target = main.picks.orb_position(slot % 3) if main.picks.showing() else Vector3.INF  # run into a pick orb
+		if target != Vector3.INF:
+			target.y = 0.0
+		else:
+			target = a.position
+	elif slot == main.party.local_slots()[0] and _drop_spot() != Vector3.INF:
+		target = _drop_spot()  # the clumsy digger: runs under a falling coconut (tests the bonk on every machine)
 	elif carrying:
 		target = Vector3.ZERO
 	else:
@@ -167,6 +192,14 @@ func _steer(slot: int, delta: float) -> void:
 		kit.slot_press(main.party, slot, "accept")
 
 
+## The first falling coconut being told now (beach-local), or INF.
+func _drop_spot() -> Vector3:
+	for e in main.events.hits_now():
+		if String(e.kind) == "drop" and not (e.data as Array).is_empty():
+			return e.data[0]
+	return Vector3.INF
+
+
 func _nearest_loose(from: Vector3) -> Vector3:
 	var best := Vector3.INF
 	var bd := INF
@@ -196,6 +229,12 @@ func _drive_vr(delta: float) -> void:
 	rig.camera.position.y = 1.6
 	vr_t += delta
 	var beach: Node3D = main.beach
+	if String(main.net.state_get("phase", "")) == "orbs":  # touch the right-hand pick orb with a glove
+		var o: Vector3 = main.picks.orb_global(2) if main.picks.showing() else Vector3.INF
+		if o != Vector3.INF and main.party.player_count() == 0:
+			kit.vr_reach(rig, 1, o, 2.0, delta)
+			vr_took = vr_took or main.picks.chosen_by == 0
+		return
 	match vr_phase:
 		"aim":
 			if main.hidden.is_empty():
@@ -255,6 +294,13 @@ func _vr_held() -> int:
 	return -1
 
 
+func _vr_took_any() -> bool:
+	for h in main.picks.history:
+		if int(h[2]) == 0:
+			return true
+	return false
+
+
 func _report() -> String:
 	return "BOT %s: players %s, items %d, sparkles %d, score %d, found %d, round %d, stats %s" % [main.net.mode,
 		str(main.party.active_slots()), main.items.size(), main.sparkles.size(), int(main.net.state_get("score", 0)),
@@ -263,6 +309,25 @@ func _report() -> String:
 
 func _checks() -> void:
 	var mode: String = main.net.mode
+	# Second pass (deep.gd) on every machine.
+	kit.assert_true(orbs_seen.has("mode") or mode == "client", "%s: the mode was picked on the pick orbs (%s)" % [mode, str(orbs_seen.keys())])
+	kit.assert_true(orbs_seen.has("gift") or mode == "client", "%s: Peg's tools were offered on the pick orbs" % mode)
+	kit.assert_true(String(main.net.state_get("mode", "")) in ["gentle", "brave", "hard"], "%s: a mode reached this machine (%s)" % [mode, str(main.net.state_get("mode", ""))])
+	kit.assert_true(main.gift != "" or orbs_seen.has("gift") or main.results_showing(), "%s: a tool was picked (%s)" % [mode, main.gift])
+	kit.assert_true(events_max > 0, "%s: warned events were told by rings here (%d)" % [mode, events_max])
+	kit.assert_true(main.deco_node != null and is_instance_valid(main.deco_node), "%s: the island wears the %s dress" % [mode, main.season])
+	if mode == "client":
+		kit.info("client: a local digger sat bonked: %s" % was_down)
+	kit.assert_true(main.museum_node != null and is_instance_valid(main.museum_node), "%s: Peg's museum stands" % mode)
+	if mode != "client":
+		kit.info("events fired %s, stats %s, picks %s" % [str(main.events.fired), str(main.stats), str(main.picks.history)])
+		kit.assert_true(not main.events.fired.is_empty(), "host: events happened")
+		kit.assert_true(Deep.museum_total(main.save.data.museum) > 0, "host: banked treasure went into the museum (%s)" % str(main.save.data.museum))
+		kit.assert_true(String(main.save.data.mode) == main.mode, "host: the mode was saved")
+		if int(main.events.fired.get("drop", 0)) > 0 and kit.tv_players() > 0:
+			kit.assert_true(int(main.stats.bonks) > 0, "host: the clumsy digger under a coconut was bonked")
+		if main.vr_rig != null and want == 0:
+			kit.assert_true(vr_took or _vr_took_any(), "solo giant: a glove took a pick orb")
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
 	if mode == "client":
 		kit.assert_eq(main.party.local_slots().size(), want, "client: all %d local players are seated" % want)
@@ -276,7 +341,7 @@ func _checks() -> void:
 	kit.assert_true(saw_results, "%s: the results were shown" % mode)
 	kit.assert_true(main.island.has("spots") and not main.x_node == null, "%s: the island came from islandgen.gd (%s)" % [mode, str(kinds_seen.keys())])
 	if mode != "client":
-		kit.assert_true(saw_pick, "%s: round 2 began with Peg's island signposts" % mode)
+		kit.assert_true(saw_pick, "%s: round 2 began with the island pick orbs" % mode)
 		kit.assert_true(int(main.save.data.islands) >= 1, "%s: the islands done were saved" % mode)
 		kit.info("map pieces banked (most in a round): %d, X shown: %s, relics: %s" % [max_maps, saw_x, str(main.save.data.relics)])
 		if want > 0:

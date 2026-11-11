@@ -119,15 +119,7 @@ static func gift_choices(rack: int, last: String, seed_value: int) -> Array:
 
 
 static func season_of(date: String) -> String:
-	var parts := date.split("-")
-	var month := int(parts[1]) if parts.size() >= 2 else 6
-	if month == 12 or month <= 2:
-		return "winter"
-	if month <= 5:
-		return "spring"
-	if month <= 8:
-		return "summer"
-	return "autumn"
+	return Seeded.season(date)  # (core/seeded.gd: one season table for every game)
 
 
 ## Today's world (MM_WORLD=<id> forces one: What's New "try" and bots).
