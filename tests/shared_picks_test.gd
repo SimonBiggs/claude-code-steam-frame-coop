@@ -6,6 +6,8 @@ extends SceneTree
 ##   - PICK code: a func named like pick / pod / orb / altar / choice that builds a Label3D and meshes -> PickOrbs
 ##     (look through its opts: body / icon / at / scale ...)
 ##   - MODE look: "gentle"/"brave"/"hard"/"heroic"/"mega": Color(...) or "name": "GENTLE"/... -> PickOrbs.mode()
+##   - SEASON props: a game's own copy of the seasonal props (a "winter" snowman / "autumn" pumpkin built in a match)
+##     -> core/season_kit.gd prop() / drift() (three games had copied them by 2026-11-11)
 ## A diegetic thing that only looks similar (a hazard vent, a shop sign) is allowed by a line in its file:
 ##   ## shared-picks-ok: <func name> (why)
 ## Every game script must also compile (load() + can_instantiate()).
@@ -21,6 +23,7 @@ const PICK_NAME := "(?i)(pick(?!up)|pod|orb|altar|choice|choose)"
 ## Ground shapes (a glow on a body, a sphere round a boss, is not a ring on the ground).
 const WARN_GEOMETRY := "(\\.torus\\(|\\.disc\\(|CylinderMesh\\.new|TorusMesh\\.new|PlaneMesh\\.new|SurfaceTool\\.new|ring_mesh\\()"
 const PICK_GEOMETRY := "(MeshInstance3D\\.new\\(|MeshKit\\.instance\\(|Sprite3D\\.new)"
+const SEASON_COPY := "(?s)\"winter\"\\s*:[^\n]*snowman.{0,1200}\"autumn\"\\s*:[^\n]*pumpkin"
 const MODE_LOOK := "\"(gentle|brave|hard|heroic|mega)\"\\s*:\\s*Color\\(|\"name\"\\s*:\\s*\"(GENTLE|BRAVE|HARD|HEROIC)\"|\"kind\"\\s*:\\s*\"mode\"[^}\\n]*\"name\"\\s*:\\s*\""
 
 var fails := 0
@@ -60,6 +63,8 @@ static func scan(path: String, text: String) -> Array:
 			out.append("%s: %s() draws its own warning: use core/warn_rings.gd (warn / shape, style \"rings\" / \"disc\" / \"flash\")" % [path, fname])
 		elif rx_pick.search(fname) and rx_pgeo.search(body) and body.contains("Label3D.new") and not body.contains("PickOrbs"):
 			out.append("%s: %s() builds its own picks: use core/pick_orbs.gd show_orbs(..., opts) (body / icon / at keep your look)" % [path, fname])
+	if not ok.has("seasons") and RegEx.create_from_string(SEASON_COPY).search(text):
+		out.append("%s: its own seasonal props (snowman, pumpkin...): use core/season_kit.gd prop(builder, season, at, i, size)" % path)
 	if not ok.has("modes"):
 		var rx_mode := RegEx.create_from_string(MODE_LOOK)
 		var mm := rx_mode.search(text)
@@ -85,10 +90,12 @@ func _initialize() -> void:
 	var bad_warn := "func boss_warn(p):\n\tvar mi := MeshInstance3D.new()\n\tmi.mesh = TorusMesh.new()\n"
 	var bad_pick := "func _make_pod(k):\n\tvar l := Label3D.new()\n\tvar m := MeshKit.instance(x)\n"
 	var bad_mode := "const C := {\"brave\": Color(1, 0.6, 0.2)}\n"
+	var bad_season := "\tmatch s:\n\t\t\"winter\":  # a snowman\n\t\t\tb.sphere(1)\n\t\t\"autumn\":  # a pumpkin\n\t\t\tb.sphere(2)\n"
 	var good := "func boss_warn(p):\n\trings.warn(p, 2.0, Color.RED, 1.0)\nfunc show_pick(d):\n\torbs.show_orbs(\"x\", d, Vector3.ZERO)\n"
 	_expect(scan("bad", bad_warn).size() == 1, "the scan finds a home-made warning ring")
 	_expect(scan("bad", bad_pick).size() == 1, "the scan finds home-made picks")
 	_expect(scan("bad", bad_mode).size() == 1, "the scan finds a game's own mode colours")
+	_expect(scan("bad", bad_season).size() == 1, "the scan finds a game's own seasonal props")
 	_expect(scan("good", good).is_empty(), "the scan passes code that uses the helpers")
 	_expect(scan("ok", "## shared-picks-ok: _make_pod (a test)\n" + bad_pick).is_empty(), "shared-picks-ok lets a func through")
 	# 2. Every game.

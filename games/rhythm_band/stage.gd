@@ -131,6 +131,7 @@ var stars_shown := 0
 var star_anim := 0.0
 var tint_col := Color.WHITE
 var tint_k := 0.0  # the drummer's spotlight toy (props.gd) tints the beams for a moment
+var warn_hold := false  # hazards.gd: a change tell holds the beams steady in its colour (no beat pulse)
 
 
 func build() -> void:
@@ -649,7 +650,8 @@ func update(delta: float, beat_pos: float, crowd: float, playing: bool, star: fl
 		pv.rotation.z = sin(t * (0.6 + k * 0.07) * spd + k * 1.3) * 0.55
 		pv.rotation.x = 0.45 + sin(t * 0.5 * spd + k) * 0.25
 		var c := BEAM_COLORS[(i + bar_n) % BEAM_COLORS.size()].lerp(Color(1.0, 0.8, 0.25), star_k).lerp(tint_col, minf(1.0, tint_k * 1.5))
-		beam_mats[i].albedo_color = Color(c.r, c.g, c.b, 0.05 + 0.2 * beat_flash * (0.4 + energy) + 0.12 * tint_k)
+		var ba := 0.17 if warn_hold else 0.05 + 0.2 * beat_flash * (0.4 + energy) + 0.12 * tint_k
+		beam_mats[i].albedo_color = Color(c.r, c.g, c.b, ba)
 	key_light.light_energy = 1.0 + beat_flash * 0.8 * (0.3 + energy)
 	key_light.light_color = BEAM_COLORS[bar_n % BEAM_COLORS.size()].lerp(Color.WHITE, 0.6).lerp(Color(1.0, 0.85, 0.5), star_k)
 	for sp in speakers:
