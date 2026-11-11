@@ -9,11 +9,12 @@ extends RefCounted
 
 const Frames := preload("res://games/mech_titans/frames.gd")
 const Upgrades := preload("res://games/mech_titans/upgrades.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
 
 const BOSS_HEARTS := 3
 ## Homes on the hills: [hearts needed, id]. main.gd builds each one it has (and a few friends by it).
 const HOMES: Array = [[1, "pond"], [4, "palms"], [8, "igloo"], [13, "spring"], [19, "moonrock"], [26, "flowers"], [35, "slide"], [48, "rainbow"]]
-const BRAVE_HEARTS := 6  ## BRAVE difficulty opens (MEGA opens when a boss went home in BRAVE or MEGA)
+const BRAVE_HEARTS := 6  ## BRAVE difficulty opens (HARD, id "mega", opens when a boss went home in BRAVE or MEGA)
 const PARADE_MIN := 8
 const PARADE_MAX := 16
 
@@ -66,7 +67,7 @@ static func unlocks_between(before: int, after: int) -> Array:
 		if before < need2 and after >= need2:
 			out.append({"kind": "upgrade", "id": String(u["id"]), "name": String(u["name"])})
 	if before < BRAVE_HEARTS and after >= BRAVE_HEARTS:
-		out.append({"kind": "mode", "id": "brave", "name": "BRAVE"})
+		out.append({"kind": "mode", "id": "brave", "name": PickOrbs.mode_name("brave")})
 	for e in HOMES:
 		if before < int(e[0]) and after >= int(e[0]):
 			out.append({"kind": "home", "id": String(e[1]), "name": "SANCTUARY"})
