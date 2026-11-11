@@ -12,8 +12,15 @@ extends Node
 ## the ones learned (cue_learned_*), the VR ghost hand (ghost_hand, ghost_let_go), practice miss arrows
 ## and the join card picture, and prints "BOT: ERROR instruction text" if a prompt label, the VR hint,
 ## the help panel or the Kraken's label shows any words.
+## SECOND PASS (deep.gd): the host bot turns deck events on from wave 1 (twice as many) so a short run meets them; in
+## the pick phase the gunner shoots a different orb each pick (left, right, middle...) unless a deckhand muskets one;
+## deckhands step out of told Kraken arms and squalls (player 2 walks into the first of each, so the caught path runs);
+## checks the mode is picked once, a gift before every wave, deck events are told (and every machine draws them),
+## Polly's harbour matches the save, and nothing in the deep test's fairness rules is broken in play. With nobody
+## else aboard (solo VR host, one Deck) it checks Polly loads the cannon.
 
 const World := preload("res://games/cannon_cove/world.gd")
+const Deep := preload("res://games/cannon_cove/deep.gd")
 
 var main
 var t := 0.0
@@ -30,6 +37,13 @@ var prop_step := 0  # simple mode, fake VR: 0 not yet, 1 bell, 2 parrot, 3 reach
 var prop_t := 0.0
 var seen := {}
 var cues := {}  # simple mode: picture cues seen / learned
+var deep_set := false
+var picks_shot := 0
+var pick_target := -1
+var last_pick_stage := ""
+var stood_in := {}  # kind -> true: player 2 walked into the first told arm / squall
+var checks := 0
+var fails := 0
 
 
 func _wanted_deckhands() -> int:
@@ -54,6 +68,11 @@ func _physics_process(delta: float) -> void:
 		main.wave = int(OS.get_environment("CC_START_WAVE")) - 1
 		main.practice_hits = 99
 		print("Bot: skipping ahead to wave %d" % (main.wave + 1))
+	if main.net.mode != "client" and not deep_set:
+		deep_set = true
+		main.hazard_from = 1  # deck events from wave 1 (a short bot run never reaches wave 2)
+		main.hazard_scale = 2.0
+		main.hazard_first = 4.0  # (bots clear a wave fast)
 	_note_features()
 	_check_story(main.net.mode)
 	if main.simple:
@@ -151,6 +170,17 @@ func _note_features() -> void:
 		"ghost hand": main.ghost_hand != null and main.ghost_hand.visible,
 		"coach hint": main.coach_text != "",
 		"guide arrow": main.players.any(func(pl): return pl.has_meta("guide") and pl.get_meta("guide").visible),
+		"pick orbs": main.picks.showing(),
+		"deck event told": main.hazards.seen > 0,
+		"kraken arm": main.hazards.live.any(func(en): return en.arm != null),
+		"squall": main.hazards.live.any(func(en): return en.cloud != null),
+		"mode picked": main.play_mode != "",
+		"gift picked": main.gift != "",
+		"harbour": main.harbour.shown > 0,
+		"polly loads": int(main.deep_stats.polly_loads) > 0,
+		"netted ship": not get_tree().get_nodes_in_group("ships").filter(func(x): return x.net_t > 0.0).is_empty(),
+		"bounce": int(main.deep_stats.bounces) > 0,
+		"shoved": main.players.any(func(pl): return pl.has_meta("shove")),
 	}
 	for k in checks:
 		if checks[k] and not seen.has(k):
@@ -160,13 +190,23 @@ func _note_features() -> void:
 
 ## [aim point, node] of what the gunner should shoot, or [].
 func _pick_target() -> Array:
+	if main.picks.showing():  # the pick row: a different orb each pick (left, right, middle...)
+		var st := "%s%d" % [main.picks.stage, main.picks.history.size()] if main.net.mode != "client" else "row"
+		if st != last_pick_stage or pick_target < 0:
+			last_pick_stage = st
+			pick_target = [0, 2, 1][picks_shot % 3]
+			picks_shot += 1
+		var op: Vector3 = main.picks.orb_position(pick_target)
+		if op != Vector3.INF:
+			return [op, main.picks.orbs.orbs[pick_target]]
+		return []
 	for k in get_tree().get_nodes_in_group("krakens"):
 		if k.vulnerable():
 			return [k.head_center(), k]
 	var target = null
 	var best_d := INF
 	for s in get_tree().get_nodes_in_group("ships"):
-		if s.sinking:
+		if s.sinking or s.ghost:
 			continue
 		var d: float = s.global_position.length() * (0.5 if s.is_fireship() else 1.0)
 		if d < best_d:
@@ -375,7 +415,7 @@ func _drive_gunner(p) -> void:
 	p.bot_aim_on = true
 	p.bot_aim = Vector2(yaw, pitch)
 	var settled: bool = absf(c.aim_yaw - clampf(yaw, -c.YAW_LIMIT, c.YAW_LIMIT)) < 0.03 and absf(c.aim_pitch - pitch) < 0.03
-	var close_enough: bool = target.is_in_group("tentacles") or target.is_in_group("krakens") or tp.length() < (float(OS.get_environment("CC_BOT_RANGE")) if OS.has_environment("CC_BOT_RANGE") else 55.0)
+	var close_enough: bool = main.picks.orbs.orbs.has(target) or target.is_in_group("tentacles") or target.is_in_group("krakens") or tp.length() < (float(OS.get_environment("CC_BOT_RANGE")) if OS.has_environment("CC_BOT_RANGE") else 55.0)
 	if settled and close_enough and absf(yaw) < c.YAW_LIMIT and c.ammo > 0 and c.reload_t <= 0.0 and p.station == station:
 		p.bot_fire = toggle
 
@@ -387,6 +427,8 @@ func _drive_deckhand(p) -> void:
 	if main.game_over:
 		return
 	var pos: Vector3 = p.global_position
+	if _dodge(p, pos):
+		return
 	var leaks := get_tree().get_nodes_in_group("leaks")
 	var boarders := get_tree().get_nodes_in_group("boarders").filter(func(b): return b.alive())
 	var goal = null
@@ -439,6 +481,47 @@ func _drive_deckhand(p) -> void:
 			if not p.bot_fire:
 				p.yaw = lerp_angle(p.yaw, atan2(-to.x, -to.z), 0.2)
 				p.pitch = 0.0
+
+
+## Deck events (deep.gd): step out of a told Kraken arm's rings / a squall band (player 2 stands in the first one).
+func _dodge(p, pos: Vector3) -> bool:
+	for tl in main.hazards.tells_now():
+		var e: Dictionary = tl.e
+		if float(tl.t) > float(tl.secs) + Deep.STAY:
+			continue
+		if p.index == 1 and (not stood_in.has(String(e.kind)) or has_meta("standing")) and float(tl.t) < float(tl.secs) + 0.5:
+			if not stood_in.has(String(e.kind)):
+				stood_in[String(e.kind)] = true
+				set_meta("standing", true)
+				print("Bot: P2 walks into the %s" % e.kind)
+			var goal: Vector3 = e.pos
+			if String(e.kind) == "squall":
+				goal = Vector3(pos.x, 0.0, goal.z)
+			var to := goal - pos
+			to.y = 0.0
+			p.bot_move = to.normalized() if to.length() > 0.3 else Vector3.ZERO
+			return true  # walks in and stays put (gets caught)
+		if has_meta("standing") and float(tl.t) >= float(tl.secs) + 0.5:
+			remove_meta("standing")
+		var grown := {"kind": e.kind, "pos": e.pos, "size": (e.size as Vector2) + Vector2(0.5, 0.5), "sign": e.sign}
+		if not Deep.caught(grown, pos):
+			continue
+		var away: Vector3
+		if String(e.kind) == "arm":
+			away = pos - (e.pos as Vector3)
+			away.y = 0.0
+			if away.length() < 0.1:
+				away = Vector3(-float(e.sign), 0.0, 0.0)
+			if absf(pos.x) > World.DECK_HALF_W - 0.8:
+				away = Vector3(0.0, 0.0, signf(away.z) if absf(away.z) > 0.1 else 1.0)
+		else:
+			away = Vector3(0.0, 0.0, signf(pos.z - (e.pos as Vector3).z) if absf(pos.z - (e.pos as Vector3).z) > 0.05 else 1.0)
+		p.bot_move = away.normalized()
+		if not seen.has("dodged"):
+			seen["dodged"] = true
+			print("Bot: P%d steps out of a %s" % [p.index + 1, e.kind])
+		return true
+	return false
 
 
 ## Even-numbered deckhands snipe tentacles and bomb boats when there's nothing else to do.
@@ -499,6 +582,8 @@ func _check_tip(who: String, text: String) -> void:
 
 func _exit_tree() -> void:
 	if main != null:
+		# Its own verdict, in local AND networked runs (multibot reads it; tests/bot_end.gd ends networked runs).
+		print("BOT RESULT: %s (%d checks%s)" % ["PASS" if fails == 0 else "FAIL", checks, "" if fails == 0 else ", %d failed" % fails])
 		if main.simple:
 			var ks: Array = cues.keys()
 			ks.sort()
@@ -510,6 +595,8 @@ func _exit_tree() -> void:
 		for p in main.players:
 			if p.active:
 				active += 1
+		print("BOT DEEP: mode=%s play_mode=%s gift=%s season=%s harbour=%d solo=%s picks=%s fired=%s stats=%s" % [main.net.mode, main.play_mode,
+			main.gift, main.season, main.harbour_n, main.solo_sailing, str(main.picks.history), str(main.hazards.fired), str(main.deep_stats)])
 		print("FINAL players=%d mode=%s wave=%d gold=%d water=%.0f game_over=%s best_wave=%d phase=%s practice_hits=%d seen=%s" % [active, main.net.mode, main.wave, main.gold, main.water, main.game_over, maxi(main.wave, Engine.get_meta("cc_best_wave", 0)), main.phase, main.practice_hits, seen.keys()])
 		var n := _count_visuals(main)
 		print("Visual instances in the scene: %d" % n)
@@ -528,13 +615,30 @@ func _count_visuals(n: Node) -> int:
 ## (and the shelf shows every one); a TV machine gets the treasures from the host. Checked once, 70 s in (or when
 ## BOT_END is near).
 func _check_story(mode: String) -> void:
-	var at := minf(70.0, float(OS.get_environment("BOT_END")) - 8.0) if OS.has_environment("BOT_END") else 70.0
+	var at := minf(70.0, float(OS.get_environment("BOT_END")) - 8.0) if OS.has_environment("BOT_END") else 52.0  # (before a 60 s run ends)
 	if has_meta("story_checked") or t < at:
 		return
 	set_meta("story_checked", true)
 	if mode == "client":
 		_ok(main.treasure_count >= 0, "the TV machine got Polly's treasures (%d)" % main.treasure_count)
+		_ok(main.harbour.shown == main.harbour_n, "the TV machine shows Polly's harbour (%d)" % main.harbour_n)
+		_ok(main.wave < 1 or main.play_mode != "", "the TV machine knows the mode (%s)" % main.play_mode)
 		return
+	_ok(main.wave < 1 or main.play_mode != "", "the mode was picked before wave 1 (%s)" % main.play_mode)
+	var modes := 0
+	var gifts := 0
+	for h in main.picks.history:
+		modes += 1 if h[0] == "mode" else 0
+		gifts += 1 if h[0] == "gift" else 0
+	_ok(modes <= 1, "the mode is picked once a session (%d)" % modes)
+	_ok(main.wave < 1 or gifts >= main.wave - (int(OS.get_environment("CC_START_WAVE")) - 1 if OS.has_environment("CC_START_WAVE") else 0),
+		"a gift before every wave (%d gifts, wave %d)" % [gifts, main.wave])
+	_ok(OS.has_environment("CC_HARBOUR") or main.harbour_n == Deep.harbour(int(main.save.data.total)), "Polly's harbour matches the save (%d)" % main.harbour_n)
+	_ok(main.harbour.shown == main.harbour_n, "every harbour piece stands (%d)" % main.harbour.shown)
+	var probs: Array = Deep.problems(main.hazards.list, main._deep_spec())
+	_ok(probs.is_empty(), "this wave's deck events are fair %s" % str(probs))
+	if main.nobody_aboard() and main.wave >= 1:
+		_ok(int(main.deep_stats.polly_loads) > 0, "nobody else aboard: Polly loads the cannon (%d)" % int(main.deep_stats.polly_loads))
 	_ok(main.voyage_seed > 0, "a seeded voyage (%d)" % main.voyage_seed)
 	_ok(main.save != null and int(main.save.data.days) >= 1, "the play-day was counted")
 	_ok(main.wave < 2 or int(main.save.data.total) >= 1, "a treasure after wave 1 (wave %d, %d treasures)" % [main.wave, int(main.save.data.total)])
@@ -543,4 +647,6 @@ func _check_story(mode: String) -> void:
 
 
 func _ok(ok: bool, what: String) -> void:
+	checks += 1
+	fails += 0 if ok else 1
 	print(("Bot: OK " if ok else "SCRIPT ERROR: BOT: FAILED ") + what)

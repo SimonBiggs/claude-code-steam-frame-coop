@@ -36,6 +36,18 @@ const SIMPLE_MODE := true
 ## Telemetry: one RUN line per wave, when the ship sinks and on quit. Networked: the host sends the treasures, flags
 ## and crown ("treasures") and the cards ("story") as events; the wave plans stay on the host (ships are snapshots).
 const VoyageGen := preload("res://games/cannon_cove/voyagegen.gd")
+## SECOND PASS (deep.gd): GENTLE / BRAVE / HARD once a session and POLLY'S CANNON GIFTS before every wave (BOUNCY BALLS,
+## NET SHOT, BIG BARREL, GOLDEN BALL, QUICK LOAD) on the shared pick orbs bobbing on the sea off the gunner's cannon
+## (picks.gd: shoot one, or musket one); Kraken arms and squalls told first by steady warn rings on our deck
+## (hazards.gd); voyages sail through the season's seas; POLLY'S HARBOUR on the island off the bow grows a piece every
+## few treasures (harbour.gd). Nobody else aboard (the Frame alone, one Deck): Polly reloads the cannon herself.
+## Networked: "orbs" (sticky) / "take" for the picks, "hazard" / "shove" / "netted" for the events and gifts, and the
+## sticky "deep" event [mode, gift, season, harbour pieces] (no snapshot change).
+const Deep := preload("res://games/cannon_cove/deep.gd")
+const Picks := preload("res://games/cannon_cove/picks.gd")
+const Hazards := preload("res://games/cannon_cove/hazards.gd")
+const HarbourScript := preload("res://games/cannon_cove/harbour.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
 const Seeded := preload("res://core/seeded.gd")
 const Save := preload("res://core/save.gd")
 const Telemetry := preload("res://core/telemetry.gd")
@@ -89,12 +101,7 @@ const MAX_PLAYERS := 7  # the gunner (index 0) plus up to six deckhands (indices
 var multi_machine := true
 const PLAYER_COLORS: Array[Color] = Looks.PLAYER_COLORS  # (looks.gd: palette.gd reads it)
 const KEYS2_DEVICE := -2  # pseudo device id for the second keyboard set (arrows + Enter/Shift) on the TV
-const CANNON_SPOTS := [
-	[Vector3(-3.55, 0.85, 1.0), Vector3.LEFT],
-	[Vector3(-3.55, 0.85, 6.0), Vector3.LEFT],
-	[Vector3(3.55, 0.85, 1.0), Vector3.RIGHT],
-	[Vector3(3.55, 0.85, 6.0), Vector3.RIGHT],
-]
+const CANNON_SPOTS := World.CANNON_SPOTS  # (world.gd: deep.gd reads them too)
 ## Extra sounds made with core/sfx.gd's synth: [seconds, start Hz, end Hz, volume, wave, noise]
 const EXTRA_SOUNDS := {
 	"cannon": [0.9, 140.0, 28.0, 0.85, "saw", 0.75],
@@ -117,6 +124,7 @@ const EXTRA_SOUNDS := {
 	"clang": [0.3, 1700.0, 1550.0, 0.35, "square", 0.25],
 	"kaboom": [1.2, 110.0, 22.0, 0.9, "saw", 0.8],
 	"firework": [0.45, 300.0, 2400.0, 0.25, "sine", 0.6],
+	"boing": [0.35, 220.0, 700.0, 0.32, "sine", 0.0],
 }
 ## The voyage: five waves, then the Kraken; after that the "bonus seas" go on forever.
 const BOSS_WAVE := 6
@@ -210,6 +218,25 @@ var treasure_root: Node3D
 var treasure_count := -1
 var story_queue: Array = []
 var story_t := 0.0
+# Second pass (deep.gd): the session's mode, this wave's gift, the season, warned deck events, Polly's harbour, solo.
+var picks: Picks
+var hazards: Hazards
+var harbour: Node3D
+var play_mode := ""  # "" until the team picks (once a session; TV machines from the "deep" event)
+var gift := ""  # this wave's gift
+var season := "spring"
+var harbour_n := 0  # pieces in Polly's harbour
+var pick_wave := 1  # host: the wave the picks are for
+var solo_t := 0.0  # host: practice seconds with no TV machine joined
+var solo_sailing := false  # host: sailing without a TV machine (the Frame alone)
+var polly_t := 0.0  # host / local: Polly's reload clock (nobody else aboard)
+var hazard_from := Deep.FIRST_WAVE  # bots: events from wave 1
+var hazard_scale := 1.0  # bots: more events a wave
+var hazard_first := Deep.FIRST_T  # bots: the first tell sooner
+var deep_stats := {"told": 0, "arms": 0, "squalls": 0, "caught": 0, "dropped": 0, "dodged": 0, "bounces": 0, "netted": 0,
+	"big_hits": 0, "polly_loads": 0, "polly_patches": 0, "grew": 0}
+var drift: CPUParticles3D
+var shown_season := ""
 
 
 func _ready() -> void:
@@ -227,6 +254,20 @@ func _ready() -> void:
 	net.main = self
 	add_child(net)
 	net.sticky_event("treasures")  # a machine that joins later gets the latest one (core/net.gd)
+	net.sticky_event("orbs")  # a machine joining mid-pick sees the pick orbs
+	net.sticky_event("deep")  # ... and the mode, gift, season and harbour
+	season = OS.get_environment("CC_SEASON") if OS.has_environment("CC_SEASON") else Seeded.season()
+	if not Deep.SEASONS.has(season):
+		season = "spring"
+	picks = Picks.new()
+	picks.main = self
+	add_child(picks)
+	hazards = Hazards.new()
+	hazards.main = self
+	add_child(hazards)
+	harbour = HarbourScript.new()
+	add_child(harbour)
+	_apply_season()
 	seats = ClassicSeats.new(self, {
 		"free_actions": ["restart", "pause"],
 		"is_local": _is_local_flat,
@@ -496,6 +537,11 @@ func _sfx() -> Node:
 	return sfx
 
 
+## This machine only (every machine already plays it: picks, deck event tells).
+func local_sound(sound_name: String, volume_db: float = 0.0, pitch: float = 1.0) -> void:
+	_sfx().play(sound_name, volume_db, pitch)
+
+
 func sound(sound_name: String, volume_db: float = 0.0, pitch: float = 1.0) -> void:
 	_sfx().play(sound_name, volume_db, pitch)
 	if net:
@@ -559,6 +605,7 @@ func explosion(pos: Vector3, color: Color, size: float) -> void:
 	ball.mesh = sm
 	var mat := World.mat(color, 5.0)
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	ball.material_override = mat
 	ball.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -584,6 +631,7 @@ func musket_fx(shooter: int, from: Vector3, to: Vector3) -> void:
 		tracer.mesh = bm
 		var mat := World.mat(Color(1.0, 0.9, 0.5), 3.0)
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		tracer.material_override = mat
 		tracer.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -648,6 +696,7 @@ func miss_arrow(from: Vector3, to: Vector3) -> void:
 	var m := World.mat(Color(1.0, 0.95, 0.45, 0.85), 3.0)
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 	# Built pointing +Z (a cone for the head, a fat shaft), then turned to face the target.
 	var shaft := World.cyl(arrow, 0.35, 0.35, 2.4, Vector3(0, 0, -0.6), m, 10)
 	shaft.rotation.x = PI / 2.0
@@ -1237,6 +1286,12 @@ func deckhands() -> Array:
 	return players.filter(func(p): return not p.gunner and p.active)
 
 
+## Nobody aboard but the gunner: no deckhand seat, or only the TV's waiting seat on a host no TV machine joined (the
+## Frame alone). Polly then loads the cannon and patches holes, and no boarders come (deep.gd SOLO).
+func nobody_aboard() -> bool:
+	return deckhands().is_empty() or (net != null and net.mode == "host" and not net.connected)
+
+
 ## Deckhands beyond the classic two (0..4): used to scale the enemies to the size of the crew.
 func crew_extra() -> int:
 	return maxi(0, deckhands().size() - 2)
@@ -1264,6 +1319,7 @@ func _process(delta: float) -> void:
 	_update_hud()
 	_update_guides()
 	_update_story(delta)
+	_deep_animate(delta)
 	if props:
 		props.tick(delta)
 	if players.size() < MAX_PLAYERS:
@@ -1289,11 +1345,17 @@ func _process(delta: float) -> void:
 	if phase == "practice":
 		_update_practice(delta)
 		return
-	if net.mode == "host" and not net.connected:
-		return  # hold the waves until the deckhands join
+	if net.mode == "host" and not net.connected and not solo_sailing:
+		return  # hold the waves until the deckhands join (or the gunner sails alone: solo_sailing)
+	_polly_helps(delta)
+	if phase == "pick":
+		picks.tick(delta)
+		return
 	_update_water(delta)
 	_random_events(delta)
 	wave_t += delta
+	if phase == "wave":
+		_host_hazards(delta)
 	if phase == "victory":
 		victory_t -= delta
 		if victory_t <= 0.0:
@@ -1305,7 +1367,7 @@ func _process(delta: float) -> void:
 	if in_break:
 		break_timer -= delta
 		if break_timer <= 0.0:
-			_start_wave()
+			_next_pick(wave + 1)  # the mode (once a session), then Polly's gift, then the wave
 		return
 	spawn_timer -= delta
 	if spawn_timer <= 0.0 and not spawn_queue.is_empty():
@@ -1319,7 +1381,12 @@ func _process(delta: float) -> void:
 # --- Target practice (before wave 1; the VR gunner practises while the TV crew joins) --------
 
 func _update_practice(delta: float) -> void:
-	var crew_ready: bool = net.mode != "host" or net.connected
+	if net.mode == "host" and not net.connected and not solo_sailing:
+		solo_t += delta  # nobody joined yet: after the practice hits and a while, the gunner sails alone with Polly
+		if solo_t >= Deep.SOLO_WAIT and (practice_hits >= PRACTICE_HITS or solo_t > 80.0):
+			solo_sailing = true
+			print("Sailing alone: Polly loads the cannons")
+	var crew_ready: bool = net.mode != "host" or net.connected or solo_sailing
 	if crew_ready:
 		practice_t += delta
 	var have := false
@@ -1467,8 +1534,8 @@ func leak_cap() -> int:
 func boarder_cap() -> int:
 	if not SIMPLE_MODE:
 		return 99
-	if wave < 4:
-		return 0
+	if wave < 4 or nobody_aboard():
+		return 0  # (nobody aboard to splash them: no boarders)
 	return (1 if wave < BOSS_WAVE else 2) + crew_extra() / 3
 
 
@@ -1511,7 +1578,16 @@ func _start_wave() -> void:
 	ships_to_spawn = spawn_queue.size()
 	wave_t = 0.0
 	wave_plan_kinds = spawn_queue.map(func(e: Dictionary) -> String: return e.k)
-	print("Wave %d started (%d deckhands, voyage %d, plan %s)" % [wave, deckhands().size(), voyage_seed, wave_plan_kinds])
+	var ev := Deep.events(Seeded.derive(VoyageGen.wave_seed(voyage_seed, wave), "events"), _deep_spec())
+	hazards.reset(ev)
+	if gift == "golden":  # GOLDEN BALL: a golden cannonball every wave (straight into the cannon when nobody's aboard)
+		if nobody_aboard() and not players.is_empty():
+			cannons[clampi(int(players[0].station), 0, cannons.size() - 1)].golden += 1
+		else:
+			golden_balls += 1
+	print("Wave %d started (%d deckhands, voyage %d, plan %s, %s, gift %s, %s, %d deck events %s%s)" % [wave, deckhands().size(), voyage_seed,
+		wave_plan_kinds, play_mode, gift, season, ev.size(), str(ev.map(func(e: Dictionary) -> String: return String(e.kind))),
+		", sailing alone" if solo_sailing else ""])
 	sound("wave")
 	sound("bell", -4.0)
 	if SIMPLE_MODE:
@@ -1553,6 +1629,7 @@ func _start_wave() -> void:
 
 
 func _end_wave() -> void:
+	hazards.reset([])  # (a tell still showing just fades: the wave is won)
 	in_break = true
 	phase = "break"
 	break_timer = 7.0
@@ -1630,6 +1707,7 @@ func _spawn_ship(e: Dictionary) -> void:
 	s.orbit_dir = float(e.get("dir", 1.0))
 	s.fire_t = float(e.get("fire", 3.0))
 	s.calm = wave <= (2 if SIMPLE_MODE else 1)
+	s.fire_every *= float(Deep.mode_data(play_mode).fire)  # GENTLE pirates shoot less often, HARD ones more
 	s.net_id = next_net_id()
 	# Come in from port or starboard (where the cannons point), a little fore or aft.
 	var side: float = e.get("side", 1.0)
@@ -1921,6 +1999,8 @@ func create_leak(pos: Vector3) -> void:
 	var leaks := get_tree().get_nodes_in_group("leaks")
 	if leak_cap() <= 0:
 		return  # simple mode, waves 1-2: the shots just rock the boat
+	if nobody_aboard():
+		return  # nobody aboard to patch it (the Frame alone, one Deck): the shot just rocks the boat
 	if leaks.size() >= leak_cap():
 		water = minf(100.0, water + (2.0 if SIMPLE_MODE else 4.0))
 		return
@@ -1951,18 +2031,25 @@ func gunner_fire(p) -> bool:
 	if fired:
 		stats[0].shots += 1
 		gunner_fired = true
+		if gift == "quick":
+			c.reload_t *= Deep.QUICK  # QUICK LOAD
 	return fired
 
 
 func ball_hit_test(pos: Vector3):
+	var slack := ball_slack()
+	if picks != null:
+		var oi := picks.ball_hit(pos, slack)
+		if oi >= 0:
+			return picks.orbs.orbs[oi]  # a pick orb (on_ball_hit takes it)
 	for s in get_tree().get_nodes_in_group("ships"):
-		if s.hit_test(pos):
+		if s.hit_test(pos, slack):
 			return s
 	for k in get_tree().get_nodes_in_group("krakens"):
-		if k.rise > 0.6 and k.state != "dying" and k.head_center().distance_to(pos) < k.HEAD_R + 1.4:
+		if k.rise > 0.6 and k.state != "dying" and k.head_center().distance_to(pos) < k.HEAD_R + 1.4 + slack:
 			return k
 	for t in get_tree().get_nodes_in_group("tentacles"):
-		if t.alive() and t.distance_to_point(pos) < 1.1:
+		if t.alive() and t.distance_to_point(pos) < 1.1 + slack:
 			return t
 	for tg in get_tree().get_nodes_in_group("targets"):
 		if tg.hit_test(pos):
@@ -1971,6 +2058,15 @@ func ball_hit_test(pos: Vector3):
 
 
 func on_ball_hit(target, pos: Vector3, mega: bool = false) -> void:
+	if picks != null and picks.orbs.orbs.has(target):  # a pick orb: the gunner chose it
+		if picks.can_take():
+			explosion(pos, Color(1.0, 0.85, 0.3), 0.8)
+			picks.take(int(target.index), 0)
+		return
+	if gift == "big":
+		deep_stats.big_hits += 1
+	if gift == "net" and target.is_in_group("ships") and not target.sinking and not target.is_fireship():
+		_net_ship(target)
 	if target.is_in_group("targets"):
 		on_target_hit(target, pos)
 		_streak_hit(pos)
@@ -2223,6 +2319,11 @@ func musket_trace(from: Vector3, dir: Vector3) -> Array:
 		if t < best_t:
 			best_t = t
 			target = s
+	if picks != null and picks.showing():
+		var oh: Array = picks.ray_hit(from, dir, best_t)
+		if int(oh[0]) >= 0:
+			target = picks.orbs.orbs[int(oh[0])]
+			best_t = float(oh[1])
 	return [target, from + dir * best_t]
 
 
@@ -2236,6 +2337,10 @@ func musket_shot(p, from: Vector3, dir: Vector3) -> void:
 		p.hud.hit_marker()
 	else:
 		net.event("hitmark", [p.index])
+	if picks != null and picks.orbs.orbs.has(target):  # a deckhand chose a pick orb
+		if picks.can_take():
+			picks.take(int(target.index), p.index)
+		return
 	if target.is_in_group("boarders"):
 		sound("hit", -4.0)
 		if target.hit(1.0):
@@ -2296,6 +2401,8 @@ var gunner_guide: Node3D
 func _gunner_focus() -> Array:
 	var best: Array = []
 	var best_d := INF
+	if picks != null and picks.showing() and not picks.spots.is_empty():
+		return [picks.spots[picks.spots.size() / 2], "PICK ONE"]  # the pick orbs (the middle glows brightest)
 	for k in get_tree().get_nodes_in_group("krakens"):
 		if k.state == "dying" or k.rise < 0.8:
 			continue
@@ -3089,6 +3196,23 @@ func apply_event(kind: String, args: Array) -> void:
 				props.apply_event(args)
 		"treasures":
 			_build_treasures(args[0], int(args[1]), bool(args[2]))
+		"orbs":
+			if picks != null:
+				picks.show_row(String(args[0]), args[1] if args.size() > 1 and args[1] is Array else [], args[2] if args.size() > 2 and args[2] is Array else [])
+		"take":
+			if picks != null:
+				picks.take_fx(int(args[0]), int(args[1]))
+		"hazard":
+			if hazards != null:
+				hazards.announce(Deep.unpack(args[0]), float(args[1]))
+		"shove":
+			_shove_local(int(args[0]), args[1], float(args[2]))
+		"netted":
+			var gs = ghost_nodes.get("ship:%d" % int(args[0]))
+			if gs != null and is_instance_valid(gs):
+				gs.net_t = float(args[1])
+		"deep":
+			_apply_deep(args)
 		"story":
 			_story(args[0], args[1], args[2])
 		"hitmark":
@@ -3306,7 +3430,8 @@ func _start_voyage() -> void:
 		save = Save.new()
 		save.game_id = GAME_ID
 		# treasures: [[kind, play-day, golden], ...]; days: days played; daily: the date TODAY'S VOYAGE sailed.
-		save.defaults = {"treasures": [], "total": 0, "days": 0, "last_day": "", "daily": "", "daily_done": "", "voyages": 0, "best_wave": 0, "kraken_wins": 0}
+		save.defaults = {"treasures": [], "total": 0, "days": 0, "last_day": "", "daily": "", "daily_done": "", "voyages": 0, "best_wave": 0, "kraken_wins": 0,
+			"mode": "", "gift": ""}
 		add_child(save)
 	var today := Seeded.today()
 	var new_day := String(save.data.last_day) != today
@@ -3330,6 +3455,14 @@ func _start_voyage() -> void:
 		_story_for_all("TODAY'S VOYAGE!", "treasuremap", Color(1.0, 0.85, 0.3))
 	if new_day and int(save.data.days) > 1:
 		_story_for_all("A new flag!", "bunting", Color(0.2, 0.45, 1.0))
+	harbour_n = Deep.harbour(int(save.data.total))
+	if OS.has_environment("CC_HARBOUR"):  # tests / screenshots: this many harbour pieces
+		harbour_n = clampi(int(OS.get_environment("CC_HARBOUR")), 0, Deep.HARBOUR.size())
+	var sd := Deep.season_data(season)
+	_story_for_all(String(sd.line), String(sd.pic), sd.drift)
+	if harbour_n > 0:
+		_story_for_all("My harbour!", "harbour", Color(1.0, 0.85, 0.3))
+	_send_deep()
 
 
 ## Host / local: a cleared wave's treasure joins the shelf (the oldest makes room when it's full).
@@ -3345,6 +3478,12 @@ func _add_treasure(kind: String) -> void:
 	save.mark_dirty()
 	_build_treasures(list, int(save.data.days), int(save.data.kraken_wins) > 0)
 	_send_treasures()
+	var grown := Deep.harbour(int(save.data.total))
+	if grown > harbour_n:  # Polly's harbour gets a new piece (for good)
+		harbour_n = grown
+		deep_stats.grew += 1
+		_send_deep()
+		_story_for_all("The harbour grows!", "harbour", Color(1.0, 0.85, 0.3))
 	var n := int(save.data.total)
 	var line: String = TREASURE_CHEERS.get(n, TREASURE_LINES.get(kind, "Treasure!"))
 	_story_for_all(line, kind, Color(1.0, 0.85, 0.3) if voyage_daily else TREASURE_COLORS.get(kind, Color.WHITE))
@@ -3365,7 +3504,10 @@ func _log_wave(end: String) -> void:
 	Telemetry.run(GAME_ID, {"end": end, "wave": wave, "phase": phase, "seed": voyage_seed, "daily": voyage_daily,
 		"secs": snappedf(wave_t, 0.1), "plan": wave_plan_kinds, "water": snappedf(water, 0.1), "gold": gold,
 		"deckhands": deckhands().size(), "vr": not players.is_empty() and players[0].vr, "net": net.mode,
-		"treasures": (save.data.treasures as Array).size() if save else 0, "days": int(save.data.days) if save else 0})
+		"treasures": (save.data.treasures as Array).size() if save else 0, "days": int(save.data.days) if save else 0,
+		"game_mode": play_mode, "gift": gift, "season": season, "harbour": harbour_n, "solo": solo_sailing or nobody_aboard(),
+		"deck_events": hazards.list.size() if hazards else 0, "caught": int(deep_stats.caught), "dropped": int(deep_stats.dropped),
+		"bounces": int(deep_stats.bounces), "netted": int(deep_stats.netted), "polly_loads": int(deep_stats.polly_loads)})
 
 
 func _exit_tree() -> void:
@@ -3485,3 +3627,267 @@ func _update_story(delta: float) -> void:
 		StoryCard.show_vr(self, players[0].xr_camera, opts)
 	if parrot != null:
 		parrot.poke()  # Polly squawks and hops as she "says" it
+
+
+# --- Second pass: picks, deck events, gifts, seasons, Polly's harbour, sailing alone (deep.gd) ---------------------
+
+func _deep_spec() -> Dictionary:
+	return {"mode": play_mode, "season": season, "wave": wave, "scale": hazard_scale, "from": hazard_from, "first": hazard_first}
+
+
+## Host / local: the picks before wave n on the pick orbs off the gunner's cannon (picks.gd): the mode once a session,
+## then Polly's gift.
+func _next_pick(n: int) -> void:
+	pick_wave = n
+	phase = "pick"
+	in_break = true
+	if play_mode == "":
+		var ids := PickOrbs.mode_ids(Deep.mode_of(String(save.data.get("mode", "brave")) if save != null else "brave"))
+		var entries: Array = []
+		for id in ids:
+			var md := PickOrbs.mode(String(id))
+			entries.append({"id": id, "name": PickOrbs.mode_name(String(id)), "pic": String(md.pic), "color": PickOrbs.mode_color(String(id))})
+		_story_for_all("Easy or hard?", "parrot", Color(0.95, 0.2, 0.15))
+		picks.begin("mode", entries, ids, _on_picked)
+		return
+	var last := String(save.data.get("gift", "")) if save != null else ""
+	var ch := Deep.gift_choices(harbour_n, last, Seeded.derive(voyage_seed, "gift%d" % n))
+	var entries2: Array = []
+	for id in ch:
+		var gd := Deep.gift(String(id))
+		entries2.append({"id": id, "name": String(gd.name), "pic": String(gd.pic), "color": gd.color})
+	_story_for_all("Pick a gift!", "gift", Color(1.0, 0.85, 0.3))
+	picks.begin("gift", entries2, ch, _on_picked)
+
+
+## Host / local: an orb was taken (slot -1: nobody, the middle one; 0: the gunner; else a deckhand).
+func _on_picked(stage: String, opt: Variant, _slot: int) -> void:
+	match stage:
+		"mode":
+			play_mode = Deep.mode_of(String(opt))
+			if OS.has_environment("CC_MODE"):  # tests: this mode
+				play_mode = Deep.mode_of(OS.get_environment("CC_MODE"))
+			if save != null:
+				save.data.mode = play_mode
+				save.mark_dirty()
+			_story_for_all(String(PickOrbs.MODE_LINES.get(play_mode, "Let's sail!")), String(PickOrbs.mode(play_mode).pic), PickOrbs.mode_color(play_mode))
+			_send_deep()
+			_next_pick(pick_wave)
+			return
+		"gift":
+			gift = String(opt)
+			if OS.has_environment("CC_GIFT"):  # tests: this gift ("none": no gift)
+				gift = "" if OS.get_environment("CC_GIFT") == "none" else OS.get_environment("CC_GIFT")
+			if save != null:
+				save.data.gift = gift
+				save.mark_dirty()
+			var gd := Deep.gift(gift)
+			if gift != "":
+				_story_for_all(String(gd.line), String(gd.pic), gd.color)
+			_send_deep()
+	_start_wave()
+
+
+## Host / local, every frame of a wave: deck events are told, then go off.
+func _host_hazards(delta: float) -> void:
+	var md := Deep.mode_data(play_mode)
+	var warn := float(md.warn)
+	for e in hazards.due(wave_t, delta):
+		deep_stats.told += 1
+		net.event("hazard", [Deep.pack(e), warn])
+		hazards.announce(e, warn)
+		if not has_meta("deck_event_told"):
+			set_meta("deck_event_told", true)
+			_story_for_all("Look out!", "krakenarm" if String(e.kind) == "arm" else "squall", Hazards.color_of(String(e.kind)))
+	for e in hazards.gone_off(warn):
+		on_hazard(e)
+
+
+## Host / local: a told deck event goes off now.
+func on_hazard(e: Dictionary) -> void:
+	var md := Deep.mode_data(play_mode)
+	var p: Vector3 = e.pos
+	var caught := 0
+	var crew: Array = [] if nobody_aboard() else deckhands()
+	match String(e.kind):
+		"arm":
+			deep_stats.arms += 1
+			add_shake(p, 0.5)
+			sound("big_kill", -3.0, 0.7)
+			_particles(p + Vector3.UP * 0.3, Color(0.6, 0.85, 1.0), 16, 0.12, 6.0, 14.0, 0.8, 60.0)
+			net.event("slam", [p])
+			for dh in crew:
+				if not Deep.caught(e, dh.global_position):
+					deep_stats.dodged += 1
+					continue
+				caught += 1
+				var out: Vector3 = dh.global_position - p
+				out.y = 0.0
+				out = out.normalized() if out.length() > 0.05 else Vector3(-float(e.sign), 0.0, 0.0)
+				_shove(dh, out * (float((e.size as Vector2).x) + 0.6), 0.25)  # bonked out of the rings
+				if int(md.drop) > 0 and dh.carrying:
+					dh.carrying = false
+					deep_stats.dropped += 1
+					if dh.golden:
+						dh.golden = false
+						golden_balls += 1  # the golden one rolls back to the pile
+					sound("dry", -4.0, 0.6)
+			if int(md.leak) > 0:
+				create_leak(p)
+		"squall":
+			deep_stats.squalls += 1
+			sound("thunder", -10.0, 1.3)
+			for dh in crew:
+				if not Deep.caught(e, dh.global_position):
+					deep_stats.dodged += 1
+					continue
+				caught += 1
+				_shove(dh, Vector3(0.0, 0.0, float(e.sign)) * float(md.push) * float(md.gust), float(md.gust))
+	deep_stats.caught += caught
+	print("Deck event went off: %s (%s, %d caught)" % [e.kind, play_mode, caught])
+
+
+## Host / local: push deckhand dh by `move` metres over `secs` (on the machine that drives them).
+func _shove(dh, move: Vector3, secs: float) -> void:
+	_shove_local(int(dh.index), move, secs)
+	if net.mode == "host":
+		net.event("shove", [int(dh.index), move, secs])
+
+
+## Every machine: a shove for a deckhand this machine drives (others follow from snapshots).
+func _shove_local(i: int, move: Vector3, secs: float) -> void:
+	if i < 0 or i >= players.size():
+		return
+	var dh = players[i]
+	if dh.gunner or not _is_local_flat(dh) or not dh.active:
+		return
+	dh.set_meta("shove", [move / maxf(secs, 0.05), secs])
+	add_shake(dh.global_position, 0.3)
+
+
+## Host: NET SHOT tangles a ship we hit (every machine draws the net).
+func _net_ship(s) -> void:
+	s.net_t = Deep.NET_SECS
+	deep_stats.netted += 1
+	net.event("netted", [int(s.net_id), Deep.NET_SECS])
+
+
+## Every machine: how much further a ball may miss by and still hit (BIG BARREL).
+func ball_slack() -> float:
+	return Deep.BIG_SLACK if gift == "big" else 0.0
+
+
+## Host: BOUNCY BALLS - one of ours splashed: it skips off the sea once and flies on. True = it bounced.
+func ball_bounce(b, pos: Vector3) -> bool:
+	if gift != "bouncy" or b.bounced or b.enemy or phase != "wave":
+		return false
+	var v: Vector3 = b.vel
+	var nv := Vector3(v.x, absf(v.y), v.z) * Deep.BOUNCE_KEEP
+	var nb := BallScript.new()
+	nb.main = self
+	nb.vel = nv
+	nb.mega = b.mega
+	nb.bounced = true
+	nb.position = pos + Vector3.UP * 0.3
+	add_child(nb)
+	net.event("ball", [nb.position, nv, false, b.mega])
+	splash(pos, 0.8)
+	sound("boing", -4.0, 1.4)
+	deep_stats.bounces += 1
+	return true
+
+
+## Host / local: nobody else aboard (the Frame alone, one Deck) - Polly brings cannonballs to the gunner's cannon and
+## patches holes.
+func _polly_helps(delta: float) -> void:
+	if not nobody_aboard() or players.is_empty() or game_over:
+		polly_t = 0.0
+		return
+	var c = cannons[clampi(int(players[0].station), 0, cannons.size() - 1)]
+	if c.ammo < Deep.SOLO_MAX:
+		polly_t += delta * (2.0 if gift == "quick" else 1.0)
+		if polly_t >= float(Deep.mode_data(play_mode).reload):
+			polly_t = 0.0
+			c.ammo += 1
+			deep_stats.polly_loads += 1
+			sound("load", -4.0, 1.2)
+			coins_fx(c.global_position + Vector3.UP * 0.8)
+			if parrot != null:
+				parrot.poke()
+	for lk in get_tree().get_nodes_in_group("leaks"):
+		lk.progress += delta / 5.0
+		if lk.progress >= 1.0 and not lk.is_queued_for_deletion():
+			deep_stats.polly_patches += 1
+			lk.queue_free()
+
+
+func _send_deep() -> void:
+	_apply_deep([play_mode, gift, season, harbour_n])
+	if net and net.mode != "client":
+		net.event("deep", [play_mode, gift, season, harbour_n])
+
+
+## Every machine: the mode, gift, season and harbour from the host.
+func _apply_deep(a: Array) -> void:
+	play_mode = String(a[0])
+	gift = String(a[1])
+	if String(a[2]) != season:
+		season = String(a[2])
+	_apply_season()
+	harbour_n = int(a[3])
+	if harbour != null:
+		harbour.build(harbour_n, season)
+
+
+## Every machine: the season's drifting things round the ship (petals, pollen, leaves, snow).
+func _apply_season() -> void:
+	if season == shown_season:
+		return
+	shown_season = season
+	if harbour != null:
+		harbour.build(maxi(harbour_n, 0), season)
+	var sd := Deep.season_data(season)
+	if drift == null:
+		drift = CPUParticles3D.new()
+		drift.name = "SeasonDrift"
+		drift.amount = 60
+		drift.lifetime = 6.0
+		drift.local_coords = false
+		drift.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+		drift.emission_box_extents = Vector3(22.0, 3.0, 22.0)
+		drift.direction = Vector3(0.4, -1.0, 0.2)
+		drift.spread = 25.0
+		drift.gravity = Vector3(0, -0.5, 0)
+		drift.initial_velocity_min = 0.4
+		drift.initial_velocity_max = 1.2
+		drift.angular_velocity_min = -90.0
+		drift.angular_velocity_max = 90.0
+		drift.scale_amount_min = 0.7
+		drift.scale_amount_max = 1.3
+		drift.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		drift.position = Vector3(0.0, 14.0, -2.0)
+		add_child(drift)
+	var q := QuadMesh.new()
+	q.size = Vector2(0.16, 0.11) if season != "winter" else Vector2(0.12, 0.12)
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.albedo_color = sd.drift
+	m.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	q.material = m
+	drift.mesh = q
+	drift.emitting = true
+
+
+## Every machine, every frame: shoves blow deckhands along; BIG BARREL / NET SHOT looks.
+func _deep_animate(delta: float) -> void:
+	for p in players:
+		if not p.has_meta("shove"):
+			continue
+		var sh: Array = p.get_meta("shove")
+		var left := float(sh[1]) - delta
+		if left <= 0.0 or not p.active:
+			p.remove_meta("shove")
+			continue
+		p.set_meta("shove", [sh[0], left])
+		p.position = World.constrain(p.position + (sh[0] as Vector3) * delta, 0.35, cannon_obstacles())

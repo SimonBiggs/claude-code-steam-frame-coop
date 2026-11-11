@@ -5,6 +5,8 @@ const Contrast := preload("res://core/contrast.gd")
 const Looks := preload("res://games/cannon_cove/looks.gd")
 const World := preload("res://games/cannon_cove/world.gd")
 const EnemyShip := preload("res://games/cannon_cove/enemy_ship.gd")
+const Deep := preload("res://games/cannon_cove/deep.gd")
+const Harbour := preload("res://games/cannon_cove/harbour.gd")
 
 
 ## Deckhands and boarders on our deck.
@@ -13,7 +15,9 @@ static func key_colors() -> Dictionary:
 	for i in range(1, Looks.PLAYER_COLORS.size()):  # deckhands: coat + dark trousers
 		out["deckhand %d" % (i + 1)] = {"color": Looks.PLAYER_COLORS[i], "rim": Looks.DECKHAND_TROUSERS}
 	return Contrast.merge(out, {"boarder": Looks.BOARDER_SHIRT,
-		"cannonball (carried)": Looks.BALL})
+		"cannonball (carried)": Looks.BALL,
+		# The second pass's deck events (deep.gd): their warn rings glow on the deck.
+		"arm warning": Deep.ARM_COLOR, "squall warning": Deep.SQUALL_COLOR})
 
 
 static func backgrounds() -> Dictionary:
@@ -46,7 +50,16 @@ static func groups() -> Array:
 	var balls := {"cannonball": {"color": Looks.BALL, "rim": Looks.SMOKE},
 		"pirate cannonball": {"color": Looks.ENEMY_BALL, "rim": Looks.ENEMY_SMOKE},
 		"golden cannonball": {"color": Looks.MEGA_BALL, "rim": Looks.OUTLINE}}
+	# Polly's gifts bob on the sea as pick orbs; a Kraken arm comes up out of the sea over our deck; the harbour sits
+	# on the sea off the bow.
+	var gifts := {}
+	for gd in Deep.GIFTS:
+		gifts["%s orb" % gd.id] = gd.color
+	var harbour := {"harbour hut": {"color": Harbour.ROOF, "rim": Harbour.WALL}, "harbour beacon": Harbour.LAMP}
 	return [
+		{"keys": gifts, "bgs": seas()},
+		{"keys": {"kraken arm": Deep.ARM_SKIN}, "bgs": Contrast.merge(seas(), backgrounds())},
+		{"keys": harbour, "bgs": seas()},
 		{"keys": on_sea, "bgs": seas()},
 		{"keys": ships, "bgs": Contrast.field("horizon", World.MOODS, "horizon")},  # far ships stand against the horizon
 		{"keys": balls, "bgs": Contrast.merge(skies(), seas())},

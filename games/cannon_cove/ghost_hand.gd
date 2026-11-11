@@ -23,6 +23,7 @@ func _ready() -> void:
 	mat = StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 	mat.albedo_color = Color(0.75, 0.95, 1.0, 0.5)
 	mat.no_depth_test = false
 	hand = Node3D.new()

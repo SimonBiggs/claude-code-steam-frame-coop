@@ -33,6 +33,12 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "cc-gifts", "date": "2026-11-11", "game": "cannon_cove", "pic": "bouncyball", "line": "Shoot Polly's cannon gifts!"},
+	{"id": "cc-arms", "date": "2026-11-11", "game": "cannon_cove", "pic": "krakenarm", "line": "Kraken arms! Step out!"},
+	{"id": "cc-harbour", "date": "2026-11-11", "game": "cannon_cove", "pic": "harbour", "line": "Polly's harbour grows!"},
+	{"id": "cc-solo", "date": "2026-11-11", "game": "cannon_cove", "pic": "parrot", "line": "Sail alone: Polly loads!"},
+	{"id": "cc-seasons", "date": "2026-11-11", "game": "cannon_cove", "pic": "snowflake", "line": "Snowy seas", "try": {"CC_SEASON": "winter"}},
+	{"id": "cc-gentle", "date": "2026-11-11", "game": "cannon_cove", "pic": "pirateship", "line": "Gentle, brave or hard"},
 	{"id": "dr-gifts", "date": "2026-11-11", "game": "dragon_rider", "pic": "firebreath", "line": "Pick Sunny's sky gifts!"},
 	{"id": "dr-storms", "date": "2026-11-11", "game": "dragon_rider", "pic": "storm", "line": "Fly round storm clouds!"},
 	{"id": "dr-babies", "date": "2026-11-11", "game": "dragon_rider", "pic": "babydragon", "line": "Baby dragons hatch!"},
