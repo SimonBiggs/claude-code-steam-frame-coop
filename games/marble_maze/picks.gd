@@ -18,7 +18,7 @@ const AFTER := 1.2  # seconds the taken orb shows its dot before the orbs go
 const ROW := Vector3(0.0, 0.0, 0.25)
 const GAP := 0.33
 const Y := 0.1  # the orb's middle above the floor: a marble (r 0.028) rolls under it
-const SCALE := 0.055  # glass ball radius 0.6 * 0.055 = 3.3 cm: modest in VR, clear in the TV chase cams
+const SCALE := 0.065  # glass ball radius 0.6 * 0.055 = 3.3 cm: modest in VR, clear in the TV chase cams
 const MARBLE_R := 0.045  # flat distance from the orb's middle a marble must roll to
 const HAND_R := 0.035
 
@@ -68,7 +68,7 @@ func show_row(new_stage: String, entries: Array) -> void:
 	if new_stage == "" or entries.is_empty():
 		orbs.clear()
 		return
-	orbs.show_orbs(new_stage, entries, ROW, GAP, Y, {"scale": SCALE, "pop": true, "font": 64, "label_y": 1.35,
+	orbs.show_orbs(new_stage, entries, ROW, GAP, Y, {"scale": SCALE, "pop": true, "font": 64, "label_y": 1.35, "label_px": 0.008,
 		"two_lines": true, "touch": 0.0, "bob": 0.15})
 
 

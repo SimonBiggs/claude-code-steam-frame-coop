@@ -293,6 +293,7 @@ func _vr_drive(tl, want: Vector2, delta: float) -> void:
 			if not has_meta("vr_pick_said"):
 				set_meta("vr_pick_said", true)
 				print("BOT: VR left hand touches the %s orb" % o.id)
+			return
 	var waiting: bool = main.state == "practice" and not saw_hands
 	if waiting or main.state != "play" and main.state != "practice":
 		if tl.grabbing:

@@ -19,7 +19,7 @@ const JAR_MAX := 80
 const BALL_R := 0.017
 ## Second pass: BOBO'S MARBLE RUN on the other side of the table: a wooden zig-zag of ramps where every gift marble
 ## the team has rolled home with (save "rack") rolls round and round (down the ramps, up the lift) - it grows.
-const RUN_POS := Vector3(1.25, 0.0, -0.3)
+const RUN_POS := Vector3(1.02, 0.0, -0.2)
 const RUN_TOP := 1.0
 const RUN_W := 0.42
 const RUN_STEP := 0.16

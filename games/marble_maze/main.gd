@@ -1470,8 +1470,8 @@ func _pick_due(n: int) -> String:
 		return ""
 	if not session.has("mode"):
 		return "mode"
-	if int(session.get("gift_n", -1)) == n:
-		return ""
+	if int(session.get("gift_n", -1)) >= n - 1:
+		return ""  # one gift pick a maze at most (today's maze, then a new place: the gift carries on)
 	if not session.has("gift") or k == "daily" or int(Story.where(int(d.get("i", 0)))[1]) == 0:
 		return "gift"
 	return ""
@@ -1482,10 +1482,7 @@ func _begin_pick(n: int, stage: String) -> void:
 	pick_next = n
 	level = n
 	var nd := desc_for(n)
-	var th := "rainbow"
-	if str(nd.get("k", "")) == "story":
-		th = str(Story.place(int(Story.where(int(nd.get("i", 0)))[0])).theme)
-	level_desc = {"k": "pick", "s": stage, "th": th}
+	level_desc = {"k": "pick", "s": stage, "th": "space"}  # a dark starry floor: the orbs' pictures stand out
 	_restart_pick_board()
 	var entries: Array = []
 	var opts: Array = []
@@ -1518,6 +1515,7 @@ func _restart_pick_board() -> void:
 	for p in players:
 		if p.index > 0:
 			p.reset_to_start()
+			p.yaw = PI  # chase cams face the orbs (towards the giant)
 	state = "pick"
 	state_t = 0.0
 	_apply_theme()
@@ -1614,7 +1612,7 @@ func _build_world_fx() -> void:
 		return
 	var pt := CPUParticles3D.new()
 	pt.name = "WorldFx"
-	pt.amount = 70 if fx != "stars" else 90
+	pt.amount = 160 if fx != "stars" else 90
 	pt.lifetime = 9.0 if fx != "stars" else 4.0
 	pt.preprocess = pt.lifetime
 	pt.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
@@ -1629,7 +1627,7 @@ func _build_world_fx() -> void:
 	pt.angular_velocity_max = 90.0
 	pt.local_coords = false
 	var mesh := BoxMesh.new()
-	mesh.size = Vector3(0.025, 0.025, 0.004) if fx != "snow" else Vector3(0.02, 0.02, 0.02)
+	mesh.size = Vector3(0.035, 0.035, 0.005) if fx != "snow" else Vector3(0.03, 0.03, 0.03)
 	pt.mesh = mesh
 	var cols := {"snow": [Color(1, 1, 1)], "leaves": [Color(1.0, 0.55, 0.15), Color(0.9, 0.3, 0.15), Color(1.0, 0.8, 0.2)],
 		"confetti": [Color(1.0, 0.3, 0.5), Color(0.3, 0.7, 1.0), Color(1.0, 0.85, 0.2), Color(0.4, 1.0, 0.5)],
@@ -2884,6 +2882,10 @@ func apply_event(kind: String, args: Array) -> void:
 				if p.index > 0:
 					p.reset_to_start()
 			state = "pick" if str(desc.get("k", "")) == "pick" else "intro"
+			if state == "pick":
+				for p in players:
+					if p.index > 0:
+						p.yaw = PI
 			state_t = 0.0
 		"orbs":
 			if picks != null:

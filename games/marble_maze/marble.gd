@@ -364,7 +364,7 @@ func _update_gift_band() -> void:
 	var m := Worlds.marble(gift)
 	gift_band.visible = not m.is_empty()
 	if not m.is_empty():
-		gift_band.material_override = main.make_material(m.color, 0.9)
+		gift_band.material_override = main.make_material(m.color, 0.3)
 
 
 ## SIMPLE_MODE: plain floor with no hole, edge or teleporter next to it is a safe place to pop back to.
