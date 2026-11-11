@@ -459,6 +459,31 @@ export async function installTools(since: string) {
 
 const rport = () => 20000 + Math.floor(Math.random() * 10000);
 
+/** Long guard bots (2026-11-11): the regular bots end before relics + crowded rooms meet, so a THORN ARMOR script
+ *  error lived on main for days. dev.land runs these when a branch touches the game (or lands it as botId);
+ *  dev.guard(game) runs them by hand. Each must end with BOT RESULT: PASS, no SCRIPT ERROR, no res:// engine ERROR. */
+export const LAND_GUARDS: Record<string, { name: string; scene: string; env: Record<string, string>; quitAfter: number; timeout: number }[]> = {
+  dungeon_delve: [{ name: "deep-relics", scene: "res://tests/dungeon_delve_bot.tscn", quitAfter: 108000, timeout: 1500,
+    env: { DD_MODE: "brave", DD_FLOOR: "8", BOT_GOAL: "guard", DD_RELICS: "all", BOT_PLAYERS: "4", DD_SEED: "111", BOT_END: "1700" } }],
+};
+
+export async function guardRun(gb: (typeof LAND_GUARDS)[string][number], project = STAGE) {
+  const env = Object.entries(gb.env).map(([k, v]) => `${k}=${v}`).join(" ");
+  const t0 = Date.now();
+  const o = (await sh(`${env} DUO_PORT=${rport()} timeout ${gb.timeout} godot-test --headless --path . --fixed-fps 60 --quit-after ${gb.quitAfter} ${gb.scene} 2>&1`, project)).out;
+  const errs = [...o.split("\n").filter(l => /SCRIPT ERROR/.test(l)), ...engineErrors(o)];
+  const result = o.split("\n").filter(l => /BOT RESULT/.test(l)).pop() ?? "no BOT RESULT";
+  const pass = /BOT RESULT: PASS/.test(result) && !/stopped at the --quit-after/.test(result) && errs.length === 0;
+  return { pass, summary: `${pass ? "ok" : "FAIL"} ${result.trim()} (${Math.round((Date.now() - t0) / 1000)} s)${errs.slice(0, 3).map(e => "\n  " + e).join("")}` };
+}
+
+/** Run a game's long guard bots now (in staging, or project). */
+export async function guard(game: string, project = STAGE) {
+  const out: Record<string, string> = {};
+  for (const gb of LAND_GUARDS[game] ?? []) out[gb.name] = (await guardRun(gb, project)).summary;
+  return out;
+}
+
 /** Land a finished branch: merge it into the permanent merge worktree (~/GodotProjects/wt-merge, branch merge-arcade),
  *  check live == staging, copy into staging, run its gen tests + bot_end_test + core_math, the Deck bot
  *  (DECK_BOT_ONLY=botId), the arcade bot, botId networked (180 s) and otherBots; then duo-deploy + duo-deploy-deck,
@@ -522,6 +547,17 @@ export async function land(branch: string, genTests: string[], botId: string, ot
       res.push(`${id}: ` + r.runs.map((x: any) => `${x.mode}:${x.pass ? "ok" : "FAIL"} ${x.result} ${(x.failed || []).join(";")} ${(x.errors || []).join(";")}`).join(" | "));
     } finally { delete process.env.DUO_PORT; }
   }
+  // Long guard bots for games whose deep errors only show far into a run (LAND_GUARDS): run when the branch touches
+  // the game or lands it as botId.
+  const touched = (await sh("git diff --name-only main merge-arcade", join(GP, "wt-merge"))).out;
+  for (const [game, guards] of Object.entries(LAND_GUARDS)) {
+    if (botId !== game && !touched.includes(`games/${game}/`)) continue;
+    for (const gb of guards) {
+      const r = await guardRun(gb);
+      out[`guard:${gb.name}`] = r.summary;
+      ok &&= r.pass;
+    }
+  }
   if (!ok) return { stop: "tests", out, res };
   // The message goes through a file: JSON.stringify'd "\n" stays a literal backslash-n inside bash quotes
   // (2026-10-29: a merge subject read "...tests)\n\nCo-Authored-By...").
@@ -542,6 +578,7 @@ export function help() {
   dev.land(branch, genTests, botId, otherBots, msg)  merge a finished branch via wt-merge, test in staging, deploy TV+Decks, merge live main
   dev.playstats({since?, game?})     how the family really played: RUN lines every machine pushed to the Steam Machine
   dev.playRuns({since?, game?})      those RUN lines as objects ({device, recv, ...run})
+  dev.guard(game)                    a game's long guard bots (LAND_GUARDS; dev.land runs them when a branch touches the game)
   dev.debt()                         tech-debt scan: {clean, issues:[{kind, what, fix}]} (fix them straight away)
   dev.bots.list() / .run(id, {net, joiners}) / .all({only, net, concurrency})   headless bot tests in staging (net: host + joiners, tools/multibot.ts)
   dev.stage.diff() / .pull() / .deploy(msg)                            staging <-> live game

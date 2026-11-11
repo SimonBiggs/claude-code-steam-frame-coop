@@ -14,7 +14,8 @@ extends Node
 ## DEEP (BRAVE / HEROIC): DD_MODE=brave|heroic starts the deep dungeon; tests/dungeon_delve_deep_bot.gd
 ## plays it (fights, loot, keys, puzzles, secrets, revives, shop, stairs). BOT_GOAL=zone ends the test
 ## as soon as the first boss is beaten and the next zone is reached (floors 1-4 + shops + the Slime
-## King); BOT_GOAL=floor after the first floor; DD_FLOOR=3 starts on the first boss floor.
+## King); BOT_GOAL=floor after the first floor; DD_FLOOR=3 starts on the first boss floor. BOT_GOAL=guard (with
+## DD_RELICS=all, BOT_END): plays until BOT_END and checks a long, crowded fight with every relic held (dev.LAND_GUARDS).
 ## Checks: the floors went by in order, monsters died, keys opened doors, the boss fell (zone goal),
 ## knocked-out heroes got back up (or none were), heroes stayed on walkable ground, the TV machine
 ## built the same kind of floor and mirrored monsters and hearts. Flat host: DUO_FLAT_HOST=1 on the host.
@@ -403,6 +404,14 @@ func _deep_checks(mode: String) -> void:
 	kit.assert_true(int(t["kills"]) > 0, "%s: monsters were beaten (%d)" % [mode, int(t["kills"])])
 	if goal == "boss":
 		kit.assert_true(goal_done, "%s: the boss was beaten: %s" % [mode, str(t)])
+	if goal == "guard":  # the long relic guard (dev.LAND_GUARDS): lots of crowded fights with every relic, no errors
+		kit.info("guard: %s" % str(t))
+		kit.assert_true(int(t["kills"]) >= 100 and int(t["rooms"]) >= 20, "%s: a long fight (%d kills, %d rooms)" % [mode, int(t["kills"]), int(t["rooms"])])
+		kit.assert_true(max_foes >= 6, "%s: crowded rooms (%d monsters at once)" % [mode, max_foes])
+		kit.assert_true(int(t["bosses"]) >= 1, "%s: a boss fell with every relic in play (%d)" % [mode, int(t["bosses"])])
+		for s1 in dp.stats:
+			if not dp._is_knight(int(s1)):
+				kit.assert_true(((dp.stats[s1] as Dictionary).get("relics", []) as Array).size() >= 6, "%s: hero %d holds the relics (%s)" % [mode, int(s1), str((dp.stats[s1] as Dictionary).get("relics", []))])
 	if goal.begins_with("depth"):
 		kit.assert_true(goal_done, "%s: got down to depth %s: %s" % [mode, goal.substr(5), str(t)])
 	if goal in ["zone", "floor"]:

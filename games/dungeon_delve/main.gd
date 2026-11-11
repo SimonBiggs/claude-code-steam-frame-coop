@@ -20,7 +20,8 @@ extends Node3D
 ## HEROIC pad: stand on one until it fills and the deep dungeon starts (deep.gd: procedural floors,
 ## hearts, knock-outs and revives, keys, puzzles, traps, monsters with tells, three bosses, loot, a
 ## shop, unlocks saved between runs). Env DD_MODE=brave|heroic starts there (tests, launchers),
-## DD_FLOOR=n on floor n (0..11), DD_SEED=n a fixed dungeon.
+## DD_FLOOR=n on floor n (0..15), DD_SEED=n a fixed dungeon, DD_RELICS=all (with DD_FLOOR) every hero holds every
+## relic it can use (the long guard bot: dev.land's Dungeon Delve guard).
 
 const NetScript := preload("res://core/net.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
