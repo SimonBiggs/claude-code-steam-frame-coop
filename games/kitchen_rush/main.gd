@@ -2,6 +2,7 @@ extends Node3D
 const VrText := preload("res://core/vr_text.gd")
 const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
 const UiKit := preload("res://core/ui_kit.gd")
+const Looks := preload("res://games/kitchen_rush/looks.gd")
 const HudKit := preload("res://core/hud_kit.gd")
 ## Kitchen Rush: co-op cooking chaos.
 ## Player 1 is the CHEF at the counter (VR hands, or button controls in split screen): chop and stack.
@@ -82,8 +83,7 @@ const MAX_ANGRY := 5
 const MAX_CUSTOMERS := 4
 const COMBO_WINDOW := 12.0
 const MAX_RUNNERS := 6  # player indices 1..6 (P2..P7); index 0 is the chef
-const PLAYER_COLORS: Array[Color] = [Color(1.0, 0.45, 0.35), Color(0.3, 0.65, 1.0), Color(0.7, 0.45, 1.0),
-	Color(0.35, 0.9, 0.4), Color(1.0, 0.82, 0.2), Color(1.0, 0.45, 0.8), Color(0.25, 0.92, 0.9)]
+const PLAYER_COLORS: Array[Color] = Looks.PLAYER_COLORS  # (looks.gd: palette.gd reads it)
 const LEAVE_AFTER_UNPLUG := 15.0  # a runner whose controller is unplugged this long leaves the kitchen
 ## A day in the kitchen: breakfast, lunch and dinner, each rated with up to three stars.
 const SHIFT_NAMES := ["BREAKFAST", "LUNCH", "DINNER"]
