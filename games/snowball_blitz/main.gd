@@ -2457,6 +2457,8 @@ func _start_siege() -> void:
 	siege = SiegeGen.siege(seed_value, lv, daily, game_mode)
 	gifts_taken = {}
 	_send_gifts()
+	if net.mode == "host":
+		net.event("orbs", ["", []])  # (no orbs yet: a machine joining now knows that at once)
 	siege_t = 0.0
 	built = false
 	logged = false
