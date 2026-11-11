@@ -8,6 +8,7 @@ extends Node3D
 ## each, the jar's marbles are one MultiMesh.
 
 const Story := preload("res://games/marble_maze/story.gd")
+const Worlds := preload("res://games/marble_maze/worlds.gd")
 
 const RADIUS := 1.85
 const JAR_POS := Vector3(-1.2, 0.0, -0.35)
@@ -16,6 +17,15 @@ const JAR_H := 0.3
 const STOOL_H := 0.55
 const JAR_MAX := 80
 const BALL_R := 0.017
+## Second pass: BOBO'S MARBLE RUN on the other side of the table: a wooden zig-zag of ramps where every gift marble
+## the team has rolled home with (save "rack") rolls round and round (down the ramps, up the lift) - it grows.
+const RUN_POS := Vector3(1.02, 0.0, -0.2)
+const RUN_TOP := 1.0
+const RUN_W := 0.42
+const RUN_STEP := 0.16
+const RUN_RAMPS := 4
+const RACK_MAX := 40
+const RUN_SPEED := 0.12
 
 var main
 var places: Array = []  # [lit mesh, asleep mesh, lamp, base position]
@@ -26,12 +36,17 @@ var pop_t: Array[float] = []
 var t := 0.0
 var cheer_i := -1
 var cheer_t := 0.0
+var run_mm: MultiMesh
+var run_path: Array[Vector3] = []
+var run_len := 0.0
+var rack_list: Array = []
 
 
 func _ready() -> void:
 	for i in Story.PLACES.size():
 		_build_place(i)
 	_build_jar()
+	_build_run()
 	set_lit(0, true)
 
 
@@ -78,6 +93,31 @@ func set_jar(list: Array, quiet: bool = false) -> void:
 		main.burst(JAR_POS + Vector3(0, STOOL_H + JAR_H, 0), Story.shiny_of(int(jar_list[n - 1]))[1], 16, false)
 
 
+## The marble run's marbles: an Array of worlds.gd MARBLES indices (the newest last).
+func set_rack(list: Array, quiet: bool = false) -> void:
+	var grew := list.size() > rack_list.size() and not quiet
+	rack_list = list.duplicate()
+	var n := mini(rack_list.size(), RACK_MAX)
+	for i in n:
+		var k := int(rack_list[rack_list.size() - n + i])
+		var col: Color = Worlds.MARBLES[clampi(k, 0, Worlds.MARBLES.size() - 1)].color
+		run_mm.set_instance_color(i, col)
+	run_mm.visible_instance_count = n
+	if grew and n > 0 and main != null:
+		main.burst(RUN_POS + Vector3(0, RUN_TOP + 0.05, 0), run_mm.get_instance_color(n - 1), 16, false)
+		main.sound("ring", -6.0, 1.3)
+
+
+func _run_point(d: float) -> Vector3:
+	d = fposmod(d, run_len)
+	for i in range(1, run_path.size()):
+		var seg := run_path[i - 1].distance_to(run_path[i])
+		if d <= seg:
+			return run_path[i - 1].lerp(run_path[i], d / maxf(seg, 0.0001))
+		d -= seg
+	return run_path[0]
+
+
 func jar_top() -> Vector3:
 	return JAR_POS + Vector3(0, STOOL_H + JAR_H + 0.03, 0)
 
@@ -94,6 +134,10 @@ func _jar_spot(i: int) -> Vector3:
 
 func _process(delta: float) -> void:
 	t += delta
+	var n := run_mm.visible_instance_count if run_mm != null else 0
+	for i in n:
+		var p := _run_point(t * RUN_SPEED + run_len * float(i) / float(n))
+		run_mm.set_instance_transform(i, Transform3D(Basis(), p))
 	for i in places.size():
 		var lamp: MeshInstance3D = places[i][2]
 		if lamp.visible:
@@ -203,6 +247,57 @@ func _parts(i: int) -> Array:
 				tm.ring_segments = 6
 				p.append([tm, Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3(0, 0.0, -0.05)), bands[k]])
 	return p
+
+
+## Bobo's marble run: a post, RUN_RAMPS ramps zig-zagging down and a lift back up (one merged mesh), the marbles one
+## MultiMesh rolling along run_path.
+func _build_run() -> void:
+	var parts: Array = []
+	var wood := Color(0.75, 0.55, 0.35)
+	parts.append([main.box_mesh(Vector3(0.05, RUN_TOP + 0.08, 0.05)), Transform3D(Basis(), RUN_POS + Vector3(0, (RUN_TOP + 0.08) * 0.5, -0.06)), wood])
+	parts.append([main.box_mesh(Vector3(RUN_W + 0.12, 0.03, 0.2)), Transform3D(Basis(), RUN_POS + Vector3(0, 0.015, 0)), wood])
+	run_path.clear()
+	var half := RUN_W * 0.5
+	var lift_x := -half - 0.04
+	run_path.append(RUN_POS + Vector3(lift_x, RUN_TOP + 0.05, 0))
+	for k in RUN_RAMPS:
+		var y0 := RUN_TOP - k * RUN_STEP
+		var y1 := y0 - RUN_STEP * 0.6
+		var xa := -half if k % 2 == 0 else half
+		var xb := -xa
+		run_path.append(RUN_POS + Vector3(xa, y0 + BALL_R, 0))
+		run_path.append(RUN_POS + Vector3(xb, y1 + BALL_R, 0))
+		var mid := Vector3((xa + xb) * 0.5, (y0 + y1) * 0.5, 0)
+		var ang := atan2(y0 - y1, xb - xa)
+		parts.append([main.box_mesh(Vector3(RUN_W + 0.03, 0.012, 0.05)), Transform3D(Basis(Vector3(0, 0, 1), ang), RUN_POS + mid - Vector3(0, 0.008, 0)),
+			Color(1.0, 0.7, 0.3) if k % 2 == 0 else Color(0.5, 0.8, 1.0)])
+		parts.append([main.box_mesh(Vector3(RUN_W + 0.03, 0.03, 0.006)), Transform3D(Basis(Vector3(0, 0, 1), ang), RUN_POS + mid + Vector3(0, 0.008, 0.026)), wood])
+	var bottom: Vector3 = run_path[run_path.size() - 1]
+	run_path.append(Vector3(RUN_POS.x + lift_x, bottom.y, RUN_POS.z))
+	run_path.append(run_path[0])
+	parts.append([main.box_mesh(Vector3(0.02, RUN_TOP, 0.02)), Transform3D(Basis(), RUN_POS + Vector3(lift_x, RUN_TOP * 0.5 + bottom.y * 0.5, -0.03)), Story.BOBO_COLOR])
+	run_len = 0.0
+	for i in range(1, run_path.size()):
+		run_len += run_path[i - 1].distance_to(run_path[i])
+	var stand := MeshInstance3D.new()
+	stand.mesh = main.merged_mesh("town_run", parts)
+	stand.material_override = main.vertex_mat()
+	add_child(stand)
+	run_mm = MultiMesh.new()
+	run_mm.transform_format = MultiMesh.TRANSFORM_3D
+	run_mm.use_colors = true
+	run_mm.mesh = main.sphere_mesh(BALL_R)
+	run_mm.instance_count = RACK_MAX
+	run_mm.visible_instance_count = 0
+	var mmi := MultiMeshInstance3D.new()
+	mmi.multimesh = run_mm
+	var mat := StandardMaterial3D.new()
+	mat.vertex_color_use_as_albedo = true
+	mat.roughness = 0.15
+	mat.metallic = 0.3
+	mmi.material_override = mat
+	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(mmi)
 
 
 ## The jar on its stool: the glass, a lid, and the marbles (one MultiMesh, coloured per marble).
