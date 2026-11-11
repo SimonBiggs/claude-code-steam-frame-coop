@@ -547,7 +547,7 @@ export async function guard(game: string, project = STAGE) {
 /** Repo-wide guard tests every landing runs (2026-11-11: gen_budget_test failed on main unnoticed because no landing
  *  ran it; each of these took < 45 s on all of main then). lan_update_test stays out: it compiles a deliberately broken
  *  script, whose expected "Parse Error" would read as a SCRIPT ERROR here. */
-export const REPO_GUARDS = ["gen_budget_test", "who_test", "who_net_test", "classic_seats_test", "menu_test", "party_stale_press_test", "bg_gen_test", "engine_sys_test", "engine_ui_test", "pause_banner_test", "contrast_test"];
+export const REPO_GUARDS = ["gen_budget_test", "who_test", "who_net_test", "classic_seats_test", "menu_test", "party_stale_press_test", "bg_gen_test", "engine_sys_test", "engine_ui_test", "pause_banner_test", "contrast_test", "vr_wrist_menu_test"];
 
 export async function land(branch: string, genTests: string[], botId: string, otherBots: string[], msg: string) {
   // A landing that stopped leaves its merge in wt-merge (and its files in staging) for a retry. Landing a DIFFERENT
@@ -592,6 +592,10 @@ export async function land(branch: string, genTests: string[], botId: string, ot
   // core/warn_rings.gd and show modes as PickOrbs.mode() (one GENTLE / BRAVE / HARD look everywhere).
   const sharedPicks = await stat(join(STAGE, "tests/shared_picks_test.gd")).then(() => ["shared_picks_test"], () => [] as string[]);
   for (const t of [...new Set([...genTests, "story_pictures_test", "progress_test", "whats_new_test", "layout_check_test", "vr_view_check_test", "bot_end_test", "core_math_test", ...REPO_GUARDS, ...sharedPicks])].filter(Boolean)) {
+    // A REPO_GUARDS test whose branch hasn't landed yet (an agent adds its guard to the live dev.ts first, 2026-11-11:
+    // contrast_test / vr_wrist_menu_test) can't run here: say so in the results instead of failing every landing.
+    // Only REPO_GUARDS may be missing; a missing gen test or core guard still fails below.
+    if (REPO_GUARDS.includes(t) && !genTests.includes(t) && !(await stat(join(STAGE, `tests/${t}.gd`)).then(() => true, () => false))) { out[t] = "not in this tree yet (its branch hasn't landed): not run"; continue; }
     // A test with a scene (extends Node, e.g. engine_ui_test) runs as that scene; a SceneTree script runs with -s.
     const scene = await stat(join(STAGE, `tests/${t}.tscn`)).then(() => true, () => false);
     const how = scene ? `--fixed-fps 60 res://tests/${t}.tscn`  /* ends itself (exit code = failures); timeout 600 caps it */ : `-s res://tests/${t}.gd`;
