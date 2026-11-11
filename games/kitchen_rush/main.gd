@@ -3417,7 +3417,7 @@ func _party_done(how: String) -> void:
 	var cards_end := 2.6 + 3.8 * beats.size()
 	var inv := not Parties.offers(shift + 1, run_seed, _progress(), last_party).is_empty()
 	if not Nights.gift_offer(shift + 1, run_seed, perks).is_empty():
-		gift_wait = cards_end - 1.2
+		gift_wait = minf(cards_end - 1.2, 3.2)  # the gift orbs float in while the thank-you card still shows
 		invites_after_gift = inv
 	elif not inv:
 		break_t = maxf(break_t, cards_end)
@@ -3567,9 +3567,9 @@ func _offer_gifts() -> void:
 func _after_gift() -> void:
 	if invites_after_gift:
 		invites_after_gift = false
-		invite_wait = 2.5
+		invite_wait = maxf(2.5, invite_wait)
 	else:
-		break_t = 3.0
+		break_t = 2.5
 
 
 ## Host: the team picked (slot -1: nobody, the middle one came).

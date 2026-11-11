@@ -70,6 +70,8 @@ func _ready() -> void:
 	if main.save != null and not OS.has_environment("KR_KEEP_SAVE"):
 		main.save.data = main.save.defaults.duplicate(true)  # every bot run starts a new café (KR_KEEP_SAVE=1 keeps it)
 		main._show_gifts([], false)
+	if main.picks != null:  # the saved mode must not change the bot's timeline: pin it (KR_BOT_MODE, default brave)
+		main.team_mode = _bot_mode()
 	var default_players := 2 if OS.has_environment("DUO_JOIN") else 1
 	want_players = clampi(int(OS.get_environment("BOT_PLAYERS")) if OS.has_environment("BOT_PLAYERS") else default_players, 1, 6)
 	print("BOT: %d TV runner(s) requested" % want_players)
@@ -312,6 +314,10 @@ func _note_features() -> void:
 			print("BOT: customer type %s" % ty)
 
 
+func _bot_mode() -> String:
+	return OS.get_environment("KR_BOT_MODE") if OS.get_environment("KR_BOT_MODE") in ["gentle", "brave", "hard"] else "brave"
+
+
 func _invites() -> Array:
 	return main.all_items().filter(func(it) -> bool: return it.kind == "invite")
 
@@ -418,7 +424,11 @@ func _chef_vr(delta: float) -> void:
 	if vr_state == "idle" and _play_props(delta):
 		return
 	if main.picks != null and main.picks.showing() and main.picks.orbs.orbs.size() > 0 and vr_t > 2.0:
-		var orb: Node3D = main.picks.orbs.orbs[mini(1 + main.shift % 2, main.picks.orbs.orbs.size() - 1)]
+		var vi: int = mini(1 + main.shift % 2, main.picks.orbs.orbs.size() - 1)
+		for k in main.picks.orbs.entries.size():
+			if String(main.picks.orbs.entries[k].get("id", "")) == _bot_mode():
+				vi = k
+		var orb: Node3D = main.picks.orbs.orbs[vi]
 		var at: Vector3 = orb.icon.global_position if orb.icon != null else orb.global_position
 		hr.global_position = hr.global_position.move_toward(at, delta * 1.2)
 		if not has_meta("vr_orb_said") and hr.global_position.distance_to(at) < 0.1:
@@ -684,8 +694,14 @@ func _runner(p, delta: float) -> void:
 				plate = it
 		var inv := _invites()
 		if main.picks != null and main.picks.showing() and p.index == 1 and main.picks.orbs.orbs.size() > 0:
-			var orb: Node3D = main.picks.orbs.orbs[(main.shift + 2) % main.picks.orbs.orbs.size()]
+			var oi: int = (main.shift + 2) % main.picks.orbs.orbs.size()
+			for k in main.picks.orbs.entries.size():  # the mode pick: always the pinned mode (gifts: any)
+				if String(main.picks.orbs.entries[k].get("id", "")) == _bot_mode():
+					oi = k
+			var orb: Node3D = main.picks.orbs.orbs[oi]
 			goal = Vector3(orb.global_position.x, 0.0, -0.8)  # walk under one (picks.gd)
+			if absf(p.global_position.x - orb.global_position.x) > 0.2:
+				goal.z = -1.9  # line up behind it first (walking along the pass would touch a neighbour on the way)
 		elif not inv.is_empty() and p.index == 1:
 			goal = Vector3(inv[0].global_position.x, 0.0, -0.8)
 		elif main.fire_on and main.ext_holder == -1 and p.index == want_players:
