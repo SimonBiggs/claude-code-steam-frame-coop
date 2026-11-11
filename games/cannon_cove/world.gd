@@ -71,6 +71,13 @@ void fragment() {
 
 # Deck geometry (world space, our ship sits at the origin, bow towards -Z).
 const DECK_HALF_W := 3.9
+## The four cannons: [position, outboard] (main.gd builds them; deep.gd keeps warned arms and squalls clear of them).
+const CANNON_SPOTS := [
+	[Vector3(-3.55, 0.85, 1.0), Vector3.LEFT],
+	[Vector3(-3.55, 0.85, 6.0), Vector3.LEFT],
+	[Vector3(3.55, 0.85, 1.0), Vector3.RIGHT],
+	[Vector3(3.55, 0.85, 6.0), Vector3.RIGHT],
+]
 const DECK_BOW := -11.0  # the bow starts narrowing here
 const BOW_TIP := -15.0
 const DECK_STERN := 9.4

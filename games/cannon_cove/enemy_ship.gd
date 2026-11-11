@@ -32,6 +32,8 @@ var orbit_dir := 1.0
 var heading := 0.0
 var fire_t := 5.0
 var fire_every := 8.0
+var net_t := 0.0  # NET SHOT (deep.gd): tangled in a net - slow, and no shooting
+var net_node: Node3D
 var board_t := 6.0
 var boarders_sent := 0
 var gold := 50
@@ -261,6 +263,7 @@ func _physics_process(delta: float) -> void:
 	hull_mat.emission_energy_multiplier = flash * 2.0
 	bar_fill.scale.x = maxf(0.02, hp / max_hp)
 	_animate_details(delta)
+	_net_look(delta)
 	var sea: float = main.sea_level
 	if ghost:
 		if not net_started:
@@ -359,7 +362,7 @@ func _sail(delta: float) -> void:
 	var want := atan2(-desired.x, -desired.z)
 	heading = lerp_angle(heading, want, 1.0 - exp(-0.9 * delta))
 	var f := forward()
-	var spd := speed * (1.4 if fleeing else 1.0)
+	var spd: float = speed * (1.4 if fleeing else 1.0) * (main.Deep.NET_SLOW if net_t > 0.0 else 1.0)
 	position.x += f.x * spd * delta
 	position.z += f.z * spd * delta
 
@@ -386,6 +389,8 @@ func _ram(delta: float) -> void:
 
 func _attack(delta: float) -> void:
 	var d := Vector2(position.x, position.z).length()
+	if net_t > 0.0:
+		return  # tangled: no shooting, no boarders
 	fire_t -= delta
 	if fire_t <= 0.0 and d < orbit_r + 18.0 and not main.game_over:
 		fire_t = fire_every * randf_range(0.8, 1.2)
@@ -424,11 +429,11 @@ func _fire_broadside() -> void:
 
 
 ## Host: is the world point p inside this ship (with some slack, to be kind)?
-func hit_test(p: Vector3) -> bool:
+func hit_test(p: Vector3, extra: float = 0.0) -> bool:
 	if sinking:
 		return false
 	var lp := global_transform.affine_inverse() * p
-	var slack := 1.0 if kind != "fireship" else 1.4
+	var slack := (1.0 if kind != "fireship" else 1.4) + extra
 	return absf(lp.x) < half.x + slack and absf(lp.z) < half.y + slack and lp.y < 9.0 and lp.y > -2.5
 
 
@@ -475,3 +480,23 @@ func apply_net(item: Array) -> void:
 	if hp < max_hp and flash <= 0.0 and has_meta("last_hp") and float(get_meta("last_hp")) > hp:
 		flash = 1.0
 	set_meta("last_hp", hp)
+
+
+## NET SHOT (every machine): a green rope net draped over the ship while it is tangled.
+func _net_look(delta: float) -> void:
+	net_t = maxf(0.0, net_t - delta)
+	if net_t > 0.0 and net_node == null:
+		net_node = Node3D.new()
+		net_node.name = "Net"
+		var m := World.mat(Color(0.55, 0.9, 0.5), 0.6)
+		var h := mast_height()
+		for i in 5:
+			var f := (i - 2) / 2.0
+			var a := World.box(net_node, Vector3(0.12, h * 0.9, 0.12), Vector3(f * half.x * 0.9, h * 0.45, 0.0), m)
+			a.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			var b := World.box(net_node, Vector3(half.x * 2.0, 0.12, 0.12), Vector3(0.0, h * (0.15 + i * 0.17), 0.0), m)
+			b.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(net_node)
+	if net_node != null:
+		net_node.visible = net_t > 0.0 and not sinking
+		net_node.rotation.z = sin(bob * 2.0) * 0.05

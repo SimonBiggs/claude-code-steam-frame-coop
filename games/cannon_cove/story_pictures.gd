@@ -5,7 +5,8 @@ extends RefCounted
 ## t = the picture's clock, bob = its gentle bob, color = the card's colour.
 ## (The Kraken's crown uses Dragon Rider's "crown": any picture works in every game.)
 
-const NAMES: Array[String] = ["parrot", "doubloon", "pearl", "anchor", "starfish", "bunting", "treasuremap"]
+const NAMES: Array[String] = ["parrot", "doubloon", "pearl", "anchor", "starfish", "bunting", "treasuremap", "bouncyball", "netshot",
+	"bigbarrel", "quickload", "krakenarm", "squall", "harbour"]
 
 const RED := Color(0.95, 0.2, 0.15)
 const GREEN := Color(0.2, 0.8, 0.3)
@@ -85,6 +86,70 @@ static func draw(pic, kind: String, t: float, bob: float, color: Color) -> void:
 			var pulse := 1.0 + sin(t * 4.0) * 0.12
 			pic._poly([[0.62 - 0.07 * pulse, 0.4 + bob], [0.64 - 0.07 * pulse, 0.38 + bob], [0.66 + 0.07 * pulse, 0.5 + bob], [0.64 + 0.07 * pulse, 0.52 + bob]], RED)
 			pic._poly([[0.66 + 0.07 * pulse, 0.4 + bob], [0.68 + 0.07 * pulse, 0.42 + bob], [0.62 - 0.07 * pulse, 0.52 + bob], [0.6 - 0.07 * pulse, 0.5 + bob]], RED)
+
+		"bouncyball":  # a pink cannonball bouncing off the waves (BOUNCY BALLS)
+			var c := Color(1.0, 0.45, 0.7) if color == Color.WHITE else color
+			var hop := absf(sin(t * 3.0)) * 0.25
+			pic._poly([[0.05, 0.86], [0.2, 0.8], [0.35, 0.86], [0.5, 0.8], [0.65, 0.86], [0.8, 0.8], [0.95, 0.86], [0.95, 0.95], [0.05, 0.95]], BLUE)
+			for i in 3:
+				pic._circle(0.22 + i * 0.12, 0.62 - sin(i * 1.2) * 0.12, 0.025, Color(1, 1, 1, 0.7))
+			pic._circle(0.62, 0.6 - hop, 0.17, Color(0.2, 0.2, 0.25))
+			pic._circle(0.62, 0.6 - hop, 0.13, c)
+			pic._circle(0.57, 0.55 - hop, 0.04, Color(1, 1, 1, 0.8))
+		"netshot":  # a green rope net with corner weights (NET SHOT)
+			var c := Color(0.55, 0.9, 0.5) if color == Color.WHITE else color
+			var sw := sin(t * 2.0) * 0.02
+			for i in 5:
+				var f := 0.2 + i * 0.15
+				pic._poly([[f - 0.012 + sw, 0.2], [f + 0.012 + sw, 0.2], [f + 0.012 - sw, 0.8], [f - 0.012 - sw, 0.8]], c)
+				pic._poly([[0.2, f - 0.012 + bob], [0.8, f - 0.012 + bob], [0.8, f + 0.012 + bob], [0.2, f + 0.012 + bob]], c)
+			for p2 in [[0.2, 0.2], [0.8, 0.2], [0.2, 0.8], [0.8, 0.8]]:
+				pic._circle(p2[0], p2[1] + bob, 0.05, Color(0.35, 0.35, 0.4))
+		"bigbarrel":  # a fat cannon with a huge ball (BIG BARREL)
+			var c := Color(1.0, 0.6, 0.2) if color == Color.WHITE else color
+			pic._poly([[0.12, 0.5 + bob], [0.62, 0.32 + bob], [0.7, 0.56 + bob], [0.2, 0.74 + bob]], Color(0.25, 0.25, 0.3))
+			pic._circle(0.66, 0.44 + bob, 0.13, Color(0.15, 0.15, 0.18))
+			pic._circle(0.3, 0.78 + bob, 0.12, Color(0.55, 0.38, 0.2))
+			pic._circle(0.3, 0.78 + bob, 0.05, Color(0.35, 0.22, 0.1))
+			var fly := fmod(t * 0.6, 1.0)
+			pic._circle(0.72 + fly * 0.12, 0.3 - fly * 0.1 + bob, 0.15, c)
+		"quickload":  # a cannonball zooming with speed lines (QUICK LOAD)
+			var c := Color(0.45, 0.85, 1.0) if color == Color.WHITE else color
+			var z := fmod(t * 1.5, 1.0) * 0.08
+			for i in 3:
+				var y := 0.42 + i * 0.09 + bob
+				pic._poly([[0.1 + z, y], [0.45 + z, y - 0.015], [0.45 + z, y + 0.015]], c)
+			pic._circle(0.64, 0.51 + bob, 0.18, Color(0.18, 0.18, 0.22))
+			pic._circle(0.59, 0.45 + bob, 0.05, Color(1, 1, 1, 0.6))
+		"krakenarm":  # a purple Kraken arm curling up out of the waves
+			var c := Color(0.55, 0.3, 0.75) if color == Color.WHITE else color
+			var sway := sin(t * 2.0) * 0.04
+			for i in 7:
+				var f := i / 6.0
+				var x := 0.4 + sin(f * 2.6) * 0.18 + sway * f
+				pic._circle(x, 0.82 - f * 0.6 + bob * f, 0.11 - f * 0.06, c)
+				if i % 2 == 1:
+					pic._circle(x - 0.04, 0.82 - f * 0.6 + bob * f, 0.025, c.lightened(0.5))
+			pic._poly([[0.05, 0.86], [0.2, 0.8], [0.35, 0.86], [0.5, 0.8], [0.65, 0.86], [0.8, 0.8], [0.95, 0.86], [0.95, 0.95], [0.05, 0.95]], BLUE)
+		"squall":  # a grey rain cloud with slanting rain
+			var c := Color(0.25, 0.55, 1.0) if color == Color.WHITE else color
+			for i in 6:
+				var x := 0.25 + i * 0.1
+				var y := 0.55 + fmod(t * 0.8 + i * 0.37, 0.3)
+				pic._poly([[x, y], [x + 0.02, y], [x - 0.05, y + 0.12], [x - 0.07, y + 0.12]], c)
+			pic._circle(0.35, 0.38 + bob, 0.15, Color(0.5, 0.53, 0.62))
+			pic._circle(0.55, 0.32 + bob, 0.19, Color(0.55, 0.58, 0.67))
+			pic._circle(0.72, 0.4 + bob, 0.13, Color(0.5, 0.53, 0.62))
+			pic._poly([[0.22, 0.4 + bob], [0.84, 0.4 + bob], [0.84, 0.52 + bob], [0.22, 0.52 + bob]], Color(0.5, 0.53, 0.62))
+		"harbour":  # Polly's harbour: an island with a hut, a beacon and a jetty
+			pic._poly(_ellipse(0.5, 0.78, 0.42, 0.1, 16), Color(0.96, 0.84, 0.56))
+			pic._poly([[0.05, 0.86], [0.95, 0.86], [0.95, 0.95], [0.05, 0.95]], BLUE)
+			pic._poly([[0.25, 0.75], [0.48, 0.75], [0.48, 0.55], [0.25, 0.55]], Color(0.97, 0.94, 0.86))
+			pic._poly([[0.21, 0.56], [0.52, 0.56], [0.365, 0.42]], RED)
+			pic._poly([[0.62, 0.75], [0.72, 0.75], [0.7, 0.35], [0.64, 0.35]], Color(0.97, 0.94, 0.86))
+			var glow := 0.05 + absf(sin(t * 1.5)) * 0.02
+			pic._circle(0.67, 0.3, glow, YELLOW)
+			pic._poly([[0.48, 0.8], [0.9, 0.8], [0.9, 0.83], [0.48, 0.83]], Color(0.6, 0.42, 0.24))
 
 
 static func _ellipse(cx: float, cy: float, rx: float, ry: float, n: int) -> Array:

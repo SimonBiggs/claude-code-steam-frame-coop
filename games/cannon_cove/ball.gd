@@ -11,6 +11,7 @@ var vel := Vector3.ZERO
 var enemy := false
 var mega := false  # a golden cannonball: bigger, glowing, explodes in a huge blast
 var visual_only := false
+var bounced := false  # BOUNCY BALLS: this one already skipped off the sea once
 var age := 0.0
 
 
@@ -19,6 +20,8 @@ func _ready() -> void:
 	if mega:
 		m = World.mat(Looks.MEGA_BALL, 3.0, 0.2)
 	var s := World.sphere(self, 0.24 if not mega else 0.4, Vector3.ZERO, m, 10)
+	if not enemy and main.ball_slack() > 0.0:
+		s.scale = Vector3.ONE * main.Deep.BIG_SCALE  # BIG BARREL: fat cannonballs
 	if mega:
 		Contrast.outline(s, Looks.OUTLINE)
 	s.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -71,6 +74,9 @@ func _physics_process(delta: float) -> void:
 	var sea: float = main.sea_level
 	if next.y < sea:
 		if not visual_only:
+			if not enemy and main.ball_bounce(self, Vector3(next.x, sea, next.z)):
+				queue_free()  # BOUNCY BALLS: it skipped off the sea (a new ball flies on)
+				return
 			main.splash(Vector3(next.x, sea, next.z), 1.0 if not mega else 2.0)
 			if not enemy:
 				main.on_ball_splash(Vector3(next.x, sea, next.z))

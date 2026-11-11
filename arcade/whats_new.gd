@@ -33,6 +33,12 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "cc-gifts", "date": "2026-11-11", "game": "cannon_cove", "pic": "bouncyball", "line": "Shoot Polly's cannon gifts!"},
+	{"id": "cc-arms", "date": "2026-11-11", "game": "cannon_cove", "pic": "krakenarm", "line": "Kraken arms! Step out!"},
+	{"id": "cc-harbour", "date": "2026-11-11", "game": "cannon_cove", "pic": "harbour", "line": "Polly's harbour grows!"},
+	{"id": "cc-solo", "date": "2026-11-11", "game": "cannon_cove", "pic": "parrot", "line": "Sail alone: Polly loads!"},
+	{"id": "cc-seasons", "date": "2026-11-11", "game": "cannon_cove", "pic": "snowflake", "line": "Snowy seas", "try": {"CC_SEASON": "winter"}},
+	{"id": "cc-gentle", "date": "2026-11-11", "game": "cannon_cove", "pic": "pirateship", "line": "Gentle, brave or hard"},
 	{"id": "wm-gifts", "date": "2026-11-11", "game": "whack_a_mole", "pic": "bighammer", "line": "Pick Fig's hammer gifts!"},
 	{"id": "wm-tricks", "date": "2026-11-11", "game": "whack_a_mole", "pic": "stampede", "line": "Mole stampede! Look out!"},
 	{"id": "wm-holiday", "date": "2026-11-11", "game": "whack_a_mole", "pic": "moleden", "line": "Moles go on holiday!"},
