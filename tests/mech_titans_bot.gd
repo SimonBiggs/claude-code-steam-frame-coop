@@ -68,6 +68,7 @@ var made_round := -1  ## MT_ROUND: the made round the bot starts at (0-based)
 var saw_variant := false  ## a lost kaiju wore the made round's size
 var saw_pick := false  ## DEEP: pods landed after a made round (every machine builds them)
 var pick_pods := 0
+var warn_seen := 0  ## most danger tells (WarnRings) on the ground at once, this machine
 var pick_seen_t := 0.0
 var saw_crown := false  ## DEEP: a boss kaiju wore its crown
 var boss_fight_t := 0.0  ## DEEP: seconds a crowned boss was up and fighting
@@ -338,6 +339,8 @@ func _deep_checks(ri: Dictionary) -> void:
 		kit.assert_true(saw_crown, "%s: the boss kaiju wore its crown" % mode)
 		if mode != "client" and boss_fight_t > 25.0:
 			kit.assert_true(main.combat.sig_tells > 0, "%s: the boss warned its big move (fought %.0f s)" % [mode, boss_fight_t])
+	if mode != "client" and (main.deep.hazards_landed > 0 or main.combat.sig_tells > 0):
+		kit.assert_true(warn_seen > 0, "%s: the danger tells showed on the ground (WarnRings)" % mode)
 	if mode != "client" and String(main.net.state_get("mode", "")) == "mega" and float(main.missions.time) > 15.0:
 		kit.assert_true(main.deep.hazards_landed > 0, "%s: the district's hazards landed" % mode)
 
@@ -387,6 +390,8 @@ func _join() -> void:
 ## Briefing: skip lines; results: continue.
 func _flow() -> String:
 	var phase := String(main.net.state_get("phase", ""))
+	if main.combat != null and main.combat.fx != null:
+		warn_seen = maxi(warn_seen, main.combat.fx.rings.count())
 	if simple:
 		var r := int(main.net.state_get("mission", 0))
 		if phase == "play" and r == 0:
