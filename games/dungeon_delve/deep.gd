@@ -247,7 +247,8 @@ func _build_lobby() -> void:
 		l.outline_size = 22
 		l.modulate = col.lightened(0.3)
 		l.outline_modulate = Color(0, 0, 0, 0.95)
-		l.position = PADS[mname] + Vector3(0.0, 1.9, 0.0)
+		# (DAILY: higher, clear of its gold star, or the gold word and star run together from the Deck / TV camera)
+		l.position = PADS[mname] + Vector3(0.0, 2.8 if mname == "daily" else 1.9, 0.0)
 		lobby.add_child(l)
 		pad_labels[mname] = l
 		var best := Label3D.new()
