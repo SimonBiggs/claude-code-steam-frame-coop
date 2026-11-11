@@ -33,6 +33,11 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "wm-gifts", "date": "2026-11-11", "game": "whack_a_mole", "pic": "bighammer", "line": "Pick Fig's hammer gifts!"},
+	{"id": "wm-tricks", "date": "2026-11-11", "game": "whack_a_mole", "pic": "stampede", "line": "Mole stampede! Look out!"},
+	{"id": "wm-holiday", "date": "2026-11-11", "game": "whack_a_mole", "pic": "moleden", "line": "Moles go on holiday!"},
+	{"id": "wm-seasons", "date": "2026-11-11", "game": "whack_a_mole", "pic": "snowman", "line": "A snowy mole garden", "try": {"WM_SEASON": "winter"}},
+	{"id": "wm-gentle", "date": "2026-11-11", "game": "whack_a_mole", "pic": "mole", "line": "Gentle, brave or hard"},
 	{"id": "td-tools", "date": "2026-11-11", "game": "treasure_dig", "pic": "bigspade", "line": "Pick Peg's digging tools!"},
 	{"id": "td-events", "date": "2026-11-11", "game": "treasure_dig", "pic": "tidewave", "line": "Tides! Coconuts! Look out!"},
 	{"id": "td-museum", "date": "2026-11-11", "game": "treasure_dig", "pic": "museum", "line": "Peg's museum grows!"},

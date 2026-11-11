@@ -58,10 +58,12 @@ static func crop_index(id: String) -> int:
 
 
 ## The save's default data (core/save.gd fills missing keys from this).
-## beds: {crop id: times grown}; cur: the bed growing now ("" = pick next); fill: veg in it.
+## beds: {crop id: times grown}; cur: the bed growing now ("" = pick next); fill: veg in it. Second pass (deep.gd):
+## mode: the family's last GENTLE / BRAVE / HARD; gift: the last hammer gift; moles_total: every mole bonked (the
+## holiday garden: one mole on holiday every deep.gd HOLIDAY_EVERY).
 static func save_defaults() -> Dictionary:
 	return {"best": 0, "world": -1, "beds": {}, "cur": FIRST_CROP, "fill": 0, "rounds": 0, "stars": {},
-		"daily": {}, "met": {}, "bunnies": 0, "kings": 0}
+		"daily": {}, "met": {}, "bunnies": 0, "kings": 0, "mode": "brave", "gift": "", "moles_total": 0}
 
 
 static func beds_grown(beds: Dictionary) -> int:
