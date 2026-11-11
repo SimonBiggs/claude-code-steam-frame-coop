@@ -970,7 +970,10 @@ func _follow_headset() -> void:
 			set_meta("follow_retry_ms", Time.get_ticks_msec() + 2000)
 			return
 		set_meta("follow_udp", bound)
-	var udp: PacketPeerUDP = get_meta("follow_udp")
+	# (a default + return: "get_meta 'follow_udp' missing" showed once in a VR sweep, 2026-11-11)
+	var udp := get_meta("follow_udp", null) as PacketPeerUDP
+	if udp == null:
+		return
 	while udp.get_available_packet_count() > 0:
 		var msg := udp.get_packet().get_string_from_utf8()
 		var sender := udp.get_packet_ip()
