@@ -501,6 +501,17 @@ func _flight_title(fl: Dictionary) -> String:
 	return ""
 
 
+## While picking, the sky scoreboard's number and clock step aside and its title floats higher: the pick orbs' names
+## sit in front of it (deep.gd row_spots) and the score is 0 then anyway.
+func _place_sign(phase: String) -> void:
+	if sign_score == null:
+		return
+	var picking := phase == "pick"
+	sign_score.visible = not picking
+	sign_time.visible = not picking
+	sign_chapter.position = SIGN_POS + Vector3(0.0, 4.2 if picking else 1.9, 0.0)
+
+
 func _all_huds() -> Array:
 	var out: Array = []
 	for k in huds:
@@ -1946,7 +1957,7 @@ func _on_state_changed(key: String, value: Variant) -> void:
 			var breeze := String(fl.get("breeze", ""))
 			if not Deep.fold(String(fl.get("fold", ""))).is_empty():
 				sub = "%s fold!" % String(Deep.fold(String(fl.get("fold", ""))).name)
-			HudKit.banner(_all_huds(), title, sub, {"duration": 2.5})
+			HudKit.banner(_all_huds(), title, sub, {"duration": 2.0, "y": 0.2})  # (high and short: the planes fly mid-screen)
 			if vr_rig != null:
 				HudKit.vr_banner(self, vr_rig.camera, title, "Throw through the hoops!" if breeze == "" else sub, {"duration": 2.5, "sound": ""})
 			sfx.play("go", -4.0)
@@ -1960,6 +1971,7 @@ func _on_state_changed(key: String, value: Variant) -> void:
 			for slot in flyers:
 				_apply_look(flyers[slot])
 		"phase":
+			_place_sign(String(value))
 			match String(value):
 				"results":
 					_show_results(net.state_get("results", {}))
@@ -1967,7 +1979,7 @@ func _on_state_changed(key: String, value: Variant) -> void:
 					_hide_results()
 					music.play_mood("party")
 					var pt := _flight_title(_flight())
-					HudKit.banner(_all_huds(), pt, "Fly into a ball", {"duration": 2.0, "style": "info"})
+					HudKit.banner(_all_huds(), pt, "Fly into a ball", {"duration": 2.0, "style": "info", "y": 0.2})
 					if vr_rig != null:
 						HudKit.vr_banner(self, vr_rig.camera, pt, "Throw a plane at a ball", {"duration": 2.0, "sound": ""})
 				_:

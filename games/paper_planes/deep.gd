@@ -53,8 +53,8 @@ const GEESE_DEPTH := 1.4  # ... and how deep (along z) the geese fly
 const GEESE_N := 6
 const DECK_CLEAR := 4.0  # metres between any event and the VR player's head (planes leave the hand there)
 const MAX_DRIFT := 6.0  # a gust never pushes a plane further than this
-const GUST_COLOR := Color(0.6, 0.3, 0.9)  # violet: "wind!" (never the gold of a pick or a hoop)
-const GEESE_COLOR := Color(1.0, 0.3, 0.5)  # pink-red: "look out!"
+const GUST_COLOR := Color(0.8, 0.95, 0.2)  # lime: "wind!" (never the gold of a pick or a hoop)
+const GEESE_COLOR := Color(0.9, 0.1, 0.15)  # deep red: "look out!"
 const GOOSE_BODY := Color(0.42, 0.33, 0.27)  # a brown goose (the white geese vanished on winter skies)
 const GOOSE_NECK := Color(0.12, 0.12, 0.14)
 const KINDS: Array[String] = ["gust", "geese"]
@@ -94,7 +94,7 @@ const TRAIL_R := 9.0
 ## The pick row: big orbs in an arc in the sky in front of the VR deck.
 const ROW_R := 10.2  # metres from the VR head (flat)
 const ROW_ANGLE := 0.52  # radians between orbs (seen from the VR deck)
-const ROW_Y := 3.9  # the middle orb's height (the outer ones dip a little)
+const ROW_Y := 2.8  # the middle orb's height (the outer ones dip a little): under the sky scoreboard and the VR story card
 const ORB_SCALE := 2.2
 const CATCH := 0.35  # a plane this near an orb's edge takes it
 const ROW_WAIT := 14.0  # nobody took one: the middle after this (main.gd pick_time)
@@ -365,7 +365,7 @@ static func row_spots(n: int) -> Array:
 	for i in n:
 		var off := (i - (n - 1) * 0.5) * ROW_ANGLE
 		var p := SkyGen.VR_HEAD + Vector3(sin(off) * ROW_R, 0.0, -cos(off) * ROW_R)
-		out.append(Vector3(snappedf(p.x, 0.01), ROW_Y - absf(off) * 1.3, snappedf(p.z, 0.01)))
+		out.append(Vector3(snappedf(p.x, 0.01), ROW_Y - absf(off) * 0.6, snappedf(p.z, 0.01)))
 	return out
 
 
