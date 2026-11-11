@@ -238,6 +238,7 @@ var gift_night := 0  # host: the last night a lantern gift was offered after
 var rings: WarnRings  # every machine draws the warning rings (host sends "warn")
 var picks: Node  # picks.gd (every machine draws the orbs, the host decides)
 var wing_node: Node3D  # wings.gd: this house's wing dressing
+var hops_landed := 0  # host: Boing hops / pufflings that landed in their warning ring (the bot checks)
 
 
 func _ready() -> void:
@@ -363,6 +364,7 @@ func ghost_material() -> ShaderMaterial:
 		_ghost_mat = ShaderMaterial.new()
 		_ghost_mat.shader = Shader.new()
 		_ghost_mat.shader.code = GHOST_SHADER
+		_ghost_mat.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through ghosts never wash out a VR card
 	return _ghost_mat
 
 

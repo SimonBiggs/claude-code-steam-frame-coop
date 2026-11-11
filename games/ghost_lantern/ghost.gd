@@ -916,6 +916,7 @@ func _hop(delta: float) -> bool:
 			if spring != null:
 				spring.scale = Vector3(1.3, 0.4, 1.3)
 			main.sound("hit", -8.0, 1.5 if kind == "boing" else 1.9)
+			main.hops_landed += 1
 			main.burst(global_position + Vector3.DOWN * 0.4, color, 8, 0.05)
 		return true
 	if kind != "boing" or leaving or hiding or sucked_t > 0.0 or stun_t > 0.0 or capture > 0.05:

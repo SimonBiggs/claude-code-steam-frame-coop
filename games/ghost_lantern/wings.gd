@@ -8,6 +8,7 @@ extends Node3D
 
 const World := preload("res://games/ghost_lantern/world.gd")
 const HouseGen := preload("res://games/ghost_lantern/housegen.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 const NAMES := {"attic": "THE ATTIC", "cellar": "THE CELLAR", "greenhouse": "THE GREENHOUSE"}
 const LINES := {"attic": "The attic is open!", "cellar": "Down to the cellar!", "greenhouse": "My greenhouse!"}
@@ -85,6 +86,7 @@ func build(w: Dictionary) -> void:
 			var glass := StandardMaterial3D.new()
 			glass.albedo_color = Color(0.7, 1.0, 0.8, 0.25)
 			glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			glass.render_priority = UiKit.VR_PRIO_UNDER_UI
 			glass.emission_enabled = true
 			glass.emission = Color(0.4, 0.7, 0.5)
 			glass.emission_energy_multiplier = 0.4

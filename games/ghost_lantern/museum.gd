@@ -10,6 +10,7 @@ extends Node3D
 ## the shelf clear of hiding places).
 
 const World := preload("res://games/ghost_lantern/world.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 ## Ghosts kept for each cosy step.
 const STEPS: Array[int] = [4, 10, 18, 28, 40, 55, 75, 95, 120, 150]  # (second pass: a cat, a gramophone, a starry ceiling)
@@ -182,12 +183,14 @@ func _build_jars() -> void:
 	var glass := StandardMaterial3D.new()
 	glass.albedo_color = Color(0.75, 0.9, 1.0, 0.22)
 	glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	glass.render_priority = UiKit.VR_PRIO_UNDER_UI
 	glass.roughness = 0.1
 	glass.metallic_specular = 0.9
 	var lid := World.mat(Color(0.75, 0.55, 0.25), 0.3, 0.4)
 	var empty_glass := StandardMaterial3D.new()
 	empty_glass.albedo_color = Color(0.3, 0.3, 0.4, 0.35)
 	empty_glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	empty_glass.render_priority = UiKit.VR_PRIO_UNDER_UI
 	var cols := KIND_ORDER.size()
 	var step := (SHELF_W - 0.3) / float(cols)
 	for c in cols:

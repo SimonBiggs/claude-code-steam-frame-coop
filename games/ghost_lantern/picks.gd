@@ -121,7 +121,7 @@ func show_row(new_stage: String, entries: Array, places: Array) -> void:
 	orbs.show_orbs(new_stage, entries, Vector3.ZERO, GAP, Y, {"at": places, "scale": 0.7, "pop": true, "touch": FEET_R})
 
 
-## Host / local, every frame while the orbs are up.
+## Host / local, every frame while the orbs are up (the clock; touches are physics frames: _physics_process).
 func tick(delta: float) -> void:
 	if stage == "":
 		return
@@ -131,6 +131,14 @@ func tick(delta: float) -> void:
 			_finish()
 		return
 	t -= delta
+	if t <= 0.0:
+		take(options.size() / 2, -1)  # the middle one (it glows brightest)
+
+
+## Host / local: a VR hand touching an orb, or someone walking under one (where the hands and feet are this frame).
+func _physics_process(_delta: float) -> void:
+	if stage == "" or chosen >= 0 or main.net.mode == "client":
+		return
 	for p in main.players:
 		if not p.active or p.ghost:
 			continue
@@ -147,8 +155,6 @@ func tick(delta: float) -> void:
 			if i >= 0:
 				take(i, p.index)
 				return
-	if t <= 0.0:
-		take(options.size() / 2, -1)  # the middle one (it glows brightest)
 
 
 ## Host / local: orb i taken by slot (-1: nobody chose, the middle one).

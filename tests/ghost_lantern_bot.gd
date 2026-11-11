@@ -151,7 +151,7 @@ func _physics_process(delta: float) -> void:
 			if to.length() > 5.0:
 				p1.xr_origin.global_position += to.normalized() * 3.0 * delta
 		var shaking := fmod(t, 9.0) < 1.0
-		if not (simple and prop_t > 0.0):
+		if not (simple and (prop_t > 0.0 or main.picks.active())):  # (the props / pick orbs move this hand)
 			p1.hand_l.position = Vector3(-0.25 + (sin(t * 30.0) * 0.12 if shaking else 0.0), 1.1, -0.3)
 	elif not p1.ghost and not p1.remote and not p1.is_down:
 		var g = _nearest_ghost(p1.global_position, "sleepy")
@@ -225,7 +225,7 @@ func _simple_checks(delta: float) -> void:
 	if t - last_print < 0.02 and fmod(t, 5.0) < 0.1:
 		print("BOT   simple: dawn=%.2f won=%s kinds=%s" % [main.director().dawn, main.director().won, _kinds()])
 	# Touch every prop once practice is over (VR: with the fake left hand; flat: P2 bumps the floor spots).
-	if not main.practice and main.props != null and t > 20.0:
+	if not main.practice and main.props != null and t > 20.0 and not main.picks.active():
 		var names: Array = main.props.TOUCH.keys()
 		if prop_i < names.size():
 			prop_t += delta
@@ -293,10 +293,7 @@ func _second_pass(_delta: float) -> void:
 	for g in get_tree().get_nodes_in_group("ghosts"):
 		if g.kind == "puffling":
 			pufflings_seen = maxi(pufflings_seen, get_tree().get_nodes_in_group("ghosts").filter(func(x) -> bool: return x.kind == "puffling").size())
-		if g.kind == "boing" and g.stun_t > 0.0 and g.hop_t < 0.0 and g.has_meta("hopped"):
-			saw_boing_land = true
-		if g.kind == "boing" and g.hop_t >= 0.0:
-			g.set_meta("hopped", true)
+	saw_boing_land = saw_boing_land or (mode != "client" and main.hops_landed > 0)
 	if mode == "client":
 		if t > 44.0 and not has_meta("client_second"):
 			set_meta("client_second", true)
@@ -323,6 +320,7 @@ func _second_pass(_delta: float) -> void:
 	if not spawned_new and main.night >= 2 and not main.in_break and t > 38.0:
 		spawned_new = true
 		var b = main._spawn_ghost("boing")
+		b.global_position = Vector3(-18.0 if p1.global_position.x > 0.0 else 18.0, 1.3, -6.0)  # far from everyone: it hops on its own
 		b.hop_wait = 0.3
 		var pf = main._spawn_ghost("puff")
 		pf.global_position = p1.global_position + Vector3(0, 1.4, -3.0)
