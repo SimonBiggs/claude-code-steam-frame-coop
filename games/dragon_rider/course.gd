@@ -14,6 +14,20 @@ const RING_R := 6.5
 const RESCUE_R := 9.5
 const BALLOON_COLORS: Array[Color] = [Color(1.0, 0.35, 0.4), Color(1.0, 0.8, 0.25), Color(0.4, 0.8, 1.0),
 	Color(0.55, 0.95, 0.45), Color(0.95, 0.5, 1.0)]
+## The rings: the next one (gold, glowing), later ones, done ones and the final one; Sunny's golden balloon.
+const RING_NEXT := Color(1.0, 0.85, 0.3)
+const RING_LATER := Color(0.55, 0.85, 1.0)
+const RING_DONE := Color(0.5, 1.0, 0.6)
+const RING_FINAL := Color(1.0, 0.5, 0.75)
+const GOLDEN_BALLOON := Color(1.0, 0.82, 0.25)
+## Rings, balloons and the stranded critters wear the ink outline, wide enough to read at flying distance (the gold
+## ring and balloons vanished on the golden horizon, the sky-blue ring on the morning sky, the pastel critters on
+## the clouds: palette.gd).
+const OUTLINE := preload("res://core/contrast.gd").OUTLINE
+const RING_OUTLINE_W := 0.12
+const BALLOON_OUTLINE_W := 0.07
+const CRITTER_OUTLINE_W := 0.035
+const CLOUD_PAD := Color(1.0, 1.0, 1.0)  # the little cloud a stranded critter sits on
 const CRITTER_COLORS: Array[Color] = [Color(1.0, 0.75, 0.85), Color(0.75, 0.9, 1.0), Color(1.0, 0.92, 0.6),
 	Color(0.8, 1.0, 0.75), Color(0.9, 0.8, 1.0)]
 const WATERFALL_SHADER := """
@@ -28,6 +42,7 @@ void fragment() {
 """
 
 const RouteGen := preload("res://games/dragon_rider/routegen.gd")
+const Contrast := preload("res://core/contrast.gd")
 
 var main
 var route := {}  # routegen.gd's data for this level
@@ -64,10 +79,10 @@ func build(seed_v: int, origin: Vector3, yaw: float, lv: int, mis: String = "rin
 	level = lv
 	mission = mis
 	route = RouteGen.route(seed_v, origin, yaw, lv, mis, main.SIMPLE_MODE)
-	ring_next_mat = main.color_mat(Color(1.0, 0.85, 0.3), 2.2)
-	ring_later_mat = main.color_mat(Color(0.55, 0.85, 1.0), 0.7)
-	ring_done_mat = main.color_mat(Color(0.5, 1.0, 0.6), 0.5)
-	ring_final_mat = main.color_mat(Color(1.0, 0.5, 0.75), 2.5)
+	ring_next_mat = main.color_mat(RING_NEXT, 2.2)
+	ring_later_mat = main.color_mat(RING_LATER, 0.7)
+	ring_done_mat = main.color_mat(RING_DONE, 0.5)
+	ring_final_mat = main.color_mat(RING_FINAL, 2.5)
 	var rock: StandardMaterial3D = main.color_mat(Color(0.55, 0.42, 0.5), 0.0)
 	var grass: StandardMaterial3D = main.color_mat(Color(0.5, 0.78, 0.4), 0.0)
 	var string_mat: StandardMaterial3D = main.color_mat(Color(0.95, 0.95, 0.95), 0.0)
@@ -82,6 +97,7 @@ func build(seed_v: int, origin: Vector3, yaw: float, lv: int, mis: String = "rin
 		ring.mesh = tm
 		ring.material_override = ring_later_mat
 		ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		Contrast.outline(ring, OUTLINE, RING_OUTLINE_W)
 		add_child(ring)
 		ring.global_position = rd.pos
 		ring.basis = main.basis_y_to(rd.normal)
@@ -91,7 +107,7 @@ func build(seed_v: int, origin: Vector3, yaw: float, lv: int, mis: String = "rin
 	for b in route.balloons:
 		_balloon(2000 + balloons.size(), b[0], BALLOON_COLORS[int(b[1]) % BALLOON_COLORS.size()], false, string_mat)
 	if route.golden != null:
-		_balloon(3000, route.golden, Color(1.0, 0.82, 0.25), true, string_mat)
+		_balloon(3000, route.golden, GOLDEN_BALLOON, true, string_mat)
 	for c in route.critters:
 		_critter(c)
 	for isl in route.islands:
@@ -121,6 +137,7 @@ func _balloon(id: int, bp: Vector3, c: Color, golden: bool, string_mat: Material
 	bm.material_override = main.color_mat(c, 1.6 if golden else 0.35)
 	bm.scale = Vector3(1.0, 1.2, 1.0) * (1.35 if golden else 1.0)
 	bm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	Contrast.outline(bm, OUTLINE, BALLOON_OUTLINE_W)
 	b.add_child(bm)
 	var st := MeshInstance3D.new()
 	st.mesh = main.cyl_mesh(0.02, 0.02, 2.0, 4)
@@ -203,12 +220,13 @@ func _critter(at: Vector3) -> void:
 	n.global_position = at
 	var pad := MeshInstance3D.new()
 	pad.mesh = main.sphere_mesh(1.0)
-	pad.material_override = main.color_mat(Color(1.0, 1.0, 1.0), 0.3)
+	pad.material_override = main.color_mat(CLOUD_PAD, 0.3)
 	pad.scale = Vector3(2.0, 0.6, 1.6)
 	pad.position = Vector3(0, -0.9, 0)
 	n.add_child(pad)
 	var body := MeshInstance3D.new()
 	body.mesh = critter_mesh(CRITTER_COLORS[i % CRITTER_COLORS.size()])
+	Contrast.outline(body, OUTLINE, CRITTER_OUTLINE_W)
 	n.add_child(body)
 	var cage := MeshInstance3D.new()
 	cage.mesh = main.sphere_mesh(1.0)
