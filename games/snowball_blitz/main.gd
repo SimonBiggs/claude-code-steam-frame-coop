@@ -59,7 +59,7 @@ const PickOrbs := preload("res://core/pick_orbs.gd")
 const WarnRings := preload("res://core/warn_rings.gd")
 const Gifts := preload("res://games/snowball_blitz/gifts.gd")
 const Bosses := preload("res://games/snowball_blitz/bosses.gd")
-const ORB_ROW := Vector3(0.0, 0.0, -3.6)  # the pick orbs float in a row here (in front of the VR player, inside the fort)
+const ORB_ROW := Vector3(0.0, 0.0, -4.4)  # the pick orbs float in a row here (in front of the VR player, inside the fort)
 const ORB_GAP := 2.4
 const ORB_Y := 1.35
 const GAME_ID := "snowball_blitz"
@@ -2703,7 +2703,7 @@ static func _orb_entries(stage: String, ids: Array) -> Array:
 func _pick_tick(delta: float) -> void:
 	pick_t -= delta
 	for tch in orbs.touches(players):
-		on_orb_hit(int(tch[0]), tch[1])
+		on_orb_hit(int(tch[0]), tch[1], "walk")
 	if pick_stage == "":
 		return
 	var all := true
@@ -2715,7 +2715,7 @@ func _pick_tick(delta: float) -> void:
 
 
 ## Host / local: a player threw a snowball at (or walked into) orb i.
-func on_orb_hit(i: int, p) -> void:
+func on_orb_hit(i: int, p, how: String = "throw") -> void:
 	if pick_stage == "" or net.mode == "client" or i < 0 or i >= pick_ids.size() or not (p in players):
 		return
 	if picked.has(p.index) or (pick_stage == "mode" and not picked.is_empty()):
@@ -2739,7 +2739,7 @@ func on_orb_hit(i: int, p) -> void:
 			gifts_taken[p.index] = mine
 			if id == "mega" and p.gifts.get("mega", 0.0) >= 1.0:
 				p.mega = true  # one to throw right away
-	print("PICK %s: P%d took %s" % [pick_stage, p.index + 1, id])
+	print("PICK %s: P%d took %s (%s)" % [pick_stage, p.index + 1, id, how])
 
 
 ## Every machine: slot took orb i (a dot in their colour circles it, a puff of the orb's colour).
@@ -2753,11 +2753,11 @@ func _finish_pick() -> void:
 	var di := pick_ids.find(Gifts.default_pick(pick_ids))
 	if pick_stage == "mode":
 		if picked.is_empty() and not players.is_empty():
-			on_orb_hit(di, players[0])
+			on_orb_hit(di, players[0], "middle")
 	else:
 		for p in _pick_players():
 			if not picked.has(p.index):
-				on_orb_hit(di, p)
+				on_orb_hit(di, p, "middle")
 	var stage := pick_stage
 	pick_stage = ""
 	orbs.clear()

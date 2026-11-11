@@ -476,6 +476,9 @@ func _throw_velocity(c: float) -> Vector3:
 
 
 func _throw_origin() -> Vector3:
+	if camera == null:  # (a seat with no view on this machine, e.g. a bot's extra player beside a VR host)
+		var b := Basis.from_euler(Vector3(pitch, yaw, 0.0))
+		return head_pos() + aim_dir() * 0.5 + b.x * 0.15 - b.y * 0.08
 	return camera.global_position + aim_dir() * 0.5 + camera.global_basis.x * 0.15 - camera.global_basis.y * 0.08
 
 

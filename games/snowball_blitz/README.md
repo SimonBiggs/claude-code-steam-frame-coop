@@ -31,6 +31,20 @@ from waddling snowmen by throwing snowballs.** Everything below "Full mode" is b
   minimap and popups; hint panels; awards. Text is one headline ("WAVE 2!", "SNOW KING!", "HOORAY!",
   "OH NO!"); the VR wrist shows "WAVE n". Game over restarts by itself after 7 s.
 
+## Picks, gifts and boss tells (simple mode)
+
+- **GENTLE / BRAVE / HARD** (the first game of a visit, after the practice): three glowing picture orbs (a heart, a
+  star, a fireball) float in front of the fort. Throw a snowball at one (the VR player too) or walk into it; the
+  first one hit decides. Gentle: fewer, slower snowmen with softer snowballs, longer boss warnings; hard: more and
+  quicker. The family's last pick sits in the middle next time (saved). `SB_MODE=gentle` skips the pick.
+- **BOBO'S GIFTS** (after every cleared wave): three seeded gift orbs - BIG BALLS, QUICK, WALLS, then WARM HAT
+  (2 igloos), MEGA (4) and AIM HELP (8). Each player takes one; the middle one is taken for anyone who doesn't
+  choose in time. Gifts stack for the game, inside caps (games/snowball_blitz/gifts.gd).
+- **Boss tells**: the SNOW KING's volley and call, the YETI's stomp, big throw and call all glow and put a ring on
+  the snow first (every machine; longer in gentle). Numbers: games/snowball_blitz/bosses.gd.
+- `SB_WAVE=7` jumps to the Snow King after the picks; the validator (tests/snowball_blitz_gen_test.gd) proves every
+  mode fair, gentle <= brave <= hard, no cliffs, the boss tells and the gift caps.
+
 ## Full mode (`SIMPLE_MODE := false`)
 
 - **VR player (host, Steam Frame), the sniper:** squeeze grip or trigger with your right hand down low
