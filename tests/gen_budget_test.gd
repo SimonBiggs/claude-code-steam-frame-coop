@@ -13,6 +13,7 @@ const BUDGET_MS := 40.0
 
 const BalloonWaves := preload("res://games/balloon_pop/wavegen.gd")
 const BalloonStory := preload("res://games/balloon_pop/story.gd")
+const BalloonSkies := preload("res://games/balloon_pop/skies.gd")
 const MazeGen := preload("res://games/marble_maze/mazegen.gd")
 const MarbleStory := preload("res://games/marble_maze/story.gd")
 const FieldGen := preload("res://games/sheep_round_up/fieldgen.gd")
@@ -59,12 +60,15 @@ const MoleStory := preload("res://games/whack_a_mole/story.gd")
 
 func _entries() -> Array:
 	var out: Array = []
-	# --- balloon_pop: WaveGen.generate(seed, Story.spec(ride, built, met, players, time)) in _start_play.
+	# --- balloon_pop: WaveGen.generate(seed, Skies.apply(Story.spec(ride, built, met, players, time), mode)) in
+	# _start_play, HARD mode (the busiest) + its wind gusts (Skies.gusts): one BgGen job makes both.
 	var met := {BalloonWaves.GRUMPY: true, BalloonWaves.ICE: true, BalloonWaves.GIANT: true}
-	out.append(["balloon_pop", "wavegen.gd", "WaveGen.generate (any ride, 15 built, 6 players, 120 s)",
+	out.append(["balloon_pop", "wavegen.gd", "WaveGen.generate (any ride, 15 built, 6 players, 120 s, HARD)",
 		func(s: int) -> Variant:
 			var r: Dictionary = BalloonStory.RIDES[s % BalloonStory.RIDES.size()]
-			return BalloonWaves.generate(s, BalloonStory.spec(String(r.id), 15, met, 6, 120.0))])
+			var rd := BalloonWaves.generate(s, BalloonSkies.apply(BalloonStory.spec(String(r.id), 15, met, 6, 120.0), "hard"))
+			rd["gusts"] = BalloonSkies.gusts(rd, "hard")
+			return rd])
 	# --- marble_maze: Story.maze(world, i) / Story.daily() -> MazeGen.generate in def_from_desc.
 	# The slowest story mazes (measured over 40 seeds, 2026-10-31): the third maze of places 4 and 6 on laps 1-3.
 	out.append(["marble_maze", "mazegen.gd", "MazeGen.generate (slowest story mazes 39-41, 60-62, 81-83)",

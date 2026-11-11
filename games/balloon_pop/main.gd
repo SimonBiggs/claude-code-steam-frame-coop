@@ -405,7 +405,7 @@ func _refresh_hud() -> void:
 	var gid := String(net.state_get("gift", ""))
 	for slot in gift_pics:
 		var gp: Array = gift_pics[slot]
-		var gh: Control = gp[0]
+		var gh: Variant = gp[0]
 		if not is_instance_valid(gh) or String(gp[1]) == gid:
 			continue
 		gp[1] = gid
@@ -470,6 +470,7 @@ func _on_player_left(slot: int) -> void:
 	score_labels.erase(slot)
 	star_icons.erase(slot)
 	ride_pics.erase(slot)
+	gift_pics.erase(slot)
 	timers.erase(slot)
 	hints.remove_view(slot)
 	_refresh_group()
@@ -825,7 +826,10 @@ func _start_play() -> void:
 	round_desc = plan[1]
 	if daily_due:
 		daily_due = false
-		net.state_set("sky", String(sp.sky))
+		var dsky := String(sp.sky)
+		if dsky == "snowy" and String(theme.get("season", "")) != "winter":
+			dsky = String(theme.get("preset", "day"))  # no snow outside winter (skies.gd seasons)
+		net.state_set("sky", dsky)
 		net.state_set("daily", true)
 	else:
 		net.state_set("sky", String(theme.get("preset", "day")))
@@ -844,7 +848,7 @@ func _start_play() -> void:
 	for i in (round_def.sets as Array).size():
 		set_left[i] = int(round_def.sets[i][2])
 	time_left = float(round_def.time)
-	var gl := Skies.gusts(round_def, _mode())
+	var gl: Array = round_def.get("gusts", [])
 	gusts.reset(gl)
 	run.merge({"team_mode": _mode(), "gift": gift, "gusts": gl.size(), "theme": String(theme.get("id", "")),
 		"parade": int(save.data.get("parade", 0))}, true)
@@ -899,7 +903,10 @@ static func _gen_key(plan: Array) -> String:
 static func _gen_job(plan: Array) -> Callable:
 	var seed_v := int(plan[1].seed)
 	var sp: Dictionary = (plan[0] as Dictionary).duplicate(true)
-	return func() -> Variant: return WaveGen.generate(seed_v, sp)
+	return func() -> Variant:
+		var rd := WaveGen.generate(seed_v, sp)
+		rd["gusts"] = Skies.gusts(rd, String(sp.get("mode", "brave")))  # the round's wind gusts, off the main thread too
+		return rd
 
 
 func _end_round() -> void:

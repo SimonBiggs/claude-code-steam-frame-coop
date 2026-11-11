@@ -33,6 +33,11 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "bp-gifts", "date": "2026-11-11", "game": "balloon_pop", "pic": "dart", "line": "Pick Poppy's gifts!"},
+	{"id": "bp-gusts", "date": "2026-11-11", "game": "balloon_pop", "pic": "airswirl", "line": "Wind! Rings show the way"},
+	{"id": "bp-skies", "date": "2026-11-11", "game": "balloon_pop", "pic": "nightsky", "line": "Night, snow, sunset skies", "try": {"BP_SKY": "night"}},
+	{"id": "bp-parade", "date": "2026-11-11", "game": "balloon_pop", "pic": "parade", "line": "Poppy's parade grows!"},
+	{"id": "bp-gentle", "date": "2026-11-11", "game": "balloon_pop", "pic": "seller", "line": "Gentle, brave or hard"},
 	{"id": "sru-fox", "date": "2026-11-11", "game": "sheep_round_up", "pic": "fox", "line": "A fox! Rings warn you first", "try": {"SRU_LEVEL": "3", "SRU_EVENT_AT": "6"}},
 	{"id": "sru-tricks", "date": "2026-11-11", "game": "sheep_round_up", "pic": "zoomies", "line": "Pick a dog trick!"},
 	{"id": "sru-seasons", "date": "2026-11-11", "game": "sheep_round_up", "pic": "snowflake", "line": "Snow, rain, wind and sun!", "try": {"SRU_SEASON": "winter"}},

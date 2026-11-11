@@ -17,6 +17,9 @@ var saw_finale := false
 var saw_pick := false  # Poppy's ride was finished and the next round began with the ride pick (story.gd)
 var saw_play := false
 var jumps := 0
+var saw_orbs := false  # the pick orbs showed on this machine (skies.gd modes / Poppy's gifts)
+var saw_gust_rings := false  # a wind gust's warn rings showed on this machine
+var gusts_planned := 0  # host: gusts in the rounds played
 var vr_t := 0.0
 
 
@@ -32,6 +35,7 @@ func _ready() -> void:
 	main.set("results_wait", 4.0)  # the next round starts by itself (nobody presses anything)
 	main.set("fresh_save", true)  # a brand-new fair every run
 	main.set("need_scale", 0.12)  # tiny rides: round 1 finishes one, round 2 starts with the ride pick
+	main.set("pick_wait_scale", 0.2)  # quick picks (bots run into the orbs anyway)
 	add_child(main)
 	kit.main = main
 	want = BotKit.bot_players(2, 6)
@@ -65,10 +69,10 @@ func _ready() -> void:
 		if not slots.is_empty() and main.avatars.has(slots[0]) and not jump_paused:
 			kit.assert_true(jump_peak > 0.5, "A makes a TV player jump"))
 	if host:
-		kit.at(22.0, "host checks (the TV machine is still connected)", _checks)
-		kit.at(30.0, "finish", kit.finish)
+		kit.at(38.0, "host checks (the TV machine is still connected)", _checks)
+		kit.at(44.0, "finish", kit.finish)
 	else:
-		kit.at(24.0 if client else 26.0, "finish", func() -> void:
+		kit.at(40.0 if client else 42.0, "finish", func() -> void:
 			_checks()
 			kit.finish())
 	kit.every(2.0, _report)
@@ -77,6 +81,12 @@ func _ready() -> void:
 
 func _watch_results() -> String:
 	var ph := String(main.net.state_get("phase", ""))
+	if main.picks != null and main.picks.showing():
+		saw_orbs = true
+	if main.gusts != null and main.gusts.rings.count() > 0:
+		saw_gust_rings = true
+	if ph == "play" and main.gusts != null:
+		gusts_planned = maxi(gusts_planned, main.gusts.list.size())
 	if ph == "pick":
 		saw_pick = true
 	elif ph == "play":
@@ -115,15 +125,23 @@ func _physics_process(delta: float) -> void:
 		_drive_vr(delta)
 
 
-## Run at the nearest friendly balloon; jump when it is overhead.
+## The pick orb this machine's bots go for (the first one: the middle one is what nobody-picks gives).
+func _orb_target() -> Vector3:
+	if main.picks == null or not main.picks.showing():
+		return Vector3.INF
+	return main.picks.orb_position(0)
+
+
+## Run at the nearest friendly balloon (or the pick orb); jump when it is overhead.
 func _steer(slot: int) -> void:
 	if not main.avatars.has(slot):
 		return
 	var a: Node3D = main.avatars[slot]
 	var b := _nearest(a.position, true)
+	var orb := _orb_target()
 	var v := Vector2.ZERO
-	if b != null:
-		var d := b.position - a.position
+	if b != null or orb != Vector3.INF:
+		var d := (orb if orb != Vector3.INF else b.position) - a.position
 		d.y = 0.0
 		if d.length() > 0.1:
 			var dn := d.normalized()
@@ -133,7 +151,7 @@ func _steer(slot: int) -> void:
 			f = f.normalized()
 			var r := Vector3(-f.z, 0.0, f.x)
 			v = Vector2(dn.dot(r), -dn.dot(f))
-		if d.length() < 1.0 and b.position.y > 1.3 and a.position.y < 0.01:
+		if b != null and orb == Vector3.INF and d.length() < 1.0 and b.position.y > 1.3 and a.position.y < 0.01:
 			kit.slot_press(main.party, slot, "a")
 			jumps += 1
 	kit.slot_stick(main.party, slot, "left", v)
@@ -145,6 +163,16 @@ func _drive_vr(delta: float) -> void:
 	var rig = main.vr_rig
 	rig.camera.position.y = 1.6
 	var head: Vector3 = rig.head_position()
+	var orb := _orb_target()
+	if orb != Vector3.INF:  # touch the pick orb with the right glove
+		var od := orb - head
+		od.y = 0.0
+		var of: Vector3 = rig.head_forward()
+		var orr := Vector3(-of.z, 0.0, of.x)
+		kit.vr_stick(rig, Vector2(od.normalized().dot(orr), od.normalized().dot(of)) if od.length() > 0.6 else Vector2.ZERO)
+		kit.vr_trigger(rig, 0.0)
+		kit.vr_reach(rig, 1, orb, 1.0, delta)
+		return
 	var b := _nearest(head, true)
 	if b == null:
 		kit.vr_stick(rig, Vector2.ZERO)
@@ -208,7 +236,22 @@ func _checks() -> void:
 		kit.assert_true(main.popped_by_vr > 0, "the fake VR player popped balloons")
 	kit.assert_true(saw_play, "%s: a generated round played" % mode)
 	kit.assert_true((main.net.state_get("fair", {}) as Dictionary).has("rides"), "%s: the fair state reached this machine" % mode)
+	kit.assert_true(saw_orbs, "%s: the pick orbs showed here" % mode)
+	kit.assert_true(not main.theme.is_empty() and String(main.net.state_get("theme", "")) == String(main.theme.id), "%s: today's sky theme reached this machine (%s)" % [mode, str(main.theme.get("id", ""))])
+	kit.assert_true(main.net.state_get("parade", null) != null, "%s: Poppy's parade reached this machine" % mode)
 	if mode != "client":
 		kit.assert_true(Story.rides_built(main.save.data.rides) >= 1, "Poppy's first ride was built (%s)" % str(main.save.data.rides))
 		kit.assert_true(saw_pick or (main.net.state_get("offers", []) as Array).size() == 2, "%s: the next round began with the ride pick" % mode)
 		kit.assert_true(not main.round_desc.is_empty() and int(main.save.data.rounds) >= 1, "%s: rounds came from a seed and were saved" % mode)
+		var stages := {}
+		for h in main.picks.history:
+			stages[String(h[0])] = int(stages.get(String(h[0]), 0)) + 1
+		kit.assert_true(int(stages.get("mode", 0)) == 1, "%s: the team picked a mode once (%s)" % [mode, str(main.picks.history)])
+		kit.assert_true(int(stages.get("gift", 0)) >= 2, "%s: Poppy's gift was picked before each round (%s)" % [mode, str(main.picks.history)])
+		kit.assert_true(main.team_mode in ["gentle", "brave", "hard"] and String(main.save.data.mode) == main.team_mode, "%s: the mode is saved (%s)" % [mode, main.team_mode])
+		var by_player := false
+		for h in main.picks.history:
+			if int(h[2]) >= 0:
+				by_player = true
+		kit.assert_true(by_player, "%s: a player took a pick orb (%s)" % [mode, str(main.picks.history)])
+		kit.assert_true(gusts_planned == 0 or saw_gust_rings, "%s: a planned wind gust was told by warn rings" % mode)

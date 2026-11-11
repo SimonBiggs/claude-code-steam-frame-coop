@@ -101,7 +101,7 @@ func _init() -> void:
 		_expect(float(g[k]) <= float(b[k]) and float(b[k]) <= float(h[k]), "%s gentle %s <= brave %s <= hard %s" % [k, str(g[k]), str(b[k]), str(h[k])])
 	_expect(float(g.balloons_min) < float(h.balloons_min) * 0.85, "hard is clearly busier than gentle (%s vs %s)" % [str(h.balloons_min), str(g.balloons_min)])
 	_expect(int(h.gusts) > int(g.gusts), "hard brings more gusts (%d vs %d)" % [int(h.gusts), int(g.gusts)])
-	_expect(gust_ms < 100.0, "gusts made fast (worst %.1f ms)" % gust_ms)
+	_expect(gust_ms < 20.0, "gusts made fast (worst %.1f ms)" % gust_ms)
 	# A gust that would blow a balloon out of reach is caught.
 	var edge := {"time": 30.0, "spawns": [[9.0, WaveGen.NORMAL, 6.2, 0.0, WaveGen.SPAWN_Y, 0.2, 0, -1]]}
 	_expect(not Skies.gust_problems(edge, [[10.0, 1.0, 0.0]], "hard").is_empty(), "a gust blowing a balloon out of the park is caught")
