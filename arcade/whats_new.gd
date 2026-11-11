@@ -33,6 +33,11 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "rb-gifts", "date": "2026-11-11", "game": "rhythm_band", "pic": "goldmic", "line": "Doodle's instrument gifts!", "try": {"RB_GIFT": "bigdrum"}},
+	{"id": "rb-changes", "date": "2026-11-11", "game": "rhythm_band", "pic": "spotlight", "line": "Fast bits, slow bits, solos!", "try": {"RB_CHANGES_NOW": "1"}},
+	{"id": "rb-modes", "date": "2026-11-11", "game": "rhythm_band", "pic": "frog", "line": "Gentle, brave or hard!"},
+	{"id": "rb-festival", "date": "2026-11-11", "game": "rhythm_band", "pic": "ferris", "line": "Doodle's festival grows!"},
+	{"id": "rb-seasons", "date": "2026-11-11", "game": "rhythm_band", "pic": "snowflake", "line": "Snowy stage", "try": {"RB_SEASON": "winter"}},
 	{"id": "ps-gifts", "date": "2026-11-11", "game": "penalty_shootout", "pic": "biggloves", "line": "Leo's boot and glove gifts!", "try": {"PS_GIFT": "big"}},
 	{"id": "ps-weather", "date": "2026-11-11", "game": "penalty_shootout", "pic": "airswirl", "line": "Gusts and mud! Look!", "try": {"PS_WEATHER_NOW": "1"}},
 	{"id": "ps-modes", "date": "2026-11-11", "game": "penalty_shootout", "pic": "lion", "line": "Gentle, brave or hard!"},
