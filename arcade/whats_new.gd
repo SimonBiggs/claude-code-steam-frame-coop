@@ -33,6 +33,11 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "ps-gifts", "date": "2026-11-11", "game": "penalty_shootout", "pic": "biggloves", "line": "Leo's boot and glove gifts!", "try": {"PS_GIFT": "big"}},
+	{"id": "ps-weather", "date": "2026-11-11", "game": "penalty_shootout", "pic": "airswirl", "line": "Gusts and mud! Look!", "try": {"PS_WEATHER_NOW": "1"}},
+	{"id": "ps-modes", "date": "2026-11-11", "game": "penalty_shootout", "pic": "lion", "line": "Gentle, brave or hard!"},
+	{"id": "ps-corner", "date": "2026-11-11", "game": "penalty_shootout", "pic": "trophy", "line": "Leo's trophy corner grows!"},
+	{"id": "ps-seasons", "date": "2026-11-11", "game": "penalty_shootout", "pic": "snowflake", "line": "Snowy pitch", "try": {"PS_SEASON": "winter"}},
 	{"id": "rw-gifts", "date": "2026-11-11", "game": "rocket_workshop", "pic": "boosters", "line": "Sprocket's rocket gifts!", "try": {"RW_GIFT": "boosters"}},
 	{"id": "rw-meteors", "date": "2026-11-11", "game": "rocket_workshop", "pic": "meteor", "line": "Meteors! Step out!", "try": {"RW_METEORS": "2"}},
 	{"id": "rw-modes", "date": "2026-11-11", "game": "rocket_workshop", "pic": "engineer", "line": "Gentle, brave or hard!"},

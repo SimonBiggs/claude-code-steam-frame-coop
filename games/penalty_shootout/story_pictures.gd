@@ -6,7 +6,7 @@ extends RefCounted
 ## (Leo's prizes also use "scarf" from Snowball Blitz, "balloon", "bunting" from Cannon Cove and "trophy" from Mini
 ## Golf Party.)
 
-const NAMES: Array[String] = ["lion", "lioncub", "football", "drum", "foamhand"]
+const NAMES: Array[String] = ["lion", "lioncub", "football", "drum", "foamhand", "biggloves", "curveboots", "mudpatch", "star"]
 
 const FUR := Color(1.0, 0.72, 0.25)
 const MANE := Color(0.85, 0.42, 0.1)
@@ -67,6 +67,52 @@ static func draw(pic, kind: String, t: float, bob: float, color: Color) -> void:
 			pic._circle(0.5 + sway * 2.0, 0.1 + bob, 0.06, c)
 			pic._poly(_ellipse(0.7 + sway, 0.5 + bob, 0.06, 0.09, 10), c)  # thumb
 			pic._poly([[0.44, 0.74 + bob], [0.6, 0.74 + bob], [0.6, 0.8 + bob], [0.44, 0.8 + bob]], WHITE)  # "1" stripe
+		"biggloves":  # two giant green goalkeeper gloves clapping together
+			var clap := absf(sin(t * 3.0)) * 0.06
+			for side in [-1.0, 1.0]:
+				var cx: float = 0.5 + side * (0.17 + clap)
+				var g := Color(0.3, 1.0, 0.5)
+				pic._poly(_ellipse(cx, 0.5 + bob, 0.16, 0.2, 16), g)  # palm
+				for k in 4:
+					var fx := cx - 0.1 + k * 0.067
+					pic._poly([[fx - 0.03, 0.42 + bob], [fx + 0.03, 0.42 + bob], [fx + 0.03, 0.2 + bob], [fx - 0.03, 0.2 + bob]], g)
+					pic._circle(fx, 0.2 + bob, 0.03, g)
+				pic._poly(_ellipse(cx - side * 0.15, 0.5 + bob, 0.05, 0.08, 10), g.darkened(0.1))  # thumb
+				pic._poly([[cx - 0.14, 0.68 + bob], [cx + 0.14, 0.68 + bob], [cx + 0.12, 0.8 + bob], [cx - 0.12, 0.8 + bob]], WHITE)  # cuff
+		"curveboots":  # a bright football boot and a ball bending round in a curve of dots
+			var c2 := Color(1.0, 0.5, 0.85)
+			pic._poly([[0.12, 0.62 + bob], [0.3, 0.5 + bob], [0.36, 0.62 + bob], [0.5, 0.66 + bob], [0.52, 0.78 + bob], [0.12, 0.78 + bob]], c2)
+			for k in 4:
+				pic._circle(0.18 + k * 0.1, 0.8 + bob, 0.025, DARK)  # studs
+			pic._poly([[0.28, 0.6 + bob], [0.44, 0.66 + bob], [0.44, 0.68 + bob], [0.28, 0.62 + bob]], WHITE)  # laces
+			for k in 6:  # the banana path
+				var f := float(k) / 5.0
+				pic._circle(0.55 + f * 0.3, 0.6 - f * 0.4 + sin(f * PI) * -0.12 + bob, 0.018, Color(1, 1, 1, 0.5 + 0.1 * k))
+			var by := 0.2 + bob + sin(t * 3.0) * 0.02
+			pic._circle(0.85, by, 0.09, WHITE)
+			pic._poly(_ngon(0.85, by, 0.035, 5, t * 2.0), DARK)
+		"star":  # Leo's big gold star, turning and twinkling (the card's colour when it asks)
+			var gold := Color(1.0, 0.85, 0.25) if color == Color.WHITE else color
+			var pts: Array = []
+			for k in 10:
+				var a := -PI * 0.5 + TAU * k / 10.0 + sin(t * 1.5) * 0.12
+				var r := 0.36 if k % 2 == 0 else 0.15
+				pts.append([0.5 + cos(a) * r, 0.52 + bob + sin(a) * r])
+			pic._poly(pts, gold)
+			pic._circle(0.42, 0.44 + bob, 0.04, Color(1, 1, 1, 0.7))
+			for k in 3:
+				var tw := 0.5 + 0.5 * sin(t * 4.0 + k * 2.1)
+				pic._circle(0.18 + k * 0.32, 0.16 + 0.05 * (k % 2), 0.02 + 0.015 * tw, Color(1, 1, 0.8, 0.8))
+		"mudpatch":  # a big brown puddle of mud with a ball stuck in it and splats flying
+			var mud := Color(0.62, 0.36, 0.16)
+			pic._poly(_ellipse(0.5, 0.72 + bob, 0.4, 0.15, 18), mud)
+			pic._poly(_ellipse(0.42, 0.7 + bob, 0.18, 0.06, 12), mud.darkened(0.25))
+			pic._circle(0.58, 0.62 + bob, 0.12, WHITE)
+			pic._poly(_ngon(0.58, 0.6 + bob, 0.04, 5, 0.3), DARK)
+			pic._poly(_ellipse(0.58, 0.72 + bob, 0.16, 0.05, 12), mud)  # sunk in
+			for k in 3:
+				var up := fmod(t * 0.8 + k * 0.33, 1.0)
+				pic._circle(0.3 + k * 0.2, 0.55 - up * 0.3 + bob, 0.03 * (1.0 - up * 0.5), mud.lightened(0.1))
 
 
 ## A lion's face: mane, face, ears, eyes, nose and smile. s = size, centred on (x, y).
