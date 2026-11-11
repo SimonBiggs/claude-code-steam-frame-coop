@@ -1345,6 +1345,9 @@ func _make_hud(slot: int, parent: Control) -> void:
 	v.add_child(chi)
 	parts["hp"] = hp
 	parts["chi"] = chi
+	var perk_l := UiKit.label("", "small", "dim")  # the master + the gifts (boons.gd)
+	v.add_child(perk_l)
+	parts["perk"] = perk_l
 	# Top centre: wave and score, and the team's spirit meter under it.
 	var sp := UiKit.vbox()
 	ui.add_child(sp)
@@ -1402,6 +1405,7 @@ func _anchor(c: Control, x: float, y: float) -> void:
 
 
 func _update_huds() -> void:
+	_update_perk_labels()
 	if join_prompt != null:
 		join_prompt.visible = party.local_slots().is_empty() and phase() != "results"
 	var ph := phase()
@@ -1948,7 +1952,7 @@ func mods_of(slot: int) -> Dictionary:
 func _enter_arena(seg: int) -> void:
 	arena_seg = seg
 	var open := Arenas.unlocked(int(save.data.generals), int(save.data.waves))
-	var id := Arenas.arena_for(temple_seed, seg, open)
+	var id := Arenas.arena_for(temple_seed, seg, open, arena if seg > 0 else "")
 	var want := OS.get_environment("EB_ARENA")
 	if seg == 0 and Arenas.ids().has(want):
 		id = want
@@ -2239,3 +2243,22 @@ func plume_fx(i: int) -> void:
 	fx.ring(at + Vector3.UP * 0.1, col, float(v.r), 0.4)
 	var snd := {"frost": "ice", "lava": "explosion", "wind": "whoosh"}.get(hazards.hazard, "whoosh") as String
 	sfx.play_at(snd, at, -2.0, 0.8)
+
+
+## The little line under each TV player's health: their master and how many gifts they hold.
+func _update_perk_labels() -> void:
+	var all: Dictionary = net.state_get("perks", {})
+	var key := str(all)
+	if key == String(get_meta("perk_key", "")):
+		return
+	set_meta("perk_key", key)
+	for s in hud_parts:
+		var parts: Dictionary = hud_parts[s]
+		if not parts.has("perk"):
+			continue
+		var l: Label = parts["perk"]
+		var p: Dictionary = all.get(int(s), {})
+		var m := String(p.get("m", ""))
+		var n := (p.get("b", []) as Array).size()
+		l.text = ("%s MASTER" % Boons.pick_name("master", m) if m != "" else "") + ("  +%d GIFTS" % n if n > 0 else "")
+		l.add_theme_color_override("font_color", Boons.pick_color("master", m) if m != "" else Color(1.0, 0.85, 0.35))

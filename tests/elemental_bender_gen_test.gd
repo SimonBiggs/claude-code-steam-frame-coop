@@ -178,6 +178,8 @@ func _init() -> void:
 		for k in range(1, 4):
 			visits[Arenas.arena_for(s, k, Arenas.ids())] = true
 	_expect(visits.size() == 3 and not visits.has("temple"), "with every island open the run visits the other three (%s)" % str(visits.keys()))
+	_expect(Arenas.arena_for(5, 4, Arenas.ids()) == "temple", "the round trip comes home again")
+	_expect(Arenas.arena_for(5, 1, ["temple", "ice"], "ice") == "temple", "never the same island twice in a row")
 	_expect(Arenas.unlocked(0, 0) == ["temple"], "a new family has only TEMPLE ISLAND")
 	_expect(Arenas.unlocked(1, 0).has("ice") and Arenas.unlocked(3, 0).size() == 4, "Generals beaten open the islands")
 	_expect(Arenas.unlocked(0, 40).size() == 4, "a big Spirit Tree opens every island too")

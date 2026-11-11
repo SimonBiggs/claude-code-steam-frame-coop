@@ -79,19 +79,24 @@ static func unlocked(generals: int, waves: int) -> Array[String]:
 	return out
 
 
-## The island of segment k (waves k*SEGMENT+1 .. (k+1)*SEGMENT) of a temple: home first, then the other unlocked
-## islands in a seeded order, round and round. "open" = unlocked() when the segment starts (one may open mid-run).
-static func arena_for(temple_seed: int, k: int, open: Array) -> String:
+## The island of segment k (waves k*SEGMENT+1 .. (k+1)*SEGMENT) of a temple: a round trip that starts at home
+## (TEMPLE ISLAND, then the other unlocked islands in a seeded order, then home again...). "open" = unlocked() when the
+## segment starts (one may open mid-run); prev: the island the run is on now (never the same island twice in a row).
+static func arena_for(temple_seed: int, k: int, open: Array, prev: String = "") -> String:
 	if k <= 0:
 		return "temple"
 	var others: Array = []
 	for id in ids():
 		if id != "temple" and open.has(id):
 			others.append(id)
-	if others.is_empty():
+	var route: Array = ["temple"]
+	route.append_array(Seeded.shuffled(Seeded.rng(temple_seed, "islands"), others))
+	if route.size() == 1:
 		return "temple"
-	others = Seeded.shuffled(Seeded.rng(temple_seed, "islands"), others)
-	return String(others[(k - 1) % others.size()])
+	var pick := String(route[k % route.size()])
+	if pick == prev:
+		pick = String(route[(k + 1) % route.size()])
+	return pick
 
 
 static func segment_of(wave: int) -> int:
