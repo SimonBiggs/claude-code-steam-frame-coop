@@ -2378,6 +2378,20 @@ func _build_hud() -> void:
 	hl.custom_minimum_size.x = 36
 	hl.add_theme_color_override("font_color", Color(1.0, 0.92, 0.7))
 	info_row.add_child(hl)
+	# PIP'S STREET: a heart + how many neighbour friends still hide in this house (only in the house).
+	var fgap := Control.new()
+	fgap.name = "FriendGap"
+	fgap.custom_minimum_size = Vector2(18, 0)
+	info_row.add_child(fgap)
+	var fi := UiKit.icon("heart", Color(1.0, 0.5, 0.65), 34.0)
+	fi.name = "FriendIcon"
+	info_row.add_child(fi)
+	var fl := _make_label(30)
+	fl.name = "Friends"
+	fl.text = "0"
+	fl.custom_minimum_size.x = 36
+	fl.add_theme_color_override("font_color", Color(1.0, 0.75, 0.82))
+	info_row.add_child(fl)
 	for c in info_row.get_children():
 		(c as Control).size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var pill := PanelContainer.new()  # one dark pill, so the row reads as one badge over the split line
@@ -2608,6 +2622,17 @@ func _update_hud() -> void:
 		info_row.get_parent().visible = true
 		(info_row.get_node("Time") as Label).text = "%d:%02d" % [int(phase_t) / 60, int(phase_t) % 60]
 		(info_row.get_node("Hiding") as Label).text = str(hiders_left())
+		var left := 0
+		for k in friend_state.size():
+			left += 1 if int(friend_state[k][1]) < 0 else 0
+		var show := not friends.is_empty()
+		(info_row.get_node("Friends") as Label).text = str(left)
+		if (info_row.get_node("Friends") as Control).visible != show:
+			for nm in ["FriendGap", "FriendIcon", "Friends"]:
+				(info_row.get_node(nm) as Control).visible = show
+			var pill := info_row.get_parent() as Control
+			pill.size = pill.get_combined_minimum_size() + Vector2(60, 0)
+			pill.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP, Control.PRESET_MODE_KEEP_SIZE, 8)
 
 
 ## Visual teaching: player p has done `key` once more ("torch", "sniff", "disguise", "squeak", "bell",
