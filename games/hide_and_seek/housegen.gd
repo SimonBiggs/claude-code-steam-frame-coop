@@ -23,6 +23,7 @@ extends RefCounted
 
 const Seeded := preload("res://core/seeded.gd")
 const Story := preload("res://games/hide_and_seek/story.gd")
+const Street := preload("res://games/hide_and_seek/street.gd")
 
 const TITLE := "THE HOUSE"
 const HALF_Z := 7.0
@@ -41,6 +42,11 @@ const GAP := 0.9  ## walkway kept between furniture pieces
 const MIN_SPOTS := 10
 const MIN_STARS := 12
 const ATTEMPTS := 12
+const PARTY_R := 0.95  ## the garden party: friends sit on this ring round the picnic blanket
+const PARTY_SEATS := 8
+const FRIEND_START := 4.0  ## friends hide at least this far from the counting spot
+const FRIEND_APART := 3.5  ## twin friends / a sneaky friend's new spot are at least this far apart
+const PIP_SPOTS := 3  ## hiding spots left for Pip after the friends
 ## Decoy footprint half-size and height per prop kind (world.gd _bake_prop colliders).
 const PROP_R: Array = [0.22, 0.3, 0.33, 0.3, 0.33]
 const PROP_H: Array = [1.2, 1.2, 0.66, 0.9, 0.66]
@@ -217,7 +223,8 @@ static func generate(seed_value: int, spec: Dictionary = {}) -> Dictionary:
 
 
 static func cache_key(seed_value: int, spec: Dictionary) -> String:
-	return "%d|%d|%d|%s" % [seed_value, int(spec.get("level", 0)), int(spec.get("theme", 0)), str(bool(spec.get("daily", false)))]
+	return "%d|%d|%d|%s|%s|%d" % [seed_value, int(spec.get("level", 0)), int(spec.get("theme", 0)), str(bool(spec.get("daily", false))),
+		str(spec.get("friends", [])), int(spec.get("twist", 0))]
 
 
 static func _try(seed_value: int, spec: Dictionary, attempt: int) -> Dictionary:
@@ -476,7 +483,96 @@ static func _try(seed_value: int, spec: Dictionary, attempt: int) -> Dictionary:
 			names.append(["garden shed", _v(sc.x, sc.z)])
 	g["rooms"] = names
 	g["doors"] = doors
+	_street(g, seed_value, spec, attempt, seeker, garden_rect, gdoor, foot, drects, gi)
 	return g
+
+
+## PIP'S STREET (street.gd): where this house's neighbour friends hide (g.friend_spots: [spot, move_to] each;
+## move_to != spot for a SNEAKY friend, who moves once), the DARK room (g.dark_room, a rooms_info index or -1:
+## the first friend hides in it) and the GARDEN PARTY (g.party: [centre, seats...], decoration only: no
+## colliders). Uses its own random stream, so a house without friends is laid out exactly as before.
+static func _street(g: Dictionary, seed_value: int, spec: Dictionary, attempt: int, start: Vector3, garden: Rect2, gdoor: Vector3,
+		foot: Array, drects: Array, gi: int) -> void:
+	var r := Seeded.rng(seed_value, "friends%d" % attempt)
+	var fids: Array = spec.get("friends", [])
+	var tw := int(spec.get("twist", 0))
+	var rooms: Array = g.rooms_info
+	g["friends"] = fids.duplicate()
+	g["twist"] = tw
+	g["dark_room"] = -1
+	g["friend_spots"] = []
+	# The garden party: a clear patch of lawn (not in front of the garden door or the kennel's toys).
+	var party: Array = []
+	var gin := garden.grow(-0.2)
+	var busy: Array = foot.duplicate()
+	busy.append_array(drects)
+	for t in 40:
+		var c := Vector2(r.randf_range(gin.position.x + PARTY_R + 0.3, gin.end.x - PARTY_R - 0.3), r.randf_range(gin.position.y + PARTY_R + 0.3, gin.end.y - PARTY_R - 0.3))
+		if Vector2(gdoor.x, gdoor.z).distance_to(c) < PARTY_R + 1.4:
+			continue
+		if _hits(Rect2(c, Vector2.ZERO).grow(PARTY_R + 0.25), busy):
+			continue
+		party.append(_v(c.x, c.y))
+		for k in PARTY_SEATS:
+			var a := TAU * k / PARTY_SEATS
+			party.append(_v(c.x + cos(a) * PARTY_R, c.y + sin(a) * PARTY_R))
+		break
+	g["party"] = party
+	if fids.is_empty():
+		return
+	var pool: Array = (g.hide_spots as Array).filter(func(p: Vector3) -> bool: return p.distance_to(start) > FRIEND_START)
+	if pool.is_empty():
+		return
+	pool.sort_custom(func(a: Vector3, b: Vector3) -> bool: return a.distance_to(start) < b.distance_to(start))
+	var first := Vector3.INF
+	if (tw & Street.DARK) != 0:
+		var dark_rooms: Array = []
+		for ri in rooms.size():
+			if rooms[ri].type in ["hall", "garden"]:
+				continue
+			if pool.any(func(p: Vector3) -> bool: return room_of(g, p) == ri):
+				dark_rooms.append(ri)
+		if dark_rooms.is_empty():
+			return
+		var dr: int = dark_rooms[r.randi() % dark_rooms.size()]
+		g.dark_room = dr
+		var inside: Array = pool.filter(func(p: Vector3) -> bool: return room_of(g, p) == dr)
+		first = inside[r.randi() % inside.size()]
+	else:
+		first = pool[r.randi_range(pool.size() / 2, pool.size() - 1)]  # the far half
+	var used: Array = [first]
+	var spots: Array = [[first, first]]
+	for k in range(1, fids.size()):  # TWINS: the second friend somewhere else
+		var far: Array = pool.filter(func(p: Vector3) -> bool: return used.all(func(u: Vector3) -> bool: return u.distance_to(p) >= FRIEND_APART))
+		if far.is_empty():
+			return
+		var p2: Vector3 = far[r.randi() % far.size()]
+		used.append(p2)
+		spots.append([p2, p2])
+	if (tw & Street.SNEAKY) != 0:  # the first friend sneaks off once, to a spot well away
+		var far: Array = pool.filter(func(p: Vector3) -> bool: return used.all(func(u: Vector3) -> bool: return u.distance_to(p) >= FRIEND_APART))
+		if far.is_empty():
+			return
+		spots[0][1] = far[r.randi() % far.size()]
+	g["friend_spots"] = spots
+
+
+## The rooms_info index whose rectangle holds p (-1: none).
+static func room_of(g: Dictionary, p: Vector3) -> int:
+	var rooms: Array = g.rooms_info
+	for ri in rooms.size():
+		if (rooms[ri].rect as Rect2).has_point(Vector2(p.x, p.z)):
+			return ri
+	return -1
+
+
+## Every spot Pip may NOT take this round (the friends' spots, where they are and where they sneak to).
+static func friend_taken(g: Dictionary) -> Array:
+	var out: Array = []
+	for fs in g.get("friend_spots", []):
+		out.append(fs[0])
+		out.append(fs[1])
+	return out
 
 
 static func _root(parent: Array, i: int) -> int:
@@ -709,6 +805,7 @@ static func check(g: Dictionary) -> Array:
 		why.append("nobody can ring the jail bell")
 	if (g.decoys as Array).size() < 8:
 		why.append("only %d decoys" % (g.decoys as Array).size())
+	why.append_array(check_street(g))
 	# Walled-off pockets (somewhere a hider could only jump into).
 	var free: PackedByteArray = hg.free
 	var seen: PackedByteArray = (hg.seen as PackedByteArray).duplicate()
@@ -737,7 +834,83 @@ static func check(g: Dictionary) -> Array:
 	return why
 
 
+## PIP'S STREET is fair: every friend hides on a proper hiding spot (reachable by a hider, touchable by the
+## seeker: hide_spots), far enough from the counting spot, twins and a sneaky friend's new spot well apart, the
+## first friend of a DARK house inside the dark room (a real room: not the hall with the jail, not the garden),
+## spots left over for Pip, and the garden party on clear lawn in the garden.
+static func check_street(g: Dictionary) -> Array:
+	var why: Array = []
+	var fids: Array = g.get("friends", [])
+	var tw := int(g.get("twist", 0))
+	var fs: Array = g.get("friend_spots", [])
+	var spots: Array = g.hide_spots
+	var start: Vector3 = (g.spawns as Array)[0]
+	if fs.size() != fids.size():
+		why.append("%d friends but %d friend spots" % [fids.size(), fs.size()])
+		return why
+	if fids.size() != (Street.friends_needed(tw) if not fids.is_empty() else 0):
+		why.append("twist %d wants %d friends, got %d" % [tw, Street.friends_needed(tw), fids.size()])
+	var all: Array = []
+	for k in fs.size():
+		for p in [fs[k][0], fs[k][1]]:
+			if not spots.has(p):
+				why.append("friend %d hides off the hiding spots at %s" % [k, str(p)])
+			if (p as Vector3).distance_to(start) <= FRIEND_START:
+				why.append("friend %d hides next to the counting spot" % k)
+			if in_jail(g, p):
+				why.append("friend %d hides in the jail" % k)
+		all.append(fs[k][0])
+		var moves: bool = (fs[k][0] as Vector3) != (fs[k][1] as Vector3)
+		if moves != (k == 0 and (tw & Street.SNEAKY) != 0):
+			why.append("friend %d %s" % [k, "moves but isn't sneaky" if moves else "is sneaky but never moves"])
+		if moves:
+			all.append(fs[k][1])
+	for a in all.size():
+		for b in range(a + 1, all.size()):
+			if (all[a] as Vector3).distance_to(all[b]) < FRIEND_APART:
+				why.append("two friend spots too close (%s, %s)" % [str(all[a]), str(all[b])])
+	var dr := int(g.get("dark_room", -1))
+	if (tw & Street.DARK) != 0 and not fids.is_empty():
+		if dr < 0 or dr >= (g.rooms_info as Array).size():
+			why.append("a dark house without a dark room")
+		else:
+			var t: String = g.rooms_info[dr].type
+			if t == "hall" or t == "garden":
+				why.append("the %s can't be the dark room" % t)
+			if room_of(g, fs[0][0]) != dr:
+				why.append("the friend isn't in the dark room")
+			if (g.rooms_info[dr].rect as Rect2).grow(0.2).has_point(Vector2((g.jail as Vector3).x, (g.jail as Vector3).z)):
+				why.append("the jail is in the dark room")
+	elif dr >= 0:
+		why.append("a dark room in a house without the dark twist")
+	var left := spots.filter(func(p: Vector3) -> bool: return not all.has(p) and p.distance_to(start) > 3.0)
+	if not fids.is_empty() and left.size() < PIP_SPOTS:
+		why.append("only %d spots left for Pip" % left.size())
+	var party: Array = g.get("party", [])
+	if party.size() != PARTY_SEATS + 1:
+		why.append("no room for the garden party")
+	else:
+		var garden: Rect2 = (g.rooms_info as Array)[-1].inner
+		for p in party:
+			var q := Vector2((p as Vector3).x, (p as Vector3).z)
+			if not garden.grow(-0.15).has_point(q):
+				why.append("a party seat outside the garden at %s" % str(p))
+			for s in g.solids:
+				var c: Vector3 = s[0]
+				var sz: Vector3 = s[1]
+				if Rect2(Vector2(c.x - sz.x / 2.0, c.z - sz.z / 2.0), Vector2(sz.x, sz.z)).grow(0.1).has_point(q):
+					why.append("a party seat inside something at %s" % str(p))
+					break
+	return why
+
+
+static func in_jail(g: Dictionary, p: Vector3) -> bool:
+	var j: Vector3 = g.jail
+	return absf(p.x - j.x) < JAIL_HALF + 0.3 and absf(p.z - j.z) < JAIL_HALF + 0.3
+
+
 ## Map data for main.gd (same keys as the hand-made maps' data()).
 static func data(g: Dictionary) -> Dictionary:
 	return {"title": TITLE, "rooms": g.rooms, "doors": g.doors, "hide_spots": g.hide_spots, "star_spots": g.star_spots,
-		"spawns": g.spawns, "jail": g.jail, "bell": g.bell, "bounds": g.bounds}
+		"spawns": g.spawns, "jail": g.jail, "bell": g.bell, "bounds": g.bounds, "friend_spots": g.get("friend_spots", []),
+		"dark_room": g.get("dark_room", -1), "party": g.get("party", []), "friends": g.get("friends", []), "twist": g.get("twist", 0)}

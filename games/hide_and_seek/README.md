@@ -18,6 +18,20 @@ launch, moves on to the next one.
   unlock the SEASIDE, SNOWY and SPOOKY house looks. Story cards (picture + a few words) tell it.
 - Saves (`core/save.gd`, id `hide_and_seek`): Pip's toys, houses explored, today's house. One telemetry `RUN:` line
   per round (map, house spec, finds, who found Pip, seconds, ...) and on quit mid-round.
+- **PIP'S STREET** (`street.gd`, second pass): the family's houses are a street of neighbours, 6 houses a street. Each
+  house has a NEIGHBOUR FRIEND (`friend.gd`: Bun the bunny, Kit the kitten, Spike the hedgehog, Hoot the owl, Tess the
+  tortoise, Fizz the frog, Nutmeg the squirrel, Pom the hamster) hiding with Pip (+25 to whoever finds them: the
+  seeker's torch or touch, or a hider bumping into them). A found friend comes to **PIP'S GARDEN PARTY** in every
+  house's garden for good (saved `party`), which grows bunting, balloons, a cake and lanterns (2 / 4 / 6 / 8 friends).
+  Friends not at the party yet come first. TWISTS rise along the street: SNEAKY (the friend pops off to a new spot
+  once, when the seeker comes close or half way through), DARK ROOM (no lamp, curtains shut, the friend shows only
+  glowing eyes: use the torch), TWINS (two friends). Later streets add more. A hiding friend squeaks now and then (a
+  sound to follow; no sparkles). Picture-first story cards: who hides here, the twist, "To the party!", "Find me
+  next time!", "STREET DONE!". **TODAY'S STREET** (the daily house) has two friends and a twist; `daily_done` when
+  finished. `HNS_TRY=street|dark|sneaky|twins` starts on a house with that twist (What's New "try").
+  housegen.gd places the friends, the dark room and the party (own random stream) and `check_street()` proves them
+  fair. The host's spec array carries `[seed, level, theme, daily, friends, twist, street, slot]`; the snapshot
+  carries `[friend_state, party]` (TV machines rebuild everything from those).
 - **Validator** `tests/hide_and_seek_gen_test.gd` (`godot-test --headless --path . -s res://tests/hide_and_seek_gen_test.gd`,
   `SEEDS=300` for more): over many seeds and sizes, every room, doorway, spawn, star spot and the jail bell is
   walkable for a hider and the seeker, every hiding spot is reachable by a hider AND touchable by the seeker (so
