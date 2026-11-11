@@ -18,6 +18,10 @@ extends Node
 ## gunner looks away from their practice balloon, so the cues show. Prints "BOT: ERROR instruction text"
 ## if a headline (TV or VR) or any word a TV view draws is anything but a short title, and checks the
 ## pause banner is just PAUSED.
+## SECOND PASS (deep.gd): the host bot turns sky events on from stage 1 (twice as many) so a short run meets them; in
+## the pick phase the rider flies into a different orb each pick (left, right, middle...) unless a gunner bubbles one
+## first; checks the mode is picked once, a gift before every stage, sky events are told (and every machine draws
+## them), the baby dragons match the save, and nothing in the deep test's fairness rules is broken in play.
 
 const FAKE_PAD := 40
 
@@ -38,6 +42,10 @@ const HEADLINES := "^(DRAGON RIDER!|STARS!|GOLDEN BALLOON!|SKY BUNNIES!|RACE GOL
 var headline_re := RegEx.create_from_string(HEADLINES)
 var look_away_t := -1.0  # simple mode: the first gunner looks away from their practice balloon
 var flap_seen_t := 0.0
+var picks_flown := 0
+var pick_target := -1
+var last_pick_stage := ""
+var deep_set := false
 
 
 func _ready() -> void:
@@ -63,6 +71,10 @@ func _process(delta: float) -> void:
 	if not joined and t > (3.0 if mode == "client" else 1.0):
 		joined = true
 		_join_players(mode)
+	if mode != "client" and not deep_set:
+		deep_set = true
+		main.hazard_from = 1  # sky events from stage 1 (a 60 s bot never reaches stage 2)
+		main.hazard_scale = 2.0
 	if mode != "client":
 		if OS.has_environment("DR_START_LEVEL") and main.phase == "practice":
 			main._end_practice()
@@ -130,6 +142,17 @@ func _autopilot(delta: float) -> void:
 			r.bot_flap = false
 			return
 	var ring: Dictionary = main.arrow_target()
+	if main.phase == "pick" and main.picks.active():
+		if main.picks.stage != last_pick_stage or pick_target < 0:
+			last_pick_stage = main.picks.stage
+			pick_target = [0, 2, 1][picks_flown % 3]  # a different orb each pick: left, right, middle...
+			picks_flown += 1
+		var op: Vector3 = main.picks.orb_position(pick_target)
+		if op != Vector3.INF:
+			ring = {"pos": op - Vector3(0, 0.0, 0), "normal": main.picks.row_normal}
+	elif main.phase != "pick":
+		pick_target = -1
+		last_pick_stage = ""
 	if ring.is_empty():
 		r.bot_input = Vector2.ZERO
 		r.bot_flap = false
@@ -357,6 +380,16 @@ func _note(mode: String) -> void:
 			seen["touched " + str(k)] = true
 	if main.level >= 2:
 		seen["stage 2"] = true
+	if main.picks.showing():
+		seen["pick orbs"] = true
+	if main.hazards.seen > 0:
+		seen["sky event told"] = true
+	if main.play_mode != "":
+		seen["mode " + main.play_mode] = true
+	if main.gift != "":
+		seen["gift " + main.gift] = true
+	if main.baby_root != null and main.baby_root.get_child_count() > 0:
+		seen["baby dragons"] = true
 
 
 func _exit_tree() -> void:
@@ -366,6 +399,8 @@ func _exit_tree() -> void:
 	keys.sort()
 	print("FINAL mode=%s phase=%s level=%d levels_done=%d lanterns=%d balloons_gone=%d seen=%s" % [main.net.mode, main.phase,
 		main.level, levels_done, main.dragon.lit_count(), main.course.gone.size() if main.course != null else 0, keys])
+	print("BOT DEEP: mode=%s play_mode=%s gift=%s season=%s babies=%d picks=%s fired=%s stats=%s" % [main.net.mode, main.play_mode,
+		main.gift, main.season, main.babies, str(main.picks.history), str(main.hazards.fired), str(main.deep_stats)])
 	if main.SIMPLE_MODE:
 		var ks: Array = cues.keys()
 		ks.sort()
@@ -421,7 +456,22 @@ func _check_story(mode: String) -> void:
 	set_meta("story_checked", true)
 	if mode == "client":
 		_ok(main.charm_count >= 0, "the TV machine got Sunny's charms (%d)" % main.charm_count)
+		_ok(main.shown_babies == main.babies, "the TV machine shows the baby dragons (%d)" % main.babies)
+		_ok(main.level < 1 or main.play_mode != "", "the TV machine knows the mode (%s)" % main.play_mode)
 		return
+	var Deep = main.Deep
+	_ok(main.level < 1 or main.play_mode != "", "the mode was picked before stage 1 (%s)" % main.play_mode)
+	var modes := 0
+	var gifts := 0
+	for h in main.picks.history:
+		modes += 1 if h[0] == "mode" else 0
+		gifts += 1 if h[0] == "gift" else 0
+	_ok(modes <= 1, "the mode is picked once a session (%d)" % modes)
+	_ok(main.level < 1 or gifts >= 1, "a gift before the stage (%d gifts, stage %d)" % [gifts, main.level])
+	_ok(main.babies == Deep.babies(int(main.save.data.total)), "the baby dragons match the save (%d)" % main.babies)
+	_ok(main.shown_babies == main.babies, "every baby dragon flies (%d)" % main.shown_babies)
+	var probs: Array = [] if main.course == null else Deep.problems(main.hazards.list, main.course.route, {"mode": main.play_mode, "season": main.season, "level": main.level})
+	_ok(probs.is_empty(), "this stage's sky events are fair %s" % str(probs))
 	_ok(main.flight_seed > 0, "a seeded flight (%d)" % main.flight_seed)
 	_ok(main.level_seed == main.RouteGen.stage_seed(main.flight_seed, main.level), "the stage seed comes from the flight seed")
 	_ok(main.level < 2 or main.charm_count >= 1, "a charm after stage 1 (stage %d, %d charms)" % [main.level, main.charm_count])

@@ -78,11 +78,20 @@ const SIMPLE_MODE := true
 ## play-day. TODAY'S FLIGHT: the first flight each day is the same on every machine and its charms are golden.
 ## Picture cards (story_pictures.gd) tell it. Telemetry: one RUN line per stage and on quit. Networked: the host
 ## sends the charms + garland and the cards as events; routes come from the level seed in the snapshot.
+## SECOND PASS (deep.gd): GENTLE / BRAVE / HARD once a session and SUNNY'S GIFTS before every stage, on the shared pick
+## orbs floating across the sky ahead (picks.gd: fly into one, or bubble one); storm clouds and crosswinds told first
+## by warn rings standing up across the route (hazards.gd); the route flies through the season's lands (blossom,
+## sunny, maple or snowy isles); every few stages a BABY DRAGON hatches in Sunny's roost and flies beside her for good.
 const RouteGen := preload("res://games/dragon_rider/routegen.gd")
 const Seeded := preload("res://core/seeded.gd")
 const Save := preload("res://core/save.gd")
 const Telemetry := preload("res://core/telemetry.gd")
 const StoryCard := preload("res://core/story_card.gd")
+const Deep := preload("res://games/dragon_rider/deep.gd")
+const Picks := preload("res://games/dragon_rider/picks.gd")
+const Hazards := preload("res://games/dragon_rider/hazards.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
+const UiKitDr := preload("res://core/ui_kit.gd")
 const GAME_ID := "dragon_rider"
 const CHARM_COLORS := {"bell": Color(1.0, 0.8, 0.2), "bunny": Color(1.0, 0.75, 0.85), "ribbon": Color(0.35, 0.6, 1.0), "crown": Color(1.0, 0.85, 0.25)}
 const CHARM_CHEERS := {1: "Our first charm!", 5: "Five charms!", 10: "Ten charms!", 22: "A rail full of charms!"}
@@ -248,6 +257,29 @@ var solo_boss_t := 0.0
 var flap_hand: Node3D            # simple mode, VR: the shared Cannon Cove ghost hand squeezing the trigger (flap)
 var flap_idle_t := 0.0
 var flap_was := false
+# Second pass (deep.gd): the session's mode, this stage's gift, the season, warned sky events, the baby dragons.
+var picks: Picks
+var hazards: Hazards
+var play_mode := ""  # "" until the team picks (once a session; TV machines from the snapshot)
+var gift := ""  # this stage's gift
+var season := "spring"
+var babies := 0  # baby dragons flying beside Sunny (from the charms event on TV machines)
+var baby_root: Node3D
+var shown_babies := -1
+var pick_level := 1  # host: the stage the picks are for
+var dizzy_t := 0.0  # host: Sunny is dizzy (a storm cloud)
+var gust_t := 0.0  # host: a crosswind pushes
+var gust_dir := Vector3.ZERO
+var hazard_from := Deep.FIRST_STAGE  # bots: events from stage 1
+var hazard_scale := 1.0  # bots: more events a stage
+var deep_stats := {"told": 0, "storms": 0, "winds": 0, "bumped": 0, "shielded": 0, "burned": 0, "gusts": 0, "fire_pops": 0,
+	"magnet": 0, "hatched": 0}
+var shield_node: MeshInstance3D
+var fire_t := 0.0
+var drift: CPUParticles3D
+var shown_season := ""
+var core_was := Vector3.INF
+var season_told := false
 
 
 func _ready() -> void:
@@ -286,6 +318,17 @@ func _ready() -> void:
 	net.main = self
 	add_child(net)
 	net.sticky_event("charms")  # a machine that joins later gets the latest one (core/net.gd)
+	net.sticky_event("orbs")  # a machine joining mid-pick sees the pick orbs
+	season = OS.get_environment("DR_SEASON") if OS.has_environment("DR_SEASON") else Seeded.season()
+	if not Deep.SEASONS.has(season):
+		season = "spring"
+	picks = Picks.new()
+	picks.main = self
+	add_child(picks)
+	hazards = Hazards.new()
+	hazards.main = self
+	add_child(hazards)
+	_apply_season()
 	seats = ClassicSeats.new(self, {
 		"no_keys": GunnerScript.NO_KEYS,
 		"free_actions": ["restart", "next", "pause"],
@@ -563,7 +606,13 @@ func _start_level(n: int) -> void:
 	phase = "intro"
 	phase_t = INTRO_TIME + 2.0 if n == 1 else 5.0
 	_spawn_mission_actors()
-	print("Level %d (%s, %s sky): %d rings, seed %d, %d gunners" % [n, mission, sky_for(n), course.rings.size(), level_seed, gunner_count()])
+	var ev := Deep.events(Seeded.derive(level_seed, "events"), course.route, {"mode": play_mode, "season": season, "level": n,
+		"scale": hazard_scale, "from": hazard_from})
+	hazards.reset(ev)
+	dizzy_t = 0.0
+	gust_t = 0.0
+	print("Level %d (%s, %s sky): %d rings, seed %d, %d gunners, %s, gift %s, %s, %d sky events %s" % [n, mission, sky_for(n),
+		course.rings.size(), level_seed, gunner_count(), play_mode, gift, season, ev.size(), str(ev.map(func(e: Dictionary) -> String: return String(e.kind)))])
 	sound("levelup", -4.0, 0.8 + n * 0.05)
 	if SIMPLE_MODE:
 		dragon.cruise = simple_cruise(n)
@@ -641,6 +690,8 @@ func _build_course() -> void:
 		get_tree().create_timer(8.0).timeout.connect(func() -> void:
 			if is_instance_valid(old):
 				old.queue_free())
+	if hazards != null:
+		hazards.clear()
 	course = CourseScript.new()
 	course.main = self
 	add_child(course)
@@ -666,7 +717,12 @@ func _host_update(delta: float) -> void:
 			if not SIMPLE_MODE and phase_t <= DONE_TIME - 1.5 and _confirm_pressed():
 				phase_t = 0.0
 			if phase_t <= 0.0:
-				_start_level(level + 1)
+				if SIMPLE_MODE:
+					_next_pick(level + 1)
+				else:
+					_start_level(level + 1)
+		"pick":
+			picks.tick(delta)
 		"over":
 			game_over_time += delta
 			if game_over_time > 1.5 and _confirm_pressed():
@@ -681,6 +737,7 @@ func _host_update(delta: float) -> void:
 		if SIMPLE_MODE:
 			_fly_through_balloons()
 			_solo_boss(delta)
+			_host_hazards(delta)
 	power_t = maxf(0.0, power_t - delta)
 	if rival != null and is_instance_valid(rival) and phase != "over":
 		rival.host_update(delta, course.rings)
@@ -752,12 +809,13 @@ func _check_stars() -> void:
 	if course == null:
 		return
 	var core: Vector3 = dragon.core_position()
+	var star_r := 6.0 * (Deep.MAGNET_X if gift == "magnet" else 1.0)  # BUNNY MAGNET scoops from further
 	for st in course.stars:
 		var id: int = st.id
 		if course.gone.has(id):
 			continue
 		var sp: Vector3 = st.pos
-		if core.distance_squared_to(sp) < 6.0 * 6.0:
+		if core.distance_squared_to(sp) < star_r * star_r:
 			course.remove_item(id)
 			stars_got += 1
 			score += 25
@@ -792,6 +850,8 @@ func _check_rescues() -> void:
 			continue
 		var cp: Vector3 = c.pos
 		var d := core.distance_to(cp)
+		if gift == "magnet":
+			d /= Deep.MAGNET_X  # BUNNY MAGNET: bunnies hop aboard from further off
 		if SIMPLE_MODE and d < course.RESCUE_R * 1.4 and not course.gone.has(4000 + i):
 			course.remove_item(4000 + i)  # simple: flying up to a bunny frees it (no gunners needed)
 			sound("cage", -2.0)
@@ -1005,6 +1065,10 @@ func on_bubble_hit(b: Node3D, target: Node3D) -> void:
 	if kind == "pballoon":
 		_pop_practice_balloon(int(target.get_meta("owner")))
 		_hit_marker(by)
+		return
+	if kind == "pickorb":  # a gunner bubbled a pick orb (picks.gd): it's theirs
+		_hit_marker(by)
+		picks.take(int(target.get_meta("index")), by)
 		return
 	if kind == "balloon":
 		var c: Node3D = target.get_parent()
@@ -1402,7 +1466,7 @@ func _end_practice() -> void:
 	for i in practice_balloons.keys():
 		_remove_practice_balloon(int(i), true)
 	print("Practice done (%.0f s)" % phase_t)
-	_start_level(1)
+	_next_pick(1)
 
 
 ## Where gunner i's practice balloon floats (dragon-local): straight along their starting aim.
@@ -1583,7 +1647,10 @@ func _fly_through_balloons() -> void:
 		if course.gone.has(id):
 			continue
 		var node: Node3D = b.node
-		if node.global_position.distance_squared_to(core) < 4.5 * 4.5:
+		var pop_r := Deep.FIRE_R if gift == "fire" else 4.5  # FIRE BREATH pops them further off
+		if node.global_position.distance_squared_to(core) < pop_r * pop_r:
+			if gift == "fire":
+				deep_stats.fire_pops += 1
 			course.remove_item(id)
 			burst(node.global_position, node.get_meta("color", Color.WHITE), 18, 0.2)
 			sound("pop", -3.0, randf_range(0.9, 1.2))
@@ -1629,6 +1696,15 @@ func _simple_assist(inp: Vector2, delta: float) -> Vector2:
 	var want_y := 45.0
 	if not target.is_empty():
 		want_y = (target.pos as Vector3).y
+	if phase == "pick":  # the pick row: free to climb and turn to any orb, no drift into one (a pick is deliberate)
+		var rc := picks.row_center()
+		want_y = rc.y if rc != Vector3.INF else dragon.global_position.y
+		var cy: Vector3 = dragon.core_position()
+		if inp.y > 0.0 and cy.y > want_y + 18.0:
+			inp.y = 0.0
+		elif inp.y < 0.0 and cy.y < want_y - 18.0:
+			inp.y = 0.0
+		return inp
 	var core: Vector3 = dragon.core_position()
 	if inp.y > 0.0 and core.y > want_y + 18.0:
 		inp.y = 0.0
@@ -1765,6 +1841,7 @@ func _process(delta: float) -> void:
 	_update_arrow(delta)
 	if SIMPLE_MODE:
 		_simple_animate(delta)
+	_deep_animate(delta)
 	world.follow(dragon.global_position, dragon.velocity)
 	_party_tick(delta)
 	_update_vr(delta)
@@ -2377,7 +2454,8 @@ func make_snapshot() -> Array:
 	return [phase, level, level_seed, course_origin, course_yaw, ring_i, score, stars_got, dragon.lit_mask(), distance,
 		[dragon.global_position, dragon.yaw, dragon.velocity, dragon.yaw_rate, dragon.steer, dragon.climb, dragon.flap_power],
 		gone, sp, players[0].net_pose(), phase_t, level_rings, mission, power_t, cannon_level, rv, bs,
-		[practice_step, practice_pos, practice_normal, _practice_alive_mask()], _gunner_state()]
+		[practice_step, practice_pos, practice_normal, _practice_alive_mask()], _gunner_state(),
+		[play_mode, gift, season, dizzy_t > 0.0, gust_t > 0.0]]
 
 
 ## Every gunner that is aboard: [index, yaw, pitch] (other machines show them as ghosts).
@@ -2394,6 +2472,13 @@ func apply_snapshot(s: Array) -> void:
 	if not ready_to_play or s.size() < 16:
 		return
 	synced = true
+	if s.size() >= 24:  # the second pass (deep.gd): before a new course is built (its lands follow the season)
+		var dp: Array = s[23]
+		play_mode = String(dp[0])
+		gift = String(dp[1])
+		if String(dp[2]) != season:
+			season = String(dp[2])
+			_apply_season()
 	phase = s[0]
 	var lv: int = s[1]
 	var sd: int = s[2]
@@ -2530,11 +2615,24 @@ func apply_event(kind: String, args: Array) -> void:
 			_prop_react(args[0], args[1], args[2])
 		"charms":
 			_build_charms(args[0], int(args[1]))
+			if args.size() > 2:
+				_build_babies(int(args[2]))
 		"story":
 			_story(args[0], args[1], args[2])
 		"visitor":
 			if props != null:
 				props.spawn_visitor(args[0], args[1], args[2])
+		"orbs":
+			if picks != null:
+				picks.show_row(String(args[0]), args[1] if args.size() > 1 and args[1] is Array else [], args[2] if args.size() > 2 and args[2] is Array else [])
+		"take":
+			if picks != null:
+				picks.take_fx(int(args[0]), int(args[1]))
+		"hazard":
+			if hazards != null:
+				hazards.announce(Deep.unpack(args[0]), float(args[1]))
+		"bump":
+			_bump_fx(String(args[0]))
 
 
 # --- Banner, VR text and comfort ------------------------------------------------
@@ -2627,7 +2725,8 @@ func _start_flight() -> void:
 		save = Save.new()
 		save.game_id = GAME_ID
 		# charms: [[kind, play-day, golden], ...]; days: days played; daily: the date TODAY'S FLIGHT was flown.
-		save.defaults = {"charms": [], "total": 0, "days": 0, "last_day": "", "daily": "", "daily_done": "", "flights": 0, "best_stage": 0}
+		save.defaults = {"charms": [], "total": 0, "days": 0, "last_day": "", "daily": "", "daily_done": "", "flights": 0, "best_stage": 0,
+			"mode": "", "gift": "", "dodged": 0}
 		add_child(save)
 	var today := Seeded.today()
 	var new_day := String(save.data.last_day) != today
@@ -2644,13 +2743,19 @@ func _start_flight() -> void:
 	save.mark_dirty()
 	print("Dragon Rider flight: seed %d%s | %d charms, day %d" % [flight_seed, " (TODAY'S FLIGHT)" if flight_daily else "",
 		(save.data.charms as Array).size(), int(save.data.days)])
+	babies = Deep.babies(int(save.data.total))
 	_build_charms(save.data.charms, int(save.data.days))
+	_build_babies(babies)
 	_send_charms()
 	if flight_daily:
 		_story_for_all("TODAY'S FLIGHT!", "dragon", Color(1.0, 0.85, 0.3))
 	_story_for_all("Hi! I'm Sunny!", "dragon", Color(0.95, 0.45, 0.3))
 	if new_day and int(save.data.days) > 1:
 		_story_for_all("My garland grew!", "flowerchain", Color(1.0, 0.6, 0.75))
+	var sd := Deep.season_data(season)
+	_story_for_all(String(sd.line), String(sd.pic), sd.drift)
+	if babies > 0:
+		_story_for_all("My babies fly too!" if babies > 1 else "My baby flies too!", "babydragon", Deep.baby_color(babies - 1))
 
 
 ## Host / local: the stage's charm joins the rail (the oldest makes room when it's full).
@@ -2665,6 +2770,13 @@ func _add_charm() -> void:
 	save.data.total = int(save.data.total) + 1
 	save.data.best_stage = maxi(int(save.data.best_stage), level)
 	save.mark_dirty()
+	var hatched := Deep.babies(int(save.data.total))
+	if hatched > babies:  # an egg in Sunny's roost hatched: a baby dragon flies beside her for good
+		babies = hatched
+		deep_stats.hatched += 1
+		_build_babies(babies)
+		_story_for_all("A baby dragon!", "babydragon", Deep.baby_color(babies - 1))
+		sound("rescue", -2.0, 1.4)
 	_build_charms(list, int(save.data.days))
 	_send_charms()
 	var n := int(save.data.total)
@@ -2673,7 +2785,7 @@ func _add_charm() -> void:
 
 func _send_charms() -> void:
 	if net and net.mode != "client" and save != null:
-		net.event("charms", [(save.data.charms as Array).duplicate(true), int(save.data.days)])
+		net.event("charms", [(save.data.charms as Array).duplicate(true), int(save.data.days), babies])
 
 
 ## One RUN line per stage (and on quit).
@@ -2681,7 +2793,9 @@ func _log_stage(end: String) -> void:
 	Telemetry.run(GAME_ID, {"end": end, "stage": level, "mission": mission, "seed": level_seed, "flight": flight_seed,
 		"daily": flight_daily, "secs": snappedf(stage_t, 0.1), "rings": level_rings, "of": course.rings.size() if course != null else 0,
 		"balloons": level_balloons, "gunners": gunner_count(), "vr": not players.is_empty() and players[0].vr, "net": net.mode,
-		"charms": (save.data.charms as Array).size() if save else 0, "days": int(save.data.days) if save else 0})
+		"charms": (save.data.charms as Array).size() if save else 0, "days": int(save.data.days) if save else 0,
+		"game_mode": play_mode, "gift": gift, "season": season, "babies": babies, "sky_events": hazards.list.size() if hazards else 0,
+		"bumped": int(deep_stats.bumped), "shielded": int(deep_stats.shielded), "burned": int(deep_stats.burned), "gusts": int(deep_stats.gusts)})
 
 
 ## Every machine: the charms hanging under the deck rail and the flower garland along it (a blossom a play-day).
@@ -2782,3 +2896,318 @@ func _update_story(delta: float) -> void:
 		StoryCard.show(huds, opts)
 	if players[0].vr and players[0].xr_camera != null:
 		StoryCard.show_vr(self, players[0].xr_camera, opts)
+
+
+# --- Second pass: picks, sky events, gifts, seasons, the roost (deep.gd) -----------------------------------------
+
+## Host: the picks before stage n on the pick orbs ahead (picks.gd): the mode once a session, then Sunny's gift.
+func _next_pick(n: int) -> void:
+	pick_level = n
+	phase = "pick"
+	phase_t = 0.0
+	dragon.cruise = simple_cruise(maxi(n, 1)) if n > 1 else dragon.cruise
+	if play_mode == "":
+		var ids := PickOrbs.mode_ids(Deep.mode_of(String(save.data.get("mode", "brave")) if save != null else "brave"))
+		var entries: Array = []
+		for id in ids:
+			var md := PickOrbs.mode(String(id))
+			entries.append({"id": id, "name": PickOrbs.mode_name(String(id)), "pic": String(md.pic), "color": PickOrbs.mode_color(String(id))})
+		_story_for_all("Easy or hard?", "dragon", Color(0.95, 0.45, 0.3))
+		picks.begin("mode", entries, ids, _on_picked)
+		return
+	var last := String(save.data.get("gift", "")) if save != null else ""
+	var ch := Deep.gift_choices(babies, last, Seeded.derive(flight_seed, "gift%d" % n))
+	var entries2: Array = []
+	for id in ch:
+		var gd := Deep.gift(String(id))
+		entries2.append({"id": id, "name": String(gd.name), "pic": String(gd.pic), "color": gd.color})
+	_story_for_all("Pick a gift!", "gift", Color(1.0, 0.85, 0.3))
+	picks.begin("gift", entries2, ch, _on_picked)
+
+
+## Host: an orb was taken (slot -1: nobody, the middle one; 0: the rider; else a gunner).
+func _on_picked(stage: String, opt: Variant, _slot: int) -> void:
+	match stage:
+		"mode":
+			play_mode = Deep.mode_of(String(opt))
+			if save != null:
+				save.data.mode = play_mode
+				save.mark_dirty()
+			_story_for_all(String(PickOrbs.MODE_LINES.get(play_mode, "Let's fly!")), String(PickOrbs.mode(play_mode).pic), PickOrbs.mode_color(play_mode))
+			_next_pick(pick_level)
+			return
+		"gift":
+			gift = String(opt)
+			if save != null:
+				save.data.gift = gift
+				save.mark_dirty()
+			var gd := Deep.gift(gift)
+			_story_for_all(String(gd.line), String(gd.pic), gd.color)
+	_start_level(pick_level)
+
+
+## Host, every frame of a stage: Sunny's gift does its thing; sky events are told, then met; dizzy and gusts wear off.
+func _host_hazards(delta: float) -> void:
+	dragon.flap_boost = Deep.ZOOM_FLAP if gift == "zoom" else 1.0
+	if gift == "bubbles" and phase == "fly":
+		power_t = maxf(power_t, 1.0)  # BUBBLE STORM: triple bubbles all stage
+	if gift == "fire":
+		_fire_sprites()
+	var md := Deep.mode_data(play_mode)
+	var warn := float(md.warn)
+	var core: Vector3 = dragon.core_position()
+	for e in hazards.due(core, float(dragon.speed), float(dragon.cruise), warn, delta):
+		deep_stats.told += 1
+		net.event("hazard", [Deep.pack(e), warn])
+		hazards.announce(e, warn)
+		if not season_told:
+			season_told = true
+			_story_for_all("Look out!", "storm" if String(e.kind) == "storm" else "airswirl", Hazards.color_of(String(e.kind)))
+	if core_was != Vector3.INF and core_was.distance_to(core) < 20.0:
+		for e in hazards.hits(core_was, core, warn):
+			on_hazard(e)
+	core_was = core
+	if dizzy_t > 0.0:
+		dizzy_t -= delta
+		dragon.speed_cap = dragon.cruise * float(md.slow)
+		if dizzy_t <= 0.0:
+			dragon.speed_cap = INF
+	else:
+		dragon.speed_cap = INF
+	if gust_t > 0.0:
+		gust_t -= delta
+		var push := float(md.push) * (Deep.SHIELD_PUSH if gift == "shield" else 1.0)
+		dragon.position += gust_dir * push * delta
+		if fmod(gust_t, 0.5) < delta:
+			puff(dragon.global_position + gust_dir * -6.0 + Vector3.UP * 2.0, Color(1, 1, 1), 6, 0.15)
+
+
+## Host: Sunny flew into a live sky event.
+func on_hazard(e: Dictionary) -> void:
+	var md := Deep.mode_data(play_mode)
+	match String(e.kind):
+		"storm":
+			deep_stats.storms += 1
+			if gift == "shield":
+				deep_stats.shielded += 1
+				_bump("shield")
+			elif gift == "fire":
+				deep_stats.burned += 1
+				_bump("fire")
+			else:
+				deep_stats.bumped += 1
+				dizzy_t = float(md.dizzy)
+				if dizzy_t > 0.0:
+					dragon.speed = minf(dragon.speed, dragon.cruise * float(md.slow))
+				_bump("storm")
+		"wind":
+			deep_stats.winds += 1
+			deep_stats.gusts += 1
+			gust_t = float(md.gust)
+			gust_dir = (e.side as Vector3) * float(e.sign)
+			_bump("wind")
+	print("Sky event met: %s (%s, gift %s)" % [e.kind, play_mode, gift])
+
+
+func _bump(kind: String) -> void:
+	_bump_fx(kind)
+	net.event("bump", [kind])
+	var k := 0.3 if kind == "wind" or kind == "shield" else 0.8
+	players[0].haptic("l", k)
+	players[0].haptic("r", k)
+
+
+## Every machine: what flying into a sky event looks and sounds like.
+func _bump_fx(kind: String) -> void:
+	var at: Vector3 = dragon.global_position + dragon.global_basis * Vector3(0, 1.5, -5.0)
+	match kind:
+		"storm":
+			puff(at, Deep.CLOUD_COLOR, 22, 0.3)
+			local_sound("thunder", -6.0, 1.3)
+			local_sound("giggle", -4.0, 0.8)
+			dragon.puff_smoke()
+		"shield":
+			puff(at, Color(0.6, 0.9, 1.0), 22, 0.25)
+			local_sound("cage", -2.0, 0.8)
+		"fire":
+			puff(at, Color(1.0, 0.55, 0.2), 24, 0.3)
+			local_sound("zap", -3.0, 0.7)
+		"wind":
+			local_sound("whoosh", -3.0, 0.7)
+
+
+## Host, FIRE BREATH: storm sprites near Sunny's nose are popped by her fire too.
+func _fire_sprites() -> void:
+	var nose: Vector3 = dragon.global_transform * Vector3(0, -0.2, -7.2)
+	for s in get_tree().get_nodes_in_group("dr_sprites"):
+		var n := s as Node3D
+		if n.global_position.distance_to(nose) < Deep.FIRE_R:
+			n.remove_from_group("dr_sprites")
+			n.remove_from_group("dr_targets")
+			burst(n.global_position, Color(1.0, 0.55, 0.2), 16, 0.18)
+			sound("zap", -4.0, 1.1)
+			sprites_popped += 1
+			deep_stats.fire_pops += 1
+			n.queue_free()
+
+
+## Every machine: the baby dragons flying beside Sunny (deep.gd baby_spot), n of them.
+func _build_babies(n: int) -> void:
+	babies = n
+	if dragon == null or n == shown_babies:
+		return
+	var grew := shown_babies >= 0 and n > shown_babies
+	shown_babies = n
+	if baby_root == null:
+		baby_root = Node3D.new()
+		baby_root.name = "Babies"
+		dragon.add_child(baby_root)
+	for c in baby_root.get_children():
+		baby_root.remove_child(c)
+		c.queue_free()
+	for i in n:
+		var b := _baby(Deep.baby_color(i))
+		b.position = Deep.baby_spot(i)
+		baby_root.add_child(b)
+		if grew and i == n - 1:
+			b.scale = Vector3.ONE * 0.05
+			b.create_tween().tween_property(b, "scale", Vector3.ONE, 1.0).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+
+## One baby dragon: a round body and head, little horns, two flapping wings (named "WingL" / "WingR").
+func _baby(col: Color) -> Node3D:
+	var root := Node3D.new()
+	var skin := color_mat(col, 0.2)
+	var belly := color_mat(col.lightened(0.45), 0.1)
+	var body := MeshInstance3D.new()
+	body.mesh = sphere_mesh(0.55)
+	body.material_override = skin
+	body.scale = Vector3(0.9, 0.8, 1.3)
+	root.add_child(body)
+	var head := MeshInstance3D.new()
+	head.mesh = sphere_mesh(0.38)
+	head.material_override = skin
+	head.position = Vector3(0, 0.45, -0.75)
+	root.add_child(head)
+	var snout := MeshInstance3D.new()
+	snout.mesh = sphere_mesh(0.2)
+	snout.material_override = belly
+	snout.position = Vector3(0, 0.38, -1.08)
+	root.add_child(snout)
+	for sx in [-1.0, 1.0]:
+		var eye := MeshInstance3D.new()
+		eye.mesh = sphere_mesh(0.07)
+		eye.material_override = color_mat(Color(0.08, 0.06, 0.1), 0.0)
+		eye.position = Vector3(0.16 * sx, 0.58, -1.02)
+		root.add_child(eye)
+		var horn := MeshInstance3D.new()
+		horn.mesh = cyl_mesh(0.0, 0.07, 0.22, 6)
+		horn.material_override = color_mat(Color(1.0, 0.95, 0.8), 0.1)
+		horn.position = Vector3(0.14 * sx, 0.82, -0.7)
+		root.add_child(horn)
+		var wing := Node3D.new()
+		wing.name = "WingL" if sx < 0.0 else "WingR"
+		wing.position = Vector3(0.4 * sx, 0.25, 0.0)
+		var wm := MeshInstance3D.new()
+		wm.mesh = prism_mesh(Vector3(1.1, 0.06, 0.8))
+		wm.material_override = belly
+		wm.position = Vector3(0.55 * sx, 0.0, 0.0)
+		wing.add_child(wm)
+		root.add_child(wing)
+	var tail := MeshInstance3D.new()
+	tail.mesh = cyl_mesh(0.04, 0.2, 0.9, 6)
+	tail.material_override = skin
+	tail.rotation.x = PI / 2.0 + 0.3
+	tail.position = Vector3(0, -0.05, 0.95)
+	root.add_child(tail)
+	for c in root.get_children():
+		if c is MeshInstance3D:
+			(c as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return root
+
+
+## Every machine: the season's drifting things round Sunny (petals, pollen, leaves, snow). The islands take the season's
+## colours when a course is built (course.gd reads main.season).
+func _apply_season() -> void:
+	if season == shown_season or dragon == null:
+		return
+	shown_season = season
+	var sd := Deep.season_data(season)
+	if drift == null:
+		drift = CPUParticles3D.new()
+		drift.name = "SeasonDrift"
+		drift.amount = 70
+		drift.lifetime = 5.0
+		drift.local_coords = false
+		drift.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+		drift.emission_box_extents = Vector3(30.0, 12.0, 30.0)
+		drift.direction = Vector3(0.3, -1.0, 0.2)
+		drift.spread = 25.0
+		drift.gravity = Vector3(0, -0.6, 0)
+		drift.initial_velocity_min = 0.5
+		drift.initial_velocity_max = 1.5
+		drift.angular_velocity_min = -90.0
+		drift.angular_velocity_max = 90.0
+		drift.scale_amount_min = 0.6
+		drift.scale_amount_max = 1.3
+		drift.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		dragon.add_child(drift)
+		drift.position = Vector3(0, 4.0, -22.0)
+	var q := QuadMesh.new()
+	q.size = Vector2(0.18, 0.12) if season != "winter" else Vector2(0.13, 0.13)
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.albedo_color = sd.drift
+	m.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	q.material = m
+	drift.mesh = q
+	drift.emitting = true
+
+
+## Every machine, every frame: the gift's look (the shield bubble, fire puffs from the nose), the babies flapping.
+func _deep_animate(delta: float) -> void:
+	var now := Time.get_ticks_msec() * 0.001
+	var want_shield := gift == "shield" and phase in ["intro", "fly"]
+	if want_shield and shield_node == null:
+		shield_node = MeshInstance3D.new()
+		shield_node.name = "ShieldBubble"
+		var sm := SphereMesh.new()
+		sm.radius = 9.0
+		sm.height = 14.0
+		sm.radial_segments = 24
+		sm.rings = 12
+		shield_node.mesh = sm
+		var mat := StandardMaterial3D.new()
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.cull_mode = BaseMaterial3D.CULL_FRONT  # (only its far side: never a film over the rider's eyes)
+		mat.albedo_color = Color(0.55, 0.85, 1.0, 0.12)
+		mat.render_priority = UiKitDr.VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
+		shield_node.material_override = mat
+		shield_node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		shield_node.position = Vector3(0, -0.5, -0.5)
+		dragon.add_child(shield_node)
+	if shield_node != null:
+		shield_node.visible = want_shield
+		if want_shield:
+			shield_node.scale = Vector3.ONE * (1.0 + 0.02 * sin(now * 3.0))
+	if gift == "fire" and phase in ["intro", "fly"]:
+		fire_t -= delta
+		if fire_t <= 0.0:
+			fire_t = 1.4
+			var nose: Vector3 = dragon.global_transform * Vector3(0, -0.2, -7.4)
+			puff(nose, Color(1.0, 0.55, 0.15), 10, 0.22)
+			puff(nose, Color(1.0, 0.85, 0.3), 6, 0.15)
+	if baby_root != null:
+		for i in baby_root.get_child_count():
+			var b := baby_root.get_child(i) as Node3D
+			var flap := sin(now * 7.0 + i * 1.3) * 0.6
+			var wl := b.get_node_or_null("WingL") as Node3D
+			var wr := b.get_node_or_null("WingR") as Node3D
+			if wl != null:
+				wl.rotation.z = flap
+			if wr != null:
+				wr.rotation.z = -flap
+			b.position = Deep.baby_spot(i) + Vector3(0, sin(now * 1.6 + i) * 0.35, 0)
+			b.rotation.z = -dragon.steer * 0.3

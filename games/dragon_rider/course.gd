@@ -42,6 +42,7 @@ void fragment() {
 """
 
 const RouteGen := preload("res://games/dragon_rider/routegen.gd")
+const Deep := preload("res://games/dragon_rider/deep.gd")
 const Contrast := preload("res://core/contrast.gd")
 
 var main
@@ -67,6 +68,8 @@ var house_xf: Array = []
 var mill_xf: Array = []
 var rock_xf: Array = []
 var mill_blades: Array = []
+var crown_color := Color(1.0, 0.6, 0.75)
+var rock_color := Color(0.55, 0.42, 0.5)
 
 
 func ring_count(lv: int) -> int:
@@ -83,8 +86,11 @@ func build(seed_v: int, origin: Vector3, yaw: float, lv: int, mis: String = "rin
 	ring_later_mat = main.color_mat(RING_LATER, 0.7)
 	ring_done_mat = main.color_mat(RING_DONE, 0.5)
 	ring_final_mat = main.color_mat(RING_FINAL, 2.5)
-	var rock: StandardMaterial3D = main.color_mat(Color(0.55, 0.42, 0.5), 0.0)
-	var grass: StandardMaterial3D = main.color_mat(Color(0.5, 0.78, 0.4), 0.0)
+	var sd := Deep.season_data(String(main.season))  # the season's lands (deep.gd SEASONS)
+	var rock: StandardMaterial3D = main.color_mat(sd.rock, 0.0)
+	var grass: StandardMaterial3D = main.color_mat(sd.grass, 0.0)
+	crown_color = sd.crown
+	rock_color = sd.rock
 	var string_mat: StandardMaterial3D = main.color_mat(Color(0.95, 0.95, 0.95), 0.0)
 	for rd in route.rings:
 		var radius: float = rd.radius
@@ -473,9 +479,9 @@ func _build_multimeshes() -> void:
 	var trunk_m: CylinderMesh = main.cyl_mesh(0.25, 0.4, 1.0, 6).duplicate()
 	trunk_m.material = main.color_mat(Color(0.45, 0.3, 0.22), 0.0)
 	var crown_m: SphereMesh = main.sphere_mesh(1.0).duplicate()
-	crown_m.material = main.color_mat(Color(1.0, 0.6, 0.75), 0.15)
+	crown_m.material = main.color_mat(crown_color, 0.15)
 	var rock_m: BoxMesh = main.box_mesh(Vector3.ONE).duplicate()
-	rock_m.material = main.color_mat(Color(0.55, 0.42, 0.5), 0.0)
+	rock_m.material = main.color_mat(rock_color, 0.0)
 	for pair in [[trunk_m, trunk_xf], [crown_m, crown_xf], [_house_mesh("cottage"), house_xf], [_house_mesh("mill"), mill_xf],
 			[rock_m, rock_xf]]:
 		var xfs: Array = pair[1]

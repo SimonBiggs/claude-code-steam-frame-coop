@@ -5,7 +5,8 @@ extends RefCounted
 ## t = the picture's clock, bob = its gentle bob, color = the card's colour.
 ## (Sky bunnies use Whack-a-Mole's "bunny": any picture works in every game.)
 
-const NAMES: Array[String] = ["dragon", "bell", "ribbon", "crown", "flowerchain"]
+const NAMES: Array[String] = ["dragon", "bell", "ribbon", "crown", "flowerchain", "firebreath", "shieldbubble", "bunnymagnet",
+	"bubblestorm", "babydragon"]
 
 const SCALE := Color(0.95, 0.45, 0.3)
 const BELLY := Color(1.0, 0.85, 0.55)
@@ -64,3 +65,49 @@ static func draw(pic, kind: String, t: float, bob: float, color: Color) -> void:
 					var a := TAU * k / 5.0 + t
 					pic._circle(x + cos(a) * 0.04, y + sin(a) * 0.04, 0.035, color if i % 2 == 0 else Color.WHITE)
 				pic._circle(x, y, 0.025, GOLD)
+		"firebreath":  # Sunny's head on the left, a flickering flame puffing out to the right
+			var fl := 0.03 * sin(t * 12.0)
+			pic._poly([[0.42, 0.42 + bob], [0.9, 0.3 + fl + bob], [0.8, 0.5 + bob], [0.94, 0.66 - fl + bob], [0.42, 0.58 + bob]], Color(1.0, 0.45, 0.15))
+			pic._poly([[0.44, 0.46 + bob], [0.78, 0.4 + fl + bob], [0.72, 0.5 + bob], [0.8, 0.6 - fl + bob], [0.44, 0.54 + bob]], Color(1.0, 0.85, 0.3))
+			pic._poly([[0.22, 0.3 + bob], [0.18, 0.14 + bob], [0.3, 0.26 + bob]], Color(1.0, 0.95, 0.8))  # a horn
+			pic._circle(0.27, 0.5 + bob, 0.18, SCALE)
+			pic._circle(0.4, 0.52 + bob, 0.09, BELLY)  # snout
+			pic._eye(0.24, 0.44 + bob, 0.045)
+		"shieldbubble":  # Sunny curled up safe inside a shiny bubble
+			pic._circle(0.5, 0.5 + bob, 0.4, Color(0.55, 0.85, 1.0, 0.45))
+			pic._circle(0.5, 0.52 + bob, 0.16, SCALE)
+			pic._circle(0.5, 0.6 + bob, 0.08, BELLY)
+			pic._eye(0.44, 0.47 + bob, 0.035)
+			pic._eye(0.56, 0.47 + bob, 0.035)
+			pic._circle(0.36, 0.34 + bob, 0.07, Color(1, 1, 1, 0.7))  # the shine
+			pic._circle(0.3, 0.44 + bob, 0.03, Color(1, 1, 1, 0.6))
+		"bunnymagnet":  # a red horseshoe magnet pulling a little bunny and a star
+			pic._poly([[0.12, 0.25 + bob], [0.3, 0.25 + bob], [0.3, 0.6 + bob], [0.12, 0.6 + bob]], Color(0.9, 0.2, 0.25))
+			pic._poly([[0.12, 0.6 + bob], [0.3, 0.6 + bob], [0.3, 0.75 + bob], [0.12, 0.75 + bob]], Color(0.85, 0.85, 0.9))
+			pic._poly([[0.36, 0.25 + bob], [0.54, 0.25 + bob], [0.54, 0.6 + bob], [0.36, 0.6 + bob]], Color(0.9, 0.2, 0.25))
+			pic._poly([[0.36, 0.6 + bob], [0.54, 0.6 + bob], [0.54, 0.75 + bob], [0.36, 0.75 + bob]], Color(0.85, 0.85, 0.9))
+			pic._poly([[0.12, 0.25 + bob], [0.54, 0.25 + bob], [0.54, 0.15 + bob], [0.12, 0.15 + bob]], Color(0.9, 0.2, 0.25))
+			var pull := fmod(t * 0.6, 1.0) * 0.08
+			pic._circle(0.78 - pull, 0.6 + bob, 0.09, Color(1.0, 0.85, 0.9))  # the bunny
+			pic._poly([[0.72 - pull, 0.52 + bob], [0.74 - pull, 0.36 + bob], [0.77 - pull, 0.52 + bob]], Color(1.0, 0.85, 0.9))
+			pic._poly([[0.79 - pull, 0.52 + bob], [0.82 - pull, 0.36 + bob], [0.84 - pull, 0.52 + bob]], Color(1.0, 0.85, 0.9))
+			pic._eye(0.75 - pull, 0.58 + bob, 0.025)
+			pic._circle(0.8 - pull, 0.3 + bob, 0.05, GOLD)  # a star
+		"bubblestorm":  # lots of bubbles flying out of a little cannon
+			pic._poly([[0.1, 0.62 + bob], [0.34, 0.5 + bob], [0.38, 0.62 + bob], [0.14, 0.74 + bob]], Color(0.5, 0.35, 0.25))
+			for i in 7:
+				var k := fmod(t * 0.5 + i / 7.0, 1.0)
+				var bx := 0.38 + k * 0.5
+				var by := 0.5 - k * 0.3 + sin(i * 2.3) * 0.12
+				pic._circle(bx, by + bob, 0.05 + 0.04 * k, Color(0.65, 0.92, 1.0, 0.75))
+				pic._circle(bx - 0.015, by - 0.015 + bob, 0.015, Color(1, 1, 1, 0.8))
+		"babydragon":  # a tiny dragon hatching out of a speckled egg
+			pic._circle(0.5, 0.66 + bob, 0.22, Color(0.95, 0.92, 0.82))  # the egg
+			pic._circle(0.42, 0.72 + bob, 0.03, Color(0.6, 0.8, 0.95))
+			pic._circle(0.6, 0.62 + bob, 0.025, Color(0.6, 0.8, 0.95))
+			pic._circle(0.5, 0.38 + bob, 0.16, color)  # the baby's head
+			pic._poly([[0.4, 0.26 + bob], [0.38, 0.16 + bob], [0.46, 0.24 + bob]], Color(1.0, 0.95, 0.8))
+			pic._poly([[0.6, 0.26 + bob], [0.62, 0.16 + bob], [0.54, 0.24 + bob]], Color(1.0, 0.95, 0.8))
+			pic._eye(0.44, 0.36 + bob, 0.04)
+			pic._eye(0.56, 0.36 + bob, 0.04)
+			pic._poly([[0.28, 0.6 + bob], [0.72, 0.6 + bob], [0.66, 0.5 + bob], [0.58, 0.56 + bob], [0.5, 0.49 + bob], [0.42, 0.56 + bob], [0.34, 0.5 + bob]], Color(0.95, 0.92, 0.82))  # the cracked top edge
