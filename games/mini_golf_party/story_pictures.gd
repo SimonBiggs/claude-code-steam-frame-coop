@@ -4,7 +4,8 @@ extends RefCounted
 ## pic._circle(x, y, r, c) / pic._poly(pts, c) / pic._eye(x, y, r), t = the picture's clock, bob = its gentle
 ## bob, color = the card's colour. GUS the gopher looks after the garden course.
 
-const NAMES: Array[String] = ["gopher", "golfball", "golfflag", "trophy", "gnome"]
+const NAMES: Array[String] = ["gopher", "golfball", "golfflag", "trophy", "gnome", "magnetcup", "longputter", "rainbowball",
+	"giantcup", "scarecrow", "treehouse"]
 
 const FUR := Color(0.72, 0.5, 0.3)
 const BELLY := Color(0.95, 0.82, 0.62)
@@ -66,3 +67,62 @@ static func draw(pic, kind: String, t: float, bob: float, color: Color) -> void:
 			pic._eye(0.55, 0.43 + bob, 0.025)
 			pic._circle(0.5, 0.49 + bob, 0.03, Color(1.0, 0.6, 0.6))
 			pic._poly([[0.36, 0.38 + bob], [0.64, 0.38 + bob], [0.5, 0.06 + bob]], color)  # hat
+		"magnetcup":  # a red horseshoe magnet pulling a ball into the cup
+			var pull := sin(t * 4.0) * 0.03
+			pic._circle(0.5, 0.86, 0.3, Color(0.3, 0.8, 0.4))
+			pic._circle(0.5, 0.84, 0.1, Color(0.1, 0.12, 0.1))
+			pic._poly([[0.28, 0.12 + bob], [0.42, 0.12 + bob], [0.42, 0.42 + bob], [0.58, 0.42 + bob], [0.58, 0.12 + bob],
+				[0.72, 0.12 + bob], [0.72, 0.5 + bob], [0.28, 0.5 + bob]], color)
+			pic._poly([[0.28, 0.12 + bob], [0.42, 0.12 + bob], [0.42, 0.2 + bob], [0.28, 0.2 + bob]], Color(0.9, 0.9, 0.95))
+			pic._poly([[0.58, 0.12 + bob], [0.72, 0.12 + bob], [0.72, 0.2 + bob], [0.58, 0.2 + bob]], Color(0.9, 0.9, 0.95))
+			pic._circle(0.32 + pull, 0.74, 0.06, Color.WHITE)
+			pic._circle(0.2, 0.66, 0.015, Color(1, 1, 1, 0.7))
+			pic._circle(0.24, 0.6, 0.012, Color(1, 1, 1, 0.5))
+		"longputter":  # a very long golf club and a dotted line to the cup
+			pic._poly([[0.1, 0.8], [0.9, 0.8], [0.9, 0.88], [0.1, 0.88]], Color(0.3, 0.8, 0.4))
+			pic._circle(0.84, 0.82, 0.06, Color(0.1, 0.12, 0.1))
+			pic._poly([[0.12, 0.06 + bob], [0.16, 0.06 + bob], [0.3, 0.72], [0.26, 0.72]], Color(0.85, 0.87, 0.9))
+			pic._poly([[0.2, 0.7], [0.36, 0.7], [0.36, 0.78], [0.2, 0.78]], color)
+			pic._circle(0.42, 0.74, 0.04, Color.WHITE)
+			for k in 5:
+				var f := fmod(t * 0.5 + k * 0.2, 1.0)
+				pic._circle(0.48 + f * 0.34, 0.76 + f * 0.04, 0.015, color.lightened(0.4))
+		"rainbowball":  # a ball rolling with a rainbow trail behind it
+			var cols: Array = [Color(1, 0.3, 0.3), Color(1, 0.7, 0.2), Color(1, 0.95, 0.3), Color(0.3, 0.85, 0.4), Color(0.35, 0.6, 1)]
+			for c in cols.size():
+				var y := 0.42 + c * 0.05
+				pic._poly([[0.08, y + bob], [0.56, y + bob], [0.56, y + 0.05 + bob], [0.08, y + 0.05 + bob]], cols[c])
+			pic._circle(0.66, 0.52 + bob, 0.16, Color.WHITE)
+			pic._circle(0.61, 0.47 + bob, 0.035, Color(1, 1, 1, 0.8))
+			pic._circle(0.7, 0.56 + bob, 0.02, Color(0.8, 0.8, 0.85))
+			pic._circle(0.64, 0.6 + bob, 0.02, Color(0.8, 0.8, 0.85))
+		"giantcup":  # a huge cup with a tiny flag and a ball dropping in
+			pic._circle(0.5, 0.78, 0.42, Color(0.3, 0.8, 0.4))
+			pic._circle(0.5, 0.74, 0.28, Color.WHITE)
+			pic._circle(0.5, 0.74, 0.25, Color(0.1, 0.12, 0.1))
+			pic._poly([[0.7, 0.74], [0.73, 0.74], [0.73, 0.18], [0.7, 0.18]], Color.WHITE)
+			pic._poly([[0.73, 0.18], [0.9, 0.24], [0.73, 0.3]], color)
+			var drop := fmod(t * 0.6, 1.0)
+			pic._circle(0.45, 0.2 + drop * 0.5, 0.05, Color.WHITE)
+		"scarecrow":  # a friendly scarecrow with a straw hat
+			pic._poly([[0.48, 0.3], [0.52, 0.3], [0.52, 0.95], [0.48, 0.95]], Color(0.55, 0.38, 0.2))
+			pic._poly([[0.15, 0.45 + bob], [0.85, 0.45 + bob], [0.85, 0.5 + bob], [0.15, 0.5 + bob]], Color(0.55, 0.38, 0.2))
+			pic._poly([[0.36, 0.42 + bob], [0.64, 0.42 + bob], [0.62, 0.72 + bob], [0.38, 0.72 + bob]], color)
+			pic._circle(0.5, 0.3 + bob, 0.12, Color(0.95, 0.85, 0.6))
+			pic._eye(0.46, 0.28 + bob, 0.02)
+			pic._eye(0.54, 0.28 + bob, 0.02)
+			pic._circle(0.5, 0.33 + bob, 0.02, Color(1.0, 0.5, 0.1))
+			pic._poly([[0.28, 0.2 + bob], [0.72, 0.2 + bob], [0.72, 0.23 + bob], [0.28, 0.23 + bob]], Color(0.9, 0.75, 0.3))
+			pic._poly([[0.38, 0.2 + bob], [0.62, 0.2 + bob], [0.56, 0.08 + bob], [0.44, 0.08 + bob]], Color(0.9, 0.75, 0.3))
+			pic._circle(0.15, 0.47 + bob, 0.04, Color(0.95, 0.85, 0.4))
+			pic._circle(0.85, 0.47 + bob, 0.04, Color(0.95, 0.85, 0.4))
+		"treehouse":  # a little house up a big tree, with a ladder
+			pic._poly([[0.44, 0.5], [0.56, 0.5], [0.58, 0.95], [0.42, 0.95]], Color(0.5, 0.33, 0.18))
+			pic._circle(0.5, 0.3 + bob * 0.5, 0.3, Color(0.3, 0.65, 0.3))
+			pic._circle(0.3, 0.38 + bob * 0.5, 0.16, Color(0.35, 0.7, 0.35))
+			pic._circle(0.7, 0.38 + bob * 0.5, 0.16, Color(0.35, 0.7, 0.35))
+			pic._poly([[0.36, 0.4], [0.64, 0.4], [0.64, 0.6], [0.36, 0.6]], Color(0.85, 0.6, 0.35))
+			pic._poly([[0.32, 0.4], [0.68, 0.4], [0.5, 0.26]], color)
+			pic._poly([[0.46, 0.46], [0.54, 0.46], [0.54, 0.54], [0.46, 0.54]], Color(0.4, 0.75, 1.0))
+			for k in 4:
+				pic._poly([[0.62, 0.66 + k * 0.08], [0.74, 0.66 + k * 0.08], [0.74, 0.68 + k * 0.08], [0.62, 0.68 + k * 0.08]], Color(0.6, 0.4, 0.22))

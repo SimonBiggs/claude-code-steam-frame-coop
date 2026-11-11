@@ -20,6 +20,12 @@ extends Node3D
 ## garden. Gus pops out of his molehill by the board and cheers every sink; picture cards (story_pictures.gd)
 ## tell the story. Telemetry: one RUN line per course (and on quit). Networked: the host sends
 ## [course seed, hole, level, try] ("hdesc") and [days, stars] ("garden"); every machine rebuilds the same hole.
+## SECOND PASS (deep.gd): GENTLE / BRAVE / HARD picked once a session and GUS'S GIFTS after every course's practice putt
+## (bouncy ball, magnet cup, long putter, rainbow ball, giant cup), both on the PICK GREEN (picks.gd: putt onto a pad
+## under an orb, or reach into one in VR); warned GUSTS and a MOLE that pops up (hazards.gd, steady warn rings first);
+## seasonal gardens (season.gd); GUS'S GARDEN CORNER grows a piece every few gold stars (corner.gd). Networked: hdesc
+## grows [.., gift, mode(, "pick")], the "deep" state is [mode, gift, season], the snapshot carries the surprise showing
+## now, and the sticky "orbs" / "take" events show the picks (all machines update together).
 
 const NetScript := preload("res://core/net.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
@@ -45,6 +51,13 @@ const Gus := preload("res://games/mini_golf_party/gus.gd")
 const Seeded := preload("res://core/seeded.gd")
 const Telemetry := preload("res://core/telemetry.gd")
 const StoryCard := preload("res://core/story_card.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
+const Deep := preload("res://games/mini_golf_party/deep.gd")
+const PicksScript := preload("res://games/mini_golf_party/picks.gd")
+const HazardsScript := preload("res://games/mini_golf_party/hazards.gd")
+const SeasonScript := preload("res://games/mini_golf_party/season.gd")
+const CornerScript := preload("res://games/mini_golf_party/corner.gd")
+const GUS_COLOR := Color(0.25, 0.7, 0.4)
 
 const GAME_ID := "mini_golf_party"
 const MAX_STROKES := 6
@@ -116,6 +129,31 @@ var course_running := false
 var greeted := false
 var story_queue: Array = []
 var story_t := 0.0
+# Second pass (deep.gd): modes and Gus's gifts on the pick green, warned surprises, seasons, the garden corner.
+var lawn: MeshInstance3D
+var picks: Node  # picks.gd
+var hazards: Node3D  # hazards.gd
+var season_node: Node3D  # season.gd
+var corner: Node3D  # corner.gd
+var mode := "brave"
+var mode_picked := false
+var gift := ""  # this course's gift ("" none: the practice putt, or not picked yet)
+var gift_for := -1  # the course number the gift was picked for
+var course_no := 0  # courses started this session
+var season := ""
+var pick_next := 0  # host: the hole after the pick
+var hz_list: Array = []  # host: this hole's surprises (deep.gd hazards)
+var hz_pack: Array = []  # host: the one showing now (deep.gd pack)
+var hz_key := ""  # every machine: which surprise (changes per surprise)
+var hz_now := {}  # every machine: the surprise showing now (deep.gd unpack)
+var hz_said := {}  # kinds told by a story card this session
+var hz_counts := {}  # kind -> surprises that happened this course (telemetry)
+var hz_blocked := 0  # moles that stayed down (a ball resting on his spot)
+var intro_card: Node  # the VR "PUTT IT IN!" banner (cleared when a pick starts)
+var hole_banner: Control
+var guides := {}  # slot -> Node3D: LONG PUTTER dots
+var guide_t := {}
+var guide_ball: Ball  # (a ball not in the tree: the dots' roll)
 
 
 func _ready() -> void:
@@ -127,6 +165,7 @@ func _ready() -> void:
 	net.main = self
 	add_child(net)
 	net.state_changed.connect(_on_state_changed)
+	net.sticky_event("orbs")  # a machine joining mid-pick sees the orbs (picks.gd)
 	party = Party.new()
 	party.name = "Party"
 	add_child(party)
@@ -137,7 +176,7 @@ func _ready() -> void:
 	# days: play-days; last_day: the last one; daily: the date TODAY'S COURSE was played; stars_total: every gold
 	# star ever (the garden's flowers); level: the course level reached (more play-days, bendier holes).
 	save.defaults = {"best_stars": 0, "days": 0, "last_day": "", "daily": "", "daily_done": "", "courses": 0, "stars_total": 0,
-		"holes_in_one": 0, "level": 1}
+		"holes_in_one": 0, "level": 1, "mode": "", "last_gift": ""}
 	add_child(save)
 	sfx = SfxScript.new()
 	add_child(sfx)
@@ -148,6 +187,12 @@ func _ready() -> void:
 	music.prepare(["victory"])
 	awards = Awards.new()
 	awards.define("stars", "STAR GOLFER", "%s gold stars", "stars")
+	picks = PicksScript.new()
+	picks.main = self
+	add_child(picks)
+	if OS.has_environment("MGP_MODE"):  # (What's New / debug: skip the mode pick)
+		mode = Deep.mode_of(OS.get_environment("MGP_MODE"))
+		mode_picked = true
 	if OS.has_environment("DUO_JOIN"):
 		net.join_finished.connect(func(ok: bool) -> void: _setup("client" if ok else "local"))
 		net.join(OS.get_environment("DUO_JOIN"))
@@ -191,8 +236,8 @@ func _setup(mode: String) -> void:
 		_start_course()
 	elif net.state_has("hdesc"):
 		_build_from_desc(net.state_get("hdesc"))
-	if vr_rig != null:
-		HudKit.vr_banner(self, vr_rig.camera, "PUTT IT IN!", "", {"duration": 3.0})
+	if vr_rig != null and not picks.active():  # (a pick on first: Gus's card says what to do, never a banner over the orbs)
+		intro_card = HudKit.vr_banner(self, vr_rig.camera, "PUTT IT IN!", "", {"duration": 3.0})
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	ready_to_play = true
 	print("Mini Golf Party: %s mode%s" % [mode, " with a VR golfer" if vr_rig != null else ""])
@@ -202,7 +247,7 @@ func _setup(mode: String) -> void:
 
 func _build_world(vr: bool) -> void:
 	sky = SkyKit.apply(self, "day", vr)
-	var lawn := MeshInstance3D.new()
+	lawn = MeshInstance3D.new()
 	var disc := CylinderMesh.new()
 	disc.top_radius = 22.0
 	disc.bottom_radius = 22.0
@@ -227,6 +272,16 @@ func _build_world(vr: bool) -> void:
 	add_child(props)
 	board = Node3D.new()
 	add_child(board)
+	hazards = HazardsScript.new()
+	hazards.main = self
+	add_child(hazards)
+	season_node = SeasonScript.new()
+	season_node.name = "Season"
+	add_child(season_node)
+	corner = CornerScript.new()
+	corner.name = "GardenCorner"
+	corner.main = self
+	add_child(corner)
 
 
 func _make_fade() -> void:
@@ -273,30 +328,51 @@ func _start_course() -> void:
 	if OS.has_environment("MGP_HOLE") and not has_meta("started"):
 		first = clampi(int(OS.get_environment("MGP_HOLE")) - 1, 0, Course.HOLES - 1)  # debug: start at hole N
 	set_meta("started", true)
-	_go_hole(first)
+	if not mode_picked:
+		_start_pick("mode", first)  # GENTLE / BRAVE / HARD once a session, on the pick green
+	else:
+		_go_hole(first)
 
 
 func _go_hole(i: int) -> void:
 	hole_t = 0.0
-	var d := HoleGen.hole(course_seed, i, course_level)
+	var md := mode
+	var gd := gift
+	var d := HoleGen.hole(course_seed, i, course_level, func(h: Dictionary) -> bool: return Deep.sinkable(h, md, gd))
 	hole_log_from = sink_log.size()
 	net.state_set("phase", "play")
 	net.state_set("hole", i)
-	net.state_set("hdesc", [course_seed, i, course_level, int(d["try"])])  # the TV machine rebuilds it from this
-	_build_hole(d)
+	net.state_set("hdesc", [course_seed, i, course_level, int(d["try"]), gift, mode])  # the TV machine rebuilds it from this
+	_build_hole(d, Deep.knobs(mode, gift, d))
+	var spec := {"mode": mode, "season": season, "gift": gift}
+	if OS.has_environment("MGP_HAZARD_NOW"):  # bots / What's New: surprises from hole 2, soon after it starts
+		spec["from"] = 1
+		spec["first_t"] = 2.0
+	hz_list = Deep.hazards(d, spec)
+	_set_hazard({}, "", 0.0, -1)
+	if not hz_list.is_empty():
+		print("Surprises on hole %d: %s" % [i + 1, str(hz_list.map(func(e: Dictionary) -> String: return "%s@%.0fs" % [e.kind, float(e.t)]))])
 
 
-## TV machine: rebuild the host's hole from [course seed, hole, level, try] (no re-checking: the same hole).
+## TV machine: rebuild the host's hole from [course seed, hole, level, try, gift, mode(, "pick")] (no re-checking).
 func _build_from_desc(v: Variant) -> void:
 	if not (v is Array) or (v as Array).size() < 4:
 		return
-	_build_hole(HoleGen.hole_try(int(v[0]), int(v[1]), int(v[2]), int(v[3])))
+	var a: Array = v
+	var g := String(a[4]) if a.size() > 4 else ""
+	var m := String(a[5]) if a.size() > 5 else "brave"
+	if a.size() > 6 and String(a[6]) == "pick":
+		var pg := Deep.pick_green()
+		_build_hole(pg, Deep.knobs(m, "", pg))
+		return
+	var d := HoleGen.hole_try(int(a[0]), int(a[1]), int(a[2]), int(a[3]))
+	_build_hole(d, Deep.knobs(m, g, d))
 
 
-func _build_hole(d: Dictionary) -> void:
+func _build_hole(d: Dictionary, knobs: Dictionary = {}) -> void:
 	hole_def = d
 	var i := int(d["index"])
-	course.build(d)
+	course.build(d, knobs)
 	props.move_to(Vector3(course.tee.x, 0.0, course.tee.y))
 	var gp := HoleGen.gus_pos(d)
 	gus.position = Vector3(gp.x, 0.0, gp.y)
@@ -324,7 +400,7 @@ func _build_hole(d: Dictionary) -> void:
 	if split != null:
 		_frame_camera()
 		if i > 0:
-			HudKit.banner([hud], "HOLE %d" % (i + 1), "", {"duration": 1.6})
+			hole_banner = HudKit.banner([hud], "HOLE %d" % (i + 1), "", {"duration": 1.6})
 	vr_idle = 0.0
 
 
@@ -363,6 +439,7 @@ func _ensure_ball(slot: int) -> Ball:
 	var b := Ball.new()
 	b.slot = slot
 	b.color = Party.COLORS[slot % Party.COLORS.size()]
+	b.rainbow = gift == "rainbow"
 	b.course = course
 	if net.mode == "client":
 		b.set_meta("mirror", true)
@@ -410,8 +487,13 @@ func _on_player_left(slot: int) -> void:
 
 # --- Putting (host / local) -----------------------------------------------------------------
 
+## Can balls be putted now (a hole, or the pick green)?
+func putting() -> bool:
+	return String(net.state_get("phase", "play")) in ["play", "pick"]
+
+
 func do_putt(slot: int, v: Vector2) -> void:
-	if not balls.has(slot) or String(net.state_get("phase", "play")) != "play":
+	if not balls.has(slot) or not putting():
 		return
 	var b: Ball = balls[slot]
 	if not b.resting():
@@ -438,7 +520,7 @@ func _sink(slot: int, b: Ball) -> void:
 	sink_log.append([hole, slot, b.strokes, mark, course.par])
 	if mark >= 2:
 		awards.add(slot, "stars")
-		save.data["stars_total"] = int(save.data["stars_total"]) + 1
+		save.data["stars_total"] = int(save.data["stars_total"]) + Deep.stars_for(gift)  # (RAINBOW BALL: two flowers)
 		save.mark_dirty()
 		_send_garden()
 	if mark == 3:
@@ -451,9 +533,29 @@ func _sink(slot: int, b: Ball) -> void:
 ## Every machine: confetti, a cheer, the duck hops, the flag waves.
 func celebrate(slot: int, p: Vector3, mark: int) -> void:
 	var col: Color = Party.COLORS[slot % Party.COLORS.size()]
+	celebrate_fx(p, col, 40 if mark >= 2 else 24)
+	sfx.play("swish", 0.0)
+	sfx.play("cheer" if mark >= 2 else "applause", -3.0)
+	if mark == 3:
+		sfx.play("fanfare", -2.0)
+		HudKit.popup(self, p + Vector3.UP * 0.6, "HOLE IN ONE!", {"style": "score", "color": col, "size": 1.4})
+	elif mark == 2:
+		HudKit.popup(self, p + Vector3.UP * 0.5, "*", {"style": "score", "color": "gold", "size": 1.6})
+	props.cheer()
+	if gus != null:
+		gus.cheer()
+	course.flag_wave = 1.2
+	if vr_rig != null and slot == 0:
+		vr_rig.pulse(VrRig.RIGHT, 0.7, 0.15)
+	if net.mode == "host":
+		net.event("sink", [slot, p, mark])
+
+
+## Every machine: a burst of confetti in `col` at p.
+func celebrate_fx(p: Vector3, col: Color, amount: int = 30) -> void:
 	var cp := CPUParticles3D.new()
 	cp.one_shot = true
-	cp.amount = 40 if mark >= 2 else 24
+	cp.amount = amount
 	cp.lifetime = 1.2
 	cp.explosiveness = 0.95
 	cp.direction = Vector3.UP
@@ -474,21 +576,6 @@ func celebrate(slot: int, p: Vector3, mark: int) -> void:
 	cp.position = p
 	cp.emitting = true
 	get_tree().create_timer(1.6).timeout.connect(cp.queue_free)
-	sfx.play("swish", 0.0)
-	sfx.play("cheer" if mark >= 2 else "applause", -3.0)
-	if mark == 3:
-		sfx.play("fanfare", -2.0)
-		HudKit.popup(self, p + Vector3.UP * 0.6, "HOLE IN ONE!", {"style": "score", "color": col, "size": 1.4})
-	elif mark == 2:
-		HudKit.popup(self, p + Vector3.UP * 0.5, "*", {"style": "score", "color": "gold", "size": 1.6})
-	props.cheer()
-	if gus != null:
-		gus.cheer()
-	course.flag_wave = 1.2
-	if vr_rig != null and slot == 0:
-		vr_rig.pulse(VrRig.RIGHT, 0.7, 0.15)
-	if net.mode == "host":
-		net.event("sink", [slot, p, mark])
 
 
 func _sound_at(n: String, p: Vector3, db: float = 0.0, pitch: float = 1.0) -> void:
@@ -540,13 +627,27 @@ func _physics_process(delta: float) -> void:
 		b.events.clear()
 	if phase == "play":
 		hole_t += delta
+		_update_hazards()
 		_hole_rules()
+	else:
+		_set_hazard({}, "", 0.0, -1)
+	if phase == "pick":
+		picks.tick(delta)
+		if picks.can_take():
+			for s in balls:
+				var b: Ball = balls[s]
+				var pi: int = picks.pad_hit(b.pos) if b.state in ["rest", "roll"] else -1
+				if pi >= 0:
+					picks.take(pi, int(s))  # putted onto a pad
+					break
 	elif phase == "cheer":
 		phase_t += delta
 		if phase_t > 3.0:
 			var h := int(net.state_get("hole", 0))
 			if h + 1 >= Course.HOLES:
 				_end_course()
+			elif h + 1 == Deep.GIFT_HOLE and gift_for != course_no:
+				_start_pick("gift", h + 1)  # Gus's gift after the practice putt
 			else:
 				_go_hole(h + 1)
 	elif phase == "results":
@@ -617,13 +718,21 @@ func _vr_golfer(delta: float) -> void:
 	var b: Ball = balls[0]
 	var to := course.aim_point(b.pos) - b.pos
 	var fwd := Vector3(to.x, 0.0, to.y).normalized() if to.length() > 0.01 else Vector3.FORWARD
+	if course.pick:  # the pick green: the little aim help points at the pad the swing is nearest to
+		var hv0 := Vector2(putter.head_vel.x, putter.head_vel.z)
+		var best := INF
+		for pd in hole_def.get("pads", []):
+			var a0 := absf(hv0.angle_to((pd as Vector2) - b.pos)) if hv0.length() > 0.05 else 0.0
+			if a0 < best:
+				best = a0
+				to = (pd as Vector2) - b.pos
 	if vr_rig.a_pressed() and b.state in ["rest", "roll"]:
 		var feet := b.position - fwd * 0.5 + Vector3(-fwd.z, 0.0, fwd.x) * 0.2
 		feet.y = 0.0
 		vr_rig.place(feet, atan2(-fwd.x, -fwd.z))
 		blink()
 		sfx.play("teleport", -10.0)
-	var playing := String(net.state_get("phase", "play")) == "play"
+	var playing := putting()
 	if b.resting() and playing and not holding:
 		vr_idle += delta
 		var head := putter.head_pos
@@ -685,6 +794,8 @@ func _process(delta: float) -> void:
 		return
 	_tv_input(delta)
 	_update_story(delta)
+	if hazards != null:
+		hazards.show_now(hz_now, hz_key)  # every machine: the surprise's tell (steady rings), the gust, the mole
 	if net.mode != "client" and course_running:
 		course_t += delta
 	_update_arrows()
@@ -695,7 +806,7 @@ func _process(delta: float) -> void:
 		for s in party.local_slots():
 			if not putted.has(s):
 				need = true
-		prompt.visible = need and String(net.state_get("phase", "play")) == "play"
+		prompt.visible = need and putting()
 	if join_prompt != null:
 		join_prompt.visible = party.local_slots().is_empty()
 
@@ -705,7 +816,7 @@ func _tv_input(delta: float) -> void:
 	var send := send_t <= 0.0
 	if send:
 		send_t = 1.0 / 30.0
-	var playing := String(net.state_get("phase", "play")) == "play"
+	var playing := putting()
 	for slot in party.local_slots():
 		if not balls.has(slot):
 			continue
@@ -741,7 +852,7 @@ func _update_arrows() -> void:
 	for slot in party.local_slots():
 		if balls.has(slot) and aim.has(slot):
 			var resting: bool = rest_flags.get(slot, false) if net.mode == "client" else (balls[slot] as Ball).resting()
-			if resting and float(sent_t.get(slot, 0.0)) <= 0.0 and String(net.state_get("phase", "play")) == "play":
+			if resting and float(sent_t.get(slot, 0.0)) <= 0.0 and putting():
 				show[slot] = Vector2(float(aim[slot]), float(power.get(slot, 0.0)))
 	if net.mode == "host":
 		for slot in remote_aim:
@@ -763,6 +874,7 @@ func _update_arrows() -> void:
 		a.scale = Vector3(1.0 + ap.y * 0.6, 1.0, len)
 		var m: StandardMaterial3D = a.get_meta("mat")
 		m.emission_energy_multiplier = 0.4 + ap.y * 2.5 + (0.3 * sin(Time.get_ticks_msec() * 0.008) if ap.y == 0.0 else 0.0)
+	_update_guides(show)
 
 
 ## Every ball carries its player's name (P3...) in their colour, a fixed size on screen and drawn through
@@ -811,8 +923,8 @@ func _make_tag(slot: int, mine: bool) -> Label3D:
 ## player's ball and the stretch ahead of it (same direction as the whole-hole view, so the stick still
 ## points the same way on screen). -1 everywhere else (the TV keeps the whole hole).
 func _deck_follow_slot() -> int:
-	if split == null or net.machine_kind != "deck":
-		return -1
+	if split == null or net.machine_kind != "deck" or String(net.state_get("phase", "play")) == "pick":
+		return -1  # (the pick green is small: the whole of it, every orb)
 	var mine := party.local_slots()
 	if mine.size() != 1 or not balls.has(mine[0]):
 		return -1
@@ -968,6 +1080,11 @@ func _on_state_changed(key: String, value: Variant) -> void:
 				_build_from_desc(value)
 		"garden":
 			_build_garden()
+			var gv: Variant = value
+			if corner != null and gv is Array and (gv as Array).size() >= 2:
+				corner.set_pieces(Deep.corner(int(gv[1])), true)
+		"deep":
+			_apply_deep(value)
 		"card":
 			_refresh_board()
 			_refresh_hud()
@@ -1045,7 +1162,7 @@ func make_snapshot() -> Array:
 	var club := PackedVector3Array()
 	if putter != null and putter.visible:
 		club = PackedVector3Array([vr_rig.hand_r.global_position, putter.head_pos])
-	return [pose, slots, pos, flags, course.mill_angle, props.spare_positions(), club]
+	return [pose, slots, pos, flags, course.mill_angle, props.spare_positions(), club, hz_pack, hz_key]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -1080,6 +1197,9 @@ func apply_snapshot(s: Array) -> void:
 	putter.visible = club.size() == 2
 	if club.size() == 2:
 		putter.draw(club[0], club[1])
+	if s.size() > 8:
+		hz_now = Deep.unpack(s[7])
+		hz_key = String(s[8])
 
 
 func apply_event(kind: String, args: Array) -> void:
@@ -1092,6 +1212,10 @@ func apply_event(kind: String, args: Array) -> void:
 			props.poke(String(args[0]))
 		"story":
 			_story(String(args[0]), String(args[1]), args[2])
+		"orbs":
+			picks.show_row(String(args[0]), args[1], args[2])
+		"take":
+			picks.take_fx(int(args[0]), int(args[1]))
 
 
 # --- Gus's garden course: seeds, growth, story, telemetry -------------------------------------------
@@ -1122,6 +1246,16 @@ func _new_course() -> void:
 	course_t = 0.0
 	hole_stats.clear()
 	course_running = true
+	course_no += 1
+	gift = ""
+	hz_counts = {}
+	if OS.has_environment("MGP_GIFT") and course_no == 1 and not Deep.gift(OS.get_environment("MGP_GIFT")).is_empty():
+		gift = OS.get_environment("MGP_GIFT")  # (What's New "try": the first course with that gift, no gift pick)
+		gift_for = course_no
+	season = OS.get_environment("MGP_SEASON") if Deep.SEASONS.has(OS.get_environment("MGP_SEASON")) else Seeded.season(today)
+	if not mode_picked and String(save.data["mode"]) != "":
+		mode = Deep.mode_of(String(save.data["mode"]))
+	_send_deep()
 	net.state_set("course", [course_seed, course_level, course_daily])
 	_send_garden()
 	print("Mini Golf Party course: seed %d level %d%s | day %d, %d stars in the garden" % [course_seed, course_level,
@@ -1129,6 +1263,8 @@ func _new_course() -> void:
 	if not greeted:
 		greeted = true
 		_story_for_all("Hi! I'm Gus!", "gopher", Color(0.25, 0.7, 0.4))
+		var sd := Deep.season_data(season)
+		_story_for_all(String(sd.line), String(sd.pic), sd.drift)
 	if course_daily:
 		_story_for_all("TODAY'S COURSE!", "golfflag", Color(1.0, 0.8, 0.2))
 	if level_up:
@@ -1152,16 +1288,29 @@ func _log_course(end: String, stars: int) -> void:
 	Telemetry.run(GAME_ID, {"end": end, "seed": course_seed, "level": course_level, "daily": course_daily,
 		"holes": hole_stats.duplicate(true), "secs": snappedf(course_t, 0.1), "stars": stars, "players": balls.size(),
 		"vr": vr_rig != null, "net": net.mode, "machines": net.peer_count() + 1,
-		"days": int(save.data["days"]), "stars_total": int(save.data["stars_total"]), "courses": int(save.data["courses"])})
+		"days": int(save.data["days"]), "stars_total": int(save.data["stars_total"]), "courses": int(save.data["courses"]),
+		"mode": mode, "gift": gift, "season": season, "surprises": hz_counts.duplicate(), "moles_down": hz_blocked,
+		"corner": Deep.corner(int(save.data["stars_total"])), "picks": picks.history.size() if picks != null else 0})
 
 
 func _exit_tree() -> void:
 	if save != null and net != null and net.mode != "client" and course_running and not hole_stats.is_empty():
 		_log_course("quit", 0)
+	if guide_ball != null:
+		guide_ball.free()
+		guide_ball = null
 
 
 func _send_garden() -> void:
+	if OS.has_environment("MGP_STARS"):  # debug / screenshots: pretend this many gold stars (the garden corner)
+		save.data["stars_total"] = maxi(int(save.data["stars_total"]), int(OS.get_environment("MGP_STARS")))
+	var old: Variant = net.state_get("garden", [])
+	var before := Deep.corner(int(old[1])) if old is Array and (old as Array).size() >= 2 else -1
 	net.state_set("garden", [int(save.data["days"]), int(save.data["stars_total"])])
+	var now_pieces := Deep.corner(int(save.data["stars_total"]))
+	if before >= 0 and now_pieces > before:
+		var kind: String = Deep.CORNER[now_pieces - 1]
+		_story_for_all("My garden grew!", String(Deep.CORNER_PICS[kind]), Color(0.4, 0.85, 0.4))
 
 
 ## Every machine: Gus's garden round this hole (rebuilt when the hole or the garden changes).
@@ -1204,3 +1353,220 @@ func _update_story(delta: float) -> void:
 		StoryCard.show([hud], opts)
 	if vr_rig != null:
 		StoryCard.show_vr(self, vr_rig.camera, opts)
+
+
+# --- Second pass: picks, surprises, seasons, gifts (deep.gd) -----------------------------------------------------
+
+## Host: the mode, gift and season to every machine (the "deep" state; late joiners get it too).
+func _send_deep() -> void:
+	net.state_set("deep", [mode, gift, season])
+
+
+## Every machine: the mode, this course's gift and the season.
+func _apply_deep(v: Variant) -> void:
+	if not (v is Array) or (v as Array).size() < 3:
+		return
+	mode = Deep.mode_of(String(v[0]))
+	gift = String(v[1])
+	season = String(v[2])
+	if season_node != null and season != "":
+		season_node.set_season(season, lawn)
+	if putter != null:
+		putter.max_reach = Deep.LONG_REACH if gift == "long" else Putter.MAX_REACH
+	for s in balls:
+		(balls[s] as Ball).rainbow = gift == "rainbow"
+
+
+## Only one golfer (a lone Deck, a solo VR host): the pick ends a bit sooner.
+func pick_solo() -> bool:
+	return _ball_slots().size() <= 1
+
+
+## Host / local: the pick green with three orbs; `next` is the hole after it.
+func _start_pick(stage: String, next: int) -> void:
+	var entries: Array = []
+	var opts: Array = []
+	if stage == "mode":
+		opts = PickOrbs.mode_ids(Deep.mode_of(String(save.data["mode"])) if String(save.data["mode"]) != "" else "brave")
+		for id in opts:
+			var md := PickOrbs.mode(String(id))
+			entries.append({"id": id, "name": md.name, "pic": md.pic, "color": md.color})
+		_story_for_all("Easy or tricky?", "gopher", GUS_COLOR)
+	else:
+		opts = Deep.gift_choices(Deep.corner(int(save.data["stars_total"])), String(save.data["last_gift"]),
+			Seeded.derive(course_seed, "gift%d" % course_no))
+		for id in opts:
+			var gd := Deep.gift(String(id))
+			entries.append({"id": id, "name": gd.name, "pic": gd.pic, "color": gd.color})
+		_story_for_all("A gift for you!", "gift", GUS_COLOR)
+	pick_next = next
+	_clear_banners()
+	_set_hazard({}, "", 0.0, -1)
+	var d := Deep.pick_green()
+	net.state_set("phase", "pick")
+	net.state_set("hdesc", [course_seed, -1, course_level, 0, gift, mode, "pick"])
+	_build_hole(d, Deep.knobs(mode, "", d))
+	picks.begin(stage, d, entries, opts, _on_picked)
+
+
+## Host / local: everyone's choice (or the middle one for them).
+func _on_picked(stage: String, opt: Variant, _slot: int) -> void:
+	if stage == "mode":
+		mode_picked = true
+		mode = Deep.mode_of(String(opt))
+		save.data["mode"] = mode
+		_story_for_all(String(PickOrbs.MODE_LINES.get(mode, "Let's go!")), String(PickOrbs.mode(mode).pic), PickOrbs.mode_color(mode))
+	else:
+		gift = String(opt)
+		gift_for = course_no
+		save.data["last_gift"] = gift
+		var gd := Deep.gift(gift)
+		_story_for_all(String(gd.line), String(gd.pic), gd.color)
+	save.mark_dirty()
+	_send_deep()
+	print("Picked %s: %s" % [stage, str(opt)])
+	_go_hole(pick_next)
+
+
+## The last hole's banner and the VR hello never sit over the pick orbs.
+func _clear_banners() -> void:
+	if hole_banner != null and is_instance_valid(hole_banner):
+		hole_banner.queue_free()
+	hole_banner = null
+	if intro_card != null and is_instance_valid(intro_card):
+		intro_card.queue_free()
+	intro_card = null
+
+
+## Host, every frame of a hole: the surprise showing now (told for `warn` seconds, then on for `dur`), what it does to
+## the balls (course.gd gust / moles) and the snapshot's copy for every machine.
+func _update_hazards() -> void:
+	for k in hz_list.size():
+		var e: Dictionary = hz_list[k]
+		var t1 := float(e.t) + float(e.warn)
+		var t2 := t1 + float(e.dur)
+		if hole_t < float(e.t) or hole_t >= t2 or bool(e.get("down", false)):
+			continue
+		var ph := "warn" if hole_t < t1 else "on"
+		if ph == "on" and String(e.kind) == "mole" and not bool(e.get("up", false)):
+			for s in balls:  # he never pops up under a ball: he stays down this time
+				if (balls[s] as Ball).pos.distance_to(e.p) < float(e.r) + Course.BALL_R + 0.03:
+					e["down"] = true
+			if bool(e.get("down", false)):
+				hz_blocked += 1
+				continue
+			e["up"] = true
+		_set_hazard(e, ph, (t1 if ph == "warn" else t2) - hole_t, k)
+		return
+	_set_hazard({}, "", 0.0, -1)
+
+
+func _set_hazard(e: Dictionary, ph: String, left: float, k: int) -> void:
+	var was := String(hz_now.get("phase", ""))
+	var key := "%d/%d" % [int(net.state_get("hole", 0)), k] if k >= 0 else ""
+	if ph == "" or e.is_empty():
+		if hz_pack.is_empty() and course.gust.is_empty() and course.moles.is_empty():
+			return
+		hz_pack = []
+		hz_now = {}
+		hz_key = ""
+		course.gust = {}
+		course.moles = []
+		return
+	hz_pack = Deep.pack(e, ph, left)
+	hz_now = Deep.unpack(hz_pack)
+	var fresh := key != hz_key
+	hz_key = key
+	course.gust = {}
+	course.moles = []
+	if ph == "on":
+		course.apply(Deep.on_knobs(e))
+		if was != "on" or fresh:
+			hz_counts[String(e.kind)] = int(hz_counts.get(String(e.kind), 0)) + 1
+	elif fresh and not hz_said.has(String(e.kind)):
+		hz_said[String(e.kind)] = true
+		if String(e.kind) == "gust":
+			_story_for_all("Windy! Look!", "gust", Deep.GUST_COLOR)
+		else:
+			_story_for_all("A mole! Look!", "mole", Deep.MOLE_COLOR)
+
+
+## LONG PUTTER: dots on the green showing where each aiming putt will roll (this machine's players; the VR golfer
+## sees where a good putt to the aim point goes). Re-rolled ten times a second per player.
+func _update_guides(show: Dictionary) -> void:
+	var want := {}
+	if gift == "long" and putting() and not course.outline.is_empty():
+		for slot in show:
+			if party.is_local(int(slot)):
+				want[slot] = show[slot]
+		if vr_rig != null and balls.has(0) and (balls[0] as Ball).resting():
+			var b0: Ball = balls[0]
+			var to := course.aim_point(b0.pos)
+			want[0] = Vector2((to - b0.pos).angle(), -HoleGen.putt_speed(course, b0.pos, to))  # (negative: a speed)
+	for slot in guides.keys():
+		if not want.has(slot):
+			(guides[slot] as Node3D).visible = false
+	var dt := get_process_delta_time()
+	for slot in want:
+		var g := _guide(int(slot))
+		g.visible = true
+		guide_t[slot] = float(guide_t.get(slot, 0.0)) - dt
+		if float(guide_t[slot]) > 0.0:
+			continue
+		guide_t[slot] = 0.1
+		var ap: Vector2 = want[slot]
+		var b: Ball = balls[slot]
+		var speed := -ap.y if ap.y < 0.0 else 0.35 + ap.y * 3.6
+		var pts := _roll(Vector2(b.position.x, b.position.z), Vector2.from_angle(ap.x) * speed)
+		var dots := g.get_children()
+		for i in dots.size():
+			var d: Node3D = dots[i]
+			d.visible = i < pts.size()
+			if d.visible:
+				d.position = course.world(pts[i], -Course.BALL_R + 0.02)
+
+
+## Where a putt from p at v rolls (the game's own ball physics, sampled every 0.12 s for GUIDE_SECS).
+func _roll(p: Vector2, v: Vector2) -> Array:
+	if guide_ball == null:
+		guide_ball = Ball.new()
+	guide_ball.course = course
+	guide_ball.place(p)
+	guide_ball.putt(v)
+	var out: Array = []
+	var t := 0.0
+	var dt := 1.0 / 30.0
+	var next := 0.12
+	while t < Deep.GUIDE_SECS and guide_ball.state == "roll":
+		guide_ball.step(dt)
+		guide_ball.events.clear()
+		t += dt
+		if t >= next:
+			next += 0.12
+			out.append(guide_ball.pos)
+	return out
+
+
+func _guide(slot: int) -> Node3D:
+	if guides.has(slot):
+		return guides[slot]
+	var g := Node3D.new()
+	g.name = "Guide%d" % slot
+	var col: Color = Party.COLORS[slot % Party.COLORS.size()].lightened(0.35)
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.albedo_color = col
+	var sm := SphereMesh.new()
+	sm.radius = 0.018
+	sm.height = 0.036
+	sm.radial_segments = 8
+	sm.rings = 4
+	sm.material = m
+	for i in int(Deep.GUIDE_SECS / 0.12) + 1:
+		var d := MeshInstance3D.new()
+		d.mesh = sm
+		d.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		g.add_child(d)
+	add_child(g)
+	guides[slot] = g
+	return g
