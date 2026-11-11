@@ -72,8 +72,7 @@ const MAX_RUNNERS := 6  # TV players 2..7 (player indices 1..6)
 const TAG_LAYERS := 0x3F000  # SIMPLE_MODE: render layers 13..18 = runner 1..6's name tag
 const INTRO_TIME := 9.0
 const CLEAR_TIME := 9.0
-const PLAYER_COLORS: Array[Color] = [Color(1.0, 0.82, 0.25), Color(1.0, 0.45, 0.3), Color(0.3, 0.75, 1.0),
-	Color(0.45, 0.95, 0.4), Color(1.0, 0.5, 0.85), Color(0.7, 0.5, 1.0), Color(0.3, 0.95, 0.9)]
+const PLAYER_COLORS: Array[Color] = Art.PLAYER_COLORS  # (art.gd: palette.gd reads it)
 const SOUNDS := {
 	"star": [0.3, 880.0, 1760.0, 0.3, "tri", 0.0],
 	"gift": [0.5, 520.0, 1560.0, 0.35, "square", 0.05],

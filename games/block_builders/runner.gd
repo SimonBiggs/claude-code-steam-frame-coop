@@ -117,7 +117,7 @@ func _ready() -> void:
 	eyes.material_override = Art.mat(Color(0.08, 0.08, 0.12))
 	eyes.position = Vector3(0, 0.88, -0.19)
 	pivot.add_child(eyes)
-	var leg_mat := Art.mat(color.darkened(0.35))
+	var leg_mat := Art.mat(Art.runner_legs(color))
 	for side in [-1.0, 1.0]:
 		var leg := MeshInstance3D.new()
 		leg.mesh = Art.box(Vector3(0.12, 0.22, 0.14))

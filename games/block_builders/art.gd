@@ -7,6 +7,17 @@ const KIND_NAMES: Array[String] = ["PLANK", "STAIRS", "SPRING", "FAN", "CRATE", 
 const KIND_COLORS: Array[Color] = [Color(1.0, 0.66, 0.28), Color(0.3, 0.72, 1.0), Color(1.0, 0.36, 0.62), Color(0.66, 0.48, 1.0),
 	Color(0.8, 0.56, 0.32), Color(0.4, 0.95, 0.35), Color(1.0, 0.3, 0.22)]
 const MESH_VERSION := "v4"
+## Placed blocks wear the ink outline (course.gd add_block): the wooden plank vanished on the canyon / beach / autumn
+## grounds, the green speed pad on the meadow, the blue stairs on the rainbow (palette.gd).
+const BLOCK_OUTLINE := preload("res://core/contrast.gd").OUTLINE
+## The builder (P1) and the runners (main.gd).
+const PLAYER_COLORS: Array[Color] = [Color(1.0, 0.82, 0.25), Color(1.0, 0.45, 0.3), Color(0.3, 0.75, 1.0),
+	Color(0.45, 0.95, 0.4), Color(1.0, 0.5, 0.85), Color(0.7, 0.5, 1.0), Color(0.3, 0.95, 0.9)]
+
+
+## A runner's legs (runner.gd): its colour, darker (always seen under the body).
+static func runner_legs(c: Color) -> Color:
+	return c.darkened(0.35)
 ## Visual layer for things only the TV players should see (billboarded popups, name tags).
 const TV_LAYER := 8
 ## The builder's own head: hidden from the builder's camera.
