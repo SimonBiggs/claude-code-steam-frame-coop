@@ -164,5 +164,5 @@ func _init() -> void:
 			m.count, m.star, m.patience, m.interval, m.max_wait, m.raccoon, m.orders, m.mode, m.theme, m.events])
 	for d in Parties.DISHES:
 		print("dish %s time %s" % [d, Parties.dish_time(d)])
-	print("KR_ROUNDS: %d round lists checked, %d failures (%d ms)" % [total, fails, Time.get_ticks_msec() - t0])
+	print("KR_ROUNDS: %s - %d round lists checked, %d failures (%d ms)" % ["PASS" if fails == 0 else "FAIL", total, fails, Time.get_ticks_msec() - t0])
 	quit(1 if fails > 0 else 0)

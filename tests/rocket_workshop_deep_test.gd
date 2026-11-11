@@ -25,6 +25,7 @@ const P := preload("res://games/rocket_workshop/puzzles.gd")
 const PickOrbs := preload("res://core/pick_orbs.gd")
 const StoryCard := preload("res://core/story_card.gd")
 const Seeded := preload("res://core/seeded.gd")
+const TestTime := preload("res://tests/test_time.gd")
 
 var fails := 0
 
@@ -53,7 +54,7 @@ func _init() -> void:
 						var list := Deep.events(ms, spec)
 						var opts := Deep.puzzle_opts(mode, gid, n)
 						var rk := G.rocket(rseed, n, 2, true, 40, false, opts)
-						worst_ms = maxf(worst_ms, (Time.get_ticks_usec() - t1) / 1000.0)
+						worst_ms = TestTime.worst(worst_ms, (Time.get_ticks_usec() - t1) / 1000.0, func() -> Variant: return [Deep.events(Seeded.derive(rseed, "meteors"), spec), G.rocket(rseed, n, 2, true, 40, false, Deep.puzzle_opts(mode, gid, n))])
 						var tag := "%s %s %s rocket %d seed %d" % [mode, season, gid if gid != "" else "no gift", n, rseed]
 						for x in Deep.problems(list, spec):
 							_fail("%s: %s" % [tag, x])

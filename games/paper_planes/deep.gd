@@ -94,7 +94,7 @@ const TRAIL_R := 9.0
 ## The pick row: big orbs in an arc in the sky in front of the VR deck.
 const ROW_R := 10.2  # metres from the VR head (flat)
 const ROW_ANGLE := 0.52  # radians between orbs (seen from the VR deck)
-const ROW_Y := 2.8  # the middle orb's height (the outer ones dip a little): under the sky scoreboard and the VR story card
+const ROW_Y := 2.8  # the middle orb's height (the outer ones dip a little): under the sky scoreboard
 const ORB_SCALE := 2.2
 const CATCH := 0.35  # a plane this near an orb's edge takes it
 const ROW_WAIT := 14.0  # nobody took one: the middle after this (main.gd pick_time)

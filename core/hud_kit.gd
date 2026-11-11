@@ -1454,6 +1454,7 @@ class VrCard extends Node3D:
 	var body_size := 0.05
 	var panel_h := 0.0
 	var t := 0.0
+	var _aside_t := 0.0
 	var panel: MeshInstance3D
 	var title_l: Label3D
 	var body_l: Label3D
@@ -1500,6 +1501,8 @@ class VrCard extends Node3D:
 		title_l.position = Vector3(0, h * 0.5 - pad - th * 0.5, 0.004)
 		body_l.position = Vector3(0, -h * 0.5 + pad + bh * 0.5, 0.004)
 		panel_h = h
+		if t < 0.1 and cam != null and is_instance_valid(cam) and is_inside_tree():
+			UiKit.vr_place(self, cam, distance, height)  # now it has a size: placed clear of pick orbs (UiKit.vr_dodge)
 		_step_aside()
 
 	## Another panel already in this spot (a banner with a story card, a game's VR label): step up over it, so the
@@ -1541,6 +1544,12 @@ class VrCard extends Node3D:
 		t += delta
 		if follow and cam != null and is_instance_valid(cam):
 			UiKit.vr_follow(self, cam, distance, height, delta)
+		# A banner / label that shows up AFTER this card (NIGHT 2 over Granny Boo's card, Ghost Lantern 2026-11-11):
+		# step out of its way too, not only when the card first appears.
+		_aside_t += delta
+		if _aside_t >= 0.25 and not _hiding:
+			_aside_t = 0.0
+			_step_aside()
 		if duration > 0.0 and t > duration:
 			hide_card()
 

@@ -25,6 +25,7 @@ const Story := preload("res://games/paper_planes/story.gd")
 const PickOrbs := preload("res://core/pick_orbs.gd")
 const StoryCard := preload("res://core/story_card.gd")
 const Seeded := preload("res://core/seeded.gd")
+const TestTime := preload("res://tests/test_time.gd")
 
 ## main.gd PLACES (the valley's places; main.gd is never loaded by a test).
 const PLACES := [Vector3(-16.0, 0.0, -3.0), Vector3(16.0, 0.0, -6.0), Vector3(-14.5, 0.0, -17.0), Vector3(14.5, 0.0, -18.0),
@@ -53,7 +54,7 @@ func _init() -> void:
 					var t1 := Time.get_ticks_usec()
 					var es := Seeded.derive(fseed, "events")
 					var list := Deep.events(es, spec)
-					worst_ms = maxf(worst_ms, (Time.get_ticks_usec() - t1) / 1000.0)
+					worst_ms = TestTime.worst(worst_ms, (Time.get_ticks_usec() - t1) / 1000.0, func() -> Variant: return Deep.events(Seeded.derive(fseed, "events"), spec))
 					checked += 1
 					var tag := "%s %s %ds seed %d" % [mode, season, int(secs), fseed]
 					for x in Deep.problems(list, spec):

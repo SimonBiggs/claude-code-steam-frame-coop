@@ -9,12 +9,8 @@ const MeshKit := preload("res://core/mesh_kit.gd")
 
 const ROLL_DECEL := 0.9
 const DRAG := 0.22
-const WALL_BOUNCE := 0.7
-const BUMPER_BOUNCE := 1.15
 const STOP_SPEED := 0.06
-const CAPTURE_SPEED := 1.6
-const ASSIST_R := 0.3
-const ASSIST := 0.9
+## (wall / bumper bounce, the cup's pull and capture speed are course.gd knobs: a mode or a gift changes them)
 const LOOP_MIN := 2.2
 const MAX_SPEED := 4.4
 const MAX_ROLL := 14.0
@@ -36,6 +32,8 @@ var sink_t := 0.0
 ## Things that happened this tick (for sounds): ["wall", strength], ["bump"], ["loop"], ["cup"], ["back"]
 var events: Array = []
 
+var rainbow := false  # Gus's RAINBOW BALL gift: a rainbow trail while it rolls (every machine)
+var trail: CPUParticles3D
 var visual: Node3D
 var spin: MeshInstance3D
 var target := Vector3.ZERO  # TV machine: where the host says it is
@@ -108,14 +106,15 @@ func step(dt: float) -> void:
 	for _k in n:
 		var g := course.grad(pos)
 		vel -= g * 9.8 * (5.0 / 7.0) * h
+		vel += course.push(pos) * h  # a gust blowing now (deep.gd): only a rolling ball
 		var sp := vel.length()
 		if sp > 0.0:
 			vel = vel / sp * maxf(0.0, sp - (ROLL_DECEL + DRAG * sp) * h)
 			sp = vel.length()
 		var to_cup := course.cup - pos
 		var dc := to_cup.length()
-		if dc < ASSIST_R and sp < 1.0 and dc > 0.001:
-			vel += to_cup / dc * ASSIST * h
+		if course.has_cup() and dc < course.assist_r and sp < 1.0 and dc > 0.001:
+			vel += to_cup / dc * course.assist * h
 		var prev := pos
 		pos += vel * h
 		if course.gimmick == "loop" and prev.y > course.loop_z and pos.y <= course.loop_z and absf(pos.x - course.loop_x) < Course.LOOP_GAP:
@@ -130,7 +129,7 @@ func step(dt: float) -> void:
 			vel = -vel * 0.45
 			events.append(["back"])
 		_collide()
-		if dc < Course.CUP_R - 0.015 and vel.length() < CAPTURE_SPEED:
+		if course.has_cup() and dc < course.cup_r - 0.015 and vel.length() < course.capture:
 			state = "cup"
 			sink_t = 0.0
 			vel = Vector2.ZERO
@@ -161,10 +160,10 @@ func _collide() -> void:
 			pos = q + nrm * r
 			var vn := vel.dot(nrm)
 			if vn < 0.0:
-				vel -= (1.0 + WALL_BOUNCE) * vn * nrm
+				vel -= (1.0 + course.wall_bounce) * vn * nrm
 				if -vn > 0.25:
 					events.append(["wall", -vn])
-	for bm in course.bumpers:
+	for bm in course.bumpers + course.moles:  # (a mole popped up is a bumper while he's up: deep.gd)
 		var c: Vector2 = bm[0]
 		var rr: float = bm[1] + r
 		var d := pos - c
@@ -173,7 +172,7 @@ func _collide() -> void:
 			pos = c + nrm * rr
 			var vn := vel.dot(nrm)
 			if vn < 0.0:
-				vel -= (1.0 + BUMPER_BOUNCE) * vn * nrm
+				vel -= (1.0 + course.bumper_bounce) * vn * nrm
 				vel = vel.limit_length(MAX_SPEED)
 				events.append(["bump"])
 
@@ -230,7 +229,43 @@ func _process(delta: float) -> void:
 	var mv := position - _last_vis
 	mv.y = 0.0
 	var dist := mv.length()
+	if rainbow and trail == null:
+		_make_trail()
+	if trail != null:
+		trail.emitting = rainbow and dist > 0.0015 and visual.visible
 	if dist > 0.0001 and dist < 0.5:
 		var axis := Vector3(mv.z, 0.0, -mv.x).normalized()
 		spin.rotate(axis, dist / Course.BALL_R)
 	_last_vis = position
+
+
+func _make_trail() -> void:
+	trail = CPUParticles3D.new()
+	trail.name = "Rainbow"
+	trail.amount = 40
+	trail.lifetime = 0.8
+	trail.local_coords = false
+	trail.direction = Vector3.UP
+	trail.spread = 30.0
+	trail.gravity = Vector3.ZERO
+	trail.initial_velocity_min = 0.02
+	trail.initial_velocity_max = 0.06
+	trail.scale_amount_min = 0.6
+	trail.scale_amount_max = 1.0
+	var q := SphereMesh.new()
+	q.radius = 0.018
+	q.height = 0.036
+	q.radial_segments = 6
+	q.rings = 3
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.vertex_color_use_as_albedo = true
+	q.material = m
+	trail.mesh = q
+	var g := Gradient.new()
+	g.colors = PackedColorArray([Color(1, 0.3, 0.3), Color(1, 0.75, 0.2), Color(1, 1, 0.3), Color(0.3, 0.9, 0.4), Color(0.35, 0.6, 1), Color(0.7, 0.4, 1)])
+	g.offsets = PackedFloat32Array([0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
+	trail.color_initial_ramp = g
+	trail.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	trail.emitting = false
+	add_child(trail)

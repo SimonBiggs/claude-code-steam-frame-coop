@@ -86,7 +86,7 @@ func _init() -> void:
 	for s in city_seeds:
 		for i in [3, 4, 6, 7, 9]:
 			_check_city(RoundGen.make(i, 100 + s * 31, 20))
-	print("ROUNDS: %d rounds and %d cities checked, %d failures (%d ms)" % [total, cities, fails, Time.get_ticks_msec() - t0])
+	print("ROUNDS: %s - %d rounds and %d cities checked, %d failures (%d ms)" % ["PASS" if fails == 0 else "FAIL", total, cities, fails, Time.get_ticks_msec() - t0])
 	quit(1 if fails > 0 else 0)
 
 

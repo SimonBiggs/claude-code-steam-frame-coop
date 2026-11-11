@@ -10,13 +10,16 @@ extends RefCounted
 ## - its text is at least MIN_TEXT_DEG high in the eye (story-card body text is ~1.2 deg at its usual 2.56 m);
 ## - nothing solid between the eyes and its centre (a physics ray, then the real triangles of every mesh on the way:
 ##   a tree, a wall, a garden prop from saved growth); meshes around the head (rooms, sky domes) don't count;
-## - no two panels in the same spot (drawn over each other);
+## - no two panels drawn over each other: their rectangles, seen from the eyes, overlap (overlap());
 ## - no world words (name tags, pop-ups) right in front of the eyes;
 ## - no text glued to the face: a visible Label3D under the XR camera turns with the head.
 ## - not washed out: no see-through scenery (water, glass, mist) behind a panel draws after it. VR panels sit at
 ##   UiKit.VR_PRIO_PANEL (-4, under their own text), so a blended surface at the default priority 0 behind a card
 ##   is blended OVER it (Fishing Lake 2026-11-11: the lake's water made Ollie's cards a faint, far-looking ghost).
 ##   Give such surfaces UiKit.VR_PRIO_UNDER_UI.
+## - never over a pick: no panel covers (seen from the eyes) anything in the KEEP_CLEAR group (core/pick_orbs.gd puts
+##   every pick orb there while it shows). UiKit.vr_spot moves VR UI up or down clear of them (vr_dodge); a game
+##   never has to lift its orbs or push its cards about for this (story cards sat on picks for ~2 s at a pick's start).
 ## A node (or ancestor) with meta "vr_check_ignore" is skipped.
 
 ## (UiKit.vr_spot brings a panel to 0.55 m only when a wall is right in front of the face)
@@ -29,12 +32,18 @@ const MIN_TEXT_DEG := 0.8
 const IGNORE_META := "vr_check_ignore"
 ## Meshes with more triangles than this count by their box only (cheap, may over-report: rare in VR games).
 const MAX_FACES := 20000
-## Two panels whose middles are closer than this (seen from the eyes) are drawn over each other.
+## Two panels whose drawn rectangles (seen from the eyes, at any depth: a near banner hides a far card just the same)
+## share more than this many square degrees are drawn over each other. Panels with no size yet (nothing drawn) fall
+## back to their middles being closer than OVERLAP_DEG. (Ghost Lantern 2026-11-11: NIGHT 2 at 1.7 m sat over Granny
+## Boo's card at 2.56 m; the old "middles within 5 deg AND within 0.6 m in depth" rule missed it.)
 const OVERLAP_DEG := 5.0
+const OVERLAP_MIN_DEG2 := 1.0
 ## World words nearer than this (metres) in front of the eyes are "in the face".
 const FACE_D := 0.45
 const VR_LAYER := preload("res://core/vr_layer.gd").LAYER
 const VR_PRIO_PANEL := -4  ## UiKit.VR_PRIO_PANEL (tests/core_math_test.gd checks they match)
+## Node group: things VR panels must never cover (pick orbs). Any game can add its own must-see things.
+const KEEP_CLEAR := "vr_keep_clear"
 
 
 ## The VR player's camera (the current XRCamera3D, else the first one), or null when nobody is in VR.
@@ -90,6 +99,18 @@ static func problems(root: Node) -> Array[String]:
 				continue
 			if overlap(head, a, b):
 				out.append("%s: drawn over %s" % [_name(a), _name(b)])
+	# A panel over a pick orb: the player can't see what they're choosing.
+	var keep := keep_clear(root, cam)
+	if not keep.is_empty():
+		var boxes: Array[AABB] = []
+		for k in keep:
+			boxes.append(thing_box(k, cam.cull_mask))
+		for c in shown:
+			var size := panel_extent(c)
+			var p := _centre(c)
+			for i in keep.size():
+				if keep[i] != c and not c.is_ancestor_of(keep[i]) and cover_deg2(head, p, size, boxes[i]) > 0.0:
+					out.append("%s: drawn over the pick %s (UiKit.vr_dodge keeps VR UI clear of VrViewCheck.KEEP_CLEAR)" % [_name(c), _name(keep[i])])
 	# Words right in front of the eyes (a TV player's name tag walking through the VR player): giant letters.
 	var origin := cam.get_parent()
 	for n in root.find_children("*", "Label3D", true, false):
@@ -117,11 +138,13 @@ static func washer(cam: Camera3D, card: Node3D, p: Vector3) -> String:
 	var head := cam.global_position
 	var dir := (p - head).normalized()
 	var prio := VR_PRIO_PANEL
+	var rig := cam.get_parent()  # the VR player's own hands and what they hold (a laser sight) aren't scenery
 	for n in cam.get_tree().root.find_children("*", "GeometryInstance3D", true, false):
 		var g := n as GeometryInstance3D
 		if g is Label3D or g is GPUParticles3D or g is CPUParticles3D or not g.is_visible_in_tree() or g.transparency > 0.65:
 			continue
-		if (g.layers & cam.cull_mask) == 0 or card.is_ancestor_of(g) or g == card or _ignored(g) or _placed(g):
+		if (g.layers & cam.cull_mask) == 0 or card.is_ancestor_of(g) or g == card or _ignored(g) or _placed(g) \
+				or (rig != null and rig.is_ancestor_of(g)):
 			continue
 		var mat := _material(g)
 		if mat == null or mat.render_priority < prio or not _blended(mat):
@@ -337,9 +360,38 @@ static func _moving(n: Node) -> bool:
 
 ## Are panels a and b drawn over each other, seen from `head`? (HudKit's VrCard steps out of the way with it.)
 static func overlap(head: Vector3, a: Node3D, b: Node3D) -> bool:
+	return overlap_deg2(head, a, b) > OVERLAP_MIN_DEG2
+
+
+## How much panels a and b cover each other seen from `head` (square degrees; 0 = clear). Depth doesn't matter.
+static func overlap_deg2(head: Vector3, a: Node3D, b: Node3D) -> float:
 	var pa := _centre(a) - head
 	var pb := _centre(b) - head
-	return rad_to_deg(pa.angle_to(pb)) < OVERLAP_DEG and absf(pa.length() - pb.length()) < 0.6 * maxf(XRServer.world_scale, 0.001)
+	var sa := panel_extent(a)
+	var sb := panel_extent(b)
+	if sa.length() < 0.01 or sb.length() < 0.01 or pa.length() < 0.01 or pb.length() < 0.01:
+		return 100.0 if rad_to_deg(pa.angle_to(pb)) < OVERLAP_DEG else 0.0
+	var f := pa.normalized()
+	var right := f.cross(Vector3.UP)
+	right = right.normalized() if right.length() > 0.01 else Vector3.RIGHT
+	var up := right.cross(f).normalized()
+	var ra := _ang_rect(pa, sa, f, right, up)
+	var rb := _ang_rect(pb, sb, f, right, up)
+	if pb.dot(f) <= 0.05:
+		return 0.0
+	var ox := minf(ra.end.x, rb.end.x) - maxf(ra.position.x, rb.position.x)
+	var oy := minf(ra.end.y, rb.end.y) - maxf(ra.position.y, rb.position.y)
+	return ox * oy if ox > 0.0 and oy > 0.0 else 0.0
+
+
+## A panel `size` metres big whose middle is at `v` from the eyes, as a rectangle of view angles (degrees) around `f`.
+static func _ang_rect(v: Vector3, size: Vector2, f: Vector3, right: Vector3, up: Vector3) -> Rect2:
+	var z := maxf(v.dot(f), 0.05)
+	var c := Vector2(rad_to_deg(atan2(v.dot(right), z)), rad_to_deg(atan2(v.dot(up), z)))
+	var d := v.length()
+	var h := Vector2(rad_to_deg(atan2(size.x * 0.5, d)), rad_to_deg(atan2(size.y * 0.5, d)))
+	return Rect2(c - h, h * 2.0)
+
 
 
 ## Panels in front of the VR player that are drawn right now (meta "vr_placed").
@@ -363,6 +415,103 @@ static func _see_through(m: MeshInstance3D) -> bool:
 		var sh := (mat as ShaderMaterial).shader
 		return sh != null and (sh.code.contains("ALPHA") or sh.code.contains("blend_add"))
 	return false
+
+
+## Things in the KEEP_CLEAR group the VR camera sees now (shown, in its world, not freed).
+static func keep_clear(n: Node, cam: Camera3D) -> Array[Node3D]:
+	var out: Array[Node3D] = []
+	if n == null or cam == null or not n.is_inside_tree() or not cam.is_inside_tree():
+		return out
+	for k in n.get_tree().get_nodes_in_group(KEEP_CLEAR):
+		var t := k as Node3D
+		if t != null and t.is_visible_in_tree() and not t.is_queued_for_deletion() and t.get_world_3d() == cam.get_world_3d() \
+				and not _ignored(t):
+			out.append(t)
+	return out
+
+
+## The world box of what `n` draws for a camera with `mask` (meshes, sprites and its words; not lights or sparkles).
+## Label3D boxes aren't built in headless runs, so words are measured from their text.
+static func thing_box(n: Node3D, mask: int = 0xFFFFF) -> AABB:
+	var box := AABB()
+	var have := false
+	for c in [n] + n.find_children("*", "GeometryInstance3D", true, false):
+		if not c is GeometryInstance3D or c is GPUParticles3D or c is CPUParticles3D:
+			continue
+		var g := c as GeometryInstance3D
+		if not g.is_visible_in_tree() or g.transparency > 0.65 or (g.layers & mask) == 0:
+			continue
+		var b := AABB()
+		if g is Label3D:
+			var sz := label_size(g as Label3D)
+			if sz == Vector2.ZERO:
+				continue
+			b = AABB(g.global_position - Vector3(sz.x, sz.y, sz.x) * 0.5, Vector3(sz.x, sz.y, sz.x))
+		else:
+			b = g.global_transform * g.get_aabb()
+		if b.size.length() < 0.001:
+			continue
+		box = b if not have else box.merge(b)
+		have = true
+	return box if have else AABB(n.global_position, Vector3.ZERO)
+
+
+## A Label3D's width and height in metres, worked out from its text (its own box only exists with a renderer).
+static func label_size(l: Label3D) -> Vector2:
+	var t := l.text.strip_edges()
+	if t == "":
+		return Vector2.ZERO
+	var lines := t.split("\n")
+	var longest := 0
+	for s in lines:
+		longest = maxi(longest, s.length())
+	var em := l.font_size * l.pixel_size
+	if l.width > 0.0 and l.autowrap_mode != TextServer.AUTOWRAP_OFF:
+		longest = mini(longest, int(l.width / 0.6 / maxf(l.font_size, 1.0)) + 1)
+	var sc := l.global_basis.get_scale()
+	return Vector2(longest * em * 0.6 * sc.x, lines.size() * em * 1.1 * sc.y)
+
+
+## A panel's width and height (metres): its boxes (panel_size), or for bare words their text (label_size).
+static func panel_extent(n: Node3D) -> Vector2:
+	var s := panel_size(n)
+	if s.length() < 0.01 and n is Label3D:
+		s = label_size(n as Label3D)
+	return s
+
+
+## How much of `box` a panel `size` metres big at `centre` (facing the eyes) covers, seen from `head`: the area of
+## the overlap in square degrees (0 = clear). `margin` (degrees) grows the panel (UiKit.vr_dodge keeps a gap).
+static func cover_deg2(head: Vector3, centre: Vector3, size: Vector2, box: AABB, margin: float = 0.0) -> float:
+	if size == Vector2.ZERO or box.size.length() < 0.001 or box.grow(0.05).has_point(head):
+		return 0.0
+	var f := centre - head
+	var d := f.length()
+	if d < 0.01:
+		return 0.0
+	f /= d
+	var right := f.cross(Vector3.UP)
+	right = right.normalized() if right.length() > 0.01 else Vector3.RIGHT
+	var up := right.cross(f).normalized()
+	var hx := rad_to_deg(atan2(size.x * 0.5, d)) + margin
+	var hy := rad_to_deg(atan2(size.y * 0.5, d)) + margin
+	var lo := Vector2(INF, INF)
+	var hi := Vector2(-INF, -INF)
+	var behind := 0
+	for i in 8:
+		var v := box.get_endpoint(i) - head
+		var z := v.dot(f)
+		if z < 0.05:
+			behind += 1
+			z = 0.05
+		var a := Vector2(rad_to_deg(atan2(v.dot(right), z)), rad_to_deg(atan2(v.dot(up), z)))
+		lo = lo.min(a)
+		hi = hi.max(a)
+	if behind == 8:
+		return 0.0
+	var ox := minf(hi.x, hx) - maxf(lo.x, -hx)
+	var oy := minf(hi.y, hy) - maxf(lo.y, -hy)
+	return ox * oy if ox > 0.0 and oy > 0.0 else 0.0
 
 
 ## A panel's drawn width and height (metres, as it is scaled now), from its own and its children's boxes.

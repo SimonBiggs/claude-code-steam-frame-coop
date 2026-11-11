@@ -260,18 +260,19 @@ export async function debt() {
   try { (globalThis as any).__breplLint?.("(async () => (WT = 1\n))"); issues.push({ kind: "brepl-guard", what: "brepl's shared-globals guard is not refusing generic globals (WT = ...)", fix: "reload dev.ts (loadModule('dev')) and check installGlobalsGuard()" }); } catch {}
   if (!(globalThis as any).__evalGuard) issues.push({ kind: "brepl-guard", what: "brepl's shared-globals guard is not installed", fix: "loadModule('dev')" });
   // Known bug patterns ("never just one ant"): flag every instance in the staging copy, not just the one we saw.
-  const PATTERNS: { kind: string; files: string; bad: string; unless?: string; fix: string }[] = [
+  const PATTERNS: { kind: string; files: string; bad: string; unless?: string; fix: string; dirs?: string }[] = [
     { kind: "pad-A", files: "grab_focus", bad: "grab_focus", unless: "JOY_BUTTON_A|ui_input.gd|UiInput", fix: "should now work by design (UiKit.ensure_pad_ui_actions at startup); check the menu reaches it" },
     { kind: "anchors", files: "set_anchors_preset", bad: "add_child\\([a-z_]+\\)\\n\\s*[a-z_]+\\.set_anchors_preset\\(Control\\.PRESET_(CENTER|RIGHT|BOTTOM)", fix: "use UiKit.pin(control, preset) (core/ui_kit.gd): one helper, offsets always reset" },
     { kind: "set_meta-null", files: "_meta(", bad: "set_meta\\([^\\n]*(,\\s*null\\)|else null\\))|get_meta\\([^)\\n]*,\\s*null\\)", fix: "set_meta(k, null) DELETES the key and get_meta(k, null) has NO default (errors when missing): store false and test with get_meta(k, false) is <Type>" },
     { kind: "dir-list-unchecked", files: "get_(directories|files)_at\\(", bad: "get_(directories|files)_at\\(", unless: "dir_exists_absolute|make_dir_recursive_absolute", fix: "check DirAccess.dir_exists_absolute(path) (or make the folder) before get_directories_at / get_files_at: listing a missing folder logs \"Couldn't open directory\" (2026-10-30: user://test_saves/)" },
+    { kind: "test-timing-spike", dirs: "tests", files: "worst_ms", bad: "worst_ms = maxf\\(worst_ms, [^\\n]*(get_ticks_usec|\\bus / 1000)", unless: "TestTime.worst|^extends RefCounted\\n## Timing in generator tests", fix: "time with TestTime.worst(worst_ms, ms, func() -> Variant: return <the call>) (tests/test_time.gd): one slow call on a busy machine re-runs twice and the fastest counts (Mini Golf's 42 ms failed a landing, 2026-11-11)" },
     { kind: "raw-look_at", files: "look(ing)?_at\\(", bad: "(^|\\n)[^#\\n]*(\\blooking_at\\(|[^A-Za-z0-9_]look_at\\()", unless: "static func aim\\(dir", fix: "use UiKit.aim(dir) / aim_from(from, at) / look(node, target) (core/ui_kit.gd): raw looking_at / look_at go NaN or error when the direction is vertical (tests/core_math_test.gd fails on any)" },
   ];
   // Voice echo (2026-11-11): every TTS player must log to ~/.claude/said.log, or the room/Deck mics feed Claude's own words back.
   for (const f of (await sh(`grep -lIE "say\\.py|piper |\\bespeak\\b" ~/.local/bin/* 2>/dev/null | grep -v '\\.bak' | xargs -r grep -L said.log`, LIVE)).out.split("\n").filter(Boolean))
     issues.push({ kind: "tts-no-said-log", what: f, fix: "append 'ts<TAB>text' to ~/.claude/said.log at start and end of playback (saidecho.py drops echoes)" });
   for (const pt of PATTERNS) {
-    const hits = (await sh(`grep -rlE ${JSON.stringify(pt.files)} --include=*.gd core games arcade`, STAGE)).out.split("\n").filter(Boolean);
+    const hits = (await sh(`grep -rlE ${JSON.stringify(pt.files)} --include=*.gd ${pt.dirs ?? "core games arcade"}`, STAGE)).out.split("\n").filter(Boolean);
     for (const f of hits) {
       const txt = await readFile(join(STAGE, f), "utf8").catch(() => "");
       if (!new RegExp(pt.bad).test(txt)) continue;
@@ -640,7 +641,9 @@ export async function land(branch: string, genTests: string[], botId: string, ot
     const scene = await stat(join(STAGE, `tests/${t}.tscn`)).then(() => true, () => false);
     const how = scene ? `--fixed-fps 60 res://tests/${t}.tscn`  /* ends itself (exit code = failures); timeout 600 caps it */ : `-s res://tests/${t}.gd`;
     out[t] = (await sh(`DUO_PORT=${rport()} timeout 600 godot-test --headless --path . ${how} 2>&1 | grep -v OpenXR | grep -E "PASS|FAIL|SCRIPT ERROR" | tail -3; echo exit=\${PIPESTATUS[0]}`, STAGE)).out;
-    if (scene && !/PASS/.test(out[t])) out[t] += " (no PASS line)";
+    // Every test prints an explicit verdict, -s scripts too (paper_planes_sky_test exited 0 with only a count line,
+    // 2026-11-11; tests/bot_end_test.gd fails a tests/*_test.gd with no PASS line in its code).
+    if (!/PASS/.test(out[t])) out[t] += " (no PASS line)";
     ok &&= /exit=0/.test(out[t]) && !/FAIL|SCRIPT ERROR|no PASS line/.test(out[t]);
   }
   const deckOut = (await sh(`DECK_BOT_ONLY=${botId} DUO_PORT=${rport()} timeout 300 godot-test --headless --path . --fixed-fps 60 --quit-after 6000 res://tests/deck_bot.tscn 2>&1`, STAGE)).out;
