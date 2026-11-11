@@ -16,6 +16,10 @@ extends Control
 ## fades once that lane / drum has been hit twice (main.cue_did / cue_learned).
 
 const LANE_COLORS: Array[Color] = [Color(0.3, 0.6, 1.0), Color(0.35, 0.95, 0.4), Color(1.0, 0.35, 0.35)]
+## The see-through road the balls roll down (normal / STAR POWER), and the gold star notes.
+const ROAD := Color(0.05, 0.04, 0.12, 0.62)
+const STAR_ROAD := Color(0.35, 0.25, 0.04, 0.7)
+const GOLD_NOTE := Color(1.0, 0.82, 0.25)
 const LANE_BUTTONS: Array[String] = ["X", "A", "B"]
 const DEPTH := 3.6
 const UiKit := preload("res://core/ui_kit.gd")
@@ -338,7 +342,7 @@ func _draw_highway(w: float, h: float, ui: float) -> void:
 	var under := -0.12
 	var poly := PackedVector2Array([_proj(hit_y, h0, cx, bw, under, -1.6), _proj(hit_y, h0, cx, bw, under, 1.6),
 		_proj(hit_y, h0, cx, bw, 1.0, 1.6), _proj(hit_y, h0, cx, bw, 1.0, -1.6)])
-	draw_colored_polygon(poly, Color(0.35, 0.25, 0.04, 0.7) if star_on else Color(0.05, 0.04, 0.12, 0.62))
+	draw_colored_polygon(poly, STAR_ROAD if star_on else ROAD)
 	var simple: bool = main.SIMPLE_MODE
 	var lanes: Array[int] = main.lanes_now()
 	var edges: Array = [-1.6, -0.5, 0.5, 1.6] if lanes.size() == 3 else [-1.6, 0.0, 1.6]
@@ -446,7 +450,7 @@ func _draw_highway(w: float, h: float, ui: float) -> void:
 			var gold_note: bool = g.g_star[i - 1] == 1
 			var col := LANE_COLORS[lane] if j == 0 else Color(0.4, 0.4, 0.45)
 			if j == 0 and (gold_note or star_on):
-				col = Color(1.0, 0.82, 0.25)
+				col = GOLD_NOTE
 			draw_circle(pos + Vector2(0, 3 * ui / z), r, Color(0, 0, 0, 0.5))
 			if gold_note and j == 0:
 				_draw_star(pos, r * 1.45, Color(1.0, 0.95, 0.6))

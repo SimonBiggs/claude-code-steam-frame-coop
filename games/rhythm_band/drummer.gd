@@ -24,7 +24,7 @@ func _update_practice() -> void:
 		var hover := Vector3(0.0, 0.1 + 0.025 * sin(now * 5.0), 0.0) * (1.0 - u)
 		var pos := pads[pad].position + lane_dir(pad) * NOTE_TRAVEL * u + hover
 		notes_mm.set_instance_transform(used, Transform3D(Basis().scaled(Vector3.ONE * 1.4), pos))
-		notes_mm.set_instance_color(used, PAD_COLORS[pad].lightened(0.3))
+		notes_mm.set_instance_color(used, note_color(pad))
 		used += 1
 		approach[pad].visible = true
 		approach[pad].scale = Vector3.ONE * (1.15 + 0.35 * absf(sin(now * 4.0)))
@@ -73,6 +73,11 @@ const PAD_COLORS: Array[Color] = [Color(1.0, 0.85, 0.2), Color(1.0, 0.3, 0.35), 
 const PAD_NAMES: Array[String] = ["HI-HAT", "SNARE", "TOM", "CRASH"]
 const MENU_NAMES: Array[String] = ["EASY", "NORMAL", "ROCK", "START!"]
 const GOLD := Color(1.0, 0.82, 0.25)
+
+
+## A drum's ball colour (its pad colour, lighter).
+static func note_color(pad: int) -> Color:
+	return PAD_COLORS[pad].lightened(0.3)
 const NOTE_TRAVEL := 2.6
 const POOL := 24
 const FLAT_HEAD := 1.45

@@ -20,6 +20,10 @@ const TILE_ROWS := 4
 const LED_COLS := 26
 const LED_ROWS := 7
 const LIP_BULBS := 34
+## The night behind the stage and the stage's back wall: what the drummer's balls and the road are seen on.
+const NIGHT := Color(0.05, 0.04, 0.12)
+const BACK_WALL := Color(0.12, 0.08, 0.22)
+const STAGE_FLOOR := Color(0.18, 0.16, 0.24)
 const BEAM_COLORS: Array[Color] = [Color(1.0, 0.3, 0.5), Color(0.3, 0.7, 1.0), Color(1.0, 0.85, 0.2),
 	Color(0.4, 1.0, 0.5), Color(0.8, 0.4, 1.0), Color(1.0, 0.55, 0.2)]
 const HAIR: Array[Color] = [Color(0.95, 0.8, 0.3), Color(0.35, 0.2, 0.1), Color(0.1, 0.08, 0.08), Color(0.9, 0.4, 0.15),
@@ -133,7 +137,7 @@ func build() -> void:
 	var env := WorldEnvironment.new()
 	var e := Environment.new()
 	e.background_mode = Environment.BG_COLOR
-	e.background_color = Color(0.05, 0.04, 0.12)
+	e.background_color = NIGHT
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	e.ambient_light_color = Color(0.7, 0.65, 0.9)
 	e.ambient_light_energy = 0.55
@@ -186,12 +190,12 @@ func _build_set() -> void:
 	var dark := Color(0.08, 0.08, 0.1)
 	var metal := Color(0.35, 0.35, 0.4)
 	parts.append([MeshKit.box(Vector3(30, 0.02, 30)), MeshKit.at(Vector3(0, -0.01, 0)), Color(0.12, 0.1, 0.16)])
-	parts.append([MeshKit.box(Vector3(9.4, STAGE_Y, 5.6)), MeshKit.at(Vector3(0.0, STAGE_Y * 0.5, 0.45)), Color(0.18, 0.16, 0.24)])
+	parts.append([MeshKit.box(Vector3(9.4, STAGE_Y, 5.6)), MeshKit.at(Vector3(0.0, STAGE_Y * 0.5, 0.45)), STAGE_FLOOR])
 	for k in 5:
 		parts.append([MeshKit.box(Vector3(9.4, 0.02, 0.03)), MeshKit.at(Vector3(0.0, STAGE_Y * (0.2 + k * 0.15), -2.34)), Color(0.24, 0.2, 0.32)])
 	parts.append([MeshKit.box(Vector3(2.2, 0.3, 1.8)), MeshKit.at(Vector3(DRUM_SPOT.x, STAGE_Y + 0.15, DRUM_SPOT.z + 0.1)), Color(0.22, 0.14, 0.3)])
 	parts.append([MeshKit.box(Vector3(2.0, 0.02, 1.6)), MeshKit.at(Vector3(DRUM_SPOT.x, STAGE_Y + 0.31, DRUM_SPOT.z + 0.1)), Color(0.5, 0.15, 0.2)])
-	parts.append([MeshKit.box(Vector3(10.0, 5.0, 0.2)), MeshKit.at(Vector3(0.0, 3.3, 3.3)), Color(0.12, 0.08, 0.22)])
+	parts.append([MeshKit.box(Vector3(10.0, 5.0, 0.2)), MeshKit.at(Vector3(0.0, 3.3, 3.3)), BACK_WALL])
 	# Truss: a top beam over the stage and towers at the sides.
 	parts.append([MeshKit.box(Vector3(10.0, 0.18, 0.18)), MeshKit.at(Vector3(0.0, 5.2, -0.6)), metal])
 	parts.append([MeshKit.box(Vector3(10.0, 0.08, 0.08)), MeshKit.at(Vector3(0.0, 5.42, -0.6)), metal])
