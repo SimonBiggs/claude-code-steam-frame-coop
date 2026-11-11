@@ -544,6 +544,11 @@ export async function guard(game: string, project = STAGE) {
  *  merge merge-arcade into live main, fast-forward wt-merge, remove the branch's worktree (~/GodotProjects/wt-<branch>)
  *  and branch. Stops (nothing deployed) with {stop, ...} on a conflict, live/staging drift, or any failing test
  *  (story_pictures_test always runs: pictures belong in games/<game>/story_pictures.gd). */
+/** Repo-wide guard tests every landing runs (2026-11-11: gen_budget_test failed on main unnoticed because no landing
+ *  ran it; each of these took < 45 s on all of main then). lan_update_test stays out: it compiles a deliberately broken
+ *  script, whose expected "Parse Error" would read as a SCRIPT ERROR here. */
+export const REPO_GUARDS = ["gen_budget_test", "who_test", "who_net_test", "classic_seats_test", "menu_test", "party_stale_press_test", "bg_gen_test", "engine_sys_test", "engine_ui_test", "pause_banner_test"];
+
 export async function land(branch: string, genTests: string[], botId: string, otherBots: string[], msg: string) {
   // A landing that stopped leaves its merge in wt-merge (and its files in staging) for a retry. Landing a DIFFERENT
   // branch next must not carry it along (2026-10-31: a tools-only landing nearly deployed saga-deep, whose tests had
@@ -555,7 +560,12 @@ export async function land(branch: string, genTests: string[], botId: string, ot
     await sh("git merge --abort 2>/dev/null; git reset -q --hard main", join(GP, "wt-merge"));
     await sh(`for d in ${DEPLOYED.join(" ")} tools addons/boot; do rsync -a --delete --exclude '*.import' --exclude '__pycache__' wt-merge/$d/ .duo-arena-stage/$d/; done; cp wt-merge/arcade.tscn .duo-arena-stage/; sed 's|^config/name="Duo Arena"$|config/name="Duo Arena Stage"|' wt-merge/project.godot > .duo-arena-stage/project.godot`, GP);
   }
-  const m = await sh(`cd ${GP}/wt-${branch} && git status --short | grep -v '^??' | head -3; cd ${GP}/wt-merge && git merge --no-edit ${branch} 2>&1 | tail -1; git diff --name-only --diff-filter=U`);
+  // The branch's worktree must be fully committed: land merges the BRANCH, so anything uncommitted (an edit, or an
+  // untracked .uid / .gd a re-import made) would silently stay behind (2026-11-11: marble-deep2's
+  // marble_maze_deep_test.gd.uid; land used to print tracked changes only and carry on).
+  const dirty = (await sh(`git status --porcelain | head -5`, join(GP, `wt-${branch}`))).out.trim();
+  if (dirty) return { stop: "uncommitted", out: `wt-${branch} has uncommitted files (commit them on the branch, or ask its agent):\n${dirty}` };
+  const m = await sh(`cd ${GP}/wt-merge && git merge --no-edit ${branch} 2>&1 | tail -1; git diff --name-only --diff-filter=U`);
   // (tail -1 of a conflicted merge is "Automatic merge failed...", not CONFLICT: party-deep's whats_new conflict
   // once went on to the tests with its markers in, 2026-10-31. The unmerged-files list after it is the sure sign.)
   if (/CONFLICT|fatal|Automatic merge failed|error:/.test(m.out) || (await sh("git diff --name-only --diff-filter=U", join(GP, "wt-merge"))).out.trim())
@@ -581,7 +591,7 @@ export async function land(branch: string, genTests: string[], botId: string, ot
   // shared_picks_test always (once it exists): a game must build picks with core/pick_orbs.gd, attack tells with
   // core/warn_rings.gd and show modes as PickOrbs.mode() (one GENTLE / BRAVE / HARD look everywhere).
   const sharedPicks = await stat(join(STAGE, "tests/shared_picks_test.gd")).then(() => ["shared_picks_test"], () => [] as string[]);
-  for (const t of [...new Set([...genTests, "story_pictures_test", "progress_test", "whats_new_test", "layout_check_test", "vr_view_check_test", "bot_end_test", "core_math_test", ...sharedPicks])].filter(Boolean)) {
+  for (const t of [...new Set([...genTests, "story_pictures_test", "progress_test", "whats_new_test", "layout_check_test", "vr_view_check_test", "bot_end_test", "core_math_test", ...REPO_GUARDS, ...sharedPicks])].filter(Boolean)) {
     // A test with a scene (extends Node, e.g. engine_ui_test) runs as that scene; a SceneTree script runs with -s.
     const scene = await stat(join(STAGE, `tests/${t}.tscn`)).then(() => true, () => false);
     const how = scene ? `--fixed-fps 60 res://tests/${t}.tscn`  /* ends itself (exit code = failures); timeout 600 caps it */ : `-s res://tests/${t}.gd`;
