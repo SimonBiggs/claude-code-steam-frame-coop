@@ -15,6 +15,7 @@ extends SceneTree
 ##   - the parade only grows, and fast enough to unlock every gift within a few weeks of play.
 ## Prints "SCRIPT ERROR: ..." for each failure and "BALLOON DEEP: PASS" / "FAIL".
 
+const Contrast := preload("res://core/contrast.gd")
 const WaveGen := preload("res://games/balloon_pop/wavegen.gd")
 const Story := preload("res://games/balloon_pop/story.gd")
 const Skies := preload("res://games/balloon_pop/skies.gd")
@@ -32,19 +33,9 @@ func _init() -> void:
 	for w in Skies.ordered():
 		_fail("modes: " + str(w))
 	# Every balloon colour on every sky.
-	var cols: Array = []
-	for i in Balloon.COLORS.size():
-		cols.append([Balloon.COLOR_NAMES[i], Balloon.COLORS[i]])
-	cols.append(["gold", Balloon.GOLD_COLOR])
-	cols.append(["grumpy", Balloon.GRUMPY_COLOR])
-	cols.append(["rocket", Balloon.ROCKET_COLOR])
-	cols.append(["ice", Balloon.ICE_COLOR])
-	cols.append(["ride choice", Balloon.CHOICE_COLOR])
-	for k in Story.KIND_COLORS:
-		cols.append(["%s card" % WaveGen.KIND_NAMES[int(k)], Story.KIND_COLORS[k]])
-	for w in Skies.contrast_problems(cols):
+	for w in Contrast.check_game("balloon_pop"):  # every balloon on every sky and grass (games/balloon_pop/palette.gd)
 		_fail("contrast: " + str(w))
-	_expect(Skies.contrast_problems([["sky blue", Color(0.3, 0.55, 0.93)]]).size() > 0, "the contrast check catches a sky-blue balloon")
+	_expect(not Contrast.distinct(Color(0.3, 0.55, 0.93), Skies.backgrounds()["day sky"]), "the contrast check catches a sky-blue balloon")
 	# Rounds x modes.
 	var per := {}
 	var checked := 0

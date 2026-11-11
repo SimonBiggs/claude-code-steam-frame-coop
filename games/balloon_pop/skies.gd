@@ -9,8 +9,8 @@ extends RefCounted
 ##            POP POP (a pop pops the good balloons next to it too).
 ##   SKIES    TODAY'S SKY THEME by the time of day (the host's clock: morning, day, sunset, starry night) and the
 ##            season (the grass: spring green, summer, autumn gold, winter snow; a winter day is a snowy sky).
-##            Every balloon colour must stand out against every sky and every grass (contrast_problems(); the
-##            snow-sheep lesson from Sheep Round-Up). At night the balloons glow.
+##            Every balloon colour must stand out against every sky and every grass (palette.gd + core/contrast.gd,
+##            tests/contrast_test.gd; the snow-sheep lesson from Sheep Round-Up). At night the balloons glow.
 ##   GUSTS    WIND GUSTS told first by warn rings (events.gd): a flashing stripe across the park shows which way, then
 ##            every balloon drifts that way for a moment. gusts(rd, mode) makes a round's list from its seed, keeping
 ##            only directions that leave every balloon reachable; gust_problems() proves it.
@@ -71,10 +71,6 @@ const TIME_LINES := {"dawn": "Good morning, balloons!", "day": "What a sunny day
 	"night": "Night! Balloons glow!", "snow": "Snow! Brrr!"}
 ## The sky presets any round may show (themes + story.gd SKIES for today's sky).
 const DAILY_SKIES: Array[String] = ["day", "dawn", "sunset", "snowy"]
-
-## Every colour a balloon can be (balloon.gd COLORS + the special kinds) must differ from every sky and grass by at
-## least this much (Oklab distance; 0.1 is a clear difference at a glance).
-const MIN_CONTRAST := 0.1
 
 
 static func mode_of(id: String) -> Dictionary:
@@ -206,25 +202,10 @@ static func all_themes() -> Array:
 	return out
 
 
-static func _oklab(c: Color) -> Vector3:
-	var l := c.srgb_to_linear()
-	var a := pow(0.4122214708 * l.r + 0.5363325363 * l.g + 0.0514459929 * l.b, 1.0 / 3.0)
-	var m := pow(0.2119034982 * l.r + 0.6806995451 * l.g + 0.1073969566 * l.b, 1.0 / 3.0)
-	var s := pow(0.0883024619 * l.r + 0.2817188376 * l.g + 0.6299787005 * l.b, 1.0 / 3.0)
-	return Vector3(0.2104542553 * a + 0.7936177850 * m - 0.0040720468 * s, 1.9779984951 * a - 2.4285922050 * m + 0.4505937099 * s,
-		0.0259040371 * a + 0.7827717662 * m - 0.8086757660 * s)
-
-
-## How different two colours look (Oklab distance: 0 = the same, 0.1 = clear at a glance).
-static func contrast(a: Color, b: Color) -> float:
-	return _oklab(a).distance_to(_oklab(b))
-
-
-## Every balloon colour against every sky (top and horizon) and every grass: [] = fine.
-## balloon_colors: [[name, Color], ...] (tests pass balloon.gd's).
-static func contrast_problems(balloon_colors: Array) -> Array:
-	var why: Array = []
-	var backs: Array = []  # [name, Color]
+## Every sky (top and horizon of each theme's preset and the daily skies) and every grass a balloon can be seen on:
+## {name: Color} for palette.gd (core/contrast.gd checks every balloon colour on each).
+static func backgrounds() -> Dictionary:
+	var backs := {}
 	var presets := {}
 	for th in all_themes():
 		presets[String(th.preset)] = true
@@ -232,21 +213,16 @@ static func contrast_problems(balloon_colors: Array) -> Array:
 		presets[p] = true
 	for p in presets:
 		var pr: Dictionary = SkyKit.PRESETS[SkyKit.resolve(String(p))]
-		backs.append(["%s sky" % p, pr.top])
-		backs.append(["%s horizon" % p, pr.horizon])
+		backs["%s sky" % p] = pr.top
+		backs["%s horizon" % p] = pr.horizon
 	for s in GROUND:
-		backs.append(["%s grass" % s, GROUND[s]])
-	for gs in GROUND:  # the wind stripe (see-through) shows on every grass
-		var gc: Color = GROUND[gs]
-		var c2 := contrast(gc.lerp(GUST_COLOR, GUST_ALPHA), gc)
-		if c2 < MIN_CONTRAST:
-			why.append("the wind stripe is hard to see on the %s grass (%.3f)" % [gs, c2])
-	for bc in balloon_colors:
-		for bk in backs:
-			var c := contrast(bc[1], bk[1])
-			if c < MIN_CONTRAST:
-				why.append("a %s balloon is hard to see on the %s (%.3f)" % [bc[0], bk[0], c])
-	return why
+		backs["%s grass" % s] = GROUND[s]
+	return backs
+
+
+## The see-through wind stripe as drawn (GUST_COLOR at GUST_ALPHA over the grass).
+static func gust_stripe() -> Color:
+	return Color(GUST_COLOR, GUST_ALPHA)
 
 
 # --- Wind gusts ----------------------------------------------------------------------------------

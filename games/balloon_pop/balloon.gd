@@ -20,7 +20,7 @@ const MINI := WaveGen.MINI
 const GIANT := WaveGen.GIANT
 const CHOICE := WaveGen.CHOICE
 const RADIUS := 0.3
-## Every colour stands out on every sky and grass (skies.gd contrast_problems(), tests/balloon_pop_deep_test.gd):
+## Every colour stands out on every sky and grass (palette.gd + core/contrast.gd, tests/contrast_test.gd):
 ## a deep blue (not sky blue), a lime green (not grass green), an aqua ice and a magenta rocket.
 const COLORS: Array[Color] = [Color(0.95, 0.08, 0.3), Color(0.15, 0.3, 0.95), Color(0.55, 1.0, 0.15),
 	Color(1.0, 0.36, 0.0), Color(0.75, 0.4, 1.0), Color(1.0, 0.45, 0.8), Color(0.1, 0.85, 0.85)]
