@@ -12,6 +12,7 @@ extends SceneTree
 const BUDGET_MS := 40.0
 
 const BalloonWaves := preload("res://games/balloon_pop/wavegen.gd")
+const ArenaGen := preload("res://games/duo_arena/arenagen.gd")
 const BalloonStory := preload("res://games/balloon_pop/story.gd")
 const BalloonSkies := preload("res://games/balloon_pop/skies.gd")
 const MazeGen := preload("res://games/marble_maze/mazegen.gd")
@@ -69,6 +70,11 @@ func _entries() -> Array:
 			var rd := BalloonWaves.generate(s, BalloonSkies.apply(BalloonStory.spec(String(r.id), 15, met, 6, 120.0), "hard"))
 			rd["gusts"] = BalloonSkies.gusts(rd, "hard")
 			return rd])
+	# --- duo_arena: Gen.layout(leg_seed, zone) in main.gd's zone setup (each leg of waves).
+	out.append(["duo_arena", "arenagen.gd", "ArenaGen.layout (every zone)",
+		func(s: int) -> Variant:
+			var ids := ArenaGen.zone_ids()
+			return ArenaGen.layout(ArenaGen.leg_seed(s, s % 4), String(ids[s % ids.size()]))])
 	# --- marble_maze: Story.maze(world, i) / Story.daily() -> MazeGen.generate in def_from_desc.
 	# The slowest story mazes (measured over 40 seeds, 2026-10-31): the third maze of places 4 and 6 on laps 1-3.
 	out.append(["marble_maze", "mazegen.gd", "MazeGen.generate (slowest story mazes 39-41, 60-62, 81-83)",

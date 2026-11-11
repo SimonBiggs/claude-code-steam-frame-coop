@@ -51,6 +51,8 @@ var tp_dest := {}  # Vector2i cell -> Vector2 partner centre
 var goal_dist := {}  # Vector2i -> cells to the goal (for "furthest checkpoint")
 var t := 0.0  # level clock (drives the sliding blocks; mirrored on the TV machine)
 var tilt := Vector2.ZERO  # -1..1 each: where the marbles are pushed (x right, y towards the VR player)
+var quake := Vector2.ZERO  # second pass (events.gd): a TILT QUAKE's push right now (board units / s^2)
+var event_gate := Vector2i(-99, -99)  # second pass (events.gd): the doorway a CLOSING GATE holds shut right now
 
 var level_root: Node3D
 var gem_nodes: Array[Node3D] = []
@@ -109,6 +111,9 @@ func load_level(n: int, def: Dictionary = {}) -> void:
 	gate_h = [1.0, 1.0]
 	teleports.clear()
 	tp_dest.clear()
+	goal = Vector2(99.0, 99.0)  # the pick board has none (main.gd PICK_MAP)
+	event_gate = Vector2i(-99, -99)
+	quake = Vector2.ZERO
 	for r in H:
 		for c in W:
 			var k := rows[r][c]
@@ -226,6 +231,11 @@ func ch(c: int, r: int) -> String:
 	return rows[r][c]
 
 
+## The pick board has no goal (main.gd PICK_MAP).
+func has_goal() -> bool:
+	return goal.x < 50.0
+
+
 func half_size() -> Vector2:
 	return Vector2(W, H) * CELL * 0.5
 
@@ -234,6 +244,8 @@ func half_size() -> Vector2:
 func solid(c: int, r: int) -> bool:
 	var k := ch(c, r)
 	if k == "#":
+		return true
+	if c == event_gate.x and r == event_gate.y:
 		return true
 	if k == "D":
 		return not gate_open[0]
@@ -414,7 +426,8 @@ func _goal_bfs() -> void:
 
 ## Push a marble (radius r) out of walls, closed gates, bumpers and sliding blocks.
 ## Returns [pos, vel, impact speed, bumper index or -1].
-func collide(p: Vector2, v: Vector2, r: float) -> Array:
+## kick: how much of a bumper's kick reaches the marble (HEAVY marbles: less, worlds.gd BUMP_K).
+func collide(p: Vector2, v: Vector2, r: float, kick: float = 1.0) -> Array:
 	var impact := 0.0
 	var bumped := -1
 	var cc := cell_of(p)
@@ -443,8 +456,8 @@ func collide(p: Vector2, v: Vector2, r: float) -> Array:
 			p = bumpers[i] + n * min_d
 			var vn := v.dot(n)
 			if vn < 0.0:
-				v -= n * vn * 2.2
-			v += n * 0.35
+				v -= n * vn * (1.0 + 1.2 * kick)
+			v += n * 0.35 * kick
 			impact = maxf(impact, 0.6)
 			bumped = i
 	return [p, v, impact, bumped]
@@ -707,6 +720,9 @@ func _build_level(_idx: int) -> void:
 		level_root.add_child(kn)
 		block_nodes.append(kn)
 	_build_team_bits()
+	if not has_goal():
+		goal_ring = null
+		return
 	goal_ring = MeshInstance3D.new()
 	var tm := TorusMesh.new()
 	tm.inner_radius = 0.03

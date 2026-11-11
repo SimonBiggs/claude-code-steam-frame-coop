@@ -12,6 +12,7 @@ extends RefCounted
 
 const MazeGen := preload("res://games/marble_maze/mazegen.gd")
 const Seeded := preload("res://core/seeded.gd")
+const Worlds := preload("res://games/marble_maze/worlds.gd")
 
 const MAZES_PER_PLACE := 3
 const BOBO_COLOR := Color(0.72, 0.5, 1.0)
@@ -62,7 +63,7 @@ static func place(i: int) -> Dictionary:
 ## The save's default data (core/save.gd fills missing keys from this).
 static func save_defaults() -> Dictionary:
 	return {"lessons_done": false, "story_i": 0, "world": -1, "shinies": {}, "places": 0, "daily": {},
-		"mazes": 0, "falls": 0, "jar": []}
+		"mazes": 0, "falls": 0, "jar": [], "mode": "brave", "gift": "", "rack": [], "gifts": {}, "events": 0}
 
 
 ## Story maze index i -> [place index (0..), maze within it (0..2), lap (0 = the story, 1+ bonus)].
@@ -92,19 +93,25 @@ static func spec(i: int) -> Dictionary:
 	return s
 
 
-## Story maze i of the world `world` (a save's own seed).
-static func maze(world: int, i: int) -> Dictionary:
-	return MazeGen.generate(Seeded.derive(world, "maze%d" % i), spec(i))
+## Story maze i of the world `world` (a save's own seed), in a mode (worlds.gd MODES) on today's world (worlds.gd
+## WORLDS: "" = none, the first pass's mazes).
+static func maze(world: int, i: int, mode: String = "", wd: String = "") -> Dictionary:
+	var s := spec(i)
+	if mode != "" or wd != "":
+		s = Worlds.apply(s, mode if mode != "" else "brave", wd if wd != "" else "sunny")
+	return MazeGen.generate(Seeded.derive(world, "maze%d" % i), s)
 
 
 ## Today's maze: a mixed bag of things, the same on every machine (pass `date` in tests).
-static func daily(date: String = "") -> Dictionary:
+static func daily(date: String = "", mode: String = "", wd: String = "") -> Dictionary:
 	var sd := Seeded.daily_seed("marble_maze", date)
 	var r := Seeded.rng(sd, "daily")
 	var pl := place(r.randi() % PLACES.size())
 	var s := {"name": "TODAY", "theme": pl.theme, "new": "", "shiny": true, "holes": r.randi_range(2, 4),
 		"bumpers": r.randi_range(0, 2), "ice": r.randi_range(0, 1), "arrows": r.randi_range(0, 2),
 		"tp": r.randf() < 0.4, "pads": r.randf() < 0.4, "loops": r.randi_range(1, 2), "minw": 1, "maxw": 3, "door": 0.5}
+	if mode != "" or wd != "":
+		s = Worlds.apply(s, mode if mode != "" else "brave", wd if wd != "" else "sunny")
 	return MazeGen.generate(sd, s)
 
 
