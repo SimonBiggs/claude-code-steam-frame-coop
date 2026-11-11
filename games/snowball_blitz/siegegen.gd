@@ -14,6 +14,10 @@ extends RefCounted
 ## more later), one new kind per wave (waves 3, 4 and 6 bring sleds / bunnies / balloons in a seeded
 ## order, wave 5 the giants), the SNOW KING at KING_WAVE and the YETI at FINALE, then endless.
 ## spawns: in order; `delay` seconds after the one before, a `kind` walks in at gate angle + `jitter`.
+## MODES (picked on the pick orbs after the practice, core/pick_orbs.gd): GENTLE (fewer, slower snowmen, softer hits,
+## longer gaps: for little ones), BRAVE (as before), HARD (more and quicker). Every spawn draws from its own seeded
+## stream, so a gentle wave is the brave one with fewer snowmen and a hard one adds a few: check_modes() proves gentle
+## <= brave <= hard wave by wave and that no wave is a cliff after the one before (threat()).
 ## check(s) is the validator: gates are spread out (and in front at first), every wave brings its new
 ## kind (and nothing not yet met), the gaps are never too short, no wall gets swamped by snowmen from one
 ## gate at once, and a small child alone keeps the fort standing through the first waves (a simulation).
@@ -55,6 +59,23 @@ const TEAM_RATE := 2.4  # a VR player + a TV kid together hold the fort through 
 const TEAM_WAVES := 4
 const SWAMP_WINDOW := 6.0  # seconds: snowmen reaching one wall within this of each other count together
 const SWAMP_MAX: Array[int] = [3, 3, 4, 4, 4, 4, 4, 5, 5, 5]  # most at one wall at once, by wave (then the last)
+## Mode numbers: count (snowmen per wave), gap (time between them; wave 1 is never quicker than brave), speed (walking),
+## hit (their snowballs and bashing on the walls). brave is the game as it was.
+## Who the validator promises each mode to: kid (a lone thrower's hits per second who holds the first kid_waves),
+## team (a VR player + a TV kid hold waves up to TEAM_WAVES), swamp (SWAMP_MAX scaled). Gentle promises more (a slower
+## little one holds three waves), hard is for big kids and grown-ups.
+const MODE_NUM := {
+	"gentle": {"count": 0.7, "gap": 1.3, "speed": 0.85, "hit": 0.6, "kid": 0.75, "kid_waves": 3, "team": 2.0, "swamp": 1.0},
+	"brave": {"count": 1.0, "gap": 1.0, "speed": 1.0, "hit": 1.0, "kid": KID_RATE, "kid_waves": KID_WAVES, "team": TEAM_RATE, "swamp": 1.0},
+	"hard": {"count": 1.25, "gap": 0.85, "speed": 1.12, "hit": 1.25, "kid": 1.2, "kid_waves": KID_WAVES, "team": 3.2, "swamp": 1.25},
+}
+const MODES: Array[String] = ["gentle", "brave", "hard"]
+const CLIFF := 1.6  # a wave's threat is at most this times the last plain wave's (bosses: their own fight)
+const ORDER_SLACK := 1.05  # gentle <= brave <= hard wave by wave (a seeded mix can differ a little)
+const CALM := 0.8  # a wave under this threat (snowballs needed per second) is calm whatever came before
+const JUMP := 2.0  # one siege's wave (from 3 on) is at most this times the last plain wave's threat (else rerolled)
+const TV_HIT := 1.6  # == player.gd's simple throw damage
+const CLIFF_START := 2.5  # wave 2 after wave 1 (wave 1 is a slow practice trickle by design)
 
 ## Village: igloos round the square in front of the fort (two staggered rows, either side of the big tree).
 const VILLAGE_SLOTS := 24
@@ -74,19 +95,25 @@ static func level(igloos: int) -> int:
 	return clampi(1 + igloos / 5, 1, MAX_LEVEL)
 
 
+static func mode_num(mode: String) -> Dictionary:
+	return MODE_NUM.get(mode, MODE_NUM["brave"])
+
+
 ## The siege for a seed. A try that check() finds unfair is thrown away and the next try (a sub-seed) is
 ## used, so every machine still gets the same siege; the gentlest try is the last resort.
-static func siege(seed_value: int, lv: int, daily: bool = false) -> Dictionary:
+static func siege(seed_value: int, lv: int, daily: bool = false, mode: String = "brave") -> Dictionary:
 	var s := {}
+	if not MODE_NUM.has(mode):
+		mode = "brave"
 	for attempt in TRIES:
-		s = _make(seed_value if attempt == 0 else Seeded.derive(seed_value, "try%d" % attempt), lv, daily, attempt)
+		s = _make(seed_value if attempt == 0 else Seeded.derive(seed_value, "try%d" % attempt), lv, daily, attempt, mode)
 		if check(s).is_empty():
 			break
 	s.seed = seed_value
 	return s
 
 
-static func _make(seed_value: int, lv: int, daily: bool, attempt: int) -> Dictionary:
+static func _make(seed_value: int, lv: int, daily: bool, attempt: int, mode: String) -> Dictionary:
 	lv = clampi(lv, 1, MAX_LEVEL)
 	var r := Seeded.rng(seed_value, "siege")
 	var order := Seeded.shuffled(r, NEW_KINDS.duplicate())
@@ -94,7 +121,7 @@ static func _make(seed_value: int, lv: int, daily: bool, attempt: int) -> Dictio
 	for i in NEW_WAVES.size():
 		news[NEW_WAVES[i]] = order[i]
 	var s := {"seed": seed_value, "level": lv, "daily": daily, "want": r.randi_range(0, WANTS.size() - 1),
-		"new": news, "gentle": attempt, "waves": []}
+		"new": news, "gentle": attempt, "mode": mode, "waves": []}
 	if daily:
 		s.want = Seeded.derive(seed_value, "want") % WANTS.size()
 	for n in range(1, FINALE + 1):
@@ -115,6 +142,16 @@ static func new_kind(s: Dictionary, n: int) -> String:
 	return String((s.new as Dictionary).get(n, ""))
 
 
+## Wave n's step on the rising curve: boss waves are their own fight, so the plain wave after one carries on from the
+## plain wave before it (no double step).
+static func curve_n(n: int) -> int:
+	var c := n
+	for m in range(1, n):
+		if boss_for(m) != "":
+			c -= 1
+	return c
+
+
 static func boss_for(n: int) -> String:
 	if n == FINALE:
 		return "yeti"
@@ -124,9 +161,11 @@ static func boss_for(n: int) -> String:
 
 
 ## How many snowmen wave n sends (before the party-size bonus main.gd adds).
-static func wave_count(n: int, lv: int, boss: String) -> int:
-	var base: int = [3, 5, 6][n - 1] if n <= 3 else 5 + n
-	var c := roundi(base * (1.0 + 0.1 * (clampi(lv, 1, MAX_LEVEL) - 1) * (0.0 if n <= 2 else 1.0)))  # always a gentle start
+static func wave_count(n: int, lv: int, boss: String, mode: String = "brave") -> int:
+	var cn := curve_n(n)
+	var base: int = [3, 5, 6, 8][n - 1] if n <= 4 else 5 + cn - (3 if n == GIANT_WAVE else 0)  # (the giants' wave: fewer, bigger)
+	var c := roundi(base * (1.0 + 0.1 * (clampi(lv, 1, MAX_LEVEL) - 1) * clampf((n - 2) * 0.5, 0.0, 1.0)))  # always a gentle start
+	c = maxi(3, roundi(c * float(mode_num(mode).count)))
 	return maxi(1, c / 2 if boss != "" else c)
 
 
@@ -153,34 +192,41 @@ static func _make_wave(s: Dictionary, n: int) -> Dictionary:
 		if n > int(w):
 			pool.append(String(s.new[w]))
 	pool.sort()
-	var count := wave_count(n, lv, boss)
+	var mode := String(s.get("mode", "brave"))
+	var count := wave_count(n, lv, boss, mode)
 	var need := 0
 	if nk != "":
-		need = mini(count - 1, 2 if nk == "giant" else 3)
+		need = mini(count - 1, new_count(nk, mode))
 	# Where in the wave the new kind's arrivals go: spread out, never first (a plain one leads the way).
 	var new_at := {}
 	for k in need:
 		new_at[1 + int(float(k) * float(count - 1) / float(need))] = true
 	var spawns: Array = []
 	var first_gate := r.randi_range(0, gates.size() - 1)
-	var base_gap := 3.0 if n == 1 else (2.2 if n == 2 else maxf(MIN_GAP, (1.8 - n * 0.1) * (1.0 - 0.05 * (lv - 1))))
+	var base_gap := maxf(MIN_GAP, (0.6 + 2.4 * pow(0.8, curve_n(n) - 1)) * (1.0 - 0.05 * (lv - 1) * (0.0 if n <= 2 else 1.0)))  # 3 s, 2.5, 2.1, ... 0.8 at wave 12
 	base_gap *= 1.0 + 0.12 * gentle
+	var gap_k := float(mode_num(mode).gap)
+	base_gap *= maxf(1.0, gap_k) if n <= 1 else gap_k  # (wave 1 is a gentle trickle in every mode)
+	if n == GIANT_WAVE:
+		base_gap *= 1.3  # the giants' wave: room round the big ones
 	for i in count:
+		var ri := Seeded.rng(int(s.seed), "wave%d spawn%d" % [n, i])  # each spawn its own stream: modes share them
 		var kind := "snowman"
+		var roll := ri.randf()
 		if new_at.has(i):
 			kind = nk
-		elif not pool.is_empty() and r.randf() >= 0.55:
-			kind = String(Seeded.pick(r, pool))
-		var gap := maxf(MIN_GAP, base_gap * r.randf_range(0.85, 1.2))
+		elif not pool.is_empty() and roll >= 0.55:
+			kind = String(Seeded.pick(ri, pool))
+		var gap := maxf(MIN_GAP, base_gap * ri.randf_range(0.85, 1.2))
 		if i > 0 and i % 5 == 0:
 			gap += 1.5  # a breather
 		if i == 0:
 			gap = 0.5
 		# Gates take turns (now and then one goes twice), so no wall gets every snowman.
 		var gate := (i + first_gate) % gates.size()
-		if r.randf() < 0.25 - 0.08 * gentle:
-			gate = r.randi_range(0, gates.size() - 1)
-		spawns.append([snappedf(gap, 0.01), kind, gate, snappedf(r.randf_range(-MAX_JITTER, MAX_JITTER), 0.001)])
+		if ri.randf() < 0.25 - 0.08 * gentle:
+			gate = ri.randi_range(0, gates.size() - 1)
+		spawns.append([snappedf(gap, 0.01), kind, gate, snappedf(ri.randf_range(-MAX_JITTER, MAX_JITTER), 0.001)])
 	return {"n": n, "gates": gates, "boss": boss, "spawns": spawns, "boss_gate": r.randi_range(0, gates.size() - 1)}
 
 
@@ -201,8 +247,8 @@ static func seg_of(pos: Vector3) -> int:
 
 
 ## A snowman's walking speed in wave n (== snowman.gd setup + main._spawn_snowman's gentle start).
-static func speed_of(kind: String, n: int) -> float:
-	var v := float(KINDS[kind].speed) * (1.0 + minf(n, 12) * 0.025)
+static func speed_of(kind: String, n: int, mode: String = "brave") -> float:
+	var v := float(KINDS[kind].speed) * (1.0 + minf(n, 12) * 0.025) * float(mode_num(mode).speed)
 	if kind == "snowman" and n <= 2:
 		v *= 0.55 if n <= 1 else 0.8
 	return v
@@ -220,6 +266,10 @@ static func _ang(a: float, b: float) -> float:
 static func check(s: Dictionary) -> Array[String]:
 	var why: Array[String] = []
 	var waves: Array = s.get("waves", [])
+	var mode := String(s.get("mode", "brave"))
+	if not MODE_NUM.has(mode):
+		why.append("no such mode %s" % mode)
+		mode = "brave"
 	if waves.size() != FINALE:
 		why.append("%d waves planned (want %d)" % [waves.size(), FINALE])
 		return why
@@ -268,25 +318,39 @@ static func check(s: Dictionary) -> Array[String]:
 				why.append("wave 1 isn't a gentle trickle")
 		if n <= 2 and news > 0:
 			why.append("wave %d brings something new" % n)
-		if nk != "" and news < (2 if nk == "giant" else 3) and spawns.size() > (2 if nk == "giant" else 3):
+		var want_new := new_count(nk, mode)
+		if nk != "" and news < want_new and spawns.size() > want_new:
 			why.append("wave %d brings only %d %s" % [n, news, nk])
-		var swamp := _swamp(w)
-		var most: int = SWAMP_MAX[mini(n, SWAMP_MAX.size()) - 1]
+		var swamp := _swamp(w, mode)
+		var most: int = ceili(SWAMP_MAX[mini(n, SWAMP_MAX.size()) - 1] * float(mode_num(mode).swamp))
 		if swamp > most:
 			why.append("wave %d swamps one wall with %d snowmen (most %d)" % [n, swamp, most])
-		if n <= KID_WAVES:
-			var left := hold(w, KID_RATE, KID_SPOT)
+		if n <= int(mode_num(mode).kid_waves):
+			var left := hold(w, float(mode_num(mode).kid), KID_SPOT, mode)
 			if left < KID_KEEP:
 				why.append("wave %d: a small child alone loses a wall (%.0f%% left)" % [n, left * 100.0])
 		if n <= TEAM_WAVES and String(w.boss) == "":
-			var left_t := hold(w, TEAM_RATE, KID_SPOT)
+			var left_t := hold(w, float(mode_num(mode).team), KID_SPOT, mode)
 			if left_t <= 0.0:
 				why.append("wave %d: a VR player + a child lose a wall" % n)
+	# No cliffs: from wave 3 on, a wave is at most JUMP times the last plain wave (calm waves don't count).
+	var prev := 0.0
+	for n in range(1, FINALE + 1):
+		var t := threat(s, n)
+		if n >= 3 and prev > 0.0 and t > maxf(prev, CALM) * JUMP:
+			why.append("wave %d is a cliff (%.0f%% harder than the wave before)" % [n, (t / maxf(prev, CALM) - 1.0) * 100.0])
+		if boss_for(n) == "":
+			prev = t
 	return why
 
 
+## How many of the new kind its wave brings (giants 2, others 3; gentle one fewer).
+static func new_count(kind: String, mode: String) -> int:
+	return (2 if kind == "giant" else 3) - (1 if mode == "gentle" else 0)
+
+
 ## Arrival times at the walls: [[t, kind, segment, hp], ...] (spawn time + the walk in).
-static func arrivals(w: Dictionary) -> Array:
+static func arrivals(w: Dictionary, mode: String = "brave") -> Array:
 	var out: Array = []
 	var t := 0.0
 	var n: int = int(w.n)
@@ -294,14 +358,14 @@ static func arrivals(w: Dictionary) -> Array:
 		t += float(sp[0])
 		var kind := String(sp[1])
 		var pos := spawn_pos(w, sp)
-		var walk := (SPAWN_R - FORT_RADIUS - 0.8) / speed_of(kind, n)
+		var walk := (SPAWN_R - FORT_RADIUS - 0.8) / speed_of(kind, n, mode)
 		out.append([t + walk, kind, seg_of(pos), hp_of(kind, n), t])
 	return out
 
 
 ## The most snowmen reaching one wall within SWAMP_WINDOW seconds of each other.
-static func _swamp(w: Dictionary) -> int:
-	var arr := arrivals(w)
+static func _swamp(w: Dictionary, mode: String = "brave") -> int:
+	var arr := arrivals(w, mode)
 	var most := 0
 	for a in arr:
 		var c := 0
@@ -314,8 +378,9 @@ static func _swamp(w: Dictionary) -> int:
 
 ## Simulate one thrower (hits per second `rate`, `spot` seconds to see each snowman) knocking the
 ## snowmen over in the order they come in: the share of the weakest wall left at the end (<= 0: it fell).
-static func hold(w: Dictionary, rate: float, spot: float) -> float:
-	var arr := arrivals(w)
+static func hold(w: Dictionary, rate: float, spot: float, mode: String = "brave") -> float:
+	var arr := arrivals(w, mode)
+	var hit := float(mode_num(mode).hit)
 	arr.sort_custom(func(a: Array, b: Array) -> bool: return float(a[4]) < float(b[4]))
 	var seg := []
 	seg.resize(SEGMENTS)
@@ -327,12 +392,90 @@ static func hold(w: Dictionary, rate: float, spot: float) -> float:
 		var at := float(a[0])
 		if kill_t > at:
 			var d: Dictionary = KINDS[String(a[1])]
-			var dmg := float(d.get("crash", 0.0)) + float(d.get("wall_dps", 0.0)) * (kill_t - at) * (3.0 if String(a[1]) == "bunny" else 1.0)
+			var dmg := (float(d.get("crash", 0.0)) + float(d.get("wall_dps", 0.0)) * (kill_t - at) * (3.0 if String(a[1]) == "bunny" else 1.0)) * hit
 			seg[int(a[2])] = float(seg[int(a[2])]) - dmg
 	var low := SEG_MAX
 	for v in seg:
 		low = minf(low, float(v))
 	return low / SEG_MAX
+
+
+## How hard wave n of a siege is: the snowballs it takes to knock its snowmen over (a TV throw does TV_HIT; balloons
+## need popping first), per second of the wave (its spawns, the walk in, and a boss's fight at the team's pace), times
+## how hard they hit.
+static func threat(s: Dictionary, n: int) -> float:
+	var w := wave_plan(s, n)
+	var mode := String(s.get("mode", "brave"))
+	var num := mode_num(mode)
+	var throws := 0.0
+	var span := 0.0
+	for sp in w.spawns:
+		span += float(sp[0])
+		throws += throws_for(String(sp[1]), n)
+	var boss := String(w.boss)
+	var fight := 0.0
+	if boss != "":
+		throws += throws_for(boss, n)
+		fight = throws_for(boss, n) / float(num.team)
+	var walk := (SPAWN_R - FORT_RADIUS - 0.8) / speed_of("snowman", n, mode)
+	return throws * float(num.hit) / (span + walk + fight)
+
+
+## Snowballs that knock one spawn over (a bunny spawn is a trio, a balloon snowman's balloons pop first).
+static func throws_for(kind: String, n: int) -> float:
+	var one := ceilf(float(KINDS[kind].hp) * (1.0 + (n - 1) * 0.1) / TV_HIT)
+	return one * (3.0 if kind == "bunny" else 1.0) + float(KINDS[kind].get("balloons", 0))
+
+
+## Problems with the three modes of one seed (empty = fair): every wave gentle <= brave <= hard (snowmen and threat).
+## (Each mode's own siege is checked by check(): no cliffs; curve() gives the average rise over many seeds.)
+static func check_modes(seed_value: int, lv: int, daily: bool = false) -> Array[String]:
+	var why: Array[String] = []
+	var sieges := {}
+	for mode in MODES:
+		sieges[mode] = siege(seed_value, lv, daily, mode)
+	for n in range(1, FINALE + 1):
+		for k in 2:
+			var a: Dictionary = sieges[MODES[k]]
+			var b: Dictionary = sieges[MODES[k + 1]]
+			var ca := (wave_plan(a, n).spawns as Array).size()
+			var cb := (wave_plan(b, n).spawns as Array).size()
+			if ca > cb:
+				why.append("wave %d: %s sends %d snowmen, %s only %d" % [n, MODES[k], ca, MODES[k + 1], cb])
+			if int(a.gentle) == int(b.gentle) and threat(a, n) > threat(b, n) * ORDER_SLACK:  # (a rerolled siege is another mix)
+				why.append("wave %d: %s is harder than %s (%.2f > %.2f)" % [n, MODES[k], MODES[k + 1], threat(a, n), threat(b, n)])
+	return why
+
+
+## The average threat of waves 1..FINALE in a mode over `count` seeds at level lv (the rising curve).
+static func curve(mode: String, lv: int, count: int = 60) -> Array[float]:
+	var out: Array[float] = []
+	out.resize(FINALE)
+	out.fill(0.0)
+	for k in count:
+		var s := siege(1000 + k * 7919, lv, false, mode)
+		for n in range(1, FINALE + 1):
+			out[n - 1] += threat(s, n) / count
+	return out
+
+
+## Problems with a mode's average curve (empty = it rises smoothly): every plain wave at least nearly as hard as the
+## plain wave before (bosses are their own fight), never more than CLIFF times it (CLIFF_START for wave 2).
+static func check_curve(c: Array[float]) -> Array[String]:
+	var why: Array[String] = []
+	var prev := 0.0
+	for n in range(1, c.size() + 1):
+		var t := c[n - 1]
+		if prev > 0.0 and boss_for(n) == "":
+			if t < prev * 0.9:
+				why.append("wave %d is easier than the wave before (%.2f < %.2f)" % [n, t, prev])
+			if t > prev * (CLIFF_START if n == 2 else CLIFF):
+				why.append("wave %d jumps %.0f%% harder" % [n, (t / prev - 1.0) * 100.0])
+		elif prev > 0.0 and t > prev * CLIFF:
+			why.append("boss wave %d is %.0f%% harder than the wave before" % [n, (t / prev - 1.0) * 100.0])
+		if boss_for(n) == "":
+			prev = t
+	return why
 
 
 # --- The village -------------------------------------------------------------------------------

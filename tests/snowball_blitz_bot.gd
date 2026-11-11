@@ -14,6 +14,8 @@ extends Node
 ## before their first throw, and look away from the snowmen a few times, so the cues show. Prints
 ## "BOT: ERROR instruction text" if a headline (TV or VR) is anything but a short title / score word,
 ## or a tip spot (a view's prompt line, the help line, the hint panel) shows any words.
+## PICKS: while pick orbs float (core/pick_orbs.gd), every bot player throws at its own orb (the VR one too) instead of
+## at snowmen; the checks need the MODE pick (first game), BOBO'S GIFTS after cleared waves, and the boss tells.
 
 var main
 var t := 0.0
@@ -126,6 +128,7 @@ func _content_script() -> void:
 		script_step += 1
 
 
+var saw := {}  # picks: orbs shown, warning rings, gifts synced
 var practice_seen := false
 var kinds_seen := {}
 ## Simple mode: skip ahead if asked, note when practice ends and which kinds each wave brings,
@@ -208,13 +211,14 @@ func _drive_vr(p, delta: float) -> void:
 			print("Bot VR: the ghost hand is showing scoop-and-throw")
 		return
 	vr_t += delta
-	var best = null
+	var best = _orb_for(p)
 	var best_d := INF
-	for s in get_tree().get_nodes_in_group("snowmen"):
-		var dd: float = s.global_position.distance_to(p.global_position)
-		if dd < best_d:
-			best_d = dd
-			best = s
+	if best == null:
+		for s in get_tree().get_nodes_in_group("snowmen"):
+			var dd: float = s.global_position.distance_to(p.global_position)
+			if dd < best_d:
+				best_d = dd
+				best = s
 	if best == null:
 		p.bot_squeeze = 0.0
 		return
@@ -258,9 +262,30 @@ func _report() -> void:
 		print("Bot:   simple practice=%s vr_hits=%d props=%s ghost_hand=%s" % [main.practice, main.vr_hits,
 			main.props.touched if main.props else {}, main.ghost_hand != null and main.ghost_hand.visible])
 	print("Bot:   kinds=%s event=%s upgrades=%s won=%s night=%.2f boss=%s" % [kinds, d.event_name, d.upgrades, d.won, d.night, main.boss_text()])
+	var gl := {}
+	for p in main.players:
+		if not p.gifts.is_empty():
+			gl[p.index] = p.gifts
+	print("Bot:   picks mode=%s stage=%s orbs=%d rings=%d gifts=%s taken=%s" % [main.game_mode, main.pick_stage, main.orbs.orbs.size(),
+		main.rings.count(), gl, main.gifts_taken])
+	if main.orbs.orbs.size() > 0:
+		saw["orbs"] = true
+	if main.rings.count() > 0:
+		saw["rings"] = true
+	if not gl.is_empty():
+		saw["gifts"] = true
 	print("t=%.0f mode=%s playing=%d wave=%d score=%d fort=%d%% snowmen=%d cocoa=%d balls=%d over=%s | %s" % [t, main.net.mode, main.party_size(), main.wave, main.score,
 		int(main.fort_fraction() * 100.0), get_tree().get_nodes_in_group("snowmen").size(), get_tree().get_nodes_in_group("cocoa").size(),
 		main.get_children().filter(func(c): return c.get("spin") != null).size(), main.game_over, ", ".join(ps)])
+
+
+## The pick orb a bot player goes for (each player a different one), or null.
+func _orb_for(p):
+	if main.orbs == null or main.orbs.orbs.is_empty():
+		return null
+	var list: Array = main.orbs.orbs
+	var o = list[(p.index + main.wave) % list.size()]
+	return o if is_instance_valid(o) and o.is_inside_tree() else null
 
 
 ## Walk to the most damaged wall and pack it. Returns false when nothing needs packing.
@@ -305,15 +330,18 @@ func _throw_role(p, delta: float) -> void:
 			best = s
 	var c: float = cycle.get(p.index, 0.0) + delta
 	cycle[p.index] = c
+	var orb = _orb_for(p)
+	if orb != null:
+		best = orb  # a pick: throw at this player's orb
 	if main.simple and main.practice and t < 4.0:
 		p.bot_throw = false  # a moment first: the throw cue (button + snowball) shows
 		return
-	if main.simple and best != null and _look_away(p, best):
+	if main.simple and best != null and orb == null and _look_away(p, best):
 		return
 	if best == null:
 		p.bot_throw = false
 		return
-	var target: Vector3 = best.global_position + Vector3.UP * best.height * 0.45
+	var target: Vector3 = best.global_position if orb != null else best.global_position + Vector3.UP * best.height * 0.45
 	var eye: Vector3 = p.global_position + Vector3.UP * 1.5
 	var flat := Vector2(target.x - eye.x, target.z - eye.z)
 	p.yaw = atan2(-flat.x, -flat.y)
@@ -355,6 +383,13 @@ func _look_away(p, best) -> bool:
 
 ## Visual teaching: picture cues instead of words; any instruction text in a tip spot is an error.
 func _note_cues() -> void:
+	if main.orbs.orbs.size() > 0:
+		saw["orbs"] = true
+	if main.rings.count() > 0:
+		saw["rings"] = true
+	for p in main.players:
+		if not p.gifts.is_empty():
+			saw["gifts"] = true
 	if main.ghost_hand != null and main.ghost_hand.visible:
 		cues["ghost_hand"] = true
 	for s in get_tree().get_nodes_in_group("snowmen"):
@@ -512,7 +547,14 @@ func _pad_test() -> void:
 func _check_siege() -> void:
 	if main.net.mode == "client":
 		_bot_check(main.village_count >= 0, "the TV machine got Bobo's village (%d igloos)" % main.village_count)
+		_bot_check(saw.has("orbs") or main.wave < 2, "the TV machine showed the pick orbs")
+		_bot_check(saw.has("gifts") or main.wave < 3, "the TV machine got everyone's gifts")
 		return
+	_bot_check(main.game_mode in ["gentle", "brave", "hard"], "a mode (%s)" % main.game_mode)
+	_bot_check(Engine.has_meta("sb_mode_set") or OS.has_environment("SB_MODE"), "the MODE pick happened")
+	_bot_check(not main.gifts_taken.is_empty() or main.wave < 3, "Bobo's gifts were picked (%s)" % main.gifts_taken)
+	var boss_wave: bool = OS.has_environment("BOT_WAVE") and int(OS.get_environment("BOT_WAVE")) in [7, 10]
+	_bot_check(saw.has("rings") or not boss_wave, "the boss told its attacks with rings")
 	_bot_check(not main.siege.is_empty(), "a seeded siege (seed %s)" % str(main.siege.get("seed", "-")))
 	_bot_check(main.logged, "a RUN line at game over")
 	_bot_check(main.built or main.wave < 2, "an igloo built after %d waves (village %d)" % [main.wave, main.village_count])

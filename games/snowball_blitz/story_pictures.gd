@@ -6,7 +6,8 @@ extends RefCounted
 ## (Snowmen use the shared "snowman", snow bunnies Whack-a-Mole's "bunny", balloon snowmen Coach's "balloon",
 ## Bobo's fish Fishing Lake's "fish": any picture works in every game.)
 
-const NAMES: Array[String] = ["polarbear", "igloo", "sledman", "snowking", "yeti", "cocoamug", "scarf", "mittens"]
+const NAMES: Array[String] = ["polarbear", "igloo", "sledman", "snowking", "yeti", "cocoamug", "scarf", "mittens",
+	"bigsnowball", "snowwall", "warmhat", "megasnowball", "aimstar"]  # (the last five: Bobo's gifts, gifts.gd)
 
 const SNOW := Color(0.96, 0.98, 1.0)
 const SHADE := Color(0.78, 0.86, 0.96)
@@ -103,6 +104,49 @@ static func draw(pic, kind: String, t: float, bob: float, color: Color) -> void:
 				pic._poly([[cx - 0.13, 0.72 + bob], [cx + 0.13, 0.72 + bob], [cx + 0.13, 0.8 + bob], [cx - 0.13, 0.8 + bob]], Color.WHITE)
 				pic._circle(cx, 0.5 + bob, 0.03, Color(1, 1, 1, 0.6))
 
+		"bigsnowball":  # BIG BALLS: a huge round snowball with a little one beside it, sparkling
+			pic._circle(0.46, 0.58 + bob, 0.3, SHADE)
+			pic._circle(0.43, 0.55 + bob, 0.28, SNOW)
+			pic._circle(0.35, 0.45 + bob, 0.07, Color(1, 1, 1, 0.9))
+			pic._circle(0.82, 0.8 + bob, 0.08, SNOW)
+			for i in 3:
+				var a := t * 2.0 + i * TAU / 3.0
+				pic._circle(0.46 + cos(a) * 0.38, 0.55 + sin(a) * 0.38 + bob, 0.02 + 0.01 * sin(t * 6.0 + i), color)
+		"snowwall":  # WALLS: a snow-brick fort wall with fresh snow falling onto it
+			pic._poly([[0.1, 0.86], [0.9, 0.86], [0.9, 0.5 + bob], [0.1, 0.5 + bob]], SNOW)
+			for row in 3:
+				var y := 0.62 + row * 0.12 + bob * (1.0 - row / 3.0)
+				pic._poly([[0.1, y], [0.9, y], [0.9, y + 0.015], [0.1, y + 0.015]], SHADE)
+				for col in 4:
+					var x := 0.1 + (col + 0.5 * (row % 2)) * 0.22
+					pic._poly([[x, y - 0.12], [x + 0.015, y - 0.12], [x + 0.015, y], [x, y]], SHADE)
+			pic._poly([[0.08, 0.5 + bob], [0.92, 0.5 + bob], [0.88, 0.44 + bob], [0.12, 0.44 + bob]], Color.WHITE)
+			for i in 4:
+				var y2 := fmod(t * 0.5 + i * 0.25, 1.0) * 0.36
+				pic._circle(0.2 + i * 0.2, 0.06 + y2, 0.025, color)
+		"warmhat":  # WARM HAT: a woolly bobble hat (in `color`) with a stripe
+			pic._poly([[0.2, 0.7 + bob], [0.8, 0.7 + bob], [0.76, 0.46 + bob], [0.64, 0.3 + bob], [0.5, 0.26 + bob], [0.36, 0.3 + bob], [0.24, 0.46 + bob]], color)
+			pic._poly([[0.22, 0.56 + bob], [0.78, 0.56 + bob], [0.79, 0.62 + bob], [0.21, 0.62 + bob]], Color.WHITE)
+			pic._poly([[0.16, 0.7 + bob], [0.84, 0.7 + bob], [0.84, 0.82 + bob], [0.16, 0.82 + bob]], color.darkened(0.25))
+			for i in 6:
+				pic._poly([[0.2 + i * 0.11, 0.7 + bob], [0.23 + i * 0.11, 0.7 + bob], [0.23 + i * 0.11, 0.82 + bob], [0.2 + i * 0.11, 0.82 + bob]], color.darkened(0.4))
+			pic._circle(0.5, 0.22 + bob + sin(t * 4.0) * 0.015, 0.08, Color.WHITE)
+		"megasnowball":  # MEGA: a giant glowing blue snowball with rays
+			for i in 8:
+				var a := i * TAU / 8.0 + t * 0.6
+				pic._poly([[0.5 + cos(a) * 0.3, 0.52 + sin(a) * 0.3 + bob], [0.5 + cos(a + 0.12) * 0.44, 0.52 + sin(a + 0.12) * 0.44 + bob],
+					[0.5 + cos(a - 0.12) * 0.44, 0.52 + sin(a - 0.12) * 0.44 + bob]], Color(color.r, color.g, color.b, 0.7))
+			pic._circle(0.5, 0.52 + bob, 0.3, color)
+			pic._circle(0.5, 0.52 + bob, 0.24, Color(0.85, 0.95, 1.0))
+			pic._circle(0.42, 0.44 + bob, 0.06, Color.WHITE)
+		"aimstar":  # AIM HELP: a target with a snowball flying into the middle
+			pic._circle(0.56, 0.52 + bob, 0.32, color)
+			pic._circle(0.56, 0.52 + bob, 0.23, Color.WHITE)
+			pic._circle(0.56, 0.52 + bob, 0.14, color)
+			pic._circle(0.56, 0.52 + bob, 0.06, Color.WHITE)
+			var k := fmod(t * 0.8, 1.0)
+			pic._circle(0.1 + k * 0.42, 0.3 + k * 0.2 + bob, 0.06, SNOW)
+			pic._poly([[0.02 + k * 0.42, 0.27 + k * 0.2 + bob], [0.08 + k * 0.42, 0.29 + k * 0.2 + bob], [0.08 + k * 0.42, 0.31 + k * 0.2 + bob]], Color(1, 1, 1, 0.6))
 
 ## A snowman standing on (x, foot), `k` times the normal size.
 static func _snowman(pic, x: float, foot: float, k: float) -> void:

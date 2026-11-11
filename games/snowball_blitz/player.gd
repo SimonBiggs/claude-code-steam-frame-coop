@@ -94,6 +94,7 @@ var held_icicle := false  # simple mode: an icicle snapped off the rack is in th
 var icicle_mesh: MeshInstance3D
 var tv_throws := 0  # simple mode: the practice prompt hides after the first throw
 var mega := false  # MEGA SNOWBALL pickup: the next throw is a giant one (host decides, mirrored)
+var gifts := {}  # BOBO'S GIFTS this player took (gifts.gd stats; the host decides, the sticky "gifts" event mirrors them)
 
 # Networked co-op.
 var remote := false
@@ -511,19 +512,19 @@ func _simple_throw(held: bool) -> void:
 		marker.visible = false
 	if not held or throw_cd > 0.0:
 		return
-	throw_cd = 0.45
+	throw_cd = 0.45 * gift("throw")  # (QUICK gifts)
 	throw_anim = 1.0
 	tv_throws += 1
 	if not vr:
 		main.cue_did(self, "throw")  # the throw cue (hud.gd) goes after two
 	var origin := _throw_origin()
-	var v := main.assist_aim(origin, _throw_velocity(0.55)) as Vector3
+	var v := main.assist_aim(origin, _throw_velocity(0.55), gift("aim")) as Vector3
 	if mega:
 		mega = false
 		main.player_throw(self, origin, v, main.MEGA_R, main.MEGA_DMG)
 		main.sound("whoosh", -2.0, 0.8)
 	else:
-		main.player_throw(self, origin, v, 0.14, 1.6)
+		main.player_throw(self, origin, v, 0.14 * gift("ball"), 1.6 * gift("ball"))  # (BIG BALLS gifts)
 		main.sound("dash", -6.0, 1.0)
 
 
@@ -640,7 +641,7 @@ func _vr_hands(delta: float) -> void:
 				hint_t = 0.0
 	else:
 		if down:
-			pack = minf(1.0, pack + delta / PACK_TIME)
+			pack = minf(1.0, pack + delta / (PACK_TIME * gift("throw")))
 			pack_pulse -= delta
 			if pack_pulse <= 0.0 and pack < 1.0:
 				pack_pulse = 0.22
@@ -674,9 +675,9 @@ func _vr_throw(now: float) -> void:
 	if v.length() > 2.0 and v.length() < 13.0:
 		v = v.normalized() * lerpf(13.0, v.length(), 0.3)
 	if v.length() > 2.0:
-		v = main.assist_aim(p_now, v)
-	var r := 0.09 + 0.07 * pack
-	var dmg := 1.5 + 2.5 * pack
+		v = main.assist_aim(p_now, v, gift("aim"))
+	var r := (0.09 + 0.07 * pack) * gift("ball")
+	var dmg := (1.5 + 2.5 * pack) * gift("ball")
 	var look := ""
 	if held_icicle:
 		held_icicle = false
@@ -693,6 +694,11 @@ func _vr_throw(now: float) -> void:
 	hand_r.trigger_haptic_pulse("haptic", 0.0, 0.7, 0.06, 0.0)
 	main.sound("dash", -4.0, 0.7 + v.length() * 0.015)
 	pack = 0.0
+
+
+## A gift stat of this player (gifts.gd; the plain value without gifts).
+func gift(stat: String) -> float:
+	return preload("res://games/snowball_blitz/gifts.gd").value(gifts, stat)
 
 
 ## Simple mode: the icicle snapped off the rack, held point-forward in the mitten.

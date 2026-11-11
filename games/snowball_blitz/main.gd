@@ -38,6 +38,15 @@ const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV p
 ## TODAY'S BLIZZARD: the first game each day is the same siege on every machine and builds a golden
 ## igloo. Telemetry: one RUN line per game and on quit. Networked: the host spawns the snowmen as before
 ## and sends the village and the story cards as events (every machine builds the igloos itself).
+##
+## PICKS (core/pick_orbs.gd: glowing picture orbs in a row in front of the fort; throw a snowball at one - the VR player
+## too - or walk into it): the first game of a visit picks GENTLE / BRAVE / HARD after the practice (SB_MODE=... skips
+## it; the family's last mode is saved and sits in the middle), which shapes the siege (siegegen.gd MODE_NUM) and the
+## bosses (bosses.gd). After every cleared wave BOBO'S GIFTS (gifts.gd): three seeded gift orbs, each player takes one
+## (they stack, capped); the middle one is taken for anyone who doesn't choose in time. BOSS TELLS (bosses.gd): the
+## Snow King's and the Yeti's big attacks glow and put a ring on the snow first (core/warn_rings.gd, every machine).
+## Events: "orbs" [stage, entries] and "gifts" {slot: gifts} are sticky (a late machine catches up), "take" [i, slot],
+## "warn" [boss net id, pos, radius, colour, secs]. SB_WAVE=n jumps to wave n after the picks (What's New "try").
 const SIMPLE_MODE := true
 const UiKit := preload("res://core/ui_kit.gd")
 const HudKit := preload("res://core/hud_kit.gd")
@@ -46,6 +55,13 @@ const Seeded := preload("res://core/seeded.gd")
 const Save := preload("res://core/save.gd")
 const Telemetry := preload("res://core/telemetry.gd")
 const StoryCard := preload("res://core/story_card.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
+const WarnRings := preload("res://core/warn_rings.gd")
+const Gifts := preload("res://games/snowball_blitz/gifts.gd")
+const Bosses := preload("res://games/snowball_blitz/bosses.gd")
+const ORB_ROW := Vector3(0.0, 0.0, -3.6)  # the pick orbs float in a row here (in front of the VR player, inside the fort)
+const ORB_GAP := 2.4
+const ORB_Y := 1.35
 const GAME_ID := "snowball_blitz"
 const VILLAGE_CHEERS := {1: "Our first igloo!", 5: "Five igloos!", 10: "Ten igloos!", 24: "A whole village!"}
 const KIND_PICS := {"snowman": "snowman", "sled": "sledman", "bunny": "bunny", "giant": "snowman", "balloon": "balloon", "king": "snowking", "yeti": "yeti"}
@@ -189,6 +205,14 @@ var village_days := 0
 var village_count := -1
 var story_queue: Array = []  # [line, pic, color]
 var story_t := 0.0
+var game_mode := "brave"  # gentle / brave / hard (the MODE pick; siegegen.gd MODE_NUM, bosses.gd)
+var orbs: PickOrbs  # the pick orbs (every machine draws them)
+var rings: WarnRings  # boss warning rings (every machine)
+var pick_stage := ""  # host / local: "mode" or "gift" while orbs are up
+var pick_ids: Array = []
+var pick_t := 0.0
+var picked := {}  # slot -> orb index (this pick)
+var gifts_taken := {}  # slot -> [gift ids] this game (telemetry)
 
 
 func _ready() -> void:
@@ -202,6 +226,12 @@ func _ready() -> void:
 		props = PropsScript.new()
 		props.main = self
 		add_child(props)
+	orbs = PickOrbs.new()
+	orbs.collision_layer = 0  # (snowballs ask orbs.nearest_hit: no physics bodies here)
+	orbs.on_hit = func(i: int, by) -> void: on_orb_hit(i, by)
+	add_child(orbs)
+	rings = WarnRings.new()
+	add_child(rings)
 	var menu := PauseMenuScript.new()
 	menu.main = self
 	add_child(menu)
@@ -210,6 +240,8 @@ func _ready() -> void:
 	net.main = self
 	add_child(net)
 	net.sticky_event("village")  # a machine that joins later gets the latest one (core/net.gd)
+	net.sticky_event("orbs")
+	net.sticky_event("gifts")
 	seats = ClassicSeats.new(self, {
 		"no_keys": -2,  # player.gd key_set -2: controller only
 		"free_actions": ["restart", "pause"],
@@ -683,21 +715,27 @@ func lob_velocity(from: Vector3, to: Vector3, speed: float) -> Vector3:
 
 ## VR aim assist (kids' arms get tired): a throw roughly towards a snowman (within 14 degrees) is bent
 ## onto a lob that reaches it at the same throwing speed, keeping a bit of the real throw.
-func assist_aim(from: Vector3, v: Vector3) -> Vector3:
+func assist_aim(from: Vector3, v: Vector3, extra_deg: float = 0.0) -> Vector3:
 	var flat := Vector3(v.x, 0, v.z)
 	if flat.length() < 0.5:
 		return v
-	var best_angle := deg_to_rad(14.0)
+	var best_angle := deg_to_rad(14.0 + extra_deg)  # (AIM HELP gifts reach further)
 	var best_pt := Vector3.ZERO
 	var found := false
-	for s in get_tree().get_nodes_in_group("snowmen"):
-		if s.dead:
+	var aims: Array = get_tree().get_nodes_in_group("snowmen")
+	if orbs != null:
+		aims = aims + orbs.orbs  # the pick orbs too (little ones hit their gift)
+	for s in aims:
+		if not is_instance_valid(s):
 			continue
-		var pt: Vector3 = s.global_position + Vector3.UP * s.height * 0.5
-		for bn in s.balloon_nodes:
-			if bn.visible:
-				pt = bn.global_position  # balloon snowmen: aim for the balloons
-				break
+		if not (s is PickOrbs.Orb) and s.dead:
+			continue
+		var pt: Vector3 = s.global_position if s is PickOrbs.Orb else s.global_position + Vector3.UP * s.height * 0.5
+		if not (s is PickOrbs.Orb):
+			for bn in s.balloon_nodes:
+				if bn.visible:
+					pt = bn.global_position  # balloon snowmen: aim for the balloons
+					break
 		var to: Vector3 = pt - from
 		to.y = 0.0
 		if to.length() < 1.0 or to.length() > 30.0:
@@ -734,6 +772,12 @@ func ball_step(b) -> bool:
 			puff(Vector3(p.x, 0.2, p.z), Color(1, 1, 1), 30, 0.12)
 		return true
 	if b.team == "p":
+		var oi := orbs.nearest_hit(p, r) if orbs != null and not orbs.orbs.is_empty() else -1
+		if oi >= 0:  # a pick orb: the thrower takes it (the host decides)
+			puff(p, orbs.color_of(oi), 12, 0.07)
+			if real and b.owner_index >= 0 and b.owner_index < players.size():
+				on_orb_hit(oi, players[b.owner_index])
+			return true
 		for s in get_tree().get_nodes_in_group("snowmen"):
 			if s.dead:
 				continue
@@ -766,7 +810,7 @@ func ball_step(b) -> bool:
 	if si >= 0:
 		puff(p, Color(0.8, 0.9, 1.0), 8, 0.07)
 		if real:
-			damage_segment(si, b.damage * 0.6)
+			damage_segment(si, b.damage * 0.6 * Gifts.team_armor(_party_gifts()))  # (WARM HAT gifts: the walls feel it less)
 		return true
 	for pl in players:
 		if pl.active and not pl.is_down and pl.hit_test(p, r):
@@ -889,6 +933,10 @@ func _spawn_snowman(kind: String, pos: Vector3, grace: float = 0.8) -> Node3D:
 		s.speed *= 0.55 if wave <= 1 else 0.8  # gentle start: slow waddlers
 		if wave <= 1:
 			s.throw_cd = 1.0e9  # wave 1: they don't throw yet
+	if SIMPLE_MODE and kind != "target":
+		var num := SiegeGen.mode_num(game_mode)
+		s.speed *= float(num.speed)  # gentle: slower, softer; hard: quicker, harder (siegegen.gd MODE_NUM)
+		s.hit_k = float(num.hit)
 	s.net_id = next_net_id()
 	s.spawn_grace = grace
 	s.position = pos
@@ -1001,6 +1049,8 @@ func _spawn_planned() -> void:
 		_spawn_snowman(kind, pos)
 	var nx: Array = spawns[wave_spawned % spawns.size()]
 	spawn_timer = float(nx[0]) / (1.0 + 0.15 * extra_players())
+	if wave_spawned == maxi(1, to_spawn / 2):
+		_give_megas(2)  # MEGA x2 gifts: another one halfway
 
 
 ## Simple mode without a siege (never in play; kept for old saves of the code): mostly plain snowmen.
@@ -1034,6 +1084,7 @@ func _start_simple_wave() -> void:
 	var nk := SiegeGen.new_kind(siege, wave)
 	if nk != "":
 		_story_for_all("Look out!", KIND_PICS.get(nk, "snowman"), Color(0.6, 0.85, 1.0))
+	_give_megas(1)
 	print("Wave %d started (simple, %d snowmen)" % [wave, to_spawn])
 	sound("wave")
 	var boss := _simple_boss()
@@ -1066,6 +1117,7 @@ func _end_simple_wave() -> void:
 		return
 	_show_center("HOORAY!", 2.0)
 	print("Wave %d cleared, fort %d%%" % [wave, int(fort_fraction() * 100.0)])
+	_begin_pick("gift")
 
 
 # --- Simple mode: target practice ----------------------------------------------
@@ -1154,6 +1206,10 @@ func _end_practice() -> void:
 	if ghost_hand:
 		ghost_hand.show_demo(false, Vector3.ZERO, Vector3.ZERO, 0.0)
 	print("Practice over (VR hits %d, %.0f s)" % [vr_hits, practice_t])
+	if SIMPLE_MODE and wave == 0 and not Engine.has_meta("sb_mode_set") and not OS.has_environment("SB_MODE"):
+		_begin_pick("mode")
+	else:
+		_skip_to_env_wave()
 
 
 ## VR practice: the ghost hand scoops and throws at the current target until the VR player has hit two.
@@ -1189,8 +1245,9 @@ func cue_learned(p, key: String) -> bool:
 
 ## Simple mode: the walls slowly snow back up by themselves (no packing rules to learn).
 func _regrow_walls(delta: float) -> void:
+	var rate := 1.5 + Gifts.team_walls(_party_gifts())  # (WALLS gifts: faster)
 	for i in SEGMENTS:
-		seg_hp[i] = minf(SEG_MAX, seg_hp[i] + 1.5 * delta)
+		seg_hp[i] = minf(SEG_MAX, seg_hp[i] + rate * delta)
 
 
 func _start_wave() -> void:
@@ -1400,6 +1457,9 @@ func _process(delta: float) -> void:
 			_update_practice(delta)
 			return
 		_regrow_walls(delta)
+		if pick_stage != "":
+			_pick_tick(delta)
+			return  # the orbs hold the game until everyone has picked (or the time runs out)
 	if net.mode == "host" and not net.connected and not SIMPLE_MODE:
 		if wave == 0:
 			director().howto()  # the VR player reads how to play while waiting
@@ -1946,6 +2006,8 @@ func debug_skip_to_wave(n: int) -> void:
 	to_spawn = 0
 	if practice:
 		_end_practice()
+	if pick_stage != "":
+		_finish_pick()
 	wave = n - 1
 	in_break = true
 	break_timer = 0.5
@@ -2051,7 +2113,7 @@ func on_p2_action(action: String, args: Array, index: int = 1) -> void:
 				return
 			stat_add(index, "thrown", 1)
 			var r: float = clampf(args[2], 0.05, 0.3)
-			var dmg: float = clampf(args[3], 0.5, 2.0)
+			var dmg: float = clampf(args[3], 0.5, 3.0)  # (BIG BALLS gifts: up to 1.6 x 1.6)
 			if p.mega and float(args[2]) >= MEGA_R * 0.9:
 				p.mega = false
 				r = MEGA_R
@@ -2212,7 +2274,26 @@ func apply_event(kind: String, args: Array) -> void:
 		"village":
 			_build_village(args[0], int(args[1]))
 		"story":
-			_story(args[0], args[1], args[2])
+			_story(args[0], args[1], args[2], args.size() > 3 and bool(args[3]))
+		"orbs":
+			if (args[1] as Array).is_empty():
+				orbs.clear()
+			else:
+				orbs.show_orbs(String(args[0]), args[1], ORB_ROW, ORB_GAP, ORB_Y)
+		"take":
+			_take_fx(int(args[0]), int(args[1]))
+		"gifts":
+			var all: Dictionary = args[0]
+			for k in all:
+				if int(k) >= 0 and int(k) < players.size():
+					players[int(k)].gifts = (all[k] as Dictionary).duplicate()
+			if args.size() > 1:
+				game_mode = String(args[1])
+		"warn":
+			var g = ghost_nodes.get("snowman:%d" % int(args[0]))
+			if g != null and is_instance_valid(g):
+				g.tell_glow(float(args[4]))
+			rings.warn(args[1], float(args[2]), args[3], float(args[4]))
 
 
 # --- HUD ---------------------------------------------------------------------
@@ -2355,7 +2436,8 @@ func _start_siege() -> void:
 		save.game_id = GAME_ID
 		# village: [[play-day built, golden, waves beaten, want], ...]; days: days played; daily: the date
 		# TODAY'S BLIZZARD was played.
-		save.defaults = {"village": [], "igloos": 0, "days": 0, "last_day": "", "daily": "", "games": 0, "best_wave": 0, "wins": 0}
+		save.defaults = {"village": [], "igloos": 0, "days": 0, "last_day": "", "daily": "", "games": 0, "best_wave": 0, "wins": 0,
+			"mode": "brave"}  # mode: the family's last GENTLE / BRAVE / HARD pick (the middle orb next visit)
 		add_child(save)
 	var today := Seeded.today()
 	var new_day := String(save.data.last_day) != today
@@ -2369,12 +2451,17 @@ func _start_siege() -> void:
 	var seed_value := SiegeGen.daily_seed() if daily else Seeded.fresh_seed()
 	if OS.has_environment("SB_SEED"):
 		seed_value = int(OS.get_environment("SB_SEED"))
-	siege = SiegeGen.siege(seed_value, lv, daily)
+	game_mode = OS.get_environment("SB_MODE") if SiegeGen.MODE_NUM.has(OS.get_environment("SB_MODE")) else String(save.data.mode)
+	if not SiegeGen.MODE_NUM.has(game_mode):
+		game_mode = "brave"
+	siege = SiegeGen.siege(seed_value, lv, daily, game_mode)
+	gifts_taken = {}
+	_send_gifts()
 	siege_t = 0.0
 	built = false
 	logged = false
-	print("Snowball Blitz siege: seed %d level %d%s want %s new %s gates %s | village %d igloos, day %d" % [
-		seed_value, lv, " (TODAY'S BLIZZARD)" if daily else "", SiegeGen.WANT_NAMES[int(siege.want)], str(siege.new),
+	print("Snowball Blitz siege: seed %d level %d%s mode %s want %s new %s gates %s | village %d igloos, day %d" % [
+		seed_value, lv, " (TODAY'S BLIZZARD)" if daily else "", game_mode, SiegeGen.WANT_NAMES[int(siege.want)], str(siege.new),
 		str((siege.waves as Array).map(func(w: Dictionary) -> int: return (w.gates as Array).size())),
 		(save.data.village as Array).size(), int(save.data.days)])
 	village_days = int(save.data.days)
@@ -2436,7 +2523,7 @@ func _log_run(end: String) -> void:
 		"daily": bool(siege.daily), "secs": snappedf(siege_t, 0.1), "score": score, "won": director().won,
 		"players": party_size(), "vr": not players.is_empty() and players[0].vr, "net": net.mode,
 		"fort": snappedf(fort_fraction(), 0.01), "igloos": (save.data.village as Array).size() if save else 0,
-		"days": int(save.data.days) if save else 0})
+		"days": int(save.data.days) if save else 0, "mode": game_mode, "gifts": _gift_counts()})
 
 
 func _exit_tree() -> void:
@@ -2530,14 +2617,19 @@ func _igloo(stage: int, golden: bool, flag: Color) -> Node3D:
 
 
 ## Host / local: a story card on every machine.
-func _story_for_all(line: String, pic: String, color: Color) -> void:
-	_story(line, pic, color)
+## urgent (the pick prompts): to the front of the queue, shown now.
+func _story_for_all(line: String, pic: String, color: Color, urgent: bool = false) -> void:
+	_story(line, pic, color, urgent)
 	if net and net.mode == "host":
-		net.event("story", [line, pic, color])
+		net.event("story", [line, pic, color, true] if urgent else [line, pic, color])
 
 
-func _story(line: String, pic: String, color: Color) -> void:
-	if story_queue.size() < 4:
+func _story(line: String, pic: String, color: Color, urgent: bool = false) -> void:
+	if urgent:
+		story_queue = story_queue.filter(func(q: Array) -> bool: return not (q.size() > 3 and bool(q[3])))  # an older prompt is stale now
+		story_queue.push_front([line, pic, color, true])
+		story_t = minf(story_t, 0.2)
+	elif story_queue.size() < 4:
 		story_queue.append([line, pic, color])
 
 
@@ -2556,3 +2648,178 @@ func _update_story(delta: float) -> void:
 		StoryCard.show(huds, opts)
 	if players[0].vr and players[0].xr_camera != null:
 		StoryCard.show_vr(self, players[0].xr_camera, opts)
+
+
+# --- Picks (core/pick_orbs.gd): MODE (team, the first game of a visit), BOBO'S GIFTS (each player, after every wave) ---
+
+func _pick_players() -> Array:
+	return players.filter(func(p) -> bool: return p.active and not p.ghost and (not p.remote or net.connected))
+
+
+func _party_gifts() -> Array:
+	var out: Array = []
+	for p in players:
+		if p.active and not p.gifts.is_empty():
+			out.append(p.gifts)
+	return out
+
+
+## Host / local: the pick orbs in front of the fort ("mode" after the practice on the first game of a visit, "gift"
+## after every cleared wave).
+func _begin_pick(stage: String) -> void:
+	if net.mode == "client":
+		return
+	var ids: Array = []
+	if stage == "mode":
+		ids = PickOrbs.mode_ids(game_mode)
+	else:
+		ids = Gifts.offer(int(siege.get("seed", 0)), wave, Gifts.unlocked(int(save.data.igloos) if save else 0))
+	if ids.is_empty() or _pick_players().is_empty():
+		return
+	pick_ids = ids
+	pick_stage = stage
+	pick_t = float(Gifts.WAIT[stage]) * (Gifts.GENTLE_WAIT if game_mode == "gentle" and stage != "mode" else 1.0)
+	picked = {}
+	var entries := _orb_entries(stage, ids)
+	orbs.show_orbs(stage, entries, ORB_ROW, ORB_GAP, ORB_Y)
+	if net.mode == "host":
+		net.event("orbs", [stage, entries])
+	var mid: Dictionary = entries[entries.size() / 2]
+	_story_for_all("Pick how brave!" if stage == "mode" else "Pick a gift!", String(mid.pic) if stage == "mode" else "gift",
+		mid.color, true)
+	sound("bell", -4.0, 1.2)
+	print("PICK %s: %s (%.0f s)" % [stage, ids, pick_t])
+
+
+static func _orb_entries(stage: String, ids: Array) -> Array:
+	var out: Array = []
+	for id in ids:
+		var d: Dictionary = PickOrbs.mode(String(id)) if stage == "mode" else Gifts.find(String(id))
+		out.append({"id": String(id), "name": String(d.get("name", id)), "pic": String(d.get("pic", "star")),
+			"color": d.get("color", Color.WHITE)})
+	return out
+
+
+func _pick_tick(delta: float) -> void:
+	pick_t -= delta
+	for tch in orbs.touches(players):
+		on_orb_hit(int(tch[0]), tch[1])
+	if pick_stage == "":
+		return
+	var all := true
+	for p in _pick_players():
+		if not picked.has(p.index):
+			all = false
+	if (pick_stage == "mode" and not picked.is_empty()) or all or pick_t <= 0.0:
+		_finish_pick()
+
+
+## Host / local: a player threw a snowball at (or walked into) orb i.
+func on_orb_hit(i: int, p) -> void:
+	if pick_stage == "" or net.mode == "client" or i < 0 or i >= pick_ids.size() or not (p in players):
+		return
+	if picked.has(p.index) or (pick_stage == "mode" and not picked.is_empty()):
+		return
+	picked[p.index] = i
+	_take_fx(i, p.index)
+	if net.mode == "host":
+		net.event("take", [i, p.index])
+	sound("pickup", 0.0, 1.0 + 0.1 * i)
+	var id := String(pick_ids[i])
+	match pick_stage:
+		"mode":
+			game_mode = id
+			if save != null:
+				save.data.mode = id
+				save.mark_dirty()
+		"gift":
+			Gifts.apply(p.gifts, id)
+			var mine: Array = gifts_taken.get(p.index, [])
+			mine.append(id)
+			gifts_taken[p.index] = mine
+			if id == "mega" and p.gifts.get("mega", 0.0) >= 1.0:
+				p.mega = true  # one to throw right away
+	print("PICK %s: P%d took %s" % [pick_stage, p.index + 1, id])
+
+
+## Every machine: slot took orb i (a dot in their colour circles it, a puff of the orb's colour).
+func _take_fx(i: int, slot: int) -> void:
+	var at := orbs.take(i, PLAYER_COLORS[slot % PLAYER_COLORS.size()])
+	if at != Vector3.INF:
+		puff(at, orbs.color_of(i), 16, 0.09)
+
+
+func _finish_pick() -> void:
+	var di := pick_ids.find(Gifts.default_pick(pick_ids))
+	if pick_stage == "mode":
+		if picked.is_empty() and not players.is_empty():
+			on_orb_hit(di, players[0])
+	else:
+		for p in _pick_players():
+			if not picked.has(p.index):
+				on_orb_hit(di, p)
+	var stage := pick_stage
+	pick_stage = ""
+	orbs.clear()
+	if net.mode == "host":
+		net.event("orbs", ["", []])
+	_send_gifts()
+	break_timer = 2.0
+	if stage == "mode":
+		Engine.set_meta("sb_mode_set", true)
+		var m := PickOrbs.mode(game_mode)
+		_story_for_all(String(PickOrbs.MODE_LINES.get(game_mode, "Let's go!")), String(m.get("pic", "star")), m.get("color", Color.WHITE))
+		if wave == 0 and not siege.is_empty():
+			siege = SiegeGen.siege(int(siege.seed), int(siege.level), bool(siege.daily), game_mode)  # the same seed, this mode
+			print("Snowball Blitz siege: mode %s (%s)" % [game_mode, str((siege.waves as Array).map(func(w: Dictionary) -> int: return (w.spawns as Array).size()))])
+		_skip_to_env_wave()
+
+
+## Host: everyone's gifts (and the mode) to every machine (sticky: a late machine catches up).
+func _send_gifts() -> void:
+	if net == null or net.mode != "host":
+		return
+	var all := {}
+	for p in players:
+		if not p.gifts.is_empty():
+			all[p.index] = p.gifts.duplicate()
+	net.event("gifts", [all, game_mode])
+
+
+## Host / local: MEGA gifts give their MEGA SNOWBALL (level 1: at the start of a wave, 2: halfway too).
+func _give_megas(level: int) -> void:
+	if net.mode == "client":
+		return
+	for p in players:
+		if p.active and not p.is_down and float(p.gifts.get("mega", 0.0)) >= level and not p.mega:
+			p.mega = true
+
+
+## Telemetry: how many of each gift the party took this game.
+func _gift_counts() -> Dictionary:
+	var out := {}
+	for k in gifts_taken:
+		for id in gifts_taken[k]:
+			out[id] = int(out.get(id, 0)) + 1
+	return out
+
+
+var _env_wave_done := false
+## SB_WAVE=n (What's New "try"): jump to wave n once the picks are done.
+func _skip_to_env_wave() -> void:
+	if _env_wave_done or not OS.has_environment("SB_WAVE"):
+		return
+	_env_wave_done = true
+	var n := int(OS.get_environment("SB_WAVE"))
+	if n > 1:
+		print("SB_WAVE: skip to wave %d" % n)
+		debug_skip_to_wave(n)
+
+
+## Host / local: a boss tells its next big attack: it glows and a ring lies on the snow until it lands (every machine).
+func boss_tell(s, pos: Vector3, radius: float, col: Color, secs: float) -> void:
+	s.tell_glow(secs)
+	rings.warn(pos, radius, col, secs)
+	if net.mode == "host":
+		net.event("warn", [s.net_id, pos, radius, col, secs])
+	sound("roar", -8.0, 1.4 if s.kind == "king" else 1.0)

@@ -21,6 +21,7 @@ const ResCache := preload("res://core/res_cache.gd")
 const WorldScript := preload("res://games/duo_arena/world.gd")
 const DecorScript := preload("res://games/duo_arena/decor.gd")
 const PickOrbs := preload("res://core/pick_orbs.gd")
+const WarnRings := preload("res://core/warn_rings.gd")
 
 const ORB_Z := -3.5  # (arenagen.gd SAFE_SPOTS keeps this row clear)
 const ORB_Y := 1.4
@@ -44,7 +45,7 @@ var orb_stage: String:
 	get:
 		return picker.stage if picker != null else ""
 var nova: Node3D
-var _warns: Array = []
+var rings: WarnRings  # boss warning rings (core/warn_rings.gd)
 var _t := 0.0
 var _cheer := 0.0
 var _keep_key := ""
@@ -58,6 +59,8 @@ func _ready() -> void:
 	picker.name = "PickOrbs"
 	picker.on_hit = func(i: int, by) -> void: main.on_orb_hit(i, by)  # shots hit the orbs (bullet.gd calls hit on bodies)
 	add_child(picker)
+	rings = WarnRings.new()
+	add_child(rings)
 
 
 func setup(new_lay: Dictionary, new_mode: String) -> void:
@@ -108,15 +111,6 @@ static func _pad_mesh() -> ArrayMesh:
 		for k in 8:
 			var a := k * TAU / 8.0
 			b.sphere(0.06, MeshKit.at(Vector3(cos(a) * 0.5, 0.04, sin(a) * 0.5)), Color.WHITE, 6)
-		return b.build()) as ArrayMesh
-
-
-static func _ring_mesh() -> ArrayMesh:
-	return ResCache.get_or_make("da_warn_ring_v1", func() -> Resource:
-		var b := MeshKit.builder()
-		b.torus(1.0, 0.07, MeshKit.at(Vector3.ZERO), Color.WHITE, 40, 4)
-		b.torus(0.6, 0.04, MeshKit.at(Vector3.ZERO), Color.WHITE, 28, 4)
-		b.torus(0.25, 0.03, MeshKit.at(Vector3.ZERO), Color.WHITE, 16, 4)
 		return b.build()) as ArrayMesh
 
 
@@ -174,14 +168,7 @@ func burst_fx(i: int) -> void:
 
 ## Every machine: a pulsing warning ring at pos until the attack lands (secs).
 func warn(pos: Vector3, radius: float, col: Color, secs: float) -> void:
-	var mi := MeshInstance3D.new()
-	mi.mesh = _ring_mesh()
-	mi.material_override = MeshKit.material(col, 3.0)
-	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	mi.position = Vector3(pos.x, 0.08, pos.z)
-	mi.scale = Vector3(radius * 0.2, 1.0, radius * 0.2)
-	add_child(mi)
-	_warns.append([mi, 0.0, maxf(secs, 0.3), radius])
+	rings.warn(pos, radius, col, secs)
 
 
 # --- Pick orbs (core/pick_orbs.gd) --------------------------------------------------------------------------
@@ -325,16 +312,3 @@ func _process(delta: float) -> void:
 		else:
 			var s := float(d.r) * (1.0 + 0.04 * sin(_t * 2.0 + i))
 			r.scale = Vector3(s, 1.0, s)
-	var keep: Array = []
-	for w in _warns:
-		var n: MeshInstance3D = w[0]
-		w[1] = float(w[1]) + delta
-		if float(w[1]) >= float(w[2]) or not is_instance_valid(n):
-			if is_instance_valid(n):
-				n.queue_free()
-			continue
-		var grow := minf(1.0, float(w[1]) / 0.3)
-		var k := (0.9 + 0.1 * absf(sin(float(w[1]) * 12.0))) * grow
-		n.scale = Vector3(float(w[3]) * k, 1.0, float(w[3]) * k)
-		keep.append(w)
-	_warns = keep

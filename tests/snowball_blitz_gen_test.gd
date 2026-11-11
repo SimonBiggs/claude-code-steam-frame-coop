@@ -7,13 +7,19 @@ extends SceneTree
 ## seed gives the same siege, the challenge rises level by level and wave by wave, every new kind arrives
 ## in every slot over the seeds, endless waves are made on demand, TODAY'S BLIZZARD is the same all day and
 ## differs between days, the village has room outside the square and clear of the big tree, Bobo's
-## pictures exist, the constants match the game's, and generation stays fast. Prints "SCRIPT ERROR: ..."
+## pictures exist, the constants match the game's, and generation stays fast. MODES: every mode fair, gentle <= brave
+## <= hard wave by wave, each mode's average curve rises smoothly (no cliff). BOSSES (bosses.gd check: every big attack
+## told long enough, longer in gentle, soft gentle hits, a breather). BOBO'S GIFTS (gifts.gd: names, pictures, caps,
+## offers at every village size). Prints "SCRIPT ERROR: ..."
 ## per failure.
 
 const G := preload("res://games/snowball_blitz/siegegen.gd")
 const Main := preload("res://games/snowball_blitz/main.gd")
 const Seeded := preload("res://core/seeded.gd")
 const StoryCard := preload("res://core/story_card.gd")
+const Bosses := preload("res://games/snowball_blitz/bosses.gd")
+const Gifts := preload("res://games/snowball_blitz/gifts.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
 
 var fails := 0
 
@@ -58,7 +64,7 @@ func _init() -> void:
 		for n in range(2, G.FINALE + 1):
 			var a: Dictionary = G.wave_plan(s, n - 1)
 			var b: Dictionary = G.wave_plan(s, n)
-			if a.boss == "" and b.boss == "":
+			if a.boss == "" and b.boss == "" and n != G.GIANT_WAVE:  # (the giants' wave: fewer, bigger)
 				_expect((b.spawns as Array).size() >= (a.spawns as Array).size(), "wave %d sends no fewer than wave %d (level %d)" % [n, n - 1, lv])
 			_expect((b.gates as Array).size() >= mini(2, (a.gates as Array).size()), "gates never drop below two once there are two")
 	for k in G.NEW_KINDS:
@@ -133,6 +139,76 @@ func _init() -> void:
 	_expect(G.village_slot(G.VILLAGE_SLOTS) == Vector3.INF, "no spot past the end")
 	_expect(G.VILLAGE_KEEP >= G.VILLAGE_SLOTS, "the save keeps a full village")
 	_expect(G.igloo_stage(3, 3) == 1 and G.igloo_stage(3, 4) == 2 and G.igloo_stage(3, 9) == 3, "igloos grow a stage a day")
+	# MODES (gentle / brave / hard): every mode's sieges are fair, gentle <= brave <= hard wave by wave, and each mode's
+	# average curve rises smoothly (no cliff).
+	for mode in G.MODES:
+		for lv in [1, G.MAX_LEVEL]:
+			var mres := Seeded.validate(func(s: int) -> Dictionary: return G.siege(s, lv, false, mode),
+				func(s: Dictionary) -> Array: return G.check(s), seeds / 2, 77 + lv, [0], "SIEGE %s level %d" % [mode, lv])
+			gens += int(mres.checked)
+			fails += (mres.failures as Array).size()
+	var mode_bad := 0
+	for lv in range(1, G.MAX_LEVEL + 1):
+		for k in seeds / 3:
+			for why in G.check_modes(k * 131 + lv, lv):
+				mode_bad += 1
+				if mode_bad <= 5:
+					_expect(false, "modes (seed %d level %d): %s" % [k * 131 + lv, lv, why])
+	_expect(mode_bad == 0, "gentle <= brave <= hard in every wave (%d problems)" % mode_bad)
+	for lv in range(1, G.MAX_LEVEL + 1):
+		var curves := {}
+		for mode in G.MODES:
+			curves[mode] = G.curve(mode, lv, 40)
+			for why in G.check_curve(curves[mode]):
+				_expect(false, "%s level %d curve: %s" % [mode, lv, why])
+		for n in G.FINALE:
+			_expect(float(curves.gentle[n]) <= float(curves.brave[n]) and float(curves.brave[n]) <= float(curves.hard[n]),
+				"level %d wave %d: gentle <= brave <= hard on average" % [lv, n + 1])
+		if lv == 1:
+			print("average threat by wave (level 1): gentle %s / brave %s / hard %s" % [curves.gentle.map(func(x): return snappedf(x, 0.01)),
+				curves.brave.map(func(x): return snappedf(x, 0.01)), curves.hard.map(func(x): return snappedf(x, 0.01))])
+	for date in ["2026-11-11", "2026-12-25"]:
+		for mode in G.MODES:
+			for why in G.check(G.siege(G.daily_seed(date), G.DAILY_LEVEL, true, mode)):
+				_expect(false, "TODAY'S BLIZZARD %s %s: %s" % [date, mode, why])
+	_expect(G.wave_count(1, 1, "", "gentle") <= G.wave_count(1, 1, "", "brave") and G.speed_of("snowman", 3, "gentle") < G.speed_of("snowman", 3, "hard"),
+		"gentle sends fewer, slower snowmen than hard")
+	var cliffy := G.siege(5, 2).duplicate(true)
+	var w6: Array = (cliffy.waves as Array)[5].spawns
+	for i in 3:
+		w6.append_array(w6.duplicate(true))
+	for sp in w6:
+		sp[0] = G.MIN_GAP
+	_expect((G.check(cliffy) as Array).any(func(w: String) -> bool: return w.contains("cliff")), "the validator catches a cliff wave")
+	var flat: Array[float] = [1.0, 2.0, 2.2, 6.0, 6.5, 7.0, 7.5, 8.0, 8.5, 9.0]
+	_expect(not G.check_curve(flat).is_empty(), "the curve check catches a jump")
+	# BOSSES: every big attack is told (long enough, longer in gentle), gentle hits are soft, a breather between attacks.
+	for k in Bosses.KINDS:
+		for why in Bosses.check(k):
+			_expect(false, "boss: " + why)
+		_expect(StoryCard.has_picture(String(Bosses.info(k).pic)), "%s has a picture" % k)
+		_expect(float(Bosses.numbers(k, "gentle", false).tell) > float(Bosses.numbers(k, "brave", false).tell), "%s tells longer in gentle" % k)
+		_expect(float(Bosses.numbers(k, "hard", true).every) >= float(Bosses.numbers(k, "hard", true).tell) + Bosses.REST, "%s hard angry still breathes" % k)
+		_expect(G.boss_for(G.KING_WAVE) == "king" and G.boss_for(G.FINALE) == "yeti", "the king and the yeti come")
+	_expect(not Bosses.check("dragon").is_empty(), "the boss check catches an unknown boss")
+	# BOBO'S GIFTS: names fit the orbs, pictures exist, capped, a full offer at every village size, the same offer everywhere.
+	var ui_src := FileAccess.get_file_as_string("res://core/ui_kit.gd")
+	var has_pic := func(n: String) -> bool: return StoryCard.has_picture(n) or ui_src.contains('"%s":' % n)
+	for why in Gifts.check_lists(has_pic):
+		_expect(false, "gifts: " + why)
+	for d in PickOrbs.MODES:
+		_expect(bool(has_pic.call(String(d.pic))), "mode %s has a picture" % d.id)
+	for igloos in [0, 2, 4, 8, 99]:
+		var open := Gifts.unlocked(igloos)
+		for sd in 30:
+			for n in [1, 4, 9, 15]:
+				var ids := Gifts.offer(sd * 977 + 1, n, open)
+				for why in Gifts.check_offer(ids, open):
+					_expect(false, "gift offer (igloos %d seed %d wave %d): %s" % [igloos, sd, n, why])
+	_expect(var_to_str(Gifts.offer(42, 3, Gifts.unlocked(9))) == var_to_str(Gifts.offer(42, 3, Gifts.unlocked(9))), "the same gift orbs on every machine")
+	_expect(Gifts.unlocked(99).size() > Gifts.unlocked(0).size(), "Bobo's village unlocks more gifts")
+	_expect(not Gifts.check_offer(["big", "big", "nope"], Gifts.unlocked(0)).is_empty(), "the offer check catches a bad offer")
+	_expect(Gifts.default_pick(["a", "b", "c"]) == "b", "the middle orb is taken for whoever doesn't choose")
 	# The game uses the same numbers.
 	_expect(is_equal_approx(G.ARENA_RADIUS, Main.ARENA_RADIUS) and is_equal_approx(G.FORT_RADIUS, Main.FORT_RADIUS), "square + fort match main.gd")
 	_expect(G.SEGMENTS == Main.SEGMENTS and is_equal_approx(G.SEG_MAX, Main.SEG_MAX), "walls match main.gd")
