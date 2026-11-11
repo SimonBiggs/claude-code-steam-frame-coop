@@ -332,28 +332,9 @@ func _spawn_meteor() -> void:
 	main.sound("meteor", -6.0)
 
 
-## Both machines: a pulsing red warning circle and a burning rock falling into it.
+## Both machines: a pulsing red warning disc (zone.rings, core/warn_rings.gd) and a burning rock falling into it.
 func meteor_visual(pos: Vector3, fall: float) -> void:
-	var disc := MeshInstance3D.new()
-	var cyl := CylinderMesh.new()
-	cyl.top_radius = METEOR_RADIUS
-	cyl.bottom_radius = METEOR_RADIUS
-	cyl.height = 0.03
-	cyl.radial_segments = 24
-	disc.mesh = cyl
-	var dm: StandardMaterial3D = main.make_material(Color(1.0, 0.15, 0.05), 2.0)
-	dm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	dm.albedo_color.a = 0.35
-	dm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	disc.material_override = dm
-	disc.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	main.add_child(disc)
-	disc.global_position = pos + Vector3.UP * 0.06
-	disc.scale = Vector3(0.2, 1.0, 0.2)
-	var dt := disc.create_tween()
-	dt.tween_property(disc, "scale", Vector3.ONE, fall * 0.5).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	dt.parallel().tween_property(dm, "albedo_color:a", 0.75, fall)
-	dt.tween_callback(disc.queue_free)
+	main.zone.rings.warn(pos, METEOR_RADIUS, Color(1.0, 0.15, 0.05), fall, pos.y + 0.06, {"style": "disc", "grow": fall * 0.5})
 	var rock := MeshInstance3D.new()
 	var sm := SphereMesh.new()
 	sm.radius = 0.55

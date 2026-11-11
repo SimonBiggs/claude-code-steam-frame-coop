@@ -7,12 +7,14 @@ extends Node3D
 ##   fx.debris(pos, Vector3(8, 10, 8), [wall, roof], 24)
 ##   fx.ring(pos, 12.0, Color(1, 0.6, 0.2), 0.6)
 ##   fx.tracer(from, to, Color(1, 0.9, 0.4))
-##   var m := fx.marker(pos, 8.0, Color(1, 0.3, 0.2), 1.2)   # telegraph circle (frees itself)
+##   fx.marker(pos, 8.0, Color(1, 0.3, 0.2), 1.2)   # telegraph circle (WarnRings, frees itself); line_marker(a, b, w, ...)
 
 const MeshKit := preload("res://core/mesh_kit.gd")
+const WarnRings := preload("res://core/warn_rings.gd")
 
 const POOL := 6
 const DEBRIS_MAX := 180
+const WARN_Y := 0.25  ## danger tells sit just above the roads
 
 var _pools := {}  # kind -> Array[CPUParticles3D]
 var _next := {}  # kind -> int
@@ -23,12 +25,14 @@ var _tracers: Array[MeshInstance3D] = []
 var _tracer_t: Array[float] = []
 var _tracer_next := 0
 var _rings: Array[Dictionary] = []  # {node, t, dur, r}
-var _markers: Array[Dictionary] = []  # {node, t, dur}
+var rings: WarnRings  ## the danger tells (core/warn_rings.gd)
 var _mats := {}
 
 
 func _ready() -> void:
 	name = "Fx"
+	rings = WarnRings.new()
+	add_child(rings)
 	var box := BoxMesh.new()
 	box.size = Vector3.ONE
 	var mat := StandardMaterial3D.new()
@@ -384,49 +388,15 @@ func tracer(from: Vector3, to: Vector3, color: Color = Color(1.0, 0.9, 0.4)) -> 
 	t.global_transform = Transform3D(_basis_y_to(d / l).scaled(Vector3(1.0, l, 1.0)), from + d * 0.5)
 
 
-## A pulsing danger circle on the ground for a telegraphed attack (frees itself after `dur`).
-func marker(pos: Vector3, radius: float, color: Color, dur: float) -> Node3D:
-	var mi := MeshInstance3D.new()
-	var cm := CylinderMesh.new()
-	cm.top_radius = 1.0
-	cm.bottom_radius = 1.0
-	cm.height = 0.05
-	cm.radial_segments = 28
-	cm.rings = 1
-	mi.mesh = cm
-	mi.material_override = _glow_mat(Color(color.r, color.g, color.b, 0.35))
-	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(mi)
-	mi.global_position = Vector3(pos.x, 0.25, pos.z)
-	mi.scale = Vector3(radius, 1.0, radius)
-	var edge := MeshInstance3D.new()
-	var tm := TorusMesh.new()
-	tm.inner_radius = 0.93
-	tm.outer_radius = 1.0
-	tm.rings = 28
-	tm.ring_segments = 4
-	edge.mesh = tm
-	edge.material_override = _glow_mat(Color(color.r, color.g, color.b, 0.9))
-	edge.scale = Vector3(1.0, 2.0, 1.0)
-	mi.add_child(edge)
-	_markers.append({"node": mi, "t": 0.0, "dur": dur})
-	return mi
+## Every machine: the danger tell for a telegraphed attack or a district hazard: a pulsing see-through disc with a
+## bright edge (or a glowing strip for a line) on the shared WarnRings, just above the roads (frees itself).
+func marker(pos: Vector3, radius: float, color: Color, dur: float) -> void:
+	rings.warn(pos, radius, color, dur, WARN_Y, {"style": "disc"})
 
 
-## A glowing line on the ground from a to b (eye-laser sweep, charge path) that frees itself.
-func line_marker(a: Vector3, b: Vector3, width: float, color: Color, dur: float) -> Node3D:
-	var mi := MeshInstance3D.new()
-	var bm := BoxMesh.new()
-	bm.size = Vector3(1, 0.05, 1)
-	mi.mesh = bm
-	mi.material_override = _glow_mat(Color(color.r, color.g, color.b, 0.45))
-	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(mi)
-	var d := Vector3(b.x - a.x, 0, b.z - a.z)
-	var mid := (a + b) * 0.5
-	mi.global_transform = Transform3D(Basis(Vector3.UP, atan2(d.x, d.z)).scaled(Vector3(width, 1.0, d.length())), Vector3(mid.x, 0.25, mid.z))
-	_markers.append({"node": mi, "t": 0.0, "dur": dur})
-	return mi
+func line_marker(a: Vector3, b: Vector3, width: float, color: Color, dur: float) -> void:
+	var d := Vector3(b.x - a.x, 0.0, b.z - a.z)
+	rings.shape("line", a, d, Vector2(d.length(), width), color, dur, {"style": "disc", "alpha": 0.45, "y": WARN_Y})
 
 
 static func _basis_y_to(dir: Vector3) -> Basis:
@@ -457,16 +427,3 @@ func _process(delta: float) -> void:
 		var s := lerpf(1.0, float(r["r"]), t / dur)
 		n.scale = Vector3(s, 0.3 + s * 0.05, s)
 		n.transparency = t / dur
-	for k in range(_markers.size() - 1, -1, -1):
-		var m: Dictionary = _markers[k]
-		var n2: Node3D = m["node"]
-		var t2: float = float(m["t"]) + delta
-		m["t"] = t2
-		if t2 >= float(m["dur"]) or not is_instance_valid(n2):
-			if is_instance_valid(n2):
-				n2.queue_free()
-			_markers.remove_at(k)
-			continue
-		var g := n2 as GeometryInstance3D
-		if g != null:
-			g.transparency = 0.35 + 0.35 * sin(t2 * 14.0)

@@ -2,7 +2,7 @@ extends Node3D
 ## MECH TITANS pods: a choice you make with your feet. Two or three glowing PODS land in front of the Titan,
 ## each a tall beam of coloured light with a picture spinning on top and a name of one or two words:
 ##   "frame"   (the session's start, once the family has two or more frames: frames.gd)
-##   "mode"    (before the first made round, once BRAVE is open: GENTLE / BRAVE / MEGA, roundgen.gd MODES)
+##   "mode"    (before the first made round, once BRAVE is open: GENTLE / BRAVE / HARD, PickOrbs.mode(); id "mega" = HARD)
 ##   "upgrade" (after every made round while there are upgrades left: upgrades.gd)
 ## Walk the Titan into one (or punch it), or fly / drive a support vehicle through it: that's the choice, for
 ## everyone. Nobody chooses? After WAIT seconds the pod that's glowing brightest (the default: the frame you had,
@@ -14,7 +14,7 @@ const ResCache := preload("res://core/res_cache.gd")
 const Data := preload("res://games/mech_titans/data.gd")
 const Upgrades := preload("res://games/mech_titans/upgrades.gd")
 const Frames := preload("res://games/mech_titans/frames.gd")
-const RoundGen := preload("res://games/mech_titans/roundgen.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
 
 const WAIT := 20.0
 const TOUCH_TITAN := 7.0  ## m from the pod's middle to the Titan's middle
@@ -23,13 +23,21 @@ const TOUCH_VEH := 6.5
 const POD_H := 7.0  ## the light column's height (the picture spins just above: about the pilot's eye height)
 const SPREAD := 14.0  ## m between pods
 const AHEAD := 20.0  ## m in front of the Titan
-const MODE_COLORS := {"gentle": Color(0.45, 1.0, 0.55), "brave": Color(1.0, 0.65, 0.25), "mega": Color(1.0, 0.3, 0.35)}
 
 var main: Node
-var pods: Array[Node3D] = []
+var orbs: PickOrbs
+var pods: Array:  ## the pods standing now (PickOrbs.Orb nodes)
+	get:
+		return orbs.orbs if orbs != null else []
 var info := {}  ## the "pick" state these pods were built from
 var t := 0.0  ## host: seconds since the pods landed
 var taken := false
+
+
+func _ready() -> void:
+	orbs = PickOrbs.new()
+	orbs.collision_layer = 0  # the Titan walks into a pod (touched()); nothing bumps into it
+	add_child(orbs)
 
 
 ## Where the pods land: in a row in front of the Titan, out of the buildings and inside the city.
@@ -57,7 +65,7 @@ static func pod_name(kind: String, id: String) -> String:
 		"frame":
 			return String(Frames.info(id)["name"])
 		"mode":
-			return String(RoundGen.MODES.get(id, RoundGen.MODES["gentle"])["name"])
+			return PickOrbs.mode_name(id)  # GENTLE / BRAVE / HARD (the id "mega" stays in saves and net state)
 	return id.to_upper()
 
 
@@ -68,11 +76,13 @@ static func pod_color(kind: String, id: String) -> Color:
 		"frame":
 			return Data.PAINTS[String(Frames.info(id)["paint"])]["main"]
 		"mode":
-			return MODE_COLORS.get(id, Color.WHITE)
+			return PickOrbs.mode_color(id)
 	return Color.WHITE
 
 
-## Every machine: (re)build the pods for the host's "pick" state ({} = none).
+## Every machine: (re)build the pods for the host's "pick" state ({} = none). The pods are a shared PickOrbs row
+## (core/pick_orbs.gd) with Mech Titans' own look: a base + a "Glow" light column (brighter for the default), the
+## spinning mesh picture above it and a two-line name on top.
 func sync(p: Variant) -> void:
 	var d: Dictionary = p if p is Dictionary else {}
 	if int(d.get("n", -1)) == int(info.get("n", -2)) and not d.is_empty():
@@ -83,69 +93,59 @@ func sync(p: Variant) -> void:
 	taken = false
 	if d.is_empty():
 		return
+	var kind := String(d.get("kind", "upgrade"))
 	var ids: Array = d.get("ids", [])
 	var at: Array = d.get("at", [])
-	for i in ids.size():
-		if i >= at.size():
-			break
-		var pod := _make_pod(String(d.get("kind", "upgrade")), String(ids[i]), i == int(d.get("def", 0)))
-		add_child(pod)
-		pod.global_position = at[i]
-		pods.append(pod)
+	var list: Array = []
+	for i in mini(ids.size(), at.size()):
+		var id := String(ids[i])
+		list.append({"id": id, "kind": kind, "name": pod_name(kind, id), "color": pod_color(kind, id)})
+	if list.is_empty():
+		return
+	orbs.show_orbs("pod_" + kind, list, Vector3.ZERO, 0.0, 0.0, {"at": at.slice(0, list.size()), "def": int(d.get("def", 0)),
+		"body": _pod_body, "icon": func(e: Dictionary) -> Node3D: return MeshKit.instance(icon_mesh(String(e["kind"]), String(e["id"])), false),
+		"icon_scale": 2.6, "icon_y": POD_H + 1.6, "bob": 0.35, "spin": 1.4, "label_y": POD_H + 4.4, "label_px": 0.022, "font": 64,
+		"two_lines": true})
 
 
 func clear() -> void:
-	for p in pods:
-		if is_instance_valid(p):
-			p.queue_free()
-	pods.clear()
+	if orbs != null:
+		orbs.clear()
 	info = {}
 
 
 ## Host: who touched a pod this frame? Returns [pod index, slot] or [] (slot 0 = the Titan).
 func touched(mech: Node3D, vehicles: Dictionary) -> Array:
-	if taken or pods.is_empty():
+	if taken or not orbs.showing():
 		return []
-	for i in pods.size():
-		var pp := pods[i].global_position
-		var flat := Vector2(mech.global_position.x - pp.x, mech.global_position.z - pp.z).length()
-		if flat < TOUCH_TITAN:
-			return [i, 0]
-		for h in 2:
-			var f: Vector3 = mech.fist_world(h)
-			if Vector2(f.x - pp.x, f.z - pp.z).length() < TOUCH_FIST:
-				return [i, 0]
-		for id in vehicles:
-			var v: Node3D = vehicles[id]
-			if int(id) >= 10 or v == null or bool(v.get("ai")):
-				continue
-			if Vector2(v.global_position.x - pp.x, v.global_position.z - pp.z).length() < TOUCH_VEH:
-				return [i, int(id)]
+	var i := orbs.at_point(mech.global_position, TOUCH_TITAN)
+	for h in 2:
+		if i < 0:
+			i = orbs.at_point(mech.fist_world(h), TOUCH_FIST)
+	if i >= 0:
+		return [i, 0]
+	for id in vehicles:
+		var v: Node3D = vehicles[id]
+		if int(id) >= 10 or v == null or bool(v.get("ai")):
+			continue
+		var j := orbs.at_point(v.global_position, TOUCH_VEH)
+		if j >= 0:
+			return [j, int(id)]
 	return []
 
 
 func _process(delta: float) -> void:
 	t += delta
-	for i in pods.size():
-		var pod := pods[i]
-		var icon := pod.get_node_or_null("Icon") as Node3D
-		if icon != null:
-			icon.rotation.y += delta * 1.4
-			icon.position.y = POD_H + 1.6 + sin(t * 2.0 + i) * 0.35
-		var glow := pod.get_node_or_null("Column") as Node3D
-		if glow != null:
-			var s := 1.0 + 0.06 * sin(t * 4.0 + i * 1.3)
-			glow.scale = Vector3(s, 1.0, s)
 
 
-func _make_pod(kind: String, id: String, is_default: bool) -> Node3D:
+## A pod's stand: the base and a tall column of light (its child "Glow" throbs; the default pod glows brightest).
+func _pod_body(e: Dictionary, is_default: bool) -> Node3D:
+	var col: Color = e.get("color", Color.WHITE)
 	var pod := Node3D.new()
-	pod.name = "Pod_%s" % id
-	var col := pod_color(kind, id)
-	var base := MeshKit.instance(_base_mesh(), false)
-	pod.add_child(base)
+	pod.name = "Pod_%s" % String(e.get("id", ""))
+	pod.add_child(MeshKit.instance(_base_mesh(), false))
 	var column := MeshInstance3D.new()
-	column.name = "Column"
+	column.name = "Glow"
 	var cm := CylinderMesh.new()
 	cm.top_radius = 2.2
 	cm.bottom_radius = 2.6
@@ -165,23 +165,6 @@ func _make_pod(kind: String, id: String, is_default: bool) -> Node3D:
 	column.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	column.position.y = POD_H * 0.5
 	pod.add_child(column)
-	var icon := MeshKit.instance(icon_mesh(kind, id), false)
-	icon.name = "Icon"
-	icon.scale = Vector3.ONE * 2.6
-	icon.position.y = POD_H + 1.6
-	pod.add_child(icon)
-	var label := Label3D.new()
-	label.name = "Name"
-	label.text = pod_name(kind, id).replace(" ", "\n")  # two short lines: the pods stand side by side
-	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	label.pixel_size = 0.022
-	label.font_size = 64
-	label.outline_size = 14
-	label.modulate = col.lightened(0.35)
-	label.outline_modulate = Color(0.05, 0.05, 0.1)
-	label.position.y = POD_H + 4.4
-	label.no_depth_test = false
-	pod.add_child(label)
 	return pod
 
 
@@ -195,7 +178,7 @@ static func _base_mesh() -> ArrayMesh:
 
 ## The picture that spins on top of a pod (about 1 unit across; the pod scales it up).
 static func icon_mesh(kind: String, id: String) -> ArrayMesh:
-	return ResCache.get_or_make("mt_pod_icon_%s_%s_v1" % [kind, id], func() -> Resource: return _build_icon(kind, id)) as ArrayMesh
+	return ResCache.get_or_make("mt_pod_icon_%s_%s_v2" % [kind, id], func() -> Resource: return _build_icon(kind, id)) as ArrayMesh
 
 
 static func _build_icon(kind: String, id: String) -> ArrayMesh:
