@@ -118,6 +118,7 @@ var straggle_t := -1.0
 var stairs_fill := 0.0
 var portal := Vector3.INF
 var checkpoint := {}
+var start_gear_g := 0  ## DD_FLOOR test start: the floor whose gear heroes get (0: a normal run)
 var phase_t := 0.0
 var shop: Array = []
 var pad_fill := {"brave": 0.0, "heroic": 0.0, "daily": 0.0}
@@ -693,11 +694,40 @@ func _ensure_stats() -> void:
 		var s: int = (pl as Dictionary)["slot"]
 		if not stats.has(s):
 			stats[s] = _new_stats(s)
+			if start_gear_g > 0 and active:
+				_start_gear(s, stats[s])
 			stats_dirty = true
 	for s in stats.keys():
 		if not main.heroes.has(int(s)) and not _is_knight(int(s)):
 			stats.erase(s)
 			stats_dirty = true
+
+
+## DD_FLOOR test starts: hearts, sword, potions and the relics a run would have by floor start_gear_g.
+func _start_gear(s: int, st0: Dictionary) -> void:
+	st0["dmg"] = int(st0["dmg"]) + start_gear_g / 3
+	st0["max"] = mini(8, int(st0["max"]) + start_gear_g / 3)
+	st0["hp"] = st0["max"]
+	st0["pot"] = int(st0["pot"]) + 1 + start_gear_g / 4
+	# ... and the relics a run would have picked by then (one per altar).
+	var party_l: Array = [{"knight": _is_knight(s), "relics": st0["relics"]}]
+	for k0 in (start_gear_g + 2) / 2:
+		var o: Array = Relics.offer(seed_v, k0 / 2, 1 + 2 * (k0 % 2), Relics.unlocked(hoard()), party_l)
+		if not o.is_empty():
+			(st0["relics"] as Array).append(String(o[0]))
+			if String(o[0]) == "glass":
+				st0["max"] = maxi(2, int(st0["max"]) - 2)
+				st0["hp"] = st0["max"]
+	# DD_RELICS=all (the long guard bot): every relic this hero can use, so relic code meets crowded rooms
+	# (THORN ARMOR popping a monster mid-hit only showed in 40-minute runs, 2026-11-11).
+	if OS.get_environment("DD_RELICS") == "all":
+		for r0 in Relics.LIST:
+			var rid := String(r0["id"])
+			if Relics.usable(rid, {"knight": _is_knight(s), "relics": st0["relics"]}):
+				(st0["relics"] as Array).append(rid)
+				if rid == "glass":
+					st0["max"] = maxi(2, int(st0["max"]) - 2)
+					st0["hp"] = st0["max"]
 
 
 func _st(slot: int) -> Dictionary:
@@ -733,25 +763,14 @@ func start_run(m: String) -> void:
 	_gold = 0
 	_keys = 0
 	_ensure_stats()
-	if FloorGen.global_floor(zone, floor_i) > 0:
-		# Starting deeper (DD_FLOOR, tests): the gear a run would have found by then.
-		var g0 := FloorGen.global_floor(zone, floor_i)
+	start_gear_g = FloorGen.global_floor(zone, floor_i)
+	if start_gear_g > 0:
+		# Starting deeper (DD_FLOOR, tests): the gear a run would have found by then. Heroes who join after this
+		# (bots and players seat a moment later) get it too in _ensure_stats (2026-11-11: they never had it, so
+		# every DD_FLOOR run played floor 8+ with starting swords and no relics).
 		for s in stats:
-			var st0: Dictionary = stats[s]
-			st0["dmg"] = int(st0["dmg"]) + g0 / 3
-			st0["max"] = mini(8, int(st0["max"]) + g0 / 3)
-			st0["hp"] = st0["max"]
-			st0["pot"] = int(st0["pot"]) + 1 + g0 / 4
-			# ... and the relics a run would have picked by then (one per altar).
-			var party_l: Array = [{"knight": _is_knight(int(s)), "relics": st0["relics"]}]
-			for k0 in (g0 + 2) / 2:
-				var o: Array = Relics.offer(seed_v, k0 / 2, 1 + 2 * (k0 % 2), Relics.unlocked(hoard()), party_l)
-				if not o.is_empty():
-					(st0["relics"] as Array).append(String(o[0]))
-					if String(o[0]) == "glass":
-						st0["max"] = maxi(2, int(st0["max"]) - 2)
-						st0["hp"] = st0["max"]
-		_gold = 20 * g0
+			_start_gear(int(s), stats[s])
+		_gold = 20 * start_gear_g
 	checkpoint = {}
 	var pd := progress()
 	pd["runs"] = int(pd["runs"]) + 1
