@@ -6,6 +6,7 @@ extends Node3D
 ## snowmen (float over the walls until their balloons are popped), shield snowmen (an ice shield blocks
 ## flat throws from the front - lob over it, hit it from the side, or break it) and the YETI finale boss.
 
+const Bosses := preload("res://games/snowball_blitz/bosses.gd")
 const KINDS := {
 	"snowman": {"hp": 3.0, "speed": 1.8, "scale": 1.0, "wall_dps": 6.0, "throw_cd": 3.8, "ball_dmg": 8.0, "ball_r": 0.14, "points": 100, "cocoa": 0.08},
 	"sled": {"hp": 2.0, "speed": 5.0, "scale": 0.8, "crash": 24.0, "points": 150, "cocoa": 0.12},
@@ -33,7 +34,6 @@ var s := 1.0
 var height := 2.0
 var seg := 0
 var throw_cd := 2.0
-var summon_cd := 8.0
 var spawn_grace := 0.8
 var dead := false
 var inside := false
@@ -52,9 +52,17 @@ var shield_node: Node3D
 var eyes: Array[MeshInstance3D] = []
 var arms: Array[MeshInstance3D] = []
 var blink_t := 2.0
-var stomp_t := 6.0
 var melt := 0.0  # sunshine event: shrinks a little
 var glow: Node3D  # practice target: a glowing ring and a bouncing arrow
+var hit_k := 1.0  # the mode's hit strength (siegegen.gd MODE_NUM: gentle softer, hard harder)
+# Bosses (bosses.gd): every big attack is TOLD first (glow + a ring on the snow), then it lands.
+var atk_t := 3.0  # host: seconds to the next attack
+var atk_tell := 0.0  # host: seconds left of the current tell (standing still)
+var atk_kind := ""
+var atk_count := 0
+var atk_at := Vector3.ZERO
+var tell_t := 0.0  # every machine: glowing while > 0
+var tell_node: MeshInstance3D
 # Networked: ghosts on the client.
 var ghost := false
 var net_id := 0
@@ -323,14 +331,6 @@ func hit_test(p: Vector3, r: float) -> bool:
 
 ## Which balloon (if any) a ball at p touches, or -1.
 func balloon_hit(p: Vector3, r: float) -> int:
-	if glow != null:
-		var k := 1.0 + 0.12 * sin(t * 5.0)
-		glow.scale = Vector3(k, 1.0, k)
-		var arrow := glow.get_node("Arrow") as Node3D
-		arrow.position.y = 2.75 * s + absf(sin(t * 3.5)) * 0.25
-		arrow.scale = Vector3.ONE / k
-		if not ghost:
-			body.rotation.z = sin(t * 2.5) * 0.06  # a cheeky wobble
 	for i in balloon_nodes.size():
 		var bn := balloon_nodes[i]
 		if bn.visible and bn.global_position.distance_to(p) < 0.3 * s + r:
@@ -402,6 +402,8 @@ func _physics_process(delta: float) -> void:
 	var pos := global_position
 	var target := pos
 	bashing = false
+	if is_boss() and _boss_step(delta):
+		return  # telling a big attack: it stands still and glows
 	var R: float = main.fort_r
 	var seg_up: bool = main.seg_hp[seg] > 0.0
 	var flat_r := Vector2(pos.x, pos.z).length()
@@ -427,12 +429,12 @@ func _physics_process(delta: float) -> void:
 			if Vector2(pos.x - wall_point.x, pos.z - wall_point.z).length() < 0.35:
 				target = pos
 				if kind == "sled":
-					main.damage_segment(seg, float(d.crash))
+					main.damage_segment(seg, float(d.crash) * hit_k)
 					main.sound("big_kill", -4.0, 1.6)
 					_collapse(-1)
 					return
 				bashing = true
-				main.damage_segment(seg, float(d.wall_dps) * delta)
+				main.damage_segment(seg, float(d.wall_dps) * delta * hit_k)
 		else:
 			target = Vector3.ZERO
 			if flat_r < R - 1.0:
@@ -445,10 +447,10 @@ func _physics_process(delta: float) -> void:
 			if dist < radius() + 0.7:
 				target = pos
 				if kind == "sled":
-					p.take_damage(22.0, pos)
+					p.take_damage(22.0 * hit_k, pos)
 					_collapse(-1)
 					return
-				p.take_damage(18.0 * delta, pos)
+				p.take_damage(18.0 * delta * hit_k, pos)
 				bashing = true
 		elif flat_r < 0.6 and kind == "sled":
 			_collapse(-1)
@@ -472,24 +474,10 @@ func _physics_process(delta: float) -> void:
 	var want_y := FLOAT_HEIGHT if floating else 0.0
 	global_position = pos + step
 	global_position.y = move_toward(pos.y, want_y, delta * (1.2 if want_y > pos.y else 5.0))
-	if kind == "yeti" and bashing:
-		stomp_t -= delta
-		if stomp_t <= 0.0:
-			stomp_t = 5.0
-			for k in [-1, 0, 1]:
-				main.damage_segment(posmod(seg + k, main.segments), 14.0)
-			main.burst(global_position + Vector3.UP * 0.3, Color(0.85, 0.92, 1.0), 30, 0.14)
-			main.sound("big_kill", 0.0, 0.5)
-			main.yeti_stomp(global_position)
 	var face := to if to.length() > 0.1 else -pos
 	if face.length() > 0.1:
 		rotation.y = lerp_angle(rotation.y, atan2(-face.x, -face.z), 1.0 - exp(-6.0 * delta))
-	if kind == "king" or kind == "yeti":
-		summon_cd -= delta
-		if summon_cd <= 0.0 and spawn_grace <= 0.0:
-			summon_cd = 9.0 if kind == "king" else 12.0
-			main.summon_minions(global_position, 2, "snowman" if kind == "king" else "bunny")
-	if d.has("throw_cd") and throw_cd <= 0.0 and spawn_grace <= 0.0:
+	if d.has("throw_cd") and throw_cd <= 0.0 and spawn_grace <= 0.0 and not is_boss():
 		_try_throw()
 
 
@@ -511,8 +499,104 @@ func _try_throw() -> void:
 		if count > 1:
 			miss += Basis(Vector3.UP, rotation.y) * Vector3((i - (count - 1) / 2.0) * 1.6, 0, 0)
 		var v: Vector3 = main.lob_velocity(from, aim + miss, 10.0)
-		main.spawn_ball(from, v, float(d.ball_r), float(d.ball_dmg), "e", -1)
+		main.spawn_ball(from, v, float(d.ball_r), float(d.ball_dmg) * hit_k, "e", -1)
 	main.sound("spit", -6.0, 0.7 if s > 1.5 else 1.1)
+
+
+func is_boss() -> bool:
+	return kind == "king" or kind == "yeti"
+
+
+## Host: the boss's attack clock (bosses.gd numbers for the game's mode; ANGRY under half its snow). Returns true while
+## it tells an attack (it stands still).
+func _boss_step(delta: float) -> bool:
+	var n: Dictionary = Bosses.numbers(kind, String(main.game_mode), hp < max_hp * 0.5)
+	if atk_tell > 0.0:
+		atk_tell -= delta
+		if atk_tell <= 0.0:
+			_boss_attack(n)
+		return true
+	atk_t -= delta
+	if atk_t > 0.0 or spawn_grace > 0.0:
+		return false
+	atk_kind = Bosses.attack(kind, atk_count)
+	atk_count += 1
+	if atk_kind == "call" and int(n.helpers) <= 0:
+		atk_t = 1.0
+		return false
+	atk_tell = float(n.tell)
+	atk_t = float(n.every)
+	var col: Color = n.color
+	match atk_kind:
+		"volley", "throw":
+			var p = main.nearest_player(global_position)
+			atk_at = p.global_position if p != null else Vector3.ZERO
+			atk_at.y = 0.0
+			main.boss_tell(self, atk_at, float(n.radius), col, atk_tell)
+		"stomp":
+			atk_at = global_position
+			main.boss_tell(self, atk_at, float(n.stomp_r), col, atk_tell)
+		_:
+			atk_at = global_position
+			main.boss_tell(self, atk_at, 2.0, col.lerp(Color.WHITE, 0.4), atk_tell)
+	var to := atk_at - global_position
+	if to.length() > 0.1:
+		rotation.y = atan2(-to.x, -to.z)
+	return true
+
+
+## Host: the told attack lands.
+func _boss_attack(n: Dictionary) -> void:
+	var pos := global_position
+	match atk_kind:
+		"volley", "throw":
+			squash = -0.6
+			var from := pos + Vector3(0, (lift + 1.3) * s, 0)
+			var count := 3 if atk_kind == "volley" else 1
+			var r := float(d.ball_r) * (1.0 if atk_kind == "volley" else 1.2)
+			for i in count:
+				var off := Vector3.ZERO
+				if count > 1:
+					var a := TAU * i / count + t
+					off = Vector3(cos(a), 0.0, sin(a)) * float(n.radius) * 0.55
+				var v: Vector3 = main.lob_velocity(from, atk_at + off + Vector3.UP * 0.6, 10.0)
+				main.spawn_ball(from, v, r, float(n.damage), "e", -1)
+			main.sound("spit", -4.0, 0.6)
+		"stomp":
+			for i in main.segments:
+				if (main.seg_center(i) as Vector3).distance_to(pos) < float(n.stomp_r) + 0.6:
+					main.damage_segment(i, float(n.damage))
+			main.burst(pos + Vector3.UP * 0.3, Color(0.85, 0.92, 1.0), 30, 0.14)
+			main.sound("big_kill", 0.0, 0.5)
+			main.yeti_stomp(pos)
+		"call":
+			main.summon_minions(pos, int(n.helpers), String(n.helper))
+
+
+## Every machine: glow for secs (a boss telling its next attack).
+func tell_glow(secs: float) -> void:
+	tell_t = secs
+	if tell_node == null:
+		tell_node = MeshInstance3D.new()
+		var sm := SphereMesh.new()
+		sm.radius = 0.75
+		sm.height = 1.5
+		sm.radial_segments = 16
+		sm.rings = 8
+		tell_node.mesh = sm
+		var mat := StandardMaterial3D.new()
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.albedo_color = Color(Bosses.info(kind).color, 0.35)
+		mat.emission_enabled = true
+		mat.emission = Bosses.info(kind).color
+		mat.emission_energy_multiplier = 2.5
+		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		tell_node.material_override = mat
+		tell_node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		tell_node.position = Vector3(0, height * 0.5, 0)
+		add_child(tell_node)
+	tell_node.visible = true
 
 
 ## A player's snowball landed: squish, nudge back, maybe collapse.
@@ -593,6 +677,12 @@ func _process(delta: float) -> void:
 		var side: float = a.get_meta("side")
 		var wave_amt := 0.5 if bashing else 0.25 * move_amt
 		a.rotation.z = side * (0.45 + sin(t * 6.0 + side) * wave_amt)
+	if tell_node != null and tell_node.visible:
+		tell_t -= delta
+		var pk := 1.0 + 0.12 * absf(sin(t * 12.0))
+		tell_node.scale = Vector3.ONE * s * 1.35 * pk
+		if tell_t <= 0.0:
+			tell_node.visible = false
 	if glow != null:
 		var k := 1.0 + 0.12 * sin(t * 5.0)
 		glow.scale = Vector3(k, 1.0, k)

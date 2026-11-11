@@ -11,6 +11,7 @@ extends RefCounted
 ## Effects are [stat, "mul"|"add", amount] on the player's personal stats (player.gd add_personal, synced).
 
 const Seeded := preload("res://core/seeded.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
 
 const OFFER := 3
 ## core/ui_kit.gd icon kinds the orbs use as pictures (StoryCard draws any of them; the gen test checks they exist).
@@ -21,11 +22,7 @@ const MAX_NAME := 9
 const CAPS := {"fire_rate": [0.35, 2.0], "damage": [0.5, 4.0], "speed": [0.8, 1.6], "armor": [0.4, 1.0],
 	"dash_cd": [0.35, 1.0], "max_hp": [-10.0, 150.0]}
 
-const MODES: Array[Dictionary] = [
-	{"id": "gentle", "name": "GENTLE", "pic": "heart", "color": Color(0.45, 1.0, 0.55), "waves": 0, "fx": []},
-	{"id": "brave", "name": "BRAVE", "pic": "star", "color": Color(0.35, 0.75, 1.0), "waves": 0, "fx": []},
-	{"id": "hard", "name": "HARD", "pic": "fireball", "color": Color(1.0, 0.35, 0.25), "waves": 0, "fx": []},
-]
+const MODES: Array[Dictionary] = PickOrbs.MODES  # (one place for every game: core/pick_orbs.gd)
 const HEROES: Array[Dictionary] = [
 	{"id": "blaster", "name": "BLASTER", "pic": "blasterhero", "color": Color(0.35, 0.8, 1.0), "waves": 0, "fx": []},
 	{"id": "sprayer", "name": "SPRAYER", "pic": "sprayhero", "color": Color(0.5, 1.0, 0.4), "waves": 0,
