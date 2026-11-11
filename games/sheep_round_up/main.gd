@@ -38,6 +38,11 @@ const Farm := preload("res://games/sheep_round_up/farm.gd")
 const Seeded := preload("res://core/seeded.gd")
 const Telemetry := preload("res://core/telemetry.gd")
 const StoryCard := preload("res://core/story_card.gd")
+const Seasons := preload("res://games/sheep_round_up/seasons.gd")
+const PicksScript := preload("res://games/sheep_round_up/picks.gd")
+const EventsScript := preload("res://games/sheep_round_up/events.gd")
+const WeatherScript := preload("res://games/sheep_round_up/weather.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
 
 const GAME_ID := "sheep_round_up"
 const ARENA := FieldGen.ARENA  # field radius
@@ -112,6 +117,19 @@ var daily_due := false
 var run := {}  # host: this round's numbers for telemetry
 var elapsed := 0.0
 var vr_story: Node3D
+# Second pass (seasons.gd): seasons + weather, the team mode, dog tricks, warned events.
+var picks: Node  # picks.gd (shared pick orbs)
+var sev: Node3D  # events.gd (fox, thunder; warning rings)
+var weather: Node3D  # weather.gd (falling rain / snow / leaves)
+var ground_mi: MeshInstance3D
+var season := ""
+var weather_kind := "sunny"
+var wind := Vector2.ZERO
+var team_mode := "brave"
+var tricks: Array = []  # dog tricks learned this visit (every machine: the "tricks" state)
+var visit_fields := 0  # host: fields started this visit
+var field_t := 0.0  # host: seconds played on this field (events)
+var picking_due := ""  # host: "mode" / "trick" when the field waits for a pick
 
 
 func _ready() -> void:
@@ -141,6 +159,8 @@ func _ready() -> void:
 		start_level = int(OS.get_environment("SRU_LEVEL"))
 	if start_level >= 0:
 		save.data.level = start_level
+	season = OS.get_environment("SRU_SEASON") if Seasons.SEASON_LOOK.has(OS.get_environment("SRU_SEASON")) else Seasons.season_for()
+	team_mode = Seasons.mode_of(String(save.data.get("mode", "brave")))
 	sfx = SfxScript.new()
 	add_child(sfx)
 	sfx.add_recipe("baa", {"len": 0.6, "peak": 0.55, "jit": 0.08, "layers": [
@@ -154,6 +174,14 @@ func _ready() -> void:
 	add_child(music)
 	music.play_mood("town")
 	music.prepare(["victory"])
+	picks = PicksScript.new()
+	picks.main = self
+	add_child(picks)
+	sev = EventsScript.new()
+	sev.main = self
+	add_child(sev)
+	weather = WeatherScript.new()
+	add_child(weather)
 	awards = Awards.new()
 	hints = Hints.new()
 	add_child(hints)
@@ -224,9 +252,10 @@ func _build_world(vr: bool) -> void:
 	disc.height = 0.2
 	disc.radial_segments = 32
 	ground.mesh = disc
-	ground.material_override = MeshKit.material(Color(0.46, 0.78, 0.34))
+	ground.material_override = MeshKit.material(WeatherScript.ground_color(season)).duplicate()
 	ground.position.y = -0.1
 	add_child(ground)
+	ground_mi = ground
 	# The edge: a knee-high stone wall. No bushes or trees near it any more: a follow camera sits up to
 	# ~4.7 m behind its dog, and a bush there once hid half of Nathanael's view (2026-10).
 	add_child(FieldView.build_edge())
@@ -282,6 +311,10 @@ func _apply_field(desc: Dictionary) -> void:
 			var sp: Array = spots[int(slot) % spots.size()]
 			(dogs[slot] as Node3D).position = Vector3(sp[0], 0.0, sp[1])
 			last_pos[slot] = (dogs[slot] as Node3D).position
+	# The season's look and this field's weather (seeded: the same on every machine).
+	weather_kind = Seasons.weather_for(int(field.seed), season)
+	wind = Seasons.wind_dir(int(field.seed))
+	weather.show_field(season, weather_kind, wind)
 	if net.mode == "client" and sheep.size() == (field.sheep as Array).size():
 		for i in sheep.size():
 			(sheep[i] as Node).call("set_breed", int(field.sheep[i][2]))
@@ -441,7 +474,7 @@ func _move_local_players(delta: float) -> void:
 	var send := send_t <= 0.0
 	if send:
 		send_t = 1.0 / 30.0
-	var playing := String(net.state_get("phase", "play")) == "play"
+	var playing := String(net.state_get("phase", "play")) in ["play", "pick"]  # dogs run to the pick orbs too
 	for slot in party.local_slots():
 		if not dogs.has(slot):
 			continue
@@ -455,7 +488,7 @@ func _move_local_players(delta: float) -> void:
 			var r := Vector3(-f.z, 0.0, f.x)
 			var dir := r * mv.x - f * mv.y
 			var wet := FieldGen.water_at(field, d.position.x, d.position.z)  # dogs paddle across the stream
-			var p := d.position + dir * DOG_SPEED * (FieldGen.DOG_SLOW if wet else 1.0) * delta
+			var p := d.position + dir * dog_speed() * (FieldGen.DOG_SLOW if wet and not tricks.has("splash") else 1.0) * delta
 			p.y = 0.0
 			d.position = FieldGen.move_dog(field, p.limit_length(ARENA))
 			Creatures.anim(d).face(dir)
@@ -587,6 +620,11 @@ func _on_state_changed(key: String, value: Variant) -> void:
 			_apply_field(value)
 		"farm":
 			_apply_farm(value)
+		"orbs":
+			var ov: Array = value
+			picks.show_row(String(ov[0]), ov[1], ov[2])
+		"tricks":
+			tricks = (value as Array).duplicate()
 		"phase":
 			if String(value) == "results":
 				_show_results(net.state_get("results", {}))
@@ -610,15 +648,28 @@ func _start_round() -> void:
 	for sp in field.sheep:
 		var sh := _make_sheep(Vector3(sp[0], 0.0, sp[1]), int(sp[2]))
 		sh.set("wander_t", randf_range(0.0, 1.5))
-	time_left = float(field.time)
+	time_left = Seasons.clock(float(field.time), team_mode)
 	elapsed = 0.0
+	field_t = 0.0
+	sev.clear()
+	sev.reset([])
 	net.state_set("total", sheep.size())
 	net.state_set("home", 0)
 	net.state_set("time", int(ceil(time_left)))
-	net.state_set("phase", "play")
 	net.state_set("round", int(net.state_get("round", 0)) + 1)
 	_refresh_group()
 	_round_story()
+	visit_fields += 1
+	picking_due = ""
+	if visit_fields == 1 and not OS.has_environment("SRU_NO_PICK"):
+		picking_due = "mode"
+	elif not Seasons.trick_offer(visit_fields, int(save.data.world) + int(net.state_get("round", 0)), tricks).is_empty():
+		picking_due = "trick"
+	if picking_due == "":
+		_begin_clock()
+	else:
+		net.state_set("phase", "pick")
+		_offer_pick(picking_due)
 
 
 ## Host: Bo's words as a field starts (the first time ever, a new kind of field, today's field).
@@ -720,6 +771,10 @@ func _end_round(all_home: bool) -> void:
 			br[id] = int(br.get(id, 0)) + 1
 	save.data.home = before + home
 	save.data.rounds = int(save.data.rounds) + 1
+	var sea: Dictionary = save.data.get("seasons", {})
+	sea[season] = int(sea.get(season, 0)) + 1
+	save.data["seasons"] = sea
+	save.data["foxes"] = int(save.data.get("foxes", 0)) + int(run.get("foxes", 0))
 	if all_home and not daily:
 		save.data.level = lv + 1
 		var bs: Dictionary = save.data.stars
@@ -761,6 +816,89 @@ func _end_round(all_home: bool) -> void:
 		int(save.data.home), int(save.data.level) + 1])
 
 
+# --- Second pass: picks, events, weather (seasons.gd) ----------------------------------------------
+
+## Host: the field's clock runs (after a pick, or at once): the mode's clock, the events (each adds its bonus).
+func _begin_clock() -> void:
+	time_left = Seasons.clock(float(field.time), team_mode)
+	var ev := Seasons.make_events(field, int(field.seed), team_mode, time_left)
+	if OS.has_environment("SRU_EVENT_AT"):  # tests: the first event this many seconds in
+		for e in ev:
+			e[0] = float(OS.get_environment("SRU_EVENT_AT")) + 22.0 * ev.find(e)
+	time_left += ev.size() * Seasons.EVENT_BONUS
+	sev.reset(ev)
+	field_t = 0.0
+	net.state_set("time", int(ceil(time_left)))
+	net.state_set("phase", "play")
+	var wd: Dictionary = Seasons.WEATHER[weather_kind]
+	if weather_kind != "sunny" or visit_fields == 1:
+		_story({"who": String(Seasons.SEASON_LOOK[season].word), "line": String(wd.line), "pic": String(wd.pic),
+			"color": Color(0.55, 0.75, 1.0), "duration": 3.0})
+	print("Field clock: %s, %s %s, %.0f s, events %s" % [team_mode, season, weather_kind, time_left, ev])
+
+
+func dog_speed() -> float:
+	var wd: Dictionary = Seasons.WEATHER.get(weather_kind, Seasons.WEATHER.sunny)
+	return DOG_SPEED * float(wd.dog) * (Seasons.ZOOMIES if tricks.has("zoomies") else 1.0)
+
+
+## Host: put up the mode or trick orbs.
+func _offer_pick(kind: String) -> void:
+	var entries: Array = []
+	var opts: Array = []
+	if kind == "mode":
+		opts = PickOrbs.mode_ids(team_mode)
+		for id in opts:
+			var md := PickOrbs.mode(id)
+			entries.append({"id": id, "name": String(md.name), "pic": String(md.pic), "color": md.color})
+	else:
+		opts = Seasons.trick_offer(visit_fields, int(save.data.world) + int(net.state_get("round", 0)), tricks)
+		for k in opts:
+			var td: Dictionary = Seasons.TRICKS[k]
+			entries.append({"id": k, "name": String(td.name), "pic": String(td.pic), "color": td.color})
+	picks.begin(kind, entries, opts, _on_pick)
+	sound("whistle", -4.0, 1.2)
+
+
+## Host: the team picked (slot -1: nobody, the middle one came).
+func _on_pick(stage: String, opt: Variant, slot: int) -> void:
+	var by := "auto" if slot < 0 else "P%d" % (slot + 1)
+	if stage == "mode":
+		team_mode = Seasons.mode_of(String(opt))
+		save.data["mode"] = team_mode
+		save.mark_dirty()
+		var md := PickOrbs.mode(team_mode)
+		_story({"who": String(md.name), "line": String(PickOrbs.MODE_LINES.get(team_mode, "")), "pic": String(md.pic),
+			"color": md.color, "duration": 3.0})
+	else:
+		var k := String(opt)
+		if not tricks.has(k):
+			tricks.append(k)
+			net.state_set("tricks", tricks.duplicate())
+		var td: Dictionary = Seasons.TRICKS[k]
+		_story({"who": String(td.name), "line": "A new dog trick!", "pic": String(td.pic), "color": td.color, "duration": 3.0})
+	print("Pick %s: %s by %s (tricks %s)" % [stage, opt, by, tricks])
+	_begin_clock()
+
+
+## Host: an event starts its warning (rings now, the fox / the strike after Seasons.WARN_SECS).
+func _sheep_event(e: Array) -> void:
+	var kind := String(e[1])
+	sev.announce(kind, float(e[2]), float(e[3]), float(e[4]))
+	net.event("sev", [kind, float(e[2]), float(e[3]), float(e[4])])
+	_story(_bo("A fox! Chase it off!", "fox", Seasons.EVENT_COLORS.fox) if kind == "fox" else _bo("Thunder! Hold on!", "storm", Seasons.EVENT_COLORS.thunder))
+	print("Sheep event: %s at (%.1f, %.1f), %.0f s in" % [kind, float(e[2]), float(e[3]), field_t])
+
+
+## Host: a dog sent the fox home.
+func fox_chased(slot: int, at: Vector3) -> void:
+	run["foxes"] = int(run.get("foxes", 0)) + 1
+	burst(at + Vector3.UP * 0.4, Color(1.0, 0.6, 0.2), 18)
+	net.event("bark", [slot])
+	bark_fx(slot)
+	print("Fox chased off by P%d" % (slot + 1))
+
+
 func _exit_tree() -> void:
 	BgGen.wait_all()  # no field job outlives the game
 	if ready_to_play and net != null and net.mode != "client" and String(net.state_get("phase", "")) == "play" and not field.is_empty():
@@ -778,7 +916,9 @@ func _telemetry(end: String, home: int, total: int, st: int) -> void:
 		"time": int(field.time), "played_s": int(elapsed), "left_s": int(maxf(0.0, time_left)), "stars": st,
 		"gates": int(field.gates), "hedges": (field.hedges as Array).size(), "bushes": (field.bushes as Array).size(),
 		"stream": not (field.stream as Dictionary).is_empty(), "try": int(field.attempt),
-		"farm": int(save.data.home), "next_level": int(save.data.level)}, true)
+		"farm": int(save.data.home), "next_level": int(save.data.level), "team_mode": team_mode, "season": season,
+		"weather": weather_kind, "events": sev.events.size(), "events_told": sev.fired, "foxes_chased": sev.chased,
+		"tricks": tricks, "picks": picks.history}, true)
 	Telemetry.run(GAME_ID, info)
 
 
@@ -865,7 +1005,8 @@ func _sim_sheep(delta: float) -> void:
 		var want := Vector3.ZERO
 		var scared := false
 		var bd: Dictionary = FieldGen.BREEDS[int(s.get("breed"))]
-		var spd := float(bd.speed)
+		var wd: Dictionary = Seasons.WEATHER.get(weather_kind, Seasons.WEATHER.sunny)
+		var spd := float(bd.speed) * float(wd.sheep)
 		if not penned:
 			var push := Vector3.ZERO
 			var herder := -1  # the dog pushing hardest towards the pen gets the credit
@@ -873,7 +1014,7 @@ func _sim_sheep(delta: float) -> void:
 			var to_pen := -Vector3(s.position.x, 0.0, s.position.z).normalized()
 			for slot in dogs:
 				var dp: Vector3 = (dogs[slot] as Node3D).position
-				var r := (BARK_R if float(bark_t.get(slot, 0.0)) > 0.0 else SCARE_R) * float(bd.scare)
+				var r := (BARK_R * (Seasons.BIG_BARK if tricks.has("bigbark") else 1.0) if float(bark_t.get(slot, 0.0)) > 0.0 else SCARE_R) * float(bd.scare)
 				var away := s.position - dp
 				away.y = 0.0
 				var dd := away.length()
@@ -887,6 +1028,7 @@ func _sim_sheep(delta: float) -> void:
 						herder = int(slot)
 			if herder >= 0:
 				s.set("last_by", herder)
+			push += sev.push_at(s.position)  # the fox (events.gd)
 			for hp in hands:
 				var away := s.position - hp
 				away.y = 0.0
@@ -900,7 +1042,7 @@ func _sim_sheep(delta: float) -> void:
 		if not scared:
 			var wt: float = float(s.get("wander_t")) - delta
 			if wt <= 0.0:
-				var wander := float(bd.wander)
+				var wander := float(bd.wander) * float(wd.wander) * (Seasons.CALL_WANDER if tricks.has("call") else 1.0)
 				wt = randf_range(1.5, 4.0) / (1.0 + wander)
 				var a := randf() * TAU
 				s.set("wander_dir", Vector3(cos(a), 0.0, sin(a)) * (wander if randf() < 0.45 + wander * 0.3 else 0.0))
@@ -908,6 +1050,8 @@ func _sim_sheep(delta: float) -> void:
 			want = s.get("wander_dir")
 			if int(s.get("breed")) == FieldGen.LAMB and not penned:
 				want += _to_mum(s) * 0.6  # lambs stay close to a grown-up sheep
+			if not penned and float(wd.drift) > 0.0:
+				want += Vector3(wind.x, 0.0, wind.y) * float(wd.drift)  # a windy field: loose sheep drift downwind
 		# keep apart from the others
 		for j in sheep.size():
 			if j == i:
@@ -1193,6 +1337,9 @@ func _process(delta: float) -> void:
 		if results_t > results_wait:
 			_start_round()
 		return
+	if String(net.state_get("phase", "")) == "pick":  # the clock waits while the pick orbs are up
+		picks.tick(delta)
+		return
 	time_left -= delta
 	elapsed += delta
 	if int(ceil(time_left)) != int(net.state_get("time", 0)):
@@ -1200,6 +1347,9 @@ func _process(delta: float) -> void:
 	if time_left <= 0.0:
 		_end_round(false)
 		return
+	field_t += delta
+	for e in sev.tick(field_t):
+		_sheep_event(e)
 	_sim_sheep(delta)
 
 
@@ -1274,6 +1424,10 @@ func apply_event(kind: String, args: Array) -> void:
 			sheep_fx(args[0], String(args[1]), int(args[2]))
 		"bark":
 			bark_fx(int(args[0]))
+		"take":
+			picks.take_fx(int(args[0]), int(args[1]))
+		"sev":
+			sev.announce(String(args[0]), float(args[1]), float(args[2]), float(args[3]))
 		"fence":
 			wobble_fence()
 		"celebrate":
