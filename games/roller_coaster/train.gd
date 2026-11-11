@@ -26,6 +26,10 @@ var riders: Array[Node3D] = []
 var occupants: Array = []
 var hands_t: Array[float] = []
 var hide_slot0 := false
+## CORKSCREW gifts (deep.gd): [[s0, s1], ...] where the cars barrel-roll (never while the VR builder rides along: no_roll).
+var rolls: Array = []
+var no_roll := false
+var flat_xf: Array[Transform3D] = []  # each car's place before any roll (the TV ride cameras follow this)
 
 
 ## occ: per car, slot >= 0 (a player), -1 (a bot rider), <= -2 (guest -2 - g).
@@ -83,9 +87,22 @@ func _car_mesh(col: Color, front: bool) -> ArrayMesh:
 func place(tr: Dictionary, s: float) -> void:
 	if tr.is_empty():
 		return
+	flat_xf.resize(cars.size())
+	var length: float = tr.get("length", 1.0)
 	for i in cars.size():
-		var xf := Track.sample(tr, s - i * GAP)
+		var cs := s - i * GAP
+		var xf := Track.sample(tr, cs)
 		xf.origin += xf.basis.y * 0.22
+		flat_xf[i] = xf
+		if not no_roll:
+			var ls := fposmod(cs, length)
+			for rg in rolls:
+				if ls > float(rg[0]) and ls < float(rg[1]):
+					var k := smoothstep(float(rg[0]), float(rg[1]), ls)
+					var axis := xf.basis.z.normalized()
+					var c := xf.origin - xf.basis.y * 0.22 + xf.basis.y * 0.6  # (roll round the riders' middle)
+					var rot := Basis(axis, k * TAU)
+					xf = Transform3D(rot * xf.basis, c + rot * (xf.origin - c))
 		cars[i].transform = xf
 
 
