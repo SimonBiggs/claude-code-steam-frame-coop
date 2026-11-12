@@ -167,26 +167,38 @@ static func tricks(seed_value: int, spec: Dictionary, rd: Dictionary) -> Array:
 	var each := span / kinds.size()
 	for i in kinds.size():
 		var t := snappedf(minf(start + warn + each * i + r.randf_range(0.0, maxf(0.0, each - slot)), stop), 0.01)
-		match String(kinds[i]):
-			"gold":
-				if _gold_busy(rd, t, float(md.gold_stay)):
-					continue  # a golden mole is up then already: never two at once
-				var holes: Array = []
-				for h in RoundGen.HOLES:
-					if not _king_on(rd, h, t - warn, t + float(md.gold_stay)):
-						holes.append(h)
-				out.append([t, "gold", int(holes[r.randi() % holes.size()])])
-			"stampede":
-				var rows: Array = []
-				for row in RoundGen.ROWS:
-					var free := true
-					for h in herd_holes(row, mode):
-						free = free and not _king_on(rd, int(h), t - warn, t + float(md.herd_stay) + RoundGen.HOLE_REST)
-					if free:
-						rows.append(row)
-				if not rows.is_empty():
-					out.append([t, "stampede", int(rows[r.randi() % rows.size()])])
+		# The kind drawn, else the other one: a trick that can't go off then (a golden mole already up, every row's herd
+		# path crossing the KING) used to be dropped, so a short round could end with none (2026-11-12: the bot's 14 s
+		# rounds, "tricks happened" failed now and then).
+		var first := String(kinds[i])
+		for kind in [first, "stampede" if first == "gold" else "gold"]:
+			var e := _trick_at(r, rd, md, mode, kind, t, warn)
+			if not e.is_empty():
+				out.append(e)
+				break
 	return out
+
+
+static func _trick_at(r: RandomNumberGenerator, rd: Dictionary, md: Dictionary, mode: String, kind: String, t: float, warn: float) -> Array:
+	match kind:
+		"gold":
+			if _gold_busy(rd, t, float(md.gold_stay)):
+				return []  # a golden mole is up then already: never two at once
+			var holes: Array = []
+			for h in RoundGen.HOLES:
+				if not _king_on(rd, h, t - warn, t + float(md.gold_stay)):
+					holes.append(h)
+			return [] if holes.is_empty() else [t, "gold", int(holes[r.randi() % holes.size()])]
+		"stampede":
+			var rows: Array = []
+			for row in RoundGen.ROWS:
+				var free := true
+				for h in herd_holes(row, mode):
+					free = free and not _king_on(rd, int(h), t - warn, t + float(md.herd_stay) + RoundGen.HOLE_REST)
+				if free:
+					rows.append(row)
+			return [] if rows.is_empty() else [t, "stampede", int(rows[r.randi() % rows.size()])]
+	return []
 
 
 ## Is the KING in hole h at any time in [from, to]?
