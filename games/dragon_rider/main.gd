@@ -92,6 +92,7 @@ const Picks := preload("res://games/dragon_rider/picks.gd")
 const Hazards := preload("res://games/dragon_rider/hazards.gd")
 const PickOrbs := preload("res://core/pick_orbs.gd")
 const UiKitDr := preload("res://core/ui_kit.gd")
+const SeasonKit := preload("res://core/season_kit.gd")
 const GAME_ID := "dragon_rider"
 const CHARM_COLORS := {"bell": Color(1.0, 0.8, 0.2), "bunny": Color(1.0, 0.75, 0.85), "ribbon": Color(0.35, 0.6, 1.0), "crown": Color(1.0, 0.85, 0.25)}
 const CHARM_CHEERS := {1: "Our first charm!", 5: "Five charms!", 10: "Ten charms!", 22: "A rail full of charms!"}
@@ -320,7 +321,7 @@ func _ready() -> void:
 	add_child(net)
 	net.sticky_event("charms")  # a machine that joins later gets the latest one (core/net.gd)
 	net.sticky_event("orbs")  # a machine joining mid-pick sees the pick orbs
-	season = OS.get_environment("DR_SEASON") if OS.has_environment("DR_SEASON") else Seeded.season()
+	season = SeasonKit.override("dragon_rider", Seeded.season(), Deep.SEASONS)
 	if not Deep.SEASONS.has(season):
 		season = "spring"
 	picks = Picks.new()

@@ -74,6 +74,7 @@ const PicksScript := preload("res://games/rhythm_band/picks.gd")
 const HazardsScript := preload("res://games/rhythm_band/hazards.gd")
 const SeasonScript := preload("res://games/rhythm_band/season.gd")
 const FestivalScript := preload("res://games/rhythm_band/festival.gd")
+const SeasonKit := preload("res://core/season_kit.gd")
 
 const MAX_PLAYERS := 7  # VR drummer + 6 guitarists
 const MAX_LOCAL_VIEWS := 6
@@ -2118,9 +2119,7 @@ func _start_fan_club() -> void:
 	save.data.sessions = int(save.data.sessions) + 1
 	save.mark_dirty()
 	_send_fans()
-	season = Seeded.season(Seeded.today())
-	if OS.has_environment("RB_SEASON") and Deep.SEASONS.has(OS.get_environment("RB_SEASON")):
-		season = OS.get_environment("RB_SEASON")
+	season = SeasonKit.override("rhythm_band", Seeded.season(Seeded.today()), Deep.SEASONS)
 	season_node.set_season(season)
 	if String(save.data.mode) != "":
 		mode = Deep.mode_of(String(save.data.mode))

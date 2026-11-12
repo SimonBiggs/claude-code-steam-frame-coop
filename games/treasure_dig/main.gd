@@ -45,6 +45,7 @@ const Picks := preload("res://games/treasure_dig/picks.gd")
 const Events := preload("res://games/treasure_dig/events.gd")
 const PickOrbs := preload("res://core/pick_orbs.gd")
 const WarnRingsScript := preload("res://core/warn_rings.gd")
+const SeasonKit := preload("res://core/season_kit.gd")
 const MUSEUM_AT := Vector3(-12.5, 0.0, -5.0)  ## Peg's museum islet (beach units, left of the island as the giant sees it)
 
 const GAME_ID := "treasure_dig"
@@ -161,7 +162,7 @@ func _ready() -> void:
 	add_child(net)
 	net.state_changed.connect(_on_state_changed)
 	net.sticky_event("orbs")  # a machine joining mid-pick sees the pick orbs
-	season = OS.get_environment("TD_SEASON") if OS.has_environment("TD_SEASON") else Seeded.season()
+	season = SeasonKit.override("treasure_dig", Seeded.season(), Deep.SEASONS)
 	party = Party.new()
 	party.name = "Party"
 	add_child(party)

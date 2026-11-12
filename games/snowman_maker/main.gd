@@ -48,6 +48,7 @@ const PicksScript := preload("res://games/snowman_maker/picks.gd")
 const HazardsScript := preload("res://games/snowman_maker/hazards.gd")
 const SeasonScript := preload("res://games/snowman_maker/season.gd")
 const TownScript := preload("res://games/snowman_maker/town.gd")
+const SeasonKit := preload("res://core/season_kit.gd")
 
 const GAME_ID := "snowman_maker"
 const ARENA := 9.0
@@ -2011,9 +2012,7 @@ func _helper_pick(from: Vector3) -> int:
 
 ## Host: the session's season, the family's last difficulty, the town; What's New "try" envs jump straight in.
 func _begin_session() -> void:
-	season = Seeded.season()
-	if OS.has_environment("SM_SEASON") and Deep.SEASONS.has(OS.get_environment("SM_SEASON")):
-		season = OS.get_environment("SM_SEASON")
+	season = SeasonKit.override("snowman_maker", Seeded.season(), Deep.SEASONS)
 	if String(save.data.get("mode", "")) != "":
 		difficulty = Deep.mode_of(String(save.data.mode))
 	if OS.has_environment("SM_MODE"):

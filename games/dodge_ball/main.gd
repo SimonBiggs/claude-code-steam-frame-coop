@@ -48,6 +48,7 @@ const HazardsScript := preload("res://games/dodge_ball/hazards.gd")
 const GiftsScript := preload("res://games/dodge_ball/gifts.gd")
 const SeasonScript := preload("res://games/dodge_ball/season.gd")
 const ToysScript := preload("res://games/dodge_ball/toys.gd")
+const SeasonKit := preload("res://core/season_kit.gd")
 
 const STAGE_H := 0.9  # the giant's stage height
 const STAGE_FRONT := -4.6  # z of the stage's front edge (the stage is behind it, towards -Z)
@@ -1588,9 +1589,7 @@ func _setup_deep() -> void:
 
 ## Host, once per session: the season, the family's last mode, the toys, for every machine.
 func _begin_deep() -> void:
-	season = Seeded.season()
-	if OS.has_environment("DB_SEASON") and Deep.SEASONS.has(OS.get_environment("DB_SEASON")):
-		season = OS.get_environment("DB_SEASON")
+	season = SeasonKit.override("dodge_ball", Seeded.season(), Deep.SEASONS)
 	mode = Deep.mode_of(String(save.data.mode) if String(save.data.mode) != "" else "brave")
 	if OS.has_environment("DB_MODE"):  # (What's New "try" / bots: straight in)
 		mode = Deep.mode_of(OS.get_environment("DB_MODE"))
