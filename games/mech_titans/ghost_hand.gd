@@ -43,6 +43,7 @@ func _ready() -> void:
 	_part(thumb, Vector3(0, 0, -0.02), Vector3(0.01, 0.01, 0.024))
 	beam_mat = mat.duplicate()
 	beam_mat.albedo_color = Color(0.5, 0.95, 1.0, 0.4)
+	beam_mat.render_priority = UiKit.VR_PRIO_UNDER_UI  # reaches the far target: passes behind VR cards
 	beam = MeshInstance3D.new()
 	var c := CylinderMesh.new()
 	c.top_radius = 0.012
