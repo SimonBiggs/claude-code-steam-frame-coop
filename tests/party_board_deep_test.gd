@@ -34,6 +34,7 @@ const PickOrbs := preload("res://core/pick_orbs.gd")
 const StoryCard := preload("res://core/story_card.gd")
 const Seeded := preload("res://core/seeded.gd")
 const TestTime := preload("res://tests/test_time.gd")
+const VrViewCheck := preload("res://core/vr_view_check.gd")
 
 const MODES: Array[String] = ["gentle", "brave", "hard"]
 
@@ -339,6 +340,8 @@ func _check_rows() -> void:
 			var d: float = v.distance_to(head.origin)
 			_expect(d > 0.3 and d < 0.62, "VR orb %d is an arm's reach away (%.2f m)" % [i, d])
 			_expect(v.z < head.origin.z, "VR orb %d is in front of the giant" % i)
+			var label := v + Vector3(0, 1.2 * Deep.VR_SCALE, 0)  # (picks.gd label_y 1.2 x the orb scale)
+			_expect(label.distance_to(head.origin) > VrViewCheck.FACE_D + 0.02, "VR orb %d's name is not in the face (%.2f m)" % [i, label.distance_to(head.origin)])
 			_expect(v.y - orb_m > Main.TABLE_Y + BD.GROUND_Y * Main.S_VR + 0.12, "VR orb %d floats above the island (eyes %.2f m)" % [i, eye])
 			for j in range(i + 1, vr.size()):
 				_expect(v.distance_to(vr[j]) > 2.0 * (orb_m + Deep.HAND_R), "VR orbs %d and %d are apart" % [i, j])

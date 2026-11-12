@@ -75,7 +75,7 @@ const HALL_STEPS: Array = [[1, "posts"], [2, "bunting"], [3, "roof"], [5, "ballo
 const HALL_PRESENTS := 12
 ## The pick rows. VR (metres): an arm's reach in front of the eyes, just under eye level; GENTLE on the left.
 const VR_X: Array[float] = [-0.3, 0.0, 0.3]
-const VR_AHEAD := 0.42
+const VR_AHEAD := 0.5  # (the names over the balls stay past core/vr_view_check.gd FACE_D)
 const VR_BELOW := 0.14
 const VR_SCALE := 0.11
 const HAND_R := 0.05  # a hand this near an orb's ball touches it ...

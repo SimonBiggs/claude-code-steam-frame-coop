@@ -127,7 +127,7 @@ var simple := SIMPLE_MODE
 var props: PropsScript  ## SIMPLE: touchable island (every machine; touches are found where the VR player is)
 var ghost: GhostHand  ## SIMPLE, VR player only: the see-through teaching hand
 ## SECOND PASS (deep.gd): the pick orbs (modes, Mango's gifts), the warned board surprises, the gifts over the tokens,
-## the season on the island and Mango's party hall. State "deep" {mode, season, hall_n}, "orbs", "hz".
+## the season on the island and Mango's party hall. State "deep" {mode, season, hall_n}, "hz"; sticky event "orbs".
 var picks: PicksScript
 var hazards: HazardsScript
 var gift_tags: GiftsScript
@@ -371,6 +371,7 @@ func _build_vr_room() -> void:
 
 ## Every machine: the second pass's pieces (deep.gd), all under the stage (board units) but the picks' brain.
 func _build_deep() -> void:
+	net.sticky_event("orbs")  # a machine joining mid-pick sees the orbs (picks.gd)
 	picks = PicksScript.new()
 	picks.main = self
 	add_child(picks)
@@ -688,9 +689,6 @@ func _on_state_changed(key: String, value: Variant) -> void:
 				festival.apply(value)
 		"music":
 			music.play_mood(String(value), 1.2)
-		"orbs":
-			if picks != null:
-				picks.show_state(value)
 		"hz":
 			if hazards != null:
 				hazards.show_now(value)
@@ -917,6 +915,9 @@ func _do_fx(kind: String, args: Array) -> void:
 			_item_fx(int(args[0]), String(args[1]))
 		"special_fx":  # [special type, space, pid]: the special space does its thing
 			_special_fx(String(args[0]), int(args[1]), int(args[2]))
+		"orbs":  # [{stage, entries, spots, row, hover, allowed}] (picks.gd)
+			if picks != null:
+				picks.show_state(args[0] if not args.is_empty() else {})
 		"pick_take":  # [orb, slot] (picks.gd)
 			if picks != null:
 				picks.take_fx(int(args[0]), int(args[1]))

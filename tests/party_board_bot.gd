@@ -136,7 +136,7 @@ func _on_state(key: String, value: Variant) -> void:
 ## Record what happened and finish once the results are up.
 func _watch() -> String:
 	_measure_vr_panels()
-	var orbs_st: Dictionary = main.net.state_get("orbs", {}) if main.net.state_get("orbs", {}) is Dictionary else {}
+	var orbs_st: Dictionary = main.picks.cur_state
 	var pk := String(orbs_st.get("stage", ""))
 	if pk != _pick_key:
 		_pick_key = pk
@@ -301,7 +301,7 @@ func _drive_tv(slot: int) -> void:
 	var step := String(main.net.state_get("step", ""))
 	var party: Node = main.party
 	if phase == "pick":  # SECOND PASS: move the dot one orb with the stick, then A
-		var st: Dictionary = main.net.state_get("orbs", {}) if main.net.state_get("orbs", {}) is Dictionary else {}
+		var st: Dictionary = main.picks.cur_state
 		var al: Array = st.get("allowed", [])
 		if st.is_empty() or not (al.is_empty() or al.has(slot)):
 			kit.slot_stick(party, slot, "left", Vector2.ZERO)
@@ -429,7 +429,7 @@ func _drive_vr(delta: float) -> void:
 
 ## SECOND PASS: the giant's right hand moves into an orb (one it may take) and stays there; the left waits up high.
 func _vr_pick(rig: Node, delta: float) -> void:
-	var st: Dictionary = main.net.state_get("orbs", {}) if main.net.state_get("orbs", {}) is Dictionary else {}
+	var st: Dictionary = main.picks.cur_state
 	var al: Array = st.get("allowed", [])
 	kit.vr_reach(rig, 0, Vector3(-0.5, 1.75, 1.6), 3.0, delta)
 	if st.is_empty() or String(st.get("row", "")) != "vr" or not (al.is_empty() or al.has(0)) or _pick_t < 0.9:

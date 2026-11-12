@@ -9,8 +9,9 @@ extends Node
 ## (a hand already in one when they pop up must leave and come back). No VR: three big orbs over the south of the
 ## island ("board"). TV / Deck players (and a flat host): the stick moves a dot in their colour from orb to orb (it
 ## starts on the middle one), A takes it. Nobody in time? The middle orb (it glows brightest).
-## The host publishes the "orbs" state {stage, entries, spots (board units), row, hover: {slot: orb}, allowed} (a
-## machine joining mid-pick sees the orbs and the dots too) and the "pick_take" effect [orb, slot].
+## The host sends the sticky "orbs" event [{stage, entries, spots (board units), row, hover: {slot: orb}, allowed}] (a
+## machine joining mid-pick sees the orbs and the dots too; cur_state on every machine) and the "pick_take" effect
+## [orb, slot].
 
 const PickOrbs := preload("res://core/pick_orbs.gd")
 const Deep := preload("res://games/party_board/deep.gd")
@@ -43,6 +44,8 @@ var stick_ready := {}  # host: slot -> the stick came back to the middle since t
 var row_head := Transform3D()  # host, VR row: the head the row was put in front of
 var shown_key := ""
 var shown_hover := ""
+var shown_stage := ""
+var cur_state := {}  # every machine: the orbs showing now ({} none; bots read it)
 
 
 func _ready() -> void:
@@ -105,36 +108,32 @@ func _vr_row(head: Transform3D) -> Array:
 
 
 func _publish() -> void:
-	main.net.state_set("orbs", {"stage": stage, "entries": entries, "spots": spots.duplicate(), "row": row,
-		"hover": hover.duplicate(), "allowed": allowed.duplicate()})
+	main.fx("orbs", [{"stage": stage, "entries": entries, "spots": spots.duplicate(), "row": row,
+		"hover": hover.duplicate(), "allowed": allowed.duplicate()}])
 
 
-## Every machine: the "orbs" state.
+## Every machine: the "orbs" event.
 func show_state(v: Variant) -> void:
 	var st: Dictionary = v if v is Dictionary else {}
+	cur_state = st.duplicate()
 	if st.is_empty() or String(st.get("stage", "")) == "":
 		if showing() or shown_key != "":
 			orbs.clear()
 		shown_key = ""
 		shown_hover = ""
+		shown_stage = ""
 		spots = [] if main.flow == null else spots
 		return
 	var es: Array = st.get("entries", [])
 	var sp: Array = st.get("spots", [])
 	var key := "%s|%s|%s" % [String(st.stage), str(es.map(func(e: Dictionary) -> String: return String(e.get("id", "")))), str(sp)]
 	if key != shown_key:
-		var moved := shown_key.begins_with("%s|" % String(st.stage)) and showing() and orbs.orbs.size() == sp.size()
 		shown_key = key
 		row = String(st.get("row", "board"))
 		if main.flow == null:
 			spots = sp.duplicate()
-		if moved:  # (the VR row followed the giant: the same orbs, new places)
-			for i in sp.size():
-				if is_instance_valid(orbs.orbs[i]):
-					(orbs.orbs[i] as Node3D).global_position = main.to_world(sp[i])
-		else:
-			_build(String(st.stage), es, sp)
-			shown_hover = ""
+		_build(String(st.stage), es, sp)  # (also when the VR row followed the giant: the orbs bob round their new height)
+		shown_hover = ""
 	var hv: Dictionary = st.get("hover", {})
 	var hk := str(hv)
 	if hk != shown_hover:
@@ -151,9 +150,12 @@ func _build(new_stage: String, es: Array, sp: Array) -> void:
 		at.append(main.to_world(p))
 	var sc: float = Deep.VR_SCALE / main.S if row == "vr" else Deep.BOARD_SCALE
 	# a modest ball, the names over it (never at the giant's eyes); hit_r in metres: the orbs live under the scaled stage
-	orbs.show_orbs(new_stage, es, at[0], 0.0, 0.0, {"at": at, "scale": sc, "pop": true, "font": 56, "label_y": 1.2,
+	# (origin in board units: the orbs bob round its height in the stage's own units, at: their places in the world)
+	orbs.show_orbs(new_stage, es, sp[0], 0.0, 0.0, {"at": at, "scale": sc, "pop": true, "font": 56, "label_y": 1.2,
 		"label_px": 0.0045, "two_lines": true, "bob": 0.04, "hit_r": PickOrbs.BALL_R * main.S, "dot_r": 0.8})
-	main.pick_banner(new_stage)
+	if new_stage != shown_stage:
+		shown_stage = new_stage
+		main.pick_banner(new_stage)
 
 
 ## Orb i's middle in the world (bots aim there), INF if none.
@@ -320,6 +322,6 @@ func _finish() -> void:
 	entries = []
 	spots = []
 	hover = {}
-	main.net.state_set("orbs", {})
+	main.fx("orbs", [{}])
 	if on_done.is_valid():
 		on_done.call(st, opt, chosen_by)

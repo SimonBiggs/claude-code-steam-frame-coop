@@ -136,7 +136,7 @@ func begin() -> void:
 	net.state_set("star", -1)
 	net.state_set("phase", "title")
 	net.state_set("hz", [])
-	net.state_set("orbs", {})
+	main.fx("orbs", [{}])
 	hz_now = []
 	festival_done = false
 	main.publish_festival()
