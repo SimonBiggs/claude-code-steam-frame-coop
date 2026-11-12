@@ -64,7 +64,7 @@ func begin(new_stage: String, entries: Array, opts: Array, vr: bool, done: Calla
 	inside = {}
 	dwell = {}
 	var in_vr: bool = vr and main.vr_rig != null
-	var at := Deep.vr_spots(main.vr_rig.head_position(), entries.size()) if in_vr else Deep.row_spots(main.course.desc, entries.size())
+	var at := Deep.vr_spots(main.vr_rig.head_position(), entries.size(), main.course.desc) if in_vr else Deep.row_spots(main.course.desc, entries.size())
 	show_row(new_stage, entries, at, in_vr)
 	main.net.event("orbs", [new_stage, entries, spots, vr_row])
 	print("PICKS %s: %s (%s)" % [new_stage, opts, "in front of the VR giant" if vr_row else "over the start"])
@@ -81,9 +81,9 @@ func show_row(new_stage: String, entries: Array, at: Array, vr: bool) -> void:
 	if vr:  # a modest ball an arm's reach away; the names just under each ball, never at the giant's eyes
 		orbs.show_orbs(new_stage, entries, at[0], 0.0, 0.0, {"at": at, "scale": Deep.VR_SCALE, "pop": true, "font": 56,
 			"label_y": -1.15, "label_px": 0.0042, "two_lines": true, "bob": 0.01 * Deep.VR_S, "hit_r": PickOrbs.BALL_R, "dot_r": 0.8})
-	else:
+	else:  # the names over the balls: under them they met the runners' nameplates
 		orbs.show_orbs(new_stage, entries, at[0], 0.0, 0.0, {"at": at, "scale": Deep.ORB_SCALE, "pop": true, "font": 64,
-			"label_y": -1.15, "label_px": 0.0105, "two_lines": true, "bob": 0.08})
+			"label_y": 1.25, "label_px": 0.0105, "two_lines": true, "bob": 0.08})
 	main.pick_banner()
 
 

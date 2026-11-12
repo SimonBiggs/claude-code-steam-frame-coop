@@ -42,6 +42,8 @@ func set_medals(n: int, modes: Array) -> void:
 			node.queue_free()
 	newest = null
 	var count := mini(shown.size(), PER_BOARD * BOARD_X.size())
+	if n <= 0:
+		return  # (the first board goes up with the first medal)
 	var b := MeshKit.Builder.new()
 	var n_boards := 1 if count <= PER_BOARD else 2
 	for k in n_boards:

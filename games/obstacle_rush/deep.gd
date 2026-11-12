@@ -102,6 +102,7 @@ const VR_X: Array[float] = [-0.3, 0.0, 0.3]
 const VR_AHEAD := 0.42
 const VR_BELOW := 0.14
 const VR_SCALE := 0.14 * VR_S
+const VR_CLEAR := 0.02  # (m) the orbs stay this far in front of the course's near edge
 const HAND_R := 0.05 * VR_S  # a VR grab point this near an orb's ball touches it ...
 const DWELL := 0.35  # ... for this long (deliberate: a hand sweeping past never picks)
 const ROW_WAIT := {"mode": 20.0, "gift": 14.0}  # nobody took one: the middle
@@ -402,13 +403,27 @@ static func row_spots(c: Dictionary, n: int = 3) -> Array:
 	return out
 
 
-## The VR orbs' places: an arm's reach in front of the giant's head (the giant faces -Z).
-static func vr_spots(head: Vector3, n: int = 3) -> Array:
+## The VR orbs' places: an arm's reach in front of the giant's head (the giant faces -Z), but always in front of
+## course c's near edge (a spinner's disc reaches out past the floors: an orb inside it hid under the disc).
+static func vr_spots(head: Vector3, n: int = 3, c: Dictionary = {}) -> Array:
 	var out: Array = []
 	for i in n:
 		var x: float = VR_X[i] if n == 3 else lerpf(VR_X[0], VR_X[2], float(i) / maxf(1.0, n - 1))
-		out.append(Vector3(head.x + x * VR_S, head.y - VR_BELOW * VR_S, head.z - VR_AHEAD * VR_S))
+		var p := Vector3(head.x + x * VR_S, head.y - VR_BELOW * VR_S, head.z - VR_AHEAD * VR_S)
+		p.z = maxf(p.z, near_edge(c, p.x) + orb_r(true) + VR_CLEAR * VR_S)
+		out.append(p)
 	return out
+
+
+## How far towards the giant (+Z) course c reaches at x: its floors' half width, or a spinner disc's edge.
+static func near_edge(c: Dictionary, x: float) -> float:
+	var z := float(c.get("half_w", 3.0))
+	for dd in c.get("discs", []):
+		var dx := x - float(dd[0])
+		var r := float(dd[2]) + orb_r(true)  # (an orb beside the disc's edge must clear it too)
+		if absf(dx) < r:
+			z = maxf(z, sqrt(r * r - dx * dx))
+	return z
 
 
 ## Which start orb a runner at p stands under (-1 none).

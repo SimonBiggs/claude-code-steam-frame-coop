@@ -256,6 +256,16 @@ func _initialize() -> void:
 			_expect((vr[i] as Vector3).distance_to(vr[j]) > 2.0 * (Deep.orb_r(true) + Deep.HAND_R), "VR orbs %d and %d are apart" % [i, j])
 	_expect(Deep.orb_r(true) / Deep.VR_S > 0.05 and Deep.orb_r(true) / Deep.VR_S < 0.12, "VR orbs are a modest size (%.2f m)" % (Deep.orb_r(true) / Deep.VR_S))
 	_expect((vr[0] as Vector3).x < (vr[2] as Vector3).x, "GENTLE is on the giant's left")
+	# ... and in front of every course's near edge (floors, spinner discs), still within reach, wherever the giant walks.
+	for s in 40:
+		var cv := G.generate(300 + s * 7, s % G.tier_count())
+		for hx in [-12.0, -4.0, 0.0, 5.0, 12.0]:
+			var hd := Vector3(hx, 4.5, Giant.feet().z)
+			for sp in Deep.vr_spots(hd, 3, cv):
+				var spv: Vector3 = sp
+				_expect(spv.z - Deep.orb_r(true) > Deep.near_edge(cv, spv.x) - Deep.orb_r(true) + 0.01 and spv.z - Deep.orb_r(true) >= float(cv.half_w), "VR orb clear of course %d's near edge at x %.1f" % [s, spv.x])
+				var dist := spv.distance_to(hd) / Deep.VR_S
+				_expect(dist > 0.15 and dist < 0.62, "VR orb within reach over course %d (%.2f m)" % [s, dist])
 	_expect(Deep.DWELL >= 0.3 and Deep.TV_DWELL >= 0.8, "picks need a deliberate touch")
 	for why in StoryCard.check():
 		_fail(why)
