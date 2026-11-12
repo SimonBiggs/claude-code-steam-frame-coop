@@ -296,6 +296,20 @@ func assert_near(a: float, b: float, tolerance: float, msg: String) -> bool:
 	return assert_true(absf(a - b) <= tolerance, "%s (got %.3f, want %.3f +- %.3f)" % [msg, a, b, tolerance])
 
 
+## A TV machine (net.mode "client") plays at the host's difficulty: the host shares it as net state `key` and `mine`
+## (this machine's own value, e.g. main.game_mode) must match it. On the host / local game it only checks the host
+## shares it. Call it late in a networked run, after the host's mode pick (Duo Arena 2026-11-12: the TV kept its own
+## "brave" while the host played gentle, so its pad / charge / fire tells were wrong). tests/net_mode_sync_test.gd
+## makes every networked game with a difficulty either call this from its bot or say why its clients never read it.
+func check_host_mode(net: Node, mine: String, key := "mode") -> bool:
+	if net == null or not (net.mode in ["host", "client"]):
+		return true
+	var host: Variant = net.state_get(key)
+	if not assert_true(host != null, "the host shares its difficulty as net state '%s' (%s machine)" % [key, net.mode]):
+		return false
+	return assert_eq(mine, String(host), "this %s machine plays at the host's difficulty ('%s')" % [net.mode, key])
+
+
 ## Print the summary and quit (exit code 1 if anything failed).
 func finish(quit: bool = true, note := "") -> void:
 	if _finished:

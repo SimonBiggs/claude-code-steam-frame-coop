@@ -417,6 +417,7 @@ func _build_ptero() -> void:
 	var sm := StandardMaterial3D.new()
 	sm.albedo_color = Color(0.0, 0.0, 0.0, 0.45)
 	sm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	sm.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (VrViewCheck "washed out")
 	sm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	shadow.material_override = sm
 	shadow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

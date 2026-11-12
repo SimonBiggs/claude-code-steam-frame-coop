@@ -205,6 +205,7 @@ func _ready() -> void:
 	revive_fill.mesh = disc
 	var fm: StandardMaterial3D = main.make_material(color, 1.0)
 	fm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	fm.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (VrViewCheck "washed out")
 	fm.albedo_color.a = 0.35
 	revive_fill.material_override = fm
 	revive_fill.position.y = 0.03
@@ -231,6 +232,7 @@ func _update_bubble() -> void:
 		bubble.mesh = sm
 		var m: StandardMaterial3D = main.make_material(Color(0.45, 0.65, 1.0), 1.5)
 		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (VrViewCheck "washed out")
 		m.albedo_color.a = 0.25
 		m.cull_mode = BaseMaterial3D.CULL_DISABLED
 		m.rim_enabled = true
@@ -943,6 +945,7 @@ func _ensure_shield() -> void:
 	disc.mesh = cyl
 	var mat: StandardMaterial3D = main.make_material(color, 1.5)
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (VrViewCheck "washed out")
 	mat.albedo_color.a = 0.35
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	disc.material_override = mat
@@ -1134,6 +1137,7 @@ func _ensure_wrist_radar() -> void:
 	mat.albedo_texture = vp.get_texture()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (VrViewCheck "washed out")
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	wrist_radar.material_override = mat
 	wrist_radar.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -1243,6 +1247,7 @@ func _build_sword_demo() -> Node3D:
 	var ghost_mat := StandardMaterial3D.new()
 	ghost_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	ghost_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	ghost_mat.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (VrViewCheck "washed out")
 	ghost_mat.albedo_color = Color(0.6, 0.9, 1.0, 0.25)
 	var head := MeshInstance3D.new()
 	var hm := SphereMesh.new()

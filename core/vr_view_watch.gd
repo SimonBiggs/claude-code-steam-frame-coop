@@ -3,8 +3,9 @@ extends Node
 ## core/vr_view_check.gd every 0.5 s and reports each new problem once as "SCRIPT ERROR: BOT ASSERT FAILED: VR view: ..." (fails the
 ## bot's own BOT RESULT, tools/multibot.ts and dev.bots). A problem has to last 3 s (cards fade in, glide into place, a blink teleport);
 ## panels drawn over each other only SHORT_S (a 2.5 s NIGHT banner over a story card is gone before 3 s, but the
-## player still couldn't read either: Ghost Lantern 2026-11-11). Does nothing
+## player still couldn't read either: Ghost Lantern 2026-11-11), a panel over a pick PICK_CLEAR_S. Does nothing
 ## without BOT_VR, so real headsets and flat machines never pay for it. VR_VIEW_WARN=1 prints "VR VIEW: ..." instead.
+## VR_VIEW_TRACE=1 prints every problem as it starts and how long it lasted when it ends (any length, for tuning).
 
 const VrViewCheck := preload("res://core/vr_view_check.gd")
 
@@ -15,6 +16,9 @@ var on := OS.has_environment("BOT_VR")
 var clock := 0.0
 const HOLD_S := 3.0
 const SHORT_S := 1.0
+## A card over a pick orb gets this long to glide clear (UiKit.vr_dodge + vr_follow); tests/vr_view_check_test.gd
+## holds the shared layer to it.
+const PICK_CLEAR_S := 1.0
 
 
 func _process(delta: float) -> void:
@@ -31,6 +35,8 @@ func _process(delta: float) -> void:
 		now[key] = true
 		if not seen.has(key):
 			seen[key] = clock
+			if OS.has_environment("VR_VIEW_TRACE"):
+				print("VR VIEW TRACE: %.2f s new: %s" % [clock, p])
 		elif clock - float(seen[key]) >= hold(p) and not told.has(key):
 			told[key] = true
 			if OS.has_environment("VR_VIEW_WARN"):
@@ -43,17 +49,23 @@ func _process(delta: float) -> void:
 				Engine.set_meta("vr_view_failures", int(Engine.get_meta("vr_view_failures", 0)) + 1)
 	for k in seen.keys():
 		if not now.has(k):
+			if OS.has_environment("VR_VIEW_TRACE"):
+				print("VR VIEW TRACE: %.2f s gone after %.2f s: %s" % [clock, clock - float(seen[k]), k])
 			seen.erase(k)
 
 
 ## How long a problem may last before it fails the bot.
 static func hold(p: String) -> float:
-	# (a card gliding clear of a pick orb that just popped up keeps the long hold: UiKit.vr_dodge moves it in time)
+	# A card over a pick: UiKit.vr_spot / vr_dodge / vr_glide clear it within ~0.7 s of the picks coming (a fresh spot
+	# the moment they change, a quick glide). It had the 3 s hold "to glide clear in time", so Nova's card over Duo
+	# Arena's middle orb for 2.6 s never failed a bot (2026-11-12): a glide that takes longer is itself the bug.
+	if p.contains(": drawn over the pick "):
+		return PICK_CLEAR_S
 	# A pick hidden behind scenery: bots pick within a few seconds, so a 3 s hold never saw it (Rhythm Band's HARD behind
 	# the green cymbal, 2026-11-12); the orbs' pop-in is over well within SHORT_S.
 	if p.contains(" of the pick ") and p.contains(": hidden behind "):
 		return SHORT_S
-	return SHORT_S if p.contains(": drawn over ") and not p.contains("drawn over the pick") else HOLD_S
+	return SHORT_S if p.contains(": drawn over ") else HOLD_S
 
 
 ## Numbers change frame to frame (distances): the problem's kind + node name is the key.

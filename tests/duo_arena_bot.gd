@@ -11,6 +11,9 @@ extends Node
 ## BOT_GOD=1: players can't be hurt (so the finale can be cleared).
 ## BOT_VR=1 (local): player 1 runs the real VR code with fake hands: it draws the sword over the
 ## shoulder, walks up to monsters and swings (slices, shell cracks), and shoots with the right hand.
+## BOT_PICK_WAIT=s (default 2.5 with BOT_VR, else 0): every bot looks away from new pick orbs for s seconds, like a
+## real player reading them, so VrViewWatch sees Nova's pick card and the orbs together (a card drawn over the middle
+## orb's name for 2.6 s once passed: the bots had always shot an orb before the check's hold ran out).
 ## Second pass (deep.gd): on the host / local game the bot forces a TOLD surprise (its warn ring must be up at once),
 ## opens NOVA'S GIFT orbs (the bots shoot one), saves the zone's lost friend when there is one (DA_ZONE=jungle), and
 ## checks phases through tests/bot_kit.gd watch_state (net "da_phase" / "da_surprise" / "da_gifts" / "da_friend"),
@@ -32,6 +35,10 @@ var script_step := 0
 var vr_draw_t := 0.0
 var end_t: float = preload("res://tests/bot_end.gd").end_at(56.0)  # BOT_END, pulled in before a --quit-after cut
 var kit: BotKit
+var pick_wait := float(OS.get_environment("BOT_PICK_WAIT")) if OS.has_environment("BOT_PICK_WAIT") \
+	else (2.5 if OS.has_environment("BOT_VR") else 0.0)
+var pick_up_t := 0.0  # how long the pick orbs have been up
+var pick_was := ""  # which pick they are (a hero pick follows the mode pick in the same frame)
 var rings_at_surprise := -1  # warn rings up the moment the surprise was forced
 
 
@@ -81,6 +88,9 @@ func _physics_process(delta: float) -> void:
 		_join_players(mode)
 	if mode == "local" and joined:
 		_pad_script()
+	var pick_now: String = "%s %s" % [main.pick_stage, main.pick_ids] if main.pick_stage != "" else ""
+	pick_up_t = pick_up_t + delta if pick_now == pick_was else 0.0
+	pick_was = pick_now
 	for p in main.players:
 		if p.vr and not p.ghost:
 			_drive_vr(p, delta)
@@ -257,6 +267,9 @@ func _drive_vr(p, delta: float) -> void:
 	else:
 		var swing := sin(t * 7.0)
 		p.hand_l.position = cam.position + Vector3(swing * 0.6, -0.3, -0.5)
+	if _reading_orbs():
+		p.hand_r.global_basis = UiKit.aim(Vector3(0.0, 1.0, 0.3).normalized(), Vector3.BACK)  # at the sky while reading
+		return
 	var orb = _orb_for(p)
 	if orb != null:
 		p.hand_r.global_basis = UiKit.aim((orb.global_position - p.hand_r.global_position).normalized(), Vector3.UP)
@@ -280,13 +293,22 @@ func _drive_vr(p, delta: float) -> void:
 ## The pick orb a bot player goes for (zone.gd orbs: each player a different one), or null.
 func _orb_for(p):
 	var orbs: Array = main.zone.orbs if main.zone != null else []
-	if orbs.is_empty():
+	if orbs.is_empty() or _reading_orbs():
 		return null
 	var o = orbs[(p.index + main.wave) % orbs.size()]
 	return o if is_instance_valid(o) and o.is_inside_tree() else null
 
 
+## BOT_PICK_WAIT: the orbs just came up and the bots are still reading them (aim away, shoot nothing).
+func _reading_orbs() -> bool:
+	return main.pick_stage != "" and pick_up_t < pick_wait
+
+
 func _aim(p) -> void:
+	if _reading_orbs():
+		p.yaw = PI  # facing away from the orbs (they're up ahead at ORB_Z)
+		p.pitch = 0.6
+		return
 	var orb = _orb_for(p)
 	if orb != null:
 		var od: Vector3 = orb.global_position - (p.global_position + Vector3.UP * 1.55)
@@ -354,6 +376,9 @@ func _deep_checks() -> void:
 		kit.assert_true((z.lay.get("pillars", []) as Array).size() >= 3, "zone %s has pillars (%d)" % [z.zone_id, (z.lay.get("pillars", []) as Array).size()])
 		kit.assert_true(Gen.SHAPES.has(String(z.lay.get("shape", ""))) and z.lay.has("spring") and z.spring != null, "the arena has a shape and Nova's spring (%s)" % z.lay.get("shape", "-"))
 	kit.assert_true(main.story_shown >= 1, "a story card was shown (%d)" % main.story_shown)
+	kit.check_host_mode(main.net, main.game_mode)  # a TV machine's tells match the host's difficulty
+	if main.zone != null:
+		kit.assert_eq(String(main.zone.mode), String(main.game_mode), "the zone's pads use this machine's difficulty")
 	kit.assert_true(kit.seen("da_phase", "wave") > 0, "the wave phase was seen (%s)" % [kit.seen_values("da_phase")])
 	var want_season: String = load("res://core/season_kit.gd").override("duo_arena", "", Deep.SEASONS)  # "" = none asked for
 	kit.assert_true(main.deep.season != "" and (want_season == "" or main.deep.season == want_season), "the season is %s (want %s)" % [main.deep.season, want_season if want_season != "" else "any"])

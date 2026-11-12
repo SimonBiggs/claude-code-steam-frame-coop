@@ -7,6 +7,7 @@ const UiKit := preload("res://core/ui_kit.gd")
 const PickOrbs := preload("res://core/pick_orbs.gd")
 const StoryCard := preload("res://core/story_card.gd")
 const VrRig := preload("res://core/vr_rig.gd")
+const VrViewWatch := preload("res://core/vr_view_watch.gd")
 
 var fails: Array[String] = []
 var world: Node3D
@@ -316,14 +317,19 @@ func _run() -> void:
 	orbs.clear()
 	await _frames(40)
 	# the card already up, then the picks come: it glides clear
+	# within PICK_CLEAR_S: core/vr_view_watch.gd fails "drawn over the pick" after that long (a 24-frame cached spot
+	# and a slow glide once left Nova's card over Duo Arena's middle orb for 2.6 s, under the old 3 s hold)
 	var ok := false
+	var took := 0.0
 	orbs.show_orbs("mode", ents, Vector3(0, 0, -4.2), 1.6, cam.global_position.y - 0.4)
 	for i in 400:
 		await _frames(1)
-		if i > 3 and not ", ".join(VrViewCheck.problems(root)).contains("drawn over the pick"):
+		took += world.get_process_delta_time()  # (the glide runs on this delta, fixed fps or not)
+		if not ", ".join(VrViewCheck.problems(root)).contains("drawn over the pick"):
 			ok = true
 			break
-	_check(ok, "a card already up glides clear when the picks come: %s" % [VrViewCheck.problems(root)])
+	print("  a card already up cleared the new picks in %.2f s" % took)
+	_check(ok and took <= VrViewWatch.PICK_CLEAR_S, "a card already up glides clear within %.1f s when the picks come (took %.2f s): %s" % [VrViewWatch.PICK_CLEAR_S, took, VrViewCheck.problems(root)])
 	# picks at eye level, nowhere above: the card goes under them
 	orbs.show_orbs("mode", ents, Vector3(0, 0, -4.2), 1.6, cam.global_position.y)
 	await _frames(1)
@@ -335,6 +341,35 @@ func _run() -> void:
 			break
 	_check(probs.is_empty(), "picks at eye level, two cards up: both clear of the picks and of each other: %s" % [probs])
 	orbs.free()
+	_clear_ui()
+	await _frames(2)
+
+	# 5d. picks coming up wherever the VR player stands (near, far, off to the side), a Nova-sized story card already
+	# up: it is off every pick within VrViewWatch.PICK_CLEAR_S (Duo Arena 2026-11-12: 2.6 s over the middle orb's
+	# name; the shared layer waited for a 24-frame spot, missed lift changes and glided lazily). A pick right at the
+	# eyes (VrViewCheck.PICK_AT_HAND_D: walked into, being reached for) doesn't count.
+	var row := PickOrbs.new()
+	world.add_child(row)
+	for where in [[0.8, 0.0], [1.5, 0.0], [1.5, 1.6], [2.0, 0.0], [3.0, 1.6], [4.2, 0.0], [6.0, 1.6]]:
+		row.clear()
+		origin.global_position = Vector3(float(where[1]), 0.0, 0.0)
+		await _frames(3)
+		var card := StoryCard.show_vr(world, cam, {"who": "NOVA", "line": "Pick how brave!", "pic": "heart", "duration": 30.0, "vr_height": -0.42})
+		await _frames(30)
+		row.show_orbs("mode", ents, Vector3(0, 0, -float(where[0])), 1.6, 1.2, {"pop": true})
+		var waited := 0.0
+		var clear := false
+		for i in 300:
+			await _frames(1)
+			waited += world.get_process_delta_time()
+			if not ", ".join(VrViewCheck.problems(root)).contains("drawn over the pick"):
+				clear = true
+				break
+		_check(clear and waited <= VrViewWatch.PICK_CLEAR_S, "picks %.1f m ahead, %.1f m aside: the card is off them within %.1f s (took %.2f s): %s" % [
+			float(where[0]), float(where[1]), VrViewWatch.PICK_CLEAR_S, waited, VrViewCheck.problems(root)])
+		card.free()
+	row.free()
+	origin.global_position = Vector3.ZERO
 	_clear_ui()
 	await _frames(2)
 

@@ -194,7 +194,17 @@ var zone: Node3D
 var deep: Node3D  # deep_play.gd
 var run_seed := 0
 var daily := false
-var game_mode := "brave"
+## How brave (Gen.MODES). The host's pick rules every machine: set here on the host / local game, it goes out as net
+## state "mode" and a TV machine (DUO_JOIN) takes it from there (_on_state_changed), so its pad tells, charge and fire
+## tells, boss slams and Deep tells match the host's (2026-11-12: the TV kept its own "brave" while the host played
+## gentle). Never set it on a client by hand.
+var game_mode := "brave":
+	set(v):
+		game_mode = v
+		if zone != null:
+			zone.mode = v
+		if net != null and net.mode != "client":
+			net.state_set("mode", v)
 var route: Array = []
 var leg := -1
 var pick_stage := ""  # host / local: "mode", "hero", "perk" while orbs are up
@@ -232,6 +242,7 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
+	net.state_changed.connect(_on_state_changed)
 	for k in ["zone", "keep", "orbs", "season", "gifts"]:
 		net.sticky_event(k)
 	seats = ClassicSeats.new(self, {
@@ -282,6 +293,12 @@ func _setup_game(mode: String) -> void:
 		_show_center("GET READY", 2.0)
 	if mode != "client":
 		_start_run()
+
+
+## Any machine: the host's replicated state changed. A TV machine plays at the host's difficulty.
+func _on_state_changed(key: String, value: Variant) -> void:
+	if key == "mode" and net.mode == "client" and value != null and Gen.MODES.has(String(value)):
+		game_mode = String(value)
 
 
 func next_net_id() -> int:
@@ -375,6 +392,7 @@ func explosion(pos: Vector3, color: Color, radius: float) -> void:
 		ball.mesh = sm
 		var mat := make_material(layer[0], layer[2])
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (VrViewCheck "washed out")
 		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		ball.material_override = mat
 		ball.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -437,6 +455,7 @@ func _ring(pos: Vector3, radius: float, color: Color) -> void:
 	ring.mesh = tm
 	var mat := make_material(color, 3.0)
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (VrViewCheck "washed out")
 	ring.material_override = mat
 	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(ring)
@@ -2495,8 +2514,7 @@ func on_orb_hit(i: int, p) -> void:
 	var id := String(pick_ids[i])
 	match pick_stage:
 		"mode":
-			game_mode = id
-			zone.mode = id
+			game_mode = id  # (the setter tells zone and the TV machines)
 			save.data.mode = id
 			save.mark_dirty()
 		"hero":

@@ -39,7 +39,7 @@ static func _follow(l: Label3D, cam: Node3D, world: Node, height: float, dist: f
 	dist *= k
 	if not l.has_meta("vr_placed"):
 		l.set_meta("vr_placed", true)
-		l.set_meta("vr_dodge_on", float(spot.get("dodge", 0.0)))
+		l.set_meta("vr_dodge_on", float(spot.get("dodge", 0.0)) + float(spot.get("lift", 0.0)))
 		_ui().vr_set_near(l, k)
 		_place(l, cam, target)
 		return
@@ -52,19 +52,19 @@ static func _follow(l: Label3D, cam: Node3D, world: Node, height: float, dist: f
 		l.remove_meta("vr_teleported")
 		_ui().vr_set_near(l, k)
 		_place(l, cam, target)
-		l.set_meta("vr_moving", false)
+		_ui().vr_stop(l)
 		return
 	if l.get_meta("vr_moving", false):
 		_ui().vr_set_near(l, k)
 		var dt := cam.get_process_delta_time()
 		if to.dot(fwd) < 0.0 or l.global_position.distance_to(target) > dist * 1.6:
 			_place(l, cam, target)  # behind / far off (turned round, teleported): never glide through the head
-			l.set_meta("vr_moving", false)
+			_ui().vr_stop(l)
 			return
-		_place(l, cam, l.global_position.lerp(target, 1.0 - exp(-4.0 * dt)))
+		_place(l, cam, l.global_position.lerp(target, _ui().vr_glide(l, dt)))  # (one glide rule: UiKit.vr_glide)
 		if l.global_position.distance_to(target) < _ui().VR_ARRIVED * dist:
 			_place(l, cam, target)
-			l.set_meta("vr_moving", false)
+			_ui().vr_stop(l)
 
 
 ## Snap in front right away (e.g. when the game pauses, since nothing else moves then).
