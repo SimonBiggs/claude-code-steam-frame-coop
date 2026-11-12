@@ -11,6 +11,7 @@ extends RefCounted
 ## own end time (bot_kit finish() at a fixed second) use within_deadline too.
 
 static func arm(node: Node, host_s := 150.0, joiner_s := 140.0) -> void:
+	tally()  # count this bot's checks and failure lines from the start, in local runs too (the shared verdict, below)
 	var joining := OS.has_environment("DUO_JOIN")
 	if not (joining or OS.has_environment("DUO_HOST") or OS.has_environment("BOT_END")):
 		return
@@ -19,7 +20,6 @@ static func arm(node: Node, host_s := 150.0, joiner_s := 140.0) -> void:
 		s = float(OS.get_environment("BOT_END"))
 	s = within_deadline(s, joining)
 	var tree := node.get_tree()  # (the tree, not the node: a bot may be freed by a scene change before its end)
-	tally()  # count this bot's checks and failure lines from the start (the shared verdict, below)
 	tree.create_timer(s, true, false, true).timeout.connect(func() -> void:
 		print("BOT END: ran %d s, quitting (tests/bot_end.gd)" % int(s))
 		quit_quietly(tree, 0, ", ended by tests/bot_end.gd after %d s" % int(s)))

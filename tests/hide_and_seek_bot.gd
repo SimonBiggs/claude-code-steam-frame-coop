@@ -56,6 +56,7 @@ var bot_vr := OS.has_environment("BOT_VR") and not OS.has_environment("DUO_JOIN"
 
 func _ready() -> void:
 	preload("res://tests/bot_end.gd").arm(self)  # end by itself in networked runs
+	add_to_group("bot_frame_limit")  # ended before every verdict was in: on_frame_limit counts the ones that are
 	if OS.has_environment("BOT_MAP"):  # BOT_MAP=0/1/2: start on this map (house / castle / spaceship)
 		var cfg := ConfigFile.new()
 		cfg.load("user://hide_and_seek_best.cfg")
@@ -316,6 +317,22 @@ func _hiders(delta: float) -> void:
 			p.toggle_disguise()  # pops out now and then (and back in once there), like a fidgety kid
 		if main.phase == "seek":
 			p.bot_alt = p.taunt_cd <= 0.0 and fmod(t + p.index * 0.7, 1.5) < 0.2  # squeak whenever it's ready
+
+
+## tests/bot_end.gd quit_quietly: the run ends before _result (a 60 s local run, solo VR's BOT_END, a networked
+## end): count the verdicts that are in, so the shared tally prints the BOT RESULT (0 in = FAIL).
+func on_frame_limit(_note := "") -> void:
+	if has_meta("result") or main == null:
+		return
+	var BotEnd := preload("res://tests/bot_end.gd")
+	if conn_done:
+		BotEnd.check(conn_ok, "connectivity: every hiding spot can be reached")
+	if cue_verdict:
+		BotEnd.check(has_meta("cues_ok"), "the picture cues showed")
+	BotEnd.check(main.round_no >= 1, "a round of hide and seek ran (round %d, t=%.0f)" % [main.round_no, t])
+	for k in ["pip_ok", "friend_ok", "sneak_ok"]:
+		if has_meta(k):
+			BotEnd.check(true, k)
 
 
 ## One BOT RESULT line per machine once every verdict is in.

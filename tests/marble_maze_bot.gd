@@ -729,8 +729,8 @@ func _tip_error(who: String, text: String) -> void:
 func _exit_tree() -> void:
 	# The verdict (tests/bot_end.gd prints BOT RESULT from the counted checks, in local, host and joining runs).
 	if main != null and is_instance_valid(main) and not OS.has_environment("BOT_COUNT"):
-		# (A 60 s local run is still in its first maze after the practice: there, the practice must be done.)
-		BotEnd.check(cleared >= 1 or (t < 90.0 and (practice_done or not simple)), "a maze was cleared (mode %s, t=%.0f, level %d, practice done %s)" % [main.net.mode, t, main.level, practice_done])
+		# (A 60 s local run is still rolling through its first maze: there, the maze must be in play.)
+		BotEnd.check(cleared >= 1 or (t < 90.0 and main.state == "play"), "a maze was cleared, or a short run is playing one (mode %s, t=%.0f, level %d, state %s)" % [main.net.mode, t, main.level, main.state])
 		BotEnd.check(main.state != "over" or not main.simple, "no game over in simple mode")
 	if main != null and is_instance_valid(main) and main.simple:
 		var ks: Array = cues.keys()

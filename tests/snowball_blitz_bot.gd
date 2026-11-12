@@ -38,6 +38,7 @@ var turn_gap := 0.0
 
 func _ready() -> void:
 	preload("res://tests/bot_end.gd").arm(self)  # end by itself in networked runs
+	Engine.set_meta("sb_bot_starts", int(Engine.get_meta("sb_bot_starts", 0)) + 1)  # a game over reloads the scene (and this bot)
 	if Engine.has_meta("sb_bot_restarts"):
 		print("Bot: game restarted")
 		var up := InputEventKey.new()
@@ -466,8 +467,8 @@ func _tip_error(who: String, text: String) -> void:
 func _exit_tree() -> void:
 	# The verdict (tests/bot_end.gd prints BOT RESULT from the counted checks, in local, host and joining runs).
 	if main != null and is_instance_valid(main):
-		# (Not after the restart check: Enter after a game over starts a fresh game, and this bot, again at wave 0.)
-		if int(Engine.get_meta("sb_bot_restarts", 0)) == 0:
+		# (Not after a restart: a game over (Enter, or the game's own restart) reloads the scene, and this bot, at wave 0.)
+		if int(Engine.get_meta("sb_bot_starts", 1)) <= 1:
 			_bot_check(main.wave >= 1, "the snowball waves came (mode %s, wave %d, t=%.0f)" % [main.net.mode, main.wave, t])
 		else:
 			_bot_check(main.ready_to_play, "the game restarted after the game over")
