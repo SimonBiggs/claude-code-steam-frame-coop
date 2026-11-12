@@ -33,6 +33,11 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "pb-gifts", "date": "2026-11-12", "game": "party_board", "pic": "luckydie", "line": "Mango's gifts!", "try": {"PB_GIFT": "lucky"}},
+	{"id": "pb-surprises", "date": "2026-11-12", "game": "party_board", "pic": "boulder", "line": "Rocks and splashes!", "try": {"PB_MODE": "hard"}},
+	{"id": "pb-hall", "date": "2026-11-12", "game": "party_board", "pic": "partyhall", "line": "Mango's party hall grows!"},
+	{"id": "pb-modes", "date": "2026-11-12", "game": "party_board", "pic": "toucan", "line": "Gentle, brave or hard!"},
+	{"id": "pb-seasons", "date": "2026-11-12", "game": "party_board", "pic": "snowflake", "line": "Seasons on the island!"},
 	{"id": "town-gifts", "date": "2026-11-12", "game": "tiny_town_tycoon", "pic": "crane", "line": "Benny's builder gifts!", "try": {"TT_GIFT": "crane"}},
 	{"id": "town-weather", "date": "2026-11-12", "game": "tiny_town_tycoon", "pic": "sleepyfog", "line": "Windy days and fog!", "try": {"TT_WEATHER_NOW": "1", "TT_MODE": "brave"}},
 	{"id": "town-islets", "date": "2026-11-12", "game": "tiny_town_tycoon", "pic": "island", "line": "Benny's islands grow!"},

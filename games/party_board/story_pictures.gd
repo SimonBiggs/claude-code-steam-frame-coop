@@ -5,7 +5,8 @@ extends RefCounted
 ## t = the picture's clock, bob = its gentle bob, color = the card's colour.
 
 const NAMES: Array[String] = ["toucan", "rainbowisle", "sweetshop", "pirateship", "hauntedhouse", "friendlyghost",
-	"spacestation", "trophywall"]
+	"spacestation", "trophywall",
+	"luckydie", "doublestar", "boulder", "partyhall"]
 
 
 static func draw(pic, kind: String, t: float, bob: float, color: Color) -> void:
@@ -109,3 +110,47 @@ static func draw(pic, kind: String, t: float, bob: float, color: Color) -> void:
 					pic._poly([[x - 0.07, y - 0.15], [x + 0.07, y - 0.15], [x + 0.03, y - 0.06], [x - 0.03, y - 0.06]], shine)
 					pic._poly([[x - 0.015, y - 0.06], [x + 0.015, y - 0.06], [x + 0.015, y - 0.02], [x - 0.015, y - 0.02]], shine)
 					pic._poly([[x - 0.05, y - 0.02], [x + 0.05, y - 0.02], [x + 0.05, y], [x - 0.05, y]], Color(0.3, 0.25, 0.3))
+		"luckydie":  # MANGO'S LUCKY DIE: a green die showing six, with a four-leaf clover sparkle
+			pic._poly([[0.18, 0.22 + bob], [0.82, 0.22 + bob], [0.82, 0.86 + bob], [0.18, 0.86 + bob]], Color(0.3, 0.75, 0.4))
+			pic._poly([[0.22, 0.26 + bob], [0.78, 0.26 + bob], [0.78, 0.82 + bob], [0.22, 0.82 + bob]], Color(0.45, 0.95, 0.5))
+			for k in 6:
+				pic._circle(0.36 + (k % 2) * 0.28, 0.36 + (k / 2) * 0.17 + bob, 0.05, white)
+			var sp := 0.5 + 0.5 * sin(t * 4.0)
+			for k in 4:
+				var a := k * TAU / 4.0 + t
+				pic._circle(0.84 + cos(a) * 0.05, 0.16 + sin(a) * 0.05, 0.04, Color(0.3, 0.85, 0.35).lightened(0.3 * sp))
+		"doublestar":  # DOUBLE STAR: two gold stars, one bigger
+			for s in 2:
+				var cx := 0.38 + s * 0.24
+				var cy := 0.56 - s * 0.16 + bob
+				var r := 0.26 - s * 0.08
+				var pts: Array = []
+				for k in 10:
+					var a := -PI * 0.5 + k * TAU / 10.0 + sin(t * 2.0 + s) * 0.08
+					var rr := r if k % 2 == 0 else r * 0.45
+					pts.append([cx + cos(a) * rr, cy + sin(a) * rr])
+				pic._poly(pts, Color(1.0, 0.85, 0.3).lightened(0.15 * s))
+			pic._circle(0.82, 0.2 + bob, 0.03, white)
+		"boulder":  # a ROCK from the volcano falling, with an orange dashed ring under it
+			var fall := fmod(t * 0.6, 1.0)
+			for k in 12:
+				if k % 2 == 0:
+					var a := k * TAU / 12.0
+					pic._circle(0.5 + cos(a) * 0.3, 0.82 + sin(a) * 0.08, 0.035, Color(1.0, 0.5, 0.08))
+			pic._circle(0.5, 0.2 + fall * 0.45, 0.17, Color(0.5, 0.4, 0.35))
+			pic._circle(0.45, 0.15 + fall * 0.45, 0.07, Color(0.62, 0.52, 0.44))
+			pic._poly([[0.44, 0.02 + fall * 0.45], [0.47, -0.08 + fall * 0.45], [0.5, 0.02 + fall * 0.45]], Color(1.0, 0.7, 0.3))
+		"partyhall":  # MANGO'S PARTY HALL: a striped tent roof over shelves of cups, a disco ball and presents
+			pic._poly([[0.5, 0.06 + bob], [0.92, 0.34 + bob], [0.08, 0.34 + bob]], Color(1.0, 0.6, 0.15))
+			for k in 3:
+				var x := 0.22 + k * 0.28
+				pic._poly([[0.5, 0.06 + bob], [x + 0.05, 0.34 + bob], [x - 0.03, 0.34 + bob]], white)
+			for sx in [0.14, 0.86]:
+				pic._poly([[sx - 0.02, 0.34 + bob], [sx + 0.02, 0.34 + bob], [sx + 0.02, 0.9], [sx - 0.02, 0.9]], white)
+			pic._circle(0.5, 0.45 + bob, 0.07, Color(0.85, 0.9, 1.0).lightened(0.2 * sin(t * 6.0)))
+			pic._poly([[0.28, 0.6], [0.72, 0.6], [0.72, 0.9], [0.28, 0.9]], Color(0.55, 0.36, 0.22))
+			for k in 2:
+				var x2 := 0.4 + k * 0.2
+				pic._poly([[x2 - 0.05, 0.62], [x2 + 0.05, 0.62], [x2 + 0.02, 0.72], [x2 - 0.02, 0.72]], Color(1.0, 0.82, 0.25))
+			pic._poly([[0.04, 0.76], [0.13, 0.76], [0.13, 0.9], [0.04, 0.9]], Color(1.0, 0.35, 0.4))
+			pic._poly([[0.87, 0.76], [0.96, 0.76], [0.96, 0.9], [0.87, 0.9]], Color(0.35, 0.65, 1.0))

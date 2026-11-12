@@ -19,6 +19,7 @@ extends RefCounted
 const Seeded := preload("res://core/seeded.gd")
 const Boards := preload("res://games/party_board/boards.gd")
 const BD := preload("res://games/party_board/board_data.gd")
+const Deep := preload("res://games/party_board/deep.gd")
 
 ## mg_runner.gd SIMPLE_GAMES (one motion or one button each; tests/party_board_mg_test.gd proves them fair).
 const SIMPLE_GAMES: Array[String] = ["coin_catch", "kart_dash", "balloon_pop", "mole_bop", "paint_splash", "fish_pond",
@@ -127,11 +128,12 @@ static func board_for(seed_value: int) -> String:
 
 
 ## data: a board_data.gd (made simple: make_simple()); it is REBUILT with this party's layout. spec: {level,
-## rounds, daily, board}. Returns {seed, level, rounds, board, layout, types: [type per space], reds, gifts,
+## rounds, daily, board, mode (deep.gd: GENTLE / BRAVE / HARD reds)}. Returns {seed, level, mode, rounds, board, layout, types: [type per space], reds, gifts,
 ## specials: [ids], warps: [warp pad ids in order], route: [star space ids], minigames: [one per round],
 ## event_round (0 = none)}.
 static func generate(data, seed_value: int, spec: Dictionary) -> Dictionary:
 	var level := maxi(0, int(spec.get("level", 0)))
+	var mode := Deep.mode_of(String(spec.get("mode", "brave")))  # (deep.gd: GENTLE fewer reds, HARD more)
 	var rounds := clampi(int(spec.get("rounds", 4)), 1, 12)
 	var bid := String(spec.get("board", ""))
 	if not Boards.ids().has(bid):
@@ -185,7 +187,7 @@ static func generate(data, seed_value: int, spec: Dictionary) -> Dictionary:
 		if free.call(i):
 			types[i] = "gift"
 			gifts.append(i)
-	var want := clampi(RED_MIN + level, RED_MIN, RED_MAX)
+	var want := Deep.red_target(level, mode, RED_MIN, RED_MAX)
 	cand = Seeded.shuffled(r, range(n))
 	var reds := 0
 	for i in cand:
@@ -226,7 +228,7 @@ static func generate(data, seed_value: int, spec: Dictionary) -> Dictionary:
 	var ev := 0
 	if rounds >= 2:
 		ev = Seeded.rng(seed_value, "event").randi_range(2, rounds)
-	return {"seed": seed_value, "level": level, "rounds": rounds, "board": bid, "layout": lay, "types": types,
+	return {"seed": seed_value, "level": level, "mode": mode, "rounds": rounds, "board": bid, "layout": lay, "types": types,
 		"reds": reds, "gifts": gifts, "specials": specials, "warps": warps, "route": route, "minigames": games,
 		"event_round": ev}
 
@@ -328,7 +330,7 @@ static func check(data, p: Dictionary) -> Array:
 				gifts += 1
 			_:
 				sp.append(i)
-	var want := clampi(RED_MIN + int(p.get("level", 0)), RED_MIN, RED_MAX)
+	var want := Deep.red_target(int(p.get("level", 0)), String(p.get("mode", "brave")), RED_MIN, RED_MAX)
 	if reds < mini(want, RED_MIN) or reds > want:
 		why.append("%d reds (want %d)" % [reds, want])
 	if reds * 3 > n:

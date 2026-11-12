@@ -123,6 +123,25 @@ static func picture(kind: String, px: float = 96.0, color: Color = Color(1.0, 0.
 	return StoryCardPics.make(kind, px, color)
 
 
+## The same picture in the 3D world: a billboard Sprite3D one unit wide (scale it), drawn by a small viewport of its
+## own (it keeps its animation). Pick orbs (core/pick_orbs.gd), gift tags and warning pictures over the ground use it.
+static func sprite(kind: String, px: int = 192, color: Color = Color(1.0, 0.75, 0.3)) -> Sprite3D:
+	var vp := SubViewport.new()
+	vp.size = Vector2i(px, px)
+	vp.transparent_bg = true
+	vp.disable_3d = true
+	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	vp.add_child(picture(kind, px, color))
+	var s := Sprite3D.new()
+	s.add_child(vp)
+	s.texture = vp.get_texture()
+	s.pixel_size = 1.0 / px
+	s.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	s.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	s.render_priority = 2
+	return s
+
+
 class Card extends Control:
 	const UiKit := preload("res://core/ui_kit.gd")
 	var opts := {}
