@@ -121,7 +121,8 @@ static func gift_choices(seed_value: int, round_n: int, side: String) -> Array:
 
 ## A round's surprises: [{t (seconds into the seek the tell starts), kind, k (which hider: an index into the hiders
 ## still hiding then, mod their count), a (0..1: the hoover's axis, the pepper's offset angle)}].
-static func plan(seed_value: int, round_n: int, mode: String, seek_len: float, solo: bool) -> Array:
+## first_at: only bots make it shorter (like their short count), to see a surprise in a 60 s run.
+static func plan(seed_value: int, round_n: int, mode: String, seek_len: float, solo: bool, first_at: float = FIRST_AT) -> Array:
 	var out: Array = []
 	if round_n < SURPRISE_FROM or solo:
 		return out
@@ -129,15 +130,15 @@ static func plan(seed_value: int, round_n: int, mode: String, seek_len: float, s
 	var tell := float(md.tell)
 	var n := int(md.surprises)
 	var last := seek_len - END_GAP - tell
-	if last < FIRST_AT:
+	if last < first_at:
 		return out
-	n = mini(n, 1 + int((last - FIRST_AT) / MIN_GAP))
+	n = mini(n, 1 + int((last - first_at) / MIN_GAP))
 	var r := Seeded.rng(seed_value, "surprise%d" % round_n)
-	var slot := (last - FIRST_AT) / float(n)
+	var slot := (last - first_at) / float(n)
 	var first_kind := r.randi() % KINDS.size()
 	for i in n:
 		var room := maxf(0.0, slot - MIN_GAP)
-		var t := FIRST_AT + slot * i + r.randf() * room
+		var t := first_at + slot * i + r.randf() * room
 		out.append({"t": snappedf(t, 0.1), "kind": KINDS[(first_kind + i) % KINDS.size()], "k": r.randi() % 6, "a": snappedf(r.randf(), 0.01)})
 	return out
 

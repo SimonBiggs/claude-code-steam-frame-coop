@@ -413,6 +413,8 @@ func is_hiding() -> bool:
 func can_move() -> bool:
 	if not active or main.phase == "intro" or main.phase == "over" or main.phase == "wait":
 		return false
+	if main.phase == "pick":
+		return true  # everyone walks to the pick orbs (deep_play.gd)
 	if role == "seeker":
 		return main.phase == "seek"
 	return prop_kind < 0
@@ -448,7 +450,13 @@ func _physics_process(delta: float) -> void:
 	var spectating := role == "hider" and (found or late)
 	var move := _read_move() if can_move() else Vector3.ZERO
 	var speed := HIDER_SPEED if role == "hider" else (VR_SPEED if vr else SEEKER_SPEED)
+	if main.get("deep") != null:
+		speed *= main.deep.speed_k(self)  # ZOOMY SHOES (deep_play.gd)
 	velocity = move * speed
+	var knock_t: float = get_meta("knock_t", 0.0)
+	if knock_t > 0.0 and not vr:
+		velocity += get_meta("knock", Vector3.ZERO)  # Rumble bumped us (deep_play.gd on_bump)
+		set_meta("knock_t", knock_t - delta)
 	if vr:
 		vr_velocity = velocity
 	elif spectating:

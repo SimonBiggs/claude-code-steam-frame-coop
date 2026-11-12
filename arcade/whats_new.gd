@@ -33,6 +33,11 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "hns-rumble", "date": "2026-11-12", "game": "hide_and_seek", "pic": "hoover", "line": "Rumble the robot hoover!"},
+	{"id": "hns-gifts", "date": "2026-11-12", "game": "hide_and_seek", "pic": "shieldbubble", "line": "Pip's gifts!"},
+	{"id": "hns-kennel", "date": "2026-11-12", "game": "hide_and_seek", "pic": "kennel", "line": "Pip's kennel grows!"},
+	{"id": "hns-modes", "date": "2026-11-12", "game": "hide_and_seek", "pic": "puppy", "line": "Gentle, brave or hard!"},
+	{"id": "hns-seasons", "date": "2026-11-12", "game": "hide_and_seek", "pic": "snowflake", "line": "Seasons on Pip's street!"},
 	{"id": "pb-gifts", "date": "2026-11-12", "game": "party_board", "pic": "luckydie", "line": "Mango's gifts!", "try": {"PB_GIFT": "lucky"}},
 	{"id": "pb-surprises", "date": "2026-11-12", "game": "party_board", "pic": "boulder", "line": "Rocks and splashes!", "try": {"PB_MODE": "hard"}},
 	{"id": "pb-hall", "date": "2026-11-12", "game": "party_board", "pic": "partyhall", "line": "Mango's party hall grows!"},

@@ -34,6 +34,7 @@ var live := {}  # host: the surprise being told / rolling
 var bubbles := {}  # hider index -> true (BUBBLE)
 var grace := {}  # host: hider index -> seconds nobody can tag them (a popped bubble)
 var season := ""
+var first_at := Deep.FIRST_AT  # (bots shorten it, like their count)
 var kennel_rounds := 0
 var stats := {"picks": 0, "tells": 0, "goes": 0, "bumped": 0, "sneezed": 0, "pops": 0}
 var _dwell := {}  # host: index -> [orb, seconds]
@@ -260,7 +261,7 @@ func _resolve() -> void:
 
 ## Host, the seeker sets off: this round's surprises.
 func seek_start() -> void:
-	plan = Deep.plan(int(main.map_spec.get("seed", 0)), main.round_no, mode_id(), main.seek_len, main.solo_round)
+	plan = Deep.plan(int(main.map_spec.get("seed", 0)), main.round_no, mode_id(), main.seek_len, main.solo_round, first_at)
 	plan_i = 0
 	live = {}
 
