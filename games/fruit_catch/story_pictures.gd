@@ -5,7 +5,8 @@ extends RefCounted
 ## t = the picture's clock, bob = its gentle bob, color = the card's colour.
 ## (Apples use Whack-a-Mole's "apple": any picture works in every game.)
 
-const NAMES: Array[String] = ["squirrel", "acorn", "orange", "pear", "plum", "pie", "juice", "crumble", "jamjar", "fruitbowl", "sapling"]
+const NAMES: Array[String] = ["squirrel", "acorn", "orange", "pear", "plum", "pie", "juice", "crumble", "jamjar", "fruitbowl", "sapling",
+	"bigbasket", "fruitmagnet", "umbrella", "goldapple", "windfall", "snowglobe", "pantry"]
 
 const RED := Color(0.95, 0.15, 0.15)
 const ORANGE := Color(1.0, 0.55, 0.05)
@@ -91,6 +92,76 @@ static func draw(pic, kind: String, t: float, bob: float, color: Color) -> void:
 			pic._circle(0.64, 0.48 + bob, 0.13, LEAF.darkened(0.1))
 			for i in 4:
 				pic._circle(0.36 + (i % 2) * 0.26 + i * 0.02, 0.32 + (i / 2) * 0.16 + bob, 0.045, color)
+
+		"bigbasket":  # a huge wicker basket brimming with fruit
+			var wick := Color(0.8, 0.55, 0.25)
+			pic._circle(0.32, 0.4 + bob, 0.1, RED)
+			pic._circle(0.5, 0.36 + bob, 0.11, ORANGE)
+			pic._circle(0.68, 0.4 + bob, 0.1, PURPLE)
+			pic._poly([[0.1, 0.45 + bob], [0.9, 0.45 + bob], [0.8, 0.88 + bob], [0.2, 0.88 + bob]], wick)
+			for i in 3:
+				pic._poly([[0.12 + i * 0.02, 0.56 + i * 0.11 + bob], [0.88 - i * 0.02, 0.56 + i * 0.11 + bob],
+					[0.87 - i * 0.02, 0.6 + i * 0.11 + bob], [0.13 + i * 0.02, 0.6 + i * 0.11 + bob]], wick.darkened(0.2))
+			pic._poly([[0.08, 0.42 + bob], [0.92, 0.42 + bob], [0.92, 0.5 + bob], [0.08, 0.5 + bob]], wick.lightened(0.15))
+		"fruitmagnet":  # a red horseshoe magnet pulling an apple
+			var mr := Color(0.9, 0.15, 0.2)
+			pic._poly([[0.12, 0.2 + bob], [0.3, 0.2 + bob], [0.3, 0.55 + bob], [0.12, 0.55 + bob]], mr)
+			pic._poly([[0.12, 0.55 + bob], [0.3, 0.55 + bob], [0.45, 0.8 + bob], [0.36, 0.88 + bob]], mr)
+			pic._poly([[0.36, 0.88 + bob], [0.45, 0.8 + bob], [0.55, 0.8 + bob], [0.64, 0.88 + bob]], mr)
+			pic._poly([[0.7, 0.2 + bob], [0.88, 0.2 + bob], [0.88, 0.55 + bob], [0.7, 0.55 + bob]], mr)
+			pic._poly([[0.88, 0.55 + bob], [0.7, 0.55 + bob], [0.55, 0.8 + bob], [0.64, 0.88 + bob]], mr)
+			pic._poly([[0.12, 0.2 + bob], [0.3, 0.2 + bob], [0.3, 0.28 + bob], [0.12, 0.28 + bob]], Color(0.85, 0.85, 0.9))
+			pic._poly([[0.7, 0.2 + bob], [0.88, 0.2 + bob], [0.88, 0.28 + bob], [0.7, 0.28 + bob]], Color(0.85, 0.85, 0.9))
+			var ay := 0.3 + 0.04 * sin(t * 4.0)
+			pic._circle(0.5, ay + bob, 0.1, ORANGE)
+			for i in 3:
+				pic._circle(0.5 + (i - 1) * 0.08, ay + 0.17 + bob, 0.015, Color(1.0, 1.0, 1.0, 0.7))
+		"umbrella":  # a bright umbrella with a rotten apple bouncing off
+			var uc := Color(0.65, 0.45, 1.0)
+			pic._poly([[0.1, 0.5 + bob], [0.3, 0.32 + bob], [0.5, 0.26 + bob], [0.7, 0.32 + bob], [0.9, 0.5 + bob]], uc)
+			pic._poly([[0.1, 0.5 + bob], [0.3, 0.32 + bob], [0.5, 0.26 + bob], [0.3, 0.5 + bob]], uc.lightened(0.25))
+			pic._poly([[0.49, 0.26 + bob], [0.52, 0.26 + bob], [0.52, 0.82 + bob], [0.49, 0.82 + bob]], STALK)
+			pic._poly([[0.42, 0.8 + bob], [0.52, 0.8 + bob], [0.52, 0.86 + bob], [0.42, 0.86 + bob]], STALK)
+			var by := 0.14 - absf(sin(t * 3.0)) * 0.06
+			pic._circle(0.74, by + bob, 0.07, Color(0.5, 0.36, 0.12))
+			pic._circle(0.76, by - 0.02 + bob, 0.02, Color(0.3, 0.42, 0.1))
+		"goldapple":  # a shining golden apple
+			_fruit(pic, bob, Color(1.0, 0.82, 0.2), 0.26)
+			for i in 4:
+				var a := t * 1.5 + i * PI * 0.5
+				pic._circle(0.5 + cos(a) * 0.36, 0.58 + sin(a) * 0.36 + bob, 0.03, Color(1.0, 0.95, 0.6))
+		"windfall":  # rotten apples tumbling from a branch onto a brown patch
+			pic._poly([[0.1, 0.2 + bob], [0.9, 0.14 + bob], [0.9, 0.2 + bob], [0.1, 0.26 + bob]], STALK)
+			pic._circle(0.3, 0.16 + bob, 0.09, LEAF)
+			pic._circle(0.7, 0.12 + bob, 0.09, LEAF)
+			pic._poly([[0.12, 0.84], [0.88, 0.84], [0.8, 0.92], [0.2, 0.92]], Color(0.55, 0.3, 0.12))
+			for i in 3:
+				var y := 0.32 + fmod(t * 0.5 + i * 0.33, 1.0) * 0.46
+				var x := 0.3 + i * 0.2
+				pic._circle(x, y, 0.07, Color(0.5, 0.36, 0.12))
+				pic._circle(x + 0.025, y - 0.02, 0.022, Color(0.3, 0.42, 0.1))
+		"snowglobe":  # Nutmeg's magic snow globe: a little tree in falling snow
+			pic._poly([[0.22, 0.8], [0.78, 0.8], [0.84, 0.92], [0.16, 0.92]], Color(0.55, 0.32, 0.18))
+			pic._circle(0.5, 0.5 + bob, 0.33, Color(0.75, 0.9, 1.0, 0.55))
+			pic._poly([[0.28, 0.72 + bob], [0.72, 0.72 + bob], [0.66, 0.8], [0.34, 0.8]], Color(0.97, 0.98, 1.0))
+			pic._poly([[0.48, 0.72 + bob], [0.52, 0.72 + bob], [0.52, 0.6 + bob], [0.48, 0.6 + bob]], STALK)
+			pic._circle(0.5, 0.52 + bob, 0.12, LEAF)
+			pic._circle(0.46, 0.5 + bob, 0.03, RED)
+			pic._circle(0.56, 0.55 + bob, 0.03, RED)
+			for i in 7:
+				var sy := 0.25 + fmod(t * 0.2 + i * 0.15, 0.45)
+				pic._circle(0.3 + fmod(i * 0.29, 0.4), sy + bob, 0.017, Color.WHITE)
+			pic._circle(0.38, 0.32 + bob, 0.05, Color(1.0, 1.0, 1.0, 0.5))
+		"pantry":  # Nutmeg's pantry: a shelf of jars, a pie and a crate of apples
+			var wd := Color(0.55, 0.35, 0.18)
+			pic._poly([[0.1, 0.15], [0.9, 0.15], [0.9, 0.9], [0.1, 0.9]], wd.darkened(0.3))
+			for row in 2:
+				var y := 0.42 + row * 0.3
+				pic._poly([[0.12, y], [0.88, y], [0.88, y + 0.04], [0.12, y + 0.04]], wd.lightened(0.15))
+				for i in 4:
+					var c: Color = [RED, ORANGE, GREEN, PURPLE][(i + row) % 4]
+					pic._poly([[0.17 + i * 0.18, y - 0.16 + bob * 0.3], [0.29 + i * 0.18, y - 0.16 + bob * 0.3], [0.29 + i * 0.18, y], [0.17 + i * 0.18, y]], c)
+					pic._poly([[0.16 + i * 0.18, y - 0.2 + bob * 0.3], [0.3 + i * 0.18, y - 0.2 + bob * 0.3], [0.3 + i * 0.18, y - 0.16 + bob * 0.3], [0.16 + i * 0.18, y - 0.16 + bob * 0.3]], Color(0.95, 0.2, 0.25))
 
 
 static func _fruit(pic, bob: float, c: Color, r: float) -> void:
