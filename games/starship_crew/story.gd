@@ -58,7 +58,8 @@ const LINES := {
 
 
 static func save_defaults() -> Dictionary:
-	return {"trips": 0, "world": -1, "daily": {}, "planets": [], "stars": 0, "missions": 0}
+	return {"trips": 0, "world": -1, "daily": {}, "planets": [], "stars": 0, "missions": 0, "mode": "", "last_gift": "",
+		"crew_xp": 0}
 
 
 ## How hard trip number `trips` is (0 = the lessons).
