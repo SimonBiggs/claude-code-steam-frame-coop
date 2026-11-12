@@ -76,6 +76,13 @@ const WishViewScript := preload("res://games/tiny_town_tycoon/wish_view.gd")
 const Seeded := preload("res://core/seeded.gd")
 const StoryCard := preload("res://core/story_card.gd")
 const Telemetry := preload("res://core/telemetry.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
+const Deep := preload("res://games/tiny_town_tycoon/deep.gd")
+const PicksScript := preload("res://games/tiny_town_tycoon/picks.gd")
+const HazardsScript := preload("res://games/tiny_town_tycoon/hazards.gd")
+const GiftsScript := preload("res://games/tiny_town_tycoon/gifts.gd")
+const SeasonScript := preload("res://games/tiny_town_tycoon/season.gd")
+const IsletsScript := preload("res://games/tiny_town_tycoon/islets.gd")
 
 const GAME_ID := "tiny_town_tycoon"
 const DAY_LEN := 420.0  ## seconds for a whole day
@@ -163,6 +170,24 @@ var _sail_t := 0.0
 var _wish_pub: Array = []
 var _run_t := 0.0  ## seconds of play in this town (telemetry)
 var _vr_story: Node3D
+# Second pass (deep.gd): modes, Benny's builder gifts, warned weather, seasons, Benny's archipelago
+var picks: Node  ## picks.gd (every machine; host decides)
+var hazards: Node3D  ## hazards.gd (every machine)
+var gifts_node: Node3D  ## gifts.gd (every machine)
+var season_node: Node3D  ## season.gd (every machine)
+var islets_node: Node3D  ## islets.gd (every machine)
+var deep_mode := "brave"  ## every machine (the "deep" state)
+var deep_gift := ""  ## every machine: today's builder gift
+var deep_season := "spring"  ## every machine
+var deep_islets := 0  ## every machine
+var mode_picked := false  ## host
+var gift_day := -1  ## host: the day the gift was picked for
+var day_n := 0  ## host: mornings since the session began
+var _settle_t := 0.0  ## host: seconds before a pick may pop up
+var _season_shown := false  ## host: Benny named the season this session
+var _bot_weather := false  ## host: TT_WEATHER_NOW (bots, What's New "try")
+var _try_gift := ""  ## host: TT_GIFT (bots, What's New "try")
+var _session_seed := 0
 
 
 func _ready() -> void:
@@ -189,7 +214,8 @@ func _ready() -> void:
 				sound("pop", -10.0, 0.7))
 	save = Save.new()
 	save.game_id = GAME_ID
-	save.defaults = {"stars": {}, "towns": {}, "last": 0, "home_seed": 0, "today_date": "", "daily_done": "", "met_benny": false}
+	save.defaults = {"stars": {}, "towns": {}, "last": 0, "home_seed": 0, "today_date": "", "daily_done": "", "met_benny": false,
+		"mode": "brave", "last_gift": "", "wishes_total": -1, "gifts": 0, "weathers": 0}
 	add_child(save)
 	sfx = SfxScript.new()
 	add_child(sfx)
@@ -276,6 +302,7 @@ func _setup(mode: String) -> void:
 	hud.name = "Hud"
 	add_child(hud)
 	hud.call("setup", self)
+	_setup_deep()
 	if Defs.SIMPLE_MODE:
 		props = PropsScript.new()
 		props.name = "Props"
@@ -325,6 +352,7 @@ func _setup(mode: String) -> void:
 	awards.set_player(0, "MAYOR")
 	if mode != "client":
 		net.state_set("shared", false)
+		_begin_deep()
 		var last := clampi(int(save.data.get("last", 0)), 0, Defs.ISLANDS.size() - 1)
 		if Defs.SIMPLE_MODE:
 			load_town("home")  # no island select: straight into the family's home island
@@ -436,6 +464,7 @@ func load_town(where: String) -> void:
 	_publish_stats()
 	_publish_wishes()
 	save_town()
+	_deep_town_loaded()
 	print("Tiny Town Tycoon: %s town, island seed %d (%s), %d buildings, %d wishes granted, districts %d" % [where, town.seed_value,
 		"new" if fresh else "saved", town.buildings.size(), wished, town.open_mask & 15])
 	if where == "today":
@@ -499,7 +528,12 @@ func _telemetry(end: String) -> void:
 	Telemetry.run(GAME_ID, {"end": end, "place": place_key, "seed": town.seed_value, "biome": town.island,
 		"buildings": town.buildings.size() - 1, "built": built, "pop": sim.pop, "unl": sim.unl, "wishes": wishes.done,
 		"wishes_open": wishes.list.size(), "districts": dists, "mins": snappedf(_run_t / 60.0, 0.1),
-		"players": party.active_slots().size(), "vr": vr_rig != null, "loads": int(sim.counters.get("loads", 0))})
+		"players": party.active_slots().size(), "vr": vr_rig != null, "loads": int(sim.counters.get("loads", 0)),
+		"pmode": deep_mode, "gift": deep_gift, "season": deep_season, "islets": deep_islets, "day": day_n,
+		"weather": hazards.count if hazards != null else 0, "weather_hits": hazards.hits if hazards != null else 0,
+		"picks": picks.history.size() if picks != null else 0})
+	if hazards != null:
+		hazards.hits = 0
 	_run_t = 0.0
 
 
@@ -534,6 +568,7 @@ func _grant_wishes(id: int) -> void:
 		return
 	for w in wishes.granted_by(town.buildings[id]):
 		_fx("wish_done", [int(w["id"]), int(w["x"]), int(w["z"]), int(w["home"]), wishes.done])
+		_wish_counted()
 		if place_key == "today" and String(save.data.get("daily_done", "")) != Seeded.today():
 			save.data["daily_done"] = Seeded.today()  # a wish granted on TODAY'S ISLAND (the Trophy Hall's golden star)
 			save.mark_dirty()
@@ -693,6 +728,7 @@ func _practice_step(done_kind: String) -> void:
 		practice = 2
 		save.data["practiced"] = true
 		save.mark_dirty()
+		_settle_t = Deep.SETTLE  # (then the mode pick: deep.gd)
 		net.state_set("boat", true)
 		_fx("practice", [2])
 
@@ -862,12 +898,15 @@ func place(slot: int, kind: String, x: int, z: int, rot: int) -> bool:
 		return false
 	var why := place_problem(kind, x, z)
 	if why != "":
+		print("Tiny Town Tycoon: P%d can't put a %s at %d,%d: %s" % [slot + 1, kind, x, z, why])
 		_fx("nope", [slot, why])
 		return false
 	if not sim.free_build:
 		sim.add_coins(-Defs.cost_of(kind))
 	var id := town.add_building(kind, x, z, rot, 0)
 	awards.add(slot, "builds")
+	if kind == "house" and deep_gift == "double":
+		_twin_house(x, z, slot)
 	if Defs.SIMPLE_MODE and slot == 0:
 		_practice_step(kind)
 		cue_did(0, "build")
@@ -1042,6 +1081,14 @@ func _on_state_changed(key: String, value: Variant) -> void:
 		"shared":
 			if split != null and playing():
 				split.set_shared(bool(value))
+		"deep":
+			_on_deep(value)
+		"hz":
+			var hz := Deep.unpack(value if value is Array else [])
+			if hazards != null:
+				hazards.show_now(hz)
+			if not hz.is_empty():
+				_banner(String(Deep.KIND_NAMES.get(String(hz.kind), "LOOK OUT!")), 2.2)
 		"coins", "pop", "happy", "tier", "goals", "free", "unl", "boat":
 			hud.call("refresh")
 			if mayor != null:
@@ -1332,6 +1379,8 @@ func _process(delta: float) -> void:
 	hour = fposmod(hour + delta * 24.0 / DAY_LEN * fast * (1.0 if is_play else 0.0), 24.0)
 	if hour < was_hour and net.mode != "client":
 		_telemetry("day")  # one RUN line per day of town time
+	if was_hour < Deep.MORNING and hour >= Deep.MORNING and net.mode != "client" and is_play:
+		_morning()
 	_sail_t = maxf(0.0, _sail_t - delta)
 	if is_play:
 		_run_t += delta
@@ -1345,6 +1394,8 @@ func _process(delta: float) -> void:
 			sky.set_time_of_day(h)
 	_tv_buttons()
 	fleet.call("tick", delta, is_play)
+	if gifts_node != null:
+		gifts_node.follow(delta)
 	if flat != null:
 		flat.call("tick", delta, is_play)
 	hud.call("tick", delta)
@@ -1372,6 +1423,7 @@ func _process(delta: float) -> void:
 		return
 	if not Defs.SIMPLE_MODE:
 		events.call("tick", delta * fast, sim, jobs)  # SIMPLE_MODE: no events with text banners
+	_deep_tick(delta)
 	_sim_t += delta * fast
 	if _sim_t >= 1.0:
 		_sim_t -= 1.0
@@ -1536,6 +1588,8 @@ func show_fx(kind: String, args: Array) -> void:
 				sfx.play_at("power_up", town.center_of(b6), -6.0)
 		"story":
 			_show_story(String(args[0]))
+		"beat":
+			_show_beat(String(args[0]), String(args[1]), Color.html(String(args[2])) if args.size() > 2 else Wishes.WHO_COLOR)
 		"wish_new":
 			var at := _wish_pos(int(args[1]), int(args[2]), int(args[3]))
 			sfx.play_at("pop", at, -4.0, 1.4)
@@ -1706,6 +1760,291 @@ func debug_event(kind: String) -> bool:
 	return bool(events.call("start", kind, sim, jobs))
 
 
+# --- Second pass: modes, Benny's builder gifts, warned weather, seasons, the archipelago (deep.gd) ------------------
+
+## Every machine: the second pass's nodes.
+func _setup_deep() -> void:
+	picks = PicksScript.new()
+	picks.main = self
+	add_child(picks)
+	hazards = HazardsScript.new()
+	hazards.main = self
+	add_child(hazards)
+	gifts_node = GiftsScript.new()
+	gifts_node.main = self
+	add_child(gifts_node)
+	season_node = SeasonScript.new()
+	season_node.name = "Season"
+	add_child(season_node)
+	islets_node = IsletsScript.new()
+	islets_node.name = "Archipelago"
+	islets_node.main = self
+	add_child(islets_node)
+	net.sticky_event("orbs")  # a machine joining mid-pick sees the orbs (picks.gd)
+
+
+## Host, once a session: the season, the family's last mode, Benny's archipelago.
+func _begin_deep() -> void:
+	_session_seed = Seeded.fresh_seed()
+	deep_season = Seeded.season()
+	if OS.has_environment("TT_SEASON") and Deep.SEASONS.has(OS.get_environment("TT_SEASON")):
+		deep_season = OS.get_environment("TT_SEASON")
+	deep_mode = Deep.mode_of(String(save.data.get("mode", "brave")))
+	if OS.has_environment("TT_MODE"):  # (What's New "try" / bots: straight in)
+		deep_mode = Deep.mode_of(OS.get_environment("TT_MODE"))
+		mode_picked = true
+	if OS.has_environment("TT_GIFT") and not Deep.gift(OS.get_environment("TT_GIFT")).is_empty():
+		_try_gift = OS.get_environment("TT_GIFT")
+		mode_picked = true
+	_bot_weather = OS.has_environment("TT_WEATHER_NOW")
+	if int(save.data.get("wishes_total", -1)) < 0:  # (an older save: the wishes its towns already got count)
+		var n := 0
+		var towns: Dictionary = save.data.get("towns", {})
+		for k in towns:
+			n += int((towns[k] as Dictionary).get("wishes", 0)) if towns[k] is Dictionary else 0
+		save.data["wishes_total"] = n
+		save.mark_dirty()
+	deep_islets = Deep.islets(int(save.data.get("wishes_total", 0)))
+	_send_deep()
+	print("Tiny Town Tycoon: %s mode, %s island, %d islets" % [deep_mode, deep_season, deep_islets])
+
+
+## Host: the mode, the gift, the season and the islets for every machine.
+func _send_deep() -> void:
+	if sim != null:
+		sim.gift = deep_gift
+	if jobs != null:
+		jobs.gift = deep_gift
+	net.state_set("deep", [deep_mode, deep_gift, deep_season, deep_islets])
+
+
+## Every machine: the "deep" state.
+func _on_deep(value: Variant) -> void:
+	var dv: Array = value if value is Array else []
+	if dv.size() < 4:
+		return
+	deep_mode = String(dv[0])
+	deep_gift = String(dv[1])
+	deep_season = String(dv[2])
+	deep_islets = int(dv[3])
+	if season_node != null:
+		season_node.set_season(deep_season)
+	if gifts_node != null:
+		gifts_node.set_gift(deep_gift)
+	if islets_node != null:
+		islets_node.set_count(deep_islets, true)
+
+
+## Host, every frame of play: the pick orbs, a pick when one is due, the weather.
+func _deep_tick(delta: float) -> void:
+	if picks == null:
+		return
+	_settle_t = maxf(0.0, _settle_t - delta)
+	picks.tick(delta)
+	if picks.active():
+		return
+	var due := _pick_due()
+	if due != "":
+		_start_pick(due)
+		return
+	hazards.host_tick(delta)
+
+
+## Host: the pick due now ("" none): the mode once a session (Benny names the season first), then a gift every day.
+## Never during the practice, a sail, or the moment after a town loads.
+func _pick_due() -> String:
+	if practice < 2 or not playing() or _sail_t > 0.0 or _settle_t > 0.0 or hazards.busy():
+		return ""
+	if not _season_shown:
+		_season_shown = true
+		var sd := Deep.season_data(deep_season)
+		_fx("beat", [String(sd.line), String(sd.pic), (sd.color as Color).to_html(false)])
+		_settle_t = 3.0
+		return ""
+	if not mode_picked:
+		return "mode"
+	if gift_day != day_n:
+		if _try_gift != "":
+			_set_gift(_try_gift)
+			_try_gift = ""
+			return ""
+		return "gift"
+	return ""
+
+
+## People here who drive a vehicle (TV players and Decks).
+func _drivers() -> int:
+	var n := 0
+	for slot in party.active_slots():
+		if int(slot) >= 1 and fleet.call("vehicle_of", int(slot)) != null:
+			n += 1
+	return n
+
+
+## Nobody here could take a pick (no driver, no flat mayor, no VR mayor): the middle comes sooner.
+func pick_nobody() -> bool:
+	return _drivers() == 0 and flat == null and vr_rig == null
+
+
+## Host: put up the pick orbs (the town carries on round them).
+func _start_pick(stage: String) -> void:
+	var entries: Array = []
+	var opts: Array = []
+	if stage == "mode":
+		opts = PickOrbs.mode_ids(deep_mode)
+		for id in opts:
+			var md := PickOrbs.mode(String(id))
+			entries.append({"id": id, "name": md.name, "pic": md.pic, "color": md.color})
+	else:
+		opts = Deep.gift_choices(deep_islets, String(save.data.get("last_gift", "")), Seeded.derive(_session_seed, "gift %d" % day_n))
+		for id in opts:
+			var gd := Deep.gift(String(id))
+			entries.append({"id": id, "name": gd.name, "pic": gd.pic, "color": gd.color})
+		_fx("beat", ["A GIFT!", "gift", Wishes.WHO_COLOR.to_html(false)])
+	var row := "island"
+	if vr_rig != null and flat == null and _drivers() == 0:
+		row = "vr"  # only the VR mayor: small orbs an arm's reach in front of them
+	sound("ding", -6.0, 1.3)
+	picks.begin(stage, entries, opts, row, _on_picked)
+
+
+## Host: the town picked (or the middle one was taken for them).
+func _on_picked(stage: String, opt: Variant, _slot: int) -> void:
+	if stage == "mode":
+		deep_mode = Deep.mode_of(String(opt))
+		mode_picked = true
+		save.data["mode"] = deep_mode
+		save.mark_dirty()
+		_fx("beat", [String(PickOrbs.mode_name(deep_mode)) + "!", String(PickOrbs.mode(deep_mode).pic), PickOrbs.mode_color(deep_mode).to_html(false)])
+		_send_deep()
+		_settle_t = 1.5
+		print("Picked mode: %s" % deep_mode)
+		return
+	_set_gift(String(opt))
+
+
+## Host: today's builder gift (what it does: sim.gd, jobs.gd, place(), gifts.gd), then today's weather.
+func _set_gift(id: String) -> void:
+	deep_gift = id
+	gift_day = day_n
+	save.data["last_gift"] = id
+	save.data["gifts"] = int(save.data.get("gifts", 0)) + 1
+	save.mark_dirty()
+	_send_deep()
+	var gd := Deep.gift(id)
+	_fx("beat", [String(gd.line), String(gd.pic), (gd.color as Color).to_html(false)])
+	if id == "park":
+		_gift_park()
+	print("Picked gift: %s" % id)
+	_plan_weather()
+
+
+## Host: the rest of today's weather on this island (deep.gd weather: told, fair, the same for an island and a day).
+func _plan_weather() -> void:
+	if hazards == null or town == null:
+		return
+	var rem := fposmod(Deep.MORNING - hour, 24.0)
+	if rem < 0.01:
+		rem = 24.0
+	var spec := {"seed": Seeded.derive(town.seed_value, "day %d" % day_n), "mode": deep_mode, "season": deep_season, "day": day_n,
+		"len": rem * DAY_LEN / 24.0 / fast}
+	if _bot_weather:
+		spec["first"] = Deep.SHORT_FIRST
+		spec["gap"] = Deep.SHORT_GAP
+	var list := Deep.weather({"ter": town.ter, "dist": town.dist, "open": town.open_mask}, spec)
+	hazards.host_begin(list)
+	print("Tiny Town Tycoon weather: %d today (%s mode, %s, %.0f s left in the day): %s" % [list.size(), deep_mode, deep_season,
+		float(spec.len), str(list.map(func(e: Dictionary) -> String: return "%s@%.0f" % [e.kind, float(e.t)]))])
+
+
+## Host: a new morning: a new gift pick (then the day's weather).
+func _morning() -> void:
+	day_n += 1
+	hazards.host_end()
+	print("Tiny Town Tycoon: morning %d" % day_n)
+
+
+## Host: a town loaded (start, sail, reload): no old weather; today's for this island once the gift is in.
+func _deep_town_loaded() -> void:
+	if hazards == null:
+		return
+	hazards.host_end()
+	_settle_t = maxf(_settle_t, Deep.SETTLE + 1.5)
+	if mode_picked and gift_day == day_n:
+		_plan_weather()
+
+
+## Host: weather's tell started (hazards.gd).
+func weather_told(e: Dictionary) -> void:
+	save.data["weathers"] = int(save.data.get("weathers", 0)) + 1
+	save.mark_dirty()
+	print("Weather: %s at (%.2f, %.2f) w %.3f, told %.1f s" % [e.kind, float(e.x), float(e.z), float(e.w), float(e.warn)])
+
+
+## Every machine: a vehicle's speed factor at p (the gift, the fog).
+func deep_speed(p: Vector3) -> float:
+	return Deep.gift_speed(deep_gift) * (hazards.slow_at(p) if hazards != null else 1.0)
+
+
+## Host: DOUBLE HOUSES: a twin blueprint next to the new house at (x, z).
+func _twin_house(x: int, z: int, slot: int) -> void:
+	var c := Deep.twin_spot(town, x, z)
+	if c.x < 0:
+		return
+	var id := town.add_building("house", c.x, c.y, town.auto_rot("house", c.x, c.y), 0)
+	_fx("placed", [id, slot])
+	_grant_wishes(id)
+
+
+## Host: HAPPY PARK: a park blueprint by the town hall when the town has no park yet.
+func _gift_park() -> void:
+	if not town.of_kind("park", false).is_empty():
+		return
+	var c := Deep.park_spot(town)
+	if c.x < 0:
+		return
+	var id := town.add_building("park", c.x, c.y, town.auto_rot("park", c.x, c.y), 0)
+	_fx("placed", [id, -1])
+	_grant_wishes(id)
+	_publish_town(false)
+
+
+## Host: one more wish came true (any town): Benny's archipelago grows an islet every few.
+func _wish_counted() -> void:
+	var total := int(save.data.get("wishes_total", 0)) + 1
+	save.data["wishes_total"] = total
+	save.mark_dirty()
+	var n := Deep.islets(total)
+	if n > deep_islets:
+		deep_islets = n
+		_send_deep()
+		var il: Dictionary = Deep.ISLETS[n - 1]
+		_fx("beat", ["A NEW ISLAND!", String(il.pic), Color(0.4, 0.75, 1.0).to_html(false)])
+		print("Benny's archipelago: islet %d (%s)" % [n, String(il.id)])
+
+
+## Every machine, when the pick orbs pop up (picks.gd show_row): a clear banner.
+func pick_banner() -> void:
+	_banner("PICK ONE!", 2.4)
+
+
+## Every machine: a short headline on every TV view and in VR.
+func _banner(title: String, secs: float) -> void:
+	HudKit.banner(hud.call("all_roots"), title, "", {"duration": secs})
+	if vr_rig != null:
+		HudKit.vr_banner(self, vr_rig.camera, title, "", {"duration": secs})
+
+
+## Every machine: one of Benny's picture cards with its own line (a mode, a gift, the season, a new islet).
+func _show_beat(line: String, pic: String, color: Color) -> void:
+	var beat := {"who": Wishes.WHO, "line": line, "pic": pic, "color": color, "duration": 3.0}
+	StoryCard.show(hud.call("all_roots"), beat)
+	if vr_rig != null:
+		if is_instance_valid(_vr_story):
+			_vr_story.queue_free()
+		_vr_story = StoryCard.show_vr(self, vr_rig.camera, beat)
+
+
 # --- Networking ------------------------------------------------------------------------------------
 
 func make_snapshot() -> Array:
@@ -1733,6 +2072,10 @@ func apply_event(kind: String, args: Array) -> void:
 		show_fx(String(args[0]), args[1])
 	elif kind == "story":
 		show_fx(kind, args)
+	elif kind == "orbs" and args.size() >= 4 and picks != null:
+		picks.show_row(String(args[0]), args[1], args[2], String(args[3]))
+	elif kind == "take" and args.size() >= 2 and picks != null:
+		picks.take_fx(int(args[0]), int(args[1]))
 
 
 func on_remote_state(slot: int, pos: Vector3, yaw: float, _pitch: float) -> void:

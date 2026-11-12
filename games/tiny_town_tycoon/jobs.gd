@@ -13,6 +13,7 @@ extends RefCounted
 const Defs := preload("res://games/tiny_town_tycoon/defs.gd")
 const Town := preload("res://games/tiny_town_tycoon/town.gd")
 const Sim := preload("res://games/tiny_town_tycoon/sim.gd")
+const Deep := preload("res://games/tiny_town_tycoon/deep.gd")
 
 ## How close (in cells, from the footprint's edge) a vehicle must be to load or unload.
 const NEAR := 0.95
@@ -31,6 +32,7 @@ var help_target := {}
 ## SIMPLE_MODE: the starter house blueprint (the drivers' practice delivery): the AI crane leaves it
 ## alone for a good while so a TV driver who joins a bit late still gets it.
 var practice_site := -1
+var gift := ""  ## the day's builder gift (deep.gd; main.gd sets it)
 
 
 func setup(t: Town, s: Sim) -> void:
@@ -369,9 +371,9 @@ func _carry_job(j: Dictionary, v: Node3D, dt: float) -> void:
 					if take == 0:
 						j["res"] = "bricks"
 						res = "bricks"
-						take = 1
+						take = Deep.CRANE_CARRY if gift == "crane" else 1  # (SPEEDY CRANE: two bricks a load)
 				else:
-					take = 1
+					take = Deep.CRANE_CARRY if gift == "crane" else 1  # (SPEEDY CRANE: two bricks a load)
 			"bus":
 				take = mini(int(j["qty"]), int(from["wait"]))
 				from["wait"] = int(from["wait"]) - take

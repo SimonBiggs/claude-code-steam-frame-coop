@@ -33,6 +33,9 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "town-gifts", "date": "2026-11-12", "game": "tiny_town_tycoon", "pic": "crane", "line": "Benny's builder gifts!", "try": {"TT_GIFT": "crane"}},
+	{"id": "town-weather", "date": "2026-11-12", "game": "tiny_town_tycoon", "pic": "sleepyfog", "line": "Windy days and fog!", "try": {"TT_WEATHER_NOW": "1", "TT_MODE": "brave"}},
+	{"id": "town-islets", "date": "2026-11-12", "game": "tiny_town_tycoon", "pic": "island", "line": "Benny's islands grow!"},
 	{"id": "pg-smudge", "date": "2026-11-12", "game": "paint_and_guess", "pic": "smudge", "line": "Smudge guesses too!"},
 	{"id": "pg-gifts", "date": "2026-11-12", "game": "paint_and_guess", "pic": "stampbrush", "line": "Smudge's brush gifts!", "try": {"PG_GIFT": "stamps"}},
 	{"id": "pg-surprises", "date": "2026-11-12", "game": "paint_and_guess", "pic": "paintdrip", "line": "Drips and windy easels!", "try": {"PG_TRICKS_NOW": "1", "PG_MODE": "brave"}},

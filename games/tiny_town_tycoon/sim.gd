@@ -8,6 +8,7 @@ extends RefCounted
 
 const Defs := preload("res://games/tiny_town_tycoon/defs.gd")
 const Town := preload("res://games/tiny_town_tycoon/town.gd")
+const Deep := preload("res://games/tiny_town_tycoon/deep.gd")
 
 const HOMES: Array[int] = [0, 4, 8, 14]  ## residents per house level
 const STOCK_CAP := 10
@@ -34,6 +35,7 @@ var _sell_t := {}  # shop id -> seconds to the next sale
 var _wait_t := {}  # house id -> seconds to the next passenger
 var _build_t := {}  # site id -> seconds of building left
 var _hall_t := 0.0
+var gift := ""  ## the day's builder gift (deep.gd; main.gd sets it)
 
 ## Callbacks main.gd provides: event(kind: String, args: Array) for one-off effects.
 var on_event: Callable
@@ -114,7 +116,7 @@ func _construction(dt: float) -> void:
 			_build_t.erase(id)
 			continue
 		if not _build_t.has(id):
-			_build_t[id] = 2.5
+			_build_t[id] = Deep.CRANE_BUILD if gift == "crane" else 2.5  # (SPEEDY CRANE: up in a moment)
 			_emit("building", [int(id)])
 		_build_t[id] = float(_build_t[id]) - dt
 		if float(_build_t[id]) <= 0.0:
@@ -299,7 +301,8 @@ func _homes(dt: float) -> void:
 			if ok and not work_ok and int(b["res"]) < cap:
 				needs |= Defs.N_JOBS
 			if ok and work_ok and int(b["res"]) < cap:
-				var t := float(_move_t.get(id, 3.0)) - dt * (0.6 + float(b["happy"]) / 100.0)
+				var park := Deep.PARK_MOVE if gift == "park" and town.near_kind(b, "park", Deep.PARK_NEAR) else 1.0  # (HAPPY PARK)
+				var t := float(_move_t.get(id, 3.0)) - dt * (0.6 + float(b["happy"]) / 100.0) * park
 				if t <= 0.0:
 					t = 7.0
 					b["res"] = int(b["res"]) + 1

@@ -10,7 +10,8 @@ const COLOR := Color(0.75, 0.5, 0.3)
 
 ## data: the raw save (no defaults filled in: always .get with a default). today: Seeded.today().
 ## grown: the buildings in Benny's home town (towns.home, or towns.meadow in older saves: {"town": {"b": [...]}});
-## daily: TODAY'S ISLAND finished today (daily_done; today_date only says they sailed there).
+## daily: TODAY'S ISLAND finished today (daily_done; today_date only says they sailed there). (The second pass's keys -
+## mode, last_gift, wishes_total for Benny's islets, gifts, weathers - are new keys beside the old layout: no migration.)
 static func progress_summary(data: Dictionary, today: String) -> Dictionary:
 	var towns: Variant = data.get("towns", {})
 	var home: Variant = {}
@@ -25,4 +26,5 @@ static func progress_summary(data: Dictionary, today: String) -> Dictionary:
 static func sample(today: String) -> Dictionary:
 	var town := {"island": 0, "b": [[1, [0, 3, 4, 0]], [2, [1, 6, 4, 0]], [3, [0, 5, 7, 1]]], "next_id": 4, "seed": 4242}
 	return {"stars": {}, "towns": {"home": {"town": town, "coins": 120, "tier": 1, "counters": {}, "goals": [], "hour": 9.0,
-		"wishes": 4}, "today": {"town": {"b": []}}}, "last": 0, "home_seed": 4242, "today_date": today, "daily_done": today, "met_benny": true}
+		"wishes": 4}, "today": {"town": {"b": []}}}, "last": 0, "home_seed": 4242, "today_date": today, "daily_done": today, "met_benny": true,
+		"mode": "brave", "last_gift": "crane", "wishes_total": 4, "gifts": 2, "weathers": 3}
