@@ -5,6 +5,7 @@ const Contrast := preload("res://core/contrast.gd")
 const Looks := preload("res://games/giants_table/looks.gd")
 const World := preload("res://games/giants_table/world.gd")
 const Goblin := preload("res://games/giants_table/goblin.gd")
+const Deep := preload("res://games/giants_table/deep.gd")
 
 
 ## The knights (P2..; P1 is the giant) and every goblin, outlined (goblin.gd).
@@ -15,6 +16,8 @@ static func key_colors() -> Dictionary:
 	for k in Goblin.KINDS:
 		out["%s goblin" % k] = {"color": Goblin.KINDS[k].color, "rim": Looks.GOBLIN_OUTLINE}
 	out["armour"] = {"color": Looks.ARMOR, "rim": Looks.GOBLIN_OUTLINE}
+	out["goo tell"] = Deep.GOO_COLOR  # the goblins' tricks (deep.gd: steady rings on the table)
+	out["barrel tell"] = Deep.BARREL_COLOR
 	return out
 
 

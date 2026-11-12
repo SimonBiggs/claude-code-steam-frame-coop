@@ -14,6 +14,11 @@ extends Node
 ## Story (raidgen.gd / table_story.gd): notes the goblin ladders, Sparky's face, a saved night and a gift on the rim
 ## (START_WAVE=5 reaches the night's end quickly; GT_SEED=n fixes the raid), and prints a SCRIPT ERROR when waves
 ## came but no ladders stood (also on TV machines, which build them from the snapshot) or Sparky never showed.
+## Second pass (deep.gd): the Giant reaches into / hovers over a pick orb for the mode pick (and the gift pick when no
+## knight is here), a knight walks under one for Sparky's gift pick; GT_TRICKS_NOW is set (tricks from wave 1, 3 s
+## in; BOT_PLAIN=1 keeps the normal start) and knights step out of a trick's ring while the Giant catches every other
+## ball / barrel. Checks: the orbs showed (every machine), a real pick was made (not the middle by default), tricks
+## were told (every machine) and the knights stayed clear.
 
 const W := preload("res://games/giants_table/world.gd")
 const BotEnd := preload("res://tests/bot_end.gd")  # check(): counted checks, so every run ends with a real BOT RESULT
@@ -33,10 +38,14 @@ var pad_phase := 0
 var seen := {}
 var smacks := 0
 var cues := {}  # simple mode: picture cues seen / learned
+var pick_t := 0.0
+const Deep := preload("res://games/giants_table/deep.gd")
 
 
 func _ready() -> void:
 	preload("res://tests/bot_end.gd").arm(self)  # end by itself in networked runs
+	if not OS.has_environment("BOT_PLAIN"):
+		OS.set_environment("GT_TRICKS_NOW", "1")  # (tricks from wave 1: a short bot run sees them)
 	main = load("res://games/giants_table/main.tscn").instantiate()
 	add_child(main)
 	if OS.has_environment("START_WAVE"):
@@ -59,13 +68,18 @@ func _physics_process(delta: float) -> void:
 		set_meta("lost", true)
 		print("Bot: forcing a game over (tests the heroes screen)")
 		main._on_game_over("The goblins stole the campfire!")
-	if main.giant != null and main.giant.flat:
+	_note_deep()
+	var picking := _drive_picks(delta)
+	if picking.has("giant"):
+		pass
+	elif main.giant != null and main.giant.flat:
 		_drive_giant(delta)
 	elif main.giant != null and main.giant.vr:
 		_drive_vr_giant(delta)
 	for k in main.knights():
-		if not k.remote:
+		if not k.remote and not picking.has(k):
 			_drive_knight(k)
+			_dodge_trick(k)
 	if t - last_print >= 10.0:
 		last_print = t
 		var ks: Array[String] = []
@@ -253,6 +267,90 @@ func _drive_knight(k) -> void:
 	k.bot_input = inp
 
 
+## Second pass: the orbs up -> the Giant (mode pick, or a gift pick with no knight here) or knight P2 (gift picks)
+## goes for one (orb (wave % 3): not always the middle). Returns who is busy picking: {"giant": true, knight: true}.
+func _drive_picks(delta: float) -> Dictionary:
+	var busy := {}
+	if main.picks == null or not main.picks.showing():
+		pick_t = 0.0
+		return busy
+	pick_t += delta
+	var stage: String = main.picks.orbs.stage
+	var want: int = (main.wave + 2) % 3
+	var at: Vector3 = main.picks.orb_position(want)
+	if at == Vector3.INF:
+		return busy
+	var knight_here := false
+	for k in main.knights():
+		if k.active and not k.is_down:
+			knight_here = true
+	var g = main.giant
+	var giant_goes: bool = g != null and not g.ghost and main.net.mode != "client" and (stage == "mode" or not knight_here)
+	if giant_goes and pick_t > 1.2:
+		busy["giant"] = true
+		g.bot = true
+		g.bot_grip = false
+		if g.flat:
+			g.bot_target = at
+		elif g.vr:
+			var ctrl: Node3D = g.hand_r
+			var off: Vector3 = ctrl.global_basis * g.GRAB_OFFSET
+			ctrl.global_position = ctrl.global_position.move_toward(at - off, 20.0 * delta)
+	if stage == "gift" and pick_t > 1.0:
+		for k in main.knights():
+			if k.remote or not k.active or k.is_down or k.index != 1:
+				continue
+			busy[k] = true
+			var to: Vector3 = Vector3(at.x, 0.0, at.z) - Vector3(k.global_position.x, 0.0, k.global_position.z)
+			k.bot_input = {"move": to.normalized() if to.length() > 0.4 else Vector3.ZERO, "sword": false, "bow": false, "jump": false}
+	return busy
+
+
+## Second pass: a knight standing in a trick's ring walks straight out of it (away from its middle / across the band).
+func _dodge_trick(k) -> void:
+	if main.hazards == null or not k.active or k.is_down:
+		return
+	for e in main.hazards.tells_now():
+		var p := Vector2(k.global_position.x, k.global_position.z)
+		if not Deep.inside(e, p, Deep.KNIGHT_R + 0.4):
+			continue
+		var out := Vector2.ZERO
+		if String(e.kind) == "goo":
+			out = (p - Vector2(float(e.x), float(e.z))).normalized()
+		else:
+			var dir := Vector2(float(e.dx), float(e.dz)).normalized()
+			var side := Vector2(-dir.y, dir.x)
+			out = side * signf((p - Vector2(float(e.x), float(e.z))).dot(side) + 0.001)
+		var inp: Dictionary = k.bot_input if k.bot_input is Dictionary else {}
+		inp["move"] = Vector3(out.x, 0.0, out.y)
+		inp["sword"] = false
+		inp["bow"] = false
+		k.bot_input = inp
+		if not seen.has("knight dodged a trick"):
+			seen["knight dodged a trick"] = true
+			print("Bot: seen knight dodged a trick (t=%.0f)" % t)
+
+
+## Second pass: what showed up (orbs, picks, tricks, gifts, seasons, treasures).
+func _note_deep() -> void:
+	var checks := {
+		"orbs up": main.picks != null and main.picks.showing(),
+		"a trick told": main.hazards != null and not main.hazards.seen.is_empty(),
+		"trick caught": main.hazards != null and main.hazards.catches > 0,
+		"season dressed": main.season_node != null and main.season_node.cloth != null,
+		"a gift at work": main.gift != "",
+		"helpers bonked": main.gifts_node != null and main.gifts_node.bonks > 0,
+		"shield blocked": main.gifts_node != null and main.gifts_node.blocks > 0,
+	}
+	if main.picks != null:
+		for hrow in main.picks.history:
+			checks["picked %s by %s" % [hrow[0], "nobody" if int(hrow[2]) < 0 else ("the giant" if int(hrow[2]) == 0 else "a knight")]] = true
+	for key in checks:
+		if checks[key] and not seen.has(key):
+			seen[key] = true
+			print("Bot: seen %s (t=%.0f, wave %d)" % [key, t, main.wave])
+
+
 func _drive_giant(delta: float) -> void:
 	var g = main.giant
 	g.bot = true
@@ -260,6 +358,12 @@ func _drive_giant(delta: float) -> void:
 	giant_wait -= delta
 	if main.game_over:
 		g.bot_grip = false
+		return
+	# Second pass: catch every other trick's ball / barrel.
+	var trick_at: Vector3 = main.hazards.thing_pos() if main.hazards != null else Vector3.INF
+	if trick_at != Vector3.INF and h.held == null and main.wave % 2 == 1:
+		g.bot_target = trick_at
+		g.bot_grip = Vector2(h.pos.x - trick_at.x, h.pos.z - trick_at.z).length() < 0.8
 		return
 	if h.held != null and is_instance_valid(h.held):
 		var obj = h.held
@@ -463,6 +567,16 @@ func _exit_tree() -> void:
 		BotEnd.check(seen.has("ladders up"), "goblin ladders stood on the table in the waves (mode %s)" % main.net.mode)
 	if main != null and main.wave >= 1:
 		BotEnd.check(seen.has("sparky's face"), "Sparky's face showed in the fire (mode %s)" % main.net.mode)
+		BotEnd.check(seen.has("season dressed"), "the table was dressed for the season (mode %s)" % main.net.mode)
+	if main != null and main.wave >= 2 and main.net.mode != "client":
+		BotEnd.check(seen.has("orbs up"), "the pick orbs showed (mode %s)" % main.net.mode)
+		var real := false
+		for k in seen:
+			if String(k).begins_with("picked ") and not String(k).ends_with("nobody"):
+				real = true
+		BotEnd.check(real or OS.has_environment("BOT_LAZY_GIANT"), "someone really took a pick orb (seen %s)" % str(seen.keys()))
+	if main != null and main.wave >= 3 and not OS.has_environment("BOT_PLAIN"):
+		BotEnd.check(seen.has("a trick told"), "a goblin trick was told (mode %s)" % main.net.mode)
 	if main != null and main.wave >= 1:
 		# (tools/multibot.ts: every machine the same raid. Not the gift count: a joiner leaves ~10 s before the host,
 		# which may save a night after it has gone.)
