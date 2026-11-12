@@ -37,6 +37,13 @@ const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV p
 ## RaidGen.CROWN_NIGHTS nights. TODAY'S RAID: the first game each day uses the day's seed on every machine.
 ## Telemetry: one RUN line per wave and at game over / quit. Networked: the snapshot's last entry is
 ## [raid seed, daily, ladder wave, gifts (kind * 2 + gold), play-days, crown]; every machine rebuilds ladders and gifts.
+## SECOND PASS (deep.gd; tests/giants_table_deep_test.gd): GENTLE / BRAVE / HARD picked once a session after the
+## practice and SPARKY'S GIFTS in every break from wave 2, both on pick orbs in front of the Giant's seat (picks.gd:
+## reach into one / hover the hand over one / a knight walks under one); the goblins' TRICKS (goo balls from a
+## catapult, rolling barrels) told by steady rings on the table, the Giant can catch them (hazards.gd); the gifts at
+## work (gifts.gd); the table dressed for the season: tablecloth, centrepiece wreath, room props (season.gd); Sparky's
+## TABLE TREASURES grow on the rim (treasures.gd). No rain, the houses never grow (David). State: "deep" [mode, gift,
+## season], "hz" (the trick showing), "hz_caught", "shield", "treasures"; events "orbs" (sticky), "take", "helper".
 const SIMPLE_MODE := true
 const UiKit := preload("res://core/ui_kit.gd")
 const HudKit := preload("res://core/hud_kit.gd")
@@ -75,6 +82,13 @@ const Seeded := preload("res://core/seeded.gd")
 const Telemetry := preload("res://core/telemetry.gd")
 const StoryCard := preload("res://core/story_card.gd")
 const Save := preload("res://core/save.gd")
+const Deep := preload("res://games/giants_table/deep.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
+const PicksScript := preload("res://games/giants_table/picks.gd")
+const HazardsScript := preload("res://games/giants_table/hazards.gd")
+const GiftsScript := preload("res://games/giants_table/gifts.gd")
+const SeasonScript := preload("res://games/giants_table/season.gd")
+const TreasuresScript := preload("res://games/giants_table/treasures.gd")
 const SPARKY := "SPARKY"
 const SPARKY_COLOR := Color(1.0, 0.6, 0.2)
 const GIFT_LINES := {"pie": "A yummy pie!", "cake": "A big cake!", "teddy": "A teddy bear!", "scarf": "A cosy scarf!",
@@ -205,6 +219,18 @@ var story_t := 0.0
 var vr_story: Node3D
 var game_t := 0.0
 var run_logged := false
+# --- Second pass (deep.gd) ---
+var picks: Node  # picks.gd
+var hazards: Node3D  # hazards.gd (every machine draws the "hz" state)
+var gifts_node: Node3D  # gifts.gd
+var season_node: Node3D  # season.gd
+var treasures_node: Node3D  # treasures.gd
+var mode := "brave"
+var gift := ""  # every machine: this wave's gift ("" none; from the "deep" state)
+var gift_wave := -1  # host: the wave the gift was picked for
+var gift_due := false  # host: Sparky's gift pick comes in this break
+var season := ""
+var bot_tricks := false  # bots (GT_TRICKS_NOW): tricks from wave 1, 3 s in
 
 
 func _ready() -> void:
@@ -220,6 +246,20 @@ func _ready() -> void:
 	village = VillageScript.new()
 	village.main = self
 	add_child(village)
+	hazards = HazardsScript.new()
+	hazards.main = self
+	add_child(hazards)
+	gifts_node = GiftsScript.new()
+	gifts_node.main = self
+	add_child(gifts_node)
+	season_node = SeasonScript.new()
+	season_node.name = "Season"
+	season_node.main = self
+	add_child(season_node)
+	treasures_node = TreasuresScript.new()
+	treasures_node.name = "TreasuresNode"
+	treasures_node.main = self
+	add_child(treasures_node)
 	if SIMPLE_MODE:
 		scenery = SceneryScript.new()
 		scenery.main = self
@@ -238,6 +278,11 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
+	net.sticky_event("orbs")  # a machine joining mid-pick sees the orbs (picks.gd)
+	net.state_changed.connect(_on_deep_state)
+	picks = PicksScript.new()
+	picks.main = self
+	add_child(picks)
 	seats = ClassicSeats.new(self, {
 		"free_actions": ["restart", "pause"],
 		"is_local": func(p) -> bool: return not p.remote,
@@ -867,7 +912,7 @@ func _update_fire(delta: float) -> void:
 	for i in flames.size():
 		var f: MeshInstance3D = flames[i]
 		var flick := 1.0 + sin(fire_t * (9.0 + i * 3.0)) * 0.08 + sin(fire_t * 23.0 + i) * 0.05
-		var s := (0.35 + 0.65 * strength) * flick
+		var s := (0.35 + 0.65 * strength) * flick * fire_boost()
 		f.scale = Vector3(s, s * (1.0 + 0.1 * sin(fire_t * 13.0 + i)), s)
 		f.visible = embers > 0
 	fire_light.light_energy = (0.6 + 2.2 * strength) * (1.0 + sin(fire_t * 17.0) * 0.08)
@@ -936,6 +981,8 @@ func _process(delta: float) -> void:
 	if net.mode == "host" and not net.connected:
 		solo_wait += delta
 		if solo_wait < 8.0:
+			if picks.active():
+				picks.tick(delta)  # (the pick runs on: a hand that reached in while the knights had time to join counts)
 			return  # give the knights a moment to join; after that the Giant can play alone (they can still join)
 	_host_knights(delta)
 	_update_boulders(delta)
@@ -944,10 +991,18 @@ func _process(delta: float) -> void:
 		_update_giant_tips(delta)
 	if not in_break:
 		wave_t += delta
+		hazards.host_tick(wave_t)
+		gifts_node.host_tick(delta)
 	if in_break:
-		break_timer -= delta
-		if break_timer <= 0.0:
-			_start_wave()
+		if picks.active():
+			picks.tick(delta)  # (the break waits for the pick)
+		elif gift_due and break_timer < 4.4:
+			gift_due = false
+			_start_pick("gift")
+		else:
+			break_timer -= delta
+			if break_timer <= 0.0:
+				_start_wave()
 	elif not spawn_queue.is_empty():
 		spawn_timer -= delta
 		var alive := get_tree().get_nodes_in_group("goblins").size()
@@ -1003,13 +1058,16 @@ func practice_finished() -> void:
 	break_timer = 1.5
 	solo_wait = practice.t  # the practice time counts towards the knights' 8 s to join
 	print("Practice done")
+	if not Engine.has_meta("gt_mode_picked"):
+		_start_pick("mode")  # GENTLE / BRAVE / HARD, once a session (a game over restarts the scene: not again)
 
 
 ## Simple mode: plain goblins, plus one new thing per wave from wave 3 on (then a gentle mix).
 ## The goblins come from the seeded plan (raidgen.gd: what comes up which ladder and when, fair for a small kid).
 func _simple_wave() -> void:
 	var solo := solo_giant()
-	wave_plan = RaidGen.plan(raid_seed, wave, 0 if solo else _extra_knights(), solo)
+	wave_plan = Deep.plan(raid_seed, wave, 0 if solo else _extra_knights(), solo, mode)
+	_deep_wave()
 	spawn_queue = (wave_plan.spawns as Array).duplicate(true)
 	spawn_queue.reverse()  # pop_back: in the plan's order
 	rain_at = randf_range(6.0, 10.0) if wave == 3 or (wave > 6 and randf() < 0.35) else -1.0
@@ -1085,6 +1143,11 @@ func _end_wave() -> void:
 	embers = mini(embers + 1, MAX_EMBERS)
 	_log_run("wave")
 	wave_lost = 0
+	hazards.host_end()
+	if save != null:  # Sparky's table treasures: one every few waves cleared (for good)
+		save.data.cleared = int(save.data.get("cleared", 0)) + 1
+		net.state_set("treasures", Deep.treasures(int(save.data.cleared)))
+	gift_due = not game_over
 	if save != null:
 		save.data.best_wave = maxi(int(save.data.best_wave), wave)
 		save.mark_dirty()
@@ -1136,6 +1199,7 @@ func _spawn_goblin(entry) -> void:
 	var dir := Vector3(cos(a), 0.0, sin(a))
 	var g := GoblinScript.new()
 	g.setup(kind, self)
+	g.speed *= Deep.goblin_speed(gift)  # (Sparky's SLEEPY DUST)
 	g.net_id = next_net_id()
 	if kind == "balloon":
 		# Floats in from the sky and drifts down towards the village.
@@ -1213,6 +1277,7 @@ func _on_game_over(reason: String) -> void:
 	game_over = true
 	game_over_time = 0.0
 	giant.release_all()
+	hazards.host_end()
 	print("Game over: %s wave=%d score=%d" % [reason, wave, score])
 	_log_run("over")
 	_story_for_all("Oh no! Let's try again!", "sparky", Color(0.6, 0.6, 0.75))
@@ -1230,6 +1295,8 @@ func _on_game_over(reason: String) -> void:
 func goblin_steals(g) -> void:
 	if embers <= 0 or g.carrying:
 		return
+	if gifts_node != null and gifts_node.block(g):
+		return  # EMBER SHIELD: it bounces off
 	embers -= 1
 	g.carrying = true
 	var away := Vector3(g.global_position.x, 0.0, g.global_position.z)
@@ -2155,6 +2222,15 @@ func apply_event(kind: String, args: Array) -> void:
 			_story(args[0], args[1], args[2])
 		"stats":
 			_apply_stats(args[0])
+		"orbs":
+			if picks != null and args.size() >= 3:
+				picks.show_row(String(args[0]), args[1], args[2])
+		"take":
+			if picks != null and args.size() >= 2:
+				picks.take_fx(int(args[0]), int(args[1]))
+		"helper":
+			if gifts_node != null and args.size() >= 1:
+				gifts_node.swing_fx(int(args[0]))
 
 
 # --- Simple mode picture cues (no words) -----------------------------------------
@@ -2513,7 +2589,8 @@ func _start_raid() -> void:
 	save = Save.new()
 	save.game_id = RaidGen.GAME_ID
 	# gifts: [[kind, play-day, today's raid], ...]; days: play-days; daily: the date TODAY'S RAID ran; nights: saved.
-	save.defaults = {"days": 0, "last_day": "", "daily": "", "daily_done": "", "games": 0, "nights": 0, "gifts": [], "best_wave": 0, "goblins": 0}
+	save.defaults = {"days": 0, "last_day": "", "daily": "", "daily_done": "", "games": 0, "nights": 0, "gifts": [], "best_wave": 0, "goblins": 0,
+		"mode": "", "last_gift": "", "cleared": 0}
 	add_child(save)
 	var today := Seeded.today()
 	var new_day := String(save.data.last_day) != today
@@ -2539,6 +2616,7 @@ func _start_raid() -> void:
 		_story_for_all("TODAY'S RAID!", "ladder", Color(1.0, 0.85, 0.3))
 	if new_day and int(save.data.days) > 1:
 		_story_for_all("A new lantern!", "lantern", Color(1.0, 0.8, 0.35))
+	_begin_deep()
 
 
 func _load_keepsakes() -> void:
@@ -2631,4 +2709,169 @@ func _log_run(end: String) -> void:
 		"vr": giant != null and giant.vr, "flat": giant != null and giant.flat, "net": net.mode,
 		"ladders": (wave_plan.get("ladders", []) as Array).size(), "planned": (wave_plan.get("spawns", []) as Array).size(),
 		"night": night_saved, "gifts": keep_gifts.size(), "days": keep_days,
-		"nights": int(save.data.nights) if save != null else 0})
+		"nights": int(save.data.nights) if save != null else 0,
+		"difficulty": mode, "gift": gift, "season": season, "tricks": hazards.count, "caught": hazards.catches,
+		"bumps": hazards.bumps, "bonks": gifts_node.bonks, "blocks": gifts_node.blocks,
+		"treasures": Deep.treasures(int(save.data.get("cleared", 0))) if save != null else 0,
+		"picks": picks.history.size() if picks != null else 0})
+
+
+# --- Second pass: modes, Sparky's gifts, goblin tricks, seasons, treasures (deep.gd) --------------------------
+
+## Host, once per game (from _start_raid): the season, the session's mode, the treasures, for every machine.
+func _begin_deep() -> void:
+	season = Seeded.season()
+	if OS.has_environment("GT_SEASON") and Deep.SEASONS.has(OS.get_environment("GT_SEASON")):
+		season = OS.get_environment("GT_SEASON")
+	mode = Deep.mode_of(String(Engine.get_meta("gt_mode", save.data.mode if String(save.data.mode) != "" else "brave")))
+	if OS.has_environment("GT_MODE"):
+		mode = Deep.mode_of(OS.get_environment("GT_MODE"))
+		Engine.set_meta("gt_mode_picked", true)  # (What's New "try" / bots: straight in)
+	if OS.has_environment("GT_GIFT") and not Deep.gift(OS.get_environment("GT_GIFT")).is_empty():
+		gift = OS.get_environment("GT_GIFT")  # (What's New "try": the first wave with that gift)
+		gift_wave = 1
+	if OS.has_environment("GT_TRICKS_NOW"):
+		bot_tricks = true
+	_send_deep()
+	net.state_set("treasures", Deep.treasures(int(save.data.get("cleared", 0))))
+	var sd := Deep.season_data(season)
+	_story_for_all(String(sd.line), String(sd.pic), SPARKY_COLOR)
+
+
+## Host: the mode, the gift and the season for every machine.
+func _send_deep() -> void:
+	net.state_set("deep", [mode, gift, season])
+
+
+## Host, at a wave's start (from _simple_wave): this wave's gift and tricks.
+func _deep_wave() -> void:
+	if gift_wave != wave:
+		gift = ""
+	_send_deep()
+	if gift == "bigfire":
+		embers = MAX_EMBERS  # BIG FIRE: Sparky's fire fills right up
+	gifts_node.host_begin()
+	var spec := {"mode": mode, "season": season, "send": Deep.send_secs(wave_plan)}
+	if bot_tricks:
+		spec["first"] = Deep.SHORT_FIRST
+	var list := Deep.tricks(raid_seed, wave, spec)
+	hazards.host_begin(list)
+	print("Giant's Table wave %d: %s mode, %s, gift %s, %d goblins, tricks %s" % [wave, mode, season, gift if gift != "" else "none",
+		(wave_plan.spawns as Array).size(), str(list.map(func(e: Dictionary) -> String: return "%s@%.0f" % [e.kind, float(e.t)]))])
+
+
+## Nobody here could take a pick (no Giant, no knight): the middle comes sooner.
+func pick_nobody() -> bool:
+	return (giant == null or giant.ghost) and active_knight_count() == 0
+
+
+## Host: put up the pick orbs (the break waits for them).
+func _start_pick(stage: String) -> void:
+	var entries: Array = []
+	var opts: Array = []
+	if stage == "mode":
+		opts = PickOrbs.mode_ids(mode)
+		for id in opts:
+			var md := PickOrbs.mode(String(id))
+			entries.append({"id": id, "name": md.name, "pic": md.pic, "color": md.color})
+		_story_for_all("Easy or tricky?", "sparky", SPARKY_COLOR)
+	else:
+		opts = Deep.gift_choices(Deep.treasures(int(save.data.get("cleared", 0))) if save != null else 0,
+			String(save.data.get("last_gift", "")) if save != null else "", Seeded.derive(raid_seed, "gift%d" % wave))
+		for id in opts:
+			var gd := Deep.gift(String(id))
+			entries.append({"id": id, "name": gd.name, "pic": gd.pic, "color": gd.color})
+		_story_for_all("A gift for you!", "gift", SPARKY_COLOR)
+	_show_center("PICK ONE!", 2.0)
+	sound("chime", -6.0, 1.3)
+	picks.begin(stage, entries, opts, _on_picked)
+
+
+## Host: the team picked (or the middle one was taken for them).
+func _on_picked(stage: String, opt: Variant, _slot: int) -> void:
+	if stage == "mode":
+		mode = Deep.mode_of(String(opt))
+		Engine.set_meta("gt_mode_picked", true)
+		Engine.set_meta("gt_mode", mode)
+		if save != null:
+			save.data.mode = mode
+		_story_for_all(String(PickOrbs.MODE_LINES.get(mode, "Let's go!")), String(PickOrbs.mode(mode).pic), PickOrbs.mode_color(mode))
+		_show_center(PickOrbs.mode_name(mode), 1.6)
+		break_timer = 1.8
+	else:
+		gift = String(opt)
+		gift_wave = wave + 1
+		if save != null:
+			save.data.last_gift = gift
+		break_timer = minf(break_timer, 2.2)
+	if save != null:
+		save.mark_dirty()
+	_send_deep()
+	print("Picked %s: %s" % [stage, str(opt)])
+
+
+## Host: a trick's tell started (hazards.gd).
+func trick_told(e: Dictionary) -> void:
+	print("Trick: %s at %.1f s (%.1f, %.1f)" % [e.kind, wave_t, float(e.x), float(e.z)])
+
+
+## Host: the Giant caught a trick's ball / barrel (hazards.gd).
+func trick_caught(e: Dictionary) -> void:
+	score += 25
+	_show_center("CAUGHT IT!", 1.4)
+	sound("fanfare", -6.0, 1.2)
+	table_story.cheer()
+	print("Trick caught: %s" % e.kind)
+
+
+## Sparky's BIG HANDS: the Giant's grab reach and hand size (giant.gd).
+func grab_reach() -> float:
+	return Deep.reach(gift)
+
+
+func hand_scale() -> float:
+	return Deep.BIG_HAND if gift == "bighands" else 1.0
+
+
+## Sparky's BIG FIRE: the flames' size.
+func fire_boost() -> float:
+	return Deep.flames(gift)
+
+
+## Every machine: the second pass's replicated state.
+func _on_deep_state(key: String, value: Variant) -> void:
+	match key:
+		"deep":
+			var dv: Array = value if value is Array else []
+			if dv.size() >= 3:
+				mode = String(dv[0])
+				var was: String = gifts_node.gift if gifts_node != null else ""
+				gift = String(dv[1])
+				season = String(dv[2])
+				if season_node != null and season != "":
+					season_node.set_season(season)
+				if gifts_node != null:
+					gifts_node.set_gift(gift)
+				if gift != "" and gift != was:
+					var gd := Deep.gift(gift)
+					_show_center(String(gd.name), 1.8, false)
+					_story(String(gd.line), String(gd.pic), gd.color)
+		"hz":
+			var hz := Deep.unpack(value if value is Array else [])
+			if hazards != null:
+				hazards.show_now(hz)
+			if not hz.is_empty():
+				_show_center(String(Deep.KIND_NAMES[String(hz.kind)]), 1.8, false)
+		"hz_caught":
+			if hazards != null:
+				hazards.set_caught(bool(value))
+		"shield":
+			if gifts_node != null:
+				gifts_node.set_shield(int(value))
+		"treasures":
+			if treasures_node != null:
+				var grew: bool = treasures_node.count >= 0 and int(value) > treasures_node.count
+				treasures_node.set_count(int(value), true)
+				if grew:
+					var tk: String = Deep.TREASURES[clampi(int(value) - 1, 0, Deep.TREASURES.size() - 1)]
+					_story("A new treasure!", tk, Color(1.0, 0.8, 0.35))

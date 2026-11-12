@@ -33,6 +33,11 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "giants-gifts", "date": "2026-11-12", "game": "giants_table", "pic": "shieldbubble", "line": "Sparky's gifts for you!", "try": {"GT_GIFT": "helpers"}},
+	{"id": "giants-tricks", "date": "2026-11-12", "game": "giants_table", "pic": "barrel", "line": "Goblin tricks! Catch them!", "try": {"GT_TRICKS_NOW": "1", "GT_MODE": "brave"}},
+	{"id": "giants-modes", "date": "2026-11-12", "game": "giants_table", "pic": "sparky", "line": "Gentle, brave or hard!"},
+	{"id": "giants-treasures", "date": "2026-11-12", "game": "giants_table", "pic": "cupcake", "line": "Treasures on the table!"},
+	{"id": "giants-seasons", "date": "2026-11-12", "game": "giants_table", "pic": "snowflake", "line": "A snowy tablecloth!", "try": {"GT_SEASON": "winter"}},
 	{"id": "rc-gifts", "date": "2026-11-12", "game": "roller_coaster", "pic": "corkscrew", "line": "Buttons' track gifts!", "try": {"RC_GIFT": "rainbow"}},
 	{"id": "rc-weather", "date": "2026-11-12", "game": "roller_coaster", "pic": "sleepycart", "line": "Windy bits, sleepy carts!", "try": {"RC_WEATHER_NOW": "1", "RC_MODE": "brave"}},
 	{"id": "rc-modes", "date": "2026-11-12", "game": "roller_coaster", "pic": "bear", "line": "Gentle, brave or hard!"},
