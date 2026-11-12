@@ -87,6 +87,12 @@ const Festival := preload("res://games/party_board/festival.gd")
 const Boards := preload("res://games/party_board/boards.gd")
 const Seeded := preload("res://core/seeded.gd")
 const StoryCard := preload("res://core/story_card.gd")
+const Deep := preload("res://games/party_board/deep.gd")
+const PicksScript := preload("res://games/party_board/picks.gd")
+const HazardsScript := preload("res://games/party_board/hazards.gd")
+const GiftsScript := preload("res://games/party_board/gifts.gd")
+const SeasonScript := preload("res://games/party_board/season.gd")
+const HallScript := preload("res://games/party_board/hall.gd")
 const MANGO_COLOR := Color(1.0, 0.6, 0.15)  ## Mango the toucan (festival.gd), the party host in the story cards
 
 const SIMPLE_MODE := true
@@ -120,6 +126,14 @@ var vr_story: Node3D
 var simple := SIMPLE_MODE
 var props: PropsScript  ## SIMPLE: touchable island (every machine; touches are found where the VR player is)
 var ghost: GhostHand  ## SIMPLE, VR player only: the see-through teaching hand
+## SECOND PASS (deep.gd): the pick orbs (modes, Mango's gifts), the warned board surprises, the gifts over the tokens,
+## the season on the island and Mango's party hall. State "deep" {mode, season, hall_n}, "orbs", "hz".
+var picks: PicksScript
+var hazards: HazardsScript
+var gift_tags: GiftsScript
+var season_node: SeasonScript
+var hall: HallScript
+var play_mode := "brave"  ## this session's GENTLE / BRAVE / HARD (every machine, from "deep")
 
 # --- The networking contract (see docs/engine/systems.md) ---
 var net: Node
@@ -205,7 +219,9 @@ func _ready() -> void:
 		"world": -1, "festival": [], "flags": [], "daily": {},
 		# deeper parties (boards.gd): boards played / visited by TODAY'S PARTY, the trophy wall, presents used,
 		# minigames the family has won
-		"boards_played": {}, "boards_seen": [], "last_board": "", "trophies": {}, "items_used": [], "mg_won": []}
+		"boards_played": {}, "boards_seen": [], "last_board": "", "trophies": {}, "items_used": [], "mg_won": [],
+		# second pass (deep.gd): the family's last mode, finished parties in Mango's party hall, gifts used
+		"mode": "", "hall_n": 0, "gifts_used": []}
 	save.use_layout(preload("res://games/party_board/progress.gd"))
 	add_child(save)
 	if fresh_save:
@@ -296,6 +312,7 @@ func _setup(mode: String) -> void:
 			add_child(ghost)
 	if simple:
 		_build_arrows()
+		_build_deep()
 	if mode != "client":
 		flow = TurnFlow.new()
 		flow.main = self
@@ -350,6 +367,35 @@ func _build_vr_room() -> void:
 	vr_room.add_child(MeshKit.scatter_random(MeshKit.prop("flower"), 40, Vector3.ZERO, 8.5, 3.0, 0.7, 1.1,
 		PackedColorArray([Color(1.0, 0.5, 0.6), Color(1.0, 0.9, 0.4), Color(0.7, 0.6, 1.0)]), 22))
 	vr_room.add_child(MeshKit.scatter_random(MeshKit.prop("bush"), 10, Vector3.ZERO, 9.0, 6.0, 0.8, 1.2, PackedColorArray(), 23))
+
+
+## Every machine: the second pass's pieces (deep.gd), all under the stage (board units) but the picks' brain.
+func _build_deep() -> void:
+	picks = PicksScript.new()
+	picks.main = self
+	add_child(picks)
+	hazards = HazardsScript.new()
+	hazards.main = self
+	stage.add_child(hazards)
+	gift_tags = GiftsScript.new()
+	gift_tags.main = self
+	stage.add_child(gift_tags)
+	season_node = SeasonScript.new()
+	season_node.name = "Season"
+	stage.add_child(season_node)
+	hall = HallScript.new()
+	hall.name = "Hall"
+	stage.add_child(hall)
+
+
+## Host: the session's mode, today's season and the party hall for every machine.
+func publish_deep() -> void:
+	net.state_set("deep", {"mode": play_mode, "season": Seeded.season(), "hall_n": int(save.data.get("hall_n", 0))})
+
+
+## Every machine, when the pick orbs pop up (picks.gd): one clear banner (the orbs say the rest in pictures).
+func pick_banner(stage_id: String) -> void:
+	hud.banner("HOW HARD?" if stage_id == "mode" else "GIFT!", "", "victory", 2.0)
 
 
 ## Every machine: lay out the seeded party desc {seed, level, rounds} (partygen.gd) on the board.
@@ -642,6 +688,21 @@ func _on_state_changed(key: String, value: Variant) -> void:
 				festival.apply(value)
 		"music":
 			music.play_mood(String(value), 1.2)
+		"orbs":
+			if picks != null:
+				picks.show_state(value)
+		"hz":
+			if hazards != null:
+				hazards.show_now(value)
+		"deep":
+			if value is Dictionary:
+				play_mode = Deep.mode_of(String((value as Dictionary).get("mode", "brave")))
+				if season_node != null:
+					season_node.set_season(String((value as Dictionary).get("season", "")))
+				if hall != null:
+					hall.set_hall(int((value as Dictionary).get("hall_n", 0)))
+	if key == "players" and gift_tags != null:
+		gift_tags.sync(value if value is Array else [])
 	hud.on_state(key, value)
 	menus.on_state(key, value)
 	dice.on_state(key, value)
@@ -666,7 +727,7 @@ func _sync_all() -> void:
 
 func _on_phase(phase: String) -> void:
 	board.visible = phase != "minigame"
-	for n: Node3D in [festival, props]:  # (the trophy wall and the touchable houses stood in the minigame arena)
+	for n: Node3D in [festival, props, hazards, gift_tags, season_node, hall]:  # (the trophy wall and the touchable houses stood in the minigame arena)
 		if n != null:
 			n.visible = phase != "minigame"
 	for pid in tokens:
@@ -706,6 +767,12 @@ func _update_camera(delta: float) -> void:
 			cam_focus(t.position + Vector3(0, 1.0, 0), d, 3.0)
 		elif String(net.state_get("step", "")) == "overview" or cur < 0:
 			cam_look(Vector3(0, 24, -27), Vector3(0, 0, 1.5), 1.5)
+	elif phase == "pick" and picks != null and not picks.spots.is_empty():  # the pick orbs (deep.gd rows)
+		var c := Vector3.ZERO
+		for p in picks.spots:
+			c += p
+		c /= float(picks.spots.size())
+		cam_look(c + Vector3(0, 9.0, -15.0), c, 2.5)
 	elif phase == "trophy":  # Mango's trophy wall grows: look at it from the island
 		var w := Festival.wall_spot()
 		var inward := Vector3(-w.x, 0, -w.z).normalized()
@@ -787,6 +854,8 @@ func _process(delta: float) -> void:
 		if Time.get_ticks_usec() - _pc > 4000:
 			print("[perf] party board arrows %d ms" % ((Time.get_ticks_usec() - _pc) / 1000))
 	if net.mode != "client":
+		if picks != null:
+			picks.tick(delta)
 		runner.host_tick(delta)
 		consume_presses()
 
@@ -848,6 +917,18 @@ func _do_fx(kind: String, args: Array) -> void:
 			_item_fx(int(args[0]), String(args[1]))
 		"special_fx":  # [special type, space, pid]: the special space does its thing
 			_special_fx(String(args[0]), int(args[1]), int(args[2]))
+		"pick_take":  # [orb, slot] (picks.gd)
+			if picks != null:
+				picks.take_fx(int(args[0]), int(args[1]))
+		"hz_fall":  # [zones] the warned surprises go off (hazards.gd)
+			if hazards != null:
+				hazards.fall_fx(args[0])
+		"gift_used":  # [pid, gift id]
+			if gift_tags != null:
+				gift_tags.bounce(int(args[0]))
+			_burst((tokens[int(args[0])] as Node3D).position + Vector3(0, 2.4, 0) if tokens.has(int(args[0])) else Vector3.ZERO,
+				Deep.gift(String(args[1])).get("color", Color.WHITE), 18)
+			sfx.play("sparkle", -2.0)
 		"arrows":
 			if args.is_empty():
 				board.hide_arrows()

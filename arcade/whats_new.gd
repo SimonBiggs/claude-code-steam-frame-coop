@@ -33,6 +33,11 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "pb-gifts", "date": "2026-11-12", "game": "party_board", "pic": "luckydie", "line": "Mango's gifts!", "try": {"PB_GIFT": "lucky"}},
+	{"id": "pb-surprises", "date": "2026-11-12", "game": "party_board", "pic": "boulder", "line": "Rocks and splashes!", "try": {"PB_MODE": "hard"}},
+	{"id": "pb-hall", "date": "2026-11-12", "game": "party_board", "pic": "partyhall", "line": "Mango's party hall grows!"},
+	{"id": "pb-modes", "date": "2026-11-12", "game": "party_board", "pic": "toucan", "line": "Gentle, brave or hard!"},
+	{"id": "pb-seasons", "date": "2026-11-12", "game": "party_board", "pic": "snowflake", "line": "Seasons on the island!"},
 	{"id": "pg-smudge", "date": "2026-11-12", "game": "paint_and_guess", "pic": "smudge", "line": "Smudge guesses too!"},
 	{"id": "pg-gifts", "date": "2026-11-12", "game": "paint_and_guess", "pic": "stampbrush", "line": "Smudge's brush gifts!", "try": {"PG_GIFT": "stamps"}},
 	{"id": "pg-surprises", "date": "2026-11-12", "game": "paint_and_guess", "pic": "paintdrip", "line": "Drips and windy easels!", "try": {"PG_TRICKS_NOW": "1", "PG_MODE": "brave"}},
