@@ -1089,6 +1089,13 @@ static func vr_ride(n: Node3D, cam: Node3D) -> void:
 	if now.is_equal_approx(was) or not n.global_transform.is_equal_approx(n.get_meta("vr_rig_n")):
 		return
 	n.global_transform = (now * was.affine_inverse()) * n.global_transform
+	# A teleport (a blink, a new round's spawn, a stairs portal): the rig jumped. The panel rode along, but where it
+	# now sits may be inside or behind a wall of the new place, and the cached spot (vr_spot, 24 frames) is from the
+	# old one: work it out afresh and put the panel there at once (Hide and Seek 2026-11-12: labels behind a wall).
+	if now.origin.distance_to(was.origin) > VR_TELEPORT * maxf(XRServer.world_scale, 0.001):
+		n.remove_meta("vr_spot")
+		n.remove_meta("vr_clear_next")
+		n.set_meta("vr_teleported", true)
 
 
 static func vr_ride_done(n: Node3D, cam: Node3D) -> void:
@@ -1135,6 +1142,12 @@ static func _vr_follow(n: Node3D, cam: Node3D, dist: float, height: float, delta
 	if vr_must_move(n, cam, fwd, d, k):
 		n.set_meta("vr_moving", true)
 	vr_dodge_moved(n, spot)
+	if n.get_meta("vr_teleported", false):  # (vr_ride) in front at once, from the new place
+		n.remove_meta("vr_teleported")
+		vr_set_near(n, k)
+		_face(n, target, cam)
+		n.set_meta("vr_moving", false)
+		return
 	if n.get_meta("vr_moving", false):
 		vr_set_near(n, k)
 		# Behind the player or far off (they turned right round, or a blink teleport moved them): a glide would fly
@@ -1179,6 +1192,8 @@ static func vr_must_move(n: Node3D, cam: Node3D, fwd: Vector3, d: float, k: floa
 ## A gliding panel has arrived this near its spot (x its distance). It was 0.05: exactly one vr_dodge step at the
 ## usual distance, so a card asked to move one step (off a pick, out from behind a post) "arrived" without moving.
 const VR_ARRIVED := 0.01
+## A rig move longer than this in one frame (m, x world_scale) is a teleport (vr_ride).
+const VR_TELEPORT := 2.0  # (a kart at full speed moves ~0.5 m a frame)
 const VR_MOVE_MARGIN_D := 0.03  # (VR_CLOSEST 0.55 m stays put; 0.53 m glides back)
 const VR_MOVE_MARGIN_FACE := 0.12
 

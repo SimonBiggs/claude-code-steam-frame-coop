@@ -48,6 +48,12 @@ static func _follow(l: Label3D, cam: Node3D, world: Node, height: float, dist: f
 	if _ui().vr_must_move(l, cam, fwd, dist, k):  # (the one stay-put rule, UiKit.vr_must_move)
 		l.set_meta("vr_moving", true)
 	_ui().vr_dodge_moved(l, spot)
+	if l.get_meta("vr_teleported", false):  # (UiKit.vr_ride) in front at once, from the new place
+		l.remove_meta("vr_teleported")
+		_ui().vr_set_near(l, k)
+		_place(l, cam, target)
+		l.set_meta("vr_moving", false)
+		return
 	if l.get_meta("vr_moving", false):
 		_ui().vr_set_near(l, k)
 		var dt := cam.get_process_delta_time()
