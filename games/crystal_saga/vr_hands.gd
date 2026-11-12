@@ -114,6 +114,8 @@ func update(delta: float, thunder_on: bool) -> void:
 	var swinging := speed > SWING_SPEED
 	if swinging:
 		for id in main.monsters.mons.keys():
+			if not main.monsters.mons.has(id):  # (a hit's follow-up spells - BIG FIRE, SPIN, TWIN - may have poofed it)
+				continue
 			var c: Vector3 = main.monsters.center_of(id)
 			if seg_dist(c, base, tip) < main.monsters.radius_of(id) + 0.1:
 				if main.hit_monster(int(id), 0, c, "sword"):

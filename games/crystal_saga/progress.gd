@@ -50,10 +50,10 @@ static func progress_summary(data: Dictionary, today: String) -> Dictionary:
 	var cleared: Variant = data.get("cleared", [])
 	var regions := (cleared as Array).size() if cleared is Array else 0
 	return {"grown": maxi(0, int(data.get("shards", 0))) + 3 * regions, "daily": daily is Dictionary and (daily as Dictionary).has(today),
-		"regions": regions}
+		"regions": regions, "garden": (data.get("garden", []) as Array).size() if data.get("garden", []) is Array else 0}
 
 
 ## A save as the game writes it after a few days (tests/progress_test.gd: it must read as grown > 0, daily done).
 static func sample(today: String) -> Dictionary:
 	return {"restored": 3, "world": 123456, "daily": {today: true}, "skills": {"splash": 2, "spin": 1}, "shards": 10,
-		"seen_places": 3, "journeys": 4, "cleared": [0, 1, 3], "classes": {"1": "healer"}, "hard": false, "seen_unlocks": 2}
+		"seen_places": 3, "journeys": 4, "cleared": [0, 1, 3], "classes": {"1": "healer"}, "hard": false, "seen_unlocks": 2, "garden": [0, 1, 3]}
