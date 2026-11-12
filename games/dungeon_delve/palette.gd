@@ -10,6 +10,7 @@ const FoeColors := preload("res://games/dungeon_delve/foe_colors.gd")
 const Hero := preload("res://games/dungeon_delve/hero.gd")
 const Dungeon := preload("res://games/dungeon_delve/dungeon.gd")
 const Monsters := preload("res://games/dungeon_delve/monsters.gd")
+const Friends := preload("res://games/dungeon_delve/friends.gd")
 
 
 static func key_colors() -> Dictionary:
@@ -39,4 +40,9 @@ static func groups() -> Array:
 			if FoeColors.FOES[kind].has(z.id):
 				keys["%s %s" % [z.id, kind]] = FoeColors.FOES[kind][z.id]
 		out.append({"keys": keys, "bgs": _zone_floors(z)})
+		# Cinder's lost friends (friends.gd) sit in a gold cage on their own zone's floors.
+		var fk := {"friend cage": Friends.CAGE_COLOR}
+		for fr in Friends.BY_ZONE[z.id]:
+			fk["friend " + String(fr.id)] = fr.color
+		out.append({"keys": fk, "bgs": _zone_floors(z)})
 	return out

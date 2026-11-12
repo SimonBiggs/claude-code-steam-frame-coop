@@ -4,7 +4,7 @@ extends RefCounted
 ## pic._p(x, y) / pic._circle(x, y, r, c) / pic._poly(pts, c) / pic._eye(x, y, r) / pic.draw_*(...), size = pic.size,
 ## t = the picture's clock, bob = its gentle bob, color = the card's colour.
 
-const NAMES: Array[String] = ["cinder", "hoard"]
+const NAMES: Array[String] = ["cinder", "hoard", "friend", "rumble"]
 
 
 static func draw(pic, kind: String, t: float, bob: float, color: Color) -> void:
@@ -47,3 +47,40 @@ static func draw(pic, kind: String, t: float, bob: float, color: Color) -> void:
 			for k2 in 3:  # sparkles
 				var f := fmod(t * 0.8 + k2 * 0.33, 1.0)
 				pic._circle(0.3 + 0.2 * k2, 0.35 - 0.1 * f, 0.02 * (1.0 - f), Color(1.0, 1.0, 0.8, 1.0 - f))
+		"friend":  # one of Cinder's lost friends hopping out of its open gold cage, hearts popping (color = the friend)
+			var gold := Color(1.0, 0.8, 0.3)
+			for k in 5:  # the cage's bars, lifted up and away
+				var x := 0.22 + 0.14 * k
+				pic.draw_line(pic._p(x, 0.02), pic._p(x, 0.3), gold, 0.025 * size.x)
+			pic.draw_line(pic._p(0.18, 0.3), pic._p(0.82, 0.3), gold, 0.03 * size.x)
+			pic._poly([[0.12, 0.92], [0.88, 0.92], [0.84, 0.86], [0.16, 0.86]], gold.darkened(0.3))
+			var hop := -absf(sin(t * 5.0)) * 0.08
+			pic._circle(0.5, 0.66 + hop, 0.2, color)
+			pic._circle(0.36, 0.48 + hop, 0.07, color.darkened(0.1))
+			pic._circle(0.64, 0.48 + hop, 0.07, color.darkened(0.1))
+			pic._circle(0.5, 0.72 + hop, 0.11, color.lightened(0.35))
+			pic._eye(0.43, 0.6 + hop, 0.045)
+			pic._eye(0.57, 0.6 + hop, 0.045)
+			pic.draw_arc(pic._p(0.5, 0.69 + hop), 0.05 * size.x, 0.3, 2.8, 10, Color(0.35, 0.15, 0.1), 0.014 * size.x)
+			for k2 in 3:  # hearts floating up
+				var f := fmod(t * 0.7 + k2 * 0.33, 1.0)
+				var hx := 0.2 + 0.3 * k2
+				var hy := 0.55 - 0.4 * f
+				var hc := Color(1.0, 0.35, 0.45, 1.0 - f)
+				pic._circle(hx - 0.02, hy, 0.025, hc)
+				pic._circle(hx + 0.02, hy, 0.025, hc)
+				pic._poly([[hx - 0.045, hy + 0.01], [hx + 0.045, hy + 0.01], [hx, hy + 0.06]], hc)
+		"rumble":  # a rumbly ceiling: a rock falling onto a flashing orange circle on the floor
+			var ring := Color(1.0, 0.35, 0.2)
+			pic._poly([[0.0, 0.0], [1.0, 0.0], [1.0, 0.12], [0.8, 0.16], [0.6, 0.1], [0.4, 0.17], [0.2, 0.11], [0.0, 0.15]], Color(0.4, 0.36, 0.42))
+			var flash := 0.55 + 0.45 * absf(sin(t * 6.0))
+			pic.draw_set_transform(pic._p(0.5, 0.82), 0.0, Vector2(1.0, 0.35))
+			pic.draw_circle(Vector2.ZERO, 0.3 * size.x, Color(ring.r, ring.g, ring.b, 0.45 * flash))
+			pic.draw_arc(Vector2.ZERO, 0.3 * size.x, 0.0, TAU, 32, ring, 0.03 * size.x)
+			pic.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+			var fall := fmod(t * 0.6, 1.0)
+			var ry := 0.22 + 0.5 * fall * fall
+			pic._circle(0.5, ry, 0.09, Color(0.62, 0.58, 0.55))
+			pic._circle(0.54, ry - 0.03, 0.04, Color(0.75, 0.72, 0.7))
+			for k3 in 3:  # little crumbs shaken loose
+				pic._circle(0.3 + 0.2 * k3, 0.2 + fmod(t * 0.9 + k3 * 0.3, 1.0) * 0.3, 0.015, Color(0.55, 0.5, 0.5))

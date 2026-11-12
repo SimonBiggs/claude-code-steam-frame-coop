@@ -497,6 +497,13 @@ func _goal(slot: int, pos: Vector3, room: int, index: int) -> Dictionary:
 			best = {"p": Vector3(pp.x, 0, pp.z), "near": 0.3}
 	if not best.is_empty():
 		return best
+	# Cinder's lost friend: bonk its cage once its room is clear (friends.gd).
+	if not dp.friend.is_empty() and not dp.friend_node.is_empty() and int(main.net.state_get("d_friend", 0)) == 0:
+		var fr_room := int(dp.friend["room"])
+		if fr_room in reach_rooms and int(main.net.state_get("d_cleared", 1)) & (1 << fr_room) != 0:
+			var fcp: Vector3 = dp.friend_node["at"]
+			var side := Vector3(0.0, 0.0, 0.85 if fcp.z < FloorGen.room_center(f, fr_room).z else -0.85)
+			return {"p": fcp + side, "near": 0.3, "bonk": true, "at": fcp}
 	for cid in dp.view.chests.size():
 		if not dp.view.chest_open(cid) and int(dp.view.chests[cid]["room"]) in reach_rooms:
 			var cp: Vector3 = dp.view.chests[cid]["p"]

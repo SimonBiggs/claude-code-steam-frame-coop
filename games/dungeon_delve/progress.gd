@@ -38,7 +38,7 @@ static func migration_samples() -> Array:
 
 ## data: the raw save (no defaults filled in: always .get with a default). today: Seeded.today().
 ## grown: big treasure chests opened (the gentle run) + deep dungeon victories (deep.wins) + everything Cinder's
-## hoard has unlocked (heroes past the knight, relics past the starting ones) + one per 100 gold in her hoard + every wish of hers kept (deep.wishes)
+## hoard has unlocked (heroes past the knight, relics past the starting ones) + one per 100 gold in her hoard + every wish of hers kept (deep.wishes) + every lost friend freed (deep.friends)
 ## (deep.hoard); "hoard" / "unlocks" say the same for anyone who wants the detail. daily: TODAY'S DUNGEON played
 ## today (daily, deep.gd finish) or a depth record for today (deep.best["daily:" + today]).
 static func progress_summary(data: Dictionary, today: String) -> Dictionary:
@@ -48,6 +48,7 @@ static func progress_summary(data: Dictionary, today: String) -> Dictionary:
 	var today_best := false
 	var runs := 0
 	var wishes := 0  ## Cinder's wishes kept (deep.wishes, wishes.gd)
+	var friends := 0  ## Cinder's lost friends freed from cages (deep.friends, friends.gd): they live at her camp
 	if deep is Dictionary:
 		var w: Variant = (deep as Dictionary).get("wins", {})
 		if w is Dictionary:
@@ -58,12 +59,14 @@ static func progress_summary(data: Dictionary, today: String) -> Dictionary:
 		hoard = maxi(0, int((deep as Dictionary).get("hoard", 0)))
 		runs = maxi(0, int((deep as Dictionary).get("runs", 0)))
 		wishes = maxi(0, int((deep as Dictionary).get("wishes", 0)))
+		var fr: Variant = (deep as Dictionary).get("friends", [])
+		friends = (fr as Array).size() if fr is Array else 0
 	var unlocks := Classes.unlocked(hoard).size() - Classes.unlocked(0).size() + Relics.unlocked(hoard).size() - Relics.unlocked(0).size()
-	return {"grown": maxi(0, int(data.get("treasures", 0))) + wins + unlocks + hoard / 100 + wishes,
-		"daily": String(data.get("daily", "")) == today or today_best, "hoard": hoard, "unlocks": unlocks, "runs": runs, "wishes": wishes}
+	return {"grown": maxi(0, int(data.get("treasures", 0))) + wins + unlocks + hoard / 100 + wishes + friends,
+		"daily": String(data.get("daily", "")) == today or today_best, "hoard": hoard, "unlocks": unlocks, "runs": runs, "wishes": wishes, "friends": friends}
 
 
 ## A save as the game writes it after a few days (tests/progress_test.gd: it must read as grown > 0, daily done).
 static func sample(today: String) -> Dictionary:
 	return {"treasures": 4, "daily": today, "deep": {"best": {"brave": 5, "heroic": 0, "daily:" + today: 3},
-		"bosses": {"brave": 1, "heroic": 0}, "wins": {"brave": 0, "heroic": 0}, "hat": {"0": "party"}, "runs": 3, "hoard": 320, "cls": {"1": "archer"}, "wishes": 2}}
+		"bosses": {"brave": 1, "heroic": 0}, "wins": {"brave": 0, "heroic": 0}, "hat": {"0": "party"}, "runs": 3, "hoard": 320, "cls": {"1": "archer"}, "wishes": 2, "friends": ["pip", "whisk"]}}
