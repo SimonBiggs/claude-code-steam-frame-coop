@@ -76,9 +76,9 @@ const FAIR_PICS := {"teacups": "teacup", "swings": "carousel", "helter": "helter
 ## The pick row (main.gd space, giant-sized: builder.gd WS = 18 park m per real m): over the near table edge at the VR
 ## builder's arm's reach.
 const WS := 18.0
-const ROW_AT := Vector3(0.0, 8.6, 7.4)
-const ROW_GAP := 0.32 * WS  # (a hand is never in two orbs at once: tests/roller_coaster_deep_test.gd)
-const ORB_SCALE := 0.14 * WS
+const ROW_AT := Vector3(0.0, 9.4, 6.6)
+const ROW_GAP := 0.27 * WS  # (a hand is never in two orbs at once: tests/roller_coaster_deep_test.gd)
+const ORB_SCALE := 0.11 * WS  # (a modest 13 cm glass ball in the builder's hands)
 const HAND_R := 0.05 * WS
 const DWELL := 0.35
 const WAIT := {"mode": 12.0, "gift": 9.0}

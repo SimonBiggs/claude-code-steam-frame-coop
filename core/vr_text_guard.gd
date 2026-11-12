@@ -97,12 +97,19 @@ func _fix(l: Label3D) -> void:
 		# A name tag or pop-up word that comes within arm's length of a face (a TV player walking through the VR
 		# player, Balloon Pop) filled the whole headset view with giant letters: it fades out up close (visibility
 		# range is measured from each camera, so far-off TV cameras still see it). Not the VR player's own hand and
-		# wrist labels (under the XROrigin3D).
-		if l.visibility_range_begin == 0.0 and not _on_rig(l):
+		# wrist labels (under the XROrigin3D), and not a pick orb's name (core/pick_orbs.gd): orbs are made to be reached
+		# into (Coaster Crew / Rhythm Band float theirs at arm's reach), so their names must stay readable up close.
+		if l.visibility_range_begin == 0.0 and not _on_rig(l) and not _on_pick_orb(l):
 			var ws := maxf(XRServer.world_scale, 0.001)
 			l.visibility_range_begin = NEAR_FADE * ws
 			l.visibility_range_begin_margin = 0.2 * ws
 			l.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
+
+
+## A pick orb's own label (its parent is an orb: core/pick_orbs.gd puts every orb in KEEP_CLEAR).
+func _on_pick_orb(l: Label3D) -> bool:
+	var p := l.get_parent()
+	return p != null and p.is_in_group(preload("res://core/vr_view_check.gd").KEEP_CLEAR)
 
 
 func _update_mirror(cam: Camera3D, delta: float) -> void:

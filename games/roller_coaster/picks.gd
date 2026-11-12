@@ -56,8 +56,9 @@ func active() -> bool:
 	return stage != ""
 
 
+## Any picks up on this machine (the 3D orbs, or only the pictures on the screens).
 func showing() -> bool:
-	return not orbs.orbs.is_empty()
+	return shown_stage != ""
 
 
 ## Host / local: put up the orbs. entries: [{id, name, pic, color}], opts: what each orb means.
@@ -77,8 +78,11 @@ func begin(new_stage: String, entries: Array, opts: Array, done: Callable) -> vo
 	print("PICKS %s: %s" % [new_stage, opts])
 
 
-## Every machine: show what the state store says (orbs up / taken / gone).
-func sync_state() -> void:
+## Every machine: show what the state store says (orbs up / taken / gone). again: rebuild (the VR builder's giant
+## turned up on this TV machine).
+func sync_state(again: bool = false) -> void:
+	if again:
+		shown_serial = -1
 	var o: Array = main.net.state_get("orbs", [])
 	var s := int(o[0]) if o.size() >= 3 else 0
 	if s != shown_serial:
@@ -100,8 +104,11 @@ func show_row(new_stage: String, entries: Array) -> void:
 		orbs.clear()
 		return
 	main.clear_banners()
+	if not main.vr_builder_here():
+		orbs.clear()  # no giant at the table: the screens' pictures are the picks (giant orbs would fill a TV view)
+		return
 	orbs.show_orbs(new_stage, entries, Deep.ROW_AT, Deep.ROW_GAP, 0.0, {"at": Deep.row(entries.size()), "scale": Deep.ORB_SCALE,
-		"pop": true, "font": 64, "label_y": -1.3, "label_px": 0.0055, "two_lines": true, "bob": 0.04, "dot_size": 0.18})
+		"pop": true, "font": 64, "label_y": 1.3, "label_px": 0.0052, "two_lines": true, "bob": 0.04, "dot_size": 0.18})
 
 
 ## Orb i's middle in the world (bots aim there), INF if none.
@@ -239,9 +246,8 @@ func take(i: int, slot: int) -> void:
 ## Every machine: a dot in the taker's colour circles orb i, a happy sound; the screens' picture glows.
 func take_fx(i: int, slot: int) -> void:
 	var col: Color = Party.COLORS[slot % Party.COLORS.size()] if slot >= 0 else Color(1, 1, 1)
-	var at := orbs.take(i, col)
-	if at != Vector3.INF:
-		main.sound("ready", -4.0, 1.2 + 0.1 * i)
+	orbs.take(i, col)
+	main.sound("ready", -4.0, 1.2 + 0.1 * i)
 	for key in strips:
 		var s: Control = (strips[key] as Array)[0]
 		if is_instance_valid(s):

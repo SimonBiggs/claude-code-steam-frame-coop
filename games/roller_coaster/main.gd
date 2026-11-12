@@ -318,6 +318,7 @@ func _make_vr_avatar() -> void:
 	if split != null:
 		split.set_bubble(VrRig.build_mirror(self, vr_avatar.head, false))
 	_build_giant()
+	picks.sync_state(true)  # (the giant's pick orbs, if a pick is on)
 
 
 ## TV machine: the builder's big friendly head and mittens above the table.
@@ -1180,8 +1181,8 @@ func _update_cameras(delta: float) -> void:
 		cam.cull_mask = (cam.cull_mask & ~ParkScript.ROOF_LAYER) if riding else (cam.cull_mask | ParkScript.ROOF_LAYER)
 		if riding:
 			var cx: Transform3D = train.global_transform * train.flat_xf[car] if car < train.flat_xf.size() else (train.cars[car] as Node3D).global_transform  # (a corkscrew rolls the car, never the camera)
-			var pos := cx.origin + cx.basis.z * 3.4 + cx.basis.y * 1.5
-			target = Transform3D(UiKit.aim(cx.origin - cx.basis.z * 3.0 + cx.basis.y * 0.6 - pos, cx.basis.y.lerp(Vector3.UP, 0.4).normalized()), pos)
+			var pos := cx.origin + cx.basis.z * 1.1 + cx.basis.y * 2.15  # (over the rider's head: the car behind is 1.75 back)
+			target = Transform3D(UiKit.aim(cx.origin - cx.basis.z * 5.0 + cx.basis.y * 0.5 - pos, cx.basis.y.lerp(Vector3.UP, 0.4).normalized()), pos)
 			k = 1.0 - exp(-9.0 * delta)
 		elif slot == 0 and _pad_builds():
 			var end: Array = track.get("end", [Track.station_end(), 0.0])
@@ -1686,6 +1687,9 @@ func _start_pick(stage_id: String) -> void:
 		opts = Deep.offer(session_seed, gift_for, pieces, net.state_get("extras", []), int(save.data.fair))
 		if opts.is_empty():
 			return
+		if opts.size() == 1:
+			_give_gift(String(opts[0]))  # (nothing to choose between: Buttons just gives it)
+			return
 		for id in opts:
 			var gd := Deep.gift(String(id))
 			entries.append({"id": id, "name": gd.name, "pic": gd.pic, "color": gd.color})
@@ -1696,6 +1700,11 @@ func _start_pick(stage_id: String) -> void:
 		_story_for_all("A gift for you!", "gift", Color(1.0, 0.45, 0.65))
 	sound("ready", -6.0, 1.2)
 	net.event("sound", ["ready"])
+
+
+## The VR builder plays at this table (the 3D pick orbs float at their arm's reach; elsewhere only the screens' pictures).
+func vr_builder_here() -> bool:
+	return vr_rig != null or vr_avatar != null
 
 
 ## Every machine, when the orbs come up: no banner or headline sits over them.
