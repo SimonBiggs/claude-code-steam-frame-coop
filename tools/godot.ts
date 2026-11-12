@@ -20,7 +20,7 @@
 //     seats: [{slot, kind: remote/pad/keyboard/virtual (core/party.gd) or vr/remote/ghost/local (main.players), active}]}
 //   await godot.netStatus(g)  // the same for one Game;  godot.launch({..., duoPort}) picks the network port (default control+1000)
 import { spawn, type ChildProcess } from "node:child_process";
-import { copyFile, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 
@@ -53,13 +53,22 @@ export function safeCwd(dir?: string): string {
 const running = new Map<number, Game>();
 
 /** Copy the bridge + control server into the project and make sure the GDev autoload is there (like `gdev start`). */
-async function install(proj: string) {
+export async function install(proj: string) {
   const dst = join(proj, "addons/gdev");
   await mkdir(dst, { recursive: true });
   for (const f of ["bridge.gd", "caption.gd", "control.gd", "gdev_main.gd"]) {  // same set as `gdev start`: bridge.gd is only a loader, without gdev_main.gd there is no control server
     const src = join(GDEV, f);
     const [a, b] = await Promise.all([readFile(src).catch(() => null), readFile(join(dst, f)).catch(() => null)]);
-    if (a && (!b || !a.equals(b))) await copyFile(src, join(dst, f));
+    if (!a || (b && a.equals(b))) continue;
+    // A project copy that differs AND is newer is someone's edit (2026-11-12: a launch silently undid an agent's
+    // addons/gdev fix): never overwrite it quietly. Skip it and say so; put the edit in ~/.local/share/gdev too.
+    if (b && (await stat(join(dst, f))).mtimeMs > (await stat(src)).mtimeMs) {
+      const msg = `⚠ gdev install: NOT overwriting ${join(dst, f)}: it differs from the installed ${src} and is newer (an edit?). Copy it to ${GDEV} if it's the new version, or delete it to take the installed one.`;
+      console.warn(msg);
+      (globalThis as any).send?.("godot.ts", msg);
+      continue;
+    }
+    await copyFile(src, join(dst, f));
   }
   const cfg = join(proj, "project.godot");
   let text = await readFile(cfg, "utf8");

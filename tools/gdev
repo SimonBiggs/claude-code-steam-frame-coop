@@ -73,17 +73,32 @@ def pid_of(proj: Path) -> int | None:
         return None
 
 
+def _install_file(src: Path, dst: Path) -> None:
+    """Copy src over dst, but never quietly over a project copy that differs AND is newer (someone's edit: a launch
+    once silently undid an agent's addons/gdev fix, 2026-11-12): skip it with a warning (also to the brepl channel)."""
+    if not src.exists() or (dst.exists() and dst.read_bytes() == src.read_bytes()):
+        return
+    if dst.exists() and dst.stat().st_mtime > src.stat().st_mtime:
+        msg = (f"⚠ gdev install: NOT overwriting {dst}: it differs from the installed {src} and is newer (an edit?). "
+               f"Copy it to {src.parent} if it's the new version, or delete it to take the installed one.")
+        print(msg, file=sys.stderr)
+        try:
+            subprocess.run(["brepl", "--pipe", "gdev"], input=msg + "\n", text=True, timeout=5,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception as e:  # the warning above is already printed
+            print(f"(gdev: couldn't post it to the brepl channel: {e})", file=sys.stderr)
+        return
+    shutil.copyfile(src, dst)
+
+
 def install(proj: Path) -> None:
     dst = proj / "addons/gdev/bridge.gd"
     dst.parent.mkdir(parents=True, exist_ok=True)
-    if not dst.exists() or dst.read_bytes() != BRIDGE_SRC.read_bytes():
-        shutil.copyfile(BRIDGE_SRC, dst)
+    _install_file(BRIDGE_SRC, dst)
     # caption.gd: "Claude:" captions; control.gd: the offscreen test control server (godot.ts). Both made by the bridge.
     # gdev_main.gd: the bridge logic itself (bridge.gd is only a frozen loader; a project's core/dev/gdev_main.gd wins).
     for extra in ("caption.gd", "control.gd", "gdev_main.gd"):
-        src = GDEV_HOME / extra
-        if src.exists() and (not (dst.parent / extra).exists() or (dst.parent / extra).read_bytes() != src.read_bytes()):
-            shutil.copyfile(src, dst.parent / extra)
+        _install_file(GDEV_HOME / extra, dst.parent / extra)
     cfg = proj / "project.godot"
     text = cfg.read_text()
     if AUTOLOAD_LINE not in text:
