@@ -502,10 +502,9 @@ var smack_phase := 0
 func _drive_vr_giant(delta: float) -> void:
 	var g = main.giant
 	g.bot = true
-	if g.xr_camera.position == Vector3.ZERO:
-		# A real headset's head is 1.6 m up in world-scaled units (XRServer.world_scale): without it the fake giant's
-		# eyes sat under the floor and the VR view (vrShot, VR bots) showed only the ground's underside.
-		g.xr_camera.position = Vector3(0.0, 1.6 * XRServer.world_scale, 0.0)
+	if not g.has_meta("bot_head_tilt"):
+		# (main.gd stands the fake giant like a real player: VrRig.fake_stand, x world_scale)
+		g.set_meta("bot_head_tilt", true)
 		g.xr_camera.rotation.x = -0.55  # looking down at the table, like a seated giant
 	var ctrl: Node3D = g.hand_r
 	var h = g.hands[1]

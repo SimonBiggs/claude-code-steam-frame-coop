@@ -726,9 +726,7 @@ func _fake_vr(delta: float) -> void:
 		right.tracker = "right_hand"
 		origin.add_child(right)
 		s.attach_xr(origin, cam, left, right)
-		cam.position = Vector3(0, 1.5, 0)
-		left.position = Vector3(-0.2, 1.2, -0.25)  # (not straight below the head: the wrist menu faces it)
-		right.position = Vector3(0.2, 1.2, -0.25)
+		preload("res://core/vr_rig.gd").fake_stand(cam, left, right, 1.0)  # the standard fake player (hands ahead, not below the head: the wrist menu faces it)
 		print("BOT: P1 is a fake VR seeker")
 		return
 	if main.phase != "seek":

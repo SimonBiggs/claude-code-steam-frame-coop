@@ -226,7 +226,7 @@ func _nearest_sparkle(from: Vector3) -> Vector3:
 ## Fake giant: aim + trigger at buried treasure, poke the sparkle, grab treasure, chest it.
 func _drive_vr(delta: float) -> void:
 	var rig = main.vr_rig
-	rig.camera.position.y = 1.6
+	kit.vr_head_height(rig)  # the standard fake player (VrRig.fake_eye, x world_scale)
 	vr_t += delta
 	var beach: Node3D = main.beach
 	if String(main.net.state_get("phase", "")) == "orbs":  # touch the right-hand pick orb with a glove

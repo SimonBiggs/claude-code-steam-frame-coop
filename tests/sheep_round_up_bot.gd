@@ -170,7 +170,7 @@ func _steer(slot: int, bark: bool) -> void:
 ## carry it over the pen and let go.
 func _drive_vr(delta: float) -> void:
 	var rig = main.vr_rig
-	rig.camera.position.y = 1.6
+	kit.vr_head_height(rig)  # the standard fake player (VrRig.fake_eye, x world_scale)
 	var head: Vector3 = rig.head_position()
 	if main.picks.showing() and int(main.held) < 0:  # touch a pick orb with the left glove (picks.gd)
 		kit.vr_stick(rig, Vector2.ZERO)

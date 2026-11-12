@@ -224,7 +224,7 @@ func _escape(p: Vector3, hz: Dictionary) -> Vector3:
 ## catches nearby fruit and dunks it in the bowl.
 func _drive_vr(delta: float) -> void:
 	var rig = main.vr_rig
-	rig.camera.position.y = 1.6
+	kit.vr_head_height(rig)  # the standard fake player (VrRig.fake_eye, x world_scale)
 	kit.vr_stick(rig, Vector2.ZERO)
 	vr_t += delta
 	if main.picks != null and main.picks.showing():

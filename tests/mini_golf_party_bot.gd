@@ -158,7 +158,7 @@ func _tv_bot(slot: int, delta: float) -> void:
 ## Fake VR golfer: A to stand behind the ball, wind back, swing through.
 func _vr_bot(delta: float) -> void:
 	var rig = main.vr_rig
-	rig.camera.position.y = 1.5
+	kit.vr_head_height(rig)  # the standard fake player (VrRig.fake_eye, x world_scale)
 	vr_t += delta
 	_toys(rig, delta)
 	if toy_step in [1, 2, 3]:

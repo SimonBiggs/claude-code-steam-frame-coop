@@ -207,7 +207,7 @@ func _physics_process(delta: float) -> void:
 ## Fake VR detective: walks the nav path with the left stick, taps the last suspect with the right glove.
 func _drive_vr(delta: float, index: int) -> void:
 	var rig = main.vr_rig
-	rig.camera.position.y = 1.6
+	kit.vr_head_height(rig)  # the standard fake player (VrRig.fake_eye, x world_scale)
 	# Sped up like the TV bots (walk_speed 7): alone (solo VR) a 2 m/s detective walking the whole manor took 45-50 s
 	# for case 1, too long for a second case inside the 60 s run (2026-11-11).
 	rig.move_speed = 4.0

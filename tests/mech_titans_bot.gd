@@ -635,9 +635,9 @@ func _pilot_target() -> Kaiju:
 ## the cockpit).
 func _drive_vr(delta: float, phase: String) -> void:
 	var rig: VrRig = main.vr_rig
-	var head := Vector3(0, 1.6, 0)
-	var rest_l := Vector3(-0.25, 1.15, -0.3)
-	var rest_r := Vector3(0.25, 1.15, -0.3)
+	var head: Vector3 = VrRig.fake_pose(rig.world_scale)[0]  # the standard fake player (BOT_VR_SEATED sits them down)
+	var rest_l := head + Vector3(-0.25, -0.45, -0.3)
+	var rest_r := head + Vector3(0.25, -0.45, -0.3)
 	rig.camera.position = head
 	rig.camera.basis = Basis()
 	if main.mech.beam_on:

@@ -259,7 +259,7 @@ func _escape(p: Vector3, hz: Dictionary) -> Vector3:
 
 func _drive_vr(delta: float) -> void:
 	var rig = main.vr_rig
-	rig.camera.position.y = 1.6
+	kit.vr_head_height(rig)  # the standard fake player (VrRig.fake_eye, x world_scale)
 	if rig.hand_r.position == Vector3.ZERO:
 		kit.vr_idle(rig)
 	rig.hand_l.position = Vector3(-0.45, 1.5, 0.25)  # the left hand waves up and back, clear of the right

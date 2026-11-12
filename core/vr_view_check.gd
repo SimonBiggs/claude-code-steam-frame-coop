@@ -24,6 +24,9 @@ extends RefCounted
 ## - never over a pick: no panel covers (seen from the eyes) anything in the KEEP_CLEAR group (core/pick_orbs.gd puts
 ##   every pick orb there while it shows). UiKit.vr_spot moves VR UI up or down clear of them (vr_dodge); a game
 ##   never has to lift its orbs or push its cards about for this (story cards sat on picks for ~2 s at a pick's start).
+## - the head itself is where a real headset's would be (head_problems()): a tracked XRCamera3D under an XROrigin3D at a
+##   real eye height (VrRig.REAL_EYE_RANGE, world_scale divided out). Fake heads riding on a flat camera (over / behind
+##   the arena) or 1.6 world units up in a giant game (ant's eyes) judged VR placement from the wrong spot (2026-11-12).
 ## A node (or ancestor) with meta "vr_check_ignore" is skipped.
 
 ## (UiKit.vr_spot brings a panel to 0.55 m only when a wall is right in front of the face)
@@ -51,11 +54,17 @@ const VR_PRIO_HILITE := -3  ## UiKit.VR_PRIO_HILITE (tests/core_math_test.gd che
 const MIN_TEXT_GAP := 0.35
 ## Node group: things VR panels must never cover (pick orbs). Any game can add its own must-see things.
 const KEEP_CLEAR := "vr_keep_clear"
+const VrRig := preload("res://core/vr_rig.gd")
+## Meta on a fake XRCamera3D that the game itself puts exactly where its real fit puts a real head (Kart Race: the
+## seat's eye point), so it needs no XROrigin3D. The value says why.
+const HEAD_FITTED_META := "vr_head_fitted"
 
 
-## The VR player's camera (the current XRCamera3D, else the first one), or null when nobody is in VR.
+## The VR player's camera (the current XRCamera3D, else the first one a headset would track: under an XROrigin3D or
+## meta HEAD_FITTED_META, else the first one), or null when nobody is in VR. gdev's camshot (g.vrShot) picks the same.
 static func vr_camera(root: Node) -> XRCamera3D:
 	var first: XRCamera3D = null
+	var tracked: XRCamera3D = null
 	for n in root.find_children("*", "XRCamera3D", true, false):
 		var c := n as XRCamera3D
 		if not c.is_inside_tree():
@@ -64,7 +73,28 @@ static func vr_camera(root: Node) -> XRCamera3D:
 			return c
 		if first == null:
 			first = c  # fake VR (bots): the TV camera is current, the headset's camera still is the VR view
-	return first
+		if tracked == null and (c.get_parent() is XROrigin3D or c.has_meta(HEAD_FITTED_META)):
+			tracked = c
+	return tracked if tracked != null else first
+
+
+## Is this VR head where a real Steam Frame player's would be? A real XRCamera3D is tracked under an XROrigin3D, at the
+## player's real eye height times XRServer.world_scale. Fake heads (bots) must be stood the same way: VrRig.fake_stand
+## (own XR nodes), tests/bot_kit.gd vr_stand / vr_idle / vr_head_height (VrRig), VrRig.fake_head_at (games whose fake VR
+## player plays through a flat camera: an origin on the game's VR spawn, never the flat camera).
+static func head_problems(cam: XRCamera3D) -> Array[String]:
+	var out: Array[String] = []
+	if cam == null or not cam.is_inside_tree() or cam.has_meta(HEAD_FITTED_META) or VrRig.headset_available():
+		return out
+	var origin := cam.get_parent() as XROrigin3D
+	if origin == null:
+		out.append("VR head %s is not under an XROrigin3D (it rides on %s, not where a VR player stands): use VrRig.fake_head_at on the game's VR spawn" % [cam.name, cam.get_parent().name])
+		return out
+	var eye := cam.position.y / maxf(XRServer.world_scale, 0.001)
+	var r := VrRig.REAL_EYE_RANGE
+	if eye < r.x or eye > r.y:
+		out.append("VR head %s: %.2f m above the floor in real metres (a real player %.1f-%.1f m; world_scale %.2f): stand it with VrRig.fake_stand / kit.vr_idle" % [cam.name, eye, r.x, r.y, XRServer.world_scale])
+	return out
 
 
 static func problems(root: Node) -> Array[String]:
@@ -73,6 +103,7 @@ static func problems(root: Node) -> Array[String]:
 	if cam == null:
 		return out
 	var ws := maxf(XRServer.world_scale, 0.001)
+	out.append_array(head_problems(cam))
 	var head := cam.global_position
 	var shown: Array[Node3D] = []
 	for n in root.find_children("*", "Node3D", true, false):

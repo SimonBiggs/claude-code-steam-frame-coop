@@ -1655,15 +1655,13 @@ func _build_views(mode: String) -> void:
 		origin.global_position = players[0].global_position
 		var cam := XRCamera3D.new()
 		origin.add_child(cam)
-		cam.position = Vector3(0.0, 1.5, 0.0)
 		var left := XRController3D.new()
 		left.tracker = "left_hand"
 		origin.add_child(left)
-		left.position = Vector3(-0.25, 1.1, -0.3)
 		var right := XRController3D.new()
 		right.tracker = "right_hand"
 		origin.add_child(right)
-		right.position = Vector3(0.25, 1.2, -0.3)
+		preload("res://core/vr_rig.gd").fake_stand(cam, left, right, 1.0)  # the standard fake player (BOT_VR_SEATED / BOT_VR_EYE)
 		players[0].attach_xr(origin, cam, left, right)
 		_build_vr_mirror(cam)
 	else:

@@ -166,7 +166,7 @@ func _steer(slot: int) -> void:
 ## Fake VR: every 2 s pull the trigger (a plane appears), wind up, flick at the nearest hoop.
 func _drive_vr(delta: float) -> void:
 	var rig = main.vr_rig
-	rig.camera.position = Vector3(0.0, 1.6, 0.0)
+	kit.vr_head_home(rig)  # the standard fake player (VrRig.fake_pose)
 	if left_test == 1 or left_test == 2:
 		_left_hand_test(rig, delta)
 		return

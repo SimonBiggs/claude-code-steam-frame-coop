@@ -209,8 +209,6 @@ func _drive_flat_builder(delta: float) -> void:
 func _drive_vr_builder(delta: float) -> void:
 	var b = main.builder
 	b.bot = true
-	if b.xr_camera.position == Vector3.ZERO:
-		b.xr_camera.position = Vector3(0.0, 1.5 * b.S, 0.0)
 	var ctrl: XRController3D = b.hand_r
 	var off: Vector3 = ctrl.global_basis * (b.GRAB_LOCAL * b.S)
 	vr_wait -= delta

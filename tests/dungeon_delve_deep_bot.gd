@@ -619,7 +619,7 @@ func _reachable(room: int, walk: int) -> Array:
 func knight(delta: float) -> void:
 	var rig: Node = main.vr_rig
 	var dp := deep()
-	rig.camera.position = Vector3(0.0, 1.5, 0.0)
+	kit.vr_head_home(rig)  # the standard fake player (VrRig.fake_pose)
 	var head: Vector3 = rig.head_position()
 	var feet := Vector3(head.x, 0.0, head.z)
 	kit.vr_stick(rig, Vector2.ZERO)

@@ -324,7 +324,7 @@ func _drive_tv(slot: int) -> void:
 ## The fake VR player.
 func _drive_vr(delta: float) -> void:
 	var rig = main.vr_rig
-	rig.camera.position.y = 1.55
+	kit.vr_head_height(rig)  # the standard fake player (VrRig.fake_eye, x world_scale)
 	kit.vr_stick(rig, Vector2.ZERO)
 	var phase := String(main.net.state_get("phase", ""))
 	var step := String(main.net.state_get("step", ""))

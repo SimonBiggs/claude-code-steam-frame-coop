@@ -359,15 +359,13 @@ func attach_fake_vr() -> void:
 	main.add_child(origin)
 	var cam := XRCamera3D.new()
 	origin.add_child(cam)
-	cam.position = Vector3(0, 1.5, 0)
 	var left := XRController3D.new()
 	left.tracker = "left_hand"
 	origin.add_child(left)
-	left.position = Vector3(-0.25, 1.1, -0.3)
 	var right := XRController3D.new()
 	right.tracker = "right_hand"
 	origin.add_child(right)
-	right.position = Vector3(0.25, 1.1, -0.3)
+	preload("res://core/vr_rig.gd").fake_stand(cam, left, right, 1.0)  # the standard fake player (BOT_VR_SEATED / BOT_VR_EYE)
 	_attach_hands(origin, cam, left, right)
 
 

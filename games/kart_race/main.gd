@@ -938,6 +938,8 @@ func debug_fake_vr():
 	players[0].add_child(cam)  # rides in the kart, like a headset's rig
 	cam.current = false
 	cam.cull_mask = 0xFFFFF & ~preload("res://core/vr_rig.gd").AVATAR_LAYER
+	# (no XROrigin3D: cockpit.gd puts it at the seat's EYE point every frame, exactly where its _fit puts a real driver's)
+	cam.set_meta(preload("res://core/vr_view_check.gd").HEAD_FITTED_META, "cockpit.gd: the seat's EYE point, like _fit")
 	# Like a real headset (kart.set_first_person hides them there), the head doesn't see the TV kart's own
 	# driver, steering wheel or name tag: they go on the TV-only avatar layer.
 	for part in [players[0].driver, players[0].wheel_vis, players[0].tag]:

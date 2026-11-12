@@ -143,7 +143,7 @@ func _tv_bot(slot: int, delta: float) -> void:
 func _vr_bot(delta: float) -> void:
 	var rig = main.vr_rig
 	var g = main.giant
-	rig.camera.position.y = 1.55 * g.S
+	kit.vr_head_height(rig)  # the standard fake player (VrRig.fake_eye, x world_scale)
 	vr_t += delta
 	match vr_step:
 		"idle":

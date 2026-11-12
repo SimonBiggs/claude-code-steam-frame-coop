@@ -149,7 +149,7 @@ func _steer(slot: int) -> void:
 ## fling it at the plug-hole.
 func _drive_vr(delta: float) -> void:
 	var rig = main.vr_rig
-	rig.camera.position.y = 1.6
+	kit.vr_head_height(rig)  # the standard fake player (VrRig.fake_eye, x world_scale)
 	var head: Vector3 = rig.head_position()
 	slap_t += delta
 	var lp: Vector3 = rig.hand_point(0)

@@ -225,7 +225,7 @@ func _vr_bot(delta: float) -> void:
 	vr_slam_t -= delta
 	vr_jab_t -= delta
 	vr_a_t -= delta
-	rig.camera.position.y = 1.6
+	kit.vr_head_height(rig)  # the standard fake player (VrRig.fake_eye, x world_scale)
 	var head := rig.head_position()
 	var target := _nearest_target(head)
 	if target != null:

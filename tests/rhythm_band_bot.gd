@@ -151,7 +151,12 @@ func _process(delta: float) -> void:
 		if fake_vr and not main.players[0].ghost and not main.players[0].vr:
 			main.players[0].fake_vr = true
 			if OS.has_environment("BOT_VR") and main.players[0].camera != null:
-				main.players[0].xr_camera = preload("res://core/vr_rig.gd").fake_head(main.players[0].camera)
+				# a real VR drummer stands on the drum rug facing the crowd (drummer._do_fit), not over the flat camera
+				const VrRig := preload("res://core/vr_rig.gd")
+				main.players[0].xr_camera = VrRig.fake_head_at(main, main.DRUM_SPOT, 0.0, main.players[0].camera.cull_mask & ~VrRig.AVATAR_LAYER)
+				# like attach_xr hiding the avatar for a real headset: the head doesn't see the flat drummer's own body
+				for v in (main.players[0].avatar as Node).find_children("*", "VisualInstance3D", true, false):
+					(v as VisualInstance3D).layers = VrRig.AVATAR_LAYER
 			print("BOT: driving the drummer's hands (fake VR)")
 	if mode == "local" and joined and t > join_time + 0.3 and not has_meta("start_checked"):
 		set_meta("start_checked", true)

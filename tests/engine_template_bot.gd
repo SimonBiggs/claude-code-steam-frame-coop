@@ -129,7 +129,7 @@ func _drive_vr(delta: float) -> void:
 	var rig = main.vr_rig
 	var head: Vector3 = rig.head_position()
 	var star := _nearest_star(head)
-	rig.camera.position.y = 1.6
+	kit.vr_head_height(rig)  # the standard fake player (VrRig.fake_eye, x world_scale)
 	if star == null:
 		kit.vr_stick(rig, Vector2.ZERO)
 		return

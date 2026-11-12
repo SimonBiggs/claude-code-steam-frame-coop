@@ -173,7 +173,7 @@ func _steer(slot: int) -> void:
 func _drive_vr(delta: float) -> void:
 	vr_t += delta
 	var rig = main.vr_rig
-	rig.camera.position.y = 1.6
+	kit.vr_head_height(rig)  # the standard fake player (VrRig.fake_eye, x world_scale)
 	var head: Vector3 = rig.head_position()
 	var orb := _orb_target()
 	if orb != Vector3.INF:  # touch the pick orb with the right glove

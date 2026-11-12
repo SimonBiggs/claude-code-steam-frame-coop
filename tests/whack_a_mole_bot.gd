@@ -210,7 +210,7 @@ func _herd_spot() -> Vector3:
 ## Fake VR: walk near a mole, raise the mallet above it, swing it down.
 func _drive_vr(delta: float) -> void:
 	var rig = main.vr_rig
-	rig.camera.position.y = 1.6
+	kit.vr_head_height(rig)  # the standard fake player (VrRig.fake_eye, x world_scale)
 	if String(main.net.state_get("phase", "")) == "orbs":  # the giant alone: bonk the right-hand pick orb with the mallet
 		var o: Vector3 = main.picks.orb_position(mini(2, main.picks.orbs.orbs.size() - 1)) if main.picks.showing() else Vector3.INF
 		kit.vr_stick(rig, Vector2.ZERO)

@@ -140,7 +140,7 @@ func _tv_bot(slot: int, delta: float) -> void:
 func _vr_bot(delta: float) -> void:
 	var rig = main.vr_rig
 	var ck = main.cockpit
-	rig.camera.position = Vector3(0.0, 1.2, 0.0)
+	kit.vr_head_home(rig)  # the standard fake player (VrRig.fake_pose)
 	vr_t += delta
 	match vr_step:
 		"wait":  # let the ghost glove show the move first
