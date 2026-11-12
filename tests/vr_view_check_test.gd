@@ -185,6 +185,33 @@ func _run() -> void:
 	low = null
 	_clear_ui()
 
+	# 5b2. a see-through laser sight held by the VR player (under its XROrigin3D) reaching past a card is blended
+	# over it just the same (Duo Arena's 12 m sight, Party Board's branch laser): VR_PRIO_UNDER_UI.
+	var aimed := HudKit.vr_card(world, cam, "AIM", "a line", {"width": 1.0})
+	await _frames(20)
+	var at := aimed.global_position
+	var sight_dir := (at - cam.global_position).normalized()
+	var sight := MeshInstance3D.new()
+	var sb := BoxMesh.new()
+	sb.size = Vector3(0.01, 0.01, 4.0)
+	sight.mesh = sb
+	var sm := StandardMaterial3D.new()
+	sm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	sm.albedo_color = Color(1, 0.3, 0.3, 0.35)
+	sight.material_override = sm
+	origin.add_child(sight)
+	sight.global_transform = Transform3D(UiKit.face(sight_dir), at + sight_dir * 1.5)
+	await _frames(1)
+	probs = VrViewCheck.problems(root)
+	_check(", ".join(probs).contains("washed out"), "a blended laser sight in the VR hand reaching behind a card is reported: %s" % [probs])
+	sm.render_priority = UiKit.VR_PRIO_UNDER_UI
+	await _frames(1)
+	probs = VrViewCheck.problems(root)
+	_check(not ", ".join(probs).contains("washed out"), "a laser sight at VR_PRIO_UNDER_UI is fine: %s" % [probs])
+	sight.free()
+	aimed = null
+	_clear_ui()
+
 	# 5c. a card never covers a pick orb (core/pick_orbs.gd KEEP_CLEAR; UiKit.vr_dodge moves VR UI clear of them)
 	var orbs := PickOrbs.new()
 	world.add_child(orbs)

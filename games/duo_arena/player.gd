@@ -5,6 +5,7 @@ extends CharacterBody3D
 ## Keyboard P2: arrows forward/back + turn, Enter shoot, Ctrl dash.
 
 const BulletScript := preload("res://games/duo_arena/bullet.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 const SPEED := 7.0
 const DASH_SPEED := 22.0
@@ -281,6 +282,7 @@ func attach_xr(origin: XROrigin3D, cam: XRCamera3D, left: XRController3D, right:
 	laser_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	laser_mat.albedo_color.a = 0.35
 	laser_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	laser_mat.render_priority = UiKit.VR_PRIO_UNDER_UI  # 12 m long: passes behind VR cards, must not draw over them
 	laser.material_override = laser_mat
 	laser.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	laser.position = Vector3(0, 0, -6.2)
