@@ -142,6 +142,13 @@ func _update_overlay() -> void:
 	overlay_label.text = txt
 
 
+## Quitting: no frame-save task may outlive this node's code (tests/thread_quit_test.gd).
+func _exit_tree() -> void:
+	for t in rec_tasks:
+		WorkerThreadPool.wait_for_task_completion(t)
+	rec_tasks.clear()
+
+
 func _start_recording(r: Dictionary) -> Dictionary:
 	if r.get("stop", false):
 		if rec_dir == "":

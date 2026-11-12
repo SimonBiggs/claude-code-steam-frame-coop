@@ -431,6 +431,14 @@ func _capture_viewport() -> Viewport:
 	return get_viewport()
 
 
+## Quitting (or swapped out): no encode task may outlive this node's code (a task still running GDScript at exit
+## crashes Godot: Sprout Hop, 2026-11-12). tests/thread_quit_test.gd checks every task user does this.
+func _exit_tree() -> void:
+	for t in tasks:
+		WorkerThreadPool.wait_for_task_completion(t)
+	tasks.clear()
+
+
 func _reap_tasks() -> void:
 	for i in range(tasks.size() - 1, -1, -1):
 		if WorkerThreadPool.is_task_completed(tasks[i]):
