@@ -63,7 +63,7 @@ static func pick(f: Dictionary) -> Dictionary:
 	if fl != 1 and rng.randf() >= CHANCE:
 		return {}
 	var friends: Array = BY_ZONE[String(FloorGen.zone_data(int(f.get("zone", 0)))["id"])]
-	var fr: Dictionary = friends[rng.randi_range(0, friends.size() - 1)]
+	var fr: Dictionary = friends[(rng.randi_range(0, friends.size() - 1) + fl) % friends.size()]  # (+ floor: never the same friend twice in a biome)
 	var reach := FloorGen.solve(f)
 	var rooms: Array = f["rooms"]
 	var cands: Array = []
