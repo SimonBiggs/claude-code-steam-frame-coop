@@ -44,16 +44,17 @@ func _initialize() -> void:
 	_expect(rivers > 20 and rivers < 60, "most islands have a river, not all (%d of 60)" % rivers)
 	_expect(shapes.size() == 60, "every island is a new shape (%d of 60)" % shapes.size())
 	_expect(looks.size() >= 3, "districts look different (%s)" % str(looks.keys()))
-	# TODAY'S ISLAND: the same all day, different each day, always good.
+	# TODAY'S ISLAND over 400+ days (and the 60 from whenever this runs), the way load_town("today") makes it:
+	# IslandGen.generate(Wishes.today_seed(date)), IslandGen.check (the same check every island gets).
 	var days := {}
-	for d in 30:
-		var date := Time.get_date_string_from_unix_time(1790000000 + d * 86400)
-		var s1 := Wishes.today_seed(date)
-		_expect(s1 == Wishes.today_seed(date), "today's island is the same all day")
-		days[s1] = true
-		for w in IslandGen.check(IslandGen.generate(s1)):
-			_fail("today %s: %s" % [date, w])
-	_expect(days.size() >= 28, "today's island changes every day (%d of 30)" % days.size())
+	var t_days := Time.get_ticks_msec()
+	var rd := Seeded.validate_days(func(date: String) -> Dictionary: return IslandGen.generate(Wishes.today_seed(date)),
+		func(isl: Dictionary) -> Array:
+			days[var_to_str(isl.ter)] = true
+			return IslandGen.check(isl), 400, "TODAY'S ISLAND", ["2026-11-11", "2026-11-12"])
+	fails += (rd.failures as Array).size()
+	print("TODAY'S ISLAND: %d days checked (%d ms)" % [int(rd.checked), Time.get_ticks_msec() - t_days])
+	_expect(days.size() >= int(rd.checked) - 2, "today's island changes every day (%d of %d)" % [days.size(), int(rd.checked)])
 	# Old towns (made before seeded islands): features() leaves their buildings and roads alone.
 	var old := Town.new()
 	old.generate(0)

@@ -14,6 +14,8 @@ const G := preload("res://games/rocket_workshop/rocketgen.gd")
 const P := preload("res://games/rocket_workshop/puzzles.gd")
 const Seeded := preload("res://core/seeded.gd")
 const StoryCard := preload("res://core/story_card.gd")
+const Deep := preload("res://games/rocket_workshop/deep.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
 
 var fails := 0
 
@@ -45,15 +47,31 @@ func _initialize() -> void:
 	var per_ms := float(Time.get_ticks_usec() - t0) / 1000.0 / maxf(1.0, gens)
 	print("rocket gen: %.3f ms per rocket incl. check (%d rockets)" % [per_ms, gens])
 	_expect(per_ms < 5.0, "a rocket generates + checks in under 5 ms here (%.2f ms; Decks are slower, aim < 100)" % per_ms)
-	# TODAY'S ROCKET: gold, valid, the same all day, different between days.
-	for date in ["2026-10-29", "2026-12-25", "2027-01-01"]:
-		var ds := G.daily_seed(date)
-		_expect(ds == G.daily_seed(date), "the daily seed is stable for %s" % date)
-		for simple in [true, false]:
-			var rk := G.rocket(ds, G.DAILY_N, 1, simple, 0, true)
-			for why in G.check(rk, {"n": G.DAILY_N, "crew": 1, "simple": simple, "launched": 0}):
-				_expect(false, "TODAY'S ROCKET %s: %s" % [date, why])
-			_expect(var_to_str(rk) == var_to_str(G.rocket(ds, G.DAILY_N, 1, simple, 0, true)), "TODAY'S ROCKET is the same all day")
+	# TODAY'S ROCKET over 400+ days (and the 60 from whenever this runs), the way _start_rocket builds it: rocket
+	# DAILY_N from daily_seed(date) in simple mode, gold, for any crew, a new or a long-time family, with or without
+	# Sprocket's BOOSTERS (Deep.puzzle_opts: every mode's opts at DAILY_N), checked by G.check like every rocket.
+	var rd := Seeded.validate_days(func(date: String) -> Array:
+			var ds := G.daily_seed(date)
+			var out: Array = []
+			for crew in [0, 1, 3, 6]:
+				for launched in [0, 40]:
+					for mode in PickOrbs.MODE_IDS:
+						for gid in ["", "boosters"]:
+							var opts := Deep.puzzle_opts(mode, gid, G.DAILY_N)
+							out.append([{"n": G.DAILY_N, "crew": crew, "simple": true, "launched": launched, "opts": opts},
+								G.rocket(ds, G.DAILY_N, crew, true, launched, true, opts)])
+			return out,
+		func(rks: Array) -> Array:
+			var why: Array = []
+			for cr in rks:
+				var rk: Dictionary = cr[1]
+				for w in G.check(rk, cr[0]):
+					why.append("crew %d parts %d %s: %s" % [int(cr[0].crew), int(cr[0].launched), str(cr[0].opts), w])
+				if not bool(rk.daily):
+					why.append("TODAY'S ROCKET isn't marked daily")
+			return why, 400, "TODAY'S ROCKET", ["2026-11-11", "2026-11-12"])
+	gens += int(rd.checked)
+	fails += (rd.failures as Array).size()
 	_expect(G.daily_seed("2026-10-29") != G.daily_seed("2026-10-30"), "a new TODAY'S ROCKET each day")
 	# Readable rising challenge: more to read on the boards at each level, never fewer.
 	print("simple blueprint pictures per level: %s" % str(sizes))

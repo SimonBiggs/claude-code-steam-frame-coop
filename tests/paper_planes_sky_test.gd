@@ -14,6 +14,8 @@ extends SceneTree
 const SkyGen := preload("res://games/paper_planes/skygen.gd")
 const Story := preload("res://games/paper_planes/story.gd")
 const Seeded := preload("res://core/seeded.gd")
+const Deep := preload("res://games/paper_planes/deep.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
 
 var fails := 0
 
@@ -33,6 +35,27 @@ func _initialize() -> void:
 		for s in 20:
 			for f in SkyGen.flight(100 + s, chap).formations:
 				shapes[f.shape] = int(shapes.get(f.shape, 0)) + 1
+	# TODAY'S SKY over 400+ days (and the 60 from whenever this runs), the way _start_flight builds it: the mixed
+	# chapter from daily_seed(date) (no fold, so no breeze), and that day's surprises (that date's season) in every mode.
+	var rd := Seeded.validate_days(func(date: String) -> Array:
+			var sv := Seeded.daily_seed("paper_planes", date)
+			var out: Array = [SkyGen.flight(sv, Story.MIXED, {"lucky": Deep.breeze_of("") == "lucky"})]
+			var season := Seeded.season(date) if Deep.SEASONS.has(Seeded.season(date)) else "spring"
+			for mode in PickOrbs.MODE_IDS:
+				var spec := {"mode": mode, "season": season, "secs": 100.0, "scale": 1.0}
+				out.append([spec, Deep.events(Seeded.derive(sv, "events"), spec)])
+			return out,
+		func(day: Array) -> Array:
+			var why := SkyGen.check(day[0])
+			for k in range(1, day.size()):
+				var spec: Dictionary = day[k][0]
+				for x in Deep.problems(day[k][1], spec):
+					why.append("%s: %s" % [spec.mode, x])
+				if (day[k][1] as Array).is_empty():
+					why.append("%s: a full flight with no surprises" % spec.mode)
+			return why, 400, "TODAY'S SKY", ["2026-11-11", "2026-11-12"])
+	total += int(rd.checked)
+	fails += (rd.failures as Array).size()
 	_expect(shapes.size() == SkyGen.SHAPES.size(), "every formation shape appears (%s)" % str(shapes))
 	_story_checks()
 	print("SKY: %s - %d flights checked, %d failures (%d ms)" % ["PASS" if fails == 0 else "FAIL", total, fails, Time.get_ticks_msec() - t0])

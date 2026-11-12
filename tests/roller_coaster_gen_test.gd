@@ -75,11 +75,16 @@ func _initialize() -> void:
 	# 4) TODAY'S COASTER.
 	_expect(G.daily_seed("2026-10-29") == G.daily_seed("2026-10-29"), "TODAY'S COASTER is the same all day")
 	_expect(G.daily_seed("2026-10-29") != G.daily_seed("2026-10-30"), "a new TODAY'S COASTER each day")
-	for date in ["2026-10-29", "2026-11-05", "2026-12-25", "2027-01-01"]:
-		var d := G.section(G.daily_seed(date), pb, 1)
-		_expect(not bool(d.full) and (d.pieces as Array).size() == G.size_for(1), "TODAY'S COASTER %s has a full plan" % date)
-		for why in G.check(d):
-			_expect(false, "TODAY'S COASTER %s: %s" % [date, why])
+	# TODAY'S COASTER over 400+ days (and the 60 from whenever this runs), the way the park starts it: the first
+	# plan (section 1) from daily_seed(date) on the practice track (later plans use fresh seeds).
+	var rd := Seeded.validate_days(func(date: String) -> Dictionary: return G.section(G.daily_seed(date), pb, 1),
+		func(d: Dictionary) -> Array:
+			var why := G.check(d)
+			if bool(d.full) or (d.pieces as Array).size() != G.size_for(1):
+				why.append("no full plan (%d pieces, full %s)" % [(d.pieces as Array).size(), d.full])
+			return why, 400, "TODAY'S COASTER", ["2026-11-11", "2026-11-12"])
+	gens += int(rd.checked)
+	fails += (rd.failures as Array).size()
 	# 5) Stars.
 	for k in seeds:
 		var c := _coaster(k * 7 + 3)
