@@ -56,6 +56,11 @@ var pic_seen := ""  # the artist-only picture above the easel, as seen during th
 var hz_last := {}  # the surprise showing (host: checked bare when it ends)
 var hz_checked := 0
 var picks_seen := 0
+var lone_reveals := 0  # host: rounds that ended with nobody to guess ...
+var smudge_seen := 0  # ... and how many of them Smudge guessed
+var stamp_rounds := 0  # rounds painted with the STAMPS gift (flat bot taps now and then) ...
+var stamps_total := 0  # ... and the stars it stamped
+var last_stamps := 0
 var seen_pics := {}  # every 3D picture a guesser could see during the draw (secret-picture check)  # the artist-only word card above the easel, as seen during this round
 
 
@@ -87,9 +92,11 @@ func _exit_tree() -> void:
 		BotEnd.check(rounds_done >= 1, "a drawing round was played (mode %s, t=%.0f)" % [main.net.mode, t])
 		if main.net.mode != "client":
 			BotEnd.check(picks_seen >= 1 or OS.has_environment("PG_MODE"), "the picks came up and were taken (%d)" % picks_seen)
-			if main.active_guessers().is_empty() and rounds_done >= 1:
+			if lone_reveals >= 1:
 				# A lone painter (a lone Deck, the VR artist alone) makes real progress: Smudge guesses.
-				BotEnd.check(int(main.save.data.get("smudge", 0)) >= 1, "Smudge guessed for a lone painter (%d)" % int(main.save.data.get("smudge", 0)))
+				BotEnd.check(smudge_seen >= 1, "Smudge guessed for a lone painter (%d of %d rounds)" % [smudge_seen, lone_reveals])
+			if stamp_rounds >= 1:
+				BotEnd.check(stamps_total >= 1, "a tap stamped a star with the STAMPS gift (%d)" % stamps_total)
 			print("BOT %s: picks %s, surprises %s (%d checked bare), museum %d" % [main.net.mode, str(main.picks.history),
 				str(main.hazards.seen), hz_checked, int(main.save.data.get("museum_n", 0))])
 
@@ -316,6 +323,10 @@ func _drive_flat(a, delta: float) -> void:
 		if shape % 7 == 6:
 			main.artist_clear()
 		return
+	if main.gift == "stamps" and shape % 4 == 1:  # STAMPS: a quick tap stamps a star
+		a.bot_paint = u < 0.04
+		a.bot_cursor = _doodle(shape, 0.3)
+		return
 	a.bot_paint = u < 1.0
 	a.bot_cursor = _doodle(shape, minf(u, 1.0))
 
@@ -430,6 +441,9 @@ func _drive_vr(a, delta: float) -> void:
 
 func _track(mode: String) -> void:
 	var st: String = main.state
+	if int(main.stamps) != last_stamps:
+		stamps_total += maxi(0, int(main.stamps) - last_stamps)
+		last_stamps = int(main.stamps)
 	if main.picks != null and main.picks.history.size() > picks_seen:
 		picks_seen = main.picks.history.size()
 		print("BOT %s: picked %s" % [mode, str(main.picks.history.back())])
@@ -439,6 +453,11 @@ func _track(mode: String) -> void:
 		if st == "reveal":
 			_check_leaks(mode)
 			rounds_done += 1
+			if mode != "client" and main.active_guessers().is_empty() and main.round_type != "team":
+				lone_reveals += 1
+				smudge_seen += 1 if main.smudge_got else 0
+			if mode != "client" and main.gift == "stamps" and not main.players[0].fake_vr:
+				stamp_rounds += 1
 			var got := 0
 			for g in main.active_guessers():
 				if g.got:
@@ -447,7 +466,7 @@ func _track(mode: String) -> void:
 				main.round_n, main.round_type, main.theme, main.reveal_word, got, main.active_guessers().size(),
 				main.canvas.strokes.size(), main.canvas.point_count, main.room.pictures.size()])
 			if main.net.mode != "local":  # every machine agrees what it was (tools/multibot.ts)
-				print("BOT AGREE game%d_round%d=%s" % [games_done, main.round_n, main.reveal_word])
+				print("BOT AGREE game%d_round%d=%s" % [games_done, main.reveal_round, main.reveal_word])
 			# Jump ahead so a short run sees every kind of round, the vote and the final scores:
 			# default: 1 -> TEAM PAINT (3) -> vote; 4+ players: 1 -> SPEED (4) -> GOLDEN FINAL (5) -> vote;
 			# host / fake VR: 1 -> TEAM PAINT (3) -> GOLDEN FINAL (5) -> vote.

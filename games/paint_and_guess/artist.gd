@@ -236,10 +236,10 @@ func _paint(ok: bool, p: Vector2, held: bool) -> void:
 		return
 	p = main.canvas.clamp_point(p)
 	var w := (SPARKLE_W if color_idx == main.canvas.SPARKLE else BRUSH_W) * Deep.brush_scale(main.gift)
-	if main.paint_blocked(last_pt if cur_id >= 0 else p, p, w * 0.5):  # a told surprise: the brush lifts there
-		_lift()
-		return
 	if cur_id < 0 or p.distance_to(last_pt) > 0.3:
+		if main.paint_blocked(p, p, w * 0.5):  # a told surprise: no paint there
+			_lift()
+			return
 		if main.canvas.is_full():
 			_lift()
 			return
@@ -254,7 +254,11 @@ func _paint(ok: bool, p: Vector2, held: bool) -> void:
 		colors_used[color_idx] = true
 		_buzz(0.3, 0.04)
 		return
-	smooth_pt = smooth_pt.lerp(p, 0.55)
+	var ns := smooth_pt.lerp(p, 0.55)
+	if main.paint_blocked(last_pt, ns, w * 0.5):  # a told surprise: the brush lifts before it
+		_lift()
+		return
+	smooth_pt = ns
 	if smooth_pt.distance_to(last_pt) < 0.006:
 		return
 	if main.canvas.stroke_len(cur_id) >= SEG_POINTS:

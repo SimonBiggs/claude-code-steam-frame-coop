@@ -215,6 +215,7 @@ var smudge_at := -1.0  # host: when Smudge guesses next (-1: not yet)
 var smudge_wrongs := 0
 var smudge_got := false
 var smudge_rounds := 0  # rounds Smudge guessed this game (telemetry, bots)
+var reveal_round := 0  # every machine: the round the last reveal was for (the "reveal" event carries it)
 var peek_done := false
 var stamps := 0  # STAMPS this game
 var game_surprises := 0
@@ -494,7 +495,7 @@ func _build_players(mode: String) -> void:
 			g.key_set = 1 if mode == "client" else 0
 		add_child(g)
 		players.append(g)
-		g.set_active(i == 1)
+		g.set_active(i == 1 and mode != "host")  # (host: a TV machine's players take their seats when they join)
 
 
 func is_local(p) -> bool:
@@ -1051,20 +1052,23 @@ func _tv_paint(g) -> void:
 	var col: int = CanvasScript.TEAM_BASE + g.index
 	var p: Vector2 = canvas.clamp_point(g.tv_cursor)
 	var bw := TEAM_BRUSH_W * Deep.brush_scale(gift)
-	if paint_blocked(g.tv_last if g.tv_cur_id >= 0 else p, p, bw * 0.5):  # a told surprise: no paint there
-		if g.tv_cur_id >= 0:
-			stroke_end(owner)
-		g.tv_cur_id = -1
-		return
 	if g.tv_cur_id < 0 or p.distance_to(g.tv_last) > 0.3:
-		if canvas.is_full():
+		if canvas.is_full() or paint_blocked(p, p, bw * 0.5):  # (a told surprise: no paint there)
+			if g.tv_cur_id >= 0:
+				stroke_end(owner)
+			g.tv_cur_id = -1
 			return
 		g.tv_cur_id = stroke_begin(col, bw, p, owner)
 		g.tv_last = p
 		g.tv_smooth = p
 		g.team_ink += 1
 		return
-	g.tv_smooth = g.tv_smooth.lerp(p, 0.6)
+	var ns: Vector2 = g.tv_smooth.lerp(p, 0.6)
+	if paint_blocked(g.tv_last, ns, bw * 0.5):  # a told surprise: the brush lifts before it
+		stroke_end(owner)
+		g.tv_cur_id = -1
+		return
+	g.tv_smooth = ns
 	if g.tv_smooth.distance_to(g.tv_last) < 0.006:
 		return
 	if canvas.stroke_len(g.tv_cur_id) >= ArtistScript.SEG_POINTS:
@@ -1633,7 +1637,8 @@ func _reveal(all_got: bool) -> void:
 	sound("fanfare" if correct_count > 0 else "reveal", -2.0, 1.0, true)
 	if correct_count > 0:
 		confetti(canvas.canvas_to_world(Vector2(0.0, 0.0), 0.1), 60)
-	net.event("reveal", [word])
+	reveal_round = round_n
+	net.event("reveal", [word, round_n])
 	print("Round %d over: '%s', %d of %d guessed it" % [round_n, word, correct_count, active_guessers().size()])
 
 
@@ -2157,6 +2162,8 @@ func apply_event(kind: String, args: Array) -> void:
 			room.cat_cheer()
 		"reveal":
 			reveal_word = args[0]
+			if args.size() > 1:
+				reveal_round = int(args[1])
 			state = "reveal"
 			state_t = 0.0
 			correct_count = 0
