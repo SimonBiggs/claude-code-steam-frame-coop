@@ -44,6 +44,7 @@ func _ready() -> void:
 		main.set("force_chapter", int(OS.get_environment("BOT_CHAPTER")))
 	add_child(main)
 	kit.main = main
+	kit.watch_state(main.net)  # phases counted as they happen (kit.seen): a 0.25 s poll misses quick ones under load
 	want = BotKit.bot_players(2, 6)
 	var client := OS.has_environment("DUO_JOIN")
 	var host := OS.has_environment("DUO_HOST")
@@ -260,7 +261,7 @@ func _checks() -> void:
 		kit.assert_eq(kit.seated(), kit.seated_want(want, host_p), "%s: all %d TV players (+%d on the host) are seated" % [mode, want, host_p])
 	if main.flat_host:
 		kit.assert_true(main.party.is_local(0) and main.flyers.has(0) and main.huds.has(0), "flat host: slot 0 plays here with a camera")
-	kit.assert_true(int(main.net.state_get("round", 0)) >= 2, "%s: round 1 ended with results and round 2 started" % mode)
+	kit.assert_true(kit.seen("phase", "results") > 0 and int(main.net.state_get("round", 0)) >= 2, "%s: round 1 ended with results and round 2 started" % mode)
 	kit.assert_true(max_hoops >= 3, "%s: hoops are in the sky" % mode)
 	var ghosts := 0
 	for s in main.flyers:

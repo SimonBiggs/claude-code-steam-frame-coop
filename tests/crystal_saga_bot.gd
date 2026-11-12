@@ -478,10 +478,12 @@ func _checks() -> void:
 		print("BOT AGREE biome=%d" % first_biome)  # ... in the same region
 	kit.assert_true(main.stories_shown > 0, "%s: Lumi's story cards showed (%d)" % [mode, main.stories_shown])
 	if mode == "client":
-		kit.assert_true(saw_choose == 0 or saw_offer_client, "client showed the level-up stones")
+		if saw_choose > 0:  # (a look during the level-up: the stones were up; whether it happened: kit.seen)
+			kit.assert_true(saw_offer_client, "client showed the level-up stones")
 		kit.assert_true(max_mons >= (1 if OS.has_environment("CS_TRY") else 2), "client mirrors the monsters (%d)" % max_mons)
-		kit.assert_true(int(main.net.state_get("open", 0)) >= 2 or saw_results, "client saw barriers open")
-		kit.assert_true(saw_map == 0 or saw_map_client, "client showed the map stones")
+		kit.assert_true(int(main.net.state_get("open", 0)) >= 2 or kit.seen("phase", "results") > 0, "client saw barriers open")
+		if saw_map > 0:
+			kit.assert_true(saw_map_client, "client showed the map stones")
 		if main.log_regions.is_empty() and OS.has_environment("CS_TRY"):
 			kit.assert_true(not saw_tells.is_empty(), "client drew the guardian's tells (%s)" % str(saw_tells))
 		if OS.get_environment("CS_TRY") == "surprises":
@@ -504,7 +506,7 @@ func _checks() -> void:
 			kit.assert_true(main.log_zones.has(z), "%s: zone %d was entered" % [mode, z])
 		kit.assert_true(saw_restored, "%s: the Crystal of Light was restored" % mode)
 		kit.assert_true(main.runs_logged > 0, "%s: a RUN telemetry line was written" % mode)
-		kit.assert_true(saw_results, "%s: the results showed" % mode)
+		kit.assert_true(kit.seen("phase", "results") > 0, "%s: the results showed" % mode)
 		var atk0: Array = (main.plan.get("guardian", {}) as Dictionary).get("attacks", [])
 		kit.assert_true(main.log_stomps > 0 or first > 3 or not atk0.has("stomp") or not main.log_tells.is_empty(), "%s: the guardian stomped (%d) %s" % [mode, main.log_stomps, str(main.log_tells)])
 	if first <= 1:

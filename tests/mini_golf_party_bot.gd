@@ -28,7 +28,6 @@ var vr_speed := 1.0
 var vr_putts := 0
 var toy_step := 0
 var saw_results := false
-var holes_seen := {}
 var again_t := -1.0
 var seen_checks := 0
 var unseen: Array[String] = []
@@ -47,6 +46,7 @@ func _ready() -> void:
 	main = load("res://games/mini_golf_party/main.tscn").instantiate()
 	add_child(main)
 	kit.main = main
+	kit.watch_state(main.net)  # phases counted as they happen (kit.seen): a 0.25 s poll misses quick ones under load
 	want = BotKit.bot_players(2, 6)
 	var client := OS.has_environment("DUO_JOIN")
 	var host := OS.has_environment("DUO_HOST")
@@ -96,7 +96,6 @@ func _own_balls_seen() -> String:
 
 
 func _results() -> String:
-	holes_seen[int(main.net.state_get("hole", 0))] = true
 	if main.results_showing():
 		if not saw_results:
 			saw_results = true
@@ -298,7 +297,8 @@ func _checks() -> void:
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
 	if mode != "host":
 		kit.assert_eq(kit.seated(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
-	kit.assert_true(holes_seen.size() >= (2 if short_run else 3), "%s: played through several holes (%d)" % [mode, holes_seen.size()])
+	var holes := kit.seen_values("hole").size()
+	kit.assert_true(holes >= (2 if short_run else 3), "%s: played through several holes (%d)" % [mode, holes])
 	if main.split != null and not main.party.local_slots().is_empty():
 		kit.assert_true(seen_checks > 0, "%s: own balls were checked for visibility" % mode)
 		kit.assert_true(unseen.is_empty(), "%s (%s): every own ball is on screen with its tag %s" % [mode, main.net.machine_kind, str(unseen)])
@@ -322,7 +322,7 @@ func _checks() -> void:
 		kit.assert_true(main.sink_log.size() >= 1, "%s: a short run still sinks holes (%d)" % [mode, main.sink_log.size()])
 	else:
 		kit.assert_true(int(main.save.data["courses"]) >= 1, "%s: a finished course was saved" % mode)
-		kit.assert_true(saw_results, "%s: the course ended with the results" % mode)
+		kit.assert_true(kit.seen("phase", "results") > 0, "%s: the course ended with the results" % mode)
 	# Design check: aiming bots hole out within par + 3 (6 putts = automatic pick-up).
 	var per_hole := {}
 	for e in main.sink_log:
@@ -363,10 +363,10 @@ func _deep_checks(mode: String) -> void:
 	if mode == "client":
 		return
 	kit.assert_true(deep.has("pick_mode") or OS.has_environment("MGP_MODE"), "%s: the mode was picked on the pick green %s" % [mode, str(deep)])
-	if holes_seen.has(1) or holes_seen.has(2):
+	if kit.seen("hole", 1) > 0 or kit.seen("hole", 2) > 0:
 		kit.assert_true(deep.has("pick_gift") or OS.has_environment("MGP_GIFT"), "%s: Gus's gift was picked after the practice putt" % mode)
 	if main.vr_rig != null and kit.tv_players() == 0 and main.party.local_slots().is_empty():
 		kit.assert_true(deep.has("by_vr") or deep.has("by_putt"), "%s: a lone VR golfer picked by hand or by putting %s" % [mode, str(deep)])
-	if holes_seen.size() >= 4:
+	if kit.seen_values("hole").size() >= 4:
 		kit.assert_true(deep.has("told_gust") or deep.has("told_mole"), "%s: a surprise was told on the later holes %s" % [mode, str(deep)])
 	kit.assert_eq(int(deep.get("corner", -1)), Deep.corner(int(main.save.data["stars_total"])), "%s: Gus's garden corner matches the stars" % mode)

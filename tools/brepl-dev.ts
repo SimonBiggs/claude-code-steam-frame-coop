@@ -262,6 +262,7 @@ export async function debt() {
   // The shared-globals guard (see installGlobalsGuard) must be live: without it agents' generic globals clash again.
   try { (globalThis as any).__breplLint?.("(async () => (WT = 1\n))"); issues.push({ kind: "brepl-guard", what: "brepl's shared-globals guard is not refusing generic globals (WT = ...)", fix: "reload dev.ts (loadModule('dev')) and check installGlobalsGuard()" }); } catch {}
   if (!(globalThis as any).__evalGuard) issues.push({ kind: "brepl-guard", what: "brepl's shared-globals guard is not installed", fix: "loadModule('dev')" });
+  for (const f of globalsGuardFailures()) issues.push({ kind: "brepl-guard", what: `shared-globals guard test case fails: ${f}`, fix: "fix genericGlobals / declaredNames in dev.ts (tools/brepl-dev.ts) until GLOBALS_GUARD_CASES all pass" });
   // Known bug patterns ("never just one ant"): flag every instance in the staging copy, not just the one we saw.
   const PATTERNS: { kind: string; files: string; bad: string; unless?: string; fix: string; dirs?: string }[] = [
     { kind: "pad-A", files: "grab_focus", bad: "grab_focus", unless: "JOY_BUTTON_A|ui_input.gd|UiInput", fix: "should now work by design (UiKit.ensure_pad_ui_actions at startup); check the menu reaches it" },
@@ -580,7 +581,7 @@ export async function guard(game: string, project = STAGE) {
 /** Repo-wide guard tests every landing runs (2026-11-11: gen_budget_test failed on main unnoticed because no landing
  *  ran it; each of these took < 45 s on all of main then). lan_update_test stays out: it compiles a deliberately broken
  *  script, whose expected "Parse Error" would read as a SCRIPT ERROR here. */
-export const REPO_GUARDS = ["gen_budget_test", "who_test", "who_net_test", "classic_seats_test", "menu_test", "party_stale_press_test", "bg_gen_test", "engine_sys_test", "engine_ui_test", "pause_banner_test", "contrast_test", "vr_wrist_menu_test", "season_override_test"];
+export const REPO_GUARDS = ["gen_budget_test", "who_test", "who_net_test", "classic_seats_test", "menu_test", "party_stale_press_test", "bg_gen_test", "engine_sys_test", "engine_ui_test", "pause_banner_test", "contrast_test", "vr_wrist_menu_test", "bot_phase_watch_test", "season_override_test"];
 
 /** Lone flat player (2026-11-11, cove-deep2: a lone Deck gunner ran out of cannonballs, a solo VR host stayed in
  *  practice forever): ONE Deck player, no VR, nobody else (DUO_SOLO=1 DUO_MACHINE_KIND=deck BOT_PLAYERS=1), the
@@ -1158,9 +1159,8 @@ const GENERIC_GLOBAL = /^(?:[A-Za-z_$][\w$]{0,2}|WORKTREE|PROJ|PROJECT|ROOT|DIR|
 export function genericGlobals(code: string): string[] {
   if (code.includes("//@shared-ok")) return [];
   code = stripLiterals(code);
-  const declared = new Set([...code.matchAll(/\b(?:const|let|var|function)\s+([A-Za-z_$][\w$]*)/g)].map(m => m[1]));
-  for (const m of code.matchAll(/\b(?:const|let|var)\s*[{[]([^}\]]*)[}\]]/g))
-    for (const p of m[1].split(/[,:\s=]+/)) if (p) declared.add(p.replace(/^\.\.\./, ""));
+  const declared = declaredNames(code);
+  for (const m of code.matchAll(/\bfunction\s*\*?\s*([A-Za-z_$][\w$]*)/g)) declared.add(m[1]);
   // parameters: (a, b) => / async (r) => / x => / function f(a, b = 2)
   for (const m of code.matchAll(/\(([^()]*)\)\s*=>|\bfunction\b[^(]*\(([^()]*)\)|\b([A-Za-z_$][\w$]*)\s*=>/g))
     for (const p of (m[1] ?? m[2] ?? m[3] ?? "").split(/[,{}\[\]\s=]+/)) if (p) declared.add(p);
@@ -1169,6 +1169,60 @@ export function genericGlobals(code: string): string[] {
   for (const m of code.matchAll(/(?:^|\n|;|\{|\(|,)[ \t]*([A-Za-z_$][\w$]*)[ \t]*(?:\?\?|\|\||&&)?=(?![=>])/g))
     if (GENERIC_GLOBAL.test(m[1]) && !declared.has(m[1])) hit.add(m[1]);
   return [...hit];
+}
+// Every name a const / let / var statement declares: ALL of `const a = 1, gg = 2` (only the first used to count, so
+// gg was refused as a shared global and agents had to add //@shared-ok, 2026-11-12), destructured names, and names
+// over several lines. Walks each statement's declarators at bracket depth 0 (code already has its literals blanked).
+function declaredNames(code: string): Set<string> {
+  const out = new Set<string>();
+  for (const m of code.matchAll(/\b(?:const|let|var)\b/g)) {
+    let i = m.index! + m[0].length, depth = 0, naming = true;
+    while (i < code.length) {
+      const c = code[i];
+      if ("([{".includes(c)) depth++;
+      else if (")]}".includes(c)) { if (--depth < 0) break; }
+      else if (depth === 0 && c === ";") break;
+      else if (depth === 0 && c === ",") naming = true;
+      else if (depth === 0 && c === "=" && code[i + 1] !== "=" && code[i + 1] !== ">" && !"=!<>".includes(code[i - 1])) naming = false;
+      else if (depth === 0 && c === "\n" && !naming) {
+        const next = code.slice(i + 1).match(/^\s*(\S)/)?.[1] ?? "";
+        if (!",.?:+-*/|&".includes(next) || !next) break;  // a new statement (no semicolons)
+      }
+      if (naming && /[A-Za-z_$]/.test(c) && !/[\w$]/.test(code[i - 1] ?? "")) {
+        const id = code.slice(i).match(/^[A-Za-z_$][\w$]*/)![0];
+        if (depth === 0 && (id === "of" || id === "in")) break;  // for (const k of xs): xs isn't declared
+        out.add(id);
+        i += id.length;
+        continue;
+      }
+      i++;
+    }
+  }
+  return out;
+}
+// The guard's own test cases: [code, the generic globals it must refuse]. dev.debt() runs them (brepl-guard).
+export const GLOBALS_GUARD_CASES: [string, string[]][] = [
+  ["(async () => (WT = 1\n))", ["WT"]],
+  ["const a = 1, gg = 2; gg = 3", []],
+  ["bg(\"x\", async () => { const a = await f(), gg = a.x,\n    WT = \"/p\"; gg = 1 })", []],
+  ["const f = (a, b) => a + b, gg = 1\nWT = 2", ["WT"]],
+  ["const a = f(\n  1, 2),\n  gg = 3\ngg = 4", []],
+  ["const a = 1\n  , gg = 2\ngg = 5", []],
+  ["const {a, b: c = 2} = o, [d, ...ee] = xs; ee = 1; c = 2", []],
+  ["for (const k of xs) { WT = k }", ["WT"]],
+  ["let x = 1\nWT = 2", ["WT"]],
+  ["const s = \"WT = 1\"", []],
+  ["globalThis.g = 1", ["g"]],
+  ["const o = { WT: 1 }, p = 2\nSP = p", ["SP"]],
+  ["const a = b == 1, gg = 2\ngg = 3", []],
+];
+export function globalsGuardFailures(): string[] {
+  const bad: string[] = [];
+  for (const [code, want] of GLOBALS_GUARD_CASES) {
+    const got = genericGlobals(code).sort();
+    if (got.join(",") !== [...want].sort().join(",")) bad.push(`${JSON.stringify(code)}: refused [${got}], want [${want}]`);
+  }
+  return bad;
 }
 // Strings, template literals, regex-free comments -> blanks, so text like "WT = 1" inside a string or a shell command
 // (`DUO_PORT=1 godot-test ...`) never counts as an assignment.
