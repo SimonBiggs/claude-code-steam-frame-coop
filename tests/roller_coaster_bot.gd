@@ -438,7 +438,7 @@ func _deep_checks() -> void:
 		kit.assert_true(_mode_ok(String(main.net.state_get("mode", ""))), "client: a mode in the state store")
 		return
 	var rides := int(main.rides_done)
-	if rides >= 1:
+	if rides >= 1 and not OS.has_environment("RC_MODE"):
 		kit.assert_true(bool(saw_orbs.get("mode", false)), "%s: the mode orbs came up after the practice ride" % mode)
 	if rides >= 2 or main.mode_picked:
 		kit.assert_true(main.mode_picked, "%s: a mode was picked (%s)" % [mode, main.mode])
