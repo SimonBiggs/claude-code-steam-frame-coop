@@ -5,6 +5,7 @@ extends RefCounted
 const Contrast := preload("res://core/contrast.gd")
 const Art := preload("res://games/block_builders/art.gd")
 const Themes := preload("res://games/block_builders/themes.gd")
+const Deep := preload("res://games/block_builders/deep.gd")
 
 
 ## Runners (P2..; P1 is the builder) show their darker legs; every block kind.
@@ -27,3 +28,13 @@ static func backgrounds() -> Dictionary:
 		out["%s dirt" % t] = th.dirt
 		out["%s rock" % t] = th.rock
 	return out
+
+
+## The surprises' tells (hazards.gd: steady bands / circles) lie on the island tops only: every theme's grass.
+static func groups() -> Array:
+	var tops := {}
+	for t in Themes.THEMES:
+		var th: Dictionary = Themes.THEMES[t]
+		for i in (th.grass as Array).size():
+			tops["%s grass %d" % [t, i + 1]] = th.grass[i]
+	return [{"keys": {"wind tell": Deep.WIND_COLOR, "wobble tell": Deep.WOBBLE_COLOR}, "bgs": tops}]

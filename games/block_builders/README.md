@@ -28,6 +28,28 @@ just: **the builder grabs blocks from the tray and makes a path, the runners run
   and over the flag (first two levels). A spare controller sees a pulsing A + plus + person; joining,
   leaving and a full party are soft sounds. Your own name tag is hidden from your own camera.
 
+## Second pass (deep.gd): modes, Puff's block gifts, surprises, seasons, Puff's town
+
+- **Modes** GENTLE / BRAVE / HARD on the shared pick orbs once a session, before the first sky course: smaller or
+  bigger courses, spare planks in the tray, how often and how strong the surprises are (TODAY'S SKY keeps its course).
+- **Puff's block gifts** before every later sky course (three on the pick orbs): STICKY BRICKS (wind and wobbles
+  can't move anyone), BIG BRICKS (every plank brings a free plank beside it), BUILDER ROBOT (puts the glowing block in
+  when the builder waits), BLOCK BOX (a spare of every block), JUMPY BOOTS (jump higher). The last two open as the
+  town grows.
+- **Picking**: runners stand under a big orb over the start island for 0.8 s; a flat builder alone hovers the glove
+  under one of three orbs over the course; the VR builder alone (with the buddy) reaches into one of three small orbs
+  an arm's reach in front of the eyes. Nobody in time: the middle one.
+- **Surprises** (never on the lessons or a session's first course): WIND (a blue band across an island, a gust
+  pushes runners towards the front edge) and WOBBLE (an orange-red circle, runners hop; BRAVE / HARD: dizzy a moment),
+  told by steady warn shapes on bare island ground only, near a runner. The buddy and the bots walk out and wait.
+- **Seasons**: BLOSSOM / SUNNY / LEAFY / SNOWY SKY pick the course themes and the surprise mix; seasonal props on
+  floating rocks behind the course and drifting petals / leaves / snow.
+- **Puff's town**: every finished sky course adds a house, tower, windmill, lighthouse, tree house or (every tenth) a
+  castle on a floating island behind the course, roofs in the mode's colour.
+- Tests: `tests/block_builders_deep_test.gd` (fairness of every surprise spot in every mode, daily over 400+ dates,
+  gifts never break it, modes really ordered), the bot (`BB_TRICKS_NOW=1`, `BB_MODE`, `BB_GIFT`, `BB_SEASON`,
+  `BB_BOT_PICK`, `BB_NO_GIFTS`).
+
 Everything below describes the full game (SIMPLE_MODE = false).
 
 - **Player 1, the BUILDER (VR, host).** `XROrigin3D.world_scale = 8`, so the course is a tabletop

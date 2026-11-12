@@ -33,6 +33,11 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "bb-gifts", "date": "2026-11-12", "game": "block_builders", "pic": "robot", "line": "Puff's block gifts!", "try": {"BB_GIFT": "robot"}},
+	{"id": "bb-surprises", "date": "2026-11-12", "game": "block_builders", "pic": "gust", "line": "Wind and wobbles!", "try": {"BB_TRICKS_NOW": "1", "BB_MODE": "brave"}},
+	{"id": "bb-town", "date": "2026-11-12", "game": "block_builders", "pic": "house", "line": "Puff's town grows!"},
+	{"id": "bb-modes", "date": "2026-11-12", "game": "block_builders", "pic": "cloud", "line": "Gentle, brave or hard!"},
+	{"id": "bb-seasons", "date": "2026-11-12", "game": "block_builders", "pic": "snowflake", "line": "Snowy build site", "try": {"BB_SEASON": "winter"}},
 	{"id": "db-gifts", "date": "2026-11-12", "game": "dodge_ball", "pic": "curveball", "line": "TumTum's ball gifts!", "try": {"DB_GIFT": "curve"}},
 	{"id": "db-tricks", "date": "2026-11-12", "game": "dodge_ball", "pic": "stomp", "line": "Stomps and ball showers!", "try": {"DB_TRICKS_NOW": "1", "DB_MODE": "brave"}},
 	{"id": "db-modes", "date": "2026-11-12", "game": "dodge_ball", "pic": "tumtum", "line": "Gentle, brave or hard!"},
