@@ -7,16 +7,20 @@ extends RefCounted
 ##          The first orb shot decides for everyone; the family's last choice is the middle orb next time.
 ##   HERO   (each player, before wave 1): a loadout for the whole run (BLASTER, SPRAYER, BOOMER, TANK, ZOOMER).
 ##   PERK   (each player, after every wave): three of the unlocked perks, seeded per run and wave; they stack.
+##   GIFT   (team, after every boss instead of a perk): NOVA'S GIFTS (deep.gd), the first orb shot decides.
 ## Unlocks for good as the family clears waves (saved "waves"): unlocked().
 ## Effects are [stat, "mul"|"add", amount] on the player's personal stats (player.gd add_personal, synced).
 
 const Seeded := preload("res://core/seeded.gd")
 const PickOrbs := preload("res://core/pick_orbs.gd")
+const Deep := preload("res://games/duo_arena/deep.gd")
 
 const OFFER := 3
 ## core/ui_kit.gd icon kinds the orbs use as pictures (StoryCard draws any of them; the gen test checks they exist).
 const UI_ICONS: Array[String] = ["heart", "star", "bolt", "play", "shield", "clock", "gem"]  # ("fireball" is Elemental Bender's story picture)
-const WAIT := {"mode": 10.0, "hero": 12.0, "perk": 12.0}
+const WAIT := {"mode": 10.0, "hero": 12.0, "perk": 12.0, "gift": 12.0}
+## Stages the whole team picks together (the first orb taken decides for everyone).
+const TEAM_STAGES: Array[String] = ["mode", "gift"]
 const MAX_NAME := 9
 ## Caps so stacked perks never break the game.
 const CAPS := {"fire_rate": [0.35, 2.0], "damage": [0.5, 4.0], "speed": [0.8, 1.6], "armor": [0.4, 1.0],
@@ -52,6 +56,8 @@ static func list(stage: String) -> Array[Dictionary]:
 			return MODES
 		"hero":
 			return HEROES
+		"gift":
+			return Deep.GIFTS
 	return PERKS
 
 
@@ -126,7 +132,7 @@ static func clamp_personal(personal: Dictionary) -> void:
 ## a fully stacked player (every perk, 20 waves of picks) stays inside the caps.
 static func check_lists(has_pic: Callable) -> Array[String]:
 	var why: Array[String] = []
-	for stage in ["mode", "hero", "perk"]:
+	for stage in ["mode", "hero", "perk", "gift"]:
 		var ids := {}
 		for d in list(stage):
 			if ids.has(d.id):

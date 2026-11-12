@@ -54,6 +54,10 @@ var slam_count := 0
 var speed_scale := 1.0
 var charge_t := 0.0  # dino: charging time left
 var charge_cd := 3.0
+var windup_t := 0.0  # dino: the charge's tell left (it stands still, its lane glows)
+var charge_dir := Vector3.ZERO  # dino: the lane it charges along (told)
+const CHARGE_TELL := 0.9
+const CHARGE_TELL_GENTLE := 1.4
 var jaw: Node3D
 var tail: Node3D
 var age := 0.0  # boss: lives longer -> enrages (slams more often)
@@ -504,18 +508,43 @@ func _dino_behaviour(delta: float, dist: float) -> void:
 		return  # raptors are fast enough already
 	charge_cd -= delta
 	var reach := 14.0 if kind == "rex" else 9.0
-	if charge_t > 0.0:
+	if windup_t > 0.0:  # TELL: stands and roars while its charge lane glows on the floor, then charges along it
+		windup_t -= delta
+		speed_scale = 0.0
+		if windup_t <= 0.0:
+			charge_t = _charge_secs()
+	elif charge_t > 0.0:
 		charge_t -= delta
-		speed_scale = 3.0 if kind == "rex" else 2.8
+		speed_scale = _charge_speed()
 		if charge_t <= 0.0:
 			speed_scale = 1.0
-	elif dist < reach and charge_cd <= 0.0 and slam_t > (4.0 if kind == "rex" else 1.0):  # (rex: never charge into a stomp tell)
-		charge_t = 1.5 if kind == "rex" else 1.3
-		charge_cd = 4.0 if kind == "rex" else 5.0
+			charge_dir = Vector3.ZERO
+	elif dist < reach and charge_cd <= 0.0 and slam_t > (4.0 if kind == "rex" else 1.0) + CHARGE_TELL_GENTLE:  # (rex: never charge into a stomp tell)
+		var target = main.nearest_player(global_position)
+		if target == null:
+			return
+		var to: Vector3 = target.global_position - global_position
+		to.y = 0.0
+		if to.length() < 0.1:
+			return
+		charge_dir = to.normalized()
+		windup_t = CHARGE_TELL_GENTLE if main.game_mode == "gentle" else CHARGE_TELL
+		charge_cd = (4.0 if kind == "rex" else 5.0) + windup_t
+		var lane := speed * _charge_speed() * _charge_secs() + radius
+		main.tell_shape("line", global_position, charge_dir, Vector2(lane, radius * 2.0 + 0.8), Looks.CHARGE_WARN, windup_t,
+			{"style": "flash", "stay": _charge_secs() * 0.6})
 		main.sound("roar", -2.0, 0.8 if kind == "rex" else 1.2)
 		if not has_meta("roared"):
 			set_meta("roared", true)
-			print("Dino charge")
+			print("Dino charge (told %.1f s)" % windup_t)
+
+
+func _charge_secs() -> float:
+	return 1.5 if kind == "rex" else 1.3
+
+
+func _charge_speed() -> float:
+	return 3.0 if kind == "rex" else 2.8
 
 
 func _physics_process(delta: float) -> void:
@@ -556,6 +585,8 @@ func _physics_process(delta: float) -> void:
 			_rex_behaviour(delta)
 		if is_dino() and kind != "ptero" and kind != "ankylo":
 			_dino_behaviour(delta, dist)
+		if (charge_t > 0.0 or windup_t > 0.0) and charge_dir != Vector3.ZERO:
+			dir = charge_dir  # a told charge goes straight down its lane (step out of it)
 		if kind == "ptero":
 			dir = _ptero_behaviour(delta, dir, dist)
 		if ranged:
@@ -661,6 +692,8 @@ func _rex_behaviour(delta: float) -> void:
 		main.boss_warn(global_position, float(n.radius), Looks.BOSS_WARN, slam_t)
 		main.sound("roar", 0.0, 0.7)
 		charge_t = 0.0
+		windup_t = 0.0
+		charge_dir = Vector3.ZERO
 	if slam_t <= tell:
 		mat.emission_energy_multiplier = 0.5 + (1.0 - slam_t / tell) * 5.0
 		speed_scale = 0.0

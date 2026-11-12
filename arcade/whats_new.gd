@@ -33,6 +33,12 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "duo2-friends", "date": "2026-11-12", "game": "duo_arena", "pic": "sproutbot", "line": "Save Nova's lost friends!", "try": {"DA_ZONE": "jungle"}},
+	{"id": "duo2-gifts", "date": "2026-11-12", "game": "duo_arena", "pic": "novazap", "line": "Nova's gifts after bosses!"},
+	{"id": "duo2-surprises", "date": "2026-11-12", "game": "duo_arena", "pic": "coconut", "line": "Coconuts! Watch the rings!", "try": {"DA_ZONE": "jungle"}},
+	{"id": "duo2-shapes", "date": "2026-11-12", "game": "duo_arena", "pic": "nova", "line": "New arena shapes + spring"},
+	{"id": "duo2-city", "date": "2026-11-12", "game": "duo_arena", "pic": "lightpark", "line": "Nova's city grows!"},
+	{"id": "duo2-seasons", "date": "2026-11-12", "game": "duo_arena", "pic": "snowflake", "line": "Seasons in the arena!", "try": {"ARCADE_SEASON_DUO_ARENA": "winter"}},
 	{"id": "hns-rumble", "date": "2026-11-12", "game": "hide_and_seek", "pic": "hoover", "line": "Rumble the robot hoover!"},
 	{"id": "hns-gifts", "date": "2026-11-12", "game": "hide_and_seek", "pic": "shieldbubble", "line": "Pip's gifts!"},
 	{"id": "hns-kennel", "date": "2026-11-12", "game": "hide_and_seek", "pic": "kennel", "line": "Pip's kennel grows!"},
