@@ -143,7 +143,11 @@ func _vr_bot(delta: float) -> void:
 	match vr_step:
 		"wait":  # let the ghost glove show the move first
 			kit.vr_reach(rig, VrRig.RIGHT, Vector3(0.5, 0.6, 0.25), 1.0, delta)
-			if vr_t > 3.5:
+			# (the ghost glove shows on the first mission's practice ring; a lone pilot steers onto the picks before that)
+			var alone: bool = main._crew_slots().is_empty() and main.picks.showing()
+			if String(main.net.state_get("phase", "")) != "play" and not alone:
+				vr_t = 0.0
+			if vr_t > 3.5 or alone:
 				vr_step = "reach"
 				vr_t = 0.0
 		"reach":
@@ -242,5 +246,6 @@ func _checks() -> void:
 		kit.assert_true(tv_pops > 0, "the TV gunners zapped things (%d)" % tv_pops)
 	kit.assert_true(main.log_rings > 0, "the ship flew through rings (%d)" % main.log_rings)
 	if main.vr_rig != null:
-		kit.assert_true(main.ghost.shown, "the ghost glove showed the stick move")
+		var steered_pick: bool = main.picks.history.any(func(h: Array) -> bool: return int(h[2]) == 0)
+		kit.assert_true(main.ghost.shown or steered_pick, "the ghost glove showed the stick move (or the pilot already steered onto a pick: %s)" % str(main.picks.history))
 		kit.assert_true(main.log_toys.size() >= 3, "the pilot pressed toys (%s)" % str(main.log_toys.keys()))

@@ -5,7 +5,8 @@ extends Node3D
 ## SECTOR (ice crystals and snowmen). Seasonal dust streams past the ship (one CPUParticles3D) and a few little
 ## floating SECTOR ISLANDS, each with a seasonal prop on top (core/season_kit.gd), glide slowly past far out to the
 ## sides (clear of the rings, the pick orbs and the surprises, which all stay within space.gd LIMIT + a few metres).
-## One merged mesh per island + one particle node: cheap on the Frame.
+## One merged mesh per island + one particle node (the dust fades before it reaches the ship: never a big square in
+## the pilot's face or the TV camera): cheap on the Frame.
 ##   set_season(name)
 
 const MeshKit := preload("res://core/mesh_kit.gd")
@@ -50,8 +51,8 @@ func set_season(s: String) -> void:
 		add_child(mi)
 		mi.position = ISLANDS[i]
 		islands.append(mi)
-	drift = SeasonKit.drift(sd.drift, s, {"amount": 90, "lifetime": 5.0, "box": Vector3(18.0, 9.0, 30.0),
-		"at": Vector3(0.0, 2.0, -70.0), "size": 0.35, "speed": Vector2(14.0, 22.0), "dir": Vector3(0.0, 0.0, 1.0)})
+	drift = SeasonKit.drift(sd.drift, s, {"amount": 90, "lifetime": 2.4, "box": Vector3(18.0, 9.0, 30.0),
+		"at": Vector3(0.0, 2.0, -95.0), "size": 0.45 if s == "winter" else 0.55, "speed": Vector2(14.0, 22.0), "dir": Vector3(0.0, 0.0, 1.0)})
 	drift.spread = 4.0
 	drift.gravity = Vector3.ZERO
 	add_child(drift)

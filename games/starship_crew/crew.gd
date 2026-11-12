@@ -31,12 +31,13 @@ func set_count(n: int, pop: bool = false) -> void:
 		pod.name = "CrewPod%d" % i
 		add_child(pod)
 		pod.position = Deep.CREW_SPOTS[i]
+		pod.scale = Vector3.ONE * Deep.CREW_SCALE
 		pod.rotation.y = 0.35 * signf(Deep.CREW_SPOTS[i].x)  # turned a little towards the ship
 		pods.append(pod)
 	if grew and pop and n > 0:
 		var last: Node3D = pods[n - 1]
 		last.scale = Vector3.ONE * 0.05
-		last.create_tween().tween_property(last, "scale", Vector3.ONE, 0.7).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		last.create_tween().tween_property(last, "scale", Vector3.ONE * Deep.CREW_SCALE, 0.7).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 		main.confetti(last.position + Vector3(0, 0.8, 0), Deep.CREW[n - 1].color, 40)
 		main.sfx.play_at("sparkle", last.position, -2.0, 1.0)
 

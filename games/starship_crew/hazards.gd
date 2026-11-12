@@ -166,8 +166,8 @@ func _place() -> void:
 			var lane := (float((k * 5 + 3) % 7) / 6.0 * 2.0 - 1.0) * float(now.w) * 0.8
 			var p := Vector3(float(now.x) + lane - off.x, across * (Space.LIMIT.y + 1.0) - off.y + Space.SHIP_Y, z) if int(now.vert) == 1 \
 				else Vector3(across * (Space.LIMIT.x + 2.0) - off.x, float(now.y) + lane - off.y + Space.SHIP_Y, z)
-			var show := z > -130.0 and z < Space.GONE_Z
-			var s := (0.7 + 0.1 * float(k % 4)) if show else 0.0001
+			var show := z > -130.0 and z < 1.0  # (gone once past the ship: never into the TV camera)
+			var s := (0.5 + 0.08 * float(k % 4)) if show else 0.0001
 			mm.set_instance_transform(k, Transform3D(Basis.from_euler(Vector3(age * 2.0 + k, age * 1.3 + k * 0.7, 0.0)).scaled(Vector3.ONE * s), p))
 	if sun != null and is_instance_valid(sun):
 		sun.position = Vector3(c.x, c.y, -160.0)

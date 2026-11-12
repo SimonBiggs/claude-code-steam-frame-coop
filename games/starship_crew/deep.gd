@@ -95,13 +95,14 @@ const CREW: Array[Dictionary] = [
 ]
 ## Where the crew pods fly (world, beside the ship; the ship never moves): left and right in turn, clear of the wing
 ## turrets, the TV camera's edges (a Deck is narrower than a TV) and the pilot's view ahead.
-const CREW_SPOTS: Array[Vector3] = [Vector3(-5.4, 1.5, -2.6), Vector3(5.4, 1.5, -2.6), Vector3(-5.0, -0.5, 0.2), Vector3(5.0, -0.5, 0.2),
-	Vector3(-6.8, 2.6, -5.0), Vector3(6.8, 2.6, -5.0), Vector3(-6.4, 0.3, -6.5), Vector3(6.4, 0.3, -6.5)]
+const CREW_SPOTS: Array[Vector3] = [Vector3(-5.4, 1.5, -2.6), Vector3(5.4, 1.5, -2.6), Vector3(-5.0, -0.6, 0.6), Vector3(5.0, -0.6, 0.6),
+	Vector3(-7.6, 4.2, -7.5), Vector3(7.6, 4.2, -7.5), Vector3(-9.0, 0.4, -10.0), Vector3(9.0, 0.4, -10.0)]
+const CREW_SCALE := 0.8
 ## The pick row: three big orbs in space ahead of the ship, above its usual line (space x, y; world z).
-const ROW_X: Array[float] = [-4.2, 0.0, 4.2]
+const ROW_X: Array[float] = [-4.6, 0.0, 4.6]
 const ROW_Y := 2.4
 const ROW_Z := -12.0
-const ORB_SCALE := 1.3
+const ORB_SCALE := 1.7
 const LINE_R := 1.3  # the ship's middle this near an orb (across) is lined up with it
 const DWELL := 0.7  # seconds it must stay lined up (sliding past never picks)
 const ORB_PULL := 0.6  # a lined-up orb gently holds the ship (share a second)
