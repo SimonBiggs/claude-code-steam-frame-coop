@@ -4,7 +4,7 @@ extends RefCounted
 ## pic._p(x, y) / pic._circle(x, y, r, c) / pic._poly(pts, c) / pic._eye(x, y, r) / pic.draw_*(...), size = pic.size,
 ## t = the picture's clock, bob = its gentle bob, color = the card's colour.
 
-const NAMES: Array[String] = ["captain", "planet", "station"]
+const NAMES: Array[String] = ["captain", "planet", "station", "tractorbeam", "megalaser", "solarflare"]
 
 
 static func draw(pic, kind: String, t: float, bob: float, color: Color) -> void:
@@ -49,3 +49,23 @@ static func draw(pic, kind: String, t: float, bob: float, color: Color) -> void:
 			for k in 8:
 				var a2 := spin + k * TAU / 8.0
 				pic._circle(0.5 + cos(a2) * 0.36, 0.5 + sin(a2) * 0.36, 0.03, [Color(1, 0.5, 0.6), Color(0.5, 0.9, 1), Color(1, 0.9, 0.4)][k % 3])
+		"tractorbeam":  # a little ship with a green beam pulling a glowing ring up to it
+			pic._poly([[0.3, 0.38 + bob], [0.5, 0.18 + bob], [0.7, 0.38 + bob], [0.62, 0.44 + bob], [0.38, 0.44 + bob]], Color(0.95, 0.96, 1.0))
+			pic._circle(0.5, 0.33 + bob, 0.06, Color(0.5, 0.85, 1.0))
+			pic._poly([[0.4, 0.44 + bob], [0.6, 0.44 + bob], [0.8, 0.9], [0.2, 0.9]], Color(0.45, 1.0, 0.5, 0.45))
+			pic.draw_arc(pic._p(0.5, 0.78 - 0.05 * sin(t * 3.0)), 0.13 * size.x, 0.0, TAU, 28, Color(0.5, 1.0, 0.95), 0.035 * size.x)
+		"megalaser":  # a big pink laser beam zapping a space rock into sparkles
+			pic._poly([[0.08, 0.62], [0.24, 0.55], [0.24, 0.72], [0.08, 0.7]], Color(0.4, 0.42, 0.5))
+			pic._poly([[0.24, 0.58], [0.66, 0.36], [0.7, 0.46], [0.24, 0.68]], Color(1.0, 0.4, 0.7))
+			pic._poly([[0.24, 0.61], [0.66, 0.4], [0.68, 0.43], [0.24, 0.65]], white)
+			pic._circle(0.76, 0.36, 0.12, Color(0.65, 0.55, 0.48))
+			for k in 6:
+				var a := t * 2.0 + k * TAU / 6.0
+				pic._circle(0.76 + cos(a) * 0.19, 0.36 + sin(a) * 0.19, 0.025, Color(1.0, 0.9, 0.4))
+		"solarflare":  # a smiling hot sun with a big pink flare looping out of it
+			pic.draw_arc(pic._p(0.62, 0.42 + bob), 0.24 * size.x, PI * 0.9, PI * 1.9, 24, Color(1.0, 0.3, 0.6), 0.07 * size.x)
+			pic._circle(0.45, 0.58 + bob, 0.26, Color(1.0, 0.75, 0.25))
+			pic._circle(0.45, 0.58 + bob, 0.19, Color(1.0, 0.88, 0.45))
+			pic._eye(0.38, 0.55 + bob, 0.04)
+			pic._eye(0.52, 0.55 + bob, 0.04)
+			pic.draw_arc(pic._p(0.45, 0.62 + bob), 0.07 * size.x, 0.3, PI - 0.3, 12, Color(0.6, 0.25, 0.1), 3.0)
