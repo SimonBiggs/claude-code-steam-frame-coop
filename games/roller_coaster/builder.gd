@@ -395,14 +395,14 @@ func _touches() -> void:
 			continue
 		if h == VrRig.RIGHT and rig.in_wrist_zone(hp):
 			continue  # the right hand is pressing the wrist MENU
-		if lever.visible and _touch("lever", hp, lever.global_position + Vector3.UP * 1.3, TOUCH_R * 1.3):
+		if lever.visible and _touch("lever", h, hp, lever.global_position + Vector3.UP * 1.3, TOUCH_R * 1.3):
 			lever_t = 0.6
 			rig.pulse(h, 0.8, 0.1)
 			main.pull_lever()
-		if close_btn.visible and _touch("close", hp, close_btn.global_position, TOUCH_R):
+		if close_btn.visible and _touch("close", h, hp, close_btn.global_position, TOUCH_R):
 			rig.pulse(h, 0.6, 0.08)
 			main.close_loop()
-		if seat.visible and _touch("seat", hp, seat.global_position, TOUCH_R):
+		if seat.visible and _touch("seat", h, hp, seat.global_position, TOUCH_R):
 			seat_on = not seat_on
 			rig.pulse(h, 0.5, 0.06)
 			main.sound("honk" if seat_on else "ui_back", -4.0, 1.2)
@@ -411,9 +411,11 @@ func _touches() -> void:
 
 
 ## True once per touch (a short cooldown, and the hand must leave first).
-func _touch(key: String, hp: Vector3, at: Vector3, r: float) -> bool:
+## One press per hand going in (the key is per hand: one shared key let the OTHER hand, outside, clear it every frame,
+## so a hand resting on the RIDE car toggled the ride on and off each frame - 2026-11-12, networked VR host bots).
+func _touch(key: String, h: int, hp: Vector3, at: Vector3, r: float) -> bool:
 	var inside := hp.distance_to(at) < r
-	var k := key + ("_in")
+	var k := "%s_%d" % [key, h]
 	if not inside:
 		touch_cool.erase(k)
 		return false

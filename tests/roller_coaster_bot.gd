@@ -52,9 +52,10 @@ func _ready() -> void:
 	var vr := OS.has_environment("BOT_VR")
 	var flat := host and OS.has_environment("DUO_FLAT_HOST")  # a flat host: P1 builds with a pad, like local play
 	var t0 := 3.0 if client else 1.0
+	var late := float(OS.get_environment("BOT_LATE")) if OS.has_environment("BOT_LATE") else 0.0  # (tools/multibot.ts --late)
 	kit.at(t0, "%d TV players press A" % want, _join)
 	if client or (host and not flat and not vr):
-		kit.at(62.0 if client else 70.0, "finish", func() -> void:
+		kit.at((62.0 - late) if client else 70.0, "finish", func() -> void:  # (a late joiner ends before the host does)
 			_checks()
 			kit.finish())
 	elif vr and not flat:  # local, or a VR host (the TV machines ride)
@@ -82,7 +83,7 @@ func _ready() -> void:
 		kit.at(70.0, "finish", func() -> void:
 			_checks()
 			kit.finish())
-	kit.at(57.5, "second pass: picks, weather, season, toy fair", _deep_checks)  # (before dev.bots' 60 s cut)
+	kit.at(57.5 - late, "second pass: picks, weather, season, toy fair", _deep_checks)  # (before dev.bots' 60 s cut)
 	kit.every(2.0, _report)
 
 
@@ -379,7 +380,9 @@ func _deep_watch(delta: float) -> void:
 		orbs_serial = p.shown_serial
 		orbs_t = 0.0
 	orbs_t += delta
-	if p.shown_stage == "" or p.taken_serial == p.shown_serial or pressed_serial == p.shown_serial or orbs_t < 1.3:
+	# With a VR builder at the table (here or on the host) the TV riders give the giant first go (its hand takes ~2 s to
+	# reach an orb): a networked rider's 1.3 s press used to beat the reach and fail "the VR builder picked by reaching".
+	if p.shown_stage == "" or p.taken_serial == p.shown_serial or pressed_serial == p.shown_serial or orbs_t < (4.0 if main.vr_builder_here() else 1.3):
 		return
 	var slots: Array = main.party.local_slots()
 	if slots.is_empty() or main.vr_rig != null:
