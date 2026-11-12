@@ -33,6 +33,11 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "rush-gifts", "date": "2026-11-12", "game": "obstacle_rush", "pic": "springshoes", "line": "Spring shoes! Glide capes!", "try": {"OR_GIFT": "springs"}},
+	{"id": "rush-surprises", "date": "2026-11-12", "game": "obstacle_rush", "pic": "swinglog", "line": "Logs swing! Water rises!", "try": {"OR_TRICKS_NOW": "1", "OR_MODE": "brave"}},
+	{"id": "rush-modes", "date": "2026-11-12", "game": "obstacle_rush", "pic": "coach", "line": "Gentle, brave or hard!"},
+	{"id": "rush-medals", "date": "2026-11-12", "game": "obstacle_rush", "pic": "medal", "line": "Win medals for the hall!"},
+	{"id": "rush-seasons", "date": "2026-11-12", "game": "obstacle_rush", "pic": "snowflake", "line": "A snowy course!", "try": {"OR_SEASON": "winter"}},
 	{"id": "giants-gifts", "date": "2026-11-12", "game": "giants_table", "pic": "shieldbubble", "line": "Sparky's gifts for you!", "try": {"GT_GIFT": "helpers"}},
 	{"id": "giants-tricks", "date": "2026-11-12", "game": "giants_table", "pic": "barrel", "line": "Goblin tricks! Catch them!", "try": {"GT_TRICKS_NOW": "1", "GT_MODE": "brave"}},
 	{"id": "giants-modes", "date": "2026-11-12", "game": "giants_table", "pic": "sparky", "line": "Gentle, brave or hard!"},
