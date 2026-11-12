@@ -37,6 +37,7 @@ func _ready() -> void:
 	box.size = Vector3.ONE
 	var mat := StandardMaterial3D.new()
 	mat.vertex_color_use_as_albedo = true
+	mat.vertex_color_is_srgb = true
 	mat.roughness = 0.9
 	box.material = mat
 	_debris_mm = MultiMesh.new()
@@ -287,6 +288,7 @@ func _make(kind: String) -> CPUParticles3D:
 			p.initial_velocity_max = 5.0
 	var mat := StandardMaterial3D.new()
 	mat.vertex_color_use_as_albedo = true
+	mat.vertex_color_is_srgb = true
 	mat.albedo_color = col
 	if col.a < 0.99:
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA

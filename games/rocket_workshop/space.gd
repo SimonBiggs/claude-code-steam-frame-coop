@@ -183,6 +183,7 @@ func _build_map() -> void:
 	a.multimesh = map_planets
 	var pm := StandardMaterial3D.new()
 	pm.vertex_color_use_as_albedo = true
+	pm.vertex_color_is_srgb = true
 	pm.emission_enabled = true
 	pm.emission = Color(0.3, 0.3, 0.3)
 	a.material_override = pm
@@ -311,6 +312,7 @@ func _build_diorama() -> void:
 	smi.multimesh = stars
 	var stm := StandardMaterial3D.new()
 	stm.vertex_color_use_as_albedo = true
+	stm.vertex_color_is_srgb = true
 	stm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	stm.disable_fog = true
 	smi.material_override = stm
@@ -384,6 +386,7 @@ func _build_diorama() -> void:
 	fsm.rings = 3
 	var fmat := StandardMaterial3D.new()
 	fmat.vertex_color_use_as_albedo = true
+	fmat.vertex_color_is_srgb = true
 	fmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	fmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	fsm.material = fmat
@@ -527,6 +530,7 @@ func _dio_confetti(at: Vector3) -> void:
 	bm.size = Vector3(0.25, 0.04, 0.35)
 	var m := StandardMaterial3D.new()
 	m.vertex_color_use_as_albedo = true
+	m.vertex_color_is_srgb = true
 	m.emission_enabled = true
 	m.emission = Color(0.4, 0.4, 0.4)
 	bm.material = m

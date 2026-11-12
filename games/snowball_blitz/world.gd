@@ -402,6 +402,7 @@ static func _add_village_square(main: Node3D, radius: float, rng: RandomNumberGe
 		gift_c.append(gc[i % 4])
 	var gift_mat := StandardMaterial3D.new()
 	gift_mat.vertex_color_use_as_albedo = true
+	gift_mat.vertex_color_is_srgb = true
 	gift_mat.roughness = 0.6
 	main.add_child(_mm_instance(BoxMesh.new(), gift_mat, gifts, gift_c))
 	# A white picket fence ring just outside the lamps.

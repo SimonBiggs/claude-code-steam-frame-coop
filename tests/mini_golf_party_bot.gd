@@ -3,7 +3,7 @@ extends Node
 ## hole's aim point and hold A for about the right power; the fake VR golfer (BOT_VR=1) teleports
 ## to its ball with A and swings the putter through it, and plays with the toys (duck, spare ball).
 ## Design check: every hole gets holed by the aiming bots within par + 3 on average.
-## Local:     godot --headless --path . --fixed-fps 60 --quit-after 12000 res://tests/mini_golf_party_bot.tscn
+## Local:     godot-test --headless --path . --fixed-fps 60 --quit-after 12000 res://tests/mini_golf_party_bot.tscn
 ## Networked: DUO_PORT=83xx DUO_HOST=1 BOT_VR=1 ... & DUO_PORT=83xx DUO_JOIN=127.0.0.1 ... (real time)
 ## Flat host: add DUO_FLAT_HOST=1 to the host (one bot pad plays on the host). DUO_MACHINE_KIND=deck: the
 ## Deck follow camera. Every machine checks it can SEE its own players' balls (in its camera's view, with

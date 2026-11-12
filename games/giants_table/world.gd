@@ -401,6 +401,7 @@ static func _build_terrain(main: Node3D) -> void:
 	terrain.mesh = st.commit()
 	var m := StandardMaterial3D.new()
 	m.vertex_color_use_as_albedo = true
+	m.vertex_color_is_srgb = true
 	m.roughness = 0.95
 	m.cull_mode = BaseMaterial3D.CULL_DISABLED
 	terrain.material_override = m

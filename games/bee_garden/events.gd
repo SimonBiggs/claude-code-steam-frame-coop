@@ -88,6 +88,7 @@ func _ready() -> void:
 	var rm := rs.commit()
 	var rmat := StandardMaterial3D.new()
 	rmat.vertex_color_use_as_albedo = true
+	rmat.vertex_color_is_srgb = true
 	rmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	rmat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	rmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA

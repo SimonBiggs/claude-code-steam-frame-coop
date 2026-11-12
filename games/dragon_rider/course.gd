@@ -190,6 +190,7 @@ func _rainbow(pts: Array) -> void:
 	var m := st.commit()
 	var mt := StandardMaterial3D.new()
 	mt.vertex_color_use_as_albedo = true
+	mt.vertex_color_is_srgb = true
 	mt.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mt.cull_mode = BaseMaterial3D.CULL_DISABLED
 	mt.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -287,6 +288,7 @@ func critter_mesh(c: Color) -> ArrayMesh:
 	var m := st.commit()
 	var mt := StandardMaterial3D.new()
 	mt.vertex_color_use_as_albedo = true
+	mt.vertex_color_is_srgb = true
 	mt.roughness = 0.7
 	mt.emission_enabled = true
 	mt.emission = Color(0.25, 0.22, 0.25)
@@ -407,6 +409,7 @@ func _house_mesh(kind: String) -> ArrayMesh:
 	var m := st.commit()
 	var mt := StandardMaterial3D.new()
 	mt.vertex_color_use_as_albedo = true
+	mt.vertex_color_is_srgb = true
 	mt.roughness = 0.8
 	m.surface_set_material(0, mt)
 	main.meshes[key] = m
@@ -427,6 +430,7 @@ func _blades_mesh() -> ArrayMesh:
 	var m := st.commit()
 	var mt := StandardMaterial3D.new()
 	mt.vertex_color_use_as_albedo = true
+	mt.vertex_color_is_srgb = true
 	mt.cull_mode = BaseMaterial3D.CULL_DISABLED
 	m.surface_set_material(0, mt)
 	main.meshes["mill_blades"] = m

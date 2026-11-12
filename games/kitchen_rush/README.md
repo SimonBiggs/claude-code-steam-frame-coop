@@ -155,15 +155,15 @@ fires and raccoons come more often (fires need more sprays). Restart after game 
 ## Test
 
 ```sh
-godot --headless --path . --fixed-fps 60 --quit-after 9000 res://tests/kitchen_rush_bot.tscn
-BOT_PLAYERS=6 godot --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/kitchen_rush_bot.tscn
-DUO_PORT=7784 DUO_HOST=1 timeout 130 godot --headless --path . res://tests/kitchen_rush_bot.tscn &
-DUO_PORT=7784 DUO_JOIN=127.0.0.1 BOT_PLAYERS=4 timeout 123 godot --headless --path . res://tests/kitchen_rush_bot.tscn
-BOT_VR=1 godot --headless --path . --fixed-fps 60 --quit-after 4800 res://tests/kitchen_rush_bot.tscn   # VR chef code, bot hands
-KR_START_SHIFT=3 BOT_PLAYERS=4 godot --headless --path . --fixed-fps 60 --quit-after 5400 res://tests/kitchen_rush_bot.tscn  # dinner rush + day end
-KR_LAZY=1 godot --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/kitchen_rush_bot.tscn  # simple: no game over; full: game over + awards + restart
-DUO_PORT=7784 DUO_HOST=1 BOT_VR=1 timeout 100 godot --headless --path . res://tests/kitchen_rush_bot.tscn  # solo VR: kitchen helpers
-KR_START_SHIFT=5 KR_TAUGHT=1 BOT_PLAYERS=6 godot --headless --path . --fixed-fps 60 --quit-after 9000 res://tests/kitchen_rush_bot.tscn  # party dishes
-godot --headless --path . -s res://tests/kitchen_rush_rounds_test.gd   # party round validator (SEEDS=300 for more)
+godot-test --headless --path . --fixed-fps 60 --quit-after 9000 res://tests/kitchen_rush_bot.tscn
+BOT_PLAYERS=6 godot-test --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/kitchen_rush_bot.tscn
+DUO_PORT=7784 DUO_HOST=1 timeout 130 godot-test --headless --path . res://tests/kitchen_rush_bot.tscn &
+DUO_PORT=7784 DUO_JOIN=127.0.0.1 BOT_PLAYERS=4 timeout 123 godot-test --headless --path . res://tests/kitchen_rush_bot.tscn
+BOT_VR=1 godot-test --headless --path . --fixed-fps 60 --quit-after 4800 res://tests/kitchen_rush_bot.tscn   # VR chef code, bot hands
+KR_START_SHIFT=3 BOT_PLAYERS=4 godot-test --headless --path . --fixed-fps 60 --quit-after 5400 res://tests/kitchen_rush_bot.tscn  # dinner rush + day end
+KR_LAZY=1 godot-test --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/kitchen_rush_bot.tscn  # simple: no game over; full: game over + awards + restart
+DUO_PORT=7784 DUO_HOST=1 BOT_VR=1 timeout 100 godot-test --headless --path . res://tests/kitchen_rush_bot.tscn  # solo VR: kitchen helpers
+KR_START_SHIFT=5 KR_TAUGHT=1 BOT_PLAYERS=6 godot-test --headless --path . --fixed-fps 60 --quit-after 9000 res://tests/kitchen_rush_bot.tscn  # party dishes
+godot-test --headless --path . -s res://tests/kitchen_rush_rounds_test.gd   # party round validator (SEEDS=300 for more)
 ```
 (Use `godot-test` with an explicit `DUO_PORT` for all of these on the Steam Machine.)

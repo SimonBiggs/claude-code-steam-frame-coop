@@ -122,9 +122,9 @@ code for anything the giant can throw.
 
 ```sh
 godot-test --headless --path . -s res://tests/giants_table_gen_test.gd   # the raid validator (SEEDS=500 for more)
-godot --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/giants_table_bot.tscn
-DUO_PORT=7781 DUO_HOST=1 timeout 75 godot --headless --path . res://tests/giants_table_bot.tscn &
-DUO_PORT=7781 DUO_JOIN=127.0.0.1 timeout 68 godot --headless --path . res://tests/giants_table_bot.tscn
+godot-test --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/giants_table_bot.tscn
+DUO_PORT=7781 DUO_HOST=1 timeout 75 godot-test --headless --path . res://tests/giants_table_bot.tscn &
+DUO_PORT=7781 DUO_JOIN=127.0.0.1 timeout 68 godot-test --headless --path . res://tests/giants_table_bot.tscn
 ```
 
 Bot options: `GT_FAKE_VR=1` (or `BOT_VR=1`) runs the VR giant code without a headset (the bot moves the controller

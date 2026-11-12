@@ -3,7 +3,7 @@ extends Node
 ## cursor mayor in slot 0) lays out roads and buildings from the tray; TV bot drivers pick vehicles
 ## and follow their job arrows (A* along the town's roads) to deliver, build and put out a fire. The
 ## town should grow past its first milestone (TT_FAST=1), then the town is saved and reloaded.
-## Local:     TT_FAST=1 godot --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/tiny_town_tycoon_bot.tscn
+## Local:     TT_FAST=1 godot-test --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/tiny_town_tycoon_bot.tscn
 ## Networked: DUO_PORT=8070 DUO_HOST=1 BOT_VR=1 ... & DUO_PORT=8070 DUO_JOIN=127.0.0.1 BOT_PLAYERS=3 ...
 ## SIMPLE_MODE (Defs.SIMPLE_MODE): no island select, events, goals or results; the mayor does the
 ## practice first (road from the glowing spot, then the house beside it), new blocks unlock one at a

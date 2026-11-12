@@ -202,6 +202,7 @@ func _build_bunting() -> void:
 	mmi.multimesh = mm
 	var mat := StandardMaterial3D.new()
 	mat.vertex_color_use_as_albedo = true
+	mat.vertex_color_is_srgb = true
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	mmi.material_override = mat
 	add_child(mmi)

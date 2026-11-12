@@ -295,6 +295,7 @@ func _build_rig() -> void:
 	nmi.multimesh = notes_mm
 	var nm := StandardMaterial3D.new()
 	nm.vertex_color_use_as_albedo = true
+	nm.vertex_color_is_srgb = true
 	nm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	nmi.material_override = nm
 	nmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

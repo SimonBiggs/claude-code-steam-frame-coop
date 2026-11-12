@@ -70,6 +70,7 @@ func _ready() -> void:
 	_ring_mat = StandardMaterial3D.new()
 	_ring_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_ring_mat.vertex_color_use_as_albedo = true
+	_ring_mat.vertex_color_is_srgb = true
 	_ring_mat.albedo_color = Art.RING_TINT
 
 

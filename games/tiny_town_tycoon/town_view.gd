@@ -547,6 +547,7 @@ func _refresh_status() -> void:
 		sm.sphere(1.0, MeshKit.at(Vector3.ZERO), Color(1, 1, 1), 8)
 		var mat := StandardMaterial3D.new()
 		mat.vertex_color_use_as_albedo = true
+		mat.vertex_color_is_srgb = true
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		mat.roughness = 1.0
 		_smoke = _mm(sm.build(mat))
@@ -577,6 +578,7 @@ func _make_fire(at: Vector3) -> CPUParticles3D:
 	bm.size = Vector3.ONE * 0.008
 	var mat := StandardMaterial3D.new()
 	mat.vertex_color_use_as_albedo = true
+	mat.vertex_color_is_srgb = true
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	bm.material = mat
 	p.mesh = bm

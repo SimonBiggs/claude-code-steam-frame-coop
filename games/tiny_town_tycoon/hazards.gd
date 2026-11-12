@@ -240,6 +240,7 @@ static func _leaf_mesh() -> Mesh:
 		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		m.cull_mode = BaseMaterial3D.CULL_DISABLED
 		m.vertex_color_use_as_albedo = true
+		m.vertex_color_is_srgb = true
 		m.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
 		q.material = m
 		return q) as Mesh
@@ -256,6 +257,7 @@ static func _puff_mesh() -> Mesh:
 		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		m.vertex_color_use_as_albedo = true
+		m.vertex_color_is_srgb = true
 		m.albedo_color = Color(0.92, 0.9, 1.0, 1.0)
 		m.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under the VR cards
 		sm.material = m

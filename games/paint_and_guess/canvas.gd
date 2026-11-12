@@ -285,6 +285,7 @@ func _build_pots() -> void:
 	pots_mm.multimesh = mm
 	var mat := StandardMaterial3D.new()
 	mat.vertex_color_use_as_albedo = true
+	mat.vertex_color_is_srgb = true
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	pots_mm.material_override = mat
 	board_root.add_child(pots_mm)
@@ -1003,6 +1004,7 @@ func _build_tv_cursors() -> void:
 	tv_cursors.multimesh = mm
 	var mat := StandardMaterial3D.new()
 	mat.vertex_color_use_as_albedo = true
+	mat.vertex_color_is_srgb = true
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	tv_cursors.material_override = mat
 	board_root.add_child(tv_cursors)
@@ -1158,6 +1160,7 @@ func show_vote(pics: Array, numbered: bool = true) -> void:
 	vote_marks.multimesh = mm
 	var mat := StandardMaterial3D.new()
 	mat.vertex_color_use_as_albedo = true
+	mat.vertex_color_is_srgb = true
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	vote_marks.material_override = mat
 	vote_root.add_child(vote_marks)
