@@ -6,6 +6,7 @@ const HudKit := preload("res://core/hud_kit.gd")
 const UiKit := preload("res://core/ui_kit.gd")
 const PickOrbs := preload("res://core/pick_orbs.gd")
 const StoryCard := preload("res://core/story_card.gd")
+const VrRig := preload("res://core/vr_rig.gd")
 
 var fails: Array[String] = []
 var world: Node3D
@@ -238,6 +239,50 @@ func _run() -> void:
 		var path := "res://games/%s/main.gd" % dir
 		if FileAccess.file_exists(path) and FileAccess.get_file_as_string(path).contains("vr_card(self, vr_rig.camera, \"PAUSED\""):
 			_check(false, "%s: use HudKit.vr_paused for the VR PAUSED card" % path)
+
+	# 7. the fake VR head stands where a real Steam Frame player's head is (VrViewCheck.head_problems, VrRig.fake_stand)
+	_check(VrViewCheck.head_problems(cam).is_empty(), "a head 1.6 m up under an XROrigin3D is a real one")
+	var flat := Camera3D.new()
+	world.add_child(flat)
+	flat.position = Vector3(0, 6, 8)
+	var rider := XRCamera3D.new()
+	flat.add_child(rider)
+	rider.current = false
+	_check(not VrViewCheck.head_problems(rider).is_empty(), "a head riding on a flat camera is reported")
+	flat.free()
+	XRServer.world_scale = 10.0
+	_check(not VrViewCheck.head_problems(cam).is_empty(), "1.6 world units up in a x10 world (ant's eyes) is reported")
+	VrRig.fake_stand(cam, null, null, 10.0)
+	_check(VrViewCheck.head_problems(cam).is_empty() and is_equal_approx(cam.position.y, 16.0), "fake_stand times world_scale: %.2f" % cam.position.y)
+	XRServer.world_scale = 20.0  # a game scales its world later: FakeTracking moves the head like real tracking
+	await _frames(2)
+	_check(is_equal_approx(cam.position.y, 32.0), "FakeTracking rescales the head with world_scale: %.2f" % cam.position.y)
+	XRServer.world_scale = 1.0
+	await _frames(2)
+	_check(is_equal_approx(cam.position.y, 1.6), "and back at world_scale 1: %.2f" % cam.position.y)
+	OS.set_environment("BOT_VR_SEATED", "1")
+	VrRig.fake_stand(cam)
+	_check(is_equal_approx(cam.position.y, VrRig.FAKE_EYE_SEATED) and VrViewCheck.head_problems(cam).is_empty(), "BOT_VR_SEATED sits the fake player down: %.2f" % cam.position.y)
+	OS.unset_environment("BOT_VR_SEATED")
+	var head_at := VrRig.fake_head_at(world, Vector3(1, 0.8, 2), PI)
+	_check(head_at.get_parent() is XROrigin3D and head_at.global_position.distance_to(Vector3(1, 0.8 + VrRig.FAKE_EYE, 2)) < 0.01 and VrViewCheck.head_problems(head_at).is_empty(), "fake_head_at stands on the VR spawn: %s" % head_at.global_position)
+	_check((-head_at.global_basis.z).dot(Vector3.BACK) > 0.99, "fake_head_at faces its yaw")
+	head_at.get_parent().free()
+	VrRig.fake_stand(cam)
+	# no game or bot stands its fake head by hand (a hand-typed 1.5 / 1.2 m, not times world_scale, 2026-11-12)
+	var hand_typed := RegEx.create_from_string("(xr_camera|rig\\.camera)\\.position(\\.y)? = (Vector3\\(0(\\.0)?, )?1\\.[0-9]")
+	var files: Array[String] = []
+	for dir in DirAccess.get_directories_at("res://games"):
+		for f in DirAccess.get_files_at("res://games/" + dir):
+			if f.ends_with(".gd"):
+				files.append("res://games/%s/%s" % [dir, f])
+	for f in DirAccess.get_files_at("res://tests"):
+		if f.ends_with("_bot.gd"):
+			files.append("res://tests/" + f)
+	for path in files:
+		var m := hand_typed.search(FileAccess.get_file_as_string(path))
+		if m != null:
+			_check(false, "%s: a fake VR head stood by hand (%s): use VrRig.fake_stand / kit.vr_head_height / kit.vr_idle" % [path, m.get_string()])
 
 	print("VR VIEW CHECK: %s%s" % ["PASS" if fails.is_empty() else "FAIL", "" if fails.is_empty() else " (%d)" % fails.size()])
 	quit(0 if fails.is_empty() else 1)

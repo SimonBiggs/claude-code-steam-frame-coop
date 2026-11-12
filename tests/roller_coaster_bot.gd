@@ -200,7 +200,7 @@ func _physics_process(delta: float) -> void:
 func _drive_vr(delta: float) -> void:
 	var rig: VrRig = main.vr_rig
 	if rig.real_head_height() < 1.0:
-		kit.vr_head_height(rig, 1.6)
+		kit.vr_head_height(rig)
 	if _vr_pick(rig, delta):
 		return  # (the left hand is reaching into a pick orb: the other jobs wait)
 	if main.builder.riding:

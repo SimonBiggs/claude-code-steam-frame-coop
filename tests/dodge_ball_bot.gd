@@ -207,7 +207,7 @@ func _nearest_loose(from: Vector3) -> Node3D:
 ## Fake VR giant: reach for a tray ball, pull the trigger, swing back, fling it at a runner.
 func _drive_vr(delta: float) -> void:
 	var rig = main.vr_rig
-	rig.camera.position = Vector3(0.0, 1.6, 0.0)
+	kit.vr_head_home(rig)  # the standard fake player (VrRig.fake_pose)
 	rig.camera.basis = Basis()
 	rig.hand_l.position = Vector3(-0.3, 1.0, -0.3)
 	vr_t += delta

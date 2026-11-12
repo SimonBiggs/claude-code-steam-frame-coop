@@ -284,7 +284,7 @@ func _walk(rig: Node, dir: Vector3) -> void:
 func _vr_bot(delta: float) -> void:
 	var rig = main.vr_rig
 	var w = main.world
-	rig.camera.position.y = 1.5
+	kit.vr_head_height(rig)  # the standard fake player (VrRig.fake_eye, x world_scale)
 	vr_t += delta
 	raise_t += delta
 	var head: Vector3 = rig.head_position()

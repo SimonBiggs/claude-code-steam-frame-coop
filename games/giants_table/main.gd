@@ -434,6 +434,8 @@ func _build_views(mode: String) -> void:
 		right.tracker = "right_hand"
 		right.pose = "aim"
 		origin.add_child(right)
+		if not get_viewport().use_xr:
+			preload("res://core/vr_rig.gd").fake_stand(cam, left, right, W.S)  # the standard fake giant (BOT_VR_SEATED / BOT_VR_EYE)
 		giant.setup_vr(origin, cam, left, right)
 		_build_vr_mirror(cam)
 	elif mode == "client":

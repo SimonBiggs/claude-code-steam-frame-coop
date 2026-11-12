@@ -274,7 +274,7 @@ func _pilot(delta: float) -> void:
 			step_t = 0.0
 	op.bot_hand = {"pos": hand, "grip": grip, "vr": OS.has_environment("BOT_VR")}
 	if OS.has_environment("BOT_VR") and op.xr_camera == null and op.camera != null:
-		op.xr_camera = preload("res://core/vr_rig.gd").fake_head(op.camera)  # the bots' VR view
+		_fake_pilot_head(op)  # the bots' VR view
 
 
 ## Host / local: the pilot's picks. Returns true while picking (the hand is the pick's).
@@ -311,8 +311,15 @@ func _pilot_picks(op, delta: float) -> bool:
 		grip = not vr  # a pointer clicks; a VR hand moves in
 	op.bot_hand = {"pos": pos, "grip": grip, "vr": vr}
 	if OS.has_environment("BOT_VR") and op.xr_camera == null and op.camera != null:
-		op.xr_camera = preload("res://core/vr_rig.gd").fake_head(op.camera)
+		_fake_pilot_head(op)
 	return true
+
+
+## The bots' VR view: where a real pilot stands after operator._recenter (at the desk, z 0.12, facing -Z), with the
+## desk fitted to that head like the real VR code does.
+func _fake_pilot_head(op) -> void:
+	op.xr_camera = preload("res://core/vr_rig.gd").fake_head_at(main, Vector3(0.0, 0.0, 0.12), 0.0, op.camera.cull_mask)
+	main.panel.set_top(op.xr_camera.global_position.y - 0.58)
 
 
 func _at(key: String, lift: float = 0.0) -> Vector3:

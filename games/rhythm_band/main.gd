@@ -2234,7 +2234,7 @@ func _update_story(delta: float) -> void:
 			huds.append(p.hud)
 	StoryCard.show(huds, opts)
 	var d = players[0]
-	if (d.vr or d.fake_vr) and d.xr_camera != null:  # (fake_vr: the bots' fake head, VrRig.fake_head)
+	if (d.vr or d.fake_vr) and d.xr_camera != null:  # (fake_vr: the bots' fake head, VrRig.fake_head_at)
 		StoryCard.show_vr(self, d.xr_camera, opts)
 
 

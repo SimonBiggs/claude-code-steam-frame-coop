@@ -253,7 +253,7 @@ func _loose_block(from: Vector3) -> Node3D:
 ## Fake VR giant: reach for a hovering block, pull the trigger, carry it over the tower, let go.
 func _drive_vr(delta: float) -> void:
 	var rig = main.vr_rig
-	kit.vr_head_height(rig, 1.5)
+	kit.vr_head_height(rig)
 	vr_wait -= delta
 	if main.results_showing():
 		kit.vr_trigger(rig, 1.0 if int(kit.t * 2.0) % 2 == 0 else 0.0)  # the giant pulls the trigger: play again

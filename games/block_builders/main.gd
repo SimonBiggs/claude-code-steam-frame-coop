@@ -461,6 +461,8 @@ func _build_views(mode: String) -> void:
 		right.tracker = "right_hand"
 		right.pose = "aim"
 		origin.add_child(right)
+		if not get_viewport().use_xr:
+			preload("res://core/vr_rig.gd").fake_stand(cam, left, right, builder.S)  # the standard fake builder (BOT_VR_SEATED / BOT_VR_EYE)
 		builder.setup_vr(origin, cam, left, right)
 		cam.cull_mask &= ~TAG_LAYERS  # runners' name tags are TV-only
 		_build_vr_mirror(cam)

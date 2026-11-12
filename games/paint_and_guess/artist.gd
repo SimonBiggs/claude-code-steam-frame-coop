@@ -138,7 +138,7 @@ func attach_xr(o: XROrigin3D, cam: XRCamera3D, left: XRController3D, right: XRCo
 ## Bots: the VR code path with a virtual head and right hand.
 func attach_fake_vr() -> void:
 	fake_vr = true
-	origin = Node3D.new()
+	origin = XROrigin3D.new()  # (a real headset's camera is tracked under an XROrigin3D: VrViewCheck.head_problems)
 	origin.name = "FakeOrigin"
 	main.add_child(origin)
 	# a fake headset camera (never current): VR cards, VR text and the bots' VR view (vrShot) work as with a headset
@@ -148,7 +148,8 @@ func attach_fake_vr() -> void:
 	origin.add_child(head)
 	cam.current = false
 	xr_camera = cam
-	head.position = Vector3(0.3, 1.35, 2.2)  # a short kid standing off to the side: the fit fixes it
+	preload("res://core/vr_rig.gd").fake_stand(cam, null, null, 1.0)  # the standard fake player (BOT_VR_SEATED / BOT_VR_EYE)
+	head.position += Vector3(0.3, 0.0, 2.2)  # standing off to the side: the fit fixes it
 	hand = Node3D.new()
 	origin.add_child(hand)  # (part of the fake rig, like a controller: at the origin, so main's space)
 	_build_brush(hand)

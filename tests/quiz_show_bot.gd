@@ -148,7 +148,7 @@ func _choice(n: int) -> int:
 ## Fake VR: reach for one desk button with the right glove.
 func _drive_vr(delta: float, n: int) -> void:
 	var rig = main.vr_rig
-	rig.camera.position.y = 1.6
+	kit.vr_head_height(rig)  # the standard fake player (VrRig.fake_eye, x world_scale)
 	var locked: Dictionary = main.net.state_get("locked", {})
 	if locked.has(0):
 		kit.vr_idle(rig)

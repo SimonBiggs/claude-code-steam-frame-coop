@@ -487,15 +487,13 @@ func _build_views(mode: String) -> void:
 		add_child(origin)
 		var cam := XRCamera3D.new()
 		origin.add_child(cam)
-		cam.position = Vector3(0, 1.5 * W.S, 0)
 		var left := XRController3D.new()
 		left.tracker = "left_hand"
 		origin.add_child(left)
-		left.position = Vector3(-0.25, 1.0, -0.2) * W.S
 		var right := XRController3D.new()
 		right.tracker = "right_hand"
 		origin.add_child(right)
-		right.position = Vector3(0.25, 1.0, -0.2) * W.S
+		preload("res://core/vr_rig.gd").fake_stand(cam, left, right, W.S)  # the standard fake player (BOT_VR_SEATED / BOT_VR_EYE)
 		gardener.fake_vr = true
 		gardener.setup_vr(origin, cam, left, right)
 	elif mode == "client":

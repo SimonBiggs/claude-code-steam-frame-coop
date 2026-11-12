@@ -121,25 +121,120 @@ var _perf_scans := 0
 var _body_shape: SphereShape3D
 
 
-## True when an OpenXR headset is running on this machine.
-## Bots (BOT_VR) in games whose fake VR player has no headset camera (it plays through a flat camera): a
-## never-current XRCamera3D riding on `flat_cam`, so VR cards, VR text and the bots' VR view (gdev vrShot,
-## core/vr_view_check.gd) work as with a headset. Returns the one already there on a second call.
-static func fake_head(flat_cam: Camera3D) -> XRCamera3D:
-	if flat_cam == null:
+# --- The fake VR player (bots: BOT_VR=1) -------------------------------------------------
+## ONE definition of where a fake headset is: a real Steam Frame player standing on the game's VR spawn (the XROrigin3D's
+## floor point), looking down -Z, hands resting in front. Real metres, origin-local; like real tracking it is multiplied
+## by XRServer.world_scale (giant / tabletop games). The game's own fit (VrRig._do_fit, a game's own recenter) then
+## lifts / moves it exactly as it would a real player. BOT_VR_SEATED=1: a seated player (eyes FAKE_EYE_SEATED);
+## BOT_VR_EYE=1.3: any eye height (a short kid). core/vr_view_check.gd head_problems() fails a head that isn't there.
+const FAKE_EYE := 1.6
+const FAKE_EYE_SEATED := 1.15
+## Resting hands, relative to the eyes ("aim" pose looks down -Z).
+const FAKE_HAND_L := Vector3(-0.25, -0.5, -0.3)
+const FAKE_HAND_R := Vector3(0.25, -0.5, -0.3)
+## Real eye heights (metres above the real floor) a headset can have: a seated kid .. a tall grown-up.
+const REAL_EYE_RANGE := Vector2(0.9, 2.0)
+
+
+## The fake player's real eye height (BOT_VR_EYE, BOT_VR_SEATED, else standing).
+static func fake_eye() -> float:
+	if OS.has_environment("BOT_VR_EYE"):
+		return clampf(float(OS.get_environment("BOT_VR_EYE")), 0.5, 2.2)
+	return FAKE_EYE_SEATED if OS.has_environment("BOT_VR_SEATED") else FAKE_EYE
+
+
+## [head, left hand, right hand] origin-local, in world units (real metres x ws). ws <= 0: XRServer.world_scale;
+## eye <= 0: fake_eye().
+static func fake_pose(ws: float = -1.0, eye: float = -1.0) -> Array[Vector3]:
+	if ws <= 0.0:
+		ws = XRServer.world_scale
+	if eye <= 0.0:
+		eye = fake_eye()
+	var head := Vector3(0.0, eye, 0.0)
+	return [head * ws, (head + FAKE_HAND_L) * ws, (head + FAKE_HAND_R) * ws]
+
+
+## Stand a fake headset: the camera and hands (children of an XROrigin3D; hands may be null) at fake_pose(), level,
+## looking down -Z. Every game's BOT_VR setup and tests/bot_kit.gd use this. ws: the scale the game plays at (pass it
+## when the game sets XROrigin3D.world_scale only later); a FakeTracking node under the origin then rescales the head
+## and hands whenever XRServer.world_scale changes, like real tracking does.
+static func fake_stand(cam: Node3D, left: Node3D = null, right: Node3D = null, ws: float = -1.0, eye: float = -1.0) -> void:
+	if ws <= 0.0:
+		ws = XRServer.world_scale
+	var p := fake_pose(ws, eye)
+	var nodes: Array[Node3D] = [cam, left, right]
+	for i in 3:
+		if nodes[i] != null:
+			nodes[i].transform = Transform3D(Basis(), p[i])
+	var origin := cam.get_parent() as XROrigin3D if cam != null else null
+	if origin == null or headset_available():
+		return
+	var ft := origin.get_node_or_null("FakeTracking") as FakeTracking
+	if ft == null:
+		ft = FakeTracking.new()
+		ft.name = "FakeTracking"
+		origin.add_child(ft)
+	ft.ws = ws
+
+
+## A bot wrote the fake head / hands itself, in world units at TODAY's scale (tests/bot_kit.gd vr_pose / vr_head_height):
+## tell FakeTracking, or a scale change that same frame multiplies the new position again (2026-11-12: Roller Coaster's
+## VR builder came back from a ride at 28.8 m real eye height, 1.6 x 18 x 18 world units).
+static func fake_written(cam: Node3D) -> void:
+	var origin := cam.get_parent() as XROrigin3D if cam != null else null
+	var ft := origin.get_node_or_null("FakeTracking") as FakeTracking if origin != null else null
+	if ft != null:
+		ft.ws = XRServer.world_scale
+
+
+## Fake headsets (fake_stand): real tracking is multiplied by XRServer.world_scale, so when a game changes the scale its
+## fake head and hands move like a headset's would, on the next frame (a giant game's fake player kept ant's eyes at
+## 1.6 world units, and a keeper's fit re-fitted itself forever, before 2026-11-12).
+class FakeTracking extends Node:
+	var ws := 1.0
+
+	func _ready() -> void:
+		process_priority = -1000
+		process_mode = Node.PROCESS_MODE_ALWAYS
+
+	func _process(_delta: float) -> void:
+		var now := XRServer.world_scale
+		if is_equal_approx(now, ws):
+			return
+		var k := now / maxf(ws, 0.001)
+		ws = now
+		for n in get_parent().get_children():
+			if n is XRCamera3D or n is XRNode3D:
+				(n as Node3D).position *= k
+
+
+## Bots in games whose fake VR player plays through a flat camera (no XR nodes of its own): an XROrigin3D on the game's
+## VR spawn (feet, facing yaw: 0 = -Z; what the game's real VR code does after its fit) with a never-current
+## XRCamera3D standing there (fake_stand), so VR cards, VR text and the bots' VR view (gdev vrShot,
+## core/vr_view_check.gd) see what a real player there sees. Moves the one already there on a second call.
+## (Never put the head on the flat camera: that is over / behind the arena, not where the VR player stands.)
+static func fake_head_at(parent: Node, feet: Vector3, yaw: float = 0.0, cull_mask: int = 0xFFFFF) -> XRCamera3D:
+	if parent == null:
 		return null
-	var have := flat_cam.get_node_or_null("FakeHead") as XRCamera3D
-	if have != null:
-		return have
-	var cam := XRCamera3D.new()
-	cam.name = "FakeHead"
-	cam.near = 0.02
-	cam.cull_mask = flat_cam.cull_mask
-	flat_cam.add_child(cam)
-	cam.current = false
+	var origin := parent.get_node_or_null("FakeVrOrigin") as XROrigin3D
+	if origin == null:
+		origin = XROrigin3D.new()
+		origin.name = "FakeVrOrigin"
+		parent.add_child(origin)
+	var cam := origin.get_node_or_null("FakeHead") as XRCamera3D
+	if cam == null:
+		cam = XRCamera3D.new()
+		cam.name = "FakeHead"
+		cam.near = 0.02
+		origin.add_child(cam)
+		cam.current = false
+	cam.cull_mask = cull_mask
+	origin.global_transform = Transform3D(Basis(Vector3.UP, yaw), feet)
+	fake_stand(cam)
 	return cam
 
 
+## True when an OpenXR headset is running on this machine.
 static func headset_available() -> bool:
 	var xr := XRServer.find_interface("OpenXR")
 	return xr != null and xr.is_initialized()
@@ -163,9 +258,7 @@ func _ready() -> void:
 	hand_l = _make_hand("left_hand", true)
 	hand_r = _make_hand("right_hand", false)
 	if fake:
-		camera.position = Vector3(0.0, 1.6, 0.0)
-		hand_l.position = Vector3(-0.25, 1.1, -0.3)
-		hand_r.position = Vector3(0.25, 1.1, -0.3)
+		fake_stand(camera, hand_l, hand_r, world_scale)
 	if is_xr:
 		print("VrRig: headset found, VR on the main viewport")
 		get_viewport().use_xr = true

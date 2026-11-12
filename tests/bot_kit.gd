@@ -16,6 +16,7 @@ extends Node
 ##   kit.at(2.0, "join a pad", func() -> void: kit.join_bot(main.party))
 ##   kit.assert_true(main.party.player_count() == 1, "the pad joined")
 const UiKit := preload("res://core/ui_kit.gd")
+const VrRig := preload("res://core/vr_rig.gd")
 
 ## First device id of virtual pads (same as core/party.gd); lower ids are real hardware.
 const FAKE_PAD_BASE := 40
@@ -261,6 +262,9 @@ func finish(quit: bool = true, note := "") -> void:
 	if _finished:
 		return
 	_finished = true
+	var vr_view := int(Engine.get_meta("vr_view_failures", 0))  # core/vr_view_watch.gd's problems count too
+	failures += vr_view
+	checks += vr_view
 	if failures == 0 and checks == 0:  # a run that checked nothing tested nothing (tests/bot_end.gd's shared rule)
 		printerr("SCRIPT ERROR: BOT RESULT: FAIL (0 checks%s: this bot counted nothing before it ended)" % note)
 	elif failures == 0:
@@ -405,9 +409,11 @@ func drop_in_out(party: Node, time: float, stay: float, seated: Callable) -> voi
 
 # --- Fake VR (core/vr_rig.gd in fake mode) ----------------------------------------------------
 
-## Put the head and hands at origin-local positions (head looks along -Z, hands point forward).
+## Put the head and hands at origin-local positions in WORLD units (head looks along -Z, hands point forward). For the
+## standard standing player use vr_stand / vr_idle (VrRig.fake_pose: real metres x world_scale, BOT_VR_SEATED).
 func vr_pose(rig: Node, head: Vector3, left: Vector3, right: Vector3) -> void:
 	rig.camera.position = head
+	VrRig.fake_written(rig.camera)
 	rig.camera.basis = Basis()
 	rig.hand_l.position = left
 	rig.hand_l.basis = Basis()
@@ -415,11 +421,20 @@ func vr_pose(rig: Node, head: Vector3, left: Vector3, right: Vector3) -> void:
 	rig.hand_r.basis = Basis()
 
 
-## A relaxed idle: head bobbing slightly, hands swinging, so velocity / fit code sees movement.
-func vr_idle(rig: Node, head_height: float = 1.6) -> void:
+## The standard fake player standing still (core/vr_rig.gd fake_stand: a real Steam Frame player's eyes and resting
+## hands, real metres x world_scale; BOT_VR_SEATED=1 sits them down). eye_height <= 0: VrRig.fake_eye().
+func vr_stand(rig: Node, eye_height: float = -1.0) -> void:
+	VrRig.fake_stand(rig.camera, rig.hand_l, rig.hand_r, float(rig.world_scale), eye_height)
+
+
+## A relaxed idle: head bobbing slightly, hands swinging, so velocity / fit code sees movement. Real metres x
+## world_scale like vr_stand; eye_height <= 0: VrRig.fake_eye() (standing, or seated with BOT_VR_SEATED=1).
+func vr_idle(rig: Node, eye_height: float = -1.0) -> void:
 	var s := sin(t * 2.0)
-	vr_pose(rig, Vector3(0.0, head_height + 0.01 * s, 0.0),
-		Vector3(-0.25, head_height - 0.5 + 0.05 * s, -0.3), Vector3(0.25, head_height - 0.45 - 0.05 * s, -0.35))
+	var ws := float(rig.world_scale)
+	var p := VrRig.fake_pose(ws, eye_height)
+	vr_pose(rig, p[0] + Vector3(0.0, 0.01 * s, 0.0) * ws, p[1] + Vector3(0.0, 0.05 * s, 0.0) * ws,
+		p[2] + Vector3(0.0, 0.05 - 0.05 * s, -0.05) * ws)
 
 
 ## Move a hand towards a WORLD point at `speed` m/s; true once it is there.
@@ -463,10 +478,19 @@ func vr_stick(rig: Node, left: Vector2, right: Vector2 = Vector2.ZERO) -> void:
 	rig.fake_stick_r = right
 
 
-## Real head height in metres (e.g. 1.1 = someone sat down; the rig re-fits after a few seconds).
-func vr_head_height(rig: Node, h: float) -> void:
+## The head back on the standard fake player's spot (origin-local x/z 0, VrRig.fake_eye() x world_scale), keeping
+## where it looks.
+func vr_head_home(rig: Node) -> void:
 	var cam: Node3D = rig.camera
-	cam.position.y = h * float(rig.world_scale)
+	cam.position = VrRig.fake_pose(float(rig.world_scale))[0]
+
+
+## Real head height in metres (e.g. 1.1 = someone sat down; the rig re-fits after a few seconds). h <= 0: the
+## standard fake player's (VrRig.fake_eye(): standing, or BOT_VR_SEATED). Times world_scale, like real tracking.
+func vr_head_height(rig: Node, h: float = -1.0) -> void:
+	var cam: Node3D = rig.camera
+	cam.position.y = (h if h > 0.0 else VrRig.fake_eye()) * float(rig.world_scale)
+	VrRig.fake_written(cam)
 
 
 ## tests/bot_end.gd quit_quietly calls this when a bot that hasn't finished is ended for it (core/quit_after.gd's

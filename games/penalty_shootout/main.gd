@@ -537,9 +537,7 @@ func _build_views(mode: String) -> void:
 			get_viewport().msaa_3d = Viewport.MSAA_2X
 		else:
 			print("PS_FAKE_VR: the keeper's VR code runs without a headset (bot-driven hands)")
-			cam.position = Vector3(0, 1.5, 0)
-			left.position = Vector3(0.3, 1.2, -0.35)
-			right.position = Vector3(-0.3, 1.2, -0.35)
+			preload("res://core/vr_rig.gd").fake_stand(cam, left, right, 1.0)  # the standard fake player (BOT_VR_SEATED / BOT_VR_EYE)
 		players[0].attach_xr(origin, cam, left, right)
 		_build_vr_mirror(cam)
 	else:

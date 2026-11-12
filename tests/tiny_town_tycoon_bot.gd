@@ -262,7 +262,7 @@ func _process(delta: float) -> void:
 		return  # the mayor's A presses would press the pause menu's highlighted button (Resume) now
 	if main.phase() != "play":
 		if main.vr_rig != null:
-			kit.vr_idle(main.vr_rig, 1.6)
+			kit.vr_idle(main.vr_rig)
 		return
 	step_t -= delta
 	if main.vr_rig != null:
@@ -410,7 +410,7 @@ func _flat_mayor() -> void:
 func _vr_mayor(delta: float) -> void:
 	var rig = main.vr_rig
 	var mayor = main.mayor
-	rig.camera.position = Vector3(0.0, 1.6, 0.0)
+	kit.vr_head_home(rig)  # the standard fake player (VrRig.fake_pose)
 	rig.camera.basis = Basis()
 	if touched or placed < 6:
 		rig.hand_l.position = Vector3(-0.45, 0.7, 0.25)  # resting by the side, away from the right hand's work

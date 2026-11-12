@@ -373,7 +373,7 @@ func story(line: String, pic: String = "engineer", color: Color = SPROCKET_COLOR
 		if p.has_meta("story") and is_instance_valid(p.get_meta("story")):
 			roots.append(p.get_meta("story"))
 	StoryCard.show(roots, opts)
-	if not players.is_empty() and players[0].xr_camera != null:  # (VR, or the bots' fake head: VrRig.fake_head)
+	if not players.is_empty() and players[0].xr_camera != null:  # (VR, or the bots' fake head: VrRig.fake_head_at)
 		StoryCard.show_vr(self, players[0].xr_camera, opts)
 	if broadcast and net != null and net.mode == "host":
 		net.event("story", [line, pic, color])

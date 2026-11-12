@@ -247,7 +247,7 @@ func _tv_bot(slot: int, delta: float) -> void:
 func _vr_bot(delta: float) -> void:
 	var rig = main.vr_rig
 	var dg = main.dungeon
-	rig.camera.position = Vector3(0.0, 1.5, 0.0)
+	kit.vr_head_home(rig)  # the standard fake player (VrRig.fake_pose)
 	vr_t += delta
 	var head: Vector3 = rig.head_position()
 	var feet := Vector3(head.x, 0.0, head.z)
