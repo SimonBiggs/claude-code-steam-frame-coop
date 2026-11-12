@@ -7,6 +7,7 @@ extends Node
 ## TEAM PAINT rounds: the TV players PAINT the word together (left stick / D-pad moves your brush ring,
 ## hold A or RT to paint) and the VR player guesses. The final VOTE: pick your favourite picture.
 ## X / Y / B (Q / E / R on the keyboard) cheer: a "YAY!" pops out of your critter on the easel.
+## PICKS (the mode, Smudge's brush gifts: picks.gd): the stick / D-pad moves your brush ring; rest it UNDER an orb.
 ## On the host, the TV machine's guessers are "remote": their picks arrive as "guess" actions and their
 ## team-paint brush as player state (pos = brush, yaw = 1 while painting).
 
@@ -196,15 +197,15 @@ func _poll_input(delta: float) -> void:
 		if _edge("c%d" % k, cheer[k]):
 			do_cheer(k)
 	var mode: String = main.guesser_mode()
-	if mode == "paint":
-		# Team paint: the stick / D-pad steer the brush ring, A or RT paints.
+	if mode == "paint" or mode == "pick":
+		# Team paint (and the picks): the stick / D-pad steer the brush ring, A or RT paints.
 		var mv := Vector2((1.0 if right else 0.0) - (1.0 if left else 0.0), (1.0 if up else 0.0) - (1.0 if down else 0.0))
 		if analog.length() > 0.2:
 			mv += Vector2(analog.x, -analog.y)
 		if mv.length() > 0.0:
 			touched = true
 		tv_cursor = main.canvas.clamp_point(tv_cursor + mv.limit_length(1.0) * BRUSH_SPEED * delta)
-		tv_down = pick or paint
+		tv_down = (pick or paint) and mode == "paint"
 		edges["pick"] = pick
 		for k in ["l", "r", "u", "d"]:
 			edges[k] = true
@@ -313,6 +314,12 @@ func _bot_play(delta: float) -> void:
 		if main.state == "draw" or main.state == "reveal":
 			do_cheer(randi() % 3)
 	var mode: String = main.guesser_mode()
+	if mode == "pick":  # rest the ring under an orb (each bot its own; P2 the middle one)
+		tv_down = false
+		var at: Vector2 = main.picks.under_point(index % 3) if main.picks != null else Vector2.INF
+		if at != Vector2.INF and bot_t > 1.0:
+			tv_cursor = main.canvas.clamp_point(tv_cursor.move_toward(at, BRUSH_SPEED * delta))
+		return
 	if mode == "paint":
 		var k := float(index) * 1.3
 		var u := fmod(bot_t * 0.35 + k, 1.0)
@@ -361,7 +368,7 @@ func _process(delta: float) -> void:
 		else:
 			_poll_input(delta)
 		# The TV machine tells the host where its team-paint brush is (30 Hz, unreliable).
-		if not main.is_host_side() and main.guesser_mode() == "paint":
+		if not main.is_host_side() and (main.guesser_mode() == "paint" or main.guesser_mode() == "pick"):
 			send_t -= delta
 			if send_t <= 0.0:
 				send_t = 1.0 / 30.0
@@ -538,6 +545,9 @@ func _update_hud() -> void:
 	if st == "draw" and team:
 		hint_label.text = "PAINT:  %s" % main.cap(main.team_word) if main.team_word != "" else "PAINT IT TOGETHER!"
 		hint_label.modulate = Color(1.0, 0.9, 0.5)
+	elif st == "pick":
+		hint_label.text = "PICK ONE!"
+		hint_label.modulate = Color(1.0, 0.85, 0.4)
 	elif st == "vote":
 		hint_label.text = "VOTE FOR THE BEST PICTURE!"
 		hint_label.modulate = Color(1.0, 0.85, 0.4)

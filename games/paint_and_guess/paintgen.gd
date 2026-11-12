@@ -33,6 +33,16 @@ const MAX_TIER: Array[int] = [1, 2, 1, 2, 3]
 const MIN_TIER: Array[int] = [1, 1, 1, 1, 2]
 ## Rounds (0-based) whose wrong answers never share the right answer's shape (easy to tell apart).
 const SHAPE_APART := [0, 2]
+## MODES (core/pick_orbs.gd GENTLE / BRAVE / HARD, picked once a session; deep.gd): picture difficulty and time.
+## GENTLE asks only for the easiest things (a trickier one only in the final), every round's wrong answers look
+## different from the right one, and every round is longer; HARD asks for trickier things, look-alike shapes from
+## round 1 (never look-alike pairs: that stays unfair) and shorter rounds. BRAVE is the game as it always was.
+## The mode is in the game's code (MODE_KEYS order: 0 = brave, so older codes are BRAVE games).
+const MODE_KEYS: Array[String] = ["brave", "gentle", "hard"]
+const MODE_MAX_TIER := {"gentle": [1, 1, 1, 1, 2], "brave": [1, 2, 1, 2, 3], "hard": [2, 3, 2, 3, 3]}
+const MODE_MIN_TIER := {"gentle": [1, 1, 1, 1, 1], "brave": [1, 1, 1, 1, 2], "hard": [1, 2, 1, 2, 2]}
+const MODE_APART := {"gentle": [0, 1, 2, 3, 4], "brave": [0, 2], "hard": [2]}
+const MODE_TIME := {"gentle": 1.25, "brave": 1.0, "hard": 0.85}  # round times x this (whole seconds)
 const BASE_THEMES := 5
 const UNLOCK_EVERY := 6  # paintings in the family gallery per new theme
 const GALLERY_MAX := 20  # paintings kept in the family gallery (oldest go)
@@ -108,6 +118,27 @@ static func group(id: String) -> String:
 	return str(THINGS[id][3]) if THINGS.has(id) else ""
 
 
+static func mode_key(m: String) -> String:
+	return m if MODE_KEYS.has(m) else "brave"
+
+
+static func max_tier(m: String, ri: int) -> int:
+	return int((MODE_MAX_TIER[mode_key(m)] as Array)[ri])
+
+
+static func min_tier(m: String, ri: int) -> int:
+	return int((MODE_MIN_TIER[mode_key(m)] as Array)[ri])
+
+
+static func apart(m: String, ri: int) -> bool:
+	return (MODE_APART[mode_key(m)] as Array).has(ri)
+
+
+## A round's seconds in a mode (before gifts).
+static func round_time(type: String, m: String = "brave") -> float:
+	return roundf(float(ROUND_TIMES.get(type, 60.0)) * float(MODE_TIME[mode_key(m)]))
+
+
 static func theme_name(i: int) -> String:
 	return str(THEMES[posmod(i, THEMES.size())][0])
 
@@ -134,8 +165,8 @@ static func paintings_to_unlock(paintings: int) -> int:
 
 # --- Codes ----------------------------------------------------------------------------------------------
 
-static func code_of(seed_v: int, themes_n: int, daily: bool) -> int:
-	return seed_v * 100 + clampi(themes_n, BASE_THEMES, THEMES.size()) * 2 + (1 if daily else 0)
+static func code_of(seed_v: int, themes_n: int, daily: bool, m: String = "brave") -> int:
+	return seed_v * 100 + MODE_KEYS.find(mode_key(m)) * 20 + clampi(themes_n, BASE_THEMES, THEMES.size()) * 2 + (1 if daily else 0)
 
 
 static func seed_of(code: int) -> int:
@@ -143,7 +174,11 @@ static func seed_of(code: int) -> int:
 
 
 static func themes_of(code: int) -> int:
-	return (code % 100) / 2
+	return (code % 20) / 2
+
+
+static func mode_of(code: int) -> String:
+	return MODE_KEYS[clampi((code % 100) / 20, 0, MODE_KEYS.size() - 1)]
 
 
 static func daily_of(code: int) -> bool:
@@ -156,10 +191,10 @@ static func daily_seed(date: String = "") -> int:
 
 ## The code of game `game_no` (1-based) of a session: TODAY'S GALLERY first when it's due today (always
 ## the starting themes, so it's the same on every machine), then games from the session seed.
-static func code_at(session_seed: int, game_no: int, daily_due: bool, themes_n: int, date: String = "") -> int:
+static func code_at(session_seed: int, game_no: int, daily_due: bool, themes_n: int, date: String = "", m: String = "brave") -> int:
 	if daily_due and game_no == 1:
-		return code_of(daily_seed(date), BASE_THEMES, true)
-	return code_of(Seeded.derive(session_seed, game_no), themes_n, false)
+		return code_of(daily_seed(date), BASE_THEMES, true, m)
+	return code_of(Seeded.derive(session_seed, game_no), themes_n, false, m)
 
 
 # --- Building a game ------------------------------------------------------------------------------------
@@ -169,8 +204,9 @@ static func build(code: int) -> Dictionary:
 	var s := seed_of(code)
 	var tn := themes_of(code)
 	var daily := daily_of(code)
+	var m := mode_of(code)
 	var r := Seeded.rng(s, "game")
-	var d := {"code": code, "seed": s, "themes": tn, "daily": daily}
+	var d := {"code": code, "seed": s, "themes": tn, "daily": daily, "mode": m}
 	d["name"] = "TODAY'S GALLERY" if daily else "%s %s" % [Seeded.pick(r, ADJ), Seeded.pick(r, NOUN)]
 	# Five different themes (newly unlocked ones come up more often, so the family meets them).
 	var pool: Array = range(tn)
@@ -188,7 +224,7 @@ static func build(code: int) -> Dictionary:
 	var rounds: Array = []
 	for ri in ROUNDS:
 		var th: int = order[ri % order.size()]
-		var rd := _make_round(s, ri, th, Seeded.rng(s, "round%d" % ri), used)
+		var rd := _make_round(s, ri, th, Seeded.rng(s, "round%d" % ri), used, m)
 		used.append(rd["target"])
 		rounds.append(rd)
 	d["rounds"] = rounds
@@ -196,9 +232,9 @@ static func build(code: int) -> Dictionary:
 
 
 ## One round: the thing to paint from theme `th` (never one in `used`) and every seat's four answers.
-static func _make_round(s: int, ri: int, th: int, rr: RandomNumberGenerator, used: Array) -> Dictionary:
-	var target := _pick_target(rr, th, ri, used)
-	var four := _pick_set(rr, th, ri, target)
+static func _make_round(s: int, ri: int, th: int, rr: RandomNumberGenerator, used: Array, m: String = "brave") -> Dictionary:
+	var target := _pick_target(rr, th, ri, used, m)
+	var four := _pick_set(rr, th, ri, target, m)
 	var base_slot := Seeded.rng(s, "slots").randi() % 4
 	var opts: Array = []
 	for seat in MAX_PLAYERS:
@@ -210,7 +246,7 @@ static func _make_round(s: int, ri: int, th: int, rr: RandomNumberGenerator, use
 			o.append(target if k == slot else others.pop_back())
 		opts.append(o)
 	var type: String = ROUND_PLAN[ri]
-	return {"type": type, "theme": th, "target": target, "opts": opts, "time": float(ROUND_TIMES[type])}
+	return {"type": type, "theme": th, "target": target, "opts": opts, "time": round_time(type, m)}
 
 
 ## Round `ri` of a game; reroll > 0 = the artist asked for a NEW ONE (the reroll-th time): another thing from the
@@ -224,39 +260,39 @@ static func round_of(d: Dictionary, ri: int, used: Array = [], reroll: int = 0) 
 	for o in rounds:
 		avoid.append(o["target"])
 	var s := int(d["seed"])
-	return _make_round(s, ri, int(rd["theme"]), Seeded.rng(s, "reroll%d/%d" % [ri, reroll]), avoid)
+	return _make_round(s, ri, int(rd["theme"]), Seeded.rng(s, "reroll%d/%d" % [ri, reroll]), avoid, mode_key(String(d.get("mode", "brave"))))
 
 
-static func _pick_target(r: RandomNumberGenerator, th: int, ri: int, used: Array) -> String:
+static func _pick_target(r: RandomNumberGenerator, th: int, ri: int, used: Array, m: String = "brave") -> String:
 	var cands: Array = []
 	for id in theme_things(th):
-		if not used.has(id) and tier(id) <= MAX_TIER[ri] and tier(id) >= MIN_TIER[ri] and StoryCard.has_picture(id):
+		if not used.has(id) and tier(id) <= max_tier(m, ri) and tier(id) >= min_tier(m, ri) and StoryCard.has_picture(id):
 			cands.append(id)
 	if cands.is_empty():  # (never for the packs above; the test proves it) fall back to any easy one
 		for id in theme_things(th):
-			if not used.has(id) and tier(id) <= MAX_TIER[ri]:
+			if not used.has(id) and tier(id) <= max_tier(m, ri):
 				cands.append(id)
 	return str(Seeded.pick(r, cands))
 
 
 ## The four answers (target first): three more from the same theme, no look-alikes, and in the easy rounds
 ## none with the target's shape.
-static func _pick_set(r: RandomNumberGenerator, th: int, ri: int, target: String) -> Array:
+static func _pick_set(r: RandomNumberGenerator, th: int, ri: int, target: String, m: String = "brave") -> Array:
 	var four: Array = [target]
 	var pool: Array = Seeded.shuffled(r, theme_things(th))
 	for strict in [true, false]:
 		for id in pool:
 			if four.size() >= 4:
 				break
-			if _decoy_ok(id, four, target, ri if strict else -1):
+			if _decoy_ok(id, four, target, strict and apart(m, ri)):
 				four.append(id)
 	return four
 
 
-static func _decoy_ok(id: String, four: Array, target: String, ri: int) -> bool:
+static func _decoy_ok(id: String, four: Array, target: String, shape_apart: bool) -> bool:
 	if four.has(id) or not THINGS.has(id) or not StoryCard.has_picture(id):
 		return false
-	if SHAPE_APART.has(ri) and shape(id) == shape(target):
+	if shape_apart and shape(id) == shape(target):
 		return false
 	for o in four:
 		if group(id) != "" and group(id) == group(str(o)):
@@ -268,6 +304,7 @@ static func _decoy_ok(id: String, four: Array, target: String, ri: int) -> bool:
 static func check(d: Dictionary) -> Array:
 	var why: Array = []
 	var tn := int(d["themes"])
+	var m := mode_key(String(d.get("mode", "brave")))
 	if tn < BASE_THEMES or tn > THEMES.size():
 		why.append("%d themes" % tn)
 	if bool(d["daily"]) and (tn != BASE_THEMES or str(d["name"]) != "TODAY'S GALLERY"):
@@ -292,12 +329,12 @@ static func check(d: Dictionary) -> Array:
 			why.append("%s: %s is not in %s" % [tag, target, theme_name(th)])
 		if not StoryCard.has_picture(target):
 			why.append("%s: no picture of %s" % [tag, target])
-		if tier(target) > MAX_TIER[ri] or tier(target) < MIN_TIER[ri]:
-			why.append("%s: %s is tier %d" % [tag, target, tier(target)])
+		if tier(target) > max_tier(m, ri) or tier(target) < min_tier(m, ri):
+			why.append("%s: %s is tier %d (%s)" % [tag, target, tier(target), m])
 		if targets.has(target):
 			why.append("%s: %s asked twice" % [tag, target])
 		targets[target] = true
-		if float(rd["time"]) < MIN_LOOK + 3.0 * LOCKOUT + 5.0:
+		if float(rd["time"]) < MIN_LOOK + 3.0 * LOCKOUT + 5.0 or float(rd["time"]) < round_time(str(rd["type"]), m) - 0.01:
 			why.append("%s: %.0f s is too short to find it after three wrong picks" % [tag, float(rd["time"])])
 		var opts: Array = rd["opts"]
 		if opts.size() != MAX_PLAYERS:
@@ -335,7 +372,7 @@ static func check(d: Dictionary) -> Array:
 						why.append("%s seat %d: %s twice" % [tag, seat, a])
 					elif group(a) != "" and group(a) == group(b):
 						why.append("%s: %s and %s look alike" % [tag, a, b])
-				if SHAPE_APART.has(ri) and a != target and shape(a) == shape(target):
+				if apart(m, ri) and a != target and shape(a) == shape(target):
 					why.append("%s: %s has the same shape as %s" % [tag, a, target])
 		if round_slots.size() < 3:
 			why.append("%s: the right answer sits in the same place for everyone" % tag)
@@ -366,13 +403,14 @@ static func check_packs() -> Array:
 				why.append("%s has no picture" % id)
 			elif str(THINGS[id][0]).length() > 15:
 				why.append("caption %s is long" % THINGS[id][0])
-		for ri in ROUNDS:
-			var n := 0
-			for id in things:
-				if tier(id) <= MAX_TIER[ri] and tier(id) >= MIN_TIER[ri]:
-					n += 1
-			if n < 3:
-				why.append("theme %s has only %d things for round %d" % [t[0], n, ri + 1])
+		for m in MODE_KEYS:
+			for ri in ROUNDS:
+				var n := 0
+				for id in things:
+					if tier(id) <= max_tier(m, ri) and tier(id) >= min_tier(m, ri):
+						n += 1
+				if n < 3:
+					why.append("theme %s has only %d things for %s round %d" % [t[0], n, m, ri + 1])
 	for id in THINGS:
 		if not seen.has(id):
 			why.append("%s is in no theme" % id)

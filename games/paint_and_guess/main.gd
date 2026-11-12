@@ -24,6 +24,14 @@ extends Node3D
 ## and in VR. Telemetry: one RUN line per game and on quit. Networked: "round" carries thing ids (picture names),
 ## "family" the packed gallery, "story" the cards.
 ##
+## SECOND PASS (deep.gd; tests/paint_and_guess_deep_test.gd): GENTLE / BRAVE / HARD picked once a session on the pick
+## orbs (picture difficulty and round times, in the game's code), SMUDGE'S BRUSH GIFTS on the pick orbs before every later
+## game (BIG BRUSH, RAINBOW BRUSH, STAMPS, SLOW CLOCK, PEEK GLASS: picks.gd, gifts.gd), warned DRIP and WIND surprises on
+## bare canvas only - nobody can paint into one, so no picture is ever spoiled (hazards.gd) - SMUDGE GUESSES for a lone
+## painter (a lone Deck, the VR artist alone: the game never waits for TV players), seasonal studios (season.gd) and
+## SMUDGE'S MUSEUM, a treasure for every finished game (museum.gd). State: "deep" [mode, gift, season], "hz" (the
+## surprise), "museum"; events "orbs" (sticky) / "take" / "gift_bounce".
+##
 ## Files: canvas.gd (easel, strokes, pots, bubbles, critters, balloons, vote grid), room.gd (the studio,
 ## gallery, cat, lights), artist.gd (players[0]), guesser.gd (players 1-6), paintgen.gd (seeded picture games),
 ## mesh_kit.gd (merged one-draw-call meshes), join_listener.gd. Modes and networking follow
@@ -50,6 +58,13 @@ const Save := preload("res://core/save.gd")
 const Telemetry := preload("res://core/telemetry.gd")
 const Seeded := preload("res://core/seeded.gd")
 const JoinListenerScript := preload("res://games/paint_and_guess/join_listener.gd")
+const Deep := preload("res://games/paint_and_guess/deep.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
+const PicksScript := preload("res://games/paint_and_guess/picks.gd")
+const HazardsScript := preload("res://games/paint_and_guess/hazards.gd")
+const GiftsScript := preload("res://games/paint_and_guess/gifts.gd")
+const SeasonScript := preload("res://games/paint_and_guess/season.gd")
+const MuseumScript := preload("res://games/paint_and_guess/museum.gd")
 
 const GAME_ID := "paint_and_guess"
 const SMUDGE := "SMUDGE"
@@ -105,6 +120,7 @@ const SOUNDS := {
 	"undo": [0.18, 760.0, 360.0, 0.2, "tri", 0.0],
 	"team": [0.9, 262.0, 784.0, 0.32, "saw", 0.1],
 	"speed": [0.6, 500.0, 1500.0, 0.3, "square", 0.0],
+	"drip": [0.3, 1400.0, 300.0, 0.3, "sine", 0.0],
 }
 
 var players: Array = []
@@ -180,6 +196,29 @@ var vote_done_t := -1.0
 var everyone_rounds := 0
 var masterpiece := ""
 var winner_idx := -1
+# Second pass (deep.gd): the session's mode, this game's gift, the season, picks, surprises, Smudge's museum.
+var picks: Node
+var hazards: Node3D
+var gifts_node: Node3D
+var season_node: Node3D
+var museum: Node3D
+var play_mode := "brave"  # GENTLE / BRAVE / HARD (core/pick_orbs.gd ids)
+var gift := ""  # this game's brush gift ("" none)
+var season := "spring"
+var mode_picked := false  # host: the mode was picked this session
+var games_started := 0  # host: games begun this session
+var gift_for := -1  # host: the game number the gift was picked for
+var try_gift := ""  # (What's New "try": the first game with this gift)
+var bot_tricks := false  # (bots / What's New: surprises from the first round, soon)
+var team_solo := false  # this TEAM PAINT round became a painting round (nobody to paint it)
+var smudge_at := -1.0  # host: when Smudge guesses next (-1: not yet)
+var smudge_wrongs := 0
+var smudge_got := false
+var smudge_rounds := 0  # rounds Smudge guessed this game (telemetry, bots)
+var reveal_round := 0  # every machine: the round the last reveal was for (the "reveal" event carries it)
+var peek_done := false
+var stamps := 0  # STAMPS this game
+var game_surprises := 0
 
 var center_label: Label
 var view_n := 0  # split views on screen (_layout_views)
@@ -199,7 +238,9 @@ func _ready() -> void:
 	save.game_id = GAME_ID
 	# gallery: [[thing, play-day, golden, packed strokes], ...] (newest last); paintings: ever painted; days: play-days;
 	# daily: the date TODAY'S GALLERY ran.
-	save.defaults = {"gallery": [], "paintings": 0, "games": 0, "days": 0, "last_day": "", "daily": "", "daily_done": "", "masterpieces": 0}
+	# Second pass: mode (the family's last), museum (newest treasures [kind index, mode]), museum_n (ever), last_gift.
+	save.defaults = {"gallery": [], "paintings": 0, "games": 0, "days": 0, "last_day": "", "daily": "", "daily_done": "", "masterpieces": 0,
+		"mode": "brave", "museum": [], "museum_n": 0, "last_gift": "", "gifts": 0, "surprises": 0, "smudge": 0}
 	add_child(save)
 	_build_world()
 	_build_hud()
@@ -211,6 +252,7 @@ func _ready() -> void:
 	net.main = self
 	add_child(net)
 	net.sticky_event("family")  # Smudge's gallery: a machine that joins later gets the latest one (core/net.gd)
+	_setup_deep()
 	seats = ClassicSeats.new(self, {
 		"no_keys": 99,
 		"free_actions": ["continue", "pause", "need_round", "need_sync"],
@@ -243,12 +285,15 @@ func _setup_game(mode: String) -> void:
 	if mode != "client":
 		_new_day()
 		_show_family()
+		_begin_deep()
 	if mode == "client":
 		players[1].set_meta("want_join", true)  # ask the host for a guesser seat (it may hand out another one)
 	_restore_party()
 	if mode == "host":
+		# The VR artist (or a flat host) never waits alone: the mode pick, then Smudge guesses until TV players join.
 		state = "wait"
-		_show_center("PAINT AND GUESS\nWaiting for the TV players to join…", 0.0)
+		_show_center("PAINT AND GUESS", 2.0)
+		_start_game()
 	elif mode == "client":
 		state = "wait"
 		_show_center("CONNECTED!", 1.5, false)
@@ -450,7 +495,7 @@ func _build_players(mode: String) -> void:
 			g.key_set = 1 if mode == "client" else 0
 		add_child(g)
 		players.append(g)
-		g.set_active(i == 1)
+		g.set_active(i == 1 and mode != "host")  # (host: a TV machine's players take their seats when they join)
 
 
 func is_local(p) -> bool:
@@ -611,7 +656,7 @@ func _frame_views() -> void:
 		var sz := c.size
 		var aspect := sz.x / maxf(sz.y, 1.0)
 		_frame_camera(p.camera, aspect, p.index > 0)
-		var narrow := aspect < 1.2
+		var narrow := aspect < (1.75 if p.index == 0 else 1.2)  # (the artist's view also keeps the easel's bubbles: a Deck cut the board's scores off)
 		p.set_meta("narrow", narrow)
 		p.camera.cull_mask = (p.camera.cull_mask & ~BOARD_SCORE_LAYER) if narrow else (p.camera.cull_mask | BOARD_SCORE_LAYER)
 
@@ -876,6 +921,8 @@ func can_team_paint() -> bool:
 
 ## What the artist's hand does right now: "paint", "guess" (TEAM PAINT balloons), "vote" or "idle".
 func artist_mode() -> String:
+	if state == "pick":
+		return "pick"
 	if state == "wait" or (state == "draw" and round_type != "team"):
 		return "paint"
 	if state == "draw":
@@ -887,6 +934,8 @@ func artist_mode() -> String:
 
 ## What a TV player's buttons do right now: "guess", "paint" (TEAM PAINT) or "vote".
 func guesser_mode() -> String:
+	if state == "pick":
+		return "pick"
 	if state == "draw" and round_type == "team":
 		return "paint"
 	if state == "vote":
@@ -1002,19 +1051,28 @@ func _tv_paint(g) -> void:
 		return
 	var col: int = CanvasScript.TEAM_BASE + g.index
 	var p: Vector2 = canvas.clamp_point(g.tv_cursor)
+	var bw := TEAM_BRUSH_W * Deep.brush_scale(gift)
 	if g.tv_cur_id < 0 or p.distance_to(g.tv_last) > 0.3:
-		if canvas.is_full():
+		if canvas.is_full() or paint_blocked(p, p, bw * 0.5):  # (a told surprise: no paint there)
+			if g.tv_cur_id >= 0:
+				stroke_end(owner)
+			g.tv_cur_id = -1
 			return
-		g.tv_cur_id = stroke_begin(col, TEAM_BRUSH_W, p, owner)
+		g.tv_cur_id = stroke_begin(col, bw, p, owner)
 		g.tv_last = p
 		g.tv_smooth = p
 		g.team_ink += 1
 		return
-	g.tv_smooth = g.tv_smooth.lerp(p, 0.6)
+	var ns: Vector2 = g.tv_smooth.lerp(p, 0.6)
+	if paint_blocked(g.tv_last, ns, bw * 0.5):  # a told surprise: the brush lifts before it
+		stroke_end(owner)
+		g.tv_cur_id = -1
+		return
+	g.tv_smooth = ns
 	if g.tv_smooth.distance_to(g.tv_last) < 0.006:
 		return
 	if canvas.stroke_len(g.tv_cur_id) >= ArtistScript.SEG_POINTS:
-		g.tv_cur_id = stroke_begin(col, TEAM_BRUSH_W, g.tv_last, owner)
+		g.tv_cur_id = stroke_begin(col, bw, g.tv_last, owner)
 	stroke_add(g.tv_cur_id, g.tv_smooth)
 	g.tv_last = g.tv_smooth
 	g.team_ink += 1
@@ -1022,13 +1080,9 @@ func _tv_paint(g) -> void:
 
 # --- Game flow -----------------------------------------------------------------------
 
+## This round's seconds: the mode's (paintgen.gd round_time) and the SLOW CLOCK (deep.gd round_time).
 func round_time() -> float:
-	match round_type:
-		"team":
-			return 50.0
-		"speed":
-			return 35.0
-	return 60.0
+	return Deep.round_time(round_type, play_mode, gift)
 
 
 func round_mult() -> int:
@@ -1056,6 +1110,8 @@ func round_title() -> String:
 func banner_text() -> String:
 	if round_n <= 0 or state == "wait":
 		return ""
+	if state == "pick":
+		return "PICK ONE!"
 	if state == "vote":
 		return "THE GALLERY VOTE"
 	if state == "over":
@@ -1108,6 +1164,8 @@ func _process(delta: float) -> void:
 	for g in active_guessers():
 		g.lock_left = maxf(0.0, g.lock_left - delta)
 	match state:
+		"pick":
+			picks.tick(delta)
 		"intro":
 			var dur := FIRST_INTRO_TIME if round_n == 1 else (TEAM_INTRO_TIME if round_type == "team" else INTRO_TIME)
 			if state_t >= dur:
@@ -1117,9 +1175,11 @@ func _process(delta: float) -> void:
 				_show_center("GO!  Guess what they're painting!" if round_type != "team" else "TEAM - PAINT!", 1.5, true,
 					"GO!  Paint the picture above the easel!" if round_type != "team" else "GUESS - touch a balloon!")
 				sound("go", 0.0, 1.0, true)
+				_deep_round()
 				print("Round %d (%s, %s): draw! (%d guessers)" % [round_n, round_type, theme, active_guessers().size()])
 		"draw":
 			time_left -= delta
+			_deep_tick(delta)
 			var secs := int(ceilf(time_left))
 			if secs <= 10 and secs != last_tick and secs > 0:
 				last_tick = secs
@@ -1210,7 +1270,17 @@ func _on_continue() -> void:
 		_start_game()
 
 
+## Host / local: a new game: the picks first when one is due (deep.gd), then the rounds.
 func _start_game() -> void:
+	_reset_game()
+	var due := _pick_due()
+	if due != "":
+		_start_pick(due)
+		return
+	_begin_game()
+
+
+func _reset_game() -> void:
 	round_n = 0
 	players[0].score = 0
 	players[0].colors_used.clear()
@@ -1223,12 +1293,28 @@ func _start_game() -> void:
 	winner_idx = -1
 	hung_count = 0
 	hung_entries.clear()
-	_new_plan()
 	room.clear_gallery()
 	canvas.hide_vote()
 	family_on_easel = false
 	canvas.set_crown(-1)
+	_clear_canvas(false)
 	net.event("gallery_clear", [])
+
+
+## Host / local: the game itself starts (its plan in the session's mode, its gift).
+func _begin_game() -> void:
+	games_started += 1
+	if gift_for != games_started:
+		gift = ""  # (a gift is for the game it was picked for)
+	if try_gift != "":
+		gift = try_gift
+		gift_for = games_started
+		try_gift = ""
+	smudge_rounds = 0
+	stamps = 0
+	game_surprises = 0
+	_send_deep()
+	_new_plan()
 	_next_round()
 
 
@@ -1242,6 +1328,17 @@ func _next_round() -> void:
 		return
 	round_n += 1
 	round_type = ROUND_PLAN[(round_n - 1) % ROUND_PLAN.size()]
+	team_solo = round_type == "team" and active_guessers().is_empty()
+	if team_solo:
+		round_type = "paint"  # nobody to paint it together: the artist paints it and Smudge guesses
+	if hazards != null:
+		hazards.host_end()
+	smudge_at = -1.0
+	smudge_wrongs = 0
+	smudge_got = false
+	peek_done = false
+	if gift == "rainbow":
+		players[0].color_idx = CanvasScript.RAINBOW
 	theme = PaintGen.theme_name(int(PaintGen.round_of(plan, round_n - 1).theme))
 	_clear_canvas(false)
 	_pick_word()
@@ -1512,8 +1609,12 @@ func _reveal(all_got: bool) -> void:
 	state_t = 0.0
 	reveal_word = word
 	_lift_all()
+	if hazards != null:
+		hazards.host_end()
 	var line := ""
-	if round_type == "team":
+	if smudge_got:
+		line = "SMUDGE GOT IT!"
+	elif round_type == "team":
 		line = "TEAM BONUS!\nThe VR player guessed it" if correct_count > 0 else "TIME'S UP!"
 	else:
 		line = "EVERYONE GOT IT!" if all_got else ("TIME'S UP!" if correct_count == 0 else "%d got it!" % correct_count)
@@ -1531,11 +1632,13 @@ func _reveal(all_got: bool) -> void:
 	# The picture of what it was, for everyone (and the words for the readers).
 	_story_for_all("It was %s!" % _article(PaintGen.caption(word)), word, Color(0.55, 0.9, 1.0) if correct_count > 0 else Color(1.0, 0.75, 0.4))
 	round_stats.append({"thing": word, "type": round_type, "theme": theme, "got": correct_count, "of": active_guessers().size(),
-		"secs": snappedf(round_time() - time_left, 0.1), "skips": 2 - skips_left, "points": canvas.point_count})
+		"secs": snappedf(round_time() - time_left, 0.1), "skips": 2 - skips_left, "points": canvas.point_count,
+		"smudge": smudge_got, "team_solo": team_solo, "surprises": hazards.count if hazards != null else 0})
 	sound("fanfare" if correct_count > 0 else "reveal", -2.0, 1.0, true)
 	if correct_count > 0:
 		confetti(canvas.canvas_to_world(Vector2(0.0, 0.0), 0.1), 60)
-	net.event("reveal", [word])
+	reveal_round = round_n
+	net.event("reveal", [word, round_n])
 	print("Round %d over: '%s', %d of %d guessed it" % [round_n, word, correct_count, active_guessers().size()])
 
 
@@ -1741,6 +1844,7 @@ func _game_over() -> void:
 	print("Game over: %s | awards: %s" % [board.replace("\n", " | "), awards.replace("\n", " | ")])
 	save.data.games = int(save.data.games) + 1
 	save.mark_dirty()
+	_add_treasure()
 	_log_game("full")
 	_show_family_easel()
 	net.event("family_easel", [])
@@ -1833,9 +1937,8 @@ func on_machine_left(peer: int) -> void:
 ## Host: the LAST machine left (multi_machine games get this only then).
 func on_client_left() -> void:
 	seats.all_left()
-	state = "wait"
-	canvas.hide_vote()
-	_show_center(Who.left(net.last_left_name) + " - waiting for them to come back…", 0.0)
+	# The artist plays on (Smudge guesses) until they come back.
+	_show_center(Who.left(net.last_left_name), 2.0)
 
 
 ## peer 0: every machine; else only that one (a newcomer / a machine that fell out of step).
@@ -1967,7 +2070,7 @@ func apply_snapshot(s: Array) -> void:
 func _client_checks(rid: int) -> void:
 	var dt := get_process_delta_time()
 	ask_t -= dt
-	var need_round := rid != opts_round and state != "wait" and state != "over" and state != "vote"
+	var need_round := rid != opts_round and state != "wait" and state != "over" and state != "vote" and state != "pick"
 	if net_rev != canvas.rev or net_sent_points != canvas.point_count:
 		sync_bad_t += dt
 	else:
@@ -2059,6 +2162,8 @@ func apply_event(kind: String, args: Array) -> void:
 			room.cat_cheer()
 		"reveal":
 			reveal_word = args[0]
+			if args.size() > 1:
+				reveal_round = int(args[1])
 			state = "reveal"
 			state_t = 0.0
 			correct_count = 0
@@ -2097,6 +2202,15 @@ func apply_event(kind: String, args: Array) -> void:
 			_apply_family(args[0], int(args[1]))
 		"family_easel":
 			_show_family_easel()
+		"orbs":
+			if picks != null and args.size() >= 5:
+				picks.show_row(str(args[0]), args[1], args[2], str(args[3]), args[4])
+		"take":
+			if picks != null and args.size() >= 2:
+				picks.take_fx(int(args[0]), int(args[1]))
+		"gift_bounce":
+			if gifts_node != null:
+				gifts_node.bounce()
 		"remote_pause":
 			get_tree().paused = args[0]
 			_set_pause_banner(args[0], "The VR artist paused the game")
@@ -2124,12 +2238,12 @@ func _new_plan() -> void:
 	var last: Array = []
 	for rd in plan.get("rounds", []):
 		last.append(rd.target)
-	plan_code = PaintGen.code_at(session_seed, 1 if daily_due else game_no, daily_due, tn)
+	plan_code = PaintGen.code_at(session_seed, 1 if daily_due else game_no, daily_due, tn, "", play_mode)
 	plan = PaintGen.build(plan_code)
 	# A new game never asks for something the last one did (the next session game instead).
 	while not daily_due and _shares_thing(plan, last) and game_no < 10000:
 		game_no += 1
-		plan_code = PaintGen.code_at(session_seed, game_no, false, tn)
+		plan_code = PaintGen.code_at(session_seed, game_no, false, tn, "", play_mode)
 		plan = PaintGen.build(plan_code)
 	round_stats.clear()
 	game_secs = 0.0
@@ -2274,7 +2388,9 @@ func _log_game(end: String) -> void:
 		"game": game_no, "round": round_n, "rounds": round_stats.duplicate(true), "guessers": active_guessers().size(),
 		"vr": players[0].vr, "net": net.mode, "secs": snappedf(game_secs, 0.1), "everyone": everyone_rounds,
 		"artist": players[0].score, "masterpiece": masterpiece, "gallery": (save.data.gallery as Array).size(),
-		"paintings": int(save.data.paintings), "days": int(save.data.days), "games": int(save.data.games)})
+		"paintings": int(save.data.paintings), "days": int(save.data.days), "games": int(save.data.games),
+		"mode": play_mode, "gift": gift, "season": season, "surprises": game_surprises, "smudge": smudge_rounds, "stamps": stamps,
+		"museum": int(save.data.get("museum_n", 0)), "picks": picks.history.duplicate() if picks != null else []})
 
 
 # --- HUD -----------------------------------------------------------------------------
@@ -2418,6 +2534,8 @@ func brush_text() -> String:
 			return "get ready…" if round_type == "team" else "%s\nget ready…" % cap(word)
 		"wait":
 			return "practice!"
+		"pick":
+			return "PICK ONE!"
 		"vote":
 			return "VOTE!"
 	return ""
@@ -2447,7 +2565,7 @@ func _update_easel_text() -> void:
 	match state:
 		"wait":
 			if vr_like:
-				info = "PAINT AND GUESS\nWaiting for the TV players…\nPractice! Hold the trigger to paint."
+				info = "PAINT AND GUESS\nPractice! Hold the trigger to paint."
 			else:
 				info = "PAINT AND GUESS\nWaiting for the VR artist…"
 		"intro":
@@ -2485,8 +2603,8 @@ func _update_easel_text() -> void:
 		if g.active:
 			sb += "P%d  %d%s%s\n" % [i + 1, g.score, "  GOT IT" if g.got and (state == "draw" or state == "reveal") else "",
 				"  x%d" % g.streak if g.streak >= 2 else ""]
-			if team and state == "draw" and (is_host_side() or is_local(g)):
-				cursors.append([g.tv_cursor, g.color, g.tv_down])
+			if ((team and state == "draw") or state == "pick") and (is_host_side() or is_local(g)):
+				cursors.append([g.tv_cursor, g.color, g.tv_down and state == "draw"])
 	canvas.score_label.text = sb
 	canvas.set_tv_cursors(cursors)
 	canvas.set_timer(time_frac(), state == "draw")
@@ -2572,7 +2690,7 @@ func _vr_label(size: int, width: float) -> Label3D:
 func _vr_status_text() -> String:
 	match state:
 		"wait":
-			return "Waiting for the TV players - practise painting!"
+			return "Practise painting!"
 		"intro":
 			return "Get ready - TEAM PAINT" if round_type == "team" else ""
 		"draw":
@@ -2583,3 +2701,294 @@ func _vr_status_text() -> String:
 		"vote":
 			return "VOTE  ·  %d" % int(ceilf(time_left)) if vote_done_t < 0.0 else ""
 	return ""
+
+
+# --- Second pass: modes, Smudge's brush gifts, surprises, seasons, Smudge's museum (deep.gd) -----------------------
+
+## Every machine: the second pass's nodes and its replicated state.
+func _setup_deep() -> void:
+	picks = PicksScript.new()
+	picks.main = self
+	add_child(picks)
+	hazards = HazardsScript.new()
+	hazards.main = self
+	add_child(hazards)
+	gifts_node = GiftsScript.new()
+	gifts_node.main = self
+	add_child(gifts_node)
+	season_node = SeasonScript.new()
+	add_child(season_node)
+	museum = MuseumScript.new()
+	museum.name = "SmudgesMuseum"
+	add_child(museum)
+	net.sticky_event("orbs")  # a machine joining mid-pick sees the orbs (picks.gd)
+	if not net.state_changed.is_connected(_on_deep_state):
+		net.state_changed.connect(_on_deep_state)
+	for k in ["deep", "hz", "museum"]:
+		if net.state_has(k):
+			_on_deep_state(k, net.state_get(k))
+
+
+## Host / local, once per session: the season, the family's last mode, the museum, for every machine.
+func _begin_deep() -> void:
+	season = Seeded.season()
+	if OS.has_environment("PG_SEASON") and Deep.SEASONS.has(OS.get_environment("PG_SEASON")):
+		season = OS.get_environment("PG_SEASON")
+	play_mode = Deep.mode_of(str(save.data.get("mode", "brave")))
+	if OS.has_environment("PG_MODE"):  # (What's New "try" / bots: straight in)
+		play_mode = Deep.mode_of(OS.get_environment("PG_MODE"))
+		mode_picked = true
+	bot_tricks = OS.has_environment("PG_TRICKS_NOW")
+	if OS.has_environment("PG_GIFT") and not Deep.gift(OS.get_environment("PG_GIFT")).is_empty():
+		try_gift = OS.get_environment("PG_GIFT")  # (What's New "try": the first game with that gift)
+		mode_picked = true
+	_send_deep()
+	_send_museum()
+	var sd := Deep.season_data(season)
+	_story_for_all(String(sd.line), String(sd.pic), Color(1.0, 0.7, 0.4))
+	print("Paint and Guess: %s mode, %s studio, museum of %d" % [play_mode, season, int(save.data.get("museum_n", 0))])
+
+
+## Host: the mode, the gift and the season for every machine.
+func _send_deep() -> void:
+	net.state_set("deep", [play_mode, gift, season])
+
+
+## Host: Smudge's museum for every machine.
+func _send_museum() -> void:
+	net.state_set("museum", [int(save.data.get("museum_n", 0)), (save.data.get("museum", []) as Array).duplicate(true)])
+
+
+## Host: the pick a new game waits for ("" none): the mode once a session before the first game, a gift before every
+## later game.
+func _pick_due() -> String:
+	if net.mode == "client":
+		return ""
+	if not mode_picked:
+		return "mode"
+	if games_started >= 1 and gift_for != games_started + 1 and not OS.has_environment("PG_NO_GIFTS"):
+		return "gift"
+	return ""
+
+
+## Nobody here could take a pick: the middle one comes sooner.
+func pick_nobody() -> bool:
+	return active_guessers().is_empty() and players[0].ghost
+
+
+## Host: put up the pick orbs (the game waits for them).
+func _start_pick(stage: String) -> void:
+	var entries: Array = []
+	var opts_list: Array = []
+	if stage == "mode":
+		opts_list = PickOrbs.mode_ids(play_mode)
+		for id in opts_list:
+			var md := PickOrbs.mode(String(id))
+			entries.append({"id": id, "name": md.name, "pic": md.pic, "color": md.color})
+	else:
+		opts_list = Deep.gift_choices(int(save.data.get("museum_n", 0)), str(save.data.get("last_gift", "")),
+			Seeded.derive(session_seed, "gift %d" % games_started))
+		for id in opts_list:
+			var gd := Deep.gift(String(id))
+			entries.append({"id": id, "name": gd.name, "pic": gd.pic, "color": gd.color})
+		_story_for_all("A GIFT!", "smudge", Color(1.0, 0.7, 0.4))
+	var a = players[0]
+	var row := "vr" if (a.vr or a.fake_vr) and active_guessers().is_empty() else "canvas"
+	state = "pick"
+	state_t = 0.0
+	sound("join", -6.0, 1.3, true)
+	picks.begin(stage, entries, opts_list, row, _on_picked)
+
+
+## Host: the team picked (or the middle one was taken for them): on with the game.
+func _on_picked(stage: String, opt: Variant, _slot: int) -> void:
+	if stage == "mode":
+		play_mode = Deep.mode_of(str(opt))
+		mode_picked = true
+		save.data.mode = play_mode
+		save.mark_dirty()
+		_story_for_all(PickOrbs.mode_name(play_mode) + "!", String(PickOrbs.mode(play_mode).pic), PickOrbs.mode_color(play_mode))
+		print("Picked mode: %s" % play_mode)
+	else:
+		gift = str(opt)
+		gift_for = games_started + 1
+		save.data.last_gift = gift
+		save.data.gifts = int(save.data.get("gifts", 0)) + 1
+		save.mark_dirty()
+		var gd := Deep.gift(gift)
+		_story_for_all(String(gd.line).to_upper(), String(gd.pic), gd.color)
+		print("Picked gift: %s" % gift)
+	_send_deep()
+	_begin_game()
+
+
+## Every machine, when the pick orbs pop up (picks.gd show_row): a clear banner, and this machine's brush rings
+## start under none of them.
+func pick_banner() -> void:
+	_show_center("PICK ONE!", 2.4, false, "PICK ONE!")
+	for i in range(1, players.size()):
+		var g = players[i]
+		if g.active and is_local(g):
+			g.tv_cursor = Vector2(clampf(g.tv_cursor.x, -0.55, 0.55), Deep.REST_Y)
+	var a = players[0]
+	if is_host_side() and not (a.vr or a.fake_vr):
+		a.cursor = Vector2(a.cursor.x, Deep.REST_Y)
+
+
+## Host, when a round's painting starts: its surprises.
+func _deep_round() -> void:
+	var allowed := round_type != "team" and (bot_tricks or games_started > 1 or round_n > 1)
+	hazards.host_begin(allowed, Seeded.derive(int(plan.get("seed", 0)), "hz %d %s" % [round_n, word]), play_mode,
+		Deep.SHORT_FIRST if bot_tricks else Deep.FIRST_T)
+
+
+## Host, every frame of a painting round: the surprises, Smudge's guesses, the PEEK GLASS.
+func _deep_tick(delta: float) -> void:
+	if round_type != "team":
+		hazards.host_tick(delta, time_left)
+	_smudge_tick()
+	if gift == "peek" and not peek_done and state_t >= Deep.PEEK_T and round_type != "team":
+		peek_done = true
+		var any := false
+		for g in active_guessers():
+			if g.got:
+				continue
+			var i := Deep.peek_pick(options_for(g.index), word, g.wrong_mask, Seeded.derive(int(plan.get("seed", 0)), "peek %d %d" % [round_n, g.index]))
+			if i >= 0:
+				g.wrong_mask |= 1 << i
+				_flash_to(g.index, "PEEK!  One wrong one gone", Deep.gift("peek").color)
+				any = true
+		if any:
+			gifts_node.bounce()
+			net.event("gift_bounce", [])
+
+
+## Host: SMUDGE GUESSES when nobody else can (a lone painter): once enough paint is on the canvas (HARD: a wrong guess
+## first). Nothing painted: nothing to guess.
+func _smudge_tick() -> void:
+	if not active_guessers().is_empty() or round_type == "team" or smudge_got or end_t >= 0.0:
+		smudge_at = -1.0
+		return
+	var md := Deep.mode_data(play_mode)
+	var f := Deep.PEEK_INK if gift == "peek" else 1.0
+	if smudge_at < 0.0:
+		if state_t >= float(md.smudge_t) * f and canvas.point_count >= float(md.smudge_ink) * f:
+			smudge_at = state_t + Deep.SMUDGE_THINK
+		return
+	if state_t < smudge_at:
+		return
+	var o: Array = options_for(0)
+	if smudge_wrongs < int(md.smudge_wrong):
+		smudge_wrongs += 1
+		var wrong := ""
+		for w in o:
+			if str(w) != word:
+				wrong = str(w)
+				break
+		_story_for_all("%s?" % cap(wrong), wrong, Color(1.0, 0.75, 0.4))
+		sound("wrong", -6.0, 1.2, true)
+		room.cat_cheer()
+		net.event("cat", [])
+		smudge_at = state_t + Deep.SMUDGE_GAP
+		print("Smudge guessed '%s' - wrong" % wrong)
+		return
+	smudge_got = true
+	smudge_rounds += 1
+	correct_count = 1
+	save.data.smudge = int(save.data.get("smudge", 0)) + 1
+	save.mark_dirty()
+	var pts := (40 + int(time_left * 0.5)) * round_mult()
+	players[0].score += pts
+	popup(canvas.canvas_to_world(Vector2(0.0, canvas.H * 0.5 - 0.22), 0.06), "SMUDGE GOT IT!  +%d" % pts, Color(1.0, 0.7, 0.4))
+	_vr_say("SMUDGE GOT IT!", 1.8)
+	room.cat_cheer()
+	net.event("cat", [])
+	print("Smudge guessed '%s' (+%d for the artist)" % [word, pts])
+	_reveal(true)
+
+
+## Every machine (only the host paints): may paint go from a to b? Never into a told surprise (hazards.gd).
+func paint_blocked(a: Vector2, b: Vector2, hw: float) -> bool:
+	return hazards != null and hazards.blocks(a, b, hw)
+
+
+## Host: where the brushes are now (a new surprise starts away from them).
+func brush_points() -> Array:
+	var out: Array = []
+	var a = players[0]
+	if a.cursor_on:
+		out.append(a.cursor)
+	if round_type == "team":
+		for g in active_guessers():
+			out.append(g.tv_cursor)
+	return out
+
+
+## Host: a surprise's tell started (hazards.gd).
+func hazard_told(e: Dictionary) -> void:
+	game_surprises += 1
+	save.data.surprises = int(save.data.get("surprises", 0)) + 1
+	save.mark_dirty()
+	print("Surprise: %s at %.2f,%.2f (w %.2f) after %.1f s" % [e.kind, float(e.x), float(e.y), float(e.w), state_t])
+
+
+## Host: STAMPS - the artist tapped the canvas: a star stamped round p (never into a told surprise).
+func stamp_at(p: Vector2, col: int) -> void:
+	if gift != "stamps" or not can_draw() or canvas.is_full():
+		return
+	var pts := Deep.stamp_points(p)
+	var bw := ArtistScript.BRUSH_W * Deep.brush_scale(gift)
+	for i in range(1, pts.size()):
+		if paint_blocked(pts[i - 1], pts[i], bw * 0.5):
+			return
+	var id := stroke_begin(col, bw, pts[0], 0)
+	for i in range(1, pts.size()):
+		stroke_add(id, pts[i])
+	stroke_end(0)
+	stamps += 1
+	gifts_node.bounce()
+	net.event("gift_bounce", [])
+	sound("pop", -6.0, 1.5, true)
+
+
+## Host, a game finished: a new treasure in Smudge's museum (its plinth in the mode's colour); gifts open as it grows.
+func _add_treasure() -> void:
+	var total := int(save.data.get("museum_n", 0))
+	var list: Array = save.data.get("museum", [])
+	var kind := Deep.treasure_kind(total)
+	list.append([Deep.TREASURES.find(kind), play_mode])
+	while list.size() > Deep.MUSEUM_SHOWN:
+		list.remove_at(0)
+	save.data.museum = list
+	save.data.museum_n = total + 1
+	save.mark_dirty()
+	_send_museum()
+	_story_for_all("A NEW %s!" % String(Deep.TREASURE_NAMES.get(kind, kind)).to_upper(), kind, Color(1.0, 0.8, 0.3))
+	for g in Deep.GIFTS:
+		if int(g.unlock) == total + 1:
+			_story_for_all("A NEW GIFT!", String(g.pic), g.color)
+
+
+## Every machine: the second pass's replicated state.
+func _on_deep_state(key: String, value: Variant) -> void:
+	match key:
+		"deep":
+			var dv: Array = value if value is Array else []
+			if dv.size() >= 3:
+				play_mode = Deep.mode_of(String(dv[0]))
+				gift = String(dv[1])
+				season = String(dv[2])
+				if season_node != null:
+					season_node.set_season(season)
+				if gifts_node != null:
+					gifts_node.set_gift(gift)
+		"hz":
+			var hz := Deep.unpack(value if value is Array else [])
+			if hazards != null:
+				hazards.show_now(hz)
+			if not hz.is_empty():
+				_show_center(String(Deep.KIND_NAMES.get(String(hz.kind), "LOOK!")), 1.6, false, String(Deep.KIND_NAMES.get(String(hz.kind), "LOOK!")))
+		"museum":
+			var mv: Array = value if value is Array else []
+			if museum != null and mv.size() >= 2:
+				museum.set_museum(int(mv[0]), mv[1])

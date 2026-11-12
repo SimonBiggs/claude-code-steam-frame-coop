@@ -33,6 +33,12 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "pg-smudge", "date": "2026-11-12", "game": "paint_and_guess", "pic": "smudge", "line": "Smudge guesses too!"},
+	{"id": "pg-gifts", "date": "2026-11-12", "game": "paint_and_guess", "pic": "stampbrush", "line": "Smudge's brush gifts!", "try": {"PG_GIFT": "stamps"}},
+	{"id": "pg-surprises", "date": "2026-11-12", "game": "paint_and_guess", "pic": "paintdrip", "line": "Drips and windy easels!", "try": {"PG_TRICKS_NOW": "1", "PG_MODE": "brave"}},
+	{"id": "pg-museum", "date": "2026-11-12", "game": "paint_and_guess", "pic": "catstatue", "line": "Smudge's museum grows!"},
+	{"id": "pg-modes", "date": "2026-11-12", "game": "paint_and_guess", "pic": "goldframe", "line": "Gentle, brave or hard!"},
+	{"id": "pg-seasons", "date": "2026-11-12", "game": "paint_and_guess", "pic": "snowflake", "line": "Snowy studio", "try": {"PG_SEASON": "winter"}},
 	{"id": "bb-gifts", "date": "2026-11-12", "game": "block_builders", "pic": "robot", "line": "Puff's block gifts!", "try": {"BB_GIFT": "robot"}},
 	{"id": "bb-surprises", "date": "2026-11-12", "game": "block_builders", "pic": "gust", "line": "Wind and wobbles!", "try": {"BB_TRICKS_NOW": "1", "BB_MODE": "brave"}},
 	{"id": "bb-town", "date": "2026-11-12", "game": "block_builders", "pic": "house", "line": "Puff's town grows!"},
