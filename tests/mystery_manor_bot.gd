@@ -17,7 +17,6 @@ var want := 2
 var paths := {}  # slot -> {target: Vector3, pts: PackedVector3Array, i: int, t: float}
 var saw_results := false
 var saw_step_back := false
-var saw_solved := false
 var max_found := 0
 var vr_walked := 0.0
 var vr_last := Vector3.INF
@@ -31,6 +30,7 @@ func _ready() -> void:
 	main.set("walk_speed", 7.0)
 	add_child(main)
 	kit.main = main
+	kit.watch_state(main.net)  # phases counted as they happen (kit.seen): a 0.25 s poll misses quick ones under load
 	want = BotKit.bot_players(2, 6)
 	var client := OS.has_environment("DUO_JOIN")
 	var host := OS.has_environment("DUO_HOST")
@@ -120,9 +120,6 @@ func _watch() -> String:
 	if bool(found[0]) or bool(found[1]):
 		if main._still_suspects(c).size() < 6:
 			saw_step_back = true
-	var phase := String(main.net.state_get("phase", ""))
-	if phase == "solved":
-		saw_solved = true
 	if main.results_showing():
 		if not saw_results:
 			saw_results = true
@@ -245,8 +242,8 @@ func _checks() -> void:
 		kit.assert_eq(kit.seated(), kit.seated_want(want, (1 if main.flat_host else 0)), "%s: all players are seated" % mode)
 	kit.assert_true(max_found >= 2, "%s: clues were found (%d)" % [mode, max_found])
 	kit.assert_true(saw_step_back, "%s: suspects who don't match stepped back" % mode)
-	kit.assert_true(saw_solved, "%s: the case was solved" % mode)
-	kit.assert_true(saw_results, "%s: results were shown" % mode)
+	kit.assert_true(kit.seen("phase", "solved") > 0, "%s: the case was solved" % mode)
+	kit.assert_true(kit.seen("phase", "results") > 0, "%s: results were shown" % mode)
 	kit.assert_true(int(main.net.state_get("cases", 0)) >= 2, "%s: a second case started" % mode)
 	if main.vr_rig != null:
 		kit.assert_true(vr_walked > 5.0, "the fake VR detective walked the manor (%.0f m)" % vr_walked)

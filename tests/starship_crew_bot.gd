@@ -23,7 +23,6 @@ const Deep := preload("res://games/starship_crew/deep.gd")
 var kit: BotKit
 var main: Node
 var want := 2
-var seen_missions := {}
 var saw_results := false
 var again_t := -1.0
 var zap_cd := {}
@@ -52,6 +51,7 @@ func _ready() -> void:
 	main = load("res://games/starship_crew/main.tscn").instantiate()
 	add_child(main)
 	kit.main = main
+	kit.watch_state(main.net)  # phases counted as they happen (kit.seen): a 0.25 s poll misses quick ones under load
 	want = BotKit.bot_players(2, 6)
 	var client := OS.has_environment("DUO_JOIN")
 	var host := OS.has_environment("DUO_HOST")
@@ -74,7 +74,6 @@ func _ready() -> void:
 func _results() -> String:
 	if main == null or not is_instance_valid(main) or main.space == null:
 		return ""
-	seen_missions[int(main.net.state_get("mission", 0))] = true
 	max_objs = maxi(max_objs, main.space.objs.size())
 	if main.results_showing():
 		if not saw_results:
@@ -210,7 +209,7 @@ func _checks() -> void:
 	if mode != "host":
 		kit.assert_eq(kit.seated(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
 		kit.assert_true(main.lasers_seen > 0, "%s: lasers were drawn (%d)" % [mode, main.lasers_seen])
-	kit.assert_true(seen_missions.size() >= (2 if short and kit.t < 50.0 else 3), "%s: played through several missions (%d%s)" % [mode, seen_missions.size(), ", short run" if short else ""])
+	kit.assert_true(kit.seen_values("mission").size() >= (2 if short and kit.t < 50.0 else 3), "%s: played through several missions (%d%s)" % [mode, kit.seen_values("mission").size(), ", short run" if short else ""])
 	kit.assert_true(main.stories_shown >= 3, "%s: Captain Whiskers' story cards showed (%d)" % [mode, main.stories_shown])
 	kit.assert_true(main.cockpit.model_parts == int(main.net.state_get("parts", -1)), "%s: the dashboard station model has every part (%d)" % [mode, main.cockpit.model_parts])
 	var seeded: bool = OS.get_environment("SC_TRIPS") != "0"
@@ -235,9 +234,9 @@ func _checks() -> void:
 		if main.surprises_seen >= 3:
 			kit.assert_true(main.zone_hits < main.surprises_seen, "%s: the pilot dodged some surprises (%d hits of %d)" % [mode, main.zone_hits, main.surprises_seen])
 	if short:  # cut short before docking: a RUN line for every mission finished so far
-		kit.assert_true(main.runs_logged >= 1 and main.runs_logged >= seen_missions.size() - 1, "%s: a RUN line for every finished mission (%d, missions seen %d, short run)" % [mode, main.runs_logged, seen_missions.size()])
+		kit.assert_true(main.runs_logged >= 1 and main.runs_logged >= kit.seen_values("mission").size() - 1, "%s: a RUN line for every finished mission (%d, missions seen %d, short run)" % [mode, main.runs_logged, kit.seen_values("mission").size()])
 	else:
-		kit.assert_true(saw_results, "%s: the ship docked and the results showed" % mode)
+		kit.assert_true(kit.seen("phase", "results") > 0, "%s: the ship docked and the results showed" % mode)
 		kit.assert_true(main.runs_logged >= 4, "%s: a RUN line for every mission (%d)" % [mode, main.runs_logged])
 		kit.assert_true(int(main.net.state_get("parts", 0)) >= 1 + int(OS.get_environment("SC_TRIPS")), "%s: the station grew a part on the way home" % mode)
 	if not OS.has_environment("SC_MISSION"):

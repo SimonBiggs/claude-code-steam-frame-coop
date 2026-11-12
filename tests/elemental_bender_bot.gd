@@ -60,6 +60,7 @@ func _ready() -> void:
 	main = load("res://games/elemental_bender/main.tscn").instantiate()
 	add_child(main)
 	kit.main = main
+	kit.watch_state(main.net)  # phases counted as they happen (kit.seen): a 0.25 s poll misses quick ones under load
 	want = BotKit.bot_players(2, 6)
 	var client := OS.has_environment("DUO_JOIN")
 	var host := OS.has_environment("DUO_HOST")
@@ -387,14 +388,14 @@ func _checks() -> void:
 	kit.assert_true(max_raiders <= main.MAX_ALIVE, "%s: at most %d raiders alive (%d)" % [mode, main.MAX_ALIVE, max_raiders])
 	kit.assert_true(main.log_specials.size() >= 1, "%s: specials used %s" % [mode, str(main.log_specials)])
 	if OS.has_environment("BOT_GIVEUP"):
-		kit.assert_true(saw_results, "%s: the temple fell and the results showed" % mode)
+		kit.assert_true(kit.seen("phase", "results") > 0, "%s: the temple fell and the results showed" % mode)
 		if mode != "client":
 			kit.assert_true(restarted and wave_after_again >= 1, "%s: PLAY AGAIN started a new game (wave %d)" % [mode, wave_after_again])
 		return
 	# Wave 6 + the General inside 58 s needs the short test waves (EB_FAST=1, see the header).
 	if mode == "local" and main.fast and not OS.has_environment("BOT_END"):
-		kit.assert_true(max_wave >= 6 or saw_results, "local: reached wave 6 (max %d)" % max_wave)
-		kit.assert_true(main.log_boss or saw_results, "local: the Shadow General appeared")
+		kit.assert_true(max_wave >= 6 or kit.seen("phase", "results") > 0, "local: reached wave 6 (max %d)" % max_wave)
+		kit.assert_true(main.log_boss or kit.seen("phase", "results") > 0, "local: the Shadow General appeared")
 	# Islands, the altar, bosses (host / local decide).
 	if mode != "client":
 		kit.assert_true(main.log_masters >= 1 or main.log_practice < 4, "%s: an element master was picked on the altar (%d)" % [mode, main.log_masters])

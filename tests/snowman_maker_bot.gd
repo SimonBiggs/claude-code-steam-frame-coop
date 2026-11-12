@@ -37,6 +37,7 @@ func _ready() -> void:
 		main.set("force_chapter", int(OS.get_environment("BOT_CHAPTER")))
 	add_child(main)
 	kit.main = main
+	kit.watch_state(main.net)  # phases counted as they happen (kit.seen): a 0.25 s poll misses quick ones under load
 	want = BotKit.bot_players(2, 6)
 	if OS.has_environment("BOT_VR") and OS.has_environment("BOT_PLAYERS") and int(OS.get_environment("BOT_PLAYERS")) == 0:
 		want = 0
@@ -422,7 +423,7 @@ func _checks() -> void:
 	if main.flat_host:
 		kit.assert_true(main.party.is_local(0) and main.avatars.has(0) and main.cams.has(0), "flat host: slot 0 plays here with a camera")
 	kit.assert_true(int(main.net.state_get("round", 0)) >= 2, "%s: round 1 ended with results and round 2 started" % mode)
-	kit.assert_true(saw_results, "%s: the results showed" % mode)
+	kit.assert_true(kit.seen("phase", "results") > 0, "%s: the results showed" % mode)
 	kit.assert_eq(main.stack_nodes.size(), (main.net.state_get("stacks", {}) as Dictionary).size(),
 		"%s: every snowman in the store is drawn" % mode)
 	if mode != "client":

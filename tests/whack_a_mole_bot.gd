@@ -17,7 +17,6 @@ var kit: BotKit
 var main: Node
 var want := 2
 var saw_results := false
-var saw_practice := false
 var saw_pick := false  # Fig's bed filled and the team bonked a seed packet (story.gd)
 var saw_kinds := {}
 var saw_moles := 0  # most moles in a generated round seen
@@ -43,6 +42,7 @@ func _ready() -> void:
 	main.set("holiday_every", 3)  # moles go on holiday quickly
 	add_child(main)
 	kit.main = main
+	kit.watch_state(main.net)  # phases counted as they happen (kit.seen): a 0.25 s poll misses quick ones under load
 	want = 0 if OS.has_environment("BOT_SOLO") else BotKit.bot_players(2, 6)
 	var client := OS.has_environment("DUO_JOIN")
 	var host := OS.has_environment("DUO_HOST")
@@ -79,8 +79,6 @@ func _ready() -> void:
 
 
 func _continue_results() -> String:
-	if String(main.net.state_get("phase", "")) == "practice":
-		saw_practice = true
 	if main.results_showing():
 		if not saw_results:
 			saw_results = true
@@ -115,9 +113,6 @@ func _press(action: String) -> void:
 func _physics_process(delta: float) -> void:
 	if main == null or not main.ready_to_play:
 		return
-	var ph := String(main.net.state_get("phase", ""))
-	if ph == "practice":
-		saw_practice = true
 	if main.picks != null and main.picks.showing():
 		orbs_seen[main.picks.orbs.stage] = true
 	saw_pick = saw_pick or orbs_seen.has("crop")
@@ -297,7 +292,7 @@ func _checks() -> void:
 	if main.vr_rig != null:
 		kit.assert_true(main.vr_whacks > 0, "the fake VR player whacked moles with the mallet")
 	if mode != "client":
-		kit.assert_true(saw_practice, "the round started with a practice mole")
+		kit.assert_true(kit.seen("phase", "practice") > 0, "the round started with a practice mole")
 		kit.assert_true(saw_pick, "%s: Fig's bed filled and the next round began with the crop pick orbs" % mode)
 		kit.assert_true(Story.beds_grown(main.save.data.beds) >= 1, "%s: a bed grew in Fig's garden (%s)" % [mode, str(main.save.data.beds)])
 		kit.assert_true(String(main.save.data.cur) not in [Story.FIRST_CROP, ""] or Story.beds_grown(main.save.data.beds) >= 2,

@@ -62,6 +62,7 @@ func _ready() -> void:
 	main = load("res://games/dungeon_delve/main.tscn").instantiate()
 	add_child(main)
 	kit.main = main
+	kit.watch_state(main.net)  # phases counted as they happen (kit.seen): a 0.25 s poll misses quick ones under load
 	want = BotKit.bot_players(2, 6)
 	var client := OS.has_environment("DUO_JOIN")
 	var host := OS.has_environment("DUO_HOST")
@@ -378,7 +379,7 @@ func _checks() -> void:
 		kit.assert_eq(main.party.local_slots().size(), want, "client: all %d TV players here are seated" % want)
 	if mode == "client":
 		kit.assert_true(max_mons >= 2, "client mirrors the monsters (%d)" % max_mons)
-		kit.assert_true(int(main.net.state_get("open", 0)) >= 2 or saw_results or again_sent, "client saw gates open")
+		kit.assert_true(int(main.net.state_get("open", 0)) >= 2 or kit.seen("phase", "results") > 0, "client saw gates open")
 		return
 	var first := int(OS.get_environment("DD_ROOM")) if OS.has_environment("DD_ROOM") else 0
 	if short:  # cut short (solo VR host BOT_END=62, a 60 s local run): real progress through the rooms
@@ -386,7 +387,7 @@ func _checks() -> void:
 	else:
 		for r in range(first, Dungeon.ROOMS):
 			kit.assert_true(main.log_rooms.has(r), "%s: room %d was entered" % [mode, r])
-		kit.assert_true(saw_results, "%s: the treasure was found and the results showed" % mode)
+		kit.assert_true(kit.seen("phase", "results") > 0, "%s: the treasure was found and the results showed" % mode)
 	if not OS.has_environment("DD_ROOM"):
 		if main.vr_rig != null:
 			kit.assert_true(main.dungeon.is_used(main.dungeon.dummy_id) or main.log_rooms.size() > 1, "the knight did the practice")
