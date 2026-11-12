@@ -191,7 +191,25 @@ export class Game {
     return this.vr();
   }
   /** What the headset would show: PNG from the VR head camera (or any Camera3D node path). */
-  async vrShot(path = join(this.dir, "vr.png"), o: { camera?: string; width?: number; height?: number; stereo?: boolean } = {}) { return (await this.cmd("camshot", { path, ...o })).path as string; }
+  /** (Waits up to ~1 s for VR cards / banners to finish fading in or out first, so a shot never shows a card
+   *  half-faded as "washed out": Snowman Maker's TUMBLE card 2026-11-12. o.settle: false shoots at once.) */
+  async vrShot(path = join(this.dir, "vr.png"), o: { camera?: string; width?: number; height?: number; stereo?: boolean; settle?: boolean } = {}) {
+    const { settle, ...rest } = o;
+    if (settle !== false) await this.settleVrUi();
+    return (await this.cmd("camshot", { path, ...rest })).path as string;
+  }
+  /** Wait (up to `ms`) until no VR UI (meta vr_placed) is mid-fade. Returns true when settled. */
+  async settleVrUi(ms = 1000) {
+    const code = 'for n in root.find_children("*", "Node3D", true, false):\n\tif n.has_meta("vr_placed") and n.is_visible_in_tree():\n\t\tfor c in n.get_children():\n\t\t\tif c is GeometryInstance3D and c.transparency > 0.02 and c.transparency < 0.98:\n\t\t\t\treturn true\nreturn false';
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+      let fading = false;
+      try { fading = !!(await this.eval(code)); } catch { return false; }
+      if (!fading) return true;
+      await Bun.sleep(80);
+    }
+    return false;
+  }
   // --- Recorder: frames in <dir>/rec/<ms>.jpg, inputs + marks in rec/events.txt and the overlay ---
   recDir = "";
   recStart = 0;  // Date.now() when recording started (frame names are ms after this)
