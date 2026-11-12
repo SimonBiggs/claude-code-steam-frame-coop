@@ -550,6 +550,7 @@ func _checks() -> void:
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
 	if mode != "host":
 		kit.assert_eq(kit.seated(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
+	kit.check_host_mode(main.net, main.play_mode)  # the TV machine plays at the host's mode ("deep" state)
 	kit.assert_true(_had("phase:results"), "%s: the party reached the results screen" % mode)
 	kit.assert_true(main.roster().size() >= 4, "%s: at least 4 players (CPUs fill up)" % mode)
 	for s in ["step:roll", "step:move", "step:land", "phase:minigame"]:

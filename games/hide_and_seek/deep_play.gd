@@ -64,8 +64,18 @@ func host() -> bool:
 	return main.net == null or main.net.mode != "client"
 
 
+## The host's pick (or its save) rules every machine: a TV machine reads the host's net state "mode", never its own
+## save (2026-11-12: before the first pick a TV used its own saved mode for the count, seek time and tells).
 func mode_id() -> String:
+	if not host():
+		return Deep.mode_of(String(main.net.state_get("mode", mode if mode != "" else "brave")))
 	return Deep.mode_of(mode if mode != "" else String(main.save.data.get("mode", "brave")))
+
+
+## Host / local: share this machine's mode as net state "mode" (from pack(), so every snapshot keeps it right).
+func share_mode() -> void:
+	if host() and main.net != null and main.net.state_get("mode") != mode_id():
+		main.net.state_set("mode", mode_id())
 
 
 func md() -> Dictionary:
@@ -242,7 +252,10 @@ func _resolve() -> void:
 			best = i
 	var id := String(choices[best])
 	if stage == "mode":
+		if OS.has_environment("HNS_MODE"):  # tests: this mode (a networked run checks the TV plays at it)
+			id = Deep.mode_of(OS.get_environment("HNS_MODE"))
 		mode = id
+		share_mode()
 		main.save.data["mode"] = id
 		main.save.mark_dirty()
 		main._story({"who": PickOrbs.mode_name(id), "line": String(PickOrbs.MODE_LINES.get(id, "")), "pic": String(PickOrbs.mode(id).get("pic", "star")),
@@ -454,6 +467,7 @@ func round_over(seeker_won: bool) -> void:
 # --- Net ------------------------------------------------------------------------------------
 
 func pack() -> Array:
+	share_mode()
 	var tk: Array = []
 	for k in takes:
 		tk.append([int(k), int(takes[k])])

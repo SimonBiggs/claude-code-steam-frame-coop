@@ -805,6 +805,8 @@ func _host_p() -> int:
 
 
 func _checks() -> void:
+	# Every machine plays at the host's mode (mech_titans keeps it only as net state "mode": clients read it there).
+	kit.check_host_mode(main.net, String(main.net.state_get("mode", "")))
 	if simple:
 		_simple_checks()
 		return

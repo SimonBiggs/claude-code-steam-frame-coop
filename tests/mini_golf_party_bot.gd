@@ -297,6 +297,7 @@ func _checks() -> void:
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
 	if mode != "host":
 		kit.assert_eq(kit.seated(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
+	kit.check_host_mode(main.net, main.mode)  # the TV machine plays at the host's mode ("deep" state)
 	var holes := kit.seen_values("hole").size()
 	kit.assert_true(holes >= (2 if short_run else 3), "%s: played through several holes (%d)" % [mode, holes])
 	if main.split != null and not main.party.local_slots().is_empty():

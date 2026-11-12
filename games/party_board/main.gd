@@ -392,6 +392,7 @@ func _build_deep() -> void:
 ## Host: the session's mode, today's season and the party hall for every machine.
 func publish_deep() -> void:
 	net.state_set("deep", {"mode": play_mode, "season": Seeded.season(), "hall_n": int(save.data.get("hall_n", 0))})
+	net.state_set("mode", play_mode)  # (the shared "host's difficulty" key: tests/bot_kit.gd check_host_mode)
 
 
 ## Every machine, when the pick orbs pop up (picks.gd): one clear banner (the orbs say the rest in pictures).

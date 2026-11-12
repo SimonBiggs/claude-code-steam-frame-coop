@@ -246,7 +246,13 @@ var picks: Node  # picks.gd
 var hazards: Node3D  # hazards.gd
 var season_node: Node3D  # season.gd
 var corner: Node3D  # corner.gd
-var mode := "brave"
+## GENTLE / BRAVE / HARD. The host's rules every machine: synced in the snapshot, and the host / local game also shares
+## it as net state "mode" (tests/bot_kit.gd check_host_mode checks the TV machine plays at it).
+var mode := "brave":
+	set(v):
+		mode = v
+		if net != null and net.mode != "client":
+			net.state_set("mode", v)
 var mode_picked := false
 var gift := ""  # this match's gift ("" none)
 var gift_for := -1  # the match number the gift was picked for
@@ -2733,8 +2739,7 @@ func _start_cup() -> void:
 	season = SeasonKit.override("penalty_shootout", Seeded.season(today), Deep.SEASONS)
 	if season_node != null:
 		season_node.set_season(season)
-	if save.data.mode != "":
-		mode = Deep.mode_of(String(save.data.mode))
+	mode = Deep.mode_of(String(save.data.mode)) if String(save.data.mode) != "" else mode  # (also shares it: the setter)
 	story_t = 2.8  # after the title
 	_story_for_all("Hi! I'm Leo!", "lion", LEO_COLOR)
 	_story_for_all(String(Deep.season_data(season).line), String(Deep.season_data(season).pic), Deep.season_data(season).drift)
@@ -2848,6 +2853,8 @@ func _on_picked(stage: String, opt: Variant, _slot: int) -> void:
 	if stage == "mode":
 		mode_picked = true
 		mode = Deep.mode_of(String(opt))
+		if OS.has_environment("PS_MODE"):  # tests: this mode (a networked run checks the TV plays at it)
+			mode = Deep.mode_of(OS.get_environment("PS_MODE"))
 		save.data.mode = mode
 		_story_for_all(String(PickOrbs.MODE_LINES.get(mode, "Let's go!")), String(PickOrbs.mode(mode).pic), PickOrbs.mode_color(mode))
 	else:

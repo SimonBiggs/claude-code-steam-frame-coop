@@ -17,6 +17,8 @@ const HOST_ONLY := {
 	"sheep_round_up": "team_mode is read in host code only; the clock goes out as net state time, the rest as events",
 	"tower_stack": "game_mode is read in host code only; it is packed into the replicated job state every machine builds from",
 	"elemental_bender": "no difficulty pick: boss_gentle is worked out and used on the host; TV raiders are ghost copies",
+	"kitchen_rush": "team_mode is read in host code only (orders, round plans, telemetry); the TV shows the host's orders and story cards",
+	"marble_maze": "the mode lives in the host's session plan (picks.gd stage is host-only); the TV builds mazes from the replicated plan",
 }
 
 var fails: Array[String] = []

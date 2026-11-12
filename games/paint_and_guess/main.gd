@@ -2751,6 +2751,7 @@ func _begin_deep() -> void:
 ## Host: the mode, the gift and the season for every machine.
 func _send_deep() -> void:
 	net.state_set("deep", [play_mode, gift, season])
+	net.state_set("mode", play_mode)  # (the shared "host's difficulty" key: tests/bot_kit.gd check_host_mode)
 
 
 ## Host: Smudge's museum for every machine.

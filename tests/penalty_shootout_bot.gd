@@ -570,6 +570,8 @@ func _exit_tree() -> void:
 			BotEnd.check(match_results >= 1, "a match penalty was taken and decided (short run: mode %s, t=%.0f, %d strikers, shots %d, results %s)" % [main.net.mode, t, strikers, shots_fired, str(results)])
 	else:
 		BotEnd.check(rounds_done >= 1, "a round of penalties was played (mode %s, t=%.0f, shots %d)" % [main.net.mode, t, shots_fired])
+	if rounds_done >= 1 or matches_done >= 1:
+		check_host_mode(main.net, main.mode)
 	if not main.simple:
 		return
 	var ks: Array = cues.keys()
@@ -617,3 +619,9 @@ func _report(mode: String) -> void:
 	print("BOT %s t=%.0f state=%s stage=%s round=%d/%d shooter=P%d saves=%d goals=%d shots=%d fired=%d kinds=%s replays=%d finals=%d cups=%s rounds_done=%d matches=%d views=%d results=%s [%s]%s" % [
 		mode, t, main.state, main.cup_stage, main.round_i + 1, main.rounds_total, main.shooter + 1, main.saves, main.goals_total,
 		main.shots_total, shots_fired, str(shot_kinds), replays, finals, str(cups), rounds_done, matches_done, views, str(results), ", ".join(act), kinfo])
+
+
+## Every machine plays at the host's difficulty (tests/bot_kit.gd host_mode_problem, counted on BotEnd's tally: no kit here).
+func check_host_mode(net: Node, mine: String, key := "mode") -> bool:
+	var why: String = preload("res://tests/bot_kit.gd").host_mode_problem(net, mine, key)
+	return preload("res://tests/bot_end.gd").check(why == "", why)
