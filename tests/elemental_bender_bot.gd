@@ -135,11 +135,11 @@ func _physics_process(delta: float) -> void:
 		_vr_bot(delta)
 
 
-func _nearest_target(from: Vector3) -> Node3D:
+func _nearest_target(from: Vector3, skip: Node3D = null) -> Node3D:
 	var best: Node3D = null
 	var bd := INF
 	for t in main.targets_for(0):
-		if not is_instance_valid(t):
+		if not is_instance_valid(t) or t == skip:
 			continue
 		var n: Node3D = t
 		var d := n.global_position.distance_to(from)
@@ -147,6 +147,17 @@ func _nearest_target(from: Vector3) -> Node3D:
 			bd = d
 			best = n
 	return best
+
+
+## Until the VR master has landed a hit, the TV bots leave the raider it is fighting to it (good team play): two
+## perfect-aim TV bots used to kill every raider before the master's fire arrived, so "the master hit raiders"
+## failed about 1 run in 30 (2026-11-12: 49 VR shots, 0 hits; solo VR hits 1 in 5).
+var vr_mark: Node3D = null
+
+func vr_leave() -> Node3D:
+	if main.vr_rig == null or int(main.log_hits_by.get(0, 0)) > 0 or vr_mark == null or not is_instance_valid(vr_mark):
+		return null
+	return vr_mark
 
 
 func _tv_bot(slot: int, delta: float) -> void:
@@ -162,7 +173,10 @@ func _tv_bot(slot: int, delta: float) -> void:
 	for k in c:
 		c[k] = float(c[k]) - delta
 	var bp: Vector3 = b.global_position
-	var target := _nearest_target(bp)
+	var target := _nearest_target(bp, vr_leave())
+	if target == null and vr_leave() != null:
+		target = vr_leave()
+	var hold := target != null and target == vr_leave()  # the VR master's raider: don't shoot it, just keep near
 	if target == null or b.dead:
 		kit.pad_trigger(dev, "rt", 0.0)
 		var home := Vector3(0, 0, 0) - bp
@@ -193,17 +207,17 @@ func _tv_bot(slot: int, delta: float) -> void:
 	else:
 		mv = Vector3(-dn.z, 0.0, dn.x) * (0.5 if slot % 2 == 0 else -0.5)
 	kit.slot_stick(main.party, slot, "left", _stick_for(slot, mv))
-	kit.pad_trigger(dev, "rt", 1.0 if dist < 30.0 else 0.0)
+	kit.pad_trigger(dev, "rt", 1.0 if dist < 30.0 and not hold else 0.0)
 	if float(c["jump"]) <= 0.0:
 		c["jump"] = randf_range(3.0, 6.0)
 		kit.slot_press(main.party, slot, "accept")
 	if float(c["dash"]) <= 0.0 and dist > 12.0:
 		c["dash"] = randf_range(4.0, 8.0)
 		kit.slot_press(main.party, slot, "b")
-	if float(c["special"]) <= 0.0 and dist < 8.0 and b.chi > 45.0:
+	if float(c["special"]) <= 0.0 and dist < 8.0 and b.chi > 45.0 and not hold:
 		c["special"] = randf_range(4.0, 7.0)
 		kit.slot_press(main.party, slot, "lt" if false else "y")
-	if float(c["spirit"]) <= 0.0 and main.team_spirit_full():
+	if float(c["spirit"]) <= 0.0 and main.team_spirit_full() and not hold:
 		c["spirit"] = 2.0
 		kit.slot_press(main.party, slot, "l3")
 
@@ -228,6 +242,7 @@ func _vr_bot(delta: float) -> void:
 	kit.vr_head_height(rig)  # the standard fake player (VrRig.fake_eye, x world_scale)
 	var head := rig.head_position()
 	var target := _nearest_target(head)
+	vr_mark = target
 	if target != null:
 		vr_target = target.global_position + Vector3.UP * float(target.get("hit_height"))
 		kit.vr_look_at(rig, Vector3(vr_target.x, head.y - 0.2, vr_target.z))
