@@ -252,6 +252,12 @@ static func check(code: int, pos: int) -> Array:
 		why.append("EASY too busy (%.2f notes a second)" % (easy_t.size() / play_secs))
 	if lanes.size() < 2:
 		why.append("EASY uses only %d lane(s)" % lanes.size())
+	if pos >= 1:
+		var all := {}
+		for l in s.g_lane:
+			all[int(l)] = true
+		if all.size() < 3:
+			why.append("song %d uses only %d lane(s) (every lane from song 2)" % [pos + 1, all.size()])
 	var g_rate := kid_guitar(easy_t, easy_lane, code)
 	if g_rate < KID_GUITAR_RATE:
 		why.append("a small kid hits only %d%% of the EASY guitar" % int(g_rate * 100.0))
