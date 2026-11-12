@@ -271,15 +271,15 @@ static func spirit_houses(bosses: Dictionary) -> int:
 ## Where friend i flies round the Spirit Tree at time t (relative to the tree's foot): a slow loop round the crown.
 static func friend_at(i: int, t: float, stage: int) -> Vector3:
 	var a := t * (0.6 + 0.07 * i) + i * TAU / 4.0
-	var r := WaveGen.crown_r(stage) + 0.9 + 0.2 * (i % 2)
-	return Vector3(cos(a) * r, WaveGen.tree_height(stage) * 0.75 + 0.6 + 0.25 * sin(t * 1.7 + i), sin(a) * r)
+	var r := WaveGen.crown_r(stage) + 1.5 + 0.3 * (i % 2)
+	return Vector3(cos(a) * r, WaveGen.tree_height(stage) * 0.7 + 0.8 + 0.3 * sin(t * 1.7 + i), sin(a) * r)
 
 
 ## Spirit house i hangs under the crown (relative to the tree's foot).
 static func house_at(i: int, stage: int) -> Vector3:
 	var a := i * TAU / SPIRIT_HOUSES_MAX + 0.3
-	var r := WaveGen.crown_r(stage) * 0.85
-	return Vector3(cos(a) * r, WaveGen.tree_height(stage) - WaveGen.crown_r(stage) * 0.55, sin(a) * r)
+	var r := WaveGen.crown_r(stage) * 0.8
+	return Vector3(cos(a) * r, WaveGen.tree_height(stage) - WaveGen.crown_r(stage) * 1.15, sin(a) * r)
 
 # --- Seasons -----------------------------------------------------------------------------------------
 

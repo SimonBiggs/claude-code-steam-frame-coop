@@ -2400,7 +2400,8 @@ func _surprise_tell_fx(kind: String, shapes: Array, secs: float, island: String)
 		hazards.rings.shape(String(sh[0]), sh[1], sh[2], sh[3], col, secs,
 			{"style": "disc", "stay": 0.35, "hot": col.lightened(0.35), "y": 0.09, "alpha": 0.4})
 		sfx.play_at("magic", sh[1], -6.0, 0.7)
-	_banner_local(String(tr.name), "MOVE!", "info")
+	for h in _all_huds():  # (a small note, not a big banner: the glowing ground is the warning)
+		HudKit.toast(h, "%s!" % String(tr.name), {"color": col, "icon": "exclaim", "sub": "MOVE!", "duration": minf(secs, 2.5), "where": "top", "sound": ""})
 	if vr_rig != null:
 		_vr_headline(String(tr.name), "MOVE!", {"duration": minf(secs, 2.5), "color": col, "sound": ""})
 

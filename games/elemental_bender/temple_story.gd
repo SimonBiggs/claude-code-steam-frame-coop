@@ -204,11 +204,12 @@ func set_keepsakes(waves: int, fruit: Array, days: int, crowned: bool, bosses: D
 	var houses := Deep.spirit_houses(bosses) if stage >= 2 else 0
 	for i in houses:
 		var hp := at + Deep.house_at(i, stage)
-		b.cylinder(0.008, 0.008, 0.35, MeshKit.at(hp + Vector3.UP * 0.4), Color(0.45, 0.3, 0.17), 4)  # its string
-		b.box(Vector3(0.3, 0.26, 0.3), MeshKit.at(hp), Color(0.85, 0.62, 0.38))
-		b.cone(0.26, 0.2, MeshKit.at(hp + Vector3.UP * 0.23), Color(0.75, 0.2, 0.18), 4)  # roof
-		b.box(Vector3(0.1, 0.12, 0.02), MeshKit.at(hp + Vector3(0, -0.02, 0.15)), Color(1.0, 0.85, 0.4), true)  # a lit window
-		b.box(Vector3(0.02, 0.12, 0.1), MeshKit.at(hp + Vector3(0.15, -0.02, 0)), Color(1.0, 0.85, 0.4), true)
+		b.cylinder(0.012, 0.012, 0.6, MeshKit.at(hp + Vector3.UP * 0.5), Color(0.45, 0.3, 0.17), 4)  # its string
+		b.box(Vector3(0.46, 0.4, 0.46), MeshKit.at(hp), Color(0.85, 0.62, 0.38))
+		b.cone(0.4, 0.3, MeshKit.at(hp + Vector3.UP * 0.35), Color(0.75, 0.2, 0.18), 4)  # roof
+		for k in 4:  # a lit window on every side
+			var wa := k * PI * 0.5
+			b.box(Vector3(0.15, 0.16, 0.03), MeshKit.at(hp + Vector3(sin(wa) * 0.235, -0.02, cos(wa) * 0.235), Vector3.ONE, Vector3(0, wa, 0)), Color(1.0, 0.85, 0.4), true)
 	var mi := MeshKit.instance(b.build(), true)
 	mi.name = "Tree"
 	keep_root.add_child(mi)
@@ -243,7 +244,7 @@ func _set_friends(list: Array, stage: int) -> void:
 			continue
 		var n := Node3D.new()
 		n.name = "Friend_%s" % String(fr.id)
-		n.scale = Vector3.ONE * (0.8 + 0.25 * int(list[i][1]))
+		n.scale = Vector3.ONE * (1.5 + 0.4 * int(list[i][1]))
 		n.add_child(MeshKit.instance(friend_mesh(int(fr.element)), false))
 		friend_root.add_child(n)
 		friend_nodes.append(n)
