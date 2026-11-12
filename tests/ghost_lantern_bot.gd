@@ -33,6 +33,7 @@ var simple := false
 var saw_hand := false
 var saw_sleepy := false
 var saw_glowy := false
+var had_vacuum := false  # a TV vacuum player was there during practice (each gets a glowing ghost; a lone Deck has none)
 var prop_i := 0
 var prop_t := 0.0
 var cues := {}  # simple mode: picture cues seen / learned
@@ -206,6 +207,8 @@ func _simple_checks(delta: float) -> void:
 			saw_glowy = true
 	if main.ghost_hand != null and main.ghost_hand.visible:
 		saw_hand = true
+	if main.practice and main.has_vacuums():
+		had_vacuum = true
 	if main.game_over:
 		print("BOT: FAIL simple mode reached game over")
 	_second_pass(delta)
@@ -225,7 +228,7 @@ func _simple_checks(delta: float) -> void:
 		print("BOT: skip to night %s" % OS.get_environment("BOT_NIGHT"))
 	if t - last_print < 0.02 and fmod(t, 5.0) < 0.1:
 		print("BOT   simple: dawn=%.2f won=%s kinds=%s" % [main.director().dawn, main.director().won, _kinds()])
-	# Touch every prop once practice is over (VR: with the fake left hand; flat: P2 bumps the floor spots).
+	# Touch every prop once practice is over (VR: with the fake left hand; flat: P2, or a lone flat P1, bumps the floor spots).
 	if not main.practice and main.props != null and t > 20.0 and not main.picks.active():
 		var names: Array = main.props.TOUCH.keys()
 		if prop_i < names.size():
@@ -235,7 +238,9 @@ func _simple_checks(delta: float) -> void:
 			if p1.vr:
 				p1.hand_l.global_position = d[0]
 			elif d[2] != null:
-				main.players[1].global_position = d[2]
+				# A TV player (P2) bumps the floor spot, or the flat lantern-bearer when nobody else plays (a lone Deck).
+				var walker = main.players[1] if main.players[1].active else p1
+				walker.global_position = d[2]
 			elif not main.props.touched.has(n):
 				main.props.touch(n)
 			if prop_t > 0.5:
@@ -266,7 +271,9 @@ func _simple_checks(delta: float) -> void:
 		var practiced: bool = OS.has_environment("BOT_NIGHT") or (saw_sleepy and main.vr_woken >= main.VR_PRACTICE)
 		var ok: bool = practiced and not main.practice and main.night >= 1 and has_meta("float_seen") \
 			and main.caught > 0 and not main.game_over and main.props.touched.size() >= 5
-		if (mode == "local" or main.net.connected) and not OS.has_environment("BOT_NIGHT"):
+		# Each TV vacuum player gets a glowing practice ghost; a lone Deck (the lantern-bearer, seats.deck_solo) or a
+		# solo VR host has no vacuum, so no glowy ghost (dev.loneRun, 2026-11-12).
+		if had_vacuum and not OS.has_environment("BOT_NIGHT"):
 			ok = ok and saw_glowy
 		if p1.vr and not OS.has_environment("BOT_NIGHT"):
 			ok = ok and saw_hand and main.props.touched.size() >= main.props.TOUCH.size()
