@@ -155,6 +155,23 @@ func every(interval: float, fn: Callable) -> void:
 	_repeats.append([interval, t + interval, fn])
 
 
+## Count every value a replicated net key takes, as it happens (net.state_changed). Use it for "did phase X
+## happen" checks instead of polling state_get from every(): a quick phase (a VR bot touching a level-up stone at
+## once) can come and go between two polls on a busy machine (Crystal Saga flake, 2026-11-12). seen(key, value).
+var _seen := {}
+
+
+func watch_state(net: Node) -> void:
+	net.state_changed.connect(func(key: String, value: Variant) -> void:
+		var k := "%s=%s" % [key, str(value)]
+		_seen[k] = int(_seen.get(k, 0)) + 1)
+
+
+## How many times net key `key` was set to `value` since watch_state().
+func seen(key: String, value: Variant) -> int:
+	return int(_seen.get("%s=%s" % [key, str(value)], 0))
+
+
 ## True once every timeline step has run.
 func timeline_done() -> bool:
 	for step in _timeline:

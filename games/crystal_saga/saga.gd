@@ -79,15 +79,53 @@ const LINES := {
 	"help_me": "Help me, heroes!",
 	"go": "Go, heroes! Go!",
 	"new_road": "A new road opens!",
+	"gold": "Catch it! A shard!",
+	"gold_home": "It hopped home!",
+	"garden": "My crystal garden grew!",
+	"garden_tree": "A crystal tree!",
+	"nox_bye": ["Hmph! Next time!", "Hee hee! Bye!", "You can't catch me!"],
+	"nox_friend": "Sorry! Friends?",
+	"nox_yes": "Yes! Welcome, Nox!",
+	"nox_home": "Nox lives here now!",
 }
+
+## NOX, the little shadow imp who took the Crystal of Light: he waits at every shrine, one chapter for every
+## crystal the family has brought home (realm.gd cleared regions). He grows kinder; the last crystal makes friends.
+const NOX := "NOX"
+const NOX_COLOR := Color(0.7, 0.5, 1.0)
+const NOX_LINES: Array[String] = ["Hee hee! Mine now!", "You again? Shoo!", "I just like shiny things!", "Nobody plays with me...",
+	"It's lonely up north.", "You... are kind heroes?", "Maybe I was wrong...", "Last one! Then... friends?"]
+## Lumi's words for the day's season as a journey starts (with its picture).
+const SEASON_LINES := {"spring": ["Blossom time!", "daisy"], "summer": ["Sunny roads today!", "sunflower"],
+	"autumn": ["Leafy roads today!", "acorn"], "winter": ["Snowy roads today!", "snowflake"]}
+## The road's surprises as Lumi warns of them on the way into their place: [name, line, picture] (by season for cones).
+const HAZARD_INFO := {"cones": ["PINECONES!", "Watch the circles!", "pinecone"], "cones_autumn": ["ACORNS!", "Watch the circles!", "acorn"],
+	"cones_winter": ["SNOW CLUMPS!", "Watch the circles!", "snowflake"], "log": ["ROLLING LOGS!", "Hop out of the lane!", "rolllog"],
+	"drips": ["CRYSTAL DROPS!", "Watch the circles!", "crystaldrop"], "boulder": ["BOULDERS!", "Hop out of the lane!", "boulder"]}
+const GOLD_NAME := "GOLDEN SLIME!"
+const GARDEN_NAME := "LUMI'S GARDEN"
+const GARDEN_TREE := 10  ## every 10th crystal flower is a crystal tree
+const GARDEN_MAX := 400  ## crystal flowers kept (the garden spreads that far; later ones are counted only)
+
+
+## Which Nox chapter the party meets at the shrine (crystals already home); -1 once he's a friend.
+static func nox_chapter(cleared: int) -> int:
+	return -1 if cleared >= Realm.SIZE else clampi(cleared, 0, NOX_LINES.size() - 1)
+
+
+## A road surprise's [name, line, picture] (cones dress for the season).
+static func hazard_info(kind: String, season: String) -> Array:
+	var k := kind + "_" + season
+	return HAZARD_INFO.get(k, HAZARD_INFO.get(kind, ["WATCH OUT!", "Watch the ground!", "star"]))
 
 
 ## The save (progress.gd SAVE_VERSION 2): restored = journeys finished; world = the family's realm seed;
 ## daily = {date: true} when TODAY'S QUEST was finished; cleared = realm slots whose guardian was beaten;
-## classes = {seat: hero}; hard = BRAVE mode; seen_unlocks = UNLOCKS already announced.
+## classes = {seat: hero}; hard = BRAVE mode; seen_unlocks = UNLOCKS already announced; garden = the biome of every
+## crystal brought home (Lumi's crystal garden at the shrine, one flower each; saga-deep2, a new key: old saves get []).
 static func save_defaults() -> Dictionary:
 	return {"restored": 0, "world": -1, "daily": {}, "skills": {}, "shards": 0, "seen_places": 0, "journeys": 0,
-		"cleared": [], "classes": {}, "hard": false, "seen_unlocks": 0}
+		"cleared": [], "classes": {}, "hard": false, "seen_unlocks": 0, "garden": []}
 
 
 ## Which journey to play next: {"seed", "tier", "daily", "region"}. region: a realm slot (the map stones' pick;
@@ -106,10 +144,11 @@ static func journey(journeys: int, world: int, daily_due: bool, date: String = "
 
 
 ## The plan for a journey (sagagen.gd generate() for its region of the family's realm).
-static func plan_for(j: Dictionary, world: int, hard: bool) -> Dictionary:
+## season: the day's (Seeded.season(); "" = undressed).
+static func plan_for(j: Dictionary, world: int, hard: bool, season: String = "") -> Dictionary:
 	var realm := Realm.generate(world)
 	var slot := clampi(int(j.get("region", 0)), 0, Realm.SIZE - 1)
-	return SagaGen.generate(int(j.seed), int(j.tier), int(realm.regions[slot].biome), String(realm.regions[slot].name), hard)
+	return SagaGen.generate(int(j.seed), int(j.tier), int(realm.regions[slot].biome), String(realm.regions[slot].name), hard, season)
 
 
 static func daily_seed(date: String = "") -> int:
@@ -248,6 +287,19 @@ static func self_check() -> Array:
 		for line in (v if v is Array else [v]):
 			if String(line).length() > 24:
 				why.append("line too long: %s" % line)
+	for nl in NOX_LINES:
+		if String(nl).length() > 26:
+			why.append("Nox line too long: %s" % nl)
+	if NOX_LINES.size() != Realm.SIZE or nox_chapter(0) != 0 or nox_chapter(Realm.SIZE) != -1 or nox_chapter(Realm.SIZE - 1) != Realm.SIZE - 1:
+		why.append("Nox has a chapter for every crystal but the last makes friends")
+	for k in SagaGen.HAZARDS:
+		for se in SagaGen.SEASONS:
+			var hi := hazard_info(String(k), String(se))
+			if String(hi[0]).length() > 14 or String(hi[1]).length() > 24:
+				why.append("surprise words too long: %s" % str(hi))
+	for se2 in SagaGen.SEASONS:
+		if not SEASON_LINES.has(se2) or String(SEASON_LINES[se2][0]).length() > 24:
+			why.append("season %s has no short line" % se2)
 	for p in PLACES:
 		if String(p.line).length() > 24:
 			why.append("place line too long: %s" % p.line)

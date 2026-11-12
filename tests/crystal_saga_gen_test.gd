@@ -12,6 +12,10 @@ extends SceneTree
 ## time to hit back, rain that leaves the glade mostly safe, few helpers); the family realms (realm.gd check():
 ## every region can be reached by clearing open ones, roads only between neighbouring rows, difficulty never
 ## jumps along any order of play); difficulty rises smoothly tier by tier for every team size; heroes (classes.gd).
+## saga-deep2: the road's surprises (sagagen.gd check_road(): none on the first roads, each told long enough to step
+## out of, room between them, small; the golden slime on open ground) in every plan above, every season; surprises
+## really happen on later roads and differ; hand-broken surprises are caught; hazards.gd aim() keeps every told spot
+## on the path and hits() matches what was told; Nox and the garden's story bits.
 ## Prints "SCRIPT ERROR: ..." for each failure.
 
 const SagaGen := preload("res://games/crystal_saga/sagagen.gd")
@@ -21,6 +25,7 @@ const Monsters := preload("res://games/crystal_saga/monsters.gd")
 const Seeded := preload("res://core/seeded.gd")
 const Realm := preload("res://games/crystal_saga/realm.gd")
 const Classes := preload("res://games/crystal_saga/classes.gd")
+const Hazards := preload("res://games/crystal_saga/hazards.gd")
 
 var fails := 0
 
@@ -35,7 +40,8 @@ func _initialize() -> void:
 		for biome in Realm.BIOMES.size():
 			for brave in [false, true]:
 				var n_seeds := maxi(4, seeds / Realm.BIOMES.size())
-				var r := Seeded.validate(func(s: int) -> Dictionary: return SagaGen.generate(s, tier, biome, "", brave),
+				var se: String = SagaGen.SEASONS[(tier + biome) % 4]
+				var r := Seeded.validate(func(s: int) -> Dictionary: return SagaGen.generate(s, tier, biome, "", brave, se),
 					func(p: Dictionary) -> Array: return SagaGen.check(p), n_seeds, 11 + tier * 31 + biome, [0, 1, 999999],
 					"SAGA T%d %s%s" % [tier, Realm.BIOMES[biome].id, " BRAVE" if brave else ""])
 				total += int(r.checked)
@@ -142,7 +148,7 @@ func _initialize() -> void:
 			var out: Array = []
 			for f in [[42, [], false], grown[absi(hash(date)) % grown.size()]]:
 				var jn := Saga.journey(3, int(f[0]), true, date, 0, f[1], bool(f[2]))
-				out.append([jn, Saga.plan_for(jn, int(f[0]), bool(f[2]))])
+				out.append([jn, Saga.plan_for(jn, int(f[0]), bool(f[2]), Seeded.season(date))])
 			return out,
 		func(out: Array) -> Array:
 			var why: Array = []
@@ -219,12 +225,68 @@ func _initialize() -> void:
 	b8.props.append([World.ROCK, -4.0, World.center(2).z - 6.6, 0.6])
 	b8.props.append([World.CRYSTAL, -4.5, World.center(2).z - 6.6, 0.6])
 	_expect(not SagaGen.check(b8).is_empty(), "a crystal inside a rock is caught")
+	# saga-deep2: road surprises.
+	var kinds := {}
+	var golds := 0
+	var with_hz := 0
+	for s5 in 120:
+		var tier5 := s5 % SagaGen.TIERS
+		var p5 := SagaGen.generate(9000 + s5 * 37, tier5, s5 % Realm.BIOMES.size(), "", s5 % 3 == 0, SagaGen.SEASONS[s5 % 4])
+		var hz5: Array = p5.road.hazards
+		with_hz += 1 if not hz5.is_empty() else 0
+		if tier5 >= 3:
+			_expect(hz5.size() == 2, "tier %d has surprises in both places (%d)" % [tier5, hz5.size()])
+		elif tier5 >= 1:
+			_expect(hz5.size() == 1, "tier %d has one surprise (%d)" % [tier5, hz5.size()])
+		for h5 in hz5:
+			kinds[String(h5.kind)] = true
+			# Every told spot is on the path in the right place, and a hero standing in it is hit.
+			var feet: Array = [World.center(int(h5.zone)) + Vector3(-1.5, 0.0, 2.0), World.center(int(h5.zone)) + Vector3(2.0, 0.0, -3.0)]
+			for k5 in 6:
+				var data := Hazards.aim(h5, int(h5.zone), feet)
+				for q5 in data:
+					var qv: Vector3 = q5
+					_expect(absf(qv.x) <= World.HALF_W + 0.01 and World.zone_of(qv) == int(h5.zone), "%s told off the path at %s" % [h5.kind, str(qv)])
+				_expect(Hazards.hits(String(h5.kind), data, h5.size, data[0] if String(h5.kind) in ["cones", "drips"] else (data[0] as Vector3).lerp(data[1], 0.5)), "%s: a hero in the told spot is hit" % h5.kind)
+				_expect(not Hazards.hits(String(h5.kind), data, h5.size, Vector3(99.0, 0.0, 99.0)), "%s: a hero far away is hit" % h5.kind)
+		golds += 0 if (p5.road.gold as Dictionary).is_empty() else 1
+	_expect(kinds.size() == SagaGen.HAZARDS.size(), "every kind of surprise happens (%s)" % str(kinds.keys()))
+	_expect(golds >= 30 and golds <= 90, "golden slimes hide on some roads (%d of 120)" % golds)
+	_expect(with_hz >= 80, "most roads after the first have surprises (%d of 120)" % with_hz)
+	var ph := SagaGen.generate(42, 4)
+	var h1 := ph.duplicate(true)
+	h1.road.hazards[0].warn = 0.3
+	_expect(not SagaGen.check(h1).is_empty(), "a surprise told too quickly is caught")
+	var h2 := ph.duplicate(true)
+	h2.road.hazards[0].gap = [1.0, 2.0]
+	_expect(not SagaGen.check(h2).is_empty(), "surprises with no rest between are caught")
+	var h3 := SagaGen.generate(42, 0)
+	h3.road.hazards = ph.road.hazards.duplicate(true)
+	_expect(not SagaGen.check(h3).is_empty(), "surprises on a first road are caught")
+	var h4 := ph.duplicate(true)
+	h4.road.hazards[0].n = 12
+	_expect(not SagaGen.check(h4).is_empty(), "a sky full of pinecones is caught")
+	var h5b := ph.duplicate(true)
+	h5b.road.gold = {"zone": 1, "x": 0.0, "z": World.entrance(1).z}
+	_expect(not SagaGen.check(h5b).is_empty(), "a golden slime on the entrance is caught")
+	var h6 := ph.duplicate(true)
+	h6.road.hazards[0].first = 0.5
+	_expect(not SagaGen.check(h6).is_empty(), "a surprise the moment heroes arrive is caught")
+	for ch in Realm.SIZE + 1:
+		_expect(Saga.nox_chapter(ch) == (ch if ch < Realm.SIZE else -1), "Nox chapter %d" % ch)
+	for gi in 400:
+		var gs := World.garden_spot(gi)
+		_expect(absf(gs.x) > 6.5 and World.zone_of(gs) >= 3, "crystal flower %d grows off the path by the shrine (%s)" % [gi, str(gs)])
 	# Pictures: every story card picture has a drawing (all games); every picture the saga uses exists.
 	var StoryCard := load("res://core/story_card.gd")
 	for e in StoryCard.check():  # (tests/story_pictures_test.gd checks the pictures in depth)
 		_expect(false, e)
 	var icons := ["star", "crown", "music", "trophy", "flag", "heart", "sun"]
-	var used: Array = ["lumi", "shard", "sun", "star", "guardian", "house", "rainbow"]
+	var used: Array = ["lumi", "shard", "sun", "star", "guardian", "house", "rainbow", "nox", "goldslime", "crystalgarden", "heart"]
+	for hk in Saga.HAZARD_INFO:
+		used.append(String(Saga.HAZARD_INFO[hk][2]))
+	for sk in Saga.SEASON_LINES:
+		used.append(String(Saga.SEASON_LINES[sk][1]))
 	for id in Saga.SKILLS:
 		used.append(String(Saga.SKILLS[id].pic))
 	for b in Realm.BIOMES:
