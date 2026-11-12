@@ -41,6 +41,12 @@ const lastPath = async (out: string) => {
 
 // --- Bot tests (headless, in the staging copy, at low priority) ------------------------------------
 
+/** Bots whose runs may end without a BOT RESULT line (multibot verdict allowNoResult). Every other bot run, local, host
+ *  or joining, FAILs without one: a run without a verdict tests nothing (2026-11-11: penalty_shootout's networked runs
+ *  "passed" that way; tests/bot_end.gd now gives every bot one). Keep this short, with a reason for each. */
+export const NET_NO_RESULT_OK: Record<string, string> = {
+};
+
 export const bots = {
   /** Game ids that have a bot test. */
   async list(): Promise<string[]> {
@@ -57,10 +63,11 @@ export const bots = {
       return { out: r.stdout.toString() + r.stderr.toString(), code: r.exitCode };
     };
     // Pass (docs/GAME_DEV_GUIDE.md "Testing"): multibot.verdict, the one shared rule.
-    const parse = ({ out, code }: { out: string; code: number }, mode: string) => ({ mode, ...verdict(out, code) });
+    const allowNoResult = NET_NO_RESULT_OK[id];
+    const parse = ({ out, code }: { out: string; code: number }, mode: string) => ({ mode, ...verdict(out, code, { allowNoResult }) });
     const runs: any[] = [parse(await one({}, "--fixed-fps 60 --quit-after 3600"), "local")];
     if (o.net) {
-      const g = await runGroup({ scene, project: proj, joiners: o.joiners ?? 1, seconds: o.seconds ?? 180, quiet: true });
+      const g = await runGroup({ scene, project: proj, joiners: o.joiners ?? 1, seconds: o.seconds ?? 180, quiet: true, allowNoResult });
       runs.push(...g.machines.map(m => ({ mode: m.machine, ...m })));
       for (const [k, a] of Object.entries(g.agree)) if (!a.ok) runs.push({ mode: `agree ${k}`, pass: false, result: a.values.join(" / "), failed: [], errors: [] });
     }
@@ -71,7 +78,9 @@ export const bots = {
     // Bots that change game files refuse plain runs ("run it with tools/multibot.ts --copies" / tools/hot-everything-test):
     // they have their own runners, so a sweep skips them instead of reporting two FAILs every time.
     const own = new Set<string>();
-    if (!o.only) for (const id of await bots.list()) if ((await Bun.file(join(STAGE, "tests", id + "_bot.gd")).text().catch(() => "")).includes("this bot changes game files")) own.add(id);
+    // (So do bots that are one half of a tools/ runner: "## Own runner: tools/<name>" in their header, e.g. lan_update
+    // and telemetry_push, which FAIL on purpose without their runner's receiver / update server, 2026-11-11.)
+    if (!o.only) for (const id of await bots.list()) if (/this bot changes game files|^## Own runner: /m.test(await Bun.file(join(STAGE, "tests", id + "_bot.gd")).text().catch(() => ""))) own.add(id);
     const ids = (o.only ?? (await bots.list())).filter(id => !own.has(id));
     const results: any[] = [];
     let next = 0;
