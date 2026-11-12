@@ -56,6 +56,9 @@ const Items := preload("res://games/kart_race/items.gd")
 const PitScript := preload("res://games/kart_race/pit.gd")
 const Shelf := preload("res://games/kart_race/shelf.gd")
 const BgGen := preload("res://core/bg_gen.gd")
+const Deep := preload("res://games/kart_race/deep.gd")
+const SurprisesScript := preload("res://games/kart_race/surprises.gd")
+const Town := preload("res://games/kart_race/town.gd")
 
 ## Simple mode picture cues on the TV views (no words): [pad button, icons, icon colour].
 ## The "go" button follows the player's controls (A on a pad, W / up on a keyboard), see _cue_button.
@@ -220,6 +223,19 @@ var lap_tick := 0.0
 var last_medal := 0
 var pits_done := 0
 var item_cycle := 0
+# The second pass (deep.gd): Bolt's gifts at the pit stop, warned surprises, seasons, Bolt's race town.
+var season := ""  # Seeded.season (the host's, synced): the roadside, the drift, the tour's surprise
+var surprises: SurprisesScript
+var surprise_kind := ""  # host: what drops this race ("" none)
+var surprise_cards := {}  # host: surprise kinds already shown on a WATCH OUT card this session
+var gift_orbs: PickOrbs
+var gift_offer: Array = []  # the gift ids on the orbs at this pit stop (synced; [] = no orbs)
+var gift_taken := {}  # kart index -> orb index picked at this pit stop (synced)
+var gifts := {}  # kart index -> gift id for this cup / tour place (synced)
+var gift_built := ""  # what the orbs show now (every machine rebuilds them from the synced offer)
+var town_races := 0  # races finished (the save's, synced): Bolt's race town grows from it
+var town_node: Node3D
+var town_key := ""
 
 var center_label: Label
 var help_label: Label
@@ -262,6 +278,16 @@ func _setup_game(mode: String) -> void:
 	pit.name = "Pit"
 	pit.main = self
 	add_child(pit)
+	season = OS.get_environment("KART_SEASON") if OS.has_environment("KART_SEASON") else Seeded.season()
+	track.season = season
+	surprises = SurprisesScript.new()
+	surprises.name = "Surprises"
+	surprises.main = self
+	add_child(surprises)
+	gift_orbs = PickOrbs.new()
+	gift_orbs.name = "GiftOrbs"
+	gift_orbs.collision_layer = 0
+	add_child(gift_orbs)
 	if mode != "client":
 		_load_story()
 	if SIMPLE_MODE and mode != "client":
@@ -1410,6 +1436,9 @@ func _process(delta: float) -> void:
 	_record_laps(dt)
 	_update_ghost(dt)
 	_update_shelf()
+	_update_town()
+	surprises.update(dt)
+	_update_gift_orbs()
 	if net.mode == "client":
 		pit.show_rows(pit_rows)
 	_update_bananas_visual()
@@ -1461,13 +1490,16 @@ func _host_update(dt: float, cont_edge: bool) -> void:
 				for k in karts:
 					if k.active and k.is_sim():
 						_rocket(k)
+				_gifts_at("go")
 		"race":
 			race_t += dt
+			surprises.host_update(dt)
 		"pit":
 			var humans: Array = []
 			for p in players:
 				if p.active:
 					humans.append(p)
+			_gift_picks(humans)
 			if pit.update(dt, humans):
 				_pit_done()
 		"results":
@@ -1622,6 +1654,8 @@ func _start_race(ti: int) -> void:
 	for i in track.box_t.size():
 		track.box_t[i] = 0.0
 	net.event("race", [track_i, laps, round_n, finish_frac, track_desc, hats_won])  # before the teleports: the TV builds the track first
+	surprise_kind = _surprise_kind()
+	surprises.begin(surprise_kind)
 	_race_story_start()
 	# CPU buddies fill the grid (fewer as more people play).
 	var humans := human_count()
@@ -1687,6 +1721,7 @@ func _authority(dt: float) -> void:
 				else:
 					notify(k, "FINAL LAP!" if lap == laps else "LAP %d!" % lap)
 				kart_sound(k, "lap", -2.0, 1.0 + 0.1 * lap)
+				_gift_at(k, "lap")
 		elif lap < shown:
 			k.set_meta("lap", lap)
 		if k.total >= goal:
@@ -1876,6 +1911,9 @@ func _load_story() -> void:
 		d["story_i"] = int(OS.get_environment("KART_STORY"))
 		d["hats"] = mini(Story.HATS.size(), int(d["story_i"]) / Story.RACES_PER_PLACE)
 	hats_won = int(d["hats"])
+	if OS.has_environment("KART_TOWN"):  # tests / WHAT'S NEW: a town this many races big
+		d["races"] = maxi(int(d["races"]), int(OS.get_environment("KART_TOWN")))
+	town_races = int(d["races"])
 	print("Grand Tour: world %d, race %d (%s), %d hats, %d golds" % [int(d["world"]), int(d["story_i"]),
 		str(Story.place(int(Story.where(int(d["story_i"]))[0])).name), hats_won, int(d["golds"])])
 
@@ -2020,10 +2058,19 @@ func _story_after_race(order: Array, cup_beats: Array = []) -> void:
 		if not k.cpu:
 			best = k
 			break
+	var town_was := Deep.town_size(int(d["races"]))
 	d["races"] = int(d["races"]) + 1
+	town_races = int(d["races"])
 	if best != null and best.place == 1:
 		d["golds"] = int(d["golds"]) + 1
 	var beats: Array = []
+	var town_now := Deep.town_size(town_races)
+	if town_now.x > town_was.x:  # Bolt's race town grew a building (by the start line)
+		var tb: Array = Deep.TOWN[town_now.x - 1]
+		beats.append({"who": "BOLT'S TOWN", "line": "New: %s!" % String(tb[2]).to_lower(), "pic": String(tb[1]), "color": BOLT_COLOR,
+			"duration": 3.0})
+	elif town_now.y > town_was.y:
+		beats.append({"who": "BOLT'S TOWN", "line": "Another balloon!", "pic": "balloon", "color": BOLT_COLOR, "duration": 3.0})
 	if Story.is_daily(track_desc):
 		var dd: Dictionary = d["daily"]
 		var today := Seeded.today()
@@ -2121,7 +2168,9 @@ func _race_telemetry(how: String, order: Array) -> void:
 		"ramps": track.ramps.size(), "splits": track.splits.size(), "humans": humans, "cpus": cpu_n, "best_place": best_place,
 		"first_t": snappedf(first_t, 0.1), "last_t": snappedf(last_t, 0.1), "race_t": snappedf(race_t, 0.1), "walls": walls,
 		"air": air, "shortcut": short, "items": items, "hats": hats_won, "vr": cockpit != null and not cockpit.fake,
-		"net": net.mode, "solo": humans == 1, "end": how})
+		"net": net.mode, "solo": humans == 1, "end": how, "season": season, "gifts": ",".join(PackedStringArray(gifts.values())),
+		"sp_kind": surprise_kind, "sp_spots": track.surprises.size(), "sp_tells": int(surprises.st.tells), "sp_hits": int(surprises.st.hits),
+		"sp_saved": int(surprises.st.saved), "hz_tells": int(surprises.st.hz_tells), "town": Deep.town_size(town_races).x})
 
 
 ## Today's ghost: a see-through kart that drives the day's best run (path sampled 5 times a second).
@@ -2283,6 +2332,154 @@ func _clear_tour_strips() -> void:
 
 # --- Bolt's cups, the pit stop, the garage, Bolt's trophy shelf and the best-lap ghost ------------------
 
+## What drops onto the road this race (deep.gd): the cup's thing or the season's, from a series' second race on.
+func _surprise_kind() -> String:
+	if track_desc.is_empty() or not SIMPLE_MODE:
+		return ""
+	if OS.has_environment("KART_SURPRISE"):  # tests: surprises in every race (not today's track)
+		if Story.is_daily(track_desc):
+			return ""
+		var cp := String(Cups.cup(int(track_desc[2])).hz) if Story.is_cup(track_desc) else ""
+		return Deep.surprise_kind("cup" if cp != "" else "tour", cp, 1, "zoom", season)
+	if Story.is_daily(track_desc):
+		return Deep.surprise_kind("daily", "", 0, speed_mode, season)
+	if Story.is_cup(track_desc):
+		return Deep.surprise_kind("cup", String(Cups.cup(int(track_desc[2])).hz), int(track_desc[3]), speed_mode, season)
+	return Deep.surprise_kind("tour", "", int(Story.where(int(track_desc[2]))[1]), speed_mode, season)
+
+
+## Host: surprise spot i goes off (every machine shows the circle; the first of each kind gets a WATCH OUT card).
+func surprise(i: int, kind: String) -> void:
+	surprises.tell(i, kind)
+	net.event("surprise", [i, kind])
+	if not surprise_cards.has(kind):
+		surprise_cards[kind] = true
+		story({"who": "WATCH OUT!", "line": "Not in the circle!", "pic": String(Deep.SURPRISES[kind].pic), "color": "ffa040", "duration": 3.0})
+
+
+## Every machine: it landed (a bump of sound and a puff where it hit).
+func surprise_landed(pos: Vector3, kind: String) -> void:
+	sound("bonk", -4.0, 0.7)
+	burst(pos + Vector3(0, 0.6, 0), (Deep.SURPRISES.get(kind, {}).get("body", Color.WHITE) as Color), 16, false)
+
+
+## Host: a kart was in the circle when it landed: a harmless spin (a star or a bubble saves you).
+func surprise_hit(k, _pos: Vector3, _kind: String) -> void:
+	if k.star_t > 0.0:
+		surprises.st.saved += 1
+		return
+	k.st_hazards += 1
+	if k.shield_t > 0.0:
+		surprises.st.saved += 1
+		k.shield_t = 0.0
+		if k.remote:
+			net.event("shield", [k.index, 0.0])
+		kart_sound(k, "pop", 0.0)
+		return
+	if k.remote:
+		net.event("slip", [k.index])
+		k.slip_t = 1.1
+		k.spin_vis = TAU
+	else:
+		k.slip()
+	kart_sound(k, "slip", -1.0)
+	rumble(k, 0.6, 0.3)
+
+
+# --- Bolt's gifts (deep.gd): picture orbs over the road at the pit stop, a gift for the whole next cup ---
+
+## Every machine: the gift orbs follow the synced offer (and are rebuilt when the track under them changes).
+func _update_gift_orbs() -> void:
+	var want := "" if gift_offer.is_empty() or state != "pit" else "%d/%s" % [track.build_n, var_to_str(gift_offer)]
+	if want != gift_built:
+		gift_built = want
+		if want == "":
+			gift_orbs.clear()
+		else:
+			var entries: Array = []
+			var at: Array = []
+			for i in gift_offer.size():
+				var g := Deep.gift(String(gift_offer[i]))
+				entries.append({"id": String(gift_offer[i]), "name": String(g.name), "pic": String(g.pic), "color": g.color})
+				at.append(track.point_at(Deep.GIFT_D, Deep.GIFT_LATS[i])[0])
+			gift_orbs.show_orbs("gifts", entries, Vector3.ZERO, 0.0, 1.9, {"at": at, "scale": 1.4, "touch": 1.9, "pop": true,
+				"two_lines": true})
+	if want != "":
+		var cols := {}
+		for ki in gift_taken:
+			var k = kart_by_index(int(ki))
+			if k != null:
+				cols[ki] = k.color
+		gift_orbs.show_takers(gift_taken, cols)
+
+
+## Host, every frame of the pit stop: a person driving through a gift orb takes that gift.
+func _gift_picks(humans: Array) -> void:
+	if gift_offer.is_empty():
+		return
+	for k in humans:
+		if gift_taken.has(k.index):
+			continue
+		var i := gift_orbs.at_point(k.position)
+		if i < 0:
+			continue
+		gift_taken[k.index] = i
+		gifts[k.index] = String(gift_offer[i])
+		kart_sound(k, "pick", -3.0, 1.3)
+		burst(k.position + Vector3(0, 1.6, 0), Deep.gift(String(gift_offer[i])).color, 16)
+		if gift_taken.size() == 1:  # the first pick of this pit stop: Bolt says what it is
+			var g := Deep.gift(String(gift_offer[i]))
+			story({"who": "BOLT'S GIFT!", "line": String(g.name).capitalize() + "!", "pic": String(g.pic),
+				"color": (g.color as Color).to_html(false), "duration": 3.0})
+		print("Pit: %s takes Bolt's gift %s" % [k.kart_name, gift_offer[i]])
+
+
+## Host at GO: every person's gift does its start thing.
+func _gifts_at(when: String) -> void:
+	for k in players:
+		if k.active:
+			_gift_at(k, when)
+
+
+## Host: a person's gift at GO ("go") or a new lap ("lap"): bubble / star / zoom (the magnet works at the boxes).
+func _gift_at(k, when: String) -> void:
+	if k.cpu or not SIMPLE_MODE:
+		return
+	match String(gifts.get(k.index, "")):
+		"bubble":
+			_apply_item(k, "bubble")
+		"turbo":
+			_apply_item(k, "zoom")
+		"star":
+			if when == "go":
+				_apply_item(k, "star")
+				k.star_t = Deep.STAR_START
+				if k.remote:
+					net.event("star", [k.index, Deep.STAR_START])
+
+
+# --- Bolt's race town (deep.gd, town.gd): grows by the start as the family races ---
+
+func _update_town() -> void:
+	var size := Deep.town_size(town_races)
+	var key := "%d/%d/%d" % [track.build_n, size.x, size.y]
+	if key == town_key:
+		return
+	town_key = key
+	if town_node != null:
+		town_node.queue_free()
+		town_node = null
+	if size.x <= 0 or track.built == null:
+		return
+	var at := Town.place(track, size.x)  # beside the start straight, clear of every road
+	if not at.is_empty():
+		town_node = Town.build(self, size, bool(at.flip))
+		add_child(town_node)
+		town_node.transform = at.xf
+		return
+	print("Bolt's town: no room by the start of %s" % str(track.info.get("name", "")))
+
+
 func mode_info() -> Dictionary:
 	return Cups.mode(speed_mode)
 
@@ -2343,6 +2540,12 @@ func _start_pit() -> void:
 		slot += 1
 	pit_rows = _pit_rows()
 	pit.start(pit_rows)
+	surprises.stop()
+	gifts.clear()
+	gift_taken.clear()
+	gift_offer = Array(Deep.gift_offer(pits_done))
+	if OS.has_environment("KART_GIFT") and Deep.GIFTS.has(OS.get_environment("KART_GIFT")):  # WHAT'S NEW "try" / tests: in the middle
+		gift_offer = Array(Deep.gift_offer(Deep.GIFT_ORDER.find(OS.get_environment("KART_GIFT")) - 1))
 	var likely: Array = [Story.story_desc(_world(), int(save.data["story_i"]))] if save != null else []
 	for c in Cups.CUPS.size():
 		likely.append(Cups.desc(_world(), c, 0, speed_mode))
@@ -2380,6 +2583,12 @@ func _pit_done() -> void:
 		c = f[1] if f.size() > 1 else c
 	if m != "":
 		speed_mode = m
+	# Bolt's gifts: whoever drove past the orbs gets the glowing middle one (little ones are never left out).
+	for k in players:
+		if k.active and not gifts.has(k.index) and gift_offer.size() == 3:
+			gifts[k.index] = String(gift_offer[1])
+	gift_offer = []
+	gift_taken.clear()
 	if c == "":
 		var after := int(series.get("cup", -1))
 		c = str(Cups.next_cup(shelf, speed_mode if speed_mode != "trial" else "gentle", after))
@@ -3041,7 +3250,7 @@ func _check_boxes() -> void:
 			continue
 		var bp: Vector3 = track.boxes[i]
 		for k in karts:
-			if k.active and k.position.distance_to(bp) < 1.9:
+			if k.active and k.position.distance_to(bp) < (Deep.MAGNET_REACH if String(gifts.get(k.index, "")) == "magnet" else 1.9):
 				track.box_t[i] = TrackScript.BOX_RESPAWN
 				burst(bp, Color.from_hsv(randf(), 0.6, 1.0), 12)
 				give_item(k)
@@ -3534,7 +3743,7 @@ func make_snapshot() -> Array:
 		looks.append([k.kart_class, k.part])
 	return [state, track_i, state_t, race_t, kd, bn, track.box_state(), head, round_n, laps, finish_frac,
 		cup_i, cup_race, PackedInt32Array(cup_pts), practice_gate, track_desc, hats_won,
-		speed_mode, looks, pit_rows, shelf, lap_ghost_t0]
+		speed_mode, looks, pit_rows, shelf, lap_ghost_t0, season, gift_offer, gift_taken, gifts, town_races]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -3620,6 +3829,14 @@ func apply_snapshot(s: Array) -> void:
 		pit_rows = s[19]
 		shelf = s[20]
 		lap_ghost_t0 = float(s[21])
+	if s.size() > 26:  # the second pass: season, Bolt's gift orbs and who took which, the gifts, the town
+		if String(s[22]) != season:
+			season = String(s[22])
+			track.season = season  # (the next track built wears it)
+		gift_offer = s[23]
+		gift_taken = s[24]
+		gifts = s[25]
+		town_races = int(s[26])
 
 
 ## The track changed under the karts this machine drives: find them on the new one (keeps their distance).
@@ -3658,6 +3875,7 @@ func apply_event(kind: String, args: Array) -> void:
 				_build_desc()
 			_clear_tour_strips()
 			_set_ghost([])
+			surprises.stop()
 			_relocate_local()
 			_clear_trophies()
 			state = "countdown"
@@ -3721,6 +3939,8 @@ func apply_event(kind: String, args: Array) -> void:
 			_show_tour_strips()
 		"pit_flash":
 			pit.flash(int(args[0]), int(args[1]))
+		"surprise":
+			surprises.tell(int(args[0]), String(args[1]))
 		"prefetch":
 			_prefetch_tracks(args[0])
 		"lapghost":

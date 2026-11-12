@@ -66,6 +66,11 @@ var lap_ghost_seen := false
 var shelf_seen := false
 var gates_seen := 0
 var cup_keys := {}
+# The second pass (deep.gd): Bolt's gift orbs, warned surprises, hazard outlines, seasons, Bolt's race town.
+var gift_orbs_seen := 0
+var gifts_given := 0
+var season_seen := false
+var town_seen := 0
 
 
 func _ready() -> void:
@@ -224,6 +229,22 @@ func _end_run(mode: String) -> void:
 			fails.append("the power-ups given (%s)" % str(main.items_given.keys()))
 		if races >= 3 and OS.has_environment("KART_PIT") and Cups.medals(main.shelf) < 1 and main.speed_mode == "gentle":
 			fails.append("a gentle cup finished puts a cup on Bolt's shelf")
+	# The second pass: every tell before its hit, gifts, surprises, outlines, seasons, the town.
+	var sst: Dictionary = main.surprises.st
+	if int(sst.early) > 0:
+		fails.append("a surprise landed on someone before its circle had shown %.1f s (%d)" % [main.Deep.TELL, int(sst.early)])
+	if pit_seen and gift_orbs_seen != 3:
+		fails.append("Bolt's three gift orbs at the pit stop (%d)" % gift_orbs_seen)
+	if mode != "client" and pit_seen and races >= 1 and gifts_given < 1:
+		fails.append("Bolt's gifts given at the pit stop")
+	if OS.has_environment("KART_SURPRISE") and cup_races >= 2 and int(sst.tells) < 1:
+		fails.append("surprises told on the road (%s)" % str(sst))
+	if cup_races >= 1 and hazards_seen > 0 and int(sst.hz_tells) < 1 and mode != "client":
+		fails.append("the hazards' outlines as karts come up to them")
+	if main.season != "" and not season_seen:
+		fails.append("the season's things by the road (%s)" % main.season)
+	if _town_buildings(main.town_races) > 0 and town_seen < 1:
+		fails.append("Bolt's race town by the start (%d races)" % main.town_races)
 	if pit_seen and gates_seen < 1:
 		fails.append("the pit stop's gates drawn on the TV")
 	if not shelf_seen:
@@ -243,8 +264,14 @@ func _end_run(mode: String) -> void:
 	print("BOT DEEP: mode=%s pit=%s picks=%d gates=%d cup_races=%d hazards=%d classes=%s speed=%s items=%s shelf=%s medals=%d lap_ghost=%s" % [
 		mode, pit_seen, pit_picks, gates_seen, cup_races, hazards_seen, ",".join(PackedStringArray(classes_seen.keys())), main.speed_mode,
 		",".join(PackedStringArray(main.items_given.keys())), shelf_seen, Cups.medals(main.shelf), lap_ghost_seen])
+	print("BOT DEEP2: mode=%s season=%s/%s gift_orbs=%d gifts=%s surprises=%s town=%d" % [mode, main.season, season_seen, gift_orbs_seen,
+		str(main.gifts), str(sst), town_seen])
 	print("BOT RESULT: %s" % ("PASS" if fails.is_empty() else "FAIL"))
 	preload("res://tests/bot_end.gd").quit_quietly(get_tree(), 0 if fails.is_empty() else 1)
+
+
+func _town_buildings(races: int) -> int:
+	return main.Deep.town_size(races).x
 
 
 ## Bolt's cups: the pit stop's gates and picks, cup tracks with hazards, kart classes, the shelf, the lap ghost.
@@ -263,6 +290,13 @@ func _deep_checks() -> void:
 			classes_seen[k.kart_class] = true
 	if main.shelf_node != null and is_instance_valid(main.shelf_node) and main.shelf_node.is_inside_tree():
 		shelf_seen = true
+	if main.state == "pit" and main.gift_orbs.showing():
+		gift_orbs_seen = maxi(gift_orbs_seen, main.gift_orbs.orbs.size())
+	gifts_given = maxi(gifts_given, main.gifts.size())
+	if main.track.built != null and main.track.built.get_node_or_null("Season") != null:
+		season_seen = true
+	if main.town_node != null and is_instance_valid(main.town_node) and main.town_node.is_inside_tree():
+		town_seen = maxi(town_seen, int(main.town_node.get_meta("buildings", 0)))
 	if main.ghost_node != null and main.ghost_node.visible and main.ghost_path.is_empty():
 		lap_ghost_seen = true
 
