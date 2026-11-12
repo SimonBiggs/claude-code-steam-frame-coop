@@ -12,6 +12,11 @@ extends Node3D
 ## round plants something in TumTum's park (park.gd) that grows a little each play-day (saved on the
 ## host). FAIR AND GENTLE: the CPU giant shares its throws out evenly, and a runner hit twice in a
 ## short while gets a longer bubble (courtgen.gd, proven by tests/dodge_ball_gen_test.gd).
+## SECOND PASS (deep.gd): GENTLE / BRAVE / HARD picked on pick orbs before the first round, TUMTUM'S BALL GIFTS for
+## the runners before every round from the second (both picks.gd: runners stand under a big orb over the court; the
+## VR giant alone reaches into a small one), TumTum's warned tricks (a STOMP band, a BALL SHOWER circle: hazards.gd,
+## steady warn rings, never in round 1), seasonal parks (season.gd) and TumTum's park toys that grow with the rounds
+## (toys.gd). State: "deep" [mode, gift, season], "hz" (the trick told now), "shields", "toys"; events "orbs", "take".
 ## Telemetry: one RUN line per round and on quit.
 
 const NetScript := preload("res://core/net.gd")
@@ -36,6 +41,13 @@ const Save := preload("res://core/save.gd")
 const Telemetry := preload("res://core/telemetry.gd")
 const StoryCard := preload("res://core/story_card.gd")
 const Seeded := preload("res://core/seeded.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
+const Deep := preload("res://games/dodge_ball/deep.gd")
+const PicksScript := preload("res://games/dodge_ball/picks.gd")
+const HazardsScript := preload("res://games/dodge_ball/hazards.gd")
+const GiftsScript := preload("res://games/dodge_ball/gifts.gd")
+const SeasonScript := preload("res://games/dodge_ball/season.gd")
+const ToysScript := preload("res://games/dodge_ball/toys.gd")
 
 const STAGE_H := 0.9  # the giant's stage height
 const STAGE_FRONT := -4.6  # z of the stage's front edge (the stage is behind it, towards -Z)
@@ -111,6 +123,22 @@ var round_t := 0.0
 var round_stats := {}  # host: this round's numbers for the RUN line
 var star_on := false
 var rounds_played := 0
+
+# Second pass (deep.gd)
+var picks: Node  # picks.gd
+var hazards: Node3D  # hazards.gd
+var gifts_node: Node3D  # gifts.gd
+var season_node: Node3D  # season.gd
+var toys_node: Node3D  # toys.gd
+var mode := "brave"  # every machine (the "deep" state)
+var gift := ""  # every machine: this round's gift ("" none)
+var season := ""
+var mode_picked := false  # host: the mode was picked this session
+var gift_round := 0  # host: the round the picked gift is for
+var shields := {}  # host: runner id -> true while their BUBBLE SHIELD is up
+var bot_tricks := false  # host (bots: DB_TRICKS_NOW): tricks from a round's first seconds, round 1 too
+var trick_hits := 0  # host: runners bumped by tricks this round (telemetry)
+var shield_pops := 0  # host: bubbles popped this round (telemetry)
 
 var balls: Array = []  # of Ball
 var out := {}  # runner id -> seconds left (host); client: id -> true
@@ -214,12 +242,16 @@ func _setup(mode: String) -> void:
 	park = ParkScript.new()
 	park.name = "Park"
 	add_child(park)
+	_setup_deep()
 	if mode == "client":  # the host's round, park and star may have arrived before this machine was set up
 		if net.state_has("court"):
 			_apply_court(int(net.state_get("court", 0)))
 		park.call("set_items", net.state_get("park", []), int(net.state_get("days", 0)))
 		star_on = bool(net.state_get("star", false))
 		world.set_star(star_on)
+		for k in ["deep", "hz", "shields", "toys"]:
+			if net.state_has(k):
+				_on_deep_state(k, net.state_get(k, null))
 	if mode != "client":
 		session_seed = Seeded.fresh_seed()
 		save = Save.new()
@@ -227,9 +259,10 @@ func _setup(mode: String) -> void:
 		# park: [[kind, play-day it came, golden], ...] (oldest first); days: play-days; daily: the date
 		# TODAY'S PARK was played; rounds: rounds finished in all.
 		save.defaults = {"park": [], "park_total": 0, "rounds": 0, "days": 0, "last_day": "", "daily": "",
-			"sessions": 0, "belly_total": 0, "best_runners": 0}
+			"sessions": 0, "belly_total": 0, "best_runners": 0, "mode": "", "last_gift": "", "tricks": 0, "gifts": 0}
 		add_child(save)
 		_start_park()
+		_begin_deep()
 		for i in BALLS:
 			_to_tray(balls[i], i)
 		_start_round()
@@ -404,12 +437,13 @@ func _move_local_players(delta: float) -> void:
 	var send := send_t <= 0.0
 	if send:
 		send_t = 1.0 / 30.0
-	var playing := String(net.state_get("phase", "play")) == "play"
+	var phase := String(net.state_get("phase", "play"))
+	var playing := phase == "play"
 	for slot in party.local_slots():
 		if not avatars.has(slot):
 			continue
 		var a: Node3D = avatars[slot]
-		var mv := party.stick(slot, "move") if playing and not out.has(slot) else Vector2.ZERO
+		var mv := party.stick(slot, "move") if (playing or phase == "pick") and not out.has(slot) else Vector2.ZERO  # (in a pick: walk under an orb)
 		if mv != Vector2.ZERO:
 			var cam := split.active_camera(slot)
 			var f := -cam.global_basis.z
@@ -417,7 +451,7 @@ func _move_local_players(delta: float) -> void:
 			f = f.normalized()
 			var r := Vector3(-f.z, 0.0, f.x)
 			var dir := r * mv.x - f * mv.y
-			a.position = _clamp_court(a.position + dir * SPEED * delta)
+			a.position = _clamp_court(a.position + dir * SPEED * Deep.run_speed(gift) * delta)
 			Creatures.anim(a).face(dir)
 		if net.mode == "client" and send:
 			net.send_state(a.position, a.rotation.y, 0.0, slot)
@@ -505,6 +539,7 @@ func on_pause_changed(paused: bool, _by_slot: int) -> void:
 
 
 func _on_state_changed(key: String, value: Variant) -> void:
+	_on_deep_state(key, value)
 	match key:
 		"tv_score", "giant_score":
 			_refresh_hud()
@@ -540,6 +575,17 @@ func _on_state_changed(key: String, value: Variant) -> void:
 # --- Rounds -------------------------------------------------------------------------------
 
 func _start_round() -> void:
+	if picks.active():
+		return
+	var next_round := int(net.state_get("round", 0)) + 1
+	if not mode_picked:
+		_start_pick("mode")
+		return
+	if next_round >= 2 and gift_round != next_round:
+		_start_pick("gift")
+		return
+	if gift_round != next_round:
+		gift = ""
 	awards.reset()
 	time_left = round_time
 	out.clear()
@@ -553,7 +599,7 @@ func _start_round() -> void:
 		b.holder = -1
 		_to_tray(b, i)
 	var round_no := int(net.state_get("round", 0)) + 1
-	var code := CourtGen.code_at(session_seed, round_no, daily_due())
+	var code := Deep.mode_code(CourtGen.code_at(session_seed, round_no, daily_due()), mode)
 	_apply_court(code)
 	net.state_set("court", code)
 	net.state_set("star", false)
@@ -565,6 +611,7 @@ func _start_round() -> void:
 	round_live = true
 	round_t = 0.0
 	round_stats = {"belly": 0, "stars": 0, "hits": 0, "bubbles": 0, "cpu_throws": 0, "most_out": 0.0, "out_t": {}}
+	_deep_round(round_no)
 	if bool(rd.daily):
 		_story("TODAY'S PARK!", "goldball", CourtGen.GOLD)
 	_story("%s!" % str(rd.name), "cushion", rd.color)
@@ -588,6 +635,7 @@ func _end_round() -> void:
 	var tv := int(net.state_get("tv_score", 0))
 	var gs := int(net.state_get("giant_score", 0))
 	var title := "RUNNERS WIN!" if tv > gs else ("TUMTUM WINS!" if gs > tv else "A DRAW!")
+	hazards.host_end()
 	_run_line("round")
 	_grow_park()
 	if tv > gs:
@@ -665,17 +713,22 @@ func _process(delta: float) -> void:
 				UiKit.pop_in(tp)
 			tp.visible = show
 	world.update_giant(g_head, g_yaw, g_hands, delta)
+	if gifts_node != null:
+		gifts_node.follow(avatars, clock)
 	for b: Ball in balls:
 		b.squish = move_toward(b.squish, 0.0, delta * 4.0)
 		var s := sin(b.squish * PI) * 0.35
-		b.mesh.scale = Vector3(1.0 + s, 1.0 - s, 1.0 + s)
+		b.mesh.scale = Vector3(1.0 + s, 1.0 - s, 1.0 + s) * Deep.ball_scale(gift)
 		var fy := _floor_at(b.node.position)
 		b.blob.position = Vector3(b.node.position.x, fy + 0.02, b.node.position.z)
 		b.blob.visible = b.node.visible
 
 
 func _host_tick(delta: float) -> void:
-	var playing := not results_showing()
+	var phase := String(net.state_get("phase", "play"))
+	var playing := phase == "play"
+	if phase == "pick":
+		picks.tick(delta)
 	_update_giant(delta, playing)
 	for i in balls.size():
 		_ball_physics(balls[i], i, delta)
@@ -697,10 +750,14 @@ func _host_tick(delta: float) -> void:
 		if float(safe[id]) <= 0.0:
 			safe.erase(id)
 	if not playing:
-		results_t += delta
-		if results_t > results_wait:
-			_start_round()  # play again by itself
+		if phase == "results":
+			results_t += delta
+			if results_t > results_wait:
+				_start_round()  # play again by itself
 		return
+	hazards.host_tick(round_t)
+	if gift == "magnet":
+		_magnet_pull(delta)
 	_runner_pickups()
 	_runner_hits()
 	time_left -= delta
@@ -865,7 +922,7 @@ func _ball_physics(b: Ball, i: int, delta: float) -> void:
 	b.node.position = p
 	# The giant's belly and body
 	if b.thrower != GIANT and b.thrower >= 0 and b.danger and not results_showing():
-		if p.distance_to(target_point()) < 0.42:
+		if p.distance_to(target_point()) < Deep.belly_r(gift, true):
 			_belly_hit(b, i)
 			return
 	var tc := _torso_center()
@@ -903,7 +960,7 @@ func _belly_hit(b: Ball, i: int) -> void:
 	b.vel = n * 3.0 + Vector3(randf_range(-1.0, 1.0), 3.5, 0.0)
 	b.node.position = target_point() + n * 0.45
 	balls[i] = b
-	var pts := 2 if star_on else 1  # GOLD STAR: TumTum's belly shines, a hit counts double
+	var pts := (2 if star_on else 1) + (Deep.belly_bonus(gift) if who < GIANT else 0)  # GOLD STAR: TumTum's belly shines, a hit counts double; SQUISHY BALL: one more
 	net.state_set("tv_score", int(net.state_get("tv_score", 0)) + pts)
 	round_stats["belly"] = int(round_stats.get("belly", 0)) + 1
 	if star_on:
@@ -954,8 +1011,8 @@ func _move_giant(delta: float, playing: bool) -> void:
 	cpu_g["t"] = float(cpu_g["t"]) - delta
 	var hand_goal := rest_r
 	match int(cpu_g["phase"]):
-		0:  # waiting
-			if playing and float(cpu_g["t"]) <= 0.0:
+		0:  # waiting (never during one of TumTum's tricks: the runners run out of it)
+			if playing and float(cpu_g["t"]) <= 0.0 and not hazards.busy():
 				var tb := _nearest_tray_ball(g_hands[1])
 				var aim := _pick_runner() if tb >= 0 else -1
 				if aim >= 0 and tb >= 0:
@@ -1157,7 +1214,7 @@ func _runner_pickups() -> void:
 			if b.holder >= 0 or b.tray >= 0 or b.hop > 0.0 or (b.danger and b.thrower == GIANT):
 				continue
 			var p := b.node.position
-			if p.y < 1.2 and Vector2(p.x - a.position.x, p.z - a.position.z).length() < 0.8:
+			if p.y < 1.2 and Vector2(p.x - a.position.x, p.z - a.position.z).length() < Deep.pickup_r(gift):
 				b.holder = int(id)
 				b.thrower = -1
 				b.danger = false
@@ -1175,7 +1232,9 @@ func _runner_throw(id: int) -> void:
 	var b: Ball = balls[i]
 	var from := b.node.position
 	var t := clampf(from.distance_to(target_point()) / 8.5, 0.55, 1.2)
-	var wobble := Vector2.from_angle(randf() * TAU) * randf_range(0.0, 0.45)  # not every throw is perfect
+	var wobble := Vector2.from_angle(randf() * TAU) * randf_range(0.0, 0.45)  # not every throw is perfect ...
+	if gift == "curve":
+		wobble = Vector2.ZERO  # ... but a CURVE BALL always curves to the belly
 	var to := target_point() + Vector3(g_vel.x, 0.0, g_vel.z) * t + Vector3(wobble.x, wobble.y, 0.0)
 	b.holder = -1
 	b.vel = _lob(from, to, t)
@@ -1209,6 +1268,8 @@ func _hit_runner(id: int, b: Ball) -> void:
 	b.thrower = -1
 	b.vel = Vector3(-b.vel.x * 0.25, 2.5, -b.vel.z * 0.25)
 	b.squish = 0.8
+	if _pop_shield(id):
+		return
 	_drop_held(id)
 	out[id] = OUT_TIME
 	# GENTLE: hit again soon after the last time = a longer bubble when they pop back.
@@ -1342,6 +1403,13 @@ func _update_cpu_runners(delta: float, playing: bool) -> void:
 						near = i
 			if near >= 0:
 				goal = (balls[near] as Ball).node.position
+		# A trick told: run out of it (deep.gd escape).
+		for e in hazards.tells_now():
+			if Deep.inside(e, Vector2(a.position.x, a.position.z), Deep.HIT_PAD + Deep.ESCAPE_PAD):
+				var q := Deep.escape(rd, e, Vector2(a.position.x, a.position.z))
+				if q != Vector2.INF:
+					goal = Vector3(q.x, 0.0, q.y)
+					st["t"] = 1.0
 		# Dodge: step sideways from a dangerous ball coming this way.
 		for b: Ball in balls:
 			if b.danger and b.thrower == GIANT and b.node.position.distance_to(a.position) < 4.0 and randf() < 0.5:
@@ -1356,7 +1424,7 @@ func _update_cpu_runners(delta: float, playing: bool) -> void:
 		dir.y = 0.0
 		if dir.length() > 0.2:
 			dir = dir.normalized()
-			a.position = _clamp_court(a.position + dir * SPEED * 0.6 * delta)
+			a.position = _clamp_court(a.position + dir * SPEED * 0.6 * Deep.run_speed(gift) * delta)
 			Creatures.anim(a).face(dir)
 
 
@@ -1429,6 +1497,13 @@ func _grow_park() -> void:
 	_story("A gold one!" if bool(rd.daily) else "Something new!", pic, CourtGen.GOLD if bool(rd.daily) else Color(0.6, 0.9, 0.6))
 	if (total + 1) % 10 == 0:
 		_story("%d in the park!" % (total + 1), "tree", Color(0.5, 0.9, 0.5))
+	var toys_n := Deep.toys(int(save.data.rounds))
+	if toys_n > Deep.toys(int(save.data.rounds) - 1):
+		var toy: Dictionary = Deep.TOYS[toys_n - 1]
+		_story("A new %s!" % String(toy.name).to_lower(), String(toy.pic), Color(1.0, 0.6, 0.3))
+		if toys_n == 2 or toys_n == 4:
+			_story("A new gift!", String(Deep.GIFTS[3 if toys_n == 2 else 4].pic), Color(1.0, 0.85, 0.3))
+	net.state_set("toys", toys_n)
 
 
 ## Host / local: one RUN line per round (end = "round") or when the game closes mid-round (end = "quit").
@@ -1455,7 +1530,9 @@ func _run_line(end: String) -> void:
 		"park": (save.data.park as Array).size() if save != null else 0,
 		"park_total": int(save.data.park_total) if save != null else 0,
 		"rounds": int(save.data.rounds) if save != null else 0, "days": int(save.data.days) if save != null else 0,
-		"session_rounds": rounds_played})
+		"session_rounds": rounds_played, "pmode": mode, "gift": gift, "season": season,
+		"tricks": hazards.count if hazards != null else 0, "trick_hits": trick_hits, "shield_pops": shield_pops,
+		"toys": Deep.toys(int(save.data.rounds)) if save != null else 0, "picks": picks.history.size() if picks != null else 0})
 
 
 func _exit_tree() -> void:
@@ -1487,6 +1564,225 @@ func _update_story(delta: float) -> void:
 		StoryCard.show(views, opts)
 	if vr_rig != null:
 		StoryCard.show_vr(self, vr_rig.camera, opts)
+
+
+# --- Second pass: modes, TumTum's ball gifts, tricks, seasons, toys (deep.gd) ------------------------------------
+
+## Every machine: the second pass's nodes.
+func _setup_deep() -> void:
+	picks = PicksScript.new()
+	picks.main = self
+	add_child(picks)
+	net.sticky_event("orbs")  # a machine joining mid-pick sees the orbs (picks.gd)
+	hazards = HazardsScript.new()
+	hazards.main = self
+	add_child(hazards)
+	gifts_node = GiftsScript.new()
+	gifts_node.main = self
+	add_child(gifts_node)
+	season_node = SeasonScript.new()
+	add_child(season_node)
+	toys_node = ToysScript.new()
+	add_child(toys_node)
+
+
+## Host, once per session: the season, the family's last mode, the toys, for every machine.
+func _begin_deep() -> void:
+	season = Seeded.season()
+	if OS.has_environment("DB_SEASON") and Deep.SEASONS.has(OS.get_environment("DB_SEASON")):
+		season = OS.get_environment("DB_SEASON")
+	mode = Deep.mode_of(String(save.data.mode) if String(save.data.mode) != "" else "brave")
+	if OS.has_environment("DB_MODE"):  # (What's New "try" / bots: straight in)
+		mode = Deep.mode_of(OS.get_environment("DB_MODE"))
+		mode_picked = true
+	if OS.has_environment("DB_GIFT") and not Deep.gift(OS.get_environment("DB_GIFT")).is_empty():
+		gift = OS.get_environment("DB_GIFT")  # (What's New "try": the first round with that gift)
+		gift_round = 1
+		mode_picked = true
+	bot_tricks = OS.has_environment("DB_TRICKS_NOW")
+	_send_deep()
+	net.state_set("toys", Deep.toys(int(save.data.rounds)))
+	var sd := Deep.season_data(season)
+	_story(String(sd.line), String(sd.pic), Color(1.0, 0.6, 0.3))
+
+
+## Host: the mode, the gift and the season for every machine.
+func _send_deep() -> void:
+	net.state_set("deep", [mode, gift, season])
+
+
+## Host, at a round's start: its gift, bubbles and tricks.
+func _deep_round(round_no: int) -> void:
+	_send_deep()
+	trick_hits = 0
+	shield_pops = 0
+	shields.clear()
+	if gift == "shield":
+		for id in avatars:
+			shields[int(id)] = true
+	net.state_set("shields", shields.keys())
+	var spec := {"mode": mode, "season": season, "round": round_no, "len": round_time}
+	if bot_tricks:
+		spec["first"] = Deep.SHORT_FIRST
+	var list := Deep.tricks(rd, spec)
+	hazards.host_begin(list)
+	if gift != "":
+		var gd := Deep.gift(gift)
+		_story(String(gd.line), String(gd.pic), gd.color)
+	print("Soft Dodgeball round %d: %s mode, %s, gift %s, tricks %s" % [round_no, mode, season, gift if gift != "" else "none",
+		str(list.map(func(e: Dictionary) -> String: return "%s@%.0f" % [e.kind, float(e.t)]))])
+
+
+## Nobody here could take a pick (no runner on the court, no VR giant): the middle comes sooner.
+func pick_nobody() -> bool:
+	return vr_rig == null and _people() == 0
+
+
+## Runners who are people (not the CPU runners).
+func _people() -> int:
+	var n := 0
+	for id in avatars:
+		if int(id) < 10:
+			n += 1
+	return n
+
+
+## Host: put up the pick orbs (the round waits for them; runners can run about, nobody throws).
+func _start_pick(stage: String) -> void:
+	var entries: Array = []
+	var opts: Array = []
+	if stage == "mode":
+		opts = PickOrbs.mode_ids(mode)
+		for id in opts:
+			var md := PickOrbs.mode(String(id))
+			entries.append({"id": id, "name": md.name, "pic": md.pic, "color": md.color})
+		_story("Easy or tricky?", "tumtum", Color(1.0, 0.6, 0.3))
+	else:
+		opts = Deep.gift_choices(Deep.toys(int(save.data.rounds)), String(save.data.last_gift),
+			Seeded.derive(session_seed, "gift%d" % (int(net.state_get("round", 0)) + 1)))
+		for id in opts:
+			var gd := Deep.gift(String(id))
+			entries.append({"id": id, "name": gd.name, "pic": gd.pic, "color": gd.color})
+		_story("A gift for you!", "gift", Color(1.0, 0.6, 0.3))
+	for i in balls.size():
+		var b: Ball = balls[i]
+		_drop_ball(b)
+		_to_tray(b, i)
+	cpu_g["phase"] = 0
+	cpu_g["ball"] = -1
+	out.clear()
+	net.state_set("phase", "pick")
+	sound("chime", -6.0, 1.3)
+	picks.begin(stage, entries, opts, vr_rig != null and _people() == 0, _on_picked)
+
+
+## Host: the team picked (or the middle one was taken for them): on with the round.
+func _on_picked(stage: String, opt: Variant, _slot: int) -> void:
+	if stage == "mode":
+		mode = Deep.mode_of(String(opt))
+		mode_picked = true
+		save.data.mode = mode
+		_story(String(PickOrbs.MODE_LINES.get(mode, "Let's go!")), String(PickOrbs.mode(mode).pic), PickOrbs.mode_color(mode))
+	else:
+		gift = String(opt)
+		gift_round = int(net.state_get("round", 0)) + 1
+		save.data.last_gift = gift
+		save.data.gifts = int(save.data.gifts) + 1
+	save.mark_dirty()
+	_send_deep()
+	print("Picked %s: %s" % [stage, str(opt)])
+	_start_round()
+
+
+## Host: a trick's tell started (hazards.gd).
+func trick_told(e: Dictionary) -> void:
+	if save != null:
+		save.data.tricks = int(save.data.tricks) + 1
+	print("Trick: %s at %.1f s (%.1f, %.1f) r %.1f" % [e.kind, round_t, float(e.x), float(e.z), float(e.w)])
+
+
+## Host: a trick bumped runner id (hazards.gd): a bubble pops, or GENTLE a boing and a hop, or out for a moment.
+func trick_hit(id: int, e: Dictionary) -> void:
+	if not avatars.has(id) or _pop_shield(id):
+		return
+	trick_hits += 1
+	var secs := Deep.trick_out(mode)
+	var a: Node3D = avatars[id]
+	if party.is_active(id):
+		party.rumble(id, 0.4, 0.5, 0.2)
+	if secs <= 0.0:
+		pop_back(id)  # GENTLE: just a boing and a hop
+		burst(a.position + Vector3.UP * 0.5, HazardsScript.color_of(String(e.kind)), 10, 0.1)
+		return
+	_drop_held(id)
+	out[id] = secs
+	safe_len[id] = float(rd.get("safe", 1.5))
+	puff(a.position + Vector3.UP * 0.6, party.color_of(id) if id < 10 else Color(0.7, 0.7, 0.7))
+
+
+## Host: a runner's BUBBLE SHIELD takes a hit instead (true when it did).
+func _pop_shield(id: int) -> bool:
+	if not shields.has(id):
+		return false
+	shields.erase(id)
+	shield_pops += 1
+	safe[id] = 1.0
+	net.state_set("shields", shields.keys())
+	if party.is_active(id):
+		party.rumble(id, 0.3, 0.3, 0.15)
+	return true
+
+
+## Host (BALL MAGNET): loose balls on the court roll towards the nearest runner.
+func _magnet_pull(delta: float) -> void:
+	for b: Ball in balls:
+		if b.holder >= 0 or b.tray >= 0 or b.hop > 0.0 or b.danger or b.node.position.y > 0.6:
+			continue
+		var best := Vector3.INF
+		var bd := Deep.MAGNET_FAR
+		for id in avatars:
+			if out.has(id):
+				continue
+			var a: Node3D = avatars[id]
+			var d := Vector2(a.position.x - b.node.position.x, a.position.z - b.node.position.z).length()
+			if d < bd:
+				bd = d
+				best = a.position
+		if best != Vector3.INF:
+			var to := Vector3(best.x - b.node.position.x, 0.0, best.z - b.node.position.z).normalized()
+			b.node.position = _clamp_court(b.node.position + to * Deep.MAGNET_PULL * delta) + Vector3(0.0, b.node.position.y, 0.0)
+			b.rest = 0.0
+
+
+## Every machine: the second pass's replicated state.
+func _on_deep_state(key: String, value: Variant) -> void:
+	match key:
+		"deep":
+			var dv: Array = value if value is Array else []
+			if dv.size() >= 3:
+				mode = String(dv[0])
+				gift = String(dv[1])
+				season = String(dv[2])
+				if season_node != null and season != "":
+					season_node.set_season(season)
+				if gifts_node != null:
+					gifts_node.set_gift(gift)
+		"hz":
+			var hz := Deep.unpack(value if value is Array else [])
+			if hazards != null:
+				hazards.show_now(hz)
+			if not hz.is_empty() and split != null:
+				HudKit.banner(_all_huds(), String(Deep.KIND_NAMES[String(hz.kind)]), "", {"duration": 1.8,
+					"color": HazardsScript.color_of(String(hz.kind))})
+		"shields":
+			if gifts_node != null:
+				gifts_node.set_shields(value if value is Array else [])
+		"toys":
+			if toys_node != null:
+				toys_node.set_count(int(value))
+		"phase":
+			if String(value) == "pick" and split != null:
+				HudKit.banner(_all_huds(), "PICK ONE!", "", {"duration": 2.0, "color": Color(1.0, 0.85, 0.3)})
 
 
 # --- Networking ------------------------------------------------------------------------------
@@ -1609,3 +1905,9 @@ func apply_event(kind: String, args: Array) -> void:
 			sfx.play(String(args[0]), float(args[1]), float(args[2]))
 		"snd3":
 			sfx.play_at(String(args[0]), args[1], float(args[2]), float(args[3]))
+		"orbs":
+			if picks != null:
+				picks.show_row(String(args[0]), args[1], args[2], bool(args[3]) if args.size() > 3 else false)
+		"take":
+			if picks != null:
+				picks.take_fx(int(args[0]), int(args[1]))
