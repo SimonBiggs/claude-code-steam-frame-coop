@@ -33,6 +33,11 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "db-gifts", "date": "2026-11-12", "game": "dodge_ball", "pic": "curveball", "line": "TumTum's ball gifts!", "try": {"DB_GIFT": "curve"}},
+	{"id": "db-tricks", "date": "2026-11-12", "game": "dodge_ball", "pic": "stomp", "line": "Stomps and ball showers!", "try": {"DB_TRICKS_NOW": "1", "DB_MODE": "brave"}},
+	{"id": "db-modes", "date": "2026-11-12", "game": "dodge_ball", "pic": "tumtum", "line": "Gentle, brave or hard!"},
+	{"id": "db-toys", "date": "2026-11-12", "game": "dodge_ball", "pic": "slide", "line": "TumTum's park gets toys!"},
+	{"id": "db-seasons", "date": "2026-11-12", "game": "dodge_ball", "pic": "snowflake", "line": "Snowy park", "try": {"DB_SEASON": "winter"}},
 	{"id": "giants-gifts", "date": "2026-11-12", "game": "giants_table", "pic": "shieldbubble", "line": "Sparky's gifts for you!", "try": {"GT_GIFT": "helpers"}},
 	{"id": "giants-tricks", "date": "2026-11-12", "game": "giants_table", "pic": "barrel", "line": "Goblin tricks! Catch them!", "try": {"GT_TRICKS_NOW": "1", "GT_MODE": "brave"}},
 	{"id": "giants-modes", "date": "2026-11-12", "game": "giants_table", "pic": "sparky", "line": "Gentle, brave or hard!"},

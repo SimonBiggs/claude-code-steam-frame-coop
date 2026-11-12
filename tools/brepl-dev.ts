@@ -672,7 +672,10 @@ export async function land(branch: string, genTests: string[], botId: string, ot
   // shared_picks_test always (once it exists): a game must build picks with core/pick_orbs.gd, attack tells with
   // core/warn_rings.gd and show modes as PickOrbs.mode() (one GENTLE / BRAVE / HARD look everywhere).
   const sharedPicks = await stat(join(STAGE, "tests/shared_picks_test.gd")).then(() => ["shared_picks_test"], () => [] as string[]);
-  for (const t of [...new Set([...genTests, "story_pictures_test", "progress_test", "whats_new_test", "layout_check_test", "vr_view_check_test", "bot_end_test", "core_math_test", ...REPO_GUARDS, ...sharedPicks])].filter(Boolean)) {
+  // Every test of the game being landed runs, not just the ones named (2026-11-12: dodge-deep2 named its deep test only
+  // and dodge_ball_gen_test was skipped): tests/<botId>_*test.gd.
+  const own = (await readdir(join(STAGE, "tests")).catch(() => [] as string[])).filter(f => f.startsWith(`${botId}_`) && f.endsWith("_test.gd")).map(f => f.slice(0, -3));
+  for (const t of [...new Set([...genTests, ...own, "story_pictures_test", "progress_test", "whats_new_test", "layout_check_test", "vr_view_check_test", "bot_end_test", "core_math_test", ...REPO_GUARDS, ...sharedPicks])].filter(Boolean)) {
     // A REPO_GUARDS test whose branch hasn't landed yet (an agent adds its guard to the live dev.ts first, 2026-11-11:
     // contrast_test / vr_wrist_menu_test) can't run here: say so in the results instead of failing every landing.
     // Only REPO_GUARDS may be missing; a missing gen test or core guard still fails below.
