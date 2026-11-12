@@ -3,9 +3,9 @@ extends Node
 ##   "mode"    GENTLE / BRAVE / HARD once a session (the family's last mode in the middle).
 ##   "island"  which island next (story.gd offers: three kinds, the least visited first) - was two signposts.
 ##   "gift"    CAPTAIN PEG'S TOOLS before every island: three of BIG SPADE, DETECTOR, PEG'S MAP, POLLY, LUCKY CHARM.
-## Three glass orbs float in a row on the sand: behind the chest, where every TV camera looks (a giant playing with
-## diggers wades round to them), or, for a giant playing alone, between the chest and the giant wherever they wade
-## (the row turns to face them, so a VR player alone can always reach every orb). A TV digger runs into one, the giant
+## Three glass orbs float in a row on the sand: behind the chest, where every TV camera looks, or, with a VR giant
+## here, between the chest and the giant wherever they wade (the row turns to face them, so the giant always sees
+## and reaches every orb; behind the chest they hid under it and the island's hump, 2026-11-12). A TV digger runs into one, the giant
 ## touches one with a glove; the first one decides for the team (a dot in their colour circles it). Nobody in time?
 ## The middle orb (it glows brightest) is taken - a solo giant or a little one is never stuck. The host sends the
 ## sticky "orbs" event [stage, entries, row] (a machine joining mid-pick sees the orbs too) and "take" [i, slot].
@@ -17,7 +17,8 @@ const WAIT := {"mode": 14.0, "island": 12.0, "gift": 10.0}
 const AFTER := 1.0  # seconds the taken orb shows its dot before the orbs go
 const ROW_R := 5.0  # beach units from the chest towards the giant (who wades at ISLAND * S + 0.25 = 9 units): an arm away
 const GAP := 2.2  # beach units between orbs (more than 2 x TV_R: a digger touches one at a time)
-const Y := 1.5  # beach units above the sand (chest height for a digger; ~1.2 m up for the giant)
+const Y := 2.0  # beach units above the sand (diggers touch by distance across the sand; ~1.3 m up for the giant). At 1.5 a two-line name
+# under the ball dipped into the sand (a seated giant saw SUNNY ISLE's bottom line cut off, 2026-11-12).
 const SCALE := 1.0
 const TV_R := 0.95  # beach units from an orb's middle a digger must run to
 const HAND_R := 0.06  # metres (the glove)
