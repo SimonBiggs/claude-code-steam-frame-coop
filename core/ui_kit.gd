@@ -892,6 +892,11 @@ static func vr_place(n: Node3D, cam: Node3D, dist: float = 1.6, height: float = 
 	VrLayer.mark_once(n)  # placed in front of the VR player = VR-only UI
 	n.set_meta("vr_placed", true)
 	n.set_meta("vr_moving", false)
+	# Our own move: the new spot is the one that rides with the rig. Else a card re-placed between follows (stepping
+	# aside from a banner every 0.25 s, set_text) looked "moved by itself" and was left behind when the rig moved that
+	# frame (a blink up the stairs left Mystery Manor's card a floor below).
+	if n.has_meta("vr_rig_xf"):
+		vr_ride_done(n, cam)
 
 
 ## A diorama game (XROrigin3D.world_scale > 1: Giant's Table, Block Builders, Bee Garden) makes the player big, so
@@ -1040,14 +1045,27 @@ static func vr_dodge(cam: Node3D, target: Vector3, n: Node3D, k: float = 1.0) ->
 			a += VrViewCheck.cover_deg2(head, p, size, b) * 30.0
 		for b in others:
 			a += VrViewCheck.cover_deg2(head, p, size, b)
+		# never into hiding: a spot behind scenery is no spot (Bee Garden 2026-11-12: QUEEN BEA's card dodged 2.56 m
+		# down at world_scale 4, behind the garden, "hidden behind" in VR bots)
 		if a <= 0.0:
-			best = dy
-			break
-		if a < best_a:
+			if dy == 0.0 or not _vr_hidden(cam, p, n):
+				best = dy
+				break
+			continue
+		if a < best_a and (dy == 0.0 or not _vr_hidden(cam, p, n)):
 			best_a = a
 			best = dy
 	n.set_meta("vr_dodge", best)
 	return best
+
+
+## Would `n` moved to `p` be hidden from the eyes, as core/vr_view_check.gd sees it (blocker(): its panel's centre,
+## which a picture medallion shifts off the node's origin)?
+static func _vr_hidden(cam: Node3D, p: Vector3, n: Node3D) -> bool:
+	if not cam is Camera3D:
+		return false
+	var head := cam.global_position
+	return VrViewCheck.blocker(cam as Camera3D, n, p + (VrViewCheck._centre(n) - n.global_position)) != ""
 
 
 ## Scale `n` to `k` of its size (vr_clear brought it k times nearer, so it looks the same size).
@@ -1114,8 +1132,7 @@ static func _vr_follow(n: Node3D, cam: Node3D, dist: float, height: float, delta
 	d *= k
 	var to := n.global_position - cam.global_position
 	to.y = 0.0
-	if to.length() < 0.01 or fwd.angle_to(to.normalized()) > deg_to_rad(35.0) or to.length() > d * 1.45 or to.length() < d * 0.55 \
-			or absf(k - float(n.get_meta("vr_k", 1.0))) > 0.12:
+	if vr_must_move(n, cam, fwd, d, k):
 		n.set_meta("vr_moving", true)
 	vr_dodge_moved(n, spot)
 	if n.get_meta("vr_moving", false):
@@ -1127,7 +1144,8 @@ static func _vr_follow(n: Node3D, cam: Node3D, dist: float, height: float, delta
 			n.set_meta("vr_moving", false)
 			return
 		_face(n, n.global_position.lerp(target, 1.0 - exp(-4.0 * delta)), cam)
-		if n.global_position.distance_to(target) < 0.05 * d:
+		if n.global_position.distance_to(target) < VR_ARRIVED * d:
+			_face(n, target, cam)
 			n.set_meta("vr_moving", false)
 
 
@@ -1137,6 +1155,32 @@ static func vr_dodge_moved(n: Node3D, spot: Dictionary) -> void:
 	if absf(dodge - float(n.get_meta("vr_dodge_on", 0.0))) > 0.01:
 		n.set_meta("vr_dodge_on", dodge)
 		n.set_meta("vr_moving", true)
+
+
+## The lazy follow's "stay put" zone: ONE rule for every follower (vr_follow's cards and banners, VrText labels).
+## The player may look about and step around, and the panel stays where they last saw it; it glides back in front
+## once they turn well away (35 degrees) or walk off, AND before it would break what core/vr_view_check.gd demands
+## from where the eyes are now (MIN_D..MAX_D away, facing them), with a margin. The old rule looked at flat
+## distance and direction only, relative to the panel's own spot: a card held 0.55 m from the eyes by a wall let the
+## player lean to 0.3 m, and height (a crouch, stairs) never counted (Mystery Manor 2026-11-12: "0.49 m from the head",
+## then "doesn't face the head (0.26)"). `d` = how far the panel's spot is now (metres, k and world_scale in).
+static func vr_must_move(n: Node3D, cam: Node3D, fwd: Vector3, d: float, k: float) -> bool:
+	var to := n.global_position - cam.global_position
+	var flat := Vector3(to.x, 0.0, to.z)
+	if flat.length() < 0.01 or fwd.angle_to(flat.normalized()) > deg_to_rad(35.0) or flat.length() > d * 1.45 \
+			or flat.length() < d * 0.55 or absf(k - float(n.get_meta("vr_k", 1.0))) > 0.12:
+		return true
+	var ws := maxf(XRServer.world_scale, 0.001)
+	var real := to.length() / ws
+	if real < VrViewCheck.MIN_D + VR_MOVE_MARGIN_D or real > VrViewCheck.MAX_D - VR_MOVE_MARGIN_D:
+		return true
+	return n.global_basis.z.normalized().dot(-to.normalized()) < VrViewCheck.FACE_DOT + VR_MOVE_MARGIN_FACE
+
+## A gliding panel has arrived this near its spot (x its distance). It was 0.05: exactly one vr_dodge step at the
+## usual distance, so a card asked to move one step (off a pick, out from behind a post) "arrived" without moving.
+const VR_ARRIVED := 0.01
+const VR_MOVE_MARGIN_D := 0.03  # (VR_CLOSEST 0.55 m stays put; 0.53 m glides back)
+const VR_MOVE_MARGIN_FACE := 0.12
 
 
 static func _face(n: Node3D, pos: Vector3, cam: Node3D) -> void:

@@ -45,8 +45,7 @@ static func _follow(l: Label3D, cam: Node3D, world: Node, height: float, dist: f
 		return
 	var to := l.global_position - cam.global_position
 	to.y = 0.0
-	if fwd.angle_to(to.normalized()) > deg_to_rad(35.0) or to.length() > dist * 1.45 or to.length() < dist * 0.55 \
-			or absf(k - float(l.get_meta("vr_k", 1.0))) > 0.12:
+	if _ui().vr_must_move(l, cam, fwd, dist, k):  # (the one stay-put rule, UiKit.vr_must_move)
 		l.set_meta("vr_moving", true)
 	_ui().vr_dodge_moved(l, spot)
 	if l.get_meta("vr_moving", false):
@@ -57,7 +56,8 @@ static func _follow(l: Label3D, cam: Node3D, world: Node, height: float, dist: f
 			l.set_meta("vr_moving", false)
 			return
 		_place(l, cam, l.global_position.lerp(target, 1.0 - exp(-4.0 * dt)))
-		if l.global_position.distance_to(target) < 0.05 * dist:
+		if l.global_position.distance_to(target) < _ui().VR_ARRIVED * dist:
+			_place(l, cam, target)
 			l.set_meta("vr_moving", false)
 
 
@@ -68,11 +68,7 @@ static func snap(l: Label3D) -> void:
 
 
 static func _place(l: Label3D, cam: Node3D, pos: Vector3) -> void:
-	l.global_position = pos
-	var face := pos - cam.global_position
-	face.y = 0.0
-	if face.length() > 0.01:
-		l.global_basis = Basis(Vector3.UP, atan2(-face.x, -face.z)).scaled(l.global_basis.get_scale())  # front (+Z) towards the player
+	_ui()._face(l, pos, cam)  # front (+Z) towards the eyes, tilted like every VR card (one rule: UiKit._face)
 
 
 ## What the VR player should read of a TV announcement: no walls of text in VR (Simon). Keeps the
