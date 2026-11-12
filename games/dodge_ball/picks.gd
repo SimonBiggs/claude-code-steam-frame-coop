@@ -82,7 +82,7 @@ func show_row(new_stage: String, entries: Array, at: Array, vr: bool) -> void:
 			"label_y": -1.15, "label_px": 0.0042, "two_lines": true, "bob": 0.01, "hit_r": PickOrbs.BALL_R, "dot_r": 0.8})
 	else:
 		orbs.show_orbs(new_stage, entries, at[0], 0.0, 0.0, {"at": at, "scale": Deep.ORB_SCALE, "pop": true, "font": 64,
-			"label_y": -1.1, "label_px": 0.0075, "two_lines": true, "bob": 0.08})
+			"label_y": -1.1, "label_px": 0.0105, "two_lines": true, "bob": 0.08})
 
 
 ## Orb i's middle in the world (bots aim there), INF if none.

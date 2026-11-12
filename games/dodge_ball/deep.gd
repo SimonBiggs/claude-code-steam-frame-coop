@@ -97,14 +97,15 @@ const TOY_HALF := 0.85  # a toy's footprint half-width (at TOY_SCALE)
 ## The court pick row: three big orbs over the front of the court (x, z), ORB_Y above the ground.
 const ROW_X: Array[float] = [-3.4, 0.0, 3.4]
 const ROW_Z := -3.45
-const ORB_Y := 2.1
-const ORB_SCALE := 0.75
+const ORB_Y := 2.25
+const ORB_SCALE := 0.9
 const TV_R := 0.9  # a runner's middle this near an orb's spot (across the ground) is under it ...
 const TV_DWELL := 0.8  # ... for this long to pick it (running past never picks)
-## The VR pick row: three small orbs an arm's reach in front of the giant's head (metres; the giant faces +Z).
-const VR_X: Array[float] = [-0.3, 0.0, 0.3]
+## The VR pick row: three small orbs an arm's reach in front of the giant's head (metres; the giant faces +Z, so
+## its left is +X: the first orb, GENTLE, on the left as on the TV), just under eye level, above the ball tray.
+const VR_X: Array[float] = [0.3, 0.0, -0.3]
 const VR_AHEAD := 0.42
-const VR_BELOW := 0.3
+const VR_BELOW := 0.14
 const VR_SCALE := 0.14
 const HAND_R := 0.05  # a VR grab point this near an orb's ball touches it ...
 const DWELL := 0.35  # ... for this long (deliberate: a hand sweeping past never picks)
