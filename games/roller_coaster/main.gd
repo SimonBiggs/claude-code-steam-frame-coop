@@ -40,6 +40,13 @@ const Seeded := preload("res://core/seeded.gd")
 const Save := preload("res://core/save.gd")
 const Telemetry := preload("res://core/telemetry.gd")
 const StoryCard := preload("res://core/story_card.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
+const Deep := preload("res://games/roller_coaster/deep.gd")
+const HazardsScript := preload("res://games/roller_coaster/hazards.gd")
+const SeasonScript := preload("res://games/roller_coaster/season.gd")
+const GiftsScript := preload("res://games/roller_coaster/gifts.gd")
+const FairScript := preload("res://games/roller_coaster/fair.gd")
+const PicksScript := preload("res://games/roller_coaster/picks.gd")
 const BUTTONS_COL := Color(0.25, 0.5, 0.95)
 const GOLD_COL := Color(1.0, 0.8, 0.25)
 const DECOR_PICS := {"balloons": "balloon", "carousel": "carousel", "wheel": "ferris", "fountain": "fountain", "flags": "bunting"}
@@ -140,6 +147,21 @@ var story_queue: Array = []
 var story_t := 0.0
 var new_day := false
 var _rng := RandomNumberGenerator.new()
+# --- Second pass (deep.gd): modes, Buttons' gifts on the pick orbs, warned park weather, seasons, the toy fair ---
+var picks: Node  # picks.gd
+var hazards: Node3D  # hazards.gd (the warned weather; a child of the park)
+var season_node: Node3D  # season.gd
+var gifts: Node3D  # gifts.gd (track gifts, the ride's gift)
+var fair: Node3D  # fair.gd (Buttons' toy fair on the floor)
+var mode := "brave"  # every machine ("mode" in the state store)
+var season := "spring"
+var mode_picked := false  # host: GENTLE / BRAVE / HARD picked this session
+var gift_for := -1  # host: the ride the last gift pick was for
+var session_seed := 1
+var ride_weather := 0  # host: weather stretches this ride (telemetry)
+var deep_stars := {}  # host: why -> stars from weather / gifts (telemetry, bots)
+var ride_banner: Control
+var _gift_tried := false
 
 
 func _ready() -> void:
@@ -216,6 +238,11 @@ func _setup(mode: String) -> void:
 		net.state_set("score", 0)
 		net.state_set("stars", [])
 		net.state_set("vr_ride", false)
+		net.state_set("extras", [])
+		net.state_set("weather", [])
+		net.state_set("gift_ride", "")
+		net.state_set("orbs", [])
+		net.state_set("take", [])
 		_set_phase("build")
 		_refresh_cars()
 		_open_park()
@@ -256,6 +283,21 @@ func _build_world(vr: bool) -> void:
 	train = TrainScript.new()
 	train.name = "Train"
 	park.add_child(train)
+	hazards = HazardsScript.new()
+	hazards.main = self
+	park.add_child(hazards)
+	season_node = SeasonScript.new()
+	season_node.name = "Season"
+	park.add_child(season_node)
+	gifts = GiftsScript.new()
+	gifts.main = self
+	park.add_child(gifts)
+	fair = FairScript.new()
+	fair.name = "Fair"
+	add_child(fair)
+	picks = PicksScript.new()
+	picks.main = self
+	add_child(picks)
 	for i in park.guests.size():
 		guest_state.append("walk")
 		guest_vel.append(Vector3.ZERO)
@@ -276,6 +318,7 @@ func _make_vr_avatar() -> void:
 	if split != null:
 		split.set_bubble(VrRig.build_mirror(self, vr_avatar.head, false))
 	_build_giant()
+	picks.sync_state(true)  # (the giant's pick orbs, if a pick is on)
 
 
 ## TV machine: the builder's big friendly head and mittens above the table.
@@ -311,6 +354,11 @@ func _rebuild_track() -> void:
 		train.place(track, train_s)
 	_place_stars()
 	_refresh_outline()
+	if gifts != null:
+		gifts.refresh()
+	if hazards != null:
+		hazards.shown_key = ""
+		hazards.show_list(net.state_get("weather", []))
 
 
 func _station_s() -> float:
@@ -394,6 +442,7 @@ func close_loop() -> void:
 
 
 func _store_track() -> void:
+	_prune_extras()
 	net.state_set("track", pieces.duplicate(true))
 	net.state_set("closed", closed)
 	_rebuild_track()
@@ -414,6 +463,7 @@ func pull_lever() -> void:
 	if p < PRACTICE.size():
 		sound("ui_error", -10.0)
 		return
+	picks.settle_now()  # (orbs still up: the middle one, at once - the lever never waits)
 	_start_ride()
 
 
@@ -477,6 +527,7 @@ func _start_ride() -> void:
 	ride_s0 = _station_s()
 	ride_d = 0.0
 	ride_len = length * (1 if practice_ride else LAPS)
+	_start_weather(practice_ride)
 	train_s = ride_s0
 	train_v = 5.0
 	energy = 0.5 * train_v * train_v + G * Track.STATION_Y
@@ -488,6 +539,7 @@ func _start_ride() -> void:
 
 
 func _end_ride() -> void:
+	gifts.end_ride()
 	rides_done += 1
 	net.state_set("rides", rides_done)
 	_set_phase("cheer")
@@ -497,6 +549,8 @@ func _end_ride() -> void:
 	var more := decor <= ParkScript.DECOR.size()
 	net.state_set("decor", mini(decor, ParkScript.DECOR.size()))
 	_ride_rewards(more)
+	net.state_set("weather", [])  # (after the RUN line: it reports this ride's weather and gift)
+	net.state_set("gift_ride", "")
 	# Guests hop out at the station and wander off again.
 	for g in guest_state.size():
 		if guest_state[g] == "ride":
@@ -522,8 +576,10 @@ func _process(delta: float) -> void:
 		if phase == "ride":
 			train.place(track, train_s)
 	train.hide_slot0 = builder != null and builder.riding  # the VR player sits there themselves
+	train.no_roll = builder != null and builder.riding  # (no corkscrew rolls while the VR builder rides along)
 	train.set_hands(hand_bits, delta)
 	_effects(delta)
+	gifts.tick(delta)
 	_spin_stars(delta)
 	_update_story(delta)
 	if outline_mi.visible:
@@ -540,6 +596,7 @@ func _simulate(delta: float) -> void:
 		build_t += delta
 	if builder != null:
 		builder.tick(delta)
+	picks.tick(delta)
 	_guests(delta)
 	_bot_hands(delta)
 	match phase:
@@ -553,6 +610,7 @@ func _simulate(delta: float) -> void:
 			if cheer_t <= 0.0:
 				_set_phase("build")
 				_after_ride_plan()
+				_maybe_pick()
 
 
 func _has_builder() -> bool:
@@ -593,15 +651,17 @@ func _ride(delta: float) -> void:
 	var vmax := VMAX_VR if (builder != null and builder.riding) else VMAX
 	if slope > 0.08 and v < LIFT_V:
 		v = LIFT_V  # the chain lift: clickety-clack
-	v = clampf(v, VMIN, vmax)
+	v = clampf(gifts.boost_v(clampf(v, VMIN, vmax)), VMIN, vmax)  # BOOSTER: off it shoots
 	var remaining := ride_len - ride_d
 	if remaining < 9.0:
 		v = minf(v, maxf(0.8, remaining * 0.8))
+	v = hazards.ride_v(v, delta)  # a SLEEPY cart slows down and naps (0) until hands wake it or it wakes itself
 	energy = 0.5 * v * v + G * y - FRICTION * delta
 	train_v = v
 	ride_d += v * delta
 	train_s = ride_s0 + ride_d
 	train.place(track, train_s)
+	hazards.after_move()
 	_collect_stars()
 	if ride_d >= ride_len - 0.05:
 		train_s = ride_s0 + ride_len
@@ -625,7 +685,7 @@ func _collect_stars() -> void:
 			if (hand_bits >> i) & 1 == 0:
 				continue
 			var ds := absf(wrapf(train.car_s(train_s, i) - float(a[1]), -length * 0.5, length * 0.5))
-			if ds < STAR_REACH:
+			if ds < gifts.star_reach():
 				taken = i
 				break
 		if taken >= 0:
@@ -651,8 +711,10 @@ func _local_input(delta: float) -> void:
 	send_t -= delta
 	for slot in party.local_slots():
 		var up := party.pressed(slot, "accept")
+		var picked: bool = picks.local_press(slot)  # X / A / B while the orbs are up: a pick
 		if slot == 0 and _pad_builds() and phase == "build":
-			_pad_builder(slot)
+			if not picked:
+				_pad_builder(slot)
 			up = false
 		if bool(my_hands.get(slot, false)) != up:
 			my_hands[slot] = up
@@ -663,6 +725,9 @@ func _local_input(delta: float) -> void:
 
 func on_request(slot: int, action: String, args: Array) -> void:
 	match action:
+		"pick":
+			if args.size() >= 2:
+				picks.press(slot, int(args[0]), int(args[1]))
 		"hands":
 			var up := bool(args[0]) if args.size() > 0 else false
 			if up and not bool(hands.get(slot, false)) and phase == "ride" and train_v > 6.0:
@@ -693,6 +758,7 @@ func _bot_hands(delta: float) -> void:
 					var ds := wrapf(float((st as Array)[1]) - train.car_s(train_s, i), -length * 0.5, length * 0.5)
 					if ds > -1.0 and ds < 4.0:
 						up = true
+			up = hazards.bot_hands(i, train.car_s(train_s, i), up)  # hands down in a gust, up to wake a sleepy cart
 		if up:
 			bits |= 1 << i
 	hand_bits = bits
@@ -1019,11 +1085,12 @@ func _sync_stars(list: Array) -> void:
 			else:
 				mi = MeshKit.instance(MeshKit.prop("star"), false)
 				mi.material_override = MeshKit.glow_material()
-				mi.scale = Vector3.ONE * 1.4
+				mi.scale = Vector3.ONE * _star_size()
 				mi.position.y = -0.4
 			n.add_child(mi)
 			park.add_child(n)
 			n.set_meta("s", float(a[1]))
+			n.set_meta("kind", String(a[2]))
 			star_nodes[id] = n
 	for id in star_nodes.keys():
 		if not seen.has(id):
@@ -1113,9 +1180,9 @@ func _update_cameras(delta: float) -> void:
 		var riding: bool = phase == "ride" and car >= 0 and car < train.cars.size()
 		cam.cull_mask = (cam.cull_mask & ~ParkScript.ROOF_LAYER) if riding else (cam.cull_mask | ParkScript.ROOF_LAYER)
 		if riding:
-			var cx: Transform3D = (train.cars[car] as Node3D).global_transform
-			var pos := cx.origin + cx.basis.z * 3.4 + cx.basis.y * 1.5
-			target = Transform3D(UiKit.aim(cx.origin - cx.basis.z * 3.0 + cx.basis.y * 0.6 - pos, cx.basis.y.lerp(Vector3.UP, 0.4).normalized()), pos)
+			var cx: Transform3D = train.global_transform * train.flat_xf[car] if car < train.flat_xf.size() else (train.cars[car] as Node3D).global_transform  # (a corkscrew rolls the car, never the camera)
+			var pos := cx.origin + cx.basis.z * 1.1 + cx.basis.y * 2.15  # (over the rider's head: the car behind is 1.75 back)
+			target = Transform3D(UiKit.aim(cx.origin - cx.basis.z * 5.0 + cx.basis.y * 0.5 - pos, cx.basis.y.lerp(Vector3.UP, 0.4).normalized()), pos)
 			k = 1.0 - exp(-9.0 * delta)
 		elif slot == 0 and _pad_builds():
 			var end: Array = track.get("end", [Track.station_end(), 0.0])
@@ -1229,7 +1296,7 @@ func _on_state_changed(key: String, value: Variant) -> void:
 			if phase == "ride":
 				music.play_mood("race")
 				if not _all_huds().is_empty():
-					HudKit.banner(_all_huds(), "RIDE!", "", {"duration": 1.6})
+					ride_banner = HudKit.banner(_all_huds(), "RIDE!", "", {"duration": 1.6})
 			elif phase == "cheer":
 				music.play_mood("victory")
 				_confetti()
@@ -1258,6 +1325,21 @@ func _on_state_changed(key: String, value: Variant) -> void:
 			_refresh_outline()
 		"tickets", "days":
 			park.set_growth(int(net.state_get("tickets", 0)), int(net.state_get("days", 0)), true)
+		"mode":
+			mode = Deep.mode_id(String(value))
+		"season":
+			season = String(value)
+			season_node.set_season(season)
+		"extras":
+			gifts.refresh()
+		"weather":
+			hazards.show_list(value as Array)
+		"gift_ride":
+			gifts.set_ride_gift(String(value))
+		"fair":
+			fair.set_count(int(value), ready_to_play)
+		"orbs", "take":
+			picks.sync_state()
 
 
 func on_pause_changed(paused: bool, _by_slot: int) -> void:
@@ -1341,7 +1423,8 @@ func _open_park() -> void:
 		save = Save.new()
 		save.game_id = GAME_ID
 		# decor: rides in the park; tickets: plans finished; days: play-days; daily: the date of TODAY'S COASTER.
-		save.defaults = {"decor": 0, "tickets": 0, "days": 0, "last_day": "", "daily": "", "daily_done": "", "rides": 0, "plans": 0, "coasters": 0}
+		save.defaults = {"decor": 0, "tickets": 0, "days": 0, "last_day": "", "daily": "", "daily_done": "", "rides": 0, "plans": 0, "coasters": 0,
+			"mode": "", "fair": 0}  # mode: the family's last GENTLE / BRAVE / HARD; fair: Buttons' toy fair rides
 		add_child(save)
 	var today := Seeded.today()
 	new_day = String(save.data.last_day) != today
@@ -1362,6 +1445,7 @@ func _open_park() -> void:
 		save.data.daily = today
 	plan_k = 0
 	_new_plan(seed_value, CoasterGen.practice_base())
+	_open_deep(seed_value)
 	print("Coaster Crew park: plan seed %d%s | decor %d, tickets %d, day %d" % [seed_value, " (TODAY'S COASTER)" if plan_daily else "",
 		int(save.data.decor), int(save.data.tickets), int(save.data.days)])
 	_story_for_all("Hi! I'm Buttons!", "bear", BUTTONS_COL)
@@ -1462,6 +1546,11 @@ func _ride_rewards(more_decor: bool) -> void:
 	if more_decor:
 		var kind := String((ParkScript.DECOR[mini(int(save.data.decor), ParkScript.DECOR.size()) - 1] as Array)[0])
 		_story_for_all("A new ride!", String(DECOR_PICS.get(kind, "carousel")), Color(1.0, 0.55, 0.7))
+	if int(save.data.rides) % Deep.FAIR_EVERY == 0 and int(save.data.fair) < Deep.FAIR.size():
+		save.data.fair = int(save.data.fair) + 1  # Buttons' toy fair grows
+		net.state_set("fair", int(save.data.fair))
+		var kind: String = Deep.FAIR[int(save.data.fair) - 1]
+		_story_for_all("A toy fair ride!", String(Deep.FAIR_PICS.get(kind, "carousel")), Color(1.0, 0.6, 0.3))
 	_log_ride("ride")
 	build_t = 0.0
 
@@ -1511,7 +1600,11 @@ func _log_ride(end: String) -> void:
 		"pieces": pieces.size(), "length": snappedf(float(track.get("length", 0.0)), 0.1), "ride_secs": snappedf(ride_t, 0.1),
 		"build_secs": snappedf(build_t, 0.1), "stars": ride_stars, "got": int(net.state_get("score", 0)) - ride_score0,
 		"riders": _humans_riding(), "vr": vr_rig != null, "net": net.mode, "decor": int(save.data.decor),
-		"tickets": int(save.data.tickets), "days": int(save.data.days), "coasters": int(save.data.coasters)})
+		"tickets": int(save.data.tickets), "days": int(save.data.days), "coasters": int(save.data.coasters),
+		"mode": mode, "season": season, "ride_gift": String(net.state_get("gift_ride", "")), "extras": _extra_kinds(),
+		"weather": ride_weather, "gust_stars": hazards.gust_stars, "wakes": hazards.wakes, "naps": hazards.naps,
+		"splash_stars": gifts.splash_stars, "deep_stars": deep_stars.duplicate(), "fair": int(save.data.fair),
+		"picks": picks.history.size(), "picked": picks.history.back() if not picks.history.is_empty() else []})
 
 
 ## Host / local: a story card on every machine.
@@ -1538,3 +1631,202 @@ func _update_story(delta: float) -> void:
 		StoryCard.show(hs, opts)
 	if vr_rig != null and vr_rig.camera != null:
 		StoryCard.show_vr(self, vr_rig.camera, opts)  # (the giant: UiKit.vr_place scales it with XRServer.world_scale)
+
+
+# --- Second pass (deep.gd): modes, Buttons' gifts, warned weather, seasons, the toy fair ---------------------------
+
+## Host / local, when the park opens: the season, the family's last mode, the toy fair.
+func _open_deep(seed_value: int) -> void:
+	session_seed = Seeded.derive(seed_value, "deep")
+	var saved_mode := String(save.data.get("mode", ""))
+	mode = Deep.mode_id(saved_mode) if saved_mode != "" else "brave"
+	if OS.has_environment("RC_MODE"):
+		mode = Deep.mode_id(OS.get_environment("RC_MODE"))
+		mode_picked = true
+	net.state_set("mode", mode)
+	season = Seeded.season()
+	if OS.has_environment("RC_SEASON") and Deep.SEASONS.has(OS.get_environment("RC_SEASON")):
+		season = OS.get_environment("RC_SEASON")
+	net.state_set("season", season)
+	season_node.set_season(season)
+	fair.set_count(int(save.data.fair), false)
+	net.state_set("fair", int(save.data.fair))
+	_try_gift_env()
+
+
+## Nobody but the builder to pick (the wait is shorter).
+func pick_solo() -> bool:
+	return party.active_slots().size() <= (0 if vr_rig != null else 1)
+
+
+## Host / local, back to building after a ride: the mode pick (once a session, after the practice ride) or Buttons'
+## gift pick (before every ride from the third). Building goes on while the orbs are up; the lever takes the middle.
+func _maybe_pick() -> void:
+	if save == null or net.mode == "client" or picks.active():
+		return
+	_try_gift_env()
+	if not mode_picked:
+		if rides_done >= 1:
+			_start_pick("mode")
+		return
+	if rides_done + 1 >= Deep.FIRST_GIFT_RIDE and gift_for != rides_done + 1:
+		_start_pick("gift")
+
+
+func _start_pick(stage_id: String) -> void:
+	var entries: Array = []
+	var opts: Array = []
+	if stage_id == "mode":
+		var last := String(save.data.mode)
+		opts = PickOrbs.mode_ids(Deep.mode_id(last) if last != "" else "brave")
+		for id in opts:
+			var md := PickOrbs.mode(String(id))
+			entries.append({"id": id, "name": md.name, "pic": md.pic, "color": md.color})
+	else:
+		gift_for = rides_done + 1
+		opts = Deep.offer(session_seed, gift_for, pieces, net.state_get("extras", []), int(save.data.fair))
+		if opts.is_empty():
+			return
+		if opts.size() == 1:
+			_give_gift(String(opts[0]))  # (nothing to choose between: Buttons just gives it)
+			return
+		for id in opts:
+			var gd := Deep.gift(String(id))
+			entries.append({"id": id, "name": gd.name, "pic": gd.pic, "color": gd.color})
+	picks.begin(stage_id, entries, opts, _on_picked)
+	if stage_id == "mode":
+		_story_for_all("Easy or tricky?", "bear", BUTTONS_COL)
+	else:
+		_story_for_all("A gift for you!", "gift", Color(1.0, 0.45, 0.65))
+	sound("ready", -6.0, 1.2)
+	net.event("sound", ["ready"])
+
+
+## The VR builder plays at this table (the 3D pick orbs float at their arm's reach; elsewhere only the screens' pictures).
+func vr_builder_here() -> bool:
+	return vr_rig != null or vr_avatar != null
+
+
+## Every machine, when the orbs come up: no banner or headline sits over them.
+func clear_banners() -> void:
+	if ride_banner != null and is_instance_valid(ride_banner):
+		ride_banner.queue_free()
+	ride_banner = null
+	if builder != null and builder.headline != null and not get_tree().paused:
+		builder.headline_t = 0.0
+		builder.headline.visible = false
+
+
+## Host / local: the crew picked (or the middle one was taken for them).
+func _on_picked(stage_id: String, opt: Variant, _slot: int) -> void:
+	if stage_id == "mode":
+		mode_picked = true
+		mode = Deep.mode_id(String(opt))
+		save.data.mode = mode
+		net.state_set("mode", mode)
+		_story_for_all(String(PickOrbs.MODE_LINES.get(mode, "Let's go!")), String(PickOrbs.mode(mode).pic), PickOrbs.mode_color(mode))
+	else:
+		_give_gift(String(opt))
+	save.mark_dirty()
+
+
+## Host / local: a track gift goes on the newest piece it fits (it stays on this coaster); a ride gift is for the next ride.
+func _give_gift(kind: String) -> void:
+	var gd := Deep.gift(kind)
+	if gd.is_empty():
+		return
+	if bool(gd.piece):
+		var extras: Array = (net.state_get("extras", []) as Array).duplicate(true)
+		var at := Deep.gift_spot(pieces, extras, kind)
+		if at < 0:
+			return
+		extras.append([at, kind])
+		net.state_set("extras", extras)
+	else:
+		net.state_set("gift_ride", kind)
+	_story_for_all(String(gd.line), String(gd.pic), gd.color)
+
+
+## What's New "try": RC_GIFT=<gift> gives that gift as soon as it fits.
+func _try_gift_env() -> void:
+	if _gift_tried or not OS.has_environment("RC_GIFT") or net.mode == "client":
+		return
+	var kind := OS.get_environment("RC_GIFT")
+	var gd := Deep.gift(kind)
+	if gd.is_empty() or (bool(gd.piece) and Deep.gift_spot(pieces, net.state_get("extras", []), kind) < 0):
+		return
+	_gift_tried = true
+	_give_gift(kind)
+
+
+## Host / local: track gifts on pieces that went (undo, a brand-new coaster) go too.
+func _prune_extras() -> void:
+	var extras: Array = net.state_get("extras", [])
+	var keep: Array = []
+	for e in extras:
+		var i := int(e[0])
+		if i < pieces.size() and (Deep.GIFT_ON.get(String(e[1]), []) as Array).has(String((pieces[i] as Array)[0])):
+			keep.append(e)
+	if keep.size() != extras.size():
+		net.state_set("extras", keep)
+
+
+func _extra_kinds() -> Array:
+	return (net.state_get("extras", []) as Array).map(func(e: Array) -> String: return String(e[1]))
+
+
+## Host / local, when the lever is pulled: this ride's warned weather (deep.gd weather, told at once by steady discs
+## along the track and a picture card).
+func _start_weather(practice_ride: bool) -> void:
+	hazards.reset_ride()
+	gifts.reset_ride()
+	var avoid := Deep.gift_ranges(track, net.state_get("extras", []))
+	var list: Array = [] if practice_ride else Deep.weather(ride_seed, rides_done + 1, track, mode, season, avoid)
+	if list.is_empty() and not practice_ride and OS.has_environment("RC_WEATHER_NOW"):
+		list = Deep.weather(ride_seed, int(Deep.mode_of(mode).from), track, mode, season, avoid)  # (What's New "try")
+	var packed: Array = []
+	var kinds := {}
+	for e in list:
+		packed.append([String(e.kind), float(e.s0), float(e.s1)])
+		kinds[String(e.kind)] = true
+	ride_weather = packed.size()
+	net.state_set("weather", packed)
+	if kinds.has("gust"):
+		_story_for_all("Windy! Hands down!", "airswirl", Deep.GUST_COLOR)
+	if kinds.has("sleepy"):
+		_story_for_all("Sleepy cart! Hands up!", "sleepycart", Deep.SLEEPY_COLOR)
+
+
+## Host: a star for every rider in `bits` (bit i = car i) - weather and gifts. Returns how many.
+func award_riders(bits: int, why: String) -> int:
+	if net.mode == "client":
+		return 0
+	var cars: Array = net.state_get("cars", [])
+	var n := 0
+	for i in mini(cars.size(), train.cars.size()):
+		if (bits >> i) & 1 == 0:
+			continue
+		n += 1
+		var pos := (train.cars[i] as Node3D).position + Vector3.UP * 1.8
+		_got_fx(pos, i)
+		net.event("got", [pos, i])
+	if n > 0:
+		net.state_set("score", int(net.state_get("score", 0)) + n)
+		deep_stars[why] = int(deep_stars.get(why, 0)) + n
+	return n
+
+
+func burst(pos: Vector3, color: Color, amount: int, speed: float) -> void:
+	_burst(pos, color, amount, speed)
+
+
+func _star_size() -> float:
+	return 1.4 * (1.7 if gifts != null and gifts.big_stars() else 1.0)
+
+
+## Every machine: BIG STARS on or off.
+func restyle_stars() -> void:
+	for id in star_nodes:
+		var n: Node3D = star_nodes[id]
+		if String(n.get_meta("kind", "star")) != "balloon" and n.get_child_count() > 0:
+			(n.get_child(0) as Node3D).scale = Vector3.ONE * _star_size()

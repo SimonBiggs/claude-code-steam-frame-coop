@@ -5,7 +5,8 @@ extends RefCounted
 ## t = the picture's clock, bob = its gentle bob, color = the card's colour.
 ## (The new rides use Ice Cream's "carousel" / "ferris", Snowball Blitz's "fountain" and Cannon Cove's "bunting": any picture works anywhere.)
 
-const NAMES: Array[String] = ["bear", "blueprint", "ticket", "coastercar", "loopdeloop", "splashpool"]
+const NAMES: Array[String] = ["bear", "blueprint", "ticket", "coastercar", "loopdeloop", "splashpool", "corkscrew", "sleepycart",
+	"teacup", "helter", "droptower"]
 
 const FUR := Color(0.72, 0.48, 0.28)
 const MUZZLE := Color(0.96, 0.85, 0.68)
@@ -88,3 +89,63 @@ static func draw(pic, kind: String, t: float, bob: float, color: Color) -> void:
 				var a := -PI * 0.9 + PI * 0.8 * i / 5.0
 				var r := 0.18 + 0.1 * fmod(t * 1.5 + i * 0.2, 1.0)
 				pic._circle(0.5 + cos(a) * r, 0.62 + sin(a) * r + bob, 0.03, Color(0.85, 0.95, 1.0))
+		"corkscrew":  # a red track twisting through rainbow hoops, a car rolling over
+			var hoops := [Color(1.0, 0.3, 0.3), Color(1.0, 0.75, 0.2), Color(0.4, 0.9, 0.4), Color(0.35, 0.65, 1.0)]
+			for i in 4:
+				var x := 0.2 + i * 0.2
+				for k in 16:
+					var a := TAU * k / 16.0
+					pic._circle(x + cos(a) * 0.05, 0.5 + sin(a) * 0.2 + bob, 0.025, hoops[i])
+			for i in 30:
+				var x := 0.08 + i * 0.028
+				pic._circle(x, 0.5 + sin(i * 0.5) * 0.12 + bob, 0.022, RAIL)
+			var cx := 0.12 + fmod(t * 0.25, 0.76)
+			var cy := 0.5 + sin((cx - 0.08) / 0.028 * 0.5) * 0.12 + bob
+			pic._circle(cx, cy, 0.08, color)
+			pic._circle(cx, cy - 0.05 * cos(t * 6.0), 0.04, Color(1.0, 0.82, 0.68))
+		"sleepycart":  # a coaster car napping on the rails: closed eyes and a floating zzz
+			pic._poly([[0.05, 0.78 + bob], [0.95, 0.78 + bob], [0.95, 0.82 + bob], [0.05, 0.82 + bob]], RAIL)
+			pic._poly([[0.2, 0.52 + bob], [0.8, 0.52 + bob], [0.82, 0.74 + bob], [0.18, 0.74 + bob]], color)
+			pic._circle(0.3, 0.77 + bob, 0.05, Color(0.25, 0.25, 0.3))
+			pic._circle(0.7, 0.77 + bob, 0.05, Color(0.25, 0.25, 0.3))
+			for x in [0.38, 0.62]:
+				pic._poly([[x - 0.06, 0.6 + bob], [x + 0.06, 0.6 + bob], [x + 0.06, 0.625 + bob], [x - 0.06, 0.625 + bob]], Color(0.15, 0.1, 0.2))
+			for i in 3:
+				var k := fmod(t * 0.5 + i / 3.0, 1.0)
+				var s := 0.04 + 0.04 * k
+				var zx := 0.62 + k * 0.25
+				var zy := 0.42 - k * 0.3 + bob
+				pic._poly([[zx - s, zy - s], [zx + s, zy - s], [zx + s, zy - s * 0.6], [zx - s * 0.3, zy + s * 0.6], [zx + s, zy + s * 0.6],
+					[zx + s, zy + s], [zx - s, zy + s], [zx - s, zy + s * 0.6], [zx + s * 0.3, zy - s * 0.6], [zx - s, zy - s * 0.6]], Color(0.85, 0.75, 1.0))
+		"teacup":  # a spinning teacup ride cup with a saucer
+			var sw := sin(t * 3.0) * 0.03
+			pic._poly([[0.12, 0.78 + bob], [0.88, 0.78 + bob], [0.8, 0.86 + bob], [0.2, 0.86 + bob]], Color(0.95, 0.95, 1.0))
+			pic._poly([[0.22 + sw, 0.4 + bob], [0.78 + sw, 0.4 + bob], [0.68, 0.78 + bob], [0.32, 0.78 + bob]], color)
+			pic._poly([[0.2 + sw, 0.36 + bob], [0.8 + sw, 0.36 + bob], [0.8 + sw, 0.42 + bob], [0.2 + sw, 0.42 + bob]], Color.WHITE)
+			for k in 12:
+				var a := -PI * 0.5 + PI * k / 11.0
+				pic._circle(0.78 + sw + cos(a) * 0.1, 0.56 + sin(a) * 0.1 + bob, 0.025, Color.WHITE)
+			for i in 3:
+				pic._circle(0.32 + i * 0.18 + sw, 0.58 + bob, 0.035, Color(1.0, 0.9, 0.4))
+		"helter":  # a helter-skelter: a striped tower with a yellow slide spiralling down
+			for i in 6:
+				var c := Color(0.95, 0.3, 0.3) if i % 2 == 0 else Color(0.98, 0.95, 0.9)
+				pic._poly([[0.4, 0.3 + i * 0.09 + bob], [0.6, 0.3 + i * 0.09 + bob], [0.6, 0.39 + i * 0.09 + bob], [0.4, 0.39 + i * 0.09 + bob]], c)
+			pic._poly([[0.36, 0.3 + bob], [0.64, 0.3 + bob], [0.5, 0.1 + bob]], Color(0.35, 0.6, 1.0))
+			for i in 40:
+				var k := i / 39.0
+				var a := k * TAU * 2.0
+				var x := 0.5 + sin(a) * 0.2
+				if cos(a) > -0.2:
+					pic._circle(x, 0.32 + k * 0.52 + bob, 0.03, Color(1.0, 0.85, 0.25))
+			var kk := fmod(t * 0.3, 1.0)
+			pic._circle(0.5 + sin(kk * TAU * 2.0) * 0.2, 0.28 + kk * 0.52 + bob, 0.045, color)
+		"droptower":  # a tall tower, the ring of seats dropping down it
+			pic._poly([[0.46, 0.12 + bob], [0.54, 0.12 + bob], [0.56, 0.88 + bob], [0.44, 0.88 + bob]], Color(0.9, 0.9, 0.95))
+			pic._circle(0.5, 0.12 + bob, 0.06, Color(1.0, 0.4, 0.45))
+			pic._poly([[0.3, 0.88 + bob], [0.7, 0.88 + bob], [0.7, 0.92 + bob], [0.3, 0.92 + bob]], Color(0.6, 0.6, 0.65))
+			var k := fmod(t * 0.4, 1.0)
+			var y := 0.25 + (0.0 if k < 0.5 else smoothstep(0.5, 0.65, k) * 0.5) + bob
+			pic._poly([[0.3, y], [0.7, y], [0.7, y + 0.1], [0.3, y + 0.1]], color)
+			for i in 3:
+				pic._circle(0.36 + i * 0.14, y - 0.03, 0.04, Color(1.0, 0.82, 0.68))

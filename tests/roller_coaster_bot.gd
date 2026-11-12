@@ -27,6 +27,16 @@ var guest_rode := false
 var poked := 0
 var idle_t := 0.0
 var checks: Array = []  # [time, Callable, msg]: asserts a moment after a hand let go
+# Second pass (deep.gd): the pick orbs, the weather, the season, the toy fair.
+var saw_orbs := {}  # stage -> true
+var orbs_serial := -1
+var orbs_t := 0.0
+var pressed_serial := -1
+var pick_target := {}  # stage -> the option this machine's bot went for
+var saw_weather := false
+var max_told := 0
+var vr_picks := 0
+var vr_left_busy := false
 
 
 func _ready() -> void:
@@ -42,9 +52,10 @@ func _ready() -> void:
 	var vr := OS.has_environment("BOT_VR")
 	var flat := host and OS.has_environment("DUO_FLAT_HOST")  # a flat host: P1 builds with a pad, like local play
 	var t0 := 3.0 if client else 1.0
+	var late := float(OS.get_environment("BOT_LATE")) if OS.has_environment("BOT_LATE") else 0.0  # (tools/multibot.ts --late)
 	kit.at(t0, "%d TV players press A" % want, _join)
 	if client or (host and not flat and not vr):
-		kit.at(62.0 if client else 70.0, "finish", func() -> void:
+		kit.at((62.0 - late) if client else 70.0, "finish", func() -> void:  # (a late joiner ends before the host does)
 			_checks()
 			kit.finish())
 	elif vr and not flat:  # local, or a VR host (the TV machines ride)
@@ -72,6 +83,7 @@ func _ready() -> void:
 		kit.at(70.0, "finish", func() -> void:
 			_checks()
 			kit.finish())
+	kit.at(57.5 - late, "second pass: picks, weather, season, toy fair", _deep_checks)  # (before dev.bots' 60 s cut)
 	kit.every(2.0, _report)
 
 
@@ -93,6 +105,9 @@ func _p1(action: String) -> void:
 func _pad_after_ride() -> String:
 	if main.phase == "build" and step >= 2:
 		# Keep playing to the end (the lone check: nothing may stand still for 30 s): ride again every few seconds.
+		if main.picks.showing() and main.picks.taken_serial != main.picks.shown_serial and idle_t < 3.0:
+			idle_t += 0.5
+			return ""  # (give the pickers a moment; after that the lever takes the middle orb)
 		idle_t += 0.5
 		if idle_t >= 5.0:
 			idle_t = 0.0
@@ -123,7 +138,8 @@ func _pad_after_ride() -> String:
 		main.add_piece("straight")
 		main.close_loop()
 		kit.assert_true(main.closed, "the close button closed the loop")
-		_p1("y")
+		if not main.picks.showing():
+			_p1("y")  # (orbs up: the riders pick first; "rides again" pulls the lever after)
 	return "built round %d" % step
 
 
@@ -170,6 +186,7 @@ func _physics_process(delta: float) -> void:
 	for g in main.guest_state.size():
 		if main.guest_state[g] == "ride":
 			guest_rode = true
+	_deep_watch(delta)
 	for c in checks.duplicate():
 		if kit.t >= float(c[0]):
 			checks.erase(c)
@@ -184,6 +201,8 @@ func _drive_vr(delta: float) -> void:
 	var rig: VrRig = main.vr_rig
 	if rig.real_head_height() < 1.0:
 		kit.vr_head_height(rig, 1.6)
+	if _vr_pick(rig, delta):
+		return  # (the left hand is reaching into a pick orb: the other jobs wait)
 	if main.builder.riding:
 		saw_vr_ride = true
 		if main.ride_d > 25.0:
@@ -343,3 +362,110 @@ func _story_checks(mode: String) -> void:
 		kit.assert_true(int(main.net.state_get("tickets", 0)) >= 1, "%s: the finished plan earned a golden ticket" % mode)
 	if mode == "host" and main.vr_rig == null and not main.flat_host:
 		kit.assert_true(int(main.save.data.plans) >= 1, "host: the demo builder followed a plan to the end")
+
+
+# --- Second pass (deep.gd): picks, weather, season, toy fair ---------------------------------------------------
+
+## Every machine: watch the orbs / weather; a local rider (or the pad builder) presses the button that shows HARD on
+## their own screen for the mode pick, and the first picture for a gift.
+func _deep_watch(delta: float) -> void:
+	var o: Array = main.net.state_get("orbs", [])
+	if o.size() >= 3 and String(o[1]) != "":
+		saw_orbs[String(o[1])] = true
+	if not (main.net.state_get("weather", []) as Array).is_empty():
+		saw_weather = true
+	max_told = maxi(max_told, int(main.hazards.told))
+	var p = main.picks
+	if p.shown_serial != orbs_serial:
+		orbs_serial = p.shown_serial
+		orbs_t = 0.0
+	orbs_t += delta
+	# With a VR builder at the table (here or on the host) the TV riders give the giant first go (its hand takes ~2 s to
+	# reach an orb): a networked rider's 1.3 s press used to beat the reach and fail "the VR builder picked by reaching".
+	if p.shown_stage == "" or p.taken_serial == p.shown_serial or pressed_serial == p.shown_serial or orbs_t < (4.0 if main.vr_builder_here() else 1.3):
+		return
+	var slots: Array = main.party.local_slots()
+	if slots.is_empty() or main.vr_rig != null:
+		return  # (no pad here; a VR builder reaches in with a hand instead)
+	var slot: int = slots.back()  # a rider if there is one, else the pad builder
+	var want := _pick_index(p)
+	var k: int = p.order_for(slot).find(want)
+	if k < 0:
+		return
+	pressed_serial = p.shown_serial
+	pick_target[p.shown_stage] = String((p.shown_entries[want] as Dictionary).get("id", ""))
+	kit.slot_press(main.party, slot, p.PRESS[k])
+
+
+## The orb a bot goes for: HARD for the mode; a track gift (corkscrew first) if one is offered, else the first one.
+func _pick_index(p) -> int:
+	var want: Array = ["hard"] if p.shown_stage == "mode" else ["corkscrew", "splash", "booster"]
+	for w in want:
+		for i in p.shown_entries.size():
+			if String((p.shown_entries[i] as Dictionary).get("id", "")) == w:
+				return i
+	return 0
+
+
+## Fake VR: while the orbs are up, the left hand moves into the HARD orb (mode) / the first orb (gift) and stays.
+func _vr_pick(rig: VrRig, delta: float) -> bool:
+	var p = main.picks
+	if p.shown_stage == "" or main.builder.riding or p.taken_serial == p.shown_serial or orbs_t < 1.0:
+		if vr_left_busy:
+			vr_left_busy = false
+			_away(rig)  # (once: the left hand goes back to its other jobs)
+		return false
+	var want := _pick_index(p)
+	var at: Vector3 = p.orb_position(want)
+	if at == Vector3.INF:
+		return false
+	if pressed_serial != p.shown_serial:
+		pressed_serial = p.shown_serial
+		pick_target[p.shown_stage] = String((p.shown_entries[want] as Dictionary).get("id", ""))
+		vr_picks += 1
+		if not tasks.is_empty() and String(tasks[0][0]) in ["touch_lever", "touch_seat", "tree"]:
+			tasks[0] = [tasks[0][0]]  # (a touch the pick interrupted starts again afterwards)
+	vr_left_busy = true
+	_reach(rig, VrRig.LEFT, at, delta)
+	return true
+
+
+func _deep_checks() -> void:
+	var mode: String = main.net.mode
+	kit.assert_true(main.season_node.season != "" and main.season_node.season == String(main.net.state_get("season", "")),
+		"%s: the park is dressed for %s" % [mode, String(main.net.state_get("season", "?"))])
+	kit.assert_eq(main.fair.count, int(main.net.state_get("fair", 0)), "%s: the toy fair shows its saved rides" % mode)
+	if saw_weather:
+		kit.assert_true(max_told > 0, "%s: the weather showed as steady discs along the track" % mode)
+	if mode == "client":
+		kit.assert_true(_mode_ok(String(main.net.state_get("mode", ""))), "client: a mode in the state store")
+		return
+	var rides := int(main.rides_done)
+	if rides >= 1 and not OS.has_environment("RC_MODE"):
+		kit.assert_true(bool(saw_orbs.get("mode", false)), "%s: the mode orbs came up after the practice ride" % mode)
+	if rides >= 2 or main.mode_picked:
+		kit.assert_true(main.mode_picked, "%s: a mode was picked (%s)" % [mode, main.mode])
+	var first_mode: Array = []
+	for h in main.picks.history:
+		if String(h[0]) == "mode":
+			first_mode = h
+			break
+	if pick_target.has("mode") and not first_mode.is_empty() and int(first_mode[2]) >= 0:
+		kit.assert_eq(main.mode, String(pick_target.mode), "%s: the bot's pick (%s) became the mode" % [mode, String(pick_target.mode)])
+	if main.vr_rig != null and pick_target.has("mode"):
+		kit.assert_true(not first_mode.is_empty() and int(first_mode[2]) == 0, "%s: the VR builder picked by reaching into an orb (%s)" % [mode, str(first_mode)])
+	if rides >= _first_gift_ride():
+		kit.assert_true(bool(saw_orbs.get("gift", false)), "%s: Buttons offered gifts before ride %d" % [mode, _first_gift_ride()])
+	if rides >= 3 and main.mode == "hard":
+		kit.assert_true(saw_weather and int(main.hazards.told) > 0, "%s: hard rides get warned weather from ride 3" % mode)
+	print("BOT deep %s: mode %s, picks %s, weather told %d, gust stars %d, naps %d, wakes %d, splash %d, extras %s, fair %d, season %s" % [mode,
+		main.mode, str(main.picks.history), int(main.hazards.told), int(main.hazards.gust_stars), int(main.hazards.naps), int(main.hazards.wakes),
+		int(main.gifts.splash_stars), str(main.net.state_get("extras", [])), int(main.fair.count), main.season])
+
+
+func _mode_ok(m: String) -> bool:
+	return m in ["gentle", "brave", "hard"]
+
+
+func _first_gift_ride() -> int:
+	return int(main.Deep.FIRST_GIFT_RIDE)

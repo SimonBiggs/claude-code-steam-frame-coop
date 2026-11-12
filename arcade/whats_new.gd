@@ -33,6 +33,11 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "rc-gifts", "date": "2026-11-12", "game": "roller_coaster", "pic": "corkscrew", "line": "Buttons' track gifts!", "try": {"RC_GIFT": "rainbow"}},
+	{"id": "rc-weather", "date": "2026-11-12", "game": "roller_coaster", "pic": "sleepycart", "line": "Windy bits, sleepy carts!", "try": {"RC_WEATHER_NOW": "1", "RC_MODE": "brave"}},
+	{"id": "rc-modes", "date": "2026-11-12", "game": "roller_coaster", "pic": "bear", "line": "Gentle, brave or hard!"},
+	{"id": "rc-fair", "date": "2026-11-12", "game": "roller_coaster", "pic": "teacup", "line": "Buttons' toy fair grows!"},
+	{"id": "rc-seasons", "date": "2026-11-12", "game": "roller_coaster", "pic": "snowflake", "line": "Snowy park", "try": {"RC_SEASON": "winter"}},
 	{"id": "sm-gifts", "date": "2026-11-12", "game": "snowman_maker", "pic": "tophat", "line": "Tumble's snowman gifts!", "try": {"SM_GIFT": "hat"}},
 	{"id": "sm-surprises", "date": "2026-11-12", "game": "snowman_maker", "pic": "sunbeam", "line": "Sunbeams and snow slides!", "try": {"SM_SURPRISES_NOW": "1"}},
 	{"id": "sm-modes", "date": "2026-11-12", "game": "snowman_maker", "pic": "penguin", "line": "Gentle, brave or hard!"},
