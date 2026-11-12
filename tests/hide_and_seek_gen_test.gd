@@ -136,11 +136,24 @@ func _initialize() -> void:
 	var day0 := Time.get_date_string_from_unix_time(1790000000)
 	var sd := Street.daily(day0)
 	_expect(var_to_str(sd) == var_to_str(Street.daily(day0)) and bool(sd.daily) and (sd.friends as Array).size() == 2, "TODAY'S STREET is the same all day, with two friends")
-	for d in 20:
-		var dd := Street.daily(Time.get_date_string_from_unix_time(1790000000 + d * 86400))
-		var g := _gen(int(dd.seed), dd)
-		for w in HouseGen.check(g):
-			_fail("today's street %d: %s" % [d, w])
+	# TODAY'S STREET over 400+ days (and the 60 from whenever this runs): a fair house, two friends on fair spots,
+	# the twist placed (Seeded.validate_days, the shared daily validator).
+	var rs := Seeded.validate_days(func(date: String) -> Dictionary:
+			var dd := Street.daily(date)
+			var g := _gen(int(dd.seed), dd)
+			g["_spec"] = dd
+			return g,
+		func(g: Dictionary) -> Array:
+			var w := HouseGen.check(g)
+			if not bool(g.ok):
+				w.append("no try passed")
+			if (g.friend_spots as Array).size() != 2 or (g._spec.friends as Array).size() != 2:
+				w.append("TODAY'S STREET without two friends")
+			if (int(g._spec.twist) & Street.TWINS) == 0:
+				w.append("TODAY'S STREET without the twins")
+			return w, int(OS.get_environment("DAYS")) if OS.has_environment("DAYS") else 400, "TODAY'S STREET", ["2026-11-11", "2026-11-12"])
+	total += int(rs.checked)
+	fails += (rs.failures as Array).size()
 	for f in Street.FRIENDS:
 		_expect(StoryCard.has_picture(String(f.pic)), "%s has a story picture" % f.name)
 	for d in Street.DECOR:
