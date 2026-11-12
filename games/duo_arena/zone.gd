@@ -23,6 +23,7 @@ const DecorScript := preload("res://games/duo_arena/decor.gd")
 const PickOrbs := preload("res://core/pick_orbs.gd")
 const WarnRings := preload("res://core/warn_rings.gd")
 
+const SPRING_COLOR := preload("res://games/duo_arena/looks.gd").SPRING_COLOR  # NOVA'S SPRING (palette.gd)
 const ORB_Z := -3.5  # (arenagen.gd SAFE_SPOTS keeps this row clear)
 const ORB_Y := 1.4
 const ORB_GAP := 2.6
@@ -45,6 +46,7 @@ var orb_stage: String:
 	get:
 		return picker.stage if picker != null else ""
 var nova: Node3D
+var spring: Node3D  # NOVA'S SPRING (arenagen.gd layout "spring"): heals whoever stands in it during a wave
 var rings: WarnRings  # boss warning rings (core/warn_rings.gd)
 var _t := 0.0
 var _cheer := 0.0
@@ -80,6 +82,10 @@ func setup(new_lay: Dictionary, new_mode: String) -> void:
 	var accent: Color = z.line
 	for p in lay.get("pillars", []):
 		WorldScript.add_pillar(main, p, accent, built)
+	spring = null
+	if lay.has("spring"):
+		spring = _build_spring(lay.spring)
+		built.add_child(spring)
 	pad_rings.clear()
 	pad_clock.clear()
 	pad_told.clear()
@@ -131,10 +137,56 @@ func host_step(delta: float, active: bool) -> void:
 			main.on_pad_burst(i)
 
 
-## Every machine: pad i glows for `secs` (about to burst).
+## Every machine: pad i glows for `secs` (about to burst), and a flashing warn ring fills it (the shared tell).
 func tell(i: int, secs: float) -> void:
 	if i >= 0 and i < pad_glow.size():
 		pad_glow[i] = secs
+		var d: Dictionary = lay.pads[i]
+		rings.shape("circle", d.p, Vector3.FORWARD, Vector2(float(d.r) + 0.2, 0.0), pad_color(), secs, {"style": "flash", "stay": 0.3})
+
+
+## NOVA'S SPRING: a soft pool of light with a slow column and little rising sparkles.
+func _build_spring(at: Vector3) -> Node3D:
+	var root := Node3D.new()
+	root.name = "NovaSpring"
+	root.position = at
+	var mi := MeshInstance3D.new()
+	mi.mesh = ResCache.get_or_make("da_spring_v1", func() -> Resource:
+		var b := MeshKit.builder()
+		b.disc(Gen.SPRING_R, MeshKit.at(Vector3.UP * 0.03), Color(0.6, 0.6, 0.6), 28)
+		b.torus(Gen.SPRING_R, 0.07, MeshKit.at(Vector3.UP * 0.05), Color.WHITE, 28, 4)
+		for k in 6:
+			var a := k * TAU / 6.0
+			b.sphere(0.09, MeshKit.at(Vector3(cos(a) * Gen.SPRING_R, 0.12, sin(a) * Gen.SPRING_R)), Color.WHITE, 6)
+		return b.build())
+	mi.material_override = MeshKit.material(SPRING_COLOR, 1.6)
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	root.add_child(mi)
+	var sp := CPUParticles3D.new()
+	sp.amount = 14
+	sp.lifetime = 1.6
+	sp.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+	sp.emission_sphere_radius = Gen.SPRING_R * 0.8
+	sp.direction = Vector3.UP
+	sp.spread = 10.0
+	sp.gravity = Vector3.ZERO
+	sp.initial_velocity_min = 0.6
+	sp.initial_velocity_max = 1.2
+	var q := SphereMesh.new()
+	q.radius = 0.06
+	q.height = 0.12
+	q.radial_segments = 6
+	q.rings = 3
+	q.material = MeshKit.material(SPRING_COLOR.lightened(0.4), 3.0)
+	sp.mesh = q
+	sp.position.y = 0.2
+	root.add_child(sp)
+	return root
+
+
+## Is a point standing in Nova's spring?
+func in_spring(p: Vector3) -> bool:
+	return spring != null and Vector2(p.x - spring.position.x, p.z - spring.position.z).length() < Gen.SPRING_R
 
 
 ## Every machine: pad i bursts (a plume of the zone's colour).

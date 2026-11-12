@@ -34,12 +34,18 @@ const Save := preload("res://core/save.gd")
 const Seeded := preload("res://core/seeded.gd")
 const Telemetry := preload("res://core/telemetry.gd")
 const StoryCard := preload("res://core/story_card.gd")
+const Deep := preload("res://games/duo_arena/deep.gd")
+const DeepPlayScript := preload("res://games/duo_arena/deep_play.gd")
 const GAME_ID := "duo_arena"
 ## NOVA, the arena's little light-bot (story_pictures.gd nova): she tells the story on picture cards. The monsters took
 ## Neon City's lights; every wave the family clears lights one again (zone.gd pylons, saved). Runs travel through seeded
 ## ZONES with hazard pads (arenagen.gd), bosses TELL their attacks (bosses.gd), everyone picks a HERO before wave 1 and a
 ## PERK after every wave (picks.gd orbs), the first game of a visit picks GENTLE / BRAVE / HARD, and the first game each
 ## day is TODAY'S ARENA (the day's seed). Env: DA_MODE=gentle|brave|hard, DA_SEED=n, DA_ZONE=<zone id> (What's New try).
+## Second pass (deep.gd / deep_play.gd): Nova's lost FRIENDS (one per far zone, saved by beating its boss), NOVA'S GIFTS
+## on the orbs after every boss, TOLD surprises (crates, coconuts, logs, lava rocks, snowballs, comets: a warn ring
+## first), seeded arena SHAPES with NOVA'S SPRING, SEASONS (ARCADE_SEASON_DUO_ARENA) and NOVA'S CITY growing.
+## Phases for bots: net state "da_phase" (practice / pick:<stage> / wave / over), "da_surprise", "da_gifts", "da_friend".
 const NOVA_COLOR := Color(0.35, 0.85, 1.0)
 
 ## SIMPLE MODE (the family: "simple games are the fun games", "words everywhere"): just shoot cute
@@ -185,6 +191,7 @@ var practice_target = null
 var solo := false  # simple mode: the VR player started without the TV (it can still join later)
 var save: Save
 var zone: Node3D
+var deep: Node3D  # deep_play.gd
 var run_seed := 0
 var daily := false
 var game_mode := "brave"
@@ -215,6 +222,9 @@ func _ready() -> void:
 	zone = ZoneScript.new()
 	zone.main = self
 	add_child(zone)
+	deep = DeepPlayScript.new()
+	deep.main = self
+	add_child(deep)
 	var menu := PauseMenuScript.new()
 	menu.main = self
 	add_child(menu)
@@ -222,7 +232,7 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
-	for k in ["zone", "keep", "orbs"]:
+	for k in ["zone", "keep", "orbs", "season", "gifts"]:
 		net.sticky_event(k)
 	seats = ClassicSeats.new(self, {
 		"max_seats": MAX_PLAYERS,
@@ -994,7 +1004,21 @@ func debug_spawn(kind: String):
 
 
 func debug_event(ev: String) -> void:
-	director().start_event(ev)
+	match ev:
+		"surprise":  # a told surprise of this zone now (host)
+			if net.mode != "client":
+				deep.force_surprise()
+		"gift":  # Nova's gift orbs now (host; any orbs up are finished first)
+			if net.mode != "client":
+				while pick_stage != "":
+					_finish_pick()
+				_begin_pick("gift")
+		"rescue":  # this zone's lost friend saved now (host)
+			if net.mode != "client":
+				deep.rescue(zone.zone_id)
+				_send_keep()
+		_:
+			director().start_event(ev)
 
 
 func debug_skip_to_wave(n: int) -> void:
@@ -1139,6 +1163,7 @@ func _process(delta: float) -> void:
 		if pick_stage != "":
 			return  # the orbs hold the game until everyone has picked (or the time runs out)
 	zone.host_step(delta, not in_break and wave > 0)
+	deep.host_step(delta, not in_break and wave > 0)
 	if net.mode == "host" and not net.connected and not solo:
 		if not SIMPLE_MODE or wave > 0:
 			if wave == 0:
@@ -1264,6 +1289,8 @@ func _start_wave() -> void:
 		create_tween().tween_property(help_label, "modulate:a", 0.0, 1.0)
 	var boss_kind := _boss_for_wave(wave)
 	director().on_wave_started(wave, boss_kind)
+	net.state_set("da_phase", "wave")
+	deep.on_wave_started(wave)
 	if boss_kind != "":
 		var bi := Bosses.info(boss_kind)
 		_story_for_all("The %s!" % String(bi.name).capitalize(), String(bi.pic), bi.color)
@@ -1326,7 +1353,8 @@ func _end_wave() -> void:
 	if wave == FINALE_WAVE and not won:
 		_victory()
 		return
-	_begin_pick("perk")
+	deep.on_wave_cleared()
+	_begin_pick("gift" if wave % Gen.LEG == 0 else "perk")  # after a boss: Nova's gift for the team
 	if SIMPLE_MODE:
 		_show_center("WAVE %d CLEAR!" % wave, 2.0)
 		director().cheer(0.5, 0.5)
@@ -1428,6 +1456,7 @@ func spawn_enemy_at(kind: String, pos: Vector3, golden: bool = false):
 		e.hp *= float(Gen.plan(wave, game_mode, 2).hp) / (1.0 + (maxi(wave, 1) - 1) * 0.12)  # the mode's toughness curve (enemy.gd grew it 12% a wave)
 		e.speed *= float(mn.speed)
 		e.dps *= float(mn.bite)
+	deep.on_spawned(e)
 	e.position = Vector3(pos.x, 0.0, pos.z)
 	add_child(e)
 	director().on_enemy_spawned(kind)
@@ -1592,6 +1621,7 @@ func _on_game_over() -> void:
 		best_line = "NEW BEST SCORE!  (previous %d)" % best.score
 	_save_best(wave, score)
 	_log_run("over")
+	net.state_set("da_phase", "over")
 	if net.mode != "client":
 		_story_for_all("Oh no! Let's try again!", "nova", Color(0.65, 0.65, 0.8))
 	if SIMPLE_MODE:
@@ -2224,7 +2254,8 @@ func _init_save() -> void:
 	# waves: waves cleared over all days (city lights), bosses: kind -> times beaten, daily: the date TODAY'S ARENA
 	# started, daily_done: the date it was played to its end, mode / hero: the family's last choices.
 	save.defaults = {"best_wave": 0, "best_score": 0, "days": 0, "last_day": "", "daily": "", "daily_done": "",
-		"games": 0, "waves": 0, "bosses": {}, "mode": "gentle", "hero": "blaster", "best_today": ["", 0], "won": 0}
+		"games": 0, "waves": 0, "bosses": {}, "mode": "gentle", "hero": "blaster", "best_today": ["", 0], "won": 0,
+		"friends": {}}  # friends: Nova's friends saved (deep.gd FRIENDS id -> 1)
 	add_child(save)
 	if int(save.data.best_score) == 0:  # the old best.cfg (before the save): keep the family's record
 		var cfg := ConfigFile.new()
@@ -2249,6 +2280,12 @@ func _start_run() -> void:
 	game_mode = OS.get_environment("DA_MODE") if Gen.MODES.has(OS.get_environment("DA_MODE")) else String(save.data.mode)
 	if not Gen.MODES.has(game_mode):
 		game_mode = "gentle"
+	net.state_set("da_phase", "practice")
+	deep.set_friends(save.data.friends if save.data.friends is Dictionary else {})
+	var season: String = DeepPlayScript.pick_season()
+	deep.set_season(season)
+	if net.mode == "host":
+		net.event("season", [season])
 	route = Gen.route(run_seed, Gen.unlocked_zones(int(save.data.waves)))
 	var try_zone := OS.get_environment("DA_ZONE")
 	if try_zone != "" and Gen.zone_ids().has(try_zone):
@@ -2267,6 +2304,9 @@ func _start_run() -> void:
 		_story_for_all("Hi again! Let's play!", "nova")
 	if daily:
 		_story_for_all("TODAY'S ARENA!", Gen.zone(String(route[0])).pic, Gen.zone(String(route[0])).line)
+	if new_day or int(save.data.games) <= 1:
+		var sl: Array = DeepPlayScript.SEASON_LINES.get(season, ["Let's go!", "nova"])
+		_story_for_all(String(sl[0]), String(sl[1]))
 
 
 ## Host / local: build leg l's zone (and tell every machine).
@@ -2276,19 +2316,22 @@ func _enter_leg(l: int, announce: bool = true) -> void:
 	zone.setup(Gen.layout(Gen.leg_seed(run_seed, l), zid), game_mode)
 	if net.mode == "host":
 		net.event("zone", [run_seed, zid, l])
+	net.state_set("da_zone", zid)
 	if announce:
 		var z := Gen.zone(zid)
 		_story_for_all("%s!" % String(z.name).capitalize(), String(z.pic), z.line)
 		sound("wave")
 		burst(Vector3(0, 1.0, 0), z.line, 40, 0.25)
+	deep.on_leg(zid)
 
 
 ## Host: the city lights and trophies on every machine.
 func _send_keep() -> void:
 	var b: Dictionary = save.data.bosses if save.data.bosses is Dictionary else {}
 	zone.set_keepsakes(int(save.data.waves), b)
+	deep.set_city(int(save.data.waves))
 	if net.mode == "host":
-		net.event("keep", [int(save.data.waves), b, String(save.data.daily_done)])
+		net.event("keep", [int(save.data.waves), b, String(save.data.daily_done), deep.friends.duplicate()])
 
 
 ## Host / local: a wave was cleared: the city gets a light, new zones / heroes / perks may open.
@@ -2322,7 +2365,25 @@ func on_boss_beaten(kind: String) -> void:
 	save.mark_dirty()
 	bosses_run.append(kind)
 	_story_for_all("We beat the %s!" % String(Bosses.info(kind).name).capitalize(), String(Bosses.info(kind).pic), Bosses.info(kind).color)
+	deep.rescue(zone.zone_id)  # a lost friend in this zone is saved
 	_send_keep()
+
+
+## Host / local: any other told attack (a dino's charge lane, Fishwort's fireball spot): a warn shape on every machine.
+func tell_shape(kind: String, pos: Vector3, dir: Vector3, size: Vector2, col: Color, secs: float, opts: Dictionary = {}) -> void:
+	zone.rings.shape(kind, pos, dir, size, col, secs, opts)
+	if net.mode == "host":
+		net.event("tshape", [kind, pos, dir, size, col, secs, opts])
+
+
+## Host / local: a pickup of a kind (Nova's HEARTS gift).
+func drop_pickup_kind(pos: Vector3, kind: String) -> void:
+	var pk := PickupScript.new()
+	pk.kind = kind
+	pk.main = self
+	pk.net_id = next_net_id()
+	pk.position = Vector3(pos.x, 0, pos.z)
+	add_child(pk)
 
 
 ## Host / local: a boss is about to attack: a warning ring on every machine for `secs`.
@@ -2380,6 +2441,13 @@ func _begin_pick(stage: String) -> void:
 	var open := Picks.unlocked(stage, int(save.data.waves))
 	var middle := game_mode if stage == "mode" else (String(save.data.hero) if stage == "hero" else "")
 	var ids := Picks.offer(stage, run_seed, wave, open, middle)
+	if stage == "gift":
+		ids = Deep.gift_offer(run_seed, maxi(0, wave / Gen.LEG), Deep.open_gifts(deep.friends), deep.gifts)
+		if ids.size() < 2:  # (every gift taken: a power instead; the last one left is just given)
+			if ids.size() == 1:
+				deep.add_gift(String(ids[0]))
+			_begin_pick("perk")
+			return
 	if ids.size() < 2 and stage == "hero":
 		for p in _pick_players():
 			heroes[p.index] = String(ids[0]) if not ids.is_empty() else "blaster"
@@ -2391,8 +2459,9 @@ func _begin_pick(stage: String) -> void:
 	zone.show_orbs(stage, ids)
 	if net.mode == "host":
 		net.event("orbs", [stage, ids])
+	net.state_set("da_phase", "pick:" + stage)
 	var mid := Picks.find(stage, Picks.default_pick(ids))
-	var line := {"mode": "Pick how brave!", "hero": "Pick your hero!", "perk": "Pick a power!"}
+	var line := {"mode": "Pick how brave!", "hero": "Pick your hero!", "perk": "Pick a power!", "gift": "Nova's gift! Pick one!"}
 	_story_for_all(String(line[stage]), String(mid.get("pic", "star")), mid.get("color", NOVA_COLOR), true)
 	sound("bubble", -2.0, 0.9)
 	print("PICK %s: %s (%.0f s)" % [stage, ids, pick_t])
@@ -2408,7 +2477,7 @@ func _pick_tick(delta: float) -> void:
 	for p in _pick_players():
 		if not picked.has(p.index):
 			all = false
-	if (pick_stage == "mode" and not picked.is_empty()) or all or pick_t <= 0.0:
+	if (Picks.TEAM_STAGES.has(pick_stage) and not picked.is_empty()) or all or pick_t <= 0.0:
 		_finish_pick()
 
 
@@ -2416,7 +2485,7 @@ func _pick_tick(delta: float) -> void:
 func on_orb_hit(i: int, p) -> void:
 	if pick_stage == "" or net.mode == "client" or i < 0 or i >= pick_ids.size() or not (p in players):
 		return
-	if picked.has(p.index) or (pick_stage == "mode" and not picked.is_empty()):
+	if picked.has(p.index) or (Picks.TEAM_STAGES.has(pick_stage) and not picked.is_empty()):
 		return
 	picked[p.index] = i
 	zone.take(i, p.index)
@@ -2441,12 +2510,14 @@ func on_orb_hit(i: int, p) -> void:
 			mine.append(id)
 			perks[p.index] = mine
 			Picks.apply(p, "perk", id)
+		"gift":
+			deep.add_gift(id)
 	print("PICK %s: P%d took %s" % [pick_stage, p.index + 1, id])
 
 
 func _finish_pick() -> void:
 	var di := pick_ids.find(Picks.default_pick(pick_ids))
-	if pick_stage == "mode":
+	if Picks.TEAM_STAGES.has(pick_stage):
 		if picked.is_empty() and not players.is_empty():
 			on_orb_hit(di, players[0])
 	else:
@@ -2464,6 +2535,9 @@ func _finish_pick() -> void:
 		_story_for_all(String(PickOrbs.MODE_LINES.get(game_mode, "Let's go!")),
 			String(Picks.find("mode", game_mode).get("pic", "star")), Picks.find("mode", game_mode).get("color", NOVA_COLOR))
 		_begin_pick("hero")
+	elif stage == "gift" and not deep.gifts.is_empty():
+		var g := Deep.gift(String(deep.gifts[-1]))
+		_story_for_all("%s for everyone!" % String(g.name).capitalize(), String(g.pic), g.color)
 
 
 # --- Story cards (Nova) -------------------------------------------------------------------------------------
@@ -2533,7 +2607,7 @@ func _log_run(end: String) -> void:
 	Telemetry.run(GAME_ID, {"end": end, "wave": wave, "score": score, "seed": run_seed, "daily": daily, "mode": game_mode,
 		"zone": zone.zone_id, "leg": leg, "players": active_player_count(), "downs": wave_downs, "heroes": hero_list,
 		"perks": perk_count, "bosses": bosses_run.duplicate(), "won": won, "waves_total": int(save.data.waves),
-		"machines": net.peer_count() if net.mode == "host" else 0})
+		"machines": net.peer_count() if net.mode == "host" else 0}.merged(deep.telemetry()))
 
 
 func _exit_tree() -> void:
@@ -2548,8 +2622,12 @@ func _apply_deep_event(kind: String, args: Array) -> bool:
 			run_seed = int(args[0])
 			leg = int(args[2])
 			zone.setup(Gen.layout(Gen.leg_seed(run_seed, leg), String(args[1])), game_mode)
+			deep.on_leg(String(args[1]))
 		"keep":
+			if args.size() > 3:
+				deep.set_friends(args[3])
 			zone.set_keepsakes(int(args[0]), args[1])
+			deep.set_city(maxi(int(save.data.waves) if save != null else 0, int(args[0])))
 			# The family's progress shows on every machine's Trophy Hall: keep the bigger totals.
 			if save != null:
 				save.data.waves = maxi(int(save.data.waves), int(args[0]))
@@ -2575,6 +2653,18 @@ func _apply_deep_event(kind: String, args: Array) -> bool:
 			zone.warn(args[0], float(args[1]), args[2], float(args[3]))
 		"story":
 			_story(String(args[0]), String(args[1]), args[2], args.size() > 3 and bool(args[3]))
+		"season":
+			deep.set_season(String(args[0]))
+		"gifts":
+			deep.set_gifts(args[0])
+		"surp":
+			deep.surprise_fx(String(args[0]), String(args[1]), args[2], args[3], args[4], float(args[5]))
+		"zap":
+			deep.zap_fx(args[0], args[1])
+		"friend":
+			deep.free_friend(String(args[0]))
+		"tshape":
+			zone.rings.shape(String(args[0]), args[1], args[2], args[3], args[4], float(args[5]), args[6])
 		_:
 			return false
 	return true
