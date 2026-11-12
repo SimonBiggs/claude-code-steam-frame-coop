@@ -692,12 +692,15 @@ export async function land(branch: string, genTests: string[], botId: string, ot
     if (!/PASS/.test(out[t])) out[t] += " (no PASS line)";
     ok &&= /exit=0/.test(out[t]) && !/FAIL|SCRIPT ERROR|no PASS line/.test(out[t]);
   }
-  const deckOut = (await sh(`DECK_BOT_ONLY=${botId} DUO_PORT=${rport()} timeout 300 godot-test --headless --path . --fixed-fps 60 --quit-after 6000 res://tests/deck_bot.tscn 2>&1`, STAGE)).out;
-  out.deck = deckOut.split("\n").filter(l => /BOT RESULT|SCRIPT ERROR/.test(l)).slice(-3).join("\n") + engineErrors(deckOut).slice(0, 3).map(e => `\nSCRIPT ERROR (engine): ${e}`).join("");
-  // (0 checks = DECK_BOT_ONLY matched no game: fine for a non-game botId like arcade_lobby, a FAIL for a game.)
+  // The Deck bot checks games only: for a non-game botId (arcade_lobby: a tools / core landing) DECK_BOT_ONLY matches
+  // nothing, and since BotEnd counts checks (0 checks = FAIL, 2026-11-12) that failed every tools-only landing.
   const isGame = await stat(join(STAGE, "games", botId)).then(() => true, () => false);
-  if (isGame && /\(0 checks\)/.test(out.deck)) out.deck += " (no Deck checks ran for this game)";
-  ok &&= /BOT RESULT: PASS/.test(out.deck) && !/SCRIPT ERROR|no Deck checks/.test(out.deck);
+  if (isGame) {
+    const deckOut = (await sh(`DECK_BOT_ONLY=${botId} DUO_PORT=${rport()} timeout 300 godot-test --headless --path . --fixed-fps 60 --quit-after 6000 res://tests/deck_bot.tscn 2>&1`, STAGE)).out;
+    out.deck = deckOut.split("\n").filter(l => /BOT RESULT|SCRIPT ERROR/.test(l)).slice(-3).join("\n") + engineErrors(deckOut).slice(0, 3).map(e => `\nSCRIPT ERROR (engine): ${e}`).join("");
+    if (/\(0 checks/.test(out.deck)) out.deck += " (no Deck checks ran for this game)";
+    ok &&= /BOT RESULT: PASS/.test(out.deck) && !/SCRIPT ERROR|no Deck checks/.test(out.deck);
+  } else out.deck = `not run: ${botId} is not a game (the Deck bot checks games)`;
   // Solo VR: the Frame hosting with no TV machine is a real way the family plays, and new bot checks kept assuming TV
   // players there (2026-11-11: 8 games, then treasure-deep2's "map pieces were dug up"). Run the game's bot that way.
   if (isGame && await stat(join(STAGE, `tests/${botId}_bot.tscn`)).then(() => true, () => false)) {
