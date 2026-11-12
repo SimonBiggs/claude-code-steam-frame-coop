@@ -201,6 +201,7 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
+	net.sticky_event("orbs")  # a machine joining mid-pick hears of the pick orbs too (deep_play.gd; the snapshot carries them)
 	seats = ClassicSeats.new(self, {
 		"no_keys": 2,  # player.gd key_set 2: controller only
 		"free_actions": ["restart", "pause"],
@@ -1099,6 +1100,9 @@ func _check_join(delta: float) -> void:
 ## Host: move a player (TV players are moved on their own machine, so tell it).
 func _place_player(p, pos: Vector3, yaw: float) -> void:
 	p.teleport(pos, yaw)
+	if p.vr:
+		VrText.snap(vr_center)  # the VR words jump to where the player now looks (riding the rig they could end up past a wall)
+		VrText.snap(vr_status)
 	if p.remote:
 		net.event("teleport", [p.index, pos, yaw])
 

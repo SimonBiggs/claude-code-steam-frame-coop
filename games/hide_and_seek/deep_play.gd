@@ -151,6 +151,7 @@ func begin_round() -> bool:
 		stage = ""
 		return false
 	stage_t = float(Deep.PICK_WAIT[stage])
+	main.net.event("orbs", [stage, choices])
 	_face_orbs()
 	var card := {"who": "HOW TRICKY?", "line": "Pick one!", "pic": "star", "color": Color(1.0, 0.85, 0.4)} if stage == "mode" else \
 		{"who": "PIP'S GIFT", "line": "For the seeker!" if gift_side == "seeker" else "For the hiders!", "pic": "gift", "color": Color(1.0, 0.72, 0.42)}
@@ -258,6 +259,7 @@ func _resolve() -> void:
 	stage = ""
 	choices = []
 	takes.clear()
+	main.net.event("orbs", ["", []])
 	main.run["mode"] = mode_id()
 	main.run["gift"] = gift
 
@@ -485,6 +487,8 @@ func apply_event(kind: String, args: Array) -> bool:
 			show_go(args)
 		"deep_bump":
 			on_bump(int(args[0]), args[1])
+		"orbs":
+			pass  # (sticky, for machines joining mid-pick: the snapshot's pack() draws them)
 		_:
 			return false
 	return true

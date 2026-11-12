@@ -160,6 +160,8 @@ func _physics_process(delta: float) -> void:
 		if maps_seen.size() >= 3:
 			print("BOT: MAP ROTATION OK (%s)" % ", ".join(maps_seen.keys()))
 	var mode: String = main.net.mode
+	if main.phase == "pick":
+		set_meta("pick_t", float(get_meta("pick_t", 0.0)) + delta)
 	_pick(delta)
 	_deep_verdict(mode)
 	if mode != "client" and main.round_no == 2 and main.phase == "seek" and main.deep.stats.goes >= 1 and main.deep.live.is_empty() and main.phase_t > 1.5:
@@ -726,7 +728,7 @@ func _cue_verdict() -> void:
 	for k in cues:
 		if str(k).begins_with("back_") or str(k).begins_with("text_err_"):
 			missing.append(str(k))
-	var deadline := 56.0 if mode == "local" else (36.0 if mode == "host" else 31.0)
+	var deadline := (56.0 if mode == "local" else (36.0 if mode == "host" else 31.0)) + float(get_meta("pick_t", 0.0))  # (+ time spent picking: no cues then)
 	if missing.is_empty():
 		cue_verdict = true
 		set_meta("cues_ok", true)
