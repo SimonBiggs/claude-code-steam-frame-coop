@@ -3,9 +3,12 @@ extends Node
 ## In VR, text that ignores depth or billboards towards the camera hurts to look at:
 ## - no_depth_test draws far text over nearer things (hands, rods), which reads as wrong depth;
 ## - a billboard is turned separately for each eye, which looks cross-eyed.
-## So while a VR camera is active, every Label3D gets depth testing, and billboarded ones are
+## So while a VR camera is active, every Label3D gets depth testing (except words written on a floating VR panel,
+## which skip it like their panel: VrViewCheck.panel_of; on the TV too), and billboarded ones are
 ## instead turned (yaw only) towards the player's head once per frame. A Label3D reads from +Z.
 ## Flat screens (the TV) are left alone: billboards are fine there.
+
+const VrViewCheck := preload("res://core/vr_view_check.gd")
 
 var faced: Array[Label3D] = []
 var fake_head: XRCamera3D = null
@@ -40,8 +43,8 @@ func _process(delta: float) -> void:
 	# (in game.log, with the time) to match against reports like "the screen goes black".
 	if vr and not fake and delta > 0.03:
 		print("[hitch] %d ms at %s" % [int(delta * 1000.0), Time.get_time_string_from_system()])
-	if vr and (not active or get_meta("rules_v", 0) != 4):
-		set_meta("rules_v", 4)  # bump when _fix changes, so a hot reload re-applies it to existing labels
+	if vr and (not active or get_meta("rules_v", 0) != 5):
+		set_meta("rules_v", 5)  # bump when _fix changes, so a hot reload re-applies it to existing labels
 		_sweep(get_tree().root)  # labels made before the guard started
 	active = vr
 	if not vr:
@@ -66,6 +69,27 @@ func _process(delta: float) -> void:
 func _on_node_added(n: Node) -> void:
 	if active and n is Label3D:
 		_fix.call_deferred(n)  # after the game has finished setting it up
+	elif n is Label3D or n is SpriteBase3D:
+		_match_panel.call_deferred(n)  # words and pictures (story medallions) on a floating panel
+
+
+## Words on a floating panel (UiKit.vr_panel_material: no depth test, so it shows through a nearer leaf or wall) skip
+## the depth test too, or the panel shows as a dark bar with the words hidden behind the scenery (Fruit Catch
+## 2026-11-12, TODAY'S HARVEST in front of a low branch). Their priority stays above the panel's.
+## core/vr_view_check.gd text_problems() fails a VR bot when this doesn't hold.
+func _match_panel(l: GeometryInstance3D) -> bool:
+	if not is_instance_valid(l) or not (l is Label3D or l is SpriteBase3D):
+		return false
+	var p := VrViewCheck.panel_of(l)
+	if p == null:
+		return false
+	l.set("no_depth_test", true)
+	var prio := (p.material_override as BaseMaterial3D).render_priority
+	l.set("render_priority", maxi(int(l.get("render_priority")), prio + 2))
+	if l is Label3D:
+		var t := l as Label3D
+		t.outline_render_priority = clampi(t.outline_render_priority, prio + 1, t.render_priority - 1)
+	return true
 
 
 func _sweep(n: Node) -> void:
@@ -83,6 +107,7 @@ func _fix(l: Label3D) -> void:
 	# it's behind them; let transparent sorting by distance decide instead.
 	l.render_priority = 0
 	l.outline_render_priority = -1
+	_match_panel(l)  # words on a floating panel float with it
 	# Readable in the headset (Abigail: "the writing is very dark"): a solid dark outline, and dark
 	# text colours lifted towards white.
 	l.outline_size = maxi(l.outline_size, 12)

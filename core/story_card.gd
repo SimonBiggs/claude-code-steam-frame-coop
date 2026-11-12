@@ -237,7 +237,7 @@ class StoryCardPics:
 		return p
 
 	## The VR card's picture: the TV card's round disc + picture, drawn into a little SubViewport shown on a
-	## Sprite3D (depth-tested like the card, drawn over its panel) half over the card's left edge.
+	## Sprite3D (skips the depth test like the card's panel, drawn over it: core/vr_text_guard.gd) half over the card's left edge.
 	static func vr_medallion(kind: String, col: Color, card: Node3D) -> Sprite3D:
 		const PX := 256
 		var vp := SubViewport.new()
@@ -256,6 +256,7 @@ class StoryCardPics:
 		s.texture = vp.get_texture()
 		s.pixel_size = 0.3 / PX
 		s.render_priority = UiKit.VR_PRIO_TEXT
+		s.no_depth_test = true  # vr-depth-ok: like the panel it sits on, or a leaf in front hides the picture but not the card
 		s.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var w: float = card.get("width") if card.get("width") != null else 1.0
 		s.layers = card.get("vis_layers") if card.get("vis_layers") != null else UiKit.VR_LAYER
