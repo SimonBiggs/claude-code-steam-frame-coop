@@ -1045,14 +1045,27 @@ static func vr_dodge(cam: Node3D, target: Vector3, n: Node3D, k: float = 1.0) ->
 			a += VrViewCheck.cover_deg2(head, p, size, b) * 30.0
 		for b in others:
 			a += VrViewCheck.cover_deg2(head, p, size, b)
+		# never into hiding: a spot behind scenery is no spot (Bee Garden 2026-11-12: QUEEN BEA's card dodged 2.56 m
+		# down at world_scale 4, behind the garden, "hidden behind" in VR bots)
 		if a <= 0.0:
-			best = dy
-			break
-		if a < best_a:
+			if dy == 0.0 or not _vr_hidden(cam, p, n):
+				best = dy
+				break
+			continue
+		if a < best_a and (dy == 0.0 or not _vr_hidden(cam, p, n)):
 			best_a = a
 			best = dy
 	n.set_meta("vr_dodge", best)
 	return best
+
+
+## Would `n` moved to `p` be hidden from the eyes, as core/vr_view_check.gd sees it (blocker(): its panel's centre,
+## which a picture medallion shifts off the node's origin)?
+static func _vr_hidden(cam: Node3D, p: Vector3, n: Node3D) -> bool:
+	if not cam is Camera3D:
+		return false
+	var head := cam.global_position
+	return VrViewCheck.blocker(cam as Camera3D, n, p + (VrViewCheck._centre(n) - n.global_position)) != ""
 
 
 ## Scale `n` to `k` of its size (vr_clear brought it k times nearer, so it looks the same size).
@@ -1131,7 +1144,8 @@ static func _vr_follow(n: Node3D, cam: Node3D, dist: float, height: float, delta
 			n.set_meta("vr_moving", false)
 			return
 		_face(n, n.global_position.lerp(target, 1.0 - exp(-4.0 * delta)), cam)
-		if n.global_position.distance_to(target) < 0.05 * d:
+		if n.global_position.distance_to(target) < VR_ARRIVED * d:
+			_face(n, target, cam)
 			n.set_meta("vr_moving", false)
 
 
@@ -1162,6 +1176,9 @@ static func vr_must_move(n: Node3D, cam: Node3D, fwd: Vector3, d: float, k: floa
 		return true
 	return n.global_basis.z.normalized().dot(-to.normalized()) < VrViewCheck.FACE_DOT + VR_MOVE_MARGIN_FACE
 
+## A gliding panel has arrived this near its spot (x its distance). It was 0.05: exactly one vr_dodge step at the
+## usual distance, so a card asked to move one step (off a pick, out from behind a post) "arrived" without moving.
+const VR_ARRIVED := 0.01
 const VR_MOVE_MARGIN_D := 0.03  # (VR_CLOSEST 0.55 m stays put; 0.53 m glides back)
 const VR_MOVE_MARGIN_FACE := 0.12
 

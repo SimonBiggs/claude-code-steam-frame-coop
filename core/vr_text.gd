@@ -56,7 +56,8 @@ static func _follow(l: Label3D, cam: Node3D, world: Node, height: float, dist: f
 			l.set_meta("vr_moving", false)
 			return
 		_place(l, cam, l.global_position.lerp(target, 1.0 - exp(-4.0 * dt)))
-		if l.global_position.distance_to(target) < 0.05 * dist:
+		if l.global_position.distance_to(target) < _ui().VR_ARRIVED * dist:
+			_place(l, cam, target)
 			l.set_meta("vr_moving", false)
 
 
