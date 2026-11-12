@@ -79,6 +79,8 @@ const Districts := preload("res://games/mech_titans/districts.gd")
 const Picks := preload("res://games/mech_titans/picks.gd")
 const PickOrbs := preload("res://core/pick_orbs.gd")
 const Deep := preload("res://games/mech_titans/deep.gd")
+const ToyHunt := preload("res://games/mech_titans/toy_hunt.gd")
+const Tales := preload("res://games/mech_titans/tales.gd")
 ## Where the kaiju friends stand and cheer (just outside the east and west edges), up to this many.
 const PARADE_MAX := 8
 const PARADE_X := 68.0
@@ -156,6 +158,7 @@ var friends_today := 0  ## host: kaiju sent home as friends this session (Momo c
 const MOMO_COLOR := "74d99a"  ## Momo, the Titans' first kaiju friend (story_pictures.gd momo)
 var deep: Deep  ## hazards, upgrade effects, sanctuary homes (every machine)
 var picks: Picks  ## the pods (every machine)
+var toy_hunt: ToyHunt  ## deep2: the lost toy, Momo's toy park, the season's dressing (every machine)
 var pick_queue: Array[String] = []  ## host: pods still to land before the next round ("mode", "upgrade")
 var pick_t := 0.0  ## host: seconds the pods have stood
 var pick_done_t := -1.0  ## host: a pod was taken; carry on when this runs out
@@ -184,7 +187,7 @@ func _ready() -> void:
 	save.version = Data.SAVE_VERSION
 	save.defaults = {"parts": 0, "cleared": [], "stars": [], "owned": [], "paint": "classic", "paints": ["classic"], "turn": "smooth",
 		"friends": [], "best_round": 0, "rounds": 0, "daily": "", "sanct": {"hearts": 0, "bosses": {}}, "frame": "titan",
-		"mode": "gentle", "mega_ok": false, "best": {}}
+		"mode": "gentle", "mega_ok": false, "best": {}, "toys": [], "toys_n": 0}
 	save.use_layout(preload("res://games/mech_titans/progress.gd"))  # SAVE_VERSION 2: the Kaiju Sanctuary (migrate_save)
 	add_child(save)
 	sfx = SfxScript.new()
@@ -239,6 +242,9 @@ func _setup(mode: String) -> void:
 	deep = Deep.new()
 	deep.setup(self)
 	world_root.add_child(deep)
+	toy_hunt = ToyHunt.new()
+	toy_hunt.setup(self)
+	world_root.add_child(toy_hunt)
 	picks = Picks.new()
 	picks.name = "Pods"
 	picks.main = self
@@ -384,6 +390,8 @@ func _publish_friends() -> void:
 	net.state_set("friends_list", f.slice(maxi(0, f.size() - Sanctuary.parade_size(h))))
 	net.state_set("friends_n", f.size())
 	net.state_set("sanct_h", h)
+	if toy_hunt != null:
+		toy_hunt.publish_park()
 
 
 ## Every machine: the kaiju friends waving from the north hills.
@@ -481,7 +489,7 @@ func _make_friends(i: int) -> void:
 	# The Kaiju Sanctuary: hearts (a boss counts BOSS_HEARTS), what they unlock, the best made round per difficulty.
 	var sanct: Dictionary = save.data["sanct"]
 	var h_before := int(sanct.get("hearts", 0))
-	var h_after := h_before + Sanctuary.hearts_for(m)
+	var h_after := h_before + Sanctuary.hearts_for(m) + (Tales.TOY_HEARTS if toy_hunt.found_in(i) else 0)  # deep2: a found toy is a bonus heart
 	sanct["hearts"] = h_after
 	var rmode := String(m.get("mode", "gentle"))
 	if bb != "":
@@ -556,7 +564,8 @@ func _round_telemetry(i: int, how: String) -> void:
 		"seconds": int(missions.time), "reboots": missions.reboots, "tv_players": party.player_count(), "vr": vr_rig != null,
 		"friends": _friend_count(), "end": how, "mode": String(m.get("mode", "gentle")), "boss": String(m.get("bigboss", "")),
 		"frame": String(net.state_get("frame", "titan")), "upg": upg_list(), "hazards": deep.hazards_landed, "hazard_hits": deep.hazards_hit,
-		"hearts": Sanctuary.hearts(save.data)})
+		"hearts": Sanctuary.hearts(save.data), "season": String(m.get("season", "")), "toy": String(m.get("toy", "")),
+		"toy_found": toy_hunt.found_in(i), "toys_n": int(save.data.get("toys_n", 0)), "minis_told": combat.minis_warned})
 
 
 # --- World ------------------------------------------------------------------------------------------
@@ -1486,6 +1495,7 @@ func _start_play() -> void:
 	if SIMPLE_MODE:
 		_apply_deep()
 		deep.round_start()
+		toy_hunt.round_start()
 		_refresh_all_vehicle_huds()
 		net.event("unlocks", [])
 		var r := int(net.state_get("mission", 0))
@@ -1502,6 +1512,13 @@ func _start_play() -> void:
 		elif bool(rm.get("gen", false)):
 			# A made round: the lost kaiju's picture (TODAY'S KAIJU for the daily golden one).
 			story(_round_card(rm))
+		if bool(rm.get("gen", false)) and String(rm.get("toy", "")) != "":
+			# deep2: then its lost toy (tales.gd): LOST + the toy's picture; its beam stands over it in the city.
+			var ti := Tales.info(String(rm["toy"]))
+			get_tree().create_timer(later + 3.5).timeout.connect(func() -> void:
+				if String(net.state_get("phase", "")) == "play" and not bool((net.state_get("toy", {}) as Dictionary).get("got", false)):
+					story({"who": "LOST TOY", "line": String(ti["name"]), "pic": String(ti["pic"]),
+						"color": (ti["color"] as Color).to_html(false), "duration": 3.2}))
 		var kinds := vehicle_kinds()
 		if r > 0 and kinds.size() > Data.simple_vehicles(r - 1).size():
 			# A new vehicle this round: its name + Y on the TV.
@@ -1597,6 +1614,8 @@ func _deep_start() -> void:
 	var start := test_start_round
 	if try == "boss":
 		start = RoundGen.LESSONS + RoundGen.BOSS_EVERY - 1  # What's New: straight to the first boss kaiju
+	elif try == "toy":
+		start = RoundGen.LESSONS  # What's New: straight to a made round with a lost toy
 	elif try == "pods":
 		start = RoundGen.LESSONS
 		pick_queue.append("upgrade")
@@ -2031,7 +2050,9 @@ func _process(delta: float) -> void:
 	if deep != null:
 		if net.mode != "client":
 			deep.host_tick(delta, phase)
+			toy_hunt.host_tick(delta, phase)
 		deep.visual_tick(delta)
+		toy_hunt.visual_tick(delta)
 	support.visual_tick(delta)
 	_tick_hud(delta)
 	if teach != null:

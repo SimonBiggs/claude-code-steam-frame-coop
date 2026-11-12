@@ -36,7 +36,7 @@ static func migration_samples() -> Array:
 
 
 ## data: the raw save (no defaults filled in: always .get with a default). today: Seeded.today().
-## grown: the Kaiju Sanctuary's hearts (every lost kaiju sent home; a boss counts 3) + everything it has
+## grown: the toys in Momo's toy park (deep2) + the Kaiju Sanctuary's hearts (every lost kaiju sent home; a boss counts 3) + everything it has
 ## unlocked (frames, upgrades, BRAVE, homes on the hills); daily: TODAY'S KAIJU went home today (main.gd
 ## _make_friends saves the date when the golden kaiju goes home: the daily is finished, not started).
 static func progress_summary(data: Dictionary, today: String) -> Dictionary:
@@ -44,12 +44,14 @@ static func progress_summary(data: Dictionary, today: String) -> Dictionary:
 	var h := Sanctuary.hearts(data)
 	var old := maxi(int(data.get("rounds", 0)), (friends as Array).size() if friends is Array else 0)
 	h = maxi(h, old)
-	return {"grown": h + Sanctuary.unlock_count(h), "daily": String(data.get("daily", "")) == today,
-		"hearts": h, "unlocks": Sanctuary.unlock_count(h)}
+	var toys := maxi(0, int(data.get("toys_n", 0)))  # deep2: every lost toy found moved into Momo's toy park
+	return {"grown": h + Sanctuary.unlock_count(h) + toys, "daily": String(data.get("daily", "")) == today,
+		"hearts": h, "unlocks": Sanctuary.unlock_count(h), "toys": toys}
 
 
 ## A save as the game writes it after a few days (tests/progress_test.gd: it must read as grown > 0, daily done).
 static func sample(today: String) -> Dictionary:
 	return {"parts": 120, "cleared": [], "stars": [], "owned": [], "paint": "classic", "paints": ["classic"], "turn": "smooth",
 		"friends": [["lizard", "", ""], ["lizard", "ffd24a", "ffb020"], ["slimelet", "", ""]], "best_round": 3, "rounds": 3,
-		"daily": today, "sanct": {"hearts": 9, "bosses": {"king_sizzle": 1}}, "frame": "sprinter", "mode": "gentle", "mega_ok": false}
+		"daily": today, "sanct": {"hearts": 9, "bosses": {"king_sizzle": 1}}, "frame": "sprinter", "mode": "gentle", "mega_ok": false,
+		"toys": ["teddy", "kite"], "toys_n": 2}

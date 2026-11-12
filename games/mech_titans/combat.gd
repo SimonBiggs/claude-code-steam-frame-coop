@@ -26,6 +26,8 @@ const BEAM_ENERGY := 20.0  ## per second
 const PUNCH_DAMAGE := 30.0
 const PUNCH_REACH := 3.2  ## metres beyond the fist that still count (generous)
 const FOAM_RANGE := 30.0
+const MINI_TELL := 1.8  ## seconds a helper's arrival ring shows before it walks in (deep2)
+const MINI_RING := 4.0
 const BOULDER_SCALE := 3.2
 
 var main: Node  ## main.gd
@@ -49,6 +51,9 @@ var _beam_sound := false
 var _slowmo := 0.0
 var _tele_warned := 0.0
 var sig_tells := 0  ## host: boss kaiju big moves warned this session (bots)
+var _mini_queue: Array = []  ## host: helpers about to walk in where their ring shows [{t, kind, from, goal, blocking}]
+var minis_warned := 0  ## host (bots): helper arrivals told by a ring
+var minis_arrived := 0  ## host (bots): helpers that came in after their ring
 
 
 func setup(p_main: Node, p_city: City, p_mech: Mech, p_fx: Fx) -> void:
@@ -60,6 +65,7 @@ func setup(p_main: Node, p_city: City, p_mech: Mech, p_fx: Fx) -> void:
 
 ## Remove every kaiju and boulder (new mission / back to the hangar).
 func clear() -> void:
+	_mini_queue.clear()
 	for id in kaiju:
 		(kaiju[id] as Node).queue_free()
 	kaiju.clear()
@@ -122,6 +128,26 @@ func _make_kaiju(id: int, k: String, split_gen: int) -> Kaiju:
 
 ## Host: n minis of `kind` arriving from the edges (or around `near`).
 func spawn_minis(kind: String, n: int, blocking: bool, near: Vector3 = Vector3.INF) -> void:
+	for s in _mini_spots(n, near):
+		spawn(kind, s[0], s[1], 0, blocking)
+
+
+## Host (deep2): helpers never pop up unannounced: a glowing circle in their colour shows where each one comes
+## in, MINI_TELL seconds first (the ring stands at the city's edge, or next to a kaiju that called them).
+func warn_minis(kind: String, n: int, blocking: bool, near: Vector3 = Vector3.INF, secs: float = MINI_TELL) -> void:
+	var col: Color = (Data.MINIS.get(kind, {}) as Dictionary).get("color", Color(0.7, 0.5, 1.0))
+	for s in _mini_spots(n, near):
+		var from: Vector3 = s[0]
+		var shown := Vector3(clampf(from.x, -Data.MAP + 3.0, Data.MAP - 3.0), 0.0, clampf(from.z, -Data.MAP + 3.0, Data.MAP - 3.0))
+		emit_fx("marker", [shown, MINI_RING, col, secs])
+		_mini_queue.append({"t": secs, "kind": kind, "from": from, "goal": s[1], "blocking": blocking})
+		minis_warned += 1
+	if n > 0:
+		emit_fx("sfx", ["beep", near if near != Vector3.INF else mech.global_position, -8.0, 1.4])
+
+
+func _mini_spots(n: int, near: Vector3) -> Array:
+	var out: Array = []
 	for i in n:
 		var from: Vector3
 		var goal: Vector3
@@ -134,7 +160,8 @@ func spawn_minis(kind: String, n: int, blocking: bool, near: Vector3 = Vector3.I
 			var t := randf_range(-50.0, 50.0)
 			from = [Vector3(t, 0, -Data.MAP - 6.0), Vector3(-Data.MAP - 6.0, 0, t * 0.6 - 20.0), Vector3(Data.MAP + 6.0, 0, t * 0.6 - 20.0)][side]
 			goal = Vector3(randf_range(-45.0, 45.0), 0, randf_range(-50.0, 18.0))
-		spawn(kind, from, goal, 0, blocking)
+		out.append([from, goal])
+	return out
 
 
 ## Host: a boss enters from the north.
@@ -204,6 +231,13 @@ func minis_alive() -> int:
 
 func tick(delta: float) -> void:
 	threat_t = maxf(0.0, threat_t - delta)
+	for i in range(_mini_queue.size() - 1, -1, -1):
+		var q: Dictionary = _mini_queue[i]
+		q["t"] = float(q["t"]) - delta
+		if float(q["t"]) <= 0.0:
+			_mini_queue.remove_at(i)
+			spawn(String(q["kind"]), q["from"], q["goal"], 0, bool(q["blocking"]))
+			minis_arrived += 1
 	_tele_warned = maxf(0.0, _tele_warned - delta)
 	for id in kaiju.keys():
 		var k: Kaiju = kaiju[id]
@@ -1075,7 +1109,7 @@ func split_jelly(k: Kaiju) -> void:
 
 func summon_minis(k: Kaiju, n: int) -> void:
 	var kind: String = "batlet" if k.kind == "mega" else main.missions.extra_kind()
-	spawn_minis(kind, n, false, k.position)
+	warn_minis(kind, n, false, k.position)
 	emit_fx("ring", [k.global_position + Vector3.UP, 20.0, Color(0.7, 0.5, 1.0)])
 
 

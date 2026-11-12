@@ -4,7 +4,7 @@ extends RefCounted
 ## pic._p(x, y) / pic._circle(x, y, r, c) / pic._poly(pts, c) / pic._eye(x, y, r) / pic.draw_*(...), size = pic.size,
 ## t = the picture's clock, bob = its gentle bob, color = the card's colour.
 
-const NAMES: Array[String] = ["momo", "sanctuary", "titanpod", "titanframe", "crownkaiju"]
+const NAMES: Array[String] = ["momo", "sanctuary", "titanpod", "titanframe", "crownkaiju", "kite", "toypark"]
 
 
 static func draw(pic, kind: String, t: float, bob: float, color: Color) -> void:
@@ -71,6 +71,54 @@ static func draw(pic, kind: String, t: float, bob: float, color: Color) -> void:
 			pic._circle(0.86 + wave * 0.3, 0.27 + bob + wave, 0.07, trim)
 			pic._poly([[0.3, 0.42 + bob], [0.18, 0.56 + bob], [0.22, 0.6 + bob], [0.32, 0.5 + bob]], bodyc.darkened(0.1))
 			pic._circle(0.18, 0.62 + bob, 0.07, trim)
+		"kite":  # a diamond kite (the card's colour) with a white cross, a wavy string and a bow tail, bobbing in the wind
+			var sway := sin(t * 2.0) * 0.03
+			var cx := 0.55 + sway
+			var cy := 0.3 + bob
+			pic._poly([[cx, cy - 0.22], [cx + 0.17, cy], [cx, cy + 0.26], [cx - 0.17, cy]], color)
+			pic._poly([[cx, cy - 0.22], [cx + 0.17, cy], [cx, cy]], color.lightened(0.25))
+			pic.draw_line(pic._p(cx, cy - 0.22), pic._p(cx, cy + 0.26), Color(1, 1, 1), 0.012 * size.x)
+			pic.draw_line(pic._p(cx - 0.17, cy), pic._p(cx + 0.17, cy), Color(1, 1, 1), 0.012 * size.x)
+			var prev: Vector2 = pic._p(cx, cy + 0.26)
+			for k in 8:
+				var f := float(k + 1) / 8.0
+				var p: Vector2 = pic._p(cx - 0.35 * f + sin(t * 3.0 + f * 6.0) * 0.03, cy + 0.26 + 0.42 * f)
+				pic.draw_line(prev, p, Color(0.95, 0.95, 0.95), 0.008 * size.x)
+				prev = p
+			for k in 3:
+				var f2 := 0.25 + k * 0.25
+				var bx := cx - 0.35 * f2 + sin(t * 3.0 + f2 * 6.0) * 0.03
+				var by := cy + 0.26 + 0.42 * f2
+				var bc := [Color(1.0, 0.85, 0.2), Color(0.3, 0.8, 1.0), Color(0.4, 0.9, 0.4)][k] as Color
+				pic._poly([[bx - 0.04, by - 0.025], [bx, by], [bx - 0.04, by + 0.025]], bc)
+				pic._poly([[bx + 0.04, by - 0.025], [bx, by], [bx + 0.04, by + 0.025]], bc)
+		"toypark":  # Momo's toy park: a green hill with a teddy, a balloon, a beach ball and a pumpkin, a little flag on top
+			pic._circle(0.5, 1.15, 0.6, Color(0.45, 0.78, 0.4))
+			pic.draw_line(pic._p(0.5, 0.56), pic._p(0.5, 0.3), Color(0.5, 0.35, 0.2), 0.012 * size.x)
+			pic._poly([[0.5, 0.3], [0.64, 0.35], [0.5, 0.4]], Color(1.0, 0.4, 0.5))
+			# teddy
+			var tb := Color(0.82, 0.48, 0.2)
+			pic._circle(0.24, 0.72 + bob, 0.09, tb)
+			pic._circle(0.24, 0.58 + bob, 0.07, tb)
+			pic._circle(0.19, 0.53 + bob, 0.03, tb)
+			pic._circle(0.29, 0.53 + bob, 0.03, tb)
+			pic._eye(0.22, 0.57 + bob, 0.015)
+			pic._eye(0.26, 0.57 + bob, 0.015)
+			# balloon on a string
+			var bx := 0.38 + sin(t * 1.5) * 0.02
+			pic.draw_line(pic._p(0.38, 0.66), pic._p(bx, 0.36 + bob), Color(0.95, 0.95, 0.95), 0.006 * size.x)
+			pic._circle(bx, 0.3 + bob, 0.07, Color(0.98, 0.25, 0.35))
+			# beach ball
+			pic._circle(0.66, 0.66 + bob * 0.5, 0.08, Color(1.0, 0.82, 0.15))
+			pic._poly([[0.66, 0.58 + bob * 0.5], [0.7, 0.66 + bob * 0.5], [0.66, 0.74 + bob * 0.5]], Color(0.95, 0.2, 0.25))
+			pic._poly([[0.66, 0.58 + bob * 0.5], [0.62, 0.66 + bob * 0.5], [0.66, 0.74 + bob * 0.5]], Color(0.2, 0.5, 1.0))
+			# pumpkin
+			pic._circle(0.8, 0.76, 0.07, Color(1.0, 0.52, 0.08))
+			pic._circle(0.86, 0.76, 0.06, Color(0.95, 0.45, 0.05))
+			pic._poly([[0.82, 0.69], [0.84, 0.69], [0.84, 0.65], [0.82, 0.65]], Color(0.3, 0.5, 0.15))
+			for k in 3:  # sparkles: it keeps growing
+				var a := t * 1.2 + k * 2.1
+				pic._circle(0.5 + cos(a) * 0.38, 0.4 + sin(a) * 0.18, 0.015 + 0.008 * sin(t * 5.0 + k), Color(1.0, 0.95, 0.6))
 		"crownkaiju":  # a big boss kaiju (the card's colour) with a golden crown and sparks round it
 			var skin2 := color
 			pic._circle(0.5, 0.68 + bob, 0.27, skin2)

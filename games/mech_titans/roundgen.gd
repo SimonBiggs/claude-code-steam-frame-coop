@@ -10,6 +10,8 @@ extends RefCounted
 ## Kaiju Sanctuary; HARD (id "mega") after a boss went home in BRAVE; names and colours: PickOrbs.mode()), each a smooth curve over the laps (curve()); every
 ## fifth made round is a BOSS KAIJU with a crown and a big readable move (bigboss.gd); every place is a
 ## district with its own hazard (districts.gd), timed by the curve.
+## DEEP2 (deep2-mech): every made round's lost kaiju lost a TOY in the city (tales.gd; the season picks which) and
+## wears the season's hat; "season" comes from the round's date so every machine dresses the city alike.
 ## Same (round, seed, friends, mode) -> same round. tests/mech_titans_rounds_test.gd checks many seeds,
 ## including that every city made can be driven / walked from the start to every rescue spot.
 
@@ -17,6 +19,7 @@ const Data := preload("res://games/mech_titans/data.gd")
 const Seeded := preload("res://core/seeded.gd")
 const BigBoss := preload("res://games/mech_titans/bigboss.gd")
 const Districts := preload("res://games/mech_titans/districts.gd")
+const Tales := preload("res://games/mech_titans/tales.gd")
 
 const LESSONS := 3  ## rounds 0-2 are data.gd's hand-made lessons
 ## Places open as the team makes friends: [place, friends needed].
@@ -123,6 +126,8 @@ static func make(i: int, run_seed: int, friends: int, mode: String = "gentle", d
 		m["tell"] = 1.0
 		m["boss_tell"] = 1.0
 		m["dmg"] = float(MODES["gentle"]["dmg"])
+		m["season"] = Seeded.season(date)
+		m["toy"] = ""
 		return m
 	var lap := i - LESSONS
 	var daily := lap == 0
@@ -180,6 +185,12 @@ static func make(i: int, run_seed: int, friends: int, mode: String = "gentle", d
 	var mroll := r.randf()
 	if not big and lap >= int(mn[0]) and mroll < float(mn[1]):
 		step["extra"] = [MINIS[place], mini(int(mn[2]) + lap / 4, int(mn[3])), maxf(float(mn[4]) - lap, float(mn[5]))]
+	# deep2: the lost toy and the season (their own rng: the rest of the round stays as it was).
+	var season := Seeded.season(date)
+	var tr := Seeded.rng(Seeded.daily_seed("mech_titans", date) if daily else run_seed, "tale%d" % (0 if daily else i))
+	var toy := Tales.pick(tr, season)
+	if not big:
+		variant["hat"] = Tales.hat(season)
 	var hz := Districts.plan(place, {"haz_every": cv["haz_every"], "tell": cv["haz_tell_mult"], "haz_aim": cv["haz_aim"],
 		"haz_count": cv["haz_count"], "dmg": cv["dmg"]})
 	hz["kind"] = String(Districts.info(place)["hazard"])
@@ -187,7 +198,7 @@ static func make(i: int, run_seed: int, friends: int, mode: String = "gentle", d
 		"rescue": 3 + r.randi() % 3, "steps": [step], "star2": ["damage", 100], "star3": ["damage", 100], "brief": [],
 		"hp": hp, "slow": float(cv["slow"]), "calm": float(cv["calm"]), "index": i, "gen": true, "daily": daily, "variant": variant,
 		"mode": mode, "lap": lap, "bigboss": bigboss, "hazard": hz, "tell": float(cv["tell"]), "boss_tell": float(cv["boss_tell"]),
-		"dmg": float(cv["dmg"])}
+		"dmg": float(cv["dmg"]), "season": season, "toy": toy, "toy_seed": tr.randi() % 100000}
 
 
 ## Why a round is not fair (empty = fine). Pure data checks; the city checks are in the test.
@@ -248,6 +259,7 @@ static func check(m: Dictionary, friends: int) -> Array:
 		var words := String(m.get("name", "")).split(" ", false)
 		if words.size() > 2 or String(m.get("name", "")) != String(m.get("name", "")).to_upper():
 			out.append("name '%s' must be one or two capital words (no how-to text)" % str(m.get("name")))
+	out.append_array(Tales.check(m))
 	if int(m.get("rescue", 0)) < 0 or int(m.get("rescue", 0)) > 6:
 		out.append("rescue %d" % int(m.get("rescue", 0)))
 	return out
