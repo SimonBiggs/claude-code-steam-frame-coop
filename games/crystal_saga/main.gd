@@ -1271,6 +1271,8 @@ func _skill_followups(id: int, slot: int, at: Vector3, src: String) -> void:
 	if ice > 0:
 		var rad2 := 1.5 + 0.5 * ice
 		for other2 in monsters.mons.keys():
+			if not monsters.mons.has(other2):  # (a hit above may have poofed it)
+				continue
 			var c2: Vector3 = monsters.center_of(other2)
 			# (Never the giant: one TV hero tapping A would keep him frozen for good, and he'd never stomp.)
 			if c2.distance_to(at) < rad2 and not monsters.frozen(int(other2)) and int(monsters.mons[other2]["kind"]) != Monsters.GIANT:
@@ -1517,6 +1519,8 @@ func cast_thunder(tip: Vector3) -> void:
 	var head := vr_rig.head_position()
 	var pts: Array = [tip]
 	for id in monsters.mons.keys():
+		if not monsters.mons.has(id):  # (an earlier strike's follow-up spells may have poofed it)
+			continue
 		var c: Vector3 = monsters.center_of(id)
 		if Vector2(c.x - head.x, c.z - head.z).length() < 7.5:
 			pts.append(c)
