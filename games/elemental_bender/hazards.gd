@@ -87,6 +87,9 @@ static func tell_time(gentle: bool) -> float:
 func tell(i: int, secs: float) -> void:
 	if i >= 0 and i < _glow.size():
 		_glow[i] = secs
+		# ... and a steady warning disc on the ground over it, like every other tell (the shared WarnRings: bots read it)
+		var v: Dictionary = vents[i]
+		rings.shape("circle", v.p, Vector3.FORWARD, Vector2(float(v.r), 0.0), color(), secs, {"style": "disc", "stay": 0.3, "y": 0.07})
 
 
 ## Every machine: the warning ring of a boss attack (or anything) at `pos`.

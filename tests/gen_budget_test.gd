@@ -124,8 +124,9 @@ func _entries() -> Array:
 		func(s: int) -> Variant:
 			return FloorGen.generate(s, 2 + s % 4, s % FloorGen.FLOORS_PER_ZONE, true, "floor")])
 	# --- elemental_bender: WaveGen.plan(temple_seed, wave, players, fast) each wave.
-	out.append(["elemental_bender", "wavegen.gd", "WaveGen.plan (waves 9..15, 6 players)",
-		func(s: int) -> Variant: return TempleWaves.plan(s, TempleWaves.MAX_WAVE - s % 7, 6, s % 2 == 0)])
+	out.append(["elemental_bender", "wavegen.gd", "WaveGen.plan + Deep.surprises (waves 9..15, 6 players, hard)",
+		func(s: int) -> Variant: return [TempleWaves.plan(s, TempleWaves.MAX_WAVE - s % 7, 6, s % 2 == 0, "temple", "hard"),
+			TempleWaves.Deep.surprises(s, TempleWaves.MAX_WAVE - s % 7, ["temple", "ice", "volcano", "sky"][s % 4], "hard")]])
 	# --- fishing_lake: LakeGen.generate(seed, {level, wish}) each lake.
 	out.append(["fishing_lake", "lakegen.gd", "LakeGen.generate (level 3, wishes)",
 		func(s: int) -> Variant:

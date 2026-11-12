@@ -13,6 +13,7 @@ const UiKit := preload("res://core/ui_kit.gd")
 const World := preload("res://games/elemental_bender/world.gd")
 const WaveGen := preload("res://games/elemental_bender/wavegen.gd")
 const E := preload("res://games/elemental_bender/elem.gd")
+const Deep := preload("res://games/elemental_bender/deep.gd")
 
 const FUR := Color(0.95, 0.52, 0.18)
 const CREAM := Color(1.0, 0.94, 0.84)
@@ -35,6 +36,11 @@ var gate_nodes: Array = []
 var fruit_count := -1
 var stage_shown := -1
 var cheer_t := 0.0
+var outfit: Node3D
+var outfit_season := ""
+var friend_root: Node3D
+var friend_nodes: Array = []  # [Node3D, index]
+var friend_stage := 0
 var t := 0.0
 
 
@@ -43,6 +49,10 @@ func _ready() -> void:
 	add_child(gate_root)
 	keep_root = Node3D.new()
 	add_child(keep_root)
+	friend_root = Node3D.new()
+	friend_root.name = "Friends"
+	friend_root.position = WaveGen.TREE_AT
+	add_child(friend_root)
 	_build_kiko()
 
 
@@ -110,6 +120,11 @@ func update_kiko(delta: float, at: Vector3) -> void:
 	for g in gate_nodes:
 		if is_instance_valid(g):
 			(g as Node3D).rotation.y = t * 1.2
+	for i in friend_nodes.size():
+		var fnode = friend_nodes[i]
+		if is_instance_valid(fnode):
+			fnode.position = Deep.friend_at(i, t, friend_stage)
+			fnode.rotation.y = -t * (0.6 + 0.07 * i)
 
 
 func cheer() -> void:
@@ -152,8 +167,9 @@ func set_gates(points: Array) -> void:
 
 ## waves: waves cleared over all days (the tree's size), fruit: [element of each General beaten] (oldest first),
 ## days: play-days (lanterns), crowned: Kiko's crown.
-func set_keepsakes(waves: int, fruit: Array, days: int, crowned: bool) -> void:
-	var key := "%d|%s|%d|%s" % [waves, str(fruit), days, crowned]
+## bosses: {boss kind: times beaten} (the SPIRIT FRIENDS and spirit houses, deep.gd).
+func set_keepsakes(waves: int, fruit: Array, days: int, crowned: bool, bosses: Dictionary = {}) -> void:
+	var key := "%d|%s|%d|%s|%s" % [waves, str(fruit), days, crowned, str(bosses)]
 	if key == keep_key:
 		return
 	keep_key = key
@@ -185,6 +201,14 @@ func set_keepsakes(waves: int, fruit: Array, days: int, crowned: bool) -> void:
 		b.cylinder(0.08, 0.1, 0.55, MeshKit.at(p + Vector3.UP * 0.47), STONE, 6)
 		b.cylinder(0.0, 0.32, 0.22, MeshKit.at(p + Vector3.UP * 1.08), STONE.darkened(0.15), 6)  # roof
 		b.box(Vector3(0.26, 0.24, 0.26), MeshKit.at(p + Vector3.UP * 0.86), Color(1.0, 0.8, 0.4), true)  # the light
+	var houses := Deep.spirit_houses(bosses) if stage >= 2 else 0
+	for i in houses:
+		var hp := at + Deep.house_at(i, stage)
+		b.cylinder(0.008, 0.008, 0.35, MeshKit.at(hp + Vector3.UP * 0.4), Color(0.45, 0.3, 0.17), 4)  # its string
+		b.box(Vector3(0.3, 0.26, 0.3), MeshKit.at(hp), Color(0.85, 0.62, 0.38))
+		b.cone(0.26, 0.2, MeshKit.at(hp + Vector3.UP * 0.23), Color(0.75, 0.2, 0.18), 4)  # roof
+		b.box(Vector3(0.1, 0.12, 0.02), MeshKit.at(hp + Vector3(0, -0.02, 0.15)), Color(1.0, 0.85, 0.4), true)  # a lit window
+		b.box(Vector3(0.02, 0.12, 0.1), MeshKit.at(hp + Vector3(0.15, -0.02, 0)), Color(1.0, 0.85, 0.4), true)
 	var mi := MeshKit.instance(b.build(), true)
 	mi.name = "Tree"
 	keep_root.add_child(mi)
@@ -201,3 +225,80 @@ func set_keepsakes(waves: int, fruit: Array, days: int, crowned: bool) -> void:
 		main.call("tree_burst", at + Vector3.UP * h)
 	fruit_count = fruit.size()
 	stage_shown = stage
+	_set_friends(Deep.friends(bosses), stage)
+
+
+# --- Spirit friends (deep.gd) ------------------------------------------------------------------
+
+## The freed SPIRIT FRIENDS fly round the Spirit Tree: [[boss kind, level]...].
+func _set_friends(list: Array, stage: int) -> void:
+	friend_stage = stage
+	for n in friend_nodes:
+		if is_instance_valid(n):
+			(n as Node).queue_free()
+	friend_nodes.clear()
+	for i in list.size():
+		var fr := Deep.friend(String(list[i][0]))
+		if fr.is_empty():
+			continue
+		var n := Node3D.new()
+		n.name = "Friend_%s" % String(fr.id)
+		n.scale = Vector3.ONE * (0.8 + 0.25 * int(list[i][1]))
+		n.add_child(MeshKit.instance(friend_mesh(int(fr.element)), false))
+		friend_root.add_child(n)
+		friend_nodes.append(n)
+
+
+## A little element spirit: a glowing round body in its element's colour, two big eyes, and its own bit on top
+## (a pebble cap, a drip, a flame, a puff of cloud).
+static func friend_mesh(e: int) -> ArrayMesh:
+	var b := MeshKit.builder()
+	var col: Color = E.COLORS[clampi(e, 0, 3)]
+	b.sphere(0.22, MeshKit.at(Vector3.ZERO), col, 12, true)
+	for sx in [-0.08, 0.08]:
+		b.sphere(0.06, MeshKit.at(Vector3(sx, 0.04, -0.18)), Color(1, 1, 1), 8)
+		b.sphere(0.035, MeshKit.at(Vector3(sx, 0.04, -0.23)), DARK, 6)
+	match e:
+		E.EARTH:
+			b.sphere(0.14, MeshKit.at(Vector3(0, 0.2, 0), Vector3(1.4, 0.6, 1.2)), Color(0.5, 0.38, 0.25), 8)
+		E.WATER:
+			b.cone(0.1, 0.22, MeshKit.at(Vector3(0, 0.27, 0)), col.lightened(0.3), 8, true)
+		E.FIRE:
+			for k in 3:
+				b.cone(0.06, 0.2, MeshKit.at(Vector3(-0.08 + k * 0.08, 0.24 + (0.05 if k == 1 else 0.0), 0)), Color(1.0, 0.8, 0.2), 6, true)
+		_:
+			for k in 3:
+				b.sphere(0.09, MeshKit.at(Vector3(-0.1 + k * 0.1, 0.2, 0.02)), Color(1, 1, 1), 8)
+	return b.build()
+
+
+# --- Kiko's seasonal outfit (deep.gd SEASONS) ---------------------------------------------------
+
+## spring: a flower behind her ear, summer: a straw sun hat, autumn: a leaf on her head, winter: a red scarf.
+func set_season(s: String) -> void:
+	if s == outfit_season:
+		return
+	outfit_season = s
+	if outfit != null and is_instance_valid(outfit):
+		outfit.queue_free()
+	var b := MeshKit.builder()
+	var parent: Node3D = head
+	match s:
+		"spring":
+			for k in 5:
+				var a := k * TAU / 5.0
+				b.sphere(0.045, MeshKit.at(Vector3(0.2 + cos(a) * 0.05, 0.16 + sin(a) * 0.05, 0.02)), Color(1.0, 0.55, 0.75), 6)
+			b.sphere(0.035, MeshKit.at(Vector3(0.2, 0.16, 0.0)), Color(1.0, 0.9, 0.3), 6)
+		"summer":
+			b.cylinder(0.3, 0.3, 0.025, MeshKit.at(Vector3(0, 0.17, 0.02)), Color(0.95, 0.82, 0.45), 14)
+			b.cylinder(0.13, 0.15, 0.12, MeshKit.at(Vector3(0, 0.24, 0.02)), Color(0.95, 0.82, 0.45), 12)
+			b.cylinder(0.152, 0.152, 0.035, MeshKit.at(Vector3(0, 0.2, 0.02)), Color(0.9, 0.25, 0.3), 12)
+		"autumn":
+			b.ellipsoid(Vector3(0.08, 0.02, 0.13), MeshKit.at(Vector3(-0.05, 0.22, 0.02), Vector3.ONE, Vector3(0.2, 0.6, 0.3)), Color(0.9, 0.4, 0.1), 8)
+		_:
+			parent = kiko
+			b.cylinder(0.2, 0.22, 0.09, MeshKit.at(Vector3(0, 0.52, -0.03)), Color(0.85, 0.15, 0.2), 12)
+			b.box(Vector3(0.08, 0.22, 0.03), MeshKit.at(Vector3(0.1, 0.4, -0.2), Vector3.ONE, Vector3(0.2, 0, 0.15)), Color(0.85, 0.15, 0.2))
+	outfit = MeshKit.instance(b.build(), false)
+	outfit.name = "Outfit_%s" % s
+	parent.add_child(outfit)

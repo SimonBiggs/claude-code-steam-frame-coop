@@ -33,6 +33,10 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "bender-friends", "date": "2026-11-12", "game": "elemental_bender", "pic": "ember", "line": "Free Kiko's spirit friends!"},
+	{"id": "bender-surprises", "date": "2026-11-12", "game": "elemental_bender", "pic": "rockrain", "line": "Watch the glowing ground!", "try": {"EB_SURPRISE": "1"}},
+	{"id": "bender-modes", "date": "2026-11-12", "game": "elemental_bender", "pic": "kiko", "line": "Gentle, brave or hard!"},
+	{"id": "bender-seasons", "date": "2026-11-12", "game": "elemental_bender", "pic": "snowman", "line": "Seasons on the islands!"},
 	{"id": "kart-gifts", "date": "2026-11-12", "game": "kart_race", "pic": "boxmagnet", "line": "Bolt's gifts at the pit!", "try": {"KART_PIT": "1"}},
 	{"id": "kart-surprises", "date": "2026-11-12", "game": "kart_race", "pic": "gumball", "line": "Watch out for the circle!", "try": {"KART_PIT": "1", "KART_SURPRISE": "1"}},
 	{"id": "kart-town", "date": "2026-11-12", "game": "kart_race", "pic": "racetown", "line": "Bolt's race town grows!"},

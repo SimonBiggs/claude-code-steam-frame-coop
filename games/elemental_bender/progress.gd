@@ -6,6 +6,7 @@ const SAVE_ID := "elemental_bender"  # the game's core/save.gd game_id
 const WHO := "kiko"  # the story friend (a story picture): Kiko the temple fox
 const GROWS := "spirittree"  # what the family grows (a story picture or a UiKit icon): the Spirit Tree
 const COLOR := Color(1.0, 0.85, 0.3)
+const Deep := preload("res://games/elemental_bender/deep.gd")
 
 
 ## data: the raw save (no defaults filled in: always .get with a default). today: Seeded.today().
@@ -14,7 +15,8 @@ const COLOR := Color(1.0, 0.85, 0.3)
 ## says it started, so the next round isn't the daily).
 static func progress_summary(data: Dictionary, today: String) -> Dictionary:
 	var islands: Variant = data.get("islands", [])
-	return {"grown": maxi(0, int(data.get("waves", 0))) + maxi(0, int(data.get("generals", 0))),
+	var bosses: Variant = data.get("bosses", {})
+	return {"friends": Deep.friends(bosses if bosses is Dictionary else {}).size(),"grown": maxi(0, int(data.get("waves", 0))) + maxi(0, int(data.get("generals", 0))),
 		"islands": (islands as Array).size() if islands is Array else 0, "daily": String(data.get("daily_done", "")) == today,
 		"played": String(data.get("last_day", "")) == today}
 

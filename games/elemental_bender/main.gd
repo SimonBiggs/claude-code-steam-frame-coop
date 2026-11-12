@@ -39,6 +39,13 @@ extends Node3D
 ## {slot: {m, b}}; events "warn", "stomp", "vent", "plume"; raider flags carry the boss kind, tell and power-up.
 ## EB_FAST=1: short practice, small waves (tests). EB_SEED=n: play temple seed n. EB_ARENA=ice|volcano|sky: the run
 ## starts on that island (What's New "try"). EB_GENTLE=1: bosses and hazards always gentle.
+## SECOND PASS (deep.gd, season.gd): after practice the team picks GENTLE / BRAVE / HARD on the altar stones (saved,
+## net state "mode"); from wave 3 Kiko's island SURPRISES (falling rocks / big wave, icicles / avalanche, lava bombs /
+## lava flow, lightning / big gust) are told by steady warning discs before they go off (events "surp", "surp_go");
+## every boss holds a SPIRIT FRIEND (Pebble, Drip, Ember, Puff) who is freed and flies round the Spirit Tree for good,
+## with spirit houses lighting up in it; the season (SeasonKit override) dresses every island and Kiko. The "temple"
+## event carries [.., bosses, season]. EB_MODE=gentle|brave|hard forces the mode, EB_SURPRISE=1 brings surprises
+## from wave 1 (What's New "try", bots).
 
 const NetScript := preload("res://core/net.gd")
 const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")
@@ -78,6 +85,9 @@ const Boons := preload("res://games/elemental_bender/boons.gd")
 const Altar := preload("res://games/elemental_bender/altar.gd")
 const PickOrbs := preload("res://core/pick_orbs.gd")
 const Hazards := preload("res://games/elemental_bender/hazards.gd")
+const Deep := preload("res://games/elemental_bender/deep.gd")
+const SeasonDress := preload("res://games/elemental_bender/season.gd")
+const WarnRings := preload("res://core/warn_rings.gd")
 
 const GAME_ID := "elemental_bender"
 const MAX_ALIVE := 14
@@ -206,6 +216,22 @@ var log_bosses := {}
 var log_tells := 0
 var log_vents := 0
 var log_phase2 := 0
+# Second pass (deep.gd): the team's mode, Kiko's warned island surprises, spirit friends, seasons.
+var team_mode := "brave"  ## host: GENTLE / BRAVE / HARD (net state "mode")
+var mode_picks := {}  ## host: slot -> mode id taken on the altar
+var surprise_plan: Array = []
+var surprise_i := 0
+var surprise_told := -1.0  ## wave_t when the coming surprise was told (-1: not yet)
+var season := ""
+var season_dress: SeasonDress
+var seen_tricks := {}
+var log_surprises := 0
+var log_surprise_hits := 0
+var log_untold := 0  ## surprises that went off without their full warning (must stay 0: the bot checks)
+var log_mode := ""
+var log_friends := 0
+var _clock := 0.0  ## every machine: game seconds (the surprise warning check)
+var _told_at := {}  ## kind -> [_clock when told, its warning seconds]
 
 
 ## The practice dummy (visual on every machine; the host decides when it pops).
@@ -246,7 +272,7 @@ func _ready() -> void:
 	# days: play-days (lanterns), last_day, daily: the date TODAY'S RAIDERS ran, waves: waves cleared over all days
 	# (the Spirit Tree), fruit: the element of every General beaten (oldest first), generals: how many.
 	save.defaults = {"best_wave": 0, "best_score": 0, "days": 0, "last_day": "", "daily": "", "daily_done": "", "games": 0, "waves": 0,
-		"fruit": [], "generals": 0, "best_today": [], "raiders": 0, "bosses": {}, "islands": []}
+		"fruit": [], "generals": 0, "best_today": [], "raiders": 0, "bosses": {}, "islands": [], "mode": "brave"}
 	add_child(save)
 	net.sticky_event("gates")  # a machine that joins later gets the coming wave's portals (core/net.gd)
 	net.sticky_event("temple")  # ... and the Spirit Tree, lanterns and Kiko's crown
@@ -402,9 +428,8 @@ func _start_breather(after_wave: bool) -> void:
 		var open := Boons.unlocked_boons(int(save.data.waves), int(save.data.generals))
 		_open_pick("boon", Boons.offer(temple_seed, wave, open))
 	else:
-		var masters := Boons.unlocked_masters(int(save.data.waves), int(save.data.generals))
-		if masters.size() >= 2 and perks.is_empty():
-			_open_pick("master", masters)
+		mode_picks = {}
+		_open_pick("mode", PickOrbs.mode_ids(Deep.mode_id(String(save.data.get("mode", "brave")))))
 
 
 func _start_wave() -> void:
@@ -414,8 +439,9 @@ func _start_wave() -> void:
 	net.state_set("wave", wave)
 	var n := maxi(1, fighters(true).size())
 	_close_pick()
-	wave_plan = WaveGen.plan(temple_seed, wave, n, fast, arena)
-	boss_gentle = OS.has_environment("EB_GENTLE") or log_downs >= 2 * n or (n == 1 and log_downs >= 1)
+	wave_plan = WaveGen.plan(temple_seed, wave, n, fast, arena, team_mode)
+	boss_gentle = OS.has_environment("EB_GENTLE") or bool(Deep.mode(team_mode).kind_boss) or log_downs >= 2 * n or (n == 1 and log_downs >= 1)
+	_plan_surprises()
 	_send_gates(wave)
 	var spawns: Array = wave_plan.spawns
 	spawn_i = 0
@@ -494,6 +520,9 @@ func _restart() -> void:
 	score = 0
 	kills = 0
 	spirit = 0.0
+	surprise_plan = []
+	surprise_i = 0
+	surprise_told = -1.0
 	awards.reset()
 	for f in fighters(false):
 		f.set("hp", float(f.get("max_hp")))
@@ -520,6 +549,7 @@ func _host_step(delta: float) -> void:
 			_practice_step(delta)
 		"breather":
 			_pick_step(delta)
+			_surprise_step(false)  # (one told before the wave ended still goes off: never a warning for nothing)
 			if phase_t > (1.5 if fast else 4.0) and not alive.is_empty() and not altar.showing():
 				_start_wave()
 		"fight":
@@ -536,6 +566,7 @@ func _host_step(delta: float) -> void:
 			if not everyone.is_empty() and alive.is_empty():
 				_game_over()
 			hazards.host_step(delta, true, boss_gentle)
+			_surprise_step(true)
 		"over":
 			if phase_t > 3.0:
 				_show_results_now()
@@ -650,8 +681,8 @@ func _spawn_raider(item: Array, is_boss: bool) -> void:
 	if is_boss:
 		r.boss_kind = String(wave_plan.get("boss_kind", "general"))
 		r.gentle = boss_gentle
-	r.max_hp = WaveGen.raider_hp(wave, n, is_boss) * (0.5 if fast else 1.0)
-	r.speed = WaveGen.raider_speed(wave, is_boss)
+	r.max_hp = WaveGen.raider_hp(wave, n, is_boss) * (0.5 if fast else 1.0) * float(wave_plan.get("hp", 1.0))
+	r.speed = WaveGen.raider_speed(wave, is_boss) * float(wave_plan.get("speed", 1.0))
 	r.damage = (18.0 + wave) if is_boss else (8.0 + wave * 0.8)
 	if is_boss:
 		r.swap_order = wave_plan.get("boss_order", [])
@@ -803,9 +834,11 @@ func on_raider_died(r: Raider, ring_out: bool) -> void:
 	if r.boss:
 		announce("THE %s IS DEFEATED!" % String(Bosses.info(r.boss_kind).name), "", "victory")
 		var bs: Dictionary = save.data.bosses if save.data.bosses is Dictionary else {}
+		var first_time := int(bs.get(r.boss_kind, 0)) == 0
 		bs[r.boss_kind] = int(bs.get(r.boss_kind, 0)) + 1
 		save.data.bosses = bs
 		_general_beaten(r.element)
+		_friend_freed(r.boss_kind, first_time)
 	elif save != null and net.mode != "client":
 		save.data.raiders = int(save.data.raiders) + 1
 
@@ -1209,6 +1242,7 @@ func on_remote_state(slot: int, pos: Vector3, yaw: float, _pitch: float) -> void
 func _process(delta: float) -> void:
 	if not ready_to_play:
 		return
+	_clock += delta
 	_sync_benders()
 	var playing := phase() != "results" and phase() != "over"
 	for s in benders:
@@ -1713,6 +1747,10 @@ func apply_event(kind: String, args: Array) -> void:
 			plume_fx(int(args[0]))
 		"temple":
 			_show_temple(args)
+		"surp":
+			_surprise_tell_fx(String(args[0]), args[1], float(args[2]), String(args[3]))
+		"surp_go":
+			_surprise_go_fx(String(args[0]), args[1], String(args[2]))
 
 
 func on_client_joined() -> void:
@@ -1757,6 +1795,11 @@ func _start_temple(first: bool) -> void:
 	perks = {}
 	run_picks = []
 	net.state_set("perks", {})
+	season = Deep.season()
+	surprise_plan = []
+	surprise_i = 0
+	surprise_told = -1.0
+	seen_tricks = {}
 	_send_temple()
 	arena_seg = -1
 	_enter_arena(0)
@@ -1767,10 +1810,13 @@ func _start_temple(first: bool) -> void:
 		if not Engine.has_meta("eb_said_hi"):
 			Engine.set_meta("eb_said_hi", true)  # (once per session)
 			_story_for_all("Hi! I'm Kiko! Save my temple!", "kiko", KIKO_COLOR)
+			var sd := Deep.season_data(season)
+			_story_for_all(String(sd.line), String(sd.pic), sd.drift)
 		if new_day and int(save.data.days) > 1:
 			_story_for_all("A new lantern!", "lantern", Color(1.0, 0.8, 0.35))
 	if temple_daily:
 		_story_for_all("TODAY'S RAIDERS!", "portal", Color(0.75, 0.5, 1.0))
+	_friend_story(arena)
 
 
 ## Host / local: the portals of wave n open on every machine (sticky: late machines get them too).
@@ -1788,7 +1834,7 @@ func _show_gates(seed_value: int, n: int, island: String = "temple") -> void:
 ## Host / local: the Spirit Tree, lanterns and Kiko's crown on every machine (sticky).
 func _send_temple() -> void:
 	var d := [int(save.data.waves), (save.data.fruit as Array).duplicate(), int(save.data.days),
-		int(save.data.generals) >= WaveGen.CROWN_GENERALS]
+		int(save.data.generals) >= WaveGen.CROWN_GENERALS, (save.data.bosses as Dictionary).duplicate() if save.data.bosses is Dictionary else {}, season]
 	_show_temple(d)
 	if net.mode == "host":
 		net.event("temple", d)
@@ -1796,7 +1842,11 @@ func _send_temple() -> void:
 
 func _show_temple(d: Array) -> void:
 	if d.size() >= 4:
-		temple_story.set_keepsakes(int(d[0]), d[1], int(d[2]), bool(d[3]))
+		temple_story.set_keepsakes(int(d[0]), d[1], int(d[2]), bool(d[3]), d[4] if d.size() > 4 and d[4] is Dictionary else {})
+	if d.size() > 5 and String(d[5]) != "":
+		season = String(d[5])
+		temple_story.set_season(season)
+		_dress_season()
 
 
 ## A glowing burst where the tree grew or a fruit appeared (every machine, from temple_story.gd).
@@ -1932,7 +1982,8 @@ func _log_run(end: String) -> void:
 		"fruit": (save.data.fruit as Array).size(), "days": int(save.data.days), "counters": log_counters,
 		"spirits": log_spirits, "ring_outs": log_ring_outs, "arena": arena, "boss": String(wave_plan.get("boss_kind", "")),
 		"gentle": boss_gentle, "masters": _masters_list(), "picks": run_picks.duplicate(), "islands": log_arenas.keys(),
-		"tells": log_tells, "vents": log_vents})
+		"tells": log_tells, "vents": log_vents, "mode": team_mode, "season": season, "surprises": log_surprises,
+		"surprise_hits": log_surprise_hits, "friends": Deep.friends(save.data.bosses if save.data.bosses is Dictionary else {}).size()})
 
 
 # --- Islands, the altar (masters + gifts), bosses and hazards ------------------------------------
@@ -1965,6 +2016,8 @@ func _enter_arena(seg: int) -> void:
 	_show_arena(id, temple_seed)
 	if net.mode == "host":
 		net.event("arena", [id, temple_seed, seg])
+	if seg > 0:
+		_friend_story(id)  # (the first island's comes after Kiko's hello: _start_temple)
 
 
 ## Every machine: build island `id` (the props and vents come from the temple seed), its sky and hazard.
@@ -1991,6 +2044,7 @@ func _show_arena(id: String, seed_value: int) -> void:
 	hazards.setup(world.lay, String(info.hazard))
 	if sky != null:
 		sky.set_preset(String(info.sky), 1.5)
+	_dress_season()
 	if moved:
 		fx.ring(Vector3(0, World.DAIS_TOP, 0), Color(0.75, 0.5, 1.0), 14.0, 0.8)
 		sfx.play("warp", -4.0, 0.8)
@@ -2042,6 +2096,8 @@ func _pick_step(delta: float) -> void:
 		done = true
 	if done and pick_t > 0.6:
 		_close_pick()
+		if String(d.get("kind", "")) == "mode":
+			_mode_chosen()
 
 
 ## Host / local: `slot` takes stone `idx` of the altar showing (once per altar).
@@ -2053,6 +2109,14 @@ func _altar_pick(slot: int, idx: int) -> void:
 	pick_taken[slot] = idx
 	var kind := String(d.get("kind", "boon"))
 	var id := String(ids[idx])
+	if kind == "mode":
+		mode_picks[slot] = id
+		net.state_set("taken", pick_taken)
+		var fm := fighter_of(slot)
+		fx.burst((fm as Node3D).global_position + Vector3.UP, PickOrbs.mode_color(id), 16, 3.0, 0.3, 0.6)
+		sound_all("power_up", (fm as Node3D).global_position, -4.0, 1.2)
+		_note(slot, "%s!" % PickOrbs.mode_name(id))
+		return
 	var p: Dictionary = (perks.get(slot, {}) as Dictionary).duplicate(true)
 	if kind == "master":
 		p["m"] = id
@@ -2081,7 +2145,9 @@ func _pick_hint(kind: String) -> void:
 	_pick_hints += 1
 	if kind == "boon" and _pick_hints > 2:
 		return  # (the glowing stones speak for themselves after the first time)
-	if kind == "master":
+	if kind == "mode":
+		story_queue.push_front(["Easy or hard?", "star", Color(0.35, 0.75, 1.0)])  # (first: the stones are up now)
+	elif kind == "master":
 		_story("Pick your master!", "kiko", KIKO_COLOR)
 	else:
 		_story("Pick a gift!", "giftstone", Color(1.0, 0.85, 0.35))
@@ -2263,3 +2329,199 @@ func _update_perk_labels() -> void:
 		var n := (p.get("b", []) as Array).size()
 		l.text = ("%s MASTER" % Boons.pick_name("master", m) if m != "" else "") + ("  +%d GIFTS" % n if n > 0 else "")
 		l.add_theme_color_override("font_color", Boons.pick_color("master", m) if m != "" else Color(1.0, 0.85, 0.35))
+
+
+# --- Second pass: the team's mode, Kiko's island surprises, spirit friends, seasons (deep.gd) -----------
+
+## Host / local: the mode stones closed: the team's mode (most picked; a tie stays gentler), then the masters.
+func _mode_chosen() -> void:
+	team_mode = Deep.team_mode(mode_picks, String(save.data.get("mode", "brave")))
+	if OS.has_environment("EB_MODE"):
+		team_mode = Deep.mode_id(OS.get_environment("EB_MODE"))
+	log_mode = team_mode
+	save.data["mode"] = team_mode
+	save.mark_dirty()
+	net.state_set("mode", team_mode)
+	var pm := PickOrbs.mode(team_mode)
+	_story_for_all(String(PickOrbs.MODE_LINES.get(team_mode, "Let's go!")), String(pm.get("pic", "star")), PickOrbs.mode_color(team_mode))
+	print("Elemental Bender: mode %s (picks %s)" % [team_mode, str(mode_picks)])
+	var masters := Boons.unlocked_masters(int(save.data.waves), int(save.data.generals))
+	if masters.size() >= 2 and perks.is_empty():
+		_open_pick("master", masters)
+
+
+## Host / local, as a wave starts: its surprises (deep.gd), and Kiko's warning the first time a trick comes.
+func _plan_surprises() -> void:
+	surprise_plan = [] if fast and not OS.has_environment("EB_SURPRISE") else Deep.surprises(temple_seed, wave, arena, team_mode)
+	if OS.has_environment("EB_SURPRISE") and not WaveGen.is_boss(wave):  # (What's New "try" / bots: from wave 1, soon)
+		if surprise_plan.is_empty():
+			surprise_plan = Deep.surprises(temple_seed, 3, arena, team_mode)
+		for i in surprise_plan.size():
+			surprise_plan[i]["at"] = (1.0 if fast else 4.0) + i * (float(surprise_plan[i].tell) + (2.0 if fast else Deep.GAP))
+	surprise_i = 0
+	surprise_told = -1.0
+	for s in surprise_plan:
+		var k := String(s.kind)
+		if not seen_tricks.has(arena + k):
+			seen_tricks[arena + k] = true
+			var tr := Deep.trick(arena, k)
+			_story_for_all("%s! Watch the %s!" % [String(tr.name).capitalize(), "circles" if k == "rain" else "glow"], String(tr.pic), tr.color)
+
+
+## Host / local: tell the coming surprise when its time comes, set it off after its warning. `fighting`: new tells
+## only while a wave fights (one already told still goes off in the breather).
+func _surprise_step(fighting: bool) -> void:
+	if surprise_i >= surprise_plan.size():
+		return
+	var s: Dictionary = surprise_plan[surprise_i]
+	if surprise_told < 0.0:
+		if fighting and wave_t >= float(s.at):
+			surprise_told = wave_t
+			_surprise_tell_fx(String(s.kind), s.shapes, float(s.tell), arena)
+			if net.mode == "host":
+				net.event("surp", [String(s.kind), s.shapes, float(s.tell), arena])
+		elif not fighting:
+			surprise_i = surprise_plan.size()  # (the wave ended before this one was told: it never comes)
+		return
+	if wave_t - surprise_told < float(s.tell):  # (wave_t keeps running in the breather)
+		return
+	_surprise_go(s)
+	surprise_i += 1
+	surprise_told = -1.0
+
+
+## Every machine: the steady warning on the ground (the shared WarnRings), a sound and a banner.
+func _surprise_tell_fx(kind: String, shapes: Array, secs: float, island: String) -> void:
+	var tr := Deep.trick(island, kind)
+	var col: Color = tr.color
+	log_surprises += 1
+	_told_at[kind] = [_clock, secs]
+	for sh in shapes:
+		hazards.rings.shape(String(sh[0]), sh[1], sh[2], sh[3], col, secs,
+			{"style": "disc", "stay": 0.35, "hot": col.lightened(0.35), "y": 0.09, "alpha": 0.4})
+		sfx.play_at("magic", sh[1], -6.0, 0.7)
+	_banner_local(String(tr.name), "MOVE!", "info")
+	if vr_rig != null:
+		_vr_headline(String(tr.name), "MOVE!", {"duration": minf(secs, 2.5), "color": col, "sound": ""})
+
+
+## Host / local: the surprise goes off: benders inside get a small bump (a rain hit / a push home), raiders inside
+## are hurt (rain) or swept to the sea (a ring-out!).
+func _surprise_go(s: Dictionary) -> void:
+	var kind := String(s.kind)
+	var dmg := Deep.damage(kind, team_mode)
+	for f in fighters(true):
+		var n: Node3D = f
+		if not Deep.inside(s, n.global_position):
+			continue
+		var push := Vector3.ZERO
+		if kind == "rain":
+			var c: Vector3 = _nearest_shape(s, n.global_position)
+			var away := n.global_position - c
+			away.y = 0.0
+			push = (away.normalized() if away.length() > 0.2 else Vector3.FORWARD) * 7.0 + Vector3.UP * 4.0
+		else:
+			var home := -Vector3(n.global_position.x, 0.0, n.global_position.z)
+			push = home.normalized() * 6.0 + Vector3.UP * 3.0
+		hurt_fighter(n, dmg, push)
+	for r in raiders.values():
+		var rr: Raider = r
+		if not is_instance_valid(rr) or rr.dead or not Deep.inside(s, rr.global_position, 0.3):
+			continue
+		if kind == "rain":
+			rr.take_hit(Deep.RAIDER_DMG, -1, Vector3.UP * 3.0, "", -1)
+		else:
+			rr.take_hit(Deep.RAIDER_DMG * 0.4, -1, Deep.sweep_out(s.shapes[0], rr.global_position) * Deep.SWEEP_PUSH * (0.6 if rr.boss else 1.5) + Vector3.UP * 5.0, "", -1)
+	_surprise_go_fx(kind, s.shapes, arena)
+	if net.mode == "host":
+		net.event("surp_go", [kind, s.shapes, arena])
+
+
+func _nearest_shape(s: Dictionary, p: Vector3) -> Vector3:
+	var best := Vector3.ZERO
+	var bd := INF
+	for sh in s.shapes:
+		var c: Vector3 = sh[1]
+		if p.distance_to(c) < bd:
+			bd = p.distance_to(c)
+			best = c
+	return best
+
+
+## Every machine: what the surprise looks like going off (rocks / icicles / lava bombs / lightning dropping into the
+## circles; a wave / avalanche / lava flow / gust rolling along the band).
+func _surprise_go_fx(kind: String, shapes: Array, island: String) -> void:
+	var tr := Deep.trick(island, kind)
+	var col: Color = tr.color
+	log_surprise_hits += 1
+	# Every machine checks it really saw the whole warning first (the bot fails log_untold > 0).
+	var told: Array = _told_at.get(kind, [-INF, 0.0])
+	if _clock - float(told[0]) < float(told[1]) - 0.25:
+		log_untold += 1
+		print("SURPRISE WARNING: %s went off %.2f s after its tell (wanted %.1f)" % [kind, _clock - float(told[0]), float(told[1])])
+	_told_at.erase(kind)
+	for sh in shapes:
+		var at: Vector3 = sh[1]
+		if String(sh[0]) == "circle":
+			var r := float((sh[3] as Vector2).x)
+			for k in 6:
+				var a := k * TAU / 6.0
+				fx.puff(at + Vector3(cos(a) * r * 0.5, 7.0 + k * 0.4, sin(a) * r * 0.5), col, 0.45, 0.5, Vector3(0, -16.0, 0))
+			fx.ring(at + Vector3.UP * 0.1, col, r, 0.5)
+			fx.burst(at + Vector3.UP * 0.3, col, 14, 4.0, 0.3, 0.6)
+		else:
+			var dir: Vector3 = sh[2]
+			var size: Vector2 = sh[3]
+			var steps := 10
+			for k in steps:
+				var p := at + dir * (size.x * (k + 0.5) / steps)
+				fx.puff(p + Vector3.UP * 0.6, col, 0.9, 0.9, dir * 9.0 + Vector3.UP * 2.0)
+		sfx.play_at(String(tr.snd), at, -2.0, 0.9)
+	for s in cams:
+		(cams[s] as CameraRig).shake(0.35)
+	vr_shake(0.3)
+
+
+## Host / local: the first time a boss falls its SPIRIT FRIEND is free (and lives round the Spirit Tree for good).
+func _friend_freed(boss_kind: String, first_time: bool) -> void:
+	var fr := Deep.friend(boss_kind)
+	if fr.is_empty():
+		return
+	var col: Color = E.COLORS[int(fr.element)]
+	if first_time:
+		log_friends += 1
+		_story_for_all("You freed %s!" % String(fr.name).capitalize(), String(fr.pic), col)
+		_story_for_all("%s lives by the tree now!" % String(fr.name).capitalize(), "spirittree", col)
+	else:
+		_story_for_all("%s grows!" % String(fr.name).capitalize(), String(fr.pic), col)
+
+
+## Host / local, arriving on an island: Kiko tells whose friend its boss holds (or that the friend is home).
+func _friend_story(id: String) -> void:
+	var bk := String(Arenas.info(id).boss)
+	var fr := Deep.friend(bk)
+	if fr.is_empty():
+		return
+	var bs: Dictionary = save.data.bosses if save.data.bosses is Dictionary else {}
+	var freed := int(bs.get(bk, 0)) > 0
+	if id == "temple":  # (home: only until Pebble is free, once a session)
+		if freed or Engine.has_meta("eb_friend_told"):
+			return
+		Engine.set_meta("eb_friend_told", true)
+	var col: Color = E.COLORS[int(fr.element)]
+	var bi := Bosses.info(bk)
+	if not freed:
+		_story_for_all("%s is trapped! Beat the %s!" % [String(fr.name).capitalize(), String(bi.name).capitalize()], String(fr.pic), col)
+	elif id != "temple":
+		_story_for_all("%s shows the way!" % String(fr.name).capitalize(), String(fr.pic), col)
+
+
+## Every machine: the season's props round this island's beach and its drift (season.gd).
+func _dress_season() -> void:
+	if season == "" or world == null or not is_instance_valid(world):
+		return
+	if season_dress == null or not is_instance_valid(season_dress):
+		season_dress = SeasonDress.new()
+		season_dress.name = "Season"
+		add_child(season_dress)
+	season_dress.dress(season, world.lay)
