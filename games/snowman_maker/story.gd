@@ -61,7 +61,7 @@ static func chapter(c: int) -> Dictionary:
 ## The save's default data (core/save.gd fills missing keys from this, so old saves just gain them).
 static func save_defaults() -> Dictionary:
 	return {"best": 0, "chapter": 0, "day": 0, "stars": {}, "misses": 0, "laps": 0, "daily": {},
-		"days": 0, "extra_flakes": 0, "made": 0, "wishes": 0}
+		"days": 0, "extra_flakes": 0, "made": 0, "wishes": 0, "mode": "", "last_gift": ""}
 
 
 ## Total stars ever earned (each story day counts its best) plus bonus-day stars.

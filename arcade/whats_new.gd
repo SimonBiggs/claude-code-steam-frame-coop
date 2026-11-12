@@ -33,6 +33,11 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "sm-gifts", "date": "2026-11-12", "game": "snowman_maker", "pic": "tophat", "line": "Tumble's snowman gifts!", "try": {"SM_GIFT": "hat"}},
+	{"id": "sm-surprises", "date": "2026-11-12", "game": "snowman_maker", "pic": "sunbeam", "line": "Sunbeams and snow slides!", "try": {"SM_SURPRISES_NOW": "1"}},
+	{"id": "sm-modes", "date": "2026-11-12", "game": "snowman_maker", "pic": "penguin", "line": "Gentle, brave or hard!"},
+	{"id": "sm-town", "date": "2026-11-12", "game": "snowman_maker", "pic": "igloo", "line": "Tumble's snow town grows!"},
+	{"id": "sm-globe", "date": "2026-11-12", "game": "snowman_maker", "pic": "snowglobe", "line": "A magic snow globe!", "try": {"SM_SEASON": "summer"}},
 	{"id": "fc-gifts", "date": "2026-11-12", "game": "fruit_catch", "pic": "bigbasket", "line": "Nutmeg's basket gifts!", "try": {"FC_GIFT": "magnet"}},
 	{"id": "fc-surprises", "date": "2026-11-12", "game": "fruit_catch", "pic": "wasp", "line": "Windfalls and wasps! Look!", "try": {"FC_SURPRISES_NOW": "1"}},
 	{"id": "fc-modes", "date": "2026-11-12", "game": "fruit_catch", "pic": "squirrel", "line": "Gentle, brave or hard!"},

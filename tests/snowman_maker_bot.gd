@@ -6,6 +6,9 @@ extends Node
 ## Networked: DUO_PORT=81xx DUO_HOST=1 ... & DUO_PORT=81xx DUO_JOIN=127.0.0.1 ... (same scene, real time)
 ## Flat host: add DUO_FLAT_HOST=1 to the host (no VR: one bot pad plays slot 0 on the host).
 ## BOT_CHAPTER=n plays chapter n's garden (pines 1+, ice 2+, drifts 3+, crowns 4; 5 = mixed).
+## Second pass (games/snowman_maker/deep.gd): the TV players walk under a pick orb (the mode pick before day 1, Tumble's
+## gift pick before day 2); a VR builder alone reaches into one and holds it there. Surprises start at 3 s from day 1
+## (main.bot_surprises): the TV players step out of a sunbeam's circle and off a slide's band while it is told.
 
 const BotKit := preload("res://tests/bot_kit.gd")
 const Snowman := preload("res://games/snowman_maker/snowman.gd")
@@ -18,6 +21,8 @@ var vr_task := ""
 var vr_target := Vector3.ZERO
 var vr_wait := 0.0
 var vr_placed := 0  ## balls / carrots / hats the fake VR builder put on a snowman
+var deep := {}  # second-pass things seen (picks, surprises, season, town)
+var pick_t := 0.0
 
 
 func _ready() -> void:
@@ -27,6 +32,7 @@ func _ready() -> void:
 	main = load("res://games/snowman_maker/main.tscn").instantiate()
 	var rt := float(OS.get_environment("BOT_ROUND")) if OS.has_environment("BOT_ROUND") else 26.0  # BOT_ROUND=150: a real day
 	main.set("round_time", rt)
+	main.set("bot_surprises", true)
 	if OS.has_environment("BOT_CHAPTER"):
 		main.set("force_chapter", int(OS.get_environment("BOT_CHAPTER")))
 	add_child(main)
@@ -49,23 +55,43 @@ func _ready() -> void:
 		kit.at(t0 + 9.2, "resumed?", func() -> void:
 			kit.assert_true(not get_tree().paused, "Start again resumes")
 			kit.allow_pause = false)
-	if want > 0:
+	if want > 0 and not OS.has_environment("BOT_LATE"):  # (a late joiner's drop-in would still sit at the host's seat count)
 		kit.drop_in_out(main.party, t0 + 11.0, 3.0, func(slot: int) -> bool:
 			return main.avatars.has(slot) and main.huds.has(slot) and main.cams.has(slot))
 	if host:
-		kit.at(rt + 3.0, "host checks (the TV machine is still connected)", _checks)
-		var end := float(OS.get_environment("BOT_HOST_END")) if OS.has_environment("BOT_HOST_END") else rt + 9.0  # late-join tests
+		# (the mode pick before day 1 and Tumble's gift pick before day 2 take a few seconds each)
+		kit.at(rt + 14.0, "host checks (the TV machine is still connected)", _checks)
+		var end := float(OS.get_environment("BOT_HOST_END")) if OS.has_environment("BOT_HOST_END") else rt + 20.0  # late-join tests
 		kit.at(end, "finish", kit.finish)
 	else:
-		kit.at(rt + (5.0 if client else 10.0), "finish", func() -> void:
+		var fin := rt + 16.0
+		if OS.has_environment("BOT_LATE"):  # a machine joining a game already running leaves before the host does
+			fin = maxf(t0 + 14.0, rt + 20.0 - float(OS.get_environment("BOT_LATE")) - 4.0)
+		kit.at(fin, "finish", func() -> void:
 			_checks()
 			kit.finish())
 	kit.every(2.0, _report)
+	kit.every(0.2, _watch_deep)
 	kit.every(0.5, _continue_results)
 	kit.every(0.5, func() -> String:
 		if main.vr_rig != null and main.results_showing():
 			kit.vr_trigger(main.vr_rig, 0.0 if main.vr_rig.fake_trigger > 0.5 else 1.0)
 		return "")
+
+
+func _watch_deep() -> String:
+	if main.picks != null and main.picks.showing():
+		deep["orbs_seen"] = true
+	if main.hazards != null:
+		for k in main.hazards.seen:
+			deep["told_" + String(k)] = true
+		if not main.hazards.now.is_empty() and main.hazards.rings.count() < 1:
+			deep["untold"] = true  # a surprise without its steady tell on the snow
+	if main.season_node != null and String(main.season_node.season) != "":
+		deep["dressed"] = String(main.season_node.season)
+	if main.town != null and main.town.count >= 0:
+		deep["town"] = main.town.count
+	return ""
 
 
 func _continue_results() -> String:
@@ -99,6 +125,10 @@ func _press(action: String) -> void:
 func _physics_process(delta: float) -> void:
 	if main == null or not main.ready_to_play:
 		return
+	if main.picks != null and main.picks.showing():
+		pick_t += delta
+	else:
+		pick_t = 0.0
 	var slots: Array[int] = main.party.local_slots()
 	for i in slots.size():
 		_steer(slots[i], i)
@@ -182,7 +212,16 @@ func _steer(slot: int, idx: int) -> void:
 	if not main.avatars.has(slot):
 		return
 	var a: Node3D = main.avatars[slot]
-	var d := _tv_goal(slot, idx) - a.position
+	var goal := _tv_goal(slot, idx)
+	if main.picks != null and main.picks.showing() and pick_t > 0.5:
+		var o: Vector3 = main.picks.orb_position(slot % 3)  # walk under a pick orb (each player its own)
+		if o != Vector3.INF:
+			goal = o
+	elif main.hazards != null and not main.hazards.now.is_empty():
+		var away := _escape(a.position, main.hazards.now)
+		if away != Vector3.INF:
+			goal = away
+	var d := goal - a.position
 	d.y = 0.0
 	var v := Vector2.ZERO
 	if d.length() > 0.1:
@@ -196,6 +235,26 @@ func _steer(slot: int, idx: int) -> void:
 	kit.slot_stick(main.party, slot, "left", v)
 
 
+## Where to step to get out of a told surprise (INF: already clear).
+func _escape(p: Vector3, hz: Dictionary) -> Vector3:
+	var flat := Vector2(p.x, p.z)
+	if not main.Deep.inside(hz, flat, 0.7):
+		return Vector3.INF
+	var out := Vector2.ZERO
+	if String(hz.kind) == "sun":
+		out = (flat - Vector2(float(hz.x), float(hz.z))).normalized()
+	else:
+		var dir := Vector2(float(hz.dx), float(hz.dz)).normalized()
+		var n := Vector2(-dir.y, dir.x)
+		out = n if (flat - Vector2(float(hz.x), float(hz.z))).dot(n) >= 0.0 else -n
+	if out == Vector2.ZERO:
+		out = Vector2(1.0, 0.0)
+	var to := flat + out * 2.5
+	if to.length() > main.ARENA - 0.8:
+		to = flat - out * 2.5  # (cornered: the other side)
+	return Vector3(to.x, 0.0, to.y)
+
+
 # --- Fake VR builder ------------------------------------------------------------------------
 
 func _drive_vr(delta: float) -> void:
@@ -204,6 +263,17 @@ func _drive_vr(delta: float) -> void:
 	if rig.hand_r.position == Vector3.ZERO:
 		kit.vr_idle(rig)
 	rig.hand_l.position = Vector3(-0.45, 1.5, 0.25)  # the left hand waves up and back, clear of the right
+	if main.picks != null and main.picks.showing():
+		# A VR builder alone reaches into an orb on purpose and holds it (with TV players: after they've had a go).
+		kit.vr_stick(rig, Vector2.ZERO)
+		kit.vr_trigger(rig, 0.0)
+		var o: Vector3 = main.picks.orb_position(1)
+		if o != Vector3.INF and (kit.tv_players() == 0 or pick_t > 5.0) and pick_t > 1.0:
+			kit.vr_reach(rig, 1, o, 1.5, delta)
+		else:
+			var h: Vector3 = rig.head_position()
+			kit.vr_reach(rig, 1, h + Vector3(0.5, -0.5, 0.3), 3.0, delta)
+		return
 	vr_wait -= delta
 	if vr_wait > 0.0:
 		kit.vr_stick(rig, Vector2.ZERO)
@@ -328,6 +398,21 @@ func _where() -> String:
 
 func _checks() -> void:
 	var mode: String = main.net.mode
+	print("BOT DEEP: mode=%s %s picks=%s town=%s gift=%s difficulty=%s" % [mode, str(deep), str(main.picks.history), str(main.town.count), main.gift, main.difficulty])
+	kit.assert_true(deep.has("orbs_seen"), "%s: the pick orbs showed" % mode)
+	if mode != "client":
+		var stages: Array = main.picks.history.map(func(h: Array) -> String: return String(h[0]))
+		kit.assert_true(stages.has("mode"), "%s: the mode pick was taken (%s)" % [mode, str(main.picks.history)])
+		kit.assert_true(stages.has("gift") or int(main.session_round) < 2, "%s: Tumble's gift pick came before day 2 (%s)" % [mode, str(main.picks.history)])
+		if kit.tv_players() > 0 or main.vr_rig != null:
+			kit.assert_true(main.picks.history.any(func(h: Array) -> bool: return int(h[2]) >= 0), "%s: a player really took a pick (%s)" % [mode, str(main.picks.history)])
+		var runs: Array = main.Telemetry.read("snowman_maker")
+		kit.assert_true(not runs.is_empty() and runs[runs.size() - 1].has("difficulty") and runs[runs.size() - 1].has("surprises"),
+			"%s: the telemetry line has the second-pass fields" % mode)
+	kit.assert_true(deep.has("told_sun") or deep.has("told_slide"), "%s: a surprise was told on the snow (%s)" % [mode, str(deep)])
+	kit.assert_true(not deep.has("untold"), "%s: no surprise went without its tell (%s)" % [mode, str(deep)])
+	kit.assert_true(String(deep.get("dressed", "")) != "" and String(deep.get("dressed", "")) == String(main.season), "%s: the garden is dressed for the season (%s)" % [mode, str(deep)])
+	kit.assert_true(main.town != null and main.town.count >= 0, "%s: Tumble's snow town is built" % mode)
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
 	if mode == "client":
 		kit.assert_eq(main.party.local_slots().size(), want, "client: all %d local players are seated" % want)
