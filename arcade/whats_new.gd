@@ -42,6 +42,8 @@ const ENTRIES := [
 	{"id": "bender-surprises", "date": "2026-11-12", "game": "elemental_bender", "pic": "rockrain", "line": "Watch the glowing ground!", "try": {"EB_SURPRISE": "1"}},
 	{"id": "bender-modes", "date": "2026-11-12", "game": "elemental_bender", "pic": "kiko", "line": "Gentle, brave or hard!"},
 	{"id": "bender-seasons", "date": "2026-11-12", "game": "elemental_bender", "pic": "snowman", "line": "Seasons on the islands!"},
+	{"id": "delve-friends", "date": "2026-11-12", "game": "dungeon_delve", "pic": "friend", "line": "Free Cinder's lost friends!", "try": {"DD_TRY": "brave"}},
+	{"id": "delve-rumble", "date": "2026-11-12", "game": "dungeon_delve", "pic": "rumble", "line": "Watch the orange circles!", "try": {"DD_TRY": "brave"}},
 	{"id": "kart-gifts", "date": "2026-11-12", "game": "kart_race", "pic": "boxmagnet", "line": "Bolt's gifts at the pit!", "try": {"KART_PIT": "1"}},
 	{"id": "kart-surprises", "date": "2026-11-12", "game": "kart_race", "pic": "gumball", "line": "Watch out for the circle!", "try": {"KART_PIT": "1", "KART_SURPRISE": "1"}},
 	{"id": "kart-town", "date": "2026-11-12", "game": "kart_race", "pic": "racetown", "line": "Bolt's race town grows!"},

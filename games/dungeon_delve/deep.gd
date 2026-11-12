@@ -52,6 +52,10 @@ const Telemetry := preload("res://core/telemetry.gd")
 const Relics := preload("res://games/dungeon_delve/relics.gd")
 const Classes := preload("res://games/dungeon_delve/classes.gd")
 const Wishes := preload("res://games/dungeon_delve/wishes.gd")
+const Friends := preload("res://games/dungeon_delve/friends.gd")
+const Rumble := preload("res://games/dungeon_delve/rumble.gd")
+const SeasonKit := preload("res://core/season_kit.gd")
+const SEASON_DRIFT := {"spring": Color(1.0, 0.8, 0.9), "summer": Color(1.0, 0.95, 0.5), "autumn": Color(0.95, 0.55, 0.2), "winter": Color(0.97, 0.98, 1.0)}
 
 const DIFF := {
 	"brave": {"hp": 1.25, "spd": 1.08, "dmg": 0, "checkpoints": true, "potions": 1, "auto_revive": true, "hearts": 4},
@@ -134,7 +138,8 @@ var _gold := 0
 var _keys := 0
 var tally := {"kills": 0, "floors": [], "bosses": 0, "wipes": 0, "revives": 0, "keys": 0, "doors": 0, "secrets": 0,
 	"puzzles": 0, "bought": 0, "potions": 0, "hurts": 0, "blocks": 0, "reflects": 0, "rooms": 0, "downs": 0,
-	"pickups": 0, "checkpoints": 0, "zones": {}, "bombs": 0, "abilities": 0, "traps": 0, "chests": 0, "by": {}, "wishes": 0}
+	"pickups": 0, "checkpoints": 0, "zones": {}, "bombs": 0, "abilities": 0, "traps": 0, "chests": 0, "by": {}, "wishes": 0,
+	"friends": 0, "friend_floors": 0, "falls": 0, "fall_tells": 0}
 var src := ""  ## what is hurting someone right now (tests: tally["by"])
 var runrec := {}  ## this run, for core/telemetry.gd (written at the end or on quit)
 var wish := {}  ## Host: this floor's CINDER'S WISH (wishes.gd): {"id", "n"}, {} in the shop camp
@@ -163,6 +168,10 @@ var hoard_sub: Label3D
 var _hoard_shown := -1
 var pets := {}  ## slot -> baby dragon node (DRAGON EGG)
 var bubbles := {}  ## slot -> bubble node (BUBBLE SHIELD)
+var friend := {}  ## this floor's caged friend (friends.gd pick: {"id", "room", "p"}), {} for none; every machine
+var friend_node := {}  ## every machine: {"root", "bars", "pet", "ring", "t"} for the cage on this floor
+var rumble_t := -1.0  ## Host: seconds to the next fall (RUMBLY floors, rumble.gd); < 0 = not fighting
+var season := ""  ## spring / summer / autumn / winter (core/season_kit.gd override: ARCADE_SEASON)
 
 
 func setup(m: Node) -> void:
@@ -599,6 +608,8 @@ func progress() -> Dictionary:
 		pd["runs"] = 0
 	if not pd.has("wishes"):
 		pd["wishes"] = 0  ## Cinder's wishes kept, ever (wishes.gd)
+	if not pd.has("friends") or typeof(pd["friends"]) != TYPE_ARRAY:
+		pd["friends"] = []  ## Cinder's friends freed from cages, ever (friends.gd ids): they live at her camp
 	return pd
 
 
@@ -807,7 +818,9 @@ func start_run(m: String) -> void:
 	runrec = {"mode": mode, "daily": daily, "seed": seed_v, "players": kinds, "solo": kinds.size() == 1,
 		"floor_times": [], "kos": [], "gold_in": 0, "gold_out": 0, "items": [], "relics": [], "bosses": [],
 		"clock": 0.0, "floor_t0": 0.0, "boss_t0": 0.0, "boss_phase": 1, "done": false,
-		"start_floor": FloorGen.global_floor(zone, floor_i), "classes": [], "hoard0": hoard(), "unlocks": [], "offers": [], "wishes": []}
+		"start_floor": FloorGen.global_floor(zone, floor_i), "classes": [], "hoard0": hoard(), "unlocks": [], "offers": [], "wishes": [],
+		"run": "%d-%d" % [Time.get_ticks_usec(), randi() % 100000], "friends": [], "falls": 0, "season": _season()}
+	net.state_set("d_friends", (progress()["friends"] as Array).duplicate())
 	for pl2 in _players():
 		(runrec["classes"] as Array).append(class_of(int((pl2 as Dictionary)["slot"])))
 	fang.clear()
@@ -827,6 +840,8 @@ func load_floor(z: int, fl: int, k: String) -> void:
 	kind = k
 	f = FloorGen.generate(seed_v, z, fl, mode == "heroic", k)
 	_wish_start()
+	rumble_t = -1.0
+	net.state_set("d_friend", 0)
 	foes.clear()
 	tele.clear()
 	_build_floor(f)
@@ -873,6 +888,10 @@ func load_floor(z: int, fl: int, k: String) -> void:
 		altar_group = 0
 		if Relics.altar_after(fl):
 			_build_altar(z, fl)
+		# Cinder's friends at the camp: each one brings the party a coin (friends.gd).
+		var fl_list: Array = progress()["friends"]
+		for i2 in mini(fl_list.size(), Friends.CAMP_SPOTS.size()):
+			_spawn_pick(Loot.COIN, FloorGen.to_world(f, 0, Friends.CAMP_SPOTS[i2]) + Vector3(0, 0.6, 0), true)
 	else:
 		if fl == 0 and bool(diff()["checkpoints"]) and z < FloorGen.ZONE_COUNT:  # no checkpoints in the endless depths
 			checkpoint = {"zone": z, "stats": stats.duplicate(true), "gold": _gold}
@@ -890,6 +909,8 @@ func load_floor(z: int, fl: int, k: String) -> void:
 			(stats[s2] as Dictionary)["ph_used"] = false  # the phoenix feather works again on every floor
 		(tally["zones"] as Dictionary)[z] = true
 		_record_depth()
+		if not Friends.pick(f).is_empty():
+			tally["friend_floors"] = int(tally["friend_floors"]) + 1
 	net.state_set("d_floor", [seed_v, z, fl, k, mode == "heroic"])
 	_sync_doors()
 	net.state_set("d_chests", 0)
@@ -973,9 +994,10 @@ func _telemetry(end: String) -> void:
 	r["secs"] = snappedf(float(runrec.get("clock", 0.0)), 0.1)
 	if lock_room >= 0 and String(((f["rooms"] as Array)[lock_room] as Dictionary)["role"]) == "boss":
 		r["boss_phase_reached"] = int(runrec["boss_phase"])
-	for k2 in ["kills", "wipes", "revives", "downs", "potions", "bombs", "secrets", "puzzles", "keys", "chests", "bought", "hurts", "blocks", "reflects", "traps"]:
+	for k2 in ["kills", "wipes", "revives", "downs", "potions", "bombs", "secrets", "puzzles", "keys", "chests", "bought", "hurts", "blocks", "reflects", "traps", "falls"]:
 		r[k2] = tally.get(k2, 0)
 	r["dmg_by"] = (tally["by"] as Dictionary).duplicate()
+	r["fall_tells"] = tally.get("fall_tells", 0)
 	r["gold_left"] = _gold
 	r["hoard"] = hoard()
 	var held: Array = []
@@ -1064,11 +1086,24 @@ func _floor_banner(z: int, fl: int, k: String) -> void:
 			if hud != null:
 				HudKit.banner([main.hud], String(zd["name"]), sub, {"duration": 2.4})
 			music_mood("tension")
+			_rumble_banner()
 			return
 		main.show_headline("%s %d" % [String(zd["short"]), fl + 1], 3.0)
+		var fname := FloorGen.floor_name(seed_v, z, fl) if sub == "" else sub
 		if hud != null:
-			HudKit.banner([main.hud], String(zd["name"]), "%s%d-%d" % [sub + "  " if sub != "" else "", z + 1, fl + 1], {"duration": 2.0})
+			HudKit.banner([main.hud], String(zd["name"]), "%s  %d-%d" % [fname, z + 1, fl + 1], {"duration": 2.0})
 		music_mood("dungeon" if String(zd["id"]) != "forge" else "tension")
+		_rumble_banner()
+
+
+## Every machine: a RUMBLY floor says so when you arrive (after the floor's banner): its picture word, in its colour.
+func _rumble_banner() -> void:
+	if not Rumble.on(f) or hud == null:
+		return
+	var lk := Rumble.look(f)
+	get_tree().create_timer(2.3).timeout.connect(func() -> void:
+		if is_instance_valid(self) and active and Rumble.on(f):
+			HudKit.banner([main.hud], String(lk["word"]), "", {"style": "boss", "duration": 1.8}))
 
 
 func music_mood(m: String) -> void:
@@ -1095,6 +1130,8 @@ func _build_floor(fl: Dictionary) -> void:
 	_clear_shop_nodes()
 	if String(fl["kind"]) == "shop":
 		_build_shop_props()
+	_build_friend(fl)
+	_build_season(fl)
 	if hud != null:
 		hud.visible = true
 		hud.set_floor(fl)
@@ -1129,6 +1166,19 @@ func _build_shop_props() -> void:
 	fn.position = c + Vector3(-3.2, 0.0, 2.8)
 	add_child(fn)
 	shop_nodes.append(fn)
+	# Cinder's camp grows: every friend ever freed from a cage (friends.gd; the host's save, shared as d_friends)
+	# sits round the campfire, then along the walls, facing the fire.
+	var freed: Array = net.state_get("d_friends", [])
+	for i in mini(freed.size(), Friends.CAMP_SPOTS.size()):
+		var fr := Friends.info(String(freed[i]))
+		if fr.is_empty():
+			continue
+		var pet := Creatures.monster(String(fr["kind"]), {"color": fr["color"], "scale": 0.8, "seed": 5 + i})
+		pet.position = FloorGen.to_world(f, 0, Friends.CAMP_SPOTS[i])
+		add_child(pet)
+		Creatures.face_now(pet, (fn.position if i < 6 else c) - pet.position)
+		pet.set_meta("camp_friend", String(fr["id"]))
+		shop_nodes.append(pet)
 	if Relics.altar_after(int(f.get("floor", 0))):
 		# The relic altar: three glowing stones in the corner (relics sit on them; deep._build_altar).
 		var ab := MeshKit.Builder.new()
@@ -1231,6 +1281,7 @@ func host_step(delta: float) -> void:
 	_hazards_step(delta)
 	_traps_step(delta, alive)
 	_features_step(delta, alive)
+	_rumble_step(delta, alive)
 	_pets_step(delta, alive)
 	_switches_step(delta, alive)
 	_doors_step(alive)
@@ -1654,9 +1705,21 @@ func net_popup(p: Vector3, text: String, style: String) -> void:
 	net.event("d_popup", [p, text, style])
 
 
-func telegraph(shape: String, pos: Vector3, dir: Vector3, size: Vector2, warn: float) -> void:
-	_tell(shape, pos, dir, size, warn, 0.0)
-	net.event("d_tele", [shape, pos, dir, size, warn, 0.0])
+func telegraph(shape: String, pos: Vector3, dir: Vector3, size: Vector2, warn: float, stay: float = 0.0) -> void:
+	_tell(shape, pos, dir, size, warn, stay)
+	net.event("d_tele", [shape, pos, dir, size, warn, stay])
+
+
+## Host: a spike band's tell: one flashing line over the whole band (7 tiles long, 2 wide) for `secs`.
+func _tell_spikes(td: Dictionary, secs: float) -> void:
+	var tl: Array = td["tiles"]
+	var r := int(td["room"])
+	var first := FloorGen.to_world(f, r, tl[0])
+	var along := FloorGen.to_world(f, r, tl[2]) - first  # tiles go 2 across, then the next along
+	var across := FloorGen.to_world(f, r, tl[1]) - first
+	var dir := along.normalized()
+	var start := first - dir * FloorGen.TILE * 0.5 + across * 0.5
+	telegraph("line", start, dir, Vector2(FloorGen.TILE * tl.size() / 2.0, FloorGen.TILE * 2.0), maxf(0.3, secs), FloorGen.SPIKES_UP)
 
 
 ## Every machine: draw a floor tell (orange, flashing faster, then hot for `stay` seconds while it goes off).
@@ -1701,7 +1764,7 @@ func _hazards_step(delta: float) -> void:
 func _hazard_hurt_players(h: Dictionary) -> void:
 	if int(h["pdmg"]) <= 0:
 		return
-	src = "area_" + String(h["shape"])
+	src = String(h.get("src", "area_" + String(h["shape"])))
 	for pl in _players(true):
 		var p: Vector3 = (pl as Dictionary)["p"]
 		if WarnRings.inside(String(h["shape"]), h["pos"], h["dir"], h["size"], p, 0.25):
@@ -1908,7 +1971,11 @@ func _traps_step(delta: float, alive: Array) -> void:
 			"spikes":
 				var period: float = td["period"]
 				var tm := fmod(trap_clock + float(td["phase"]), period)
-				var s := 0.0 if tm < period - 1.8 else (1.0 if tm < period - 0.9 else 2.0)
+				var up: float = FloorGen.SPIKES_UP
+				var warn_s: float = FloorGen.TRAP_WARN["spikes"]
+				var s := 0.0 if tm < period - up - warn_s else (1.0 if tm < period - up else 2.0)
+				if s == 1.0 and traps_out[ti * 2] < 0.5 and not here.is_empty():
+					_tell_spikes(td, period - up - tm)  # the band flashes orange first (warn_rings), then the spikes come up
 				traps_out[ti * 2] = s
 				traps_out[ti * 2 + 1] = 0.0
 				if s >= 2.0:
@@ -1936,10 +2003,15 @@ func _traps_step(delta: float, alive: Array) -> void:
 				var tm2 := fmod(trap_clock + float(td["phase"]), period2)
 				var s2 := 0.0
 				var v := 0.0
-				if tm2 >= period2 - 3.2 and tm2 < period2 - 2.0:
+				var bwarn: float = FloorGen.TRAP_WARN["boulder"]
+				if tm2 >= period2 - 2.0 - bwarn and tm2 < period2 - 2.0:
 					s2 = 1.0
-					if tm2 - delta < period2 - 3.2:
-						main.sound_at("rain" if false else "engine", FloorGen.room_center(f, r), -8.0, 0.5)
+					if tm2 - delta < period2 - 2.0 - bwarn:
+						main.sound_at("engine", FloorGen.room_center(f, r), -8.0, 0.5)
+						if not here.is_empty():  # its whole lane flashes first (warn_rings), then it rolls along it
+							var a0 := view.boulder_lane_point(td, -1.25)
+							var a1 := view.boulder_lane_point(td, 1.25)
+							telegraph("line", a0, a1 - a0, Vector2(a0.distance_to(a1), 1.7), period2 - 2.0 - tm2, 2.0)
 				elif tm2 >= period2 - 2.0:
 					s2 = 2.0
 					v = lerpf(-1.25, 1.25, (tm2 - (period2 - 2.0)) / 2.0)
@@ -1984,8 +2056,9 @@ func _traps_step(delta: float, alive: Array) -> void:
 							if fall_d.has(k):
 								_fall(int((pl as Dictionary)["slot"]), r, w2)
 							elif not shake_d.has(k):
-								shake_d[k] = 0.8
+								shake_d[k] = float(FloorGen.TRAP_WARN["collapse"])
 								main.sound_at("dice", w2, -8.0, 0.6)
+								telegraph("circle", w2, Vector3.FORWARD, Vector2(FloorGen.TILE * 0.62, 0.0), float(shake_d[k]), 0.4)
 					if shake_d.has(k):
 						sbits |= 1 << k
 					if fall_d.has(k):
@@ -2591,6 +2664,8 @@ func _attack(slot: int, pos: Vector3, yaw: float, dmg: float, reach: float, bash
 				hit = true
 	if _hit_secret(at + fwd * 0.3):
 		hit = true
+	if _try_cage(slot, at, 1.0):
+		hit = true
 	if not hit and not props_only:
 		main.sound_at("swish", at, -10.0, randf_range(1.1, 1.3))
 
@@ -2664,6 +2739,12 @@ func _knight_step(delta: float) -> void:
 			if (q as Vector3).distance_to(cp) < 0.5:
 				_open_chest(cid, 0)
 				break
+	if not friend_node.is_empty():
+		var fp: Vector3 = friend_node["at"]
+		for q in points:
+			if Vector2((q as Vector3).x - fp.x, (q as Vector3).z - fp.z).length() < Friends.CAGE_R + 0.15 and (q as Vector3).y < fp.y + 1.5:
+				_try_cage(0, fp, 0.5)
+				break
 	var sl: Array = f["switches"]
 	for sid2 in sl.size():
 		var s: Dictionary = sl[sid2]
@@ -2712,6 +2793,7 @@ func process(delta: float) -> void:
 			h.set_revive(float(revive_vals.get(int(s), 0.0)))
 	_knight_hearts()
 	_animate_pets(delta)
+	_animate_friend(delta)
 	for n in shop_nodes:
 		var item: Node = n.get_node_or_null("Item")
 		if item != null:
@@ -3016,6 +3098,9 @@ func on_state(key: String, value: Variant) -> void:
 				stop()
 		"d_open", "d_lock":
 			_apply_doors()
+		"d_friend":
+			if int(value) == 1 and not friend_node.is_empty() and float(friend_node["t"]) < 0.0 and (friend_node["root"] as Node3D).visible:
+				friend_node["t"] = 0.0
 		"d_chests":
 			view.set_chests(int(value))
 		"d_pots":
@@ -3070,6 +3155,241 @@ func apply_event(k: String, args: Array) -> void:
 			main.show_headline(String(args[0]), 2.5)
 		"d_floor":
 			_floor_banner(int(args[0]), int(args[1]), String(args[2]))
+		"d_fall":
+			if not f.is_empty():
+				_fall_fx(args[0], float(args[1]), Rumble.look(f))
+
+
+# --- Cinder's lost friends (friends.gd), rumbly floors (rumble.gd), seasons ----------------------------
+
+## This game's season (core/season_kit.gd: ARCADE_SEASON / ARCADE_SEASON_DUNGEON_DELVE override the date's).
+func _season() -> String:
+	return SeasonKit.override(main.GAME_ID, Seeded.season(), SeasonKit.SEASONS)
+
+
+## Every machine: the season dresses the start room of every floor (two props in free corners) and the camp
+## (props in three corners and drifting petals / pollen / leaves / snow).
+func _build_season(fl: Dictionary) -> void:
+	season = _season()
+	var c := FloorGen.room_center(fl, 0)
+	var r0: Dictionary = (fl["rooms"] as Array)[0]
+	var shop_k := String(fl["kind"]) == "shop"
+	var corners: Array = [Vector2(-4.5, -4.5), Vector2(4.5, -4.5), Vector2(4.6, 4.6), Vector2(-4.6, 4.6)] if shop_k else [Vector2(-4.5, 4.5), Vector2(4.5, 4.5), Vector2(-4.5, -4.5), Vector2(4.5, -4.5)]
+	var b := MeshKit.Builder.new()
+	var placed := 0
+	for i in corners.size():
+		if placed >= (3 if shop_k else 2):
+			break
+		var q: Vector2 = corners[i]
+		var clear := not (shop_k and q.x < 0.0 and q.y > 0.0)  # (the camp's campfire corner holds Cinder's friends)
+		for pp in r0.get("pots", []):
+			if (pp as Vector2).distance_to(q) < 1.2:
+				clear = false
+		if not clear:
+			continue
+		SeasonKit.prop(b, season, FloorGen.to_world(fl, 0, q) - c, i, 0.9, Vector3(-signf(q.x), 0.0, -signf(q.y)).normalized())
+		placed += 1
+	var node := Node3D.new()
+	node.name = "Season"
+	node.position = c
+	if not b.is_empty():
+		node.add_child(MeshKit.instance(b.build(), false))
+	if shop_k:
+		node.add_child(SeasonKit.drift(SEASON_DRIFT.get(season, Color.WHITE), season, {"box": Vector3(5.0, 0.4, 5.0), "at": Vector3(0.0, 5.0, 0.0), "amount": 60}))
+	view.add_child(node)  # (view.build frees it with the floor)
+
+
+## Every machine: the cage with this floor's lost friend in it (friends.gd), or nothing.
+func _build_friend(fl: Dictionary) -> void:
+	friend_node = {}
+	friend = Friends.pick(fl)
+	if friend.is_empty():
+		return
+	var fr := Friends.info(String(friend["id"]))
+	var at := FloorGen.to_world(fl, int(friend["room"]), friend["p"])
+	var root := Node3D.new()
+	root.name = "FriendCage"
+	root.position = at
+	view.add_child(root)
+	var b := MeshKit.Builder.new()
+	b.cylinder(Friends.CAGE_R + 0.05, Friends.CAGE_R + 0.1, 0.12, MeshKit.at(Vector3(0, 0.06, 0)), Friends.CAGE_COLOR.darkened(0.35), 16)
+	root.add_child(MeshKit.instance(b.build(), false))
+	var bb := MeshKit.Builder.new()
+	for k in 10:
+		var a := TAU * k / 10.0
+		bb.cylinder(0.035, 0.035, 1.05, MeshKit.at(Vector3(cos(a) * Friends.CAGE_R, 0.64, sin(a) * Friends.CAGE_R)), Friends.CAGE_COLOR, 6)
+	bb.torus(Friends.CAGE_R, 0.04, MeshKit.at(Vector3(0, 1.16, 0)), Friends.CAGE_COLOR, 18, 4)
+	for k2 in 2:  # two bars across the top (an open-topped dome, so the friend inside shows)
+		bb.cylinder(0.03, 0.03, Friends.CAGE_R * 2.0, MeshKit.at(Vector3(0, 1.2, 0), Vector3.ONE, Vector3(PI * 0.5, k2 * PI * 0.5, 0)), Friends.CAGE_COLOR, 6)
+	bb.torus(0.13, 0.03, MeshKit.at(Vector3(0, 1.42, 0), Vector3.ONE, Vector3(PI * 0.5, 0, 0)), Friends.CAGE_COLOR, 10, 4)
+	var bars := MeshKit.instance(bb.build(), false)
+	root.add_child(bars)
+	var pet := Creatures.monster(String(fr["kind"]), {"color": fr["color"], "scale": 0.75, "seed": 5})
+	pet.position = Vector3(0, 0.12, 0)
+	root.add_child(pet)
+	var ring := view._ring(Friends.CAGE_R + 0.3, Friends.CAGE_COLOR)
+	ring.reparent(root, false)  # (view._ring adds it to the floor)
+	ring.position = Vector3(0, 0.04, 0)
+	friend_node = {"root": root, "bars": bars, "pet": pet, "ring": ring, "t": -1.0, "at": at}
+	if int(net.state_get("d_friend", 0)) == 1 and is_host() == false:
+		root.visible = false  # (a late joiner: already freed)
+
+
+## Every machine: the cage wobbles (help!), and once freed the bars lift away and the friend hops, cheers and
+## pops off home to Cinder's camp.
+func _animate_friend(delta: float) -> void:
+	if friend_node.is_empty() or not is_instance_valid(friend_node["root"]):
+		return
+	var pet: Node3D = friend_node["pet"]
+	var bars: Node3D = friend_node["bars"]
+	var t: float = friend_node["t"]
+	if t < 0.0:
+		pet.position.y = 0.12 + absf(sin(_t * 5.0)) * 0.12
+		pet.rotation.y = sin(_t * 1.3) * 0.8
+		bars.rotation.z = sin(_t * 9.0) * 0.02
+		var ring: Node3D = friend_node["ring"]
+		ring.scale = Vector3.ONE * (1.0 + 0.12 * sin(_t * 4.0))
+		return
+	t += delta
+	friend_node["t"] = t
+	bars.position.y = minf(4.0, t * 3.0)
+	bars.visible = t < 1.2
+	(friend_node["ring"] as Node3D).visible = false
+	pet.position.y = 0.12 + absf(sin(t * 7.0)) * 0.5
+	pet.rotation.y += delta * 6.0
+	if t > 2.4:
+		pet.scale = Vector3.ONE * maxf(0.01, 1.0 - (t - 2.4) * 3.0)
+	if t > 2.8:
+		(friend_node["root"] as Node3D).visible = false
+
+
+## Host: someone bonked or touched the cage. Opens once its room has been cleared (no monsters left in it).
+func _try_cage(slot: int, at: Vector3, reach: float) -> bool:
+	if friend.is_empty() or int(net.state_get("d_friend", 0)) != 0 or friend_node.is_empty():
+		return false
+	var cp: Vector3 = friend_node["at"]
+	if Vector2(cp.x - at.x, cp.z - at.z).length() > reach:
+		return false
+	if cleared_bits & (1 << int(friend["room"])) == 0:
+		main.sound_at("dice", cp, -6.0, 1.5)  # (rattle: beat the monsters first)
+		return true
+	_free_friend(slot)
+	return true
+
+
+func _free_friend(slot: int) -> void:
+	net.state_set("d_friend", 1)
+	var id := String(friend["id"])
+	var fr := Friends.info(id)
+	tally["friends"] = int(tally["friends"]) + 1
+	if runrec.has("friends"):
+		(runrec["friends"] as Array).append(id)
+	var pd := progress()
+	var list: Array = pd["friends"]
+	var first := not list.has(id)
+	if first:
+		list.append(id)
+		main.save.mark_dirty()
+		net.state_set("d_friends", list.duplicate())
+	for s in stats:
+		var st: Dictionary = stats[s]
+		if not bool(st["down"]):
+			st["hp"] = mini(int(st["max"]), int(st["hp"]) + 1)
+	stats_dirty = true
+	_add_hoard(Friends.HOARD * (mini(zone, 7) + 1))
+	if float(friend_node["t"]) < 0.0:
+		friend_node["t"] = 0.0
+	var cp: Vector3 = friend_node["at"]
+	main.sound_at("power_up", cp, -2.0)
+	main.sound_at("fanfare", cp, -6.0)
+	var col: Color = fr.get("color", Friends.CAGE_COLOR)
+	main.confetti(cp + Vector3(0, 1.0, 0), col, 50)
+	net.event("confetti", [cp + Vector3(0, 1.0, 0), col, 50])
+	net.event("d_banner", ["%s IS FREE!" % String(fr["name"]), "level"])
+	main.show_headline("%s IS FREE!" % String(fr["name"]), 2.5)
+	main.story({"who": String(fr["name"]), "line": "Thank you! See you at camp!" if first else "Thanks again!", "pic": "friend",
+		"color": col.to_html(false), "duration": 3.0})
+	main.awards.add(maxi(slot, 0), "chests")
+
+
+## Host: RUMBLY floors (rumble.gd): while a fight room is shut, things fall every few seconds, each told first by a
+## flashing circle (hazard() -> warn_rings) for Rumble.WARN seconds; one lands near a hero, the others anywhere in the room.
+func _rumble_step(delta: float, alive: Array) -> void:
+	if lock_room < 0 or not Rumble.in_room(f, lock_room):
+		rumble_t = -1.0
+		return
+	if rumble_t < 0.0:
+		rumble_t = Rumble.FIRST
+	rumble_t -= delta
+	if rumble_t > 0.0:
+		return
+	rumble_t = randf_range(Rumble.PERIOD.x, Rumble.PERIOD.y)
+	var here: Array = []
+	for pl in alive:
+		if FloorGen.room_at(f, (pl as Dictionary)["p"]) == lock_room:
+			here.append((pl as Dictionary)["p"])
+	if here.is_empty():
+		return
+	var c := FloorGen.room_center(f, lock_room)
+	var lim := FloorGen.HALF - 1.0
+	var spots: Array = []
+	for k in Rumble.count(f):
+		var p: Vector3
+		if k == 0:
+			var a := randf() * TAU
+			p = (here[randi() % here.size()] as Vector3) + Vector3(cos(a), 0.0, sin(a)) * randf_range(0.5, 1.3)
+		else:
+			p = c + Vector3(randf_range(-lim, lim), 0.0, randf_range(-lim, lim))
+		p.x = clampf(p.x, c.x - lim, c.x + lim)
+		p.z = clampf(p.z, c.z - lim, c.z + lim)
+		p.y = 0.0
+		var ok := true
+		for q in spots:
+			if (q as Vector3).distance_to(p) < Rumble.RADIUS * 2.2:
+				ok = false
+		if ok:
+			spots.append(p)
+	var lk := Rumble.look(f)
+	for p2 in spots:
+		_add_hazard({"shape": "circle", "pos": p2, "dir": Vector3.FORWARD, "size": Vector2(Rumble.RADIUS, 0.0), "warn": Rumble.WARN,
+			"stay": 0.35, "pdmg": 1, "fdmg": 1.0, "tick": 0.0, "breaks": false, "src": "rumble"})
+		tally["fall_tells"] = int(tally["fall_tells"]) + 1
+		_fall_fx(p2, Rumble.WARN, lk)
+		net.event("d_fall", [p2, Rumble.WARN])
+	tally["falls"] = int(tally["falls"]) + spots.size()
+	main.sound_at("engine", c, -6.0, 0.35)
+	shake(0.15)
+
+
+## Every machine: the falling thing (the biome's drip / rock / icicle / ember) drops onto its told circle, landing
+## exactly when the circle's warning ends, then pops.
+func _fall_fx(at: Vector3, secs: float, lk: Dictionary) -> void:
+	var col: Color = lk["color"]
+	var b := MeshKit.Builder.new()
+	match String(lk["shape"]):
+		"icicle":
+			b.cone(0.22, 0.8, MeshKit.at(Vector3.ZERO, Vector3.ONE, Vector3(PI, 0, 0)), col, 8, true)
+		"drip":
+			b.sphere(0.24, MeshKit.at(Vector3.ZERO, Vector3(1.0, 1.4, 1.0)), col, 10, true)
+		"ember":
+			b.sphere(0.22, Transform3D.IDENTITY, col, 8, true)
+			b.sphere(0.12, MeshKit.at(Vector3(0, 0.05, 0)), Color(1.0, 0.9, 0.4), 6, true)
+		_:
+			b.sphere(0.3, Transform3D.IDENTITY, col, 7)
+			b.sphere(0.16, MeshKit.at(Vector3(0.18, 0.1, 0.05)), col.darkened(0.2), 6)
+	var n := MeshKit.instance(b.build(), false)
+	n.position = at + Vector3(0, 9.0, 0)
+	n.visible = false
+	add_child(n)
+	var tw := n.create_tween()
+	tw.tween_interval(maxf(0.0, secs - 0.55))
+	tw.tween_callback(func() -> void: n.visible = true)
+	tw.tween_property(n, "position:y", at.y + 0.25, 0.55).set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
+	tw.tween_callback(func() -> void:
+		main.confetti(at + Vector3(0, 0.3, 0), col, 14)
+		main.sound_at("crash", at, -10.0, 1.3))
+	tw.tween_property(n, "scale", Vector3.ONE * 0.05, 0.25)
+	tw.tween_callback(n.queue_free)
 
 
 # --- Relics, biome hazards, pets ----------------------------------------------------------------------

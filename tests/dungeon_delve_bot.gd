@@ -25,6 +25,7 @@ const VrRig := preload("res://core/vr_rig.gd")
 const Dungeon := preload("res://games/dungeon_delve/dungeon.gd")
 const DeepBot := preload("res://tests/dungeon_delve_deep_bot.gd")
 const FloorGen := preload("res://games/dungeon_delve/floorgen.gd")
+const Rumble := preload("res://games/dungeon_delve/rumble.gd")
 
 var kit: BotKit
 var main: Node
@@ -52,6 +53,8 @@ var off_floor := 0
 var max_foes := 0
 var floors_seen := {}
 var goal_done := false
+var rumble_fight := 0.0  ## seconds spent fighting in a RUMBLY room (rumble.gd)
+var cage_seen := 0  ## floors this machine built with a caged friend
 var short := false  ## the run ends before the bot's whole run (solo VR host BOT_END=62, a 60 s local run)
 
 
@@ -103,7 +106,11 @@ func _watch() -> String:
 	if main.deep != null and main.deep.active:
 		var dp = main.deep
 		if not dp.f.is_empty():
+			if not floors_seen.has(dp.built_key) and not dp.friend_node.is_empty():
+				cage_seen += 1
 			floors_seen[dp.built_key] = true
+			if main.net.mode != "client" and Rumble.in_room(dp.f, dp.lock_room):
+				rumble_fight += 0.25
 			max_foes = maxi(max_foes, dp.foes.mons.size())
 			for h in main.heroes.values():
 				if not FloorGen.walkable(dp.view.rects, dp.view.obst, h.position, 0.05) and FloorGen.room_at(dp.f, h.position) >= 0:
@@ -416,6 +423,8 @@ func _deep_checks(mode: String) -> void:
 		kit.assert_true(floors_seen.size() >= 1, "client built the deep floors (%d)" % floors_seen.size())
 		kit.assert_true(max_foes >= 1, "client mirrors the monsters (%d)" % max_foes)
 		kit.assert_true(not (main.net.state_get("d_stats", {}) as Dictionary).is_empty(), "client sees everyone's hearts")
+		if kit.seen("d_friend", 1) > 0:
+			kit.assert_true(cage_seen >= 1, "client built the friend's cage it saw freed (%d)" % cage_seen)
 		return
 	var t: Dictionary = dp.tally
 	var fl: Array = t["floors"]
@@ -453,14 +462,26 @@ func _deep_checks(mode: String) -> void:
 				kit.assert_true(((dp.stats[s0] as Dictionary).get("relics", []) as Array).size() >= 1, "%s: hero %d took a relic at the altar (%s)" % [mode, int(s0), str(dp.stats[s0])])
 		kit.assert_true(dp.hoard() > 0 and int(main.net.state_get("d_hoard", 0)) == dp.hoard(), "%s: coins went into Cinder's hoard (%d)" % [mode, dp.hoard()])
 		kit.assert_true((dp.runrec.get("offers", []) as Array).size() >= 1, "%s: an altar offered relics (%s)" % [mode, str(dp.runrec.get("offers", []))])
+	# Cinder's lost friends (friends.gd): a full biome always passes a cage (its 2nd floor), and the bots free it.
+	if goal == "zone":
+		kit.assert_true(int(t["friend_floors"]) >= 1 and int(t["friends"]) >= 1, "%s: a lost friend was freed from a cage (%d of %d floors with one)" % [mode, int(t["friends"]), int(t["friend_floors"])])
+		kit.assert_true((pd.get("friends", []) as Array).size() >= 1 and (main.net.state_get("d_friends", []) as Array).size() >= 1, "%s: the freed friend was saved and moved to the camp (%s)" % [mode, str(pd.get("friends", []))])
+	if int(t["friends"]) > 0:
+		kit.info("friends freed %d (saved %s)" % [int(t["friends"]), str(pd.get("friends", []))])
+	# Rumbly floors (rumble.gd): fights there got falls, and every fall was told on the floor first.
+	if rumble_fight > 2.0 * Rumble.PERIOD.y:
+		kit.assert_true(int(t["falls"]) >= 1, "%s: a rumbly fight dropped things (%.0f s fighting, %d falls)" % [mode, rumble_fight, int(t["falls"])])
+	kit.assert_eq(int(t["fall_tells"]), int(t["falls"]), "%s: every fall was told by a warning circle first" % mode)
 	if int(t["downs"]) > 0:
 		kit.assert_true(int(t["revives"]) > 0 or int(t["wipes"]) > 0, "%s: knocked-out heroes got back up (%d downs, %d revives)" % [mode, int(t["downs"]), int(t["revives"])])
 	if main.vr_rig != null:
 		kit.assert_true(main.hands.swings > 0, "the knight hit monsters (%d)" % main.hands.swings)
 	# The run ends and "Again!" goes back to the gentle practice room (crashed on the TV, 25 Oct).
 	dp.finish(false)
-	var runs: Array = preload("res://core/telemetry.gd").read("dungeon_delve")
-	kit.assert_true(not runs.is_empty() and String((runs.back() as Dictionary).get("end", "")) == "wipe" and (runs.back() as Dictionary).has("dmg_by") and (runs.back() as Dictionary).has("floor_times"), "%s: the run was written to telemetry (%s)" % [mode, str(runs.back()).left(200) if not runs.is_empty() else "none"])
+	# Only THIS run's line (its run id): other bots and runs share the test telemetry file.
+	var run_id := String(dp.runrec.get("run", ""))
+	var runs: Array = preload("res://core/telemetry.gd").read("dungeon_delve").filter(func(r: Dictionary) -> bool: return String(r.get("run", "")) == run_id)
+	kit.assert_true(run_id != "" and runs.size() == 1 and String((runs[0] as Dictionary).get("end", "")) == "wipe" and (runs[0] as Dictionary).has("dmg_by") and (runs[0] as Dictionary).has("floor_times") and (runs[0] as Dictionary).has("falls") and (runs[0] as Dictionary).has("friends"), "%s: this run wrote one telemetry line (%s)" % [mode, str(runs).left(200)])
 	kit.assert_eq(String(main.net.state_get("phase", "")), "results", "%s: a finished run shows the results" % mode)
 	main.on_request(0, "again", [])
 	kit.assert_true(not dp.active and String(main.net.state_get("phase", "")) == "practice" and main.dungeon.visible, "%s: Again goes back to the gentle practice room" % mode)
