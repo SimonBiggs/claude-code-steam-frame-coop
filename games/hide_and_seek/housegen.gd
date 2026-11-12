@@ -24,6 +24,7 @@ extends RefCounted
 const Seeded := preload("res://core/seeded.gd")
 const Story := preload("res://games/hide_and_seek/story.gd")
 const Street := preload("res://games/hide_and_seek/street.gd")
+const Deep := preload("res://games/hide_and_seek/deep.gd")
 
 const TITLE := "THE HOUSE"
 const HALF_Z := 7.0
@@ -214,6 +215,8 @@ static func generate(seed_value: int, spec: Dictionary = {}) -> Dictionary:
 		if check(g).is_empty():
 			g["ok"] = true
 			break
+	if g.has("hide_spots"):
+		g["pick_spots"] = pick_spots(g)
 	_cache_lock.lock()
 	if _cache.size() > 6:
 		_cache.clear()
@@ -746,6 +749,14 @@ static func _cell(gr: Dictionary, p: Vector3) -> int:
 	return iz * int(gr.nx) + ix
 
 
+## The mode / gift pick orbs (deep.gd): the first row in front of the counting spot that is clear of the spawns, the
+## jail and the bell, over floor a hider and the seeker can both walk to.
+static func pick_spots(g: Dictionary) -> Array:
+	var hg := raster(g, HIDER[0], HIDER[1])
+	var sg := raster(g, SEEKER[0], SEEKER[1])
+	return Deep.pick_spots(data(g), func(p: Vector3) -> bool: return near(hg, p, Deep.PICK_TOUCH * 0.6) and near(sg, p, Deep.PICK_TOUCH * 0.6))
+
+
 ## Is a reachable cell centre within `dist` of p?
 static func near(gr: Dictionary, p: Vector3, dist: float) -> bool:
 	var nx := int(gr.nx)
@@ -913,4 +924,5 @@ static func in_jail(g: Dictionary, p: Vector3) -> bool:
 static func data(g: Dictionary) -> Dictionary:
 	return {"title": TITLE, "rooms": g.rooms, "doors": g.doors, "hide_spots": g.hide_spots, "star_spots": g.star_spots,
 		"spawns": g.spawns, "jail": g.jail, "bell": g.bell, "bounds": g.bounds, "friend_spots": g.get("friend_spots", []),
-		"dark_room": g.get("dark_room", -1), "party": g.get("party", []), "friends": g.get("friends", []), "twist": g.get("twist", 0)}
+		"dark_room": g.get("dark_room", -1), "party": g.get("party", []), "friends": g.get("friends", []), "twist": g.get("twist", 0),
+		"pick_spots": g.get("pick_spots", [])}

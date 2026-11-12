@@ -25,6 +25,9 @@ const SPAWNS: Array[Vector3] = [Vector3(0, 0, 6.0), Vector3(-1.2, 0, 3.4), Vecto
 const JAIL_POS := Vector3(2.05, 0, 6.15)
 const BELL_POS := Vector3(1.15, 0, 5.55)
 
+## The mode / gift pick orbs (deep.gd) float over these, clear of the spawns, the jail and the bell.
+const PICK_SPOTS: Array[Vector3] = [Vector3(-2.45, 0, 5.1), Vector3(-1.2, 0, 5.1), Vector3(0.05, 0, 5.1)]
+
 const STAR_SPOTS: Array[Vector3] = [
 	Vector3(-7.5, 0, 0.5), Vector3(-3.0, 0, 0.0), Vector3(3.0, 0, 1.0), Vector3(7.5, 0, 0.0), Vector3(-6.0, 0, 3.6),
 	Vector3(-2.0, 0, 2.6), Vector3(5.8, 0, 3.4), Vector3(6.0, 0, 5.6), Vector3(-7.8, 0, -2.6), Vector3(-4.2, 0, -4.6),
@@ -100,7 +103,8 @@ const LAMP := Color(0.85, 0.95, 1.0)
 
 static func data(_spec: Dictionary = {}) -> Dictionary:
 	return {"title": TITLE, "rooms": ROOMS, "doors": DOORS, "hide_spots": HIDE_SPOTS, "star_spots": STAR_SPOTS,
-		"spawns": SPAWNS, "jail": JAIL_POS, "bell": BELL_POS, "bounds": [-9.0, 9.0, -7.0, 7.0]}
+		"spawns": SPAWNS, "jail": JAIL_POS, "bell": BELL_POS, "bounds": [-9.0, 9.0, -7.0, 7.0],
+		"pick_spots": PICK_SPOTS}
 
 
 static func build(root: Node3D, spec: Dictionary = {}) -> Dictionary:
