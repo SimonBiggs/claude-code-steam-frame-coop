@@ -66,8 +66,8 @@ func _ready() -> void:
 		kit.drop_in_out(main.party, t0 + 9.0, 3.0, func(slot: int) -> bool:
 			return main.avatars.has(slot) and main.huds.has(slot) and main.cams.has(slot) and main.throw_prompts.has(slot))
 	if host:
-		kit.at(48.0, "host checks", _checks)
-		kit.at(52.0, "finish", kit.finish)
+		kit.at(58.0, "host checks", _checks)
+		kit.at(62.0, "finish", kit.finish)
 	else:
 		kit.at(42.0 if client else 44.0, "finish", func() -> void:
 			_checks()

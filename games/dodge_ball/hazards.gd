@@ -24,6 +24,7 @@ var key := ""
 var now := {}
 var age := 0.0  # seconds since this trick's tell began here
 var went := false  # it went off here (the stomp wave / the shower started)
+var puffs := 0  # stomp dust puffs rolled out so far
 var rain: CPUParticles3D
 var seen := {}  # kind -> tells drawn (bots)
 # Host
@@ -92,10 +93,18 @@ func _process(delta: float) -> void:
 	age += delta
 	if not went and age >= float(now.warn):
 		went = true
+		puffs = 0
 		if String(now.kind) == "stomp":
 			_stomp_fx()
 		else:
 			_shower_fx()
+	if went and String(now.kind) == "stomp":  # the dust wave rolls along the band, a puff at a time
+		while puffs < 7 and age - float(now.warn) >= 0.08 * puffs:
+			var x := -Deep.COURT_X + Deep.COURT_X * 2.0 * float(puffs) / 6.0
+			main.burst(Vector3(x, 0.3, float(now.z)), Color(0.95, 0.85, 0.7), 10, 0.14)
+			puffs += 1
+	if rain != null and is_instance_valid(rain) and rain.emitting and age - float(now.warn) >= Deep.after(now):
+		rain.emitting = false
 
 
 ## The stomp goes off: TumTum's belly wobbles, a thud, dust puffs roll along the band.
@@ -103,12 +112,6 @@ func _stomp_fx() -> void:
 	main.world.wobble_belly()
 	main.sfx.play("boing", 0.0, 0.45)
 	main.sfx.play("crowd_oh", -10.0)
-	var z := float(now.z)
-	for i in 7:
-		var x := -Deep.COURT_X + Deep.COURT_X * 2.0 * float(i) / 6.0
-		get_tree().create_timer(0.08 * i).timeout.connect(func() -> void:
-			if is_inside_tree():
-				main.burst(Vector3(x, 0.3, z), Color(0.95, 0.85, 0.7), 10, 0.14))
 
 
 ## The shower goes off: soft balls rain into the circle for deep.gd AFTER seconds.
@@ -144,9 +147,6 @@ func _shower_fx() -> void:
 	add_child(p)
 	rain = p
 	p.emitting = true
-	get_tree().create_timer(Deep.after(now)).timeout.connect(func() -> void:
-		if is_instance_valid(p):
-			p.emitting = false)
 
 
 # --- Host -----------------------------------------------------------------------------------------------------
