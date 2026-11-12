@@ -56,7 +56,7 @@ func setup(m) -> void:
 	add_child(orbs)
 	rings = WarnRings.new()
 	add_child(rings)
-	season = Seeded.season()
+	season = SeasonKit.override("hide_and_seek", Seeded.season())  # ARCADE_SEASON / ARCADE_SEASON_HIDE_AND_SEEK for tests and tries
 	kennel_rounds = int(main.save.data.get("kennel", 0))
 
 
