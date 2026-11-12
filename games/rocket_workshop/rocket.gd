@@ -137,6 +137,7 @@ func _particles(amount: int, lifetime: float, color: Color, size: float) -> CPUP
 	sm.rings = 4
 	var m := StandardMaterial3D.new()
 	m.vertex_color_use_as_albedo = true
+	m.vertex_color_is_srgb = true
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	sm.material = m
@@ -268,6 +269,7 @@ func _confetti(at: Vector3, amount: int) -> void:
 	bm.size = Vector3(0.09, 0.015, 0.13)
 	var m := StandardMaterial3D.new()
 	m.vertex_color_use_as_albedo = true
+	m.vertex_color_is_srgb = true
 	m.emission_enabled = true
 	m.emission = Color(0.3, 0.3, 0.3)
 	bm.material = m

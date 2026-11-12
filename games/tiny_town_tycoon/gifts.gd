@@ -116,6 +116,7 @@ static func _spark_mesh() -> Mesh:
 		bm.size = Vector3.ONE * 0.004
 		var m := MeshKit.material(Color.WHITE, 1.8).duplicate() as StandardMaterial3D
 		m.vertex_color_use_as_albedo = true
+		m.vertex_color_is_srgb = true
 		bm.material = m
 		return bm) as Mesh
 

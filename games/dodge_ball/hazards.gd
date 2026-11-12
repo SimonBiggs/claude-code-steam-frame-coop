@@ -140,6 +140,7 @@ func _shower_fx() -> void:
 		var m := MeshKit.material(Color.WHITE, 0.4)
 		m = m.duplicate() as StandardMaterial3D
 		m.vertex_color_use_as_albedo = true
+		m.vertex_color_is_srgb = true
 		sm.material = m
 		return sm)
 	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

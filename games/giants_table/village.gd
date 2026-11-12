@@ -117,6 +117,7 @@ func _multi(mesh: Mesh, n: int, colors: bool, m: StandardMaterial3D) -> MultiMes
 	mm.instance_count = n
 	if colors:
 		m.vertex_color_use_as_albedo = true
+		m.vertex_color_is_srgb = true
 	var mi := MultiMeshInstance3D.new()
 	mi.multimesh = mm
 	mi.material_override = m

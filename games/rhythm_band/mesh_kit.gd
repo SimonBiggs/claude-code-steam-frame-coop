@@ -85,6 +85,7 @@ static func vertex_material(cache: Dictionary, unshaded: bool = false) -> Standa
 		return cached
 	var m := StandardMaterial3D.new()
 	m.vertex_color_use_as_albedo = true
+	m.vertex_color_is_srgb = true
 	m.roughness = 0.75
 	if unshaded:
 		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED

@@ -73,6 +73,7 @@ static func _mesh() -> Mesh:
 		sm.rings = 6
 		var m := StandardMaterial3D.new()
 		m.vertex_color_use_as_albedo = true
+		m.vertex_color_is_srgb = true
 		m.roughness = 0.3
 		m.rim_enabled = true
 		m.rim = 0.4

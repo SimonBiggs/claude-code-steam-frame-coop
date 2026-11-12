@@ -202,6 +202,7 @@ func _build_goal() -> void:
 	frame.mesh = MeshKit.merge(parts)
 	var fm := StandardMaterial3D.new()
 	fm.vertex_color_use_as_albedo = true
+	fm.vertex_color_is_srgb = true
 	fm.emission_enabled = true
 	fm.emission = Color(1, 1, 1)
 	fm.emission_energy_multiplier = 0.25
@@ -531,6 +532,7 @@ func _build_trophy() -> void:
 	mi.mesh = MeshKit.merge(parts)
 	var m := StandardMaterial3D.new()
 	m.vertex_color_use_as_albedo = true
+	m.vertex_color_is_srgb = true
 	m.metallic = 0.6
 	m.roughness = 0.3
 	m.emission_enabled = true
@@ -583,6 +585,7 @@ func confetti_cannons() -> void:
 		p.mesh = main.box_mesh(Vector3(0.06, 0.03, 0.005))
 		var m := StandardMaterial3D.new()
 		m.vertex_color_use_as_albedo = true
+		m.vertex_color_is_srgb = true
 		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		m.cull_mode = BaseMaterial3D.CULL_DISABLED
 		p.material_override = m

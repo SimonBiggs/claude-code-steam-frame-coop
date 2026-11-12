@@ -676,6 +676,7 @@ func _build_level(_idx: int) -> void:
 	mi.mesh = st.commit()
 	var mat := StandardMaterial3D.new()
 	mat.vertex_color_use_as_albedo = true
+	mat.vertex_color_is_srgb = true
 	mat.roughness = 0.55
 	mi.material_override = mat
 	level_root.add_child(mi)
@@ -749,6 +750,7 @@ func _build_level(_idx: int) -> void:
 func _unshaded_vertex_mat() -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.vertex_color_use_as_albedo = true
+	m.vertex_color_is_srgb = true
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	return m
 
@@ -784,6 +786,7 @@ func _build_team_bits() -> void:
 		b.multimesh = gate_mm
 		var gm := StandardMaterial3D.new()
 		gm.vertex_color_use_as_albedo = true
+		gm.vertex_color_is_srgb = true
 		gm.emission_enabled = true
 		gm.emission = Color(0.2, 0.2, 0.3)
 		b.material_override = gm

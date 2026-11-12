@@ -215,6 +215,7 @@ func _build_spares() -> void:
 	mmi.multimesh = spare_mm
 	var m := StandardMaterial3D.new()
 	m.vertex_color_use_as_albedo = true
+	m.vertex_color_is_srgb = true
 	m.roughness = 0.2
 	mmi.material_override = m
 	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

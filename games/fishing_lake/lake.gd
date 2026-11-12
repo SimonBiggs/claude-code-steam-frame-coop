@@ -294,6 +294,7 @@ func _build_terrain() -> void:
 	mi.mesh = st.commit()
 	var m := StandardMaterial3D.new()
 	m.vertex_color_use_as_albedo = true
+	m.vertex_color_is_srgb = true
 	m.roughness = 0.95
 	m.cull_mode = BaseMaterial3D.CULL_DISABLED
 	mi.material_override = m
@@ -525,6 +526,7 @@ func _build_landmarks() -> void:
 	bm.mesh = st.commit()
 	var bmat := StandardMaterial3D.new()
 	bmat.vertex_color_use_as_albedo = true
+	bmat.vertex_color_is_srgb = true
 	bmat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	bm.material_override = bmat
 	blades.add_child(bm)
@@ -588,6 +590,7 @@ func _build_plants() -> void:
 	cone.rings = 1
 	var leaf := StandardMaterial3D.new()
 	leaf.vertex_color_use_as_albedo = true
+	leaf.vertex_color_is_srgb = true
 	leaf.roughness = 0.9
 	_multimesh(cone, leaf, crowns, crown_cols)
 	# Round bushes and flowers on the banks, rocks along the water's edge.
@@ -619,10 +622,12 @@ func _build_plants() -> void:
 	var round_m: Mesh = main.sphere_mesh(1.0)
 	var vc := StandardMaterial3D.new()
 	vc.vertex_color_use_as_albedo = true
+	vc.vertex_color_is_srgb = true
 	vc.roughness = 0.9
 	_multimesh(round_m, vc, bushes, bush_cols)
 	var vcg := StandardMaterial3D.new()
 	vcg.vertex_color_use_as_albedo = true
+	vcg.vertex_color_is_srgb = true
 	vcg.emission_enabled = true
 	vcg.emission = Color(0.15, 0.12, 0.1)
 	_multimesh(main.sphere_mesh(1.0), vcg, flowers, flower_cols)

@@ -49,6 +49,7 @@ func _ready() -> void:
 	var pm := st.commit()
 	puff_mat = StandardMaterial3D.new()
 	puff_mat.vertex_color_use_as_albedo = true
+	puff_mat.vertex_color_is_srgb = true
 	puff_mat.roughness = 1.0
 	puff_mat.emission_enabled = true
 	puff_mat.emission = Color(0.35, 0.2, 0.55)
@@ -70,6 +71,7 @@ func _ready() -> void:
 	var fm := fst.commit()
 	var fmat := StandardMaterial3D.new()
 	fmat.vertex_color_use_as_albedo = true
+	fmat.vertex_color_is_srgb = true
 	fmat.emission_enabled = true
 	fmat.emission = Color(0.5, 0.4, 0.3)
 	fmat.emission_energy_multiplier = 0.6

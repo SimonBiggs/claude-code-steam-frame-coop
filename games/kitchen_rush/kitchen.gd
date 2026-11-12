@@ -224,6 +224,7 @@ static func _multi(main: Node3D, mesh: Mesh, xforms: Array, colors: Array, color
 	m.albedo_color = color
 	m.roughness = 0.6
 	m.vertex_color_use_as_albedo = mm.use_colors
+	m.vertex_color_is_srgb = true
 	mmi.material_override = m
 	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	main.add_child(mmi)

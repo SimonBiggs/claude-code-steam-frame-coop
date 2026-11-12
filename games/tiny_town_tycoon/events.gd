@@ -449,6 +449,7 @@ func _festival_fx(at: Vector3) -> void:
 	cm.size = Vector3(0.003, 0.003, 0.0006)
 	var cmat := StandardMaterial3D.new()
 	cmat.vertex_color_use_as_albedo = true
+	cmat.vertex_color_is_srgb = true
 	cmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	cmat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	cm.material = cmat

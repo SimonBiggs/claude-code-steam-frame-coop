@@ -648,6 +648,7 @@ static func _fairy_lights(root: Node3D, far: float, near: float, th: Dictionary)
 	mmi.multimesh = mm
 	var m := StandardMaterial3D.new()
 	m.vertex_color_use_as_albedo = true
+	m.vertex_color_is_srgb = true
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mmi.material_override = m
 	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

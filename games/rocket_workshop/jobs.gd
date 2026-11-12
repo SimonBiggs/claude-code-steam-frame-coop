@@ -214,6 +214,7 @@ func _build_paint() -> void:
 	a.multimesh = pot_mm
 	var pm := StandardMaterial3D.new()
 	pm.vertex_color_use_as_albedo = true
+	pm.vertex_color_is_srgb = true
 	pm.metallic = 0.5
 	pm.roughness = 0.4
 	a.material_override = pm
@@ -222,6 +223,7 @@ func _build_paint() -> void:
 	b.multimesh = lid_mm
 	var lm := StandardMaterial3D.new()
 	lm.vertex_color_use_as_albedo = true
+	lm.vertex_color_is_srgb = true
 	lm.emission_enabled = true
 	lm.emission = Color(0.25, 0.25, 0.25)
 	b.material_override = lm

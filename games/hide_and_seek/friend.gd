@@ -159,6 +159,7 @@ func merge() -> void:
 	if _vc_mat == null:
 		_vc_mat = StandardMaterial3D.new()
 		_vc_mat.vertex_color_use_as_albedo = true
+		_vc_mat.vertex_color_is_srgb = true
 		_vc_mat.roughness = 0.8
 	var one := MeshInstance3D.new()
 	one.mesh = st.commit()

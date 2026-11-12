@@ -293,6 +293,7 @@ func _build_run() -> void:
 	mmi.multimesh = run_mm
 	var mat := StandardMaterial3D.new()
 	mat.vertex_color_use_as_albedo = true
+	mat.vertex_color_is_srgb = true
 	mat.roughness = 0.15
 	mat.metallic = 0.3
 	mmi.material_override = mat
@@ -330,6 +331,7 @@ func _build_jar() -> void:
 	mmi.multimesh = jar_mm
 	var mat := StandardMaterial3D.new()
 	mat.vertex_color_use_as_albedo = true
+	mat.vertex_color_is_srgb = true
 	mat.roughness = 0.15
 	mat.metallic = 0.2
 	mat.emission_enabled = true
