@@ -24,9 +24,9 @@ const CLOTH := {
 }
 const CLOTH_DROP := 5.0  # how far the cloth hangs down
 const WREATH_R := 1.35  # on the fire's stones (world.gd FIRE_R 1.1)
-const ROOM_R := 24.0  # the room props stand this far out, on the rug
-const ROOM_ANGLES: Array[float] = [3.6, 4.2, 4.7, 5.25, 5.85, 0.3, 2.85]  # (never near the Giant's seat at PI/2)
-const ROOM_SIZE := 9.0
+const ROOM_R := 22.0  # the room props stand this far out, on the rug
+const ROOM_ANGLES: Array[float] = [3.45, 3.95, 4.45, 4.98, 5.48, 5.98]  # (all on the far side: never near the Giant's seat at PI/2 or in front of the flat camera)
+const ROOM_SIZE := 5.5
 
 var main
 var season := ""

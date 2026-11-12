@@ -378,7 +378,7 @@ func _drive_giant(delta: float) -> void:
 		return
 	# Second pass: catch every other trick's ball / barrel.
 	var trick_at: Vector3 = main.hazards.thing_pos() if main.hazards != null else Vector3.INF
-	if trick_at != Vector3.INF and h.held == null and main.wave % 2 == 1:
+	if trick_at != Vector3.INF and h.held == null and main.wave % 2 == 1 and not OS.has_environment("BOT_NO_CATCH"):
 		g.bot_target = trick_at
 		g.bot_grip = Vector2(h.pos.x - trick_at.x, h.pos.z - trick_at.z).length() < 0.8
 		return
