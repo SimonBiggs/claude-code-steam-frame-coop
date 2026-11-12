@@ -8,6 +8,7 @@ extends Node3D
 const UiKit := preload("res://core/ui_kit.gd")
 
 const Art := preload("res://games/block_builders/art.gd")
+const Deep := preload("res://games/block_builders/deep.gd")
 
 const SPEED := 4.3
 const JUMP_V := 7.6
@@ -63,6 +64,8 @@ var idle_t := 0.0             # how long since this runner last moved (contextua
 var squash := 0.0             # >0 squashed (landing), <0 stretched (jumping)
 var blink_t := 2.0
 var shake := 0.0
+var hz_push := Vector3.ZERO      # a told gust pushing us (hazards.gd)
+var dizzy_t := 0.0               # a wobble made us dizzy: no running for a moment (hazards.gd)
 var star_sent := {}           # star index -> level_seq (TV: don't spam the host)
 var gift_sent_t := 0.0
 
@@ -259,7 +262,7 @@ func _physics_process(delta: float) -> void:
 		respawn_t -= delta
 		main.net.send_state(global_position, face, cam_yaw, index)
 		return
-	if main.state == "play" or main.state == "intro":
+	if main.state == "play" or main.state == "intro" or main.state == "pick":
 		_move(delta)
 	main.net.send_state(global_position, face, cam_yaw, index)
 
@@ -267,10 +270,13 @@ func _physics_process(delta: float) -> void:
 func _move(delta: float) -> void:
 	var course = main.course
 	var move := read_move(delta)
+	if dizzy_t > 0.0:
+		dizzy_t -= delta
+		move = Vector3.ZERO
 	var pos := global_position
 	var feet := pos.y
 	var gust: Vector3 = course.gust_at(pos + Vector3.UP * 0.4, main.level_time)
-	var vel := move * SPEED + gust + boost_v
+	var vel := move * SPEED + gust + boost_v + hz_push
 	# Horizontal: one axis at a time so you slide along walls.
 	var already_stuck := _blocked(pos, feet)
 	for axis in 2:
@@ -303,7 +309,7 @@ func _move(delta: float) -> void:
 	jump_buf -= delta
 	air_t = 0.0 if on_ground else air_t + delta
 	if jump_buf > 0.0 and air_t < COYOTE and vy <= 0.5:
-		vy = JUMP_V
+		vy = JUMP_V * Deep.jump_scale(main.gift)
 		on_ground = false
 		air_t = COYOTE
 		jump_buf = 0.0

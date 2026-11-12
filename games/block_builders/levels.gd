@@ -367,10 +367,12 @@ static func get_level(i: int) -> Dictionary:
 	var l := levels()
 	if Engine.get_meta("bb_simple", false) and i >= l.size():
 		var world := int(Engine.get_meta("bb_world", 0))
-		var key := "%d:%d:%s" % [world, i, Story.Seeded.today() if Story.is_daily(i) else ""]
+		var mode := String(Engine.get_meta("bb_mode", "brave"))
+		var season := String(Engine.get_meta("bb_season", ""))
+		var key := "%d:%d:%s:%s:%s" % [world, i, Story.Seeded.today() if Story.is_daily(i) else "", mode, season]
 		if not _gen_cache.has(key):
 			if _gen_cache.size() > 16:
 				_gen_cache.clear()
-			_gen_cache[key] = Story.course(world, mini(i, Story.DAILY_INDEX))
+			_gen_cache[key] = Story.course(world, mini(i, Story.DAILY_INDEX), mode, season)
 		return _gen_cache[key]
 	return l[clampi(i, 0, l.size() - 1)]

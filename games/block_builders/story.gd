@@ -11,6 +11,7 @@ extends RefCounted
 
 const Seeded := preload("res://core/seeded.gd")
 const CourseGen := preload("res://games/block_builders/coursegen.gd")
+const Deep := preload("res://games/block_builders/deep.gd")
 
 const LESSONS := 8  ## levels.gd SIMPLE_LEVELS
 const ADVENTURES := 990  ## adventures before the indices run out (one a minute for 16 hours)
@@ -25,7 +26,8 @@ const FRIENDS: Array = [["PIP", Color(1.0, 0.75, 0.8)], ["SUNNY", Color(1.0, 0.9
 
 
 static func save_defaults() -> Dictionary:
-	return {"lessons_done": false, "adventure": 0, "world": -1, "friends": [], "daily": {}, "courses": 0, "best_level": 0}
+	return {"lessons_done": false, "adventure": 0, "world": -1, "friends": [], "daily": {}, "courses": 0, "best_level": 0,
+		"mode": "brave", "last_gift": "", "gifts": 0, "surprises": 0, "town": [], "town_total": 0}
 
 
 static func level_index(adv: int) -> int:
@@ -49,17 +51,25 @@ static func is_course_name(t: String) -> bool:
 	return t == "TODAY" or (t.begins_with("SKY ") and t.substr(4).is_valid_int())
 
 
-## TODAY'S SKY (pass `date` in tests): a mid-sized adventure from the day's seed.
+## TODAY'S SKY (pass `date` in tests): a mid-sized adventure from the day's seed (the same in every mode), dressed in
+## its date's season (deep.gd SEASONS themes).
 static func daily_course(date: String = "") -> Dictionary:
-	return CourseGen.generate(Seeded.daily_seed("block_builders", date), 3, "TODAY")
+	var lv := CourseGen.generate(Seeded.daily_seed("block_builders", date), 3, "TODAY")
+	if lv.has("seed"):
+		lv["theme"] = Deep.season_theme(int(lv.seed), Seeded.season(date))
+	return lv
 
 
-## The course for level index i (adventures and today's sky; lessons come from levels.gd).
-static func course(world: int, i: int) -> Dictionary:
+## The course for level index i (adventures and today's sky; lessons come from levels.gd), built in a mode (a step
+## smaller or bigger: deep.gd mode_adv) and dressed for a season ("" none: the generator's own theme).
+static func course(world: int, i: int, mode: String = "brave", season: String = "") -> Dictionary:
 	if is_daily(i):
 		return daily_course()
 	var adv := adventure_of(i)
-	return CourseGen.generate(Seeded.derive(world, "sky%d" % adv), adv)
+	var lv := CourseGen.generate(Seeded.derive(world, "sky%d" % adv), Deep.mode_adv(adv, mode), "SKY %d" % (adv + 1))
+	if season != "" and lv.has("seed"):
+		lv["theme"] = Deep.season_theme(int(lv.seed), season)
+	return lv
 
 
 ## The friend waiting on course i: the first one not rescued yet (they come in order), or a repeat

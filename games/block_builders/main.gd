@@ -63,6 +63,13 @@ const Save := preload("res://core/save.gd")
 const Seeded := preload("res://core/seeded.gd")
 const Telemetry := preload("res://core/telemetry.gd")
 const StoryCard := preload("res://core/story_card.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
+const Deep := preload("res://games/block_builders/deep.gd")
+const PicksScript := preload("res://games/block_builders/picks.gd")
+const HazardsScript := preload("res://games/block_builders/hazards.gd")
+const GiftsScript := preload("res://games/block_builders/gifts.gd")
+const SeasonScript := preload("res://games/block_builders/season.gd")
+const TownScript := preload("res://games/block_builders/town.gd")
 
 const SIMPLE_MODE := true
 const SIMPLE_INTRO_TIME := 2.5
@@ -185,6 +192,24 @@ var goal_clears := 0           # levels this machine has seen cleared
 var cue_state := ""
 
 # Split-screen views
+# Second pass (deep.gd): modes, Puff's block gifts, warned surprises, seasonal build sites, Puff's town.
+var picks: Node  # picks.gd
+var hazards: Node3D  # hazards.gd
+var gifts_node: Node3D  # gifts.gd
+var season_node: Node3D  # season.gd
+var town: Node3D  # town.gd
+var mode := "brave"
+var gift := ""
+var season := "spring"
+var mode_picked := false  # host: the mode was picked this session
+var session_courses := 0  # host: sky courses finished this session (gifts and surprises from the second)
+var gift_for := -1  # host: the level_seq the gift was picked for
+var session_seed := 0
+var bot_tricks := false  # BB_TRICKS_NOW: surprises on the first course too, soon after the start
+var robot_t := 0.0
+var try_gift := ""  # BB_GIFT: the first sky course gets this gift without a pick
+var robot_puts := 0
+var big_puts := 0
 var view_root: Control
 var views_dirty := true
 var last_view_size := Vector2.ZERO
@@ -217,6 +242,7 @@ func _ready() -> void:
 	flock = FlockScript.new()
 	flock.name = "Flock"
 	add_child(flock)
+	_setup_deep()
 	_build_hud()
 	var menu := PauseMenuScript.new()
 	menu.main = self
@@ -297,6 +323,7 @@ func _setup_simple(mode: String) -> void:
 		return
 	if mode == "host" or seats.deck_alone():
 		_set_solo(true)
+	_begin_deep()
 	_show_center("BLOCK BUILDERS", SIMPLE_INTRO_TIME)
 
 
@@ -933,6 +960,8 @@ func _reset_budget() -> void:
 	var d: Dictionary = Levels.get_level(level)
 	var b: Dictionary = d.budget
 	budget = {}
+	if simple and Story.is_adventure(level):
+		b = Deep.tray(b, mode, gift)  # the mode's spare planks, the BLOCK BOX
 	for k in Art.KINDS:
 		budget[k] = int(b.get(k, 0))
 	if active_runner_count() >= 4 and budget["plank"] > 0:
@@ -981,6 +1010,12 @@ func put(kind: String, c: Vector3i, rot: int) -> void:
 		return
 	course.add_block(kind, c, rot)
 	sound("place", -2.0, randf_range(0.9, 1.15))
+	if gift == "big" and simple:  # BIG BRICKS: a free plank beside it (never where the course needs a block)
+		var e := Deep.big_extra(level_data(), kind, c)
+		if e != Deep.NO_CELL and can_place(kind, e):
+			course.add_block(kind, e, rot)
+			big_puts += 1
+			burst(Vector3(e.x + 0.5, e.y + 1.0, e.z + 0.5), Deep.gift("big").color, 10, 0.1)
 	burst(Vector3(c.x + 0.5, c.y + 1.0, c.z + 0.5), Art.kind_color(kind), 10, 0.1)
 	last_place_t = level_time
 	placed_level += 1
@@ -1046,6 +1081,9 @@ func _start_level(i: int) -> void:
 	if props != null:
 		props.on_level()
 	if simple:
+		gift = ""
+		if hazards != null:
+			hazards.host_end()
 		_story_level()
 		ring_state = 1 if level_data().has("ring") else 0
 		hint_t = 0.0
@@ -1054,6 +1092,11 @@ func _start_level(i: int) -> void:
 		print("Level %d (%s) started" % [level + 1, d.name])
 		if level >= 1:
 			create_tween().tween_property(help_label, "modulate:a", 0.0, 1.0)
+		var due := _pick_due()
+		if due != "":
+			_start_pick(due)
+		else:
+			_deep_course()
 		return
 	_show_center("LEVEL %d of %d: %s\n%s" % [level + 1, Levels.count(), d.name, d.tip], 6.0)
 	sound("wave", -2.0)
@@ -1342,6 +1385,11 @@ func _process(delta: float) -> void:
 		_update_cues(delta)
 		_update_join_cue()
 		_update_world_arrows()
+	if gifts_node != null and course != null:
+		var ha := Vector3.INF
+		if hint.size() >= 3:
+			ha = (hint[1] as Vector3) + Vector3(0.5, 0.5, 0.5)
+		gifts_node.follow(runners(), ha, course.start, delta)
 	_check_tv_confirm()
 	if net.mode == "client":
 		seats.sync()
@@ -1352,6 +1400,10 @@ func _process(delta: float) -> void:
 		return
 	state_t += delta
 	match state:
+		"pick":
+			picks.tick(delta)
+			if solo:
+				players[1].bot_input = {"move": Vector3.ZERO, "jump": false}
 		"intro":
 			if simple:
 				if state_t > SIMPLE_INTRO_TIME:
@@ -1477,6 +1529,9 @@ func _story_clear() -> void:
 			dd.erase(ks[0])
 	elif Story.is_adventure(level):
 		sd.adventure = maxi(int(sd.adventure), Story.adventure_of(level) + 1)
+	if Story.is_adventure(level):
+		session_courses += 1
+		_add_building()
 	sd.courses = int(sd.courses) + 1
 	sd.best_level = maxi(int(sd.best_level), level)
 	save.mark_dirty()
@@ -1491,7 +1546,13 @@ func _telemetry(end: String) -> void:
 		"seed": int(d.get("seed", 0)), "challenges": d.get("challenges", []), "secs": int(level_time), "placed": placed_level,
 		"runners": active_runner_count(), "solo": solo, "vr": builder != null and builder.vr, "mode": net.mode,
 		"friend_waiting": friend_state == 1, "friend": int(run.get("friend", -1)), "friends": (save.data.friends as Array).size(),
-		"falls": level_tumbles}
+		"falls": level_tumbles, "pmode": mode, "gift": gift, "season": season, "surprises": hazards.count if hazards != null else 0,
+		"surprise_hits": hazards.hits if hazards != null else 0, "robot_puts": robot_puts, "big_puts": big_puts,
+		"town": int(save.data.get("town_total", 0)), "picks": picks.history.size() if picks != null else 0}
+	if hazards != null:
+		hazards.hits = 0
+	robot_puts = 0
+	big_puts = 0
 	Telemetry.run("block_builders", info)
 	run = {}
 
@@ -1519,6 +1580,8 @@ func _simple_play(delta: float) -> void:
 	if solo:
 		_drive_buddy(players[1])
 	_update_hint(delta)
+	hazards.host_tick(level_time)
+	_robot(delta)
 	_check_high_fives()
 	_check_ring()
 	_check_friend()
@@ -1631,7 +1694,13 @@ func _drive_buddy(r) -> void:
 			jump = true
 	if reached and wi < path.size() - 1 and (wi > 0 or built):
 		r.set_meta("bot_wp", wi + 1)
-	_buddy_unstick(r, wi, wp, move, pos)
+	var steered: Vector3 = hazards.steer(r, move)  # walk out of a told surprise, wait outside one
+	if steered != move:
+		move = steered
+		jump = false
+		r.set_meta("stuck_t", 0.0)
+	else:
+		_buddy_unstick(r, wi, wp, move, pos)
 	r.bot_input = {"move": move, "jump": jump}
 
 
@@ -2208,7 +2277,7 @@ func make_snapshot() -> Array:
 	return [level, level_seq, state, state_t, level_time, time_left, score, water_y, b, course.pack_blocks(),
 		builder.net_state(), rs, stars_taken, balloon_state, balloon_pos, hint, ring_state,
 		props.net_state() if props != null else [], place_total, placed_level,
-		int(save.data.world), friend_id, friend_state, (save.data.friends as Array).duplicate()]
+		int(save.data.world), friend_id, friend_state, (save.data.friends as Array).duplicate(), mode, season]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -2218,6 +2287,11 @@ func apply_snapshot(s: Array) -> void:
 	if s.size() >= 24 and int(Engine.get_meta("bb_world", 0)) != int(s[20]):
 		Engine.set_meta("bb_world", int(s[20]))  # the host's sky adventures (levels.gd)
 		level_seq = -1  # reload the course from the right world
+	if s.size() >= 26 and (String(s[24]) != mode or String(s[25]) != season):
+		mode = String(s[24])  # the courses are built in the host's mode and season (levels.gd)
+		season = String(s[25])
+		_set_course_meta()
+		level_seq = -1
 	var seq: int = s[1]
 	if seq != level_seq:
 		level = s[0]
@@ -2298,6 +2372,15 @@ func apply_event(kind: String, args: Array) -> void:
 				props.react(str(args[0]), int(args[1]), false)
 		"story":
 			_show_story({"who": str(args[0]), "line": str(args[1]), "pic": str(args[2]), "color": Color.html(str(args[3])), "duration": 3.5}, false)
+		"orbs":
+			if picks != null:
+				picks.show_row(String(args[0]), args[1], args[2], String(args[3]) if args.size() > 3 else "")
+		"take":
+			if picks != null:
+				picks.take_fx(int(args[0]), int(args[1]))
+		"robot":
+			if gifts_node != null:
+				gifts_node.robot_put(args[0])
 		"remote_pause":
 			get_tree().paused = args[0]
 			_set_pause_banner(args[0], "The Builder paused the game")
@@ -2483,6 +2566,256 @@ func _make_vr_label(font: int, color: Color) -> Label3D:
 	l.layers = 1
 	add_child(l)
 	return l
+
+
+# --- Second pass: modes, Puff's block gifts, surprises, seasons, Puff's town (deep.gd) -----------------------
+
+## Every machine: the second pass's nodes and its replicated state.
+func _setup_deep() -> void:
+	picks = PicksScript.new()
+	picks.main = self
+	add_child(picks)
+	net_sticky_ready()
+	hazards = HazardsScript.new()
+	hazards.main = self
+	add_child(hazards)
+	gifts_node = GiftsScript.new()
+	gifts_node.main = self
+	add_child(gifts_node)
+	season_node = SeasonScript.new()
+	add_child(season_node)
+	town = TownScript.new()
+	town.name = "PuffsTown"
+	add_child(town)
+
+
+## (net.gd is made after the course; the sticky "orbs" event and the state hook wait for it.)
+func net_sticky_ready() -> void:
+	if net == null:
+		call_deferred("net_sticky_ready")
+		return
+	net.sticky_event("orbs")  # a machine joining mid-pick sees the orbs (picks.gd)
+	if not net.state_changed.is_connected(_on_deep_state):
+		net.state_changed.connect(_on_deep_state)
+	for k in ["deep", "hz", "town"]:
+		if net.state_has(k):
+			_on_deep_state(k, net.state_get(k))
+
+
+## Host, once per session: the season, the family's last mode, the town, for every machine.
+func _begin_deep() -> void:
+	if net.mode == "client":
+		return
+	session_seed = Seeded.fresh_seed()
+	season = Seeded.season()
+	if OS.has_environment("BB_SEASON") and Deep.SEASONS.has(OS.get_environment("BB_SEASON")):
+		season = OS.get_environment("BB_SEASON")
+	mode = Deep.mode_of(String(save.data.get("mode", "brave")))
+	if OS.has_environment("BB_MODE"):  # (What's New "try" / bots: straight in)
+		mode = Deep.mode_of(OS.get_environment("BB_MODE"))
+		mode_picked = true
+	bot_tricks = OS.has_environment("BB_TRICKS_NOW")
+	if OS.has_environment("BB_GIFT") and not Deep.gift(OS.get_environment("BB_GIFT")).is_empty():
+		try_gift = OS.get_environment("BB_GIFT")  # (What's New "try": the first sky course with that gift)
+		mode_picked = true
+	_set_course_meta()
+	_send_deep()
+	_send_town()
+	print("Block Builders: %s mode, %s build site, town of %d" % [mode, season, int(save.data.get("town_total", 0))])
+
+
+## Every machine: the sky courses are built in this mode and season (levels.gd get_level).
+func _set_course_meta() -> void:
+	Engine.set_meta("bb_mode", mode)
+	Engine.set_meta("bb_season", season)
+
+
+## Host: the mode, the gift and the season for every machine.
+func _send_deep() -> void:
+	net.state_set("deep", [mode, gift, season])
+
+
+## Host: Puff's town for every machine.
+func _send_town() -> void:
+	net.state_set("town", [int(save.data.get("town_total", 0)), (save.data.get("town", []) as Array).duplicate(true)])
+
+
+## Host: the pick a level waits for ("" none): the mode once a session before the first sky course, a gift before every
+## later sky course. Never on the lessons.
+func _pick_due() -> String:
+	if not simple or net.mode == "client" or not Story.is_adventure(level):
+		return ""
+	if not mode_picked:
+		return "mode"
+	if session_courses >= 1 and gift_for != level_seq and not OS.has_environment("BB_NO_GIFTS"):
+		return "gift"
+	return ""
+
+
+## Nobody here could take a pick (no runner who is a person, no builder who can reach): the middle comes sooner.
+func pick_nobody() -> bool:
+	return _people() == 0 and (builder == null or not (builder.vr or builder.flat))
+
+
+func _people() -> int:
+	var n := 0
+	for r in runners():
+		if r.active and not r.buddy:
+			n += 1
+	return n
+
+
+## Host: put up the pick orbs (the course waits for them; runners can walk about on the start island).
+func _start_pick(stage: String) -> void:
+	var entries: Array = []
+	var opts: Array = []
+	if stage == "mode":
+		opts = PickOrbs.mode_ids(mode)
+		for id in opts:
+			var md := PickOrbs.mode(String(id))
+			entries.append({"id": id, "name": md.name, "pic": md.pic, "color": md.color})
+	else:
+		opts = Deep.gift_choices(int(save.data.get("town_total", 0)), String(save.data.get("last_gift", "")),
+			Seeded.derive(session_seed, "gift %d %d" % [level, session_courses]))
+		for id in opts:
+			var gd := Deep.gift(String(id))
+			entries.append({"id": id, "name": gd.name, "pic": gd.pic, "color": gd.color})
+		_show_story(_puff("A GIFT!"))
+	var row := "start"
+	if _people() == 0 and builder != null:
+		row = "vr" if builder.vr else ("flat" if builder.flat else "start")
+	state = "pick"
+	state_t = 0.0
+	sound("ding", -6.0, 1.3)
+	picks.begin(stage, entries, opts, row, _on_picked)
+
+
+## Host: the team picked (or the middle one was taken for them): on with the course.
+func _on_picked(stage: String, opt: Variant, _slot: int) -> void:
+	if stage == "mode":
+		var was := mode
+		mode = Deep.mode_of(String(opt))
+		mode_picked = true
+		save.data.mode = mode
+		save.mark_dirty()
+		_show_story({"who": "PUFF", "line": String(PickOrbs.mode_name(mode)) + "!", "pic": String(PickOrbs.mode(mode).pic),
+			"color": PickOrbs.mode_color(mode), "duration": 3.0})
+		print("Picked mode: %s" % mode)
+		_set_course_meta()
+		_send_deep()
+		if was != mode:
+			_start_level(level)  # built again in the picked mode
+			return
+		state = "play"
+		state_t = 0.0
+		_deep_course()
+		return
+	gift = String(opt)
+	gift_for = level_seq
+	save.data.last_gift = gift
+	save.data.gifts = int(save.data.get("gifts", 0)) + 1
+	save.mark_dirty()
+	print("Picked gift: %s" % gift)
+	state = "play"
+	state_t = 0.0
+	_reset_budget()  # (the BLOCK BOX)
+	_deep_course()
+	var gd := Deep.gift(gift)
+	_show_story({"who": "PUFF", "line": String(gd.line).to_upper(), "pic": String(gd.pic), "color": gd.color, "duration": 3.0})
+
+
+## Host, when a course's play starts: its gift and surprises for every machine.
+func _deep_course() -> void:
+	if try_gift != "" and Story.is_adventure(level):
+		gift = try_gift
+		try_gift = ""
+		_reset_budget()
+	_send_deep()
+	robot_t = 0.0
+	var allowed: bool = simple and Story.is_adventure(level) and (session_courses >= 1 or bot_tricks)
+	var spots: Array = Deep.spots(level_data(), mode) if allowed else []
+	hazards.host_begin(spots, int(level_data().get("seed", 0)), season, mode, Deep.SHORT_FIRST if bot_tricks else Deep.FIRST_T)
+	print("Block Builders course %s: %s mode, %s, gift %s, %d surprise spots" % [str(level_data().name), mode, season,
+		gift if gift != "" else "none", spots.size()])
+
+
+## Host: a surprise's tell started (hazards.gd).
+func hazard_told(e: Dictionary) -> void:
+	save.data.surprises = int(save.data.get("surprises", 0)) + 1
+	print("Surprise: %s at x %.1f (w %.2f) after %.1f s" % [e.kind, float(e.x), float(e.w), level_time])
+
+
+## Host: the BUILDER ROBOT puts the glowing hint block in when the builder waits (only ever a block of the course's own
+## solution: the hint), so a lone runner or a little builder always gets the path.
+func _robot(delta: float) -> void:
+	if gift != "robot" or hint.size() < 3 or builder == null or builder.held_kind != "":
+		robot_t = 0.0
+		return
+	robot_t += delta
+	if robot_t < Deep.ROBOT_IDLE or build_idle() < Deep.ROBOT_IDLE:
+		return
+	robot_t = 0.0
+	var kind: String = Art.KINDS[clampi(int(hint[0]), 0, Art.KINDS.size() - 1)]
+	var hc: Vector3 = hint[1]
+	var c := Vector3i(roundi(hc.x), roundi(hc.y), roundi(hc.z))
+	if not take(kind):
+		return
+	put(kind, c, int(hint[2]))
+	robot_puts += 1
+	var at := Vector3(c.x + 0.5, c.y + 0.5, c.z + 0.5)
+	gifts_node.robot_put(at)
+	net.event("robot", [at])
+	sound("click", -4.0, 1.6)
+	print("Builder robot put a %s at %s" % [kind, c])
+
+
+## Host, a sky course finished: a new building in Puff's town (its roof in the mode's colour); gifts open as it grows.
+func _add_building() -> void:
+	var total := int(save.data.get("town_total", 0))
+	var list: Array = save.data.get("town", [])
+	list.append([Deep.TOWN_KINDS.find(Deep.town_kind(total)), mode])
+	while list.size() > Deep.TOWN_SHOWN:
+		list.remove_at(0)
+	save.data.town = list
+	save.data.town_total = total + 1
+	save.mark_dirty()
+	_send_town()
+	_show_story({"who": "PUFF", "line": "A NEW %s!" % Deep.town_kind(total).to_upper(), "pic": Deep.town_kind(total),
+		"color": Story.PUFF_COLOR, "duration": 3.0})
+	for g in Deep.GIFTS:
+		if int(g.unlock) == total + 1:
+			_show_story({"who": "PUFF", "line": "A NEW GIFT!", "pic": String(g.pic), "color": g.color, "duration": 3.0})
+
+
+## Every machine, when the pick orbs pop up (picks.gd show_row): a clear banner.
+func pick_banner() -> void:
+	_show_center("PICK ONE!", 2.4, false)
+
+
+## Every machine: the second pass's replicated state.
+func _on_deep_state(key: String, value: Variant) -> void:
+	match key:
+		"deep":
+			var dv: Array = value if value is Array else []
+			if dv.size() >= 3:
+				mode = String(dv[0])
+				gift = String(dv[1])
+				season = String(dv[2])
+				_set_course_meta()
+				if season_node != null:
+					season_node.set_season(season)
+				if gifts_node != null:
+					gifts_node.set_gift(gift)
+		"hz":
+			var hz := Deep.unpack(value if value is Array else [])
+			if hazards != null:
+				hazards.show_now(hz)
+			if not hz.is_empty():
+				_show_center(String(Deep.KIND_NAMES.get(String(hz.kind), "LOOK OUT!")), 2.0, false)
+		"town":
+			var tv: Array = value if value is Array else []
+			if town != null and tv.size() >= 2:
+				town.set_town(int(tv[0]), tv[1])
 
 
 func _exit_tree() -> void:
