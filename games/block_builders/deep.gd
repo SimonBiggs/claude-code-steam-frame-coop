@@ -96,8 +96,8 @@ const TV_R := 0.7  # a runner's middle (or the flat glove) this near an orb's sp
 const TV_DWELL := 0.8  # ... for this long to pick it
 ## Flat builder row: along X over the middle of the course (the flat camera looks down from +Z).
 const FLAT_X: Array[float] = [-3.0, 0.0, 3.0]
-const FLAT_Z := 0.5
-const FLAT_Y := 3.2
+const FLAT_Z := 3.0  # (in front of the course's middle clouds)
+const FLAT_Y := 4.0
 const FLAT_SCALE := 0.9
 ## VR row (metres, times builder.gd S = 8 world units): an arm's reach in front of the builder's eyes, just under eye
 ## level; GENTLE on the builder's left.
@@ -105,7 +105,7 @@ const S := 8.0
 const VR_X: Array[float] = [-0.3, 0.0, 0.3]
 const VR_AHEAD := 0.42
 const VR_BELOW := 0.14
-const VR_SCALE := 0.14  # (times S in the world)
+const VR_SCALE := 0.11  # (times S in the world)
 const HAND_R := 0.05  # metres: a hand this near an orb's ball touches it ...
 const DWELL := 0.35  # ... for this long (deliberate: a hand sweeping past never picks)
 const ROW_WAIT := {"mode": 20.0, "gift": 16.0}  # nobody took one: the middle
