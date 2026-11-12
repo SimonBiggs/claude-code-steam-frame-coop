@@ -394,6 +394,20 @@ export async function debt() {
     if (a && b && !a.equals(b))
       issues.push({ kind: "tool-copy", what: `${rel} differs from ${src.replace(HOME, "~")}`, fix: `cp ${src} ${repo} and commit` });
   }
+  // The gdev addon in the repo and every worktree matches its real source ~/.local/share/gdev: godot.launch / gdev
+  // start skip a newer edited project copy (with a warning), so a checkout behind the installed gdev would quietly
+  // test against an old one (2026-11-12). Every file, not just the TOOL_COPIES ones.
+  {
+    const GD = join(HOME, ".local/share/gdev");
+    const wts = (await sh("git worktree list --porcelain", LIVE)).out.split("\n").filter(l => l.startsWith("worktree ")).map(l => l.slice(9));
+    for (const wt of [...new Set([LIVE, ...wts])]) {
+      for (const f of ["bridge.gd", "caption.gd", "control.gd", "gdev_main.gd"]) {
+        const [a, b] = await Promise.all([readFile(join(GD, f)).catch(() => null), readFile(join(wt, "addons/gdev", f)).catch(() => null)]);
+        if (a && !b) issues.push({ kind: "gdev-addon", what: `${wt.replace(HOME, "~")}/addons/gdev/${f} is missing (installed: ~/.local/share/gdev/${f})`, fix: `cp ~/.local/share/gdev/${f} ${wt}/addons/gdev/ (and commit in the repo)` });
+        else if (a && b && !a.equals(b)) issues.push({ kind: "gdev-addon", what: `${wt.replace(HOME, "~")}/addons/gdev/${f} differs from ~/.local/share/gdev/${f}`, fix: `whichever is newer is the real one: cp it over the other (commit the repo copy; land, which installs it)` });
+      }
+    }
+  }
   // Real-play telemetry (2026-11-11: no family RUN lines reached the Steam Machine for 2 weeks and nobody noticed):
   // every machine pushes its RUN lines to duo-telemetry-recv; warn when nothing real has arrived for 7 days, or a
   // device had to drop lines it couldn't send.
