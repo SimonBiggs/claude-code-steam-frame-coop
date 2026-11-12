@@ -15,6 +15,7 @@ const Seeded := preload("res://core/seeded.gd")
 const Cups := preload("res://games/kart_race/cups.gd")
 const Items := preload("res://games/kart_race/items.gd")
 const StoryCard := preload("res://core/story_card.gd")
+const TestTime := preload("res://tests/test_time.gd")
 
 var fails := 0
 ## core/ui_kit.gd icon kinds the cups / items use as pictures (StoryCard.picture draws them too).
@@ -27,7 +28,7 @@ func _initialize() -> void:
 	var total := 0
 	var attempts := {}
 	var lens: Array[float] = []
-	var slowest := 0
+	var slowest := 0.0  # ms, TestTime.worst: a busy-machine spike re-times twice (1230 ms of 1500 in a nightly-style run)
 	for tour in 2:
 		for pl in Story.PLACES.size():
 			for step in Story.RACES_PER_PLACE:
@@ -51,9 +52,10 @@ func _initialize() -> void:
 				total += int(r.checked)
 				fails += (r.failures as Array).size()
 				for s in (1 if Seeded.quick() else 4):
-					var ts := Time.get_ticks_msec()
+					var ts := Time.get_ticks_usec()
 					var info := TrackGen.generate(500 + s * 31 + i, sp)
-					slowest = maxi(slowest, Time.get_ticks_msec() - ts)
+					var sd := 500 + s * 31 + i
+					slowest = TestTime.worst(slowest, (Time.get_ticks_usec() - ts) / 1000.0, func() -> Variant: return TrackGen.generate(sd, sp))
 					attempts[int(info.get("attempt", -1))] = int(attempts.get(int(info.get("attempt", -1)), 0)) + 1
 					var tr := TrackGen.Track.new()
 					tr.prepare(info)
@@ -85,9 +87,10 @@ func _initialize() -> void:
 					1 if Seeded.quick() else maxi(4, seeds / 2), 701 + c * 37 + race * 5 + (1 if m == "zoom" else 0), [] if Seeded.quick() else [3, 77], "KART CUP %s race %d %s" % [Cups.cup(c).id, race, m])
 				total += int(cr.checked)
 				fails += (cr.failures as Array).size()
-				var ts := Time.get_ticks_msec()
+				var ts := Time.get_ticks_usec()
 				var info := TrackGen.generate(9000 + c * 13 + race, sp)
-				slowest = maxi(slowest, Time.get_ticks_msec() - ts)
+				var sd := 9000 + c * 13 + race
+				slowest = TestTime.worst(slowest, (Time.get_ticks_usec() - ts) / 1000.0, func() -> Variant: return TrackGen.generate(sd, sp))
 				attempts[int(info.get("attempt", -1))] = int(attempts.get(int(info.get("attempt", -1)), 0)) + 1
 	for c in Cups.CUPS:
 		for kind in ["patch", "bump"]:
@@ -138,10 +141,10 @@ func _initialize() -> void:
 	for k in ["world", "story_i", "hats", "champs", "golds", "races", "tours", "daily"]:
 		_expect(d.has(k), "save default %s" % k)
 	lens.sort()
-	print("KART TRACKGEN: %d tracks checked in %d ms; lengths %.0f..%.0f m (median %.0f); attempts %s; slowest %d ms" % [
+	print("KART TRACKGEN: %d tracks checked in %d ms; lengths %.0f..%.0f m (median %.0f); attempts %s; slowest %.0f ms" % [
 		total, Time.get_ticks_msec() - t0, lens[0], lens[-1], lens[lens.size() / 2], str(attempts), slowest])
 	_expect(not attempts.has(-1), "no fallbacks")
-	_expect(slowest < 1500, "a track generates in under 1.5 s (%d ms)" % slowest)
+	_expect(slowest < 1500, "a track generates in under 1.5 s (%.0f ms)" % slowest)
 	print("KART TRACKGEN: %s (%d failures)" % ["PASS" if fails == 0 else "FAIL", fails])
 	quit(0 if fails == 0 else 1)
 

@@ -22,6 +22,7 @@ const Picks := preload("res://games/marble_maze/picks.gd")
 const Main := preload("res://games/marble_maze/main.gd")
 const PickOrbs := preload("res://core/pick_orbs.gd")
 const Contrast := preload("res://core/contrast.gd")
+const TestTime := preload("res://tests/test_time.gd")
 
 var fails := 0
 
@@ -50,9 +51,9 @@ func _initialize() -> void:
 					_fail("%s / %s / story %d seed %d: %s" % [mode, wd.id, i, 1000 + s, x])
 				var e0 := Time.get_ticks_usec()
 				var ev := Worlds.events(def, mode)
+				ev_ms = TestTime.worst(ev_ms, (Time.get_ticks_usec() - e0) / 1000.0, func() -> Variant: return Worlds.events(def, mode))
 				for x in Worlds.event_problems(def, ev, mode):
 					_fail("%s / %s / story %d: events: %s" % [mode, wd.id, i, x])
-				ev_ms = maxf(ev_ms, (Time.get_ticks_usec() - e0) / 1000.0)
 				if var_to_str(ev) != var_to_str(Worlds.events(Story.maze(1000 + s, i, mode, str(wd.id)), mode)):
 					_fail("%s / %s / story %d: events differ between two makes" % [mode, wd.id, i])
 				sum.holes += int(MazeGen.features(def).get("O", 0))
