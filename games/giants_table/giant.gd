@@ -271,6 +271,9 @@ func _set_layers(node: Node, layers: int) -> void:
 func _pose_hand(h: Hand, xf: Transform3D, grip: float) -> void:
 	if h.ctrl == null:
 		h.root.global_transform = xf
+	var hs: float = main.hand_scale()  # (Sparky's BIG HANDS gift)
+	if not is_equal_approx(h.root.scale.x, hs):
+		h.root.scale = Vector3.ONE * hs
 	for f in h.fingers:
 		f.rotation.x = -grip * 1.25
 	h.thumb.rotation.x = -grip * 0.6
@@ -385,8 +388,8 @@ func _try_grab(h: Hand) -> bool:
 		return false
 	var best = null
 	var best_d := INF
-	var reach := FLAT_REACH if flat else VR_REACH
-	for group in ["goblins", "boulders", "embers", "props", "knights"]:
+	var reach: float = (FLAT_REACH if flat else VR_REACH) * main.grab_reach()  # (Sparky's BIG HANDS gift: further)
+	for group in ["goblins", "boulders", "embers", "props", "knights", "tricks"]:  # (tricks: a goblin trick's ball / barrel, hazards.gd)
 		for o in get_tree().get_nodes_in_group(group):
 			if o.is_queued_for_deletion() or (group == "knights" and not o.active):
 				continue
