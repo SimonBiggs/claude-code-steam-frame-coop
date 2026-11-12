@@ -456,7 +456,7 @@ func _xr_nodes() -> Dictionary:
 	var root := get_tree().root
 	var cams := root.find_children("*", "XRCamera3D", true, false)
 	var ctrls := root.find_children("*", "XRController3D", true, false)
-	var out := {"head": cams[0] if cams.size() else null, "left": null, "right": null}
+	var out := {"head": _vr_head(cams), "left": null, "right": null}
 	for c in ctrls:
 		var t := str((c as XRController3D).tracker)
 		if t == "left_hand" and out.left == null:
@@ -464,6 +464,22 @@ func _xr_nodes() -> Dictionary:
 		elif t == "right_hand" and out.right == null:
 			out.right = c
 	return out
+
+
+## The VR player's head (same pick as core/vr_view_check.gd vr_camera): the current XRCamera3D, else the first one a
+## headset would track (under an XROrigin3D, or meta "vr_head_fitted": placed by the game where its fit puts a real
+## head), else the first. (A stray XRCamera3D first in the tree made vrShot look from the wrong spot.)
+static func _vr_head(cams: Array) -> XRCamera3D:
+	var tracked: XRCamera3D = null
+	for n in cams:
+		var c := n as XRCamera3D
+		if c == null or not c.is_inside_tree():
+			continue
+		if c.current:
+			return c
+		if tracked == null and (c.get_parent() is XROrigin3D or c.has_meta("vr_head_fitted")):
+			tracked = c
+	return tracked if tracked != null else (cams[0] as XRCamera3D if cams.size() else null)
 
 
 func _v3(a) -> Vector3:
@@ -564,11 +580,14 @@ func _camshot(r: Dictionary) -> Dictionary:
 		return {"error": "no camera (default is the VR head: launch with BOT_VR=1)"}
 	var w := int(r.get("width", 1280))
 	var h := int(r.get("height", 720))
-	# stereo: what a headset really shows: one view per eye, 64 mm apart, ~100 degrees each, side by side (like
-	# SteamVR's mirror). Mono (default): one 90 degree view from between the eyes.
-	var eyes: Array = [[0.0, w]] if not bool(r.get("stereo", false)) else [[-0.032, w / 2], [0.032, w / 2]]
+	# stereo: what a headset really shows: one view per eye, 64 mm apart (times XRServer.world_scale, like a headset in a
+	# giant / tabletop game), ~100 degrees each, side by side (like SteamVR's mirror). Mono (default): one 90 degree
+	# view from between the eyes.
+	var ipd := 0.032 * (XRServer.world_scale if src is XRCamera3D else 1.0)
+	var eyes: Array = [[0.0, w]] if not bool(r.get("stereo", false)) else [[-ipd, w / 2], [ipd, w / 2]]
 	var imgs: Array[Image] = []
 	var vps: Array[SubViewport] = []
+	var rides: Array[Node] = []
 	for e in eyes:  # every eye in the same frames (a moving hand stays put between them)
 		var vp := SubViewport.new()
 		vp.size = Vector2i(int(e[1]), h)
@@ -583,9 +602,21 @@ func _camshot(r: Dictionary) -> Dictionary:
 		add_child(vp)
 		cam.global_transform = src.global_transform.translated_local(Vector3(float(e[0]), 0.0, 0.0))
 		cam.current = true
+		# Ride on the source camera while the frames draw: a camera copied once was 3 frames behind a moving rig (a kart at
+		# speed: the shot looked from inside its own back end, 2026-11-12).
+		var ride := RemoteTransform3D.new()
+		ride.name = "GDevShotEye"
+		ride.position = Vector3(float(e[0]), 0.0, 0.0)
+		ride.update_scale = false
+		src.add_child(ride)
+		ride.remote_path = ride.get_path_to(cam)
+		rides.append(ride)
 		vps.append(vp)
 	for i in 3:
 		await RenderingServer.frame_post_draw
+	for ride in rides:
+		if is_instance_valid(ride):
+			ride.queue_free()
 	for vp in vps:
 		var img := _grab(vp)
 		vp.queue_free()

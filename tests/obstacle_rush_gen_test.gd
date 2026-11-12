@@ -113,6 +113,7 @@ func _initialize() -> void:
 		_fail("story: " + w)
 	print("course gen: %d courses checked, %d failures" % [total, fails])
 	print("BOT RESULT: %s" % ("PASS" if fails == 0 else "FAIL"))
+	print("RUSH GEN: %s" % ("PASS" if fails == 0 else "FAIL (%d)" % fails))
 	quit(0 if fails == 0 else 1)
 
 

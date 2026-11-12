@@ -11,12 +11,17 @@ extends Node
 ## then the next show is seeded; OR_SHOWS=3 starts on seeded courses at tier 2). BOT_NO_DAILY skips TODAY'S
 ## COURSE. Also checks: stars get grabbed and the grandstand gains fans (story.gd), every seeded course
 ## the show plays passes coursegen.gd check(), and the client builds the very same course as the host.
+## Second pass (deep.gd): the bot plays as if OR_SHOWS (default 2) shows were done, so the mode and gift picks come up:
+## TV runners walk under a start orb and stand there (each bot its own), the VR giant alone reaches into a small orb in
+## front of it; runners wait just before a told surprise (OR_TRICKS_NOW is set: surprises on a show's first course
+## too; BOT_NO_TRICKS=1 for none). OR_SHOWS=0 plays the lessons (and the practice target).
 
 const BotKit := preload("res://tests/bot_kit.gd")
 const VrRig := preload("res://core/vr_rig.gd")
 const CpuBrain := preload("res://games/obstacle_rush/cpu_brain.gd")
 const CourseGen := preload("res://games/obstacle_rush/coursegen.gd")
 const Story := preload("res://games/obstacle_rush/story.gd")
+const Deep := preload("res://games/obstacle_rush/deep.gd")
 
 var kit: BotKit
 var main: Node
@@ -36,6 +41,12 @@ var grabs := 0
 var course_keys := {}  # var_to_str(cdesc) -> course name
 var gen_checked := 0
 var short := false  ## the run ends before the bot's whole run (solo VR host BOT_END=62, a 60 s local run)
+var saw_orbs := false
+var saw_vr_orbs := false
+var waited := 0  # times a bot runner waited before a told surprise
+var fence_ok := true  # nobody ran past the start while the orbs were up
+var hz_seen := {}  # kind -> true (every machine)
+var on_lessons := false  # host / local: orbs or a surprise during the lessons show
 
 
 func _ready() -> void:
@@ -43,7 +54,9 @@ func _ready() -> void:
 	kit = BotKit.new()
 	add_child(kit)
 	main = load("res://games/obstacle_rush/main.tscn").instantiate()
-	main.force_shows = int(OS.get_environment("OR_SHOWS")) if OS.has_environment("OR_SHOWS") else 0
+	main.force_shows = int(OS.get_environment("OR_SHOWS")) if OS.has_environment("OR_SHOWS") else 2
+	if not OS.has_environment("BOT_NO_TRICKS"):
+		OS.set_environment("OR_TRICKS_NOW", "1")
 	add_child(main)
 	kit.main = main
 	want = BotKit.bot_players(2, 6)
@@ -108,6 +121,17 @@ func _results() -> String:
 func _physics_process(delta: float) -> void:
 	if main == null or not main.ready_to_play or main.course == null:
 		return
+	if main.picks != null and main.picks.showing():
+		saw_orbs = true
+		saw_vr_orbs = saw_vr_orbs or bool(main.picks.vr_row)
+		if String(main.net.state_get("phase", "")) == "pick" and not main.course.desc.is_empty():
+			for r in main.runners.values():
+				if r.owned and r.position.x > main.course.start_x + Deep.FENCE + 0.05:
+					fence_ok = false
+	for e in main.hazards.tells_now():
+		hz_seen[String(e.kind)] = true
+	if main.net.mode != "client" and main.show_no == 0 and (main.picks.showing() or not main.hazards.tells_now().is_empty()):
+		on_lessons = true
 	for slot in main.party.local_slots():
 		_tv_bot(slot, delta)
 	if main.vr_rig != null:
@@ -128,6 +152,17 @@ func _tv_bot(slot: int, delta: float) -> void:
 		br.set_meta("course", main.built_key)
 		br.reset(slot * 17 + 3 + main.built_key.length())
 	br.think(r, main.course, delta)
+	# Pick orbs over the start: walk under one (each bot its own) and stand there.
+	if main.picks.showing() and not main.picks.vr_row and not main.picks.spots.is_empty():
+		var sp: Vector3 = main.picks.spots[slot % main.picks.spots.size()]
+		var to := Vector3(sp.x - r.position.x, 0.0, sp.z - r.position.z)
+		br.out_move = to.normalized() if to.length() > 0.2 else Vector3.ZERO
+		br.out_jump = false
+	elif main.hazards.wait_for(r.position):  # a surprise told just in front: wait for it
+		if br.out_move != Vector3.ZERO:
+			waited += 1
+		br.out_move = Vector3.ZERO
+		br.out_jump = false
 	var cam: Camera3D = main.split.active_camera(slot)
 	var f := -cam.global_basis.z
 	f.y = 0.0
@@ -145,6 +180,13 @@ func _vr_bot(delta: float) -> void:
 	var g = main.giant
 	kit.vr_head_height(rig)  # the standard fake player (VrRig.fake_eye, x world_scale)
 	vr_t += delta
+	if main.picks.showing() and main.picks.vr_row:  # the small orbs in front of the giant: reach into one and stay
+		kit.vr_trigger(rig, 0.0)
+		var op: Vector3 = main.picks.orb_position(2)
+		if op != Vector3.INF and main.picks.t > 1.0:
+			kit.vr_reach(rig, VrRig.RIGHT, op, 12.0, delta)
+		vr_step = "idle"
+		return
 	match vr_step:
 		"idle":
 			if String(main.net.state_get("phase", "")) != "play":
@@ -243,6 +285,7 @@ func _checks() -> void:
 	kit.assert_true(seen_courses.size() >= several, "%s: played through several courses (%d%s)" % [mode, seen_courses.size(), ", short run" if short else ""])
 	kit.assert_true(gen_checked >= several, "%s: checked the courses it built (%d)" % [mode, gen_checked])
 	kit.assert_true(main.stands.fans == mini(int(main.net.state_get("fans", 0)), Story.MAX_FANS), "%s: the grandstand shows the fans (%d)" % [mode, main.stands.fans])
+	_deep_checks(mode)
 	if mode == "client":
 		kit.assert_true(main.runners.size() >= 3, "client mirrors the runners (%d)" % main.runners.size())
 		kit.assert_true(main.course.checkpoints.size() > 0, "client built the course")
@@ -268,6 +311,40 @@ func _checks() -> void:
 	if main.vr_rig != null:
 		kit.assert_true(vr_throws > 0, "the fake VR giant threw balls (%d)" % vr_throws)
 		kit.assert_true(main.ghost.shown, "the ghost glove showed the throw")
-		if not OS.has_environment("OR_COURSE") and int(OS.get_environment("OR_SHOWS")) == 0:  # (the target is on the first lesson)
+		if not OS.has_environment("OR_COURSE") and main.force_shows == 0:  # (the target is on the first lesson)
 			kit.assert_true(int(main.net.state_get("target_hit", 0)) > 0, "the practice target got hit")
 		kit.assert_true(pokes.size() >= 3, "the giant poked things (%d)" % pokes.size())
+
+
+## Second pass: picks, surprises, seasons, the medal hall (deep.gd).
+func _deep_checks(mode: String) -> void:
+	var lessons: bool = main.force_shows == 0
+	kit.assert_true(main.season_node != null and main.season_node.season != "", "%s: the course is dressed for the season (%s)" % [mode, main.season])
+	kit.assert_true(main.hall != null and main.hall.total >= 0, "%s: the medal hall is built (%d)" % [mode, main.hall.total])
+	kit.assert_true(Deep.MODES.has(main.mode), "%s: a mode is set (%s)" % [mode, main.mode])
+	kit.assert_true(fence_ok, "%s: nobody ran into the course while the orbs were up" % mode)
+	kit.info("%s: mode %s, gift %s, season %s, surprises seen %s, bots waited %d, vr orbs %s, picks %s" % [mode, main.mode,
+		main.gift, main.season, str(hz_seen.keys()), waited, str(saw_vr_orbs), str(main.picks.history)])
+	if lessons:
+		kit.assert_true(not on_lessons, "%s: the lessons have no picks or surprises" % mode)
+		return
+	kit.assert_true(saw_orbs, "%s: the pick orbs showed" % mode)
+	if not OS.has_environment("BOT_NO_TRICKS"):
+		kit.assert_true(not hz_seen.is_empty(), "%s: Coach Jelly's surprises were told %s" % [mode, str(main.hazards.seen)])
+	if mode == "client":
+		return
+	var stages: Array = main.picks.history.map(func(h: Array) -> String: return String(h[0]))
+	kit.assert_true(stages.has("mode"), "%s: the mode was picked %s" % [mode, str(main.picks.history)])
+	if not short:
+		kit.assert_true(stages.has("gift"), "%s: a gift was picked before a later course %s" % [mode, str(main.picks.history)])
+		kit.assert_true(int(main.save.data.medal_total) > 0 and main.hall.total == int(main.save.data.medal_total), "%s: a medal went up in the hall (%d)" % [mode, main.hall.total])
+	var people: bool = main._people() > 0
+	var by_someone := false
+	for h in main.picks.history:
+		if int(h[2]) >= 0:
+			by_someone = true
+	if people or main.vr_rig != null:
+		kit.assert_true(by_someone, "%s: a player really picked an orb (not just the wait) %s" % [mode, str(main.picks.history)])
+	if main.vr_rig != null and not people:
+		kit.assert_true(saw_vr_orbs, "%s: VR alone: the orbs float in front of the giant" % mode)
+	kit.assert_true(String(main.save.data.mode) != "", "%s: the mode is saved" % mode)
