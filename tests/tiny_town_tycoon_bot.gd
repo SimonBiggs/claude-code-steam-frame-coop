@@ -54,6 +54,7 @@ var unplug_dev := -1
 var unplug_slot := -1
 var home_n := 0  ## buildings in the home town when the boat sailed
 var granted := 0  ## wishes the bot mayor granted on purpose
+var wish_skips := {}  ## "<wish id> <why>": wishes the bot mayor said it can't grant (said once each)
 
 
 func _ready() -> void:
@@ -276,9 +277,11 @@ func _next_step() -> Array:
 		for w in main.wishes.list:
 			var wk := String(w["kind"])
 			if main.place_problem(wk, 0, 0).begins_with("Unlocks"):
+				_wish_skip(w, "locked: " + main.place_problem(wk, 0, 0))
 				continue
 			var sp: Vector2i = main.wishes.spot_for(w)
 			if sp.x < 0:
+				_wish_skip(w, "no spot")
 				continue
 			if main.town.on_road({"kind": wk, "x": sp.x, "z": sp.y}):
 				var entry := [wk, [sp]]
@@ -300,6 +303,9 @@ func _next_step() -> Array:
 						return plan[step]
 					plan.insert(step, ["road", _ordered(cells)])
 					return plan[step]
+				_wish_skip(w, "road there, but not on it")
+			else:
+				_wish_skip(w, "no road can reach its spot %s" % str(sp))
 	while step < plan.size():
 		var st: Array = plan[step]
 		var kind := String(st[0])
@@ -323,6 +329,14 @@ func _next_step() -> Array:
 			continue
 		return [kind, [c]]
 	return []
+
+
+## Say once why the mayor bot isn't granting wish `w` (a run with no wish granted is a failed check: tell why).
+func _wish_skip(w: Dictionary, why: String) -> void:
+	var k := "%d %s" % [int(w["id"]), why]
+	if not wish_skips.has(k):
+		wish_skips[k] = true
+		kit.info("wish %d (%s at %d,%d) not aimed at: %s" % [int(w["id"]), String(w["kind"]), int(w["x"]), int(w["z"]), why])
 
 
 ## Road cells in drawing order (each next to the last, from the end that touches an old road).
@@ -755,12 +769,7 @@ func _is_instruction(t: String) -> bool:
 
 
 func _in_story_card(n: Node) -> bool:
-	var p := n
-	while p != null and p != main:
-		if p is StoryCardScript.Card or (main._vr_story != null and is_instance_valid(main._vr_story) and p == main._vr_story):
-			return true
-		p = p.get_parent()
-	return false
+	return StoryCardScript.is_story(n)  # (TV or VR card, also one being replaced: core/story_card.gd)
 
 
 ## Every 0.5 s: no how-to text in the game's HUD or VR text (the core pause menu is not the game's).
