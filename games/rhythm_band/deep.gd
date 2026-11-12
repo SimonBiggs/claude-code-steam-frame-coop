@@ -88,6 +88,8 @@ const ROW_X: Array[float] = [-0.42, 0.0, 0.42]
 ## (up from -0.12: a seated player's outer orbs sat on the hi-hat and the crash, core/vr_view_check.gd pick_hidden)
 const ROW_Y := -0.02
 const ROW_Z := -0.72
+## The row's distance out never shrinks below this share of ROW_Z (a seated player's 0.7 kit scale).
+const ROW_Z_MIN_S := 0.9
 const ORB_SCALE := 0.2
 const HAND_R := 0.06  # a hand this near an orb's edge is in it
 const DWELL := 0.25  # seconds a hand must stay in an orb (a swing through never picks)
