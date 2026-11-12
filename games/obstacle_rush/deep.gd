@@ -85,7 +85,8 @@ const ZOOM := 1.2  # ZOOM SHOES: running speed x this
 const HALL_SHOWN := 48  # medals hung (the newest; the count keeps going): two boards of HALL_ROW x 3 (hall.gd)
 const HALL_ROW := 8
 const TROPHY_EVERY := 8
-const MEDAL_COLORS := {"gentle": Color(0.85, 0.55, 0.3), "brave": Color(0.82, 0.86, 0.92), "hard": Color(1.0, 0.82, 0.25)}
+const MEDAL_METAL := {"gentle": "bronze", "brave": "silver", "hard": "gold"}  # (the ribbon is the mode's own colour)
+const METALS := {"bronze": Color(0.85, 0.55, 0.3), "silver": Color(0.82, 0.86, 0.92), "gold": Color(1.0, 0.82, 0.25)}
 ## The start pick row: three big orbs across the course (z), AHEAD m past the start line, ORB_Y over the start floor.
 const ROW_Z: Array[float] = [-2.0, 0.0, 2.0]
 const ROW_AHEAD := 1.1
@@ -383,7 +384,7 @@ static func trophies(medals: int) -> int:
 
 
 static func medal_color(mode: String) -> Color:
-	return MEDAL_COLORS.get(mode_of(mode), MEDAL_COLORS.brave)
+	return METALS[String(MEDAL_METAL[mode_of(mode)])]
 
 
 # --- The pick rows --------------------------------------------------------------------------------------------

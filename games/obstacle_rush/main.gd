@@ -76,6 +76,7 @@ const HOP_IN_TIME := 70.0  ## after this, runners still on the course hop to the
 const AFTER_FIRST := 35.0  ## ... or this long after the first person got there
 const FLAG_DOWN := 3.6  ## the board's flags (above the grandstand) ...
 const FLAG_UP := 7.0  ## ... and raised for a course done
+const VR_CARD_UP := 0.3  ## VR story cards float this far (m) above eye level, over the course's high floors
 const TABLE_W := 42.0  ## the picnic table (coursegen.gd keeps courses within x -19..19)
 
 # --- The networking contract ---
@@ -1134,7 +1135,9 @@ func show_story(beat: Dictionary) -> void:
 	if vr_rig != null:
 		if vr_story != null and is_instance_valid(vr_story):
 			vr_story.queue_free()
-		vr_story = StoryCard.show_vr(self, vr_rig.camera, beat)
+		var vb := beat.duplicate()
+		vb["vr_height"] = VR_CARD_UP  # above the toy course: a step or a high floor right in front would hide it at eye level
+		vr_story = StoryCard.show_vr(self, vr_rig.camera, vb)
 
 
 func _coach(line: String, pic: String = "coach") -> Dictionary:
@@ -1452,6 +1455,13 @@ func _add_medal() -> void:
 		_story(_coach("A gold cup!", "trophy"))
 
 
+## Every machine, when the pick orbs pop up (picks.gd show_row): a clear banner over the course's.
+func pick_banner() -> void:
+	if split != null:
+		HudKit.banner(_all_huds(), "PICK ONE!", "", {"duration": 2.4, "color": Color(1.0, 0.85, 0.3)})
+	show_headline("PICK ONE!")
+
+
 ## Every machine: the second pass's replicated state.
 func _on_deep_state(key: String, value: Variant) -> void:
 	match key:
@@ -1488,11 +1498,6 @@ func _on_deep_state(key: String, value: Variant) -> void:
 			var mv: Array = value if value is Array else []
 			if hall != null and mv.size() >= 2:
 				hall.set_medals(int(mv[0]), mv[1])
-		"phase":
-			if String(value) == "pick":
-				if split != null:
-					HudKit.banner(_all_huds(), "PICK ONE!", "", {"duration": 2.0, "color": Color(1.0, 0.85, 0.3)})
-				show_headline("PICK ONE!")
 
 
 # --- Networking -----------------------------------------------------------------------------------

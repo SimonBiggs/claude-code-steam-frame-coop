@@ -46,6 +46,7 @@ var saw_vr_orbs := false
 var waited := 0  # times a bot runner waited before a told surprise
 var fence_ok := true  # nobody ran past the start while the orbs were up
 var hz_seen := {}  # kind -> true (every machine)
+var on_lessons := false  # host / local: orbs or a surprise during the lessons show
 
 
 func _ready() -> void:
@@ -129,6 +130,8 @@ func _physics_process(delta: float) -> void:
 					fence_ok = false
 	for e in main.hazards.tells_now():
 		hz_seen[String(e.kind)] = true
+	if main.net.mode != "client" and main.show_no == 0 and (main.picks.showing() or not main.hazards.tells_now().is_empty()):
+		on_lessons = true
 	for slot in main.party.local_slots():
 		_tv_bot(slot, delta)
 	if main.vr_rig != null:
@@ -323,7 +326,7 @@ func _deep_checks(mode: String) -> void:
 	kit.info("%s: mode %s, gift %s, season %s, surprises seen %s, bots waited %d, vr orbs %s, picks %s" % [mode, main.mode,
 		main.gift, main.season, str(hz_seen.keys()), waited, str(saw_vr_orbs), str(main.picks.history)])
 	if lessons:
-		kit.assert_true(not saw_orbs and hz_seen.is_empty(), "%s: the lessons have no picks or surprises" % mode)
+		kit.assert_true(not on_lessons, "%s: the lessons have no picks or surprises" % mode)
 		return
 	kit.assert_true(saw_orbs, "%s: the pick orbs showed" % mode)
 	if not OS.has_environment("BOT_NO_TRICKS"):

@@ -242,7 +242,7 @@ func _initialize() -> void:
 	_expect(Deep.HALL_SHOWN == Hall.PER_BOARD * Hall.BOARD_X.size(), "the hall's boards hold every medal shown")
 	_expect(StoryCard.has_picture("medal") and StoryCard.has_picture("trophy"), "the medal hall has pictures")
 	for m in PickOrbs.MODE_IDS:
-		_expect(Deep.MEDAL_COLORS.has(m), "a %s medal has a colour" % m)
+		_expect(Deep.MEDAL_METAL.has(m), "a %s medal has a metal" % m)
 	_expect(Hall.BOARD_BOTTOM >= 2.9, "the hall stands over the grandstand's back rail")
 	_expect(Story.save_defaults().has("medals") and Story.save_defaults().has("medal_total"), "the medals are saved")
 	# The VR pick row: an arm's reach, small, apart.
