@@ -219,7 +219,14 @@ var session_t := 0.0
 var quit_logged := false
 var host_museum := 0  # TV: how many models the host's Rocket Row has (snapshots)
 ## Second pass (deep.gd): the session's mode, this rocket's gift, the season, the picks and the meteors.
-var play_mode := "brave"  # GENTLE / BRAVE / HARD (every machine: snapshots)
+## GENTLE / BRAVE / HARD. The host's pick rules every machine: set on the host / local game it goes out as net state
+## "mode", and a TV machine takes it from there (_on_state_changed) and the snapshots, never from its own save
+## (2026-11-12: a TV machine played at its own saved mode until the first snapshot).
+var play_mode := "brave":
+	set(v):
+		play_mode = v
+		if net != null and net.mode != "client":
+			net.state_set("mode", v)
 var mode_picked := false
 var gift_id := ""  # Sprocket's gift on this rocket ("" none; every machine: snapshots)
 var season := "spring"
@@ -282,6 +289,7 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
+	net.state_changed.connect(_on_state_changed)
 	net.sticky_event("museum")  # a machine that joins later gets the latest Rocket Row (core/net.gd)
 	net.sticky_event("orbs")  # a machine joining mid-pick sees the orbs (picks.gd)
 	seats = ClassicSeats.new(self, {
@@ -318,6 +326,7 @@ func _setup_game(mode: String) -> void:
 		players[1].set_meta("want_join", true)  # ask the host for a crew spot (it may hand out another one)
 	_restore_party()
 	if mode != "client":
+		net.state_set("mode", play_mode)
 		museum.set_entries(_museum_packed())
 		net.event("museum", [museum.entries])  # sticky: every machine that joins gets Rocket Row
 		save.data.sessions = int(save.data.sessions) + 1
@@ -338,6 +347,12 @@ func _setup_game(mode: String) -> void:
 		_show_center("CONNECTED!\nFind the boards with BOUNCING ARROWS and tell the pilot what they say!", 3.0)
 	else:
 		_show_center("ROCKET WORKSHOP\nPilot: work the desk.  Crew: read the blueprints out loud!", 3.0)
+
+
+## Any machine: a TV machine plays at the host's mode.
+func _on_state_changed(key: String, value: Variant) -> void:
+	if key == "mode" and net.mode == "client" and value != null:
+		play_mode = Deep.mode_of(String(value))
 
 
 func _exit_tree() -> void:

@@ -231,7 +231,13 @@ var night_live := false  # a night is being played (for the quit RUN line)
 var night_time := 0.0  # seconds played tonight (game time)
 var story_count := 0  # story cards shown (the bot checks Granny Boo speaks)
 # Second pass: modes, lantern gifts on the pick orbs, warning rings for hops, wings.
-var game_mode := "gentle"  # gentle / brave / hard (PickOrbs.MODES), picked before night 1 (mirrored)
+## gentle / brave / hard (PickOrbs.MODES), picked before night 1 (mirrored: snapshots carry it). The host also
+## shares it as net state "mode" (the shared host-difficulty check reads it, 2026-11-12). Never set it on a client by hand.
+var game_mode := "gentle":
+	set(v):
+		game_mode = v
+		if net != null and net.mode != "client":
+			net.state_set("mode", v)
 var mode_picked := false  # host: this visit's mode is chosen
 var upgrades := {}  # lantern gifts this visit: id -> level (PicksScript.UPGRADES; mirrored)
 var gift_night := 0  # host: the last night a lantern gift was offered after

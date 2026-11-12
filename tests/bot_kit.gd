@@ -296,6 +296,28 @@ func assert_near(a: float, b: float, tolerance: float, msg: String) -> bool:
 	return assert_true(absf(a - b) <= tolerance, "%s (got %.3f, want %.3f +- %.3f)" % [msg, a, b, tolerance])
 
 
+## A TV machine (net.mode "client") plays at the host's difficulty: the host shares it as net state `key` and `mine`
+## (this machine's own value, e.g. main.game_mode) must match it. On the host / local game it only checks the host
+## shares it. Call it late in a networked run, after the host's mode pick (Duo Arena 2026-11-12: the TV kept its own
+## "brave" while the host played gentle, so its pad / charge / fire tells were wrong). tests/net_mode_sync_test.gd
+## makes every networked game with a difficulty either call this from its bot or say why its clients never read it.
+func check_host_mode(net: Node, mine: String, key := "mode") -> bool:
+	var why := host_mode_problem(net, mine, key)
+	return assert_true(why == "", why if why != "" else "this machine plays at the host's difficulty ('%s': %s)" % [key, mine])
+
+
+## The same check for bots without a BotKit (they record it their own way): "" = fine, else what's wrong.
+static func host_mode_problem(net: Node, mine: String, key := "mode") -> String:
+	if net == null or not (net.mode in ["host", "client"]):
+		return ""
+	var host: Variant = net.state_get(key)
+	if host == null:
+		return "the host never shared its difficulty as net state '%s' (%s machine)" % [key, net.mode]
+	if mine != str(host):
+		return "this %s machine plays at %s, the host at %s ('%s')" % [net.mode, mine, str(host), key]
+	return ""
+
+
 ## Print the summary and quit (exit code 1 if anything failed).
 func finish(quit: bool = true, note := "") -> void:
 	if _finished:

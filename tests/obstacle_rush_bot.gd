@@ -280,6 +280,7 @@ func _checks() -> void:
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
 	if mode != "host":
 		kit.assert_eq(kit.seated(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
+	kit.check_host_mode(main.net, main.mode)  # the TV machine plays at the host's mode ("deep" state)
 	var several := 2 if short else 3  # (a cut-short run: solo VR host BOT_END=62, a 60 s local run)
 	var courses := kit.seen_values("course").size()
 	kit.assert_true(courses >= several, "%s: played through several courses (%d%s)" % [mode, courses, ", short run" if short else ""])
@@ -334,7 +335,8 @@ func _deep_checks(mode: String) -> void:
 	if mode == "client":
 		return
 	var stages: Array = main.picks.history.map(func(h: Array) -> String: return String(h[0]))
-	kit.assert_true(stages.has("mode"), "%s: the mode was picked %s" % [mode, str(main.picks.history)])
+	var forced := OS.has_environment("OR_MODE")  # (OR_MODE skips the mode pick: a networked run at the host's HARD)
+	kit.assert_true(forced or stages.has("mode"), "%s: the mode was picked %s" % [mode, str(main.picks.history)])
 	if not short:
 		kit.assert_true(stages.has("gift"), "%s: a gift was picked before a later course %s" % [mode, str(main.picks.history)])
 		kit.assert_true(int(main.save.data.medal_total) > 0 and main.hall.total == int(main.save.data.medal_total), "%s: a medal went up in the hall (%d)" % [mode, main.hall.total])
@@ -347,4 +349,4 @@ func _deep_checks(mode: String) -> void:
 		kit.assert_true(by_someone, "%s: a player really picked an orb (not just the wait) %s" % [mode, str(main.picks.history)])
 	if main.vr_rig != null and not people:
 		kit.assert_true(saw_vr_orbs, "%s: VR alone: the orbs float in front of the giant" % mode)
-	kit.assert_true(String(main.save.data.mode) != "", "%s: the mode is saved" % mode)
+	kit.assert_true(forced or String(main.save.data.mode) != "", "%s: the mode is saved" % mode)

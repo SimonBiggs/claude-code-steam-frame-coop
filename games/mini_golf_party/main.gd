@@ -1361,6 +1361,7 @@ func _update_story(delta: float) -> void:
 ## Host: the mode, gift and season to every machine (the "deep" state; late joiners get it too).
 func _send_deep() -> void:
 	net.state_set("deep", [mode, gift, season])
+	net.state_set("mode", mode)  # (the shared "host's difficulty" key: tests/bot_kit.gd check_host_mode)
 
 
 ## Every machine: the mode, this course's gift and the season.

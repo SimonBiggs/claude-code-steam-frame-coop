@@ -313,6 +313,7 @@ func _checks() -> void:
 	kit.assert_true(orbs_seen.has("mode") or mode == "client", "%s: the mode was picked on the pick orbs (%s)" % [mode, str(orbs_seen.keys())])
 	kit.assert_true(orbs_seen.has("gift") or mode == "client", "%s: Peg's tools were offered on the pick orbs" % mode)
 	kit.assert_true(String(main.net.state_get("mode", "")) in ["gentle", "brave", "hard"], "%s: a mode reached this machine (%s)" % [mode, str(main.net.state_get("mode", ""))])
+	kit.check_host_mode(main.net, String(main.mode))  # every machine digs at the host's mode (2026-11-12)
 	kit.assert_true(main.gift != "" or orbs_seen.has("gift") or main.results_showing(), "%s: a tool was picked (%s)" % [mode, main.gift])
 	kit.assert_true(events_max > 0, "%s: warned events were told by rings here (%d)" % [mode, events_max])
 	kit.assert_true(main.deco_node != null and is_instance_valid(main.deco_node), "%s: the island wears the %s dress" % [mode, main.season])

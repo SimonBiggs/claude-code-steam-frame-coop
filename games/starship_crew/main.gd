@@ -1382,6 +1382,7 @@ func _send_deep() -> void:
 	if OS.has_environment("SC_CREW"):  # (tests / screenshots: show this many friends, never saved)
 		friends = clampi(int(OS.get_environment("SC_CREW")), 0, Deep.CREW.size())
 	net.state_set("deep", [mode, gift, season, friends])
+	net.state_set("mode", mode)  # (the bots check a TV machine plays at it: tests/bot_kit.gd check_host_mode)
 
 
 ## Nobody here could take a pick (no pilot, no gunner): the middle comes sooner.

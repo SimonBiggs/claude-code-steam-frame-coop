@@ -254,6 +254,7 @@ func _report() -> String:
 func _checks() -> void:
 	var mode: String = main.net.mode
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
+	kit.check_host_mode(main.net, main.play_mode)  # the TV machine plays at the host's mode ("deep" state)
 	if mode == "client":
 		kit.assert_eq(main.party.local_slots().size(), want, "client: all %d local players are seated" % want)
 	else:

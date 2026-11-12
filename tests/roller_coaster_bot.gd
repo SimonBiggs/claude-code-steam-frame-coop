@@ -331,6 +331,7 @@ func _checks() -> void:
 	var mode: String = main.net.mode
 	_story_checks(mode)
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
+	kit.check_host_mode(main.net, String(main.mode))  # every machine rides at the host's mode (2026-11-12)
 	kit.assert_true(saw_ride, "%s: the train rode" % mode)
 	kit.assert_true(int(main.net.state_get("rides", 0)) >= (1 if mode == "client" else 2), "%s: rides finished (%d)" % [mode, int(main.net.state_get("rides", 0))])
 	kit.assert_true(int(main.net.state_get("score", 0)) > 0, "%s: stars were grabbed" % mode)

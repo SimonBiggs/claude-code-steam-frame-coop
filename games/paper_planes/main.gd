@@ -195,7 +195,7 @@ var picks: Node  # picks.gd (host / local run the picks; every machine shows the
 var hazards: Node3D  # hazards.gd (every machine draws the tells)
 var hangar: Node3D  # hangar.gd
 var drift: CPUParticles3D  # the season's blossom / seeds / leaves / snow
-var play_mode := "brave"  # host: GENTLE / BRAVE / HARD (picked once a session)
+var play_mode := "brave"  # GENTLE / BRAVE / HARD (picked once a session on the host; a TV takes it from "deep")
 var mode_picked := false  # host: the mode pick happened this session
 var flight_t := 0.0  # host: seconds into the flight (the events' clock)
 var goose_bumps := 0  # host: planes bumped by geese this session (bots)
@@ -1666,6 +1666,7 @@ func _season() -> String:
 func _send_deep() -> void:
 	var fl := _flight()
 	net.state_set("deep", {"mode": play_mode, "fold": String(fl.get("fold", "")), "season": _season(), "hangar": Deep.hangar(_stamps())})
+	net.state_set("mode", play_mode)  # (the shared "host's difficulty" key: tests/bot_kit.gd check_host_mode)
 
 
 func _start_flight(choice: String, how: String) -> void:
@@ -1927,6 +1928,8 @@ func _on_state_changed(key: String, value: Variant) -> void:
 		"deep":
 			if value is Dictionary:
 				var dp: Dictionary = value
+				if net.mode == "client":
+					play_mode = Deep.mode_of(String(dp.get("mode", play_mode)))  # the TV plays at the host's mode (2026-11-12)
 				if hangar != null:
 					hangar.show_pieces(int(dp.get("hangar", 0)))
 				if drift == null or String(drift.get_meta("season", "")) != String(dp.get("season", "")):

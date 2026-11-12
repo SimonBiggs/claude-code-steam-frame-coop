@@ -216,7 +216,13 @@ var tour_strips: Array = []  # results: a row of place pictures on each TV view
 # Bolt's cups (cups.gd), the pit stop (pit.gd), items (items.gd), Bolt's trophy shelf (shelf.gd), the best-lap ghost.
 const TRIAL_LAPS := 3
 const TRIAL_COLOR := Color(0.78, 0.55, 1.0)  # the TIME TRIAL gate (purple)
-var speed_mode := "gentle"  # cups.gd MODES: gentle / zoom / trial (synced in the snapshot)
+## cups.gd MODES: gentle / zoom / trial. The host's rules every machine: synced in the snapshot, and the host / local
+## game also shares it as net state "mode" (tests/bot_kit.gd check_host_mode checks the TV machine plays at it).
+var speed_mode := "gentle":
+	set(v):
+		speed_mode = v
+		if net != null and net.mode != "client":
+			net.state_set("mode", v)
 var base_laps := SIMPLE_LAPS  # laps of a normal race (bots shorten it); a time trial has one more
 var series := {}  # host: what is being raced {"kind": "daily" / "tour" / "cup", "cup": i, "pts": {kart index: points}}
 var pit: PitScript  # pit.gd: the picture gates

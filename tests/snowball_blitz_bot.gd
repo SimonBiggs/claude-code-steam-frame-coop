@@ -78,6 +78,9 @@ func _physics_process(delta: float) -> void:
 	if main.net.mode == "client" and main.simple and t >= (float(OS.get_environment("BOT_END")) - 10.0 if OS.has_environment("BOT_END") else 60.0) and not has_meta("client_checked"):
 		set_meta("client_checked", true)
 		_check_siege()
+	if main.net.mode == "client" and main.wave >= 1 and not has_meta("mode_checked"):
+		set_meta("mode_checked", true)  # (wave 1 comes after the MODE pick; a hard host's game over can end a life early)
+		_check_host_mode()
 	if main.net.mode != "client":
 		_content_script()
 		if OS.has_environment("BOT_GOD"):
@@ -556,6 +559,7 @@ func _pad_test() -> void:
 ## Bobo's story (simple mode): the host / local game made a seeded siege, logged a RUN line at game over and
 ## built an igloo once a wave was beaten; a TV machine got the village from the host.
 func _check_siege() -> void:
+	_check_host_mode()
 	if main.net.mode == "client":
 		_bot_check(main.village_count >= 0, "the TV machine got Bobo's village (%d igloos)" % main.village_count)
 		_bot_check(saw.has("orbs") or main.wave < 2, "the TV machine showed the pick orbs")
@@ -571,6 +575,13 @@ func _check_siege() -> void:
 	_bot_check(main.logged, "a RUN line at game over")
 	_bot_check(main.built or main.wave < 2, "an igloo built after %d waves (village %d)" % [main.wave, main.village_count])
 	_bot_check(main.village != null and main.village.get_child_count() == main.village_count, "the village shows every igloo")
+
+
+## Every machine plays at the host's mode (2026-11-12: a TV machine kept its own).
+func _check_host_mode() -> void:
+	var k := preload("res://tests/bot_kit.gd").new()
+	_bot_check(k.check_host_mode(main.net, String(main.game_mode)), "this %s machine plays at the host's mode (%s)" % [main.net.mode, main.game_mode])
+	k.free()
 
 
 func _bot_check(ok: bool, what: String) -> void:

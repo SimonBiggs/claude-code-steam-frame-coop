@@ -208,6 +208,8 @@ func on_frame_limit(_note := "") -> void:
 		BotEnd.check(season_seen, "the season's things by the road (%s)" % main.season)
 	if pit_seen:
 		BotEnd.check(gift_orbs_seen == 3, "Bolt's three gift orbs at the pit stop (%d)" % gift_orbs_seen)
+	if races >= 1:
+		check_host_mode(main.net, main.speed_mode)
 
 
 func _end_run(mode: String) -> void:
@@ -254,6 +256,8 @@ func _end_run(mode: String) -> void:
 		fails.append("the pit stop's gates drawn on the TV")
 	if not shelf_seen:
 		fails.append("Bolt's trophy shelf by the start")
+	if not check_host_mode(main.net, main.speed_mode):
+		fails.append("this machine plays at the host's speed")
 	if mode != "client":
 		if not kinds_seen.has("daily") and not OS.has_environment("KART_PIT") or not kinds_seen.has("story"):
 			fails.append("today's track and a story track both raced (%s)" % str(kinds_seen.keys()))
@@ -476,3 +480,9 @@ func _report(mode: String) -> void:
 	print("BOT %s t=%.0f race=%d state=%s race_t=%.0f track=%s views=%d remote_synced=%d bananas=%d races_done=%d%s [%s]" % [
 		mode, t, main.round_n, main.state, main.race_t, str(main.track.info["name"]), views, synced,
 		main.bananas.size(), races, extra, ", ".join(act)])
+
+
+## Every machine plays at the host's difficulty (tests/bot_kit.gd host_mode_problem, counted on BotEnd's tally: no kit here).
+func check_host_mode(net: Node, mine: String, key := "mode") -> bool:
+	var why: String = preload("res://tests/bot_kit.gd").host_mode_problem(net, mine, key)
+	return preload("res://tests/bot_end.gd").check(why == "", why)

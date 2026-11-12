@@ -69,6 +69,18 @@ static func end_at(default_s: float, spare_s := 2.0) -> float:
 	return s
 
 
+## When the joining machines (DUO_JOIN) of this run end, worked out on any machine: the runner's deadline pulls a
+## joiner in 10 s more than the host (within_deadline), so a host check that needs the TV machine still connected must
+## come before this (mech_titans 2026-11-12: host checks at 87 s, the joiner had left at 78 s: "got 0 seated").
+static func joiners_end_at(default_s: float, spare_s := 2.0) -> float:
+	var s := float(OS.get_environment("BOT_END")) if OS.has_environment("BOT_END") else default_s
+	s = within_deadline(s, true)
+	var cut := run_length()
+	if cut < INF:
+		s = minf(s, maxf(5.0, cut - spare_s))
+	return s
+
+
 ## Whether this run ends before `need_s` game seconds: the time the bot's whole arc needs (a full journey, a docking, a
 ## finished round). A cut-short run checks real progress instead of the whole arc (crystal_saga, starship_crew,
 ## penalty_shootout: their end checks assumed a full-length run while the solo VR host's BOT_END=62 or a 60 s

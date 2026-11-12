@@ -368,6 +368,8 @@ func on_frame_limit(_note := "") -> void:
 			BotEnd.check(true, k)
 	if kit.seen("phase", "pick") > 0:
 		BotEnd.check(main.deep.mode != "" or main.phase == "pick", "the mode pick ran (%s)" % main.deep.mode)
+	if main.round_no >= 1:
+		BotEnd.check(kit.check_host_mode(main.net, main.deep.mode if main.deep.mode != "" else main.deep.mode_id()), "this machine plays at the host's mode")
 
 
 ## One BOT RESULT line per machine once every verdict is in.
@@ -404,6 +406,8 @@ func _print_result(note: String) -> void:
 		fails.append("street friend")
 	if not has_meta("deep_ok"):
 		fails.append("picks / gifts / surprises")
+	if not kit.check_host_mode(main.net, main.deep.mode if main.deep.mode != "" else main.deep.mode_id()):
+		fails.append("the host's mode")
 	print("BOT RESULT: %s (6 checks%s)%s" % ["PASS" if fails.is_empty() else "FAIL", note, "" if fails.is_empty() else " failed: " + ", ".join(fails)])
 
 

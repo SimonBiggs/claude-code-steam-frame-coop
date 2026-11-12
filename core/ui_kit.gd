@@ -886,12 +886,12 @@ static func vr_place(n: Node3D, cam: Node3D, dist: float = 1.6, height: float = 
 	var ws := vr_fit_world(n)
 	var pos := cam.global_position + (fwd * dist + Vector3(0.0, height, 0.0)) * VrText.COMFORT * ws
 	var spot := vr_spot(cam, pos, n, true)
-	n.set_meta("vr_dodge_on", float(spot.get("dodge", 0.0)))
+	n.set_meta("vr_dodge_on", float(spot.get("dodge", 0.0)) + float(spot.get("lift", 0.0)))
 	vr_set_near(n, float(spot.k))
 	_face(n, spot.pos, cam)
 	VrLayer.mark_once(n)  # placed in front of the VR player = VR-only UI
 	n.set_meta("vr_placed", true)
-	n.set_meta("vr_moving", false)
+	vr_stop(n)
 	# Our own move: the new spot is the one that rides with the rig. Else a card re-placed between follows (stepping
 	# aside from a banner every 0.25 s, set_text) looked "moved by itself" and was left behind when the rig moved that
 	# frame (a blink up the stairs left Mystery Manor's card a floor below).
@@ -940,7 +940,7 @@ static func vr_clear(cam: Node3D, target: Vector3, n: Node = null, fresh := fals
 				aims.append(target + right * sz.x * c.x + Vector3.UP * sz.y * c.y)
 		for aim in aims:
 			var l := head.distance_to(aim)
-			var hit: Dictionary = VrViewCheck.first_hit(cam as Camera3D, head.lerp(aim, 1.06), n)
+			var hit: Dictionary = VrViewCheck.first_hit(cam as Camera3D, head.lerp(aim, 1.06), n, [], true)
 			if hit.node != null:
 				var free := float(hit.f) * l * 1.06 - 0.12 * ws
 				k = minf(k, clampf(free / l, minf(1.0, near * ws / length), 1.0))
@@ -956,12 +956,15 @@ static func vr_clear(cam: Node3D, target: Vector3, n: Node = null, fresh := fals
 static func vr_spot(cam: Node3D, target: Vector3, n: Node = null, fresh := false) -> Dictionary:
 	var head := cam.global_position
 	var now := Engine.get_process_frames()
-	if n != null and not fresh and n.has_meta("vr_spot") and now < int((n.get_meta("vr_spot") as Array)[0]):
+	# (the cache is dropped the moment a pick shows up or goes: a card waited up to 24 frames to start dodging)
+	var keep_sig := _vr_keep_sig(n, cam)
+	if n != null and not fresh and n.has_meta("vr_spot") and now < int((n.get_meta("vr_spot") as Array)[0]) \
+			and int(n.get_meta("vr_spot_keep", 0)) == keep_sig:
 		var c: Array = n.get_meta("vr_spot")  # [until, k, lift, dodge, k2]: worked out at most every 24 frames
 		var dg := float(c[3]) if c.size() > 4 else 0.0  # (a panel from before a hot reload)
 		var k2c := float(c[4]) if c.size() > 4 else 1.0
 		return {"pos": head.lerp(head.lerp(target + Vector3.UP * float(c[2]), float(c[1])) + Vector3.UP * dg, k2c),
-			"k": float(c[1]) * k2c, "dodge": dg}
+			"k": float(c[1]) * k2c, "dodge": dg, "lift": float(c[2])}
 	var ws := maxf(XRServer.world_scale, 0.001)
 	var length := head.distance_to(target)
 	var k := vr_clear(cam, target, n, true)
@@ -989,8 +992,20 @@ static func vr_spot(cam: Node3D, target: Vector3, n: Node = null, fresh := false
 		pos += Vector3.UP * dodge
 		k2 = vr_clear(cam, pos, null, true, VR_CLOSEST)
 	if n != null:
-		n.set_meta("vr_spot", [now + 24, k, lift, dodge, k2])
-	return {"pos": head.lerp(pos, k2), "k": k * k2, "dodge": dodge}
+		# still over a pick (nowhere clear yet: the orbs are popping in, the player is walking up to them): look again soon
+		n.set_meta("vr_spot", [now + (4 if n.get_meta("vr_dodge_covers", false) else 24), k, lift, dodge, k2])
+		n.set_meta("vr_spot_keep", keep_sig)
+	return {"pos": head.lerp(pos, k2), "k": k * k2, "dodge": dodge, "lift": lift}
+
+
+## Which picks (VrViewCheck.KEEP_CLEAR) are up now, as one number: vr_spot works a spot out afresh when it changes.
+static func _vr_keep_sig(n: Node, cam: Node3D) -> int:
+	if n == null or not cam is Camera3D or not n.is_inside_tree():
+		return 0
+	var sig := 0
+	for t in VrViewCheck.keep_clear(n, cam as Camera3D):  # (and how big: picks that pop in grow over ~0.5 s)
+		sig = hash([sig, t.get_instance_id(), int(t.global_basis.get_scale().x * 4.0)])
+	return sig
 
 
 ## VR UI never covers a pick (core/pick_orbs.gd puts its orbs in VrViewCheck.KEEP_CLEAR while they show): how far
@@ -998,12 +1013,14 @@ static func vr_spot(cam: Node3D, target: Vector3, n: Node = null, fresh := false
 ## one of them, staying within ~32 degrees of eye level. Keeps the last answer while it still works (no hopping as the
 ## orbs bob); 0 when nothing must be kept clear. The VR followers glide a panel to its new spot (vr_follow, VrText).
 const VR_DODGE_WORDS := 5  # steps a card moves at most to clear world words (VrViewCheck.world_words)
+const VR_DODGE_PICK := 20  # steps a card moves at most to clear a pick (the 32 degrees stop it first)
 const VR_DODGE_STEP := 0.08  # (x VrText.COMFORT m at the usual 1.6 x COMFORT m: ~3 degrees a step)
 static func vr_dodge(cam: Node3D, target: Vector3, n: Node3D, k: float = 1.0) -> float:
 	var things: Array[Node3D] = VrViewCheck.keep_clear(n, cam as Camera3D) if cam is Camera3D else ([] as Array[Node3D])
 	# words written in the world for the VR player (a score board, a course banner, an easel's round text) count too,
 	# less than a pick: a card slides off them when it can (VrViewCheck "drawn over the words")
 	var words: Array[Label3D] = VrViewCheck.world_words_cached(n.get_tree().root, cam as Camera3D) if cam is Camera3D and n.is_inside_tree() else ([] as Array[Label3D])
+	n.set_meta("vr_dodge_covers", false)
 	if (things.is_empty() and words.is_empty()) or n.get_meta("vr_check_ignore", false):
 		n.set_meta("vr_dodge", 0.0)
 		return 0.0
@@ -1012,9 +1029,9 @@ static func vr_dodge(cam: Node3D, target: Vector3, n: Node3D, k: float = 1.0) ->
 		return 0.0
 	var head := cam.global_position
 	var boxes: Array[AABB] = []
-	for t in things:
+	for t in things:  # part by part, like the check (VrViewCheck.thing_boxes)
 		if t != n and not n.is_ancestor_of(t):
-			boxes.append(VrViewCheck.thing_box(t, (cam as Camera3D).cull_mask))
+			boxes.append_array(VrViewCheck.thing_boxes(t, (cam as Camera3D).cull_mask))
 	# other VR panels count too (less than a pick): two cards dodging the same row mustn't end up in one spot
 	var word_boxes: Array[AABB] = []
 	for w in words:
@@ -1029,7 +1046,9 @@ static func vr_dodge(cam: Node3D, target: Vector3, n: Node3D, k: float = 1.0) ->
 	var flat := Vector2(target.x - head.x, target.z - head.z).length()
 	var tries: Array[float] = [float(n.get_meta("vr_dodge", 0.0)), 0.0]
 	# only words to clear (no pick): a card never travels far for them (a huge garden sign sent one under the lawn)
-	for i in range(1, (VR_DODGE_WORDS if boxes.is_empty() else 12) + 1):
+	# (for a pick: as far as the 32-degree limit allows; 12 steps stopped short of the clear spot over a high row,
+	# Dodge Ball 2026-11-12)
+	for i in range(1, (VR_DODGE_WORDS if boxes.is_empty() else VR_DODGE_PICK) + 1):
 		tries.append(i * step)
 		tries.append(-i * step)
 	var best := 0.0
@@ -1056,7 +1075,12 @@ static func vr_dodge(cam: Node3D, target: Vector3, n: Node3D, k: float = 1.0) ->
 			best_a = a
 			best = dy
 	n.set_meta("vr_dodge", best)
+	n.set_meta("vr_dodge_covers", _vr_covers_pick(head, target + Vector3.UP * best, size, boxes))
 	return best
+
+
+static func _vr_covers_pick(head: Vector3, p: Vector3, size: Vector2, boxes: Array[AABB]) -> bool:
+	return VrViewCheck.covers_any(head, p, size, boxes)
 
 
 ## Would `n` moved to `p` be hidden from the eyes, as core/vr_view_check.gd sees it (blocker(): its panel's centre,
@@ -1146,7 +1170,7 @@ static func _vr_follow(n: Node3D, cam: Node3D, dist: float, height: float, delta
 		n.remove_meta("vr_teleported")
 		vr_set_near(n, k)
 		_face(n, target, cam)
-		n.set_meta("vr_moving", false)
+		vr_stop(n)
 		return
 	if n.get_meta("vr_moving", false):
 		vr_set_near(n, k)
@@ -1154,20 +1178,37 @@ static func _vr_follow(n: Node3D, cam: Node3D, dist: float, height: float, delta
 		# the card through their head (core/vr_view_check.gd saw it 5 m behind, facing away): put it in front at once.
 		if to.dot(fwd) < 0.0 or n.global_position.distance_to(target) > d * 1.6:
 			_face(n, target, cam)
-			n.set_meta("vr_moving", false)
+			vr_stop(n)
 			return
-		_face(n, n.global_position.lerp(target, 1.0 - exp(-4.0 * delta)), cam)
+		_face(n, n.global_position.lerp(target, vr_glide(n, delta)), cam)
 		if n.global_position.distance_to(target) < VR_ARRIVED * d:
 			_face(n, target, cam)
-			n.set_meta("vr_moving", false)
+			vr_stop(n)
 
 
-## A pick came or went (vr_dodge moved the spot up or down): the follower glides there now, not when the head turns.
+## A pick came or went (vr_dodge moved the spot up or down, or the picks themselves made vr_spot lift it over them):
+## the follower glides there now, not when the head turns, and quickly (VR_GLIDE_DODGE): a card over a pick hides
+## what the player is choosing (Duo Arena 2026-11-12: Nova's card over the middle orb's name for 2.6 s, while the
+## card waited for its 24-frame spot and only noticed a dodge, not a lift, then glided at the lazy rate).
 static func vr_dodge_moved(n: Node3D, spot: Dictionary) -> void:
-	var dodge := float(spot.get("dodge", 0.0))
+	var dodge := float(spot.get("dodge", 0.0)) + float(spot.get("lift", 0.0))
 	if absf(dodge - float(n.get_meta("vr_dodge_on", 0.0))) > 0.01:
 		n.set_meta("vr_dodge_on", dodge)
 		n.set_meta("vr_moving", true)
+		n.set_meta("vr_dodging", true)
+
+
+## The glide's step this frame (0..1 of the way left): the lazy rate, or the quick one off a pick (vr_dodge_moved).
+const VR_GLIDE := 4.0
+const VR_GLIDE_DODGE := 12.0  # (95% of the way in 0.25 s; the lazy 4.0 took ~0.75 s, more for a long way)
+static func vr_glide(n: Node3D, delta: float) -> float:
+	return 1.0 - exp(-(VR_GLIDE_DODGE if n.get_meta("vr_dodging", false) else VR_GLIDE) * delta)
+
+
+## The follower is where it should be: stop gliding (and the quick dodge glide with it).
+static func vr_stop(n: Node3D) -> void:
+	n.set_meta("vr_moving", false)
+	n.remove_meta("vr_dodging")
 
 
 ## The lazy follow's "stay put" zone: ONE rule for every follower (vr_follow's cards and banners, VrText labels).

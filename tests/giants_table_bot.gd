@@ -594,6 +594,8 @@ func _exit_tree() -> void:
 	if main != null and main.wave >= 3 and not OS.has_environment("BOT_PLAIN"):
 		BotEnd.check(seen.has("a trick told"), "a goblin trick was told (mode %s)" % main.net.mode)
 	if main != null and main.wave >= 1:
+		check_host_mode(main.net, main.mode)
+	if main != null and main.wave >= 1:
 		# (tools/multibot.ts: every machine the same raid. Not the gift count: a joiner leaves ~10 s before the host,
 		# which may save a night after it has gone.)
 		print("BOT AGREE raid=%d" % main.raid_seed)
@@ -615,3 +617,9 @@ func _exit_tree() -> void:
 				var key: String = ch.get_script().resource_path.get_file() if ch.get_script() else ch.get_class()
 				by[key] = by.get(key, 0) + _count_visuals(ch)
 			print("Breakdown: %s" % by)
+
+
+## Every machine plays at the host's difficulty (tests/bot_kit.gd host_mode_problem, counted on BotEnd's tally: no kit here).
+func check_host_mode(net: Node, mine: String, key := "mode") -> bool:
+	var why: String = preload("res://tests/bot_kit.gd").host_mode_problem(net, mine, key)
+	return preload("res://tests/bot_end.gd").check(why == "", why)

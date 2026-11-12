@@ -77,7 +77,7 @@ var decor: Node3D  # every machine: this island's sand, palms and rocks
 # Second pass (deep.gd): the session's mode, this island's tool, the season, warned events, the museum.
 var picks: Picks
 var events: Events
-var mode := ""  # host: "" until the team picks (once a session)
+var mode := ""  # "" until the team picks (once a session; a TV machine takes the host's from net state "mode")
 var gift := ""  # this island's tool (net state "gift")
 var season := ""
 var pending := {}  # host: the next island's desc (once picked)
@@ -601,6 +601,9 @@ func _on_state_changed(key: String, value: Variant) -> void:
 			_refresh_hud()
 		"gift":
 			gift = String(value)
+		"mode":
+			if net.mode == "client":  # (only the host reads it now, but a TV machine never keeps its own: 2026-11-12)
+				mode = String(value)
 		"museum":
 			_build_museum(value if value is Dictionary else {})
 		"season":

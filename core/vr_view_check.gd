@@ -154,14 +154,17 @@ static func problems(root: Node) -> Array[String]:
 	var keep := keep_clear(root, cam)
 	if not keep.is_empty():
 		var boxes: Array[AABB] = []
+		var parts: Array = []
 		for k in keep:
 			boxes.append(thing_box(k, cam.cull_mask))
+			parts.append(thing_boxes(k, cam.cull_mask))
 		for c in shown:
 			var size := panel_extent(c)
 			var p := _centre(c)
 			for i in keep.size():
-				if keep[i] != c and not c.is_ancestor_of(keep[i]) and cover_deg2(head, p, size, boxes[i]) > 0.0:
-					out.append("%s: drawn over the pick %s (UiKit.vr_dodge keeps VR UI clear of VrViewCheck.KEEP_CLEAR)" % [_name(c), _name(keep[i])])
+				if keep[i] != c and not c.is_ancestor_of(keep[i]) and covers_any(head, p, size, parts[i]):
+					out.append("%s: drawn over the pick %s (UiKit.vr_dodge keeps VR UI clear of VrViewCheck.KEEP_CLEAR)%s" % [_name(c), _name(keep[i]),
+						(" [pick parts %s card at %s size %s dodge %s moving %s]" % [parts[i], p, size, c.get_meta("vr_dodge", "-"), c.get_meta("vr_moving", "-")] + _debug(c, cam)) if OS.has_environment("VR_VIEW_DEBUG") else ""])
 		# A pick orb (or the name under it) behind scenery: the player can't read what they're choosing (Rhythm Band
 		# 2026-11-12: HARD's label half behind the green cymbal).
 		for k in keep:
@@ -442,6 +445,10 @@ static func pick_hidden(cam: Camera3D, k: Node3D) -> Array[String]:
 		var hit := first_hit(cam, head.lerp(p, 0.97), k, meshes)
 		if hit.node == null or float(hit.f) * dist * 0.97 < 0.6 * ws:
 			continue
+		# another pick right beside the player hides this one: they're standing at the row, seeing it end-on, and one
+		# step aside shows it (not scenery a game can move; Duo Arena 2026-11-12, the VR player in the perk row)
+		if _in_pick(hit.node) and float(hit.f) * dist * 0.97 < PICK_BESIDE_D * ws:
+			continue
 		var what: Node = s[0]
 		out.append("%s of the pick %s: hidden behind %s%s (%.1f m away; move the pick or the scenery)" % [
 			("words " + _name(what)) if what is Label3D else "picture", _name(k), _name(hit.node), made_by(hit.node), float(hit.f) * dist * 0.97 / ws])
@@ -454,7 +461,9 @@ static func pick_hidden(cam: Camera3D, k: Node3D) -> Array[String]:
 ## props from saved growth, trees); not moving things (players walking past, balls), not `skip`, VR UI or the VR
 ## player's own rig, not meshes around the head (rooms, sky domes). UiKit.vr_clear uses it to bring VR UI in front.
 ## `meshes`: the viewport's MeshInstance3Ds when the caller already has them (many rays in one check).
-static func first_hit(cam: Camera3D, to: Vector3, skip: Node = null, meshes: Array = []) -> Dictionary:
+## `skip_picks`: pick orbs (KEEP_CLEAR) are no wall (UiKit.vr_clear: a card brought in front of an orb covers it
+## completely; UiKit.vr_dodge moves it clear of them instead).
+static func first_hit(cam: Camera3D, to: Vector3, skip: Node = null, meshes: Array = [], skip_picks := false) -> Dictionary:
 	var best := {"node": null, "f": 1.0}
 	var head := cam.global_position
 	var length := head.distance_to(to)
@@ -470,7 +479,8 @@ static func first_hit(cam: Camera3D, to: Vector3, skip: Node = null, meshes: Arr
 			var r := space.intersect_ray(q)
 			if r.is_empty() or not r.collider is CollisionObject3D:
 				break
-			if r.collider is StaticBody3D and not _skip_blocker(r.collider as Node, skip, cam):
+			if r.collider is StaticBody3D and not _skip_blocker(r.collider as Node, skip, cam) \
+					and not (skip_picks and _in_pick(r.collider as Node)):
 				best = {"node": r.collider, "f": head.distance_to(r.position) / length}
 				break
 			ex.append((r.collider as CollisionObject3D).get_rid())
@@ -483,7 +493,7 @@ static func first_hit(cam: Camera3D, to: Vector3, skip: Node = null, meshes: Arr
 		var box := m.global_transform * m.get_aabb()
 		if box.grow(0.05).has_point(head) or box.intersects_segment(head, to) == null:
 			continue
-		if _skip_blocker(m, skip, cam) or _moving(m) or _walks_about(m) or _see_through(m):
+		if _skip_blocker(m, skip, cam) or _moving(m) or _walks_about(m) or _see_through(m) or (skip_picks and _in_pick(m)):
 			continue
 		var f := _mesh_hit(m, head, to)
 		if f < float(best.f):
@@ -525,6 +535,16 @@ static func _skip_blocker(n: Node, card: Node, cam: Camera3D) -> bool:
 	var x := n
 	while x != null:
 		if x == card or x == origin or x.has_meta("vr_placed") or x.has_meta(IGNORE_META) or str(x.name) == "GDev":
+			return true
+		x = x.get_parent()
+	return false
+
+
+## Part of a pick orb (or anything else in KEEP_CLEAR)?
+static func _in_pick(n: Node) -> bool:
+	var x := n
+	while x != null:
+		if x.is_in_group(KEEP_CLEAR):
 			return true
 		x = x.get_parent()
 	return false
@@ -693,15 +713,23 @@ static func _see_through(m: MeshInstance3D) -> bool:
 	return false
 
 
-## Things in the KEEP_CLEAR group the VR camera sees now (shown, in its world, not freed).
+## Things in the KEEP_CLEAR group the VR camera sees now (shown, in its world, not freed), and not right at the eyes:
+## a pick nearer than PICK_AT_HAND_D is one the player is walking into or reaching for. It fills a third of the view,
+## so no card 2.5 m away can be clear of it within UiKit.vr_dodge's 32 degrees (Duo Arena 2026-11-12: the VR player
+## stood in the perk row after taking one; the card hunted up and down for 2.6 s). Farther picks still count.
+const PICK_AT_HAND_D := 1.2
+## A pick nearer than this hiding another pick isn't reported by pick_hidden (see there).
+const PICK_BESIDE_D := 2.0
 static func keep_clear(n: Node, cam: Camera3D) -> Array[Node3D]:
 	var out: Array[Node3D] = []
 	if n == null or cam == null or not n.is_inside_tree() or not cam.is_inside_tree():
 		return out
+	var head := cam.global_position
+	var near := PICK_AT_HAND_D * maxf(XRServer.world_scale, 0.001)
 	for k in n.get_tree().get_nodes_in_group(KEEP_CLEAR):
 		var t := k as Node3D
 		if t != null and t.is_visible_in_tree() and not t.is_queued_for_deletion() and t.get_world_3d() == cam.get_world_3d() \
-				and not _ignored(t):
+				and not _ignored(t) and t.global_position.distance_to(head) >= near:
 			out.append(t)
 	return out
 
@@ -709,8 +737,20 @@ static func keep_clear(n: Node, cam: Camera3D) -> Array[Node3D]:
 ## The world box of what `n` draws for a camera with `mask` (meshes, sprites and its words; not lights or sparkles).
 ## Label3D boxes aren't built in headless runs, so words are measured from their text.
 static func thing_box(n: Node3D, mask: int = 0xFFFFF) -> AABB:
-	var box := AABB()
-	var have := false
+	var parts := thing_boxes(n, mask)
+	if parts.is_empty():
+		return AABB(n.global_position, Vector3.ZERO)
+	var box := parts[0]
+	for b in parts:
+		box = box.merge(b)
+	return box
+
+
+## thing_box part by part (the orb, its picture, its name): one box around all of them has corners nothing is drawn
+## at (a wide name's depth at the orb's top), which "covered" a pick a card was clear of and left no spot to dodge to
+## (Dodge Ball 2026-11-12: TUMTUM's card over the CURVE BALL orb for 2 s). Picks are checked against these.
+static func thing_boxes(n: Node3D, mask: int = 0xFFFFF) -> Array[AABB]:
+	var out: Array[AABB] = []
 	for c in [n] + n.find_children("*", "GeometryInstance3D", true, false):
 		if not c is GeometryInstance3D or c is GPUParticles3D or c is CPUParticles3D:
 			continue
@@ -725,11 +765,9 @@ static func thing_box(n: Node3D, mask: int = 0xFFFFF) -> AABB:
 			b = AABB(g.global_position - Vector3(sz.x, sz.y, sz.x) * 0.5, Vector3(sz.x, sz.y, sz.x))
 		else:
 			b = g.global_transform * g.get_aabb()
-		if b.size.length() < 0.001:
-			continue
-		box = b if not have else box.merge(b)
-		have = true
-	return box if have else AABB(n.global_position, Vector3.ZERO)
+		if b.size.length() >= 0.001:
+			out.append(b)
+	return out
 
 
 ## A Label3D's width and height in metres, worked out from its text (its own box only exists with a renderer).
@@ -788,6 +826,14 @@ static func cover_deg2(head: Vector3, centre: Vector3, size: Vector2, box: AABB,
 	var ox := minf(hi.x, hx) - maxf(lo.x, -hx)
 	var oy := minf(hi.y, hy) - maxf(lo.y, -hy)
 	return ox * oy if ox > 0.0 and oy > 0.0 else 0.0
+
+
+## Does a panel `size` big at `centre` cover any of `boxes` (thing_boxes) seen from `head`?
+static func covers_any(head: Vector3, centre: Vector3, size: Vector2, boxes: Array) -> bool:
+	for b in boxes:
+		if cover_deg2(head, centre, size, b) > 0.0:
+			return true
+	return false
 
 
 ## A panel's drawn width and height (metres, as it is scaled now), from its own and its children's boxes.

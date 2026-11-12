@@ -2888,6 +2888,8 @@ func apply_event(kind: String, args: Array) -> void:
 		"warn":
 			rings.warn(args[0], float(args[1]), args[2], float(args[3]))
 		"tackle":  # [mode, lure, days fished]
+			if String(args[0]) != game_mode:
+				whiskers_pulls = []  # Old Whiskers' pulls were made in this machine's own mode: again in the host's (2026-11-12)
 			game_mode = String(args[0])
 			lure_id = String(args[1])
 			tackle_days = int(args[2])
@@ -3582,6 +3584,7 @@ func _shiny_dict() -> Dictionary:
 func _send_tackle() -> void:
 	if net != null and net.mode == "host":
 		net.event("tackle", [game_mode, lure_id, int(save.data.days)])
+		net.state_set("mode", game_mode)  # (the shared host-difficulty check reads it; TV machines use "tackle", 2026-11-12)
 
 
 ## Host: the picks start after `wait` seconds: GENTLE / BRAVE / HARD once a visit, then the day's lure.

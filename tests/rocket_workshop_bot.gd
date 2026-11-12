@@ -596,6 +596,10 @@ func _deep_checks() -> void:
 
 ## Before the result: meteors fell with crew, never on a lone pilot.
 func _deep_final() -> void:
+	var k := preload("res://tests/bot_kit.gd").new()  # every machine plays at the host's mode (2026-11-12: the TV kept its own)
+	k.check_host_mode(main.net, String(main.play_mode))
+	_check("plays_at_host_mode", k.failures == 0, String(main.play_mode))
+	k.free()
 	if main.net.mode == "client":
 		return
 	if crew_ever:

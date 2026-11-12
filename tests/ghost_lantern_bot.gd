@@ -309,6 +309,7 @@ func _second_pass(_delta: float) -> void:
 			print("BOT: client second pass: orbs=%s rings=%s mode=%s gifts=%s wing=%s" % [saw_orbs.keys(), saw_rings, main.game_mode, main.upgrades, main.house.get("wing", {}).get("id", "-")])
 			if main.net.connected and not OS.has_environment("GL_MODE"):
 				BotEnd.check(not saw_orbs.is_empty(), "the client saw the pick orbs")
+			_check_host_mode()
 		return
 	var p1 = main.players[0]
 	# Take an orb a second after it's up: the VR lantern-bearer with a hand, else P2 walks under one.
@@ -606,6 +607,8 @@ func _exit_tree() -> void:
 	# The verdict (tests/bot_end.gd prints BOT RESULT from the counted checks, in local, host and joining runs).
 	if main != null and is_instance_valid(main):
 		BotEnd.check(has_meta("report"), "the run reached its 55 s report (mode %s, t=%.0f)" % [main.net.mode, t])
+		if main.net.mode == "host":
+			_check_host_mode()
 	if main != null and is_instance_valid(main) and main.simple:
 		var ks: Array = cues.keys()
 		ks.sort()
@@ -613,3 +616,9 @@ func _exit_tree() -> void:
 		for p in main.players:
 			if p.has_meta("cue_done"):
 				print("BOT CUES: P%d done=%s" % [p.index + 1, p.get_meta("cue_done")])
+
+
+## The TV machine plays at the host's difficulty (like bot_kit check_host_mode; 2026-11-12).
+func _check_host_mode() -> void:
+	var why: String = preload("res://tests/bot_kit.gd").host_mode_problem(main.net, main.game_mode)  # (one shared check)
+	BotEnd.check(why == "", why if why != "" else "this machine plays at the host's difficulty")

@@ -261,7 +261,13 @@ var flap_was := false
 # Second pass (deep.gd): the session's mode, this stage's gift, the season, warned sky events, the baby dragons.
 var picks: Picks
 var hazards: Hazards
-var play_mode := ""  # "" until the team picks (once a session; TV machines from the snapshot)
+## "" until the team picks (once a session; TV machines from the snapshot). The host also shares it as net state
+## "mode" (the shared host-difficulty check reads it, 2026-11-12). Never set it on a client by hand.
+var play_mode := "":
+	set(v):
+		play_mode = v
+		if net != null and net.mode != "client" and v != "":
+			net.state_set("mode", v)
 var gift := ""  # this stage's gift
 var season := "spring"
 var babies := 0  # baby dragons flying beside Sunny (from the charms event on TV machines)

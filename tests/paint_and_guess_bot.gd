@@ -90,6 +90,8 @@ func _ready() -> void:
 func _exit_tree() -> void:
 	if main != null and is_instance_valid(main):
 		BotEnd.check(rounds_done >= 1, "a drawing round was played (mode %s, t=%.0f)" % [main.net.mode, t])
+		if rounds_done >= 1:
+			check_host_mode(main.net, main.play_mode)
 		if main.net.mode != "client":
 			BotEnd.check(picks_seen >= 1 or OS.has_environment("PG_MODE"), "the picks came up and were taken (%d)" % picks_seen)
 			if lone_reveals >= 1:
@@ -595,3 +597,9 @@ func _check_leaks(mode: String) -> void:
 	print("BOT %s: secret-word check round %d: %d guesser-visible texts, %d leaks (total %d leaks in %d checks)" % [mode,
 		main.round_n, seen_texts.size(), bad, leaks, word_checks])
 	seen_texts.clear()
+
+
+## Every machine plays at the host's difficulty (tests/bot_kit.gd host_mode_problem, counted on BotEnd's tally: no kit here).
+func check_host_mode(net: Node, mine: String, key := "mode") -> bool:
+	var why: String = preload("res://tests/bot_kit.gd").host_mode_problem(net, mine, key)
+	return preload("res://tests/bot_end.gd").check(why == "", why)

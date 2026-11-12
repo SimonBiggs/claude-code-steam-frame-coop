@@ -205,6 +205,7 @@ func burst_fx(i: int) -> void:
 	plume.mesh = cyl
 	var mat := MeshKit.material(col, 3.0).duplicate() as StandardMaterial3D
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (VrViewCheck "washed out")
 	plume.material_override = mat
 	plume.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	plume.position = (d.p as Vector3)

@@ -1815,6 +1815,7 @@ func _send_deep() -> void:
 	if jobs != null:
 		jobs.gift = deep_gift
 	net.state_set("deep", [deep_mode, deep_gift, deep_season, deep_islets])
+	net.state_set("mode", deep_mode)  # (the bots check a TV machine plays at it: tests/bot_kit.gd check_host_mode)
 
 
 ## Every machine: the "deep" state.

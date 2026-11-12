@@ -3824,6 +3824,7 @@ func _send_deep() -> void:
 	_apply_deep([play_mode, gift, season, harbour_n])
 	if net and net.mode != "client":
 		net.event("deep", [play_mode, gift, season, harbour_n])
+		net.state_set("mode", play_mode)  # (the shared host-difficulty check reads it; TV machines use "deep", 2026-11-12)
 
 
 ## Every machine: the mode, gift, season and harbour from the host.

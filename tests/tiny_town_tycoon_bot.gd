@@ -984,6 +984,7 @@ func _checks() -> void:
 	_deep_checks()
 	var mode: String = main.net.mode
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
+	kit.check_host_mode(main.net, String(main.deep_mode))  # every machine plays at the host's mode (2026-11-12)
 	if not host:
 		kit.assert_eq(kit.seated(), kit.seated_want(want), "%s: all %d players are seated" % [mode, want])
 	kit.assert_true(main.town.buildings.size() >= 8, "%s: the mayor built a town (%d buildings)" % [mode, main.town.buildings.size()])

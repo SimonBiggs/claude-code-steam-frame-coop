@@ -2630,9 +2630,11 @@ func _set_course_meta() -> void:
 	Engine.set_meta("bb_season", season)
 
 
-## Host: the mode, the gift and the season for every machine.
+## Host: the mode, the gift and the season for every machine (the TV machine builds its courses in the host's mode,
+## _on_deep_state). "mode" alone too: the shared host-difficulty check reads it (2026-11-12).
 func _send_deep() -> void:
 	net.state_set("deep", [mode, gift, season])
+	net.state_set("mode", mode)
 
 
 ## Host: Puff's town for every machine.
