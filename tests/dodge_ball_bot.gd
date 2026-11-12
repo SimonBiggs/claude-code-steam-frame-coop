@@ -47,6 +47,7 @@ func _ready() -> void:
 	main.set("results_wait", 6.0)
 	add_child(main)
 	kit.main = main
+	kit.watch_state(main.net)  # phases counted as they happen (kit.seen): a 0.25 s poll misses quick ones under load
 	want = 0 if OS.has_environment("BOT_SOLO") else BotKit.bot_players(2, 6)  # BOT_SOLO: VR alone
 	var client := OS.has_environment("DUO_JOIN")
 	var host := OS.has_environment("DUO_HOST")
@@ -287,7 +288,7 @@ func _checks() -> void:
 		kit.assert_eq(kit.seated(), kit.seated_want(want, host_p), "%s: all %d players are seated" % [mode, want])
 	if main.flat_host:
 		kit.assert_true(main.party.is_local(0) and main.avatars.has(0) and main.cams.has(0), "flat host: slot 0 plays here with a camera")
-	kit.assert_true(saw_results, "%s: the round ended with results" % mode)
+	kit.assert_true(kit.seen("phase", "results") > 0, "%s: the round ended with results" % mode)
 	kit.assert_true(int(main.net.state_get("round", 0)) >= 2, "%s: the next round started by itself" % mode)
 	kit.assert_true(max_tv > 0, "%s: runners hit the giant's belly (%d)" % [mode, max_tv])
 	if OS.has_environment("BOT_VR") and mode != "client":

@@ -46,6 +46,7 @@ func _ready() -> void:
 	main.set("try_open", 7)  # towergen OPEN_ALL: special blocks from job 2 on
 	add_child(main)
 	kit.main = main
+	kit.watch_state(main.net)  # phases counted as they happen (kit.seen): a 0.25 s poll misses quick ones under load
 	want = BotKit.bot_players(2, 6)
 	var client := OS.has_environment("DUO_JOIN")
 	var host := OS.has_environment("DUO_HOST")
@@ -329,7 +330,7 @@ func _checks() -> void:
 	if mode == "client":
 		kit.assert_eq(main.party.local_slots().size(), want, "client: all %d local players are seated" % want)
 		kit.assert_true(ghosts_seen > 0, "client: ghost blocks mirrored from the host")
-		kit.assert_true(saw_results, "client: saw the results")
+		kit.assert_true(kit.seen("phase", "results") > 0, "client: saw the results")
 		return
 	if mode == "local":
 		kit.assert_eq(kit.seated(), kit.seated_want(want), "local: all %d TV players are seated" % want)
