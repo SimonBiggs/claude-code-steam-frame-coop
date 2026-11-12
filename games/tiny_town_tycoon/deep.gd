@@ -101,7 +101,7 @@ const ISLET_ANGLES: Array[float] = [-PI * 0.5, PI, 0.0, -PI * 0.5 - 0.3, -PI * 0
 ## The island pick row: three orbs over road cells near the town hall's door, ORB_Y above the grass.
 const ROW_GAP := 3  # cells between two orbs at least
 const ORB_Y := 0.07
-const ORB_SCALE := 0.035  # (a ball of radius 0.021 m: bigger than a toy vehicle, smaller than a house)
+const ORB_SCALE := 0.045  # (a ball of radius 0.027 m: bigger than a toy vehicle, smaller than a house)
 const TV_R := 0.03  # a vehicle's middle this near an orb's spot (across the ground) is under it ...
 const TV_DWELL := 0.8  # ... for this long to pick it (driving past never picks)
 ## The VR pick row: three small orbs an arm's reach in front of the mayor's eyes, just under eye level.
@@ -187,7 +187,7 @@ static func weather(isl: Dictionary, spec: Dictionary) -> Array:
 	var gap := float(spec.get("gap", MIN_GAP))
 	var every := maxf(float(md.every) if gap >= MIN_GAP else gap * 1.3, gap)
 	var r := Seeded.rng(int(spec.get("seed", 1)), "weather %s %d" % [mode, int(rlen)])
-	var ter: PackedByteArray = isl.get("ter", PackedByteArray())
+	var ter := open_land(isl)
 	var land := _land_cells(ter)
 	if land.size() < MIN_LAND * 3:
 		return out
@@ -212,6 +212,20 @@ static func weather(isl: Dictionary, spec: Dictionary) -> Array:
 ## Seconds a vehicle loses to the worst weather of this mode (a gust's stop, or crawling through the fog).
 static func _slow_cost(md: Dictionary) -> float:
 	return maxf(float(md.stall), float(md.fog_secs) * (1.0 - float(md.fog_slow)))
+
+
+## The island's terrain with the districts still under the mist turned to water: weather only comes where the town
+## can drive (isl: {ter, dist, open} - Town or IslandGen; no dist: all of it).
+static func open_land(isl: Dictionary) -> PackedByteArray:
+	var ter: PackedByteArray = (isl.get("ter", PackedByteArray()) as PackedByteArray).duplicate()
+	var dist: PackedByteArray = isl.get("dist", PackedByteArray())
+	if dist.size() != ter.size():
+		return ter
+	var open := int(isl.get("open", 1)) | 1
+	for i in ter.size():
+		if (open >> int(dist[i])) & 1 == 0:
+			ter[i] = Defs.T_WATER
+	return ter
 
 
 static func _land_cells(ter: PackedByteArray) -> Array:
@@ -335,7 +349,7 @@ static func problems(isl: Dictionary, list: Array, spec: Dictionary) -> Array:
 	var first := float(spec.get("first", FIRST_DAY0 if int(spec.get("day", 1)) == 0 else FIRST_T))
 	var gap := float(spec.get("gap", MIN_GAP))
 	var rlen := float(spec.get("len", 400.0))
-	var ter: PackedByteArray = isl.get("ter", PackedByteArray())
+	var ter := open_land(isl)
 	var fx := effect(mode, gift_id)
 	if float(fx.stall) > float(md.stall) or float(fx.slow) < float(md.fog_slow) or gift_speed(gift_id) < 1.0:
 		why.append("the gift %s makes the weather worse" % gift_id)

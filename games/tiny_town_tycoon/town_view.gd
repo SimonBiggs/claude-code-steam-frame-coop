@@ -388,25 +388,28 @@ func _update_site(b: Dictionary) -> void:
 		site.name = "Site%d" % id
 		add_child(site)
 		_sites[id] = site
+		# the pop-in and plonk animate this inner node: the site itself keeps building_xf's CELL scale (tweening the
+		# site's own scale to ONE left a blueprint 18 times too big over the table, a giant glass house, 2026-11-12)
+		var pop := Node3D.new()
+		pop.name = "Pop"
+		site.add_child(pop)
 		var ghost := MeshInstance3D.new()
 		ghost.name = "Ghost"
 		ghost.mesh = Art.building_mesh(kind, id, 1, snowy)
 		ghost.material_override = Art.ghost_mat(Color(0.55, 0.8, 1.0, 0.38))
 		ghost.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		site.add_child(ghost)
+		pop.add_child(ghost)
 		var scaf := MeshInstance3D.new()
 		scaf.mesh = Art.scaffold_mesh(Defs.size_of(kind))
-		site.add_child(scaf)
+		pop.add_child(scaf)
 		var pile := Node3D.new()
 		pile.name = "Pile"
-		site.add_child(pile)
-		site.scale = Vector3.ONE * 0.3
-		var tw := site.create_tween()
-		tw.tween_property(site, "scale", Vector3.ONE, 0.35).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	var xf := building_xf(b)
-	site.transform = Transform3D(xf.basis, xf.origin)
-	site.scale = site.scale  # keep the tween's scale
-	var pile2: Node3D = site.get_node("Pile")
+		pop.add_child(pile)
+		pop.scale = Vector3.ONE * 0.3
+		var tw := pop.create_tween()
+		tw.tween_property(pop, "scale", Vector3.ONE, 0.35).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	site.transform = building_xf(b)
+	var pile2: Node3D = site.get_node("Pop/Pile")
 	var have := int(b["mats"])
 	if pile2.get_child_count() != have:
 		for c in pile2.get_children():
@@ -442,9 +445,10 @@ func start_rise(id: int) -> void:
 func plonk(id: int) -> void:
 	var site: Node3D = _sites.get(id, null)
 	if site != null:
-		var tw := site.create_tween()
-		site.scale = Vector3(1.25, 0.7, 1.25)
-		tw.tween_property(site, "scale", Vector3.ONE, 0.35).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
+		var pop: Node3D = site.get_node("Pop")
+		var tw := pop.create_tween()
+		pop.scale = Vector3(1.25, 0.7, 1.25)
+		tw.tween_property(pop, "scale", Vector3.ONE, 0.35).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
 
 
 # --- Status: icons, fires, smoke, waiting people (twice a second) --------------------------------------------

@@ -23,6 +23,7 @@ const Save := preload("res://core/save.gd")
 const StoryCardScript := preload("res://core/story_card.gd")
 const Wishes := preload("res://games/tiny_town_tycoon/wishes.gd")
 const Telemetry := preload("res://core/telemetry.gd")
+const Deep := preload("res://games/tiny_town_tycoon/deep.gd")
 
 var kit: BotKit
 var main: Node
@@ -60,6 +61,9 @@ var wish_skips := {}  ## "<wish id> <why>": wishes the bot mayor said it can't g
 var pick_seen := {}  ## stage -> true: orbs this machine saw
 var pick_reached := {}  ## stage -> true: a bot got under / into its orb
 var weather_dodges := 0  ## times a bot driver steered out of or waited before told weather
+var pick_away := {}  ## slot -> [stage, orb index to pass through first] (a vehicle already under an orb when they popped up must leave and come back)
+var bot_pads: Array = []  ## this machine's bot pads (device ids)
+var gift_seen_t := -1.0  ## seconds into the run when this machine first had a gift (the weather comes after it)
 
 
 func _ready() -> void:
@@ -79,6 +83,13 @@ func _ready() -> void:
 	want = BotKit.bot_players(2, 6)
 	var t0 := 3.0 if client else 1.0
 	kit.at(t0, "%d players press A on their pads" % want, _join)
+	if client:  # (a late joiner lands on Benny's card: its A only closes the card, so the players press again)
+		for k in [2.5, 5.0, 8.0]:
+			kit.at(t0 + k, "anyone not seated yet presses A again", func() -> void:
+				if kit.seated() < kit.seated_want(want):
+					kit.info("seated %d of %d: pressing A again" % [kit.seated(), want])
+					for dv in bot_pads:
+						kit.pad_press(int(dv), JOY_BUTTON_A))
 	kit.at(t0 + 2.5, "pick the island", _pick)
 	kit.at(t0 + 5.0, "island picked?", func() -> void:
 		if not client:
@@ -125,7 +136,8 @@ func _ready() -> void:
 	if not host:
 		kit.at(16.0, "a driver honks (A)", func() -> void: _press_driver("accept"))
 	if client:
-		kit.at(52.0, "finish", func() -> void:
+		# a machine that joined late (BOT_LATE) counts its clock from its own start: it still leaves before the host
+		kit.at(52.0 - minf(20.0, float(OS.get_environment("BOT_LATE")) if OS.has_environment("BOT_LATE") else 0.0), "finish", func() -> void:
 			_checks()
 			kit.finish())
 	elif host:
@@ -154,7 +166,7 @@ func _join() -> void:
 			kit.join_bot(main.party)
 		return
 	for i in want:
-		kit.join_bot(main.party)
+		bot_pads.append(kit.join_bot(main.party))
 
 
 func _pick() -> void:
@@ -629,9 +641,22 @@ func _drive(slot: int, delta: float) -> void:
 	paths[slot] = p
 	if _pick_row("island"):  # the orbs are up: drive under ours and stand still
 		var pt := _pick_target()
+		var st := String(main.picks.orbs.stage)
+		if not pick_away.has(slot) or String(pick_away[slot][0]) != st:
+			var under := Deep.under(main.picks.spots, v.position)
+			pick_away[slot] = [st, (under + 1) % main.picks.spots.size() if under >= 0 else -1]
+		var via := int(pick_away[slot][1])
+		if via >= 0 and pt != Vector3.INF:  # resting in an orb when they popped up: out through another one first
+			var vp: Vector3 = main.picks.spots[via]
+			if Vector2(vp.x - v.position.x, vp.z - v.position.z).length() < Defs.CELL * 0.4:
+				pick_away[slot] = [st, -1]
+			else:
+				pt = vp
 		if pt != Vector3.INF:
 			target = Vector3(pt.x, Defs.GROUND_Y, pt.z)
-			if Vector2(target.x - v.position.x, target.z - v.position.z).length() < Defs.CELL * 0.2:
+			if via < 0 and Vector2(target.x - v.position.x, target.z - v.position.z).length() < Defs.CELL * 0.2:
+				if not pick_reached.has(main.picks.orbs.stage):
+					kit.info("P%d's vehicle is under its %s orb" % [slot + 1, main.picks.orbs.stage])
 				pick_reached[main.picks.orbs.stage] = true
 				kit.slot_stick(main.party, slot, "left", Vector2.ZERO)
 				return
@@ -769,6 +794,11 @@ func _see(what: String) -> void:
 func _record() -> String:
 	if main == null or not main.ready_to_play or main.hud == null:
 		return ""
+	if gift_seen_t < 0.0 and String(main.deep_gift) != "":
+		gift_seen_t = kit.t
+	for st in main.view._sites.values():  # a blueprint the size of its footprint (not 18 times: the giant glass house)
+		if is_instance_valid(st) and (st as Node3D).global_basis.get_scale().x > Defs.CELL * 1.5:
+			_see("giant_site")
 	for sl in main.hud.views:
 		var v: Dictionary = main.hud.views[sl]
 		if v.has("cue"):
@@ -864,6 +894,8 @@ func _save_reload() -> void:
 
 
 func _report() -> String:
+	if main == null or main.town == null or main.fleet == null:
+		return "BOT: still joining (%s)" % ("no main" if main == null else "town %s fleet %s ready %s" % [main.town != null, main.fleet != null, main.ready_to_play])  # (a late joiner's game isn't set up until the host answers)
 	var built := 0
 	for id in main.town.buildings:
 		if int(main.town.buildings[id]["stage"]) >= 1:
@@ -911,9 +943,12 @@ func _deep_checks() -> void:
 	kit.info("deep: mode %s gift %s season %s islets %d, picks %s, weather seen %s, spun %d, dodges %d, reached %s" % [main.deep_mode,
 		main.deep_gift, main.deep_season, main.deep_islets, str(main.picks.history), str(main.hazards.seen), main.hazards.spun,
 		weather_dodges, str(pick_reached.keys())])
+	kit.assert_true(not seen.has("giant_site"), "%s: every blueprint is its own size (no giant glass house)" % mode)
 	kit.assert_true(main.season_node.season != "", "%s: Benny's season dresses the garden (%s)" % [mode, main.deep_season])
 	kit.assert_true(main.deep_gift != "", "%s: a builder gift was picked (%s)" % [mode, main.deep_gift])
-	kit.assert_true(main.hazards.seen.size() >= 1, "%s: Benny's weather was told on the island (%s)" % [mode, str(main.hazards.seen)])
+	var late := gift_seen_t < 0.0 or kit.t - gift_seen_t < Deep.SHORT_FIRST + 10.0  # (a gift picked just now: its weather is still to come)
+	if not late:
+		kit.assert_true(main.hazards.seen.size() >= 1, "%s: Benny's weather was told on the island (%s)" % [mode, str(main.hazards.seen)])
 	if mode == "client":
 		kit.assert_true(pick_seen.has("mode") or pick_seen.has("gift"), "TV machine: the pick orbs showed here")
 		return

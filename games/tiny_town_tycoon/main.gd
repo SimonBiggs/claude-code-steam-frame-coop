@@ -898,6 +898,7 @@ func place(slot: int, kind: String, x: int, z: int, rot: int) -> bool:
 		return false
 	var why := place_problem(kind, x, z)
 	if why != "":
+		print("Tiny Town Tycoon: P%d can't put a %s at %d,%d: %s" % [slot + 1, kind, x, z, why])
 		_fx("nope", [slot, why])
 		return false
 	if not sim.free_build:
@@ -1852,7 +1853,7 @@ func _deep_tick(delta: float) -> void:
 ## Host: the pick due now ("" none): the mode once a session (Benny names the season first), then a gift every day.
 ## Never during the practice, a sail, or the moment after a town loads.
 func _pick_due() -> String:
-	if practice < 2 or not playing() or _sail_t > 0.0 or _settle_t > 0.0:
+	if practice < 2 or not playing() or _sail_t > 0.0 or _settle_t > 0.0 or hazards.busy():
 		return ""
 	if not _season_shown:
 		_season_shown = true
@@ -1950,7 +1951,7 @@ func _plan_weather() -> void:
 	if _bot_weather:
 		spec["first"] = Deep.SHORT_FIRST
 		spec["gap"] = Deep.SHORT_GAP
-	var list := Deep.weather({"ter": town.ter}, spec)
+	var list := Deep.weather({"ter": town.ter, "dist": town.dist, "open": town.open_mask}, spec)
 	hazards.host_begin(list)
 	print("Tiny Town Tycoon weather: %d today (%s mode, %s, %.0f s left in the day): %s" % [list.size(), deep_mode, deep_season,
 		float(spec.len), str(list.map(func(e: Dictionary) -> String: return "%s@%.0f" % [e.kind, float(e.t)]))])

@@ -144,6 +144,8 @@ func _pick(delta: float) -> Array:
 			continue
 		if i != before:
 			dwell[id] = 0.0
+			if i >= 0:
+				print("PICKS: %s is in orb %d (%.1f s)" % [id, i, t])
 		inside[id] = i
 		if i >= 0 and t >= OPEN:
 			dwell[id] = float(dwell.get(id, 0.0)) + delta
