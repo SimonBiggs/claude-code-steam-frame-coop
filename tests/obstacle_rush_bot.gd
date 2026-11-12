@@ -35,6 +35,7 @@ var fans0 := -1
 var grabs := 0
 var course_keys := {}  # var_to_str(cdesc) -> course name
 var gen_checked := 0
+var short := false  ## the run ends before the bot's whole run (solo VR host BOT_END=62, a 60 s local run)
 
 
 func _ready() -> void:
@@ -60,10 +61,9 @@ func _ready() -> void:
 			(brains[rid] as CpuBrain).bonked_door(float(d["x"]), float(d["z"])))
 	kit.every(4.0, _report)
 	kit.every(0.5, _results)
-	var end := 150.0 if host else (140.0 if client else 230.0)
-	if OS.has_environment("BOT_END"):
-		end = float(OS.get_environment("BOT_END"))
-	end = preload("res://tests/bot_end.gd").within_deadline(end)
+	var full := 150.0 if host else (140.0 if client else 230.0)
+	var end: float = preload("res://tests/bot_end.gd").end_at(full)  # (BOT_END, --quit-after, the runner's deadline)
+	short = end < full - 1.0
 	kit.at(end, "finish", func() -> void:
 		_checks()
 		kit.finish())
@@ -239,15 +239,17 @@ func _checks() -> void:
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
 	if mode != "host":
 		kit.assert_eq(kit.seated(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
-	kit.assert_true(seen_courses.size() >= 3, "%s: played through several courses (%d)" % [mode, seen_courses.size()])
-	kit.assert_true(gen_checked >= 3, "%s: checked the courses it built (%d)" % [mode, gen_checked])
+	var several := 2 if short else 3  # (a cut-short run: solo VR host BOT_END=62, a 60 s local run)
+	kit.assert_true(seen_courses.size() >= several, "%s: played through several courses (%d%s)" % [mode, seen_courses.size(), ", short run" if short else ""])
+	kit.assert_true(gen_checked >= several, "%s: checked the courses it built (%d)" % [mode, gen_checked])
 	kit.assert_true(main.stands.fans == mini(int(main.net.state_get("fans", 0)), Story.MAX_FANS), "%s: the grandstand shows the fans (%d)" % [mode, main.stands.fans])
 	if mode == "client":
 		kit.assert_true(main.runners.size() >= 3, "client mirrors the runners (%d)" % main.runners.size())
 		kit.assert_true(main.course.checkpoints.size() > 0, "client built the course")
 		return
-	kit.assert_true(saw_results, "%s: the show ended with the results" % mode)
-	kit.assert_true(int(main.net.state_get("fans", 0)) > fans0, "%s: fans joined the grandstand (%d -> %d)" % [mode, fans0, int(main.net.state_get("fans", 0))])
+	if not short:
+		kit.assert_true(saw_results, "%s: the show ended with the results" % mode)
+	kit.assert_true(short or int(main.net.state_get("fans", 0)) > fans0, "%s: fans joined the grandstand (%d -> %d)" % [mode, fans0, int(main.net.state_get("fans", 0))])
 	kit.assert_true(grabs > 0, "%s: a star got grabbed" % mode)
 	var natural := {}
 	var log_by_course := {}

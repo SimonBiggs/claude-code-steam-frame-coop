@@ -23,7 +23,7 @@ var pad_step := 0
 var target := 2
 var script_step := 0
 var vr_draw_t := 0.0
-var end_t := float(OS.get_environment("BOT_END")) if OS.has_environment("BOT_END") else 56.0
+var end_t: float = preload("res://tests/bot_end.gd").end_at(56.0)  # BOT_END, pulled in before a --quit-after cut
 
 
 func _ready() -> void:
@@ -75,6 +75,8 @@ func _physics_process(delta: float) -> void:
 			continue
 		p.force_fire = p.index >= 2 or mode == "client"
 		_aim(p)
+	if mode == "client" and t >= end_t - 1.0:
+		_deep_checks()  # a TV machine's verdict too (the host's comes from its content script)
 	if mode != "client":
 		_content_script()
 		if OS.has_environment("BOT_GOD"):
@@ -302,6 +304,9 @@ func _report(mode: String) -> void:
 ## The deep content (arenagen / zone / picks / story) works: a zone was built, everyone picked a hero, Nova told the
 ## story. Fails print SCRIPT ERROR (the runner's verdict); the summary is the BOT RESULT line.
 func _deep_checks() -> void:
+	if has_meta("deep_checked"):
+		return
+	set_meta("deep_checked", true)
 	var fails: Array[String] = []
 	var z = main.zone
 	if z == null or z.zone_id == "":

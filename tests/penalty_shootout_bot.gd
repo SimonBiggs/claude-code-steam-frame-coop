@@ -21,6 +21,7 @@ extends Node
 ## a short title / score word, or a tip spot (help line, view HUD lines) shows any words.
 
 const FAKE_PAD := 40
+const BotEnd := preload("res://tests/bot_end.gd")  # check(): counted checks, so every run ends with a real BOT RESULT
 
 var main
 var t := 0.0
@@ -37,6 +38,7 @@ var keeper_try := true
 var last_state := ""
 var result_wait := -1.0
 var results := {}
+var match_results := 0  # results of real (not practice) penalties
 var last_round := 0
 var rounds_done := 0
 var matches_done := 0
@@ -148,11 +150,11 @@ func _physics_process(delta: float) -> void:
 		print("BOT: fake controller %d drives P%d, paused=%s" % [FAKE_PAD, int(main.joy_owner.get(FAKE_PAD, -1)) + 1, get_tree().paused])
 	var st: String = main.state
 	var short := 3 if main.simple else 1  # simple mode: 3 rounds, so the FIREBALL unlocks
-	if mode == "local" and st == "intro" and main.rounds_total > short:
+	if mode == "host":
+		short = 2
+	short = _with_star(short)
+	if mode != "client" and st == "intro" and main.rounds_total > short:
 		main.rounds_total = short  # keep the headless match short
-		main.final_shots = 1
-	if mode == "host" and st == "intro" and main.rounds_total > 2:
-		main.rounds_total = 2
 		main.final_shots = 1
 	if mode != "client" and st == "trophy" and main.state_t > 3.0 and main.state_t < 5.0:
 		main.state_t = 99.0  # short runs: a quicker trophy ceremony
@@ -194,6 +196,8 @@ func _physics_process(delta: float) -> void:
 		if result_wait < 0.0:
 			var r: String = main.last_result
 			results[r] = int(results.get(r, 0)) + 1
+			if main.practice == "" and r != "":
+				match_results += 1  # a real penalty (not practice) decided
 			print("BOT %s: result #%d %s" % [mode, _count(), r])
 	if main.round_i > last_round:
 		rounds_done += main.round_i - last_round
@@ -534,28 +538,57 @@ func _tip_error(who: String, text: String) -> void:
 	cues["tip_text"] = true
 
 
+## Rounds to shorten a match to: `want`, or more so the match still reaches its first star kick (Leo's star is the
+## match's story). The solo VR host's 2-round cut ended the computer striker's match after 2 kicks while match 1's
+## first star is kick 3, so no star ever showed (2026-11-12).
+func _with_star(want: int) -> int:
+	if not main.simple or main.mplan.is_empty():
+		return want
+	var stars: Array = main.mplan.get("stars", [])
+	var per: int = 1 if main.cpu else maxi(1, main.active_strikers().size())
+	for k in stars.size():
+		if stars[k] != Vector2.INF:
+			return maxi(want, ceili(float(k + 1) / float(per)))
+	return want
+
+
 func _exit_tree() -> void:
-	if main == null or not main.simple:
+	if main == null:
+		return
+	# The verdict (tests/bot_end.gd prints BOT RESULT from the counted checks, in local, host and joining runs).
+	# A whole round needs ~60 s after the practice (which repeats a missed ring); a shorter run (dev.bots.run's 60 s
+	# local, the solo VR host's BOT_END=62) must at least get a real penalty taken and decided (2026-11-12).
+	if BotEnd.short_run(90.0) and rounds_done == 0:
+		# Kicks keep getting decided (no stall: about one every 8 s, practice included) and, when the run is long enough
+		# for the practice (the keeper's balls, then one ring kick per striker: ~35 s + 7 s a striker), a match penalty.
+		var decided := 0
+		for r in results:
+			decided += int(results[r]) if String(r) != "" else 0
+		BotEnd.check(decided >= 1 + int(t / 8.0), "kicks kept being decided (short run: mode %s, t=%.0f, results %s)" % [main.net.mode, t, str(results)])
+		var strikers: int = 1 if main.cpu else maxi(1, main.active_strikers().size())
+		if not BotEnd.short_run(35.0 + 7.0 * strikers + 8.0):
+			BotEnd.check(match_results >= 1, "a match penalty was taken and decided (short run: mode %s, t=%.0f, %d strikers, shots %d, results %s)" % [main.net.mode, t, strikers, shots_fired, str(results)])
+	else:
+		BotEnd.check(rounds_done >= 1, "a round of penalties was played (mode %s, t=%.0f, shots %d)" % [main.net.mode, t, shots_fired])
+	if not main.simple:
 		return
 	var ks: Array = cues.keys()
 	ks.sort()
 	print("BOT CUES: mode=%s %s" % [main.net.mode, ",".join(PackedStringArray(ks))])
 	print("BOT LEO: mode=%s matches=%d %s" % [main.net.mode, matches_done, str(leo)])
-	if matches_done >= 1 and not (leo.get("plan", false) and leo.get("star_shown", false) and leo.get("sockets", false)):
-		print("SCRIPT ERROR: BOT LEO: a whole match without Leo's plan, star or sockets (%s)" % str(leo))
-	if main.net.mode != "client" and leo.get("cubs", 0) < 1:
-		print("SCRIPT ERROR: BOT LEO: no lion cub beside Leo (%s)" % str(leo))
+	if matches_done >= 1:
+		BotEnd.check(leo.get("plan", false) and leo.get("star_shown", false) and leo.get("sockets", false), "a match showed Leo's plan, star and sockets (%s)" % str(leo))
+	if main.net.mode != "client":
+		BotEnd.check(leo.get("cubs", 0) >= 1, "a lion cub beside Leo (%s)" % str(leo))
 	print("BOT DEEP: mode=%s matches=%d %s" % [main.net.mode, matches_done, str(deep)])
-	if main.net.mode != "client" and matches_done >= 1 and not deep.has("pick_mode"):
-		print("SCRIPT ERROR: BOT DEEP: a match without the mode pick (%s)" % str(deep))
-	if main.net.mode != "client" and matches_done >= 2 and not deep.has("pick_gift"):
-		print("SCRIPT ERROR: BOT DEEP: a second match without Leo's gift pick (%s)" % str(deep))
-	if deep.has("hz_due") and not (deep.has("told_gust") or deep.has("told_mud")):
-		print("SCRIPT ERROR: BOT DEEP: a kick had weather nobody was told about (%s)" % str(deep))
-	if deep.has("untold"):
-		print("SCRIPT ERROR: BOT DEEP: a kick could go before its weather was told (%s)" % str(deep))
-	if String(deep.get("dressed", "")) == "" or String(deep.get("dressed", "")) != String(deep.get("season", "?")):
-		print("SCRIPT ERROR: BOT DEEP: the pitch isn't dressed for the season (%s)" % str(deep))
+	if main.net.mode != "client" and matches_done >= 1:
+		BotEnd.check(deep.has("pick_mode"), "a match had the mode pick (%s)" % str(deep))
+	if main.net.mode != "client" and matches_done >= 2:
+		BotEnd.check(deep.has("pick_gift"), "a second match had Leo's gift pick (%s)" % str(deep))
+	if deep.has("hz_due"):
+		BotEnd.check(deep.has("told_gust") or deep.has("told_mud"), "every kick's weather was told (%s)" % str(deep))
+	BotEnd.check(not deep.has("untold"), "no kick went before its weather was told (%s)" % str(deep))
+	BotEnd.check(String(deep.get("dressed", "")) != "" and String(deep.get("dressed", "")) == String(deep.get("season", "?")), "the pitch is dressed for the season (%s)" % str(deep))
 	for p in main.players:
 		if p.has_meta("cue_done"):
 			print("BOT CUES: P%d done=%s" % [p.index + 1, p.get_meta("cue_done")])

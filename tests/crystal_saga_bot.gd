@@ -58,6 +58,7 @@ var saw_tells := {}  ## tell kinds seen drawn on this machine
 var quest_max := 0
 var region_changes := 0
 var last_biome := -1
+var short := false  ## the run ends before a whole journey (solo VR host BOT_END=62, a 60 s local run): check progress
 
 
 func _ready() -> void:
@@ -80,10 +81,9 @@ func _ready() -> void:
 			kit.join_bot(main.party))  # a flat host (TV / Deck hosting): one pad hero here, in slot 0
 	kit.every(5.0, _report)
 	kit.every(0.25, _watch)
-	var end := 150.0 if host else (140.0 if client else 300.0)
-	if OS.has_environment("BOT_END"):
-		end = float(OS.get_environment("BOT_END"))
-	end = BotEnd.within_deadline(end)
+	var full := 150.0 if host else (140.0 if client else 300.0)  # a whole journey
+	var end := BotEnd.end_at(full)  # (BOT_END, --quit-after or the runner's deadline may end it sooner)
+	short = end < full - 1.0
 	kit.at(end, "finish", func() -> void:
 		_checks()
 		kit.finish())
@@ -430,16 +430,24 @@ func _checks() -> void:
 	var first := int(OS.get_environment("CS_ZONE")) if OS.has_environment("CS_ZONE") else 0
 	if OS.get_environment("CS_TRY") == "guardian":
 		first = 3
-	for z in range(first, World.ZONES):
-		kit.assert_true(main.log_zones.has(z), "%s: zone %d was entered" % [mode, z])
-	kit.assert_true(saw_restored, "%s: the Crystal of Light was restored" % mode)
+	if short:  # cut short: real progress along the road instead of the whole journey
+		var reach := mini(World.ZONES - 1, first + 1 + int(kit.t / 25.0))  # (a zone every ~20 s: VR alone, a TV party, a lone Deck)
+		var got := true
+		for z in range(first, reach + 1):
+			got = got and main.log_zones.has(z)
+		kit.assert_true(got, "%s: the journey got from zone %d to zone %d in %.0f s (short run, %s)" % [mode, first, reach, kit.t, str(main.log_zones)])
+	else:  # the whole journey: every zone, the crystal restored, the results, the guardian
+		for z in range(first, World.ZONES):
+			kit.assert_true(main.log_zones.has(z), "%s: zone %d was entered" % [mode, z])
+		kit.assert_true(saw_restored, "%s: the Crystal of Light was restored" % mode)
+		kit.assert_true(main.runs_logged > 0, "%s: a RUN telemetry line was written" % mode)
+		kit.assert_true(saw_results, "%s: the results showed" % mode)
+		var atk0: Array = (main.plan.get("guardian", {}) as Dictionary).get("attacks", [])
+		kit.assert_true(main.log_stomps > 0 or first > 3 or not atk0.has("stomp") or not main.log_tells.is_empty(), "%s: the guardian stomped (%d) %s" % [mode, main.log_stomps, str(main.log_tells)])
 	if first <= 1:
 		kit.assert_true(saw_choose > 0 and not (main.save.data.skills as Dictionary).is_empty(), "%s: the party levelled up (%s)" % [mode, str(main.save.data.skills)])
 	kit.assert_true(int(main.save.data.shards) > 0, "%s: crystal shards were found (%d)" % [mode, int(main.save.data.shards)])
-	kit.assert_true(main.runs_logged > 0, "%s: a RUN telemetry line was written" % mode)
-	kit.assert_true(saw_results, "%s: the results showed" % mode)
 	var atk: Array = (main.plan.get("guardian", {}) as Dictionary).get("attacks", [])
-	kit.assert_true(main.log_stomps > 0 or first > 3 or not atk.has("stomp") or not main.log_tells.is_empty(), "%s: the guardian stomped (%d) %s" % [mode, main.log_stomps, str(main.log_tells)])
 	if OS.has_environment("CS_TRY") or OS.has_environment("CS_REGION"):
 		var fancy := 0
 		for k in main.log_tells:
@@ -457,7 +465,7 @@ func _checks() -> void:
 			kit.assert_true(main.ghost.shown.has("swing") and main.ghost.shown.has("fire"), "the ghost hand showed swing and fire (%s)" % str(main.ghost.shown))
 		kit.assert_true(main.hands.swings > 0, "the hero's sword hit monsters (%d)" % main.hands.swings)
 		kit.assert_true(main.hands.fires > 0, "the hero cast fireballs (%d)" % main.hands.fires)
-		if first <= 2:
+		if first <= 2 and not short:  # (the cave orb's thunder comes late in a journey)
 			kit.assert_true(main.hands.thunders > 0, "the hero cast thunder (%d)" % main.hands.thunders)
 		kit.assert_true(main.log_pokes.size() >= 6, "props reacted (%s)" % str(main.log_pokes))
 	if mode == "local" and not OS.has_environment("CS_TRY"):  # (CS_TRY: the VR hero may beat the guardian alone)

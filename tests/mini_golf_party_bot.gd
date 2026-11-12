@@ -63,9 +63,7 @@ func _ready() -> void:
 	var end := 150.0 if host else (140.0 if client else 190.0)
 	if client and OS.has_environment("BOT_LATE"):  # (tools/multibot.ts --late: joined late, leave before the host does)
 		end -= float(OS.get_environment("BOT_LATE"))
-	if OS.has_environment("BOT_END"):  # (e.g. the solo VR host run: BOT_END=62)
-		end = minf(end, float(OS.get_environment("BOT_END")) - 2.0)
-	end = preload("res://tests/bot_end.gd").within_deadline(end)
+	end = minf(end, preload("res://tests/bot_end.gd").end_at(end))  # BOT_END (solo VR host: 62), --quit-after, deadline
 	short_run = end < 120.0
 	kit.at(end, "finish", func() -> void:
 		_checks()

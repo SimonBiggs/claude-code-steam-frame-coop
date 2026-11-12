@@ -71,6 +71,7 @@ func _ready() -> void:
 		end_t = 46.0
 		if OS.has_environment("BOT_LATE"):  # (tools/multibot.ts --late: joined late, leave before the host does)
 			end_t = maxf(15.0, end_t - float(OS.get_environment("BOT_LATE")))
+	end_t = minf(end_t, preload("res://tests/bot_end.gd").end_at(end_t))  # before a --quit-after / deadline cut
 	kit.at(3.0 if client else 1.0, "%d TV players press A" % want, func() -> void:
 		if main.net.mode != "host":
 			for i in want:

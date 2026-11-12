@@ -22,6 +22,7 @@ extends Node
 
 const Levels := preload("res://games/block_builders/levels.gd")
 const Story := preload("res://games/block_builders/story.gd")
+const BotEnd := preload("res://tests/bot_end.gd")  # check(): counted checks, so every run ends with a real BOT RESULT
 
 var main
 var t := 0.0
@@ -90,12 +91,10 @@ func _physics_process(delta: float) -> void:
 			print("Bot: LEVEL %d CLEARED (%d so far) score=%d stars=%d" % [main.level + 1, cleared_seen, main.score, main.stars_taken])
 			if main.simple and main.net.mode != "client" and Story.is_adventure(main.level):
 				# The bot path detours to the lost cloud friend (coursegen.gd), so it must be home now.
-				if main.friend_state == 2 and (main.save.data.friends as Array).size() > 0:
+				if BotEnd.check(main.friend_state == 2 and (main.save.data.friends as Array).size() > 0, "the lost friend on %s was rescued (state %d) %s friend %s ground %s path %s" % [str(main.level_data().name), main.friend_state, str(main.level_data().get("challenges")), str(main.level_data().get("friend")), str(main.level_data().ground), str(main.level_data().bot_path)]):
 					print("Bot: FRIEND rescued on %s (%d home)" % [str(main.level_data().name), (main.save.data.friends as Array).size()])
-				else:
-					printerr("SCRIPT ERROR: Bot: the lost friend on %s wasn't rescued (state %d) %s friend %s ground %s path %s" % [str(main.level_data().name), main.friend_state, str(main.level_data().get("challenges")), str(main.level_data().get("friend")), str(main.level_data().ground), str(main.level_data().bot_path)])
-				if int(main.save.data.adventure) < Story.adventure_of(main.level) + 1 and not Story.is_daily(main.level):
-					printerr("SCRIPT ERROR: Bot: the adventure wasn't saved (%d)" % int(main.save.data.adventure))
+				if not Story.is_daily(main.level):
+					BotEnd.check(int(main.save.data.adventure) >= Story.adventure_of(main.level) + 1, "the adventure was saved (%d)" % int(main.save.data.adventure))
 		if main.simple and main.state == "failed":
 			print("Bot: FAIL - a level failed in SIMPLE_MODE")
 		last_state = main.state
@@ -437,6 +436,9 @@ func _tip_error(who: String, text: String) -> void:
 
 
 func _exit_tree() -> void:
+	# The verdict (tests/bot_end.gd prints BOT RESULT from the counted checks, in local, host and joining runs).
+	if main != null and is_instance_valid(main):
+		BotEnd.check(cleared_seen >= 1, "a level was cleared (mode %s, t=%.0f, state %s)" % [main.net.mode, t, main.state])
 	if main != null and is_instance_valid(main) and main.simple:
 		var ks: Array = cues.keys()
 		ks.sort()

@@ -16,6 +16,7 @@ extends Node
 ## came but no ladders stood (also on TV machines, which build them from the snapshot) or Sparky never showed.
 
 const W := preload("res://games/giants_table/world.gd")
+const BotEnd := preload("res://tests/bot_end.gd")  # check(): counted checks, so every run ends with a real BOT RESULT
 
 var main
 var t := 0.0
@@ -455,10 +456,13 @@ func _count_visuals(n: Node) -> int:
 
 
 func _exit_tree() -> void:
-	if main != null and main.wave >= 2 and not seen.has("ladders up"):
-		print("SCRIPT ERROR: GT BOT: waves came but no goblin ladders stood on the table (mode %s)" % main.net.mode)
-	if main != null and main.wave >= 1 and not seen.has("sparky's face"):
-		print("SCRIPT ERROR: GT BOT: Sparky's face never showed in the fire (mode %s)" % main.net.mode)
+	# The verdict (tests/bot_end.gd prints BOT RESULT from the counted checks, in local, host and joining runs).
+	if main != null:
+		BotEnd.check(main.wave >= 1, "the goblin waves came (mode %s, wave %d)" % [main.net.mode, main.wave])
+	if main != null and main.wave >= 2:
+		BotEnd.check(seen.has("ladders up"), "goblin ladders stood on the table in the waves (mode %s)" % main.net.mode)
+	if main != null and main.wave >= 1:
+		BotEnd.check(seen.has("sparky's face"), "Sparky's face showed in the fire (mode %s)" % main.net.mode)
 	if main != null and main.wave >= 1:
 		# (tools/multibot.ts: every machine the same raid. Not the gift count: a joiner leaves ~10 s before the host,
 		# which may save a night after it has gone.)

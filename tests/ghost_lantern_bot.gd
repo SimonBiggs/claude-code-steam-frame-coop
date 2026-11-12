@@ -21,6 +21,7 @@ extends Node
 ## P2 looks away now and then (to see the turn cue); local mode unplugs and replugs P2's (fake)
 ## controller to see the bolt.
 const UiKit := preload("res://core/ui_kit.gd")
+const BotEnd := preload("res://tests/bot_end.gd")  # check(): counted checks, so every run ends with a real BOT RESULT
 var main
 var t := 0.0
 var last_print := -100.0
@@ -32,6 +33,7 @@ var simple := false
 var saw_hand := false
 var saw_sleepy := false
 var saw_glowy := false
+var had_vacuum := false  # a TV vacuum player was there during practice (each gets a glowing ghost; a lone Deck has none)
 var prop_i := 0
 var prop_t := 0.0
 var cues := {}  # simple mode: picture cues seen / learned
@@ -205,6 +207,8 @@ func _simple_checks(delta: float) -> void:
 			saw_glowy = true
 	if main.ghost_hand != null and main.ghost_hand.visible:
 		saw_hand = true
+	if main.practice and main.has_vacuums():
+		had_vacuum = true
 	if main.game_over:
 		print("BOT: FAIL simple mode reached game over")
 	_second_pass(delta)
@@ -224,7 +228,7 @@ func _simple_checks(delta: float) -> void:
 		print("BOT: skip to night %s" % OS.get_environment("BOT_NIGHT"))
 	if t - last_print < 0.02 and fmod(t, 5.0) < 0.1:
 		print("BOT   simple: dawn=%.2f won=%s kinds=%s" % [main.director().dawn, main.director().won, _kinds()])
-	# Touch every prop once practice is over (VR: with the fake left hand; flat: P2 bumps the floor spots).
+	# Touch every prop once practice is over (VR: with the fake left hand; flat: P2, or a lone flat P1, bumps the floor spots).
 	if not main.practice and main.props != null and t > 20.0 and not main.picks.active():
 		var names: Array = main.props.TOUCH.keys()
 		if prop_i < names.size():
@@ -234,7 +238,9 @@ func _simple_checks(delta: float) -> void:
 			if p1.vr:
 				p1.hand_l.global_position = d[0]
 			elif d[2] != null:
-				main.players[1].global_position = d[2]
+				# A TV player (P2) bumps the floor spot, or the flat lantern-bearer when nobody else plays (a lone Deck).
+				var walker = main.players[1] if main.players[1].active else p1
+				walker.global_position = d[2]
 			elif not main.props.touched.has(n):
 				main.props.touch(n)
 			if prop_t > 0.5:
@@ -265,13 +271,16 @@ func _simple_checks(delta: float) -> void:
 		var practiced: bool = OS.has_environment("BOT_NIGHT") or (saw_sleepy and main.vr_woken >= main.VR_PRACTICE)
 		var ok: bool = practiced and not main.practice and main.night >= 1 and has_meta("float_seen") \
 			and main.caught > 0 and not main.game_over and main.props.touched.size() >= 5
-		if (mode == "local" or main.net.connected) and not OS.has_environment("BOT_NIGHT"):
+		# Each TV vacuum player gets a glowing practice ghost; a lone Deck (the lantern-bearer, seats.deck_solo) or a
+		# solo VR host has no vacuum, so no glowy ghost (dev.loneRun, 2026-11-12).
+		if had_vacuum and not OS.has_environment("BOT_NIGHT"):
 			ok = ok and saw_glowy
 		if p1.vr and not OS.has_environment("BOT_NIGHT"):
 			ok = ok and saw_hand and main.props.touched.size() >= main.props.TOUCH.size()
 		print("BOT: SIMPLE %s practice_done=%s woken=%d saw_sleepy=%s saw_glowy=%s hand=%s tv_caught=%s night=%d caught=%d props=%s" % [
 			"OK" if ok else "FAIL", not main.practice, main.vr_woken, saw_sleepy, saw_glowy, saw_hand, main.tv_caught.keys(),
 			main.night, main.caught, main.props.touched])
+		BotEnd.check(ok, "simple mode (mode %s): practice done, a night, a ghost caught, props touched, no game over" % mode)
 
 
 ## Second pass: the pick orbs (mode before night 1, a lantern gift after a night: the VR hand or P2's feet take
@@ -298,8 +307,8 @@ func _second_pass(_delta: float) -> void:
 		if t > 44.0 and not has_meta("client_second"):
 			set_meta("client_second", true)
 			print("BOT: client second pass: orbs=%s rings=%s mode=%s gifts=%s wing=%s" % [saw_orbs.keys(), saw_rings, main.game_mode, main.upgrades, main.house.get("wing", {}).get("id", "-")])
-			if main.net.connected and saw_orbs.is_empty() and not OS.has_environment("GL_MODE"):
-				print("SCRIPT ERROR: BOT second: the client never saw the pick orbs")
+			if main.net.connected and not OS.has_environment("GL_MODE"):
+				BotEnd.check(not saw_orbs.is_empty(), "the client saw the pick orbs")
 		return
 	var p1 = main.players[0]
 	# Take an orb a second after it's up: the VR lantern-bearer with a hand, else P2 walks under one.
@@ -347,6 +356,7 @@ func _second_pass(_delta: float) -> void:
 		print("BOT: SECOND %s picks=%s mode=%s gifts=%s angle=%.0f range=%.1f rings=%s pufflings=%d boing_landed=%s wing=%s" % [
 			"OK" if errs.is_empty() else "FAIL", str(main.picks.history), main.game_mode, main.upgrades, main.lantern_angle(),
 			main.lantern_range(), saw_rings, pufflings_seen, saw_boing_land, main.house.get("wing", {}).get("id", "-")])
+		BotEnd.check(errs.is_empty(), "second pass (picks, gifts, new ghosts): %s" % str(errs))
 
 
 ## Granny Boo's house: hiding ghosts seen hiding (eyes showing, body hidden) and coming out.
@@ -410,6 +420,7 @@ func _check_house() -> void:
 			errs.append("the client's jar shelf is empty (host kept %s)" % str(main.house_key))
 	for e in errs:
 		print("SCRIPT ERROR: BOT house: " + str(e))
+	BotEnd.check(errs.is_empty(), "the haunted house (mode %s): %s" % [main.net.mode, str(errs)])
 	if main.house_key.size() == 5:
 		print("BOT AGREE house=%d/%d" % [int(main.house_key[0]), int(main.house_key[1])])
 	print("BOT: HOUSE %s bodies=%d seed=%s spots=%d hid=%s out=%s kept=%d cosy=%d stories=%d" % ["OK" if errs.is_empty() else "FAIL", _bodies(main).size(),
@@ -592,6 +603,9 @@ func _tip_error(who: String, text: String) -> void:
 
 
 func _exit_tree() -> void:
+	# The verdict (tests/bot_end.gd prints BOT RESULT from the counted checks, in local, host and joining runs).
+	if main != null and is_instance_valid(main):
+		BotEnd.check(has_meta("report"), "the run reached its 55 s report (mode %s, t=%.0f)" % [main.net.mode, t])
 	if main != null and is_instance_valid(main) and main.simple:
 		var ks: Array = cues.keys()
 		ks.sort()
