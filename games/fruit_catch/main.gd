@@ -167,6 +167,7 @@ var hz_fired := false  # host: its apples fell / its wasp set off
 var hz_bumped := {}  # host: slots the wasp bumped this time
 var hz_count := 0  # host: surprises this round (telemetry)
 var bumps := 0  # host: wasp bumps + windfall apples caught this round (telemetry)
+var gift_shown := ""  # every machine: the gift whose banner showed
 var bot_surprises := false  # bots: surprises from round 1, from 3 s
 
 
@@ -692,16 +693,16 @@ func _on_state_changed(key: String, value: Variant) -> void:
 			var dv: Array = value if value is Array else []
 			if dv.size() >= 3:
 				mode = String(dv[0])
-				var was := gift
 				gift = String(dv[1])
 				season = String(dv[2])
 				if season_node != null and season != "":
 					season_node.set_season(season)
 				_refresh_baskets()
-				if gift != "" and gift != was:
+				if gift != "" and gift != gift_shown:
 					var gd := Deep.gift(gift)
 					_banner(String(gd.name), "", "victory")
 					_story(String(gd.line), String(gd.pic), gd.color)
+				gift_shown = gift
 		"hz":
 			var hz := Deep.unpack(value if value is Array else [])
 			if hazards != null:
@@ -758,7 +759,7 @@ func _begin_session() -> void:
 	_send_deep()
 	net.state_set("pantry", Deep.pantry(int(save.data.dishes)))
 	var sd := Deep.season_data(season)
-	_story(String(sd.line), String(sd.pic), sd.drift)
+	_story_all(String(sd.line), String(sd.pic), sd.drift)
 	print("Fruit Catch orchard: %d trees (%d planted in all), day %d, today's harvest %s, session seed %d" % [
 		(save.data.orchard as Array).size(), int(save.data.trees), int(save.data.days),
 		"done" if String(save.data.daily) == Seeded.today() else "due", session_seed])
@@ -1393,6 +1394,19 @@ func _story(line: String, pic: String, color: Color) -> void:
 	story_queue.append([line, pic, color])
 
 
+## Host: a story beat / a banner on every machine (beats that don't come from a state change).
+func _story_all(line: String, pic: String, color: Color) -> void:
+	_story(line, pic, color)
+	if net.mode == "host":
+		net.event("story", [line, pic, color])
+
+
+func _banner_all(title: String, style: String) -> void:
+	_banner(title, "", style)
+	if net.mode == "host":
+		net.event("banner", [title, style])
+
+
 func _update_story(delta: float) -> void:
 	story_t -= delta
 	if story_t > 0.0 or story_queue.is_empty():
@@ -1452,17 +1466,17 @@ func _start_pick(stage: String) -> void:
 		for id in opts:
 			var md := PickOrbs.mode(String(id))
 			entries.append({"id": id, "name": md.name, "pic": md.pic, "color": md.color})
-		_story("Easy or tricky?", "squirrel", Art.FUR)
+		_story_all("Easy or tricky?", "squirrel", Art.FUR)
 	else:
 		opts = Deep.gift_choices(Deep.pantry(int(save.data.dishes)), String(save.data.last_gift),
 			Seeded.derive(session_seed, "gift%d" % session_round))
 		for id in opts:
 			var gd := Deep.gift(String(id))
 			entries.append({"id": id, "name": gd.name, "pic": gd.pic, "color": gd.color})
-		_story("A gift for you!", "gift", Art.FUR)
+		_story_all("A gift for you!", "gift", Art.FUR)
 	net.state_set("hz", [])
 	net.state_set("phase", "pick")
-	_banner("PICK ONE!", "", "default")
+	_banner_all("PICK ONE!", "default")
 	picks.begin(stage, entries, opts, _on_picked)
 	sound("whistle", -8.0, 1.3)
 
@@ -1473,8 +1487,8 @@ func _on_picked(stage: String, opt: Variant, _slot: int) -> void:
 		mode_picked = true
 		mode = Deep.mode_of(String(opt))
 		save.data.mode = mode
-		_story(String(PickOrbs.MODE_LINES.get(mode, "Let's go!")), String(PickOrbs.mode(mode).pic), PickOrbs.mode_color(mode))
-		_banner(PickOrbs.mode_name(mode), "", "victory")
+		_story_all(String(PickOrbs.MODE_LINES.get(mode, "Let's go!")), String(PickOrbs.mode(mode).pic), PickOrbs.mode_color(mode))
+		_banner_all(PickOrbs.mode_name(mode), "victory")
 	else:
 		gift = String(opt)
 		gift_round = session_round + 1
@@ -1741,6 +1755,10 @@ func apply_event(kind: String, args: Array) -> void:
 	match kind:
 		"fx":
 			fx(String(args[0]), args[1], args[2], int(args[3]), int(args[4]))
+		"story":
+			_story(String(args[0]), String(args[1]), args[2])
+		"banner":
+			_banner(String(args[0]), "", String(args[1]))
 		"orbs":
 			if picks != null and args.size() >= 3:
 				picks.show_row(String(args[0]), args[1], args[2])
