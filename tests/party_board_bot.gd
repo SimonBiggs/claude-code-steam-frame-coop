@@ -71,6 +71,7 @@ func _ready() -> void:
 	main.set("mg_time_scale", 0.4)
 	add_child(main)
 	kit.main = main
+	kit.watch_state(main.net)  # every phase / step as it happens (kit.seen): a poll misses quick ones under load
 	main.net.state_changed.connect(_on_state)
 	want = BotKit.bot_players(2, 6)
 	client = OS.has_environment("DUO_JOIN")
@@ -123,14 +124,18 @@ func _start_direct() -> void:
 		main.flow.on_request(0, "setup", ["start"])
 
 
-## Record every replicated step, menu and phase as it happens.
+## Record every menu kind as it happens (phases and steps: kit.watch_state).
 func _on_state(key: String, value: Variant) -> void:
-	match key:
-		"phase", "step":
-			seen[key + ":" + String(value if value != null else "")] = true
-		"menu":
-			if value is Dictionary and not (value as Dictionary).is_empty():
-				seen["menu:" + String((value as Dictionary).get("kind", ""))] = true
+	if key == "menu" and value is Dictionary and not (value as Dictionary).is_empty():
+		seen["menu:" + String((value as Dictionary).get("kind", ""))] = true
+
+
+## Did it happen? "phase:results" / "step:roll" ask kit.seen (counted as they happened); the rest this bot's `seen`.
+func _had(what: String) -> bool:
+	var kv := what.split(":", true, 1)
+	if kv.size() == 2 and kv[0] in ["phase", "step"]:
+		return kit.seen(kv[0], kv[1]) > 0
+	return seen.has(what)
 
 
 ## SECOND PASS: the picks, surprises and gift tags seen here.
@@ -170,15 +175,10 @@ func _watch() -> String:
 	_measure_vr_panels()
 	_watch_deep()
 	var phase := String(main.net.state_get("phase", ""))
-	seen["phase:" + phase] = true
-	seen["step:" + String(main.net.state_get("step", ""))] = true
-	var m: Dictionary = main.net.state_get("menu", {}) if main.net.state_get("menu", {}) is Dictionary else {}
-	if not m.is_empty():
-		seen["menu:" + String(m.get("kind", ""))] = true
 	var mg: Dictionary = main.net.state_get("mg", {}) if main.net.state_get("mg", {}) is Dictionary else {}
 	if not mg.is_empty():
 		seen["mg:" + String(mg.get("id", ""))] = true
-		if String(main.net.state_get("mg_phase", "")) == "result" and not seen.has("res:%d" % int(mg.get("n", 0))):
+		if String(main.net.state_get("mg_phase", "")) == "result" and not _had("res:%d" % int(mg.get("n", 0))):
 			seen["res:%d" % int(mg.get("n", 0))] = true
 			var res: Dictionary = main.net.state_get("mg_result", {})
 			var parts: PackedStringArray = []
@@ -186,7 +186,7 @@ func _watch() -> String:
 				parts.append("%s=%d(+%d)" % [main.name_of(int(r["pid"])), int(r["score"]), int(r["coins"])])
 			kit.info("%s: %s  %s" % [String(mg.get("id", "")), String(res.get("title", "")), " ".join(parts)])
 	if main.flow != null and not _star_rigged and phase == "board" and String(main.net.state_get("step", "")) == "roll" \
-			and int(main.net.state_get("round", 0)) >= 1 and (seen.has("menu:shop") or main.simple):
+			and int(main.net.state_get("round", 0)) >= 1 and (_had("menu:shop") or main.simple):
 		_star_rigged = true
 		main.flow.bot_star_ahead(int(main.net.state_get("cur", 0)))
 	if main.dice == null:
@@ -204,7 +204,7 @@ func _watch() -> String:
 			# PLAY AGAIN from the results screen goes back to the title / setup menu.
 			_finish_at = 2e9
 			var seats: Array[int] = main.party.local_slots()
-			seen.erase("phase:title")
+			var titles0 := kit.seen("phase", "title")
 			if main.simple:
 				if not seats.is_empty():
 					kit.slot_press(main.party, seats[0], "accept")
@@ -212,14 +212,14 @@ func _watch() -> String:
 					main.net.request(0, "again", [])
 				# (new trophies are shown first: up to three picture cards, then the festival pick)
 				kit.at(kit.t + 3.0, "a new trophy or the festival pick?", func() -> void:
-					kit.assert_true(seen.has("phase:festival") or seen.has("phase:trophy"), "A on the winner moment: Mango's trophy wall or festival pick comes"))
+					kit.assert_true(_had("phase:festival") or _had("phase:trophy"), "A on the winner moment: Mango's trophy wall or festival pick comes"))
 				kit.at(kit.t + 10.0, "the winner picks Mango's next festival piece?", func() -> void:
-					kit.assert_true(seen.has("phase:festival") and seen.has("menu:festival"), "A on the winner moment: the winner picks what Mango builds")
-					if seen.has("phase:trophy"):
+					kit.assert_true(_had("phase:festival") and _had("menu:festival"), "A on the winner moment: the winner picks what Mango builds")
+					if _had("phase:trophy"):
 						kit.assert_true(not (main.festival.trophies as Array).is_empty(), "a won trophy stands on Mango's wall %s" % str(main.festival.trophies))
 						kit.info("trophies: %s" % str(main.festival.trophies)))
 				kit.at(kit.t + 17.0, "back at the start?", func() -> void:
-					kit.assert_true(seen.has("phase:title"), "after the festival pick a new party starts")
+					kit.assert_true(kit.seen("phase", "title") > titles0, "after the festival pick a new party starts")
 					var built: Array = main.save.data["festival"]
 					kit.assert_true(built.size() == 1, "a festival piece was built and saved (%s)" % str(built))
 					kit.assert_true(main.festival.built.size() == 1 and main.festival.deco_mi.mesh != null, "the festival piece stands on the island")
@@ -269,7 +269,7 @@ func _measure_vr_panels() -> void:
 		var dist := Vector2(to.x, to.z).length()
 		var top: float = main.board_top_y()
 		_vr_panel_n += 1
-		if not seen.has("vrpanel:" + String(panel_root.name).left(12)):
+		if not _had("vrpanel:" + String(panel_root.name).left(12)):
 			seen["vrpanel:" + String(panel_root.name).left(12)] = true
 			kit.info("VR panel %s: %.2f m away, %.2f m wide, bottom %.2f m (board top %.2f m, eyes %.2f m)" % [panel_root.name, dist,
 				box.size.x, box.position.y, top, cam.global_position.y])
@@ -536,8 +536,8 @@ func _cut_checks() -> void:
 		kit.assert_eq(kit.seated(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
 	kit.assert_true(main.roster().size() >= 4, "%s: at least 4 players (CPUs fill up)" % mode)
 	for s in ["step:roll", "step:move", "step:land"]:
-		kit.assert_true(seen.has(s), "%s: saw %s (short run)" % [mode, s])
-	kit.assert_true(seen.has("phase:minigame"), "%s: the board went on to a minigame (short run, round %d)" % [mode, int(main.net.state_get("round", 0))])
+		kit.assert_true(_had(s), "%s: saw %s (short run)" % [mode, s])
+	kit.assert_true(_had("phase:minigame"), "%s: the board went on to a minigame (short run, round %d)" % [mode, int(main.net.state_get("round", 0))])
 	if main.vr_rig != null:
 		kit.assert_true(_vr_panel_bad.is_empty(), "every VR card / menu is ~1.5 m away and above the board %s" % str(_vr_panel_bad))
 	if main.simple:
@@ -550,16 +550,16 @@ func _checks() -> void:
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
 	if mode != "host":
 		kit.assert_eq(kit.seated(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
-	kit.assert_true(seen.has("phase:results"), "%s: the party reached the results screen" % mode)
+	kit.assert_true(_had("phase:results"), "%s: the party reached the results screen" % mode)
 	kit.assert_true(main.roster().size() >= 4, "%s: at least 4 players (CPUs fill up)" % mode)
 	for s in ["step:roll", "step:move", "step:land", "phase:minigame"]:
-		kit.assert_true(seen.has(s), "%s: saw %s" % [mode, s])
+		kit.assert_true(_had(s), "%s: saw %s" % [mode, s])
 	if main.simple:
 		_checks_simple(mode)
 		return
 	if mode != "client":
 		for s in ["step:event", "step:duel", "menu:shop", "menu:duel"]:
-			kit.assert_true(seen.has(s), "%s: saw %s" % [mode, s])
+			kit.assert_true(_had(s), "%s: saw %s" % [mode, s])
 		var bought := 0
 		for p in main.roster():
 			bought += int((p as Dictionary)["stars_bought"])
@@ -576,7 +576,7 @@ func _checks() -> void:
 			var gap := (menu_btn.clamp(box.position, box.end) - menu_btn).length()
 			kit.assert_true(gap > 0.08, "the glove coins/stars stay clear of the wrist MENU button (%.2f m, text '%s')" % [gap, gl.text.replace("\n", " | ")])
 		kit.assert_true(main.ceremony.vr_results != null, "the results card shows in VR")
-		kit.assert_true(seen.has("vr:throw"), "the fake VR player threw the dice")
+		kit.assert_true(_had("vr:throw"), "the fake VR player threw the dice")
 	var mgs: PackedStringArray = []
 	for k in seen:
 		if String(k).begins_with("mg:"):
@@ -584,16 +584,16 @@ func _checks() -> void:
 	kit.info("minigames played: %s" % ", ".join(mgs))
 	if OS.has_environment("PB_ALL_MINIGAMES") and mode != "client":
 		for id in main.runner.ids():
-			kit.assert_true(seen.has("mg:" + String(id)), "%s: played minigame %s" % [mode, id])
+			kit.assert_true(_had("mg:" + String(id)), "%s: played minigame %s" % [mode, id])
 	if OS.has_environment("PB_MINIGAME"):
-		kit.assert_true(seen.has("mg:" + OS.get_environment("PB_MINIGAME")), "%s: played %s" % [mode, OS.get_environment("PB_MINIGAME")])
+		kit.assert_true(_had("mg:" + OS.get_environment("PB_MINIGAME")), "%s: played %s" % [mode, OS.get_environment("PB_MINIGAME")])
 
 
 ## SECOND PASS checks (short: a run cut before the results).
 func _deep_checks(mode: String, short: bool) -> void:
 	var pm := OS.get_environment("PB_MODE")
-	if pm == "" and (mode != "client" or seen.has("orbs:mode")):
-		kit.assert_true(seen.has("orbs_shown:mode"), "%s: the mode orbs popped up" % mode)
+	if pm == "" and (mode != "client" or _had("orbs:mode")):
+		kit.assert_true(_had("orbs_shown:mode"), "%s: the mode orbs popped up" % mode)
 	kit.assert_true(String(main.play_mode) in ["gentle", "brave", "hard"], "%s: a mode is set (%s)" % [mode, main.play_mode])
 	if main.flow != null and pm == "":
 		var mt: Array = takes.filter(func(t: Array) -> bool: return String(t[0]) == "mode")
@@ -612,8 +612,8 @@ func _deep_checks(mode: String, short: bool) -> void:
 		kit.assert_true(takes.any(func(t: Array) -> bool: return String(t[0]) == "gift"), "%s: Mango's gift was picked %s" % [mode, str(takes)])
 	if mode != "client":
 		kit.assert_true(_gift_held or main.picks.history.any(func(h: Array) -> bool: return String(h[0]) == "gift"), "%s: a gift was held" % mode)
-	kit.assert_true(seen.has("hz:told") and seen.has("hz:rings"), "%s: the round's surprises were told on the board (rings)" % mode)
-	kit.assert_true(seen.has("hz:fell"), "%s: the surprises went off at the round's end" % mode)
+	kit.assert_true(_had("hz:told") and _had("hz:rings"), "%s: the round's surprises were told on the board (rings)" % mode)
+	kit.assert_true(_had("hz:fell"), "%s: the surprises went off at the round's end" % mode)
 
 
 func _checks_simple(mode: String) -> void:
@@ -627,7 +627,7 @@ func _checks_simple(mode: String) -> void:
 			mgs.append(String(k).substr(3))
 	kit.assert_true(menus.is_empty(), "%s: no menus pop up %s" % [mode, str(menus)])
 	for s in ["step:event", "step:duel"]:
-		kit.assert_true(not seen.has(s), "%s: no %s" % [mode, s])
+		kit.assert_true(not _had(s), "%s: no %s" % [mode, s])
 	_board_checks(mode)
 	for id in mgs:
 		kit.assert_true(main.runner.SIMPLE_GAMES.has(id), "%s: %s is one of the simple minigames" % [mode, id])
@@ -653,14 +653,14 @@ func _checks_simple(mode: String) -> void:
 		if mode == "local":  # (networked: the TV machines' players join after the party started, in CPU seats)
 			kit.assert_true(not main.flow.practiced.is_empty(), "%s: practice rolls happened %s" % [mode, str(main.flow.practiced)])
 	if main.split != null and main.party.player_count() > 0:
-		kit.assert_true(seen.has("tv:press_a"), "%s: TV dice blocks show the glowing A" % mode)
+		kit.assert_true(_had("tv:press_a"), "%s: TV dice blocks show the glowing A" % mode)
 	if main.tv_ui != null:
 		kit.assert_true(main.hud.hint_label.text == "", "%s: no hint text under the turn pill" % mode)
 	_cue_checks(mode)
 	if main.vr_rig != null:
-		kit.assert_true(seen.has("vr:throw"), "the fake VR player threw the dice")
-		kit.assert_true(seen.has("vr:ghost_board"), "the ghost hand showed how to throw the dice")
-		kit.assert_true(seen.has("vr:ghost_minigame"), "the ghost hand showed a minigame move")
+		kit.assert_true(_had("vr:throw"), "the fake VR player threw the dice")
+		kit.assert_true(_had("vr:ghost_board"), "the ghost hand showed how to throw the dice")
+		kit.assert_true(_had("vr:ghost_minigame"), "the ghost hand showed a minigame move")
 		kit.assert_true(main.hud.vr_turn.text == "" and main.hud.glove_label.text == "", "no text on the VR scoreboard / glove")
 		var kinds: Array = main.props.touched.keys()
 		kit.info("touched: %s" % str(kinds))
@@ -740,7 +740,7 @@ func _board_checks(mode: String) -> void:
 	kit.info("%s: board %s, %d spaces" % [mode, bid, main.data.count()])
 	if mode != "client":
 		for s in ["step:gift", "step:special"]:
-			kit.assert_true(seen.has(s), "%s: saw %s" % [mode, s])
+			kit.assert_true(_had(s), "%s: saw %s" % [mode, s])
 		kit.assert_true(int(main.flow.run.get("gifts", 0)) > 0, "%s: a present was opened" % mode)
 
 
@@ -869,7 +869,7 @@ func _cue_checks(mode: String) -> void:
 			games[id] = String(main.runner.meta(String(id)).get("cue", ""))
 		var learned := 0
 		for id in games:
-			if seen.has("mg:" + String(id)):
+			if _had("mg:" + String(id)):
 				kit.assert_true(cues.has("cue_" + String(games[id])), "%s: SIMPLE: %s showed its picture cue (%s)" % [mode, id, games[id]])
 			if cues.has("cue_learned_" + String(games[id])):
 				learned += 1
