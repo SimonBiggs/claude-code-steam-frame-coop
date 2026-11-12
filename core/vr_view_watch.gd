@@ -59,4 +59,4 @@ static func hold(p: String) -> float:
 ## Numbers change frame to frame (distances): the problem's kind + node name is the key.
 func _key(p: String) -> String:
 	var r := RegEx.create_from_string("[-0-9.]+ ?(m|deg)?")
-	return r.sub(p, "#", true)
+	return r.sub(p.split(" [card ")[0], "#", true)

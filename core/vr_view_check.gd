@@ -126,10 +126,10 @@ static func problems(root: Node) -> Array[String]:
 		var p := _centre(c)
 		var d := head.distance_to(p) / ws
 		if d < MIN_D or d > MAX_D:
-			out.append("%s: %.2f m from the head (%.1f-%.1f m)" % [name, d, MIN_D, MAX_D])
+			out.append("%s: %.2f m from the head (%.1f-%.1f m)%s" % [name, d, MIN_D, MAX_D, _debug(c, cam)])
 		var face := c.global_basis.z.normalized().dot((head - c.global_position).normalized())
 		if face < FACE_DOT:
-			out.append("%s: doesn't face the head (%.2f)" % [name, face])
+			out.append("%s: doesn't face the head (%.2f)%s" % [name, face, _debug(c, cam)])
 		var small := _smallest_text_deg(c, head)
 		if small > 0.0 and small < MIN_TEXT_DEG:
 			out.append("%s: text only %.2f deg high (min %.1f)" % [name, small, MIN_TEXT_DEG])
@@ -802,3 +802,11 @@ static func panel_size(n: Node3D) -> Vector2:
 			have = true
 	var sc := n.global_basis.get_scale()
 	return Vector2(box.size.x * sc.x, box.size.y * sc.y) if have else Vector2.ZERO
+
+
+## VR_VIEW_DEBUG=1: how a card got where it is (follower state, head and rig) for the distance / facing lines.
+static func _debug(c: Node3D, cam: Node3D) -> String:
+	if not OS.has_environment("VR_VIEW_DEBUG"):
+		return ""
+	var o := cam.get_parent() as Node3D
+	return " [card %s head %s fwd %s origin %s moving %s follow %s spot %s]" % [c.global_position, cam.global_position, -cam.global_basis.z, o.global_position if o != null else Vector3.ZERO, c.get_meta("vr_moving", "-"), c.get("follow"), c.get_meta("vr_spot", "-")]

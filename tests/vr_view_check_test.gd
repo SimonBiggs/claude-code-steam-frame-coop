@@ -85,6 +85,31 @@ func _run() -> void:
 	probs = VrViewCheck.problems(root)
 	_check(probs.is_empty(), "nothing hidden behind the wall: %s" % [probs])
 	_clear_ui()
+	# 3b. the player walks about in a small room (the head moves, not the rig): a card held near by a wall must never
+	# end up nearer than the check allows, or not facing the head, while the lazy follow lets it stay put
+	# (Mystery Manor 2026-11-12: "0.49 m from the head", then "doesn't face the head (0.26)", in its little rooms).
+	wall.global_position = Vector3(0, 1.6, -1.0)
+	await _frames(3)
+	c = HudKit.vr_card(world, cam, "NO MATCH?", "", {"width": 0.9, "height": -0.32})
+	await _frames(20)
+	for step in [[Vector3(0, 0, -0.32), 0.0, "leans in close"], [Vector3(0.45, 0, 0), 0.0, "steps sideways"],
+			[Vector3(0, 0, 0), deg_to_rad(28.0), "turns a little"], [Vector3(-0.3, 0, -0.1), deg_to_rad(-20.0), "steps back the other way"],
+			[Vector3(0.3, 0, 0.3), 0.0, "steps back"], [Vector3(0, -0.7, 0), 0.0, "crouches down low"]]:
+		cam.position += step[0] as Vector3
+		cam.rotation.y += float(step[1])
+		await _frames(90)
+		probs = VrViewCheck.problems(root)
+		_check(probs.is_empty(), "a card near a wall stays readable when the player %s: %s" % [step[2], probs])
+	# re-placed (stepping aside, new text) and the rig blinks up the stairs in the same frame: it still rides along
+	cam.position = Vector3(0, 1.6, 0)
+	cam.rotation = Vector3.ZERO
+	await _frames(90)
+	UiKit.vr_place(c, cam, c.distance, c.height)
+	origin.global_position += Vector3(0.5, 6.0, 0.0)
+	await _frames(2)
+	_check(absf(c.global_position.y - cam.global_position.y) < 1.0, "a card re-placed just before a blink up the stairs rides along (%.1f m below the eyes)" % (cam.global_position.y - c.global_position.y))
+	origin.global_position = Vector3.ZERO
+	_clear_ui()
 	wall.free()
 	await _frames(2)
 
