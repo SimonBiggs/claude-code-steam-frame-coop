@@ -28,6 +28,8 @@ var speed := 0.0
 var yaw := 0.0
 var honks := 0  ## counts up on every honk (snapshots carry it so both machines play it)
 var odometer := 0.0
+var wx := 1.0  ## speed factor from the day's gift and the weather here (fleet.gd sets it every frame: deep.gd)
+var stall_t := 0.0  ## seconds a gust still holds this vehicle (hazards.gd)
 ## Mirror mode: drawn from snapshots / send_state (not simulated here).
 var mirror := false
 var net_pos := Vector3.ZERO
@@ -110,6 +112,11 @@ func set_kind(p_kind: String) -> void:
 
 ## Drive towards a world XZ direction (length 0..1 = throttle).
 func drive(dir: Vector2, delta: float, town: Town) -> void:
+	if stall_t > 0.0:  # spun round by a gust: a moment to catch its breath
+		stall_t -= delta
+		speed = move_toward(speed, 0.0, ACCEL * 3.0 * delta)
+		_move(delta, town)
+		return
 	var want := minf(dir.length(), 1.0)
 	if want > 0.05:
 		var target_yaw := atan2(dir.x, dir.y)
@@ -118,7 +125,7 @@ func drive(dir: Vector2, delta: float, town: Town) -> void:
 		yaw += clampf(diff, -rate * delta, rate * delta)
 		# slow down for sharp turns so cars don't skid round corners
 		want *= clampf(1.15 - absf(diff) / PI, 0.25, 1.0)
-	var top := MAX_SPEED * town.speed_at(position) * want
+	var top := MAX_SPEED * town.speed_at(position) * want * wx
 	speed = move_toward(speed, top, ACCEL * delta * (1.6 if top < speed else 1.0))
 	_move(delta, town)
 
