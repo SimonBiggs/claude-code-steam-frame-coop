@@ -27,6 +27,9 @@ var look := {}
 var owned := true
 var is_cpu := false
 var speed_scale := 1.0  ## CPU runners are a little slower than people
+var phys := {}  ## this course's gift (deep.gd phys(): jump, fall, max_fall, speed, air; owned runners)
+var wade := 1.0  ## running speed in Coach Jelly's rising water (main sets it every frame; owned runners)
+var shield := false  ## a BUBBLE gift still up: the next bonk just pops it (owned runners)
 
 var inp_move := Vector3.ZERO  ## world direction, length 0..1
 var inp_jump := false  ## went down this tick (consumed)
@@ -40,6 +43,7 @@ var tumbles := 0
 var events: Array = []  ## ["jump"] / ["land"] / ["fell"] / ["bonk"] / ["pad"] (main plays sounds)
 
 var _air_t := 0.0
+var _jumped := false  ## in the air from our own jump (a GLIDE CAPE only opens then: never off a ledge or a pad)
 var _jump_buf := 0.0
 var _was_floor := true
 var _knock := Vector3.ZERO
@@ -113,6 +117,12 @@ func place(p: Vector3) -> void:
 func bonk(dir: Vector3, strength: float = 1.0) -> void:
 	if not owned or safe_t > 0.0 or done:
 		return
+	if shield:  # the BUBBLE pops instead
+		shield = false
+		safe_t = SAFE_AFTER
+		_squash = 1.0
+		events.append(["pop"])
+		return
 	dir.y = 0.0
 	dir = dir.normalized() if dir.length() > 0.01 else Vector3.LEFT
 	_knock = dir * 6.0 * strength
@@ -144,18 +154,23 @@ func step(delta: float) -> void:
 	_jump_buf -= delta
 	var on_floor := is_on_floor()
 	_air_t = 0.0 if on_floor else _air_t + delta
-	var want := mv * RUN_SPEED * speed_scale
+	var want := mv * RUN_SPEED * speed_scale * float(phys.get("speed", 1.0)) * wade
 	var h := Vector3(velocity.x, 0.0, velocity.z)
 	var acc := ACCEL if on_floor else AIR_ACCEL
 	if tumble_t > 0.0:
 		h = h.move_toward(_knock, 30.0 * delta)
 	else:
 		h = h.move_toward(want, acc * delta)
+	if not on_floor and phys.has("air"):  # (a gift never carries a jump further: coursegen.gd proves every course)
+		h = h.limit_length(RUN_SPEED * speed_scale * float(phys.air))
 	velocity.x = h.x
 	velocity.z = h.z
-	velocity.y -= GRAVITY * delta
+	if on_floor and velocity.y <= 0.0:
+		_jumped = false
+	velocity.y -= GRAVITY * delta * (float(phys.get("fall", 1.0)) if velocity.y < 0.0 and _jumped else 1.0)
 	if _jump_buf > 0.0 and _air_t < COYOTE and tumble_t <= 0.0 and not done:
-		velocity.y = JUMP_V
+		velocity.y = JUMP_V * float(phys.get("jump", 1.0))
+		_jumped = true
 		_jump_buf = 0.0
 		_air_t = COYOTE
 		jumps += 1
@@ -165,9 +180,10 @@ func step(delta: float) -> void:
 		var pad: Vector3 = c.pad_launch(position)
 		if pad != Vector3.ZERO:
 			velocity = pad
+			_jumped = false
 			_squash = 1.0
 			events.append(["pad"])
-	velocity.y = maxf(velocity.y, -30.0)
+	velocity.y = maxf(velocity.y, -float(phys.get("max_fall", 30.0)))
 	move_and_slide()
 	for i in get_slide_collision_count():
 		var col := get_slide_collision(i)

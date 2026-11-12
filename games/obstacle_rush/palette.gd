@@ -1,12 +1,15 @@
 extends RefCounted
 ## What must be seen in Obstacle Rush, and what it is on (core/contrast.gd; tests/contrast_test.gd).
 ## The jelly-bean runners (player colours and the CPU palette), the giant's beach balls and the stars are on the
-## candy-coloured course floors; every one of them has an ink outline (runner_look.gd OUTLINE).
+## candy-coloured course floors; every one of them has an ink outline (runner_look.gd OUTLINE). Coach Jelly's warned
+## surprises (deep.gd: the swinging log's orange band, the rising water's blue band and the water itself) lie on the
+## same floors in every season (the seasons only dress the lawn round the table: season.gd).
 
 const Contrast := preload("res://core/contrast.gd")
 const Party := preload("res://core/party.gd")
 const Course := preload("res://games/obstacle_rush/course.gd")
 const Look := preload("res://games/obstacle_rush/runner_look.gd")
+const Deep := preload("res://games/obstacle_rush/deep.gd")
 
 
 static func key_colors() -> Dictionary:
@@ -16,6 +19,8 @@ static func key_colors() -> Dictionary:
 	out["star"] = Course.STAR_COLOR
 	for k in out:  # (each with the ink outline: runner_look.gd OUTLINE)
 		out[k] = {"color": out[k], "rim": Look.OUTLINE}
+	out["log warning"] = Deep.LOG_COLOR
+	out["water warning"] = Deep.WATER_COLOR
 	return out
 
 
