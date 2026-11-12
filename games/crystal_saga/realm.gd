@@ -87,7 +87,9 @@ const BAT_COLOR := Color(0.55, 0.4, 0.8)  # a "bat" flyer skin
 const MUSHY_COLOR := Color(0.95, 0.35, 0.4)  # a "mushroom" walker skin
 const SLIME_COLORS: Array[Color] = [Color(0.45, 0.9, 0.45), Color(1.0, 0.55, 0.75), Color(0.45, 0.75, 1.0), Color(0.75, 0.55, 1.0)]
 const TELL_COLORS := {"stomp": Color(1.0, 0.5, 0.9), "rain": Color(0.45, 0.8, 1.0), "roll": Color(1.0, 0.5, 0.15),
-	"call": Color(0.5, 1.0, 0.5)}
+	"call": Color(0.5, 1.0, 0.5), "cones": Color(0.95, 0.4, 0.05), "log": Color(0.9, 0.3, 0.08), "drips": Color(0.1, 0.8, 0.85),
+	"boulder": Color(1.0, 0.42, 0.35)}  ## (saga-deep2: the road's surprises, hazards.gd)
+const GOLD_COLOR := Color(1.0, 0.95, 0.1)  ## the golden slime (monsters.gd GOLD)
 const QUEST_NEED := 3  ## things to find (one more is hidden as a spare in gentle mode)
 
 

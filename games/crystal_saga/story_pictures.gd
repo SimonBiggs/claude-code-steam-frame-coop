@@ -5,13 +5,64 @@ extends RefCounted
 ## t = the picture's clock, bob = its gentle bob, color = the card's colour.
 
 const NAMES: Array[String] = ["lumi", "shard", "bigfire", "snowflake", "twin", "longsword", "spin", "mighty", "windmill", "fountain", "rainbow",
-	"archer", "healer", "bard", "starrain", "bubbleshield", "guardian"]
+	"archer", "healer", "bard", "starrain", "bubbleshield", "guardian",
+	"nox", "pinecone", "rolllog", "crystaldrop", "goldslime", "crystalgarden"]
 
 
 static func draw(pic, kind: String, t: float, bob: float, _color: Color) -> void:
 	var size: Vector2 = pic.size
 	var white := Color(1.0, 1.0, 1.0)
 	match kind:
+		"nox":  # NOX the little shadow imp (Crystal Saga): purple, horns, big yellow eyes, flapping wings
+			var fl := 0.07 * sin(t * 12.0)
+			pic._poly([[0.38, 0.45 + bob], [0.08, 0.3 + bob - fl], [0.14, 0.62 + bob]], Color(0.5, 0.35, 0.7))
+			pic._poly([[0.62, 0.45 + bob], [0.92, 0.3 + bob - fl], [0.86, 0.62 + bob]], Color(0.5, 0.35, 0.7))
+			pic._circle(0.5, 0.72 + bob, 0.18, Color(0.38, 0.25, 0.55))
+			pic._circle(0.5, 0.48 + bob, 0.24, Color(0.32, 0.2, 0.48))
+			pic._poly([[0.34, 0.32 + bob], [0.3, 0.12 + bob], [0.43, 0.27 + bob]], Color(0.6, 0.4, 0.8))
+			pic._poly([[0.66, 0.32 + bob], [0.7, 0.12 + bob], [0.57, 0.27 + bob]], Color(0.6, 0.4, 0.8))
+			pic._circle(0.42, 0.46 + bob, 0.07, Color(1.0, 0.9, 0.3))
+			pic._circle(0.58, 0.46 + bob, 0.07, Color(1.0, 0.9, 0.3))
+			pic._circle(0.43, 0.47 + bob, 0.03, Color(0.15, 0.1, 0.2))
+			pic._circle(0.59, 0.47 + bob, 0.03, Color(0.15, 0.1, 0.2))
+			pic.draw_arc(pic._p(0.5, 0.56 + bob), 0.06 * size.x, 0.3, PI - 0.3, 8, Color(1.0, 0.9, 0.6), 0.02 * size.x)
+		"pinecone":  # a pinecone falling onto an amber circle
+			pic._circle(0.5, 0.86, 0.3, Color(1.0, 0.82, 0.25, 0.45))
+			var y := 0.1 + fmod(t * 0.5, 0.6)
+			for k in 4:
+				var w := 0.16 - absf(k - 1.2) * 0.03
+				pic._poly([[0.5 - w, y + k * 0.08], [0.5 + w, y + k * 0.08], [0.5, y + k * 0.08 + 0.12]], Color(0.55, 0.35, 0.2).lerp(Color(0.72, 0.5, 0.3), (k % 2) * 0.7))
+		"rolllog":  # a log rolling along an orange lane
+			pic._poly([[0.05, 0.72], [0.95, 0.72], [0.95, 0.92], [0.05, 0.92]], Color(1.0, 0.62, 0.2, 0.5))
+			var x := 0.2 + fmod(t * 0.3, 0.6)
+			pic._poly([[x - 0.14, 0.45], [x + 0.14, 0.45], [x + 0.14, 0.8], [x - 0.14, 0.8]], Color(0.55, 0.36, 0.2))
+			pic._circle(x, 0.45, 0.14, Color(0.9, 0.75, 0.5))
+			pic._circle(x, 0.45, 0.07, Color(0.7, 0.52, 0.3))
+		"crystaldrop":  # a crystal dropping from the cave roof onto an aqua circle
+			pic._poly([[0.05, 0.05], [0.95, 0.05], [0.8, 0.14], [0.6, 0.1], [0.4, 0.16], [0.2, 0.1]], Color(0.38, 0.36, 0.48))
+			pic._circle(0.5, 0.86, 0.28, Color(0.55, 1.0, 0.95, 0.45))
+			var y2 := 0.2 + fmod(t * 0.5, 0.5)
+			pic._poly([[0.42, y2], [0.58, y2], [0.5, y2 + 0.24]], Color(0.55, 1.0, 0.95))
+			pic._poly([[0.46, y2], [0.54, y2], [0.5, y2 + 0.14]], white)
+		"goldslime":  # the golden slime with a little crown, hopping away
+			var hop := absf(sin(t * 4.0)) * 0.08
+			pic._circle(0.5, 0.9, 0.2, Color(0.0, 0.0, 0.0, 0.15))
+			pic._poly([[0.22, 0.85 - hop], [0.3, 0.55 - hop], [0.5, 0.42 - hop], [0.7, 0.55 - hop], [0.78, 0.85 - hop]], Color(1.0, 0.82, 0.2))
+			pic._circle(0.42, 0.64 - hop, 0.04, Color(0.2, 0.15, 0.1))
+			pic._circle(0.58, 0.64 - hop, 0.04, Color(0.2, 0.15, 0.1))
+			pic._poly([[0.38, 0.42 - hop], [0.4, 0.28 - hop], [0.46, 0.36 - hop], [0.5, 0.26 - hop], [0.54, 0.36 - hop], [0.6, 0.28 - hop], [0.62, 0.42 - hop]], Color(1.0, 0.92, 0.45))
+			var tw2 := 0.5 + 0.5 * sin(t * 6.0)
+			pic._circle(0.8, 0.35, 0.03 * tw2 + 0.01, white)
+		"crystalgarden":  # Lumi's crystal garden: crystal flowers of every colour and a crystal tree
+			pic._poly([[0.0, 0.82], [1.0, 0.82], [1.0, 1.0], [0.0, 1.0]], Color(0.42, 0.7, 0.32))
+			var cols: Array[Color] = [Color(0.6, 1.0, 0.45), Color(0.5, 0.8, 1.0), Color(1.0, 0.75, 0.3), Color(0.8, 0.4, 1.0)]
+			for k2 in 4:
+				var fx := 0.14 + k2 * 0.2 + (0.12 if k2 >= 2 else 0.0)
+				pic.draw_line(pic._p(fx, 0.84), pic._p(fx, 0.66), Color(0.4, 0.75, 0.45), 0.02 * size.x)
+				pic._poly([[fx, 0.5 + bob * (k2 % 2)], [fx + 0.06, 0.62], [fx, 0.7], [fx - 0.06, 0.62]], cols[k2])
+			pic.draw_line(pic._p(0.55, 0.84), pic._p(0.55, 0.45), Color(0.85, 0.9, 1.0), 0.03 * size.x)
+			pic._poly([[0.55, 0.12 + bob], [0.66, 0.32 + bob], [0.55, 0.48], [0.44, 0.32 + bob]], Color(0.55, 0.85, 1.0))
+			pic._circle(0.68, 0.18, 0.02 + 0.015 * sin(t * 5.0), white)
 		"lumi":  # Lumi (Crystal Saga): a little crystal fairy, glowing, with wings that flutter
 			var flap := 0.06 * sin(t * 12.0)
 			pic._poly([[0.42, 0.5 + bob], [0.12, 0.28 + bob - flap], [0.18, 0.62 + bob]], Color(0.8, 0.95, 1.0, 0.8))

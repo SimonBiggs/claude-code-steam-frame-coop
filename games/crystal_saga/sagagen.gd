@@ -44,7 +44,8 @@ const FRIEND_AT := Vector2(3.6, -5.2)
 ## The plan for one journey (pure data: arrays, numbers, colours, strings) through a region of the realm:
 ## biome (realm.gd BIOMES index) dresses it and picks its quest and guardian; region: its name; hard: BRAVE mode
 ## (one spare quest thing fewer, quicker tells; the tier already counts brave).
-static func generate(seed_value: int, tier: int, biome: int = 1, region: String = "", hard: bool = false) -> Dictionary:
+## season: Seeded.season() of the day ("" = none): it dresses the road (world.gd) and the forest's falling things.
+static func generate(seed_value: int, tier: int, biome: int = 1, region: String = "", hard: bool = false, season: String = "") -> Dictionary:
 	tier = clampi(tier, 0, TIERS - 1)
 	biome = clampi(biome, 0, Realm.BIOMES.size() - 1)
 	var b: Dictionary = Realm.BIOMES[biome]
@@ -67,7 +68,9 @@ static func generate(seed_value: int, tier: int, biome: int = 1, region: String 
 	_rocks(Seeded.rng(seed_value, "rocks"), tier, props)
 	var waves: Array = [[], _forest_waves(Seeded.rng(seed_value, "w1"), tier, props), _cave_waves(Seeded.rng(seed_value, "w2"), tier, props), [], []]
 	var gd := guardian(Seeded.rng(seed_value, "guardian"), String(b.sig), tier, hard)
-	return {"seed": seed_value, "tier": tier, "biome": biome, "hard": hard, "names": names, "leaf": b.leaf,
+	var rd := road(Seeded.rng(seed_value, "road"), tier, hard, props)
+	return {"seed": seed_value, "tier": tier, "biome": biome, "hard": hard, "season": season if SEASONS.has(season) else "",
+		"road": rd, "names": names, "leaf": b.leaf,
 		"gem": b.gem, "path": b.path, "ground": b.ground, "sky": b.sky, "skins": b.skins, "giant": 0, "giant_look": [b.body, b.glow],
 		"props": props, "waves": waves,
 		"quest": {"giver": String(q[0]), "giver_pic": String(q[1]), "giver_look": String(q[2]), "item": String(q[3]),
@@ -120,6 +123,128 @@ static func min_warn(a: String) -> float:
 		"roll":
 			return REACT + ROLL_W * 0.5 / VR_SPEED
 	return 0.8
+
+
+# --- The road's surprises (saga-deep2) -----------------------------------------------------------------
+## Falling and rolling things on the way, each TOLD first by a warning shape on the ground (core/warn_rings.gd,
+## hazards.gd): the forest drops PINECONES (circles; acorns in autumn, snow clumps in winter) or rolls a LOG
+## across the path (a lane from side to side); the cave drips CRYSTAL DROPS (circles) or rolls a BOULDER down the
+## path (a lane along it). None on a family's first roads (tier 0); one region from tier 1, both from tier 3.
+## A bump is only a sparkly "boing" (TV heroes a short dizzy spell), like a monster's.
+## A GOLDEN SLIME hides on some roads: it hops away from heroes and gives a crystal shard when poofed; it never
+## holds the party up (it goes home when its place is cleared).
+
+const SEASONS: Array[String] = ["spring", "summer", "autumn", "winter"]
+const HAZARDS := {"cones": 1, "log": 1, "drips": 2, "boulder": 2}  ## kind -> the zone it happens in
+const HAZARD_WARN := {"cones": 1.8, "log": 2.1, "drips": 1.7, "boulder": 2.1}
+const CONE_R := 0.8
+const DRIP_R := 0.7
+const LOG_W := 1.2
+const BOULDER_W := 1.4
+const BOULDER_LEN := 9.0
+const GOLD_CHANCE := 0.45
+const HAZARD_FIRST := 5.0  ## seconds into a fight before the first one (monsters first, then surprises)
+
+
+## The road's surprises for a tier: {"hazards": [{zone, kind, warn, n, size, gap, first}], "gold": {zone, x, z} or {}}.
+static func road(r: RandomNumberGenerator, tier: int, hard: bool, props: Array) -> Dictionary:
+	var zones: Array = []
+	if tier >= 3:
+		zones = [1, 2]
+	elif tier >= 1:
+		zones = [1 if r.randf() < 0.5 else 2]
+	var k := (1.0 - 0.03 * tier) * (0.9 if hard else 1.0)
+	var hz: Array = []
+	for z in zones:
+		var kinds: Array = HAZARDS.keys().filter(func(x: Variant) -> bool: return int(HAZARDS[x]) == int(z))
+		var kind := String(Seeded.pick(r, kinds))
+		var n := 1
+		if kind == "cones":
+			n = 1 + tier / 3
+		elif kind == "drips":
+			n = 2 + tier / 3
+		hz.append({"zone": int(z), "kind": kind, "warn": snappedf(maxf(float(HAZARD_WARN[kind]) * k, min_hazard_warn(kind)), 0.01),
+			"n": n, "size": hazard_size(kind), "gap": [snappedf(7.5 - 0.4 * tier, 0.01), snappedf(10.5 - 0.5 * tier, 0.01)],
+			"first": HAZARD_FIRST})
+	var gold := {}
+	if r.randf() < GOLD_CHANCE:
+		var gz := 1 if r.randf() < 0.5 else 2
+		var c := World.center(gz).z
+		var p := _spawn_spot(r, c - 5.5, c + 1.0, 3.6, props, [])
+		gold = {"zone": gz, "x": snappedf(p.x, 0.01), "z": snappedf(p.y, 0.01)}
+	return {"hazards": hz, "gold": gold}
+
+
+## A hazard's size: circles [radius, 0]; lanes [length, width] (the log spans the whole path).
+static func hazard_size(kind: String) -> Vector2:
+	match kind:
+		"cones":
+			return Vector2(CONE_R, 0.0)
+		"drips":
+			return Vector2(DRIP_R, 0.0)
+		"log":
+			return Vector2(World.HALF_W * 2.0, LOG_W)
+	return Vector2(BOULDER_LEN, BOULDER_W)
+
+
+## The shortest fair tell: notice it, then step out (the VR hero walks slowest).
+static func min_hazard_warn(kind: String) -> float:
+	var s := hazard_size(kind)
+	if kind in ["cones", "drips"]:
+		return REACT + s.x / VR_SPEED
+	return REACT + s.y * 0.5 / VR_SPEED + 0.2
+
+
+## The road's surprises are fair: none on the first roads, each told long enough to step out of, room to breathe
+## between them, small enough to leave most of the place safe, and the golden slime on open ground.
+static func check_road(plan: Dictionary) -> Array:
+	var why: Array = []
+	var rd: Dictionary = plan.get("road", {})
+	if rd.is_empty():
+		return ["no road surprises list"]
+	var hz: Array = rd.get("hazards", [])
+	if int(plan.tier) == 0 and not hz.is_empty():
+		why.append("a first road has falling things")
+	var zones := {}
+	for h in hz:
+		var kind := String(h.kind)
+		if not HAZARDS.has(kind):
+			why.append("unknown surprise %s" % kind)
+			continue
+		if int(h.zone) != int(HAZARDS[kind]):
+			why.append("%s in zone %d" % [kind, int(h.zone)])
+		if zones.has(int(h.zone)):
+			why.append("two surprises in zone %d" % int(h.zone))
+		zones[int(h.zone)] = true
+		var w := float(h.warn)
+		if w + 0.001 < min_hazard_warn(kind):
+			why.append("the %s tell is too quick (%.2f s, needs %.2f)" % [kind, w, min_hazard_warn(kind)])
+		if w > 3.0:
+			why.append("the %s tell is too slow to read as one (%.2f s)" % [kind, w])
+		if float(h.gap[0]) < w + 3.0 or float(h.gap[1]) < float(h.gap[0]):
+			why.append("%s come too often (gap %s, tell %.2f)" % [kind, str(h.gap), w])
+		if float(h.first) < 4.0:
+			why.append("%s start before the heroes look round (%.1f s)" % [kind, float(h.first)])
+		var s: Vector2 = h.size
+		var area := PI * s.x * s.x * int(h.n) if kind in ["cones", "drips"] else s.x * s.y * int(h.n)
+		if area > World.HALF_W * 2.0 * World.ZL * 0.12 or int(h.n) < 1 or (not kind in ["cones", "drips"] and int(h.n) != 1):
+			why.append("%s cover too much (%d, %.1f m2)" % [kind, int(h.n), area])
+	var g: Dictionary = rd.get("gold", {})
+	if not g.is_empty():
+		var gz := int(g.zone)
+		var p := Vector2(float(g.x), float(g.z))
+		var c := World.center(gz).z
+		if not gz in [1, 2]:
+			why.append("the golden slime is in zone %d" % gz)
+		elif absf(p.x) > World.HALF_W - 0.6 or p.y > c + World.HALF_L - 1.0 or p.y < c - World.HALF_L + 1.0:
+			why.append("the golden slime is off the path at %s" % str(p))
+		elif p.distance_to(Vector2(0.0, World.entrance(gz).z)) < 3.0:
+			why.append("the golden slime sits on the entrance")
+		else:
+			for b in blockers(plan, gz):
+				if p.distance_to(b[0]) < float(b[1]) + 0.3:
+					why.append("the golden slime is inside a rock")
+	return why
 
 
 ## The tree trunks and touchable things along both edges of a zone: [kind, x, z, r] (world coordinates).
@@ -419,6 +544,9 @@ static func check(plan: Dictionary) -> Array:
 		why.append("too many props (%d): used bits run out" % props.size())
 	why.append_array(check_quest(plan))
 	why.append_array(check_guardian(plan))
+	why.append_array(check_road(plan))
+	if not (String(plan.get("season", "")) in SEASONS or String(plan.get("season", "")) == ""):
+		why.append("unknown season %s" % plan.season)
 	for zone in [1, 2, 3]:
 		why.append_array(_check_zone(plan, zone))
 	var chests := 0

@@ -33,6 +33,11 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "saga-surprises", "date": "2026-11-12", "game": "crystal_saga", "pic": "pinecone", "line": "Watch the circles!", "try": {"CS_TRY": "surprises"}},
+	{"id": "saga-nox", "date": "2026-11-12", "game": "crystal_saga", "pic": "nox", "line": "Meet Nox at the shrine!"},
+	{"id": "saga-garden", "date": "2026-11-12", "game": "crystal_saga", "pic": "crystalgarden", "line": "Lumi's crystal garden!"},
+	{"id": "saga-gold", "date": "2026-11-12", "game": "crystal_saga", "pic": "goldslime", "line": "Catch the golden slime!"},
+	{"id": "saga-seasons", "date": "2026-11-12", "game": "crystal_saga", "pic": "snowflake", "line": "Seasons on the road!"},
 	{"id": "pb-gifts", "date": "2026-11-12", "game": "party_board", "pic": "luckydie", "line": "Mango's gifts!", "try": {"PB_GIFT": "lucky"}},
 	{"id": "pb-surprises", "date": "2026-11-12", "game": "party_board", "pic": "boulder", "line": "Rocks and splashes!", "try": {"PB_MODE": "hard"}},
 	{"id": "pb-hall", "date": "2026-11-12", "game": "party_board", "pic": "partyhall", "line": "Mango's party hall grows!"},
