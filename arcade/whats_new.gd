@@ -33,6 +33,11 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "sc-modules", "date": "2026-11-12", "game": "starship_crew", "pic": "tractorbeam", "line": "Ship parts: shield, turbo!", "try": {"SC_GIFT": "tractor"}},
+	{"id": "sc-surprises", "date": "2026-11-12", "game": "starship_crew", "pic": "solarflare", "line": "Rock streams! Solar flares!", "try": {"SC_SURPRISES_NOW": "1"}},
+	{"id": "sc-modes", "date": "2026-11-12", "game": "starship_crew", "pic": "captain", "line": "Gentle, brave or hard!"},
+	{"id": "sc-crew", "date": "2026-11-12", "game": "starship_crew", "pic": "puppy", "line": "Crew friends fly with you!"},
+	{"id": "sc-sectors", "date": "2026-11-12", "game": "starship_crew", "pic": "snowflake", "line": "Seasonal star sectors!", "try": {"SC_SEASON": "winter"}},
 	{"id": "fc-gifts", "date": "2026-11-12", "game": "fruit_catch", "pic": "bigbasket", "line": "Nutmeg's basket gifts!", "try": {"FC_GIFT": "magnet"}},
 	{"id": "fc-surprises", "date": "2026-11-12", "game": "fruit_catch", "pic": "wasp", "line": "Windfalls and wasps! Look!", "try": {"FC_SURPRISES_NOW": "1"}},
 	{"id": "fc-modes", "date": "2026-11-12", "game": "fruit_catch", "pic": "squirrel", "line": "Gentle, brave or hard!"},

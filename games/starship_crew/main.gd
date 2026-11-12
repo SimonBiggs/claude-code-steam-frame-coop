@@ -1379,7 +1379,10 @@ func _exit_tree() -> void:
 
 ## Host: the mode, the module, the season and the crew for every machine.
 func _send_deep() -> void:
-	net.state_set("deep", [mode, gift, season, Deep.crew(int(save.data.crew_xp))])
+	var friends := Deep.crew(int(save.data.crew_xp))
+	if OS.has_environment("SC_CREW"):  # (tests / screenshots: show this many friends, never saved)
+		friends = clampi(int(OS.get_environment("SC_CREW")), 0, Deep.CREW.size())
+	net.state_set("deep", [mode, gift, season, friends])
 
 
 ## Nobody here could take a pick (no pilot, no gunner): the middle comes sooner.
