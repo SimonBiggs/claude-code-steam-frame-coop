@@ -96,15 +96,15 @@ const TOY_SCALE := 0.7  # toys.gd builds them a bit big, then shrinks them to fi
 const TOY_HALF := 0.85  # a toy's footprint half-width (at TOY_SCALE)
 ## The court pick row: three big orbs over the front of the court (x, z), ORB_Y above the ground.
 const ROW_X: Array[float] = [-3.4, 0.0, 3.4]
-const ROW_Z := -3.45
-const ORB_Y := 2.25
+const ROW_Z := -3.45  # (in front of the cushions: CourtGen.CUSHION_AREA)
+const ORB_Y := 3.1  # high enough that the names under the orbs show over the VR giant's ball tray
 const ORB_SCALE := 0.9
 const TV_R := 0.9  # a runner's middle this near an orb's spot (across the ground) is under it ...
 const TV_DWELL := 0.8  # ... for this long to pick it (running past never picks)
 ## The VR pick row: three small orbs an arm's reach in front of the giant's head (metres; the giant faces +Z, so
 ## its left is +X: the first orb, GENTLE, on the left as on the TV), just under eye level, above the ball tray.
 const VR_X: Array[float] = [0.3, 0.0, -0.3]
-const VR_AHEAD := 0.42
+const VR_AHEAD := 0.5  # (0.42 put the names under the orbs behind the giant's own belly target, seen from a seated player)
 const VR_BELOW := 0.14
 const VR_SCALE := 0.14
 const HAND_R := 0.05  # a VR grab point this near an orb's ball touches it ...
