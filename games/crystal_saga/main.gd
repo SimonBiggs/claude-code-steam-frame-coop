@@ -545,7 +545,7 @@ func _enter_zone(z: int) -> void:
 		if not hz.is_empty():
 			var hi := Saga.hazard_info(String(hz.kind), String(plan.get("season", "")))
 			_say({"who": String(hi[0]), "line": String(hi[1]), "pic": String(hi[2]), "color": Realm.TELL_COLORS.get(String(hz.kind), Color.WHITE),
-				"duration": 3.0})
+				"duration": 3.0}, true)  # (ahead of the queue: shown before the first one falls, sagagen.gd HAZARD_FIRST)
 	if z == 4:  # Nox waits by the broken crystal: one chapter for every crystal already home
 		var ch := Saga.nox_chapter(_cleared().size())
 		if ch >= 0:

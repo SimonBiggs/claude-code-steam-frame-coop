@@ -1322,14 +1322,15 @@ var nox: Node3D
 var _nox_home := Vector3.ZERO
 var _nox_flying := false
 const NOX_SHRINE := Vector3(1.9, 2.0, -2.0)  ## from the shrine's centre
-const NOX_VILLAGE := Vector3(-3.6, 1.5, 3.4)
+const NOX_VILLAGE := Vector3(-3.6, 1.6, 3.4)
+const NOX_SIZE := 1.7  ## (at 1.0 he was a dark speck by the crystal from the shrine's entrance)
 
 
 func _build_nox() -> void:
 	nox = Node3D.new()
 	nox.name = "Nox"
 	var b := MeshKit.Builder.new()
-	var body := Color(0.32, 0.2, 0.48)
+	var body := Color(0.48, 0.32, 0.68)
 	b.sphere(0.32, MeshKit.at(Vector3.ZERO, Vector3(1.0, 1.1, 1.0)), body, 12)
 	b.sphere(0.24, MeshKit.at(Vector3(0.0, -0.3, 0.0), Vector3(1.0, 0.8, 1.0)), body.lightened(0.1), 10)
 	for sx in [-1.0, 1.0]:
@@ -1354,7 +1355,7 @@ func set_nox(where: String) -> void:
 	if nox == null:
 		return
 	_nox_flying = false
-	nox.scale = Vector3.ONE
+	nox.scale = Vector3.ONE * NOX_SIZE
 	nox.visible = where != ""
 	_nox_home = center(4) + NOX_SHRINE if where == "shrine" else NOX_VILLAGE
 	nox.position = _nox_home
@@ -1368,7 +1369,7 @@ func nox_fly() -> void:
 	var tw := nox.create_tween()
 	tw.tween_property(nox, "position", nox.position + Vector3(2.0, 1.2, 0.0), 0.5).set_trans(Tween.TRANS_SINE)
 	tw.tween_property(nox, "position", nox.position + Vector3(6.0, 14.0, -26.0), 2.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-	tw.parallel().tween_property(nox, "scale", Vector3.ONE * 0.2, 2.2)
+	tw.parallel().tween_property(nox, "scale", Vector3.ONE * 0.3, 2.2)
 	tw.tween_callback(func() -> void: nox.visible = false)
 
 
