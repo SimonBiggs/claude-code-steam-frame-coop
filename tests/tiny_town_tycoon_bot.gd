@@ -64,6 +64,7 @@ var weather_dodges := 0  ## times a bot driver steered out of or waited before t
 var pick_away := {}  ## slot -> [stage, orb index to pass through first] (a vehicle already under an orb when they popped up must leave and come back)
 var pick_seen_t := {}  ## stage -> when the flat mayor bot first saw its orbs
 var bot_pads: Array = []  ## this machine's bot pads (device ids)
+var last_island := 0  ## the island this machine shows (town.seed_value): a sail restarts the weather
 var gift_seen_t := -1.0  ## seconds into the run when this machine first had a gift (the weather comes after it)
 
 
@@ -734,6 +735,9 @@ func _simple_timeline() -> void:
 			# builders keep going too, so one more there.
 			# A host's own mayor keeps building too (a VR host alone failed "(3, at most 2)" every run, 2026-11-11).
 			var most := 2 + (multiplayer.get_peers().size() + 1 if main.net.mode == "host" else 1 if main.net.mode == "local" else 0)
+			# Benny's DOUBLE HOUSES gift: every one of those late places is two houses (host "(5, at most 4)", 2026-11-12).
+			if String(main.deep_gift) == "double":
+				most = 2 + (most - 2) * 2
 			kit.assert_true(main.town.buildings.size() <= most, "today's island is a new little town (%d, at most %d)" % [main.town.buildings.size(), most])
 			var runs := Telemetry.read("tiny_town_tycoon").filter(func(r: Dictionary) -> bool: return String(r.get("end", "")) == "sail")
 			kit.assert_true(not runs.is_empty(), "a RUN line when the boat sailed"))
@@ -803,6 +807,13 @@ func _record() -> String:
 		return ""
 	if gift_seen_t < 0.0 and String(main.deep_gift) != "":
 		gift_seen_t = kit.t
+	# The host sailing to another island plans that island's weather afresh (first one SHORT_FIRST later): the clock for
+	# "the weather was told" starts again there (a client once ended 3 s after the host's third sail, weather still to come).
+	var isl := int(main.town.seed_value) if main.town != null else 0
+	if isl != last_island:
+		last_island = isl
+		if gift_seen_t >= 0.0:
+			gift_seen_t = kit.t
 	for st in main.view._sites.values():  # a blueprint the size of its footprint (not 18 times: the giant glass house)
 		if is_instance_valid(st) and (st as Node3D).global_basis.get_scale().x > Defs.CELL * 1.5:
 			_see("giant_site")
