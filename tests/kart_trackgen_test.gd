@@ -1,6 +1,7 @@
 extends SceneTree
 ## KART RACE track generator: proves the seeded tracks are fair over many seeds (no game, no window).
-##   godot-test --headless --path . -s res://tests/kart_trackgen_test.gd      (SEEDS=40 for more)
+##   godot-test --headless --path . -s res://tests/kart_trackgen_test.gd      (SEEDS=40 for more; GEN_QUICK=1 = the
+##   landing sample, core/seeded.gd quick())
 ## For every Grand Tour race spec (6 places x 3 races, the story and a bonus tour) and 60 days of TODAY'S
 ## TRACK: games/kart_race/trackgen.gd check() (closed loop, never near itself, drivable bends, gentle
 ## hills, a straight flat start for the grid, fair jumps at every kart speed, things on the road and off
@@ -21,7 +22,7 @@ const UI_ICONS: Array[String] = ["star", "flag", "fire", "clock", "crown", "trop
 
 
 func _initialize() -> void:
-	var seeds := int(OS.get_environment("SEEDS")) if OS.has_environment("SEEDS") else 12
+	var seeds := Seeded.test_count(12, 1)  # 1 + the family seeds in landings (GEN_QUICK=1), every seed nightly
 	var t0 := Time.get_ticks_msec()
 	var total := 0
 	var attempts := {}
@@ -31,6 +32,8 @@ func _initialize() -> void:
 		for pl in Story.PLACES.size():
 			for step in Story.RACES_PER_PLACE:
 				var i := (tour * Story.PLACES.size() + pl) * Story.RACES_PER_PLACE + step
+				if not Seeded.sampled(i, 4):  # quick runs: today's quarter of the race specs, all of them nightly
+					continue
 				var sp := Story.spec(i)
 				var r := Seeded.validate(func(s: int) -> Dictionary: return TrackGen.generate(s, sp),
 					func(info: Dictionary) -> Array:
@@ -47,7 +50,7 @@ func _initialize() -> void:
 					seeds, 11 + i * 3, [0, 1, 999999], "KART TRACK race %d" % i)
 				total += int(r.checked)
 				fails += (r.failures as Array).size()
-				for s in 4:
+				for s in (1 if Seeded.quick() else 4):
 					var ts := Time.get_ticks_msec()
 					var info := TrackGen.generate(500 + s * 31 + i, sp)
 					slowest = maxi(slowest, Time.get_ticks_msec() - ts)
@@ -79,7 +82,7 @@ func _initialize() -> void:
 						for h in hz:
 							hz_seen["%s/%s" % [info.get("hz", ""), h[2]]] = true
 						return why,
-					maxi(4, seeds / 2), 701 + c * 37 + race * 5 + (1 if m == "zoom" else 0), [3, 77], "KART CUP %s race %d %s" % [Cups.cup(c).id, race, m])
+					1 if Seeded.quick() else maxi(4, seeds / 2), 701 + c * 37 + race * 5 + (1 if m == "zoom" else 0), [] if Seeded.quick() else [3, 77], "KART CUP %s race %d %s" % [Cups.cup(c).id, race, m])
 				total += int(cr.checked)
 				fails += (cr.failures as Array).size()
 				var ts := Time.get_ticks_msec()

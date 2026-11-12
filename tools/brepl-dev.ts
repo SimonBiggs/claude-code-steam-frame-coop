@@ -24,7 +24,8 @@ const TOOL_COPIES: Record<string, string> = {  // installed file -> repo copy (k
   [join(HOME, ".local/share/brepl/mcp.ts")]: "tools/brepl-mcp.ts", [join(HOME, ".local/share/brepl/multibot.ts")]: "tools/multibot.ts", [join(HOME, ".local/share/brepl/alerts.ts")]: "tools/brepl-alerts.ts",
   [join(HOME, ".local/share/brepl/peers.ts")]: "tools/brepl-peers.ts", [join(BIN, "brepl-tunnel")]: "tools/brepl-tunnel",
   [join(HOME, ".config/systemd/user/brepl-tunnel@.service")]: "tools/systemd/brepl-tunnel@.service",
-  [join(BIN, "test-throttle")]: "tools/test-throttle", [join(BIN, "duo-deploy-deck")]: "tools/duo-deploy-deck",
+  [join(BIN, "test-throttle")]: "tools/test-throttle", [join(BIN, "duo-nightly-tests")]: "tools/duo-nightly-tests",
+  [join(HOME, ".config/systemd/user/duo-nightly-tests.service")]: "tools/systemd/duo-nightly-tests.service", [join(HOME, ".config/systemd/user/duo-nightly-tests.timer")]: "tools/systemd/duo-nightly-tests.timer", [join(BIN, "duo-deploy-deck")]: "tools/duo-deploy-deck",
   [join(HOME, "GodotProjects/duo-arena-deck-build/run.sh")]: "tools/deck-run.sh", [join(HOME, "GodotProjects/duo-arena-deck-build/claude-rc.sh")]: "tools/deck/claude-rc.sh",
   [join(HOME, ".config/systemd/user/brepl.service")]: "tools/systemd/brepl.service", [join(BIN, "frame-at")]: "tools/frame-at", [join(BIN, "duo-deploy-frame")]: "tools/duo-deploy-frame",
 };
@@ -270,6 +271,17 @@ export async function debt() {
     { kind: "test-timing-spike", dirs: "tests", files: "worst_ms", bad: "worst_ms = maxf\\(worst_ms, [^\\n]*(get_ticks_usec|\\bus / 1000)", unless: "TestTime.worst|^extends RefCounted\\n## Timing in generator tests", fix: "time with TestTime.worst(worst_ms, ms, func() -> Variant: return <the call>) (tests/test_time.gd): one slow call on a busy machine re-runs twice and the fastest counts (Mini Golf's 42 ms failed a landing, 2026-11-11)" },
     { kind: "raw-look_at", files: "look(ing)?_at\\(", bad: "(^|\\n)[^#\\n]*(\\blooking_at\\(|[^A-Za-z0-9_]look_at\\()", unless: "static func aim\\(dir", fix: "use UiKit.aim(dir) / aim_from(from, at) / look(node, target) (core/ui_kit.gd): raw looking_at / look_at go NaN or error when the direction is vertical (tests/core_math_test.gd fails on any)" },
   ];
+  // Slow landing tests (SLOW_TEST_S) not changed since they were slow, and the nightly full sweep's failures / absence.
+  const slow = JSON.parse(await readFile(SLOW_FILE, "utf8").catch(() => "{}"));
+  for (const [t, v] of Object.entries(slow) as [string, any][]) {
+    const m = await stat(join(LIVE, `tests/${t}.gd`)).then(x => x.mtime.toISOString().slice(0, 16), () => "");
+    if (m && m <= v.at) issues.push({ kind: "slow-landing-test", what: `${t} took ${v.secs} s in a landing (${v.branch}, ${v.at})`, fix: `give it a quick mode: Seeded.test_count(n) / Seeded.sampled(i) (core/seeded.gd, GEN_QUICK=1 in landings); the nightly full sweep keeps every seed. Then delete its entry in ~/.cache/duo-arena/slow-tests.json` });
+  }
+  const nl = JSON.parse(await readFile(NIGHTLY, "utf8").catch(() => "null"));
+  if (!nl || Date.now() - Date.parse(nl.date) > 36 * 3600e3)
+    issues.push({ kind: "nightly-missing", what: nl ? `the last full test sweep was ${nl.date}` : "no full test sweep has run yet", fix: "systemctl --user status duo-nightly-tests.timer; run one: bg('x', () => dev.nightly())" });
+  else for (const [t, r] of Object.entries(nl.tests) as [string, any][])
+    if (!r.pass) issues.push({ kind: "nightly-fail", what: `${t} failed the full sweep (${nl.date} @${nl.commit}): ${String(r.tail).split("\n").pop()}`, fix: `GEN_QUICK only samples: fix the seed/date in ~/.cache/duo-arena/nightly/logs/${t}.log, then dev.nightly(["${t}"])` });
   // Voice echo (2026-11-11): every TTS player must log to ~/.claude/said.log, or the room/Deck mics feed Claude's own words back.
   for (const f of (await sh(`grep -lIE "say\\.py|piper |\\bespeak\\b" ~/.local/bin/* 2>/dev/null | grep -v '\\.bak' | xargs -r grep -L said.log`, LIVE)).out.split("\n").filter(Boolean))
     issues.push({ kind: "tts-no-said-log", what: f, fix: "append 'ts<TAB>text' to ~/.claude/said.log at start and end of playback (saidecho.py drops echoes)" });
@@ -592,6 +604,25 @@ export async function lone(ids?: string[], project = STAGE) {
   return { fail: out.filter(r => !r.pass).map(r => `${r.id}: ${r.summary}`), table: out.map(r => `${r.id.padEnd(18)} ${r.summary.split("\n")[0]}`).join("\n") };
 }
 
+/** Landing tests must stay quick (2026-11-12: kart_trackgen_test ~220 s and dungeon_delve_floors_test ~130 s made every
+ *  landing that ran them long). dev.land records any test over SLOW_TEST_S in ~/.cache/duo-arena/slow-tests.json and
+ *  dev.debt reports it until the test file changes: give it a quick mode (Seeded.test_count / Seeded.sampled, GEN_QUICK=1);
+ *  the nightly full sweep (dev.nightly, duo-nightly-tests.timer) keeps the full coverage. */
+export const SLOW_TEST_S = 60;
+const SLOW_FILE = join(HOME, ".cache/duo-arena/slow-tests.json");
+const NIGHTLY = join(HOME, ".cache/duo-arena/nightly/latest.json");
+async function noteSlowTest(test: string, secs: number, branch: string) {
+  const all = JSON.parse(await readFile(SLOW_FILE, "utf8").catch(() => "{}"));
+  all[test] = { secs, branch, at: new Date().toISOString().slice(0, 16) };
+  await writeFile(SLOW_FILE, JSON.stringify(all, null, 1));
+}
+
+/** The full test sweep now (what duo-nightly-tests.timer runs at 03:30): every tests/*_test.gd (or `tests`) on a
+ *  snapshot of live main, every seed and date. Long (~15-30 min): run it in bg(). Returns the summary line. */
+export async function nightly(tests: string[] = []) {
+  return (await sh(`duo-nightly-tests ${tests.join(" ")} 2>&1 | tail -1`)).out;
+}
+
 export async function land(branch: string, genTests: string[], botId: string, otherBots: string[], msg: string) {
   // A landing that stopped leaves its merge in wt-merge (and its files in staging) for a retry. Landing a DIFFERENT
   // branch next must not carry it along (2026-10-31: a tools-only landing nearly deployed saga-deep, whose tests had
@@ -642,7 +673,13 @@ export async function land(branch: string, genTests: string[], botId: string, ot
     // A test with a scene (extends Node, e.g. engine_ui_test) runs as that scene; a SceneTree script runs with -s.
     const scene = await stat(join(STAGE, `tests/${t}.tscn`)).then(() => true, () => false);
     const how = scene ? `--fixed-fps 60 res://tests/${t}.tscn`  /* ends itself (exit code = failures); timeout 600 caps it */ : `-s res://tests/${t}.gd`;
-    out[t] = (await sh(`DUO_PORT=${rport()} timeout 600 godot-test --headless --path . ${how} 2>&1 | grep -v OpenXR | grep -E "PASS|FAIL|SCRIPT ERROR" | tail -3; echo exit=\${PIPESTATUS[0]}`, STAGE)).out;
+    // GEN_QUICK=1: generator tests check today's sample of seeds/dates (core/seeded.gd Seeded.quick()); the nightly
+    // full sweep (tools/duo-nightly-tests) checks them all. A landing test over SLOW_TEST_S is flagged (dev.debt).
+    const t0 = Date.now();
+    out[t] = (await sh(`GEN_QUICK=1 DUO_PORT=${rport()} timeout 600 godot-test --headless --path . ${how} 2>&1 | grep -v OpenXR | grep -E "PASS|FAIL|SCRIPT ERROR" | tail -3; echo exit=\${PIPESTATUS[0]}`, STAGE)).out;
+    const secs = Math.round((Date.now() - t0) / 1000);
+    out[t] += ` (${secs} s)`;
+    if (secs > SLOW_TEST_S) { out[t] += ` SLOW: over ${SLOW_TEST_S} s in a landing`; await noteSlowTest(t, secs, branch); }
     // Every test prints an explicit verdict, -s scripts too (paper_planes_sky_test exited 0 with only a count line,
     // 2026-11-11; tests/bot_end_test.gd fails a tests/*_test.gd with no PASS line in its code).
     if (!/PASS/.test(out[t])) out[t] += " (no PASS line)";
@@ -715,6 +752,7 @@ export function help() {
   dev.playRuns({since?, game?})      those RUN lines as objects ({device, recv, ...run})
   dev.lone(ids?) / dev.loneRun(id, project?)  lone flat player check (one Deck player, no VR, nobody else): rounds advance, never frozen (dev.land runs it)
   dev.guard(game)                    a game's long guard bots (LAND_GUARDS; dev.land runs them when a branch touches the game)
+  dev.nightly(tests?)                full sweep of every test (every seed/date; landings run GEN_QUICK samples); nightly at 03:30
   dev.debt()                         tech-debt scan: {clean, issues:[{kind, what, fix}]} (fix them straight away)
   dev.bots.list() / .run(id, {net, joiners}) / .all({only, net, concurrency})   headless bot tests in staging (net: host + joiners, tools/multibot.ts)
   dev.stage.diff() / .pull() / .deploy(msg)                            staging <-> live game

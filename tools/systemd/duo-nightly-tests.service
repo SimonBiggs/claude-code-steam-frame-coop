@@ -1,0 +1,8 @@
+[Unit]
+Description=Full sweep of every duo-arena test (landings run a quick sample; this checks every seed and date)
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c '%h/.local/bin/duo-nightly-tests 2>&1 | tail -1 | %h/.local/bin/brepl --pipe nightly-tests'
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin
+Nice=19

@@ -111,6 +111,43 @@ static func dates(count: int = 400, first: String = "2026-10-01", extra: Array =
 	return out
 
 
+## QUICK test runs (2026-11-12): a landing (dev.land sets GEN_QUICK=1) checks a representative SAMPLE so no test
+## holds a landing up for minutes (kart_trackgen_test took ~220 s, dungeon_delve_floors_test ~130 s); the nightly
+## full sweep (tools/duo-nightly-tests, duo-nightly-tests.timer) runs every seed and date. The sample turns with the
+## day (offset = days since 2026-10-01), so over a few landings every seed/date is checked in quick runs too, and a
+## landing is reproducible all day. Seeds/dates a test lists as `extra` (family-played seeds, fixed dates) are
+## ALWAYS checked, and so are the next QUICK_AHEAD days (the family's real coming dailies).
+const QUICK_STRIDE := 4  ## validate(): every 4th seed
+const QUICK_DAY_STRIDE := 10  ## validate_days(): every 10th date of the 400
+const QUICK_AHEAD := 14
+
+
+static func quick() -> bool:
+	return OS.get_environment("GEN_QUICK") == "1"
+
+
+## A test's loop count: SEEDS env when set, else `full`, or in a quick run `quick_n` (default about a quarter, >= 2).
+##   var seeds := Seeded.test_count(60)      # 60 nightly, 15 in a landing
+##   var seeds := Seeded.test_count(60, 6)   # 60 nightly, 6 in a landing
+static func test_count(full: int, quick_n: int = -1) -> int:
+	if OS.has_environment("SEEDS"):
+		return int(OS.get_environment("SEEDS"))
+	if not quick():
+		return full
+	return mini(full, quick_n) if quick_n >= 0 else maxi(mini(2, full), full / QUICK_STRIDE)
+
+
+## True when item `i` of a loop is in today's quick sample (always true in a full run): for loops a test can't
+## shorten with test_count() (fixed lists of places / cups / dates).  if not Seeded.sampled(i): continue
+static func sampled(i: int, stride: int = QUICK_STRIDE) -> bool:
+	return not quick() or posmod(i - _day_offset(), stride) == 0
+
+
+static func _day_offset() -> int:
+	var now := Time.get_unix_time_from_datetime_string(Time.get_date_string_from_system() + "T12:00:00")
+	return int((now - Time.get_unix_time_from_datetime_string("2026-10-01T12:00:00")) / 86400)
+
+
 ## The validator loop for a game's TODAY'S level (every game with a daily): make the daily level for each of
 ## dates(count) with gen(date) and run check(level) on it (an Array of reasons, empty when fine); the same date must
 ## make the same level all day. A daily nobody can win is a whole day lost for the family, so every gen test with a
@@ -119,6 +156,18 @@ static func dates(count: int = 400, first: String = "2026-10-01", extra: Array =
 static func validate_days(gen: Callable, check: Callable, count: int = 400, tag: String = "DAILY", extra: Array = []) -> Dictionary:
 	var failures: Array = []
 	var days := dates(count, "2026-10-01", extra)
+	if quick():
+		var keep := {}
+		for e in extra:
+			keep[str(e)] = true
+		var now := Time.get_unix_time_from_datetime_string(Time.get_date_string_from_system() + "T12:00:00")
+		for d in QUICK_AHEAD:
+			keep[Time.get_date_string_from_unix_time(now + d * 86400)] = true
+		var sample: Array = []
+		for i in days.size():
+			if keep.has(days[i]) or sampled(i, QUICK_DAY_STRIDE):
+				sample.append(days[i])
+		days = sample
 	for date in days:
 		var level: Variant = gen.call(date)
 		var reasons: Array = check.call(level)
@@ -139,7 +188,8 @@ static func validate(gen: Callable, check: Callable, count: int = 200, first: in
 	var failures: Array = []
 	var seeds: Array = []
 	for i in count:
-		seeds.append(first + i * 7919)
+		if count <= 3 or sampled(i):  # quick runs: today's quarter of the seeds (see quick())
+			seeds.append(first + i * 7919)
 	seeds.append_array(extra)
 	for s in seeds:
 		var level: Variant = gen.call(int(s))
