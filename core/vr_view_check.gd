@@ -198,6 +198,15 @@ static func panel_fill(m: MeshInstance3D) -> Color:
 ## no-depth panel), drawn under the panel (render priority), or too close to the panel's colour to read.
 static func text_problems(card: Node3D) -> Array[String]:
 	var out: Array[String] = []
+	for c in [card] + card.find_children("*", "SpriteBase3D", true, false):
+		var s := c as SpriteBase3D  # pictures on the panel (story medallions): the same depth rule as words
+		if s == null or not s.is_visible_in_tree() or s.transparency > 0.65 or panel_of(s) == null:
+			continue
+		var smat := panel_of(s).material_override as BaseMaterial3D
+		if not s.no_depth_test:
+			out.append("picture %s is depth-tested on a panel that isn't: scenery in front hides it, not the panel" % s.name)
+		if s.render_priority <= smat.render_priority:
+			out.append("picture %s drawn under its own panel (priority %d, panel %d)" % [s.name, s.render_priority, smat.render_priority])
 	for c in [card] + card.find_children("*", "Label3D", true, false):
 		if not c is Label3D:
 			continue

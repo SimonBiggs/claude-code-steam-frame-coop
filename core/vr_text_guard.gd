@@ -69,24 +69,26 @@ func _process(delta: float) -> void:
 func _on_node_added(n: Node) -> void:
 	if active and n is Label3D:
 		_fix.call_deferred(n)  # after the game has finished setting it up
-	elif n is Label3D:
-		_match_panel.call_deferred(n)
+	elif n is Label3D or n is SpriteBase3D:
+		_match_panel.call_deferred(n)  # words and pictures (story medallions) on a floating panel
 
 
 ## Words on a floating panel (UiKit.vr_panel_material: no depth test, so it shows through a nearer leaf or wall) skip
 ## the depth test too, or the panel shows as a dark bar with the words hidden behind the scenery (Fruit Catch
 ## 2026-11-12, TODAY'S HARVEST in front of a low branch). Their priority stays above the panel's.
 ## core/vr_view_check.gd text_problems() fails a VR bot when this doesn't hold.
-func _match_panel(l: Label3D) -> bool:
-	if not is_instance_valid(l):
+func _match_panel(l: GeometryInstance3D) -> bool:
+	if not is_instance_valid(l) or not (l is Label3D or l is SpriteBase3D):
 		return false
 	var p := VrViewCheck.panel_of(l)
 	if p == null:
 		return false
-	l.no_depth_test = true
+	l.set("no_depth_test", true)
 	var prio := (p.material_override as BaseMaterial3D).render_priority
-	l.render_priority = maxi(l.render_priority, prio + 2)
-	l.outline_render_priority = clampi(l.outline_render_priority, prio + 1, l.render_priority - 1)
+	l.set("render_priority", maxi(int(l.get("render_priority")), prio + 2))
+	if l is Label3D:
+		var t := l as Label3D
+		t.outline_render_priority = clampi(t.outline_render_priority, prio + 1, t.render_priority - 1)
 	return true
 
 
