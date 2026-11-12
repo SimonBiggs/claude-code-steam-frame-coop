@@ -66,6 +66,7 @@ const HazardsScript := preload("res://games/obstacle_rush/hazards.gd")
 const GiftsScript := preload("res://games/obstacle_rush/gifts.gd")
 const SeasonScript := preload("res://games/obstacle_rush/season.gd")
 const HallScript := preload("res://games/obstacle_rush/hall.gd")
+const SeasonKit := preload("res://core/season_kit.gd")
 
 ## A runner owned here bumped pretend door k (bots learn from it like the CPU brains do).
 signal fake_door_hit(rid: int, k: int)
@@ -1273,9 +1274,7 @@ func _setup_deep() -> void:
 ## Host, once per session: the season, the family's last mode, the medal hall, for every machine.
 func _begin_deep() -> void:
 	session_seed = Seeded.fresh_seed()
-	season = Seeded.season()
-	if OS.has_environment("OR_SEASON") and Deep.SEASONS.has(OS.get_environment("OR_SEASON")):
-		season = OS.get_environment("OR_SEASON")
+	season = SeasonKit.override("obstacle_rush", Seeded.season(), Deep.SEASONS)
 	mode = Deep.mode_of(String(save.data.mode) if String(save.data.mode) != "" else "brave")
 	if OS.has_environment("OR_MODE"):  # (What's New "try" / bots: straight in)
 		mode = Deep.mode_of(OS.get_environment("OR_MODE"))

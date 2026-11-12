@@ -89,6 +89,7 @@ const HazardsScript := preload("res://games/giants_table/hazards.gd")
 const GiftsScript := preload("res://games/giants_table/gifts.gd")
 const SeasonScript := preload("res://games/giants_table/season.gd")
 const TreasuresScript := preload("res://games/giants_table/treasures.gd")
+const SeasonKit := preload("res://core/season_kit.gd")
 const SPARKY := "SPARKY"
 const SPARKY_COLOR := Color(1.0, 0.6, 0.2)
 const GIFT_LINES := {"pie": "A yummy pie!", "cake": "A big cake!", "teddy": "A teddy bear!", "scarf": "A cosy scarf!",
@@ -2722,9 +2723,7 @@ func _log_run(end: String) -> void:
 
 ## Host, once per game (from _start_raid): the season, the session's mode, the treasures, for every machine.
 func _begin_deep() -> void:
-	season = Seeded.season()
-	if OS.has_environment("GT_SEASON") and Deep.SEASONS.has(OS.get_environment("GT_SEASON")):
-		season = OS.get_environment("GT_SEASON")
+	season = SeasonKit.override("giants_table", Seeded.season(), Deep.SEASONS)
 	mode = Deep.mode_of(String(Engine.get_meta("gt_mode", save.data.mode if String(save.data.mode) != "" else "brave")))
 	if OS.has_environment("GT_MODE"):
 		mode = Deep.mode_of(OS.get_environment("GT_MODE"))

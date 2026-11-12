@@ -45,6 +45,7 @@ const PicksScript := preload("res://games/fruit_catch/picks.gd")
 const HazardsScript := preload("res://games/fruit_catch/hazards.gd")
 const SeasonScript := preload("res://games/fruit_catch/season.gd")
 const PantryScript := preload("res://games/fruit_catch/pantry.gd")
+const SeasonKit := preload("res://core/season_kit.gd")
 const NUTMEG_POS := Vector3(2.35, 0.0, 2.1)  ## Nutmeg's stump, right of the bowl
 const ORCHARD_CHEERS := {1: "Our first tree!", 5: "Five trees!", 10: "Ten trees!", 20: "A big orchard!", 36: "A whole forest!"}
 
@@ -742,9 +743,7 @@ func _begin_session() -> void:
 	net.state_set("days", int(save.data.days))
 	net.state_set("orchard", (save.data.orchard as Array).duplicate(true))
 	net.state_set("grew", grew)
-	season = Seeded.season()
-	if OS.has_environment("FC_SEASON") and Deep.SEASONS.has(OS.get_environment("FC_SEASON")):
-		season = OS.get_environment("FC_SEASON")
+	season = SeasonKit.override("fruit_catch", Seeded.season(), Deep.SEASONS)
 	if String(save.data.mode) != "":
 		mode = Deep.mode_of(String(save.data.mode))
 	if OS.has_environment("FC_MODE"):

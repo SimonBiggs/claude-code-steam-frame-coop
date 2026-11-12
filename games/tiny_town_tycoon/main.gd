@@ -83,6 +83,7 @@ const HazardsScript := preload("res://games/tiny_town_tycoon/hazards.gd")
 const GiftsScript := preload("res://games/tiny_town_tycoon/gifts.gd")
 const SeasonScript := preload("res://games/tiny_town_tycoon/season.gd")
 const IsletsScript := preload("res://games/tiny_town_tycoon/islets.gd")
+const SeasonKit := preload("res://core/season_kit.gd")
 
 const GAME_ID := "tiny_town_tycoon"
 const DAY_LEN := 420.0  ## seconds for a whole day
@@ -1786,9 +1787,7 @@ func _setup_deep() -> void:
 ## Host, once a session: the season, the family's last mode, Benny's archipelago.
 func _begin_deep() -> void:
 	_session_seed = Seeded.fresh_seed()
-	deep_season = Seeded.season()
-	if OS.has_environment("TT_SEASON") and Deep.SEASONS.has(OS.get_environment("TT_SEASON")):
-		deep_season = OS.get_environment("TT_SEASON")
+	deep_season = SeasonKit.override("tiny_town_tycoon", Seeded.season(), Deep.SEASONS)
 	deep_mode = Deep.mode_of(String(save.data.get("mode", "brave")))
 	if OS.has_environment("TT_MODE"):  # (What's New "try" / bots: straight in)
 		deep_mode = Deep.mode_of(OS.get_environment("TT_MODE"))

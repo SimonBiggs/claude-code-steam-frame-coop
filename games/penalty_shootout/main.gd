@@ -78,6 +78,7 @@ const PicksScript := preload("res://games/penalty_shootout/picks.gd")
 const HazardsScript := preload("res://games/penalty_shootout/hazards.gd")
 const SeasonScript := preload("res://games/penalty_shootout/season.gd")
 const CornerScript := preload("res://games/penalty_shootout/corner.gd")
+const SeasonKit := preload("res://core/season_kit.gd")
 const GAME_ID := "penalty_shootout"
 const LEO := "LEO"
 const LEO_COLOR := Color(1.0, 0.72, 0.25)
@@ -2729,9 +2730,7 @@ func _start_cup() -> void:
 	print("Penalty Shootout: cup seed %d%s | %d prizes, day %d" % [cup_seed, " (TODAY'S MATCH)" if cup_daily else "",
 		(save.data.prizes as Array).size(), int(save.data.days)])
 	_send_family()
-	season = Seeded.season(today)
-	if OS.has_environment("PS_SEASON"):
-		season = OS.get_environment("PS_SEASON")
+	season = SeasonKit.override("penalty_shootout", Seeded.season(today), Deep.SEASONS)
 	if season_node != null:
 		season_node.set_season(season)
 	if save.data.mode != "":

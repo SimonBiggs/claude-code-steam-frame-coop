@@ -552,10 +552,10 @@ func _checks() -> void:
 		kit.assert_true(tv > 0, "the TV party hit monsters (%d)" % tv)
 
 
-## Every machine: the season dressed the road (CS_SEASON, else the day's).
+## Every machine: the season dressed the road (ARCADE_SEASON via core/season_kit.gd, else the day's).
 func _deep2_common(mode: String) -> void:
 	var se := String(main.plan.get("season", ""))
-	var want_se := OS.get_environment("CS_SEASON") if OS.has_environment("CS_SEASON") else preload("res://core/seeded.gd").season()
+	var want_se := preload("res://core/season_kit.gd").override("crystal_saga", preload("res://core/seeded.gd").season())
 	kit.assert_eq(se, want_se, "%s: the road is dressed for the season" % mode)
 	kit.assert_true(main.world.season_props != null, "%s: the season's props stand by the road" % mode)
 	if dodges > 0:

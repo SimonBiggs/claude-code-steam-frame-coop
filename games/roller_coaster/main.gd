@@ -47,6 +47,7 @@ const SeasonScript := preload("res://games/roller_coaster/season.gd")
 const GiftsScript := preload("res://games/roller_coaster/gifts.gd")
 const FairScript := preload("res://games/roller_coaster/fair.gd")
 const PicksScript := preload("res://games/roller_coaster/picks.gd")
+const SeasonKit := preload("res://core/season_kit.gd")
 const BUTTONS_COL := Color(0.25, 0.5, 0.95)
 const GOLD_COL := Color(1.0, 0.8, 0.25)
 const DECOR_PICS := {"balloons": "balloon", "carousel": "carousel", "wheel": "ferris", "fountain": "fountain", "flags": "bunting"}
@@ -1644,9 +1645,7 @@ func _open_deep(seed_value: int) -> void:
 		mode = Deep.mode_id(OS.get_environment("RC_MODE"))
 		mode_picked = true
 	net.state_set("mode", mode)
-	season = Seeded.season()
-	if OS.has_environment("RC_SEASON") and Deep.SEASONS.has(OS.get_environment("RC_SEASON")):
-		season = OS.get_environment("RC_SEASON")
+	season = SeasonKit.override("roller_coaster", Seeded.season(), Deep.SEASONS)
 	net.state_set("season", season)
 	season_node.set_season(season)
 	fair.set_count(int(save.data.fair), false)

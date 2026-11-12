@@ -21,6 +21,7 @@ const PickOrbs := preload("res://core/pick_orbs.gd")
 const Seeded := preload("res://core/seeded.gd")
 const SkyKit := preload("res://core/sky_kit.gd")
 const WaveGen := preload("res://games/balloon_pop/wavegen.gd")
+const SeasonKit := preload("res://core/season_kit.gd")
 
 ## Per mode. busy: waves come this much faster (wavegen.gd gap / busy). rise: balloons rise this much faster (still
 ## capped by wavegen.gd max_rise, so every balloon stays reachable). grumpy: x the ride's grumpy chance. gusts: wind
@@ -150,12 +151,10 @@ static func time_of(hour: int) -> String:
 	return "night"
 
 
-## The sky theme for an hour on a date (BP_SKY=dawn/day/sunset/night/snow and BP_SEASON force one: What's New
+## The sky theme for an hour on a date (BP_SKY=dawn/day/sunset/night/snow and ARCADE_SEASON force one: What's New
 ## "try" and bots). {id, time, season, preset, ground, flowers, name, pic, line, glow}
 static func theme_of(hour: int, date: String) -> Dictionary:
-	var season := season_of(date)
-	if OS.has_environment("BP_SEASON") and SEASONS.has(OS.get_environment("BP_SEASON")):
-		season = OS.get_environment("BP_SEASON")
+	var season := SeasonKit.override("balloon_pop", season_of(date), SEASONS)
 	var tm := time_of(hour)
 	if OS.has_environment("BP_SKY"):
 		var want := OS.get_environment("BP_SKY")

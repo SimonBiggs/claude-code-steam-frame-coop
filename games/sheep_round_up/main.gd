@@ -43,6 +43,7 @@ const PicksScript := preload("res://games/sheep_round_up/picks.gd")
 const EventsScript := preload("res://games/sheep_round_up/events.gd")
 const WeatherScript := preload("res://games/sheep_round_up/weather.gd")
 const PickOrbs := preload("res://core/pick_orbs.gd")
+const SeasonKit := preload("res://core/season_kit.gd")
 
 const GAME_ID := "sheep_round_up"
 const ARENA := FieldGen.ARENA  # field radius
@@ -159,7 +160,7 @@ func _ready() -> void:
 		start_level = int(OS.get_environment("SRU_LEVEL"))
 	if start_level >= 0:
 		save.data.level = start_level
-	season = OS.get_environment("SRU_SEASON") if Seasons.SEASON_LOOK.has(OS.get_environment("SRU_SEASON")) else Seasons.season_for()
+	season = SeasonKit.override("sheep_round_up", Seasons.season_for(), Seasons.SEASON_LOOK)
 	team_mode = Seasons.mode_of(String(save.data.get("mode", "brave")))
 	sfx = SfxScript.new()
 	add_child(sfx)

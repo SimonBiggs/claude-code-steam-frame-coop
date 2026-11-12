@@ -56,6 +56,7 @@ const PicksScript := preload("res://games/starship_crew/picks.gd")
 const HazardsScript := preload("res://games/starship_crew/hazards.gd")
 const SeasonScript := preload("res://games/starship_crew/season.gd")
 const CrewScript := preload("res://games/starship_crew/crew.gd")
+const SeasonKit := preload("res://core/season_kit.gd")
 
 const GAME_ID := "starship_crew"
 const NEED := MissionGen.NEED  ## stars per mission
@@ -345,9 +346,7 @@ func _start_show() -> void:
 	if OS.has_environment("SC_TRIPS"):
 		trip_no = int(OS.get_environment("SC_TRIPS")) + (int(get_meta("again", 0)) if has_meta("started") else 0)
 	daily_trip = trip_no > 0 and not (save.data.daily as Dictionary).has(Seeded.today()) and not OS.has_environment("BOT_NO_DAILY")
-	season = Seeded.season()
-	if OS.has_environment("SC_SEASON") and Deep.SEASONS.has(OS.get_environment("SC_SEASON")):
-		season = OS.get_environment("SC_SEASON")
+	season = SeasonKit.override("starship_crew", Seeded.season(), Deep.SEASONS)
 	if OS.has_environment("SC_MODE"):
 		mode = Deep.mode_of(OS.get_environment("SC_MODE"))
 		mode_picked = true
