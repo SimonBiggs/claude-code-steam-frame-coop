@@ -33,7 +33,7 @@ extends Node3D
 ## chapter per crystal home; the last makes friends and he moves to Willowbrook), and LUMI'S CRYSTAL GARDEN beside
 ## the shrine grows a crystal flower for every crystal brought home (save "garden").
 ## CS_ZONE=n starts in zone n (0..4) for tests; CS_JOURNEYS=n plays as if n journeys were done (tier).
-## CS_SEASON=winter (etc.) dresses for that season; CS_TRY=surprises plays a road with surprises in both places.
+## ARCADE_SEASON=winter (etc.) dresses for that season; CS_TRY=surprises plays a road with surprises in both places.
 
 const NetScript := preload("res://core/net.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
@@ -62,6 +62,7 @@ const Realm := preload("res://games/crystal_saga/realm.gd")
 const Classes := preload("res://games/crystal_saga/classes.gd")
 const Layout := preload("res://games/crystal_saga/progress.gd")
 const Hazards := preload("res://games/crystal_saga/hazards.gd")
+const SeasonKit := preload("res://core/season_kit.gd")
 
 const GAME_ID := "crystal_saga"
 const MOODS: Array[String] = ["town", "overworld", "dungeon", "boss", "cosy"]
@@ -288,11 +289,9 @@ func _choose_journey() -> void:
 	plan = Saga.plan_for(journey, int(save.data.world), _hard(), _season())
 
 
-## The day's season (CS_SEASON overrides it for tests and What's New).
+## The day's season (ARCADE_SEASON / ARCADE_SEASON_CRYSTAL_SAGA override it for tests and What's New).
 static func _season() -> String:
-	if OS.has_environment("CS_SEASON"):
-		return OS.get_environment("CS_SEASON")
-	return Seeded.season()
+	return SeasonKit.override(GAME_ID, Seeded.season(), SagaGen.SEASONS)
 
 
 ## Host: realm slots beaten (the save's, plus CS_JOURNEYS pretend ones for tests).

@@ -93,6 +93,7 @@ const HINT_LAYER := 4  # visual layer bit for things only the guessers see (the 
 ## off at the edge; those views get the scores in their top line instead) and VR.
 const BOARD_SCORE_LAYER := 1 << 9
 const VR_LAYER := preload("res://core/vr_layer.gd").LAYER  # the VR player's floating text (never on the TV; engine-wide VR layer)
+const SeasonKit := preload("res://core/season_kit.gd")
 const PLAYER_COLORS: Array[Color] = [Color(1.0, 0.85, 0.55), Color(1.0, 0.35, 0.35), Color(0.3, 0.65, 1.0),
 	Color(0.4, 0.9, 0.4), Color(1.0, 0.8, 0.15), Color(0.8, 0.45, 1.0), Color(1.0, 0.55, 0.2)]
 const SOUNDS := {
@@ -2731,9 +2732,7 @@ func _setup_deep() -> void:
 
 ## Host / local, once per session: the season, the family's last mode, the museum, for every machine.
 func _begin_deep() -> void:
-	season = Seeded.season()
-	if OS.has_environment("PG_SEASON") and Deep.SEASONS.has(OS.get_environment("PG_SEASON")):
-		season = OS.get_environment("PG_SEASON")
+	season = SeasonKit.override("paint_and_guess", Seeded.season(), Deep.SEASONS)
 	play_mode = Deep.mode_of(str(save.data.get("mode", "brave")))
 	if OS.has_environment("PG_MODE"):  # (What's New "try" / bots: straight in)
 		play_mode = Deep.mode_of(OS.get_environment("PG_MODE"))

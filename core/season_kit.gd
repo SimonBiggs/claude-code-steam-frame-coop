@@ -7,10 +7,42 @@ extends RefCounted
 ##   for i in spots.size(): SeasonKit.prop(b, season, spots[i], i, size, facing)
 ##   add_child(MeshKit.instance(b.build(), false))
 ##   add_child(SeasonKit.drift(colour, season, {"box": Vector3(12, 0.5, 5), "at": Vector3(0, 8, -9), "amount": 80}))
+## And the ONE season test setting for every game (bots, deep tests, What's New "try"):
+##   season = SeasonKit.override(G.GAME_ID, Seeded.season(), Deep.SEASONS)
+## ARCADE_SEASON=winter dresses every game for winter; ARCADE_SEASON_<GAME_ID>=summer (e.g. ARCADE_SEASON_KART_RACE)
+## just that one game (it wins over ARCADE_SEASON). A game never reads its own XX_SEASON env
+## (tests/season_override_test.gd fails it).
 
 const MeshKit := preload("res://core/mesh_kit.gd")
 
 const SEASONS: Array[String] = ["spring", "summer", "autumn", "winter"]
+const ENV := "ARCADE_SEASON"
+
+static var _said := {}  # env=value lines already printed (a game may ask every frame)
+
+
+## The season a game should use: ARCADE_SEASON_<GAME_ID>, else ARCADE_SEASON, else `fallback` (the game's own
+## Seeded.season() etc.). `allowed`: the game's valid seasons (an Array, or a Dictionary keyed by season). A value
+## that is set but not allowed prints a visible SEASON WARNING and uses `fallback` (never a quiet fallback).
+static func override(game_id: String, fallback: String, allowed: Variant = SEASONS) -> String:
+	for key in [ENV + "_" + game_id.to_upper(), ENV]:
+		if not OS.has_environment(key):
+			continue
+		var v := OS.get_environment(key).strip_edges().to_lower()
+		if v == "":
+			continue
+		var line := "%s=%s" % [key, v]
+		if allowed.has(v):
+			if not _said.has(line):
+				_said[line] = true
+				print("SeasonKit: %s season %s (%s)" % [game_id, v, line])
+			return v
+		if not _said.has(line):
+			_said[line] = true
+			print("SEASON WARNING: %s is not a %s season (allowed: %s): using %s" % [line, game_id, str(allowed.keys() if allowed is Dictionary else allowed), fallback])
+			push_warning("SeasonKit: %s is not a %s season" % [line, game_id])
+		return fallback
+	return fallback
 
 
 ## One seasonal prop standing at `at` (on the ground), `size` times its 1 m-ish base size. facing: the way a face

@@ -41,6 +41,7 @@ const PickOrbs := preload("res://core/pick_orbs.gd")
 const PicksScript := preload("res://games/paper_planes/picks.gd")
 const HazardsScript := preload("res://games/paper_planes/hazards.gd")
 const HangarScript := preload("res://games/paper_planes/hangar.gd")
+const SeasonKit := preload("res://core/season_kit.gd")
 
 const GAME_ID := "paper_planes"
 const SAVE_VERSION := 2
@@ -1654,9 +1655,9 @@ func _stamps() -> int:
 	return Story.stamps(save.data["stars"]) + int(save.data.get("extra_stamps", 0))
 
 
-## Today's season (PP_SEASON for tests).
+## Today's season (ARCADE_SEASON / ARCADE_SEASON_PAPER_PLANES for tests).
 func _season() -> String:
-	var s := OS.get_environment("PP_SEASON") if OS.has_environment("PP_SEASON") else Seeded.season()
+	var s := SeasonKit.override(GAME_ID, Seeded.season(), Deep.SEASONS)
 	return s if Deep.SEASONS.has(s) else "spring"
 
 

@@ -92,6 +92,7 @@ const MusicScript := preload("res://core/music.gd")
 const NetScript := preload("res://core/net.gd")
 const ClassicSeats := preload("res://core/classic_seats.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
+const SeasonKit := preload("res://core/season_kit.gd")
 
 const GRAVITY := 9.8
 const MAX_LEAKS := 7
@@ -256,7 +257,7 @@ func _ready() -> void:
 	net.sticky_event("treasures")  # a machine that joins later gets the latest one (core/net.gd)
 	net.sticky_event("orbs")  # a machine joining mid-pick sees the pick orbs
 	net.sticky_event("deep")  # ... and the mode, gift, season and harbour
-	season = OS.get_environment("CC_SEASON") if OS.has_environment("CC_SEASON") else Seeded.season()
+	season = SeasonKit.override("cannon_cove", Seeded.season(), Deep.SEASONS)
 	if not Deep.SEASONS.has(season):
 		season = "spring"
 	picks = Picks.new()

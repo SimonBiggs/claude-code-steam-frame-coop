@@ -57,6 +57,7 @@ const PicksScript := preload("res://games/mini_golf_party/picks.gd")
 const HazardsScript := preload("res://games/mini_golf_party/hazards.gd")
 const SeasonScript := preload("res://games/mini_golf_party/season.gd")
 const CornerScript := preload("res://games/mini_golf_party/corner.gd")
+const SeasonKit := preload("res://core/season_kit.gd")
 const GUS_COLOR := Color(0.25, 0.7, 0.4)
 
 const GAME_ID := "mini_golf_party"
@@ -1252,7 +1253,7 @@ func _new_course() -> void:
 	if OS.has_environment("MGP_GIFT") and course_no == 1 and not Deep.gift(OS.get_environment("MGP_GIFT")).is_empty():
 		gift = OS.get_environment("MGP_GIFT")  # (What's New "try": the first course with that gift, no gift pick)
 		gift_for = course_no
-	season = OS.get_environment("MGP_SEASON") if Deep.SEASONS.has(OS.get_environment("MGP_SEASON")) else Seeded.season(today)
+	season = SeasonKit.override("mini_golf_party", Seeded.season(today), Deep.SEASONS)
 	if not mode_picked and String(save.data["mode"]) != "":
 		mode = Deep.mode_of(String(save.data["mode"]))
 	_send_deep()
