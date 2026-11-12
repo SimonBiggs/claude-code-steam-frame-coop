@@ -369,8 +369,8 @@ static func pick_hidden(cam: Camera3D, k: Node3D) -> Array[String]:
 		if hit.node == null or float(hit.f) * dist * 0.97 < 0.6 * ws:
 			continue
 		var what: Node = s[0]
-		out.append("%s of the pick %s: hidden behind %s (%.1f m away; move the pick or the scenery)" % [
-			("words " + _name(what)) if what is Label3D else "picture", _name(k), _name(hit.node), float(hit.f) * dist * 0.97 / ws])
+		out.append("%s of the pick %s: hidden behind %s%s (%.1f m away; move the pick or the scenery)" % [
+			("words " + _name(what)) if what is Label3D else "picture", _name(k), _name(hit.node), made_by(hit.node), float(hit.f) * dist * 0.97 / ws])
 		break  # one line per pick is enough
 	return out
 
@@ -508,6 +508,21 @@ static func _smallest_text_deg(n: Node3D, head: Vector3) -> float:
 		var deg := rad_to_deg(atan2(h, maxf(0.01, head.distance_to(l.global_position))))
 		best = deg if best == 0.0 else minf(best, deg)
 	return best
+
+
+## " (made by games/x/props.gd Fence)": the nearest scripted ancestor of an unnamed mesh, so a failure says what it is.
+static func made_by(n: Node) -> String:
+	var what := ""
+	if n is MeshInstance3D and (n as MeshInstance3D).mesh != null:
+		var b := (n as MeshInstance3D).get_aabb()
+		what = " %s %.1fx%.1fx%.1f m at %s" % [(n as MeshInstance3D).mesh.get_class(), b.size.x, b.size.y, b.size.z, (n as Node3D).global_position.snapped(Vector3.ONE * 0.1)]
+	var x := n
+	while x != null:
+		var s: Script = x.get_script()
+		if s != null and s.resource_path != "":
+			return " (%s in %s %s)" % [what.strip_edges(), s.resource_path.get_file(), x.name]
+		x = x.get_parent()
+	return " (%s)" % what.strip_edges()
 
 
 static func _name(n: Node) -> String:
