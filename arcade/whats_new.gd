@@ -33,6 +33,10 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "kart-gifts", "date": "2026-11-12", "game": "kart_race", "pic": "boxmagnet", "line": "Bolt's gifts at the pit!", "try": {"KART_PIT": "1"}},
+	{"id": "kart-surprises", "date": "2026-11-12", "game": "kart_race", "pic": "gumball", "line": "Watch out for the circle!", "try": {"KART_PIT": "1", "KART_SURPRISE": "1"}},
+	{"id": "kart-town", "date": "2026-11-12", "game": "kart_race", "pic": "racetown", "line": "Bolt's race town grows!"},
+	{"id": "kart-seasons", "date": "2026-11-12", "game": "kart_race", "pic": "acorn", "line": "Seasons by the road!"},
 	{"id": "pb-gifts", "date": "2026-11-12", "game": "party_board", "pic": "luckydie", "line": "Mango's gifts!", "try": {"PB_GIFT": "lucky"}},
 	{"id": "pb-surprises", "date": "2026-11-12", "game": "party_board", "pic": "boulder", "line": "Rocks and splashes!", "try": {"PB_MODE": "hard"}},
 	{"id": "pb-hall", "date": "2026-11-12", "game": "party_board", "pic": "partyhall", "line": "Mango's party hall grows!"},

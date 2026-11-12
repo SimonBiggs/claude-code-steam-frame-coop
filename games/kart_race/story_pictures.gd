@@ -5,13 +5,47 @@ extends RefCounted
 ## t = the picture's clock, bob = its gentle bob, color = the card's colour.
 
 const NAMES: Array[String] = ["kart", "partyhat", "cowboy", "wizard", "boltbot", "kartsmall", "kartbig", "lollipop", "snail",
-	"spoiler", "spanner", "mushroom", "mushrooms", "bubble", "banana", "horn", "shelf"]
+	"spoiler", "spanner", "mushroom", "mushrooms", "bubble", "banana", "horn", "shelf", "boxmagnet", "gumball", "racetown"]
 
 
 static func draw(pic, kind: String, t: float, bob: float, color: Color) -> void:
 	var size: Vector2 = pic.size
 	var white := Color(1.0, 1.0, 1.0)
 	match kind:
+		"boxmagnet":  # BOX MAGNET (Bolt's gift): a red horseshoe magnet pulling a ? box with little pull lines
+			var red := Color(0.95, 0.25, 0.25)
+			pic.draw_arc(pic._p(0.34, 0.5 + bob), 0.2 * size.x, PI * 0.5, PI * 1.5, 20, red, 0.12 * size.x)
+			pic._poly([[0.34, 0.24 + bob], [0.52, 0.24 + bob], [0.52, 0.36 + bob], [0.34, 0.36 + bob]], red)
+			pic._poly([[0.34, 0.64 + bob], [0.52, 0.64 + bob], [0.52, 0.76 + bob], [0.34, 0.76 + bob]], red)
+			pic._poly([[0.52, 0.24 + bob], [0.6, 0.24 + bob], [0.6, 0.36 + bob], [0.52, 0.36 + bob]], white)
+			pic._poly([[0.52, 0.64 + bob], [0.6, 0.64 + bob], [0.6, 0.76 + bob], [0.52, 0.76 + bob]], white)
+			var pull := fmod(t * 0.8, 1.0) * 0.06
+			pic._poly([[0.72 - pull, 0.38], [0.92 - pull, 0.38], [0.92 - pull, 0.62], [0.72 - pull, 0.62]], Color(1.0, 0.8, 0.2))
+			pic.draw_string(ThemeDB.fallback_font, pic._p(0.765 - pull, 0.58), "?", HORIZONTAL_ALIGNMENT_LEFT, -1, int(0.2 * size.x), white)
+			for k in 3:
+				var x := 0.62 + fmod(t * 0.6 + k * 0.33, 1.0) * 0.08
+				pic.draw_line(pic._p(x, 0.42 + k * 0.08), pic._p(x + 0.04, 0.42 + k * 0.08), Color(1.0, 1.0, 1.0, 0.8), 0.012 * size.x)
+		"gumball":  # a big pink gumball with a shine, bouncing
+			var hop := absf(sin(t * 3.0)) * 0.08
+			pic._circle(0.5, 0.86, 0.22 - hop, Color(0, 0, 0, 0.15))
+			pic._circle(0.5, 0.5 - hop + bob, 0.32, Color(1.0, 0.4, 0.62))
+			pic._circle(0.4, 0.38 - hop + bob, 0.09, Color(1.0, 0.8, 0.88))
+			for k in 5:
+				var a := TAU * k / 5.0 + 0.4
+				pic._circle(0.5 + cos(a) * 0.18, 0.52 - hop + bob + sin(a) * 0.16, 0.025, [Color(1, 1, 1), Color(0.4, 0.8, 1.0), Color(1.0, 0.9, 0.3)][k % 3])
+		"racetown":  # Bolt's race town: a little tower, flags and a balloon behind a chequered start line
+			pic._poly([[0.0, 0.78], [1.0, 0.78], [1.0, 1.0], [0.0, 1.0]], Color(0.4, 0.75, 0.35))
+			pic._poly([[0.18, 0.3 + bob], [0.3, 0.3 + bob], [0.3, 0.78], [0.18, 0.78]], white)
+			pic._poly([[0.12, 0.22 + bob], [0.36, 0.22 + bob], [0.36, 0.32 + bob], [0.12, 0.32 + bob]], Color(0.55, 0.85, 1.0))
+			for k in 3:
+				var x := 0.45 + k * 0.1
+				pic.draw_line(pic._p(x, 0.78), pic._p(x, 0.42), Color(0.9, 0.9, 0.95), 0.012 * size.x)
+				var wave := sin(t * 4.0 + k) * 0.015
+				pic._poly([[x, 0.42], [x + 0.08, 0.44 + wave], [x, 0.5]], [Color(1.0, 0.3, 0.3), Color(0.3, 0.6, 1.0), Color(1.0, 0.85, 0.2)][k])
+			pic._circle(0.82, 0.3 + bob * 2.0, 0.1, Color(1.0, 0.45, 0.5))
+			pic.draw_line(pic._p(0.82, 0.4 + bob * 2.0), pic._p(0.8, 0.7), Color(0.9, 0.9, 0.9), 0.008 * size.x)
+			for k in 10:
+				pic._poly([[k * 0.1, 0.84], [k * 0.1 + 0.1, 0.84], [k * 0.1 + 0.1, 0.9], [k * 0.1, 0.9]], Color(0.1, 0.1, 0.12) if k % 2 == 0 else white)
 		"kart", "kartsmall", "kartbig":  # medium / LIGHT (small, zippy) / HEAVY (big and chunky) karts
 			_kart(pic, t, bob, color, 0.78 if kind == "kartsmall" else (1.18 if kind == "kartbig" else 1.0))
 		"lollipop":

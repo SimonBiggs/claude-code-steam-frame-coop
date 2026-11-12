@@ -20,6 +20,7 @@ extends RefCounted
 const Seeded := preload("res://core/seeded.gd")
 const Track := preload("res://games/kart_race/track.gd")
 const Cups := preload("res://games/kart_race/cups.gd")
+const Deep := preload("res://games/kart_race/deep.gd")
 
 const CENTER := Vector2(20.0, -35.0)  # middle of the ground and sky dome (track.gd)
 const MAX_R := 125.0  # the road stays inside this (the far hills start about 150 m out)
@@ -70,6 +71,7 @@ static func generate(seed_value: int, spec: Dictionary) -> Dictionary:
 			continue
 		if check(info).is_empty():
 			info["attempt"] = attempt
+			_place_surprises(info, seed_value)
 			return info
 	var fb: Dictionary = (Track.TRACKS[posmod(int(spec.get("palette", 0)), Track.TRACKS.size())] as Dictionary).duplicate(true)
 	fb["palette"] = int(spec.get("palette", 0))
@@ -381,6 +383,72 @@ static func check(info: Dictionary) -> Array:
 	return why
 
 
+## SURPRISE SPOTS (deep.gd): where things may drop onto the road, placed AFTER the track is fair, from their own
+## random stream (so adding them changed no track): [s fraction, lat]. Each is a circle of Deep.R on one side of the
+## road leaving CLEAR_LANE free, on a gentle stretch you can see coming, away from ramps / splits / arrows / boxes /
+## hazards / the start, and far from each other. _check_surprises proves it (a spot that would fail is never placed).
+static func _place_surprises(info: Dictionary, seed_value: int) -> void:
+	var r := Seeded.rng(seed_value, "surprises")
+	var t: Track = Track.new()
+	t.prepare(info)
+	var rad := radii(t)
+	var L := t.length
+	var out: Array = []
+	for tries in 80:
+		if out.size() >= Deep.SPOTS:
+			break
+		var s := r.randf_range(PRACTICE_END + 20.0, L - START_BACK - 20.0)
+		var lat := Deep.LAT * (1.0 if r.randf() < 0.5 else -1.0)
+		var cand: Array = out.duplicate()
+		cand.append([s / L, lat])
+		var why: Array = []
+		_surprise_problems(t, rad, cand, why)
+		if why.is_empty():
+			out = cand
+	t.free()
+	out.sort()
+	info["surprises"] = out
+
+
+static func _surprise_problems(t: Track, rad: PackedFloat32Array, spots: Array, why: Array) -> void:
+	var L := t.length
+	for i in spots.size():
+		var sp: Array = spots[i]
+		var s := float(sp[0]) * L
+		var lat := float(sp[1])
+		var tag := "surprise at s=%.0f" % s
+		if not _clear(s - Deep.R, s + Deep.R, L, 14.0):
+			why.append("%s in the start / practice stretch" % tag)
+		var wall := t.wall_at(s)
+		if absf(lat) + Deep.R > wall - 0.2:
+			why.append("%s off the road" % tag)
+		if wall + absf(lat) - Deep.R < CLEAR_LANE:
+			why.append("%s leaves no clear lane" % tag)
+		if _min_radius(t, rad, s - 40.0, s + 4.0) < 26.0:
+			why.append("%s not seen coming (bend)" % tag)
+		for sa: Array in t.splits:
+			if fposmod(s - float(sa[0]) + 14.0, L) < float(sa[1]) + 28.0:
+				why.append("%s in the split lanes" % tag)
+		for ra: Array in t.ramps:
+			if fposmod(s - float(ra[0]) + 10.0, L) < float(ra[1]) + 34.0 + 10.0:
+				why.append("%s on a ramp or its landing" % tag)
+		for pa: Array in t.pads:
+			if fposmod(s - float(pa[0]) + 8.0, L) < float(pa[1]) + 16.0:
+				why.append("%s on a boost arrow" % tag)
+		for f in t.info.get("items", []):
+			if fposmod(s - float(f) * L + 10.0, L) < 20.0:
+				why.append("%s by the ? boxes" % tag)
+		for h: Array in t.hazards:
+			var a := float(h[0]) - float(h[3]) - 10.0
+			var b := float(h[0]) + float(h[4]) + float(h[3]) + 10.0
+			if fposmod(s - a, L) < b - a:
+				why.append("%s by a hazard" % tag)
+		for j in range(i + 1, spots.size()):
+			var g := absf(float(spots[j][0]) - float(sp[0])) * L
+			if minf(g, L - g) < 50.0:
+				why.append("%s too close to another" % tag)
+
+
 static func _check_track(t: Track, why: Array) -> void:
 	var L := t.length
 	var n := t.n
@@ -501,6 +569,7 @@ static func _check_track(t: Track, why: Array) -> void:
 			if not why.is_empty() and str(why[-1]).begins_with("jump"):
 				break
 	_check_hazards(t, rad, why)
+	_surprise_problems(t, rad, t.info.get("surprises", []), why)
 	_check_speed_and_items(t, rad, why)
 	_check_cpu_lanes(t, why)
 	# No prop spot inside the walls (a hidden wall): the same spot finder the scenery uses.
