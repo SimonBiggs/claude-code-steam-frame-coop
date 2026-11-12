@@ -7,6 +7,7 @@ const Contrast := preload("res://core/contrast.gd")
 const Party := preload("res://core/party.gd")
 const Track := preload("res://games/roller_coaster/track.gd")
 const Train := preload("res://games/roller_coaster/train.gd")
+const Deep := preload("res://games/roller_coaster/deep.gd")
 
 
 static func key_colors() -> Dictionary:
@@ -15,8 +16,15 @@ static func key_colors() -> Dictionary:
 	var out := {"rail": Track.RAIL_COL}
 	for k in cars:
 		out[k] = {"color": cars[k], "rim": Train.seat_color(cars[k])}
+	# The warned weather's steady discs (hazards.gd) lie on the grass along the track.
+	out["gust disc"] = Deep.GUST_COLOR
+	out["sleepy disc"] = Deep.SLEEPY_COLOR
 	return out
 
 
+## The park's grass in every season (season.gd tints the table) and the sandy paths.
 static func backgrounds() -> Dictionary:
-	return {"park grass": Track.PARK_GRASS, "park path": Track.PARK_PATH}
+	var out := {"park grass": Track.PARK_GRASS, "park path": Track.PARK_PATH}
+	for s in Deep.SEASONS:
+		out["%s grass" % s] = Deep.season_data(s).grass
+	return out

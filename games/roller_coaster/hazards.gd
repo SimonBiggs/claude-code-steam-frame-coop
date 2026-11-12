@@ -59,8 +59,9 @@ func show_list(raw: Array) -> void:
 func _disc(s: float, r: float, col: Color, alpha: float) -> void:
 	var xf := Track.sample(main.track, s)
 	var p := xf.origin - xf.basis.y * 0.12
-	rings.shape("circle", p, Vector3.FORWARD, Vector2(r, 0.0), col, 0.3,
-		{"style": "disc", "stay": STAY, "alpha": alpha, "y": p.y, "hot": col})
+	var gp := rings.to_global(p) if rings.is_inside_tree() else p  # (WarnRings places in world space; the table may be turned)
+	rings.shape("circle", gp, Vector3.FORWARD, Vector2(r, 0.0), col, 0.3,
+		{"style": "disc", "stay": STAY, "alpha": alpha, "y": gp.y, "hot": col})
 
 
 static func color_of(kind: String) -> Color:

@@ -33,6 +33,11 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "rc-gifts", "date": "2026-11-12", "game": "roller_coaster", "pic": "corkscrew", "line": "Buttons' track gifts!", "try": {"RC_GIFT": "rainbow"}},
+	{"id": "rc-weather", "date": "2026-11-12", "game": "roller_coaster", "pic": "sleepycart", "line": "Windy bits, sleepy carts!", "try": {"RC_WEATHER_NOW": "1", "RC_MODE": "brave"}},
+	{"id": "rc-modes", "date": "2026-11-12", "game": "roller_coaster", "pic": "bear", "line": "Gentle, brave or hard!"},
+	{"id": "rc-fair", "date": "2026-11-12", "game": "roller_coaster", "pic": "teacup", "line": "Buttons' toy fair grows!"},
+	{"id": "rc-seasons", "date": "2026-11-12", "game": "roller_coaster", "pic": "snowflake", "line": "Snowy park", "try": {"RC_SEASON": "winter"}},
 	{"id": "rb-gifts", "date": "2026-11-11", "game": "rhythm_band", "pic": "goldmic", "line": "Doodle's instrument gifts!", "try": {"RB_GIFT": "bigdrum"}},
 	{"id": "rb-changes", "date": "2026-11-11", "game": "rhythm_band", "pic": "spotlight", "line": "Fast bits, slow bits, solos!", "try": {"RB_CHANGES_NOW": "1"}},
 	{"id": "rb-modes", "date": "2026-11-11", "game": "rhythm_band", "pic": "frog", "line": "Gentle, brave or hard!"},

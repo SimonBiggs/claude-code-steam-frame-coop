@@ -30,6 +30,18 @@ var hide_slot0 := false
 var rolls: Array = []
 var no_roll := false
 var flat_xf: Array[Transform3D] = []  # each car's place before any roll (the TV ride cameras follow this)
+var rainbow := false  # RAINBOW gift (gifts.gd): every car a colour of the rainbow for one ride
+const RAINBOW: Array[Color] = [Color(1.0, 0.3, 0.3), Color(1.0, 0.65, 0.2), Color(1.0, 0.92, 0.3), Color(0.4, 0.95, 0.4),
+	Color(0.35, 0.7, 1.0), Color(0.7, 0.45, 1.0)]
+
+
+func set_rainbow(on: bool) -> void:
+	if on == rainbow:
+		return
+	rainbow = on
+	var occ := occupants.duplicate()
+	occupants = []
+	set_cars(occ)
 
 
 ## occ: per car, slot >= 0 (a player), -1 (a bot rider), <= -2 (guest -2 - g).
@@ -45,6 +57,8 @@ func set_cars(occ: Array) -> void:
 	for i in occ.size():
 		var code := int(occ[i])
 		var col := Party.COLORS[code % Party.COLORS.size()] if code >= 0 else BOT_CAR if code == -1 else GUEST_CAR
+		if rainbow:
+			col = RAINBOW[i % RAINBOW.size()]
 		var car := Node3D.new()
 		car.name = "Car%d" % i
 		add_child(car)

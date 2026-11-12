@@ -39,7 +39,7 @@ const KINDS: Array[String] = ["gust", "sleepy"]
 const GUST_COLOR := Color(0.4, 0.82, 1.0)  # sky blue
 const SLEEPY_COLOR := Color(0.72, 0.5, 1.0)  # lavender
 const SLEEPY_LEN := 2.4  # the sleepy stretch (the cart stops in its middle)
-const LEAD := 11.0  # weather starts at least this far past the station (told >= MIN_WARN s before the train is there)
+const LEAD := 16.0  # weather starts at least this far past the station (told >= MIN_WARN s before the train is there)
 const MIN_WARN := 2.0
 const END_CLEAR := 6.0  # ... and ends this far before the lap ends
 const GAP := 4.0  # plain track between two weather stretches (and round a loop, a splash or a gift)
@@ -77,8 +77,8 @@ const FAIR_PICS := {"teacups": "teacup", "swings": "carousel", "helter": "helter
 ## builder's arm's reach.
 const WS := 18.0
 const ROW_AT := Vector3(0.0, 8.6, 7.4)
-const ROW_GAP := 0.26 * WS
-const ORB_SCALE := 0.16 * WS
+const ROW_GAP := 0.32 * WS  # (a hand is never in two orbs at once: tests/roller_coaster_deep_test.gd)
+const ORB_SCALE := 0.14 * WS
 const HAND_R := 0.05 * WS
 const DWELL := 0.35
 const WAIT := {"mode": 12.0, "gift": 9.0}
@@ -249,7 +249,7 @@ static func problems(list: Array, tr: Dictionary, mode: String, avoid: Array = [
 		var why := _why(e, tr, list, avoid)
 		if why != "":
 			out.append(why)
-		if (float(e.s0) - Track.STATION_LEN) / 15.0 < MIN_WARN * 0.5 and (float(e.s0) - Track.STATION_LEN) / 5.0 < MIN_WARN:
+		if float(e.s0) - Track.STATION_LEN < MIN_WARN * 5.0:  # (the train leaves the station at 5 m/s; the test rides it for real)
 			out.append("told too late (%.1f m)" % float(e.s0))
 	return out
 

@@ -18,4 +18,5 @@ static func progress_summary(data: Dictionary, today: String) -> Dictionary:
 
 ## A save as the game writes it after a few days (tests/progress_test.gd: it must read as grown > 0, daily done).
 static func sample(today: String) -> Dictionary:
-	return {"decor": 3, "tickets": 5, "days": 3, "last_day": today, "daily": today, "daily_done": today, "rides": 8, "plans": 5, "coasters": 2}
+	return {"decor": 3, "tickets": 5, "days": 3, "last_day": today, "daily": today, "daily_done": today, "rides": 8, "plans": 5, "coasters": 2,
+		"mode": "brave", "fair": 2}
