@@ -165,7 +165,9 @@ func _simple_timeline(t0: float) -> void:
 	if client and OS.has_environment("BOT_LATE"):
 		end = maxf(30.0, end - float(OS.get_environment("BOT_LATE")))
 	if host:
-		kit.at(end - 6.0, "host checks (the TV machine is still connected)", _checks)
+		# before the joiner leaves (it checks and finishes at its end - 5): a runner deadline ends joiners 10 s sooner
+		var their_end: float = preload("res://tests/bot_end.gd").joiners_end_at(100.0)
+		kit.at(minf(end - 6.0, their_end - 8.0), "host checks (the TV machine is still connected)", _checks)
 		kit.at(end, "finish", kit.finish)
 	else:
 		kit.at(end - 5.0 if client else end, "checks", func() -> void:

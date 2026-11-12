@@ -591,6 +591,12 @@ func _checks() -> void:
 
 
 ## SECOND PASS checks (short: a run cut before the results).
+## A party of one round (PB_ROUNDS=1, a quick networked check): no later rounds, so no gift pick, no end-of-round
+## surprises, one roll each. Its other checks (results, steps, mode sync) still run.
+func _one_round() -> bool:
+	return int(main.get("rounds_override")) < 2
+
+
 func _deep_checks(mode: String, short: bool) -> void:
 	var pm := OS.get_environment("PB_MODE")
 	if pm == "" and (mode != "client" or _had("orbs:mode")):
@@ -618,7 +624,7 @@ func _deep_checks(mode: String, short: bool) -> void:
 
 
 func _checks_simple(mode: String) -> void:
-	_deep_checks(mode, false)
+	_deep_checks(mode, _one_round())
 	var menus: PackedStringArray = []
 	var mgs: PackedStringArray = []
 	for k in seen:
@@ -864,7 +870,8 @@ func _cue_checks(mode: String) -> void:
 		tv_seats = tv_seats or main.is_local_tv(sl)
 	if main.tv_ui != null and tv_seats:
 		kit.assert_true(cues.has("cue_roll"), "%s: SIMPLE: a TV player saw A + an arrow + a die (roll)" % mode)
-		kit.assert_true(cues.has("cue_learned_roll"), "%s: SIMPLE: the roll cue went after two rolls" % mode)
+		if not _one_round():  # a one-round party (PB_ROUNDS=1) has one roll each
+			kit.assert_true(cues.has("cue_learned_roll"), "%s: SIMPLE: the roll cue went after two rolls" % mode)
 		var games := {}
 		for id in main.runner.SIMPLE_GAMES:
 			games[id] = String(main.runner.meta(String(id)).get("cue", ""))
