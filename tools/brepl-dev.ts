@@ -682,12 +682,13 @@ export async function land(branch: string, genTests: string[], botId: string, ot
   // A landing that stopped leaves its merge in wt-merge (and its files in staging) for a retry. Landing a DIFFERENT
   // branch next must not carry it along (2026-10-31: a tools-only landing nearly deployed saga-deep, whose tests had
   // failed): start again from main, staging included.
+  // (addons/gdev too: staging kept an old gdev control.gd, 2026-11-12.)
   // Staging = the repo as the TV runs it: addons/boot (services: QuitAfter, VrViewWatch, SafeApply...) and project.godot
   // (its Boot autoload) too, not just the deployed dirs (2026-10-31: staging had no Boot, so no bot ran with services).
   const stale = (await sh("git log --merges --first-parent --format=%s main..merge-arcade", join(GP, "wt-merge"))).out.split("\n").filter(Boolean);
   if (stale.some(s => !s.includes(`'${branch}'`))) {
     await sh("git merge --abort 2>/dev/null; git reset -q --hard main", join(GP, "wt-merge"));
-    await sh(`for d in ${DEPLOYED.join(" ")} tools addons/boot; do rsync -a --delete --exclude '*.import' --exclude '__pycache__' wt-merge/$d/ .duo-arena-stage/$d/; done; cp wt-merge/arcade.tscn .duo-arena-stage/; sed 's|^config/name="Duo Arena"$|config/name="Duo Arena Stage"|' wt-merge/project.godot > .duo-arena-stage/project.godot`, GP);
+    await sh(`for d in ${DEPLOYED.join(" ")} tools addons/boot addons/gdev; do rsync -a --delete --exclude '*.import' --exclude '__pycache__' wt-merge/$d/ .duo-arena-stage/$d/; done; cp wt-merge/arcade.tscn .duo-arena-stage/; sed 's|^config/name="Duo Arena"$|config/name="Duo Arena Stage"|' wt-merge/project.godot > .duo-arena-stage/project.godot`, GP);
   }
   // The branch's worktree must be fully committed: land merges the BRANCH, so anything uncommitted (an edit, or an
   // untracked .uid / .gd a re-import made) would silently stay behind (2026-11-11: marble-deep2's
@@ -719,7 +720,7 @@ export async function land(branch: string, genTests: string[], botId: string, ot
     retry = differing.length > 0 && differing.every(f => ours.has(f) || [...ours].some(o => o.startsWith(f + "/")));
   }
   if (drift.out.trim() && !retry) return { stop: "live!=stage", out: drift.out };
-  await sh(`for d in ${DEPLOYED.join(" ")} tools addons/boot; do rsync -a --delete --exclude '*.import' --exclude '__pycache__' wt-merge/$d/ .duo-arena-stage/$d/; done; cp wt-merge/arcade.tscn .duo-arena-stage/; sed 's|^config/name="Duo Arena"$|config/name="Duo Arena Stage"|' wt-merge/project.godot > .duo-arena-stage/project.godot`, GP);
+  await sh(`for d in ${DEPLOYED.join(" ")} tools addons/boot addons/gdev; do rsync -a --delete --exclude '*.import' --exclude '__pycache__' wt-merge/$d/ .duo-arena-stage/$d/; done; cp wt-merge/arcade.tscn .duo-arena-stage/; sed 's|^config/name="Duo Arena"$|config/name="Duo Arena Stage"|' wt-merge/project.godot > .duo-arena-stage/project.godot`, GP);
   const out: Record<string, string> = {};
   if (uidFix.note) out["uid-autocommit"] = uidFix.note;
   let ok = true;
