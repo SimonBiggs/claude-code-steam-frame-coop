@@ -530,6 +530,9 @@ func _connectivity(space: PhysicsDirectSpaceState3D, md: Dictionary, radius: flo
 		for i in range(1, spawns.size()):
 			if not _reach_near(spawns[i], 0.5, seen, free, x0, z0, nx, nz):
 				problems.append("spawn %s" % spawns[i])
+		for pk in md.get("pick_spots", []):  # the mode / gift pick orbs (deep.gd): a hider can stand under each
+			if not _reach_near(pk, 0.3, seen, free, x0, z0, nx, nz):
+				problems.append("pick orb spot %s" % pk)
 		for st in md.star_spots:
 			if not _reach_near(st, 0.6, seen, free, x0, z0, nx, nz):
 				problems.append("star spot %s" % st)
