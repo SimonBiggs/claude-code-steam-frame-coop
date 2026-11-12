@@ -55,6 +55,11 @@ var unplug_slot := -1
 var home_n := 0  ## buildings in the home town when the boat sailed
 var granted := 0  ## wishes the bot mayor granted on purpose
 var wish_skips := {}  ## "<wish id> <why>": wishes the bot mayor said it can't grant (said once each)
+## Second pass (deep.gd): the bots pick on the orbs (BOT_MODE / BOT_GIFT, else BRAVE and the SPEEDY CRANE first) and
+## drive out of told weather (TT_WEATHER_NOW: the weather comes soon).
+var pick_seen := {}  ## stage -> true: orbs this machine saw
+var pick_reached := {}  ## stage -> true: a bot got under / into its orb
+var weather_dodges := 0  ## times a bot driver steered out of or waited before told weather
 
 
 func _ready() -> void:
@@ -62,6 +67,8 @@ func _ready() -> void:
 	kit = BotKit.new()
 	add_child(kit)
 	BotKit.vr_host_plays()  # a networked VR host (not a flat one) without a headset: the fake VR mayor plays
+	if not OS.has_environment("TT_WEATHER_NOW"):
+		OS.set_environment("TT_WEATHER_NOW", "1")  # (the weather soon after the gift, so a 60 s bot sees it)
 	if not OS.has_environment("TT_KEEP_SAVE"):
 		Save.erase("tiny_town_tycoon")  # a fresh island each run (test saves only)
 	main = load("res://games/tiny_town_tycoon/main.tscn").instantiate()
@@ -365,6 +372,12 @@ func _ordered(cells: Array[Vector2i]) -> Array[Vector2i]:
 
 
 func _flat_mayor() -> void:
+	if _pick_row("island"):  # the orbs are up: hold the cursor under ours (no building meanwhile)
+		var at := _pick_target()
+		if at != Vector3.INF:
+			main.flat.cur = Vector2((at.x + Defs.HALF) / Defs.CELL, (at.z + Defs.HALF) / Defs.CELL)
+			pick_reached[main.picks.orbs.stage] = true
+		return
 	if step_t > 0.0:
 		return
 	var flat = main.flat
@@ -423,6 +436,12 @@ func _vr_mayor(delta: float) -> void:
 	else:
 		kit.vr_stick(rig, Vector2.ZERO, Vector2.ZERO)
 	var palm_off: Vector3 = rig.hand_point(VrRig.RIGHT) - rig.hand(VrRig.RIGHT).global_position
+	if vr_state == "" and _pick_row("vr"):  # the orbs are up in front of the mayor: the right hand goes into ours and stays
+		kit.vr_trigger(rig, 0.0)
+		var at := _pick_target()
+		if at != Vector3.INF and kit.vr_reach(rig, VrRig.RIGHT, at - palm_off, 1.2, delta):
+			pick_reached[main.picks.orbs.stage] = true
+		return
 	match vr_state:
 		"":
 			if simple and placed >= 6 and orbit_t >= 2.5 and _vr_toys(delta):
@@ -596,10 +615,10 @@ func _drive(slot: int, delta: float) -> void:
 	if v == null:
 		return
 	var card: Array = main.net.state_get("job%d" % slot, [])
-	if card.size() < 8:
+	if card.size() < 8 and not _pick_row("island"):
 		kit.slot_stick(main.party, slot, "left", Vector2.ZERO)
 		return
-	var target := Vector3(Defs.dq(int(card[4])), Defs.GROUND_Y, Defs.dq(int(card[5])))
+	var target := Vector3(Defs.dq(int(card[4])), Defs.GROUND_Y, Defs.dq(int(card[5]))) if card.size() >= 8 else v.position
 	var p: Dictionary = paths.get(slot, {"t": 0.0, "path": [] as Array[Vector2i], "i": 0, "goal": Vector3.INF})
 	p["t"] = float(p["t"]) - delta
 	if float(p["t"]) <= 0.0 or (p["goal"] as Vector3).distance_to(target) > 0.01:
@@ -608,6 +627,19 @@ func _drive(slot: int, delta: float) -> void:
 		p["path"] = main.town.find_path(Defs.world_cell(v.position), Defs.world_cell(target))
 		p["i"] = 0
 	paths[slot] = p
+	if _pick_row("island"):  # the orbs are up: drive under ours and stand still
+		var pt := _pick_target()
+		if pt != Vector3.INF:
+			target = Vector3(pt.x, Defs.GROUND_Y, pt.z)
+			if Vector2(target.x - v.position.x, target.z - v.position.z).length() < Defs.CELL * 0.2:
+				pick_reached[main.picks.orbs.stage] = true
+				kit.slot_stick(main.party, slot, "left", Vector2.ZERO)
+				return
+			if (p["goal"] as Vector3).distance_to(target) > 0.01:
+				p["t"] = 0.0
+				p["goal"] = target
+				p["path"] = main.town.find_path(Defs.world_cell(v.position), Defs.world_cell(target))
+				p["i"] = 0
 	var path: Array[Vector2i] = p["path"]
 	var aim := target
 	var i := int(p["i"])
@@ -619,6 +651,13 @@ func _drive(slot: int, delta: float) -> void:
 		aim = cp
 		break
 	p["i"] = i
+	var steer: Vector3 = main.hazards.steer(v.position, aim)  # told weather: out of it, or wait before it
+	if steer != Vector3.INF:
+		weather_dodges += 1
+		if Vector2(steer.x - v.position.x, steer.z - v.position.z).length() < 0.0005:
+			kit.slot_stick(main.party, slot, "left", Vector2.ZERO)
+			return
+		aim = steer
 	var d := aim - v.position
 	d.y = 0.0
 	var stick := Vector2.ZERO
@@ -839,7 +878,57 @@ func _report() -> String:
 		int(main.net.state_get("coins", 0)), int(main.net.state_get("tier", 0)), veh.size(), step, plan.size(), extra]
 
 
+## Are the pick orbs up in this row (every machine sees them through the "orbs" event)?
+func _pick_row(row: String) -> bool:
+	return main.picks != null and main.picks.showing() and String(main.picks.row) == row
+
+
+## The orb this machine's bots go for: BOT_MODE / BOT_GIFT, else BRAVE and the SPEEDY CRANE (then HAPPY PARK), else
+## the first. INF while none.
+func _pick_target() -> Vector3:
+	var ents: Array = main.picks.orbs.entries
+	var stage := String(main.picks.orbs.stage)
+	pick_seen[stage] = true
+	var want: Array = [OS.get_environment("BOT_MODE") if OS.has_environment("BOT_MODE") else "brave"] if stage == "mode" else \
+		[OS.get_environment("BOT_GIFT") if OS.has_environment("BOT_GIFT") else "crane", "park", "crane", "zoomy"]
+	var best := 0
+	for w in want:
+		for i in ents.size():
+			if String((ents[i] as Dictionary).get("id", "")) == String(w):
+				return _orb_at(i)
+	return _orb_at(best)
+
+
+func _orb_at(i: int) -> Vector3:
+	if i < 0 or i >= main.picks.spots.size():
+		return Vector3.INF
+	return main.picks.spots[i]
+
+
+## The second pass: the picks were taken (by a player when one could), the gift works, the weather was told.
+func _deep_checks() -> void:
+	var mode: String = main.net.mode
+	kit.info("deep: mode %s gift %s season %s islets %d, picks %s, weather seen %s, spun %d, dodges %d, reached %s" % [main.deep_mode,
+		main.deep_gift, main.deep_season, main.deep_islets, str(main.picks.history), str(main.hazards.seen), main.hazards.spun,
+		weather_dodges, str(pick_reached.keys())])
+	kit.assert_true(main.season_node.season != "", "%s: Benny's season dresses the garden (%s)" % [mode, main.deep_season])
+	kit.assert_true(main.deep_gift != "", "%s: a builder gift was picked (%s)" % [mode, main.deep_gift])
+	kit.assert_true(main.hazards.seen.size() >= 1, "%s: Benny's weather was told on the island (%s)" % [mode, str(main.hazards.seen)])
+	if mode == "client":
+		kit.assert_true(pick_seen.has("mode") or pick_seen.has("gift"), "TV machine: the pick orbs showed here")
+		return
+	var stages := {}
+	for h in main.picks.history:
+		stages[String(h[0])] = int(h[2])
+	kit.assert_true(stages.has("mode") and stages.has("gift"), "%s: the mode and the gift were picked on the orbs (%s)" % [mode, str(main.picks.history)])
+	var someone: bool = main.vr_rig != null or main.flat != null or main._drivers() > 0
+	if someone:
+		kit.assert_true(int(stages.get("mode", -1)) >= 0, "%s: a player took the mode orb (not the time-out)" % mode)
+		kit.assert_true(int(stages.get("gift", -1)) >= 0, "%s: a player took a gift orb (not the time-out)" % mode)
+
+
 func _checks() -> void:
+	_deep_checks()
 	var mode: String = main.net.mode
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
 	if not host:

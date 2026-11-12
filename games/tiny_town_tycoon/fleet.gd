@@ -142,6 +142,7 @@ func tick(delta: float, playing: bool) -> void:
 		if bool(v.get("mirror")):
 			v.call("mirror_update", delta)
 			continue
+		v.set("wx", main.deep_speed(v.position))  # the day's gift and the weather here (deep.gd)
 		if is_ai(int(vid)):
 			if host:
 				_ai(v, delta, playing)
@@ -194,12 +195,26 @@ func _ai(v: Node3D, delta: float, playing: bool) -> void:
 		# no job: potter back towards the town hall and wait there
 		var home := spawn_point(int(v.get("vid")))
 		if v.position.distance_to(home) > Defs.CELL * 1.5 and playing:
-			v.call("ai_drive", home, delta, town)
+			_ai_go(v, home, delta)
+		elif playing and main.hazards != null and main.hazards.steer(v.position, v.position) != Vector3.INF:
+			_ai_go(v, v.position, delta)  # parked in told weather: out of it
 		else:
 			v.call("idle", delta, town)
 		return
 	var j: Dictionary = jobs.jobs[jid]
-	v.call("ai_drive", jobs.target_of(j), delta, town)
+	_ai_go(v, jobs.target_of(j), delta)
+
+
+## An AI driver heads for goal, careful of told weather (hazards.gd steer): waits before it, drives out of it.
+func _ai_go(v: Node3D, goal: Vector3, delta: float) -> void:
+	var s: Vector3 = main.hazards.steer(v.position, goal) if main.hazards != null else Vector3.INF
+	if s == Vector3.INF:
+		v.call("ai_drive", goal, delta, town)
+	elif Vector2(s.x - v.position.x, s.z - v.position.z).length() < 0.0005:
+		v.call("idle", delta, town)  # told weather on the way: wait for it to pass
+	else:
+		v.call("drive", Vector2(s.x - v.position.x, s.z - v.position.z).normalized(), delta, town)  # drive out of it!
+		v.set("repath_t", 0.0)
 
 
 func _spray_target(v: Node3D) -> void:
