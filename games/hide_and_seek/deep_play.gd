@@ -160,14 +160,17 @@ func begin_round() -> bool:
 	return true
 
 
-## The seeker turns to the orbs (the flat camera and the VR rig alike).
+## Everyone turns to the orbs (the hiders' cameras, the flat seeker and the VR rig alike).
 func _face_orbs() -> void:
-	var s = main.players[0]
 	var spots := Deep.pick_spots(main.md())
-	if not s.active or spots.size() < 2:
+	if spots.size() < 2:
 		return
-	var d: Vector3 = (spots[1] as Vector3) - s.global_position
-	main._place_player(s, main.spawn_pos(0), atan2(-d.x, -d.z))
+	for p in main.players:
+		if not p.active:
+			continue
+		var at: Vector3 = main.spawn_pos(p.index)
+		var d: Vector3 = (spots[1] as Vector3) - at
+		main._place_player(p, at, atan2(-d.x, -d.z))
 
 
 func can_pick(p) -> bool:
@@ -516,7 +519,7 @@ func _show_orbs() -> void:
 				var g := Deep.gift(String(id))
 				entries.append({"id": id, "name": String(g.name), "pic": String(g.pic), "color": g.color})
 		var spots := Deep.pick_spots(main.md())
-		orbs.show_orbs(stage, entries, Vector3.ZERO, Deep.PICK_GAP, Deep.PICK_Y, {"at": spots, "scale": 0.55, "touch": Deep.PICK_TOUCH,
+		orbs.show_orbs(stage, entries, Vector3.ZERO, Deep.PICK_GAP, Deep.PICK_Y, {"at": spots, "scale": 0.45, "touch": Deep.PICK_TOUCH,
 			"pop": true, "two_lines": true, "label_y": -0.9, "for_others": stage == "gift" and gift_side == "hider"})
 	var cols := {}
 	for p in main.players:

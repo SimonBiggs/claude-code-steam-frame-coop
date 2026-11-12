@@ -45,8 +45,8 @@ const BUBBLE_GRACE := 2.5  # BUBBLE: a popped bubble gives this long to run befo
 const KINDS: Array[String] = ["hoover", "pepper"]
 const KIND_PICS := {"hoover": "hoover", "pepper": "pepper"}
 const KIND_NAMES := {"hoover": "RUMBLE!", "pepper": "PEPPER!"}
-const HOOVER_COLOR := Color(0.25, 0.85, 1.0)  # Rumble's band: sky blue
-const PEPPER_COLOR := Color(1.0, 0.45, 0.2)  # the pepper ring: orange
+const HOOVER_COLOR := Color(0.15, 0.3, 0.95)  # Rumble's band: deep blue (palette.gd: seen on every floor)
+const PEPPER_COLOR := Color(0.9, 0.12, 0.5)  # the pepper ring: berry pink
 const SURPRISE_FROM := 2  # no surprise in round 1
 const FIRST_AT := 18.0  # seconds into the seek before the first tell
 const END_GAP := 12.0  # nothing goes off in the last seconds
@@ -62,8 +62,8 @@ const PEPPER_R := 1.6
 const PEPPER_OFF := 0.6  # the ring's middle is up to this far from the hider (not a bullseye on someone)
 
 ## Pick orbs over the counting room's floor: a row this far in front of the counting spot (houses), or the map's own.
-const PICK_ROWS: Array[float] = [1.3, 1.6, 1.15, 1.9]  # houses: the first row (and shift away from the jail) that's clear
-const PICK_SHIFTS: Array[float] = [0.0, 0.6, 1.2]
+const PICK_ROWS: Array[float] = [1.9, 1.7, 1.5, 1.3, 2.1]  # houses: the first row (and shift away from the jail) that's clear
+const PICK_SHIFTS: Array[float] = [0.0, 0.6, 1.2, -0.6]
 const PICK_GAP := 1.3
 const PICK_Y := 1.25  # the ball's middle over the floor
 const PICK_TOUCH := 0.6  # standing this close under one (feet)
