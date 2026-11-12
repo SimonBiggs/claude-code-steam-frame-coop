@@ -256,7 +256,7 @@ class StoryCardPics:
 		s.texture = vp.get_texture()
 		s.pixel_size = 0.3 / PX
 		s.render_priority = UiKit.VR_PRIO_TEXT
-		s.no_depth_test = true  # like the panel it sits on, or a leaf in front hides the picture but not the card
+		s.no_depth_test = true  # vr-depth-ok: like the panel it sits on, or a leaf in front hides the picture but not the card
 		s.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var w: float = card.get("width") if card.get("width") != null else 1.0
 		s.layers = card.get("vis_layers") if card.get("vis_layers") != null else UiKit.VR_LAYER
