@@ -7,10 +7,14 @@ extends Node
 ## Local:     godot --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/dodge_ball_bot.tscn
 ## Networked: DUO_PORT=81xx DUO_HOST=1 ... & DUO_PORT=81xx DUO_JOIN=127.0.0.1 ... (same scene, real time)
 ## Flat host: add DUO_FLAT_HOST=1 to the host (no VR: one bot pad plays slot 0 on the host).
+## Second pass (deep.gd): the runners walk under a pick orb and stand there (the VR giant alone reaches into one), and
+## run out of TumTum's warned tricks (DB_TRICKS_NOW is set: tricks from a round's first seconds, round 1 too;
+## BOT_NO_TRICKS=1 for none).
 
 const BotKit := preload("res://tests/bot_kit.gd")
 const Telemetry := preload("res://core/telemetry.gd")
 const Seeded := preload("res://core/seeded.gd")
+const Deep := preload("res://games/dodge_ball/deep.gd")
 
 var kit: BotKit
 var main: Node
@@ -27,12 +31,17 @@ var max_giant := 0
 var cpu_throws := 0  # most CPU giant throws seen in one round (host / local only: round_stats)
 var inside_cushion := false
 var start_unix := 0.0
+var saw_orbs := false
+var saw_vr_orbs := false
+var dodged := 0  # times a bot runner ran out of a told trick
 
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	kit = BotKit.new()
 	add_child(kit)
+	if not OS.has_environment("BOT_NO_TRICKS"):
+		OS.set_environment("DB_TRICKS_NOW", "1")
 	main = load("res://games/dodge_ball/main.tscn").instantiate()
 	main.set("round_time", 18.0)
 	main.set("results_wait", 6.0)
@@ -57,10 +66,10 @@ func _ready() -> void:
 		kit.drop_in_out(main.party, t0 + 9.0, 3.0, func(slot: int) -> bool:
 			return main.avatars.has(slot) and main.huds.has(slot) and main.cams.has(slot) and main.throw_prompts.has(slot))
 	if host:
-		kit.at(38.0, "host checks", _checks)
-		kit.at(42.0, "finish", kit.finish)
+		kit.at(48.0, "host checks", _checks)
+		kit.at(52.0, "finish", kit.finish)
 	else:
-		kit.at(31.0 if client else 34.0, "finish", func() -> void:
+		kit.at(42.0 if client else 44.0, "finish", func() -> void:
 			_checks()
 			kit.finish())
 	kit.every(2.0, _report)
@@ -103,6 +112,9 @@ func _physics_process(delta: float) -> void:
 	max_giant = maxi(max_giant, int(main.net.state_get("giant_score", 0)))
 	if main.round_stats is Dictionary:
 		cpu_throws = maxi(cpu_throws, int(main.round_stats.get("cpu_throws", 0)))
+	if main.picks != null and main.picks.showing():
+		saw_orbs = true
+		saw_vr_orbs = saw_vr_orbs or bool(main.picks.vr_row)
 	for slot in main.party.local_slots():
 		_steer(slot, delta)
 	if main.vr_rig != null:
@@ -115,6 +127,23 @@ func _steer(slot: int, delta: float) -> void:
 		return
 	var a: Node3D = main.avatars[slot]
 	var v := Vector2.ZERO
+	var here := Vector2(a.position.x, a.position.z)
+	# Pick orbs over the court: walk under one (each bot its own) and stand there.
+	if main.picks.showing() and not main.picks.vr_row and not main.picks.spots.is_empty():
+		var sp: Vector3 = main.picks.spots[slot % main.picks.spots.size()]
+		kit.slot_stick(main.party, slot, "left", _toward(slot, a.position, Vector3(sp.x, 0.0, sp.z), 0.25))
+		return
+	# A trick told: run out of it.
+	for e in main.hazards.tells_now():
+		if Deep.inside(e, here, Deep.HIT_PAD + Deep.ESCAPE_PAD):
+			var q := Deep.escape(main.rd, e, here)
+			if q != Vector2.INF:
+				if float(hold_t.get("dodge%d" % slot, -1.0)) < 0.0:
+					dodged += 1
+				hold_t["dodge%d" % slot] = 1.0
+				kit.slot_stick(main.party, slot, "left", _toward(slot, a.position, Vector3(q.x, 0.0, q.y), 0.1))
+				return
+	hold_t["dodge%d" % slot] = -1.0
 	if main._holding(slot) >= 0 or _client_holding(slot):
 		hold_t[slot] = float(hold_t.get(slot, 0.0)) + delta
 		if float(hold_t[slot]) > 0.6:
@@ -135,6 +164,21 @@ func _steer(slot: int, delta: float) -> void:
 				var r := Vector3(-f.z, 0.0, f.x)
 				v = Vector2(d.dot(r), -d.dot(f))
 	kit.slot_stick(main.party, slot, "left", v)
+
+
+## The stick that walks runner slot from p to goal (zero when within near).
+func _toward(slot: int, p: Vector3, goal: Vector3, near: float) -> Vector2:
+	var d := goal - p
+	d.y = 0.0
+	if d.length() < near:
+		return Vector2.ZERO
+	d = d.normalized()
+	var cam: Camera3D = main.split.active_camera(slot)
+	var f := -cam.global_basis.z
+	f.y = 0.0
+	f = f.normalized()
+	var r := Vector3(-f.z, 0.0, f.x)
+	return Vector2(d.dot(r), -d.dot(f))
 
 
 func _client_holding(slot: int) -> bool:
@@ -167,6 +211,18 @@ func _drive_vr(delta: float) -> void:
 	rig.camera.basis = Basis()
 	rig.hand_l.position = Vector3(-0.3, 1.0, -0.3)
 	vr_t += delta
+	if main.picks.showing() and main.picks.vr_row:  # the small orbs in front of the giant: reach into one and stay
+		kit.vr_trigger(rig, 0.0)
+		var op: Vector3 = main.picks.orb_position(0)
+		if op != Vector3.INF and vr_t > 1.0:
+			kit.vr_reach(rig, 1, op, 1.2, delta)
+		vr_phase = "reach"
+		return
+	if main.picks.showing():
+		kit.vr_trigger(rig, 0.0)
+		vr_phase = "reach"
+		vr_t = 0.0
+		return
 	match vr_phase:
 		"reach":
 			kit.vr_trigger(rig, 0.0)
@@ -257,6 +313,7 @@ func _checks() -> void:
 func _story_checks(mode: String) -> void:
 	var rd: Dictionary = main.rd
 	kit.assert_true(not rd.is_empty(), "%s: this round's park is built" % mode)
+	_deep_checks(mode)
 	kit.assert_eq(int(rd.get("code", -1)), int(main.net.state_get("court", -2)), "%s: the round matches the host's code" % mode)
 	kit.assert_eq(main.world.cushions.size(), (rd.get("cushions", []) as Array).size(), "%s: every cushion is drawn" % mode)
 	kit.assert_true(not inside_cushion, "%s: no runner ever stood inside a cushion" % mode)
@@ -294,3 +351,30 @@ func _watch_cushions() -> String:
 				inside_cushion = true
 				return "runner %d is inside a cushion at %s" % [int(id), str(a.position)]
 	return ""
+
+
+## Second pass: picks, tricks, seasons, toys (deep.gd).
+func _deep_checks(mode: String) -> void:
+	kit.assert_true(saw_orbs, "%s: the pick orbs showed" % mode)
+	kit.assert_true(main.season_node != null and main.season_node.season != "", "%s: the park is dressed for the season (%s)" % [mode, main.season])
+	kit.assert_true(main.toys_node != null and main.toys_node.count >= 0, "%s: TumTum's toys are drawn (%d)" % [mode, main.toys_node.count])
+	kit.assert_true(Deep.MODES.has(main.mode), "%s: a mode is set (%s)" % [mode, main.mode])
+	if not OS.has_environment("BOT_NO_TRICKS"):
+		kit.assert_true(not main.hazards.seen.is_empty(), "%s: TumTum's tricks were told %s" % [mode, str(main.hazards.seen)])
+	kit.info("%s: mode %s, gift %s, season %s, tricks seen %s, bots ran out of %d tells, vr orbs %s" % [mode, main.mode, main.gift,
+		main.season, str(main.hazards.seen), dodged, str(saw_vr_orbs)])
+	if mode == "client":
+		return
+	var stages: Array = main.picks.history.map(func(h: Array) -> String: return String(h[0]))
+	kit.assert_true(stages.has("mode"), "%s: the mode was picked %s" % [mode, str(main.picks.history)])
+	kit.assert_true(stages.has("gift"), "%s: a gift was picked before round 2 %s" % [mode, str(main.picks.history)])
+	var people: bool = main._people() > 0
+	var by_someone := false
+	for h in main.picks.history:
+		if int(h[2]) >= 0:
+			by_someone = true
+	if people or main.vr_rig != null:
+		kit.assert_true(by_someone, "%s: a player really picked an orb (not just the wait) %s" % [mode, str(main.picks.history)])
+	if main.vr_rig != null and not people:
+		kit.assert_true(saw_vr_orbs, "%s: VR alone: the orbs float in front of the giant" % mode)
+	kit.assert_true(String(main.save.data.mode) != "", "%s: the mode is saved" % mode)
