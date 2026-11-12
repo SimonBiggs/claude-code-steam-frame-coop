@@ -545,6 +545,7 @@ func _features() -> void:
 func _vcol_mat(unshaded: bool) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.vertex_color_use_as_albedo = true
+	m.vertex_color_is_srgb = true
 	m.roughness = 0.9
 	m.cull_mode = BaseMaterial3D.CULL_DISABLED
 	if unshaded:
@@ -986,6 +987,7 @@ func _build_scenery() -> void:
 		_mm(tm, main.make_material(Color(0.5, 0.35, 0.22), 0.0), trunk_x)
 		var cmat := StandardMaterial3D.new()
 		cmat.vertex_color_use_as_albedo = true
+		cmat.vertex_color_is_srgb = true
 		cmat.roughness = 0.8
 		if is_night():
 			cmat.emission_enabled = true
@@ -1021,6 +1023,7 @@ func _build_scenery() -> void:
 		hill_c.append(hc)
 	var hmat := StandardMaterial3D.new()
 	hmat.vertex_color_use_as_albedo = true
+	hmat.vertex_color_is_srgb = true
 	hmat.roughness = 0.9
 	if is_night():
 		hmat.emission_enabled = true
@@ -1088,6 +1091,7 @@ func _build_crowd() -> void:
 		s += 1.6
 	var fmat := StandardMaterial3D.new()
 	fmat.vertex_color_use_as_albedo = true
+	fmat.vertex_color_is_srgb = true
 	fmat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	if is_night():
 		fmat.emission_enabled = true
@@ -1188,6 +1192,7 @@ func _build_theme() -> void:
 			_mm(main.cyl_mesh(0.06, 0.08, 2.6, 6), main.make_material(Color(0.2, 0.2, 0.25), 0.0), posts)
 			var gm := StandardMaterial3D.new()
 			gm.vertex_color_use_as_albedo = true
+			gm.vertex_color_is_srgb = true
 			gm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 			_mm(main.sphere_mesh(0.22), gm, bulbs, bc)
 			var stems: Array[Transform3D] = []
@@ -1206,6 +1211,7 @@ func _build_theme() -> void:
 				snowmen.append(Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * rng.randf_range(0.9, 1.3)), p + Vector3(0, 0.1, 0)))
 			var sm := StandardMaterial3D.new()
 			sm.vertex_color_use_as_albedo = true
+			sm.vertex_color_is_srgb = true
 			sm.roughness = 0.8
 			_mm(main.snowman_mesh(), sm, snowmen)
 			snow = CPUParticles3D.new()
@@ -1232,6 +1238,7 @@ func _build_theme() -> void:
 func _vc(glow: float) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.vertex_color_use_as_albedo = true
+	m.vertex_color_is_srgb = true
 	m.roughness = 0.5
 	if glow > 0.0:
 		m.emission_enabled = true

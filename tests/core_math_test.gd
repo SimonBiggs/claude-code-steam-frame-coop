@@ -1,6 +1,6 @@
 extends SceneTree
 ## Regression checks for core helpers that guard against known bug patterns (run headless:
-## godot --headless --path . -s res://tests/core_math_test.gd). Prints CORE MATH: PASS / FAIL lines.
+## godot-test --headless --path . -s res://tests/core_math_test.gd). Prints CORE MATH: PASS / FAIL lines.
 const UiKit := preload("res://core/ui_kit.gd")
 
 func _initialize() -> void:

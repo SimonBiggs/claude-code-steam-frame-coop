@@ -5,7 +5,7 @@ extends Node
 ## into the chest. BOT_PLAYERS=n TV players (default 2).
 ## Second pass (deep.gd): TV bots run into a pick orb (mode, island, Peg's tool), the giant alone touches one with
 ## a glove; checks the mode, the tool, warned events on every machine, the season's dress and the museum.
-## Local:     godot --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/treasure_dig_bot.tscn
+## Local:     godot-test --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/treasure_dig_bot.tscn
 ## Networked: DUO_PORT=81xx DUO_HOST=1 ... & DUO_PORT=81xx DUO_JOIN=127.0.0.1 ... (same scene, real time)
 ## Flat host: add DUO_FLAT_HOST=1 to the host (no VR: one bot pad plays slot 0 on the host).
 const UiKit := preload("res://core/ui_kit.gd")

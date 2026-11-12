@@ -24,6 +24,7 @@ const Seeded := preload("res://core/seeded.gd")
 const World := preload("res://games/elemental_bender/world.gd")
 const Arenas := preload("res://games/elemental_bender/arenas.gd")
 const Bosses := preload("res://games/elemental_bender/bosses.gd")
+const Deep := preload("res://games/elemental_bender/deep.gd")
 
 const GAME_ID := "elemental_bender"
 const FRONT := 1.5 * PI  # (cos a, 0, sin a) = -z: where the temple faces (the practice dummy, the VR master's view)
@@ -135,12 +136,15 @@ static func gates(temple_seed: int, n: int, arena: String = "temple") -> Array:
 
 
 ## The whole wave plan for a party of `players` fighters. `fast`: the short test waves (EB_FAST).
-static func plan(temple_seed: int, n: int, players: int = 1, fast: bool = false, arena: String = "temple") -> Dictionary:
+## mode: the team's GENTLE / BRAVE / HARD (deep.gd MODES: how many raiders, how tough, how fast).
+static func plan(temple_seed: int, n: int, players: int = 1, fast: bool = false, arena: String = "temple", mode: String = "brave") -> Dictionary:
 	n = maxi(1, n)
 	players = clampi(players, 1, MAX_PLAYERS)
 	var boss := is_boss(n)
+	var m := Deep.mode(mode)
 	var p := {"n": n, "players": players, "boss": boss, "gates": gates(temple_seed, n, arena), "arena": arena,
-		"aseed": Arenas.layout_seed(temple_seed, arena), "boss_kind": String(Arenas.info(arena).boss) if boss else ""}
+		"aseed": Arenas.layout_seed(temple_seed, arena), "boss_kind": String(Arenas.info(arena).boss) if boss else "",
+		"mode": Deep.mode_id(mode), "hp": float(m.hp), "speed": float(m.speed), "kid": float(m.kid)}
 	var rng := Seeded.rng(wave_seed(temple_seed, n), "raiders%d" % players)
 	# The elements: a fixed teaching order per temple (the first two waves bring two different ones).
 	var order := Seeded.shuffled(Seeded.rng(temple_seed, "elements"), [0, 1, 2, 3])
@@ -157,7 +161,7 @@ static func plan(temple_seed: int, n: int, players: int = 1, fast: bool = false,
 		bo.append(e)
 	var fixed := int(Bosses.info(String(p.boss_kind)).element) if boss else -1
 	p.boss_order = ([fixed] if fixed >= 0 else bo) if boss else []
-	var count := raider_count(n, players)
+	var count := maxi(players + (1 if boss else 0), roundi(raider_count(n, players) * float(m.count)))
 	if fast:
 		count = ((2 if boss else 2 + int(n / 2.0)) + players - 1)
 	var ranged_p := 0.0 if n <= 2 else minf(0.25 + n * 0.04, 0.6)
@@ -207,7 +211,7 @@ static func check(p: Dictionary) -> Array[String]:
 
 		if i == 0 and n <= 2 and absf(angle_difference(atan2(g.z, g.x), FRONT)) > FRONT_SIDE + 0.001:
 			why.append("wave %d: the portal at (%.0f, %.0f) is not in front of the temple" % [n, g.x, g.z])
-		var walk := (Vector2(g.x, g.z).length() - JITTER - TEMPLE_R) / raider_speed(n, false)
+		var walk := (Vector2(g.x, g.z).length() - JITTER - TEMPLE_R) / (raider_speed(n, false) * float(p.get("speed", 1.0)))
 		if walk < (MIN_WALK if n <= 2 else MIN_WALK_LATER):
 			why.append("wave %d: a portal only %.1f s from the temple" % [n, walk])
 	var pal: Array = p.palette
@@ -274,12 +278,12 @@ static func kid_sim(p: Dictionary) -> Dictionary:
 		var s: Array = p.spawns[i]
 		t += float(s[3])
 		var boss := bool(p.boss) and i == 0
-		var hp := raider_hp(n, players, boss)
+		var hp := raider_hp(n, players, boss) * float(p.get("hp", 1.0))
 		var best := 0
 		for h in players:
 			if float(free[h]) < float(free[best]):
 				best = h
-		var dps := kid_dps(n)
+		var dps := kid_dps(n) * float(p.get("kid", 1.0))
 		var fin := maxf(float(free[best]), t + KID_REACH) + hp / dps
 		if boss:  # the whole team on the General (he doesn't count against the crowd)
 			fin = t + KID_REACH + hp / (dps * players)

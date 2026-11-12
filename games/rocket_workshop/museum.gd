@@ -31,6 +31,7 @@ func _ready() -> void:
 	pmi.multimesh = plinths
 	var pm := StandardMaterial3D.new()
 	pm.vertex_color_use_as_albedo = true
+	pm.vertex_color_is_srgb = true
 	pm.roughness = 0.6
 	pmi.material_override = pm
 	add_child(pmi)

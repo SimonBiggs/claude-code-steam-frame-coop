@@ -5,7 +5,7 @@ extends Node
 ## and pokes the spinner, pads, doors, flag and a runner with its gloves.
 ## Design check: every course gets finished on foot (not only by the hop-in), and the show ends
 ## with the results; the giant's practice target gets hit.
-## Local:     godot --headless --path . --fixed-fps 60 --quit-after 15000 res://tests/obstacle_rush_bot.tscn
+## Local:     godot-test --headless --path . --fixed-fps 60 --quit-after 15000 res://tests/obstacle_rush_bot.tscn
 ## Networked: DUO_PORT=83xx DUO_HOST=1 BOT_VR=1 ... & DUO_PORT=83xx DUO_JOIN=127.0.0.1 ... (real time)
 ## OR_COURSE=n starts at lesson n (0..3). OR_SHOWS=n plays as if n shows were done (default 0: the lessons,
 ## then the next show is seeded; OR_SHOWS=3 starts on seeded courses at tier 2). BOT_NO_DAILY skips TODAY'S

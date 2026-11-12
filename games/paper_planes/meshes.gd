@@ -43,6 +43,7 @@ static func plane_material(tint: Color) -> StandardMaterial3D:
 	return ResCache.get_or_make("pp_plane_mat_%s" % tint.to_html(false), func() -> StandardMaterial3D:
 		var m := StandardMaterial3D.new()
 		m.vertex_color_use_as_albedo = true
+		m.vertex_color_is_srgb = true
 		m.albedo_color = tint
 		m.cull_mode = BaseMaterial3D.CULL_DISABLED
 		m.roughness = 0.9

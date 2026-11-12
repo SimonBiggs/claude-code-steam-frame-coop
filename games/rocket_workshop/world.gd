@@ -199,6 +199,7 @@ static func _bunting(main: Node3D) -> void:
 	mmi.multimesh = mm
 	var m := StandardMaterial3D.new()
 	m.vertex_color_use_as_albedo = true
+	m.vertex_color_is_srgb = true
 	m.cull_mode = BaseMaterial3D.CULL_DISABLED
 	mmi.material_override = m
 	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -288,6 +289,7 @@ static func _mm(main: Node3D, mesh: Mesh, xfs: Array, colors: Array, mat: Materi
 static func _vertex_mat(glow: float) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.vertex_color_use_as_albedo = true
+	m.vertex_color_is_srgb = true
 	m.roughness = 0.6
 	if glow > 0.0:
 		m.emission_enabled = true

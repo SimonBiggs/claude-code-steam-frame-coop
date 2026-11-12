@@ -1475,6 +1475,7 @@ func _confetti(pos: Vector3, amount: int, life: float) -> void:
 		qm.size = Vector2(0.08, 0.05)
 		var m := StandardMaterial3D.new()
 		m.vertex_color_use_as_albedo = true
+		m.vertex_color_is_srgb = true
 		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		m.cull_mode = BaseMaterial3D.CULL_DISABLED
 		qm.material = m

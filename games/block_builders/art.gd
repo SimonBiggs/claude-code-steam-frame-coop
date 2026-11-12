@@ -38,6 +38,7 @@ static func mat(color: Color, glow: float = 0.0, rough: float = 0.8) -> Standard
 static func vcol_mat(rough: float = 0.75) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.vertex_color_use_as_albedo = true
+	m.vertex_color_is_srgb = true
 	m.roughness = rough
 	return m
 
@@ -331,6 +332,7 @@ static func rainbow_mesh(radius: float, band: float) -> ArrayMesh:
 	var m := st.commit()
 	var mt := StandardMaterial3D.new()
 	mt.vertex_color_use_as_albedo = true
+	mt.vertex_color_is_srgb = true
 	mt.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mt.cull_mode = BaseMaterial3D.CULL_DISABLED
 	mt.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -427,6 +429,7 @@ static func prop_mesh(kind: String, tint: Color) -> ArrayMesh:
 	if kind == "crystal" or kind == "bulb":
 		var gm := StandardMaterial3D.new()
 		gm.vertex_color_use_as_albedo = true
+		gm.vertex_color_is_srgb = true
 		gm.emission_enabled = true
 		gm.emission = tint
 		gm.emission_energy_multiplier = 1.6

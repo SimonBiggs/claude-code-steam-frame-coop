@@ -237,6 +237,7 @@ static func _space(t) -> void:
 	mi.mesh = st.commit()
 	var m := StandardMaterial3D.new()
 	m.vertex_color_use_as_albedo = true
+	m.vertex_color_is_srgb = true
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mi.material_override = m
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -257,6 +258,7 @@ static func _space(t) -> void:
 	pmi.mesh = ps.commit()
 	var pm := StandardMaterial3D.new()
 	pm.vertex_color_use_as_albedo = true
+	pm.vertex_color_is_srgb = true
 	pm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	pm.disable_fog = true
 	pmi.material_override = pm

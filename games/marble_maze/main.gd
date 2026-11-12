@@ -1638,6 +1638,7 @@ func _build_world_fx() -> void:
 	pt.color_initial_ramp = g
 	var mat := StandardMaterial3D.new()
 	mat.vertex_color_use_as_albedo = true
+	mat.vertex_color_is_srgb = true
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED if fx == "stars" else BaseMaterial3D.SHADING_MODE_PER_PIXEL
 	mesh.material = mat
 	pt.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

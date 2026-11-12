@@ -2,7 +2,7 @@ extends Node
 ## Headless bot for games/tower_stack. TV bots push blocks onto the pad (and one climbs the tower);
 ## BOT_VR=1 adds a fake VR giant that grabs boinged-up blocks and stacks them on the stage.
 ## Without VR the helper crane does the stacking.
-## Local:      godot --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/tower_stack_bot.tscn
+## Local:      godot-test --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/tower_stack_bot.tscn
 ## Networked:  DUO_PORT=8137 DUO_HOST=1 ... & DUO_PORT=8137 DUO_JOIN=127.0.0.1 ... (same scene, real time)
 ## Flat host: add DUO_FLAT_HOST=1 to the host (no VR: one bot pad plays slot 0 on the host).
 ## Second pass: every special block is open (try_open) and TODAY'S TOWER is off (daily_ok) so the builder pick
@@ -41,11 +41,10 @@ func _ready() -> void:
 	# One flat player alone (no VR giant, nobody else) pushes blocks slowly: a longer round, still under the real 180 s,
 	# so the crane can finish a tower for them before the lone check's end (120 s).
 	var lone := BotKit.bot_players(2, 6) == 1 and not OS.has_environment("DUO_HOST") and not OS.has_environment("DUO_JOIN") and not OS.has_environment("BOT_VR")
-	# Local runs: 50 s (round 2 still starts by ~53 s, before the 58 s finish). 42 s left no room for one toppled
-	# stack, so about 1 local run in 30 never finished a tower (2026-11-12). Networked runs keep 42 s: the client
-	# finishes at 53 s and must see round 2.
-	var netted := OS.has_environment("DUO_HOST") or OS.has_environment("DUO_JOIN")
-	main.set("round_time", 95.0 if lone else (42.0 if netted else 50.0))
+	# 50 s rounds, local and networked (round 2 still starts by ~53 s). 42 s left no room for one toppled stack, so
+	# about 1 local run in 30 never finished a tower (2026-11-12); networked runs had the same 42 s and the same risk,
+	# so their checks moved 8 s later too (client finish 61 s, host checks 64 s, host finish 68 s).
+	main.set("round_time", 95.0 if lone else 50.0)
 	main.set("daily_ok", false)
 	main.set("try_open", 7)  # towergen OPEN_ALL: special blocks from job 2 on
 	add_child(main)
@@ -69,10 +68,10 @@ func _ready() -> void:
 	kit.drop_in_out(main.party, t0 + 9.0, 3.0, func(slot: int) -> bool:
 		return main.avatars.has(slot) and main.huds.has(slot) and main.cams.has(slot))
 	if host:
-		kit.at(56.0, "host checks", _checks)
-		kit.at(60.0, "finish", kit.finish)
+		kit.at(64.0, "host checks", _checks)
+		kit.at(68.0, "finish", kit.finish)
 	else:
-		kit.at(53.0 if client else (110.0 if lone else 58.0), "finish", func() -> void:
+		kit.at(61.0 if client else (110.0 if lone else 58.0), "finish", func() -> void:
 			_checks()
 			kit.finish())
 	if not OS.has_environment("DUO_JOIN"):

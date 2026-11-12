@@ -581,7 +581,7 @@ export async function guard(game: string, project = STAGE) {
 /** Repo-wide guard tests every landing runs (2026-11-11: gen_budget_test failed on main unnoticed because no landing
  *  ran it; each of these took < 45 s on all of main then). lan_update_test stays out: it compiles a deliberately broken
  *  script, whose expected "Parse Error" would read as a SCRIPT ERROR here. */
-export const REPO_GUARDS = ["gen_budget_test", "who_test", "who_net_test", "classic_seats_test", "menu_test", "party_stale_press_test", "bg_gen_test", "engine_sys_test", "engine_ui_test", "pause_banner_test", "contrast_test", "vr_wrist_menu_test", "bot_phase_watch_test", "season_override_test"];
+export const REPO_GUARDS = ["gen_budget_test", "who_test", "who_net_test", "classic_seats_test", "menu_test", "party_stale_press_test", "bg_gen_test", "engine_sys_test", "engine_ui_test", "pause_banner_test", "contrast_test", "vr_wrist_menu_test", "bot_phase_watch_test", "season_override_test", "vertex_color_srgb_test"];
 
 /** Lone flat player (2026-11-11, cove-deep2: a lone Deck gunner ran out of cannonballs, a solo VR host stayed in
  *  practice forever): ONE Deck player, no VR, nobody else (DUO_SOLO=1 DUO_MACHINE_KIND=deck BOT_PLAYERS=1), the
@@ -646,6 +646,38 @@ export async function branchDir(branch: string): Promise<string> {
   return join(GP, `wt-${branch}`);
 }
 
+/** Pre-land step: every tracked .gd on the branch gets its .uid committed ON THE BRANCH (agents kept forgetting new
+ *  .uid files: marble-deep2, paint-deep2, 2026-11-11/12). Runs the import in the branch's worktree when a .uid is
+ *  missing on disk, then commits exactly those .uid paths (never the agent's other work) with a visible log line.
+ *  Returns {stop} (land keeps refusing) if the import fails or a .uid is still missing afterwards. */
+export async function commitMissingUids(bdir: string, branch: string): Promise<{ stop?: string, out?: string, note?: string }> {
+  const say = (t: string) => { console.log(t); (globalThis as any).send?.(`land ${branch}`, t); };
+  // sh() runs a missing cwd in HOME (removed worktrees): never import or commit there.
+  if (!(await stat(join(bdir, ".git")).then(() => true, () => false))) return { stop: "missing-uid", out: `${bdir}: not a git worktree, so its .uid files can't be checked (is the branch checked out somewhere else?)` };
+  const listMissing = async () => (await sh(`git ls-files '*.gd' | while read f; do [ -n "$(git ls-files "$f.uid")" ] || echo "$f"; done`, bdir)).out.split("\n").filter(Boolean);
+  let missing = await listMissing();
+  if (!missing.length) return {};
+  const onDisk = async (f: string) => stat(join(bdir, f + ".uid")).then(() => true, () => false);
+  let imported = "";
+  if ((await Promise.all(missing.map(onDisk))).some(x => !x)) {
+    say(`${branch}: ${missing.length} script(s) have no .uid in git; importing in ${bdir.replace(HOME, "~")} to make them`);
+    const imp = await sh(`DUO_PORT=${rport()} timeout 600 godot-test --headless --path . --import 2>&1 | tail -3; echo exit=\${PIPESTATUS[0]}`, bdir);
+    imported = imp.out;
+    if (!/exit=0/.test(imp.out)) return { stop: "missing-uid", out: `${bdir}: import to make missing .uid files failed:\n${imp.out}\nmissing: ${missing.slice(0, 10).join(", ")}` };
+  }
+  const have: string[] = [];
+  for (const f of missing) if (await onDisk(f)) have.push(f + ".uid");
+  if (have.length) {
+    const c = await sh(`git add -- ${have.map(x => `'${x}'`).join(" ")} && git commit -q -m "Add missing .uid files (dev.land pre-land import)" -- ${have.map(x => `'${x}'`).join(" ")} 2>&1; echo exit=$?`, bdir);
+    if (!/exit=0/.test(c.out)) return { stop: "missing-uid", out: `${bdir}: committing the missing .uid files failed:\n${c.out}` };
+  }
+  missing = await listMissing();
+  if (missing.length) return { stop: "missing-uid", out: `${bdir}: still no .uid after import (${imported.trim().split("\n").pop()}):\n${missing.slice(0, 10).join("\n")}` };
+  const note = `committed ${have.length} missing .uid file(s) on ${branch}: ${have.slice(0, 6).join(", ")}${have.length > 6 ? " ..." : ""}`;
+  say(`${branch}: ${note}`);
+  return { note };
+}
+
 export async function land(branch: string, genTests: string[], botId: string, otherBots: string[], msg: string) {
   // A landing that stopped leaves its merge in wt-merge (and its files in staging) for a retry. Landing a DIFFERENT
   // branch next must not carry it along (2026-10-31: a tools-only landing nearly deployed saga-deep, whose tests had
@@ -661,6 +693,9 @@ export async function land(branch: string, genTests: string[], botId: string, ot
   // untracked .uid / .gd a re-import made) would silently stay behind (2026-11-11: marble-deep2's
   // marble_maze_deep_test.gd.uid; land used to print tracked changes only and carry on).
   const bdir = await branchDir(branch);
+  // Missing .uid files are made and committed on the branch first (visible log line); refusal kept if that fails.
+  const uidFix = await commitMissingUids(bdir, branch);
+  if (uidFix.stop) return { stop: uidFix.stop, out: uidFix.out };
   const dirty = (await sh(`git status --porcelain | head -5`, bdir)).out.trim();
   if (dirty) return { stop: "uncommitted", out: `${bdir} has uncommitted files (commit them on the branch, or ask its agent):\n${dirty}` };
   // Every script carries its .uid in git: a missing one is made by each machine's next import, so live and the
@@ -686,6 +721,7 @@ export async function land(branch: string, genTests: string[], botId: string, ot
   if (drift.out.trim() && !retry) return { stop: "live!=stage", out: drift.out };
   await sh(`for d in ${DEPLOYED.join(" ")} tools addons/boot; do rsync -a --delete --exclude '*.import' --exclude '__pycache__' wt-merge/$d/ .duo-arena-stage/$d/; done; cp wt-merge/arcade.tscn .duo-arena-stage/; sed 's|^config/name="Duo Arena"$|config/name="Duo Arena Stage"|' wt-merge/project.godot > .duo-arena-stage/project.godot`, GP);
   const out: Record<string, string> = {};
+  if (uidFix.note) out["uid-autocommit"] = uidFix.note;
   let ok = true;
   // story_pictures_test always: it pins core/story_card.gd SHARED_PICTURES (a game's pictures belong in its own
   // games/<game>/story_pictures.gd) and catches one name drawn by two games. progress_test always: a deepened game

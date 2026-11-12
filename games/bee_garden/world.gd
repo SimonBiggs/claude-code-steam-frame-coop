@@ -448,6 +448,7 @@ static func vmesh(st: SurfaceTool, glow: float = 0.0) -> ArrayMesh:
 	var m := st.commit()
 	var mt := StandardMaterial3D.new()
 	mt.vertex_color_use_as_albedo = true
+	mt.vertex_color_is_srgb = true
 	mt.roughness = 0.8
 	mt.cull_mode = BaseMaterial3D.CULL_DISABLED
 	if glow > 0.0:

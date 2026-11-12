@@ -936,6 +936,7 @@ func confetti(pos: Vector3, amount: int = 90, power: float = 1.0) -> void:
 	var m := Art.box(Vector3(0.2, 0.02, 0.13))
 	var mat := StandardMaterial3D.new()
 	mat.vertex_color_use_as_albedo = true
+	mat.vertex_color_is_srgb = true
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	m.material = mat

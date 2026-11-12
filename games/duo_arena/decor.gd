@@ -208,6 +208,7 @@ static func _add_sky(main: Node3D) -> void:
 	var star_mat := StandardMaterial3D.new()
 	star_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	star_mat.vertex_color_use_as_albedo = true
+	star_mat.vertex_color_is_srgb = true
 	star_mat.set("disable_fog", true)
 	main.add_child(multimesh(BoxMesh.new(), star_mat, stars, cols))
 	var planet := MeshInstance3D.new()

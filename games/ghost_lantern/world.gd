@@ -364,6 +364,7 @@ static func _library(root: Node3D, out: Dictionary) -> void:
 				at += w + 0.01
 	var book_mat := StandardMaterial3D.new()
 	book_mat.vertex_color_use_as_albedo = true
+	book_mat.vertex_color_is_srgb = true
 	book_mat.roughness = 0.8
 	root.add_child(_multimesh(BoxMesh.new(), book_mat, books, cols, []))
 	# Fireplace with ghostly green flames.

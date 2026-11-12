@@ -633,6 +633,7 @@ func _apply_look(f: Flyer) -> void:
 		var m := MeshKit.material(tcol, 1.6 if sparkle else 1.0).duplicate() as StandardMaterial3D
 		if rainbow:
 			m.vertex_color_use_as_albedo = true
+			m.vertex_color_is_srgb = true
 		sm.material = m
 		return sm)
 	if rainbow:

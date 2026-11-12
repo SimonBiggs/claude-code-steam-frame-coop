@@ -46,6 +46,7 @@ static func build(main, size: Vector2i, flip: bool = false) -> Node3D:
 		gi.mesh = glow.commit()
 		var gm := StandardMaterial3D.new()
 		gm.vertex_color_use_as_albedo = true
+		gm.vertex_color_is_srgb = true
 		gm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		gi.material_override = gm
 		gi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

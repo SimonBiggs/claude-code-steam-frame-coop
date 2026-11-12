@@ -113,10 +113,10 @@ theme), `builder.gd` (VR / flat / TV ghost builder and the tray), `runner.gd` (r
 ## Tests
 
 ```sh
-godot --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/block_builders_bot.tscn
-BOT_PLAYERS=6 godot --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/block_builders_bot.tscn
-DUO_PORT=7912 DUO_HOST=1 timeout 45 godot --headless --path . res://tests/block_builders_bot.tscn &
-DUO_PORT=7912 DUO_JOIN=127.0.0.1 BOT_PLAYERS=3 timeout 38 godot --headless --path . res://tests/block_builders_bot.tscn
+godot-test --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/block_builders_bot.tscn
+BOT_PLAYERS=6 godot-test --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/block_builders_bot.tscn
+DUO_PORT=7912 DUO_HOST=1 timeout 45 godot-test --headless --path . res://tests/block_builders_bot.tscn &
+DUO_PORT=7912 DUO_JOIN=127.0.0.1 BOT_PLAYERS=3 timeout 38 godot-test --headless --path . res://tests/block_builders_bot.tscn
 ```
 
 Bot options: `BB_FAKE_VR=1` runs the VR builder code without a headset (the bot moves the right

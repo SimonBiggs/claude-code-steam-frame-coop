@@ -2282,6 +2282,7 @@ func _burst(pos: Vector3, amount: int, colors: Array, speed: float) -> void:
 		if multi:
 			var mat := StandardMaterial3D.new()
 			mat.vertex_color_use_as_albedo = true
+			mat.vertex_color_is_srgb = true
 			mat.emission_enabled = true
 			mat.emission = Color(0.3, 0.3, 0.3)
 			bm.material = mat

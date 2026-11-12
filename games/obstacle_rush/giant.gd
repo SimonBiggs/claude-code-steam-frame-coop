@@ -113,6 +113,7 @@ func _ball_mesh() -> ArrayMesh:
 func _ball_mat(i: int) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.vertex_color_use_as_albedo = true
+	m.vertex_color_is_srgb = true
 	m.albedo_color = Course.ball_color(i)
 	m.roughness = 0.3
 	return m

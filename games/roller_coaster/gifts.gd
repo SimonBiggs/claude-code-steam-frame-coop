@@ -207,6 +207,7 @@ func _make_trail() -> void:
 	var m := StandardMaterial3D.new()
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	m.vertex_color_use_as_albedo = true
+	m.vertex_color_is_srgb = true
 	bm.material = m
 	trail.mesh = bm
 	add_child(trail)

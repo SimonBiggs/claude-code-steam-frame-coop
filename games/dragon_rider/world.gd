@@ -135,6 +135,7 @@ func build(vr_mode: bool) -> void:
 	# Cloud puffs: one MultiMesh (instance colours tint them).
 	puff_mat = StandardMaterial3D.new()
 	puff_mat.vertex_color_use_as_albedo = true
+	puff_mat.vertex_color_is_srgb = true
 	puff_mat.roughness = 1.0
 	puff_mat.emission_enabled = true
 	puff_mat.emission = Color(1.0, 0.86, 0.82)

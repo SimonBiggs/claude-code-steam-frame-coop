@@ -265,6 +265,7 @@ func _build_floor() -> void:
 	mi.multimesh = tiles_mm
 	var m := StandardMaterial3D.new()
 	m.vertex_color_use_as_albedo = true
+	m.vertex_color_is_srgb = true
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mi.material_override = m
 	add_child(mi)
@@ -473,6 +474,7 @@ func _build_avatar(i: int) -> void:
 	]
 	var gm := StandardMaterial3D.new()
 	gm.vertex_color_use_as_albedo = true
+	gm.vertex_color_is_srgb = true
 	gm.emission_enabled = true
 	gm.emission = color
 	gm.emission_energy_multiplier = 0.15
@@ -709,6 +711,7 @@ func pyro() -> void:
 		var m := StandardMaterial3D.new()
 		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		m.vertex_color_use_as_albedo = true
+		m.vertex_color_is_srgb = true
 		p.material_override = m
 		var g := Gradient.new()
 		g.offsets = PackedFloat32Array([0.0, 0.4, 1.0])

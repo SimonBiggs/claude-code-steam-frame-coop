@@ -50,6 +50,7 @@ func _ready() -> void:
 	var m := st.commit()
 	var mt := StandardMaterial3D.new()
 	mt.vertex_color_use_as_albedo = true
+	mt.vertex_color_is_srgb = true
 	mt.roughness = 0.4
 	mt.metallic = 0.3
 	mt.emission_enabled = true
