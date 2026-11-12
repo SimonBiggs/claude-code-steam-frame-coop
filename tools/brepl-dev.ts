@@ -435,6 +435,35 @@ export async function debt() {
       if (!/^yes/.test(String(q.out ?? "").trim())) issues.push({ kind: "telemetry-firewall", what: `the Steam Machine's firewall doesn't allow ${proto} 7870 (${String(q.out ?? "").trim().slice(0, 80)}): Decks can't push RUN lines`,
         fix: `ask Simon to run: sudo firewall-cmd --permanent --add-port=7870/${proto} && sudo firewall-cmd --reload` });
     }
+    // Launched but silent (2026-11-12 audit): every TV arcade launch (Steam's gameprocess_log, launch.sh) must reach the
+    // receiver (a check-in at start), and a long TV session should leave RUN lines. Decks: many check-ins, no lines.
+    {
+      const PUSH_LANDED = Date.parse("2026-11-11T12:00:00") / 1000, now = Date.now() / 1000;
+      const gl = await readFile(join(HOME, ".local/share/Steam/logs/gameprocess_log.txt"), "latin1").catch(() => "");
+      const sess = new Map<string, { a: number; b: number }>();
+      // "AppID X adding PID N as a tracked process "...duo-arena/launch.sh"" ... "AppID X no longer tracking PID N"
+      for (const m of gl.matchAll(/^\[(\d{4}-\d\d-\d\d) (\d\d:\d\d:\d\d)\] AppID \d+ (?:adding PID (\d+) as a tracked process "[^\n]*duo-arena\/launch\.sh|no longer tracking PID (\d+))/gm)) {
+        const t = Date.parse(`${m[1]}T${m[2]}`) / 1000;
+        if (m[3]) sess.set(m[3], { a: t, b: 0 }); else if (sess.has(m[4]!) && !sess.get(m[4]!)!.b) sess.get(m[4]!)!.b = t;
+      }
+      const sm = JSON.parse(await readFile(join(TELEMETRY_STORE, "steammachine.meta.json"), "utf8").catch(() => "{}"));
+      const tvRuns = runs.filter((r: any) => r.device === "steammachine" && !r.copy).map((r: any) => Number(r.recv) || 0);
+      const iso = (t: number) => new Date(t * 1000).toISOString().slice(0, 16).replace("T", " ");
+      for (const s of [...sess.values()].filter(s => s.a > PUSH_LANDED && now - s.a > 300)) {
+        if (!(Number(sm.last_seen) >= s.a - 60)) { issues.push({ kind: "telemetry-silent", what: `the TV started the arcade at ${iso(s.a)} but never reached duo-telemetry-recv (no check-in): its RUN lines aren't arriving`,
+          fix: "on the TV: grep 'TELEMETRY PUSH' ~/GodotProjects/duo-arena/.dev/game.log; check duo-telemetry-recv and that launch.sh doesn't set SAVE_TEST / DUO_TELEMETRY_PUSH=0" }); break; }
+        const end = s.b || now;
+        if (end - s.a > 20 * 60 && !tvRuns.some(t => t >= s.a && t <= end + 900)) issues.push({ kind: "telemetry-no-runs", what: `the TV ran the arcade ${Math.round((end - s.a) / 60)} min from ${iso(s.a)} but no RUN line arrived from it`,
+          fix: "look in .dev/game.log for RUN:/TELEMETRY PUSH lines: a game that ends rounds without Telemetry.run, or the push failing" });
+      }
+      for (const f of await readdir(TELEMETRY_STORE).catch(() => [] as string[])) {
+        if (!f.endsWith(".meta.json") || f.startsWith("lan-test-") || f === "steammachine.meta.json") continue;
+        const m = JSON.parse(await readFile(join(TELEMETRY_STORE, f), "utf8").catch(() => "{}"));
+        if ((m.checkins || []).filter((t: number) => now - t < 7 * 86400 && t > (m.last_new || 0)).length >= 3)
+          issues.push({ kind: "telemetry-no-runs", what: `${f.slice(0, -10)} started the arcade 3+ times this week since its last RUN line (${m.last_new ? iso(m.last_new) : "never"})`,
+            fix: "only menus, or rounds end without Telemetry.run / the push fails: ask, or run tools/telemetry-lan-test on that Deck while it's idle" });
+      }
+    }
     const seen = checkins.length ? `; machines that started the arcade and reached the Steam Machine this week: ${checkins.join(", ")} (so they can send; no rounds finished)` : "; no machine has started the arcade and checked in this week either";
     if (days > 7) issues.push({ kind: "telemetry-gap", what: (newest ? `no real RUN lines from any machine for ${days} days (newest ${new Date(newest * 1000).toISOString().slice(0, 10)})` : "no real RUN lines have ever reached ~/.cache/duo-arena/telemetry") + seen,
       fix: "check duo-telemetry-recv (systemctl --user status duo-telemetry-recv; journalctl --user -u duo-telemetry-recv); prove a Deck's path with tools/telemetry-lan-test DECK (test receiver, refuses while Godot runs there); then ask whether the family played at all" });
@@ -595,7 +624,7 @@ export async function guard(game: string, project = STAGE) {
 /** Repo-wide guard tests every landing runs (2026-11-11: gen_budget_test failed on main unnoticed because no landing
  *  ran it; each of these took < 45 s on all of main then). lan_update_test stays out: it compiles a deliberately broken
  *  script, whose expected "Parse Error" would read as a SCRIPT ERROR here. */
-export const REPO_GUARDS = ["gen_budget_test", "who_test", "who_net_test", "classic_seats_test", "menu_test", "party_stale_press_test", "bg_gen_test", "engine_sys_test", "engine_ui_test", "pause_banner_test", "contrast_test", "vr_wrist_menu_test", "bot_phase_watch_test", "season_override_test", "vertex_color_srgb_test", "net_mode_sync_test", "forced_mode_test", "thread_quit_test"];
+export const REPO_GUARDS = ["gen_budget_test", "who_test", "who_net_test", "classic_seats_test", "menu_test", "party_stale_press_test", "bg_gen_test", "engine_sys_test", "engine_ui_test", "pause_banner_test", "contrast_test", "vr_wrist_menu_test", "bot_phase_watch_test", "season_override_test", "vertex_color_srgb_test", "net_mode_sync_test", "forced_mode_test", "thread_quit_test", "telemetry_coverage_test"];
 
 /** Lone flat player (2026-11-11, cove-deep2: a lone Deck gunner ran out of cannonballs, a solo VR host stayed in
  *  practice forever): ONE Deck player, no VR, nobody else (DUO_SOLO=1 DUO_MACHINE_KIND=deck BOT_PLAYERS=1), the

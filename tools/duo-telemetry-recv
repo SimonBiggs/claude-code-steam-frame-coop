@@ -79,7 +79,9 @@ async function takeRuns(body: any, ip = "") {
   const dropped = Math.max(0, Math.floor(Number(body.dropped) || 0));
   meta.last_seen = now;
   // Check-ins (an arcade start with nothing to send) still show the machine ran the arcade and can reach us.
-  if (body.checkin) meta.last_checkin = now;
+  // Every check-in's time too (last 50): dev.debt warns when a machine starts the arcade again and again without a
+  // RUN line arriving (launched but silent).
+  if (body.checkin) { meta.last_checkin = now; meta.checkins = [...(meta.checkins || []), now].slice(-50); }
   if (typeof body.build === "string") meta.build = body.build.slice(0, 80);
   if (ip) meta.ip = ip.replace(/^::ffff:/, "");
   if (Number.isFinite(Number(body.waiting))) meta.waiting = Number(body.waiting);
