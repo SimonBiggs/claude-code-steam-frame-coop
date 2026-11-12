@@ -4,10 +4,12 @@ extends RefCounted
 ## pic._p(x, y) / pic._circle(x, y, r, c) / pic._poly(pts, c) / pic._eye(x, y, r) / pic.draw_*(...), size = pic.size,
 ## t = the picture's clock, bob = its gentle bob, color = the card's colour.
 ## smudge (the gallery cat in her beret), paintpot, goldframe (TODAY'S GALLERY) tell the story; smiley, snake and
-## butterfly are easy things to paint (games/paint_and_guess/paintgen.gd THINGS). Every other thing to paint is
-## another game's picture (names are shared across games).
+## butterfly are easy things to paint (games/paint_and_guess/paintgen.gd THINGS); bigbrush, rainbowbrush, stampbrush,
+## slowclock, peekglass are Smudge's brush gifts (deep.gd GIFTS), paintdrip the DRIP surprise, vase, sculpture and
+## catstatue treasures in Smudge's museum. Every other thing to paint is another game's picture (names are shared).
 
-const NAMES: Array[String] = ["smudge", "paintpot", "goldframe", "smiley", "snake", "butterfly"]
+const NAMES: Array[String] = ["smudge", "paintpot", "goldframe", "smiley", "snake", "butterfly", "bigbrush", "rainbowbrush",
+	"stampbrush", "slowclock", "peekglass", "paintdrip", "vase", "sculpture", "catstatue"]
 
 const FUR := Color(0.98, 0.72, 0.4)
 const BERET := Color(0.85, 0.2, 0.35)
@@ -87,3 +89,73 @@ static func draw(pic, kind: String, t: float, bob: float, color: Color) -> void:
 			pic._circle(0.5, 0.3 + bob, 0.045, Color(0.3, 0.2, 0.25))
 			pic.draw_line(pic._p(0.49, 0.27 + bob), pic._p(0.42, 0.14 + bob), Color(0.3, 0.2, 0.25), maxf(1.0, pic.size.x * 0.012))
 			pic.draw_line(pic._p(0.51, 0.27 + bob), pic._p(0.58, 0.14 + bob), Color(0.3, 0.2, 0.25), maxf(1.0, pic.size.x * 0.012))
+		"bigbrush":  # a big fat brush painting a thick stripe
+			var c: Color = PAINTS[int(t * 0.6) % PAINTS.size()]
+			pic.draw_line(pic._p(0.12, 0.78 + bob), pic._p(0.62, 0.78 + bob), c, maxf(4.0, pic.size.x * 0.16))
+			pic._poly([[0.55, 0.62 + bob], [0.75, 0.62 + bob], [0.78, 0.5 + bob], [0.52, 0.5 + bob]], c)  # the bristles
+			pic._poly([[0.53, 0.5 + bob], [0.77, 0.5 + bob], [0.74, 0.4 + bob], [0.56, 0.4 + bob]], Color(0.8, 0.82, 0.88))
+			pic.draw_line(pic._p(0.65, 0.4 + bob), pic._p(0.78, 0.08 + bob), Color(0.65, 0.42, 0.22), maxf(3.0, pic.size.x * 0.09))
+		"rainbowbrush":  # a brush leaving a rainbow
+			for i in 5:
+				pic.draw_arc(pic._p(0.42, 0.78 + bob), pic.size.x * (0.34 - i * 0.05), PI, TAU, 18, PAINTS[(i + int(t)) % PAINTS.size()], maxf(2.0, pic.size.x * 0.045))
+			pic.draw_line(pic._p(0.78, 0.68 + bob), pic._p(0.92, 0.3 + bob), Color(0.65, 0.42, 0.22), maxf(2.0, pic.size.x * 0.06))
+			pic._poly([[0.72, 0.7 + bob], [0.82, 0.7 + bob], [0.8, 0.8 + bob], [0.74, 0.8 + bob]], Color.from_hsv(fmod(t * 0.3, 1.0), 0.7, 1.0))
+		"stampbrush":  # a stamp and the star it stamped
+			var sc: Color = Color(1.0, 0.85, 0.3)
+			var pts := []
+			for i in 10:
+				var a := -PI * 0.5 + TAU * float(i) / 10.0
+				var r := 0.2 if i % 2 == 0 else 0.09
+				pts.append([0.36 + cos(a) * r, 0.66 + bob + sin(a) * r])
+			pic._poly(pts, sc)
+			var up := absf(sin(t * 2.5)) * 0.08
+			pic._poly([[0.58, 0.42 + bob - up], [0.88, 0.42 + bob - up], [0.88, 0.5 + bob - up], [0.58, 0.5 + bob - up]], Color(0.85, 0.3, 0.35))
+			pic._poly([[0.68, 0.14 + bob - up], [0.78, 0.14 + bob - up], [0.78, 0.42 + bob - up], [0.68, 0.42 + bob - up]], Color(0.65, 0.42, 0.22))
+			pic._circle(0.73, 0.14 + bob - up, 0.07, Color(0.65, 0.42, 0.22))
+		"slowclock":  # a happy clock with slow hands
+			pic._circle(0.5, 0.55 + bob, 0.36, Color(0.5, 0.9, 1.0))
+			pic._circle(0.5, 0.55 + bob, 0.3, Color(1, 1, 1))
+			for i in 12:
+				var a := TAU * float(i) / 12.0
+				pic._circle(0.5 + cos(a) * 0.25, 0.55 + bob + sin(a) * 0.25, 0.015, Color(0.3, 0.35, 0.5))
+			var hand := t * 0.4
+			pic.draw_line(pic._p(0.5, 0.55 + bob), pic._p(0.5 + cos(hand) * 0.2, 0.55 + bob + sin(hand) * 0.2), Color(0.2, 0.25, 0.4), maxf(2.0, pic.size.x * 0.035))
+			pic.draw_line(pic._p(0.5, 0.55 + bob), pic._p(0.5, 0.42 + bob), Color(0.2, 0.25, 0.4), maxf(2.0, pic.size.x * 0.045))
+			pic._poly([[0.3, 0.2 + bob], [0.42, 0.24 + bob], [0.36, 0.3 + bob]], Color(0.5, 0.9, 1.0))  # bells
+			pic._poly([[0.7, 0.2 + bob], [0.58, 0.24 + bob], [0.64, 0.3 + bob]], Color(0.5, 0.9, 1.0))
+		"peekglass":  # a magnifying glass with an eye peeking through
+			pic.draw_line(pic._p(0.6, 0.62 + bob), pic._p(0.85, 0.88 + bob), Color(0.65, 0.42, 0.22), maxf(3.0, pic.size.x * 0.08))
+			pic._circle(0.42, 0.44 + bob, 0.28, Color(0.55, 1.0, 0.6))
+			pic._circle(0.42, 0.44 + bob, 0.22, Color(0.85, 0.97, 1.0))
+			pic._eye(0.42, 0.44 + bob, 0.1)
+			pic.draw_line(pic._p(0.28, 0.3 + bob), pic._p(0.34, 0.26 + bob), Color(1, 1, 1), maxf(2.0, pic.size.x * 0.03))
+		"paintdrip":  # a pot tipping, a drip of orange paint falling
+			var drip := fmod(t * 0.8, 1.0)
+			pic._poly([[0.2, 0.15 + bob], [0.6, 0.15 + bob], [0.56, 0.42 + bob], [0.24, 0.42 + bob]], Color(0.85, 0.87, 0.92))
+			pic._poly([[0.24, 0.15 + bob], [0.56, 0.15 + bob], [0.56, 0.22 + bob], [0.24, 0.22 + bob]], Color(1.0, 0.5, 0.08))
+			pic._poly([[0.5, 0.22 + bob], [0.58, 0.22 + bob], [0.6, 0.36 + bob], [0.52, 0.36 + bob]], Color(1.0, 0.5, 0.08))
+			pic._circle(0.56, 0.45 + bob + drip * 0.3, 0.05, Color(1.0, 0.5, 0.08))
+			pic._poly([[0.36, 0.86 + bob], [0.78, 0.86 + bob], [0.72, 0.8 + bob], [0.42, 0.8 + bob]], Color(1.0, 0.5, 0.08))
+		"vase":  # a round blue vase with a pattern
+			pic._circle(0.5, 0.62 + bob, 0.26, Color(0.35, 0.6, 0.95))
+			pic._poly([[0.4, 0.2 + bob], [0.6, 0.2 + bob], [0.62, 0.42 + bob], [0.38, 0.42 + bob]], Color(0.3, 0.52, 0.88))
+			pic._poly([[0.35, 0.16 + bob], [0.65, 0.16 + bob], [0.63, 0.22 + bob], [0.37, 0.22 + bob]], Color(0.6, 0.8, 1.0))
+			for i in 4:
+				pic._circle(0.33 + 0.115 * i, 0.62 + bob, 0.035, Color(1.0, 0.85, 0.3))
+		"sculpture":  # a twisty sculpture on a plinth
+			pic._poly([[0.28, 0.72 + bob], [0.72, 0.72 + bob], [0.72, 0.9 + bob], [0.28, 0.9 + bob]], Color(0.93, 0.9, 0.84))
+			pic._circle(0.5, 0.6 + bob, 0.13, Color(0.95, 0.45, 0.4))
+			pic._poly([[0.5, 0.26 + bob], [0.64, 0.4 + bob], [0.5, 0.54 + bob], [0.36, 0.4 + bob]], Color(1.0, 0.7, 0.65))
+			pic._circle(0.5, 0.2 + bob, 0.06, Color(1.0, 0.8, 0.3))
+		"catstatue":  # a golden cat statue in a beret
+			var gold := Color(1.0, 0.8, 0.3)
+			pic._poly([[0.28, 0.82 + bob], [0.72, 0.82 + bob], [0.72, 0.92 + bob], [0.28, 0.92 + bob]], Color(0.93, 0.9, 0.84))
+			pic._circle(0.5, 0.64 + bob, 0.2, gold)
+			pic._circle(0.5, 0.36 + bob, 0.15, gold)
+			pic._poly([[0.37, 0.28 + bob], [0.39, 0.14 + bob], [0.47, 0.25 + bob]], gold)
+			pic._poly([[0.63, 0.28 + bob], [0.61, 0.14 + bob], [0.53, 0.25 + bob]], gold)
+			pic._poly([[0.36, 0.24 + bob], [0.5, 0.17 + bob], [0.64, 0.22 + bob], [0.58, 0.27 + bob], [0.42, 0.28 + bob]], BERET)
+			pic._eye(0.45, 0.37 + bob, 0.03)
+			pic._eye(0.55, 0.37 + bob, 0.03)
+			var tw := 0.02 + 0.015 * absf(sin(t * 4.0))
+			pic._poly([[0.8, 0.3 - tw * 2.0 + bob], [0.8 + tw, 0.3 + bob], [0.8, 0.3 + tw * 2.0 + bob], [0.8 - tw, 0.3 + bob]], Color(1.0, 0.97, 0.7))
