@@ -711,6 +711,12 @@ export async function land(branch: string, genTests: string[], botId: string, ot
     const soErr = [...so.split("\n").filter(l => /SCRIPT ERROR/.test(l)), ...engineErrors(so)];
     out.solo_vr = (so.split("\n").filter(l => /BOT RESULT/.test(l)).pop() ?? "no BOT RESULT") + soErr.slice(0, 3).map(e => "\n" + e).join("");
     ok &&= /BOT RESULT: PASS/.test(out.solo_vr) && soErr.length === 0;
+    // Seated / short VR player (eyes 1.15 m: the little ones): a pick row sinking into a drum kit and a fake head 0.4 m
+    // too low only showed seated (2026-11-12: Rhythm Band, Dodge Ball, Paint and Guess).
+    const se = (await sh(`DUO_HOST=1 BOT_VR=1 BOT_VR_SEATED=1 BOT_END=62 DUO_PORT=${rport()} timeout 200 godot-test --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/${botId}_bot.tscn 2>&1`, STAGE)).out;
+    const seErr = [...se.split("\n").filter(l => /SCRIPT ERROR/.test(l)), ...engineErrors(se)];
+    out.seated_vr = (se.split("\n").filter(l => /BOT RESULT/.test(l)).pop() ?? "no BOT RESULT") + seErr.slice(0, 3).map(e => "\n" + e).join("");
+    ok &&= /BOT RESULT: PASS/.test(out.seated_vr) && seErr.length === 0;
     // Lone flat player: one Deck player, no VR, nobody else, must reach real play and keep going (loneRun above).
     const lr = await loneRun(botId);
     out.lone_flat = lr.summary;

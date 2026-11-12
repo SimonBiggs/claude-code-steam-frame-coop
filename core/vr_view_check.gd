@@ -58,6 +58,9 @@ const MIN_TEXT_GAP := 0.35
 const KEEP_CLEAR := "vr_keep_clear"
 ## Picks further than this (real metres) from the VR head are for other players; their sight lines aren't checked.
 const PICK_SEE_D := 6.0
+## Meta on a pick the VR player can't take at all (PickOrbs opts.for_others: runners' orbs the VR giant only watches,
+## Obstacle Rush 2026-11-12): pick_hidden doesn't need it in plain sight from the VR head (panels still keep clear of it).
+const FOR_OTHERS_META := "pick_for_others"
 const VrRig := preload("res://core/vr_rig.gd")
 ## Meta on a fake XRCamera3D that the game itself puts exactly where its real fit puts a real head (Kart Race: the
 ## seat's eye point), so it needs no XROrigin3D. The value says why.
@@ -346,7 +349,7 @@ static func pick_hidden(cam: Camera3D, k: Node3D) -> Array[String]:
 	var out: Array[String] = []
 	var head := cam.global_position
 	var ws := maxf(XRServer.world_scale, 0.001)
-	if head.distance_to(k.global_position) / ws > PICK_SEE_D:
+	if head.distance_to(k.global_position) / ws > PICK_SEE_D or k.has_meta(FOR_OTHERS_META):
 		return out
 	var right := cam.global_basis.x.normalized()
 	var up := cam.global_basis.y.normalized()

@@ -310,7 +310,9 @@ func _build_telescope() -> void:
 	cm.radial_segments = 6
 	cm.rings = 1
 	telescope_beam.mesh = cm
-	telescope_beam.material_override = MeshKit.material(Color(1.0, 0.95, 0.5, 0.6), 2.0)
+	var bm := MeshKit.material(Color(1.0, 0.95, 0.5, 0.6), 2.0).duplicate() as StandardMaterial3D
+	bm.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (a seated giant pointing past Peg's card washed it out)
+	telescope_beam.material_override = bm
 	telescope_beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(telescope_beam)
 	telescope_ring = MeshInstance3D.new()
@@ -665,11 +667,12 @@ func _start_round() -> void:
 ## Host: the picks before an island, one after another on the pick orbs (picks.gd): the mode once a session,
 ## which island (unless it's the first ever or TODAY'S ISLAND), then Peg's tool. Then the island starts.
 func _next_pick() -> void:
-	# The row: on the far side of the chest, where every TV camera looks; a giant playing alone gets it in front of
-	# them, wherever they wade (picks.gd).
-	var alone := vr_rig != null and party.player_count() == 0
-	var toward := beach.to_local(vr_rig.head_position()) if alone else Vector3(0.0, 0.0, -9.0)
-	var row := picks.row_at(toward, Vector3.INF if alone else Vector3(0.0, 0.0, 9.0))  # (TV cameras look from +z)
+	# The row: on the far side of the chest, where every TV camera looks; with a VR giant here (alone or with diggers)
+	# between the chest and the giant, wherever they wade (picks.gd): behind the chest the giant saw the orbs tiny,
+	# half under the chest and over the island's hump, names unreadable (VrViewCheck pick_hidden, 2026-11-12).
+	var giant := vr_rig != null
+	var toward := beach.to_local(vr_rig.head_position()) if giant else Vector3(0.0, 0.0, -9.0)
+	var row := picks.row_at(toward, Vector3.INF if giant else Vector3(0.0, 0.0, 9.0))  # (TV cameras look from +z)
 	net.state_set("phase", "orbs")
 	if mode == "":
 		var ids := PickOrbs.mode_ids(Deep.mode_of(String(save.data.get("mode", "brave"))))
