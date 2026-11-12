@@ -185,6 +185,29 @@ func _run() -> void:
 	low = null
 	_clear_ui()
 
+	# 5b1. a card over words written in the world (an easel's round text) hides them: "drawn over the words";
+	# words in VrViewCheck.KEEP_CLEAR are kept clear by UiKit.vr_dodge instead.
+	var sign_card := HudKit.vr_card(world, cam, "SMUDGE", "a line", {"width": 1.0})
+	await _frames(20)
+	var sign_at := sign_card.global_position
+	var sign_dir := (sign_at - cam.global_position).normalized()
+	var sign := Label3D.new()
+	sign.text = "ROUND 2"
+	sign.font_size = 64
+	sign.pixel_size = 0.004
+	world.add_child(sign)
+	sign.global_transform = Transform3D(UiKit.face(sign_dir), sign_at + sign_dir * 0.4)
+	await _frames(1)
+	probs = VrViewCheck.problems(root)
+	_check(", ".join(probs).contains("drawn over the words"), "a card over world words is reported: %s" % [probs])
+	sign.visible = false
+	await _frames(1)
+	probs = VrViewCheck.problems(root)
+	_check(not ", ".join(probs).contains("drawn over the words"), "no words, no report: %s" % [probs])
+	sign.free()
+	sign_card = null
+	_clear_ui()
+
 	# 5b2. a see-through laser sight held by the VR player (under its XROrigin3D) reaching past a card is blended
 	# over it just the same (Duo Arena's 12 m sight, Party Board's branch laser): VR_PRIO_UNDER_UI.
 	var aimed := HudKit.vr_card(world, cam, "AIM", "a line", {"width": 1.0})

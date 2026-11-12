@@ -335,6 +335,10 @@ export async function debt() {
     const dirty = (await sh("git status --porcelain | grep -v '\\.uid$'", dir)).out;
     if (dirty) issues.push({ kind: "uncommitted", what: `${r}: ${dirty.split("\n").length} changed files (${dirty.split("\n").slice(0, 3).map(l => l.replace(/^\s*\S+\s+/, "")).join(", ")})`, fix: "commit or discard" });
     const ahead = (await sh("git rev-list --count @{u}..HEAD 2>/dev/null", dir)).out;
+    if (r === "duo-arena") {
+      const noUid = (await sh(`git ls-files '*.gd' | while read f; do [ -n "$(git ls-files "$f.uid")" ] || echo "$f"; done | head -5`, dir)).out.trim();
+      if (noUid) issues.push({ kind: "missing-uid", what: `${r}: scripts with no .uid in git: ${noUid.split("\n").join(", ")}`, fix: "import in a worktree (godot-test --headless --path . --import), commit the .uid files and land" });
+    }
     if (+ahead > 0) issues.push({ kind: "unpushed", what: `${r}: ${ahead} commits not pushed`, fix: "git push" });
     const main = (await sh("git symbolic-ref --short HEAD", dir)).out;
     for (const b of (await sh(`git branch --format='%(refname:short)' --no-merged ${main}`, dir)).out.split("\n").filter(Boolean)) {
@@ -646,6 +650,10 @@ export async function land(branch: string, genTests: string[], botId: string, ot
   // marble_maze_deep_test.gd.uid; land used to print tracked changes only and carry on).
   const dirty = (await sh(`git status --porcelain | head -5`, join(GP, `wt-${branch}`))).out.trim();
   if (dirty) return { stop: "uncommitted", out: `wt-${branch} has uncommitted files (commit them on the branch, or ask its agent):\n${dirty}` };
+  // Every script carries its .uid in git: a missing one is made by each machine's next import, so live and the
+  // devices get untracked files and different uids (2026-11-12: paint-deep2's tests/paint_and_guess_deep_test.gd.uid).
+  const noUid = (await sh(`git ls-files '*.gd' | while read f; do [ -n "$(git ls-files "$f.uid")" ] || echo "$f"; done | head -5`, join(GP, `wt-${branch}`))).out.trim();
+  if (noUid) return { stop: "missing-uid", out: `wt-${branch}: scripts with no .uid in git (run godot-test --headless --path . --import there, then commit the .uid files):\n${noUid}` };
   const m = await sh(`cd ${GP}/wt-merge && git merge --no-edit ${branch} 2>&1 | tail -1; git diff --name-only --diff-filter=U`);
   // (tail -1 of a conflicted merge is "Automatic merge failed...", not CONFLICT: party-deep's whats_new conflict
   // once went on to the tests with its markers in, 2026-10-31. The unmerged-files list after it is the sure sign.)

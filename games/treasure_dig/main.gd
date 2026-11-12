@@ -327,6 +327,7 @@ func _build_telescope() -> void:
 	vr_sign = UiKit.label3d("0", 0.16, "gold", true)
 	vr_sign.outline_size = 26
 	add_child(vr_sign)
+	vr_sign.add_to_group(preload("res://core/vr_view_check.gd").KEEP_CLEAR)  # the giant's score + clock: VR cards dodge it
 	vr_sign.global_position = beach.to_global(Vector3(0.0, 5.0, 0.0))
 
 
