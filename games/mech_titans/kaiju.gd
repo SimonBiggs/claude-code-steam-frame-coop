@@ -10,6 +10,7 @@ const Data := preload("res://games/mech_titans/data.gd")
 const Creatures := preload("res://core/creatures.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 const UiKit := preload("res://core/ui_kit.gd")
+const Tales := preload("res://games/mech_titans/tales.gd")
 
 ## State codes (also sent in snapshots).
 const STATES: Array[String] = ["enter", "roam", "windup", "attack", "recover", "stunned", "dizzy", "grabbed", "thrown", "home", "gone", "downed", "practice"]
@@ -166,6 +167,13 @@ func setup(p_id: int, k: String, p_split_gen: int = 0, variant: Dictionary = {})
 		crown.scale = Vector3.ONE * maxf(1.5, height * 0.2)
 		crown.position = Vector3(0.0, height * 0.96, 0.0)
 		add_child(crown)
+	if String(variant.get("hat", "")) != "" and split_gen == 0 and not is_mini and not bool(variant.get("crown", false)):
+		# deep2: the season's hat (tales.gd: bobble hat, leaf crown, flower crown, sun hat), where a boss wears its crown.
+		var hat := MeshKit.instance(Tales.hat_mesh(String(variant["hat"])), false)
+		hat.name = "SeasonHat"
+		hat.scale = Vector3.ONE * maxf(1.3, height * 0.24)
+		hat.position = Vector3(0.0, height * 0.93, 0.0)
+		add_child(hat)
 	# Ground shadow marker for flyers (helps everyone judge where it is).
 	if fly_alt > 0.0:
 		_ground_marker = MeshInstance3D.new()

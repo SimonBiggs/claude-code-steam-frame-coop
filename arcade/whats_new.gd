@@ -33,6 +33,9 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "mech-toys", "date": "2026-11-12", "game": "mech_titans", "pic": "teddy", "line": "Find the kaiju's lost toy!", "try": {"MT_TRY": "toy"}},
+	{"id": "mech-toypark", "date": "2026-11-12", "game": "mech_titans", "pic": "toypark", "line": "Momo's toy park grows!"},
+	{"id": "mech-seasons", "date": "2026-11-12", "game": "mech_titans", "pic": "snowflake", "line": "Kaiju in seasonal hats!"},
 	{"id": "pb-gifts", "date": "2026-11-12", "game": "party_board", "pic": "luckydie", "line": "Mango's gifts!", "try": {"PB_GIFT": "lucky"}},
 	{"id": "pb-surprises", "date": "2026-11-12", "game": "party_board", "pic": "boulder", "line": "Rocks and splashes!", "try": {"PB_MODE": "hard"}},
 	{"id": "pb-hall", "date": "2026-11-12", "game": "party_board", "pic": "partyhall", "line": "Mango's party hall grows!"},

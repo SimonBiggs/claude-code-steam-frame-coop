@@ -18,6 +18,10 @@ extends SceneTree
 ##    2.5x GENTLE's top); upgrade pods are fair for every seed / unlock level / upgrades taken (upgrades.gd
 ##    check_offer) and every upgrade, frame and BRAVE unlocks exactly once as the sanctuary grows; frames are
 ##    trades (frames.gd check). The pure-data checks must take < 100 ms (a Deck).
+##  - DEEP2 (deep2-mech): every made round's lost TOY suits its season and the lost kaiju wears the season's hat
+##    (tales.gd check, inside RoundGen.check); every season has 3+ toys; TODAY'S KAIJU's season is the date's
+##    season over 400+ days, and a year brings every toy; in every city checked the toy's street corner
+##    is reachable from the Titan's start (and not on top of it).
 ## Prints "SCRIPT ERROR: ..." for each failure.
 
 const RoundGen := preload("res://games/mech_titans/roundgen.gd")
@@ -29,6 +33,7 @@ const BigBoss := preload("res://games/mech_titans/bigboss.gd")
 const Upgrades := preload("res://games/mech_titans/upgrades.gd")
 const Frames := preload("res://games/mech_titans/frames.gd")
 const Sanctuary := preload("res://games/mech_titans/sanctuary.gd")
+const Tales := preload("res://games/mech_titans/tales.gd")
 
 const GRID := 0.75
 const TRUCK_R := 2.5
@@ -77,7 +82,7 @@ func _initialize() -> void:
 	var rd := Seeded.validate_days(func(date: String) -> Array:
 			var out: Array = []
 			for mf in [["gentle", 0], ["gentle", 7], ["brave", 13], ["mega", 20]]:
-				out.append([mf[1], RoundGen.make(RoundGen.LESSONS, 1, int(mf[1]), String(mf[0]), date)])
+				out.append([mf[1], RoundGen.make(RoundGen.LESSONS, 1, int(mf[1]), String(mf[0]), date), date])
 			return out,
 		func(days: Array) -> Array:
 			var why: Array = []
@@ -87,10 +92,22 @@ func _initialize() -> void:
 					why.append("%s f%d: %s" % [m.get("mode"), int(fm[0]), w])
 				if not bool(m.daily) or not bool((m.variant as Dictionary).get("golden", false)):
 					why.append("%s f%d: not a golden TODAY'S KAIJU" % [m.get("mode"), int(fm[0])])
+				if String(m.get("season", "")) != Seeded.season(String(fm[2])):
+					why.append("%s f%d: season %s on %s" % [m.get("mode"), int(fm[0]), m.get("season"), fm[2]])
 			return why, 400, "TODAY'S KAIJU", ["2026-11-11", "2026-11-12"])
 	total += int(rd.checked) * 4
 	fails += (rd.failures as Array).size()
 	_expect(var_to_str(RoundGen.make(RoundGen.LESSONS, 1, 3, "gentle", "2026-11-12")) != var_to_str(RoundGen.make(RoundGen.LESSONS, 1, 3, "gentle", "2026-11-13")), "TODAY'S KAIJU changes from day to day")
+	# Seasons: every season has toys of its own, and a year of TODAY'S KAIJU brings every toy.
+	for w in Tales.check_seasons():
+		_expect(false, "TALES %s" % w)
+	var toys_seen := {}
+	for d in Seeded.dates(366, "2026-01-01"):
+		toys_seen[String(RoundGen.make(RoundGen.LESSONS, 1, 3, "gentle", String(d)).get("toy", ""))] = true
+	for t in Tales.ORDER:
+		_expect(toys_seen.has(t), "TALES a year of TODAY'S KAIJU never lost the %s" % t)
+	var xmas := RoundGen.make(RoundGen.LESSONS, 1, 3, "gentle", "2026-12-25")
+	_expect(String(xmas.get("season", "")) == "winter" and String((xmas.variant as Dictionary).get("hat", "")) == "bobble", "TALES a winter kaiju wears a bobble hat")
 	# Today's kaiju is the same whatever the session seed.
 	_expect(var_to_str(RoundGen.make(3, 1, 5)) == var_to_str(RoundGen.make(3, 777, 5)), "today's kaiju is the same for every session")
 	# Places open with friends; twins every fifth made round.
@@ -210,6 +227,11 @@ func _check_city(m: Dictionary) -> void:
 			_expect(false, "%s: lost kaiju %d starts inside a building" % [tag, k])
 		targets.append(["kaiju start", start, 1.5])
 		targets.append(["kaiju goal", goal, 1.5])
+	if String(m.get("toy", "")) != "":
+		var ts := Tales.spot(c, int(m.toy_seed))
+		targets.append(["lost toy", ts, Tales.TOUCH_TITAN - 2.7])  # the Titan's middle must get within TOUCH_TITAN
+		if ts.distance_to(Data.MECH_START) < Tales.MIN_FROM_START - 4.0:
+			_expect(false, "%s: the lost toy sits right by the start" % tag)
 	for t in targets:
 		if not _near(reach, t[1], t[2]):
 			_expect(false, "%s: the %s at %s can't be reached from the start" % [tag, t[0], str(t[1])])

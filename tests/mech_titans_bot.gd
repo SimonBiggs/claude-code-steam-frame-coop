@@ -72,6 +72,11 @@ var warn_seen := 0  ## most danger tells (WarnRings) on the ground at once, this
 var pick_seen_t := 0.0
 var saw_crown := false  ## DEEP: a boss kaiju wore its crown
 var boss_fight_t := 0.0  ## DEEP: seconds a crowned boss was up and fighting
+var saw_toy := false  ## DEEP2: the round's lost toy stood under its beam on this machine
+var saw_hat := false  ## DEEP2: a lost kaiju wore the season's hat
+var play_t := 0.0  ## seconds of play in the current round (host: walk to the toy after a while)
+var toy_walks := 0
+var _watching := false
 
 
 func _ready() -> void:
@@ -91,6 +96,7 @@ func _ready() -> void:
 	main.set("test_hp_scale", 1.0 if practice else 0.6)
 	add_child(main)
 	kit.main = main
+	_watch()
 	want = BotKit.bot_players(2, 6)
 	client = OS.has_environment("DUO_JOIN")
 	host = OS.has_environment("DUO_HOST")
@@ -341,6 +347,24 @@ func _deep_checks(ri: Dictionary) -> void:
 			kit.assert_true(main.combat.sig_tells > 0, "%s: the boss warned its big move (fought %.0f s)" % [mode, boss_fight_t])
 	if mode != "client" and (main.deep.hazards_landed > 0 or main.combat.sig_tells > 0):
 		kit.assert_true(warn_seen > 0, "%s: the danger tells showed on the ground (WarnRings)" % mode)
+	# DEEP2: the lost toy, the season's hat and props, Momo's toy park, helpers told by a ring.
+	var ri_toy := String(ri.get("toy", ""))
+	print("BOT DEEP2: toy=%s season=%s saw_toy=%s found=%d park=%d hat=%s minis told %d / came %d" % [ri_toy, String(ri.get("season", "")),
+		str(saw_toy), main.toy_hunt.toys_found, main.toy_hunt.park_count(), str(saw_hat),
+		main.combat.minis_warned if mode != "client" else -1, main.combat.minis_arrived if mode != "client" else -1])
+	if ri_toy != "" and saw_play:
+		kit.assert_true(saw_toy, "%s: the lost %s stood under its beam" % [mode, ri_toy])
+		if String(ri.get("bigboss", "")) == "":
+			kit.assert_true(saw_hat, "%s: the lost kaiju wore its %s hat" % [mode, String(ri.get("season", ""))])
+		if String(ri.get("place", "")) != "moon":
+			kit.assert_true(main.toy_hunt._season_root != null and main.toy_hunt._season_root.get_child_count() > 0, "%s: the city is dressed for %s" % [mode, String(ri.get("season", ""))])
+		if mode != "client" and toy_walks > 0:
+			kit.assert_true(main.toy_hunt.toys_found > 0, "%s: the Titan found the lost toy" % mode)
+			kit.assert_true(int(main.save.data.get("toys_n", 0)) > 0, "%s: the toy is saved in Momo's toy park" % mode)
+		if saw_results and (mode == "client" or main.toy_hunt.toys_found > 0):
+			kit.assert_true(main.toy_hunt.park_count() > 0, "%s: Momo's toy park stands on the hills" % mode)
+	if mode != "client":
+		kit.assert_true(main.combat.minis_arrived <= main.combat.minis_warned, "%s: every helper came in where its ring showed first" % mode)
 	if mode != "client" and String(main.net.state_get("mode", "")) == "mega" and float(main.missions.time) > 15.0:
 		kit.assert_true(main.deep.hazards_landed > 0, "%s: the district's hazards landed" % mode)
 
@@ -388,7 +412,15 @@ func _join() -> void:
 
 
 ## Briefing: skip lines; results: continue.
+## Phases counted the moment they change (BotKit.watch_state), not polled: a short phase can fall between polls.
+func _watch() -> void:
+	if not _watching and main.get("net") != null:
+		_watching = true
+		kit.watch_state(main.net)
+
+
 func _flow() -> String:
+	_watch()
 	var phase := String(main.net.state_get("phase", ""))
 	if main.combat != null and main.combat.fx != null:
 		warn_seen = maxi(warn_seen, main.combat.fx.rings.count())
@@ -400,14 +432,11 @@ func _flow() -> String:
 					saw_vehicle = true
 					if String(main.net.state_get("veh", {})[k]) != "jet":
 						only_jets_round1 = false
-		if phase == "play" and r >= 1:
-			saw_round2 = true
-		if phase == "results":
-			saw_results = true
-		if phase == "play":
-			saw_play = true
+		saw_round2 = saw_round2 or (r >= 1 and phase == "play") or (kit.seen("mission", 1) > 0 and kit.seen("phase", "play") >= 2)
+		saw_results = saw_results or kit.seen("phase", "results") > 0
+		saw_play = saw_play or kit.seen("phase", "play") > 0
+		saw_pick = saw_pick or kit.seen("phase", "pick") > 0
 		if phase == "pick":
-			saw_pick = true
 			pick_pods = maxi(pick_pods, main.picks.pods.size())
 			pick_seen_t += 0.4
 			if main.net.mode != "client" and pick_seen_t > 1.5 and not main.picks.pods.is_empty() and not main.picks.taken:
@@ -450,6 +479,8 @@ func _physics_process(delta: float) -> void:
 			saw_crown = true
 			if k.is_active() and k.state != "enter":
 				boss_fight_t += delta
+		if not k.is_mini and k.get_node_or_null("SeasonHat") != null:
+			saw_hat = true
 		if made_round >= 0 and not k.is_mini:
 			var v: Dictionary = main.round_variant()
 			if absf(k.height - float(Data.KAIJU[k.kind]["height"]) * float(v.get("size", 1.0))) < 0.01 and not v.is_empty():
@@ -458,6 +489,16 @@ func _physics_process(delta: float) -> void:
 			saw_practice = true
 		if k.any_painted():
 			saw_painted = true
+	if main.toy_hunt != null and main.toy_hunt.toy_showing():
+		saw_toy = true
+	play_t = play_t + delta if phase == "play" else 0.0
+	if simple and main.net.mode != "client" and phase == "play" and play_t > 9.0 and main.toy_hunt != null:
+		var toy: Dictionary = main.net.state_get("toy", {})
+		if not toy.is_empty() and not bool(toy.get("got", false)) and toy_walks < 3 and fposmod(play_t, 3.0) < delta:
+			# the Titan walks up to the lost toy (the real touch path, host / local)
+			toy_walks += 1
+			var at: Vector3 = toy["at"]
+			main.mech.position = main.city.push_out(Vector3(at.x, 0.0, at.z + 4.0), 2.6)
 	for slot in main.party.local_slots():
 		if slot == 0:
 			_drive_pad_pilot(slot, delta, phase)
