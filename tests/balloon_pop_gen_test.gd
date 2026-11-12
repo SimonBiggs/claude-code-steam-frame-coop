@@ -11,6 +11,7 @@ extends SceneTree
 
 const WaveGen := preload("res://games/balloon_pop/wavegen.gd")
 const Story := preload("res://games/balloon_pop/story.gd")
+const Skies := preload("res://games/balloon_pop/skies.gd")
 const Seeded := preload("res://core/seeded.gd")
 const StoryCard := preload("res://core/story_card.gd")
 
@@ -77,19 +78,33 @@ func _initialize() -> void:
 		shapes[w[1]] = true
 	_expect(shapes.size() >= 5, "later rounds mix wave shapes (%s)" % str(shapes.keys()))
 	# TODAY'S SKY: fair for many days, the same all day, different day to day.
+	# Over 400+ days (Seeded.validate_days, the shared daily validator), as main.gd _play_plan() makes it
+	# (Skies.apply(Story.daily_spec(players, 120 s), mode)): one mode / party size a day (every mode x 1, 3 and 6
+	# players, by the date: a round is ~10 ms, two a day was +20 s), the round fair (check()) with fair gusts (gust_problems()).
 	var days := {}
 	var skies := {}
-	for d in 60:
-		var date := Time.get_date_string_from_unix_time(1790000000 + d * 86400)
-		var sp := Story.daily_spec(3, 120.0, date)
-		var rd := WaveGen.generate(Story.daily_seed(date), sp)
-		for w in WaveGen.check(rd, Story.allowed(sp)):
-			_fail("daily %s: %s" % [date, w])
-		_expect(var_to_str(rd) == var_to_str(WaveGen.generate(Story.daily_seed(date), Story.daily_spec(3, 120.0, date))), "daily %s is the same all day" % date)
-		days[var_to_str(rd.spawns)] = true
-		skies[sp.sky] = true
-		total += 1
-	_expect(days.size() >= 58, "daily rounds differ day to day (%d unique of 60)" % days.size())
+	var plays := [["brave", 3], ["gentle", 1], ["hard", 6], ["brave", 1], ["gentle", 6], ["hard", 3], ["brave", 6], ["gentle", 3], ["hard", 1]]
+	var rs := Seeded.validate_days(func(date: String) -> Dictionary:
+			var out := {}
+			for mp in [plays[absi(hash(date)) % plays.size()]]:
+				var sp := Skies.apply(Story.daily_spec(int(mp[1]), 120.0, date), String(mp[0]))
+				var rd := WaveGen.generate(Story.daily_seed(date), sp)
+				out["%s p%d" % mp] = {"sp": sp, "rd": rd, "gusts": Skies.gusts(rd, String(mp[0]))}
+			return out,
+		func(out: Dictionary) -> Array:
+			var why: Array = []
+			for k in out:
+				var o: Dictionary = out[k]
+				for w in WaveGen.check(o.rd, Story.allowed(o.sp)):
+					why.append("%s: %s" % [k, w])
+				for w in Skies.gust_problems(o.rd, o.gusts, String(o.sp.mode)):
+					why.append("%s: gusts: %s" % [k, w])
+				days[var_to_str(o.rd.spawns)] = true
+				skies[o.sp.sky] = true
+			return why, 400, "TODAY'S SKY", ["2026-11-11", "2026-11-12"])
+	total += int(rs.checked)
+	fails += (rs.failures as Array).size()
+	_expect(days.size() >= int(rs.checked) - 5, "daily rounds differ day to day (%d unique of %d)" % [days.size(), int(rs.checked)])
 	_expect(skies.size() >= 3, "TODAY'S SKY changes (%s)" % str(skies.keys()))
 	# Hand checks: the validator catches broken rounds.
 	var g := [1, 2, 3]

@@ -70,6 +70,28 @@ func _initialize() -> void:
 	_expect(G.daily_seed("2026-10-29") == G.daily_seed("2026-10-29"), "TODAY'S RAID is the same all day")
 	_expect(G.daily_seed("2026-10-29") != G.daily_seed("2026-10-30"), "TODAY'S RAID changes the next day")
 	_expect(G.daily_seed() == Seeded.daily_seed("giants_table"), "TODAY'S RAID uses the shared daily seed")
+	# TODAY'S RAID over 400+ days (Seeded.validate_days, the shared daily validator), as main.gd plays it
+	# (plan(raid_seed, wave, extra knights, solo)): the night (waves 1..NIGHT_WAVES) fair for the slow kid
+	# (check_night(): check() of every wave + the ember sim) for the solo Giant and two more party sizes (by the date),
+	# and the later waves to MAX_WAVE for one of them (check()), the same all day. (Every party x every wave was +50 s.)
+	var rs := Seeded.validate_days(func(date: String) -> Dictionary:
+			var ds := G.daily_seed(date)
+			var h := absi(hash(date))
+			var parties: Array = [PARTIES[0], PARTIES[1 + h % (PARTIES.size() - 1)], PARTIES[1 + (h / 7 + 2) % (PARTIES.size() - 1)]]
+			var late: Array = []
+			for n in range(G.NIGHT_WAVES + 1, G.MAX_WAVE + 1):
+				late.append(G.plan(ds, n, parties[1][0], parties[1][1]))
+			return {"seed": ds, "parties": parties, "late": late, "first": G.plan(ds, 1, 0, true)},
+		func(r: Dictionary) -> Array:
+			var why: Array = []
+			for p in r.late:
+				for w in G.check(p):
+					why.append("wave %d: %s" % [int(p.get("wave", 0)), w])
+			for party in r.parties:
+				for w in G.check_night(int(r.seed), party[0], party[1]):
+					why.append("party %s: %s" % [str(party), w])
+			return why, 400, "TODAY'S RAID", ["2026-11-11", "2026-11-12"])
+	fails += (rs.failures as Array).size()
 	# The story rules.
 	_expect(G.ladder_count(1) == 1 and G.ladder_count(2) == 1 and G.ladder_count(3) == 2, "one ladder, then two from wave 3")
 	var kings := 0

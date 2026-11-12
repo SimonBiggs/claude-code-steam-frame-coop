@@ -93,6 +93,39 @@ func _initialize() -> void:
 	_expect(G.daily_seed("2026-10-30") == G.daily_seed("2026-10-30"), "TODAY'S RAIDERS is the same all day")
 	_expect(G.daily_seed("2026-10-30") != G.daily_seed("2026-10-31"), "TODAY'S RAIDERS changes the next day")
 	_expect(G.daily_seed() == Seeded.daily_seed("elemental_bender"), "TODAY'S RAIDERS uses the shared daily seed")
+	# TODAY'S RAIDERS over 400+ days (Seeded.validate_days, the shared daily validator), as main.gd plays it: for a new
+	# family and one grown family (by the date; unlocks [waves, generals]) the islands the day's run travels to
+	# (_enter_arena: arena_for(seed, segment, open, last island)) and their layouts (Arenas.check; TEMPLE ISLAND is the
+	# fixed classic layout, checked above), every wave's plan there (check(); one party size a wave, 1-7 benders turn
+	# by turn: a plan for every size of both families was +46 s) and the altar's gifts (check_offer), the same all day.
+	var rs := Seeded.validate_days(func(date: String) -> Array:
+			var ds := G.daily_seed(date)
+			var all: Array = []
+			var grown := [[6, 0], [12, 1], [20, 2], [40, 4]]
+			for lv in [[0, 0], grown[absi(hash(date)) % grown.size()]]:
+				var open := Arenas.unlocked(int(lv[1]), int(lv[0]))
+				var boons := Boons.unlocked_boons(int(lv[0]), int(lv[1]))
+				var island := ""
+				for n in range(1, G.MAX_WAVE + 1):
+					var seg := Arenas.segment_of(n)
+					if (n - 1) % Arenas.SEGMENT == 0:
+						island = Arenas.arena_for(ds, seg, open, island if seg > 0 else "")
+						if island != "temple":
+							all.append({"island": island, "seed": Arenas.layout_seed(ds, island)})
+					all.append(G.plan(ds, n, 1 + (absi(hash(date)) + n) % G.MAX_PLAYERS, false, island))
+					all.append({"offer": Boons.offer(ds, n, boons), "open": boons})
+			return all,
+		func(all: Array) -> Array:
+			var why: Array = []
+			for p in all:
+				if p.has("island"):
+					why.append_array(Arenas.check(String(p.island), int(p.seed)))
+				elif p.has("offer"):
+					why.append_array(Boons.check_offer(p.offer, p.open))
+				else:
+					why.append_array(G.check(p))
+			return why, 400, "TODAY'S RAIDERS", ["2026-11-11", "2026-11-12"])
+	fails += (rs.failures as Array).size()
 	# The story rules.
 	for s in 30:
 		_expect(G.plan(s, 1, 1).palette != G.plan(s, 2, 1).palette, "waves 1 and 2 bring different elements (seed %d)" % s)

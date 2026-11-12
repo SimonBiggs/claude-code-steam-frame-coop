@@ -144,6 +144,46 @@ func _initialize() -> void:
 			print("SCRIPT ERROR: KR_ROUNDS café level %d after %d parties" % [l2, n])
 			fails += 1
 		lv = l2
+	# TODAY'S PARTY over 400+ days (Seeded.validate_days, the shared daily validator): round 2 of every session
+	# (Parties.make(DAILY_ROUND, ..., date) on the day's theme night, as main.gd plays it) for a new, a mid and a
+	# long-time café in GENTLE / BRAVE / HARD: fair (check(): the kitchen model serves every order in time), today's
+	# party with a star guest whatever the session seed, gentle <= brave <= hard, the same all day.
+	var rs := Seeded.validate_days(func(date: String) -> Array:
+			var out: Array = []
+			for k in [0, 4, 8]:
+				var pg := _progress(k)
+				pg["theme"] = Nights.theme_for(date)
+				var ms := {}
+				for md in ["gentle", "brave", "hard"]:
+					pg["mode"] = md
+					ms[md] = Parties.make(Parties.DAILY_ROUND, 1000 + k, pg.duplicate(), "", "", date)
+				ms["other_seed"] = Parties.make(Parties.DAILY_ROUND, 777777, pg.duplicate(), "", "", date)
+				out.append([pg.duplicate(), ms])
+			return out,
+		func(out: Array) -> Array:
+			var why: Array = []
+			for pm in out:
+				var ms: Dictionary = pm[1]
+				for md in ["gentle", "brave", "hard"]:
+					var m: Dictionary = ms[md]
+					for w in Parties.check(m, pm[0]):
+						why.append("%s: %s" % [md, w])
+					if not bool(m.daily) or String(m.party) != String(out[0][1].brave.party) or int(m.star) < 1:
+						why.append("%s: not today's party with a star guest" % md)
+				if var_to_str(ms.other_seed) != var_to_str(ms.hard):
+					why.append("today's party depends on the session seed")
+				var pg: Array = Nights.pressure(ms.gentle)
+				var pb: Array = Nights.pressure(ms.brave)
+				var ph: Array = Nights.pressure(ms.hard)
+				for i in pb.size():
+					if float(pg[i]) > float(pb[i]) + 0.001 or float(pb[i]) > float(ph[i]) + 0.001:
+						why.append("not gentle <= brave <= hard (%d: %.2f %.2f %.2f)" % [i, pg[i], pb[i], ph[i]])
+			return why, 400, "TODAY'S PARTY", ["2026-11-11", "2026-11-12"])
+	total += int(rs.checked)
+	fails += (rs.failures as Array).size()
+	if Parties.make(Parties.DAILY_ROUND, 5, _progress(3)).party != Parties.daily_party():
+		print("SCRIPT ERROR: KR_ROUNDS today's party (no date) isn't daily_party()")
+		fails += 1
 	var themes := {}
 	for d in 60:
 		themes[Nights.theme_for("2026-01-%02d" % (d % 28 + 1)) if d < 28 else Nights.theme_for("2026-02-%02d" % (d - 27))] = true

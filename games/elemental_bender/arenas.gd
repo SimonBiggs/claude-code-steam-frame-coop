@@ -236,7 +236,17 @@ static func _vents(id: String, seed_value: int, lay: Dictionary) -> Array:
 	var hz := String(info(id).hazard)
 	if hz == "":
 		return []
-	var rng := Seeded.rng(seed_value, "vents")
+	var out := _place_vents(Seeded.rng(seed_value, "vents"), hz, lay)
+	# A crowded island can leave room for only 2 of the first try's vents (check() wants 3: TODAY'S RAIDERS on
+	# 2027-04-28 / 2027-07-02 would have had a 2-vent island): lay them out again until 3+ fit.
+	var k := 0
+	while out.size() < 3 and k < 30:
+		k += 1
+		out = _place_vents(Seeded.rng(seed_value, "vents%d" % k), hz, lay)
+	return out
+
+
+static func _place_vents(rng: RandomNumberGenerator, hz: String, lay: Dictionary) -> Array:
 	var want := 4
 	var out: Array = []
 	var tries := 0
