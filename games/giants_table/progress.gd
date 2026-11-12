@@ -4,20 +4,22 @@ extends RefCounted
 
 const SAVE_ID := "giants_table"  # the game's core/save.gd game_id
 const WHO := "sparky"  # Sparky, the little fire friend
-const GROWS := "cake"  # the villagers' thank-you gifts
+const GROWS := "cake"  # the villagers' thank-you gifts and Sparky's table treasures
 const COLOR := Color(1.0, 0.6, 0.2)
+const Deep := preload("res://games/giants_table/deep.gd")
 
 
 ## data: the raw save (no defaults filled in: always .get with a default). today: Seeded.today().
-## grown: every night the village was saved (one gift each; the rim keeps the newest 12); daily: TODAY'S RAID played to the end today (daily_done; "daily" only
+## grown: every night the village was saved (one gift each; the rim keeps the newest 12) + every table treasure (one
+## each deep.gd TREASURE_EVERY waves cleared); daily: TODAY'S RAID played to the end today (daily_done; "daily" only
 ## says it started, so the next round isn't the daily).
 static func progress_summary(data: Dictionary, today: String) -> Dictionary:
 	var gifts: Variant = data.get("gifts", [])
-	return {"grown": maxi(int(data.get("nights", 0)), (gifts as Array).size() if gifts is Array else 0),
+	return {"grown": maxi(int(data.get("nights", 0)), (gifts as Array).size() if gifts is Array else 0) + Deep.treasures(int(data.get("cleared", 0))),
 		"daily": String(data.get("daily_done", "")) == today, "played": String(data.get("last_day", "")) == today}
 
 
 ## A save as the game writes it after a few days (tests/progress_test.gd: it must read as grown > 0, daily done).
 static func sample(today: String) -> Dictionary:
-	return {"days": 3, "last_day": today, "daily": today, "daily_done": today, "games": 5, "nights": 4, "best_wave": 6, "goblins": 40,
+	return {"days": 3, "last_day": today, "daily": today, "daily_done": today, "games": 5, "nights": 4, "best_wave": 6, "goblins": 40, "cleared": 14, "mode": "brave", "last_gift": "shield",
 		"gifts": [["pie", 1, true], ["cake", 1, false], ["teddy", 2, true], ["scarf", 3, true]]}
