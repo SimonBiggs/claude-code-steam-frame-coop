@@ -22,7 +22,7 @@ func _gen(s: int, sp: Dictionary) -> Dictionary:
 	return HouseGen.generate(s, sp)
 
 
-func _init() -> void:
+func _initialize() -> void:
 	var seeds := int(OS.get_environment("SEEDS")) if OS.has_environment("SEEDS") else 40
 	var total := 0
 	var t0 := Time.get_ticks_usec()

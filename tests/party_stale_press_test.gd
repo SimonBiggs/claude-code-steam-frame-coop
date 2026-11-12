@@ -10,7 +10,7 @@ const Party := preload("res://core/party.gd")
 var fails := 0
 
 
-func _init() -> void:
+func _initialize() -> void:
 	_run.call_deferred()
 
 

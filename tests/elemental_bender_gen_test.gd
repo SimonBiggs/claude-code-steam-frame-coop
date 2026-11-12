@@ -24,7 +24,7 @@ var fails := 0
 const E_FIRE := 3
 
 
-func _init() -> void:
+func _initialize() -> void:
 	var seeds := int(OS.get_environment("SEEDS")) if OS.has_environment("SEEDS") else 60
 	W.layout()  # (built once per game; don't time it)
 	var t0 := Time.get_ticks_usec()

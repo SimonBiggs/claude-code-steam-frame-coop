@@ -15,7 +15,7 @@ func check(ok: bool, what: String) -> void:
 		print("BOT ASSERT FAILED: " + what)
 
 
-func _init() -> void:
+func _initialize() -> void:
 	for ip in ["10.0.0.5", "172.16.0.1", "172.31.255.255", "192.168.1.20", "169.254.3.4", "127.0.0.1", "::1",
 			"fe80::1", "fd12::3", "::ffff:192.168.0.9"]:
 		check(U.is_private_ip(ip), "private: " + ip)

@@ -68,6 +68,10 @@ func _initialize() -> void:
 				code += line + "\n"
 		if not ("PASS" in code or "finish(" in code):
 			flat.append(f + " (prints no PASS verdict: print \"<NAME>: PASS\" when it passed, FAIL when not)")
+		# A SceneTree test that works in _init() runs before the RenderingServer exists: any mesh or material it makes
+		# leaks ("RenderingServer::get_singleton() is null", RID leaks at exit: whack_a_mole_deep_test, 2026-11-11).
+		if code.begins_with("extends SceneTree") and "\nfunc _init(" in code:
+			flat.append(f + " (works in _init(): use _initialize(), the tree and RenderingServer exist by then)")
 	if not counted.is_empty():
 		flat.append("these bots count no checks (BotEnd.check() / bot_kit, so they end with a real BOT RESULT): " + ", ".join(counted))
 	_tally_lines(flat)

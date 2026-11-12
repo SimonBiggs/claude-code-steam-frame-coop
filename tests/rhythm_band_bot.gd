@@ -24,6 +24,12 @@ extends Node
 ## at a maraca and that no view shows its own name tag, and prints "BOT: ERROR instruction text" if a
 ## headline is anything but a short title / number, or a tip spot (help line, VR dashboard, lane tags,
 ## the stage's song sign, judgement words) shows any words.
+## SECOND PASS (deep.gd; RB_CHANGES_NOW is set so songs 1-3 have warned changes): the bot picks on the pick orbs
+## (the mode after practice, Doodle's gift before songs 2 and 3) - the fake VR drummer moves a stick tip into an orb
+## after they open and holds it there, the flat drummer presses its drum key, a guitarist (every other pick, and on a
+## TV machine) presses its button - and checks: both picks happened, every change was told for the mode's warning
+## seconds before it started, the clock really ran fast / slow, a gift's effect is on, the festival matches the songs
+## played and Doodle's season stage stands.
 
 const FAKE_PAD := 40
 const BotEnd := preload("res://tests/bot_end.gd")  # check(): counted, so a run cut off before its own BOT RESULT still has one
@@ -55,6 +61,7 @@ var prac_tapped := -1
 var checks := {}
 var quit_t := -1.0
 var cues := {}  # simple mode: picture cues seen / learned
+var verdict_done := false
 const HEADLINES := "^(RHYTHM BAND!|SONG \\d+!|\\d+|PLAY!|HOORAY!|PLAYER \\d+!|PLAYER \\d+ LEFT|PAUSED|CONNECTED|The band is full!|P\\d: controller disconnected|Connecting to the VR drummer…)$"
 var headline_re := RegEx.create_from_string(HEADLINES)
 
@@ -71,6 +78,8 @@ class RealPadFilter extends Node:
 func _ready() -> void:
 	preload("res://tests/bot_end.gd").arm(self)  # end by itself in networked runs
 	process_mode = Node.PROCESS_MODE_ALWAYS  # keeps running if the Start check opened the pause menu
+	if not OS.has_environment("BOT_NO_CHANGES"):
+		OS.set_environment("RB_CHANGES_NOW", "1")
 	main = load("res://games/rhythm_band/main.tscn").instantiate()
 	if not OS.has_environment("BOT_FULL"):
 		main.song_bars = 5
@@ -162,6 +171,9 @@ func _process(delta: float) -> void:
 		_note_cues()
 	if main.state == "practice":
 		_practice(mode, delta)
+	if main.state == "pick":
+		_pick(mode)
+	_watch_changes()
 	if main.state == "menu":
 		_drive_menu(mode)
 	else:
@@ -201,6 +213,7 @@ func _process(delta: float) -> void:
 		print("BOT %s: done" % mode)
 		print("BOT RESULT: %s (%d songs, %d checks%s)" % ["PASS" if check_fails == 0 else "FAIL", songs_done, checks_run,
 			"" if check_fails == 0 else ", %d failed: see the BOT CHECK lines" % check_fails])
+		verdict_done = true
 		preload("res://tests/bot_end.gd").quit_quietly(get_tree())
 		quit_t = 1e9
 	report_t -= delta
@@ -321,6 +334,13 @@ func _exit_tree() -> void:
 		BotEnd.check(songs_done >= 1, "a song was played (mode %s, t=%.0f, state %s)" % [main.net.mode, t, main.state])
 	if not simple:
 		return
+	if not verdict_done:  # cut off (BOT_END / --quit-after) before song 3: a verdict on what it got to
+		var m: String = main.net.mode
+		var picked: int = main.picks.history.size()
+		var late := int(checks.get("told_late", 0))
+		var moved: bool = m == "client" or (picked >= 1 and int(main.songs_played) + (1 if main.state == "play" else 0) >= 1)
+		print("BOT RESULT: %s (stopped early: %d songs done, %d picks, %d changes told (%d late), %d checks failed)" % [
+			"PASS" if check_fails == 0 and late == 0 and moved else "FAIL", songs_done, picked, int(checks.get("changes", 0)), late, check_fails])
 	var ks: Array = cues.keys()
 	ks.sort()
 	print("BOT CUES: mode=%s %s" % [main.net.mode, ",".join(PackedStringArray(ks))])
@@ -404,14 +424,15 @@ func _final_checks(mode: String) -> void:
 	for p in main.players:
 		if p.index > 0 and p.active and p.is_local():
 			gs += " P%d %d/%d" % [p.index + 1, int(p.hits), int(p.hits) + int(p.misses)]
+	var prac_ok: bool = checks.has("practice_seen") or OS.has_environment("BOT_LATE")  # (a late joiner came after it)
 	_check("BOT CHECK %s: practice seen %s, songs %d, menus %d, star power %d -> %s" % [mode, checks.has("practice_seen"), songs_done,
-		menus_seen, stars_used, "PASS" if checks.has("practice_seen") and menus_seen == 0 and stars_used == 0 else "FAIL"])
+		menus_seen, stars_used, "PASS" if prac_ok and menus_seen == 0 and stars_used == 0 else "FAIL"])
 	# Story + fan club: every machine shows Doodle's cards and the host's fans (one per finished song).
 	var want_fans: int = (main.net.state_get("fans", []) as Array).size()
 	var shown: int = main.fan_club.fans.size()
 	var pics_ok := true
 	for pic in main.story_shown:
-		pics_ok = pics_ok and main.StoryCard.has_picture(pic)
+		pics_ok = pics_ok and (main.StoryCard.has_picture(pic) or _mode_pic(pic))  # (GENTLE / BRAVE: UiKit icons)
 	# (a TV machine may quit a moment before the host's last fan reaches it)
 	var need := mini(songs_done - (1 if mode == "client" else 0), main.SongGen.FAN_KEEP)
 	var story_ok: bool = want_fans >= need and shown == mini(want_fans, main.SongGen.FAN_SLOTS) \
@@ -419,6 +440,34 @@ func _final_checks(mode: String) -> void:
 	_check("BOT CHECK story %s: fans shown %d of %d, story cards %s -> %s" % [mode, shown, want_fans, str(main.story_shown),
 		"PASS" if story_ok else "FAIL"])
 	print("BOT %s: last song drums %d/%d%s" % [mode, int(d.hits), int(d.hits) + int(d.misses), gs])
+	# Second pass.
+	var hist: Array = main.picks.history
+	var stages := {}
+	for h in hist:
+		stages[str(h[0])] = true
+	var picks_ok: bool = mode == "client" or (stages.has("mode") and stages.has("gift"))
+	_check("BOT CHECK picks %s: %s, mode %s -> %s" % [mode, str(hist), main.mode, "PASS" if picks_ok else "FAIL"])
+	var n_ch := int(checks.get("changes", 0))
+	var late := int(checks.get("told_late", 0))
+	var rmax := float(checks.get("rate_max", 1.0))
+	var rmin := float(checks.get("rate_min", 1.0))
+	var kinds: Dictionary = main.hazards.seen
+	var speed_ok: bool = (not kinds.has("fast") or rmax > 1.05) and (not kinds.has("slow") or rmin < 0.95)
+	_check("BOT CHECK changes %s: %d told (%d late), kinds %s, clock %.2f..%.2f -> %s" % [mode, n_ch, late, str(kinds), rmin, rmax,
+		"PASS" if n_ch >= 1 and late == 0 and speed_ok else "FAIL"])
+	var fest_want: int = int(main.net.state_get("fest", -1)) if mode == "client" else main.Deep.festival(int(main.save.data.songs))
+	var fest_ok: bool = main.festival.pieces == fest_want and main.season_node.season != "" and main.season_node.props != null
+	if checks.has("bigdrum_ok") and not bool(checks.bigdrum_ok):
+		fest_ok = false
+	_check("BOT CHECK stage %s: festival %d (want %d), season %s, gift %s -> %s" % [mode, int(main.festival.pieces), fest_want,
+		main.season_node.season, main.gift, "PASS" if fest_ok else "FAIL"])
+
+
+func _mode_pic(pic: String) -> bool:
+	for md in main.PickOrbs.MODES:
+		if String(md.pic) == pic:
+			return true
+	return false
 
 
 func _join_players(mode: String) -> void:
@@ -584,6 +633,80 @@ func _swing_drums() -> void:
 			else:
 				tip = c + Vector3(0, 0.3 * maxf(tdt, 0.0) / 0.1, 0)
 		d.fake_tips[h] = tip
+
+
+## The pick orbs: the fake VR drummer reaches into one (waits for them to open, moves in, holds), the flat drummer
+## presses its drum key, a guitarist presses its button (every other pick on the host; always on a TV machine).
+func _pick(mode: String) -> void:
+	var pk = main.picks
+	var st: float = main.state_t
+	var d = main.players[0]
+	var n: int = pk.history.size()
+	var gs: Array = []
+	for p in main.players:
+		if p.index > 0 and p.active and p.is_local():
+			gs.append(p)
+	if mode == "client":
+		if st > 2.5 and not checks.has("cpick%d" % int(main.pick_next)) and not gs.is_empty():
+			checks["cpick%d" % int(main.pick_next)] = true
+			var p = gs[0]
+			if p.joy >= FAKE_PAD:
+				_pad_press(p.joy, [JOY_BUTTON_X, JOY_BUTTON_A, JOY_BUTTON_B][2])
+			else:
+				p.press(2)
+			print("BOT client: P%d pressed B on the pick orbs" % (p.index + 1))
+		return
+	var by_guitar: bool = n % 2 == 1 and not gs.is_empty()
+	var want: int = [0, 2, 1][n % 3]
+	if by_guitar:
+		if st > 1.4 and not checks.has("gpick%d" % n):
+			checks["gpick%d" % n] = true
+			var p = gs[0]
+			var k: int = pk.order_for(p.index).find(want)
+			if p.joy >= FAKE_PAD:
+				_pad_press(p.joy, [JOY_BUTTON_X, JOY_BUTTON_A, JOY_BUTTON_B][k])
+			else:
+				p.press(k)
+			print("BOT %s: P%d pressed %s for orb %d" % [mode, p.index + 1, ["X", "A", "B"][k], want])
+		return
+	if d.fake_vr:
+		var rest_l: Vector3 = d.pads[1].global_position + Vector3(0, 0.3, 0)
+		var rest_r: Vector3 = d.pads[2].global_position + Vector3(0, 0.3, 0)
+		d.fake_tips[0] = rest_l
+		d.fake_tips[1] = rest_r
+		var at: Vector3 = pk.orb_position(want)
+		if st > 1.3 and at != Vector3.INF:
+			d.fake_tips[1] = at  # in and hold
+	elif not d.vr and st > 1.4 and not checks.has("dpick%d" % n):
+		checks["dpick%d" % n] = true
+		var k2: int = pk.order_for(0).find(want)
+		_key_press(lane_keys[k2])
+		print("BOT %s: the flat drummer pressed %s for orb %d" % [mode, ["A", "S", "D"][k2], want])
+
+
+## Every frame: changes seen, how early they were told, the clock's speed.
+func _watch_changes() -> void:
+	var hz = main.hazards
+	if main.state == "play":
+		var r: float = main.rate_now()
+		checks["rate_max"] = maxf(float(checks.get("rate_max", 1.0)), r)
+		checks["rate_min"] = minf(float(checks.get("rate_min", 1.0)), r)
+		if main.gift == "bigdrum":
+			checks["bigdrum_ok"] = is_equal_approx(float(main.players[0].pad_scale), main.Deep.BIGDRUM_SIZE)
+	for tl in hz.tells_now():
+		var key := "%d|%d" % [int(main.song_serial), int(tl.bar)]
+		if not checks.has("told " + key):
+			checks["told " + key] = true
+			var start: float = float(tl.bar) * 4.0 * float(main.song.spb)
+			var early: float = start - float(main.song_t)
+			var ok: bool = tl.phase == "warn" and early >= main.warn_secs() * 0.85
+			if float(main.song_t) < 0.2 or (OS.has_environment("BOT_LATE") and songs_done == 0):
+				ok = true  # (a TV machine that joined while it was already told: a late joiner's first song)
+			var c: int = int(checks.get("changes", 0))
+			checks["changes"] = c + 1
+			if not ok:
+				checks["told_late"] = int(checks.get("told_late", 0)) + 1
+			print("BOT: %s change at bar %d told %.1f s before (want %.1f) %s" % [tl.kind, int(tl.bar), early, main.warn_secs(), "ok" if ok else "LATE"])
 
 
 func _report(mode: String) -> void:

@@ -15,7 +15,7 @@ const Tackle := preload("res://games/fishing_lake/tackle.gd")
 var fails := 0
 
 
-func _init() -> void:
+func _initialize() -> void:
 	var seeds := int(OS.get_environment("SEEDS")) if OS.has_environment("SEEDS") else 60
 	var total := 0
 	var gens := 0

@@ -22,7 +22,7 @@ func _fail(msg: String) -> void:
 		printerr("SCRIPT ERROR: WISH " + msg)
 
 
-func _init() -> void:
+func _initialize() -> void:
 	var seen := {}
 	var floors := 0
 	var pick_us := 0

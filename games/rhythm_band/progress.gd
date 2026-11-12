@@ -9,7 +9,8 @@ const COLOR := Color(1.0, 0.4, 0.6)
 
 
 ## data: the raw save (no defaults filled in: always .get with a default). today: Seeded.today().
-## grown: every fan the frog's band has won (the fan club keeps the newest ones); daily: TODAY'S SONG finished today.
+## grown: every fan the frog's band has won (the fan club keeps the newest ones; every deep.gd FEST_EVERY songs it also
+## grows Doodle's festival); daily: TODAY'S SONG finished today (stamped when it finishes).
 static func progress_summary(data: Dictionary, today: String) -> Dictionary:
 	var fans: Variant = data.get("fans", [])
 	return {"grown": maxi(int(data.get("fans_total", 0)), (fans as Array).size() if fans is Array else 0),
@@ -19,4 +20,4 @@ static func progress_summary(data: Dictionary, today: String) -> Dictionary:
 ## A save as the game writes it after a few days (tests/progress_test.gd: it must read as grown > 0, daily done).
 static func sample(today: String) -> Dictionary:
 	return {"best": 4200, "fans": [[0, 1, false], [2, 2, true], [1, 3, true]], "fans_total": 7, "songs": 7, "days": 3,
-		"last_day": today, "daily": today, "sessions": 4}
+		"last_day": today, "daily": today, "sessions": 4, "mode": "brave", "last_gift": "shaker", "solos": 2}
