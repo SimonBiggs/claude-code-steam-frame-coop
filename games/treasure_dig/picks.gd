@@ -17,7 +17,8 @@ const WAIT := {"mode": 14.0, "island": 12.0, "gift": 10.0}
 const AFTER := 1.0  # seconds the taken orb shows its dot before the orbs go
 const ROW_R := 5.0  # beach units from the chest towards the giant (who wades at ISLAND * S + 0.25 = 9 units): an arm away
 const GAP := 2.2  # beach units between orbs (more than 2 x TV_R: a digger touches one at a time)
-const Y := 1.5  # beach units above the sand (chest height for a digger; ~1.2 m up for the giant)
+const Y := 2.0  # beach units above the sand (diggers touch by distance across the sand; ~1.3 m up for the giant). At 1.5 a two-line name
+# under the ball dipped into the sand (a seated giant saw SUNNY ISLE's bottom line cut off, 2026-11-12).
 const SCALE := 1.0
 const TV_R := 0.95  # beach units from an orb's middle a digger must run to
 const HAND_R := 0.06  # metres (the glove)
