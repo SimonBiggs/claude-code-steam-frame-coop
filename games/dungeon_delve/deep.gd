@@ -1173,7 +1173,7 @@ func _build_shop_props() -> void:
 		var fr := Friends.info(String(freed[i]))
 		if fr.is_empty():
 			continue
-		var pet := Creatures.monster(String(fr["kind"]), {"color": fr["color"], "scale": 0.45, "seed": 5 + i})
+		var pet := Creatures.monster(String(fr["kind"]), {"color": fr["color"], "scale": 0.8, "seed": 5 + i})
 		pet.position = FloorGen.to_world(f, 0, Friends.CAMP_SPOTS[i])
 		add_child(pet)
 		Creatures.face_now(pet, (fn.position if i < 6 else c) - pet.position)
@@ -3219,16 +3219,17 @@ func _build_friend(fl: Dictionary) -> void:
 		var a := TAU * k / 10.0
 		bb.cylinder(0.035, 0.035, 1.05, MeshKit.at(Vector3(cos(a) * Friends.CAGE_R, 0.64, sin(a) * Friends.CAGE_R)), Friends.CAGE_COLOR, 6)
 	bb.torus(Friends.CAGE_R, 0.04, MeshKit.at(Vector3(0, 1.16, 0)), Friends.CAGE_COLOR, 18, 4)
-	bb.sphere(Friends.CAGE_R * 0.95, MeshKit.at(Vector3(0, 1.16, 0), Vector3(1.0, 0.35, 1.0)), Friends.CAGE_COLOR.darkened(0.15), 12)
+	for k2 in 2:  # two bars across the top (an open-topped dome, so the friend inside shows)
+		bb.cylinder(0.03, 0.03, Friends.CAGE_R * 2.0, MeshKit.at(Vector3(0, 1.2, 0), Vector3.ONE, Vector3(PI * 0.5, k2 * PI * 0.5, 0)), Friends.CAGE_COLOR, 6)
 	bb.torus(0.13, 0.03, MeshKit.at(Vector3(0, 1.42, 0), Vector3.ONE, Vector3(PI * 0.5, 0, 0)), Friends.CAGE_COLOR, 10, 4)
 	var bars := MeshKit.instance(bb.build(), false)
 	root.add_child(bars)
-	var pet := Creatures.monster(String(fr["kind"]), {"color": fr["color"], "scale": 0.42, "seed": 5})
+	var pet := Creatures.monster(String(fr["kind"]), {"color": fr["color"], "scale": 0.75, "seed": 5})
 	pet.position = Vector3(0, 0.12, 0)
 	root.add_child(pet)
 	var ring := view._ring(Friends.CAGE_R + 0.3, Friends.CAGE_COLOR)
+	ring.reparent(root, false)  # (view._ring adds it to the floor)
 	ring.position = Vector3(0, 0.04, 0)
-	root.add_child(ring)
 	friend_node = {"root": root, "bars": bars, "pet": pet, "ring": ring, "t": -1.0, "at": at}
 	if int(net.state_get("d_friend", 0)) == 1 and is_host() == false:
 		root.visible = false  # (a late joiner: already freed)

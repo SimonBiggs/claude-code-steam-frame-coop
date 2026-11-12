@@ -30,6 +30,10 @@ static func arm(node: Node, host_s := 150.0, joiner_s := 140.0) -> void:
 const DEADLINE_SPARE := 25.0
 
 static func within_deadline(s: float, joining := OS.has_environment("DUO_JOIN")) -> float:
+	if OS.has_environment("BOT_LATE") and s < INF:
+		# A late joiner (multibot --late S) started S seconds after the host: its game ends S sooner, so it still
+		# leaves first (Dungeon Delve 2026-11-12: a late client outlived the host, reloaded and never ended).
+		s = maxf(5.0, s - float(OS.get_environment("BOT_LATE")))
 	if not OS.has_environment("BOT_DEADLINE"):
 		return s
 	var limit := float(OS.get_environment("BOT_DEADLINE")) - DEADLINE_SPARE - (10.0 if joining else 0.0)
