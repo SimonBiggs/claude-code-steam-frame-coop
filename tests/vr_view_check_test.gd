@@ -108,6 +108,16 @@ func _run() -> void:
 	origin.global_position += Vector3(0.5, 6.0, 0.0)
 	await _frames(2)
 	_check(absf(c.global_position.y - cam.global_position.y) < 1.0, "a card re-placed just before a blink up the stairs rides along (%.1f m below the eyes)" % (cam.global_position.y - c.global_position.y))
+	# a teleport to a spot with a wall right in front: the card (riding along) comes in front of it at once, not
+	# 24 frames later from a stale spot (Hide and Seek 2026-11-12)
+	origin.global_position = Vector3.ZERO
+	await _frames(30)
+	wall.global_position = Vector3(20, 1.6, -1.0)
+	await _frames(90)  # (back out in the open, ~2.6 m away)
+	origin.global_position = Vector3(20, 0, 0)
+	await _frames(3)
+	probs = VrViewCheck.problems(root)
+	_check(not ", ".join(probs).contains("hidden behind") and cam.global_position.distance_to(c.global_position) < 1.0, "a card in front of a wall right after a teleport: %.2f m %s" % [cam.global_position.distance_to(c.global_position), probs])
 	origin.global_position = Vector3.ZERO
 	_clear_ui()
 	wall.free()
