@@ -13,6 +13,8 @@ extends Node3D
 ## and the giant is the region's CRYSTAL GUARDIAN (sagagen.gd guardian()): besides the STOMP it may make CRYSTAL
 ## RAIN (blue circles on the ground, then crystals drop there), ROLL (an orange lane, then he rolls down it and
 ## sits dizzy a moment: hits count extra then) or CALL helpers (green sparkle rings, then little slimes pop up).
+## saga-deep2: a GOLDEN SLIME on some roads (sagagen.gd road()) hops away from the heroes and never bumps anyone; it
+## isn't counted (count()) so it never holds the party up.
 ## Every attack shows its tell first, for sagagen.gd's fair warn time; tells() are drawn on every machine.
 
 const Creatures := preload("res://core/creatures.gd")
@@ -20,7 +22,7 @@ const MeshKit := preload("res://core/mesh_kit.gd")
 const World := preload("res://games/crystal_saga/world.gd")
 const WarnRings := preload("res://core/warn_rings.gd")
 
-enum { SLIME, MUSHY, BAT, GIANT }
+enum { SLIME, MUSHY, BAT, GIANT, GOLD }  ## GOLD: the golden slime (saga-deep2): it hops AWAY; poof it for a shard
 const GIANT_SCALE := 2.3
 const STOMP_R := 3.4
 const WIND_TIME := 1.3
@@ -53,8 +55,19 @@ func clear() -> void:
 	mons.clear()
 
 
+## Monsters the party has to clear (the golden slime is a bonus, not counted).
 func count() -> int:
-	return mons.size()
+	var n := 0
+	for id in mons:
+		n += 0 if int(mons[id]["kind"]) == GOLD else 1
+	return n
+
+
+func gold_id() -> int:
+	for id in mons:
+		if int(mons[id]["kind"]) == GOLD:
+			return int(id)
+	return -1
 
 
 func spawn(kind: int, p: Vector3) -> int:
@@ -88,6 +101,15 @@ func _make(id: int, kind: int, p: Vector3) -> Dictionary:
 			ring = _ring_mesh()
 			ring.visible = false
 			node.add_child(ring)
+		GOLD:
+			node = Creatures.monster("slime", {"color": Realm.GOLD_COLOR})
+			var cb := MeshKit.Builder.new()
+			var top := Creatures.height_of(node)
+			cb.cylinder(0.16, 0.13, 0.12, MeshKit.at(Vector3(0.0, top + 0.04, 0.0)), Color(1.0, 0.9, 0.35), 10, true)
+			for k in 5:
+				var a := TAU * k / 5.0
+				cb.cone(0.04, 0.1, MeshKit.at(Vector3(cos(a) * 0.13, top + 0.14, sin(a) * 0.13)), Color(1.0, 0.95, 0.5), 4, true)
+			node.add_child(MeshKit.instance(cb.build(), false))
 		_:
 			var hk := String(skins[0]) if skins.size() == 3 else "slime"
 			node = Creatures.monster(hk, {"color": SLIME_COLORS[id % SLIME_COLORS.size()]} if hk == "slime" else {"seed": id})
@@ -228,6 +250,9 @@ func step(delta: float, targets: Array) -> Array:
 			continue
 		if kind == BAT:
 			_bat(m, delta, targets)
+			continue
+		if kind == GOLD:
+			_gold(m, delta, targets)
 			continue
 		var best := Vector3.INF
 		for tg in targets:
@@ -465,6 +490,39 @@ const TELL_COLORS := Realm.TELL_COLORS
 func clear_tells() -> void:
 	if rings != null:
 		rings.clear()
+
+
+## The golden slime: little hops away from the nearest hero in its place (a bit slower than a hero walks).
+func _gold(m: Dictionary, delta: float, targets: Array) -> void:
+	var p: Vector3 = m["p"]
+	var zone := int(m["zone"])
+	m["t"] = float(m["t"]) - delta
+	if float(m["t"]) <= 0.0:
+		m["t"] = randf_range(0.7, 1.2)
+		var away := Vector3.ZERO
+		for tg in targets:
+			var tp: Vector3 = tg[0]
+			var d := Vector3(p.x - tp.x, 0.0, p.z - tp.z)
+			if World.zone_of(tp) == zone and d.length() < 4.0:
+				away += d.normalized() / maxf(0.5, d.length())
+		var dir := away.normalized() if away.length() > 0.01 else Vector3(randf_range(-1, 1), 0, randf_range(-1, 1)).normalized()
+		dir = dir.rotated(Vector3.UP, randf_range(-0.6, 0.6))
+		var c := World.center(zone)
+		if absf(p.x) > World.HALF_W - 1.2 or absf(p.z - c.z) > World.HALF_L - 1.6:  # cornered: slip back towards the middle
+			dir = (dir + Vector3(c.x - p.x, 0.0, c.z - p.z).normalized() * 1.2).normalized()
+		m["v"] = dir * (1.8 if away.length() > 0.01 else 0.6) * speed
+		m["hop"] = 0.5
+		m["yaw"] = atan2(dir.x, dir.z)
+	var hop: float = m["hop"]
+	var y := 0.0
+	if hop > 0.0:
+		hop = maxf(0.0, hop - delta)
+		m["hop"] = hop
+		p += (m["v"] as Vector3) * delta
+		y = sin(PI * (1.0 - hop / 0.5)) * 0.3
+	p = _zone_clamp(p, zone, 0.4)
+	p.y = y
+	m["p"] = p
 
 
 func _bat(m: Dictionary, delta: float, targets: Array) -> void:

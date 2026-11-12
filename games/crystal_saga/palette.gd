@@ -31,7 +31,7 @@ static func backgrounds() -> Dictionary:
 
 
 static func _monsters(skins: Array) -> Dictionary:
-	var out := {}
+	var out := {"golden slime": Realm.GOLD_COLOR}  # (any road may hide one: sagagen.gd road())
 	if String(skins[0]) == "slime":
 		out.merge(Contrast.named("slime", Realm.SLIME_COLORS))
 	if String(skins[1]) == "mushroom":

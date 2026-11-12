@@ -13,6 +13,7 @@ extends Node3D
 ## small meshes each, one OmniLight (only in the cave).
 
 const MeshKit := preload("res://core/mesh_kit.gd")
+const SeasonKit := preload("res://core/season_kit.gd")
 const Creatures := preload("res://core/creatures.gd")
 const Classes := preload("res://games/crystal_saga/classes.gd")
 const Realm := preload("res://games/crystal_saga/realm.gd")
@@ -138,6 +139,8 @@ func build(p: Dictionary, village_places: int = 0) -> void:
 	_props()
 	_village()
 	set_village(village_places, false)
+	_season_dress(String(plan.get("season", "")))
+	_build_nox()
 	cave_light = OmniLight3D.new()
 	cave_light.omni_range = 14.0
 	cave_light.light_energy = 1.4
@@ -983,6 +986,11 @@ func animate(delta: float, zone: int) -> void:
 		_flag.rotation.y = 0.15 * sin(_t * 1.7)
 	if _blades != null and village > 0:
 		_blades.rotate_object_local(Vector3.FORWARD, delta * 0.8)
+	if nox != null and nox.visible and not _nox_flying:
+		nox.position = _nox_home + Vector3(0.0, 0.12 * sin(_t * 2.2), 0.0)
+		nox.rotation.y = 0.35 * sin(_t * 0.9)
+		(nox.get_child(1) as Node3D).rotation.z = 0.35 * sin(_t * 14.0)  # wings flap
+		(nox.get_child(2) as Node3D).rotation.z = -0.35 * sin(_t * 14.0)
 
 
 # --- Realm, heroes and quests (saga-deep) ----------------------------------------------------------
@@ -1280,3 +1288,145 @@ static func region_mesh(biome: int) -> ArrayMesh:
 			b.cone(0.1, 0.25, MeshKit.at(Vector3(0.0, 0.07, 0.0)), Color(1.0, 0.55, 0.15), 6, true)
 			b.cone(0.05, 0.14, MeshKit.at(Vector3(0.0, 0.06, 0.03)), Color(1.0, 0.9, 0.4), 6, true)
 	return b.build()
+
+
+# --- Seasons, Nox and Lumi's crystal garden (saga-deep2) ---------------------------------------------------
+
+## The day's season dresses the road (plan "season"): core/season_kit.gd props by the village fences, the glade's
+## stones and the shrine, and its drifting things (blossom, pollen, leaves, snow) over the outdoor places.
+const SEASON_SPOTS: Array[Vector3] = [Vector3(-6.7, 0.0, 6.2), Vector3(6.7, 0.0, 3.6), Vector3(-6.7, 0.0, -6.4), Vector3(6.6, 0.0, -2.6),
+	Vector3(-6.2, 0.0, -50.5), Vector3(6.2, 0.0, -42.5), Vector3(-5.8, 0.0, -57.0), Vector3(5.8, 0.0, -58.4)]  # (zone 4: between the path and the garden)
+const DRIFT := {"spring": Color(1.0, 0.75, 0.85), "summer": Color(1.0, 0.95, 0.6), "autumn": Color(0.95, 0.55, 0.2), "winter": Color(0.97, 0.98, 1.0)}
+var season_props: Node3D  ## (bots, tests: the season's dressing)
+
+
+func _season_dress(s: String) -> void:
+	if not DRIFT.has(s):
+		return
+	var b := MeshKit.Builder.new()
+	for i in SEASON_SPOTS.size():
+		var at := SEASON_SPOTS[i]
+		SeasonKit.prop(b, s, at, i, 1.1, Vector3(-signf(at.x), 0.0, 0.0))
+	season_props = MeshKit.instance(b.build(), false)
+	season_props.name = "Season"
+	add_child(season_props)
+	for z in [0, 1, 3, 4]:
+		var d := SeasonKit.drift(DRIFT[s], s, {"box": Vector3(9.0, 0.5, HALF_L), "at": center(z) + Vector3(0.0, 7.0, 0.0),
+			"amount": 30 if s == "summer" else 70, "size": 0.1 if s == "summer" else 0.14})
+		add_child(d)
+
+
+## NOX, the little shadow imp (saga.gd NOX_LINES): he hovers by the broken Crystal of Light at the shrine, flies off
+## when it's restored, and lives in Willowbrook once every crystal of the realm is home.
+var nox: Node3D
+var _nox_home := Vector3.ZERO
+var _nox_flying := false
+const NOX_SHRINE := Vector3(1.9, 2.0, -2.0)  ## from the shrine's centre
+const NOX_VILLAGE := Vector3(-3.6, 1.6, 3.4)
+const NOX_SIZE := 1.7  ## (at 1.0 he was a dark speck by the crystal from the shrine's entrance)
+
+
+func _build_nox() -> void:
+	nox = Node3D.new()
+	nox.name = "Nox"
+	var b := MeshKit.Builder.new()
+	var body := Color(0.48, 0.32, 0.68)
+	b.sphere(0.32, MeshKit.at(Vector3.ZERO, Vector3(1.0, 1.1, 1.0)), body, 12)
+	b.sphere(0.24, MeshKit.at(Vector3(0.0, -0.3, 0.0), Vector3(1.0, 0.8, 1.0)), body.lightened(0.1), 10)
+	for sx in [-1.0, 1.0]:
+		b.cone(0.07, 0.24, MeshKit.at(Vector3(sx * 0.17, 0.35, 0.0), Vector3.ONE, Vector3(0.0, 0.0, -sx * 0.4)), Color(0.55, 0.35, 0.75), 6)
+		b.sphere(0.075, MeshKit.at(Vector3(sx * 0.12, 0.06, 0.27)), Color(1.0, 0.9, 0.3), 8, true)
+		b.sphere(0.035, MeshKit.at(Vector3(sx * 0.12, 0.06, 0.33)), Color(0.15, 0.1, 0.2), 6)
+	b.cone(0.05, 0.3, MeshKit.at(Vector3(0.0, -0.45, -0.25), Vector3.ONE, Vector3(-2.2, 0.0, 0.0)), body, 6)  # a little tail
+	nox.add_child(MeshKit.instance(b.build(), false))
+	for sx2 in [-1.0, 1.0]:
+		var w := Node3D.new()
+		w.position = Vector3(sx2 * 0.22, 0.1, -0.12)
+		var wb := MeshKit.Builder.new()
+		wb.prism(3, 0.3, 0.03, MeshKit.at(Vector3(sx2 * 0.25, 0.05, 0.0), Vector3(1.0, 1.0, 0.6), Vector3(PI * 0.5, 0.0, 0.0)), Color(0.5, 0.35, 0.7, 1.0), true)
+		w.add_child(MeshKit.instance(wb.build(), false))
+		nox.add_child(w)
+	nox.visible = false
+	add_child(nox)
+
+
+## where: "shrine" (waiting by the broken crystal), "village" (a friend at home) or "" (gone).
+func set_nox(where: String) -> void:
+	if nox == null:
+		return
+	_nox_flying = false
+	nox.scale = Vector3.ONE * NOX_SIZE
+	nox.visible = where != ""
+	_nox_home = center(4) + NOX_SHRINE if where == "shrine" else NOX_VILLAGE
+	nox.position = _nox_home
+
+
+## The crystal is restored: Nox zips up and away north.
+func nox_fly() -> void:
+	if nox == null or not nox.visible or _nox_home.z > -20.0 or not is_inside_tree():
+		return
+	_nox_flying = true
+	var tw := nox.create_tween()
+	tw.tween_property(nox, "position", nox.position + Vector3(2.0, 1.2, 0.0), 0.5).set_trans(Tween.TRANS_SINE)
+	tw.tween_property(nox, "position", nox.position + Vector3(6.0, 14.0, -26.0), 2.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.parallel().tween_property(nox, "scale", Vector3.ONE * 0.3, 2.2)
+	tw.tween_callback(func() -> void: nox.visible = false)
+
+
+## LUMI'S CRYSTAL GARDEN beside the shrine: a crystal flower for every crystal brought home (save "garden": the
+## region's biome each), in the region's glow colour; every 10th is a crystal tree. It spreads row by row out
+## across the meadow on both sides, and stays.
+var garden: Node3D
+var garden_count := 0
+
+
+## Where the i-th crystal flower grows (outside the shrine's pillars and the path).
+static func garden_spot(i: int) -> Vector3:
+	var side := -1.0 if i % 2 == 0 else 1.0
+	var j := i / 2
+	var col := j / 10
+	var row := j % 10
+	return center(4) + Vector3(side * (7.4 + col * 1.3), 0.0, 6.2 - row * 1.45 + (col % 2) * 0.7)
+
+
+func set_garden(list: Array, grow: bool) -> void:
+	if garden != null:
+		garden.queue_free()
+		garden = null
+	garden_count = list.size()
+	if list.is_empty():
+		return
+	garden = Node3D.new()
+	garden.name = "CrystalGarden"
+	add_child(garden)
+	var last := list.size() - 1
+	var b := MeshKit.Builder.new()
+	for i in list.size():
+		if grow and i == last:
+			continue
+		_garden_flower(b, i, int(list[i]), Vector3.ZERO)
+	if last > 0 or not grow:
+		garden.add_child(MeshKit.instance(b.build(), false))
+	if grow:
+		var nb := MeshKit.Builder.new()
+		_garden_flower(nb, last, int(list[last]), -garden_spot(last))
+		var n := MeshKit.instance(nb.build(), false)
+		n.position = garden_spot(last)
+		garden.add_child(n)
+		if is_inside_tree():
+			n.scale = Vector3(0.05, 0.05, 0.05)
+			n.create_tween().tween_property(n, "scale", Vector3.ONE, 1.4).set_trans(Tween.TRANS_BACK)
+
+
+static func _garden_flower(b: MeshKit.Builder, i: int, biome: int, off: Vector3) -> void:
+	var p := garden_spot(i) + off
+	var glow: Color = Realm.BIOMES[clampi(biome, 0, Realm.BIOMES.size() - 1)].glow
+	if i % 10 == 9:  # a crystal tree
+		b.cylinder(0.12, 0.18, 1.6, MeshKit.at(p + Vector3(0.0, 0.8, 0.0)), Color(0.85, 0.9, 1.0), 6, true)
+		for k in 5:
+			var a := TAU * k / 5.0 + i
+			_crystal_bits(b, p + Vector3(cos(a) * 0.45, 1.5 + 0.2 * (k % 2), sin(a) * 0.45), glow, 0.9)
+		_crystal_bits(b, p + Vector3(0.0, 1.9, 0.0), glow.lightened(0.3), 1.1)
+		return
+	b.cylinder(0.025, 0.03, 0.45, MeshKit.at(p + Vector3(0.0, 0.22, 0.0)), Color(0.4, 0.75, 0.45), 4)
+	_crystal_bits(b, p + Vector3(0.0, 0.5, 0.0), glow, 0.55)
