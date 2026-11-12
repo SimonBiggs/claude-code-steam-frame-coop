@@ -301,7 +301,7 @@ func _checks() -> void:
 		kit.assert_true(saw_gold, "%s: Gust's golden hoop flew (chapter %d)" % [mode, ch])
 	if mode != "client":
 		kit.assert_true(main.flights_done >= 1 and main.gate_picked != "", "%s: a fold was picked (%s) and a flight finished" % [mode, main.gate_picked])
-		var runs: Array = Telemetry.read("paper_planes")
+		var runs: Array = kit.my_runs("paper_planes")  # (this run's lines: other test Godots share the file)
 		kit.assert_true(not runs.is_empty() and (runs[-1] as Dictionary).has("stars"), "%s: the flight wrote a telemetry line" % mode)
 		if not runs.is_empty():
 			print("BOT last RUN: %s" % JSON.stringify(runs[-1]))

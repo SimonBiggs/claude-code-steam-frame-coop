@@ -522,3 +522,13 @@ func on_frame_limit(note := ", stopped at the --quit-after frame limit") -> void
 	if not _finished and on_cut.is_valid():
 		on_cut.call()
 	finish(false, note)
+
+
+## This run's telemetry RUN lines for a game (core/telemetry.gd). Concurrent test Godots share one user:// (godot-test
+## doesn't give each its own), so another bot's line can be the file's last one: never check runs[-1], check these.
+var started_unix := Time.get_unix_time_from_system()
+
+
+func my_runs(game_id: String) -> Array:
+	var runs: Array = load("res://core/telemetry.gd").read(game_id)
+	return runs.filter(func(e: Variant) -> bool: return e is Dictionary and float((e as Dictionary).get("t", 0)) >= started_unix - 2.0)

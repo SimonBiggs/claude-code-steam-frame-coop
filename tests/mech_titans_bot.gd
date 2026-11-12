@@ -159,7 +159,11 @@ func _simple_timeline(t0: float) -> void:
 	kit.every(0.5, _scan_text)
 	if not client and not host and made_round < 0:
 		_teach_timeline()
-	var end := 100.0
+	# BOT_END / --quit-after / the runner's deadline may end it sooner; a late joiner leaves BOT_LATE s earlier on its
+	# own clock, so it still leaves before the host does.
+	var end: float = preload("res://tests/bot_end.gd").end_at(100.0)
+	if client and OS.has_environment("BOT_LATE"):
+		end = maxf(30.0, end - float(OS.get_environment("BOT_LATE")))
 	if host:
 		kit.at(end - 6.0, "host checks (the TV machine is still connected)", _checks)
 		kit.at(end, "finish", kit.finish)
@@ -311,8 +315,10 @@ func _story_checks() -> void:
 	kit.assert_true(main.parade != null and main.parade.get_child_count() > 0, "%s: a kaiju friend waves from the hills" % mode)
 	if mode != "client":
 		kit.assert_true((main.save.data.get("friends", []) as Array).size() > 0, "%s: the kaiju friend is saved" % mode)
-		var runs: Array = Telemetry.read("mech_titans")
-		kit.assert_true(not runs.is_empty() and String((runs[-1] as Dictionary).get("end", "")) == "home", "%s: the round wrote a telemetry line" % mode)
+		var runs: Array = kit.my_runs("mech_titans")
+		# (lines from this run only: other test Godots may share the test telemetry file)
+		var mine: Array = runs.filter(func(e: Dictionary) -> bool: return String(e.get("end", "")) == "home")
+		kit.assert_true(not mine.is_empty(), "%s: the round wrote a telemetry line" % mode)
 		if not runs.is_empty():
 			print("BOT last RUN: %s" % JSON.stringify(runs[-1]))
 	if made_round >= 0:
