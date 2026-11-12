@@ -4,7 +4,7 @@ extends Node
 ##   "gift"  TUMBLE'S GIFTS before every day from the second: three of COSY SCARF, CARROT NOSE, MAGIC HAT, SPARKLE
 ##           BUTTONS, SNOW BOOTS.
 ## Three small glass orbs float an arm's reach in front of the VR builder (deep.gd row_spots, from where they stand and
-## look when the orbs come up; with no VR builder, bigger ones stand in the build circle). A TV player WALKS UNDER one;
+## look when the orbs come up; with no VR builder, bigger ones stand just past the build circle). A TV player WALKS UNDER one;
 ## the VR builder REACHES into one on purpose (a glove has to move in after they pop up and stay a moment - a hand
 ## already resting there or sweeping past never picks). A player already standing under one when they pop up must
 ## step out and back in. The first one decides for the team (a dot in their colour circles it). Nobody in time? The

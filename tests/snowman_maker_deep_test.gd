@@ -16,7 +16,7 @@ extends SceneTree
 ##   - the seasons: each has its weights, a picture, a line; winter is real snow and the rest a snow globe; summer has
 ##     the most sunbeams, winter the most slides; every date has a garden;
 ##   - the pick row: an arm's reach from the VR builder, apart, one roller never under two orbs; with no VR builder in
-##     the build circle (always clear of pines, boxes and the visitor);
+##     the clear middle of the garden (never a pine or a box there);
 ##   - Tumble's snow town only grows, finishes, and stands outside the garden, inside the globe, clear of the village
 ##     places and the season props;
 ##   - every key colour stands out (core/contrast.gd, games/snowman_maker/palette.gd);
@@ -287,8 +287,9 @@ func _row_for(vr: bool) -> void:
 				if reach > 1.25 or reach < 0.55:
 					_fail("%s: orb %d is %.2f m from the VR builder (an arm's reach, never in the face)" % [tag0, i, reach])
 			else:
-				if Vector2(p.x, p.z).length() + tvr > G.YARD_R:
-					_fail("%s: orb %d is not inside the build circle" % [tag0, i])
+				# near the middle, where no pine grows (gardengen.gd: 3.7 m out at least) and no box stands (they're on the near side)
+				if Vector2(p.x, p.z).length() + tvr > 3.7 - G.TREE_R - G.BODY_R or p.z > 0.0:
+					_fail("%s: orb %d is not in the clear middle of the garden" % [tag0, i])
 				if p.y - orb < 1.0:
 					_fail("%s: orb %d too low (a roller walks under it)" % [tag0, i])
 			for j in i:
@@ -297,6 +298,18 @@ func _row_for(vr: bool) -> void:
 					_fail("%s: orbs %d and %d touch" % [tag0, i, j])
 				if Vector2(p.x - q.x, p.z - q.z).length() < tvr * 2.0:
 					_fail("%s: one roller can be under orbs %d and %d" % [tag0, i, j])
+	# With no VR builder: a roller can stand under every orb in every garden (no pine, box or visitor there).
+	if not vr:
+		for s in Seeded.test_count(60, 15):
+			for chap in Story.CHAPTERS.size():
+				var g := G.garden(900 + s * 131, chap)
+				for p in Deep.row_spots(3, false):
+					var at := Vector3(p.x, 0.0, p.z)
+					if not G.free_at(g, at, G.BODY_R + tvr):
+						_fail("%s: a pine by orb (%.1f, %.1f) in garden %d ch%d" % [tag0, p.x, p.z, s, chap])
+					for b in g.boxes:
+						if Vector2(at.x - (b.pos as Vector3).x, at.z - (b.pos as Vector3).z).length() < G.BOX_R + tvr + G.BODY_R:
+							_fail("%s: a box by orb (%.1f, %.1f) in garden %d ch%d" % [tag0, p.x, p.z, s, chap])
 	# The VR row from the start spot is clear of the sign and stays in the garden; rollers reach under it (the build
 	# circle is always clear: gardengen.gd check()).
 	for p in Deep.row_spots(3, true):

@@ -24,7 +24,7 @@ extends RefCounted
 ##             igloo house, a snow dog, a lit snowy tree, a snow bear, a sled, a tower ...: saved, for good).
 ##   PICK ROW  three orbs: with a VR builder an arm's reach in front of them (they reach into one on purpose: a hand
 ##             moves in and stays a moment) and TV players walk under one; with no VR builder (a flat host, local
-##             play, a lone Deck) bigger orbs stand in the middle of the build circle. Nobody in time = the middle.
+##             play, a lone Deck) bigger orbs stand just past the build circle, where the rollers start and look. Nobody in time = the middle.
 
 const Seeded := preload("res://core/seeded.gd")
 const PickOrbs := preload("res://core/pick_orbs.gd")
@@ -97,17 +97,17 @@ const TOWN_Z: Array[float] = [-2.6, 0.0, 2.6, 5.2, 7.8]
 const GLOBE_R := 22.0
 const STAND_COLOR := Color(0.95, 0.78, 0.3)
 ## The pick row. With a VR builder: an arm's reach in front of them, a little apart; TV players walk under one.
-const ROW_AHEAD := 0.75
+const ROW_AHEAD := 0.8
 const ROW_GAP := 0.72
-const ROW_Y := 1.1
+const ROW_Y := 1.2
 const ORB_SCALE := 0.3
 const HAND_R := 0.1  # a glove this near an orb's edge is in it
 const DWELL := 0.3  # seconds a glove must stay in an orb (a hand sweeping past never picks)
 const TV_R := 0.32  # a roller this near an orb's middle (across) catches it
 const TV_DWELL := 0.15
-const FLAT_X: Array[float] = [-1.2, 0.0, 1.2]  # no VR builder: big orbs in the build circle (always clear)
-const FLAT_Y := 1.5
-const FLAT_Z := 0.0
+const FLAT_X: Array[float] = [-1.2, 0.0, 1.2]  # no VR builder: big orbs just beyond the build circle's far edge, where
+const FLAT_Y := 1.5  # the rollers start and their cameras look (no pine ever grows this near the middle, no box stands there)
+const FLAT_Z := -2.0
 const FLAT_SCALE := 0.5
 const FLAT_TV_R := 0.5
 const ROW_WAIT := {"mode": 20.0, "gift": 16.0}  # nobody took one: the middle
