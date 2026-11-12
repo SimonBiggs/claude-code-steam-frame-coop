@@ -104,9 +104,9 @@ func follow(delta: float) -> void:
 
 
 func _drop_trail(vid: Variant) -> void:
-	var p: Node = trails.get(vid, null)
-	if p != null and is_instance_valid(p):
-		p.queue_free()
+	var p: Variant = trails.get(vid, null)  # (untyped: the trail is freed with its vehicle when that goes first)
+	if is_instance_valid(p):
+		(p as Node).queue_free()
 	trails.erase(vid)
 
 

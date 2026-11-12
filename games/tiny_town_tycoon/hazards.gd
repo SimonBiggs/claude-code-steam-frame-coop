@@ -63,7 +63,7 @@ func show_now(hz: Dictionary) -> void:
 		return
 	seen[String(hz.kind)] = int(seen.get(String(hz.kind), 0)) + 1
 	var col := color_of(String(hz.kind))
-	var o := {"style": "disc", "stay": STAY, "alpha": 0.42, "y": RING_Y, "hot": col}
+	var o := {"style": "disc", "stay": STAY, "alpha": 0.58, "y": RING_Y, "hot": col}
 	if String(hz.kind) == "gust":
 		var from := Vector3(-Defs.HALF - 0.02, 0.0, float(hz.z))
 		rings.shape("line", from, Vector3.RIGHT, Vector2(Defs.HALF * 2.0 + 0.04, float(hz.w) * 2.0), col, 0.3, o)

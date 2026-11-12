@@ -62,6 +62,7 @@ var pick_seen := {}  ## stage -> true: orbs this machine saw
 var pick_reached := {}  ## stage -> true: a bot got under / into its orb
 var weather_dodges := 0  ## times a bot driver steered out of or waited before told weather
 var pick_away := {}  ## slot -> [stage, orb index to pass through first] (a vehicle already under an orb when they popped up must leave and come back)
+var pick_seen_t := {}  ## stage -> when the flat mayor bot first saw its orbs
 var bot_pads: Array = []  ## this machine's bot pads (device ids)
 var gift_seen_t := -1.0  ## seconds into the run when this machine first had a gift (the weather comes after it)
 
@@ -386,9 +387,15 @@ func _ordered(cells: Array[Vector2i]) -> Array[Vector2i]:
 func _flat_mayor() -> void:
 	if _pick_row("island"):  # the orbs are up: hold the cursor under ours (no building meanwhile)
 		var at := _pick_target()
+		var st := "%s %d" % [String(main.picks.orbs.stage), main.picks.history.size()]
+		if not pick_seen_t.has(st):
+			pick_seen_t[st] = kit.t
 		if at != Vector3.INF:
-			main.flat.cur = Vector2((at.x + Defs.HALF) / Defs.CELL, (at.z + Defs.HALF) / Defs.CELL)
-			pick_reached[main.picks.orbs.stage] = true
+			# like a thumb on the stick: away from the orbs a moment first (a cursor that was already under one when they
+			# popped up must leave and come back), then under ours
+			var off := Vector3(0.0, 0.0, Defs.CELL * 3.0) if kit.t - float(pick_seen_t[st]) < 0.8 else Vector3.ZERO
+			main.flat.cur = Vector2((at.x + off.x + Defs.HALF) / Defs.CELL, (at.z + off.z + Defs.HALF) / Defs.CELL)
+			pick_reached[String(main.picks.orbs.stage)] = true
 		return
 	if step_t > 0.0:
 		return
