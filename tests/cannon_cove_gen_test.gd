@@ -91,12 +91,21 @@ func _initialize() -> void:
 	print("average threat per wave: %s" % str(sizes))
 	_expect(float(sizes[5]) > float(sizes[1]) * 2.0, "wave 5 is clearly busier than wave 1")
 	_expect(float(sizes[9]) > float(sizes[7]), "bonus seas grow")
-	# TODAY'S VOYAGE.
-	for date in ["2026-10-29", "2026-12-25", "2027-01-01"]:
-		var ds := G.daily_seed(date)
-		_expect(ds == G.daily_seed(date), "TODAY'S VOYAGE is the same all day")
-		for why in G.check_voyage(ds):
-			_expect(false, "TODAY'S VOYAGE %s: %s" % [date, why])
+	# TODAY'S VOYAGE over 400+ days (Seeded.validate_days, the shared daily validator): every wave of the day's voyage
+	# fair as the game sails it (main.gd SIMPLE_MODE) for every crew size (crew_extra 0..4: 1-6 deckhands), the same all day.
+	var rs := Seeded.validate_days(func(date: String) -> Dictionary:
+			var ds := G.daily_seed(date)
+			var all: Array = []
+			for w in range(1, G.MAX_WAVE + 1):
+				all.append(G.wave_plan(ds, w, Main.SIMPLE_MODE, 4))
+			return {"seed": ds, "waves": all},
+		func(v: Dictionary) -> Array:
+			var why: Array = []
+			for extra in [0, 1, 2, 3, 4]:
+				for w in G.check_voyage(int(v.seed), Main.SIMPLE_MODE, extra):
+					why.append("crew +%d: %s" % [extra, w])
+			return why, 400, "TODAY'S VOYAGE", ["2026-11-11", "2026-11-12"])
+	fails += (rs.failures as Array).size()
 	_expect(G.daily_seed("2026-10-29") != G.daily_seed("2026-10-30"), "a new TODAY'S VOYAGE each day")
 	# The treasure shelf (on top of the stern castle wall) and the flags (on the stay).
 	var seen: Array = []

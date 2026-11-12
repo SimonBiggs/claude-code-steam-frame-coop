@@ -63,19 +63,27 @@ func _initialize() -> void:
 			for w in CourseGen.check(CourseGen.lesson(i, s)):
 				_fail("lesson %d seed %d: %s" % [i, s, w])
 			total += 1
-	# TODAY'S COURSE: fair, the same all day, different day to day.
+	# TODAY'S COURSE over 400+ days (and the 60 from whenever this runs): the show's first course the way the game
+	# builds it (Story.recipe -> describe -> CourseGen.make on every machine), fair and the same all day.
 	var days := {}
-	for d in 40:
-		var date := Time.get_date_string_from_unix_time(1790000000 + d * 86400)
-		var desc := Story.daily_desc(date)
-		var c := CourseGen.make(desc)
-		for w in CourseGen.check(c):
-			_fail("daily %s: %s" % [date, w])
-		_expect(String(c.name) == "TODAY'S COURSE", "the daily course is called TODAY'S COURSE")
-		_expect(var_to_str(c) == var_to_str(CourseGen.make(Story.daily_desc(date))), "daily %s is the same all day" % date)
-		days[var_to_str(c.floors)] = true
-		total += 1
-	_expect(days.size() >= 30, "daily courses differ (%d unique of 40)" % days.size())
+	var rd := Seeded.validate_days(func(date: String) -> Dictionary:
+			var desc := Story.describe(Story.recipe(3, 7, 0, true, date))
+			var c := CourseGen.make(desc)
+			c["_desc"] = desc
+			return c,
+		func(c: Dictionary) -> Array:
+			var why := CourseGen.check(c)
+			if String(c.name) != "TODAY'S COURSE":
+				why.append("not called TODAY'S COURSE")
+			if String(c._desc.get("k", "")) != "daily":
+				why.append("the show's first course isn't the daily one")
+			if int(c._desc.get("a", -1)) < 0:
+				why.append("no made course passed: TODAY'S COURSE fell back to the first lesson")
+			days[var_to_str(c.floors)] = true
+			return why, 400, "TODAY'S COURSE", ["2026-11-11", "2026-11-12"])
+	total += int(rd.checked)
+	fails += (rd.failures as Array).size()
+	_expect(days.size() >= int(rd.checked) * 3 / 4, "daily courses differ (%d unique of %d)" % [days.size(), int(rd.checked)])
 	# Hand checks: the validator catches broken courses.
 	var c0 := CourseGen.generate(42, 3)
 	var b1 := c0.duplicate(true)

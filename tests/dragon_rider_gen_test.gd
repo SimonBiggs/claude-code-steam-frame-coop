@@ -78,13 +78,25 @@ func _initialize() -> void:
 	var resc := G.route(11, Vector3(0, 45, 0), 0.0, 4, "rescue")
 	(resc.critters as Array)[0] = (resc.critters as Array)[0] + Vector3(0.0, 40.0, 0.0)
 	_expect(not G.check(resc).is_empty(), "a bunny out of scooping reach is caught")
-	# TODAY'S FLIGHT.
-	for date in ["2026-10-29", "2026-12-25", "2027-01-01"]:
-		var ds := G.daily_seed(date)
-		for lv in [1, 4, 7]:
-			var r := G.route(G.stage_seed(ds, lv), Vector3(0, 45, 0), 0.0, lv, Main.mission_for(lv))
-			for why in G.check(r):
-				_expect(false, "TODAY'S FLIGHT %s stage %d: %s" % [date, lv, why])
+	# TODAY'S FLIGHT over 400+ days (Seeded.validate_days, the shared daily validator): every stage of the day's flight
+	# (stage_seed(daily_seed, n), its mission, main.gd SIMPLE_MODE; the dragon starts each stage wherever the last one
+	# ended, so the start comes from the stage seed as above), each fair (check()), the same all day.
+	var rs := Seeded.validate_days(func(date: String) -> Array:
+			var ds := G.daily_seed(date)
+			var out: Array = []
+			for lv in range(1, G.MAX_STAGE + 1):
+				var s := G.stage_seed(ds, lv)
+				var rr := Seeded.rng(s, "start")
+				out.append(G.route(s, Vector3(rr.randf_range(-500, 500), rr.randf_range(25, 80), rr.randf_range(-500, 500)), rr.randf_range(-PI, PI),
+					lv, Main.mission_for(lv), Main.SIMPLE_MODE))
+			return out,
+		func(out: Array) -> Array:
+			var why: Array = []
+			for i in out.size():
+				for w in G.check(out[i]):
+					why.append("stage %d (%s): %s" % [i + 1, Main.mission_for(i + 1), w])
+			return why, 400, "TODAY'S FLIGHT", ["2026-11-11", "2026-11-12"])
+	fails += (rs.failures as Array).size()
 	_expect(G.daily_seed("2026-10-29") != G.daily_seed("2026-10-30"), "a new TODAY'S FLIGHT each day")
 	# Charms on the deck rail: every slot on the deck's length, each its own spot.
 	var seen: Array = []

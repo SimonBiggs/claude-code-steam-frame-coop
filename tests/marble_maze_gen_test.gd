@@ -11,6 +11,8 @@ extends SceneTree
 
 const MazeGen := preload("res://games/marble_maze/mazegen.gd")
 const Story := preload("res://games/marble_maze/story.gd")
+const Worlds := preload("res://games/marble_maze/worlds.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
 const Seeded := preload("res://core/seeded.gd")
 
 var fails := 0
@@ -62,33 +64,34 @@ func _initialize() -> void:
 			_fail("place %s rarely hides a shiny (%s)" % [Story.PLACES[pl].name, str(got)])
 	_expect(fallbacks == 0, "no plain fallback mazes (%d)" % fallbacks)
 	# The daily maze: fair for a year of days, the same all day, different on different days.
+	# Over 400+ days from 2026-10-01 (Seeded.validate_days, the shared daily validator: includes 2026-10-29, the shiny
+	# below a zoom arrow where the bot looped for 230 s, and the 60 days from whenever the test runs), as main.gd
+	# _gen_job() makes it (Story.daily(date, mode, Worlds.world_of(date))) in one mode a day (GENTLE / BRAVE / HARD by the
+	# date: a maze is ~10 ms, all three a day was +26 s), fair (never the
+	# plain fallback: MazeGen.generate() only returns a maze that passed check(), so it isn't run twice), with fair
+	# world events (Worlds.event_problems), the same all day.
 	var days := {}
-	for d in 120:
-		var date := Time.get_date_string_from_unix_time(1790000000 + d * 86400)
-		var lv := Story.daily(date)
-		var why := MazeGen.check(lv)
-		if lv.has("fallback"):
-			why.append("fell back")
-		for w in why:
-			_fail("daily %s: %s" % [date, w])
-		_expect(var_to_str(lv) == var_to_str(Story.daily(date)), "daily %s is the same all day" % date)
-		days["\n".join(PackedStringArray(lv.map))] = true
-		total += 1
-	_expect(days.size() > 100, "daily mazes differ day to day (%d unique of 120)" % days.size())
-	# 2026-10-29 (the shiny below a zoom arrow: the bot looped for 230 s) and the next 60 days, plus the
-	# 60 days from whenever the test runs: fair, and not the plain fallback.
-	var t29 := Time.get_unix_time_from_datetime_string("2026-10-29T12:00:00")
-	var now := Time.get_unix_time_from_system()
-	for base in [t29, now]:
-		for d in 61:
-			var date := Time.get_date_string_from_unix_time(int(base) + d * 86400)
-			var lv := Story.daily(date)
-			var why := MazeGen.check(lv)
-			if lv.has("fallback"):
-				why.append("fell back")
-			for w in why:
-				_fail("daily %s (seed %d): %s" % [date, int(lv.seed), w])
-			total += 1
+	var rs := Seeded.validate_days(func(date: String) -> Dictionary:
+			var wd := str(Worlds.world_of(date).id)
+			var out := {}
+			for mode in [PickOrbs.MODE_IDS[absi(hash(date)) % PickOrbs.MODE_IDS.size()]]:
+				var lv := Story.daily(date, mode, wd)
+				out[mode] = {"lv": lv, "ev": Worlds.events(lv, mode)}
+			return out,
+		func(out: Dictionary) -> Array:
+			var why: Array = []
+			for mode in out:
+				var lv: Dictionary = out[mode].lv
+				if lv.has("fallback"):
+					why.append("%s: fell back" % mode)
+				for w in Worlds.event_problems(lv, out[mode].ev, mode):
+					why.append("%s: events: %s" % [mode, w])
+			for mode in out:
+				days["\n".join(PackedStringArray(out[mode].lv.map))] = true
+			return why, 400, "TODAY'S MAZE", ["2026-11-11", "2026-11-12"])
+	total += int(rs.checked)
+	fails += (rs.failures as Array).size()
+	_expect(days.size() > int(rs.checked) * 4 / 5, "daily mazes differ day to day (%d unique of %d)" % [days.size(), int(rs.checked)])
 	_expect(Story.daily("2026-10-29").map != OLD_2026_10_29, "2026-10-29's daily maze is no longer the unfair one")
 	_expect(not MazeGen.check({"map": OLD_2026_10_29}).is_empty(), "a shiny only reachable by rolling sideways off a zoom arrow is caught")
 	# A hand check: a gate with its pads behind it must fail; a trap after an arrow must fail.

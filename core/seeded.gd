@@ -27,7 +27,11 @@ static func derive(seed_value: int, salt: Variant) -> int:
 
 
 ## Today's date as "YYYY-MM-DD" (local time, so the daily level changes at the family's midnight).
+## Test runs only (env SAVE_TEST, which godot-test sets): DUO_TODAY=YYYY-MM-DD pretends it is that day, so a bot can
+## replay any day's daily level (2026-11-12: Hide and Seek's TODAY'S STREET broke the bot on one date only).
 static func today() -> String:
+	if OS.has_environment("SAVE_TEST") and OS.get_environment("DUO_TODAY").length() == 10:
+		return OS.get_environment("DUO_TODAY")
 	return Time.get_date_string_from_system()
 
 
@@ -87,6 +91,44 @@ static func shuffled(r: RandomNumberGenerator, items: Array) -> Array:
 		a[i] = a[j]
 		a[j] = t
 	return a
+
+
+## Dates a daily-level validator checks: `count` days from `first`, then the 60 days from whenever the test runs
+## (so the family's real "today" and the coming weeks are always covered), plus `extra` dates. "YYYY-MM-DD" each.
+static func dates(count: int = 400, first: String = "2026-10-01", extra: Array = []) -> Array:
+	var out: Array = []
+	var t0 := Time.get_unix_time_from_datetime_string(first + "T12:00:00")
+	for d in count:
+		out.append(Time.get_date_string_from_unix_time(t0 + d * 86400))
+	var now := Time.get_unix_time_from_datetime_string(Time.get_date_string_from_system() + "T12:00:00")
+	for d in 60:
+		var s := Time.get_date_string_from_unix_time(now + d * 86400)
+		if not out.has(s):
+			out.append(s)
+	for e in extra:
+		if not out.has(str(e)):
+			out.append(str(e))
+	return out
+
+
+## The validator loop for a game's TODAY'S level (every game with a daily): make the daily level for each of
+## dates(count) with gen(date) and run check(level) on it (an Array of reasons, empty when fine); the same date must
+## make the same level all day. A daily nobody can win is a whole day lost for the family, so every gen test with a
+## daily runs this over a year+ of dates. Returns {"ok", "checked", "failures": [[date, reason], ...]} and prints
+## "SCRIPT ERROR: <tag> <date>: reason" per failure (first 30), like validate().
+static func validate_days(gen: Callable, check: Callable, count: int = 400, tag: String = "DAILY", extra: Array = []) -> Dictionary:
+	var failures: Array = []
+	var days := dates(count, "2026-10-01", extra)
+	for date in days:
+		var level: Variant = gen.call(date)
+		var reasons: Array = check.call(level)
+		if var_to_str(gen.call(date)) != var_to_str(level):
+			reasons.append("not the same all day")
+		for why in reasons:
+			failures.append([date, str(why)])
+			if failures.size() <= 30:
+				print("SCRIPT ERROR: %s %s: %s" % [tag, date, str(why)])
+	return {"ok": failures.is_empty(), "checked": days.size(), "failures": failures}
 
 
 ## The validator loop every generator test uses: generate `count` levels (seeds from `first`, plus any

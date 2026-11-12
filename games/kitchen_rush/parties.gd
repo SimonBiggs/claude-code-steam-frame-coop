@@ -135,11 +135,11 @@ static func offers(r: int, run_seed: int, progress: Dictionary, last_party: Stri
 
 ## The party that comes in round r when nobody chooses: Gran's friends (1), today's party (2), or the
 ## first invitation.
-static func default_party(r: int, run_seed: int, progress: Dictionary, last_party: String = "") -> String:
+static func default_party(r: int, run_seed: int, progress: Dictionary, last_party: String = "", date: String = "") -> String:
 	if r <= 1:
 		return "granny"
 	if r == DAILY_ROUND:
-		return daily_party()
+		return daily_party(date)
 	return String(offers(r, run_seed, progress, last_party)[0])
 
 
@@ -152,11 +152,12 @@ static func daily_party(date: String = "") -> String:
 ## Round r (1-based) of a session. `party` "" = the default. `fresh` = a taught dish to put first
 ## (the first time a session meets it). Returns a plain Dictionary:
 ## {round, party, daily, menu, orders, count, star, patience, interval, max_wait, raccoon, gift, word, line, fresh}
-static func make(r: int, run_seed: int, progress: Dictionary, party: String = "", fresh: String = "") -> Dictionary:
+## `date`: TODAY'S PARTY's date ("" = today; tests prove it over many dates).
+static func make(r: int, run_seed: int, progress: Dictionary, party: String = "", fresh: String = "", date: String = "") -> Dictionary:
 	var daily := r == DAILY_ROUND
 	if party == "" or daily or r <= 1:
-		party = default_party(r, run_seed, progress)
-	var rng := Seeded.rng(Seeded.daily_seed(GAME_ID) if daily else run_seed, "round%d/%s" % [0 if daily else r, party])
+		party = default_party(r, run_seed, progress, "", date)
+	var rng := Seeded.rng(Seeded.daily_seed(GAME_ID, date) if daily else run_seed, "round%d/%s" % [0 if daily else r, party])
 	var info: Dictionary = PARTIES[party]
 	var theme := String(progress.get("theme", ""))
 	var mode := Nights.mode_of(String(progress.get("mode", "brave")))
@@ -215,7 +216,7 @@ static func make(r: int, run_seed: int, progress: Dictionary, party: String = ""
 	# Brave first: its events (the first two of hard's list), then ease the pace until the simple kitchen model
 	# serves every order in time.
 	var length := 1.5 + float(count) * float(interval) * 0.85 + 20.0
-	var hard_events := Nights.make_events(r, run_seed if not daily else Seeded.daily_seed(GAME_ID), "hard", length)
+	var hard_events := Nights.make_events(r, run_seed if not daily else Seeded.daily_seed(GAME_ID, date), "hard", length)
 	m.events = hard_events.slice(0, int(Nights.MODES.brave.events))
 	_ease(m, {})
 	if mode == "brave":
