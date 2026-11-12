@@ -33,6 +33,12 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "pg-smudge", "date": "2026-11-12", "game": "paint_and_guess", "pic": "smudge", "line": "Smudge guesses too!"},
+	{"id": "pg-gifts", "date": "2026-11-12", "game": "paint_and_guess", "pic": "stampbrush", "line": "Smudge's brush gifts!", "try": {"PG_GIFT": "stamps"}},
+	{"id": "pg-surprises", "date": "2026-11-12", "game": "paint_and_guess", "pic": "paintdrip", "line": "Drips and windy easels!", "try": {"PG_TRICKS_NOW": "1", "PG_MODE": "brave"}},
+	{"id": "pg-museum", "date": "2026-11-12", "game": "paint_and_guess", "pic": "catstatue", "line": "Smudge's museum grows!"},
+	{"id": "pg-modes", "date": "2026-11-12", "game": "paint_and_guess", "pic": "goldframe", "line": "Gentle, brave or hard!"},
+	{"id": "pg-seasons", "date": "2026-11-12", "game": "paint_and_guess", "pic": "snowflake", "line": "Snowy studio", "try": {"PG_SEASON": "winter"}},
 	{"id": "db-gifts", "date": "2026-11-12", "game": "dodge_ball", "pic": "curveball", "line": "TumTum's ball gifts!", "try": {"DB_GIFT": "curve"}},
 	{"id": "db-tricks", "date": "2026-11-12", "game": "dodge_ball", "pic": "stomp", "line": "Stomps and ball showers!", "try": {"DB_TRICKS_NOW": "1", "DB_MODE": "brave"}},
 	{"id": "db-modes", "date": "2026-11-12", "game": "dodge_ball", "pic": "tumtum", "line": "Gentle, brave or hard!"},

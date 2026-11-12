@@ -16,6 +16,7 @@ extends Node3D
 ## fake_vr (bots): the VR code path driven by a virtual head and hand (bot_* fields).
 ## On the TV machine this is a ghost: a floating brush that follows the host's brush cursor.
 const UiKit := preload("res://core/ui_kit.gd")
+const Deep := preload("res://games/paint_and_guess/deep.gd")
 
 const TIP := 0.11  # brush tip ahead of the controller
 const TOUCH_FRONT := 0.12  # tip this close in front of the board paints directly
@@ -71,6 +72,8 @@ var refit_t := 0.0
 var painted_points := 0  # this round (for tips and stats)
 var colors_used := {}
 var touch_board_was := false
+var down_pts := 0  # points since the brush went down (STAMPS: a short tap stamps a star)
+var down_at := Vector2.ZERO
 
 # Bots: flat
 var bot := false
@@ -214,9 +217,14 @@ func _process(delta: float) -> void:
 		hud_label.text = main.hud_text(self)
 
 
-func _lift() -> void:
+## The brush lifts. tap_ok: a short tap (the brush just touched down and came up) stamps a star (STAMPS gift).
+func _lift(tap_ok: bool = false) -> void:
 	if cur_id >= 0:
+		var tap: bool = tap_ok and main.gift == "stamps" and down_pts <= 3 and last_pt.distance_to(down_at) < Deep.STAMP_TAP
 		main.stroke_end(0)
+		cur_id = -1
+		if tap:
+			main.stamp_at(down_at, color_idx)
 	cur_id = -1
 
 
@@ -224,15 +232,22 @@ func _paint(ok: bool, p: Vector2, held: bool) -> void:
 	cursor = p
 	cursor_on = ok
 	if not (held and ok and main.can_draw()):
-		_lift()
+		_lift(held == false and ok)
 		return
 	p = main.canvas.clamp_point(p)
-	var w := SPARKLE_W if color_idx == main.canvas.SPARKLE else BRUSH_W
+	var w := (SPARKLE_W if color_idx == main.canvas.SPARKLE else BRUSH_W) * Deep.brush_scale(main.gift)
+	if main.paint_blocked(last_pt if cur_id >= 0 else p, p, w * 0.5):  # a told surprise: the brush lifts there
+		_lift()
+		return
 	if cur_id < 0 or p.distance_to(last_pt) > 0.3:
 		if main.canvas.is_full():
 			_lift()
 			return
+		var fresh := cur_id < 0
 		cur_id = main.stroke_begin(color_idx, w, p, 0)
+		if fresh:
+			down_pts = 0
+			down_at = p
 		last_pt = p
 		smooth_pt = p
 		painted_points += 1
@@ -246,6 +261,7 @@ func _paint(ok: bool, p: Vector2, held: bool) -> void:
 		cur_id = main.stroke_begin(color_idx, w, last_pt, 0)
 	main.stroke_add(cur_id, smooth_pt)
 	painted_points += 1
+	down_pts += 1
 	last_pt = smooth_pt
 
 
