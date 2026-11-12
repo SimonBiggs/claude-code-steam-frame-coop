@@ -2633,8 +2633,8 @@ func _load_garage() -> void:
 	speed_mode = String(save.data.get("mode", "gentle"))
 	if not Cups.MODES.has(speed_mode):
 		speed_mode = "gentle"
-	if OS.has_environment("KART_MODE"):
-		speed_mode = OS.get_environment("KART_MODE")
+	if net.forced_mode("KART_MODE") != "":
+		speed_mode = net.forced_mode("KART_MODE")
 
 
 func _save_garage(k) -> void:

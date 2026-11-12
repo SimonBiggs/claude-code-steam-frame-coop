@@ -368,7 +368,7 @@ func _deep_checks(mode: String) -> void:
 	if mode == "client":
 		return
 	var stages: Array = main.picks.history.map(func(h: Array) -> String: return String(h[0]))
-	kit.assert_true(stages.has("mode"), "%s: the mode was picked %s" % [mode, str(main.picks.history)])
+	kit.assert_true(stages.has("mode") or BotKit.mode_forced(main.net, "DB_MODE"), "%s: the mode was picked %s" % [mode, str(main.picks.history)])  # (DB_MODE skips it)
 	kit.assert_true(stages.has("gift"), "%s: a gift was picked before round 2 %s" % [mode, str(main.picks.history)])
 	var people: bool = main._people() > 0
 	var by_someone := false
@@ -379,4 +379,5 @@ func _deep_checks(mode: String) -> void:
 		kit.assert_true(by_someone, "%s: a player really picked an orb (not just the wait) %s" % [mode, str(main.picks.history)])
 	if main.vr_rig != null and not people:
 		kit.assert_true(saw_vr_orbs, "%s: VR alone: the orbs float in front of the giant" % mode)
-	kit.assert_true(String(main.save.data.mode) != "", "%s: the mode is saved" % mode)
+	if not BotKit.mode_forced(main.net, "DB_MODE"):  # (a forced mode is never saved: the family's own pick stays)
+		kit.assert_true(String(main.save.data.mode) != "", "%s: the mode is saved" % mode)

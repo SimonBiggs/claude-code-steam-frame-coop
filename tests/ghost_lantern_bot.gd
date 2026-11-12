@@ -1,4 +1,5 @@
 extends Node
+const BotKit := preload("res://tests/bot_kit.gd")
 ## Headless bot for Ghost Lantern. Same scene on host and client (so node paths match).
 ## Local/host: player 1 points the lantern at the ghost nearest player 2 (and rings the bell now and then).
 ## Local/client: vacuum players walk up to the nearest ghost, aim at it and hold fire. On the client,
@@ -307,7 +308,7 @@ func _second_pass(_delta: float) -> void:
 		if t > 44.0 and not has_meta("client_second"):
 			set_meta("client_second", true)
 			print("BOT: client second pass: orbs=%s rings=%s mode=%s gifts=%s wing=%s" % [saw_orbs.keys(), saw_rings, main.game_mode, main.upgrades, main.house.get("wing", {}).get("id", "-")])
-			if main.net.connected and not OS.has_environment("GL_MODE"):
+			if main.net.connected and not BotKit.mode_forced(main.net, "GL_MODE"):
 				BotEnd.check(not saw_orbs.is_empty(), "the client saw the pick orbs")
 			_check_host_mode()
 		return
@@ -342,7 +343,7 @@ func _second_pass(_delta: float) -> void:
 		set_meta("second_report", true)
 		var hist: Array = main.picks.history.map(func(h: Array) -> String: return String(h[0]))
 		var errs: Array = []
-		if not OS.has_environment("GL_MODE") and not OS.has_environment("BOT_NIGHT") and not hist.has("mode"):
+		if not BotKit.mode_forced(main.net, "GL_MODE") and not OS.has_environment("BOT_NIGHT") and not hist.has("mode"):
 			errs.append("no mode pick (%s)" % str(hist))
 		if not hist.has("lantern"):
 			errs.append("no lantern gift pick (%s)" % str(hist))

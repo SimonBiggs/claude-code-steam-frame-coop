@@ -330,8 +330,6 @@ func _ready() -> void:
 	rings = WarnRings.new()
 	add_child(rings)
 	game_mode = GardenGen.mode_of(String(save.data.get("mode", "gentle")))
-	if OS.has_environment("BEE_MODE"):  # What's New "try": start in this mode (it floats in the middle of the pick)
-		game_mode = GardenGen.mode_of(OS.get_environment("BEE_MODE"))
 	_build_hud()
 	var menu := PauseMenuScript.new()
 	menu.main = self
@@ -341,6 +339,8 @@ func _ready() -> void:
 	net.main = self
 	add_child(net)
 	net.state_changed.connect(_on_state_changed)
+	if net.forced_mode("BEE_MODE") != "":  # What's New "try": start in this mode (it floats in the middle of the pick)
+		game_mode = GardenGen.mode_of(net.forced_mode("BEE_MODE"))
 	game_mode = game_mode  # (now net exists: share it)
 	picks = PicksScript.new()
 	picks.main = self

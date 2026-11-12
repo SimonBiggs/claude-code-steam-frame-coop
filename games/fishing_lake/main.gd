@@ -279,8 +279,8 @@ func _ready() -> void:
 	rings = WarnRings.new()
 	add_child(rings)
 	game_mode = String(save.data.get("mode", "brave"))
-	if OS.has_environment("FL_MODE") and Tackle.MODE_NUM.has(OS.get_environment("FL_MODE")):
-		game_mode = OS.get_environment("FL_MODE")
+	if net.forced_mode("FL_MODE") != "" and Tackle.MODE_NUM.has(net.forced_mode("FL_MODE")):
+		game_mode = net.forced_mode("FL_MODE")
 		Engine.set_meta("fl_mode_set", true)
 	if not Tackle.MODE_NUM.has(game_mode):
 		game_mode = "brave"

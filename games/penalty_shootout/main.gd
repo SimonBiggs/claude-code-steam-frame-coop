@@ -2853,8 +2853,8 @@ func _on_picked(stage: String, opt: Variant, _slot: int) -> void:
 	if stage == "mode":
 		mode_picked = true
 		mode = Deep.mode_of(String(opt))
-		if OS.has_environment("PS_MODE"):  # tests: this mode (a networked run checks the TV plays at it)
-			mode = Deep.mode_of(OS.get_environment("PS_MODE"))
+		if net.forced_mode("PS_MODE") != "":  # tests: this mode (a networked run checks the TV plays at it)
+			mode = Deep.mode_of(net.forced_mode("PS_MODE"))
 		save.data.mode = mode
 		_story_for_all(String(PickOrbs.MODE_LINES.get(mode, "Let's go!")), String(PickOrbs.mode(mode).pic), PickOrbs.mode_color(mode))
 	else:

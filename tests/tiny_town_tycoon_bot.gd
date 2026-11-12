@@ -973,10 +973,12 @@ func _deep_checks() -> void:
 	var stages := {}
 	for h in main.picks.history:
 		stages[String(h[0])] = int(h[2])
-	kit.assert_true(stages.has("mode") and stages.has("gift"), "%s: the mode and the gift were picked on the orbs (%s)" % [mode, str(main.picks.history)])
+	var forced := BotKit.mode_forced(main.net, "TT_MODE")  # (TT_MODE skips the mode pick)
+	kit.assert_true((stages.has("mode") or forced) and stages.has("gift"), "%s: the mode and the gift were picked on the orbs (%s)" % [mode, str(main.picks.history)])
 	var someone: bool = main.vr_rig != null or main.flat != null or main._drivers() > 0
 	if someone:
-		kit.assert_true(int(stages.get("mode", -1)) >= 0, "%s: a player took the mode orb (not the time-out)" % mode)
+		if not forced:
+			kit.assert_true(int(stages.get("mode", -1)) >= 0, "%s: a player took the mode orb (not the time-out)" % mode)
 		kit.assert_true(int(stages.get("gift", -1)) >= 0, "%s: a player took a gift orb (not the time-out)" % mode)
 
 

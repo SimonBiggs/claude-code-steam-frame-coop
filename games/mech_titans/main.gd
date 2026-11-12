@@ -1592,7 +1592,7 @@ func _deep_start() -> void:
 	if not Frames.unlocked(h).has(fr):
 		fr = "titan"
 	var try := OS.get_environment("MT_TRY")
-	var md := OS.get_environment("MT_MODE")
+	var md: String = net.forced_mode("MT_MODE")
 	if md == "" and try == "mega":
 		md = "mega" if bool(save.data.get("mega_ok", false)) else ""
 	if md != "" and RoundGen.valid_mode(md):

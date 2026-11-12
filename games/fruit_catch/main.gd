@@ -746,8 +746,8 @@ func _begin_session() -> void:
 	season = SeasonKit.override("fruit_catch", Seeded.season(), Deep.SEASONS)
 	if String(save.data.mode) != "":
 		mode = Deep.mode_of(String(save.data.mode))
-	if OS.has_environment("FC_MODE"):
-		mode = Deep.mode_of(OS.get_environment("FC_MODE"))
+	if net.forced_mode("FC_MODE") != "":
+		mode = Deep.mode_of(net.forced_mode("FC_MODE"))
 		mode_picked = true  # (What's New "try": straight in)
 	if OS.has_environment("FC_GIFT") and not Deep.gift(OS.get_environment("FC_GIFT")).is_empty():
 		mode_picked = true

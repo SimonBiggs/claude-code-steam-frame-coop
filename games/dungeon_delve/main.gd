@@ -248,11 +248,11 @@ func _start_show() -> void:
 	_enter_room(first)
 	# DD_MODE (tests, launchers: also opens HEROIC) or DD_TRY (the arcade's What's New "try this": just the jump,
 	# HEROIC stays locked until the Slime King falls).
-	var try_mode := OS.get_environment("DD_MODE") if OS.has_environment("DD_MODE") else OS.get_environment("DD_TRY")
+	var try_mode: String = net.forced_mode("DD_MODE") if net.forced_mode("DD_MODE") != "" else OS.get_environment("DD_TRY")
 	if try_mode != "" and not has_meta("deep_mode_started"):
 		set_meta("deep_mode_started", true)
 		var dm := try_mode
-		if dm in ["brave", "daily"] or (dm == "heroic" and (OS.has_environment("DD_MODE") or deep.heroic_unlocked())):
+		if dm in ["brave", "daily"] or (dm == "heroic" and (net.forced_mode("DD_MODE") != "" or deep.heroic_unlocked())):
 			deep.start_run(dm)
 
 

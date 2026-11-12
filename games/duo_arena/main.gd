@@ -2296,7 +2296,7 @@ func _start_run() -> void:
 	run_seed = int(OS.get_environment("DA_SEED")) if OS.has_environment("DA_SEED") else (Gen.daily_seed() if daily else Seeded.fresh_seed())
 	if daily:
 		save.data.daily = today
-	game_mode = OS.get_environment("DA_MODE") if Gen.MODES.has(OS.get_environment("DA_MODE")) else String(save.data.mode)
+	game_mode = net.forced_mode("DA_MODE") if Gen.MODES.has(net.forced_mode("DA_MODE")) else String(save.data.mode)
 	if not Gen.MODES.has(game_mode):
 		game_mode = "gentle"
 	net.state_set("da_phase", "practice")
@@ -2450,7 +2450,7 @@ func _pick_players() -> Array:
 
 ## Host / local: the orbs before wave 1 (after the practice targets).
 func _begin_run_picks() -> void:
-	if not Engine.has_meta("da_mode_set") and not OS.has_environment("DA_MODE"):
+	if not Engine.has_meta("da_mode_set") and net.forced_mode("DA_MODE") == "":
 		_begin_pick("mode")
 	else:
 		_begin_pick("hero")

@@ -1789,8 +1789,8 @@ func _begin_deep() -> void:
 	_session_seed = Seeded.fresh_seed()
 	deep_season = SeasonKit.override("tiny_town_tycoon", Seeded.season(), Deep.SEASONS)
 	deep_mode = Deep.mode_of(String(save.data.get("mode", "brave")))
-	if OS.has_environment("TT_MODE"):  # (What's New "try" / bots: straight in)
-		deep_mode = Deep.mode_of(OS.get_environment("TT_MODE"))
+	if net.forced_mode("TT_MODE") != "":  # (What's New "try" / bots: straight in)
+		deep_mode = Deep.mode_of(net.forced_mode("TT_MODE"))
 		mode_picked = true
 	if OS.has_environment("TT_GIFT") and not Deep.gift(OS.get_environment("TT_GIFT")).is_empty():
 		_try_gift = OS.get_environment("TT_GIFT")

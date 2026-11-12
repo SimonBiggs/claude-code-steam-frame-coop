@@ -1,4 +1,5 @@
 extends Node
+const BotKit := preload("res://tests/bot_kit.gd")
 ## Headless bot for Paint and Guess. The artist (local / DUO_HOST) paints doodles - circles, zigzags and
 ## spirals in different colours (incl. RAINBOW and SPARKLE), undoes a stroke now and then - and every
 ## local guesser thinks for a moment, then picks one of its four answers (wrong ones get crossed out,
@@ -93,7 +94,7 @@ func _exit_tree() -> void:
 		if rounds_done >= 1:
 			check_host_mode(main.net, main.play_mode)
 		if main.net.mode != "client":
-			BotEnd.check(picks_seen >= 1 or OS.has_environment("PG_MODE"), "the picks came up and were taken (%d)" % picks_seen)
+			BotEnd.check(picks_seen >= 1 or BotKit.mode_forced(main.net, "PG_MODE"), "the picks came up and were taken (%d)" % picks_seen)
 			if lone_reveals >= 1:
 				# A lone painter (a lone Deck, the VR artist alone) makes real progress: Smudge guesses.
 				BotEnd.check(smudge_seen >= 1, "Smudge guessed for a lone painter (%d of %d rounds)" % [smudge_seen, lone_reveals])

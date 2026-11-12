@@ -1276,8 +1276,8 @@ func _begin_deep() -> void:
 	session_seed = Seeded.fresh_seed()
 	season = SeasonKit.override("obstacle_rush", Seeded.season(), Deep.SEASONS)
 	mode = Deep.mode_of(String(save.data.mode) if String(save.data.mode) != "" else "brave")
-	if OS.has_environment("OR_MODE"):  # (What's New "try" / bots: straight in)
-		mode = Deep.mode_of(OS.get_environment("OR_MODE"))
+	if net.forced_mode("OR_MODE") != "":  # (What's New "try" / bots: straight in)
+		mode = Deep.mode_of(net.forced_mode("OR_MODE"))
 		mode_picked = true
 	if OS.has_environment("OR_GIFT") and not Deep.gift(OS.get_environment("OR_GIFT")).is_empty():
 		gift = OS.get_environment("OR_GIFT")  # (What's New "try": the first course with that gift)

@@ -598,7 +598,7 @@ func _one_round() -> bool:
 
 
 func _deep_checks(mode: String, short: bool) -> void:
-	var pm := OS.get_environment("PB_MODE")
+	var pm := BotKit.forced_mode(main.net, "PB_MODE")
 	if pm == "" and (mode != "client" or _had("orbs:mode")):
 		kit.assert_true(_had("orbs_shown:mode"), "%s: the mode orbs popped up" % mode)
 	kit.assert_true(String(main.play_mode) in ["gentle", "brave", "hard"], "%s: a mode is set (%s)" % [mode, main.play_mode])

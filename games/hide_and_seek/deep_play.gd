@@ -252,8 +252,8 @@ func _resolve() -> void:
 			best = i
 	var id := String(choices[best])
 	if stage == "mode":
-		if OS.has_environment("HNS_MODE"):  # tests: this mode (a networked run checks the TV plays at it)
-			id = Deep.mode_of(OS.get_environment("HNS_MODE"))
+		if main.net.forced_mode("HNS_MODE") != "":  # tests: this mode (a networked run checks the TV plays at it)
+			id = Deep.mode_of(main.net.forced_mode("HNS_MODE"))
 		mode = id
 		share_mode()
 		main.save.data["mode"] = id

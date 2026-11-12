@@ -347,8 +347,8 @@ func _start_show() -> void:
 		trip_no = int(OS.get_environment("SC_TRIPS")) + (int(get_meta("again", 0)) if has_meta("started") else 0)
 	daily_trip = trip_no > 0 and not (save.data.daily as Dictionary).has(Seeded.today()) and not OS.has_environment("BOT_NO_DAILY")
 	season = SeasonKit.override("starship_crew", Seeded.season(), Deep.SEASONS)
-	if OS.has_environment("SC_MODE"):
-		mode = Deep.mode_of(OS.get_environment("SC_MODE"))
+	if net.forced_mode("SC_MODE") != "":
+		mode = Deep.mode_of(net.forced_mode("SC_MODE"))
 		mode_picked = true
 	elif String(save.data.mode) != "":
 		mode = Deep.mode_of(String(save.data.mode))

@@ -1012,8 +1012,8 @@ func _on_picked(st: String, opt: Variant, _slot: int) -> void:
 	if st == "mode":
 		mode_picked = true
 		play_mode = Deep.mode_of(String(opt))
-		if OS.has_environment("RW_MODE"):  # tests: this mode
-			play_mode = Deep.mode_of(OS.get_environment("RW_MODE"))
+		if net.forced_mode("RW_MODE") != "":  # tests: this mode
+			play_mode = Deep.mode_of(net.forced_mode("RW_MODE"))
 		save.data.mode = play_mode
 		save.mark_dirty()
 		story(String(PickOrbs.MODE_LINES.get(play_mode, "Let's go!")), String(PickOrbs.mode(play_mode).pic), PickOrbs.mode_color(play_mode))

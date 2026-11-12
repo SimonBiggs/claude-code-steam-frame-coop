@@ -1641,8 +1641,8 @@ func _open_deep(seed_value: int) -> void:
 	session_seed = Seeded.derive(seed_value, "deep")
 	var saved_mode := String(save.data.get("mode", ""))
 	mode = Deep.mode_id(saved_mode) if saved_mode != "" else "brave"
-	if OS.has_environment("RC_MODE"):
-		mode = Deep.mode_id(OS.get_environment("RC_MODE"))
+	if net.forced_mode("RC_MODE") != "":
+		mode = Deep.mode_id(net.forced_mode("RC_MODE"))
 		mode_picked = true
 	net.state_set("mode", mode)
 	season = SeasonKit.override("roller_coaster", Seeded.season(), Deep.SEASONS)

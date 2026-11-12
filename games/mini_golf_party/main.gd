@@ -191,8 +191,8 @@ func _ready() -> void:
 	picks = PicksScript.new()
 	picks.main = self
 	add_child(picks)
-	if OS.has_environment("MGP_MODE"):  # (What's New / debug: skip the mode pick)
-		mode = Deep.mode_of(OS.get_environment("MGP_MODE"))
+	if net.forced_mode("MGP_MODE") != "":  # (What's New / debug: skip the mode pick)
+		mode = Deep.mode_of(net.forced_mode("MGP_MODE"))
 		mode_picked = true
 	if OS.has_environment("DUO_JOIN"):
 		net.join_finished.connect(func(ok: bool) -> void: _setup("client" if ok else "local"))
