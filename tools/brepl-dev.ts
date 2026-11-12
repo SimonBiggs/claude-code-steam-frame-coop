@@ -510,6 +510,13 @@ export async function installTools(since: string) {
       try { await (globalThis as any).writeModule(dest, await readFile(src, "utf8")); } catch (e) { done.push(`${rel}: NOT installed (${String(e).slice(0, 200)})`); continue; }
     } else await sh(`cp --preserve=mode ${JSON.stringify(src)} ${JSON.stringify(dest)}`);
     done.push(`${rel} -> ${dest.replace(HOME, "~")}`);
+    // A new or changed systemd unit does nothing until systemd reloads it, and a new timer until it is enabled
+    // (2026-11-12: duo-nightly-tests.timer had to be enabled by hand after its landing).
+    if (dest.includes("/.config/systemd/user/")) {
+      const unit = dest.split("/").pop()!;
+      const r = await sh(`systemctl --user daemon-reload${unit.endsWith(".timer") ? ` && systemctl --user enable --now ${unit} 2>&1 | tail -1; systemctl --user is-active ${unit}` : ""}`);
+      done.push(`systemd reloaded${unit.endsWith(".timer") ? `, ${unit}: ${r.out.split("\n").pop()}` : ""}`);
+    }
     // A running user service still executes the OLD copy (2026-11-11: duo-telemetry-recv): restart every active
     // service whose unit runs this file.
     if (dest.startsWith(BIN)) {
