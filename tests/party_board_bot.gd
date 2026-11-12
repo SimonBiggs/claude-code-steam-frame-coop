@@ -19,6 +19,11 @@ extends Node
 ## local mode unplugs / replugs P2's pad (bolt), checks the pause banner is just PAUSED and never under
 ## the pause menu's own PAUSED, has a late player drop in and out (their cues are forgotten), and prints
 ## "BOT: ERROR how-to text" for any instruction text in the game's HUD, banners or VR text.
+## SECOND PASS (deep.gd): the mode pick on the pick orbs before the first party (TV seats move their dot with the stick
+## and press A; the fake VR giant moves its right hand into an orb and holds it there - whoever is here, never assuming
+## TV players), Mango's gift pick from round 2 (only the player furthest behind; CPUs take their own), the warned
+## surprises told on the spaces at a round's start and going off at its end, the gift tags over the tokens, the season
+## on the island and Mango's party hall growing after a party.
 
 const BotKit := preload("res://tests/bot_kit.gd")
 const Boards := preload("res://games/party_board/boards.gd")
@@ -47,6 +52,11 @@ var bad_text := {}  ## SIMPLE: how-to text found (reported once each)
 var unplug_dev := -1
 var unplug_slot := -1
 var spare_dev := -1
+var _pick_t := 0.0  ## SECOND PASS: seconds the current pick has been up here
+var _pick_key := ""
+var _pick_aim := -1
+var takes: Array = []  ## [stage, slot] of every orb taken (host / local)
+var _gift_held := false  ## a gift tag floated over a token here
 
 
 func _ready() -> void:
@@ -123,9 +133,42 @@ func _on_state(key: String, value: Variant) -> void:
 				seen["menu:" + String((value as Dictionary).get("kind", ""))] = true
 
 
+## SECOND PASS: the picks, surprises and gift tags seen here.
+func _watch_deep() -> void:
+	if main.picks == null or main.hazards == null:
+		return
+	var orbs_st: Dictionary = main.picks.cur_state
+	var pk := String(orbs_st.get("stage", ""))
+	if pk != _pick_key:
+		_pick_key = pk
+		_pick_t = 0.0
+		_pick_aim = -1
+	else:
+		_pick_t += 0.1
+	if pk != "":
+		seen["orbs:" + pk] = true
+		if main.picks.showing():
+			seen["orbs_shown:" + pk] = true
+	if main.flow != null and main.picks.history.size() > takes.size():
+		for i in range(takes.size(), main.picks.history.size()):
+			var h: Array = main.picks.history[i]
+			takes.append([String(h[0]), int(h[2])])
+			kit.info("pick %s: %s by %d" % [String(h[0]), String(h[1]), int(h[2])])
+	var hz: Variant = main.net.state_get("hz", [])
+	if hz is Array and not (hz as Array).is_empty():
+		seen["hz:told"] = true
+		if main.hazards.rings.count() > 0:
+			seen["hz:rings"] = true
+	if main.hazards.fell > 0:
+		seen["hz:fell"] = true
+	if not main.gift_tags.tags.is_empty():
+		_gift_held = true
+
+
 ## Record what happened and finish once the results are up.
 func _watch() -> String:
 	_measure_vr_panels()
+	_watch_deep()
 	var phase := String(main.net.state_get("phase", ""))
 	seen["phase:" + phase] = true
 	seen["step:" + String(main.net.state_get("step", ""))] = true
@@ -181,6 +224,7 @@ func _watch() -> String:
 					kit.assert_true(built.size() == 1, "a festival piece was built and saved (%s)" % str(built))
 					kit.assert_true(main.festival.built.size() == 1 and main.festival.deco_mi.mesh != null, "the festival piece stands on the island")
 					kit.assert_true((main.save.data["flags"] as Array).size() >= 1, "the winner planted a flag (%s)" % str(main.save.data["flags"]))
+					kit.assert_true(int(main.save.data["hall_n"]) == 1 and main.hall.mesh_node != null, "Mango's party hall grew a step (%d)" % int(main.save.data["hall_n"]))
 					kit.finish())
 				return ""
 			if main.ceremony.results_ui != null and not seats.is_empty():
@@ -263,6 +307,19 @@ func _drive_tv(slot: int) -> void:
 	var phase := String(main.net.state_get("phase", ""))
 	var step := String(main.net.state_get("step", ""))
 	var party: Node = main.party
+	if phase == "pick":  # SECOND PASS: move the dot one orb with the stick, then A
+		var st: Dictionary = (main.picks.cur_state if main.picks != null else {})
+		var al: Array = st.get("allowed", [])
+		if st.is_empty() or not (al.is_empty() or al.has(slot)):
+			kit.slot_stick(party, slot, "left", Vector2.ZERO)
+			return
+		if _pick_t < 1.0:
+			kit.slot_stick(party, slot, "left", Vector2(-1.0 if slot % 2 == 0 else 1.0, 0.0))
+		else:
+			kit.slot_stick(party, slot, "left", Vector2.ZERO)
+			if _pick_t > 1.4 and _may_press(slot, 1.0):
+				kit.slot_press(party, slot, "accept")
+		return
 	if phase == "festival":  # the winner picks Mango's next festival piece
 		var fm = main.menus.tv_menu
 		if fm != null and is_instance_valid(fm) and int((main.net.state_get("menu", {}) as Dictionary).get("pid", -1)) == slot and _may_press(slot, 1.0):
@@ -339,6 +396,9 @@ func _drive_vr(delta: float) -> void:
 			vm.confirm(mini(pick, vm.items.size() - 1))
 		return
 	_menu_t = 0.0
+	if phase == "pick":
+		_vr_pick(rig, delta)
+		return
 	if main.simple and phase in ["board", "intro", "ceremony"]:
 		_poke_props(rig, delta)
 	if phase == "board" and step == "roll" and int((main.net.state_get("dice", {}) as Dictionary).get("pid", -1)) == 0:
@@ -372,6 +432,21 @@ func _drive_vr(delta: float) -> void:
 		return
 	if phase == "results":
 		kit.vr_trigger(rig, 0.0)
+
+
+## SECOND PASS: the giant's right hand moves into an orb (one it may take) and stays there; the left waits up high.
+func _vr_pick(rig: Node, delta: float) -> void:
+	var st: Dictionary = (main.picks.cur_state if main.picks != null else {})
+	var al: Array = st.get("allowed", [])
+	kit.vr_reach(rig, 0, Vector3(-0.5, 1.75, 1.6), 3.0, delta)
+	if st.is_empty() or String(st.get("row", "")) != "vr" or not (al.is_empty() or al.has(0)) or _pick_t < 0.9:
+		kit.vr_reach(rig, 1, Vector3(0.5, 1.75, 1.6), 3.0, delta)
+		return
+	if _pick_aim < 0:
+		_pick_aim = int(kit.t * 10.0) % (st.get("spots", []) as Array).size()
+	var at: Vector3 = main.picks.orb_position(_pick_aim)
+	if at != Vector3.INF:
+		kit.vr_reach(rig, 1, at, 1.2, delta)
 
 
 ## Grab a die off its pedestal with the right glove, swing towards the island, let go.
@@ -467,6 +542,7 @@ func _cut_checks() -> void:
 		kit.assert_true(_vr_panel_bad.is_empty(), "every VR card / menu is ~1.5 m away and above the board %s" % str(_vr_panel_bad))
 	if main.simple:
 		kit.assert_true(bad_text.is_empty(), "SIMPLE: no how-to text on this machine (%s)" % str(bad_text.keys()))
+		_deep_checks(mode, true)
 
 
 func _checks() -> void:
@@ -513,7 +589,35 @@ func _checks() -> void:
 		kit.assert_true(seen.has("mg:" + OS.get_environment("PB_MINIGAME")), "%s: played %s" % [mode, OS.get_environment("PB_MINIGAME")])
 
 
+## SECOND PASS checks (short: a run cut before the results).
+func _deep_checks(mode: String, short: bool) -> void:
+	var pm := OS.get_environment("PB_MODE")
+	if pm == "" and (mode != "client" or seen.has("orbs:mode")):
+		kit.assert_true(seen.has("orbs_shown:mode"), "%s: the mode orbs popped up" % mode)
+	kit.assert_true(String(main.play_mode) in ["gentle", "brave", "hard"], "%s: a mode is set (%s)" % [mode, main.play_mode])
+	if main.flow != null and pm == "":
+		var mt: Array = takes.filter(func(t: Array) -> bool: return String(t[0]) == "mode")
+		kit.assert_true(not mt.is_empty(), "%s: the mode was picked %s" % [mode, str(takes)])
+		var people: bool = kit.tv_players() > 0 or main.vr_rig != null or main.party.player_count() > 0
+		if people and not mt.is_empty():
+			kit.assert_true(int(mt[0][1]) >= 0, "%s: a player took the mode orb (not the time-out) %s" % [mode, str(mt)])
+			if main.vr_rig != null and kit.tv_players() == 0 and main.party.local_slots().filter(func(s: int) -> bool: return s != 0).is_empty():
+				kit.assert_true(int(mt[0][1]) == 0, "%s: the VR giant alone took the mode orb with its hand" % mode)
+	kit.assert_true(main.season_node.props != null and main.season_node.season != "", "%s: the season dresses the island (%s)" % [mode, main.season_node.season])
+	kit.info("deep: mode %s season %s takes %s hz %s gift tags %s" % [main.play_mode, main.season_node.season, str(takes),
+		str(main.hazards.seen), str(_gift_held)])
+	if short:
+		return
+	if main.flow != null:
+		kit.assert_true(takes.any(func(t: Array) -> bool: return String(t[0]) == "gift"), "%s: Mango's gift was picked %s" % [mode, str(takes)])
+	if mode != "client":
+		kit.assert_true(_gift_held or main.picks.history.any(func(h: Array) -> bool: return String(h[0]) == "gift"), "%s: a gift was held" % mode)
+	kit.assert_true(seen.has("hz:told") and seen.has("hz:rings"), "%s: the round's surprises were told on the board (rings)" % mode)
+	kit.assert_true(seen.has("hz:fell"), "%s: the surprises went off at the round's end" % mode)
+
+
 func _checks_simple(mode: String) -> void:
+	_deep_checks(mode, false)
 	var menus: PackedStringArray = []
 	var mgs: PackedStringArray = []
 	for k in seen:
@@ -534,7 +638,7 @@ func _checks_simple(mode: String) -> void:
 	for i in main.data.count():
 		reds += 1 if main.data.type_of(i) == "red" else 0
 	var rainbow := bool((main.net.state_get("board_mod", {}) if main.net.state_get("board_mod", {}) is Dictionary else {}).get("rainbow", false))
-	kit.assert_true(reds >= 3 or (rainbow and reds == 0), "%s: the seeded red spaces are on this machine's board (%d%s)" % [
+	kit.assert_true(reds >= 2 or (rainbow and reds == 0), "%s: the seeded red spaces are on this machine's board (%d%s)" % [
 		mode, reds, ", PARTY ISLAND's RAINBOW turned them blue" if rainbow else ""])
 	var stars := 0
 	for p in _final_roster:

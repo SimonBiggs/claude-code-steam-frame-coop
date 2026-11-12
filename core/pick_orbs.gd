@@ -213,20 +213,7 @@ func _glass_ball(col: Color, is_default: bool) -> MeshInstance3D:
 
 ## A billboard picture (StoryCard picture drawn into a small viewport).
 func _picture(pic: String, col: Color) -> Sprite3D:
-	var vp := SubViewport.new()
-	vp.size = Vector2i(PIC_PX, PIC_PX)
-	vp.transparent_bg = true
-	vp.disable_3d = true
-	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	vp.add_child(StoryCard.picture(pic, PIC_PX, col))
-	var s := Sprite3D.new()
-	s.add_child(vp)
-	s.texture = vp.get_texture()
-	s.pixel_size = 1.0 / PIC_PX
-	s.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	s.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	s.render_priority = 2
-	return s
+	return StoryCard.sprite(pic, PIC_PX, col)
 
 
 func clear() -> void:

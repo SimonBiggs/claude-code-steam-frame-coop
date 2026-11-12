@@ -31,6 +31,8 @@ const Festival := preload("res://games/party_board/festival.gd")
 const Seeded := preload("res://core/seeded.gd")
 const Telemetry := preload("res://core/telemetry.gd")
 const Boards := preload("res://games/party_board/boards.gd")
+const Deep := preload("res://games/party_board/deep.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
 
 const CPU_NAMES := ["BOBO", "PIP", "MIMI", "TUTU", "ZAZA", "LULU", "KIKI"]
 const MIN_SEATS := 4
@@ -83,7 +85,11 @@ var rocket_round := -1  ## SPACE STATION's ROCKET: everyone rolls two dice this 
 var mod := {}  ## the board event's lasting changes, published as "board_mod": {rainbow: bool, chest: space id}
 var behind_final: Array = []  ## pids with the fewest stars when the last round started (COMEBACK trophy)
 var new_trophies: Array = []  ## won this party: shown after the winner moment
-var catchup_given := 0  ## presents given to whoever was behind (telemetry)
+var catchup_given := 0  ## Mango's gifts given to whoever was behind (telemetry)
+## SECOND PASS (deep.gd): the mode is picked once a session (mode_picked), Mango's gift from round 2, the warned
+## surprises told when a round starts (hz_now) and going off when its last turn ends.
+var mode_picked := false
+var hz_now: Array = []
 
 
 func _ready() -> void:
@@ -129,8 +135,12 @@ func begin() -> void:
 	_roster()
 	net.state_set("star", -1)
 	net.state_set("phase", "title")
+	net.state_set("hz", [])
+	main.fx("orbs", [{}])
+	hz_now = []
 	festival_done = false
 	main.publish_festival()
+	main.publish_deep()
 	if main.simple:
 		main.fx("banner", ["PARTY BOARD!", "", "victory", SIMPLE_TITLE_T])
 		seq.wait(_w(SIMPLE_TITLE_T))
@@ -159,7 +169,7 @@ func _roster() -> void:
 func _new_record(pid: int, cpu: bool) -> Dictionary:
 	return {"pid": pid, "name": _name_for(pid, cpu), "cpu": cpu, "coins": Rules.START_COINS, "stars": 0, "items": [],
 		"space": 0, "mg_wins": 0, "mg_coins": 0, "events": 0, "max_coins": Rules.START_COINS, "duel_wins": 0,
-		"stars_bought": 0, "hops": 0, "items_bought": 0, "sixes": 0, "bonus": []}
+		"stars_bought": 0, "hops": 0, "items_bought": 0, "sixes": 0, "bonus": [], "gift": ""}
 
 
 func _name_for(pid: int, cpu: bool) -> String:
@@ -335,9 +345,10 @@ func start_game() -> void:
 	net.state_set("final", false)
 	_publish()
 	if main.simple:
-		_make_plan()
-		net.state_set("star", int(plan.route[0]))
-		_simple_opening()
+		if not mode_picked:
+			_mode_pick()
+			return
+		_simple_party()
 		return
 	var spots: Array = main.data.star_spots().filter(func(s: int) -> bool: return main.data.distance(0, s) >= 6)
 	net.state_set("star", int(spots[rng.randi() % spots.size()]))
@@ -364,6 +375,180 @@ func start_game() -> void:
 		main.fx("sfx", ["drumroll", -4.0]))
 	seq.wait(_w(2.8))
 	seq.add(_start_round)
+
+
+func _simple_party() -> void:
+	_make_plan()
+	main.net.state_set("star", int(plan.route[0]))
+	_simple_opening()
+
+
+## SECOND PASS: GENTLE / BRAVE / HARD on the pick orbs, once a session (the family's last mode in the middle; anyone
+## playing takes it). PB_MODE=<id> (What's New "try", bots) skips the pick.
+func _mode_pick() -> void:
+	mode_picked = true
+	var forced := OS.get_environment("PB_MODE")
+	if Deep.MODES.has(forced):
+		_set_mode(forced)
+		_simple_party()
+		return
+	var last := String(main.save.data.get("mode", ""))
+	var ids := PickOrbs.mode_ids(Deep.mode_of(last) if last != "" else "brave")
+	var entries: Array = []
+	for id in ids:
+		var m := PickOrbs.mode(String(id))
+		entries.append({"id": String(id), "name": String(m.name), "pic": String(m.pic), "color": m.color})
+	main.net.state_set("cur", -1)
+	main.net.state_set("phase", "pick")
+	main.net.state_set("step", "pick")
+	main.picks.begin("mode", entries, ids, func(_st: String, opt: Variant, _by: int) -> void: _set_mode(String(opt)))
+	seq.until(func() -> bool: return not main.picks.active(), 30.0, func() -> void: _set_mode(main.play_mode))
+	seq.wait(_w(0.3))
+	seq.add(_simple_party)
+
+
+func _set_mode(id: String) -> void:
+	main.play_mode = Deep.mode_of(id)
+	main.save.data["mode"] = main.play_mode
+	main.save.mark_dirty()
+	main.publish_deep()
+	main.fx("banner", [PickOrbs.mode_name(main.play_mode) + "!", "", "victory", 1.4])
+
+
+## SECOND PASS: MANGO'S GIFT (deep.gd GIFTS) for whoever is furthest behind, from the second round: three gifts on the
+## pick orbs, only they may take one (a CPU takes its own). PB_GIFT=<id> (What's New "try", bots) is always offered.
+func _mango_gift() -> void:
+	var recs: Array = []
+	var star := int(main.net.state_get("star", 0))
+	for k in pl:
+		recs.append({"pid": int(k), "stars": int(pl[k]["stars"]), "cpu": _cpu(int(k)), "dist": main.data.distance(int(pl[k]["space"]), star)})
+	var who := Deep.gift_to(recs)
+	if who < 0:
+		return
+	var ids := Deep.gift_choices(int(main.save.data.get("hall_n", 0)), Seeded.derive(int(plan.get("seed", 0)), "gift %d" % round_n))
+	var forced := OS.get_environment("PB_GIFT")
+	if not Deep.gift(forced).is_empty() and not ids.has(forced):
+		ids[ids.size() / 2] = forced
+	var entries: Array = []
+	for id in ids:
+		var g := Deep.gift(String(id))
+		entries.append({"id": String(id), "name": String(g.name), "pic": String(g.pic), "color": g.color})
+	var cpu_i := -1
+	if _cpu(who):
+		var d: int = main.data.distance(int(pl[who]["space"]), star)
+		for want in (["shortcut", "lucky", "shield", "double"] if d > 6 else ["double", "lucky", "shield", "shortcut"]):
+			if ids.has(want):
+				cpu_i = ids.find(want)
+				break
+	main.net.state_set("cur", who)
+	main.net.state_set("phase", "pick")
+	main.net.state_set("step", "pick")
+	main.picks.begin("gift", entries, ids, func(_st: String, opt: Variant, _by: int) -> void: _give_gift(who, String(opt)),
+		[who], who if _cpu(who) else -1, cpu_i)
+	seq.until(func() -> bool: return not main.picks.active(), 30.0)
+	seq.add(func() -> void:
+		main.net.state_set("phase", "board")
+		main.net.state_set("step", "start"))
+	seq.wait(_w(0.4))
+
+
+func _give_gift(pid: int, id: String) -> void:
+	if not pl.has(pid) or Deep.gift(id).is_empty():
+		return
+	pl[pid]["gift"] = id
+	_publish()
+	catchup_given += 1
+	run["gift_" + id] = int(run.get("gift_" + id, 0)) + 1
+	main.fx("anim", [pid, "cheer", 0.8])
+	main.fx("sfx", ["power_up", -3.0])
+
+
+## pid's gift is used now (it pops off the token).
+func _use_gift(pid: int) -> String:
+	var id := String(pl[pid].get("gift", "")) if pl.has(pid) else ""
+	if id == "":
+		return ""
+	pl[pid]["gift"] = ""
+	_publish()
+	run["gifts_used"] = int(run.get("gifts_used", 0)) + 1
+	main.fx("gift_used", [pid, id])
+	if not _cpu(pid):
+		var used: Array = main.save.data["gifts_used"]
+		if not used.has(id):
+			used.append(id)
+			main.save.mark_dirty()
+	return id
+
+
+func _gift_of(pid: int) -> String:
+	return String(pl[pid].get("gift", "")) if pl.has(pid) else ""
+
+
+## A push back is coming: the UMBRELLA takes it (true: nothing happens).
+func _shielded(pid: int) -> bool:
+	if _gift_of(pid) != "shield":
+		return false
+	_use_gift(pid)
+	main.fx("anim", [pid, "cheer", 0.6])
+	return true
+
+
+## SECOND PASS: this round's warned surprises (deep.gd zones), told on the spaces when the round starts.
+func _tell_surprises() -> void:
+	hz_now = []
+	var stands: Array = []
+	for k in pl:
+		stands.append(int(pl[k]["space"]))
+	var star := int(main.net.state_get("star", -1))
+	var chest := int(mod.get("chest", -1))
+	var types: Array = main.data.types()
+	var zs := Deep.zones(main.data, types, int(plan.get("seed", 0)), round_n, rounds, main.play_mode, star, chest, stands)
+	if zs.is_empty():
+		return
+	var why := Deep.problems(zs, main.data, types, main.play_mode, star, chest, stands)
+	if not why.is_empty():
+		push_warning("Party Board: unfair surprises skipped: %s" % str(why))
+		return
+	hz_now = zs
+	main.net.state_set("hz", zs.duplicate(true))
+	main.net.state_set("cur", -1)
+	main.net.state_set("step", "surprise")
+	var kind := String((zs[0] as Dictionary).kind)
+	main.fx("story", ["MANGO", String(Deep.KIND_NAMES[kind]), String(Deep.KIND_PICS[kind]), Deep.color_of(kind).to_html()])
+	run["hz_told"] = int(run.get("hz_told", 0)) + zs.size()
+	seq.wait(_w(1.8))
+
+
+## SECOND PASS: the round's last turn is over: the surprises go off and whoever stands in one slides back.
+func _surprises_fall() -> void:
+	var zs := hz_now
+	hz_now = []
+	if zs.is_empty():
+		return
+	main.net.state_set("cur", -1)
+	main.net.state_set("step", "surprise")
+	main.fx("hz_fall", [zs])
+	seq.wait(_w(0.8))
+	var md := Deep.mode_data(main.play_mode)
+	var back := {}
+	for k in pl:
+		var pid := int(k)
+		if Deep.hit(zs, int(pl[pid]["space"])):
+			if _shielded(pid):
+				continue
+			back[pid] = 1 if _behind().has(pid) else int(md.hz_back)
+			main.fx("anim", [pid, "hurt", 0.8])
+			run["hz_hits"] = int(run.get("hz_hits", 0)) + 1
+	for i in Deep.MAX_BACK:
+		seq.add(func() -> void:
+			for pid in back:
+				if int(back[pid]) > i:
+					var prev: Array = main.data.prev_of(int(pl[pid]["space"]))
+					if not prev.is_empty():
+						_move_to(int(pid), int(prev[0])))
+		seq.wait(_w(0.4 if not back.is_empty() else 0.0))
+	seq.add(func() -> void: main.net.state_set("hz", []))
+	seq.wait(_w(0.4))
 
 
 ## SIMPLE: one cheerful headline, a look at the STAR, then everyone's practice roll.
@@ -421,9 +606,10 @@ func _start_round() -> void:
 			behind_final = _behind()
 			seq.wait(_w(1.6))
 		if round_n >= 2:
-			seq.add(_catch_up_simple)
+			seq.add(_mango_gift)
 		if round_n == int(plan.get("event_round", 0)):
 			seq.add(_board_event)
+		seq.add(_tell_surprises)
 		seq.add(_next_turn)
 		return
 	main.fx("banner", ["ROUND %d" % round_n, "of %d" % rounds, "default", 1.8])
@@ -500,6 +686,8 @@ func _round_over() -> void:
 	main.net.state_set("cur", -1)
 	main.net.state_set("step", "overview")
 	seq.wait(_w(0.6))
+	if main.simple and not hz_now.is_empty():
+		seq.add(_surprises_fall)
 	seq.add(func() -> void: main.runner.start(_pick_minigames(), _after_minigames))
 
 
@@ -712,6 +900,9 @@ func _roll(pid: int, practice: bool = false) -> void:
 
 
 func _add_die(v: int) -> void:
+	var gpid := int((main.net.state_get("dice", {}) as Dictionary).get("pid", -1))
+	if main.simple:
+		v = Deep.die(v, _gift_of(gpid))  # LUCKY DIE: 1-3 count 3 more (never more than 6)
 	dice_values.append(v)
 	# a copy: changing the stored dict in place made state_set see "no change", so the rolled number
 	# never reached the dice blocks (or the TV machine)
@@ -749,6 +940,8 @@ func _start_move(pid: int) -> void:
 		main.fx("banner", ["DOUBLES!", "+5 bonus steps... no wait, +5 coins!", "level", 1.8])
 		_coins(pid, 5)
 		total -= 5
+	if main.simple and _gift_of(pid) in ["lucky", "shortcut"]:
+		total = Deep.hops(total, _use_gift(pid))  # (SHORTCUT: a few hops more)
 	main.net.state_set("dice", {})
 	main.net.state_set("steps_left", total)
 	main.net.state_set("step", "move")
@@ -853,12 +1046,15 @@ func _star_offer(pid: int) -> void:
 
 ## SIMPLE: passing or landing on the STAR picks it up.
 func _star_grab(pid: int) -> void:
-	pl[pid]["stars"] = int(pl[pid]["stars"]) + 1
+	var worth := Deep.star_value(_gift_of(pid))  # DOUBLE STAR: this one counts two
+	if worth > 1:
+		_use_gift(pid)
+	pl[pid]["stars"] = int(pl[pid]["stars"]) + worth
 	pl[pid]["stars_bought"] = int(pl[pid]["stars_bought"]) + 1
 	_publish()
 	main.net.state_set("step", "star")
-	main.fx("star_fx", [pid, 1])
-	main.fx("banner", ["STAR!", "", "victory", 1.8])
+	main.fx("star_fx", [pid, worth])
+	main.fx("banner", ["STAR!" if worth == 1 else "TWO STARS!", "", "victory", 1.8])
 	seq.wait(_w(2.0))
 	seq.add(_move_star)
 
@@ -986,8 +1182,10 @@ func _land_simple(pid: int, sp: int, type: String) -> void:
 		main.fx("sfx", ["boing", -3.0, 0.8])
 		main.fx("anim", [pid, "hurt", 0.6])
 		seq.wait(_w(0.6))
-		# gentle catch-up: whoever has the fewest stars only slides back one
-		for i in (1 if _behind().has(pid) else SIMPLE_BACK):
+		# gentle catch-up: whoever has the fewest stars only slides back one; the mode says how far (deep.gd back);
+		# Mango's UMBRELLA keeps you where you are
+		var n_back := 0 if _shielded(pid) else (1 if _behind().has(pid) else int(Deep.mode_data(main.play_mode).back))
+		for i in n_back:
 			seq.add(func() -> void:
 				var back: Array = main.data.prev_of(int(pl[pid]["space"]))
 				if not back.is_empty():
@@ -1267,18 +1465,6 @@ func _do_board_event(ev: String) -> void:
 				main.fx("sfx", ["power_up"])
 
 
-## Gentle catch-up (each round from the second): whoever has the fewest stars and holds nothing gets a present.
-func _catch_up_simple() -> void:
-	var got := false
-	for pid in _behind():
-		if (pl[pid]["items"] as Array).is_empty():
-			_give_item(int(pid), _random_item())
-			catchup_given += 1
-			got = true
-	if got:
-		seq.wait(_w(1.0))
-
-
 func _coins(pid: int, n: int) -> void:
 	if not pl.has(pid) or n == 0:
 		return
@@ -1540,6 +1726,9 @@ func finish_game(winners: Array) -> void:
 				dd.erase(ks[0])
 		_award_trophies(winners)
 		main.publish_festival()
+	if main.simple and pl.values().any(func(r: Dictionary) -> bool: return not bool(r["cpu"])):
+		sd["hall_n"] = int(sd.get("hall_n", 0)) + 1  # Mango's party hall grows a step (hall.gd)
+		main.publish_deep()
 	main.save.mark_dirty()
 	_telemetry("party", winners)
 
@@ -1601,7 +1790,8 @@ func _telemetry(end: String, winners: Array) -> void:
 		"board": String(plan.get("board", "")), "spaces": main.data.count(), "catchup": catchup_given,
 		"trophies": (main.save.data["trophies"] as Dictionary).size(), "reds_on_board": int(plan.reds), "stars": stars,
 		"winners": winners.size(), "human_won": human_won, "secs": int((Time.get_ticks_msec() - party_t0) / 1000),
-		"festival": (main.save.data["festival"] as Array).size()}, true)
+		"festival": (main.save.data["festival"] as Array).size(), "play_mode": main.play_mode, "season": Seeded.season(),
+		"hall": int(main.save.data.get("hall_n", 0))}, true)
 	Telemetry.run("party_board", info)
 
 
@@ -1615,7 +1805,7 @@ func _make_plan() -> void:
 	var fresh := not (sd["boards_played"] as Dictionary).has(bid)
 	var hats := Boards.seat_hats(Boards.hats(sd["trophies"]), seed_value)
 	var desc := {"seed": seed_value, "level": 4 if daily else int(sd["parties"]), "rounds": rounds, "daily": daily, "board": bid,
-		"hats": hats}
+		"hats": hats, "mode": main.play_mode}
 	var t0 := Time.get_ticks_usec()
 	plan = main.apply_plan(desc)
 	plan["daily"] = daily

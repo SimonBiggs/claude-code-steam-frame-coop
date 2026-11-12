@@ -10,6 +10,7 @@ const BD := preload("res://games/party_board/board_data.gd")
 const Boards := preload("res://games/party_board/boards.gd")
 const Token := preload("res://games/party_board/token.gd")
 const Floors := preload("res://games/party_board/minigames/floors.gd")
+const Deep := preload("res://games/party_board/deep.gd")
 
 
 ## The players as drawn (token.gd LOOKS: the class per slot), on the board and in every minigame.
@@ -69,6 +70,13 @@ static func groups() -> Array:
 		keys.merge(_edged("gift space", Boards.GIFT_COLORS[0]))
 		keys.merge(_edged("%s space" % b.special, Boards.SPECIALS[b.special].tile))
 		out.append({"keys": keys, "bgs": _grounds(bd, String(b.id))})
+	# Mango's warned SURPRISES (deep.gd): steady discs on blue / red spaces only (deep.gd plain()); a disc is bigger than
+	# its tile, so its edge sits on the board's ground too.
+	var tells := {"rock tell": Deep.ROCK_COLOR, "splash tell": Deep.WAVE_COLOR}
+	var under := {"blue space": BD.TYPE_COLORS.blue[0], "red space": BD.TYPE_COLORS.red[0]}
+	for b in Boards.BOARDS:
+		under.merge(_grounds(bd, String(b.id)))
+	out.append({"keys": tells, "bgs": under})
 	# FALLING PLATFORMS: the warning ring round a stone that is about to drop.
 	out.append({"keys": {"platform warning": Floors.PLATFORM_WARN}, "bgs": {"platform top": Floors.PLATFORM_TOP}})
 	return out
