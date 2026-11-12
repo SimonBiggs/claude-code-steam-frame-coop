@@ -78,6 +78,20 @@ static func _build_icon(kind: String, id: String) -> ArrayMesh:
 	var col := Boons.pick_color(kind, id)
 	var white := Color(0.95, 0.95, 1.0)
 	var gold := Color(1.0, 0.82, 0.25)
+	if kind == "mode":  # GENTLE: a heart, BRAVE: a star, HARD: three fireballs (PickOrbs.MODES pictures)
+		match id:
+			"gentle":
+				b.sphere(0.2, MeshKit.at(Vector3(-0.14, 0.12, 0)), col, 12, true)
+				b.sphere(0.2, MeshKit.at(Vector3(0.14, 0.12, 0)), col, 12, true)
+				b.cone(0.3, 0.42, MeshKit.at(Vector3(0, -0.2, 0), Vector3.ONE, Vector3(PI, 0, 0)), col, 12, true)
+			"hard":
+				for k in 3:
+					var a := k * TAU / 3.0 + 0.3
+					b.sphere(0.17, MeshKit.at(Vector3(cos(a) * 0.24, sin(a) * 0.24, 0)), col, 10, true)
+					b.cone(0.1, 0.24, MeshKit.at(Vector3(cos(a) * 0.24, sin(a) * 0.24 + 0.18, 0)), Color(1.0, 0.75, 0.2), 6, true)
+			_:
+				b.star(5, 0.42, 0.19, 0.12, Transform3D.IDENTITY, col, true)
+		return b.build()
 	if kind == "master":
 		var e := int(Boons.master(id).get("element", -1))
 		if e < 0:  # the spirit master: a white star with the four elements round it
