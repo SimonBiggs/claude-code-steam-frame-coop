@@ -409,7 +409,7 @@ static func first_hit(cam: Camera3D, to: Vector3, skip: Node = null, meshes: Arr
 		var box := m.global_transform * m.get_aabb()
 		if box.grow(0.05).has_point(head) or box.intersects_segment(head, to) == null:
 			continue
-		if _skip_blocker(m, skip, cam) or _moving(m) or _see_through(m):
+		if _skip_blocker(m, skip, cam) or _moving(m) or _walks_about(m) or _see_through(m):
 			continue
 		var f := _mesh_hit(m, head, to)
 		if f < float(best.f):
@@ -543,6 +543,18 @@ static func _moving(n: Node) -> bool:
 	var x := n.get_parent()
 	while x != null:
 		if x is CharacterBody3D or x is RigidBody3D:
+			return true
+		x = x.get_parent()
+	return false
+
+
+## Part of a player or creature built by core/creatures.gd (meta "creature"), or something one carries (a basket on a
+## head): they walk about and step out of the way, so they don't count as in the way (Dodge Ball 2026-11-12: a runner
+## standing under the big orb it picks; Fruit Catch: a TV player's basket walking past the VR player).
+static func _walks_about(n: Node) -> bool:
+	var x := n.get_parent()
+	while x != null:
+		if x.has_meta("creature"):
 			return true
 		x = x.get_parent()
 	return false
