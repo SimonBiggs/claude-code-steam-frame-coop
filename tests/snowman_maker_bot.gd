@@ -60,13 +60,13 @@ func _ready() -> void:
 			return main.avatars.has(slot) and main.huds.has(slot) and main.cams.has(slot))
 	if host:
 		# (the mode pick before day 1 and Tumble's gift pick before day 2 take a few seconds each)
-		kit.at(rt + 11.0, "host checks (the TV machine is still connected)", _checks)
-		var end := float(OS.get_environment("BOT_HOST_END")) if OS.has_environment("BOT_HOST_END") else rt + 17.0  # late-join tests
+		kit.at(rt + 14.0, "host checks (the TV machine is still connected)", _checks)
+		var end := float(OS.get_environment("BOT_HOST_END")) if OS.has_environment("BOT_HOST_END") else rt + 20.0  # late-join tests
 		kit.at(end, "finish", kit.finish)
 	else:
-		var fin := rt + 13.0
+		var fin := rt + 16.0
 		if OS.has_environment("BOT_LATE"):  # a machine joining a game already running leaves before the host does
-			fin = maxf(t0 + 14.0, rt + 17.0 - float(OS.get_environment("BOT_LATE")) - 4.0)
+			fin = maxf(t0 + 14.0, rt + 20.0 - float(OS.get_environment("BOT_LATE")) - 4.0)
 		kit.at(fin, "finish", func() -> void:
 			_checks()
 			kit.finish())
