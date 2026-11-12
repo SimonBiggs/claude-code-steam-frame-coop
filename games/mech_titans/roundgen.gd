@@ -106,7 +106,8 @@ static func place_opened(before: int, after: int) -> String:
 
 ## Round i (0-based) of a session with `run_seed`, when the team has `friends` kaiju friends.
 ## Mission-shaped (like Data.simple_round) plus: index, gen (true when made from a seed), daily, variant.
-static func make(i: int, run_seed: int, friends: int, mode: String = "gentle") -> Dictionary:
+## `date` ("" = today) picks which day TODAY'S KAIJU (the first made round) is for (tests check many days).
+static func make(i: int, run_seed: int, friends: int, mode: String = "gentle", date: String = "") -> Dictionary:
 	if not MODES.has(mode):
 		mode = "gentle"
 	if i < LESSONS:
@@ -125,7 +126,7 @@ static func make(i: int, run_seed: int, friends: int, mode: String = "gentle") -
 		return m
 	var lap := i - LESSONS
 	var daily := lap == 0
-	var r := Seeded.rng(Seeded.daily_seed("mech_titans") if daily else run_seed, "round%d" % (0 if daily else i))
+	var r := Seeded.rng(Seeded.daily_seed("mech_titans", date) if daily else run_seed, "round%d" % (0 if daily else i))
 	var open := places_open(friends)
 	# Lean towards the newest place (a new place is exciting), but visit the others too.
 	var weights: Array = []

@@ -35,6 +35,7 @@ extends Node3D
 ## store ("d_*" keys), the snapshot (deep_pack) and events ("d_*").
 
 const FloorGen := preload("res://games/dungeon_delve/floorgen.gd")
+const Seeded := preload("res://core/seeded.gd")
 const FloorView := preload("res://games/dungeon_delve/floor_view.gd")
 const Foes := preload("res://games/dungeon_delve/foes.gd")
 const WarnRings := preload("res://core/warn_rings.gd")
@@ -754,7 +755,13 @@ func _alive(slot: int) -> bool:
 # --- Runs and floors -------------------------------------------------------------------------------
 
 static func daily_key() -> String:
-	return "daily:" + Time.get_date_string_from_system()
+	return "daily:" + Seeded.today()
+
+
+## TODAY'S DUNGEON's run seed: the same for everyone all day (pass `date` in tests; tests/dungeon_delve_floors_test.gd
+## proves every floor of it over 400+ days).
+static func daily_seed(date: String = "") -> int:
+	return absi(hash(date if date != "" else Seeded.today())) % 1000000
 
 
 ## m: "brave", "heroic" or "daily" (BRAVE rules, the same dungeon for everyone all day: beat your best).
@@ -763,7 +770,7 @@ func start_run(m: String) -> void:
 	mode = "brave" if daily else m
 	seed_v = int(OS.get_environment("DD_SEED")) if OS.has_environment("DD_SEED") else randi() % 1000000
 	if daily:
-		seed_v = absi(hash(Time.get_date_string_from_system())) % 1000000
+		seed_v = daily_seed()
 	zone = 0
 	floor_i = 0
 	if OS.has_environment("DD_FLOOR") and not main.has_meta("deep_started"):
@@ -991,7 +998,7 @@ func finish(won: bool) -> void:
 	var new_best := FloorGen.global_floor(zone, floor_i) > int((progress()["best"] as Dictionary).get(key, 0))
 	_record_depth()
 	if daily:
-		main.save.data["daily"] = Time.get_date_string_from_system()  # TODAY'S DUNGEON played (Seeded.today(); the Trophy Hall reads it)
+		main.save.data["daily"] = Seeded.today()  # TODAY'S DUNGEON played (the Trophy Hall reads it)
 		main.save.mark_dirty()
 	if won:
 		var pd := progress()

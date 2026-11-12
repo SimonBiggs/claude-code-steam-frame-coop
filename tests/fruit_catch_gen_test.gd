@@ -102,13 +102,15 @@ func _initialize() -> void:
 			hits += 1
 	_expect(hits > 220, "shaking mostly drops the fruit the dish needs (%d / 400)" % hits)
 	# TODAY'S HARVEST: valid, the same all day, different between days.
-	for date in ["2026-10-29", "2026-12-25", "2027-01-01"]:
-		var ds := G.daily_seed(date)
-		var h := G.harvest(ds, G.DAILY_LEVEL, true)
-		for why in G.check(h):
-			_expect(false, "TODAY'S HARVEST %s: %s" % [date, why])
-		_expect(var_to_str(h) == var_to_str(G.harvest(G.daily_seed(date), G.DAILY_LEVEL, true)), "TODAY'S HARVEST is the same all day")
-		_expect(int((h.dishes as Array)[2][0]) == G.SALAD and int((h.dishes as Array)[G.DISH_COUNT - 1][0]) == G.SALAD, "TODAY'S HARVEST ends with a fruit salad feast")
+	# Over 400+ days (Seeded.validate_days, the shared daily validator), as main.gd plays it (harvest(daily_seed,
+	# DAILY_LEVEL, true, round_time): the real round): fair (check()), a fruit salad feast at the end, the same all day.
+	var rs := Seeded.validate_days(func(date: String) -> Dictionary: return G.harvest(G.daily_seed(date), G.DAILY_LEVEL, true, G.ROUND_SECS),
+		func(h: Dictionary) -> Array:
+			var why: Array = G.check(h)
+			if int((h.dishes as Array)[2][0]) != G.SALAD or int((h.dishes as Array)[G.DISH_COUNT - 1][0]) != G.SALAD:
+				why.append("TODAY'S HARVEST doesn't end with a fruit salad feast")
+			return why, 400, "TODAY'S HARVEST", ["2026-11-11", "2026-11-12"])
+	fails += (rs.failures as Array).size()
 	_expect(G.daily_seed("2026-10-29") != G.daily_seed("2026-10-30"), "a new TODAY'S HARVEST each day")
 	# The orchard: room for plenty, each tree its own spot, outside the park, behind the big tree.
 	var spots: Array = []

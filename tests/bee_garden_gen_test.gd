@@ -161,16 +161,41 @@ func _initialize() -> void:
 	bad_d.wasps = [40.0]
 	_expect(_has(Gen.check_day(g1, bad_d), "wasp in round"), "a wasp too early for gentle is caught")
 	# TODAY'S GARDEN: the same all day, different day to day; the next gardens come from the world seed.
+	# Over 400+ days (Seeded.validate_days, the shared daily validator), as main.gd makes it: the garden
+	# (Gen.generate(garden_seed, Story.spec(save))) for a new family and a grown one (more seed kinds, later level),
+	# each fair (check()), and its first rounds (day_plan(), as main.gd builds the spec) fair for 1, 3 and 6 bees
+	# across GENTLE / BRAVE / HARD (check_day()), the same for every family and all day.
 	var daily := {}
-	for dd in 30:
-		var date := Time.get_date_string_from_unix_time(1790000000 + dd * 86400)
-		var gs: Array = Story.garden_seed({"daily": "", "world": 5}, date)
-		_expect(bool(gs[1]) and int(gs[0]) == Story.daily_seed(date), "the first garden of %s is today's" % date)
-		_expect(int(Story.garden_seed({"daily": "", "world": 9}, date)[0]) == int(gs[0]), "today's garden is the same for every family")
-		daily[var_to_str(Gen.generate(int(gs[0]), {}).spots)] = true
-		for why in Gen.check(Gen.generate(int(gs[0]), {})):
-			_fail("today %s: %s" % [date, why])
-	_expect(daily.size() >= 29, "today's garden changes day to day (%d of 30)" % daily.size())
+	var stages := [{"jars": 0, "rounds": 0}, {"jars": 30, "rounds": 25}]
+	var rs := Seeded.validate_days(func(date: String) -> Dictionary:
+			var gs: Array = Story.garden_seed({"daily": "", "world": 5}, date)
+			var out := {"today": bool(gs[1]) and int(gs[0]) == Story.daily_seed(date)
+				and int(Story.garden_seed({"daily": "", "world": 9}, date)[0]) == int(gs[0]), "gardens": []}
+			for st in stages:
+				var g := Gen.generate(int(gs[0]), Story.spec(st))
+				var day_plans: Array = []
+				for i in 3:
+					var sp := Story.spec(st, [1, 3, 6][i])
+					sp["mode"] = Gen.MODE_IDS[i]
+					day_plans.append(Gen.day_plan(g, 1 + i, sp))
+				(out.gardens as Array).append([g, day_plans])
+			return out,
+		func(out: Dictionary) -> Array:
+			var why: Array = []
+			if not bool(out.today):
+				why.append("the first garden isn't today's, the same for every family")
+			for i in (out.gardens as Array).size():
+				var g: Dictionary = out.gardens[i][0]
+				for w in Gen.check(g):
+					why.append("garden %d: %s" % [i, w])
+				for d in out.gardens[i][1]:
+					for w in Gen.check_day(g, d):
+						why.append("garden %d %s: %s" % [i, String(d.get("mode", "")), w])
+			daily[var_to_str(out.gardens[0][0].spots)] = true
+			return why, 400, "TODAY'S GARDEN", ["2026-11-11", "2026-11-12"])
+	total += int(rs.checked)
+	fails += (rs.failures as Array).size()
+	_expect(daily.size() >= int(rs.checked) - 5, "today's garden changes day to day (%d of %d)" % [daily.size(), int(rs.checked)])
 	var later: Array = Story.garden_seed({"daily": "2026-10-29", "world": 5, "gardens": 3}, "2026-10-29")
 	_expect(not bool(later[1]) and int(later[0]) == Seeded.derive(5, 3), "later gardens today come from the world seed")
 	# Story rules.

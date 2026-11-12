@@ -56,6 +56,27 @@ func _initialize() -> void:
 	_expect(G.daily_seed("2026-10-29") == G.daily_seed("2026-10-29"), "TODAY'S BATH is the same all day")
 	_expect(G.daily_seed("2026-10-29") != G.daily_seed("2026-10-30"), "TODAY'S BATH changes the next day")
 	_expect(G.daily_seed() == Seeded.daily_seed("bubble_bath"), "TODAY'S BATH uses the shared daily seed")
+	# TODAY'S BATH over 400+ days (Seeded.validate_days, the shared daily validator): every round 1-12 of the day's
+	# bath fair (check() per round; goals and islands never go down, as check_bath() but on the plans already made),
+	# the same all day.
+	var rs := Seeded.validate_days(func(date: String) -> Array:
+			var ds := G.daily_seed(date)
+			var all: Array = []
+			for n in range(1, G.MAX_ROUND + 1):
+				all.append(G.plan(ds, n))
+			return all,
+		func(all: Array) -> Array:
+			var why: Array = []
+			for i in all.size():
+				var p: Dictionary = all[i]
+				for w in G.check(p):
+					why.append("round %d: %s" % [i + 1, w])
+				if i > 0 and int(p.goal) < int(all[i - 1].goal):
+					why.append("round %d's goal is smaller than round %d's" % [i + 1, i])
+				if i > 0 and i < 4 and (p.islands as Array).size() < (all[i - 1].islands as Array).size():
+					why.append("round %d has fewer islands than round %d" % [i + 1, i])
+			return why, 400, "TODAY'S BATH", ["2026-11-11", "2026-11-12"])
+	fails += (rs.failures as Array).size()
 	# The validator really catches unfair baths.
 	var base := G.plan(9, 4)
 	_expect(G.check(base).is_empty(), "seed 9 round 4 is fair (%s)" % str(G.check(base)))

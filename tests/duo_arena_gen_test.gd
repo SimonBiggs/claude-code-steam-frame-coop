@@ -63,6 +63,35 @@ func _initialize() -> void:
 	_expect(differ >= 18, "different seeds give different arenas (%d of 20)" % differ)
 	_expect(Gen.daily_seed("2026-11-11") == Gen.daily_seed("2026-11-11"), "TODAY'S ARENA is the same all day")
 	_expect(Gen.daily_seed("2026-11-11") != Gen.daily_seed("2026-11-12"), "TODAY'S ARENA changes each day")
+	# TODAY'S ARENA over 400+ days (Seeded.validate_days, the shared daily validator), as main.gd _start_run() /
+	# _enter_leg() play it: for a new, a mid and a long-time family (waves 0 / 15 / 99 unlock more zones and perks) the
+	# day's route (NEON CITY first, only unlocked zones), every leg's arena on it (check()) and the perk offers of the
+	# first legs (check_offer), the same all day.
+	var rs := Seeded.validate_days(func(date: String) -> Array:
+			var ds := Gen.daily_seed(date)
+			var all: Array = []
+			for lv in [0, 15, 99]:
+				var zo := Gen.unlocked_zones(lv)
+				var rt := Gen.route(ds, zo)
+				all.append({"route": rt, "open": zo})
+				for l in rt.size():
+					all.append(Gen.layout(Gen.leg_seed(ds, l), Gen.zone_for_wave(rt, l * Gen.LEG + 1)))
+				var open := Picks.unlocked("perk", lv)
+				for n in [1, 3, 6, 9]:
+					all.append({"perk": Picks.offer("perk", ds, n, open), "open": open})
+			return all,
+		func(all: Array) -> Array:
+			var why: Array = []
+			for x in all:
+				if x.has("perk"):
+					why.append_array(Picks.check_offer("perk", x.perk, x.open))
+				elif x.has("route"):
+					why.append_array(_check_route(x.route, x.open))
+				else:
+					why.append_array(Gen.check(x))
+			return why, 400, "TODAY'S ARENA", ["2026-11-11", "2026-11-12"])
+	fails += (rs.failures as Array).size()
+	checks += int(rs.checked)
 	# The wave curve.
 	for mode in Gen.MODES:
 		for players in range(1, 8):

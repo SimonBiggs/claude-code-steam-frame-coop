@@ -24,6 +24,20 @@ func _initialize() -> void:
 			"GARDEN ch%d" % chap)
 		total += int(r.checked)
 		fails += (r.failures as Array).size()
+	# TODAY'S GARDEN over 400+ days (and the 60 from whenever this runs), the way the game starts it: the mixed
+	# chapter Story.next_round picks for the daily, from daily_seed(date).
+	var rd := Seeded.validate_days(func(date: String) -> Dictionary:
+			var nx := Story.next_round({"chapter": 2, "daily": {}}, Seeded.daily_key(date))
+			var g := GardenGen.garden(Seeded.daily_seed("snowman_maker", date), int(nx[1]))
+			g["_mode"] = String(nx[0])
+			return g,
+		func(g: Dictionary) -> Array:
+			var why := GardenGen.check(g)
+			if String(g._mode) != "daily":
+				why.append("the first game of the day isn't the daily garden")
+			return why, 400, "TODAY'S GARDEN", ["2026-11-11", "2026-11-12"])
+	total += int(rd.checked)
+	fails += (rd.failures as Array).size()
 	# Variety: different seeds give different gardens.
 	var a := GardenGen.garden(5, 3)
 	var b := GardenGen.garden(6, 3)

@@ -114,13 +114,23 @@ func _initialize() -> void:
 	for sp in (no_new.waves as Array)[2].spawns:
 		sp[1] = "snowman"
 	_expect(not G.check(no_new).is_empty(), "a wave without its new kind is caught")
-	# TODAY'S BLIZZARD: valid, the same all day, different between days.
-	for date in ["2026-10-29", "2026-12-25", "2027-01-01"]:
-		var ds := G.daily_seed(date)
-		var s := G.siege(ds, G.DAILY_LEVEL, true)
-		for why in G.check(s):
-			_expect(false, "TODAY'S BLIZZARD %s: %s" % [date, why])
-		_expect(var_to_str(s) == var_to_str(G.siege(G.daily_seed(date), G.DAILY_LEVEL, true)), "TODAY'S BLIZZARD is the same all day")
+	# TODAY'S BLIZZARD over 400+ days (and the 60 from whenever this runs), the way _new_siege builds it: the
+	# DAILY_LEVEL siege from daily_seed(date) in every mode (check()), gentle <= brave <= hard (check_modes).
+	var rd := Seeded.validate_days(func(date: String) -> Array:
+			var out: Array = [G.daily_seed(date)]
+			for mode in G.MODES:
+				out.append(G.siege(G.daily_seed(date), G.DAILY_LEVEL, true, mode))
+			return out,
+		func(day: Array) -> Array:
+			var why: Array = []
+			for k in range(1, day.size()):
+				for w in G.check(day[k]):
+					why.append("%s: %s" % [G.MODES[k - 1], w])
+			for w in G.check_modes(int(day[0]), G.DAILY_LEVEL, true):
+				why.append("modes: " + w)
+			return why, 400, "TODAY'S BLIZZARD", ["2026-11-11", "2026-11-12"])
+	gens += int(rd.checked) * G.MODES.size()
+	fails += (rd.failures as Array).size()
 	_expect(G.daily_seed("2026-10-29") != G.daily_seed("2026-10-30"), "a new TODAY'S BLIZZARD each day")
 	# The village: room for plenty, each igloo its own spot, outside the square, clear of the big tree + pond.
 	var spots: Array = []
@@ -167,10 +177,6 @@ func _initialize() -> void:
 		if lv == 1:
 			print("average threat by wave (level 1): gentle %s / brave %s / hard %s" % [curves.gentle.map(func(x): return snappedf(x, 0.01)),
 				curves.brave.map(func(x): return snappedf(x, 0.01)), curves.hard.map(func(x): return snappedf(x, 0.01))])
-	for date in ["2026-11-11", "2026-12-25"]:
-		for mode in G.MODES:
-			for why in G.check(G.siege(G.daily_seed(date), G.DAILY_LEVEL, true, mode)):
-				_expect(false, "TODAY'S BLIZZARD %s %s: %s" % [date, mode, why])
 	_expect(G.wave_count(1, 1, "", "gentle") <= G.wave_count(1, 1, "", "brave") and G.speed_of("snowman", 3, "gentle") < G.speed_of("snowman", 3, "hard"),
 		"gentle sends fewer, slower snowmen than hard")
 	var cliffy := G.siege(5, 2).duplicate(true)

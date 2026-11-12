@@ -115,19 +115,25 @@ func _initialize() -> void:
 	var col := [[0, 0.0, 0.5, 0.0, 0], [0, 0.0, 1.1, 0.0, 0], [0, 0.0, 1.7, 0.0, 0], [0, 0.0, 2.3, 0.0, 0], [0, 0.0, 2.9, 0.0, 0]]
 	var lim := G.safe_tan(col)
 	_expect(lim > 0.05 and lim < 0.3, "five cubes in a column tip at a sensible lean (%.3f)" % lim)
-	# TODAY'S TOWER: valid, the same all day, different between days.
-	for date in ["2026-10-29", "2026-12-25", "2027-01-01"]:
-		var ds := G.daily_seed(date)
-		var st := G.site(ds, G.DAILY_LEVEL, true)
-		for why in G.check(st):
-			_expect(false, "TODAY'S TOWER %s: %s" % [date, why])
-		_expect(var_to_str(st) == var_to_str(G.site(G.daily_seed(date), G.DAILY_LEVEL, true)), "TODAY'S TOWER is the same all day")
-		_expect(var_to_str(G.from_job(G.job_of(st))) == var_to_str(st), "the job description rebuilds the same tower on the TV")
-		for md in G.MODE_IDS:
-			var st2 := G.site(ds, G.DAILY_LEVEL, true, md, G.OPEN_ALL)
-			_expect(var_to_str(G.from_job(G.job_of(st2))) == var_to_str(st2), "a %s job with special blocks rebuilds on the TV" % md)
-			for why in G.check(st2):
-				_expect(false, "TODAY'S TOWER %s %s: %s" % [date, md, why])
+	# TODAY'S TOWER over 400+ days (and the 60 from whenever this runs), the way _start_job builds it: the
+	# DAILY_LEVEL site from daily_seed(date) with every special open, in every mode; G.check, and the job
+	# description rebuilds the same tower on the TV.
+	var rd := Seeded.validate_days(func(date: String) -> Array:
+			var out: Array = []
+			for md in G.MODE_IDS:
+				out.append(G.site(G.daily_seed(date), G.DAILY_LEVEL, true, md, G.OPEN_ALL))
+			return out,
+		func(sts: Array) -> Array:
+			var why: Array = []
+			for k in sts.size():
+				var st: Dictionary = sts[k]
+				for w in G.check(st):
+					why.append("%s: %s" % [G.MODE_IDS[k], w])
+				if var_to_str(G.from_job(G.job_of(st))) != var_to_str(st):
+					why.append("%s: the job description doesn't rebuild the same tower on the TV" % G.MODE_IDS[k])
+			return why, 400, "TODAY'S TOWER", ["2026-11-11", "2026-11-12"])
+	gens += int(rd.checked) * G.MODE_IDS.size()
+	fails += (rd.failures as Array).size()
 	# Old saves: 3-long town entries rebuild as the brave job with nothing open (the first pass's jobs).
 	for sd in [1, 77, 4242]:
 		_expect(var_to_str(G.from_job([sd, 4, 0])) == var_to_str(G.site(sd, 4)), "an old town entry rebuilds the same tower")

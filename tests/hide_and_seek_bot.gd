@@ -210,18 +210,27 @@ func _seeker(delta: float) -> void:
 			if d < best_d:
 				best_d = d
 				best = h
-	# PIP'S STREET: neighbour friends hiding in the house are worth finding too (the bot goes for them first).
+	# PIP'S STREET: neighbour friends hiding in the house are worth finding too. Like a kid who has just seen the
+	# "Find me!" cards, the bot goes for the nearest friend FIRST (wherever they hide) while there's time, then the
+	# hiders: finding the last hider ends the round, so a seeker who grabs a nearby hider first never meets friends
+	# hiding at the far end of the house (2026-11-12's TODAY'S STREET: both friends ~13 m away, the one networked
+	# hider 3.5 m away; the old "a friend if within the hider's distance + 8 m" never went for them).
 	var best_pos: Vector3 = Vector3.ZERO if best == null else best.global_position
 	var best_c: Vector3 = Vector3.ZERO if best == null else best.center()
+	var friends_first: bool = main.phase_t > 8.0
+	var fbest = null
+	var fbest_d := INF
 	for k in main.friends.size():
 		if int(main.friend_state[k][1]) < 0 and is_instance_valid(main.friends[k]):
-			var fp: Vector3 = main.friends[k].global_position
-			var fd: float = fp.distance_to(s.global_position) - 8.0
-			if fd < best_d:
-				best_d = maxf(0.0, fd)
-				best = main.friends[k]
-				best_pos = fp
-				best_c = main.friends[k].center()
+			var fd: float = main.friends[k].global_position.distance_to(s.global_position)
+			if fd < fbest_d:
+				fbest_d = fd
+				fbest = main.friends[k]
+	if fbest != null and (friends_first or fbest_d - 8.0 < best_d):
+		best_d = fbest_d
+		best = fbest
+		best_pos = fbest.global_position
+		best_c = fbest.center()
 	# Alone (no hiders): Pip is the one to find too.
 	if main.solo_round and main.pip_on:
 		var pd: float = main.pip_spot.distance_to(s.global_position)
@@ -350,6 +359,12 @@ func _result(mode: String) -> void:
 	if main.phase != "over" and mode == "local":
 		return
 	set_meta("result", true)
+	_print_result("")
+	if mode == "local":
+		preload("res://tests/bot_end.gd").quit_quietly(get_tree())
+
+
+func _print_result(note: String) -> void:
 	var fails: Array[String] = []
 	if not conn_ok:
 		fails.append("connectivity")
@@ -361,9 +376,7 @@ func _result(mode: String) -> void:
 		fails.append("pip")
 	if not has_meta("friend_ok"):
 		fails.append("street friend")
-	print("BOT RESULT: %s (5 checks)%s" % ["PASS" if fails.is_empty() else "FAIL", "" if fails.is_empty() else " failed: " + ", ".join(fails)])
-	if mode == "local":
-		preload("res://tests/bot_end.gd").quit_quietly(get_tree())
+	print("BOT RESULT: %s (5 checks%s)%s" % ["PASS" if fails.is_empty() else "FAIL", note, "" if fails.is_empty() else " failed: " + ", ".join(fails)])
 
 
 ## PIP'S STREET: a friend found and at Pip's garden party (host / local: in the save too; TV: mirrored from the host).

@@ -52,17 +52,21 @@ func _initialize() -> void:
 	_expect((HouseGen.generate(3, {"level": 0}).spots as Array).size() - HouseGen.FIXED_SPOTS.size() == 3, "the first house has 3 hiding places")
 	_expect((HouseGen.generate(3, {"level": 5}).spots as Array).size() - HouseGen.FIXED_SPOTS.size() == 6, "a later house has 6")
 	# TODAY'S HOUSE: the same all day whatever the family's level, and different from day to day.
+	# Over 400+ days (Seeded.validate_days, the shared daily validator), as main.gd _new_house() / _apply_house() make
+	# it: fair (check(): every night x crew x mode), the same house for a new and a long-time family, the same all day.
 	var days := {}
-	for d in 30:
-		var date := Time.get_date_string_from_unix_time(1790000000 + d * 86400)
-		var sd := Seeded.daily_seed("ghost_lantern", date)
-		var a := HouseGen.generate(sd, {"level": 0, "daily": true})
-		var b := HouseGen.generate(sd, {"level": 7, "daily": true})
-		_expect(var_to_str(a) == var_to_str(b), "daily %s: the same house for everyone" % date)
-		for w in HouseGen.check(a):
-			_fail("daily %s: %s" % [date, w])
-		days[var_to_str(a.spots)] = true
-	_expect(days.size() >= 29, "daily houses differ (%d of 30)" % days.size())
+	var rs := Seeded.validate_days(func(date: String) -> Array:
+			var sd := Seeded.daily_seed("ghost_lantern", date)
+			return [HouseGen.generate(sd, {"level": 0, "daily": true}), HouseGen.generate(sd, {"level": 7, "daily": true})],
+		func(ab: Array) -> Array:
+			var why: Array = HouseGen.check(ab[0])
+			if var_to_str(ab[0]) != var_to_str(ab[1]):
+				why.append("not the same house for everyone")
+			days[var_to_str(ab[0].spots)] = true
+			return why, 400, "TODAY'S HOUSE", ["2026-11-11", "2026-11-12"])
+	total += int(rs.checked)
+	fails += (rs.failures as Array).size()
+	_expect(days.size() >= int(rs.checked) - 5, "daily houses differ (%d of %d)" % [days.size(), int(rs.checked)])
 	# Night plans: one new thing each night, the king on 5 and 10, crews.
 	var h0 := HouseGen.generate(42, {"level": 2})
 	var n1 := HouseGen.night_plan(h0, 1, 2)

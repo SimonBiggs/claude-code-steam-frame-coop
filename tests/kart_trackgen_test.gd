@@ -102,23 +102,28 @@ func _initialize() -> void:
 	_expect(Cups.parts_unlocked({}).is_empty() and Cups.parts_unlocked({"candy:gentle": 1, "ice:zoom": 0, "x": 3}).size() == 2, "parts_unlocked()")
 	_expect(Cups.next_part("", {"candy:gentle": 1}) == "spoiler" and Cups.next_part("spoiler", {"candy:gentle": 1}) == "", "next_part()")
 	_expect(Cups.next_cup({"candy:gentle": 2}, "gentle") == 1 and Cups.next_cup({"candy:gentle": 2}, "zoom") == 0, "next_cup()")
-	# Today's track: fair for 60 days, the same all day, different on different days.
+	# Today's track over 400+ days (Seeded.validate_days, the shared daily validator), as main.gd builds it
+	# (Story.track_for(Story.daily_desc())): never the hand-made fallback (generate() only returns a track that passed
+	# check(), so "not the fallback" IS the fair check), the day's description and spec the same all day, different
+	# day to day. A track is ~70 ms: it's built once a date (the determinism of a seed's track is proven above), the
+	# full 2x build + re-check was +60 s.
 	var day_seeds := {}
-	for d in 60:
-		var date := Time.get_date_string_from_unix_time(1790000000 + d * 86400)
-		var desc := Story.daily_desc(date)
-		var a: Array = Story.track_for(desc)
-		var info: Dictionary = a[0]
-		var why := TrackGen.check(info)
-		if info.has("fallback"):
-			why.append("fell back")
-		if var_to_str(Story.track_for(desc)[0]) != var_to_str(info):
-			why.append("not the same all day")
-		for w in why:
-			_fail("TODAY'S TRACK %s: %s" % [date, w])
-		day_seeds[int(desc[1])] = true
-		total += 1
-	_expect(day_seeds.size() >= 55, "today's tracks differ day to day (%d of 60)" % day_seeds.size())
+	var built := {}
+	var rs := Seeded.validate_days(func(date: String) -> Dictionary:
+			var desc := Story.daily_desc(date)
+			day_seeds[int(desc[1])] = true
+			if not built.has(date):
+				built[date] = Story.track_for(desc)[0]
+			return {"desc": desc, "spec": Story.desc_spec(desc), "track": built[date]},
+		func(d: Dictionary) -> Array:
+			var why: Array = []
+			if d.track.has("fallback") or not d.track.has("attempt"):
+				why.append("fell back to the hand-made track")
+			return why, 400, "TODAY'S TRACK", ["2026-11-11", "2026-11-12"])
+	built.clear()
+	total += int(rs.checked)
+	fails += (rs.failures as Array).size()
+	_expect(day_seeds.size() >= int(rs.checked) - 5, "today's tracks differ day to day (%d of %d)" % [day_seeds.size(), int(rs.checked)])
 	# Story rules.
 	_expect(Story.where(0) == [0, 0, 0] and Story.where(5) == [1, 2, 0] and Story.where(18) == [0, 0, 1], "where()")
 	_expect(Story.hats_after(1) == 0 and Story.hats_after(2) == 1 and Story.hats_after(17) == 6 and Story.hats_after(40) == 6, "hats_after()")
