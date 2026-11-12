@@ -15,6 +15,7 @@ const PickOrbs := preload("res://core/pick_orbs.gd")
 const WAIT := {"mode": 14.0, "lantern": 12.0}
 const AFTER := 1.0  # seconds the taken orb shows its dot before the orbs go
 const GAP := 1.0
+const VR_GAP := 0.85  # a VR row a little narrower: the start spot's easel and cuckoo clock (props.gd) stand just outside it
 const Y := 1.3
 const AHEAD := 1.7  # metres in front of the VR lantern-bearer (a flat one: AHEAD_FLAT, so the row fits the view)
 const AHEAD_FLAT := 3.2
@@ -103,14 +104,15 @@ func _places(n: int) -> Array:
 	o.x = clampf(o.x, -19.6, 19.6)
 	o.z = clampf(o.z, -6.4, 6.4)
 	# Not across a wall between the rooms (x = -7 / 7): slide into the room the lantern-bearer is in.
-	var half := (n - 1) * 0.5 * GAP + 0.6
+	var gap := VR_GAP if main.players[0].vr else GAP
+	var half := (n - 1) * 0.5 * gap + 0.6
 	for wx in [-7.0, 7.0]:
 		var side := signf(head.origin.x - wx)
 		if absf(o.x - wx) < half * absf(right.x) + 0.4:
 			o.x = wx + side * (half * absf(right.x) + 0.4)
 	var out: Array = []
 	for i in n:
-		var p := o + right * (float(i) - (n - 1) * 0.5) * GAP
+		var p := o + right * (float(i) - (n - 1) * 0.5) * gap
 		out.append(Vector3(p.x, 0.0, p.z))  # (VR cards keep clear of the orbs themselves: UiKit.vr_dodge)
 	return out
 
