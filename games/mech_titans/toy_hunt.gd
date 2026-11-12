@@ -298,7 +298,7 @@ func _build_season(s: String, place: String) -> void:
 			i += 1
 	_season_root.add_child(MeshKit.instance(b.build(), false))
 	if DRIFT_COLORS.has(s):
-		_drift = SeasonKit.drift(DRIFT_COLORS[s], s, {"box": Vector3(55.0, 2.0, 55.0), "at": Vector3(0, 26, 0), "amount": 260,
-			"size": 0.55, "lifetime": 11.0, "speed": Vector2(1.0, 2.2)})
+		_drift = SeasonKit.drift(DRIFT_COLORS[s], s, {"box": Vector3(55.0, 2.0, 55.0), "at": Vector3(0, 26, 0), "amount": 320,
+			"size": 0.3, "lifetime": 11.0, "speed": Vector2(1.0, 2.2)})
 		_drift.local_coords = false
 		_season_root.add_child(_drift)

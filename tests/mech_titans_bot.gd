@@ -76,6 +76,7 @@ var saw_toy := false  ## DEEP2: the round's lost toy stood under its beam on thi
 var saw_hat := false  ## DEEP2: a lost kaiju wore the season's hat
 var play_t := 0.0  ## seconds of play in the current round (host: walk to the toy after a while)
 var toy_walks := 0
+var helpers_called := false
 var _watching := false
 
 
@@ -365,6 +366,8 @@ func _deep_checks(ri: Dictionary) -> void:
 			kit.assert_true(main.toy_hunt.park_count() > 0, "%s: Momo's toy park stands on the hills" % mode)
 	if mode != "client":
 		kit.assert_true(main.combat.minis_arrived <= main.combat.minis_warned, "%s: every helper came in where its ring showed first" % mode)
+		if helpers_called:
+			kit.assert_true(main.combat.minis_arrived >= 2, "%s: the told helpers came in after their rings (%d)" % [mode, main.combat.minis_arrived])
 	if mode != "client" and String(main.net.state_get("mode", "")) == "mega" and float(main.missions.time) > 15.0:
 		kit.assert_true(main.deep.hazards_landed > 0, "%s: the district's hazards landed" % mode)
 
@@ -492,6 +495,10 @@ func _physics_process(delta: float) -> void:
 	if main.toy_hunt != null and main.toy_hunt.toy_showing():
 		saw_toy = true
 	play_t = play_t + delta if phase == "play" else 0.0
+	if simple and made_round >= 0 and main.net.mode != "client" and phase == "play" and play_t > 4.0 and not helpers_called:
+		helpers_called = true  # two helpers come in the way the round's helpers do: their rings must show first
+		main.combat.warn_minis("slimelet", 2, false)
+		kit.assert_true(main.combat.fx.rings.count() >= 2 and main.combat.minis_arrived == 0, "helpers' rings show before they come in")
 	if simple and main.net.mode != "client" and phase == "play" and play_t > 9.0 and main.toy_hunt != null:
 		var toy: Dictionary = main.net.state_get("toy", {})
 		if not toy.is_empty() and not bool(toy.get("got", false)) and toy_walks < 3 and fposmod(play_t, 3.0) < delta:
