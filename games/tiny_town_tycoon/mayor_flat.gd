@@ -88,6 +88,11 @@ func move_to(c: Vector2i) -> void:
 	cur = Vector2(c.x + s * 0.5, c.y + s * 0.5)
 
 
+## The cursor's middle on the island (pick orbs: the flat mayor holds it under one).
+func cursor_point() -> Vector3:
+	return Vector3(cur.x * Defs.CELL - Defs.HALF, Defs.GROUND_Y, cur.y * Defs.CELL - Defs.HALF)
+
+
 func tick(delta: float, playing: bool) -> void:
 	var party: Node = main.party
 	var busy: bool = UiMenu.slot_busy(SLOT) or not party.is_local(SLOT)

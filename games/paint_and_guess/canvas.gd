@@ -13,6 +13,7 @@ extends Node3D
 const MeshKit := preload("res://games/paint_and_guess/mesh_kit.gd")
 const StoryCard := preload("res://core/story_card.gd")
 const PaintGen := preload("res://games/paint_and_guess/paintgen.gd")
+const VrViewCheck := preload("res://core/vr_view_check.gd")
 const PROMPT_SIZE := 0.3  # the artist's picture of what to paint (m)
 const PIC_COLOR := Color(1.0, 0.62, 0.3)  # the colour the picture cards are drawn in (answers, balloons, prompt)
 
@@ -325,6 +326,9 @@ func _label(size: int, col: Color, pos: Vector3) -> Label3D:
 	l.modulate = col
 	l.outline_modulate = Color(0, 0, 0)
 	l.position = pos
+	# The easel's words (round, theme, reveal, the word sign, scores): VR cards dodge clear of them (UiKit.vr_dodge;
+	# Smudge's story card sat over "ROUND 2 of 5" in a round intro).
+	l.add_to_group(VrViewCheck.KEEP_CLEAR)
 	board_root.add_child(l)
 	return l
 
@@ -1044,6 +1048,7 @@ func _build_balloons() -> void:
 		b.position = balloon_local(i)
 		board_root.add_child(b)
 		b.visible = false
+		b.add_to_group(VrViewCheck.KEEP_CLEAR)  # the VR player's guesses: VR cards never cover them
 		balloons.append(b)
 
 
@@ -1091,6 +1096,7 @@ func _animate_balloons() -> void:
 func show_vote(pics: Array, numbered: bool = true) -> void:
 	hide_vote()
 	vote_root = Node3D.new()
+	vote_root.add_to_group(VrViewCheck.KEEP_CLEAR)  # the gallery vote's pictures: VR cards never cover them
 	board_root.add_child(vote_root)
 	vote_cells.clear()
 	var n := pics.size()
