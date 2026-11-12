@@ -82,7 +82,7 @@ func show_row(new_stage: String, entries: Array) -> void:
 	for lp in Deep.row_local(entries.size()):
 		at.append(_world(lp))
 	orbs.show_orbs(new_stage, entries, at[0], 0.42, 0.0, {"at": at, "scale": Deep.ORB_SCALE, "pop": true, "font": 64,
-		"label_y": -1.3, "label_px": 0.0055, "two_lines": true, "bob": 0.04, "dot_size": 0.18})  # (names under the orbs)
+		"label_y": 1.15, "label_px": 0.0055, "two_lines": true, "bob": 0.04, "dot_size": 0.18})  # (names over the orbs: under them they sat behind the hi-hat / crash, more so for a seated player)
 	_place()
 
 
