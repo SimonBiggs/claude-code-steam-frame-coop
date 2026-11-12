@@ -13,4 +13,4 @@ const BOSS_WARN := Color(1.0, 0.1, 0.1)
 const CHARGE_WARN := Color(1.0, 0.45, 0.05)
 const FIREBALL_WARN := Color(1.0, 0.2, 0.55)
 ## NOVA'S SPRING, the healing pool of light (zone.gd).
-const SPRING_COLOR := Color(0.35, 1.0, 0.75)
+const SPRING_COLOR := Color(1.0, 0.6, 0.9)  # soft pink: never a hazard colour (pads are green / orange / blue / purple)

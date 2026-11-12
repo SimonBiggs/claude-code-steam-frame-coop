@@ -18,6 +18,7 @@ extends Node
 const UiKit := preload("res://core/ui_kit.gd")
 const BotKit := preload("res://tests/bot_kit.gd")
 const Gen := preload("res://games/duo_arena/arenagen.gd")
+const Deep := preload("res://games/duo_arena/deep.gd")
 
 const FAKE_PAD := 40
 
@@ -354,7 +355,7 @@ func _deep_checks() -> void:
 		kit.assert_true(Gen.SHAPES.has(String(z.lay.get("shape", ""))) and z.lay.has("spring") and z.spring != null, "the arena has a shape and Nova's spring (%s)" % z.lay.get("shape", "-"))
 	kit.assert_true(main.story_shown >= 1, "a story card was shown (%d)" % main.story_shown)
 	kit.assert_true(kit.seen("da_phase", "wave") > 0, "the wave phase was seen (%s)" % [kit.seen_values("da_phase")])
-	var want_season := OS.get_environment("ARCADE_SEASON_DUO_ARENA") if OS.has_environment("ARCADE_SEASON_DUO_ARENA") else OS.get_environment("ARCADE_SEASON")
+	var want_season: String = load("res://core/season_kit.gd").override("duo_arena", "", Deep.SEASONS)  # "" = none asked for
 	kit.assert_true(main.deep.season != "" and (want_season == "" or main.deep.season == want_season), "the season is %s (want %s)" % [main.deep.season, want_season if want_season != "" else "any"])
 	if main.net.mode != "client":
 		kit.assert_true(main.wave >= 1, "wave 1 started (pick stage '%s')" % main.pick_stage)

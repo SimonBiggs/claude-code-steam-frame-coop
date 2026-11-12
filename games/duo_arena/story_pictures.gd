@@ -125,7 +125,10 @@ static func draw(pic, kind: String, t: float, bob: float, color: Color) -> void:
 			pic._circle(0.25, 0.33 + bob, 0.025, NOVA.lightened(0.5))
 			pic._circle(0.32, 0.33 + bob, 0.025, NOVA.lightened(0.5))
 			var zz := 0.02 * sin(t * 20.0)
-			pic._poly([[0.42, 0.42 + bob], [0.58, 0.5 + zz], [0.52, 0.55], [0.72, 0.68 + zz], [0.56, 0.58], [0.6, 0.52 - zz], [0.44, 0.46 + bob]], Color(1.0, 0.95, 0.45))
+			var bolt := Color(1.0, 0.95, 0.45)  # a zigzag bolt: three thick strokes
+			pic._poly([[0.42, 0.41 + bob], [0.6, 0.47 + zz], [0.58, 0.52 + zz], [0.42, 0.46 + bob]], bolt)
+			pic._poly([[0.6, 0.47 + zz], [0.62, 0.51 + zz], [0.54, 0.6], [0.52, 0.56]], bolt)
+			pic._poly([[0.52, 0.56], [0.72, 0.64 + zz], [0.7, 0.69 + zz], [0.54, 0.6]], bolt)
 			pic._circle(0.78, 0.74, 0.14, Color(0.6, 0.3, 0.8))
 			pic._eye(0.74, 0.72, 0.03)
 			pic._eye(0.83, 0.72, 0.03)

@@ -62,7 +62,7 @@ const SURPRISES := {
 	"coconut": {"name": "COCONUTS!", "pic": "coconut", "shape": "drop", "color": Color(1.0, 0.85, 0.3)},
 	"log": {"name": "ROLLING LOG!", "pic": "rolllog", "shape": "roll", "color": Color(1.0, 0.55, 0.2)},
 	"rock": {"name": "LAVA ROCKS!", "pic": "meteor", "shape": "drop", "color": Color(1.0, 0.3, 0.1)},
-	"snowball": {"name": "SNOWBALL!", "pic": "bigsnowball", "shape": "roll", "color": Color(1.0, 0.35, 0.75)},
+	"snowball": {"name": "SNOWBALL!", "pic": "bigsnowball", "shape": "roll", "color": Color(1.0, 0.25, 0.2)},
 	"comet": {"name": "COMETS!", "pic": "starrain", "shape": "drop", "color": Color(1.0, 0.9, 0.3)},
 }
 const ZONE_SURPRISES := {"neon": ["crate"], "jungle": ["coconut", "log"], "lava": ["rock"], "ice": ["snowball"],
